@@ -12,11 +12,35 @@ dist/
 build/
 *.db
 *.sqlite3
+# === Node.js ===
+node_modules/
+# === Java / Maven ===
+HELP.md
+target/
+!.mvn/wrapper/maven-wrapper.jar
+!**/src/main/**
+!**/src/test/**
 # === IDE ===
 .idea/
 .vscode/
 *.swp
 *.swo
+*.iws
+*.iml
+*.ipr
+# === STS ===
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings
+.springBeans
+.sts4-cache
+# === NetBeans ===
+/nbproject/private/
+/nbbuild/
+/nbdist/
+/.nb-gradle/
 # === OS ===
 .DS_Store
 Thumbs.db
@@ -28,6 +52,46 @@ Thumbs.db
 temp_*.py
 dump_*.py
 *.tmp.md
+# === 以. 开头的文件（需显式保留的点文件用 ! 排除） ===
+.*/
+!.github/
+!.github/workflows/
+!.github/workflows/*.yml
+!.env.example
+!.gitattributes
+# === 机器专属脚本配置（不提交，避免泄露本机路径） ===
+scripts/link-skills.local.py
+scripts/.zhipin_lastrun
+# === 运行时状态（不提交） ===
+state/*.db
+state/probe-dump.json
+state/rss-last-check.json
+state/github-stars-last-check.json
+# === 结构化数据层（SQLite 真相源本地化 + 文本导出进 git 同步） ===
+data/*.db
+!data/exports/
+!data/exports/*.json
+data/*.json
+data/*.csv
+# === Obsidian ===
+.obsidian/*
+!.obsidian/app.json
+!.obsidian/core-plugins.json
+!.obsidian/community-plugins.json
+!.obsidian/appearance.json
+!.obsidian/graph.json
+!.obsidian/page-preview.json
+# === Wiki ===
+!.wiki/
+!.wiki/**
+.wiki/temp/
+.wiki/automation/state/
+.wiki/automation/reports/
+.wiki/automation/rss-inbox/
+.wiki/**/__pycache__/
+.wiki/**/*.pyc
+# === 生成产物：简历 docx（由 Resume/md2docx.py 生成，不入库） ===
+Resume/versions/*.docx
 # === 课程遗留（已从 git 移除，防止误加） ===
 agent-core/
 deepagents/
