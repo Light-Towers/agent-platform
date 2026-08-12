@@ -6,7 +6,7 @@
 
 [![CI](https://github.com/Light-Towers/agent-platform/actions/workflows/agent-platform-ci.yml/badge.svg)](https://github.com/Light-Towers/agent-platform/actions/workflows/agent-platform-ci.yml)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![License](https://img.shields.io/badge/license-Apache_2.0-green.svg)](LICENSE)
 
 </div>
 
@@ -58,56 +58,51 @@ Agent Platform 是一个基于 **LangGraph Supervisor 模式** 的统一智能�
 
 ## 架构
 
-```mermaid
-graph TB
-    subgraph Gateway["FastAPI Gateway"]
-        AUTH["认证 + 会话防劫持"]
-        SSE["SSE 流式响应"]
-        COORD["SessionCoordinator<br/>同 session 串行"]
-        ADM["AdmissionQueue<br/>持久化准入 + 限流"]
-    end
+```text
+                                    REQUEST
+                                        │
+                                        ▼
+                    ┌─────────────┐   ┌──────────────┐   ┌────────────────┐
+                    │  Gateway    │ → │  Admission   │ → │   Supervisor   │
+                    │ Auth/Session│   │  Queue       │   │   Intent Route │
+                    └─────────────┘   └──────────────┘   └───────┬────────┘
+                                            │
+                 ┌──────────────────────────┼──────────────────────────┐
+                 │                          │                          │
+                 ▼                          ▼                          ▼
+             ┌────────┐                 ┌────────┐                 ┌────────┐
+             │ Search │                 │  RAG   │                 │  SQL   │
+             └────┬───┘                 └────┬───┘                 └────┬───┘
+                  │                          │                          │
+                  ├──────────────────────────┼──────────────────────────┤
+                  │                          │                          │
+                  ▼                          ▼                          ▼
+             ┌────────┐                 ┌────────┐                 ┌────────┐
+             │ Direct │                 │  MCP   │                 │ ...    │
+             └────┬───┘                 └────────┘                 └────────┘
+                  │                                                    │
+                  └─────────────────────────┬──────────────────────────┘
+                                            ▼
+                                ┌────────────────────────┐
+                                │   Evidence Synthesis   │
+                                │                        │
+                                │  汇总 / Reflection     │
+                                │  Retry / Final Answer  │
+                                └───────────┬────────────┘
+                                            │
+                                            ▼
+                                    ┌──────────────┐
+                                    │ SSE Response │
+                                    └──────────────┘
 
-    subgraph Supervisor["Supervisor — LangGraph"]
-        ROUTE["意图路由<br/>LLM 结构化 / 启发式兜底"]
-        SYNTH["证据汇总 + 反思重试"]
-        COMPACT["上下文压缩"]
-    end
 
-    subgraph Capabilities["能力节点"]
-        SEARCH["Search<br/>Tavily + 熔断"]
-        RAG["RAG<br/>pgvector + BM25 + RRF"]
-        SQL["Text-to-SQL<br/>三件套 + 白名单守卫"]
-        DIRECT["Direct<br/>直答"]
-        MCP["MCP<br/>外部工具 + 白名单"]
-    end
-
-    subgraph Infra["基础设施"]
-        PG[("PostgreSQL + pgvector<br/>checkpoint / RAG / 记忆<br/>缓存 / SQL 训练 / 准入队列")]
-        CACHE["语义缓存"]
-        CB["熔断器<br/>closed → open → half-open"]
-        OTEL["OTel 追踪"]
-        LANGFUSE["Langfuse"]
-    end
-
-    AUTH --> COORD --> ADM --> ROUTE
-    ROUTE --> SEARCH & RAG & SQL & DIRECT & MCP
-    SEARCH & RAG & SQL & DIRECT & MCP --> SYNTH
-    COMPACT -.-> ROUTE
-
-    SEARCH -.-> CB
-    MCP -.-> CB
-    SQL -.-> CB
-
-    ROUTE -.-> CACHE
-    SYNTH -.-> CACHE
-    SYNTH -.-> PG
-    ROUTE -.-> PG
-
-    ADM -.-> PG
-    COORD -.-> OTEL
-    ADM -.-> OTEL
-    SYNTH -.-> OTEL
-    SYNTH -.-> LANGFUSE
+                ╭─────────────────────────────────────────────────────╮
+                │                  CROSS-CUTTING                      │
+                │                                                     │
+                │  PostgreSQL/pgvector    Semantic Cache              │
+                │  Circuit Breaker        OpenTelemetry               │
+                │  Langfuse               Checkpoint / Memory         │
+                ╰─────────────────────────────────────────────────────╯
 ```
 
 ```mermaid
@@ -382,4 +377,4 @@ tests/                     # 单元测试（40 用例）
 
 ## License
 
-[MIT](LICENSE)
+[Apache-2.0](LICENSE)
