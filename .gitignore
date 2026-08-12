@@ -1,0 +1,39 @@
+# === 密钥 ===
+.env
+# === Python ===
+__pycache__/
+*.pyc
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+dist/
+build/
+*.db
+*.sqlite3
+# === IDE ===
+.idea/
+.vscode/
+*.swp
+*.swo
+# === OS ===
+.DS_Store
+Thumbs.db
+# === 临时 ===
+*.tmp
+*.bak
+*.log
+.tmp_*
+temp_*.py
+dump_*.py
+*.tmp.md
+# === 课程遗留（已从 git 移除，防止误加） ===
+agent-core/
+deepagents/
+kefu-adapter/
+kefu-service/
+shared-schemas/
+wenda-adapter/
+zhanggui-zhiku/
+courses/
