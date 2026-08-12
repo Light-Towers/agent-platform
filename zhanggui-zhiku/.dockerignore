@@ -1,0 +1,33 @@
+# 版本控制与编辑器
+.git
+.gitignore
+.idea
+.vscode
+*.swp
+
+# Python 缓存与构建产物
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.eggs/
+
+# 环境与密钥（容器内通过 env_file/compose 注入，勿打进镜像）
+.env
+.env.example
+
+# 运行时产生的本地数据
+models/
+output/
+logs/
+doc/
+
+# 测试与文档（非运行必需）
+test/
+README.md
+docs/
+
+# 系统文件
+.DS_Store
+Thumbs.db

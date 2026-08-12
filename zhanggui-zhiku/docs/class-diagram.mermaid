@@ -1,0 +1,77 @@
+classDiagram
+    direction TB
+
+    class Settings {
+        +str app_host
+        +int app_port
+        +Path project_root
+        +list cors_origins
+        +bool cors_allow_credentials
+        +str models_dir
+        +str modelscope_cache
+        +str hf_home
+        +str openai_api_key
+        +str openai_base_url
+        +str milvus_url
+        +str chunks_collection
+        +str neo4j_uri
+        +str neo4j_password
+        +str mongo_url
+        +str minio_endpoint
+        +str minio_secret_key
+        +str mineru_api_token
+        +str bge_m3_path
+        +str bge_reranker_large
+        +... 其余字段见 config 表
+    }
+
+    class FastAPIApp {
+        +create_app() FastAPI
+        +run()
+    }
+
+    class ImportRouter {
+        +GET /import.html
+        +POST /upload
+        +GET /status/{task_id}
+    }
+
+    class QueryRouter {
+        +GET /chat.html
+        +GET /health
+        +POST /query
+        +GET /stream/{session_id}
+        +GET /history/{session_id}
+        +DELETE /history/{session_id}
+    }
+
+    class MilvusClient
+    class MinIOClient
+    class MongoHistoryTool
+    class Neo4jClient
+
+    class KbImportGraph {
+        +stream(state)
+    }
+    class QueryGraph {
+        +invoke(state)
+    }
+
+    Settings <.. FastAPIApp : 读取配置
+    Settings <.. ImportRouter : 读取配置
+    Settings <.. QueryRouter : 读取配置
+
+    FastAPIApp *-- ImportRouter : include_router
+    FastAPIApp *-- QueryRouter : include_router
+
+    ImportRouter ..> KbImportGraph : 后台任务
+    QueryRouter ..> QueryGraph : 后台任务
+
+    ImportRouter ..> MinIOClient : 上传文件
+    ImportRouter ..> MilvusClient : 入库
+    QueryRouter ..> MongoHistoryTool : 历史读写
+    QueryRouter ..> MilvusClient : 向量检索
+    QueryRouter ..> Neo4jClient : 知识图谱检索
+    KbImportGraph ..> MilvusClient
+    KbImportGraph ..> MinIOClient
+    QueryGraph ..> MongoHistoryTool

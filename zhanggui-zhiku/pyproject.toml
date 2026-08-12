@@ -1,0 +1,101 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "zhanggui-zhiku"
+version = "1.1.0"
+description = "掌柜智库：RAG 知识库导入与多路检索问答一体化服务"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "掌柜智库 Team" }]
+keywords = ["rag", "langgraph", "fastapi", "milvus", "knowledge-base"]
+dependencies = [
+    "fastapi",
+    "flagembedding",
+    "grandalf",
+    "langchain",
+    "langchain-community",
+    "langchain-openai",
+    "langgraph",
+    "loguru",
+    "magic-pdf",
+    "minio",
+    "modelscope",
+    "numpy",
+    "pandas",
+    "pymilvus[model]",
+    "pymilvus-model",
+    "pymongo",
+    "python-dotenv",
+    "python-multipart",
+    "regex",
+    "torch",
+    "torchaudio",
+    "torchvision",
+    "uvicorn",
+    "transformers",
+    "openai-agents",
+    "requests",
+    # agent-core 共享内核（monorepo sibling 包，editable 安装，import 名 agent_core）。
+    # uv 语法（推荐，本仓含 uv.lock）。pip 用户需改为：`pip install -e ../agent-core`，
+    # 并在 requirements 去掉此行（setuptools 不解析 path 表）。
+    "agent-core",
+]
+
+[tool.uv.sources]
+agent-core = { path = "../agent-core", editable = true }
+
+[project.scripts]
+zhanggui-zhiku = "app.main:run"
+
+[project.urls]
+Homepage = "https://github.com/noctilucent-lamp/zhanggui-zhiku"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["app*"]
+
+[tool.setuptools.package-data]
+"*" = ["*.html", "*.json"]
+
+# ---------------------------------------------------------------------------
+# ruff：静态检查与格式化基线（M1 引入，M3 收窄）
+#
+# 说明：本项目存量代码已有部分历史债。M1 的目标是
+# 「让 CI 门禁可用且结果可复现」，M3 完成全量整形并收窄豁免：
+#   - lint 规则集固定为 pyflakes(F) + pycodestyle 的错误类子集(E4/E7/E9)；
+#   - M3 已执行 `ruff format app tests eval` 全量整形，`ruff format --check`
+#     翻转为 CI 硬门禁（zhiku-ci.yml 不再 continue-on-error）；
+#   - M3 通过自动修复消除 F401（unused-import，18 处）与 F541（f-string 无占位符，
+#     6 处），二者已从 ignore 移除；剩余 ignore 为**非自动修复**存量告警
+#     （26 处 = E722 1 + F403 6 + F405 18 + F811 1），作为待收窄基线，
+#     新代码不得再引入清单外的新告警。
+# ---------------------------------------------------------------------------
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+extend-exclude = [
+    ".venv",
+    "doc",
+    "logs",
+    "output",
+    "prompts",
+]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]
+# 存量基线（M3 收窄后剩余非自动修复项），后续里程碑按目录逐条收窄；新增代码请勿依赖这些豁免。
+ignore = [
+    "E722", # bare-except：存量 1 处（node_rrf.py:39）
+    "F403", # star import：存量 6 处（query_router 2 / node_rerank 1 / node_search_embedding_hyde 3）
+    "F405", # star import 派生的未定义名：存量 18 处
+    "F811", # 重复定义：存量 1 处（app/core/logger.py:95）
+]
+
+[project.optional-dependencies]
+tracing = [
+    "opentelemetry-api>=1.24",
+    "opentelemetry-sdk>=1.24",
+]

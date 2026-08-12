@@ -1,0 +1,253 @@
+# 掌柜智库（Zhanggui Zhiku）本地一体化编排
+# 服务：web(统一 FastAPI) / milvus(向量库) / mongo(历史会话) / minio(对象存储) / neo4j(知识图谱) / minio-init(自动建桶)
+#       可观测（可选 profile obs）：jaeger(链路追踪 UI)
+#
+# M6（方案 §10 / §2.2）分层 profile：
+#   - core：基础设施（milvus/mongo/minio/minio-init/neo4j）—— Nightly 与默认栈使用；
+#   - obs：可观测（jaeger）—— 默认不拉起，避免加重依赖；启用见下方「启用链路追踪」；
+#   - web：无 profile，始终拉起（依赖 core 服务，compose 会自动解析依赖）。
+#
+# ⚠️ Compose profile 语义（实测文档确认）：若 web 依赖的 core 服务处于**未启用** profile，
+#   直接 `docker compose up -d` 会报错：`service milvus is required by web but is disabled.
+#   Can be enabled by profiles [core]`。因此默认拉起命令必须带 `--profile core`：
+#
+# 使用：
+#   1) 复制 .env.example 为 .env 并填写 API Key
+#   2) docker compose --profile core up -d --build   # 默认栈（web + 基础设施，不含 obs）
+#   3) 浏览器访问 http://localhost:8000/import.html 与 http://localhost:8000/chat.html
+#
+# 启用链路追踪（可选，M4/M6）：
+#   docker compose --profile core --profile obs up -d --build
+#   并在 .env 设置：OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317 且 ZHANGUI_TRACE_ENABLED=true
+#   （jaeger all-in-one 原生接收 OTLP gRPC；UI: http://localhost:16686）
+#
+# 说明：
+#   - web 通过 environment 覆盖关键连接地址为本网络内的服务名（milvus/mongo/minio/neo4j），
+#     其余配置仍从 .env 读取（env_file）。
+#   - milvus standalone **需外接 etcd 与 minio**（官方 standalone compose 即如此）：镜像内
+#     milvus.yaml 默认 etcd.endpoints=localhost:2379 且 UseEmbed=false，容器内无 etcd 时会
+#     反复 SIGABRT(134) 重启。故下方显式提供 etcd 服务，并用 ETCD_ENDPOINTS/MINIO_ADDRESS 指向。
+#   - minio-init 在 minio 就绪后自动创建应用所需的桶（默认 kb-import-bucket），免去手动建桶。
+#   - 镜像 tag 已锁定为稳定版本以保证可复现；如需升级请同步修改下方 image 字段。
+#   - uvicorn 容量模型（§10.5）：web 显式 `--workers 1`。reranker/embedding 模型进程内加载，
+#     N worker = N 份模型副本（内存放大）；GPU 场景建议 workers=1~2，水平扩展优先加 replica
+#     而非加 worker。`deploy.replicas` 注释仅作示范（K8s / 真实编排生效），Compose 单机无效。
+
+services:
+  web:
+    build:
+      context: ..
+      dockerfile: zhanggui-zhiku/Dockerfile
+    container_name: zhanggui-zhiku-web
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      # 容器内通过服务名互访（覆盖 .env 中的 localhost）
+      APP_HOST: "0.0.0.0"
+      APP_PORT: "8000"
+      MILVUS_URL: "http://milvus:19530"
+      MONGO_URL: "mongodb://mongo:27017"
+      MINIO_ENDPOINT: "minio:9000"
+      NEO4J_URI: "bolt://neo4j:7687"
+    depends_on:
+      milvus:
+        condition: service_healthy
+      mongo:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    volumes:
+      - ./output:/app/output
+      - ./logs:/app/logs
+      - ./models:/app/models
+    # M6（§10.5）：显式单 worker 容量模型（模型进程内加载，多 worker = 多份模型副本内存放大）
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+    # M6（§2.2）：存活探针（/health/live 已由 M6 新增；/health 旧探针保留兼容）。
+    # 就绪语义由业务层 /health/ready 提供（Milvus 连通判据）；此处用轻量存活探针避免误摘除。
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/live', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    deploy:
+      # replicas: 3  # 仅供示范（K8s / 真实编排生效）；Compose 单机多副本无意义（§10.5）
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2G
+
+  # Milvus 元数据存储（官方 standalone 部署的必需依赖，见文件头说明）
+  # 版本取 Milvus v2.5.10 官方 standalone compose 指定的 3.5.18（通用文档写 3.5.0，同为 3.5.x；
+  # 优先跟随该 Milvus 版本自带编排）。etcd 对磁盘敏感，生产建议本地 NVMe SSD
+  # （≥500 IOPS、p99 fsync <10ms，可用 fio 验证）；本机为验证环境未做该项基准。
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.18
+    container_name: zhanggui-zhiku-etcd
+    restart: unless-stopped
+    environment:
+      ETCD_AUTO_COMPACTION_MODE: revision
+      ETCD_AUTO_COMPACTION_RETENTION: "1000"
+      ETCD_QUOTA_BACKEND_BYTES: "4294967296"
+      ETCD_SNAPSHOT_COUNT: "50000"
+    command:
+      - etcd
+      - -advertise-client-urls=http://etcd:2379
+      - -listen-client-urls=http://0.0.0.0:2379
+      - --data-dir=/etcd
+    volumes:
+      - etcd_data:/etcd
+    profiles: ["core"]
+    healthcheck:
+      test: ["CMD", "etcdctl", "endpoint", "health"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+
+  milvus:
+    image: milvusdb/milvus:v2.5.10
+    container_name: zhanggui-zhiku-milvus
+    restart: unless-stopped
+    command: ["milvus", "run", "standalone"]
+    security_opt:
+      - seccomp:unconfined
+    environment:
+      ETCD_ENDPOINTS: etcd:2379
+      MINIO_ADDRESS: minio:9000
+      MINIO_REGION: us-east-1
+      # 显式声明 Milvus 内部 bucket（默认即 a-bucket，此处写明避免成为隐式依赖）。
+      # 与应用桶 kb-import-bucket 同实例不同桶：单机验证环境不拆分 MinIO 实例，
+      # 但两者用途不同（前者=向量库内部数据，后者=业务导入文件），备份/清理勿混淆。
+      MINIO_BUCKET_NAME: a-bucket
+      # standalone 默认消息队列为 rocksmq（嵌入式，落 /var/lib/milvus，无需单独 MQ 服务）。
+      # 注：Milvus 2.6+ 文档所述默认 MQ 为 Woodpecker，v2.5.10 不适用。
+      MQ_TYPE: default
+    ports:
+      - "19530:19530"
+      - "9091:9091"
+    volumes:
+      - milvus_data:/var/lib/milvus
+    depends_on:
+      etcd:
+        condition: service_healthy
+      minio:
+        condition: service_started
+    profiles: ["core"]
+    # 9091 为 Milvus 自带健康端点；无此探针时 compose --wait / ps 无法反映真实就绪状态
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
+      interval: 15s
+      timeout: 10s
+      retries: 6
+      start_period: 90s
+    deploy:
+      resources:
+        limits:
+          cpus: "4.0"
+          memory: 4G
+
+  mongo:
+    image: mongo:7
+    container_name: zhanggui-zhiku-mongo
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_DATABASE: ${MONGO_DB_NAME:-zhanggui-zhiku}
+    volumes:
+      - mongo_data:/data/db
+    profiles: ["core"]
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  minio:
+    # M6：minio 锁版，消除 latest（方案 M1 已识别未锁版）
+    image: minio/minio:RELEASE.2024-01-16T16-07-38Z
+    container_name: zhanggui-zhiku-minio
+    restart: unless-stopped
+    command: ["server", "/data", "--console-address", ":9001"]
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-minioadmin}
+    volumes:
+      - minio_data:/data
+    profiles: ["core"]
+
+  # 应用所需的 MinIO 桶（默认 kb-import-bucket）在 minio 就绪后自动创建，可重复执行（幂等）。
+  minio-init:
+    # 注意：minio/mc 的 RELEASE tag 体系与 minio/minio **相互独立**，不可复用同一 tag
+    # （mc 无 RELEASE.2024-01-16T16-07-38Z，会报 manifest unknown）。此处独立锁版。
+    image: minio/mc:RELEASE.2025-04-16T18-13-26Z
+    container_name: zhanggui-zhiku-minio-init
+    restart: "no"
+    depends_on:
+      minio:
+        condition: service_started
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-minioadmin}
+      MINIO_BUCKET: ${MINIO_BUCKET_NAME:-kb-import-bucket}
+    entrypoint: >
+      /bin/sh -c "
+      until mc alias set local http://minio:9000 $${MINIO_ROOT_USER} $${MINIO_ROOT_PASSWORD} 2>/dev/null;
+      do echo 'waiting for minio...'; sleep 2; done;
+      mc mb -p local/$${MINIO_BUCKET};
+      echo 'bucket $${MINIO_BUCKET} ready'
+      "
+    profiles: ["core"]
+
+  neo4j:
+    image: neo4j:5
+    container_name: zhanggui-zhiku-neo4j
+    restart: unless-stopped
+    ports:
+      - "7687:7687"
+      - "7474:7474"
+    environment:
+      NEO4J_AUTH: ${NEO4J_USERNAME:-neo4j}/${NEO4J_PASSWORD:-neo4j123456}
+    volumes:
+      - neo4j_data:/data
+    profiles: ["core"]
+    healthcheck:
+      # 7474 根路径在 neo4j 启动后即返回 200，不依赖认证，适合做就绪探针
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:7474 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 40s
+
+  # M6（方案 §8.3）：链路追踪 —— 仅 profile obs 拉起（默认不启动，避免加重依赖）。
+  # jaeger all-in-one 原生接收 OTLP gRPC（4317）；web 侧在 .env 配置
+  # OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317 + ZHANGUI_TRACE_ENABLED=true 即导出。
+  jaeger:
+    image: jaegertracing/all-in-one:1.57
+    container_name: zhanggui-zhiku-jaeger
+    restart: unless-stopped
+    ports:
+      - "16686:16686"   # Jaeger UI
+      - "4317:4317"     # OTLP gRPC 接收
+      - "4318:4318"     # OTLP HTTP 接收
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    profiles: ["obs"]
+
+volumes:
+  etcd_data:
+  milvus_data:
+  mongo_data:
+  minio_data:
+  neo4j_data:
