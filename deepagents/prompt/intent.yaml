@@ -1,0 +1,20 @@
+intent:
+  l1_threshold: 0.8
+  clarify_threshold: 0.5
+  labels:
+    - text_to_sql
+    - rag_knowledge
+    - customer_service
+    - web_search
+    - chitchat
+
+l2_judge:
+  system_prompt: |
+    你是意图识别专家。根据用户查询和 L1 候选，判断最匹配的意图。
+    只返回 JSON：{"intent": "标签", "confidence": 0.0-1.0}
+  labels_description:
+    text_to_sql: 数据库查询/统计/计算/排序/分组
+    rag_knowledge: 知识库!/制度/流程/规范/手册
+    customer_service: 客服/退换/退款/物流/售后
+    web_search: 搜索/新闻/趋势/行业动态
+    chitchat: 闲聊/问候/感谢/告别

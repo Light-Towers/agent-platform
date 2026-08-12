@@ -1,0 +1,19 @@
+# 重排配置（M3，方案 §7.3）
+#
+# 说明：默认值与当前节点硬编码完全一致（node_rerank.py），修改本文件即可调节重排行为。
+# model 为模型标识（实际加载路径仍由 BGE_RERANKER_LARGE 环境变量决定，见 reranker_config.py）；
+# batch_size / max_concurrency 为 §10.4 预留（M6 落地 Semaphore/batch 时使用）。
+
+model: BAAI/bge-reranker-v2-m3   # 重排模型标识
+batch_size: 16                   # 批量推理大小（P2 batch inference 预留）
+max_concurrency: 8               # reranker 并发闸门（对应方案 §10.4 Semaphore(8)，M6 落地）
+
+dynamic_topk:
+  enabled: true                  # 是否启用断崖式动态 TopK（false = 固定取满 max_k）
+  gap_ratio: 0.25                # 相对断崖阈值（原 node_rerank.py 硬编码 RERANK_GAP_RATIO）
+  gap_abs: 0.5                   # 绝对断崖阈值（原 node_rerank.py 硬编码 RERANK_GAP_ABS）
+  min_k: 1                       # 最小保留条数（原 RERANK_MIN_TOPK）
+  max_k: 10                      # 最大保留条数（原 RERANK_MAX_TOPK）
+
+fallback:
+  on_error: passthrough          # reranker 异常时返回原序（既有降级行为显式化）

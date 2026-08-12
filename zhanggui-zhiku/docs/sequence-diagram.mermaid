@@ -1,0 +1,43 @@
+sequenceDiagram
+    autonumber
+    participant Dev as 开发者/部署
+    participant Cfg as app.core.config
+    participant Main as app.main:create_app
+    participant IR as import_router
+    participant QR as query_router
+    participant UV as uvicorn
+
+    Note over Dev,Cfg: === 启动流程 ===
+    Dev->>UV: uvicorn app.main:app --port $APP_PORT
+    UV->>Main: import app.main
+    Main->>Cfg: load_dotenv() + 构建 Settings(单例)
+    Cfg-->>Main: settings
+    Main->>IR: include_router(import_router)
+    Main->>QR: include_router(query_router)
+    Main-->>UV: FastAPI app (含 9 端点)
+
+    Note over Dev,UV: === 导入流程 (POST /upload) ===
+    participant Client as 浏览器(import.html)
+    participant BG as BackgroundTasks
+    participant Graph as kb_import_app
+
+    Client->>IR: POST /upload (files)
+    IR->>IR: 保存本地 + MinIO 上传
+    IR->>BG: add_task(run_graph_task)
+    IR-->>Client: {task_ids}
+    BG->>Graph: stream(state)
+    Graph-->>BG: 节点完成事件
+    Client->>IR: GET /status/{task_id} (轮询)
+
+    Note over Dev,UV: === 问答流程 (POST /query) ===
+    participant SSE as /stream SSE
+    participant QG as query_app
+
+    Client->>QR: POST /query {query, session_id, is_stream}
+    QR->>QR: create_sse_queue(session_id)
+    QR->>BG: add_task(run_query_graph)
+    QR-->>Client: {session_id}
+    Client->>SSE: GET /stream/{session_id}
+    BG->>QG: invoke(state)
+    QG-->>SSE: SSEEvent 推送答案
+    Client->>QR: GET /history/{session_id}

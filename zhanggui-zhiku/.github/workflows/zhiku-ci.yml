@@ -1,0 +1,52 @@
+# ============================================================================
+# 掌柜智库 (zhanggui-zhiku) CI —— DEFERRED（暂未启用）
+# ============================================================================
+#
+# 状态：本文件为「占位 + 模板」，当前未被启用，不会实际运行。
+#
+# 为什么 deferred（不抽仓前提下不可行）：
+#   - GitHub Actions 只会读取 **仓库根目录** 的 `.github/workflows/` 下的工作流。
+#     本目录 `Code/agent/zhanggui-zhiku/` 是 monorepo `noctilucent-lamp` 的子目录，
+#     在此处放置的工作流文件 GitHub 不会识别/触发，留一个会“看似存在却永不运行”
+#     的 CI 是误导性的。
+#   - 真正的 CI 当前位于 monorepo 根：
+#       `zhiku-ci.yml` / `zhiku-nightly.yml`
+#     在拆分独立仓库之前，CI 治理以 monorepo 根为准。
+#
+# 启用条件（when this becomes actionable）：
+#   当 zhanggui-zhiku 被拆分为独立 Git 仓库时，删除本文件顶部的「DEFERRED」注释块，
+#   并确认根目录 `pyproject.toml` 的依赖与测试命令后，取消下方模板注释即可启用。
+#
+# 启用后预期行为：
+#   - 用 uv 按 pyproject.toml 安装依赖；
+#   - 跑 `pytest tests/unit`（集成测试依赖 Milvus / Mongo，需对应服务，缺失时跳过）。
+#
+# 以下是可直接启用的模板（默认注释掉，避免未就绪时误触发报错）：
+# ----------------------------------------------------------------------------
+# name: zhiku-ci
+#
+# on:
+#   push:
+#     paths:
+#       - 'Code/agent/zhanggui-zhiku/**'
+#   pull_request:
+#     paths:
+#       - 'Code/agent/zhanggui-zhiku/**'
+#
+# jobs:
+#   unit-tests:
+#     runs-on: ubuntu-latest
+#     defaults:
+#       run:
+#         working-directory: Code/agent/zhanggui-zhiku
+#     steps:
+#       - uses: actions/checkout@v4
+#       - name: Install uv
+#         uses: astral-sh/setup-uv@v3
+#       - name: Set up Python
+#         run: uv python install 3.11
+#       - name: Install dependencies
+#         run: uv pip install --system -e .
+#       - name: Run unit tests
+#         run: pytest tests/unit -q
+# ----------------------------------------------------------------------------

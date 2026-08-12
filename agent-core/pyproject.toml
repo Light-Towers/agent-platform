@@ -1,0 +1,66 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agent-core"
+version = "0.1.0"
+description = "Framework-agnostic agent runtime kernel: tracing, guardrails, eval metrics, llm client, memory, tool registry."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+keywords = ["agent", "tracing", "guardrails", "rag", "llm"]
+# 核心层仅依赖 stdlib + 自带 agent_core.logging，无第三方硬依赖。
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/osmondy/agent-platform"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["agent_core*"]
+
+[tool.setuptools.package-data]
+"*" = ["*.html", "*.json"]
+
+# ---------------------------------------------------------------------------
+# 可选依赖（extra）：重型/可选依赖全部降级为 extra + 懒导入，
+# 使纯模块（tracing / metrics / guardrails 纯逻辑 / llm 协议层 / memory.base /
+# tools.base）在仅装 stdlib 的 venv 即可 import。
+# ---------------------------------------------------------------------------
+[project.optional-dependencies]
+# OTel 全链路追踪
+tracing = [
+    "opentelemetry-api>=1.24",
+    "opentelemetry-sdk>=1.24",
+]
+# LLM openai 兼容适配器（langchain-openai）。核心协议层不需要。
+llm-openai = [
+    "langchain-openai",
+]
+# ASGI 安全护栏中间件
+web = [
+    "starlette",
+]
+# Mongo 历史记忆实现
+memory-mongo = [
+    "pymongo",
+]
+# MCP 工具适配器
+tools-mcp = [
+    "openai-agents",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+extend-exclude = [".venv", "tests"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]
+ignore = [
+    "E722",
+    "F403",
+    "F405",
+    "F811",
+]
