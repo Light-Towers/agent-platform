@@ -40,7 +40,7 @@
 ### 2.4 三个关键发现
 
 1. **Vanna 已归档**：Text-to-SQL 不能依赖 vanna 包，但其"三件套训练 + 检索注入"机制已被验证有效，自实现（约 300 行）并纳入评测。
-2. **GraphRAG 系降温 + 高成本**：知识图谱增强不做 MVP 首选，LightRAG 式轻量方案留作 Phase 2 增量。
+2. **GraphRAG 系降温 + 高成本**：知识图谱增强不做 MVP 首选，LightRAG 式轻量方案留作 Phase 3 增量。
 3. **deepagents 是 harness 不是框架**：借鉴其规划/子代理/中间件模式，编排底座选 LangGraph（状态持久化是生产刚需）。
 
 ## 三、技术栈选型（结合既有已验证资产）
@@ -97,7 +97,7 @@
 5. Langfuse 可选接线 + golden 评测 + CI 门禁
 6. Docker Compose 一键启动（仅 PG 一个外部依赖）；零配置可跑内存模式冒烟
 
-**明确不做**：知识图谱增强、前端 UI、多租户/权限、客服对话场景（均留 Phase 2）。
+**明确不做**：知识图谱增强、前端 UI、多租户/权限、客服对话场景（均留 Phase 3）。
 
 ## 六、开发顺序（6 阶段，每阶段独立验收）
 
@@ -115,8 +115,8 @@
 方案确认后已按 P0→P5 完成代码落地（`agent-platform/`）：
 
 - 代码：约 30 个文件，全部就绪
-- 单元测试：**32 个用例全部通过**（本地 Python 3.14 实测）
-- 评测门禁：golden set 12 条 + CI workflow 已建；本地 eval 门禁脚本**尚未执行最终确认**
-- 待办：跑通 `python eval/run_eval.py --fail-below 1.0`，以及（可选）docker compose 端到端冒烟
+- 单元测试：**40 个用例全部通过**（本地 Python 3.14 实测）
+- 评测门禁：golden set 12 条 + CI workflow 已建；本地 eval 门禁脚本**已确认通过（12/12 = 100%）**
+- 待办：（可选）docker compose 端到端冒烟
 
 > 若对方案有异议，代码均可按新决策调整；核心可逆点：编排框架（LangGraph）、检索融合策略（RRF）、SQL 守卫（sqlglot）。
