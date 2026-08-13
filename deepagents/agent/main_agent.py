@@ -38,8 +38,9 @@ async def _create_checkpointer():
         return InMemorySaver()
     except ImportError:
         from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-        async with AsyncSqliteSaver.from_conn_string(":memory:") as saver:
-            return saver
+        saver = AsyncSqliteSaver.from_conn_string(":memory:")
+        await saver.__aenter__()
+        return saver
 
 
 def _build_subagents():

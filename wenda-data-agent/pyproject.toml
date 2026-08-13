@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 name = "wenda-data-agent"
 version = "0.1.0"
 description = "Text-to-SQL 数据分析垂直场景（生产化改造自 courses/zhanggui-wenda/data-agent/）"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
     "agent-core",
     "fastapi>=0.115",

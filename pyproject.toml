@@ -3,7 +3,7 @@ name = "agent-platform"
 version = "0.1.0"
 description = "统一生产级 Agent 平台：Supervisor + Search/RAG/Text-to-SQL 子图（LangGraph 单进程多子图架构）"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
     "agent-core",
     "fastapi>=0.115",
