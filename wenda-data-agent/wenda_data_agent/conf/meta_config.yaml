@@ -1,0 +1,13 @@
+# wenda-data-agent 元知识库配置
+meta_db:
+  dsn: ""
+  table_prefix: "wenda_data_agent_"
+
+dw_db:
+  dsn: ""
+  schema: "public"
+
+pgvector:
+  dimension: 1536
+  index_type: "ivfflat"
+  metric: "cosine"

@@ -20,6 +20,8 @@ from fastapi import FastAPI
 
 load_dotenv(find_dotenv())
 
+# WENDA_API_URL 默认指向 wenda-data-agent 生产服务（端口 8000）。
+# 可通过环境变量覆盖回退课程快照。
 WENDA_API_URL = os.getenv("WENDA_API_URL", "http://localhost:8000")
 ADAPTER_VERSION = "0.1.0"
 
