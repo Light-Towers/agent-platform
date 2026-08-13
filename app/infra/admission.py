@@ -7,39 +7,37 @@ admission 默认 false（opt-in），DATABASE_URL 为空时自动禁用。
 
 import asyncio
 import logging
-import time
 import uuid
-from collections import deque
 from datetime import datetime, timezone
 from typing import Literal
 
+from agent_core.guardrails.ratelimit import SlidingWindowRateLimiter
 from app.schemas import AdmissionDecision, Priority
 
 logger = logging.getLogger(__name__)
 
 
 class RateLimiter:
-    """三维滑动窗口限流（per-user / per-session / global）。"""
+    """三维滑动窗口限流（per-user / per-session / global）。
+
+    复用 agent_core.guardrails.ratelimit.SlidingWindowRateLimiter，
+    持有三个独立实例分别对应 user / session / global 维度（1 秒窗口）。
+    """
 
     def __init__(self, per_user: int, per_session: int, global_: int) -> None:
-        self._limits = {"user": per_user, "session": per_session, "global": global_}
-        self._windows: dict[str, dict[str, deque]] = {
-            "user": {},
-            "session": {},
-            "global": {"_": deque()},
-        }
+        self._user_limiter = SlidingWindowRateLimiter(per_user, window_seconds=1)
+        self._session_limiter = SlidingWindowRateLimiter(per_session, window_seconds=1)
+        self._global_limiter = SlidingWindowRateLimiter(global_, window_seconds=1)
 
     def check(self, user_id: str, session_id: str) -> bool:
-        now = time.monotonic()
-        cutoff = now - 1.0  # 1 秒窗口
-
-        for dim, key in [("user", user_id), ("session", session_id), ("global", "_")]:
-            window = self._windows[dim].setdefault(key, deque())
-            while window and window[0] < cutoff:
-                window.popleft()
-            if len(window) >= self._limits[dim]:
+        for limiter, key in (
+            (self._user_limiter, user_id),
+            (self._session_limiter, session_id),
+            (self._global_limiter, "_"),
+        ):
+            allowed, _ = limiter.allow(key)
+            if not allowed:
                 return False
-            window.append(now)
         return True
 
 
