@@ -9,7 +9,7 @@ class AgentState(TypedDict, total=False):
     messages: Annotated[list, add_messages]  # 对话历史（checkpoint 持久化）
     question: str
     user_id: str
-    route: str  # search | rag | sql | direct
+    route: str  # search | rag | sql | direct | mcp
     sub_query: str
     route_reason: str
     memory_notes: list[str]

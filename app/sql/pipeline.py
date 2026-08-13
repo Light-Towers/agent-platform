@@ -76,7 +76,7 @@ async def execute_readonly(sql: str, max_rows: int) -> dict:
             rows = [list(r) async for r in cur]
         return {"columns": columns, "rows": rows[:max_rows]}
 
-    raise RuntimeError(f"暂不支持的业务库类型: {dsn.split('://')[0]}（MySQL 留待 Phase 2）")
+    raise RuntimeError(f"暂不支持的业务库类型: {dsn.split('://')[0]}（MySQL 留待 Phase 3）")
 
 
 async def text_to_sql(pool, question: str, llm=None) -> dict:

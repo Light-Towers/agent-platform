@@ -16,6 +16,7 @@ import time
 import uuid
 from datetime import datetime, timezone
 
+from app.infra.cache import spawn_background
 from app.infra.circuit_breaker import CircuitBreaker
 from app.schemas import McpServerConfig, McpToolResult
 
@@ -162,7 +163,7 @@ class MCPClientManager:
                 tool_name,
                 caller,
             )
-            asyncio.create_task(
+            spawn_background(
                 self._audit_call(caller, server_id, tool_name, params, "rejected", 0, "MCP_TOOL_NOT_ALLOWED")
             )
             return McpToolResult(
@@ -190,7 +191,7 @@ class MCPClientManager:
         duration_ms = int((time.monotonic() - start) * 1000)
 
         if result is None:
-            asyncio.create_task(
+            spawn_background(
                 self._audit_call(caller, server_id, tool_name, params, "failed", duration_ms, "CALL_FAILED_OR_TIMEOUT")
             )
             return McpToolResult(
@@ -200,7 +201,7 @@ class MCPClientManager:
             )
 
         evidence = self._reduce_result(server_id, tool_name, result)
-        asyncio.create_task(
+        spawn_background(
             self._audit_call(caller, server_id, tool_name, params, "success", duration_ms, None)
         )
         return McpToolResult(success=True, evidence=evidence, duration_ms=duration_ms)

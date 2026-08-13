@@ -69,6 +69,7 @@ class Settings(BaseSettings):
     admission_queue_capacity: int = 100
     admission_queue_timeout_seconds: float = 10.0
     admission_rate_limit_per_user: int = 10
+    admission_rate_limit_per_session: int = 10
     admission_rate_limit_global: int = 100
 
     # Phase 2: 会话回退 revert

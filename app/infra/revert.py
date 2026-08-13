@@ -6,11 +6,11 @@
 - 内存模式仅对存活会话有效
 """
 
-import asyncio
 import logging
 import uuid
 from datetime import datetime, timezone
 
+from app.infra.cache import spawn_background
 from app.schemas import RevertResult
 
 logger = logging.getLogger(__name__)
@@ -64,7 +64,7 @@ class RevertHandler:
             context_summary = f"回退至 checkpoint {checkpoint_id[:8]}...（{msg_count} 条消息，最近：{last_question}）"
 
             # 异步审计
-            asyncio.create_task(
+            spawn_background(
                 self._write_audit(
                     operator, session_id, source_checkpoint_id, checkpoint_id, "success"
                 )
@@ -84,7 +84,7 @@ class RevertHandler:
                 checkpoint_id,
                 exc_info=True,
             )
-            asyncio.create_task(
+            spawn_background(
                 self._write_audit(
                     operator, session_id, source_checkpoint_id, checkpoint_id, "failed"
                 )

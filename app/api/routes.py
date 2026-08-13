@@ -77,6 +77,7 @@ async def query(
     request_id = str(uuid.uuid4())
 
     # Phase 2: durable admission 前置
+    decision = None
     admission_queue = getattr(request.app.state, "admission_queue", None)
     if admission_queue is not None and settings.admission_effective_enabled:
         decision = await admission_queue.enqueue(
@@ -115,18 +116,22 @@ async def query(
     config = {"configurable": {"thread_id": thread_id}}
 
     async def _stream():
-        # Phase 2: admission queued 前置事件
-        if admission_queue is not None and settings.admission_effective_enabled:
-            ad = await admission_queue.enqueue(request_id, thread_id, req.user_id, priority)
-            if ad.status == "queued":
-                yield _sse({
-                    "type": "admission",
-                    "status": "queued",
-                    "position": ad.queue_position,
-                })
+        # Phase 2: admission queued 前置事件（复用外层 decision，避免重复入队）
+        if (
+            admission_queue is not None
+            and settings.admission_effective_enabled
+            and decision is not None
+            and decision.status == "queued"
+        ):
+            yield _sse({
+                "type": "admission",
+                "status": "queued",
+                "position": decision.queue_position,
+            })
         # Phase 2: coordination queue 前置事件
         if coord_decision is not None and coord_decision.decision_type == "queue":
             yield _sse({"type": "coordination", "decision": "queue"})
+            await coordinator.wait_for_turn(thread_id, request_id)
 
         # Phase 2: OTel request span
         span = None
