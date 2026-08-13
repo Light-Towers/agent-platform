@@ -160,4 +160,4 @@ def force_flush() -> None:
             if hasattr(provider, "force_flush"):
                 provider.force_flush()
         except Exception:
-            pass
+            logger.warning("otel force_flush failed", exc_info=True)

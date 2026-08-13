@@ -8,7 +8,6 @@
 
 import asyncio
 import logging
-import time
 from typing import Literal
 
 from app.schemas import CoordinationDecision
@@ -17,7 +16,11 @@ logger = logging.getLogger(__name__)
 
 
 class SessionCoordinator:
-    """Per-session asyncio.Lock 互斥 + coalesce/queue/reject 三策略。"""
+    """Per-session 互斥 + coalesce/queue/reject 三策略。
+
+    queue 策略下，acquire 返回 decision_type="queue" 后调用方需 await wait_for_turn()
+    等待获取执行权；release() 唤醒队列下一个请求。
+    """
 
     def __init__(
         self,
@@ -26,27 +29,29 @@ class SessionCoordinator:
     ) -> None:
         self._policy = policy
         self._enabled = enabled
-        self._locks: dict[str, asyncio.Lock] = {}
         self._active: dict[str, str] = {}  # session_id -> request_id（当前执行中）
         self._queues: dict[str, asyncio.Queue] = {}
+        self._conditions: dict[str, asyncio.Condition] = {}
         self._logger = logging.getLogger(__name__)
 
     async def acquire(
         self, session_id: str, request_id: str
     ) -> CoordinationDecision:
-        """获取会话执行权。返回协调决策。"""
+        """获取会话执行权。返回协调决策。
+
+        queue/coalesce 策略下会话忙碌时返回 decision_type="queue"，
+        调用方发送排队事件后需 await wait_for_turn() 等待执行权。
+        """
         if not self._enabled:
             return CoordinationDecision(
                 decision_type="serialize", request_id=request_id
             )
 
         try:
-            lock = self._locks.setdefault(session_id, asyncio.Lock())
             active = self._active.get(session_id)
 
             if active is None:
                 # 会话空闲，直接获取
-                await lock.acquire()
                 self._active[session_id] = request_id
                 self._logger.info(
                     "coordination serialize session=%s request=%s",
@@ -111,22 +116,36 @@ class SessionCoordinator:
                 decision_type="serialize", request_id=request_id
             )
 
+    async def wait_for_turn(self, session_id: str, request_id: str) -> None:
+        """排队请求等待获取执行权。
+
+        acquire() 返回 decision_type="queue" 后调用此方法，
+        阻塞直到 release() 将本请求设为 active。
+        """
+        if not self._enabled:
+            return
+        cond = self._conditions.setdefault(session_id, asyncio.Condition())
+        async with cond:
+            while self._active.get(session_id) != request_id:
+                await cond.wait()
+
     async def release(self, session_id: str, request_id: str) -> None:
         """释放会话执行权，唤醒队列下一个。"""
         if not self._enabled:
             return
 
         try:
-            lock = self._locks.get(session_id)
-            if lock is not None and lock.locked():
-                lock.release()
+            cond = self._conditions.get(session_id)
             if self._active.get(session_id) == request_id:
                 del self._active[session_id]
             # 唤醒队列下一个（如有）
             q = self._queues.get(session_id)
             if q is not None and not q.empty():
                 _next = q.get_nowait()
-                # 下一个请求需自行 acquire
+                self._active[session_id] = _next
+                if cond is not None:
+                    async with cond:
+                        cond.notify_all()
         except Exception:
             self._logger.warning(
                 "coordination release failed session=%s request=%s",

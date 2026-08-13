@@ -14,6 +14,7 @@ from app.rag.chunker import Chunk
 from app.rag.embed import embed_query, embed_texts
 
 _BM25_LOAD_LIMIT = 10000
+_RRF_K = 60
 
 
 def tokenize(text: str) -> list[str]:
@@ -28,7 +29,7 @@ def tokenize(text: str) -> list[str]:
     return tokens
 
 
-def rrf_merge(ranked_id_lists: list[list], k: int = 60) -> list:
+def rrf_merge(ranked_id_lists: list[list], k: int = _RRF_K) -> list:
     """Reciprocal Rank Fusion：多路召回按 1/(k+rank) 累加排序。"""
     scores: dict = {}
     for ranked in ranked_id_lists:
@@ -104,7 +105,7 @@ async def retrieve_chunks(pool, query: str, k: int | None = None) -> list[dict]:
             "source": by_id[chunk_id][1],
             "heading": by_id[chunk_id][2],
             "content": by_id[chunk_id][3],
-            "score": round(1.0 / (60 + rank), 6),
+            "score": round(1.0 / (_RRF_K + rank), 6),
         }
         for rank, chunk_id in enumerate(merged, start=1)
         if chunk_id in by_id

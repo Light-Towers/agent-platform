@@ -60,7 +60,7 @@ async def lifespan(app: FastAPI):
     if settings.admission_effective_enabled:
         limiter = RateLimiter(
             per_user=settings.admission_rate_limit_per_user,
-            per_session=settings.admission_rate_limit_per_user,
+            per_session=settings.admission_rate_limit_per_session,
             global_=settings.admission_rate_limit_global,
         )
         admission_queue = AdmissionQueue(

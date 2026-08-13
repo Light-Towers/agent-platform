@@ -79,7 +79,7 @@ class McpServerConfig(BaseModel):
     server_id: str
     transport: Literal["stdio", "sse"]
     endpoint: str
-    tool_allowlist: list[str] = []
+    tool_allowlist: list[str] = Field(default_factory=list)
     timeout_seconds: float = 30.0
     enabled: bool = False
 
