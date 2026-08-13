@@ -6,7 +6,6 @@ from langchain_core.tools import tool
 from sqlalchemy import create_engine
 from sqlalchemy.exc import DBAPIError
 
-import utils._path_setup  # noqa: F401 — agent-core sys.path
 from api.monitor import monitor
 from tools._timeout import with_timeout
 from tools.sql_validation import _ensure_limit, _validate_identifier, _validate_sql_select_only

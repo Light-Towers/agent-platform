@@ -1,8 +1,6 @@
 import logging
 from pathlib import Path
 
-import utils._path_setup  # noqa: F401 — agent-core sys.path
-
 try:
     from agent_core.logging import get_logger
     logger = get_logger(__name__)
