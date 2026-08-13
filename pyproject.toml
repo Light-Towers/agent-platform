@@ -5,6 +5,7 @@ description = "统一生产级 Agent 平台：Supervisor + Search/RAG/Text-to-SQ
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
+    "agent-core",
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",
     "python-multipart>=0.0.9",
@@ -49,3 +50,6 @@ addopts = "--import-mode=importlib"
 [tool.ruff]
 line-length = 100
 target-version = "py310"
+
+[tool.uv.sources]
+agent-core = { path = "./agent-core", editable = true }

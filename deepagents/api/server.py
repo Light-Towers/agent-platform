@@ -19,8 +19,6 @@ load_dotenv(find_dotenv())
 from agent_core.logging import get_logger
 from agent_core.tracing import init_tracing, start_span
 
-import utils._path_setup  # noqa: F401 — agent-core sys.path
-
 logger = get_logger(__name__)
 
 current_dir = Path(__file__).resolve().parent

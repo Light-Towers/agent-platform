@@ -12,9 +12,13 @@ on:
       - "Dockerfile"
       - ".env.example"
       - ".github/workflows/agent-platform-ci.yml"
+      - "agent-core/**"
+      - "shared-schemas/**"
+      - "deepagents/**"
       - "dialogue-framework/**"
       - "wenda-data-agent/**"
       - "wenda-data-agent-web/**"
+      - "zhanggui-zhiku/**"
   pull_request:
     paths:
       - "app/**"
@@ -26,9 +30,13 @@ on:
       - "Dockerfile"
       - ".env.example"
       - ".github/workflows/agent-platform-ci.yml"
+      - "agent-core/**"
+      - "shared-schemas/**"
+      - "deepagents/**"
       - "dialogue-framework/**"
       - "wenda-data-agent/**"
       - "wenda-data-agent-web/**"
+      - "zhanggui-zhiku/**"
 
 jobs:
   test:
@@ -40,7 +48,7 @@ jobs:
           python-version: "3.11"
           cache: pip
       - name: Install
-        run: pip install -e ".[dev]" -e ./shared-schemas -e ./agent-core -e ./dialogue-framework -e ./wenda-data-agent
+        run: pip install -e ".[dev]" -e ./shared-schemas -e ./agent-core -e ./dialogue-framework -e ./wenda-data-agent -e ./deepagents
       - name: Unit tests
         run: pytest -q
       - name: Eval gate (heuristic routing baseline)
