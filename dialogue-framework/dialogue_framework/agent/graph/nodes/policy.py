@@ -6,6 +6,12 @@ from dialogue_framework.policies.base_policy import Action
 
 
 async def policy(state: dict[str, Any]) -> dict[str, Any]:
+    ensemble = state.get("policy_ensemble")
+    if ensemble is not None:
+        actions = await ensemble.predict(state)
+        if actions:
+            return {"action": actions[0]}
+
     commands = state.get("commands", [])
     if commands:
         cmd = commands[0]

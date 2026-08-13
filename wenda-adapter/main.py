@@ -12,7 +12,6 @@ import json
 import os
 import time
 from contextlib import asynccontextmanager
-from pathlib import Path
 
 import httpx
 from dotenv import find_dotenv, load_dotenv
@@ -108,11 +107,9 @@ async def query(body: dict):
     try:
         upstream_headers: dict[str, str] = {}
         try:
-            import sys
-            sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "deepagents"))
             from agent.tracing.trace_propagation import inject_traceparent
             upstream_headers = inject_traceparent(upstream_headers)
-        except Exception:
+        except Exception:  # noqa: BLE001, S110
             pass
 
         async with client.stream(
@@ -151,7 +148,7 @@ async def query(body: dict):
             fallback=True,
             latency_ms=(time.perf_counter() - start) * 1000,
         ).model_dump()
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return QueryResponse(
             answer=f"适配器内部错误: {e}",
             fallback=True,
@@ -176,7 +173,7 @@ async def health():
             status=HealthStatus.HEALTHY if resp.status_code < 500 else HealthStatus.UNHEALTHY,
             latency_ms=latency,
         ))
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         deps.append(DependencyHealth(
             name="wenda",
             status=HealthStatus.UNHEALTHY,
