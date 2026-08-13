@@ -1,15 +1,9 @@
-"""BaseEmbedder Protocol：embedding 可插拔接口抽象。
+"""BaseEmbedder：复用 agent_core.llm.embedding.BaseEmbedder。
 
 生产实现：LangchainOpenAIEmbedder（langchain-openai 远程，默认）。
 可选实现：LangchainHuggingfaceEmbedder（BGE 本地，权重不入库，可跳过）。
 """
 
-from typing import Protocol
+from agent_core.llm.embedding import BaseEmbedder
 
-
-class BaseEmbedder(Protocol):
-    """embedding 客户端协议。"""
-
-    async def embed_texts(self, texts: list[str]) -> list[list[float]]: ...
-
-    async def embed_query(self, query: str) -> list[float]: ...
+__all__ = ["BaseEmbedder"]

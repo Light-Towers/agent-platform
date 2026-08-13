@@ -1,27 +1,20 @@
-"""LangchainHuggingfaceEmbedder：BGE 本地 embedding 可选实现。
+"""Embedding 工厂：复用 agent_core.llm.embedding，按 EMBEDDING_BACKEND 切换。
 
 [可选/可跳过] BGE 权重本地自备，非必交付。
-对齐 spec「BGE 不生产化入栈」精神：缺省 EMBEDDING_BACKEND=langchain_openai 时本文件不被加载。
+对齐 spec「BGE 不生产化入栈」精神：缺省 EMBEDDING_BACKEND=langchain_openai 时本文件不加载 BGE。
 需 EMBEDDING_BACKEND=langchain_huggingface 且本地放置 BGE 权重（约 390MB）。
 """
 
+from agent_core.llm.embedding import LangchainHuggingfaceEmbedder as _CoreHFEmbedder
 from dialogue_framework.shared.config import get_settings
 from dialogue_framework.shared.llm.langchain_openai_embedder import LangchainOpenAIEmbedder
 
 
-class LangchainHuggingfaceEmbedder:
+class LangchainHuggingfaceEmbedder(_CoreHFEmbedder):
     """BGE 本地 embedding（可选，权重本地自备不入库）。"""
 
     def __init__(self, model_path: str) -> None:
-        from langchain_huggingface import HuggingFaceEmbeddings
-
-        self._embeddings = HuggingFaceEmbeddings(model_name=model_path)
-
-    async def embed_texts(self, texts: list[str]) -> list[list[float]]:
-        return self._embeddings.embed_documents(texts)
-
-    async def embed_query(self, query: str) -> list[float]:
-        return self._embeddings.embed_query(query)
+        super().__init__(model_name=model_path)
 
 
 def build_embedder():

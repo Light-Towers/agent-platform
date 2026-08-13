@@ -8,9 +8,10 @@
 - 默认 false（opt-in）
 """
 
-import hashlib
 import logging
 from typing import Literal
+
+from agent_core.tracing import user_query_hash
 
 logger = logging.getLogger(__name__)
 
@@ -145,10 +146,10 @@ def parse_traceparent(header: str | None):
 
 
 def redact_question(question: str) -> dict:
-    """脱敏：返回问题长度 + 哈希摘要，不含全文。"""
+    """脱敏：返回问题长度 + 哈希摘要，不含全文。复用 agent_core.tracing.user_query_hash。"""
     return {
         "question_length": len(question),
-        "question_hash": hashlib.sha256(question.encode()).hexdigest()[:16],
+        "question_hash": user_query_hash(question),
     }
 
 
