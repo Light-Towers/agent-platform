@@ -9,6 +9,7 @@ wenda 快照零改动（AGENTS.md 约束）。
 from __future__ import annotations
 
 import json
+import logging
 import os
 import time
 from contextlib import asynccontextmanager
@@ -18,6 +19,7 @@ from dotenv import find_dotenv, load_dotenv
 from fastapi import FastAPI
 
 load_dotenv(find_dotenv())
+logger = logging.getLogger(__name__)
 
 # WENDA_API_URL 默认指向 wenda-data-agent 生产服务（端口 8000）。
 # 可通过环境变量覆盖回退课程快照。
@@ -109,8 +111,8 @@ async def query(body: dict):
         try:
             from agent.tracing.trace_propagation import inject_traceparent
             upstream_headers = inject_traceparent(upstream_headers)
-        except Exception:  # noqa: BLE001, S110
-            pass
+        except Exception:  # noqa: BLE001
+            logger.warning("traceparent 注入失败", exc_info=True)
 
         async with client.stream(
             "POST",
