@@ -2,12 +2,10 @@
 
 from functools import lru_cache
 
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from shared_schemas.settings import BaseLLMSettings
 
 
-class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
-
+class Settings(BaseLLMSettings):
     # 服务
     host: str = "0.0.0.0"
     port: int = 8000
@@ -15,20 +13,12 @@ class Settings(BaseSettings):
 
     # 存储
     database_url: str = ""  # 空 = 内存模式（无持久化，仅开发）
-    vector_dim: int = 512
 
-    # LLM（OpenAI 兼容）
-    llm_api_key: str = ""
-    llm_base_url: str = "https://api.openai.com/v1"
-    llm_model: str = "gpt-4o-mini"
+    # LLM 补充字段
     llm_fallback_model: str = "gpt-4o-mini"
-    llm_timeout: float = 60.0
 
-    # Embedding
+    # Embedding 补充字段
     embedding_mode: str = "auto"  # auto | mock | remote
-    embedding_base_url: str = ""
-    embedding_api_key: str = ""
-    embedding_model: str = "bge-small-zh"
 
     # 联网搜索
     search_api_key: str = ""
@@ -85,10 +75,6 @@ class Settings(BaseSettings):
     # Phase 2: MCP client（opt-in，默认 false）
     mcp_enabled: bool = False
     mcp_servers: str = ""  # JSON 编码的 server 配置列表
-
-    @property
-    def llm_enabled(self) -> bool:
-        return bool(self.llm_api_key)
 
     @property
     def db_enabled(self) -> bool:
