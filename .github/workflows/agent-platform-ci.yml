@@ -12,6 +12,9 @@ on:
       - "Dockerfile"
       - ".env.example"
       - ".github/workflows/agent-platform-ci.yml"
+      - "dialogue-framework/**"
+      - "wenda-data-agent/**"
+      - "wenda-data-agent-web/**"
   pull_request:
     paths:
       - "app/**"
@@ -23,6 +26,9 @@ on:
       - "Dockerfile"
       - ".env.example"
       - ".github/workflows/agent-platform-ci.yml"
+      - "dialogue-framework/**"
+      - "wenda-data-agent/**"
+      - "wenda-data-agent-web/**"
 
 jobs:
   test:
@@ -34,7 +40,7 @@ jobs:
           python-version: "3.11"
           cache: pip
       - name: Install
-        run: pip install -e ".[dev]"
+        run: pip install -e ".[dev]" -e ./shared-schemas -e ./agent-core -e ./dialogue-framework -e ./wenda-data-agent
       - name: Unit tests
         run: pytest -q
       - name: Eval gate (heuristic routing baseline)

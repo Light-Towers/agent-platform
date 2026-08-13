@@ -1,0 +1,41 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "wenda-data-agent"
+version = "0.1.0"
+description = "Text-to-SQL 数据分析垂直场景（生产化改造自 courses/zhanggui-wenda/data-agent/）"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "langgraph>=0.6",
+    "langchain-core>=0.3",
+    "langchain-openai>=0.3",
+    "psycopg[binary,pool]>=3.1",
+    "pgvector>=0.3",
+    "sqlglot>=25.0",
+    "pydantic>=2.7",
+    "pydantic-settings>=2.2",
+    "pyyaml>=6.0",
+    "httpx>=0.27",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+]
+huggingface = [
+    "langchain-huggingface>=0.1",
+]
+
+[project.scripts]
+wenda-data-agent = "wenda_data_agent.scripts.build_meta_knowledge:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["wenda_data_agent"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
