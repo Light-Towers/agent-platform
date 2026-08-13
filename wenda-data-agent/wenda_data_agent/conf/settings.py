@@ -7,12 +7,10 @@ from functools import lru_cache
 from pathlib import Path
 
 import yaml
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from shared_schemas.settings import BaseLLMSettings
 
 
-class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
-
+class Settings(BaseLLMSettings):
     # 服务
     host: str = "0.0.0.0"
     port: int = 8000
@@ -25,17 +23,11 @@ class Settings(BaseSettings):
     # 表前缀
     table_prefix: str = "wenda_data_agent_"
 
-    # LLM
-    llm_api_key: str = ""
-    llm_base_url: str = "https://api.openai.com/v1"
-    llm_model: str = "gpt-4o-mini"
-    llm_timeout: float = 60.0
+    # LLM 补充字段
     llm_max_retries: int = 3
 
-    # Embedding 后端（可插拔）：langchain_openai | langchain_huggingface
+    # Embedding 补充字段（覆盖基类默认值）
     embedding_backend: str = "langchain_openai"
-    embedding_api_key: str = ""
-    embedding_base_url: str = ""
     embedding_model: str = "text-embedding-3-small"
     vector_dim: int = 1536
 
@@ -50,10 +42,6 @@ class Settings(BaseSettings):
 
     # 分词器：jieba | bigram
     tokenizer: str = "bigram"
-
-    @property
-    def llm_enabled(self) -> bool:
-        return bool(self.llm_api_key)
 
     @property
     def meta_db_enabled(self) -> bool:

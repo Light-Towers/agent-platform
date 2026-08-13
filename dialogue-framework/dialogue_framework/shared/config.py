@@ -5,12 +5,10 @@
 
 from functools import lru_cache
 
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from shared_schemas.settings import BaseLLMSettings
 
 
-class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
-
+class Settings(BaseLLMSettings):
     # 服务
     host: str = "0.0.0.0"
     port: int = 8001
@@ -24,27 +22,14 @@ class Settings(BaseSettings):
     # 图检索后端（可插拔）：pgvector | neo4j
     graph_backend: str = "pgvector"
 
-    # LLM（OpenAI 兼容，对齐 langchain-openai>=0.3）
-    llm_api_key: str = ""
-    llm_base_url: str = "https://api.openai.com/v1"
-    llm_model: str = "gpt-4o-mini"
+    # LLM 补充字段
     llm_fallback_model: str = "gpt-4o-mini"
-    llm_timeout: float = 60.0
 
-    # Embedding 后端（可插拔）：langchain_openai | langchain_huggingface
+    # Embedding 补充字段
     embedding_backend: str = "langchain_openai"
-    embedding_api_key: str = ""
-    embedding_base_url: str = ""
-    embedding_model: str = "bge-small-zh"
 
-    # 向量维度
-    vector_dim: int = 512
-    # 检索 top_k
+    # 检索
     retrieval_top_k: int = 4
-
-    @property
-    def llm_enabled(self) -> bool:
-        return bool(self.llm_api_key)
 
 
 @lru_cache

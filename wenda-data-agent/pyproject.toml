@@ -9,6 +9,7 @@ description = "Text-to-SQL 数据分析垂直场景（生产化改造自 courses
 requires-python = ">=3.11"
 dependencies = [
     "agent-core",
+    "shared-schemas",
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",
     "langgraph>=0.6",
@@ -43,3 +44,4 @@ asyncio_mode = "auto"
 
 [tool.uv.sources]
 agent-core = { path = "../agent-core", editable = true }
+shared-schemas = { path = "../shared-schemas", editable = true }
