@@ -1,23 +1,20 @@
-"""LangchainOpenAIEmbedder：langchain-openai 远程 embedding 生产实现。"""
+"""LangchainOpenAIEmbedder：复用 agent_core.llm.embedding，从 settings 注入参数。"""
 
+from agent_core.llm.embedding import LangchainOpenAIEmbedder as _CoreEmbedder
 from dialogue_framework.shared.config import get_settings
 
 
-class LangchainOpenAIEmbedder:
-    """langchain-openai 远程 embedding（生产默认）。"""
+class LangchainOpenAIEmbedder(_CoreEmbedder):
+    """langchain-openai 远程 embedding（生产默认）。
+
+    从 dialogue_framework settings 读取 api_key/model/base_url，
+    委托给 agent_core.llm.embedding.LangchainOpenAIEmbedder。
+    """
 
     def __init__(self) -> None:
-        from langchain_openai import OpenAIEmbeddings
-
         settings = get_settings()
-        self._embeddings = OpenAIEmbeddings(
-            model=settings.embedding_model,
+        super().__init__(
             api_key=settings.embedding_api_key or settings.llm_api_key,
-            base_url=settings.embedding_base_url or None,
+            model=settings.embedding_model,
+            base_url=settings.embedding_base_url or "",
         )
-
-    async def embed_texts(self, texts: list[str]) -> list[list[float]]:
-        return await self._embeddings.aembed_documents(texts)
-
-    async def embed_query(self, query: str) -> list[float]:
-        return await self._embeddings.aembed_query(query)
