@@ -23,7 +23,7 @@ async def correct_sql(state: dict[str, Any]) -> dict[str, Any]:
     correct_count = state.get("correct_count", 0)
 
     if llm is None or not llm.enabled:
-        return {"sql": sql, "error": error}
+        return {"sql": sql, "error": error, "correct_count": correct_count + 1}
 
     if correct_count >= state.get("sql_max_correct_retries", 3):
         return {"sql": sql, "error": "纠正次数已达上限"}

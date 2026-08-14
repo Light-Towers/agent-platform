@@ -14,7 +14,10 @@ logger = get_logger(__name__)
 
 async def execute_sql(state: dict[str, Any]) -> dict[str, Any]:
     sql = state.get("sql", "")
+    error = state.get("error", "")
     ctx: DataAgentContext | None = state.get("context")
+    if error:
+        return {"result": None, "error": error}
     if not sql:
         return {"result": None, "error": "空 SQL"}
     if ctx is None or ctx.dw_repository is None:
