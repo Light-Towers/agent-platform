@@ -8,7 +8,6 @@
 
 import logging
 import uuid
-from datetime import datetime, timezone
 
 from app.infra.cache import spawn_background
 from app.schemas import RevertResult
@@ -107,7 +106,6 @@ class RevertHandler:
     ) -> None:
         """异步审计日志写入。"""
         revert_id = str(uuid.uuid4())
-        reverted_at = datetime.now(timezone.utc).isoformat()
 
         if self._pool is not None:
             try:

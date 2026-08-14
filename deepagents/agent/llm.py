@@ -6,7 +6,7 @@ from langchain.chat_models import init_chat_model
 from langchain_core.language_models import BaseChatModel
 from langchain_core.outputs import ChatResult, ChatGeneration, ChatGenerationChunk
 from langchain_core.messages import BaseMessage
-from typing import Any, Iterator, AsyncIterator
+from typing import Any, Iterator
 
 from pydantic import ConfigDict
 
