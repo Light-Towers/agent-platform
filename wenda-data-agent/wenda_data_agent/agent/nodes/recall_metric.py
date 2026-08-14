@@ -15,7 +15,7 @@ async def recall_metric(state: dict[str, Any]) -> dict[str, Any]:
     if ctx.embedding_client is not None:
         try:
             embedding = await ctx.embedding_client.embed_query(" ".join(keywords))
-        except Exception:  # noqa: BLE001
+        except Exception:
             embedding = None
 
     metrics = await ctx.metric_repository.recall(keywords, embedding=embedding, top_k=10)

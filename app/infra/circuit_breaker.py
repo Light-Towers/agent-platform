@@ -46,7 +46,7 @@ class CircuitBreaker(_BaseBreaker):
             return fallback
         try:
             result = await fn()
-        except Exception:  # noqa: BLE001 熔断语义即吞错降级
+        except Exception:
             self.record_failure()
             return fallback
         self.record_success()

@@ -143,7 +143,7 @@ async def lifespan(app: FastAPI):
             close_result = conn.close()
             if hasattr(close_result, "__await__"):
                 await close_result
-        except Exception:  # noqa: BLE001 关闭失败不阻塞退出
+        except Exception:
             logger.warning("checkpointer 连接关闭失败")
     await close_pool()
 

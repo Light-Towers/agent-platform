@@ -166,7 +166,7 @@ async def ping() -> bool:
         async with _pool.connection() as conn:
             await conn.execute("SELECT 1")
         return True
-    except Exception:  # noqa: BLE001 健康检查必须吞异常
+    except Exception:
         return False
 
 

@@ -106,7 +106,7 @@ async def query(body: dict):
             fallback=True,
             latency_ms=(time.perf_counter() - start) * 1000,
         ).model_dump()
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return QueryResponse(
             answer=f"适配器内部错误: {e}",
             fallback=True,
@@ -131,7 +131,7 @@ async def health():
             status=HealthStatus.HEALTHY if resp.status_code < 500 else HealthStatus.UNHEALTHY,
             latency_ms=latency,
         ))
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         deps.append(DependencyHealth(
             name="wenda",
             status=HealthStatus.UNHEALTHY,
