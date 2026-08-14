@@ -1,89 +1,56 @@
-"""测试 SSE 流消费逻辑。"""
+"""测试 wenda-adapter JSON 转发逻辑。"""
 
+from unittest.mock import AsyncMock, MagicMock
 
-import httpx
 import pytest
-from main import _consume_sse_stream
 
 
-def _make_response(lines: list[str]) -> httpx.Response:
-    body = "\n".join(lines)
-    return httpx.Response(200, text=body)
-
-
-@pytest.mark.asyncio
-async def test_consume_sse_result_string():
-    lines = [
-        'data: {"type": "result", "data": "hello"}',
-        'data: {"type": "result", "data": " world"}',
-    ]
-    resp = _make_response(lines)
-    answer, _data, error = await _consume_sse_stream(resp)
-    assert answer == "hello world"
-    assert error is None
+def _make_client(status_code: int = 200, payload: dict | None = None):
+    resp = MagicMock()
+    resp.status_code = status_code
+    resp.json.return_value = payload or {}
+    client = AsyncMock()
+    client.post = AsyncMock(return_value=resp)
+    return client
 
 
 @pytest.mark.asyncio
-async def test_consume_sse_result_dict():
-    lines = [
-        'data: {"type": "result", "data": {"answer": "42", "meta": "x"}}',
-    ]
-    resp = _make_response(lines)
-    answer, data, _error = await _consume_sse_stream(resp)
-    assert answer == "42"
-    assert data == {"answer": "42", "meta": "x"}
+async def test_query_json_answer():
+    import main
+
+    client = _make_client(200, {"answer": "hello", "latency_ms": 12.3})
+    main._client = client
+    result = await main.query({"query": "ping"})
+    assert result["answer"] == "hello"
+    assert result["fallback"] is False
 
 
 @pytest.mark.asyncio
-async def test_consume_sse_error():
-    lines = [
-        'data: {"type": "error", "message": "boom"}',
-    ]
-    resp = _make_response(lines)
-    _answer, _data, error = await _consume_sse_stream(resp)
-    assert error == "boom"
+async def test_query_json_with_error():
+    import main
+
+    client = _make_client(200, {"answer": "", "error": "boom"})
+    main._client = client
+    result = await main.query({"query": "ping"})
+    assert result["fallback"] is True
+    assert result["data"]["metadata"]["error"] == "boom"
 
 
 @pytest.mark.asyncio
-async def test_consume_sse_content_field():
-    lines = [
-        'data: {"type": "chunk", "content": "partial"}',
-        'data: {"type": "final", "content": " done"}',
-    ]
-    resp = _make_response(lines)
-    answer, data, _error = await _consume_sse_stream(resp)
-    assert answer == "partial done"
-    assert data is not None
-    assert data["type"] == "final"
+async def test_query_non_200():
+    import main
+
+    client = _make_client(503, {})
+    main._client = client
+    result = await main.query({"query": "ping"})
+    assert result["fallback"] is True
+    assert "503" in result["answer"]
 
 
 @pytest.mark.asyncio
-async def test_consume_sse_skip_non_data_lines():
-    lines = [
-        ": comment",
-        "",
-        'data: {"type": "result", "data": "ok"}',
-    ]
-    resp = _make_response(lines)
-    answer, _, _ = await _consume_sse_stream(resp)
-    assert answer == "ok"
+async def test_query_empty_query():
+    import main
 
-
-@pytest.mark.asyncio
-async def test_consume_sse_skip_invalid_json():
-    lines = [
-        "data: not-json",
-        'data: {"type": "result", "data": "ok"}',
-    ]
-    resp = _make_response(lines)
-    answer, _, _ = await _consume_sse_stream(resp)
-    assert answer == "ok"
-
-
-@pytest.mark.asyncio
-async def test_consume_sse_empty_stream():
-    resp = _make_response([])
-    answer, data, error = await _consume_sse_stream(resp)
-    assert answer == ""
-    assert data is None
-    assert error is None
+    main._client = _make_client()
+    result = await main.query({"query": ""})
+    assert result["answer"] == ""

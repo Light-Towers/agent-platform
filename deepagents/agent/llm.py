@@ -1,5 +1,6 @@
 import logging
 import os
+import time
 
 from dotenv import find_dotenv, load_dotenv
 from langchain.chat_models import init_chat_model
@@ -77,6 +78,19 @@ class _FallbackModel(BaseChatModel):
         object.__setattr__(self, "_primary", primary)
         object.__setattr__(self, "_fallback", fallback)
 
+    _COOLDOWN_S: float = 60.0
+
+    def _mark_primary_failed(self) -> None:
+        """标记主模型失败并设置冷却窗口。"""
+        object.__setattr__(self, "primary_failed", True)
+        object.__setattr__(self, "_cooldown_until", time.monotonic() + self._COOLDOWN_S)
+
+    def _maybe_recover(self) -> None:
+        """冷却期过后尝试复位，让主模型重新探测。"""
+        if self.primary_failed and time.monotonic() >= getattr(self, "_cooldown_until", 0.0):
+            object.__setattr__(self, "primary_failed", False)
+            _logger.info("主模型冷却期已过，尝试恢复主模型")
+
     @property
     def _current(self):
         return self._fallback if self.primary_failed else self._primary
@@ -116,6 +130,7 @@ class _FallbackModel(BaseChatModel):
             yield chunk
 
     def invoke(self, *args, **kwargs):
+        self._maybe_recover()
         if self.primary_failed:
             return self._fallback.invoke(*args, **kwargs)
         try:
@@ -123,11 +138,12 @@ class _FallbackModel(BaseChatModel):
         except Exception as e:
             if self._fallback is not None:
                 _logger.warning("主模型 (%s) 调用失败，切换到备用模型: %s", _PRIMARY_MODEL, e)
-                object.__setattr__(self, "primary_failed", True)
+                self._mark_primary_failed()
                 return self._fallback.invoke(*args, **kwargs)
             raise
 
     async def ainvoke(self, *args, **kwargs):
+        self._maybe_recover()
         if self.primary_failed:
             return await self._fallback.ainvoke(*args, **kwargs)
         try:
@@ -135,12 +151,13 @@ class _FallbackModel(BaseChatModel):
         except Exception as e:
             if self._fallback is not None:
                 _logger.warning("主模型 (%s) 调用失败，切换到备用模型: %s", _PRIMARY_MODEL, e)
-                object.__setattr__(self, "primary_failed", True)
+                self._mark_primary_failed()
                 return await self._fallback.ainvoke(*args, **kwargs)
             raise
 
     def stream(self, *args, **kwargs):
         """流式调用 — 如果主模型失败，fallback 用非流式（简化实现）。"""
+        self._maybe_recover()
         if not self.primary_failed:
             try:
                 yield from self._primary.stream(*args, **kwargs)
@@ -148,7 +165,7 @@ class _FallbackModel(BaseChatModel):
             except Exception as e:
                 if self._fallback is not None:
                     _logger.warning("主模型 (%s) 流式调用失败，切换到备用模型: %s", _PRIMARY_MODEL, e)
-                    object.__setattr__(self, "primary_failed", True)
+                    self._mark_primary_failed()
                 else:
                     raise
         result = self._fallback.invoke(*args, **kwargs)
@@ -156,6 +173,7 @@ class _FallbackModel(BaseChatModel):
 
     async def astream(self, *args, **kwargs):
         """异步流式调用。"""
+        self._maybe_recover()
         if not self.primary_failed:
             try:
                 async for chunk in self._primary.astream(*args, **kwargs):
@@ -164,7 +182,7 @@ class _FallbackModel(BaseChatModel):
             except Exception as e:
                 if self._fallback is not None:
                     _logger.warning("主模型 (%s) 异步流式调用失败，切换到备用模型: %s", _PRIMARY_MODEL, e)
-                    object.__setattr__(self, "primary_failed", True)
+                    self._mark_primary_failed()
                 else:
                     raise
         result = await self._fallback.ainvoke(*args, **kwargs)

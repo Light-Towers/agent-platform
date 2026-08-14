@@ -23,7 +23,7 @@ async def recall(pool, user_id: str, question: str, k: int = 3) -> list[str]:
             where_params=(user_id,),
         )
         return [r[0] for r in rows]
-    except Exception:  # noqa: BLE001 记忆缺失不影响回答
+    except Exception:
         logger.exception("长期记忆召回失败，降级为空")
         return []
 
@@ -41,7 +41,7 @@ def remember(pool, user_id: str, content: str) -> None:
                     "INSERT INTO memories (user_id, content, embedding) VALUES (%s, %s, %s)",
                     (user_id, content, vec),
                 )
-        except Exception:  # noqa: BLE001
+        except Exception:
             logger.exception("长期记忆写入失败")
 
     spawn_background(_write())

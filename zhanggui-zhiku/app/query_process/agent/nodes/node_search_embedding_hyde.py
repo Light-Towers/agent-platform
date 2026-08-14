@@ -9,6 +9,8 @@ from app.core.load_prompt import load_prompt
 from app.conf.milvus_config import milvus_config
 from app.conf.retrieval_config import retrieval_cfg
 from app.core.tracing import traced_span
+from app.utils.item_name_normalize_utils import normalize_item_name
+from app.utils.escape_milvus_string_utils import escape_milvus_string
 
 
 def _hyde_span_attrs(*args, result=None, **kwargs):
@@ -111,8 +113,8 @@ def step_2_search_embedding_hyde(
     # 构造过滤表达式 (如果有商品名限制)
     expr = None
     if item_names:
-        # 处理 item_names 中的引号，防止注入或语法错误
-        quoted = ", ".join(f'"{v}"' for v in item_names)
+        # 与 node_search_embedding.py 统一：先规范化商品名，再转义引号防止 Milvus 表达式注入/语法错误
+        quoted = ", ".join(f'"{escape_milvus_string(normalize_item_name(v))}"' for v in item_names)
         expr = f"item_name in [{quoted}]"
         logger.info(f"Step 2: 应用过滤条件: {expr}")
     else:

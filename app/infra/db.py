@@ -80,7 +80,7 @@ CREATE TABLE IF NOT EXISTS admission_queue (
     queue_position INTEGER,
     rejection_reason TEXT
 );
-CREATE INDEX IF NOT EXISTS idx_admission_status_priority ON admission_queue (status, priority DESC, created_at);
+CREATE INDEX IF NOT EXISTS idx_admission_status_priority ON admission_queue (status, created_at);
 CREATE INDEX IF NOT EXISTS idx_admission_session ON admission_queue (session_id);
 CREATE INDEX IF NOT EXISTS idx_admission_user ON admission_queue (user_id);
 
@@ -128,7 +128,7 @@ async def init_pool():
         pool = AsyncConnectionPool(
             conninfo=settings.database_url,
             min_size=1,
-            max_size=8,
+            max_size=settings.db_pool_max_size,  # 可配置，默认 20，避免高并发池耗尽
             kwargs={"autocommit": True},
             configure=register_vector,
             open=False,

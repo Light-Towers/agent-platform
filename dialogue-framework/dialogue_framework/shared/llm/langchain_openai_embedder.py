@@ -1,6 +1,7 @@
 """LangchainOpenAIEmbedder：复用 agent_core.llm.embedding，从 settings 注入参数。"""
 
 from agent_core.llm.embedding import LangchainOpenAIEmbedder as _CoreEmbedder
+
 from dialogue_framework.shared.config import get_settings
 
 

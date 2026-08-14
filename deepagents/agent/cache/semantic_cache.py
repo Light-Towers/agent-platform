@@ -26,6 +26,7 @@ from agent.cache.layers import (
 logger = get_logger(__name__)
 
 _stats = CacheStats()
+_pending_writes: set = set()
 
 
 def _get_embedding(text: str) -> np.ndarray | None:
@@ -138,7 +139,9 @@ class SemanticCache:
     async def set_async(*args: Any, **kwargs: Any) -> None:
         """fire-and-forget 异步写入（不阻塞调用方）。"""
         try:
-            asyncio.create_task(SemanticCache.set(*args, **kwargs))
+            task = asyncio.create_task(SemanticCache.set(*args, **kwargs))
+            _pending_writes.add(task)
+            task.add_done_callback(_pending_writes.discard)
         except Exception as e:
             logger.warning("缓存异步写入失败: %s", e)
 

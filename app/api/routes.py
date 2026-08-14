@@ -3,6 +3,7 @@
 import json
 import logging
 import uuid
+from datetime import UTC
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, UploadFile
 from fastapi.responses import StreamingResponse
@@ -114,7 +115,11 @@ async def query(
     config = {"configurable": {"thread_id": thread_id}}
 
     async def _stream():
-        # Phase 2: admission queued 前置事件（复用外层 decision，避免重复入队）
+        # decision 定义在 query() 作用域，闭包内第 129 行需写回它（否则闭包内存在
+        # 赋值即被视为局部变量，导致 121/130/137 行在 queued 分支未触发时
+        # 读取未初始化局部变量 → UnboundLocalError F823）。
+        nonlocal decision
+        # Phase 2: admission 排队阻塞等待（路径一：queued 时真正等待补位唤醒）
         if (
             admission_queue is not None
             and settings.admission_effective_enabled
@@ -124,6 +129,20 @@ async def query(
             yield _sse({
                 "type": "admission",
                 "status": "queued",
+                "position": decision.queue_position,
+            })
+            decision = await admission_queue.wait_for_admit(request_id)
+        if decision is not None and decision.status == "rejected":
+            yield _sse({
+                "type": "admission",
+                "status": "rejected",
+                "reason": decision.reason,
+            })
+            return
+        if decision is not None and decision.status == "admitted":
+            yield _sse({
+                "type": "admission",
+                "status": "admitted",
                 "position": decision.queue_position,
             })
         # Phase 2: coordination queue 前置事件
@@ -273,11 +292,11 @@ async def session_revert(
             raise HTTPException(status_code=403, detail="FORBIDDEN")
         raise HTTPException(status_code=500, detail=result.error or "REVERT_FAILED")
 
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     return RevertResponse(
         session_id=result.session_id,
         checkpoint_id=result.checkpoint_id,
         context_summary=result.context_summary,
-        reverted_at=datetime.now(timezone.utc).isoformat(),
+        reverted_at=datetime.now(UTC).isoformat(),
     )

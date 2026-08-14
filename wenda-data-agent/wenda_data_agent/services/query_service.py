@@ -10,8 +10,10 @@ logger = get_logger(__name__)
 class QueryService:
     """查询服务：封装 Text-to-SQL 管线调用。"""
 
-    def __init__(self, graph=None) -> None:
+    def __init__(self, graph=None, context=None, llm=None) -> None:
         self._graph = graph
+        self._context = context
+        self._llm = llm
 
     def set_graph(self, graph) -> None:
         self._graph = graph
@@ -19,7 +21,7 @@ class QueryService:
     async def query(self, question: str, **kwargs: Any) -> dict[str, Any]:
         if self._graph is None:
             return {"answer": "", "error": "graph not initialized", "fallback": True}
-        state: dict[str, Any] = {"query": question}
+        state: dict[str, Any] = {"query": question, "context": self._context, "llm": self._llm}
         try:
             result = await self._graph.ainvoke(state)
             return {

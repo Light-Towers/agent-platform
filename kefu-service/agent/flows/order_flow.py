@@ -6,10 +6,10 @@ LangGraph 子图：收集订单 ID → 查询订单信息 → 格式化回复。
 
 from __future__ import annotations
 
-from langgraph.graph import StateGraph, END
+from langgraph.graph import END, StateGraph
 
-from agent.state import KefuState
 from agent.services import extract_order_id, query_order
+from agent.state import KefuState
 
 
 async def collect_order_id(state: KefuState) -> KefuState:

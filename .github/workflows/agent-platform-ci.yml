@@ -17,8 +17,11 @@ on:
       - "deepagents/**"
       - "dialogue-framework/**"
       - "wenda-data-agent/**"
-      - "wenda-data-agent-web/**"
       - "zhanggui-zhiku/**"
+      - "courses/**"
+      - "wenda-adapter/**"
+      - "kefu-adapter/**"
+      - "kefu-service/**"
   pull_request:
     paths:
       - "app/**"
@@ -35,8 +38,11 @@ on:
       - "deepagents/**"
       - "dialogue-framework/**"
       - "wenda-data-agent/**"
-      - "wenda-data-agent-web/**"
       - "zhanggui-zhiku/**"
+      - "courses/**"
+      - "wenda-adapter/**"
+      - "kefu-adapter/**"
+      - "kefu-service/**"
 
 jobs:
   test:
@@ -51,5 +57,7 @@ jobs:
         run: pip install -e ".[dev]" -e ./shared-schemas -e ./agent-core -e ./dialogue-framework -e ./wenda-data-agent -e ./deepagents
       - name: Unit tests
         run: pytest -q
+      - name: Ruff lint
+        run: ruff check .
       - name: Eval gate (heuristic routing baseline)
         run: python eval/run_eval.py --fail-below 1.0

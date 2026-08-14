@@ -6,16 +6,15 @@ atguigu_ai NLG → deepagents 输出
 
 from __future__ import annotations
 
-from langgraph.graph import StateGraph, END
-
 from agent_core.logging import get_logger
+from langgraph.graph import END, StateGraph
 
-from agent.state import KefuState
-from agent.commands import Command, INTENT_TO_COMMAND
-from agent.flows.order_flow import build_order_flow
+from agent.commands import INTENT_TO_COMMAND, Command
 from agent.flows.logistics_flow import build_logistics_flow
+from agent.flows.order_flow import build_order_flow
 from agent.flows.postsale_flow import build_postsale_flow
 from agent.graph_rag import graph_rag_query
+from agent.state import KefuState
 
 logger = get_logger(__name__)
 
@@ -96,7 +95,7 @@ async def chitchat_node(state: KefuState) -> KefuState:
     return {**state, "response": "好的，请问还有什么可以帮您？"}
 
 
-def build_kefu_graph():
+def build_kefu_graph(checkpointer=None):
     """构建 kefu 主对话图。"""
     graph = StateGraph(KefuState)
 
@@ -123,4 +122,4 @@ def build_kefu_graph():
     for node in ["order_flow", "logistics_flow", "postsale_flow", "knowledge", "chitchat"]:
         graph.add_edge(node, END)
 
-    return graph.compile()
+    return graph.compile(checkpointer=checkpointer)

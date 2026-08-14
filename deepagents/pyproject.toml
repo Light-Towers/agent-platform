@@ -30,6 +30,9 @@ dependencies = [
     "sqlparse>=0.5",
     "pydantic>=2.13",
     "pydantic-settings>=2.14",
+    "requests>=2.34.2",
+    "ragflow-sdk>=0.22.1",
+    "numpy>=2.0.0",
 ]
 
 [project.optional-dependencies]

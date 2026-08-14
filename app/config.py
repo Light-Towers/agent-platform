@@ -13,6 +13,7 @@ class Settings(BaseLLMSettings):
 
     # 存储
     database_url: str = ""  # 空 = 内存模式（无持久化，仅开发）
+    db_pool_max_size: int = 20  # 连接池上限（高并发 admission 全局限流 100/s 时避免池耗尽）
 
     # LLM 补充字段
     llm_fallback_model: str = "gpt-4o-mini"
@@ -75,6 +76,9 @@ class Settings(BaseLLMSettings):
     # Phase 2: MCP client（opt-in，默认 false）
     mcp_enabled: bool = False
     mcp_servers: str = ""  # JSON 编码的 server 配置列表
+
+    # CORS：允许的前端来源（逗号分隔），为空时默认回环 127.0.0.1:5173
+    cors_allow_origins: str = ""
 
     @property
     def db_enabled(self) -> bool:
