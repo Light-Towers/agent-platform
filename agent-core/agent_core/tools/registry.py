@@ -12,7 +12,6 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 from agent_core.logging import get_logger
-from agent_core.tools.base import Tool
 
 logger = get_logger(__name__)
 

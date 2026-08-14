@@ -5,11 +5,7 @@ admission 默认 false（opt-in），DATABASE_URL 为空时自动禁用。
 队列不存储 question 全文（脱敏约束）。
 """
 
-import asyncio
 import logging
-import uuid
-from datetime import datetime, timezone
-from typing import Literal
 
 from agent_core.guardrails.ratelimit import SlidingWindowRateLimiter
 from app.schemas import AdmissionDecision, Priority

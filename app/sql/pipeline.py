@@ -9,7 +9,8 @@ import sqlite3
 import urllib.parse
 
 from app.config import get_settings
-from app.sql.guard import detect_dialect, validate_sql
+from agent_core.sql.guard import validate_sql
+from app.sql.guard import detect_dialect
 from app.sql.schema_store import fetch_context
 
 _SYSTEM_PROMPT = (

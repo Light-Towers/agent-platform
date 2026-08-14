@@ -14,7 +14,6 @@ import json
 import logging
 import time
 import uuid
-from datetime import datetime, timezone
 
 from app.infra.cache import spawn_background
 from app.infra.circuit_breaker import CircuitBreaker

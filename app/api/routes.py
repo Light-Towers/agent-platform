@@ -11,12 +11,11 @@ from app.api.auth import resolve_thread_id, verify_api_key
 from app.config import get_settings
 from app.infra import cache as semantic_cache
 from app.infra.db import get_pool, ping
-from app.infra.otel import get_otel_tracer, parse_traceparent, redact_question
+from app.infra.otel import redact_question
 from app.rag.chunker import split_markdown
 from app.rag.embed import embed_query
 from app.rag.store import add_document
 from app.schemas import (
-    AdmissionDecision,
     HealthResponse,
     ImportResponse,
     Priority,
@@ -97,8 +96,7 @@ async def query(
         if coord_decision.decision_type == "reject":
             raise HTTPException(status_code=409, detail="CONCURRENCY_REJECTED")
 
-    # Phase 2: OTel traceparent 透传
-    otel_ctx = parse_traceparent(traceparent)
+    # Phase 2: OTel tracer
     otel_tracer = getattr(request.app.state, "otel_tracer", None)
 
     # 语义缓存：命中直接返回
