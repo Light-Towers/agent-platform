@@ -182,7 +182,19 @@ async def vector_search(
     """pgvector 余弦距离向量检索（app 包内通用）。
 
     SQL: SELECT {cols} FROM {table} WHERE {where} ORDER BY embedding <=> %s LIMIT %s
+
+    安全：table/cols 经标识符白名单校验（仅含 [a-z0-9_]，列名逗号分隔），
+    拒绝任意字符串注入，避免误用导致的 SQL 注入式表名/列名。
     """
+    import re
+
+    _IDENT = re.compile(r"^[a-z_][a-z0-9_]*$")
+    if not _IDENT.match(table or ""):
+        raise ValueError(f"vector_search: 非法表名 {table!r}（仅允许 [a-z0-9_]）")
+    for _col in cols.split(","):
+        _col = _col.strip()
+        if not _col or not _IDENT.match(_col):
+            raise ValueError(f"vector_search: 非法列名 {cols!r}（仅允许 [a-z0-9_]，逗号分隔）")
     sql = (
         f"SELECT {cols} FROM {table} WHERE {where} "
         f"ORDER BY embedding <=> %s LIMIT %s"
