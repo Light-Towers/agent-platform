@@ -37,11 +37,14 @@ _TEXT_SUFFIXES = {".md", ".markdown", ".txt"}
 
 @router.get("/health", response_model=HealthResponse)
 async def health() -> HealthResponse:
+    from shared_schemas import HealthStatus
+
     settings = get_settings()
     db_ok = await ping() if settings.db_enabled else False
-    status = "ok" if (db_ok or not settings.db_enabled) else "degraded"
+    status = HealthStatus.HEALTHY if (db_ok or not settings.db_enabled) else HealthStatus.DEGRADED
     return HealthResponse(
         status=status,
+        version="0.1.0",
         storage="postgres" if settings.db_enabled else "memory",
         llm=settings.llm_enabled,
         search=bool(settings.search_api_key),
@@ -63,7 +66,7 @@ async def query(
     traceparent: str | None = Header(default=None),
 ):
     settings = get_settings()
-    thread_id = resolve_thread_id(req.thread_id, api_key)
+    thread_id = resolve_thread_id(req.session_id, api_key)
     graph = request.app.state.graph
     pool = get_pool()
 
@@ -103,7 +106,7 @@ async def query(
     # 语义缓存：命中直接返回
     q_embedding: list[float] | None = None
     if settings.cache_enabled and pool is not None:
-        q_embedding = await embed_query(req.question)
+        q_embedding = await embed_query(req.query)
         cached = await semantic_cache.cache_lookup(pool, q_embedding, settings.cache_threshold)
         if cached:
             async def _cached_stream():
@@ -163,13 +166,13 @@ async def query(
             span.__enter__()
             span.set_attribute("thread_id", thread_id)
             span.set_attribute("priority", priority)
-            for k, v in redact_question(req.question).items():
+            for k, v in redact_question(req.query).items():
                 span.set_attribute(k, v)
 
         try:
             final_answer = ""
             async for update in graph.astream(
-                {"messages": [("user", req.question)], "question": req.question,
+                {"messages": [("user", req.query)], "question": req.query,
                  "user_id": req.user_id, "iterations": 0},
                 config=config,
                 stream_mode="updates",
@@ -181,7 +184,7 @@ async def query(
                     if node == "synthesize" and payload.get("answer"):
                         final_answer = payload["answer"]
             if final_answer and q_embedding is not None:
-                semantic_cache.cache_store(pool, req.question, final_answer, q_embedding)
+                semantic_cache.cache_store(pool, req.query, final_answer, q_embedding)
             yield _sse({"type": "done", "thread_id": thread_id, "answer": final_answer})
         finally:
             if span is not None:

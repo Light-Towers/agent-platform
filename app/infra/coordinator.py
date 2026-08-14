@@ -86,7 +86,7 @@ class SessionCoordinator:
                     return CoordinationDecision(
                         decision_type="queue",
                         request_id=request_id,
-                        wait_seconds=0.0,
+                        wait_seconds=float(q.qsize()),
                     )
 
                 elif self._policy == "reject":
@@ -111,7 +111,7 @@ class SessionCoordinator:
                     return CoordinationDecision(
                         decision_type="queue",
                         request_id=request_id,
-                        wait_seconds=0.0,
+                        wait_seconds=float(q.qsize()),
                     )
 
         except Exception:
@@ -159,7 +159,10 @@ class SessionCoordinator:
                     # 本会话已无活动请求且无等待者：清理字典条目，避免只增不清导致内存缓涨
                     if self._active.get(session_id) == request_id:
                         self._active.pop(session_id, None)
-                    if q is not None and q.empty():
+                    # acquire 对每个 session 都无条件建了 _conditions[session_id]，
+                    # 故清理不看 q 是否为 None：队列不存在或已空都需清，否则单请求
+                    # session 的 _conditions 残留（无队列路径 q is None 原被跳过）。
+                    if q is None or q.empty():
                         self._queues.pop(session_id, None)
                         self._conditions.pop(session_id, None)
         except Exception:

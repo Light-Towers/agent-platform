@@ -220,7 +220,7 @@ class AdmissionQueue:
                     ") ASC, created_at ASC "
                     "LIMIT 1 FOR UPDATE SKIP LOCKED"
                 )
-                nxt = await row.fetchone() if hasattr(row, "fetchone") else row
+                nxt = await row.fetchone()
                 if nxt:
                     nxt_id = nxt[0]
                     await conn.execute(
