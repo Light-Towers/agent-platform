@@ -6,7 +6,7 @@
 
 from shared_schemas.health import DependencyHealth, HealthResponse, HealthStatus
 from shared_schemas.intent import IntentCandidate, IntentResult
-from shared_schemas.query import QueryData, QueryRequest, QueryResponse
+from shared_schemas.query import Priority, QueryData, QueryRequest, QueryResponse
 from shared_schemas.subagent import SubagentCall, SubagentResult
 
 __all__ = [
@@ -15,6 +15,7 @@ __all__ = [
     "HealthStatus",
     "IntentCandidate",
     "IntentResult",
+    "Priority",
     "QueryData",
     "QueryRequest",
     "QueryResponse",

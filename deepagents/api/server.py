@@ -21,6 +21,14 @@ from agent_core.tracing import init_tracing, start_span
 
 logger = get_logger(__name__)
 
+# 持有后台任务引用，避免 CPython 在任务完成前回收 coroutine frame 导致静默丢失
+_background_tasks: set[asyncio.Task] = set()
+
+
+def _track_task(task: asyncio.Task) -> None:
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+
 current_dir = Path(__file__).resolve().parent
 project_root = current_dir.parent
 
@@ -163,7 +171,7 @@ async def run_task(request: TaskRequest):
             async with _concurrency_semaphore:
                 await run_deep_agent(request.query, thread_id)
 
-        asyncio.create_task(_run())
+        _track_task(asyncio.create_task(_run()))
         return {"status": "started", "thread_id": thread_id}
 
 

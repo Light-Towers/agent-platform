@@ -1,20 +1,61 @@
-"""API 层 Pydantic 契约（类型安全，防幻觉式字段拼写）。"""
+"""API 层 Pydantic 契约（类型安全，防幻觉式字段拼写）。
+
+app 的查询/健康契约统一接入联邦网关的 shared_schemas，成为唯一事实来源：
+- QueryRequest / HealthResponse 直接复用 shared_schemas，并向后兼容旧客户端
+  字段名（question→query、thread_id→session_id）通过 AliasChoices 双写接受。
+- 其余 app 内部专用类型（CoordinationDecision / AdmissionDecision / McpServerConfig
+  等）仍本文件定义，不属于跨服务联邦契约。
+"""
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
+from shared_schemas import (
+    HealthResponse as BaseHealthResponse,
+)
+from shared_schemas import (
+    Priority,
+)
+from shared_schemas import (
+    QueryRequest as BaseQueryRequest,
+)
+
+# 重新导出联邦类型，供 app 内部（routes.py 等）从 app.schemas 统一引用
+__all__ = ["Capability", "HealthResponse", "Priority", "QueryRequest"]
 
 Capability = Literal["search", "rag", "sql", "direct", "mcp"]
 
-Priority = Literal["high", "normal", "low"]
 
+class QueryRequest(BaseQueryRequest):
+    """联邦统一查询请求 + app 向后兼容别名。
 
-class QueryRequest(BaseModel):
-    question: str = Field(min_length=1, max_length=2000)
-    # 仅在未启用 API_KEY 认证时生效；启用认证时服务端忽略该值（防会话劫持）
-    thread_id: str | None = None
-    user_id: str = "default"
-    priority: Priority = "normal"
+    入站 JSON 同时接受网关标准名（query/session_id）与旧客户端名
+    （question/thread_id）；内部统一以标准名（query/session_id）存储，
+    routes.py 使用标准名访问。user_id/priority 沿用基类可选字段，
+    app 仅覆盖默认值（user_id 默认 "default"、priority 默认 "normal"）。
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    # 覆盖基类字段，使 query 同时接受旧字段名 question（入站双写兼容）
+    query: str = Field(
+        ...,
+        min_length=1,
+        max_length=2000,
+        validation_alias=AliasChoices("query", "question"),
+        serialization_alias="query",
+        description="用户查询文本（兼容旧字段名 question）",
+    )
+    # 覆盖基类字段，使 session_id 同时接受旧字段名 thread_id
+    session_id: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("session_id", "thread_id"),
+        serialization_alias="session_id",
+        description="会话 ID（兼容旧字段名 thread_id）",
+    )
+    # app 业务默认值：未传 user_id 时记为 default（基类为 None）
+    user_id: str = Field(default="default")
+    priority: Priority = Field(default="normal")
 
 
 class ImportResponse(BaseModel):
@@ -36,17 +77,13 @@ class SqlTrainResponse(BaseModel):
     example_stored: bool = False
 
 
-class HealthResponse(BaseModel):
-    status: str
-    storage: Literal["postgres", "memory"]
-    llm: bool
-    search: bool
-    sql_backend: str
-    coordination: bool = False
-    admission: bool = False
-    revert: bool = False
-    otel: bool = False
-    mcp: bool = False
+class HealthResponse(BaseHealthResponse):
+    """联邦统一健康检查响应 + app 能力标志。
+
+    复用 shared_schemas.HealthResponse（status: HealthStatus enum / version /
+    dependencies），app 独有能力标志（coordination/admission/revert/...）已在
+    共享契约中以可选字段提供，此处仅做显式再导出以保持对外形态一致。
+    """
 
 
 class RevertRequest(BaseModel):
