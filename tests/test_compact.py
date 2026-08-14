@@ -1,6 +1,7 @@
 """上下文压缩 compact 测试。"""
 
 import pytest
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from app.agent.compact import (
     _KEEP_RECENT,
@@ -8,7 +9,6 @@ from app.agent.compact import (
     estimate_tokens,
     should_compact,
 )
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 
 class _MockLLM:

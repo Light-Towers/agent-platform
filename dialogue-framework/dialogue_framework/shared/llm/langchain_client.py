@@ -1,6 +1,7 @@
 """LLM 客户端：复用 agent_core.llm.fallback.FallbackChatModel + dialogue-framework 配置。"""
 
 from agent_core.llm.fallback import FallbackChatModel
+
 from dialogue_framework.shared.config import get_settings
 
 

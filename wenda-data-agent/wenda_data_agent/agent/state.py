@@ -18,3 +18,5 @@ class DataAgentState(TypedDict, total=False):
     result: Any
     answer: str
     correct_count: int
+    context: Any
+    llm: Any

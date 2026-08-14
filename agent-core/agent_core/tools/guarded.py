@@ -13,6 +13,7 @@
 框架无关：仅 stdlib + 自带 agent_core.logging + agent_core.tracing（均懒导入降级）。
 """
 
+import asyncio
 import concurrent.futures
 from typing import Any, Callable, Dict, Optional
 
@@ -43,11 +44,20 @@ def guarded_invoke(
     :param channel: 通道名（用于日志与 span 标识，可空）
     :return: 工具返回的 dict；超时 / 异常 / 非 dict 一律归一为 {}
     """
-    invoke = getattr(tool, "invoke", None)
-    if invoke is not None:
-        future = _EXECUTOR.submit(invoke, state)
-    else:
-        future = _EXECUTOR.submit(tool, state)
+    def _run() -> Any:
+        inv = getattr(tool, "invoke", None)
+        if inv is None:
+            inv = tool
+        res = inv(state)
+        if asyncio.iscoroutine(res):
+            # 在线程池子线程内执行 coroutine（此处无 running loop，可 asyncio.run），
+            # 并用 wait_for 施加超时——保证 async 工具也受 guard 超时约束，
+            # 且不会把 coroutine 抛回调用者线程（后者若在事件循环中会因
+            # "loop already running" 静默失败，导致工具从未真正执行）。
+            res = asyncio.run(asyncio.wait_for(res, timeout=timeout_s))
+        return res
+
+    future = _EXECUTOR.submit(_run)
     try:
         result = future.result(timeout=timeout_s)
         return result if isinstance(result, dict) else {}

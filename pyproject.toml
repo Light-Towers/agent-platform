@@ -50,7 +50,12 @@ addopts = "--import-mode=importlib"
 
 [tool.ruff]
 line-length = 100
-target-version = "py310"
+target-version = "py311"
+
+[tool.ruff.lint]
+# B008: FastAPI 在依赖注入（Depends(...)）中于函数默认参数位置调用是官方推荐写法，
+# 非真实 bug；全项目大量使用，CI 门禁误报。忽略以让 ruff check 通过。
+ignore = ["B008"]
 
 [tool.uv.sources]
 agent-core = { path = "./agent-core", editable = true }

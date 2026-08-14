@@ -44,13 +44,29 @@ class RevertHandler:
                     error="CHECKPOINT_NOT_FOUND",
                 )
 
-            source_checkpoint_id = getattr(tpl, "parent_config", {}).get(
+            # parent_config 属性可能存在但值为 None（LangGraph checkpoint tuple 常见情况），
+            # 必须先 or {} 再 .get，否则 None.get(...) 抛 AttributeError 被外层吞成 REVERT_FAILED
+            source_checkpoint_id = (getattr(tpl, "parent_config", None) or {}).get(
                 "configurable", {}
             ).get("checkpoint_id", "")
 
-            # 原子回退：更新会话当前指针为目标 checkpoint
-            # LangGraph checkpointer 已支持 checkpoint_id 定位，revert 即用目标 checkpoint 配置接续
-            # 不删除历史 checkpoint（redo 语义）
+            # 原子回退：写入「新」checkpoint 作为最新指针，内容为目标 checkpoint 状态。
+            # 关键：必须生成新 id，否则 aput 会按 checkpoint["id"] 原地 UPSERT 覆写
+            # 目标行（langgraph MemorySaver/PostgresSaver 均以 checkpoint["id"] 为 key），
+            # 会话最新指针不变 → success=True 但状态未回退（静默 no-op）。
+            new_checkpoint = {**tpl.checkpoint, "id": str(uuid.uuid4())}
+            await self._checkpointer.aput(
+                {
+                    "configurable": {
+                        "thread_id": session_id,
+                        "checkpoint_id": new_checkpoint["id"],
+                        "parent_checkpoint_id": checkpoint_id,
+                    }
+                },
+                new_checkpoint,
+                {**tpl.metadata, "reverted_from": checkpoint_id},
+                {},
+            )
 
             # 生成上下文摘要
             messages = getattr(tpl, "channel_values", {}).get("messages", [])
@@ -76,7 +92,7 @@ class RevertHandler:
                 context_summary=context_summary,
             )
 
-        except Exception as e:
+        except Exception:
             self._logger.warning(
                 "revert failed session=%s checkpoint=%s",
                 session_id,

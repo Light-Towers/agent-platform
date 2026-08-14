@@ -13,6 +13,7 @@ from shared_schemas import HealthResponse, HealthStatus, QueryRequest, QueryResp
 
 from dialogue_framework.agent.agent import DialogueAgent
 from dialogue_framework.agent.message_processor import MessageProcessor
+from dialogue_framework.core.stores.tracker_store import build_store
 from dialogue_framework.shared.config import get_settings
 
 logger = get_logger(__name__)
@@ -21,7 +22,8 @@ logger = get_logger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
-    agent = DialogueAgent()
+    store = await build_store()
+    agent = DialogueAgent(store=store)
     app.state.processor = MessageProcessor(agent=agent)
     app.state.settings = settings
     logger.info(

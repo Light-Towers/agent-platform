@@ -21,5 +21,5 @@ minio_config = MinIOConfig(
     secret_key=settings.minio_secret_key,
     bucket_name=settings.minio_bucket_name,
     minio_img_dir=settings.minio_img_dir,
-    minio_secure=settings.minio_secure == "True",
+    minio_secure=settings.minio_secure == "True" or settings.minio_secure == "true",
 )

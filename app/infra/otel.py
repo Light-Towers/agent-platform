@@ -18,8 +18,8 @@ logger = logging.getLogger(__name__)
 # 可选导入 opentelemetry
 try:
     from opentelemetry import trace
-    from opentelemetry.sdk.trace import TracerProvider
     from opentelemetry.sdk.resources import Resource
+    from opentelemetry.sdk.trace import TracerProvider
     from opentelemetry.sdk.trace.sampling import (
         ALWAYS_ON,
         TraceIdRatioBasedSampler,
@@ -137,7 +137,6 @@ def parse_traceparent(header: str | None):
         from opentelemetry.trace.propagation.tracecontext import (
             TraceContextFormat,
         )
-        from opentelemetry import context as otel_context
 
         ctx = TraceContextFormat().extract({"traceparent": header})
         return ctx

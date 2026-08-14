@@ -26,7 +26,7 @@ class MongoHistoryStore:
     def __init__(self, mongo_url: str, db_name: str, collection: str = "chat_message") -> None:
         # pymongo 为可选依赖：懒导入，缺包时给出明确错误。
         try:
-            from pymongo import MongoClient, ASCENDING
+            from pymongo import MongoClient, ASCENDING, DESCENDING
             from bson import ObjectId
         except Exception as e:  # pragma: no cover - 依赖缺失路径
             raise ImportError(
@@ -35,6 +35,7 @@ class MongoHistoryStore:
 
         self._ObjectId = ObjectId
         self._ASCENDING = ASCENDING
+        self._DESCENDING = DESCENDING
         try:
             self.client = MongoClient(mongo_url)
             self.db = self.client[db_name]
@@ -82,10 +83,16 @@ class MongoHistoryStore:
         return str(result.inserted_id)
 
     def get_recent(self, session_id: str, limit: int = 10) -> List[Dict[str, Any]]:
-        """查询指定会话最近 ``limit`` 条记录（按 ts 升序），失败返回空列表。"""
+        """查询指定会话最近 ``limit`` 条记录（按 ts 升序返回），失败返回空列表。"""
         try:
-            cursor = self.collection.find({"session_id": session_id}).sort("ts", self._ASCENDING).limit(limit)
-            return list(cursor)
+            cursor = (
+                self.collection.find({"session_id": session_id})
+                .sort("ts", self._DESCENDING)
+                .limit(limit)
+            )
+            rows = list(cursor)
+            rows.reverse()
+            return rows
         except Exception as e:
             logger.error("Error getting recent messages: %s", e)
             return []
@@ -125,6 +132,14 @@ class MongoHistoryStore:
         except Exception as e:
             logger.error("Error updating history messages: %s", e)
             return 0
+
+    def close(self) -> None:
+        """关闭 MongoDB 连接，释放连接池资源。"""
+        try:
+            self.client.close()
+            logger.info("MongoDB connection closed")
+        except Exception as e:
+            logger.error("Error closing MongoDB connection: %s", e)
 
 
 __all__ = ["MongoHistoryStore"]

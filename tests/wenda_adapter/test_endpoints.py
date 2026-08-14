@@ -23,8 +23,8 @@ def test_query_empty_body():
 def test_query_upstream_200():
     import main
 
-    sse_body = 'data: {"type": "result", "data": {"answer": "42"}}\n\n'
-    mock = _make_mock_client(lambda req: httpx.Response(200, text=sse_body))
+    json_body = {"answer": "42", "latency_ms": 5.0}
+    mock = _make_mock_client(lambda req: httpx.Response(200, json=json_body))
 
     with TestClient(main.app) as tc:
         main._client = mock
@@ -66,11 +66,11 @@ def test_query_connect_error():
         assert body["fallback"] is True
 
 
-def test_query_sse_error():
+def test_query_json_error():
     import main
 
-    sse_body = 'data: {"type": "error", "message": "upstream boom"}\n\n'
-    mock = _make_mock_client(lambda req: httpx.Response(200, text=sse_body))
+    json_body = {"answer": "", "error": "upstream boom"}
+    mock = _make_mock_client(lambda req: httpx.Response(200, json=json_body))
 
     with TestClient(main.app) as tc:
         main._client = mock

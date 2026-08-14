@@ -1,7 +1,8 @@
 """LLM 客户端：复用 agent_core.llm.fallback.FallbackChatModel + app 配置。"""
 
-from app.config import get_settings
 from agent_core.llm.fallback import FallbackChatModel
+
+from app.config import get_settings
 
 
 def build_chat_model() -> FallbackChatModel | None:

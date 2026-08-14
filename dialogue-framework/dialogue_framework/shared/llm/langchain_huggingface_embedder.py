@@ -6,6 +6,7 @@
 """
 
 from agent_core.llm.embedding import LangchainHuggingfaceEmbedder as _CoreHFEmbedder
+
 from dialogue_framework.shared.config import get_settings
 from dialogue_framework.shared.llm.langchain_openai_embedder import LangchainOpenAIEmbedder
 
