@@ -168,3 +168,26 @@ async def ping() -> bool:
         return True
     except Exception:  # noqa: BLE001 健康检查必须吞异常
         return False
+
+
+async def vector_search(
+    pool,
+    table: str,
+    cols: str,
+    embedding: list[float],
+    k: int = 1,
+    where: str = "embedding IS NOT NULL",
+    where_params: tuple = (),
+) -> list[tuple]:
+    """pgvector 余弦距离向量检索（app 包内通用）。
+
+    SQL: SELECT {cols} FROM {table} WHERE {where} ORDER BY embedding <=> %s LIMIT %s
+    """
+    sql = (
+        f"SELECT {cols} FROM {table} WHERE {where} "
+        f"ORDER BY embedding <=> %s LIMIT %s"
+    )
+    params = (*where_params, embedding, k)
+    async with pool.connection() as conn:
+        cur = await conn.execute(sql, params)
+        return await cur.fetchall()

@@ -4,6 +4,7 @@
 不依赖已归档的 vanna 包，训练数据统一存 pgvector，按语义相似度召回。
 """
 
+from app.infra.db import vector_search
 from app.rag.embed import embed_query, embed_texts
 
 
@@ -39,13 +40,7 @@ async def fetch_context(pool, question: str, k: int = 3) -> dict:
     embedding = await embed_query(question)
 
     async def _top(table: str, cols: str) -> list:
-        async with pool.connection() as conn:
-            cur = await conn.execute(
-                f"SELECT {cols} FROM {table} WHERE embedding IS NOT NULL "
-                f"ORDER BY embedding <=> %s LIMIT %s",
-                (embedding, k),
-            )
-            return await cur.fetchall()
+        return await vector_search(pool, table, cols, embedding, k=k)
 
     ddl_rows = await _top("sql_ddl", "content")
     doc_rows = await _top("sql_docs", "content")
