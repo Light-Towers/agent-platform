@@ -10,6 +10,7 @@ import uuid
 from rank_bm25 import BM25Okapi
 
 from app.config import get_settings
+from app.infra.db import vector_search
 from app.rag.chunker import Chunk
 from app.rag.embed import embed_query, embed_texts
 
@@ -55,13 +56,7 @@ async def add_document(pool, source: str, chunks: list[Chunk]) -> str:
 
 
 async def _vector_ids(pool, embedding: list[float], k: int) -> list[int]:
-    sql = (
-        "SELECT id FROM chunks WHERE embedding IS NOT NULL "
-        "ORDER BY embedding <=> %s LIMIT %s"
-    )
-    async with pool.connection() as conn:
-        cur = await conn.execute(sql, (embedding, k))
-        rows = await cur.fetchall()
+    rows = await vector_search(pool, "chunks", "id", embedding, k=k)
     return [r[0] for r in rows]
 
 
