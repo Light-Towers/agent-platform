@@ -138,6 +138,12 @@ async def query(
                 "status": "rejected",
                 "reason": decision.reason,
             })
+            # 必须在 return 前清理：否则 _states[rid] 残留 "rejected" 且 DB 行
+            # 仍是 "queued" → count(admitted+queued) 永久含该记录，容量泄漏，
+            # 直到进程重启 recover_on_startup 才清。mark_completed 会 pop 内存
+            # 状态并把 DB 行标 completed，释放容量。能走到本分支即说明 admission
+            # 已启用且队列满，admission_queue 必非空。
+            await admission_queue.mark_completed(request_id)
             return
         if decision is not None and decision.status == "admitted":
             yield _sse({

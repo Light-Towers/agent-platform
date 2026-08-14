@@ -75,7 +75,7 @@ async def compact_messages(messages: list[Any], llm) -> tuple[list[Any], str | N
             ]
         )
         summary = raw.content if hasattr(raw, "content") else str(raw)
-    except Exception as exc:  # noqa: BLE001 压缩失败不阻塞主链路
+    except Exception as exc:
         logger.warning("上下文压缩失败，保留原始消息: %s", exc)
         return messages, f"COMPACTION_FAILED: {exc}"
 

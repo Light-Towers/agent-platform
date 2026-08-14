@@ -115,7 +115,7 @@ async def text_to_sql(pool, question: str, llm=None) -> dict:
 
     try:
         result = await execute_readonly(safe_sql, settings.sql_max_rows)
-    except Exception as exc:  # noqa: BLE001 执行错误转成结构化结果返回给上层
+    except Exception as exc:
         return {
             "question": question,
             "context_found": context_found,
