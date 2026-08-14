@@ -2,19 +2,18 @@
 name = "kefu-service"
 version = "0.1.0"
 description = "kefu 从 atguigu_ai 迁移到 deepagents + LangGraph（Phase 7）"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
+    "agent-core",
     "fastapi>=0.129.0",
     "uvicorn>=0.41.0",
     "langgraph>=1.2.10",
     "pydantic>=2.13.0",
 ]
 
-[project.optional-dependencies]
-agent-core = [
-    "agent-core @ file:///${PROJECT_ROOT}/../agent-core",
-]
-
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.uv.sources]
+agent-core = { path = "../agent-core", editable = true }

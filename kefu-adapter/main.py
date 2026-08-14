@@ -64,7 +64,7 @@ async def query(body: dict):
             import sys
             from pathlib import Path
             sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "deepagents"))
-            from agent.tracing.trace_propagation import inject_traceparent
+            from agent_core.tracing_propagation import inject_traceparent
             upstream_headers = inject_traceparent(upstream_headers)
         except Exception:
             logger.warning("traceparent 注入失败", exc_info=True)
