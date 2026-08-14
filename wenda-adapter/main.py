@@ -109,7 +109,7 @@ async def query(body: dict):
     try:
         upstream_headers: dict[str, str] = {}
         try:
-            from agent.tracing.trace_propagation import inject_traceparent
+            from agent_core.tracing_propagation import inject_traceparent
             upstream_headers = inject_traceparent(upstream_headers)
         except Exception:  # noqa: BLE001
             logger.warning("traceparent 注入失败", exc_info=True)
