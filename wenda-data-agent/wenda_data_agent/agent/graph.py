@@ -25,6 +25,8 @@ from wenda_data_agent.agent.state import DataAgentState
 def _route_after_validate(state: dict[str, Any]) -> str:
     if state.get("sql_valid", False):
         return "execute_sql"
+    if state.get("correct_count", 0) >= state.get("sql_max_correct_retries", 3):
+        return "execute_sql"
     return "correct_sql"
 
 
@@ -69,7 +71,7 @@ def build_graph():
         _route_after_validate,
         {"execute_sql": "execute_sql", "correct_sql": "correct_sql"},
     )
-    graph.add_edge("correct_sql", "execute_sql")
+    graph.add_edge("correct_sql", "validate_sql")
     graph.add_edge("execute_sql", END)
 
     return graph.compile()

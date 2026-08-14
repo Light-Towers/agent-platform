@@ -1,7 +1,5 @@
 """Postgres 客户端管理：psycopg AsyncConnectionPool。"""
 
-from typing import Any
-
 from agent_core.logging import get_logger
 from psycopg import AsyncConnectionPool
 
@@ -37,14 +35,3 @@ class PostgresClientManager:
         if self._pool is None:
             raise RuntimeError("pool not connected, call connect() first")
         return self._pool
-
-    async def execute(self, sql: str, params: tuple | None = None) -> Any:
-        async with self.pool.connection() as conn:
-            cur = await conn.execute(sql, params)
-            return await cur.fetchall()
-
-    async def execute_readonly(self, sql: str, params: tuple | None = None) -> Any:
-        async with self.pool.connection() as conn:
-            await conn.execute("SET default_transaction_read_only = on")
-            cur = await conn.execute(sql, params)
-            return await cur.fetchall()
