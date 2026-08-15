@@ -1,4 +1,5 @@
 import json
+import os
 from minio import Minio
 
 from app.conf.minio_config import minio_config
@@ -13,7 +14,7 @@ try:
         endpoint=minio_config.endpoint,
         access_key=minio_config.access_key,
         secret_key=minio_config.secret_key,
-        secure=False,  # 内网/本地部署用HTTP，公网部署需改为True并配置SSL
+        secure=minio_config.minio_secure,  # 从 MINIO_SECURE 环境变量读取
     )
     bucket_name = minio_config.bucket_name
 
@@ -25,20 +26,23 @@ try:
     else:
         logger.info(f"MinIO存储桶[{bucket_name}]已存在，无需重复创建")
 
-    # 配置存储桶公网只读策略：允许匿名用户通过URL直接访问桶内文件
-    bucket_policy = {
-        "Version": "2012-10-17",
-        "Statement": [
-            {
-                "Effect": "Allow",
-                "Principal": {"AWS": ["*"]},  # *表示所有匿名用户（S3兼容标识）
-                "Action": ["s3:GetObject"],  # 仅授权文件获取/访问操作
-                "Resource": [f"arn:aws:s3:::{bucket_name}/*"],
-            }
-        ],
-    }
-    minio_client.set_bucket_policy(bucket_name, json.dumps(bucket_policy))
-    logger.info(f"MinIO存储桶[{bucket_name}]已配置公网只读策略，支持匿名URL访问")
+    # 公网只读策略：默认关闭（安全），设 MINIO_PUBLIC_READ=true 开启匿名 URL 访问
+    if os.getenv("MINIO_PUBLIC_READ", "false").lower() == "true":
+        bucket_policy = {
+            "Version": "2012-10-17",
+            "Statement": [
+                {
+                    "Effect": "Allow",
+                    "Principal": {"AWS": ["*"]},  # *表示所有匿名用户（S3兼容标识）
+                    "Action": ["s3:GetObject"],  # 仅授权文件获取/访问操作
+                    "Resource": [f"arn:aws:s3:::{bucket_name}/*"],
+                }
+            ],
+        }
+        minio_client.set_bucket_policy(bucket_name, json.dumps(bucket_policy))
+        logger.info(f"MinIO存储桶[{bucket_name}]已配置公网只读策略，支持匿名URL访问")
+    else:
+        logger.info(f"MinIO存储桶[{bucket_name}]未启用公网只读（设 MINIO_PUBLIC_READ=true 开启）")
 
 except Exception as e:
     # 捕获初始化异常，记录错误日志并置空客户端

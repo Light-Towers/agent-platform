@@ -5,7 +5,6 @@ from typing import Any
 
 from fastapi import WebSocket
 
-import utils._path_setup  # noqa: F401 — agent-core sys.path
 from api.context import get_thread_context
 
 try:

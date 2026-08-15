@@ -4,20 +4,21 @@
 的 API 请求/响应均使用此包定义的 schema，确保跨服务类型安全。
 """
 
-from shared_schemas.query import QueryRequest, QueryResponse, QueryData
-from shared_schemas.health import HealthResponse, HealthStatus, DependencyHealth
-from shared_schemas.intent import IntentResult, IntentCandidate
+from shared_schemas.health import DependencyHealth, HealthResponse, HealthStatus
+from shared_schemas.intent import IntentCandidate, IntentResult
+from shared_schemas.query import Priority, QueryData, QueryRequest, QueryResponse
 from shared_schemas.subagent import SubagentCall, SubagentResult
 
 __all__ = [
-    "QueryRequest",
-    "QueryResponse",
-    "QueryData",
+    "DependencyHealth",
     "HealthResponse",
     "HealthStatus",
-    "DependencyHealth",
-    "IntentResult",
     "IntentCandidate",
+    "IntentResult",
+    "Priority",
+    "QueryData",
+    "QueryRequest",
+    "QueryResponse",
     "SubagentCall",
     "SubagentResult",
 ]

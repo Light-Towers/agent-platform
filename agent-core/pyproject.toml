@@ -50,6 +50,10 @@ memory-mongo = [
 tools-mcp = [
     "openai-agents",
 ]
+# SQL 白名单守卫
+sql = [
+    "sqlglot>=25.0",
+]
 
 [tool.ruff]
 line-length = 120

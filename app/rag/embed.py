@@ -16,7 +16,7 @@ def _mock_embed(text: str, dim: int) -> list[float]:
     vec = []
     counter = 0
     while len(vec) < dim:
-        digest = hashlib.sha256(f"{text}:{counter}".encode("utf-8")).digest()
+        digest = hashlib.sha256(f"{text}:{counter}".encode()).digest()
         vec.extend(b / 255.0 - 0.5 for b in digest)
         counter += 1
     vec = vec[:dim]
@@ -46,7 +46,13 @@ async def embed_texts(texts: list[str]) -> list[list[float]]:
             json={"model": settings.embedding_model, "input": texts},
         )
         resp.raise_for_status()
-        data = sorted(resp.json()["data"], key=lambda d: d["index"])
+        payload = resp.json()
+        data = payload.get("data")
+        if not data:
+            # Embedding API 返回 200 但 body 缺 "data" 键或为空（错误格式），
+            # 抛语义化错误而非 KeyError，便于上层结构化捕获
+            raise ValueError(f"Embedding API 返回格式异常（缺 data 字段）: {payload}")
+        data = sorted(data, key=lambda d: d["index"])
         return [d["embedding"] for d in data]
 
 

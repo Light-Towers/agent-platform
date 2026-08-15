@@ -80,7 +80,7 @@ CREATE TABLE IF NOT EXISTS admission_queue (
     queue_position INTEGER,
     rejection_reason TEXT
 );
-CREATE INDEX IF NOT EXISTS idx_admission_status_priority ON admission_queue (status, priority DESC, created_at);
+CREATE INDEX IF NOT EXISTS idx_admission_status_priority ON admission_queue (status, created_at);
 CREATE INDEX IF NOT EXISTS idx_admission_session ON admission_queue (session_id);
 CREATE INDEX IF NOT EXISTS idx_admission_user ON admission_queue (user_id);
 
@@ -128,7 +128,7 @@ async def init_pool():
         pool = AsyncConnectionPool(
             conninfo=settings.database_url,
             min_size=1,
-            max_size=8,
+            max_size=settings.db_pool_max_size,  # 可配置，默认 20，避免高并发池耗尽
             kwargs={"autocommit": True},
             configure=register_vector,
             open=False,
@@ -166,5 +166,40 @@ async def ping() -> bool:
         async with _pool.connection() as conn:
             await conn.execute("SELECT 1")
         return True
-    except Exception:  # noqa: BLE001 健康检查必须吞异常
+    except Exception:
         return False
+
+
+async def vector_search(
+    pool,
+    table: str,
+    cols: str,
+    embedding: list[float],
+    k: int = 1,
+    where: str = "embedding IS NOT NULL",
+    where_params: tuple = (),
+) -> list[tuple]:
+    """pgvector 余弦距离向量检索（app 包内通用）。
+
+    SQL: SELECT {cols} FROM {table} WHERE {where} ORDER BY embedding <=> %s LIMIT %s
+
+    安全：table/cols 经标识符白名单校验（仅含 [a-z0-9_]，列名逗号分隔），
+    拒绝任意字符串注入，避免误用导致的 SQL 注入式表名/列名。
+    """
+    import re
+
+    _IDENT = re.compile(r"^[a-z_][a-z0-9_]*$")
+    if not _IDENT.match(table or ""):
+        raise ValueError(f"vector_search: 非法表名 {table!r}（仅允许 [a-z0-9_]）")
+    for _col in cols.split(","):
+        _col = _col.strip()
+        if not _col or not _IDENT.match(_col):
+            raise ValueError(f"vector_search: 非法列名 {cols!r}（仅允许 [a-z0-9_]，逗号分隔）")
+    sql = (
+        f"SELECT {cols} FROM {table} WHERE {where} "
+        f"ORDER BY embedding <=> %s LIMIT %s"
+    )
+    params = (*where_params, embedding, k)
+    async with pool.connection() as conn:
+        cur = await conn.execute(sql, params)
+        return await cur.fetchall()

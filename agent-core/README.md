@@ -15,6 +15,7 @@
 | `agent_core.llm` | register_provider / get_llm_client / BaseLLMProvider | 协议层纯 stdlib（openai 适配器 extra `llm-openai`） |
 | `agent_core.memory` | ConversationMemory / MongoHistoryStore | base 纯 stdlib；mongo 实现 extra `memory-mongo` |
 | `agent_core.tools` | Tool / ToolRegistry / guarded_invoke / wrap_tool / MCPToolAdapter | base/registry/guarded 纯 stdlib；mcp 适配器 extra `tools-mcp` |
+| `agent_core.resilience` | retry / timeout / CircuitBreaker / validate_config | 纯 stdlib |
 
 ## 安装
 

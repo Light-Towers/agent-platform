@@ -8,14 +8,14 @@ GraphRAG → 知识库检索子 Agent，atguigu_ai Tracker → LangGraph State�
 
 from __future__ import annotations
 
-from fastapi import FastAPI
-
-from agent.state import KefuState
 from agent.graph import build_kefu_graph
+from agent.state import KefuState
+from fastapi import FastAPI
+from langgraph.checkpoint.memory import InMemorySaver
 
 app = FastAPI(title="kefu-service", version="0.1.0")
 
-_kefu_graph = build_kefu_graph()
+_kefu_graph = build_kefu_graph(checkpointer=InMemorySaver())
 
 
 @app.get("/health")
@@ -45,16 +45,22 @@ async def handle_message(request: dict):
         "user_message": user_message,
         "session_id": session_id,
         "tenant_id": tenant_id,
-        "intent": None,
-        "slots": {},
-        "flow_state": None,
-        "response": None,
-        "history": [],
     }
 
     result = await _kefu_graph.ainvoke(initial_state, config=config)
-    return {
-        "answer": result.get("response", ""),
-        "intent": result.get("intent"),
-        "session_id": session_id,
-    }
+    answer = result.get("response", "")
+    intent = result.get("intent")
+    # 对齐 atguigu_ai /api/messages 契约：返回 List[MessageResponse]（list-of-{text,buttons}）
+    # kefu-adapter 期望 list-of-{text}，dict 会被 for msg in dict 迭代 keys(str) 导致 AttributeError。
+    messages = []
+    if answer:
+        messages.append({"recipient_id": session_id, "text": answer})
+    if intent:
+        # 将意图信息附带在 custom 字段，适配器忽略但不崩溃
+        if messages:
+            messages[0]["custom"] = {"intent": intent}
+        else:
+            messages.append(
+                {"recipient_id": session_id, "text": "", "custom": {"intent": intent}}
+            )
+    return messages

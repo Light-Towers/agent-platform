@@ -24,6 +24,6 @@ def get_langfuse_callbacks() -> list:
             host=settings.langfuse_host,
         )
         return [handler]
-    except Exception:  # noqa: BLE001 tracing 失败不影响主链路
+    except Exception:
         logger.warning("Langfuse 初始化失败，已降级为无 trace 模式")
         return []

@@ -91,7 +91,10 @@ class MCPToolAdapter:
             return {}
 
         try:
-            result = asyncio.run(self._call(query, state))
+            # _call 是 async 流程，在同步 invoke 体内用 asyncio.run 包裹（已在
+            # guarded 线程池子线程执行，无 running loop）；用 wait_for 施加超时，
+            # 与 guarded 的超时语义保持一致。
+            result = asyncio.run(asyncio.wait_for(self._call(query, state), timeout=self.timeout_s))
         except Exception as e:  # noqa: BLE001
             logger.error("MCP 适配器调用异常 %s: %s", self.name, e)
             result = None

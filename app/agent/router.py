@@ -58,7 +58,7 @@ async def decide_route(llm, question: str) -> RouteDecision:
             if decision.capability == "mcp" and not get_settings().mcp_enabled:
                 return heuristic_route(question)
             return decision
-    except Exception:  # noqa: BLE001 结构化失败回退启发式
+    except Exception:
         pass
     return heuristic_route(question)
 
