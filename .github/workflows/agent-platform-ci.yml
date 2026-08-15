@@ -20,7 +20,6 @@ on:
       - "zhanggui-zhiku/**"
       - "courses/**"
       - "wenda-adapter/**"
-      - "kefu-adapter/**"
       - "kefu-service/**"
   pull_request:
     paths:
@@ -41,7 +40,6 @@ on:
       - "zhanggui-zhiku/**"
       - "courses/**"
       - "wenda-adapter/**"
-      - "kefu-adapter/**"
       - "kefu-service/**"
 
 jobs:

@@ -381,13 +381,11 @@ shared-schemas/            # deepagents 联邦 4 服务共享的 Pydantic 契约
 ### 业务 / 适配 sibling 包
 
 ```
-kefu-adapter/              # ⚠️ 已弃用：atguigu_ai 老系统 REST → 统一 QueryResponse 适配层（:8002）
-                          #   —— 经 KEFU_API_URL(默认 :5005) 桥接**外部** atguigu_ai（仓库内无此代码，glob 命中 0）
-                          #   —— kefu-service 已提供 /invoke(QueryResponse)，网关 KEFU_USE_ADAPTER=false 即直连，
-                          #      adapter 仅 atguigu_ai 退役前过渡保留（见问题 3/4）
 kefu-service/              # kefu 迁移版（deepagents + LangGraph），已实现且 CI 通过，已接入网关
                           #   —— 提供 Agent Protocol 兼容 /invoke（返回 QueryResponse）；
                           #      网关 KEFU_USE_ADAPTER=false 直连本服务（默认）
+                          #   —— 原 kefu-adapter（atguigu_ai 适配层）已于 2026-08 移除（无调用方，
+                          #      默认直连 kefu-service；外部 atguigu_ai 退役为运维动作）
 wenda-adapter/             # wenda 老系统 SSE → JSON 适配层（:8001）
 wenda-data-agent/          # Text-to-SQL 数据分析垂直场景（生产化改造自 courses/.../data-agent）
 zhanggui-zhiku/            # 掌柜智库：RAG 知识库导入 + 多路检索问答一体化服务（:8900）
@@ -424,11 +422,10 @@ tests/                     # 单元测试（40 用例，针对 app/ 平台）
 > 下列项为架构决策 / 迁移工程，需在拍板后实施，**非文档层面的简单修复**。
 
 - **U-1 · QueryRequest 入站字段名不统一（待拍板）**：`app/schemas.py:41-54` 经 `AliasChoices("query","question")` / `AliasChoices("session_id","thread_id")` 双写兼容。内部 state 与 DB 列名均为 `question`（`app/agent/graph.py`、`app/sql/schema_store.py`）。移除兼容层前须确认全部入站/出站边界已统一。*注：旧评审称 `HealthResponse` 字段集完全不同属误判——`HealthResponse` 已 `class HealthResponse(BaseHealthResponse)` 对齐联邦契约（`shared-schemas/health.py:25-40`），无需处理。*
-- **U-2 · kefu 迁移（已完成代码侧，剩余为运维动作）**：
+- **U-2 · kefu 迁移（已完成）**：
   - ✅ `kefu-service` 已升级为 Agent Protocol 兼容 server：新增 `POST /invoke`（接受 `QueryRequest`，返回 `QueryResponse`，`kefu-service/main.py` + 依赖 `shared-schemas`）；旧 `/api/messages` 保留为 atguigu_ai 兼容入口。
   - ✅ 网关 `deepagents/agent/config.py` 新增 `KEFU_SERVICE_URL` + `KEFU_USE_ADAPTER` 开关（默认 `false`，直连 `kefu-service:8003`）；`async_subagents.py` 增加 httpx 远程回退（外部 `deepagents` 包未安装时直连 `/invoke`）。
-  - ✅ `kefu-adapter` 已标记 `DeprecationWarning` 弃用。
-  - ⏳ **运维待办**：`atguigu_ai` 外部系统退役后，删除 `kefu-adapter/` 包即可（仓库内动作，无代码阻塞）。*注：原评审称「非简单改 URL 可接入」属实，但根因（缺 Agent Protocol + QueryResponse）已在本轮修复。*
+  - ✅ `kefu-adapter` 包已于 2026-08 移除（无调用方，默认直连 `kefu-service` 生效）。`deepagents/eval/run-all.py` 的 kefu 项目已改默认指向 `KEFU_SERVICE_URL`（`KEFU_ADAPTER_URL` 仍可覆盖）。*注：原评审称「非简单改 URL 可接入」属实，但根因（缺 Agent Protocol + QueryResponse）已在本轮修复。*
 
 ## 路线图
 

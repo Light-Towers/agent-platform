@@ -16,7 +16,7 @@ LLM：SiliconFlow Qwen3-32B（.env 已有 key）
 | 1 | Docker Compose 编排 | ✅ PASS | 7 服务起得来；Langfuse /health 返回 200 |
 | 2 | deepagents 主服务启动 | ✅ PASS | web 启动完成；`/api/task` 返回 `{"status":"started","thread_id":...}` |
 | 3 | WebSocket 流式对话 | ✅ PASS | 218s 完成流式对话；session_created→assistant_call→subservice_route→tool_start/outcome→task_result 全事件流正确回流 |
-| 4 | Adapters + Middleware | ✅ PASS | `TodoListMiddleware`/`RubricMiddleware` import OK；wenda/kefu-adapter 代码（SSE→JSON 适配）存在且逻辑正确 |
+| 4 | Adapters + Middleware | ✅ PASS | `TodoListMiddleware`/`RubricMiddleware` import OK；wenda-adapter 代码（SSE→JSON 适配）存在且逻辑正确（kefu-adapter 已于 2026-08 移除，迁移至 kefu-service 直连） |
 | 5 | 评测框架 | ✅ PASS | `eval.run_eval`/`judge`/`score_routing` import OK；golden 200 题；`run-all.py` 语法/加载 OK |
 | 6 | Langfuse tracing | ✅ PASS（降级） | `langfuse_adapter` import OK；`is_langfuse_enabled()=False` → agent-core OTel no-op 降级（设计内三态之一） |
 | 7 | kefu-service | ✅ PASS | `_test_m7.py`：对话 10/10 + Flow 子图 3/3 + GraphRAG 5/5，M7 验收通过 |

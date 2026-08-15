@@ -162,7 +162,11 @@ async def main_async(args: argparse.Namespace) -> None:
             adapter_url = os.getenv("WENDA_ADAPTER_URL", "http://localhost:8001")
             results = await eval_subservice(items, adapter_url)
         elif project == "kefu":
-            adapter_url = os.getenv("KEFU_ADAPTER_URL", "http://localhost:8002")
+            # kefu-adapter 已弃用并移除；默认直连 kefu-service(:8003) 的 /invoke。
+            # 仍支持 KEFU_ADAPTER_URL 显式覆盖（若外部 atguigu_ai + adapter 仍在运行）。
+            adapter_url = os.getenv("KEFU_ADAPTER_URL") or os.getenv(
+                "KEFU_SERVICE_URL", "http://localhost:8003"
+            )
             results = await eval_subservice(items, adapter_url)
         elif project == "zhiku":
             adapter_url = os.getenv("ZHIKU_API_URL", "http://localhost:8900")

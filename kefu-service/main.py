@@ -10,7 +10,7 @@ GraphRAG → 知识库检索子 Agent，atguigu_ai Tracker → LangGraph State�
     接受 graph_id + input，返回 QueryResponse），供 deepagents 联邦网关远程直连；
   - `POST /api/messages` 保留为 atguigu_ai 兼容入口（旧契约），内部复用统一核心逻辑；
   - deepagents/agent/config.py 新增 KEFU_SERVICE_URL + KEFU_USE_ADAPTER 开关，
-    置 KEFU_USE_ADAPTER=false 即直连本服务，届时即可废弃 kefu-adapter 转换层
+    置 KEFU_USE_ADAPTER=false 即直连本服务；kefu-adapter 转换层已于 2026-08 移除
     （外部 atguigu_ai 退役由运维执行）。
 """
 
