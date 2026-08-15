@@ -7,6 +7,7 @@ name = "shared-schemas"
 version = "0.1.0"
 description = "统一 Pydantic schema，deepagents 联邦网关 4 服务共享"
 requires-python = ">=3.11"
+license = { text = "Apache-2.0" }
 dependencies = [
     "pydantic>=2.13",
     "pydantic-settings>=2.0",

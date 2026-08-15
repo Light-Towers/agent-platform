@@ -3,6 +3,7 @@ name = "kefu-service"
 version = "0.1.0"
 description = "kefu 客服迁移版（deepagents + LangGraph，Agent Protocol 兼容，Phase 7）"
 requires-python = ">=3.11"
+license = { text = "Apache-2.0" }
 dependencies = [
     "agent-core",
     "shared-schemas",

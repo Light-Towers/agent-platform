@@ -8,7 +8,7 @@ version = "2.0.0"
 description = "Production-grade multi-agent orchestration: supervisor + 3 sub-agents (Tavily/MySQL/zhiku), sharing agent-core kernel."
 readme = "README.md"
 requires-python = ">=3.11"
-license = { text = "MIT" }
+license = { text = "Apache-2.0" }
 authors = [{ name = "Light-Towers" }]
 keywords = ["agent", "multi-agent", "orchestration", "langgraph", "fastapi"]
 dependencies = [

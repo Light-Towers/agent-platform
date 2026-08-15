@@ -7,6 +7,7 @@ name = "wenda-data-agent"
 version = "0.1.0"
 description = "Text-to-SQL 数据分析垂直场景（迁移自 wenda 老系统 data-agent）"
 requires-python = ">=3.11"
+license = { text = "Apache-2.0" }
 dependencies = [
     "agent-core",
     "shared-schemas",
