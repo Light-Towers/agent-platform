@@ -1,7 +1,8 @@
 """统一 Pydantic schema，deepagents 联邦网关 4 服务共享。
 
-所有子服务（wenda-adapter / zhiku / kefu-service / deepagents 网关）
+所有子服务（wenda-data-agent / zhiku / kefu-service / deepagents 网关）
 的 API 请求/响应均使用此包定义的 schema，确保跨服务类型安全。
+（原 wenda-adapter 已于 2026-08 退役，由 wenda-data-agent 直连替代。）
 """
 
 from shared_schemas.health import DependencyHealth, HealthResponse, HealthStatus

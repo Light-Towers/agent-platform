@@ -18,7 +18,6 @@ on:
       - "dialogue-framework/**"
       - "wenda-data-agent/**"
       - "zhanggui-zhiku/**"
-      - "courses/**"
       - "kefu-service/**"
   pull_request:
     paths:
@@ -37,7 +36,6 @@ on:
       - "dialogue-framework/**"
       - "wenda-data-agent/**"
       - "zhanggui-zhiku/**"
-      - "courses/**"
       - "kefu-service/**"
 
 jobs:

@@ -1,6 +1,6 @@
 # agent-platform — Agent 上下文文件
 
-> 统一生产级 Agent 平台，本仓库为 **monorepo**（10 个独立 `pyproject.toml` 工程）。
+> 统一生产级 Agent 平台，本仓库为 **monorepo**（9 个独立 `pyproject.toml` 工程：根 + app + deepagents + agent-core + shared-schemas + kefu-service + wenda-data-agent + zhanggui-zhiku + dialogue-framework）。
 > 根 `app/` 是一套单进程 Supervisor 平台；`deepagents/` 是并行的联邦网关编排系统（两者非上下级）。
 > 各包经 `agent-core` / `shared-schemas` 共享内核与契约。
 > 详细人类阅读指南见 `README.md`（含完整目录结构），本文件面向 AI agent，仅列要点。

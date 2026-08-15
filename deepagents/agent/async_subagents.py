@@ -11,8 +11,9 @@ AGENT_MODE=local 时仍用本地 subagent。
 远程调用实现说明（Phase 7 收尾已修复）：
   优先使用外部 `deepagents` 包的 `AsyncSubAgent`（graph_id+url，Agent Protocol）。
   若该包未安装（当前 .venv 未包含），自动回退到基于 httpx 的
-  `_HttpSubAgent`：POST 到子服务 URL，kefu 直连走 /invoke（返回 QueryResponse），
-  adapter 走 /api/messages。两路径对外暴露同一 `ainvoke(input)` 接口。
+  `_HttpSubAgent`：POST 到子服务各自的 endpoint（见 SubserviceConfig.endpoint），
+  例如 kefu 直连走 /invoke（返回 QueryResponse），wenda-data-agent 走 /api/query
+  （返回 SqlQueryResponse）。两路径对外暴露同一 `ainvoke(input)` 接口。
 """
 
 from __future__ import annotations
@@ -39,10 +40,11 @@ class _HttpSubAgent:
         self.name = svc.name
         self.graph_id = svc.graph_id
         self.url = svc.url
+        self.endpoint = svc.endpoint
         self.description = description
 
     async def ainvoke(self, input: dict) -> dict:
-        endpoint = "/invoke" if (self.graph_id == "customer_service" and not use_kefu_adapter()) else "/api/messages"
+        endpoint = self.endpoint
         payload = {
             "query": input.get("query", input.get("message", "")),
             "session_id": input.get("session_id"),
@@ -53,12 +55,14 @@ class _HttpSubAgent:
             resp = await client.post(self.url.rstrip("/") + endpoint, json=payload)
             resp.raise_for_status()
             data = resp.json()
-        # kefu /invoke 返回 QueryResponse(dict)；/api/messages 返回 list，
-        # 统一规整为 {"answer": ...} 供 main_agent 消费
+        # kefu /invoke 返回 QueryResponse(dict)；wenda-data-agent /api/query 返回 SqlQueryResponse(dict)；
+        # 旧 adapter /api/messages 返回 list。统一规整为 {"answer": ...} 供 main_agent 消费。
         if isinstance(data, list):
             text = " ".join(msg.get("text", "") for msg in data if isinstance(msg, dict))
             return {"answer": text}
-        return data
+        if isinstance(data, dict):
+            return {"answer": data.get("answer", ""), **data}
+        return {"answer": str(data)}
 
 
 def _build_async_subagent(key: str, description: str):
@@ -77,7 +81,7 @@ def _build_async_subagent(key: str, description: str):
 def get_remote_subagents():
     """构建 3 个远程子 Agent。
 
-    text_to_sql → wenda-adapter（Text-to-SQL）
+    text_to_sql → wenda-data-agent(:8001)/api/query（Text-to-SQL，adapter 已退役）
     rag_query   → zhiku（RAG 知识库）
     customer_service → kefu-service(:8003)/invoke（直连）或 kefu-adapter(:8002)
     """
