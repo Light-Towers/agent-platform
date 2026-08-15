@@ -1,47 +1,20 @@
-"""长期记忆：pgvector 语义召回 + 后台异步沉淀。
+"""长期记忆：pgvector 语义召回 + 后台异步沉淀（兼容门面）。
 
-写入走 spawn_background（持引用防 GC）；召回失败静默降级为空，不阻塞主链路。
+逻辑已下沉到 ``memory_backend.PgVectorMemoryBackend``。本模块保留模块级
+``recall`` / ``remember`` 函数作为稳定门面，内部委托默认后端单例，调用方
+（graph.py）无需改动。如需切换/组合后端，替换 ``memory_backend.default_backend``。
 """
 
 import logging
 
-from app.infra.cache import spawn_background
-from app.infra.db import vector_search
-from app.rag.embed import embed_query, embed_texts
+from app.memory.memory_backend import default_backend
 
 logger = logging.getLogger(__name__)
 
 
 async def recall(pool, user_id: str, question: str, k: int = 3) -> list[str]:
-    if pool is None:
-        return []
-    try:
-        embedding = await embed_query(question)
-        rows = await vector_search(
-            pool, "memories", "content", embedding, k=k,
-            where="user_id = %s AND embedding IS NOT NULL",
-            where_params=(user_id,),
-        )
-        return [r[0] for r in rows]
-    except Exception:
-        logger.exception("长期记忆召回失败，降级为空")
-        return []
+    return await default_backend.recall(pool, user_id, question, k=k)
 
 
 def remember(pool, user_id: str, content: str) -> None:
-    """非阻塞沉淀；content 为空或池不可用时跳过。"""
-    if pool is None or not content.strip():
-        return
-
-    async def _write():
-        try:
-            vec = (await embed_texts([content]))[0]
-            async with pool.connection() as conn:
-                await conn.execute(
-                    "INSERT INTO memories (user_id, content, embedding) VALUES (%s, %s, %s)",
-                    (user_id, content, vec),
-                )
-        except Exception:
-            logger.exception("长期记忆写入失败")
-
-    spawn_background(_write())
+    default_backend.remember(pool, user_id, content)
