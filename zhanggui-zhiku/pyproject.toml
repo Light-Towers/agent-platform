@@ -44,9 +44,6 @@ dependencies = [
     "agent-core",
 ]
 
-[tool.uv.sources]
-agent-core = { path = "../agent-core", editable = true }
-
 [project.scripts]
 zhanggui-zhiku = "app.main:run"
 
