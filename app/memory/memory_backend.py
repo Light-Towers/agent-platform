@@ -19,18 +19,22 @@ from app.rag.embed import embed_query, embed_texts
 
 logger = logging.getLogger(__name__)
 
+# 优化 E / P4.3 / E-3：MemoryBackend 契约下沉到内核 agent_core.memory.backend，
+# 此处 re-export 单一真相源。import 失败时回退到本地副本（S-3 回滚开关）。
+try:
+    from agent_core.memory.backend import MemoryBackend
+except Exception:  # pragma: no cover - 兜底：内核不可用时保留本地定义
+    _MemoryBackend_Local = True
 
-@runtime_checkable
-class MemoryBackend(Protocol):
-    """长期记忆后端契约。"""
+    @runtime_checkable
+    class MemoryBackend(Protocol):  # type: ignore[no-redef]
+        """长期记忆后端契约（本地回退副本）。"""
 
-    async def recall(self, pool: object, user_id: str, question: str, k: int = 3) -> list[str]:
-        """召回与 question 相关的历史记忆文本。"""
-        ...
+        async def recall(self, pool: object, user_id: str, question: str, k: int = 3) -> list[str]:
+            ...
 
-    def remember(self, pool: object, user_id: str, content: str) -> None:
-        """沉淀一条记忆（非阻塞）。"""
-        ...
+        def remember(self, pool: object, user_id: str, content: str) -> None:
+            ...
 
 
 class PgVectorMemoryBackend:
