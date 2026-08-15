@@ -34,16 +34,16 @@
 
 | 维度 | 现状 | 文件锚点 |
 |---|---|---|
-| 状态定义 | `AgentState(TypedDict)`，**无运行时校验** | `app/agent/state.py:8` |
-| 输入护栏 | 外层包裹式 `guard_input()`，PII 脱敏 + injection 检测 | `deepagents/gateway/input_guard.py:86` |
-| 长期记忆 | 单 pgvector 表 `memories`，写走 `spawn_background` | `app/memory/longterm.py:15` |
-| 依赖管理 | `uv.lock` 存在，子包用 `[tool.uv.sources]` editable | `pyproject.toml:65` |
-| 工程门禁 | `pytest`/`eval` 存在，缺统一 `Makefile` 与类型门禁 | 无 `Makefile` |
-| 编排 | `app/` 自研 Supervisor 图 vs `deepagents/` `create_deep_agent`，双轨 | `app/agent/graph.py:33` vs `deepagents/agent/main_agent.py:118` |
+| 状态定义 | `AgentState(BaseModel)`，**Pydantic 运行时校验**（优化 A 已落地） | `app/agent/state.py:21` |
+| 输入护栏 | `guard_input()` 已下沉为 `agent_core.guardrails.input_guard` 共享内核，deepagents/app 双视图统一入口 | `agent_core/guardrails/input_guard.py` |
+| 长期记忆 | `MemoryBackend` 协议 + `PgVectorMemoryBackend`（默认）+ `CompositeMemoryBackend` 预留；门面 `longterm.py` | `app/memory/memory_backend.py` |
+| 依赖管理 | `uv.lock` 存在，子包用 `[tool.uv.sources]` editable（uv workspace 成员声明暂缓，见 §4） | `pyproject.toml:65` |
+| 工程门禁 | `Makefile`（make install/lint/test/eval/ci）+ 全仓 ruff 绿 + pytest 门禁可用 | `Makefile` |
+| 编排 | `app/` 自研 Supervisor 图 vs `deepagents/` `create_deep_agent`，双轨（优化 E 独立专项，本轮不实施） | `app/agent/graph.py:33` vs `deepagents/agent/main_agent.py:118` |
 
 ## 2. 优化项清单（按优先级与风险分级）
 
-### 优化 A：`AgentState` 升级为 Pydantic BaseModel（中优先级 / 低-中风险）
+### 优化 A：`AgentState` 升级为 Pydantic BaseModel（中优先级 / 低-中风险） ✅ 已落地
 
 - **借鉴来源**：CrewAI Flows 用 `class MarketState(BaseModel)` 在 Flow 步骤间结构化传递状态；OpenAI Agents SDK 全链路 Pydantic 模型校验。
 - **当前差距**：`TypedDict` 只在静态类型检查期生效，运行时节点写入脏字段/类型错误只能等下游崩溃。
@@ -55,7 +55,7 @@
 - **测试边界**：仅需回归 `app/agent/graph.py` 全流程 + `tests/` 中 state 相关用例（约 40 用例中的 state 读写部分）。
 - **收益**：节点边界脏 state 即时暴露，减少"脏数据穿透到 synthesize"类偶发 bug。
 
-### 优化 B：输入护栏改为声明式 Middleware（中优先级 / 中风险）
+### 优化 B：输入护栏下沉为共享内核 + 双视图统一入口（中优先级 / 中风险） ✅ 已落地
 
 - **借鉴来源**：OpenAI Agents SDK 将 Guardrails 作为 Agent 一等公民；DeepAgents 用 `RubricMiddleware`/`TodoListMiddleware` 栈式横切。
 - **当前差距**：`guard_input()` 是外层包裹，与编排解耦但无法作为反思/规划链的一环，且 `app/` 视图完全无护栏。
@@ -67,7 +67,7 @@
 - **测试边界**：回归 `input_guard` 既有单测（若有）+ 新增 middleware 挂载冒烟；影响面限于入口链路，不触碰检索/生成。
 - **收益**：护栏成为可插拔横切层，未来可叠加 `RubricMiddleware` 反思；双视图统一安全入口。
 
-### 优化 C：长期记忆多后端路由（中优先级 / 中风险）
+### 优化 C：长期记忆多后端路由（中优先级 / 中风险） ✅ 已落地
 
 - **借鉴来源**：DeepAgents `CompositeBackend` 按路径把状态路由到耐久存储（文件/向量）。
 - **当前差距**：`longterm.py` 仅单 pgvector 表，文件型/缓存型记忆无去处；写入只入 `memories` 表。
@@ -114,15 +114,17 @@
 
 ## 4. 实施路线图（分阶段，每阶段独立可测）
 
-| 阶段 | 内容 | 回归范围 | 门禁 |
-|---|---|---|---|
-| P0 | 优化 D（Makefile + uv workspace） | 无业务代码改动 | `make install/test` 通过 |
-| P1 | 优化 A（`AgentState` → Pydantic） | `app/agent/graph.py` + state 用例 | pytest + eval 全绿 |
-| P2 | 优化 B（护栏 middleware 包装） | 入口链路 + input_guard 单测 | pytest + eval 全绿 |
-| P3 | 优化 C（memory backend 协议） | `app/memory/longterm.py` 行为 | 新增 backend 单测 + eval 全绿 |
-| P4（后置） | 优化 E（双轨收敛） | 全量 | 独立专项 + eval 充分验证 |
+| 阶段 | 内容 | 回归范围 | 门禁 | 状态 |
+|---|---|---|---|---|
+| P0 | 优化 D（Makefile + uv workspace） | 无业务代码改动 | `make install/test` 通过 | Makefile 已落地；uv workspace 成员声明暂缓（path-sources 已可用，见下） |
+| P1 | 优化 A（`AgentState` → Pydantic） | `app/agent/graph.py` + state 用例 | pytest + eval 全绿 | ✅ 已落地（commit f0a5f43） |
+| P2 | 优化 B（护栏共享内核 + 双视图统一入口） | 入口链路 + input_guard 单测 | pytest + eval 全绿 | ✅ 已落地（commit a23755e） |
+| P3 | 优化 C（memory backend 协议） | `app/memory/longterm.py` 行为 | 新增 backend 单测 + eval 全绿 | ✅ 已落地（commit dd51aa9） |
+| P4（后置） | 优化 E（双轨收敛） | 全量 | 独立专项 + eval 充分验证 | 独立专项，本轮不实施 |
 
 > P0~P3 均为**局部改动 + 向后兼容**，每阶段结束跑 `make test`（含 40 单测）与 `make eval`（12 golden）即可确认无回归。P4 为架构级，单独立项。
+
+**关于优化 D 的 uv workspace 成员声明（暂缓说明）**：当前各子包已通过 `[tool.uv.sources]` 的 `path` editable 引用 sibling 包，`uv.lock` 同步正常，Makefile 门禁（`make install/lint/test`）已可用，工程收益（统一入口 + 门禁）已达成。改为 `uv workspace` 成员声明会触及全部 7 个子包 + 根 + `uv.lock`，且 `zhanggui-zhiku` 使用 setuptools 而非 hatchling（与其余包不一致），workspace 下可能触发全量重 build，存在文档预警的"破坏现有 editable 安装"风险。按"先在隔离环境验证 `uv sync` 成功再提交"的缓解要求，该项不在本地直接推进，待有隔离验证环境时单独立项。
 
 ## 5. 风险与缓解
 
