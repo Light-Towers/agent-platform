@@ -34,11 +34,11 @@ def build_graph(llm, checkpointer=None, mcp_manager: MCPClientManager | None = N
     """构建并编译 Supervisor 图；llm 可为 None（无 LLM 模式）。"""
 
     async def route_node(state: AgentState) -> dict:
-        question = state.get("question", "")
+        question = state.question
 
         # 上下文压缩：多轮会话 token 超阈值时摘要旧消息
         settings = get_settings()
-        messages = state.get("messages", [])
+        messages = state.messages
         if settings.compaction_enabled and llm is not None:
             threshold = int(settings.model_context_window * settings.compaction_threshold_ratio)
             if should_compact(messages, threshold):
@@ -50,13 +50,13 @@ def build_graph(llm, checkpointer=None, mcp_manager: MCPClientManager | None = N
                         "route_reason": "上下文已压缩，重新路由",
                         "memory_notes": [],
                         "messages": compacted,
-                        "iterations": state.get("iterations", 0),
+                        "iterations": state.iterations,
                     }
 
         decision = await decide_route(llm, question)
         memory_notes: list[str] = []
         if settings.memory_enabled:
-            memory_notes = await recall(get_pool(), state.get("user_id", "default"), question)
+            memory_notes = await recall(get_pool(), state.user_id, question)
         return {
             "route": decision.capability,
             "sub_query": decision.sub_query,
@@ -65,13 +65,13 @@ def build_graph(llm, checkpointer=None, mcp_manager: MCPClientManager | None = N
         }
 
     async def search_node(state: AgentState) -> dict:
-        return {"evidence": await search_web(state["sub_query"])}
+        return {"evidence": await search_web(state.sub_query)}
 
     async def rag_node(state: AgentState) -> dict:
-        return {"evidence": await rag_query(state["sub_query"])}
+        return {"evidence": await rag_query(state.sub_query)}
 
     async def sql_node(state: AgentState) -> dict:
-        return {"evidence": await sql_query(state["sub_query"], llm=llm)}
+        return {"evidence": await sql_query(state.sub_query, llm=llm)}
 
     async def direct_node(state: AgentState) -> dict:
         return {"evidence": []}
@@ -80,22 +80,22 @@ def build_graph(llm, checkpointer=None, mcp_manager: MCPClientManager | None = N
         return await mcp_query(state, mcp_manager)
 
     async def synthesize_node(state: AgentState) -> dict:
-        question = state["question"]
-        evidence = state.get("evidence", [])
-        memory_notes = state.get("memory_notes", [])
-        iterations = state.get("iterations", 0)
+        question = state.question
+        evidence = state.evidence
+        memory_notes = state.memory_notes
+        iterations = state.iterations
 
         # 反思：证据为空且未到重试上限，回到路由再来一次
         has_real_evidence = evidence and not any(
             e.startswith(("知识库未启用", "知识库中未检索到", "联网搜索未配置", "SQL_DSN 未配置"))
             for e in evidence
         )
-        if not has_real_evidence and state["route"] != "direct" and iterations < get_settings().max_iterations:
+        if not has_real_evidence and state.route != "direct" and iterations < get_settings().max_iterations:
             return {"iterations": iterations + 1, "evidence": []}
 
         answer = await _compose(question, evidence, memory_notes)
         if get_settings().memory_enabled:
-            remember(get_pool(), state.get("user_id", "default"), f"Q: {question}\nA: {answer}")
+            remember(get_pool(), state.user_id, f"Q: {question}\nA: {answer}")
         return {
             "answer": answer,
             "iterations": iterations,
@@ -126,11 +126,11 @@ def build_graph(llm, checkpointer=None, mcp_manager: MCPClientManager | None = N
         return raw.content if hasattr(raw, "content") else str(raw)
 
     def pick_capability(state: AgentState) -> str:
-        return state.get("route", "direct")
+        return state.route
 
     def next_after_synthesize(state: AgentState) -> str:
         # synthesize 重试分支返回空 answer 且 iterations 已增加
-        if not state.get("answer") and state.get("iterations", 0) > 0:
+        if not state.answer and state.iterations > 0:
             return "route"
         return END
 
