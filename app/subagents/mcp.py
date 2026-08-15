@@ -13,10 +13,10 @@ async def mcp_query(state: AgentState, mcp_manager: MCPClientManager | None) -> 
     if mcp_manager is None:
         return {"evidence": ["MCP 未启用"]}
 
-    server_id = state.get("mcp_server", "")
-    tool_name = state.get("mcp_tool", "")
-    params = state.get("mcp_params", {})
-    caller = state.get("user_id", "default")
+    server_id = state.mcp_server
+    tool_name = state.mcp_tool
+    params = state.mcp_params
+    caller = state.user_id
 
     if not server_id or not tool_name:
         return {"evidence": ["MCP 路由缺少 server_id 或 tool_name"]}
