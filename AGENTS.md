@@ -13,8 +13,7 @@
 | `deepagents/` | 联邦网关 + 3 子服务编排中枢（与 `app/` 并行，详见 `deepagents/README.md`） | `python -m api.server` |
 | `agent-core/` | 零依赖运行时内核：tracing / guardrails / sql 守卫 / llm / memory | — |
 | `shared-schemas/` | 联邦 4 服务共享 Pydantic 契约（QueryResponse 等） | — |
-| `kefu-adapter/` | atguigu_ai REST → 统一契约适配层（:8002）；经 `KEFU_API_URL`(默认 :5005) 桥接**外部** atguigu_ai（仓库内无此代码）。迁移计划要求废弃但**尚未执行**（kefu-service 未升级 Agent Protocol 且 atguigu_ai 未下线，暂不能删） | `main.py` |
-| `kefu-service/` | kefu 迁移版（deepagents + LangGraph），已实现且 CI 通过，但尚未接入网关（迁移需升级 Agent Protocol + 补齐 QueryResponse，非改 URL） | — |
+| `kefu-service/` | kefu 迁移版（deepagents + LangGraph），已实现且 CI 通过，已接入联邦网关（Agent Protocol 兼容 `/invoke`，返回 `QueryResponse`；`KEFU_USE_ADAPTER=false` 默认直连） | — |
 | `wenda-adapter/` | wenda 老系统 SSE → JSON 适配层（:8001） | `main.py` |
 | `wenda-data-agent/` | Text-to-SQL 数据分析垂直场景 | — |
 | `zhanggui-zhiku/` | 掌柜智库：RAG 知识库导入 + 多路检索问答（:8900） | `zhanggui-zhiku` 脚本 |

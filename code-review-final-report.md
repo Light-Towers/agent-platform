@@ -11,7 +11,7 @@
 > - 路径已迁移：原 `D:\Study\github\agent-platform` → 现 `D:\Study\agent-platform`。
 > - 原"未修复项"中多数现已修复：**U-4 / U-5 / U-7** 代码已修复；**U-3** 已加 `_IDENT` 白名单；**U-6**（otel jaeger→OTLP）、**U-8**（store.py 批量 INSERT + BM25 缓存）已代码修复；**U-2** 为 reducer 合并语义**误报**。
 > - **U-1** 仅 `HealthResponse` 已对齐；`QueryRequest` 字段双写兼容（`AliasChoices`）仍属架构待拍板项，未移除兼容层。
-> - **kefu 迁移技术债（原问题 2/3/4）已完成代码侧**：`kefu-service` 已升级为 Agent Protocol 兼容 server（新增 `POST /invoke` 返回 `QueryResponse`），网关新增 `KEFU_USE_ADAPTER` 开关（默认直连 `kefu-service:8003`），`kefu-adapter` 已弃用标记；外部 `atguigu_ai` 退役后删 `kefu-adapter/` 包即可（运维动作）。
+> - **kefu 迁移技术债（原问题 2/3/4）已完成**：`kefu-service` 已升级为 Agent Protocol 兼容 server（新增 `POST /invoke` 返回 `QueryResponse`），网关新增 `KEFU_USE_ADAPTER` 开关（默认直连 `kefu-service:8003`），`kefu-adapter` 包已于 2026-08 从仓库移除；外部 `atguigu_ai` 退役为纯外部运维动作（与代码无关）。
 > - 文档脱节（README/AGENTS 遗漏 9 包、配置表缺漏、Python 版本冲突等）已修正。
 > 其余结论（安全扫描、交叉核验方法论）仍有效。
 

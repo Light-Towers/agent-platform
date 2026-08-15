@@ -63,7 +63,7 @@ python -m api.server  # 启动 FastAPI，默认 :8000
 
 **Phase 0-7 · 生产化改造**（CHANGELOG [2.0.0]）
 - ✅ Phase 0：Langfuse 三态 trace + W3C traceparent 传播 + 评测集 200 题 + spike 报告
-- ✅ Phase 1：wenda-adapter（SSE→JSON）+ kefu-adapter + shared-schemas 统一 schema
+- ✅ Phase 1：wenda-adapter（SSE→JSON）+ kefu-adapter（已移除，迁移至 kefu-service 直连）+ shared-schemas 统一 schema
 - ✅ Phase 2：AsyncSubAgent 联邦网关 + AGENT_MODE 切换 + 健康探活降级
 - ✅ Phase 3：L1 embedding+原型余弦 + L2 LLM 细判 + Query 改写 + 子问题分解
 - ✅ Phase 4：TodoListMiddleware + RubricMiddleware（扩展非重写 deepagents）
