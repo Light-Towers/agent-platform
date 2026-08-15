@@ -18,12 +18,13 @@ from __future__ import annotations
 
 import time
 
-from kefu_agent.graph import build_kefu_graph
-from kefu_agent.state import KefuState
 from fastapi import FastAPI
 from langgraph.checkpoint.memory import InMemorySaver
 from shared_schemas import QueryRequest, QueryResponse
 from shared_schemas.query import QueryData
+
+from kefu_agent.graph import build_kefu_graph
+from kefu_agent.state import KefuState
 
 app = FastAPI(title="kefu-service", version="0.1.0")
 
