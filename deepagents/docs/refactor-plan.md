@@ -262,10 +262,11 @@
 | **风险** | **数月级工程**（3 Flow + GraphRAG 完整重表达 + atguigu_ai Tracker→LangGraph State 语义映射）；需逐 Flow 验证；atguigu_ai 对话状态管理较复杂，LangGraph 重表达需仔细 |
 | **回滚** | atguigu_ai 保持运行，新 kefu-service 灰度，出问题切回 |
 
-> **执行状态（截至 2026-08）**：第④项「kefu-adapter 废弃」**尚未执行**。
-> 原因：`kefu-service` 已实现且 CI 通过，但 `deepagents/agent/config.py` 的 `customer_service` 子服务仍指向 `KEFU_ADAPTER_URL`（:8002）。
-> 直接废弃 adapter 不可行——远程模式走 Agent Protocol（`async_subagents.py`），而 `kefu-service` 当前仅为普通 FastAPI REST 且返回 `list-of-{text}`，既未实现 Agent Protocol server 也不返回 `QueryResponse`（详见 `kefu-service/main.py` 顶部注释）。
-> 需先将 `kefu-service` 升级为 Agent Protocol server（或改网关调用方式）并补齐 `QueryResponse` 契约后，方可移除 `kefu-adapter` 转换层（见问题 2 / 问题 3 技术债）。
+> **执行状态（截至 2026-08）**：第④项「kefu-adapter 废弃」**已完成代码侧准备，待运维执行**。
+> 原因（已解决）：`kefu-service` 已实现且 CI 通过，已升级为 Agent Protocol 兼容 server（新增 `POST /invoke`，返回 `QueryResponse`，依赖 `shared-schemas`；旧 `/api/messages` 保留为 atguigu_ai 兼容入口）。
+> ✅ `deepagents/agent/config.py` 新增 `KEFU_SERVICE_URL` + `KEFU_USE_ADAPTER` 开关（默认 `false`，直连 `kefu-service:8003`）；`async_subagents.py` 增加 httpx 远程回退（外部 `deepagents` 包未安装时直连 `/invoke`）。
+> ✅ `kefu-adapter` 已加 `DeprecationWarning` 弃用标记。
+> ⏳ 剩余运维动作：外部 `atguigu_ai` 退役后，删除 `kefu-adapter/` 包即可（无代码阻塞）。详见 `kefu-service/main.py` 顶部注释与 README「已知待拍板项」。
 
 ---
 

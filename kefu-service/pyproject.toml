@@ -5,10 +5,12 @@ description = "kefu 从 atguigu_ai 迁移到 deepagents + LangGraph（Phase 7）
 requires-python = ">=3.11"
 dependencies = [
     "agent-core",
+    "shared-schemas",
     "fastapi>=0.129.0",
     "uvicorn>=0.41.0",
     "langgraph>=1.2.10",
     "pydantic>=2.13.0",
+    "httpx>=0.28.0",
 ]
 
 [build-system]
@@ -17,3 +19,4 @@ build-backend = "hatchling.build"
 
 [tool.uv.sources]
 agent-core = { path = "../agent-core", editable = true }
+shared-schemas = { path = "../shared-schemas", editable = true }
