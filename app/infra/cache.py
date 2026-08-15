@@ -1,4 +1,9 @@
-"""语义缓存：按向量相似度命中历史答案。
+"""语义缓存：按向量相似度命中历史答案（``BaseSemanticCache`` app 侧实现）。
+
+遵循 ``agent_core.cache.BaseSemanticCache`` 协议语义（统计接口 ``get_stats`` /
+``reset_stats`` 统一），但本后端为函数式 PG 实现，key 构造为
+``question.strip().lower()``（与 deepagents 的 ``build_cache_key`` 要素不同，
+因向量空间/租户模型不一致，**不跨后端共享缓存数据**，见 TB-4）。
 
 修复已知缺陷模式：后台写入任务必须持有引用（模块级集合 + done 回调移除），
 否则 asyncio.create_task 返回值可能被 GC 提前回收导致写入丢失。
