@@ -37,7 +37,7 @@
 | 状态定义 | `AgentState(BaseModel)`，**Pydantic 运行时校验**（优化 A 已落地） | `app/agent/state.py:21` |
 | 输入护栏 | `guard_input()` 已下沉为 `agent_core.guardrails.input_guard` 共享内核，deepagents/app 双视图统一入口 | `agent_core/guardrails/input_guard.py` |
 | 长期记忆 | `MemoryBackend` 协议 + `PgVectorMemoryBackend`（默认）+ `CompositeMemoryBackend` 预留；门面 `longterm.py` | `app/memory/memory_backend.py` |
-| 依赖管理 | `uv.lock` 存在，子包用 `[tool.uv.sources]` editable（uv workspace 成员声明暂缓，见 §4） | `pyproject.toml:65` |
+| 依赖管理 | `uv workspace` 成员声明已启用（根 `[tool.uv.workspace]` + 各子包去重 sources），monorepo 统一解析 | `pyproject.toml:65` |
 | 工程门禁 | `Makefile`（make install/lint/test/eval/ci）+ 全仓 ruff 绿 + pytest 门禁可用 | `Makefile` |
 | 编排 | `app/` 自研 Supervisor 图 vs `deepagents/` `create_deep_agent`，双轨（优化 E 独立专项，本轮不实施） | `app/agent/graph.py:33` vs `deepagents/agent/main_agent.py:118` |
 
@@ -116,7 +116,7 @@
 
 | 阶段 | 内容 | 回归范围 | 门禁 | 状态 |
 |---|---|---|---|---|
-| P0 | 优化 D（Makefile + uv workspace） | 无业务代码改动 | `make install/test` 通过 | Makefile 已落地；uv workspace 成员声明暂缓（path-sources 已可用，见下） |
+| P0 | 优化 D（Makefile + uv workspace） | 无业务代码改动 | `make install/test` 通过 | ✅ 已落地（Makefile + workspace 成员声明，commit 163a6dc） |
 | P1 | 优化 A（`AgentState` → Pydantic） | `app/agent/graph.py` + state 用例 | pytest + eval 全绿 | ✅ 已落地（commit f0a5f43） |
 | P2 | 优化 B（护栏共享内核 + 双视图统一入口） | 入口链路 + input_guard 单测 | pytest + eval 全绿 | ✅ 已落地（commit a23755e） |
 | P3 | 优化 C（memory backend 协议） | `app/memory/longterm.py` 行为 | 新增 backend 单测 + eval 全绿 | ✅ 已落地（commit dd51aa9） |
@@ -124,13 +124,11 @@
 
 > P0~P3 均为**局部改动 + 向后兼容**，每阶段结束跑 `make test`（含 40 单测）与 `make eval`（12 golden）即可确认无回归。P4 为架构级，单独立项。
 
-**关于优化 D 的 uv workspace 成员声明（暂缓说明）**：当前各子包已通过 `[tool.uv.sources]` 的 `path` editable 引用 sibling 包，`uv.lock` 同步正常，Makefile 门禁（`make install/lint/test`）已可用，工程收益（统一入口 + 门禁）已达成。改为 `uv workspace` 成员声明会触及全部 7 个子包 + 根 + `uv.lock`，且 `zhanggui-zhiku` 使用 setuptools 而非 hatchling（与其余包不一致），workspace 下可能触发全量重 build，存在文档预警的"破坏现有 editable 安装"风险。按"先在隔离环境验证 `uv sync` 成功再提交"的缓解要求，该项不在本地直接推进，待有隔离验证环境时单独立项。
-
 ## 5. 风险与缓解
 
-- **Pydantic state 与 LangGraph reducer 冲突**：`add_messages` 是 reducer 函数，Pydantic field 需验证其可承载；先在小图验证再全量。
+- **Pydantic state 与 LangGraph reducer 冲突**：`add_messages` 是 reducer 函数，Pydantic field 需验证其可承载；先在小图验证再全量。**已验证**：`tests/test_agent_state.py` 确认 Pydantic `AgentState` + `add_messages` 在真实 `StateGraph` 中正常累加。
 - **middleware 包装改变调用时序**：`guard_input` 返回值字典结构保持不变，仅挂载位置变化；用现有网关单测覆盖。
-- **uv workspace 破坏现有 editable 安装**：先在隔离环境验证 `uv sync` 成功再提交。
+- **uv workspace 破坏现有 editable 安装**：已在隔离分支验证 `uv lock` + `uv sync` 成功（255 包，含 zhanggui torch 重依赖），无破坏后合并（commit 163a6dc）。
 - **回归验证总闸**：所有阶段以 `make test` + `make eval` 为强制门禁，未全绿不合并。
 
 ---
