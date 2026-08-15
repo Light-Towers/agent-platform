@@ -8,7 +8,7 @@ version = "1.1.0"
 description = "掌柜智库：RAG 知识库导入与多路检索问答一体化服务"
 readme = "README.md"
 requires-python = ">=3.11"
-license = { text = "MIT" }
+license = { text = "Apache-2.0" }
 authors = [{ name = "掌柜智库 Team" }]
 keywords = ["rag", "langgraph", "fastapi", "milvus", "knowledge-base"]
 dependencies = [
