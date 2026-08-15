@@ -47,6 +47,13 @@ _subservices: dict[str, SubserviceConfig] = {
         name="智能客服助手",
         graph_id="customer_service",
         url=_env("KEFU_ADAPTER_URL", "http://localhost:8002"),
+        # 迁移约束：kefu-service(:8003) 已实现且 CI 通过，但尚未接入本网关。
+        # 远程模式走 AsyncSubAgent（Agent Protocol，见 async_subagents.py），
+        # 而 kefu-service 当前仅为普通 FastAPI REST 且返回 list-of-{text}，
+        # 既未实现 Agent Protocol server，也不返回 QueryResponse。
+        # 故「直接把本 URL 指向 kefu-service:8003」不可行：
+        # 需先将 kefu-service 升级为 Agent Protocol server（或改网关调用方式）
+        # 并补齐 QueryResponse 契约后，方可移除 kefu-adapter 转换层。
     ),
 }
 

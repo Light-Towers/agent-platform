@@ -262,6 +262,11 @@
 | **风险** | **数月级工程**（3 Flow + GraphRAG 完整重表达 + atguigu_ai Tracker→LangGraph State 语义映射）；需逐 Flow 验证；atguigu_ai 对话状态管理较复杂，LangGraph 重表达需仔细 |
 | **回滚** | atguigu_ai 保持运行，新 kefu-service 灰度，出问题切回 |
 
+> **执行状态（截至 2026-08）**：第④项「kefu-adapter 废弃」**尚未执行**。
+> 原因：`kefu-service` 已实现且 CI 通过，但 `deepagents/agent/config.py` 的 `customer_service` 子服务仍指向 `KEFU_ADAPTER_URL`（:8002）。
+> 直接废弃 adapter 不可行——远程模式走 Agent Protocol（`async_subagents.py`），而 `kefu-service` 当前仅为普通 FastAPI REST 且返回 `list-of-{text}`，既未实现 Agent Protocol server 也不返回 `QueryResponse`（详见 `kefu-service/main.py` 顶部注释）。
+> 需先将 `kefu-service` 升级为 Agent Protocol server（或改网关调用方式）并补齐 `QueryResponse` 契约后，方可移除 `kefu-adapter` 转换层（见问题 2 / 问题 3 技术债）。
+
 ---
 
 ## 6. 目录结构变化
@@ -423,7 +428,7 @@ services:
 | "勿提交真实 .env" | ✅ 所有新增配置走 `.env.example` + 环境变量 |
 | "勿提交大二进制资产" | ✅ Valkey/Langfuse 用 Docker 镜像，不入库 |
 | "勿在此目录创建 wiki 内容" | ✅ 本文档是技术方案非 wiki 知识，放 `docs/` |
-| Python 3.10+ / LF line endings | ✅ 所有新增代码遵守 |
+| Python 3.11+（>=3.11，全仓 requires-python 一致）/ LF line endings | ✅ 所有新增代码遵守 |
 | kebab-case 脚本名（PREFERENCE_3） | ✅ `run-all.py` / `semantic_cache.py` / `circuit_breaker.py` 等均 kebab-case |
 | async/await + uv（PREFERENCE_5） | ✅ 全部 async；依赖用 uv 管理（FastAPI/Deep Agents 均用 uv） |
 | 中文为主（PREFERENCE_6） | ✅ 本文档中文 |

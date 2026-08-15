@@ -4,6 +4,11 @@ Phase 7：9 种命令 → LangGraph 意图路由，3 个 Flow → LangGraph 子�
 GraphRAG → 知识库检索子 Agent，atguigu_ai Tracker → LangGraph State。
 
 运行：uvicorn main:app --host 0.0.0.0 --port 8003
+
+网关接入状态：本服务已实现且 CI 通过（M7 验收 10/10 + Flow 3/3 + GraphRAG 5/5），
+但 deepagents 联邦网关当前仅经 KEFU_ADAPTER_URL(:8002) 接入 kefu-adapter，未直连本服务。
+接入网关需先把本服务升级为 Agent Protocol server（async_subagents.py 远程模式依赖 graph_id+url），
+或改网关调用方式，并补齐 QueryResponse 契约；届时方可移除 kefu-adapter 转换层。
 """
 
 from __future__ import annotations

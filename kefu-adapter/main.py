@@ -4,6 +4,11 @@ atguigu_ai 已有 FastAPI server + /api/messages（POST）。
 本适配器转发请求 → 转统一 QueryResponse schema → 返回给网关。
 
 kefu 快照零改动（AGENTS.md 约束）。
+
+外部依赖声明：atguigu_ai 是**外部遗留服务，不在本仓库内**（glob `*atguigu*` 命中 0 个）。
+运行时经 `KEFU_API_URL`（默认 http://localhost:5005）打到外部 atguigu_ai:5005。
+迁移未完成前本适配器是唯一桥接，删除则客服链路中断——
+故 kefu-service 接入网关、atguigu_ai 下线前，本 adapter 不可移除（见问题 3 / 问题 4）。
 """
 
 from __future__ import annotations
