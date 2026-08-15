@@ -14,7 +14,7 @@ keywords = ["agent", "tracing", "guardrails", "rag", "llm"]
 dependencies = []
 
 [project.urls]
-Homepage = "https://github.com/osmondy/agent-platform"
+Homepage = "https://github.com/Light-Towers/agent-platform"
 
 [tool.setuptools.packages.find]
 where = ["."]

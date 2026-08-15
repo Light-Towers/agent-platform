@@ -1,7 +1,7 @@
 [project]
 name = "kefu-service"
 version = "0.1.0"
-description = "kefu 从 atguigu_ai 迁移到 deepagents + LangGraph（Phase 7）"
+description = "kefu 客服迁移版（deepagents + LangGraph，Agent Protocol 兼容，Phase 7）"
 requires-python = ">=3.11"
 dependencies = [
     "agent-core",
