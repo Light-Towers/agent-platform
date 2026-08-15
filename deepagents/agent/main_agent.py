@@ -4,8 +4,6 @@ from pathlib import Path
 from agent_core.logging import get_logger
 from agent_core.tracing import start_span
 
-import utils._path_setup  # noqa: F401 — agent-core sys.path
-
 logger = get_logger(__name__)
 
 import os
@@ -40,8 +38,9 @@ async def _create_checkpointer():
         return InMemorySaver()
     except ImportError:
         from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-        async with AsyncSqliteSaver.from_conn_string(":memory:") as saver:
-            return saver
+        saver = AsyncSqliteSaver.from_conn_string(":memory:")
+        await saver.__aenter__()
+        return saver
 
 
 def _build_subagents():

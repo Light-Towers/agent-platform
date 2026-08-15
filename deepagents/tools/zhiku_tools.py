@@ -5,8 +5,6 @@ from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_excep
 from api.monitor import monitor
 from tools._timeout import with_timeout
 
-import utils._path_setup  # noqa: F401 — agent-core sys.path
-
 try:
     from agent_core.logging import get_logger
     _zhiku_logger = get_logger(__name__)

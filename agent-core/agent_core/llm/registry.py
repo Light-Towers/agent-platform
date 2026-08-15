@@ -67,7 +67,7 @@ def get_llm_client(
     if not target_model:
         raise ValueError("模型名未指定：请传 model 或设置 provider.default_model")
 
-    cache_key = (provider, target_model, json_mode, api_key, base_url, repr(extra_body))
+    cache_key = (provider, target_model, json_mode, api_key, base_url, temperature, repr(extra_body), repr(sorted(kwargs.items())))
     if cache_key in _CLIENT_CACHE:
         logger.debug("LLM 客户端缓存命中：provider=%s model=%s json_mode=%s", provider, target_model, json_mode)
         return _CLIENT_CACHE[cache_key]

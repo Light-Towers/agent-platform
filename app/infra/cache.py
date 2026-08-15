@@ -7,9 +7,12 @@
 import asyncio
 import logging
 
+from agent_core.cache import CacheStats
+
 logger = logging.getLogger(__name__)
 
 _background_tasks: set[asyncio.Task] = set()
+_stats = CacheStats()
 
 
 def spawn_background(coro) -> asyncio.Task:
@@ -27,6 +30,7 @@ def pending_background_tasks() -> int:
 async def cache_lookup(pool, embedding: list[float], threshold: float) -> str | None:
     """返回余弦距离小于 threshold 的缓存答案；未命中返回 None。"""
     if pool is None:
+        _stats.record("miss")
         return None
     sql = (
         "SELECT answer, embedding <=> %s AS distance FROM semantic_cache "
@@ -37,10 +41,22 @@ async def cache_lookup(pool, embedding: list[float], threshold: float) -> str | 
             row = await conn.execute(sql, (embedding, embedding))
             rec = await row.fetchone()
         if rec and rec[1] is not None and rec[1] < threshold:
+            _stats.record("l2_hit")
             return rec[0]
-    except Exception:  # noqa: BLE001 缓存失效不影响主链路
+    except Exception:
         logger.exception("语义缓存查询失败，降级为未命中")
+    _stats.record("miss")
     return None
+
+
+def get_stats() -> dict[str, int | float]:
+    """返回缓存命中率统计快照。"""
+    return _stats.snapshot()
+
+
+def reset_stats() -> None:
+    """清空统计。"""
+    _stats.reset()
 
 
 async def _cache_write(pool, question: str, answer: str, embedding: list[float]) -> None:
@@ -60,7 +76,7 @@ def cache_store(pool, question: str, answer: str, embedding: list[float]) -> Non
     async def _guarded():
         try:
             await _cache_write(pool, question, answer, embedding)
-        except Exception:  # noqa: BLE001
+        except Exception:
             logger.exception("语义缓存写入失败")
 
     spawn_background(_guarded())

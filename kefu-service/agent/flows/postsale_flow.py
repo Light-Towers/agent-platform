@@ -6,10 +6,10 @@ LangGraph 子图：识别售后类型 → 查询售后政策 → 格式化回复
 
 from __future__ import annotations
 
-from langgraph.graph import StateGraph, END
+from langgraph.graph import END, StateGraph
 
-from agent.state import KefuState
 from agent.services import extract_issue_type, query_postsale_policy
+from agent.state import KefuState
 
 
 async def collect_issue_type(state: KefuState) -> KefuState:

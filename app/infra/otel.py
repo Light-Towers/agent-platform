@@ -8,17 +8,18 @@
 - 默认 false（opt-in）
 """
 
-import hashlib
 import logging
 from typing import Literal
+
+from agent_core.tracing import user_query_hash
 
 logger = logging.getLogger(__name__)
 
 # 可选导入 opentelemetry
 try:
     from opentelemetry import trace
-    from opentelemetry.sdk.trace import TracerProvider
     from opentelemetry.sdk.resources import Resource
+    from opentelemetry.sdk.trace import TracerProvider
     from opentelemetry.sdk.trace.sampling import (
         ALWAYS_ON,
         TraceIdRatioBasedSampler,
@@ -106,6 +107,12 @@ def init_otel(
             exporter_obj = OTLPSpanExporter(endpoint=endpoint or None)
             provider.add_span_processor(BatchSpanProcessor(exporter_obj))
         elif exporter == "jaeger":
+            # 弃用：opentelemetry-exporter-jaeger 在 OTel SDK 1.x 后已归档（thrift 协议停更）。
+            # Jaeger 现推荐 OTLP 接收端，请用 exporter="otlp"（endpoint 指向 Jaeger OTLP 端口）。
+            # 保留此分支以兼容旧配置，但显式告警；若包未安装则下方 except 降级为 NoOpTracer。
+            logger.warning(
+                "OTEL_EXPORTER=jaeger 已弃用（JaegerExporter 归档），请改用 exporter='otlp'"
+            )
             from opentelemetry.exporter.jaeger.thrift import JaegerExporter
             from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
@@ -136,7 +143,6 @@ def parse_traceparent(header: str | None):
         from opentelemetry.trace.propagation.tracecontext import (
             TraceContextFormat,
         )
-        from opentelemetry import context as otel_context
 
         ctx = TraceContextFormat().extract({"traceparent": header})
         return ctx
@@ -145,10 +151,10 @@ def parse_traceparent(header: str | None):
 
 
 def redact_question(question: str) -> dict:
-    """脱敏：返回问题长度 + 哈希摘要，不含全文。"""
+    """脱敏：返回问题长度 + 哈希摘要，不含全文。复用 agent_core.tracing.user_query_hash。"""
     return {
         "question_length": len(question),
-        "question_hash": hashlib.sha256(question.encode()).hexdigest()[:16],
+        "question_hash": user_query_hash(question),
     }
 
 
@@ -160,4 +166,4 @@ def force_flush() -> None:
             if hasattr(provider, "force_flush"):
                 provider.force_flush()
         except Exception:
-            pass
+            logger.warning("otel force_flush failed", exc_info=True)

@@ -9,7 +9,7 @@ from pathlib import Path
 
 import uvicorn
 from dotenv import find_dotenv, load_dotenv
-from fastapi import FastAPI, File, Form, Query, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, File, Form, Query, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -19,9 +19,15 @@ load_dotenv(find_dotenv())
 from agent_core.logging import get_logger
 from agent_core.tracing import init_tracing, start_span
 
-import utils._path_setup  # noqa: F401 — agent-core sys.path
-
 logger = get_logger(__name__)
+
+# 持有后台任务引用，避免 CPython 在任务完成前回收 coroutine frame 导致静默丢失
+_background_tasks: set[asyncio.Task] = set()
+
+
+def _track_task(task: asyncio.Task) -> None:
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
 
 current_dir = Path(__file__).resolve().parent
 project_root = current_dir.parent
@@ -87,6 +93,8 @@ app.add_middleware(
     allow_headers=["Content-Type", "Authorization"],
 )
 
+_ALLOW_NO_AUTH = os.getenv("DISABLE_AUTH", "false").lower() in ("1", "true", "yes")
+
 if _HAS_SECURITY_GUARDS and API_KEY:
     app.add_middleware(
         SecurityGuardsMiddleware,
@@ -95,13 +103,42 @@ if _HAS_SECURITY_GUARDS and API_KEY:
         rate_limit_global=int(os.getenv("RATE_LIMIT_GLOBAL", "200")),
         exempt_paths=("/health", "/ws/"),
     )
+elif _ALLOW_NO_AUTH:
+    logger.warning(
+        "安全告警：已显式禁用认证 (DISABLE_AUTH=true)，服务对所有请求开放，"
+        "仅限隔离开发环境使用，禁止在生产部署。"
+    )
+else:
+    logger.warning(
+        "安全告警：未配置 API_KEY 且未显式设置 DISABLE_AUTH=true，"
+        "服务将拒绝所有未携带正确 API_KEY 的请求 (返回 401)。"
+        "生产部署请设置 API_KEY；本地开发可设 DISABLE_AUTH=true。"
+    )
+
+    @app.middleware("http")
+    async def _require_api_key(request: Request, call_next):  # type: ignore[name-defined]
+        if request.url.path in ("/health", "/ws/"):
+            return await call_next(request)
+        if not API_KEY:
+            # 本分支表示未配置 API_KEY 且未显式 DISABLE_AUTH，一律拒绝
+            from fastapi.responses import JSONResponse
+
+            return JSONResponse(status_code=401, content={"detail": "API key required (server misconfigured)"})
+        auth = request.headers.get("Authorization", "")
+        provided = auth[len("Bearer ") :] if auth.lower().startswith("bearer ") else auth
+        if secrets.compare_digest(provided, API_KEY):
+            return await call_next(request)
+        from fastapi.responses import JSONResponse
+
+        return JSONResponse(status_code=401, content={"detail": "API key required"})
 
 _concurrency_semaphore = asyncio.Semaphore(int(os.getenv("MAX_CONCURRENT_TASKS", "10")))
 
 
 def _check_api_key(key: str | None) -> bool:
+    # 未配置 API_KEY 且未显式禁用认证时，fail-closed：拒绝所有请求（含 WebSocket）
     if not API_KEY:
-        return True
+        return _ALLOW_NO_AUTH
     return secrets.compare_digest(key or "", API_KEY)
 
 
@@ -134,7 +171,7 @@ async def run_task(request: TaskRequest):
             async with _concurrency_semaphore:
                 await run_deep_agent(request.query, thread_id)
 
-        asyncio.create_task(_run())
+        _track_task(asyncio.create_task(_run()))
         return {"status": "started", "thread_id": thread_id}
 
 

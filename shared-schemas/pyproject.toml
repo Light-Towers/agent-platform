@@ -9,6 +9,7 @@ description = "统一 Pydantic schema，deepagents 联邦网关 4 服务共享"
 requires-python = ">=3.11"
 dependencies = [
     "pydantic>=2.13",
+    "pydantic-settings>=2.0",
 ]
 
 [tool.setuptools.packages.find]
