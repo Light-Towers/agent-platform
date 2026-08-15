@@ -1,0 +1,5 @@
+{"id": 1, "question": "统计一下订单表里上个月的销售额", "expected_sql_contains": ["SELECT", "SUM", "订单"], "expected_tables": ["orders"]}
+{"id": 2, "question": "数据库里库存低于10的商品有多少条", "expected_sql_contains": ["SELECT", "COUNT", "库存"], "expected_tables": ["products"]}
+{"id": 3, "question": "表里的销量冠军是哪个产品", "expected_sql_contains": ["SELECT", "ORDER BY", "LIMIT 1"], "expected_tables": ["products"]}
+{"id": 4, "question": "用 SQL 统计每个地区的订单数量", "expected_sql_contains": ["SELECT", "COUNT", "GROUP BY"], "expected_tables": ["orders"]}
+{"id": 5, "question": "查询最近一周的新增用户数", "expected_sql_contains": ["SELECT", "COUNT", "WHERE"], "expected_tables": ["users"]}

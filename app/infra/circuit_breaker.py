@@ -1,11 +1,13 @@
-"""熔断器：closed -> open -> half-open 状态机。
+"""Async adapter for agent_core.resilience.CircuitBreaker.
 
-连续失败达到阈值后打开熔断，恢复窗口内直接走 fallback，不再打下游；
-窗口到期后放行一次试探（half-open），成功则复位，失败则重新计时。
+Wraps the sync upstream breaker with the async + fallback interface
+the app expects, preserving backward-compatible state strings.
 """
 
-import time
-from typing import Awaitable, Callable, TypeVar
+from collections.abc import Awaitable, Callable
+from typing import TypeVar
+
+from agent_core.resilience import CircuitBreaker as _BaseBreaker
 
 T = TypeVar("T")
 
@@ -14,40 +16,37 @@ STATE_OPEN = "open"
 STATE_HALF_OPEN = "half-open"
 
 
-class CircuitBreaker:
+class CircuitBreaker(_BaseBreaker):
+    """Async-compatible circuit breaker with fallback.
+
+    Extends agent_core.resilience.CircuitBreaker with:
+    - recovery_seconds param alias (→ reset_timeout)
+    - async call(fn, fallback) that returns fallback instead of raising
+    - backward-compatible state strings ("half-open" not "half_open")
+    """
+
     def __init__(self, failure_threshold: int = 3, recovery_seconds: float = 30.0) -> None:
-        self.failure_threshold = failure_threshold
-        self.recovery_seconds = recovery_seconds
-        self._state = STATE_CLOSED
-        self._failures = 0
-        self._opened_at = 0.0
+        super().__init__(failure_threshold=failure_threshold, reset_timeout=recovery_seconds)
 
     @property
     def state(self) -> str:
-        if self._state == STATE_OPEN and self._now() - self._opened_at >= self.recovery_seconds:
+        if (
+            self._state == self.OPEN
+            and self._opened_at is not None
+            and self._clock() - self._opened_at >= self._reset_timeout
+        ):
+            return STATE_HALF_OPEN
+        if self._state == self.HALF_OPEN:
             return STATE_HALF_OPEN
         return self._state
 
-    def _now(self) -> float:
-        return time.monotonic()
-
-    def record_success(self) -> None:
-        self._failures = 0
-        self._state = STATE_CLOSED
-
-    def record_failure(self) -> None:
-        self._failures += 1
-        if self._failures >= self.failure_threshold:
-            self._state = STATE_OPEN
-            self._opened_at = self._now()
-
     async def call(self, fn: Callable[[], Awaitable[T]], fallback: T | None = None) -> T:
-        """执行 fn；熔断打开时不执行直接返回 fallback；fn 抛错时同样返回 fallback。"""
-        if self.state == STATE_OPEN:
+        """Execute async fn; return fallback on open or error."""
+        if not self.allow():
             return fallback
         try:
             result = await fn()
-        except Exception:  # noqa: BLE001 熔断语义即吞错降级
+        except Exception:
             self.record_failure()
             return fallback
         self.record_success()

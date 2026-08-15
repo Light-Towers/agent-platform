@@ -16,7 +16,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.agent.router import decide_route, heuristic_route  # noqa: E402
+from app.agent.router import decide_route, heuristic_route
 
 
 def load_golden() -> list[dict]:

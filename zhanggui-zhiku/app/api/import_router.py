@@ -145,8 +145,13 @@ async def upload_files(background_tasks: BackgroundTasks, files: List[UploadFile
         # 4. 构建该任务的本地独立目录：output/YYYYMMDD/TaskID，避免多文件重名冲突
         task_local_dir = os.path.join(date_based_root_dir, task_id)
         os.makedirs(task_local_dir, exist_ok=True)  # 目录不存在则创建，存在则不做处理
-        # 构建上传文件的本地保存绝对路径
-        local_file_abs_path = os.path.join(task_local_dir, file.filename)
+        # 构建上传文件的本地保存绝对路径（sanitize 防路径遍历）
+        # 跨平台统一分隔符：os.path.basename 在 Linux 不剥离 Windows 反斜杠，
+        # 先做 replace("\\","/") 保证 basename 正确取末段
+        safe_filename = os.path.basename((file.filename or "").replace("\\", "/"))
+        if not safe_filename or safe_filename in (".", ".."):
+            raise HTTPException(status_code=400, detail="Invalid filename")
+        local_file_abs_path = os.path.join(task_local_dir, safe_filename)
 
         # 5. 将上传的文件保存到本地临时目录（后续MinIO上传/文件解析均基于此文件）
         with open(local_file_abs_path, "wb") as file_buffer:
@@ -157,7 +162,7 @@ async def upload_files(background_tasks: BackgroundTasks, files: List[UploadFile
         # 从统一配置获取MinIO的PDF存储目录配置
         minio_pdf_base_dir = settings.minio_pdf_dir  # 缺省值：pdf_files（见 app.core.config）
         # 构建MinIO中的文件对象名：配置目录/YYYYMMDD/文件名（按日期分层，和本地一致）
-        minio_object_name = f"{minio_pdf_base_dir}/{datetime.now().strftime('%Y%m%d')}/{file.filename}"
+        minio_object_name = f"{minio_pdf_base_dir}/{datetime.now().strftime('%Y%m%d')}/{safe_filename}"
         try:
             # 获取MinIO客户端实例
             minio_client = get_minio_client()

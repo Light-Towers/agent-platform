@@ -8,7 +8,6 @@
 
 import asyncio
 import logging
-import time
 from typing import Literal
 
 from app.schemas import CoordinationDecision
@@ -17,7 +16,11 @@ logger = logging.getLogger(__name__)
 
 
 class SessionCoordinator:
-    """Per-session asyncio.Lock 互斥 + coalesce/queue/reject 三策略。"""
+    """Per-session 互斥 + coalesce/queue/reject 三策略。
+
+    queue 策略下，acquire 返回 decision_type="queue" 后调用方需 await wait_for_turn()
+    等待获取执行权；release() 唤醒队列下一个请求。
+    """
 
     def __init__(
         self,
@@ -26,78 +29,90 @@ class SessionCoordinator:
     ) -> None:
         self._policy = policy
         self._enabled = enabled
-        self._locks: dict[str, asyncio.Lock] = {}
         self._active: dict[str, str] = {}  # session_id -> request_id（当前执行中）
         self._queues: dict[str, asyncio.Queue] = {}
+        self._conditions: dict[str, asyncio.Condition] = {}
         self._logger = logging.getLogger(__name__)
 
     async def acquire(
         self, session_id: str, request_id: str
     ) -> CoordinationDecision:
-        """获取会话执行权。返回协调决策。"""
+        """获取会话执行权。返回协调决策。
+
+        queue/coalesce 策略下会话忙碌时返回 decision_type="queue"，
+        调用方发送排队事件后需 await wait_for_turn() 等待执行权。
+        """
         if not self._enabled:
             return CoordinationDecision(
                 decision_type="serialize", request_id=request_id
             )
 
         try:
-            lock = self._locks.setdefault(session_id, asyncio.Lock())
-            active = self._active.get(session_id)
+            cond = self._conditions.setdefault(session_id, asyncio.Condition())
+            async with cond:
+                active = self._active.get(session_id)
 
-            if active is None:
-                # 会话空闲，直接获取
-                await lock.acquire()
-                self._active[session_id] = request_id
-                self._logger.info(
-                    "coordination serialize session=%s request=%s",
-                    session_id,
-                    request_id,
-                )
-                return CoordinationDecision(
-                    decision_type="serialize", request_id=request_id
-                )
+                if active is None:
+                    # 会话空闲，直接获取
+                    self._active[session_id] = request_id
+                    self._logger.info(
+                        "coordination serialize session=%s request=%s",
+                        session_id,
+                        request_id,
+                    )
+                    return CoordinationDecision(
+                        decision_type="serialize", request_id=request_id
+                    )
 
-            # 会话忙碌，按策略处理
-            if self._policy == "coalesce":
-                # 旧请求尚未进入能力节点（仅在排队）→ 取消旧请求
-                # 简化实现：旧请求已 active 则不取消（COALESCE_SKIPPED），新请求排队
-                self._logger.info(
-                    "coordination COALESCE_SKIPPED session=%s old=%s new=%s",
-                    session_id,
-                    active,
-                    request_id,
-                )
-                q = self._queues.setdefault(session_id, asyncio.Queue())
-                await q.put(request_id)
-                return CoordinationDecision(
-                    decision_type="queue",
-                    request_id=request_id,
-                    wait_seconds=0.0,
-                )
+                # 会话忙碌，按策略处理（仍在锁内，使入队与 release 串行化，
+                # 避免「release 清空 active 时 B 尚未入队 → B 入队后无人唤醒」的丢失唤醒竞态）
+                if self._policy == "coalesce":
+                    # 注意：当前 coalesce 已退化为 queue —— 仅当旧请求尚未进入能力节点
+                    # （还在排队）时才可能取消，但本实现中旧请求已 active 则不取消，新请求排队。
+                    # 即 COALESCE_SKIPPED 的实际行为与 queue 策略等价。若需真「取消旧请求」，
+                    # 需向旧 request_id 发送取消信号并唤醒队列，属未来增强。
+                    self._logger.info(
+                        "coordination COALESCE_SKIPPED session=%s old=%s new=%s",
+                        session_id,
+                        active,
+                        request_id,
+                    )
+                    q = self._queues.setdefault(session_id, asyncio.Queue())
+                    await q.put(request_id)
+                    # 注：此处不再检查 self._active.get(session_id) is None 接管——
+                    # 整个 acquire 在 async with cond 锁内，release 也需同锁，无法并发清空
+                    # active，故该分支恒为 False（旧并发模型的残留死代码）。入队后由
+                    # release 唤醒队列首部即可，不会挂起。
+                    return CoordinationDecision(
+                        decision_type="queue",
+                        request_id=request_id,
+                        wait_seconds=float(q.qsize()),
+                    )
 
-            elif self._policy == "reject":
-                self._logger.info(
-                    "coordination reject session=%s request=%s",
-                    session_id,
-                    request_id,
-                )
-                return CoordinationDecision(
-                    decision_type="reject", request_id=request_id
-                )
+                elif self._policy == "reject":
+                    self._logger.info(
+                        "coordination reject session=%s request=%s",
+                        session_id,
+                        request_id,
+                    )
+                    return CoordinationDecision(
+                        decision_type="reject", request_id=request_id
+                    )
 
-            else:  # queue
-                q = self._queues.setdefault(session_id, asyncio.Queue())
-                await q.put(request_id)
-                self._logger.info(
-                    "coordination queue session=%s request=%s",
-                    session_id,
-                    request_id,
-                )
-                return CoordinationDecision(
-                    decision_type="queue",
-                    request_id=request_id,
-                    wait_seconds=0.0,
-                )
+                else:  # queue
+                    q = self._queues.setdefault(session_id, asyncio.Queue())
+                    await q.put(request_id)
+                    # 同 coalesce：锁内 active 非空，接管分支恒 False，已删除（见上方说明）。
+                    self._logger.info(
+                        "coordination queue session=%s request=%s",
+                        session_id,
+                        request_id,
+                    )
+                    return CoordinationDecision(
+                        decision_type="queue",
+                        request_id=request_id,
+                        wait_seconds=float(q.qsize()),
+                    )
 
         except Exception:
             # 协调器内部错误：降级为无互斥并发执行
@@ -111,22 +126,45 @@ class SessionCoordinator:
                 decision_type="serialize", request_id=request_id
             )
 
+    async def wait_for_turn(self, session_id: str, request_id: str) -> None:
+        """排队请求等待获取执行权。
+
+        acquire() 返回 decision_type="queue" 后调用此方法，
+        阻塞直到 release() 将本请求设为 active。
+        """
+        if not self._enabled:
+            return
+        cond = self._conditions.setdefault(session_id, asyncio.Condition())
+        async with cond:
+            while self._active.get(session_id) != request_id:
+                await cond.wait()
+
     async def release(self, session_id: str, request_id: str) -> None:
         """释放会话执行权，唤醒队列下一个。"""
         if not self._enabled:
             return
 
         try:
-            lock = self._locks.get(session_id)
-            if lock is not None and lock.locked():
-                lock.release()
-            if self._active.get(session_id) == request_id:
-                del self._active[session_id]
-            # 唤醒队列下一个（如有）
-            q = self._queues.get(session_id)
-            if q is not None and not q.empty():
-                _next = q.get_nowait()
-                # 下一个请求需自行 acquire
+            cond = self._conditions.setdefault(session_id, asyncio.Condition())
+            async with cond:
+                if self._active.get(session_id) == request_id:
+                    del self._active[session_id]
+                # 唤醒队列下一个（如有）
+                q = self._queues.get(session_id)
+                if q is not None and not q.empty():
+                    _next = q.get_nowait()
+                    self._active[session_id] = _next
+                    cond.notify_all()
+                else:
+                    # 本会话已无活动请求且无等待者：清理字典条目，避免只增不清导致内存缓涨
+                    if self._active.get(session_id) == request_id:
+                        self._active.pop(session_id, None)
+                    # acquire 对每个 session 都无条件建了 _conditions[session_id]，
+                    # 故清理不看 q 是否为 None：队列不存在或已空都需清，否则单请求
+                    # session 的 _conditions 残留（无队列路径 q is None 原被跳过）。
+                    if q is None or q.empty():
+                        self._queues.pop(session_id, None)
+                        self._conditions.pop(session_id, None)
         except Exception:
             self._logger.warning(
                 "coordination release failed session=%s request=%s",

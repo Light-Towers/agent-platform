@@ -14,15 +14,15 @@ import json
 import logging
 import time
 import uuid
-from datetime import datetime, timezone
 
+from app.infra.cache import spawn_background
 from app.infra.circuit_breaker import CircuitBreaker
 from app.schemas import McpServerConfig, McpToolResult
 
 logger = logging.getLogger(__name__)
 
 try:
-    import mcp as mcp_sdk
+    import mcp as mcp_sdk  # noqa: F401  SDK 可用性探测，_MCP_AVAILABLE 依赖其导入成功
 
     _MCP_AVAILABLE = True
 except ImportError:
@@ -162,7 +162,7 @@ class MCPClientManager:
                 tool_name,
                 caller,
             )
-            asyncio.create_task(
+            spawn_background(
                 self._audit_call(caller, server_id, tool_name, params, "rejected", 0, "MCP_TOOL_NOT_ALLOWED")
             )
             return McpToolResult(
@@ -190,7 +190,7 @@ class MCPClientManager:
         duration_ms = int((time.monotonic() - start) * 1000)
 
         if result is None:
-            asyncio.create_task(
+            spawn_background(
                 self._audit_call(caller, server_id, tool_name, params, "failed", duration_ms, "CALL_FAILED_OR_TIMEOUT")
             )
             return McpToolResult(
@@ -200,13 +200,19 @@ class MCPClientManager:
             )
 
         evidence = self._reduce_result(server_id, tool_name, result)
-        asyncio.create_task(
+        spawn_background(
             self._audit_call(caller, server_id, tool_name, params, "success", duration_ms, None)
         )
         return McpToolResult(success=True, evidence=evidence, duration_ms=duration_ms)
 
     async def _invoke_tool(self, conn: _MCPConnection, tool_name: str, params: dict):
-        """实际调用 MCP 工具（子类可覆写用于 mock 测试）。"""
+        """实际调用 MCP 工具。
+
+        TODO: 当前为 MVP 桩，未接入 mcp_sdk 真实调用（connect_all / call_tool 等
+        外围逻辑已完整实现，但此处始终返回 mock）。真实接入时替换为
+        `await conn.session.call_tool(tool_name, params)` 并解析 Content 列表。
+        子类可覆写此方法用于 mock 测试。
+        """
         if not _MCP_AVAILABLE:
             raise RuntimeError("MCP SDK not installed")
         return {"tool": tool_name, "params": params, "result": "mock"}

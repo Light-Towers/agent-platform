@@ -12,6 +12,7 @@ import time
 from typing import Any
 
 import numpy as np
+from agent_core.cache import CacheStats
 from agent_core.logging import get_logger
 
 from agent.cache.config import get_cache_config
@@ -24,7 +25,8 @@ from agent.cache.layers import (
 
 logger = get_logger(__name__)
 
-_stats: dict[str, int] = {"l1_hit": 0, "l2_hit": 0, "miss": 0, "null_hit": 0, "total": 0}
+_stats = CacheStats()
+_pending_writes: set = set()
 
 
 def _get_embedding(text: str) -> np.ndarray | None:
@@ -66,19 +68,18 @@ class SemanticCache:
         if not cfg.cache_enabled:
             return None
 
-        _stats["total"] += 1
         cache_key = _build_cache_key(
             intent, rewritten_query, cfg.kb_versions, cfg.tenant_id, cfg.gray_pct
         )
 
         if await NullCache.get(cache_key):
-            _stats["null_hit"] += 1
+            _stats.record("null_hit")
             logger.debug("NullCache 命中（防穿透）: %s", cache_key[:16])
             return {"_layer": "null", "answer": "", "trace_id": ""}
 
         result = await L1Cache.get(cache_key)
         if result is not None:
-            _stats["l1_hit"] += 1
+            _stats.record("l1_hit")
             return result
 
         if query_vec is None:
@@ -87,10 +88,10 @@ class SemanticCache:
         if query_vec is not None:
             result = await L2Cache.get(query_vec)
             if result is not None:
-                _stats["l2_hit"] += 1
+                _stats.record("l2_hit")
                 return result
 
-        _stats["miss"] += 1
+        _stats.record("miss")
         return None
 
     @staticmethod
@@ -138,25 +139,21 @@ class SemanticCache:
     async def set_async(*args: Any, **kwargs: Any) -> None:
         """fire-and-forget 异步写入（不阻塞调用方）。"""
         try:
-            asyncio.create_task(SemanticCache.set(*args, **kwargs))
+            task = asyncio.create_task(SemanticCache.set(*args, **kwargs))
+            _pending_writes.add(task)
+            task.add_done_callback(_pending_writes.discard)
         except Exception as e:
             logger.warning("缓存异步写入失败: %s", e)
 
     @staticmethod
     def get_stats() -> dict[str, int | float]:
         """返回命中率统计。"""
-        total = _stats["total"] or 1
-        hits = _stats["l1_hit"] + _stats["l2_hit"] + _stats["null_hit"]
-        return {
-            **_stats,
-            "hit_rate": round(hits / total, 4),
-        }
+        return _stats.snapshot()
 
     @staticmethod
     def reset_stats() -> None:
         """重置统计。"""
-        for k in _stats:
-            _stats[k] = 0
+        _stats.reset()
 
     @staticmethod
     async def invalidate(intent: str, rewritten_query: str) -> None:

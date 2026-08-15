@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
+
 from pydantic import BaseModel, Field
+
+Priority = Literal["high", "normal", "low"]
 
 
 class QueryRequest(BaseModel):
@@ -14,6 +17,9 @@ class QueryRequest(BaseModel):
     trace_id: str | None = Field(None, description="W3C traceparent（跨服务链路追踪）")
     session_id: str | None = Field(None, description="会话 ID（对话状态隔离）")
     context: dict[str, Any] = Field(default_factory=dict, description="额外上下文（如上传文件路径）")
+    # 以下为 app（统一 Agent 平台）贡献的可选扩展，向后兼容：旧调用方不传亦工作
+    priority: Priority | None = Field(None, description="请求优先级（admission 限流用）")
+    user_id: str | None = Field(None, description="用户标识（审计/配额用）")
 
 
 class QueryData(BaseModel):

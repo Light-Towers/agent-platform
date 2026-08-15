@@ -6,10 +6,10 @@ LangGraph 子图：收集物流单号 → 查询物流状态 → 格式化回复
 
 from __future__ import annotations
 
-from langgraph.graph import StateGraph, END
+from langgraph.graph import END, StateGraph
 
-from agent.state import KefuState
 from agent.services import extract_tracking_id, query_logistics
+from agent.state import KefuState
 
 
 async def collect_tracking_id(state: KefuState) -> KefuState:

@@ -1,10 +1,6 @@
 """Test model fallback routing in agent/llm.py."""
 import pytest
-import sys
 import os
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).parents[2]))
 
 
 class TestFallbackModel:

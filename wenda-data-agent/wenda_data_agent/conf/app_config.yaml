@@ -1,0 +1,26 @@
+# wenda-data-agent 应用配置
+server:
+  host: "0.0.0.0"
+  port: 8000
+
+llm:
+  model: "gpt-4o-mini"
+  timeout: 60.0
+  max_retries: 3
+
+embedding:
+  backend: "langchain_openai"
+  model: "text-embedding-3-small"
+  vector_dim: 1536
+
+retrieval:
+  top_k: 10
+  rrf_k: 60
+
+sql:
+  read_only_guard: true
+  max_rows: 1000
+  max_correct_retries: 3
+
+tokenizer:
+  type: "bigram"

@@ -7,6 +7,7 @@ from app.conf.retrieval_config import retrieval_cfg
 from app.core.logger import logger
 from app.core.tracing import traced_span
 from app.utils.item_name_normalize_utils import normalize_item_name
+from app.utils.escape_milvus_string_utils import escape_milvus_string
 
 
 def _embedding_span_attrs(*args, result=None, **kwargs):
@@ -75,7 +76,7 @@ def node_search_embedding(state):
 
     # 对每个商品名做规范化（去空白/品牌前缀/料号），再添加双引号，拼接为Milvus支持的in语法格式
     # 与导入侧共用 normalize_item_name，保证精确过滤口径一致（如 "HAK 180 烫金机" → "HAK180烫金机"）
-    quoted = ", ".join(f'"{normalize_item_name(v)}"' for v in item_names)
+    quoted = ", ".join(f'"{escape_milvus_string(normalize_item_name(v))}"' for v in item_names)
     # 构造最终过滤表达式
     expr = f"item_name in [{quoted}]"
     logger.info(f"创建搜索请求过滤表达式: {expr}")

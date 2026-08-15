@@ -8,7 +8,7 @@ import re
 
 import sqlparse
 from sqlparse.sql import Statement
-from sqlparse.tokens import Keyword, DML
+from sqlparse.tokens import DML
 
 _SAFE_IDENTIFIER = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*$')
 
