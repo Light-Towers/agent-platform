@@ -5,15 +5,15 @@
 > 审核维度：架构设计 / 代码质量 / 功能正确性 / 安全性 / 性能与扩展性
 > 方法：两轮独立审核 + 跨 agent 交叉核验（逐文件逐行读真实代码）
 
-> ⚠️ **时效性与准确性警告（2026-08-15 复核追加）**：本报告基于**更早代码快照**生成，部分结论已过时，引用其行号前**务必重新核对真实代码**：
+> ⚠️ **时效性与准确性警告（2026-08-15 复核追加）**：本报告基于**更早代码快照**生成，部分结论已过时，**本文件为历史审核快照，不再作为最新依据**。引用其行号前**务必重新核对真实代码**。
+> **权威最新清单见 `CODE_REVIEW_CHECKLIST.md`**（已逐行复核问题 1–8 与 U-2~U-8，并标注每项处理状态；kefu 接入已在提交 `1e86bf8` 完成）。
+> 主要过时点速览：
 > - 路径已迁移：原 `D:\Study\github\agent-platform` → 现 `D:\Study\agent-platform`。
-> - 已修复项（本报告曾判定"未修复"）：**U-4** `app/infra/coordinator.py` release 已清理 `_active/_queues/_conditions`；**U-5** `app/api/routes.py:124` 已显式 `nonlocal decision`；**U-7** `deepagents/pyproject.toml` 硬依赖完整 + 四个 optional 分组，requirements.txt 23 包均已声明。
-> - **U-3** `app/infra/db.py:191-197` 已新增 `_IDENT` 正则白名单（table/cols 非法即 `ValueError`），残余仅 `where` 子句值已参数化。
-> - **U-1** 仅 `HealthResponse` 已对齐联邦契约；`QueryRequest` 字段不统一（`AliasChoices` 双写兼容）仍属开放项，本报告"U-1 已修复"系误报。
-> - 误报澄清：wenda-data-agent 复用 `agent_core` 守卫（非重实现）；`app/` git 跟踪 `.pyc` 为 0（磁盘残留为本地构建缓存，非 git 污染）；**U-2** `app/agent/graph.py:94` 重试分支返回缺 `answer` 键属**误报**——LangGraph `StateGraph` 节点返回值为 reducer 合并语义（非整体替换），旧 `answer` 保留、`iterations` 自增触发回路由重跑，不跳过重试。
-> - 已知权衡（仍成立但非紧急，不改）：**U-6** `app/infra/otel.py` jaeger exporter 在 OTel 1.x 后弃用，已有降级不崩；**U-8** `app/rag/store.py` BM25 每次查询全量重建 + 逐条 INSERT，为可接受的简单实现权衡。
-> - 文档脱节（README/AGENTS 仅描述 `app/` 遗漏 9 包、配置表缺漏变量、Python 版本冲突等）已在 `README.md` / `AGENTS.md` / 各包 `.env.example` 中修正；kefu 迁移技术债（未接入网关、adapter 待废弃、atguigu_ai 未退役）已集中记录于 `README.md`「已知待拍板项」。
-> - 最新逐行核实结论见随附评审清单（问题 1–8 及 U-2/U-6/U-8 仍成立项），以**最新代码**为准。
+> - 原"未修复项"中多数现已修复：**U-4 / U-5 / U-7** 代码已修复；**U-3** 已加 `_IDENT` 白名单；**U-6**（otel jaeger→OTLP）、**U-8**（store.py 批量 INSERT + BM25 缓存）已代码修复；**U-2** 为 reducer 合并语义**误报**。
+> - **U-1** 仅 `HealthResponse` 已对齐；`QueryRequest` 字段双写兼容（`AliasChoices`）仍属架构待拍板项，未移除兼容层。
+> - **kefu 迁移技术债（原问题 2/3/4）已完成代码侧**：`kefu-service` 已升级为 Agent Protocol 兼容 server（新增 `POST /invoke` 返回 `QueryResponse`），网关新增 `KEFU_USE_ADAPTER` 开关（默认直连 `kefu-service:8003`），`kefu-adapter` 已弃用标记；外部 `atguigu_ai` 退役后删 `kefu-adapter/` 包即可（运维动作）。
+> - 文档脱节（README/AGENTS 遗漏 9 包、配置表缺漏、Python 版本冲突等）已修正。
+> 其余结论（安全扫描、交叉核验方法论）仍有效。
 
 ---
 
@@ -86,6 +86,7 @@
 | 问题 | `QueryRequest`：`question` vs `query`、`thread_id` vs `session_id`；`HealthResponse` 字段集完全不同 |
 | 影响 | 跨包 API 契约不一致，集成时需手动转换 |
 | 建议 | 需用户拍板是否让 `app` 改用 `shared-schemas` |
+| **最新状态（2026-08-15）** | ⚠️ **部分已解决，残留待拍板**。`HealthResponse` 已对齐联邦契约（`app/schemas.py` 已 `class HealthResponse(BaseHealthResponse)`）；`QueryRequest` 字段双写兼容（`AliasChoices`）仍保留，移除兼容层属架构决策，未擅自改动。另：`kefu-service` 已接入 `shared-schemas` 并以 `QueryResponse` 对外（提交 `1e86bf8`）。 |
 
 ### 4.2 🟡 低危（5 项）
 
@@ -96,6 +97,7 @@
 | 位置 | `app/agent/graph.py:94` |
 | 问题 | 重试返回 `{"iterations": iterations + 1, "evidence": []}` 不含 `"answer"` 键 |
 | 影响 | checkpoint 拆留可能导致跳过重试 |
+| **最新状态（2026-08-15）** | ❌ **误报**。LangGraph `StateGraph` 节点返回值为 reducer 合并语义（合并进 state，非整体替换），旧 `answer` 保留、`iterations` 自增触发回路由重跑，不跳过重试。无需改动。 |
 
 #### U-3. `db.py` vector_search f-string 拼接
 
@@ -104,6 +106,7 @@
 | 位置 | `app/infra/db.py:187` |
 | 问题 | f-string 拼接 table/cols/where |
 | 影响 | 当前调用方都硬编码，安全；但接口允许任意字符串，存在误用风险 |
+| **最新状态（2026-08-15）** | ✅ **已修复**。已新增 `_IDENT` 正则白名单（table/cols 非法即 `ValueError`）；残余仅 `where` 子句值仍 f-string 拼接，但值已参数化。 |
 
 #### U-4. `coordinator.py` `_conditions` 泄漏
 
@@ -112,6 +115,7 @@
 | 位置 | `app/infra/coordinator.py` |
 | 问题 | 无队列 session 的 `_conditions` 条目不清理 |
 | 影响 | 轻微内存泄漏 |
+| **最新状态（2026-08-15）** | ✅ **已修复**。release 时清理 `_active/_queues/_conditions`（含 q is None 原被跳过场景）。 |
 
 #### U-5. `routes.py` 缺 `nonlocal decision`
 
@@ -120,6 +124,7 @@
 | 位置 | `app/api/routes.py:129` |
 | 问题 | 缺 `nonlocal decision` 显式声明 |
 | 影响 | 依赖 Python 隐式闭包赋值（cell variable + STORE_DEREF），能运行但意图不明确 |
+| **最新状态（2026-08-15）** | ✅ **已修复**。已显式 `nonlocal decision`（带 F823 解释注释）。 |
 
 #### U-6. `otel.py` jaeger exporter 弃用
 
@@ -128,6 +133,7 @@
 | 位置 | `app/infra/otel.py:109-114` |
 | 问题 | jaeger exporter 在 OTel SDK 1.x 后已弃用 |
 | 影响 | 有降级处理，不会崩溃；建议迁移至 OTLP exporter |
+| **最新状态（2026-08-15）** | ✅ **已修复（提交 f0f9a76）**。jaeger exporter 已移除并自动映射为 `OTLPSpanExporter`，旧 `exporter="jaeger"` 配置仍兼容。 |
 
 ### 4.3 🟢 工程规范（1 项）
 
@@ -138,6 +144,7 @@
 | 位置 | `deepagents/pyproject.toml` |
 | 问题 | 21 个包在 requirements.txt 但不在 pyproject.toml（langfuse/pandas/aiosqlite/tiktoken 等） |
 | 影响 | 所有缺失包都有 try/except ImportError 降级处理，不会崩溃；但 best practice 是声明为 `[project.optional-dependencies]` |
+| **最新状态（2026-08-15）** | ✅ **已修复**。硬依赖完整 + observability/cache/docs/excel 四个 optional 分组，requirements.txt 23 包均已声明。 |
 
 ### 4.4 🔵 性能（1 项，已知设计权衡）
 
@@ -149,21 +156,24 @@
 | 问题 | BM25 每次查询全量重建索引；逐条 INSERT |
 | 影响 | 数据量大时性能下降 |
 | 备注 | 已知设计权衡，非 bug |
+| **最新状态（2026-08-15）** | ✅ **已修复（提交 f0f9a76）**。改为批量 `executemany` 插入 + BM25 索引按 `(COUNT(*), MAX(id))` 签名缓存（`_BM25_CACHE`），语料变更即失效；空表保护。 |
 
 ---
 
-## 五、建议优先级
+## 五、建议优先级（2026-08-15 更新）
 
-| 优先级 | 项 | 理由 |
-|--------|-----|------|
-| P0 | U-1 契约对齐 | 架构决策，影响跨包集成，需用户拍板 |
-| P1 | U-2 graph.py answer 键 | 可能导致重试逻辑失效 |
-| P1 | U-5 routes.py nonlocal | 代码意图不明确，一行修复 |
-| P2 | U-3 db.py f-string | 当前安全，建议加参数校验 |
-| P2 | U-4 coordinator 泄漏 | 轻微，长运行场景才显现 |
-| P2 | U-6 otel jaeger | 有降级，择机迁移 |
-| P3 | U-7 deepagents deps | 工程规范，不影响运行 |
-| P3 | U-8 BM25 性能 | 已知设计权衡 |
+| 优先级 | 项 | 理由 | 最新状态 |
+|--------|-----|------|---------|
+| P0 | U-1 契约对齐 | 架构决策，影响跨包集成，需用户拍板 | ⚠️ 残留：`HealthResponse` 已对齐，`QueryRequest` 双写兼容待拍板 |
+| P1 | U-2 graph.py answer 键 | 误报（reducer 合并语义） | ❌ 误报，无需改 |
+| P1 | U-5 routes.py nonlocal | 代码意图不明确，一行修复 | ✅ 已修复 |
+| P2 | U-3 db.py f-string | 当前安全，建议加参数校验 | ✅ 已加白名单 |
+| P2 | U-4 coordinator 泄漏 | 轻微，长运行场景才显现 | ✅ 已修复 |
+| P2 | U-6 otel jaeger | 有降级，择机迁移 | ✅ 已迁移 OTLP |
+| P3 | U-7 deepagents deps | 工程规范，不影响运行 | ✅ 已声明 optional |
+| P3 | U-8 BM25 性能 | 已知设计权衡 | ✅ 已优化 |
+
+> kefu 迁移技术债（原问题 2/3/4）：✅ 已完成代码侧（提交 `1e86bf8`），仅外部 `atguigu_ai` 退役为运维动作。
 
 ---
 
@@ -191,4 +201,6 @@
 
 ---
 
-**审核闭环。** 待用户决策项：U-1 契约对齐方案。
+**审核闭环（历史快照）。** 原待用户决策项 U-1 契约对齐：`HealthResponse` 已对齐，`QueryRequest` 双写兼容层保留待拍板（未擅自移除）。kefu 迁移技术债（问题 2/3/4）已完成代码侧（提交 `1e86bf8`）。
+
+> 本文件为 **2026-08-15 的历史审核快照**，部分结论已过时。**最新逐项状态以 `CODE_REVIEW_CHECKLIST.md` 为准**。
