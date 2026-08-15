@@ -147,7 +147,7 @@
 |---|---|---|---|---|
 | TB-1 | **DF 双 LLM 协议冗余**：`dialogue_framework.shared.llm.base_client.BaseChatClient` 与 `agent_core.llm.providers.BaseLLMProvider` 签名不兼容、互不对接 | `architecture-boundary-agent-core-vs-dialogue-framework.md:63` | 低 | DF 弃用自有 `BaseChatClient`、对齐内核协议；**不合并/删除 dialogue-framework** |
 | TB-2 | **DF 双 memory 抽象冗余**：`dialogue_framework.core.Tracker`（slots/events/stack）未使用 `agent_core.memory.ConversationMemory` | 同上:64 | 低 | DF `Tracker` 适配 `ConversationMemory`；不合并两包 |
-| TB-3 | **uv workspace 环境脆弱**：根 `uv sync` 会卸载非根 member 包（实测卸载 24 包，含 deepagents-app），默认环境不含非根包依赖，需 `uv run --package/--with` 绕过 | 实施过程实测 | 中 | 不应在默认 venv 跑 `uv sync`；建议评估 `uv sync --all-packages` 或文档固化运行约定，避免误伤 |
+| TB-3 | **uv workspace 环境脆弱**：根 `uv sync` 会卸载非根 member 包（实测卸载 24 包，含 deepagents-app），默认环境不含非根包依赖 | 实施过程实测 | 中（已缓解） | **已修复**：根因是 uv workspace 默认 `uv sync` 只装根包。固化约定为 `uv sync --all-packages --extra dev`（装全部 workspace 包 + dev 工具），单包测试用 `uv run --package <pkg> ...`；运行约定已写入 `README.md` uv workspace 段。裸 `uv sync` 仍会卸载非根包，勿直接使用 |
 | TB-4 | **M5 语义缓存统一未落地**：`agent_core.cache` 已建 `CacheStats`/`build_cache_key` 单一真相，但 app(`PgSemanticCache`)/deepagents(`ValkeySemanticCache`) 尚未统一到 `BaseSemanticCache` 接口 | `m5-semantic-cache-plan.md`（纯草案，未实施） | 中 | 仅统一接口与 key 构造，不跨后端共享缓存数据（向量空间不一致，现状保留）；`agent_core.cache` 零依赖 |
 | TB-5 | **deepagents 联邦契约统一（原 TODO）**：`shared_schemas` 在 deepagents 侧原未直接复用（仅 app 侧用），已在优化 E/P4.1 补齐断言——**已闭环**，此处仅作历史登记 | `architecture-boundary-app-vs-deepagents.md:69` | 已解决 | — |
 

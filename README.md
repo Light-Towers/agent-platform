@@ -319,6 +319,25 @@ CI（`.github/workflows/agent-platform-ci.yml`）在每次推送时执行 pytest
 > 以及若干 sibling 业务包与共享内核包。各包均为独立 `pyproject.toml` 工程，
 > 通过 `agent-core` / `shared-schemas` 共享内核与契约，以 `uv` workspace 或 editable 安装互联。
 
+### uv workspace 环境约定（重要）
+
+本仓库是 uv workspace（根 `pyproject.toml` 含 `[tool.uv.workspace]`）。**默认 `uv sync` 只安装根包及其依赖，会卸载其它 member 包**（如 `deepagents`/`kefu-service`/`wenda-data-agent`/`zhanggui-zhiku`/`dialogue-framework`），导致跨包测试/导入失败。
+
+完整开发环境请用（装全部 workspace 包 + dev 工具）：
+
+```bash
+uv sync --all-packages --extra dev
+```
+
+运行单个包的测试（无需手动装依赖）：
+
+```bash
+uv run --package deepagents-app python -m pytest deepagents/tests/unit/ -q
+uv run python -m pytest tests/ -q          # 根 app 包
+```
+
+> 详见 `docs/architecture-improvement-plan.md` §6 TB-3（uv workspace 环境脆弱）。
+
 ### 单进程平台（本 README 描述对象）
 
 ```
