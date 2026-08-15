@@ -20,7 +20,3 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 only-include = ["kefu_agent"]
-
-[tool.uv.sources]
-agent-core = { path = "../agent-core", editable = true }
-shared-schemas = { path = "../shared-schemas", editable = true }

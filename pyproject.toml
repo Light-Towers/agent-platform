@@ -63,5 +63,16 @@ target-version = "py311"
 ignore = ["B008", "E402", "E731", "BLE001", "S110", "B017", "PERF102", "RUF059"]
 
 [tool.uv.sources]
-agent-core = { path = "./agent-core", editable = true }
-shared-schemas = { path = "./shared-schemas", editable = true }
+agent-core = { workspace = true }
+shared-schemas = { workspace = true }
+
+[tool.uv.workspace]
+members = [
+    "agent-core",
+    "shared-schemas",
+    "deepagents",
+    "kefu-service",
+    "wenda-data-agent",
+    "zhanggui-zhiku",
+    "dialogue-framework",
+]
