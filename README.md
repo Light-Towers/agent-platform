@@ -5,7 +5,7 @@
 **统一生产级 Agent 平台 — Supervisor 编排 + 多能力链路 + 运行时增强**
 
 [![CI](https://github.com/Light-Towers/agent-platform/actions/workflows/agent-platform-ci.yml/badge.svg)](https://github.com/Light-Towers/agent-platform/actions/workflows/agent-platform-ci.yml)
-[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/badge/license-Apache_2.0-green.svg)](LICENSE)
 
 </div>
@@ -257,6 +257,20 @@ curl http://127.0.0.1:8000/health
 | `LLM_FALLBACK_MODEL` | `gpt-4o-mini` | 降级模型 |
 | `SEARCH_API_KEY` | `""` | Tavily 搜索 API Key |
 | `SQL_DSN` | `""` | 业务库连接串（sqlite / postgresql） |
+| `HOST` | `0.0.0.0` | 服务监听地址 |
+| `PORT` | `8000` | 服务监听端口 |
+| `VECTOR_DIM` | `512` | pgvector 向量维度（与 Embedding 模型匹配） |
+| `LLM_BASE_URL` | `https://api.openai.com/v1` | OpenAI 兼容协议基址（compose 注入） |
+| `LLM_TIMEOUT` | `60` | LLM 请求超时（秒） |
+| `EMBEDDING_MODE` | `auto` | `auto`=有 key 走远端，否则内置确定式 mock（仅开发/测试） |
+| `EMBEDDING_BASE_URL` | `""` | Embedding 远端基址（compose 注入） |
+| `EMBEDDING_API_KEY` | `""` | Embedding API Key（compose 注入） |
+| `EMBEDDING_MODEL` | `bge-small-zh` | Embedding 模型名（compose 注入） |
+| `LANGFUSE_PUBLIC_KEY` | `""` | Langfuse 公钥（与 secret/host 均填才启用 trace） |
+| `LANGFUSE_SECRET_KEY` | `""` | Langfuse 私钥 |
+| `LANGFUSE_HOST` | `https://cloud.langfuse.com` | Langfuse 服务端地址（compose 注入） |
+| `SQL_MAX_ROWS` | `100` | Text-to-SQL 业务库只读返回行数上限 |
+| `RAG_TOP_K` | `4` | RAG 检索召回条数 |
 
 ### Phase 2 配置
 
@@ -275,6 +289,11 @@ curl http://127.0.0.1:8000/health
 | `OTEL_SAMPLING_RATE` | `1.0` | 采样率（0.0–1.0） |
 | `MCP_ENABLED` | `false` | MCP client 开关（opt-in） |
 | `MCP_SERVERS` | `""` | JSON 编码的 server 配置列表 |
+| `CACHE_ENABLED` | `true` | 语义缓存开关 |
+| `CACHE_THRESHOLD` | `0.05` | 语义缓存命中相似度阈值 |
+| `MEMORY_ENABLED` | `true` | 长期记忆（pgvector）开关 |
+| `BREAKER_FAILURE_THRESHOLD` | `3` | 熔断器连续失败阈值（触发熔断） |
+| `BREAKER_RECOVERY_SECONDS` | `30` | 熔断器半开恢复等待（秒） |
 
 完整变量见 [`.env.example`](.env.example)。
 
@@ -295,11 +314,18 @@ CI（`.github/workflows/agent-platform-ci.yml`）在每次推送时执行 pytest
 
 ## 目录结构
 
+> 本仓库为 **monorepo**，根 `app/` 只是其中一套「单进程 Supervisor 平台」。
+> 另有 `deepagents/` 联邦网关编排系统（与 `app/` 并行，二者不构成上下级关系），
+> 以及若干 sibling 业务包与共享内核包。各包均为独立 `pyproject.toml` 工程，
+> 通过 `agent-core` / `shared-schemas` 共享内核与契约，以 `uv` workspace 或 editable 安装互联。
+
+### 单进程平台（本 README 描述对象）
+
 ```
 app/
 ├── main.py                # 应用工厂 + lifespan 预热（五项 Phase 2 资源初始化）
 ├── config.py              # pydantic-settings 集中配置
-├── schemas.py             # API Pydantic 契约
+├── schemas.py             # API Pydantic 契约（复用 shared-schemas，QueryRequest 经 AliasChoices 双写兼容 question/thread_id；HealthResponse 已对齐联邦契约，无需改动）
 ├── api/
 │   ├── auth.py            # 认证 + 会话防劫持
 │   └── routes.py          # /query /import /sql/train /session/revert /health
@@ -334,9 +360,45 @@ app/
     ├── revert.py          # 会话回退（Phase 2）
     ├── otel.py            # OTel 追踪（Phase 2）
     └── mcp_client.py      # MCP client（Phase 2）
+```
 
-eval/                      # golden set + 评测脚本
-tests/                     # 单元测试（40 用例）
+### 联邦网关编排系统（并行 sibling）
+
+```
+deepagents/                # 联邦网关 + 3 子服务编排中枢（详见 deepagents/README.md）
+                          #   - api.server：网关入口（guardrail / 意图分类 / 改写 / 语义缓存 / Planner）
+                          #   - agent/：3 子 Agent（text_to_sql / rag_query / customer_service）
+                          #   - AGENT_MODE=local|remote 切换本地子 Agent 或远程 AsyncSubAgent
+```
+
+### 共享内核与契约
+
+```
+agent-core/                # 零依赖运行时内核：tracing / guardrails / sql 守卫 / llm / memory / tool registry
+shared-schemas/            # deepagents 联邦 4 服务共享的 Pydantic 契约（QueryResponse 等）
+```
+
+### 业务 / 适配 sibling 包
+
+```
+kefu-adapter/              # atguigu_ai 老系统 REST → 统一 QueryResponse 适配层（:8002）
+                          #   —— 经 KEFU_API_URL(默认 :5005) 桥接**外部** atguigu_ai（仓库内无此代码，glob 命中 0）
+                          #   —— 迁移计划(refactor-plan Phase 7④)要求废弃，但尚未执行：
+                          #      kefu-service 未升级 Agent Protocol，且 atguigu_ai 未下线，adapter 暂不能删（见问题 3/4）
+kefu-service/              # kefu 迁移版（deepagents + LangGraph），已实现且 CI 通过，但尚未接入网关
+                          #   —— 迁移需先将本服务升级为 Agent Protocol server 并补齐 QueryResponse 契约，
+                          #      非简单改 KEFU_ADAPTER_URL（详见 kefu-service/main.py 顶部注释）
+wenda-adapter/             # wenda 老系统 SSE → JSON 适配层（:8001）
+wenda-data-agent/          # Text-to-SQL 数据分析垂直场景（生产化改造自 courses/.../data-agent）
+zhanggui-zhiku/            # 掌柜智库：RAG 知识库导入 + 多路检索问答一体化服务（:8900）
+dialogue-framework/        # LLM 对话系统框架基础设施（生产化改造自 courses/.../atguigu_ai）
+```
+
+### 测试与评测
+
+```
+eval/                      # golden set + 评测脚本（针对 app/ 平台）
+tests/                     # 单元测试（40 用例，针对 app/ 平台）
 ```
 
 ---
@@ -356,6 +418,13 @@ tests/                     # 单元测试（40 用例）
 | admission 崩溃恢复 vs 不存储问题全文 | 元数据可恢复，未执行请求标记 rejected，客户端可重试 |
 
 ---
+
+## 已知待拍板项（技术债）
+
+> 下列项为架构决策 / 迁移工程，需在拍板后实施，**非文档层面的简单修复**。
+
+- **U-1 · QueryRequest 入站字段名不统一（待拍板）**：`app/schemas.py:41-54` 经 `AliasChoices("query","question")` / `AliasChoices("session_id","thread_id")` 双写兼容。内部 state 与 DB 列名均为 `question`（`app/agent/graph.py`、`app/sql/schema_store.py`）。移除兼容层前须确认全部入站/出站边界已统一。*注：旧评审称 `HealthResponse` 字段集完全不同属误判——`HealthResponse` 已 `class HealthResponse(BaseHealthResponse)` 对齐联邦契约（`shared-schemas/health.py:25-40`），无需处理。*
+- **U-2 · kefu 迁移未完成（待实施）**：① `kefu-service` 已实现且 CI 通过，但未接入 `deepagents` 网关（`config.py:49` 仍指向 `kefu-adapter:8002`）；② 远程模式走 Agent Protocol（`async_subagents.py`），`kefu-service` 当前仅为普通 FastAPI REST 且返回 `list-of-{text}`，**非简单改 URL 可接入**；③ 迁移计划（`refactor-plan.md` Phase 7④）要求废弃 `kefu-adapter` 但未执行；④ `kefu-adapter` 经 `KEFU_API_URL`（默认 :5005）桥接**外部** `atguigu_ai`（不在仓库内），老系统未退役。→ 接入顺序：升级 `kefu-service` 为 Agent Protocol server + 补齐 `QueryResponse` → 切换网关 → 退役 `atguigu_ai` → 移除 `kefu-adapter`。
 
 ## 路线图
 

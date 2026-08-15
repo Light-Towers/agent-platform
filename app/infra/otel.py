@@ -108,15 +108,19 @@ def init_otel(
             provider.add_span_processor(BatchSpanProcessor(exporter_obj))
         elif exporter == "jaeger":
             # 弃用：opentelemetry-exporter-jaeger 在 OTel SDK 1.x 后已归档（thrift 协议停更）。
-            # Jaeger 现推荐 OTLP 接收端，请用 exporter="otlp"（endpoint 指向 Jaeger OTLP 端口）。
-            # 保留此分支以兼容旧配置，但显式告警；若包未安装则下方 except 降级为 NoOpTracer。
+            # 故不再导入归档的 JaegerExporter，自动映射为 OTLP（Jaeger 现推荐 OTLP 接收端），
+            # 旧配置 exporter="jaeger" 仍可工作（endpoint 指向 Jaeger OTLP 端口即可），
+            # 无需安装 opentelemetry-exporter-jaeger。
             logger.warning(
-                "OTEL_EXPORTER=jaeger 已弃用（JaegerExporter 归档），请改用 exporter='otlp'"
+                "OTEL_EXPORTER=jaeger 已弃用（JaegerExporter 归档），已自动映射为 OTLP；"
+                "建议显式配置 exporter='otlp'"
             )
-            from opentelemetry.exporter.jaeger.thrift import JaegerExporter
+            from opentelemetry.exporter.otlp.proto.http.trace_exporter import (
+                OTLPSpanExporter,
+            )
             from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
-            exporter_obj = JaegerExporter()
+            exporter_obj = OTLPSpanExporter(endpoint=endpoint or None)
             provider.add_span_processor(BatchSpanProcessor(exporter_obj))
 
         trace.set_tracer_provider(provider)

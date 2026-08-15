@@ -5,6 +5,16 @@
 > 审核维度：架构设计 / 代码质量 / 功能正确性 / 安全性 / 性能与扩展性
 > 方法：两轮独立审核 + 跨 agent 交叉核验（逐文件逐行读真实代码）
 
+> ⚠️ **时效性与准确性警告（2026-08-15 复核追加）**：本报告基于**更早代码快照**生成，部分结论已过时，引用其行号前**务必重新核对真实代码**：
+> - 路径已迁移：原 `D:\Study\github\agent-platform` → 现 `D:\Study\agent-platform`。
+> - 已修复项（本报告曾判定"未修复"）：**U-4** `app/infra/coordinator.py` release 已清理 `_active/_queues/_conditions`；**U-5** `app/api/routes.py:124` 已显式 `nonlocal decision`；**U-7** `deepagents/pyproject.toml` 硬依赖完整 + 四个 optional 分组，requirements.txt 23 包均已声明。
+> - **U-3** `app/infra/db.py:191-197` 已新增 `_IDENT` 正则白名单（table/cols 非法即 `ValueError`），残余仅 `where` 子句值已参数化。
+> - **U-1** 仅 `HealthResponse` 已对齐联邦契约；`QueryRequest` 字段不统一（`AliasChoices` 双写兼容）仍属开放项，本报告"U-1 已修复"系误报。
+> - 误报澄清：wenda-data-agent 复用 `agent_core` 守卫（非重实现）；`app/` git 跟踪 `.pyc` 为 0（磁盘残留为本地构建缓存，非 git 污染）；**U-2** `app/agent/graph.py:94` 重试分支返回缺 `answer` 键属**误报**——LangGraph `StateGraph` 节点返回值为 reducer 合并语义（非整体替换），旧 `answer` 保留、`iterations` 自增触发回路由重跑，不跳过重试。
+> - 已知权衡（仍成立但非紧急，不改）：**U-6** `app/infra/otel.py` jaeger exporter 在 OTel 1.x 后弃用，已有降级不崩；**U-8** `app/rag/store.py` BM25 每次查询全量重建 + 逐条 INSERT，为可接受的简单实现权衡。
+> - 文档脱节（README/AGENTS 仅描述 `app/` 遗漏 9 包、配置表缺漏变量、Python 版本冲突等）已在 `README.md` / `AGENTS.md` / 各包 `.env.example` 中修正；kefu 迁移技术债（未接入网关、adapter 待废弃、atguigu_ai 未退役）已集中记录于 `README.md`「已知待拍板项」。
+> - 最新逐行核实结论见随附评审清单（问题 1–8 及 U-2/U-6/U-8 仍成立项），以**最新代码**为准。
+
 ---
 
 ## 一、项目概况

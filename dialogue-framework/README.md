@@ -18,7 +18,7 @@ updated: 2026-08-13
 
 ## 技术栈
 
-- Python 3.10+
+- Python 3.11+（与全仓 `requires-python = ">=3.11"` 一致）
 - FastAPI · LangGraph · pgvector · pydantic v2 · pydantic-settings
 - langchain 生态（langchain-openai>=0.3）
 - Postgres（psycopg）· JSON Store（开发零依赖）

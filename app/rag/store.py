@@ -1,6 +1,7 @@
 """分块存储与混合检索：pgvector 向量召回 + BM25 关键词召回 + RRF 融合。
 
-MVP 阶段 BM25 语料在查询时全量加载（万级分块内可接受）；
+MVP 阶段 BM25 语料在查询时加载（万级分块内可接受）；
+为降低重复开销，BM25 索引按 (行数, 最大 id) 签名缓存，语料变化即失效；
 规模上来后再替换为 ES/全文索引，检索接口保持不变。
 """
 
@@ -16,6 +17,15 @@ from app.rag.embed import embed_query, embed_texts
 
 _BM25_LOAD_LIMIT = 10000
 _RRF_K = 60
+
+# BM25 索引缓存：signature=(count, max_id) -> (BM25Okapi, [id,...])
+# 新增/删除 chunks 会改变签名从而失效；纯追加场景命中缓存避免每查询重建。
+_BM25_CACHE: dict = {}
+
+
+def _invalidate_bm25_cache() -> None:
+    """语料变更后清空 BM25 缓存。"""
+    _BM25_CACHE.clear()
 
 
 def tokenize(text: str) -> list[str]:
@@ -45,13 +55,17 @@ async def add_document(pool, source: str, chunks: list[Chunk]) -> str:
     if not chunks:
         return doc_id
     vectors = await embed_texts([c.text for c in chunks])
+    params = [
+        (doc_id, source, c.heading, c.text, vec)
+        for c, vec in zip(chunks, vectors)
+    ]
     async with pool.connection() as conn:
-        for chunk, vec in zip(chunks, vectors):
-            await conn.execute(
-                "INSERT INTO chunks (doc_id, source, heading, content, embedding) "
-                "VALUES (%s, %s, %s, %s, %s)",
-                (doc_id, source, chunk.heading, chunk.text, vec),
-            )
+        await conn.executemany(
+            "INSERT INTO chunks (doc_id, source, heading, content, embedding) "
+            "VALUES (%s, %s, %s, %s, %s)",
+            params,
+        )
+    _invalidate_bm25_cache()
     return doc_id
 
 
@@ -63,16 +77,35 @@ async def _vector_ids(pool, embedding: list[float], k: int) -> list[int]:
 async def _bm25_ids(pool, query: str, k: int) -> list[int]:
     async with pool.connection() as conn:
         cur = await conn.execute(
-            "SELECT id, content FROM chunks ORDER BY id LIMIT %s", (_BM25_LOAD_LIMIT,)
+            "SELECT COUNT(*), COALESCE(MAX(id), 0) FROM chunks"
         )
-        rows = await cur.fetchall()
-    if not rows:
+        row = await cur.fetchone()
+    count, max_id = (row[0], row[1]) if row else (0, 0)
+    signature = (count, max_id)
+
+    cached = _BM25_CACHE.get(signature)
+    if cached is not None:
+        bm25, ids = cached
+    else:
+        async with pool.connection() as conn:
+            cur = await conn.execute(
+                "SELECT id, content FROM chunks ORDER BY id LIMIT %s",
+                (_BM25_LOAD_LIMIT,),
+            )
+            rows = await cur.fetchall()
+        if not rows:
+            _BM25_CACHE[signature] = (None, [])
+            return []
+        corpus = [tokenize(r[1]) for r in rows]
+        bm25 = BM25Okapi(corpus)
+        ids = [r[0] for r in rows]
+        _BM25_CACHE[signature] = (bm25, ids)
+
+    if bm25 is None:
         return []
-    corpus = [tokenize(r[1]) for r in rows]
-    bm25 = BM25Okapi(corpus)
     scores = bm25.get_scores(tokenize(query))
-    order = sorted(range(len(rows)), key=lambda i: scores[i], reverse=True)
-    return [rows[i][0] for i in order[:k] if scores[i] > 0]
+    order = sorted(range(len(ids)), key=lambda i: scores[i], reverse=True)
+    return [ids[i] for i in order[:k] if scores[i] > 0]
 
 
 async def retrieve_chunks(pool, query: str, k: int | None = None) -> list[dict]:
