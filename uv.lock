@@ -15,6 +15,7 @@ source = { editable = "agent-core" }
 
 [package.metadata]
 requires-dist = [
+    { name = "langchain-core", marker = "extra == 'langchain'" },
     { name = "langchain-openai", marker = "extra == 'llm-openai'" },
     { name = "openai-agents", marker = "extra == 'tools-mcp'" },
     { name = "opentelemetry-api", marker = "extra == 'tracing'", specifier = ">=1.24" },
@@ -23,7 +24,7 @@ requires-dist = [
     { name = "sqlglot", marker = "extra == 'sql'", specifier = ">=25.0" },
     { name = "starlette", marker = "extra == 'web'" },
 ]
-provides-extras = ["tracing", "llm-openai", "web", "memory-mongo", "tools-mcp", "sql"]
+provides-extras = ["tracing", "llm-openai", "web", "memory-mongo", "tools-mcp", "sql", "langchain"]
 
 [[package]]
 name = "agent-platform"

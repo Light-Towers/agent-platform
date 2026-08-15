@@ -8,6 +8,9 @@ All notable changes to this project are documented here.
 
 > 详见 `docs/refactor-plan.md` v3.6 + `docs/audit-report.md`
 
+#### Changed
+- **模型 fallback 收敛** (`agent/llm.py` → `agent_core/llm/`): 删除 `deepagents` 侧的 `_FallbackModel` 子类，降级路由（连续失败计数 + 冷却窗口 + 成功复位）统一收敛为内核 `FallbackChatModel` 单一真相源；`LangChainFallbackModel`（`BaseChatModel` 子类，仅 langchain extra 时导入）作为薄适配层委托内核，杜绝双份降级逻辑与「永久降级」缺陷。`create_fallback_model()` 有备用模型时直接返回 `LangChainFallbackModel`。
+
 #### Phase 0 · 可观测性统一 + 评测基线 + spike
 - **Langfuse 适配** (`agent/tracing/langfuse_adapter.py`): 三态设计（开发 no-op / CI Langfuse / 生产 ClickHouse），与 agent-core OTel 共存
 - **W3C traceparent 传播** (`agent/tracing/trace_propagation.py`): 跨服务 trace 上下文注入/提取，无 OTel 时 no-op

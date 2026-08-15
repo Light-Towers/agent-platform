@@ -50,6 +50,11 @@ tools-mcp = [
 sql = [
     "sqlglot>=25.0",
 ]
+# LangChain 兼容适配（BaseChatModel 子类）。供 deepagents 等需要
+# isinstance(BaseChatModel) 检查的框架薄适配；核心降级逻辑仍在 fallback.py。
+langchain = [
+    "langchain-core",
+]
 
 [tool.ruff]
 line-length = 120

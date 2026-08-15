@@ -17,4 +17,14 @@ __all__ = [
     "register_provider",
     "get_llm_client",
     "clear_cache",
+    "LangChainFallbackModel",
 ]
+
+
+def __getattr__(name: str):
+    # LangChain 兼容子类依赖可选 extra；延迟导入避免内核强依赖。
+    if name == "LangChainFallbackModel":
+        from agent_core.llm.fallback_lc import LangChainFallbackModel
+
+        return LangChainFallbackModel
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
