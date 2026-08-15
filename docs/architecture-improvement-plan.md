@@ -101,7 +101,7 @@
   3. `MemoryBackend` 协议下沉 `agent_core.memory`，供双轨复用（可选）。
 - **必须保留**的自研外壳（硬约束，禁止为"统一"而弱化）：`app/main.py` 的 admission 排队、session coordinator、SSE 事件映射、语义缓存、`sqlglot` SQL 守卫、PG checkpoint、`gateway/input_guard.py` 合规护栏；`deepagents` 的联邦 remote subagent 委派治理（重试/429/健康检查）。
 - **风险**：编排核心若误合并影响面最大；故收敛限定在内核/契约层，每阶段独立可测。
-- **专项规划**：详见 `docs/plan-e-dual-track-convergence.md`（P4.1~P4.3 分阶段草案，待评审）。
+- **专项规划**：详见 `docs/plan-e-dual-track-convergence.md`（P4.1~P4.3 已实施，经独立审核修订后落地）。
 
 ## 3. 必须保留、不可替换的深度定制（护栏清单）
 
@@ -122,7 +122,7 @@
 | P1 | 优化 A（`AgentState` → Pydantic） | `app/agent/graph.py` + state 用例 | pytest + eval 全绿 | ✅ 已落地（commit f0a5f43） |
 | P2 | 优化 B（护栏共享内核 + 双视图统一入口） | 入口链路 + input_guard 单测 | pytest + eval 全绿 | ✅ 已落地（commit a23755e） |
 | P3 | 优化 C（memory backend 协议） | `app/memory/longterm.py` 行为 | 新增 backend 单测 + eval 全绿 | ✅ 已落地（commit dd51aa9） |
-| P4（后置） | 优化 E（双轨收敛） | 内核/契约层 | 独立专项 + eval 充分验证 | 专项规划 `docs/plan-e-dual-track-convergence.md`（内核层收敛，非合并代码） |
+| P4（后置） | 优化 E（双轨收敛） | 内核/契约层 | 独立专项 + eval 充分验证 | ✅ P4.1~P4.3 已落地（shared_schemas 断言 + SQL 守卫统一 + MemoryBackend 下沉内核）；专项规划见 `docs/plan-e-dual-track-convergence.md` |
 
 > P0~P3 均为**局部改动 + 向后兼容**，每阶段结束跑 `make test`（含 40 单测）与 `make eval`（12 golden）即可确认无回归。P4 为架构级，单独立项。
 
