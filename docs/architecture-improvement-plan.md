@@ -91,15 +91,17 @@
 - **测试边界**：无需功能回归；仅验证 `make` 各目标可运行。
 - **收益**：统一本地/CI 入口，降低新成员上手与回归执行成本。
 
-### 优化 E：双轨编排收敛（高优先级 / 高风险，建议后置）
+### 优化 E：双轨编排收敛（高优先级 / 高风险，独立专项）
 
 - **借鉴来源**：本项目 `deepagents/` 已验证 `create_deep_agent` 可用；CrewAI 双范式（Crews+Flows）说明"自主 vs 可控"可共存但需统一底座。
-- **当前差距**：`app/` 自研 Supervisor 图与 `deepagents/` 应用层重复实现编排，技术栈分裂，维护双倍成本。
-- **方案要点（仅方向，非本轮落地）**：
-  1. 以 `create_deep_agent` 为统一底座，将 `app/graph.py` 的 `route/search/rag/sql/mcp` 节点改造为 subagent 或工具。
-  2. **必须保留**的自研外壳：`app/main.py` 的 admission 排队、session coordinator、SSE 事件映射 `_node_event`、语义缓存（`cache/`）、`sqlglot` SQL 守卫、`gateway/input_guard.py` 合规护栏、联邦 remote subagent 委派治理（重试/429/健康检查）。
-- **风险**：影响面最大（编排核心），需独立专项，且开启 `REFLEXION_ENABLED`/`PLANNER_ENABLED` 默认开关前需充分 eval。
-- **收益**：消除双轨，免费获得并行委派/反思；但**本轮不实施**，待 A~D 落地且 eval 门禁稳定后再评估。
+- **当前差距**：`app/` 自研 Supervisor 图与 `deepagents/` 应用层重复实现编排，技术栈分裂，维护双倍成本。**但调研确认双轨零代码耦合，且已通过 `agent_core` 共享内核**；重复主要在"应用层编排形态"而非"能力实现"。
+- **收敛范围（基于调研修正方向）**：**不在编排层合并代码**——强行以 `create_deep_agent` 为底座重写 `app/graph.py` 会破坏 `app` 的 admission/coordinator/revert/PG checkpoint/sqlglot 双保险/SSE 外壳，且丢失 `deepagents` 的联邦远程治理。正确收敛在**共享内核层与联邦契约层**：
+  1. `shared_schemas` 契约对齐：`deepagents/agent/async_subagents.py` 的远程响应接入 `QueryResponse` 断言（消除不对称）。
+  2. SQL 守卫统一评估：`deepagents/tools/sql_validation.py`（sqlparse）与 `agent_core.sql.guard`（sqlglot）的方言兼容评估（可选）。
+  3. `MemoryBackend` 协议下沉 `agent_core.memory`，供双轨复用（可选）。
+- **必须保留**的自研外壳（硬约束，禁止为"统一"而弱化）：`app/main.py` 的 admission 排队、session coordinator、SSE 事件映射、语义缓存、`sqlglot` SQL 守卫、PG checkpoint、`gateway/input_guard.py` 合规护栏；`deepagents` 的联邦 remote subagent 委派治理（重试/429/健康检查）。
+- **风险**：编排核心若误合并影响面最大；故收敛限定在内核/契约层，每阶段独立可测。
+- **专项规划**：详见 `docs/plan-e-dual-track-convergence.md`（P4.1~P4.3 分阶段草案，待评审）。
 
 ## 3. 必须保留、不可替换的深度定制（护栏清单）
 
@@ -120,7 +122,7 @@
 | P1 | 优化 A（`AgentState` → Pydantic） | `app/agent/graph.py` + state 用例 | pytest + eval 全绿 | ✅ 已落地（commit f0a5f43） |
 | P2 | 优化 B（护栏共享内核 + 双视图统一入口） | 入口链路 + input_guard 单测 | pytest + eval 全绿 | ✅ 已落地（commit a23755e） |
 | P3 | 优化 C（memory backend 协议） | `app/memory/longterm.py` 行为 | 新增 backend 单测 + eval 全绿 | ✅ 已落地（commit dd51aa9） |
-| P4（后置） | 优化 E（双轨收敛） | 全量 | 独立专项 + eval 充分验证 | 独立专项，本轮不实施 |
+| P4（后置） | 优化 E（双轨收敛） | 内核/契约层 | 独立专项 + eval 充分验证 | 专项规划 `docs/plan-e-dual-track-convergence.md`（内核层收敛，非合并代码） |
 
 > P0~P3 均为**局部改动 + 向后兼容**，每阶段结束跑 `make test`（含 40 单测）与 `make eval`（12 golden）即可确认无回归。P4 为架构级，单独立项。
 
