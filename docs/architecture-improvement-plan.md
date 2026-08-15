@@ -166,3 +166,36 @@
 - TB-4 是已规划未实施的**独立专项**（M5），与 E 平行，可单独排期。
 
 *生成依据：v2 实施过程实测 + `docs/` 下各边界调研与专项规划文档登记的待办项汇总（2026-08-16）。*
+
+---
+
+## 7. v2 分支 15 条严格审核 — 修复登记（2026-08-16）
+
+来源：用户派发三评审子代理产出的 15 条审核（MUST FIX #1 / SHOULD FIX #2-#10 / CONSIDER #11-#15），已逐条源码核验，14/15 成立（#13 影响面窄于报告，见下）。
+
+### 7.1 本轮已修复（app 护栏组 + lint 固化）
+
+| 编号 | 问题 | 核验结论 | 修复 | 状态 |
+|---|---|---|---|---|
+| #1 | app 护栏假拦截：`route_node` blocked 返 `route:"direct"` 无短路，`synthesize_node` 覆盖 `answer`，`remember()` 写原文进记忆 | 成立 | `graph.py`：`blocked` 返 `route:"blocked"` + `add_conditional_edges` 加 `blocked: END` 短路；answer 不再被覆盖；拦截不进 synthesize 故不 `remember` | ✅ 已修 |
+| #2 | 脱敏未传播：`guard["redacted_text"]` 仅局部变量，未写回 `state.question` | 成立 | `graph.py`：正常路由返回加 `"question": question`（脱敏值）；下游路由/记忆均用脱敏文本 | ✅ 已修 |
+| #3 | ruff 默认 `select=E4,E7,E9,F` 无 I 组，import 排序规则被静默关闭 | 成立 | `pyproject.toml [tool.ruff.lint]` 显式 `select=["E4","E7","E9","F","I"]` 固化规则集 | ✅ 已修 |
+| #4 | app 护栏无回归测试 | 成立 | 新增 `tests/test_input_guard_graph.py`：拦截短路 / 脱敏传播 / guard 关闭透传（3 例） | ✅ 已修 |
+| #9 | 降级阈值 `failure_threshold` 1→3 漂移 | 已自然满足 | `agent_core.llm.fallback.FallbackChatModel` 默认 `threshold=3`，`build_chat_model()` 未覆盖；无需改 | ✅ 核验通过 |
+
+### 7.2 已核验、待排期（非本轮强制范围）
+
+| 编号 | 问题 | 现状 | 建议 |
+|---|---|---|---|
+| #5 | fallback `bind_tools` 恒绑主模型，结构化输出不可降级 | v2 重构后 `FallbackChatModel` 仅 `with_structured_output`（亦恒绑 primary）；路由有 `heuristic_route` 兜底，影响有限 | 后续增强：结构化输出也走降级路由 |
+| #6 | fallback `stream` 主模型异常后重播 fallback 全量，客户端收到重复 chunk | app 链路用 `ainvoke` 未用 stream，影响面有限 | 后续增强：stream 失败应清空已吐 chunk |
+| #7 | `requirements.txt` 未同步 `shared-schemas`/`sqlglot` | 仓库以 uv workspace 为准，`requirements.txt` 为遗留产物 | 待确认是否仍需维护，否则删除 |
+| #8 | SQL 守卫 `LIMIT>100` 截断 + 文本重生成 | `agent_core.sql.guard` 行为，需独立评估截断阈值合理性 | 单独排期 |
+| #10 | 仅 workspace 安装 + 缺 CHANGELOG | 工程约定问题 | 补 CHANGELOG 或明确 uv workspace 为唯一安装入口 |
+| #11 | `_validate_state`/`guard_middleware` 文档提及但代码不存在 | 文档与实现脱节，仅为文档清理 | 文档勘误 |
+| #12 | `make type` 是 ruff 别名 | 非缺陷 | 无需修 |
+| #13 | `rag_query` 端点 httpx 兜底 | 实际优先走 `AsyncSubAgent`，httpx 仅兜底且已收敛，影响窄于报告 | 维持现状 |
+| #14 | `zhanggui-zhiku` 双 `uv.lock` | 子包独立 lock，需确认是否并入 workspace | 单独排期 |
+| #15 | logger name 变更 | 观测一致性问题 | 低优 |
+
+*门禁：本轮修复后 `ruff check .` 全绿，`pytest tests/` 84 passed（含新增 3 例）。*

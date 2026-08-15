@@ -42,12 +42,14 @@ def build_graph(llm, checkpointer=None, mcp_manager: MCPClientManager | None = N
         if settings.guard_enabled:
             guard = guard_input(question)
             if guard["blocked"]:
+                # 拦截后直接短路到 END，避免被 synthesize_node 覆盖 answer
                 return {
                     "answer": "抱歉，您的输入包含不安全的内容，请重新描述。",
-                    "route": "direct",
+                    "route": "blocked",
                     "sub_query": "",
                     "route_reason": "被输入护栏拦截（injection）",
                 }
+            # 脱敏文本写回 state，后续路由/记忆均使用脱敏后内容，避免原文进记忆
             question = guard["redacted_text"]
 
         # 上下文压缩：多轮会话 token 超阈值时摘要旧消息
@@ -75,6 +77,7 @@ def build_graph(llm, checkpointer=None, mcp_manager: MCPClientManager | None = N
             "sub_query": decision.sub_query,
             "route_reason": decision.reason,
             "memory_notes": memory_notes,
+            "question": question,  # 写回脱敏后的问题
         }
 
     async def search_node(state: AgentState) -> dict:
@@ -160,7 +163,7 @@ def build_graph(llm, checkpointer=None, mcp_manager: MCPClientManager | None = N
     builder.add_conditional_edges(
         "route",
         pick_capability,
-        {"search": "search", "rag": "rag", "sql": "sql", "direct": "direct", "mcp": "mcp"},
+        {"search": "search", "rag": "rag", "sql": "sql", "direct": "direct", "mcp": "mcp", "blocked": END},
     )
     builder.add_edge("search", "synthesize")
     builder.add_edge("rag", "synthesize")

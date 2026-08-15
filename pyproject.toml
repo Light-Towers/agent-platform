@@ -55,6 +55,8 @@ line-length = 120
 target-version = "py311"
 
 [tool.ruff.lint]
+# 显式 select，固化 lint 门禁规则集，避免依赖 ruff 默认 select（E4,E7,E9,F）漂移导致 I(isort) 等规则被静默关闭。
+select = ["E4", "E7", "E9", "F", "I"]
 # 以下为既有风格/惯例类告警，非逻辑阻断；收敛以让 CI 门禁（ruff check .）转绿。
 # B008: FastAPI 在依赖注入（Depends(...)）中于函数默认参数位置调用是官方推荐写法，非真实 bug。
 # E402: 模块级 import 不在顶部（deepagents 多因 load_dotenv()/sys.path 后再 import，deliberate）。
