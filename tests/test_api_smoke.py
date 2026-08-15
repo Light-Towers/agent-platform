@@ -12,7 +12,7 @@ def test_health_memory_mode():
         resp = client.get("/health")
         assert resp.status_code == 200
         data = resp.json()
-        assert data["status"] == "ok"
+        assert data["status"] == "healthy"
         assert data["storage"] == "memory"
         assert data["llm"] is False
 

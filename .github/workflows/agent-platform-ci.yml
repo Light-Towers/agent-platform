@@ -12,6 +12,16 @@ on:
       - "Dockerfile"
       - ".env.example"
       - ".github/workflows/agent-platform-ci.yml"
+      - "agent-core/**"
+      - "shared-schemas/**"
+      - "deepagents/**"
+      - "dialogue-framework/**"
+      - "wenda-data-agent/**"
+      - "zhanggui-zhiku/**"
+      - "courses/**"
+      - "wenda-adapter/**"
+      - "kefu-adapter/**"
+      - "kefu-service/**"
   pull_request:
     paths:
       - "app/**"
@@ -23,6 +33,16 @@ on:
       - "Dockerfile"
       - ".env.example"
       - ".github/workflows/agent-platform-ci.yml"
+      - "agent-core/**"
+      - "shared-schemas/**"
+      - "deepagents/**"
+      - "dialogue-framework/**"
+      - "wenda-data-agent/**"
+      - "zhanggui-zhiku/**"
+      - "courses/**"
+      - "wenda-adapter/**"
+      - "kefu-adapter/**"
+      - "kefu-service/**"
 
 jobs:
   test:
@@ -34,8 +54,10 @@ jobs:
           python-version: "3.11"
           cache: pip
       - name: Install
-        run: pip install -e ".[dev]"
+        run: pip install -e ".[dev]" -e ./shared-schemas -e ./agent-core -e ./dialogue-framework -e ./wenda-data-agent -e ./deepagents
       - name: Unit tests
         run: pytest -q
+      - name: Ruff lint
+        run: ruff check .
       - name: Eval gate (heuristic routing baseline)
         run: python eval/run_eval.py --fail-below 1.0

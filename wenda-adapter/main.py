@@ -1,25 +1,27 @@
-"""wenda-adapter：SSE→JSON 适配层。
+"""wenda-adapter：JSON 转发适配层。
 
-wenda `/api/query` 是 SSE 流式（text/event-stream），与联邦网关目标 JSON schema 不兼容。
-本适配器消费 SSE 流 → 聚合为 QueryResponse JSON → 返回给网关。
+wenda-data-agent `/api/query` 返回 SqlQueryResponse JSON，本适配器转发并映射为
+联邦网关 QueryResponse JSON 契约。
 
 wenda 快照零改动（AGENTS.md 约束）。
 """
 
 from __future__ import annotations
 
-import json
+import logging
 import os
 import time
 from contextlib import asynccontextmanager
-from pathlib import Path
 
 import httpx
 from dotenv import find_dotenv, load_dotenv
 from fastapi import FastAPI
 
 load_dotenv(find_dotenv())
+logger = logging.getLogger(__name__)
 
+# WENDA_API_URL 默认指向 wenda-data-agent 生产服务（端口 8000）。
+# 可通过环境变量覆盖回退课程快照。
 WENDA_API_URL = os.getenv("WENDA_API_URL", "http://localhost:8000")
 ADAPTER_VERSION = "0.1.0"
 
@@ -43,57 +45,9 @@ def _get_client() -> httpx.AsyncClient:
     return _client
 
 
-async def _consume_sse_stream(response: httpx.Response) -> tuple[str, dict | None, str | None]:
-    """消费 SSE 流，聚合为 (answer, data, error)。
-
-    wenda SSE 格式：`data: {json_chunk}\\n\\n`
-    chunk 有 type 字段，最后一条通常是最终回答。
-    """
-    answer_parts: list[str] = []
-    last_data: dict | None = None
-    error_msg: str | None = None
-
-    async for line in response.aiter_lines():
-        if not line.startswith("data: "):
-            continue
-        payload = line[len("data: "):].strip()
-        if not payload:
-            continue
-        try:
-            chunk = json.loads(payload)
-        except json.JSONDecodeError:
-            continue
-
-        chunk_type = chunk.get("type", "")
-        if chunk_type == "error":
-            error_msg = chunk.get("message", "unknown error")
-            break
-
-        if chunk_type == "result":
-            data = chunk.get("data")
-            if isinstance(data, str) and data:
-                answer_parts.append(data)
-            elif isinstance(data, dict):
-                text = data.get("answer") or data.get("content") or data.get("text") or ""
-                if isinstance(text, str) and text:
-                    answer_parts.append(text)
-                last_data = data
-            continue
-
-        content = chunk.get("content") or chunk.get("answer") or chunk.get("text") or ""
-        if isinstance(content, str) and content:
-            answer_parts.append(content)
-
-        if chunk_type in ("final", "answer", "complete"):
-            last_data = chunk
-
-    answer = "".join(answer_parts)
-    return answer, last_data, error_msg
-
-
 @app.post("/query")
 async def query(body: dict):
-    """转发查询到 wenda，消费 SSE 流，返回 JSON。"""
+    """转发查询到 wenda-data-agent，返回 JSON。"""
     from shared_schemas import QueryData, QueryResponse
 
     start = time.perf_counter()
@@ -106,41 +60,44 @@ async def query(body: dict):
     try:
         upstream_headers: dict[str, str] = {}
         try:
-            import sys
-            sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "deepagents"))
-            from agent.tracing.trace_propagation import inject_traceparent
+            from agent_core.tracing_propagation import inject_traceparent
             upstream_headers = inject_traceparent(upstream_headers)
         except Exception:
-            pass
+            logger.warning("traceparent 注入失败", exc_info=True)
 
-        async with client.stream(
-            "POST",
+        resp = await client.post(
             f"{WENDA_API_URL}/api/query",
             json={"query": query_text},
             headers=upstream_headers,
-        ) as resp:
-            if resp.status_code != 200:
-                return QueryResponse(
-                    answer=f"wenda 返回非 200: {resp.status_code}",
-                    fallback=True,
-                    latency_ms=(time.perf_counter() - start) * 1000,
-                ).model_dump()
-
-            answer, data, error = await _consume_sse_stream(resp)
+        )
 
         latency = (time.perf_counter() - start) * 1000
+
+        if resp.status_code != 200:
+            return QueryResponse(
+                answer=f"wenda 返回非 200: {resp.status_code}",
+                fallback=True,
+                latency_ms=latency,
+            ).model_dump()
+
+        payload = resp.json()
+        answer = payload.get("answer", "")
+        error = payload.get("error")
+        data_dict = payload.get("data")
+
         if error:
             return QueryResponse(
-                answer=answer or "",
+                answer=answer,
                 data=QueryData(source="wenda", metadata={"error": error}),
                 latency_ms=latency,
-                fallback=True,
+                fallback=payload.get("fallback", True),
             ).model_dump()
 
         return QueryResponse(
             answer=answer,
-            data=QueryData(source="wenda", content=data) if data else None,
+            data=QueryData(source="wenda", content=data_dict) if data_dict else None,
             latency_ms=latency,
+            fallback=payload.get("fallback", False),
         ).model_dump()
 
     except httpx.ConnectError:

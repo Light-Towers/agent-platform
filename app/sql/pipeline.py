@@ -8,8 +8,10 @@ import re
 import sqlite3
 import urllib.parse
 
+from agent_core.sql.guard import validate_sql
+
 from app.config import get_settings
-from app.sql.guard import detect_dialect, validate_sql
+from app.sql.guard import detect_dialect
 from app.sql.schema_store import fetch_context
 
 _SYSTEM_PROMPT = (
@@ -67,16 +69,19 @@ async def execute_readonly(sql: str, max_rows: int) -> dict:
     if dsn.startswith("postgres"):
         import psycopg
 
-        conninfo = dsn
-        sep = "&" if "?" in conninfo else "?"
-        conninfo += f"{sep}options=-c%20default_transaction_read_only%3Don"
-        async with await psycopg.AsyncConnection.connect(conninfo) as conn:
+        # 连接级只读第二道防线：用 psycopg 原生 options 参数（避免 URL 编码在含 ?
+        # 的 conninfo 下被版本相关行为跳过），并在建连后显式 SET 双保险，
+        # 即使白名单守卫被绕过（如 sqlglot 未知 CVE），业务库也不可写入。
+        async with await psycopg.AsyncConnection.connect(
+            dsn, options="-c default_transaction_read_only=on"
+        ) as conn:
+            await conn.execute("SET default_transaction_read_only = on")
             cur = await conn.execute(sql)
             columns = [d.name for d in cur.description] if cur.description else []
             rows = [list(r) async for r in cur]
         return {"columns": columns, "rows": rows[:max_rows]}
 
-    raise RuntimeError(f"暂不支持的业务库类型: {dsn.split('://')[0]}（MySQL 留待 Phase 2）")
+    raise RuntimeError(f"暂不支持的业务库类型: {dsn.split('://')[0]}（MySQL 留待 Phase 3）")
 
 
 async def text_to_sql(pool, question: str, llm=None) -> dict:
@@ -110,7 +115,7 @@ async def text_to_sql(pool, question: str, llm=None) -> dict:
 
     try:
         result = await execute_readonly(safe_sql, settings.sql_max_rows)
-    except Exception as exc:  # noqa: BLE001 执行错误转成结构化结果返回给上层
+    except Exception as exc:
         return {
             "question": question,
             "context_found": context_found,

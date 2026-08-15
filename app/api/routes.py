@@ -3,6 +3,7 @@
 import json
 import logging
 import uuid
+from datetime import UTC
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, UploadFile
 from fastapi.responses import StreamingResponse
@@ -11,12 +12,11 @@ from app.api.auth import resolve_thread_id, verify_api_key
 from app.config import get_settings
 from app.infra import cache as semantic_cache
 from app.infra.db import get_pool, ping
-from app.infra.otel import get_otel_tracer, parse_traceparent, redact_question
+from app.infra.otel import redact_question
 from app.rag.chunker import split_markdown
 from app.rag.embed import embed_query
 from app.rag.store import add_document
 from app.schemas import (
-    AdmissionDecision,
     HealthResponse,
     ImportResponse,
     Priority,
@@ -37,11 +37,14 @@ _TEXT_SUFFIXES = {".md", ".markdown", ".txt"}
 
 @router.get("/health", response_model=HealthResponse)
 async def health() -> HealthResponse:
+    from shared_schemas import HealthStatus
+
     settings = get_settings()
     db_ok = await ping() if settings.db_enabled else False
-    status = "ok" if (db_ok or not settings.db_enabled) else "degraded"
+    status = HealthStatus.HEALTHY if (db_ok or not settings.db_enabled) else HealthStatus.DEGRADED
     return HealthResponse(
         status=status,
+        version="0.1.0",
         storage="postgres" if settings.db_enabled else "memory",
         llm=settings.llm_enabled,
         search=bool(settings.search_api_key),
@@ -63,7 +66,7 @@ async def query(
     traceparent: str | None = Header(default=None),
 ):
     settings = get_settings()
-    thread_id = resolve_thread_id(req.thread_id, api_key)
+    thread_id = resolve_thread_id(req.session_id, api_key)
     graph = request.app.state.graph
     pool = get_pool()
 
@@ -77,6 +80,7 @@ async def query(
     request_id = str(uuid.uuid4())
 
     # Phase 2: durable admission 前置
+    decision = None
     admission_queue = getattr(request.app.state, "admission_queue", None)
     if admission_queue is not None and settings.admission_effective_enabled:
         decision = await admission_queue.enqueue(
@@ -96,14 +100,13 @@ async def query(
         if coord_decision.decision_type == "reject":
             raise HTTPException(status_code=409, detail="CONCURRENCY_REJECTED")
 
-    # Phase 2: OTel traceparent 透传
-    otel_ctx = parse_traceparent(traceparent)
+    # Phase 2: OTel tracer
     otel_tracer = getattr(request.app.state, "otel_tracer", None)
 
     # 语义缓存：命中直接返回
     q_embedding: list[float] | None = None
     if settings.cache_enabled and pool is not None:
-        q_embedding = await embed_query(req.question)
+        q_embedding = await embed_query(req.query)
         cached = await semantic_cache.cache_lookup(pool, q_embedding, settings.cache_threshold)
         if cached:
             async def _cached_stream():
@@ -115,18 +118,46 @@ async def query(
     config = {"configurable": {"thread_id": thread_id}}
 
     async def _stream():
-        # Phase 2: admission queued 前置事件
-        if admission_queue is not None and settings.admission_effective_enabled:
-            ad = await admission_queue.enqueue(request_id, thread_id, req.user_id, priority)
-            if ad.status == "queued":
-                yield _sse({
-                    "type": "admission",
-                    "status": "queued",
-                    "position": ad.queue_position,
-                })
+        # decision 定义在 query() 作用域，闭包内第 129 行需写回它（否则闭包内存在
+        # 赋值即被视为局部变量，导致 121/130/137 行在 queued 分支未触发时
+        # 读取未初始化局部变量 → UnboundLocalError F823）。
+        nonlocal decision
+        # Phase 2: admission 排队阻塞等待（路径一：queued 时真正等待补位唤醒）
+        if (
+            admission_queue is not None
+            and settings.admission_effective_enabled
+            and decision is not None
+            and decision.status == "queued"
+        ):
+            yield _sse({
+                "type": "admission",
+                "status": "queued",
+                "position": decision.queue_position,
+            })
+            decision = await admission_queue.wait_for_admit(request_id)
+        if decision is not None and decision.status == "rejected":
+            yield _sse({
+                "type": "admission",
+                "status": "rejected",
+                "reason": decision.reason,
+            })
+            # 必须在 return 前清理：否则 _states[rid] 残留 "rejected" 且 DB 行
+            # 仍是 "queued" → count(admitted+queued) 永久含该记录，容量泄漏，
+            # 直到进程重启 recover_on_startup 才清。mark_completed 会 pop 内存
+            # 状态并把 DB 行标 completed，释放容量。能走到本分支即说明 admission
+            # 已启用且队列满，admission_queue 必非空。
+            await admission_queue.mark_completed(request_id)
+            return
+        if decision is not None and decision.status == "admitted":
+            yield _sse({
+                "type": "admission",
+                "status": "admitted",
+                "position": decision.queue_position,
+            })
         # Phase 2: coordination queue 前置事件
         if coord_decision is not None and coord_decision.decision_type == "queue":
             yield _sse({"type": "coordination", "decision": "queue"})
+            await coordinator.wait_for_turn(thread_id, request_id)
 
         # Phase 2: OTel request span
         span = None
@@ -135,13 +166,13 @@ async def query(
             span.__enter__()
             span.set_attribute("thread_id", thread_id)
             span.set_attribute("priority", priority)
-            for k, v in redact_question(req.question).items():
+            for k, v in redact_question(req.query).items():
                 span.set_attribute(k, v)
 
         try:
             final_answer = ""
             async for update in graph.astream(
-                {"messages": [("user", req.question)], "question": req.question,
+                {"messages": [("user", req.query)], "question": req.query,
                  "user_id": req.user_id, "iterations": 0},
                 config=config,
                 stream_mode="updates",
@@ -153,7 +184,7 @@ async def query(
                     if node == "synthesize" and payload.get("answer"):
                         final_answer = payload["answer"]
             if final_answer and q_embedding is not None:
-                semantic_cache.cache_store(pool, req.question, final_answer, q_embedding)
+                semantic_cache.cache_store(pool, req.query, final_answer, q_embedding)
             yield _sse({"type": "done", "thread_id": thread_id, "answer": final_answer})
         finally:
             if span is not None:
@@ -270,11 +301,11 @@ async def session_revert(
             raise HTTPException(status_code=403, detail="FORBIDDEN")
         raise HTTPException(status_code=500, detail=result.error or "REVERT_FAILED")
 
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     return RevertResponse(
         session_id=result.session_id,
         checkpoint_id=result.checkpoint_id,
         context_summary=result.context_summary,
-        reverted_at=datetime.now(timezone.utc).isoformat(),
+        reverted_at=datetime.now(UTC).isoformat(),
     )

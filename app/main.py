@@ -7,6 +7,7 @@ import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.agent.graph import build_graph
 from app.agent.llm import build_chat_model
@@ -60,7 +61,7 @@ async def lifespan(app: FastAPI):
     if settings.admission_effective_enabled:
         limiter = RateLimiter(
             per_user=settings.admission_rate_limit_per_user,
-            per_session=settings.admission_rate_limit_per_user,
+            per_session=settings.admission_rate_limit_per_session,
             global_=settings.admission_rate_limit_global,
         )
         admission_queue = AdmissionQueue(
@@ -142,13 +143,26 @@ async def lifespan(app: FastAPI):
             close_result = conn.close()
             if hasattr(close_result, "__await__"):
                 await close_result
-        except Exception:  # noqa: BLE001 关闭失败不阻塞退出
+        except Exception:
             logger.warning("checkpointer 连接关闭失败")
     await close_pool()
 
 
 def create_app() -> FastAPI:
     app = FastAPI(title="agent-platform", version="0.1.0", lifespan=lifespan)
+    # CORS：允许前端跨域调用 /query 等接口；allow_origins 应从环境变量注入，
+    # 默认为回环，避免开发期浏览器被阻断的同时不暴露给任意来源。
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=[
+            o.strip()
+            for o in (get_settings().cors_allow_origins or "http://127.0.0.1:5173").split(",")
+            if o.strip()
+        ],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
     app.include_router(router)
     return app
 

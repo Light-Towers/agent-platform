@@ -1,6 +1,5 @@
-import logging
 from pathlib import Path
-from typing import Annotated, Optional
+from typing import Annotated
 
 from langchain_core.tools import tool
 from api.monitor import monitor

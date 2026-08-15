@@ -8,6 +8,7 @@ kefu 快照零改动（AGENTS.md 约束）。
 
 from __future__ import annotations
 
+import logging
 import os
 import time
 import uuid
@@ -18,6 +19,7 @@ from dotenv import find_dotenv, load_dotenv
 from fastapi import FastAPI
 
 load_dotenv(find_dotenv())
+logger = logging.getLogger(__name__)
 
 KEFU_API_URL = os.getenv("KEFU_API_URL", "http://localhost:5005")
 ADAPTER_VERSION = "0.1.0"
@@ -62,10 +64,10 @@ async def query(body: dict):
             import sys
             from pathlib import Path
             sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "deepagents"))
-            from agent.tracing.trace_propagation import inject_traceparent
+            from agent_core.tracing_propagation import inject_traceparent
             upstream_headers = inject_traceparent(upstream_headers)
         except Exception:
-            pass
+            logger.warning("traceparent 注入失败", exc_info=True)
 
         resp = await client.post(
             f"{KEFU_API_URL}/api/messages",

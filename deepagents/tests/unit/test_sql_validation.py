@@ -1,8 +1,4 @@
 import pytest
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).parents[2]))
 
 from tools.sql_validation import _validate_identifier, _validate_sql_select_only, _ensure_limit
 

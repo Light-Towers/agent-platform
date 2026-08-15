@@ -1,0 +1,8 @@
+{"id": 1, "question": "查一下我的订单状态", "expected_intent": "flow", "expected_flow": "order", "expected_keywords": ["订单"]}
+{"id": 2, "question": "我的快递到哪了", "expected_intent": "flow", "expected_flow": "logistics", "expected_keywords": ["快递"]}
+{"id": 3, "question": "我要退货", "expected_intent": "flow", "expected_flow": "postsale", "expected_keywords": ["退货"]}
+{"id": 4, "question": "帮我查一下知识库", "expected_intent": "search", "expected_flow": null, "expected_keywords": ["知识库"]}
+{"id": 5, "question": "你好", "expected_intent": "answer", "expected_flow": null, "expected_keywords": []}
+{"id": 6, "question": "取消订单", "expected_intent": "flow", "expected_flow": "order", "expected_keywords": ["取消", "订单"]}
+{"id": 7, "question": "怎么联系客服", "expected_intent": "answer", "expected_flow": null, "expected_keywords": ["客服"]}
+{"id": 8, "question": "修改收货地址", "expected_intent": "flow", "expected_flow": "order", "expected_keywords": ["地址"]}
