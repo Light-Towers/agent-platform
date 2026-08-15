@@ -1,6 +1,6 @@
 # 优化 E：双轨编排收敛 — 专项规划（已评审，实施中）
 
-> 状态：规划已按独立审核修订，进入实施（P4.1 已落地，P4.2/P4.3 推进中）
+> 状态：规划已按独立审核修订，P4.1~P4.3 全部实施完成（见顶部实施记录）
 > 关联：`docs/architecture-improvement-plan.md` §2 优化 E / §4 路线图 P4
 > 调研依据：`docs/architecture-boundary-app-vs-deepagents.md` + 本轮 `app/` 与 `deepagents/` 双轨代码调研
 > 上游约束：`agent-core` 是 `reliable-agent` 哲学落地，零依赖铁律不可逾越（护栏清单第 1 条）
@@ -81,7 +81,7 @@
 | 阶段 | 内容 | 回归范围 | 门禁 | 状态 |
 |---|---|---|---|---|
 | P4.1 | E-1：`shared_schemas` 断言接入 `async_subagents`（含 B-1 补依赖） | `async_subagents` 单测 | pytest + eval | ✅ 已实施 |
-| P4.2 | E-2：SQL 守卫统一评估（加 sqlglot 依赖 → 委托 `agent_core.sql.guard(dialect="mysql")` → 18 例回归 + 新增 MySQL 单测） | `sql_validation`/`db_tools` 用例（18） | pytest + eval | 🔧 推进中 |
+| P4.2 | E-2：SQL 守卫统一评估（加 sqlglot 依赖 → 委托 `agent_core.sql.guard(dialect="mysql")` → 18 例回归 + 新增 MySQL 单测） | `sql_validation`/`db_tools` 用例（18） | pytest + eval | ✅ 已实施 |
 | P4.3 | E-3：`MemoryBackend` 协议下沉 `agent_core.memory/backend.py`（仅协议，实现留 app；区分 `ConversationMemory`） | memory backend 单测 | pytest | ✅ 已实施 |
 
 > **不实施**：编排代码合并（A→B 或 B→A 的图重写）。该项影响面最大、需充分 eval，且会破坏 §3 硬约束；若未来确需，应单独立项并先补齐 §3 外壳的等价实现。
@@ -102,4 +102,4 @@
 
 ---
 
-*生成依据：本轮对 `app/agent/graph.py`、`app/subagents/*`、`deepagents/agent/main_agent.py`、`deepagents/agent/async_subagents.py`、`deepagents/tools/sql_validation.py` 等的双轨代码调研 + `docs/architecture-boundary-app-vs-deepagents.md`。本规划为草案，实施前需评审确认 P4.1~P4.3 范围。*
+*生成依据：本轮对 `app/agent/graph.py`、`app/subagents/*`、`deepagents/agent/main_agent.py`、`deepagents/agent/async_subagents.py`、`deepagents/tools/sql_validation.py` 等的双轨代码调研 + `docs/architecture-boundary-app-vs-deepagents.md`。本规划已按独立源码审核（B-1/M-1~M-5/S-1~S-5）修订，P4.1~P4.3 已实施完成。*

@@ -43,6 +43,11 @@ AGENTS.md 原文："根 `app/` 是一套单进程 Supervisor 平台；`deepagent
 > 建议：deepagents 的 `async_subagents._HttpSubAgent` 已在 POST 时用 `QueryRequest` 字段形态、消费 `QueryResponse`，但未复用 `shared_schemas` 类型。
 > 后续可在 deepagents 侧直接 import `shared_schemas` 做请求/响应断言，统一契约校验（低风险、可选）。
 
+**更新（2026-08-16，优化 E / P4.1 已落地）**：上述建议已实施——
+- `deepagents/pyproject.toml` 补 `shared-schemas` 依赖；
+- `async_subagents._HttpSubAgent.ainvoke` 对 dict 响应执行 `shared_schemas.QueryResponse(**data)` 断言（`SqlQueryResponse` 超集被安全吸收），断言失败抛 `ValueError`，并加 `E1_CONTRACT_ASSERT` 灰度开关（S-1）；
+- 现 deepagents 已**直接 import** `shared_schemas`（契约采用度不对称已消除）。详见 `docs/plan-e-dual-track-convergence.md`。
+
 ## 5. 部署形态
 
 - 根 `docker-compose.yml`：仅编排 `agent-platform`（即 `app/`，:8000）+ postgres。**不含 deepagents**。

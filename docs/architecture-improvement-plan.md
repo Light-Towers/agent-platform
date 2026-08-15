@@ -39,7 +39,7 @@
 | 长期记忆 | `MemoryBackend` 协议 + `PgVectorMemoryBackend`（默认）+ `CompositeMemoryBackend` 预留；门面 `longterm.py` | `app/memory/memory_backend.py` |
 | 依赖管理 | `uv workspace` 成员声明已启用（根 `[tool.uv.workspace]` + 各子包去重 sources），monorepo 统一解析 | `pyproject.toml:65` |
 | 工程门禁 | `Makefile`（make install/lint/test/eval/ci）+ 全仓 ruff 绿 + pytest 门禁可用 | `Makefile` |
-| 编排 | `app/` 自研 Supervisor 图 vs `deepagents/` `create_deep_agent`，双轨（优化 E 独立专项，本轮不实施） | `app/agent/graph.py:33` vs `deepagents/agent/main_agent.py:118` |
+| 编排 | `app/` 自研 Supervisor 图 vs `deepagents/` `create_deep_agent`，双轨（优化 E 已落地，内核/契约层收敛，非合并代码） | `app/agent/graph.py:33` vs `deepagents/agent/main_agent.py:118` |
 
 ## 2. 优化项清单（按优先级与风险分级）
 
