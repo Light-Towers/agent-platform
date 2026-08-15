@@ -18,7 +18,7 @@ dependencies = [
     "langchain",
     "langchain-community",
     "langchain-openai",
-    "langgraph",
+    "langgraph>=1.2.10,<2",
     "loguru",
     "magic-pdf",
     "minio",
@@ -56,9 +56,6 @@ Homepage = "https://github.com/Light-Towers/agent-platform"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["app*"]
-
-[tool.setuptools.package-data]
-"*" = ["*.html", "*.json"]
 
 # ---------------------------------------------------------------------------
 # ruff：静态检查与格式化基线（M1 引入，M3 收窄）

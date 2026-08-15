@@ -1,6 +1,6 @@
 [build-system]
-requires = ["setuptools>=61.0", "wheel"]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 [project]
 name = "agent-core"
@@ -16,12 +16,8 @@ dependencies = []
 [project.urls]
 Homepage = "https://github.com/Light-Towers/agent-platform"
 
-[tool.setuptools.packages.find]
-where = ["."]
-include = ["agent_core*"]
-
-[tool.setuptools.package-data]
-"*" = ["*.html", "*.json"]
+[tool.hatch.build.targets.wheel]
+packages = ["agent_core"]
 
 # ---------------------------------------------------------------------------
 # 可选依赖（extra）：重型/可选依赖全部降级为 extra + 懒导入，

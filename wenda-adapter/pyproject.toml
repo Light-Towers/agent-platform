@@ -1,12 +1,13 @@
 [build-system]
-requires = ["setuptools>=68.0"]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 [project]
 name = "wenda-adapter"
 version = "0.1.0"
 description = "wenda SSE→JSON 适配层"
 requires-python = ">=3.11"
+license = { text = "Apache-2.0" }
 dependencies = [
     "agent-core",
     "shared-schemas",
@@ -16,8 +17,8 @@ dependencies = [
     "pydantic>=2.13",
 ]
 
-[tool.setuptools]
-py-modules = ["main"]
+[tool.hatch.build.targets.wheel]
+include = ["main.py"]
 
 [tool.uv.sources]
 agent-core = { path = "../agent-core", editable = true }
