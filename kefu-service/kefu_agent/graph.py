@@ -9,12 +9,12 @@ from __future__ import annotations
 from agent_core.logging import get_logger
 from langgraph.graph import END, StateGraph
 
-from agent.commands import INTENT_TO_COMMAND, Command
-from agent.flows.logistics_flow import build_logistics_flow
-from agent.flows.order_flow import build_order_flow
-from agent.flows.postsale_flow import build_postsale_flow
-from agent.graph_rag import graph_rag_query
-from agent.state import KefuState
+from kefu_agent.commands import INTENT_TO_COMMAND, Command
+from kefu_agent.flows.logistics_flow import build_logistics_flow
+from kefu_agent.flows.order_flow import build_order_flow
+from kefu_agent.flows.postsale_flow import build_postsale_flow
+from kefu_agent.graph_rag import graph_rag_query
+from kefu_agent.state import KefuState
 
 logger = get_logger(__name__)
 
