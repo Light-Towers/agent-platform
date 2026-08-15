@@ -14,8 +14,7 @@
 | `agent-core/` | 零依赖运行时内核：tracing / guardrails / sql 守卫 / llm / memory | — |
 | `shared-schemas/` | 联邦 4 服务共享 Pydantic 契约（QueryResponse 等） | — |
 | `kefu-service/` | kefu 迁移版（deepagents + LangGraph），已实现且 CI 通过，已接入联邦网关（Agent Protocol 兼容 `/invoke`，返回 `QueryResponse`；`KEFU_USE_ADAPTER=false` 默认直连） | — |
-| `wenda-adapter/` | wenda 老系统 SSE → JSON 适配层（:8001） | `main.py` |
-| `wenda-data-agent/` | Text-to-SQL 数据分析垂直场景 | — |
+| `wenda-data-agent/` | Text-to-SQL 数据分析垂直场景（已直连联邦契约，无需 adapter） | — |
 | `zhanggui-zhiku/` | 掌柜智库：RAG 知识库导入 + 多路检索问答（:8900） | `zhanggui-zhiku` 脚本 |
 | `dialogue-framework/` | LLM 对话系统框架基础设施 | `dialogue_framework.cli:main` |
 | `tests/` | `app/` 单元测试（40 用例） | `pytest -q` |
