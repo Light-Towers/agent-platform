@@ -4,6 +4,11 @@
 > 审核：对照 `refactor-plan.md` v3.6 验收标准，逐 Phase 检查实现完整性/正确性/一致性
 > 范围：工作区未提交改动（50 文件，3776 行新增）+ kefu-service/（未跟踪）
 > 结论：**7 个 Phase 全部实现，核心逻辑完整，发现 1 个已修复问题 + 3 个可接受偏差**
+>
+> ⚠️ **时效性警告**：本报告为 2026-08-11 工作区快照。其中 `wenda-adapter` / `kefu-adapter`
+> 相关内容（如 :44/:50/:53/:139 的 adapter 描述）**已过时**——`wenda-adapter` 已于 2026-08 退役
+> （由 `wenda-data-agent` 直连替代），`kefu-adapter` 也已移除（kefu 直连 `kefu-service`）。
+> 请以最新代码与 `README.md` 为准。
 
 ---
 

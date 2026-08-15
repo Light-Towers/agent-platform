@@ -2,10 +2,18 @@
 
 from functools import lru_cache
 
+from pydantic_settings import SettingsConfigDict
+
 from shared_schemas.settings import BaseLLMSettings
 
 
 class Settings(BaseLLMSettings):
+    # model_ 前缀字段（如 model_context_window）与 pydantic 保留命名空间冲突，
+    # 显式清空 protected_namespaces 以消除警告
+    model_config = SettingsConfigDict(
+        env_file=".env", extra="ignore", protected_namespaces=()
+    )
+
     # 服务
     host: str = "0.0.0.0"
     port: int = 8000
