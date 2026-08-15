@@ -51,7 +51,7 @@ agent-core = { path = "../agent-core", editable = true }
 zhanggui-zhiku = "app.main:run"
 
 [project.urls]
-Homepage = "https://github.com/noctilucent-lamp/zhanggui-zhiku"
+Homepage = "https://github.com/Light-Towers/agent-platform"
 
 [tool.setuptools.packages.find]
 where = ["."]

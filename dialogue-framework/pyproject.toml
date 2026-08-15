@@ -5,14 +5,14 @@ build-backend = "hatchling.build"
 [project]
 name = "dialogue-framework"
 version = "0.1.0"
-description = "LLM 驱动的对话系统框架基础设施（生产化改造自 courses/zhanggui-kefu/atguigu_ai/）"
+description = "LLM 驱动的对话系统框架基础设施（迁移自 kefu 老系统 atguigu_ai）"
 requires-python = ">=3.11"
 dependencies = [
     "agent-core",
     "shared-schemas",
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",
-    "langgraph>=0.6",
+    "langgraph>=1.2.10,<2",
     "langchain-core>=0.3",
     "langchain-openai>=0.3",
     "psycopg[binary,pool]>=3.1",

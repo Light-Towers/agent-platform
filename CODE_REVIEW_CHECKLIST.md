@@ -55,11 +55,11 @@
 
 ### 问题 6：kefu-service / kefu-adapter 缺失 `.env.example`
 - **事实依据**：
-  - 全仓 `.env.example` 共 5 份：根 / `deepagents/` / `dialogue-framework/` / `wenda-data-agent/` / `zhanggui-zhiku/`。
-  - `kefu-adapter/`、`kefu-service/` 目录均无 `.env.example`，环境变量（`KEFU_API_URL` / `KEFU_ADAPTER_URL`）仅在代码 `os.getenv` 中给默认值。
-  - `deepagents/docs/production-action-plan.md:147` 声称 `Test-Path "kefu-service/.env.example"` 应通过，但实际文件不存在 → **计划声称的完整性核查未兑现**。
+  - 全仓 `.env.example` 共 6 份：根 / `deepagents/` / `dialogue-framework/` / `kefu-service/` / `wenda-data-agent/` / `zhanggui-zhiku/`。
+  - `kefu-adapter` 包已于 2026-08 移除（无调用方，网关默认直连 `kefu-service:8003`），故无 `.env.example`。`kefu-service/.env.example` 标注配置继承自 `agent-core`，列端口锚点。
+  - `deepagents/docs/production-action-plan.md:147` 声称 `Test-Path "kefu-service/.env.example"` 应通过 → 现已成立。
 - **影响**：部署缺文档，环境变量无据可查。
-- **处理状态**：✅ 已修复。已新建 `kefu-adapter/.env.example`（含 `KEFU_API_URL` 默认 `:5005` + 端口）与 `kefu-service/.env.example`（标注配置继承自 `agent-core`，列端口锚点）。生产计划 `Test-Path` 现可通过。
+- **处理状态**：✅ 已修复。已新建 `kefu-service/.env.example`；根 `.env.example` 另补全 Phase 2 变量（`COORDINATION_*`/`ADMISSION_*`/`OTEL_*`/`MCP_*`/`CORS_ALLOW_ORIGINS`，对齐 `app/config.py:54-81`）。生产计划 `Test-Path` 现可通过。
 
 ### 问题 7：Python 版本声明冲突（实质成立，原行号有误）
 - **事实依据**：
