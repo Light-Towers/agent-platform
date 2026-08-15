@@ -89,7 +89,7 @@ def mark_unhealthy(key: str) -> None:
     old = _subservices[key]
     _subservices[key] = SubserviceConfig(
         name=old.name, graph_id=old.graph_id, url=old.url,
-        local_agent=old.local_agent, healthy=False,
+        endpoint=old.endpoint, local_agent=old.local_agent, healthy=False,
     )
 
 
@@ -98,5 +98,5 @@ def mark_healthy(key: str) -> None:
     old = _subservices[key]
     _subservices[key] = SubserviceConfig(
         name=old.name, graph_id=old.graph_id, url=old.url,
-        local_agent=old.local_agent, healthy=True,
+        endpoint=old.endpoint, local_agent=old.local_agent, healthy=True,
     )

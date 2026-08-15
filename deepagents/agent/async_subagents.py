@@ -18,7 +18,7 @@ AGENT_MODE=local 时仍用本地 subagent。
 
 from __future__ import annotations
 
-from agent.config import get_all_subservices, use_kefu_adapter
+from agent.config import get_all_subservices
 from agent.prompts import sub_agents_content
 
 try:  # 外部 deepagents 包（Agent Protocol 原生支持）
