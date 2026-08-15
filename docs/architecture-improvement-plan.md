@@ -43,25 +43,25 @@
 
 ## 2. 优化项清单（按优先级与风险分级）
 
-### 优化 A：`AgentState` 升级为 Pydantic BaseModel（中优先级 / 低-中风险） ✅ 已落地
+### 优化 A：`AgentState` 升级为 Pydantic BaseModel（中优先级 / 低-中风险） ◐ 部分落地（要点1 已完成，要点2 未实施）
 
 - **借鉴来源**：CrewAI Flows 用 `class MarketState(BaseModel)` 在 Flow 步骤间结构化传递状态；OpenAI Agents SDK 全链路 Pydantic 模型校验。
 - **当前差距**：`TypedDict` 只在静态类型检查期生效，运行时节点写入脏字段/类型错误只能等下游崩溃。
 - **方案要点**：
   1. 将 `app/agent/state.py` 的 `AgentState` 改为 `pydantic.BaseModel`，保留 `messages: Annotated[list, add_messages]` 的 reducer 语义（Pydantic 兼容 `Annotated`）。
-  2. 新增节点入口处的 `_validate_state()` 校验函数，对 `route` 枚举、必填字段做断言。
+  2. （未实施）新增节点入口处的 `_validate_state()` 校验函数，对 `route` 枚举、必填字段做断言。`AgentState` 虽已 Pydantic 化，但尚未引入入口校验函数（`route` 仍为 `str` 非枚举）。
   3. 保留 `total=False` 等价性：用 `Field(default=None)` 表达可选字段。
 - **兼容性**：LangGraph `StateGraph` 同时支持 TypedDict 与 Pydantic model 作为 state schema，无需改动 `graph.py` 的节点签名。
 - **测试边界**：仅需回归 `app/agent/graph.py` 全流程 + `tests/` 中 state 相关用例（约 40 用例中的 state 读写部分）。
 - **收益**：节点边界脏 state 即时暴露，减少"脏数据穿透到 synthesize"类偶发 bug。
 
-### 优化 B：输入护栏下沉为共享内核 + 双视图统一入口（中优先级 / 中风险） ✅ 已落地
+### 优化 B：输入护栏下沉为共享内核 + 双视图统一入口（中优先级 / 中风险） ◐ 部分落地（要点1/3 已完成，要点2 未实施）
 
 - **借鉴来源**：OpenAI Agents SDK 将 Guardrails 作为 Agent 一等公民；DeepAgents 用 `RubricMiddleware`/`TodoListMiddleware` 栈式横切。
 - **当前差距**：`guard_input()` 是外层包裹，与编排解耦但无法作为反思/规划链的一环，且 `app/` 视图完全无护栏。
 - **方案要点**：
   1. **保留** `deepagents/gateway/input_guard.py` 的全部检测逻辑（`detect_pii`/`redact_pii`/`detect_injection`/`guard_input`），不重写规则。
-  2. 新增薄适配层 `deepagents/gateway/guard_middleware.py`：将 `guard_input` 包装为 DeepAgent Middleware（`@middleware`/`BaseMiddleware`），挂到 `create_deep_agent(middleware=[..., GuardMiddleware])`（`main_agent.py:63`）。
+  2. （未实施）新增薄适配层 `deepagents/gateway/guard_middleware.py`：将 `guard_input` 包装为 DeepAgent Middleware（`@middleware`/`BaseMiddleware`），挂到 `create_deep_agent(middleware=[..., GuardMiddleware])`（`main_agent.py:63`）。当前 `guard_input` 仅在 `app/route_node` 与 `deepagents` 网关入口直接调用，未封装为 Middleware 栈。
   3. `app/` 视图在 `route_node` 前插入同一 `guard_input` 调用（单函数复用，非重写）。
 - **兼容性**：检测函数签名与返回字典不变；仅新增包装，旧调用方（`deepagents` 网关入口）行为不变。
 - **测试边界**：回归 `input_guard` 既有单测（若有）+ 新增 middleware 挂载冒烟；影响面限于入口链路，不触碰检索/生成。
@@ -187,15 +187,15 @@
 
 | 编号 | 问题 | 现状 | 建议 |
 |---|---|---|---|
-| #5 | fallback `bind_tools` 恒绑主模型，结构化输出不可降级 | v2 重构后 `FallbackChatModel` 仅 `with_structured_output`（亦恒绑 primary）；路由有 `heuristic_route` 兜底，影响有限 | 后续增强：结构化输出也走降级路由 |
-| #6 | fallback `stream` 主模型异常后重播 fallback 全量，客户端收到重复 chunk | app 链路用 `ainvoke` 未用 stream，影响面有限 | 后续增强：stream 失败应清空已吐 chunk |
-| #7 | `requirements.txt` 未同步 `shared-schemas`/`sqlglot` | 仓库以 uv workspace 为准，`requirements.txt` 为遗留产物 | 待确认是否仍需维护，否则删除 |
-| #8 | SQL 守卫 `LIMIT>100` 截断 + 文本重生成 | `agent_core.sql.guard` 行为，需独立评估截断阈值合理性 | 单独排期 |
-| #10 | 仅 workspace 安装 + 缺 CHANGELOG | 工程约定问题 | 补 CHANGELOG 或明确 uv workspace 为唯一安装入口 |
-| #11 | `_validate_state`/`guard_middleware` 文档提及但代码不存在 | 文档与实现脱节，仅为文档清理 | 文档勘误 |
+| #5 | fallback `bind_tools` 恒绑主模型，结构化输出不可降级 | v2 重构后 `FallbackChatModel` 仅 `with_structured_output`（亦恒绑 primary）；但 `decide_route` 已有 `try/except → heuristic_route` 兜底，主模型结构化失败不阻塞路由 | 维持现状：启发式兜底已覆盖，降级路由收益极低 |
+| #6 | fallback `stream` 主模型异常后重播 fallback 全量，客户端收到重复 chunk | app 链路 `synthesize` 用 `ainvoke` 未用 stream，`FallbackChatModel.stream/astream` 无调用方 | 维持现状：潜在缺陷，待 streaming 启用时再修（缓冲已吐 chunk） |
+| #7 | `requirements.txt` 未同步 `shared-schemas`/`sqlglot` | 根目录无 requirements.txt（uv workspace 管理）；`deepagents/requirements.txt` 漏列 `shared-schemas`/`sqlglot` | ✅ 已修：`deepagents/requirements.txt` 补 `-e ../shared-schemas` + `sqlglot>=25.0` |
+| #8 | SQL 守卫 `LIMIT>100` 截断 + 文本重生成 | `agent_core.sql.guard` 的 `max_rows`（默认 100，`SQL_GUARD_MAX_ROWS` 可配）是**有意的防护上限**，防 `SELECT *` 拖垮 DB；截断后返回规整 SQL 是正常归一化 | 维持现状：安全设计，非缺陷 |
+| #10 | 仅 workspace 安装 + 缺 CHANGELOG | 工程约定问题 | ✅ 已修：新增 `CHANGELOG.md`，明确 uv workspace 为唯一安装入口 |
+| #11 | `_validate_state`/`guard_middleware` 文档提及但代码不存在 | 实为 §2 优化 A/B 要点2 规划项未实施；标题"✅已落地"误导 | ✅ 已勘误：要点2 标"（未实施）"，标题降为"◐部分落地" |
 | #12 | `make type` 是 ruff 别名 | 非缺陷 | 无需修 |
 | #13 | `rag_query` 端点 httpx 兜底 | 实际优先走 `AsyncSubAgent`，httpx 仅兜底且已收敛，影响窄于报告 | 维持现状 |
-| #14 | `zhanggui-zhiku` 双 `uv.lock` | 子包独立 lock，需确认是否并入 workspace | 单独排期 |
-| #15 | logger name 变更 | 观测一致性问题 | 低优 |
+| #14 | `zhanggui-zhiku` 双 `uv.lock` | 子包独立 lock 与 workspace 根锁冲突 | ✅ 已修：删除 `zhanggui-zhiku/uv.lock`，统一根锁（`uv lock` 验证通过） |
+| #15 | logger name 变更 | 核验：app 全量 `getLogger(__name__)` + 顶层 `agent_core` 命名已规范 | 无需修：非缺陷 |
 
 *门禁：本轮修复后 `ruff check .` 全绿，`pytest tests/` 84 passed（含新增 3 例）。*
