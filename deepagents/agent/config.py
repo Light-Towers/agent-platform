@@ -22,6 +22,10 @@ class SubserviceConfig:
     name: str
     graph_id: str
     url: str
+    # 远程回退（httpx）调用该子服务的 HTTP 端点路径。
+    # 各子服务协议不同：kefu-service 走 /invoke（Agent Protocol，返回 QueryResponse），
+    # wenda-data-agent 走 /api/query（返回 SqlQueryResponse），zhiku 走 /api/query 等。
+    endpoint: str = "/api/messages"
     local_agent: dict | None = field(default=None, repr=False)
     healthy: bool = True
 
@@ -36,7 +40,10 @@ _subservices: dict[str, SubserviceConfig] = {
     "text_to_sql": SubserviceConfig(
         name="业务数据查询助手",
         graph_id="text_to_sql",
-        url=_env("WENDA_ADAPTER_URL", "http://localhost:8001"),
+        # wenda-adapter 已退役，Text-to-SQL 能力由 wenda-data-agent 直连提供
+        # wenda-data-agent 实际监听 :8000（见其 README 启动命令）
+        url=_env("WENDA_DATA_AGENT_URL", "http://localhost:8000"),
+        endpoint="/api/query",
     ),
     "rag_query": SubserviceConfig(
         name="知识库检索助手",
@@ -55,6 +62,7 @@ _subservices: dict[str, SubserviceConfig] = {
             if _env("KEFU_USE_ADAPTER", "false").lower() != "true"
             else _env("KEFU_ADAPTER_URL", "http://localhost:8002")
         ),
+        endpoint="/invoke",
     ),
 }
 

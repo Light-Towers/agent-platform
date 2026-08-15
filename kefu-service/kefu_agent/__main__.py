@@ -3,7 +3,7 @@
 Phase 7：9 种命令 → LangGraph 意图路由，3 个 Flow → LangGraph 子图，
 GraphRAG → 知识库检索子 Agent，atguigu_ai Tracker → LangGraph State。
 
-运行：uvicorn main:app --host 0.0.0.0 --port 8003
+运行：uvicorn kefu_agent:app --host 0.0.0.0 --port 8003
 
 网关接入状态（已修复）：本服务已实现且 CI 通过，并已于 Phase 7 收尾补齐：
   - 接入 shared-schemas 统一契约，新增 `POST /invoke`（Agent Protocol 兼容，

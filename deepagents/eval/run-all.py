@@ -159,7 +159,7 @@ async def main_async(args: argparse.Namespace) -> None:
         if project == "deepagents":
             results = await eval_deepagents(items, no_judge=args.no_judge, cleanup=not args.no_cleanup)
         elif project == "wenda":
-            adapter_url = os.getenv("WENDA_ADAPTER_URL", "http://localhost:8001")
+            adapter_url = os.getenv("WENDA_DATA_AGENT_URL", "http://localhost:8001")
             results = await eval_subservice(items, adapter_url)
         elif project == "kefu":
             # kefu-adapter 已弃用并移除；默认直连 kefu-service(:8003) 的 /invoke。

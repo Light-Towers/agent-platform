@@ -386,8 +386,9 @@ kefu-service/              # kefu 迁移版（deepagents + LangGraph），已实
                           #      网关 KEFU_USE_ADAPTER=false 直连本服务（默认）
                           #   —— 原 kefu-adapter（atguigu_ai 适配层）已于 2026-08 移除（无调用方，
                           #      默认直连 kefu-service；外部 atguigu_ai 退役为运维动作）
-wenda-adapter/             # wenda 老系统 SSE → JSON 适配层（:8001）
 wenda-data-agent/          # Text-to-SQL 数据分析垂直场景（生产化改造自 courses/.../data-agent）
+                          #   —— 原 wenda-adapter（SSE→JSON 适配层）已于 2026-08 退役，
+                          #      网关直连本服务 /api/query（wenda-data-agent 默认 :8000）
 zhanggui-zhiku/            # 掌柜智库：RAG 知识库导入 + 多路检索问答一体化服务（:8900）
 dialogue-framework/        # LLM 对话系统框架基础设施（生产化改造自 courses/.../atguigu_ai）
 ```
