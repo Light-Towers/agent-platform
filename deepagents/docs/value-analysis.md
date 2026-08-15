@@ -258,7 +258,7 @@ Langfuse 三态设计（dev no-op / preview / prod）+ W3C traceparent 跨服务
 | 生产横切能力（缓存/限流/熔断/guardrail） | 编排灵活性（动态子 Agent/并行/peer 对话） |
 | 联邦架构 + 跨服务 trace | 上下文管理（summarization 阈值不适配） |
 | 意图识别 short-circuit | 失败处理（健康检查/熔断器未接入） |
-| 评测框架 + judge 去偏 | 并发安全（_main_agent 竞态/_FallbackModel 永久降级） |
+| 评测框架 + judge 去偏 | 并发安全（_main_agent 竞态；_FallbackModel 永久降级已通过内核统一路由根治） |
 | 渐进式改造范式 | 测试覆盖（核心模块零单测） |
 | 成本路由 + 灰度发布 | HITL / MCP / 结构化输出（开源框架均有） |
 
@@ -269,7 +269,7 @@ Langfuse 三态设计（dev no-op / preview / prod）+ W3C traceparent 跨服务
 | 1 | 接入 singleflight + 修复竞态 | 小 | 大 | 低 | P4.1, P1.1 |
 | 2 | Summarization 阈值适配 | 极小 | 大 | 低 | P2.1 |
 | 3 | 接入健康检查/熔断器 | 小 | 中 | 低 | P3.1, P3.2 |
-| 4 | _FallbackModel 恢复机制 | 小 | 中 | 低 | P0.3 |
+| 4 | _FallbackModel 恢复机制（已通过内核 FallbackChatModel 连续失败计数+冷却+成功复位根治） | 已完成 | 中 | 低 | P0.3 |
 | 5 | 动态子 Agent | 中 | 大 | 中 | P5 |
 | 6 | 评测集扩充到 200+ | 中 | 中 | 低 | P6.3 |
 | 7 | HITL + MCP | 中 | 中 | 中 | P7.1, P7.4 |

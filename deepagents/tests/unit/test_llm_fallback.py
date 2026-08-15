@@ -1,95 +1,124 @@
-"""Test model fallback routing in agent/llm.py."""
+"""Test model fallback routing via agent/llm.py (LangChain adapter).
+
+契约：``create_fallback_model`` 在有备用模型时返回 ``LangChainFallbackModel``
+（BaseChatModel 子类）。降级语义完全由内核 ``FallbackChatModel`` 实现，本测试
+用遵守 LangChain 消息协议的 FakeChatModel 验证「主失败→降级备→冷却到期→恢复」。
+"""
 import pytest
-import os
+
+from langchain_core.language_models import BaseChatModel
+from langchain_core.messages import AIMessage, HumanMessage
+
+
+class FakeChatModel(BaseChatModel):
+    """可注入失败行为的 LangChain 假模型（遵守消息协议）。"""
+
+    name: str = "fake"
+    fail_times: int = 0  # 前 N 次调用抛错
+    calls: int = 0
+
+    @property
+    def _llm_type(self) -> str:
+        return "fake"
+
+    def _generate(self, messages, stop=None, run_manager=None, **kwargs):
+        from langchain_core.outputs import ChatGeneration, ChatResult
+
+        self.calls += 1
+        if self.calls <= self.fail_times:
+            raise RuntimeError(f"{self.name} down")
+        return ChatResult(generations=[ChatGeneration(message=AIMessage(content=f"{self.name}:ok"))])
 
 
 class TestFallbackModel:
-    """Test _FallbackModel proxy behaviour (without real API calls)."""
+    """LangChainFallbackModel 透传内核降级路由（无真实 API 调用）。"""
 
     @pytest.fixture(autouse=True)
     def _setup_env(self, monkeypatch):
-        """Ensure env vars are set so agent.llm can import."""
         monkeypatch.setenv("OPENAI_BASE_URL", "https://dashscope.example.com/v1")
         monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
         monkeypatch.setenv("LLM_QWEN_MAX", "qwen-max")
         monkeypatch.delenv("LLM_QWEN_FALLBACK", raising=False)
 
-    def test_fallback_proxy_getattr(self):
-        from agent.llm import _FallbackModel
+    def test_invoke_routes_to_primary(self):
+        from agent.llm import LangChainFallbackModel
 
-        class FakeModel:
-            def invoke(self, x):
-                return f"invoked:{x}"
+        primary = FakeChatModel(name="primary")
+        fallback = FakeChatModel(name="fallback")
+        proxy = LangChainFallbackModel(primary=primary, fallback=fallback)
 
-            def stream(self, x):
-                yield f"stream:{x}"
+        resp = proxy.invoke([HumanMessage(content="hi")])
+        assert isinstance(resp, AIMessage)
+        assert resp.content == "primary:ok"
+        assert not proxy.degraded
 
-            def bind_tools(self, tools):
-                return f"bound:{len(tools)}"
+    def test_switches_to_fallback_on_failure(self):
+        from agent.llm import LangChainFallbackModel
 
-        primary = FakeModel()
-        fallback = FakeModel()
-        proxy = _FallbackModel(primary, fallback)
+        # failure_threshold=1：首次主失败即降级（连续失败计数达阈值）
+        primary = FakeChatModel(name="primary", fail_times=5)
+        fallback = FakeChatModel(name="fallback")
+        proxy = LangChainFallbackModel(
+            primary=primary, fallback=fallback, failure_threshold=1, cooldown=0.0
+        )
 
-        assert proxy.invoke("hello") == "invoked:hello"
-        assert list(proxy.stream("hi")) == ["stream:hi"]
-        assert proxy.bind_tools(["t1", "t2"]) == "bound:2"
+        # 主失败 → 降级并走 fallback
+        resp = proxy.invoke([HumanMessage(content="hi")])
+        assert resp.content == "fallback:ok"
+        assert proxy.degraded
 
-    def test_fallback_switches_on_error(self):
-        from agent.llm import _FallbackModel
+    def test_recovers_after_cooldown(self):
+        from agent.llm import LangChainFallbackModel
 
-        class FailingModel:
-            def invoke(self, x):
-                raise RuntimeError("primary down")
+        primary = FakeChatModel(name="primary", fail_times=1)
+        fallback = FakeChatModel(name="fallback")
+        proxy = LangChainFallbackModel(
+            primary=primary, fallback=fallback, failure_threshold=1, cooldown=0.0
+        )
 
-        class GoodModel:
-            def invoke(self, x):
-                return "fallback:ok"
+        # 首次失败 → 降级
+        assert proxy.invoke([HumanMessage(content="x")]).content == "fallback:ok"
+        assert proxy.degraded
+        # 冷却窗口为 0，下一次回到主模型；主此时已成功 → 复位
+        assert proxy.invoke([HumanMessage(content="y")]).content == "primary:ok"
+        assert not proxy.degraded
 
-        primary = FailingModel()
-        fallback = GoodModel()
-        proxy = _FallbackModel(primary, fallback)
+    def test_stream_delegates(self):
+        from agent.llm import LangChainFallbackModel
+        from langchain_core.messages import AIMessageChunk
+        from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
 
-        # First call fails on primary, succeeds on fallback
-        result = proxy.invoke("test")
-        assert result == "fallback:ok"
+        class StreamModel(BaseChatModel):
+            name: str = "s"
 
-        # Subsequent calls go directly to fallback (cached)
-        result2 = proxy.invoke("test2")
-        assert result2 == "fallback:ok"
+            @property
+            def _llm_type(self) -> str:
+                return "s"
 
-    def test_fallback_no_fallback_raises(self):
-        from agent.llm import _FallbackModel
+            def _generate(self, messages, stop=None, run_manager=None, **kwargs):
+                return ChatResult(generations=[ChatGeneration(message=AIMessage(content="s:ok"))])
 
-        class FailingModel:
-            def invoke(self, x):
-                raise RuntimeError("primary down")
+            def _stream(self, messages, stop=None, run_manager=None, **kwargs):
+                yield ChatGenerationChunk(message=AIMessageChunk(content=f"{self.name}:chunk"))
 
-        primary = FailingModel()
-        proxy = _FallbackModel(primary, None)
+        primary = StreamModel()
+        fallback = StreamModel()
+        proxy = LangChainFallbackModel(primary=primary, fallback=fallback)
+        chunks = list(proxy.stream([HumanMessage(content="hi")]))
+        assert chunks[0].text == "s:chunk"
 
-        with pytest.raises(RuntimeError, match="primary down"):
-            proxy.invoke("test")
+    def test_is_base_chat_model(self):
+        from agent.llm import LangChainFallbackModel
+        from langchain_core.language_models import BaseChatModel
 
-    def test_fallback_repr(self):
-        from agent.llm import _FallbackModel
-
-        class M:
-            def __repr__(self):
-                return "FakeModel()"
-
-        proxy = _FallbackModel(M(), None)
-        assert "FakeModel" in repr(proxy)
+        primary = FakeChatModel(name="primary")
+        fallback = FakeChatModel(name="fallback")
+        proxy = LangChainFallbackModel(primary=primary, fallback=fallback)
+        assert isinstance(proxy, BaseChatModel)
 
 
 class TestCreateFallbackModel:
-    """Test create_fallback_model() with controlled env vars.
-
-    Tests call create_fallback_model() directly after monkeypatching os.environ,
-    so they are NOT affected by the real .env file (load_dotenv already ran at
-    module import time; monkeypatch overrides os.environ lookups for subsequent
-    os.getenv() calls within the test).
-    """
+    """create_fallback_model() 在有/无备用模型时的返回类型。"""
 
     def test_no_fallback_returns_primary(self, monkeypatch):
         monkeypatch.setenv("OPENAI_BASE_URL", "https://dashscope.example.com/v1")
@@ -97,16 +126,28 @@ class TestCreateFallbackModel:
         monkeypatch.setenv("LLM_QWEN_MAX", "qwen-max")
         monkeypatch.delenv("LLM_QWEN_FALLBACK", raising=False)
 
-        from agent.llm import create_fallback_model, _FallbackModel
+        from agent.llm import create_fallback_model, LangChainFallbackModel
+
         m = create_fallback_model()
-        assert not isinstance(m, _FallbackModel)
+        assert not isinstance(m, LangChainFallbackModel)
+
+    def test_with_fallback_returns_adapter(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_BASE_URL", "https://dashscope.example.com/v1")
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        monkeypatch.setenv("LLM_QWEN_MAX", "qwen-max")
+        monkeypatch.setenv("LLM_QWEN_FALLBACK", "qwen-plus")
+
+        from agent.llm import create_fallback_model, LangChainFallbackModel
+
+        m = create_fallback_model()
+        assert isinstance(m, LangChainFallbackModel)
 
     def test_missing_primary_config_raises(self, monkeypatch):
-        """Without API_KEY/BASE_URL, create_fallback_model() should raise."""
         monkeypatch.delenv("OPENAI_API_KEY", raising=False)
         monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
         monkeypatch.delenv("LLM_QWEN_MAX", raising=False)
 
         from agent.llm import create_fallback_model
+
         with pytest.raises(RuntimeError, match="主模型配置缺失"):
             create_fallback_model()
