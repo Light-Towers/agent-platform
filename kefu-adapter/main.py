@@ -1,14 +1,17 @@
-"""kefu-adapter：atguigu_ai REST 适配层。
+"""kefu-adapter：atguigu_ai REST 适配层（⚠️ 已弃用）。
 
 atguigu_ai 已有 FastAPI server + /api/messages（POST）。
 本适配器转发请求 → 转统一 QueryResponse schema → 返回给网关。
 
 kefu 快照零改动（AGENTS.md 约束）。
 
+⚠️ 弃用说明（Phase 7 收尾）：kefu-service(:8003) 已实现 Agent Protocol 兼容的
+`/invoke` 端点并返回 QueryResponse，deepagents 网关新增 `KEFU_USE_ADAPTER` 开关
+（默认 false，直连 kefu-service）。故本 adapter 已**可被绕过**；仅在外部 atguigu_ai
+尚未退役前作为过渡保留。atguigu_ai 下线后，删除本包即可（见问题 3 / 问题 4）。
+
 外部依赖声明：atguigu_ai 是**外部遗留服务，不在本仓库内**（glob `*atguigu*` 命中 0 个）。
 运行时经 `KEFU_API_URL`（默认 http://localhost:5005）打到外部 atguigu_ai:5005。
-迁移未完成前本适配器是唯一桥接，删除则客服链路中断——
-故 kefu-service 接入网关、atguigu_ai 下线前，本 adapter 不可移除（见问题 3 / 问题 4）。
 """
 
 from __future__ import annotations
@@ -17,6 +20,7 @@ import logging
 import os
 import time
 import uuid
+import warnings
 from contextlib import asynccontextmanager
 
 import httpx
@@ -25,6 +29,14 @@ from fastapi import FastAPI
 
 load_dotenv(find_dotenv())
 logger = logging.getLogger(__name__)
+
+warnings.warn(
+    "kefu-adapter 已弃用：kefu-service(:8003) 已提供 /invoke（QueryResponse），"
+    "网关可通过 KEFU_USE_ADAPTER=false 直连 kefu-service。本 adapter 仅在外部 "
+    "atguigu_ai 退役前作为过渡保留。",
+    DeprecationWarning,
+    stacklevel=2,
+)
 
 KEFU_API_URL = os.getenv("KEFU_API_URL", "http://localhost:5005")
 ADAPTER_VERSION = "0.1.0"
