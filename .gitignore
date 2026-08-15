@@ -52,6 +52,10 @@ Thumbs.db
 temp_*.py
 dump_*.py
 *.tmp.md
+# 会话产物（代码对比临时文件，非源码）
+.diff_*.txt
+_diff*.txt
+diff_*.txt
 # === 以. 开头的文件（需显式保留的点文件用 ! 排除） ===
 .*/
 !.github/

@@ -135,4 +135,34 @@
 
 ---
 
-*生成依据：前轮对 `agent-platform` 六维度代码调研 + GitHub 标杆项目（LangChain/Dify/AutoGen/CrewAI/OpenAI Agents SDK/DeepAgents）架构对比。本方案聚焦"借鉴而非重写"，所有改动均保留内部契约兼容。*
+---
+
+## 6. 待办与技术债登记（v2 之后）
+
+> 本节登记 v2 路线图中**尚未实施**或**已识别但未纳入**的问题。按优先级/红线排序，每项标注来源与约束，避免遗留成隐性债务。
+
+### 6.1 已识别技术债（建议后续迭代）
+
+| 编号 | 问题 | 来源 | 风险 | 红线/约束 |
+|---|---|---|---|---|
+| TB-1 | **DF 双 LLM 协议冗余**：`dialogue_framework.shared.llm.base_client.BaseChatClient` 与 `agent_core.llm.providers.BaseLLMProvider` 签名不兼容、互不对接 | `architecture-boundary-agent-core-vs-dialogue-framework.md:63` | 低 | DF 弃用自有 `BaseChatClient`、对齐内核协议；**不合并/删除 dialogue-framework** |
+| TB-2 | **DF 双 memory 抽象冗余**：`dialogue_framework.core.Tracker`（slots/events/stack）未使用 `agent_core.memory.ConversationMemory` | 同上:64 | 低 | DF `Tracker` 适配 `ConversationMemory`；不合并两包 |
+| TB-3 | **uv workspace 环境脆弱**：根 `uv sync` 会卸载非根 member 包（实测卸载 24 包，含 deepagents-app），默认环境不含非根包依赖，需 `uv run --package/--with` 绕过 | 实施过程实测 | 中 | 不应在默认 venv 跑 `uv sync`；建议评估 `uv sync --all-packages` 或文档固化运行约定，避免误伤 |
+| TB-4 | **M5 语义缓存统一未落地**：`agent_core.cache` 已建 `CacheStats`/`build_cache_key` 单一真相，但 app(`PgSemanticCache`)/deepagents(`ValkeySemanticCache`) 尚未统一到 `BaseSemanticCache` 接口 | `m5-semantic-cache-plan.md`（纯草案，未实施） | 中 | 仅统一接口与 key 构造，不跨后端共享缓存数据（向量空间不一致，现状保留）；`agent_core.cache` 零依赖 |
+| TB-5 | **deepagents 联邦契约统一（原 TODO）**：`shared_schemas` 在 deepagents 侧原未直接复用（仅 app 侧用），已在优化 E/P4.1 补齐断言——**已闭环**，此处仅作历史登记 | `architecture-boundary-app-vs-deepagents.md:69` | 已解决 | — |
+
+### 6.2 范围外 / 未核验项（需独立子任务）
+
+| 编号 | 问题 | 来源 | 说明 |
+|---|---|---|---|
+| TB-6 | **kefu 返回符合性逐项核验**：优化 E 仅对 `async_subagents` 加 `QueryResponse` 断言（消费侧），未反向核验 kefu `/invoke` 是否逐字段符合 `QueryResponse`（含 `fallback`/`error`/`sources` 字段形态） | `plan-e-dual-track-convergence.md:95` S-5③ | 需独立子任务 + 真实/模拟 kefu 服务；本期不纳入 |
+| TB-7 | **docker compose 端到端冒烟**：`docker-compose.yml` 已存在，但缺一键端到端冒烟验证 | `research-proposal.md:120` | 可选；需服务可达环境 |
+| TB-8 | **eval 门禁 CI 化**：本地 `python -m eval.run_eval` 12/12 通过，但 eval 依赖 LLM/服务可达，CI 不可达时仅本地人工验证 | `architecture-improvement-plan.md:134` | 建议固化 CI 跳过策略 + 本地门禁约定 |
+
+### 6.3 说明
+
+- TB-1/TB-2 是本次 v2"双轨收敛"的**延伸项**，按边界文档判定为低优先级后续技术债，**不应在 v2 强行收敛**（DF 仅包内自引用、强行合并违反红线）。
+- TB-3 是**工程环境问题**，与代码正确性无关，但会误伤开发者环境，建议尽早固化运行约定。
+- TB-4 是已规划未实施的**独立专项**（M5），与 E 平行，可单独排期。
+
+*生成依据：v2 实施过程实测 + `docs/` 下各边界调研与专项规划文档登记的待办项汇总（2026-08-16）。*
