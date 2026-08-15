@@ -1,0 +1,22 @@
+# 检索链路配置（M3，方案 §7.2）
+#
+# 说明：默认值与当前节点硬编码完全一致（node_rrf.py:172 / node_search_embedding.py），
+# 修改本文件即可调节检索行为，无需改代码。config_hash 会随本文件内容变化（§7.5）。
+# 所有取值均为「配置默认」，禁止在本文件预填评测/压测数字。
+
+hybrid:
+  dense_weight: 0.8          # 稠密向量评分权重（原 node_search_embedding.py 硬编码 (0.8, 0.2)）
+  sparse_weight: 0.2         # 稀疏向量评分权重
+
+rrf:
+  k: 60                      # RRF 常数（原 node_rrf.py:172 硬编码 k=60）
+  max_results: 10            # RRF 输出上限（原 node_rrf.py:172 硬编码 max_results=10）
+  weights:                   # 各召回通道权重（具名，可扩展到 4 路 embedding/hyde/kg/web）
+    embedding: 1.0
+    hyde: 1.0
+
+channels:                    # 各路召回开关与超时（配合 §10.3 逐路 timeout，M6 fanout 使用）
+  embedding: { enabled: true, timeout_s: 1.5 }
+  hyde:      { enabled: true, timeout_s: 2.5 }
+  kg:        { enabled: true, timeout_s: 1.0 }
+  web:       { enabled: true, timeout_s: 3.0 }

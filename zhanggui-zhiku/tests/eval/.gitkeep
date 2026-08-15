@@ -1,0 +1,5 @@
+# 占位文件：保持 tests/eval/ 目录进入版本控制。
+#
+# 本目录用于检索质量评测用例（Recall@K / MRR / nDCG@10 等），
+# 与之配套的 eval/golden_queries.jsonl 与 eval/run_eval.py 属于 M2 里程碑范围。
+# M2 落地后可删除本文件。

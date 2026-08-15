@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "wenda-adapter"
+version = "0.1.0"
+description = "wenda SSE→JSON 适配层"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.129",
+    "uvicorn>=0.41",
+    "httpx>=0.28",
+    "pydantic>=2.13",
+]
+
+[tool.setuptools.packages.find]
+include = ["wenda_adapter*"]

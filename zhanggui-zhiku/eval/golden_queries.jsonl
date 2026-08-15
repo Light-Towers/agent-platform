@@ -1,0 +1,73 @@
+# ============================================================================
+# 掌柜智库检索评测 golden dataset（M2，方案 §6.1）
+# 样本量：56 条（参数查询 14 / 操作步骤 14 / 故障排查 14 / 多跳 14，四类全覆盖）
+#
+# 【诚实声明】本数据集为「构造 / 脱敏样例」，**非线上查询日志**（方案 §13 口径）。
+# 说明：
+#   1. 仓库当前不存在 doc/ 素材目录（实测确认，见交付说明），因此 query 基于项目
+#      代码/文档中真实出现的商品域构造：HAK 180 烫金机（node 手测与 prompt 示例）、
+#      万用表（README 示例"这个万用表怎么换电池"）、苏伯尔电磁炉（item_name_recognition
+#      prompt 示例"苏伯尓5000W大功率电磁炉"）。查询内容为这些商品说明书常见的
+#      「参数 / 操作 / 故障 / 组合推理」问题，**不代表任何真实文档原文**。
+#   2. relevant_chunk_ids 与 grade 为**假设性标注**（c_xxx 为构造 chunk 编号），
+#      用于打通评测管线、验证指标函数（尤其 nDCG 分级计算），不绑定真实索引。
+#      待真实文档入库后需按实际 chunk_id 重新标注。
+#   3. grade 分级：2=高度相关 / 1=部分相关 / 0=不相关（nDCG@10 必需，二值无法计算）。
+#   4. 每行一条 JSON，字段：qid / query / item_name / relevant_chunk_ids / grade / tags。
+# ============================================================================
+{"qid":"q001","query":"HAK 180 烫金机额定电压是多少","item_name":"HAK 180 烫金机","relevant_chunk_ids":["c_101"],"grade":{"c_101":2},"tags":["参数查询"]}
+{"qid":"q002","query":"HAK 180 烫金机最大烫印温度能到多少度","item_name":"HAK 180 烫金机","relevant_chunk_ids":["c_102"],"grade":{"c_102":2},"tags":["参数查询"]}
+{"qid":"q003","query":"HAK 180 烫金机加热功率是多大","item_name":"HAK 180 烫金机","relevant_chunk_ids":["c_103"],"grade":{"c_103":2},"tags":["参数查询"]}
+{"qid":"q004","query":"HAK 180 烫金机工作台面尺寸是多少","item_name":"HAK 180 烫金机","relevant_chunk_ids":["c_104"],"grade":{"c_104":2},"tags":["参数查询"]}
+{"qid":"q005","query":"HAK 180 烫金机整机重量多重","item_name":"HAK 180 烫金机","relevant_chunk_ids":["c_105"],"grade":{"c_105":2},"tags":["参数查询"]}
+{"qid":"q006","query":"HAK 180 烫金机压力调节范围是多少","item_name":"HAK 180 烫金机","relevant_chunk_ids":["c_106"],"grade":{"c_106":2},"tags":["参数查询"]}
+{"qid":"q007","query":"HAK 180 烫金机怎么换烫印头","item_name":"HAK 180 烫金机","relevant_chunk_ids":["c_107","c_108"],"grade":{"c_107":2,"c_108":1},"tags":["操作步骤"]}
+{"qid":"q008","query":"HAK 180 烫金机开机后怎么设置烫印温度","item_name":"HAK 180 烫金机","relevant_chunk_ids":["c_109"],"grade":{"c_109":2},"tags":["操作步骤"]}
+{"qid":"q009","query":"HAK 180 烫金机烫印时间怎么调节","item_name":"HAK 180 烫金机","relevant_chunk_ids":["c_110"],"grade":{"c_110":2},"tags":["操作步骤"]}
+{"qid":"q010","query":"HAK 180 烫金机首次使用前需要做什么准备","item_name":"HAK 180 烫金机","relevant_chunk_ids":["c_111"],"grade":{"c_111":2},"tags":["操作步骤"]}
+{"qid":"q011","query":"HAK 180 烫金机怎么更换烫金纸","item_name":"HAK 180 烫金机","relevant_chunk_ids":["c_112"],"grade":{"c_112":2},"tags":["操作步骤"]}
+{"qid":"q012","query":"HAK 180 烫金机用完后怎么关机断电","item_name":"HAK 180 烫金机","relevant_chunk_ids":["c_113"],"grade":{"c_113":2},"tags":["操作步骤"]}
+{"qid":"q013","query":"HAK 180 烫金机开机不加热怎么回事","item_name":"HAK 180 烫金机","relevant_chunk_ids":["c_114"],"grade":{"c_114":2},"tags":["故障排查"]}
+{"qid":"q014","query":"HAK 180 烫金机温度显示不稳定怎么处理","item_name":"HAK 180 烫金机","relevant_chunk_ids":["c_115"],"grade":{"c_115":2},"tags":["故障排查"]}
+{"qid":"q015","query":"HAK 180 烫金机烫印后图案不清晰怎么办","item_name":"HAK 180 烫金机","relevant_chunk_ids":["c_116"],"grade":{"c_116":2},"tags":["故障排查"]}
+{"qid":"q016","query":"HAK 180 烫金机加热时有异响是什么原因","item_name":"HAK 180 烫金机","relevant_chunk_ids":["c_117"],"grade":{"c_117":2},"tags":["故障排查"]}
+{"qid":"q017","query":"HAK 180 烫金机压力不足压不紧怎么调","item_name":"HAK 180 烫金机","relevant_chunk_ids":["c_118"],"grade":{"c_118":2},"tags":["故障排查"]}
+{"qid":"q018","query":"HAK 180 烫金机保险丝烧断是什么原因","item_name":"HAK 180 烫金机","relevant_chunk_ids":["c_119"],"grade":{"c_119":2},"tags":["故障排查"]}
+{"qid":"q019","query":"烫金机温度设到最高还烫不牢，可能是哪些参数没调对","item_name":"HAK 180 烫金机","relevant_chunk_ids":["c_102","c_106","c_116"],"grade":{"c_102":2,"c_106":2,"c_116":1},"tags":["多跳"]}
+{"qid":"q020","query":"换新烫印头后温度上不去，先查哪几个地方","item_name":"HAK 180 烫金机","relevant_chunk_ids":["c_107","c_114"],"grade":{"c_107":2,"c_114":1},"tags":["多跳"]}
+{"qid":"q021","query":"烫金纸经常断纸，和温度压力设置有什么关系","item_name":"HAK 180 烫金机","relevant_chunk_ids":["c_112","c_102","c_106"],"grade":{"c_112":2,"c_102":1,"c_106":1},"tags":["多跳"]}
+{"qid":"q022","query":"连续烫印一段时间后温度下降，应该检查什么","item_name":"HAK 180 烫金机","relevant_chunk_ids":["c_115","c_103"],"grade":{"c_115":2,"c_103":1},"tags":["多跳"]}
+{"qid":"q023","query":"新机器第一次使用想烫印厚布料，温度压力时间怎么配合","item_name":"HAK 180 烫金机","relevant_chunk_ids":["c_111","c_102","c_106","c_110"],"grade":{"c_111":2,"c_102":2,"c_106":1,"c_110":1},"tags":["多跳"]}
+{"qid":"q024","query":"烫印头损坏需要更换，除了换头还要重新设置哪些参数","item_name":"HAK 180 烫金机","relevant_chunk_ids":["c_107","c_109"],"grade":{"c_107":2,"c_109":1},"tags":["多跳"]}
+{"qid":"q025","query":"万用表RS-12 测量直流电压的最大量程是多少","item_name":"万用表RS-12","relevant_chunk_ids":["c_201"],"grade":{"c_201":2},"tags":["参数查询"]}
+{"qid":"q026","query":"万用表RS-12 用几节几号电池供电","item_name":"万用表RS-12","relevant_chunk_ids":["c_202"],"grade":{"c_202":2},"tags":["参数查询"]}
+{"qid":"q027","query":"万用表RS-12 交流电压测量范围是多少","item_name":"万用表RS-12","relevant_chunk_ids":["c_203"],"grade":{"c_203":2},"tags":["参数查询"]}
+{"qid":"q028","query":"万用表RS-12 电阻测量档最大能测多少欧","item_name":"万用表RS-12","relevant_chunk_ids":["c_204"],"grade":{"c_204":2},"tags":["参数查询"]}
+{"qid":"q029","query":"万用表怎么换电池","item_name":"万用表RS-12","relevant_chunk_ids":["c_202","c_205"],"grade":{"c_202":2,"c_205":1},"tags":["操作步骤"]}
+{"qid":"q030","query":"万用表测电压时表笔应该插哪个孔","item_name":"万用表RS-12","relevant_chunk_ids":["c_206"],"grade":{"c_206":2},"tags":["操作步骤"]}
+{"qid":"q031","query":"万用表怎么测电阻，档位怎么选","item_name":"万用表RS-12","relevant_chunk_ids":["c_204","c_207"],"grade":{"c_204":2,"c_207":1},"tags":["操作步骤"]}
+{"qid":"q032","query":"万用表蜂鸣档怎么测线路通断","item_name":"万用表RS-12","relevant_chunk_ids":["c_208"],"grade":{"c_208":2},"tags":["操作步骤"]}
+{"qid":"q033","query":"万用表开机无显示是什么原因","item_name":"万用表RS-12","relevant_chunk_ids":["c_202","c_209"],"grade":{"c_202":2,"c_209":1},"tags":["故障排查"]}
+{"qid":"q034","query":"万用表测量读数不准怎么办","item_name":"万用表RS-12","relevant_chunk_ids":["c_210"],"grade":{"c_210":2},"tags":["故障排查"]}
+{"qid":"q035","query":"万用表换电池后还是开不了机怎么排查","item_name":"万用表RS-12","relevant_chunk_ids":["c_202","c_209"],"grade":{"c_202":2,"c_209":1},"tags":["故障排查"]}
+{"qid":"q036","query":"万用表测电压时显示OL是什么意思","item_name":"万用表RS-12","relevant_chunk_ids":["c_211"],"grade":{"c_211":2},"tags":["故障排查"]}
+{"qid":"q037","query":"万用表测不出电压，先换电池还是先查表笔","item_name":"万用表RS-12","relevant_chunk_ids":["c_209","c_206","c_210"],"grade":{"c_209":2,"c_206":1,"c_210":1},"tags":["多跳"]}
+{"qid":"q038","query":"想测家里插座有没有电，应该用哪个档位怎么操作","item_name":"万用表RS-12","relevant_chunk_ids":["c_203","c_207","c_206"],"grade":{"c_203":2,"c_207":1,"c_206":1},"tags":["多跳"]}
+{"qid":"q039","query":"万用表读数一直跳变不稳定，和电池电量低有关系吗","item_name":"万用表RS-12","relevant_chunk_ids":["c_210","c_202"],"grade":{"c_210":2,"c_202":1},"tags":["多跳"]}
+{"qid":"q040","query":"测量电阻前为什么要先断电，操作步骤是什么","item_name":"万用表RS-12","relevant_chunk_ids":["c_204","c_207","c_212"],"grade":{"c_204":2,"c_207":1,"c_212":1},"tags":["多跳"]}
+{"qid":"q041","query":"苏伯尔电磁炉额定功率是多少瓦","item_name":"苏伯尔电磁炉","relevant_chunk_ids":["c_301"],"grade":{"c_301":2},"tags":["参数查询"]}
+{"qid":"q042","query":"苏伯尔电磁炉工作电压是多少","item_name":"苏伯尔电磁炉","relevant_chunk_ids":["c_302"],"grade":{"c_302":2},"tags":["参数查询"]}
+{"qid":"q043","query":"苏伯尔电磁炉火力档位一共有几档","item_name":"苏伯尔电磁炉","relevant_chunk_ids":["c_303"],"grade":{"c_303":2},"tags":["参数查询"]}
+{"qid":"q044","query":"苏伯尔电磁炉适用什么材质的锅具","item_name":"苏伯尔电磁炉","relevant_chunk_ids":["c_304"],"grade":{"c_304":2},"tags":["参数查询"]}
+{"qid":"q045","query":"苏伯尔电磁炉开机后怎么调节火力","item_name":"苏伯尔电磁炉","relevant_chunk_ids":["c_303","c_305"],"grade":{"c_303":2,"c_305":1},"tags":["操作步骤"]}
+{"qid":"q046","query":"苏伯尔电磁炉定时功能怎么使用","item_name":"苏伯尔电磁炉","relevant_chunk_ids":["c_306"],"grade":{"c_306":2},"tags":["操作步骤"]}
+{"qid":"q047","query":"苏伯尔电磁炉用完后怎么清洁面板","item_name":"苏伯尔电磁炉","relevant_chunk_ids":["c_307"],"grade":{"c_307":2},"tags":["操作步骤"]}
+{"qid":"q048","query":"苏伯尔电磁炉第一次使用前需要做什么","item_name":"苏伯尔电磁炉","relevant_chunk_ids":["c_308"],"grade":{"c_308":2},"tags":["操作步骤"]}
+{"qid":"q049","query":"苏伯尔电磁炉开机不加热怎么回事","item_name":"苏伯尔电磁炉","relevant_chunk_ids":["c_309"],"grade":{"c_309":2},"tags":["故障排查"]}
+{"qid":"q050","query":"苏伯尔电磁炉显示E0报警是什么故障","item_name":"苏伯尔电磁炉","relevant_chunk_ids":["c_310"],"grade":{"c_310":2},"tags":["故障排查"]}
+{"qid":"q051","query":"苏伯尔电磁炉风扇不转怎么办","item_name":"苏伯尔电磁炉","relevant_chunk_ids":["c_311"],"grade":{"c_311":2},"tags":["故障排查"]}
+{"qid":"q052","query":"苏伯尔电磁炉按键失灵怎么处理","item_name":"苏伯尔电磁炉","relevant_chunk_ids":["c_312"],"grade":{"c_312":2},"tags":["故障排查"]}
+{"qid":"q053","query":"电磁炉放上锅还是不加热，先查锅具还是先查报警代码","item_name":"苏伯尔电磁炉","relevant_chunk_ids":["c_304","c_309","c_310"],"grade":{"c_304":2,"c_309":1,"c_310":1},"tags":["多跳"]}
+{"qid":"q054","query":"电磁炉E0报警后想继续使用，需要检查哪些项","item_name":"苏伯尔电磁炉","relevant_chunk_ids":["c_310","c_309"],"grade":{"c_310":2,"c_309":1},"tags":["多跳"]}
+{"qid":"q055","query":"电磁炉火力时大时小不稳定，和电压或锅具有关吗","item_name":"苏伯尔电磁炉","relevant_chunk_ids":["c_302","c_304","c_305"],"grade":{"c_302":2,"c_304":1,"c_305":1},"tags":["多跳"]}
+{"qid":"q056","query":"想用电磁炉煮火锅，火力档位和定时怎么配合设置","item_name":"苏伯尔电磁炉","relevant_chunk_ids":["c_305","c_306"],"grade":{"c_305":2,"c_306":1},"tags":["多跳"]}
