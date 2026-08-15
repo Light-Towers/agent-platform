@@ -3,7 +3,6 @@
 from functools import lru_cache
 
 from pydantic_settings import SettingsConfigDict
-
 from shared_schemas.settings import BaseLLMSettings
 
 
