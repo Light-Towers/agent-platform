@@ -24,14 +24,14 @@
   - `kefu-service/main.py:6` 注释写明运行端口 `8003`，`build_kefu_graph` 已实现，验收报告 `deepagents/VERIFICATION_REPORT.md:22` 显示 M7 测试 10/10 + Flow 3/3 + GraphRAG 5/5 通过。
   - **关键修正（迁移深度）**：网关远程模式走 `AsyncSubAgent`（Agent Protocol，`graph_id` + `url`），见 `deepagents/agent/async_subagents.py:8-9,23-28`；该文件注释 `:8` 自承 "M2 阶段子服务尚未升级为 Agent Protocol server"。当前 `kefu-service`/`kefu-adapter` 均为普通 FastAPI REST，**直接把 `config.py` 的 URL 指向 `kefu-service:8003` 大概率不可行**。且 `kefu-service` 返回 `list-of-{text}`（`main.py:53-66`）而非 `QueryResponse`，adapter 的转换层暂不能移除。
 - **影响**：新实现写完未上线；迁移到 kefu-service **不只是改 URL**，需先把 kefu-service 升级为 Agent Protocol server（或改网关调用方式）并补齐 `QueryResponse` 契约，否则 adapter 不可删。
-- **处理状态**：⚠️ 待实施（架构决策/工程改造，非文档层可解）。已在 `config.py:46-57`、`kefu-service/main.py:6` 顶部注释、`README.md`「已知待拍板项」显式标注迁移约束，防止误改。
+- **处理状态**：✅ 已完成（代码侧，提交 `1e86bf8`）。`kefu-service` 已升级为 Agent Protocol 兼容 server（新增 `POST /invoke`，返回 `QueryResponse`，依赖 `shared-schemas`；旧 `/api/messages` 保留为 atguigu_ai 兼容入口）；网关 `deepagents/agent/config.py` 新增 `KEFU_SERVICE_URL` + `KEFU_USE_ADAPTER` 开关（默认 `false` 直连 `kefu-service:8003`）；`async_subagents.py` 增加 httpx 远程回退（外部 `deepagents` 包未安装时直连 `/invoke`）；`kefu-adapter` 已加 `DeprecationWarning` 弃用标记。⏳ 剩余运维动作：外部 `atguigu_ai` 退役后删除 `kefu-adapter/` 包（无代码阻塞）。
 
 ### 问题 3：迁移计划要求"废弃 kefu-adapter"，但从未执行
 - **事实依据**：
   - `deepagents/docs/refactor-plan.md:258` 明确写："④ kefu-adapter 废弃，新 kefu-service 直接是 FastAPI + LangGraph"。
   - 但 `deepagents/agent/config.py:49` 至今仍指向 `kefu-adapter`（`:8002`）。
 - **影响**：计划与实现脱节，技术债未清理。
-- **处理状态**：⚠️ 待实施。已在 `refactor-plan.md` Phase 7 表格后加"执行状态"注记（第④项尚未执行及原因），并在 `README.md`/`AGENTS.md` 的 kefu-adapter 行标注"迁移计划要求废弃但尚未执行"。
+- **处理状态**：✅ 已完成代码侧准备（提交 `1e86bf8`）。`kefu-service` 已可经网关 `KEFU_USE_ADAPTER=false` 直连，无需 `kefu-adapter` 转换层；`kefu-adapter` 已加 `DeprecationWarning` 弃用标记，`refactor-plan.md` 执行状态注记已更新为"待运维执行"。⏳ 剩余：外部 `atguigu_ai` 退役后删 `kefu-adapter/` 包。
 
 ### 问题 4：老客服系统 `atguigu_ai` 未退役，且不在仓库内
 - **事实依据**：
@@ -39,7 +39,7 @@
   - 字符串 `atguigu_ai` 在仓库内有 56 处引用，均为注释/文档说明迁移来源（如 `kefu-service/main.py:1`、`kefu-service/agent/graph_rag.py:1`、`kefu-adapter/main.py:1`），**不构成代码耦合**。
   - `kefu-adapter/main.py:24` `KEFU_API_URL` 默认 `http://localhost:5005` → 当前生产流量实际打到外部 `atguigu_ai:5005`。
 - **影响**：迁移未完成；adapter 不能直接删除（删则客服链路断）。
-- **处理状态**：⚠️ 待实施。已在 `kefu-adapter/main.py:1-7` 顶部加"外部依赖声明"注释，并在 `README.md`/`AGENTS.md` 标注桥接外部 atguigu_ai(:5005) 的根因。
+- **处理状态**：⚠️ 待实施（外部系统动作，非仓库代码可解）。`kefu-service` 已可直连（无需 adapter）；`kefu-adapter` 已弃用标记。`atguigu_ai` 退役为外部运维动作，退役后删 `kefu-adapter/` 包即可（无代码阻塞）。`kefu-adapter/main.py:1-7` 顶部已加"外部依赖声明"注释。
 
 ---
 
@@ -117,6 +117,6 @@
 
 ## 六、建议复核模型重点验证
 
-1. **问题 2 的修复深度（非改 URL）**：`deepagents/agent/async_subagents.py:8-9` 网关远程模式用 `AsyncSubAgent`（Agent Protocol，`graph_id`+`url`），而 `kefu-service` 当前是普通 FastAPI REST 且返回 `list-of-{text}`（`main.py:53-66`）非 `QueryResponse`。请验证：将 kefu-service 接入联邦网关所需的真实改造量（升级为 Agent Protocol server 或改网关调用方式 + 补齐 `QueryResponse` 契约），而非简单改 `config.py:49` 的 URL。
+1. **问题 2 的修复深度（已完成，供验证）**：提交 `1e86bf8` 已将 `kefu-service` 升级为 Agent Protocol 兼容 server（新增 `POST /invoke` 返回 `QueryResponse`，依赖 `shared-schemas`），网关 `config.py` 新增 `KEFU_USE_ADAPTER` 开关（默认 `false` 直连 `kefu-service:8003`），`async_subagents.py` 增加 httpx 远程回退。请验证：直连路径下 `customer_service` 子服务经 `KEFU_SERVICE_URL/invoke` 返回 `QueryResponse` 是否正常；以及 `KEFU_USE_ADAPTER=true` 时仍走 `kefu-adapter:8002` 的兼容路径。
 2. **问题 5（U-1）的取舍**：`schemas.py:41-54` 已用 `AliasChoices` 双写兼容；移除兼容层需确认所有调用方（尤其 `app/api/routes.py` 入站解析）及 DB 列名（`question`，`app/sql/schema_store.py:27`）已统一用标准名。HealthResponse 已对齐，无需处理。
 3. **根 `code-review-final-report.md` 时效**：`:4` 路径确为旧 `D:\Study\github\agent-platform`，`:60` 自承部分结论基于旧代码失真——其 U-4/U-5/U-7 已修复、U-3 已加白名单均证明此点；本报告第三、四节已逐行重验，引用该报告行号时务必重新核对。
