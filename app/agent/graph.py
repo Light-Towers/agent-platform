@@ -7,6 +7,7 @@ SSE 聚合、会话键、探活自递归等一串问题；这里用 LangGraph �
 
 import logging
 
+from agent_core.guardrails.input_guard import guard_input
 from langchain_core.messages import AIMessage
 from langgraph.graph import END, START, StateGraph
 
@@ -36,8 +37,20 @@ def build_graph(llm, checkpointer=None, mcp_manager: MCPClientManager | None = N
     async def route_node(state: AgentState) -> dict:
         question = state.question
 
-        # 上下文压缩：多轮会话 token 超阈值时摘要旧消息
+        # 输入护栏：PII 脱敏 + prompt injection 检测（opt-in，与 deepagents 统一入口）
         settings = get_settings()
+        if settings.guard_enabled:
+            guard = guard_input(question)
+            if guard["blocked"]:
+                return {
+                    "answer": "抱歉，您的输入包含不安全的内容，请重新描述。",
+                    "route": "direct",
+                    "sub_query": "",
+                    "route_reason": "被输入护栏拦截（injection）",
+                }
+            question = guard["redacted_text"]
+
+        # 上下文压缩：多轮会话 token 超阈值时摘要旧消息
         messages = state.messages
         if settings.compaction_enabled and llm is not None:
             threshold = int(settings.model_context_window * settings.compaction_threshold_ratio)

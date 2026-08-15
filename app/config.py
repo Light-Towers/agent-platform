@@ -84,6 +84,9 @@ class Settings(BaseLLMSettings):
     mcp_enabled: bool = False
     mcp_servers: str = ""  # JSON 编码的 server 配置列表
 
+    # 输入护栏（opt-in，默认 false）：PII 脱敏 + prompt injection 检测
+    guard_enabled: bool = False
+
     # CORS：允许的前端来源（逗号分隔），为空时默认回环 127.0.0.1:5173
     cors_allow_origins: str = ""
 
