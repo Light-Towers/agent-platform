@@ -92,12 +92,5 @@ data/*.csv
 .wiki/**/*.pyc
 # === 生成产物：简历 docx（由 Resume/md2docx.py 生成，不入库） ===
 Resume/versions/*.docx
-# === 课程遗留（已从 git 移除，防止误加） ===
-agent-core/
-deepagents/
-kefu-adapter/
-kefu-service/
-shared-schemas/
-wenda-adapter/
-zhanggui-zhiku/
+# === 课程快照（不纳入版本控制） ===
 courses/

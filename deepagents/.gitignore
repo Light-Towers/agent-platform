@@ -1,0 +1,21 @@
+# 敏感配置：本地真实密钥，勿入库（用 .env.example 作模板）
+.env
+
+# Python 缓存
+__pycache__/
+*.pyc
+
+# 运行产物（session 输出/中间数据）
+output/
+updated/
+tools/test_session_*/
+
+# IDE
+.idea/
+
+# 虚拟环境
+venv/
+.venv/
+
+# 评测结果（不进仓库，见 eval/PROPOSAL.md §5）
+eval/results/

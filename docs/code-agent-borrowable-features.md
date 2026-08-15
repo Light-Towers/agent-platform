@@ -201,7 +201,7 @@ OpenCode 的 `AGENTS.md` 末尾 "V2 Session Core" 部分揭示了**生产级会�
 | N4 | 多 agent 并行 | Claude Code C4 | **与路由模型冲突**：Supervisor 路由选单能力（5.1.1 第 2 条），多 agent 并行适用于多维度证据汇总但非 MVP |
 | N5 | Skill 自动触发 | Claude Code C5、Codex D13 | **RAG 已覆盖**：领域知识注入由知识库（RAG）承担，非 skill |
 | N6 | App server daemon 架构 | Codex D28 | **形态不匹配**：本项目是 HTTP 服务（FastAPI），非 CLI daemon |
-| N7 | 凭证 keyring / OAuth | Codex D8、OpenCode O27 | **单租户服务端**：env/secret manager 已够；OAuth 留 Phase 3 多租户 |
+| N7 | 凭证 keyring / OAuth | Codex D8、OpenCode O27 | **单租户服务端**：env/secret manager 已够；OAuth 留 Phase 2 多租户 |
 | N8 | 会话分享 | OpenCode O25 | **后端运行时**：协作 UX 由调用方自理 |
 | N9 | 自引用循环 | Claude Code C12 | **问答一次完成**：反思重试（5.1.1 第 4 条）已够，非"迭代直到测试过" |
 | N10 | 安全钩子（9 模式监控） | Claude Code C13 | **已有领域级安全**：SQL 白名单 + 只读 + 密钥脱敏（4.3） |
@@ -218,7 +218,7 @@ OpenCode 的 `AGENTS.md` 末尾 "V2 Session Core" 部分揭示了**生产级会�
 | N21 | System context algebra | OpenCode O9 | **过设计**：本项目上下文简单（问题+证据+记忆） |
 | N22 | ACP | OpenCode O18 | **单 Supervisor**：无 agent 间通信 |
 | N23 | Tool output store | OpenCode O29 | **证据是片段**：无需大输出存储 |
-| N24 | 多 project + 多 worktree | OpenCode O1 | **单租户**：Phase 3 多租户时再考虑 |
+| N24 | 多 project + 多 worktree | OpenCode O1 | **单租户**：Phase 2 多租户时再考虑 |
 | N25 | 双 agent 模式（build/plan） | OpenCode O14 | **无编码操作**：plan 的"拒绝文件编辑"无对应物 |
 | N26 | 编码能力（file/git/patch/ripgrep/lsp/apply-patch） | 三者均有 | **spec.md 1.4 显式排除**：代码库操作 / 编码型 Agent |
 

@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kefu-adapter"
+version = "0.1.0"
+description = "atguigu_ai REST 适配层"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.129",
+    "uvicorn>=0.41",
+    "httpx>=0.28",
+    "pydantic>=2.13",
+]
+
+[tool.setuptools.packages.find]
+include = ["kefu_adapter*"]
