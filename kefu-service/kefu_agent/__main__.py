@@ -18,8 +18,8 @@ from __future__ import annotations
 
 import time
 
-from agent.graph import build_kefu_graph
-from agent.state import KefuState
+from kefu_agent.graph import build_kefu_graph
+from kefu_agent.state import KefuState
 from fastapi import FastAPI
 from langgraph.checkpoint.memory import InMemorySaver
 from shared_schemas import QueryRequest, QueryResponse

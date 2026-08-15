@@ -8,8 +8,8 @@ from __future__ import annotations
 
 from langgraph.graph import END, StateGraph
 
-from agent.services import extract_tracking_id, query_logistics
-from agent.state import KefuState
+from kefu_agent.services import extract_tracking_id, query_logistics
+from kefu_agent.state import KefuState
 
 
 async def collect_tracking_id(state: KefuState) -> KefuState:
