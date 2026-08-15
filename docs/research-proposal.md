@@ -115,8 +115,8 @@
 方案确认后已按 P0→P5 完成代码落地（`agent-platform/`）：
 
 - 代码：约 30 个文件，全部就绪
-- 单元测试：**32 个用例全部通过**（本地 Python 3.14 实测）
-- 评测门禁：golden set 12 条 + CI workflow 已建；本地 eval 门禁脚本**尚未执行最终确认**
-- 待办：跑通 `python eval/run_eval.py --fail-below 1.0`，以及（可选）docker compose 端到端冒烟
+- 单元测试：**40 个用例全部通过**（本地 Python 3.13 实测，`pytest -q`）
+- 评测门禁：golden set 12 条 + CI workflow 已建；本地 eval 门禁脚本**已确认通过（12/12 = 100% 启发式路由）**
+- 待办：（可选）docker compose 端到端冒烟
 
 > 若对方案有异议，代码均可按新决策调整；核心可逆点：编排框架（LangGraph）、检索融合策略（RRF）、SQL 守卫（sqlglot）。
