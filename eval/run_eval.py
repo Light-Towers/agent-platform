@@ -3,11 +3,13 @@
 默认只跑确定性启发式路由（无外部依赖，可进 CI 门禁）；
 配置 LLM_API_KEY 后加 --llm 可评测 LLM 结构化路由。
 
-CI 门禁约定（见 docs/architecture-improvement-plan.md §6 TB-8）：
-- 默认（无 --llm）：跑启发式评测，作为确定性门禁（--fail-below 默认 0.8）。
-- --llm：启用 LLM 结构化路由评测；若 LLM_API_KEY 缺失，回退启发式并给出 WARN。
-- --require-llm：要求必须跑 LLM 评测；若 LLM_API_KEY 缺失则显式 SKIP（退出码 2），
-  避免 CI 在环境不可达时"假装通过"。CI 应将退出码 2 识别为"环境跳过"而非失败。
+CI / 门禁分层约定（见 docs/architecture-improvement-plan.md §6 TB-8）：
+- 确定性门禁（agent-platform-ci.yml → `make ci`）：默认（无 --llm）跑启发式评测，
+  无 LLM 依赖、永远可达，--fail-below 默认 0.8。CI 只守这一层，不评 LLM 质量分。
+- LLM 质量雷达（eval-llm.yml，定时+手动，非阻塞）：用 --require-llm 跑真 LLM 评测，
+  验证端到端答案质量 / 路由决策 / 护栏拦截 / 跨模型回归；LLM_API_KEY 缺失则显式
+  SKIP（退出码 2），不假装通过，也不阻塞 push。结果存 artifact 供趋势查看。
+- --llm：本地调试用，启用 LLM 结构化路由评测；key 缺失回退启发式并 WARN。
 
 用法：
     python -m eval.run_eval
