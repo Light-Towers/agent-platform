@@ -103,6 +103,14 @@
 - **风险**：编排核心若误合并影响面最大；故收敛限定在内核/契约层，每阶段独立可测。
 - **专项规划**：详见 `docs/plan-e-dual-track-convergence.md`（P4.1~P4.3 已实施，经独立审核修订后落地）。
 
+### 优化 F：自研外壳基础设施化（中优先级 / 可选，独立专项）
+
+- **来源**：用户决策——若把 `app` 的 5 段自研外壳补到 `deepagents`，需回答"app 的 LangGraph 逻辑是否还有意义"。澄清：外壳是**团队自研逻辑、非 LangGraph 独有**；补外壳=搬家不是换框架；补完后双轨差异收敛为纯编排风格差异（确定性 DAG vs 涌现委派）。
+- **结论**：`app` 显式 `StateGraph` 编排可退役（被 DeepAgents 风格吸收），但 LangGraph 内核永远在（DeepAgents 依赖之），外壳代码搬家不消失。
+- **收敛方式（不做全量迁移）**：把 admission/coordinator/revert/SQL 双保险/SSE 抽为**独立可复用横向基础设施**，双轨共用同一套、编排层各自保留；继承 §3 护栏（编排不可合并）。
+- **前置**：先修 `deepagents/api/server.py:165` API_KEY 模式 thread_id 每次重建导致会话断裂的 bug（否则接 PG checkpoint 也救不了多轮对话）。
+- **专项规划**：详见 `docs/plan-e-dual-track-convergence.md` 末尾「F 外壳基础设施化」节（P4.4，可选）。
+
 ## 3. 必须保留、不可替换的深度定制（护栏清单）
 
 以下为项目护城河，任何优化均不得触碰：
@@ -150,6 +158,12 @@
 | TB-3 | **uv workspace 环境脆弱**：根 `uv sync` 会卸载非根 member 包（实测卸载 24 包，含 deepagents-app），默认环境不含非根包依赖 | 实施过程实测 | 中（已缓解） | **已修复**：根因是 uv workspace 默认 `uv sync` 只装根包。固化约定为 `uv sync --all-packages --extra dev`（装全部 workspace 包 + dev 工具），单包测试用 `uv run --package <pkg> ...`；运行约定已写入 `README.md` uv workspace 段。裸 `uv sync` 仍会卸载非根包，勿直接使用 |
 | TB-4 | **M5 语义缓存统一未落地**：`agent_core.cache` 已建 `CacheStats`/`build_cache_key` 单一真相，但 app(`PgSemanticCache`)/deepagents(`ValkeySemanticCache`) 尚未统一到 `BaseSemanticCache` 接口 | `m5-semantic-cache-plan.md`（纯草案，未实施） | 中 | ✅ 已落地（2026-08-16）：`agent_core.cache` 新增 `BaseSemanticCache` Protocol + 零依赖 `build_cache_key` 纯函数（单一真相）；deepagents `layers.py` 复用内核 `build_cache_key`（移除本地 hash 重复，I 规则清理 hashlib/json）；app `infra/cache.py` docstring 标注遵循协议、不跨后端共享数据。补 `agent-core/tests/test_cache_key.py`。遵循 §6 约束：仅统一接口与 key 构造，不跨后端共享缓存数据 |
 | TB-5 | **deepagents 联邦契约统一（原 TODO）**：`shared_schemas` 在 deepagents 侧原未直接复用（仅 app 侧用），已在优化 E/P4.1 补齐断言——**已闭环**，此处仅作历史登记 | `architecture-boundary-app-vs-deepagents.md:69` | 已解决 | — |
+| TB-9 | **双轨职责重叠（意图/改写双份）**：`app.decide_route` 与 `deepagents/agent/intent/*` + `rewrite/` 各自实现意图分类与 Query 改写，策略可能分歧、双份维护 | `dual-track-architecture-analysis.md` AR-1 | 高（仅 SQL/契约已收口，路由/改写仍双份） | 以 `app.decide_route` + `agent_core` 为路由真相源；deepagents 侧复用或经内核桥接，禁止编排层合并（护栏 §3） |
+| TB-10 | **双轨记忆语义不等价**：`app` 有 pgvector 长期记忆 + PG checkpoint + revert；`deepagents` 仅 `InMemorySaver`，无长期记忆（E-3 已下沉 `MemoryBackend` 协议但未挂后端） | `dual-track-architecture-analysis.md` AR-2 | 高（跨轨无法共享长期上下文） | `create_deep_agent` memory 挂载点接入内核 `MemoryBackend`；短期文档固化"deepagents 无长期记忆"边界 |
+| TB-11 | **双轨配置体系分裂**：`app` 用 pydantic-settings `Settings`；`deepagents` 用 dataclass+dotenv+YAML，能力开关散落 env | `dual-track-architecture-analysis.md` AR-3 | 中 | 长期 deepagents 配置收敛到 pydantic-settings 或复用 `app.Settings`；短期 README 枚举全部 env 开关与默认值 |
+| TB-12 | **共享内核采用度不对称（残余）**：`deepagents` 引 `agent_core` 24 处 / `app` 7 处；缓存 key 已统一（TB-4）但 `PgSemanticCache`/`ValkeySemanticCache` 未统一到 `BaseSemanticCache` 实现层 | `dual-track-architecture-analysis.md` AR-4 | 中（部分已闭环：E-1/TB-4/TB-5） | 新增内核能力强制双轨同步接入；缓存后端实现层对齐 `BaseSemanticCache` |
+| TB-13 | **双轨认知/维护成本**：9 包 monorepo + 两套编排哲学（StateGraph 边思维 vs DeepAgents 委派思维）+ SSE/WS 双网关，排障需先判轨 | `dual-track-architecture-analysis.md` AR-5 | 中（结构性） | 优化 F：抽自研外壳为共享基础设施，双轨共用；`AGENTS.md` 固化「新业务默认走哪条轨」决策树 |
+| TB-14 | **deepagents 外壳缺失 + thread_id 会话断裂**：`deepagents/api/server.py:165` API_KEY 模式每次请求生成新 `thread_id`，使 checkpointer 形同虚设（即便换 PG 也救不了多轮）；且缺 admission/coordinator/revert/SSE 外壳 | `plan-e-dual-track-convergence.md` §F | 高（阻断 B 侧持久化与回退） | 优化 F P4.4：先修 thread_id 复用 → 注入 PG checkpoint（ADR-0002）→ 抽外壳为共享基础设施并双挂 |
 
 ### 6.2 范围外 / 未核验项（需独立子任务）
 
