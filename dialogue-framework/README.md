@@ -8,7 +8,7 @@ updated: 2026-08-13
 
 ## 来源
 
-生产化改造自 `courses/zhanggui-kefu/atguigu_ai/`（尚硅谷课程快照，类 Rasa 架构，LangGraph 重写）。
+生产化改造自 `courses/zhanggui-kefu/legacy/`（尚硅谷课程快照，类 Rasa 架构，LangGraph 重写）。
 课程快照保持 `courses/` 原样（gitignore 忽略），本目录为受 git 跟踪的生产化版本。
 
 ## 定位

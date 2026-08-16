@@ -1,17 +1,17 @@
-"""kefu-service：从 atguigu_ai 迁移到 deepagents + LangGraph。
+"""kefu-service：从 legacy 客服平台迁移到 deepagents + LangGraph。
 
 Phase 7：9 种命令 → LangGraph 意图路由，3 个 Flow → LangGraph 子图，
-GraphRAG → 知识库检索子 Agent，atguigu_ai Tracker → LangGraph State。
+GraphRAG → 知识库检索子 Agent，legacy tracker → LangGraph State。
 
 运行：uvicorn kefu_agent:app --host 0.0.0.0 --port 8003
 
 网关接入状态（已修复）：本服务已实现且 CI 通过，并已于 Phase 7 收尾补齐：
   - 接入 shared-schemas 统一契约，新增 `POST /invoke`（Agent Protocol 兼容，
     接受 graph_id + input，返回 QueryResponse），供 deepagents 联邦网关远程直连；
-  - `POST /api/messages` 保留为 atguigu_ai 兼容入口（旧契约），内部复用统一核心逻辑；
+  - `POST /api/messages` 保留为 legacy 兼容入口（旧契约），内部复用统一核心逻辑；
   - deepagents/agent/config.py 新增 KEFU_SERVICE_URL + KEFU_USE_ADAPTER 开关，
     置 KEFU_USE_ADAPTER=false 即直连本服务；kefu-adapter 转换层已于 2026-08 移除
-    （外部 atguigu_ai 退役由运维执行）。
+    （legacy 接入层退役由运维执行）。
 """
 
 from __future__ import annotations
@@ -97,14 +97,14 @@ async def invoke(req: QueryRequest):
 
 @app.post("/api/messages")
 async def handle_message(request: dict):
-    """处理客服消息（对齐 atguigu_ai /api/messages 接口，旧契约保留）。"""
+    """处理客服消息（对齐 legacy /api/messages 接口，旧契约保留）。"""
     req = QueryRequest(
         query=request.get("message", ""),
         session_id=request.get("session_id", "default"),
         tenant_id=request.get("tenant_id", "default"),
     )
     resp = await _run_kefu(req)
-    # 对齐 atguigu_ai 契约：返回 List[MessageResponse]（list-of-{text,buttons}）
+    # 对齐 legacy 契约：返回 List[MessageResponse]（list-of-{text,buttons}）
     # kefu-adapter 期望 list-of-{text}，dict 会被 for msg in dict 迭代 keys(str) 导致 AttributeError。
     messages = []
     if resp.answer:

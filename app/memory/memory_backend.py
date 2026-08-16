@@ -24,11 +24,14 @@ logger = logging.getLogger(__name__)
 try:
     from agent_core.memory.backend import MemoryBackend
 except Exception:  # pragma: no cover - 兜底：内核不可用时保留本地定义
+    # 刻意保留的 S-3 回滚副本：仅在 agent_core 不可导入时启用，保证 app 侧
+    # MemoryBackend 契约不依赖内核可达性。与 agent_core.memory.backend.MemoryBackend
+    # 签名必须保持同步（属回退兜底，非业务重复代码，勿删）。
     _MemoryBackend_Local = True
 
     @runtime_checkable
     class MemoryBackend(Protocol):  # type: ignore[no-redef]
-        """长期记忆后端契约（本地回退副本）。"""
+        """长期记忆后端契约（本地回退副本，S-3 红线兜底）。"""
 
         async def recall(self, pool: object, user_id: str, question: str, k: int = 3) -> list[str]:
             ...
@@ -77,11 +80,12 @@ class PgVectorMemoryBackend:
 
 
 class CompositeMemoryBackend:
-    """复合后端：按 namespace 路由到不同后端（预留）。
+    """复合后端：按 namespace 路由到不同后端（预留，当前未启用）。
 
-    首期仅接入 pgvector 后端（default），复合路由接口保留但暂不启用——
-    调用方无感知，行为等价于 ``PgVectorMemoryBackend``。未来可按 namespace
-    将文件型/缓存型记忆路由到独立后端，无需改动调用方。
+    ⚠️ 状态：首期**仅接入 pgvector 后端（default），复合路由接口保留但暂不启用**——
+    当前行为完全等价于 ``PgVectorMemoryBackend``，属于 Speculative Generality 预留扩展点，
+    请勿将其视为已生效的多后端能力。调用方无感知。未来按 namespace 将文件型/缓存型
+    记忆路由到独立后端时再启用，无需改动调用方签名。
     """
 
     def __init__(self, default: MemoryBackend | None = None) -> None:

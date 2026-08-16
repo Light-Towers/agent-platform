@@ -161,11 +161,11 @@
 
 ### 6.3 说明
 
-- TB-1/TB-2 是本次 v2"双轨收敛"的**延伸项**，按边界文档判定为低优先级后续技术债，**不应在 v2 强行收敛**（DF 仅包内自引用、强行合并违反红线）。
+- TB-1/TB-2 是本次 v2"双轨收敛"的**延伸项**，按边界文档判定为低优先级后续技术债。v2 中已以**桥接适配**形式落地（非合并/删除 dialogue-framework，符合红线字面）：`dialogue_framework/shared/llm/core_adapter.py`（`LLMCoreClient` 桥接内核 `BaseLLMProvider`）+ `dialogue_framework/core/tracker_memory.py`（`TrackerConversationMemory` 适配内核 `ConversationMemory`），并补 `tests/test_tb_bridge.py`。DF 仍为独立包、未合并，满足护栏清单红线；详见 §6.1 TB-1/TB-2 行"✅ 已落地"标注与 CHANGELOG。
 - TB-3 是**工程环境问题**，与代码正确性无关，但会误伤开发者环境，建议尽早固化运行约定。
 - TB-4 是已规划未实施的**独立专项**（M5），与 E 平行，可单独排期。
 
-*生成依据：v2 实施过程实测 + `docs/` 下各边界调研与专项规划文档登记的待办项汇总（2026-08-16）。*
+*生成依据：v2 实施过程实测 + `docs/` 下各边界调研与专项规划文档登记的待办项汇总（2026-08-16，TB-1/TB-2 以桥接形式落地后修订）。*
 
 ---
 
