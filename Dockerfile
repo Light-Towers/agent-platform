@@ -9,7 +9,10 @@ COPY agent-core ./agent-core
 COPY shared-schemas ./shared-schemas
 COPY app ./app
 
-RUN pip install --no-cache-dir .
+# agent-core / shared-schemas 是 [project].dependencies 里的本地 workspace 包，
+# [tool.uv.sources] workspace=true 仅 uv 能解析；普通 pip 会误当 PyPI 包去下载。
+# 故在同一安装事务中把两个本地路径一并传入，让 pip 识别为已满足的依赖。
+RUN pip install --no-cache-dir ./agent-core ./shared-schemas .
 
 # 容器安全：以非 root 用户运行（最佳实践）
 RUN useradd -m -u 10001 appuser
