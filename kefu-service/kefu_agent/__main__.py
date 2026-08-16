@@ -16,6 +16,7 @@ GraphRAG → 知识库检索子 Agent，atguigu_ai Tracker → LangGraph State�
 
 from __future__ import annotations
 
+import logging
 import time
 
 from fastapi import FastAPI
@@ -25,6 +26,8 @@ from shared_schemas.query import QueryData
 
 from kefu_agent.graph import build_kefu_graph
 from kefu_agent.state import KefuState
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="kefu-service", version="0.1.0")
 
@@ -64,12 +67,20 @@ async def _run_kefu(req: QueryRequest) -> QueryResponse:
     intent = result.get("intent")
     latency_ms = round((time.perf_counter() - t0) * 1000, 2)
 
+    # 契约语义增强（TB-6）：answer 为空属于"形状合法但内容空洞"退化，显式告警便于观测。
+    if not answer or not answer.strip():
+        logger.warning(
+            "kefu 响应 answer 为空（意图=%s），疑似图未产出 response，将返回空回答", intent
+        )
+
     return QueryResponse(
         answer=answer,
         data=QueryData(content={"intent": intent}, source="kefu-service"),
         trace_id=req.trace_id,
         latency_ms=latency_ms,
         intent=intent,
+        # 显式标注未走降级路径，增强联邦契约符合性可见性（默认 False 但显式表达语义）
+        fallback=False,
     )
 
 

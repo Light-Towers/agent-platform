@@ -76,3 +76,49 @@ async def test_switch_off_falls_back(monkeypatch):
     agent = _make_agent(monkeypatch, {"answer": 123})
     out = await agent.ainvoke({"query": "q"})
     assert out["answer"] == 123
+
+
+# --- TB-6：kefu 返回符合性逐项核验（消费侧双向契约） ---
+
+
+async def test_kefu_real_fields_extracted(monkeypatch):
+    """kefu /invoke 真实返回的 QueryResponse 字段应被消费侧完整提取。"""
+    kefu_response = {
+        "answer": "您的订单已发货",
+        "data": {"content": {"intent": "logistics"}, "source": "kefu-service", "metadata": {}},
+        "trace_id": "trace-abc",
+        "latency_ms": 12.5,
+        "intent": "logistics",
+        "fallback": False,
+    }
+    agent = _make_agent(monkeypatch, kefu_response)
+    out = await agent.ainvoke({"query": "订单到哪了"})
+    # 形状断言通过 + 字段透传
+    assert out["answer"] == "您的订单已发货"
+    assert out["trace_id"] == "trace-abc"
+    assert out["latency_ms"] == 12.5
+    assert out["intent"] == "logistics"
+    assert out["data"]["content"]["intent"] == "logistics"
+
+
+async def test_content_assert_warns_on_empty_answer(monkeypatch, caplog):
+    """TB-6 盲区：answer 为空属形状合法但内容空洞，内容断言应告警（不抛错）。"""
+    import logging
+
+    agent = _make_agent(monkeypatch, {"answer": "", "fallback": False})
+    with caplog.at_level(logging.WARNING, logger="agent.async_subagents"):
+        out = await agent.ainvoke({"query": "q"})
+    assert out["answer"] == ""
+    assert any("answer 为空" in r.message for r in caplog.records)
+
+
+async def test_content_assert_switch_off(monkeypatch, caplog):
+    """E1_CONTENT_ASSERT=off 时，空 answer 不告警（可独立回滚）。"""
+    import logging
+
+    monkeypatch.setattr("agent.async_subagents._E1_CONTENT_ASSERT", False)
+    agent = _make_agent(monkeypatch, {"answer": ""})
+    with caplog.at_level(logging.WARNING, logger="agent.async_subagents"):
+        out = await agent.ainvoke({"query": "q"})
+    assert out["answer"] == ""
+    assert not any("answer 为空" in r.message for r in caplog.records)

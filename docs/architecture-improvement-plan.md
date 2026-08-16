@@ -155,7 +155,7 @@
 
 | 编号 | 问题 | 来源 | 说明 |
 |---|---|---|---|
-| TB-6 | **kefu 返回符合性逐项核验**：优化 E 仅对 `async_subagents` 加 `QueryResponse` 断言（消费侧），未反向核验 kefu `/invoke` 是否逐字段符合 `QueryResponse`（含 `fallback`/`error`/`sources` 字段形态） | `plan-e-dual-track-convergence.md:95` S-5③ | 需独立子任务 + 真实/模拟 kefu 服务；本期不纳入 |
+| TB-6 | **kefu 返回符合性逐项核验**：优化 E 仅对 `async_subagents` 加 `QueryResponse` 断言（消费侧），未反向核验 kefu `/invoke` 是否逐字段符合 `QueryResponse`（含 `fallback`/`error`/`sources` 字段形态） | `plan-e-dual-track-convergence.md:95` S-5③ | ✅ 已落地（2026-08-16）：逐项核验 kefu `/invoke` 返回的 `QueryResponse` 字段（answer/data.content.intent/source/trace_id/latency_ms/intent/fallback）均与 `shared_schemas.query.QueryResponse` 契约一致；发现并修复"形状合法但内容空洞"盲区——kefu 图未产出 response 时返回空 answer（契约通过但语义退化）。收口：① kefu `_run_kefu` 显式 `fallback=False` + 空 answer 日志告警；② 消费侧 `_HttpSubAgent` 抽出 `_normalize_response` 纯函数，新增 `E1_CONTENT_ASSERT` 内容断言（answer 非空，与形状断言分离可独立回滚）；③ 新增 `deepagents/tests/unit/test_async_subagents_contract.py` 中 3 例 TB-6 双向符合性测试（kefu 真实字段提取 / 空 answer 告警 / 开关 off）。字段形态结论：kefu 未传 `error`/`sources`（契约非必填，合法）；`fallback` 此前隐式默认，现显式 |
 | TB-7 | **docker compose 端到端冒烟**：`docker-compose.yml` 已存在，但缺一键端到端冒烟验证 | `research-proposal.md:120` | 可选；需服务可达环境 |
 | TB-8 | **eval 门禁 CI 化**：本地 `python -m eval.run_eval` 12/12 通过，但 eval 依赖 LLM/服务可达，CI 不可达时仅本地人工验证 | `architecture-improvement-plan.md:134` | 建议固化 CI 跳过策略 + 本地门禁约定 | ✅ 已落地（2026-08-16）：`run_eval.py` 加 `--require-llm`（环境不可达显式 SKIP 退出码 2，不假装通过）+ 默认 `--fail-below 0.8` 门禁阈值；Makefile `install` 改用 `--all-packages --extra dev`（TB-3 约定）、`eval` 改用**直接路径** `eval/run_eval.py`（避免命中 deepagents 同名模块）、新增 `eval-llm-required` target。`ci: lint test eval` 串联依赖 uv run 退出码透传（已验证）。ruff F821 对 `{args.fail_below:.0%}` 中文 f-string 误报，改用 `.format` 规避 |
 
