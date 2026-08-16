@@ -33,7 +33,13 @@ async def _build_checkpointer():
     if settings.db_enabled:
         from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 
-        saver = AsyncPostgresSaver.from_conn_string(settings.database_url)
+        # 复用 init_pool() 已建立的 AsyncConnectionPool，避免 from_conn_string()
+        # 的 async context manager 生命周期难管理（退出即关连接）。AsyncPostgresSaver
+        # 构造函数直接接受 AsyncConnectionPool（TB-7 真端到端暴露的 API 变化）。
+        pool = get_pool()
+        if pool is None:
+            raise RuntimeError("db_enabled 但连接池未初始化，检查 lifespan 中 init_pool 顺序")
+        saver = AsyncPostgresSaver(pool)
         await saver.setup()
         return saver
     from langgraph.checkpoint.memory import MemorySaver
@@ -136,15 +142,8 @@ async def lifespan(app: FastAPI):
     mcp_mgr = getattr(app.state, "mcp_manager", None)
     if mcp_mgr is not None:
         await mcp_mgr.close_all()
-    checkpointer = getattr(app.state, "checkpointer", None)
-    conn = getattr(checkpointer, "conn", None)
-    if conn is not None and hasattr(conn, "close"):
-        try:
-            close_result = conn.close()
-            if hasattr(close_result, "__await__"):
-                await close_result
-        except Exception:
-            logger.warning("checkpointer 连接关闭失败")
+    # checkpointer 复用 init_pool 的连接池（db_enabled 时 conn 即 _pool），
+    # 生命周期归 close_pool() 统一管理，此处不再单独关闭连接。
     await close_pool()
 
 

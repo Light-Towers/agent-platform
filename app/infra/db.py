@@ -16,8 +16,6 @@ _pool = None
 _pool_lock = asyncio.Lock()
 
 SCHEMA_TEMPLATE = """
-CREATE EXTENSION IF NOT EXISTS vector;
-
 CREATE TABLE IF NOT EXISTS chunks (
     id BIGSERIAL PRIMARY KEY,
     doc_id TEXT NOT NULL,
@@ -122,15 +120,23 @@ async def init_pool():
     async with _pool_lock:
         if _pool is not None:
             return _pool
-        from pgvector.psycopg import register_vector
+        from pgvector.psycopg import register_vector_async
         from psycopg_pool import AsyncConnectionPool
+
+        # 顺序约束：register_vector_async 在每个连接建立时即 fetch 'vector' 类型，
+        # 故必须在打开连接池（建立首批连接）之前先启用 pgvector 扩展，
+        # 否则报 "vector type not found in the database"（TB-7 真端到端暴露）。
+        await ensure_extensions(settings.database_url)
 
         pool = AsyncConnectionPool(
             conninfo=settings.database_url,
             min_size=1,
             max_size=settings.db_pool_max_size,  # 可配置，默认 20，避免高并发池耗尽
             kwargs={"autocommit": True},
-            configure=register_vector,
+            # 必须用 register_vector_async：AsyncConnectionPool 的连接是 AsyncConnection，
+            # 同步版 register_vector 调用 TypeInfo.fetch 会返回未 await 的 coroutine，
+            # 导致 'coroutine' object has no attribute 'register'（TB-7 真端到端暴露）。
+            configure=register_vector_async,
             open=False,
         )
         await pool.open(wait=True)
@@ -138,6 +144,14 @@ async def init_pool():
         _pool = pool
         logger.info("PostgreSQL 连接池就绪，schema 已校验")
         return _pool
+
+
+async def ensure_extensions(database_url: str) -> None:
+    """连接池建立前，用一次性连接启用 pgvector 扩展（幂等）。"""
+    from psycopg import AsyncConnection
+
+    async with await AsyncConnection.connect(database_url, autocommit=True) as conn:
+        await conn.execute("CREATE EXTENSION IF NOT EXISTS vector")
 
 
 async def ensure_schema(pool) -> None:
