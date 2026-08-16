@@ -1,0 +1,58 @@
+name: eval-llm
+
+# TB-8 分层门禁 · 第 2 层：LLM 质量评测雷达（非阻塞）。
+# 验证端到端答案质量 / 路由决策正确性 / 护栏实际拦截 / 跨模型回归——
+# 这些依赖 LLM_API_KEY 可达，CI 推送门禁不可达，故独立为定时 + 手动触发。
+# 不可达时显式 SKIP（退出码 2，不假装通过），结果存 artifact 供趋势查看，不卡 push。
+
+on:
+  schedule:
+    # 每日 03:17 UTC 跑一次质量雷达（避开整点，降低调度峰值）
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+    # 发布前手动触发，作为质量卡点的人为确认
+    inputs:
+      fail_below:
+        description: "质量门禁阈值（准确率低于该值视为退化）"
+        required: false
+        default: "0.8"
+
+jobs:
+  llm-eval:
+    runs-on: ubuntu-latest
+    # 非阻塞：即便本 job 失败也不影响其他 workflow / 合并
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install (all workspace packages + dev tools)
+        run: make install
+      - name: LLM eval (require-llm; SKIP if env unreachable)
+        id: eval
+        # LLM_API_KEY 经仓库 Secrets 注入；缺失时 --require-llm 显式 SKIP(2)
+        env:
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+        run: |
+          make eval-llm-required || CODE=$?
+          if [ "${CODE:-0}" = "2" ]; then
+            echo "eval-skipped=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::LLM 评测环境不可达（LLM_API_KEY 未配置），已显式 SKIP，不视为失败"
+          elif [ "${CODE:-0}" != "0" ]; then
+            echo "::error::LLM 评测未达门禁阈值或异常"
+            exit "$CODE"
+          fi
+      - name: Upload eval report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: llm-eval-report
+          path: |
+            eval/*.jsonl
+          retention-days: 30
