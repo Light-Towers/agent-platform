@@ -63,6 +63,41 @@
   - **区分记录**：在 `agent_core/memory/__init__.py` 显式注释 `ConversationMemory`（会话历史存储）与 `MemoryBackend`（语义长期记忆召回）是两套正交能力，避免未来误合并。
 - **收益**：语义记忆后端成为跨轨可插拔契约；B 接入需改 `create_deep_agent` 的 memory 挂载，属 B 侧独立迭代，本期不强制。
 
+### F 外壳基础设施化：自研外壳抽为双轨共享（P4.4，可选，承接 TB-13/AR-2 讨论）
+
+> **来源**：用户决策——若将 `app` 的 5 段自研生产外壳（admission/coordinator/revert/SQL 双保险/SSE）补到 `deepagents`，会自然引出"那 `app` 的 LangGraph 逻辑是否还有意义"之问。本优化给出工程结论与落地路径。
+
+**关键澄清（误区别）**：
+- 这 5 段外壳**全是 `app` 自研程序逻辑，不是 LangGraph 独有的框架能力**。LangGraph 仅提供"持久化 checkpoint + 可重放执行"这一内核能力（且 DeepAgents 底层就是 LangGraph，同样可用）。
+- 因此"在 deepagents 补外壳"= 把自研代码**搬家**，不是"换框架"。补完后两轨差异收敛为**纯编排风格差异**（确定性 DAG 路由 vs 涌现式委派）。
+
+**结论（回答"app 的 LangGraph 逻辑是否还有意义"）**：
+1. `app` 里**显式 `StateGraph` 编排（`build_graph`）** 在 deepagents 接管后可退役（被 `subagents + middleware` 风格吸收）。
+2. **LangGraph 内核永远在**（DeepAgents 依赖它），"LangGraph 没意义"表述错误。
+3. 外壳代码**搬家不消失**——是团队自研资产。
+
+**正确收敛（不做全量迁移）**：把 5 段外壳**抽为独立可复用的横向基础设施**，而非"各写一份 / 搬家一份"。双轨共用同一套外壳代码，编排层各自保留。
+
+| 外壳能力 | 抽离形态 | 双轨接入方式 |
+|---|---|---|
+| admission 排队 | `app/infra/admission.py` → 独立 `agent_core`/网关包 `AdmissionQueue` | A 直接 import；B 在 `api/server.py` 请求入口挂载 |
+| 会话并发协调 | `app/infra/coordinator.py` → 独立 `SessionCoordinator` | A 直接 import；B 在 `server.py` per-session 互斥 |
+| 状态回退 | `app/infra/revert.py` → 暴露 `revert(thread_id, checkpoint_id)` 接口 | A `/api/revert`；B 新增等价 `/api/revert`（复用同一 `RevertHandler`） |
+| SQL 双保险 | `agent_core.sql.guard`（已下沉）+ 连接只读 | 双轨共用 `agent_core`，无需各写 |
+| SSE 事件映射 | `app/api/routes.py` 的 SSE renderer → 独立 `sse.py` | A 直用；B 若需 SSE 复用 renderer（WS/SSE 协议差异需适配层） |
+
+**边界约束（继承 §3）**：抽离后仍禁止"抽 app 节点为 deepagents subagent"或反向图重写（护栏 S-4）。外壳可共享，编排不可合并。
+
+**收益**：消除双轨外壳重复维护（TB-13）；B 侧获得持久化 checkpoint/回退能力（AR-2/TB-10）；为未来"确定性路由 vs 涌现委派"主线决策扫清外壳障碍。
+
+**风险**：抽离需保证 `app` 现有行为零回归（admission 崩溃恢复、coordinator 丢失唤醒竞态防护都需保留）；B 侧 `thread_id` 每次请求重建 bug（`api/server.py:165` API_KEY 模式）须先修，否则接了 PG checkpoint 也救不了多轮会话。
+
+**实施计划（建议顺序）**：
+1. 先修 `server.py:165` thread_id 会话断裂（前置，否则后续无效）。
+2. PG checkpoint 注入 `main_agent.py:132`（ADR-0002 已规划，代码未落地）。
+3. 抽 `AdmissionQueue`/`SessionCoordinator`/`RevertHandler` 为共享基础设施，A/B 双挂。
+4. 补 B 侧 `/api/revert` 端点，复用 A 的 `RevertHandler`。
+
 ## 3. 不可收敛的硬约束（护栏，禁止触碰）
 
 以下为 `app` 自研外壳，双轨收敛**必须保留**，不得为"统一"而删除或弱化：
