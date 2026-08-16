@@ -61,13 +61,23 @@ def _build_subagents():
 
 
 def _build_middleware():
-    """Phase 4：构建 middleware 列表（TodoListMiddleware + RubricMiddleware）。
+    """Phase 4：构建 middleware 列表（TodoListMiddleware + RubricMiddleware + GuardMiddleware）。
 
     PLANNER_ENABLED=true → TodoListMiddleware（思考规划）
     REFLEXION_ENABLED=true → RubricMiddleware（Reflexion 自评估迭代）
-    两者都可独立开关，失败时降级为空列表（不影响现有栈）。
+    GUARD_ENABLED=true → GuardMiddleware（输入护栏：PII 脱敏 + injection 检测，优化 B 要点2）
+    三者都可独立开关，失败时降级为空列表（不影响现有栈）。
     """
     middleware = []
+
+    if os.getenv("GUARD_ENABLED", "false").lower() == "true":
+        try:
+            from deepagents.gateway.guard_middleware import GuardMiddleware
+
+            middleware.append(GuardMiddleware())
+            logger.info("GuardMiddleware 已启用（输入护栏挂入 deepagents 栈）")
+        except Exception as e:
+            logger.warning("GuardMiddleware 启用失败: %s", e)
 
     if os.getenv("PLANNER_ENABLED", "false").lower() == "true":
         try:

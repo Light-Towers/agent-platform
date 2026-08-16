@@ -46,3 +46,29 @@ async def test_add_messages_reducer_accumulates_in_graph():
     assert isinstance(result["messages"][1], AIMessage)
     # 非 reducer 字段透传
     assert result["question"] == "q"
+
+
+def test_route_enum_rejects_invalid_value():
+    """优化 A 要点2：route 已枚举化，写入非法分支键应由 Pydantic 校验拦截。"""
+    import pytest
+
+    with pytest.raises(Exception):  # ValidationError（pydantic v2）
+        AgentState(route="serach")  # 拼写错误，非合法分支键
+
+
+def test_validate_state_rejects_empty_question():
+    """优化 A 要点2：_validate_state 入口断言拦截空 question。"""
+    import pytest
+
+    from app.agent.state import _validate_state
+
+    with pytest.raises(ValueError):
+        _validate_state(AgentState(question=""))
+
+
+def test_validate_state_accepts_valid_state():
+    """优化 A 要点2：合法 state 通过 _validate_state。"""
+    from app.agent.state import _validate_state
+
+    _validate_state(AgentState(question="q", route="direct"))  # 不抛异常
+
