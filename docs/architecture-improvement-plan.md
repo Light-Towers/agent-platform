@@ -43,25 +43,25 @@
 
 ## 2. 优化项清单（按优先级与风险分级）
 
-### 优化 A：`AgentState` 升级为 Pydantic BaseModel（中优先级 / 低-中风险） ◐ 部分落地（要点1 已完成，要点2 未实施）
+### 优化 A：`AgentState` 升级为 Pydantic BaseModel（中优先级 / 低-中风险） ✅ 已落地
 
 - **借鉴来源**：CrewAI Flows 用 `class MarketState(BaseModel)` 在 Flow 步骤间结构化传递状态；OpenAI Agents SDK 全链路 Pydantic 模型校验。
 - **当前差距**：`TypedDict` 只在静态类型检查期生效，运行时节点写入脏字段/类型错误只能等下游崩溃。
 - **方案要点**：
   1. 将 `app/agent/state.py` 的 `AgentState` 改为 `pydantic.BaseModel`，保留 `messages: Annotated[list, add_messages]` 的 reducer 语义（Pydantic 兼容 `Annotated`）。
-  2. （未实施）新增节点入口处的 `_validate_state()` 校验函数，对 `route` 枚举、必填字段做断言。`AgentState` 虽已 Pydantic 化，但尚未引入入口校验函数（`route` 仍为 `str` 非枚举）。
+  2. ✅ 已落地（2026-08-16）：`route` 字段枚举化为 `Literal["search","rag","sql","direct","mcp","blocked"]`（与 `graph.py` 条件分支键一一对应），节点写入非法路由值由 Pydantic 立即拦截；新增 `_validate_state()` 入口断言（校验 `question` 非空），在 `route_node` 入口调用，脏 state 在节点边界即时暴露。
   3. 保留 `total=False` 等价性：用 `Field(default=None)` 表达可选字段。
 - **兼容性**：LangGraph `StateGraph` 同时支持 TypedDict 与 Pydantic model 作为 state schema，无需改动 `graph.py` 的节点签名。
 - **测试边界**：仅需回归 `app/agent/graph.py` 全流程 + `tests/` 中 state 相关用例（约 40 用例中的 state 读写部分）。
 - **收益**：节点边界脏 state 即时暴露，减少"脏数据穿透到 synthesize"类偶发 bug。
 
-### 优化 B：输入护栏下沉为共享内核 + 双视图统一入口（中优先级 / 中风险） ◐ 部分落地（要点1/3 已完成，要点2 未实施）
+### 优化 B：输入护栏下沉为共享内核 + 双视图统一入口（中优先级 / 中风险） ✅ 已落地
 
 - **借鉴来源**：OpenAI Agents SDK 将 Guardrails 作为 Agent 一等公民；DeepAgents 用 `RubricMiddleware`/`TodoListMiddleware` 栈式横切。
 - **当前差距**：`guard_input()` 是外层包裹，与编排解耦但无法作为反思/规划链的一环，且 `app/` 视图完全无护栏。
 - **方案要点**：
   1. **保留** `deepagents/gateway/input_guard.py` 的全部检测逻辑（`detect_pii`/`redact_pii`/`detect_injection`/`guard_input`），不重写规则。
-  2. （未实施）新增薄适配层 `deepagents/gateway/guard_middleware.py`：将 `guard_input` 包装为 DeepAgent Middleware（`@middleware`/`BaseMiddleware`），挂到 `create_deep_agent(middleware=[..., GuardMiddleware])`（`main_agent.py:63`）。当前 `guard_input` 仅在 `app/route_node` 与 `deepagents` 网关入口直接调用，未封装为 Middleware 栈。
+  2. ✅ 已落地（2026-08-16）：新增 `deepagents/gateway/guard_middleware.py`，将内核 `guard_input` 包装为 DeepAgent `AgentMiddleware`（`GuardMiddleware`），在 `before_agent` 钩子对入口 user 文本做脱敏改写 + injection 拦截；`main_agent._build_middleware()` 按 `GUARD_ENABLED` 开关注入（`GuardMiddleware()`），带失败降级，与 TodoList / Rubric 共用 `create_deep_agent(middleware=[...])` 统一挂载点。至此 `guard_input` 不再是 `app` 侧专属手动调用，deepagents 视图 agent 也默认经过输入护栏。
   3. `app/` 视图在 `route_node` 前插入同一 `guard_input` 调用（单函数复用，非重写）。
 - **兼容性**：检测函数签名与返回字典不变；仅新增包装，旧调用方（`deepagents` 网关入口）行为不变。
 - **测试边界**：回归 `input_guard` 既有单测（若有）+ 新增 middleware 挂载冒烟；影响面限于入口链路，不触碰检索/生成。
@@ -145,8 +145,8 @@
 
 | 编号 | 问题 | 来源 | 风险 | 红线/约束 |
 |---|---|---|---|---|
-| TB-1 | **DF 双 LLM 协议冗余**：`dialogue_framework.shared.llm.base_client.BaseChatClient` 与 `agent_core.llm.providers.BaseLLMProvider` 签名不兼容、互不对接 | `architecture-boundary-agent-core-vs-dialogue-framework.md:63` | 低 | DF 弃用自有 `BaseChatClient`、对齐内核协议；**不合并/删除 dialogue-framework** |
-| TB-2 | **DF 双 memory 抽象冗余**：`dialogue_framework.core.Tracker`（slots/events/stack）未使用 `agent_core.memory.ConversationMemory` | 同上:64 | 低 | DF `Tracker` 适配 `ConversationMemory`；不合并两包 |
+| TB-1 | **DF 双 LLM 协议冗余**：`dialogue_framework.shared.llm.base_client.BaseChatClient` 与 `agent_core.llm.providers.BaseLLMProvider` 签名不兼容、互不对接 | `architecture-boundary-agent-core-vs-dialogue-framework.md:63` | 已闭环 | ✅ 已落地（2026-08-16，桥接形式）：`dialogue_framework/shared/llm/core_adapter.py` 新增 `LLMCoreClient` 桥接内核 `BaseLLMProvider`；DF 弃用自有 `BaseChatClient`、对齐内核协议；**不合并/删除 dialogue-framework**（详见 §6.3） |
+| TB-2 | **DF 双 memory 抽象冗余**：`dialogue_framework.core.Tracker`（slots/events/stack）未使用 `agent_core.memory.ConversationMemory` | 同上:64 | 已闭环 | ✅ 已落地（2026-08-16，桥接形式）：`dialogue_framework/core/tracker_memory.py` 新增 `TrackerConversationMemory` 适配内核 `ConversationMemory`，`Tracker.to_conversation_memory()` 挂载；不合并两包（详见 §6.3） |
 | TB-3 | **uv workspace 环境脆弱**：根 `uv sync` 会卸载非根 member 包（实测卸载 24 包，含 deepagents-app），默认环境不含非根包依赖 | 实施过程实测 | 中（已缓解） | **已修复**：根因是 uv workspace 默认 `uv sync` 只装根包。固化约定为 `uv sync --all-packages --extra dev`（装全部 workspace 包 + dev 工具），单包测试用 `uv run --package <pkg> ...`；运行约定已写入 `README.md` uv workspace 段。裸 `uv sync` 仍会卸载非根包，勿直接使用 |
 | TB-4 | **M5 语义缓存统一未落地**：`agent_core.cache` 已建 `CacheStats`/`build_cache_key` 单一真相，但 app(`PgSemanticCache`)/deepagents(`ValkeySemanticCache`) 尚未统一到 `BaseSemanticCache` 接口 | `m5-semantic-cache-plan.md`（纯草案，未实施） | 中 | ✅ 已落地（2026-08-16）：`agent_core.cache` 新增 `BaseSemanticCache` Protocol + 零依赖 `build_cache_key` 纯函数（单一真相）；deepagents `layers.py` 复用内核 `build_cache_key`（移除本地 hash 重复，I 规则清理 hashlib/json）；app `infra/cache.py` docstring 标注遵循协议、不跨后端共享数据。补 `agent-core/tests/test_cache_key.py`。遵循 §6 约束：仅统一接口与 key 构造，不跨后端共享缓存数据 |
 | TB-5 | **deepagents 联邦契约统一（原 TODO）**：`shared_schemas` 在 deepagents 侧原未直接复用（仅 app 侧用），已在优化 E/P4.1 补齐断言——**已闭环**，此处仅作历史登记 | `architecture-boundary-app-vs-deepagents.md:69` | 已解决 | — |
@@ -158,6 +158,7 @@
 | TB-6 | **kefu 返回符合性逐项核验**：优化 E 仅对 `async_subagents` 加 `QueryResponse` 断言（消费侧），未反向核验 kefu `/invoke` 是否逐字段符合 `QueryResponse`（含 `fallback`/`error`/`sources` 字段形态） | `plan-e-dual-track-convergence.md:95` S-5③ | ✅ 已落地（2026-08-16）：逐项核验 kefu `/invoke` 返回的 `QueryResponse` 字段（answer/data.content.intent/source/trace_id/latency_ms/intent/fallback）均与 `shared_schemas.query.QueryResponse` 契约一致；发现并修复"形状合法但内容空洞"盲区——kefu 图未产出 response 时返回空 answer（契约通过但语义退化）。收口：① kefu `_run_kefu` 显式 `fallback=False` + 空 answer 日志告警；② 消费侧 `_HttpSubAgent` 抽出 `_normalize_response` 纯函数，新增 `E1_CONTENT_ASSERT` 内容断言（answer 非空，与形状断言分离可独立回滚）；③ 新增 `deepagents/tests/unit/test_async_subagents_contract.py` 中 3 例 TB-6 双向符合性测试（kefu 真实字段提取 / 空 answer 告警 / 开关 off）。字段形态结论：kefu 未传 `error`/`sources`（契约非必填，合法）；`fallback` 此前隐式默认，现显式 |
 | TB-7 | **docker compose 端到端冒烟**：`docker-compose.yml` 已存在，但缺一键端到端冒烟验证 | `research-proposal.md:120` | 可选；需服务可达环境 |
 | TB-8 | **eval 门禁 CI 化**：本地 `python -m eval.run_eval` 12/12 通过，但 eval 依赖 LLM/服务可达，CI 不可达时仅本地人工验证 | `architecture-improvement-plan.md:134` | 建议固化 CI 跳过策略 + 本地门禁约定 | ✅ 已落地（2026-08-16）：`run_eval.py` 加 `--require-llm`（环境不可达显式 SKIP 退出码 2，不假装通过）+ 默认 `--fail-below 0.8` 门禁阈值；Makefile `install` 改用 `--all-packages --extra dev`（TB-3 约定）、`eval` 改用**直接路径** `eval/run_eval.py`（避免命中 deepagents 同名模块）、新增 `eval-llm-required` target。`ci: lint test eval` 串联依赖 uv run 退出码透传（已验证）。ruff F821 对 `{args.fail_below:.0%}` 中文 f-string 误报，改用 `.format` 规避 |
+| U-1 | **QueryRequest 入站双写兼容**：`app/schemas.py` 给 `query`/`session_id` 加 `AliasChoices` 接收旧名 `question`/`thread_id`，属隐性兼容债 | `shared_schemas.query.QueryRequest` + `app/schemas.py:41-55` | 已缓解（非彻底移除） | **已处置（2026-08-16）**：旧字段名 `question`/`thread_id` 在 `app/schemas.py` docstring 显式登记为「已弃用，计划于下一主版本移除」，消除隐性兼容；内部 `AgentState.question` 为 graph state 字段，与入站别名无关，不在本次范围（强行统一内部 state 命名为 `query` 属纯 churn，收益为零，不做）。彻底移除别名需先普查存量客户端是否仍发旧名，列为后续决策项，非代码缺陷 |
 
 ### 6.3 说明
 
@@ -192,7 +193,7 @@
 | #7 | `requirements.txt` 未同步 `shared-schemas`/`sqlglot` | 根目录无 requirements.txt（uv workspace 管理）；`deepagents/requirements.txt` 漏列 `shared-schemas`/`sqlglot` | ✅ 已修：`deepagents/requirements.txt` 补 `-e ../shared-schemas` + `sqlglot>=25.0` |
 | #8 | SQL 守卫 `LIMIT>100` 截断 + 文本重生成 | `agent_core.sql.guard` 的 `max_rows`（默认 100，`SQL_GUARD_MAX_ROWS` 可配）是**有意的防护上限**，防 `SELECT *` 拖垮 DB；截断后返回规整 SQL 是正常归一化 | 维持现状：安全设计，非缺陷 |
 | #10 | 仅 workspace 安装 + 缺 CHANGELOG | 工程约定问题 | ✅ 已修：新增 `CHANGELOG.md`，明确 uv workspace 为唯一安装入口 |
-| #11 | `_validate_state`/`guard_middleware` 文档提及但代码不存在 | 实为 §2 优化 A/B 要点2 规划项未实施；标题"✅已落地"误导 | ✅ 已勘误：要点2 标"（未实施）"，标题降为"◐部分落地" |
+| #11 | `_validate_state`/`guard_middleware` 文档提及但代码不存在 | 实为 §2 优化 A/B 要点2 规划项未实施；标题"✅已落地"误导 | ✅ 已勘误：优化 A 要点2（`route` 枚举化 + `_validate_state`）与优化 B 要点2（`guard_middleware`）均已于 2026-08-16 落地（§2 两者标题均回升"✅已落地"）；原"提及但代码不存在"已消解 |
 | #12 | `make type` 是 ruff 别名 | 非缺陷 | 无需修 |
 | #13 | `rag_query` 端点 httpx 兜底 | 实际优先走 `AsyncSubAgent`，httpx 仅兜底且已收敛，影响窄于报告 | 维持现状 |
 | #14 | `zhanggui-zhiku` 双 `uv.lock` | 子包独立 lock 与 workspace 根锁冲突 | ✅ 已修：删除 `zhanggui-zhiku/uv.lock`，统一根锁（`uv lock` 验证通过） |
