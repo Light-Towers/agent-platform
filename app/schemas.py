@@ -38,20 +38,23 @@ class QueryRequest(BaseQueryRequest):
     model_config = ConfigDict(populate_by_name=True)
 
     # 覆盖基类字段，使 query 同时接受旧字段名 question（入站双写兼容）
+    # 弃用路线（U-1）：旧字段名 question 已弃用，计划于下一主版本移除。
+    # 当前保留仅为向后兼容存量客户端；新接入方应使用基类标准名 query。
     query: str = Field(
         ...,
         min_length=1,
         max_length=2000,
         validation_alias=AliasChoices("query", "question"),
         serialization_alias="query",
-        description="用户查询文本（兼容旧字段名 question）",
+        description="用户查询文本（标准名 query；旧字段名 question 已弃用，计划移除）",
     )
     # 覆盖基类字段，使 session_id 同时接受旧字段名 thread_id
+    # 弃用路线（U-1）：旧字段名 thread_id 已弃用，计划于下一主版本移除。
     session_id: str | None = Field(
         default=None,
         validation_alias=AliasChoices("session_id", "thread_id"),
         serialization_alias="session_id",
-        description="会话 ID（兼容旧字段名 thread_id）",
+        description="会话 ID（标准名 session_id；旧字段名 thread_id 已弃用，计划移除）",
     )
     # app 业务默认值：未传 user_id 时记为 default（基类为 None）
     user_id: str = Field(default="default")
