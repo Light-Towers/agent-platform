@@ -24,22 +24,22 @@
   - `kefu-service/main.py:6` 注释写明运行端口 `8003`，`build_kefu_graph` 已实现，验收报告 `deepagents/VERIFICATION_REPORT.md:22` 显示 M7 测试 10/10 + Flow 3/3 + GraphRAG 5/5 通过。
   - **关键修正（迁移深度）**：网关远程模式走 `AsyncSubAgent`（Agent Protocol，`graph_id` + `url`），见 `deepagents/agent/async_subagents.py:8-9,23-28`；该文件注释 `:8` 自承 "M2 阶段子服务尚未升级为 Agent Protocol server"。当前 `kefu-service`/`kefu-adapter` 均为普通 FastAPI REST，**直接把 `config.py` 的 URL 指向 `kefu-service:8003` 大概率不可行**。且 `kefu-service` 返回 `list-of-{text}`（`main.py:53-66`）而非 `QueryResponse`，adapter 的转换层暂不能移除。
 - **影响**：新实现写完未上线；迁移到 kefu-service **不只是改 URL**，需先把 kefu-service 升级为 Agent Protocol server（或改网关调用方式）并补齐 `QueryResponse` 契约，否则 adapter 不可删。
-- **处理状态**：✅ 已完成（提交 `1e86bf8` + 移除 adapter）。`kefu-service` 已升级为 Agent Protocol 兼容 server（新增 `POST /invoke`，返回 `QueryResponse`，依赖 `shared-schemas`；旧 `/api/messages` 保留为 atguigu_ai 兼容入口）；网关 `deepagents/agent/config.py` 新增 `KEFU_SERVICE_URL` + `KEFU_USE_ADAPTER` 开关（默认 `false` 直连 `kefu-service:8003`）；`async_subagents.py` 增加 httpx 远程回退（外部 `deepagents` 包未安装时直连 `/invoke`）；`kefu-adapter` 包已于 2026-08 从仓库移除（无调用方，默认直连 kefu-service 生效）。剩余外部运维动作：外部 `atguigu_ai` 退役（与代码无关）。
+- **处理状态**：✅ 已完成（提交 `1e86bf8` + 移除 adapter）。`kefu-service` 已升级为 Agent Protocol 兼容 server（新增 `POST /invoke`，返回 `QueryResponse`，依赖 `shared-schemas`；旧 `/api/messages` 保留为 legacy 兼容入口）；网关 `deepagents/agent/config.py` 新增 `KEFU_SERVICE_URL` + `KEFU_USE_ADAPTER` 开关（默认 `false` 直连 `kefu-service:8003`）；`async_subagents.py` 增加 httpx 远程回退（外部 `deepagents` 包未安装时直连 `/invoke`）；`kefu-adapter` 包已于 2026-08 从仓库移除（无调用方，默认直连 kefu-service 生效）。剩余外部运维动作：外部 `legacy` 退役（与代码无关）。
 
 ### 问题 3：迁移计划要求"废弃 kefu-adapter"，但从未执行
 - **事实依据**：
   - `deepagents/docs/refactor-plan.md:258` 明确写："④ kefu-adapter 废弃，新 kefu-service 直接是 FastAPI + LangGraph"。
   - 但 `deepagents/agent/config.py:49` 至今仍指向 `kefu-adapter`（`:8002`）。
 - **影响**：计划与实现脱节，技术债未清理。
-- **处理状态**：✅ 已完成（提交 `1e86bf8` + 移除 adapter）。`kefu-service` 已可经网关 `KEFU_USE_ADAPTER=false` 直连，无需 `kefu-adapter` 转换层；`kefu-adapter` 包已于 2026-08 从仓库移除，`refactor-plan.md` 执行状态注记已更新。剩余外部运维动作：外部 `atguigu_ai` 退役（与代码无关）。
+- **处理状态**：✅ 已完成（提交 `1e86bf8` + 移除 adapter）。`kefu-service` 已可经网关 `KEFU_USE_ADAPTER=false` 直连，无需 `kefu-adapter` 转换层；`kefu-adapter` 包已于 2026-08 从仓库移除，`refactor-plan.md` 执行状态注记已更新。剩余外部运维动作：外部 `legacy` 退役（与代码无关）。
 
-### 问题 4：老客服系统 `atguigu_ai` 未退役，且不在仓库内
+### 问题 4：老客服系统 `legacy` 未退役，且不在仓库内
 - **事实依据**：
-  - 名为 `atguigu_ai/` 的目录或 `atguigu_ai.py` 文件：全仓 `search_file` glob `*atguigu*` → **0 个**（老系统代码确实不在仓库内，为外部遗留服务）。
-  - 字符串 `atguigu_ai` 在仓库内有 56 处引用，均为注释/文档说明迁移来源（如 `kefu-service/main.py:1`、`kefu-service/agent/graph_rag.py:1`、`kefu-adapter/main.py:1`），**不构成代码耦合**。
-  - `kefu-adapter/main.py:24` `KEFU_API_URL` 默认 `http://localhost:5005` → 当前生产流量实际打到外部 `atguigu_ai:5005`。
+  - 名为 `legacy/` 的目录或 `legacy.py` 文件：全仓 `search_file` glob `*legacy*` → **0 个**（老系统代码确实不在仓库内，为外部遗留服务）。
+  - 字符串 `legacy` 在仓库内有 56 处引用，均为注释/文档说明迁移来源（如 `kefu-service/main.py:1`、`kefu-service/agent/graph_rag.py:1`、`kefu-adapter/main.py:1`），**不构成代码耦合**。
+  - `kefu-adapter/main.py:24` `KEFU_API_URL` 默认 `http://localhost:5005` → 当前生产流量实际打到外部 `legacy:5005`。
 - **影响**：迁移未完成；adapter 不能直接删除（删则客服链路断）。
-- **处理状态**：✅ 已完成（仓库侧）。`kefu-service` 已可直连（无需 adapter），`kefu-adapter` 包已于 2026-08 从仓库移除；`atguigu_ai` 为外部遗留系统，其退役属外部运维动作，与仓库代码无关（退役后仅停用外部 :5005 服务即可）。
+- **处理状态**：✅ 已完成（仓库侧）。`kefu-service` 已可直连（无需 adapter），`kefu-adapter` 包已于 2026-08 从仓库移除；`legacy` 为外部遗留系统，其退役属外部运维动作，与仓库代码无关（退役后仅停用外部 :5005 服务即可）。
 
 ---
 

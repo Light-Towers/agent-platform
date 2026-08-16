@@ -21,7 +21,7 @@ All notable changes to this project are documented here.
 
 #### Phase 1 · 服务化拆分
 - **wenda-adapter** (`../wenda-adapter/`): SSE→JSON 适配层，消费 wenda SSE 流聚合 QueryResponse
-- **kefu-adapter** (`../kefu-adapter/`): atguigu_ai REST 适配层，转发 /api/messages
+- **kefu-adapter** (`../kefu-adapter/`): legacy REST 适配层，转发 /api/messages
 - **shared-schemas** (`../shared-schemas/`): 统一 Pydantic schema（QueryRequest/QueryResponse/HealthResponse/IntentResult/SubagentCall）
 - **deepagents 入站鉴权**: 复用 SecurityGuardsMiddleware + API_KEY
 
@@ -60,8 +60,8 @@ All notable changes to this project are documented here.
 - **多租户** (`api/context.py`): tenant_id ContextVar 隔离
 
 #### Phase 7 · kefu 迁移
-- **kefu-service** (`../kefu-service/`): atguigu_ai → deepagents + LangGraph 重写
-  - 9 种命令 (`agent/commands.py`): 对应 atguigu_ai command_prompt.jinja2
+- **kefu-service** (`../kefu-service/`): legacy → deepagents + LangGraph 重写
+  - 9 种命令 (`agent/commands.py`): 对应 legacy command_prompt.jinja2
   - 3 个 Flow 子图 (`agent/flows/`): order/logistics/postsale，接入真实业务服务
   - GraphRAG (`agent/graph_rag.py`): 6 步流程，配置驱动知识库
   - 业务服务 (`agent/services.py`): 订单/物流/售后查询 + 槽位提取
