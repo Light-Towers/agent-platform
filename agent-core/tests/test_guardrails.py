@@ -70,7 +70,7 @@ def test_should_skip_rate_limit_sse_not_exempt():
 
 
 def test_format_validation_error_string_too_long():
-    errors = [{"loc": ("body", "question"), "type": "string_too_long",
+    errors = [{"loc": ("body", "query"), "type": "string_too_long",
                "msg": "too long", "ctx": {"limit_value": 100, "actual_length": 200}}]
     msg = format_validation_error(errors)
     assert "100" in msg and "200" in msg
