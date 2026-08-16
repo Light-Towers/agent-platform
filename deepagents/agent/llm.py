@@ -1,9 +1,9 @@
 import logging
 import os
 
+from agent_core.llm import LangChainFallbackModel
 from dotenv import find_dotenv, load_dotenv
 from langchain.chat_models import init_chat_model
-from agent_core.llm import LangChainFallbackModel
 
 # 加载配置文件
 load_dotenv(find_dotenv())
