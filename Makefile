@@ -1,7 +1,7 @@
 # Agent Platform 本地/CI 工程门禁
 # 统一任务入口，避免各脚本分散调用；所有目标零业务副作用。
 
-.PHONY: install lint format type test eval eval-llm-required ci
+.PHONY: install lint format type test eval eval-llm-required ci compose-smoke
 
 install:
 	uv sync --all-packages --extra dev
@@ -30,3 +30,11 @@ eval-llm-required:
 
 # CI 串联：lint + 单测 + 评测门禁；任一失败即中断。
 ci: lint test eval
+
+# TB-7 端到端冒烟：需本机 Docker 守护进程可用。启动 pgvector + agent-platform，
+# 等待两服务 healthcheck 变 healthy，再探测 /health 与 /query 返回，最后清理。
+# 无 Docker 的环境用 `uv run python _tb7_smoke.py` 做等价内存模式预热冒烟。
+compose-smoke:
+	docker compose up -d --wait
+	@echo "== agent-platform /health =="; docker compose exec -T agent-platform python -c "import urllib.request; print(urllib.request.urlopen('http://127.0.0.1:8000/health').read().decode())"
+	docker compose down -v
