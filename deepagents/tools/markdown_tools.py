@@ -12,8 +12,9 @@ try:
 except ImportError:
     from typing_extensions import Annotated
 from langchain_core.tools import tool
-from api.monitor import monitor
+
 from api.context import get_session_context
+from api.monitor import monitor
 from utils.path_utils import resolve_path
 
 

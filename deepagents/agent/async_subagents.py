@@ -30,9 +30,9 @@ except Exception:  # pragma: no cover - 回退路径
     _HAS_DEEPAGENTS = False
 
 
-import httpx
 import os
 
+import httpx
 from agent_core.logging import get_logger
 
 logger = get_logger(__name__)

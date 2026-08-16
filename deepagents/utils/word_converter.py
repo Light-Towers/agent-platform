@@ -58,8 +58,8 @@ def convert_md_to_pdf_via_weasyprint(md_abs_path: Path, pdf_abs_path: Path) -> s
 
 def convert_md_to_pdf_via_word(md_abs_path: Path, pdf_abs_path: Path) -> str:
     try:
-        import win32com.client
         import pythoncom
+        import win32com.client
     except ImportError:
         return convert_md_to_pdf_via_weasyprint(md_abs_path, pdf_abs_path)
 
