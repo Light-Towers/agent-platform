@@ -13,7 +13,7 @@ from langgraph.graph import END, START, StateGraph
 
 from app.agent.compact import compact_messages, should_compact
 from app.agent.router import decide_route
-from app.agent.state import AgentState
+from app.agent.state import AgentState, _validate_state
 from app.config import get_settings
 from app.infra.db import get_pool
 from app.infra.mcp_client import MCPClientManager
@@ -36,6 +36,7 @@ def build_graph(llm, checkpointer=None, mcp_manager: MCPClientManager | None = N
 
     async def route_node(state: AgentState) -> dict:
         question = state.question
+        _validate_state(state)
 
         # 输入护栏：PII 脱敏 + prompt injection 检测（opt-in，与 deepagents 统一入口）
         settings = get_settings()
