@@ -1,5 +1,6 @@
 name: agent-platform-ci
 
+# 触发：仅当影响运行/测试/契约/编排的代码变更时跑。
 on:
   push:
     paths:
@@ -38,20 +39,22 @@ on:
       - "zhanggui-zhiku/**"
       - "kefu-service/**"
 
+# TB-8 分层门禁（见 docs/architecture-improvement-plan.md §6.2）：
+# 本 workflow 只守「确定性门禁」—— lint + 单测 + 启发式路由评测（无 LLM 依赖，永远可达）。
+# LLM 质量评测（依赖 LLM_API_KEY 可达）交由 eval-llm.yml（定时 + 手动），非阻塞、不卡 push。
+# CI 直接复用 Makefile 的 `make ci` 单一真相，避免手写命令与本地漂移。
 jobs:
-  test:
+  ci:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-          cache: pip
-      - name: Install
-        run: pip install -e ".[dev]" -e ./shared-schemas -e ./agent-core -e ./dialogue-framework -e ./wenda-data-agent -e ./deepagents
-      - name: Unit tests
-        run: pytest -q
-      - name: Ruff lint
-        run: ruff check .
-      - name: Eval gate (heuristic routing baseline)
-        run: python eval/run_eval.py --fail-below 1.0
+      - name: Install (all workspace packages + dev tools)
+        run: make install
+      - name: CI gate (lint + unit tests + heuristic eval)
+        run: make ci
