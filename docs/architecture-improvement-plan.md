@@ -157,7 +157,7 @@
 |---|---|---|---|
 | TB-6 | **kefu 返回符合性逐项核验**：优化 E 仅对 `async_subagents` 加 `QueryResponse` 断言（消费侧），未反向核验 kefu `/invoke` 是否逐字段符合 `QueryResponse`（含 `fallback`/`error`/`sources` 字段形态） | `plan-e-dual-track-convergence.md:95` S-5③ | 需独立子任务 + 真实/模拟 kefu 服务；本期不纳入 |
 | TB-7 | **docker compose 端到端冒烟**：`docker-compose.yml` 已存在，但缺一键端到端冒烟验证 | `research-proposal.md:120` | 可选；需服务可达环境 |
-| TB-8 | **eval 门禁 CI 化**：本地 `python -m eval.run_eval` 12/12 通过，但 eval 依赖 LLM/服务可达，CI 不可达时仅本地人工验证 | `architecture-improvement-plan.md:134` | 建议固化 CI 跳过策略 + 本地门禁约定 |
+| TB-8 | **eval 门禁 CI 化**：本地 `python -m eval.run_eval` 12/12 通过，但 eval 依赖 LLM/服务可达，CI 不可达时仅本地人工验证 | `architecture-improvement-plan.md:134` | 建议固化 CI 跳过策略 + 本地门禁约定 | ✅ 已落地（2026-08-16）：`run_eval.py` 加 `--require-llm`（环境不可达显式 SKIP 退出码 2，不假装通过）+ 默认 `--fail-below 0.8` 门禁阈值；Makefile `install` 改用 `--all-packages --extra dev`（TB-3 约定）、`eval` 改用**直接路径** `eval/run_eval.py`（避免命中 deepagents 同名模块）、新增 `eval-llm-required` target。`ci: lint test eval` 串联依赖 uv run 退出码透传（已验证）。ruff F821 对 `{args.fail_below:.0%}` 中文 f-string 误报，改用 `.format` 规避 |
 
 ### 6.3 说明
 
