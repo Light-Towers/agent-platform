@@ -32,9 +32,11 @@ eval-llm-required:
 ci: lint test eval
 
 # TB-7 端到端冒烟：需本机 Docker 守护进程可用。启动 pgvector + agent-platform，
-# 等待两服务 healthcheck 变 healthy，再探测 /health 与 /query 返回，最后清理。
-# 无 Docker 的环境用 `uv run python _tb7_smoke.py` 做等价内存模式预热冒烟。
+# 等待两服务 healthcheck 变 healthy，再探测 /health 返回，最后清理。
+# 无 Docker 的环境用 `uv run python scripts/smoke_memory.py` 做等价内存模式预热冒烟。
+# 若本机 8000 被其他服务占用，用 `HOST_PORT=18000 make compose-smoke` 临时切换宿主端口
+# （探测走容器内 127.0.0.1:8000，与宿主端口无关，故切换不影响冒烟语义）。
 compose-smoke:
-	docker compose up -d --wait
+	docker compose up -d --build --wait
 	@echo "== agent-platform /health =="; docker compose exec -T agent-platform python -c "import urllib.request; print(urllib.request.urlopen('http://127.0.0.1:8000/health').read().decode())"
 	docker compose down -v
