@@ -1,4 +1,9 @@
-"""LLM 客户端：复用 agent_core.llm.fallback.FallbackChatModel + dialogue-framework 配置。"""
+"""LLM 客户端：复用 agent_core.llm.fallback.FallbackChatModel + dialogue-framework 配置。
+
+TB-1：产出的 ``FallbackChatModel`` 即 agent_core ``BaseLLMProvider`` 协议实现
+（具备 ainvoke / with_structured_output），可直接经
+``dialogue_framework.shared.llm.core_adapter.LLMCoreClient`` 适配为 DF 运行时协议。
+"""
 
 from agent_core.llm.fallback import FallbackChatModel
 
