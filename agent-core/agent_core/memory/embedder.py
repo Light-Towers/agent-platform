@@ -1,21 +1,25 @@
 # -*- coding: utf-8 -*-
 """共享 Embedding 提供方（所有子包统一入口，消除各自为政）。
 
-按配置动态选择来源：
-  - 配了 SILICONFLOW_API_KEY → 远程硅基流动 API（默认 BAAI/bge-m3，1024 维）
-  - 否则                   → 本地 sentence-transformers（BAAI/bge-small-zh-v1.5，512 维）
+按配置动态选择来源（优先级从高到低）：
+  - ``EMBEDDING_MODE=mock``（或 auto 且无远程密钥）→ ``MockEmbedder``（确定性 hash 向量，零成本、零网络）
+  - 配了 ``SILICONFLOW_API_KEY``                           → 远程硅基流动 API（默认 BAAI/bge-m3，1024 维）
+  - 否则                                                  → 本地 sentence-transformers（BAAI/bge-small-zh-v1.5，512 维）
 
-维度由所选模型自动派生，调用方无需关心。依赖均为懒加载，缺包时抛出明确 ImportError，
-不阻断模块导入期。
+维度由所选模型自动派生（mock 由 ``EMBEDDING_DIM`` 控制，默认 512），调用方无需关心。
+依赖均为懒加载，缺包时抛出明确 ImportError，不阻断模块导入期。
 
 此前该逻辑散落在 deepagents/classifier.py（本地）、deepagents/memory/vector_backends.py
-（本地+远程）、zhanggui-zhiku/app/lm/siliconflow_client.py（远程）三处，现统一收口到内核。
+（本地+远程）、zhanggui-zhiku/app/lm/siliconflow_client.py（远程）、app/rag/embed.py（mock+远程）
+四处，现统一收口到内核，子包统一 import。
 """
 
 from __future__ import annotations
 
+import hashlib
+import math
 import os
-from typing import Protocol
+from typing import Any, Protocol
 
 from agent_core.logging import get_logger
 
@@ -28,6 +32,31 @@ class EmbeddingProvider(Protocol):
     dim: int
 
     def embed(self, texts: list[str]) -> list[list[float]]: ...
+
+
+class MockEmbedder:
+    """确定性 mock embedding：基于内容哈希生成固定向量，零成本、零网络。
+
+    用于开发/CI 零密钥环境跑通链路（语义相似度无意义，检索质量由上层兜底）。
+    dim 由 ``EMBEDDING_DIM`` 控制，默认 512（与 app 的 vector_dim 对齐）。
+    """
+
+    def __init__(self, dim: int | None = None) -> None:
+        self.dim = int(dim or int(os.getenv("EMBEDDING_DIM", "512")))
+
+    def embed(self, texts: list[str]) -> list[list[float]]:
+        out: list[list[float]] = []
+        for text in texts:
+            vec: list[float] = []
+            counter = 0
+            while len(vec) < self.dim:
+                digest = hashlib.sha256(f"{text}:{counter}".encode()).digest()
+                vec.extend(b / 255.0 - 0.5 for b in digest)
+                counter += 1
+            vec = vec[: self.dim]
+            norm = math.sqrt(sum(v * v for v in vec)) or 1.0
+            out.append([v / norm for v in vec])
+        return out
 
 
 class LocalEmbedder:
@@ -129,11 +158,24 @@ _EMBEDDER: EmbeddingProvider | None = None
 
 
 def get_embedder() -> EmbeddingProvider:
-    """按配置返回 embedding 提供方：有 SILICONFLOW_API_KEY 用远程，否则本地。"""
+    """按配置返回 embedding 提供方（统一入口）。
+
+    选择逻辑：
+      1. EMBEDDING_MODE=mock → MockEmbedder（CI/零密钥）
+      2. 否则，配了 SILICONFLOW_API_KEY → 远程硅基流动
+      3. 否则，EMBEDDING_MODE=auto 且未配远程密钥 → MockEmbedder（兜底，零密钥可跑）
+      4. 否则 → 本地 sentence-transformers
+    """
     global _EMBEDDER
     if _EMBEDDER is not None:
         return _EMBEDDER
+    mode = os.getenv("EMBEDDING_MODE", "auto").lower()
     api_key = os.getenv("SILICONFLOW_API_KEY")
+
+    if mode == "mock" or (mode == "auto" and not api_key):
+        _EMBEDDER = MockEmbedder()
+        logger.info("Embedding 使用 Mock（确定性 hash，dim=%s）", _EMBEDDER.dim)
+        return _EMBEDDER
     if api_key:
         _EMBEDDER = SiliconFlowEmbedder(
             api_key=api_key,
@@ -141,10 +183,56 @@ def get_embedder() -> EmbeddingProvider:
             model=os.getenv("SILICONFLOW_EMBEDDING_MODEL", "BAAI/bge-m3"),
         )
         logger.info("Embedding 使用远程硅基流动: %s", _EMBEDDER.dim)
-    else:
-        _EMBEDDER = LocalEmbedder(os.getenv("INTENT_EMBEDDING_MODEL", "BAAI/bge-small-zh-v1.5"))
-        logger.info("Embedding 使用本地模型: %s", _EMBEDDER.dim)
+        return _EMBEDDER
+    _EMBEDDER = LocalEmbedder(os.getenv("INTENT_EMBEDDING_MODEL", "BAAI/bge-small-zh-v1.5"))
+    logger.info("Embedding 使用本地模型: %s", _EMBEDDER.dim)
     return _EMBEDDER
 
 
-__all__ = ["EmbeddingProvider", "LocalEmbedder", "SiliconFlowEmbedder", "get_embedder"]
+__all__ = [
+    "EmbeddingProvider",
+    "MockEmbedder",
+    "LocalEmbedder",
+    "SiliconFlowEmbedder",
+    "LocalFnEmbedder",
+    "get_embedder",
+]
+
+
+class LocalFnEmbedder:
+    """适配宿主自有 embedding 函数（async ``embed_texts(texts) -> list[list[float]]``）。
+
+    用于宿主已有稳定 embedding 实现（如 app 的 RAG embed，含 mock/OpenAI 兼容 +
+    特定 dim），避免内核后端强制使用共享 embedder 造成维度/CI 不一致。宿主只需提供
+    函数与声明 dim。结果按 L2 归一化（与内置提供方一致，保证余弦相似度语义正确）。
+    """
+
+    def __init__(self, embed_fn: Any, dim: int) -> None:
+        self._fn = embed_fn
+        self.dim = int(dim)
+
+    async def _embed(self, texts: list[str]) -> list[list[float]]:
+        raw = await self._fn(texts)
+        out: list[list[float]] = []
+        for vec in raw:
+            norm = math.sqrt(sum(float(v) * float(v) for v in vec)) or 1.0
+            out.append([float(v) / norm for v in vec])
+        return out
+
+    def embed(self, texts: list[str]) -> list[list[float]]:
+        import asyncio
+
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+        if loop is not None:
+            # 已在事件循环内：同步 embed 不应阻塞，交由调用方异步路径；
+            # 这里用 run_in_executor 跑同步包装（避免嵌套事件循环死锁）。
+            import concurrent.futures
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+                return ex.submit(
+                    lambda: asyncio.run(self._embed(texts))
+                ).result()
+        return asyncio.run(self._embed(texts))
