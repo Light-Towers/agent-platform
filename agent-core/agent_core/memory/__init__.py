@@ -41,6 +41,39 @@ from agent_core.memory.vector_backend import (
     create_memory_backend,
 )
 
+
+def get_checkpointer():
+    """构建 LangGraph checkpointer（各子包统一入口，类比 ``get_embedder``）。
+
+    优先级：
+      1. 配置 ``MONGO_URL`` → ``MongoCheckpointer``（持久化到 MongoDB，重启不丢，
+         按 ``tenant_id`` 隔离）。生产推荐。
+      2. 否则降级 ``InMemorySaver``（纯内存，重启丢，开发/无 Mongo 环境）。
+
+    所有子包应通过本工厂获取 checkpointer，避免在各处重复 ``if MONGO_URL ...
+    else InMemorySaver`` 样板，并保证降级策略一致。
+    """
+    mongo_url = __import__("os").getenv("MONGO_URL")
+    if mongo_url:
+        try:
+            return MongoCheckpointer(
+                mongo_url=mongo_url,
+                db_name=__import__("os").getenv("MONGO_DB", "deepagents"),
+                collection=__import__("os").getenv(
+                    "MONGO_CHECKPOINT_COLLECTION", "langgraph_checkpoints"
+                ),
+                tenant_id=__import__("os").getenv("TENANT_ID", "default"),
+            )
+        except Exception as e:  # pragma: no cover - Mongo 不可用时降级
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "MongoCheckpointer 初始化失败，降级 InMemorySaver: %s", e
+            )
+    from langgraph.checkpoint.memory import InMemorySaver
+
+    return InMemorySaver()
+
 __all__ = [
     "ConversationMemory",
     "MemoryBackend",
@@ -51,6 +84,7 @@ __all__ = [
     "get_embedder",
     "MongoHistoryStore",
     "MongoCheckpointer",
+    "get_checkpointer",
     "get_default_backend",
     "get_semantic_memory",
     "recall_memories",
