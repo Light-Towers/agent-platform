@@ -20,6 +20,12 @@ import pytest
 from app.conf import rerank_config, retrieval_config
 from app.conf.yaml_config_utils import CfgDict, load_yaml_config
 
+# 配置目录基于本包绝对定位（不依赖 pytest 运行 cwd），否则从仓库根运行
+# pytest 时相对路径 app/conf/retrieval.yaml 会解析到仓库根而非 zhanggui 子包。
+_CONF_DIR = Path(__file__).resolve().parents[2] / "app" / "conf"
+_RETRIEVAL_YAML = _CONF_DIR / "retrieval.yaml"
+_RERANK_YAML = _CONF_DIR / "rerank.yaml"
+
 
 # ---------------------------------------------------------------------------
 # 默认值 = 改造前硬编码（保证默认行为不变）
@@ -61,7 +67,7 @@ def test_rerank_yaml_loads_with_expected_defaults():
 # 轻量加载器
 # ---------------------------------------------------------------------------
 def test_loader_returns_attr_dict():
-    cfg = load_yaml_config(Path("app/conf/retrieval.yaml"), "ZHANGUI_RETRIEVAL_YAML")
+    cfg = load_yaml_config(_RETRIEVAL_YAML, "ZHANGUI_RETRIEVAL_YAML")
     assert isinstance(cfg, CfgDict)
     # 属性访问 + dict 访问 + 混合访问
     assert cfg.rrf.k == 60
@@ -85,7 +91,7 @@ def test_loader_env_override_path(tmp_path, monkeypatch):
         encoding="utf-8",
     )
     monkeypatch.setenv("ZHANGUI_RETRIEVAL_YAML", str(alt))
-    cfg = load_yaml_config(Path("app/conf/retrieval.yaml"), "ZHANGUI_RETRIEVAL_YAML")
+    cfg = load_yaml_config(_RETRIEVAL_YAML, "ZHANGUI_RETRIEVAL_YAML")
     assert cfg.hybrid.dense_weight == pytest.approx(0.6)
     assert cfg.hybrid.sparse_weight == pytest.approx(0.4)
     assert cfg.rrf.k == 30
@@ -95,7 +101,7 @@ def test_loader_env_override_path(tmp_path, monkeypatch):
 def test_loader_missing_yaml_raises(tmp_path, monkeypatch):
     monkeypatch.setenv("ZHANGUI_RERANK_YAML", str(tmp_path / "nope.yaml"))
     with pytest.raises(FileNotFoundError):
-        load_yaml_config(Path("app/conf/rerank.yaml"), "ZHANGUI_RERANK_YAML")
+        load_yaml_config(_RERANK_YAML, "ZHANGUI_RERANK_YAML")
 
 
 # ---------------------------------------------------------------------------

@@ -149,7 +149,14 @@ class LocalEmbedder:
         from sentence_transformers import SentenceTransformer
 
         self._model = SentenceTransformer(model)
-        self.dim = int(self._model.get_sentence_embedding_dimension())
+        # sentence-transformers 近期将 get_sentence_embedding_dimension 重命名为
+        # get_embedding_dimension，旧方法触发 FutureWarning；做兼容回退。
+        _dim_fn = getattr(
+            self._model,
+            "get_embedding_dimension",
+            self._model.get_sentence_embedding_dimension,
+        )
+        self.dim = int(_dim_fn())
 
     def embed(self, texts: list[str]) -> list[list[float]]:
         return self._model.encode(texts, normalize_embeddings=True).tolist()
