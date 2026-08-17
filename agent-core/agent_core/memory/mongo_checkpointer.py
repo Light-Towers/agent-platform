@@ -15,6 +15,9 @@
 
 from __future__ import annotations
 
+import asyncio
+import functools
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, AsyncIterator, Optional, Sequence
 
 from agent_core.logging import get_logger
@@ -28,6 +31,20 @@ from langgraph.checkpoint.base import (
 from langchain_core.runnables import RunnableConfig
 
 logger = get_logger(__name__)
+
+# 后台线程池：把阻塞式 pymongo 调用移出事件循环。LangGraph 全程 astream 会高频
+# 触发 checkpoint 读写，若同步 pymongo 直接跑在 async 方法内会阻塞整个事件循环，
+# 拖垮并发请求。统一经 _run 投入线程池执行。
+_MONGO_EXECUTOR = ThreadPoolExecutor(max_workers=8, thread_name_prefix="mongo-io")
+
+
+def _run(fn, *args, **kwargs):
+    """在线程池执行阻塞式 pymongo 调用并 await 其结果（不阻塞 asyncio 调度）。"""
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = asyncio.get_event_loop()
+    return loop.run_in_executor(_MONGO_EXECUTOR, functools.partial(fn, *args, **kwargs))
 
 
 def _tid(config: RunnableConfig) -> str:
@@ -131,7 +148,7 @@ class MongoCheckpointer(BaseCheckpointSaver[str]):
     async def aget_tuple(self, config: RunnableConfig) -> Optional[CheckpointTuple]:
         if not _cid(config):
             return None
-        doc = self._coll.find_one(self._doc_filter(config))
+        doc = await _run(self._coll.find_one, self._doc_filter(config))
         return self._to_tuple(doc) if doc else None
 
     async def alist(
@@ -152,10 +169,15 @@ class MongoCheckpointer(BaseCheckpointSaver[str]):
         if filter:
             for k, v in filter.items():
                 query["metadata." + str(k)] = v
-        cursor = self._coll.find(query).sort("checkpoint_id", -1)
-        if limit:
-            cursor = cursor.limit(limit)
-        for doc in cursor:
+
+        def _query() -> list[dict]:
+            cursor = self._coll.find(query).sort("checkpoint_id", -1)
+            if limit:
+                cursor = cursor.limit(limit)
+            return list(cursor)
+
+        docs = await _run(_query)
+        for doc in docs:
             yield self._to_tuple(doc)
 
     # ---- 异步写 ----
@@ -169,23 +191,27 @@ class MongoCheckpointer(BaseCheckpointSaver[str]):
         ck_type, ck_blob = self.serde.dumps_typed(checkpoint)
         md_type, md_blob = self.serde.dumps_typed(metadata)
         parent_id = (metadata or {}).get("parents", {}).get(_ns(config))
-        self._coll.update_one(
-            self._doc_filter(config),
-            {
-                "$set": {
-                    "tenant_id": self._tenant_id,
-                    "thread_id": _tid(config),
-                    "checkpoint_ns": _ns(config),
-                    "checkpoint_id": _cid(config),
-                    "parent_id": parent_id,
-                    "checkpoint_type": ck_type,
-                    "checkpoint_blob": ck_blob,
-                    "metadata_type": md_type,
-                    "metadata_blob": md_blob,
-                }
-            },
-            upsert=True,
-        )
+
+        def _update() -> None:
+            self._coll.update_one(
+                self._doc_filter(config),
+                {
+                    "$set": {
+                        "tenant_id": self._tenant_id,
+                        "thread_id": _tid(config),
+                        "checkpoint_ns": _ns(config),
+                        "checkpoint_id": _cid(config),
+                        "parent_id": parent_id,
+                        "checkpoint_type": ck_type,
+                        "checkpoint_blob": ck_blob,
+                        "metadata_type": md_type,
+                        "metadata_blob": md_blob,
+                    }
+                },
+                upsert=True,
+            )
+
+        await _run(_update)
         return config
 
     async def aput_writes(
@@ -195,19 +221,23 @@ class MongoCheckpointer(BaseCheckpointSaver[str]):
         task_id: str,
         task_path: str = "",
     ) -> None:
-        existing = self._coll.find_one(self._doc_filter(config), {"writes": 1})
-        cur = list(existing.get("writes", [])) if existing else []
-        for ch, value in writes:
-            cur.append({"channel": ch, "value": value, "task_id": task_id})
-        self._coll.update_one(
-            self._doc_filter(config),
-            {"$set": {"writes": cur}},
-            upsert=True,
-        )
+        def _merge() -> None:
+            existing = self._coll.find_one(self._doc_filter(config), {"writes": 1})
+            cur = list(existing.get("writes", [])) if existing else []
+            for ch, value in writes:
+                cur.append({"channel": ch, "value": value, "task_id": task_id})
+            self._coll.update_one(
+                self._doc_filter(config),
+                {"$set": {"writes": cur}},
+                upsert=True,
+            )
+
+        await _run(_merge)
 
     async def adelete_thread(self, thread_id: str) -> None:
-        self._coll.delete_many(
-            {"tenant_id": self._tenant_id, "thread_id": thread_id}
+        await _run(
+            self._coll.delete_many,
+            {"tenant_id": self._tenant_id, "thread_id": thread_id},
         )
 
     # str 版本递增：保证 checkpoint_id 单调且可直接排序
