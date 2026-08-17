@@ -173,7 +173,8 @@ async def query(
             final_answer = ""
             async for update in graph.astream(
                 {"messages": [("user", req.query)], "question": req.query,
-                 "user_id": req.user_id, "iterations": 0},
+                 "user_id": req.user_id, "workspace_id": req.workspace_id,
+                 "iterations": 0},
                 config=config,
                 stream_mode="updates",
             ):
@@ -220,7 +221,11 @@ def _node_event(node: str, payload: dict) -> dict | None:
 
 
 @router.post("/import", response_model=ImportResponse)
-async def import_document(file: UploadFile, api_key=Depends(verify_api_key)):
+async def import_document(
+    file: UploadFile,
+    workspace_id: str = "default",
+    api_key=Depends(verify_api_key),
+):
     pool = get_pool()
     if pool is None:
         raise HTTPException(status_code=503, detail="知识库未启用（DATABASE_URL 未配置）")
@@ -238,7 +243,7 @@ async def import_document(file: UploadFile, api_key=Depends(verify_api_key)):
     chunks = split_markdown(text)
     if not chunks:
         raise HTTPException(status_code=400, detail="文档内容为空或无法切分")
-    doc_id = await add_document(pool, source=filename, chunks=chunks)
+    doc_id = await add_document(pool, source=filename, chunks=chunks, workspace_id=workspace_id)
     return ImportResponse(doc_id=doc_id, source=filename, chunks=len(chunks))
 
 

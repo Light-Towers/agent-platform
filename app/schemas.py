@@ -51,6 +51,9 @@ class QueryRequest(BaseQueryRequest):
         default=None,
         description="会话 ID（网关标准名 session_id）",
     )
+    # 工作空间隔离键（优化 G）：跨会话记忆与 RAG 文档按 workspace 隔离；
+    # 未传时记为 default（全局共享空间）。user_id 仅作辅助归属维度，不参与隔离。
+    workspace_id: str = Field(default="default")
     # app 业务默认值：未传 user_id 时记为 default（基类为 None）
     user_id: str = Field(default="default")
     priority: Priority = Field(default="normal")
