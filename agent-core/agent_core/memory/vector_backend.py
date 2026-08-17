@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import asyncio
 import functools
-import os
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
@@ -129,14 +128,16 @@ class MilvusMemoryBackend(MemoryBackend):
         return vec[0]
 
     def _create_collection(self) -> None:
+        from pymilvus import CollectionSchema, DataType, FieldSchema
+
         fields = [
-            FieldSchema(name="id", dtype=self._DataType.INT64, is_primary=True, auto_id=True),
-            FieldSchema(name="user_id", dtype=self._DataType.VARCHAR, max_length=128),
-            FieldSchema(name="tenant_id", dtype=self._DataType.VARCHAR, max_length=128),
-            FieldSchema(name="content", dtype=self._DataType.VARCHAR, max_length=65535),
-            FieldSchema(name="embedding", dtype=self._DataType.FLOAT_VECTOR, dim=self._dim),
+            FieldSchema(name="id", dtype=DataType.INT64, is_primary=True, auto_id=True),
+            FieldSchema(name="user_id", dtype=DataType.VARCHAR, max_length=128),
+            FieldSchema(name="tenant_id", dtype=DataType.VARCHAR, max_length=128),
+            FieldSchema(name="content", dtype=DataType.VARCHAR, max_length=65535),
+            FieldSchema(name="embedding", dtype=DataType.FLOAT_VECTOR, dim=self._dim),
         ]
-        schema = self._CollectionSchema(fields=fields)
+        schema = CollectionSchema(fields=fields)
         self._Collection(name=self._collection_name, schema=schema)
         self._utility.create_index(
             self._collection_name,

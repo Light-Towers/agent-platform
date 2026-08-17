@@ -38,6 +38,7 @@ def _resolve_default_backend() -> Any:
     try:
         from agent_core.memory.embedder import LocalFnEmbedder
         from agent_core.memory.vector_backend import PgVectorMemoryBackend
+
         from app.rag.embed import embed_texts
 
         # 注入 app 自有 embedding（512 维, 含 mock/OpenAI 兼容），保持与 memories 表
@@ -78,8 +79,8 @@ def embed_memory(text: str) -> list[float]:
     直接复用 ``app.rag.embed.embed_texts``，避免依赖内核默认 embedder 选型，
     保持与 RAG/缓存维度统一（CI 零密钥）。
     """
-    from app.rag.embed import embed_texts
     from app.config import get_settings
+    from app.rag.embed import embed_texts
 
     return embed_texts([text], dim=get_settings().vector_dim)[0]
 

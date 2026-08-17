@@ -81,7 +81,7 @@ async def recall(pool, workspace_id: str, question: str, k: int = 3) -> list[str
     # 优化 H 类型增强路径：用 app psycopg 池做分层加权召回
     if pool is not None and settings.memory_extraction_enabled:
         try:
-            return await recall_typed(pool, workspace_id, question, k=k)
+            return await _mb.recall_typed(pool, workspace_id, question, k=k)
         except Exception:
             logger.exception("类型感知召回失败，降级内核/空")
     # 降级路径：内核后端（pool=None，内核自建 asyncpg 池）
@@ -107,12 +107,11 @@ async def remember(
       重要性的结构化事实（D1 抽取不存原文）；
     - 否则退化：存整条原文（保持优化 G 之前行为，兼容 memory_extraction_enabled=False）。
     """
-    settings = get_settings()
     if facts:
         if pool is not None:
             for f in facts:
                 try:
-                    await remember_fact(
+                    await _mb.remember_fact(
                         pool, workspace_id, f["fact"], f.get("type", "semantic"),
                         f.get("importance", 0.5),
                     )
