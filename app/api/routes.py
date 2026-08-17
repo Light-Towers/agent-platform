@@ -204,6 +204,41 @@ def _sse(payload: dict) -> str:
     return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
 
+# 优化 I：精确回忆接口——按 thread_id 回溯历史对话原文（与 H 语义回忆正交）。
+# 复用 app.state.checkpointer（LangGraph AsyncPostgresSaver，内核 get_checkpointer 工厂产出）。
+from app.memory import recall_exact as _recall_exact
+from app.schemas import HistoryItem, HistoryResponse
+
+
+@router.get("/history", response_model=HistoryResponse)
+async def history(
+    session_id: str,
+    keyword: str | None = None,
+    limit: int | None = None,
+    request: Request = None,
+    api_key=Depends(verify_api_key),
+):
+    """精确回忆：按会话 thread_id 取回历史对话原文（优化 I）。
+
+    与 /query 的语义召回（优化 H）正交：此处返回字面原文，支持关键词过滤，
+    用于「找到我之前某次聊天里具体说了什么」。需 api_key 鉴权。
+    """
+    from app.api.auth import resolve_thread_id
+
+    thread_id = resolve_thread_id(session_id, api_key)
+    checkpointer = getattr(request.app.state, "checkpointer", None)
+    if checkpointer is None:
+        raise HTTPException(status_code=503, detail="CHECKPOINTER_UNAVAILABLE")
+    items = await _recall_exact.get_thread_history(
+        checkpointer, thread_id, keyword=keyword, limit=limit
+    )
+    return HistoryResponse(
+        thread_id=thread_id,
+        count=len(items),
+        items=[HistoryItem(**it) for it in items],
+    )
+
+
 def _node_event(node: str, payload: dict) -> dict | None:
     if node == "route":
         return {

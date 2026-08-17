@@ -22,7 +22,14 @@ from shared_schemas import (
 )
 
 # 重新导出联邦类型，供 app 内部（routes.py 等）从 app.schemas 统一引用
-__all__ = ["Capability", "HealthResponse", "Priority", "QueryRequest"]
+__all__ = [
+    "Capability",
+    "HealthResponse",
+    "Priority",
+    "QueryRequest",
+    "HistoryItem",
+    "HistoryResponse",
+]
 
 Capability = Literal["search", "rag", "sql", "direct", "mcp"]
 
@@ -127,6 +134,21 @@ class McpToolResult(BaseModel):
     evidence: list[str] = []
     error: str | None = None
     duration_ms: int = 0
+
+
+# 优化 I：精确回忆——按 thread_id 回溯历史对话原文
+class HistoryItem(BaseModel):
+    index: int
+    role: str  # user / assistant / tool / system
+    content: str
+    id: str | None = None
+    created_at: str | None = None
+
+
+class HistoryResponse(BaseModel):
+    thread_id: str
+    count: int
+    items: list[HistoryItem]
 
 
 class RevertResult(BaseModel):
