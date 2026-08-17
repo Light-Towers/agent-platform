@@ -17,7 +17,10 @@ app/memory/memory_backend.py，现已统一收口到内核，子包直接 import
 
 from __future__ import annotations
 
+import asyncio
+import functools
 import os
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 from agent_core.logging import get_logger
@@ -27,6 +30,25 @@ from agent_core.memory.embedder import get_embedder
 logger = get_logger(__name__)
 
 DEFAULT_COLLECTION = "semantic_memory"
+
+# 后台线程池：把阻塞式向量库 SDK（Milvus pymilvus）调用移出事件循环，
+# 避免 LangGraph astream 等 async 上下文被同步 SDK 阻塞。
+_MILVUS_EXECUTOR = ThreadPoolExecutor(max_workers=4, thread_name_prefix="milvus-io")
+
+
+def _run_sync(fn, *args, **kwargs):
+    """在线程池执行阻塞调用并在事件循环内 await（避免阻塞 asyncio 调度）。
+
+    兼容两种调用上下文：
+      - async 主流程中已有 running loop → 用 get_running_loop；
+      - 后台 daemon 线程的 ``loop.run_until_complete`` 内（Milvus.remember）→
+        同样已有 running loop，故优先 get_running_loop，缺失时退回 get_event_loop。
+    """
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = asyncio.get_event_loop()
+    return loop.run_in_executor(_MILVUS_EXECUTOR, functools.partial(fn, *args, **kwargs))
 
 
 # ==========================================================================
@@ -50,7 +72,27 @@ class MilvusMemoryBackend(MemoryBackend):
         token: str = "",
         collection: str = DEFAULT_COLLECTION,
         tenant_id: str = "default",
+        embedder: Any | None = None,
     ) -> None:
+        self._collection_name = collection
+        self._tenant_id = tenant_id
+        self._uri = uri
+        self._token = token or ""
+        self._embedder = embedder or get_embedder()
+        self._dim = self._embedder.dim
+        self._coll: Any = None
+        self._connected = False
+        logger.info("MilvusMemoryBackend 已配置集合 %s (dim=%s)", collection, self._dim)
+
+    def _connect(self) -> Any:
+        """懒连接（同步，调用方负责放入 executor）。
+
+        延迟到首次实际使用时连接，避免在对象构造期（可能处于事件循环中）执行
+        阻塞式 ``connections.connect``，与 PgVectorMemoryBackend 的池惰性初始化一致。
+        同样把 ``pymilvus`` 的（可选）import 放在此处，未安装时不影响对象构造与单测。
+        """
+        if self._connected and self._coll is not None:
+            return self._coll
         from pymilvus import (
             Collection,
             CollectionSchema,
@@ -66,17 +108,25 @@ class MilvusMemoryBackend(MemoryBackend):
         self._DataType = DataType
         self._FieldSchema = FieldSchema
         self._CollectionSchema = CollectionSchema
-        self._collection_name = collection
-        self._tenant_id = tenant_id
-        self._embedder = get_embedder()
-        self._dim = self._embedder.dim
-
-        connections.connect(alias="default", uri=uri, token=token or "")
-        if not utility.has_collection(collection):
+        self._connections.connect(alias="default", uri=self._uri, token=self._token)
+        if not self._utility.has_collection(self._collection_name):
             self._create_collection()
-        self._coll: Collection = Collection(collection)
-        self._coll.load()
-        logger.info("MilvusMemoryBackend 已连接集合 %s (dim=%s)", collection, self._dim)
+        coll = self._Collection(self._collection_name)
+        coll.load()
+        self._coll = coll
+        self._connected = True
+        return coll
+
+    async def _aembed(self, text: str) -> list[float]:
+        """异步取单条 embedding，优先 ``aembed``（与 PgVectorMemoryBackend._embed_one 对齐）。
+
+        避免事件循环内对 LocalFnEmbedder 调同步 ``embed``（其内部 asyncio.run 会死锁）；
+        无 aembed 时回退同步 embed 并丢到线程池，不阻塞调度。
+        """
+        if hasattr(self._embedder, "aembed"):
+            return (await self._embedder.aembed([text]))[0]
+        vec = await _run_sync(self._embedder.embed, [text])
+        return vec[0]
 
     def _create_collection(self) -> None:
         fields = [
@@ -114,23 +164,51 @@ class MilvusMemoryBackend(MemoryBackend):
     ) -> list[str]:
         if not question:
             return []
-        vec = self._embedder.embed([question])[0]
+        vec = await self._aembed(question)
+        coll = await _run_sync(self._connect)
         safe_user = self._escape_milvus_str(user_id)
         safe_tenant = self._escape_milvus_str(self._tenant_id)
         expr = f'user_id == "{safe_user}" and tenant_id == "{safe_tenant}"'
-        res = self._coll.search(
-            data=[vec],
-            anns_field="embedding",
-            param={"metric_type": "COSINE", "params": {"ef": 64}},
-            limit=k,
-            expr=expr,
-            output_fields=["content"],
-        )
-        return [hit.entity.get("content") for hit in res[0]] if res else []
+
+        def _search() -> list[str]:
+            res = coll.search(
+                data=[vec],
+                anns_field="embedding",
+                param={"metric_type": "COSINE", "params": {"ef": 64}},
+                limit=k,
+                expr=expr,
+                output_fields=["content"],
+            )
+            return [hit.entity.get("content") for hit in res[0]] if res else []
+
+        return await _run_sync(_search)
 
     def remember(self, pool: Any, user_id: str, content: str) -> None:
-        vec = self._embedder.embed([content])[0]
-        self._coll.insert([[user_id], [self._tenant_id], [content], [vec]])
+        """同步沉淀记忆（后台线程执行异步写入，不阻塞调用方）。
+
+        与 PgVectorMemoryBackend.remember 一致：起一个 daemon 线程跑完整 asyncio
+        写入流程（含 async embed + 线程池包裹的 Milvus insert），避免：
+          1) 在调用方事件循环中同步阻塞 SDK；
+          2) 对 LocalFnEmbedder 同步嵌入造成 asyncio.run 嵌套死锁。
+        """
+        import threading
+
+        def _run() -> None:
+            loop = _new_loop()
+            try:
+                loop.run_until_complete(self._aremember(pool, user_id, content))
+            finally:
+                loop.close()
+
+        t = threading.Thread(target=_run, daemon=True)
+        t.start()
+
+    async def _aremember(self, pool: Any, user_id: str, content: str) -> None:
+        vec = await self._aembed(content)
+        coll = await _run_sync(self._connect)
+        await _run_sync(
+            coll.insert, [[user_id], [self._tenant_id], [content], [vec]]
+        )
 
 
 # ==========================================================================
