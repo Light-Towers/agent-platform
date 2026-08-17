@@ -17,7 +17,7 @@ from app.agent.state import AgentState, _validate_state
 from app.config import get_settings
 from app.infra.db import get_pool
 from app.infra.mcp_client import MCPClientManager
-from app.memory.longterm import recall, remember
+from app.memory.longterm import extract_memory_facts, recall, remember
 from app.subagents.mcp import mcp_query
 from app.subagents.rag import rag_query
 from app.subagents.search import search_web
@@ -112,7 +112,11 @@ def build_graph(llm, checkpointer=None, mcp_manager: MCPClientManager | None = N
 
         answer = await _compose(question, evidence, memory_notes)
         if get_settings().memory_enabled:
-            remember(get_pool(), state.workspace_id, f"Q: {question}\nA: {answer}")
+            # 优化 H：抽取结构化事实后再沉淀（开启时）；否则退化存原文
+            facts = None
+            if get_settings().memory_extraction_enabled and llm is not None:
+                facts = await extract_memory_facts(llm, question, answer)
+            await remember(get_pool(), state.workspace_id, f"Q: {question}\nA: {answer}", facts=facts)
         return {
             "answer": answer,
             "iterations": iterations,

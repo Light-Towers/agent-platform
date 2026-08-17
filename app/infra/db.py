@@ -34,8 +34,11 @@ CREATE TABLE IF NOT EXISTS memories (
     user_id TEXT NOT NULL DEFAULT 'default',
     content TEXT NOT NULL,
     embedding vector({dim}),
+    memory_type TEXT NOT NULL DEFAULT 'semantic',
+    importance FLOAT NOT NULL DEFAULT 0.5,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+CREATE INDEX IF NOT EXISTS idx_memories_user_type ON memories (user_id, memory_type);
 
 CREATE TABLE IF NOT EXISTS semantic_cache (
     id BIGSERIAL PRIMARY KEY,
@@ -172,6 +175,18 @@ async def ensure_schema(pool) -> None:
     except Exception:
         # duplicate_column 等幂等失败忽略；新库由建表语句已含该列
         pass
+    # 优化 H：长期记忆质量升级——memories 表扩展类型/重要性/时间元数据（幂等 ALTER）
+    for _ddl in (
+        "ALTER TABLE memories ADD COLUMN memory_type TEXT NOT NULL DEFAULT 'semantic'",
+        "ALTER TABLE memories ADD COLUMN importance FLOAT NOT NULL DEFAULT 0.5",
+        "CREATE INDEX IF NOT EXISTS idx_memories_user_type ON memories (user_id, memory_type)",
+    ):
+        try:
+            async with pool.connection() as conn:
+                await conn.execute(_ddl)
+        except Exception:
+            # duplicate_column / 索引已存在等幂等失败忽略
+            pass
 
 
 def get_pool():
