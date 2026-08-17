@@ -55,6 +55,12 @@ cache = ["valkey>=0.1.0"]
 docs = ["markdown>=3.10.2", "weasyprint>=69.0", "pypdf>=4.0"]
 # Excel/Word 文件读取（upload_file_read_tool 软降级）
 excel = ["pandas>=3.0.1", "openpyxl>=3.1.5", "python-docx>=1.2.0"]
+# 记忆架构（MongoCheckpointer + Milvus 语义记忆；代码内 try/except ImportError 软降级）
+# pip install -e "./deepagents[memory]"
+# - pymongo: 会话历史持久化（MongoCheckpointer）
+# - pymilvus: 语义记忆默认后端
+# - asyncpg: PostgreSQL + pgvector 备选向量后端
+memory = ["pymongo>=4.6", "pymilvus>=2.4", "asyncpg>=0.29"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["agent", "api", "tools", "utils", "prompt"]

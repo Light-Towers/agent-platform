@@ -28,19 +28,30 @@ _main_agent = None
 
 
 async def _create_checkpointer():
-    """创建 checkpointer。
+    """创建 checkpointer（会话历史持久化）。
 
-    使用 InMemorySaver：纯内存、同步/异步均可（提供 aget_tuple/aput_writes），
-    无需 SQLite 连接或异步上下文管理器，可被全局缓存的 agent 安全复用。
+    优先级：
+      1. 配置 ``MONGO_URL`` → ``MongoCheckpointer``（持久化到 MongoDB，重启不丢，
+         按 ``tenant_id`` 隔离）。生产推荐。
+      2. 否则降级 ``InMemorySaver``（纯内存，重启丢，开发/无 Mongo 环境）。
     """
-    try:
-        from langgraph.checkpoint.memory import InMemorySaver
-        return InMemorySaver()
-    except ImportError:
-        from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-        saver = AsyncSqliteSaver.from_conn_string(":memory:")
-        await saver.__aenter__()
-        return saver
+    mongo_url = os.getenv("MONGO_URL")
+    if mongo_url:
+        try:
+            from agent_core.memory import MongoCheckpointer
+
+            return MongoCheckpointer(
+                mongo_url=mongo_url,
+                db_name=os.getenv("MONGO_DB", "deepagents"),
+                collection=os.getenv("MONGO_CHECKPOINT_COLLECTION", "langgraph_checkpoints"),
+                tenant_id=os.getenv("TENANT_ID", "default"),
+            )
+        except Exception as e:  # pragma: no cover - Mongo 不可用时降级
+            logger.warning("MongoCheckpointer 初始化失败，降级 InMemorySaver: %s", e)
+
+    from langgraph.checkpoint.memory import InMemorySaver
+
+    return InMemorySaver()
 
 
 def _build_subagents():
