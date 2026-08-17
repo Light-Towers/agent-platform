@@ -28,23 +28,22 @@ logger = logging.getLogger(__name__)
 
 
 async def _build_checkpointer():
-    """有 DATABASE_URL 用 Postgres checkpoint；否则内存版（开发模式）。"""
-    settings = get_settings()
-    if settings.db_enabled:
-        from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+    """有 DATABASE_URL 复用 PG 连接池走 Postgres checkpoint；否则内存版（开发模式）。
 
-        # 复用 init_pool() 已建立的 AsyncConnectionPool，避免 from_conn_string()
-        # 的 async context manager 生命周期难管理（退出即关连接）。AsyncPostgresSaver
-        # 构造函数直接接受 AsyncConnectionPool（TB-7 真端到端暴露的 API 变化）。
-        pool = get_pool()
-        if pool is None:
-            raise RuntimeError("db_enabled 但连接池未初始化，检查 lifespan 中 init_pool 顺序")
-        saver = AsyncPostgresSaver(pool)
+    统一委托内核 ``get_checkpointer(pg_pool=...)`` 工厂（C8 收口：避免各子包重复
+    if MONGO_URL / if DATABASE_URL 样板）。PG 池由 app 自己的 init_pool() 管理，
+    仅把池句柄透传给工厂；Mongo/InMemory 分支完全由内核负责降级。
+    """
+    pool = get_pool()  # db_enabled 为 False 时返回 None → 工厂降级 InMemorySaver
+    if pool is None and get_settings().db_enabled:
+        raise RuntimeError("db_enabled 但连接池未初始化，检查 lifespan 中 init_pool 顺序")
+    from agent_core.memory import get_checkpointer
+
+    saver = get_checkpointer(pg_pool=pool)
+    # AsyncPostgresSaver 需要异步建表；InMemorySaver / MongoCheckpointer 无需 setup。
+    if pool is not None:
         await saver.setup()
-        return saver
-    from langgraph.checkpoint.memory import MemorySaver
-
-    return MemorySaver()
+    return saver
 
 
 @asynccontextmanager
