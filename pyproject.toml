@@ -48,7 +48,10 @@ packages = ["app"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-testpaths = ["tests"]
+testpaths = [
+    "tests",
+    "agent-core/tests",
+]
 addopts = "--import-mode=importlib"
 
 [tool.ruff]
