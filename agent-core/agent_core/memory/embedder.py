@@ -212,36 +212,42 @@ def get_embedder(force: bool = False) -> EmbeddingProvider:
       1. ``EMBEDDING_MODE=mock``（或 auto 且无远程密钥）→ ``MockEmbedder``（CI/零密钥）
       2. ``EMBEDDING_MODE=remote`` 或配了 ``EMBEDDING_API_KEY`` → 通用远程 ``RemoteEmbedder``
          （OpenAI 兼容 /embeddings；硅基流动等兼容服务只需填对应 BASE_URL）
-      3. 配了 ``SILICONFLOW_API_KEY`` → 远程 ``SiliconFlowEmbedder``（兼容保留）
+      3. 仅配了 ``SILICONFLOW_API_KEY``（未配通用 ``EMBEDDING_API_KEY``）→ ``SiliconFlowEmbedder``
+         （专用硅基流动实现，模型默认 bge-m3=1024，与既有向量数据维度一致）
       4. 否则 → 本地 sentence-transformers（``INTENT_EMBEDDING_MODEL`` 可覆盖）
 
     维度约定：mock/remote 由 ``EMBEDDING_DIM`` 控制（默认 512），
     本地/硅基流动由模型自动派生（bge-small-zh=512 / bge-m3=1024）。
+
+    注意：``SILICONFLOW_API_KEY`` 既作为通用远程的别名（走 RemoteEmbedder），
+    也可作为专用硅基流动实现（SiliconFlowEmbedder，1024 维）。为避免维度错配破坏
+    既有向量数据，专用硅基流动实现优先级高于通用 RemoteEmbedder，仅当显式配置
+    ``EMBEDDING_API_KEY`` 或 ``EMBEDDING_MODE=remote`` 时才走通用 RemoteEmbedder（512 维）。
     """
     global _EMBEDDER
     if _EMBEDDER is not None and not force:
         return _EMBEDDER
     mode = os.getenv("EMBEDDING_MODE", "auto").lower()
-    api_key = os.getenv("EMBEDDING_API_KEY") or os.getenv("SILICONFLOW_API_KEY")
+    api_key = os.getenv("EMBEDDING_API_KEY")
+    siliconflow_key = os.getenv("SILICONFLOW_API_KEY")
 
-    if mode == "mock" or (mode == "auto" and not api_key):
+    if mode == "mock" or (mode == "auto" and not api_key and not siliconflow_key):
         _EMBEDDER = MockEmbedder()
         logger.info("Embedding 使用 Mock（确定性 hash，dim=%s）", _EMBEDDER.dim)
         return _EMBEDDER
     if mode == "remote" or api_key:
-        # 通用 OpenAI 兼容远程：EMBEDDING_* 优先，硅基流动别名兼容
+        # 通用 OpenAI 兼容远程：EMBEDDING_* 优先
         _EMBEDDER = RemoteEmbedder(
-            api_key=os.getenv("EMBEDDING_API_KEY") or os.getenv("SILICONFLOW_API_KEY", ""),
-            base_url=os.getenv("EMBEDDING_BASE_URL")
-            or os.getenv("SILICONFLOW_BASE_URL", "https://api.openai.com/v1"),
-            model=os.getenv("EMBEDDING_MODEL")
-            or os.getenv("SILICONFLOW_EMBEDDING_MODEL", "bge-small-zh"),
+            api_key=api_key or "",
+            base_url=os.getenv("EMBEDDING_BASE_URL", "https://api.openai.com/v1"),
+            model=os.getenv("EMBEDDING_MODEL", "bge-small-zh"),
         )
         logger.info("Embedding 使用远程（OpenAI 兼容，dim=%s）", _EMBEDDER.dim)
         return _EMBEDDER
-    if os.getenv("SILICONFLOW_API_KEY"):
+    if siliconflow_key:
+        # 专用硅基流动实现（1024 维 bge-m3），与既有向量数据维度一致
         _EMBEDDER = SiliconFlowEmbedder(
-            api_key=os.getenv("SILICONFLOW_API_KEY", ""),
+            api_key=siliconflow_key,
             base_url=os.getenv("SILICONFLOW_BASE_URL", "https://api.siliconflow.cn/v1"),
             model=os.getenv("SILICONFLOW_EMBEDDING_MODEL", "BAAI/bge-m3"),
         )

@@ -22,6 +22,8 @@ from agent_core.memory.backend import MemoryBackend
 from agent_core.memory.embedder import (
     EmbeddingProvider,
     LocalEmbedder,
+    LocalFnEmbedder,
+    MockEmbedder,
     SiliconFlowEmbedder,
     RemoteEmbedder,
     get_embedder,
@@ -33,6 +35,7 @@ from agent_core.memory.semantic import (
     get_semantic_memory,
     recall_memories,
     remember_memory,
+    semantic_memory_enabled,
 )
 from agent_core.memory.vector_backend import (
     DEFAULT_COLLECTION,
@@ -95,6 +98,8 @@ __all__ = [
     "MemoryBackend",
     "EmbeddingProvider",
     "LocalEmbedder",
+    "LocalFnEmbedder",
+    "MockEmbedder",
     "SiliconFlowEmbedder",
     "RemoteEmbedder",
     "get_embedder",
@@ -105,6 +110,7 @@ __all__ = [
     "get_semantic_memory",
     "recall_memories",
     "remember_memory",
+    "semantic_memory_enabled",
     "DEFAULT_COLLECTION",
     "MilvusMemoryBackend",
     "PgVectorMemoryBackend",

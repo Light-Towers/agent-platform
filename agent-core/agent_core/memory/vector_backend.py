@@ -94,13 +94,30 @@ class MilvusMemoryBackend(MemoryBackend):
             {"index_type": "HNSW", "metric_type": "COSINE", "params": {"M": 8, "efConstruction": 200}},
         )
 
+    @staticmethod
+    def _escape_milvus_str(value: str) -> str:
+        """转义 Milvus 标量过滤表达式中被视为字面量的字符串。
+
+        Milvus expr 不支持参数占位符，字符串字面量需用双引号包裹。若 ``value``
+        含双引号/反斜杠，会被解释为表达式语法（注入风险）。这里对反斜杠与双引号
+        做转义，并拒绝换行等非法字符，保证 expr 只作字面量匹配。
+        """
+        if not isinstance(value, str) or not value:
+            raise ValueError("Milvus 过滤字段必须为非空字符串")
+        if any(ch in value for ch in "\n\r\t"):
+            raise ValueError("Milvus 过滤字段含非法控制字符")
+        escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+        return escaped
+
     async def recall(
         self, pool: Any, user_id: str, question: str, k: int = 3
     ) -> list[str]:
         if not question:
             return []
         vec = self._embedder.embed([question])[0]
-        expr = f'user_id == "{user_id}" and tenant_id == "{self._tenant_id}"'
+        safe_user = self._escape_milvus_str(user_id)
+        safe_tenant = self._escape_milvus_str(self._tenant_id)
+        expr = f'user_id == "{safe_user}" and tenant_id == "{safe_tenant}"'
         res = self._coll.search(
             data=[vec],
             anns_field="embedding",
@@ -146,10 +163,11 @@ class PgVectorMemoryBackend(MemoryBackend):
         # 允许宿主注入自有 embedder（如 app 复用其 RAG 的 embedding，保证 dim/CI 一致）；
         # 未注入则用共享内核 embedder。
         self._embedder = embedder if embedder is not None else get_embedder()
+        self._dim = self._embedder.dim
         self._pool: Any = None
         logger.info(
             "PgVectorMemoryBackend 已配置表 %s (dim=%s, tenant=%s)",
-            collection, self._embedder.dim, tenant_id,
+            collection, self._dim, tenant_id,
         )
 
     async def _ensure_pool(self) -> Any:
