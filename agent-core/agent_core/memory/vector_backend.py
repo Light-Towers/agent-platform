@@ -122,45 +122,69 @@ class MilvusMemoryBackend(MemoryBackend):
 class PgVectorMemoryBackend(MemoryBackend):
     """PostgreSQL + pgvector 语义记忆后端（备选方案）。
 
-    表 schema：memory_embeddings(id, tenant_id, user_id, content, embedding VECTOR(dim))
+    表 schema（无 tenant 隔离时）：
+        memories(id BIGSERIAL, user_id TEXT, content TEXT, embedding VECTOR(dim))
+    启用 tenant 隔离时追加 ``tenant_id TEXT NOT NULL`` 列并参与过滤。
+
     索引：HNSW（vector_cosine_ops）。dim 由 embedding 提供方派生。
+
+    pool 策略：
+      - 调用方传入 asyncpg 池 → 复用；
+      - 否则（pool=None）→ 后端自建 asyncpg 池（需 database_url）。
     """
 
     def __init__(
         self,
-        database_url: str,
-        collection: str = "memory_embeddings",
-        tenant_id: str = "default",
+        database_url: str = "",
+        collection: str = "memories",
+        tenant_id: str | None = None,
+        embedder: Any | None = None,
     ) -> None:
-        import asyncpg
-
-        self._asyncpg = asyncpg
         self._dsn = database_url
         self._table = collection
         self._tenant_id = tenant_id
-        self._embedder = get_embedder()
-        self._dim = self._embedder.dim
+        # 允许宿主注入自有 embedder（如 app 复用其 RAG 的 embedding，保证 dim/CI 一致）；
+        # 未注入则用共享内核 embedder。
+        self._embedder = embedder if embedder is not None else get_embedder()
         self._pool: Any = None
-        logger.info("PgVectorMemoryBackend 已配置表 %s (dim=%s)", collection, self._dim)
+        logger.info(
+            "PgVectorMemoryBackend 已配置表 %s (dim=%s, tenant=%s)",
+            collection, self._embedder.dim, tenant_id,
+        )
 
     async def _ensure_pool(self) -> Any:
         if self._pool is None:
+            if not self._dsn:
+                raise RuntimeError("PgVectorMemoryBackend 需要 database_url（内存模式不可用）")
+            import asyncpg
+
+            self._asyncpg = asyncpg
             self._pool = await self._asyncpg.create_pool(self._dsn)
-            async with self._pool.acquire() as conn:
-                await conn.execute("CREATE EXTENSION IF NOT EXISTS vector")
-                await conn.execute(
-                    f"CREATE TABLE IF NOT EXISTS {self._table} ("
-                    " id BIGSERIAL PRIMARY KEY,"
-                    " tenant_id TEXT NOT NULL,"
-                    " user_id TEXT NOT NULL,"
-                    " content TEXT NOT NULL,"
-                    f" embedding VECTOR({self._dim}))"
-                )
-                await conn.execute(
-                    f"CREATE INDEX IF NOT EXISTS {self._table}_hnsw"
-                    f" ON {self._table} USING hnsw (embedding vector_cosine_ops)"
-                )
         return self._pool
+
+    async def _init_schema(self, conn: Any) -> None:
+        await conn.execute("CREATE EXTENSION IF NOT EXISTS vector")
+        if self._tenant_id is not None:
+            await conn.execute(
+                f"CREATE TABLE IF NOT EXISTS {self._table} ("
+                " id BIGSERIAL PRIMARY KEY,"
+                " tenant_id TEXT NOT NULL,"
+                " user_id TEXT NOT NULL,"
+                " content TEXT NOT NULL,"
+                f" embedding VECTOR({self._dim}))"
+            )
+        else:
+            await conn.execute(
+                f"CREATE TABLE IF NOT EXISTS {self._table} ("
+                " id BIGSERIAL PRIMARY KEY,"
+                " user_id TEXT NOT NULL,"
+                " content TEXT NOT NULL,"
+                f" embedding VECTOR({self._dim}))"
+            )
+        await conn.execute(
+            f"CREATE INDEX IF NOT EXISTS {self._table}_hnsw"
+            f" ON {self._table} USING hnsw (embedding vector_cosine_ops)"
+        )
 
     async def recall(
         self, pool: Any, user_id: str, question: str, k: int = 3
@@ -168,29 +192,72 @@ class PgVectorMemoryBackend(MemoryBackend):
         if not question:
             return []
         vec = self._embedder.embed([question])[0]
-        use_self = pool is None
         cp = pool or await self._ensure_pool()
         try:
             async with cp.acquire() as conn:
-                rows = await conn.fetch(
-                    f"SELECT content FROM {self._table}"
-                    " WHERE tenant_id=$1 AND user_id=$2"
-                    " ORDER BY embedding <=> $3 LIMIT $4",
-                    self._tenant_id, user_id, _to_pg_vector(vec), k,
-                )
+                if self._tenant_id is not None:
+                    rows = await conn.fetch(
+                        f"SELECT content FROM {self._table}"
+                        " WHERE tenant_id=$1 AND user_id=$2"
+                        " ORDER BY embedding <=> $3 LIMIT $4",
+                        self._tenant_id, user_id, _to_pg_vector(vec), k,
+                    )
+                else:
+                    rows = await conn.fetch(
+                        f"SELECT content FROM {self._table}"
+                        " WHERE user_id=$1"
+                        " ORDER BY embedding <=> $2 LIMIT $3",
+                        user_id, _to_pg_vector(vec), k,
+                    )
             return [r["content"] for r in rows]
         finally:
-            if use_self:
+            if pool is None:
                 pass  # 自建池复用，不在此关闭
 
     def remember(self, pool: Any, user_id: str, content: str) -> None:
-        raise RuntimeError(
-            "PgVectorMemoryBackend.remember 为异步后端，请通过 semantic_memory 门面调用（异步写入）"
-        )
+        """同步沉淀记忆（后台线程执行异步写入，不阻塞调用方）。"""
+        import threading
+
+        def _run() -> None:
+            loop = _new_loop()
+            try:
+                loop.run_until_complete(self._aremember(pool, user_id, content))
+            finally:
+                loop.close()
+
+        t = threading.Thread(target=_run, daemon=True)
+        t.start()
+
+    async def _aremember(self, pool: Any, user_id: str, content: str) -> None:
+        vec = self._embedder.embed([content])[0]
+        cp = pool or await self._ensure_pool()
+        async with cp.acquire() as conn:
+            await self._init_schema(conn)
+            if self._tenant_id is not None:
+                await conn.execute(
+                    f"INSERT INTO {self._table} (tenant_id, user_id, content, embedding)"
+                    " VALUES ($1, $2, $3, $4)",
+                    self._tenant_id, user_id, content, _to_pg_vector(vec),
+                )
+            else:
+                await conn.execute(
+                    f"INSERT INTO {self._table} (user_id, content, embedding)"
+                    " VALUES ($1, $2, $3)",
+                    user_id, content, _to_pg_vector(vec),
+                )
 
 
 def _to_pg_vector(vec: list[float]) -> str:
     return "[" + ",".join(str(x) for x in vec) + "]"
+
+
+def _new_loop():
+    import asyncio
+
+    try:
+        return asyncio.get_event_loop()
+    except RuntimeError:
+        return asyncio.new_event_loop()
 
 
 # ==========================================================================
