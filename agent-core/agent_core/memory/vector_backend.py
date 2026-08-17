@@ -186,12 +186,19 @@ class PgVectorMemoryBackend(MemoryBackend):
             f" ON {self._table} USING hnsw (embedding vector_cosine_ops)"
         )
 
+    async def _embed_one(self, text: str) -> list[float]:
+        """优先走 async embed（避免嵌套事件循环死锁），回退到同步 embed。"""
+        emb = self._embedder
+        if hasattr(emb, "aembed"):
+            return (await emb.aembed([text]))[0]
+        return emb.embed([text])[0]
+
     async def recall(
         self, pool: Any, user_id: str, question: str, k: int = 3
     ) -> list[str]:
         if not question:
             return []
-        vec = self._embedder.embed([question])[0]
+        vec = await self._embed_one(question)
         cp = pool or await self._ensure_pool()
         try:
             async with cp.acquire() as conn:
@@ -229,7 +236,7 @@ class PgVectorMemoryBackend(MemoryBackend):
         t.start()
 
     async def _aremember(self, pool: Any, user_id: str, content: str) -> None:
-        vec = self._embedder.embed([content])[0]
+        vec = await self._embed_one(content)
         cp = pool or await self._ensure_pool()
         async with cp.acquire() as conn:
             await self._init_schema(conn)

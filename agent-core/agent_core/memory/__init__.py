@@ -23,6 +23,7 @@ from agent_core.memory.embedder import (
     EmbeddingProvider,
     LocalEmbedder,
     SiliconFlowEmbedder,
+    RemoteEmbedder,
     get_embedder,
 )
 from agent_core.memory.mongo import MongoHistoryStore
@@ -46,6 +47,7 @@ __all__ = [
     "EmbeddingProvider",
     "LocalEmbedder",
     "SiliconFlowEmbedder",
+    "RemoteEmbedder",
     "get_embedder",
     "MongoHistoryStore",
     "MongoCheckpointer",
