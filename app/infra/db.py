@@ -23,9 +23,11 @@ CREATE TABLE IF NOT EXISTS chunks (
     heading TEXT NOT NULL DEFAULT '',
     content TEXT NOT NULL,
     embedding vector({dim}),
+    workspace_id TEXT NOT NULL DEFAULT 'default',
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_chunks_doc ON chunks (doc_id);
+CREATE INDEX IF NOT EXISTS idx_chunks_workspace ON chunks (workspace_id);
 
 CREATE TABLE IF NOT EXISTS memories (
     id BIGSERIAL PRIMARY KEY,
@@ -158,6 +160,18 @@ async def ensure_schema(pool) -> None:
     ddl = SCHEMA_TEMPLATE.format(dim=get_settings().vector_dim)
     async with pool.connection() as conn:
         await conn.execute(ddl)
+    # 存量库迁移：新列 IF NOT EXISTS 不作用于已存在表，需幂等 ALTER（优化 G：workspace 隔离）
+    try:
+        async with pool.connection() as conn:
+            await conn.execute(
+                "ALTER TABLE chunks ADD COLUMN workspace_id TEXT NOT NULL DEFAULT 'default'"
+            )
+            await conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_chunks_workspace ON chunks (workspace_id)"
+            )
+    except Exception:
+        # duplicate_column 等幂等失败忽略；新库由建表语句已含该列
+        pass
 
 
 def get_pool():

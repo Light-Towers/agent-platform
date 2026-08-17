@@ -111,6 +111,20 @@
 - **前置**：先修 `deepagents/api/server.py:165` API_KEY 模式 thread_id 每次重建导致会话断裂的 bug（否则接 PG checkpoint 也救不了多轮对话）。
 - **专项规划**：详见 `docs/plan-e-dual-track-convergence.md` 末尾「F 外壳基础设施化」节（P4.4，可选）。
 
+### 优化 G：引入 `workspace_id` 工作空间隔离（高优先级 / 低-中风险） ✅ 已落地（feat/workspace-isolation）
+
+- **来源**：跨会话记忆架构讨论（对标 codex 的 workspace 锚）。澄清：**RAG 知识库 ≠ 跨会话记忆**，二者此前无统一归属维度、长期记忆仅按 `user_id` 隔离（app 默认 `default` 桶串味）。引入 `workspace_id` 作为统一归属/隔离主键，同时串起 RAG 文档与长期记忆，但语义分离。
+- **决策（A 模式）**：`workspace_id` 由**客户端显式传**（请求字段，默认 `default`），**仅 app 内部隔离**，不写 `shared_schemas`（联邦网关无感）。不做 resume/fork（用户决策：暂不需要）。
+- **三者关系**：RAG 知识库 = 工作空间的「静态硬盘」（用户上传文档）；长期记忆 = 工作空间的「动态经验」（跨会话沉淀 Q/A）；`workspace_id` = 绑定二者的「文件夹」。RAG 本身不跨会话（每次会话重检索），跨会话能力由 `memories` 表 + checkpointer 提供并受 workspace 隔离。
+- **落地改动**：
+  - `app/infra/db.py`：`chunks` 表加 `workspace_id TEXT NOT NULL DEFAULT 'default'` 列 + 索引；`ensure_schema` 对存量库幂等 `ALTER TABLE ... ADD COLUMN`（捕获 duplicate_column）。
+  - `app/rag/store.py`：`add_document`/`retrieve_chunks`/`_vector_ids`/`_bm25_ids` 全链路按 `workspace_id` 过滤（向量路用 `vector_search(where=...)`，BM25 语料加载与缓存签名含 `workspace_id`）。
+  - `app/schemas.py`：`QueryRequest` 加 `workspace_id`（默认 `default`）；`app/api/routes.py` 的 `/import` 接口加 `workspace_id` 表单参并写入。
+  - `app/agent/state.py`：`AgentState` 加 `workspace_id`；`routes.py` 注入初始 state；`graph.py` 的 `route_node/rag_node/synthesize_node` 按 `workspace_id` 调 `recall/remember` 与 `rag_query`。
+  - `app/memory/longterm.py`：门面 `recall/remember` 改为以 `workspace_id` 作为内核隔离过滤键（复用内核 `recall(pool, user_id, ...)` 的 `user_id` 形参位），**内核 `PgVectorMemoryBackend` 零改动**（表结构/其余维度不变）。
+- **护栏**：保持内核零依赖铁律，未触碰 `agent-core` 后端契约；`workspace_id` 隔离在 app 业务层完成，符合 §3 护栏第 1 条。
+- **后续可扩展（本分支未做）**：B 模式（按 `user_id` 推导默认 workspace）、`shared_schemas` 联邦化（deepagents 网关感知 workspace）、resume/fork 指定历史 session。
+
 ## 3. 必须保留、不可替换的深度定制（护栏清单）
 
 以下为项目护城河，任何优化均不得触碰：

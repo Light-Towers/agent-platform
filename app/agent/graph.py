@@ -72,7 +72,7 @@ def build_graph(llm, checkpointer=None, mcp_manager: MCPClientManager | None = N
         decision = await decide_route(llm, question)
         memory_notes: list[str] = []
         if settings.memory_enabled:
-            memory_notes = await recall(get_pool(), state.user_id, question)
+            memory_notes = await recall(get_pool(), state.workspace_id, question)
         return {
             "route": decision.capability,
             "sub_query": decision.sub_query,
@@ -85,7 +85,7 @@ def build_graph(llm, checkpointer=None, mcp_manager: MCPClientManager | None = N
         return {"evidence": await search_web(state.sub_query)}
 
     async def rag_node(state: AgentState) -> dict:
-        return {"evidence": await rag_query(state.sub_query)}
+        return {"evidence": await rag_query(state.sub_query, state.workspace_id)}
 
     async def sql_node(state: AgentState) -> dict:
         return {"evidence": await sql_query(state.sub_query, llm=llm)}
@@ -112,7 +112,7 @@ def build_graph(llm, checkpointer=None, mcp_manager: MCPClientManager | None = N
 
         answer = await _compose(question, evidence, memory_notes)
         if get_settings().memory_enabled:
-            remember(get_pool(), state.user_id, f"Q: {question}\nA: {answer}")
+            remember(get_pool(), state.workspace_id, f"Q: {question}\nA: {answer}")
         return {
             "answer": answer,
             "iterations": iterations,
