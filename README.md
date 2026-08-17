@@ -28,6 +28,19 @@ Agent Platform 是一个基于 **LangGraph Supervisor 模式** 的统一智能�
 
 ---
 
+## 上游内核蓝本：`reliable-agent`
+
+本仓库的 `agent-core` 并非从零发明，而是受开源包 [Light-Towers/reliable-agent](https://github.com/Light-Towers/reliable-agent)（框架无关的 LLM/Agent 生产可靠性原语）启发/改写后的**本项目落地版**。两者组件一一映射、设计铁律一致：
+
+- **组件映射**：tracing / eval.metrics / guardrails / llm_client / memory / tool_registry 在 `reliable-agent` 与 `agent-core` 中均有对应。
+- **设计铁律同源**："框架无关、core 绝不 import langgraph/宿主应用、重依赖全部 extra + lazy import、仅 stdlib 可 import"原则与 `agent-core` 逐字对应（见 `agent-core/README.md`）。
+- **不是 pip 依赖**：`agent-core/pyproject.toml` 的 `dependencies=[]`，全仓库无任何 `reliable-agent` 引用 —— `agent-core` 是**自研实现等价内核**，而非直接 `pip install` 该包。
+- **本地是 superset**：`reliable-agent` 的 memory 仅指对话历史、eval.metrics 仅对给定 ID 列表算指标，**不含 embedding / vector store / 语义记忆**；本地 `agent-core` 额外提供了 `embedder.py` 与 `vector_backend.py`（pgvector 语义记忆），能力更全。
+
+更完整的上游对照与护栏清单见 [`docs/architecture-improvement-plan.md` §0.1](docs/architecture-improvement-plan.md)。
+
+---
+
 ## 特性
 
 ### Phase 1 — 核心能力

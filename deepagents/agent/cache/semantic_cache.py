@@ -32,14 +32,14 @@ _pending_writes: set = set()
 def _get_embedding(text: str) -> np.ndarray | None:
     """获取 query 的 embedding 向量（用于 L2 语义缓存）。
 
-    复用 L1 分类器的 sentence-transformers 模型，但向量空间独立。
+    直接复用 agent-core 统一 embedding 单例（get_embedder），消除
+    对 L1 分类器私有 _embedder 的耦合，向量空间独立且全局一致。
     """
     try:
-        from agent.intent.classifier import _embedder
+        from agent_core.memory.embedder import get_embedder
 
-        if _embedder is None:
-            return None
-        vec = _embedder.encode([text], normalize_embeddings=True)[0]
+        provider = get_embedder()
+        vec = provider.embed([text])[0]
         return np.array(vec, dtype=np.float32)
     except Exception:
         return None
