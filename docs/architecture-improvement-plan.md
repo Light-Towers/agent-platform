@@ -188,7 +188,47 @@
 #### H.6 后续（未纳入本优化）
 
 - H2：真三分存储（Graph + Profile + Episodic vector）独立表/库。
-- 精确回忆机制：按 `thread_id` + checkpointer 回溯历史对话原文（与语义回忆正交，见跨会话记忆讨论）。
+- 精确回忆机制：按 `thread_id` + checkpointer 回溯历史对话原文（与语义回忆正交，见跨会话记忆讨论，已由优化 I 落地）。
+
+### 优化 I：精确回忆机制——thread_id + checkpointer 回溯历史原文（中优先级 / 低风险）
+
+> 状态：已落地（feat/workspace-isolation 分支，独立于 H）
+> 前置：内核 `get_checkpointer` 工厂已产出 `AsyncPostgresSaver`，挂于 `app.state.checkpointer`；
+>       `/query` 已用 `thread_id` 驱动会话状态（优化 G 的 `resolve_thread_id`）。
+
+#### I.0 为什么需要精确回忆（与 H 正交）
+
+跨会话记忆有两路，互为补充：
+
+| 维度 | 优化 H（语义回忆） | 优化 I（精确回忆） |
+|---|---|---|
+| 目标 | 跨会话「大概记得」用户偏好/事实 | 精确定位「某次聊天具体说了什么」 |
+| 载体 | LLM 抽取结构化事实 + pgvector | LangGraph checkpointer 原始消息 |
+| 匹配 | 语义相似度 | 字面原文 / `thread_id` 定位 |
+| 丢失风险 | 抽取可能丢原文细节、PII 剥离 | 无（存原文） |
+| 隔离维度 | `workspace_id`（memories 表） | `thread_id`（checkpointer 表，会话级） |
+
+用户原问"能不能精确的找到之前聊天内容"——H 答不了（它只存提炼事实），只有 I 能答。两路并存才是完整跨会话记忆。
+
+#### I.1 设计决策
+
+- **复用内核 checkpointer**：`AsyncPostgresSaver.alist_messages({"configurable": {"thread_id": ...}})` 原生支持按会话取回全部消息，零新增存储、零内核改动。
+- **精确匹配语义**：`keyword` 过滤走字面子串匹配（非向量语义），保证「找到原话」的确定性。
+- **鉴权一致**：`/history` 复用 `verify_api_key` + `resolve_thread_id`，与 `/query` 同源归属（thread_id 由 session_id + api_key 推导，他人不可越权读）。
+- **降级安全**：无 checkpointer（内存/未初始化）时返回 503，不泄漏空数据误判。
+
+#### I.2 落地改动清单
+
+- `app/memory/recall_exact.py`（新）：`get_thread_history(checkpointer, thread_id, keyword, limit)` 规整 `BaseMessage` → `{index, role, content, id, created_at}`；`search_in_thread` 关键词精确检索。role 归一化（human→user, ai→assistant）。
+- `app/schemas.py`：新增 `HistoryItem` / `HistoryResponse`。
+- `app/api/routes.py`：新增 `GET /history?session_id=&keyword=&limit=`，依赖 `verify_api_key`，从 `app.state.checkpointer` 取数据。
+- 单测 `tests/test_recall_exact.py`：mock checkpointer 的 `alist_messages`，验证规整/关键词过滤/limit/角色归一化。
+
+#### I.3 风险与门禁
+
+- **checkpointer 依赖**：接口依赖 `app.state.checkpointer`；内存模式（无 PG）时 `get_checkpointer` 降级 `InMemorySaver`，仍能按 thread_id 回溯（测试用 mock）。
+- **PII 暴露面**：`/history` 返回原文，鉴权与 `/query` 同强度（api_key + 推导 thread_id），无越权面；如需更严可加 `workspace_id` 绑定校验（留作后续）。
+- **回归总闸**：`pytest tests/ -q` 全绿；新增 `tests/test_recall_exact.py` 覆盖规整/关键词/limit/归一化，不连 PG。
 
 ## 3. 必须保留、不可替换的深度定制（护栏清单）
 
