@@ -30,28 +30,15 @@ _main_agent = None
 async def _create_checkpointer():
     """创建 checkpointer（会话历史持久化）。
 
-    优先级：
+    统一委托 agent-core 的 ``get_checkpointer`` 工厂（与 embedder 的
+    ``get_embedder`` 同一收口模式）：
       1. 配置 ``MONGO_URL`` → ``MongoCheckpointer``（持久化到 MongoDB，重启不丢，
          按 ``tenant_id`` 隔离）。生产推荐。
       2. 否则降级 ``InMemorySaver``（纯内存，重启丢，开发/无 Mongo 环境）。
     """
-    mongo_url = os.getenv("MONGO_URL")
-    if mongo_url:
-        try:
-            from agent_core.memory import MongoCheckpointer
+    from agent_core.memory import get_checkpointer
 
-            return MongoCheckpointer(
-                mongo_url=mongo_url,
-                db_name=os.getenv("MONGO_DB", "deepagents"),
-                collection=os.getenv("MONGO_CHECKPOINT_COLLECTION", "langgraph_checkpoints"),
-                tenant_id=os.getenv("TENANT_ID", "default"),
-            )
-        except Exception as e:  # pragma: no cover - Mongo 不可用时降级
-            logger.warning("MongoCheckpointer 初始化失败，降级 InMemorySaver: %s", e)
-
-    from langgraph.checkpoint.memory import InMemorySaver
-
-    return InMemorySaver()
+    return get_checkpointer()
 
 
 def _build_subagents():
