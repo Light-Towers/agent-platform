@@ -59,6 +59,49 @@ class MockEmbedder:
         return out
 
 
+# ── 模块级网络 / 向量辅助（远程提供方共享，且可在测试中 monkeypatch） ──
+def _http_post_json(url, headers, payload, timeout=60.0, retries=2, backoff=0.5):
+    """POST JSON 并返回解析后的响应（对 429/5xx/网络异常简单重试）。
+
+    失败抛 RuntimeError；4xx 业务错误直接抛出不重试。可在测试中
+    ``monkeypatch.setattr("agent_core.memory.embedder._http_post_json", fake)``。
+    """
+    import json
+    import time
+    import urllib.error
+    import urllib.request
+
+    body = json.dumps(payload).encode("utf-8")
+    last_err: Exception | None = None
+    for attempt in range(retries + 1):
+        req = urllib.request.Request(url, data=body, headers=headers, method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as e:
+            detail = ""
+            try:
+                detail = e.read().decode("utf-8")
+            except Exception:
+                pass
+            last_err = RuntimeError(f"Embedding HTTP {e.code}: {detail[:500]}")
+            if e.code not in (429, 500, 502, 503, 504) or attempt >= retries:
+                break
+            time.sleep(backoff * (attempt + 1))
+        except (urllib.error.URLError, TimeoutError, OSError) as e:
+            last_err = RuntimeError(f"Embedding 网络请求失败: {e}")
+            if attempt >= retries:
+                break
+            time.sleep(backoff * (attempt + 1))
+    raise last_err
+
+
+def _l2_normalize(vector: list[float]) -> list[float]:
+    """L2 归一化；零向量原样返回。"""
+    norm = math.sqrt(sum(float(x) * float(x) for x in vector))
+    return [float(x) / norm for x in vector] if norm > 1e-9 else [0.0] * len(vector)
+
+
 class RemoteEmbedder:
     """通用 OpenAI 兼容 /embeddings 远程提供方（仅依赖标准库 urllib）。
 
@@ -88,46 +131,12 @@ class RemoteEmbedder:
         }
 
     def embed(self, texts: list[str]) -> list[list[float]]:
-        import json
-        import time
-        import urllib.error
-        import urllib.request
-
-        def _post_json(url, headers, payload, timeout=60.0, retries=2, backoff=0.5):
-            body = json.dumps(payload).encode("utf-8")
-            last_err: Exception | None = None
-            for attempt in range(retries + 1):
-                req = urllib.request.Request(url, data=body, headers=headers, method="POST")
-                try:
-                    with urllib.request.urlopen(req, timeout=timeout) as resp:
-                        return json.loads(resp.read().decode("utf-8"))
-                except urllib.error.HTTPError as e:
-                    detail = ""
-                    try:
-                        detail = e.read().decode("utf-8")
-                    except Exception:
-                        pass
-                    last_err = RuntimeError(f"Embedding HTTP {e.code}: {detail[:500]}")
-                    if e.code not in (429, 500, 502, 503, 504) or attempt >= retries:
-                        break
-                    time.sleep(backoff * (attempt + 1))
-                except (urllib.error.URLError, TimeoutError, OSError) as e:
-                    last_err = RuntimeError(f"Embedding 网络请求失败: {e}")
-                    if attempt >= retries:
-                        break
-                    time.sleep(backoff * (attempt + 1))
-            raise last_err
-
-        def _l2(v):
-            norm = math.sqrt(sum(float(x) * float(x) for x in v))
-            return [float(x) / norm for x in v] if norm > 1e-9 else [0.0] * len(v)
-
-        resp = _post_json(self._url, self._headers, {"model": self._model, "input": texts})
+        resp = _http_post_json(self._url, self._headers, {"model": self._model, "input": texts})
         data = resp.get("data")
         if not data:
             raise ValueError(f"Embedding API 返回格式异常（缺 data 字段）: {resp}")
         data = sorted(data, key=lambda d: int(d.get("index", 0)))
-        return [_l2(d["embedding"]) for d in data]
+        return [_l2_normalize(d["embedding"]) for d in data]
 
 
 class LocalEmbedder:
@@ -173,45 +182,10 @@ class SiliconFlowEmbedder:
         self.dim = 1024 if "bge-m3" in model else 512
 
     def embed(self, texts: list[str]) -> list[list[float]]:
-        import json
-        import math
-        import time
-        import urllib.error
-        import urllib.request
-
-        def _post_json(url, headers, payload, timeout=30.0, retries=2, backoff=0.5):
-            body = json.dumps(payload).encode("utf-8")
-            last_err: Exception | None = None
-            for attempt in range(retries + 1):
-                req = urllib.request.Request(url, data=body, headers=headers, method="POST")
-                try:
-                    with urllib.request.urlopen(req, timeout=timeout) as resp:
-                        return json.loads(resp.read().decode("utf-8"))
-                except urllib.error.HTTPError as e:
-                    detail = ""
-                    try:
-                        detail = e.read().decode("utf-8")
-                    except Exception:
-                        pass
-                    last_err = RuntimeError(f"SiliconFlow HTTP {e.code}: {detail[:500]}")
-                    if e.code not in (429, 500, 502, 503, 504) or attempt >= retries:
-                        break
-                    time.sleep(backoff * (attempt + 1))
-                except (urllib.error.URLError, TimeoutError, OSError) as e:
-                    last_err = RuntimeError(f"SiliconFlow 网络请求失败: {e}")
-                    if attempt >= retries:
-                        break
-                    time.sleep(backoff * (attempt + 1))
-            raise last_err
-
-        def _l2(v):
-            norm = math.sqrt(sum(float(x) * float(x) for x in v))
-            return [float(x) / norm for x in v] if norm > 1e-9 else [0.0] * len(v)
-
         results: list[list[float]] = []
         for i in range(0, len(texts), self._batch_size):
             batch = texts[i : i + self._batch_size]
-            resp = _post_json(self._url, self._headers, {"model": self._model, "input": batch})
+            resp = _http_post_json(self._url, self._headers, {"model": self._model, "input": batch})
             data = sorted(resp.get("data") or [], key=lambda it: int(it.get("index", 0)))
             if len(data) != len(batch):
                 raise RuntimeError(
@@ -221,7 +195,7 @@ class SiliconFlowEmbedder:
                 vec = it.get("embedding")
                 if not isinstance(vec, list) or not vec:
                     raise RuntimeError("SiliconFlow embeddings 响应缺少 embedding 字段")
-                results.append(_l2(vec))
+                results.append(_l2_normalize(vec))
         return results
 
 
