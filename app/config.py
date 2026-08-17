@@ -39,6 +39,8 @@ class Settings(BaseLLMSettings):
     cache_enabled: bool = True
     cache_threshold: float = 0.05  # 余弦距离阈值，小于该值视为同义命中
     memory_enabled: bool = True
+    memory_extraction_enabled: bool = False  # 优化 H：LLM 抽取结构化事实（默认关，无 LLM 时退化存原文）
+    memory_forget_threshold: float = 0.1  # 优化 H：低价值记忆惰性淘汰阈值（importance）
     breaker_failure_threshold: int = 3
     breaker_recovery_seconds: float = 30.0
 
