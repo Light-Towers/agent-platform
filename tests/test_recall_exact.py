@@ -7,10 +7,7 @@
 - 无 checkpointer / 异常时安全返回 []
 """
 
-import sys
-from types import SimpleNamespace
 
-import pytest
 
 
 class _FakeMessage:

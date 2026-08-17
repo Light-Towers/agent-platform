@@ -7,7 +7,6 @@
 - remember_fact / consolidate_memories 的写入与惰性淘汰逻辑（经 mock 池）。
 """
 
-import sys
 from types import SimpleNamespace
 
 import pytest
@@ -122,8 +121,9 @@ async def test_extract_memory_facts_none_llm(patch_settings, monkeypatch):
 
 
 async def test_recall_typed_weights_and_ranks(patch_settings, monkeypatch):
+    from datetime import datetime, timedelta, timezone
+
     import app.memory.memory_backend as mb
-    from datetime import datetime, timezone, timedelta
 
     # 准备带类型的假召回（content, memory_type, importance, created_at）
     now = datetime.now(timezone.utc)
@@ -256,6 +256,58 @@ async def test_recall_falls_back_to_core_when_disabled(patch_settings, monkeypat
     res = await l.recall(None, "ws-x", "问题")
     assert res == ["历史记忆"]
     assert called["recall"][0] == "ws-x"
+
+
+async def test_recall_forwards_to_recall_typed_when_enabled(patch_settings, monkeypatch):
+    # 优化 H 类型增强路径：enabled 且 pool 非空时，门面必须转发到 _mb.recall_typed
+    # （回归：曾误写裸 recall_typed 导致 NameError）
+    import app.memory.longterm as l
+
+    patch_settings.memory_extraction_enabled = True
+    # longterm 用 `from app.config import get_settings` 绑定副本，需直接 patch 模块内引用
+    monkeypatch.setattr("app.memory.longterm.get_settings", lambda: patch_settings)
+    spy = {"called": None}
+
+    async def _fake_recall_typed(pool, ws, q, k=3):
+        spy["called"] = (ws, q, k)
+        return ["typed-mem"]
+
+    monkeypatch.setattr("app.memory.memory_backend.recall_typed", _fake_recall_typed)
+
+    class _Pool:
+        pass
+
+    res = await l.recall(_Pool(), "ws-typed", "q", k=2)
+    assert res == ["typed-mem"]
+    assert spy["called"] == ("ws-typed", "q", 2)
+
+
+async def test_remember_forwards_to_remember_fact_when_enabled(patch_settings, monkeypatch):
+    # 优化 H：提供 facts 时门面必须逐条转发到 _mb.remember_fact
+    # （回归：曾误写裸 remember_fact 导致 NameError）
+    import app.memory.longterm as l
+
+    patch_settings.memory_extraction_enabled = True
+    monkeypatch.setattr("app.memory.longterm.get_settings", lambda: patch_settings)
+    spy = {"facts": []}
+
+    async def _fake_remember_fact(pool, ws, fact, mtype, importance):
+        spy["facts"].append((ws, fact, mtype, importance))
+
+    monkeypatch.setattr("app.memory.memory_backend.remember_fact", _fake_remember_fact)
+
+    class _Pool:
+        pass
+
+    facts = [
+        {"type": "semantic", "importance": 0.8, "fact": "用户是财务"},
+        {"type": "episodic", "importance": 0.5, "fact": "上周做了报表"},
+    ]
+    await l.remember(_Pool(), "ws-typed", "原文不存", facts=facts)
+    assert spy["facts"] == [
+        ("ws-typed", "用户是财务", "semantic", 0.8),
+        ("ws-typed", "上周做了报表", "episodic", 0.5),
+    ]
 
 
 def _async(value):

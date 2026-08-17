@@ -8,8 +8,9 @@
   - 内核 MemoryBackend 契约可被运行时检查（runtime_checkable Protocol）。
 """
 
-from app.memory.memory_backend import get_default_backend
 from agent_core.memory.backend import MemoryBackend
+
+from app.memory.memory_backend import get_default_backend
 
 
 def test_memory_backend_module_no_local_impl():

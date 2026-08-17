@@ -14,8 +14,9 @@ routes.py 直接 import，调用方零改动。
 
 import os
 
-from app.config import get_settings
 from agent_core.memory.embedder import get_embedder
+
+from app.config import get_settings
 
 
 def _sync_env() -> None:

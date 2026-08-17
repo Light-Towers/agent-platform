@@ -11,8 +11,8 @@
 import pytest
 
 from app.config import get_settings
-from app.rag import store as rag_store
 from app.memory import memory_backend as mb
+from app.rag import store as rag_store
 
 
 # ---------------------------------------------------------------------------
