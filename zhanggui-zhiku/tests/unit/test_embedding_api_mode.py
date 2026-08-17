@@ -16,6 +16,7 @@ import math
 
 import pytest
 
+from agent_core.memory import embedder as core_embedder
 from app.conf.embedding_config import embedding_config
 from app.lm import embedding_utils
 from app.lm.embedding_utils import generate_embeddings
@@ -48,7 +49,7 @@ def test_api_generate_embeddings_structure(monkeypatch):
         data.reverse()
         return {"object": "list", "data": data}
 
-    monkeypatch.setattr("app.lm.siliconflow_client._post_json", fake_post_json)
+    monkeypatch.setattr(core_embedder, "_http_post_json", fake_post_json)
 
     texts = ["苹果手机", "商品：苹果，介绍：支持5G网络"]
     res = generate_embeddings(texts)
@@ -92,7 +93,7 @@ def test_api_dense_order_matches_input(monkeypatch):
         data.reverse()  # 乱序返回
         return {"object": "list", "data": data}
 
-    monkeypatch.setattr("app.lm.siliconflow_client._post_json", fake_post_json)
+    monkeypatch.setattr(core_embedder, "_http_post_json", fake_post_json)
 
     res = generate_embeddings(["第一段", "第二段", "第三段"])
     # 每条向量 L2 归一化
@@ -122,7 +123,7 @@ def test_api_mode_missing_response_field_raises(monkeypatch):
     def fake_post_json(url, headers, payload, **kwargs):
         return {"object": "list", "data": [{"object": "embedding", "index": 0}]}  # 缺 embedding 字段
 
-    monkeypatch.setattr("app.lm.siliconflow_client._post_json", fake_post_json)
+    monkeypatch.setattr(core_embedder, "_http_post_json", fake_post_json)
 
     with pytest.raises(RuntimeError, match="embedding"):
         generate_embeddings(["测试"])
@@ -135,7 +136,7 @@ def test_api_mode_wrong_count_raises(monkeypatch):
         # 返回条数少于请求
         return {"object": "list", "data": [{"object": "embedding", "index": 0, "embedding": [1.0, 0.0]}]}
 
-    monkeypatch.setattr("app.lm.siliconflow_client._post_json", fake_post_json)
+    monkeypatch.setattr(core_embedder, "_http_post_json", fake_post_json)
 
     with pytest.raises(RuntimeError, match="数量不匹配"):
         generate_embeddings(["测试1", "测试2"])
