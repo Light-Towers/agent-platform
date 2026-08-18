@@ -3,7 +3,6 @@ import os
 import re
 import secrets
 import shutil
-import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -36,6 +35,8 @@ from api.monitor import manager
 
 API_KEY = os.getenv("API_KEY", "")
 ZHIKU_API_URL = os.getenv("ZHIKU_API_URL", "")
+
+from api.auth import resolve_thread_id
 
 _HAS_SECURITY_GUARDS = False
 try:
@@ -135,6 +136,14 @@ else:
 _concurrency_semaphore = asyncio.Semaphore(int(os.getenv("MAX_CONCURRENT_TASKS", "10")))
 
 
+def _extract_api_key(request: Request) -> str | None:
+    """从请求头提取 API_KEY 原文（与 _require_api_key 校验逻辑一致）。"""
+    auth = request.headers.get("Authorization", "")
+    if auth.lower().startswith("bearer "):
+        return auth[len("Bearer ") :]
+    return request.headers.get("X-API-Key") or None
+
+
 def _check_api_key(key: str | None) -> bool:
     # 未配置 API_KEY 且未显式禁用认证时，fail-closed：拒绝所有请求（含 WebSocket）
     if not API_KEY:
@@ -160,13 +169,10 @@ from agent.main_agent import run_deep_agent
 
 @app.post("/api/task")
 async def run_task(request: TaskRequest):
-    with start_span("api.task", attrs={"thread_id": request.thread_id or "auto"}):
-        # 安全：当 API_KEY 启用时，忽略客户端传入的 thread_id，防止会话劫持
-        if API_KEY:
-            thread_id = str(uuid.uuid4())
-        else:
-            thread_id = request.thread_id or str(uuid.uuid4())
-
+    # 安全：API_KEY 启用时忽略客户端 thread_id，按密钥派生稳定会话（防劫持 + 跨请求续接）
+    api_key = _extract_api_key(request)
+    thread_id = resolve_thread_id(request.thread_id, api_key)
+    with start_span("api.task", attrs={"thread_id": thread_id}):
         async def _run():
             async with _concurrency_semaphore:
                 await run_deep_agent(request.query, thread_id)
@@ -176,9 +182,14 @@ async def run_task(request: TaskRequest):
 
 
 @app.post("/api/upload")
-async def upload_files(files: list[UploadFile] = File(...), thread_id: str = Form(...)):
-    # 安全：当 API_KEY 启用时，忽略客户端传入的 thread_id，防止会话劫持
-    safe_thread_id = str(uuid.uuid4()) if API_KEY else thread_id
+async def upload_files(
+    files: list[UploadFile] = File(...),
+    thread_id: str = Form(None),
+    request: Request = None,
+):
+    # 安全：API_KEY 启用时忽略客户端 thread_id，按密钥派生，保证上传文件落到与对话同一会话目录
+    api_key = _extract_api_key(request) if request else None
+    safe_thread_id = resolve_thread_id(thread_id, api_key)
     target_dir = updated_dir / f"session_{_sanitize_filename(safe_thread_id)}"
     target_dir.mkdir(parents=True, exist_ok=True)
 
@@ -245,7 +256,9 @@ async def websocket_endpoint(
     if not _check_api_key(api_key):
         await websocket.close(code=4001, reason="Invalid API key")
         return
-    await manager.connect(websocket, thread_id)
+    # 认证启用时忽略 URL 中的 thread_id（不可信），按密钥派生，使 WS 桥接到与 /api/task 同一会话
+    ws_thread_id = resolve_thread_id(thread_id, api_key)
+    await manager.connect(websocket, ws_thread_id)
     try:
         while True:
             data = await websocket.receive_text()
@@ -254,9 +267,9 @@ async def websocket_endpoint(
                 "message": f"服务端已收到: {data}"
             })
     except WebSocketDisconnect:
-        manager.disconnect(websocket, thread_id)
+        manager.disconnect(websocket, ws_thread_id)
     except Exception:
-        manager.disconnect(websocket, thread_id)
+        manager.disconnect(websocket, ws_thread_id)
 
 
 if __name__ == "__main__":
