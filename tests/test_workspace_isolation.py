@@ -64,6 +64,10 @@ class _FakeConnWriter:
         self._db = db
         self._log = log
 
+    def cursor(self):
+        # store.add_document 现用 conn.cursor().executemany(...)，mock 复用本对象的 executemany
+        return self
+
     async def execute(self, sql, params=None):
         sql = sql.strip()
         p = params or ()

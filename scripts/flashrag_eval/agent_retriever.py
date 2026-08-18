@@ -9,7 +9,7 @@ FlashRAG 约定：
 
 import asyncio
 import threading
-from typing import List, Optional
+from typing import List
 
 from flashrag.retriever.retriever import BaseTextRetriever
 

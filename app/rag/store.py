@@ -64,7 +64,8 @@ async def add_document(pool, source: str, chunks: list[Chunk], workspace_id: str
         for c, vec in zip(chunks, vectors)
     ]
     async with pool.connection() as conn:
-        await conn.executemany(
+        cur = conn.cursor()
+        await cur.executemany(
             "INSERT INTO chunks (doc_id, source, heading, content, embedding, workspace_id) "
             "VALUES (%s, %s, %s, %s, %s, %s)",
             params,
