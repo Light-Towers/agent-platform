@@ -240,7 +240,7 @@ async def vector_search(
             raise ValueError(f"vector_search: 非法列名 {cols!r}（仅允许 [a-z0-9_]，逗号分隔）")
     sql = (
         f"SELECT {cols} FROM {table} WHERE {where} "
-        f"ORDER BY embedding <=> %s LIMIT %s"
+        f"ORDER BY embedding <=> %s::vector LIMIT %s"
     )
     params = (*where_params, embedding, k)
     async with pool.connection() as conn:

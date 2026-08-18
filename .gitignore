@@ -98,3 +98,6 @@ data/*.csv
 Resume/versions/*.docx
 # === 课程快照（不纳入版本控制） ===
 courses/
+# === FlashRAG 评测：实验输出产物与日志（核心脚本 agent_retriever.py/run_eval.py 入库，out/ 与 *.txt 日志不入库） ===
+scripts/flashrag_eval/out/
+scripts/flashrag_eval/*.txt

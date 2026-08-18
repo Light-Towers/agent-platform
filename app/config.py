@@ -51,6 +51,12 @@ class Settings(BaseLLMSettings):
 
     # RAG
     rag_top_k: int = 4
+    # Rerank：RRF 融合后是否用硅基流动 bge-reranker-v2-m3 重排 top-K
+    rerank_enabled: bool = False
+    rerank_top_n: int = 8  # 融合后送入 rerank 的候选数（>= rag_top_k）
+    rerank_api_key: str = ""
+    rerank_base_url: str = "https://api.siliconflow.cn/v1"
+    rerank_model: str = "BAAI/bge-reranker-v2-m3"
 
     # 图控制
     max_iterations: int = 2

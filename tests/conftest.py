@@ -25,6 +25,13 @@ def clean_env(monkeypatch):
 
     for var in _CLEARED_VARS:
         monkeypatch.delenv(var, raising=False)
+    # 强制内存模式：pydantic-settings 中环境变量优先级高于 .env，
+    # 故显式置空 DATABASE_URL 可覆盖 .env 里的 postgres 配置，
+    # 保证 smoke 测试在「无外部依赖」的内存模式下运行。
+    monkeypatch.setenv("DATABASE_URL", "")
+    # 同理：.env 里的 LLM_API_KEY 非空会让 llm_enabled=True，
+    # 置空后 /health 才返回 llm=False，匹配内存模式冒烟语义。
+    monkeypatch.setenv("LLM_API_KEY", "")
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()

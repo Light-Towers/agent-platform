@@ -33,6 +33,14 @@ eval-llm-required:
 eval-llm-memory:
 	uv run python eval/memory_reuse_llm.py
 
+# 检索回归评测：用 FlashRAG 的 retrieval_recall@k 对照「关 rerank」vs「开 rerank」。
+# 需 pgvector 容器（见 docs/opencode-llm-setup.md §1.1）与真实 embedding/rerank 可达。
+# 两次结果差值 Δ 即 rerank 带来的准确率变化；基线见文档 §8。
+eval-rag:
+	cd scripts/flashrag_eval && \
+	RERANK_ENABLED=false uv run python run_eval.py && \
+	RERANK_ENABLED=true  uv run python run_eval.py
+
 # CI 串联：lint + 单测 + 评测门禁；任一失败即中断。
 ci: lint test eval
 

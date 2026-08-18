@@ -45,8 +45,8 @@ async def cache_lookup(pool, embedding: list[float], threshold: float) -> str | 
         _stats.record("miss")
         return None
     sql = (
-        "SELECT answer, embedding <=> %s AS distance FROM semantic_cache "
-        "ORDER BY embedding <=> %s LIMIT 1"
+        "SELECT answer, embedding <=> %s::vector AS distance FROM semantic_cache "
+        "ORDER BY embedding <=> %s::vector LIMIT 1"
     )
     try:
         async with pool.connection() as conn:
