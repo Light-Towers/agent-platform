@@ -201,6 +201,18 @@ async def get_main_agent(checkpointer=None):
             "领域知识时，主动利用长期记忆以保持连续性与一致性。"
         )
 
+        # P3.3：子 Agent 失败处理策略（主管如何应对委派降级/不可用）
+        _system_prompt = _system_prompt + (
+            "\n\n# 子 Agent 委派失败处理策略\n"
+            "当子服务（数据分析 / 知识库 / 客服）探活不健康、触发熔断或远程调用失败时，"
+            "平台会自动降级：要么路由到本地兜底子 Agent，要么返回带 `degraded: true` 的降级回答。"
+            "此时你应注意：\n"
+            "1. 若子 Agent 返回内容含 `degraded` 标记，应如实告知用户该部分结果来自降级路径，"
+            "可能不完整或未经远程服务校验，请用户稍后重试或补充背景。\n"
+            "2. 不要对降级结果过度承诺；能基于本地/通用知识直接回答的，优先直接作答并标注不确定性。\n"
+            "3. 仅在确有必要时才依赖子 Agent 的硬性数据；无法确认时主动说明限制，避免编造。"
+        )
+
         _cp = checkpointer if checkpointer is not None else await _create_checkpointer()
         _main_checkpointer = _cp
         _store = await _create_store()

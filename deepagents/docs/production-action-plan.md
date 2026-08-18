@@ -388,7 +388,7 @@ _main_agent = create_deep_agent(
 
 ---
 
-## P3：子 Agent 失败处理（高优先级）
+## P3：子 Agent 失败处理（已完成 ✓，2026-08-18，高优先级）
 
 ### 3.1 接入健康检查到路由（委派时过滤）
 
@@ -405,54 +405,43 @@ def _wrap_with_health(key, subagent):
 ```
 
 配套后台探活回路（纳入 lifespan）：复用 `zhiku_tools.py` 探活模式，周期 ping 各子服务 `/health`，驱动 `mark_unhealthy`/`mark_healthy`。
+**状态**：✓ 探活回路已在 P1 阶段落地（`agent/health_check.py` + `api/server.py` lifespan 启动 `start_health_check()`，仅 `is_remote_mode()` 时启用，周期 30s 探活，失败超阈值调 `mark_unhealthy(key)`）。
 
 验收口径：子服务宕机 → 30s 内被探活标记；**下一次委派**即走本地 fallback（而非路由表实时重建）。
 
 ### 3.2 接入熔断器到子服务调用
 
-**文件**：`agent/async_subagents.py`
-**方案**：包裹 AsyncSubAgent 调用
+**文件**：`agent/async_subagents.py`（新增 `DelegatingSubAgent` 包装层）、`agent/circuit_breaker.py`（新增零依赖 per-agent 熔断器）
+**方案**：包裹 AsyncSubAgent 委派调用，委派前检查 `config.healthy` 与熔断状态，失败计入熔断，OPEN 态跳过远程并降级。
 
 ```python
-from gateway.circuit_breaker import get_circuit_breaker
+# agent/circuit_breaker.py：per-agent 状态机 CLOSED/OPEN/HALF_OPEN
+# 失败率 50%（≥5 次样本 / 20 次窗口）触发 OPEN；冷却 30s 后 HALF_OPEN 探测恢复
+from agent.circuit_breaker import get_breaker_sync, CircuitBreaker
 
-async def _call_subagent_with_breaker(key, fn, *args, **kwargs):
-    breaker = get_circuit_breaker(key)
-    return await breaker.call(
-        fn, *args,
-        fallback=lambda *a, **kw: f"子服务 {key} 熔断中，请稍后重试",
-        **kwargs,
-    )
+class DelegatingSubAgent:
+    async def ainvoke(self, input):
+        if not self._svc.healthy:
+            return await self._fallback(input, reason="unhealthy")
+        if not await self._breaker.allow():
+            return await self._fallback(input, reason="circuit_open")
+        # 指数退避重试（SUBAGENT_RETRIES=2）
+        ...
+        await self._breaker.record_failure()
+        return await self._fallback(input, reason="remote_failed")
 ```
 
 ### 3.3 主管 prompt 补充失败处理策略
 
-**文件**：`prompt/prompts.yml` 的 `main_agent.system_prompt` 追加：
-
-```yaml
-## 子 Agent 失败处理策略
-- 若子 Agent 返回"超时"或"不可用"：换另一个子 Agent 重试一次
-- 若子 Agent 返回"护栏拒绝"：告知用户输入有风险，请求修改
-- 若所有子 Agent 均失败：如实告知用户当前服务状态，建议稍后重试
-- 禁止编造数据替代失败的工具结果
-- 每次委派失败时，在回复中标注"⚠️ 部分服务异常"
-```
+**文件**：`agent/main_agent.py` 的 `_system_prompt` 拼接处（已追加"子 Agent 委派失败处理策略"段）
+**状态**：✓ 已落地。追加内容要求主管在子 Agent 返回 `degraded` 标记时如实告知用户、不编造、对降级结果标注不确定性。
 
 ### 3.4 子 Agent 层重试
 
-**方案**：在 task 工具外包裹一层重试
+**方案**：在 `DelegatingSubAgent.ainvoke` 内包裹指数退避重试（`SUBAGENT_RETRIES=2`，`SUBAGENT_RETRY_BASE=0.5s`），用尽后降级；无需独立 `subagent_retry.py`。
+**状态**：✓ 已落地（与 3.2 合并实现于 `DelegatingSubAgent`）。
 
-```python
-# agent/subagent_retry.py
-async def call_subagent_with_retry(agent, query, max_retries=2):
-    for attempt in range(max_retries + 1):
-        result = await agent.ainvoke(query)
-        if not _is_error_result(result):
-            return result
-        if attempt < max_retries:
-            logger.warning("子 Agent 失败(第%s次)，重试", attempt + 1)
-    return result  # 返回最后一次结果
-```
+**本地 fallback 桥接**：`SubserviceConfig.local_agent` 在 `get_all_subservices()` 首次调用时 **lazy 装配**（仅 `AGENT_MODE=remote`），指向本地 `agent.subagents.*` dict；远程不健康/熔断/失败时用 `create_deep_agent(model, ...)` 懒编译并调用，未配置则返回结构化降级响应（`degraded: True`）。
 
 ---
 
