@@ -123,7 +123,13 @@ async def test_extract_memory_facts_none_llm(patch_settings, monkeypatch):
 async def test_recall_typed_weights_and_ranks(patch_settings, monkeypatch):
     from datetime import datetime, timedelta, timezone
 
+    import agent_core.memory.typed as typed_core
     import app.memory.memory_backend as mb
+
+    # 开启内核 typed 开关，确保走加权融合（非平权退化）
+    monkeypatch.setenv("SEMANTIC_MEMORY_TYPED", "true")
+    # 重新绑定开关函数返回值（setenv 后对已缓存的 os.getenv 无影响，直接 patch）
+    monkeypatch.setattr(typed_core, "semantic_memory_typed_enabled", lambda: True)
 
     # 准备带类型的假召回（content, memory_type, importance, created_at）
     now = datetime.now(timezone.utc)
@@ -132,10 +138,10 @@ async def test_recall_typed_weights_and_ranks(patch_settings, monkeypatch):
         ("semantic 偏好", "semantic", 0.9, now - timedelta(days=1)),
         ("procedural 方法", "procedural", 0.9, now - timedelta(days=1)),
     ]
-    # mock 其依赖的 vector_search_memories（在 memory_backend 模块内调用）
+    # 内核 recall_typed 经宿主池调 _vector_search_memories；mock 它返回带类型行
     monkeypatch.setattr(
-        mb, "vector_search_memories",
-        lambda pool, ws, emb, k: _async(rows),
+        typed_core, "_vector_search_memories",
+        lambda pool, user_id, embedding, k: _async(rows),
     )
     monkeypatch.setattr(mb, "embed_memory", lambda t: [0.0] * 512)
 

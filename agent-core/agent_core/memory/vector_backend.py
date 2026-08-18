@@ -268,7 +268,10 @@ class PgVectorMemoryBackend(MemoryBackend):
                 " tenant_id TEXT NOT NULL,"
                 " user_id TEXT NOT NULL,"
                 " content TEXT NOT NULL,"
-                f" embedding VECTOR({self._dim}))"
+                f" embedding VECTOR({self._dim}),"
+                " memory_type TEXT NOT NULL DEFAULT 'semantic',"
+                " importance FLOAT NOT NULL DEFAULT 0.5,"
+                " created_at TIMESTAMPTZ NOT NULL DEFAULT now())"
             )
         else:
             await conn.execute(
@@ -276,12 +279,27 @@ class PgVectorMemoryBackend(MemoryBackend):
                 " id BIGSERIAL PRIMARY KEY,"
                 " user_id TEXT NOT NULL,"
                 " content TEXT NOT NULL,"
-                f" embedding VECTOR({self._dim}))"
+                f" embedding VECTOR({self._dim}),"
+                " memory_type TEXT NOT NULL DEFAULT 'semantic',"
+                " importance FLOAT NOT NULL DEFAULT 0.5,"
+                " created_at TIMESTAMPTZ NOT NULL DEFAULT now())"
             )
         await conn.execute(
             f"CREATE INDEX IF NOT EXISTS {self._table}_hnsw"
             f" ON {self._table} USING hnsw (embedding vector_cosine_ops)"
         )
+        # ADR-0004 阶段 1：存量库迁移——新列 IF NOT EXISTS 不作用于已存在表，
+        # 需要幂等 ALTER（duplicate_column 失败可忽略）。
+        for _ddl in (
+            f"ALTER TABLE {self._table} ADD COLUMN memory_type TEXT NOT NULL DEFAULT 'semantic'",
+            f"ALTER TABLE {self._table} ADD COLUMN importance FLOAT NOT NULL DEFAULT 0.5",
+            f"ALTER TABLE {self._table} ADD COLUMN created_at TIMESTAMPTZ NOT NULL DEFAULT now()",
+        ):
+            try:
+                await conn.execute(_ddl)
+            except Exception:
+                # duplicate_column 等幂等失败忽略
+                pass
 
     async def _embed_one(self, text: str) -> list[float]:
         """优先走 async embed（避免嵌套事件循环死锁），回退到同步 embed。"""
