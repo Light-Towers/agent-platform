@@ -10,6 +10,7 @@
 import logging
 from typing import Any
 
+from agent_core.tokenizer import estimate_tokens as _count_tokens
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 logger = logging.getLogger(__name__)
@@ -24,16 +25,13 @@ _SUMMARY_PROMPT = (
 )
 
 
-def estimate_tokens(messages: list[Any]) -> int:
-    """粗略估算 token 数：中文 ~1.5 字/token，英文 ~0.75 词/token。
+def estimate_tokens(messages: list[Any], model: str | None = None) -> int:
+    """统计消息列表的 token 数。
 
-    取字符数 / 1.5 作为上界估计，简单但够用（精确可用 tiktoken，但避免额外依赖）。
+    优先走 ``agent_core.tokenizer``（OpenAI 系精确计数，其他启发式），
+    传入 ``model`` 可启用精确计数；不传则启发式估算。
     """
-    total_chars = 0
-    for msg in messages:
-        content = _msg_content(msg)
-        total_chars += len(content)
-    return int(total_chars / 1.5)
+    return _count_tokens(messages, model)
 
 
 def _msg_content(msg: Any) -> str:
@@ -46,14 +44,18 @@ def _msg_content(msg: Any) -> str:
     return str(msg)
 
 
-def should_compact(messages: list[Any], threshold_tokens: int) -> bool:
+def should_compact(
+    messages: list[Any], threshold_tokens: int, model: str | None = None
+) -> bool:
     """消息 token 估算超过阈值且可压缩消息数 > _KEEP_RECENT 时返回 True。"""
     if len(messages) <= _KEEP_RECENT:
         return False
-    return estimate_tokens(messages) > threshold_tokens
+    return estimate_tokens(messages, model) > threshold_tokens
 
 
-async def compact_messages(messages: list[Any], llm) -> tuple[list[Any], str | None]:
+async def compact_messages(
+    messages: list[Any], llm, model: str | None = None
+) -> tuple[list[Any], str | None]:
     """将旧消息摘要为一条 SystemMessage，保留最近 _KEEP_RECENT 条。
 
     返回 (压缩后的消息列表, 错误信息)。
@@ -84,8 +86,8 @@ async def compact_messages(messages: list[Any], llm) -> tuple[list[Any], str | N
         "上下文压缩完成: %d 条消息 → %d 条, token 估算 %d → %d",
         len(messages),
         len(compacted),
-        estimate_tokens(messages),
-        estimate_tokens(compacted),
+        estimate_tokens(messages, model),
+        estimate_tokens(compacted, model),
     )
     return compacted, None
 

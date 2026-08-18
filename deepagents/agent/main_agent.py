@@ -1,3 +1,4 @@
+import asyncio
 import shutil
 from pathlib import Path
 
@@ -25,6 +26,12 @@ from tools.pdf_tools import convert_md_to_pdf
 from tools.upload_file_read_tool import read_file_content
 
 _main_agent = None
+_main_agent_lock = asyncio.Lock()  # P1.1/1.4：保护 _main_agent 构造，防并发首请求重复构造
+_main_checkpointer = None  # 缓存 get_main_agent 构造出的 checkpointer，供 checkpoint_cleaner 复用
+
+# P1.6：per-thread_id 互斥锁 + 引用计数清理（避免锁对象生命周期 Bug）
+_thread_locks: dict[str, asyncio.Lock] = {}
+_thread_refcount: dict[str, int] = {}
 
 
 # 阶段2 收尾：main_agent 推理流程接入类型化记忆（ADR-0004）。
@@ -120,10 +127,21 @@ def _build_middleware():
     return middleware if middleware else None
 
 
-async def get_main_agent():
+async def get_main_agent(checkpointer=None):
+    """返回单例 main_agent。
+
+    P1.1/1.4：用 ``_main_agent_lock`` 保护构造，消除并发首请求的重复构造竞态。
+    ``checkpointer`` 由 lifespan 预初始化阶段注入（规划 1.1/1.2）；为 None 时
+    回退到 ``_create_checkpointer()``（Mongo/InMemory），保证本地无 PG 测试态可跑。
+    """
     global _main_agent
-    if _main_agent is None:
-        logger.info("初始化 main_agent（懒加载）")
+    if _main_agent is not None:
+        return _main_agent
+    async with _main_agent_lock:
+        # 双重检查：持锁后可能已被其他协程构造完成
+        if _main_agent is not None:
+            return _main_agent
+        logger.info("初始化 main_agent（lifespan 预初始化 或 首次懒加载）")
 
         _system_prompt = main_agent_content['system_prompt']
         if os.getenv("PLANNER_ENABLED", "false").lower() == "true" and planner_content:
@@ -131,15 +149,42 @@ async def get_main_agent():
             if _addition:
                 _system_prompt = _system_prompt + "\n\n" + _addition
 
+        _cp = checkpointer if checkpointer is not None else await _create_checkpointer()
+        _main_checkpointer = _cp
         _main_agent = create_deep_agent(
             model=model,
             system_prompt=_system_prompt,
             tools=[generate_markdown, convert_md_to_pdf, read_file_content],
-            checkpointer=await _create_checkpointer(),
+            checkpointer=_cp,
             subagents=_build_subagents(),
             middleware=_build_middleware(),
         )
     return _main_agent
+
+
+def get_main_checkpointer():
+    """返回当前 main_agent 使用的 checkpointer（供 P1.3 定时清理复用）。"""
+    return _main_checkpointer
+
+
+# P1.6：per-thread_id 互斥锁 + 引用计数清理
+async def _get_thread_lock(thread_id: str) -> asyncio.Lock:
+    """获取（或新建）指定 thread_id 的串行锁，并递增引用计数。"""
+    lock = _thread_locks.get(thread_id)
+    if lock is None:
+        lock = asyncio.Lock()
+        _thread_locks[thread_id] = lock
+        _thread_refcount[thread_id] = 0
+    _thread_refcount[thread_id] += 1
+    return lock
+
+
+def _release_thread_lock(thread_id: str) -> None:
+    """引用计数减一，归零时清理锁，避免锁对象无限堆积。"""
+    _thread_refcount[thread_id] = _thread_refcount.get(thread_id, 1) - 1
+    if _thread_refcount[thread_id] <= 0:
+        _thread_locks.pop(thread_id, None)
+        _thread_refcount.pop(thread_id, None)
 
 
 project_root_path = Path(__file__).parents[1].resolve()
@@ -261,51 +306,55 @@ async def run_deep_agent(task_query, workspace_id):
         # 阶段2 收尾：召回类型化记忆并注入本轮 user 上下文（无池/关闭则空串）
         memory_ctx = await recall_typed_context(workspace_id, task_query)
 
-        main_agent = await get_main_agent()
+        # P1.6：同一 workspace_id（thread_id）串行执行，避免并发撕裂 checkpointer 状态。
+        # 引用计数锁在 run 结束时释放，归零即清理，避免锁对象堆积。
+        lock = await _get_thread_lock(workspace_id)
         try:
-            async for chunk in main_agent.astream(
-                {"messages": [{"role": "user", "content": task_query + path_instruction + memory_ctx}]},
-                config=config,
-            ):
-                for node_name, state in chunk.items():
-                    if not state or "messages" not in state:
-                        continue
-                    messages = state["messages"]
-                    if messages and isinstance(messages, list):
-                        last_msg = messages[-1]
-                        if node_name == 'model':
-                            if last_msg.tool_calls:
-                                for tool_call in last_msg.tool_calls:
-                                    if tool_call['name'] == 'task':
-                                        subagent_type = tool_call['args']['subagent_type']
-                                        logger.info("委派子智能体: %s", subagent_type)
-                                        monitor.report_assistant(
-                                            subagent_type,
-                                            {'description': tool_call['args']['description']}
-                                        )
-                                        if is_remote_mode():
-                                            monitor._emit('subservice_route', {
-                                                'subagent': subagent_type,
-                                                'mode': 'remote',
-                                                'description': tool_call['args']['description'],
-                                            })
-                                        else:
-                                            monitor._emit('subservice_route', {
-                                                'subagent': subagent_type,
-                                                'mode': 'local',
-                                                'description': tool_call['args']['description'],
-                                            })
-                            elif last_msg.content:
-                                _final_answer = last_msg.content
-                                if os.getenv("GUARD_ENABLED", "false").lower() == "true":
-                                    try:
-                                        from gateway.output_guard import guard_output
-                                        _og = guard_output(_final_answer)
-                                        if not _og["safe"]:
-                                            logger.warning("输出 guardrail 拦截: pii=%s", _og["pii_leaked"])
-                                    except Exception:
-                                        pass
-                                monitor.report_task_result(last_msg.content)
+            async with lock:
+                main_agent = await get_main_agent()
+                async for chunk in main_agent.astream(
+                    {"messages": [{"role": "user", "content": task_query + path_instruction + memory_ctx}]},
+                    config=config,
+                ):
+                    for node_name, state in chunk.items():
+                        if not state or "messages" not in state:
+                            continue
+                        messages = state["messages"]
+                        if messages and isinstance(messages, list):
+                            last_msg = messages[-1]
+                            if node_name == 'model':
+                                if last_msg.tool_calls:
+                                    for tool_call in last_msg.tool_calls:
+                                        if tool_call['name'] == 'task':
+                                            subagent_type = tool_call['args']['subagent_type']
+                                            logger.info("委派子智能体: %s", subagent_type)
+                                            monitor.report_assistant(
+                                                subagent_type,
+                                                {'description': tool_call['args']['description']}
+                                            )
+                                            if is_remote_mode():
+                                                monitor._emit('subservice_route', {
+                                                    'subagent': subagent_type,
+                                                    'mode': 'remote',
+                                                    'description': tool_call['args']['description'],
+                                                })
+                                            else:
+                                                monitor._emit('subservice_route', {
+                                                    'subagent': subagent_type,
+                                                    'mode': 'local',
+                                                    'description': tool_call['args']['description'],
+                                                })
+                                elif last_msg.content:
+                                    _final_answer = last_msg.content
+                                    if os.getenv("GUARD_ENABLED", "false").lower() == "true":
+                                        try:
+                                            from gateway.output_guard import guard_output
+                                            _og = guard_output(_final_answer)
+                                            if not _og["safe"]:
+                                                logger.warning("输出 guardrail 拦截: pii=%s", _og["pii_leaked"])
+                                        except Exception:
+                                            pass
+                                    monitor.report_task_result(last_msg.content)
         except Exception as e:
             logger.exception("main_agent 执行异常 workspace_id=%s", workspace_id)
             monitor.report_error(f"执行主智能发生异常信息：{str(e)}")
@@ -323,3 +372,4 @@ async def run_deep_agent(task_query, workspace_id):
                 except Exception:
                     pass
             reset_session_context(session_dir_token, session_id_token)
+            _release_thread_lock(workspace_id)  # P1.6：归零清理锁
