@@ -1,5 +1,8 @@
 import asyncio
+import hashlib
+import json
 import shutil
+from collections import OrderedDict
 from pathlib import Path
 
 from agent_core.logging import get_logger
@@ -242,6 +245,105 @@ def get_main_store():
     return _main_store
 
 
+# P5：动态子 Agent（工具注册表 + 角色规约）
+_ROLE_CACHE: "OrderedDict[str, object]" = OrderedDict()
+_ROLE_CACHE_MAX = int(os.getenv("DYNAMIC_AGENT_CACHE_MAX", "10"))  # LRU 容量
+
+
+async def _plan_roles(task_query: str) -> list[str] | None:
+    """P5：根据任务用 LLM 选出需要的角色集合（结构化输出）。
+
+    失败或解析失败 -> 返回 None，调用方回退到静态全量模式。
+    角色集合限定在 ROLE_TOOLS 已知集合；未知 role 会被 normalize 丢弃。
+    """
+    from agent.tool_registry import ALL_ROLES, normalize_roles
+
+    try:
+        prompt = (
+            "你是角色规划器。根据用户的任务，从以下角色中选出与任务相关的角色（可多选）：\n"
+            f"{', '.join(ALL_ROLES)}\n"
+            "角色含义：files=文件读写与转换；data=数据分析/SQL；search=联网搜索；"
+            "knowledge=知识库检索。\n"
+            "仅选择与任务直接相关的角色，无关的不选。\n\n"
+            f"用户任务：{task_query}\n\n"
+            '只输出 JSON，形如 {"roles": ["data", "files"]}，无其他文字。'
+        )
+        resp = await model.ainvoke(prompt)
+        text = getattr(resp, "content", str(resp))
+        parsed = _extract_json(text)
+        raw_roles = parsed.get("roles") if isinstance(parsed, dict) else None
+        if not isinstance(raw_roles, list):
+            return None
+        return normalize_roles([str(r) for r in raw_roles])
+    except Exception as exc:
+        logger.warning("[dynamic-agent] 角色规划失败，回退静态模式: %s", exc)
+        return None
+
+
+def _extract_json(text: str) -> dict:
+    """从 LLM 输出中提取 JSON 对象（容错：去代码块、截取首个大括号）。"""
+    import json
+    import re
+
+    text = text.strip().strip("`")
+    if text.startswith("json"):
+        text = text[4:]
+    match = re.search(r"\{.*\}", text, re.DOTALL)
+    if match:
+        try:
+            return json.loads(match.group(0))
+        except Exception:
+            return {}
+    return {}
+
+
+async def get_main_agent_for_task(role_specs: list[str] | None = None):
+    """P5：按角色规约获取动态 agent，LRU 缓存避免重复构造。
+
+    ``role_specs`` 为 None（规划失败/未启用）时回退静态单例 ``get_main_agent()``。
+    """
+    if role_specs is None:
+        return await get_main_agent()
+
+    cache_key = hashlib.sha256(
+        json.dumps(sorted(role_specs), sort_keys=True).encode()
+    ).hexdigest()
+
+    if cache_key in _ROLE_CACHE:
+        _ROLE_CACHE.move_to_end(cache_key)
+        return _ROLE_CACHE[cache_key]
+
+    from agent.tool_registry import get_tools_for_roles
+
+    tools = get_tools_for_roles(role_specs)
+    _system_prompt = main_agent_content['system_prompt']
+    if os.getenv("PLANNER_ENABLED", "false").lower() == "true" and planner_content:
+        _addition = planner_content.get("planner", {}).get("system_prompt_addition", "")
+        if _addition:
+            _system_prompt = _system_prompt + "\n\n" + _addition
+
+    # 复用全局 checkpointer/store，保证与静态 agent 会话历史一致（避免每个 role 重建状态）
+    cp = _main_checkpointer if _main_checkpointer is not None else await _create_checkpointer()
+    store = _main_store if _main_store is not None else await _create_store()
+
+    agent = create_deep_agent(
+        model=model,
+        system_prompt=_system_prompt,
+        tools=tools,
+        checkpointer=cp,
+        store=store,
+        subagents=_build_subagents(),
+        middleware=_build_middleware(),
+    )
+
+    _ROLE_CACHE[cache_key] = agent
+    if len(_ROLE_CACHE) > _ROLE_CACHE_MAX:
+        _ROLE_CACHE.popitem(last=False)  # LRU 淘汰
+
+    logger.info("[dynamic-agent] 构造新 agent（roles=%s, cache_size=%d）", role_specs, len(_ROLE_CACHE))
+    return agent
+
+
 # P1.6：per-thread_id 互斥锁 + 引用计数清理
 async def _get_thread_lock(thread_id: str) -> asyncio.Lock:
     """获取（或新建）指定 thread_id 的串行锁，并递增引用计数。"""
@@ -342,6 +444,17 @@ async def run_deep_agent(task_query, workspace_id):
             except Exception as e:
                 logger.warning("缓存查询失败（非致命）: %s", e)
 
+        # P5：动态子 Agent（渐进启用）。开启时先用 LLM 规划角色，再取对应 agent；
+        # 失败则回退静态单例。缓存击穿防护应在「确定的 agent」之上生效，故先定 agent。
+        selected_agent = await get_main_agent()
+        if os.getenv("DYNAMIC_AGENT_ENABLED", "false").lower() == "true":
+            try:
+                roles = await _plan_roles(task_query)
+                selected_agent = await get_main_agent_for_task(roles)
+            except Exception as exc:
+                logger.warning("[dynamic-agent] 决策失败，回退静态 agent: %s", exc)
+                selected_agent = await get_main_agent()
+
         # P4：缓存击穿防护。缓存 miss 后，用 singleflight 以 cache key 去重：
         # 同一 query 的并发请求只真正执行一次 Agent（LLM），其余等同一结果，
         # 避免热点 query 把 LLM/子服务打爆。cache key 与语义缓存一致（含 kb 版本/租户/灰度）。
@@ -352,7 +465,7 @@ async def run_deep_agent(task_query, workspace_id):
             else ("", "", ""),
         )
         _final_answer = await singleflight(
-            cache_key, _execute_agent_core, task_query, workspace_id,
+            cache_key, _execute_agent_core, task_query, workspace_id, selected_agent,
         )
 
         # 统一收尾：监控上报 + 阶段2 记忆沉淀 + 语义缓存写入（无论是否经 singleflight 合并，
@@ -371,7 +484,7 @@ async def run_deep_agent(task_query, workspace_id):
                     pass
 
 
-async def _execute_agent_core(task_query: str, workspace_id: str) -> str:
+async def _execute_agent_core(task_query: str, workspace_id: str, main_agent=None) -> str:
     """P4：Agent 核心执行（供 singleflight 去重包裹）。
 
     与 run_deep_agent 解耦：负责 session 目录准备、上下文注入、per-thread 串行锁、
@@ -382,6 +495,7 @@ async def _execute_agent_core(task_query: str, workspace_id: str) -> str:
     Args:
         task_query: 经意图改写后的最终 query
         workspace_id: 工作空间/thread_id 标识
+        main_agent: 实际执行的 agent 实例（P5 动态 agent / 静态单例）
 
     Returns:
         最终答案；执行异常时返回空串（由调用方决定降级行为）
@@ -426,10 +540,11 @@ async def _execute_agent_core(task_query: str, workspace_id: str) -> str:
 
     final_answer = ""
     # P1.6：同一 workspace_id（thread_id）串行执行，避免并发撕裂 checkpointer 状态。
+    agent = main_agent or await get_main_agent()
     lock = await _get_thread_lock(workspace_id)
     try:
         async with lock:
-            main_agent = await get_main_agent()
+            main_agent = agent
             async for chunk in main_agent.astream(
                 {"messages": [{"role": "user", "content": task_query + path_instruction + memory_ctx}]},
                 config=config,
