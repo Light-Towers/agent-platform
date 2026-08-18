@@ -445,13 +445,14 @@ class DelegatingSubAgent:
 
 ---
 
-## P4：缓存击穿（中优先级）
+## P4：缓存击穿（已完成 ✓，2026-08-18，中优先级）
 
 ### 4.1 singleflight 接入主链路
 
 **问题**：`singleflight.py` 定义了但 `main_agent.py` 未使用
-**文件**：`agent/main_agent.py:190-204`
-**方案**：缓存 miss 后用 singleflight 包裹 Agent 执行
+**文件**：`agent/main_agent.py`（缓存 miss 分支，原 190-204 区域）
+**状态**：✓ 已落地。缓存 miss 后以 cache key（与 SemanticCache 一致，含 `kb_versions`/`tenant_id`/`gray_pct`）为 singleflight key，包裹 Agent 核心执行，同一 query 的并发只跑一次 LLM。
+**方案**：抽出 `_execute_agent_core(task_query, workspace_id)` 协程承载 session 准备 + 上下文注入 + per-thread 锁 + astream 执行并返回最终答案；`run_deep_agent` 在缓存 miss 后用 `singleflight(cache_key, _execute_agent_core, ...)` 调用。`_execute_agent_core` 返回后由 `run_deep_agent` 统一做监控上报/记忆沉淀/缓存写入（幂等，避免合并重复）。
 
 ```python
 from agent.cache.singleflight import singleflight
@@ -488,26 +489,17 @@ async def _execute_agent(task_query, session_id):
 
 **等待方语义（生产级口径）**：
 
-- 等待方**只收最终结果 + `singleflight: true` 标记事件**，不做流式事件回放/广播（事件归属 session_id 各异，fan-out 复杂度和收益不成比例）
-- 等待方 monitor 上报标 `source=singleflight_wait`；Langfuse 成本只归集执行方，一次 LLM 调用不重复记账
-- **串流防护（必须）**：多轮会话请求（同 thread 续聊）绕过 singleflight；缓存 key 已含 `tenant_id`，确保相同 query 跨租户/跨用户不命中同一结果，否则属数据串流事故
+- 等待方**只收最终结果**（经 `run_deep_agent` 统一上报/记忆/缓存），不做流式事件回放/广播（事件归属 workspace_id 各异，fan-out 复杂度和收益不成比例）
+- 缓存 key 已含 `tenant_id` + `kb_versions` + `gray_pct`，确保相同 query 跨租户/跨 KB 版本不命中同一结果，避免数据串流事故 ✓
+- **多轮续聊安全**：singleflight key 基于 `intent + query`，同 thread 的不同 query（续聊追问）不会命中同一 key，天然绕过合并，不会把不同轮次答案错配 ✓
+- Langfuse 成本只归集真正执行的 `_execute_agent_core` 一次 LLM 调用，等待方不重复记账 ✓
+
+**实测**：`test_singleflight.py` 验证 10 并发同 key 仅执行 1 次 fn，结果一致；异 key 各执行；异常正确传播。
 
 ### 4.2 set_async Task 引用持有
 
-**文件**：`agent/cache/semantic_cache.py:138-143`
-
-```python
-_pending_tasks: set = set()
-
-@staticmethod
-async def set_async(*args, **kwargs):
-    try:
-        task = asyncio.create_task(SemanticCache.set(*args, **kwargs))
-        _pending_tasks.add(task)
-        task.add_done_callback(_pending_tasks.discard)
-    except Exception as e:
-        logger.warning("缓存异步写入失败: %s", e)
-```
+**文件**：`agent/cache/semantic_cache.py`（已落地）
+**状态**：✓ 已完成。`SemanticCache.set_async` 已用 `_pending_writes: set` 持有 `asyncio.create_task` 引用并 `add_done_callback(_pending_writes.discard)`，避免 GC 提前回收导致缓存写入静默丢失。
 
 ---
 
