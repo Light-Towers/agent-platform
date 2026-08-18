@@ -18,6 +18,9 @@ AGENT_MODE=local 时仍用本地 subagent。
 
 from __future__ import annotations
 
+import asyncio
+
+from agent.circuit_breaker import get_breaker_sync
 from agent.config import get_all_subservices
 from agent.prompts import sub_agents_content
 
@@ -112,16 +115,123 @@ class _HttpSubAgent:
 
 
 def _build_async_subagent(key: str, description: str):
-    """构建单个远程子 Agent（优先 AsyncSubAgent，否则 httpx 回退）。"""
+    """构建单个远程子 Agent（优先 AsyncSubAgent，否则 httpx 回退）。
+
+    P3：返回的 agent 被 `DelegatingSubAgent` 包装，委派时施加
+    健康探活短路 + 熔断器 + 指数退避重试 + 本地 fallback（local_agent）。
+    """
     svc = get_all_subservices()[key]
     if _HAS_DEEPAGENTS and AsyncSubAgent is not None:
-        return AsyncSubAgent(
+        inner = AsyncSubAgent(
             graph_id=svc.graph_id,
             url=svc.url,
             name=svc.name,
             description=description,
         )
-    return _HttpSubAgent(svc, description)
+    else:
+        inner = _HttpSubAgent(svc, description)
+    return DelegatingSubAgent(key, inner, svc, description)
+
+
+class DelegatingSubAgent:
+    """P3：委派包装层。
+
+    在 deepagents 框架的 subagent 委派（`ainvoke`）外层增加：
+      1. 健康探活短路：config.healthy=False 时直接跳过远程，走本地 fallback。
+      2. 熔断器：OPEN 态跳过远程，走本地 fallback；监控失败率自动熔断。
+      3. 指数退避重试：网络抖动偶发失败时重试（默认 2 次）。
+      4. 本地 fallback：配置了 local_agent 时降级到本地 subagent；
+         否则返回结构化降级响应（带 degraded 标记）。
+    """
+
+    # 偶发失败的重试次数（不含首次）。
+    RETRIES = int(os.getenv("SUBAGENT_RETRIES", "2"))
+    # 重试基础退避（秒），指数增长：base * 2**attempt。
+    RETRY_BASE = float(os.getenv("SUBAGENT_RETRY_BASE", "0.5"))
+
+    def __init__(self, key: str, inner, svc, description: str = "") -> None:
+        self.key = key
+        self.name = svc.name
+        self.graph_id = svc.graph_id
+        self.url = svc.url
+        self.endpoint = svc.endpoint
+        self.description = description or getattr(inner, "description", "")
+        self._inner = inner
+        self._svc = svc
+        self._breaker = get_breaker_sync(self.name)
+        self._local_agent = None  # 懒编译
+
+    async def ainvoke(self, input: dict) -> dict:
+        # 1. 健康探活短路（config.healthy 由 health_check 维护）
+        if not self._svc.healthy:
+            logger.warning("[%s] 健康探活标记不可用，跳过远程委派，走本地 fallback", self.name)
+            return await self._fallback(input, reason="unhealthy")
+
+        # 2. 熔断器放行检查
+        if not await self._breaker.allow():
+            logger.warning("[%s] 熔断器 OPEN，跳过远程委派，走本地 fallback", self.name)
+            return await self._fallback(input, reason="circuit_open")
+
+        # 3. 指数退避重试的远程委派
+        last_exc: Exception | None = None
+        for attempt in range(self.RETRIES + 1):
+            try:
+                result = await self._inner.ainvoke(input)
+                await self._breaker.record_success()
+                return result
+            except Exception as exc:  # 网络/协议/子服务异常
+                last_exc = exc
+                logger.warning(
+                    "[%s] 远程委派失败（attempt %d/%d）: %s",
+                    self.name, attempt + 1, self.RETRIES + 1, exc,
+                )
+                if attempt < self.RETRIES:
+                    await asyncio.sleep(self.RETRY_BASE * (2 ** attempt))
+                    continue
+        # 4. 用尽重试仍失败 -> 计入熔断 + 本地 fallback
+        await self._breaker.record_failure()
+        logger.error("[%s] 远程委派彻底失败，转入本地 fallback: %s", self.name, last_exc)
+        return await self._fallback(input, reason="remote_failed", error=last_exc)
+
+    async def _fallback(self, input: dict, reason: str, error: Exception | None = None) -> dict:
+        """本地降级路径。
+
+        配置了 local_agent（dict）时尝试编译并调用本地 subagent；
+        否则返回结构化降级响应，避免把失败抛给主管线程。
+        """
+        local_spec = self._svc.local_agent
+        if local_spec:
+            try:
+                agent = self._get_local_agent(local_spec)
+                result = await agent.ainvoke(input)
+                result.setdefault("degraded", True)
+                result.setdefault("degraded_reason", reason)
+                return result
+            except Exception as exc:
+                logger.error("[%s] 本地 fallback 也失败: %s", self.name, exc)
+                # 落入结构化降级响应
+        return {
+            "answer": f"子服务「{self.name}」当前不可用（{reason}），已降级处理，请稍后重试或由主管直接回答。",
+            "degraded": True,
+            "degraded_reason": reason,
+            "error": str(error) if error else None,
+        }
+
+    def _get_local_agent(self, spec: dict):
+        """懒编译本地 fallback subagent（仅一次）。"""
+        if self._local_agent is None:
+            from deepagents import create_deep_agent
+
+            from agent.llm import model
+
+            self._local_agent = create_deep_agent(
+                model=model,
+                name=spec.get("name", self.name),
+                description=spec.get("description", self.description),
+                system_prompt=spec.get("system_prompt", ""),
+                tools=spec.get("tools", []),
+            )
+        return self._local_agent
 
 
 def get_remote_subagents():
