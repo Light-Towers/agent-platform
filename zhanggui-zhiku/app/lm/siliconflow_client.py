@@ -92,7 +92,12 @@ def _l2_normalize(vector):
 
 
 class SiliconFlowEmbeddingClient:
-    """硅基流动 embeddings API 客户端（稠密向量，本地 L2 归一化）。"""
+    """硅基流动 embeddings API 客户端（稠密向量，本地 L2 归一化）。
+
+    实现已委托内核 agent_core.memory.embedder.SiliconFlowEmbedder（零依赖 urllib +
+    L2 归一化 + index 重排统一收口，消除与 app 等子项目各自为政的重复实现）。
+    本类仅保留批量切分与响应数量校验（内核基础能力之上），向后兼容 embedding_utils 调用。
+    """
 
     def __init__(self, api_key, base_url=None, model=None, batch_size=DEFAULT_EMBEDDING_BATCH_SIZE):
         """
@@ -103,16 +108,19 @@ class SiliconFlowEmbeddingClient:
         """
         if not api_key:
             raise ValueError("SILICONFLOW_API_KEY 未配置")
-        self.api_key = api_key
-        self.base_url = (base_url or "https://api.siliconflow.cn/v1").rstrip("/")
-        self.model = model or "BAAI/bge-m3"
         self.batch_size = max(1, int(batch_size))
-        self._url = f"{self.base_url}/embeddings"
-        self._headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+        # 委托内核统一实现（维度/归一化/请求逻辑与 local BGE-M3 稠密语义对齐）
+        from agent_core.memory.embedder import SiliconFlowEmbedder
+
+        self._inner = SiliconFlowEmbedder(
+            api_key=api_key,
+            base_url=base_url or "https://api.siliconflow.cn/v1",
+            model=model or "BAAI/bge-m3",
+        )
 
     def embed(self, texts):
         """
-        为文本列表生成 L2 归一化稠密向量。
+        为文本列表生成 L2 归一化稠密向量（按 batch_size 切批调用内核实现）。
 
         :param texts: 非空文本列表（与 local 模式 generate_embeddings 入参一致）
         :return: list[list[float]]，与输入一一对应
@@ -123,17 +131,12 @@ class SiliconFlowEmbeddingClient:
         results = []
         for i in range(0, len(texts), self.batch_size):
             batch = texts[i : i + self.batch_size]
-            resp = _post_json(self._url, self._headers, {"model": self.model, "input": batch})
-            data = resp.get("data") or []
-            # 兼容返回乱序：按 index 重排（缺失 index 时稳定排序保持原序）
-            data = sorted(data, key=lambda item: int(item.get("index", 0)))
-            if len(data) != len(batch):
-                raise RuntimeError(f"SiliconFlow embeddings 响应数量不匹配：请求{len(batch)}条，返回{len(data)}条")
-            for item in data:
-                vec = item.get("embedding")
-                if not isinstance(vec, list) or not vec:
-                    raise RuntimeError(f"SiliconFlow embeddings 响应缺少 embedding 字段: {item}")
-                results.append(_l2_normalize(vec))
+            vecs = self._inner.embed(batch)
+            if len(vecs) != len(batch):
+                raise RuntimeError(
+                    f"SiliconFlow embeddings 响应数量不匹配：请求{len(batch)}条，返回{len(vecs)}条"
+                )
+            results.extend(vecs)
         return results
 
 

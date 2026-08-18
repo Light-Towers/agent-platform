@@ -8,6 +8,10 @@
 
 # --- 本地 editable 包 ---
 -e ../agent-core
+-e ../shared-schemas
+
+# --- SQL 守卫（deepagents 委托 agent_core 的 mysql dialect 守卫，需 sqlglot 透传） ---
+sqlglot>=25.0
 
 # --- 核心框架 ---
 deepagents==0.7.5

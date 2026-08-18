@@ -53,7 +53,7 @@ adapter 已集成：wenda-adapter/kefu-adapter 调用上游时注入 traceparent
 | 验收项 | 状态 | 证据 |
 |--------|------|------|
 | wenda-adapter SSE→JSON 适配 | ✅ | `wenda-adapter/main.py`：消费 SSE 流→聚合 QueryResponse JSON |
-| kefu-adapter REST 适配 | ✅ | `kefu-adapter/main.py`：转发 atguigu_ai /api/messages |
+| kefu-adapter REST 适配 | ✅ | `kefu-adapter/main.py`：转发 legacy /api/messages |
 | shared-schemas 统一 schema | ✅ | `shared-schemas/`：QueryRequest/QueryResponse/HealthResponse/IntentResult/SubagentCall |
 | 各 adapter /health 端点 | ✅ | wenda-adapter/kefu-adapter 均有 /health，探活上游 |
 | wenda/kefu 快照零改动 | ✅ | 仅新增 adapter + Dockerfile，不改业务代码 |
@@ -125,7 +125,7 @@ adapter 已集成：wenda-adapter/kefu-adapter 调用上游时注入 traceparent
 
 | 验收项 | 状态 | 证据 |
 |--------|------|------|
-| 9 种命令定义 | ✅ | `kefu-service/agent/commands.py`：对应 atguigu_ai command_prompt.jinja2 |
+| 9 种命令定义 | ✅ | `kefu-service/agent/commands.py`：对应 legacy command_prompt.jinja2 |
 | 3 个 Flow 子图 | ✅ | `agent/flows/`：order_flow/logistics_flow/postsale_flow |
 | 主对话图 | ✅ | `agent/graph.py`：意图路由→命令分发→Flow/知识/闲聊 |
 | GraphRAG 6 步骨架 | ✅ | `agent/graph_rag.py`：实体抽取→关系→社区→检索→排序→生成 |

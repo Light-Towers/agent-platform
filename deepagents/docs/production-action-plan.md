@@ -48,90 +48,34 @@ uv pip compile requirements.txt -o tmp.txt
 
 缺失项（已排除 `tavily-python`，已在 `pyproject.toml:27` 声明）：`valkey`, `langfuse`, `pandas`, `openpyxl`, `python-docx`, `weasyprint`, `markdown`, `md2pdf`, `reportlab`, `pycairo`, `ragflow-sdk`, `tiktoken`, `numpy`, `opentelemetry-exporter-otlp-proto-http`
 
-### 0.3 _FallbackModel 永久降级修复
+### 0.3 _FallbackModel 永久降级修复（已根治）
 
-**文件**：`agent/llm.py`
-**问题**：`primary_failed=True` 后永不恢复。四处调用路径（`invoke` L118 / `ainvoke` L130 / `stream` L142 / `astream` L157）均只置位不复位
-**方案**：加恢复探测机制，统一用 `object.__setattr__`（pydantic 模型赋值约束）
+**文件**：`agent/llm.py` → `agent_core/llm/fallback.py`、`agent_core/llm/fallback_lc.py`
+**原问题**：`primary_failed=True` 后只置位不复位，导致主模型恢复后仍永久走备用模型；
+原 `_FallbackModel` 把降级路由复制在 `deepagents` 侧，与内核 `FallbackChatModel`
+存在语义漂移，且 `invoke` 绕过 LangChain `_generate` 管道（`bind_tools`/tracing 失效）。
+
+**最终方案（已落地）**：删除 `deepagents` 侧的 `_FallbackModel` 子类，降级语义收敛为
+内核 `FallbackChatModel` 的**唯一真相源**，由「连续失败计数 + 冷却窗口 + 成功复位」
+保证可恢复：
+
+- 主模型连续失败达 `failure_threshold` → 切备用并记录冷却截止；
+- 冷却到期 → 下次请求先试探主模型，成功即复位计数（无永久降级）；
+- `invoke`/`ainvoke`/`stream`/`astream` 全部走同一路由，无重复实现。
+
+`LangChainFallbackModel`（`BaseChatModel` 子类，仅 langchain extra 时导入）作为薄适配层，
+`_generate/_agenerate/_stream/_astream` 直接委托内核，不再有"任意对象薄代理"旁路。
+`create_fallback_model()` 在有备用模型时直接返回 `LangChainFallbackModel`。
 
 ```python
-class _FallbackModel(BaseChatModel):
-    model_name: str = "fallback-model"
-    primary_failed: bool = False
-    _fail_time: float = 0.0
-    _RECOVERY_INTERVAL = 60.0  # 60s 后试探主模型
-
-    def _should_try_recovery(self) -> bool:
-        """检查是否到了试探主模型恢复的时间。"""
-        if not self.primary_failed:
-            return True
-        if time.time() - self._fail_time > self._RECOVERY_INTERVAL:
-            _logger.info("试探主模型恢复...")
-            object.__setattr__(self, "primary_failed", False)
-            return True
-        return False
-
-    def _mark_failed(self):
-        object.__setattr__(self, "primary_failed", True)
-        object.__setattr__(self, "_fail_time", time.time())
-
-    # invoke
-    def invoke(self, *args, **kwargs):
-        if not self._should_try_recovery():
-            return self._fallback.invoke(*args, **kwargs)
-        try:
-            return self._primary.invoke(*args, **kwargs)
-        except Exception as e:
-            if self._fallback is not None:
-                _logger.warning("主模型调用失败，切换到备用模型: %s", e)
-                self._mark_failed()
-                return self._fallback.invoke(*args, **kwargs)
-            raise
-
-    # ainvoke
-    async def ainvoke(self, *args, **kwargs):
-        if not self._should_try_recovery():
-            return await self._fallback.ainvoke(*args, **kwargs)
-        try:
-            return await self._primary.ainvoke(*args, **kwargs)
-        except Exception as e:
-            if self._fallback is not None:
-                _logger.warning("主模型调用失败，切换到备用模型: %s", e)
-                self._mark_failed()
-                return await self._fallback.ainvoke(*args, **kwargs)
-            raise
-
-    # stream
-    def stream(self, *args, **kwargs):
-        if self._should_try_recovery():
-            try:
-                yield from self._primary.stream(*args, **kwargs)
-                return
-            except Exception as e:
-                if self._fallback is not None:
-                    _logger.warning("主模型流式调用失败，切换到备用模型: %s", e)
-                    self._mark_failed()
-                else:
-                    raise
-        result = self._fallback.invoke(*args, **kwargs)
-        yield result
-
-    # astream
-    async def astream(self, *args, **kwargs):
-        if self._should_try_recovery():
-            try:
-                async for chunk in self._primary.astream(*args, **kwargs):
-                    yield chunk
-                return
-            except Exception as e:
-                if self._fallback is not None:
-                    _logger.warning("主模型异步流式调用失败，切换到备用模型: %s", e)
-                    self._mark_failed()
-                else:
-                    raise
-        result = await self._fallback.ainvoke(*args, **kwargs)
-        yield result
+# deepagents/agent/llm.py —— 无降级逻辑，仅构造适配层
+if fallback is not None:
+    return LangChainFallbackModel(primary=primary, fallback=fallback)
+return primary
 ```
+
+**验证**：`deepagents/tests/unit/test_llm_fallback.py` 8 passed（含「主失败→降级备→
+冷却到期→恢复」契约）；agent-core + deepagents 单测 96 passed。
 
 ### 0.4 kefu-service 入库完整性核查
 
@@ -376,17 +320,15 @@ async def run_deep_agent(task_query, session_id):
 ### 2.1 SummarizationMiddleware 阈值适配
 
 **问题**：trigger=170K tokens，qwen-max 窗口仅 32K，主动 summarize 永不触发
-**方案 A**：给 `_FallbackModel` 加 profile
+**方案 A**：在 `LangChainFallbackModel`（即 `create_fallback_model` 返回的模型）暴露上下文窗口上限，供 summarization 读取
 
 ```python
-# agent/llm.py
-class _FallbackModel(BaseChatModel):
-    model_name: str = "fallback-model"
-    # ... 现有字段 ...
-
+# agent_core/llm/fallback_lc.py
+class LangChainFallbackModel(BaseChatModel):
     @property
     def profile(self) -> dict:
-        return {"max_input_tokens": 30_000}  # qwen-max 32K，留 2K 余量
+        # 主模型上下文窗口；qwen-max 32K，留 2K 余量
+        return {"max_input_tokens": 30_000}
 ```
 
 **方案 B**：支持环境变量配置（`agent/config.py`；⚠️ 独立开关 `SUMMARIZATION_ENABLED`，不与 `PLANNER_ENABLED`（TodoList）耦合）

@@ -8,7 +8,8 @@ from sqlalchemy.exc import DBAPIError
 
 from api.monitor import monitor
 from tools._timeout import with_timeout
-from tools.sql_validation import _ensure_limit, _validate_identifier, _validate_sql_select_only
+from tools.sql_guard import validate_sql_mysql
+from tools.sql_validation import _validate_identifier
 
 try:
     from agent_core.logging import get_logger
@@ -232,8 +233,11 @@ def execute_sql_query(query)->str:
     monitor.report_tool(tool_name="数据库表数据查询工具：execute_sql_query", args={"query": query})
 
     try:
-        safe_query = _validate_sql_select_only(query)
-        safe_query = _ensure_limit(safe_query)
+        ok, reason, safe_query = validate_sql_mysql(query)
+        if not ok:
+            monitor.report_tool_outcome(
+                tool_name="execute_sql_query", outcome="guarded", error_class="SqlGuard", detail=reason)
+            return f"SQL 校验未通过：{reason}"
         with _get_connection() as conn:
             with conn.cursor() as cursor:
                 cursor.execute(safe_query)

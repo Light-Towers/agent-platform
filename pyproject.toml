@@ -21,6 +21,7 @@ dependencies = [
     "langgraph-checkpoint-postgres>=2.0",
     "psycopg[binary,pool]>=3.1",
     "pgvector>=0.3",
+    "asyncpg>=0.29",
     "rank-bm25>=0.2.2",
     "sqlglot>=25.0",
 ]
@@ -55,6 +56,8 @@ line-length = 120
 target-version = "py311"
 
 [tool.ruff.lint]
+# 显式 select，固化 lint 门禁规则集，避免依赖 ruff 默认 select（E4,E7,E9,F）漂移导致 I(isort) 等规则被静默关闭。
+select = ["E4", "E7", "E9", "F", "I"]
 # 以下为既有风格/惯例类告警，非逻辑阻断；收敛以让 CI 门禁（ruff check .）转绿。
 # B008: FastAPI 在依赖注入（Depends(...)）中于函数默认参数位置调用是官方推荐写法，非真实 bug。
 # E402: 模块级 import 不在顶部（deepagents 多因 load_dotenv()/sys.path 后再 import，deliberate）。
@@ -63,5 +66,16 @@ target-version = "py311"
 ignore = ["B008", "E402", "E731", "BLE001", "S110", "B017", "PERF102", "RUF059"]
 
 [tool.uv.sources]
-agent-core = { path = "./agent-core", editable = true }
-shared-schemas = { path = "./shared-schemas", editable = true }
+agent-core = { workspace = true }
+shared-schemas = { workspace = true }
+
+[tool.uv.workspace]
+members = [
+    "agent-core",
+    "shared-schemas",
+    "deepagents",
+    "kefu-service",
+    "wenda-data-agent",
+    "zhanggui-zhiku",
+    "dialogue-framework",
+]

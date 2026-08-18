@@ -1,7 +1,7 @@
 # 导入依赖
-from ragflow_sdk import RAGFlow #链接rag服务的客户端
-from rawflow.rag_config import _load_ragflow_env
+from ragflow_sdk import RAGFlow  #链接rag服务的客户端
 
+from rawflow.rag_config import _load_ragflow_env
 
 # 创建一个ragflow的客户端
 api_key , base_url =_load_ragflow_env()

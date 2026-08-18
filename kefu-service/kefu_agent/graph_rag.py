@@ -1,4 +1,4 @@
-"""GraphRAG 子 Agent：对应 atguigu_ai information_retrieval.py 的 6 步流程。
+"""GraphRAG 子 Agent：对应 legacy information_retrieval.py 的 6 步流程。
 
 6 步：实体抽取 → 关系构建 → 社区检测 → 检索 → 排序 → 生成
 接入知识库（配置驱动，不依赖外部 Neo4j）。

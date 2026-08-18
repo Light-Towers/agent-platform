@@ -30,7 +30,58 @@ except Exception:  # pragma: no cover - 回退路径
     _HAS_DEEPAGENTS = False
 
 
+import os
+
 import httpx
+from agent_core.logging import get_logger
+
+logger = get_logger(__name__)
+
+# E-1 契约断言灰度开关（优化 E / P4.1 / S-1）：默认开启。
+# 关闭时回退到原 str(data)/dict 规整，便于现网快速回滚（无需发版）。
+_E1_CONTRACT_ASSERT = os.getenv("E1_CONTRACT_ASSERT", "on").lower() in ("1", "true", "yes", "on")
+# E-1b 内容断言（TB-6 补充）：在形状断言之外，验证响应语义非空（answer 非空）。
+# 与形状断言分离，可独立回滚。默认开启。
+_E1_CONTENT_ASSERT = os.getenv("E1_CONTENT_ASSERT", "on").lower() in ("1", "true", "yes", "on")
+
+try:  # shared-schemas 已在 dependencies 声明（优化 E / B-1）
+    from shared_schemas import QueryResponse as _QueryResponse
+
+    _HAS_SHARED_SCHEMAS = True
+except Exception:  # pragma: no cover - 兜底：依赖缺失时跳过断言
+    _QueryResponse = None
+    _HAS_SHARED_SCHEMAS = False
+
+
+def _normalize_response(data, name: str) -> dict:
+    """将远程子服务响应规整为 {"answer": ...} 供 main_agent 消费。
+
+    同时执行两级联邦契约断言（优化 E / P4.1 / TB-6）：
+    1. 形状断言（_E1_CONTRACT_ASSERT，默认 on）：响应能被 shared_schemas.QueryResponse
+       构造，确保字段形状符合联邦契约（kefu 的 QueryResponse / wenda 的 SqlQueryResponse 超集均吸收）。
+    2. 内容断言（_E1_CONTENT_ASSERT，默认 on）：answer 非空，避免"契约通过但内容空洞"
+       （kefu 图未产出 response 时返回空 answer，形状合法但语义退化）。
+    """
+    # 旧 adapter /api/messages 返回 list。
+    if isinstance(data, list):
+        text = " ".join(msg.get("text", "") for msg in data if isinstance(msg, dict))
+        return {"answer": text}
+    if isinstance(data, dict):
+        # E-1 联邦契约对齐：形状校验（SqlQueryResponse 字段超集被安全吸收）。
+        if _E1_CONTRACT_ASSERT and _HAS_SHARED_SCHEMAS:
+            try:
+                _QueryResponse(**data)
+            except Exception as exc:
+                raise ValueError(
+                    f"[{name}] 远程响应不符合 shared_schemas.QueryResponse 契约: {exc} | keys={list(data.keys())}"
+                ) from exc
+        # E-1b 内容校验（TB-6）：answer 非空。
+        if _E1_CONTENT_ASSERT:
+            answer = data.get("answer", "")
+            if not answer or not str(answer).strip():
+                logger.warning("[%s] 远程响应 answer 为空（契约形状通过但内容空洞），疑似子服务退化", name)
+        return {"answer": data.get("answer", ""), **data}
+    return {"answer": str(data)}
 
 
 class _HttpSubAgent:
@@ -55,14 +106,9 @@ class _HttpSubAgent:
             resp = await client.post(self.url.rstrip("/") + endpoint, json=payload)
             resp.raise_for_status()
             data = resp.json()
-        # kefu /invoke 返回 QueryResponse(dict)；wenda-data-agent /api/query 返回 SqlQueryResponse(dict)；
+        # kefu /invoke 返回 QueryResponse(dict)；wenda-data-agent /api/query 返回 SqlQueryResponse(dict，QueryResponse 子类)；
         # 旧 adapter /api/messages 返回 list。统一规整为 {"answer": ...} 供 main_agent 消费。
-        if isinstance(data, list):
-            text = " ".join(msg.get("text", "") for msg in data if isinstance(msg, dict))
-            return {"answer": text}
-        if isinstance(data, dict):
-            return {"answer": data.get("answer", ""), **data}
-        return {"answer": str(data)}
+        return _normalize_response(data, self.name)
 
 
 def _build_async_subagent(key: str, description: str):

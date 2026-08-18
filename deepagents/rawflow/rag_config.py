@@ -1,6 +1,8 @@
 import os
+from typing import Optional, Tuple
+
 from dotenv import load_dotenv
-from typing import Tuple, Optional
+
 
 def _load_ragflow_env() -> Tuple[Optional[str], Optional[str]]:
     """

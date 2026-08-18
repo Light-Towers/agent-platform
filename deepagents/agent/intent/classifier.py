@@ -1,8 +1,8 @@
 """L1 粗分类器：embedding + 原型向量余弦相似度。
 
-固定本地 sentence-transformers（bge-small-zh），与 Phase 5 缓存 embedding 解耦，永不切换。
-原型向量 = 每类 20 条典型 query 的 embedding 均值，来源独立于评测集。
-目标延迟 <10ms（模型加载 ~2s，推理 <10ms 需 benchmark）。
+embedding 后端统一委托 agent-core 的 ``LocalEmbedder``（bge-small-zh-v1.5），
+与 Phase 5 缓存 embedding 解耦，永不切换。原型向量 = 每类 20 条典型 query 的
+embedding 均值，来源独立于评测集。目标延迟 <10ms（模型加载 ~2s，推理 <10ms 需 benchmark）。
 """
 
 from __future__ import annotations
@@ -26,15 +26,18 @@ _intent_labels: list[str] = []
 
 
 def _load_embedder() -> Any:
-    """懒加载 sentence-transformers 模型。"""
+    """懒加载 sentence-transformers 模型（委托 agent-core LocalEmbedder）。
+
+    复用内核的本地 embedder 单例，避免 deepagents 与内核重复加载模型实例。
+    """
     global _embedder
     if _embedder is not None:
         return _embedder
     try:
-        from sentence_transformers import SentenceTransformer  # noqa: PLC0415
+        from agent_core.memory.embedder import LocalEmbedder  # noqa: PLC0415
 
-        _embedder = SentenceTransformer(_MODEL_NAME)
-        logger.info("L1 embedding 模型已加载: %s", _MODEL_NAME)
+        _embedder = LocalEmbedder(_MODEL_NAME)
+        logger.info("L1 embedding 模型已加载（内核 LocalEmbedder）: %s", _MODEL_NAME)
     except ImportError:
         logger.warning("sentence-transformers 未安装，L1 降级为关键词匹配")
         _embedder = None
@@ -64,7 +67,7 @@ def _build_prototypes() -> dict[str, np.ndarray]:
         return _prototype_vectors
 
     for label, queries in proto_data.items():
-        embeddings = embedder.encode(queries, normalize_embeddings=True)
+        embeddings = embedder.embed(queries)
         mean_vec = np.mean(embeddings, axis=0)
         norm = np.linalg.norm(mean_vec)
         if norm > 0:
@@ -122,7 +125,7 @@ def classify(query: str, top_k: int = 3) -> dict[str, Any]:
         primary = candidates[0] if candidates else {"intent": "unknown", "confidence": 0.0}
         return {"primary": primary, "candidates": candidates[:top_k], "source": "l1_keyword"}
 
-    query_vec = _embedder.encode([query], normalize_embeddings=True)[0]
+    query_vec = np.array(_embedder.embed([query])[0])
 
     scores = []
     for label, proto_vec in prototypes.items():

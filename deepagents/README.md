@@ -69,7 +69,7 @@ python -m api.server  # 启动 FastAPI，默认 :8000
 - ✅ Phase 4：TodoListMiddleware + RubricMiddleware（扩展非重写 deepagents）
 - ✅ Phase 5：Valkey 分层缓存（L1 精确 + L2 语义 HNSW + L3 检索 + NullCache + singleflight）
 - ✅ Phase 6：限流/熔断/guardrail/灰度/成本路由/多租户
-- ✅ Phase 7：kefu-service（atguigu_ai → deepagents + LangGraph，9 命令 + 3 Flow + GraphRAG）
+- ✅ Phase 7：kefu-service（legacy → deepagents + LangGraph，9 命令 + 3 Flow + GraphRAG）
 
 ### 待做 / 已知限制
 

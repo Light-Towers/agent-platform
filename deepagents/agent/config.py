@@ -56,7 +56,7 @@ _subservices: dict[str, SubserviceConfig] = {
         # kefu 迁移开关（Phase 7 收尾已修复）：
         #   KEFU_USE_ADAPTER=false → 直连 kefu-service(:8003) 的 /invoke（Agent Protocol 兼容，
         #   返回 QueryResponse），kefu-adapter 转换层可废弃；
-        #   KEFU_USE_ADAPTER=true  → 仍经 kefu-adapter(:8002)（外部 atguigu_ai 未退役前的过渡）。
+        #   KEFU_USE_ADAPTER=true  → 仍经 kefu-adapter(:8002)（外部 legacy 未退役前的过渡）。
         url=(
             _env("KEFU_SERVICE_URL", "http://localhost:8003")
             if _env("KEFU_USE_ADAPTER", "false").lower() != "true"

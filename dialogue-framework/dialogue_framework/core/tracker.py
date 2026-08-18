@@ -30,6 +30,17 @@ class Tracker:
         self.latest_action = action
         self.add_event({"action": action, **kwargs})
 
+    def to_conversation_memory(self) -> object:
+        """TB-2：桥接内核 ConversationMemory 协议（消息记忆视图）。
+
+        返回 ``TrackerConversationMemory`` 实例（实现 agent_core 的
+        ``ConversationMemory`` 协议），不修改 Tracker 自有状态结构，
+        仅把 user/assistant 消息映射到 Tracker.events，供其他 agent 复用内核记忆契约。
+        """
+        from dialogue_framework.core.tracker_memory import TrackerConversationMemory
+
+        return TrackerConversationMemory(self)
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "session_id": self.session_id,

@@ -1,4 +1,4 @@
-"""9 种命令定义：对应 atguigu_ai command_prompt.jinja2。
+"""9 种命令定义：对应 legacy command_prompt.jinja2。
 
 start_flow / cancel_flow / change_flow / set_slot /
 knowledge_answer / chitchat / cannot_handle / clarify / human_handoff

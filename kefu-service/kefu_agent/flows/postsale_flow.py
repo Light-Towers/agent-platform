@@ -1,4 +1,4 @@
-"""售后 Flow：对应 atguigu_ai flow_postsale.yml。
+"""售后 Flow：对应 legacy flow_postsale.yml。
 
 LangGraph 子图：识别售后类型 → 查询售后政策 → 格式化回复。
 接入真实业务服务（agent.services.query_postsale_policy）。
