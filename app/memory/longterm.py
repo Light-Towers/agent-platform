@@ -17,6 +17,7 @@ import json
 import logging
 
 from agent_core.memory.typed import semantic_memory_typed_enabled
+
 from app.config import get_settings
 from app.memory import memory_backend as _mb
 
@@ -78,7 +79,6 @@ async def extract_memory_facts(llm, question: str, answer: str) -> list[dict]:
 
 
 async def recall(pool, workspace_id: str, question: str, k: int = 3) -> list[str]:
-    settings = get_settings()
     # ADR-0004 阶段3：总开关由 SEMANTIC_MEMORY_TYPED 控制（与内核 typed 语义统一）。
     # 开启 → 走内核 typed 加权/平权召回（仍用 app psycopg 池，遵守 ADR-0003）；
     # 关闭或内存模式 → 退化内核后端平权召回（pool=None 由内核自建池）。

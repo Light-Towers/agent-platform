@@ -24,12 +24,21 @@ from typing import Iterable
 from agent_core.memory.typed import (
     MemoryType,
     TypedMemory,
-    consolidate as _core_consolidate,
-    forget as _core_forget,
-    recall_typed as _core_recall_typed,
-    remember_typed as _core_remember_typed,
     semantic_memory_typed_enabled,
 )
+from agent_core.memory.typed import (
+    consolidate as _core_consolidate,
+)
+from agent_core.memory.typed import (
+    forget as _core_forget,
+)
+from agent_core.memory.typed import (
+    recall_typed as _core_recall_typed,
+)
+from agent_core.memory.typed import (
+    remember_typed as _core_remember_typed,
+)
+
 # 降级路径（无 DB/内核后端）的门面：app 仍用自己的 _resolve_default_backend
 # （基于 database_url 解析，与内核 get_default_backend 的 SEMANTIC_MEMORY_ENABLED
 # 开关解耦），保持既有 app 测试契约不变。类型化读写已下沉内核 typed 模块。
@@ -86,7 +95,6 @@ def embed_memory(text: str) -> list[float]:
     保持与 RAG/缓存维度统一（CI 零密钥）。内核 typed 模块不内嵌 embedder，
     embedding 必须由宿主层在此处提供。
     """
-    from app.config import get_settings
     from app.rag.embed import embed_texts
 
     return embed_texts([text], dim=get_settings().vector_dim)[0]

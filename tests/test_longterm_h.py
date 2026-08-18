@@ -124,6 +124,7 @@ async def test_recall_typed_weights_and_ranks(patch_settings, monkeypatch):
     from datetime import datetime, timedelta, timezone
 
     import agent_core.memory.typed as typed_core
+
     import app.memory.memory_backend as mb
 
     # 开启内核 typed 开关，确保走加权融合（非平权退化）
@@ -267,8 +268,9 @@ async def test_recall_falls_back_to_core_when_disabled(patch_settings, monkeypat
 async def test_recall_forwards_to_recall_typed_when_enabled(patch_settings, monkeypatch):
     # ADR-0004 阶段3：总开关 SEMANTIC_MEMORY_TYPED 控制转发；即使
     # memory_extraction_enabled=False（默认），开启 typed 开关也应转发。
-    import app.memory.longterm as l
     import agent_core.memory.typed as typed_core
+
+    import app.memory.longterm as l
 
     # SEMANTIC_MEMORY_TYPED 开启（与内核 typed 开关语义统一）
     monkeypatch.setenv("SEMANTIC_MEMORY_TYPED", "true")
@@ -294,8 +296,9 @@ async def test_recall_forwards_to_recall_typed_when_enabled(patch_settings, monk
 
 async def test_recall_does_not_forward_when_typed_disabled(patch_settings, monkeypatch):
     # ADR-0004 阶段3：typed 开关关闭时，即使 pool 非空也不走 typed 路径（退化内核后端）。
-    import app.memory.longterm as l
     import agent_core.memory.typed as typed_core
+
+    import app.memory.longterm as l
 
     monkeypatch.setattr(typed_core, "semantic_memory_typed_enabled", lambda: False)
     monkeypatch.setattr("app.memory.longterm.get_settings", lambda: patch_settings)
