@@ -17,7 +17,11 @@ from typing import Any
 from agent_core.monitor import (
     ConnectionManager,
     ToolMonitor,
+)
+from agent_core.monitor import (
     manager as _manager,
+)
+from agent_core.monitor import (
     monitor as _monitor,
 )
 
