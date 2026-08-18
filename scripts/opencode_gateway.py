@@ -25,15 +25,13 @@ import asyncio
 import json
 import os
 import subprocess
-import sys
 import time
 import uuid
 from typing import Any
 
-from fastapi import FastAPI, Request
-from fastapi.responses import StreamingResponse, JSONResponse
 import uvicorn
-
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse, StreamingResponse
 
 OPENAI_MODELS = {"opencode": "opencode/deepseek-v4-flash-free"}
 
