@@ -31,8 +31,10 @@ EXIT_SKIP = 2
 # 偏好设定（第1轮告知）；相关题（第2轮）应体现该偏好。
 _PREFERENCE_TELL = "我是财务岗，做报表时请用简洁的中文表格呈现，不要写长篇解释。"
 _RELATED_QUESTION = "帮我汇总一下上个月各项支出的金额，做个对照。"
-# 裁判要找的偏好信号关键词（至少一个即视为体现偏好）
-_PREFERENCE_SIGNALS = ("表格", "财务", "支出", "对照", "汇总")
+# 裁判要找的偏好信号关键词：仅保留「真正代表偏好」的词（表格/财务）。
+# 注意：相关题题面自带「支出/对照/汇总」，不能当作偏好信号，否则隔离对照组
+# 复述题面会误判为「串味 / 复用」（假阳性）。LLM 裁判为主，关键词仅作退化兜底。
+_PREFERENCE_SIGNALS = ("表格", "财务")
 
 
 async def _judge_reused(llm, answer: str) -> bool:
@@ -64,9 +66,10 @@ async def _judge_reused(llm, answer: str) -> bool:
 def _has_preference_leak(answer: str) -> bool:
     """隔离校验：另一 workspace 的回答不应出现偏好信号（未被告知却用表格/财务口吻）。
 
-    注意：相关题本身含「支出/汇总」字样，故仅用强偏好信号（表格/财务/对照）判定串味。
+    仅用强偏好信号（表格/财务）判定串味；剔除题面自带的「对照/支出/汇总」，
+    否则隔离对照组复述题面会误报为记忆跨桶串味（假阳性，R1）。
     """
-    strong = ("表格", "财务", "对照")
+    strong = ("表格", "财务")
     return any(sig in answer for sig in strong)
 
 
