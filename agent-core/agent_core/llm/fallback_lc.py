@@ -18,11 +18,46 @@
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 from langchain_core.language_models import BaseChatModel
 
 from agent_core.llm.fallback import FallbackChatModel
+
+
+# 各模型上下文窗口（tokens），用于向 deepagents 的 SummarizationMiddleware 暴露
+# max_input_tokens，使其按「模型窗口比例」自适应触发（而非硬编码 170K）。
+# 留约 2K 余量给系统提示与工具调用开销。
+_MODEL_MAX_INPUT_TOKENS: dict[str, int] = {
+    "qwen-max": 30_000,        # 官方 32768，留余量
+    "qwen-plus": 120_000,      # 官方 131072
+    "qwen-turbo": 120_000,     # 官方 131072
+    "qwen-long": 1_000_000,    # 官方 1000000（长文档）
+    "qwen2.5-72b-instruct": 120_000,
+    "deepseek-chat": 60_000,
+    "deepseek-v3": 60_000,
+    "gpt-4o": 120_000,
+    "gpt-4o-mini": 120_000,
+}
+
+
+def _resolve_max_input_tokens(primary_model_name: str | None) -> int:
+    """解析主模型的输入窗口上限（tokens）。
+
+    优先级：``LLM_MAX_INPUT_TOKENS`` 环境变量 > 已知模型表 > 默认 30K 兜底。
+    该值经 ``LangChainFallbackModel.profile`` 暴露给 deepagents，驱动
+    SummarizationMiddleware 以「窗口比例（0.85 trigger / 0.10 keep）」触发，
+    从而在小窗口模型（如 qwen-max 32K）上真正生效（见 P2.1）。
+    """
+    env_val = os.getenv("LLM_MAX_INPUT_TOKENS")
+    if env_val and env_val.isdigit():
+        return int(env_val)
+    if primary_model_name:
+        for key, val in _MODEL_MAX_INPUT_TOKENS.items():
+            if primary_model_name.startswith(key):
+                return val
+    return 30_000
 
 
 class LangChainFallbackModel(BaseChatModel):
@@ -52,6 +87,16 @@ class LangChainFallbackModel(BaseChatModel):
                 failure_threshold=failure_threshold,
                 cooldown=cooldown,
             ),
+        )
+        # P2.1：向 deepagents 暴露主模型上下文窗口（max_input_tokens）。
+        # 注意：pydantic v2 的 @property 在 BaseChatModel 子类上会被拦截，
+        # 故用 object.__setattr__ 直接挂实例属性，compute_summarization_defaults
+        # 读取 model.profile["max_input_tokens"] 后按窗口比例自适应触发。
+        primary_name = getattr(primary, "model_name", None) or getattr(primary, "model", None)
+        object.__setattr__(
+            self,
+            "profile",
+            {"max_input_tokens": _resolve_max_input_tokens(primary_name)},
         )
 
     # ---- 兼容属性（只读转发，供 _FallbackModel 复用） ----
@@ -84,7 +129,7 @@ class LangChainFallbackModel(BaseChatModel):
     def cooldown_until(self) -> float:
         return self._core._cooldown_until
 
-    # ---- BaseChatModel 抽象接口适配（委托内核统一路由） ----
+    # ---- BaseChatModel 抽象接口适配（委托内核统一路由） ----    # ---- BaseChatModel 抽象接口适配（委托内核统一路由） ----
 
     @property
     def _llm_type(self) -> str:

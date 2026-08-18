@@ -120,7 +120,13 @@ class TestFallbackModel:
 class TestCreateFallbackModel:
     """create_fallback_model() 在有/无备用模型时的返回类型。"""
 
-    def test_no_fallback_returns_primary(self, monkeypatch):
+    def test_no_fallback_returns_single_model_adapter(self, monkeypatch):
+        """无备用模型时仍返回 LangChainFallbackModel（单模型外壳）。
+
+        P2.1：必须返回外壳而非裸 primary，否则 deepagents 的 SummarizationMiddleware
+        读不到 model.profile["max_input_tokens"]，会在小窗口模型（qwen-max 32K）下
+        永不触发摘要。外壳的 fallback 为 None，profile 按主模型名解析窗口。
+        """
         monkeypatch.setenv("OPENAI_BASE_URL", "https://dashscope.example.com/v1")
         monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
         monkeypatch.setenv("LLM_QWEN_MAX", "qwen-max")
@@ -129,7 +135,10 @@ class TestCreateFallbackModel:
         from agent.llm import create_fallback_model, LangChainFallbackModel
 
         m = create_fallback_model()
-        assert not isinstance(m, LangChainFallbackModel)
+        assert isinstance(m, LangChainFallbackModel)
+        assert m._core.fallback is None
+        # profile 暴露窗口，驱动 summarization 按窗口比例触发（而非硬编码 170K）
+        assert m.profile["max_input_tokens"] == 30_000
 
     def test_with_fallback_returns_adapter(self, monkeypatch):
         monkeypatch.setenv("OPENAI_BASE_URL", "https://dashscope.example.com/v1")
