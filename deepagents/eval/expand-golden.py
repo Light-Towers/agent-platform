@@ -16,11 +16,18 @@ from pathlib import Path
 random.seed(42)
 
 eval_dir = Path(__file__).resolve().parent
-prototypes_path = eval_dir.parent / "agent" / "intent" / "prototypes.json"
+prototypes_path = (
+    eval_dir.parent.parent
+    / "agent-core"
+    / "agent_core"
+    / "intent"
+    / "data"
+    / "prototypes.json"
+)
 golden_path = eval_dir / "golden.jsonl"
 
 with open(prototypes_path, encoding="utf-8") as f:
-    prototypes = json.load(f)
+    prototypes = json.load(f)["prototypes"]
 
 AGENT_MAP = {
     "text_to_sql": "业务数据查询助手",
