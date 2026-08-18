@@ -22,7 +22,14 @@ from shared_schemas import (
 )
 
 # 重新导出联邦类型，供 app 内部（routes.py 等）从 app.schemas 统一引用
-__all__ = ["Capability", "HealthResponse", "Priority", "QueryRequest"]
+__all__ = [
+    "Capability",
+    "HealthResponse",
+    "Priority",
+    "QueryRequest",
+    "HistoryItem",
+    "HistoryResponse",
+]
 
 Capability = Literal["search", "rag", "sql", "direct", "mcp"]
 
@@ -51,6 +58,9 @@ class QueryRequest(BaseQueryRequest):
         default=None,
         description="会话 ID（网关标准名 session_id）",
     )
+    # 工作空间隔离键（优化 G）：跨会话记忆与 RAG 文档按 workspace 隔离；
+    # 未传时记为 default（全局共享空间）。user_id 仅作辅助归属维度，不参与隔离。
+    workspace_id: str = Field(default="default")
     # app 业务默认值：未传 user_id 时记为 default（基类为 None）
     user_id: str = Field(default="default")
     priority: Priority = Field(default="normal")
@@ -124,6 +134,21 @@ class McpToolResult(BaseModel):
     evidence: list[str] = []
     error: str | None = None
     duration_ms: int = 0
+
+
+# 优化 I：精确回忆——按 thread_id 回溯历史对话原文
+class HistoryItem(BaseModel):
+    index: int
+    role: str  # user / assistant / tool / system
+    content: str
+    id: str | None = None
+    created_at: str | None = None
+
+
+class HistoryResponse(BaseModel):
+    thread_id: str
+    count: int
+    items: list[HistoryItem]
 
 
 class RevertResult(BaseModel):

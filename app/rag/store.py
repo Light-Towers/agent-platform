@@ -49,39 +49,46 @@ def rrf_merge(ranked_id_lists: list[list], k: int = _RRF_K) -> list:
     return sorted(scores, key=scores.get, reverse=True)
 
 
-async def add_document(pool, source: str, chunks: list[Chunk]) -> str:
-    """文档入库：向量化后批量插入；返回 doc_id。"""
+async def add_document(pool, source: str, chunks: list[Chunk], workspace_id: str = "default") -> str:
+    """文档入库：向量化后批量插入；返回 doc_id。
+
+    workspace_id 隔离文档归属（优化 G）：不同工作空间上传的文档互不检索。
+    """
     doc_id = uuid.uuid4().hex[:12]
     if not chunks:
         return doc_id
     vectors = await embed_texts([c.text for c in chunks])
     params = [
-        (doc_id, source, c.heading, c.text, vec)
+        (doc_id, source, c.heading, c.text, vec, workspace_id)
         for c, vec in zip(chunks, vectors)
     ]
     async with pool.connection() as conn:
         await conn.executemany(
-            "INSERT INTO chunks (doc_id, source, heading, content, embedding) "
-            "VALUES (%s, %s, %s, %s, %s)",
+            "INSERT INTO chunks (doc_id, source, heading, content, embedding, workspace_id) "
+            "VALUES (%s, %s, %s, %s, %s, %s)",
             params,
         )
     _invalidate_bm25_cache()
     return doc_id
 
 
-async def _vector_ids(pool, embedding: list[float], k: int) -> list[int]:
-    rows = await vector_search(pool, "chunks", "id", embedding, k=k)
+async def _vector_ids(pool, embedding: list[float], k: int, workspace_id: str = "default") -> list[int]:
+    rows = await vector_search(
+        pool, "chunks", "id", embedding, k=k,
+        where="workspace_id = %s", where_params=(workspace_id,),
+    )
     return [r[0] for r in rows]
 
 
-async def _bm25_ids(pool, query: str, k: int) -> list[int]:
+async def _bm25_ids(pool, query: str, k: int, workspace_id: str = "default") -> list[int]:
     async with pool.connection() as conn:
         cur = await conn.execute(
-            "SELECT COUNT(*), COALESCE(MAX(id), 0) FROM chunks"
+            "SELECT COUNT(*), COALESCE(MAX(id), 0) FROM chunks WHERE workspace_id = %s",
+            (workspace_id,),
         )
         row = await cur.fetchone()
     count, max_id = (row[0], row[1]) if row else (0, 0)
-    signature = (count, max_id)
+    signature = (count, max_id, workspace_id)
 
     cached = _BM25_CACHE.get(signature)
     if cached is not None:
@@ -89,8 +96,8 @@ async def _bm25_ids(pool, query: str, k: int) -> list[int]:
     else:
         async with pool.connection() as conn:
             cur = await conn.execute(
-                "SELECT id, content FROM chunks ORDER BY id LIMIT %s",
-                (_BM25_LOAD_LIMIT,),
+                "SELECT id, content FROM chunks WHERE workspace_id = %s ORDER BY id LIMIT %s",
+                (workspace_id, _BM25_LOAD_LIMIT),
             )
             rows = await cur.fetchall()
         if not rows:
@@ -108,22 +115,26 @@ async def _bm25_ids(pool, query: str, k: int) -> list[int]:
     return [ids[i] for i in order[:k] if scores[i] > 0]
 
 
-async def retrieve_chunks(pool, query: str, k: int | None = None) -> list[dict]:
-    """混合检索入口：返回 [{id, source, heading, content, score}]，已按 RRF 排序。"""
+async def retrieve_chunks(pool, query: str, k: int | None = None, workspace_id: str = "default") -> list[dict]:
+    """混合检索入口：返回 [{id, source, heading, content, score}]，已按 RRF 排序。
+
+    workspace_id 隔离检索范围（优化 G）：仅召回本工作空间上传的文档分块。
+    """
     if pool is None:
         return []
     k = k or get_settings().rag_top_k
     fetch_k = k * 4  # 每路多召回再融合
     embedding = await embed_query(query)
-    vec_ids = await _vector_ids(pool, embedding, fetch_k)
-    bm25_ids = await _bm25_ids(pool, query, fetch_k)
+    vec_ids = await _vector_ids(pool, embedding, fetch_k, workspace_id)
+    bm25_ids = await _bm25_ids(pool, query, fetch_k, workspace_id)
     merged = rrf_merge([vec_ids, bm25_ids])[:k]
     if not merged:
         return []
     async with pool.connection() as conn:
         cur = await conn.execute(
-            "SELECT id, source, heading, content FROM chunks WHERE id = ANY(%s)",
-            (list(merged),),
+            "SELECT id, source, heading, content FROM chunks "
+            "WHERE id = ANY(%s) AND workspace_id = %s",
+            (list(merged), workspace_id),
         )
         rows = await cur.fetchall()
     by_id = {r[0]: r for r in rows}

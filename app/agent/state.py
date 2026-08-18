@@ -32,6 +32,7 @@ class AgentState(BaseModel):
     messages: Annotated[list[BaseMessage], add_messages] = []
     question: str = ""
     user_id: str = "default"
+    workspace_id: str = "default"
     route: Route = "direct"
     sub_query: str = ""
     route_reason: str = ""

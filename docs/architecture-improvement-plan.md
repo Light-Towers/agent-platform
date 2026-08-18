@@ -111,6 +111,125 @@
 - **前置**：先修 `deepagents/api/server.py:165` API_KEY 模式 thread_id 每次重建导致会话断裂的 bug（否则接 PG checkpoint 也救不了多轮对话）。
 - **专项规划**：详见 `docs/plan-e-dual-track-convergence.md` 末尾「F 外壳基础设施化」节（P4.4，可选）。
 
+### 优化 G：引入 `workspace_id` 工作空间隔离（高优先级 / 低-中风险） ✅ 已落地（feat/workspace-isolation）
+
+- **来源**：跨会话记忆架构讨论（对标 codex 的 workspace 锚）。澄清：**RAG 知识库 ≠ 跨会话记忆**，二者此前无统一归属维度、长期记忆仅按 `user_id` 隔离（app 默认 `default` 桶串味）。引入 `workspace_id` 作为统一归属/隔离主键，同时串起 RAG 文档与长期记忆，但语义分离。
+- **决策（A 模式）**：`workspace_id` 由**客户端显式传**（请求字段，默认 `default`），**仅 app 内部隔离**，不写 `shared_schemas`（联邦网关无感）。不做 resume/fork（用户决策：暂不需要）。
+- **三者关系**：RAG 知识库 = 工作空间的「静态硬盘」（用户上传文档）；长期记忆 = 工作空间的「动态经验」（跨会话沉淀 Q/A）；`workspace_id` = 绑定二者的「文件夹」。RAG 本身不跨会话（每次会话重检索），跨会话能力由 `memories` 表 + checkpointer 提供并受 workspace 隔离。
+- **落地改动**：
+  - `app/infra/db.py`：`chunks` 表加 `workspace_id TEXT NOT NULL DEFAULT 'default'` 列 + 索引；`ensure_schema` 对存量库幂等 `ALTER TABLE ... ADD COLUMN`（捕获 duplicate_column）。
+  - `app/rag/store.py`：`add_document`/`retrieve_chunks`/`_vector_ids`/`_bm25_ids` 全链路按 `workspace_id` 过滤（向量路用 `vector_search(where=...)`，BM25 语料加载与缓存签名含 `workspace_id`）。
+  - `app/schemas.py`：`QueryRequest` 加 `workspace_id`（默认 `default`）；`app/api/routes.py` 的 `/import` 接口加 `workspace_id` 表单参并写入。
+  - `app/agent/state.py`：`AgentState` 加 `workspace_id`；`routes.py` 注入初始 state；`graph.py` 的 `route_node/rag_node/synthesize_node` 按 `workspace_id` 调 `recall/remember` 与 `rag_query`。
+  - `app/memory/longterm.py`：门面 `recall/remember` 改为以 `workspace_id` 作为内核隔离过滤键（复用内核 `recall(pool, user_id, ...)` 的 `user_id` 形参位），**内核 `PgVectorMemoryBackend` 零改动**（表结构/其余维度不变）。
+- **护栏**：保持内核零依赖铁律，未触碰 `agent-core` 后端契约；`workspace_id` 隔离在 app 业务层完成，符合 §3 护栏第 1 条。
+- **后续可扩展（本分支未做）**：B 模式（按 `user_id` 推导默认 workspace）、`shared_schemas` 联邦化（deepagents 网关感知 workspace）、resume/fork 指定历史 session。
+
+### 优化 H：长期记忆质量升级——三层抽取 + 三分存储 + consolidation/forgetting（中优先级 / 中风险）
+
+> 状态：提案（feat/workspace-isolation 分支，待落地）
+> 前置：依赖优化 G 的 `workspace_id` 隔离（记忆归属维度已就位）
+
+#### H.0 问题定义（为什么说当前长期记忆"质量低"）
+
+当前 `app/memory/longterm.py` 的 `remember()` 把**整条 `"Q: ...\nA: ..."` 原文**直接灌进 pgvector，recall 只做**单一语义向量召回**。这带来三类问题：
+
+1. **噪声与 PII 风险**：原始对话包含寒暄、冗余、用户隐私字段，全量入库既稀释检索精度又违规留存 PII 原文。
+2. **检索无结构**：recall 只能「语义相似度」一条路，无法区分"这是发生过的事（episodic）""这是用户偏好（semantic）""这是该怎么做事（procedural）"，导致回答时误用记忆类型。
+3. **无巩固与遗忘**：记忆只增不减，`memories` 表无限膨胀，旧事实与后来修正的事实并存，且同样权重参与召回——经典「记忆腐化」。
+
+对标 OpenAI Agents SDK（`Memory` 抽象 + `memory_search` 工具）、LangGraph `long-term-memory`（LLM 抽取结构化事实再存）、Mem0（episodic/semantic/procedural 三层 + consolidation），本优化落地**同质但保持内核零依赖**的方案。
+
+#### H.1 设计决策（five design decisions，复用跨会话记忆讨论结论）
+
+| # | 决策 | 落地方式 |
+|---|---|---|
+| D1 | **抽取不存原文** | `remember` 先经 LLM 抽取为结构化事实（`surface_form` 摘要 + 元数据），原文不入记忆库；PII 在抽取阶段即被剥离 |
+| D2 | **结构化 + 元数据** | `memories` 表扩展 `memory_type`/`importance`/`created_at` 三列；事实按类型分层 |
+| D3 | **分层混合检索** | recall 按 `memory_type` 加权 + 语义召回 + importance 衰减排序 |
+| D4 | **consolidation 巩固** | 新事实入库时比对存量：冲突则按时间/importance 更新而非重复插入；相似则合并 |
+| D5 | **forgetting 遗忘** | 按 `importance × 衰减(created_at)` 打分，低于阈值的低价值记忆在 consolidation 窗口内惰性淘汰 |
+
+#### H.2 三种记忆类型（three-type 模型）
+
+| 类型 | 含义 | 抽取信号 | 召回偏好 |
+|---|---|---|---|
+| `episodic` | 特定发生过的事（"用户上周报过账"） | 含时间/事件/结果 | 高 importance，短期强权重 |
+| `semantic` | 用户偏好/事实/人设（"用户是财务，讨厌冗长"） | 稳定陈述、偏好表达 | 长期稳定，跨会话复用 |
+| `procedural` | 该怎么做事（"这类报表用 X 模板"） | 指令性、方法论 | 高 importance，覆盖式更新 |
+
+#### H.3 存储结构（三分存储 + 共享检索，遵守 §3 护栏第 1 条）
+
+**关键护栏**：`agent-core` 的 `MemoryBackend` 契约（`recall/remember`）与 `PgVectorMemoryBackend` 实现**不得修改**（零依赖铁律）。因此 H 在 **app 层**落地：
+
+- **复用内核表**：沿用内核 `PgVectorMemoryBackend` 的 `memories` 表（列：`user_id`/`content`/`embedding`），**app 侧幂等 `ALTER TABLE` 扩展** `memory_type TEXT`/`importance FLOAT`/`created_at TIMESTAMPTZ`（app 是该表唯一写方，安全；不改内核 DDL 文件，避免破坏非 app 消费方）。
+- **三分检索入口**：app 门面 `recall` 内部按 `memory_type` 分别加权召回后融合（单一混合结果返回，对 graph 透明）。
+- **共享检索**：对外仍暴露 `recall(pool, workspace_id, question, k)`，graph 无感知类型分层。
+
+> 注：真正的「图存储（Graph）/用户画像（Profile）/情景向量（Episodic vector）」三库分离是 Mem0 式重架构，超出本优化范围。H 用**单表 + 类型列**近似三分语义，零新增依赖、可独立测试，符合「分阶段低风险」原则。未来若需真图存储，列为优化 H2。
+
+#### H.4 落地改动清单
+
+- `app/infra/db.py`：`ensure_schema` 幂等 `ALTER TABLE memories ADD COLUMN memory_type/importance/created_at`（捕获 duplicate_column）。
+- `app/memory/memory_backend.py`：app 侧 `PgVectorMemoryBackend` 的 `remember/recall` 支持写/读 `memory_type`/`importance`/`created_at`；新增 `remember_fact(pool, workspace_id, fact, memory_type, importance)` 与 `recall_typed(pool, workspace_id, question, k)`。
+- `app/memory/longterm.py`：门面升级
+  - `remember(pool, workspace_id, q, a)`：LLM 抽取结构化事实 → `remember_fact`（带类型/重要性）；抽取失败/未开启时退化存原文（保持现有行为）。
+  - `recall(pool, workspace_id, question, k)`：调 `recall_typed` 分层加权融合。
+  - 新增 `consolidate(pool, workspace_id)`（冲突更新+相似合并+低价值淘汰）与 `forget(pool, workspace_id, memory_id)`。
+- `app/config.py`：新增开关 `memory_extraction_enabled: bool = False`（默认关，无 LLM 时退化）、`memory_forget_threshold: float = 0.1`。
+- `app/agent/graph.py`：`synthesize_node` 完成后调 `remember`（抽取路径）；`route_node` 前调 `recall`（分层路径）。
+
+#### H.5 风险与门禁
+
+- **LLM 抽取不可控**：默认 `memory_extraction_enabled=False`，退化路径与当前行为完全一致；抽取路径单测用 mock LLM 验证，不依赖真实 API。
+- **ALTER TABLE 兼容性**：幂等捕获 `duplicate_column`，存量库安全升级。
+- **回归总闸**：`pytest tests/ -q` + `python -m eval.run_eval` 全绿；新增 `tests/test_longterm_h.py` 覆盖抽取/退化/consolidate/forget。
+
+#### H.6 后续（未纳入本优化）
+
+- H2：真三分存储（Graph + Profile + Episodic vector）独立表/库。
+- 精确回忆机制：按 `thread_id` + checkpointer 回溯历史对话原文（与语义回忆正交，见跨会话记忆讨论，已由优化 I 落地）。
+
+### 优化 I：精确回忆机制——thread_id + checkpointer 回溯历史原文（中优先级 / 低风险）
+
+> 状态：已落地（feat/workspace-isolation 分支，独立于 H）
+> 前置：内核 `get_checkpointer` 工厂已产出 `AsyncPostgresSaver`，挂于 `app.state.checkpointer`；
+>       `/query` 已用 `thread_id` 驱动会话状态（优化 G 的 `resolve_thread_id`）。
+
+#### I.0 为什么需要精确回忆（与 H 正交）
+
+跨会话记忆有两路，互为补充：
+
+| 维度 | 优化 H（语义回忆） | 优化 I（精确回忆） |
+|---|---|---|
+| 目标 | 跨会话「大概记得」用户偏好/事实 | 精确定位「某次聊天具体说了什么」 |
+| 载体 | LLM 抽取结构化事实 + pgvector | LangGraph checkpointer 原始消息 |
+| 匹配 | 语义相似度 | 字面原文 / `thread_id` 定位 |
+| 丢失风险 | 抽取可能丢原文细节、PII 剥离 | 无（存原文） |
+| 隔离维度 | `workspace_id`（memories 表） | `thread_id`（checkpointer 表，会话级） |
+
+用户原问"能不能精确的找到之前聊天内容"——H 答不了（它只存提炼事实），只有 I 能答。两路并存才是完整跨会话记忆。
+
+#### I.1 设计决策
+
+- **复用内核 checkpointer**：`AsyncPostgresSaver.alist_messages({"configurable": {"thread_id": ...}})` 原生支持按会话取回全部消息，零新增存储、零内核改动。
+- **精确匹配语义**：`keyword` 过滤走字面子串匹配（非向量语义），保证「找到原话」的确定性。
+- **鉴权一致**：`/history` 复用 `verify_api_key` + `resolve_thread_id`，与 `/query` 同源归属（thread_id 由 session_id + api_key 推导，他人不可越权读）。
+- **降级安全**：无 checkpointer（内存/未初始化）时返回 503，不泄漏空数据误判。
+
+#### I.2 落地改动清单
+
+- `app/memory/recall_exact.py`（新）：`get_thread_history(checkpointer, thread_id, keyword, limit)` 规整 `BaseMessage` → `{index, role, content, id, created_at}`；`search_in_thread` 关键词精确检索。role 归一化（human→user, ai→assistant）。
+- `app/schemas.py`：新增 `HistoryItem` / `HistoryResponse`。
+- `app/api/routes.py`：新增 `GET /history?session_id=&keyword=&limit=`，依赖 `verify_api_key`，从 `app.state.checkpointer` 取数据。
+- 单测 `tests/test_recall_exact.py`：mock checkpointer 的 `alist_messages`，验证规整/关键词过滤/limit/角色归一化。
+
+#### I.3 风险与门禁
+
+- **checkpointer 依赖**：接口依赖 `app.state.checkpointer`；内存模式（无 PG）时 `get_checkpointer` 降级 `InMemorySaver`，仍能按 thread_id 回溯（测试用 mock）。
+- **PII 暴露面**：`/history` 返回原文，鉴权与 `/query` 同强度（api_key + 推导 thread_id），无越权面；如需更严可加 `workspace_id` 绑定校验（留作后续）。
+- **回归总闸**：`pytest tests/ -q` 全绿；新增 `tests/test_recall_exact.py` 覆盖规整/关键词/limit/归一化，不连 PG。
+
 ## 3. 必须保留、不可替换的深度定制（护栏清单）
 
 以下为项目护城河，任何优化均不得触碰：
