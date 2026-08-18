@@ -222,20 +222,70 @@ async def recall_typed(
     return scored[:k]
 
 
-async def consolidate(user_id, pool, forget_threshold: float = 0.1) -> int:
-    """巩固 + 遗忘（ADR-0004 D4/D5）。
+def memory_forget_threshold() -> float:
+    """遗忘重要度阈值（TD-6 参数化）。
 
-    淘汰「importance 低于阈值且超过 30 天」的低价值记忆，返回删除条数。
-    完整 SQL 逻辑，与 app 既有 ``consolidate_memories`` 一致，仅内核化。
+    读环境变量 ``MEMORY_FORGET_THRESHOLD``；缺省回退历史常量 ``0.1``。
+    基线采集后（ADR-0004 候选A 被驳回原因：缺数据）可按业务覆盖。
     """
+    raw = os.getenv("MEMORY_FORGET_THRESHOLD")
+    if raw is None:
+        return 0.1
+    try:
+        return float(raw)
+    except ValueError:
+        logger.warning("[typed] MEMORY_FORGET_THRESHOLD=%r 非法，回退 0.1", raw)
+        return 0.1
+
+
+def memory_forget_age_days() -> int:
+    """遗忘老化天数（TD-6 参数化）。
+
+    读环境变量 ``MEMORY_FORGET_AGE_DAYS``；缺省回退历史常量 ``30``。
+    SQL 端用参数化 ``interval '%s days'``，避免写死字面量。
+    """
+    raw = os.getenv("MEMORY_FORGET_AGE_DAYS")
+    if raw is None:
+        return 30
+    try:
+        return int(raw)
+    except ValueError:
+        logger.warning("[typed] MEMORY_FORGET_AGE_DAYS=%r 非法，回退 30", raw)
+        return 30
+
+
+async def consolidate(
+    user_id,
+    pool,
+    forget_threshold: float | None = None,
+    age_days: int | None = None,
+) -> int:
+    """巩固 + 遗忘（ADR-0004 D4/D5，TD-6 阈值/老化天数参数化）。
+
+    淘汰「importance 低于阈值且超过 age_days 天」的低价值记忆，返回删除条数。
+    完整 SQL 逻辑，与 app 既有 ``consolidate_memories`` 一致，仅内核化。
+
+    Args:
+        forget_threshold: 重要度淘汰阈值；``None`` 时取 ``memory_forget_threshold()``。
+        age_days: 老化天数；``None`` 时取 ``memory_forget_age_days()``。
+    """
+    if forget_threshold is None:
+        forget_threshold = memory_forget_threshold()
+    if age_days is None:
+        age_days = memory_forget_age_days()
     async with pool.connection() as conn:
         cur = await conn.execute(
             "DELETE FROM memories "
             "WHERE user_id = %s AND importance < %s "
-            "AND created_at < now() - interval '30 days'",
-            (user_id, forget_threshold),
+            "AND created_at < now() - interval '%s days'",
+            (user_id, forget_threshold, age_days),
         )
-        return getattr(cur, "rowcount", 0) or 0
+        deleted = getattr(cur, "rowcount", 0) or 0
+        logger.info(
+            "[typed] consolidate 删除 %d 条（user=%s, threshold=%.3f, age_days=%d）",
+            deleted, user_id, forget_threshold, age_days,
+        )
+        return deleted
 
 
 async def forget(user_id, pool, memory_id) -> bool:

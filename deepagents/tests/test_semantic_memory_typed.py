@@ -11,7 +11,6 @@ deepagents 的 pytest 配置 asyncio_mode=auto，async 测试无需装饰器。
 
 from __future__ import annotations
 
-import agent_core.memory.typed as typed_core
 import agent.memory.semantic_memory as sm
 
 
@@ -33,7 +32,7 @@ async def test_recall_typed_delegates_to_core_typed(monkeypatch):
             pool=pool, user_id=user_id, question=question, k=k,
             weights=weights, embedding=embedding,
         )
-        from agent_core.memory.typed import TypedMemory, MemoryType
+        from agent_core.memory.typed import MemoryType, TypedMemory
 
         return [TypedMemory(content="x", memory_type=MemoryType.SEMANTIC, importance=0.5)]
 
@@ -77,7 +76,7 @@ async def test_consolidate_and_forget_delegate_when_enabled(monkeypatch):
     monkeypatch.setattr(sm, "semantic_memory_typed_enabled", lambda: True)
     calls = {"consolidate": 0, "forget": 0}
 
-    async def _fake_consolidate(user_id, pool, forget_threshold):
+    async def _fake_consolidate(user_id, pool, forget_threshold, age_days=None):
         calls["consolidate"] += 1
         assert user_id == "u1" and pool is not None
         return 2
@@ -199,7 +198,7 @@ async def test_recall_context_injects_when_enabled(monkeypatch):
 
     async def _fake_recall(pool, user_id, question, k, weights, embedding):
         captured.update(pool=pool, user_id=user_id, question=question)
-        from agent_core.memory.typed import TypedMemory, MemoryType
+        from agent_core.memory.typed import MemoryType, TypedMemory
 
         return [
             TypedMemory(content="老用户偏好蓝色", memory_type=MemoryType.EPISODIC, importance=0.7),

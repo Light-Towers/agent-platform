@@ -152,7 +152,8 @@ async def maybe_consolidate(pool, workspace_id: str) -> int:
     """低频触发 typed 巩固/遗忘（旁路，失败不阻断，返回淘汰条数）。
 
     - 仅当 ``SEMANTIC_MEMORY_TYPED`` 开启且 pool 存在时生效；
-    - 内部惰性淘汰 importance 低于阈值且超过 30 天的低价值记忆；
+    - 内部惰性淘汰 importance 低于阈值且超过老化天数（默认 30 天，
+      可由 ``MEMORY_FORGET_AGE_DAYS`` 配置，TD-6）的低价值记忆；
     - 不抛错，异常吞掉（记忆维护是增强项，不应影响主链路）。
     """
     global _consolidate_counter

@@ -156,17 +156,21 @@ async def recall_typed(
 async def consolidate_memories(
     pool,
     workspace_id: str,
-    forget_threshold: float = 0.1,
+    forget_threshold: float | None = None,
+    age_days: int | None = None,
 ) -> int:
-    """巩固 + 遗忘（ADR-0004 re-export，委托内核 typed.consolidate）。
+    """巩固 + 遗忘（ADR-0004 re-export，委托内核 typed.consolidate，TD-6 参数化）。
 
-    - forgetting：淘汰 importance 低于阈值且超过 30 天的低价值记忆；
+    - forgetting：淘汰 importance 低于阈值且超过 age_days 天的低价值记忆；
+    - ``forget_threshold`` / ``age_days`` 为 ``None`` 时由内核取环境变量默认值
+      （``MEMORY_FORGET_THRESHOLD`` / ``MEMORY_FORGET_AGE_DAYS``，默认 0.1 / 30）；
     - 返回被淘汰的记忆条数。
     """
     return await _core_consolidate(
         user_id=workspace_id,
         pool=pool,
         forget_threshold=forget_threshold,
+        age_days=age_days,
     )
 
 

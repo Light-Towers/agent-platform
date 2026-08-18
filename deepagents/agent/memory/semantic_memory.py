@@ -144,15 +144,23 @@ async def recall_typed(
     return result
 
 
-async def consolidate(pool, user_id: str, forget_threshold: float = 0.1) -> int:
-    """巩固 + 遗忘（ADR-0004 阶段2 re-export）。
+async def consolidate(
+    pool,
+    user_id: str,
+    forget_threshold: float | None = None,
+    age_days: int | None = None,
+) -> int:
+    """巩固 + 遗忘（ADR-0004 阶段2 re-export，TD-6 参数化）。
 
     仅 ``SEMANTIC_MEMORY_TYPED=true`` 时调用内核 typed.consolidate 淘汰低价值记忆；
     关闭时返回 0（deepagents 历史无此能力，保持零行为变更）。``pool`` 为宿主 psycopg 池。
+    ``forget_threshold`` / ``age_days`` 为 ``None`` 时由内核取环境变量默认值。
     """
     if not semantic_memory_typed_enabled():
         return 0
-    return await _core_consolidate(user_id=user_id, pool=pool, forget_threshold=forget_threshold)
+    return await _core_consolidate(
+        user_id=user_id, pool=pool, forget_threshold=forget_threshold, age_days=age_days
+    )
 
 
 async def forget(pool, user_id: str, memory_id) -> bool:

@@ -15,7 +15,6 @@
 from __future__ import annotations
 
 import datetime
-from types import SimpleNamespace
 
 import pytest
 
@@ -270,10 +269,79 @@ async def test_consolidate_deletes_low_value_old(monkeypatch):
     deleted = await consolidate("ws1", _CapturePool(), forget_threshold=0.1)
     assert deleted == 3
     assert "DELETE FROM memories" in captured["sql"]
-    assert captured["params"] == ("ws1", 0.1)
-    # 含 30 天窗口与 importance 阈值条件
+    # TD-6 参数化：参数三元组 (user, threshold, age_days)，默认 age_days=30
+    assert captured["params"] == ("ws1", 0.1, 30)
+    # 含 30 天窗口与 importance 阈值条件（SQL 用参数化 interval '%s days'）
     assert "importance <" in captured["sql"]
-    assert "interval '30 days'" in captured["sql"]
+    assert "interval '%s days'" in captured["sql"]
+
+
+# --- TD-6 环境变量参数化（阈值 / 老化天数）------------------------------
+
+async def test_consolidate_reads_env_threshold_and_age_days(monkeypatch):
+    """TD-6：MEMORY_FORGET_THRESHOLD / MEMORY_FORGET_AGE_DAYS 应覆盖默认值。"""
+    monkeypatch.setenv("MEMORY_FORGET_THRESHOLD", "0.35")
+    monkeypatch.setenv("MEMORY_FORGET_AGE_DAYS", "7")
+
+    captured = {}
+
+    class _Cur:
+        rowcount = 0
+
+        def fetchall(self):
+            return []
+
+    class _Conn:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def execute(self, sql, params):
+            captured["sql"] = sql
+            captured["params"] = params
+            return _Cur()
+
+    class _Pool:
+        def connection(self):
+            return _Conn()
+
+    await consolidate("ws2", _Pool())
+    # 环境变量生效：params 三元组最后一维应为 7，阈值应为 0.35
+    assert captured["params"] == ("ws2", 0.35, 7)
+
+
+async def test_consolidate_env_invalid_falls_back(monkeypatch):
+    """TD-6：非法环境变量应安全回退默认（0.1 / 30），不抛。"""
+    monkeypatch.setenv("MEMORY_FORGET_THRESHOLD", "not-a-float")
+    monkeypatch.setenv("MEMORY_FORGET_AGE_DAYS", "oops")
+
+    captured = {}
+
+    class _Cur:
+        rowcount = 0
+
+        def fetchall(self):
+            return []
+
+    class _Conn:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def execute(self, sql, params):
+            captured["params"] = params
+            return _Cur()
+
+    class _Pool:
+        def connection(self):
+            return _Conn()
+
+    await consolidate("ws3", _Pool())
+    assert captured["params"] == ("ws3", 0.1, 30)
 
 
 # --- forget 删除（fake 池）------------------------------------------------
