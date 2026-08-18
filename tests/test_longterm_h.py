@@ -242,7 +242,8 @@ async def test_consolidate_deletes_low_value_old(patch_settings, monkeypatch):
     deleted = await mb.consolidate_memories(_CapturePool(), "ws1", forget_threshold=0.1)
     assert deleted == 3
     assert "DELETE FROM memories" in captured["sql"]
-    assert captured["params"] == ("ws1", 0.1)
+    # TD-6 参数化：三元组 (user, threshold, age_days)，默认 age_days=30
+    assert captured["params"] == ("ws1", 0.1, 30)
 
 
 async def test_recall_falls_back_to_core_when_disabled(patch_settings, monkeypatch):

@@ -69,7 +69,14 @@ ADR-0004 阶段4 的候选B（`eval/memory_reuse_llm.py`）评审中，发现 `_
 - 现状：`forget_threshold=0.1` + SQL 内 `"30 days"` 写死。记忆生命周期不可配，跨业务不合理。
 - 关联：即 ADR-0004 候选A（智能阈值）驳回提到的固定阈值；待采集基线后参数化。
 - 建议：从 settings 读取；采集重要性/老化基线数据后再调参。
-- 状态：待排期（依赖候选A 基线采集）
+- 修复（v2 TD-6 最小修复）：阈值/老化天数改为从环境变量读取
+  （`MEMORY_FORGET_THRESHOLD` / `MEMORY_FORGET_AGE_DAYS`，默认 0.1 / 30）；
+  新增 `memory_forget_threshold()` / `memory_forget_age_days()` helper；
+  `consolidate` 签名加 `age_days: int | None = None`（SQL 用 `interval '%s days'` 参数化），
+  下游 `deepagents/agent/memory/semantic_memory.py` 与 `app/memory/memory_backend.py`
+  的 `consolidate` / `consolidate_memories` 同步透传 `age_days`，向后兼容
+  （旧调用仅传 `forget_threshold` 仍可用）。`consolidate` 新增诊断日志输出实际阈值/天数/删除条数。
+- 状态：✅ 已修复（参数化基线；智能阈值"候选A"仍待基线采集后评估，非本次范围）
 
 ---
 
@@ -144,8 +151,9 @@ ADR-0004 阶段4 的候选B（`eval/memory_reuse_llm.py`）评审中，发现 `_
 
 ## 排期建议
 1. ~~高优先：TD-1/TD-2（生产链路，且注释误导）—— 已修复（v2 任务二）~~
-2. 中优先：TD-6（依赖候选A 基线）、TD-4/TD-3
-3. 低优先：TD-5/TD-7~TD-10
+2. ~~中优先：TD-6（参数化阈值/老化天数）—— 已修复（v2 TD-6 最小修复；智能阈值候选A 仍待基线采集）~~
+3. 中优先：TD-4/TD-3
+4. 低优先：TD-5/TD-7~TD-10
 
 ---
 
