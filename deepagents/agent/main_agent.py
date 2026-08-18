@@ -8,6 +8,11 @@ logger = get_logger(__name__)
 
 import os
 
+from agent_core.memory.semantic import (
+    recall_memories,
+    remember_memory,
+    semantic_memory_enabled,
+)
 from deepagents import create_deep_agent
 
 from agent.async_subagents import get_remote_subagents
@@ -215,6 +220,19 @@ async def run_deep_agent(task_query, session_id):
         session_dir_str = str(session_dir).replace("\\", "/")
         relative_session_dir_str = str(session_dir.relative_to(project_root_path)).replace("\\", "/")
 
+        # 语义长期记忆召回（受 SEMANTIC_MEMORY_ENABLED 开关控制；对齐 app 范式，复用内核实现）
+        memory_context = ""
+        if semantic_memory_enabled():
+            try:
+                past = await recall_memories(session_id, task_query, k=5)
+                if past:
+                    memory_context = "\n    [历史记忆] 以下为你在本会话中沉淀过的上下文，可参考复用：\n" + "\n".join(
+                        [f"    - {m}" for m in past]
+                    )
+                    logger.info("语义记忆召回 %d 条 (session=%s)", len(past), session_id)
+            except Exception as e:
+                logger.warning("语义记忆召回失败（非致命）: %s", e)
+
         updated_dir_path = project_root_path / "updated" / f"session_{session_id}"
         updated_info_prompt = ""
         if updated_dir_path.exists():
@@ -238,6 +256,7 @@ async def run_deep_agent(task_query, session_id):
         【工作环境指令】
         工作目录: {relative_session_dir_str}
         {updated_info_prompt}
+        {memory_context}
 
         规则：
         1. 新生成文件必须保存到工作目录：'{relative_session_dir_str}/filename'
@@ -305,3 +324,10 @@ async def run_deep_agent(task_query, session_id):
                 except Exception:
                     pass
             reset_session_context(session_dir_token, session_id_token)
+
+        # 语义长期记忆沉淀（受 SEMANTIC_MEMORY_ENABLED 开关；仅真实生成答案且非缓存命中时写入）
+        if semantic_memory_enabled() and _cache_hit is None and _final_answer:
+            try:
+                remember_memory(session_id, f"Q: {task_query}\nA: {_final_answer}")
+            except Exception as e:
+                logger.warning("语义记忆沉淀失败（非致命）: %s", e)
