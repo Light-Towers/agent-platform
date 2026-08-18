@@ -142,25 +142,14 @@ def extract_tracking_id(message: str) -> str | None:
 
 
 async def extract_issue_type(message: str) -> str | None:
-    """从用户消息中识别售后业务细分类型（slot 提取，非意图分类，TD-2 澄清）。
+    """从用户消息中识别售后业务细分类型（slot 提取，非意图分类，TD-2）。
 
-    职责边界：意图分类已统一收敛到 ``agent_core.intent``（kefu 的
-    ``intent_node`` 判 CUSTOMER_SERVICE 并细分到 postsale_query 后才会进入
-    售后 Flow 调用本函数）。本函数只承担**售后域内的细分 slot 提取**
-    （退款/换货/维修/退货），其关键词表是业务细分而非意图识别硬编码，保留。
-
-    为防误匹配非售后语句，先经统一 classifier 做域校验：仅当判定为
-    CUSTOMER_SERVICE 时才细分；否则返回 None（交由上层走知识库/主管应答）。
+    职责边界：意图分类已在 ``intent_node`` 完成（判 CUSTOMER_SERVICE 并细分到
+    ``postsale_query`` 后才会进入售后 Flow 调用本函数），此处**不再重复分类**
+    （避免二次嵌入/LLM 调用造成的延迟翻倍与两次结果发散，#6 修复）。
+    本函数只承担售后域内的细分 slot 提取（退款/换货/维修/退货），
+    关键词表是业务细分而非意图识别硬编码，保留。
     """
-    from agent_core.intent import IntentLabel, classify_intent
-
-    try:
-        if (await classify_intent(message)).primary != IntentLabel.CUSTOMER_SERVICE:
-            return None
-    except Exception:
-        # classifier 不可用时退化为直接细分（保持旧行为，不阻断售后流）。
-        pass
-
     if any(kw in message for kw in ["退款", "退钱"]):
         return "退款"
     if any(kw in message for kw in ["换货", "更换"]):

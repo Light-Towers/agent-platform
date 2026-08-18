@@ -5,7 +5,10 @@ description = "kefu 客服迁移版（deepagents + LangGraph，Agent Protocol �
 requires-python = ">=3.11"
 license = { text = "Apache-2.0" }
 dependencies = [
-    "agent-core",
+    # 统一意图架构 agent_core.intent 的可选本地嵌入能力（L1）声明为 extra：
+    # 安装该 extra 后 classify_intent 可走 sentence-transformers 主路径；
+    # 未安装时 classify_intent 自动降级，intent_node 回退业务关键词分流（可达性底线，#1）。
+    "agent-core[memory-embed-local]",
     "shared-schemas",
     "fastapi>=0.129.0",
     "uvicorn>=0.41.0",

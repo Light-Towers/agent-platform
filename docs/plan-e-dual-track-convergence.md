@@ -8,7 +8,7 @@
 > 实施记录（2026-08-16）：P4.1~P4.3 已全部落地并通过单测门禁（deepagents unit 44 passed；app 根 59 passed）。
 >   - P4.1：deepagents/pyproject.toml 补 `shared-schemas` 依赖；`async_subagents._HttpSubAgent.ainvoke` 接入 `QueryResponse(**data)` 断言 + `E1_CONTRACT_ASSERT` 灰度开关；新增 `tests/unit/test_async_subagents_contract.py`(5)。
 >   - P4.2：deepagents/pyproject.toml 补 `sqlglot`；新增 `tools/sql_guard.py` 薄封装委托 `agent_core.sql.guard(dialect="mysql")` + `USE_CORE_GUARD` 回滚开关；`db_tools.execute_sql_query` 改用薄封装；新增 `tests/unit/test_sql_guard_mysql.py`(7)，`sql_validation` 回归 18 维持。
->   - P4.3：新增 `agent_core/memory/backend.py`（仅 `MemoryBackend` Protocol 签名，零依赖）；`agent_core/memory/__init__.py` 导出并标注与 `ConversationMemory` 正交；`app/memory/memory_backend.py` 改为 re-export 内核版 + 本地兜底副本（S-3）。
+>   - P4.3：新增 `agent_core/memory/backend.py`（仅 `MemoryBackend` Protocol 签名，零依赖）；`agent_core/memory/__init__.py` 导出并标注与 `ConversationMemory` 正交；`app/memory/memory_backend.py` 经优化 H 重写为**类型化记忆门面**（含 `MemoryBackend` 语义契约的本地实现），协议下沉目标已达成（内核为唯一真相源），re-export 形态随这次重写调整，记录形态过期已勘误（2026-08-18）。
 
 ## 0. 结论先行
 
@@ -90,10 +90,10 @@
 
 **收益**：消除双轨外壳重复维护（TB-13）；B 侧获得持久化 checkpoint/回退能力（AR-2/TB-10）；为未来"确定性路由 vs 涌现委派"主线决策扫清外壳障碍。
 
-**风险**：抽离需保证 `app` 现有行为零回归（admission 崩溃恢复、coordinator 丢失唤醒竞态防护都需保留）；B 侧 `thread_id` 每次请求重建 bug（`api/server.py:165` API_KEY 模式）须先修，否则接了 PG checkpoint 也救不了多轮会话。
+**风险**：抽离需保证 `app` 现有行为零回归（admission 崩溃恢复、coordinator 丢失唤醒竞态防护都需保留）；B 侧 `thread_id` 会话断裂**已于 2026-08-18 审查核销**（`api/auth.py:resolve_thread_id` 按密钥派生稳定 `thread_id`，见 improvement-plan TB-14 已落地）——此前登记的 `server.py:165` 重建 bug 已消解，以下顺序从 PG checkpoint 注入起步即可。
 
 **实施计划（建议顺序）**：
-1. 先修 `server.py:165` thread_id 会话断裂（前置，否则后续无效）。
+1. ~~先修 `server.py:165` thread_id 会话断裂~~ ✅ 已修（见 TB-14 核销），无需重复投入。
 2. PG checkpoint 注入 `main_agent.py:132`（ADR-0002 已规划，代码未落地）。
 3. 抽 `AdmissionQueue`/`SessionCoordinator`/`RevertHandler` 为共享基础设施，A/B 双挂。
 4. 补 B 侧 `/api/revert` 端点，复用 A 的 `RevertHandler`。

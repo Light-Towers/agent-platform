@@ -221,7 +221,8 @@ class DelegatingSubAgent:
             except Exception as exc:
                 logger.error("[%s] 本地 fallback 也失败: %s", self.name, exc)
                 # 落入结构化降级响应
-        record_delegation(success=True, degraded=True)
+        # 熔断 + 本地兜底均不可用，才是「彻底失败」——驱动 delegation_failure_total（#4 修复）。
+        record_delegation(success=False, degraded=True)
         return {
             "answer": f"子服务「{self.name}」当前不可用（{reason}），已降级处理，请稍后重试或由主管直接回答。",
             "degraded": True,

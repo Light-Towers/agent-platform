@@ -17,7 +17,7 @@
 | `wenda-data-agent/` | Text-to-SQL 数据分析垂直场景（已直连联邦契约，无需 adapter） | — |
 | `zhanggui-zhiku/` | 掌柜智库：RAG 知识库导入 + 多路检索问答（:8900） | `zhanggui-zhiku` 脚本 |
 | `dialogue-framework/` | LLM 对话系统框架基础设施 | `dialogue_framework.cli:main` |
-| `tests/` | `app/` 单元测试（40 用例） | `pytest -q` |
+| `tests/` | `app/` 单元测试 | `pytest -q` |
 | `eval/` | `app/` 评测门禁（12 条 golden） | `python -m eval.run_eval` |
 | `docs/` | 设计文档 | — |
 
@@ -25,7 +25,7 @@
 
 ```bash
 pip install -e ".[dev]"          # 安装
-pytest -q                         # 单元测试
+make ci                           # CI 唯一门禁：根 pytest（收集 tests/ + agent-core/tests + deepagents/tests/unit + kefu-service/tests）
 python -m eval.run_eval           # 评测门禁
 DATABASE_URL= uvicorn app.main:app --port 8000  # 零依赖冒烟
 ```

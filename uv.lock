@@ -2632,7 +2632,7 @@ name = "kefu-service"
 version = "0.1.0"
 source = { editable = "kefu-service" }
 dependencies = [
-    { name = "agent-core" },
+    { name = "agent-core", extra = ["memory-embed-local"] },
     { name = "fastapi" },
     { name = "httpx" },
     { name = "langgraph" },
@@ -2643,7 +2643,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "agent-core", editable = "agent-core" },
+    { name = "agent-core", extras = ["memory-embed-local"], editable = "agent-core" },
     { name = "fastapi", specifier = ">=0.129.0" },
     { name = "httpx", specifier = ">=0.28.0" },
     { name = "langgraph", specifier = ">=1.2.10,<2" },

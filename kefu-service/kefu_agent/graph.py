@@ -6,7 +6,12 @@ legacy NLG → deepagents 输出
 
 from __future__ import annotations
 
-from agent_core.intent import IntentLabel, classify_intent, is_chitchat
+import asyncio
+
+from agent_core.intent import IntentLabel, IntentResult, is_chitchat
+from agent_core.intent.classifier import classify_l1
+from agent_core.intent.llm_judge import l2_judge
+from agent_core.intent.models import L1_THRESHOLD
 from agent_core.logging import get_logger
 from langgraph.graph import END, StateGraph
 
@@ -30,38 +35,63 @@ _LOGISTICS_KEYWORDS = ["物流", "快递", "发货"]
 _POSTSALE_KEYWORDS = ["售后", "退换", "退款", "换货", "退货", "维修"]
 
 
+def _route_by_business_keywords(message: str) -> str | None:
+    """按业务关键词细分订单/物流/售后 Flow（零依赖，永远可达）。
+
+    业务分流词优先于闲聊/统一分类器：保证「寒暄+诉求」复合消息
+    （如「你好，帮我查一下订单」）的诉求不被闲聊短路掩盖（TD-1 修复后收尾）。
+    """
+    if any(kw in message for kw in _ORDER_KEYWORDS):
+        return "order_query"
+    if any(kw in message for kw in _LOGISTICS_KEYWORDS):
+        return "logistics_query"
+    if any(kw in message for kw in _POSTSALE_KEYWORDS):
+        return "postsale_query"
+    return None
+
+
 async def intent_node(state: KefuState) -> KefuState:
     """意图识别节点（复用统一意图架构 agent_core.intent，TD-1 修复）。
 
-    闲聊经 ``is_chitchat`` 短路；其余走 ``classify_intent`` 取统一标签：
-    - CUSTOMER_SERVICE -> 仍按业务关键词细分订单/物流/售后 Flow；
-    - 其他（RAG_KNOWLEDGE / TEXT_TO_SQL / WEB_SEARCH / DIRECT / CHITCHAT 兜底）
-      -> 走知识库 ``knowledge``。
+    路由优先级（收尾纠偏）：
+    1. 业务关键词先行细分 —— 订单/物流/售后 Flow 零依赖永远可达；
+    2. 无业务关键词时，闲聊经 ``is_chitchat`` 短路；
+    3. 其余走 ``classify_intent`` 取统一标签（CUSTOMER_SERVICE / 其他）；
+    4. 分类器不可用（无嵌入/无 LLM）时，安全回退业务关键词分流，
+       仍无命中才走知识库兜底 —— 保住标准安装环境下的可达性底线（严重 #1 修复）。
     """
     message = state.get("user_message", "")
 
-    if is_chitchat(message):
+    # 1. 业务关键词优先（恢复旧优先级，解决闲聊短路掩盖诉求）
+    intent = _route_by_business_keywords(message)
+    if intent:
+        return {**state, "intent": intent}
+
+    # 2. 无业务诉求时再判闲聊
+    if await asyncio.to_thread(is_chitchat, message):
         intent = "chitchat"
     else:
+        # 3. 统一意图分类：L1 同步嵌入推理放进线程池（不阻塞事件循环，严重 #3），
+        #    L2 LLM 细判为原生 async 直接 await（避免 asyncio.to_thread 误包 async 函数
+        #    导致 coroutine 永不被 await、分类器实质失效的回归，Critical #1）。
         try:
-            label = (await classify_intent(message)).primary
-        except Exception as exc:
-            # 统一意图架构（L2 LLM）不可用时，安全降级到知识库兜底，
-            # 不阻断客服链路（TD-1 修复后仍需保证 LLM 缺失时的可用性）。
-            logger.warning("[intent] classify_intent 失败，降级 knowledge: %s", exc)
-            label = IntentLabel.DIRECT
-        if label == IntentLabel.CUSTOMER_SERVICE:
-            if any(kw in message for kw in _ORDER_KEYWORDS):
-                intent = "order_query"
-            elif any(kw in message for kw in _LOGISTICS_KEYWORDS):
-                intent = "logistics_query"
-            elif any(kw in message for kw in _POSTSALE_KEYWORDS):
-                intent = "postsale_query"
+            l1: IntentResult = await asyncio.to_thread(classify_l1, message)
+            if l1.confidence >= L1_THRESHOLD and not l1.need_clarify:
+                label = l1.primary
             else:
-                # 客服大类但无明确业务分流词，归入知识库应答。
-                intent = "knowledge"
+                label = (await l2_judge(message)).primary
+        except Exception as exc:
+            # 4. 分类器不可用（L1 嵌入缺失 / L2 LLM 未配置）时，安全回退知识库兜底
+            #    （业务关键词已在第 1 步判定为 None，故此处直接 knowledge，不再借
+            #    IntentLabel.DIRECT 表达，语义更清晰，建议 #5）。
+            logger.warning("[intent] 意图分类失败，降级 knowledge: %s", exc)
+            intent = "knowledge"
+            return {**state, "intent": intent}
+        if label == IntentLabel.CUSTOMER_SERVICE:
+            # 业务关键词未命中但被判为客服大类，归入知识库应答。
+            intent = "knowledge"
         else:
-            # RAG_KNOWLEDGE / TEXT_TO_SQL / WEB_SEARCH / DIRECT 均走知识库。
+            # RAG_KNOWLEDGE / TEXT_TO_SQL / WEB_SEARCH / DIRECT / CHITCHAT 兜底均走知识库。
             intent = "knowledge"
 
     return {**state, "intent": intent}
