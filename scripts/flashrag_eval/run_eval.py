@@ -22,12 +22,10 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, ROOT)
 
+from agent_retriever import AgentRetriever
 from flashrag.config import Config
 from flashrag.dataset import Dataset
 from flashrag.evaluator import Evaluator
-from flashrag.retriever.retriever import BaseTextRetriever
-
-from agent_retriever import AgentRetriever
 
 # ---- 评测语料：多段 markdown，每个 ## 主题会被 split_markdown 切成独立 chunk ----
 # 这样语料粒度足够细，rerank 才有「把正确 chunk 顶到前面」的发挥空间。
@@ -151,7 +149,7 @@ def build_dataset() -> Dataset:
 
 async def main():
     from app.config import get_settings
-    from app.infra.db import init_pool, ensure_schema
+    from app.infra.db import ensure_schema, init_pool
     from app.rag.chunker import split_markdown
     from app.rag.store import add_document
 

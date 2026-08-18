@@ -7,11 +7,10 @@ import asyncio
 import sys
 
 from app.config import get_settings
-from app.infra.db import init_pool, get_pool, ensure_schema
+from app.infra.db import ensure_schema, init_pool
 from app.rag.chunker import split_markdown
-from app.rag.store import add_document, retrieve_chunks
 from app.rag.embed import embed_query
-
+from app.rag.store import add_document, retrieve_chunks
 
 DOCS = {
     "pg.md": """# PostgreSQL pgvector 扩展

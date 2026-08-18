@@ -519,7 +519,7 @@ async def _execute_agent_core(task_query: str, workspace_id: str, main_agent=Non
             )
 
     session_dir_token = set_session_context(session_dir_str)
-    session_id_token = set_thread_context(workspace_id)
+    thread_token = set_thread_context(workspace_id)
     monitor.report_session_dir(session_dir_str)
 
     config = {"configurable": {"thread_id": workspace_id}}
@@ -591,7 +591,7 @@ async def _execute_agent_core(task_query: str, workspace_id: str, main_agent=Non
         logger.exception("main_agent 执行异常 workspace_id=%s", workspace_id)
         monitor.report_error(f"执行主智能发生异常信息：{str(e)}")
     finally:
-        reset_session_context(session_dir_token, session_id_token)
+        reset_session_context(session_dir_token, thread_token)
         _release_thread_lock(workspace_id)  # P1.6：归零清理锁
 
     return final_answer
