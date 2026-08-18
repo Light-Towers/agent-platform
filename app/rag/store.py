@@ -14,6 +14,7 @@ from app.config import get_settings
 from app.infra.db import vector_search
 from app.rag.chunker import Chunk
 from app.rag.embed import embed_query, embed_texts
+from app.rag.rerank import get_reranker
 
 _BM25_LOAD_LIMIT = 10000
 _RRF_K = 60
@@ -116,20 +117,24 @@ async def _bm25_ids(pool, query: str, k: int, workspace_id: str = "default") -> 
 
 
 async def retrieve_chunks(pool, query: str, k: int | None = None, workspace_id: str = "default") -> list[dict]:
-    """混合检索入口：返回 [{id, source, heading, content, score}]，已按 RRF 排序。
+    """混合检索入口：向量召回 + BM25 + RRF 融合，融合后可选 rerank 重排 top-K。
 
     workspace_id 隔离检索范围（优化 G）：仅召回本工作空间上传的文档分块。
+    返回 [{id, source, heading, content, score}]，按相关性降序；
+    rerank 开启时 score 为 rerank 相关性分（0~1），否则为 RRF 分。
     """
     if pool is None:
         return []
-    k = k or get_settings().rag_top_k
+    s = get_settings()
+    k = k or s.rag_top_k
     fetch_k = k * 4  # 每路多召回再融合
     embedding = await embed_query(query)
     vec_ids = await _vector_ids(pool, embedding, fetch_k, workspace_id)
     bm25_ids = await _bm25_ids(pool, query, fetch_k, workspace_id)
-    merged = rrf_merge([vec_ids, bm25_ids])[:k]
+    merged = rrf_merge([vec_ids, bm25_ids])[: max(k, s.rerank_top_n)]
     if not merged:
         return []
+
     async with pool.connection() as conn:
         cur = await conn.execute(
             "SELECT id, source, heading, content FROM chunks "
@@ -138,14 +143,48 @@ async def retrieve_chunks(pool, query: str, k: int | None = None, workspace_id: 
         )
         rows = await cur.fetchall()
     by_id = {r[0]: r for r in rows}
+    candidates = [by_id[c] for c in merged if c in by_id]
+    if not candidates:
+        return []
+
+    # 融合后过 rerank 重排 top-K
+    reranker = get_reranker()
+    if reranker is not None:
+        pairs = [[query, c[3]] for c in candidates]
+        try:
+            scores = reranker.compute_score(pairs)
+        except Exception as e:  # rerank 失败则优雅回退到 RRF 融合序
+            import logging
+
+            logging.getLogger(__name__).warning("rerank 失败，回退 RRF 融合序: %s", e)
+            scores = None
+    else:
+        scores = None
+
+    if scores is not None:
+        ordered = sorted(
+            zip(candidates, scores), key=lambda x: x[1], reverse=True
+        )[:k]
+        return [
+            {
+                "id": c[0],
+                "source": c[1],
+                "heading": c[2],
+                "content": c[3],
+                "score": round(float(sc), 6),
+            }
+            for c, sc in ordered
+        ]
+
+    # 无 rerank：返回 RRF 融合序（截断到 k）
     return [
         {
-            "id": chunk_id,
-            "source": by_id[chunk_id][1],
-            "heading": by_id[chunk_id][2],
-            "content": by_id[chunk_id][3],
+            "id": c[0],
+            "source": c[1],
+            "heading": c[2],
+            "content": c[3],
             "score": round(1.0 / (_RRF_K + rank), 6),
         }
-        for rank, chunk_id in enumerate(merged, start=1)
-        if chunk_id in by_id
+        for rank, c in enumerate(candidates, start=1)
+        if rank <= k
     ]
