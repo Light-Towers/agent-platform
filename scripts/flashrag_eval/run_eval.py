@@ -157,6 +157,11 @@ async def main():
     print(f"[eval] rerank_effective_enabled={rerank_on}")
 
     pool = await init_pool()
+    # 评测环境：chunks 为临时入库数据，强制重建以兼容 schema 演进
+    # （如远程合并新增 workspace_id 列后，旧 chunks 表缺列会导致 ensure_schema 失败）。
+    async with pool.connection() as conn:
+        await conn.execute("DROP TABLE IF EXISTS chunks")
+        await conn.commit()
     await ensure_schema(pool)
 
     # 清空历史 chunks（评测环境可丢，避免重复入库污染语料）

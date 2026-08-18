@@ -102,6 +102,10 @@ def classify_l1(query: str) -> IntentResult:
     返回 ``IntentResult``（source 为 l1 / l1_keyword / l1_fallback）。
     need_clarify 在置信度 < CLARIFY_THRESHOLD 时置位。
     """
+    # 0. 空/空白 query 无分类意义，直接兜底 DIRECT + need_clarify
+    if not query or not query.strip():
+        return _fallback_result()
+
     # 1. chitchat 短链
     q_low = query.lower()
     if any(k in q_low for k in _CHITCHAT_KEYWORDS):

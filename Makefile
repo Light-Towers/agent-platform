@@ -7,13 +7,13 @@ install:
 	uv sync --all-packages --extra dev
 
 lint:
-	uv run ruff check .
+	uv run --with ruff ruff check .
 
 format:
-	uv run ruff format .
+	uv run --with ruff ruff format .
 
 type:
-	uv run ruff check . --select ALL 2>/dev/null || uv run ruff check .
+	uv run --with ruff ruff check . --select ALL 2>/dev/null || uv run --with ruff ruff check .
 
 test:
 	uv run pytest -q
@@ -36,10 +36,11 @@ eval-llm-memory:
 # 检索回归评测：用 FlashRAG 的 retrieval_recall@k 对照「关 rerank」vs「开 rerank」。
 # 需 pgvector 容器（见 docs/opencode-llm-setup.md §1.1）与真实 embedding/rerank 可达。
 # 两次结果差值 Δ 即 rerank 带来的准确率变化；基线见文档 §8。
+# 注意：必须在项目根运行（不 cd 进子目录），否则 pydantic-settings 找不到 .env
+# 导致走内存模式、init_pool 返回 None。
 eval-rag:
-	cd scripts/flashrag_eval && \
-	RERANK_ENABLED=false uv run python run_eval.py && \
-	RERANK_ENABLED=true  uv run python run_eval.py
+	RERANK_ENABLED=false uv run --extra eval python scripts/flashrag_eval/run_eval.py
+	RERANK_ENABLED=true  uv run --extra eval python scripts/flashrag_eval/run_eval.py
 
 # CI 串联：lint + 单测 + 评测门禁；任一失败即中断。
 ci: lint test eval
