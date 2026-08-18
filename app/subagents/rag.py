@@ -5,11 +5,11 @@ from app.infra.db import get_pool
 from app.rag.store import retrieve_chunks
 
 
-async def rag_query(query: str) -> list[str]:
+async def rag_query(query: str, workspace_id: str = "default") -> list[str]:
     pool = get_pool()
     if pool is None:
         return ["知识库未启用（DATABASE_URL 未配置）"]
-    chunks = await retrieve_chunks(pool, query, get_settings().rag_top_k)
+    chunks = await retrieve_chunks(pool, query, get_settings().rag_top_k, workspace_id)
     if not chunks:
         return ["知识库中未检索到相关内容"]
     return [

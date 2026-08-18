@@ -23,17 +23,22 @@ CREATE TABLE IF NOT EXISTS chunks (
     heading TEXT NOT NULL DEFAULT '',
     content TEXT NOT NULL,
     embedding vector({dim}),
+    workspace_id TEXT NOT NULL DEFAULT 'default',
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_chunks_doc ON chunks (doc_id);
+CREATE INDEX IF NOT EXISTS idx_chunks_workspace ON chunks (workspace_id);
 
 CREATE TABLE IF NOT EXISTS memories (
     id BIGSERIAL PRIMARY KEY,
     user_id TEXT NOT NULL DEFAULT 'default',
     content TEXT NOT NULL,
     embedding vector({dim}),
+    memory_type TEXT NOT NULL DEFAULT 'semantic',
+    importance FLOAT NOT NULL DEFAULT 0.5,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+CREATE INDEX IF NOT EXISTS idx_memories_user_type ON memories (user_id, memory_type);
 
 CREATE TABLE IF NOT EXISTS semantic_cache (
     id BIGSERIAL PRIMARY KEY,
@@ -158,6 +163,30 @@ async def ensure_schema(pool) -> None:
     ddl = SCHEMA_TEMPLATE.format(dim=get_settings().vector_dim)
     async with pool.connection() as conn:
         await conn.execute(ddl)
+    # 存量库迁移：新列 IF NOT EXISTS 不作用于已存在表，需幂等 ALTER（优化 G：workspace 隔离）
+    try:
+        async with pool.connection() as conn:
+            await conn.execute(
+                "ALTER TABLE chunks ADD COLUMN workspace_id TEXT NOT NULL DEFAULT 'default'"
+            )
+            await conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_chunks_workspace ON chunks (workspace_id)"
+            )
+    except Exception:
+        # duplicate_column 等幂等失败忽略；新库由建表语句已含该列
+        pass
+    # 优化 H：长期记忆质量升级——memories 表扩展类型/重要性/时间元数据（幂等 ALTER）
+    for _ddl in (
+        "ALTER TABLE memories ADD COLUMN memory_type TEXT NOT NULL DEFAULT 'semantic'",
+        "ALTER TABLE memories ADD COLUMN importance FLOAT NOT NULL DEFAULT 0.5",
+        "CREATE INDEX IF NOT EXISTS idx_memories_user_type ON memories (user_id, memory_type)",
+    ):
+        try:
+            async with pool.connection() as conn:
+                await conn.execute(_ddl)
+        except Exception:
+            # duplicate_column / 索引已存在等幂等失败忽略
+            pass
 
 
 def get_pool():

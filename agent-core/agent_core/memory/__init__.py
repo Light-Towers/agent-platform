@@ -31,11 +31,18 @@ from agent_core.memory.embedder import (
 from agent_core.memory.mongo import MongoHistoryStore
 from agent_core.memory.mongo_checkpointer import MongoCheckpointer
 from agent_core.memory.semantic import (
+    MemoryType,
+    TypedMemory,
+    consolidate,
+    forget,
     get_default_backend,
     get_semantic_memory,
     recall_memories,
+    recall_typed,
     remember_memory,
+    remember_typed,
     semantic_memory_enabled,
+    semantic_memory_typed_enabled,
 )
 from agent_core.memory.vector_backend import (
     DEFAULT_COLLECTION,
@@ -111,6 +118,13 @@ __all__ = [
     "recall_memories",
     "remember_memory",
     "semantic_memory_enabled",
+    "MemoryType",
+    "TypedMemory",
+    "semantic_memory_typed_enabled",
+    "recall_typed",
+    "remember_typed",
+    "consolidate",
+    "forget",
     "DEFAULT_COLLECTION",
     "MilvusMemoryBackend",
     "PgVectorMemoryBackend",

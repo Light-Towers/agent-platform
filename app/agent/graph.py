@@ -17,7 +17,7 @@ from app.agent.state import AgentState, _validate_state
 from app.config import get_settings
 from app.infra.db import get_pool
 from app.infra.mcp_client import MCPClientManager
-from app.memory.longterm import recall, remember
+from app.memory.longterm import extract_memory_facts, maybe_consolidate, recall, remember
 from app.subagents.mcp import mcp_query
 from app.subagents.rag import rag_query
 from app.subagents.search import search_web
@@ -72,7 +72,7 @@ def build_graph(llm, checkpointer=None, mcp_manager: MCPClientManager | None = N
         decision = await decide_route(llm, question)
         memory_notes: list[str] = []
         if settings.memory_enabled:
-            memory_notes = await recall(get_pool(), state.user_id, question)
+            memory_notes = await recall(get_pool(), state.workspace_id, question)
         return {
             "route": decision.capability,
             "sub_query": decision.sub_query,
@@ -85,7 +85,7 @@ def build_graph(llm, checkpointer=None, mcp_manager: MCPClientManager | None = N
         return {"evidence": await search_web(state.sub_query)}
 
     async def rag_node(state: AgentState) -> dict:
-        return {"evidence": await rag_query(state.sub_query)}
+        return {"evidence": await rag_query(state.sub_query, state.workspace_id)}
 
     async def sql_node(state: AgentState) -> dict:
         return {"evidence": await sql_query(state.sub_query, llm=llm)}
@@ -112,7 +112,13 @@ def build_graph(llm, checkpointer=None, mcp_manager: MCPClientManager | None = N
 
         answer = await _compose(question, evidence, memory_notes)
         if get_settings().memory_enabled:
-            remember(get_pool(), state.user_id, f"Q: {question}\nA: {answer}")
+            # 优化 H：抽取结构化事实后再沉淀（开启时）；否则退化存原文
+            facts = None
+            if get_settings().memory_extraction_enabled and llm is not None:
+                facts = await extract_memory_facts(llm, question, answer)
+            await remember(get_pool(), state.workspace_id, f"Q: {question}\nA: {answer}", facts=facts)
+            # ADR-0004 阶段3：低频触发 typed 巩固/遗忘（旁路，不阻断）
+            await maybe_consolidate(get_pool(), state.workspace_id)
         return {
             "answer": answer,
             "iterations": iterations,
