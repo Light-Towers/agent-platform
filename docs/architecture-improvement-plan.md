@@ -282,7 +282,7 @@
 | TB-11 | **双轨配置体系分裂**：`app` 用 pydantic-settings `Settings`；`deepagents` 用 dataclass+dotenv+YAML，能力开关散落 env | `dual-track-architecture-analysis.md` AR-3 | 中 | 长期 deepagents 配置收敛到 pydantic-settings 或复用 `app.Settings`；短期 README 枚举全部 env 开关与默认值 |
 | TB-12 | **共享内核采用度不对称（残余）**：`deepagents` 引 `agent_core` 24 处 / `app` 7 处；缓存 key 已统一（TB-4）但 `PgSemanticCache`/`ValkeySemanticCache` 未统一到 `BaseSemanticCache` 实现层 | `dual-track-architecture-analysis.md` AR-4 | 中（部分已闭环：E-1/TB-4/TB-5） | 新增内核能力强制双轨同步接入；缓存后端实现层对齐 `BaseSemanticCache` |
 | TB-13 | **双轨认知/维护成本**：9 包 monorepo + 两套编排哲学（StateGraph 边思维 vs DeepAgents 委派思维）+ SSE/WS 双网关，排障需先判轨 | `dual-track-architecture-analysis.md` AR-5 | 中（结构性） | 优化 F：抽自研外壳为共享基础设施，双轨共用；`AGENTS.md` 固化「新业务默认走哪条轨」决策树 |
-| TB-14 | **deepagents 外壳缺失 + thread_id 会话断裂**：`deepagents/api/server.py:165` API_KEY 模式每次请求生成新 `thread_id`，使 checkpointer 形同虚设（即便换 PG 也救不了多轮）；且缺 admission/coordinator/revert/SSE 外壳 | `plan-e-dual-track-convergence.md` §F | 高（阻断 B 侧持久化与回退） | 优化 F P4.4：先修 thread_id 复用 → 注入 PG checkpoint（ADR-0002）→ 抽外壳为共享基础设施并双挂 |
+| TB-14 | **deepagents 外壳缺失 + thread_id 会话断裂**：`deepagents/api/server.py:165` API_KEY 模式每次请求生成新 `thread_id`，使 checkpointer 形同虚设（即便换 PG 也救不了多轮）；且缺 admission/coordinator/revert/SSE 外壳 | `plan-e-dual-track-convergence.md` §F | 高（阻断 B 侧持久化与回退） | ~~优化 F P4.4：先修 thread_id 复用~~ ✅ **已落地（2026-08-18 审查核销）**：`deepagents/api/auth.py` 的 `resolve_thread_id` 已按密钥派生稳定 `thread_id`，多轮会话断裂已修复（审查实码确认）；余「抽外壳为共享基础设施」仍为 P4.4 独立项，按文档执行时勿在 thread_id 上重复投入 |
 
 ### 6.2 范围外 / 未核验项（需独立子任务）
 
@@ -332,4 +332,4 @@
 | #14 | `zhanggui-zhiku` 双 `uv.lock` | 子包独立 lock 与 workspace 根锁冲突 | ✅ 已修：删除 `zhanggui-zhiku/uv.lock`，统一根锁（`uv lock` 验证通过） |
 | #15 | logger name 变更 | 核验：app 全量 `getLogger(__name__)` + 顶层 `agent_core` 命名已规范 | 无需修：非缺陷 |
 
-*门禁：本轮修复后 `ruff check .` 全绿，`pytest tests/` 84 passed（含新增 3 例）。*
+*门禁：本轮修复后 `ruff check .` 全绿；CI 门禁经 `make test` 分三个独立 pytest session 串联——根（`tests` + `agent-core/tests`）、`deepagents/tests/unit`（排除预存冲突的 `test_tool_registry.py`）、`kefu-service/tests`，三套件全部通过即为门禁达标（具体例数随用例增长，不在此固化，避免文档数字漂移）。CI 盲区修复详见严重 #2。*

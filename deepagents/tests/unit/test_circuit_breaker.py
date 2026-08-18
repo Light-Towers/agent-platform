@@ -183,11 +183,13 @@ class TestP3Observability:
 
         M.delegation_success_total = 0
         M.degrade_total = 0
+        M.delegation_failure_total = 0
 
         svc = _FakeSvc("obs-unhealthy", healthy=False)
         agent = DelegatingSubAgent("k", FakeRemoteSubAgent(), svc, "d")
         out = asyncio.run(agent.ainvoke({"query": "x"}))
         assert out["degraded"] is True
-        # 降级兜底路径计 success(degraded) + degrade
+        # 熔断 + 兜底均不可用 -> 计 failure_total（彻底失败可见性，#4 修复）；
+        # degrade_total 仍记录降级次数。
         assert M.snapshot()["degrade_total"] == 1
-        assert M.snapshot()["delegation_success_total"] == 1
+        assert M.snapshot()["delegation_failure_total"] == 1
