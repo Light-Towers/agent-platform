@@ -14,6 +14,7 @@ rrf:
   weights:                   # 各召回通道权重（具名，可扩展到 4 路 embedding/hyde/kg/web）
     embedding: 1.0
     hyde: 1.0
+    kg: 1.0
 
 channels:                    # 各路召回开关与超时（配合 §10.3 逐路 timeout，M6 fanout 使用）
   embedding: { enabled: true, timeout_s: 1.5 }
