@@ -6,6 +6,12 @@
 隔离策略（与全局一致）：整个项目统一以 ``workspace_id`` 作为类型化记忆的隔离主键。
 deepagents 单进程单池，一个 ``thread_id`` 即代表一个 workspace 工作空间，故调用处
 将 ``thread_id`` 作为 ``workspace_id`` 透传进来。
+
+注意（跨层命名澄清，TD-E）：下游内核 ``agent_core.memory`` 的 ``recall_typed`` /
+``remember_fact`` 形参与 PG/Milvus 列名仍叫 ``user_id``，这是内核通用的共享契约，
+本模块调用时**所传的 ``workspace_id`` 即落在内核的 ``user_id`` 形参位上**，
+二者语义等价 —— ``workspace_id`` 是 deepagents 侧的隔离主键名，``user_id`` 是内核
+存储层的通用字段名，请勿据此误以为存在双重隔离或错位落库。
 """
 
 from __future__ import annotations

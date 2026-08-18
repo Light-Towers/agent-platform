@@ -154,7 +154,7 @@ async def run_one(item):
     monitor.on("assistant_call", cb_route)
     monitor.on("task_result", cb_answer)   # run_deep_agent 不返回值，靠事件拿答案
     try:
-        await run_deep_agent(item["query"], session_id=sid)
+        await run_deep_agent(item["query"], workspace_id=sid)
     finally:
         monitor.off("assistant_call", cb_route)   # 防止 callback 累积串题
         monitor.off("task_result", cb_answer)

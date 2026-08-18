@@ -48,7 +48,7 @@ async def run_one(item: dict, timestamp: str) -> dict:
              "error_class": e["data"].get("error_class")}
             for e in outcomes
         ],
-        "session_id": sid,
+        "workspace_id": sid,
     }
 
 

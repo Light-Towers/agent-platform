@@ -91,6 +91,32 @@ ADR-0004 阶段4 的候选B（`eval/memory_reuse_llm.py`）评审中，发现 `_
 - 建议：改为配置表或枚举常量。
 - 状态：待排期
 
+### TD-11 隔离键命名语义噪音（session_id 残留变量/字段名）
+- 关联：PR#10 审核（2026-08-18）非阻塞残留项
+- 现状：PR#10 已将隔离主键统一为 `workspace_id`，但仍有两处命名未同步：
+  - `deepagents/agent/main_agent.py` 局部变量（已修 B）→ 原 `session_id_token` 已重命名为 `thread_token`（2026-08-18 修复）。
+  - `deepagents/eval/run_eval.py:51` 评测报告输出字段（已修 C）→ 原 `"session_id"` 已改为 `"workspace_id"`（2026-08-18 修复）。
+  - `async_subagents.py:104` 跨服务 HTTP payload `session_id` 字段：属独立远程契约（kefu/wenda 接口），**保持不变**，不登记修复。
+- 结论：代码侧语义噪音已清零；仅保留远程契约字段。
+- 状态：✅ 代码侧已修复，远程契约维持
+
+### TD-12 docs 旧 `run_deep_agent(session_id=)` 签名文本残留
+- 关联：PR#10 审核（2026-08-18）非阻塞残留项
+- 文件：`deepagents/eval/PROPOSAL.md:157`（已修 F）→ 示例代码 `session_id=sid` 已改为 `workspace_id=sid`。
+- 其余文档（`docs/architecture-improvement-plan.md` 等）中的 `session_id` 属 `app/` 平台真实 API 参数名（如 `GET /history?session_id=`），与 deepagents 隔离键无关，**不改动**。
+- 结论：deepagents 侧 docs 已同步；app 侧真实参数名保持。
+- 状态：✅ 已修复（仅 deepagents 侧）
+
+### TD-13 内核 `user_id` 形参语义与全局 `workspace_id` 隔离键不一致
+- 关联：PR#10 审核（2026-08-18）独立补充项
+- 现状：`agent_core.memory.{recall_typed,remember_fact}` 形参与 PG/Milvus 列名均为 `user_id`，
+  而 deepagents 调用处（`deepagents/agent/memory/main_agent_memory.py`）传的是 `workspace_id`。
+  隔离主键**正确传递**（`workspace_id` 即落于内核 `user_id` 形参位），无功能缺陷。
+- 风险：跨层命名错位易误导维护者误判"双重隔离/错位落库"。
+- 建议：**仅 docstring 澄清，不重命名内核形参/列**（内核为跨包共享契约，重命名破坏 schema 与多包兼容）。
+  `main_agent_memory.py` 模块 docstring 已补充 TD-E 澄清段（2026-08-18）。
+- 状态：✅ docstring 已澄清，内核命名维持
+
 ---
 
 ## 已修复
