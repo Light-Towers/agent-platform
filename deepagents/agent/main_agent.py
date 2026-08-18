@@ -162,8 +162,7 @@ async def run_deep_agent(task_query, session_id):
         intent_config = os.getenv("INTENT_ENABLED", "false").lower() == "true"
         if intent_config:
             try:
-                from agent.intent.classifier import is_chitchat
-                from agent.intent.llm_judge import classify_with_fallback
+                from agent_core.intent import classify_intent, is_chitchat
 
                 if is_chitchat(task_query):
                     logger.info("L1 short-circuit: chitchat 直出")
@@ -171,16 +170,18 @@ async def run_deep_agent(task_query, session_id):
                     monitor._emit('intent', {"intent": "chitchat", "source": "l1_short_circuit"})
                     return
 
-                intent_result = await classify_with_fallback(task_query)
-                _cached_intent = intent_result["primary"]["intent"]
+                intent_result = await classify_intent(task_query)
+                _cached_intent = intent_result.primary.value
                 monitor._emit('intent', {
-                    "intent": intent_result["primary"]["intent"],
-                    "confidence": intent_result["primary"]["confidence"],
-                    "source": intent_result["source"],
+                    "intent": intent_result.primary.value,
+                    "confidence": intent_result.confidence,
+                    "source": intent_result.source,
                 })
 
-                if intent_result.get("need_clarify"):
-                    clarify_msg = f"您是想查询{intent_result['candidates'][0]['intent']}还是{intent_result['candidates'][1]['intent']}相关的内容呢？请具体描述一下您的需求。"
+                if intent_result.need_clarify and len(intent_result.candidates) >= 2:
+                    c0 = intent_result.candidates[0].intent.value
+                    c1 = intent_result.candidates[1].intent.value
+                    clarify_msg = f"您是想查询{c0}还是{c1}相关的内容呢？请具体描述一下您的需求。"
                     monitor.report_task_result(clarify_msg)
                     return
 

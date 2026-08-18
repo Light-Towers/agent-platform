@@ -12,6 +12,7 @@ from langchain_core.messages import AIMessage
 from langgraph.graph import END, START, StateGraph
 
 from app.agent.compact import compact_messages, should_compact
+from app.agent.intent_bridge import l1_route_hint
 from app.agent.router import decide_route
 from app.agent.state import AgentState, _validate_state
 from app.config import get_settings
@@ -68,6 +69,18 @@ def build_graph(llm, checkpointer=None, mcp_manager: MCPClientManager | None = N
                         "messages": compacted,
                         "iterations": state.iterations,
                     }
+
+        # L1 轻量 short-circuit：高置信 chitchat 直接直答，避免无效 LLM 路由
+        # （仅作拦截，不替换 decide_route 的 LLM 主判，eval 基线不受影响）。
+        l1_hint = l1_route_hint(question)
+        if l1_hint is not None:
+            return {
+                "route": l1_hint,
+                "sub_query": question,
+                "route_reason": "L1 chitchat short-circuit",
+                "memory_notes": [],
+                "question": question,
+            }
 
         decision = await decide_route(llm, question)
         memory_notes: list[str] = []
