@@ -30,6 +30,15 @@ from functools import lru_cache
 from typing import Any
 
 from agent_core.logging import get_logger
+from agent_core.memory.typed import (
+    MemoryType,
+    TypedMemory,
+    consolidate,
+    forget,
+    recall_typed,
+    remember_typed,
+    semantic_memory_typed_enabled,
+)
 from agent_core.memory.vector_backend import create_memory_backend
 
 logger = get_logger(__name__)
@@ -112,4 +121,12 @@ __all__ = [
     "get_semantic_memory",
     "recall_memories",
     "remember_memory",
+    # ADR-0004 阶段 1：类型化记忆下沉内核（可选模块，不替换上面门面）
+    "MemoryType",
+    "TypedMemory",
+    "semantic_memory_typed_enabled",
+    "recall_typed",
+    "remember_typed",
+    "consolidate",
+    "forget",
 ]
