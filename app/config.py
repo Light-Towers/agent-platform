@@ -64,7 +64,10 @@ class Settings(BaseLLMSettings):
     # 上下文压缩
     compaction_enabled: bool = True
     compaction_threshold_ratio: float = 0.8  # 占模型窗口比例，超过则触发压缩
-    model_context_window: int = 128000  # 模型上下文窗口 token 数
+    # 模型上下文窗口 token 数。务必按实际模型填写（可用环境变量 MODEL_CONTEXT_WINDOW 覆盖），
+    # 切勿依赖 128000 默认值当成万能值：qwen-max 仅 32768、qwen-long 达 1000000，
+    # 填错会导致压缩触发比例与真实窗口脱节。
+    model_context_window: int = 128000  # 默认 128K（OpenAI 系常见值），按模型改
 
     # Phase 2: 会话并发协调
     coordination_enabled: bool = True

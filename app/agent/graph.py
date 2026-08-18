@@ -58,8 +58,10 @@ def build_graph(llm, checkpointer=None, mcp_manager: MCPClientManager | None = N
         messages = state.messages
         if settings.compaction_enabled and llm is not None:
             threshold = int(settings.model_context_window * settings.compaction_threshold_ratio)
-            if should_compact(messages, threshold):
-                compacted, err = await compact_messages(messages, llm)
+            # 从 llm 提取模型名以启用精确 token 计数；提取不到则走启发式
+            model_name = getattr(llm, "model_name", None) or getattr(llm, "model", None)
+            if should_compact(messages, threshold, model_name):
+                compacted, err = await compact_messages(messages, llm, model_name)
                 if err is None:
                     return {
                         "route": "direct",

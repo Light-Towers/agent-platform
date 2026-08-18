@@ -76,7 +76,35 @@ async def lifespan(app: FastAPI):
     await init_pool()
 
     logger.info("deepagents 服务启动完成")
+
+    # P1.1：lifespan 预初始化 main_agent，消除并发首请求的重复构造竞态。
+    # 预初始化失败不致命：run_deep_agent 仍会经 _main_agent_lock 懒加载兜底。
+    try:
+        from agent.main_agent import get_main_agent
+        await get_main_agent()
+        logger.info("main_agent 预初始化完成（lifespan）")
+    except Exception as e:
+        logger.warning("main_agent 预初始化失败（非致命，首次请求懒加载兜底）: %s", e)
+
+    # P1.3：启动 checkpoint 定时清理后台任务（复用 main_agent 的 checkpointer）。
+    # InMemorySaver 时返回 None（无需清理）；其他异常不影响主服务。
+    _cleaner_task = None
+    try:
+        from agent.checkpoint_cleaner import start_checkpoint_cleaner
+        from agent.main_agent import get_main_checkpointer
+        _cleaner_task = await start_checkpoint_cleaner(get_main_checkpointer())
+    except Exception as e:
+        logger.warning("checkpoint 清理任务启动失败（非致命）: %s", e)
+
     yield
+
+    # P1.3：关闭时取消清理任务
+    if _cleaner_task is not None:
+        try:
+            from agent.checkpoint_cleaner import stop_checkpoint_cleaner
+            await stop_checkpoint_cleaner(_cleaner_task)
+        except Exception as e:
+            logger.warning("checkpoint 清理任务停止异常: %s", e)
 
     from agent.tracing.langfuse_adapter import shutdown_langfuse
     shutdown_langfuse()
