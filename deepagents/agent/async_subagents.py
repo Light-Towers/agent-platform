@@ -22,11 +22,11 @@ import asyncio
 
 from agent_core.monitor import monitor
 
-from agent.agent.metrics import record_delegation
 from agent.circuit_breaker import get_breaker_sync
 from agent.config import get_all_subservices
+from agent.metrics import record_delegation
 from agent.prompts import sub_agents_content
-from agent.tracing.langfuse_adapter import observe
+from agent.tracing.langfuse_adapter import langfuse_observe as observe
 
 try:  # 外部 deepagents 包（Agent Protocol 原生支持）
     from deepagents import AsyncSubAgent

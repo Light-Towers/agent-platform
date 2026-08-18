@@ -57,13 +57,16 @@ def record_circuit_state(agent_name: str, state: str) -> None:
         agent_name: 子 Agent 名（作为维度）。
         state: ``open`` / ``half_open`` / ``closed``。
     """
+    # 同态去重：仅状态真正变化才计数/上报（避免重复打点）。
+    with _lock:
+        if _circuit_state.get(agent_name) == state:
+            return
+        _circuit_state[agent_name] = state
     counter = {
         "open": "circuit_open_total",
         "half_open": "circuit_half_open_total",
         "closed": "circuit_closed_total",
     }.get(state)
-    with _lock:
-        _circuit_state[agent_name] = state
     if counter:
         _inc(counter)
     monitor.report_circuit(

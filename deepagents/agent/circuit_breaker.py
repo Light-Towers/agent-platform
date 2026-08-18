@@ -20,7 +20,7 @@ import time
 
 from agent_core.logging import get_logger
 
-from agent.agent.metrics import record_circuit_state
+from agent.metrics import record_circuit_state
 
 logger = get_logger(__name__)
 

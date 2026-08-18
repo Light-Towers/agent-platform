@@ -123,3 +123,71 @@ class TestDelegatingSubAgent:
         assert out["degraded_reason"] == "remote_failed"
         # 熔断器已记录一次失败（窗口非空）
         assert len(agent._breaker._failures) >= 1
+
+
+class TestP3Observability:
+    """P3 可观测性回归：熔断状态变化与委派结果须进入 metrics + monitor。"""
+
+    def test_circuit_open_emits_metric_and_monitor(self, monkeypatch):
+        from agent_core.monitor import monitor
+
+        from agent import metrics as M
+        from agent.circuit_breaker import CircuitState, get_breaker_sync
+
+        # 重置计数 + 捕获 monitor 上报事件
+        M.circuit_open_total = 0
+        events = []
+        monkeypatch.setattr(
+            monitor, "report_circuit",
+            lambda state, msg, data=None: events.append((state, msg, data)),
+        )
+
+        br = get_breaker_sync("obs-trip")
+        br._state = CircuitState.CLOSED
+        br._successes = []
+        br._failures = []
+        br.min_requests = 2
+
+        async def run():
+            for _ in range(2):
+                assert await br.allow()
+                await br.record_failure()
+            assert br.state() == CircuitState.OPEN
+
+        asyncio.run(run())
+
+        # 熔断 OPEN 计数 +1
+        assert M.snapshot()["circuit_open_total"] == 1
+        # monitor 收到 circuit_state_change 事件，state=open
+        assert any(e[0] == "open" for e in events)
+
+    def test_delegation_success_records_metric(self, monkeypatch):
+        from agent import metrics as M
+        from agent.async_subagents import DelegatingSubAgent
+
+        M.delegation_success_total = 0
+        M.degrade_total = 0
+
+        svc = _FakeSvc("obs-retry", healthy=True)
+        agent = DelegatingSubAgent("k", FakeRemoteSubAgent(fail_times=1), svc, "d")
+        agent.RETRIES = 1
+        out = asyncio.run(agent.ainvoke({"query": "x"}))
+        assert out == {"answer": "remote-ok"}
+        # 远程成功路径计 success，不计 degraded
+        assert M.snapshot()["delegation_success_total"] == 1
+        assert M.snapshot()["degrade_total"] == 0
+
+    def test_degraded_fallback_records_metric(self, monkeypatch):
+        from agent import metrics as M
+        from agent.async_subagents import DelegatingSubAgent
+
+        M.delegation_success_total = 0
+        M.degrade_total = 0
+
+        svc = _FakeSvc("obs-unhealthy", healthy=False)
+        agent = DelegatingSubAgent("k", FakeRemoteSubAgent(), svc, "d")
+        out = asyncio.run(agent.ainvoke({"query": "x"}))
+        assert out["degraded"] is True
+        # 降级兜底路径计 success(degraded) + degrade
+        assert M.snapshot()["degrade_total"] == 1
+        assert M.snapshot()["delegation_success_total"] == 1
