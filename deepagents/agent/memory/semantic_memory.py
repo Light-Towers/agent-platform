@@ -35,11 +35,19 @@ from agent_core.memory import (
 from agent_core.memory.typed import (
     MemoryType,
     TypedMemory,
-    consolidate as _core_consolidate,
-    forget as _core_forget,
-    recall_typed as _core_recall_typed,
-    remember_typed as _core_remember_typed,
     semantic_memory_typed_enabled,
+)
+from agent_core.memory.typed import (
+    consolidate as _core_consolidate,
+)
+from agent_core.memory.typed import (
+    forget as _core_forget,
+)
+from agent_core.memory.typed import (
+    recall_typed as _core_recall_typed,
+)
+from agent_core.memory.typed import (
+    remember_typed as _core_remember_typed,
 )
 
 logger = get_logger(__name__)
