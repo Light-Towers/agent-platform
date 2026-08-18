@@ -69,8 +69,12 @@ def create_fallback_model():
         _logger.info("模型路由: 主=%s, 备=%s", primary_model, fallback_model)
         return LangChainFallbackModel(primary=primary, fallback=fallback)
 
-    _logger.info("模型: %s（无备用）", primary_model)
-    return primary
+    # 无备用模型时仍返回 LangChainFallbackModel（仅 primary）。
+    # P2.1：保证 ``profile``（含 max_input_tokens）始终暴露给 deepagents 的
+    # SummarizationMiddleware，使 summarize 阈值按模型窗口比例自适应触发
+    # （否则裸模型无 profile → 回退硬编码 170K，qwen-max 32K 窗口下永不触发）。
+    _logger.info("模型: %s（无备用，单模型外壳）", primary_model)
+    return LangChainFallbackModel(primary=primary, fallback=None)
 
 
 # 模块级单例

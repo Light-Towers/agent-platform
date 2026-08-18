@@ -28,6 +28,7 @@ from tools.upload_file_read_tool import read_file_content
 _main_agent = None
 _main_agent_lock = asyncio.Lock()  # P1.1/1.4：保护 _main_agent 构造，防并发首请求重复构造
 _main_checkpointer = None  # 缓存 get_main_agent 构造出的 checkpointer，供 checkpoint_cleaner 复用
+_main_store = None  # 缓存 get_main_agent 构造出的长期记忆 store（P2.2）
 
 # P1.6：per-thread_id 互斥锁 + 引用计数清理（避免锁对象生命周期 Bug）
 _thread_locks: dict[str, asyncio.Lock] = {}
@@ -54,6 +55,49 @@ async def _create_checkpointer():
     from agent_core.memory import get_checkpointer
 
     return get_checkpointer()
+
+
+async def _create_store():
+    """P2.2：构建长期记忆 store（跨会话语义检索）。
+
+    收口到 langgraph.store，与 checkpointer 同工厂模式：
+      1. 配置 ``STORE_POSTGRES_DSN`` → ``PostgresStore``（pgvector 索引 + bge 嵌入，
+         持久化到 Postgres，跨会话语义检索，重启不丢）。生产推荐。
+      2. 否则降级 ``InMemoryStore``（纯内存，重启丢，开发/无 PG 环境）。
+    """
+    from langgraph.store.memory import InMemoryStore
+
+    dsn = os.getenv("STORE_POSTGRES_DSN", "")
+    if dsn:
+        from langgraph.store.postgres import PostgresStore
+        from langgraph.store.postgres.base import PostgresIndexConfig
+
+        async def _bge_embed(texts: list[str]) -> list[list[float]]:
+            """用 agent-core 的 bge 嵌入，对齐 PostgresStore 索引维度。"""
+            from agent_core.memory.embedder import get_embedder
+            return get_embedder().embed(texts)
+
+        _dims = None
+        try:
+            from agent_core.memory.embedder import get_embedder
+            _dims = getattr(get_embedder(), "dim", None)
+        except Exception:
+            _dims = None
+        _dims = int(_dims or int(os.getenv("STORE_EMBED_DIMS", "512")))
+
+        # 语义记忆命名空间：按 (tenant, thread) 组织；向量索引用 bge 维度。
+        store = PostgresStore.from_conn_string(
+            dsn,
+            index=PostgresIndexConfig(
+                embed=_bge_embed,
+                dims=_dims,
+                fields=["content"],
+            ),
+        )
+        logger.info("长期记忆 store：PostgresStore（pgvector + bge %d 维）", _dims)
+        return store
+    logger.info("长期记忆 store：InMemoryStore（无 STORE_POSTGRES_DSN，开发态）")
+    return InMemoryStore(index=None)
 
 
 def _build_subagents():
@@ -134,7 +178,7 @@ async def get_main_agent(checkpointer=None):
     ``checkpointer`` 由 lifespan 预初始化阶段注入（规划 1.1/1.2）；为 None 时
     回退到 ``_create_checkpointer()``（Mongo/InMemory），保证本地无 PG 测试态可跑。
     """
-    global _main_agent
+    global _main_agent, _main_store
     if _main_agent is not None:
         return _main_agent
     async with _main_agent_lock:
@@ -149,13 +193,24 @@ async def get_main_agent(checkpointer=None):
             if _addition:
                 _system_prompt = _system_prompt + "\n\n" + _addition
 
+        # P2.2：长期记忆说明（跨部门/跨会话语义检索能力的提示注入）
+        _system_prompt = _system_prompt + (
+            "\n\n# 长期记忆\n"
+            "你具备跨会话的长期记忆（语义记忆 + 情景记忆）。历史任务沉淀的要点可在后续"
+            "会话中经语义检索复用，无需用户重复提供背景。涉及用户偏好、项目背景、反复出现的"
+            "领域知识时，主动利用长期记忆以保持连续性与一致性。"
+        )
+
         _cp = checkpointer if checkpointer is not None else await _create_checkpointer()
         _main_checkpointer = _cp
+        _store = await _create_store()
+        _main_store = _store
         _main_agent = create_deep_agent(
             model=model,
             system_prompt=_system_prompt,
             tools=[generate_markdown, convert_md_to_pdf, read_file_content],
             checkpointer=_cp,
+            store=_store,
             subagents=_build_subagents(),
             middleware=_build_middleware(),
         )
@@ -165,6 +220,11 @@ async def get_main_agent(checkpointer=None):
 def get_main_checkpointer():
     """返回当前 main_agent 使用的 checkpointer（供 P1.3 定时清理复用）。"""
     return _main_checkpointer
+
+
+def get_main_store():
+    """返回当前 main_agent 使用的长期记忆 store（P2.2）。"""
+    return _main_store
 
 
 # P1.6：per-thread_id 互斥锁 + 引用计数清理
