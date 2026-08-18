@@ -1,7 +1,7 @@
 # Agent Platform 本地/CI 工程门禁
 # 统一任务入口，避免各脚本分散调用；所有目标零业务副作用。
 
-.PHONY: install lint format type test eval eval-llm-required ci compose-smoke
+.PHONY: install lint format type test eval eval-llm-required eval-llm-memory ci compose-smoke
 
 install:
 	uv sync --all-packages --extra dev
@@ -27,6 +27,11 @@ eval:
 
 eval-llm-required:
 	uv run python eval/run_eval.py --require-llm --fail-below 0.8
+
+# 跨轮记忆复用 LLM 雷达（ADR-0004 候选B）：验证 typed 记忆跨轮复用 + workspace 隔离。
+# 依赖 LLM_API_KEY + DATABASE_URL；缺失时显式 SKIP(2)，不阻塞 CI。
+eval-llm-memory:
+	uv run python eval/memory_reuse_llm.py
 
 # CI 串联：lint + 单测 + 评测门禁；任一失败即中断。
 ci: lint test eval
