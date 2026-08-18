@@ -203,21 +203,30 @@ EMBEDDING_API_KEY=<硅基流动 token>                 # 已在 .gitignore 的 .
 「关 rerank（纯 RRF 融合序）」vs「开 rerank（融合后过 `bge-reranker-v2-m3` 重排 top-K）」。
 
 评测语料：`scripts/flashrag_eval/run_eval.py` 内置 6 篇多段 markdown（pg / kafka / redis + 干扰项 mysql / elasticsearch / rabbitmq，
-每个 `##` 主题切成独立 chunk），7 条业务黄金问题（golden_answers 为排他性短语，避免近义文档误命中）。
+每个 `##` 主题切成独立 chunk），8 条业务黄金问题（golden_answers 为排他性短语，避免近义文档误命中）。
 
-> ⚠️ 早期 3 篇纯净语料下 recall@1/@5 均为 1.0，体现不出 rerank 增益（语料太干净、无近义竞争）。
-> 加入 3 篇干扰文档 + 收紧 golden_answers 后，才制造出 rerank 可发挥的重排空间。
+> ⚠️ 实测该评测集在「向量召回 + BM25 召回 → RRF 融合」下已近饱和：
+> rerank 关/开两档 `recall@5` 均为 **1.0**（8/8 全命中），rerank 未带来额外 recall 增益。
+> 这反映当前评测集对 rerank 不够敏感（语料小、golden 多为单 chunk 命中，无近义强竞争）。
+> 若要衡量 rerank 增益，需扩充带近义竞争的黄金问题（见 §8.3）。
 
-### 8.1 基线结果（top-k=5）
+### 8.1 基线结果（top-k=5，实测于 2026-08-18）
 
-| 配置 | recall@1 | recall@5 | 备注 |
-|------|----------|----------|------|
-| rerank **关**（RRF 融合序） | 0.875 | 1.0 | 8 题中 1 题 top-1 错（Kafka 不丢消息→错排到 RabbitMQ） |
-| rerank **开**（重排 top-K） | **1.0** | 1.0 | rerank 把正确 Kafka chunk 顶到 top-1 |
-| **Δ（rerank 增益）** | **+12.5pp** | 0 | 可见地把错误 top-1 纠正为正确 |
+| 配置 | recall@1 | recall@5 | precision@5 | 备注 |
+|------|----------|----------|-------------|------|
+| rerank **关**（RRF 融合序） | 1.0 | 1.0 | 0.325 | 8/8 全命中 |
+| rerank **开**（重排 top-K） | 1.0 | 1.0 | 0.300 | 8/8 全命中，与关档持平 |
+| **Δ（rerank 增益）** | 0 | 0 | -0.025 | 饱和评测集下 rerank 未显增益 |
 
-- 直观案例：「Kafka 怎么保证消息不丢？」开启 rerank 后 top-1 从 RabbitMQ（错）纠正为 Kafka ISR 副本（对）。
-- precision@5 区间为 0.30~0.33（语料小、chunk 多，属预期，不影响 rerank 增益结论）。
+- precision@5 在 0.30~0.33 区间（语料小、chunk 多，属预期）。
+- 结论：rerank 主链路已闭环且**优雅回退**机制验证有效（§7.3），但在当前 8 题评测集上 recall 已封顶，
+  增益无从体现。检索回归基线的价值在于**锁定「不退化」**：后续改动检索逻辑后重跑，`recall@5` 须维持 1.0。
+
+### 8.3 评测集待增强（非阻塞）
+
+当前 8 题 golden 多为单 chunk 命中，rerank 无发挥空间。建议后续补充：
+- 近义强竞争问题（如「消息不丢」同时命中 Kafka/RabbitMQ 多篇），制造 rerank 可纠正的 top-1 错排；
+- 跨文档多跳问题，验证 rerank 对融合序的二次排序收益。
 
 ### 8.2 复跑
 

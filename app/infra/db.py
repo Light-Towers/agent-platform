@@ -23,22 +23,18 @@ CREATE TABLE IF NOT EXISTS chunks (
     heading TEXT NOT NULL DEFAULT '',
     content TEXT NOT NULL,
     embedding vector({dim}),
-    workspace_id TEXT NOT NULL DEFAULT 'default',
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_chunks_doc ON chunks (doc_id);
-CREATE INDEX IF NOT EXISTS idx_chunks_workspace ON chunks (workspace_id);
 
 CREATE TABLE IF NOT EXISTS memories (
     id BIGSERIAL PRIMARY KEY,
     user_id TEXT NOT NULL DEFAULT 'default',
     content TEXT NOT NULL,
     embedding vector({dim}),
-    memory_type TEXT NOT NULL DEFAULT 'semantic',
-    importance FLOAT NOT NULL DEFAULT 0.5,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-CREATE INDEX IF NOT EXISTS idx_memories_user_type ON memories (user_id, memory_type);
+CREATE INDEX IF NOT EXISTS idx_memories_user ON memories (user_id);
 
 CREATE TABLE IF NOT EXISTS semantic_cache (
     id BIGSERIAL PRIMARY KEY,

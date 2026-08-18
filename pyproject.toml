@@ -39,6 +39,13 @@ dev = [
     "ruff>=0.5",
 ]
 
+# 检索回归评测专用（FlashRAG 依赖较重：faiss/transformers/spacy 等），
+# 不进 dev，避免拖垮日常 `make install`。跑评测用 `make eval-rag`（自动 --extra eval）。
+eval = [
+    "flashrag-dev",
+    "faiss-cpu",
+]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
@@ -71,6 +78,7 @@ ignore = ["B008", "E402", "E731", "BLE001", "S110", "B017", "PERF102", "RUF059"]
 [tool.uv.sources]
 agent-core = { workspace = true }
 shared-schemas = { workspace = true }
+flashrag-dev = { git = "https://github.com/RUC-NLPIR/FlashRAG.git" }
 
 [tool.uv.workspace]
 members = [
