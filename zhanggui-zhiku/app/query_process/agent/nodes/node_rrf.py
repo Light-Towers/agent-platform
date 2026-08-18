@@ -176,8 +176,9 @@ def node_rrf(state):
     # RRF 需要使用 chunk_id 做去重与计分，因此这里必须保留 entity（而不是仅抽取 content 字符串）。
     embedding_chunks = _as_entity_list(state.get("embedding_chunks"))
     hyde_embedding_chunks = _as_entity_list(state.get("hyde_embedding_chunks"))
+    kg_chunks = _as_entity_list(state.get("kg_chunks"))
 
-    logger.info(f"RRF 输入统计: Embedding源={len(embedding_chunks)}条, HyDE源={len(hyde_embedding_chunks)}条")
+    logger.info(f"RRF 输入统计: Embedding源={len(embedding_chunks)}条, HyDE源={len(hyde_embedding_chunks)}条, KG源={len(kg_chunks)}条")
 
     # Debug 日志：打印部分 ID 以便核对
     if embedding_chunks:
@@ -192,6 +193,7 @@ def node_rrf(state):
     channel_chunks: Dict[str, List[Dict[str, Any]]] = {
         "embedding": embedding_chunks,
         "hyde": hyde_embedding_chunks,
+        "kg": kg_chunks,
     }
     source_weights = []
     active_channels = []
