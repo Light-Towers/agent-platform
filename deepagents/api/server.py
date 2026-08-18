@@ -291,7 +291,7 @@ async def metrics_endpoint():
     含熔断器计数/状态与子 Agent 委派结果计数。零 prometheus 依赖，
     符合内核零依赖铁律；需标准 scraping 时可在此桥接 OpenTelemetry exporter。
     """
-    from agent.agent.metrics import snapshot
+    from agent.metrics import snapshot
 
     return snapshot()
 
