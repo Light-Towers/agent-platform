@@ -53,7 +53,7 @@
    - 此改动落在 `vector_backend.py`——首版未在"契约变更范围"列出，v2 补入。
 
 3. **新增内核可选 API**（不替换现有 `recall_memories`/`remember_memory`）：
-   - `recall_typed(pool, user_id, question, k=3, weights=None) -> list[TypedMemory]`：**显式接收 `pool`**（G2/ST-3 修正）。`pool` 类型 = 宿主传入的 psycopg `AsyncConnectionPool`（pg 模式）或内核自建 asyncpg 池（见驱动策略）。语义召回后按 `type_weight × importance × time_decay` 融合排序（移植 app `recall_typed` 加权逻辑，公式为内核事实）。
+   - `recall_typed(pool, user_id, question, k=3, weights=None) -> list[TypedMemory]`：**显式接收 `pool`**（G2/ST-3 修正）。`pool` 类型 = 宿主传入的 psycopg `AsyncConnectionPool`（pg 模式，与 app 同池）或内核自建 asyncpg 池（见驱动策略）。语义召回后按 `type_weight × importance × time_decay` 融合排序（移植 app `recall_typed` 加权逻辑，公式为内核事实；`time_decay = 1/(1+0.01*age_days)`，双曲衰减，非线性）。
    - `remember_typed(pool, user_id, fact, memory_type, importance) -> None`：fire-and-forget 沉淀。同样接收 `pool`。
    - `consolidate(user_id, pool, forget_threshold) -> int` / `forget(user_id, pool, memory_id) -> bool`：巩固+遗忘（移植 app 已落地 SQL）。
    - `semantic.py` 新增可选导出 `recall_typed` / `remember_typed`（复用 `typed.py`），现有 5 个公开符号签名不变。
@@ -73,9 +73,10 @@
 
 ### 护栏合规（§3，v2 明确）
 
-- `agent_core.memory.typed` 核心逻辑仅依赖 stdlib（`@dataclass` + `datetime`），**不引入 pydantic**；psycopg/asyncpg 经宿主池传入（可选 extra + 懒加载），**不新增内核硬依赖**。
+- `agent_core.memory.typed` 核心逻辑仅依赖 stdlib（`@dataclass` + `datetime`），**不引入 pydantic**。
+- **驱动依赖归属（二次评审 #1 修正）**：`vector_backend.py` 只用 **asyncpg**（`pool.acquire()` + `$N` 占位符，`vector_backend.py:301-313`），**不碰 psycopg**；psycopg 仅经 `get_checkpointer`（`memory/__init__.py:48`）使用，与 vector/typed 下沉无关。故内核 typed 的 pg 路径：**asyncpg 经内核现有 `vector_backend` 间接使用（可选 extra + 懒加载）**；若采用「接收宿主 psycopg 池」策略（驱动策略 4），则 psycopg 由宿主提供，内核不新增 psycopg 硬依赖。两种策略下内核均**不新增硬依赖**。
 - LLM 抽取不进内核，内核不感知任何 LLM 客户端。
-- 向后兼容：`semantic.py` 现有 5 个公开符号签名不变，调用方（含 PR #4 已接线的 deepagents）零改动。
+- 向后兼容：`semantic.py` 现有 5 个公开符号（`semantic_memory_enabled` / `get_default_backend` / `get_semantic_memory` / `recall_memories` / `remember_memory`）签名不变，调用方（含 PR #4 已接线的 deepagents）零改动。
 
 ### 返回类型与 re-export 投影（SP-4 澄清）
 
@@ -101,6 +102,7 @@
 - **负向 / 风险**：
   - 内核契约变更：`vector_backend.py` 的 `memories` 表新增 `memory_type`/`importance`/`created_at` 列（pg 模式）+ Milvus 集合标量字段；各子包需迁移（app 幂等 ALTER，deepagents/kefu/wenda 若启用需建表）。
   - 与现有双驱动（ADR-0003）叠加，pg 模式 typed 路径复用宿主 psycopg 池（不新增池），Milvus 模式降级无类型。
+  - **驱动切换移植成本（二次评审 #2）**：app 类型路径用 psycopg 池（`%s` 占位符 + `pool.connection()`，`memory_backend.py:142-155`），内核 `vector_backend` 用 asyncpg 池（`$N` 占位符 + `pool.acquire()`，`vector_backend.py:301-313`）。若采用「接收宿主 psycopg 池」策略，内核 `typed.py` 需**同时改写**：① 占位符风格 `$N`→`%s`；② 池 API `acquire()`→`connection()`；③ 解除对 `app.infra.db.vector_search` 的依赖（改为内核内联 SQL）。若采用「内核 asyncpg 自建池」策略，则 app 适配层需反向改写。移植工作量需在阶段 1 估算。
   - 加权融合公式（type_weight / decay 系数）固化内核事实，宿主可经 `weights` 入参覆盖（见待决策项 2）。
 - **运维约束**：`SEMANTIC_MEMORY_TYPED` 默认关闭；CI 零密钥环境走内存降级，typed 路径不可达（符合现有 CI 门禁分层）。
 
@@ -113,7 +115,7 @@
 ## 待决策项（评审时需拍板，v2 收敛）
 
 1. **表契约迁移脚本归属**：内核统一定义并下发迁移脚本（推荐），还是各子包自带 migration？→ 推荐内核 `vector_backend.py` 内 `_init_schema` 幂等加列 + 提供 ALTER 片段。
-2. **加权系数覆盖方式**：默认系数（`procedural=1.2 / semantic=1.1 / episodic=1.0` + `decay=0.01*age`）写死在 `typed.py`；`weights` 入参覆盖优先于默认（G4 澄清：签名已支持入参覆盖，env 覆盖为**可选增强**，非必需，待决策是否加 env 旋钮）。
+2. **加权系数覆盖方式**：默认系数（`procedural=1.2 / semantic=1.1 / episodic=1.0` + `time_decay=1/(1+0.01*age_days)` 双曲衰减）写死在 `typed.py`；`weights` 入参覆盖优先于默认（G4 澄清：签名已支持入参覆盖，env 覆盖为**可选增强**，非必需，待决策是否加 env 旋钮）。
 3. **阶段 2 是否随本 ADR 一并 PR**：建议单独立项（与首版一致），避免扩大本 ADR 落地面。
 
 ## 修订记录（v2，回应评审）
@@ -127,3 +129,15 @@
 - SP-3：consolidate/forget 改为「已落地但仅 app 可用」。
 - SP-4：re-export 层做 `.content` 投影保 `list[str]` 契约。
 - G4：`weights` 入参覆盖优先于默认，env 覆盖列为可选增强（待决策项 2）。
+
+## 修订记录（v2.1，回应二次评审）
+
+状态由「修订中」收敛为「采纳待拍板」。二次评审 4 条核实：
+
+- **#1 psycopg 归属（采纳）**：护栏合规段改为「asyncpg 经内核 vector_backend 间接使用；psycopg 仅经 get_checkpointer，与 typed 下沉无关」，删除模糊的「psycopg/asyncpg 经宿主池传入」。
+- **#2 驱动切换移植成本（采纳）**：负向风险补「占位符 `$N`→`%s` + 池 API `acquire()`→`connection()` + 解除 `app.infra.db.vector_search` 依赖」的移植清单，阶段 1 需估算。
+- **#3 衰减公式（采纳）**：`time_decay` 改为精确双曲衰减 `1/(1+0.01*age_days)`（核实 `memory_backend.py:135`），非线性。
+- **#4 公开符号（已修正，v2 行 59 已列 5 个）**：评审引首版行号，v2 已补 `get_semantic_memory`；本段显式列全 5 个符号。
+- **反驳：二次评审沿用首版「consolidate/forget 部分未完全落地 ✅」**：经核实 `memory_backend.py:158`/`181` 为**完整 SQL 实现**（与首版 SP-3 已被推翻一致），该 ✅ 系评审未重新核实代码、照抄首版过时判断。维持 v2「已落地但仅 app 可用」结论，不予采纳。
+
+**二次评审已核实准确的声明（与 v2 一致）**：`extract_memory_facts` 位于 `longterm.py:42` ✅；deepagents `semantic_memory.py` 纯 re-export ✅；`_MEMORY_TYPES` 三值与 `MemoryType` 对齐 ✅；加权公式 `type_weight×importance×time_decay` 一致 ✅；`type_weight 1.2/1.1/1.0` 一致 ✅。
