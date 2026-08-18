@@ -48,6 +48,23 @@ jobs:
             echo "::error::LLM 评测未达门禁阈值或异常"
             exit "$CODE"
           fi
+      - name: Typed memory cross-turn reuse (ADR-0004 候选B)
+        id: memory
+        # 依赖 LLM_API_KEY + DATABASE_URL；任一缺失显式 SKIP(2)。非阻塞。
+        env:
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          make eval-llm-memory || CODE=$?
+          if [ "${CODE:-0}" = "2" ]; then
+            echo "memory-skipped=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::跨轮记忆复用雷达环境不可达（LLM_API_KEY/DATABASE_URL 未配置），已显式 SKIP，不视为失败"
+          elif [ "${CODE:-0}" != "0" ]; then
+            echo "::error::跨轮记忆复用雷达未通过（记忆未复用或 workspace 隔离失效）"
+            exit "$CODE"
+          fi
       - name: Upload eval report
         if: always()
         uses: actions/upload-artifact@v4

@@ -1,0 +1,114 @@
+# 技术债清单：写死判定逻辑（Hardcoded Logic Debt）
+
+> 登记日期：2026-08-18
+> 关联：ADR-0004 类型化记忆阶段4、双轨架构分析 `TB-9`、双轨收敛 `plan-e` S-5
+> 状态：待排期（仅记录，未修复）
+
+## 背景
+
+ADR-0004 阶段4 的候选B（`eval/memory_reuse_llm.py`）评审中，发现 `_PREFERENCE_SIGNALS` 为写死关键词常量，
+用于"跨轮记忆复用"的退化兜底判定。扩展排查后确认：项目内存在多处同类"写死判定逻辑"——即运行时业务判定依赖
+硬编码常量元组 / 固定数值阈值 / 关键词硬映射，而非从配置、模型推理或运行时数据推导。
+
+本文档统一登记，便于后续迭代排期。严重程度分级：
+- 🔴 高：写死且无 LLM/配置兜底，换种表述即误判，具生产风险
+- 🟠 中：有主路径兜底，但写死值仍不健壮（阈值跨场景不合理 / 含 typo）
+- 🟡 低：有 LLM/配置兜底，仅词表或示例应外置，影响隐蔽
+
+---
+
+## 🔴 高风险
+
+### TD-1 kefu 意图路由为纯关键词 if-else（与 docstring 脱节）
+- 文件：`kefu-service/kefu_agent/graph.py:30-41`
+- 现状：客服意图纯 `if kw in msg` 硬匹配，`else → knowledge`；"谢谢"独立消息覆盖其他意图。
+- 矛盾：`graph.py:3` docstring 声称"LLM 驱动的意图路由（复用 Phase 3）"，实际未调 LLM、未接 classifier。
+- 影响：换种说法即误路由；注释误导维护者以为已统一。
+- 范围说明：双轨收敛 `plan-e` 的 **S-5 范围外声明**明确 kefu 符合性核验"本期不纳入"，故未被统一意图架构覆盖。
+- 建议：① 修正 docstring 为真实状态；② 或令 kefu 意图节点复用 `deepagents/agent/intent/classifier.py`（真正统一）。
+- 状态：待排期
+
+### TD-2 kefu 售后类型纯关键词判定
+- 文件：`kefu-service/kefu_agent/services.py:144-154`
+- 现状：`if "退款" in msg → "退款"`，与 TD-1 词表重复且不一致（"退钱"等说法全漏）。
+- 建议：与 TD-1 一并统一到 classifier。
+- 状态：待排期
+
+---
+
+## 🟠 中风险
+
+### TD-3 deepagents 意图降级关键词含 typo
+- 文件：`deepagents/agent/intent/classifier.py:89-103`
+- 现状：`_keyword_fallback` 写死关键词字典，含 `"2么"`（应为"怎么"）。仅 embedding 缺失时退化用，但有 LLM/embedding 主路径兜底。
+- 建议：修正 typo；降级词表外置或删除（主路径健全时不应依赖写死降级）。
+- 状态：待排期
+
+### TD-4 意图置信度阈值多处写死且重复
+- 文件：`deepagents/agent/intent/llm_judge.py:17-18,87,97`（`_L2_THRESHOLD=0.8` / `_CLARIFY_THRESHOLD=0.5`）、`classifier.py`（同样 0.8）
+- 现状：决定是否"反问用户"的业务边界写死；两处 0.8 重复。
+- 建议：收敛到单一配置项（settings 或 prototypes.json）。
+- 状态：待排期
+
+### TD-5 商品名确认阈值写死
+- 文件：`zhanggui-zhiku/.../node_item_name_confirm.py:170-171`
+- 现状：`score>0.85` / `>=0.6` 固定阈值；跨类目相似度分布不同，易误确认。
+- 建议：阈值按类目配置化，或改 LLM 判定。
+- 状态：待排期
+
+### TD-6 typed 记忆遗忘阈值 + 老化天数写死
+- 文件：`agent-core/agent_core/memory/typed.py:225-238`
+- 现状：`forget_threshold=0.1` + SQL 内 `"30 days"` 写死。记忆生命周期不可配，跨业务不合理。
+- 关联：即 ADR-0004 候选A（智能阈值）驳回提到的固定阈值；待采集基线后参数化。
+- 建议：从 settings 读取；采集重要性/老化基线数据后再调参。
+- 状态：待排期（依赖候选A 基线采集）
+
+---
+
+## 🟡 低风险
+
+### TD-7 app 路由特征词硬映射
+- 文件：`app/agent/router.py:14-39`
+- 现状：`SQL_HINTS` / `RAG_HINTS` 等特征词硬映射。有 LLM 路由主路径兜底。
+- 建议：词表外置或并入 classifier 原型。
+- 状态：待排期
+
+### TD-8 longterm 抽取 prompt 内嵌具体偏好示例
+- 文件：`app/memory/longterm.py:30-41`
+- 现状：抽取 prompt 内嵌"财务/简洁报表"具体 few-shot 示例，引导模型偏向特定偏好（类 `_PREFERENCE_SIGNALS` 风险）。
+- 建议：示例泛化为中性模板，或随用户偏好动态注入。
+- 状态：待排期
+
+### TD-9 zhanggui eval 超参写死
+- 文件：`zhanggui-zhiku/eval/run_eval.py:63-64`
+- 现状：评测超参 `0.8/0.2/0.25` 写死，与线上 `retrieval.yaml` 可能不一致。
+- 建议：统一引用 retrieval.yaml 配置。
+- 状态：待排期
+
+### TD-10 admission 状态枚举写死进 SQL
+- 文件：`app/infra/admission.py:91`
+- 现状：状态枚举 `'admitted','queued'` 写死进 SQL 字符串。
+- 建议：改为配置表或枚举常量。
+- 状态：待排期
+
+---
+
+## 已修复
+
+### TD-0 eval 跨轮记忆雷达写死信号（已完成）
+- 原：`eval/memory_reuse_llm.py` 的 `_PREFERENCE_SIGNALS` / `strong` 写死关键词。
+- 修复（commit `248f0e9`，已 push PR#10）：退化兜底改为直接 SKIP、删除写死常量；信号集不再含题面自带词。
+- 状态：✅ 已修复
+
+---
+
+## 交叉引用
+- `docs/dual-track-architecture-analysis.md:24-28`：意图分类双份未对齐单一真相源 → 待办 `TB-9`（未排期）
+- `docs/plan-e-dual-track-convergence.md` S-5：kefu 符合性核验范围外，本期不纳入
+- 说明：本文档 TD-1/TD-2 即 `TB-9` 在 kefu 侧的具体落点；统一意图架构（deepagents embedding 主路径）已完成，
+  但 kefu 为漏网之鱼。
+
+## 排期建议
+1. 高优先：TD-1/TD-2（生产链路，且注释误导）—— 先修 docstring（小），再议是否复用 classifier（大）
+2. 中优先：TD-6（依赖候选A 基线）、TD-4/TD-3
+3. 低优先：TD-5/TD-7~TD-10
