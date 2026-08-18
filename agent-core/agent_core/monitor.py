@@ -137,6 +137,16 @@ class ToolMonitor:
         logger.error("[Monitor:error] %s", message)
         self._emit("error", message)
 
+    def report_circuit(self, state: str, message: str, data: dict[str, Any] | None = None) -> None:
+        """上报熔断器状态变化（P3 可观测性）。
+
+        Args:
+            state: 目标状态（``open`` / ``half_open`` / ``closed``）。
+            message: 人类可读描述。
+            data: 附加维度（如 ``agent_name`` / ``failure_count`` / ``threshold``）。
+        """
+        self._emit("circuit_state_change", message, {"state": state, **(data or {})})
+
     def report_tool_outcome(
         self,
         tool_name: str,

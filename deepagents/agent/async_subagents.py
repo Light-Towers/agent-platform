@@ -20,9 +20,13 @@ from __future__ import annotations
 
 import asyncio
 
+from agent_core.monitor import monitor
+
+from agent.agent.metrics import record_delegation
 from agent.circuit_breaker import get_breaker_sync
 from agent.config import get_all_subservices
 from agent.prompts import sub_agents_content
+from agent.tracing.langfuse_adapter import observe
 
 try:  # 外部 deepagents 包（Agent Protocol 原生支持）
     from deepagents import AsyncSubAgent
@@ -161,15 +165,19 @@ class DelegatingSubAgent:
         self._breaker = get_breaker_sync(self.name)
         self._local_agent = None  # 懒编译
 
+    @observe(name="subagent.delegate", as_type="span")
     async def ainvoke(self, input: dict) -> dict:
+        monitor.report_assistant(self.name, {"event": "delegate_start"})
         # 1. 健康探活短路（config.healthy 由 health_check 维护）
         if not self._svc.healthy:
             logger.warning("[%s] 健康探活标记不可用，跳过远程委派，走本地 fallback", self.name)
+            monitor.report_assistant(self.name, {"event": "delegate_degraded", "reason": "unhealthy"})
             return await self._fallback(input, reason="unhealthy")
 
         # 2. 熔断器放行检查
         if not await self._breaker.allow():
             logger.warning("[%s] 熔断器 OPEN，跳过远程委派，走本地 fallback", self.name)
+            monitor.report_assistant(self.name, {"event": "delegate_degraded", "reason": "circuit_open"})
             return await self._fallback(input, reason="circuit_open")
 
         # 3. 指数退避重试的远程委派
@@ -178,6 +186,7 @@ class DelegatingSubAgent:
             try:
                 result = await self._inner.ainvoke(input)
                 await self._breaker.record_success()
+                record_delegation(success=True)
                 return result
             except Exception as exc:  # 网络/协议/子服务异常
                 last_exc = exc
@@ -191,6 +200,7 @@ class DelegatingSubAgent:
         # 4. 用尽重试仍失败 -> 计入熔断 + 本地 fallback
         await self._breaker.record_failure()
         logger.error("[%s] 远程委派彻底失败，转入本地 fallback: %s", self.name, last_exc)
+        monitor.report_assistant(self.name, {"event": "delegate_degraded", "reason": "remote_failed"})
         return await self._fallback(input, reason="remote_failed", error=last_exc)
 
     async def _fallback(self, input: dict, reason: str, error: Exception | None = None) -> dict:
@@ -206,10 +216,12 @@ class DelegatingSubAgent:
                 result = await agent.ainvoke(input)
                 result.setdefault("degraded", True)
                 result.setdefault("degraded_reason", reason)
+                record_delegation(success=True, degraded=True)
                 return result
             except Exception as exc:
                 logger.error("[%s] 本地 fallback 也失败: %s", self.name, exc)
                 # 落入结构化降级响应
+        record_delegation(success=True, degraded=True)
         return {
             "answer": f"子服务「{self.name}」当前不可用（{reason}），已降级处理，请稍后重试或由主管直接回答。",
             "degraded": True,

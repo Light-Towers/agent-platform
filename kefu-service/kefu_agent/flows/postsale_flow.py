@@ -15,7 +15,7 @@ from kefu_agent.state import KefuState
 async def collect_issue_type(state: KefuState) -> KefuState:
     """从用户消息中识别售后类型到 slots。"""
     message = state.get("user_message", "")
-    issue_type = extract_issue_type(message)
+    issue_type = await extract_issue_type(message)
     slots = dict(state.get("slots", {}))
     if issue_type:
         slots["issue_type"] = issue_type

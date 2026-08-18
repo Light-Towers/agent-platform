@@ -20,6 +20,8 @@ import time
 
 from agent_core.logging import get_logger
 
+from agent.agent.metrics import record_circuit_state
+
 logger = get_logger(__name__)
 
 # 失败率阈值：窗口内失败占比超过该值则熔断。
@@ -72,6 +74,15 @@ class CircuitBreaker:
     def _now(self) -> float:
         return time.monotonic()
 
+    def _transition(self, new_state: str) -> None:
+        """统一状态转换入口：更新内部状态 + 记录指标/上报（P3 可观测性）。"""
+        if new_state == self._state:
+            return
+        old = self._state
+        self._state = new_state
+        record_circuit_state(self.name, new_state)
+        logger.info("[circuit:%s] state %s -> %s", self.name, old, new_state)
+
     def _trim(self) -> None:
         """按窗口大小裁剪滑动窗口（保留最近 window_size 次结果）。"""
         for bucket in (self._successes, self._failures):
@@ -86,9 +97,8 @@ class CircuitBreaker:
         async with self._lock:
             if self._state == CircuitState.OPEN:
                 if self._now() - self._opened_at >= self.cooldown_seconds:
-                    self._state = CircuitState.HALF_OPEN
                     self._half_open_successes = 0
-                    logger.info("[circuit:%s] 冷却到期，进入 HALF_OPEN 探测", self.name)
+                    self._transition(CircuitState.HALF_OPEN)
                     return True
                 return False
             return True
@@ -99,10 +109,9 @@ class CircuitBreaker:
             if self._state == CircuitState.HALF_OPEN:
                 self._half_open_successes += 1
                 if self._half_open_successes >= self.half_open_probes:
-                    self._state = CircuitState.CLOSED
                     self._successes = []
                     self._failures = []
-                    logger.info("[circuit:%s] 探测连续成功，恢复 CLOSED", self.name)
+                    self._transition(CircuitState.CLOSED)
                 return
             self._successes.append(now)
             self._trim()
@@ -112,10 +121,9 @@ class CircuitBreaker:
         async with self._lock:
             now = self._now()
             if self._state == CircuitState.HALF_OPEN:
-                self._state = CircuitState.OPEN
                 self._opened_at = now
                 self._half_open_successes = 0
-                logger.warning("[circuit:%s] HALF_OPEN 探测失败，重新 OPEN", self.name)
+                self._transition(CircuitState.OPEN)
                 return
             self._failures.append(now)
             self._trim()
@@ -130,15 +138,8 @@ class CircuitBreaker:
             return
         failures = len(self._failures)
         if failures / total >= self.failure_ratio:
-            self._state = CircuitState.OPEN
             self._opened_at = self._now()
-            logger.warning(
-                "[circuit:%s] 失败率 %.0f%% 超阈值（%d/%d），熔断 OPEN",
-                self.name,
-                failures / total * 100,
-                failures,
-                total,
-            )
+            self._transition(CircuitState.OPEN)
 
 
 _breakers: dict[str, CircuitBreaker] = {}
