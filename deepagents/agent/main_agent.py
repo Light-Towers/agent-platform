@@ -12,6 +12,9 @@ import os
 from deepagents import create_deep_agent
 
 from agent.async_subagents import get_remote_subagents
+from agent.cache.config import get_cache_config
+from agent.cache.layers import _build_cache_key
+from agent.cache.singleflight import singleflight
 from agent.config import is_remote_mode
 from agent.llm import model
 from agent.prompts import main_agent_content, planner_content
@@ -339,102 +342,25 @@ async def run_deep_agent(task_query, workspace_id):
             except Exception as e:
                 logger.warning("缓存查询失败（非致命）: %s", e)
 
-        session_dir = project_root_path / "output" / f"session_{workspace_id}"
-        session_dir.mkdir(parents=True, exist_ok=True)
-        session_dir_str = str(session_dir).replace("\\", "/")
-        relative_session_dir_str = str(session_dir.relative_to(project_root_path)).replace("\\", "/")
+        # P4：缓存击穿防护。缓存 miss 后，用 singleflight 以 cache key 去重：
+        # 同一 query 的并发请求只真正执行一次 Agent（LLM），其余等同一结果，
+        # 避免热点 query 把 LLM/子服务打爆。cache key 与语义缓存一致（含 kb 版本/租户/灰度）。
+        cache_key = _build_cache_key(
+            _cached_intent, task_query,
+            *(lambda c: (c.kb_versions, c.tenant_id, c.gray_pct))(get_cache_config())
+            if os.getenv("CACHE_ENABLED", "false").lower() == "true"
+            else ("", "", ""),
+        )
+        _final_answer = await singleflight(
+            cache_key, _execute_agent_core, task_query, workspace_id,
+        )
 
-        updated_dir_path = project_root_path / "updated" / f"session_{workspace_id}"
-        updated_info_prompt = ""
-        if updated_dir_path.exists():
-            files = [f.name for f in updated_dir_path.iterdir() if f.is_file()]
-            if files:
-                for filename in files:
-                    shutil.copy2(updated_dir_path / filename, session_dir / filename)
-                updated_info_prompt = (
-                    "\n    [已上传文件] 已加载到工作目录:\n"
-                    + "\n".join([f"    - {f}" for f in files])
-                    + "\n    请优先使用工具（read_file_content）读取并参考这些文件。"
-                )
-
-        session_dir_token = set_session_context(session_dir_str)
-        session_id_token = set_thread_context(workspace_id)
-        monitor.report_session_dir(session_dir_str)
-
-        config = {"configurable": {"thread_id": workspace_id}}
-
-        path_instruction = f"""
-        【工作环境指令】
-        工作目录: {relative_session_dir_str}
-        {updated_info_prompt}
-
-        规则：
-        1. 新生成文件必须保存到工作目录：'{relative_session_dir_str}/filename'
-        2. 读取已上传的文件时，请直接将文件名作为 filename 参数传入（read_file_content）读取工具，不要带上任何目录前缀。
-        3. 使用相对路径，禁止使用绝对路径
-        4. 若存在上传文件，请先分析内容
-        """
-
-        # 阶段2 收尾：召回类型化记忆并注入本轮 user 上下文（无池/关闭则空串）
-        memory_ctx = await recall_typed_context(workspace_id, task_query)
-
-        # P1.6：同一 workspace_id（thread_id）串行执行，避免并发撕裂 checkpointer 状态。
-        # 引用计数锁在 run 结束时释放，归零即清理，避免锁对象堆积。
-        lock = await _get_thread_lock(workspace_id)
-        try:
-            async with lock:
-                main_agent = await get_main_agent()
-                async for chunk in main_agent.astream(
-                    {"messages": [{"role": "user", "content": task_query + path_instruction + memory_ctx}]},
-                    config=config,
-                ):
-                    for node_name, state in chunk.items():
-                        if not state or "messages" not in state:
-                            continue
-                        messages = state["messages"]
-                        if messages and isinstance(messages, list):
-                            last_msg = messages[-1]
-                            if node_name == 'model':
-                                if last_msg.tool_calls:
-                                    for tool_call in last_msg.tool_calls:
-                                        if tool_call['name'] == 'task':
-                                            subagent_type = tool_call['args']['subagent_type']
-                                            logger.info("委派子智能体: %s", subagent_type)
-                                            monitor.report_assistant(
-                                                subagent_type,
-                                                {'description': tool_call['args']['description']}
-                                            )
-                                            if is_remote_mode():
-                                                monitor._emit('subservice_route', {
-                                                    'subagent': subagent_type,
-                                                    'mode': 'remote',
-                                                    'description': tool_call['args']['description'],
-                                                })
-                                            else:
-                                                monitor._emit('subservice_route', {
-                                                    'subagent': subagent_type,
-                                                    'mode': 'local',
-                                                    'description': tool_call['args']['description'],
-                                                })
-                                elif last_msg.content:
-                                    _final_answer = last_msg.content
-                                    if os.getenv("GUARD_ENABLED", "false").lower() == "true":
-                                        try:
-                                            from gateway.output_guard import guard_output
-                                            _og = guard_output(_final_answer)
-                                            if not _og["safe"]:
-                                                logger.warning("输出 guardrail 拦截: pii=%s", _og["pii_leaked"])
-                                        except Exception:
-                                            pass
-                                    monitor.report_task_result(last_msg.content)
-        except Exception as e:
-            logger.exception("main_agent 执行异常 workspace_id=%s", workspace_id)
-            monitor.report_error(f"执行主智能发生异常信息：{str(e)}")
-        finally:
-            # 阶段2 收尾：本轮生效答案沉淀为 episodic 记忆（旁路，失败不阻断）
-            if _final_answer:
-                await remember_episodic(workspace_id, task_query, _final_answer)
-            if _cache_hit is None and _final_answer and os.getenv("CACHE_ENABLED", "false").lower() == "true":
+        # 统一收尾：监控上报 + 阶段2 记忆沉淀 + 语义缓存写入（无论是否经 singleflight 合并，
+        # 每个 run_deep_agent 调用方都基于最终答案补齐自身指标与记忆，写入幂等无害）。
+        if _final_answer:
+            monitor.report_task_result(_final_answer)
+            await remember_episodic(workspace_id, task_query, _final_answer)
+            if _cache_hit is None and os.getenv("CACHE_ENABLED", "false").lower() == "true":
                 try:
                     from agent.cache.semantic_cache import SemanticCache
                     await SemanticCache.set_async(
@@ -443,5 +369,114 @@ async def run_deep_agent(task_query, workspace_id):
                     )
                 except Exception:
                     pass
-            reset_session_context(session_dir_token, session_id_token)
-            _release_thread_lock(workspace_id)  # P1.6：归零清理锁
+
+
+async def _execute_agent_core(task_query: str, workspace_id: str) -> str:
+    """P4：Agent 核心执行（供 singleflight 去重包裹）。
+
+    与 run_deep_agent 解耦：负责 session 目录准备、上下文注入、per-thread 串行锁、
+    agent astream 执行并收集最终答案，**返回**最终答案字符串。流式过程中的子服务
+    路由监控保留在此（仅真正执行的请求上报）；最终答案的统一监控上报/记忆沉淀/缓存
+    写入由 run_deep_agent 在拿到结果后负责，避免 singleflight 合并时重复或缺失。
+
+    Args:
+        task_query: 经意图改写后的最终 query
+        workspace_id: 工作空间/thread_id 标识
+
+    Returns:
+        最终答案；执行异常时返回空串（由调用方决定降级行为）
+    """
+    session_dir = project_root_path / "output" / f"session_{workspace_id}"
+    session_dir.mkdir(parents=True, exist_ok=True)
+    session_dir_str = str(session_dir).replace("\\", "/")
+    relative_session_dir_str = str(session_dir.relative_to(project_root_path)).replace("\\", "/")
+
+    updated_dir_path = project_root_path / "updated" / f"session_{workspace_id}"
+    updated_info_prompt = ""
+    if updated_dir_path.exists():
+        files = [f.name for f in updated_dir_path.iterdir() if f.is_file()]
+        if files:
+            for filename in files:
+                shutil.copy2(updated_dir_path / filename, session_dir / filename)
+            updated_info_prompt = (
+                "\n    [已上传文件] 已加载到工作目录:\n"
+                + "\n".join([f"    - {f}" for f in files])
+                + "\n    请优先使用工具（read_file_content）读取并参考这些文件。"
+            )
+
+    session_dir_token = set_session_context(session_dir_str)
+    session_id_token = set_thread_context(workspace_id)
+    monitor.report_session_dir(session_dir_str)
+
+    config = {"configurable": {"thread_id": workspace_id}}
+
+    path_instruction = f"""
+    【工作环境指令】
+    工作目录: {relative_session_dir_str}
+    {updated_info_prompt}
+
+    规则：
+    1. 新生成文件必须保存到工作目录：'{relative_session_dir_str}/filename'
+    2. 读取已上传的文件时，请直接将文件名作为 filename 参数传入（read_file_content）读取工具，不要带上任何目录前缀。
+    3. 使用相对路径，禁止使用绝对路径
+    4. 若存在上传文件，请先分析内容
+    """
+
+    memory_ctx = await recall_typed_context(workspace_id, task_query)
+
+    final_answer = ""
+    # P1.6：同一 workspace_id（thread_id）串行执行，避免并发撕裂 checkpointer 状态。
+    lock = await _get_thread_lock(workspace_id)
+    try:
+        async with lock:
+            main_agent = await get_main_agent()
+            async for chunk in main_agent.astream(
+                {"messages": [{"role": "user", "content": task_query + path_instruction + memory_ctx}]},
+                config=config,
+            ):
+                for node_name, state in chunk.items():
+                    if not state or "messages" not in state:
+                        continue
+                    messages = state["messages"]
+                    if messages and isinstance(messages, list):
+                        last_msg = messages[-1]
+                        if node_name == 'model':
+                            if last_msg.tool_calls:
+                                for tool_call in last_msg.tool_calls:
+                                    if tool_call['name'] == 'task':
+                                        subagent_type = tool_call['args']['subagent_type']
+                                        logger.info("委派子智能体: %s", subagent_type)
+                                        monitor.report_assistant(
+                                            subagent_type,
+                                            {'description': tool_call['args']['description']}
+                                        )
+                                        if is_remote_mode():
+                                            monitor._emit('subservice_route', {
+                                                'subagent': subagent_type,
+                                                'mode': 'remote',
+                                                'description': tool_call['args']['description'],
+                                            })
+                                        else:
+                                            monitor._emit('subservice_route', {
+                                                'subagent': subagent_type,
+                                                'mode': 'local',
+                                                'description': tool_call['args']['description'],
+                                            })
+                            elif last_msg.content:
+                                final_answer = last_msg.content
+                                if os.getenv("GUARD_ENABLED", "false").lower() == "true":
+                                    try:
+                                        from gateway.output_guard import guard_output
+                                        _og = guard_output(final_answer)
+                                        if not _og["safe"]:
+                                            logger.warning("输出 guardrail 拦截: pii=%s", _og["pii_leaked"])
+                                    except Exception:
+                                        pass
+    except Exception as e:
+        logger.exception("main_agent 执行异常 workspace_id=%s", workspace_id)
+        monitor.report_error(f"执行主智能发生异常信息：{str(e)}")
+    finally:
+        reset_session_context(session_dir_token, session_id_token)
+        _release_thread_lock(workspace_id)  # P1.6：归零清理锁
+
+    return final_answer
