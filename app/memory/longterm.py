@@ -16,6 +16,8 @@
 import json
 import logging
 
+from agent_core.memory.typed import semantic_memory_typed_enabled
+
 from app.config import get_settings
 from app.memory import memory_backend as _mb
 
@@ -77,9 +79,10 @@ async def extract_memory_facts(llm, question: str, answer: str) -> list[dict]:
 
 
 async def recall(pool, workspace_id: str, question: str, k: int = 3) -> list[str]:
-    settings = get_settings()
-    # 优化 H 类型增强路径：用 app psycopg 池做分层加权召回
-    if pool is not None and settings.memory_extraction_enabled:
+    # ADR-0004 阶段3：总开关由 SEMANTIC_MEMORY_TYPED 控制（与内核 typed 语义统一）。
+    # 开启 → 走内核 typed 加权/平权召回（仍用 app psycopg 池，遵守 ADR-0003）；
+    # 关闭或内存模式 → 退化内核后端平权召回（pool=None 由内核自建池）。
+    if pool is not None and semantic_memory_typed_enabled():
         try:
             return await _mb.recall_typed(pool, workspace_id, question, k=k)
         except Exception:
@@ -121,8 +124,46 @@ async def remember(
             # 无池（内存模式）无法落库，静默跳过
             logger.debug("内存模式：跳过结构化记忆落库")
         return
-    # 退化路径：整条原文（旧行为）
+    # 退化路径：整条原文
+    if pool is not None and semantic_memory_typed_enabled():
+        # ADR-0004 阶段3：typed 开关开启时，原文也落入 typed 表（semantic 类型），
+        # 保证下一轮 typed recall 能命中（D1 抽取未开启时仍可用整条记忆）。
+        try:
+            await _mb.remember_fact(
+                pool, workspace_id, content, memory_type="semantic", importance=0.5,
+            )
+        except Exception:
+            logger.exception("typed 退化写入失败，跳过")
+        return
+    # 旧行为：内核后端平权存原文（内存模式或 typed 关闭）
     backend = _mb.get_default_backend()
     if backend is None:
         return
     backend.remember(pool=None, user_id=workspace_id, content=content)
+
+
+# ADR-0004 阶段3：巩固/遗忘调度钩子（typed 闭环最后一块）
+# 不在每条对话后都跑 consolidate（开销），用模块级计数器按频率触发。
+_CONSOLIDATE_EVERY = 5  # 每 5 轮对话触发一次惰性遗忘
+_consolidate_counter = 0
+
+
+async def maybe_consolidate(pool, workspace_id: str) -> int:
+    """低频触发 typed 巩固/遗忘（旁路，失败不阻断，返回淘汰条数）。
+
+    - 仅当 ``SEMANTIC_MEMORY_TYPED`` 开启且 pool 存在时生效；
+    - 内部惰性淘汰 importance 低于阈值且超过 30 天的低价值记忆；
+    - 不抛错，异常吞掉（记忆维护是增强项，不应影响主链路）。
+    """
+    global _consolidate_counter
+    if pool is None or not semantic_memory_typed_enabled():
+        return 0
+    _consolidate_counter += 1
+    if _consolidate_counter % _CONSOLIDATE_EVERY != 0:
+        return 0
+    try:
+        threshold = get_settings().memory_forget_threshold
+        return await _mb.consolidate_memories(pool, workspace_id, forget_threshold=threshold)
+    except Exception:
+        logger.exception("记忆巩固/遗忘失败，跳过（不阻断主链路）")
+        return 0

@@ -123,7 +123,14 @@ async def test_extract_memory_facts_none_llm(patch_settings, monkeypatch):
 async def test_recall_typed_weights_and_ranks(patch_settings, monkeypatch):
     from datetime import datetime, timedelta, timezone
 
+    import agent_core.memory.typed as typed_core
+
     import app.memory.memory_backend as mb
+
+    # 开启内核 typed 开关，确保走加权融合（非平权退化）
+    monkeypatch.setenv("SEMANTIC_MEMORY_TYPED", "true")
+    # 重新绑定开关函数返回值（setenv 后对已缓存的 os.getenv 无影响，直接 patch）
+    monkeypatch.setattr(typed_core, "semantic_memory_typed_enabled", lambda: True)
 
     # 准备带类型的假召回（content, memory_type, importance, created_at）
     now = datetime.now(timezone.utc)
@@ -132,10 +139,10 @@ async def test_recall_typed_weights_and_ranks(patch_settings, monkeypatch):
         ("semantic 偏好", "semantic", 0.9, now - timedelta(days=1)),
         ("procedural 方法", "procedural", 0.9, now - timedelta(days=1)),
     ]
-    # mock 其依赖的 vector_search_memories（在 memory_backend 模块内调用）
+    # 内核 recall_typed 经宿主池调 _vector_search_memories；mock 它返回带类型行
     monkeypatch.setattr(
-        mb, "vector_search_memories",
-        lambda pool, ws, emb, k: _async(rows),
+        typed_core, "_vector_search_memories",
+        lambda pool, user_id, embedding, k: _async(rows),
     )
     monkeypatch.setattr(mb, "embed_memory", lambda t: [0.0] * 512)
 
@@ -259,13 +266,18 @@ async def test_recall_falls_back_to_core_when_disabled(patch_settings, monkeypat
 
 
 async def test_recall_forwards_to_recall_typed_when_enabled(patch_settings, monkeypatch):
-    # 优化 H 类型增强路径：enabled 且 pool 非空时，门面必须转发到 _mb.recall_typed
-    # （回归：曾误写裸 recall_typed 导致 NameError）
+    # ADR-0004 阶段3：总开关 SEMANTIC_MEMORY_TYPED 控制转发；即使
+    # memory_extraction_enabled=False（默认），开启 typed 开关也应转发。
+    import agent_core.memory.typed as typed_core
+
     import app.memory.longterm as l
 
-    patch_settings.memory_extraction_enabled = True
+    # SEMANTIC_MEMORY_TYPED 开启（与内核 typed 开关语义统一）
+    monkeypatch.setenv("SEMANTIC_MEMORY_TYPED", "true")
+    monkeypatch.setattr(typed_core, "semantic_memory_typed_enabled", lambda: True)
     # longterm 用 `from app.config import get_settings` 绑定副本，需直接 patch 模块内引用
     monkeypatch.setattr("app.memory.longterm.get_settings", lambda: patch_settings)
+    assert patch_settings.memory_extraction_enabled is False  # 强调：抽取未开也转发
     spy = {"called": None}
 
     async def _fake_recall_typed(pool, ws, q, k=3):
@@ -280,6 +292,89 @@ async def test_recall_forwards_to_recall_typed_when_enabled(patch_settings, monk
     res = await l.recall(_Pool(), "ws-typed", "q", k=2)
     assert res == ["typed-mem"]
     assert spy["called"] == ("ws-typed", "q", 2)
+
+
+async def test_recall_does_not_forward_when_typed_disabled(patch_settings, monkeypatch):
+    # ADR-0004 阶段3：typed 开关关闭时，即使 pool 非空也不走 typed 路径（退化内核后端）。
+    import agent_core.memory.typed as typed_core
+
+    import app.memory.longterm as l
+
+    monkeypatch.setattr(typed_core, "semantic_memory_typed_enabled", lambda: False)
+    monkeypatch.setattr("app.memory.longterm.get_settings", lambda: patch_settings)
+
+    forwarded = {"hit": False}
+
+    async def _fake_recall_typed(pool, ws, q, k=3):
+        forwarded["hit"] = True
+        return []
+
+    monkeypatch.setattr("app.memory.memory_backend.recall_typed", _fake_recall_typed)
+    # 退化路径 mock：内核 backend.recall 返回原文（async，匹配 longterm 的 await）
+    async def _fake_back_recall(*a, **k):
+        return ["fallback-mem"]
+
+    monkeypatch.setattr(
+        "app.memory.memory_backend.get_default_backend",
+        lambda: SimpleNamespace(recall=_fake_back_recall),
+    )
+
+    class _Pool:
+        pass
+
+    res = await l.recall(_Pool(), "ws-x", "q")
+    assert forwarded["hit"] is False
+    assert res == ["fallback-mem"]
+
+
+async def test_maybe_consolidate_triggers_every_n(patch_settings, monkeypatch):
+    # ADR-0004 阶段3：maybe_consolidate 每 _CONSOLIDATE_EVERY 次触发一次 consolidate。
+    import app.memory.longterm as l
+
+    # 经 env 打开 typed 开关（longterm 用 from-import 副本，patch 函数对象无效）
+    monkeypatch.setenv("SEMANTIC_MEMORY_TYPED", "true")
+    monkeypatch.setattr("app.memory.longterm.get_settings", lambda: patch_settings)
+
+    calls = {"n": 0}
+
+    async def _fake_consolidate(pool, ws, forget_threshold=0.1):
+        calls["n"] += 1
+        return 0
+
+    monkeypatch.setattr("app.memory.memory_backend.consolidate_memories", _fake_consolidate)
+    # 重置模块级计数器，避免其他测试副作用影响计频断言
+    l._consolidate_counter = 0
+
+    class _Pool:
+        pass
+
+    # 前 4 次不应触发，第 5 次触发（_CONSOLIDATE_EVERY=5）
+    for _ in range(4):
+        await l.maybe_consolidate(_Pool(), "ws")
+    assert calls["n"] == 0
+    await l.maybe_consolidate(_Pool(), "ws")
+    assert calls["n"] == 1
+
+
+async def test_maybe_consolidate_noop_when_disabled(patch_settings, monkeypatch):
+    # typed 开关关闭 → 不触发 consolidate
+    import app.memory.longterm as l
+
+    monkeypatch.setenv("SEMANTIC_MEMORY_TYPED", "false")
+    monkeypatch.setattr("app.memory.longterm.get_settings", lambda: patch_settings)
+
+    calls = {"n": 0}
+    monkeypatch.setattr(
+        "app.memory.memory_backend.consolidate_memories",
+        lambda *a, **k: calls.__setitem__("n", calls["n"] + 1),
+    )
+
+    class _Pool:
+        pass
+
+    for _ in range(10):
+        await l.maybe_consolidate(_Pool(), "ws")
+    assert calls["n"] == 0
 
 
 async def test_remember_forwards_to_remember_fact_when_enabled(patch_settings, monkeypatch):
