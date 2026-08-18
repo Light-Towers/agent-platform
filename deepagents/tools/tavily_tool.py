@@ -5,7 +5,6 @@ import httpx
 import requests
 from dotenv import load_dotenv
 from langchain_core.tools import tool
-from tavily import TavilyClient
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from tools._timeout import with_timeout
@@ -22,7 +21,12 @@ except ImportError:
     def _start_span(*a, **kw):
         yield None
 
-tavily_client = TavilyClient(api_key=os.getenv("TAVILY_API_KEY"))
+
+def _get_tavily_client():
+    """延迟构造 Tavily 客户端，避免 import 期硬依赖 tavily SDK。"""
+    from tavily import TavilyClient
+
+    return TavilyClient(api_key=os.getenv("TAVILY_API_KEY"))
 
 # 可重试：网络超时 / 连接错误；不可重试：HTTP 4xx
 _RETRYABLE = (httpx.TimeoutException, httpx.ConnectError, requests.ConnectionError, requests.Timeout)
@@ -36,7 +40,7 @@ _RETRYABLE = (httpx.TimeoutException, httpx.ConnectError, requests.ConnectionErr
 )
 def _tavily_search(**kwargs):
     """带重试的 Tavily 调用（仅网络类错误重试，4xx/业务错误不重试）。"""
-    return tavily_client.search(**kwargs)
+    return _get_tavily_client().search(**kwargs)
 
 
 @tool

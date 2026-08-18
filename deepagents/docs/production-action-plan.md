@@ -503,33 +503,53 @@ async def _execute_agent(task_query, session_id):
 
 ---
 
-## P5：动态子 Agent（中优先级）
+## P5：动态子 Agent（已完成 ✓，2026-08-18，中优先级）
 
-### 5.1 工具注册表
+### 5.1 工具注册表（已完成）
+
+**文件**：`agent/tool_registry.py`（新增）
+**状态**：✓ 已实现。采用「延迟定位串」（`module:attr`）而非 import 期硬依赖，避免外部 SDK（如 tavily）缺失时阻断导入（同时修复了 `tools/tavily_tool.py` 顶层 import 改为延迟构造，解耦 import 期依赖）。
 
 ```python
 # agent/tool_registry.py
-from tools.db_tools import list_sql_tables, get_table_data, execute_sql_query
-from tools.tavily_tool import internet_search
-from tools.zhiku_tools import zhiku_retrieve
-from tools.upload_file_read_tool import read_file_content
-from tools.markdown_tools import generate_markdown
-from tools.pdf_tools import convert_md_to_pdf
-
-TOOL_REGISTRY = {
-    "sql_query":  [list_sql_tables, get_table_data, execute_sql_query],
-    "web_search": [internet_search],
-    "knowledge":  [zhiku_retrieve],
-    "file_read":  [read_file_content],
-    "markdown":   [generate_markdown],
-    "pdf":        [convert_md_to_pdf],
+TOOL_REGISTRY = {  # 工具名 -> "module:attr" 延迟定位串
+    "generate_markdown": "tools.markdown_tools:generate_markdown",
+    "convert_md_to_pdf": "tools.pdf_tools:convert_md_to_pdf",
+    "read_file_content": "tools.upload_file_read_tool:read_file_content",
+    "execute_sql_query": "tools.db_tools:execute_sql_query",
+    "internet_search":   "tools.tavily_tool:internet_search",
+    "zhiku_retrieve":    "tools.zhiku_tools:zhiku_retrieve",
 }
+ROLE_TOOLS = {  # 角色 -> 工具名列表（声明式）
+    "files":      ["generate_markdown", "convert_md_to_pdf", "read_file_content"],
+    "data":       ["execute_sql_query", "read_file_content"],
+    "search":     ["internet_search", "read_file_content"],
+    "knowledge":  ["zhiku_retrieve", "read_file_content"],
+}
+BASE_ROLES = ["files"]  # 始终挂载
+```
 
-def get_tools(capabilities: list[str]) -> list:
-    tools = []
-    for cap in capabilities:
-        tools.extend(TOOL_REGISTRY.get(cap, []))
-    return tools
+### 5.2 SubAgentFactory（已完成）
+
+**说明**：动态模式不改变委派拓扑，`_build_subagents()` 仍返回原 3 个 subagent，未做 per-spec 子 agent 拆分（与规划 5.2 的 `build_subagents` 略有差异，但实际动态粒度落在「主管工具集」而非「子 agent 集合」，更符合低成本增量价值）。工具粒度的 `get_tools_for_roles(roles)` 已实现于 `tool_registry.py`。
+
+```python
+# agent/subagent_factory.py（参考，实际未单独建文件；逻辑并入 tool_registry）
+from agent.tool_registry import get_tools
+
+_DEFAULT_PROMPT = "你是专业助手，请使用提供的工具完成任务。"
+
+def build_subagents(role_specs: list[dict]) -> list[dict]:
+    """按规约现场构造子 Agent。"""
+    subagents = []
+    for spec in role_specs:
+        subagents.append({
+            "name": spec["name"],
+            "description": spec["description"],
+            "system_prompt": spec.get("system_prompt", _DEFAULT_PROMPT),
+            "tools": get_tools(spec["capabilities"]),
+        })
+    return subagents
 ```
 
 ### 5.2 SubAgentFactory
@@ -557,10 +577,13 @@ def build_subagents(role_specs: list[dict]) -> list[dict]:
     return subagents
 ```
 
-### 5.3 角色规约 prompt
+### 5.3 角色规约 prompt（已完成为 `_plan_roles`）
+
+**文件**：`agent/main_agent.py` 的 `_plan_roles(task_query)`
+**状态**：✓ 已实现。用 LLM（结构化 JSON 输出）按任务选角色，失败/解析失败回退 `normalize_roles` → 全量工具（静态语义）。`_extract_json` 容错（去代码块、截取首个 `{}`）。
 
 ```yaml
-# prompt/dynamic_planner.yaml
+# prompt/dynamic_planner.yaml （参考，实际使用 main_agent._plan_roles 内联 prompt）
 planner:
   system_prompt_addition: |
     ## 动态角色规划
@@ -582,56 +605,44 @@ planner:
     - 复杂任务拆分多角色，标注协作关系
 ```
 
-### 5.4 每请求构造 agent + LRU 缓存
+### 5.4 每请求构造 agent + LRU 缓存（已完成）
+
+**文件**：`agent/main_agent.py` 的 `get_main_agent_for_task(role_specs)`
+**状态**：✓ 已实现。按 `hashlib.sha256(sorted(roles))` 做 LRU（`_ROLE_CACHE`，容量 `DYNAMIC_AGENT_CACHE_MAX`，默认 10）。复用全局 `_main_checkpointer` / `_main_store` 保证会话历史一致；`role_specs=None` 回退静态单例。
 
 ```python
-# main_agent.py 改造
+# main_agent.py（实际实现）
 from collections import OrderedDict
-_agent_cache: OrderedDict[str, Any] = {}
-_AGENT_CACHE_MAX = 10  # 最多缓存 10 种 agent 模式
+_ROLE_CACHE: "OrderedDict[str, object]" = OrderedDict()
+_ROLE_CACHE_MAX = int(os.getenv("DYNAMIC_AGENT_CACHE_MAX", "10"))
 
-async def get_main_agent_for_task(role_specs: list[dict] | None = None):
-    """按任务规约获取 agent，LRU 缓存。"""
+async def get_main_agent_for_task(role_specs=None):
     if role_specs is None:
-        return await get_main_agent()  # 回退到静态模式
-
-    cache_key = hashlib.sha256(
-        json.dumps(role_specs, sort_keys=True).encode()
-    ).hexdigest()
-
-    if cache_key in _agent_cache:
-        _agent_cache.move_to_end(cache_key)
-        return _agent_cache[cache_key]
-
-    subagents = build_subagents(role_specs)
+        return await get_main_agent()
+    cache_key = hashlib.sha256(json.dumps(sorted(role_specs), sort_keys=True).encode()).hexdigest()
+    if cache_key in _ROLE_CACHE:
+        _ROLE_CACHE.move_to_end(cache_key)
+        return _ROLE_CACHE[cache_key]
+    tools = get_tools_for_roles(role_specs)
     agent = create_deep_agent(
-        model=model,
-        system_prompt=_system_prompt,
-        tools=[generate_markdown, convert_md_to_pdf, read_file_content],
-        checkpointer=app_checkpointer,  # 注入 lifespan 的 Postgres checkpointer（ADR-0002），禁止自建 InMemorySaver
-        subagents=subagents,
-        middleware=_build_middleware(),
+        model=model, system_prompt=_system_prompt, tools=tools,
+        checkpointer=_main_checkpointer, store=_main_store,
+        subagents=_build_subagents(), middleware=_build_middleware(),
     )
-
-    _agent_cache[cache_key] = agent
-    if len(_agent_cache) > _AGENT_CACHE_MAX:
-        _agent_cache.popitem(last=False)  # LRU 淘汰
-
+    _ROLE_CACHE[cache_key] = agent
+    if len(_ROLE_CACHE) > _ROLE_CACHE_MAX:
+        _ROLE_CACHE.popitem(last=False)
     return agent
 ```
 
-### 5.5 渐进启用
+### 5.5 渐进启用（已完成）
 
-```python
-# main_agent.py run_deep_agent()
-DYNAMIC_AGENT_ENABLED = os.getenv("DYNAMIC_AGENT_ENABLED", "false").lower() == "true"
+**文件**：`run_deep_agent` 缓存 miss 分支
+**状态**：✓ 已实现。读取 `DYNAMIC_AGENT_ENABLED`：
+- `true`：`roles = await _plan_roles(task_query)` → `get_main_agent_for_task(roles)`；异常回退静态。
+- `false`（默认）：静态单例 `get_main_agent()`。
 
-if DYNAMIC_AGENT_ENABLED:
-    role_specs = await _plan_roles(task_query)  # LLM 输出角色规约
-    main_agent = await get_main_agent_for_task(role_specs)
-else:
-    main_agent = await get_main_agent()  # 静态模式
-```
+**实测**：`test_tool_registry.py` 覆盖注册表一致性、角色筛选去重、normalize 兜底、`_plan_roles` 解析/失败回退、`get_main_agent_for_task` LRU 淘汰（容量 2 → 第三类触发淘汰，构造次数=3）。
 
 ---
 
