@@ -1,7 +1,7 @@
 """主对话图：意图路由 → 命令分发 → Flow/知识/闲聊 → 响应。
 
-atguigu_ai Policy → LLM 驱动的意图路由（复用 Phase 3）
-atguigu_ai NLG → deepagents 输出
+legacy Policy → LLM 驱动的意图路由（复用 Phase 3）
+legacy NLG → deepagents 输出
 """
 
 from __future__ import annotations

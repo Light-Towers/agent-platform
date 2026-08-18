@@ -1,4 +1,4 @@
-"""订单 Flow：对应 atguigu_ai flow_order.yml。
+"""订单 Flow：对应 legacy flow_order.yml。
 
 LangGraph 子图：收集订单 ID → 查询订单信息 → 格式化回复。
 接入真实业务服务（agent.services.query_order）。

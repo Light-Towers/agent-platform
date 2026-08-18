@@ -19,7 +19,7 @@
 |------|--------|------|------|
 | P0-1 | 🔴 方案错误 | 初版 Phase 4"从 create_deep_agent 迁移到 LangGraph 自建图" | Deep Agents 是 LangGraph 官方高层封装（27.6k stars，MIT），内置 planning/subagents/context mgmt。改为**扩展非重写** |
 | P1-1 | 🟠 协议风险 | 初版用 Redis Stack 做语义缓存 | 改为 **Valkey + valkey-search**（BSD-3，LF 托管，命令 1:1 兼容） |
-| P1-2 | 🟠 框架停滞 | zhanggui-kefu 用的 atguigu_ai 自研框架无社区维护 | 短期保持 atguigu_ai 独立；新增 **Phase 7** 长期迁移 |
+| P1-2 | 🟠 框架停滞 | zhanggui-kefu 用的 legacy 自研框架无社区维护 | 短期保持 legacy 独立；新增 **Phase 7** 长期迁移 |
 | P2-1 | 🟡 选型不当 | L1 分类器用 BGE-reranker | 改为 **embedding + 原型向量余弦** |
 | P2-2 | 🟡 措辞误导 | Langfuse ClickHouse "2026 新增" | 改为"自部署依赖 ClickHouse（官方 docker-compose 已含）" |
 | P2-3 | 🟡 依赖未核实 | 熔断器 pybreaker | 改用 **tenacity**（已有依赖 `requirements.txt:113`，async 原生） |
@@ -100,7 +100,7 @@
               ┌──────────────────┼───────────────┼──────────┐
               ▼                  ▼               ▼          ▼
          wenda-service      zhiku-service    kefu-service   Tavily
-          (FastAPI)          (FastAPI)        (atguigu_ai)   (SaaS)
+          (FastAPI)          (FastAPI)        (legacy)   (SaaS)
          Text-to-SQL        RAG 知识库       对话+GraphRAG
          MySQL+ES+Qdrant    Milvus+Neo4j     Neo4j+BGE
          独立部署/扩缩       独立部署/扩缩     独立部署/扩缩
@@ -139,7 +139,7 @@
 | 缓存 | **Valkey + valkey-search** | 9.1.2 (bundle) | BSD-3 | 26.8k | 语义缓存 + 向量检索 | 5 | `valkey/valkey-bundle:9.1.2`（预装 search 1.2.1，无需 `--loadmodule`） |
 | L1 分类 | **embedding + 原型向量余弦** | — | — | — | 意图粗分 <10ms | 3 | 复用 Valkey Search embedding |
 | 熔断/重试 | **tenacity** | 9.1.4 | MIT | — | 限流降级 | 6 | **已有依赖** `requirements.txt:113`，直接复用 |
-| 客服（短期） | atguigu_ai 自研框架 | — | demo | — | kefu 独立（自研框架无社区维护） | 1-2 | `zhanggui-kefu/atguigu_ai/`（模仿 Rasa 架构的自研框架，非 Rasa） |
+| 客服（短期） | legacy 自研框架 | — | demo | — | kefu 独立（自研框架无社区维护） | 1-2 | `zhanggui-kefu/legacy/`（模仿 Rasa 架构的自研框架，非 Rasa） |
 | 客服（长期） | **deepagents + LangGraph 重写** | — | MIT | — | 统一技术栈 | 7 | 消除自研框架无维护风险 |
 | 包管理 | **uv** | latest | MIT/Apache-2.0 | — | 依赖管理 | 全 | FastAPI/Deep Agents 均用 uv |
 
@@ -175,7 +175,7 @@
 |----|------|
 | **目标** | 4 项目暴露统一 HTTP 接口，可独立部署 |
 | **前置** | Phase 0 |
-| **改动** | ① **wenda**：新建 `wenda-adapter`（薄 FastAPI 层），**wenda `/api/query` 是 SSE 流式（`text/event-stream`），与目标 JSON schema 不兼容**——wenda-adapter 需做流→JSON 适配（消费 SSE 流 → 聚合为 `{answer, data, trace_id}` JSON），并提供 `/health`（wenda 无健康端点）；wenda 快照零改动 ② **zhiku**：`app/main.py` 已有 `/query` + **三级 `/health`/`/health/live`/`/health/ready`**（复用，不另起），对齐 schema ③ **kefu**：atguigu_ai 已有 FastAPI server + `/api/messages`（`atguigu_ai/api/server.py`），包一层适配器 `kefu-adapter/main.py` 转统一 schema ④ 各项目加 Dockerfile（zhiku 已有，wenda-adapter/kefu-adapter 新建） ⑤ 统一 `api/schemas.py`（Pydantic，共享包） ⑥ **修订 AGENTS.md 边界表**：新增 wenda-adapter/kefu-adapter/shared-schemas/kefu-service 行 ⑦ **deepagents 入站鉴权**：网关侧加 API Key 鉴权（复用 `SecurityGuardsMiddleware`），子服务鉴权内网直连可关 |
+| **改动** | ① **wenda**：新建 `wenda-adapter`（薄 FastAPI 层），**wenda `/api/query` 是 SSE 流式（`text/event-stream`），与目标 JSON schema 不兼容**——wenda-adapter 需做流→JSON 适配（消费 SSE 流 → 聚合为 `{answer, data, trace_id}` JSON），并提供 `/health`（wenda 无健康端点）；wenda 快照零改动 ② **zhiku**：`app/main.py` 已有 `/query` + **三级 `/health`/`/health/live`/`/health/ready`**（复用，不另起），对齐 schema ③ **kefu**：legacy 已有 FastAPI server + `/api/messages`（`legacy/api/server.py`），包一层适配器 `kefu-adapter/main.py` 转统一 schema ④ 各项目加 Dockerfile（zhiku 已有，wenda-adapter/kefu-adapter 新建） ⑤ 统一 `api/schemas.py`（Pydantic，共享包） ⑥ **修订 AGENTS.md 边界表**：新增 wenda-adapter/kefu-adapter/shared-schemas/kefu-service 行 ⑦ **deepagents 入站鉴权**：网关侧加 API Key 鉴权（复用 `SecurityGuardsMiddleware`），子服务鉴权内网直连可关 |
 | **关键文件** | `zhanggui-wenda/data-agent/api/schemas.py`（新）、`zhanggui-zhiku/app/api/schemas.py`（对齐）、`kefu-adapter/main.py`（新）、`kefu-adapter/Dockerfile`（新）、`shared-schemas/`（新，统一 Pydantic schema 包） |
 | **实现要点** | 统一 schema 用 Pydantic v2（FastAPI 已依赖）；wenda-adapter/kefu-adapter 是薄适配层，不改 wenda/kefu 快照业务代码；shared-schemas 作为独立小包，各服务 Dockerfile 构建时 `pip install ../shared-schemas`（非 editable，避免容器化路径问题） |
 | **验收** | 4 服务独立 `docker compose up` 起来；`/health` 全绿；`/query` 端到端返回正确 schema |
@@ -201,7 +201,7 @@
 |----|------|
 | **目标** | 网关层补齐两级意图识别 + query 改写，**short-circuit 模式**：L1/L2 只拦截 chitchat/单意图直接回（<10ms，不打下游），复杂 query 仍交主管 LLM 全工具路由（不替换 LLM 路由，只短路简单意图） |
 | **前置** | Phase 2 |
-| **改动** | ① **L1 粗分类器**：用网关已有 embedding 模型对 query 编码，与 5 个意图原型向量（`text_to_sql` / `rag_knowledge` / `customer_service` / `web_search` / `chitchat`）算余弦相似度，top-3 候选 + 置信度，<10ms ② **L2 LLM 细判**：仅当 L1 置信度 < 0.8 时触发，用 LLM 在 top-3 里细判（复用 kefu `atguigu_ai/dialogue_understanding/generator/templates/command_prompt.jinja2` 决策规则表模式） ③ **置信度兜底**：<0.5 走 `clarify` 反问 ④ **Query 改写**：网关入口加 `rewrite_node`，做指代消解 + standalone question（复用 zhiku `rewritten_query_and_itemnames.prompt`）+ 子问题分解（一问拆多问并行） ⑤ 改写前后 A/B 评测（召回率/正确率） ⑥ 意图原型向量可在线更新（管理 API） |
+| **改动** | ① **L1 粗分类器**：用网关已有 embedding 模型对 query 编码，与 5 个意图原型向量（`text_to_sql` / `rag_knowledge` / `customer_service` / `web_search` / `chitchat`）算余弦相似度，top-3 候选 + 置信度，<10ms ② **L2 LLM 细判**：仅当 L1 置信度 < 0.8 时触发，用 LLM 在 top-3 里细判（复用 kefu `legacy/dialogue_understanding/generator/templates/command_prompt.jinja2` 决策规则表模式） ③ **置信度兜底**：<0.5 走 `clarify` 反问 ④ **Query 改写**：网关入口加 `rewrite_node`，做指代消解 + standalone question（复用 zhiku `rewritten_query_and_itemnames.prompt`）+ 子问题分解（一问拆多问并行） ⑤ 改写前后 A/B 评测（召回率/正确率） ⑥ 意图原型向量可在线更新（管理 API） |
 | **关键文件** | `deepagents/agent/intent/classifier.py`（L1，embedding+余弦）、`deepagents/agent/intent/llm_judge.py`（L2）、`deepagents/agent/intent/prototypes.json`（5 类原型向量，可更新）、`deepagents/agent/rewrite/rewrite_node.py`（新）、`deepagents/agent/rewrite/subquery_decompose.py`（新）、`deepagents/prompt/intent.yaml`（新）、`deepagents/prompt/rewrite.yaml`（新）、`deepagents/agent/prompts.py`（扩，加载新增 .yaml） |
 | **实现要点** | L1 embedding **固定本地 sentence-transformers（如 bge-small-zh），与 Phase 5 缓存 embedding 解耦，永不切换**（避免向量空间不同导致原型向量重建+重标定）；**原型向量初始化用每类 20 条典型 query 的 embedding 均值，来源必须独立于评测集**（避免同源污染导致准确率虚高）；子问题分解用 LLM 产出 `[{subquery, intent}]` 列表，并行调 Phase 2 路由；`prompts.py` 扩展为加载 `prompt/` 下所有 .yaml（当前只加载 `prompts.yml`） |
 | **验收** | 意图准确率 ≥95%（评测集）；低置信度走反问；改写后召回率提升 ≥5%；L1 延迟 <10ms（本地 sentence-transformers 需 benchmark 确认） |
@@ -249,24 +249,24 @@
 | **验收** | 限流生效（超限返回 429）；降级自动触发；**在评测集分布下成本降 ≥30%**（口径：评测集全量实跑，对比新旧链路 token 总成本，Langfuse cost 字段聚合）；guardrail 拦截注入；灰度按比例分流；多租户隔离无串 |
 | **回滚** | 各中间件独立开关，可单独关闭 |
 
-### Phase 7：kefu 从 atguigu_ai 迁移到 deepagents（长期）
+### Phase 7：kefu 从 legacy 迁移到 deepagents（长期）
 
 | 项 | 内容 |
 |----|------|
 | **目标** | 消除自研框架无社区维护风险，统一技术栈 |
 | **前置** | Phase 2-6 完成，网关能力齐全 |
-| **改动** | ① 用 deepagents + LangGraph 重写 kefu 的对话管理：9 种命令（kefu `atguigu_ai/dialogue_understanding/generator/templates/command_prompt.jinja2` 已定义：start flow / cancel flow / change flow / set slot / knowledge_answer / chitchat / cannot_handle / clarify / human_handoff）+ 业务 Flow（kefu `ecs_demo/data/flows/` 下 3 个：`flow_order.yml` / `flow_logistics.yml` / `flow_postsale.yml`）→ 用 LangGraph 状态图重表达 ② GraphRAG 能力（kefu `ecs_demo/addons/information_retrieval.py` 的 6 步流程）→ 作为 deepagents 子 Agent ③ BGE 中文 embedding → 保留或升级（评估 2026 SOTA） ④ kefu-adapter 废弃，新 kefu-service 直接是 FastAPI + LangGraph ⑤ 评测对齐：kefu **无评测数据集**（glob `zhanggui-kefu/**/eval*` 零结果），需新建评测集（复用 Phase 0 评测框架 + LLM 合成 + 人工审核） |
+| **改动** | ① 用 deepagents + LangGraph 重写 kefu 的对话管理：9 种命令（kefu `legacy/dialogue_understanding/generator/templates/command_prompt.jinja2` 已定义：start flow / cancel flow / change flow / set slot / knowledge_answer / chitchat / cannot_handle / clarify / human_handoff）+ 业务 Flow（kefu `ecs_demo/data/flows/` 下 3 个：`flow_order.yml` / `flow_logistics.yml` / `flow_postsale.yml`）→ 用 LangGraph 状态图重表达 ② GraphRAG 能力（kefu `ecs_demo/addons/information_retrieval.py` 的 6 步流程）→ 作为 deepagents 子 Agent ③ BGE 中文 embedding → 保留或升级（评估 2026 SOTA） ④ kefu-adapter 废弃，新 kefu-service 直接是 FastAPI + LangGraph ⑤ 评测对齐：kefu **无评测数据集**（glob `zhanggui-kefu/**/eval*` 零结果），需新建评测集（复用 Phase 0 评测框架 + LLM 合成 + 人工审核） |
 | **关键文件** | `kefu-service/`（新，deepagents + LangGraph 重写）、`kefu-service/agent/flows/`（Flow 用 LangGraph 重表达）、`kefu-service/agent/graph_rag.py`（GraphRAG 子 Agent） |
-| **实现要点** | atguigu_ai 的 Flow 概念 → LangGraph 的子图；atguigu_ai 的 Policy → LLM 驱动的意图路由（复用 Phase 3）；atguigu_ai 的 Tracker → LangGraph State；atguigu_ai 的 NLG → deepagents 输出；**渐进迁移**：先迁移最高频 3 个 Flow，灰度切换，验证后全量 |
-| **验收** | 新 kefu-service 意图准确率 ≥ atguigu_ai 原版；GraphRAG 召回率 ≥ 原版；Flow 全覆盖；atguigu_ai 可下线 |
-| **风险** | **数月级工程**（3 Flow + GraphRAG 完整重表达 + atguigu_ai Tracker→LangGraph State 语义映射）；需逐 Flow 验证；atguigu_ai 对话状态管理较复杂，LangGraph 重表达需仔细 |
-| **回滚** | atguigu_ai 保持运行，新 kefu-service 灰度，出问题切回 |
+| **实现要点** | legacy 的 Flow 概念 → LangGraph 的子图；legacy 的 Policy → LLM 驱动的意图路由（复用 Phase 3）；legacy 的 Tracker → LangGraph State；legacy 的 NLG → deepagents 输出；**渐进迁移**：先迁移最高频 3 个 Flow，灰度切换，验证后全量 |
+| **验收** | 新 kefu-service 意图准确率 ≥ legacy 原版；GraphRAG 召回率 ≥ 原版；Flow 全覆盖；legacy 可下线 |
+| **风险** | **数月级工程**（3 Flow + GraphRAG 完整重表达 + legacy Tracker→LangGraph State 语义映射）；需逐 Flow 验证；legacy 对话状态管理较复杂，LangGraph 重表达需仔细 |
+| **回滚** | legacy 保持运行，新 kefu-service 灰度，出问题切回 |
 
 > **执行状态（2026-08 更新）**：第④项「kefu-adapter 废弃」**已完成**。
-> 原因（已解决）：`kefu-service` 已实现且 CI 通过，已升级为 Agent Protocol 兼容 server（新增 `POST /invoke`，返回 `QueryResponse`，依赖 `shared-schemas`；旧 `/api/messages` 保留为 atguigu_ai 兼容入口）。
+> 原因（已解决）：`kefu-service` 已实现且 CI 通过，已升级为 Agent Protocol 兼容 server（新增 `POST /invoke`，返回 `QueryResponse`，依赖 `shared-schemas`；旧 `/api/messages` 保留为 legacy 兼容入口）。
 > ✅ `deepagents/agent/config.py` 新增 `KEFU_SERVICE_URL` + `KEFU_USE_ADAPTER` 开关（默认 `false`，直连 `kefu-service:8003`）；`async_subagents.py` 增加 httpx 远程回退（外部 `deepagents` 包未安装时直连 `/invoke`）。
 > ✅ `kefu-adapter` 包已从仓库移除（无调用方，默认直连 kefu-service 生效）；`deepagents/eval/run-all.py` 的 kefu 项目改默认指向 `KEFU_SERVICE_URL`（`KEFU_ADAPTER_URL` 仍可覆盖）。
-> 外部 `atguigu_ai` 退役属外部运维动作，与仓库代码无关。详见 `kefu-service/main.py` 顶部注释与 README「已知待拍板项」。
+> 外部 `legacy` 退役属外部运维动作，与仓库代码无关。详见 `kefu-service/main.py` 顶部注释与 README「已知待拍板项」。
 
 ---
 
@@ -327,7 +327,7 @@ deepagents/
 ├── wenda-adapter/                  # 新：wenda /api/query 适配器（Phase 1，薄层）
 │   ├── main.py
 │   └── Dockerfile
-├── kefu-adapter/                  # 新：atguigu_ai REST 适配器（Phase 1，薄层）
+├── kefu-adapter/                  # 新：legacy REST 适配器（Phase 1，薄层）
 │   ├── main.py
 │   └── Dockerfile
 ├── kefu-service/                  # 新：deepagents 重写客服（Phase 7）
@@ -393,11 +393,11 @@ services:
 | 灰度期间缓存脏命中 | 灰度用户看到旧链路缓存 | 缓存 key 含 `gray_pct` 维度，灰度/普通缓存隔离 | 关闭灰度或清缓存 |
 | PII 进缓存 key | 隐私泄露 | **guardrail 脱敏先于缓存**（架构图已标注顺序） | 关闭缓存 |
 | 子服务全挂 | 网关不可用 | Phase 2 fallback 机制（保留本地子 Agent） | 自动降级到本地 |
-| kefu atguigu_ai 自研框架无社区维护 | 长期维护风险 | Phase 7 迁移到 deepagents；短期监控 | 切回 atguigu_ai（保持运行） |
+| kefu legacy 自研框架无社区维护 | 长期维护风险 | Phase 7 迁移到 deepagents；短期监控 | 切回 legacy（保持运行） |
 | Valkey search 模块编译需 GCC 12+ | 部署受阻 | 用 **`valkey/valkey-bundle:9.1.2`** 预编译镜像（含 search 1.2.1） | 退回 Redis 7.2（最后 BSD 版本） |
 | Langfuse ClickHouse 内存大 | 开发机资源不足 | 生产部署给足内存；**开发期 trace 降级 no-op**（复用 agent-core） | 关闭 trace，旁路无影响 |
 | 改造周期长 | 交付压力 | 7 Phase 独立上线，每 Phase 有独立业务价值 | 最小上线 M1（Phase 0+1） |
-| Phase 7 数月级工程 | 长周期交付 | 渐进迁移（先 3 Flow 灰度）；atguigu_ai 保持运行不阻塞 | 切回 atguigu_ai |
+| Phase 7 数月级工程 | 长周期交付 | 渐进迁移（先 3 Flow 灰度）；legacy 保持运行不阻塞 | 切回 legacy |
 
 ---
 
@@ -411,7 +411,7 @@ services:
 | **M4** | +4 | Planner + Reflexion | 跨域复杂任务自动拆解 | 复杂 query 自动拆步；失败 step 重规划 |
 | **M5** | +5 | 语义缓存 | 重复 query <1ms 返回 | L1 命中 <1ms；L2 命中 <10ms；命中率上报 |
 | **M6** | +6 | 横切能力 | 限流/成本/安全/灰度/多租户 | 限流 429；**评测集分布下成本降 ≥30%**；guardrail 拦截 |
-| **M7** | +7 | kefu 迁移 | 消除自研框架风险，统一栈 | 新 kefu 意图准确率 ≥ atguigu_ai；Flow 全覆盖 |
+| **M7** | +7 | kefu 迁移 | 消除自研框架风险，统一栈 | 新 kefu 意图准确率 ≥ legacy；Flow 全覆盖 |
 
 **推荐落地顺序**：M1 → M2 → M3 → M5 → M4 → M6 → M7
 - M5（缓存）排在 M4（规划）前，因为缓存价值立竿见影且独立（仅依赖 M3 的意图+改写）
@@ -452,11 +452,11 @@ services:
 - **审核发现**：Redis 2024-03 协议从 BSD 变为 RSALv2/SSPLv2（非 OSI 开源）。Valkey 是 LF 托管的开源 fork（BSD-3），valkey-search 命令与 RediSearch 1:1 兼容
 - **修订**：改用 Valkey 9.1.1 + valkey-search
 
-#### P1-2：kefu atguigu_ai 自研框架无维护（已修订）
+#### P1-2：kefu legacy 自研框架无维护（已修订）
 
 - **初版**：kefu 保持 Rasa 独立（**事实错误：kefu 不是 Rasa**）
-- **审核发现**：kefu 用的是 atguigu_ai 自研框架（模仿 Rasa 架构，但 `requirements-atguigu.txt` 无 rasa 包，`atguigu_ai/` 无 `import rasa`，`flow_order.yml` 注释写"适配atguigu_ai框架语法"）
-- **修订**：短期保持 atguigu_ai 独立；新增 Phase 7 长期迁移到 deepagents
+- **审核发现**：kefu 用的是 legacy 自研框架（模仿 Rasa 架构，但 `requirements-legacy.txt` 无 rasa 包，`legacy/` 无 `import rasa`，`flow_order.yml` 注释写"适配legacy框架语法"）
+- **修订**：短期保持 legacy 独立；新增 Phase 7 长期迁移到 deepagents
 
 #### P2-1：L1 分类器选型（已修订）
 
@@ -580,7 +580,7 @@ services:
 
 | 编号 | 严重度 | 问题 | 修订 |
 |------|--------|------|------|
-| X0-1 | 🔴 事实硬伤 | **kefu 不是 Rasa**——`requirements-atguigu.txt` 无 rasa 包，`atguigu_ai/` 无 import rasa，是模仿 Rasa 架构的自研框架 | 全文档 Rasa→atguigu_ai（21 处），Phase 7 迁移对象改为 atguigu_ai |
+| X0-1 | 🔴 事实硬伤 | **kefu 不是 Rasa**——`requirements-legacy.txt` 无 rasa 包，`legacy/` 无 import rasa，是模仿 Rasa 架构的自研框架 | 全文档 Rasa→legacy（21 处），Phase 7 迁移对象改为 legacy |
 | X0-2 | 🔴 违规 | wenda 不在 AGENTS.md 例外清单，Phase 1 改 wenda 代码违规 | 新建 `wenda-adapter` 薄层转发，wenda 快照零改动 |
 | X0-3 | 🔴 事实错误 | wenda 没有 Dockerfile，Phase 1 写"wenda/zhiku 已有"错误 | 改为"wenda-adapter 新建、zhiku 已有" |
 | X1-1 | 🟠 伪托约束 | §10 引用"不合并代码"为 AGENTS.md 约束，但不存在 | **已写入 AGENTS.md**（D3）+ 边界表更新（D7） |
@@ -647,7 +647,7 @@ services:
 | FastAPI | webfetch github.com/fastapi/fastapi | 101.5k stars，7,651 commits，uv 管理，MIT |
 | Valkey | webfetch valkey.io + github.com/valkey-io/valkey | 26.8k stars，13,968 commits，LF 托管，BSD-3，9.1.1（2026-07-21） |
 | valkey-search | webfetch github.com/valkey-io/valkey-search | 140 stars，653 commits，BSD-3，命令兼容 RediSearch，HNSW+KNN+hybrid |
-| atguigu_ai 自研框架 | grep requirements-atguigu.txt + atguigu_ai/*.py | **kefu 不是 Rasa**：无 rasa 包、无 import rasa，是模仿 Rasa 架构的自研框架，已有 FastAPI server + `/api/messages` |
+| legacy 自研框架 | grep requirements-legacy.txt + legacy/*.py | **kefu 不是 Rasa**：无 rasa 包、无 import rasa，是模仿 Rasa 架构的自研框架，已有 FastAPI server + `/api/messages` |
 | deepagents 代码实况 | read main_agent.py / requirements.txt | 路由入口在 48-57 行；tenacity 9.1.4 已在 `requirements.txt:113`；httpx 0.28.1 已在 `requirements.txt:39` |
 | kefu 文件实况 | glob zhanggui-kefu | `ecs_demo/addons/information_retrieval.py` ✓；`ecs_demo/data/flows/` 下 3 个 yml ✓ |
 | zhiku 文件实况 | read zhanggui-zhiku/app/lm/lm_utils.py | 第 35 行 `extra_body={"enable_thinking": False}` ✓ |
@@ -660,7 +660,7 @@ services:
 | **AsyncSubAgent** | **pip install + inspect** | deepagents 内置远程子 agent：连接 Agent Protocol-compliant server，`middleware/async_subagents.py` 8 处引用 Agent Protocol ✓ |
 | **langgraph-supervisor** | **webfetch GitHub** | 1.6k stars，但官方 README 写"now recommend using supervisor pattern directly via tools rather than this library"——已不推荐，deepagents 是替代 ✓ |
 | **A2A 协议** | **webfetch a2a-protocol.org** | Google→LF, v1.0, Apache-2.0，agent-to-agent 通信标准；明确"Not a sub-agent or tool-call protocol"；与 Agent Protocol 不同 ✓ |
-| **kefu 不是 Rasa** | **grep requirements-atguigu.txt + atguigu_ai/*.py** | 零 rasa 包、零 import rasa，是模仿 Rasa 架构的自研框架 atguigu_ai ✓ |
+| **kefu 不是 Rasa** | **grep requirements-legacy.txt + legacy/*.py** | 零 rasa 包、零 import rasa，是模仿 Rasa 架构的自研框架 legacy ✓ |
 | **valkey-bundle** | **webfetch hub.docker.com/r/valkey/valkey-bundle** | `valkey/valkey-bundle:9.1.2` 含 valkey 9.1.1 + search 1.2.1 + json + bloom + ldap 预装 ✓ |
 | **wenda 无 Dockerfile** | **glob zhanggui-wenda/**/Dockerfile*** | 零结果 ✓ |
 | **AGENTS.md "不合并代码"** | **D3 写入** | 已正式写入 AGENTS.md 禁止行为 + 边界表新增 4 行 ✓ |

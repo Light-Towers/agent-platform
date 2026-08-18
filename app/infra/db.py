@@ -16,8 +16,6 @@ _pool = None
 _pool_lock = asyncio.Lock()
 
 SCHEMA_TEMPLATE = """
-CREATE EXTENSION IF NOT EXISTS vector;
-
 CREATE TABLE IF NOT EXISTS chunks (
     id BIGSERIAL PRIMARY KEY,
     doc_id TEXT NOT NULL,
@@ -25,17 +23,22 @@ CREATE TABLE IF NOT EXISTS chunks (
     heading TEXT NOT NULL DEFAULT '',
     content TEXT NOT NULL,
     embedding vector({dim}),
+    workspace_id TEXT NOT NULL DEFAULT 'default',
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_chunks_doc ON chunks (doc_id);
+CREATE INDEX IF NOT EXISTS idx_chunks_workspace ON chunks (workspace_id);
 
 CREATE TABLE IF NOT EXISTS memories (
     id BIGSERIAL PRIMARY KEY,
     user_id TEXT NOT NULL DEFAULT 'default',
     content TEXT NOT NULL,
     embedding vector({dim}),
+    memory_type TEXT NOT NULL DEFAULT 'semantic',
+    importance FLOAT NOT NULL DEFAULT 0.5,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+CREATE INDEX IF NOT EXISTS idx_memories_user_type ON memories (user_id, memory_type);
 
 CREATE TABLE IF NOT EXISTS semantic_cache (
     id BIGSERIAL PRIMARY KEY,
@@ -122,15 +125,23 @@ async def init_pool():
     async with _pool_lock:
         if _pool is not None:
             return _pool
-        from pgvector.psycopg import register_vector
+        from pgvector.psycopg import register_vector_async
         from psycopg_pool import AsyncConnectionPool
+
+        # 顺序约束：register_vector_async 在每个连接建立时即 fetch 'vector' 类型，
+        # 故必须在打开连接池（建立首批连接）之前先启用 pgvector 扩展，
+        # 否则报 "vector type not found in the database"（TB-7 真端到端暴露）。
+        await ensure_extensions(settings.database_url)
 
         pool = AsyncConnectionPool(
             conninfo=settings.database_url,
             min_size=1,
             max_size=settings.db_pool_max_size,  # 可配置，默认 20，避免高并发池耗尽
             kwargs={"autocommit": True},
-            configure=register_vector,
+            # 必须用 register_vector_async：AsyncConnectionPool 的连接是 AsyncConnection，
+            # 同步版 register_vector 调用 TypeInfo.fetch 会返回未 await 的 coroutine，
+            # 导致 'coroutine' object has no attribute 'register'（TB-7 真端到端暴露）。
+            configure=register_vector_async,
             open=False,
         )
         await pool.open(wait=True)
@@ -140,10 +151,42 @@ async def init_pool():
         return _pool
 
 
+async def ensure_extensions(database_url: str) -> None:
+    """连接池建立前，用一次性连接启用 pgvector 扩展（幂等）。"""
+    from psycopg import AsyncConnection
+
+    async with await AsyncConnection.connect(database_url, autocommit=True) as conn:
+        await conn.execute("CREATE EXTENSION IF NOT EXISTS vector")
+
+
 async def ensure_schema(pool) -> None:
     ddl = SCHEMA_TEMPLATE.format(dim=get_settings().vector_dim)
     async with pool.connection() as conn:
         await conn.execute(ddl)
+    # 存量库迁移：新列 IF NOT EXISTS 不作用于已存在表，需幂等 ALTER（优化 G：workspace 隔离）
+    try:
+        async with pool.connection() as conn:
+            await conn.execute(
+                "ALTER TABLE chunks ADD COLUMN workspace_id TEXT NOT NULL DEFAULT 'default'"
+            )
+            await conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_chunks_workspace ON chunks (workspace_id)"
+            )
+    except Exception:
+        # duplicate_column 等幂等失败忽略；新库由建表语句已含该列
+        pass
+    # 优化 H：长期记忆质量升级——memories 表扩展类型/重要性/时间元数据（幂等 ALTER）
+    for _ddl in (
+        "ALTER TABLE memories ADD COLUMN memory_type TEXT NOT NULL DEFAULT 'semantic'",
+        "ALTER TABLE memories ADD COLUMN importance FLOAT NOT NULL DEFAULT 0.5",
+        "CREATE INDEX IF NOT EXISTS idx_memories_user_type ON memories (user_id, memory_type)",
+    ):
+        try:
+            async with pool.connection() as conn:
+                await conn.execute(_ddl)
+        except Exception:
+            # duplicate_column / 索引已存在等幂等失败忽略
+            pass
 
 
 def get_pool():

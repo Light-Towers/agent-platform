@@ -1,15 +1,16 @@
 """API 层 Pydantic 契约（类型安全，防幻觉式字段拼写）。
 
 app 的查询/健康契约统一接入联邦网关的 shared_schemas，成为唯一事实来源：
-- QueryRequest / HealthResponse 直接复用 shared_schemas，并向后兼容旧客户端
-  字段名（question→query、thread_id→session_id）通过 AliasChoices 双写接受。
+- QueryRequest / HealthResponse 直接复用 shared_schemas，入站字段使用网关
+  标准名（query / session_id）。旧字段名（question / thread_id）的双写兼容
+  已于 2026-08-16 移除（U-1 收敛）。
 - 其余 app 内部专用类型（CoordinationDecision / AdmissionDecision / McpServerConfig
   等）仍本文件定义，不属于跨服务联邦契约。
 """
 
 from typing import Literal
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field
 from shared_schemas import (
     HealthResponse as BaseHealthResponse,
 )
@@ -21,7 +22,14 @@ from shared_schemas import (
 )
 
 # 重新导出联邦类型，供 app 内部（routes.py 等）从 app.schemas 统一引用
-__all__ = ["Capability", "HealthResponse", "Priority", "QueryRequest"]
+__all__ = [
+    "Capability",
+    "HealthResponse",
+    "Priority",
+    "QueryRequest",
+    "HistoryItem",
+    "HistoryResponse",
+]
 
 Capability = Literal["search", "rag", "sql", "direct", "mcp"]
 
@@ -37,22 +45,22 @@ class QueryRequest(BaseQueryRequest):
 
     model_config = ConfigDict(populate_by_name=True)
 
-    # 覆盖基类字段，使 query 同时接受旧字段名 question（入站双写兼容）
+    # 覆盖基类字段，统一使用网关标准名 query（U-1 已收敛：旧字段名 question/
+    # thread_id 的入站双写兼容于 2026-08-16 彻底移除，存量客户端须改用 query/
+    # session_id）。内部 graph state 字段仍名为 question，与入站契约无关。
     query: str = Field(
         ...,
         min_length=1,
         max_length=2000,
-        validation_alias=AliasChoices("query", "question"),
-        serialization_alias="query",
-        description="用户查询文本（兼容旧字段名 question）",
+        description="用户查询文本（网关标准名 query）",
     )
-    # 覆盖基类字段，使 session_id 同时接受旧字段名 thread_id
     session_id: str | None = Field(
         default=None,
-        validation_alias=AliasChoices("session_id", "thread_id"),
-        serialization_alias="session_id",
-        description="会话 ID（兼容旧字段名 thread_id）",
+        description="会话 ID（网关标准名 session_id）",
     )
+    # 工作空间隔离键（优化 G）：跨会话记忆与 RAG 文档按 workspace 隔离；
+    # 未传时记为 default（全局共享空间）。user_id 仅作辅助归属维度，不参与隔离。
+    workspace_id: str = Field(default="default")
     # app 业务默认值：未传 user_id 时记为 default（基类为 None）
     user_id: str = Field(default="default")
     priority: Priority = Field(default="normal")
@@ -126,6 +134,21 @@ class McpToolResult(BaseModel):
     evidence: list[str] = []
     error: str | None = None
     duration_ms: int = 0
+
+
+# 优化 I：精确回忆——按 thread_id 回溯历史对话原文
+class HistoryItem(BaseModel):
+    index: int
+    role: str  # user / assistant / tool / system
+    content: str
+    id: str | None = None
+    created_at: str | None = None
+
+
+class HistoryResponse(BaseModel):
+    thread_id: str
+    count: int
+    items: list[HistoryItem]
 
 
 class RevertResult(BaseModel):

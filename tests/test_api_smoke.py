@@ -19,7 +19,7 @@ def test_health_memory_mode():
 
 def test_query_sse_direct_route():
     with TestClient(app) as client:
-        resp = client.post("/query", json={"question": "帮我写一首诗"})
+        resp = client.post("/query", json={"query": "帮我写一首诗"})
         assert resp.status_code == 200
         assert resp.headers["content-type"].startswith("text/event-stream")
         events = [

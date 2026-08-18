@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "dialogue-framework"
 version = "0.1.0"
-description = "LLM 驱动的对话系统框架基础设施（迁移自 kefu 老系统 atguigu_ai）"
+description = "LLM 驱动的对话系统框架基础设施（迁移自 kefu 老系统 legacy）"
 requires-python = ">=3.11"
 license = { text = "Apache-2.0" }
 dependencies = [
@@ -42,7 +42,3 @@ packages = ["dialogue_framework"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-
-[tool.uv.sources]
-agent-core = { path = "../agent-core", editable = true }
-shared-schemas = { path = "../shared-schemas", editable = true }

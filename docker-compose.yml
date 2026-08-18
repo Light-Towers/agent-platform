@@ -22,6 +22,14 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    # TB-7：容器就绪探针。lifespan 内 init_pool(wait=True) 若连不上 pg 会阻塞 ~30s，
+    # 仅靠 depends_on 无法判断 api 自身是否真 ready，故加 healthcheck 让 compose 冒烟可判定。
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health').status==200 else 1)\""]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 40s
     environment:
       DATABASE_URL: postgresql://agent:${POSTGRES_PASSWORD:-agent_platform_dev}@postgres:5432/agent_platform
       API_KEY: ${API_KEY:-}
@@ -39,7 +47,8 @@ services:
       LANGFUSE_HOST: ${LANGFUSE_HOST:-}
     ports:
       # 只绑定回环地址，避免 0.0.0.0 直接暴露（compose 安全面规约）
-      - "127.0.0.1:8000:8000"
+      # 宿主端口参数化（默认 8000），便于本机 8000 被占用时冒烟切换，如 HOST_PORT=18000 make compose-smoke
+      - "127.0.0.1:${HOST_PORT:-8000}:8000"
 
 volumes:
   pgdata: {}

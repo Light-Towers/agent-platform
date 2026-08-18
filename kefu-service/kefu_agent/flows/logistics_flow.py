@@ -1,4 +1,4 @@
-"""物流 Flow：对应 atguigu_ai flow_logistics.yml。
+"""物流 Flow：对应 legacy flow_logistics.yml。
 
 LangGraph 子图：收集物流单号 → 查询物流状态 → 格式化回复。
 接入真实业务服务（agent.services.query_logistics）。

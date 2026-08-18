@@ -39,19 +39,68 @@ class FallbackChatModel:
     def degraded(self) -> bool:
         return self._consecutive_failures >= self.failure_threshold
 
-    async def ainvoke(self, *args: Any, **kwargs: Any) -> Any:
+    def _route_fallback(self) -> Any:
+        """在已 degraded 且冷却未到期时返回备用模型，否则返回主模型。"""
         if self.degraded and time.monotonic() < self._cooldown_until:
-            return await self.fallback.ainvoke(*args, **kwargs)
+            return self.fallback
+        return self.primary
+
+    def _on_primary_failure(self) -> None:
+        """主模型失败：累加计数，达到阈值则记录冷却截止（可复位）。"""
+        self._consecutive_failures += 1
+        if self.degraded:
+            self._cooldown_until = time.monotonic() + self.cooldown
+        logger.warning("主模型调用失败（连续 %d 次），降级备模型", self._consecutive_failures)
+
+    def invoke(self, *args: Any, **kwargs: Any) -> Any:
+        model = self._route_fallback()
+        if model is self.fallback:
+            return model.invoke(*args, **kwargs)
         try:
-            result = await self.primary.ainvoke(*args, **kwargs)
+            result = model.invoke(*args, **kwargs)
         except Exception:  # noqa: BLE001 降级语义
-            self._consecutive_failures += 1
-            if self.degraded:
-                self._cooldown_until = time.monotonic() + self.cooldown
-            logger.warning("主模型调用失败（连续 %d 次），降级备模型", self._consecutive_failures)
+            self._on_primary_failure()
+            return self.fallback.invoke(*args, **kwargs)
+        self._consecutive_failures = 0  # 成功即复位
+        return result
+
+    async def ainvoke(self, *args: Any, **kwargs: Any) -> Any:
+        model = self._route_fallback()
+        if model is self.fallback:
+            return await model.ainvoke(*args, **kwargs)
+        try:
+            result = await model.ainvoke(*args, **kwargs)
+        except Exception:  # noqa: BLE001 降级语义
+            self._on_primary_failure()
             return await self.fallback.ainvoke(*args, **kwargs)
         self._consecutive_failures = 0  # 成功即复位
         return result
+
+    def stream(self, *args: Any, **kwargs: Any):
+        model = self._route_fallback()
+        if model is self.fallback:
+            yield from model.stream(*args, **kwargs)
+            return
+        try:
+            for chunk in model.stream(*args, **kwargs):
+                yield chunk
+        except Exception:  # noqa: BLE001 降级语义
+            self._on_primary_failure()
+            yield from self.fallback.stream(*args, **kwargs)
+
+    async def astream(self, *args: Any, **kwargs: Any):
+        model = self._route_fallback()
+        if model is self.fallback:
+            async for chunk in model.astream(*args, **kwargs):
+                yield chunk
+            return
+        try:
+            async for chunk in model.astream(*args, **kwargs):
+                yield chunk
+        except Exception:  # noqa: BLE001 降级语义
+            self._on_primary_failure()
+            async for chunk in self.fallback.astream(*args, **kwargs):
+                yield chunk
 
     def with_structured_output(self, schema: Any) -> Any:
         """路由等结构化场景直接用主模型；失败由调用方回退启发式。"""

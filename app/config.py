@@ -3,7 +3,6 @@
 from functools import lru_cache
 
 from pydantic_settings import SettingsConfigDict
-
 from shared_schemas.settings import BaseLLMSettings
 
 
@@ -40,6 +39,8 @@ class Settings(BaseLLMSettings):
     cache_enabled: bool = True
     cache_threshold: float = 0.05  # 余弦距离阈值，小于该值视为同义命中
     memory_enabled: bool = True
+    memory_extraction_enabled: bool = False  # 优化 H：LLM 抽取结构化事实（默认关，无 LLM 时退化存原文）
+    memory_forget_threshold: float = 0.1  # 优化 H：低价值记忆惰性淘汰阈值（importance）
     breaker_failure_threshold: int = 3
     breaker_recovery_seconds: float = 30.0
 
@@ -84,6 +85,9 @@ class Settings(BaseLLMSettings):
     # Phase 2: MCP client（opt-in，默认 false）
     mcp_enabled: bool = False
     mcp_servers: str = ""  # JSON 编码的 server 配置列表
+
+    # 输入护栏（opt-in，默认 false）：PII 脱敏 + prompt injection 检测
+    guard_enabled: bool = False
 
     # CORS：允许的前端来源（逗号分隔），为空时默认回环 127.0.0.1:5173
     cors_allow_origins: str = ""

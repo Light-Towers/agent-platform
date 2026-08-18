@@ -28,6 +28,19 @@ Agent Platform 是一个基于 **LangGraph Supervisor 模式** 的统一智能�
 
 ---
 
+## 上游内核蓝本：`reliable-agent`
+
+本仓库的 `agent-core` 并非从零发明，而是受开源包 [Light-Towers/reliable-agent](https://github.com/Light-Towers/reliable-agent)（框架无关的 LLM/Agent 生产可靠性原语）启发/改写后的**本项目落地版**。两者组件一一映射、设计铁律一致：
+
+- **组件映射**：tracing / eval.metrics / guardrails / llm_client / memory / tool_registry 在 `reliable-agent` 与 `agent-core` 中均有对应。
+- **设计铁律同源**："框架无关、core 绝不 import langgraph/宿主应用、重依赖全部 extra + lazy import、仅 stdlib 可 import"原则与 `agent-core` 逐字对应（见 `agent-core/README.md`）。
+- **不是 pip 依赖**：`agent-core/pyproject.toml` 的 `dependencies=[]`，全仓库无任何 `reliable-agent` 引用 —— `agent-core` 是**自研实现等价内核**，而非直接 `pip install` 该包。
+- **本地是 superset**：`reliable-agent` 的 memory 仅指对话历史、eval.metrics 仅对给定 ID 列表算指标，**不含 embedding / vector store / 语义记忆**；本地 `agent-core` 额外提供了 `embedder.py` 与 `vector_backend.py`（pgvector 语义记忆），能力更全。
+
+更完整的上游对照与护栏清单见 [`docs/architecture-improvement-plan.md` §0.1](docs/architecture-improvement-plan.md)。
+
+---
+
 ## 特性
 
 ### Phase 1 — 核心能力
@@ -319,6 +332,25 @@ CI（`.github/workflows/agent-platform-ci.yml`）在每次推送时执行 pytest
 > 以及若干 sibling 业务包与共享内核包。各包均为独立 `pyproject.toml` 工程，
 > 通过 `agent-core` / `shared-schemas` 共享内核与契约，以 `uv` workspace 或 editable 安装互联。
 
+### uv workspace 环境约定（重要）
+
+本仓库是 uv workspace（根 `pyproject.toml` 含 `[tool.uv.workspace]`）。**默认 `uv sync` 只安装根包及其依赖，会卸载其它 member 包**（如 `deepagents`/`kefu-service`/`wenda-data-agent`/`zhanggui-zhiku`/`dialogue-framework`），导致跨包测试/导入失败。
+
+完整开发环境请用（装全部 workspace 包 + dev 工具）：
+
+```bash
+uv sync --all-packages --extra dev
+```
+
+运行单个包的测试（无需手动装依赖）：
+
+```bash
+uv run --package deepagents-app python -m pytest deepagents/tests/unit/ -q
+uv run python -m pytest tests/ -q          # 根 app 包
+```
+
+> 详见 `docs/architecture-improvement-plan.md` §6 TB-3（uv workspace 环境脆弱）。
+
 ### 单进程平台（本 README 描述对象）
 
 ```
@@ -384,13 +416,13 @@ shared-schemas/            # deepagents 联邦 4 服务共享的 Pydantic 契约
 kefu-service/              # kefu 迁移版（deepagents + LangGraph），已实现且 CI 通过，已接入网关
                           #   —— 提供 Agent Protocol 兼容 /invoke（返回 QueryResponse）；
                           #      网关 KEFU_USE_ADAPTER=false 直连本服务（默认）
-                          #   —— 原 kefu-adapter（atguigu_ai 适配层）已于 2026-08 移除（无调用方，
-                          #      默认直连 kefu-service；外部 atguigu_ai 退役为运维动作）
+                          #   —— 原 kefu-adapter（legacy 适配层）已于 2026-08 移除（无调用方，
+                          #      默认直连 kefu-service；外部 legacy 退役为运维动作）
 wenda-data-agent/          # Text-to-SQL 数据分析垂直场景（生产化改造自 courses/.../data-agent）
                           #   —— 原 wenda-adapter（SSE→JSON 适配层）已于 2026-08 退役，
                           #      网关直连本服务 /api/query（wenda-data-agent 默认 :8000）
 zhanggui-zhiku/            # 掌柜智库：RAG 知识库导入 + 多路检索问答一体化服务（:8900）
-dialogue-framework/        # LLM 对话系统框架基础设施（生产化改造自 courses/.../atguigu_ai）
+dialogue-framework/        # LLM 对话系统框架基础设施（生产化改造自 courses/.../legacy）
 ```
 
 ### 测试与评测
@@ -424,9 +456,13 @@ tests/                     # 单元测试（40 用例，针对 app/ 平台）
 
 - **U-1 · QueryRequest 入站字段名不统一（待拍板）**：`app/schemas.py:41-54` 经 `AliasChoices("query","question")` / `AliasChoices("session_id","thread_id")` 双写兼容。内部 state 与 DB 列名均为 `question`（`app/agent/graph.py`、`app/sql/schema_store.py`）。移除兼容层前须确认全部入站/出站边界已统一。*注：旧评审称 `HealthResponse` 字段集完全不同属误判——`HealthResponse` 已 `class HealthResponse(BaseHealthResponse)` 对齐联邦契约（`shared-schemas/health.py:25-40`），无需处理。*
 - **U-2 · kefu 迁移（已完成）**：
-  - ✅ `kefu-service` 已升级为 Agent Protocol 兼容 server：新增 `POST /invoke`（接受 `QueryRequest`，返回 `QueryResponse`，`kefu-service/main.py` + 依赖 `shared-schemas`）；旧 `/api/messages` 保留为 atguigu_ai 兼容入口。
+  - ✅ `kefu-service` 已升级为 Agent Protocol 兼容 server：新增 `POST /invoke`（接受 `QueryRequest`，返回 `QueryResponse`，`kefu-service/main.py` + 依赖 `shared-schemas`）；旧 `/api/messages` 保留为 legacy 兼容入口。
   - ✅ 网关 `deepagents/agent/config.py` 新增 `KEFU_SERVICE_URL` + `KEFU_USE_ADAPTER` 开关（默认 `false`，直连 `kefu-service:8003`）；`async_subagents.py` 增加 httpx 远程回退（外部 `deepagents` 包未安装时直连 `/invoke`）。
   - ✅ `kefu-adapter` 包已于 2026-08 移除（无调用方，默认直连 `kefu-service` 生效）。`deepagents/eval/run-all.py` 的 kefu 项目已改默认指向 `KEFU_SERVICE_URL`（`KEFU_ADAPTER_URL` 仍可覆盖）。*注：原评审称「非简单改 URL 可接入」属实，但根因（缺 Agent Protocol + QueryResponse）已在本轮修复。*
+- **TB-1 / TB-2 · dialogue-framework 与内核协议对齐（已完成）**：
+  - ✅ **TB-1**：`dialogue_framework/shared/llm/core_adapter.py` 新增 `LLMCoreClient`，把 agent_core `BaseLLMProvider`（工厂协议）桥接为 DF `BaseChatClient`（运行时协议）；两协议互补不合并，DF 不删除。
+  - ✅ **TB-2**：`dialogue_framework/core/tracker_memory.py` 新增 `TrackerConversationMemory`，实现 agent_core `ConversationMemory` 协议，把消息落进 `Tracker.events`；`Tracker.to_conversation_memory()` 桥接挂载。DF 自有数据结构未改动。
+  - 验证：`dialogue-framework/tests/test_tb_bridge.py`（3 passed），`ruff check .` 全绿。详见 `CHANGELOG.md` 技术债 TB 闭环小节。
 
 ## 路线图
 

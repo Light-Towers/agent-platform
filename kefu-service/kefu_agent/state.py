@@ -1,6 +1,6 @@
-"""LangGraph State：对应 atguigu_ai Tracker。
+"""LangGraph State：对应 legacy Tracker。
 
-atguigu_ai Tracker → LangGraph State 语义映射：
+legacy Tracker → LangGraph State 语义映射：
 - Tracker.slots → State.slots
 - Tracker.flow_stack → State.flow_state
 - Tracker.history → State.history

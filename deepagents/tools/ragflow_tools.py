@@ -1,8 +1,9 @@
 #  get_assistant_list 获取聊天助手和知识库信息
 #  create_ask_delete  创建提问和删除会话获取rag查询结果
 from langchain_core.tools import tool
+
 # 导入依赖
-from ragflow_sdk import RAGFlow #链接rag服务的客户端
+from ragflow_sdk import RAGFlow  #链接rag服务的客户端
 
 from api.monitor import monitor
 from rawflow.rag_config import _load_ragflow_env

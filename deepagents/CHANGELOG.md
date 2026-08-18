@@ -8,6 +8,9 @@ All notable changes to this project are documented here.
 
 > 详见 `docs/refactor-plan.md` v3.6 + `docs/audit-report.md`
 
+#### Changed
+- **模型 fallback 收敛** (`agent/llm.py` → `agent_core/llm/`): 删除 `deepagents` 侧的 `_FallbackModel` 子类，降级路由（连续失败计数 + 冷却窗口 + 成功复位）统一收敛为内核 `FallbackChatModel` 单一真相源；`LangChainFallbackModel`（`BaseChatModel` 子类，仅 langchain extra 时导入）作为薄适配层委托内核，杜绝双份降级逻辑与「永久降级」缺陷。`create_fallback_model()` 有备用模型时直接返回 `LangChainFallbackModel`。
+
 #### Phase 0 · 可观测性统一 + 评测基线 + spike
 - **Langfuse 适配** (`agent/tracing/langfuse_adapter.py`): 三态设计（开发 no-op / CI Langfuse / 生产 ClickHouse），与 agent-core OTel 共存
 - **W3C traceparent 传播** (`agent/tracing/trace_propagation.py`): 跨服务 trace 上下文注入/提取，无 OTel 时 no-op
@@ -18,7 +21,7 @@ All notable changes to this project are documented here.
 
 #### Phase 1 · 服务化拆分
 - **wenda-adapter** (`../wenda-adapter/`): SSE→JSON 适配层，消费 wenda SSE 流聚合 QueryResponse
-- **kefu-adapter** (`../kefu-adapter/`): atguigu_ai REST 适配层，转发 /api/messages
+- **kefu-adapter** (`../kefu-adapter/`): legacy REST 适配层，转发 /api/messages
 - **shared-schemas** (`../shared-schemas/`): 统一 Pydantic schema（QueryRequest/QueryResponse/HealthResponse/IntentResult/SubagentCall）
 - **deepagents 入站鉴权**: 复用 SecurityGuardsMiddleware + API_KEY
 
@@ -57,8 +60,8 @@ All notable changes to this project are documented here.
 - **多租户** (`api/context.py`): tenant_id ContextVar 隔离
 
 #### Phase 7 · kefu 迁移
-- **kefu-service** (`../kefu-service/`): atguigu_ai → deepagents + LangGraph 重写
-  - 9 种命令 (`agent/commands.py`): 对应 atguigu_ai command_prompt.jinja2
+- **kefu-service** (`../kefu-service/`): legacy → deepagents + LangGraph 重写
+  - 9 种命令 (`agent/commands.py`): 对应 legacy command_prompt.jinja2
   - 3 个 Flow 子图 (`agent/flows/`): order/logistics/postsale，接入真实业务服务
   - GraphRAG (`agent/graph_rag.py`): 6 步流程，配置驱动知识库
   - 业务服务 (`agent/services.py`): 订单/物流/售后查询 + 槽位提取

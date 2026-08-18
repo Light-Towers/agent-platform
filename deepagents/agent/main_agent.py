@@ -17,9 +17,9 @@ from agent.prompts import main_agent_content, planner_content
 from agent.subagents.database_query_agent import database_query_agent
 from agent.subagents.knowledge_base_agent import knowledge_base_agent
 from agent.subagents.network_search_agent import network_search_agent
+from agent.tracing.langfuse_adapter import langfuse_observe
 from api.context import reset_session_context, set_session_context, set_thread_context
 from api.monitor import monitor
-from agent.tracing.langfuse_adapter import langfuse_observe
 from tools.markdown_tools import generate_markdown
 from tools.pdf_tools import convert_md_to_pdf
 from tools.upload_file_read_tool import read_file_content
@@ -28,19 +28,17 @@ _main_agent = None
 
 
 async def _create_checkpointer():
-    """创建 checkpointer。
+    """创建 checkpointer（会话历史持久化）。
 
-    使用 InMemorySaver：纯内存、同步/异步均可（提供 aget_tuple/aput_writes），
-    无需 SQLite 连接或异步上下文管理器，可被全局缓存的 agent 安全复用。
+    统一委托 agent-core 的 ``get_checkpointer`` 工厂（与 embedder 的
+    ``get_embedder`` 同一收口模式）：
+      1. 配置 ``MONGO_URL`` → ``MongoCheckpointer``（持久化到 MongoDB，重启不丢，
+         按 ``tenant_id`` 隔离）。生产推荐。
+      2. 否则降级 ``InMemorySaver``（纯内存，重启丢，开发/无 Mongo 环境）。
     """
-    try:
-        from langgraph.checkpoint.memory import InMemorySaver
-        return InMemorySaver()
-    except ImportError:
-        from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-        saver = AsyncSqliteSaver.from_conn_string(":memory:")
-        await saver.__aenter__()
-        return saver
+    from agent_core.memory import get_checkpointer
+
+    return get_checkpointer()
 
 
 def _build_subagents():
@@ -61,13 +59,23 @@ def _build_subagents():
 
 
 def _build_middleware():
-    """Phase 4：构建 middleware 列表（TodoListMiddleware + RubricMiddleware）。
+    """Phase 4：构建 middleware 列表（TodoListMiddleware + RubricMiddleware + GuardMiddleware）。
 
     PLANNER_ENABLED=true → TodoListMiddleware（思考规划）
     REFLEXION_ENABLED=true → RubricMiddleware（Reflexion 自评估迭代）
-    两者都可独立开关，失败时降级为空列表（不影响现有栈）。
+    GUARD_ENABLED=true → GuardMiddleware（输入护栏：PII 脱敏 + injection 检测，优化 B 要点2）
+    三者都可独立开关，失败时降级为空列表（不影响现有栈）。
     """
     middleware = []
+
+    if os.getenv("GUARD_ENABLED", "false").lower() == "true":
+        try:
+            from deepagents.gateway.guard_middleware import GuardMiddleware
+
+            middleware.append(GuardMiddleware())
+            logger.info("GuardMiddleware 已启用（输入护栏挂入 deepagents 栈）")
+        except Exception as e:
+            logger.warning("GuardMiddleware 启用失败: %s", e)
 
     if os.getenv("PLANNER_ENABLED", "false").lower() == "true":
         try:

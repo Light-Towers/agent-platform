@@ -7,16 +7,17 @@ SSE 聚合、会话键、探活自递归等一串问题；这里用 LangGraph �
 
 import logging
 
+from agent_core.guardrails.input_guard import guard_input
 from langchain_core.messages import AIMessage
 from langgraph.graph import END, START, StateGraph
 
 from app.agent.compact import compact_messages, should_compact
 from app.agent.router import decide_route
-from app.agent.state import AgentState
+from app.agent.state import AgentState, _validate_state
 from app.config import get_settings
 from app.infra.db import get_pool
 from app.infra.mcp_client import MCPClientManager
-from app.memory.longterm import recall, remember
+from app.memory.longterm import extract_memory_facts, recall, remember
 from app.subagents.mcp import mcp_query
 from app.subagents.rag import rag_query
 from app.subagents.search import search_web
@@ -34,11 +35,26 @@ def build_graph(llm, checkpointer=None, mcp_manager: MCPClientManager | None = N
     """构建并编译 Supervisor 图；llm 可为 None（无 LLM 模式）。"""
 
     async def route_node(state: AgentState) -> dict:
-        question = state.get("question", "")
+        question = state.question
+        _validate_state(state)
+
+        # 输入护栏：PII 脱敏 + prompt injection 检测（opt-in，与 deepagents 统一入口）
+        settings = get_settings()
+        if settings.guard_enabled:
+            guard = guard_input(question)
+            if guard["blocked"]:
+                # 拦截后直接短路到 END，避免被 synthesize_node 覆盖 answer
+                return {
+                    "answer": "抱歉，您的输入包含不安全的内容，请重新描述。",
+                    "route": "blocked",
+                    "sub_query": "",
+                    "route_reason": "被输入护栏拦截（injection）",
+                }
+            # 脱敏文本写回 state，后续路由/记忆均使用脱敏后内容，避免原文进记忆
+            question = guard["redacted_text"]
 
         # 上下文压缩：多轮会话 token 超阈值时摘要旧消息
-        settings = get_settings()
-        messages = state.get("messages", [])
+        messages = state.messages
         if settings.compaction_enabled and llm is not None:
             threshold = int(settings.model_context_window * settings.compaction_threshold_ratio)
             if should_compact(messages, threshold):
@@ -50,28 +66,29 @@ def build_graph(llm, checkpointer=None, mcp_manager: MCPClientManager | None = N
                         "route_reason": "上下文已压缩，重新路由",
                         "memory_notes": [],
                         "messages": compacted,
-                        "iterations": state.get("iterations", 0),
+                        "iterations": state.iterations,
                     }
 
         decision = await decide_route(llm, question)
         memory_notes: list[str] = []
         if settings.memory_enabled:
-            memory_notes = await recall(get_pool(), state.get("user_id", "default"), question)
+            memory_notes = await recall(get_pool(), state.workspace_id, question)
         return {
             "route": decision.capability,
             "sub_query": decision.sub_query,
             "route_reason": decision.reason,
             "memory_notes": memory_notes,
+            "question": question,  # 写回脱敏后的问题
         }
 
     async def search_node(state: AgentState) -> dict:
-        return {"evidence": await search_web(state["sub_query"])}
+        return {"evidence": await search_web(state.sub_query)}
 
     async def rag_node(state: AgentState) -> dict:
-        return {"evidence": await rag_query(state["sub_query"])}
+        return {"evidence": await rag_query(state.sub_query, state.workspace_id)}
 
     async def sql_node(state: AgentState) -> dict:
-        return {"evidence": await sql_query(state["sub_query"], llm=llm)}
+        return {"evidence": await sql_query(state.sub_query, llm=llm)}
 
     async def direct_node(state: AgentState) -> dict:
         return {"evidence": []}
@@ -80,22 +97,26 @@ def build_graph(llm, checkpointer=None, mcp_manager: MCPClientManager | None = N
         return await mcp_query(state, mcp_manager)
 
     async def synthesize_node(state: AgentState) -> dict:
-        question = state["question"]
-        evidence = state.get("evidence", [])
-        memory_notes = state.get("memory_notes", [])
-        iterations = state.get("iterations", 0)
+        question = state.question
+        evidence = state.evidence
+        memory_notes = state.memory_notes
+        iterations = state.iterations
 
         # 反思：证据为空且未到重试上限，回到路由再来一次
         has_real_evidence = evidence and not any(
             e.startswith(("知识库未启用", "知识库中未检索到", "联网搜索未配置", "SQL_DSN 未配置"))
             for e in evidence
         )
-        if not has_real_evidence and state["route"] != "direct" and iterations < get_settings().max_iterations:
+        if not has_real_evidence and state.route != "direct" and iterations < get_settings().max_iterations:
             return {"iterations": iterations + 1, "evidence": []}
 
         answer = await _compose(question, evidence, memory_notes)
         if get_settings().memory_enabled:
-            remember(get_pool(), state.get("user_id", "default"), f"Q: {question}\nA: {answer}")
+            # 优化 H：抽取结构化事实后再沉淀（开启时）；否则退化存原文
+            facts = None
+            if get_settings().memory_extraction_enabled and llm is not None:
+                facts = await extract_memory_facts(llm, question, answer)
+            await remember(get_pool(), state.workspace_id, f"Q: {question}\nA: {answer}", facts=facts)
         return {
             "answer": answer,
             "iterations": iterations,
@@ -126,11 +147,11 @@ def build_graph(llm, checkpointer=None, mcp_manager: MCPClientManager | None = N
         return raw.content if hasattr(raw, "content") else str(raw)
 
     def pick_capability(state: AgentState) -> str:
-        return state.get("route", "direct")
+        return state.route
 
     def next_after_synthesize(state: AgentState) -> str:
         # synthesize 重试分支返回空 answer 且 iterations 已增加
-        if not state.get("answer") and state.get("iterations", 0) > 0:
+        if not state.answer and state.iterations > 0:
             return "route"
         return END
 
@@ -147,7 +168,7 @@ def build_graph(llm, checkpointer=None, mcp_manager: MCPClientManager | None = N
     builder.add_conditional_edges(
         "route",
         pick_capability,
-        {"search": "search", "rag": "rag", "sql": "sql", "direct": "direct", "mcp": "mcp"},
+        {"search": "search", "rag": "rag", "sql": "sql", "direct": "direct", "mcp": "mcp", "blocked": END},
     )
     builder.add_edge("search", "synthesize")
     builder.add_edge("rag", "synthesize")

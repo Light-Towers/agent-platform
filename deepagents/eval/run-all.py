@@ -163,7 +163,7 @@ async def main_async(args: argparse.Namespace) -> None:
             results = await eval_subservice(items, adapter_url)
         elif project == "kefu":
             # kefu-adapter 已弃用并移除；默认直连 kefu-service(:8003) 的 /invoke。
-            # 仍支持 KEFU_ADAPTER_URL 显式覆盖（若外部 atguigu_ai + adapter 仍在运行）。
+            # 仍支持 KEFU_ADAPTER_URL 显式覆盖（若外部 legacy + adapter 仍在运行）。
             adapter_url = os.getenv("KEFU_ADAPTER_URL") or os.getenv(
                 "KEFU_SERVICE_URL", "http://localhost:8003"
             )

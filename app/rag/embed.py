@@ -1,59 +1,47 @@
-"""Embedding 客户端：OpenAI 兼容 /embeddings；无密钥时走确定性 mock。
+"""Embedding 客户端：统一委托内核 agent_core.memory.embedder.get_embedder()。
 
-mock 模式（EMBEDDING_MODE=mock 或 auto 且无密钥）基于内容哈希生成固定向量，
-保证开发/测试链路可跑通；语义相似度无意义，检索质量由 BM25 分支兜底。
+app 不直接实现 embedding 逻辑（避免与子项目各自为政），仅负责把 app 配置
+（shared-schemas 的 ``embedding_*`` 字段）映射为内核 get_embedder() 期望的环境变量，
+随后复用内核的统一提供方：
+
+  - ``embedding_mode=mock``（或 auto 且无密钥）→ MockEmbedder（确定性 hash，零成本）
+  - ``embedding_mode=remote`` 或配了 ``embedding_api_key`` → 通用远程（OpenAI 兼容 /embeddings）
+  - 否则 → 本地 sentence-transformers（BAAI/bge-small-zh-v1.5，512 维）
+
+公开 API 保持 ``embed_texts`` / ``embed_query``（async），供 store.py / schema_store.py /
+routes.py 直接 import，调用方零改动。
 """
 
-import hashlib
-import math
+import os
 
-import httpx
+from agent_core.memory.embedder import get_embedder
 
 from app.config import get_settings
 
 
-def _mock_embed(text: str, dim: int) -> list[float]:
-    vec = []
-    counter = 0
-    while len(vec) < dim:
-        digest = hashlib.sha256(f"{text}:{counter}".encode()).digest()
-        vec.extend(b / 255.0 - 0.5 for b in digest)
-        counter += 1
-    vec = vec[:dim]
-    norm = math.sqrt(sum(v * v for v in vec)) or 1.0
-    return [v / norm for v in vec]
-
-
-def _use_remote(settings) -> bool:
-    if settings.embedding_mode == "mock":
-        return False
-    if settings.embedding_mode == "remote":
-        return True
-    return bool(settings.embedding_api_key)
+def _sync_env() -> None:
+    """把 app 配置映射为内核 get_embedder() 期望的环境变量（强制覆盖，保证 app 配置优先）。"""
+    s = get_settings()
+    os.environ["EMBEDDING_MODE"] = s.embedding_mode
+    if s.embedding_api_key:
+        os.environ["EMBEDDING_API_KEY"] = s.embedding_api_key
+    if s.embedding_base_url:
+        os.environ["EMBEDDING_BASE_URL"] = s.embedding_base_url
+    if s.embedding_model:
+        os.environ["EMBEDDING_MODEL"] = s.embedding_model
+    os.environ["EMBEDDING_DIM"] = str(s.vector_dim)
 
 
 async def embed_texts(texts: list[str]) -> list[list[float]]:
     if not texts:
         return []
-    settings = get_settings()
-    if not _use_remote(settings):
-        return [_mock_embed(t, settings.vector_dim) for t in texts]
-
-    async with httpx.AsyncClient(timeout=60) as client:
-        resp = await client.post(
-            f"{settings.embedding_base_url.rstrip('/')}/embeddings",
-            headers={"Authorization": f"Bearer {settings.embedding_api_key}"},
-            json={"model": settings.embedding_model, "input": texts},
-        )
-        resp.raise_for_status()
-        payload = resp.json()
-        data = payload.get("data")
-        if not data:
-            # Embedding API 返回 200 但 body 缺 "data" 键或为空（错误格式），
-            # 抛语义化错误而非 KeyError，便于上层结构化捕获
-            raise ValueError(f"Embedding API 返回格式异常（缺 data 字段）: {payload}")
-        data = sorted(data, key=lambda d: d["index"])
-        return [d["embedding"] for d in data]
+    _sync_env()
+    provider = get_embedder(force=True)
+    # 优先异步路径（RemoteEmbedder/MockEmbedder 均支持 aembed），避免事件循环内阻塞
+    if hasattr(provider, "aembed"):
+        return await provider.aembed(texts)
+    # 本地 sentence-transformers 仅同步，但内部为 CPU 推理，开销可控
+    return provider.embed(texts)
 
 
 async def embed_query(text: str) -> list[float]:

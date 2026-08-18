@@ -28,17 +28,22 @@ logger = logging.getLogger(__name__)
 
 
 async def _build_checkpointer():
-    """有 DATABASE_URL 用 Postgres checkpoint；否则内存版（开发模式）。"""
-    settings = get_settings()
-    if settings.db_enabled:
-        from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+    """有 DATABASE_URL 复用 PG 连接池走 Postgres checkpoint；否则内存版（开发模式）。
 
-        saver = AsyncPostgresSaver.from_conn_string(settings.database_url)
+    统一委托内核 ``get_checkpointer(pg_pool=...)`` 工厂（C8 收口：避免各子包重复
+    if MONGO_URL / if DATABASE_URL 样板）。PG 池由 app 自己的 init_pool() 管理，
+    仅把池句柄透传给工厂；Mongo/InMemory 分支完全由内核负责降级。
+    """
+    pool = get_pool()  # db_enabled 为 False 时返回 None → 工厂降级 InMemorySaver
+    if pool is None and get_settings().db_enabled:
+        raise RuntimeError("db_enabled 但连接池未初始化，检查 lifespan 中 init_pool 顺序")
+    from agent_core.memory import get_checkpointer
+
+    saver = get_checkpointer(pg_pool=pool)
+    # AsyncPostgresSaver 需要异步建表；InMemorySaver / MongoCheckpointer 无需 setup。
+    if pool is not None:
         await saver.setup()
-        return saver
-    from langgraph.checkpoint.memory import MemorySaver
-
-    return MemorySaver()
+    return saver
 
 
 @asynccontextmanager
@@ -136,15 +141,8 @@ async def lifespan(app: FastAPI):
     mcp_mgr = getattr(app.state, "mcp_manager", None)
     if mcp_mgr is not None:
         await mcp_mgr.close_all()
-    checkpointer = getattr(app.state, "checkpointer", None)
-    conn = getattr(checkpointer, "conn", None)
-    if conn is not None and hasattr(conn, "close"):
-        try:
-            close_result = conn.close()
-            if hasattr(close_result, "__await__"):
-                await close_result
-        except Exception:
-            logger.warning("checkpointer 连接关闭失败")
+    # checkpointer 复用 init_pool 的连接池（db_enabled 时 conn 即 _pool），
+    # 生命周期归 close_pool() 统一管理，此处不再单独关闭连接。
     await close_pool()
 
 
