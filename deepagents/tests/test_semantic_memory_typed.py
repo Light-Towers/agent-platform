@@ -182,3 +182,85 @@ def test_embed_memory_calls_core_embedder(monkeypatch):
     vec = sm.embed_memory("hi")
     assert captured["texts"] == ["hi"]
     assert vec == [0.5, 0.6]
+
+
+# --- 阶段2 收尾：main_agent 推理流程接线 typed 记忆 --------------------------
+from agent.memory.main_agent_memory import (  # noqa: E402
+    recall_typed_context,
+    remember_episodic,
+)
+
+
+async def test_recall_context_injects_when_enabled(monkeypatch):
+    """启用 + 有池 → recall_typed 被调用并产出上下文串。"""
+    monkeypatch.setattr(sm, "semantic_memory_typed_enabled", lambda: True)
+    captured = {}
+    monkeypatch.setattr("agent.db.get_pool", lambda: _FakePool())
+
+    async def _fake_recall(pool, user_id, question, k, weights, embedding):
+        captured.update(pool=pool, user_id=user_id, question=question)
+        from agent_core.memory.typed import TypedMemory, MemoryType
+
+        return [
+            TypedMemory(content="老用户偏好蓝色", memory_type=MemoryType.EPISODIC, importance=0.7),
+        ]
+
+    monkeypatch.setattr(sm, "_core_recall_typed", _fake_recall)
+    monkeypatch.setattr(sm, "embed_memory", lambda t: [0.9])
+
+    ctx = await recall_typed_context("sess-1", "推荐个颜色")
+    assert "老用户偏好蓝色" in ctx
+    assert "[episodic]" in ctx
+    assert captured["user_id"] == "sess-1"
+
+
+async def test_recall_context_empty_without_pool(monkeypatch):
+    """无池 → 返回空串（零行为变更降级）。"""
+    monkeypatch.setattr(sm, "semantic_memory_typed_enabled", lambda: True)
+    monkeypatch.setattr("agent.db.get_pool", lambda: None)
+    ctx = await recall_typed_context("sess-1", "q")
+    assert ctx == ""
+
+
+async def test_recall_context_resilient_to_exception(monkeypatch):
+    """异常 → 返回空串，不向上抛。"""
+    monkeypatch.setattr(sm, "semantic_memory_typed_enabled", lambda: True)
+    monkeypatch.setattr("agent.db.get_pool", lambda: _FakePool())
+    monkeypatch.setattr(
+        sm, "recall_typed",
+        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("pg down")),
+    )
+    ctx = await recall_typed_context("sess-1", "q")
+    assert ctx == ""
+
+
+async def test_remember_episodic_stores_when_enabled(monkeypatch):
+    """启用 + 有池 → remember_fact 被调用一次（episodic）。"""
+    monkeypatch.setattr(sm, "semantic_memory_typed_enabled", lambda: True)
+    monkeypatch.setattr("agent.db.get_pool", lambda: _FakePool())
+    captured = {}
+
+    async def _fake_remember(pool, user_id, fact, memory_type, importance, embedding):
+        captured.update(pool=pool, user_id=user_id, fact=fact,
+                        memory_type=memory_type, importance=importance)
+
+    monkeypatch.setattr(sm, "_core_remember_typed", _fake_remember)
+    monkeypatch.setattr(sm, "embed_memory", lambda t: [0.1])
+
+    await remember_episodic("sess-1", "用户问X", "答Y")
+    assert captured["user_id"] == "sess-1"
+    assert captured["memory_type"] == "episodic"
+    assert "用户问：用户问X" in captured["fact"]
+
+
+async def test_remember_episodic_noop_without_pool(monkeypatch):
+    """无池 → 不调用 remember_fact。"""
+    monkeypatch.setattr(sm, "semantic_memory_typed_enabled", lambda: True)
+    monkeypatch.setattr("agent.db.get_pool", lambda: None)
+    called = {"remember": False}
+    monkeypatch.setattr(
+        sm, "_core_remember_typed",
+        lambda *a, **k: called.__setitem__("remember", True),
+    )
+    await remember_episodic("sess-1", "q", "a")
+    assert called["remember"] is False

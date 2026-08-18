@@ -70,11 +70,20 @@ async def lifespan(app: FastAPI):
     from agent.health_check import start_health_check
     start_health_check()
 
+    # 类型化记忆 pgvector 连接池（ADR-0003 单一 psycopg 池，遵守 ADR-0004）
+    from agent.db import init_pool
+
+    await init_pool()
+
     logger.info("deepagents 服务启动完成")
     yield
 
     from agent.tracing.langfuse_adapter import shutdown_langfuse
     shutdown_langfuse()
+
+    from agent.db import close_pool
+
+    await close_pool()
 
 
 app = FastAPI(title="DeepAgents API", lifespan=lifespan)

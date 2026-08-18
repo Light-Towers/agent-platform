@@ -27,6 +27,14 @@ from tools.upload_file_read_tool import read_file_content
 _main_agent = None
 
 
+# 阶段2 收尾：main_agent 推理流程接入类型化记忆（ADR-0004）。
+# 接线逻辑独立到 agent.memory.main_agent_memory 以隔离重依赖（llm/langgraph）。
+from agent.memory.main_agent_memory import (
+    recall_typed_context,
+    remember_episodic,
+)
+
+
 async def _create_checkpointer():
     """创建 checkpointer（会话历史持久化）。
 
@@ -246,10 +254,13 @@ async def run_deep_agent(task_query, session_id):
         4. 若存在上传文件，请先分析内容
         """
 
+        # 阶段2 收尾：召回类型化记忆并注入本轮 user 上下文（无池/关闭则空串）
+        memory_ctx = await recall_typed_context(session_id, task_query)
+
         main_agent = await get_main_agent()
         try:
             async for chunk in main_agent.astream(
-                {"messages": [{"role": "user", "content": task_query + path_instruction}]},
+                {"messages": [{"role": "user", "content": task_query + path_instruction + memory_ctx}]},
                 config=config,
             ):
                 for node_name, state in chunk.items():
@@ -295,6 +306,9 @@ async def run_deep_agent(task_query, session_id):
             logger.exception("main_agent 执行异常 session_id=%s", session_id)
             monitor.report_error(f"执行主智能发生异常信息：{str(e)}")
         finally:
+            # 阶段2 收尾：本轮生效答案沉淀为 episodic 记忆（旁路，失败不阻断）
+            if _final_answer:
+                await remember_episodic(session_id, task_query, _final_answer)
             if _cache_hit is None and _final_answer and os.getenv("CACHE_ENABLED", "false").lower() == "true":
                 try:
                     from agent.cache.semantic_cache import SemanticCache
