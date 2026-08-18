@@ -6,6 +6,7 @@ legacy NLG → deepagents 输出
 
 from __future__ import annotations
 
+from agent_core.intent import IntentLabel, classify_intent, is_chitchat
 from agent_core.logging import get_logger
 from langgraph.graph import END, StateGraph
 
@@ -22,23 +23,46 @@ _order_flow = build_order_flow()
 _logistics_flow = build_logistics_flow()
 _postsale_flow = build_postsale_flow()
 
+# CUSTOMER_SERVICE 大类下仍需细分的业务二级路由关键词（统一意图标签不区分订单/物流/售后，
+# 这部分属于 kefu 业务流程分流，非意图识别硬编码，保留为必要业务路由）。
+_ORDER_KEYWORDS = ["订单", "下单", "购买"]
+_LOGISTICS_KEYWORDS = ["物流", "快递", "发货"]
+_POSTSALE_KEYWORDS = ["售后", "退换", "退款", "换货", "退货", "维修"]
+
 
 async def intent_node(state: KefuState) -> KefuState:
-    """意图识别节点（复用 Phase 3 意图识别）。"""
+    """意图识别节点（复用统一意图架构 agent_core.intent，TD-1 修复）。
+
+    闲聊经 ``is_chitchat`` 短路；其余走 ``classify_intent`` 取统一标签：
+    - CUSTOMER_SERVICE -> 仍按业务关键词细分订单/物流/售后 Flow；
+    - 其他（RAG_KNOWLEDGE / TEXT_TO_SQL / WEB_SEARCH / DIRECT / CHITCHAT 兜底）
+      -> 走知识库 ``knowledge``。
+    """
     message = state.get("user_message", "")
 
-    if any(kw in message for kw in ["政策", "流程", "规定", "制度", "手册", "怎么申请", "如何申请"]):
-        intent = "knowledge"
-    elif any(kw in message for kw in ["订单", "下单", "购买"]):
-        intent = "order_query"
-    elif any(kw in message for kw in ["物流", "快递", "发货"]):
-        intent = "logistics_query"
-    elif any(kw in message for kw in ["售后", "退换", "退款", "换货", "退货", "维修"]):
-        intent = "postsale_query"
-    elif any(kw in message for kw in ["你好", "谢谢", "再见"]):
+    if is_chitchat(message):
         intent = "chitchat"
     else:
-        intent = "knowledge"
+        try:
+            label = (await classify_intent(message)).primary
+        except Exception as exc:
+            # 统一意图架构（L2 LLM）不可用时，安全降级到知识库兜底，
+            # 不阻断客服链路（TD-1 修复后仍需保证 LLM 缺失时的可用性）。
+            logger.warning("[intent] classify_intent 失败，降级 knowledge: %s", exc)
+            label = IntentLabel.DIRECT
+        if label == IntentLabel.CUSTOMER_SERVICE:
+            if any(kw in message for kw in _ORDER_KEYWORDS):
+                intent = "order_query"
+            elif any(kw in message for kw in _LOGISTICS_KEYWORDS):
+                intent = "logistics_query"
+            elif any(kw in message for kw in _POSTSALE_KEYWORDS):
+                intent = "postsale_query"
+            else:
+                # 客服大类但无明确业务分流词，归入知识库应答。
+                intent = "knowledge"
+        else:
+            # RAG_KNOWLEDGE / TEXT_TO_SQL / WEB_SEARCH / DIRECT 均走知识库。
+            intent = "knowledge"
 
     return {**state, "intent": intent}
 

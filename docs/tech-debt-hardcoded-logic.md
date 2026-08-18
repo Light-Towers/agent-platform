@@ -26,13 +26,21 @@ ADR-0004 阶段4 的候选B（`eval/memory_reuse_llm.py`）评审中，发现 `_
 - 影响：换种说法即误路由；注释误导维护者以为已统一。
 - 范围说明：双轨收敛 `plan-e` 的 **S-5 范围外声明**明确 kefu 符合性核验"本期不纳入"，故未被统一意图架构覆盖。
 - 建议：① 修正 docstring 为真实状态；② 或令 kefu 意图节点复用 `deepagents/agent/intent/classifier.py`（真正统一）。
-- 状态：待排期
+- 修复（v2 任务二）：`intent_node` 改为复用统一意图架构 `agent_core.intent`
+  （`is_chitchat` 短路闲聊 + `classify_intent` 取 `IntentLabel`）；仅保留
+  CUSTOMER_SERVICE 大类下订单/物流/售后的**业务二级分流**关键词（职责属业务路由，非意图识别）。
+  docstring 已澄清为"复用统一意图架构"，消除误导。
+- 状态：✅ 已修复
 
 ### TD-2 kefu 售后类型纯关键词判定
 - 文件：`kefu-service/kefu_agent/services.py:144-154`
 - 现状：`if "退款" in msg → "退款"`，与 TD-1 词表重复且不一致（"退钱"等说法全漏）。
 - 建议：与 TD-1 一并统一到 classifier。
-- 状态：待排期
+- 修复（v2 任务二）：`extract_issue_type` 增加统一意图域校验
+  （仅 `CUSTOMER_SERVICE` 域才细分退款/换货/维修/退货），并澄清其职责为
+  **售后业务 slot 提取**（非意图分类），与 `agent_core.intent` 边界划清；
+  函数改为 async，调用方 `postsale_flow.collect_issue_type` 已加 `await`。
+- 状态：✅ 已修复
 
 ---
 
@@ -135,6 +143,26 @@ ADR-0004 阶段4 的候选B（`eval/memory_reuse_llm.py`）评审中，发现 `_
   但 kefu 为漏网之鱼。
 
 ## 排期建议
-1. 高优先：TD-1/TD-2（生产链路，且注释误导）—— 先修 docstring（小），再议是否复用 classifier（大）
+1. ~~高优先：TD-1/TD-2（生产链路，且注释误导）—— 已修复（v2 任务二）~~
 2. 中优先：TD-6（依赖候选A 基线）、TD-4/TD-3
 3. 低优先：TD-5/TD-7~TD-10
+
+---
+
+## 新增（v2 任务二）
+
+### TD-14 子 Agent 委派可观测性缺失（熔断/降级无统一指标）
+- 关联：P3 熔断保护已实现（`circuit_breaker.py` + `async_subagents.py` 健康短路 + 重试 + 兜底），
+  但状态变化仅 `logger.warning/info`，无统一指标/事件上报，运维不可见。
+- 修复（v2 任务二）：
+  - `agent_core.monitor.ToolMonitor` 新增 `report_circuit(state, message, data)` 公共方法，
+    复用既有监控通道（WebSocket + 回调 + 日志）。
+  - 新增 `deepagents/agent/metrics.py`：进程内计数器
+    （`circuit_open_total` / `circuit_half_open_total` / `circuit_closed_total` /
+    `delegation_success_total` / `delegation_failure_total` / `degrade_total` + 熔断状态快照），
+    零外部依赖（遵循内核零依赖铁律）。
+  - `circuit_breaker.py` 状态转换统一经 `_transition()` 触发 `record_circuit_state`（计数 + monitor 上报）。
+  - `async_subagents.py` 委派主路径加 langfuse `@observe` 埋点、`monitor.report_assistant` 上报、
+    `record_delegation` 计数（健康短路 / 熔断短路 / 远程成功 / 降级兜底）。
+  - `api/server.py` 暴露 `GET /metrics` JSON 端点（标准 scraping 可后续桥接 OpenTelemetry exporter）。
+- 状态：✅ 已修复（指标暴露 + tracing 埋点）
