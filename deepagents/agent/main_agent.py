@@ -146,9 +146,12 @@ project_root_path = Path(__file__).parents[1].resolve()
 
 
 @langfuse_observe(name="agent.run", as_type="span")
-async def run_deep_agent(task_query, session_id):
-    with start_span("agent.run", attrs={"session_id": session_id, "query_len": len(task_query)}):
-        logger.info("开始执行 main_agent session_id=%s", session_id)
+async def run_deep_agent(task_query, workspace_id):
+    # 隔离策略（与全局一致）：统一以 workspace_id 作为类型化记忆隔离主键。
+    # deepagents 单进程单池，一个 thread_id 即代表一个 workspace 工作空间，
+    # 调用方（api/server、eval）传入的即该 workspace 的稳定标识。
+    with start_span("agent.run", attrs={"workspace_id": workspace_id, "query_len": len(task_query)}):
+        logger.info("开始执行 main_agent workspace_id=%s", workspace_id)
 
         # Phase 6：输入 guardrail（PII 脱敏 + injection 检测）
         if os.getenv("GUARD_ENABLED", "false").lower() == "true":
@@ -218,12 +221,12 @@ async def run_deep_agent(task_query, session_id):
             except Exception as e:
                 logger.warning("缓存查询失败（非致命）: %s", e)
 
-        session_dir = project_root_path / "output" / f"session_{session_id}"
+        session_dir = project_root_path / "output" / f"session_{workspace_id}"
         session_dir.mkdir(parents=True, exist_ok=True)
         session_dir_str = str(session_dir).replace("\\", "/")
         relative_session_dir_str = str(session_dir.relative_to(project_root_path)).replace("\\", "/")
 
-        updated_dir_path = project_root_path / "updated" / f"session_{session_id}"
+        updated_dir_path = project_root_path / "updated" / f"session_{workspace_id}"
         updated_info_prompt = ""
         if updated_dir_path.exists():
             files = [f.name for f in updated_dir_path.iterdir() if f.is_file()]
@@ -237,10 +240,10 @@ async def run_deep_agent(task_query, session_id):
                 )
 
         session_dir_token = set_session_context(session_dir_str)
-        session_id_token = set_thread_context(session_id)
+        session_id_token = set_thread_context(workspace_id)
         monitor.report_session_dir(session_dir_str)
 
-        config = {"configurable": {"thread_id": session_id}}
+        config = {"configurable": {"thread_id": workspace_id}}
 
         path_instruction = f"""
         【工作环境指令】
@@ -255,7 +258,7 @@ async def run_deep_agent(task_query, session_id):
         """
 
         # 阶段2 收尾：召回类型化记忆并注入本轮 user 上下文（无池/关闭则空串）
-        memory_ctx = await recall_typed_context(session_id, task_query)
+        memory_ctx = await recall_typed_context(workspace_id, task_query)
 
         main_agent = await get_main_agent()
         try:
@@ -303,18 +306,18 @@ async def run_deep_agent(task_query, session_id):
                                         pass
                                 monitor.report_task_result(last_msg.content)
         except Exception as e:
-            logger.exception("main_agent 执行异常 session_id=%s", session_id)
+            logger.exception("main_agent 执行异常 workspace_id=%s", workspace_id)
             monitor.report_error(f"执行主智能发生异常信息：{str(e)}")
         finally:
             # 阶段2 收尾：本轮生效答案沉淀为 episodic 记忆（旁路，失败不阻断）
             if _final_answer:
-                await remember_episodic(session_id, task_query, _final_answer)
+                await remember_episodic(workspace_id, task_query, _final_answer)
             if _cache_hit is None and _final_answer and os.getenv("CACHE_ENABLED", "false").lower() == "true":
                 try:
                     from agent.cache.semantic_cache import SemanticCache
                     await SemanticCache.set_async(
                         _cached_intent, task_query,
-                        {"answer": _final_answer, "trace_id": session_id},
+                        {"answer": _final_answer, "trace_id": workspace_id},
                     )
                 except Exception:
                     pass

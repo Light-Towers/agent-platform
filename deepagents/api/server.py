@@ -184,7 +184,7 @@ async def run_task(request: TaskRequest):
     with start_span("api.task", attrs={"thread_id": thread_id}):
         async def _run():
             async with _concurrency_semaphore:
-                await run_deep_agent(request.query, thread_id)
+                await run_deep_agent(request.query, workspace_id=thread_id)
 
         _track_task(asyncio.create_task(_run()))
         return {"status": "started", "thread_id": thread_id}

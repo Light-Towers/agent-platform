@@ -30,7 +30,7 @@ async def run_one(item: dict, timestamp: str) -> dict:
     monitor.on("task_result", cb_answer)
     monitor.on("tool_outcome", cb_outcome)
     try:
-        await run_deep_agent(item["query"], session_id=sid)
+        await run_deep_agent(item["query"], workspace_id=sid)
     finally:
         monitor.off("assistant_call", cb_route)
         monitor.off("task_result", cb_answer)
