@@ -7,7 +7,8 @@ Planner 只做决策不持有执行语义（契约点 P1）。
 
 演进来源：app/infra/*（2026-08-19 起逐模块迁入，Phase 0 已完成 admission /
 cache / circuit_breaker / coordinator / revert / mcp_client / otel / tracing / db
-全部 9 个运行时模块，app/infra 已退役）。
+全部 9 个运行时模块，app/infra 已退役）。Phase 1 新增 capabilities/ 注册表：
+Function/Agent/Remote 三执行器 + CapabilityRegistry，能力注册/发现/执行中立化。
 """
 
 from agent_runtime.schemas import (

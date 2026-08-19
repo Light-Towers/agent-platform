@@ -132,7 +132,7 @@ app 的 search/rag/sql/mcp（进程内节点）与联邦 `database_query_agent`/
 | Phase | 内容 | 关键产出 | 状态 |
 |---|---|---|---|
 | **0** | `app/infra` → `agent-runtime`（9 个运行时模块全部迁入）；同步定 ThreadState 契约 | 共享 runtime + 统一状态 schema | ✅ **完成（2026-08-19）** |
-| **1** | `capabilities/` 注册表（Function/Agent/Remote 三执行器） | 能力层中立化 | 待办 |
+| **1** | `capabilities/` 注册表（Function/Agent/Remote 三执行器） | 能力层中立化 | ✅ **完成（2026-08-19）** |
 | **2** | Planner 协议 + 双实现；`PLANNER` 环境变量 | 编排解耦 + 双跑 eval 基线 | 待办 |
 | **3** | retire `app/graph.py`，保留 `app/api` + `app/config`；统一 SSE/WS 出口 | 单 Runtime 成型 | 待办 |
 
@@ -162,3 +162,9 @@ app 的 search/rag/sql/mcp（进程内节点）与联邦 `database_query_agent`/
 - ✅ Phase 0 完成（2026-08-19）：cache/circuit_breaker/coordinator/revert/mcp_client/otel/tracing/db 全部迁入
   `agent_runtime.*`；`app/schemas.py` 对 4 个运行时类型 re-export；调用点（app/scripts/tests 16 文件）全量改引用；
   `app/infra/` 仅剩空包占位。验证：根 tests **261 passed**（零回归，与迁移前一致），lint 0 error。
+
+- ✅ Phase 1 完成（2026-08-19）：`agent_runtime/capabilities/` 注册表——`Capability`（name/description/kind/executor/timeout_ms）+ `CapabilityRegistry`（register/get/list/execute，统一执行入口承载超时边界）+ 三执行器工厂 `as_function_capability` / `as_agent_capability`（lazy deepagents.create_deep_agent，与联邦 `_get_local_agent` 同路径）/ `as_remote_capability`。
+  - `app/capabilities.py`：装配 4 个进程内能力（search/rag/sql/mcp）为 function 型注册项，惰性单例 `get_registry()`。
+  - `app/agent/graph.py` 四节点改经 `registry.execute(...)`（能力层中立化首个生产路径验证）；mcp 能力签名依赖 state+manager，注册表 kwargs 透传承载。
+  - 验证：根 tests **268 passed**（261 基线 + 新增 7），新测试 `tests/test_capability_registry.py` 覆盖注册/发现/重复注册/超时/三执行器，lint 0 error。
+  - 联邦侧 `as_agent_capability` / `as_remote_capability` 工厂已就绪，main_agent.py 委派路径**未改**（deep_agent subagents 机制 Phase 2 Planner 协议时再切换，避免破坏现有行为）。

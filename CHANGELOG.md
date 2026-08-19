@@ -14,6 +14,13 @@
   - 验证：根 tests **261 passed（零回归）**，`app.main` import ok，lint 0 error。
 - 不做（遵循不过度设计）：`db.py` 的 `SCHEMA_TEMPLATE` 已随迁移归位（建表职责属 agent-runtime 初始化）；联邦 3 个 unit error 为 `deepagents` 改名遗留（测试文件仍 import PyPI `deepagents` 包），与本变更无关。
 
+## Plan-F Phase 1 能力层中立化（2026-08-19）
+
+- **`agent-runtime/agent_runtime/capabilities/` 新包**：`Capability` + `CapabilityRegistry`（注册/发现/统一执行入口，超时边界收敛于 execute）+ 三执行器工厂——`as_function_capability`（进程内 async 函数）/ `as_agent_capability`（subagent dict → lazy `deepagents.create_deep_agent`，与联邦本地 fallback 同路径）/ `as_remote_capability`（远程子服务调用）。
+- **`app/capabilities.py`**：装配 search/rag/sql/mcp 四能力为 function 型注册项（惰性单例）；`app/agent/graph.py` 四节点改经 `registry.execute(...)`——能力层中立化首个生产路径验证。
+- **测试**：`tests/test_capability_registry.py` 7 例（注册/发现/重复注册/未知能力/超时/三执行器）；根 tests **268 passed**（261 基线 + 7 新增，零回归），lint 0 error。
+- 不做（遵循不过度设计）：联邦 `main_agent.py` 委派路径未改（deep_agent subagents 机制属 Phase 2 Planner 协议切换范围）；`Capability.metadata` 仅留扩展位不预填；MCP 能力签名依赖 state+manager 以 kwargs 透传承载，不强行重构为 query 形态。
+
 ## v2 Resilience 收敛（2026-08-19）
 
 - **`agent-core/agent_core/resilience.py` 新增 `retry_async`**：异步指数退避重试原语（`max_attempts` 含首次、退避 `base*factor**(n-1)`、`exceptions` 过滤、可注入 `sleep`、支持同步/异步 `on_retry` 回调），与同步 `retry` 语义对齐。
