@@ -2,6 +2,16 @@
 
 本仓库为 uv workspace monorepo。**唯一受支持的安装/运行入口是根 `uv.lock` + `uv sync`**，子包不再维护独立 `uv.lock`（见 v2 修复 #14）。
 
+## 架构审核落地（2026-08-19 晚）—— Planner/Skill/Runtime 收口
+
+- **PlannerRuntime per-request 隔离（P0）**：`_steps`/`_call_stack` 由实例 mutable state 改为 `contextvars.ContextVar`——异 session 并发互不干扰、同 session 串行共享预算，修复单例注入下「一次执行的预算被并发请求耗尽」的跨请求污染；`max_steps`/`max_skill_depth` 保持不可变配置。
+- **配套测试语义修正**：`test_planner_governance.py` / `test_agentic_planner.py` 原「跨多次 arun 累计步数」断言即旧 bug 行为，改为「单次执行内嵌套超限 + 执行结束预算复位」（新增 `test_guard_budget_resets_after_execution`）。
+- **SessionCoordinator 语义明确（P0）**：docstring 声明 **process-local 单实例**（`_active/_queues/_conditions` 均 asyncio 进程内状态），多副本下「同 session 串行」不成立；演进方向：分布式 lease / durable execution 持有 ownership（本期不做）。
+- **Skill 入参契约真正执行（P1）**：`SkillRegistry.execute()` 新增 `_validate_input()`——`required` 存在性 + `properties` 类型校验，缺 schema 向后兼容、不拒绝注册方注入参数（mcp 的 state/mcp_manager）；传错参数抛明确 `SkillExecutionError` 而非内部 Python exception。新增 3 测试。
+- **术语精确化**：`SkillKind.WORKFLOW` 注释与架构文档统一「Static DAG → Workflow（Static/Conditional）」，LangGraph 明确为执行实现。
+- **演进方向留档（暂缓重构）**：SkillRegistry/SkillRuntime 分离、Dynamic Agent 纳入 Skill 体系、`Plan.notes`→`ExecutionContext`、Workflow Definition→Workflow Skill 编译——写入 `docs/plan-f-single-runtime-multi-planner.md`，按「边界出现再拆」原则执行。
+- **测试**：根 tests 180 passed（governance 7 + capability registry 16 含契约测试）/ 联邦 unit 89 passed（零回归），ruff 0 error。
+
 ## Plan-F 收尾（2026-08-19）—— Capability→Skill 全量 rename
 
 - **命名统一（待用户确认范围：全量重命名）**：将 `agent_runtime/capabilities/` 体系重命名为 `agent_runtime/skills/`，符号 `Capability`→`Skill`、`CapabilityKind`→`SkillKind`、`CapabilityRegistry`→`SkillRegistry`、`CapabilityNotFoundError`→`SkillNotFoundError`、`DuplicateCapabilityError`→`DuplicateSkillError`、`as_function/agent/remote/dag_capability`→`as_function/agent/remote/dag_skill`。

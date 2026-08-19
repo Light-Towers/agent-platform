@@ -105,7 +105,7 @@ async def test_arun_wraps_core_with_governance(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_arun_raises_on_step_limit(monkeypatch):
-    """arun 经 skill_guard 在步数超限时抛 SkillCompositionError。"""
+    """arun 经 skill_guard 在单次执行步数超限时抛 SkillCompositionError（预算 per-request 隔离）。"""
     async def fake_core(task_query: str, workspace_id: str, main_agent=None) -> str:
         return "ok"
 
@@ -114,12 +114,17 @@ async def test_arun_raises_on_step_limit(monkeypatch):
     monkeypatch.setattr(ma, "_execute_agent_core", fake_core)
 
     planner = AgenticPlanner()
-    # max_steps=1：第二次 arun 必超步数上限
     runtime = PlannerRuntime(registry=None, pool=None, max_steps=1)
 
-    await planner.arun("q1", "ws1", runtime)
-    with pytest.raises(SkillCompositionError):
-        await planner.arun("q2", "ws1", runtime)
+    # 单次执行内嵌套第二个 guard 触发步数超限（max_steps=1）
+    async with runtime.skill_guard("a"):
+        with pytest.raises(SkillCompositionError):
+            async with runtime.skill_guard("b"):
+                pass
+
+    # 预算 per-request：执行退出复位，后续 arun 可正常执行（不跨请求累计）
+    answer = await planner.arun("q1", "ws1", runtime)
+    assert answer == "ok"
 
 
 @pytest.mark.asyncio

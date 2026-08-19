@@ -248,24 +248,40 @@ async def run_evaluation(records: list[dict], no_judge: bool = False, cleanup: b
 
 
 def _require_real_llm_key_for_baseline() -> None:
-    """基线生成依赖真实 LLM 实跑；无 key 或占位桩会产出垃圾基线，提前拦截。
+    """基线生成依赖真实 LLM 实跑；无可用通道会产出垃圾基线，提前拦截。
 
-    当前开发环境无真实 key（仅 test-key 占位），无法生成 ``fed_latest.jsonl`` 真实基线。
-    需在有 key 环境执行：
-        uv run python -m agent_federation.eval.run_eval --baseline eval/fed_latest.jsonl
+    真实通道判定（满足任一即放行）：
+    - ``LLM_BASE_URL`` 指向可达端点（http/https 开头）且 ``LLM_API_KEY`` 非空
+      —— 覆盖本地 ``opencode-gateway``（scripts/opencode_gateway.py @:8799）等
+      经 CLI 自带鉴权绕开公开端点 Cloudflare 403 的真实通道；
+    - 或 ``OPENAI_API_KEY`` 非占位值。
+
+    纯测试/占位环境（两者皆无）才拦截，避免产出无意义基线。
     """
     # 已知测试/占位桩值（tests 用 setdefault 注入，避免误判为真实 key）
     _PLACEHOLDER_KEYS = {"", "test-key", "x", "sk-test", "dummy", "none"}
-    key = (os.getenv("OPENAI_API_KEY") or "").strip().lower()
-    if key in _PLACEHOLDER_KEYS:
-        print(
-            "错误: --baseline 需要真实 LLM 实跑，但 OPENAI_API_KEY 缺失或为占位值。\n"
-            "当前开发环境无真实 key，无法生成有意义的 fed_latest.jsonl 基线。\n"
-            "请在配置了 OPENAI_API_KEY/OPENAI_BASE_URL 的环境执行：\n"
-            "    uv run python -m agent_federation.eval.run_eval --baseline eval/fed_latest.jsonl\n"
-            "（R1 漂移门禁的比对逻辑本身无 LLM 依赖，已通过 eval/test_eval_baseline.py 覆盖。）"
-        )
-        sys.exit(2)
+
+    llm_base = (os.getenv("LLM_BASE_URL") or "").strip()
+    llm_key = (os.getenv("LLM_API_KEY") or "").strip()
+    # 本地 gateway 通道：base 是 http(s) 端点且 key 非空（opencode-local-gateway 即真实可用）
+    gateway_channel = bool(llm_base) and llm_base.lower().startswith(("http://", "https://")) and llm_key != ""
+
+    openai_key = (os.getenv("OPENAI_API_KEY") or "").strip().lower()
+    openai_channel = openai_key not in _PLACEHOLDER_KEYS
+
+    if gateway_channel or openai_channel:
+        return
+
+    print(
+        "错误: --baseline 需要真实 LLM 实跑，但当前环境无可用的 LLM 通道。\n"
+        "请满足以下任一条件后重试：\n"
+        "  - 配置 LLM_BASE_URL( http(s) 端点 ) + LLM_API_KEY（如本地 opencode-gateway）\n"
+        "  - 配置 OPENAI_API_KEY（非 test-key/x 等占位值）\n"
+        "例如（本地 gateway）：\n"
+        "    uv run python -m agent_federation.eval.run_eval --baseline eval/fed_latest.jsonl\n"
+        "（R1 漂移门禁的比对逻辑本身无 LLM 依赖，已通过 eval/test_eval_baseline.py 覆盖。）"
+    )
+    sys.exit(2)
 
 
 def main():

@@ -16,6 +16,7 @@ agentic 路径——deterministic 静态 DAG 天然无环，无需也不使用�
 
 from __future__ import annotations
 
+import contextvars
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -81,7 +82,14 @@ class PlannerRuntime:
     的资源边界；``skill_guard(name)`` 是组合型 Planner（agentic）编排 Skill 时须包裹的
     护栏——步数超限 / 循环调用（同名 Skill 重复入栈）/ 嵌套过深时抛 ``SkillCompositionError``。
 
-    由调用方（app lifespan / eval）装配，注入一次、贯穿会话。
+    由调用方（app lifespan / eval）装配，注入一次、贯穿会话（单例可复用）。
+
+    并发模型（架构审核 P0 落地）：执行期可变状态（步数/调用栈）经 ``contextvars`` 按
+    **执行上下文**（asyncio task）隔离——异 session 并发互不干扰；同 session 串行
+    （同一 task 链）共享同一护栏预算。单例注入 + 请求隔离，不再出现「一次执行的预算
+    被并发请求耗尽」的跨请求污染。
+
+    ``max_skill_depth`` / ``max_steps`` 为不可变配置（注入一次、贯穿会话）。
     """
 
     def __init__(
@@ -100,8 +108,23 @@ class PlannerRuntime:
         self.pool = pool
         self.max_skill_depth = max_skill_depth
         self.max_steps = max_steps
-        self._call_stack: list[str] = []
-        self._steps = 0
+        # 执行期可变状态（per-request，经 ContextVar 隔离；default 为共享只读初始值）
+        self._steps_var: contextvars.ContextVar[int] = contextvars.ContextVar(
+            "planner_steps", default=0
+        )
+        self._call_stack_var: contextvars.ContextVar[list[str]] = contextvars.ContextVar(
+            "planner_call_stack", default=[]
+        )
+
+    @property
+    def _steps(self) -> int:
+        """当前执行上下文的步数计数（兼容既有测试/调试读取）。"""
+        return self._steps_var.get()
+
+    @property
+    def _call_stack(self) -> list[str]:
+        """当前执行上下文的 Skill 调用栈（兼容既有测试/调试读取）。"""
+        return self._call_stack_var.get()
 
     @asynccontextmanager
     async def skill_guard(self, name: str) -> AsyncIterator[None]:
@@ -110,23 +133,30 @@ class PlannerRuntime:
         用法（组合型 Planner 编排 Skill 时）：
             async with runtime.skill_guard(skill_name):
                 result = await runtime.registry.execute(skill_name, **kwargs)
+
+        护栏状态 per-request：上下文退出即复位（预算不跨执行累计），同 task 链内
+        嵌套调用共享预算（单次执行内累计）。
         """
-        self._steps += 1
-        if self._steps > self.max_steps:
+        steps = self._steps_var.get() + 1
+        if steps > self.max_steps:
             raise SkillCompositionError(f"Skill 组合步数超上限（max_steps={self.max_steps}）")
-        if name in self._call_stack:
+        stack = self._call_stack_var.get()
+        if name in stack:
             raise SkillCompositionError(
-                f"Skill 循环调用检测: {' -> '.join([*self._call_stack, name])}"
+                f"Skill 循环调用检测: {' -> '.join([*stack, name])}"
             )
-        if len(self._call_stack) >= self.max_skill_depth:
+        if len(stack) >= self.max_skill_depth:
             raise SkillCompositionError(
                 f"Skill 嵌套深度超上限（max_skill_depth={self.max_skill_depth}）"
             )
-        self._call_stack.append(name)
+        # 每次 set 新值（list 用新拷贝），不修改共享 default，避免跨 task 污染
+        self._steps_var.set(steps)
+        self._call_stack_var.set([*stack, name])
         try:
             yield
         finally:
-            self._call_stack.pop()
+            self._steps_var.set(steps - 1)
+            self._call_stack_var.set(stack)
 
 
 class Planner(ABC):

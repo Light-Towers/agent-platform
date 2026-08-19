@@ -63,14 +63,29 @@ async def test_guard_rejects_depth_overflow():
 
 @pytest.mark.asyncio
 async def test_guard_rejects_step_overflow():
+    """步数上限在单次执行内（同 task 链嵌套）累计并拦截。"""
     rt = _runtime(max_steps=2)
     async with rt.skill_guard("a"):
+        async with rt.skill_guard("b"):
+            with pytest.raises(SkillCompositionError, match="步数"):
+                async with rt.skill_guard("c"):
+                    pass
+
+
+@pytest.mark.asyncio
+async def test_guard_budget_resets_after_execution():
+    """预算 per-request：执行退出后复位，不影响后续执行（架构审核 P0）。"""
+    rt = _runtime(max_steps=1)
+    # 单次执行：第一个 guard 消费预算，同执行内嵌套第二个必超
+    async with rt.skill_guard("a"):
+        with pytest.raises(SkillCompositionError, match="步数"):
+            async with rt.skill_guard("b"):
+                pass
+    # 执行结束预算复位：后续新执行可正常进入
+    async with rt.skill_guard("a"):
         pass
-    async with rt.skill_guard("b"):
-        pass
-    with pytest.raises(SkillCompositionError, match="步数"):
-        async with rt.skill_guard("c"):
-            pass
+    assert rt._steps == 0
+    assert rt._call_stack == []
 
 
 @pytest.mark.asyncio
