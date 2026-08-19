@@ -9,7 +9,7 @@ GraphRAG → 知识库检索子 Agent，legacy tracker → LangGraph State。
   - 接入 shared-schemas 统一契约，新增 `POST /invoke`（Agent Protocol 兼容，
     接受 graph_id + input，返回 QueryResponse），供 deepagents 联邦网关远程直连；
   - `POST /api/messages` 保留为 legacy 兼容入口（旧契约），内部复用统一核心逻辑；
-  - deepagents/agent/config.py 新增 KEFU_SERVICE_URL + KEFU_USE_ADAPTER 开关，
+  - agent_federation/agent/config.py 新增 KEFU_SERVICE_URL + KEFU_USE_ADAPTER 开关，
     置 KEFU_USE_ADAPTER=false 即直连本服务；kefu-adapter 转换层已于 2026-08 移除
     （legacy 接入层退役由运维执行）。
 """
@@ -88,7 +88,7 @@ async def _run_kefu(req: QueryRequest) -> QueryResponse:
 async def invoke(req: QueryRequest):
     """Agent Protocol 兼容入口（graph_id 预留，供联邦网关远程直连）。
 
-    deepagents/agent/async_subagents.py 在 KEFU_USE_ADAPTER=false 时经
+    agent_federation/agent/async_subagents.py 在 KEFU_USE_ADAPTER=false 时经
     KEFU_SERVICE_URL(:8003)/invoke 调用本端点，返回 QueryResponse。
     """
     # graph_id 当前仅 kefu-service 单图，预留供扩展多图路由

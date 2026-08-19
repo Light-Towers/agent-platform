@@ -72,9 +72,9 @@ Agent Platform 是一个基于 **LangGraph Supervisor 模式** 的统一智能�
 ## 架构
 
 ```text
-                                    REQUEST
-                                        │
-                                        ▼
+                                         REQUEST
+                                            │
+                                            ▼
                     ┌─────────────┐   ┌──────────────┐   ┌────────────────┐
                     │  Gateway    │ → │  Admission   │ → │   Supervisor   │
                     │ Auth/Session│   │  Queue       │   │   Intent Route │
@@ -328,13 +328,13 @@ CI（`.github/workflows/agent-platform-ci.yml`）在每次推送时执行 pytest
 ## 目录结构
 
 > 本仓库为 **monorepo**，根 `app/` 只是其中一套「单进程 Supervisor 平台」。
-> 另有 `deepagents/` 联邦网关编排系统（与 `app/` 并行，二者不构成上下级关系），
+> 另有 `agent_federation/` 联邦网关编排系统（与 `app/` 并行，二者不构成上下级关系），
 > 以及若干 sibling 业务包与共享内核包。各包均为独立 `pyproject.toml` 工程，
 > 通过 `agent-core` / `shared-schemas` 共享内核与契约，以 `uv` workspace 或 editable 安装互联。
 
 ### uv workspace 环境约定（重要）
 
-本仓库是 uv workspace（根 `pyproject.toml` 含 `[tool.uv.workspace]`）。**默认 `uv sync` 只安装根包及其依赖，会卸载其它 member 包**（如 `deepagents`/`kefu-service`/`wenda-data-agent`/`zhanggui-zhiku`/`dialogue-framework`），导致跨包测试/导入失败。
+本仓库是 uv workspace（根 `pyproject.toml` 含 `[tool.uv.workspace]`）。**默认 `uv sync` 只安装根包及其依赖，会卸载其它 member 包**（如 `agent_federation`/`kefu-service`/`wenda-data-agent`/`zhanggui-zhiku`/`dialogue-framework`），导致跨包测试/导入失败。
 
 完整开发环境请用（装全部 workspace 包 + dev 工具）：
 
@@ -345,7 +345,7 @@ uv sync --all-packages --extra dev
 运行单个包的测试（无需手动装依赖）：
 
 ```bash
-uv run --package deepagents-app python -m pytest deepagents/tests/unit/ -q
+uv run --package agent-federation-app python -m pytest agent_federation/tests/unit/ -q
 uv run python -m pytest tests/ -q          # 根 app 包
 ```
 
@@ -397,7 +397,7 @@ app/
 ### 联邦网关编排系统（并行 sibling）
 
 ```
-deepagents/                # 联邦网关 + 3 子服务编排中枢（详见 deepagents/README.md）
+agent_federation/          # 联邦网关 + 3 子服务编排中枢（详见 agent_federation/README.md）
                           #   - api.server：网关入口（guardrail / 意图分类 / 改写 / 语义缓存 / Planner）
                           #   - agent/：3 子 Agent（text_to_sql / rag_query / customer_service）
                           #   - AGENT_MODE=local|remote 切换本地子 Agent 或远程 AsyncSubAgent
@@ -407,7 +407,7 @@ deepagents/                # 联邦网关 + 3 子服务编排中枢（详见 dee
 
 ```
 agent-core/                # 零依赖运行时内核：tracing / guardrails / sql 守卫 / llm / memory / tool registry
-shared-schemas/            # deepagents 联邦 4 服务共享的 Pydantic 契约（QueryResponse 等）
+shared-schemas/            # agent_federation 联邦 4 服务共享的 Pydantic 契约（QueryResponse 等）
 ```
 
 ### 业务 / 适配 sibling 包
@@ -457,8 +457,8 @@ tests/                     # 单元测试（40 用例，针对 app/ 平台）
 - **U-1 · QueryRequest 入站字段名不统一（待拍板）**：`app/schemas.py:41-54` 经 `AliasChoices("query","question")` / `AliasChoices("session_id","thread_id")` 双写兼容。内部 state 与 DB 列名均为 `question`（`app/agent/graph.py`、`app/sql/schema_store.py`）。移除兼容层前须确认全部入站/出站边界已统一。*注：旧评审称 `HealthResponse` 字段集完全不同属误判——`HealthResponse` 已 `class HealthResponse(BaseHealthResponse)` 对齐联邦契约（`shared-schemas/health.py:25-40`），无需处理。*
 - **U-2 · kefu 迁移（已完成）**：
   - ✅ `kefu-service` 已升级为 Agent Protocol 兼容 server：新增 `POST /invoke`（接受 `QueryRequest`，返回 `QueryResponse`，`kefu-service/main.py` + 依赖 `shared-schemas`）；旧 `/api/messages` 保留为 legacy 兼容入口。
-  - ✅ 网关 `deepagents/agent/config.py` 新增 `KEFU_SERVICE_URL` + `KEFU_USE_ADAPTER` 开关（默认 `false`，直连 `kefu-service:8003`）；`async_subagents.py` 增加 httpx 远程回退（外部 `deepagents` 包未安装时直连 `/invoke`）。
-  - ✅ `kefu-adapter` 包已于 2026-08 移除（无调用方，默认直连 `kefu-service` 生效）。`deepagents/eval/run-all.py` 的 kefu 项目已改默认指向 `KEFU_SERVICE_URL`（`KEFU_ADAPTER_URL` 仍可覆盖）。*注：原评审称「非简单改 URL 可接入」属实，但根因（缺 Agent Protocol + QueryResponse）已在本轮修复。*
+  - ✅ 网关 `agent_federation/agent/config.py` 新增 `KEFU_SERVICE_URL` + `KEFU_USE_ADAPTER` 开关（默认 `false`，直连 `kefu-service:8003`）；`async_subagents.py` 增加 httpx 远程回退（外部 `deepagents` 包未安装时直连 `/invoke`）。
+  - ✅ `kefu-adapter` 包已于 2026-08 移除（无调用方，默认直连 `kefu-service` 生效）。`agent_federation/eval/run-all.py` 的 kefu 项目已改默认指向 `KEFU_SERVICE_URL`（`KEFU_ADAPTER_URL` 仍可覆盖）。*注：原评审称「非简单改 URL 可接入」属实，但根因（缺 Agent Protocol + QueryResponse）已在本轮修复。*
 - **TB-1 / TB-2 · dialogue-framework 与内核协议对齐（已完成）**：
   - ✅ **TB-1**：`dialogue_framework/shared/llm/core_adapter.py` 新增 `LLMCoreClient`，把 agent_core `BaseLLMProvider`（工厂协议）桥接为 DF `BaseChatClient`（运行时协议）；两协议互补不合并，DF 不删除。
   - ✅ **TB-2**：`dialogue_framework/core/tracker_memory.py` 新增 `TrackerConversationMemory`，实现 agent_core `ConversationMemory` 协议，把消息落进 `Tracker.events`；`Tracker.to_conversation_memory()` 桥接挂载。DF 自有数据结构未改动。

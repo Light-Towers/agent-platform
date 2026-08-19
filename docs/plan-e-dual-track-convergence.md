@@ -2,33 +2,33 @@
 
 > 状态：规划已按独立审核修订，P4.1~P4.3 全部实施完成（见顶部实施记录）
 > 关联：`docs/architecture-improvement-plan.md` §2 优化 E / §4 路线图 P4
-> 调研依据：`docs/architecture-boundary-app-vs-deepagents.md` + 本轮 `app/` 与 `deepagents/` 双轨代码调研
+> 调研依据：`docs/architecture-boundary-app-vs-agent-federation.md` + 本轮 `app/` 与 `agent_federation/` 双轨代码调研
 > 上游约束：`agent-core` 是 `reliable-agent` 哲学落地，零依赖铁律不可逾越（护栏清单第 1 条）
 > 审核修订记录（2026-08-16）：依据独立源码核对，采纳 B-1 / M-1~M-5 / S-1~S-5，逐项修正如下。
-> 实施记录（2026-08-16）：P4.1~P4.3 已全部落地并通过单测门禁（deepagents unit 44 passed；app 根 59 passed）。
->   - P4.1：deepagents/pyproject.toml 补 `shared-schemas` 依赖；`async_subagents._HttpSubAgent.ainvoke` 接入 `QueryResponse(**data)` 断言 + `E1_CONTRACT_ASSERT` 灰度开关；新增 `tests/unit/test_async_subagents_contract.py`(5)。
->   - P4.2：deepagents/pyproject.toml 补 `sqlglot`；新增 `tools/sql_guard.py` 薄封装委托 `agent_core.sql.guard(dialect="mysql")` + `USE_CORE_GUARD` 回滚开关；`db_tools.execute_sql_query` 改用薄封装；新增 `tests/unit/test_sql_guard_mysql.py`(7)，`sql_validation` 回归 18 维持。
+> 实施记录（2026-08-16）：P4.1~P4.3 已全部落地并通过单测门禁（agent_federation unit 44 passed；app 根 59 passed）。
+>   - P4.1：agent_federation/pyproject.toml 补 `shared-schemas` 依赖；`async_subagents._HttpSubAgent.ainvoke` 接入 `QueryResponse(**data)` 断言 + `E1_CONTRACT_ASSERT` 灰度开关；新增 `tests/unit/test_async_subagents_contract.py`(5)。
+>   - P4.2：agent_federation/pyproject.toml 补 `sqlglot`；新增 `tools/sql_guard.py` 薄封装委托 `agent_core.sql.guard(dialect="mysql")` + `USE_CORE_GUARD` 回滚开关；`db_tools.execute_sql_query` 改用薄封装；新增 `tests/unit/test_sql_guard_mysql.py`(7)，`sql_validation` 回归 18 维持。
 >   - P4.3：新增 `agent_core/memory/backend.py`（仅 `MemoryBackend` Protocol 签名，零依赖）；`agent_core/memory/__init__.py` 导出并标注与 `ConversationMemory` 正交；`app/memory/memory_backend.py` 经优化 H 重写为**类型化记忆门面**（含 `MemoryBackend` 语义契约的本地实现），协议下沉目标已达成（内核为唯一真相源），re-export 形态随这次重写调整，记录形态过期已勘误（2026-08-18）。
 
 ## 0. 结论先行
 
-**双轨不应在编排层合并代码。** `app/`（单进程 Supervisor）与 `deepagents/`（联邦网关 + `create_deep_agent`）是两种合法产品形态，二者**零代码耦合**（互不包含 import），且已通过 `agent_core` 共享内核。
+**双轨不应在编排层合并代码。** `app/`（单进程 Supervisor）与 `agent_federation/`（联邦网关 + `create_deep_agent`）是两种合法产品形态，二者**零代码耦合**（互不包含 import），且已通过 `agent_core` 共享内核。
 
 强行把 A 的节点抽成 B 的 subagent（或反之）会同时破坏：
 - `app` 的合规外壳（admission 排队、session coordinator、revert、PG checkpoint、sqlglot 双保险、SSE 事件映射）；
-- `deepagents` 的联邦远程治理（Agent Protocol 委派、429 限流、探活降级）。
+- `agent_federation` 的联邦远程治理（Agent Protocol 委派、429 限流、探活降级）。
 
 **收敛的正确范围 = 共享内核层的不对称补齐 + 联邦契约对齐**，而非编排代码合并。这是低风险、可独立测试、且不触碰编排核心的路径。
 
 ## 1. 双轨现状（调研摘要）
 
-| 维度 | 轨道 A `app/` | 轨道 B `deepagents/` |
+| 维度 | 轨道 A `app/` | 轨道 B `agent_federation/` |
 |---|---|---|
 | 形态 | 自研 LangGraph Supervisor（`graph.py:build_graph`） | `create_deep_agent(subagents=[...])`（`main_agent.py:118`） |
 | 搜索 | `app/subagents/search.py:search_web`（Tavily + 熔断） | `network_search_agent` + `tools/tavily_tool` |
 | RAG | `app/subagents/rag.py:rag_query`（自研 pgvector） | `knowledge_base_agent` + `tools/zhiku_tools`（HTTP 调 zhiku 服务） |
 | SQL | `app/subagents/sql_agent.py:sql_query`（Vanna 管线 + `agent_core.sql.guard` sqlglot + 连接只读双保险） | `database_query_agent` + `tools/db_tools`（独立 `sql_validation.py` sqlparse） |
-| 记忆 | `app/memory/longterm.py`（pgvector 长期记忆） | 仅 deepagents 内部 `InMemorySaver`，**无 pgvector 召回** |
+| 记忆 | `app/memory/longterm.py`（pgvector 长期记忆） | 仅 agent_federation 内部 `InMemorySaver`，**无 pgvector 召回** |
 | 远程治理 | 无（MCP 为进程内 client） | 在 `tools/zhiku_tools.py`（429 限流识别 + 健康探活降级）+ `tools/db_tools.py`/`tools/tavily_tool` 重试；`async_subagents.py` 仅是 **httpx/AsyncSubAgent 的薄封装门面**，本身不含限流逻辑（审核 M-4 纠正） |
 | 合规外壳 | admission/coordinator/revert/PG checkpoint/SSE 均有 | 无（WS 而非 SSE） |
 
@@ -40,20 +40,20 @@
 
 ### E-1 联邦契约对齐：`shared_schemas` 断言（P4.1，低风险）✅ 已实施
 
-**前置（审核 B-1）**：`deepagents/pyproject.toml` 原**未声明 `shared-schemas` 依赖**（uv workspace 把它列为 member 但未加入 dependencies）。已补 `"shared-schemas"` 到 dependencies，使 B 侧 import 在依赖解析层成立。
+**前置（审核 B-1）**：`agent_federation/pyproject.toml` 原**未声明 `shared-schemas` 依赖**（uv workspace 把它列为 member 但未加入 dependencies）。已补 `"shared-schemas"` 到 dependencies，使 B 侧 import 在依赖解析层成立。
 
-- **现状**：`deepagents/agent/async_subagents.py:46` 的 `_HttpSubAgent.ainvoke` 按字段形态消费响应，**未复用 `shared_schemas` 类型**；wenda `/api/query` 实际返回 `SqlQueryResponse`（`QueryResponse` 子类，含 `sql/error`），kefu `/invoke` 返回 `QueryResponse`。
+- **现状**：`agent_federation/agent/async_subagents.py:46` 的 `_HttpSubAgent.ainvoke` 按字段形态消费响应，**未复用 `shared_schemas` 类型**；wenda `/api/query` 实际返回 `SqlQueryResponse`（`QueryResponse` 子类，含 `sql/error`），kefu `/invoke` 返回 `QueryResponse`。
 - **方案（审核 M-1 修正）**：`shared_schemas` 仅定义 `QueryRequest/QueryData/QueryResponse`（`shared_schemas/query.py`），**无 `SqlQueryResponse`**（该类型属 wenda 私有扩展）。故断言统一用 `shared_schemas.QueryResponse(**data)` 校验——`SqlQueryResponse` 字段超集可被 `QueryResponse` 安全吸收（额外字段被忽略），无需新增类型。
 - **兼容性**：纯新增断言，远程调用协议不变；B 侧仍不直接依赖 app。
 - **实施结果**：`_HttpSubAgent.ainvoke` 在 `data` 为 dict 时执行 `QueryResponse(**data)` 校验，校验失败抛 `ValueError`（含服务名 + 原始键），不再静默 `str(data)`；并补充 `tests/unit/test_async_subagents_contract.py` 覆盖通过/失败路径。
 - **收益**：消除 `shared_schemas` 采用不对称（边界文档 §4 已登记为"低优先级可选迭代"）。
 
 ### E-2 SQL 守卫统一评估（P4.2，中风险，可选）
-- **现状**：A 用 `agent_core.sql.guard.validate_sql`（sqlglot，支持 PG/sqlite）；B 用 `deepagents/tools/sql_validation.py`（sqlparse，走 MySQL wenda）。
+- **现状**：A 用 `agent_core.sql.guard.validate_sql`（sqlglot，支持 PG/sqlite）；B 用 `agent_federation/tools/sql_validation.py`（sqlparse，走 MySQL wenda）。
 - **方案（审核 M-2 修正）**：`agent_core.sql.guard.validate_sql(sql, dialect, max_rows)` **已支持 `dialect` 参数透传**（`guard.py:34` `sqlglot.parse(cleaned, read=dialect)`），`app/sql/guard.py` 也已支持 `mysql` 方言。故**不存在"需建方言分支"**——直接传 `dialect="mysql"` 即可，B 改为委托内核 guard 时无需新增分支。
 - **风险**：sqlglot 与 sqlparse 对 MySQL 方言解析细节可能有边角差异；B 当前 `sql_validation` 还做了 `_ensure_limit`（无 LIMIT 时补 `LIMIT 100`）和标识符白名单，委托内核时需保留 LIMIT 兜底语义。
 - **前置**：先补充 B 侧 SQL 守卫回归单测（当前 `sql_validation.py` 有纯函数但 `db_tools` 调用处缺用例）——注意用例数应为 **18**（审核 M-3 纠正：原审核误计为 14）。
-- **实施计划**：`deepagents/pyproject.toml` 加 `sqlglot` 依赖 → 新增 `deepagents/tools/sql_guard.py` 薄封装委托 `agent_core.sql.guard`（传 `dialect="mysql"`，保留 LIMIT 兜底）→ `db_tools` 改用薄封装 → 跑 18 例回归 + 新增 `test_sql_guard_mysql.py`（含一条 `SELECT ... LIMIT` 与一条被禁 DML 用例）。
+- **实施计划**：`agent_federation/pyproject.toml` 加 `sqlglot` 依赖 → 新增 `agent_federation/tools/sql_guard.py` 薄封装委托 `agent_core.sql.guard`（传 `dialect="mysql"`，保留 LIMIT 兜底）→ `db_tools` 改用薄封装 → 跑 18 例回归 + 新增 `test_sql_guard_mysql.py`（含一条 `SELECT ... LIMIT` 与一条被禁 DML 用例）。
 - **收益**：统一 SQL 合规硬约束（护栏清单第 2 条），内核为唯一真相源。若 sqlglot 边角差异不可接受，保留 B 独立守卫并文档记录，不强行统一。
 
 ### E-3 长期记忆内核对齐（P4.3，可选）
@@ -65,14 +65,14 @@
 
 ### F 外壳基础设施化：自研外壳抽为双轨共享（P4.4，可选，承接 TB-13/AR-2 讨论）
 
-> **来源**：用户决策——若将 `app` 的 5 段自研生产外壳（admission/coordinator/revert/SQL 双保险/SSE）补到 `deepagents`，会自然引出"那 `app` 的 LangGraph 逻辑是否还有意义"之问。本优化给出工程结论与落地路径。
+> **来源**：用户决策——若将 `app` 的 5 段自研生产外壳（admission/coordinator/revert/SQL 双保险/SSE）补到 `agent_federation`，会自然引出"那 `app` 的 LangGraph 逻辑是否还有意义"之问。本优化给出工程结论与落地路径。
 
 **关键澄清（误区别）**：
 - 这 5 段外壳**全是 `app` 自研程序逻辑，不是 LangGraph 独有的框架能力**。LangGraph 仅提供"持久化 checkpoint + 可重放执行"这一内核能力（且 DeepAgents 底层就是 LangGraph，同样可用）。
-- 因此"在 deepagents 补外壳"= 把自研代码**搬家**，不是"换框架"。补完后两轨差异收敛为**纯编排风格差异**（确定性 DAG 路由 vs 涌现式委派）。
+- 因此"在 agent_federation 补外壳"= 把自研代码**搬家**，不是"换框架"。补完后两轨差异收敛为**纯编排风格差异**（确定性 DAG 路由 vs 涌现式委派）。
 
 **结论（回答"app 的 LangGraph 逻辑是否还有意义"）**：
-1. `app` 里**显式 `StateGraph` 编排（`build_graph`）** 在 deepagents 接管后可退役（被 `subagents + middleware` 风格吸收）。
+1. `app` 里**显式 `StateGraph` 编排（`build_graph`）** 在 agent_federation 接管后可退役（被 `subagents + middleware` 风格吸收）。
 2. **LangGraph 内核永远在**（DeepAgents 依赖它），"LangGraph 没意义"表述错误。
 3. 外壳代码**搬家不消失**——是团队自研资产。
 
@@ -86,7 +86,7 @@
 | SQL 双保险 | `agent_core.sql.guard`（已下沉）+ 连接只读 | 双轨共用 `agent_core`，无需各写 |
 | SSE 事件映射 | `app/api/routes.py` 的 SSE renderer → 独立 `sse.py` | A 直用；B 若需 SSE 复用 renderer（WS/SSE 协议差异需适配层） |
 
-**边界约束（继承 §3）**：抽离后仍禁止"抽 app 节点为 deepagents subagent"或反向图重写（护栏 S-4）。外壳可共享，编排不可合并。
+**边界约束（继承 §3）**：抽离后仍禁止"抽 app 节点为 agent_federation subagent"或反向图重写（护栏 S-4）。外壳可共享，编排不可合并。
 
 **收益**：消除双轨外壳重复维护（TB-13）；B 侧获得持久化 checkpoint/回退能力（AR-2/TB-10）；为未来"确定性路由 vs 涌现委派"主线决策扫清外壳障碍。
 
@@ -102,14 +102,14 @@
 
 以下为 `app` 自研外壳，双轨收敛**必须保留**，不得为"统一"而删除或弱化：
 
-1. `app/infra/admission.py` — PG 持久化排队 + 优先级调度（deepagents 无）。
-2. `app/infra/coordinator.py` — 会话级并发协调（deepagents 无）。
+1. `app/infra/admission.py` — PG 持久化排队 + 优先级调度（agent_federation 无）。
+2. `app/infra/coordinator.py` — 会话级并发协调（agent_federation 无）。
 3. `app/infra/revert.py` + `RevertHandler` — 会话回退。
-4. `app/main.py` PG `AsyncPostgresSaver` checkpoint（deepagents 仅内存/sqlite）。
-5. `agent_core.sql.guard` + 连接级只读**双保险**（sqlglot；deepagents 用较弱 sqlparse）。
-6. `app/memory/longterm.py` pgvector 长期记忆（deepagents 无）。
-7. `app/api/routes.py` SSE 事件映射（deepagents 用 WS，不兼容）。
-8. `deepagents/agent/async_subagents.py` 联邦远程委派治理（重试/429/探活）—— 反向把 A 本地能力提升为远程 subagent 成本过高，不做。
+4. `app/main.py` PG `AsyncPostgresSaver` checkpoint（agent_federation 仅内存/sqlite）。
+5. `agent_core.sql.guard` + 连接级只读**双保险**（sqlglot；agent_federation 用较弱 sqlparse）。
+6. `app/memory/longterm.py` pgvector 长期记忆（agent_federation 无）。
+7. `app/api/routes.py` SSE 事件映射（agent_federation 用 WS，不兼容）。
+8. `agent_federation/agent/async_subagents.py` 联邦远程委派治理（重试/429/探活）—— 反向把 A 本地能力提升为远程 subagent 成本过高，不做。
 
 ## 4. 分阶段实施（每阶段独立可测，门禁 = `make test` + `make eval`）
 
@@ -137,4 +137,4 @@
 
 ---
 
-*生成依据：本轮对 `app/agent/graph.py`、`app/subagents/*`、`deepagents/agent/main_agent.py`、`deepagents/agent/async_subagents.py`、`deepagents/tools/sql_validation.py` 等的双轨代码调研 + `docs/architecture-boundary-app-vs-deepagents.md`。本规划已按独立源码审核（B-1/M-1~M-5/S-1~S-5）修订，P4.1~P4.3 已实施完成。*
+*生成依据：本轮对 `app/agent/graph.py`、`app/subagents/*`、`agent_federation/agent/main_agent.py`、`agent_federation/agent/async_subagents.py`、`agent_federation/tools/sql_validation.py` 等的双轨代码调研 + `docs/architecture-boundary-app-vs-agent-federation.md`。本规划已按独立源码审核（B-1/M-1~M-5/S-1~S-5）修订，P4.1~P4.3 已实施完成。*

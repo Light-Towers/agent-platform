@@ -45,11 +45,11 @@
 
 ## 三、技术栈选型（结合既有已验证资产）
 
-复用 deepagents 生产化改造（Issue #120）已验证的选型，不另起炉灶：
+复用 agent_federation 生产化改造（Issue #120）已验证的选型，不另起炉灶：
 
 | 层 | 选型 | 理由 |
 |----|------|------|
-| Agent 编排 | LangGraph 主管图 + deepagents 中间件模式借鉴 | 生产级状态持久化事实标准；图显式可调试 |
+| Agent 编排 | LangGraph 主管图 + `deepagents` PyPI 中间件模式借鉴 | 生产级状态持久化事实标准；图显式可调试 |
 | 结构化契约 | Pydantic v2（工具输入输出 / API schema） | 与 FastAPI 同生态，类型安全防幻觉 |
 | API 层 | FastAPI（HTTP + SSE 流式） | 现有子项目全部在用，统一收敛 |
 | 长期记忆/会话 | PostgreSQL + pgvector + langgraph-checkpoint-postgres（embedding：bge-small-zh） | 一个 PG 承载 checkpoint、语义缓存、长期记忆、RAG 分块、SQL 训练数据 |

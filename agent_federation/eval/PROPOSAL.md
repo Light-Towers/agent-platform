@@ -192,7 +192,7 @@ def score_rubric(answer, acceptance_points):
 
 - 本地 / 定时手动跑（`python eval/run-eval.py --limit 20`）。
 - golden 增量进仓库（`eval/golden.jsonl` 受版本控制）。
-- 结果 JSONL 落盘但不进仓库——**需在 `deepagents/.gitignore` 追加 `eval/results/`**（当前 `.gitignore` 未配此条，仅有 `output/` / `updated/` 等）。
+- 结果 JSONL 落盘但不进仓库——**需在 `agent_federation/.gitignore` 追加 `eval/results/`**（当前 `.gitignore` 未配此条，仅有 `output/` / `updated/` 等）。
 - 路由错误样本回流到 prompt 修改（`prompt/prompts.yml`），形成「评测 → 发现路由偏差 → 改 prompt → 再评测」闭环。
 
 ## 6. 与代码现状的映射

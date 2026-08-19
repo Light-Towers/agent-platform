@@ -21,7 +21,7 @@
 
 调用方：`app/api/routes.py:106-114`（查询前 `cache_lookup`，命中直接 SSE 返回 `cache_hit`；流式结束后 `cache_store` 异步写入）
 
-### 实现二：`deepagents/agent/cache/`（4 文件 ~600 行，Valkey + HNSW）
+### 实现二：`agent_federation/agent/cache/`（4 文件 ~600 行，Valkey + HNSW）
 
 | 维度 | 内容 |
 |------|------|
@@ -38,15 +38,15 @@
 | 写入 | `set_async` fire-and-forget |
 | 开关默认 | `CACHE_ENABLED=false` |
 
-调用方：`deepagents/agent/main_agent.py:192-200`（查询）、`290-296`（异步写入）
+调用方：`agent_federation/agent/main_agent.py:192-200`（查询）、`290-296`（异步写入）
 
 ### 关键不一致点
 
-1. **阈值方向相反**：app 用距离（0.05，越小越严），deepagents 用相似度（0.92，越大越严）。转换：`similarity = 1 - distance`
-2. **Embedding 模型名义相同但实际不同**：app 走远端 API（或 mock），deepagents 走本地 sentence-transformers，**向量空间可能不一致**
-3. **缓存键策略**：app 用明文小写（无防脏命中），deepagents 用 sha256（含 kb_versions/tenant/gray 防脏命中）
+1. **阈值方向相反**：app 用距离（0.05，越小越严），agent_federation 用相似度（0.92，越大越严）。转换：`similarity = 1 - distance`
+2. **Embedding 模型名义相同但实际不同**：app 走远端 API（或 mock），agent_federation 走本地 sentence-transformers，**向量空间可能不一致**
+3. **缓存键策略**：app 用明文小写（无防脏命中），agent_federation 用 sha256（含 kb_versions/tenant/gray 防脏命中）
 4. **app 无 TTL** 是显著缺陷
-5. **配置来源不同**：app 用 pydantic Settings，deepagents 用 dataclass + os.getenv
+5. **配置来源不同**：app 用 pydantic Settings，agent_federation 用 dataclass + os.getenv
 
 ---
 
@@ -62,9 +62,9 @@ agent_core/cache/
 ```
 
 - `app/infra/cache.py` → `PgSemanticCache(BaseSemanticCache)`
-- `deepagents/agent/cache/` → `ValkeySemanticCache(BaseSemanticCache)`
+- `agent_federation/agent/cache/` → `ValkeySemanticCache(BaseSemanticCache)`
 
-**优点**：风险最低，保留各后端独特优势（app 零依赖 vs deepagents 高性能）
+**优点**：风险最低，保留各后端独特优势（app 零依赖 vs agent_federation 高性能）
 **缺点**：不消除后端实现代码，只消除抽象层重复
 
 ### 方案 B：统一到单一实现，可插拔后端
@@ -93,9 +93,9 @@ agent_core/cache/
 ```
 
 - 共享：接口定义、统计逻辑、缓存键构建、空值缓存抽象
-- 各保留：PgSemanticCache（app）、ValkeySemanticCache（deepagents）
+- 各保留：PgSemanticCache（app）、ValkeySemanticCache（agent_federation）
 - app 的 `cache_lookup`/`cache_store` 改为 `PgSemanticCache` 类方法
-- deepagents 的 `SemanticCache` 改为 `ValkeySemanticCache(BaseSemanticCache)`
+- agent_federation 的 `SemanticCache` 改为 `ValkeySemanticCache(BaseSemanticCache)`
 
 **优点**：消除抽象层重复（~80 行），保留后端灵活性，风险可控
 **缺点**：后端实现仍各自维护（但后端代码本就不可复用 — SQL ≠ Valkey 命令）
@@ -198,7 +198,7 @@ class BaseNullCache(ABC):
 - 加入 `CacheStats` 统计
 - `app/api/routes.py` 调用方改为 `PgSemanticCache.get/set`
 
-### Step 4: `deepagents/agent/cache/` → `ValkeySemanticCache(BaseSemanticCache)`
+### Step 4: `agent_federation/agent/cache/` → `ValkeySemanticCache(BaseSemanticCache)`
 
 - `SemanticCache` 类改名为 `ValkeySemanticCache`，继承 `BaseSemanticCache`
 - `_build_cache_key` 改为调用 `agent_core.cache.base.build_cache_key`
@@ -209,14 +209,14 @@ class BaseNullCache(ABC):
 ### Step 5: 配置统一
 
 - app 的 `cache_enabled`/`cache_threshold` 保留在 `app/config.py`（PostgreSQL 特有）
-- deepagents 的 `CacheConfig` 保留（Valkey 特有 TTL/索引配置）
+- agent_federation 的 `CacheConfig` 保留（Valkey 特有 TTL/索引配置）
 - 共享配置（如 `cache_enabled`）已在各自 Settings 中，无需额外提取
 
 ---
 
 ## 风险与注意事项
 
-1. **向量空间不一致**：app 和 deepagents 用不同 embedding 模型，统一接口后**不可跨后端共享缓存数据**（各自缓存各自命中，这是现有行为，不改变）
+1. **向量空间不一致**：app 和 agent_federation 用不同 embedding 模型，统一接口后**不可跨后端共享缓存数据**（各自缓存各自命中，这是现有行为，不改变）
 2. **阈值方向**：`BaseSemanticCache` 接口不规定阈值方向，各后端自行解释（距离 vs 相似度）
 3. **向后兼容**：app 的 `cache_lookup`/`cache_store` 模块级函数保留为 `PgSemanticCache` 的静态方法别名，避免破坏外部调用
 4. **agent_core 依赖**：`base.py` 仅依赖 stdlib（abc/hashlib/json/time），不引入 psycopg/valkey
@@ -232,7 +232,7 @@ class BaseNullCache(ABC):
 | `agent-core/tests/test_cache_base.py` | 新增 | ~40 |
 | `app/infra/cache.py` | 改写 | ~80（66→80） |
 | `app/api/routes.py` | 小改 | ~5 行 |
-| `deepagents/agent/cache/semantic_cache.py` | 改写 | ~170（176→170） |
-| `deepagents/agent/cache/layers.py` | 小改 | ~5 行 |
-| `deepagents/agent/main_agent.py` | 小改 | ~3 行 |
+| `agent_federation/agent/cache/semantic_cache.py` | 改写 | ~170（176→170） |
+| `agent_federation/agent/cache/layers.py` | 小改 | ~5 行 |
+| `agent_federation/agent/main_agent.py` | 小改 | ~3 行 |
 | **总计** | | ~380 行变更 |

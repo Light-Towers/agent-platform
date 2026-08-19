@@ -135,10 +135,10 @@ def _build_middleware():
 
     if os.getenv("GUARD_ENABLED", "false").lower() == "true":
         try:
-            from deepagents.gateway.guard_middleware import GuardMiddleware
+            from agent_federation.gateway.guard_middleware import GuardMiddleware
 
             middleware.append(GuardMiddleware())
-            logger.info("GuardMiddleware 已启用（输入护栏挂入 deepagents 栈）")
+            logger.info("GuardMiddleware 已启用（输入护栏挂入 agent_federation 栈）")
         except Exception as e:
             logger.warning("GuardMiddleware 启用失败: %s", e)
 
@@ -370,7 +370,7 @@ project_root_path = Path(__file__).parents[1].resolve()
 @langfuse_observe(name="agent.run", as_type="span")
 async def run_deep_agent(task_query, workspace_id):
     # 隔离策略（与全局一致）：统一以 workspace_id 作为类型化记忆隔离主键。
-    # deepagents 单进程单池，一个 thread_id 即代表一个 workspace 工作空间，
+    # agent_federation 单进程单池，一个 thread_id 即代表一个 workspace 工作空间，
     # 调用方（api/server、eval）传入的即该 workspace 的稳定标识。
     with start_span("agent.run", attrs={"workspace_id": workspace_id, "query_len": len(task_query)}):
         logger.info("开始执行 main_agent workspace_id=%s", workspace_id)

@@ -11,13 +11,13 @@
 
 | 能力 | 位置 | 状态 |
 |------|------|------|
-| 原始向量记忆（`recall_memories` / `remember_memory`） | `agent_core.memory.semantic`（内核，零依赖） | 已是单一真相源，deepagents 已接线（TB-10, PR #4） |
-| 类型化读写（`recall_typed` / `remember_fact`） | `app/memory/memory_backend.py`（app 专有层） | 已落地（优化 H），但仅 app 可用，deepagents 无类型路径 |
+| 原始向量记忆（`recall_memories` / `remember_memory`） | `agent_core.memory.semantic`（内核，零依赖） | 已是单一真相源，agent_federation 已接线（TB-10, PR #4） |
+| 类型化读写（`recall_typed` / `remember_fact`） | `app/memory/memory_backend.py`（app 专有层） | 已落地（优化 H），但仅 app 可用，agent_federation 无类型路径 |
 | 分层加权融合 + 时间衰减 | `app/memory/memory_backend.py::recall_typed` | 已落地（优化 H），仅 app 可用 |
 | 事实抽取（`extract_memory_facts`，LLM 结构化） | `app/memory/longterm.py` | 已落地，仅 app 可用 |
 | 巩固 / 遗忘（`consolidate_memories` / `forget_memory`） | `app/memory/memory_backend.py` | 已落地完整 SQL（优化 H），仅 app 可用 |
 
-> 修订注（SP-3）：首版称 consolidate/forget「部分未完全落地」已过时——核实 `memory_backend.py:158` / `:181` 已实现完整 SQL，且与优化 H 已接线。修正为「已落地但仅 app 可用，deepagents 无类型路径」。
+> 修订注（SP-3）：首版称 consolidate/forget「部分未完全落地」已过时——核实 `memory_backend.py:158` / `:181` 已实现完整 SQL，且与优化 H 已接线。修正为「已落地但仅 app 可用，agent_federation 无类型路径」。
 
 ### 现状关键技术事实（修订 v2 补充，回应 SP-1 / G2）
 
@@ -67,16 +67,16 @@
    - `SEMANTIC_MEMORY_TYPED`（默认 `false`）：仅当 `true` 且 `SEMANTIC_MEMORY_ENABLED=true` 时启用类型路径。
    - 调用方经 `typed_memory_enabled()` 判定。关闭时：
      - app re-export 层**继续走自身 psycopg 池的 `recall_typed`/原始逻辑**（G3 修正：不切内核 asyncpg/Milvus 自建池，连接来源不变，事务边界不变）；
-     - deepagents 回退到 `recall_memories`/`remember_memory`（已接线的 PR #4 路径，零行为变更）。
+     - agent_federation 回退到 `recall_memories`/`remember_memory`（已接线的 PR #4 路径，零行为变更）。
 
-6. **抽取阶段不下沉**：`extract_memory_facts`（LLM 抽取）**留在宿主层**（app / deepagents 各自调用自己的 LLM 客户端），内核只接收已抽取的结构化 `TypedMemory`。原因：抽取粒度因宿主而异（app 单轮 Q-A vs DeepAgent 长程多步），且依赖 LLM 客户端（违反内核零依赖）。
+6. **抽取阶段不下沉**：`extract_memory_facts`（LLM 抽取）**留在宿主层**（app / agent_federation 各自调用自己的 LLM 客户端），内核只接收已抽取的结构化 `TypedMemory`。原因：抽取粒度因宿主而异（app 单轮 Q-A vs DeepAgent 长程多步），且依赖 LLM 客户端（违反内核零依赖）。
 
 ### 护栏合规（§3，v2 明确）
 
 - `agent_core.memory.typed` 核心逻辑仅依赖 stdlib（`@dataclass` + `datetime`），**不引入 pydantic**。
 - **驱动依赖归属（二次评审 #1 修正）**：`vector_backend.py` 只用 **asyncpg**（`pool.acquire()` + `$N` 占位符，`vector_backend.py:301-313`），**不碰 psycopg**；psycopg 仅经 `get_checkpointer`（`memory/__init__.py:48`）使用，与 vector/typed 下沉无关。故内核 typed 的 pg 路径：**asyncpg 经内核现有 `vector_backend` 间接使用（可选 extra + 懒加载）**；若采用「接收宿主 psycopg 池」策略（驱动策略 4），则 psycopg 由宿主提供，内核不新增 psycopg 硬依赖。两种策略下内核均**不新增硬依赖**。
 - LLM 抽取不进内核，内核不感知任何 LLM 客户端。
-- 向后兼容：`semantic.py` 现有 5 个公开符号（`semantic_memory_enabled` / `get_default_backend` / `get_semantic_memory` / `recall_memories` / `remember_memory`）签名不变，调用方（含 PR #4 已接线的 deepagents）零改动。
+- 向后兼容：`semantic.py` 现有 5 个公开符号（`semantic_memory_enabled` / `get_default_backend` / `get_semantic_memory` / `recall_memories` / `remember_memory`）签名不变，调用方（含 PR #4 已接线的 agent_federation）零改动。
 
 ### 返回类型与 re-export 投影（SP-4 澄清）
 
@@ -84,23 +84,23 @@
 
 ### 迁移路径（两阶段，独立 PR）
 
-- **阶段 1（本 ADR 落地）**：内核新增 `typed.py`（含 `vector_backend.py` schema 扩展）+ app `memory_backend.py` 改为**薄适配层** re-export 内核（同优化 F 的 re-export 手法），适配层做 `.content` 投影；app 既有测试不变；deepagents 可选接入 `recall_typed`（不强制）。
-- **阶段 2（后续）**：deepagents 在 `run_deep_agent` 接入 `recall_typed`/`remember_typed`，实现与 app 共用类型记忆；统一 `memories` 表契约到内核定义并下发迁移脚本。
+- **阶段 1（本 ADR 落地）**：内核新增 `typed.py`（含 `vector_backend.py` schema 扩展）+ app `memory_backend.py` 改为**薄适配层** re-export 内核（同优化 F 的 re-export 手法），适配层做 `.content` 投影；app 既有测试不变；agent_federation 可选接入 `recall_typed`（不强制）。
+- **阶段 2（后续）**：agent_federation 在 `run_deep_agent` 接入 `recall_typed`/`remember_typed`，实现与 app 共用类型记忆；统一 `memories` 表契约到内核定义并下发迁移脚本。
 
 ## 替代方案
 
 1. **直接搬 app `memory_backend.py` 到内核**（已否决）：违反 §3 护栏（内核契约变更 + 双份 schema 风险）、抽取粒度错配、搬的是半成品（首版误述，实为已落地但仅 app 可用）。
-2. **deepagents 复制 app 代码**（已否决）：双份真相源，合并冲突风险，违背单一真相源原则。
-3. **维持现状（app 专有，deepagents 无类型）**：可接受为临时态，但 deepagents 永远无法获得类型增强，且 app 类型逻辑无法被内核测试门禁覆盖。
+2. **agent_federation 复制 app 代码**（已否决）：双份真相源，合并冲突风险，违背单一真相源原则。
+3. **维持现状（app 专有，agent_federation 无类型）**：可接受为临时态，但 agent_federation 永远无法获得类型增强，且 app 类型逻辑无法被内核测试门禁覆盖。
 
 ## 后果
 
 - **正向**：
-  - 类型化记忆成为跨子包单一真相源，app + deepagents 共用内核实现，消除复制；
+  - 类型化记忆成为跨子包单一真相源，app + agent_federation 共用内核实现，消除复制；
   - 内核可加框架无关单测（加权融合 / 衰减 / 遗忘），CI 门禁可覆盖（当前 app 类型逻辑无独立单测）；
-  - deepagents 长期记忆获得类型增强路径，且与 app 同契约。
+  - agent_federation 长期记忆获得类型增强路径，且与 app 同契约。
 - **负向 / 风险**：
-  - 内核契约变更：`vector_backend.py` 的 `memories` 表新增 `memory_type`/`importance`/`created_at` 列（pg 模式）+ Milvus 集合标量字段；各子包需迁移（app 幂等 ALTER，deepagents/kefu/wenda 若启用需建表）。
+  - 内核契约变更：`vector_backend.py` 的 `memories` 表新增 `memory_type`/`importance`/`created_at` 列（pg 模式）+ Milvus 集合标量字段；各子包需迁移（app 幂等 ALTER，agent_federation/kefu/wenda 若启用需建表）。
   - 与现有双驱动（ADR-0003）叠加，pg 模式 typed 路径复用宿主 psycopg 池（不新增池），Milvus 模式降级无类型。
   - **驱动切换移植成本（二次评审 #2）**：app 类型路径用 psycopg 池（`%s` 占位符 + `pool.connection()`，`memory_backend.py:142-155`），内核 `vector_backend` 用 asyncpg 池（`$N` 占位符 + `pool.acquire()`，`vector_backend.py:301-313`）。若采用「接收宿主 psycopg 池」策略，内核 `typed.py` 需**同时改写**：① 占位符风格 `$N`→`%s`；② 池 API `acquire()`→`connection()`；③ 解除对 `app.infra.db.vector_search` 的依赖（改为内核内联 SQL）。若采用「内核 asyncpg 自建池」策略，则 app 适配层需反向改写。移植工作量需在阶段 1 估算。
   - 加权融合公式（type_weight / decay 系数）固化内核事实，宿主可经 `weights` 入参覆盖（见待决策项 2）。
@@ -110,7 +110,7 @@
 
 - 内核单测（无 DB/无 LLM）：`recall_typed` 加权排序正确性、`time_decay` 单调性、`consolidate` 遗忘阈值、`forget` 删除；
 - 回归：app 现有 `test_longterm_h.py` / `memory_backend` 调用经 re-export 层（含 `.content` 投影）不变，agent-core 全量 + app eval（`python -m eval.run_eval`）基线不降；
-- 端到端：deepagents 接入后，多轮对话类型记忆召回正确（比对 PR #4 的 `test_semantic_memory.py` 扩展）。
+- 端到端：agent_federation 接入后，多轮对话类型记忆召回正确（比对 PR #4 的 `test_semantic_memory.py` 扩展）。
 
 ## 待决策项（评审时需拍板，v2 收敛）
 
@@ -140,4 +140,4 @@
 - **#4 公开符号（已修正，v2 行 59 已列 5 个）**：评审引首版行号，v2 已补 `get_semantic_memory`；本段显式列全 5 个符号。
 - **反驳：二次评审沿用首版「consolidate/forget 部分未完全落地 ✅」**：经核实 `memory_backend.py:158`/`181` 为**完整 SQL 实现**（与首版 SP-3 已被推翻一致），该 ✅ 系评审未重新核实代码、照抄首版过时判断。维持 v2「已落地但仅 app 可用」结论，不予采纳。
 
-**二次评审已核实准确的声明（与 v2 一致）**：`extract_memory_facts` 位于 `longterm.py:42` ✅；deepagents `semantic_memory.py` 纯 re-export ✅；`_MEMORY_TYPES` 三值与 `MemoryType` 对齐 ✅；加权公式 `type_weight×importance×time_decay` 一致 ✅；`type_weight 1.2/1.1/1.0` 一致 ✅。
+**二次评审已核实准确的声明（与 v2 一致）**：`extract_memory_facts` 位于 `longterm.py:42` ✅；agent_federation `semantic_memory.py` 纯 re-export ✅；`_MEMORY_TYPES` 三值与 `MemoryType` 对齐 ✅；加权公式 `type_weight×importance×time_decay` 一致 ✅；`type_weight 1.2/1.1/1.0` 一致 ✅。

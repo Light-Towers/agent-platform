@@ -187,7 +187,7 @@ async def main_async(args: argparse.Namespace) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="全项目评测驱动器")
     parser.add_argument("--golden", default="golden.jsonl", help="评测集文件名")
-    parser.add_argument("--project", default="", help="只跑指定项目（deepagents/wenda/zhiku/kefu）")
+    parser.add_argument("--project", default="", help="只跑指定项目（agent_federation/wenda/zhiku/kefu）")
     parser.add_argument("--limit", type=int, default=0, help="每项目限制题数（0=全部）")
     parser.add_argument("--no-judge", action="store_true", help="跳过 rubric judge")
     parser.add_argument("--no-cleanup", action="store_true", help="不清理评测 session 目录")

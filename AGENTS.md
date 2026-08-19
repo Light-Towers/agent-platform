@@ -1,7 +1,7 @@
 # agent-platform — Agent 上下文文件
 
-> 统一生产级 Agent 平台，本仓库为 **monorepo**（9 个独立 `pyproject.toml` 工程：根 + app + deepagents + agent-core + shared-schemas + kefu-service + wenda-data-agent + zhanggui-zhiku + dialogue-framework）。
-> 根 `app/` 是一套单进程 Supervisor 平台；`deepagents/` 是并行的联邦网关编排系统（两者非上下级）。
+> 统一生产级 Agent 平台，本仓库为 **monorepo**（9 个独立 `pyproject.toml` 工程：根 + app + agent_federation + agent-core + shared-schemas + kefu-service + wenda-data-agent + zhanggui-zhiku + dialogue-framework）。
+> 根 `app/` 是一套单进程 Supervisor 平台；`agent_federation/` 是并行的联邦网关编排系统（两者非上下级）。
 > 各包经 `agent-core` / `shared-schemas` 共享内核与契约。
 > 详细人类阅读指南见 `README.md`（含完整目录结构），本文件面向 AI agent，仅列要点。
 
@@ -10,7 +10,7 @@
 | 目录 | 定位 | 入口 |
 |------|------|------|
 | `app/` | 单进程 Supervisor 平台（统一 Agent 平台，本 README 主描述对象） | `app/main.py` |
-| `deepagents/` | 联邦网关 + 3 子服务编排中枢（与 `app/` 并行，详见 `deepagents/README.md`） | `python -m api.server` |
+| `agent_federation/` | 联邦网关 + 3 子服务编排中枢（与 `app/` 并行，详见 `agent_federation/README.md`；原名 `deepagents/`，2026-08-19 为消除与 PyPI 依赖包 `deepagents` 同名冲突而改名） | `python -m api.server` |
 | `agent-core/` | 零依赖运行时内核：tracing / guardrails / sql 守卫 / llm / memory | — |
 | `shared-schemas/` | 联邦 4 服务共享 Pydantic 契约（QueryResponse 等） | — |
 | `kefu-service/` | kefu 迁移版（deepagents + LangGraph），已实现且 CI 通过，已接入联邦网关（Agent Protocol 兼容 `/invoke`，返回 `QueryResponse`；`KEFU_USE_ADAPTER=false` 默认直连） | — |
@@ -25,7 +25,7 @@
 
 ```bash
 pip install -e ".[dev]"          # 安装
-make ci                           # CI 唯一门禁：根 pytest（收集 tests/ + agent-core/tests + deepagents/tests/unit + kefu-service/tests）
+make ci                           # CI 唯一门禁：根 pytest（收集 tests/ + agent-core/tests + agent_federation/tests/unit + kefu-service/tests）
 python -m eval.run_eval           # 评测门禁
 DATABASE_URL= uvicorn app.main:app --port 8000  # 零依赖冒烟
 ```

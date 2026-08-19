@@ -59,10 +59,10 @@ testpaths = [
     "tests",
     "agent-core/tests",
 ]
-# 注：deepagents/tests/unit 与 kefu-service/tests 经 Makefile `test` 目标以
+# 注：agent_federation/tests/unit 与 kefu-service/tests 经 Makefile `test` 目标以
 # 独立 pytest session 纳入 CI（避免与根 tests/ 的 conftest 插件名冲突）。
-# test_tool_registry 为预存导入冲突（本地 deepagents/ 目录遮蔽 PyPI deepagents 包），
-# 已在对应 session 中 --ignore，待独立修复后再放开。
+# 本地目录原名 deepagents/，因与 PyPI 依赖包 deepagents 同名，已于 2026-08-19
+# 重命名为 agent_federation/ 彻底消除歧义。
 addopts = "--import-mode=importlib"
 
 [tool.ruff]
@@ -74,7 +74,7 @@ target-version = "py311"
 select = ["E4", "E7", "E9", "F", "I"]
 # 以下为既有风格/惯例类告警，非逻辑阻断；收敛以让 CI 门禁（ruff check .）转绿。
 # B008: FastAPI 在依赖注入（Depends(...)）中于函数默认参数位置调用是官方推荐写法，非真实 bug。
-# E402: 模块级 import 不在顶部（deepagents 多因 load_dotenv()/sys.path 后再 import，deliberate）。
+# E402: 模块级 import 不在顶部（agent_federation 多因 load_dotenv()/sys.path 后再 import，deliberate）。
 # E731: lambda 赋值（风格）。BLE001/S110: 盲捕获（既有合理降级）。B017: pytest.raises(Exception)。
 # PERF102: .items()→.values()。RUF059: 未使用解包变量。
 ignore = ["B008", "E402", "E731", "BLE001", "S110", "B017", "PERF102", "RUF059"]
@@ -88,7 +88,7 @@ flashrag-dev = { git = "https://github.com/RUC-NLPIR/FlashRAG.git" }
 members = [
     "agent-core",
     "shared-schemas",
-    "deepagents",
+    "agent_federation",
     "kefu-service",
     "wenda-data-agent",
     "zhanggui-zhiku",
