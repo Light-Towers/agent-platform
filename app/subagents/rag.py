@@ -1,7 +1,8 @@
 """RAG 子能力：混合检索证据收集。"""
 
-from app.config import get_settings
 from agent_runtime.db import get_pool
+
+from app.config import get_settings
 from app.rag.store import retrieve_chunks
 
 

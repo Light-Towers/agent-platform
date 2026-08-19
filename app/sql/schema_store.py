@@ -5,6 +5,7 @@
 """
 
 from agent_runtime.db import vector_search
+
 from app.rag.embed import embed_query, embed_texts
 
 

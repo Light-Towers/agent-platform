@@ -6,6 +6,7 @@ agent_federation 多智能体评测驱动器（MVP）。
 import argparse
 import asyncio
 import json
+import os
 import shutil
 import sys
 from datetime import datetime
@@ -246,6 +247,27 @@ async def run_evaluation(records: list[dict], no_judge: bool = False, cleanup: b
     return results
 
 
+def _require_real_llm_key_for_baseline() -> None:
+    """基线生成依赖真实 LLM 实跑；无 key 或占位桩会产出垃圾基线，提前拦截。
+
+    当前开发环境无真实 key（仅 test-key 占位），无法生成 ``fed_latest.jsonl`` 真实基线。
+    需在有 key 环境执行：
+        uv run python -m agent_federation.eval.run_eval --baseline eval/fed_latest.jsonl
+    """
+    # 已知测试/占位桩值（tests 用 setdefault 注入，避免误判为真实 key）
+    _PLACEHOLDER_KEYS = {"", "test-key", "x", "sk-test", "dummy", "none"}
+    key = (os.getenv("OPENAI_API_KEY") or "").strip().lower()
+    if key in _PLACEHOLDER_KEYS:
+        print(
+            "错误: --baseline 需要真实 LLM 实跑，但 OPENAI_API_KEY 缺失或为占位值。\n"
+            "当前开发环境无真实 key，无法生成有意义的 fed_latest.jsonl 基线。\n"
+            "请在配置了 OPENAI_API_KEY/OPENAI_BASE_URL 的环境执行：\n"
+            "    uv run python -m agent_federation.eval.run_eval --baseline eval/fed_latest.jsonl\n"
+            "（R1 漂移门禁的比对逻辑本身无 LLM 依赖，已通过 eval/test_eval_baseline.py 覆盖。）"
+        )
+        sys.exit(2)
+
+
 def main():
     parser = argparse.ArgumentParser(description="agent_federation 评测驱动器")
     parser.add_argument("--golden", default=str(PROJECT_ROOT / "eval" / "golden.jsonl"),
@@ -260,6 +282,9 @@ def main():
     parser.add_argument("--fail-below", type=float, default=0.0,
                         help="compare 模式下，漂移题占比或 exact 均值低于该值时退出码非零（默认 0=仅报告）")
     args = parser.parse_args()
+
+    if args.baseline:
+        _require_real_llm_key_for_baseline()
 
     results = asyncio.run(run_eval(
         golden_path=Path(args.golden),

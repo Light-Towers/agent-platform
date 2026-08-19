@@ -4,18 +4,67 @@
 使联邦 deep_agent 执行符合统一 Planner 协议：``plan(ctx) -> Plan`` + ``execute(plan, runtime) -> StreamEvent``。
 
 边界：``run_deep_agent`` 的 guard/intent/cache/memory/monitor 副作用链路保持不动，
-本类只做协议适配，供 ``PLANNER=agentic`` 时统一消费（Phase 3 统一 SSE 出口时再整合全链路）。
+本类只做协议适配，供 ``PLANNER=agentic`` 时统一消费。``execute()`` 已把
+``_execute_agent_core`` 运行期的 monitor 事件（assistant_call/tool_start/...）桥接为
+``evidence`` StreamEvent，使 WS 流更丰富（route -> evidence* -> answer）。
 """
 
 from __future__ import annotations
 
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from typing import Any
 
 from agent_runtime.planner.protocol import Plan, Planner, PlannerContext, PlannerRuntime, StreamEvent
 
 logger = logging.getLogger(__name__)
+
+# monitor 事件 -> evidence StreamEvent 的桥接：让 WS 流携带运行时证据/记忆上下文。
+# 仅桥接有信息量的事件类型，避免噪音（如纯 heartbeat）。
+_MONITOR_BRIDGE_TYPES = (
+    "assistant_call",   # 子 agent 调用
+    "tool_start",       # 工具/能力调用
+    "tool_outcome",     # 工具结果
+    "session_created",  # 工作目录/记忆上下文建立
+    "task_result",      # 子任务完成
+    "circuit_state_change",  # 熔断器状态（可观测性）
+    "error",            # 执行错误
+)
+
+
+def _monitor_event_to_stream_event(event: dict[str, Any]) -> StreamEvent | None:
+    """把 monitor 事件负载桥接为 ``evidence`` StreamEvent。
+
+    保持只读转换：monitor 事件原文（event/message/data）原样透传，不丢信息；
+    无法识别的类型返回 ``None``（调用方跳过）。
+    """
+    event_type = event.get("event")
+    if event_type not in _MONITOR_BRIDGE_TYPES:
+        return None
+    return StreamEvent(
+        type="evidence",
+        payload={
+            "source": "federated_monitor",
+            "event": event_type,
+            "message": event.get("message", ""),
+            "data": event.get("data", {}),
+            "timestamp": event.get("timestamp"),
+        },
+    )
+
+
+def _subscribe_monitor(handler: Callable[[dict[str, Any]], None]) -> Callable[[], None]:
+    """临时订阅全部桥接事件类型，返回注销函数（并发安全：每个 execute 用自己的闭包+列表）。"""
+    from agent_core.monitor import monitor  # noqa: PLC0415
+
+    for t in _MONITOR_BRIDGE_TYPES:
+        monitor.on(t, handler)
+
+    def _unsub() -> None:
+        for t in _MONITOR_BRIDGE_TYPES:
+            monitor.off(t, handler)
+
+    return _unsub
 
 
 class AgenticPlanner(Planner):
@@ -39,13 +88,30 @@ class AgenticPlanner(Planner):
         workspace_id = plan.notes.get("workspace_id", "default")
 
         yield StreamEvent(type="route", payload={"capability": "agentic", "reason": plan.reason})
+
+        # 桥接 monitor 事件为 evidence StreamEvent，使 WS 流携带运行时证据/记忆上下文。
+        # _execute_agent_core 执行期间通过全局 monitor 发射 assistant_call/tool_start/...，
+        # 这里临时订阅并在 answer 前按序 yield，不改黑盒内部契约。
+        events: list[StreamEvent] = []
+
+        def _handle(ev: dict[str, Any]) -> None:
+            se = _monitor_event_to_stream_event(ev)
+            if se is not None:
+                events.append(se)
+
+        unsub = _subscribe_monitor(_handle)
         try:
             answer = await _execute_agent_core(question, workspace_id)
         except Exception as exc:  # noqa: BLE001
+            unsub()
             logger.warning("agentic 执行异常: %s", exc)
             yield StreamEvent(type="error", payload={"error": str(exc)})
             yield StreamEvent(type="answer", payload={"text": ""})
             return
+        unsub()
+
+        for se in events:
+            yield se
         yield StreamEvent(type="answer", payload={"text": answer})
 
     async def arun(

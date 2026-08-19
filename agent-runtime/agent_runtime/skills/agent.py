@@ -9,17 +9,17 @@ from __future__ import annotations
 
 from typing import Any
 
-from agent_runtime.capabilities.registry import Capability, CapabilityKind
+from agent_runtime.skills.registry import Skill, SkillKind
 
 
-def as_agent_capability(
+def as_agent_skill(
     subagent: dict,
     *,
     model: Any = None,
     timeout_ms: int | None = None,
     input_schema: dict | None = None,
     output_schema: dict | None = None,
-) -> Capability:
+) -> Skill:
     """把 subagent dict 包装为 agent 型能力。
 
     执行：每次调用创建独立 agent 实例并 invoke；kwargs 作为 agent 输入透传。
@@ -40,10 +40,10 @@ def as_agent_capability(
         )
         return await agent.ainvoke(kwargs)
 
-    return Capability(
+    return Skill(
         name=name,
         description=description,
-        kind=CapabilityKind.AGENT,
+        kind=SkillKind.AGENT,
         executor=execute,
         timeout_ms=timeout_ms,
         input_schema=input_schema,

@@ -1,4 +1,4 @@
-"""Planner 注册表：按 kind 注册/发现 Planner 实现（与 CapabilityRegistry 同构）。"""
+"""Planner 注册表：按 kind 注册/发现 Planner 实现（与 SkillRegistry 同构）。"""
 
 from __future__ import annotations
 

@@ -154,7 +154,7 @@ class DeterministicPlanner(Planner):
     async def _run_capability(
         self, plan: Plan, runtime: PlannerRuntime, workspace_id: str, question: str
     ) -> list[str]:
-        """按 Plan.route 经 CapabilityRegistry 执行能力，结果归一化为 evidence 列表。"""
+        """按 Plan.route 经 SkillRegistry 执行能力，结果归一化为 evidence 列表。"""
         if plan.route == "direct":
             return []
         if plan.route == "mcp":

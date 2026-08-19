@@ -16,10 +16,10 @@ from __future__ import annotations
 from functools import partial
 from typing import Any
 
-from agent_runtime.capabilities.dag import as_dag_capability
-from agent_runtime.capabilities.function import as_function_capability
-from agent_runtime.capabilities.registry import CapabilityRegistry
 from agent_runtime.mcp_client import MCPClientManager
+from agent_runtime.skills.dag import as_dag_skill
+from agent_runtime.skills.function import as_function_skill
+from agent_runtime.skills.registry import SkillRegistry
 
 from app.agent.state import AgentState
 from app.subagents.mcp import mcp_query
@@ -27,7 +27,7 @@ from app.subagents.rag import rag_query
 from app.subagents.search import search_web
 from app.subagents.sql_agent import sql_query
 
-_registry: CapabilityRegistry | None = None
+_registry: SkillRegistry | None = None
 
 # Skill 契约（Phase 1.5）：JSON Schema——供 Agent 工具描述生成与入参校验
 _QUERY_SCHEMA: dict[str, Any] = {
@@ -94,15 +94,15 @@ async def _run_general_qa(graph: Any, **kwargs: Any) -> str:
     return answer
 
 
-def build_registry(graph: Any | None = None) -> CapabilityRegistry:
+def build_registry(graph: Any | None = None) -> SkillRegistry:
     """构建 app 能力注册表（幂等；重复调用返回新实例，供测试隔离）。
 
     graph（可选）：LangGraph 静态图实例。注入时额外注册 ``general_qa`` Workflow Skill
     （Phase 3：graph.py 包装而非删除，供 Planner / Agent 组合调用）。
     """
-    registry = CapabilityRegistry()
+    registry = SkillRegistry()
     registry.register(
-        as_function_capability(
+        as_function_skill(
             "search",
             "联网搜索（Tavily）：返回证据字符串列表",
             search_web,
@@ -110,7 +110,7 @@ def build_registry(graph: Any | None = None) -> CapabilityRegistry:
         )
     )
     registry.register(
-        as_function_capability(
+        as_function_skill(
             "rag",
             "知识库混合检索：按 workspace 过滤，返回证据字符串列表",
             rag_query,
@@ -118,7 +118,7 @@ def build_registry(graph: Any | None = None) -> CapabilityRegistry:
         )
     )
     registry.register(
-        as_function_capability(
+        as_function_skill(
             "sql",
             "SQL 查询：text-to-SQL 管线，返回证据字符串列表",
             sql_query,
@@ -126,7 +126,7 @@ def build_registry(graph: Any | None = None) -> CapabilityRegistry:
         )
     )
     registry.register(
-        as_function_capability(
+        as_function_skill(
             "mcp",
             "MCP 工具调用：调用外部工具并归约为 evidence（依赖 state + manager）",
             _mcp_execute,
@@ -134,7 +134,7 @@ def build_registry(graph: Any | None = None) -> CapabilityRegistry:
     )
     if graph is not None:
         registry.register(
-            as_dag_capability(
+            as_dag_skill(
                 "general_qa",
                 "通用问答（Workflow Skill）：端到端 QA 流水线——输入护栏 → 路由 → "
                 "检索/搜索/SQL/MCP → 答案合成，返回最终回答字符串",
@@ -147,7 +147,7 @@ def build_registry(graph: Any | None = None) -> CapabilityRegistry:
     return registry
 
 
-def get_registry(graph: Any | None = None) -> CapabilityRegistry:
+def get_registry(graph: Any | None = None) -> SkillRegistry:
     """进程级单例注册表。
 
     graph 仅首次构建时生效（lifespan 装配 general_qa 时注入）；后续调用幂等返回同一实例。

@@ -8,10 +8,10 @@ from __future__ import annotations
 
 from typing import Any, Awaitable, Callable
 
-from agent_runtime.capabilities.registry import Capability, CapabilityKind
+from agent_runtime.skills.registry import Skill, SkillKind
 
 
-def as_remote_capability(
+def as_remote_skill(
     name: str,
     description: str,
     invoke: Callable[..., Awaitable[Any]],
@@ -19,16 +19,16 @@ def as_remote_capability(
     timeout_ms: int | None = None,
     input_schema: dict | None = None,
     output_schema: dict | None = None,
-) -> Capability:
+) -> Skill:
     """把远程子服务调用包装为 remote 型能力。"""
 
     async def execute(**kwargs: Any) -> Any:
         return await invoke(**kwargs)
 
-    return Capability(
+    return Skill(
         name=name,
         description=description,
-        kind=CapabilityKind.REMOTE,
+        kind=SkillKind.REMOTE,
         executor=execute,
         timeout_ms=timeout_ms,
         input_schema=input_schema,

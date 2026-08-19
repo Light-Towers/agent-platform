@@ -9,10 +9,10 @@ from __future__ import annotations
 
 from typing import Any, Awaitable, Callable
 
-from agent_runtime.capabilities.registry import Capability, CapabilityKind
+from agent_runtime.skills.registry import Skill, SkillKind
 
 
-def as_dag_capability(
+def as_dag_skill(
     name: str,
     description: str,
     run_dag: Callable[..., Awaitable[Any]],
@@ -20,20 +20,20 @@ def as_dag_capability(
     timeout_ms: int | None = None,
     input_schema: dict | None = None,
     output_schema: dict | None = None,
-) -> Capability:
+) -> Skill:
     """把静态 DAG 执行器包装为 workflow 型能力。
 
-    与 as_function_capability 同构，kind 为 WORKFLOW（语义区分：内部是编排而非单工具），
+    与 as_function_skill 同构，kind 为 WORKFLOW（语义区分：内部是编排而非单工具），
     供 Agent 组合调用（agentic 路径）或直接按 Skill 契约执行（deterministic 路径）。
     """
 
     async def execute(**kwargs: Any) -> Any:
         return await run_dag(**kwargs)
 
-    return Capability(
+    return Skill(
         name=name,
         description=description,
-        kind=CapabilityKind.WORKFLOW,
+        kind=SkillKind.WORKFLOW,
         executor=execute,
         timeout_ms=timeout_ms,
         input_schema=input_schema,

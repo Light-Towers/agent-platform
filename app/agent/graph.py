@@ -8,6 +8,8 @@ SSE 聚合、会话键、探活自递归等一串问题；这里用 LangGraph �
 import logging
 
 from agent_core.guardrails.input_guard import guard_input
+from agent_runtime.db import get_pool
+from agent_runtime.mcp_client import MCPClientManager
 from langchain_core.messages import AIMessage
 from langgraph.graph import END, START, StateGraph
 
@@ -15,10 +17,8 @@ from app.agent.compact import compact_messages, should_compact
 from app.agent.intent_bridge import l1_route_hint
 from app.agent.router import decide_route
 from app.agent.state import AgentState, _validate_state
-from app.config import get_settings
-from agent_runtime.db import get_pool
-from agent_runtime.mcp_client import MCPClientManager
 from app.capabilities import get_registry
+from app.config import get_settings
 from app.memory.longterm import extract_memory_facts, maybe_consolidate, recall, remember
 
 logger = logging.getLogger(__name__)
