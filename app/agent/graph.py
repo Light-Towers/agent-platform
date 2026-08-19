@@ -18,11 +18,8 @@ from app.agent.state import AgentState, _validate_state
 from app.config import get_settings
 from agent_runtime.db import get_pool
 from agent_runtime.mcp_client import MCPClientManager
+from app.capabilities import get_registry
 from app.memory.longterm import extract_memory_facts, maybe_consolidate, recall, remember
-from app.subagents.mcp import mcp_query
-from app.subagents.rag import rag_query
-from app.subagents.search import search_web
-from app.subagents.sql_agent import sql_query
 
 logger = logging.getLogger(__name__)
 
@@ -97,19 +94,19 @@ def build_graph(llm, checkpointer=None, mcp_manager: MCPClientManager | None = N
         }
 
     async def search_node(state: AgentState) -> dict:
-        return {"evidence": await search_web(state.sub_query)}
+        return {"evidence": await get_registry().execute("search", query=state.sub_query)}
 
     async def rag_node(state: AgentState) -> dict:
-        return {"evidence": await rag_query(state.sub_query, state.workspace_id)}
+        return {"evidence": await get_registry().execute("rag", query=state.sub_query, workspace_id=state.workspace_id)}
 
     async def sql_node(state: AgentState) -> dict:
-        return {"evidence": await sql_query(state.sub_query, llm=llm)}
+        return {"evidence": await get_registry().execute("sql", query=state.sub_query, llm=llm)}
 
     async def direct_node(state: AgentState) -> dict:
         return {"evidence": []}
 
     async def mcp_node(state: AgentState) -> dict:
-        return await mcp_query(state, mcp_manager)
+        return await get_registry().execute("mcp", state=state, mcp_manager=mcp_manager)
 
     async def synthesize_node(state: AgentState) -> dict:
         question = state.question
