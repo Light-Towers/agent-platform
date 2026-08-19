@@ -464,8 +464,16 @@ async def run_deep_agent(task_query, workspace_id):
             if os.getenv("CACHE_ENABLED", "false").lower() == "true"
             else ("", "", ""),
         )
+        # Plan-F Phase 3：联邦主链路经 Planner 协议 + PlannerRuntime 治理驱动（与 app /query 对称）。
+        # 保留 singleflight 缓存击穿防护（去重仍在「确定的 agent」之上生效）；
+        # AgenticPlanner.arun 套 skill_guard 组合治理（max_skill_depth/max_steps），
+        # 内部仍走 _execute_agent_core（guard/intent/cache/memory/monitor 副作用链零破坏）。
+        from agent_federation.planners import AgenticPlanner, get_planner_runtime
+
         _final_answer = await singleflight(
-            cache_key, _execute_agent_core, task_query, workspace_id, selected_agent,
+            cache_key,
+            AgenticPlanner().arun,
+            task_query, workspace_id, get_planner_runtime(), selected_agent,
         )
 
         # 统一收尾：监控上报 + 阶段2 记忆沉淀 + 语义缓存写入（无论是否经 singleflight 合并，
