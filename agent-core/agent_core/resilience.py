@@ -115,20 +115,25 @@ class CircuitBreaker:
         self,
         failure_threshold: int = 5,
         reset_timeout: float = 30.0,
+        max_half_open_probe: int = 1,
         clock: Callable[[], float] = time.monotonic,
         exceptions: "Iterable[Type[BaseException]] | Type[BaseException]" = Exception,
     ) -> None:
         if failure_threshold < 1:
             raise ValueError("failure_threshold 必须 >= 1")
-        if reset_timeout <= 0:
-            raise ValueError("reset_timeout 必须 > 0")
+        if max_half_open_probe < 1:
+            raise ValueError("max_half_open_probe 必须 >= 1")
         self._failure_threshold = failure_threshold
         self._reset_timeout = reset_timeout
+        self._max_half_open_probe = max_half_open_probe
         self._clock = clock
         self._exc_types = exceptions if isinstance(exceptions, tuple) else (exceptions,)
         self._state = self.CLOSED
         self._failures = 0
         self._opened_at: Optional[float] = None
+        # HALF_OPEN 期间在飞的探测请求数；超过上限的并发 probe 被拒绝，
+        # 否则 OPEN→HALF_OPEN 后所有并发请求都会成为 probe（审计 P1 #六）。
+        self._half_open_inflight = 0
 
     @property
     def state(self) -> str:
@@ -140,16 +145,34 @@ class CircuitBreaker:
                 self._state = self.HALF_OPEN
 
     def allow(self) -> bool:
-        """调用前查询：是否允许执行（OPEN 且冷却未到则拒绝）。"""
+        """调用前查询：是否允许执行（OPEN 且冷却未到则拒绝）。
+
+        HALF_OPEN 时限制并发探测数（max_half_open_probe）：已达到上限的
+        并发请求会被拒绝（视为仍 OPEN），避免 100 个并发请求同时成为 probe。
+        """
         self._maybe_transition()
-        return self._state != self.OPEN
+        if self._state == self.OPEN:
+            return False
+        if self._state == self.HALF_OPEN:
+            if self._half_open_inflight < self._max_half_open_probe:
+                self._half_open_inflight += 1
+                return True
+            return False
+        return True
+
+    def _end_half_open_probe(self) -> None:
+        if self._half_open_inflight > 0:
+            self._half_open_inflight -= 1
 
     def record_success(self) -> None:
+        if self._state == self.HALF_OPEN:
+            self._end_half_open_probe()
         self._failures = 0
         self._state = self.CLOSED
 
     def record_failure(self) -> None:
         if self._state == self.HALF_OPEN:
+            self._end_half_open_probe()
             self._state = self.OPEN
             self._opened_at = self._clock()
             return

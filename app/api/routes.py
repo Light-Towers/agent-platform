@@ -95,20 +95,54 @@ async def query(
     # Phase 2: 会话并发协调前置
     coordinator = getattr(request.app.state, "coordinator", None)
     coord_decision = None
+
+    # 统一生命周期清理（幂等）。覆盖所有退出路径：coordinator reject、cache hit、
+    # 正常完成、graph 异常、客户端断开、排队后拒绝。无论哪条路径都必须经过它，
+    # 否则 coordinator 槽位 / admission 容量会泄漏（审计 P0: #一 #二）。
+    # 用 _released / _marked 保证重复调用安全（e.g. _stream finally + 外部提前清理）。
+    _released = False
+    _marked = False
+
+    async def _cleanup() -> None:
+        nonlocal _released, _marked
+        if coordinator is not None and settings.coordination_enabled and not _released:
+            try:
+                # release 处理已 active 的请求；cancel 确保本请求若仍在队列中
+                # （排队中、尚未 active）也被清出，避免死请求被 promote 卡死会话
+                # （审计 P1 #四：coordinator queue cancellation）。
+                await coordinator.release(thread_id, request_id)
+                if hasattr(coordinator, "cancel"):
+                    await coordinator.cancel(thread_id, request_id)
+            finally:
+                _released = True
+        if admission_queue is not None and settings.admission_effective_enabled and not _marked:
+            try:
+                await admission_queue.mark_completed(request_id)
+            finally:
+                _marked = True
+
     if coordinator is not None and settings.coordination_enabled:
         coord_decision = await coordinator.acquire(thread_id, request_id)
         if coord_decision.decision_type == "reject":
+            # 统一清理：coordinator.acquire 已占用 active/queued 槽位，reject 必须
+            # 释放，否则该 session 的 coordination 容量永久少 1（P0: leak on reject）。
+            # admission 已在前面 enqueue 并可能 admitted，同样要 mark_completed。
+            await _cleanup()
             raise HTTPException(status_code=409, detail="CONCURRENCY_REJECTED")
 
     # Phase 2: OTel tracer
     otel_tracer = getattr(request.app.state, "otel_tracer", None)
 
-    # 语义缓存：命中直接返回
+    # 语义缓存：命中直接返回。命中是正常路径，但 coordinator.acquire 已占用槽位、
+    # admission 已可能 admitted —— 必须在返回前统一清理，否则同 session 后续请求
+    # 会永久排队（P0: cache-hit leak）。
     q_embedding: list[float] | None = None
     if settings.cache_enabled and pool is not None:
         q_embedding = await embed_query(req.query)
         cached = await semantic_cache.cache_lookup(pool, q_embedding, settings.cache_threshold)
         if cached:
+            await _cleanup()
+
             async def _cached_stream():
                 yield _sse({"type": "cache_hit", "text": cached})
                 yield _sse({"type": "done", "thread_id": thread_id})
@@ -118,9 +152,9 @@ async def query(
     config = {"configurable": {"thread_id": thread_id}}
 
     async def _stream():
-        # decision 定义在 query() 作用域，闭包内第 129 行需写回它（否则闭包内存在
-        # 赋值即被视为局部变量，导致 121/130/137 行在 queued 分支未触发时
-        # 读取未初始化局部变量 → UnboundLocalError F823）。
+        # decision 定义在 query() 作用域，闭包内需写回它（否则闭包内存在
+        # 赋值即被视为局部变量，导致 queued 分支未触发时读取未初始化局部变量
+        # → UnboundLocalError F823）。
         nonlocal decision
         # Phase 2: admission 排队阻塞等待（路径一：queued 时真正等待补位唤醒）
         if (
@@ -141,12 +175,11 @@ async def query(
                 "status": "rejected",
                 "reason": decision.reason,
             })
-            # 必须在 return 前清理：否则 _states[rid] 残留 "rejected" 且 DB 行
-            # 仍是 "queued" → count(admitted+queued) 永久含该记录，容量泄漏，
-            # 直到进程重启 recover_on_startup 才清。mark_completed 会 pop 内存
-            # 状态并把 DB 行标 completed，释放容量。能走到本分支即说明 admission
-            # 已启用且队列满，admission_queue 必非空。
-            await admission_queue.mark_completed(request_id)
+            # 统一清理：_states[rid] 残留 "rejected" 且 DB 行仍是 "queued" →
+            # count(admitted+queued) 永久含该记录，容量泄漏，直到进程重启
+            # recover_on_startup 才清。mark_completed 会 pop 内存状态并把 DB 行
+            # 标 completed，释放容量。走 _cleanup() 统一出口，避免与外层重复清理。
+            await _cleanup()
             return
         if decision is not None and decision.status == "admitted":
             yield _sse({
@@ -190,12 +223,10 @@ async def query(
         finally:
             if span is not None:
                 span.__exit__(None, None, None)
-            # Phase 2: coordination release
-            if coordinator is not None and settings.coordination_enabled:
-                await coordinator.release(thread_id, request_id)
-            # Phase 2: admission mark completed
-            if admission_queue is not None and settings.admission_effective_enabled:
-                await admission_queue.mark_completed(request_id)
+            # Phase 2: 统一生命周期清理（幂等，覆盖 graph 异常 / 客户端断开 /
+            # 正常完成）。reject 与 cache-hit 路径已在 _stream 外提前调用过，
+            # 此处再调用安全无副作用。
+            await _cleanup()
 
     return StreamingResponse(_stream(), media_type="text/event-stream")
 

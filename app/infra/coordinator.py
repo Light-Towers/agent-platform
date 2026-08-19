@@ -8,6 +8,7 @@
 
 import asyncio
 import logging
+from collections import deque
 from typing import Literal
 
 from app.schemas import CoordinationDecision
@@ -32,6 +33,7 @@ class SessionCoordinator:
         self._active: dict[str, str] = {}  # session_id -> request_id（当前执行中）
         self._queues: dict[str, asyncio.Queue] = {}
         self._conditions: dict[str, asyncio.Condition] = {}
+        self._cancelled: set[str] = set()  # 已取消（客户端断开 / 超时）的请求
         self._logger = logging.getLogger(__name__)
 
     async def acquire(
@@ -126,18 +128,51 @@ class SessionCoordinator:
                 decision_type="serialize", request_id=request_id
             )
 
-    async def wait_for_turn(self, session_id: str, request_id: str) -> None:
+    async def cancel(self, session_id: str, request_id: str) -> None:
+        """取消一个请求（客户端断开 / 超时）。幂等。
+
+        将 request_id 从会话队列中移除（若仍在排队、尚未 active），并加入
+        _cancelled。否则排队中已死但未 active 的请求会被 release() 误 promote 成
+        active，导致会话永久卡死（审计 #四：coordinator queue cancellation）。
+
+        对已经 active 的请求调用 cancel 无效——active 请求走 release() 释放。
+        """
+        if not self._enabled:
+            return
+        self._cancelled.add(request_id)
+        q = self._queues.get(session_id)
+        if q is not None and not q.empty():
+            # asyncio.Queue 无 remove，重建过滤掉被取消的请求。
+            # 必须保持 _queue 为 collections.deque：若替换成 list，
+            # 后续 get_nowait()→_get()→popleft() 会抛 AttributeError
+            # （list 无 popleft），异常被 release() 吞掉后会话清理中断。
+            remaining = deque(r for r in q._queue if r != request_id)
+            if len(remaining) != q.qsize():
+                q._queue = remaining
+                # 同步修正 unfinished 计数（被取消请求从未被消费），避免 join() 挂起
+                q._unfinished_tasks = len(remaining)
+        cond = self._conditions.setdefault(session_id, asyncio.Condition())
+        async with cond:
+            cond.notify_all()
+
+    async def wait_for_turn(self, session_id: str, request_id: str) -> bool:
         """排队请求等待获取执行权。
 
         acquire() 返回 decision_type="queue" 后调用此方法，
         阻塞直到 release() 将本请求设为 active。
+        返回 True 表示获得执行权；False 表示自身已被 cancel（被取消）。
         """
         if not self._enabled:
-            return
+            return True
         cond = self._conditions.setdefault(session_id, asyncio.Condition())
         async with cond:
             while self._active.get(session_id) != request_id:
+                if request_id in self._cancelled:
+                    # 自身已被取消：不占用执行权，立即退出避免永久挂起
+                    return False
                 await cond.wait()
+            self._cancelled.discard(request_id)
+            return True
 
     async def release(self, session_id: str, request_id: str) -> None:
         """释放会话执行权，唤醒队列下一个。"""
@@ -149,14 +184,19 @@ class SessionCoordinator:
             async with cond:
                 if self._active.get(session_id) == request_id:
                     del self._active[session_id]
-                # 唤醒队列下一个（如有）
+                # 唤醒队列下一个（跳过已取消的请求，避免 promote 死请求导致会话卡死）
                 q = self._queues.get(session_id)
-                if q is not None and not q.empty():
-                    _next = q.get_nowait()
+                _next = None
+                while q is not None and not q.empty():
+                    cand = q.get_nowait()
+                    if cand not in self._cancelled:
+                        _next = cand
+                        break
+                if _next is not None:
                     self._active[session_id] = _next
                     cond.notify_all()
                 else:
-                    # 本会话已无活动请求且无等待者：清理字典条目，避免只增不清导致内存缓涨
+                    # 本会话已无活动请求且无存活等待者：清理字典条目，避免只增不清
                     if self._active.get(session_id) == request_id:
                         self._active.pop(session_id, None)
                     # acquire 对每个 session 都无条件建了 _conditions[session_id]，
