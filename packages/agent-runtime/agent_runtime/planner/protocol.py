@@ -127,15 +127,35 @@ class PlannerRuntime:
         return self._call_stack_var.get()
 
     @asynccontextmanager
+    async def execution(self) -> AsyncIterator[None]:
+        """单次执行边界：进入时重置步数预算与调用栈，退出时复位。
+
+        语义（架构审核 P1 修正）：``max_steps`` 是「单次执行累计 Skill 调用数」——
+        顺序调用（A 退出后再进 B）与嵌套调用同样消耗预算；``max_skill_depth`` 才
+        约束同时嵌套深度。调用方（组合型 Planner 的 execute/arun 入口）须用本 scope
+        包裹整次执行：预算不跨执行累计，同执行内顺序/嵌套 Skill 共享同一预算。
+        """
+        self._steps_var.set(0)
+        self._call_stack_var.set([])
+        try:
+            yield
+        finally:
+            self._steps_var.set(0)
+            self._call_stack_var.set([])
+
+    @asynccontextmanager
     async def skill_guard(self, name: str) -> AsyncIterator[None]:
         """Skill 组合护栏：步数上限 → 循环检测 → 深度上限，进入 Skill 前包裹。
 
         用法（组合型 Planner 编排 Skill 时）：
-            async with runtime.skill_guard(skill_name):
-                result = await runtime.registry.execute(skill_name, **kwargs)
+            async with runtime.execution():
+                async with runtime.skill_guard(skill_name):
+                    result = await runtime.registry.execute(skill_name, **kwargs)
 
-        护栏状态 per-request：上下文退出即复位（预算不跨执行累计），同 task 链内
-        嵌套调用共享预算（单次执行内累计）。
+        语义：``_steps`` 只增不减（退出不复位），同一执行边界内顺序 + 嵌套的
+        Skill 调用共享累计预算；``_call_stack`` 随嵌套进入/退出变化（循环检测 /
+        深度上限按当前调用栈判定）。护栏状态 per-request：经 contextvars 隔离，
+        同 task 链内共享预算（单次执行内累计），跨执行（execution 边界）复位。
         """
         steps = self._steps_var.get() + 1
         if steps > self.max_steps:
@@ -155,7 +175,7 @@ class PlannerRuntime:
         try:
             yield
         finally:
-            self._steps_var.set(steps - 1)
+            # 步数预算不回退（累计计数）；仅弹出调用栈（循环/深度判定按栈）
             self._call_stack_var.set(stack)
 
 

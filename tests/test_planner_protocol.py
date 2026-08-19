@@ -194,6 +194,76 @@ async def test_execute_mcp_without_manager_degrades():
     assert events[1].payload["preview"].startswith("MCP 未启用")
 
 
+# ---------- compaction：plan 生产摘要，execute 消费（P2 修正） ----------
+
+
+class _RecordingLLM:
+    """记录合成提示，验证 compacted 摘要真正参与答案合成。"""
+
+    def __init__(self):
+        self.blocks = []
+
+    async def ainvoke(self, messages):
+        self.blocks = messages
+        return type("R", (), {"content": "ok"})()
+
+
+def _settings_with_compaction():
+    from agent_server.config import Settings
+
+    return Settings(compaction_enabled=True, model_context_window=1000, compaction_threshold_ratio=0.1)
+
+
+@pytest.mark.asyncio
+async def test_plan_compaction_writes_summary_into_notes(monkeypatch):
+    """多轮消息超阈值时，plan() 触发压缩并把摘要写入 notes["messages"]。"""
+    import agent_server.planners.deterministic as det_mod
+    from langchain_core.messages import AIMessage, HumanMessage
+
+    llm = _RecordingLLM()
+    ctx = PlannerContext(
+        question="再算一次上个月的销售额",
+        llm=llm,
+        # 需要超过 _KEEP_RECENT(4) 条消息才满足压缩条件，且 token 超阈值
+        messages=[
+            HumanMessage(content=f"第{i}轮问题" + "很长" * 200) for i in range(5)
+        ]
+        + [AIMessage(content="第一轮答案")],
+    )
+    monkeypatch.setattr(det_mod, "get_settings", _settings_with_compaction)
+
+    plan = await DeterministicPlanner().plan(ctx)
+
+    assert plan.route == "direct"
+    assert "已压缩" in plan.reason
+    assert isinstance(plan.notes["messages"], list)
+    assert plan.notes["question"] == ctx.question
+
+
+@pytest.mark.asyncio
+async def test_execute_consumes_compacted_messages():
+    """P2 修正：notes["messages"] 不再被丢弃，摘要作为对话上下文并入合成提示。"""
+    from langchain_core.messages import SystemMessage
+
+    llm = _RecordingLLM()
+    runtime = PlannerRuntime(registry=FakeRegistry(), llm=llm, pool=None)
+    compacted = [SystemMessage(content="[上下文摘要] 用户询问过销量统计，结论为 42 万")]
+
+    # 无 LLM 模式同样消费：摘要文本应出现在模板输出中
+    runtime2 = PlannerRuntime(registry=FakeRegistry(), llm=None, pool=None)
+    plan = Plan(route="direct", sub_query="再算一次", notes={"question": "再算一次", "messages": compacted})
+    events = [ev async for ev in DeterministicPlanner().execute(plan, runtime2)]
+    assert "上下文摘要" in events[-1].payload["text"]
+
+    # LLM 模式：user content 包含「对话上下文」块
+    events = [ev async for ev in DeterministicPlanner().execute(plan, runtime)]
+    assert events[-1].payload["text"] == "ok"
+    user_block = [m for m in llm.blocks if m["role"] == "user"][0]["content"]
+    assert "## 对话上下文" in user_block
+    assert "上下文摘要" in user_block
+    assert "再算一次" in user_block
+
+
 # ---------- 与 golden 路由基线一致（双跑 eval 护栏） ----------
 
 

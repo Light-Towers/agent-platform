@@ -32,6 +32,15 @@ _SYNTHESIZE_PROMPT = (
 _EMPTY_EVIDENCE_MARKERS = ("知识库未启用", "知识库中未检索到", "联网搜索未配置", "SQL_DSN 未配置")
 
 
+def _message_content(msg: Any) -> str:
+    """从 LangChain 消息 / dict / 裸串提取文本（与 compact._msg_content 同构）。"""
+    if hasattr(msg, "content"):
+        return str(msg.content)
+    if isinstance(msg, dict):
+        return str(msg.get("content", ""))
+    return str(msg)
+
+
 class DeterministicPlanner(Planner):
     """确定性 Planner：复刻 graph.py ``route -> (search|rag|sql|direct|mcp) -> synthesize`` 决策与编排。"""
 
@@ -142,7 +151,9 @@ class DeterministicPlanner(Planner):
             break
 
         # 合成 + 记忆沉淀（与 synthesize_node 同源）
-        answer = await self._compose(question, evidence, memory_notes, runtime.llm)
+        # compaction 路径：plan() 把摘要写入 notes["messages"]，这里消费它作为合成上下文
+        context_messages = plan.notes.get("messages") or []
+        answer = await self._compose(question, evidence, memory_notes, runtime.llm, context_messages)
         if settings.memory_enabled and runtime.pool is not None:
             facts = None
             if settings.memory_extraction_enabled and runtime.llm is not None:
@@ -181,8 +192,19 @@ class DeterministicPlanner(Planner):
             return list(result.get("evidence") or [])
         return list(result or [])
 
-    async def _compose(self, question: str, evidence: list[str], memory_notes: list[str], llm) -> str:
-        """答案合成：无 LLM 走模板拼装，有 LLM 走证据约束提示（与 graph._compose 同源）。"""
+    async def _compose(
+        self,
+        question: str,
+        evidence: list[str],
+        memory_notes: list[str],
+        llm,
+        context_messages: list[Any] | None = None,
+    ) -> str:
+        """答案合成：无 LLM 走模板拼装，有 LLM 走证据约束提示（与 graph._compose 同源）。
+
+        ``context_messages``：compaction 摘要消息（plan() 写入 notes["messages"]），
+        作为「对话上下文」并入提示，使摘要真正参与合成（P1 修正：此前摘要被丢弃）。
+        """
         if llm is None:
             parts = [f"（无 LLM 模式）针对问题「{question}」收集到的证据："]
             if evidence:
@@ -191,10 +213,17 @@ class DeterministicPlanner(Planner):
                 parts.append("- 无")
             if memory_notes:
                 parts.append("相关历史记忆：" + "；".join(memory_notes))
+            if context_messages:
+                parts.append("对话上下文：" + "；".join(_message_content(m) for m in context_messages))
             return "\n".join(parts)
         blocks = [f"## 证据\n{i}. {e}" for i, e in enumerate(evidence, start=1)] or ["## 证据\n（无）"]
         if memory_notes:
             blocks.append("## 历史记忆\n" + "\n".join(f"- {m}" for m in memory_notes))
+        if context_messages:
+            context_text = "\n".join(
+                _message_content(m) for m in context_messages
+            )
+            blocks.append("## 对话上下文\n" + context_text)
         blocks.append(f"## 问题\n{question}")
         raw = await llm.ainvoke(
             [
