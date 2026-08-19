@@ -7,8 +7,7 @@
 from __future__ import annotations
 
 import pytest
-
-from app.memory import thread_persist
+from agent_server.memory import thread_persist
 
 
 @pytest.fixture

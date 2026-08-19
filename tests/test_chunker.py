@@ -1,4 +1,4 @@
-from app.rag.chunker import split_markdown
+from agent_server.rag.chunker import split_markdown
 
 
 def test_heading_preserved():

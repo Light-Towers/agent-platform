@@ -7,7 +7,7 @@ LangGraph 能识别字段上的 Annotated[list, add_messages] reducer 并正确�
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.graph import END, START, StateGraph
 
-from app.agent.state import AgentState
+from agent_server.agent.state import AgentState
 
 
 def test_state_is_pydantic_with_defaults():
@@ -60,7 +60,7 @@ def test_validate_state_rejects_empty_question():
     """优化 A 要点2：_validate_state 入口断言拦截空 question。"""
     import pytest
 
-    from app.agent.state import _validate_state
+    from agent_server.agent.state import _validate_state
 
     with pytest.raises(ValueError):
         _validate_state(AgentState(question=""))
@@ -68,7 +68,7 @@ def test_validate_state_rejects_empty_question():
 
 def test_validate_state_accepts_valid_state():
     """优化 A 要点2：合法 state 通过 _validate_state。"""
-    from app.agent.state import _validate_state
+    from agent_server.agent.state import _validate_state
 
     _validate_state(AgentState(question="q", route="direct"))  # 不抛异常
 

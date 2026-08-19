@@ -10,9 +10,9 @@
 
 import pytest
 
-from app.config import get_settings
-from app.memory import memory_backend as mb
-from app.rag import store as rag_store
+from agent_server.config import get_settings
+from agent_server.memory import memory_backend as mb
+from agent_server.rag import store as rag_store
 
 
 # ---------------------------------------------------------------------------
@@ -158,7 +158,7 @@ def _calls_with(pool, substr):
 
 async def test_rag_insert_carries_workspace_id(patch_embed):
     pool = _FakePool()
-    from app.rag.chunker import Chunk
+    from agent_server.rag.chunker import Chunk
 
     await rag_store.add_document(pool, "s.txt", [Chunk(text="内容A", heading="h")], workspace_id="wsA")
     inserts = _calls_with(pool, "INSERT INTO chunks")
@@ -180,7 +180,7 @@ async def test_rag_queries_scoped_to_workspace(patch_embed):
 
 async def test_rag_no_cross_contamination(patch_embed):
     pool = _FakePool()
-    from app.rag.chunker import Chunk
+    from agent_server.rag.chunker import Chunk
 
     await rag_store.add_document(pool, "a.txt", [Chunk(text="A专有内容", heading="h")], workspace_id="wsA")
     await rag_store.add_document(pool, "b.txt", [Chunk(text="B专有内容", heading="h")], workspace_id="wsB")
@@ -194,7 +194,7 @@ async def test_rag_no_cross_contamination(patch_embed):
 
 async def test_rag_default_space_isolated(patch_embed):
     pool = _FakePool()
-    from app.rag.chunker import Chunk
+    from agent_server.rag.chunker import Chunk
 
     await rag_store.add_document(pool, "s.txt", [Chunk(text="默认空间内容", heading="h")])
     res = await rag_store.retrieve_chunks(pool, "内容", k=5, workspace_id="other")

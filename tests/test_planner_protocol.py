@@ -10,7 +10,7 @@ import pytest
 from agent_runtime.planner.protocol import Plan, PlannerContext, PlannerRuntime, StreamEvent
 from agent_runtime.planner.registry import PlannerRegistry
 
-from app.planners.deterministic import DeterministicPlanner
+from agent_server.planners.deterministic import DeterministicPlanner
 
 
 class FakeRegistry:
@@ -112,7 +112,7 @@ async def test_plan_chitchat_short_circuit():
 
 @pytest.mark.asyncio
 async def test_plan_guard_blocked(monkeypatch):
-    import app.planners.deterministic as det_mod
+    import agent_server.planners.deterministic as det_mod
 
     def fake_guard(_q):
         return {"blocked": True, "redacted_text": ""}
@@ -129,7 +129,7 @@ async def test_plan_guard_blocked(monkeypatch):
 
 
 def _settings_with(**overrides):
-    from app.config import Settings
+    from agent_server.config import Settings
 
     return Settings(**overrides)
 

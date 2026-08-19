@@ -23,8 +23,8 @@ type:
 # agent_federation/ 彻底消除遮蔽；test_tool_registry 已回归门禁（75 passed）。
 test:
 	uv run pytest -q
-	uv run pytest agent_federation/tests/unit -q
-	uv run pytest kefu-service/tests -q
+	uv run pytest applications/agent_federation/tests/unit -q
+	uv run pytest applications/kefu-service/tests -q
 
 # 评测门禁：默认启发式（确定性，CI 可达），阈值 0.8；LLM_API_KEY 缺失时回退启发式并 WARN。
 # 注意：必须用直接路径 `eval/run_eval.py` 而非 `-m eval.run_eval`，

@@ -129,7 +129,7 @@ def test_embed_require_real_rejects_mock(monkeypatch):
 
     from agent_core.memory.embedder import MockEmbedder
 
-    from app.rag import embed as embed_mod
+    from agent_server.rag import embed as embed_mod
 
     monkeypatch.setenv("EMBEDDING_REQUIRE_REAL", "true")
 
@@ -150,7 +150,7 @@ def test_embed_require_real_off_allows_mock(monkeypatch):
 
     from agent_core.memory.embedder import MockEmbedder
 
-    from app.rag import embed as embed_mod
+    from agent_server.rag import embed as embed_mod
 
     monkeypatch.setenv("EMBEDDING_REQUIRE_REAL", "false")
 

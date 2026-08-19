@@ -1,4 +1,4 @@
-from app.agent.router import heuristic_route
+from agent_server.agent.router import heuristic_route
 
 
 def test_sql_priority_over_search_and_rag():

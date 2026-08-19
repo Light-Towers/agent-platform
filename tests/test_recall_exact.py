@@ -39,7 +39,7 @@ def _make_cp():
 
 
 async def test_get_thread_history_normalizes_roles():
-    import app.memory.recall_exact as r
+    import agent_server.memory.recall_exact as r
 
     items = await r.get_thread_history(_make_cp(), "t1")
     assert len(items) == 5
@@ -52,7 +52,7 @@ async def test_get_thread_history_normalizes_roles():
 
 
 async def test_get_thread_history_keyword_filter():
-    import app.memory.recall_exact as r
+    import agent_server.memory.recall_exact as r
 
     items = await r.get_thread_history(_make_cp(), "t1", keyword="报表")
     # 仅含「报表」的两条命中
@@ -61,7 +61,7 @@ async def test_get_thread_history_keyword_filter():
 
 
 async def test_get_thread_history_keyword_case_insensitive():
-    import app.memory.recall_exact as r
+    import agent_server.memory.recall_exact as r
 
     items = await r.get_thread_history(_make_cp(), "t1", keyword="X 模板")
     assert len(items) == 1
@@ -69,20 +69,20 @@ async def test_get_thread_history_keyword_case_insensitive():
 
 
 async def test_get_thread_history_limit_takes_tail():
-    import app.memory.recall_exact as r
+    import agent_server.memory.recall_exact as r
 
     items = await r.get_thread_history(_make_cp(), "t1", limit=2)
     assert [it["index"] for it in items] == [3, 4]
 
 
 async def test_get_thread_history_no_checkpointer():
-    import app.memory.recall_exact as r
+    import agent_server.memory.recall_exact as r
 
     assert await r.get_thread_history(None, "t1") == []
 
 
 async def test_get_thread_history_handles_exception():
-    import app.memory.recall_exact as r
+    import agent_server.memory.recall_exact as r
 
     class _Boom:
         async def alist_messages(self, config):
@@ -92,13 +92,13 @@ async def test_get_thread_history_handles_exception():
 
 
 async def test_search_in_thread_requires_keyword():
-    import app.memory.recall_exact as r
+    import agent_server.memory.recall_exact as r
 
     assert await r.search_in_thread(_make_cp(), "t1", "") == []
 
 
 async def test_passes_thread_id_to_checkpointer():
-    import app.memory.recall_exact as r
+    import agent_server.memory.recall_exact as r
 
     cp = _make_cp()
     await r.get_thread_history(cp, "thread-xyz")

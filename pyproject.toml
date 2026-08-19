@@ -52,18 +52,20 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["app"]
+packages = ["applications/agent_server"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = [
     "tests",
-    "agent-core/tests",
+    "packages/agent-core/tests",
 ]
 # 注：agent_federation/tests/unit 与 kefu-service/tests 经 Makefile `test` 目标以
 # 独立 pytest session 纳入 CI（避免与根 tests/ 的 conftest 插件名冲突）。
-# 本地目录原名 deepagents/，因与 PyPI 依赖包 deepagents 同名，已于 2026-08-19
-# 重命名为 agent_federation/ 彻底消除歧义。
+# 分层（2026-08-19）：packages/ 放平台库（agent-core/agent-runtime/shared-schemas），
+# applications/ 放应用（agent_server/agent_federation/dialogue-framework/kefu-service/
+# wenda-data-agent/zhanggui-zhiku）。原 deepagents/ 因与 PyPI 包同名已重命名为
+# agent_federation/ 并清理残骸。根宿主原 app/ 已改名 agent_server/（包名同步）。
 addopts = "--import-mode=importlib"
 
 [tool.ruff]
@@ -87,13 +89,16 @@ agent-runtime = { workspace = true }
 flashrag-dev = { git = "https://github.com/RUC-NLPIR/FlashRAG.git" }
 
 [tool.uv.workspace]
+# 注：根项目本体（applications/agent_server，原 app/）不是独立 workspace 成员，
+# 它是 agent-platform 根包的源码（由 [tool.hatch.build.targets.wheel] packages 指定）。
+# 以下为真正的独立成员（各自含 pyproject.toml，被根项目/彼此以 workspace=true 依赖引用）。
 members = [
-    "agent-core",
-    "shared-schemas",
-    "agent-runtime",
-    "agent_federation",
-    "kefu-service",
-    "wenda-data-agent",
-    "zhanggui-zhiku",
-    "dialogue-framework",
+    "packages/agent-core",
+    "packages/shared-schemas",
+    "packages/agent-runtime",
+    "applications/agent_federation",
+    "applications/kefu-service",
+    "applications/wenda-data-agent",
+    "applications/zhanggui-zhiku",
+    "applications/dialogue-framework",
 ]

@@ -163,7 +163,7 @@ async def test_dag_capability_execute():
 @pytest.mark.asyncio
 async def test_build_registry_with_graph_registers_general_qa():
     """app 侧装配：注入 graph 后注册 general_qa Workflow Skill（graph 包装而非删除）。"""
-    from app.capabilities import build_registry
+    from agent_server.capabilities import build_registry
 
     class FakeGraph:
         async def astream(self, state, config=None, stream_mode="updates"):
@@ -181,7 +181,7 @@ async def test_build_registry_with_graph_registers_general_qa():
 
 
 def test_build_registry_without_graph_no_general_qa():
-    from app.capabilities import build_registry
+    from agent_server.capabilities import build_registry
 
     registry = build_registry()
     assert [c.name for c in registry.list()] == ["mcp", "rag", "search", "sql"]
