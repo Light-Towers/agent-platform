@@ -9,9 +9,11 @@ from __future__ import annotations
 import asyncio
 
 import pytest
+from agent_runtime.circuit_breaker import CircuitBreaker
 from agent_runtime.skills.agent import as_agent_skill
 from agent_runtime.skills.dag import as_dag_skill
 from agent_runtime.skills.function import as_function_skill
+from agent_runtime.skills.middleware import CircuitBreakerMiddleware
 from agent_runtime.skills.registry import (
     DuplicateSkillError,
     SkillExecutionError,
@@ -245,3 +247,137 @@ async def test_execute_skips_validation_without_schema():
     registry = SkillRegistry()
     registry.register(as_function_skill("x", "X", run))
     assert await registry.execute("x", anything=1) == {"anything": 1}
+
+
+# ---------- Phase 架构审核：Skill Execution Middleware 洋葱链 ----------
+
+
+class _RecordingMiddleware:
+    """记录 call 顺序的测试中间件（外层先 after，内层先 before）。"""
+
+    def __init__(self, name: str, events: list[str], delay_enter: bool = False):
+        self._name = name
+        self._events = events
+        self._delay_enter = delay_enter
+
+    async def around(self, name, kwargs, call_next):
+        if self._delay_enter:
+            self._events.append(f"before:{self._name}")
+            return await call_next(name, kwargs)
+        self._events.append(f"before:{self._name}")
+        result = await call_next(name, kwargs)
+        self._events.append(f"after:{self._name}")
+        return result
+
+
+class _ShortCircuitMiddleware:
+    """不调用 call_next 即短路（拦截语义）。"""
+
+    async def around(self, name, kwargs, call_next):
+        return "short-circuited"
+
+
+@pytest.mark.asyncio
+async def test_middleware_onion_order():
+    """洋葱链顺序：先注册的外层先执行前置，后执行后置（LIFO after）。"""
+    events: list[str] = []
+
+    async def run(**kwargs):
+        events.append("execute")
+        return "ok"
+
+    registry = SkillRegistry(
+        middlewares=[
+            _RecordingMiddleware("outer", events),
+            _RecordingMiddleware("inner", events),
+        ]
+    )
+    registry.register(as_function_skill("x", "X", run))
+
+    assert await registry.execute("x") == "ok"
+    assert events == ["before:outer", "before:inner", "execute", "after:inner", "after:outer"]
+
+
+@pytest.mark.asyncio
+async def test_middleware_short_circuit_skips_executor():
+    """中间件不调用 call_next 即短路，执行器不执行。"""
+    called = []
+
+    async def run(**kwargs):
+        called.append(1)
+        return "ok"
+
+    registry = SkillRegistry(middlewares=[_ShortCircuitMiddleware()])
+    registry.register(as_function_skill("x", "X", run))
+
+    assert await registry.execute("x") == "short-circuited"
+    assert called == []
+
+
+@pytest.mark.asyncio
+async def test_middleware_chain_with_timeout_still_applies():
+    """超时边界仍在最内层执行器上生效（中间件包裹执行器，不绕过超时）。"""
+    import asyncio as _asyncio
+
+    events: list[str] = []
+
+    async def slow(**kwargs):
+        events.append("execute")
+        await _asyncio.sleep(5)
+        return "late"
+
+    registry = SkillRegistry(
+        middlewares=[_RecordingMiddleware("mw", events, delay_enter=True)]
+    )
+    registry.register(as_function_skill("slow", "慢", slow, timeout_ms=50))
+
+    with pytest.raises(_asyncio.TimeoutError):
+        await registry.execute("slow")
+    assert events == ["before:mw", "execute"]
+
+
+@pytest.mark.asyncio
+async def test_circuit_breaker_middleware_degrades():
+    """熔断中间件：打开后不再调用执行器，返回降级消息（与 search 原内嵌行为等价）。"""
+    calls = []
+
+    async def run(**kwargs):
+        calls.append(1)
+        raise RuntimeError("上游故障")
+
+    breaker = CircuitBreaker(failure_threshold=1, recovery_seconds=60)
+    registry = SkillRegistry(
+        middlewares=[CircuitBreakerMiddleware(breaker, skill_names=("search",))]
+    )
+    registry.register(as_function_skill("search", "搜索", run))
+    registry.register(as_function_skill("rag", "RAG", run))
+
+    # 首次失败触发熔断（breaker.call fallback=None → 降级消息）
+    degraded = await registry.execute("search", q="x")
+    assert degraded == ["联网搜索暂时不可用（熔断或请求失败）"]
+    # 熔断打开后短路：执行器不再被调用
+    await registry.execute("search", q="x")
+    assert len(calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_circuit_breaker_middleware_scope():
+    """skill_names 限定故障域：search 熔断不影响 rag（同 breaker 但不同技能）。"""
+    calls = []
+
+    async def run(**kwargs):
+        calls.append(kwargs.get("skill"))
+        raise RuntimeError("boom")
+
+    breaker = CircuitBreaker(failure_threshold=1, recovery_seconds=60)
+    registry = SkillRegistry(
+        middlewares=[CircuitBreakerMiddleware(breaker, skill_names=("search",))]
+    )
+    registry.register(as_function_skill("search", "搜索", run))
+    registry.register(as_function_skill("rag", "RAG", run))
+
+    await registry.execute("search", q="x")
+    with pytest.raises(RuntimeError):
+        # rag 不在熔断范围内：异常直接透传（熔断仅包裹 search）
+        await registry.execute("rag", q="y")
+    assert calls == [None, None]

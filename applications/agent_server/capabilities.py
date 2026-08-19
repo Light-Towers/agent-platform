@@ -8,6 +8,10 @@ Skill 契约（Phase 1.5）：每个能力带 input/output JSON Schema，Planner
 经 ``to_tool_schema()`` 生成工具描述——能力实现细节（函数 / 静态 DAG / 远程）
 对调用方保持黑盒。
 
+Runtime 边界（架构审核 P1）：熔断经 ``CircuitBreakerMiddleware`` 挂在注册表
+洋葱链上（仅包裹 search，隔离故障域），search 实现不再内嵌 breaker——
+边界从实现内收敛到统一执行入口。
+
 注册表为模块级惰性单例（幂等），进程生命周期内复用。
 """
 
@@ -16,18 +20,22 @@ from __future__ import annotations
 from functools import partial
 from typing import Any
 
+from agent_runtime.circuit_breaker import CircuitBreaker
 from agent_runtime.mcp_client import MCPClientManager
 from agent_runtime.skills.dag import as_dag_skill
 from agent_runtime.skills.function import as_function_skill
+from agent_runtime.skills.middleware import CircuitBreakerMiddleware
 from agent_runtime.skills.registry import SkillRegistry
 
 from agent_server.agent.state import AgentState
+from agent_server.config import get_settings
 from agent_server.subagents.mcp import mcp_query
 from agent_server.subagents.rag import rag_query
 from agent_server.subagents.search import search_web
 from agent_server.subagents.sql_agent import sql_query
 
 _registry: SkillRegistry | None = None
+_breaker: CircuitBreaker | None = None
 
 # Skill 契约（Phase 1.5）：JSON Schema——供 Agent 工具描述生成与入参校验
 _QUERY_SCHEMA: dict[str, Any] = {
@@ -94,13 +102,30 @@ async def _run_general_qa(graph: Any, **kwargs: Any) -> str:
     return answer
 
 
+def _get_breaker() -> CircuitBreaker:
+    """search 熔断器单例：参数取 settings（与 main.py MCP manager 同源语义）。"""
+    global _breaker
+    if _breaker is None:
+        settings = get_settings()
+        _breaker = CircuitBreaker(
+            failure_threshold=settings.breaker_failure_threshold,
+            recovery_seconds=settings.breaker_recovery_seconds,
+        )
+    return _breaker
+
+
 def build_registry(graph: Any | None = None) -> SkillRegistry:
     """构建 app 能力注册表（幂等；重复调用返回新实例，供测试隔离）。
 
     graph（可选）：LangGraph 静态图实例。注入时额外注册 ``general_qa`` Workflow Skill
     （Phase 3：graph.py 包装而非删除，供 Planner / Agent 组合调用）。
+
+    Runtime 边界（架构审核 P1）：熔断经中间件链收敛——``CircuitBreakerMiddleware``
+    仅包裹 search（隔离故障域），search 实现不再内嵌 breaker。
     """
-    registry = SkillRegistry()
+    registry = SkillRegistry(
+        middlewares=[CircuitBreakerMiddleware(_get_breaker(), skill_names=("search",))]
+    )
     registry.register(
         as_function_skill(
             "search",

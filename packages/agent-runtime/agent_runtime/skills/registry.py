@@ -7,18 +7,20 @@
 - WorkflowExecutor：Static/Conditional 编排（graph.py → general_qa），LangGraph 仅是执行实现
 
 契约（P1）：Planner 只决策（plan），执行统一走 SkillRegistry.execute()。
-当前 execute() 实际承载的 Runtime 边界：**入参契约校验 + 统一超时**。
-retry / 熔断 / rate limit / tracing 等边界**尚未在注册表收敛**（演进方向：
-拆分为 SkillExecutor + Middleware Chain；此前 retry 归 Planner 编排循环、
-熔断散落在单个能力实现内，见 docs/plan-f §架构审核 演进方向）。
+execute() 承载的 Runtime 边界：**入参契约校验 + 统一超时（最内层）+
+可选中间件洋葱链**（retry / 熔断 / rate limit / tracing 收敛于此，
+见 ``agent_runtime/skills/middleware.py``；已落地熔断，retry/rate limit 演进中）。
 """
 
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Awaitable, Callable
+from typing import Any
+
+from agent_runtime.skills.middleware import SkillMiddleware
 
 # 执行器签名：**kwargs 透传（如 search(query=...)、mcp(state=..., mcp_manager=...)）
 Executor = Callable[..., Awaitable[Any]]
@@ -128,10 +130,15 @@ def _validate_input(name: str, schema: dict[str, Any] | None, kwargs: dict[str, 
 
 
 class SkillRegistry:
-    """能力注册表：注册 / 发现 / 统一执行入口。"""
+    """能力注册表：注册 / 发现 / 统一执行入口。
 
-    def __init__(self) -> None:
+    ``middlewares``：Skill 执行洋葱链（可选）。链上边界按注册顺序
+    外层→内层包裹最终执行器，最先注册的最外层。
+    """
+
+    def __init__(self, middlewares: list[SkillMiddleware] | None = None) -> None:
         self._capabilities: dict[str, Skill] = {}
+        self._middlewares: list[SkillMiddleware] = list(middlewares or [])
 
     def register(self, capability: Skill) -> None:
         if capability.name in self._capabilities:
@@ -154,10 +161,22 @@ class SkillRegistry:
         return name in self._capabilities
 
     async def execute(self, name: str, **kwargs: Any) -> Any:
-        """统一执行入口：入参契约校验 → Runtime 边界（超时），kwargs 透传。"""
+        """统一执行入口：入参契约校验 → 中间件洋葱链 → 执行器（含统一超时）。"""
         capability = self.get(name)
         _validate_input(name, capability.input_schema, kwargs)
-        coro = capability.executor(**kwargs)
-        if capability.timeout_ms is not None:
-            coro = asyncio.wait_for(coro, timeout=capability.timeout_ms / 1000)
-        return await coro
+
+        async def invoke(n: str, kw: dict[str, Any]) -> Any:
+            coro = capability.executor(**kw)
+            if capability.timeout_ms is not None:
+                coro = asyncio.wait_for(coro, timeout=capability.timeout_ms / 1000)
+            return await coro
+
+        # 洋葱链：先注册的外层先执行，经 call_next 逐层向内，直到最终执行器。
+        # 链为空的常规路径与逐层委托等价（无中间件时 zero 额外开销）。
+        if not self._middlewares:
+            return await invoke(name, kwargs)
+        handler: Callable[[str, dict[str, Any]], Awaitable[Any]] = invoke
+        for middleware in reversed(self._middlewares):
+            prev = handler
+            handler = lambda n, kw, _mw=middleware, _prev=prev: _mw.around(n, kw, _prev)
+        return await handler(name, kwargs)
