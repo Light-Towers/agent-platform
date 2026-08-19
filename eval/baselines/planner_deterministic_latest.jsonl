@@ -1,0 +1,12 @@
+{"id": 1, "question": "统计一下订单表里上个月的销售额", "expected": "sql", "route": "sql", "ok": true, "reason": "命中数据查询特征词"}
+{"id": 2, "question": "数据库里库存低于10的商品有多少条", "expected": "sql", "route": "sql", "ok": true, "reason": "命中数据查询特征词"}
+{"id": 3, "question": "最近 GitHub 上有什么热门的 Agent 开源项目", "expected": "search", "route": "search", "ok": true, "reason": "命中时效/联网特征词"}
+{"id": 4, "question": "帮我查一下本周发布的最新 LLM 新闻", "expected": "search", "route": "search", "ok": true, "reason": "命中时效/联网特征词"}
+{"id": 5, "question": "知识库里关于 LangGraph 检查点的文档怎么说的", "expected": "rag", "route": "rag", "ok": true, "reason": "命中知识库特征词"}
+{"id": 6, "question": "什么是检索增强生成，给我解释一下原理", "expected": "rag", "route": "rag", "ok": true, "reason": "命中知识库特征词"}
+{"id": 7, "question": "帮我写一首关于秋天的诗", "expected": "direct", "route": "direct", "ok": true, "reason": "无明确能力特征"}
+{"id": 8, "question": "1+1等于几", "expected": "direct", "route": "direct", "ok": true, "reason": "无明确能力特征"}
+{"id": 9, "question": "表里的销量冠军是哪个产品", "expected": "sql", "route": "sql", "ok": true, "reason": "命中数据查询特征词"}
+{"id": 10, "question": "介绍一下 RAGFlow 的文档解析能力", "expected": "rag", "route": "rag", "ok": true, "reason": "命中知识库特征词"}
+{"id": 11, "question": "今天有什么科技新闻", "expected": "search", "route": "search", "ok": true, "reason": "命中时效/联网特征词"}
+{"id": 12, "question": "用 SQL 统计每个地区的订单数量", "expected": "sql", "route": "sql", "ok": true, "reason": "命中数据查询特征词"}

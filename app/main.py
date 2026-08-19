@@ -125,6 +125,10 @@ async def lifespan(app: FastAPI):
 
     app.state.graph = build_graph(llm, checkpointer=checkpointer, mcp_manager=mcp_manager)
     app.state.checkpointer = checkpointer
+    # Plan-F Phase 2: Planner 实现（PLANNER env 选择，Phase 3 统一 SSE 出口后供 api 消费）
+    from app.planners import get_planner
+
+    app.state.planner = get_planner(settings)
     app.state.callbacks = get_langfuse_callbacks(
         public_key=settings.langfuse_public_key,
         secret_key=settings.langfuse_secret_key,
