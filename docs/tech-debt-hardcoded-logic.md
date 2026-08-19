@@ -25,7 +25,7 @@ ADR-0004 阶段4 的候选B（`eval/memory_reuse_llm.py`）评审中，发现 `_
 - 矛盾：`graph.py:3` docstring 声称"LLM 驱动的意图路由（复用 Phase 3）"，实际未调 LLM、未接 classifier。
 - 影响：换种说法即误路由；注释误导维护者以为已统一。
 - 范围说明：双轨收敛 `plan-e` 的 **S-5 范围外声明**明确 kefu 符合性核验"本期不纳入"，故未被统一意图架构覆盖。
-- 建议：① 修正 docstring 为真实状态；② 或令 kefu 意图节点复用 `deepagents/agent/intent/classifier.py`（真正统一）。
+- 建议：① 修正 docstring 为真实状态；② 或令 kefu 意图节点复用 `agent_federation/agent/intent/classifier.py`（真正统一）。
 - 修复（v2 任务二）：`intent_node` 改为复用统一意图架构 `agent_core.intent`
   （`is_chitchat` 短路闲聊 + `classify_intent` 取 `IntentLabel`）；仅保留
   CUSTOMER_SERVICE 大类下订单/物流/售后的**业务二级分流**关键词（职责属业务路由，非意图识别）。
@@ -46,14 +46,14 @@ ADR-0004 阶段4 的候选B（`eval/memory_reuse_llm.py`）评审中，发现 `_
 
 ## 🟠 中风险
 
-### TD-3 deepagents 意图降级关键词含 typo
-- 文件：`deepagents/agent/intent/classifier.py:89-103`
+### TD-3 agent_federation 意图降级关键词含 typo
+- 文件：`agent_federation/agent/intent/classifier.py:89-103`
 - 现状：`_keyword_fallback` 写死关键词字典，含 `"2么"`（应为"怎么"）。仅 embedding 缺失时退化用，但有 LLM/embedding 主路径兜底。
 - 建议：修正 typo；降级词表外置或删除（主路径健全时不应依赖写死降级）。
 - 状态：待排期
 
 ### TD-4 意图置信度阈值多处写死且重复
-- 文件：`deepagents/agent/intent/llm_judge.py:17-18,87,97`（`_L2_THRESHOLD=0.8` / `_CLARIFY_THRESHOLD=0.5`）、`classifier.py`（同样 0.8）
+- 文件：`agent_federation/agent/intent/llm_judge.py:17-18,87,97`（`_L2_THRESHOLD=0.8` / `_CLARIFY_THRESHOLD=0.5`）、`classifier.py`（同样 0.8）
 - 现状：决定是否"反问用户"的业务边界写死；两处 0.8 重复。
 - 建议：收敛到单一配置项（settings 或 prototypes.json）。
 - 状态：待排期
@@ -73,7 +73,7 @@ ADR-0004 阶段4 的候选B（`eval/memory_reuse_llm.py`）评审中，发现 `_
   （`MEMORY_FORGET_THRESHOLD` / `MEMORY_FORGET_AGE_DAYS`，默认 0.1 / 30）；
   新增 `memory_forget_threshold()` / `memory_forget_age_days()` helper；
   `consolidate` 签名加 `age_days: int | None = None`（SQL 用 `interval '%s days'` 参数化），
-  下游 `deepagents/agent/memory/semantic_memory.py` 与 `app/memory/memory_backend.py`
+  下游 `agent_federation/agent/memory/semantic_memory.py` 与 `app/memory/memory_backend.py`
   的 `consolidate` / `consolidate_memories` 同步透传 `age_days`，向后兼容
   （旧调用仅传 `forget_threshold` 仍可用）。`consolidate` 新增诊断日志输出实际阈值/天数/删除条数。
 - 状态：✅ 已修复（参数化基线；智能阈值"候选A"仍待基线采集后评估，非本次范围）
@@ -109,23 +109,23 @@ ADR-0004 阶段4 的候选B（`eval/memory_reuse_llm.py`）评审中，发现 `_
 ### TD-11 隔离键命名语义噪音（session_id 残留变量/字段名）
 - 关联：PR#10 审核（2026-08-18）非阻塞残留项
 - 现状：PR#10 已将隔离主键统一为 `workspace_id`，但仍有两处命名未同步：
-  - `deepagents/agent/main_agent.py` 局部变量（已修 B）→ 原 `session_id_token` 已重命名为 `thread_token`（2026-08-18 修复）。
-  - `deepagents/eval/run_eval.py:51` 评测报告输出字段（已修 C）→ 原 `"session_id"` 已改为 `"workspace_id"`（2026-08-18 修复）。
+  - `agent_federation/agent/main_agent.py` 局部变量（已修 B）→ 原 `session_id_token` 已重命名为 `thread_token`（2026-08-18 修复）。
+  - `agent_federation/eval/run_eval.py:51` 评测报告输出字段（已修 C）→ 原 `"session_id"` 已改为 `"workspace_id"`（2026-08-18 修复）。
   - `async_subagents.py:104` 跨服务 HTTP payload `session_id` 字段：属独立远程契约（kefu/wenda 接口），**保持不变**，不登记修复。
 - 结论：代码侧语义噪音已清零；仅保留远程契约字段。
 - 状态：✅ 代码侧已修复，远程契约维持
 
 ### TD-12 docs 旧 `run_deep_agent(session_id=)` 签名文本残留
 - 关联：PR#10 审核（2026-08-18）非阻塞残留项
-- 文件：`deepagents/eval/PROPOSAL.md:157`（已修 F）→ 示例代码 `session_id=sid` 已改为 `workspace_id=sid`。
-- 其余文档（`docs/architecture-improvement-plan.md` 等）中的 `session_id` 属 `app/` 平台真实 API 参数名（如 `GET /history?session_id=`），与 deepagents 隔离键无关，**不改动**。
-- 结论：deepagents 侧 docs 已同步；app 侧真实参数名保持。
-- 状态：✅ 已修复（仅 deepagents 侧）
+- 文件：`agent_federation/eval/PROPOSAL.md:157`（已修 F）→ 示例代码 `session_id=sid` 已改为 `workspace_id=sid`。
+- 其余文档（`docs/architecture-improvement-plan.md` 等）中的 `session_id` 属 `app/` 平台真实 API 参数名（如 `GET /history?session_id=`），与 agent_federation 隔离键无关，**不改动**。
+- 结论：agent_federation 侧 docs 已同步；app 侧真实参数名保持。
+- 状态：✅ 已修复（仅 agent_federation 侧）
 
 ### TD-13 内核 `user_id` 形参语义与全局 `workspace_id` 隔离键不一致
 - 关联：PR#10 审核（2026-08-18）独立补充项
 - 现状：`agent_core.memory.{recall_typed,remember_fact}` 形参与 PG/Milvus 列名均为 `user_id`，
-  而 deepagents 调用处（`deepagents/agent/memory/main_agent_memory.py`）传的是 `workspace_id`。
+  而 agent_federation 调用处（`agent_federation/agent/memory/main_agent_memory.py`）传的是 `workspace_id`。
   隔离主键**正确传递**（`workspace_id` 即落于内核 `user_id` 形参位），无功能缺陷。
 - 风险：跨层命名错位易误导维护者误判"双重隔离/错位落库"。
 - 建议：**仅 docstring 澄清，不重命名内核形参/列**（内核为跨包共享契约，重命名破坏 schema 与多包兼容）。
@@ -146,7 +146,7 @@ ADR-0004 阶段4 的候选B（`eval/memory_reuse_llm.py`）评审中，发现 `_
 ## 交叉引用
 - `docs/dual-track-architecture-analysis.md:24-28`：意图分类双份未对齐单一真相源 → 待办 `TB-9`（未排期）
 - `docs/plan-e-dual-track-convergence.md` S-5：kefu 符合性核验范围外，本期不纳入
-- 说明：本文档 TD-1/TD-2 即 `TB-9` 在 kefu 侧的具体落点；统一意图架构（deepagents embedding 主路径）已完成，
+- 说明：本文档 TD-1/TD-2 即 `TB-9` 在 kefu 侧的具体落点；统一意图架构（agent_federation embedding 主路径）已完成，
   但 kefu 为漏网之鱼。
 
 ## 排期建议
@@ -165,7 +165,7 @@ ADR-0004 阶段4 的候选B（`eval/memory_reuse_llm.py`）评审中，发现 `_
 - 修复（v2 任务二）：
   - `agent_core.monitor.ToolMonitor` 新增 `report_circuit(state, message, data)` 公共方法，
     复用既有监控通道（WebSocket + 回调 + 日志）。
-  - 新增 `deepagents/agent/metrics.py`：进程内计数器
+  - 新增 `agent_federation/agent/metrics.py`：进程内计数器
     （`circuit_open_total` / `circuit_half_open_total` / `circuit_closed_total` /
     `delegation_success_total` / `delegation_failure_total` / `degrade_total` + 熔断状态快照），
     零外部依赖（遵循内核零依赖铁律）。

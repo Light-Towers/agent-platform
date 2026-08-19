@@ -8,11 +8,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY agent-core/ ./agent-core/
-COPY deepagents/requirements.txt .
+COPY agent_federation/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt \
     && pip install --no-cache-dir ./agent-core
 
-COPY deepagents/ .
+COPY agent_federation/ .
 
 EXPOSE 8000
 

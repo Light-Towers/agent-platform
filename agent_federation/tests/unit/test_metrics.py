@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """P3 可观测性：进程内指标计数器单测（防回归）。
 
-覆盖 deepagents/agent/metrics.py：
+覆盖 agent_federation/agent/metrics.py：
 - record_circuit_state 状态转换计数 + 快照
 - record_delegation 成功/失败/降级计数
 - snapshot 字段完整性

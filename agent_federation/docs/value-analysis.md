@@ -19,10 +19,10 @@
 
 ## 二、解决的业务痛点
 
-| 痛点 | 具体表现 | deepagents 的解决方式 |
+| 痛点 | 具体表现 | agent_federation 的解决方式 |
 |------|---------|----------------------|
 | **Demo 到生产的鸿沟** | demo 级多 Agent 停在「单进程 demo」，缺生产横切 | 补齐 8 项横切能力，每项可独立开关/回滚 |
-| **异构 Agent 服务治理** | 4 个子项目框架异构（deepagents/LangGraph/legacy），技术栈割裂 | 联邦网关 + Agent Protocol，不合并代码，HTTP 解耦 |
+| **异构 Agent 服务治理** | 4 个子项目框架异构（agent_federation/LangGraph/legacy），技术栈割裂 | 联邦网关 + Agent Protocol，不合并代码，HTTP 解耦 |
 | **LLM 成本失控** | 简单 chitchat 也走大模型全工具路由 | 两级意图识别 short-circuit + 成本路由三级 tier |
 | **重复查询浪费** | 相同问题每次重算 LLM | 四层语义缓存（NullCache → L1 精确 → L2 HNSW → L3 检索） |
 | **子服务故障雪崩** | 一个子服务挂导致整体不可用 | 熔断器 + 健康检查 + fallback 降级 |

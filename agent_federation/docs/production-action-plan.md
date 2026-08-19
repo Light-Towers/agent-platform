@@ -68,14 +68,14 @@ uv pip compile requirements.txt -o tmp.txt
 `create_fallback_model()` 在有备用模型时直接返回 `LangChainFallbackModel`。
 
 ```python
-# deepagents/agent/llm.py —— 无降级逻辑，仅构造适配层
+# agent_federation/agent/llm.py —— 无降级逻辑，仅构造适配层
 if fallback is not None:
     return LangChainFallbackModel(primary=primary, fallback=fallback)
 return primary
 ```
 
-**验证**：`deepagents/tests/unit/test_llm_fallback.py` 8 passed（含「主失败→降级备→
-冷却到期→恢复」契约）；agent-core + deepagents 单测 96 passed。
+**验证**：`agent_federation/tests/unit/test_llm_fallback.py` 8 passed（含「主失败→降级备→
+冷却到期→恢复」契约）；agent-core + agent_federation 单测 96 passed。
 
 ### 0.4 kefu-service 入库完整性核查
 

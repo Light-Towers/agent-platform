@@ -13,9 +13,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-_deepagents_root = str(Path(__file__).resolve().parents[2])
-if _deepagents_root not in sys.path:
-    sys.path.insert(0, _deepagents_root)
+_agent_federation_root = str(Path(__file__).resolve().parents[2])
+if _agent_federation_root not in sys.path:
+    sys.path.insert(0, _agent_federation_root)
 
 from agent.async_subagents import _HttpSubAgent  # noqa: E402
 

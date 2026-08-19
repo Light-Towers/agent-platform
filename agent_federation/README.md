@@ -1,4 +1,4 @@
-# deepagents 多智能体编排项目
+# agent_federation 多智能体编排项目
 
 > 基于多智能体项目改造而成的生产级多智能体编排系统。
 > 联邦网关 + 3 子服务（wenda/zhiku/kefu），补齐思考规划 / 意图识别 / 意图改写 / 语义缓存 4 大能力。
@@ -7,7 +7,7 @@
 ## 架构
 
 ```
-用户 → deepagents-gateway（联邦网关）
+用户 → agent_federation-gateway（联邦网关）
          ├── guardrail（PII 脱敏 + 注入检测）
          ├── L1 意图分类（embedding+原型余弦）→ L2 LLM 细判
          ├── Query 改写（指代消解+子问题分解）
@@ -66,10 +66,10 @@ python -m api.server  # 启动 FastAPI，默认 :8000
 - ✅ Phase 1：wenda-adapter（SSE→JSON，已于 2026-08 退役，由 wenda-data-agent 直连替代）+ kefu-adapter（已移除，迁移至 kefu-service 直连）+ shared-schemas 统一 schema
 - ✅ Phase 2：AsyncSubAgent 联邦网关 + AGENT_MODE 切换 + 健康探活降级
 - ✅ Phase 3：L1 embedding+原型余弦 + L2 LLM 细判 + Query 改写 + 子问题分解
-- ✅ Phase 4：TodoListMiddleware + RubricMiddleware（扩展非重写 deepagents）
+- ✅ Phase 4：TodoListMiddleware + RubricMiddleware（扩展非重写 deepagents PyPI 包）
 - ✅ Phase 5：Valkey 分层缓存（L1 精确 + L2 语义 HNSW + L3 检索 + NullCache + singleflight）
 - ✅ Phase 6：限流/熔断/guardrail/灰度/成本路由/多租户
-- ✅ Phase 7：kefu-service（legacy → deepagents + LangGraph，9 命令 + 3 Flow + GraphRAG）
+- ✅ Phase 7：kefu-service（legacy → deepagents PyPI + LangGraph，9 命令 + 3 Flow + GraphRAG）
 
 ### 待做 / 已知限制
 
@@ -93,7 +93,7 @@ python -m api.server  # 启动 FastAPI，默认 :8000
 ## 项目结构
 
 ```
-deepagents/
+agent_federation/
 ├── agent/
 │   ├── main_agent.py         # 主管 Agent（懒初始化 + SQLite checkpointer）
 │   ├── llm.py                # LLM 模型初始化
@@ -124,7 +124,7 @@ deepagents/
 
 ## 与 zhanggui-zhiku 的差异化
 
-| 维度 | zhanggui-zhiku | deepagents |
+| 维度 | zhanggui-zhiku | agent_federation |
 |------|----------------|------------|
 | 核心范式 | RAG 检索增强 | 多智能体编排 |
 | 深挖亮点 | 检索链路、向量工程 | 委派机制、会话隔离、故障隔离 |
@@ -135,4 +135,4 @@ deepagents/
 
 ---
 
-*改造自多智能体项目，基于 deepagents==0.7.5 + LangGraph 1.2.10。*
+*改造自多智能体项目，基于 deepagents PyPI 包==0.7.5 + LangGraph 1.2.10。本地包路径于 2026-08-19 从 `deepagents/` 重命名为 `agent_federation/`，彻底消除与 PyPI 同名依赖的目录遮蔽。*
