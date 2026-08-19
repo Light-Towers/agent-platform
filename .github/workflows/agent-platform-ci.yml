@@ -1,43 +1,36 @@
 name: agent-platform-ci
 
 # 触发：仅当影响运行/测试/契约/编排的代码变更时跑。
+# 布局：packages/（agent-core/agent-runtime/shared-schemas）+ applications/（agent_server 等）
 on:
   push:
     paths:
-      - "app/**"
+      - "packages/**"
+      - "applications/**"
       - "tests/**"
       - "eval/**"
       - "docs/**"
       - "pyproject.toml"
+      - "uv.lock"
+      - "Makefile"
       - "docker-compose.yml"
       - "Dockerfile"
       - ".env.example"
       - ".github/workflows/agent-platform-ci.yml"
-      - "agent-core/**"
-      - "shared-schemas/**"
-      - "agent_federation/**"
-      - "dialogue-framework/**"
-      - "wenda-data-agent/**"
-      - "zhanggui-zhiku/**"
-      - "kefu-service/**"
   pull_request:
     paths:
-      - "app/**"
+      - "packages/**"
+      - "applications/**"
       - "tests/**"
       - "eval/**"
       - "docs/**"
       - "pyproject.toml"
+      - "uv.lock"
+      - "Makefile"
       - "docker-compose.yml"
       - "Dockerfile"
       - ".env.example"
       - ".github/workflows/agent-platform-ci.yml"
-      - "agent-core/**"
-      - "shared-schemas/**"
-      - "agent_federation/**"
-      - "dialogue-framework/**"
-      - "wenda-data-agent/**"
-      - "zhanggui-zhiku/**"
-      - "kefu-service/**"
 
 # TB-8 分层门禁（见 docs/architecture-improvement-plan.md §6.2）：
 # 本 workflow 只守「确定性门禁」—— lint + 单测 + 启发式路由评测（无 LLM 依赖，永远可达）。
