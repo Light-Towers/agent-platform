@@ -33,8 +33,8 @@ Agent Platform 是一个基于 **LangGraph Supervisor 模式** 的统一智能�
 本仓库的 `agent-core` 并非从零发明，而是受开源包 [Light-Towers/reliable-agent](https://github.com/Light-Towers/reliable-agent)（框架无关的 LLM/Agent 生产可靠性原语）启发/改写后的**本项目落地版**。两者组件一一映射、设计铁律一致：
 
 - **组件映射**：tracing / eval.metrics / guardrails / llm_client / memory / tool_registry 在 `reliable-agent` 与 `agent-core` 中均有对应。
-- **设计铁律同源**："框架无关、core 绝不 import langgraph/宿主应用、重依赖全部 extra + lazy import、仅 stdlib 可 import"原则与 `agent-core` 逐字对应（见 `agent-core/README.md`）。
-- **不是 pip 依赖**：`agent-core/pyproject.toml` 的 `dependencies=[]`，全仓库无任何 `reliable-agent` 引用 —— `agent-core` 是**自研实现等价内核**，而非直接 `pip install` 该包。
+- **设计铁律同源**："框架无关、core 绝不 import langgraph/宿主应用、重依赖全部 extra + lazy import、仅 stdlib 可 import"原则与 `agent-core` 逐字对应（见 `packages/agent-core/README.md`）。
+- **不是 pip 依赖**：`packages/agent-core/pyproject.toml` 的 `dependencies=[]`，全仓库无任何 `reliable-agent` 引用 —— `agent-core` 是**自研实现等价内核**，而非直接 `pip install` 该包。
 - **本地是 superset**：`reliable-agent` 的 memory 仅指对话历史、eval.metrics 仅对给定 ID 列表算指标，**不含 embedding / vector store / 语义记忆**；本地 `agent-core` 额外提供了 `embedder.py` 与 `vector_backend.py`（pgvector 语义记忆），能力更全。
 
 更完整的上游对照与护栏清单见 [`docs/architecture-improvement-plan.md` §0.1](docs/architecture-improvement-plan.md)。
@@ -50,9 +50,9 @@ Agent Platform 是一个基于 **LangGraph Supervisor 模式** 的统一智能�
 - **混合检索 RAG**（`applications/agent_server/subagents/rag.py` + `applications/agent_server/rag/`）：文档导入 → 语义切分 → pgvector 向量检索 + BM25 关键词检索 → RRF 融合排序
 - **Text-to-SQL**（`applications/agent_server/subagents/sql_agent.py` + `applications/agent_server/sql/`）：训练三件套（DDL + 业务文档 + 问题-SQL 范例）→ sqlglot 白名单守卫 → 连接级只读执行
 - **长期记忆**（`applications/agent_server/memory/longterm.py`）：pgvector 语义召回历史对话，跨会话上下文关联
-- **语义缓存**（`applications/agent_server/infra/cache.py`）：余弦距离阈值判定同义命中，命中时跳过编排直接返回
+- **语义缓存**（`packages/agent-runtime/agent_runtime/cache.py`）：余弦距离阈值判定同义命中，命中时跳过编排直接返回
 - **上下文压缩**（`applications/agent_server/agent/compact.py`）：多轮会话 token 超阈值时自动摘要旧消息，参考 Claude Code / Codex / OpenCode
-- **熔断器**（`applications/agent_server/infra/circuit_breaker.py`）：closed → open → half-open 状态机，连续失败达阈值后熔断，冷却窗口到期放行试探
+- **熔断器**（`packages/agent-runtime/agent_runtime/circuit_breaker.py`）：closed → open → half-open 状态机，连续失败达阈值后熔断，冷却窗口到期放行试探
 - **LLM 主备降级**（`applications/agent_server/agent/llm.py`）：主模型超时/错误时自动切换 fallback 模型
 - **SSE 流式响应**：route → evidence → answer → done 全链路流式
 - **认证 + 会话防劫持**（`applications/agent_server/api/auth.py`）：API_KEY 启用时按密钥派生 thread_id，忽略客户端传入值
@@ -61,11 +61,11 @@ Agent Platform 是一个基于 **LangGraph Supervisor 模式** 的统一智能�
 
 ### Phase 2 — 运行时增强
 
-- **会话并发协调**（`applications/agent_server/infra/coordinator.py`）：per-session `asyncio.Lock` 互斥，同 session 串行 / 异 session 并发；支持 coalesce（合并）/ queue（排队）/ reject（拒绝）三策略
-- **Durable Admission**（`applications/agent_server/infra/admission.py`）：PG 持久化准入队列 + 三维滑动窗口限流（per-user / per-session / global）+ 优先级调度 + 崩溃恢复；不存储问题全文（脱敏约束）
-- **会话回退**（`applications/agent_server/infra/revert.py`）：Checkpoint 级原子回退，不删除历史 checkpoint（支持 redo），跨用户禁止，异步审计日志
-- **OTel 分布式追踪**（`applications/agent_server/infra/otel.py`）：OpenTelemetry 接线，W3C traceparent 透传，问题脱敏（仅记录长度 + 哈希），与 Langfuse 共存，exporter 可插拔（otlp/jaeger/console/none）
-- **MCP Client**（`applications/agent_server/infra/mcp_client.py` + `applications/agent_server/subagents/mcp.py`）：多 MCP server 连接管理（stdio + SSE transport），工具白名单校验，per-server 独立熔断器隔离故障域，调用审计
+- **会话并发协调**（`packages/agent-runtime/agent_runtime/coordinator.py`）：per-session `asyncio.Lock` 互斥，同 session 串行 / 异 session 并发；支持 coalesce（合并）/ queue（排队）/ reject（拒绝）三策略
+- **Durable Admission**（`packages/agent-runtime/agent_runtime/admission.py`）：PG 持久化准入队列 + 三维滑动窗口限流（per-user / per-session / global）+ 优先级调度 + 崩溃恢复；不存储问题全文（脱敏约束）
+- **会话回退**（`packages/agent-runtime/agent_runtime/revert.py`）：Checkpoint 级原子回退，不删除历史 checkpoint（支持 redo），跨用户禁止，异步审计日志
+- **OTel 分布式追踪**（`packages/agent-runtime/agent_runtime/otel.py`）：OpenTelemetry 接线，W3C traceparent 透传，问题脱敏（仅记录长度 + 哈希），与 Langfuse 共存，exporter 可插拔（otlp/jaeger/console/none）
+- **MCP Client**（`packages/agent-runtime/agent_runtime/mcp_client.py` + `applications/agent_server/subagents/mcp.py`）：多 MCP server 连接管理（stdio + SSE transport），工具白名单校验，per-server 独立熔断器隔离故障域，调用审计
 
 ---
 
@@ -145,7 +145,7 @@ flowchart LR
 
 ```bash
 pip install -e ".[dev]"
-DATABASE_URL= uvicorn app.main:app --port 8000
+DATABASE_URL= uvicorn agent_server.main:app --port 8000
 ```
 
 无需 PostgreSQL、无需 LLM API Key，直答链路即可跑通。
@@ -315,10 +315,10 @@ curl http://127.0.0.1:8000/health
 ## 测试与评测
 
 ```bash
-pytest -q                            # 单元测试（40 用例，无外部依赖）
-python -m eval.run_eval              # 启发式路由准确率基线（12 条 golden）
-python -m eval.run_eval --llm        # 配置 LLM 后评测结构化路由
-python -m eval.run_eval --fail-below 1.0   # CI 门禁用法
+make test                            # 三套件 pytest（根 tests/ + 联邦 unit + kefu）
+python eval/run_eval.py              # 启发式路由准确率基线（12 条 golden）
+python eval/run_eval.py --llm        # 配置 LLM 后评测结构化路由
+python eval/run_eval.py --fail-below 0.8   # CI 门禁用法
 ```
 
 CI（`.github/workflows/agent-platform-ci.yml`）在每次推送时执行 pytest + 评测门禁，不调用模型，不需要 LLM API Key。
@@ -327,14 +327,14 @@ CI（`.github/workflows/agent-platform-ci.yml`）在每次推送时执行 pytest
 
 ## 目录结构
 
-> 本仓库为 **monorepo**，根 `app/` 只是其中一套「单进程 Supervisor 平台」。
-> 另有 `agent_federation/` 联邦网关编排系统（与 `app/` 并行，二者不构成上下级关系），
+> 本仓库为 **monorepo**（根 + `packages/` + `applications/`），`applications/agent_server/` 只是其中一套「单进程 Supervisor 平台」。
+> 另有 `applications/agent_federation/` 联邦网关编排系统（与 agent_server 并行，二者不构成上下级关系），
 > 以及若干 sibling 业务包与共享内核包。各包均为独立 `pyproject.toml` 工程，
-> 通过 `agent-core` / `shared-schemas` 共享内核与契约，以 `uv` workspace 或 editable 安装互联。
+> 通过 `packages/agent-core` / `packages/shared-schemas` 共享内核与契约，以 `uv` workspace 互联。
 
 ### uv workspace 环境约定（重要）
 
-本仓库是 uv workspace（根 `pyproject.toml` 含 `[tool.uv.workspace]`）。**默认 `uv sync` 只安装根包及其依赖，会卸载其它 member 包**（如 `agent_federation`/`kefu-service`/`wenda-data-agent`/`zhanggui-zhiku`/`dialogue-framework`），导致跨包测试/导入失败。
+本仓库是 uv workspace（根 `pyproject.toml` 含 `[tool.uv.workspace]`）。**默认 `uv sync` 只安装根包及其依赖，会卸载其它 member 包**（如 `applications/` 下各应用），导致跨包测试/导入失败。
 
 完整开发环境请用（装全部 workspace 包 + dev 工具）：
 
@@ -345,8 +345,8 @@ uv sync --all-packages --extra dev
 运行单个包的测试（无需手动装依赖）：
 
 ```bash
-uv run --package agent-federation-app python -m pytest agent_federation/tests/unit/ -q
-uv run python -m pytest tests/ -q          # 根 app 包
+uv run --package agent-federation-app python -m pytest applications/agent_federation/tests/unit/ -q
+uv run python -m pytest tests/ -q          # 根 agent_server 包
 ```
 
 > 详见 `docs/architecture-improvement-plan.md` §6 TB-3（uv workspace 环境脆弱）。
@@ -354,7 +354,7 @@ uv run python -m pytest tests/ -q          # 根 app 包
 ### 单进程平台（本 README 描述对象）
 
 ```
-app/
+applications/agent_server/
 ├── main.py                # 应用工厂 + lifespan 预热（五项 Phase 2 资源初始化）
 ├── config.py              # pydantic-settings 集中配置
 ├── schemas.py             # API Pydantic 契约（复用 shared-schemas，QueryRequest 经 AliasChoices 双写兼容 question/thread_id；HealthResponse 已对齐联邦契约，无需改动）
@@ -362,7 +362,7 @@ app/
 │   ├── auth.py            # 认证 + 会话防劫持
 │   └── routes.py          # /query /import /sql/train /session/revert /health
 ├── agent/
-│   ├── graph.py           # Supervisor 图（route → capability → synthesize）
+│   ├── graph.py           # Supervisor 图（route → capability → synthesize；Phase 3 起包装为 general_qa Workflow Skill）
 │   ├── router.py          # LLM 结构化路由 + 启发式兜底
 │   ├── state.py           # AgentState TypedDict
 │   ├── llm.py             # LLM 主备降级
@@ -381,55 +381,55 @@ app/
 │   ├── pipeline.py        # Text-to-SQL 管线
 │   └── schema_store.py    # 训练三件套存储
 ├── memory/
-│   └── longterm.py        # pgvector 长期记忆
-└── infra/
-    ├── db.py              # 连接池 + schema 初始化
-    ├── cache.py           # 语义缓存
-    ├── circuit_breaker.py # 熔断器
-    ├── tracing.py         # Langfuse 接线
-    ├── coordinator.py     # 会话并发协调（Phase 2）
-    ├── admission.py       # 持久化准入 + 限流（Phase 2）
-    ├── revert.py          # 会话回退（Phase 2）
-    ├── otel.py            # OTel 追踪（Phase 2）
-    └── mcp_client.py      # MCP client（Phase 2）
+│   ├── longterm.py        # pgvector 长期记忆
+│   └── thread_persist.py  # 对话历史写回 checkpointer（Planner 协议中立）
+├── planners/
+│   ├── deterministic.py   # DeterministicPlanner（Plan-F Phase 2）
+│   └── __init__.py        # PLANNER env 切换实现
+├── capabilities.py        # SkillRegistry 装配（search/rag/sql/mcp + general_qa Workflow Skill）
+└── infra/                 # 退役占位（运行时模块已迁入 packages/agent-runtime）
 ```
 
 ### 联邦网关编排系统（并行 sibling）
 
 ```
-agent_federation/          # 联邦网关 + 3 子服务编排中枢（详见 agent_federation/README.md）
-                          #   - api.server：网关入口（guardrail / 意图分类 / 改写 / 语义缓存 / Planner）
-                          #   - agent/：3 子 Agent（text_to_sql / rag_query / customer_service）
-                          #   - AGENT_MODE=local|remote 切换本地子 Agent 或远程 AsyncSubAgent
+applications/agent_federation/  # 联邦网关 + 3 子服务编排中枢（详见 applications/agent_federation/README.md）
+                              #   - api.server：网关入口（guardrail / 意图分类 / 改写 / 语义缓存 / Planner）
+                              #   - agent/：3 子 Agent（text_to_sql / rag_query / customer_service）
+                              #   - planners/agentic.py：AgenticPlanner（统一 Planner 协议适配）
+                              #   - AGENT_MODE=local|remote 切换本地子 Agent 或远程 AsyncSubAgent
 ```
 
 ### 共享内核与契约
 
 ```
-agent-core/                # 零依赖运行时内核：tracing / guardrails / sql 守卫 / llm / memory / tool registry
-shared-schemas/            # agent_federation 联邦 4 服务共享的 Pydantic 契约（QueryResponse 等）
+packages/agent-core/         # 零依赖运行时内核：tracing / guardrails / sql 守卫 / llm / memory / typed 记忆
+packages/agent-runtime/      # 运行时中间件（admission/coordinator/cache/circuit_breaker/revert/mcp/otel/tracing/db）
+                             #   + planner/（Planner 协议 + PlannerRuntime.skill_guard 组合治理）
+                             #   + skills/（SkillRegistry + Function/Agent/Remote/Workflow 四执行器）
+packages/shared-schemas/     # agent_federation 联邦 4 服务共享的 Pydantic 契约（QueryResponse / ThreadState 等）
 ```
 
 ### 业务 / 适配 sibling 包
 
 ```
-kefu-service/              # kefu 迁移版（deepagents + LangGraph），已实现且 CI 通过，已接入网关
+applications/kefu-service/   # kefu 迁移版（deepagents + LangGraph），已实现且 CI 通过，已接入网关
                           #   —— 提供 Agent Protocol 兼容 /invoke（返回 QueryResponse）；
                           #      网关 KEFU_USE_ADAPTER=false 直连本服务（默认）
                           #   —— 原 kefu-adapter（legacy 适配层）已于 2026-08 移除（无调用方，
                           #      默认直连 kefu-service；外部 legacy 退役为运维动作）
-wenda-data-agent/          # Text-to-SQL 数据分析垂直场景（生产化改造自 courses/.../data-agent）
+applications/wenda-data-agent/ # Text-to-SQL 数据分析垂直场景（生产化改造自 courses/.../data-agent）
                           #   —— 原 wenda-adapter（SSE→JSON 适配层）已于 2026-08 退役，
                           #      网关直连本服务 /api/query（wenda-data-agent 默认 :8000）
-zhanggui-zhiku/            # 掌柜智库：RAG 知识库导入 + 多路检索问答一体化服务（:8900）
-dialogue-framework/        # LLM 对话系统框架基础设施（生产化改造自 courses/.../legacy）
+applications/zhanggui-zhiku/ # 掌柜智库：RAG 知识库导入 + 多路检索问答一体化服务（:8900；包名仍为 app）
+applications/dialogue-framework/ # LLM 对话系统框架基础设施（生产化改造自 courses/.../legacy）
 ```
 
 ### 测试与评测
 
 ```
-eval/                      # golden set + 评测脚本（针对 app/ 平台）
-tests/                     # 单元测试（40 用例，针对 app/ 平台）
+eval/                      # golden set + 评测脚本（针对 agent_server 平台；run_eval.py + run_planner_eval.py 双基线）
+tests/                     # 单元测试（针对 agent_server 平台；含 planner/skill/governance 契约测试）
 ```
 
 ---
@@ -454,11 +454,11 @@ tests/                     # 单元测试（40 用例，针对 app/ 平台）
 
 > 下列项为架构决策 / 迁移工程，需在拍板后实施，**非文档层面的简单修复**。
 
-- **U-1 · QueryRequest 入站字段名不统一（待拍板）**：`applications/agent_server/schemas.py:41-54` 经 `AliasChoices("query","question")` / `AliasChoices("session_id","thread_id")` 双写兼容。内部 state 与 DB 列名均为 `question`（`applications/agent_server/agent/graph.py`、`applications/agent_server/sql/schema_store.py`）。移除兼容层前须确认全部入站/出站边界已统一。*注：旧评审称 `HealthResponse` 字段集完全不同属误判——`HealthResponse` 已 `class HealthResponse(BaseHealthResponse)` 对齐联邦契约（`shared-schemas/health.py:25-40`），无需处理。*
+- **U-1 · QueryRequest 入站字段名不统一（待拍板）**：`applications/agent_server/schemas.py:41-54` 经 `AliasChoices("query","question")` / `AliasChoices("session_id","thread_id")` 双写兼容。内部 state 与 DB 列名均为 `question`（`applications/agent_server/agent/graph.py`、`applications/agent_server/sql/schema_store.py`）。移除兼容层前须确认全部入站/出站边界已统一。*注：旧评审称 `HealthResponse` 字段集完全不同属误判——`HealthResponse` 已 `class HealthResponse(BaseHealthResponse)` 对齐联邦契约（`packages/shared-schemas/shared_schemas/health.py:25-40`），无需处理。*
 - **U-2 · kefu 迁移（已完成）**：
   - ✅ `kefu-service` 已升级为 Agent Protocol 兼容 server：新增 `POST /invoke`（接受 `QueryRequest`，返回 `QueryResponse`，`kefu-service/main.py` + 依赖 `shared-schemas`）；旧 `/api/messages` 保留为 legacy 兼容入口。
-  - ✅ 网关 `agent_federation/agent/config.py` 新增 `KEFU_SERVICE_URL` + `KEFU_USE_ADAPTER` 开关（默认 `false`，直连 `kefu-service:8003`）；`async_subagents.py` 增加 httpx 远程回退（外部 `deepagents` 包未安装时直连 `/invoke`）。
-  - ✅ `kefu-adapter` 包已于 2026-08 移除（无调用方，默认直连 `kefu-service` 生效）。`agent_federation/eval/run-all.py` 的 kefu 项目已改默认指向 `KEFU_SERVICE_URL`（`KEFU_ADAPTER_URL` 仍可覆盖）。*注：原评审称「非简单改 URL 可接入」属实，但根因（缺 Agent Protocol + QueryResponse）已在本轮修复。*
+  - ✅ 网关 `applications/agent_federation/agent/config.py` 新增 `KEFU_SERVICE_URL` + `KEFU_USE_ADAPTER` 开关（默认 `false`，直连 `kefu-service:8003`）；`async_subagents.py` 增加 httpx 远程回退（外部 `deepagents` 包未安装时直连 `/invoke`）。
+  - ✅ `kefu-adapter` 包已于 2026-08 移除（无调用方，默认直连 `kefu-service` 生效）。`applications/agent_federation/eval/run-all.py` 的 kefu 项目已改默认指向 `KEFU_SERVICE_URL`（`KEFU_ADAPTER_URL` 仍可覆盖）。*注：原评审称「非简单改 URL 可接入」属实，但根因（缺 Agent Protocol + QueryResponse）已在本轮修复。*
 - **TB-1 / TB-2 · dialogue-framework 与内核协议对齐（已完成）**：
   - ✅ **TB-1**：`dialogue_framework/shared/llm/core_adapter.py` 新增 `LLMCoreClient`，把 agent_core `BaseLLMProvider`（工厂协议）桥接为 DF `BaseChatClient`（运行时协议）；两协议互补不合并，DF 不删除。
   - ✅ **TB-2**：`dialogue_framework/core/tracker_memory.py` 新增 `TrackerConversationMemory`，实现 agent_core `ConversationMemory` 协议，把消息落进 `Tracker.events`；`Tracker.to_conversation_memory()` 桥接挂载。DF 自有数据结构未改动。
