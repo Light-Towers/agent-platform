@@ -307,29 +307,14 @@ def _node_event(node: str, payload: dict) -> dict | None:
 
 
 def _stream_event(event) -> dict | None:
-    """StreamEvent（Planner 协议）→ SSE 事件（与 graph 路径事件同构，客户端无感）。"""
-    if event.type == "route":
-        return {
-            "type": "route",
-            "capability": event.payload.get("capability"),
-            "reason": event.payload.get("reason"),
-        }
-    if event.type == "evidence":
-        return {
-            "type": "evidence",
-            "node": event.payload.get("node"),
-            "count": event.payload.get("count", 0),
-            "preview": event.payload.get("preview", ""),
-        }
-    if event.type == "memory":
-        return {"type": "memory", "notes": event.payload.get("notes", [])}
-    if event.type == "status":
-        return {"type": "status", **event.payload}
-    if event.type == "answer":
-        return {"type": "answer", "text": event.payload.get("text", "")}
-    if event.type == "error":
-        return {"type": "error", **event.payload}
-    return None
+    """StreamEvent（Planner 协议）→ SSE 事件（与 graph 路径事件同构，客户端无感）。
+
+    委托 ``serialize_stream_event``（agent_runtime 共享映射），app 与联邦双轨出口同源，
+    避免 schema 漂移（Plan-F WS 出口统一）。
+    """
+    from agent_runtime.planner.protocol import serialize_stream_event
+
+    return serialize_stream_event(event)
 
 
 @router.post("/import", response_model=ImportResponse)

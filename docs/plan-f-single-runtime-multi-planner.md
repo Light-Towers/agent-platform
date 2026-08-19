@@ -243,6 +243,7 @@ app 的 search/rag/sql/mcp（进程内节点）与联邦 `database_query_agent`/
 - `app/main.py`：lifespan 装配 `registry=get_registry(graph=...)` + `app.state.planner_runtime=PlannerRuntime(...)`；启动日志增 planner kind。
 - `app/config.py`：增 `max_skill_depth: int = 4` / `max_steps: int = 20`。
 - 不做（不过度设计）：WS 出口统一延后（当前 app 仅 SSE，联邦 WS 适配不在本 phase 范围）；组合治理参数走 Settings 注入，不硬编码。
+  → **已于 2026-08-19 收尾**：见下方「WS 出口统一收尾」。
 - 验证：新增/扩展测试 25 例全绿（`tests/test_capability_registry.py` 13 例含 schema 契约 + WORKFLOW + general_qa 装配；`tests/test_planner_governance.py` 6 例含 skill_guard 三违规；`tests/test_thread_persist.py` 6 例含 append/read 往返）；**根 tests 全量回归 322 passed（零回归）**，lint 0 error。
 
 ### Phase 3 联邦侧收尾（2026-08-19）—— 双轨真正闭环
@@ -262,3 +263,13 @@ app 的 search/rag/sql/mcp（进程内节点）与联邦 `database_query_agent`/
 - **用法**：先 `--baseline eval/baselines/fed_latest.jsonl` 锁切换后基线 → 后续改动 `--compare eval/baselines/fed_latest.jsonl --fail-below 0.05` 守门禁。
 - 不做（不过度设计）：不引入新 golden schema、不改动 judge 逻辑、不做跨 run 的 LLM 语义相似度比对（路由决策层已足够定位漂移）。
 - 验证：新增 `tests/unit/test_eval_baseline.py`（4 例覆盖 baseline 快照剥离 + exact/jaccard/rubric 退化 + 缺失题 + clean 无漂移）；联邦 unit 85 passed / 根 tests 322 passed（零回归），lint 0 error。
+
+### WS 出口统一收尾（2026-08-19）—— 双轨流式事件同构
+
+> 原 Phase 3「统一 SSE/WS 出口」仅落 app 侧 SSE；联邦 `/ws/{thread_id}` 仍是 echo/pong 桩，未接 deep_agent 事件流。本收尾把联邦 WS 也接入统一 `StreamEvent` 出口，使 app(SSE) / 联邦(WS) 双轨事件 schema 同源（传输层各异，事件语义统一）。
+
+- `agent_runtime/planner/protocol.py`：新增 `serialize_stream_event(event: StreamEvent) -> dict | None`，作为 **app / 联邦共享的单一映射**（route/evidence/memory/status/answer/error 扁平化输出），消除双轨出口 schema 漂移源。
+- `app/api/routes.py`：`_stream_event` 改为委托 `serialize_stream_event`（输出结构不变，消除 app 内硬编码映射副本），app SSE 出口仍经此函数。
+- `agent_federation/api/server.py`：`/ws/{thread_id}` 从 echo/pong 升级为——收 `{"type":"query","text":...}` → `AgenticPlanner.execute(plan, runtime)` 产 `StreamEvent` → 逐条 `send_json(serialize_stream_event(event))` → 收尾 `{"type":"done","thread_id","answer"}`；非 query 合法 JSON 仍回退 pong（保留旧 echo 兼容）。`/api/task` 现状不动。
+- **Boundary（不过度设计）**：仅统一「事件 schema 出口」，不重写联邦 WS 鉴权/并发/前端协议；`AgenticPlanner.execute` 当前产出 route/answer/error（`_execute_agent_core` 内部 monitor 事件未桥接为 StreamEvent），evidence/memory 桥接留作后续（非本次范围）。
+- 验证：新增 `tests/unit/test_ws_stream.py`（2 例：query 流式收 route+answer+done；非 query 回退 pong，mock `AgenticPlanner.execute` 免 LLM）；联邦 unit 87 passed / 根 tests 322 passed（零回归），lint 0 error。

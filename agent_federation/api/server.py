@@ -1,4 +1,5 @@
 import asyncio
+import json
 import os
 import re
 import secrets
@@ -309,12 +310,40 @@ async def websocket_endpoint(
     ws_thread_id = resolve_thread_id(thread_id, api_key)
     await manager.connect(websocket, ws_thread_id)
     try:
+        # Plan-F WS 出口统一：客户端发 {"type":"query","text":...} → 服务端经
+        # AgenticPlanner.execute 产出 StreamEvent（与 app /query 同构）→ 逐条 send_json。
+        # 传输层 WS 与 app SSE 不同，但事件 schema 经共享 serialize_stream_event 同源。
+        from agent_federation.planners import AgenticPlanner, get_planner_runtime
+        from agent_runtime.planner.protocol import (
+            PlannerContext,
+            serialize_stream_event,
+        )
+
+        planner = AgenticPlanner()
+        runtime = get_planner_runtime()
+
         while True:
             data = await websocket.receive_text()
-            await websocket.send_json({
-                "type": "pong",
-                "message": f"服务端已收到: {data}"
-            })
+            try:
+                msg = json.loads(data)
+            except json.JSONDecodeError:
+                await websocket.send_json({"type": "error", "error": "invalid json"})
+                continue
+
+            if msg.get("type") != "query" or not msg.get("text"):
+                await websocket.send_json({"type": "pong", "message": f"服务端已收到: {data}"})
+                continue
+
+            plan = await planner.plan(PlannerContext(question=msg["text"], workspace_id=ws_thread_id))
+            final_answer = ""
+            async for event in planner.execute(plan, runtime):
+                out = serialize_stream_event(event)
+                if out is None:
+                    continue
+                if event.type == "answer":
+                    final_answer = event.payload.get("text", "")
+                await websocket.send_json(out)
+            await websocket.send_json({"type": "done", "thread_id": ws_thread_id, "answer": final_answer})
     except WebSocketDisconnect:
         manager.disconnect(websocket, ws_thread_id)
     except Exception:

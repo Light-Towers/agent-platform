@@ -147,3 +147,34 @@ class Planner(ABC):
     @abstractmethod
     async def execute(self, plan: Plan, runtime: PlannerRuntime) -> AsyncIterator[StreamEvent]:
         """编排执行：按 Plan 依次调用能力、合成答案，产出统一流式事件。"""
+
+
+def serialize_stream_event(event: StreamEvent) -> dict | None:
+    """StreamEvent（Planner 协议）→ 出口事件 dict（与现有 SSE 事件同构，客户端无感）。
+
+    app（SSE）/ 联邦（WS）共用此单一映射，避免双轨出口 schema 漂移（Plan-F WS 出口统一）。
+    返回 None 表示忽略该事件（协议未定义的 type）。
+    """
+    if event.type == "route":
+        return {
+            "type": "route",
+            "capability": event.payload.get("capability"),
+            "reason": event.payload.get("reason"),
+        }
+    if event.type == "evidence":
+        return {
+            "type": "evidence",
+            "node": event.payload.get("node"),
+            "count": event.payload.get("count", 0),
+            "preview": event.payload.get("preview", ""),
+        }
+    if event.type == "memory":
+        return {"type": "memory", "notes": event.payload.get("notes", [])}
+    if event.type == "status":
+        return {"type": "status", **event.payload}
+    if event.type == "answer":
+        return {"type": "answer", "text": event.payload.get("text", "")}
+    if event.type == "error":
+        return {"type": "error", **event.payload}
+    return None
+
