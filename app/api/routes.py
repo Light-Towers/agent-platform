@@ -6,14 +6,16 @@ import uuid
 from datetime import UTC
 
 from agent_core.runtime.lease import AsyncLease
+from agent_runtime import cache as semantic_cache
+from agent_runtime.db import get_pool, ping
+from agent_runtime.otel import redact_question
+from agent_runtime.planner.protocol import PlannerContext
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, UploadFile
 from fastapi.responses import StreamingResponse
 
 from app.api.auth import resolve_thread_id, verify_api_key
 from app.config import get_settings
-from agent_runtime import cache as semantic_cache
-from agent_runtime.db import get_pool, ping
-from agent_runtime.otel import redact_question
+from app.memory import thread_persist as _thread_persist
 from app.rag.chunker import split_markdown
 from app.rag.embed import embed_query
 from app.rag.store import add_document
@@ -69,6 +71,9 @@ async def query(
     settings = get_settings()
     thread_id = resolve_thread_id(req.session_id, api_key)
     graph = request.app.state.graph
+    planner = getattr(request.app.state, "planner", None)
+    planner_runtime = getattr(request.app.state, "planner_runtime", None)
+    checkpointer = getattr(request.app.state, "checkpointer", None)
     pool = get_pool()
 
     # priority 来源优先级：X-Priority header > req.priority body > 默认 normal
@@ -196,21 +201,44 @@ async def query(
 
         try:
             final_answer = ""
-            async for update in graph.astream(
-                {"messages": [("user", req.query)], "question": req.query,
-                 "user_id": req.user_id, "workspace_id": req.workspace_id,
-                 "iterations": 0},
-                config=config,
-                stream_mode="updates",
-            ):
-                for node, payload in update.items():
-                    event = _node_event(node, payload)
-                    if event:
-                        yield _sse(event)
-                    if node == "synthesize" and payload.get("answer"):
-                        final_answer = payload["answer"]
+            if planner is None or planner_runtime is None:
+                # 兜底：Planner 未装配（理论不发生，lifespan 保证），走 graph 静态 DAG。
+                async for update in graph.astream(
+                    {"messages": [("user", req.query)], "question": req.query,
+                     "user_id": req.user_id, "workspace_id": req.workspace_id,
+                     "iterations": 0},
+                    config=config,
+                    stream_mode="updates",
+                ):
+                    for node, payload in update.items():
+                        event = _node_event(node, payload)
+                        if event:
+                            yield _sse(event)
+                        if node == "synthesize" and payload.get("answer"):
+                            final_answer = payload["answer"]
+            else:
+                # Phase 3: 统一出口——编排权移交 Planner（plan 决策 + execute 编排），
+                # 事件流经 StreamEvent 直通 SSE（与 graph 路径事件同构）。
+                ctx = PlannerContext(
+                    question=req.query,
+                    workspace_id=req.workspace_id,
+                    user_id=req.user_id,
+                    messages=await _thread_persist.read_thread_messages(checkpointer, thread_id),
+                    llm=planner_runtime.llm,
+                )
+                plan = await planner.plan(ctx)
+                async for event in planner.execute(plan, planner_runtime):
+                    sse = _stream_event(event)
+                    if sse:
+                        yield _sse(sse)
+                    if event.type == "answer":
+                        final_answer = event.payload.get("text", "")
             if final_answer and q_embedding is not None:
                 semantic_cache.cache_store(pool, req.query, final_answer, q_embedding)
+            # Phase 3: 对话历史写回——Planner 协议中立（不持线程语义），由 app 层承担。
+            # 与 graph 路径的 checkpoint 持久化行为等价，/history 与 revert 不回退。
+            if final_answer and checkpointer is not None:
+                await _thread_persist.append_thread(checkpointer, thread_id, req.query, final_answer)
             yield _sse({"type": "done", "thread_id": thread_id, "answer": final_answer})
         finally:
             if span is not None:
@@ -275,6 +303,32 @@ def _node_event(node: str, payload: dict) -> dict | None:
                 "preview": evidence[0][:200] if evidence else ""}
     if node == "synthesize" and payload.get("answer"):
         return {"type": "answer", "text": payload["answer"]}
+    return None
+
+
+def _stream_event(event) -> dict | None:
+    """StreamEvent（Planner 协议）→ SSE 事件（与 graph 路径事件同构，客户端无感）。"""
+    if event.type == "route":
+        return {
+            "type": "route",
+            "capability": event.payload.get("capability"),
+            "reason": event.payload.get("reason"),
+        }
+    if event.type == "evidence":
+        return {
+            "type": "evidence",
+            "node": event.payload.get("node"),
+            "count": event.payload.get("count", 0),
+            "preview": event.payload.get("preview", ""),
+        }
+    if event.type == "memory":
+        return {"type": "memory", "notes": event.payload.get("notes", [])}
+    if event.type == "status":
+        return {"type": "status", **event.payload}
+    if event.type == "answer":
+        return {"type": "answer", "text": event.payload.get("text", "")}
+    if event.type == "error":
+        return {"type": "error", **event.payload}
     return None
 
 

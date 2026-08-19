@@ -179,9 +179,9 @@ app 的 search/rag/sql/mcp（进程内节点）与联邦 `database_query_agent`/
 |---|---|---|---|
 | **0** | `app/infra` → `agent-runtime`（9 个运行时模块全部迁入）；同步定 ThreadState 契约 | 共享 runtime + 统一状态 schema | ✅ **完成（2026-08-19）** |
 | **1** | `capabilities/` 注册表（Function/Agent/Remote 三执行器） | 能力层中立化 | ✅ **完成（2026-08-19）** |
-| **1.5** | Skill 契约升级：`Capability` 补 input/output schema（JSON Schema） | Skill = 带契约的能力单元（对外统一称 Skill） | 待确认 |
-| **2** | Planner 协议 + 双实现；`PLANNER` 环境变量 | 编排解耦 + 双跑 eval 基线 | ✅ 代码/测试/eval 完成（待回归+提交） |
-| **3** | graph.py → `general_qa` Workflow Skill（包装非删除）+ 统一 SSE/WS 出口 + 组合治理（max_skill_depth/cycle detection） | 单 Runtime 成型 | 待办 |
+| **1.5** | Skill 契约升级：`Capability` 补 input/output schema（JSON Schema） | Skill = 带契约的能力单元（对外统一称 Skill） | ✅ **完成（2026-08-19）** |
+| **2** | Planner 协议 + 双实现；`PLANNER` 环境变量 | 编排解耦 + 双跑 eval 基线 | ✅ 完成（2026-08-19） |
+| **3** | graph.py → `general_qa` Workflow Skill（包装非删除）+ 统一 SSE/WS 出口 + 组合治理（max_skill_depth/cycle detection） | 单 Runtime 成型 | ✅ **完成（2026-08-19）** |
 
 ### Phase 0 迁移单元顺序
 
@@ -228,3 +228,19 @@ app 的 search/rag/sql/mcp（进程内节点）与联邦 `database_query_agent`/
 
 ### 4.1 补充（同轮）：
 > 用户架构审核确立 **Skill 统一能力协议**（见 §4.1）：Capability Registry = Skill Registry 雏形；graph.py Phase 3 包装为 `general_qa` Workflow Skill（非删除）；Capability 内部名保持、对外统一称 Skill；Phase 1.5 补 input/output schema；组合治理（max_skill_depth/cycle detection）仅 agentic 路径落地。
+
+### Phase 1.5 完成（2026-08-19）—— Skill 契约升级
+- `agent_runtime/capabilities/registry.py`：`CapabilityKind` 增 `WORKFLOW = "workflow"`；`Capability` dataclass 增 `input_schema` / `output_schema`（JSON Schema dict，可空）；新增 `to_tool_schema()` → `{"type":"function","function":{"name","description","parameters"}}`（供 Agent 工具描述生成 + 入参契约显式化）。
+- `function.py` / `agent.py` / `remote.py` 三工厂函数增 `input_schema` / `output_schema` 形参并透传。
+- **新建 `capabilities/dag.py`**：`as_dag_capability(name, description, fn, *, timeout_ms, input_schema, output_schema)` → kind=WORKFLOW，把确定性 DAG 执行器封装为可注册 Skill（Static DAG Executor，对应 §4.1 的 Workflow Skill）。
+- `app/capabilities.py`：定义 `_QUERY_SCHEMA` / `_RAG_SCHEMA` / `_GENERAL_QA_INPUT_SCHEMA` / `_GENERAL_QA_OUTPUT_SCHEMA`；`build_registry(graph=None)` 在注入 `graph` 时注册 `general_qa` Workflow Skill（经 `_run_general_qa` → `graph.astream` 归约 answer，graph.py **包装非删除**）；`get_registry(graph=None)` 惰性单例。
+- 不做（不过度设计）：`version` / `risk_level` / `policy` 元数据暂缓（单实例无多租户分级诉求）；`to_tool_schema` 仅覆盖参数级契约，不预做工具调用服务端编排。
+
+### Phase 3 完成（2026-08-19）—— 单 Runtime 成型
+- `agent_runtime/planner/protocol.py`：新增 `SkillCompositionError(RuntimeError)`；`PlannerRuntime.__init__` 增 `max_skill_depth=4` / `max_steps=20` + `_call_stack` / `_steps` 计数；新增 `@asynccontextmanager async def skill_guard(self, name)`——执行序：步数上限 → 循环检测（相邻/跨层）→ 深度上限，仅 agentic 组合路径使用（deterministic 静态 DAG 天然无环，不为此加复杂度）。
+- `app/memory/thread_persist.py`（新建）：`read_thread_messages(checkpointer, thread_id)`（aget_tuple 读 channel_values.messages）+ `append_thread(checkpointer, thread_id, question, answer)`（推进 channel_versions["messages"] + new_versions={"messages":ver} 落 blob；空 answer 或 checkpointer 缺失均 noop；thread 间隔离）。
+- `app/api/routes.py`：`/query` 取 `planner` / `planner_runtime` / `checkpointer`；**Planner 主路径**——`PlannerContext(...)` → `planner.plan` → `planner.execute` → `_stream_event`（StreamEvent→SSE 映射：route/evidence/memory/status/answer/error）；graph 执行异常降级兜底；历史经 `append_thread` 写回 checkpointer。
+- `app/main.py`：lifespan 装配 `registry=get_registry(graph=...)` + `app.state.planner_runtime=PlannerRuntime(...)`；启动日志增 planner kind。
+- `app/config.py`：增 `max_skill_depth: int = 4` / `max_steps: int = 20`。
+- 不做（不过度设计）：WS 出口统一延后（当前 app 仅 SSE，联邦 WS 适配不在本 phase 范围）；组合治理参数走 Settings 注入，不硬编码。
+- 验证：新增/扩展测试 25 例全绿（`tests/test_capability_registry.py` 13 例含 schema 契约 + WORKFLOW + general_qa 装配；`tests/test_planner_governance.py` 6 例含 skill_guard 三违规；`tests/test_thread_persist.py` 6 例含 append/read 往返）；**根 tests 全量回归 322 passed（零回归）**，lint 0 error。

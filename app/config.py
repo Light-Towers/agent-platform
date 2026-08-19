@@ -101,6 +101,11 @@ class Settings(BaseLLMSettings):
     # Plan-F Phase 2: Planner 实现选择（deterministic | agentic），PLANNER env 覆盖
     planner: str = "deterministic"
 
+    # Plan-F Phase 3: Skill 组合治理（agentic 组合路径的护栏边界；
+    # deterministic 静态 DAG 天然无环，不使用这些限制）
+    max_skill_depth: int = 4
+    max_steps: int = 20
+
     # CORS：允许的前端来源（逗号分隔），为空时默认回环 127.0.0.1:5173
     cors_allow_origins: str = ""
 

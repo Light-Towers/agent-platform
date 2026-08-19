@@ -21,6 +21,22 @@
 - **测试**：`tests/test_capability_registry.py` 7 例（注册/发现/重复注册/未知能力/超时/三执行器）；根 tests **268 passed**（261 基线 + 7 新增，零回归），lint 0 error。
 - 不做（遵循不过度设计）：联邦 `main_agent.py` 委派路径未改（deep_agent subagents 机制属 Phase 2 Planner 协议切换范围）；`Capability.metadata` 仅留扩展位不预填；MCP 能力签名依赖 state+manager 以 kwargs 透传承载，不强行重构为 query 形态。
 
+## Plan-F Phase 1.5 Skill 契约升级（2026-08-19）
+
+- **`agent-runtime/agent_runtime/capabilities/registry.py`**：`CapabilityKind` 增 `WORKFLOW`；`Capability` 增 `input_schema` / `output_schema`（JSON Schema dict，可空）；新增 `to_tool_schema()`（供 Agent 工具描述生成 + 入参契约显式化）。
+- **`capabilities/dag.py` 新建**：`as_dag_capability(...)` → kind=WORKFLOW，把确定性 DAG 执行器封装为可注册 Workflow Skill（Static DAG Executor，对应 §4.1）。
+- **`app/capabilities.py`**：定义 query/rag/general_qa 四套 JSON Schema 契约；`build_registry(graph=None)` 注入 graph 时注册 `general_qa` Workflow Skill（graph.py **包装非删除**），`get_registry` 惰性单例。
+- **测试**：`test_capability_registry.py` 扩至 13 例（schema 契约 + WORKFLOW + general_qa 装配），零回归。
+
+## Plan-F Phase 3 单 Runtime 成型（2026-08-19）
+
+- **`agent_runtime/planner/protocol.py`**：新增 `SkillCompositionError` + `PlannerRuntime.skill_guard`（max_skill_depth=4 / max_steps=20 / 循环检测），仅 agentic 组合路径使用。
+- **`app/memory/thread_persist.py` 新建**：`read_thread_messages` / `append_thread`——经 checkpoint aget_tuple/aput 落消息历史（channel_versions 推进 + new_versions 落 blob；空 answer/no checkpointer/thread 间隔离均正确 noop）。
+- **`app/api/routes.py`**：`/query` 切 Planner 主路径（`PlannerContext`→`plan`→`execute`→StreamEvent→SSE 映射）+ graph 兜底 + 历史写回 checkpointer；新增 `_stream_event` 统一出口。
+- **`app/main.py` / `app/config.py`**：lifespan 装配 `registry` + `planner_runtime`；配置增 `max_skill_depth` / `max_steps`。
+- **测试**：新增 `test_planner_governance.py`（6）/ `test_thread_persist.py`（6）；根 tests **全量回归 322 passed（零回归）**，lint 0 error。
+- 不做（遵循不过度设计）：WS 出口统一延后（app 现仅 SSE）；`version`/`risk_level`/`policy` 元数据暂缓（单实例无多租户分级诉求）。
+
 ## v2 Resilience 收敛（2026-08-19）
 
 - **`agent-core/agent_core/resilience.py` 新增 `retry_async`**：异步指数退避重试原语（`max_attempts` 含首次、退避 `base*factor**(n-1)`、`exceptions` 过滤、可注入 `sleep`、支持同步/异步 `on_retry` 回调），与同步 `retry` 语义对齐。
