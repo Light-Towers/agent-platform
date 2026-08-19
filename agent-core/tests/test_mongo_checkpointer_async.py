@@ -8,7 +8,6 @@
 """
 from __future__ import annotations
 
-import asyncio
 import uuid
 
 import pytest
@@ -144,3 +143,75 @@ async def test_mongo_aput_writes_merges():
     assert doc is not None
     channels = {w["channel"]: w["value"] for w in doc["writes"]}
     assert channels == {"ch1": "v1", "ch2": "v2"}
+
+
+# ── 真实落库语义：写入后用「新构造的 checkpointer 实例」仍能取回（模拟重启不丢）──
+class _RealLikeColl:
+    """实现 pymongo 真实契约的内存集合（update_one 走 $set/$push，find 支持排序）。"""
+
+    def __init__(self):
+        self._docs: dict[tuple, dict] = {}
+        self._indexes = []
+
+    def create_index(self, keys, **_kw):
+        self._indexes.append(keys)
+        return "idx"
+
+    def _key(self, f):
+        return (f.get("tenant_id"), f.get("thread_id"), f.get("checkpoint_ns"), f.get("checkpoint_id"))
+
+    def update_one(self, filt, update, upsert=False):
+        key = self._key(filt)
+        doc = self._docs.get(key, {})
+        doc.update(filt)
+        doc.update(update.get("$set", {}))
+        for ch, val in update.get("$push", {}).get("writes", {}).get("$each", []):
+            doc.setdefault("writes", []).append({"channel": ch, "value": val})
+        self._docs[key] = doc
+
+    def find_one(self, filt, proj=None):
+        return self._docs.get(self._key(filt))
+
+    def find(self, query):
+        out = [d for d in self._docs.values() if all(d.get(k) == v for k, v in query.items())]
+        return _FakeCursor(sorted(out, key=lambda d: d.get("checkpoint_id", "")))
+
+
+def _make_checkpointer_with_coll(coll):
+    from agent_core.memory.mongo_checkpointer import MongoCheckpointer
+    from langgraph.checkpoint.base import BaseCheckpointSaver
+
+    cp = MongoCheckpointer.__new__(MongoCheckpointer)
+    BaseCheckpointSaver.__init__(cp, serde=None)
+    cp._coll = coll
+    cp._tenant_id = "unit"
+    return cp
+
+
+@pytest.mark.asyncio
+async def test_mongo_persistence_across_restart():
+    """Milvus+Mmongo 方案的核心价值：历史记录跨实例持久化（进程重启不丢）。
+
+    用同一块内存集合模拟 MongoDB；先写 checkpoint，再「丢弃旧 checkpointer
+    对象、新建一个指向同集合的 checkpointer」，仍能取回 → 证明持久化在存储层、
+    不在对象内存里。
+    """
+    shared = _RealLikeColl()
+
+    cfg = _cfg("persist-1")
+    ck = Checkpoint(
+        id=cfg["configurable"]["checkpoint_id"], ts=0,
+        channel_values={"x": 1}, channel_versions={}, versions_seen={},
+    )
+    # 第一次"进程"：写入
+    cp1 = _make_checkpointer_with_coll(shared)
+    await cp1.aput(cfg, ck, CheckpointMetadata(parents={}), {})
+
+    # 第二次"进程"：旧对象丢弃，新建 checkpointer 指向同一存储
+    del cp1
+    cp2 = _make_checkpointer_with_coll(shared)
+    got = await cp2.aget_tuple(cfg)
+    assert got is not None
+    # 存储层持久化生效：跨实例仍能定位到同一线程的历史记录
+    assert got.config["configurable"]["thread_id"] == "persist-1"
+    assert got.config["configurable"]["checkpoint_id"] == cfg["configurable"]["checkpoint_id"]
