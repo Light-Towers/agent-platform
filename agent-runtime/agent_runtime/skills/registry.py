@@ -26,7 +26,7 @@ class SkillKind(str, Enum):
     FUNCTION = "function"
     AGENT = "agent"
     REMOTE = "remote"
-    WORKFLOW = "workflow"  # 静态 DAG 编排（Phase 3：graph.py → general_qa Workflow Skill）
+    WORKFLOW = "workflow"  # Workflow Skill：Static/Conditional 编排（graph.py → general_qa），LangGraph 仅是执行实现
 
 
 @dataclass(frozen=True)
@@ -73,6 +73,56 @@ class DuplicateSkillError(ValueError):
     """重复注册同名能力。"""
 
 
+class SkillExecutionError(RuntimeError):
+    """Skill 执行失败：入参契约校验不通过（给出明确错误，而非内部 Python exception）。"""
+
+
+def _validate_input(name: str, schema: dict[str, Any] | None, kwargs: dict[str, Any]) -> None:
+    """Skill 入参契约校验（轻量）：required 字段存在性 + properties 类型检查。
+
+    schema 缺省（None）跳过；仅校验公开业务入参，不拒绝额外注入参数
+    （如 mcp 的 state/mcp_manager 由注册方透传，不属于公开契约）。
+    """
+    if not schema:
+        return
+    missing = [k for k in schema.get("required", []) if k not in kwargs]
+    if missing:
+        raise SkillExecutionError(
+            f"Skill {name} 入参契约校验失败: 缺少必填参数 {missing}"
+        )
+    properties = schema.get("properties", {})
+    for key, value in kwargs.items():
+        prop = properties.get(key)
+        if not prop or value is None:
+            continue
+        expected = prop.get("type")
+        if expected == "string" and not isinstance(value, str):
+            raise SkillExecutionError(
+                f"Skill {name} 入参契约校验失败: 参数 {key} 期望 {expected}，"
+                f"实际 {type(value).__name__}"
+            )
+        if expected in ("number", "integer") and isinstance(value, bool):
+            raise SkillExecutionError(
+                f"Skill {name} 入参契约校验失败: 参数 {key} 期望 {expected}，"
+                f"实际 bool"
+            )
+        if expected == "number" and not isinstance(value, (int, float)):
+            raise SkillExecutionError(
+                f"Skill {name} 入参契约校验失败: 参数 {key} 期望 {expected}，"
+                f"实际 {type(value).__name__}"
+            )
+        if expected == "integer" and not isinstance(value, int):
+            raise SkillExecutionError(
+                f"Skill {name} 入参契约校验失败: 参数 {key} 期望 {expected}，"
+                f"实际 {type(value).__name__}"
+            )
+        if expected == "boolean" and not isinstance(value, bool):
+            raise SkillExecutionError(
+                f"Skill {name} 入参契约校验失败: 参数 {key} 期望 {expected}，"
+                f"实际 {type(value).__name__}"
+            )
+
+
 class SkillRegistry:
     """能力注册表：注册 / 发现 / 统一执行入口。"""
 
@@ -100,8 +150,9 @@ class SkillRegistry:
         return name in self._capabilities
 
     async def execute(self, name: str, **kwargs: Any) -> Any:
-        """统一执行入口：按能力配置应用 Runtime 边界（超时），kwargs 透传。"""
+        """统一执行入口：入参契约校验 → Runtime 边界（超时），kwargs 透传。"""
         capability = self.get(name)
+        _validate_input(name, capability.input_schema, kwargs)
         coro = capability.executor(**kwargs)
         if capability.timeout_ms is not None:
             coro = asyncio.wait_for(coro, timeout=capability.timeout_ms / 1000)

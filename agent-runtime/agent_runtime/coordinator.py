@@ -1,5 +1,14 @@
 """会话并发协调器：同 session 串行 / 异 session 并发。
 
+**部署语义（架构审核 P0 明确）**：``SessionCoordinator`` 是 **process-local** 协调器——
+``_active/_queues/_conditions/_cancelled`` 均为 asyncio 进程内状态，仅保证**单进程实例**
+下的「同 session 串行、异 session 并发」。多 worker（uvicorn workers>1）或多副本
+（K8s replicas>1）部署下该保证不成立：同 session 请求可能落在不同进程并行执行，
+而 checkpoint 已分布到 PG——即「状态分布式、协调本地」的不一致。
+
+多副本部署前须将 session execution ownership 上移：Postgres/Redis 分布式 lease，
+或交由 admission / durable execution 系统持有（本期不做，属演进方向）。
+
 借鉴 OpenCode V2 SessionRunCoordinator：
 - joins same-Session resumes（同 session 互斥）
 - coalesces prompt wakeups（合并策略）

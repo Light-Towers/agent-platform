@@ -14,6 +14,7 @@ from agent_runtime.skills.dag import as_dag_skill
 from agent_runtime.skills.function import as_function_skill
 from agent_runtime.skills.registry import (
     DuplicateSkillError,
+    SkillExecutionError,
     SkillKind,
     SkillNotFoundError,
     SkillRegistry,
@@ -184,3 +185,63 @@ def test_build_registry_without_graph_no_general_qa():
 
     registry = build_registry()
     assert [c.name for c in registry.list()] == ["mcp", "rag", "search", "sql"]
+
+
+# ---------- 架构审核 P1：Skill 契约真正执行（入参校验） ----------
+
+
+@pytest.mark.asyncio
+async def test_execute_validates_required_input():
+    """缺少 required 参数时抛 SkillExecutionError（而非内部异常）。"""
+    async def run(**kwargs):
+        return "ok"
+
+    registry = SkillRegistry()
+    registry.register(
+        as_function_skill(
+            "search",
+            "搜索",
+            run,
+            input_schema={
+                "type": "object",
+                "properties": {"q": {"type": "string"}},
+                "required": ["q"],
+            },
+        )
+    )
+    with pytest.raises(SkillExecutionError, match="缺少必填参数"):
+        await registry.execute("search")
+
+
+@pytest.mark.asyncio
+async def test_execute_validates_input_type():
+    """参数类型不符时抛 SkillExecutionError（明确契约错误而非内部异常）。"""
+    async def run(**kwargs):
+        return "ok"
+
+    registry = SkillRegistry()
+    registry.register(
+        as_function_skill(
+            "search",
+            "搜索",
+            run,
+            input_schema={
+                "type": "object",
+                "properties": {"q": {"type": "string"}},
+                "required": ["q"],
+            },
+        )
+    )
+    with pytest.raises(SkillExecutionError, match="期望 string"):
+        await registry.execute("search", q=123)
+
+
+@pytest.mark.asyncio
+async def test_execute_skips_validation_without_schema():
+    """无 schema 时保持原透传行为（向后兼容）。"""
+    async def run(**kwargs):
+        return kwargs
+
+    registry = SkillRegistry()
+    registry.register(as_function_skill("x", "X", run))
+    assert await registry.execute("x", anything=1) == {"anything": 1}

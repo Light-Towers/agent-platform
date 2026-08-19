@@ -140,12 +140,12 @@ app 的 search/rag/sql/mcp（进程内节点）与联邦 `database_query_agent`/
 
 | Skill 架构 | agent-platform 现有代码 | 状态 |
 |---|---|---|
-| Skill Registry | `agent_runtime/capabilities/registry.py`（CapabilityRegistry：register/get/list/execute + 统一超时边界） | ✅ Phase 1 |
-| Skill 元数据 | `Capability`（name/description/kind/executor/timeout_ms） | 部分——缺 input_schema / output_schema / risk_level / policy |
-| 多 Executor | `as_function_capability` / `as_agent_capability` / `as_remote_capability` | ✅ Phase 1 |
-| Static DAG Executor | 缺——`app/agent/graph.py` 四节点链即静态 DAG 形态，未包装为可注册 Skill | 待落地 |
+| Skill Registry | `agent_runtime/skills/registry.py`（SkillRegistry：register/get/list/execute + 入参契约校验 + 统一超时边界） | ✅ Phase 1（已 rename，2026-08-19） |
+| Skill 元数据 | `Skill`（name/description/kind/executor/timeout_ms/input_schema/output_schema） | ✅ Phase 1.5 |
+| 多 Executor | `as_function_skill` / `as_agent_skill` / `as_remote_skill` / `as_dag_skill` | ✅ Phase 1 + 1.5 |
+| Workflow Executor（原 Static DAG） | `as_dag_skill`（kind=WORKFLOW）包装 `graph.py` → `general_qa`；LangGraph 仅是执行实现 | ✅ Phase 1.5/3 |
 | Skill Planner | `agent_runtime/planner/`（Planner ABC：plan/execute + PlannerRegistry） | ✅ Phase 2 |
-| 组合治理（max_depth / cycle detection） | 缺 | 待落地 |
+| 组合治理（max_depth / cycle detection） | `PlannerRuntime.skill_guard`（per-request 隔离，2026-08-19 架构审核 P0 落地） | ✅ Phase 3 |
 
 **落地决策（架构师建议，用户待确认）**：
 1. **内部命名保持 `Capability`，对外/文档统一称 Skill**——避免全仓无意义 rename 噪音（污染 git 历史）；
@@ -273,3 +273,21 @@ app 的 search/rag/sql/mcp（进程内节点）与联邦 `database_query_agent`/
 - `agent_federation/api/server.py`：`/ws/{thread_id}` 从 echo/pong 升级为——收 `{"type":"query","text":...}` → `AgenticPlanner.execute(plan, runtime)` 产 `StreamEvent` → 逐条 `send_json(serialize_stream_event(event))` → 收尾 `{"type":"done","thread_id","answer"}`；非 query 合法 JSON 仍回退 pong（保留旧 echo 兼容）。`/api/task` 现状不动。
 - **Boundary（不过度设计）**：仅统一「事件 schema 出口」，不重写联邦 WS 鉴权/并发/前端协议；`AgenticPlanner.execute` 当前产出 route/answer/error（`_execute_agent_core` 内部 monitor 事件未桥接为 StreamEvent），evidence/memory 桥接留作后续（非本次范围）。
 - 验证：新增 `tests/unit/test_ws_stream.py`（2 例：query 流式收 route+answer+done；非 query 回退 pong，mock `AgenticPlanner.execute` 免 LLM）；联邦 unit 87 passed / 根 tests 322 passed（零回归），lint 0 error。
+
+### 架构审核落地（2026-08-19 晚）—— Planner/Skill/Runtime 收口 + 演进方向
+
+> 用户基于 v2 做架构级审核：核心结论「LangGraph/DeepAgents 应降级为执行实现；**Skill = 能力统一抽象，Planner = 决策/组合层，Runtime = 执行治理层**」。审核论断逐条代码核实全部属实，按「不过度设计—最小必要优先」落地分级：
+
+**本轮已落地（P0 真实风险 + P1 轻量）**
+1. **PlannerRuntime per-request 隔离（P0）**：`protocol.py` 的 `_steps`/`_call_stack` 由实例 mutable state 改为 `contextvars.ContextVar`——异 session 并发互不干扰、同 session 串行（同 task 链）共享预算。修复单例注入下「一次执行的预算被并发请求耗尽」的跨请求污染。`max_steps`/`max_skill_depth` 保持不可变配置。**配套测试语义修正**：`test_planner_governance.py`/`test_agentic_planner.py` 原「跨多次 arun 累计步数」断言即 bug 行为，改为「单次执行内嵌套超限 + 执行结束预算复位」。
+2. **SessionCoordinator 语义明确（P0）**：`coordinator.py` docstring 明确 **process-local 单实例**语义（`_active/_queues/_conditions` 均为 asyncio 进程内状态），多副本下「同 session 串行」不成立；标注演进方向（Postgres/Redis 分布式 lease 或 durable execution 持有 ownership），本期不做。
+3. **Skill 入参契约真正执行（P1）**：`registry.py` 新增 `SkillExecutionError` + `_validate_input()`——`execute()` 入口校验 `required` 存在性 + `properties` 类型，缺 schema 向后兼容（不拒绝注册方注入参数如 mcp 的 state/mcp_manager）。Agent 组合 Skill 传错参数得到明确契约错误而非内部 Python exception。
+4. **术语精确化（P2 轻量）**：`SkillKind.WORKFLOW` 注释与本文档统一「Static DAG → Workflow（Static/Conditional）」，LangGraph 明确为执行实现。
+
+**演进方向（文档化，暂缓重构）**——按「边界出现再拆」原则留档：
+- **SkillRegistry / SkillRuntime 分离**：当前 execute 仅 timeout + 契约校验两个边界，拆两层为时尚早；待 retry/circuit 等第二边界真实出现时，按「Registry=Discover / Runtime=Execute」拆分。
+- **Dynamic Agent 纳入 Skill 体系**：`AgenticPlanner` 仍直调 `_execute_agent_core`（旁路）。收敛为 `SkillKind.AGENT` 是完整架构收口，但 `_execute_agent_core` 挂着 guard/intent/cache/memory/monitor 副作用链，包装须保行为，作独立阶段。
+- **`Plan.notes` → `ExecutionContext`**：notes 承载 question/workspace_id/user_id 已近隐形上下文；演进为独立 `ExecutionContext`（request_id/thread_id/messages/budget/deadline/trace_id），Plan 仅存 route/steps/reason。
+- **Workflow Definition → Workflow Skill 编译**：支持 YAML/声明式 Workflow（`steps: [search, rag, summarize]`）编译为 WorkflowSkill 注册进 Registry，LangGraph 仅是其中一种执行后端。
+
+**验证**：root tests 180 passed（含 governance 7 + capability registry 16 契约测试）/ 联邦 unit 89 passed（零回归），ruff 0 error。未提交（待与真实 R1 基线一起）。
