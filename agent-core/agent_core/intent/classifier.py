@@ -29,11 +29,31 @@ from agent_core.intent.models import (
 _DATA_PATH = Path(__file__).resolve().parent / "data" / "prototypes.json"
 
 # chitchat 关键词短链：命中即直接判为 CHITCHAT，跳过嵌入计算。
-_CHITCHAT_KEYWORDS = [
-    "你好", "您好", "在吗", "你是谁", "你是机器人吗", "谢谢", "感谢",
-    "再见", "拜拜", "哈哈", "嘿", "hi", "hello", "hey", "thanks", "thank you",
-    "who are you", "what are you", "are you a bot", "bye",
+#
+# 分两组以避免对含礼貌词的业务问题误路由（审计 P2 #十二）：
+#  - STRONG：强意图词，原文 substring 命中即短路（如"你是谁""在吗"几乎不会出现在
+#    正常业务问句中）。
+#  - WEAK：礼貌/告别词（谢谢/hi/bye 等）。这类词常出现在正常业务句里（"谢谢你帮我
+#    分析合同"），若用 substring 会误判为 CHITCHAT 跳过 embedding。改为仅在 query
+#    去除空白与标点后整体等于该词（即纯问候/礼貌语）时才短路。
+_CHITCHAT_STRONG = [
+    "你好", "您好", "在吗", "你是谁", "你是机器人吗",
+    "who are you", "what are you", "are you a bot",
 ]
+_CHITCHAT_WEAK = [
+    "谢谢", "感谢", "再见", "拜拜", "哈哈", "嘿",
+    "hi", "hello", "hey", "thanks", "thank you", "bye",
+]
+
+
+def _is_pure_weak_chitchat(query: str) -> bool:
+    """WEAK 词仅当 query（去空白/标点后）整体等于该词时才判 chitchat。"""
+    import re
+
+    q = query.strip().lower()
+    # 去除所有非字母数字 unicode 字符（含中英文标点、空白），再比较
+    core = re.sub(r"[^\w\u4e00-\u9fff]+", "", q)
+    return core in {k.lower() for k in _CHITCHAT_WEAK}
 
 
 def _load_prototypes() -> dict[str, Any]:
@@ -78,7 +98,7 @@ def _intent_prototype_vector(intent: str, samples: list[str]) -> tuple:
 def _keyword_rule(query: str) -> IntentResult | None:
     """关键词降级：当嵌入层不可用或原型缺失时启用。"""
     q = query.lower()
-    if any(k in q for k in _CHITCHAT_KEYWORDS):
+    if any(k in q for k in _CHITCHAT_STRONG) or _is_pure_weak_chitchat(query):
         return IntentResult(
             primary=IntentLabel.CHITCHAT, confidence=0.7,
             candidates=[IntentCandidate(IntentLabel.CHITCHAT, 0.7)],
@@ -108,7 +128,7 @@ def classify_l1(query: str) -> IntentResult:
 
     # 1. chitchat 短链
     q_low = query.lower()
-    if any(k in q_low for k in _CHITCHAT_KEYWORDS):
+    if any(k in q_low for k in _CHITCHAT_STRONG) or _is_pure_weak_chitchat(query):
         return IntentResult(
             primary=IntentLabel.CHITCHAT, confidence=0.95,
             candidates=[IntentCandidate(IntentLabel.CHITCHAT, 0.95)],

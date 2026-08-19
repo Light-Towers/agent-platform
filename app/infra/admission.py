@@ -142,12 +142,30 @@ class AdmissionQueue:
         """
         loop = asyncio.get_event_loop()
         deadline = loop.time() + self._timeout
+
+        async def _mark_db_rejected(reason: str) -> None:
+            """超时/取消：把 DB 中仍 queued 的行标为 rejected，使状态机语义干净
+            （审计 P1 #三：超时不应伪装成 completed，且立即释放容量）。
+            """
+            if self._pool is None:
+                return
+            try:
+                async with self._pool.connection() as conn:
+                    await conn.execute(
+                        "UPDATE admission_queue SET status = 'rejected', "
+                        "rejection_reason = %s WHERE request_id = %s AND status = 'queued'",
+                        (reason, request_id),
+                    )
+            except Exception:
+                logger.warning("admission timeout db-mark failed", exc_info=True)
+
         try:
             async with self._cond:
                 while self._states.get(request_id) == "queued":
                     remaining = deadline - loop.time()
                     if remaining <= 0:
                         self._states[request_id] = "rejected"
+                        await _mark_db_rejected("ADMISSION_TIMEOUT")
                         return AdmissionDecision(
                             status="rejected",
                             priority="normal",
@@ -158,6 +176,7 @@ class AdmissionQueue:
                     except TimeoutError:
                         # 等待期间无其他等待者 notify，确实超时
                         self._states[request_id] = "rejected"
+                        await _mark_db_rejected("ADMISSION_TIMEOUT")
                         return AdmissionDecision(
                             status="rejected",
                             priority="normal",
@@ -206,7 +225,7 @@ class AdmissionQueue:
             async with self._pool.connection() as conn, conn.transaction():
                 await conn.execute(
                     "UPDATE admission_queue SET status = 'completed', completed_at = now() "
-                    "WHERE request_id = %s",
+                    "WHERE request_id = %s AND status IN ('admitted', 'queued')",
                     (request_id,),
                 )
                 # 取队首 queued（按优先级升序、最旧优先），行锁跳过并发已锁行
