@@ -6,13 +6,6 @@
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-
-from app.agent.graph import build_graph
-from app.agent.llm import build_chat_model
-from app.api.routes import router
-from app.config import get_settings
 from agent_runtime.admission import AdmissionQueue, RateLimiter
 from agent_runtime.coordinator import SessionCoordinator
 from agent_runtime.db import close_pool, get_pool, init_pool
@@ -21,6 +14,13 @@ from agent_runtime.otel import force_flush as otel_force_flush
 from agent_runtime.otel import get_otel_tracer, init_otel
 from agent_runtime.revert import RevertHandler
 from agent_runtime.tracing import get_langfuse_callbacks
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+from app.agent.graph import build_graph
+from app.agent.llm import build_chat_model
+from app.api.routes import router
+from app.config import get_settings
 from app.schemas import McpServerConfig
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -126,16 +126,31 @@ async def lifespan(app: FastAPI):
     app.state.graph = build_graph(llm, checkpointer=checkpointer, mcp_manager=mcp_manager)
     app.state.checkpointer = checkpointer
     # Plan-F Phase 2: Planner 实现（PLANNER env 选择，Phase 3 统一 SSE 出口后供 api 消费）
+    # Plan-F Phase 3: PlannerRuntime——注册表注入 graph（含 general_qa Workflow Skill），
+    # llm/mcp_manager/pool 一并装配；组合治理（max_skill_depth/max_steps）约束 agentic 路径。
+    from agent_runtime.planner.protocol import PlannerRuntime
+
+    from app.capabilities import get_registry
     from app.planners import get_planner
 
     app.state.planner = get_planner(settings)
+    registry = get_registry(graph=app.state.graph)
+    app.state.registry = registry
+    app.state.planner_runtime = PlannerRuntime(
+        registry=registry,
+        llm=llm,
+        mcp_manager=mcp_manager,
+        pool=get_pool(),
+        max_skill_depth=settings.max_skill_depth,
+        max_steps=settings.max_steps,
+    )
     app.state.callbacks = get_langfuse_callbacks(
         public_key=settings.langfuse_public_key,
         secret_key=settings.langfuse_secret_key,
         host=settings.langfuse_host,
     )
     logger.info(
-        "agent-platform 就绪 storage=%s llm=%s pool=%s coordination=%s admission=%s revert=%s otel=%s mcp=%s",
+        "agent-platform 就绪 storage=%s llm=%s pool=%s coordination=%s admission=%s revert=%s otel=%s mcp=%s planner=%s",
         "postgres" if settings.db_enabled else "memory",
         settings.llm_enabled,
         get_pool() is not None,
@@ -144,6 +159,7 @@ async def lifespan(app: FastAPI):
         settings.revert_enabled,
         settings.otel_effective_enabled,
         mcp_manager is not None,
+        getattr(app.state.planner, "kind", "unknown"),
     )
     yield
     # Phase 2: OTel flush

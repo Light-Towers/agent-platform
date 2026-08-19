@@ -7,6 +7,10 @@
   （``CapabilityRegistry.execute`` 的统一边界）承载；
 - 事件（StreamEvent）与 SSE 出口事件同构（type + payload），Phase 3 切换出口时可直传。
 
+组合治理（Phase 3）：PlannerRuntime 承载 ``max_skill_depth`` / ``max_steps`` 与
+``skill_guard``（步数上限 / 循环检测 / 深度上限），约束「Agent 动态组合 Skill」的
+agentic 路径——deterministic 静态 DAG 天然无环，无需也不使用该护栏（不过度设计）。
+
 实现可放在任意侧（app=deterministic / 联邦=agentic），协议保持中立。
 """
 
@@ -14,6 +18,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -65,17 +70,63 @@ class PlannerContext(BaseModel):
     mcp_params: dict[str, Any] = Field(default_factory=dict)
 
 
+class SkillCompositionError(RuntimeError):
+    """Skill 组合治理违规：步数超限 / 循环调用 / 嵌套过深（agentic 组合路径）。"""
+
+
 class PlannerRuntime:
     """执行期依赖句柄：能力注册表必填；llm/mcp_manager/pool 按需注入。
+
+    组合治理（Phase 3）：``max_skill_depth`` / ``max_steps`` 限定「Agent 动态组合 Skill」
+    的资源边界；``skill_guard(name)`` 是组合型 Planner（agentic）编排 Skill 时须包裹的
+    护栏——步数超限 / 循环调用（同名 Skill 重复入栈）/ 嵌套过深时抛 ``SkillCompositionError``。
 
     由调用方（app lifespan / eval）装配，注入一次、贯穿会话。
     """
 
-    def __init__(self, registry, llm: Any = None, mcp_manager: Any = None, pool: Any = None):
+    def __init__(
+        self,
+        registry,
+        llm: Any = None,
+        mcp_manager: Any = None,
+        pool: Any = None,
+        *,
+        max_skill_depth: int = 4,
+        max_steps: int = 20,
+    ):
         self.registry = registry
         self.llm = llm
         self.mcp_manager = mcp_manager
         self.pool = pool
+        self.max_skill_depth = max_skill_depth
+        self.max_steps = max_steps
+        self._call_stack: list[str] = []
+        self._steps = 0
+
+    @asynccontextmanager
+    async def skill_guard(self, name: str) -> AsyncIterator[None]:
+        """Skill 组合护栏：步数上限 → 循环检测 → 深度上限，进入 Skill 前包裹。
+
+        用法（组合型 Planner 编排 Skill 时）：
+            async with runtime.skill_guard(skill_name):
+                result = await runtime.registry.execute(skill_name, **kwargs)
+        """
+        self._steps += 1
+        if self._steps > self.max_steps:
+            raise SkillCompositionError(f"Skill 组合步数超上限（max_steps={self.max_steps}）")
+        if name in self._call_stack:
+            raise SkillCompositionError(
+                f"Skill 循环调用检测: {' -> '.join([*self._call_stack, name])}"
+            )
+        if len(self._call_stack) >= self.max_skill_depth:
+            raise SkillCompositionError(
+                f"Skill 嵌套深度超上限（max_skill_depth={self.max_skill_depth}）"
+            )
+        self._call_stack.append(name)
+        try:
+            yield
+        finally:
+            self._call_stack.pop()
 
 
 class Planner(ABC):

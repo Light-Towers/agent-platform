@@ -17,6 +17,8 @@ def as_agent_capability(
     *,
     model: Any = None,
     timeout_ms: int | None = None,
+    input_schema: dict | None = None,
+    output_schema: dict | None = None,
 ) -> Capability:
     """把 subagent dict 包装为 agent 型能力。
 
@@ -44,4 +46,6 @@ def as_agent_capability(
         kind=CapabilityKind.AGENT,
         executor=execute,
         timeout_ms=timeout_ms,
+        input_schema=input_schema,
+        output_schema=output_schema,
     )

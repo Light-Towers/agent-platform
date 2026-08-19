@@ -26,11 +26,17 @@ class CapabilityKind(str, Enum):
     FUNCTION = "function"
     AGENT = "agent"
     REMOTE = "remote"
+    WORKFLOW = "workflow"  # 静态 DAG 编排（Phase 3：graph.py → general_qa Workflow Skill）
 
 
 @dataclass(frozen=True)
 class Capability:
-    """注册表条目：能力契约（不可变）。"""
+    """注册表条目：能力契约（不可变）。
+
+    input_schema / output_schema（可选 JSON Schema dict）是 Skill 契约升级（Phase 1.5）：
+    Planner / Agent 组合调用时经 ``to_tool_schema()`` 生成工具描述与入参校验，
+    能力实现细节（Python 函数 / 静态 DAG / 远程服务）对调用方保持黑盒。
+    """
 
     name: str
     description: str
@@ -39,6 +45,24 @@ class Capability:
     timeout_ms: int | None = None
     # 保留扩展位：metadata（来源轨/是否降级/评估标签等）后续按需填充
     metadata: dict[str, Any] = field(default_factory=dict)
+    # Skill 契约（Phase 1.5）：JSON Schema dict，缺省时 Agent 只见 name/description
+    input_schema: dict[str, Any] | None = None
+    output_schema: dict[str, Any] | None = None
+
+    def to_tool_schema(self) -> dict[str, Any]:
+        """生成 Agent 工具描述（供 Planner / Agent 组合调用时注入工具列表）。
+
+        与 MCP/OpenAI function calling 同构：name + description + parameters。
+        """
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": self.description,
+                "parameters": self.input_schema
+                or {"type": "object", "properties": {}},
+            },
+        }
 
 
 class CapabilityNotFoundError(KeyError):

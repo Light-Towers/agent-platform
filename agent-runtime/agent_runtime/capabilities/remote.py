@@ -17,6 +17,8 @@ def as_remote_capability(
     invoke: Callable[..., Awaitable[Any]],
     *,
     timeout_ms: int | None = None,
+    input_schema: dict | None = None,
+    output_schema: dict | None = None,
 ) -> Capability:
     """把远程子服务调用包装为 remote 型能力。"""
 
@@ -29,4 +31,6 @@ def as_remote_capability(
         kind=CapabilityKind.REMOTE,
         executor=execute,
         timeout_ms=timeout_ms,
+        input_schema=input_schema,
+        output_schema=output_schema,
     )
