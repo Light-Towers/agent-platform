@@ -181,7 +181,7 @@ app 的 search/rag/sql/mcp（进程内节点）与联邦 `database_query_agent`/
 | **1** | `capabilities/` 注册表（Function/Agent/Remote 三执行器） | 能力层中立化 | ✅ **完成（2026-08-19）** |
 | **1.5** | Skill 契约升级：`Capability` 补 input/output schema（JSON Schema） | Skill = 带契约的能力单元（对外统一称 Skill） | ✅ **完成（2026-08-19）** |
 | **2** | Planner 协议 + 双实现；`PLANNER` 环境变量 | 编排解耦 + 双跑 eval 基线 | ✅ 完成（2026-08-19） |
-| **3** | graph.py → `general_qa` Workflow Skill（包装非删除）+ 统一 SSE/WS 出口 + 组合治理（max_skill_depth/cycle detection） | 单 Runtime 成型 | ✅ **完成（2026-08-19）** |
+| **3** | graph.py → `general_qa` Workflow Skill（包装非删除）+ 统一 SSE/WS 出口 + 组合治理（max_skill_depth/cycle detection）+ 联邦 `run_deep_agent` 经 Planner 协议 + `PlannerRuntime` 治理驱动（双轨闭环） | 单 Runtime 成型 | ✅ **完成（2026-08-19）** |
 
 ### Phase 0 迁移单元顺序
 
@@ -214,7 +214,7 @@ app 的 search/rag/sql/mcp（进程内节点）与联邦 `database_query_agent`/
   - `app/capabilities.py`：装配 4 个进程内能力（search/rag/sql/mcp）为 function 型注册项，惰性单例 `get_registry()`。
   - `app/agent/graph.py` 四节点改经 `registry.execute(...)`（能力层中立化首个生产路径验证）；mcp 能力签名依赖 state+manager，注册表 kwargs 透传承载。
   - 验证：根 tests **268 passed**（261 基线 + 新增 7），新测试 `tests/test_capability_registry.py` 覆盖注册/发现/重复注册/超时/三执行器，lint 0 error。
-  - 联邦侧 `as_agent_capability` / `as_remote_capability` 工厂已就绪，main_agent.py 委派路径**未改**（deep_agent subagents 机制 Phase 2 Planner 协议时再切换，避免破坏现有行为）。
+  - 联邦侧 `as_agent_capability` / `as_remote_capability` 工厂已就绪；**main_agent.py 委派路径已在 Phase 3 联邦侧收尾切换**：`run_deep_agent` 经 `AgenticPlanner.arun` + `PlannerRuntime.skill_guard` 驱动（2026-08-19 闭环，见 Phase 3 联邦侧收尾），`deep_agent` subagents 委派机制（内部 `_build_subagents`）保持不动（零破坏 eval/WS 契约）。
 
 - ✅ Phase 2 完成（2026-08-19）：Planner 协议 + 双实现 + `PLANNER` env + 双跑 eval 基线。
   - `agent_runtime/planner/`：契约 P1 落地——`Plan`（route/sub_query/reason/notes，notes 为扩展位）+ `StreamEvent`（type/payload，与 SSE 出口同构）+ `PlannerContext`（含 mcp_* 透传字段）+ `PlannerRuntime`（registry/llm/mcp_manager/pool 注入）+ `Planner` ABC（kind + plan/execute）+ `PlannerRegistry`（与 CapabilityRegistry 同构）。
@@ -244,3 +244,12 @@ app 的 search/rag/sql/mcp（进程内节点）与联邦 `database_query_agent`/
 - `app/config.py`：增 `max_skill_depth: int = 4` / `max_steps: int = 20`。
 - 不做（不过度设计）：WS 出口统一延后（当前 app 仅 SSE，联邦 WS 适配不在本 phase 范围）；组合治理参数走 Settings 注入，不硬编码。
 - 验证：新增/扩展测试 25 例全绿（`tests/test_capability_registry.py` 13 例含 schema 契约 + WORKFLOW + general_qa 装配；`tests/test_planner_governance.py` 6 例含 skill_guard 三违规；`tests/test_thread_persist.py` 6 例含 append/read 往返）；**根 tests 全量回归 322 passed（零回归）**，lint 0 error。
+
+### Phase 3 联邦侧收尾（2026-08-19）—— 双轨真正闭环
+> Plan-F 核心目标「单 Runtime 多 Planner」此前 app 侧已成型，联邦 `run_deep_agent` 仍裸调 `_execute_agent_core`（未落 Planner 协议 + 组合治理）。本收尾把联邦主链路接入统一运行时，与 app `/query` 对称。
+
+- `agent_federation/planners/agentic.py`：新增 `AgenticPlanner.arun(question, workspace_id, runtime, main_agent=None) -> str`——与 `execute`（供 app SSE 产出 StreamEvent）并存，本方法返回答案字符串、`async with runtime.skill_guard("agentic")` 包裹 `_execute_agent_core`，将 Phase 3 组合治理（max_skill_depth/max_steps）落地到联邦主链路；`main_agent` 透传保留联邦 P5 动态 agent 选择能力（不进统一协议）。
+- `agent_federation/planners/__init__.py`：新增 `get_planner_runtime()` 模块级单例（联邦无 FastAPI app.state 注入先例），治理参数取 `FED_MAX_SKILL_DEPTH` / `FED_MAX_STEPS`（默认 4/20，与 `PlannerRuntime` 默认及 app/config 对齐），`registry=None`（联邦 agentic 不查能力注册表）。
+- `agent_federation/agent/main_agent.py`：`run_deep_agent` 把 `singleflight(_execute_agent_core, ...)` 改为 `singleflight(AgenticPlanner().arun, ..., get_planner_runtime(), selected_agent)`——保留 singleflight 缓存击穿防护 + 全部副作用链（guard/intent/cache/memory/monitor/remember_episodic/SemanticCache），仅把「最终执行」委托给 Planner 协议 + 治理；eval/WS 的 monitor 事件契约零破坏。
+- **Boundary 严守（不过度设计）**：`deep_agent` subagents 委派机制（`_build_subagents` / `create_deep_agent`）保持不动——Plan-F 目标是「编排收敛」而非「重写委派」，避免破坏现有行为；联邦仍走老委派，但被统一 Planner 协议 + `PlannerRuntime` 治理包裹。
+- 验证：扩 `tests/unit/test_agentic_planner.py`（arun 经治理复用 _execute_agent_core 返回答案 + main_agent 透传 + 步数超限抛 `SkillCompositionError`）；新增 `tests/unit/test_run_deep_agent_planner.py`（run_deep_agent 经 planner.arun 走通 + monitor.report_task_result 仍上报）；联邦 unit 81 passed / 根 tests 322 passed（零回归），lint 0 error。

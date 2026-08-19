@@ -2,6 +2,14 @@
 
 本仓库为 uv workspace monorepo。**唯一受支持的安装/运行入口是根 `uv.lock` + `uv sync`**，子包不再维护独立 `uv.lock`（见 v2 修复 #14）。
 
+## Plan-F Phase 3 联邦侧收尾（2026-08-19）—— 双轨真正闭环
+
+- **`agent_federation/planners/agentic.py`**：新增 `AgenticPlanner.arun(question, workspace_id, runtime, main_agent=None) -> str`——与 `execute`（供 app SSE 产出 StreamEvent）并存；`async with runtime.skill_guard("agentic")` 包裹 `_execute_agent_core`，将组合治理（max_skill_depth/max_steps）落地联邦主链路；`main_agent` 透传保留动态 agent 选择能力（不进统一协议）。
+- **`agent_federation/planners/__init__.py`**：新增 `get_planner_runtime()` 模块级单例（联邦无 FastAPI app.state 注入先例），治理参数取 `FED_MAX_SKILL_DEPTH` / `FED_MAX_STEPS`（默认 4/20，与 PlannerRuntime 默认及 app/config 对齐），`registry=None`（联邦 agentic 不查能力注册表）。
+- **`agent_federation/agent/main_agent.py`**：`run_deep_agent` 把 `singleflight(_execute_agent_core, ...)` 改为 `singleflight(AgenticPlanner().arun, ..., get_planner_runtime(), selected_agent)`——保留 singleflight 缓存击穿防护 + 全部副作用链（guard/intent/cache/memory/monitor/remember_episodic/SemanticCache），仅「最终执行」委托给 Planner 协议 + 治理；eval/WS 的 monitor 事件契约零破坏。
+- **Boundary**：`deep_agent` subagents 委派机制（`_build_subagents` / `create_deep_agent`）保持不动——Plan-F 目标是「编排收敛」而非「重写委派」，避免破坏现有行为。
+- **测试**：扩 `tests/unit/test_agentic_planner.py`（arun 经治理复用 + main_agent 透传 + 步数超限抛 `SkillCompositionError`）；新增 `tests/unit/test_run_deep_agent_planner.py`（run_deep_agent 经 planner.arun 走通 + monitor 上报保留）；联邦 unit 81 passed / 根 tests 322 passed（零回归），lint 0 error。
+
 ## Plan-F 单 Runtime 多 Planner 启动（2026-08-19）
 
 - **方案文档** `docs/plan-f-single-runtime-multi-planner.md`：双轨收敛共识落档——「单 Runtime + 多 Planner」取代 plan-e 的「收敛」表述。含 K1–K5 卡点修正、R0 控制权冲突风险、P1–P5 五个落地契约点、Phase 0–3 路线图。
