@@ -17,7 +17,7 @@ import sys
 from app.agent.graph import build_graph
 from app.agent.llm import build_chat_model
 from app.config import get_settings
-from app.infra.db import close_pool, get_pool, init_pool
+from agent_runtime.db import close_pool, get_pool, init_pool
 
 
 async def _build_checkpointer():
@@ -62,7 +62,10 @@ async def main() -> int:
         print("[FAIL] llm_enabled is False → 会走启发式模式，未命中真实 LLM 通道")
         return 2
 
-    await init_pool()
+    await init_pool(
+        database_url=settings.database_url,
+        db_pool_max_size=settings.db_pool_max_size,
+    )
     checkpointer = await _build_checkpointer()
     llm = build_chat_model()
     graph = build_graph(llm, checkpointer=checkpointer, mcp_manager=None)

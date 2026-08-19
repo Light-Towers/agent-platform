@@ -149,20 +149,23 @@ def build_dataset() -> Dataset:
 
 async def main():
     from app.config import get_settings
-    from app.infra.db import ensure_schema, init_pool
+    from agent_runtime.db import ensure_schema, init_pool
     from app.rag.chunker import split_markdown
     from app.rag.store import add_document
 
     rerank_on = get_settings().rerank_effective_enabled
     print(f"[eval] rerank_effective_enabled={rerank_on}")
 
-    pool = await init_pool()
+    pool = await init_pool(
+        database_url=get_settings().database_url,
+        db_pool_max_size=get_settings().db_pool_max_size,
+    )
     # 评测环境：chunks 为临时入库数据，强制重建以兼容 schema 演进
     # （如远程合并新增 workspace_id 列后，旧 chunks 表缺列会导致 ensure_schema 失败）。
     async with pool.connection() as conn:
         await conn.execute("DROP TABLE IF EXISTS chunks")
         await conn.commit()
-    await ensure_schema(pool)
+    await ensure_schema(pool, vector_dim=get_settings().vector_dim)
 
     # 清空历史 chunks（评测环境可丢，避免重复入库污染语料）
     async with pool.connection() as conn:

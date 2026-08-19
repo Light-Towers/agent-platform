@@ -4,7 +4,7 @@ from app.sql.pipeline import format_result, text_to_sql
 
 
 async def sql_query(query: str, llm=None) -> list[str]:
-    from app.infra.db import get_pool
+    from agent_runtime.db import get_pool
 
     payload = await text_to_sql(get_pool(), query, llm=llm)
     return [format_result(payload)]

@@ -14,7 +14,7 @@ import pytest
 from agent_core.intent.classifier import classify_l1
 from agent_core.resilience import CircuitBreaker
 
-from app.infra.coordinator import SessionCoordinator
+from agent_runtime.coordinator import SessionCoordinator
 
 # ---------------------------------------------------------------------------
 # #四：coordinator cancel 协议

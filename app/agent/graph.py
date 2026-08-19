@@ -16,8 +16,8 @@ from app.agent.intent_bridge import l1_route_hint
 from app.agent.router import decide_route
 from app.agent.state import AgentState, _validate_state
 from app.config import get_settings
-from app.infra.db import get_pool
-from app.infra.mcp_client import MCPClientManager
+from agent_runtime.db import get_pool
+from agent_runtime.mcp_client import MCPClientManager
 from app.memory.longterm import extract_memory_facts, maybe_consolidate, recall, remember
 from app.subagents.mcp import mcp_query
 from app.subagents.rag import rag_query

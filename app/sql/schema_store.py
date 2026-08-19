@@ -4,7 +4,7 @@
 不依赖已归档的 vanna 包，训练数据统一存 pgvector，按语义相似度召回。
 """
 
-from app.infra.db import vector_search
+from agent_runtime.db import vector_search
 from app.rag.embed import embed_query, embed_texts
 
 

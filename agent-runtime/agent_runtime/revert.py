@@ -9,8 +9,8 @@
 import logging
 import uuid
 
-from app.infra.cache import spawn_background
-from app.schemas import RevertResult
+from agent_runtime.cache import spawn_background
+from agent_runtime.schemas import RevertResult
 
 logger = logging.getLogger(__name__)
 

@@ -2,7 +2,7 @@
 
 import asyncio
 
-from app.infra.cache import pending_background_tasks, spawn_background
+from agent_runtime.cache import pending_background_tasks, spawn_background
 
 
 async def test_spawned_task_is_tracked_until_done():

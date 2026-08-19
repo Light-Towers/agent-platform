@@ -11,7 +11,7 @@ import uuid
 from rank_bm25 import BM25Okapi
 
 from app.config import get_settings
-from app.infra.db import vector_search
+from agent_runtime.db import vector_search
 from app.rag.chunker import Chunk
 from app.rag.embed import embed_query, embed_texts
 from app.rag.rerank import get_reranker

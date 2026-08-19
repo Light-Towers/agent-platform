@@ -4,7 +4,7 @@ import asyncio
 
 import pytest
 
-from app.infra.coordinator import SessionCoordinator
+from agent_runtime.coordinator import SessionCoordinator
 
 
 @pytest.mark.asyncio

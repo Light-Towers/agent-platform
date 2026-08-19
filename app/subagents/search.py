@@ -3,7 +3,7 @@
 import httpx
 
 from app.config import get_settings
-from app.infra.circuit_breaker import CircuitBreaker
+from agent_runtime.circuit_breaker import CircuitBreaker
 
 _breaker: CircuitBreaker | None = None
 
