@@ -87,7 +87,7 @@ class AgentRetriever(BaseTextRetriever):
 
 
 async def retrieve_chunks_safe(pool, query: str, k: int):
-    from app.rag.store import retrieve_chunks
+    from agent_server.rag.store import retrieve_chunks
 
     return await retrieve_chunks(pool, query, k=k)
 

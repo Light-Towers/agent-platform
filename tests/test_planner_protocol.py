@@ -9,7 +9,6 @@ from __future__ import annotations
 import pytest
 from agent_runtime.planner.protocol import Plan, PlannerContext, PlannerRuntime, StreamEvent
 from agent_runtime.planner.registry import PlannerRegistry
-
 from agent_server.planners.deterministic import DeterministicPlanner
 
 

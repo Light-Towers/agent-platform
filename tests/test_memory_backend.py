@@ -9,7 +9,6 @@
 """
 
 from agent_core.memory.backend import MemoryBackend
-
 from agent_server.memory.memory_backend import get_default_backend
 
 
@@ -24,7 +23,7 @@ def test_memory_backend_module_no_local_impl():
 async def test_recall_empty_in_memory_mode(monkeypatch):
     # 内存模式：无 DATABASE_URL → 后端降级 None，recall 返回空
     monkeypatch.setattr(
-        "app.memory.memory_backend._resolve_default_backend",
+        "agent_server.memory.memory_backend._resolve_default_backend",
         lambda: None,
     )
     import agent_server.memory.longterm as l
@@ -35,7 +34,7 @@ async def test_recall_empty_in_memory_mode(monkeypatch):
 def test_default_backend_none_without_db(monkeypatch):
     # 未配置 DB 时降级为 None（不抛、不连库）
     monkeypatch.setattr(
-        "app.config.get_settings", lambda: _FakeSettings(database_url="")
+        "agent_server.config.get_settings", lambda: _FakeSettings(database_url="")
     )
     backend = get_default_backend()
     assert backend is None
@@ -46,7 +45,7 @@ def test_default_backend_delegates_to_core_pg(monkeypatch):
     from agent_core.memory.vector_backend import PgVectorMemoryBackend
 
     monkeypatch.setattr(
-        "app.config.get_settings",
+        "agent_server.config.get_settings",
         lambda: _FakeSettings(database_url="postgresql://x@localhost/db"),
     )
     import agent_server.memory.memory_backend as m

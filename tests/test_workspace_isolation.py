@@ -9,7 +9,6 @@
 """
 
 import pytest
-
 from agent_server.config import get_settings
 from agent_server.memory import memory_backend as mb
 from agent_server.rag import store as rag_store
@@ -138,8 +137,8 @@ def patch_embed(monkeypatch):
     async def _fake_query(text, dim=512):
         return [0.0] * dim
 
-    monkeypatch.setattr("app.rag.embed.embed_texts", _fake_texts)
-    monkeypatch.setattr("app.rag.embed.embed_query", _fake_query)
+    monkeypatch.setattr("agent_server.rag.embed.embed_texts", _fake_texts)
+    monkeypatch.setattr("agent_server.rag.embed.embed_query", _fake_query)
     monkeypatch.setattr(mb, "embed_memory", lambda t: [0.0] * 512)
     s = get_settings()
     original_url = s.database_url
@@ -147,7 +146,7 @@ def patch_embed(monkeypatch):
     # 置非空 database_url，使 add_document / vector_search 走真实 SQL 路径
     # （由本测试的 fake psycopg 池接手，不连真实 PG）
     s.database_url = "postgresql://fake/fake"
-    monkeypatch.setattr("app.config.get_settings", lambda: s)
+    monkeypatch.setattr("agent_server.config.get_settings", lambda: s)
     yield
     s.database_url = original_url  # 还原，避免影响同进程其他测试
 

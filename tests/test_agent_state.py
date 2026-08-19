@@ -4,10 +4,9 @@
 LangGraph 能识别字段上的 Annotated[list, add_messages] reducer 并正确累加。
 """
 
+from agent_server.agent.state import AgentState
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.graph import END, START, StateGraph
-
-from agent_server.agent.state import AgentState
 
 
 def test_state_is_pydantic_with_defaults():
@@ -59,7 +58,6 @@ def test_route_enum_rejects_invalid_value():
 def test_validate_state_rejects_empty_question():
     """优化 A 要点2：_validate_state 入口断言拦截空 question。"""
     import pytest
-
     from agent_server.agent.state import _validate_state
 
     with pytest.raises(ValueError):

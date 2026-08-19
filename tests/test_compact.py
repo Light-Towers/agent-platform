@@ -2,13 +2,13 @@
 
 import pytest
 from agent_core.tokenizer import count_messages, count_tokens, get_tokenizer
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from agent_server.agent.compact import (
     _KEEP_RECENT,
     compact_messages,
     estimate_tokens,
     should_compact,
 )
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 
 class _MockLLM:
