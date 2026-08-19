@@ -3,9 +3,9 @@
 import hashlib
 
 import pytest
-from fastapi import HTTPException
 from agent_server.api.auth import resolve_thread_id, verify_api_key
 from agent_server.config import get_settings
+from fastapi import HTTPException
 
 
 def _set_api_key(monkeypatch, key: str):

@@ -3,7 +3,6 @@
 import sqlite3
 
 import pytest
-
 from agent_server.sql.pipeline import execute_readonly, extract_sql
 
 

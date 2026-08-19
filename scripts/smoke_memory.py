@@ -19,7 +19,7 @@ for k in list(os.environ):
     if k.upper() == "DATABASE_URL":
         os.environ.pop(k, None)
 
-import app.main as m
+import agent_server.main as m
 
 
 async def main() -> int:

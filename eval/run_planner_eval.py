@@ -44,10 +44,10 @@ def build_planner(kind: str):
     get_settings() 为 lru_cache：双跑不同 kind 前必须清缓存，否则二次调用仍命中首次 Settings。
     """
     os.environ["PLANNER"] = kind
-    from app.config import get_settings  # noqa: PLC0415
+    from agent_server.config import get_settings  # noqa: PLC0415
 
     get_settings.cache_clear()
-    from app.planners import get_planner  # noqa: PLC0415
+    from agent_server.planners import get_planner  # noqa: PLC0415
 
     return get_planner()
 
@@ -61,7 +61,7 @@ async def run_kind(kind: str, golden: list[dict], use_llm: bool):
         if not os.getenv("LLM_API_KEY"):
             print("WARN: LLM_API_KEY 未配置，deterministic 轨回退启发式路由")
         else:
-            from app.agent.llm import build_chat_model  # noqa: PLC0415
+            from agent_server.agent.llm import build_chat_model  # noqa: PLC0415
 
             llm = build_chat_model()
 

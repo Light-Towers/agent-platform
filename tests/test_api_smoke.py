@@ -2,8 +2,8 @@
 
 import json
 
-from fastapi.testclient import TestClient
 from agent_server.main import app
+from fastapi.testclient import TestClient
 
 
 def test_health_memory_mode():

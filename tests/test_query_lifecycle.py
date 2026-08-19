@@ -80,7 +80,7 @@ def app_with_mocks(monkeypatch):
     app = _app
     # 重置可能因其他测试污染的 state
     settings = _make_settings()
-    monkeypatch.setattr("app.api.routes.get_settings", lambda: settings)
+    monkeypatch.setattr("agent_server.api.routes.get_settings", lambda: settings)
 
     coordinator = _MockCoordinator()
     admission = _MockAdmission()
@@ -128,10 +128,10 @@ async def test_cache_hit_releases_resources(app_with_mocks, monkeypatch):
 
     # 让缓存查询命中：pool 非 None、embed_query 返回定长向量、cache_lookup 命中
     fake_pool = object()
-    monkeypatch.setattr("app.api.routes.get_pool", lambda: fake_pool)
-    monkeypatch.setattr("app.api.routes.embed_query", lambda q: _async_embed())
+    monkeypatch.setattr("agent_server.api.routes.get_pool", lambda: fake_pool)
+    monkeypatch.setattr("agent_server.api.routes.embed_query", lambda q: _async_embed())
     monkeypatch.setattr(
-        "app.api.routes.semantic_cache.cache_lookup",
+        "agent_server.api.routes.semantic_cache.cache_lookup",
         lambda pool, emb, thr: _async_cache_hit(),
     )
 

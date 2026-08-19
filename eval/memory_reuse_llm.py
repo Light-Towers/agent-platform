@@ -81,9 +81,9 @@ async def run() -> int:
         print("SKIP: DATABASE_URL 未配置，记忆闭环无 PG 池，跨轮记忆雷达不可达")
         return EXIT_SKIP
 
-    from app.agent.graph import build_graph
-    from app.agent.llm import build_chat_model
-    from app.config import get_settings
+    from agent_server.agent.graph import build_graph
+    from agent_server.agent.llm import build_chat_model
+    from agent_server.config import get_settings
 
     settings = get_settings()
     if not settings.memory_enabled:

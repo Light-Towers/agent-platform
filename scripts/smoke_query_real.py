@@ -14,10 +14,10 @@ from __future__ import annotations
 import asyncio
 import sys
 
-from app.agent.graph import build_graph
-from app.agent.llm import build_chat_model
-from app.config import get_settings
 from agent_runtime.db import close_pool, get_pool, init_pool
+from agent_server.agent.graph import build_graph
+from agent_server.agent.llm import build_chat_model
+from agent_server.config import get_settings
 
 
 async def _build_checkpointer():

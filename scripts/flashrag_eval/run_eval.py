@@ -148,10 +148,10 @@ def build_dataset() -> Dataset:
 
 
 async def main():
-    from app.config import get_settings
     from agent_runtime.db import ensure_schema, init_pool
-    from app.rag.chunker import split_markdown
-    from app.rag.store import add_document
+    from agent_server.config import get_settings
+    from agent_server.rag.chunker import split_markdown
+    from agent_server.rag.store import add_document
 
     rerank_on = get_settings().rerank_effective_enabled
     print(f"[eval] rerank_effective_enabled={rerank_on}")
