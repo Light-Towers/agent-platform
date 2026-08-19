@@ -16,6 +16,14 @@
 - 纯数据结构对比，无 LLM 依赖，CI 可守；用法：先 `--baseline` 锁切换后基线 → 后续 `--compare --fail-below 0.05` 守门禁。
 - **测试**：新增 `tests/unit/test_eval_baseline.py`（4 例：baseline 快照剥离 + exact/jaccard/rubric 退化 + 缺失题 + clean 无漂移）；联邦 unit 85 passed / 根 tests 322 passed（零回归），lint 0 error。
 
+## Plan-F WS 出口统一收尾（2026-08-19）—— 双轨流式事件同构
+
+- **`agent_runtime/planner/protocol.py`**：新增 `serialize_stream_event(event) -> dict | None`，作为 app(SSE) / 联邦(WS) **共享的单一映射**，消除双轨出口 schema 漂移源。
+- **`app/api/routes.py`**：`_stream_event` 委托 `serialize_stream_event`（输出结构不变，消除 app 内硬编码映射副本）。
+- **`agent_federation/api/server.py`**：`/ws/{thread_id}` 从 echo/pong 升级为——收 `{"type":"query","text":...}` → `AgenticPlanner.execute` 产 `StreamEvent` → 逐条 `send_json(serialize_stream_event)` → 收尾 `{"type":"done","thread_id","answer"}`；非 query 合法 JSON 回退 pong（保留旧兼容）；`/api/task` 不动。
+- **Boundary**：仅统一「事件 schema 出口」，不重写联邦 WS 鉴权/并发/前端协议；evidence/memory 桥接（monitor→StreamEvent）留作后续。
+- **测试**：新增 `tests/unit/test_ws_stream.py`（2 例：query 流式收 route+answer+done；非 query 回退 pong，mock execute 免 LLM）；联邦 unit 87 passed / 根 tests 322 passed（零回归），lint 0 error。
+
 ## Plan-F 单 Runtime 多 Planner 启动（2026-08-19）
 
 - **方案文档** `docs/plan-f-single-runtime-multi-planner.md`：双轨收敛共识落档——「单 Runtime + 多 Planner」取代 plan-e 的「收敛」表述。含 K1–K5 卡点修正、R0 控制权冲突风险、P1–P5 五个落地契约点、Phase 0–3 路线图。
