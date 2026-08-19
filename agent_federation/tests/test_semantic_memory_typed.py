@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
-"""ADR-0004 阶段2：deepagents 类型化记忆封装单测（mock psycopg 池）。
+"""ADR-0004 阶段2：agent_federation 类型化记忆封装单测（mock psycopg 池）。
 
 验证：
 - SEMANTIC_MEMORY_TYPED=true 时，typed 封装委托内核 typed API（recall/remember/consolidate/forget）；
 - SEMANTIC_MEMORY_TYPED=false（默认）时，回退内核旧门面（零行为变更），consolidate/forget 无操作；
 - embed_memory 用 agent-core embedder 单例（无实际模型加载时 mock）。
 
-deepagents 的 pytest 配置 asyncio_mode=auto，async 测试无需装饰器。
+agent_federation 的 pytest 配置 asyncio_mode=auto，async 测试无需装饰器。
 """
 
 from __future__ import annotations

@@ -1,8 +1,8 @@
-# deepagents 生产化依赖清单（与 pyproject.toml [project].dependencies 对齐）
+# agent_federation 生产化依赖清单（与 pyproject.toml [project].dependencies 对齐）
 #
 # 本文件仅列「硬依赖」（最小可运行集）。可选能力（链路追踪/缓存/文档生成/Excel）
 # 通过 pyproject [project.optional-dependencies] 安装，避免一股脑装无用包：
-#   pip install -e "./deepagents[observability,cache,docs,excel]"
+#   pip install -e "./agent_federation[observability,cache,docs,excel]"
 #
 # 使用 uv 管理的联邦网关请直接依赖 pyproject.toml（本文件为非 uv 用户备选）。
 
@@ -10,7 +10,7 @@
 -e ../agent-core
 -e ../shared-schemas
 
-# --- SQL 守卫（deepagents 委托 agent_core 的 mysql dialect 守卫，需 sqlglot 透传） ---
+# --- SQL 守卫（agent_federation 委托 agent_core 的 mysql dialect 守卫，需 sqlglot 透传） ---
 sqlglot>=25.0
 
 # --- 核心框架 ---

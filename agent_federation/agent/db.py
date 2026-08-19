@@ -1,7 +1,7 @@
-"""PostgreSQL + pgvector 连接池（deepagents 单一池，遵守 ADR-0003）。
+"""PostgreSQL + pgvector 连接池（agent_federation 单一池，遵守 ADR-0003）。
 
 设计要点：
-- deepagents 不自建 asyncpg 双池；pg 模式语义/类型记忆统一走此 psycopg 单池。
+- agent_federation 不自建 asyncpg 双池；pg 模式语义/类型记忆统一走此 psycopg 单池。
 - 池 URL 取 ``DEEPAGENTS_DATABASE_URL``，回退 ``DATABASE_URL``（与 app 共享库时指向同一库）。
 - 懒加载加锁 + lifespan 预热，避免竞态；建表语句全部 IF NOT EXISTS，重启安全。
 - ``register_vector_async`` 必须在打开连接池前先 ``CREATE EXTENSION vector``，否则报
@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 _pool = None
 _pool_lock = asyncio.Lock()
 
-# deepagents 仅用到 memories 表（类型化记忆）；其余表由 app 侧 schema 负责
+# agent_federation 仅用到 memories 表（类型化记忆）；其余表由 app 侧 schema 负责
 MEMORIES_SCHEMA = """
 CREATE TABLE IF NOT EXISTS memories (
     id BIGSERIAL PRIMARY KEY,
@@ -77,7 +77,7 @@ async def init_pool():
         await pool.open(wait=True)
         await _ensure_schema(pool)
         _pool = pool
-        logger.info("deepagents PostgreSQL 连接池就绪，memories schema 已校验")
+        logger.info("agent_federation PostgreSQL 连接池就绪，memories schema 已校验")
         return _pool
 
 

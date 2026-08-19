@@ -2,7 +2,7 @@
 """进程内可观测性计数器（P3 可观测性补完，零外部依赖）。
 
 设计护栏（遵循 §3 内核零依赖铁律）：
-- 仅依赖 stdlib，不硬依赖 prometheus / fastapi，避免给 deepagents 引入新重依赖。
+- 仅依赖 stdlib，不硬依赖 prometheus / fastapi，避免给 agent_federation 引入新重依赖。
 - 维护进程级单调计数器 + 最近状态快照，供 ``api/server.py`` 的 ``GET /metrics``
   端点以 JSON 暴露；同时这些计数在状态变化时也会经 ``agent_core.monitor`` 上报事件。
 

@@ -50,7 +50,7 @@ async def _get_valkey() -> Any:
 
 
 # 缓存 key 构造统一走内核单一真相（agent_core.cache.build_cache_key），
-# 避免 deepagents 与未来 app 重构各写一份 hash 逻辑导致漂移。
+# 避免 agent_federation 与未来 app 重构各写一份 hash 逻辑导致漂移。
 _build_cache_key = build_cache_key
 
 

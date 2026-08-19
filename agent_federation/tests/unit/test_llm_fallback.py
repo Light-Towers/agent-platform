@@ -123,7 +123,7 @@ class TestCreateFallbackModel:
     def test_no_fallback_returns_single_model_adapter(self, monkeypatch):
         """无备用模型时仍返回 LangChainFallbackModel（单模型外壳）。
 
-        P2.1：必须返回外壳而非裸 primary，否则 deepagents 的 SummarizationMiddleware
+        P2.1：必须返回外壳而非裸 primary，否则 deepagents PyPI 包的 SummarizationMiddleware
         读不到 model.profile["max_input_tokens"]，会在小窗口模型（qwen-max 32K）下
         永不触发摘要。外壳的 fallback 为 None，profile 按主模型名解析窗口。
         """
