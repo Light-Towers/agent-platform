@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import importlib
 
 import pytest
 
@@ -89,11 +88,17 @@ def test_milvus_escape_rejects_control_chars():
         MilvusMemoryBackend._escape_milvus_str('bad\nuser')
 
 
-def test_milvus_escape_quotes():
+def test_milvus_escape_quotes_rejected():
     from agent_core.memory.vector_backend import MilvusMemoryBackend
 
-    out = MilvusMemoryBackend._escape_milvus_str('a"b')
-    assert out == 'a\\"b'
+    # 引号/反斜杠在 user_id/tenant_id 中非法：拒绝而非转义，
+    # 避免查询侧 expr 转义与数据侧字面存储不一致导致查不到（双重转义 bug）。
+    with pytest.raises(ValueError):
+        MilvusMemoryBackend._escape_milvus_str('a"b')
+    with pytest.raises(ValueError):
+        MilvusMemoryBackend._escape_milvus_str('a\\b')
+    # 普通字符原样返回（保证写入/查询两侧一致）
+    assert MilvusMemoryBackend._escape_milvus_str("alice") == "alice"
 
 
 # ── 优化 ③ #5：Milvus 异步嵌入不阻塞 / 无嵌套死锁 ───────────────────────────

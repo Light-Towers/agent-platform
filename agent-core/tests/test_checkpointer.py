@@ -21,9 +21,15 @@ def test_get_checkpointer_falls_back_to_inmemory_without_mongo(monkeypatch):
 
 
 def test_get_checkpointer_uses_mongo_when_configured(monkeypatch):
-    """配置 MONGO_URL 时：有 pymongo 返回 MongoCheckpointer；否则优雅降级。
+    """配置 MONGO_URL 且 MongoDB 可达时返回 MongoCheckpointer；否则优雅降级。
 
-    降级路径本身也是正确行为（CI 常无 pymongo），故两种情形都断言通过。
+    修复前该测试在「装了 pymongo 但本机无 MongoDB」组合下必失败——它硬断言
+    MongoCheckpointer，而 get_checkpointer 的真实契约是「MongoDB 可达才返回
+    MongoCheckpointer，连接失败则降级 InMemorySaver」（__init__.py 的 except 分支）。
+    故这里按 MongoDB 实际可达性分两支断言：可达则验 MongoCheckpointer 初始化正确，
+    不可达则验工厂优雅降级（同样是正确行为，CI 无 mongo 服务时即走此路）。
+    依赖缺失（无 pymongo）的降级已由 test_get_checkpointer_degrades_on_mongo_failure
+    覆盖，此处不再重复。
     """
     monkeypatch.setenv("MONGO_URL", "mongodb://localhost:27017")
     monkeypatch.setenv("MONGO_DB", "deepagents_test")
@@ -35,12 +41,12 @@ def test_get_checkpointer_uses_mongo_when_configured(monkeypatch):
     from agent_core.memory import MongoCheckpointer, get_checkpointer
 
     cp = get_checkpointer()
-    if _pymongo_available():
+    if _pymongo_available() and _mongo_reachable():
         assert isinstance(cp, MongoCheckpointer)
         assert cp._tenant_id == "unit"
         assert cp._db.name == "deepagents_test"
     else:
-        # 无 pymongo 依赖时，工厂必须降级而非抛错
+        # MongoDB 不可达（或依赖缺失）时，工厂必须降级而非抛错
         assert isinstance(cp, InMemorySaver)
 
 
@@ -50,6 +56,21 @@ def _pymongo_available() -> bool:
 
         return True
     except ImportError:
+        return False
+
+
+def _mongo_reachable(url: str = "mongodb://localhost:27017", timeout_ms: int = 1500) -> bool:
+    """探测本机 MongoDB 是否真正可达（避免真连库测试变成环境 flaky）。"""
+    if not _pymongo_available():
+        return False
+    try:
+        from pymongo import MongoClient
+
+        client = MongoClient(url, serverSelectionTimeoutMS=timeout_ms)
+        client.admin.command("ping")
+        client.close()
+        return True
+    except Exception:
         return False
 
 

@@ -138,27 +138,32 @@ class MilvusMemoryBackend(MemoryBackend):
             FieldSchema(name="embedding", dtype=DataType.FLOAT_VECTOR, dim=self._dim),
         ]
         schema = CollectionSchema(fields=fields)
-        self._Collection(name=self._collection_name, schema=schema)
-        self._utility.create_index(
-            self._collection_name,
-            "embedding",
-            {"index_type": "HNSW", "metric_type": "COSINE", "params": {"M": 8, "efConstruction": 200}},
+        coll = self._Collection(name=self._collection_name, schema=schema)
+        # pymilvus 3.x：索引通过 Collection 对象创建（utility 无 create_index 方法）
+        coll.create_index(
+            field_name="embedding",
+            index_params={
+                "index_type": "HNSW",
+                "metric_type": "COSINE",
+                "params": {"M": 8, "efConstruction": 200},
+            },
         )
 
     @staticmethod
     def _escape_milvus_str(value: str) -> str:
-        """转义 Milvus 标量过滤表达式中被视为字面量的字符串。
+        """校验并转义 Milvus 标量过滤表达式中的字符串字面量。
 
         Milvus expr 不支持参数占位符，字符串字面量需用双引号包裹。若 ``value``
-        含双引号/反斜杠，会被解释为表达式语法（注入风险）。这里对反斜杠与双引号
-        做转义，并拒绝换行等非法字符，保证 expr 只作字面量匹配。
+        含双引号/反斜杠，会被解释为表达式语法（注入风险），且查询侧 expr 的
+        转义语义与数据侧 insert 的字面存储不一致，会导致带这类字符的 id 查不到。
+        因此引号/反斜杠与控制字符一律**拒绝**（user_id/tenant_id 不应含这些字符），
+        其余字符原样用于 expr，保证写入与查询两侧一致。
         """
         if not isinstance(value, str) or not value:
             raise ValueError("Milvus 过滤字段必须为非空字符串")
-        if any(ch in value for ch in "\n\r\t"):
-            raise ValueError("Milvus 过滤字段含非法控制字符")
-        escaped = value.replace("\\", "\\\\").replace('"', '\\"')
-        return escaped
+        if any(ch in value for ch in '"\\\n\r\t'):
+            raise ValueError("Milvus 过滤字段含非法字符（引号/反斜杠/控制字符）")
+        return value
 
     async def recall(
         self, pool: Any, user_id: str, question: str, k: int = 3
@@ -205,10 +210,14 @@ class MilvusMemoryBackend(MemoryBackend):
         t.start()
 
     async def _aremember(self, pool: Any, user_id: str, content: str) -> None:
+        # 与 recall 一致的转义/校验：含引号/反斜杠/控制字符的 user_id/tenant_id
+        # 在写入侧同样处理，避免写入与查询表达式不一致导致查不到。
+        safe_user = self._escape_milvus_str(user_id)
+        safe_tenant = self._escape_milvus_str(self._tenant_id)
         vec = await self._aembed(content)
         coll = await _run_sync(self._connect)
         await _run_sync(
-            coll.insert, [[user_id], [self._tenant_id], [content], [vec]]
+            coll.insert, [[safe_user], [safe_tenant], [content], [vec]]
         )
 
 
