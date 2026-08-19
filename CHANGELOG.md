@@ -10,6 +10,12 @@
 - **Boundary**：`deep_agent` subagents 委派机制（`_build_subagents` / `create_deep_agent`）保持不动——Plan-F 目标是「编排收敛」而非「重写委派」，避免破坏现有行为。
 - **测试**：扩 `tests/unit/test_agentic_planner.py`（arun 经治理复用 + main_agent 透传 + 步数超限抛 `SkillCompositionError`）；新增 `tests/unit/test_run_deep_agent_planner.py`（run_deep_agent 经 planner.arun 走通 + monitor 上报保留）；联邦 unit 81 passed / 根 tests 322 passed（零回归），lint 0 error。
 
+## Plan-F R1 漂移门禁收尾（2026-08-19）—— 双跑 eval 基线闭环
+
+- **`agent_federation/eval/run_eval.py`**：新增 `--baseline <path>`（本次结果快照为行为基线，只落 `id`/`routed_agents`/`routing_score`/`rubric_rate`，不存 answer 全文）+ `--compare <path>`（逐项对比漂移：exact/jaccard/rubric 退化 + 缺失题，报告漂移率）+ `--fail-below`（漂移率超阈值退出码非零，可作 CI 门禁）；`save_baseline`/`compare_baseline` 抽为独立纯函数。
+- 纯数据结构对比，无 LLM 依赖，CI 可守；用法：先 `--baseline` 锁切换后基线 → 后续 `--compare --fail-below 0.05` 守门禁。
+- **测试**：新增 `tests/unit/test_eval_baseline.py`（4 例：baseline 快照剥离 + exact/jaccard/rubric 退化 + 缺失题 + clean 无漂移）；联邦 unit 85 passed / 根 tests 322 passed（零回归），lint 0 error。
+
 ## Plan-F 单 Runtime 多 Planner 启动（2026-08-19）
 
 - **方案文档** `docs/plan-f-single-runtime-multi-planner.md`：双轨收敛共识落档——「单 Runtime + 多 Planner」取代 plan-e 的「收敛」表述。含 K1–K5 卡点修正、R0 控制权冲突风险、P1–P5 五个落地契约点、Phase 0–3 路线图。
