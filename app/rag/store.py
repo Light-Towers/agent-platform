@@ -8,10 +8,10 @@ MVP 阶段 BM25 语料在查询时加载（万级分块内可接受）；
 import re
 import uuid
 
+from agent_runtime.db import vector_search
 from rank_bm25 import BM25Okapi
 
 from app.config import get_settings
-from agent_runtime.db import vector_search
 from app.rag.chunker import Chunk
 from app.rag.embed import embed_query, embed_texts
 from app.rag.rerank import get_reranker

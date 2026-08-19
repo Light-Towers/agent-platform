@@ -1,9 +1,9 @@
 """联网搜索子能力：Tavily；未配置密钥时返回明确提示而非静默空结果。"""
 
 import httpx
+from agent_runtime.circuit_breaker import CircuitBreaker
 
 from app.config import get_settings
-from agent_runtime.circuit_breaker import CircuitBreaker
 
 _breaker: CircuitBreaker | None = None
 

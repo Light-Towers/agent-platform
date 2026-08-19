@@ -4,7 +4,7 @@
 
 - 决策（plan）只回答「本次走哪条能力链路」，不持有执行语义；
 - 执行（execute）按 Plan 编排能力调用，retry/超时/熔断等执行边界由 Runtime
-  （``CapabilityRegistry.execute`` 的统一边界）承载；
+  （``SkillRegistry.execute`` 的统一边界）承载；
 - 事件（StreamEvent）与 SSE 出口事件同构（type + payload），Phase 3 切换出口时可直传。
 
 组合治理（Phase 3）：PlannerRuntime 承载 ``max_skill_depth`` / ``max_steps`` 与

@@ -7,10 +7,10 @@ from __future__ import annotations
 
 from typing import Any, Awaitable, Callable
 
-from agent_runtime.capabilities.registry import Capability, CapabilityKind
+from agent_runtime.skills.registry import Skill, SkillKind
 
 
-def as_function_capability(
+def as_function_skill(
     name: str,
     description: str,
     fn: Callable[..., Awaitable[Any]],
@@ -18,7 +18,7 @@ def as_function_capability(
     timeout_ms: int | None = None,
     input_schema: dict | None = None,
     output_schema: dict | None = None,
-) -> Capability:
+) -> Skill:
     """把进程内 async 函数包装为 function 型能力。
 
     input_schema / output_schema（可选 JSON Schema dict）：Skill 契约（Phase 1.5），
@@ -28,10 +28,10 @@ def as_function_capability(
     async def execute(**kwargs: Any) -> Any:
         return await fn(**kwargs)
 
-    return Capability(
+    return Skill(
         name=name,
         description=description,
-        kind=CapabilityKind.FUNCTION,
+        kind=SkillKind.FUNCTION,
         executor=execute,
         timeout_ms=timeout_ms,
         input_schema=input_schema,

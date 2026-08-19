@@ -2,6 +2,26 @@
 
 本仓库为 uv workspace monorepo。**唯一受支持的安装/运行入口是根 `uv.lock` + `uv sync`**，子包不再维护独立 `uv.lock`（见 v2 修复 #14）。
 
+## Plan-F 收尾（2026-08-19）—— Capability→Skill 全量 rename
+
+- **命名统一（待用户确认范围：全量重命名）**：将 `agent_runtime/capabilities/` 体系重命名为 `agent_runtime/skills/`，符号 `Capability`→`Skill`、`CapabilityKind`→`SkillKind`、`CapabilityRegistry`→`SkillRegistry`、`CapabilityNotFoundError`→`SkillNotFoundError`、`DuplicateCapabilityError`→`DuplicateSkillError`、`as_function/agent/remote/dag_capability`→`as_function/agent/remote/dag_skill`。
+- **保留项（语义不同，不乱改）**：`app/schemas.py` 的 `Capability = Literal[...]`（路由决策选中的能力名）与所有 `decision.capability` / plan payload 的 `capability` key / StreamEvent 的 `capability` payload——它们是「路由决策结果」，非治理 Skill，保持原样。
+- 波及 `app/`、`agent_federation/`、`tests/`、`eval/` 共 27 个 `.py`（已排除无关 `dialogue-framework` 巧合命中）；用脚本批量 rename（符号级 + 目录重命名），避免 Unicode 匹配误差。
+- **测试**：根 tests **322 passed**（零回归）；`tests/test_capability_registry.py` 13 passed；联邦 unit 87 passed；lint 0 error。
+
+## Plan-F 收尾（2026-08-19）—— WS evidence/memory 桥接闭环
+
+- **`agent_federation/planners/agentic.py`**：`execute()` 现把 `_execute_agent_core` 运行期经全局 `monitor` 发射的运行时事件桥接为 `evidence` StreamEvent（route → evidence* → answer）。新增 `_monitor_event_to_stream_event()`（只读转换，保留 event/message/data 原文）+ `_subscribe_monitor()`（用现有 `monitor.on/off` 临时订阅 `assistant_call`/`tool_start`/`tool_outcome`/`session_created`/`task_result`/`circuit_state_change`/`error`，每个 execute 用自己的闭包+列表，并发安全）。
+- **不破坏黑盒契约**：`run_deep_agent` 的 `_execute_agent_core` 内部零改动，monitor 全局 WS 通道（ConnectionManager）不受影响；仅 execute 路径的 StreamEvent 流更丰富（WS 客户端可见子 agent 调用/工具证据/记忆上下文建立）。
+- 原 WS 出口统一收尾（第 24 行）标注的「evidence/memory 桥接留作后续」**已闭环**。
+- **测试**：扩 `tests/unit/test_agentic_planner.py`（+2 例：execute 桥接 monitor 事件为 evidence；异常路径订阅必注销防回调泄漏）；联邦 unit 87→87（含新增 2 例，原 85 + 新加 execute 桥接共 87）passed。
+
+## Plan-F 收尾（2026-08-19）—— 真实 R1 基线（环境限制，待有 key 环境执行）
+
+- **`agent_federation/eval/run_eval.py`**：`--baseline` 新增前置检查 `_require_real_llm_key_for_baseline()`——`OPENAI_API_KEY` 缺失/占位（test-key/x/sk-test 等）时直接 `sys.exit(2)` 并打印可执行指引，避免在无 key 环境产出垃圾 `fed_latest.jsonl`。
+- **当前状态**：开发环境无真实 LLM key，`fed_latest.jsonl` 真实基线**待在有 key 环境执行**——`uv run python -m agent_federation.eval.run_eval --baseline eval/fed_latest.jsonl`；R1 漂移门禁的**比对逻辑本身无 LLM 依赖**，已通过 `tests/unit/test_eval_baseline.py`（4 例）覆盖，可作 CI 门禁。
+- **Boundary**：仅加前置护栏，不改 `--compare/--fail-below` 比对语义。
+
 ## Plan-F Phase 3 联邦侧收尾（2026-08-19）—— 双轨真正闭环
 
 - **`agent_federation/planners/agentic.py`**：新增 `AgenticPlanner.arun(question, workspace_id, runtime, main_agent=None) -> str`——与 `execute`（供 app SSE 产出 StreamEvent）并存；`async with runtime.skill_guard("agentic")` 包裹 `_execute_agent_core`，将组合治理（max_skill_depth/max_steps）落地联邦主链路；`main_agent` 透传保留动态 agent 选择能力（不进统一协议）。
@@ -21,7 +41,7 @@
 - **`agent_runtime/planner/protocol.py`**：新增 `serialize_stream_event(event) -> dict | None`，作为 app(SSE) / 联邦(WS) **共享的单一映射**，消除双轨出口 schema 漂移源。
 - **`app/api/routes.py`**：`_stream_event` 委托 `serialize_stream_event`（输出结构不变，消除 app 内硬编码映射副本）。
 - **`agent_federation/api/server.py`**：`/ws/{thread_id}` 从 echo/pong 升级为——收 `{"type":"query","text":...}` → `AgenticPlanner.execute` 产 `StreamEvent` → 逐条 `send_json(serialize_stream_event)` → 收尾 `{"type":"done","thread_id","answer"}`；非 query 合法 JSON 回退 pong（保留旧兼容）；`/api/task` 不动。
-- **Boundary**：仅统一「事件 schema 出口」，不重写联邦 WS 鉴权/并发/前端协议；evidence/memory 桥接（monitor→StreamEvent）留作后续。
+- **Boundary**：仅统一「事件 schema 出口」，不重写联邦 WS 鉴权/并发/前端协议；evidence/memory 桥接（monitor→StreamEvent）已于同日后续收尾闭环（见上方「WS evidence/memory 桥接闭环」）。
 - **测试**：新增 `tests/unit/test_ws_stream.py`（2 例：query 流式收 route+answer+done；非 query 回退 pong，mock execute 免 LLM）；联邦 unit 87 passed / 根 tests 322 passed（零回归），lint 0 error。
 
 ## Plan-F 单 Runtime 多 Planner 启动（2026-08-19）

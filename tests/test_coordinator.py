@@ -3,7 +3,6 @@
 import asyncio
 
 import pytest
-
 from agent_runtime.coordinator import SessionCoordinator
 
 

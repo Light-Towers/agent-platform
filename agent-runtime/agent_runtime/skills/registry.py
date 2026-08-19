@@ -1,11 +1,11 @@
-"""Capability Registry：能力层中立化（Plan-F Phase 1）。
+"""Skill Registry：能力层中立化（Plan-F Phase 1）。
 
 定位：统一"能力"的注册 / 发现 / 执行入口。三种执行器：
 - FunctionExecutor：进程内确定性函数（app 的 search/rag/sql/mcp）
 - AgentExecutor：本地 subagent（LLM self-reasoning，联邦 database/network/knowledge 三 agent）
 - RemoteExecutor：远程子服务（Agent Protocol / HTTP）
 
-契约（P1）：Planner 只决策（plan），执行统一走 CapabilityRegistry.execute()——
+契约（P1）：Planner 只决策（plan），执行统一走 SkillRegistry.execute()——
 retry / 超时 / 熔断等 Runtime 边界在此收敛，Planner 不持有执行语义。
 """
 
@@ -20,7 +20,7 @@ from typing import Any, Awaitable, Callable
 Executor = Callable[..., Awaitable[Any]]
 
 
-class CapabilityKind(str, Enum):
+class SkillKind(str, Enum):
     """能力执行方式：决定走哪个执行器语义。"""
 
     FUNCTION = "function"
@@ -30,7 +30,7 @@ class CapabilityKind(str, Enum):
 
 
 @dataclass(frozen=True)
-class Capability:
+class Skill:
     """注册表条目：能力契约（不可变）。
 
     input_schema / output_schema（可选 JSON Schema dict）是 Skill 契约升级（Phase 1.5）：
@@ -40,7 +40,7 @@ class Capability:
 
     name: str
     description: str
-    kind: CapabilityKind
+    kind: SkillKind
     executor: Executor
     timeout_ms: int | None = None
     # 保留扩展位：metadata（来源轨/是否降级/评估标签等）后续按需填充
@@ -65,34 +65,34 @@ class Capability:
         }
 
 
-class CapabilityNotFoundError(KeyError):
+class SkillNotFoundError(KeyError):
     """执行/获取不存在的能力。"""
 
 
-class DuplicateCapabilityError(ValueError):
+class DuplicateSkillError(ValueError):
     """重复注册同名能力。"""
 
 
-class CapabilityRegistry:
+class SkillRegistry:
     """能力注册表：注册 / 发现 / 统一执行入口。"""
 
     def __init__(self) -> None:
-        self._capabilities: dict[str, Capability] = {}
+        self._capabilities: dict[str, Skill] = {}
 
-    def register(self, capability: Capability) -> None:
+    def register(self, capability: Skill) -> None:
         if capability.name in self._capabilities:
-            raise DuplicateCapabilityError(
+            raise DuplicateSkillError(
                 f"能力已注册: {capability.name}（重复注册会掩盖行为差异，拒绝覆盖）"
             )
         self._capabilities[capability.name] = capability
 
-    def get(self, name: str) -> Capability:
+    def get(self, name: str) -> Skill:
         try:
             return self._capabilities[name]
         except KeyError:
-            raise CapabilityNotFoundError(f"能力未注册: {name}") from None
+            raise SkillNotFoundError(f"能力未注册: {name}") from None
 
-    def list(self) -> list[Capability]:
+    def list(self) -> list[Skill]:
         """按名称排序返回全部能力。"""
         return sorted(self._capabilities.values(), key=lambda c: c.name)
 

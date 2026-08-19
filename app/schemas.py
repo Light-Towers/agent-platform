@@ -13,7 +13,6 @@ app 的查询/健康契约统一接入联邦网关的 shared_schemas，成为唯
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
 from agent_runtime.schemas import (
     AdmissionDecision as AdmissionDecision,
 )
@@ -29,6 +28,7 @@ from agent_runtime.schemas import (
 from agent_runtime.schemas import (
     RevertResult as RevertResult,
 )
+from pydantic import BaseModel, ConfigDict, Field
 from shared_schemas import (
     HealthResponse as BaseHealthResponse,
 )

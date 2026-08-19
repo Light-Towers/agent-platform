@@ -2,8 +2,9 @@
 
 import logging
 
-from app.agent.state import AgentState
 from agent_runtime.mcp_client import MCPClientManager
+
+from app.agent.state import AgentState
 
 logger = logging.getLogger(__name__)
 
