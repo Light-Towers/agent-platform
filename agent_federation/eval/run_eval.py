@@ -60,6 +60,74 @@ def score_routing(pred: list, gold: list) -> dict:
     return {"exact": exact, "jaccard": round(jaccard, 4)}
 
 
+def save_baseline(results: list[dict], path: Path) -> None:
+    """把本次评测结果快照为行为基线（Plan-F R1 漂移门禁参照点）。
+
+    baseline 只保留可复现对比的字段（id / routed_agents / routing_score /
+    rubric_rate），不存 answer 全文（避免基线文件随语料噪声膨胀）。
+    """
+    snap = []
+    for r in results:
+        if "routing_score" not in r:
+            continue
+        entry = {
+            "id": r["id"],
+            "routed_agents": r.get("routed_agents", []),
+            "routing_score": r["routing_score"],
+        }
+        if r.get("rubric_score"):
+            entry["rubric_rate"] = r["rubric_score"]["rate"]
+        snap.append(entry)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as f:
+        for row in snap:
+            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+
+def compare_baseline(results: list[dict], baseline_path: Path, fail_below: float = 0.0) -> float:
+    """与基线逐项对比漂移（Plan-F R1）：检测 exact 退化 / jaccard 退化 / 缺失题。
+
+    返回漂移题占比（退化或缺失的题 / 基线题数）；fail_below>0 时由调用方决定是否非零退出。
+    纯数据结构对比，无 LLM 依赖，可作为 CI 可守的 R1 漂移门禁。
+    """
+    base = {}
+    with baseline_path.open(encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line:
+                row = json.loads(line)
+                base[row["id"]] = row
+
+    cur = {r["id"]: r for r in results if "routing_score" in r}
+
+    drifted = 0
+    for bid, brow in base.items():
+        c = cur.get(bid)
+        if c is None:
+            drifted += 1  # 缺失题 = 行为漂移
+            print(f"  [漂移] {bid}: 缺失（基线有该题）")
+            continue
+        b_score = brow["routing_score"]
+        c_score = c["routing_score"]
+        if c_score["exact"] != b_score["exact"]:
+            drifted += 1
+            print(f"  [漂移] {bid}: exact {b_score['exact']} -> {c_score['exact']}")
+        elif c_score["jaccard"] < b_score["jaccard"]:
+            drifted += 1
+            print(f"  [漂移] {bid}: jaccard {b_score['jaccard']} -> {c_score['jaccard']}")
+        # rubric 退化（若有基线）
+        if "rubric_rate" in brow and "rubric_score" in c and c["rubric_score"]:
+            if c["rubric_score"]["rate"] < brow["rubric_rate"]:
+                drifted += 1
+                print(f"  [漂移] {bid}: rubric {brow['rubric_rate']:.0%} -> {c['rubric_score']['rate']:.0%}")
+
+    n = len(base)
+    drift_rate = drifted / n if n else 0.0
+    print(f"\nR1 漂移检测：{drifted}/{n} 题漂移，漂移率 {drift_rate:.1%}"
+          + (f"（门禁 {fail_below:.0%}）" if fail_below else ""))
+    return drift_rate
+
+
 async def run_eval(golden_path: Path, limit: int, cleanup: bool, judge: bool):
     timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
     items = []
@@ -185,14 +253,28 @@ def main():
     parser.add_argument("--limit", type=int, default=0, help="限制题数（0=全部）")
     parser.add_argument("--no-cleanup", action="store_true", help="不清理评测 session 目录")
     parser.add_argument("--no-judge", action="store_true", help="跳过 rubric judge（只跑路由）")
+    parser.add_argument("--baseline", default=None,
+                        help="把本次结果快照为行为基线（Plan-F R1 漂移门禁用），写入该路径")
+    parser.add_argument("--compare", default=None,
+                        help="与指定基线逐项对比漂移（exact/jaccard 退化 + 缺失题），需配合 --baseline 之外的实跑")
+    parser.add_argument("--fail-below", type=float, default=0.0,
+                        help="compare 模式下，漂移题占比或 exact 均值低于该值时退出码非零（默认 0=仅报告）")
     args = parser.parse_args()
 
-    asyncio.run(run_eval(
+    results = asyncio.run(run_eval(
         golden_path=Path(args.golden),
         limit=args.limit,
         cleanup=not args.no_cleanup,
         judge=not args.no_judge,
     ))
+
+    if args.baseline:
+        save_baseline(results, Path(args.baseline))
+
+    if args.compare:
+        drift_rate = compare_baseline(results, Path(args.compare), args.fail_below)
+        if args.fail_below and drift_rate > args.fail_below:
+            sys.exit(1)
 
 
 if __name__ == "__main__":

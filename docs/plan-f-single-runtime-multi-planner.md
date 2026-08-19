@@ -70,7 +70,7 @@ app 的 search/rag/sql/mcp（进程内节点）与联邦 `database_query_agent`/
 | 风险 | 内容 | 缓解 |
 |---|---|---|
 | **R0 Runtime ownership conflict（最高）** | retry/timeout/cancellation/memory/tracing/streaming 归属不清 → `retry(retry(agent(tool())))` 套娃 | **决策/执行分离**：retry/超时/熔断归 Runtime 对 capability 调用的统一边界；Planner 只决策不执行（契约点 P1） |
-| R1 行为漂移 | app 12 golden（deterministic）vs 联邦无等价基线 | 双跑 eval 基线（P5） |
+| R1 行为漂移 | app 12 golden（deterministic）vs 联邦无等价基线 | 双跑 eval 基线（P5）→ app 侧 `eval/run_planner_eval.py` 已闭环；联邦侧 `eval/run_eval.py` 已加 `--baseline`/`--compare` 漂移门禁（2026-08-19 收尾） |
 | R2 外壳迁移遗漏 | admission/coordinator/revert 是生产外壳，plan-e §3 硬约束禁止弱化 | 逐模块独立迁移 + 双轨回归 |
 | R3 范围爆炸 | 6000+4000 行一次性合并 | Phase 0–3 拆分，每阶段 `make test` + eval 门禁 |
 | R4 数据归属 | app PG 存量 vs 联邦 Mongo/MySQL | 先统一 ThreadState 契约（P2），再迁存量 |
@@ -169,7 +169,7 @@ app 的 search/rag/sql/mcp（进程内节点）与联邦 `database_query_agent`/
 | **P2** | ThreadState 统一状态 | `messages`（LangChain 序列化 dict）+ `metadata`（编排状态）+ `version`。app 编排字段（route/evidence 等）归 metadata | **shared-schemas（已落地）** |
 | **P3** | 流式协议统一出口 | Planner 只产 `StreamEvent` 流，Runtime 决定 SSE/WS adapter（现有客户端协议不变） | agent-runtime |
 | **P4** | MCP 层归属 | `MCPClientManager` 是带连接管理的 runtime 资源（归 agent-runtime/mcp），Capability 消费它 | agent-runtime |
-| **P5** | 双跑 eval 基线 | 同一 golden 双跑（deterministic/agentic）各自记录基线 = 回归门禁 + Planner 解耦验证探针 | eval/ |
+| **P5** | 双跑 eval 基线 | 同一 golden 双跑（deterministic/agentic）各自记录基线 = 回归门禁 + Planner 解耦验证探针 | ✅ app 侧 `eval/run_planner_eval.py`（2026-08-19）+ 联邦侧 `eval/run_eval.py` `--baseline`/`--compare` 漂移门禁（2026-08-19） |
 
 ---
 
@@ -253,3 +253,12 @@ app 的 search/rag/sql/mcp（进程内节点）与联邦 `database_query_agent`/
 - `agent_federation/agent/main_agent.py`：`run_deep_agent` 把 `singleflight(_execute_agent_core, ...)` 改为 `singleflight(AgenticPlanner().arun, ..., get_planner_runtime(), selected_agent)`——保留 singleflight 缓存击穿防护 + 全部副作用链（guard/intent/cache/memory/monitor/remember_episodic/SemanticCache），仅把「最终执行」委托给 Planner 协议 + 治理；eval/WS 的 monitor 事件契约零破坏。
 - **Boundary 严守（不过度设计）**：`deep_agent` subagents 委派机制（`_build_subagents` / `create_deep_agent`）保持不动——Plan-F 目标是「编排收敛」而非「重写委派」，避免破坏现有行为；联邦仍走老委派，但被统一 Planner 协议 + `PlannerRuntime` 治理包裹。
 - 验证：扩 `tests/unit/test_agentic_planner.py`（arun 经治理复用 _execute_agent_core 返回答案 + main_agent 透传 + 步数超限抛 `SkillCompositionError`）；新增 `tests/unit/test_run_deep_agent_planner.py`（run_deep_agent 经 planner.arun 走通 + monitor.report_task_result 仍上报）；联邦 unit 81 passed / 根 tests 322 passed（零回归），lint 0 error。
+
+### R1 漂移门禁收尾（2026-08-19）—— 双跑 eval 基线闭环
+> R1 风险点：联邦 `run_deep_agent` 经 Planner 协议切换后，需锁行为基线以验证「行为未漂移」。app 侧 `eval/run_planner_eval.py` 双跑基线已闭环；联邦侧补齐等价漂移门禁。
+
+- `agent_federation/eval/run_eval.py`：新增 `--baseline <path>`（把本次结果快照为行为基线，只落可复现对比字段 `id`/`routed_agents`/`routing_score`/`rubric_rate`，不存 answer 全文避免噪声膨胀）+ `--compare <path>`（与基线逐项对比，检测 exact 退化 / jaccard 退化 / rubric 退化 / 缺失题，报告漂移率）+ `--fail-below`（漂移率超阈值则退出码非零，可作 CI 门禁）。
+- 纯数据结构对比，无 LLM 依赖，CI 可守；`save_baseline` / `compare_baseline` 抽为独立纯函数复用。
+- **用法**：先 `--baseline eval/baselines/fed_latest.jsonl` 锁切换后基线 → 后续改动 `--compare eval/baselines/fed_latest.jsonl --fail-below 0.05` 守门禁。
+- 不做（不过度设计）：不引入新 golden schema、不改动 judge 逻辑、不做跨 run 的 LLM 语义相似度比对（路由决策层已足够定位漂移）。
+- 验证：新增 `tests/unit/test_eval_baseline.py`（4 例覆盖 baseline 快照剥离 + exact/jaccard/rubric 退化 + 缺失题 + clean 无漂移）；联邦 unit 85 passed / 根 tests 322 passed（零回归），lint 0 error。
