@@ -1,12 +1,16 @@
 """Skill Registry：能力层中立化（Plan-F Phase 1）。
 
-定位：统一"能力"的注册 / 发现 / 执行入口。三种执行器：
+定位：统一"能力"的注册 / 发现 / 执行入口。四种执行器：
 - FunctionExecutor：进程内确定性函数（app 的 search/rag/sql/mcp）
 - AgentExecutor：本地 subagent（LLM self-reasoning，联邦 database/network/knowledge 三 agent）
 - RemoteExecutor：远程子服务（Agent Protocol / HTTP）
+- WorkflowExecutor：Static/Conditional 编排（graph.py → general_qa），LangGraph 仅是执行实现
 
-契约（P1）：Planner 只决策（plan），执行统一走 SkillRegistry.execute()——
-retry / 超时 / 熔断等 Runtime 边界在此收敛，Planner 不持有执行语义。
+契约（P1）：Planner 只决策（plan），执行统一走 SkillRegistry.execute()。
+当前 execute() 实际承载的 Runtime 边界：**入参契约校验 + 统一超时**。
+retry / 熔断 / rate limit / tracing 等边界**尚未在注册表收敛**（演进方向：
+拆分为 SkillExecutor + Middleware Chain；此前 retry 归 Planner 编排循环、
+熔断散落在单个能力实现内，见 docs/plan-f §架构审核 演进方向）。
 """
 
 from __future__ import annotations

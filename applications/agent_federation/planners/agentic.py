@@ -124,7 +124,8 @@ class AgenticPlanner(Planner):
         """联邦侧执行入口（供 ``run_deep_agent`` 复用）：返回答案字符串，并套组合治理护栏。
 
         - 与 ``execute``(供 app SSE)并存：``execute`` 产出 StreamEvent 流，本方法返回字符串。
-        - 经 ``runtime.skill_guard`` 包裹 ``_execute_agent_core``：将 Phase 3 组合治理
+        - 经 ``runtime.execution()`` 界定单次执行预算边界 + ``runtime.skill_guard``
+          包裹 ``_execute_agent_core``：将 Phase 3 组合治理
           (max_skill_depth/max_steps)落地到联邦主链路；护栏违规抛 ``SkillCompositionError``。
         - ``main_agent`` 透传：保留联邦 P5 动态 agent 选择能力（None 时 _execute_agent_core
           内部回退静态单例），不进统一 Planner 协议（属联邦内部 concern）。
@@ -133,5 +134,6 @@ class AgenticPlanner(Planner):
         """
         from agent_federation.agent.main_agent import _execute_agent_core  # noqa: PLC0415
 
-        async with runtime.skill_guard("agentic"):
-            return await _execute_agent_core(question, workspace_id, main_agent)
+        async with runtime.execution():
+            async with runtime.skill_guard("agentic"):
+                return await _execute_agent_core(question, workspace_id, main_agent)

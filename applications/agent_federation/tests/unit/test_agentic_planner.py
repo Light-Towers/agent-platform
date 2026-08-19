@@ -117,12 +117,13 @@ async def test_arun_raises_on_step_limit(monkeypatch):
     runtime = PlannerRuntime(registry=None, pool=None, max_steps=1)
 
     # 单次执行内嵌套第二个 guard 触发步数超限（max_steps=1）
-    async with runtime.skill_guard("a"):
-        with pytest.raises(SkillCompositionError):
-            async with runtime.skill_guard("b"):
-                pass
+    async with runtime.execution():
+        async with runtime.skill_guard("a"):
+            with pytest.raises(SkillCompositionError):
+                async with runtime.skill_guard("b"):
+                    pass
 
-    # 预算 per-request：执行退出复位，后续 arun 可正常执行（不跨请求累计）
+    # 预算 per-request：execution 边界退出复位，后续 arun 可正常执行（不跨请求累计）
     answer = await planner.arun("q1", "ws1", runtime)
     assert answer == "ok"
 
