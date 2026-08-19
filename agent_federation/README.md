@@ -37,20 +37,27 @@ python -m api.server  # 启动 FastAPI，默认 :8000
 
 | 变量 | 必填 | 说明 |
 |------|------|------|
-| `OPENAI_API_KEY` | ✅ | DashScope API Key |
-| `OPENAI_BASE_URL` | ✅ | DashScope 兼容端点 |
+| `OPENAI_API_KEY` / `OPENAI_BASE_URL` | ✅ | DashScope API Key / 兼容端点（主 LLM） |
 | `LLM_QWEN_MAX` | ✅ | 主模型名称 |
-| `LLM_QWEN_FALLBACK` | 可选 | 备用模型名称（主模型不可用时自动降级） |
-| `OPENAI_FALLBACK_BASE_URL` | 可选 | 备用模型端点（默认同主模型） |
-| `OPENAI_FALLBACK_API_KEY` | 可选 | 备用模型 API Key（默认同主模型） |
+| `LLM_QWEN_FALLBACK` / `OPENAI_FALLBACK_*` | 可选 | 备用模型（主模型不可用时自动降级） |
+| `AGENT_MODE` | 可选 | 编排模式：local / remote（默认 local） |
+| `WENDA_DATA_AGENT_URL` | 可选 | wenda-data-agent 地址（Text-to-SQL 子 Agent） |
+| `ZHIKU_API_URL` / `ZHIKU_API_KEY` | 可选 | zhiku 检索服务地址 / Key |
+| `KEFU_SERVICE_URL` / `KEFU_USE_ADAPTER` / `KEFU_ADAPTER_URL` | 可选 | kefu 直连地址 / 是否经 adapter 中转 / adapter 地址 |
 | `TAVILY_API_KEY` | ✅ | Tavily 搜索 API |
-| `MYSQL_*` | ✅ | MySQL 连接信息（生产环境应使用只读用户） |
-| `MYSQL_POOL_SIZE` | 可选 | DB 连接池大小（默认 5） |
-| `MYSQL_POOL_RESET_SESSION` | 可选 | 连接归还时重置（默认 true） |
-| `ZHIKU_API_URL` | 可选 | zhiku 检索服务地址（知识库子 Agent） |
-| `ZHIKU_API_KEY` | 可选 | zhiku API Key |
+| `MYSQL_*` | ✅ | MySQL 连接信息（生产环境应使用只读用户；池参数 `MYSQL_POOL_SIZE` 等） |
+| `DEEPAGENTS_DATABASE_URL` / `DATABASE_URL` | 可选 | PG 向量库 DSN（配了才启用向量检索持久化） |
+| `VALKEY_URL` | 可选 | 语义缓存 Valkey 地址（默认 redis://localhost:6379） |
+| `STORE_POSTGRES_DSN` | 可选 | LangGraph checkpointer PG DSN（默认 SQLite） |
+| `MONGO_URL` / `MONGO_DB` / `MONGO_CHECKPOINT_COLLECTION` | 可选 | Mongo checkpointer（配置且可达时优先） |
+| `SEMANTIC_MEMORY_ENABLED` | 可选 | 长期记忆开关（默认 false） |
+| `VECTOR_BACKEND` / `MILVUS_URI` / `MILVUS_TOKEN` | 可选 | 长期记忆向量后端（milvus / pgvector）与端点 |
+| `SILICONFLOW_API_KEY` / `SILICONFLOW_BASE_URL` / `SILICONFLOW_EMBEDDING_MODEL` | 可选 | 远程 embedding（默认 BAAI/bge-m3） |
+| `EMBEDDING_API_KEY` | 可选 | 通用远程 embedding Key（优先于 `SILICONFLOW_API_KEY`） |
 | `API_KEY` | 可选 | 服务鉴权 Key（空则不鉴权） |
 | `ALLOWED_ORIGINS` | 可选 | CORS 允许源（逗号分隔，默认 localhost:3000） |
+
+> **完整开关清单见 [`.env.example`](.env.example)**（80+ 项，源码为真相源盘点，2026-08-19 核销 TB-11 第一步）：能力开关（`INTENT_ENABLED` / `PLANNER_ENABLED` / `REFLEXION_ENABLED` / `GUARD_ENABLED` / `CACHE_ENABLED` / `DYNAMIC_AGENT_ENABLED` / `DYNAMIC_AGENT_CACHE_MAX`）、治理参数（熔断 `CB_*`、限流 `RATE_LIMIT_*`、灰度 `GRAY_PCT`、重试 `SUBAGENT_RETRIES` / `SUBAGENT_RETRY_BASE`、断言 `E1_CONTRACT_ASSERT` / `E1_CONTENT_ASSERT`、checkpoint 清理 `CHECKPOINT_*`）、缓存 key 版本（`KB_VERSION_*` / `TENANT_ID`）、Langfuse trace（`LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` / `LANGFUSE_HOST`）等均已登记。
 
 ## 改造历程
 
@@ -95,7 +102,7 @@ python -m api.server  # 启动 FastAPI，默认 :8000
 ```
 agent_federation/
 ├── agent/
-│   ├── main_agent.py         # 主管 Agent（懒初始化 + SQLite checkpointer）
+│   ├── main_agent.py         # 主管 Agent（懒初始化 + Mongo/PG/SQLite checkpointer 三态降级）
 │   ├── llm.py                # LLM 模型初始化
 │   ├── prompts.py            # YAML 配置加载
 │   └── subagents/            # 3 个子 Agent 定义
