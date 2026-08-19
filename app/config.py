@@ -98,6 +98,9 @@ class Settings(BaseLLMSettings):
     # 输入护栏（opt-in，默认 false）：PII 脱敏 + prompt injection 检测
     guard_enabled: bool = False
 
+    # Plan-F Phase 2: Planner 实现选择（deterministic | agentic），PLANNER env 覆盖
+    planner: str = "deterministic"
+
     # CORS：允许的前端来源（逗号分隔），为空时默认回环 127.0.0.1:5173
     cors_allow_origins: str = ""
 

@@ -115,6 +115,52 @@ app 的 search/rag/sql/mcp（进程内节点）与联邦 `database_query_agent`/
 
 ---
 
+### 4.1 Skill 统一能力协议（用户架构审核精确化，2026-08-19）
+
+用户审核确立一条更上层的抽象，与 §4 核心原则**同构而非冲突**：
+
+> **Skill 是 Agent Platform 的统一能力协议；Static DAG 是 Skill 的确定性执行实现；
+> Dynamic Graph 是 Skill 的智能组合与规划实现。统一的是 Skill Contract 和 Runtime，
+> 不是具体编排引擎。**
+
+架构形态：
+
+```
+                Agent / Planner
+                       ↓
+                 Skill Registry        ← 注册制 + 契约制（Agent 只见元数据，不见 Python 实现）
+                       ↓
+       ┌────────────────┼─────────────────┐
+       ↓                ↓                 ↓
+  Static DAG        Single Tool      Dynamic Agent / External
+（Workflow Skill）  （Atomic Skill）   （Agent Skill / Remote）
+```
+
+**与现有代码的映射**（关键结论：Capability Registry 已是 Skill Registry 的雏形，缺口集中且可枚举）：
+
+| Skill 架构 | agent-platform 现有代码 | 状态 |
+|---|---|---|
+| Skill Registry | `agent_runtime/capabilities/registry.py`（CapabilityRegistry：register/get/list/execute + 统一超时边界） | ✅ Phase 1 |
+| Skill 元数据 | `Capability`（name/description/kind/executor/timeout_ms） | 部分——缺 input_schema / output_schema / risk_level / policy |
+| 多 Executor | `as_function_capability` / `as_agent_capability` / `as_remote_capability` | ✅ Phase 1 |
+| Static DAG Executor | 缺——`app/agent/graph.py` 四节点链即静态 DAG 形态，未包装为可注册 Skill | 待落地 |
+| Skill Planner | `agent_runtime/planner/`（Planner ABC：plan/execute + PlannerRegistry） | ✅ Phase 2 |
+| 组合治理（max_depth / cycle detection） | 缺 | 待落地 |
+
+**落地决策（架构师建议，用户待确认）**：
+1. **内部命名保持 `Capability`，对外/文档统一称 Skill**——避免全仓无意义 rename 噪音（污染 git 历史）；
+   契约语义升级优先于命名升级；若后续两词并存造成认知成本，再做一次性 rename。
+2. **元数据补齐（Phase 1.5，最小增量）**：`Capability` 增加可选 `input_schema` / `output_schema`
+   （JSON Schema dict，供 Agent 工具描述生成与入参校验）；`version` / `risk_level` / `policy` 暂缓
+   （当前单实例部署无多租户风险分级诉求，需要时再加——不过度设计）。
+3. **DAG Executor = Phase 3 精确落点**：`app/agent/graph.py` **不删除**，包装为 `general_qa`
+   Workflow Skill（用户明确"不会直接删掉，而会把它包装成 GeneralQASkill"）；编排权移交 Planner——
+   deterministic 编排 = general_qa Skill 内部 DAG；agentic 编排 = Skill 动态组合。
+4. **组合治理（Phase 3 随 AgenticPlanner 落地）**：`PlannerRuntime` 增加 `max_skill_depth` /
+   `max_steps` / cycle detection；仅 agentic 组合路径需要（deterministic 静态 DAG 天然无环，不为此加复杂度）。
+
+---
+
 ## 5. 五个契约点（落地前置，防止 Phase 2 返工）
 
 | # | 契约 | 内容 | 归属 |
@@ -133,8 +179,9 @@ app 的 search/rag/sql/mcp（进程内节点）与联邦 `database_query_agent`/
 |---|---|---|---|
 | **0** | `app/infra` → `agent-runtime`（9 个运行时模块全部迁入）；同步定 ThreadState 契约 | 共享 runtime + 统一状态 schema | ✅ **完成（2026-08-19）** |
 | **1** | `capabilities/` 注册表（Function/Agent/Remote 三执行器） | 能力层中立化 | ✅ **完成（2026-08-19）** |
-| **2** | Planner 协议 + 双实现；`PLANNER` 环境变量 | 编排解耦 + 双跑 eval 基线 | 待办 |
-| **3** | retire `app/graph.py`，保留 `app/api` + `app/config`；统一 SSE/WS 出口 | 单 Runtime 成型 | 待办 |
+| **1.5** | Skill 契约升级：`Capability` 补 input/output schema（JSON Schema） | Skill = 带契约的能力单元（对外统一称 Skill） | 待确认 |
+| **2** | Planner 协议 + 双实现；`PLANNER` 环境变量 | 编排解耦 + 双跑 eval 基线 | ✅ 代码/测试/eval 完成（待回归+提交） |
+| **3** | graph.py → `general_qa` Workflow Skill（包装非删除）+ 统一 SSE/WS 出口 + 组合治理（max_skill_depth/cycle detection） | 单 Runtime 成型 | 待办 |
 
 ### Phase 0 迁移单元顺序
 
@@ -168,3 +215,16 @@ app 的 search/rag/sql/mcp（进程内节点）与联邦 `database_query_agent`/
   - `app/agent/graph.py` 四节点改经 `registry.execute(...)`（能力层中立化首个生产路径验证）；mcp 能力签名依赖 state+manager，注册表 kwargs 透传承载。
   - 验证：根 tests **268 passed**（261 基线 + 新增 7），新测试 `tests/test_capability_registry.py` 覆盖注册/发现/重复注册/超时/三执行器，lint 0 error。
   - 联邦侧 `as_agent_capability` / `as_remote_capability` 工厂已就绪，main_agent.py 委派路径**未改**（deep_agent subagents 机制 Phase 2 Planner 协议时再切换，避免破坏现有行为）。
+
+- ✅ Phase 2 完成（2026-08-19）：Planner 协议 + 双实现 + `PLANNER` env + 双跑 eval 基线。
+  - `agent_runtime/planner/`：契约 P1 落地——`Plan`（route/sub_query/reason/notes，notes 为扩展位）+ `StreamEvent`（type/payload，与 SSE 出口同构）+ `PlannerContext`（含 mcp_* 透传字段）+ `PlannerRuntime`（registry/llm/mcp_manager/pool 注入）+ `Planner` ABC（kind + plan/execute）+ `PlannerRegistry`（与 CapabilityRegistry 同构）。
+  - `app/planners/deterministic.py`：**DeterministicPlanner**——从 graph.py 提炼决策 plan()（guard→intent→memory→router 同源复用模块级函数，防漂移）+ 编排 execute()（按 Plan.route 经 registry 调能力 + synthesize 合成 + 记忆写入，产出统一 StreamEvent 流）；`app/planners/__init__.py` 的 `get_planner()` 按 `PLANNER` env 切换实现（get_settings 为 lru_cache，切换前需 cache_clear）。
+  - `agent_federation/planners/agentic.py`：**AgenticPlanner**——包装 `_execute_agent_core`（deep_agent 执行适配为 Planner 协议；plan 占位 return route="deep_agent"；execute 产 route/answer/error 事件流；异常降级 error 事件不抛出）。
+  - `app/config.py` 加 `planner` 字段；`app/main.py` lifespan 挂 `app.state.planner`（Phase 3 统一 SSE 出口后供 api 消费）。
+  - `eval/run_planner_eval.py`：双跑基线——deterministic 决策准确率（golden 12 条 100%）+ agentic 协议结构基线；`eval/baselines/planner_{kind}_latest.jsonl` 默认 latest 覆盖（`--stamp` 可选留痕），`--fail-below 0.8` 门禁。
+  - 测试：`tests/test_planner_protocol.py`（14 用例：协议/注册表/Deterministic plan+execute/guard/mcp 透传）+ `agent_federation/tests/unit/test_agentic_planner.py`（plan 占位/execute 包装/异常降级）。
+  - 验证：三套件全绿——根 **304 passed** / 联邦 **78 passed** / kefu **8 passed**，lint 0 error。
+  - 环境注记：根 project 仅依赖 shared-schemas/agent-runtime，dialogue-framework/wenda-data-agent 为 workspace member 需 `make install`（`uv sync --all-packages --extra dev`）才安装；缺装会导致根套件 collection error（ModuleNotFoundError），回归前须先 `make install`。
+
+### 4.1 补充（同轮）：
+> 用户架构审核确立 **Skill 统一能力协议**（见 §4.1）：Capability Registry = Skill Registry 雏形；graph.py Phase 3 包装为 `general_qa` Workflow Skill（非删除）；Capability 内部名保持、对外统一称 Skill；Phase 1.5 补 input/output schema；组合治理（max_skill_depth/cycle detection）仅 agentic 路径落地。
