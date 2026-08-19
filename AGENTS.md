@@ -2,6 +2,7 @@
 
 > 统一生产级 Agent 平台，本仓库为 **monorepo**（9 个独立 `pyproject.toml` 工程：根 + app + agent_federation + agent-core + shared-schemas + kefu-service + wenda-data-agent + zhanggui-zhiku + dialogue-framework）。
 > 根 `app/` 是一套单进程 Supervisor 平台；`agent_federation/` 是并行的联邦网关编排系统（两者非上下级）。
+> **演进方向（Plan-F）**：双轨正收敛为「单 Runtime + 多 Planner」——共享 `agent-runtime/` 承载运行时中间件（admission/coordinator/checkpoint/tracing/cache/rate_limit 等），Planner 策略（deterministic/agentic）可插拔，不统一 Agent 只统一 Runtime。详见 `docs/plan-f-single-runtime-multi-planner.md`。
 > 各包经 `agent-core` / `shared-schemas` 共享内核与契约。
 > 详细人类阅读指南见 `README.md`（含完整目录结构），本文件面向 AI agent，仅列要点。
 
@@ -12,7 +13,8 @@
 | `app/` | 单进程 Supervisor 平台（统一 Agent 平台，本 README 主描述对象） | `app/main.py` |
 | `agent_federation/` | 联邦网关 + 3 子服务编排中枢（与 `app/` 并行，详见 `agent_federation/README.md`；原名 `deepagents/`，2026-08-19 为消除与 PyPI 依赖包 `deepagents` 同名冲突而改名） | `python -m api.server` |
 | `agent-core/` | 零依赖运行时内核：tracing / guardrails / sql 守卫 / llm / memory | — |
-| `shared-schemas/` | 联邦 4 服务共享 Pydantic 契约（QueryResponse 等） | — |
+| `shared-schemas/` | 联邦 4 服务共享 Pydantic 契约（QueryResponse / ThreadState 等） | — |
+| `agent-runtime/` | Plan-F 运行时中间件层（admission/coordinator/cache/circuit_breaker/revert/mcp_client/otel/tracing/db，Phase 0 已全部迁入；`app/infra/` 已退役仅剩空包占位） | — |
 | `kefu-service/` | kefu 迁移版（deepagents + LangGraph），已实现且 CI 通过，已接入联邦网关（Agent Protocol 兼容 `/invoke`，返回 `QueryResponse`；`KEFU_USE_ADAPTER=false` 默认直连） | — |
 | `wenda-data-agent/` | Text-to-SQL 数据分析垂直场景（已直连联邦契约，无需 adapter） | — |
 | `zhanggui-zhiku/` | 掌柜智库：RAG 知识库导入 + 多路检索问答（:8900） | `zhanggui-zhiku` 脚本 |

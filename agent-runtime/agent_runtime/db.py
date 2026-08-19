@@ -8,8 +8,6 @@
 import asyncio
 import logging
 
-from app.config import get_settings
-
 logger = logging.getLogger(__name__)
 
 _pool = None
@@ -111,11 +109,14 @@ CREATE INDEX IF NOT EXISTS idx_mcp_audit_caller ON mcp_call_audit (caller);
 """
 
 
-async def init_pool():
-    """lifespan 中调用一次；带锁防竞态。DATABASE_URL 未配置时返回 None（内存模式）。"""
+async def init_pool(database_url: str = "", db_pool_max_size: int = 20):
+    """lifespan 中调用一次；带锁防竞态。DATABASE_URL 未配置时返回 None（内存模式）。
+
+    配置依赖倒置（Plan-F）：agent-runtime 不依赖 app.config，连接参数由调用方
+    （app lifespan / scripts）从自身 Settings 注入；database_url 为空即内存模式。
+    """
     global _pool
-    settings = get_settings()
-    if not settings.db_enabled:
+    if not database_url:
         logger.info("DATABASE_URL 未配置，以内存模式运行（无持久化）")
         return None
     async with _pool_lock:
@@ -127,12 +128,12 @@ async def init_pool():
         # 顺序约束：register_vector_async 在每个连接建立时即 fetch 'vector' 类型，
         # 故必须在打开连接池（建立首批连接）之前先启用 pgvector 扩展，
         # 否则报 "vector type not found in the database"（TB-7 真端到端暴露）。
-        await ensure_extensions(settings.database_url)
+        await ensure_extensions(database_url)
 
         pool = AsyncConnectionPool(
-            conninfo=settings.database_url,
+            conninfo=database_url,
             min_size=1,
-            max_size=settings.db_pool_max_size,  # 可配置，默认 20，避免高并发池耗尽
+            max_size=db_pool_max_size,  # 可配置，默认 20，避免高并发池耗尽
             kwargs={"autocommit": True},
             # 必须用 register_vector_async：AsyncConnectionPool 的连接是 AsyncConnection，
             # 同步版 register_vector 调用 TypeInfo.fetch 会返回未 await 的 coroutine，
@@ -155,8 +156,9 @@ async def ensure_extensions(database_url: str) -> None:
         await conn.execute("CREATE EXTENSION IF NOT EXISTS vector")
 
 
-async def ensure_schema(pool) -> None:
-    ddl = SCHEMA_TEMPLATE.format(dim=get_settings().vector_dim)
+async def ensure_schema(pool, vector_dim: int = 512) -> None:
+    """幂等建表 + 存量库 ALTER。vector_dim 由调用方注入（配置依赖倒置）。"""
+    ddl = SCHEMA_TEMPLATE.format(dim=vector_dim)
     async with pool.connection() as conn:
         await conn.execute(ddl)
     # 存量库迁移：新列 IF NOT EXISTS 不作用于已存在表，需幂等 ALTER（优化 G：workspace 隔离）

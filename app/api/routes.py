@@ -11,9 +11,9 @@ from fastapi.responses import StreamingResponse
 
 from app.api.auth import resolve_thread_id, verify_api_key
 from app.config import get_settings
-from app.infra import cache as semantic_cache
-from app.infra.db import get_pool, ping
-from app.infra.otel import redact_question
+from agent_runtime import cache as semantic_cache
+from agent_runtime.db import get_pool, ping
+from agent_runtime.otel import redact_question
 from app.rag.chunker import split_markdown
 from app.rag.embed import embed_query
 from app.rag.store import add_document

@@ -1,6 +1,6 @@
 import asyncio
 
-from app.infra.circuit_breaker import (
+from agent_runtime.circuit_breaker import (
     STATE_CLOSED,
     STATE_HALF_OPEN,
     STATE_OPEN,

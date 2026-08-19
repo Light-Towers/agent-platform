@@ -11,7 +11,7 @@ import logging
 from collections import deque
 from typing import Literal
 
-from app.schemas import CoordinationDecision
+from agent_runtime.schemas import CoordinationDecision
 
 logger = logging.getLogger(__name__)
 

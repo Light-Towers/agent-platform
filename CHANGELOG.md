@@ -2,6 +2,18 @@
 
 本仓库为 uv workspace monorepo。**唯一受支持的安装/运行入口是根 `uv.lock` + `uv sync`**，子包不再维护独立 `uv.lock`（见 v2 修复 #14）。
 
+## Plan-F 单 Runtime 多 Planner 启动（2026-08-19）
+
+- **方案文档** `docs/plan-f-single-runtime-multi-planner.md`：双轨收敛共识落档——「单 Runtime + 多 Planner」取代 plan-e 的「收敛」表述。含 K1–K5 卡点修正、R0 控制权冲突风险、P1–P5 五个落地契约点、Phase 0–3 路线图。
+- **`shared-schemas/shared_schemas/thread.py`**：统一线程状态契约 `ThreadState`（messages 序列化 dict + metadata 编排状态 + version）——双 Planner 共享 checkpoint 的状态兼容基础（契约点 P2）。
+- **`agent-runtime/` 新包**（uv workspace 新成员）：运行时中间件层。首个迁移单元 = admission：`app/infra/admission.py` → `agent_runtime/admission.py`，`AdmissionDecision` 类型 → `agent_runtime/schemas.py`；`app/schemas.py` re-export 兼容旧引用，`app/main.py` 改从 `agent_runtime` 引用。
+- **验证**：根 tests **261 passed**（排除 wenda/dialogue 既有环境缺失目录）；迁移相关 test_router + test_input_guard_graph 8 passed；`app.main` import ok。
+- **Phase 0 完成（同日）**：剩余 8 个运行时模块全部迁入 `agent_runtime.*`——cache / circuit_breaker / coordinator（CoordinationDecision）/ revert（RevertResult）/ mcp_client（McpServerConfig/McpToolResult）/ otel / tracing / db。`app/schemas.py` 对 4 个运行时类型 re-export 兼容；`app/infra/` 9 模块全部删除，仅留空包占位（退役标记）。
+  - **配置依赖倒置**：`db.init_pool(database_url, db_pool_max_size)` / `db.ensure_schema(pool, vector_dim)` / `tracing.get_langfuse_callbacks(public_key, secret_key, host)`——agent-runtime 零依赖 `app.config`，参数由 app lifespan / scripts 从 Settings 注入。
+  - 调用点全量更新：app 内部 8 文件 + scripts 3 个 + tests 4 个，改从 `agent_runtime.*` 引用。
+  - 验证：根 tests **261 passed（零回归）**，`app.main` import ok，lint 0 error。
+- 不做（遵循不过度设计）：`db.py` 的 `SCHEMA_TEMPLATE` 已随迁移归位（建表职责属 agent-runtime 初始化）；联邦 3 个 unit error 为 `deepagents` 改名遗留（测试文件仍 import PyPI `deepagents` 包），与本变更无关。
+
 ## v2 Resilience 收敛（2026-08-19）
 
 - **`agent-core/agent_core/resilience.py` 新增 `retry_async`**：异步指数退避重试原语（`max_attempts` 含首次、退避 `base*factor**(n-1)`、`exceptions` 过滤、可注入 `sleep`、支持同步/异步 `on_retry` 回调），与同步 `retry` 语义对齐。

@@ -1,4 +1,4 @@
-"""durable admission：持久化准入控制。
+"""durable admission：持久化准入控制（Plan-F 自 app/infra/admission.py 迁移）。
 
 请求入队持久化至 PostgreSQL，进程崩溃后队列元数据可恢复。
 admission 默认 false（opt-in），DATABASE_URL 为空时自动禁用。
@@ -10,14 +10,18 @@ admission 默认 false（opt-in），DATABASE_URL 为空时自动禁用。
 - wait_for_admit 用 asyncio.Condition 阻塞请求，直到被调度为 admitted（补位）或被拒。
 - mark_completed 在请求完成后尝试把最早 queued 提升为 admitted（补位唤醒下一个）。
 - recover_on_startup 把崩溃遗留的 queued 标 rejected，并唤醒所有等待者。
+
+迁移说明（2026-08-19）：类型 AdmissionDecision 随实现迁入 agent_runtime.schemas，
+app 侧通过 app/schemas.py re-export 保持 `from app.schemas import AdmissionDecision` 兼容。
 """
 
 import asyncio
 import logging
 
 from agent_core.guardrails.ratelimit import SlidingWindowRateLimiter
+from shared_schemas import Priority
 
-from app.schemas import AdmissionDecision, Priority
+from agent_runtime.schemas import AdmissionDecision
 
 logger = logging.getLogger(__name__)
 

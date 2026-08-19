@@ -13,14 +13,14 @@ from app.agent.graph import build_graph
 from app.agent.llm import build_chat_model
 from app.api.routes import router
 from app.config import get_settings
-from app.infra.admission import AdmissionQueue, RateLimiter
-from app.infra.coordinator import SessionCoordinator
-from app.infra.db import close_pool, get_pool, init_pool
-from app.infra.mcp_client import MCPClientManager
-from app.infra.otel import force_flush as otel_force_flush
-from app.infra.otel import get_otel_tracer, init_otel
-from app.infra.revert import RevertHandler
-from app.infra.tracing import get_langfuse_callbacks
+from agent_runtime.admission import AdmissionQueue, RateLimiter
+from agent_runtime.coordinator import SessionCoordinator
+from agent_runtime.db import close_pool, get_pool, init_pool
+from agent_runtime.mcp_client import MCPClientManager
+from agent_runtime.otel import force_flush as otel_force_flush
+from agent_runtime.otel import get_otel_tracer, init_otel
+from agent_runtime.revert import RevertHandler
+from agent_runtime.tracing import get_langfuse_callbacks
 from app.schemas import McpServerConfig
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -49,7 +49,10 @@ async def _build_checkpointer():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
-    await init_pool()
+    await init_pool(
+        database_url=settings.database_url,
+        db_pool_max_size=settings.db_pool_max_size,
+    )
     checkpointer = await _build_checkpointer()
     llm = build_chat_model()
 
@@ -122,7 +125,11 @@ async def lifespan(app: FastAPI):
 
     app.state.graph = build_graph(llm, checkpointer=checkpointer, mcp_manager=mcp_manager)
     app.state.checkpointer = checkpointer
-    app.state.callbacks = get_langfuse_callbacks()
+    app.state.callbacks = get_langfuse_callbacks(
+        public_key=settings.langfuse_public_key,
+        secret_key=settings.langfuse_secret_key,
+        host=settings.langfuse_host,
+    )
     logger.info(
         "agent-platform 就绪 storage=%s llm=%s pool=%s coordination=%s admission=%s revert=%s otel=%s mcp=%s",
         "postgres" if settings.db_enabled else "memory",

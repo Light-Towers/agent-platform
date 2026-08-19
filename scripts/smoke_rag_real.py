@@ -7,7 +7,7 @@ import asyncio
 import sys
 
 from app.config import get_settings
-from app.infra.db import ensure_schema, init_pool
+from agent_runtime.db import ensure_schema, init_pool
 from app.rag.chunker import split_markdown
 from app.rag.embed import embed_query
 from app.rag.store import add_document, retrieve_chunks
@@ -35,9 +35,12 @@ async def main():
         print("[FAIL] db_enabled=False，无法验证 RAG 真连")
         return 1
 
-    pool = await init_pool()
+    pool = await init_pool(
+        database_url=s.database_url,
+        db_pool_max_size=s.db_pool_max_size,
+    )
     # ensure_schema 已按 VECTOR_DIM 建表；若维度变更需先 DROP（本脚本前置已处理）
-    await ensure_schema(pool)
+    await ensure_schema(pool, vector_dim=s.vector_dim)
 
     # 1) 真实 embedding 入库
     doc_ids = []

@@ -4,13 +4,31 @@ app 的查询/健康契约统一接入联邦网关的 shared_schemas，成为唯
 - QueryRequest / HealthResponse 直接复用 shared_schemas，入站字段使用网关
   标准名（query / session_id）。旧字段名（question / thread_id）的双写兼容
   已于 2026-08-16 移除（U-1 收敛）。
-- 其余 app 内部专用类型（CoordinationDecision / AdmissionDecision / McpServerConfig
-  等）仍本文件定义，不属于跨服务联邦契约。
+- 运行时契约（AdmissionDecision / CoordinationDecision / RevertResult /
+  McpServerConfig / McpToolResult）已随实现全部迁入 agent-runtime（Plan-F
+  Phase 0），此处 re-export 保持 `from app.schemas import X` 兼容。
+- 其余 app 内部专用类型（HistoryItem 等会话层契约）仍本文件定义，
+  不属于跨服务联邦契约。
 """
 
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+from agent_runtime.schemas import (
+    AdmissionDecision as AdmissionDecision,
+)
+from agent_runtime.schemas import (
+    CoordinationDecision as CoordinationDecision,
+)
+from agent_runtime.schemas import (
+    McpServerConfig as McpServerConfig,
+)
+from agent_runtime.schemas import (
+    McpToolResult as McpToolResult,
+)
+from agent_runtime.schemas import (
+    RevertResult as RevertResult,
+)
 from shared_schemas import (
     HealthResponse as BaseHealthResponse,
 )
@@ -23,7 +41,12 @@ from shared_schemas import (
 
 # 重新导出联邦类型，供 app 内部（routes.py 等）从 app.schemas 统一引用
 __all__ = [
+    "AdmissionDecision",
     "Capability",
+    "CoordinationDecision",
+    "McpServerConfig",
+    "McpToolResult",
+    "RevertResult",
     "HealthResponse",
     "Priority",
     "QueryRequest",
@@ -106,36 +129,6 @@ class RevertResponse(BaseModel):
     reverted_at: str
 
 
-class AdmissionDecision(BaseModel):
-    status: Literal["admitted", "queued", "rejected"]
-    queue_position: int | None = None
-    priority: Priority = "normal"
-    estimated_wait_seconds: float | None = None
-    reason: str | None = None
-
-
-class CoordinationDecision(BaseModel):
-    decision_type: Literal["serialize", "coalesce", "queue", "reject"]
-    request_id: str
-    wait_seconds: float = 0.0
-
-
-class McpServerConfig(BaseModel):
-    server_id: str
-    transport: Literal["stdio", "sse"]
-    endpoint: str
-    tool_allowlist: list[str] = Field(default_factory=list)
-    timeout_seconds: float = 30.0
-    enabled: bool = False
-
-
-class McpToolResult(BaseModel):
-    success: bool
-    evidence: list[str] = []
-    error: str | None = None
-    duration_ms: int = 0
-
-
 # 优化 I：精确回忆——按 thread_id 回溯历史对话原文
 class HistoryItem(BaseModel):
     index: int
@@ -151,9 +144,3 @@ class HistoryResponse(BaseModel):
     items: list[HistoryItem]
 
 
-class RevertResult(BaseModel):
-    success: bool
-    session_id: str
-    checkpoint_id: str
-    context_summary: str
-    error: str | None = None

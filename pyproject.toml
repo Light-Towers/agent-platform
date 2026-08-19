@@ -9,6 +9,7 @@ authors = [{ name = "Light-Towers" }]
 dependencies = [
     "agent-core",
     "shared-schemas",
+    "agent-runtime",
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",
     "python-multipart>=0.0.9",
@@ -82,12 +83,14 @@ ignore = ["B008", "E402", "E731", "BLE001", "S110", "B017", "PERF102", "RUF059"]
 [tool.uv.sources]
 agent-core = { workspace = true }
 shared-schemas = { workspace = true }
+agent-runtime = { workspace = true }
 flashrag-dev = { git = "https://github.com/RUC-NLPIR/FlashRAG.git" }
 
 [tool.uv.workspace]
 members = [
     "agent-core",
     "shared-schemas",
+    "agent-runtime",
     "agent_federation",
     "kefu-service",
     "wenda-data-agent",

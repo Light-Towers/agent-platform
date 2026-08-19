@@ -15,9 +15,9 @@ import logging
 import time
 import uuid
 
-from app.infra.cache import spawn_background
-from app.infra.circuit_breaker import CircuitBreaker
-from app.schemas import McpServerConfig, McpToolResult
+from agent_runtime.cache import spawn_background
+from agent_runtime.circuit_breaker import CircuitBreaker
+from agent_runtime.schemas import McpServerConfig, McpToolResult
 
 logger = logging.getLogger(__name__)
 
