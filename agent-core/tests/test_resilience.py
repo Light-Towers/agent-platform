@@ -2,7 +2,7 @@
 
 import pytest
 
-from agent_core.resilience import CircuitBreaker, retry, timeout, validate_config
+from agent_core.resilience import CircuitBreaker, retry, retry_async, timeout, validate_config
 
 
 # ---------------------------------------------------------------------------
@@ -57,6 +57,116 @@ def test_retry_non_matching_exception_propagates():
 
     with pytest.raises(TypeError):
         fn()
+
+
+# ---------------------------------------------------------------------------
+# retry_async
+# ---------------------------------------------------------------------------
+async def _noop_sleep(_: float) -> None:
+    return None
+
+
+@pytest.mark.asyncio
+async def test_retry_async_succeeds_first_attempt():
+    calls = 0
+
+    async def fn():
+        nonlocal calls
+        calls += 1
+        return "ok"
+
+    assert await retry_async(fn, max_attempts=3) == "ok"
+    assert calls == 1
+
+
+@pytest.mark.asyncio
+async def test_retry_async_succeeds_after_failures():
+    calls = 0
+
+    async def fn():
+        nonlocal calls
+        calls += 1
+        if calls < 3:
+            raise ValueError("transient")
+        return "ok"
+
+    assert await retry_async(fn, max_attempts=3, backoff_base=0, sleep=_noop_sleep) == "ok"
+    assert calls == 3
+
+
+@pytest.mark.asyncio
+async def test_retry_async_exhausted_raises_last():
+    calls = 0
+
+    async def fn():
+        nonlocal calls
+        calls += 1
+        raise ValueError(f"fail-{calls}")
+
+    with pytest.raises(ValueError, match="fail-3"):
+        await retry_async(fn, max_attempts=3, backoff_base=0, sleep=_noop_sleep)
+    assert calls == 3
+
+
+@pytest.mark.asyncio
+async def test_retry_async_non_matching_exception_propagates():
+    async def fn():
+        raise TypeError("not retried")
+
+    with pytest.raises(TypeError):
+        await retry_async(fn, max_attempts=3, exceptions=ValueError, sleep=_noop_sleep)
+
+
+@pytest.mark.asyncio
+async def test_retry_async_passes_args_and_kwargs():
+    async def add(a, b, *, c=0):
+        return a + b + c
+
+    assert await retry_async(add, 20, 22, max_attempts=2, c=0) == 42
+
+
+@pytest.mark.asyncio
+async def test_retry_async_backoff_sequence():
+    sleeps: list[float] = []
+
+    async def fn():
+        raise ValueError("boom")
+
+    async def fake_sleep(sec):
+        sleeps.append(sec)
+
+    with pytest.raises(ValueError):
+        await retry_async(fn, max_attempts=3, backoff_base=0.5, backoff_factor=2.0, sleep=fake_sleep)
+    assert sleeps == [0.5, 1.0]
+
+
+@pytest.mark.asyncio
+async def test_retry_async_on_retry_callback():
+    seen: list[tuple] = []
+    calls = 0
+
+    async def fn():
+        nonlocal calls
+        calls += 1
+        if calls < 2:
+            raise ValueError("x")
+        return "ok"
+
+    async def cb(exc, attempt):
+        seen.append((type(exc).__name__, attempt))
+
+    assert await retry_async(fn, max_attempts=3, backoff_base=0, sleep=_noop_sleep, on_retry=cb) == "ok"
+    assert calls == 2
+    assert seen == [("ValueError", 1)]
+
+
+@pytest.mark.asyncio
+async def test_retry_async_invalid_max_attempts():
+    async def fn():
+        return 1
+
+    with pytest.raises(ValueError, match="max_attempts"):
+        await retry_async(fn, max_attempts=0)
 
 
 # ---------------------------------------------------------------------------

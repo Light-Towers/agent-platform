@@ -18,8 +18,6 @@ AGENT_MODE=local 时仍用本地 subagent。
 
 from __future__ import annotations
 
-import asyncio
-
 from agent_core.monitor import monitor
 
 from agent.circuit_breaker import get_breaker_sync
@@ -41,6 +39,7 @@ import os
 
 import httpx
 from agent_core.logging import get_logger
+from agent_core.resilience import retry_async
 
 logger = get_logger(__name__)
 
@@ -180,28 +179,34 @@ class DelegatingSubAgent:
             monitor.report_assistant(self.name, {"event": "delegate_degraded", "reason": "circuit_open"})
             return await self._fallback(input, reason="circuit_open")
 
-        # 3. 指数退避重试的远程委派
-        last_exc: Exception | None = None
-        for attempt in range(self.RETRIES + 1):
-            try:
-                result = await self._inner.ainvoke(input)
-                await self._breaker.record_success()
-                record_delegation(success=True)
-                return result
-            except Exception as exc:  # 网络/协议/子服务异常
-                last_exc = exc
-                logger.warning(
-                    "[%s] 远程委派失败（attempt %d/%d）: %s",
-                    self.name, attempt + 1, self.RETRIES + 1, exc,
-                )
-                if attempt < self.RETRIES:
-                    await asyncio.sleep(self.RETRY_BASE * (2 ** attempt))
-                    continue
-        # 4. 用尽重试仍失败 -> 计入熔断 + 本地 fallback
-        await self._breaker.record_failure()
-        logger.error("[%s] 远程委派彻底失败，转入本地 fallback: %s", self.name, last_exc)
-        monitor.report_assistant(self.name, {"event": "delegate_degraded", "reason": "remote_failed"})
-        return await self._fallback(input, reason="remote_failed", error=last_exc)
+        # 3. 指数退避重试的远程委派（内核原语 retry_async，语义与原手写循环一致：
+        #    max_attempts=RETRIES+1 含首次，退避 base*2**(attempt-1)，成功即记录并返回）。
+        async def _call_and_record() -> dict:
+            result = await self._inner.ainvoke(input)
+            await self._breaker.record_success()
+            record_delegation(success=True)
+            return result
+
+        try:
+            return await retry_async(
+                _call_and_record,
+                max_attempts=self.RETRIES + 1,
+                backoff_base=self.RETRY_BASE,
+                on_retry=self._log_delegate_retry,
+            )
+        except Exception as last_exc:  # 网络/协议/子服务异常，用尽重试仍失败
+            # 4. 计入熔断 + 本地 fallback
+            await self._breaker.record_failure()
+            logger.error("[%s] 远程委派彻底失败，转入本地 fallback: %s", self.name, last_exc)
+            monitor.report_assistant(self.name, {"event": "delegate_degraded", "reason": "remote_failed"})
+            return await self._fallback(input, reason="remote_failed", error=last_exc)
+
+    def _log_delegate_retry(self, exc: BaseException, attempt: int) -> None:
+        """重试前的日志回调（attempt 从 1 开始，与外部可见的尝试次数一致）。"""
+        logger.warning(
+            "[%s] 远程委派失败（attempt %d/%d）: %s",
+            self.name, attempt, self.RETRIES + 1, exc,
+        )
 
     async def _fallback(self, input: dict, reason: str, error: Exception | None = None) -> dict:
         """本地降级路径。
