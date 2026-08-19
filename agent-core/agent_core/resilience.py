@@ -4,6 +4,7 @@
 生产环境常用的降级 / 容错工具，全部仅依赖 stdlib，可独立 import：
 
 - ``retry``：带指数退避的同步重试装饰器；
+- ``retry_async``：带指数退避的异步重试（直接函数式调用，供 async 调用点复用）；
 - ``timeout``：函数调用超时包装（基于线程池，跨平台）；
 - ``CircuitBreaker``：熔断开关（失败率超阈值后短时拒绝，恢复期半开探测）；
 - ``validate_config``：轻量配置校验与默认值填充。
@@ -13,10 +14,12 @@
 
 from __future__ import annotations
 
+import asyncio
+import inspect
 import time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from functools import wraps
-from typing import Any, Callable, Iterable, Optional, Type, TypeVar
+from typing import Any, Awaitable, Callable, Iterable, Optional, Type, TypeVar
 
 F = TypeVar("F", bound=Callable[..., Any])
 
@@ -62,6 +65,55 @@ def retry(
         return wrapper  # type: ignore[return-value]
 
     return decorator
+
+
+# ---------------------------------------------------------------------------
+# retry_async
+# ---------------------------------------------------------------------------
+async def retry_async(
+    fn: Callable[..., Awaitable[Any]],
+    *args: Any,
+    max_attempts: int = 3,
+    backoff_base: float = 0.5,
+    backoff_factor: float = 2.0,
+    exceptions: "Iterable[Type[BaseException]] | Type[BaseException]" = Exception,
+    sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+    on_retry: "Optional[Callable[[BaseException, int], Any]]" = None,
+    **kwargs: Any,
+) -> Any:
+    """异步函数重试：失败按指数退避重试，直到成功或达到 max_attempts。
+
+    与同步 ``retry`` 语义一致，但面向 async/await 调用点：
+    ``sleep`` 默认为 ``asyncio.sleep``（不阻塞事件循环），并可注入以便测试。
+
+    :param fn: 异步可调用对象（返回 awaitable），支持位置/关键字参数透传。
+    :param max_attempts: 最大尝试次数（含首次），>= 1。
+    :param backoff_base: 首次退避秒数。
+    :param backoff_factor: 退避乘数（第 n 次等待 = backoff_base * backoff_factor ** (n-1)）。
+    :param exceptions: 触发重试的异常类型（单个或元组）；其它异常直接抛出。
+    :param sleep: 退避用的异步 sleep 函数（默认 asyncio.sleep，可注入以便测试）。
+    :param on_retry: 每次重试前的回调 (exc, attempt)，attempt 从 1 开始；
+        支持同步与异步回调（返回 coroutine 时自动 await）。
+    :return: fn 的成功返回值；全部尝试失败则抛出最后一次异常。
+    """
+    if max_attempts < 1:
+        raise ValueError("max_attempts 必须 >= 1")
+    exc_types = exceptions if isinstance(exceptions, tuple) else (exceptions,)
+    last_exc: Optional[BaseException] = None
+    for attempt in range(1, max_attempts + 1):
+        try:
+            return await fn(*args, **kwargs)
+        except exc_types as exc:  # type: ignore[misc]
+            last_exc = exc
+            if attempt >= max_attempts:
+                break
+            if on_retry is not None:
+                result = on_retry(exc, attempt)
+                if inspect.isawaitable(result):
+                    await result
+            await sleep(backoff_base * (backoff_factor ** (attempt - 1)))
+    assert last_exc is not None
+    raise last_exc
 
 
 # ---------------------------------------------------------------------------
@@ -226,4 +278,4 @@ def validate_config(
     return out
 
 
-__all__ = ["retry", "timeout", "CircuitBreaker", "validate_config"]
+__all__ = ["retry", "retry_async", "timeout", "CircuitBreaker", "validate_config"]
