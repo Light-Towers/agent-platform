@@ -45,27 +45,27 @@ Agent Platform 是一个基于 **LangGraph Supervisor 模式** 的统一智能�
 
 ### Phase 1 — 核心能力
 
-- **Supervisor 编排**（`app/agent/graph.py`）：意图路由 → 子能力执行 → 证据汇总 → 反思重试，LLM 结构化路由失败时回退确定性启发式
-- **联网搜索**（`app/subagents/search.py`）：Tavily API + 熔断器保护，超时/错误自动降级
-- **混合检索 RAG**（`app/subagents/rag.py` + `app/rag/`）：文档导入 → 语义切分 → pgvector 向量检索 + BM25 关键词检索 → RRF 融合排序
-- **Text-to-SQL**（`app/subagents/sql_agent.py` + `app/sql/`）：训练三件套（DDL + 业务文档 + 问题-SQL 范例）→ sqlglot 白名单守卫 → 连接级只读执行
-- **长期记忆**（`app/memory/longterm.py`）：pgvector 语义召回历史对话，跨会话上下文关联
-- **语义缓存**（`app/infra/cache.py`）：余弦距离阈值判定同义命中，命中时跳过编排直接返回
-- **上下文压缩**（`app/agent/compact.py`）：多轮会话 token 超阈值时自动摘要旧消息，参考 Claude Code / Codex / OpenCode
-- **熔断器**（`app/infra/circuit_breaker.py`）：closed → open → half-open 状态机，连续失败达阈值后熔断，冷却窗口到期放行试探
-- **LLM 主备降级**（`app/agent/llm.py`）：主模型超时/错误时自动切换 fallback 模型
+- **Supervisor 编排**（`applications/agent_server/agent/graph.py`）：意图路由 → 子能力执行 → 证据汇总 → 反思重试，LLM 结构化路由失败时回退确定性启发式
+- **联网搜索**（`applications/agent_server/subagents/search.py`）：Tavily API + 熔断器保护，超时/错误自动降级
+- **混合检索 RAG**（`applications/agent_server/subagents/rag.py` + `applications/agent_server/rag/`）：文档导入 → 语义切分 → pgvector 向量检索 + BM25 关键词检索 → RRF 融合排序
+- **Text-to-SQL**（`applications/agent_server/subagents/sql_agent.py` + `applications/agent_server/sql/`）：训练三件套（DDL + 业务文档 + 问题-SQL 范例）→ sqlglot 白名单守卫 → 连接级只读执行
+- **长期记忆**（`applications/agent_server/memory/longterm.py`）：pgvector 语义召回历史对话，跨会话上下文关联
+- **语义缓存**（`applications/agent_server/infra/cache.py`）：余弦距离阈值判定同义命中，命中时跳过编排直接返回
+- **上下文压缩**（`applications/agent_server/agent/compact.py`）：多轮会话 token 超阈值时自动摘要旧消息，参考 Claude Code / Codex / OpenCode
+- **熔断器**（`applications/agent_server/infra/circuit_breaker.py`）：closed → open → half-open 状态机，连续失败达阈值后熔断，冷却窗口到期放行试探
+- **LLM 主备降级**（`applications/agent_server/agent/llm.py`）：主模型超时/错误时自动切换 fallback 模型
 - **SSE 流式响应**：route → evidence → answer → done 全链路流式
-- **认证 + 会话防劫持**（`app/api/auth.py`）：API_KEY 启用时按密钥派生 thread_id，忽略客户端传入值
+- **认证 + 会话防劫持**（`applications/agent_server/api/auth.py`）：API_KEY 启用时按密钥派生 thread_id，忽略客户端传入值
 - **Checkpoint 持久化**：Postgres（生产）/ Memory（开发），会话状态可恢复
 - **评测门禁**（`eval/`）：12 条 golden set，启发式路由准确率基线 100%，CI 阻断回归
 
 ### Phase 2 — 运行时增强
 
-- **会话并发协调**（`app/infra/coordinator.py`）：per-session `asyncio.Lock` 互斥，同 session 串行 / 异 session 并发；支持 coalesce（合并）/ queue（排队）/ reject（拒绝）三策略
-- **Durable Admission**（`app/infra/admission.py`）：PG 持久化准入队列 + 三维滑动窗口限流（per-user / per-session / global）+ 优先级调度 + 崩溃恢复；不存储问题全文（脱敏约束）
-- **会话回退**（`app/infra/revert.py`）：Checkpoint 级原子回退，不删除历史 checkpoint（支持 redo），跨用户禁止，异步审计日志
-- **OTel 分布式追踪**（`app/infra/otel.py`）：OpenTelemetry 接线，W3C traceparent 透传，问题脱敏（仅记录长度 + 哈希），与 Langfuse 共存，exporter 可插拔（otlp/jaeger/console/none）
-- **MCP Client**（`app/infra/mcp_client.py` + `app/subagents/mcp.py`）：多 MCP server 连接管理（stdio + SSE transport），工具白名单校验，per-server 独立熔断器隔离故障域，调用审计
+- **会话并发协调**（`applications/agent_server/infra/coordinator.py`）：per-session `asyncio.Lock` 互斥，同 session 串行 / 异 session 并发；支持 coalesce（合并）/ queue（排队）/ reject（拒绝）三策略
+- **Durable Admission**（`applications/agent_server/infra/admission.py`）：PG 持久化准入队列 + 三维滑动窗口限流（per-user / per-session / global）+ 优先级调度 + 崩溃恢复；不存储问题全文（脱敏约束）
+- **会话回退**（`applications/agent_server/infra/revert.py`）：Checkpoint 级原子回退，不删除历史 checkpoint（支持 redo），跨用户禁止，异步审计日志
+- **OTel 分布式追踪**（`applications/agent_server/infra/otel.py`）：OpenTelemetry 接线，W3C traceparent 透传，问题脱敏（仅记录长度 + 哈希），与 Langfuse 共存，exporter 可插拔（otlp/jaeger/console/none）
+- **MCP Client**（`applications/agent_server/infra/mcp_client.py` + `applications/agent_server/subagents/mcp.py`）：多 MCP server 连接管理（stdio + SSE transport），工具白名单校验，per-server 独立熔断器隔离故障域，调用审计
 
 ---
 
@@ -454,7 +454,7 @@ tests/                     # 单元测试（40 用例，针对 app/ 平台）
 
 > 下列项为架构决策 / 迁移工程，需在拍板后实施，**非文档层面的简单修复**。
 
-- **U-1 · QueryRequest 入站字段名不统一（待拍板）**：`app/schemas.py:41-54` 经 `AliasChoices("query","question")` / `AliasChoices("session_id","thread_id")` 双写兼容。内部 state 与 DB 列名均为 `question`（`app/agent/graph.py`、`app/sql/schema_store.py`）。移除兼容层前须确认全部入站/出站边界已统一。*注：旧评审称 `HealthResponse` 字段集完全不同属误判——`HealthResponse` 已 `class HealthResponse(BaseHealthResponse)` 对齐联邦契约（`shared-schemas/health.py:25-40`），无需处理。*
+- **U-1 · QueryRequest 入站字段名不统一（待拍板）**：`applications/agent_server/schemas.py:41-54` 经 `AliasChoices("query","question")` / `AliasChoices("session_id","thread_id")` 双写兼容。内部 state 与 DB 列名均为 `question`（`applications/agent_server/agent/graph.py`、`applications/agent_server/sql/schema_store.py`）。移除兼容层前须确认全部入站/出站边界已统一。*注：旧评审称 `HealthResponse` 字段集完全不同属误判——`HealthResponse` 已 `class HealthResponse(BaseHealthResponse)` 对齐联邦契约（`shared-schemas/health.py:25-40`），无需处理。*
 - **U-2 · kefu 迁移（已完成）**：
   - ✅ `kefu-service` 已升级为 Agent Protocol 兼容 server：新增 `POST /invoke`（接受 `QueryRequest`，返回 `QueryResponse`，`kefu-service/main.py` + 依赖 `shared-schemas`）；旧 `/api/messages` 保留为 legacy 兼容入口。
   - ✅ 网关 `agent_federation/agent/config.py` 新增 `KEFU_SERVICE_URL` + `KEFU_USE_ADAPTER` 开关（默认 `false`，直连 `kefu-service:8003`）；`async_subagents.py` 增加 httpx 远程回退（外部 `deepagents` 包未安装时直连 `/invoke`）。

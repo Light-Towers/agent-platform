@@ -3,8 +3,7 @@
 import json
 
 from fastapi.testclient import TestClient
-
-from app.main import app
+from agent_server.main import app
 
 
 def test_health_memory_mode():

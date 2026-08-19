@@ -10,11 +10,11 @@
 
 from agent_core.memory.backend import MemoryBackend
 
-from app.memory.memory_backend import get_default_backend
+from agent_server.memory.memory_backend import get_default_backend
 
 
 def test_memory_backend_module_no_local_impl():
-    import app.memory.memory_backend as m
+    import agent_server.memory.memory_backend as m
 
     # 无债务：本地 PgVectorMemoryBackend / CompositeMemoryBackend 已删除
     assert not hasattr(m, "PgVectorMemoryBackend")
@@ -27,7 +27,7 @@ async def test_recall_empty_in_memory_mode(monkeypatch):
         "app.memory.memory_backend._resolve_default_backend",
         lambda: None,
     )
-    import app.memory.longterm as l
+    import agent_server.memory.longterm as l
 
     assert await l.recall(None, "u1", "q") == []
 
@@ -49,7 +49,7 @@ def test_default_backend_delegates_to_core_pg(monkeypatch):
         "app.config.get_settings",
         lambda: _FakeSettings(database_url="postgresql://x@localhost/db"),
     )
-    import app.memory.memory_backend as m
+    import agent_server.memory.memory_backend as m
 
     m.default_backend = None  # 强制重新解析
     backend = m._resolve_default_backend()

@@ -23,11 +23,11 @@ AGENTS.md 原文："根 `app/` 是一套单进程 Supervisor 平台；`agent_fed
 
 | 能力 | `app/`（证据） | `agent_federation/`（证据） |
 |------|------|------|
-| 顶层 HTTP API | ✅ `app/main.py:152` FastAPI；`app/api/routes.py` | ✅ `agent_federation/api/server.py:79` FastAPI（标题 "DeepAgents API"） |
-| Agent 编排 | ✅ `app/agent/graph.py:11,137` `StateGraph` + `build_graph()`（route→capability→synthesize） | ✅ `agent_federation/agent/main_agent.py:11,118` `create_deep_agent()`，主管 Agent 委派 SubAgent |
-| 子能力 | search/rag/sql/mcp（进程内节点 `app/subagents/*`） | 3 子 Agent：network_search/database_query/knowledge_base；远程模式经 `async_subagents.py` 委派 wenda/zhiku/kefu |
-| 网关/协调层 | 进程内意图路由 `app/agent/router.py`；`infra/coordinator.py`、`admission.py`、`revert.py` | 独立网关层 `agent_federation/api/server.py` + `gateway/`（input_guard/output_guard/rate_limit/gray）+ `agent/intent/` + `agent/rewrite/` + `agent/cache/` |
-| 配置 | `app/config.py` pydantic-settings `Settings` | `agent_federation/agent/config.py` dataclass + dotenv；另有 YAML prompts |
+| 顶层 HTTP API | ✅ `applications/agent_server/main.py:152` FastAPI；`applications/agent_server/api/routes.py` | ✅ `agent_federation/api/server.py:79` FastAPI（标题 "DeepAgents API"） |
+| Agent 编排 | ✅ `applications/agent_server/agent/graph.py:11,137` `StateGraph` + `build_graph()`（route→capability→synthesize） | ✅ `agent_federation/agent/main_agent.py:11,118` `create_deep_agent()`，主管 Agent 委派 SubAgent |
+| 子能力 | search/rag/sql/mcp（进程内节点 `applications/agent_server/subagents/*`） | 3 子 Agent：network_search/database_query/knowledge_base；远程模式经 `async_subagents.py` 委派 wenda/zhiku/kefu |
+| 网关/协调层 | 进程内意图路由 `applications/agent_server/agent/router.py`；`infra/coordinator.py`、`admission.py`、`revert.py` | 独立网关层 `agent_federation/api/server.py` + `gateway/`（input_guard/output_guard/rate_limit/gray）+ `agent/intent/` + `agent/rewrite/` + `agent/cache/` |
+| 配置 | `applications/agent_server/config.py` pydantic-settings `Settings` | `agent_federation/agent/config.py` dataclass + dotenv；另有 YAML prompts |
 | 端点 | `/query`(SSE)、`/health`、`/import`、`/sql/train`、`/session/revert` | `/api/task`、`/api/upload`、`/ws/{thread_id}`、`/health`；对子服务走 `/invoke`、`/api/messages` |
 
 ## 4. 共享内核采用度（**唯一不对称点**）
@@ -37,7 +37,7 @@ AGENTS.md 原文："根 `app/` 是一套单进程 Supervisor 平台；`agent_fed
 - `app/` 引用 `agent_core` 7 处
 
 但 `shared-schemas`（联邦契约）采用度**不对称**：
-- `app/` **直接 import** `shared_schemas`：`app/config.py:5`、`app/schemas.py:13-21,80`、`app/api/routes.py:40`
+- `app/` **直接 import** `shared_schemas`：`applications/agent_server/config.py:5`、`applications/agent_server/schemas.py:13-21,80`、`applications/agent_server/api/routes.py:40`
 - `agent_federation/` **不直接 import** `shared_schemas`（0 命中）；它仅通过下游子服务（kefu/wenda/zhiku）间接消费 `QueryRequest/QueryResponse`
 
 > 建议：agent_federation 的 `async_subagents._HttpSubAgent` 已在 POST 时用 `QueryRequest` 字段形态、消费 `QueryResponse`，但未复用 `shared_schemas` 类型。

@@ -15,7 +15,7 @@ import httpx  # noqa: E402
 import pytest  # noqa: E402
 
 # 复用 app.main 的 app 实例（ASGITransport 不触发 lifespan，手动注入 mock state）
-from app.main import app as _app  # noqa: E402
+from agent_server.main import app as _app  # noqa: E402
 
 
 class _Decision:
@@ -66,7 +66,7 @@ class _MockAdmission:
 
 def _make_settings():
     """构造一个开启 coordination + admission 的 settings（admission 需 db_enabled）。"""
-    from app.config import Settings
+    from agent_server.config import Settings
 
     s = Settings()
     s.coordination_enabled = True

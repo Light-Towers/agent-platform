@@ -4,9 +4,8 @@
 - #1 护栏拦截必须短路（route=blocked -> END），answer 不被 synthesize 覆盖
 - #2 脱敏文本必须写回 state.question，避免原文进入下游/记忆
 """
-
-from app.agent.graph import build_graph
-from app.config import get_settings
+from agent_server.agent.graph import build_graph
+from agent_server.config import get_settings
 
 
 def _settings_guard_on():

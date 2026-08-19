@@ -33,7 +33,7 @@ class FakeFallback:
 
 
 async def test_degradation_flag_resets_after_recovery():
-    from app.agent.llm import FallbackChatModel
+    from agent_server.agent.llm import FallbackChatModel
 
     primary = FakePrimary(fail_times=2)
     fallback = FakeFallback()

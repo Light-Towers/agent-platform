@@ -7,8 +7,7 @@ short-circuit 行为；不依赖 LLM/嵌入模型，保证 CI 可跑。
 
 
 from agent_core.intent import IntentLabel
-
-from app.agent.intent_bridge import l1_route_hint, map_intent_to_capability
+from agent_server.agent.intent_bridge import l1_route_hint, map_intent_to_capability
 
 
 def test_map_intent_to_capability():

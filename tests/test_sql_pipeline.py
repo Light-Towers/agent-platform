@@ -4,7 +4,7 @@ import sqlite3
 
 import pytest
 
-from app.sql.pipeline import execute_readonly, extract_sql
+from agent_server.sql.pipeline import execute_readonly, extract_sql
 
 
 @pytest.fixture
@@ -19,7 +19,7 @@ def sqlite_dsn(tmp_path, monkeypatch):
     conn.close()
     dsn = f"sqlite:///{db_path.as_posix()}"
     monkeypatch.setenv("SQL_DSN", dsn)
-    from app.config import get_settings
+    from agent_server.config import get_settings
 
     get_settings.cache_clear()
     yield dsn

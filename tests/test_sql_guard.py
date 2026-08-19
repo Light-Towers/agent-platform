@@ -1,4 +1,4 @@
-from app.sql.guard import detect_dialect, validate_sql
+from agent_server.sql.guard import detect_dialect, validate_sql
 
 
 def test_reject_non_select():

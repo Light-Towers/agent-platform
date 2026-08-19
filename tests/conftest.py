@@ -21,7 +21,7 @@ _CLEARED_VARS = [
 
 @pytest.fixture(autouse=True)
 def clean_env(monkeypatch):
-    from app.config import get_settings
+    from agent_server.config import get_settings
 
     for var in _CLEARED_VARS:
         monkeypatch.delenv(var, raising=False)

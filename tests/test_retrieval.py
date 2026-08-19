@@ -1,4 +1,4 @@
-from app.rag.store import rrf_merge, tokenize
+from agent_server.rag.store import rrf_merge, tokenize
 
 
 def test_rrf_common_item_rises_to_top():

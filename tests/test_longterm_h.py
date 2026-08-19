@@ -74,7 +74,7 @@ def test_default_extraction_disabled(patch_settings):
 
 
 async def test_extract_memory_facts_parses_json(patch_settings, monkeypatch):
-    import app.memory.longterm as l
+    import agent_server.memory.longterm as l
 
     class _FakeLLM:
         async def ainvoke(self, prompt):
@@ -91,7 +91,7 @@ async def test_extract_memory_facts_parses_json(patch_settings, monkeypatch):
 
 
 async def test_extract_memory_facts_handles_fenced_json(patch_settings, monkeypatch):
-    import app.memory.longterm as l
+    import agent_server.memory.longterm as l
 
     class _FakeLLM:
         async def ainvoke(self, prompt):
@@ -104,7 +104,7 @@ async def test_extract_memory_facts_handles_fenced_json(patch_settings, monkeypa
 
 
 async def test_extract_memory_facts_robust_to_garbage(patch_settings, monkeypatch):
-    import app.memory.longterm as l
+    import agent_server.memory.longterm as l
 
     class _FakeLLM:
         async def ainvoke(self, prompt):
@@ -115,7 +115,7 @@ async def test_extract_memory_facts_robust_to_garbage(patch_settings, monkeypatc
 
 
 async def test_extract_memory_facts_none_llm(patch_settings, monkeypatch):
-    import app.memory.longterm as l
+    import agent_server.memory.longterm as l
 
     assert await l.extract_memory_facts(None, "q", "a") == []
 
@@ -125,7 +125,7 @@ async def test_recall_typed_weights_and_ranks(patch_settings, monkeypatch):
 
     import agent_core.memory.typed as typed_core
 
-    import app.memory.memory_backend as mb
+    import agent_server.memory.memory_backend as mb
 
     # 开启内核 typed 开关，确保走加权融合（非平权退化）
     monkeypatch.setenv("SEMANTIC_MEMORY_TYPED", "true")
@@ -154,7 +154,7 @@ async def test_recall_typed_weights_and_ranks(patch_settings, monkeypatch):
 
 async def test_remember_fact_writes_typed(patch_settings, monkeypatch):
     # 验证 remember_fact 把带类型记录 INSERT（mock 池捕获 SQL）
-    import app.memory.memory_backend as mb
+    import agent_server.memory.memory_backend as mb
 
     captured = {}
 
@@ -185,7 +185,7 @@ async def test_remember_fact_writes_typed(patch_settings, monkeypatch):
 
 
 async def test_remember_fact_clamps_type_and_importance(patch_settings, monkeypatch):
-    import app.memory.memory_backend as mb
+    import agent_server.memory.memory_backend as mb
 
     captured = {}
 
@@ -213,7 +213,7 @@ async def test_remember_fact_clamps_type_and_importance(patch_settings, monkeypa
 
 
 async def test_consolidate_deletes_low_value_old(patch_settings, monkeypatch):
-    import app.memory.memory_backend as mb
+    import agent_server.memory.memory_backend as mb
 
     captured = {}
 
@@ -248,7 +248,7 @@ async def test_consolidate_deletes_low_value_old(patch_settings, monkeypatch):
 
 async def test_recall_falls_back_to_core_when_disabled(patch_settings, monkeypatch):
     # memory_extraction_enabled=False：recall 走内核降级路径（pool=None → 内核自建池）
-    import app.memory.longterm as l
+    import agent_server.memory.longterm as l
 
     called = {}
 
@@ -271,7 +271,7 @@ async def test_recall_forwards_to_recall_typed_when_enabled(patch_settings, monk
     # memory_extraction_enabled=False（默认），开启 typed 开关也应转发。
     import agent_core.memory.typed as typed_core
 
-    import app.memory.longterm as l
+    import agent_server.memory.longterm as l
 
     # SEMANTIC_MEMORY_TYPED 开启（与内核 typed 开关语义统一）
     monkeypatch.setenv("SEMANTIC_MEMORY_TYPED", "true")
@@ -299,7 +299,7 @@ async def test_recall_does_not_forward_when_typed_disabled(patch_settings, monke
     # ADR-0004 阶段3：typed 开关关闭时，即使 pool 非空也不走 typed 路径（退化内核后端）。
     import agent_core.memory.typed as typed_core
 
-    import app.memory.longterm as l
+    import agent_server.memory.longterm as l
 
     monkeypatch.setattr(typed_core, "semantic_memory_typed_enabled", lambda: False)
     monkeypatch.setattr("app.memory.longterm.get_settings", lambda: patch_settings)
@@ -330,7 +330,7 @@ async def test_recall_does_not_forward_when_typed_disabled(patch_settings, monke
 
 async def test_maybe_consolidate_triggers_every_n(patch_settings, monkeypatch):
     # ADR-0004 阶段3：maybe_consolidate 每 _CONSOLIDATE_EVERY 次触发一次 consolidate。
-    import app.memory.longterm as l
+    import agent_server.memory.longterm as l
 
     # 经 env 打开 typed 开关（longterm 用 from-import 副本，patch 函数对象无效）
     monkeypatch.setenv("SEMANTIC_MEMORY_TYPED", "true")
@@ -359,7 +359,7 @@ async def test_maybe_consolidate_triggers_every_n(patch_settings, monkeypatch):
 
 async def test_maybe_consolidate_noop_when_disabled(patch_settings, monkeypatch):
     # typed 开关关闭 → 不触发 consolidate
-    import app.memory.longterm as l
+    import agent_server.memory.longterm as l
 
     monkeypatch.setenv("SEMANTIC_MEMORY_TYPED", "false")
     monkeypatch.setattr("app.memory.longterm.get_settings", lambda: patch_settings)
@@ -381,7 +381,7 @@ async def test_maybe_consolidate_noop_when_disabled(patch_settings, monkeypatch)
 async def test_remember_forwards_to_remember_fact_when_enabled(patch_settings, monkeypatch):
     # 优化 H：提供 facts 时门面必须逐条转发到 _mb.remember_fact
     # （回归：曾误写裸 remember_fact 导致 NameError）
-    import app.memory.longterm as l
+    import agent_server.memory.longterm as l
 
     patch_settings.memory_extraction_enabled = True
     monkeypatch.setattr("app.memory.longterm.get_settings", lambda: patch_settings)
