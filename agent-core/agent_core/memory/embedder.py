@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import math
 import os
@@ -265,6 +266,21 @@ def get_embedder(force: bool = False) -> EmbeddingProvider:
     return _EMBEDDER
 
 
+async def embed_one(embedder: EmbeddingProvider, text: str) -> list[float]:
+    """嵌入单条文本：统一 aembed / 同步 embed 分支（各向量后端共享入口）。
+
+    - 提供方有 ``aembed``（异步，如 LocalFnEmbedder）→ 直接 await；
+    - 否则同步 ``embed`` 丢到默认线程池（``asyncio.to_thread``），不阻塞事件循环。
+
+    取代各向量后端各自的实现（原 MilvusMemoryBackend._aembed /
+    PgVectorMemoryBackend._embed_one，二者逻辑相同）。以后接入 OpenAI / BGE /
+    Jina / 本地等新提供方，后端无需感知。
+    """
+    if hasattr(embedder, "aembed"):
+        return (await embedder.aembed([text]))[0]
+    return (await asyncio.to_thread(embedder.embed, [text]))[0]
+
+
 __all__ = [
     "EmbeddingProvider",
     "MockEmbedder",
@@ -272,6 +288,7 @@ __all__ = [
     "SiliconFlowEmbedder",
     "RemoteEmbedder",
     "LocalFnEmbedder",
+    "embed_one",
     "get_embedder",
 ]
 

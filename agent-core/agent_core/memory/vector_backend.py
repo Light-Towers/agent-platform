@@ -18,36 +18,35 @@ app/memory/memory_backend.py，现已统一收口到内核，子包直接 import
 from __future__ import annotations
 
 import asyncio
-import functools
-from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 from agent_core.logging import get_logger
 from agent_core.memory.backend import MemoryBackend
-from agent_core.memory.embedder import get_embedder
+from agent_core.memory.embedder import embed_one, get_embedder
 
 logger = get_logger(__name__)
 
 DEFAULT_COLLECTION = "semantic_memory"
 
-# 后台线程池：把阻塞式向量库 SDK（Milvus pymilvus）调用移出事件循环，
-# 避免 LangGraph astream 等 async 上下文被同步 SDK 阻塞。
-_MILVUS_EXECUTOR = ThreadPoolExecutor(max_workers=4, thread_name_prefix="milvus-io")
 
+def _run_background(coro_factory: Any) -> None:
+    """在独立 daemon 线程中执行 async 协程（fire-and-forget）。
 
-def _run_sync(fn, *args, **kwargs):
-    """在线程池执行阻塞调用并在事件循环内 await（避免阻塞 asyncio 调度）。
-
-    兼容两种调用上下文：
-      - async 主流程中已有 running loop → 用 get_running_loop；
-      - 后台 daemon 线程的 ``loop.run_until_complete`` 内（Milvus.remember）→
-        同样已有 running loop，故优先 get_running_loop，缺失时退回 get_event_loop。
+    统一各向量后端 remember() 的后台写盘线程模型：
+    daemon 线程 → 独立事件循环 → 执行协程 → 关闭循环。
+    此前 Milvus/PgVector 各有一份完全相同的 Thread/loop 样板，现收口至此；
+    协程内的阻塞式 SDK 调用统一经 ``asyncio.to_thread`` 移出事件循环。
     """
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        loop = asyncio.get_event_loop()
-    return loop.run_in_executor(_MILVUS_EXECUTOR, functools.partial(fn, *args, **kwargs))
+    import threading
+
+    def _run() -> None:
+        loop = _new_loop()
+        try:
+            loop.run_until_complete(coro_factory())
+        finally:
+            loop.close()
+
+    threading.Thread(target=_run, daemon=True).start()
 
 
 # ==========================================================================
@@ -117,15 +116,11 @@ class MilvusMemoryBackend(MemoryBackend):
         return coll
 
     async def _aembed(self, text: str) -> list[float]:
-        """异步取单条 embedding，优先 ``aembed``（与 PgVectorMemoryBackend._embed_one 对齐）。
+        """异步取单条 embedding：统一走共享 ``embed_one``（aembed 优先，同步走线程池）。
 
-        避免事件循环内对 LocalFnEmbedder 调同步 ``embed``（其内部 asyncio.run 会死锁）；
-        无 aembed 时回退同步 embed 并丢到线程池，不阻塞调度。
+        与 PgVectorMemoryBackend._embed_one 共用同一实现，避免两处重复逻辑。
         """
-        if hasattr(self._embedder, "aembed"):
-            return (await self._embedder.aembed([text]))[0]
-        vec = await _run_sync(self._embedder.embed, [text])
-        return vec[0]
+        return await embed_one(self._embedder, text)
 
     def _create_collection(self) -> None:
         from pymilvus import CollectionSchema, DataType, FieldSchema
@@ -171,7 +166,7 @@ class MilvusMemoryBackend(MemoryBackend):
         if not question:
             return []
         vec = await self._aembed(question)
-        coll = await _run_sync(self._connect)
+        coll = await asyncio.to_thread(self._connect)
         safe_user = self._escape_milvus_str(user_id)
         safe_tenant = self._escape_milvus_str(self._tenant_id)
         expr = f'user_id == "{safe_user}" and tenant_id == "{safe_tenant}"'
@@ -187,27 +182,17 @@ class MilvusMemoryBackend(MemoryBackend):
             )
             return [hit.entity.get("content") for hit in res[0]] if res else []
 
-        return await _run_sync(_search)
+        return await asyncio.to_thread(_search)
 
     def remember(self, pool: Any, user_id: str, content: str) -> None:
         """同步沉淀记忆（后台线程执行异步写入，不阻塞调用方）。
 
-        与 PgVectorMemoryBackend.remember 一致：起一个 daemon 线程跑完整 asyncio
-        写入流程（含 async embed + 线程池包裹的 Milvus insert），避免：
-          1) 在调用方事件循环中同步阻塞 SDK；
-          2) 对 LocalFnEmbedder 同步嵌入造成 asyncio.run 嵌套死锁。
+        与 PgVectorMemoryBackend.remember 共用 ``_run_background``（起 daemon 线程
+        跑完整 asyncio 写入流程，含 async embed + 线程池包裹的 Milvus insert），
+        避免：1) 在调用方事件循环中同步阻塞 SDK；2) 对 LocalFnEmbedder 同步嵌入
+        造成 asyncio.run 嵌套死锁。
         """
-        import threading
-
-        def _run() -> None:
-            loop = _new_loop()
-            try:
-                loop.run_until_complete(self._aremember(pool, user_id, content))
-            finally:
-                loop.close()
-
-        t = threading.Thread(target=_run, daemon=True)
-        t.start()
+        _run_background(lambda: self._aremember(pool, user_id, content))
 
     async def _aremember(self, pool: Any, user_id: str, content: str) -> None:
         # 与 recall 一致的转义/校验：含引号/反斜杠/控制字符的 user_id/tenant_id
@@ -215,8 +200,8 @@ class MilvusMemoryBackend(MemoryBackend):
         safe_user = self._escape_milvus_str(user_id)
         safe_tenant = self._escape_milvus_str(self._tenant_id)
         vec = await self._aembed(content)
-        coll = await _run_sync(self._connect)
-        await _run_sync(
+        coll = await asyncio.to_thread(self._connect)
+        await asyncio.to_thread(
             coll.insert, [[safe_user], [safe_tenant], [content], [vec]]
         )
 
@@ -311,11 +296,8 @@ class PgVectorMemoryBackend(MemoryBackend):
                 pass
 
     async def _embed_one(self, text: str) -> list[float]:
-        """优先走 async embed（避免嵌套事件循环死锁），回退到同步 embed。"""
-        emb = self._embedder
-        if hasattr(emb, "aembed"):
-            return (await emb.aembed([text]))[0]
-        return emb.embed([text])[0]
+        """与 MilvusMemoryBackend._aembed 共用共享实现 ``embed_one``（见上）。"""
+        return await embed_one(self._embedder, text)
 
     async def recall(
         self, pool: Any, user_id: str, question: str, k: int = 3
@@ -347,17 +329,7 @@ class PgVectorMemoryBackend(MemoryBackend):
 
     def remember(self, pool: Any, user_id: str, content: str) -> None:
         """同步沉淀记忆（后台线程执行异步写入，不阻塞调用方）。"""
-        import threading
-
-        def _run() -> None:
-            loop = _new_loop()
-            try:
-                loop.run_until_complete(self._aremember(pool, user_id, content))
-            finally:
-                loop.close()
-
-        t = threading.Thread(target=_run, daemon=True)
-        t.start()
+        _run_background(lambda: self._aremember(pool, user_id, content))
 
     async def _aremember(self, pool: Any, user_id: str, content: str) -> None:
         vec = await self._embed_one(content)
