@@ -5,6 +5,7 @@ import logging
 import uuid
 from datetime import UTC
 
+from agent_core.runtime.lease import AsyncLease
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, UploadFile
 from fastapi.responses import StreamingResponse
 
@@ -96,30 +97,21 @@ async def query(
     coordinator = getattr(request.app.state, "coordinator", None)
     coord_decision = None
 
-    # 统一生命周期清理（幂等）。覆盖所有退出路径：coordinator reject、cache hit、
+    # 统一生命周期租约（幂等）。覆盖所有退出路径：coordinator reject、cache hit、
     # 正常完成、graph 异常、客户端断开、排队后拒绝。无论哪条路径都必须经过它，
     # 否则 coordinator 槽位 / admission 容量会泄漏（审计 P0: #一 #二）。
-    # 用 _released / _marked 保证重复调用安全（e.g. _stream finally + 外部提前清理）。
-    _released = False
-    _marked = False
-
-    async def _cleanup() -> None:
-        nonlocal _released, _marked
-        if coordinator is not None and settings.coordination_enabled and not _released:
-            try:
-                # release 处理已 active 的请求；cancel 确保本请求若仍在队列中
-                # （排队中、尚未 active）也被清出，避免死请求被 promote 卡死会话
-                # （审计 P1 #四：coordinator queue cancellation）。
-                await coordinator.release(thread_id, request_id)
-                if hasattr(coordinator, "cancel"):
-                    await coordinator.cancel(thread_id, request_id)
-            finally:
-                _released = True
-        if admission_queue is not None and settings.admission_effective_enabled and not _marked:
-            try:
-                await admission_queue.mark_completed(request_id)
-            finally:
-                _marked = True
+    # AsyncLease 结构性保证幂等：release() 只执行一次，单个回调异常不影响其余
+    # （异常隔离），替代手写 try/finally + bool 守卫。
+    lease = AsyncLease()
+    if coordinator is not None and settings.coordination_enabled:
+        # release 处理已 active 的请求；cancel 确保本请求若仍在队列中
+        # （排队中、尚未 active）也被清出，避免死请求被 promote 卡死会话
+        # （审计 P1 #四：coordinator queue cancellation）。
+        lease.on_release(lambda: coordinator.release(thread_id, request_id))
+        if hasattr(coordinator, "cancel"):
+            lease.on_release(lambda: coordinator.cancel(thread_id, request_id))
+    if admission_queue is not None and settings.admission_effective_enabled:
+        lease.on_release(lambda: admission_queue.mark_completed(request_id))
 
     if coordinator is not None and settings.coordination_enabled:
         coord_decision = await coordinator.acquire(thread_id, request_id)
@@ -127,7 +119,7 @@ async def query(
             # 统一清理：coordinator.acquire 已占用 active/queued 槽位，reject 必须
             # 释放，否则该 session 的 coordination 容量永久少 1（P0: leak on reject）。
             # admission 已在前面 enqueue 并可能 admitted，同样要 mark_completed。
-            await _cleanup()
+            await lease.release()
             raise HTTPException(status_code=409, detail="CONCURRENCY_REJECTED")
 
     # Phase 2: OTel tracer
@@ -141,7 +133,7 @@ async def query(
         q_embedding = await embed_query(req.query)
         cached = await semantic_cache.cache_lookup(pool, q_embedding, settings.cache_threshold)
         if cached:
-            await _cleanup()
+            await lease.release()
 
             async def _cached_stream():
                 yield _sse({"type": "cache_hit", "text": cached})
@@ -178,8 +170,8 @@ async def query(
             # 统一清理：_states[rid] 残留 "rejected" 且 DB 行仍是 "queued" →
             # count(admitted+queued) 永久含该记录，容量泄漏，直到进程重启
             # recover_on_startup 才清。mark_completed 会 pop 内存状态并把 DB 行
-            # 标 completed，释放容量。走 _cleanup() 统一出口，避免与外层重复清理。
-            await _cleanup()
+            # 标 completed，释放容量。走 lease.release() 统一出口，避免与外层重复清理。
+            await lease.release()
             return
         if decision is not None and decision.status == "admitted":
             yield _sse({
@@ -225,8 +217,8 @@ async def query(
                 span.__exit__(None, None, None)
             # Phase 2: 统一生命周期清理（幂等，覆盖 graph 异常 / 客户端断开 /
             # 正常完成）。reject 与 cache-hit 路径已在 _stream 外提前调用过，
-            # 此处再调用安全无副作用。
-            await _cleanup()
+            # 此处再调用安全无副作用（AsyncLease 幂等）。
+            await lease.release()
 
     return StreamingResponse(_stream(), media_type="text/event-stream")
 
