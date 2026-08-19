@@ -1,6 +1,6 @@
 """GuardMiddleware 单元测试（优化 B 要点2）。
 
-验证：deepagents 栈内输入护栏 Middleware 能
+验证：agent_federation 栈内输入护栏 Middleware 能
 1) 对入口 user 文本做 PII 脱敏改写（下游 model 看到脱敏文本）；
 2) 命中 prompt injection 且 GUARD_BLOCK_INJECTION=true 时替换为拦截提示；
 3) 护栏自身异常时降级跳过，不阻断 agent；

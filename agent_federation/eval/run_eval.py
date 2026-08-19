@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-deepagents 多智能体评测驱动器（MVP）。
+agent_federation 多智能体评测驱动器（MVP）。
 按 eval/PROPOSAL.md §8 步骤 2-3 落地：路由准确率集合匹配 + rubric judge。
 """
 import argparse
@@ -179,7 +179,7 @@ async def run_evaluation(records: list[dict], no_judge: bool = False, cleanup: b
 
 
 def main():
-    parser = argparse.ArgumentParser(description="deepagents 评测驱动器")
+    parser = argparse.ArgumentParser(description="agent_federation 评测驱动器")
     parser.add_argument("--golden", default=str(PROJECT_ROOT / "eval" / "golden.jsonl"),
                         help="golden 集路径")
     parser.add_argument("--limit", type=int, default=0, help="限制题数（0=全部）")

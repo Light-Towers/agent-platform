@@ -1,7 +1,7 @@
 """DeepAgent Middleware 封装：输入护栏挂进 agent 栈。
 
 优化 B 要点2：把内核 `guard_input`（PII 脱敏 + prompt injection 检测）从
-`app` 侧手动函数调用，升级为 deepagents 一等横切组件，使 deepagents 视图的
+`app` 侧手动函数调用，升级为 agent_federation 一等横切组件，使 agent_federation 视图的
 agent 也默认经过输入护栏，消除双视图安全水位差，并与 TodoList / Rubric 等
 middleware 共用 `create_deep_agent(middleware=[...])` 统一挂载点。
 

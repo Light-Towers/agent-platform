@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-deepagents 评测裁判：rubric 逐项打分 + 不同 provider 去偏。
+agent_federation 评测裁判：rubric 逐项打分 + 不同 provider 去偏。
 
 按 eval/PROPOSAL.md §8 步骤 3 落地。
 - entity 验收点：字符串包含判断（无需 LLM）

@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import importlib
 
-# 工具名 -> "module.attr" 延迟定位串（module 相对 deepagents 包）
+# 工具名 -> "module.attr" 延迟定位串（module 相对 agent_federation 包）
 TOOL_REGISTRY: dict[str, str] = {
     "generate_markdown": "tools.markdown_tools:generate_markdown",
     "convert_md_to_pdf": "tools.pdf_tools:convert_md_to_pdf",

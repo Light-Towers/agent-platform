@@ -1,13 +1,13 @@
 # -*- coding: utf-8 -*-
-"""deepagents WS 监控外壳 —— 兼容 re-export 层（优化 F 下沉）。
+"""agent_federation WS 监控外壳 —— 兼容 re-export 层（优化 F 下沉）。
 
 维护历史公开 API：``monitor`` / ``manager`` / ``ToolMonitor`` / ``ConnectionManager``，
-以及 ``build_thread_id`` / ``extract_thread_id_from_scope`` 等 deepagents 私有的线程 id 工具。
+以及 ``build_thread_id`` / ``extract_thread_id_from_scope`` 等 agent_federation 私有的线程 id 工具。
 
 实现已下沉到 ``agent_core.monitor``（框架无关内核），这里只做：
-1. 兼容 re-export，保证 deepagents 内 70+ 处 ``from api.monitor import monitor`` 零改动；
-2. 把 deepagents 的 ``get_thread_context`` 注入内核，恢复"每请求 thread_id"语义；
-3. 保留 deepagents 独有的 thread_id 推导工具（WebSocket scope 解析）。
+1. 兼容 re-export，保证 agent_federation 内 70+ 处 ``from api.monitor import monitor`` 零改动；
+2. 把 agent_federation 的 ``get_thread_context`` 注入内核，恢复"每请求 thread_id"语义；
+3. 保留 agent_federation 独有的 thread_id 推导工具（WebSocket scope 解析）。
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ from agent_core.monitor import (
     monitor as _monitor,
 )
 
-# 注入 deepagents 的 thread 上下文读取函数，恢复并发安全的 thread_id 语义。
+# 注入 agent_federation 的 thread 上下文读取函数，恢复并发安全的 thread_id 语义。
 try:
     from api.context import get_thread_context
 
@@ -40,7 +40,7 @@ ToolMonitor = ToolMonitor
 ConnectionManager = ConnectionManager
 
 
-# -- deepagents 私有 thread_id 工具（保留，供 server.py / ws 端点使用） -----
+# -- agent_federation 私有 thread_id 工具（保留，供 server.py / ws 端点使用） -----
 def build_thread_id(user_id: str, sid: str) -> str:
     return f"user-{user_id}-session-{sid}"
 
