@@ -137,54 +137,58 @@ class DeterministicPlanner(Planner):
                 yield StreamEvent(type="memory", payload={"notes": memory_notes})
 
         # 能力调用 + 反思重试：证据为空且未到上限时回到 plan 重新决策（与 synthesize_node 同源）
-        iterations = int(plan.notes.get("iterations") or 0)
-        while True:
-            evidence = await self._run_capability(plan, runtime, workspace_id, question)
-            yield StreamEvent(
-                type="evidence",
-                payload={"node": plan.route, "count": len(evidence), "preview": evidence[0][:200] if evidence else ""},
-            )
-            has_real = evidence and not any(e.startswith(_EMPTY_EVIDENCE_MARKERS) for e in evidence)
-            if not has_real and plan.route != "direct" and iterations < settings.max_iterations:
-                iterations += 1
-                previous_route = plan.route
-                plan = await self.plan(
-                    PlannerContext(
-                        question=question,
-                        workspace_id=workspace_id,
-                        user_id=plan.notes.get("user_id", "default"),
-                        messages=[],
-                        llm=runtime.llm,
-                    )
-                )
+        # 统一执行边界（P0 路径A）：能力调用经 execution() + delegate 受组合治理，
+        # 与 graph 控制平面共享同一执行边界契约。记忆召回/合成/沉淀是 Planner 编排，
+        # 非 Skill 组合，不走 delegate；反思重试在边界内顺序调用，步数累计（max_steps=20 充裕）。
+        async with runtime.execution():
+            iterations = int(plan.notes.get("iterations") or 0)
+            while True:
+                evidence = await self._run_capability(plan, runtime, workspace_id, question)
                 yield StreamEvent(
-                    type="replan",
-                    payload={
-                        "iteration": iterations,
-                        "from_route": previous_route,
-                        "to_route": plan.route,
-                        "reason": "evidence_insufficient",
-                    },
+                    type="evidence",
+                    payload={"node": plan.route, "count": len(evidence), "preview": evidence[0][:200] if evidence else ""},
                 )
-                continue
-            break
+                has_real = evidence and not any(e.startswith(_EMPTY_EVIDENCE_MARKERS) for e in evidence)
+                if not has_real and plan.route != "direct" and iterations < settings.max_iterations:
+                    iterations += 1
+                    previous_route = plan.route
+                    plan = await self.plan(
+                        PlannerContext(
+                            question=question,
+                            workspace_id=workspace_id,
+                            user_id=plan.notes.get("user_id", "default"),
+                            messages=[],
+                            llm=runtime.llm,
+                        )
+                    )
+                    yield StreamEvent(
+                        type="replan",
+                        payload={
+                            "iteration": iterations,
+                            "from_route": previous_route,
+                            "to_route": plan.route,
+                            "reason": "evidence_insufficient",
+                        },
+                    )
+                    continue
+                break
 
-        # 合成 + 记忆沉淀（与 synthesize_node 同源）
-        # compaction 路径：plan() 把摘要写入 notes["messages"]，这里消费它作为合成上下文
-        context_messages = plan.notes.get("messages") or []
-        answer = await self._compose(question, evidence, memory_notes, runtime.llm, context_messages)
-        if settings.memory_enabled and runtime.pool is not None:
-            facts = None
-            if settings.memory_extraction_enabled and runtime.llm is not None:
-                facts = await extract_memory_facts(runtime.llm, question, answer)
-            await remember(runtime.pool, workspace_id, f"Q: {question}\nA: {answer}", facts=facts)
-            await maybe_consolidate(runtime.pool, workspace_id)
-        yield StreamEvent(type="answer", payload={"text": answer})
+            # 合成 + 记忆沉淀（与 synthesize_node 同源）
+            # compaction 路径：plan() 把摘要写入 notes["messages"]，这里消费它作为合成上下文
+            context_messages = plan.notes.get("messages") or []
+            answer = await self._compose(question, evidence, memory_notes, runtime.llm, context_messages)
+            if settings.memory_enabled and runtime.pool is not None:
+                facts = None
+                if settings.memory_extraction_enabled and runtime.llm is not None:
+                    facts = await extract_memory_facts(runtime.llm, question, answer)
+                await remember(runtime.pool, workspace_id, f"Q: {question}\nA: {answer}", facts=facts)
+                await maybe_consolidate(runtime.pool, workspace_id)
+            yield StreamEvent(type="answer", payload={"text": answer})
 
     async def _run_capability(
         self, plan: Plan, runtime: PlannerRuntime, workspace_id: str, question: str
     ) -> list[str]:
-        """按 Plan.route 经 SkillRegistry 执行能力，结果归一化为 evidence 列表。"""
+        """按 Plan.route 经 runtime.delegate（skill_guard 组合治理）执行能力，结果归一化为 evidence 列表。"""
         if plan.route == "direct":
             return []
         if plan.route == "mcp":
@@ -199,14 +203,14 @@ class DeterministicPlanner(Planner):
                 mcp_tool=plan.notes.get("mcp_tool", ""),
                 mcp_params=plan.notes.get("mcp_params", {}),
             )
-            result = await runtime.registry.execute("mcp", state=state, mcp_manager=runtime.mcp_manager)
+            result = await runtime.delegate("mcp", state=state, mcp_manager=runtime.mcp_manager)
         else:
             kwargs: dict[str, Any] = {"query": plan.sub_query or question}
             if plan.route == "rag":
                 kwargs["workspace_id"] = workspace_id
             elif plan.route == "sql":
                 kwargs["llm"] = runtime.llm
-            result = await runtime.registry.execute(plan.route, **kwargs)
+            result = await runtime.delegate(plan.route, **kwargs)
         if isinstance(result, dict):
             return list(result.get("evidence") or [])
         return list(result or [])
