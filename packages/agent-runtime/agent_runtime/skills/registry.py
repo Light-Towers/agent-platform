@@ -15,6 +15,7 @@ execute() 承载的 Runtime 边界：**入参契约校验 + 统一超时（最�
 from __future__ import annotations
 
 import asyncio
+import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from enum import Enum
@@ -54,6 +55,9 @@ class Skill:
     # Skill 契约（Phase 1.5）：JSON Schema dict，缺省时 Agent 只见 name/description
     input_schema: dict[str, Any] | None = None
     output_schema: dict[str, Any] | None = None
+    # 权限声明（Plan-F 组合治理）：空 frozenset 表示无限制（公开能力）；
+    # 非空时调用方须持有全部声明权限方可发现/调用（PolicyValidator 校验）。
+    permissions: frozenset[str] = field(default_factory=frozenset)
 
     def to_tool_schema(self) -> dict[str, Any]:
         """生成 Agent 工具描述（供 Planner / Agent 组合调用时注入工具列表）。
@@ -129,6 +133,18 @@ def _validate_input(name: str, schema: dict[str, Any] | None, kwargs: dict[str, 
             )
 
 
+_TOKEN_RE = re.compile(r"[^\W_]+")
+
+
+def _tokenize(text: str) -> list[str]:
+    """轻量分词：按单词字符切分并小写化（不引入外部 NLP 依赖）。
+
+    供 SkillRegistry.discover 的关键词匹配打分；语义检索演进时替换为
+    embedding retriever 即可，discover 接口不变。
+    """
+    return [w.lower() for w in _TOKEN_RE.findall(text)]
+
+
 class SkillRegistry:
     """能力注册表：注册 / 发现 / 统一执行入口。
 
@@ -159,6 +175,61 @@ class SkillRegistry:
 
     def __contains__(self, name: str) -> bool:
         return name in self._capabilities
+
+    def discover(
+        self,
+        query: str = "",
+        *,
+        top_k: int = 10,
+        metadata_filter: dict[str, Any] | None = None,
+        caller_permissions: frozenset[str] | set[str] | None = None,
+    ) -> list[Skill]:
+        """发现候选 Skill：metadata 过滤 → 权限过滤 → 关键词打分 → top_k 截断。
+
+        架构契约（Plan-F Skill Discovery）：Planner 不应把全量 Skill schema 塞进 LLM 上下文，
+        而是先经 discover 缩小候选集，再交 LLM 决策。三阶段过滤互不依赖、可独立跳过：
+
+        - ``metadata_filter``：按 ``skill.metadata[k] == v`` 精确匹配（来源轨/标签/降级标记等）；
+        - ``caller_permissions``：``skill.permissions`` 非空时须 ⊆ ``caller_permissions``（空 permissions
+          表示公开能力，始终通过）；
+        - ``query`` 关键词打分：query 词集 ∩ (name ∪ description) 词集的大小，降序排序。
+
+        语义检索演进位：当前用关键词匹配（零依赖），后续可插入 embedding retriever
+        （替换 ``_score`` 即可，discover 接口不变）。
+        """
+        candidates = list(self._capabilities.values())
+        if metadata_filter:
+            candidates = [
+                s
+                for s in candidates
+                if all(s.metadata.get(k) == v for k, v in metadata_filter.items())
+            ]
+        if caller_permissions is not None:
+            allowed = frozenset(caller_permissions)
+            candidates = [
+                s for s in candidates if not s.permissions or s.permissions <= allowed
+            ]
+        if query:
+            scored = [(self._score(query, s), s) for s in candidates]
+            scored.sort(key=lambda pair: (-pair[0], pair[1].name))
+            candidates = [s for _, s in scored]
+        else:
+            candidates.sort(key=lambda s: s.name)
+        return candidates[:top_k]
+
+    @staticmethod
+    def _score(query: str, skill: Skill) -> int:
+        """关键词匹配得分：query 词集与 skill name/description 词集的交集大小。"""
+        q_words = set(_tokenize(query))
+        if not q_words:
+            return 0
+        s_words = set(_tokenize(skill.name)) | set(_tokenize(skill.description))
+        return len(q_words & s_words)
+
+    @staticmethod
+    def to_tool_schemas(skills: list[Skill]) -> list[dict[str, Any]]:
+        """批量生成工具描述（供 Planner / Agent 注入 LLM 工具列表）。"""
+        return [s.to_tool_schema() for s in skills]
 
     async def execute(self, name: str, **kwargs: Any) -> Any:
         """统一执行入口：入参契约校验 → 中间件洋葱链 → 执行器（含统一超时）。"""

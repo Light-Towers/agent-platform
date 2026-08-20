@@ -20,6 +20,7 @@ def as_dag_skill(
     timeout_ms: int | None = None,
     input_schema: dict | None = None,
     output_schema: dict | None = None,
+    permissions: frozenset[str] | set[str] | None = None,
 ) -> Skill:
     """把静态 DAG 执行器包装为 workflow 型能力。
 
@@ -38,4 +39,5 @@ def as_dag_skill(
         timeout_ms=timeout_ms,
         input_schema=input_schema,
         output_schema=output_schema,
+        permissions=frozenset(permissions) if permissions else frozenset(),
     )

@@ -98,38 +98,49 @@ class PlanningFeedback(StrEnum):
 class ExecutionContext:
     """单次 Planner execution 的执行上下文（预算 + 调用栈 + 元数据）。
 
-    架构契约：绑定一次 execution（由 Planner.execute 入口创建），所有嵌套 Skill 共享。
-    不可由 SkillRegistry.execute 内部创建（否则每次 Skill 调用都归零预算）。
+    架构契约：绑定一次 execution（由 ``PlannerRuntime.execution`` 入口创建），所有嵌套
+    Skill 共享。经 ``PlannerRuntime`` 的 ``contextvars`` 按 asyncio task 隔离——异 session
+    并发互不干扰，同 task 链内共享同一预算。
 
-    预算语义（与 PlannerRuntime.max_steps / max_skill_depth 对齐）：
-    - step_count：累计 Skill 调用数（只增不减，顺序 + 嵌套共享）；
-    - call_depth：当前嵌套深度（enter +1 / exit -1）。
+    预算语义（与 ``PlannerRuntime.max_steps`` / ``max_skill_depth`` 对齐）：
+    - ``step_count``：累计 Skill 调用数（只增不减，顺序 + 嵌套共享）；
+    - ``call_stack``：当前嵌套调用栈（enter append / exit pop），``call_depth = len(call_stack)``。
     """
 
     execution_id: str = field(default_factory=lambda: uuid.uuid4().hex)
     step_count: int = 0
-    call_depth: int = 0
+    call_stack: list[str] = field(default_factory=list)
     max_steps: int = 20
     max_depth: int = 4
     deadline: float | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
+    @property
+    def call_depth(self) -> int:
+        """当前嵌套深度（调用栈长度）。"""
+        return len(self.call_stack)
+
     def enter_skill(self, name: str) -> None:
-        """进入 Skill：步数预算 + 深度上限校验。超限抛 SkillCompositionError。"""
+        """进入 Skill：步数预算 → 循环检测 → 深度上限，超限抛 SkillCompositionError。"""
         if self.step_count >= self.max_steps:
             raise SkillCompositionError(
                 f"Skill 组合步数超上限（max_steps={self.max_steps}）"
             )
-        if self.call_depth >= self.max_depth:
+        if name in self.call_stack:
+            raise SkillCompositionError(
+                f"Skill 循环调用检测: {' -> '.join([*self.call_stack, name])}"
+            )
+        if len(self.call_stack) >= self.max_depth:
             raise SkillCompositionError(
                 f"Skill 嵌套深度超上限（max_depth={self.max_depth}）"
             )
         self.step_count += 1
-        self.call_depth += 1
+        self.call_stack.append(name)
 
     def exit_skill(self) -> None:
-        """退出 Skill：仅回退深度，步数预算不回退（累计计数）。"""
-        self.call_depth = max(0, self.call_depth - 1)
+        """退出 Skill：仅弹出调用栈，步数预算不回退（累计计数）。"""
+        if self.call_stack:
+            self.call_stack.pop()
 
 
 class PlannerRuntime:
@@ -165,40 +176,44 @@ class PlannerRuntime:
         self.pool = pool
         self.max_skill_depth = max_skill_depth
         self.max_steps = max_steps
-        # 执行期可变状态（per-request，经 ContextVar 隔离；default 为共享只读初始值）
-        self._steps_var: contextvars.ContextVar[int] = contextvars.ContextVar(
-            "planner_steps", default=0
+        # 执行期上下文（per-request，经 ContextVar 隔离）：execution() 入口创建
+        # ExecutionContext 并 set，同 task 链内共享，跨 task 互不干扰。
+        self._ctx_var: contextvars.ContextVar[ExecutionContext | None] = contextvars.ContextVar(
+            "planner_exec_ctx", default=None
         )
-        self._call_stack_var: contextvars.ContextVar[list[str]] = contextvars.ContextVar(
-            "planner_call_stack", default=[]
-        )
+
+    @property
+    def context(self) -> ExecutionContext | None:
+        """当前执行上下文（``execution()`` 边界内有效，边界外为 None）。"""
+        return self._ctx_var.get()
 
     @property
     def _steps(self) -> int:
         """当前执行上下文的步数计数（兼容既有测试/调试读取）。"""
-        return self._steps_var.get()
+        ctx = self._ctx_var.get()
+        return ctx.step_count if ctx else 0
 
     @property
     def _call_stack(self) -> list[str]:
         """当前执行上下文的 Skill 调用栈（兼容既有测试/调试读取）。"""
-        return self._call_stack_var.get()
+        ctx = self._ctx_var.get()
+        return ctx.call_stack if ctx else []
 
     @asynccontextmanager
     async def execution(self) -> AsyncIterator[None]:
-        """单次执行边界：进入时重置步数预算与调用栈，退出时复位。
+        """单次执行边界：创建 ExecutionContext 并绑定，退出时复位。
 
         语义（架构审核 P1 修正）：``max_steps`` 是「单次执行累计 Skill 调用数」——
         顺序调用（A 退出后再进 B）与嵌套调用同样消耗预算；``max_skill_depth`` 才
         约束同时嵌套深度。调用方（组合型 Planner 的 execute/arun 入口）须用本 scope
         包裹整次执行：预算不跨执行累计，同执行内顺序/嵌套 Skill 共享同一预算。
         """
-        self._steps_var.set(0)
-        self._call_stack_var.set([])
+        ctx = ExecutionContext(max_steps=self.max_steps, max_depth=self.max_skill_depth)
+        token = self._ctx_var.set(ctx)
         try:
             yield
         finally:
-            self._steps_var.set(0)
-            self._call_stack_var.set([])
+            self._ctx_var.reset(token)
 
     @asynccontextmanager
     async def skill_guard(self, name: str) -> AsyncIterator[None]:
@@ -209,31 +224,34 @@ class PlannerRuntime:
                 async with runtime.skill_guard(skill_name):
                     result = await runtime.registry.execute(skill_name, **kwargs)
 
-        语义：``_steps`` 只增不减（退出不复位），同一执行边界内顺序 + 嵌套的
-        Skill 调用共享累计预算；``_call_stack`` 随嵌套进入/退出变化（循环检测 /
-        深度上限按当前调用栈判定）。护栏状态 per-request：经 contextvars 隔离，
-        同 task 链内共享预算（单次执行内累计），跨执行（execution 边界）复位。
+        或经 ``delegate()`` 一步到位（推荐）。护栏状态委托给 ``ExecutionContext``，
+        经 contextvars 按 asyncio task 隔离：同 task 链内共享预算（单次执行内累计），
+        跨执行（execution 边界）复位。
         """
-        steps = self._steps_var.get() + 1
-        if steps > self.max_steps:
-            raise SkillCompositionError(f"Skill 组合步数超上限（max_steps={self.max_steps}）")
-        stack = self._call_stack_var.get()
-        if name in stack:
-            raise SkillCompositionError(
-                f"Skill 循环调用检测: {' -> '.join([*stack, name])}"
-            )
-        if len(stack) >= self.max_skill_depth:
-            raise SkillCompositionError(
-                f"Skill 嵌套深度超上限（max_skill_depth={self.max_skill_depth}）"
-            )
-        # 每次 set 新值（list 用新拷贝），不修改共享 default，避免跨 task 污染
-        self._steps_var.set(steps)
-        self._call_stack_var.set([*stack, name])
+        ctx = self._ctx_var.get()
+        if ctx is None:
+            raise SkillCompositionError("skill_guard 须在 execution() 边界内使用")
+        ctx.enter_skill(name)
         try:
             yield
         finally:
-            # 步数预算不回退（累计计数）；仅弹出调用栈（循环/深度判定按栈）
-            self._call_stack_var.set(stack)
+            ctx.exit_skill()
+
+    async def delegate(self, name: str, **kwargs: Any) -> Any:
+        """Skill 委派 API：经 ``skill_guard`` 包裹 ``registry.execute``，计入组合预算。
+
+        架构契约（Plan-F Skill Delegation）：Skill → Skill 组合须经此方法，而非直接调
+        ``registry.execute``——确保嵌套调用受步数 / 深度 / 循环护栏治理。Workflow Skill
+        内部调其他 Skill 时同样须走 ``delegate``，避免绕过护栏（架构审核 P2：此前
+        ``general_qa`` 内部直接调 ``registry.execute`` 不计入预算，现已修正）。
+
+        边界回退：不在 ``execution()`` 边界内时（如 deterministic 静态 DAG 路径——天然
+        无环、不使用组合护栏）直接执行不护栏，向后兼容。
+        """
+        if self._ctx_var.get() is None:
+            return await self.registry.execute(name, **kwargs)
+        async with self.skill_guard(name):
+            return await self.registry.execute(name, **kwargs)
 
 
 class Planner(ABC):
