@@ -19,6 +19,7 @@ def as_agent_skill(
     timeout_ms: int | None = None,
     input_schema: dict | None = None,
     output_schema: dict | None = None,
+    permissions: frozenset[str] | set[str] | None = None,
 ) -> Skill:
     """把 subagent dict 包装为 agent 型能力。
 
@@ -48,4 +49,5 @@ def as_agent_skill(
         timeout_ms=timeout_ms,
         input_schema=input_schema,
         output_schema=output_schema,
+        permissions=frozenset(permissions) if permissions else frozenset(),
     )

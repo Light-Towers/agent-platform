@@ -123,7 +123,12 @@ async def lifespan(app: FastAPI):
             mcp_manager = None
     app.state.mcp_manager = mcp_manager
 
-    app.state.graph = build_graph(llm, checkpointer=checkpointer, mcp_manager=mcp_manager)
+    # delegate_ref 延迟绑定：graph 节点经 runtime.delegate 调用能力（受 skill_guard 组合治理），
+    # 解决循环依赖（graph → registry → runtime → graph）——先传空 holder，runtime 创建后填充。
+    delegate_ref: dict = {}
+    app.state.graph = build_graph(
+        llm, checkpointer=checkpointer, mcp_manager=mcp_manager, delegate_ref=delegate_ref
+    )
     app.state.checkpointer = checkpointer
     # Plan-F Phase 2: Planner 实现（PLANNER env 选择，Phase 3 统一 SSE 出口后供 api 消费）
     # Plan-F Phase 3: PlannerRuntime——注册表注入 graph（含 general_qa Workflow Skill），
@@ -144,6 +149,8 @@ async def lifespan(app: FastAPI):
         max_skill_depth=settings.max_skill_depth,
         max_steps=settings.max_steps,
     )
+    # 绑定 delegate：graph 节点的 _invoke 此后经 runtime.delegate 调用
+    delegate_ref["delegate"] = app.state.planner_runtime.delegate
     app.state.callbacks = get_langfuse_callbacks(
         public_key=settings.langfuse_public_key,
         secret_key=settings.langfuse_secret_key,

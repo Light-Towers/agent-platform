@@ -6,6 +6,7 @@ SSE 聚合、会话键、探活自递归等一串问题；这里用 LangGraph �
 """
 
 import logging
+from typing import Any
 
 from agent_core.guardrails.input_guard import guard_input
 from agent_runtime.db import get_pool
@@ -29,8 +30,25 @@ _SYNTHESIZE_PROMPT = (
 )
 
 
-def build_graph(llm, checkpointer=None, mcp_manager: MCPClientManager | None = None):
-    """构建并编译 Supervisor 图；llm 可为 None（无 LLM 模式）。"""
+def build_graph(
+    llm,
+    checkpointer=None,
+    mcp_manager: MCPClientManager | None = None,
+    *,
+    delegate_ref: dict | None = None,
+):
+    """构建并编译 Supervisor 图；llm 可为 None（无 LLM 模式）。
+
+    ``delegate_ref``：延迟绑定的 delegate 引用（``{"delegate": runtime.delegate}``）。
+    提供且 ``"delegate"`` 键存在时，能力节点经 delegate 调用（受 ``skill_guard`` 组合治理，
+    Workflow 嵌套调用计入步数 / 深度预算）；缺省回退 ``get_registry().execute``（向后兼容）。
+    """
+
+    async def _invoke(name: str, **kwargs) -> Any:
+        """能力调用统一入口：优先经 delegate（组合治理），回退 registry.execute。"""
+        if delegate_ref is not None and "delegate" in delegate_ref:
+            return await delegate_ref["delegate"](name, **kwargs)
+        return await get_registry().execute(name, **kwargs)
 
     async def route_node(state: AgentState) -> dict:
         question = state.question
@@ -94,19 +112,19 @@ def build_graph(llm, checkpointer=None, mcp_manager: MCPClientManager | None = N
         }
 
     async def search_node(state: AgentState) -> dict:
-        return {"evidence": await get_registry().execute("search", query=state.sub_query)}
+        return {"evidence": await _invoke("search", query=state.sub_query)}
 
     async def rag_node(state: AgentState) -> dict:
-        return {"evidence": await get_registry().execute("rag", query=state.sub_query, workspace_id=state.workspace_id)}
+        return {"evidence": await _invoke("rag", query=state.sub_query, workspace_id=state.workspace_id)}
 
     async def sql_node(state: AgentState) -> dict:
-        return {"evidence": await get_registry().execute("sql", query=state.sub_query, llm=llm)}
+        return {"evidence": await _invoke("sql", query=state.sub_query, llm=llm)}
 
     async def direct_node(state: AgentState) -> dict:
         return {"evidence": []}
 
     async def mcp_node(state: AgentState) -> dict:
-        return await get_registry().execute("mcp", state=state, mcp_manager=mcp_manager)
+        return await _invoke("mcp", state=state, mcp_manager=mcp_manager)
 
     async def synthesize_node(state: AgentState) -> dict:
         question = state.question
