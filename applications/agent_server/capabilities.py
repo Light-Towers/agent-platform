@@ -67,9 +67,8 @@ _GENERAL_QA_INPUT_SCHEMA: dict[str, Any] = {
 }
 
 _GENERAL_QA_OUTPUT_SCHEMA: dict[str, Any] = {
-    "type": "object",
-    "properties": {"answer": {"type": "string"}},
-    "required": ["answer"],
+    "type": "string",
+    "description": "最终回答文本",
 }
 
 

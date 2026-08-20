@@ -381,3 +381,67 @@ async def test_circuit_breaker_middleware_scope():
         # rag 不在熔断范围内：异常直接透传（熔断仅包裹 search）
         await registry.execute("rag", q="y")
     assert calls == [None, None]
+
+
+# ---------- output_schema 校验 ----------
+
+
+@pytest.mark.asyncio
+async def test_execute_validates_output_type_string():
+    async def run(**kwargs):
+        return 123  # 期望 string，返回 int
+
+    registry = SkillRegistry()
+    registry.register(
+        as_function_skill(
+            "search", "搜索", run, output_schema={"type": "string"}
+        )
+    )
+    with pytest.raises(SkillExecutionError, match="产出校验失败"):
+        await registry.execute("search")
+
+
+@pytest.mark.asyncio
+async def test_execute_validates_output_object_required():
+    async def run(**kwargs):
+        return {"b": 1}  # 缺 required 字段 a
+
+    registry = SkillRegistry()
+    registry.register(
+        as_function_skill(
+            "search",
+            "搜索",
+            run,
+            output_schema={"type": "object", "required": ["a"]},
+        )
+    )
+    with pytest.raises(SkillExecutionError, match="缺少必填字段"):
+        await registry.execute("search")
+
+
+@pytest.mark.asyncio
+async def test_execute_output_schema_passes():
+    async def run(**kwargs):
+        return {"answer": "ok"}
+
+    registry = SkillRegistry()
+    registry.register(
+        as_function_skill(
+            "search",
+            "搜索",
+            run,
+            output_schema={"type": "object", "required": ["answer"]},
+        )
+    )
+    result = await registry.execute("search")
+    assert result == {"answer": "ok"}
+
+
+@pytest.mark.asyncio
+async def test_execute_no_output_schema_skips_validation():
+    async def run(**kwargs):
+        return 123  # 无 output_schema，不校验
+
+    registry = SkillRegistry()
+    registry.register(as_function_skill("x", "X", run))
+    assert await registry.execute("x") == 123

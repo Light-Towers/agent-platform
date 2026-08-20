@@ -12,11 +12,12 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from agent_runtime.planner.protocol import StreamEvent
+from agent_runtime.planner.protocol import Plan, StreamEvent
 
 if TYPE_CHECKING:
     from agent_runtime.planner.protocol import PlannerRuntime
@@ -146,21 +147,106 @@ async def execute_graph(
     layers = graph.topological_layers()
     results: dict[str, Any] = {}
     for i, layer in enumerate(layers):
+        # deadline 消费：超限时提前终止，产出 error 事件
+        exec_ctx = runtime.context
+        if exec_ctx is not None and exec_ctx.deadline is not None:
+            if time.monotonic() > exec_ctx.deadline:
+                yield StreamEvent(
+                    type="error",
+                    payload={"error": "执行超时（deadline 超限）", "completed": len(results)},
+                )
+                return
 
-        async def _run(node_id: str) -> tuple[str, Any]:
+        async def _run(node_id: str) -> tuple[str, Any, str | None]:
             node = graph.nodes[node_id]
-            return node_id, await runtime.delegate(node.skill_name, **node.kwargs)
+            try:
+                return node_id, await runtime.delegate(node.skill_name, **node.kwargs), None
+            except Exception as exc:
+                return node_id, None, str(exc)
 
         layer_results = await asyncio.gather(*(_run(nid) for nid in layer))
-        for node_id, result in layer_results:
-            results[node_id] = result
-            yield StreamEvent(
-                type="evidence",
-                payload={
-                    "node": node_id,
-                    "skill": graph.nodes[node_id].skill_name,
-                    "layer": i,
-                    "result": result,
-                },
-            )
+        for node_id, result, error in layer_results:
+            if error is not None:
+                yield StreamEvent(
+                    type="error",
+                    payload={
+                        "node": node_id,
+                        "skill": graph.nodes[node_id].skill_name,
+                        "layer": i,
+                        "error": error,
+                    },
+                )
+            else:
+                results[node_id] = result
+                yield StreamEvent(
+                    type="evidence",
+                    payload={
+                        "node": node_id,
+                        "skill": graph.nodes[node_id].skill_name,
+                        "layer": i,
+                        "result": result,
+                    },
+                )
     yield StreamEvent(type="answer", payload={"results": results})
+
+
+async def execute_plan(
+    plan: Plan,
+    runtime: PlannerRuntime,
+    *,
+    caller_permissions: frozenset[str] | set[str] | None = None,
+    max_parallel: int | None = None,
+) -> AsyncIterator[StreamEvent]:
+    """执行 Plan 的通用入口：带 graph 时 validate → execute_graph，否则单 route delegate。
+
+    架构契约（Plan-F 执行链打通）：Planner 产出 Plan 后，可经此入口执行——
+
+    - ``plan.graph`` 非空：经 ``PolicyValidator`` 校验（循环 / 深度 / 步数 / 权限）后，
+      在 ``execution()`` 边界内分层并行执行；
+    - ``plan.graph`` 为 None：退化为单 route delegate 调用（通用入口，不替代
+      deterministic/agentic planner 的丰富编排——它们有自己的 execute 实现）。
+
+    本函数内部创建 ``execution()`` 边界，调用方无须自行包裹。
+    执行过程中经 ``ContextManager`` 记录 task/execution 状态，结束时产出
+    ``status`` 事件含结构化 snapshot（供调用方持久化或注入下一轮 prompt）。
+    """
+    from agent_runtime.planner.context_manager import ContextManager
+    from agent_runtime.planner.policy import PolicyValidator
+
+    cm = ContextManager()
+    ctx = cm.create_context(
+        goal=plan.sub_query or plan.route,
+        constraints=plan.notes.get("constraints"),
+    )
+
+    if plan.graph is not None:
+        validator = PolicyValidator(runtime.registry)
+        validator.validate(
+            plan.graph,
+            max_depth=runtime.max_skill_depth,
+            max_steps=runtime.max_steps,
+            caller_permissions=caller_permissions,
+            max_parallel=max_parallel,
+        )
+        yield StreamEvent(type="route", payload={"capability": "graph", "reason": plan.reason})
+        async with runtime.execution():
+            async for event in execute_graph(plan.graph, runtime):
+                if event.type == "evidence":
+                    cm.record_skill(
+                        ctx, event.payload.get("skill", ""), result=event.payload.get("result")
+                    )
+                elif event.type == "error":
+                    cm.record_skill(
+                        ctx, event.payload.get("skill", ""), error=event.payload.get("error", "")
+                    )
+                yield event
+        yield StreamEvent(type="status", payload={"snapshot": cm.snapshot(ctx)})
+    else:
+        yield StreamEvent(type="route", payload={"capability": plan.route, "reason": plan.reason})
+        async with runtime.execution():
+            kwargs = plan.notes.get("kwargs", {})
+            result = await runtime.delegate(plan.route, **kwargs)
+            cm.record_skill(ctx, plan.route, result=result)
+            yield StreamEvent(type="evidence", payload={"node": plan.route, "result": result})
+            yield StreamEvent(type="answer", payload={"text": str(result)})
+        yield StreamEvent(type="status", payload={"snapshot": cm.snapshot(ctx)})

@@ -148,3 +148,30 @@ def test_validate_multiple_violations():
         validator.validate(g, max_steps=1, caller_permissions={"read"})
     msg = str(exc_info.value)
     assert "步数" in msg or "权限" in msg or "未注册" in msg
+
+
+# ---------- 并行度上限 ----------
+
+
+def test_validate_max_parallel_exceeded():
+    reg = _registry()
+    validator = PolicyValidator(reg)
+    g = ExecutionGraph()
+    g.add_node("a", "public_skill")
+    g.add_node("b", "public_skill")
+    g.add_node("c", "public_skill")
+    with pytest.raises(PlanViolationError, match="并行度"):
+        validator.validate(g, max_parallel=2)
+
+
+def test_validate_max_parallel_ok():
+    reg = _registry()
+    validator = PolicyValidator(reg)
+    g = ExecutionGraph()
+    g.add_node("a", "public_skill")
+    g.add_node("b", "public_skill")
+    g.add_node("c", "public_skill")
+    g.add_edge("c", "a")
+    g.add_edge("c", "b")
+    # 第 0 层 2 节点，第 1 层 1 节点，max_parallel=2 通过
+    validator.validate(g, max_parallel=2)

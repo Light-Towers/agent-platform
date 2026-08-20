@@ -137,12 +137,58 @@ _TOKEN_RE = re.compile(r"[^\W_]+")
 
 
 def _tokenize(text: str) -> list[str]:
-    """轻量分词：按单词字符切分并小写化（不引入外部 NLP 依赖）。
+    """轻量分词：按单词字符切分并小写化，连续中文段按字符拆分（不引入外部 NLP 依赖）。
 
     供 SkillRegistry.discover 的关键词匹配打分；语义检索演进时替换为
     embedding retriever 即可，discover 接口不变。
     """
-    return [w.lower() for w in _TOKEN_RE.findall(text)]
+    tokens: list[str] = []
+    for raw in _TOKEN_RE.findall(text):
+        # ASCII 词直接保留；连续中文段（长度 > 1 且非 ASCII）按字符拆分提升匹配粒度
+        if len(raw) > 1 and any(ord(c) > 127 for c in raw):
+            tokens.extend(c.lower() for c in raw if ord(c) > 127)
+            ascii_parts = [w.lower() for w in re.findall(r"[a-z0-9]+", raw, re.IGNORECASE)]
+            tokens.extend(ascii_parts)
+        else:
+            tokens.append(raw.lower())
+    return tokens
+
+
+def _validate_output(name: str, schema: dict[str, Any] | None, result: Any) -> None:
+    """Skill 产出契约校验（轻量）：type 匹配 + object required 字段存在性。
+
+    schema 缺省（None）跳过；仅校验常见类型（string/object/array/number/integer/boolean），
+    不做完整 JSON Schema 验证（避免引入 jsonschema 依赖）。
+    """
+    if not schema:
+        return
+    expected = schema.get("type")
+    if expected == "string" and not isinstance(result, str):
+        raise SkillExecutionError(
+            f"Skill {name} 产出校验失败: 期望 string，实际 {type(result).__name__}"
+        )
+    if expected == "object" and not isinstance(result, dict):
+        raise SkillExecutionError(
+            f"Skill {name} 产出校验失败: 期望 object，实际 {type(result).__name__}"
+        )
+    if expected == "array" and not isinstance(result, list):
+        raise SkillExecutionError(
+            f"Skill {name} 产出校验失败: 期望 array，实际 {type(result).__name__}"
+        )
+    if expected in ("number", "integer") and not isinstance(result, (int, float)):
+        raise SkillExecutionError(
+            f"Skill {name} 产出校验失败: 期望 {expected}，实际 {type(result).__name__}"
+        )
+    if expected == "boolean" and not isinstance(result, bool):
+        raise SkillExecutionError(
+            f"Skill {name} 产出校验失败: 期望 boolean，实际 {type(result).__name__}"
+        )
+    if expected == "object" and isinstance(result, dict):
+        missing = [k for k in schema.get("required", []) if k not in result]
+        if missing:
+            raise SkillExecutionError(
+                f"Skill {name} 产出校验失败: 缺少必填字段 {missing}"
+            )
 
 
 class SkillRegistry:
@@ -232,7 +278,7 @@ class SkillRegistry:
         return [s.to_tool_schema() for s in skills]
 
     async def execute(self, name: str, **kwargs: Any) -> Any:
-        """统一执行入口：入参契约校验 → 中间件洋葱链 → 执行器（含统一超时）。"""
+        """统一执行入口：入参契约校验 → 中间件洋葱链 → 执行器（含统一超时）→ 产出契约校验。"""
         capability = self.get(name)
         _validate_input(name, capability.input_schema, kwargs)
 
@@ -240,7 +286,9 @@ class SkillRegistry:
             coro = capability.executor(**kw)
             if capability.timeout_ms is not None:
                 coro = asyncio.wait_for(coro, timeout=capability.timeout_ms / 1000)
-            return await coro
+            result = await coro
+            _validate_output(name, capability.output_schema, result)
+            return result
 
         # 洋葱链：先注册的外层先执行，经 call_next 逐层向内，直到最终执行器。
         # 链为空的常规路径与逐层委托等价（无中间件时 zero 额外开销）。

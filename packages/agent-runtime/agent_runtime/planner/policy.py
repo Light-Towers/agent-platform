@@ -41,6 +41,7 @@ class PolicyValidator:
         *,
         max_depth: int = 4,
         max_steps: int = 20,
+        max_parallel: int | None = None,
         caller_permissions: frozenset[str] | set[str] | None = None,
     ) -> ExecutionGraph:
         """校验执行图，全部通过则原样返回，任一违规聚合抛 ``PlanViolationError``。"""
@@ -61,7 +62,13 @@ class PolicyValidator:
         if steps > max_steps:
             violations.append(f"节点数 {steps} 超步数上限 {max_steps}")
 
-        # 4. 能力注册 + 权限校验
+        # 4. 并行度上限（同层节点数）
+        if max_parallel is not None:
+            for j, layer in enumerate(graph.topological_layers()):
+                if len(layer) > max_parallel:
+                    violations.append(f"第 {j} 层并行度 {len(layer)} 超上限 {max_parallel}")
+
+        # 5. 能力注册 + 权限校验
         allowed = frozenset(caller_permissions) if caller_permissions is not None else None
         for node in graph.nodes.values():
             try:

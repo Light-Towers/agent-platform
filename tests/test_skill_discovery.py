@@ -137,3 +137,24 @@ def test_to_tool_schemas_batch():
     schemas = SkillRegistry.to_tool_schemas(skills)
     assert len(schemas) == 4
     assert all(s["type"] == "function" for s in schemas)
+
+
+# ---------- 中文分词 ----------
+
+
+def test_discover_chinese_keyword_scoring():
+    """连续中文段按字符拆分，query 中文词能匹配 description 中的中文字符。"""
+    reg = SkillRegistry()
+    reg.register(_skill("web_search", "联网搜索网页信息"))
+    reg.register(_skill("sql_query", "数据库SQL查询"))
+    result = reg.discover("搜索")
+    assert result[0].name == "web_search"
+
+
+def test_discover_chinese_mixed_keyword():
+    """中英混合 query：英文词 + 中文字符共同打分。"""
+    reg = SkillRegistry()
+    reg.register(_skill("web_search", "联网搜索web网页"))
+    reg.register(_skill("rag", "知识库检索"))
+    result = reg.discover("search 网页")
+    assert result[0].name == "web_search"
