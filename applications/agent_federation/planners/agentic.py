@@ -15,7 +15,14 @@ import logging
 from collections.abc import AsyncIterator, Callable
 from typing import Any
 
-from agent_runtime.planner.protocol import Plan, Planner, PlannerContext, PlannerRuntime, StreamEvent
+from agent_runtime.planner.protocol import (
+    ExecutionContext,
+    Plan,
+    Planner,
+    PlannerContext,
+    PlannerRuntime,
+    StreamEvent,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +87,12 @@ class AgenticPlanner(Planner):
             notes={"question": ctx.question, "workspace_id": ctx.workspace_id, "user_id": ctx.user_id},
         )
 
-    async def execute(self, plan: Plan, runtime: PlannerRuntime) -> AsyncIterator[StreamEvent]:
+    async def execute(
+        self,
+        plan: Plan,
+        runtime: PlannerRuntime,
+        ctx: ExecutionContext | None = None,
+    ) -> AsyncIterator[StreamEvent]:
         # lazy import：避免模块顶层拉起 main_agent 全局副作用
         from agent_federation.agent.main_agent import _execute_agent_core  # noqa: PLC0415
 

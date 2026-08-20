@@ -13,7 +13,14 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from agent_core.guardrails.input_guard import guard_input
-from agent_runtime.planner.protocol import Plan, Planner, PlannerContext, PlannerRuntime, StreamEvent
+from agent_runtime.planner.protocol import (
+    ExecutionContext,
+    Plan,
+    Planner,
+    PlannerContext,
+    PlannerRuntime,
+    StreamEvent,
+)
 
 from agent_server.agent.compact import compact_messages, should_compact
 from agent_server.agent.intent_bridge import l1_route_hint
@@ -108,7 +115,10 @@ class DeterministicPlanner(Planner):
         )
 
     async def execute(
-        self, plan: Plan, runtime: PlannerRuntime
+        self,
+        plan: Plan,
+        runtime: PlannerRuntime,
+        ctx: ExecutionContext | None = None,
     ) -> AsyncIterator[StreamEvent]:
         settings = get_settings()
         question = plan.notes.get("question") or plan.sub_query or ""
@@ -137,6 +147,7 @@ class DeterministicPlanner(Planner):
             has_real = evidence and not any(e.startswith(_EMPTY_EVIDENCE_MARKERS) for e in evidence)
             if not has_real and plan.route != "direct" and iterations < settings.max_iterations:
                 iterations += 1
+                previous_route = plan.route
                 plan = await self.plan(
                     PlannerContext(
                         question=question,
@@ -146,7 +157,15 @@ class DeterministicPlanner(Planner):
                         llm=runtime.llm,
                     )
                 )
-                yield StreamEvent(type="status", payload={"retry": True, "iterations": iterations, "route": plan.route})
+                yield StreamEvent(
+                    type="replan",
+                    payload={
+                        "iteration": iterations,
+                        "from_route": previous_route,
+                        "to_route": plan.route,
+                        "reason": "evidence_insufficient",
+                    },
+                )
                 continue
             break
 
