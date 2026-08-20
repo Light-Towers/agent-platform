@@ -168,17 +168,22 @@ async def test_execute_blocked_plan_short_circuits():
 
 
 @pytest.mark.asyncio
-async def test_execute_retry_on_empty_evidence():
+async def test_execute_replan_on_empty_evidence():
     planner = DeterministicPlanner()
-    # search 能力返回空证据 → 触发反思重试（回到 plan 重新决策）
+    # search 能力返回空证据 → 触发 re-plan（回到 plan 重新决策）
     runtime = PlannerRuntime(registry=FakeRegistry(search_evidence=[]), llm=None, pool=None)
     plan = await planner.plan(PlannerContext(question="最近 GitHub 有什么热门 Agent 项目"))
 
     events = [ev async for ev in planner.execute(plan, runtime)]
 
     types = [e.type for e in events]
-    assert types.count("status") >= 1
-    # 重试后仍 search（启发式同判定），最终产出 answer
+    assert types.count("replan") >= 1
+    # re-plan 事件携带 from_route / to_route / reason
+    replan_ev = next(e for e in events if e.type == "replan")
+    assert replan_ev.payload["from_route"] == "search"
+    assert replan_ev.payload["to_route"] == "search"
+    assert replan_ev.payload["reason"] == "evidence_insufficient"
+    # re-plan 后仍 search（启发式同判定），最终产出 answer
     assert types[-1] == "answer"
 
 

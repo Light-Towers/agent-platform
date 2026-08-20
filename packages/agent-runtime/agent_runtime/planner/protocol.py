@@ -17,14 +17,17 @@ agentic 路径——deterministic 静态 DAG 天然无环，无需也不使用�
 from __future__ import annotations
 
 import contextvars
+import uuid
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from dataclasses import dataclass, field
+from enum import StrEnum
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-StreamEventType = Literal["route", "evidence", "memory", "answer", "error", "status"]
+StreamEventType = Literal["route", "evidence", "memory", "answer", "error", "status", "replan"]
 
 
 class StreamEvent(BaseModel):
@@ -73,6 +76,60 @@ class PlannerContext(BaseModel):
 
 class SkillCompositionError(RuntimeError):
     """Skill 组合治理违规：步数超限 / 循环调用 / 嵌套过深（agentic 组合路径）。"""
+
+
+class PlanningFeedback(StrEnum):
+    """Planner 重规划反馈原因：与 Skill 执行异常严格分离。
+
+    语义边界（架构契约）：
+    - Skill 执行异常（timeout / circuit / tool unavailable）→ Skill Runtime 处理（retry / fallback）；
+    - PlanningFeedback（证据不足 / 路由不匹配）→ Planner 处理（re-plan）。
+    不得将 PlanningFeedback 下沉为 SkillRuntime retry，反之亦然。
+    """
+
+    EVIDENCE_EMPTY = "evidence_empty"
+    EVIDENCE_INSUFFICIENT = "evidence_insufficient"
+    ROUTE_MISMATCH = "route_mismatch"
+    NEED_MORE_INFORMATION = "need_more_information"
+    TOOL_RESULT_SUGGESTS_REPLAN = "tool_result_suggests_replan"
+
+
+@dataclass
+class ExecutionContext:
+    """单次 Planner execution 的执行上下文（预算 + 调用栈 + 元数据）。
+
+    架构契约：绑定一次 execution（由 Planner.execute 入口创建），所有嵌套 Skill 共享。
+    不可由 SkillRegistry.execute 内部创建（否则每次 Skill 调用都归零预算）。
+
+    预算语义（与 PlannerRuntime.max_steps / max_skill_depth 对齐）：
+    - step_count：累计 Skill 调用数（只增不减，顺序 + 嵌套共享）；
+    - call_depth：当前嵌套深度（enter +1 / exit -1）。
+    """
+
+    execution_id: str = field(default_factory=lambda: uuid.uuid4().hex)
+    step_count: int = 0
+    call_depth: int = 0
+    max_steps: int = 20
+    max_depth: int = 4
+    deadline: float | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def enter_skill(self, name: str) -> None:
+        """进入 Skill：步数预算 + 深度上限校验。超限抛 SkillCompositionError。"""
+        if self.step_count >= self.max_steps:
+            raise SkillCompositionError(
+                f"Skill 组合步数超上限（max_steps={self.max_steps}）"
+            )
+        if self.call_depth >= self.max_depth:
+            raise SkillCompositionError(
+                f"Skill 嵌套深度超上限（max_depth={self.max_depth}）"
+            )
+        self.step_count += 1
+        self.call_depth += 1
+
+    def exit_skill(self) -> None:
+        """退出 Skill：仅回退深度，步数预算不回退（累计计数）。"""
+        self.call_depth = max(0, self.call_depth - 1)
 
 
 class PlannerRuntime:
@@ -195,8 +252,18 @@ class Planner(ABC):
         """决策：给定会话上下文，返回本次执行的 Plan。"""
 
     @abstractmethod
-    async def execute(self, plan: Plan, runtime: PlannerRuntime) -> AsyncIterator[StreamEvent]:
-        """编排执行：按 Plan 依次调用能力、合成答案，产出统一流式事件。"""
+    async def execute(
+        self,
+        plan: Plan,
+        runtime: PlannerRuntime,
+        ctx: ExecutionContext | None = None,
+    ) -> AsyncIterator[StreamEvent]:
+        """编排执行：按 Plan 依次调用能力、合成答案，产出统一流式事件。
+
+        ``ctx`` 为可选执行上下文（预算 + 调用栈 + 元数据），由调用方在 execution 入口
+        创建并传入，所有嵌套 Skill 共享同一预算。未传入时由 Runtime 内部护栏
+        （``skill_guard``）承载组合治理，向后兼容。
+        """
 
 
 def serialize_stream_event(event: StreamEvent) -> dict | None:
@@ -222,6 +289,14 @@ def serialize_stream_event(event: StreamEvent) -> dict | None:
         return {"type": "memory", "notes": event.payload.get("notes", [])}
     if event.type == "status":
         return {"type": "status", **event.payload}
+    if event.type == "replan":
+        return {
+            "type": "replan",
+            "iteration": event.payload.get("iteration", 0),
+            "from_route": event.payload.get("from_route"),
+            "to_route": event.payload.get("to_route"),
+            "reason": event.payload.get("reason", "evidence_insufficient"),
+        }
     if event.type == "answer":
         return {"type": "answer", "text": event.payload.get("text", "")}
     if event.type == "error":
