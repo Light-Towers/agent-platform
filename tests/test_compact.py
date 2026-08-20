@@ -1,4 +1,4 @@
-"""上下文压缩 compact 测试。"""
+"""上下文压缩 compact 测试（dict 消息形态：compact 已下沉 agent-runtime）。"""
 
 import pytest
 from agent_core.tokenizer import count_messages, count_tokens, get_tokenizer
@@ -8,7 +8,7 @@ from agent_server.agent.compact import (
     estimate_tokens,
     should_compact,
 )
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage
 
 
 class _MockLLM:
@@ -92,8 +92,9 @@ async def test_compact_messages_success():
     compacted, err = await compact_messages(msgs, llm)
     assert err is None
     assert len(compacted) == _KEEP_RECENT + 1
-    assert isinstance(compacted[0], SystemMessage)
-    assert "上下文摘要" in compacted[0].content
+    assert isinstance(compacted[0], dict)
+    assert compacted[0]["role"] == "system"
+    assert "上下文摘要" in compacted[0]["content"]
     assert llm.invoke_count == 1
 
 

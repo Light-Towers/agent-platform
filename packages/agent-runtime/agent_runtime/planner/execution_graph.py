@@ -230,6 +230,9 @@ async def execute_plan(
         )
         yield StreamEvent(type="route", payload={"capability": "graph", "reason": plan.reason})
         async with runtime.execution():
+            # snapshot 消费（Plan-F Context Pipeline）：执行中把结构化快照写入
+            # ExecutionContext.metadata，供下一轮组装（ContextAssembler 读 task/execution
+            # 层注入）或持久化消费——修掉「status 事件产出 snapshot 但无人消费」。
             async for event in execute_graph(plan.graph, runtime):
                 if event.type == "evidence":
                     cm.record_skill(
@@ -240,6 +243,12 @@ async def execute_plan(
                         ctx, event.payload.get("skill", ""), error=event.payload.get("error", "")
                     )
                 yield event
+            exec_ctx = runtime.context
+            if exec_ctx is not None:
+                snapshot = cm.snapshot(ctx)
+                exec_ctx.metadata["snapshot"] = snapshot
+                # 记录到 runtime，供 execution 边界退出后（context 复位前）消费
+                runtime.last_snapshot = snapshot
         yield StreamEvent(type="status", payload={"snapshot": cm.snapshot(ctx)})
     else:
         yield StreamEvent(type="route", payload={"capability": plan.route, "reason": plan.reason})

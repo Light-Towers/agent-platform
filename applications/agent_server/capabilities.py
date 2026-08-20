@@ -122,9 +122,18 @@ def build_registry(graph: Any | None = None) -> SkillRegistry:
     Runtime 边界（架构审核 P1）：熔断经中间件链收敛——``CircuitBreakerMiddleware``
     仅包裹 search（隔离故障域），search 实现不再内嵌 breaker。
     """
-    registry = SkillRegistry(
-        middlewares=[CircuitBreakerMiddleware(_get_breaker(), skill_names=("search",))]
-    )
+    middlewares = [CircuitBreakerMiddleware(_get_breaker(), skill_names=("search",))]
+    settings = get_settings()
+    if settings.tool_result_compression_enabled:
+        from agent_runtime.skills.middleware import ToolResultCompressionMiddleware
+
+        middlewares.append(
+            ToolResultCompressionMiddleware(
+                max_tokens=settings.tool_result_max_tokens,
+                store_dir=settings.tool_result_store_dir or None,
+            )
+        )
+    registry = SkillRegistry(middlewares=middlewares)
     registry.register(
         as_function_skill(
             "search",

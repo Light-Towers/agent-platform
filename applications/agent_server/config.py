@@ -111,6 +111,13 @@ class Settings(BaseLLMSettings):
     # 按层检查 deadline 提前终止（超限产出 error 事件）。
     max_execution_seconds: float = 60.0
 
+    # Plan-F Context Pipeline：统一上下文组装（agent_runtime/context/）
+    context_budget_tool_results_ratio: float = 0.35  # tool_results 层占比
+    tool_result_max_tokens: int = 8192  # 单条工具结果超此阈值则外置 + 截断视图
+    tool_result_store_dir: str = ""  # 空则复用 session_dir
+    memory_gate_top_k: int = 5  # 记忆召回门控：预算内最多注入的条数
+    tool_result_compression_enabled: bool = False  # opt-in：Skill 出口统一压缩（默认关，避免改变现有返回结构）
+
     # CORS：允许的前端来源（逗号分隔），为空时默认回环 127.0.0.1:5173
     cors_allow_origins: str = ""
 

@@ -4,7 +4,7 @@
 收敛为 SkillRegistry.execute 的统一洋葱链——Planner 只决策，能力实现只做本职，
 Runtime 边界在链上即插即用。
 
-当前已收敛：``CircuitBreakerMiddleware``（熔断）。
+当前已收敛：``CircuitBreakerMiddleware``（熔断）、``ToolResultCompressionMiddleware``（结果外置）。
 演进中：retry（Planner 编排循环的"证据为空重新路由"属编排语义，不迁移；
 执行级异常重试待真实需求出现再挂链）、rate limit（admission 队列待接入）。
 """
@@ -15,6 +15,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any, Protocol
 
 from agent_runtime.circuit_breaker import CircuitBreaker
+from agent_runtime.context.tool_result import ToolResultCompressor
 
 # 洋葱模型：call_next 是下一层（另一中间件或最终执行器）
 CallNext = Callable[[str, dict[str, Any]], Awaitable[Any]]
@@ -58,3 +59,33 @@ class CircuitBreakerMiddleware:
         if result is None:
             return [self._degraded_message]
         return result
+
+
+class ToolResultCompressionMiddleware:
+    """工具结果压缩中间件（Plan-F Context Pipeline P1）：超预算结果外置 + 截断视图。
+
+    挂在本洋葱链上，工具本身不感知：``around`` 在 call_next 之后把结果交给
+    ``ToolResultCompressor``，返回 ``{text, ref, full_path, truncated}`` 结构
+    （text 是上下文可用的视图，完整结果已外置到 store_dir）。
+
+    ``skill_names`` 为 None 时作用于全部技能（默认）；否则仅包裹指定技能。
+    """
+
+    def __init__(
+        self,
+        max_tokens: int = 8192,
+        store_dir=None,
+        model: str | None = None,
+        *,
+        skill_names: tuple[str, ...] | None = None,
+    ) -> None:
+        self._compressor = ToolResultCompressor(
+            max_tokens=max_tokens, store_dir=store_dir, model=model
+        )
+        self._skill_names = skill_names
+
+    async def around(self, name: str, kwargs: dict[str, Any], call_next: CallNext) -> Any:
+        if self._skill_names is not None and name not in self._skill_names:
+            return await call_next(name, kwargs)
+        result = await call_next(name, kwargs)
+        return self._compressor.compress(result)

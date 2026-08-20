@@ -50,6 +50,9 @@ class _NoOpSpan:
     def add_event(self, name, attributes=None):
         pass
 
+    def end(self):
+        pass
+
 
 class _NoOpTracer:
     """空 tracer（OTel 未启用/未安装时）。"""
