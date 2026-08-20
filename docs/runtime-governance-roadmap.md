@@ -9,10 +9,16 @@
 > 1. `Plan` 已有 `mode` + `graph` 字段（`protocol.py:61,66`）；
 > 2. `GraphPlanner` 已打通 `Plan→PolicyValidator→execute_graph`（`applications/agent_server/planners/graph.py:83-91`）；
 > 3. `execute_plan` 已强制 `PolicyValidator.validate()`（`execution_graph.py:223-228`）；
-> 4. `registry._validate_output` 已实现并调用（`registry.py:157,290`，轻量 type 校验）；
+> 4. `registry._validate_output` 已实现并调用（`skills/registry.py:157,290`，轻量 type 校验）；
 > 5. `execute_graph` 的 `_run` 已节点级异常隔离（`execution_graph.py:160-165`）；
 > 6. `deadline` 已由 P1-1 接入并在 `execute_graph` 消费。
-> **真正的缺口**是：新控制平面（graph 路径）已完整但**非默认**——`config.py:102` 默认 `planner="deterministic"`，`DeterministicPlanner`/`AgenticPlanner` 仍走 `route→registry.execute`，不产出 `graph`。后续优先级见下方 §0。
+> **真正的缺口**是：新控制平面（graph 路径）已完整但**非默认**——`config.py:102` 默认 `planner="deterministic"`，`DeterministicPlanner` 仍走 `route→registry.execute`，`AgenticPlanner` 包装 `_execute_agent_core`（deep_agent 黑盒，不经 `registry`），两者均不产出 `graph`。后续优先级见下方 §0。
+
+> **已完成基线速览**（P0-1 + P1-1/1-2/1-3 均已完成并验证）：
+> - **P0-1** 部署约束文档 → `docs/deployment.md`（multi-worker 约束 + coordinator.py 链接）。
+> - **P1-1** deadline 闭环 → `config.py:112` `max_execution_seconds` → `main.py:152` → `protocol.py:226-233`（`execution()` 建 deadline）→ `execution_graph.py:150-158`（逐层消费）；测试 `test_execute_plan_deadline_aborts`。
+> - **P1-2** max_parallel 接线 → `execute_plan(max_parallel=...)` → `policy.py:66-69`；已接线但无调用方（GraphPlanner 未传）。
+> - **P1-3** 回归测试 → `tests/test_execute_plan.py`：`test_execute_plan_deadline_aborts` / `test_execute_plan_max_parallel_rejected`（7 测试通过）。
 
 ## 0. 真正的架构缺口（与外部审核稿对齐后的修正版）
 
@@ -33,7 +39,7 @@
 |---|---|---|---|---|---|
 | P2-1 | tokens/cost 聚合器 | P2 | 0.3 | `protocol.py` (ExecutionContext) | P1-1 |
 | P2-2 | llm client 计量点 | P2 | 0.5 | `agent_core/llm/` | P2-1 |
-| P3-1 | Trajectory 持久化 | P3 | 1.5 | `trajectory/`(新) + `execution_graph.py` | P2-2 |
+| P3-1 | Trajectory 持久化 | P3 | 1.5 | `trajectory/`(新) + `execution_graph.py` | P2-2（tokens 可后补时仅 P1-1） |
 | P3-2 | Trajectory Replay | P3 | 2 | `eval/replay/`(新) | P3-1 |
 | P4-1 | 分布式 session lease | P4 | 3 | `coordinator.py` | P0-1 |
 | P4-2 | 收紧 registry.execute | P4 | 0.5 | `registry.py` + CI lint | — |
@@ -65,14 +71,14 @@
 
 ## P3 — Trajectory（在 Budget 闭环后）
 
-P2-1 与 P3-1 可并行，但 P3-2（Replay）依赖 P3-1（持久化）。
+P2-1 与 P3-1 的**并行关系取决于 P3-1 是否硬依赖 token 计量点**：若 trajectory 的 `tokens` 字段允许后补（`None` 占位），则 P3-1 仅依赖 P1-1（可并行）；若硬依赖计量点，则 P3-1 前置 P2-2（与汇总表一致）。P3-2（Replay）始终依赖 P3-1（持久化）。
 
 ### P3-1 Trajectory 持久化
 - **改动文件**：新增 `packages/agent-runtime/agent_runtime/trajectory/`（存储 + schema）；`execution_graph.py` 的 `execute_plan` 末尾挂持久化。
 - **改动内容**：
   - 基于 `ContextManager.snapshot()`（`context_manager.py:148-150`）已有的结构化输出，补充 `execution_id`、`parent_execution_id`、`session_id`、`planner`、`plan`、每步 `latency`/`tokens`。
   - `AgentContext.metadata`（`context_manager.py:75`）已有扩展位，可承载 `execution_id` 等关联字段，不必改 snapshot 结构。
-  - 写入存储（PG 表或 OTel span），`status` 事件已产出 snapshot（`execution_graph.py:241,250`），持久化在此消费即可。
+  - 写入存储（PG 表或 OTel span），`status` 事件已产出 snapshot（`execution_graph.py:243,252`），持久化在此消费即可。
 - **工作量**：1.5
 - **验收**：一次执行后，按 `execution_id` 可查询完整轨迹（skill / args / result / latency / tokens / errors）。
 - **理由**：`record_skill` + snapshot 模型已落地，缺的只是存储与查询，不是模型。
@@ -97,11 +103,11 @@ P2-1 与 P3-1 可并行，但 P3-2（Replay）依赖 P3-1（持久化）。
 - **备注**：v2 当前单进程部署下无实际暴露，优先级取决于「是否近期要多副本」。
 
 ### P4-2 收紧 `registry.execute` 的直接可见性
-- **现状（已核实三处直调）**：`protocol.py:258-259`（delegate 边界外回退）、`graph.py:60-64`（`_invoke` 回退）、`deterministic.py:202,209`（`_run_capability` 直调）。
+- **现状（已核实三处直调）**：`protocol.py:273-274`（delegate 边界外回退）、`agent_server/agent/graph.py:60-64`（`_invoke` 回退）、`deterministic.py:202,209`（`_run_capability` 直调）。
 - **改动内容**：Python 无真 private，实际手段 = ①命名约定（如 `_execute_internal`）②CI lint 规则（禁止 `registry.execute(` 出现在 `skills/` 外部）③文档契约声明「Skill→Skill 唯一合法路径是 `runtime.delegate()`」。
 - **关键**：**不要现在就改三处调用**——它们是宿主代码、行为正确，改坏风险大于收益，先以 lint/文档约束。
 - **工作量**：0.5
-- **验收**：CI 加一条 grep 规则，非白名单文件出现 `registry.execute(` 即失败。
+- **验收**：CI 加一条 grep 规则，非白名单文件出现 `registry.execute(` 或 `get_registry().execute(` 即失败（`agent/graph.py:64` 的调用形态是 `get_registry().execute(`，两种形态都要覆盖）。
 
 ### P4-3 真实现 coalesce（或诚实改名）
 - **改动文件**：`coordinator.py`
@@ -122,13 +128,14 @@ P2-1 与 P3-1 可并行，但 P3-2（Replay）依赖 P3-1（持久化）。
 - **注意**：`normalized args` 对可变对象 / 大 payload 需先做规范化（排序键、截断、类型降级），避免哈希不稳定或超大。
 - **工作量**：1.5
 - **验收**：`search("北京天气")` 后 `search("北京今天的天气")` 不同参数不误报；完全重复的 `A→B→A'`（同 args 同 result class）能拦。
-- **定位**：结构检测（`protocol.py:136` 的 `name in call_stack`）已够用，这是增强项，不阻塞任何东西。
+- **定位**：结构检测（`protocol.py:142` 的 `name in call_stack`）已够用，这是增强项，不阻塞任何东西。
+- **备注**：编号 P5 是类别号（Semantic Loop Detection 区段），**非优先级**；优先级以「汇总表」列为准。
 
 ---
 
 ## 外部审核要点建议
 
-1. **优先级与依赖**：P2-1 → P2-2 → P3-1 → P3-2 是硬依赖链；P4-1 依赖 P0-1（已完成）；P4-2/P4-3/P5-1 可独立开工。
+1. **优先级与依赖**：P2-1 → P2-2 硬依赖；P3-1 的前置为 P2-2（trajectory 的 `tokens` 字段若允许后补，则降级为仅依赖 P1-1，可与 P2-1 并行）；P3-2 依赖 P3-1；P4-1 依赖 P0-1（已完成）；P4-2/P4-3/P5-1 可独立开工。
 2. **风险点**：P2-2 需先核实 `agent-core` llm client 是否已透传 `usage`（决定是真新代码还是接线）；P4-1 工作量最大且涉及双写一致性。
 3. **范围边界**：P4-2 明确要求**不要**改三处现有直调调用，仅加 lint/文档约束，避免回归。
 4. **已完成基线**：P0-1（`docs/deployment.md`）+ P1-1/1-2/1-3（`protocol.py` / `execution_graph.py` / `config.py` / `main.py` / `tests/test_execute_plan.py`，7 测试通过）。

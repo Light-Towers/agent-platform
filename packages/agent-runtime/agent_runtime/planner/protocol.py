@@ -191,6 +191,8 @@ class PlannerRuntime:
         self.max_skill_depth = max_skill_depth
         self.max_steps = max_steps
         self.max_duration_seconds = max_duration_seconds
+        # 最近一次执行的 ContextManager snapshot（execute_plan 写入，供下一轮组装消费）
+        self.last_snapshot: dict[str, Any] | None = None
         # 执行期上下文（per-request，经 ContextVar 隔离）：execution() 入口创建
         # ExecutionContext 并 set，同 task 链内共享，跨 task 互不干扰。
         self._ctx_var: contextvars.ContextVar[ExecutionContext | None] = contextvars.ContextVar(

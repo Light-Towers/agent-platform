@@ -16,12 +16,12 @@ from agent_runtime.mcp_client import MCPClientManager
 from langchain_core.messages import AIMessage
 from langgraph.graph import END, START, StateGraph
 
-from agent_server.agent.compact import compact_messages, should_compact
 from agent_server.agent.intent_bridge import l1_route_hint
 from agent_server.agent.router import decide_route
 from agent_server.agent.state import AgentState, _validate_state
 from agent_server.capabilities import get_registry
 from agent_server.config import get_settings
+from agent_server.context import build_context_assembler, conversation_cap
 from agent_server.memory.longterm import extract_memory_facts, maybe_consolidate, recall, remember
 
 logger = logging.getLogger(__name__)
@@ -82,23 +82,26 @@ def build_graph(
             # 脱敏文本写回 state，后续路由/记忆均使用脱敏后内容，避免原文进记忆
             question = guard["redacted_text"]
 
-        # 上下文压缩：多轮会话 token 超阈值时摘要旧消息
+        # 上下文压缩：多轮会话 token 超阈值时摘要旧消息（统一 assembler 入口，兼容旧阈值）
         messages = state.messages
         if settings.compaction_enabled and llm is not None:
-            threshold = int(settings.model_context_window * settings.compaction_threshold_ratio)
             # 从 llm 提取模型名以启用精确 token 计数；提取不到则走启发式
             model_name = getattr(llm, "model_name", None) or getattr(llm, "model", None)
-            if should_compact(messages, threshold, model_name):
-                compacted, err = await compact_messages(messages, llm, model_name)
-                if err is None:
-                    return {
-                        "route": "direct",
-                        "sub_query": question,
-                        "route_reason": "上下文已压缩，重新路由",
-                        "memory_notes": [],
-                        "messages": compacted,
-                        "iterations": state.iterations,
-                    }
+            assembler = build_context_assembler(settings, llm=llm, model=model_name)
+            compacted, _report = await assembler.assemble_conversation_only(
+                messages=messages,
+                user_message=question,
+                conversation_cap=conversation_cap(settings),
+            )
+            if compacted is not None:
+                return {
+                    "route": "direct",
+                    "sub_query": question,
+                    "route_reason": "上下文已压缩，重新路由",
+                    "memory_notes": [],
+                    "messages": compacted,
+                    "iterations": state.iterations,
+                }
 
         # L1 轻量 short-circuit：高置信 chitchat 直接直答，避免无效 LLM 路由
         # （仅作拦截，不替换 decide_route 的 LLM 主判，eval 基线不受影响）。

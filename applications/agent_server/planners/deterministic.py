@@ -22,11 +22,11 @@ from agent_runtime.planner.protocol import (
     StreamEvent,
 )
 
-from agent_server.agent.compact import compact_messages, should_compact
 from agent_server.agent.intent_bridge import l1_route_hint
 from agent_server.agent.router import decide_route
 from agent_server.agent.state import AgentState
 from agent_server.config import get_settings
+from agent_server.context import build_context_assembler, conversation_cap
 from agent_server.memory.longterm import extract_memory_facts, maybe_consolidate, recall, remember
 
 logger = logging.getLogger(__name__)
@@ -65,28 +65,38 @@ class DeterministicPlanner(Planner):
                     route="blocked",
                     sub_query="",
                     reason="被输入护栏拦截（injection）",
-                    notes={"question": question, "workspace_id": ctx.workspace_id, "user_id": ctx.user_id},
+                    notes={
+                        "question": question,
+                        "workspace_id": ctx.workspace_id,
+                        "user_id": ctx.user_id,
+                    },
                 )
             question = guard["redacted_text"]
 
-        # 上下文压缩：多轮会话 token 超阈值时摘要旧消息（与 graph.route_node 同源）
+        # 上下文压缩：多轮会话 token 超阈值时摘要旧消息（与 graph.route_node 同源，
+        # 双链路收敛为统一 assembler 入口，行为兼容旧阈值语义）
         if settings.compaction_enabled and ctx.llm is not None:
-            threshold = int(settings.model_context_window * settings.compaction_threshold_ratio)
             model_name = getattr(ctx.llm, "model_name", None) or getattr(ctx.llm, "model", None)
-            if should_compact(ctx.messages, threshold, model_name):
-                compacted, err = await compact_messages(ctx.messages, ctx.llm, model_name)
-                if err is None:
-                    return Plan(
-                        route="direct",
-                        sub_query=question,
-                        reason="上下文已压缩，重新路由",
-                        notes={
-                            "question": question,
-                            "workspace_id": ctx.workspace_id,
-                            "user_id": ctx.user_id,
-                            "messages": compacted,
-                        },
-                    )
+            assembler = build_context_assembler(
+                settings, llm=ctx.llm, model=model_name,
+            )
+            compacted, _report = await assembler.assemble_conversation_only(
+                messages=ctx.messages,
+                user_message=question,
+                conversation_cap=conversation_cap(settings),
+            )
+            if compacted is not None:
+                return Plan(
+                    route="direct",
+                    sub_query=question,
+                    reason="上下文已压缩，重新路由",
+                    notes={
+                        "question": question,
+                        "workspace_id": ctx.workspace_id,
+                        "user_id": ctx.user_id,
+                        "messages": compacted,
+                    },
+                )
 
         # L1 轻量 short-circuit：高置信 chitchat 直答（与 graph.route_node 同源，eval 基线不受影响）
         l1_hint = l1_route_hint(question)
@@ -95,7 +105,11 @@ class DeterministicPlanner(Planner):
                 route=l1_hint,
                 sub_query=question,
                 reason="L1 chitchat short-circuit",
-                notes={"question": question, "workspace_id": ctx.workspace_id, "user_id": ctx.user_id},
+                notes={
+                    "question": question,
+                    "workspace_id": ctx.workspace_id,
+                    "user_id": ctx.user_id,
+                },
             )
 
         # LLM 主路由：失败自动回退确定性启发式（decide_route 内部处理）
@@ -130,9 +144,20 @@ class DeterministicPlanner(Planner):
             return
 
         # 记忆召回（决策后执行期；pool 为 None 时跳过——memory 依赖 DB 池）
+        # 经 MemoryGate 门控：去重/冲突消解/预算内取 top（P2 接线，settings.memory_gate_top_k 控制条数）
         memory_notes: list[str] = []
         if settings.memory_enabled and runtime.pool is not None:
-            memory_notes = await recall(runtime.pool, workspace_id, question)
+            if getattr(settings, "memory_gate_top_k", 5) > 0:
+                from agent_runtime.context.memory_gate import MemoryGate, gate_recall
+
+                gate = MemoryGate(top_k=settings.memory_gate_top_k)
+                memory_notes = await gate_recall(
+                    lambda question: recall(runtime.pool, workspace_id, question),
+                    question,
+                    gate=gate,
+                )
+            else:
+                memory_notes = await recall(runtime.pool, workspace_id, question)
             if memory_notes:
                 yield StreamEvent(type="memory", payload={"notes": memory_notes})
 
@@ -176,7 +201,13 @@ class DeterministicPlanner(Planner):
             # 合成 + 记忆沉淀（与 synthesize_node 同源）
             # compaction 路径：plan() 把摘要写入 notes["messages"]，这里消费它作为合成上下文
             context_messages = plan.notes.get("messages") or []
-            answer = await self._compose(question, evidence, memory_notes, runtime.llm, context_messages)
+            answer = await self._compose(
+                question,
+                evidence,
+                memory_notes,
+                runtime.llm,
+                context_messages,
+            )
             if settings.memory_enabled and runtime.pool is not None:
                 facts = None
                 if settings.memory_extraction_enabled and runtime.llm is not None:
