@@ -1,6 +1,7 @@
 """app 侧 Planner 装配：``PLANNER`` env（``settings.planner``）决定使用哪个实现（默认 deterministic）。
 
 - ``deterministic``：本模块 ``DeterministicPlanner``（决策与 graph.py 同源）；
+- ``graph``：本模块 ``GraphPlanner``（discover → ExecutionGraph → execute_plan，组合治理主链）；
 - ``agentic``：联邦侧 ``AgenticPlanner``（lazy import——app 不静态依赖 agent_federation）。
 
 Phase 3 统一 SSE/WS 出口后，``app.api`` 直接消费 ``get_planner()`` 返回的 Planner。
@@ -15,16 +16,24 @@ from agent_server.planners.deterministic import DeterministicPlanner
 
 if TYPE_CHECKING:
     from agent_runtime.planner.protocol import Planner
+    from agent_runtime.skills.registry import SkillRegistry
 
 
-def get_planner(settings=None) -> "Planner":
-    """按 ``settings.planner``（PLANNER env）返回 Planner 实现。"""
+def get_planner(settings=None, *, registry: "SkillRegistry | None" = None) -> "Planner":
+    """按 ``settings.planner``（PLANNER env）返回 Planner 实现。
+
+    ``registry``：GraphPlanner 需要（plan() 经 discover 选候选 Skill）；其他 Planner 忽略。
+    """
     settings = settings or get_settings()
     if settings.planner == "agentic":
         from agent_federation.planners.agentic import AgenticPlanner  # noqa: PLC0415
 
         return AgenticPlanner()
+    if settings.planner == "graph":
+        from agent_server.planners.graph import GraphPlanner  # noqa: PLC0415
+
+        return GraphPlanner(registry=registry)
     return DeterministicPlanner()
 
 
-__all__ = ["DeterministicPlanner", "get_planner"]
+__all__ = ["DeterministicPlanner", "GraphPlanner", "get_planner"]

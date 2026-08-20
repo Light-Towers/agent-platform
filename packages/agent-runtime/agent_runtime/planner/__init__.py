@@ -20,6 +20,7 @@ from agent_runtime.planner.execution_graph import (
     GraphCycleError,
     GraphNode,
     execute_graph,
+    execute_plan,
 )
 from agent_runtime.planner.policy import PlanViolationError, PolicyValidator
 from agent_runtime.planner.protocol import (
@@ -53,4 +54,5 @@ __all__ = [
     "StreamEvent",
     "TaskState",
     "execute_graph",
+    "execute_plan",
 ]

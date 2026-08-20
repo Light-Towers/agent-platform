@@ -17,7 +17,7 @@ from agent_runtime.tracing import get_langfuse_callbacks
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from agent_server.agent.graph import build_graph
+from agent_server.agent.graph import DelegateRef, build_graph
 from agent_server.agent.llm import build_chat_model
 from agent_server.api.routes import router
 from agent_server.config import get_settings
@@ -125,7 +125,7 @@ async def lifespan(app: FastAPI):
 
     # delegate_ref 延迟绑定：graph 节点经 runtime.delegate 调用能力（受 skill_guard 组合治理），
     # 解决循环依赖（graph → registry → runtime → graph）——先传空 holder，runtime 创建后填充。
-    delegate_ref: dict = {}
+    delegate_ref = DelegateRef()
     app.state.graph = build_graph(
         llm, checkpointer=checkpointer, mcp_manager=mcp_manager, delegate_ref=delegate_ref
     )
@@ -138,9 +138,10 @@ async def lifespan(app: FastAPI):
     from agent_server.capabilities import get_registry
     from agent_server.planners import get_planner
 
-    app.state.planner = get_planner(settings)
+    # 装配顺序：registry 先于 planner（GraphPlanner plan() 需 registry 做 discover）
     registry = get_registry(graph=app.state.graph)
     app.state.registry = registry
+    app.state.planner = get_planner(settings, registry=registry)
     app.state.planner_runtime = PlannerRuntime(
         registry=registry,
         llm=llm,
@@ -148,9 +149,10 @@ async def lifespan(app: FastAPI):
         pool=get_pool(),
         max_skill_depth=settings.max_skill_depth,
         max_steps=settings.max_steps,
+        max_duration_seconds=settings.max_execution_seconds or None,
     )
     # 绑定 delegate：graph 节点的 _invoke 此后经 runtime.delegate 调用
-    delegate_ref["delegate"] = app.state.planner_runtime.delegate
+    delegate_ref.delegate = app.state.planner_runtime.delegate
     app.state.callbacks = get_langfuse_callbacks(
         public_key=settings.langfuse_public_key,
         secret_key=settings.langfuse_secret_key,

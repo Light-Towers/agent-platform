@@ -17,6 +17,7 @@ agentic 路径——deterministic 静态 DAG 天然无环，无需也不使用�
 from __future__ import annotations
 
 import contextvars
+import time
 import uuid
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
@@ -41,16 +42,28 @@ class StreamEvent(BaseModel):
 
 
 class Plan(BaseModel):
-    """一次决策结果：选中能力 + 子查询 + 理由 + 附加上下文。
+    """一次决策结果：执行模式 + 能力选择 + 可选执行图。
+
+    ``mode``（Plan-F 执行链打通）：标识本次执行的路径——
+
+    - ``deterministic``：单 route 调用（现有 DeterministicPlanner，route 必填）；
+    - ``graph``：多 Skill 组合计划，``graph`` 携带 ExecutionGraph，经 PolicyValidator +
+      execute_graph 执行（GraphPlanner）；
+    - ``agentic``：LLM 自主 function-calling（AgenticPlanner，不经 ExecutionGraph）。
+
+    ``graph`` 类型为 ``Any`` 以避免 protocol ↔ execution_graph 循环导入，实际为
+    ``ExecutionGraph | None``。``mode="graph"`` 时 ``graph`` 必须非空。
 
     ``notes`` 承载决策期附加信息（脱敏后问题、workspace_id、记忆召回、重试迭代等），
     供 execute 阶段消费；是 Plan 的扩展位，不新增字段即保持协议稳定。
     """
 
-    route: str
+    mode: Literal["deterministic", "graph", "agentic"] = "deterministic"
+    route: str = ""
     sub_query: str = ""
     reason: str = ""
     notes: dict[str, Any] = Field(default_factory=dict)
+    graph: Any = None
 
 
 class PlannerContext(BaseModel):
@@ -169,6 +182,7 @@ class PlannerRuntime:
         *,
         max_skill_depth: int = 4,
         max_steps: int = 20,
+        max_duration_seconds: float | None = None,
     ):
         self.registry = registry
         self.llm = llm
@@ -176,6 +190,7 @@ class PlannerRuntime:
         self.pool = pool
         self.max_skill_depth = max_skill_depth
         self.max_steps = max_steps
+        self.max_duration_seconds = max_duration_seconds
         # 执行期上下文（per-request，经 ContextVar 隔离）：execution() 入口创建
         # ExecutionContext 并 set，同 task 链内共享，跨 task 互不干扰。
         self._ctx_var: contextvars.ContextVar[ExecutionContext | None] = contextvars.ContextVar(
@@ -208,7 +223,14 @@ class PlannerRuntime:
         约束同时嵌套深度。调用方（组合型 Planner 的 execute/arun 入口）须用本 scope
         包裹整次执行：预算不跨执行累计，同执行内顺序/嵌套 Skill 共享同一预算。
         """
-        ctx = ExecutionContext(max_steps=self.max_steps, max_depth=self.max_skill_depth)
+        deadline = (
+            time.monotonic() + self.max_duration_seconds
+            if self.max_duration_seconds is not None
+            else None
+        )
+        ctx = ExecutionContext(
+            max_steps=self.max_steps, max_depth=self.max_skill_depth, deadline=deadline
+        )
         token = self._ctx_var.set(ctx)
         try:
             yield

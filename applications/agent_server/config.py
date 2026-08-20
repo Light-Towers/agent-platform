@@ -106,6 +106,11 @@ class Settings(BaseLLMSettings):
     max_skill_depth: int = 4
     max_steps: int = 20
 
+    # Plan-F Phase 3: 单次 execution 的 wall-clock 上限（秒），None/0 不启用；
+    # 经 PlannerRuntime.max_duration_seconds 注入 execution() 边界，由 execute_graph
+    # 按层检查 deadline 提前终止（超限产出 error 事件）。
+    max_execution_seconds: float = 60.0
+
     # CORS：允许的前端来源（逗号分隔），为空时默认回环 127.0.0.1:5173
     cors_allow_origins: str = ""
 

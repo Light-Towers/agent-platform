@@ -6,6 +6,8 @@ SSE 聚合、会话键、探活自递归等一串问题；这里用 LangGraph �
 """
 
 import logging
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from typing import Any
 
 from agent_core.guardrails.input_guard import guard_input
@@ -30,24 +32,35 @@ _SYNTHESIZE_PROMPT = (
 )
 
 
+@dataclass
+class DelegateRef:
+    """延迟绑定的 delegate 引用（类型安全的 mutable holder）。
+
+    解决 graph → registry → runtime → graph 循环依赖：先传空 holder，
+    runtime 创建后设置 ``delegate``。替代裸 dict，提供类型安全。
+    """
+
+    delegate: Callable[..., Awaitable[Any]] | None = None
+
+
 def build_graph(
     llm,
     checkpointer=None,
     mcp_manager: MCPClientManager | None = None,
     *,
-    delegate_ref: dict | None = None,
+    delegate_ref: DelegateRef | None = None,
 ):
     """构建并编译 Supervisor 图；llm 可为 None（无 LLM 模式）。
 
-    ``delegate_ref``：延迟绑定的 delegate 引用（``{"delegate": runtime.delegate}``）。
-    提供且 ``"delegate"`` 键存在时，能力节点经 delegate 调用（受 ``skill_guard`` 组合治理，
-    Workflow 嵌套调用计入步数 / 深度预算）；缺省回退 ``get_registry().execute``（向后兼容）。
+    ``delegate_ref``：延迟绑定的 ``DelegateRef``。提供且 ``delegate`` 已设置时，
+    能力节点经 delegate 调用（受 ``skill_guard`` 组合治理，Workflow 嵌套调用计入
+    步数 / 深度预算）；缺省回退 ``get_registry().execute``（向后兼容）。
     """
 
     async def _invoke(name: str, **kwargs) -> Any:
         """能力调用统一入口：优先经 delegate（组合治理），回退 registry.execute。"""
-        if delegate_ref is not None and "delegate" in delegate_ref:
-            return await delegate_ref["delegate"](name, **kwargs)
+        if delegate_ref is not None and delegate_ref.delegate is not None:
+            return await delegate_ref.delegate(name, **kwargs)
         return await get_registry().execute(name, **kwargs)
 
     async def route_node(state: AgentState) -> dict:
