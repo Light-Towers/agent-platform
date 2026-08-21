@@ -12,12 +12,45 @@
 - ``"$input.<key>"``：来自 Workflow Skill 被调用时的入参 kwargs；
 - ``"$node.<node_id>"``：引用上游节点输出（执行期动态解析）；
 - 其他值视为字面量透传。
+
+YAML 文件格式示例（§20 演进落地）：
+```yaml
+name: "qa_pipeline"
+description: "通用问答流水线"
+input_schema:
+  type: object
+  properties:
+    question: {type: string}
+  required: [question]
+nodes:
+  - id: "route"
+    skill: "route"
+    inputs:
+      question: "$input.question"
+  - id: "search"
+    skill: "search"
+    inputs:
+      query: "$input.question"
+  - id: "summarize"
+    skill: "summarize"
+    inputs:
+      text: "$node.search"
+edges:
+  - dependent: "search"
+    dependency: "route"
+  - dependent: "summarize"
+    dependency: "search"
+output_node: "summarize"
+permissions: ["read", "search"]
+```
 """
 
 from __future__ import annotations
 
+import pathlib
 from typing import Any
 
+import yaml
 from pydantic import BaseModel, Field
 
 from agent_runtime.planner.execution_graph import (
@@ -154,10 +187,51 @@ def compile_workflow(spec: "WorkflowSpec | dict[str, Any]", *, registry: Any | N
     )
 
 
+def load_workflow_yaml(path: str | pathlib.Path, *, registry: Any | None = None) -> Skill:
+    """从 YAML 文件加载并编译为 Workflow Skill。
+
+    :param path: .yaml/.yml 文件路径。
+    :param registry: 可选注册表，传给 ``compile_workflow``。
+    :return: 可直接注册到 ``SkillRegistry`` 的 ``Skill``。
+    """
+    p = pathlib.Path(path)
+    if not p.exists():
+        raise FileNotFoundError(f"Workflow file not found: {path}")
+    content = p.read_text(encoding="utf-8")
+    spec_dict = yaml.safe_load(content)
+    return compile_workflow(spec_dict, registry=registry)
+
+
+def discover_workflows(
+    directory: str | pathlib.Path,
+    *,
+    registry: Any | None = None,
+    pattern: str = "*.y*ml",
+) -> list[Skill]:
+    """递归扫描目录，加载所有匹配的 Workflow YAML 文件。
+
+    :param directory: 扫描根目录（如 ``workflows/``）。
+    :param registry: 可选注册表，传给 ``compile_workflow``。
+    :param pattern: glob 模式（默认 ``*.y*ml`` 兼容 .yaml/.yml）。
+    :return: 编译后的 ``Skill`` 列表，按文件名排序以保证确定性。
+    """
+    root = pathlib.Path(directory)
+    if not root.exists() or not root.is_dir():
+        return []
+    skills: list[Skill] = []
+    for file in sorted(root.rglob(pattern)):
+        try:
+            skills.append(load_workflow_yaml(file, registry=registry))
+        except Exception as e:
+            raise RuntimeError(f"Failed to load workflow {file}: {e}") from e
+    return skills
+
+
 __all__ = [
-    "WorkflowSpec",
     "WorkflowNode",
     "WorkflowEdge",
     "WorkflowExecutor",
     "compile_workflow",
+    "load_workflow_yaml",
+    "discover_workflows",
 ]
