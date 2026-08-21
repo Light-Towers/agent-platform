@@ -17,6 +17,8 @@ agentic 路径——deterministic 静态 DAG 天然无环，无需也不使用�
 from __future__ import annotations
 
 import contextvars
+import hashlib
+import json
 import time
 import uuid
 from abc import ABC, abstractmethod
@@ -144,14 +146,21 @@ class ExecutionContext:
     max_cost: float | None = None
     # P3-1：逐步明细（skill / args / result / latency / tokens / error），供 Trajectory 持久化
     steps: list[TrajectoryStep] = field(default_factory=list)
+    # P5-1：语义循环指纹（skill + 归一化 args），重复指纹拒绝继续
+    fingerprints: set[str] = field(default_factory=set)
 
     @property
     def call_depth(self) -> int:
         """当前嵌套深度（调用栈长度）。"""
         return len(self.call_stack)
 
-    def enter_skill(self, name: str) -> None:
-        """进入 Skill：步数预算 → 循环检测 → 深度上限，超限抛 SkillCompositionError。"""
+    def enter_skill(self, name: str, kwargs: dict[str, Any] | None = None) -> None:
+        """进入 Skill：步数预算 → 循环检测 → 深度上限 → 语义指纹，超限抛 SkillCompositionError。
+
+        P5-1 语义指纹：对 ``(name, 归一化 kwargs)`` 求指纹，重复指纹（同一 Skill 同入参再次
+        调用，如 ``A → B → A'`` 同 args）拒绝继续——比 ``name in call_stack`` 仅查即时重入
+        更宽，能拦「绕一圈回来重复调用」的语义循环，又不误伤「不同入参的同名 Skill」。
+        """
         if self.step_count >= self.max_steps:
             raise SkillCompositionError(
                 f"Skill 组合步数超上限（max_steps={self.max_steps}）"
@@ -164,6 +173,12 @@ class ExecutionContext:
             raise SkillCompositionError(
                 f"Skill 嵌套深度超上限（max_depth={self.max_depth}）"
             )
+        fp = _fingerprint(name, kwargs or {})
+        if fp in self.fingerprints:
+            raise SkillCompositionError(
+                f"语义循环检测：重复调用 {name}（同入参已执行过），拒绝继续"
+            )
+        self.fingerprints.add(fp)
         self.step_count += 1
         self.call_stack.append(name)
 
@@ -327,12 +342,12 @@ class PlannerRuntime:
             self._ctx_var.reset(token)
 
     @asynccontextmanager
-    async def skill_guard(self, name: str) -> AsyncIterator[None]:
-        """Skill 组合护栏：步数上限 → 循环检测 → 深度上限，进入 Skill 前包裹。
+    async def skill_guard(self, name: str, kwargs: dict[str, Any] | None = None) -> AsyncIterator[None]:
+        """Skill 组合护栏：步数上限 → 循环检测 → 深度上限 → 语义指纹，进入 Skill 前包裹。
 
         用法（组合型 Planner 编排 Skill 时）：
             async with runtime.execution():
-                async with runtime.skill_guard(skill_name):
+                async with runtime.skill_guard(skill_name, kwargs):
                     result = await runtime.registry.execute(skill_name, **kwargs)
 
         或经 ``delegate()`` 一步到位（推荐）。护栏状态委托给 ``ExecutionContext``，
@@ -342,7 +357,7 @@ class PlannerRuntime:
         ctx = self._ctx_var.get()
         if ctx is None:
             raise SkillCompositionError("skill_guard 须在 execution() 边界内使用")
-        ctx.enter_skill(name)
+        ctx.enter_skill(name, kwargs)
         try:
             yield
         finally:
@@ -361,7 +376,7 @@ class PlannerRuntime:
         """
         if self._ctx_var.get() is None:
             return await self.registry.execute(name, **kwargs)
-        async with self.skill_guard(name):
+        async with self.skill_guard(name, kwargs):
             ctx = self._ctx_var.get()
             t0 = time.monotonic()
             tokens_before = ctx.tokens_used if ctx else 0
@@ -410,6 +425,33 @@ class Planner(ABC):
         创建并传入，所有嵌套 Skill 共享同一预算。未传入时由 Runtime 内部护栏
         （``skill_guard``）承载组合治理，向后兼容。
         """
+
+
+def _fingerprint(name: str, kwargs: dict[str, Any]) -> str:
+    """P5-1：``(skill, 归一化 args)`` 稳定指纹（sha256 十六进制）。
+
+    归一化：键排序；对不可 JSON 序列化对象回退 ``repr``；长字符串截断避免超大/不稳定
+    哈希（可变对象 / 大 payload 先做规范化，符合 roadmap P5-1 备注）。
+    """
+
+    def _default(obj: Any) -> str:
+        return repr(obj)
+
+    def _trunc(value: Any, limit: int = 512) -> Any:
+        if isinstance(value, str) and len(value) > limit:
+            return value[:limit] + "...(truncated)"
+        return value
+
+    try:
+        normalized = json.dumps(
+            {"name": name, "args": {k: _trunc(v) for k, v in kwargs.items()}},
+            sort_keys=True,
+            ensure_ascii=False,
+            default=_default,
+        )
+    except Exception:  # noqa: BLE001 极端情况下回退 repr
+        normalized = repr((name, sorted(kwargs.items())))
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
 
 
 def serialize_stream_event(event: StreamEvent) -> dict | None:
