@@ -43,3 +43,4 @@ DATABASE_URL= uvicorn agent_server.main:app --port 8000  # 零依赖冒烟
 - **勿提交真实 `.env` 文件**：所有 `.env` 已被 `.gitignore` 忽略，使用前按 `.env.example` 填值
 - **勿提交大二进制资产**：模型权重、数据集均未入库，需本地自备
 - **勿在根测试/共享代码中 `import app`**：`applications/zhanggui-zhiku/app/` 包名仍为 `app`，会遮蔽；统一用 `agent_server.*`
+- **所有代码优化/重构必须先制定方案**：除非方案已敲定（有文档/issue 记录并经确认），**禁止直接动手改代码**；方案需包含目标、影响面、迁移策略、验收标准，并在文档/issue 中记录

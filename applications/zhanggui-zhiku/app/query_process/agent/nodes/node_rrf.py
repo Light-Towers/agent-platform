@@ -51,8 +51,14 @@ def _as_entity_list(state_list) -> List[Dict[str, Any]]:
                 # 尝试直接作为 dict 访问 (某些版本 sdk)
                 try:
                     final_ent = dict(entity_content)
-                except:
-                    pass
+                except (TypeError, ValueError) as exc:
+                    logger.warning(
+                        "Failed to convert Milvus entity to dict: %s. "
+                        "Entity content type: %s. Skipping entity extraction.",
+                        exc,
+                        type(entity_content).__name__,
+                    )
+                    final_ent = {}
 
             # 2. 补充最外层的 id 和 distance
             # 优先保留 entity 内部已有的 chunk_id/id，如果没有，则把外层的 id 补进去

@@ -61,4 +61,4 @@ async def test_plan_carries_last_snapshot(monkeypatch):
         last_snapshot=_SNAPSHOT,
     )
     plan = await planner.plan(ctx)
-    assert plan.notes.get("last_snapshot") == _SNAPSHOT
+    assert plan.last_snapshot == _SNAPSHOT

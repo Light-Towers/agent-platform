@@ -12,7 +12,9 @@ services:
       - MYSQL_PORT=3306
       - ZHIKU_API_URL=${ZHIKU_API_URL:-http://host.docker.internal:8000}
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://langfuse:3000/api/public/otel/v1/traces
-      - OTEL_EXPORTER_OTLP_HEADERS=Authorization=Basic cGstbGYtZDNiNzU3MWQtYzAxZC00NTVlLWIzYmItM2Y0MWU3ZWIxMjc5OnNrLWxmLWRmMGYwNTk5LTZhY2ItNDIyNy05M2VhLTczODljNmUyNjc3NA==,x-langfuse-ingestion-version=4
+      # 安全：OTel 认证头从环境变量注入，禁止硬编码在仓库中。
+      # 格式：Authorization=Basic <base64(public_key:secret_key)>
+      - OTEL_EXPORTER_OTLP_HEADERS=${OTEL_EXPORTER_OTLP_HEADERS:-}
       - AGENT_CORE_TRACE_ENABLED=true
       - LANGFUSE_HOST=http://langfuse:3000
       - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY:-}
@@ -38,7 +40,8 @@ services:
       --mysql-native-password=ON
     environment:
       TZ: Asia/Shanghai
-      MYSQL_ROOT_PASSWORD: ${MYSQL_PASSWORD:-123456}
+      # 安全：生产部署必须设置强密码，禁止使用弱默认值。
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?请设置 MYSQL_ROOT_PASSWORD 环境变量}
       MYSQL_DATABASE: ${MYSQL_DATABASE:-pharma_db}
     ports:
       - "3306:3306"
@@ -71,30 +74,32 @@ services:
       - "3000:3000"
     environment: &langfuse-env
       - DATABASE_URL=postgresql://langfuse:langfuse@langfuse-db:5432/langfuse
-      - NEXTAUTH_SECRET=${LANGFUSE_NEXTAUTH_SECRET:-changeme}
-      - SALT=${LANGFUSE_SALT:-changeme}
-      - ENCRYPTION_KEY=${LANGFUSE_ENCRYPTION_KEY:-0000000000000000000000000000000000000000000000000000000000000000}
+      # 安全：以下密钥生产部署必须设置强随机值，禁止使用弱默认值。
+      # 生成方式：openssl rand -base64 32
+      - NEXTAUTH_SECRET=${LANGFUSE_NEXTAUTH_SECRET:?请设置 LANGFUSE_NEXTAUTH_SECRET}
+      - SALT=${LANGFUSE_SALT:?请设置 LANGFUSE_SALT}
+      - ENCRYPTION_KEY=${LANGFUSE_ENCRYPTION_KEY:?请设置 LANGFUSE_ENCRYPTION_KEY（64 位 hex）}
       - NEXTAUTH_URL=${LANGFUSE_NEXTAUTH_URL:-http://localhost:3000}
       - TELEMETRY_ENABLED=false
       - CLICKHOUSE_URL=http://clickhouse:8123
       - CLICKHOUSE_MIGRATION_URL=clickhouse://clickhouse:9000
       - CLICKHOUSE_USER=${CLICKHOUSE_USER:-clickhouse}
-      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD:-clickhouse}
+      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD:?请设置 CLICKHOUSE_PASSWORD}
       - CLICKHOUSE_CLUSTER_ENABLED=false
       - REDIS_HOST=valkey
       - REDIS_PORT=6379
-      - REDIS_AUTH=${REDIS_AUTH:-myredissecret}
+      - REDIS_AUTH=${REDIS_AUTH:?请设置 REDIS_AUTH}
       - LANGFUSE_S3_EVENT_UPLOAD_BUCKET=langfuse
       - LANGFUSE_S3_EVENT_UPLOAD_REGION=auto
       - LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID=${MINIO_ROOT_USER:-minio}
-      - LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD:-miniosecret}
+      - LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD:?请设置 MINIO_ROOT_PASSWORD}
       - LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT=http://minio:9000
       - LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE=true
       - LANGFUSE_S3_EVENT_UPLOAD_PREFIX=events/
       - LANGFUSE_S3_MEDIA_UPLOAD_BUCKET=langfuse
       - LANGFUSE_S3_MEDIA_UPLOAD_REGION=auto
       - LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID=${MINIO_ROOT_USER:-minio}
-      - LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD:-miniosecret}
+      - LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD:?请设置 MINIO_ROOT_PASSWORD}
       - LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT=http://minio:9000
       - LANGFUSE_S3_MEDIA_UPLOAD_FORCE_PATH_STYLE=true
       - LANGFUSE_S3_MEDIA_UPLOAD_PREFIX=media/
@@ -176,7 +181,8 @@ services:
     command: -c 'mkdir -p /data/langfuse && minio server --address ":9000" --console-address ":9001" /data'
     environment:
       - MINIO_ROOT_USER=${MINIO_ROOT_USER:-minio}
-      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:-miniosecret}
+      # 安全：MINIO_ROOT_PASSWORD 已在上方 langfuse 段声明为必填，此处复用同一变量。
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
     ports:
       - "9090:9000"
       - "9091:9001"

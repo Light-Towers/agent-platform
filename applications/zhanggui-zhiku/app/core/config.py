@@ -93,7 +93,8 @@ class Settings:
     neo4j_uri: str = os.getenv("NEO4J_URI", "bolt://localhost:7687")
     neo4j_database: str = os.getenv("NEO4J_DATABASE", "neo4j")
     neo4j_username: str = os.getenv("NEO4J_USERNAME", "neo4j")
-    neo4j_password: str = os.getenv("NEO4J_PASSWORD", "neo4j123456")
+    # 安全：密码不提供默认值，部署时必须显式设置。本地开发可用 .env 文件配置。
+    neo4j_password: str = os.getenv("NEO4J_PASSWORD", "")
 
     # -------------------------- Mongo --------------------------
     mongo_url: str = os.getenv("MONGO_URL", "mongodb://localhost:27017")
@@ -101,8 +102,9 @@ class Settings:
 
     # -------------------------- MinIO --------------------------
     minio_endpoint: str = os.getenv("MINIO_ENDPOINT", "localhost:9000")
-    minio_access_key: str = os.getenv("MINIO_ACCESS_KEY", "minioadmin")
-    minio_secret_key: str = os.getenv("MINIO_SECRET_KEY", "minioadmin")
+    # 安全：凭据不提供默认值，部署时必须显式设置。
+    minio_access_key: str = os.getenv("MINIO_ACCESS_KEY", "")
+    minio_secret_key: str = os.getenv("MINIO_SECRET_KEY", "")
     minio_bucket_name: str = os.getenv("MINIO_BUCKET_NAME", "kb-import-bucket")
     minio_img_dir: str = os.getenv("MINIO_IMG_DIR", "images")
     minio_secure: str = os.getenv("MINIO_SECURE", "False")
@@ -159,6 +161,22 @@ class Settings:
 
 # 全局单例：所有模块统一从此处读取配置
 settings = Settings()
+
+
+def validate_credentials() -> list[str]:
+    """检查必要凭据是否已配置。
+
+    返回缺失凭据列表。调用方（如应用启动时）可根据返回结果决定是否 fail-fast。
+    本地开发环境可忽略警告，生产部署必须确保凭据已设置。
+    """
+    missing = []
+    if not settings.neo4j_password:
+        missing.append("NEO4J_PASSWORD")
+    if not settings.minio_access_key:
+        missing.append("MINIO_ACCESS_KEY")
+    if not settings.minio_secret_key:
+        missing.append("MINIO_SECRET_KEY")
+    return missing
 
 # 项目根目录（供全项目统一使用，避免各模块自行推导）
 PROJECT_ROOT: Path = settings.project_root

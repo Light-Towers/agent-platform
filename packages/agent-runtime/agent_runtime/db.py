@@ -156,11 +156,18 @@ CREATE INDEX IF NOT EXISTS idx_trajectories_created ON trajectories (created_at)
 """
 
 
-async def init_pool(database_url: str = "", db_pool_max_size: int = 20):
+async def init_pool(
+    database_url: str = "",
+    db_pool_max_size: int = 20,
+    vector_dim: int | None = None,
+):
     """lifespan 中调用一次；带锁防竞态。DATABASE_URL 未配置时返回 None（内存模式）。
 
     配置依赖倒置（Plan-F）：agent-runtime 不依赖 app.config，连接参数由调用方
     （app lifespan / scripts）从自身 Settings 注入；database_url 为空即内存模式。
+
+    vector_dim: 向量维度。未提供时从 agent_core.memory.embedder.get_embedder().dim
+    自动派生（单一事实源）。仅当 embedder 不可用时才回退到默认 512。
     """
     global _pool
     if not database_url:
@@ -189,7 +196,7 @@ async def init_pool(database_url: str = "", db_pool_max_size: int = 20):
             open=False,
         )
         await pool.open(wait=True)
-        await ensure_schema(pool)
+        await ensure_schema(pool, vector_dim=vector_dim)
         _pool = pool
         logger.info("PostgreSQL 连接池就绪，schema 已校验")
         return _pool
@@ -203,8 +210,26 @@ async def ensure_extensions(database_url: str) -> None:
         await conn.execute("CREATE EXTENSION IF NOT EXISTS vector")
 
 
-async def ensure_schema(pool, vector_dim: int = 512) -> None:
-    """幂等建表 + 存量库 ALTER。vector_dim 由调用方注入（配置依赖倒置）。"""
+async def ensure_schema(pool, vector_dim: int | None = None) -> None:
+    """幂等建表 + 存量库 ALTER。
+
+    vector_dim 单一事实源：
+    1. 调用方显式注入（配置依赖倒置）；
+    2. 否则从 agent_core.memory.embedder.get_embedder().dim 自动派生；
+    3. embedder 不可用时回退 512（兼容 mock/测试场景）。
+    """
+    if vector_dim is None:
+        try:
+            from agent_core.memory.embedder import get_embedder
+            vector_dim = get_embedder().dim
+            logger.debug("ensure_schema: vector_dim 从 embedder 派生 = %d", vector_dim)
+        except Exception:
+            vector_dim = 512
+            logger.warning(
+                "ensure_schema: embedder 不可用，回退默认 vector_dim=%d。"
+                "生产环境建议显式注入或配置 EMBEDDING_DIM。",
+                vector_dim,
+            )
     ddl = SCHEMA_TEMPLATE.format(dim=vector_dim)
     async with pool.connection() as conn:
         await conn.execute(ddl)
