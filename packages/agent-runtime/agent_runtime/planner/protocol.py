@@ -28,6 +28,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from agent_runtime.trajectory.models import TrajectoryStep
+
 StreamEventType = Literal["route", "evidence", "memory", "answer", "error", "status", "replan"]
 
 
@@ -140,6 +142,8 @@ class ExecutionContext:
     cost_used: float = 0.0
     max_tokens: int | None = None
     max_cost: float | None = None
+    # P3-1：逐步明细（skill / args / result / latency / tokens / error），供 Trajectory 持久化
+    steps: list[TrajectoryStep] = field(default_factory=list)
 
     @property
     def call_depth(self) -> int:
@@ -188,6 +192,31 @@ class ExecutionContext:
                 f"费用超上限（used={self.cost_used:.4f}, max={self.max_cost:.4f}）"
             )
 
+    def record_step(
+        self,
+        name: str,
+        args: dict[str, Any],
+        result: Any = None,
+        error: str | None = None,
+        latency: float = 0.0,
+        tokens: int = 0,
+    ) -> None:
+        """记录一次 Skill 调用明细（P3-1 Trajectory 来源）。
+
+        ``index`` 取当前 ``steps`` 长度（同 execution 内从 0 递增），保证 replay 顺序。
+        """
+        self.steps.append(
+            TrajectoryStep(
+                name=name,
+                args=args,
+                result=result,
+                error=error,
+                latency=latency,
+                tokens=tokens,
+                index=len(self.steps),
+            )
+        )
+
 
 class PlannerRuntime:
     """执行期依赖句柄：能力注册表必填；llm/mcp_manager/pool 按需注入。
@@ -218,6 +247,7 @@ class PlannerRuntime:
         max_duration_seconds: float | None = None,
         max_tokens: int | None = None,
         max_cost: float | None = None,
+        trajectory_store: Any = None,
     ):
         self.registry = registry
         self.llm = llm
@@ -228,6 +258,8 @@ class PlannerRuntime:
         self.max_duration_seconds = max_duration_seconds
         self.max_tokens = max_tokens
         self.max_cost = max_cost
+        # P3-1：轨迹存储后端（可选注入）；未注入则不持久化（单进程/测试默认跳过）
+        self.trajectory_store = trajectory_store
         # P2-2 计量接线：把 llm 客户端的 usage 回调接到当前执行的 ExecutionContext。
         # 计量源（agent-core FallbackChatModel）→ 聚合器（ExecutionContext.record_usage）
         # 经 contextvars 按 asyncio task 隔离：LLM 调用发生时取当前执行上下文，跨执行不串。
@@ -235,6 +267,8 @@ class PlannerRuntime:
             llm.set_on_usage(self._on_llm_usage)
         # 最近一次执行的 ContextManager snapshot（execute_plan 写入，供下一轮组装消费）
         self.last_snapshot: dict[str, Any] | None = None
+        # 最近一次执行的 Trajectory 记录（execute_plan 写入，P3-1 持久化后回写）
+        self.last_trajectory: Any = None
         # 执行期上下文（per-request，经 ContextVar 隔离）：execution() 入口创建
         # ExecutionContext 并 set，同 task 链内共享，跨 task 互不干扰。
         self._ctx_var: contextvars.ContextVar[ExecutionContext | None] = contextvars.ContextVar(
@@ -328,7 +362,24 @@ class PlannerRuntime:
         if self._ctx_var.get() is None:
             return await self.registry.execute(name, **kwargs)
         async with self.skill_guard(name):
-            return await self.registry.execute(name, **kwargs)
+            ctx = self._ctx_var.get()
+            t0 = time.monotonic()
+            tokens_before = ctx.tokens_used if ctx else 0
+            try:
+                result = await self.registry.execute(name, **kwargs)
+            except Exception as exc:
+                if ctx is not None:
+                    ctx.record_step(
+                        name, kwargs, None, str(exc),
+                        time.monotonic() - t0, ctx.tokens_used - tokens_before,
+                    )
+                raise
+            if ctx is not None:
+                ctx.record_step(
+                    name, kwargs, result, None,
+                    time.monotonic() - t0, ctx.tokens_used - tokens_before,
+                )
+            return result
 
 
 class Planner(ABC):

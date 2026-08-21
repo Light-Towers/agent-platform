@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from agent_runtime.planner.protocol import Plan, StreamEvent
+from agent_runtime.trajectory.models import TrajectoryRecord
 
 if TYPE_CHECKING:
     from agent_runtime.planner.protocol import PlannerRuntime
@@ -29,6 +30,27 @@ def _usage_payload(runtime: PlannerRuntime) -> dict[str, Any]:
     if ctx is None:
         return {"tokens_used": 0, "cost_used": 0.0}
     return {"tokens_used": ctx.tokens_used, "cost_used": ctx.cost_used}
+
+
+async def _persist_trajectory(
+    runtime: PlannerRuntime, plan: Plan, agent_ctx: Any, exec_ctx: Any
+) -> None:
+    """P3-1：把一次执行的结构化轨迹持久化到 trajectory_store（未注入则跳过）。"""
+    store = runtime.trajectory_store
+    if store is None or exec_ctx is None:
+        return
+    record = TrajectoryRecord(
+        execution_id=exec_ctx.execution_id,
+        session_id=plan.notes.get("session_id"),
+        planner=plan.notes.get("planner"),
+        plan=plan.model_dump(),
+        steps=list(exec_ctx.steps),
+        total_tokens=exec_ctx.tokens_used,
+        total_cost=exec_ctx.cost_used,
+        snapshot=exec_ctx.metadata.get("snapshot") or agent_ctx.snapshot(),
+    )
+    await store.save(record)
+    runtime.last_trajectory = record
 
 
 @dataclass(frozen=True)
@@ -261,6 +283,7 @@ async def execute_plan(
                 exec_ctx.metadata["snapshot"] = snapshot
                 # 记录到 runtime，供 execution 边界退出后（context 复位前）消费
                 runtime.last_snapshot = snapshot
+                await _persist_trajectory(runtime, plan, ctx, exec_ctx)
         yield StreamEvent(
             type="status",
             payload={
@@ -276,6 +299,9 @@ async def execute_plan(
             cm.record_skill(ctx, plan.route, result=result)
             yield StreamEvent(type="evidence", payload={"node": plan.route, "result": result})
             yield StreamEvent(type="answer", payload={"text": str(result)})
+            exec_ctx = runtime.context
+            if exec_ctx is not None:
+                await _persist_trajectory(runtime, plan, ctx, exec_ctx)
         yield StreamEvent(
             type="status",
             payload={"snapshot": cm.snapshot(ctx), **_usage_payload(runtime)},
