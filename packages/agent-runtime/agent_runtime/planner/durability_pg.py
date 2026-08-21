@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import time
 from typing import Any
 
@@ -24,6 +25,7 @@ from agent_runtime.planner.durability import (
     Checkpoint,
     CheckpointStore,
     ExecutionOwnershipStore,
+    FencedWriteError,
     IdempotencyStore,
 )
 
@@ -49,13 +51,15 @@ def _loads(val: Any) -> Any:
 
 
 class PgCheckpointStore(CheckpointStore):
-    """PG checkpoint 存储：execution_checkpoints 表。
+    """PG checkpoint 存储：execution_checkpoints 表（§20 带 fencing + 版本契约）。
 
     字段：
     - execution_id PK
     - completed jsonb（已完成节点结果）
     - updated_at timestamptz
     - resumable bool（stale 回收后置 True，允许 resume 接管）
+    - checkpoint_version / graph_id / graph_version（恢复契约版本，resume 前校验）
+    - generation（fencing token，与 execution_leases 对齐；save 带 WHERE generation 防护）
     """
 
     def __init__(self, pool: Any, *, table: str = "execution_checkpoints") -> None:
@@ -64,15 +68,16 @@ class PgCheckpointStore(CheckpointStore):
 
     async def load(self, execution_id: str) -> Checkpoint | None:
         sql = (
-            f"SELECT completed, updated_at, resumable FROM {self._table} "
-            "WHERE execution_id = %s"
+            f"SELECT completed, updated_at, resumable, checkpoint_version, "
+            f"       graph_id, graph_version, generation "
+            f"FROM {self._table} WHERE execution_id = %s"
         )
         async with self._pool.connection() as conn:
             cur = await conn.execute(sql, (execution_id,))
             row = await cur.fetchone()
         if row is None:
             return None
-        completed, updated_at, resumable = row
+        completed, updated_at, resumable, cpv, gid, gver, gen = row
         # updated_at from PG is datetime; from fake pool may be float
         if isinstance(updated_at, (int, float)):
             updated_at_ts = updated_at
@@ -83,19 +88,63 @@ class PgCheckpointStore(CheckpointStore):
             completed=_loads(completed) if completed is not None else {},
             updated_at=updated_at_ts,
             resumable=bool(resumable),
+            checkpoint_version=cpv,
+            graph_id=gid,
+            graph_version=gver,
+            generation=gen,
         )
 
     async def save(self, checkpoint: Checkpoint) -> None:
+        """持久化 checkpoint；带 §20 fencing 防护。
+
+        fencing 由 **lease 的 generation token** 驱动（而非 checkpoint 自维护的
+        generation 列）：``checkpoint.generation`` 须来自当前 lease 的 fencing token
+        （即 ``ownership_store.acquire/claim`` 返回的 generation，经 runtime 注入）。
+
+        防护规则：``ON CONFLICT DO UPDATE ... WHERE execution_id IN (
+        SELECT execution_id FROM execution_leases WHERE execution_id=? AND generation=?
+        )``。旧 owner 用过期 token 写时，lease 的 generation 已被 reaper claim 递增，
+        子查询命中 0 行 → UPDATE 0 行 → RETURNING NULL → 抛 ``FencedWriteError``（G4）。
+        generation=0 表示首写（INSERT），不做防护（此时尚无 lease token 可比）。
+        """
         sql = (
-            f"INSERT INTO {self._table} (execution_id, completed, updated_at, resumable) "
-            "VALUES (%s, %s, now(), %s) "
-            "ON CONFLICT (execution_id) DO UPDATE "
-            "SET completed = EXCLUDED.completed, updated_at = now(), resumable = EXCLUDED.resumable"
+            f"INSERT INTO {self._table} "
+            f"(execution_id, completed, updated_at, resumable, "
+            f" checkpoint_version, graph_id, graph_version, generation) "
+            f"VALUES (%s, %s, now(), %s, %s, %s, %s, %s) "
+            f"ON CONFLICT (execution_id) DO UPDATE "
+            f"SET completed = EXCLUDED.completed, updated_at = now(), "
+            f"    resumable = EXCLUDED.resumable, "
+            f"    checkpoint_version = EXCLUDED.checkpoint_version, "
+            f"    graph_id = EXCLUDED.graph_id, "
+            f"    graph_version = EXCLUDED.graph_version, "
+            f"    generation = EXCLUDED.generation "
+            f"WHERE EXCLUDED.generation = 0 "
+            f"   OR {self._table}.execution_id IN ("
+            f"  SELECT execution_id FROM execution_leases "
+            f"  WHERE execution_leases.execution_id = EXCLUDED.execution_id "
+            f"    AND execution_leases.generation = EXCLUDED.generation"
+            f") "
+            f"RETURNING execution_id"
         )
         async with self._pool.connection() as conn:
-            await conn.execute(
+            cur = await conn.execute(
                 sql,
-                (checkpoint.execution_id, _dumps(checkpoint.completed), checkpoint.resumable),
+                (
+                    checkpoint.execution_id,
+                    _dumps(checkpoint.completed),
+                    checkpoint.resumable,
+                    checkpoint.checkpoint_version,
+                    checkpoint.graph_id,
+                    checkpoint.graph_version,
+                    checkpoint.generation,
+                ),
+            )
+            row = await cur.fetchone()
+        if checkpoint.generation != 0 and row is None:
+            raise FencedWriteError(
+                f"checkpoint save fenced: execution_id={checkpoint.execution_id} "
+                f"generation={checkpoint.generation} 已过期，owner 已被取代"
             )
 
 
@@ -132,20 +181,20 @@ class PgIdempotencyStore(IdempotencyStore):
 
 
 class PgExecutionOwnershipStore(ExecutionOwnershipStore):
-    """PG 执行所有权/租约存储：execution_leases 表（C1 CAS 语义）。
+    """PG 执行所有权/租约存储：execution_leases 表（C1 CAS + §20 fencing）。
 
     字段：
     - execution_id PK
-    - owner TEXT（持有者标识，如 "pid:uuid"）
+    - owner TEXT（持有者标识，如 "pid:uuid"）NOT NULL
     - expires_at timestamptz（租约到期，TTL 自动过期防死锁）
+    - generation BIGINT（fencing token，每次 ownership acquisition 自增 1）
 
-    关键操作均为单条 SQL 原子 CAS：
-    - acquire: INSERT … ON CONFLICT DO UPDATE WHERE (expires_at<now() OR owner=me) RETURNING
-    - heartbeat: UPDATE … WHERE owner=me RETURNING
-    - release: DELETE … WHERE owner=me
-    - get_owner: SELECT owner WHERE expires_at>now()
-    - list_stale: SELECT execution_id WHERE expires_at<=now()
-    - reap_stale_notifying: UPDATE … SET owner=NULL, expires_at=NULL WHERE expires_at<now() RETURNING + NOTIFY
+    §20 关键约束（修复原 owner=NULL 广播式 reap 的设计断裂）：
+    - acquire / claim 均返回最新 generation（fencing token）。
+    - claim_stale 用 ``FOR UPDATE SKIP LOCKED`` 单事务锁定 stale 行并 ``generation+1``，
+      并发 reaper 只有抢到行锁的 winner 能修改，天然 winner-take-all（Test 4）。
+    - **绝不把 owner 置 NULL**：NOT NULL 约束即 schema 层面强制；winner 自行 resume，
+      不广播 NOTIFY 让所有副本 resume（否则重新引入多副本重复恢复）。
     """
 
     def __init__(
@@ -159,34 +208,45 @@ class PgExecutionOwnershipStore(ExecutionOwnershipStore):
         self._table = table
         self._notify_channel = notify_channel
 
-    async def acquire(self, execution_id: str, owner: str, ttl_s: float) -> bool:
+    async def acquire(self, execution_id: str, owner: str, ttl_s: float) -> "tuple[bool, int]":
         """CAS 抢占所有权：仅当无行/已过期/同 owner 时成功。
 
-        返回 True 表示获得所有权；False 表示被他人持有且未过期。
+        返回 ``(granted, generation)``：granted 为 True 表示获得；generation 为本次
+        获取的 fencing token（旧 owner 用过期 token 回写状态会被 fencing）。
         """
         sql = (
-            f"INSERT INTO {self._table} (execution_id, owner, expires_at) "
-            "VALUES (%s, %s, now() + (%s || ' seconds')::interval) "
+            f"INSERT INTO {self._table} (execution_id, owner, expires_at, generation) "
+            "VALUES (%s, %s, now() + (%s || ' seconds')::interval, 1) "
             "ON CONFLICT (execution_id) DO UPDATE "
-            "SET owner = EXCLUDED.owner, expires_at = EXCLUDED.expires_at "
+            "SET owner = EXCLUDED.owner, expires_at = EXCLUDED.expires_at, "
+            "    generation = {table}.generation + 1 "
             "WHERE {table}.expires_at < now() OR {table}.owner = EXCLUDED.owner "
-            "RETURNING execution_id"
+            "RETURNING execution_id, generation"
         ).format(table=self._table)
         async with self._pool.connection() as conn:
             cur = await conn.execute(sql, (execution_id, owner, str(ttl_s)))
             row = await cur.fetchone()
-        return row is not None
+        if row is None:
+            # 冲突但 WHERE 不满足（被他人持有且未过期）：读取当前 generation 透出
+            async with self._pool.connection() as conn:
+                cur = await conn.execute(
+                    f"SELECT generation FROM {self._table} WHERE execution_id = %s",
+                    (execution_id,),
+                )
+                r = await cur.fetchone()
+            return (False, r[0] if r else 0)
+        return (True, row[1])
 
     async def heartbeat(self, execution_id: str, ttl_s: float) -> None:
-        """续租：延长租约到期时间。"""
+        """续租：仅当 owner 一致时延长租约到期时间（防续租他人租约）。"""
         sql = (
             f"UPDATE {self._table} "
             "SET expires_at = now() + (%s || ' seconds')::interval "
-            "WHERE execution_id = %s "
+            "WHERE execution_id = %s AND owner = %s "
             "RETURNING execution_id"
         )
         async with self._pool.connection() as conn:
-            cur = await conn.execute(sql, (str(ttl_s), execution_id))
+            cur = await conn.execute(sql, (str(ttl_s), execution_id, str(os.getpid())))
             await cur.fetchone()
 
     async def release(self, execution_id: str, owner: str) -> None:
@@ -214,55 +274,43 @@ class PgExecutionOwnershipStore(ExecutionOwnershipStore):
             rows = await cur.fetchall()
         return [r[0] for r in rows]
 
-    # ---- §20.1 跨进程 stale reaper + NOTIFY ----
+    async def claim_stale(
+        self, owner: str, ttl_s: float, *, now: float | None = None
+    ) -> "list[tuple[str, int]]":
+        """原子认领全部 stale 执行（winner-take-all 分布式 fencing，§20）。
 
-    async def reap_stale_notifying(
-        self,
-        checkpoint_store: CheckpointStore | None = None,
-        *,
-        now: float | None = None,
-        on_stale=None,
-    ) -> list[str]:
-        """原子回收 stale 执行并发 NOTIFY 唤醒其它副本（C1 + C2）。
+        单事务内：``SELECT … FOR UPDATE SKIP LOCKED`` 锁定 stale 行 → 对每个
+        成功锁定的行 ``UPDATE SET owner=new, expires_at=now()+ttl, generation+1``。
+        并发 reaper 中，未抢到行锁者 ``SKIP LOCKED`` 跳过，最终同一 execution 只有一个
+        winner（RETURNING 出 (execution_id, new_generation)）。winner 自行 resume；
+        不广播 NOTIFY（避免多副本重复恢复）。
 
-        - 仅 UPDATE … WHERE expires_at<now() RETURNING 成功的行才算回收成功（防重复 resume）。
-        - 回收后将对应 checkpoint 标记 resumable=True（供 resume 接管）。
-        - 发送 NOTIFY execution_resumable 唤醒其它副本的 resume loop（C2 信号）。
-        - 即使 NOTIFY 丢失，periodic reconcile 会再次调用此方法兜底。
+        返回本调用成功认领的 ``[(execution_id, generation), ...]``。
         """
         now = now if now is not None else time.time()
-        reclaimed: list[str] = []
-
-        sql_reap = (
-            f"UPDATE {self._table} "
-            "SET owner = NULL, expires_at = NULL "
+        claimed: list[tuple[str, int]] = []
+        sql_lock = (
+            f"SELECT execution_id FROM {self._table} "
             "WHERE expires_at <= now() "
-            "RETURNING execution_id"
+            "FOR UPDATE SKIP LOCKED"
+        )
+        sql_update = (
+            f"UPDATE {self._table} "
+            "SET owner = %s, expires_at = now() + (%s || ' seconds')::interval, "
+            "    generation = generation + 1 "
+            "WHERE execution_id = %s "
+            "RETURNING execution_id, generation"
         )
         async with self._pool.connection() as conn:
-            cur = await conn.execute(sql_reap)
-            rows = await cur.fetchall()
-        reclaimed = [r[0] for r in rows]
-
-        for eid in reclaimed:
-            if checkpoint_store is not None:
-                cp = await checkpoint_store.load(eid)
-                if cp is not None:
-                    cp.resumable = True
-                    cp.updated_at = now
-                    await checkpoint_store.save(cp)
-            if on_stale is not None:
-                await on_stale(eid)
-
-        if reclaimed:
-            # 发送唤醒信号（C2：仅信号，不保证送达，periodic reconcile 兜底）
-            try:
-                async with self._pool.connection() as conn:
-                    await conn.execute(f"NOTIFY {self._notify_channel}")
-            except Exception:
-                logger.warning("NOTIFY %s 发送失败", self._notify_channel, exc_info=True)
-
-        return reclaimed
+            async with conn.transaction():
+                cur = await conn.execute(sql_lock)
+                rows = await cur.fetchall()
+                for (eid,) in rows:
+                    cur = await conn.execute(sql_update, (owner, str(ttl_s), eid))
+                    r = await cur.fetchone()
+                    if r is not None:
+                        claimed.append((r[0], r[1]))
+        return claimed
 
     # ---- §20.1 跨进程 resume 监听器（可选，供副本主动监听） ----
 

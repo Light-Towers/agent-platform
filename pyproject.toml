@@ -67,6 +67,13 @@ testpaths = [
 # wenda-data-agent/zhanggui-zhiku）。原 deepagents/ 因与 PyPI 包同名已重命名为
 # agent_federation/ 并清理残骸。根宿主原 app/ 已改名 agent_server/（包名同步）。
 addopts = "--import-mode=importlib"
+# 测试分层 marker（架构决策 2026-08-21：Durable Execution 分 Level 1/2/3）
+# level1 = 单副本 crash recovery（当前 v2 必须 Green）
+# level2 = 多副本 Execution HA（Lease/Heartbeat/Claim/Fencing，下一阶段，不阻塞当前 v2）
+markers = [
+    "level1: 单副本 Durable Execution（crash→restart→resume），当前 v2 验收核心",
+    "level2: 多副本 Execution HA（fencing/claim/reaper），下一阶段，不阻塞 Level 1",
+]
 
 [tool.ruff]
 line-length = 120

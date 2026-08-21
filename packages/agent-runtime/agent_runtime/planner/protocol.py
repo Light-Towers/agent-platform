@@ -33,10 +33,21 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from agent_runtime.planner.durability import (
+    Checkpoint,
     ExecutionOwnershipStore,
+    FencedWriteError,
+    IncompatibleCheckpointError,
     InMemoryExecutionOwnershipStore,
+    new_execution_id,
     reap_stale_executions,
 )
+# 注意：ExecutionGraph / StreamEvent / _run_graph_in_place 来自 execution_graph，
+# 而 execution_graph 又反向 import 本模块的 Plan/StreamEvent，直接模块级导入会循环。
+# 故在 resume() 内部做延迟导入（运行时两模块均已加载完，无循环）。
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:  # pragma: no cover - 仅类型标注用，运行时不导入
+    from agent_runtime.planner.execution_graph import ExecutionGraph, StreamEvent
 from agent_runtime.trajectory.models import TrajectoryStep
 
 StreamEventType = Literal["route", "evidence", "memory", "answer", "error", "status", "replan"]
@@ -172,6 +183,9 @@ class ExecutionContext:
     # P5-1：语义循环指纹（skill + 归一化 args），重复指纹拒绝继续（需 enable_loop_fingerprint 开启）
     fingerprints: set[str] = field(default_factory=set)
     loop_fingerprint: bool = False
+    # §20：当前持有的 fencing token（来自 ownership_store.acquire/claim 返回的 generation）。
+    # checkpoint 写操作须携带此 token，旧 owner 用过期 token 写会被 fencing（FencedWriteError）。
+    generation: int = 0
 
     @property
     def call_depth(self) -> int:
@@ -356,7 +370,9 @@ class PlannerRuntime:
         return ctx.call_stack if ctx else []
 
     @asynccontextmanager
-    async def execution(self, *, validate_composition: bool = True) -> AsyncIterator[None]:
+    async def execution(
+        self, *, validate_composition: bool = True, execution_id: str | None = None
+    ) -> AsyncIterator[None]:
         """单次执行边界：创建 ExecutionContext 并绑定，退出时复位。
 
         语义（架构审核 P1 修正）：``max_steps`` 是「单次执行累计 Skill 调用数」——
@@ -364,11 +380,14 @@ class PlannerRuntime:
         约束同时嵌套深度。调用方（组合型 Planner 的 execute/arun 入口）须用本 scope
         包裹整次执行：预算不跨执行累计，同执行内顺序/嵌套 Skill 共享同一预算。
 
-        生命周期职责（§7.1 / §11）：
+        生命周期职责（§7.1 / §11 / §20）：
         - 进入时若 ``validate_composition`` 且 registry 非空，先跑 ``CompositionValidator``
           静态校验（存在性 / 环 / 权限闭包），组合非法则 fail-fast；
         - 进入时经 ``ownership_store`` acquire 执行所有权（租约），并起心跳续租协程；
-          退出时 release，stale 执行可由 ``reap_stale`` 回收（跨进程唤醒见 §20）。
+          退出时 release，stale 执行可由 ``reap_stale`` / ``claim_stale`` 回收（§20）；
+        - ``execution_id`` 可显式注入（resume 接管他人执行时传入被恢复执行的 id），
+          不传则新建。acquire 返回的 fencing token（generation）存入 ctx，供 checkpoint
+          写操作携带（旧 owner 用过期 token 写会被 fencing，见 ``save_checkpoint``）。
         """
         deadline = (
             time.monotonic() + self.max_duration_seconds
@@ -376,6 +395,7 @@ class PlannerRuntime:
             else None
         )
         ctx = ExecutionContext(
+            execution_id=execution_id or new_execution_id(),
             max_steps=self.max_steps, max_depth=self.max_skill_depth, deadline=deadline,
             max_tokens=self.max_tokens, max_cost=self.max_cost,
             loop_fingerprint=self.enable_loop_fingerprint,
@@ -388,11 +408,12 @@ class PlannerRuntime:
             if validator is not None:
                 validator()
 
-        # 执行所有权 / 租约
+        # 执行所有权 / 租约（§20：acquire 返回 (granted, generation)）
         eid = ctx.execution_id
         owner = str(os.getpid())
         lease_ttl = self.max_duration_seconds or 300.0
-        await self.ownership_store.acquire(eid, owner, lease_ttl)
+        granted, generation = await self.ownership_store.acquire(eid, owner, lease_ttl)
+        ctx.generation = generation
 
         hb_task: "asyncio.Task | None" = None
         if lease_ttl is not None:
@@ -433,6 +454,70 @@ class PlannerRuntime:
             self.checkpoint_store,
             on_stale=on_stale,
         )
+
+    async def save_checkpoint(self, checkpoint: Checkpoint) -> None:
+        """持久化 checkpoint（§20 fencing 注入点）。
+
+        自动把当前执行上下文的 fencing token（``ctx.generation``）写入 checkpoint，
+        再交 checkpoint_store 保存。若底层 store 是 PgCheckpointStore，旧 owner 用过期
+        token 写会命中 0 行并抛 ``FencedWriteError``（G4）——此时本方法将其转为中止
+        当前执行（不再重试，避免陈旧执行继续污染状态）。
+        """
+        if self.checkpoint_store is None:
+            return
+        ctx = self._ctx_var.get()
+        checkpoint.generation = ctx.generation if ctx is not None else 0
+        try:
+            await self.checkpoint_store.save(checkpoint)
+        except FencedWriteError:
+            # 当前 owner 已被 reaper claim 取代：中止本执行，不重试。
+            raise
+
+    async def resume(
+        self,
+        execution_id: str,
+        graph: "ExecutionGraph",
+        *,
+        graph_id: str | None = None,
+        graph_version: str | None = None,
+    ) -> "AsyncIterator[StreamEvent]":
+        """语义级恢复 API（§20 G3）：恢复一个已存在且 stale 的 execution。
+
+        职责链（resume 不得绕过 ownership）：
+        1. ``claim_stale`` 原子认领——winner-take-all fencing，仅本副本成功认领才继续；
+           未认领（被他人抢走或该 execution 仍存活）则直接放弃，不执行。
+        2. 加载 checkpoint 并校验 ``graph_version`` 兼容性（v12 checkpoint 不应被
+           v13 graph 解释）；不兼容抛 ``IncompatibleCheckpointError``。
+        3. 进入 ``execution(execution_id=...)`` 边界（复用既有执行生命周期 + 心跳 + 释放），
+           调用 ``_run_graph_in_place``：已完成节点 SKIP、未完成任务继续（尊重依赖边）。
+
+        本方法仅封装语义，不复写第二套 execution 生命周期——底层仍走 ``execution()``。
+        """
+        owner = str(os.getpid())
+        lease_ttl = self.max_duration_seconds or 300.0
+        # 1. 原子认领（winner-take-all）
+        claimed = await self.ownership_store.claim_stale(owner, lease_ttl)
+        if execution_id not in {eid for eid, _ in claimed}:
+            # 未被本副本认领：可能仍存活（不该 resume）或已被他副本认领 → 放弃
+            return
+        # 2. 校验 graph 版本兼容性
+        if self.checkpoint_store is not None:
+            cp = await self.checkpoint_store.load(execution_id)
+            if cp is not None and cp.graph_version is not None and graph_version is not None:
+                if cp.graph_version != graph_version:
+                    raise IncompatibleCheckpointError(
+                        f"checkpoint graph_version={cp.graph_version} "
+                        f"与当前 graph_version={graph_version} 不兼容，拒绝 resume"
+                    )
+        # 3. 进入执行边界并驱动（已完成节点自动 SKIP）
+        # 延迟导入避免与 execution_graph 的循环依赖
+        from agent_runtime.planner.execution_graph import _run_graph_in_place
+
+        async with self.execution(execution_id=execution_id):
+            async for event in _run_graph_in_place(
+                graph, self, checkpoint_store=self.checkpoint_store, execution_id=execution_id
+            ):
+                yield event
 
     @asynccontextmanager
     async def skill_guard(self, name: str, kwargs: dict[str, Any] | None = None) -> AsyncIterator[None]:
