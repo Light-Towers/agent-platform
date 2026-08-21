@@ -30,7 +30,10 @@ ADR-0004 阶段4 的候选B（`eval/memory_reuse_llm.py`）评审中，发现 `_
   （`is_chitchat` 短路闲聊 + `classify_intent` 取 `IntentLabel`）；仅保留
   CUSTOMER_SERVICE 大类下订单/物流/售后的**业务二级分流**关键词（职责属业务路由，非意图识别）。
   docstring 已澄清为"复用统一意图架构"，消除误导。
-- 状态：✅ 已修复
+- 验证（2026-08-21）：`kefu_agent/graph.py` 经 `from agent_core.intent import ... classify_l1 / l2_judge / is_chitchat`
+  真实复用共享内核（非本地副本）；`applications/kefu-service/tests/test_intent_node.py`（8 passed）回归锁存该复用，
+  确认闲聊短路 / 统一分类 / 业务关键词优先分流均走统一意图架构。
+- 状态：✅ 已修复 + 已验证（回归测试 gateway）
 
 ### TD-2 kefu 售后类型纯关键词判定
 - 文件：`kefu-service/kefu_agent/services.py:144-154`
