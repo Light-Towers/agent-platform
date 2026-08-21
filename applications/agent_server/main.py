@@ -18,10 +18,10 @@ from agent_runtime.planner.durability_pg import (
     PgExecutionOwnershipStore,
     PgIdempotencyStore,
 )
-from agent_runtime.trajectory import PgTrajectoryStore
 from agent_runtime.revert import RevertHandler
 from agent_runtime.skills.workflow import discover_workflows
 from agent_runtime.tracing import get_langfuse_callbacks
+from agent_runtime.trajectory import PgTrajectoryStore
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
