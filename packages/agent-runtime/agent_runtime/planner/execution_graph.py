@@ -17,6 +17,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from agent_runtime.planner.durability import Checkpoint
 from agent_runtime.planner.protocol import Plan, StreamEvent
 from agent_runtime.trajectory.models import TrajectoryRecord
 
@@ -55,11 +56,17 @@ async def _persist_trajectory(
 
 @dataclass(frozen=True)
 class GraphNode:
-    """执行图节点：一次 Skill 调用。"""
+    """执行图节点：一次 Skill 调用。
+
+    ``input_refs``：参数级的「上游节点输出引用」，值为 ``"node:<node_id>"``，
+    在节点执行时从已完成节点的结果中解析（支持多 Skill 组合的依赖数据传递）。
+    静态参数仍走 ``kwargs``；``"$query"`` 由组合器在构建期替换为原始问题。
+    """
 
     node_id: str
     skill_name: str
     kwargs: dict[str, Any] = field(default_factory=dict)
+    input_refs: dict[str, str] = field(default_factory=dict)
 
 
 class GraphCycleError(ValueError):
@@ -86,12 +93,19 @@ class ExecutionGraph:
         self._deps: dict[str, set[str]] = {}
 
     def add_node(
-        self, node_id: str, skill_name: str, kwargs: dict[str, Any] | None = None
+        self,
+        node_id: str,
+        skill_name: str,
+        kwargs: dict[str, Any] | None = None,
+        input_refs: dict[str, str] | None = None,
     ) -> GraphNode:
-        """添加节点：node_id 唯一，skill_name 为注册表中的能力名。"""
+        """添加节点：node_id 唯一，skill_name 为注册表中的能力名。
+
+        ``input_refs``：参数 → ``"node:<node_id>"`` 引用，执行时从上游结果解析。
+        """
         if node_id in self._nodes:
             raise ValueError(f"节点已存在: {node_id}")
-        node = GraphNode(node_id, skill_name, kwargs or {})
+        node = GraphNode(node_id, skill_name, kwargs or {}, input_refs or {})
         self._nodes[node_id] = node
         self._deps.setdefault(node_id, set())
         return node
@@ -160,22 +174,31 @@ class ExecutionGraph:
         return len(self._nodes)
 
 
-async def execute_graph(
+async def _run_graph_in_place(
     graph: ExecutionGraph,
     runtime: PlannerRuntime,
+    *,
+    checkpoint_store: Any | None = None,
+    execution_id: str | None = None,
 ) -> AsyncIterator[StreamEvent]:
-    """分层并行执行 ExecutionGraph：同层 ``asyncio.gather``，层间顺序执行。
+    """分层并行执行核心循环（假设已在 ``runtime.execution()`` 边界内）。
 
-    每个节点经 ``runtime.delegate()`` 调用 Skill（受 ``skill_guard`` 组合治理，
-    计入步数 / 深度 / 循环预算）。产出 ``StreamEvent``：
+    与 ``execute_graph`` 的区别：不创建新的执行边界、不做 ContextManager 快照与轨迹持久化
+    —— 供嵌套场景（如 Workflow Skill 内部执行子图）复用调用方已有的执行上下文
+    （预算 / 调用栈 / trace 连续累计，符合 doc §7「Skill→Skill 须经 Runtime」）。
 
-    - 每节点完成产出 ``evidence`` 事件（含 node_id / skill / layer / result）；
-    - 全部完成产出 ``answer`` 事件（聚合全部节点结果 dict）。
-
-    须在 ``runtime.execution()`` 边界内调用（delegate 前置校验）。
+    Durability（doc §11）：传入 ``checkpoint_store`` + ``execution_id`` 时，按节点落地
+    checkpoint——已完成节点结果复用（崩溃后 resume 不重跑），未完成任务继续（尊重依赖边）。
     """
+    # 1. 加载已完成的 checkpoint（resume 场景）：已完成节点直接复用结果，不重跑
+    completed: dict[str, Any] = {}
+    if checkpoint_store is not None and execution_id is not None:
+        cp = await checkpoint_store.load(execution_id)
+        if cp is not None:
+            completed = dict(cp.completed)
+
     layers = graph.topological_layers()
-    results: dict[str, Any] = {}
+    results: dict[str, Any] = dict(completed)
     for i, layer in enumerate(layers):
         # deadline 消费：超限时提前终止，产出 error 事件
         exec_ctx = runtime.context
@@ -187,37 +210,94 @@ async def execute_graph(
                 )
                 return
 
+        # 已完成节点（来自 checkpoint）：直接复用结果 + 补发 evidence 事件，不再执行
+        pending = [nid for nid in layer if nid not in results]
+
         async def _run(node_id: str) -> tuple[str, Any, str | None]:
             node = graph.nodes[node_id]
             try:
-                return node_id, await runtime.delegate(node.skill_name, **node.kwargs), None
+                # 解析 input_refs：从已完成节点结果中取上游输出（多 Skill 依赖传递）
+                kwargs: dict[str, Any] = dict(node.kwargs)
+                for arg, ref in node.input_refs.items():
+                    if ref.startswith("node:"):
+                        upstream = ref[len("node:") :]
+                        if upstream not in results:
+                            raise ValueError(
+                                f"节点 {node_id} 引用未就绪的上游节点 {upstream}"
+                            )
+                        kwargs[arg] = results[upstream]
+                    else:
+                        kwargs[arg] = ref
+                return node_id, await runtime.delegate(node.skill_name, **kwargs), None
             except Exception as exc:
                 return node_id, None, str(exc)
 
-        layer_results = await asyncio.gather(*(_run(nid) for nid in layer))
-        for node_id, result, error in layer_results:
-            if error is not None:
-                yield StreamEvent(
-                    type="error",
-                    payload={
-                        "node": node_id,
-                        "skill": graph.nodes[node_id].skill_name,
-                        "layer": i,
-                        "error": error,
-                    },
-                )
-            else:
-                results[node_id] = result
+        if pending:
+            layer_results = await asyncio.gather(*(_run(nid) for nid in pending))
+            for node_id, result, error in layer_results:
+                if error is not None:
+                    yield StreamEvent(
+                        type="error",
+                        payload={
+                            "node": node_id,
+                            "skill": graph.nodes[node_id].skill_name,
+                            "layer": i,
+                            "error": error,
+                        },
+                    )
+                else:
+                    results[node_id] = result
+                    # checkpoint 落盘：每完成一个节点即持久化（崩溃后 resume 可复用）
+                    if checkpoint_store is not None and execution_id is not None:
+                        await checkpoint_store.save(
+                            Checkpoint(execution_id, dict(results))
+                        )
+                    yield StreamEvent(
+                        type="evidence",
+                        payload={
+                            "node": node_id,
+                            "skill": graph.nodes[node_id].skill_name,
+                            "layer": i,
+                            "result": result,
+                        },
+                    )
+        # 本层已完成的节点（来自 checkpoint）补发 evidence 事件，保持事件流完整
+        for node_id in layer:
+            if node_id in results and node_id not in pending:
                 yield StreamEvent(
                     type="evidence",
                     payload={
                         "node": node_id,
                         "skill": graph.nodes[node_id].skill_name,
                         "layer": i,
-                        "result": result,
+                        "result": results[node_id],
+                        "resumed": True,
                     },
                 )
     yield StreamEvent(type="answer", payload={"results": results})
+
+
+async def execute_graph(
+    graph: ExecutionGraph,
+    runtime: PlannerRuntime,
+    *,
+    checkpoint_store: Any | None = None,
+    execution_id: str | None = None,
+) -> AsyncIterator[StreamEvent]:
+    """分层并行执行 ExecutionGraph（顶层入口）：创建 ``execution()`` 边界后执行核心循环。
+
+    每个节点经 ``runtime.delegate()`` 调用 Skill（受 ``skill_guard`` 组合治理，
+    计入步数 / 深度 / 循环预算）。事件透传给调用方（``execute_plan`` 负责 CM 快照与轨迹持久化）。
+
+    嵌套场景（Workflow 内部子图）应改用 ``_run_graph_in_place`` 复用调用方已有的执行上下文，
+    避免重复创建边界导致预算复位。传 ``checkpoint_store`` + ``execution_id`` 启用执行级
+    checkpoint/resume（doc §11 / Phase E）。
+    """
+    async with runtime.execution():
+        async for event in _run_graph_in_place(
+            graph, runtime, checkpoint_store=checkpoint_store, execution_id=execution_id
+        ):
+            yield event
 
 
 async def execute_plan(
@@ -267,7 +347,15 @@ async def execute_plan(
             # snapshot 消费（Plan-F Context Pipeline）：执行中把结构化快照写入
             # ExecutionContext.metadata，供下一轮组装（ContextAssembler 读 task/execution
             # 层注入）或持久化消费——修掉「status 事件产出 snapshot 但无人消费」。
-            async for event in execute_graph(plan.graph, runtime):
+            # 注意：直接复用 _run_graph_in_place（不套 execute_graph），避免嵌套 execution() 边界。
+            exec_ctx = runtime.context
+            assert exec_ctx is not None  # 在 execution() 边界内必然已设置
+            async for event in _run_graph_in_place(
+                plan.graph,
+                runtime,
+                checkpoint_store=runtime.checkpoint_store,
+                execution_id=exec_ctx.execution_id,
+            ):
                 if event.type == "evidence":
                     cm.record_skill(
                         ctx, event.payload.get("skill", ""), result=event.payload.get("result")
