@@ -19,8 +19,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from agent_runtime.planner.execution_graph import execute_plan
-from agent_runtime.planner.protocol import Plan, PlannerRuntime
 from agent_runtime.trajectory.models import TrajectoryRecord, TrajectoryStep
 
 
@@ -134,7 +132,7 @@ async def replay_trajectory(
     record: TrajectoryRecord,
     registry: Any,
     *,
-    runtime_cls: Any = PlannerRuntime,
+    runtime_cls: Any = None,
     max_steps: int = 50,
 ) -> ReplayReport:
     """重放一条轨迹并报告 divergence。
@@ -144,6 +142,12 @@ async def replay_trajectory(
         以检测漂移）；须实现 ``async execute(name, **kwargs)``。
     :return: ``ReplayReport``（divergences / replay_steps / diverged）。
     """
+    # 延迟导入避免循环依赖（protocol/execution_graph → trajectory 包 → replay → protocol）
+    from agent_runtime.planner.execution_graph import execute_plan
+    from agent_runtime.planner.protocol import Plan, PlannerRuntime
+
+    if runtime_cls is None:
+        runtime_cls = PlannerRuntime
     wrapper = _RecordingWrapper(registry)
     runtime = runtime_cls(registry=wrapper, max_steps=max_steps)
     plan = Plan(**record.plan)
