@@ -18,6 +18,7 @@ from agent_runtime.planner.durability_pg import (
     PgExecutionOwnershipStore,
     PgIdempotencyStore,
 )
+from agent_runtime.skills.workflow import discover_workflows
 from agent_runtime.revert import RevertHandler
 from agent_runtime.tracing import get_langfuse_callbacks
 from fastapi import FastAPI
@@ -188,6 +189,19 @@ async def lifespan(app: FastAPI):
 
     # 装配顺序：registry 先于 planner（GraphPlanner plan() 需 registry 做 discover）
     registry = get_registry(graph=app.state.graph)
+
+    # §20 演进：自动发现并注册 Workflows 目录（声明式 YAML → Skill）
+    try:
+        wf_skills = discover_workflows(
+            "packages/agent-runtime/workflows",
+            registry=registry,
+        )
+        for sk in wf_skills:
+            registry.register(sk)
+        logger.info("auto-registered %d workflow skills from packages/agent-runtime/workflows", len(wf_skills))
+    except Exception:
+        logger.warning("workflow auto-discovery failed", exc_info=True)
+
     app.state.registry = registry
     app.state.planner = get_planner(settings, registry=registry)
     app.state.planner_runtime = PlannerRuntime(
