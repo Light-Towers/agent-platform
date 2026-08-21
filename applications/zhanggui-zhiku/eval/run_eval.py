@@ -43,6 +43,8 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 from app.conf.milvus_config import milvus_config  # noqa: E402 —— 路径引导后导入，脚本直跑必需
+from app.conf.retrieval_config import retrieval_cfg  # noqa: E402 TD-9：统一引用 yaml 配置
+from app.conf.rerank_config import rerank_cfg  # noqa: E402 TD-9：统一引用 yaml 配置
 from app.clients.milvus_utils import get_milvus_client  # noqa: E402
 from app.query_process.agent.nodes.node_search_embedding import node_search_embedding  # noqa: E402
 from app.query_process.agent.nodes.node_search_embedding_hyde import node_search_embedding_hyde  # noqa: E402
@@ -52,16 +54,25 @@ from app.core.tracing import init_tracing  # noqa: E402
 from eval.metrics import compute_retrieval_metrics  # noqa: E402
 
 # ---------------------------------------------------------------------------
-# M2 硬编码基线快照（config_hash 的兜底来源）
-# 说明：RRF 权重 / k / max_results、混合检索稠密稀疏权重、动态 TopK 阈值当前仍为
-# 节点内硬编码（node_rrf.py / node_search_embedding.py / node_rerank.py）。
-# M3 起外置到 app/conf/retrieval.yaml / rerank.yaml 后，config_hash 改读 yaml 内容，
-# 此处基线仅用于 M2 阶段保证"每次评测可追溯到当时配置"。
+# TD-9：运行时配置快照（config_hash 的兜底来源），统一从 retrieval.yaml / rerank.yaml 读取。
+# 不再硬编码超参，避免与线上配置漂移。yaml 缺失时退化为空 dict（compute_config_hash 直接读文件内容）。
 # ---------------------------------------------------------------------------
 _RUNTIME_BASELINE: Dict[str, Any] = {
-    "rrf": {"k": 60, "max_results": 10, "weights": [1.0, 1.0]},
-    "hybrid": {"dense_weight": 0.8, "sparse_weight": 0.2},
-    "rerank_dynamic_topk": {"gap_ratio": 0.25, "gap_abs": 0.5, "min_k": 1, "max_k": 10},
+    "rrf": {
+        "k": retrieval_cfg.rrf.k,
+        "max_results": retrieval_cfg.rrf.max_results,
+        "weights": list(retrieval_cfg.rrf.weights.values()) if hasattr(retrieval_cfg.rrf.weights, 'values') else retrieval_cfg.rrf.weights,
+    },
+    "hybrid": {
+        "dense_weight": retrieval_cfg.hybrid.dense_weight,
+        "sparse_weight": retrieval_cfg.hybrid.sparse_weight,
+    },
+    "rerank_dynamic_topk": {
+        "gap_ratio": rerank_cfg.dynamic_topk.gap_ratio,
+        "gap_abs": rerank_cfg.dynamic_topk.gap_abs,
+        "min_k": rerank_cfg.dynamic_topk.min_k,
+        "max_k": rerank_cfg.dynamic_topk.max_k,
+    },
 }
 
 DEFAULT_GOLDEN: Path = Path(__file__).resolve().parent / "golden_queries.jsonl"

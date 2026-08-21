@@ -295,10 +295,11 @@ async def test_recall_forwards_to_recall_typed_when_enabled(patch_settings, monk
 
 async def test_recall_does_not_forward_when_typed_disabled(patch_settings, monkeypatch):
     # ADR-0004 阶段3：typed 开关关闭时，即使 pool 非空也不走 typed 路径（退化内核后端）。
-    import agent_core.memory.typed as typed_core
+    # 注意：longterm 顶层 import 已绑定符号，须 patch 其自身命名空间的引用
+    # （WS-1 起 TYPED 默认开，显式关闭才是本用例意图）。
     import agent_server.memory.longterm as l
 
-    monkeypatch.setattr(typed_core, "semantic_memory_typed_enabled", lambda: False)
+    monkeypatch.setattr(l, "semantic_memory_typed_enabled", lambda: False)
     monkeypatch.setattr("agent_server.memory.longterm.get_settings", lambda: patch_settings)
 
     forwarded = {"hit": False}

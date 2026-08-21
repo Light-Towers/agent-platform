@@ -21,6 +21,7 @@ from __future__ import annotations
 from typing import Iterable
 
 # 内核类型化记忆（单一真相源）
+from agent_core.memory.store import CapabilityReport, MemoryStore, PgMemoryStore
 from agent_core.memory.typed import (
     MemoryType,
     TypedMemory,
@@ -183,10 +184,29 @@ async def forget_memory(pool, workspace_id: str, memory_id: int) -> bool:
     )
 
 
+# --- WS-1 统一门面：MemoryStore --------------------------------------------
+
+def get_memory_store(pool) -> MemoryStore:
+    """构造 app 统一记忆存储（PgMemoryStore：权威后端）。
+
+    embedding 统一用 app 自有 embedder（与 RAG/缓存维度一致），pool 由调用方
+    传入（遵守 ADR-0003 单一连接源）。新代码应经本入口读写记忆，而非直接调
+    内核 typed 函数；``probe()`` 结果可暴露到 /health。
+    """
+    return PgMemoryStore(pool, embed_memory)
+
+
+def memory_capability_report(pool) -> CapabilityReport:
+    """记忆能力探测（/health 用；pool 为 None 时如实报告 disabled）。"""
+    return get_memory_store(pool).probe()
+
+
 # 兼容别名：内核 MemoryType / TypedMemory 透出，便于上层直接引用
 __all__ = [
     "MemoryType",
     "TypedMemory",
+    "MemoryStore",
+    "CapabilityReport",
     "semantic_memory_typed_enabled",
     "get_default_backend",
     "_resolve_default_backend",
@@ -196,4 +216,6 @@ __all__ = [
     "recall_typed",
     "consolidate_memories",
     "forget_memory",
+    "get_memory_store",
+    "memory_capability_report",
 ]

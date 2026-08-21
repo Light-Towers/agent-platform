@@ -1,4 +1,5 @@
 import json
+import os
 from typing import List, Dict
 from langchain_core.messages import SystemMessage, HumanMessage
 
@@ -13,6 +14,11 @@ from app.conf.milvus_config import milvus_config
 from app.conf.retrieval_config import retrieval_cfg
 from app.core.logger import logger
 from app.core.tracing import start_span
+
+# TD-5：商品名确认阈值参数化（环境变量可覆盖，默认与原硬编码一致）
+# 跨类目相似度分布不同，可按部署环境调整；智能阈值待采集基线后评估。
+_ITEM_CONFIRM_HIGH_THRESHOLD = float(os.getenv("ITEM_CONFIRM_HIGH_THRESHOLD", "0.85"))
+_ITEM_CONFIRM_MID_THRESHOLD = float(os.getenv("ITEM_CONFIRM_MID_THRESHOLD", "0.6"))
 
 
 def step_3_extract_info(query: str, history: List[Dict]) -> Dict:
@@ -166,9 +172,9 @@ def step_5_align_item_names(query_results: List[Dict]) -> Dict:
         top_matches_log = ", ".join([f"{m['item_name']}({m['score']:.3f})" for m in matches[:3]])
         logger.info(f"Step 5: '{extracted_name}' Top匹配: {top_matches_log}")
 
-        # 筛选
-        high = [m for m in matches if m.get("score", 0) > 0.85]
-        mid = [m for m in matches if m.get("score", 0) >= 0.6]
+        # TD-5：阈值经环境变量参数化（默认与原硬编码 0.85/0.6 一致）
+        high = [m for m in matches if m.get("score", 0) > _ITEM_CONFIRM_HIGH_THRESHOLD]
+        mid = [m for m in matches if m.get("score", 0) >= _ITEM_CONFIRM_MID_THRESHOLD]
 
         # 规则 A: 单个高置信度
         if len(high) == 1:

@@ -13,6 +13,7 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from agent_core.guardrails.input_guard import guard_input
+from agent_runtime.planner.context_manager import render_snapshot_prompt
 from agent_runtime.planner.protocol import (
     ExecutionContext,
     Plan,
@@ -22,7 +23,7 @@ from agent_runtime.planner.protocol import (
     StreamEvent,
 )
 
-from agent_server.agent.intent_bridge import l1_route_hint
+from agent_server.agent.intent_bridge import l1_route_hint_async
 from agent_server.agent.router import decide_route
 from agent_server.agent.state import AgentState
 from agent_server.config import get_settings
@@ -69,6 +70,7 @@ class DeterministicPlanner(Planner):
                         "question": question,
                         "workspace_id": ctx.workspace_id,
                         "user_id": ctx.user_id,
+                        "last_snapshot": ctx.last_snapshot,
                     },
                 )
             question = guard["redacted_text"]
@@ -95,11 +97,16 @@ class DeterministicPlanner(Planner):
                         "workspace_id": ctx.workspace_id,
                         "user_id": ctx.user_id,
                         "messages": compacted,
+                        "last_snapshot": ctx.last_snapshot,
+                        # WS-2：标记本轮已压缩，供 execute_plan 回填
+                        # ConversationContext.compacted（三层契约一致性）
+                        "compacted": True,
                     },
                 )
 
         # L1 轻量 short-circuit：高置信 chitchat 直答（与 graph.route_node 同源，eval 基线不受影响）
-        l1_hint = l1_route_hint(question)
+        # WS-6：async 入口，嵌入计算不阻塞事件循环
+        l1_hint = await l1_route_hint_async(question)
         if l1_hint is not None:
             return Plan(
                 route=l1_hint,
@@ -109,6 +116,7 @@ class DeterministicPlanner(Planner):
                     "question": question,
                     "workspace_id": ctx.workspace_id,
                     "user_id": ctx.user_id,
+                    "last_snapshot": ctx.last_snapshot,
                 },
             )
 
@@ -125,6 +133,8 @@ class DeterministicPlanner(Planner):
                 "mcp_server": ctx.mcp_server,
                 "mcp_tool": ctx.mcp_tool,
                 "mcp_params": ctx.mcp_params,
+                # WS-2：上一轮结构化快照透传到 execute，合成时注入 prompt
+                "last_snapshot": ctx.last_snapshot,
             },
         )
 
@@ -167,6 +177,7 @@ class DeterministicPlanner(Planner):
         # 非 Skill 组合，不走 delegate；反思重试在边界内顺序调用，步数累计（max_steps=20 充裕）。
         async with runtime.execution():
             iterations = int(plan.notes.get("iterations") or 0)
+            original_snapshot = plan.notes.get("last_snapshot")
             while True:
                 evidence = await self._run_capability(plan, runtime, workspace_id, question)
                 yield StreamEvent(
@@ -186,6 +197,8 @@ class DeterministicPlanner(Planner):
                             llm=runtime.llm,
                         )
                     )
+                    # re-plan 新建的 Plan 不携带原快照，回填避免丢失（WS-2）
+                    plan.notes.setdefault("last_snapshot", original_snapshot)
                     yield StreamEvent(
                         type="replan",
                         payload={
@@ -207,6 +220,7 @@ class DeterministicPlanner(Planner):
                 memory_notes,
                 runtime.llm,
                 context_messages,
+                snapshot=plan.notes.get("last_snapshot"),
             )
             if settings.memory_enabled and runtime.pool is not None:
                 facts = None
@@ -253,12 +267,16 @@ class DeterministicPlanner(Planner):
         memory_notes: list[str],
         llm,
         context_messages: list[Any] | None = None,
+        snapshot: dict[str, Any] | None = None,
     ) -> str:
         """答案合成：无 LLM 走模板拼装，有 LLM 走证据约束提示（与 graph._compose 同源）。
 
         ``context_messages``：compaction 摘要消息（plan() 写入 notes["messages"]），
         作为「对话上下文」并入提示，使摘要真正参与合成（P1 修正：此前摘要被丢弃）。
+        ``snapshot``：上一轮执行的结构化快照（WS-2），经 ``render_snapshot_prompt``
+        渲染为「任务状态」块结构化注入，不进对话历史存储。
         """
+        snapshot_text = render_snapshot_prompt(snapshot)
         if llm is None:
             parts = [f"（无 LLM 模式）针对问题「{question}」收集到的证据："]
             if evidence:
@@ -269,6 +287,8 @@ class DeterministicPlanner(Planner):
                 parts.append("相关历史记忆：" + "；".join(memory_notes))
             if context_messages:
                 parts.append("对话上下文：" + "；".join(_message_content(m) for m in context_messages))
+            if snapshot_text:
+                parts.append(snapshot_text)
             return "\n".join(parts)
         blocks = [f"## 证据\n{i}. {e}" for i, e in enumerate(evidence, start=1)] or ["## 证据\n（无）"]
         if memory_notes:
@@ -278,6 +298,8 @@ class DeterministicPlanner(Planner):
                 _message_content(m) for m in context_messages
             )
             blocks.append("## 对话上下文\n" + context_text)
+        if snapshot_text:
+            blocks.append("## 任务状态\n" + snapshot_text)
         blocks.append(f"## 问题\n{question}")
         raw = await llm.ainvoke(
             [
