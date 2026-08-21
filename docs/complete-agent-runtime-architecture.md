@@ -68,7 +68,7 @@ Mode Selector
 |---|---|---|---|---|
 | Deterministic | 简单问答、固定单能力 | 规则/确定性逻辑 | 单 Skill | 快、便宜、稳定 |
 | Static Workflow | 已知业务流程 | 预定义 DAG | 固定 DAG | 可测试、可审计 |
-| Dynamic Graph | 多能力组合、依赖未知 | LLM Planner | 动态 DAG | 灵活且可治理 |
+| Dynamic Graph   | 多能力组合、依赖未知 | LLM Planner | 动态 DAG | 灵活且可治理 |
 | Agentic | 开放式探索、复杂自主任务 | Agent loop | 动态 tool/subagent 调用 | 最大自主性 |
 
 四者不是互相替代关系，而是同一个 Runtime 的不同计划来源。
@@ -93,9 +93,8 @@ Admission
   ├── rate limit
   ├── concurrency quota
   ├── per-user quota
-  ├── per-session coordination
   ├── priority
-  └── queue / reject / coalesce
+  └── queue / reject
 ```
 
 Admission 只回答一个问题：**现在是否允许这个执行开始？**
@@ -249,11 +248,13 @@ ExecutionGraph 是平台级执行 IR（Intermediate Representation）。
 - 并行
 - 输入映射
 - 输出引用
-- 节点超时
-- 节点重试策略
 - 节点权限
 - 节点预算
 - execution metadata
+
+节点超时 / 节点重试策略 **不属于** Graph IR：执行级边界（超时 / 熔断 / retry）已在
+`SkillRegistry.execute` 的 Middleware 洋葱链收敛（`GuardMiddleware` / `RetryMiddleware`），
+ExecutionGraph 只声明结构、不内嵌执行边界。
 
 示例：
 
@@ -610,16 +611,22 @@ Agent 可以动态产生下一步动作；Graph 可以预先确定全部动作�
                                    └──────────┬──────────┘
                                               │
                                               ▼
-                                   ┌─────────────────────┐
-                                   │ Admission            │
-                                   │ quota/rate/priority  │
-                                   │ queue/coalesce       │
-                                   └──────────┬──────────┘
-                                              │
-                                              ▼
-                                   ┌─────────────────────┐
-                                   │ Mode Selector        │
-                                   └──────────┬──────────┘
+                                    ┌─────────────────────┐
+                                    │ Admission           │
+                                    │ quota/rate/priority │
+                                    │ queue/reject        │
+                                    └──────────┬──────────┘
+                                               │
+                                               ▼
+                                    ┌─────────────────────┐
+                                    │ SessionCoordinator  │
+                                    │ session_id / dedupe │
+                                    └──────────┬──────────┘
+                                               │
+                                               ▼
+                                     ┌─────────────────────┐
+                                     │ Mode Selector       │
+                                     └──────────┬──────────┘
                                               │
                 ┌─────────────────────────────┼─────────────────────────────┐
                 │                             │                             │
@@ -645,20 +652,20 @@ Agent 可以动态产生下一步动作；Graph 可以预先确定全部动作�
                                               │
                                               ▼
                                    ┌─────────────────────┐
-                                   │ Unified Runtime      │
-                                   │                      │
-                                   │ ExecutionContext     │
-                                   │ Budget / Deadline    │
-                                   │ Middleware           │
-                                   │ Checkpoint           │
+                                   │ Unified Runtime     │
+                                   │                     │
+                                   │ ExecutionContext    │
+                                   │ Budget / Deadline   │
+                                   │ Middleware          │
+                                   │ Checkpoint          │
                                    │ Context / Memory    │
                                    │ Event / Trace       │
-                                   │ Trajectory           │
+                                   │ Trajectory          │
                                    └──────────┬──────────┘
                                               │
                                               ▼
                                    ┌─────────────────────┐
-                                   │    SkillRegistry     │
+                                   │    SkillRegistry    │
                                    └──────────┬──────────┘
                                               │
                     ┌─────────────────────────┼─────────────────────────┐
@@ -680,26 +687,34 @@ Agent 可以动态产生下一步动作；Graph 可以预先确定全部动作�
 ## 15. 当前 v2 → Target Architecture 差距
 
 | 能力 | 当前 v2 | 目标 |
-|---|---|---|
-| Planner Protocol | ✅ | 保持 |
+| --- | --- | --- |
+| Planner 协议 | ✅ | 保持 |
 | ExecutionGraph | ✅ | 升级为平台 IR |
-| PolicyValidator | ✅ | 扩展预算/组合策略 |
 | SkillRegistry | ✅ | 保持统一能力入口 |
+| PolicyValidator | ✅ | 扩展预算/组合策略 |
 | Skill Contract | ✅ | 完善 JSON Schema |
-| Middleware | 🟡 | 补 retry / rate / audit |
-| Admission | 🟡 | 前移为所有 Planner 的统一入口 |
-| Mode Selection | ❌ 配置选择 | 自动选择四种模式 |
-| Dynamic Graph | 🟡 单节点基础版 | LLM 多 Skill DAG |
-| Static DAG → Workflow Skill | 🟡 有 kind/方向 | 完整 compiler |
-| Skill → Skill | 🟡 有 guard 基础 | 一等公民组合模型 |
-| Agentic Runtime | 🟡 DeepAgents 外挂治理 | 完全共享 Skill Runtime |
-| Context Pipeline | 🟢 | 统一四层 Context |
-| Trajectory / Replay | 🟢 | 与 Durable Execution 深度结合 |
-| Distributed Session Ownership | ❌/🟡 | lease + recovery |
-| Durable Resume | 🟡 | execution-level checkpoint/resume |
-| Event Model | 🟢 | 全模式统一 |
+| Middleware | ✅ 已实现（2026-08-21） | retry（`RetryMiddleware` 瞬态重试）/ rate（`RateLimitMiddleware`+`SimpleTokenBucket`）/ audit（`AuditMiddleware`），均经 `SkillRegistry` 洋葱链生效 |
+| Admission | ✅ 已实现收口（2026-08-21） | `agent_server/api/routes.py` 已作为所有 Planner 统一入口（enqueue→wait_for_admit→mark_completed）；另提供框架无关 `run_admitted`（`admission_gateway.py`）+ `InMemoryAdmissionController` 供联邦等复用 |
+| Mode Selection | ✅ 已实现（2026-08-21） | 自动选择四种模式（ModeSelector + UnifiedPlanner，`PLANNER=auto`；保留 `PLANNER=` 强制 override） |
+| Skill → Skill | ✅ 已实现（2026-08-21） | 一等公民组合模型（``Skill.sub_skills`` 声明）+ 运行时 ``skill_guard``（max_depth/max_steps/cycle）组合治理 + 计划期 ``CompositionValidator`` 静态校验（存在性 / 环 / 权限闭包）；经 ``runtime.delegate`` 编排 |
+| Dynamic Graph | ✅ 已实现（2026-08-21） | LLM 多 Skill DAG（graph_compose 候选 Top-K + 结构化 Graph IR + 校验 + 失败重规划） |
+| Static DAG → Workflow Skill | ✅ 已实现（2026-08-21） | 完整 compiler（compile_workflow + WorkflowExecutor，复用统一 Runtime） |
+| Skill → Skill 运行时循环 / 语义指纹 | ✅ P5-1 已实现（默认关闭） | 完整运行时循环治理 |
+| Agentic Runtime | ✅ 已实现收口 + deepagents 接入（2026-08-21） | 完全共享 Skill Runtime（tool discovery→SkillRegistry；tool call→`runtime.delegate`；subagent 作为 Agent Skill 经统一 Runtime）；联邦侧 `AGENTIC_RUNTIME_BRIDGE` opt-in 把联邦能力注册为 SkillRegistry 并追加「经统一 Runtime 治理」的 LangChain 桥接工具（`agentic_runtime_bridge.py`），默认关闭零影响 |
+| Context Pipeline | ✅ | 统一四层 Context |
+| Trajectory / Replay | ✅ 已实现（P3-1 / P3-2） | 与 Durable Execution 深度结合 |
+| Distributed Session Ownership | ✅ 进程内已落地（2026-08-21） | InMemory 默认 + PgAdvisory lease（v2）+ ``ExecutionOwnershipStore``/``InMemoryExecutionOwnershipStore`` + ``reap_stale_executions``（stale recovery 检测 + 所有权回收，纯逻辑可单测）；**跨进程 durable recovery（PG LISTEN/NOTIFY 唤醒）属环境依赖，见 §17** |
+| Durable Resume | ✅ 已实现（2026-08-21） | execution-level checkpoint/resume（checkpoint 集成进 ExecutionGraph，`_run_graph_in_place` 按节点落盘 + 同 execution_id resume） |
+| Idempotency | ✅ 已实现（2026-08-21） | `with_idempotency` + `IdempotencyStore`/`InMemoryIdempotencyStore`（仅缓存成功；错误不污染） |
+| Event Model | ✅ | 全模式统一 |
 
 ---
+
+图例：
+
+- ✅ = 已实现 / 完全支持
+- 🟡 = 部分实现 / 规划中
+- ❌ = 未实现 / 目标架构
 
 ## 16. 推荐实施顺序
 
@@ -812,3 +827,40 @@ Durability   = 中断后如何继续做
 ```
 
 这套边界比“LangGraph Supervisor + DeepAgents”本身更重要。框架应该是实现，而不是架构。
+
+---
+
+## 20. 待环境验证任务（Environment-Dependent Backlog）
+
+> 以下任务**无法在纯单元测试环境（无 PostgreSQL / 无真实 LLM / 单进程）内完成或验证**，
+> 需要对应的外部依赖与部署形态。其**可单测的纯逻辑半程**已在本文档前述章节落地（✅），
+> 此处仅记录「需环境验证/落地」的剩余部分，避免与已完成的代码混淆。
+
+### 20.1 跨进程 durable recovery（multi-replica）
+- **已落地（进程内，可单测）**：`ExecutionOwnershipStore` / `InMemoryExecutionOwnershipStore` /
+  `reap_stale_executions` 完成 stale 检测 + 所有权回收；`AdmissionQueue` 的内存调度已落地。
+- **待环境验证**：多副本下 ownership / 排队需跨进程协调。需以 **PgAdvisory / PG `LISTEN/NOTIFY`**
+  实现 `ExecutionOwnershipStore` 的持久化后端，并在 `AdmissionQueue.mark_completed` 把
+  queued→admitted 提升时**跨进程通知**等待者（当前仅 `asyncio.Condition` 唤醒同进程协程）。
+- **依赖**：PostgreSQL + 多副本部署 + 多进程集成测试。
+
+### 20.2 PG / Redis 后端持久化
+- **已落地**：`InMemoryCheckpointStore` / `InMemoryIdempotencyStore` / `InMemoryAdmissionController`
+  （测试 / 单进程默认后端）。
+- **待环境验证**：重启 / 多副本下 checkpoint、idempotency、admission 状态需持久化，避免丢失。
+  需新增 `PgCheckpointStore` / `PgIdempotencyStore`（或 Redis 等价物）并注入 `PlannerRuntime` /
+  `run_admitted`。
+- **依赖**：PostgreSQL 或 Redis + 连接池配置。
+
+### 20.3 deepagents 桥接端到端灰度验证
+- **已落地**：`AgenticRuntimeBridge` + 联邦侧 `AGENTIC_RUNTIME_BRIDGE` opt-in 适配器
+  （默认关闭，零影响），单元层验证「桥接工具 → `runtime.delegate`」路由正确。
+- **待环境验证**：开启开关后，**真实 LLM + 联邦部署**下验证 deep_agent 实际选择并调用桥接工具、
+  统一治理（budget/permission/timeout/circuit/trace）在负载下生效、子智能体经统一 Runtime 执行。
+- **依赖**：真实 LLM API Key + 联邦运行环境（非单测可覆盖）。
+
+### 20.4 真多副本下的 Durability 全链路
+- 综合 20.1 / 20.2：进程崩溃后由**另一副本**基于同一 `execution_id` 的持久化 checkpoint resume，
+  跨进程 stale reaper 触发 recovery。需在多副本集成环境中做故障注入验证。
+- **依赖**：多副本部署 + 故障注入工具。
+
