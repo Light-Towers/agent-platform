@@ -11,7 +11,7 @@
 |------|------|------|
 | `applications/agent_server/` | 单进程 Supervisor 平台（统一 Agent 平台；2026-08-19 由根 `app/` 改名迁入） | `agent_server.main:app`（uvicorn） |
 | `applications/agent_federation/` | 联邦网关 + 3 子服务编排中枢（与 agent_server 并行，详见其 README；原名 `deepagents/`，为消除与 PyPI 依赖包 `deepagents` 同名冲突而改名） | `python -m api.server` |
-| `packages/agent-core/` | 零依赖运行时内核：tracing / guardrails / sql 守卫 / llm / memory / typed 记忆 | — |
+| `packages/agent-core/` | 零依赖运行时内核：tracing / guardrails / sql 守卫 / llm / memory（含 MemoryStore 统一门面 + CapabilityReport） / events（EventBus 多 sink 扇出） / config（KernelConfig + 类型化 env） / intent（L1 分类器） / resilience（CircuitBreaker + retry + timeout） | — |
 | `packages/agent-runtime/` | Plan-F 运行时中间件层：admission/coordinator/cache/circuit_breaker/revert/mcp_client/otel/tracing/db + planner/（Planner 协议、PlannerRuntime、skill_guard）+ skills/（SkillRegistry + Function/Agent/Remote/Workflow 四执行器） | — |
 | `packages/shared-schemas/` | 联邦 4 服务共享 Pydantic 契约（QueryResponse / ThreadState 等） | — |
 | `applications/kefu-service/` | kefu 迁移版（deepagents + LangGraph），已接入联邦网关（Agent Protocol 兼容 `/invoke`，返回 `QueryResponse`；`KEFU_USE_ADAPTER=false` 默认直连） | — |

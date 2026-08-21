@@ -2,6 +2,80 @@
 
 本仓库为 uv workspace monorepo。**唯一受支持的安装/运行入口是根 `uv.lock` + `uv sync`**，子包不再维护独立 `uv.lock`（见 v2 修复 #14）。
 
+## Agent 核心架构优化八工作流全量落地（2026-08-20）
+
+> 实施计划：8 个工作流（WS-1 ~ WS-8），按 P0 → P1 → P2 推进。
+> 原则：**不推倒重来，先接线、再收敛、最后清理**；每个 WS 独立可交付。
+> 验证：ruff 0 error / 根 tests **484 passed** / 联邦 unit **89 passed** / kefu **8 passed** / eval **12/12 = 100%**。
+
+### WS-1（P0）记忆子系统统一门面
+
+- **`packages/agent-core/agent_core/memory/store.py` 新建**：`MemoryStore` Protocol（五动词 `recall / remember / consolidate / forget / probe`）+ `CapabilityReport` dataclass（宿主 `/health` 可直接序列化）。
+- **`PgMemoryStore`**：包装 `typed` 模块（宿主 psycopg 池，遵守 ADR-0003 单一连接源），embedder 构造注入，支持全部五动词，**pg 为唯一权威后端**。
+- **`VectorMemoryStore`**：包装 `MemoryBackend`（Milvus / PgVector），仅 recall / remember；consolidate / forget 返回 0 / False（向量后端无类型列）。
+- **`semantic.py` 门面降级为薄适配器**：`SEMANTIC_MEMORY_ENABLED` 单总开关控制，`SEMANTIC_MEMORY_TYPED` 保留但只影响加权策略（**WS-1 起默认开**，不再决定走哪条栈）。
+- 宿主接线：`applications/agent_server/memory/memory_backend.py` 改经门面；`lru_cache` 后端工厂补 `reset_backend_cache()`。
+- **测试**：扩展 `packages/agent-core/tests/test_typed_memory.py`、`tests/test_memory_backend.py`；新增 probe 测试（无依赖环境返回 enabled=False + reason，绝不抛异常）。
+
+### WS-2（P0）Context Pipeline 接线：snapshot 消费 + compact 归一
+
+- **snapshot 消费闭环**：`applications/agent_server/planners/graph.py` 消费 `execute_plan` 产出的 `StreamEvent(type="status", payload={"snapshot": ...})`——多轮时将 `task`/`execution` 段注入下一轮 prompt 头部，并按现有 thread 持久化机制落 checkpoint。
+- **compact 归一**：`agent_server/agent/graph.py`、`planners/deterministic.py` 改经 `agent_runtime.context.compact`；旧 `agent_server/agent/compact.py` 标记弃用。
+- **`ConversationContext.compacted` 回填**：`deterministic.plan` 压缩分支 `notes["compacted"] = True`，`execution_graph.execute_plan` 检测后回填 `ctx.conversation.compacted`，保持三层契约一致。
+- **测试**：`tests/test_compact.py` 迁移扩展；新增 snapshot 注入回归 + compacted 回填测试（`test_execute_plan_compacted_flag_backfilled` / `_default_false`）；eval 12/12 不回退。
+
+### WS-3（P1）可靠性原语收敛
+
+- **`resilience.CircuitBreaker` 并发安全**：内部加 `threading.Lock` 保护 `allow()/record_*`，half_open 探测计数不再竞态；新增 `_half_open_inflight` 限制并发探测数（`max_half_open_probe`）。
+- **统一状态常量**：内核暴露 `STATE_CLOSED / STATE_OPEN / STATE_HALF_OPEN`（`agent_runtime.circuit_breaker` 的 `"half-open"` 兼容别名保留一版）。
+- **`llm/fallback.py` 降级状态机收敛**：`FallbackChatModel` 删除内嵌失败计数，改为**组合** `CircuitBreaker`（threshold→failure_threshold，cooldown→reset_timeout），可复位。
+- **流式降级语义修正**：`stream/astream` 仅在「未产出任何 chunk」时才允许切备模型重放；已产出 chunk 后主模型失败 → 向上抛异常，docstring 明确契约。
+- **测试**：扩展 `packages/agent-core/tests/test_resilience.py`（并发 allow/record 竞争用例）、`tests/test_llm_fallback.py`（中途流式失败 + breaker 组合用例）。
+
+### WS-4（P1）可观测性统一事件出口
+
+- **`packages/agent-core/agent_core/events.py` 新建**：`EventSink` Protocol + `EventBus`（多 sink 扇出、逐 sink 异常隔离、失败计数）。
+- **四 sink 注册**：`CallbackSink`（回调订阅）、`WebSocketSink`（WS 推送）、`LegacyStreamSink`（旧 builtins.runtime 通道，首次命中触发 DeprecationWarning）、`OTelSpanSink`（OTel span 事件出口，懒导入 opentelemetry，无活跃 span 时静默 no-op）。
+- **`monitor.py` 改造**：`ToolMonitor._emit` 改走 `EventBus` 扇出；`ToolMonitor()` 单例语义保留兼容，新 API 支持 `ToolMonitor(bus=...)` 构造注入。
+- **测试**：`packages/agent-core/tests/test_events.py` 扩展多 sink 扇出 + 异常隔离 + OTelSpanSink（no-op / fake span 写入）用例；federation/kefu 既有 monitor 测试全绿。
+
+### WS-5（P1）KernelConfig 与环境变量治理
+
+- **`packages/agent-core/agent_core/config.py` 新建**：`KernelConfig` dataclass + 类型化 env 解析助手（`env_bool / env_int / env_float / env_str`，非法值警告并回退默认）；`env_database_url`（新名 `AGENT_PLATFORM_DATABASE_URL` 优先，旧名 `DEEPAGENTS_DATABASE_URL` 兼容 + DeprecationWarning）。
+- **散点 `os.getenv` 全量迁移**：`memory/typed.py`、`memory/semantic.py`（5 处：VECTOR_BACKEND / MILVUS_URI / MILVUS_TOKEN / SEMANTIC_MEMORY_COLLECTION / TENANT_ID）改经 `env_str`/`env_bool`。
+- **环境变量清单表**落入 `packages/agent-core/README.md`（变量名 / 默认值 / 所属模块 / 用途），后续新增 env 必须登记。
+- **测试**：新增 config 解析单测；grep 确认无新代码直读旧变量名。
+
+### WS-6（P2）意图 L1 分类器数据化与异步契约
+
+- **`packages/agent-core/agent_core/intent/classifier.py`**：`_load_prototypes()` 加 `@lru_cache(maxsize=1)`（保留测试用 `cache_clear` 出口）；chitchat 关键词短链（`_CHITCHAT_STRONG` / `_CHITCHAT_WEAK`）外置到 `data/prototypes.json` 的 `chitchat_shortcuts` 段，代码只留读取逻辑 + 数据缺失兜底。
+- **新增 `classify_l1_async(query)`**：`asyncio.to_thread(classify_l1, ...)` 包装，docstring 声明 `classify_l1` 为阻塞调用。
+- 核查 `agent_federation/planners/agentic.py` 与 kefu 调用点，统一改走 async 入口。
+- **测试**：`packages/agent-core/tests/test_intent.py`、`test_intent_l2.py` 全绿 + 数据外置后等价性用例。
+
+### WS-7（P2）Tool/Skill 执行策略合并
+
+- **`packages/agent-runtime/agent_runtime/skills/middleware.py`** 新增 `GuardMiddleware`：超时（`asyncio.wait_for`，async-native）+ 失败降级返回空结果，语义对齐 `guarded_invoke`；新代码应优先挂本中间件而非再包 `wrap_tool`。
+- **`agent_core.tools.guarded`** 与 **`ToolRegistry`** 标记为维护模式：docstring 声明新代码用 SkillRegistry + middleware；zhanggui-zhiku 的 fanout 调用点迁移列入后续专项。
+- **`guarded_invoke`** 内 8 线程池保留（同步工具仍需），补"超时后线程不可取消、仅放弃等待"显式文档。
+- **测试**：`tests/test_graph_planner.py` 风格新增 GuardMiddleware 超时/降级用例。
+
+### WS-8（P2）LLM 客户端缓存治理
+
+- **`packages/agent-core/agent_core/llm/registry.py`**：`_CLIENT_CACHE` 改为上限 64 的 LRU（`OrderedDict`，零依赖）；cache key 中 `api_key` 替换为 `sha256(api_key)` 摘要，密钥不再常驻缓存键。
+- **`packages/agent-core/agent_core/llm/protocols.py` 新建**：`ChatModel` Protocol（`invoke / ainvoke / stream / astream`），`FallbackChatModel` 的 primary/fallback 类型标注改用它。
+- **`fallback_lc.py`** 不动（组合结构已正确）。
+- **测试**：新增 LRU 淘汰与 key 哈希单测；`tests/test_llm_fallback.py` 全绿。
+
+### 完成审计补漏（实施后逐项核对 spec 发现并修复）
+
+| 遗漏项 | 工作流 | 修复 |
+|---|---|---|
+| `OTelSpanSink` 未实现 | WS-4 | `events.py` 新增类，懒导入 opentelemetry，无活跃 span 时静默 no-op |
+| `semantic.py` 散点 `os.getenv` 未迁经配置层 | WS-5 | 5 处改经 `env_str`；新增 `env_str` 助手函数到 `config.py` |
+| `ConversationContext.compacted` 回填未接线 | WS-2 | `deterministic.plan` 压缩分支标记 `notes["compacted"]`；`execute_plan` 回填 `ctx.conversation.compacted` |
+| `SEMANTIC_MEMORY_TYPED` 默认值应改开 | WS-1 | `config.py` / `typed.py` 默认从 `False` 改 `True`；修复 `test_longterm_h` 中被旧默认值掩盖的 patch 错位 |
+
 ## 架构审核落地（2026-08-19 晚）—— Planner/Skill/Runtime 收口
 
 - **PlannerRuntime per-request 隔离（P0）**：`_steps`/`_call_stack` 由实例 mutable state 改为 `contextvars.ContextVar`——异 session 并发互不干扰、同 session 串行共享预算，修复单例注入下「一次执行的预算被并发请求耗尽」的跨请求污染；`max_steps`/`max_skill_depth` 保持不可变配置。

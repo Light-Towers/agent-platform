@@ -403,7 +403,8 @@ applications/agent_federation/  # 联邦网关 + 3 子服务编排中枢（详�
 ### 共享内核与契约
 
 ```
-packages/agent-core/         # 零依赖运行时内核：tracing / guardrails / sql 守卫 / llm / memory / typed 记忆
+packages/agent-core/         # 零依赖运行时内核：tracing / guardrails / sql 守卫 / llm / memory（MemoryStore 统一门面）
+                             #   / events（EventBus 多 sink 扇出） / config（KernelConfig） / intent / resilience
 packages/agent-runtime/      # 运行时中间件（admission/coordinator/cache/circuit_breaker/revert/mcp/otel/tracing/db）
                              #   + planner/（Planner 协议 + PlannerRuntime.skill_guard 组合治理）
                              #   + skills/（SkillRegistry + Function/Agent/Remote/Workflow 四执行器）

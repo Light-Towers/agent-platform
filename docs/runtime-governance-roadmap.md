@@ -37,34 +37,31 @@
 
 | 编号 | 项 | 优先级 | 工作量(天) | 核心改动文件 | 前置 |
 |---|---|---|---|---|---|
-| P2-1 | tokens/cost 聚合器 | P2 | 0.3 | `protocol.py` (ExecutionContext) | P1-1 |
-| P2-2 | llm client 计量点 | P2 | 0.5 | `agent_core/llm/` | P2-1 |
+| P2-1 | tokens/cost 聚合器 | P2 | 0.3 | `protocol.py` (ExecutionContext) | P1-1 | ✅ 已落地（2026-08-21）：ExecutionContext 新增 tokens_used/cost_used/max_tokens/max_cost + record_usage() 方法，超限抛 SkillCompositionError；PlannerRuntime 透传 max_tokens/max_cost 配置 |
+| P2-2 | llm client 计量点 | P2 | 0.5 | `agent_core/llm/` | P2-1 | ✅ 已落地（2026-08-21）：计量源 `FallbackChatModel`/`LangChainFallbackModel` 抽取 `usage_metadata`（含 `response_metadata` 兜底）→ `on_usage` 回调外发；`PlannerRuntime` 装配期把 `llm.on_usage` 接到当前 `ExecutionContext.record_usage`（contextvars 按 task 隔离，边界外静默丢弃）；`execute_plan` 的 `status` 事件带出累计 `tokens_used`/`cost_used` |
 | P3-1 | Trajectory 持久化 | P3 | 1.5 | `trajectory/`(新) + `execution_graph.py` | P2-2（tokens 可后补时仅 P1-1） |
 | P3-2 | Trajectory Replay | P3 | 2 | `eval/replay/`(新) | P3-1 |
 | P4-1 | 分布式 session lease | P4 | 3 | `coordinator.py` | P0-1 |
-| P4-2 | 收紧 registry.execute | P4 | 0.5 | `registry.py` + CI lint | — |
-| P4-3 | coalesce 改名/真实现 | P4 | 0.3–1 | `coordinator.py` | — |
+| P4-2 | 收紧 registry.execute | P4 | 0.5 | `registry.py` + CI lint | — | ✅ 已落地（2026-08-21）：架构约束 lint 脚本 `scripts/lint_architecture.py` + Makefile `lint` 目标串联 |
+| P4-3 | coalesce 诚实改名/真实现 | P4 | 0.3 | `coordinator.py` | — | ✅ 已落地（2026-08-21）：方案 A（诚实改名），coalesce 从策略枚举移除，仅保留 queue/reject 二策略 |
 | P5-1 | TrajectoryFingerprint | P2 | 1.5 | `fingerprint.py`(新) | — |
 
 ---
 
 ## P2 — ExecutionBudget 扩展
 
-### P2-1 引入 `tokens` / `cost` 预算聚合器
-- **改动文件**：`packages/agent-runtime/agent_runtime/planner/protocol.py`（`ExecutionContext`）
-- **改动内容**：`ExecutionContext` 增加 `tokens_used: int = 0`、`cost_used: float = 0.0`、`max_tokens: int | None = None`、`max_cost: float | None = None` 及 `record_usage(tokens, cost)` 方法。
-- **关键约束（层边界）**：token/cost 计量点**不在本包**，而在 `agent-core` 的 `llm` client 层。本项只做**聚合器**，不在此埋点。
-- **设计原则**：`ExecutionContext` 是聚合器 + 闸门，`agent-core llm` 是计量源，`PolicyValidator`/`PlannerRuntime` 是装配方，三者职责不重叠。
+### P2-1 ✅ 已落地（2026-08-21）
+- **改动文件**：`packages/agent-runtime/agent_runtime/planner/protocol.py`
+- **改动内容**：`ExecutionContext` 新增 `tokens_used: int = 0` / `cost_used: float = 0.0` / `max_tokens: int | None = None` / `max_cost: float | None = None` 字段及 `record_usage(tokens, cost)` 方法（累计 + 超限抛 `SkillCompositionError`）；`PlannerRuntime.__init__` 新增 `max_tokens` / `max_cost` 参数，`execution()` 入口透传至 `ExecutionContext`。
+- **设计原则**：`ExecutionContext` 是聚合器 + 闸门，`agent-core llm` 是计量源（P2-2），`PlannerRuntime` 是装配方，三者职责不重叠。
 - **工作量**：0.3
 - **验收**：单元测试验证 `record_usage` 累计与超限抛 `SkillCompositionError`。
-- **前置**：P1-1
 
-### P2-2 在 `agent-core` llm client 层做 token 计量（计量点）
-- **改动文件**：`packages/agent-core/agent_core/llm/`（chat/completion 封装处）
-- **改动内容**：LLM 调用返回处暴露 `usage`（prompt/completion tokens）；由 `agent-runtime` 的 Planner 侧消费并 `ExecutionContext.record_usage`。
-- **备注**：需先评估现有 llm client 是否已透传 `usage`；若没有，这是本项唯一真正的新代码。
+### P2-2 ✅ 已落地（2026-08-21）
+- **改动文件**：`packages/agent-core/agent_core/llm/fallback.py`（计量源：`on_usage` 回调 + `_extract_usage` + `_emit_usage` + 流包装 `_wrap_stream`/`_wrap_astream`）；`packages/agent-core/agent_core/llm/fallback_lc.py`（`LangChainFallbackModel` 转发 `on_usage`）；`packages/agent-runtime/agent_runtime/planner/protocol.py`（`PlannerRuntime` 装配期接线 `_on_llm_usage`）；`packages/agent-runtime/agent_runtime/planner/execution_graph.py`（`status` 事件带 `tokens_used`/`cost_used`）。
+- **改动内容**：评估结果——底层 LangChain 客户端（`ChatOpenAI`）本就携带 `usage_metadata`，但此前 `FallbackChatModel` 透传原始 `AIMessage` 不做抽取，故本项是**真新代码（计量点）**而非单纯接线。计量源职责：从 `AIMessage.usage_metadata`（pydantic/dict）或 `response_metadata.usage` 抽取 `total_tokens`（缺失时回退 `input+output`），经 `on_usage(tokens, cost)` 回调外发；cost 在本层无定价信息恒为 0.0。装配方职责：`PlannerRuntime.__init__` 对具备 `set_on_usage` 的 llm 注入回调，回调在 LLM 调用发生时读当前 `ExecutionContext`（contextvars 隔离）并 `record_usage`；边界外静默丢弃。三者职责不重叠（计量源 / 聚合器 / 装配方）。
 - **工作量**：0.5
-- **验收**：一次 agentic 执行后，`status` snapshot 能带出累计 tokens。
+- **验收**：`tests/test_p2_2_usage_metering.py` 10 passed——覆盖 `usage_metadata`/`response_metadata` 抽取、invoke/ainvoke/stream/astream 四路径外发、runtime 接线累计、边界外丢弃、`status` 事件带 tokens。
 - **前置**：P2-1
 
 ---
@@ -102,21 +99,17 @@ P2-1 与 P3-1 的**并行关系取决于 P3-1 是否硬依赖 token 计量点**�
 - **前置**：P0-1（部署约束文档）必须同时存在，避免在 lease 落地前误导多副本部署。
 - **备注**：v2 当前单进程部署下无实际暴露，优先级取决于「是否近期要多副本」。
 
-### P4-2 收紧 `registry.execute` 的直接可见性
-- **现状（已核实三处直调）**：`protocol.py:273-274`（delegate 边界外回退）、`agent_server/agent/graph.py:60-64`（`_invoke` 回退）、`deterministic.py:202,209`（`_run_capability` 直调）。
-- **改动内容**：Python 无真 private，实际手段 = ①命名约定（如 `_execute_internal`）②CI lint 规则（禁止 `registry.execute(` 出现在 `skills/` 外部）③文档契约声明「Skill→Skill 唯一合法路径是 `runtime.delegate()`」。
-- **关键**：**不要现在就改三处调用**——它们是宿主代码、行为正确，改坏风险大于收益，先以 lint/文档约束。
-- **工作量**：0.5
-- **验收**：CI 加一条 grep 规则，非白名单文件出现 `registry.execute(` 或 `get_registry().execute(` 即失败（`agent/graph.py:64` 的调用形态是 `get_registry().execute(`，两种形态都要覆盖）。
+### P4-2 ✅ 已落地（2026-08-21）
+- **改动文件**：新增 `scripts/lint_architecture.py`；`Makefile` lint 目标串联。
+- **改动内容**：架构约束 lint 检测 `registry.execute(` / `get_registry().execute(` 在白名单外的直接调用；白名单含 `protocol.py`（delegate 实现）、`graph.py`（_invoke 回退）、`registry.py`（自身）及测试/评测目录。
+- **验收**：`uv run python scripts/lint_architecture.py` 通过；`make lint` 串联执行。
+- **关键**：三处现有直调调用未改动（宿主代码、行为正确），仅以 lint/文档约束新增调用。
 
-### P4-3 真实现 coalesce（或诚实改名）
-- **改动文件**：`coordinator.py`
-- **改动内容**（二选一，推荐 A）：
-  - **A（短期诚实）**：把 policy 类型字面量从 `"coalesce"/"queue"/"reject"` 收紧为 `"queue"/"reject"`，删掉 `coordinator.py:80-101` 的假 coalesce 分支；等真实现后再加。
-  - **B（长期完整）**：真实现——coalesce 命中时向旧 `request_id` 发取消信号并唤醒队列，只保留最新请求。
-- **工作量**：A=0.3 / B=1
-- **验收**：A=policy 枚举不再含 `coalesce`；B=并发请求只执行最新一个。
-- **理由**：`coordinator.py:82-84` 注释已自认退化为 queue，名称 ≠ 语义是架构债。
+### P4-3 ✅ 已落地（2026-08-21，方案 A 诚实改名）
+- **改动文件**：`coordinator.py`、`schemas.py`、`agent_server/config.py`
+- **改动内容**：coalesce 从策略枚举中移除（`Literal["queue", "reject"]`），退化的 coalesce 分支（与 queue 等价）删除，`CoordinationDecision.decision_type` 同步移除 `"coalesce"`。
+- **验收**：`ruff check` 全绿 + 根 tests 全绿（零回归）。
+- **后续**：若需真 coalesce（取消旧请求），按方案 B 独立专项实施。
 
 ---
 
