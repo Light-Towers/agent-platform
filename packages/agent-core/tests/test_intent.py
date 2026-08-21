@@ -49,3 +49,42 @@ def test_l1_fallback_result_is_direct_with_clarify():
     res = classify_l1("")
     assert res.primary is IntentLabel.DIRECT
     assert res.need_clarify is True
+
+
+# ---------- WS-6：数据外置等价性 + 异步入口 ----------
+
+
+def test_chitchat_words_loaded_from_data():
+    """词表从 prototypes.json 加载（含 strong/weak），与历史行为等价。"""
+    from agent_core.intent.classifier import _chitchat_words, _load_prototypes
+
+    _load_prototypes.cache_clear()
+    _chitchat_words.cache_clear()
+    strong, weak = _chitchat_words()
+    assert "你好" in strong and "在吗" in strong
+    assert "谢谢" in weak and "hi" in weak
+    # 数据驱动：新增词可经数据文件生效（不改代码）
+    data = _load_prototypes()
+    assert set(data["chitchat_shortcuts"]["strong"]) == set(strong)
+
+
+def test_l1_uses_data_driven_shortcut():
+    # 数据中的 strong 词命中短链（等价于改造前硬编码行为）
+    res = classify_l1("你是谁")
+    assert res.primary is IntentLabel.CHITCHAT
+    assert res.source == "l1_keyword"
+    # weak 词仅纯问候时短路，业务句不误伤
+    assert classify_l1("hi").primary is IntentLabel.CHITCHAT
+    assert classify_l1("谢谢你帮我分析一下这份合同").source != "l1_keyword" or \
+        classify_l1("谢谢你帮我分析一下这份合同").primary is not IntentLabel.CHITCHAT
+
+
+def test_classify_l1_async_matches_sync():
+    import asyncio
+
+    from agent_core.intent import classify_l1_async
+
+    sync_res = classify_l1("你好")
+    async_res = asyncio.run(classify_l1_async("你好"))
+    assert async_res.primary is sync_res.primary
+    assert async_res.source == sync_res.source

@@ -4,12 +4,20 @@ LLM 客户端注册表（框架无关内核，源自 zhiku app/lm/lm_utils 的�
 
 - ``register_provider``：注册一个 provider（实现 ``BaseLLMProvider`` 协议）。
 - ``get_llm_client``：按 provider 名解析并**带缓存**构造客户端；缓存键含
-  (provider, model, json_mode, api_key, base_url, extra_body) 以保障不同配置互不串。
+  (provider, model, json_mode, api_key_hash, base_url, extra_body) 以保障不同
+  配置互不串。
+
+WS-8 缓存治理：
+- 缓存为上限 ``_MAX_CACHE`` 的 LRU（长进程不无限增长）；
+- cache key 中 api_key 只存 ``sha256`` 摘要，密钥不再常驻内存缓存键。
 
 框架无关：核心层不依赖 langchain / app.conf；默认模型不再硬编码 ``qwen3-32b``，
 由 provider 的 ``default_model`` 或调用方传入决定。
 """
 
+import hashlib
+import threading
+from collections import OrderedDict
 from typing import Any, Dict, Optional
 
 from agent_core.llm.providers import BaseLLMProvider, OpenAICompatibleProvider
@@ -19,12 +27,38 @@ logger = get_logger(__name__)
 
 # 已注册的 provider（name -> provider 实例）
 _PROVIDERS: Dict[str, BaseLLMProvider] = {}
-# 全局客户端缓存：键为配置元组，值为客户端实例
-_CLIENT_CACHE: Dict[tuple, Any] = {}
+
+# 全局客户端缓存（WS-8：上限 LRU，避免长进程无限增长）
+_MAX_CACHE = 64
+_CLIENT_CACHE: "OrderedDict[tuple, Any]" = OrderedDict()
+_CACHE_LOCK = threading.Lock()
 
 # 预注册内置 openai 兼容适配器
 _DEFAULT_OPENAI_PROVIDER = OpenAICompatibleProvider()
 _PROVIDERS[_DEFAULT_OPENAI_PROVIDER.name] = _DEFAULT_OPENAI_PROVIDER
+
+
+def _hash_api_key(api_key: Optional[str]) -> str:
+    """api_key → sha256 摘要（WS-8：密钥不入缓存键，避免明文常驻内存）。"""
+    if not api_key:
+        return ""
+    return hashlib.sha256(api_key.encode("utf-8")).hexdigest()
+
+
+def _cache_get(key: tuple) -> Any:
+    with _CACHE_LOCK:
+        if key in _CLIENT_CACHE:
+            _CLIENT_CACHE.move_to_end(key)
+            return _CLIENT_CACHE[key]
+    return None
+
+
+def _cache_put(key: tuple, client: Any) -> None:
+    with _CACHE_LOCK:
+        _CLIENT_CACHE[key] = client
+        _CLIENT_CACHE.move_to_end(key)
+        while len(_CLIENT_CACHE) > _MAX_CACHE:
+            _CLIENT_CACHE.popitem(last=False)
 
 
 def register_provider(provider: BaseLLMProvider) -> None:
@@ -67,10 +101,15 @@ def get_llm_client(
     if not target_model:
         raise ValueError("模型名未指定：请传 model 或设置 provider.default_model")
 
-    cache_key = (provider, target_model, json_mode, api_key, base_url, temperature, repr(extra_body), repr(sorted(kwargs.items())))
-    if cache_key in _CLIENT_CACHE:
+    # WS-8：api_key 只以摘要入键；LRU 命中时刷新新鲜度
+    cache_key = (
+        provider, target_model, json_mode, _hash_api_key(api_key),
+        base_url, temperature, repr(extra_body), repr(sorted(kwargs.items())),
+    )
+    cached = _cache_get(cache_key)
+    if cached is not None:
         logger.debug("LLM 客户端缓存命中：provider=%s model=%s json_mode=%s", provider, target_model, json_mode)
-        return _CLIENT_CACHE[cache_key]
+        return cached
 
     client = prov.build(
         model=target_model,
@@ -81,13 +120,14 @@ def get_llm_client(
         extra_body=extra_body,
         **kwargs,
     )
-    _CLIENT_CACHE[cache_key] = client
+    _cache_put(cache_key, client)
     return client
 
 
 def clear_cache() -> None:
     """清空客户端缓存（测试 / 配置热更新用）。"""
-    _CLIENT_CACHE.clear()
+    with _CACHE_LOCK:
+        _CLIENT_CACHE.clear()
 
 
 __all__ = ["register_provider", "get_llm_client", "clear_cache", "BaseLLMProvider", "OpenAICompatibleProvider"]

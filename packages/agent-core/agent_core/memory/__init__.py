@@ -8,7 +8,9 @@
 - ``embedder``：共享 Embedding 提供方（远程硅基流动 / 本地 bge 动态切换）；
 - ``vector_backend``：语义记忆向量后端（Milvus 默认 + PgVector 备选，可切换）；
 - ``mongo_checkpointer``：LangGraph ``MongoCheckpointer``（会话历史持久化到 Mongo）；
-- ``semantic``：语义记忆门面（recall_memories / remember_memory），统一上游调用。
+- ``semantic``：语义记忆门面（recall_memories / remember_memory），统一上游调用；
+- ``store``：统一记忆存储契约 ``MemoryStore``（WS-1：PgMemoryStore 权威后端 +
+  VectorMemoryStore 可选实现 + CapabilityReport 能力探测）。
 
 重要区别（优化 E / E-3 / M-5）：
   ``ConversationMemory`` 面向「对话轮次持久化」（save/get_recent/clear/update），
@@ -41,8 +43,15 @@ from agent_core.memory.semantic import (
     recall_typed,
     remember_memory,
     remember_typed,
+    reset_backend_cache,
     semantic_memory_enabled,
     semantic_memory_typed_enabled,
+)
+from agent_core.memory.store import (
+    CapabilityReport,
+    MemoryStore,
+    PgMemoryStore,
+    VectorMemoryStore,
 )
 from agent_core.memory.vector_backend import (
     DEFAULT_COLLECTION,
@@ -115,6 +124,7 @@ __all__ = [
     "get_checkpointer",
     "get_default_backend",
     "get_semantic_memory",
+    "reset_backend_cache",
     "recall_memories",
     "remember_memory",
     "semantic_memory_enabled",
@@ -125,6 +135,10 @@ __all__ = [
     "remember_typed",
     "consolidate",
     "forget",
+    "CapabilityReport",
+    "MemoryStore",
+    "PgMemoryStore",
+    "VectorMemoryStore",
     "DEFAULT_COLLECTION",
     "MilvusMemoryBackend",
     "PgVectorMemoryBackend",

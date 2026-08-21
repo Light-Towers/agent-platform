@@ -52,5 +52,16 @@
       "给我讲个故事",
       "算一下 123 乘以 456"
     ]
+  },
+  "chitchat_shortcuts": {
+    "_comment": "WS-6：chitchat 短链词表数据化。strong=原文 substring 命中即短路；weak=仅当 query 去标点/空白后整体等于该词时才短路（避免误伤含礼貌词的业务问句）",
+    "strong": [
+      "你好", "您好", "在吗", "你是谁", "你是机器人吗",
+      "who are you", "what are you", "are you a bot"
+    ],
+    "weak": [
+      "谢谢", "感谢", "再见", "拜拜", "哈哈", "嘿",
+      "hi", "hello", "hey", "thanks", "thank you", "bye"
+    ]
   }
 }

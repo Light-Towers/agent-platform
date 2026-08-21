@@ -10,14 +10,20 @@
 
 向量维度由共享 embedder 动态派生（远程硅基流动 bge-m3=1024 / 本地 bge-small-zh=512）。
 
-环境变量（宿主无关，统一约定）：
+环境变量（宿主无关，统一约定，完整清单见 ``agent_core.config``）：
   VECTOR_BACKEND=milvus|pg   （默认 milvus）
   MILVUS_URI / MILVUS_TOKEN
-  DEEPAGENTS_DATABASE_URL    （pg 后端用；各子包可用各自的 *_DATABASE_URL 覆盖）
+  AGENT_PLATFORM_DATABASE_URL（pg 后端用；旧名 DEEPAGENTS_DATABASE_URL 兼容
+                              一个小版本，回退 DATABASE_URL）
   SEMANTIC_MEMORY_COLLECTION （集合/表名，默认 semantic_memory）
   TENANT_ID                  （多租户隔离，默认 default）
-  SEMANTIC_MEMORY_ENABLED     （默认 false；开启才真正写入/召回）
+  SEMANTIC_MEMORY_ENABLED     （总开关，默认 false；开启才真正写入/召回）
   SILICONFLOW_API_KEY         （配了则 embedding 走远程，否则本地）
+
+开关语义（WS-1 收敛后）：``SEMANTIC_MEMORY_ENABLED`` 是唯一总开关，决定记忆
+是否启用；``SEMANTIC_MEMORY_TYPED`` 不再决定「走哪条栈」，只影响 typed 路径的
+加权策略是否生效（见 ``typed.semantic_memory_typed_enabled``）。统一契约见
+``agent_core.memory.store.MemoryStore``（PgMemoryStore 为权威后端）。
 
 此前该门面实现在 deepagents/agent/memory/semantic_memory.py，现收口到内核。
 """
@@ -25,10 +31,10 @@
 from __future__ import annotations
 
 import asyncio
-import os
 from functools import lru_cache
 from typing import Any
 
+from agent_core.config import env_bool, env_database_url, env_str
 from agent_core.logging import get_logger
 from agent_core.memory.typed import (
     MemoryType,
@@ -45,26 +51,27 @@ logger = get_logger(__name__)
 
 
 def _database_url() -> str:
-    """pg 后端 URL：优先通用 DEEPAGENTS_DATABASE_URL，否则回退通用 DATABASE_URL。
+    """pg 后端 URL：经内核配置层解析（新名优先，旧名兼容 + 回退 DATABASE_URL）。
 
-    各子包可注入自己的环境变量名，这里只给通用兜底，避免与宿主耦合。
+    WS-5：不再直读 ``DEEPAGENTS_DATABASE_URL``，统一经 ``env_database_url``。
     """
-    return os.getenv("DEEPAGENTS_DATABASE_URL") or os.getenv("DATABASE_URL", "")
+    return env_database_url()
 
 
 @lru_cache(maxsize=1)
 def _get_backend() -> Any:
-    if os.getenv("SEMANTIC_MEMORY_ENABLED", "false").lower() != "true":
+    if not env_bool("SEMANTIC_MEMORY_ENABLED", False):
         return None
-    mode = os.getenv("VECTOR_BACKEND", "milvus").lower()
+    # WS-5：散点 env 统一经内核配置层读取
+    mode = env_str("VECTOR_BACKEND", "milvus").lower()
     try:
         return create_memory_backend(
             mode=mode,
-            uri=os.getenv("MILVUS_URI", "http://localhost:19530"),
-            token=os.getenv("MILVUS_TOKEN", ""),
+            uri=env_str("MILVUS_URI", "http://localhost:19530"),
+            token=env_str("MILVUS_TOKEN", ""),
             database_url=_database_url(),
-            collection=os.getenv("SEMANTIC_MEMORY_COLLECTION", "semantic_memory"),
-            tenant_id=os.getenv("TENANT_ID", "default"),
+            collection=env_str("SEMANTIC_MEMORY_COLLECTION", "semantic_memory"),
+            tenant_id=env_str("TENANT_ID", "default"),
         )
     except Exception as e:
         logger.warning("语义记忆后端初始化失败，降级为无记忆: %s", e)
@@ -78,6 +85,15 @@ def semantic_memory_enabled() -> bool:
 def get_default_backend() -> Any:
     """返回当前语义记忆后端实例（用于显式注入/测试）。"""
     return _get_backend()
+
+
+def reset_backend_cache() -> None:
+    """清空后端工厂缓存（测试 / 配置热更用）。
+
+    ``_get_backend`` 用 ``lru_cache`` 固化首次解析结果，env 变更后需调用本函数
+    才会重新按新配置构造后端。
+    """
+    _get_backend.cache_clear()
 
 
 async def recall_memories(user_id: str, question: str, k: int = 3) -> list[str]:
@@ -119,6 +135,7 @@ __all__ = [
     "semantic_memory_enabled",
     "get_default_backend",
     "get_semantic_memory",
+    "reset_backend_cache",
     "recall_memories",
     "remember_memory",
     # ADR-0004 阶段 1：类型化记忆下沉内核（可选模块，不替换上面门面）

@@ -15,7 +15,28 @@
 | `agent_core.llm` | register_provider / get_llm_client / BaseLLMProvider | 协议层纯 stdlib（openai 适配器 extra `llm-openai`） |
 | `agent_core.memory` | ConversationMemory / MongoHistoryStore | base 纯 stdlib；mongo 实现 extra `memory-mongo` |
 | `agent_core.tools` | Tool / ToolRegistry / guarded_invoke / wrap_tool / MCPToolAdapter | base/registry/guarded 纯 stdlib；mcp 适配器 extra `tools-mcp` |
-| `agent_core.resilience` | retry / timeout / CircuitBreaker / validate_config | 纯 stdlib |
+| `agent_core.resilience` | retry / timeout / CircuitBreaker（STATE_* 常量） / validate_config | 纯 stdlib |
+| `agent_core.events` | EventSink / EventBus / CallbackSink / LegacyStreamSink / OTelSpanSink（WS-4 统一事件出口） | 纯 stdlib |
+| `agent_core.config` | env_bool / env_int / env_float / env_str / env_database_url / KernelConfig（WS-5） | 纯 stdlib |
+| `agent_core.memory.store` | MemoryStore / PgMemoryStore / VectorMemoryStore / CapabilityReport（WS-1） | 纯 stdlib |
+
+## 环境变量清单（新增 env 必须登记）
+
+| 变量 | 默认值 | 所属模块 | 用途 |
+|---|---|---|---|
+| `SEMANTIC_MEMORY_ENABLED` | `false` | memory.semantic | 语义记忆总开关（唯一总开关） |
+| `SEMANTIC_MEMORY_TYPED` | `true` | memory.typed | typed 加权策略开关（WS-1 起默认开；不再决定走哪条栈） |
+| `SEMANTIC_MEMORY_COLLECTION` | `semantic_memory` | memory.semantic | 向量集合/表名 |
+| `VECTOR_BACKEND` | `milvus` | memory.semantic | 向量后端（`milvus` \| `pg`） |
+| `MILVUS_URI` / `MILVUS_TOKEN` | `http://localhost:19530` / `""` | memory.semantic | Milvus 连接 |
+| `AGENT_PLATFORM_DATABASE_URL` | 回退 `DATABASE_URL` | config | pg 后端 URL；旧名 `DEEPAGENTS_DATABASE_URL` 兼容一个小版本 |
+| `TENANT_ID` | `default` | memory | 多租户隔离 |
+| `MEMORY_FORGET_THRESHOLD` | `0.1` | memory.typed | consolidate 重要度阈值 |
+| `MEMORY_FORGET_AGE_DAYS` | `30` | memory.typed | consolidate 老化天数 |
+| `EMBEDDING_MODE` / `EMBEDDING_DIM` | `auto` / `512` | memory.embedder | embedder 选型（mock 维度） |
+| `SILICONFLOW_API_KEY` | `""` | memory.embedder | 配了则 embedding 走远程硅基流动 |
+| `MONGO_URL` / `MONGO_DB` | `""` / `deepagents` | memory | Mongo 会话历史/checkpoint |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` / `AGENT_CORE_TRACE_ENABLED` | `""` / `false` | tracing | OTel 导出总开关 |
 
 ## 安装
 
