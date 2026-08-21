@@ -31,7 +31,11 @@ class CircuitBreaker(_BaseBreaker):
     """
 
     def __init__(self, failure_threshold: int = 3, recovery_seconds: float = 30.0) -> None:
-        super().__init__(failure_threshold=failure_threshold, reset_timeout=recovery_seconds)
+        super().__init__(
+            failure_threshold=failure_threshold,
+            reset_timeout=recovery_seconds,
+            max_half_open_probe=1,
+        )
 
     @property
     def state(self) -> str:
