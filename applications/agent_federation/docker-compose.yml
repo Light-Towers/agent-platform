@@ -158,8 +158,8 @@ services:
     restart: unless-stopped
     environment:
       - CLICKHOUSE_DB=default
-      - CLICKHOUSE_USER=${CLICKHOUSE_USER:-clickhouse}
-      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD:-clickhouse}
+      - CLICKHOUSE_USER=${CLICKHOUSE_USER:?请设置 CLICKHOUSE_USER}
+      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD:?请设置 CLICKHOUSE_PASSWORD}
     ports:
       - "8123:8123"
       - "9000:9000"
@@ -180,8 +180,7 @@ services:
     entrypoint: sh
     command: -c 'mkdir -p /data/langfuse && minio server --address ":9000" --console-address ":9001" /data'
     environment:
-      - MINIO_ROOT_USER=${MINIO_ROOT_USER:-minio}
-      # 安全：MINIO_ROOT_PASSWORD 已在上方 langfuse 段声明为必填，此处复用同一变量。
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER:?请设置 MINIO_ROOT_USER}
       - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
     ports:
       - "9090:9000"
@@ -201,7 +200,7 @@ services:
     container_name: deepagents-valkey
     restart: unless-stopped
     command: >
-      --requirepass ${REDIS_AUTH:-myredissecret}
+      --requirepass ${REDIS_AUTH:?请设置 REDIS_AUTH}
       --maxmemory-policy noeviction
     ports:
       - "6379:6379"
