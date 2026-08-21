@@ -53,9 +53,11 @@ _provider: Any = None
 _base_attrs: Dict[str, Any] = {}
 _state_lock = threading.Lock()
 
-# 每请求上下文：request_id / user_query_hash 走 contextvars，
+# 每请求上下文：request_id / trace_id / span_id / user_query_hash 走 contextvars，
 # 使并发请求互不污染。
 _request_id_var: contextvars.ContextVar[str] = contextvars.ContextVar("agent_core_request_id", default="")
+_trace_id_var: contextvars.ContextVar[str] = contextvars.ContextVar("agent_core_trace_id", default="")
+_span_id_var: contextvars.ContextVar[str] = contextvars.ContextVar("agent_core_span_id", default="")
 _user_query_hash_var: contextvars.ContextVar[str] = contextvars.ContextVar("agent_core_user_query_hash", default="")
 
 # ---------------------------------------------------------------------------
@@ -210,6 +212,48 @@ def set_request_context(request_id: Optional[str] = None, user_query_hash: Optio
 def get_request_id() -> str:
     """读取当前上下文中的 request_id（无则空串）。"""
     return _request_id_var.get()
+
+
+def get_trace_id() -> str:
+    """读取当前上下文中的 trace_id（无则空串）。"""
+    return _trace_id_var.get()
+
+
+def get_span_id() -> str:
+    """读取当前上下文中的 span_id（无则空串）。"""
+    return _span_id_var.get()
+
+
+def set_trace_context(trace_id: Optional[str] = None, span_id: Optional[str] = None) -> None:
+    """设置 trace_id / span_id 到当前上下文（contextvars）。"""
+    if trace_id is not None:
+        _trace_id_var.set(trace_id)
+    if span_id is not None:
+        _span_id_var.set(span_id)
+
+
+def get_traceparent() -> str:
+    """生成 W3C traceparent 头部值：version-trace-id-span-id-flags。
+    
+    格式: 00-trace_id-span_id-01
+    trace_id: 32 hex chars (16 bytes)
+    span_id: 16 hex chars (8 bytes)
+    flags: 01 = sampled
+    """
+    trace_id = _trace_id_var.get()
+    span_id = _span_id_var.get()
+    
+    # 如果没有 trace_id，生成一个新的 32 字符 trace_id
+    if not trace_id:
+        trace_id = uuid.uuid4().hex  # 32 hex chars
+        _trace_id_var.set(trace_id)
+    
+    # 如果没有 span_id，生成一个新的 16 字符 span_id
+    if not span_id:
+        span_id = uuid.uuid4().hex[:16]  # 16 hex chars
+        _span_id_var.set(span_id)
+    
+    return f"00-{trace_id}-{span_id}-01"
 
 
 def is_tracing_enabled() -> bool:
