@@ -30,7 +30,7 @@ def test_fingerprint_differs_by_args():
 
 
 def test_execution_context_blocks_duplicate_fingerprint():
-    ctx = ExecutionContext()
+    ctx = ExecutionContext(loop_fingerprint=True)
     ctx.enter_skill("a", {"q": "x"})
     ctx.enter_skill("b", {"q": "x"})
     # A → B → A（同入参）应被语义指纹拦
@@ -56,7 +56,10 @@ def test_execution_context_allows_immediate_reentry_only_via_stack():
 
 @pytest.mark.asyncio
 async def test_delegate_blocks_semantic_loop():
-    runtime = PlannerRuntime(registry=_FakeRegistry(), max_steps=20, max_skill_depth=8)
+    runtime = PlannerRuntime(
+        registry=_FakeRegistry(), max_steps=20, max_skill_depth=8,
+        enable_loop_fingerprint=True,
+    )
 
     async def run():
         async with runtime.execution():
@@ -71,8 +74,21 @@ async def test_delegate_blocks_semantic_loop():
 
 @pytest.mark.asyncio
 async def test_delegate_allows_distinct_args():
-    runtime = PlannerRuntime(registry=_FakeRegistry(), max_steps=20, max_skill_depth=8)
+    runtime = PlannerRuntime(
+        registry=_FakeRegistry(), max_steps=20, max_skill_depth=8,
+        enable_loop_fingerprint=True,
+    )
     async with runtime.execution():
         await runtime.delegate("search", q="weather")
         await runtime.delegate("search", q="news")  # 不同入参：允许
+    assert runtime.context is None
+
+
+@pytest.mark.asyncio
+async def test_delegate_default_off_allows_repeated_same_args():
+    # 默认关闭：合法重放/重规划（同入参重复调用）不误伤
+    runtime = PlannerRuntime(registry=_FakeRegistry(), max_steps=20, max_skill_depth=8)
+    async with runtime.execution():
+        await runtime.delegate("search", q="weather")
+        await runtime.delegate("search", q="weather")
     assert runtime.context is None

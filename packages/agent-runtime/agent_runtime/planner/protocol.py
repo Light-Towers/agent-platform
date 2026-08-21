@@ -146,8 +146,9 @@ class ExecutionContext:
     max_cost: float | None = None
     # P3-1：逐步明细（skill / args / result / latency / tokens / error），供 Trajectory 持久化
     steps: list[TrajectoryStep] = field(default_factory=list)
-    # P5-1：语义循环指纹（skill + 归一化 args），重复指纹拒绝继续
+    # P5-1：语义循环指纹（skill + 归一化 args），重复指纹拒绝继续（需 enable_loop_fingerprint 开启）
     fingerprints: set[str] = field(default_factory=set)
+    loop_fingerprint: bool = False
 
     @property
     def call_depth(self) -> int:
@@ -174,7 +175,7 @@ class ExecutionContext:
                 f"Skill 嵌套深度超上限（max_depth={self.max_depth}）"
             )
         fp = _fingerprint(name, kwargs or {})
-        if fp in self.fingerprints:
+        if self.loop_fingerprint and fp in self.fingerprints:
             raise SkillCompositionError(
                 f"语义循环检测：重复调用 {name}（同入参已执行过），拒绝继续"
             )
@@ -263,6 +264,7 @@ class PlannerRuntime:
         max_tokens: int | None = None,
         max_cost: float | None = None,
         trajectory_store: Any = None,
+        enable_loop_fingerprint: bool = False,
     ):
         self.registry = registry
         self.llm = llm
@@ -275,6 +277,8 @@ class PlannerRuntime:
         self.max_cost = max_cost
         # P3-1：轨迹存储后端（可选注入）；未注入则不持久化（单进程/测试默认跳过）
         self.trajectory_store = trajectory_store
+        # P5-1：语义循环指纹（增强项，默认关闭，避免误伤合法重放/重规划）
+        self.enable_loop_fingerprint = enable_loop_fingerprint
         # P2-2 计量接线：把 llm 客户端的 usage 回调接到当前执行的 ExecutionContext。
         # 计量源（agent-core FallbackChatModel）→ 聚合器（ExecutionContext.record_usage）
         # 经 contextvars 按 asyncio task 隔离：LLM 调用发生时取当前执行上下文，跨执行不串。
@@ -334,6 +338,7 @@ class PlannerRuntime:
         ctx = ExecutionContext(
             max_steps=self.max_steps, max_depth=self.max_skill_depth, deadline=deadline,
             max_tokens=self.max_tokens, max_cost=self.max_cost,
+            loop_fingerprint=self.enable_loop_fingerprint,
         )
         token = self._ctx_var.set(ctx)
         try:
