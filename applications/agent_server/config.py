@@ -98,7 +98,9 @@ class Settings(BaseLLMSettings):
     # 输入护栏（opt-in，默认 false）：PII 脱敏 + prompt injection 检测
     guard_enabled: bool = False
 
-    # Plan-F Phase 2: Planner 实现选择（deterministic | agentic），PLANNER env 覆盖
+    # Plan-F Phase 2: Planner 实现选择（deterministic | graph | agentic | auto），PLANNER env 覆盖。
+    # ``auto`` 启用 Phase A Mode Selector：按问题/能力自动选 deterministic/workflow/graph/agentic；
+    # 其余值为强制 override（调试/灰度）。
     planner: str = "deterministic"
 
     # Plan-F Phase 3: Skill 组合治理（agentic 组合路径的护栏边界；
