@@ -7,11 +7,17 @@ import logging
 from contextlib import asynccontextmanager
 
 from agent_runtime.admission import AdmissionQueue, RateLimiter
+from agent_runtime.admission_gateway import PgAdmissionController
 from agent_runtime.coordinator import SessionCoordinator
 from agent_runtime.db import close_pool, get_pool, init_pool
 from agent_runtime.mcp_client import MCPClientManager
 from agent_runtime.otel import force_flush as otel_force_flush
 from agent_runtime.otel import get_otel_tracer, init_otel
+from agent_runtime.planner.durability_pg import (
+    PgCheckpointStore,
+    PgExecutionOwnershipStore,
+    PgIdempotencyStore,
+)
 from agent_runtime.revert import RevertHandler
 from agent_runtime.tracing import get_langfuse_callbacks
 from fastapi import FastAPI
@@ -46,14 +52,67 @@ async def _build_checkpointer():
     return saver
 
 
+def _build_pg_stores(pool):
+    """构建 PG 持久化后端（§20.1/20.2）。
+
+    仅在 pool 非 None 时创建；返回 (checkpoint_store, idempotency_store, ownership_store)。
+    """
+    if pool is None:
+        return None, None, None
+    checkpoint_store = PgCheckpointStore(pool)
+    idempotency_store = PgIdempotencyStore(pool)
+    ownership_store = PgExecutionOwnershipStore(pool)
+    return checkpoint_store, idempotency_store, ownership_store
+
+
+def _build_admission_controller(pool, settings):
+    """构建 admission 控制器：distributed 模式用 PgAdmissionController，其余用 AdmissionQueue。"""
+    if pool is None:
+        return None
+    if settings.runtime_mode == "distributed":
+        return PgAdmissionController(
+            pool,
+            capacity=settings.admission_queue_capacity,
+            timeout_s=settings.admission_queue_timeout_seconds,
+        )
+    # single_node / local：继续用现有 AdmissionQueue（内存调度 + PG 持久化队列）
+    if settings.admission_effective_enabled:
+        limiter = RateLimiter(
+            per_user=settings.admission_rate_limit_per_user,
+            per_session=settings.admission_rate_limit_per_session,
+            global_=settings.admission_rate_limit_global,
+        )
+        return AdmissionQueue(
+            pool=pool,
+            capacity=settings.admission_queue_capacity,
+            timeout_seconds=settings.admission_queue_timeout_seconds,
+            rate_limiter=limiter,
+            effective_enabled=True,
+        )
+    return None
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
+
+    # §20 C4: distributed 模式必须有 PG，否则 fail fast
+    if settings.runtime_mode == "distributed" and not settings.db_enabled:
+        raise RuntimeError(
+            "runtime_mode=distributed 要求配置 DATABASE_URL，当前为空。"
+            "请设置 DATABASE_URL 或改用 runtime_mode=single_node/local。"
+        )
+
     await init_pool(
         database_url=settings.database_url,
         db_pool_max_size=settings.db_pool_max_size,
     )
+    pool = get_pool()
     checkpointer = await _build_checkpointer()
+
+    # §20.1/20.2: 构建 PG 持久化后端
+    checkpoint_store, idempotency_store, ownership_store = _build_pg_stores(pool)
+
     llm = build_chat_model()
 
     # Phase 2: 会话并发协调
@@ -65,30 +124,19 @@ async def lifespan(app: FastAPI):
     else:
         app.state.coordinator = None
 
-    # Phase 2: durable admission（opt-in + DATABASE_URL 双重开关）
-    if settings.admission_effective_enabled:
-        limiter = RateLimiter(
-            per_user=settings.admission_rate_limit_per_user,
-            per_session=settings.admission_rate_limit_per_session,
-            global_=settings.admission_rate_limit_global,
-        )
-        admission_queue = AdmissionQueue(
-            pool=get_pool(),
-            capacity=settings.admission_queue_capacity,
-            timeout_seconds=settings.admission_queue_timeout_seconds,
-            rate_limiter=limiter,
-            effective_enabled=True,
-        )
-        recovered = await admission_queue.recover_on_startup()
+    # Phase 2: admission 控制器（按 runtime_mode 选择实现）
+    admission_controller = _build_admission_controller(pool, settings)
+    if admission_controller is not None:
+        recovered = await admission_controller.recover_on_startup()
         if recovered:
             logger.info("admission recovered %d interrupted requests", recovered)
-        app.state.admission_queue = admission_queue
+        app.state.admission_controller = admission_controller
     else:
-        app.state.admission_queue = None
+        app.state.admission_controller = None
 
     # Phase 2: 会话回退 revert
     if settings.revert_enabled:
-        app.state.revert_handler = RevertHandler(checkpointer, get_pool())
+        app.state.revert_handler = RevertHandler(checkpointer, pool)
     else:
         app.state.revert_handler = None
 
@@ -113,7 +161,7 @@ async def lifespan(app: FastAPI):
             configs = [McpServerConfig(**c) for c in json.loads(settings.mcp_servers)]
             mcp_manager = MCPClientManager(
                 server_configs=configs,
-                pool=get_pool(),
+                pool=pool,
                 breaker_failure_threshold=settings.breaker_failure_threshold,
                 breaker_recovery_seconds=settings.breaker_recovery_seconds,
             )
@@ -146,10 +194,12 @@ async def lifespan(app: FastAPI):
         registry=registry,
         llm=llm,
         mcp_manager=mcp_manager,
-        pool=get_pool(),
+        pool=pool,
         max_skill_depth=settings.max_skill_depth,
         max_steps=settings.max_steps,
         max_duration_seconds=settings.max_execution_seconds or None,
+        checkpoint_store=checkpoint_store,
+        ownership_store=ownership_store,
     )
     # 绑定 delegate：graph 节点的 _invoke 此后经 runtime.delegate 调用
     delegate_ref.delegate = app.state.planner_runtime.delegate
@@ -159,16 +209,17 @@ async def lifespan(app: FastAPI):
         host=settings.langfuse_host,
     )
     logger.info(
-        "agent-platform 就绪 storage=%s llm=%s pool=%s coordination=%s admission=%s revert=%s otel=%s mcp=%s planner=%s",
+        "agent-platform 就绪 storage=%s llm=%s pool=%s coordination=%s admission=%s revert=%s otel=%s mcp=%s planner=%s runtime_mode=%s",
         "postgres" if settings.db_enabled else "memory",
         settings.llm_enabled,
-        get_pool() is not None,
+        pool is not None,
         settings.coordination_enabled,
-        settings.admission_effective_enabled,
+        admission_controller is not None,
         settings.revert_enabled,
         settings.otel_effective_enabled,
         mcp_manager is not None,
         getattr(app.state.planner, "kind", "unknown"),
+        settings.runtime_mode,
     )
     yield
     # Phase 2: OTel flush

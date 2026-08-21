@@ -835,22 +835,67 @@ Durability   = 中断后如何继续做
 > 以下任务**无法在纯单元测试环境（无 PostgreSQL / 无真实 LLM / 单进程）内完成或验证**，
 > 需要对应的外部依赖与部署形态。其**可单测的纯逻辑半程**已在本文档前述章节落地（✅），
 > 此处仅记录「需环境验证/落地」的剩余部分，避免与已完成的代码混淆。
+>
+> **§20 生产级硬性验收约束（实现本节的硬性标准，缺一不可）**：多副本部署要「真正成立」，
+> 不能只做到「能跑」。以下 5 条约束是 20.1–20.4 全部子项的统一验收基线，实现时逐条对照。
+>
+> - **C1 — 所有跨副本状态变更必须原子 CAS**：lease 抢占、slot 抢占、stale reap 一律用
+>   `UPDATE … WHERE <owner=$me OR expires_at<now()> RETURNING` 的 compare-and-swap，
+>   只有拿到 `RETURNING` 的副本才算成功。禁止「`SELECT` 判断 → `UPDATE` 写入」的非原子两步。
+> - **C2 — PG = source of truth，LISTEN/NOTIFY = 唤醒信号（非消息队列）**：所有事实以 PG 表为准；
+>   `NOTIFY` 仅用于「可能有事发生」的唤醒；等待方被唤醒后**必须回查 PG** 再决定动作，且带
+>   periodic retry / reconcile 兜底——即使 `NOTIFY` 丢失、LISTEN 断连、Pod 重启、PG 抖动，
+>   正确性仍不破坏。
+> - **C3 — admission 是行级事实 + TTL，不是全局 counter**：`admission_slots` 每行一个占用
+>   （`execution_id` / `owner` / `acquired_at` / `expires_at`），并发上限用 `COUNT(*)` +
+>   带 TTL 自动过期；Pod crash 后其 slot 行随 TTL 自愈，不会被「`active=7` 减不回来」卡死。
+>   slot 抢占同样走 C1 的 CAS（`COUNT < limit` 与 `INSERT` 不可分两步）。
+> - **C4 — 生产模式 fail fast，不自动 fallback InMemory**：`distributed` 模式下若 `DATABASE_URL`
+>   缺失 / 连接失败 → 启动即报错退出；**禁止**「DB 配错就静默退回 InMemory 多 Pod 各自维护状态」
+>   的事故路径。`development` 模式才允许 InMemory。
+> - **C5 — 测试必须覆盖四组**（见 §20.5）：单元语义、并发 CAS 正确性、kill-pod resume、NOTIFY
+>   丢失后仍经 periodic reconcile 恢复。缺 D 组（NOTIFY 丢失）即视为未达标。
+>
+> **核心原则一句**：PG 保存事实，LISTEN/NOTIFY 负责唤醒，periodic reconciliation 保证最终一致性。
 
 ### 20.1 跨进程 durable recovery（multi-replica）
 - **已落地（进程内，可单测）**：`ExecutionOwnershipStore` / `InMemoryExecutionOwnershipStore` /
   `reap_stale_executions` 完成 stale 检测 + 所有权回收；`AdmissionQueue` 的内存调度已落地。
-- **待环境验证**：多副本下 ownership / 排队需跨进程协调。需以 **PgAdvisory / PG `LISTEN/NOTIFY`**
-  实现 `ExecutionOwnershipStore` 的持久化后端，并在 `AdmissionQueue.mark_completed` 把
-  queued→admitted 提升时**跨进程通知**等待者（当前仅 `asyncio.Condition` 唤醒同进程协程）。
-- **依赖**：PostgreSQL + 多副本部署 + 多进程集成测试。
+- **待环境验证（按 C1/C2/C4）**：多副本下 ownership / 排队需跨进程协调。需新增持久化后端
+  `PgExecutionOwnershipStore`，其 `acquire` / `reap_stale` 均走 C1 的原子 CAS：
+  ```sql
+  -- 抢占 lease（acquire / heartbeat 复用同构）
+  UPDATE execution_leases
+  SET owner = $2, expires_at = now() + ($3 || ' seconds')::interval
+  WHERE execution_id = $1 AND (owner = $2 OR expires_at < now())
+  RETURNING execution_id;
+  -- 回收 stale：只有拿到 RETURNING 的副本有资格发 execution_resumable NOTIFY
+  UPDATE execution_leases
+  SET owner = NULL, expires_at = NULL
+  WHERE execution_id = $1 AND expires_at < now()
+  RETURNING execution_id;
+  ```
+  stale reaper 每副本起后台任务周期调用 `reap_stale_executions`（纯逻辑已在 durability.py:188
+  落地），但回收动作本身必须 C1 CAS——**多副本同时发现 stale 也不会触发两次 resume**。
+  `NOTIFY execution_resumable` 仅唤醒 resume loop，恢复流程为「唤醒 → 查 PG resumable →
+  CAS acquire ownership → 从 checkpoint 恢复 → 继续」（C2），`NOTIFY` 丢失由 periodic scan 兜底。
+- **依赖**：PostgreSQL + 多副本部署 + 多进程集成测试（§20.5 C/D 组）。
 
 ### 20.2 PG / Redis 后端持久化
 - **已落地**：`InMemoryCheckpointStore` / `InMemoryIdempotencyStore` / `InMemoryAdmissionController`
   （测试 / 单进程默认后端）。
-- **待环境验证**：重启 / 多副本下 checkpoint、idempotency、admission 状态需持久化，避免丢失。
-  需新增 `PgCheckpointStore` / `PgIdempotencyStore`（或 Redis 等价物）并注入 `PlannerRuntime` /
-  `run_admitted`。
-- **依赖**：PostgreSQL 或 Redis + 连接池配置。
+- **待环境验证（按 C1–C4）**：重启 / 多副本下 checkpoint、idempotency、admission 状态需持久化，
+  避免丢失。新增 `PgCheckpointStore` / `PgIdempotencyStore` / `PgAdmissionController`（或 Redis
+  等价物）并注入 `PlannerRuntime` / `run_admitted`。三个状态都属于**跨副本必须共享的执行事实**：
+  | Store                       | PG 表                    | 关键语义               |
+  | --------------------------- | ----------------------- | ---------------------- |
+  | `PgCheckpointStore`         | `execution_checkpoints` | execution 的可恢复状态 |
+  | `PgIdempotencyStore`        | `idempotency_keys`      | 防止重复执行            |
+  | `PgExecutionOwnershipStore` | `execution_leases`      | 谁拥有 execution、何时过期 |
+  - 实现必须保持原 ABC **语义完全不变**（仅后端替换）。
+  - `admission_slots` 设计遵循 C3：行级占用 + TTL，`acquire` 走 CAS，非全局 counter。
+  - 生产模式（C4）下 PG 缺失即 fail fast。
+- **依赖**：PostgreSQL 或 Redis + 连接池配置 + 按 §20.5 的四组测试。
 
 ### 20.3 deepagents 桥接端到端灰度验证
 - **已落地**：`AgenticRuntimeBridge` + 联邦侧 `AGENTIC_RUNTIME_BRIDGE` opt-in 适配器
@@ -861,6 +906,18 @@ Durability   = 中断后如何继续做
 
 ### 20.4 真多副本下的 Durability 全链路
 - 综合 20.1 / 20.2：进程崩溃后由**另一副本**基于同一 `execution_id` 的持久化 checkpoint resume，
-  跨进程 stale reaper 触发 recovery。需在多副本集成环境中做故障注入验证。
+  跨进程 stale reaper（C1 CAS 防重复触发）唤醒 recovery（C2 信号 + 兜底）。需在多副本集成环境中
+  做故障注入验证（§20.5 C 组：kill Pod A → lease expire → Pod B reap → CAS acquire → resume，
+  断言不重跑 / 不丢 checkpoint / 不出现两 owner）。
 - **依赖**：多副本部署 + 故障注入工具。
+
+### 20.5 §20 验收测试矩阵（C5 展开）
+- **A 组 — 单元语义**：Checkpoint CRUD、Idempotency CRUD、Lease acquire/renew/release/expiry、
+  Admission acquire/release。用 fake pool 覆盖 PG 类语义（与 `test_session_lease.py` 同范式）。
+- **B 组 — 并发正确性**：10 worker 同时 `acquire` 同一 execution → 成功者恰 1、失败者 9；
+  `limit=5` 下 100 并发 admission → 任意时刻 `active <= 5`。验证 C1 的 CAS 不被绕过。
+- **C 组 — 故障恢复**：Pod A 执行中 checkpoint → kill A → lease 过期 → Pod B 检测 stale →
+  CAS acquire → resume；断言不从头执行、不执行两次、不丢 checkpoint、不出现两个 owner。
+- **D 组 — 通知失效（极易漏，强制要求）**：人为丢弃 `NOTIFY` → 验证 periodic reconciliation
+  仍能发现 vacancy / resumable execution 并最终恢复。不过此组即视为未达标（仍是「依赖通知才正确」）。
 

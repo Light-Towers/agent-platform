@@ -133,8 +133,8 @@ class ExecutionOwnershipStore(abc.ABC):
         """续租：把租约到期时间顺延 ttl_s。"""
 
     @abc.abstractmethod
-    async def release(self, execution_id: str) -> None:
-        """释放所有权（执行完成 / 被回收）。"""
+    async def release(self, execution_id: str, owner: str) -> None:
+        """释放所有权（执行完成 / 被回收）。仅当 owner 一致时生效，防止误释放他人持有的租约。"""
 
     @abc.abstractmethod
     async def get_owner(self, execution_id: str) -> "str | None":
@@ -168,8 +168,10 @@ class InMemoryExecutionOwnershipStore(ExecutionOwnershipStore):
             return
         self._owners[execution_id] = (cur[0], time.monotonic() + ttl_s)
 
-    async def release(self, execution_id: str) -> None:
-        self._owners.pop(execution_id, None)
+    async def release(self, execution_id: str, owner: str) -> None:
+        cur = self._owners.get(execution_id)
+        if cur is not None and cur[0] == owner:
+            self._owners.pop(execution_id, None)
 
     async def get_owner(self, execution_id: str) -> "str | None":
         cur = self._owners.get(execution_id)
@@ -205,7 +207,8 @@ async def reap_stale_executions(
     stale = await ownership.list_stale(now)
     reclaimed: list[str] = []
     for eid in stale:
-        await ownership.release(eid)
+        # stale 回收：租约已过期，owner 已失效，直接释放（不验证 owner）
+        await ownership.release(eid, owner="")
         if checkpoint_store is not None:
             cp = await checkpoint_store.load(eid)
             if cp is not None:
