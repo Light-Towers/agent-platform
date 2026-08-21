@@ -11,9 +11,14 @@ from typing import Literal
 from pydantic import BaseModel, Field
 from shared_schemas import Priority
 
+# TD-10：准入状态枚举常量（避免散点字符串字面量写死进 SQL / 比较逻辑）
+ADMISSION_ADMITTED = "admitted"
+ADMISSION_QUEUED = "queued"
+ADMISSION_REJECTED = "rejected"
+
 
 class AdmissionDecision(BaseModel):
-    status: Literal["admitted", "queued", "rejected"]
+    status: Literal[ADMISSION_ADMITTED, ADMISSION_QUEUED, ADMISSION_REJECTED]
     queue_position: int | None = None
     priority: Priority = "normal"
     estimated_wait_seconds: float | None = None
@@ -21,7 +26,7 @@ class AdmissionDecision(BaseModel):
 
 
 class CoordinationDecision(BaseModel):
-    decision_type: Literal["serialize", "coalesce", "queue", "reject"]
+    decision_type: Literal["serialize", "queue", "reject"]
     request_id: str
     wait_seconds: float = 0.0
 
