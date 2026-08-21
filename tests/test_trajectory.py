@@ -10,7 +10,6 @@
 from __future__ import annotations
 
 import pytest
-
 from agent_runtime.planner.execution_graph import execute_plan
 from agent_runtime.planner.protocol import ExecutionContext, Plan, PlannerRuntime
 from agent_runtime.trajectory import (

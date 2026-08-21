@@ -16,7 +16,6 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from typing import Any
 
 from agent_runtime.trajectory.models import TrajectoryRecord, TrajectoryStep
