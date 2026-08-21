@@ -91,13 +91,13 @@ P2-1 与 P3-1 的**并行关系取决于 P3-1 是否硬依赖 token 计量点**�
 
 ## P4 — 分布式 / Recovery（生产级成熟度的最后一块）
 
-### P4-1 分布式 Session Ownership（PG lease）
-- **改动文件**：`packages/agent-runtime/agent_runtime/coordinator.py`
-- **改动内容**：把 `_active` 的进程内 dict 换成 PG `advisory lock` 或 `lease` 表；`acquire`/`release` 改走 DB。保留当前 asyncio 实现为单进程快速路径，双写。
-- **工作量**：3
-- **验收**：两个进程同 session 并发请求，只有一个能 `serialize`，另一个 `queue`/`reject`。
-- **前置**：P0-1（部署约束文档）必须同时存在，避免在 lease 落地前误导多副本部署。
-- **备注**：v2 当前单进程部署下无实际暴露，优先级取决于「是否近期要多副本」。
+### P4-1 ✅ 已落地（2026-08-21，可插拔 lease 后端）
+- **改动文件**：`packages/agent-runtime/agent_runtime/coordinator.py`（新增 `LeaseBackend` / `InMemoryLeaseBackend` / `PgAdvisoryLeaseBackend`）
+- **改动内容**：`_active` 进程内 dict 抽成可插拔 `LeaseBackend`——默认 `InMemoryLeaseBackend`（asyncio 进程内快路径，行为与旧 `_active` 一致）；多副本注入 `PgAdvisoryLeaseBackend`（`session_leases` 表 `INSERT ... ON CONFLICT DO UPDATE WHERE expires_at<now()` 单飞授权 + TTL 自动过期防崩溃死锁 + 双写本地镜像）。`serialize` 授权经 `lease.try_acquire` 单飞：仅一个 owner 成功，其余走 queue/reject。`Coordinator(lease_backend=, lease_ttl=)` 注入式；`release` 经 `lease.release`（未持有则 no-op）。
+- **工作量**：3（实现 + 单测）
+- **验收**：`tests/test_session_lease.py` 覆盖 InMemory 单飞/释放、PG 单飞/双写/TTL 过期/错误 owner 释放 no-op、Coordinator 注入后端后同 session 仅一 owner、`PgAdvisoryLeaseBackend` 模拟跨进程并发拒绝。
+- **前置**：P0-1（部署约束文档）已存在，避免 lease 落地前误导多副本部署。
+- **已知局限**：跨进程 queue 唤醒（B 进程排队后 A 进程 release 需跨进程通知）仍需 durable execution，不在本期；单进程部署完全等价旧行为。多副本启用前需建 `session_leases` 表（DDL 见部署文档）。
 
 ### P4-2 ✅ 已落地（2026-08-21）
 - **改动文件**：新增 `scripts/lint_architecture.py`；`Makefile` lint 目标串联。
