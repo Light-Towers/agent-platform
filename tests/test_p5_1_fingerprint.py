@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import pytest
-
 from agent_runtime.planner.protocol import (
     ExecutionContext,
     PlannerRuntime,
