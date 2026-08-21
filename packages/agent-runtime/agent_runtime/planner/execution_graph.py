@@ -247,11 +247,14 @@ async def _run_graph_in_place(
                     )
                 else:
                     results[node_id] = result
-                    # checkpoint 落盘：每完成一个节点即持久化（崩溃后 resume 可复用）
+                    # checkpoint 落盘：每完成一个节点即持久化（崩溃后 resume 可复用）。
+                    # 经传入的 checkpoint_store 保存，并注入当前 fencing token（generation，
+                    # 来自 runtime execution 上下文），PG 实现据此做分布式 fencing（G4）。
                     if checkpoint_store is not None and execution_id is not None:
-                        await checkpoint_store.save(
-                            Checkpoint(execution_id, dict(results))
-                        )
+                        cp = Checkpoint(execution_id, dict(results))
+                        ctx = runtime.context
+                        cp.generation = ctx.generation if ctx is not None else 0
+                        await checkpoint_store.save(cp)
                     yield StreamEvent(
                         type="evidence",
                         payload={

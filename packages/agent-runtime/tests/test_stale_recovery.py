@@ -14,9 +14,9 @@ from agent_runtime.planner.durability import (
 
 async def test_ownership_acquire_rejects_active():
     store = InMemoryExecutionOwnershipStore()
-    assert await store.acquire("e1", "ownerA", ttl_s=10.0)
+    assert (await store.acquire("e1", "ownerA", ttl_s=10.0))[0]
     # 仍持有且未过期 → 拒绝（含自己续租语义由 heartbeat 承担）
-    assert not await store.acquire("e1", "ownerB", ttl_s=10.0)
+    assert not (await store.acquire("e1", "ownerB", ttl_s=10.0))[0]
     assert await store.get_owner("e1") == "ownerA"
 
 
@@ -26,7 +26,7 @@ async def test_ownership_heartbeat_extends():
     await store.heartbeat("e1", ttl_s=50.0)
     # heartbeat 顺延租约，应仍在持有
     assert await store.get_owner("e1") == "ownerA"
-    await store.release("e1")
+    await store.release("e1", "ownerA")
     assert await store.get_owner("e1") is None
 
 
@@ -42,8 +42,9 @@ async def test_reap_stale_releases_ownership_and_mark_checkpoint():
         own, cp_store, now=stale_now
     )
     assert reclaimed == ["e1"]
-    # 所有权已释放（可被其他副本/同 execution_id resume 接管）
-    assert await own.get_owner("e1") is None
+    # §20：stale 执行被 reaper 原子认领（winner-take-all），所有权转移给 "reaper"，
+    # 而非无主消失——避免「lease 清干净但任务丢失」。后续 resume 由 reaper 负责。
+    assert await own.get_owner("e1") == "reaper"
     # checkpoint 仍在，resume 路径可继续
     cp = await cp_store.load("e1")
     assert cp is not None and cp.completed == {"n1": {"x": 1}}

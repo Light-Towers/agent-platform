@@ -112,7 +112,16 @@ CREATE TABLE IF NOT EXISTS execution_checkpoints (
     execution_id TEXT PRIMARY KEY,
     completed JSONB NOT NULL DEFAULT '{}',
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    resumable BOOLEAN NOT NULL DEFAULT FALSE
+    resumable BOOLEAN NOT NULL DEFAULT FALSE,
+    -- §20: checkpoint 恢复契约版本（schema 本身演进）与执行时基于的 graph 版本。
+    -- resume 前须校验 graph_version 与当前 runtime 的 graph 版本兼容，否则拒绝恢复
+    -- （防止 v12 checkpoint 被 v13 graph 错误解释）。
+    checkpoint_version INTEGER NOT NULL DEFAULT 1,
+    graph_id TEXT,
+    graph_version TEXT,
+    -- §20: 与 execution_leases.generation 对齐的 fencing token。checkpoint 写须带
+    -- WHERE generation=<token>，旧 owner 回写 0 rows 即被 fencing（FencedWriteError）。
+    generation BIGINT NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_checkpoints_resumable ON execution_checkpoints (resumable) WHERE resumable;
 
@@ -125,7 +134,11 @@ CREATE TABLE IF NOT EXISTS idempotency_keys (
 CREATE TABLE IF NOT EXISTS execution_leases (
     execution_id TEXT PRIMARY KEY,
     owner TEXT NOT NULL,
-    expires_at TIMESTAMPTZ NOT NULL
+    expires_at TIMESTAMPTZ NOT NULL,
+    -- §20: 分布式 fencing token。每次 ownership acquisition（acquire / claim）
+    -- generation 自增 1；状态写操作须带 WHERE generation=<token>，旧 owner 回写 0 rows
+    -- 即被 fencing（参见 durability_pg.PgExecutionOwnershipStore + FencedWriteError）。
+    generation BIGINT NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_leases_expires ON execution_leases (expires_at);
 
@@ -205,7 +218,10 @@ async def ensure_extensions(database_url: str) -> None:
 
 async def ensure_schema(pool, vector_dim: int = 512) -> None:
     """幂等建表 + 存量库 ALTER。vector_dim 由调用方注入（配置依赖倒置）。"""
-    ddl = SCHEMA_TEMPLATE.format(dim=vector_dim)
+    # 用 str.replace 而非 str.format：SCHEMA_TEMPLATE 内含 PG 字面量 '{}'
+    # （JSONB 空对象），str.format 会把 '{}' 当成未命名占位符而抛 IndexError
+    # （TB-7 之外、多副本真端到端才暴露：内存/FakePool 测试从不走 ensure_schema）。
+    ddl = SCHEMA_TEMPLATE.replace("{dim}", str(vector_dim))
     async with pool.connection() as conn:
         await conn.execute(ddl)
     # 存量库迁移：新列 IF NOT EXISTS 不作用于已存在表，需幂等 ALTER（优化 G：workspace 隔离）
