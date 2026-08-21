@@ -22,9 +22,16 @@ if TYPE_CHECKING:
 def get_planner(settings=None, *, registry: "SkillRegistry | None" = None) -> "Planner":
     """按 ``settings.planner``（PLANNER env）返回 Planner 实现。
 
-    ``registry``：GraphPlanner 需要（plan() 经 discover 选候选 Skill）；其他 Planner 忽略。
+    - ``auto``：启用 Phase A Mode Selector（UnifiedPlanner 逐请求自动选择范式）；
+    - ``deterministic``（默认）/ ``graph`` / ``agentic``：强制对应实现（override，doc §16）。
+
+    ``registry``：GraphPlanner / Mode Selector 需要（plan() 经 discover 选候选 Skill）。
     """
     settings = settings or get_settings()
+    if settings.planner == "auto":
+        from agent_server.planners.unified import UnifiedPlanner  # noqa: PLC0415
+
+        return UnifiedPlanner(settings, registry=registry)
     if settings.planner == "agentic":
         from agent_federation.planners.agentic import AgenticPlanner  # noqa: PLC0415
 
@@ -36,4 +43,9 @@ def get_planner(settings=None, *, registry: "SkillRegistry | None" = None) -> "P
     return DeterministicPlanner()
 
 
-__all__ = ["DeterministicPlanner", "GraphPlanner", "get_planner"]
+__all__ = [
+    "DeterministicPlanner",
+    "GraphPlanner",
+    "UnifiedPlanner",
+    "get_planner",
+]
