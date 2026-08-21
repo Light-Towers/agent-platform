@@ -58,6 +58,10 @@ class Skill:
     # 权限声明（Plan-F 组合治理）：空 frozenset 表示无限制（公开能力）；
     # 非空时调用方须持有全部声明权限方可发现/调用（PolicyValidator 校验）。
     permissions: frozenset[str] = field(default_factory=frozenset)
+    # 组合声明（Plan-F 一等公民组合模型）：本能力直接组合的下层能力名列表。
+    # 须经 Runtime/Registry（runtime.delegate）组合，由 CompositionValidator 静态校验
+    # （存在性 / 环 / 权限闭包），避免组合治理仅靠运行时 skill_guard 兜底。
+    sub_skills: tuple[str, ...] = field(default_factory=tuple)
 
     def to_tool_schema(self) -> dict[str, Any]:
         """生成 Agent 工具描述（供 Planner / Agent 组合调用时注入工具列表）。
@@ -218,6 +222,25 @@ class SkillRegistry:
     def list(self) -> list[Skill]:
         """按名称排序返回全部能力。"""
         return sorted(self._capabilities.values(), key=lambda c: c.name)
+
+    def validate_composition(self) -> list[str]:
+        """静态校验 Skill 组合图（§7.1 一等公民组合模型）。
+
+        委托 ``CompositionValidator`` 检查：存在性 / 权限闭包 / 无环。
+        ``PlannerRuntime.execution()`` 进入时也会自动跑（fail-fast），本方法供
+        启动期 / 测试显式校验组合图合法性。
+        """
+        from agent_runtime.skills.composition import CompositionValidator
+
+        return CompositionValidator(self).validate()
+
+    def assert_composition_valid(self) -> None:
+        """组合图非法时抛 ``CompositionError``（fail-fast，供 execution 入口调用）。"""
+        from agent_runtime.skills.composition import CompositionError, CompositionValidator
+
+        violations = CompositionValidator(self).validate()
+        if violations:
+            raise CompositionError("; ".join(violations))
 
     def __contains__(self, name: str) -> bool:
         return name in self._capabilities
