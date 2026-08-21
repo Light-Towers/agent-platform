@@ -8,27 +8,22 @@
 import asyncio
 import json
 import time
-import uuid
-from collections import defaultdict
 from typing import Any
 
 import pytest
-
+from agent_runtime.admission_gateway import PgAdmissionController
 from agent_runtime.planner.durability import (
     Checkpoint,
     InMemoryCheckpointStore,
     InMemoryExecutionOwnershipStore,
     InMemoryIdempotencyStore,
-    reap_stale_executions,
 )
-from agent_runtime.admission_gateway import PgAdmissionController
 from agent_runtime.planner.durability_pg import (
     PgCheckpointStore,
     PgExecutionOwnershipStore,
     PgIdempotencyStore,
 )
 from agent_runtime.schemas import ADMISSION_ADMITTED, ADMISSION_QUEUED, ADMISSION_REJECTED
-
 
 # ===== Fake psycopg Pool 实现 =====
 
@@ -397,10 +392,12 @@ class TestInMemoryEquivalence:
         pg = PgExecutionOwnershipStore(_FakePgPool())
 
         assert await mem.acquire("e1", "o1", 10) == await pg.acquire("e1", "o1", 10)
-        assert await mem.acquire("e1", "o2", 10) == await pg.acquire("e1", "o2", 10) == False
+        assert not await mem.acquire("e1", "o2", 10)
+        assert not await pg.acquire("e1", "o2", 10)
         await mem.release("e1", "o1")
         await pg.release("e1", "o1")
-        assert await mem.acquire("e1", "o2", 10) == await pg.acquire("e1", "o2", 10) == True
+        assert await mem.acquire("e1", "o2", 10)
+        assert await pg.acquire("e1", "o2", 10)
 
 
 # ===== 并发 admission wait_for_admit 测试 =====

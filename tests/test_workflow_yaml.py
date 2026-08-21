@@ -1,17 +1,15 @@
 """Workflow YAML 文件加载器测试。"""
 
-import tempfile
 import pathlib
-
-import yaml
+import tempfile
 
 import pytest
-
+import yaml
 from agent_runtime.skills.workflow import (
     WorkflowSpec,
-    load_workflow_yaml,
-    discover_workflows,
     compile_workflow,
+    discover_workflows,
+    load_workflow_yaml,
 )
 
 

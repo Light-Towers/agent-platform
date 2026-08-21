@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pytest
-
 from agent_runtime.planner.execution_graph import ExecutionGraph
 from agent_runtime.planner.graph_compose import (
     GraphComposeError,

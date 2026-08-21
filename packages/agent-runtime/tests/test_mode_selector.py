@@ -2,11 +2,8 @@
 
 from __future__ import annotations
 
-import pytest
-
 from agent_runtime.planner.mode_selector import (
     ExecutionMode,
-    ModeDecision,
     ModeSelector,
 )
 from agent_runtime.planner.protocol import PlannerContext
