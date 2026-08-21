@@ -123,6 +123,12 @@ class Settings(BaseLLMSettings):
     # CORS：允许的前端来源（逗号分隔），为空时默认回环 127.0.0.1:5173
     cors_allow_origins: str = ""
 
+    # §20: 运行时模式（决定持久化后端与 fail-fast 行为）
+    # local       -> InMemory 后端，无需 DATABASE_URL（开发/测试默认）
+    # single_node -> PG 可选（有 DATABASE_URL 用 PG，无则降级 InMemory）
+    # distributed -> PG 必须（无 DATABASE_URL 启动即报错，fail fast）
+    runtime_mode: str = "local"
+
     @property
     def db_enabled(self) -> bool:
         return bool(self.database_url)

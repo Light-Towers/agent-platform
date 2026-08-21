@@ -417,7 +417,7 @@ class PlannerRuntime:
                     await hb_task
                 except (asyncio.CancelledError, Exception):
                     pass
-            await self.ownership_store.release(eid)
+            await self.ownership_store.release(eid, owner)
             self._ctx_var.reset(token)
             _runtime_var.reset(rt_token)
 

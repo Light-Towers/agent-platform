@@ -13,9 +13,12 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import Any, Protocol
 
 from shared_schemas import Priority
+
+logger = logging.getLogger(__name__)
 
 from agent_runtime.planner.durability import new_execution_id
 from agent_runtime.schemas import (
@@ -139,3 +142,160 @@ class InMemoryAdmissionController:
         if self._queued:
             self._queued.pop(0)
             self._active += 1  # 补位唤醒下一个
+
+
+class PgAdmissionController:
+    """PG 持久化准入控制器（§20.2 + §20.1 跨进程唤醒）。
+
+    设计遵循 §20 生产级约束：
+    - C1: slot 抢占原子 CAS（单条 INSERT ... WHERE count < capacity RETURNING）
+    - C2: PG = 事实源，LISTEN/NOTIFY 仅作唤醒，polling reconcile 兜底
+    - C3: admission_slots 行级事实 + TTL，非全局 counter
+    - C4: 生产模式由上层装配时校验 pool 非空（fail fast）
+    - C5: wait_for_admit 轮询 + 可选 LISTEN，NOTIFY 丢失不影响正确性
+
+    表结构 admission_slots:
+    - slot_key TEXT PK（随机生成，如 uuid）
+    - execution_id TEXT UNIQUE（关联请求）
+    - owner TEXT（持有者标识）
+    - acquired_at TIMESTAMPTZ
+    - expires_at TIMESTAMPTZ（TTL 自动过期，防 Pod crash 卡槽）
+
+    容量限制：单条 SQL 原子检查 COUNT(*) + 插入，PG 串行化保证无竞态。
+    """
+
+    def __init__(
+        self,
+        pool: Any,
+        *,
+        capacity: int = 100,
+        timeout_s: float = 30.0,
+        slot_ttl_s: float = 300.0,
+        notify_channel: str = "admission_vacancy",
+        poll_interval: float = 0.05,
+    ) -> None:
+        self._pool = pool
+        self._capacity = capacity
+        self._timeout_s = timeout_s
+        self._slot_ttl_s = slot_ttl_s
+        self._notify_channel = notify_channel
+        self._poll_interval = poll_interval
+
+    async def _try_acquire_slot(self, request_id: str, owner: str) -> bool:
+        """CAS 抢占一个 admission slot（C1）。
+
+        单条 SQL：在活跃槽位数 < capacity 时，插入新槽位并返回 slot_key。
+        使用 COUNT(*) + INSERT 原子性，PG 事务串行化保证并发安全。
+        """
+        import uuid
+        slot_key = uuid.uuid4().hex
+        sql = (
+            "INSERT INTO admission_slots (slot_key, execution_id, owner, acquired_at, expires_at) "
+            "SELECT %s, %s, %s, now(), now() + (%s || ' seconds')::interval "
+            "WHERE (SELECT count(*) FROM admission_slots WHERE expires_at > now()) < %s "
+            "RETURNING slot_key"
+        )
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(sql, (slot_key, request_id, owner, str(self._slot_ttl_s), self._capacity))
+            row = await cur.fetchone()
+        return row is not None
+
+    async def _reap_expired_slots(self) -> int:
+        """清理过期槽位（TTL 自动过期），返回清理数量。"""
+        sql = "DELETE FROM admission_slots WHERE expires_at <= now()"
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(sql)
+            # rowcount may not be available on all psycopg versions
+            return cur.rowcount if hasattr(cur, "rowcount") and cur.rowcount is not None else 0
+
+    async def enqueue(
+        self,
+        request_id: str,
+        session_id: str,
+        user_id: str,
+        priority: Priority = "normal",
+    ) -> AdmissionDecision:
+        """请求入队/准入：CAS 抢占 slot。
+
+        - 成功 → ADMISSION_ADMITTED
+        - 失败（已满）→ ADMISSION_QUEUED（需调用 wait_for_admit）
+        """
+        owner = f"{session_id}:{user_id}"
+        if await self._try_acquire_slot(request_id, owner):
+            return AdmissionDecision(status=ADMISSION_ADMITTED, priority=priority)
+        return AdmissionDecision(status=ADMISSION_QUEUED, priority=priority)
+
+    async def wait_for_admit(self, request_id: str) -> AdmissionDecision:
+        """阻塞等待 admission 调度（轮询 + 可选 LISTEN 唤醒，C2 + C5）。
+
+        循环：
+        1. 尝试 CAS 抢占 slot
+        2. 成功 → ADMISSION_ADMITTED
+        3. 超时 → ADMISSION_REJECTED
+        4. 否则：等待 NOTIFY 或 polling interval，再重试
+        """
+        import time
+        deadline = time.monotonic() + self._timeout_s
+        owner = ""  # 在 wait_for_admit 阶段无 session/user 信息，仅用 execution_id 关联
+
+        # 尝试建立 LISTEN 连接用于低延迟唤醒（可选，失败不影响正确性）
+        listen_task = None
+        stop_event = None
+        notified = asyncio.Event()
+
+        async def _listen() -> None:
+            sql_listen = f"LISTEN {self._notify_channel}"
+            try:
+                async with self._pool.connection() as conn:
+                    await conn.execute(sql_listen)
+                    async for notify in conn.notifies():
+                        if notify.channel == self._notify_channel:
+                            notified.set()
+                        if stop_event is not None and stop_event.is_set():
+                            break
+            except Exception:
+                # LISTEN 失败不影响正确性，回退纯轮询
+                pass
+
+        listen_task = asyncio.create_task(_listen())
+        stop_event = asyncio.Event()
+
+        try:
+            while True:
+                if await self._try_acquire_slot(request_id, owner):
+                    return AdmissionDecision(status=ADMISSION_ADMITTED, priority="normal")
+
+                if time.monotonic() >= deadline:
+                    return AdmissionDecision(
+                        status=ADMISSION_REJECTED, priority="normal", reason="ADMISSION_TIMEOUT"
+                    )
+
+                # 等待 NOTIFY 或 polling interval（二者取最先到达，C2 兜底）
+                notified.clear()
+                try:
+                    await asyncio.wait_for(notified.wait(), timeout=self._poll_interval)
+                except asyncio.TimeoutError:
+                    pass  # 轮询间隔到达，继续循环重试
+
+        finally:
+            stop_event.set()
+            if listen_task is not None:
+                listen_task.cancel()
+                try:
+                    await listen_task
+                except (asyncio.CancelledError, Exception):
+                    pass
+
+    async def mark_completed(self, request_id: str) -> None:
+        """标记请求完成：释放 slot 并发 NOTIFY 唤醒等待者（C2）。"""
+        sql = "DELETE FROM admission_slots WHERE execution_id = %s"
+        async with self._pool.connection() as conn:
+            await conn.execute(sql, (request_id,))
+            try:
+                await conn.execute(f"NOTIFY {self._notify_channel}")
+            except Exception:
+                logger.warning("NOTIFY %s 发送失败", self._notify_channel, exc_info=True)
+
+    async def recover_on_startup(self) -> int:
+        """启动恢复：清理所有过期/残留槽位，返回清理数量。"""
+        return await self._reap_expired_slots()

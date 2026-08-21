@@ -106,6 +106,37 @@ CREATE TABLE IF NOT EXISTS mcp_call_audit (
 );
 CREATE INDEX IF NOT EXISTS idx_mcp_audit_server ON mcp_call_audit (server_id);
 CREATE INDEX IF NOT EXISTS idx_mcp_audit_caller ON mcp_call_audit (caller);
+
+-- §20.1/20.2: Durability PG 后端表
+CREATE TABLE IF NOT EXISTS execution_checkpoints (
+    execution_id TEXT PRIMARY KEY,
+    completed JSONB NOT NULL DEFAULT '{}',
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    resumable BOOLEAN NOT NULL DEFAULT FALSE
+);
+CREATE INDEX IF NOT EXISTS idx_checkpoints_resumable ON execution_checkpoints (resumable) WHERE resumable;
+
+CREATE TABLE IF NOT EXISTS idempotency_keys (
+    key TEXT PRIMARY KEY,
+    result JSONB NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS execution_leases (
+    execution_id TEXT PRIMARY KEY,
+    owner TEXT NOT NULL,
+    expires_at TIMESTAMPTZ NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_leases_expires ON execution_leases (expires_at);
+
+CREATE TABLE IF NOT EXISTS admission_slots (
+    slot_key TEXT PRIMARY KEY,
+    execution_id TEXT NOT NULL UNIQUE,
+    owner TEXT NOT NULL,
+    acquired_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    expires_at TIMESTAMPTZ NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_slots_expires ON admission_slots (expires_at);
 """
 
 
