@@ -23,6 +23,14 @@ if TYPE_CHECKING:
     from agent_runtime.planner.protocol import PlannerRuntime
 
 
+def _usage_payload(runtime: PlannerRuntime) -> dict[str, Any]:
+    """P2-2：把当前执行的累计 token / 费用带入 status 事件（无执行上下文时为 0）。"""
+    ctx = runtime.context
+    if ctx is None:
+        return {"tokens_used": 0, "cost_used": 0.0}
+    return {"tokens_used": ctx.tokens_used, "cost_used": ctx.cost_used}
+
+
 @dataclass(frozen=True)
 class GraphNode:
     """执行图节点：一次 Skill 调用。"""
@@ -218,6 +226,10 @@ async def execute_plan(
         goal=plan.sub_query or plan.route,
         constraints=plan.notes.get("constraints"),
     )
+    # WS-2：compacted 标记回填——上游（Planner 路由期经 ContextAssembler 压缩）
+    # 在 notes 中标记后，由这里写入 ConversationContext，保持三层契约一致。
+    if plan.notes.get("compacted"):
+        ctx.conversation.compacted = True
 
     if plan.graph is not None:
         validator = PolicyValidator(runtime.registry)
@@ -249,7 +261,13 @@ async def execute_plan(
                 exec_ctx.metadata["snapshot"] = snapshot
                 # 记录到 runtime，供 execution 边界退出后（context 复位前）消费
                 runtime.last_snapshot = snapshot
-        yield StreamEvent(type="status", payload={"snapshot": cm.snapshot(ctx)})
+        yield StreamEvent(
+            type="status",
+            payload={
+                "snapshot": cm.snapshot(ctx),
+                **_usage_payload(runtime),
+            },
+        )
     else:
         yield StreamEvent(type="route", payload={"capability": plan.route, "reason": plan.reason})
         async with runtime.execution():
@@ -258,4 +276,7 @@ async def execute_plan(
             cm.record_skill(ctx, plan.route, result=result)
             yield StreamEvent(type="evidence", payload={"node": plan.route, "result": result})
             yield StreamEvent(type="answer", payload={"text": str(result)})
-        yield StreamEvent(type="status", payload={"snapshot": cm.snapshot(ctx)})
+        yield StreamEvent(
+            type="status",
+            payload={"snapshot": cm.snapshot(ctx), **_usage_payload(runtime)},
+        )

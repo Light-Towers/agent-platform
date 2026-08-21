@@ -54,6 +54,27 @@ async def test_execute_plan_single_route():
     assert events[3].payload["snapshot"]["execution"]["outputs"]["search"] == "search:x"
 
 
+@pytest.mark.asyncio
+async def test_execute_plan_compacted_flag_backfilled():
+    """WS-2：notes["compacted"] 回填到 snapshot 的 conversation.compacted。"""
+    plan = Plan(
+        route="search",
+        sub_query="test",
+        notes={"kwargs": {"query": "x"}, "compacted": True},
+    )
+    events = [ev async for ev in execute_plan(plan, _runtime())]
+    snapshot = events[-1].payload["snapshot"]
+    assert snapshot["conversation"]["compacted"] is True
+
+
+@pytest.mark.asyncio
+async def test_execute_plan_compacted_flag_default_false():
+    plan = Plan(route="search", sub_query="test", notes={"kwargs": {"query": "x"}})
+    events = [ev async for ev in execute_plan(plan, _runtime())]
+    snapshot = events[-1].payload["snapshot"]
+    assert snapshot["conversation"]["compacted"] is False
+
+
 # ---------- graph 路径 ----------
 
 
@@ -144,3 +165,16 @@ async def test_execute_plan_max_parallel_rejected():
     with pytest.raises(PlanViolationError, match="并行度"):
         async for _ in execute_plan(plan, _runtime(), max_parallel=2):
             pass
+
+
+@pytest.mark.asyncio
+async def test_execute_plan_snapshot_written_to_exec_context_metadata():
+    """snapshot 消费：执行后 runtime 携带结构化快照（供下一轮组装）。"""
+    runtime = _runtime()
+    g = ExecutionGraph()
+    g.add_node("a", "search", {"query": "x"})
+    plan = Plan(route="graph", graph=g)
+    events = [ev async for ev in execute_plan(plan, runtime)]
+    assert events[-1].type == "status"
+    assert runtime.last_snapshot is not None
+    assert "search" in runtime.last_snapshot["execution"]["outputs"]
