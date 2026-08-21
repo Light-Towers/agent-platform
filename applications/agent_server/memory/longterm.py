@@ -26,6 +26,7 @@ logger = logging.getLogger(__name__)
 _MEMORY_TYPES = ("episodic", "semantic", "procedural")
 
 # 抽取系统提示：要求 LLM 产出结构化事实 JSON 数组（优化 H, D1 抽取不存原文）
+# TD-8：示例泛化为中性模板，不内嵌具体职业/偏好（避免引导模型偏向特定偏好）。
 # 注意：提示词内含 JSON 示例花括号，故用 %-格式化（而非 .format），避免 KeyError。
 _EXTRACT_PROMPT = (
     "你是长期记忆抽取器。从一轮问答中提取对用户未来有用的长期记忆事实。\n"
@@ -34,7 +35,7 @@ _EXTRACT_PROMPT = (
     "  - semantic：用户稳定偏好/人设/事实（跨会话复用）\n"
     "  - procedural：该怎么做某事的方法论/指令\n"
     "仅输出 JSON 数组，元素形如 {\"type\":\"semantic\",\"importance\":0.8,"
-    "\"fact\":\"用户是财务，偏好简洁报表\"}。importance 为 0~1 重要性。\n"
+    "\"fact\":\"<用户偏好或事实的中性描述>\"}。importance 为 0~1 重要性。\n"
     "若无有价值事实，输出 []\n"
     "不要输出原文寒暄，不要包含 PII 原文，只抽取可复用结论。\n"
     "问题：%(question)s\n回答：%(answer)s"

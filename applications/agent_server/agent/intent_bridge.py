@@ -42,11 +42,22 @@ def map_intent_to_capability(label: IntentLabel) -> str:
 
 
 def l1_route_hint(question: str) -> str | None:
-    """L1 轻量 short-circuit。
+    """L1 轻量 short-circuit（**同步阻塞**：内含嵌入计算，async 链路用 async 版）。
 
     仅对高置信 chitchat 直接返回 ``direct``；其余返回 None，
     交由 ``decide_route`` 做 LLM 主路由。不触发 LLM 调用。
     """
     if is_chitchat(question):
+        return "direct"
+    return None
+
+
+async def l1_route_hint_async(question: str) -> str | None:
+    """``l1_route_hint`` 的异步版（WS-6）：经线程池移出事件循环，
+    避免嵌入计算阻塞 async 链路（to_thread 只包同步函数，防假绿回归）。
+    """
+    import asyncio
+
+    if await asyncio.to_thread(is_chitchat, question):
         return "direct"
     return None

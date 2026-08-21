@@ -77,6 +77,8 @@ class GraphPlanner(Planner):
                 "question": ctx.question,
                 "workspace_id": ctx.workspace_id,
                 "user_id": ctx.user_id,
+                # WS-2：上一轮结构化快照透传，供后续多 Skill 编排组装消费
+                "last_snapshot": ctx.last_snapshot,
             },
         )
 

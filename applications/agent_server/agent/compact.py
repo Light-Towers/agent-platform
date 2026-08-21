@@ -10,8 +10,8 @@ from __future__ import annotations
 from agent_runtime.context.compact import (
     _KEEP_RECENT,
     _SUMMARY_PROMPT,
-    _msg_content,
-    _msg_role,
+    _msg_content,  # noqa: F401 兼容 shim 再导出（旧调用方可能直读）
+    _msg_role,  # noqa: F401 兼容 shim 再导出
     compact_messages,
     estimate_tokens,
     should_compact,

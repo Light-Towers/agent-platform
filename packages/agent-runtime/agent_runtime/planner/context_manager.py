@@ -148,3 +148,30 @@ class ContextManager:
     def snapshot(self, ctx: AgentContext) -> dict[str, Any]:
         """结构化快照（代理 ``AgentContext.snapshot``）。"""
         return ctx.snapshot()
+
+
+def render_snapshot_prompt(snapshot: dict[str, Any] | None) -> str:
+    """snapshot → 结构化提示文本（WS-2：供下一轮 prompt 头部注入）。
+
+    只渲染有信息量的字段：goal / completed / pending / constraints / errors；
+    空快照或无实质内容时返回 ``""``（调用方据此跳过注入）。输出为纯文本，
+    由调用方决定包成 system/user 消息，不进对话历史存储。
+    """
+    if not snapshot:
+        return ""
+    task = snapshot.get("task") or {}
+    execution = snapshot.get("execution") or {}
+    lines: list[str] = []
+    if task.get("goal"):
+        lines.append(f"任务目标: {task['goal']}")
+    if task.get("completed_steps"):
+        lines.append("已完成: " + ", ".join(task["completed_steps"]))
+    if task.get("pending"):
+        lines.append("待办: " + ", ".join(task["pending"]))
+    if task.get("constraints"):
+        lines.append(f"约束: {task['constraints']}")
+    if execution.get("errors"):
+        lines.append(f"执行错误: {execution['errors']}")
+    if not lines:
+        return ""
+    return "[上轮任务状态]\n" + "\n".join(lines)

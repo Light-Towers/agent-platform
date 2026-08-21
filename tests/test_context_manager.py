@@ -8,6 +8,7 @@ from agent_runtime.planner.context_manager import (
     ConversationContext,
     ExecutionState,
     TaskState,
+    render_snapshot_prompt,
 )
 
 # ---------- 三类上下文 ----------
@@ -109,3 +110,37 @@ def test_agent_context_snapshot_direct():
     snap = ctx.snapshot()
     assert snap["task"]["goal"] == "test"
     assert snap["execution"]["skill_stack"] == ["a"]
+
+
+# ---------- render_snapshot_prompt（WS-2 下一轮注入）----------
+
+
+def test_render_snapshot_prompt_renders_task_fields():
+    snap = {
+        "task": {
+            "goal": "分析架构",
+            "completed_steps": ["fetch"],
+            "pending": ["analyze"],
+            "constraints": {"scope": "core"},
+        },
+        "execution": {"outputs": {}, "errors": {}, "skill_stack": []},
+    }
+    text = render_snapshot_prompt(snap)
+    assert text.startswith("[上轮任务状态]")
+    assert "任务目标: 分析架构" in text
+    assert "已完成: fetch" in text
+    assert "待办: analyze" in text
+
+
+def test_render_snapshot_prompt_empty_returns_blank():
+    assert render_snapshot_prompt(None) == ""
+    assert render_snapshot_prompt({}) == ""
+    # 无实质内容的快照（只有计数/空列表）不注入
+    assert render_snapshot_prompt({"task": {}, "execution": {}}) == ""
+
+
+def test_render_snapshot_prompt_includes_errors():
+    snap = {"task": {}, "execution": {"errors": {"search": "timeout"}}}
+    text = render_snapshot_prompt(snap)
+    assert "执行错误" in text
+    assert "timeout" in text
