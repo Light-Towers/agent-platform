@@ -177,6 +177,35 @@ def _build_middleware():
     return middleware if middleware else None
 
 
+def _maybe_attach_bridged_tools(tools: list, query: str) -> list:
+    """Phase D 集成（opt-in）：追加经统一 Runtime 治理的桥接工具。
+
+    ``AGENTIC_RUNTIME_BRIDGE != "true"`` 时直接返回原工具集（默认行为，零影响）。
+    开启时：用联邦能力注册表构建 LangChain 工具，agent 调用这些工具经
+    ``runtime.delegate`` 进入统一 Skill Runtime。任一环节失败仅跳过桥接工具。
+    """
+    from agent_federation.planners.agentic_runtime_bridge import (
+        bridge_enabled,
+        build_bridged_langchain_tools,
+    )
+
+    if not bridge_enabled():
+        return tools
+    try:
+        from agent_federation.planners import get_planner_runtime
+
+        runtime = get_planner_runtime()
+        if runtime.registry is None:
+            return tools  # 注册表未构建（bridge 未真正生效），不追加
+        bridged = build_bridged_langchain_tools(runtime, query)
+        if bridged:
+            logger.info("AGENTIC_RUNTIME_BRIDGE：追加 %d 个桥接工具", len(bridged))
+            return tools + bridged
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("AGENTIC_RUNTIME_BRIDGE 工具构建失败，回退默认工具: %s", exc)
+    return tools
+
+
 async def get_main_agent(checkpointer=None):
     """返回单例 main_agent。
 
@@ -223,10 +252,15 @@ async def get_main_agent(checkpointer=None):
         _main_checkpointer = _cp
         _store = await _create_store()
         _main_store = _store
+        _tools = [generate_markdown, convert_md_to_pdf, read_file_content]
+        # Phase D 集成（opt-in, AGENTIC_RUNTIME_BRIDGE=true）：追加经统一 Runtime 治理的桥接工具，
+        # 不改变默认工具集；任一环节失败仅跳过桥接工具，主链路零影响。
+        _tools = _maybe_attach_bridged_tools(_tools, "")
+
         _main_agent = create_deep_agent(
             model=model,
             system_prompt=_system_prompt,
-            tools=[generate_markdown, convert_md_to_pdf, read_file_content],
+            tools=_tools,
             checkpointer=_cp,
             store=_store,
             subagents=_build_subagents(),
@@ -316,6 +350,7 @@ async def get_main_agent_for_task(role_specs: list[str] | None = None):
     from agent.tool_registry import get_tools_for_roles
 
     tools = get_tools_for_roles(role_specs)
+    tools = _maybe_attach_bridged_tools(tools, ",".join(sorted(role_specs)))
     _system_prompt = main_agent_content['system_prompt']
     if os.getenv("PLANNER_ENABLED", "false").lower() == "true" and planner_content:
         _addition = planner_content.get("planner", {}).get("system_prompt_addition", "")
