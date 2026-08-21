@@ -137,6 +137,22 @@ CREATE TABLE IF NOT EXISTS admission_slots (
     expires_at TIMESTAMPTZ NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_slots_expires ON admission_slots (expires_at);
+
+-- §20.1/20.2/P3-1: Trajectory 轨迹存储
+CREATE TABLE IF NOT EXISTS trajectories (
+    execution_id TEXT PRIMARY KEY,
+    parent_execution_id TEXT,
+    session_id TEXT,
+    planner TEXT,
+    plan JSONB NOT NULL DEFAULT '{}',
+    steps JSONB NOT NULL DEFAULT '[]',
+    total_tokens INTEGER NOT NULL DEFAULT 0,
+    total_cost DOUBLE PRECISION NOT NULL DEFAULT 0.0,
+    snapshot JSONB NOT NULL DEFAULT '{}',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_trajectories_session ON trajectories (session_id);
+CREATE INDEX IF NOT EXISTS idx_trajectories_created ON trajectories (created_at);
 """
 
 

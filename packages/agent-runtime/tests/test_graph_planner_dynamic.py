@@ -11,7 +11,6 @@ from agent_runtime.planner.protocol import (
     StreamEvent,
 )
 from agent_runtime.skills.registry import Skill, SkillKind, SkillRegistry
-
 from agent_server.planners.graph import GraphPlanner
 
 

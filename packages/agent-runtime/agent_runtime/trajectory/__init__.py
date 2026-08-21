@@ -15,12 +15,14 @@ from agent_runtime.trajectory.store import (
     TrajectoryStore,
     _coerce_record,
 )
+from agent_runtime.trajectory.store_pg import PgTrajectoryStore
 
 __all__ = [
     "TrajectoryRecord",
     "TrajectoryStep",
     "TrajectoryStore",
     "InMemoryTrajectoryStore",
+    "PgTrajectoryStore",
     "_coerce_record",
     "ReplayDivergence",
     "ReplayRegistry",

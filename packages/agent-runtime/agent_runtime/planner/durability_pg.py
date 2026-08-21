@@ -25,7 +25,6 @@ from agent_runtime.planner.durability import (
     CheckpointStore,
     ExecutionOwnershipStore,
     IdempotencyStore,
-    reap_stale_executions,
 )
 
 logger = logging.getLogger(__name__)

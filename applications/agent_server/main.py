@@ -18,8 +18,9 @@ from agent_runtime.planner.durability_pg import (
     PgExecutionOwnershipStore,
     PgIdempotencyStore,
 )
-from agent_runtime.skills.workflow import discover_workflows
+from agent_runtime.trajectory import PgTrajectoryStore
 from agent_runtime.revert import RevertHandler
+from agent_runtime.skills.workflow import discover_workflows
 from agent_runtime.tracing import get_langfuse_callbacks
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -54,16 +55,17 @@ async def _build_checkpointer():
 
 
 def _build_pg_stores(pool):
-    """构建 PG 持久化后端（§20.1/20.2）。
+    """构建 PG 持久化后端（§20.1/20.2 + P3-1）。
 
-    仅在 pool 非 None 时创建；返回 (checkpoint_store, idempotency_store, ownership_store)。
+    仅在 pool 非 None 时创建；返回 (checkpoint_store, idempotency_store, ownership_store, trajectory_store)。
     """
     if pool is None:
-        return None, None, None
+        return None, None, None, None
     checkpoint_store = PgCheckpointStore(pool)
     idempotency_store = PgIdempotencyStore(pool)
     ownership_store = PgExecutionOwnershipStore(pool)
-    return checkpoint_store, idempotency_store, ownership_store
+    trajectory_store = PgTrajectoryStore(pool)
+    return checkpoint_store, idempotency_store, ownership_store, trajectory_store
 
 
 def _build_admission_controller(pool, settings):
@@ -111,8 +113,8 @@ async def lifespan(app: FastAPI):
     pool = get_pool()
     checkpointer = await _build_checkpointer()
 
-    # §20.1/20.2: 构建 PG 持久化后端
-    checkpoint_store, idempotency_store, ownership_store = _build_pg_stores(pool)
+    # §20.1/20.2 + P3-1: 构建 PG 持久化后端
+    checkpoint_store, idempotency_store, ownership_store, trajectory_store = _build_pg_stores(pool)
 
     llm = build_chat_model()
 
@@ -214,6 +216,7 @@ async def lifespan(app: FastAPI):
         max_duration_seconds=settings.max_execution_seconds or None,
         checkpoint_store=checkpoint_store,
         ownership_store=ownership_store,
+        trajectory_store=trajectory_store,
     )
     # 绑定 delegate：graph 节点的 _invoke 此后经 runtime.delegate 调用
     delegate_ref.delegate = app.state.planner_runtime.delegate
