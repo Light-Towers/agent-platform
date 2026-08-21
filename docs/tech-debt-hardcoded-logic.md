@@ -2,7 +2,7 @@
 
 > 登记日期：2026-08-18
 > 关联：ADR-0004 类型化记忆阶段4、双轨架构分析 `TB-9`、双轨收敛 `plan-e` S-5
-> 状态：待排期（仅记录，未修复）
+> 状态：全部已修复（TD-3~TD-10 全量闭环）
 
 ## 背景
 
@@ -47,22 +47,20 @@ ADR-0004 阶段4 的候选B（`eval/memory_reuse_llm.py`）评审中，发现 `_
 ## 🟠 中风险
 
 ### TD-3 agent_federation 意图降级关键词含 typo
-- 文件：`agent_federation/agent/intent/classifier.py:89-103`
-- 现状：`_keyword_fallback` 写死关键词字典，含 `"2么"`（应为"怎么"）。仅 embedding 缺失时退化用，但有 LLM/embedding 主路径兜底。
-- 建议：修正 typo；降级词表外置或删除（主路径健全时不应依赖写死降级）。
-- 状态：待排期
+- 文件：原 `agent_federation/agent/intent/classifier.py:89-103`（已不存在）
+- 现状：WS-6 统一意图架构已将分类器迁移到 `agent_core/intent/classifier.py`，关键词数据外置到 `data/prototypes.json`（数据驱动），原 typo "2么" 不再存在。
+- 状态：✅ 已由 WS-6 数据外置隐式解决
 
 ### TD-4 意图置信度阈值多处写死且重复
-- 文件：`agent_federation/agent/intent/llm_judge.py:17-18,87,97`（`_L2_THRESHOLD=0.8` / `_CLARIFY_THRESHOLD=0.5`）、`classifier.py`（同样 0.8）
-- 现状：决定是否"反问用户"的业务边界写死；两处 0.8 重复。
-- 建议：收敛到单一配置项（settings 或 prototypes.json）。
-- 状态：待排期
+- 文件：原 `agent_federation/agent/intent/llm_judge.py:17-18,87,97`、`classifier.py`（已不存在）
+- 现状：WS-6 统一意图架构已将阈值收敛到 `agent_core/intent/models.py` 单一来源（`L1_THRESHOLD=0.8` / `CLARIFY_THRESHOLD=0.5`），`classifier.py` 和 `llm_judge.py` 均 import 自此处，不再重复。
+- 状态：✅ 已由 WS-6 统一意图架构隐式解决
 
 ### TD-5 商品名确认阈值写死
 - 文件：`zhanggui-zhiku/.../node_item_name_confirm.py:170-171`
 - 现状：`score>0.85` / `>=0.6` 固定阈值；跨类目相似度分布不同，易误确认。
-- 建议：阈值按类目配置化，或改 LLM 判定。
-- 状态：待排期
+- 修复（2026-08-21）：阈值改为环境变量 `ITEM_CONFIRM_HIGH_THRESHOLD` / `ITEM_CONFIRM_MID_THRESHOLD`（默认 0.85 / 0.6，与原硬编码一致），可按部署环境调整。
+- 状态：✅ 已修复（参数化，智能阈值待采集基线后评估）
 
 ### TD-6 typed 记忆遗忘阈值 + 老化天数写死
 - 文件：`agent-core/agent_core/memory/typed.py:225-238`
@@ -83,28 +81,28 @@ ADR-0004 阶段4 的候选B（`eval/memory_reuse_llm.py`）评审中，发现 `_
 ## 🟡 低风险
 
 ### TD-7 app 路由特征词硬映射
-- 文件：`app/agent/router.py:14-39`
+- 文件：`applications/agent_server/agent/router.py`
 - 现状：`SQL_HINTS` / `RAG_HINTS` 等特征词硬映射。有 LLM 路由主路径兜底。
-- 建议：词表外置或并入 classifier 原型。
-- 状态：待排期
+- 修复（2026-08-21）：特征词外置到 `data/route_hints.json`（数据驱动，`@lru_cache` 读盘），代码仅保留数据缺失兜底；新增词不再改代码。
+- 状态：✅ 已修复
 
 ### TD-8 longterm 抽取 prompt 内嵌具体偏好示例
-- 文件：`app/memory/longterm.py:30-41`
-- 现状：抽取 prompt 内嵌"财务/简洁报表"具体 few-shot 示例，引导模型偏向特定偏好（类 `_PREFERENCE_SIGNALS` 风险）。
-- 建议：示例泛化为中性模板，或随用户偏好动态注入。
-- 状态：待排期
+- 文件：`applications/agent_server/memory/longterm.py:30-41`
+- 现状：抽取 prompt 内嵌"财务/简洁报表"具体 few-shot 示例，引导模型偏向特定偏好。
+- 修复（2026-08-21）：示例泛化为中性模板 `<用户偏好或事实的中性描述>`，不再内嵌具体职业/偏好。
+- 状态：✅ 已修复
 
 ### TD-9 zhanggui eval 超参写死
 - 文件：`zhanggui-zhiku/eval/run_eval.py:63-64`
 - 现状：评测超参 `0.8/0.2/0.25` 写死，与线上 `retrieval.yaml` 可能不一致。
-- 建议：统一引用 retrieval.yaml 配置。
-- 状态：待排期
+- 修复（2026-08-21）：`_RUNTIME_BASELINE` 改为从 `retrieval_cfg` / `rerank_cfg` 读取，不再硬编码超参，与线上配置保持同步。
+- 状态：✅ 已修复
 
 ### TD-10 admission 状态枚举写死进 SQL
-- 文件：`app/infra/admission.py:91`
-- 现状：状态枚举 `'admitted','queued'` 写死进 SQL 字符串。
-- 建议：改为配置表或枚举常量。
-- 状态：待排期
+- 文件：`packages/agent-runtime/agent_runtime/admission.py`、`applications/agent_server/api/routes.py`
+- 现状：状态枚举 `'admitted','queued','rejected'` 写死进 SQL 字符串和比较逻辑。
+- 修复（2026-08-21）：`schemas.py` 新增 `ADMISSION_ADMITTED/QUEUED/REJECTED` 常量；`admission.py` 全量替换为常量引用；`routes.py` 同步 import 常量替代硬编码字符串。
+- 状态：✅ 已修复
 
 ### TD-11 隔离键命名语义噪音（session_id 残留变量/字段名）
 - 关联：PR#10 审核（2026-08-18）非阻塞残留项
@@ -152,8 +150,8 @@ ADR-0004 阶段4 的候选B（`eval/memory_reuse_llm.py`）评审中，发现 `_
 ## 排期建议
 1. ~~高优先：TD-1/TD-2（生产链路，且注释误导）—— 已修复（v2 任务二）~~
 2. ~~中优先：TD-6（参数化阈值/老化天数）—— 已修复（v2 TD-6 最小修复；智能阈值候选A 仍待基线采集）~~
-3. 中优先：TD-4/TD-3
-4. 低优先：TD-5/TD-7~TD-10
+3. ~~中优先：TD-4/TD-3 —— 已由 WS-6 统一意图架构隐式解决~~
+4. ~~低优先：TD-5/TD-7~TD-10 —— 全部已修复（2026-08-21）~~
 
 ---
 

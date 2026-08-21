@@ -35,7 +35,7 @@ agent-core  agent-runtime  shared-schemas  agent-server  agent_federation  dialo
 
 | 目录 | 定位 | 职责 | 稳定性 |
 |------|------|------|--------|
-| `agent-core` | **基础 Agent 能力内核** | logging / tracing / metrics / llm / memory / tools / guardrails / resilience | 稳定、底层、框架无关（不得 import 任何宿主） |
+| `agent-core` | **基础 Agent 能力内核** | logging / tracing / metrics / llm / memory（含 MemoryStore 统一门面） / tools / guardrails / resilience / events（EventBus 多 sink 扇出） / config（KernelConfig + 类型化 env 解析） / intent（L1 分类器） | 稳定、底层、框架无关（不得 import 任何宿主） |
 | `agent-runtime` | **Agent 执行 / 组合运行时** | Planner / Plan / Skill / SkillRegistry / Workflow / ExecutionContext / ExecutionRuntime | 重点建设，当前仍在成形期 |
 | `shared-schemas` | **跨边界数据 / 协议契约** | Request / Response / Event / Error / Protocol DTO | 稳定，跨进程通信单一事实来源 |
 
@@ -89,6 +89,8 @@ agent-core  agent-runtime  shared-schemas  agent-server  agent_federation  dialo
 - **`agent-runtime` 未长成**：应用层（`dialogue-framework`、`agent_federation`）各自实现 planner/agent，需随 runtime 成形逐步收敛到红线 4。
 - **协议冗余**：DF 自有 `BaseChatClient` 与 `agent-core` 的 `BaseLLMProvider` 并存；DF `Tracker` 与 `agent_core.memory` 两套会话抽象。详见 `docs/architecture-boundary-agent-core-vs-dialogue-framework.md`。
 - **历史命名残留**：`docs/architecture-boundary-app-vs-agent-federation.md` 中仍出现的 `deepagents/` 旧名，已于 2026-08-19 清理为 `agent_federation/`；本文统一使用新名。
+
+> 2026-08-20 更新：WS-1~WS-8 八工作流全量落地后，内核记忆/可靠性/可观测/配置/意图/Skill 中间件/LLM 缓存八大维度已收敛，详见 CHANGELOG 对应条目。兼容期为一个小版本（弃用路径保留 + DeprecationWarning），下轮清理专项删除。
 
 ## 6. 当前实际结构（2026-08-19 已落地）
 

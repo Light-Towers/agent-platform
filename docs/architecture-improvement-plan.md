@@ -1,6 +1,6 @@
 # 架构优化借鉴方案（基于开源标杆调研）
 
-> 状态：提案（待评审）
+> 状态：提案（大部分已落地，WS-1~WS-8 全量完成后进入内核稳定期）
 > 关联文档：`docs/competitive-landscape.md`（对标调研）、`docs/architecture-boundary-app-vs-agent-federation.md`
 > 调研来源：LangChain(144k★)、Dify(152k★)、AutoGen(60k★)、CrewAI(57k★)、OpenAI Agents SDK(29k★)、DeepAgents(langchain-ai)
 > 上游内核蓝本：[Light-Towers/reliable-agent](https://github.com/Light-Towers/reliable-agent)
@@ -67,7 +67,7 @@
 - **测试边界**：回归 `input_guard` 既有单测（若有）+ 新增 middleware 挂载冒烟；影响面限于入口链路，不触碰检索/生成。
 - **收益**：护栏成为可插拔横切层，未来可叠加 `RubricMiddleware` 反思；双视图统一安全入口。
 
-### 优化 C：长期记忆多后端路由（中优先级 / 中风险） ✅ 已落地
+### 优化 C：长期记忆多后端路由（中优先级 / 中风险） ✅ 已落地 → WS-1 进一步收敛
 
 - **借鉴来源**：DeepAgents `CompositeBackend` 按路径把状态路由到耐久存储（文件/向量）。
 - **当前差距**：`longterm.py` 仅单 pgvector 表，文件型/缓存型记忆无去处；写入只入 `memories` 表。
@@ -78,6 +78,7 @@
 - **兼容性**：对外 API 完全向后兼容；复合后端为可选扩展，默认关闭。
 - **测试边界**：回归 `app/memory/longterm.py` 既有行为 + 新增 backend 协议单测，不影响图执行。
 - **收益**：为未来"对话摘要存文件、事实存向量"分层铺垫，且不破坏现有写链路。
+- **WS-1 进一步收敛（2026-08-20）**：`MemoryBackend` 协议已升级为 `MemoryStore`（五动词 `recall/remember/consolidate/forget/probe`），`PgMemoryStore` + `VectorMemoryStore` 双实现，`CapabilityReport` 供 `/health` 探测。详见 CHANGELOG WS-1 条目。
 
 ### 优化 D：统一 `uv workspace` + `Makefile` 工程门禁（低优先级 / 低风险）
 
@@ -128,6 +129,7 @@
 ### 优化 H：长期记忆质量升级——三层抽取 + 三分存储 + consolidation/forgetting（中优先级 / 中风险）
 
 > 状态：✅ 已落地（2026-08-19 审查核销，ADR-0004 v2.1 阶段 1~3 已下沉内核：`app/memory/longterm.py` 抽取(D1)/三层存储(D2)/分层加权召回(D3)/巩固+遗忘(D4/D5) + 内核 `agent_core.memory.typed`（`recall_typed`/`remember_typed`/`consolidate`/`forget`/`MemoryType`）；`SEMANTIC_MEMORY_TYPED` 总开关控制退化路径）
+> **WS-1 进一步收敛（2026-08-20）**：typed 模块已包装为 `PgMemoryStore`（`MemoryStore` 协议实现），embedder 改为构造注入，`CapabilityReport` 供宿主探测。详见 CHANGELOG WS-1 条目。
 > 前置：依赖优化 G 的 `workspace_id` 隔离（记忆归属维度已就位）
 
 #### H.0 问题定义（为什么说当前长期记忆"质量低"）
@@ -250,8 +252,10 @@
 | P2 | 优化 B（护栏共享内核 + 双视图统一入口） | 入口链路 + input_guard 单测 | pytest + eval 全绿 | ✅ 已落地（commit a23755e） |
 | P3 | 优化 C（memory backend 协议） | `app/memory/longterm.py` 行为 | 新增 backend 单测 + eval 全绿 | ✅ 已落地（commit dd51aa9） |
 | P4（后置） | 优化 E（双轨收敛） | 内核/契约层 | 独立专项 + eval 充分验证 | ✅ P4.1~P4.3 已落地（shared_schemas 断言 + SQL 守卫统一 + MemoryBackend 下沉内核）；专项规划见 `docs/plan-e-dual-track-convergence.md` |
+| P5 | 优化 F（自研外壳基础设施化） | agent-runtime 运行时中间件 | 独立专项 | ✅ 已落地（2026-08-19）：`agent-runtime/` 新包承载 admission/coordinator/cache/circuit_breaker/revert/mcp_client/otel/tracing/db + planner/ + skills/，详见 `docs/plan-f-single-runtime-multi-planner.md` |
+| P6 | **Agent 核心架构优化（WS-1~WS-8）** | 内核记忆/可靠性/可观测/配置/意图/Skill 中间件/LLM 缓存 | `make ci`（lint + 484 根 tests + 89 联邦 + 8 kefu + eval 12/12） | ✅ 全量落地（2026-08-20），详见 CHANGELOG 对应条目 |
 
-> P0~P3 均为**局部改动 + 向后兼容**，每阶段结束跑 `make test`（含 40 单测）与 `make eval`（12 golden）即可确认无回归。P4 为架构级，单独立项。
+> P0~P3 均为**局部改动 + 向后兼容**，每阶段结束跑 `make test`（含 40 单测）与 `make eval`（12 golden）即可确认无回归。P4 为架构级，单独立项。P6 为内核级八工作流专项，按 P0→P1→P2 分批推进。
 
 ## 5. 风险与缓解
 
@@ -277,9 +281,9 @@
 | TB-3 | **uv workspace 环境脆弱**：根 `uv sync` 会卸载非根 member 包（实测卸载 24 包，含 agent_federation-app），默认环境不含非根包依赖 | 实施过程实测 | 中（已缓解） | **已修复**：根因是 uv workspace 默认 `uv sync` 只装根包。固化约定为 `uv sync --all-packages --extra dev`（装全部 workspace 包 + dev 工具），单包测试用 `uv run --package <pkg> ...`；运行约定已写入 `README.md` uv workspace 段。裸 `uv sync` 仍会卸载非根包，勿直接使用 |
 | TB-4 | **M5 语义缓存统一未落地**：`agent_core.cache` 已建 `CacheStats`/`build_cache_key` 单一真相，但 app(`PgSemanticCache`)/agent_federation(`ValkeySemanticCache`) 尚未统一到 `BaseSemanticCache` 接口 | `m5-semantic-cache-plan.md`（纯草案，未实施） | 中 | ✅ 已落地（2026-08-16）：`agent_core.cache` 新增 `BaseSemanticCache` Protocol + 零依赖 `build_cache_key` 纯函数（单一真相）；agent_federation `layers.py` 复用内核 `build_cache_key`（移除本地 hash 重复，I 规则清理 hashlib/json）；app `infra/cache.py` docstring 标注遵循协议、不跨后端共享数据。补 `agent-core/tests/test_cache_key.py`。遵循 §6 约束：仅统一接口与 key 构造，不跨后端共享缓存数据 |
 | TB-5 | **agent_federation 联邦契约统一（原 TODO）**：`shared_schemas` 在 agent_federation 侧原未直接复用（仅 app 侧用），已在优化 E/P4.1 补齐断言——**已闭环**，此处仅作历史登记 | `architecture-boundary-app-vs-agent-federation.md:69` | 已解决 | — |
-| TB-9 | **双轨职责重叠（意图/改写双份）**：`app.decide_route` 与 `agent_federation/agent/intent/*` + `rewrite/` 各自实现意图分类与 Query 改写，策略可能分歧、双份维护 | `dual-track-architecture-analysis.md` AR-1 | 高（仅 SQL/契约已收口，路由/改写仍双份） | 以 `app.decide_route` + `agent_core` 为路由真相源；agent_federation 侧复用或经内核桥接，禁止编排层合并（护栏 §3） （2026-08-19 审查核销：意图分类已收口到内核 `agent_core.intent.classify_intent`（`agent_federation/agent/main_agent.py` 直用），`app/agent/intent_bridge.py` 为双轨标签映射单一真源；`rewrite/` 为联邦 Phase 2 subquery 分解专用，app 侧无对应实现，无双份） |
+| TB-9 | **双轨职责重叠（意图/改写双份）**：`app.decide_route` 与 `agent_federation/agent/intent/*` + `rewrite/` 各自实现意图分类与 Query 改写，策略可能分歧、双份维护 | `dual-track-architecture-analysis.md` AR-1 | 高（仅 SQL/契约已收口，路由/改写仍双份） | 以 `app.decide_route` + `agent_core` 为路由真相源；agent_federation 侧复用或经内核桥接，禁止编排层合并（护栏 §3） （2026-08-19 审查核销：意图分类已收口到内核 `agent_core.intent.classify_intent`（`agent_federation/agent/main_agent.py` 直用），`app/agent/intent_bridge.py` 为双轨标签映射单一真源；`rewrite/` 为联邦 Phase 2 subquery 分解专用，app 侧无对应实现，无双份；**WS-6 进一步收敛**：L1 分类器原型数据外置到 `data/prototypes.json` + `@lru_cache` + `classify_l1_async` 异步入口） |
 | TB-10 | **双轨记忆语义不等价**：`app` 有 pgvector 长期记忆 + PG checkpoint + revert；`agent_federation` 仅 `InMemorySaver`，无长期记忆（E-3 已下沉 `MemoryBackend` 协议但未挂后端） | `dual-track-architecture-analysis.md` AR-2 | 高（跨轨无法共享长期上下文） | `create_deep_agent` memory 挂载点接入内核 `MemoryBackend`；短期文档固化"agent_federation 无长期记忆"边界 （2026-08-19 审查核销：`agent_federation/agent/memory/main_agent_memory.py` 已挂 typed 长期记忆（`recall_typed_context`/`remember_episodic`，thread_id→workspace_id 透传），checkpointer 走内核 `get_checkpointer`（Mongo 持久化 / InMemory 降级）；「无长期记忆」边界已解除） |
-| TB-11 | **双轨配置体系分裂**：`app` 用 pydantic-settings `Settings`；`agent_federation` 用 dataclass+dotenv+YAML，能力开关散落 env | `dual-track-architecture-analysis.md` AR-3 | 中 | 长期 agent_federation 配置收敛到 pydantic-settings 或复用 `app.Settings`；短期 README 枚举全部 env 开关与默认值 （2026-08-19 第一步已落地：README 环境变量表 + `.env.example` 以源码为真相源全量盘点 80+ 开关（含共享内核 `agent_core.memory.*` 11 项），修正 `SUBAGENT_RETRY_BASE` 默认值偏差 1.0→0.5、移除源码中已不存在的过时 `MYSQL_POOL_RESET_SESSION`；长期 pydantic-settings 收敛保留，待出现真实配置复用需求） |
+| TB-11 | **双轨配置体系分裂**：`app` 用 pydantic-settings `Settings`；`agent_federation` 用 dataclass+dotenv+YAML，能力开关散落 env | `dual-track-architecture-analysis.md` AR-3 | 中 | 长期 agent_federation 配置收敛到 pydantic-settings 或复用 `app.Settings`；短期 README 枚举全部 env 开关与默认值 （2026-08-19 第一步已落地：README 环境变量表 + `.env.example` 以源码为真相源全量盘点 80+ 开关（含共享内核 `agent_core.memory.*` 11 项），修正 `SUBAGENT_RETRY_BASE` 默认值偏差 1.0→0.5、移除源码中已不存在的过时 `MYSQL_POOL_RESET_SESSION`；**WS-5 进一步收敛**：内核新增 `KernelConfig` + `env_bool/env_int/env_float/env_str` 类型化解析层，散点 `os.getenv` 全量迁移；长期 pydantic-settings 收敛保留，待出现真实配置复用需求） |
 | TB-12 | **共享内核采用度不对称（残余）**：`agent_federation` 引 `agent_core` 24 处 / `app` 7 处；缓存 key 已统一（TB-4）但 `PgSemanticCache`/`ValkeySemanticCache` 未统一到 `BaseSemanticCache` 实现层 | `dual-track-architecture-analysis.md` AR-4 | 中（部分已闭环：E-1/TB-4/TB-5） | 新增内核能力强制双轨同步接入；缓存后端实现层对齐 `BaseSemanticCache` （2026-08-19 审查核销：`PgSemanticCache` / 联邦 `SemanticCache` 均已实现 `BaseSemanticCache` 统计接口（`get_stats`/`reset_stats`），key 构造统一内核 `build_cache_key`，实现层对齐闭环） |
 | TB-13 | **双轨认知/维护成本**：9 包 monorepo + 两套编排哲学（StateGraph 边思维 vs DeepAgents 委派思维）+ SSE/WS 双网关，排障需先判轨 | `dual-track-architecture-analysis.md` AR-5 | 中（结构性） | 优化 F：抽自研外壳为共享基础设施，双轨共用；`AGENTS.md` 固化「新业务默认走哪条轨」决策树 |
 | TB-14 | **agent_federation 外壳缺失 + thread_id 会话断裂**：`agent_federation/api/server.py:165` API_KEY 模式每次请求生成新 `thread_id`，使 checkpointer 形同虚设（即便换 PG 也救不了多轮）；且缺 admission/coordinator/revert/SSE 外壳 | `plan-e-dual-track-convergence.md` §F | 高（阻断 B 侧持久化与回退） | ~~优化 F P4.4：先修 thread_id 复用~~ ✅ **已落地（2026-08-18 审查核销）**：`agent_federation/api/auth.py` 的 `resolve_thread_id` 已按密钥派生稳定 `thread_id`，多轮会话断裂已修复（审查实码确认）；余「抽外壳为共享基础设施」仍为 P4.4 独立项，按文档执行时勿在 thread_id 上重复投入 |

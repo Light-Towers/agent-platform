@@ -2,7 +2,8 @@
 
 设计要点：
 - agent_federation 不自建 asyncpg 双池；pg 模式语义/类型记忆统一走此 psycopg 单池。
-- 池 URL 取 ``DEEPAGENTS_DATABASE_URL``，回退 ``DATABASE_URL``（与 app 共享库时指向同一库）。
+- 池 URL 取 ``AGENT_PLATFORM_DATABASE_URL``（WS-5：旧名 ``DEEPAGENTS_DATABASE_URL``
+  兼容一个小版本，回退 ``DATABASE_URL``；与 app 共享库时指向同一库）。
 - 懒加载加锁 + lifespan 预热，避免竞态；建表语句全部 IF NOT EXISTS，重启安全。
 - ``register_vector_async`` 必须在打开连接池前先 ``CREATE EXTENSION vector``，否则报
   "vector type not found"（与 app/infra/db.py 同一坑）。
@@ -35,7 +36,10 @@ CREATE INDEX IF NOT EXISTS idx_memories_user_type ON memories (user_id, memory_t
 
 
 def _database_url() -> str | None:
-    return os.getenv("DEEPAGENTS_DATABASE_URL") or os.getenv("DATABASE_URL") or None
+    # WS-5：经内核配置层解析（新名优先，旧名 DEEPAGENTS_DATABASE_URL 兼容 + 弃用警告）
+    from agent_core.config import env_database_url
+
+    return env_database_url() or None
 
 
 def _vector_dim() -> int:
@@ -53,7 +57,7 @@ async def init_pool():
     global _pool
     url = _database_url()
     if not url:
-        logger.info("DEEPAGENTS_DATABASE_URL/DATABASE_URL 未配置，以内存模式运行（无持久化）")
+        logger.info("AGENT_PLATFORM_DATABASE_URL/DATABASE_URL 未配置，以内存模式运行（无持久化）")
         return None
     async with _pool_lock:
         if _pool is not None:
