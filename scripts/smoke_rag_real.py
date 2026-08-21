@@ -39,8 +39,8 @@ async def main():
         database_url=s.database_url,
         db_pool_max_size=s.db_pool_max_size,
     )
-    # ensure_schema 已按 VECTOR_DIM 建表；若维度变更需先 DROP（本脚本前置已处理）
-    await ensure_schema(pool, vector_dim=s.vector_dim)
+    # ensure_schema 从 embedder 派生 vector_dim（单一事实源），无需显式传递
+    await ensure_schema(pool)
 
     # 1) 真实 embedding 入库
     doc_ids = []

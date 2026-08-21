@@ -165,7 +165,8 @@ async def main():
     async with pool.connection() as conn:
         await conn.execute("DROP TABLE IF EXISTS chunks")
         await conn.commit()
-    await ensure_schema(pool, vector_dim=get_settings().vector_dim)
+    # ensure_schema 从 embedder 派生 vector_dim（单一事实源），无需显式传递
+    await ensure_schema(pool)
 
     # 清空历史 chunks（评测环境可丢，避免重复入库污染语料）
     async with pool.connection() as conn:
