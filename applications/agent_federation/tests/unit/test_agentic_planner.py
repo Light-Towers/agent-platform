@@ -29,8 +29,8 @@ async def test_plan_protocol_placeholder():
     plan = await planner.plan(PlannerContext(question="帮我查一下上海的用户", workspace_id="ws1"))
     assert plan.route == "agentic"
     assert plan.sub_query == "帮我查一下上海的用户"
-    assert plan.notes["workspace_id"] == "ws1"
-    assert plan.notes["user_id"] == "default"
+    assert plan.workspace_id == "ws1"
+    assert plan.user_id == "default"
 
 
 @pytest.mark.asyncio

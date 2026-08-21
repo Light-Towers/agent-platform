@@ -101,6 +101,7 @@ class Plan(BaseModel):
     mcp_server: str = ""
     mcp_tool: str = ""
     mcp_params: dict[str, Any] = Field(default_factory=dict)
+    execution_mode: str = ""
     notes: dict[str, Any] = Field(default_factory=dict)
     graph: Any = None
 

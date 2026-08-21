@@ -57,7 +57,7 @@ async def test_unified_force_graph():
     plan = await planner.plan(_ctx("搜索并分析 北京 天气 数据"))
     assert plan.mode == "graph"
     assert isinstance(plan.graph, ExecutionGraph)
-    assert plan.notes["execution_mode"] == ExecutionMode.GRAPH.value
+    assert plan.execution_mode == ExecutionMode.GRAPH.value
 
 
 async def test_unified_auto_workflow():
@@ -66,7 +66,7 @@ async def test_unified_auto_workflow():
     plan = await planner.plan(_ctx("生成财务周报"))
     assert plan.mode == "workflow"
     assert plan.route == "report_workflow"
-    assert plan.notes["execution_mode"] == ExecutionMode.WORKFLOW.value
+    assert plan.execution_mode == ExecutionMode.WORKFLOW.value
 
 
 async def test_unified_auto_graph_multi_skill():
@@ -75,4 +75,4 @@ async def test_unified_auto_graph_multi_skill():
     planner = UnifiedPlanner(settings, _registry(), selector=selector)  # type: ignore[arg-type]
     plan = await planner.plan(_ctx("搜索并分析 北京 天气 数据"))
     assert plan.mode == "graph"
-    assert plan.notes["execution_mode"] == ExecutionMode.GRAPH.value
+    assert plan.execution_mode == ExecutionMode.GRAPH.value

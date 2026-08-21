@@ -84,7 +84,9 @@ class AgenticPlanner(Planner):
             route="agentic",
             sub_query=ctx.question,
             reason="agentic planner 自主决策（deep_agent）",
-            notes={"question": ctx.question, "workspace_id": ctx.workspace_id, "user_id": ctx.user_id},
+            question=ctx.question,
+            workspace_id=ctx.workspace_id,
+            user_id=ctx.user_id,
         )
 
     async def execute(
@@ -96,8 +98,8 @@ class AgenticPlanner(Planner):
         # lazy import：避免模块顶层拉起 main_agent 全局副作用
         from agent_federation.agent.main_agent import _execute_agent_core  # noqa: PLC0415
 
-        question = plan.notes.get("question") or plan.sub_query or ""
-        workspace_id = plan.notes.get("workspace_id", "default")
+        question = plan.question or plan.sub_query or ""
+        workspace_id = plan.workspace_id
 
         yield StreamEvent(type="route", payload={"capability": "agentic", "reason": plan.reason})
 
