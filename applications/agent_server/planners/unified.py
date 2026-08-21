@@ -53,7 +53,7 @@ class UnifiedPlanner(Planner):
         decision = await self._selector.select(ctx, self._registry)
         sub = self._sub_planner(decision.mode)
         plan = await sub.plan(ctx)
-        plan.notes = {**plan.notes, "execution_mode": decision.mode.value}
+        plan.execution_mode = decision.mode.value
         if decision.mode == ExecutionMode.WORKFLOW and decision.workflow_skill:
             # workflow 模式：复用 Workflow Skill（已注册）作为单 route 能力
             plan = Plan(
@@ -61,7 +61,7 @@ class UnifiedPlanner(Planner):
                 route=decision.workflow_skill,
                 sub_query=ctx.question,
                 reason=f"Mode Selector → Workflow Skill {decision.workflow_skill}",
-                notes={**plan.notes, "execution_mode": ExecutionMode.WORKFLOW.value},
+                execution_mode=ExecutionMode.WORKFLOW.value,
             )
         return plan
 
@@ -71,7 +71,7 @@ class UnifiedPlanner(Planner):
         runtime: PlannerRuntime,
         ctx: ExecutionContext | None = None,
     ) -> AsyncIterator[StreamEvent]:
-        mode = plan.notes.get("execution_mode", plan.mode)
+        mode = getattr(plan, "execution_mode", None) or plan.mode
         if mode == ExecutionMode.WORKFLOW.value or plan.mode == "workflow":
             # workflow 经 execute_plan 的单一 route 分支走统一 Runtime（受治理 + 轨迹持久化）
             async for event in execute_plan(plan, runtime):

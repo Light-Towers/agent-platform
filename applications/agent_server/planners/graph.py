@@ -56,12 +56,10 @@ class GraphPlanner(Planner):
             sub_query=ctx.question,
             reason=reason,
             graph=g,
-            notes={
-                "question": ctx.question,
-                "workspace_id": ctx.workspace_id,
-                "user_id": ctx.user_id,
-                "last_snapshot": ctx.last_snapshot,
-            },
+            question=ctx.question,
+            workspace_id=ctx.workspace_id,
+            user_id=ctx.user_id,
+            last_snapshot=ctx.last_snapshot,
         )
 
     async def plan(self, ctx: PlannerContext) -> Plan:
@@ -71,7 +69,7 @@ class GraphPlanner(Planner):
                 mode="deterministic",
                 route="direct",
                 reason="GraphPlanner 无 registry，回退 deterministic",
-                notes={"question": ctx.question},
+                question=ctx.question,
             )
 
         candidates = registry.discover(ctx.question, top_k=10)
@@ -80,7 +78,7 @@ class GraphPlanner(Planner):
                 mode="deterministic",
                 route="direct",
                 reason="无候选 Skill，回退 direct",
-                notes={"question": ctx.question},
+                question=ctx.question,
             )
 
         # 单候选或无 LLM：基础版单节点（兼容旧行为，避免无意义组合）
@@ -101,12 +99,10 @@ class GraphPlanner(Planner):
             sub_query=ctx.question,
             reason="LLM 组合多 Skill DAG",
             graph=graph,
-            notes={
-                "question": ctx.question,
-                "workspace_id": ctx.workspace_id,
-                "user_id": ctx.user_id,
-                "last_snapshot": ctx.last_snapshot,
-            },
+            question=ctx.question,
+            workspace_id=ctx.workspace_id,
+            user_id=ctx.user_id,
+            last_snapshot=ctx.last_snapshot,
         )
 
     async def _compose_with_retry(
@@ -136,11 +132,11 @@ class GraphPlanner(Planner):
             return
 
         plan_ctx = PlannerContext(
-            question=plan.sub_query or plan.notes.get("question", ""),
-            workspace_id=plan.notes.get("workspace_id", "default"),
-            user_id=plan.notes.get("user_id", "default"),
+            question=plan.question or plan.sub_query,
+            workspace_id=plan.workspace_id,
+            user_id=plan.user_id,
             llm=runtime.llm,
-            last_snapshot=plan.notes.get("last_snapshot"),
+            last_snapshot=plan.last_snapshot,
         )
         # 执行期重规划：PolicyValidator 拒绝（非法图）时，有限次重新规划而非无限 loop
         for attempt in range(self._max_execution_replans + 1):
