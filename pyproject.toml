@@ -34,6 +34,9 @@ otel = [
     "opentelemetry-exporter-otlp>=1.20",
 ]
 mcp = ["mcp>=0.9"]
+# Agentic Planner 模式（PLANNER=agentic）需要联邦侧 AgenticPlanner；
+# 默认 deterministic/graph/auto 模式无需安装。安装：uv sync --extra agentic
+agentic = ["agent-federation-app"]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
@@ -86,6 +89,7 @@ ignore = ["B008", "E402", "E731", "BLE001", "S110", "B017", "PERF102", "RUF059"]
 agent-core = { workspace = true }
 shared-schemas = { workspace = true }
 agent-runtime = { workspace = true }
+agent-federation-app = { workspace = true }
 flashrag-dev = { git = "https://github.com/RUC-NLPIR/FlashRAG.git" }
 
 [tool.uv.workspace]

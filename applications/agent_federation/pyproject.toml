@@ -14,6 +14,7 @@ keywords = ["agent", "multi-agent", "orchestration", "langgraph", "fastapi"]
 dependencies = [
     "agent-core",
     "shared-schemas",
+    "agent-runtime",  # Plan-F：Planner 协议 / SkillRegistry / ExecutionContext 等运行时中间件
     "deepagents==0.7.5",
     "langchain>=1.3.14",
     "langchain-core>=1.5.3",
