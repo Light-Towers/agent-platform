@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import datetime
 import logging
-import os
 from dataclasses import dataclass
 from enum import Enum
 from typing import Iterable
@@ -85,17 +84,17 @@ TIME_DECAY_COEFF: float = 0.01  # 双曲衰减 1/(1 + 0.01*age_days)
 # --- 开关 ------------------------------------------------------------------
 
 def semantic_memory_typed_enabled() -> bool:
-    """``SEMANTIC_MEMORY_TYPED`` 开关（默认关，保持与旧行为一致）。
+    """``SEMANTIC_MEMORY_TYPED`` 加权策略开关（WS-1 起默认开）。
 
-    ADR-0004 未拍板「env 覆盖加权系数」，本模块仅用该开关控制 typed 路径是否启用；
-    加权系数默认写死，``weights`` 入参可覆盖（约束 2 推荐默认）。
+    语义变更（WS-1）：本开关不再决定「走哪条栈」（统一经 MemoryStore），
+    只控制 typed 召回是否启用加权融合（``type_weight × importance × time_decay``）；
+    关闭时退化为平权召回（按时间衰减排序）。``SEMANTIC_MEMORY_ENABLED`` 才是
+    记忆总开关。加权系数默认写死，``weights`` 入参可覆盖（ADR-0004 约束 2）。
+    WS-5：经内核配置层 ``env_bool`` 解析（非法值警告 + 回退默认）。
     """
-    return os.getenv("SEMANTIC_MEMORY_TYPED", "false").lower() in (
-        "1",
-        "true",
-        "yes",
-        "on",
-    )
+    from agent_core.config import env_bool
+
+    return env_bool("SEMANTIC_MEMORY_TYPED", True)
 
 
 def _normalize_weights(weights: Iterable[tuple[str, float]] | None) -> dict[str, float]:
@@ -227,15 +226,11 @@ def memory_forget_threshold() -> float:
 
     读环境变量 ``MEMORY_FORGET_THRESHOLD``；缺省回退历史常量 ``0.1``。
     基线采集后（ADR-0004 候选A 被驳回原因：缺数据）可按业务覆盖。
+    WS-5：经 ``env_float`` 解析（非法值警告 + 回退默认）。
     """
-    raw = os.getenv("MEMORY_FORGET_THRESHOLD")
-    if raw is None:
-        return 0.1
-    try:
-        return float(raw)
-    except ValueError:
-        logger.warning("[typed] MEMORY_FORGET_THRESHOLD=%r 非法，回退 0.1", raw)
-        return 0.1
+    from agent_core.config import env_float
+
+    return env_float("MEMORY_FORGET_THRESHOLD", 0.1)
 
 
 def memory_forget_age_days() -> int:
@@ -243,15 +238,11 @@ def memory_forget_age_days() -> int:
 
     读环境变量 ``MEMORY_FORGET_AGE_DAYS``；缺省回退历史常量 ``30``。
     SQL 端用参数化 ``interval '%s days'``，避免写死字面量。
+    WS-5：经 ``env_int`` 解析（非法值警告 + 回退默认）。
     """
-    raw = os.getenv("MEMORY_FORGET_AGE_DAYS")
-    if raw is None:
-        return 30
-    try:
-        return int(raw)
-    except ValueError:
-        logger.warning("[typed] MEMORY_FORGET_AGE_DAYS=%r 非法，回退 30", raw)
-        return 30
+    from agent_core.config import env_int
+
+    return env_int("MEMORY_FORGET_AGE_DAYS", 30)
 
 
 async def consolidate(

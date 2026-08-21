@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from functools import wraps
@@ -152,16 +153,26 @@ def timeout(seconds: float, executor: Optional[ThreadPoolExecutor] = None) -> Ca
 # ---------------------------------------------------------------------------
 # CircuitBreaker
 # ---------------------------------------------------------------------------
+# 状态常量（WS-3：内核单一真相，适配层不再各自定义字符串）
+STATE_CLOSED = "closed"
+STATE_OPEN = "open"
+STATE_HALF_OPEN = "half_open"
+
+
 class CircuitBreaker:
     """简单熔断器：连续失败达到阈值后进入 OPEN（拒绝调用），冷却后转 HALF_OPEN 探测，
     探测成功则回 CLOSED，失败则回到 OPEN。
 
     状态：CLOSED（正常） / OPEN（熔断拒绝） / HALF_OPEN（探测中）。
+
+    并发安全（WS-3）：状态读写均受内部锁保护，多协程/多线程并发下
+    half_open 探测计数不会竞态。并发模型约束：单事件循环或多线程均适用，
+    但 ``call()`` 内的 fn 执行不在锁内（避免长时间持锁）。
     """
 
-    CLOSED = "closed"
-    OPEN = "open"
-    HALF_OPEN = "half_open"
+    CLOSED = STATE_CLOSED
+    OPEN = STATE_OPEN
+    HALF_OPEN = STATE_HALF_OPEN
 
     def __init__(
         self,
@@ -180,6 +191,7 @@ class CircuitBreaker:
         self._max_half_open_probe = max_half_open_probe
         self._clock = clock
         self._exc_types = exceptions if isinstance(exceptions, tuple) else (exceptions,)
+        self._lock = threading.Lock()
         self._state = self.CLOSED
         self._failures = 0
         self._opened_at: Optional[float] = None
@@ -189,7 +201,20 @@ class CircuitBreaker:
 
     @property
     def state(self) -> str:
-        return self._state
+        with self._lock:
+            return self._state
+
+    def resolved_state(self) -> str:
+        """返回计入冷却期后的等效状态（OPEN 且冷却到期 → HALF_OPEN），只读不突变。
+
+        适配层（如 agent_runtime.circuit_breaker）应经本方法读状态，而非直读
+        私有字段（WS-3：消除子类对 ``_state/_opened_at/_clock`` 的直读耦合）。
+        """
+        with self._lock:
+            if self._state == self.OPEN and self._opened_at is not None:
+                if self._clock() - self._opened_at >= self._reset_timeout:
+                    return self.HALF_OPEN
+            return self._state
 
     def _maybe_transition(self) -> None:
         if self._state == self.OPEN and self._opened_at is not None:
@@ -202,36 +227,39 @@ class CircuitBreaker:
         HALF_OPEN 时限制并发探测数（max_half_open_probe）：已达到上限的
         并发请求会被拒绝（视为仍 OPEN），避免 100 个并发请求同时成为 probe。
         """
-        self._maybe_transition()
-        if self._state == self.OPEN:
-            return False
-        if self._state == self.HALF_OPEN:
-            if self._half_open_inflight < self._max_half_open_probe:
-                self._half_open_inflight += 1
-                return True
-            return False
-        return True
+        with self._lock:
+            self._maybe_transition()
+            if self._state == self.OPEN:
+                return False
+            if self._state == self.HALF_OPEN:
+                if self._half_open_inflight < self._max_half_open_probe:
+                    self._half_open_inflight += 1
+                    return True
+                return False
+            return True
 
     def _end_half_open_probe(self) -> None:
         if self._half_open_inflight > 0:
             self._half_open_inflight -= 1
 
     def record_success(self) -> None:
-        if self._state == self.HALF_OPEN:
-            self._end_half_open_probe()
-        self._failures = 0
-        self._state = self.CLOSED
+        with self._lock:
+            if self._state == self.HALF_OPEN:
+                self._end_half_open_probe()
+            self._failures = 0
+            self._state = self.CLOSED
 
     def record_failure(self) -> None:
-        if self._state == self.HALF_OPEN:
-            self._end_half_open_probe()
-            self._state = self.OPEN
-            self._opened_at = self._clock()
-            return
-        self._failures += 1
-        if self._failures >= self._failure_threshold:
-            self._state = self.OPEN
-            self._opened_at = self._clock()
+        with self._lock:
+            if self._state == self.HALF_OPEN:
+                self._end_half_open_probe()
+                self._state = self.OPEN
+                self._opened_at = self._clock()
+                return
+            self._failures += 1
+            if self._failures >= self._failure_threshold:
+                self._state = self.OPEN
+                self._opened_at = self._clock()
 
     def call(self, fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
         """受熔断保护地执行 fn：拒绝时抛 RuntimeError；否则按结果记录成功/失败。"""
@@ -278,4 +306,13 @@ def validate_config(
     return out
 
 
-__all__ = ["retry", "retry_async", "timeout", "CircuitBreaker", "validate_config"]
+__all__ = [
+    "retry",
+    "retry_async",
+    "timeout",
+    "CircuitBreaker",
+    "validate_config",
+    "STATE_CLOSED",
+    "STATE_OPEN",
+    "STATE_HALF_OPEN",
+]

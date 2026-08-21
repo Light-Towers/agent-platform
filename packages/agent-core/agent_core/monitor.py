@@ -4,29 +4,40 @@
 优化 F：把 deepagents 自研的 ``ToolMonitor`` + ``ConnectionManager`` 下沉到内核，
 作为跨子包（deepagents / app / kefu / wenda）共用的监控外壳单一真相源。
 
+WS-4（统一事件出口）：事件流改经 ``agent_core.events.EventBus`` 扇出——
+WebSocket / 回调订阅 / 旧 builtins.runtime 通道全部实现为 EventSink，逐 sink
+异常隔离；新增出口（OTel span 事件、测试采集器等）只需 ``bus.add_sink(...)``。
+
 设计护栏（遵循 §3 内核零依赖铁律）：
-- 核心逻辑仅依赖 stdlib + ``agent_core.logging``，**不硬依赖 fastapi / starlette**。
+- 核心逻辑仅依赖 stdlib + ``agent_core.logging`` / ``agent_core.events``，
+  **不硬依赖 fastapi / starlette**。
 - ``fastapi.WebSocket`` 仅在 ``ConnectionManager`` 内**惰性 import**（可选依赖），
   无 fastapi 的纯脚本/测试环境可直接用 ``ToolMonitor`` 的回调订阅能力。
 - 线程上下文（thread_id）**不耦合宿主** ``api.context``：宿主通过
   ``ToolMonitor.set_context_getter()`` 注入自己的 ContextVar 读取函数，内核默认
   回退到 ``agent_core.tracing`` 的 request_id，保证并发安全且零硬编码依赖。
 
-上报通道：
+上报通道（均为 EventSink 实现）：
 1. WebSocket：宿主把 ``ConnectionManager`` 实例交给 ``set_websocket_manager``，
-   内核按当前 thread_id 推送 monitor_event。
-2. 脚本运行时 stream_writer：可选兼容 ``builtins.runtime.stream_writer``（保留 deepagents 旧路径）。
-3. 回调订阅：``on(event_type, cb)``，供测试或本地 CLI 直接消费事件。
+   内核按当前 thread_id 推送 monitor_event（``WebSocketSink``）。
+2. 脚本运行时 stream_writer：``LegacyStreamSink`` 可选兼容
+   ``builtins.runtime.stream_writer``（保留 deepagents 旧路径，弃用警告一次）。
+3. 回调订阅：``on(event_type, cb)``（``CallbackSink``），供测试或本地 CLI 直接消费事件。
+4. OTel span 事件：``OTelSpanSink`` 把业务事件挂到当前活跃 span（OTel 未启用时
+   静默 no-op，零开销）。
+
+单例治理（WS-4）：模块级 ``monitor`` 仍是默认共享单例（``ToolMonitor()`` 返回它），
+但显式传 ``bus`` 时构造**独立实例**——测试一律用注入式实例，互不污染。
 """
 
 from __future__ import annotations
 
 import asyncio
-import builtins
 import datetime
 from collections.abc import Callable
 from typing import Any
 
+from agent_core.events import CallbackSink, EventBus, LegacyStreamSink, OTelSpanSink
 from agent_core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -42,22 +53,78 @@ def _default_context_getter() -> str | None:
         return None
 
 
+class WebSocketSink:
+    """WebSocket 出口：按当前 thread_id 把事件推送给 ConnectionManager。
+
+    跨事件循环安全：manager 绑定 loop 与当前 loop 不一致时经
+    ``run_coroutine_threadsafe`` 投递；未绑定 loop / 无 thread_id 时静默跳过。
+    """
+
+    def __init__(self, monitor: "ToolMonitor") -> None:
+        self._monitor = monitor
+
+    def emit(self, event: dict[str, Any]) -> None:
+        manager = self._monitor.websocket_manager
+        if manager is None:
+            return
+        thread_id = self._monitor._context_getter()
+        manager_loop = getattr(manager, "loop", None)
+        if not thread_id or manager_loop is None:
+            return
+        try:
+            current_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            current_loop = None
+        if current_loop is not None and current_loop == manager_loop:
+            current_loop.create_task(manager.send_to_thread(event, thread_id))
+        else:
+            asyncio.run_coroutine_threadsafe(
+                manager.send_to_thread(event, thread_id), manager_loop
+            )
+
+
 class ToolMonitor:
-    """工具/事件监控器单例。
+    """工具/事件监控器：事件经 EventBus 扇出到各 EventSink。
 
     跨协程并发安全：thread_id 通过可注入的 context getter（默认 tracing request_id）
     在 emit 时实时读取，不缓存到全局可变状态。
+
+    构造语义（WS-4）：``ToolMonitor()`` 返回模块单例（兼容既有调用方）；
+    ``ToolMonitor(bus=EventBus())`` 构造独立实例供测试/隔离场景注入使用。
     """
 
     _instance = None
 
-    def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-            cls._instance.websocket_manager = None
-            cls._instance._callbacks: dict[str, list[Callable]] = {}
-            cls._instance._context_getter: Callable[[], str | None] = _default_context_getter
-        return cls._instance
+    def __new__(cls, bus: EventBus | None = None):
+        if bus is None and cls._instance is not None:
+            return cls._instance
+        instance = super().__new__(cls)
+        instance._init(bus)
+        if bus is None:
+            cls._instance = instance
+        return instance
+
+    def _init(self, bus: EventBus | None) -> None:
+        self.bus = bus or EventBus()
+        self.websocket_manager = None
+        self._context_getter: Callable[[], str | None] = _default_context_getter
+        self._callback_sink = CallbackSink()
+        self._ws_sink = WebSocketSink(self)
+        self._legacy_sink = LegacyStreamSink()
+        self._otel_sink = OTelSpanSink()
+        self.bus.add_sink(self._callback_sink)
+        self.bus.add_sink(self._ws_sink)
+        self.bus.add_sink(self._legacy_sink)
+        self.bus.add_sink(self._otel_sink)
+
+    def __init__(self, bus: EventBus | None = None) -> None:
+        # 单例语义下 __init__ 会被重复调用，实际初始化在 __new__/_init 完成
+        pass
+
+    # -- 兼容属性：旧代码直读 monitor._callbacks ---------------------------
+    @property
+    def _callbacks(self) -> dict[str, list[Callable]]:
+        return self._callback_sink._callbacks  # noqa: SLF001 兼容旧测试/调用方
 
     # -- 配置（宿主注入） -------------------------------------------------
     def set_websocket_manager(self, manager) -> None:
@@ -77,44 +144,10 @@ class ToolMonitor:
             "data": data or {},
             "timestamp": datetime.datetime.now().isoformat(),
         }
-
-        # 通道 1：WebSocket
-        if self.websocket_manager is not None:
-            try:
-                thread_id = self._context_getter()
-                manager_loop = getattr(self.websocket_manager, "loop", None)
-                if thread_id and manager_loop is not None:
-                    try:
-                        current_loop = asyncio.get_running_loop()
-                    except RuntimeError:
-                        current_loop = None
-                    if current_loop is not None and current_loop == manager_loop:
-                        current_loop.create_task(
-                            self.websocket_manager.send_to_thread(payload, thread_id)
-                        )
-                    else:
-                        asyncio.run_coroutine_threadsafe(
-                            self.websocket_manager.send_to_thread(payload, thread_id),
-                            manager_loop,
-                        )
-            except Exception as e:  # pragma: no cover - 推送失败不应阻断主链路
-                logger.warning("WebSocket send failed: %s", e)
-
-        # 通道 2：脚本运行时 stream_writer（可选兼容）
-        if hasattr(builtins, "runtime") and hasattr(builtins.runtime, "stream_writer"):
-            try:
-                builtins.runtime.stream_writer(payload)
-            except Exception:
-                pass
-
+        # WS-4：统一经 EventBus 扇出（WebSocket / 回调 / legacy 通道均为 sink，
+        # 逐 sink 异常隔离，单通道故障不影响其余出口）
+        self.bus.emit(payload)
         logger.debug("[Monitor:%s] %s", event_type, message)
-
-        # 通道 3：回调订阅
-        for cb in list(self._callbacks.get(event_type, [])):
-            try:
-                cb(payload)
-            except Exception:
-                pass
 
     # -- 事件上报 API（保持 deepagents 旧签名，零改动调用方） --------------
     def report_tool(self, tool_name: str, args: dict[str, Any] | None = None) -> None:
@@ -160,16 +193,12 @@ class ToolMonitor:
             {"tool_name": tool_name, "outcome": outcome, "error_class": error_class, "detail": detail},
         )
 
-    # -- 回调订阅 ---------------------------------------------------------
+    # -- 回调订阅（委托 CallbackSink）--------------------------------------
     def on(self, event_type: str, callback: Callable) -> None:
-        self._callbacks.setdefault(event_type, []).append(callback)
+        self._callback_sink.on(event_type, callback)
 
     def off(self, event_type: str, callback: Callable) -> None:
-        if event_type in self._callbacks:
-            try:
-                self._callbacks[event_type].remove(callback)
-            except ValueError:
-                pass
+        self._callback_sink.off(event_type, callback)
 
 
 monitor = ToolMonitor()
@@ -227,6 +256,7 @@ manager = ConnectionManager()
 
 __all__ = [
     "ToolMonitor",
+    "WebSocketSink",
     "monitor",
     "ConnectionManager",
     "manager",

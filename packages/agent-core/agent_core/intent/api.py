@@ -11,7 +11,7 @@
 from __future__ import annotations
 
 
-from agent_core.intent.classifier import classify_l1
+from agent_core.intent.classifier import classify_l1, classify_l1_async
 from agent_core.intent.llm_judge import l2_judge
 from agent_core.intent.models import (
     L1_THRESHOLD,
@@ -36,7 +36,7 @@ async def classify_intent(query: str, *, model=None) -> IntentResult:
     Returns:
         IntentResult：L1 高置信直接出，否则 L2 细判；L2 失败降级 L1。
     """
-    l1 = classify_l1(query)
+    l1 = await classify_l1_async(query)
     if l1.confidence >= L1_THRESHOLD and not l1.need_clarify:
         return l1
     return await l2_judge(query, model=model)

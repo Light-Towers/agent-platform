@@ -21,7 +21,7 @@ from agent_core.intent.models import (
     IntentLabel,
     IntentResult,
 )
-from agent_core.intent.classifier import classify_l1, _keyword_rule
+from agent_core.intent.classifier import classify_l1_async, _keyword_rule
 
 logger = logging.getLogger(__name__)
 
@@ -89,8 +89,8 @@ async def l2_judge(query: str, *, model=None) -> IntentResult:
     except Exception as e:
         logger.warning("L2 intent judge failed, fallback to L1: %s", e)
 
-    # 降级：L1 嵌入 + 关键词
-    l1 = classify_l1(query)
+    # 降级：L1 嵌入 + 关键词（经异步入口，不阻塞事件循环，WS-6）
+    l1 = await classify_l1_async(query)
     if l1.primary != IntentLabel.DIRECT or l1.source != "l1_fallback":
         return l1
     kw = _keyword_rule(query)

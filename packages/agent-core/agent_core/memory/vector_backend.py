@@ -374,19 +374,25 @@ def create_memory_backend(
     database_url: str = "",
     collection: str = DEFAULT_COLLECTION,
     tenant_id: str = "default",
+    embedder: Any | None = None,
 ) -> MemoryBackend:
     """按 mode 创建向量后端。
 
     mode="milvus" → MilvusMemoryBackend（默认）
     mode="pg"     → PgVectorMemoryBackend（备选）
-    embedding 维度由共享 embedder 动态派生（远程 bge-m3=1024 / 本地 bge-small-zh=512）。
+    embedding 维度由 embedder 派生（可构造注入，未注入则用共享 ``get_embedder``；
+    远程 bge-m3=1024 / 本地 bge-small-zh=512）。
     """
     if mode == "milvus":
-        return MilvusMemoryBackend(uri=uri, token=token, collection=collection, tenant_id=tenant_id)
+        return MilvusMemoryBackend(
+            uri=uri, token=token, collection=collection, tenant_id=tenant_id, embedder=embedder
+        )
     if mode == "pg":
         if not database_url:
             raise ValueError("pg 后端需要 database_url")
-        return PgVectorMemoryBackend(database_url=database_url, collection=collection, tenant_id=tenant_id)
+        return PgVectorMemoryBackend(
+            database_url=database_url, collection=collection, tenant_id=tenant_id, embedder=embedder
+        )
     raise ValueError(f"未知 VECTOR_BACKEND: {mode}")
 
 

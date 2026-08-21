@@ -5,6 +5,10 @@
 ``ToolRegistry`` 管理工具条目及其元数据（``enabled`` / ``timeout_s``），供
 ``guarded_invoke`` / ``wrap_tool`` 读取执行策略。
 
+**维护模式（WS-7）**：新代码的工具注册与执行策略应经
+``agent_runtime.skills.SkillRegistry``（四执行器 + middleware 洋葱链）；本注册表
+保留服务存量调用方（zhanggui-zhiku fanout 等），迁移列入后续专项。
+
 框架无关：本模块**零第三方依赖**，仅 stdlib。
 """
 

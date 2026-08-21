@@ -252,6 +252,83 @@ def test_breaker_call_success_records():
 
 
 # ---------------------------------------------------------------------------
+# WS-3：并发安全 + resolved_state + STATE 常量
+# ---------------------------------------------------------------------------
+def test_breaker_state_constants_single_source():
+    from agent_core.resilience import STATE_CLOSED, STATE_HALF_OPEN, STATE_OPEN
+
+    assert CircuitBreaker.CLOSED == STATE_CLOSED == "closed"
+    assert CircuitBreaker.OPEN == STATE_OPEN == "open"
+    assert CircuitBreaker.HALF_OPEN == STATE_HALF_OPEN == "half_open"
+
+
+def test_breaker_resolved_state_readonly():
+    # OPEN 且冷却到期 → resolved_state 报 HALF_OPEN，但内部状态不突变
+    cb = CircuitBreaker(failure_threshold=1, reset_timeout=0.01, clock=lambda: 0)
+    cb.record_failure()
+    assert cb.state == CircuitBreaker.OPEN
+    # 推进时钟超过冷却期（用可控 clock 重建）
+    t = [0.0]
+    cb2 = CircuitBreaker(failure_threshold=1, reset_timeout=10, clock=lambda: t[0])
+    cb2.record_failure()
+    t[0] = 20.0
+    assert cb2.resolved_state() == CircuitBreaker.HALF_OPEN
+    # 只读不突变：未经 allow() 前内部仍 OPEN
+    assert cb2.state == CircuitBreaker.OPEN
+
+
+def test_breaker_concurrent_half_open_probe_limited():
+    """并发竞态（WS-3）：HALF_OPEN 时多线程并发 allow，探测数不超 max_half_open_probe。"""
+    import threading
+
+    t = [0.0]
+    cb = CircuitBreaker(
+        failure_threshold=1, reset_timeout=5, max_half_open_probe=1, clock=lambda: t[0]
+    )
+    cb.record_failure()  # → OPEN
+    t[0] = 10.0  # 冷却到期 → 下一次 allow 转 HALF_OPEN
+
+    allowed = []
+    barrier = threading.Barrier(32)
+
+    def _probe():
+        barrier.wait()
+        if cb.allow():
+            allowed.append(1)
+
+    threads = [threading.Thread(target=_probe) for _ in range(32)]
+    for th in threads:
+        th.start()
+    for th in threads:
+        th.join()
+    # 32 个并发请求只允许 1 个成为 probe（锁保护下不竞态）
+    assert len(allowed) == 1
+
+
+def test_breaker_concurrent_record_failure_no_lost_updates():
+    """并发 record_failure 不丢计数：N 线程各记一次，failure_threshold 内状态一致。"""
+    import threading
+
+    cb = CircuitBreaker(failure_threshold=100, reset_timeout=60)
+    barrier = threading.Barrier(50)
+
+    def _fail():
+        barrier.wait()
+        cb.record_failure()
+
+    threads = [threading.Thread(target=_fail) for _ in range(50)]
+    for th in threads:
+        th.start()
+    for th in threads:
+        th.join()
+    # 50 < 100 未熔断；再记 50 次应精确达到阈值转 OPEN（无丢失更新）
+    assert cb.state == CircuitBreaker.CLOSED
+    for _ in range(50):
+        cb.record_failure()
+    assert cb.state == CircuitBreaker.OPEN
+
+
+# ---------------------------------------------------------------------------
 # validate_config
 # ---------------------------------------------------------------------------
 def test_validate_config_defaults():

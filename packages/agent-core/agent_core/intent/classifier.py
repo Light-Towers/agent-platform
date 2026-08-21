@@ -36,11 +36,14 @@ _DATA_PATH = Path(__file__).resolve().parent / "data" / "prototypes.json"
 #  - WEAK：礼貌/告别词（谢谢/hi/bye 等）。这类词常出现在正常业务句里（"谢谢你帮我
 #    分析合同"），若用 substring 会误判为 CHITCHAT 跳过 embedding。改为仅在 query
 #    去除空白与标点后整体等于该词（即纯问候/礼貌语）时才短路。
-_CHITCHAT_STRONG = [
+#
+# WS-6：词表外置到 data/prototypes.json 的 ``chitchat_shortcuts`` 段（数据驱动，
+# 新增词不再改代码）；下方常量仅作数据缺失时的兜底。
+_CHITCHAT_STRONG_FALLBACK = [
     "你好", "您好", "在吗", "你是谁", "你是机器人吗",
     "who are you", "what are you", "are you a bot",
 ]
-_CHITCHAT_WEAK = [
+_CHITCHAT_WEAK_FALLBACK = [
     "谢谢", "感谢", "再见", "拜拜", "哈哈", "嘿",
     "hi", "hello", "hey", "thanks", "thank you", "bye",
 ]
@@ -53,13 +56,33 @@ def _is_pure_weak_chitchat(query: str) -> bool:
     q = query.strip().lower()
     # 去除所有非字母数字 unicode 字符（含中英文标点、空白），再比较
     core = re.sub(r"[^\w\u4e00-\u9fff]+", "", q)
-    return core in {k.lower() for k in _CHITCHAT_WEAK}
+    _strong, weak = _chitchat_words()
+    return core in {k.lower() for k in weak}
 
 
+@lru_cache(maxsize=1)
 def _load_prototypes() -> dict[str, Any]:
-    """加载原型数据（意图 -> 样例文本列表 + 预计算原型向量）。"""
+    """加载原型数据（意图 -> 样例文本列表 + 预计算原型向量）。
+
+    WS-6：``lru_cache`` 避免每次请求读盘；测试/数据热更经
+    ``_load_prototypes.cache_clear()`` 复位。
+    """
     with open(_DATA_PATH, "r", encoding="utf-8") as f:
         return json.load(f)
+
+
+@lru_cache(maxsize=1)
+def _chitchat_words() -> tuple[list[str], list[str]]:
+    """读数据文件中的 chitchat 短链词表（strong, weak）；缺失时回退代码兜底。"""
+    try:
+        shortcuts = _load_prototypes().get("chitchat_shortcuts") or {}
+        strong = list(shortcuts.get("strong") or [])
+        weak = list(shortcuts.get("weak") or [])
+        if strong and weak:
+            return strong, weak
+    except Exception:
+        pass
+    return list(_CHITCHAT_STRONG_FALLBACK), list(_CHITCHAT_WEAK_FALLBACK)
 
 
 @lru_cache(maxsize=1)
@@ -97,8 +120,9 @@ def _intent_prototype_vector(intent: str, samples: list[str]) -> tuple:
 
 def _keyword_rule(query: str) -> IntentResult | None:
     """关键词降级：当嵌入层不可用或原型缺失时启用。"""
+    strong, _weak = _chitchat_words()
     q = query.lower()
-    if any(k in q for k in _CHITCHAT_STRONG) or _is_pure_weak_chitchat(query):
+    if any(k in q for k in strong) or _is_pure_weak_chitchat(query):
         return IntentResult(
             primary=IntentLabel.CHITCHAT, confidence=0.7,
             candidates=[IntentCandidate(IntentLabel.CHITCHAT, 0.7)],
@@ -117,7 +141,7 @@ def _fallback_result() -> IntentResult:
 
 
 def classify_l1(query: str) -> IntentResult:
-    """L1 嵌入粗分类。
+    """L1 嵌入粗分类（**同步阻塞**：内含嵌入计算，async 链路请用 classify_l1_async）。
 
     返回 ``IntentResult``（source 为 l1 / l1_keyword / l1_fallback）。
     need_clarify 在置信度 < CLARIFY_THRESHOLD 时置位。
@@ -127,8 +151,9 @@ def classify_l1(query: str) -> IntentResult:
         return _fallback_result()
 
     # 1. chitchat 短链
+    strong, _weak = _chitchat_words()
     q_low = query.lower()
-    if any(k in q_low for k in _CHITCHAT_STRONG) or _is_pure_weak_chitchat(query):
+    if any(k in q_low for k in strong) or _is_pure_weak_chitchat(query):
         return IntentResult(
             primary=IntentLabel.CHITCHAT, confidence=0.95,
             candidates=[IntentCandidate(IntentLabel.CHITCHAT, 0.95)],
@@ -160,3 +185,14 @@ def classify_l1(query: str) -> IntentResult:
     except Exception:
         # 3. 嵌入失败时降级关键词
         return _keyword_rule(query) or _fallback_result()
+
+
+async def classify_l1_async(query: str) -> IntentResult:
+    """``classify_l1`` 的异步入口（WS-6）：经 ``asyncio.to_thread`` 移出事件循环。
+
+    历史事故教训：``to_thread`` 只能包**同步**函数（误包 async 函数会导致
+    coroutine 从未被 await 的静默失效），此处包裹的 classify_l1 为纯同步。
+    """
+    import asyncio
+
+    return await asyncio.to_thread(classify_l1, query)
