@@ -39,12 +39,12 @@
 |---|---|---|---|---|---|
 | P2-1 | tokens/cost 聚合器 | P2 | 0.3 | `protocol.py` (ExecutionContext) | P1-1 | ✅ 已落地（2026-08-21）：ExecutionContext 新增 tokens_used/cost_used/max_tokens/max_cost + record_usage() 方法，超限抛 SkillCompositionError；PlannerRuntime 透传 max_tokens/max_cost 配置 |
 | P2-2 | llm client 计量点 | P2 | 0.5 | `agent_core/llm/` | P2-1 | ✅ 已落地（2026-08-21）：计量源 `FallbackChatModel`/`LangChainFallbackModel` 抽取 `usage_metadata`（含 `response_metadata` 兜底）→ `on_usage` 回调外发；`PlannerRuntime` 装配期把 `llm.on_usage` 接到当前 `ExecutionContext.record_usage`（contextvars 按 task 隔离，边界外静默丢弃）；`execute_plan` 的 `status` 事件带出累计 `tokens_used`/`cost_used` |
-| P3-1 | Trajectory 持久化 | P3 | 1.5 | `trajectory/`(新) + `execution_graph.py` | P2-2（tokens 可后补时仅 P1-1） |
-| P3-2 | Trajectory Replay | P3 | 2 | `eval/replay/`(新) | P3-1 |
+| P3-1 | Trajectory 持久化 | P3 | 1.5 | `trajectory/`(新) + `execution_graph.py` | P2-2（tokens 可后补时仅 P1-1） | ✅ 已落地（2026-08-21）：`agent_runtime/trajectory/`（models/store/store_pg/replay）+ `execute_plan` 末尾 `_persist_trajectory` 挂持久化 + `PlannerRuntime.trajectory_store` 注入 + 宿主 `main.py` 装配 `PgTrajectoryStore` |
+| P3-2 | Trajectory Replay | P3 | 2 | `eval/replay/`(新) | P3-1 | ✅ 已落地（2026-08-21）：`trajectory/replay.py`（`replay_trajectory` 复用 `execute_plan` 真实执行链，报告 order/extra_call/missing_call/result_change/error_change 五类 divergence） |
 | P4-1 | 分布式 session lease | P4 | 3 | `coordinator.py` | P0-1 |
 | P4-2 | 收紧 registry.execute | P4 | 0.5 | `registry.py` + CI lint | — | ✅ 已落地（2026-08-21）：架构约束 lint 脚本 `scripts/lint_architecture.py` + Makefile `lint` 目标串联 |
 | P4-3 | coalesce 诚实改名/真实现 | P4 | 0.3 | `coordinator.py` | — | ✅ 已落地（2026-08-21）：方案 A（诚实改名），coalesce 从策略枚举移除，仅保留 queue/reject 二策略 |
-| P5-1 | TrajectoryFingerprint | P2 | 1.5 | `fingerprint.py`(新) | — |
+| P5-1 | TrajectoryFingerprint | P2 | 1.5 | `fingerprint.py`(新) | — | ✅ 已落地（2026-08-21）：`protocol.py` 的 `_fingerprint`（skill + 归一化 kwargs，键序无关）+ `ExecutionContext.fingerprints` 重复指纹拒绝；`enable_loop_fingerprint` 默认关闭防误伤合法重放 |
 
 ---
 
@@ -70,22 +70,16 @@
 
 P2-1 与 P3-1 的**并行关系取决于 P3-1 是否硬依赖 token 计量点**：若 trajectory 的 `tokens` 字段允许后补（`None` 占位），则 P3-1 仅依赖 P1-1（可并行）；若硬依赖计量点，则 P3-1 前置 P2-2（与汇总表一致）。P3-2（Replay）始终依赖 P3-1（持久化）。
 
-### P3-1 Trajectory 持久化
-- **改动文件**：新增 `packages/agent-runtime/agent_runtime/trajectory/`（存储 + schema）；`execution_graph.py` 的 `execute_plan` 末尾挂持久化。
-- **改动内容**：
-  - 基于 `ContextManager.snapshot()`（`context_manager.py:148-150`）已有的结构化输出，补充 `execution_id`、`parent_execution_id`、`session_id`、`planner`、`plan`、每步 `latency`/`tokens`。
-  - `AgentContext.metadata`（`context_manager.py:75`）已有扩展位，可承载 `execution_id` 等关联字段，不必改 snapshot 结构。
-  - 写入存储（PG 表或 OTel span），`status` 事件已产出 snapshot（`execution_graph.py:243,252`），持久化在此消费即可。
-- **工作量**：1.5
-- **验收**：一次执行后，按 `execution_id` 可查询完整轨迹（skill / args / result / latency / tokens / errors）。
-- **理由**：`record_skill` + snapshot 模型已落地，缺的只是存储与查询，不是模型。
+### P3-1 ✅ 已落地（2026-08-21）
+- **改动文件**：新增 `packages/agent-runtime/agent_runtime/trajectory/`（`models.py` TrajectoryRecord/TrajectoryStep + `store.py` 契约与内存实现 + `store_pg.py` PG 实现 + `replay.py`）；`execution_graph.py` 的 `execute_plan` 末尾 `_persist_trajectory`；`planner/protocol.py`（`trajectory_store` 注入 + ExecutionContext.steps 逐步明细）。
+- **改动内容**：`TrajectoryRecord` 含 `execution_id / parent_execution_id / session_id / planner / plan / steps（skill+args+result+error+latency+tokens）/ total_tokens / total_cost / snapshot / created_at`。存储契约 `TrajectoryStore`（save / get / list_by_session）三实现：`InMemoryTrajectoryStore`（LRU 上限，单进程默认）、`PgTrajectoryStore`（PG 持久化，`_coerce_record` 反序列化复用）；宿主 `agent_server/main.py` 装配期 pool 非 None 时注入 `PgTrajectoryStore`。tokens 字段由 P2-2 计量闭环直接写入 `total_tokens`。
+- **验收**：`tests/test_trajectory.py`——execute_plan 后按 `execution_id` 可查询完整轨迹（skill / args / result / latency / tokens / errors），`list_by_session` 按 session 倒序。
 
-### P3-2 Trajectory Replay（依赖 P3-1）
-- **改动文件**：新增 `eval/replay/` 或 `packages/agent-runtime/.../replay.py`
-- **改动内容**：读取轨迹 → Mock LLM/Tool → 重放 → 与原始结果比对找 divergence（route 变化、skill 顺序变化、多余调用）。
-- **工作量**：2
-- **验收**：能对一条 golden 轨迹重放并报告 divergence 点。
-- **前置**：P3-1
+### P3-2 ✅ 已落地（2026-08-21，依赖 P3-1）
+- **改动文件**：`packages/agent-runtime/agent_runtime/trajectory/replay.py`
+- **改动内容**：`replay_trajectory` 复用 `execute_plan` 真实执行链（重放注册表作 registry），比对逻辑与执行解耦（`_RecordingWrapper` 记录 actual_steps）。五类 divergence：`order`（同序位 skill 名变化/route 漂移）、`extra_call`（重放超出录制步数）、`missing_call`（录制存在但重放未触发）、`result_change`（同 skill 成功但结果变化）、`error_change`（成功/失败状态反转）。`ReplayReport` 带 `diverged` 属性与 `to_dict()` 序列化。
+- **验收**：`tests/test_trajectory_replay.py`——对 golden 轨迹重放并报告各 divergence 点。
+- **前置**：P3-1 ✅
 
 ---
 
@@ -115,13 +109,11 @@ P2-1 与 P3-1 的**并行关系取决于 P3-1 是否硬依赖 token 计量点**�
 
 ## P5 — Semantic Loop Detection（结构检测增强）
 
-### P5-1 `TrajectoryFingerprint`
-- **改动文件**：`packages/agent-runtime/agent_runtime/planner/`（新模块 `fingerprint.py`）或 `protocol.py`
-- **改动内容**：`skill + normalized args + state hash + result class` 的组合指纹，记录在 `ExecutionContext`；发现重复指纹时拒绝继续（抛 `SkillCompositionError`）。
-- **注意**：`normalized args` 对可变对象 / 大 payload 需先做规范化（排序键、截断、类型降级），避免哈希不稳定或超大。
-- **工作量**：1.5
-- **验收**：`search("北京天气")` 后 `search("北京今天的天气")` 不同参数不误报；完全重复的 `A→B→A'`（同 args 同 result class）能拦。
-- **定位**：结构检测（`protocol.py:142` 的 `name in call_stack`）已够用，这是增强项，不阻塞任何东西。
+### P5-1 ✅ 已落地（2026-08-21，默认关闭的增强项）
+- **改动文件**：`packages/agent-runtime/agent_runtime/planner/protocol.py`
+- **改动内容**：`_fingerprint(name, kwargs)`（skill + 归一化 kwargs，sha256，键序无关）记录在 `ExecutionContext.fingerprints`；`enter_skill` 发现重复指纹时抛 `SkillCompositionError` 拒绝继续。`PlannerRuntime(enable_loop_fingerprint=)` 装配开关，**默认关闭**避免误伤合法重放/重规划（同入参重复调用是重放场景的合法行为）。
+- **验收**：`tests/test_p5_1_fingerprint.py`——`A→B→A'`（同入参）能拦；不同入参同名 Skill 不误报；kwargs 键序无关；默认关闭时同入参重复调用放行。
+- **定位**：结构检测（`name in call_stack`）仍为默认第一道防线，指纹为可选增强。
 - **备注**：编号 P5 是类别号（Semantic Loop Detection 区段），**非优先级**；优先级以「汇总表」列为准。
 
 ---
