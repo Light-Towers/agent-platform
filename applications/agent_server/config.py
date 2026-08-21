@@ -107,6 +107,8 @@ class Settings(BaseLLMSettings):
     # deterministic 静态 DAG 天然无环，不使用这些限制）
     max_skill_depth: int = 4
     max_steps: int = 20
+    # P5-1：语义循环指纹（skill + 归一化 args），重复指纹拒绝继续（默认关，避免误伤合法重放/重规划）
+    enable_loop_fingerprint: bool = False
 
     # Plan-F Phase 3: 单次 execution 的 wall-clock 上限（秒），None/0 不启用；
     # 经 PlannerRuntime.max_duration_seconds 注入 execution() 边界，由 execute_graph

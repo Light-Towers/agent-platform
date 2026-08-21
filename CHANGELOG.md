@@ -2,6 +2,40 @@
 
 本仓库为 uv workspace monorepo。**唯一受支持的安装/运行入口是根 `uv.lock` + `uv sync`**，子包不再维护独立 `uv.lock`（见 v2 修复 #14）。
 
+## Runtime 治理路线图全量闭环（2026-08-21）
+
+> `docs/runtime-governance-roadmap.md` P0~P5 全区段落地；`docs/tech-debt-hardcoded-logic.md` TD-1~TD-14 全部闭环。
+> 验证：ruff 0 error / 架构 lint 通过 / 根 tests **541 passed**（原 import 失败目录已修复）/ 联邦 unit **92 passed** / kefu **8 passed** / eval **12/12 = 100%**。
+
+### 计量闭环（P2）
+
+- **P2-1 tokens/cost 聚合器**：`ExecutionContext` 新增 `tokens_used / cost_used / max_tokens / max_cost` + `record_usage()`（超限抛 `SkillCompositionError`）；`PlannerRuntime` 透传配置。
+- **P2-2 llm client 计量点**：`FallbackChatModel` / `LangChainFallbackModel` 抽取 `usage_metadata`（含 `response_metadata` 兜底）→ `on_usage` 回调；`PlannerRuntime` 装配期接线到当前 `ExecutionContext`（contextvars 按 task 隔离，边界外静默丢弃）；invoke/ainvoke/stream/astream 四路径外发；`status` 事件带累计 tokens/cost。
+
+### Trajectory（P3）
+
+- **P3-1 持久化**：新增 `agent_runtime/trajectory/`（TrajectoryRecord/TrajectoryStep + `TrajectoryStore` 契约 + `InMemoryTrajectoryStore`/`PgTrajectoryStore`）；`execute_plan` 末尾 `_persist_trajectory`；宿主装配期 pool 非 None 时注入 PG 实现。
+- **P3-2 Replay**：`trajectory/replay.py`——`replay_trajectory` 复用 `execute_plan` 真实执行链，报告五类 divergence（order / extra_call / missing_call / result_change / error_change）。
+
+### 分布式 / 治理（P4）
+
+- **P4-1 可插拔 session lease**：`LeaseBackend` 协议 + `InMemoryLeaseBackend`（默认快路径）+ `PgAdvisoryLeaseBackend`（`session_leases` 表单飞授权 + TTL 过期 + 双写本地镜像）；`Coordinator(lease_backend=, lease_ttl=)` 注入式。
+- **P4-2 架构约束 lint**：`scripts/lint_architecture.py` 检测白名单外 `registry.execute()` 直调，串入 `make lint`。
+- **P4-3 coalesce 诚实改名**：策略枚举仅保留 queue/reject。
+
+### 语义循环检测（P5）
+
+- **P5-1 TrajectoryFingerprint**：`_fingerprint`（skill + 归一化 kwargs，键序无关）重复指纹抛 `SkillCompositionError`；`enable_loop_fingerprint` 默认关闭防误伤合法重放。
+
+### 技术债收尾（TD）
+
+- **TD-1** kefu 意图路由验证：确认真实复用 `agent_core.intent`（回归测试锁定）；**TD-3/TD-4** 由 WS-6 隐式解决；**TD-5** 阈值参数化（`ITEM_CONFIRM_HIGH/MID_THRESHOLD`）；**TD-7** 路由特征词外置 `route_hints.json`；**TD-8** longterm prompt 泛化；**TD-9** eval 超参统一读 yaml；**TD-10** admission 状态常量 `ADMISSION_*`（含 SQL 语法修复）。
+
+### 其他（同日提交）
+
+- **§20 Workflow DSL**：YAML 声明式 Workflow 编译为 Skill + Workflows 目录自动发现注册。
+- **UnifiedPlanner**：graph/workflow 统一分发；**PG durability**：admission/checkpoint/ownership/idempotency PG 后端套件。
+
 ## Agent 核心架构优化八工作流全量落地（2026-08-20）
 
 > 实施计划：8 个工作流（WS-1 ~ WS-8），按 P0 → P1 → P2 推进。

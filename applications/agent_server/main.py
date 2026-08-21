@@ -217,6 +217,7 @@ async def lifespan(app: FastAPI):
         checkpoint_store=checkpoint_store,
         ownership_store=ownership_store,
         trajectory_store=trajectory_store,
+        enable_loop_fingerprint=settings.enable_loop_fingerprint,
     )
     # 绑定 delegate：graph 节点的 _invoke 此后经 runtime.delegate 调用
     delegate_ref.delegate = app.state.planner_runtime.delegate
