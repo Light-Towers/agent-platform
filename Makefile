@@ -8,6 +8,7 @@ install:
 
 lint:
 	uv run --with ruff ruff check .
+	uv run python scripts/lint_architecture.py
 
 format:
 	uv run --with ruff ruff format .

@@ -10,6 +10,7 @@ from agent_runtime import cache as semantic_cache
 from agent_runtime.db import get_pool, ping
 from agent_runtime.otel import redact_question
 from agent_runtime.planner.protocol import PlannerContext
+from agent_runtime.schemas import ADMISSION_ADMITTED, ADMISSION_QUEUED, ADMISSION_REJECTED
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, UploadFile
 from fastapi.responses import StreamingResponse
 
@@ -92,7 +93,7 @@ async def query(
         decision = await admission_queue.enqueue(
             request_id, thread_id, req.user_id, priority
         )
-        if decision.status == "rejected":
+        if decision.status == ADMISSION_REJECTED:
             raise HTTPException(
                 status_code=429 if decision.reason == "RATE_LIMITED" else 503,
                 detail=decision.reason or "ADMISSION_REJECTED",
@@ -158,30 +159,30 @@ async def query(
             admission_queue is not None
             and settings.admission_effective_enabled
             and decision is not None
-            and decision.status == "queued"
+            and decision.status == ADMISSION_QUEUED
         ):
             yield _sse({
                 "type": "admission",
-                "status": "queued",
+                "status": ADMISSION_QUEUED,
                 "position": decision.queue_position,
             })
             decision = await admission_queue.wait_for_admit(request_id)
-        if decision is not None and decision.status == "rejected":
+        if decision is not None and decision.status == ADMISSION_REJECTED:
             yield _sse({
                 "type": "admission",
-                "status": "rejected",
+                "status": ADMISSION_REJECTED,
                 "reason": decision.reason,
             })
-            # 统一清理：_states[rid] 残留 "rejected" 且 DB 行仍是 "queued" →
-            # count(admitted+queued) 永久含该记录，容量泄漏，直到进程重启
+            # 统一清理：_states[rid] 残留 ADMISSION_REJECTED 且 DB 行仍是 ADMISSION_QUEUED →
+            # count(ADMISSION_ADMITTED+ADMISSION_QUEUED) 永久含该记录，容量泄漏，直到进程重启
             # recover_on_startup 才清。mark_completed 会 pop 内存状态并把 DB 行
             # 标 completed，释放容量。走 lease.release() 统一出口，避免与外层重复清理。
             await lease.release()
             return
-        if decision is not None and decision.status == "admitted":
+        if decision is not None and decision.status == ADMISSION_ADMITTED:
             yield _sse({
                 "type": "admission",
-                "status": "admitted",
+                "status": ADMISSION_ADMITTED,
                 "position": decision.queue_position,
             })
         # Phase 2: coordination queue 前置事件
@@ -201,6 +202,7 @@ async def query(
 
         try:
             final_answer = ""
+            round_snapshot: dict | None = None
             if planner is None or planner_runtime is None:
                 # 兜底：Planner 未装配（理论不发生，lifespan 保证），走 graph 静态 DAG。
                 async for update in graph.astream(
@@ -219,12 +221,15 @@ async def query(
             else:
                 # Phase 3: 统一出口——编排权移交 Planner（plan 决策 + execute 编排），
                 # 事件流经 StreamEvent 直通 SSE（与 graph 路径事件同构）。
+                # WS-2：从 thread 持久化读上一轮结构化快照，注入 PlannerContext；
+                # 本轮 status 事件携带的 snapshot 随 append_thread 落 checkpoint。
                 ctx = PlannerContext(
                     question=req.query,
                     workspace_id=req.workspace_id,
                     user_id=req.user_id,
                     messages=await _thread_persist.read_thread_messages(checkpointer, thread_id),
                     llm=planner_runtime.llm,
+                    last_snapshot=await _thread_persist.read_thread_snapshot(checkpointer, thread_id),
                 )
                 plan = await planner.plan(ctx)
                 async for event in planner.execute(plan, planner_runtime):
@@ -233,12 +238,20 @@ async def query(
                         yield _sse(sse)
                     if event.type == "answer":
                         final_answer = event.payload.get("text", "")
+                    elif event.type == "status" and event.payload.get("snapshot"):
+                        round_snapshot = event.payload["snapshot"]
             if final_answer and q_embedding is not None:
                 semantic_cache.cache_store(pool, req.query, final_answer, q_embedding)
             # Phase 3: 对话历史写回——Planner 协议中立（不持线程语义），由 app 层承担。
             # 与 graph 路径的 checkpoint 持久化行为等价，/history 与 revert 不回退。
             if final_answer and checkpointer is not None:
-                await _thread_persist.append_thread(checkpointer, thread_id, req.query, final_answer)
+                await _thread_persist.append_thread(
+                    checkpointer,
+                    thread_id,
+                    req.query,
+                    final_answer,
+                    snapshot=round_snapshot,
+                )
             yield _sse({"type": "done", "thread_id": thread_id, "answer": final_answer})
         finally:
             if span is not None:

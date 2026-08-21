@@ -21,7 +21,12 @@ import logging
 from agent_core.guardrails.ratelimit import SlidingWindowRateLimiter
 from shared_schemas import Priority
 
-from agent_runtime.schemas import AdmissionDecision
+from agent_runtime.schemas import (
+    ADMISSION_ADMITTED,
+    ADMISSION_QUEUED,
+    ADMISSION_REJECTED,
+    AdmissionDecision,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +71,7 @@ class AdmissionQueue:
         self._timeout = timeout_seconds
         self._limiter = rate_limiter or RateLimiter(10, 10, 100)
         self._effective_enabled = effective_enabled
-        # 内存调度状态：request_id -> 当前状态（admitted / queued / rejected）
+        # 内存调度状态：request_id -> 当前状态（ADMISSION_* 常量）
         self._states: dict[str, str] = {}
         self._cond = asyncio.Condition()
 
@@ -79,12 +84,12 @@ class AdmissionQueue:
     ) -> AdmissionDecision:
         """请求入队/准入。未启用时直接 admitted。"""
         if not self._effective_enabled:
-            return AdmissionDecision(status="admitted", priority=priority)
+            return AdmissionDecision(status=ADMISSION_ADMITTED, priority=priority)
 
         # 限流检查
         if not self._limiter.check(user_id, session_id):
             return AdmissionDecision(
-                status="rejected", priority=priority, reason="RATE_LIMITED"
+                status=ADMISSION_REJECTED, priority=priority, reason="RATE_LIMITED"
             )
 
         try:
@@ -92,7 +97,8 @@ class AdmissionQueue:
                 # 事务内原子：容量判断 + 写入，避免并发双双通过容量检查导致超容
                 row = await conn.execute(
                     "SELECT count(*) FROM admission_queue "
-                    "WHERE status IN ('admitted', 'queued')"
+                    "WHERE status IN (%s, %s)",
+                    (ADMISSION_ADMITTED, ADMISSION_QUEUED),
                 )
                 count = await row.fetchone()
                 current = count[0] if count else 0
@@ -103,14 +109,14 @@ class AdmissionQueue:
                         "INSERT INTO admission_queue "
                         "(request_id, session_id, user_id, priority, status, "
                         " created_at, queue_position) "
-                        "VALUES (%s, %s, %s, %s, 'queued', now(), %s)",
-                        (request_id, session_id, user_id, priority, current + 1),
+                        "VALUES (%s, %s, %s, %s, %s, now(), %s)",
+                        (request_id, session_id, user_id, priority, ADMISSION_QUEUED, current + 1),
                     )
                     async with self._cond:
-                        self._states[request_id] = "queued"
+                        self._states[request_id] = ADMISSION_QUEUED
                         self._cond.notify_all()
                     return AdmissionDecision(
-                        status="queued",
+                        status=ADMISSION_QUEUED,
                         priority=priority,
                         queue_position=current + 1,
                         estimated_wait_seconds=self._timeout,
@@ -121,21 +127,21 @@ class AdmissionQueue:
                     "INSERT INTO admission_queue "
                     "(request_id, session_id, user_id, priority, status, "
                     " created_at, admitted_at, queue_position) "
-                    "VALUES (%s, %s, %s, %s, 'admitted', now(), now(), %s)",
-                    (request_id, session_id, user_id, priority, current + 1),
+                    "VALUES (%s, %s, %s, %s, %s, now(), now(), %s)",
+                    (request_id, session_id, user_id, priority, ADMISSION_ADMITTED, current + 1),
                 )
                 async with self._cond:
-                    self._states[request_id] = "admitted"
+                    self._states[request_id] = ADMISSION_ADMITTED
                     self._cond.notify_all()
                 return AdmissionDecision(
-                    status="admitted",
+                    status=ADMISSION_ADMITTED,
                     priority=priority,
                     queue_position=current + 1,
                 )
         except Exception:
             logger.warning("admission enqueue failed", exc_info=True)
             return AdmissionDecision(
-                status="rejected", priority=priority, reason="ADMISSION_UNAVAILABLE"
+                status=ADMISSION_REJECTED, priority=priority, reason="ADMISSION_UNAVAILABLE"
             )
 
     async def wait_for_admit(self, request_id: str) -> AdmissionDecision:
@@ -156,22 +162,22 @@ class AdmissionQueue:
             try:
                 async with self._pool.connection() as conn:
                     await conn.execute(
-                        "UPDATE admission_queue SET status = 'rejected', "
-                        "rejection_reason = %s WHERE request_id = %s AND status = 'queued'",
-                        (reason, request_id),
+                        "UPDATE admission_queue SET status = %s, "
+                        "rejection_reason = %s WHERE request_id = %s AND status = %s",
+                        (ADMISSION_REJECTED, reason, request_id, ADMISSION_QUEUED),
                     )
             except Exception:
                 logger.warning("admission timeout db-mark failed", exc_info=True)
 
         try:
             async with self._cond:
-                while self._states.get(request_id) == "queued":
+                while self._states.get(request_id) == ADMISSION_QUEUED:
                     remaining = deadline - loop.time()
                     if remaining <= 0:
-                        self._states[request_id] = "rejected"
+                        self._states[request_id] = ADMISSION_REJECTED
                         await _mark_db_rejected("ADMISSION_TIMEOUT")
                         return AdmissionDecision(
-                            status="rejected",
+                            status=ADMISSION_REJECTED,
                             priority="normal",
                             reason="ADMISSION_TIMEOUT",
                         )
@@ -179,10 +185,10 @@ class AdmissionQueue:
                         await asyncio.wait_for(self._cond.wait(), timeout=remaining)
                     except TimeoutError:
                         # 等待期间无其他等待者 notify，确实超时
-                        self._states[request_id] = "rejected"
+                        self._states[request_id] = ADMISSION_REJECTED
                         await _mark_db_rejected("ADMISSION_TIMEOUT")
                         return AdmissionDecision(
-                            status="rejected",
+                            status=ADMISSION_REJECTED,
                             priority="normal",
                             reason="ADMISSION_TIMEOUT",
                         )
@@ -190,12 +196,12 @@ class AdmissionQueue:
         except Exception:
             logger.warning("admission wait_for_admit failed", exc_info=True)
             return AdmissionDecision(
-                status="rejected", priority="normal", reason="ADMISSION_UNAVAILABLE"
+                status=ADMISSION_REJECTED, priority="normal", reason="ADMISSION_UNAVAILABLE"
             )
-        if state == "admitted":
-            return AdmissionDecision(status="admitted", priority="normal")
+        if state == ADMISSION_ADMITTED:
+            return AdmissionDecision(status=ADMISSION_ADMITTED, priority="normal")
         return AdmissionDecision(
-            status="rejected", priority="normal", reason="ADMISSION_REJECTED"
+            status=ADMISSION_REJECTED, priority="normal", reason="ADMISSION_REJECTED"
         )
 
     async def recover_on_startup(self) -> int:
@@ -215,8 +221,8 @@ class AdmissionQueue:
         # 唤醒可能遗留的等待协程，避免挂起
         async with self._cond:
             for rid in list(self._states):
-                if self._states[rid] == "queued":
-                    self._states[rid] = "rejected"
+                if self._states[rid] == ADMISSION_QUEUED:
+                    self._states[rid] = ADMISSION_REJECTED
             self._cond.notify_all()
         return recovered
 
@@ -229,27 +235,29 @@ class AdmissionQueue:
             async with self._pool.connection() as conn, conn.transaction():
                 await conn.execute(
                     "UPDATE admission_queue SET status = 'completed', completed_at = now() "
-                    "WHERE request_id = %s AND status IN ('admitted', 'queued')",
+                    "WHERE request_id = %s AND status IN (%s, %s)",
+                    (request_id, ADMISSION_ADMITTED, ADMISSION_QUEUED),
                     (request_id,),
                 )
                 # 取队首 queued（按优先级升序、最旧优先），行锁跳过并发已锁行
                 row = await conn.execute(
                     "SELECT request_id FROM admission_queue "
-                    "WHERE status = 'queued' "
+                    "WHERE status = %s "
                     "ORDER BY ("
                     "  CASE priority WHEN 'low' THEN 0 "
                     "       WHEN 'normal' THEN 1 "
                     "       WHEN 'high' THEN 2 ELSE 1 END"
                     ") ASC, created_at ASC "
-                    "LIMIT 1 FOR UPDATE SKIP LOCKED"
+                    "LIMIT 1 FOR UPDATE SKIP LOCKED",
+                    (ADMISSION_QUEUED,),
                 )
                 nxt = await row.fetchone()
                 if nxt:
                     nxt_id = nxt[0]
                     await conn.execute(
-                        "UPDATE admission_queue SET status = 'admitted', "
+                        "UPDATE admission_queue SET status = %s, "
                         "admitted_at = now() WHERE request_id = %s",
-                        (nxt_id,),
+                        (ADMISSION_ADMITTED, nxt_id),
                     )
                     promoted.append(nxt_id)
         except Exception:
@@ -258,5 +266,5 @@ class AdmissionQueue:
             async with self._cond:
                 self._states.pop(request_id, None)
                 for rid in promoted:
-                    self._states[rid] = "admitted"
+                    self._states[rid] = ADMISSION_ADMITTED
                 self._cond.notify_all()

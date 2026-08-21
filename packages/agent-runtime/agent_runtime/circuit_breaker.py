@@ -11,6 +11,8 @@ from agent_core.resilience import CircuitBreaker as _BaseBreaker
 
 T = TypeVar("T")
 
+# 兼容契约（保留一个小版本，WS-3）：runtime 对外常量沿用历史字符串（连字符风格
+# "half-open"），与 state 属性返回值一致；内核真相源为 agent_core.resilience.STATE_*。
 STATE_CLOSED = "closed"
 STATE_OPEN = "open"
 STATE_HALF_OPEN = "half-open"
@@ -23,6 +25,9 @@ class CircuitBreaker(_BaseBreaker):
     - recovery_seconds param alias (→ reset_timeout)
     - async call(fn, fallback) that returns fallback instead of raising
     - backward-compatible state strings ("half-open" not "half_open")
+
+    状态读取经父类 ``resolved_state()``（计入冷却期的等效状态），不再直读
+    父类私有字段（WS-3）。
     """
 
     def __init__(self, failure_threshold: int = 3, recovery_seconds: float = 30.0) -> None:
@@ -30,15 +35,10 @@ class CircuitBreaker(_BaseBreaker):
 
     @property
     def state(self) -> str:
-        if (
-            self._state == self.OPEN
-            and self._opened_at is not None
-            and self._clock() - self._opened_at >= self._reset_timeout
-        ):
+        resolved = self.resolved_state()
+        if resolved == self.HALF_OPEN:
             return STATE_HALF_OPEN
-        if self._state == self.HALF_OPEN:
-            return STATE_HALF_OPEN
-        return self._state
+        return resolved
 
     async def call(self, fn: Callable[[], Awaitable[T]], fallback: T | None = None) -> T:
         """Execute async fn; return fallback on open or error."""

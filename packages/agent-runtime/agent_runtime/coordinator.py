@@ -11,8 +11,11 @@
 
 借鉴 OpenCode V2 SessionRunCoordinator：
 - joins same-Session resumes（同 session 互斥）
-- coalesces prompt wakeups（合并策略）
 - 允许不同 Sessions 并发（异 session 不阻塞）
+
+P4-3（coalesce 诚实改名）：原三策略 coalesce/queue/reject 中 coalesce 已退化为
+queue（代码注释自认），名称 ≠ 语义属架构债。现将 coalesce 从策略枚举中移除，
+仅保留 queue/reject 二策略；若后续需真 coalesce（取消旧请求），按独立专项实施。
 """
 
 import asyncio
@@ -26,7 +29,7 @@ logger = logging.getLogger(__name__)
 
 
 class SessionCoordinator:
-    """Per-session 互斥 + coalesce/queue/reject 三策略。
+    """Per-session 互斥 + queue/reject 二策略。
 
     queue 策略下，acquire 返回 decision_type="queue" 后调用方需 await wait_for_turn()
     等待获取执行权；release() 唤醒队列下一个请求。
@@ -34,7 +37,7 @@ class SessionCoordinator:
 
     def __init__(
         self,
-        policy: Literal["coalesce", "queue", "reject"] = "queue",
+        policy: Literal["queue", "reject"] = "queue",
         enabled: bool = True,
     ) -> None:
         self._policy = policy
@@ -50,7 +53,7 @@ class SessionCoordinator:
     ) -> CoordinationDecision:
         """获取会话执行权。返回协调决策。
 
-        queue/coalesce 策略下会话忙碌时返回 decision_type="queue"，
+        queue 策略下会话忙碌时返回 decision_type="queue"，
         调用方发送排队事件后需 await wait_for_turn() 等待执行权。
         """
         if not self._enabled:
@@ -77,30 +80,7 @@ class SessionCoordinator:
 
                 # 会话忙碌，按策略处理（仍在锁内，使入队与 release 串行化，
                 # 避免「release 清空 active 时 B 尚未入队 → B 入队后无人唤醒」的丢失唤醒竞态）
-                if self._policy == "coalesce":
-                    # 注意：当前 coalesce 已退化为 queue —— 仅当旧请求尚未进入能力节点
-                    # （还在排队）时才可能取消，但本实现中旧请求已 active 则不取消，新请求排队。
-                    # 即 COALESCE_SKIPPED 的实际行为与 queue 策略等价。若需真「取消旧请求」，
-                    # 需向旧 request_id 发送取消信号并唤醒队列，属未来增强。
-                    self._logger.info(
-                        "coordination COALESCE_SKIPPED session=%s old=%s new=%s",
-                        session_id,
-                        active,
-                        request_id,
-                    )
-                    q = self._queues.setdefault(session_id, asyncio.Queue())
-                    await q.put(request_id)
-                    # 注：此处不再检查 self._active.get(session_id) is None 接管——
-                    # 整个 acquire 在 async with cond 锁内，release 也需同锁，无法并发清空
-                    # active，故该分支恒为 False（旧并发模型的残留死代码）。入队后由
-                    # release 唤醒队列首部即可，不会挂起。
-                    return CoordinationDecision(
-                        decision_type="queue",
-                        request_id=request_id,
-                        wait_seconds=float(q.qsize()),
-                    )
-
-                elif self._policy == "reject":
+                if self._policy == "reject":
                     self._logger.info(
                         "coordination reject session=%s request=%s",
                         session_id,
@@ -113,7 +93,6 @@ class SessionCoordinator:
                 else:  # queue
                     q = self._queues.setdefault(session_id, asyncio.Queue())
                     await q.put(request_id)
-                    # 同 coalesce：锁内 active 非空，接管分支恒 False，已删除（见上方说明）。
                     self._logger.info(
                         "coordination queue session=%s request=%s",
                         session_id,

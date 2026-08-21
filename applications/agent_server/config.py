@@ -71,7 +71,7 @@ class Settings(BaseLLMSettings):
 
     # Phase 2: 会话并发协调
     coordination_enabled: bool = True
-    coordination_policy: str = "queue"  # coalesce | queue | reject
+    coordination_policy: str = "queue"  # queue | reject
 
     # Phase 2: durable admission（opt-in，默认 false）
     admission_enabled: bool = False
