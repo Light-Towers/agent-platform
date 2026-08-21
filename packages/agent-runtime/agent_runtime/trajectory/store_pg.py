@@ -11,7 +11,7 @@ import time
 from typing import Any
 
 from agent_runtime.trajectory.models import TrajectoryRecord
-from agent_runtime.trajectory.store import TrajectoryStore, _coerce_record
+from agent_runtime.trajectory.store import TrajectoryStore
 
 
 def _dumps(obj: Any) -> str:
