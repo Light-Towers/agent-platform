@@ -7,7 +7,11 @@
 而 checkpoint 已分布到 PG——即「状态分布式、协调本地」的不一致。
 
 多副本部署前须将 session execution ownership 上移：Postgres/Redis 分布式 lease，
-或交由 admission / durable execution 系统持有（本期不做，属演进方向）。
+或交由 admission / durable execution 系统持有。P4-1 已落地可插拔 ``LeaseBackend``
+（默认 ``InMemoryLeaseBackend`` 进程内快路径；多副本注入 ``PgAdvisoryLeaseBackend``
+走 ``session_leases`` 表 advisory lease + 双写本地镜像），``serialize`` 授权经后端单飞，
+使「状态分布式、协调本地」的不一致收敛为「授权也分布」。
+（跨进程 queue 唤醒仍需 durable execution，属已知局限，不在本期范围。）
 
 借鉴 OpenCode V2 SessionRunCoordinator：
 - joins same-Session resumes（同 session 互斥）
@@ -21,11 +25,102 @@ queue（代码注释自认），名称 ≠ 语义属架构债。现将 coalesce 
 import asyncio
 import logging
 from collections import deque
-from typing import Literal
+from typing import Any, Literal, Protocol, runtime_checkable
 
 from agent_runtime.schemas import CoordinationDecision
 
 logger = logging.getLogger(__name__)
+
+
+@runtime_checkable
+class LeaseBackend(Protocol):
+    """会话执行权（ownership）后端契约（P4-1）。
+
+    ``try_acquire`` 单飞授予同 session 执行权（仅一个 owner 成功）；``release`` 释放。
+    实现可进程内（默认快路径）或分布式（PG advisory lock / Redis），由宿主注入。
+    """
+
+    async def try_acquire(self, session_id: str, owner: str, ttl: float) -> bool: ...
+
+    async def release(self, session_id: str, owner: str) -> None: ...
+
+
+class InMemoryLeaseBackend:
+    """进程内 lease 后端（单进程默认快路径）：asyncio.Lock 保护 ``_active``。"""
+
+    def __init__(self) -> None:
+        self._active: dict[str, str] = {}
+        self._lock = asyncio.Lock()
+
+    async def try_acquire(self, session_id: str, owner: str, ttl: float) -> bool:
+        async with self._lock:
+            if self._active.get(session_id) is None:
+                self._active[session_id] = owner
+                return True
+            return False
+
+    async def release(self, session_id: str, owner: str) -> None:
+        async with self._lock:
+            if self._active.get(session_id) == owner:
+                del self._active[session_id]
+
+
+class PgAdvisoryLeaseBackend:
+    """PG advisory lease 后端（多副本分布式 serialize，P4-1）。
+
+    用 ``session_leases`` 表 + ``INSERT ... ON CONFLICT DO UPDATE WHERE expires_at < now()``
+    做单飞授权（TTL 自动过期，防 owner 崩溃后永久死锁）；并**双写**进程内镜像做本地快路径读。
+    仅依赖注入的 asyncpg 风格连接池（``pool.acquire()`` 上下文 + ``fetchval`` / ``execute``，
+    ``$1`` 占位符），不硬依赖具体驱动；真实多副本部署由宿主注入 pool。
+
+    单进程部署下无实际暴露，默认仍用 ``InMemoryLeaseBackend``；本类供多副本启用，属演进方向。
+    """
+
+    def __init__(self, pool: Any, *, ttl: float = 300.0) -> None:
+        self._pool = pool
+        self._ttl = ttl
+        self._local = InMemoryLeaseBackend()  # 双写镜像
+
+    @staticmethod
+    def _hkey(session_id: str) -> int:
+        import hashlib
+
+        return int.from_bytes(hashlib.sha256(session_id.encode("utf-8")).digest()[:8], "big") % (2**31)
+
+    async def try_acquire(self, session_id: str, owner: str, ttl: float) -> bool:
+        ok = False
+        try:
+            async with self._pool.acquire() as conn:
+                acquired = await conn.fetchval(
+                    "INSERT INTO session_leases(session_id, owner, expires_at) "
+                    "VALUES ($1, $2, now() + ($3 || ' seconds')::interval) "
+                    "ON CONFLICT (session_id) DO UPDATE "
+                    "SET owner = $2, expires_at = now() + ($3 || ' seconds')::interval "
+                    "WHERE session_leases.expires_at < now() "
+                    "RETURNING owner",
+                    session_id,
+                    owner,
+                    str(ttl),
+                )
+                ok = acquired == owner
+        except Exception:  # noqa: BLE001 分布式锁不可用时降级为拒绝（调用方走 queue/reject）
+            logger.warning("PG lease 获取失败 session=%s，降级拒绝", session_id, exc_info=True)
+            return False
+        if ok:
+            await self._local.try_acquire(session_id, owner, ttl)
+        return ok
+
+    async def release(self, session_id: str, owner: str) -> None:
+        try:
+            async with self._pool.acquire() as conn:
+                await conn.execute(
+                    "DELETE FROM session_leases WHERE session_id = $1 AND owner = $2",
+                    session_id,
+                    owner,
+                )
+        except Exception:  # noqa: BLE001 清理失败不影响主流程
+            logger.warning("PG lease 释放失败 session=%s", session_id, exc_info=True)
+        await self._local.release(session_id, owner)
 
 
 class SessionCoordinator:
@@ -39,10 +134,15 @@ class SessionCoordinator:
         self,
         policy: Literal["queue", "reject"] = "queue",
         enabled: bool = True,
+        lease_backend: LeaseBackend | None = None,
+        lease_ttl: float = 300.0,
     ) -> None:
         self._policy = policy
         self._enabled = enabled
-        self._active: dict[str, str] = {}  # session_id -> request_id（当前执行中）
+        # P4-1：serialize 执行权后端。默认进程内快路径；多副本注入 PgAdvisoryLeaseBackend。
+        self._lease: LeaseBackend = lease_backend or InMemoryLeaseBackend()
+        self._lease_ttl = lease_ttl
+        self._active: dict[str, str] = {}  # session_id -> request_id（当前执行中，本地视图）
         self._queues: dict[str, asyncio.Queue] = {}
         self._conditions: dict[str, asyncio.Condition] = {}
         self._cancelled: set[str] = set()  # 已取消（客户端断开 / 超时）的请求
@@ -67,16 +167,19 @@ class SessionCoordinator:
                 active = self._active.get(session_id)
 
                 if active is None:
-                    # 会话空闲，直接获取
-                    self._active[session_id] = request_id
-                    self._logger.info(
-                        "coordination serialize session=%s request=%s",
-                        session_id,
-                        request_id,
-                    )
-                    return CoordinationDecision(
-                        decision_type="serialize", request_id=request_id
-                    )
+                    # 会话本地空闲：尝试获取执行权（进程内 / 分布式 lease 单飞授权）
+                    granted = await self._lease.try_acquire(session_id, request_id, self._lease_ttl)
+                    if granted:
+                        self._active[session_id] = request_id
+                        self._logger.info(
+                            "coordination serialize session=%s request=%s",
+                            session_id,
+                            request_id,
+                        )
+                        return CoordinationDecision(
+                            decision_type="serialize", request_id=request_id
+                        )
+                    # 未获取到（另一进程/副本持有 lease）：视作忙碌，走 queue/reject 分支
 
                 # 会话忙碌，按策略处理（仍在锁内，使入队与 release 串行化，
                 # 避免「release 清空 active 时 B 尚未入队 → B 入队后无人唤醒」的丢失唤醒竞态）
@@ -200,3 +303,14 @@ class SessionCoordinator:
                 request_id,
                 exc_info=True,
             )
+        finally:
+            # P4-1：释放分布式/本地 lease（未持有则 no-op）
+            try:
+                await self._lease.release(session_id, request_id)
+            except Exception:
+                self._logger.warning(
+                    "lease release failed session=%s request=%s",
+                    session_id,
+                    request_id,
+                    exc_info=True,
+                )
