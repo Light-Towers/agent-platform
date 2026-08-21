@@ -16,9 +16,11 @@ agentic 路径——deterministic 静态 DAG 天然无环，无需也不使用�
 
 from __future__ import annotations
 
+import asyncio
 import contextvars
 import hashlib
 import json
+import os
 import time
 import uuid
 from abc import ABC, abstractmethod
@@ -30,9 +32,30 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from agent_runtime.planner.durability import (
+    ExecutionOwnershipStore,
+    InMemoryExecutionOwnershipStore,
+    reap_stale_executions,
+)
 from agent_runtime.trajectory.models import TrajectoryStep
 
 StreamEventType = Literal["route", "evidence", "memory", "answer", "error", "status", "replan"]
+
+# 当前执行上下文绑定的 Runtime（在 ``execution()`` 边界内 set，边界外为 None）。
+# 供嵌套 Skill 执行器（如 Workflow Skill 内部执行子 Skill）获取 Runtime 并经
+# ``delegate`` 受组合治理，避免绕过护栏（架构契约：Skill→Skill 须经 Runtime）。
+_runtime_var: contextvars.ContextVar["PlannerRuntime | None"] = contextvars.ContextVar(
+    "planner_runtime", default=None
+)
+
+
+def get_current_runtime() -> "PlannerRuntime | None":
+    """获取当前执行边界内的 PlannerRuntime（不在 execution() 边界内返回 None）。
+
+    嵌套 Skill 执行器（Workflow / Agent Skill）经此拿到 Runtime，调用 ``delegate``
+    执行子 Skill，复用同一执行上下文（预算 / 调用栈 / trace）受治理。
+    """
+    return _runtime_var.get()
 
 
 class StreamEvent(BaseModel):
@@ -62,7 +85,7 @@ class Plan(BaseModel):
     供 execute 阶段消费；是 Plan 的扩展位，不新增字段即保持协议稳定。
     """
 
-    mode: Literal["deterministic", "graph", "agentic"] = "deterministic"
+    mode: Literal["deterministic", "workflow", "graph", "agentic"] = "deterministic"
     route: str = ""
     sub_query: str = ""
     reason: str = ""
@@ -264,7 +287,9 @@ class PlannerRuntime:
         max_tokens: int | None = None,
         max_cost: float | None = None,
         trajectory_store: Any = None,
+        checkpoint_store: Any = None,
         enable_loop_fingerprint: bool = False,
+        ownership_store: Any = None,
     ):
         self.registry = registry
         self.llm = llm
@@ -277,6 +302,15 @@ class PlannerRuntime:
         self.max_cost = max_cost
         # P3-1：轨迹存储后端（可选注入）；未注入则不持久化（单进程/测试默认跳过）
         self.trajectory_store = trajectory_store
+        # Phase E：执行级 checkpoint 存储（可选注入）；未注入则不落盘（resume 不可用）
+        self.checkpoint_store = checkpoint_store
+        # §11 / §20：执行所有权 / 租约存储（默认进程内；多副本需 PgAdvisory 持久化后端）。
+        # 提供后，execution() 边界自动 acquire/release 所有权，reap_stale 可回收 stale 执行。
+        self.ownership_store: ExecutionOwnershipStore = (
+            ownership_store
+            if ownership_store is not None
+            else InMemoryExecutionOwnershipStore()
+        )
         # P5-1：语义循环指纹（增强项，默认关闭，避免误伤合法重放/重规划）
         self.enable_loop_fingerprint = enable_loop_fingerprint
         # P2-2 计量接线：把 llm 客户端的 usage 回调接到当前执行的 ExecutionContext。
@@ -322,13 +356,19 @@ class PlannerRuntime:
         return ctx.call_stack if ctx else []
 
     @asynccontextmanager
-    async def execution(self) -> AsyncIterator[None]:
+    async def execution(self, *, validate_composition: bool = True) -> AsyncIterator[None]:
         """单次执行边界：创建 ExecutionContext 并绑定，退出时复位。
 
         语义（架构审核 P1 修正）：``max_steps`` 是「单次执行累计 Skill 调用数」——
         顺序调用（A 退出后再进 B）与嵌套调用同样消耗预算；``max_skill_depth`` 才
         约束同时嵌套深度。调用方（组合型 Planner 的 execute/arun 入口）须用本 scope
         包裹整次执行：预算不跨执行累计，同执行内顺序/嵌套 Skill 共享同一预算。
+
+        生命周期职责（§7.1 / §11）：
+        - 进入时若 ``validate_composition`` 且 registry 非空，先跑 ``CompositionValidator``
+          静态校验（存在性 / 环 / 权限闭包），组合非法则 fail-fast；
+        - 进入时经 ``ownership_store`` acquire 执行所有权（租约），并起心跳续租协程；
+          退出时 release，stale 执行可由 ``reap_stale`` 回收（跨进程唤醒见 §20）。
         """
         deadline = (
             time.monotonic() + self.max_duration_seconds
@@ -340,11 +380,59 @@ class PlannerRuntime:
             max_tokens=self.max_tokens, max_cost=self.max_cost,
             loop_fingerprint=self.enable_loop_fingerprint,
         )
+        # 组合静态校验（plan 期 fail-fast）：非法组合不进入执行。
+        # 仅真实 SkillRegistry 具备 assert_composition_valid；测试替身（_FakeRegistry 等）
+        # 不强制实现组合校验，跳过（生产运行时始终为真实注册表）。
+        if validate_composition and self.registry is not None:
+            validator = getattr(self.registry, "assert_composition_valid", None)
+            if validator is not None:
+                validator()
+
+        # 执行所有权 / 租约
+        eid = ctx.execution_id
+        owner = str(os.getpid())
+        lease_ttl = self.max_duration_seconds or 300.0
+        await self.ownership_store.acquire(eid, owner, lease_ttl)
+
+        hb_task: "asyncio.Task | None" = None
+        if lease_ttl is not None:
+            async def _heartbeat() -> None:
+                try:
+                    while True:
+                        await asyncio.sleep(lease_ttl / 2)
+                        await self.ownership_store.heartbeat(eid, lease_ttl)
+                except asyncio.CancelledError:
+                    return
+
+            hb_task = asyncio.create_task(_heartbeat())
+
         token = self._ctx_var.set(ctx)
+        rt_token = _runtime_var.set(self)
         try:
             yield
         finally:
+            if hb_task is not None:
+                hb_task.cancel()
+                try:
+                    await hb_task
+                except (asyncio.CancelledError, Exception):
+                    pass
+            await self.ownership_store.release(eid)
             self._ctx_var.reset(token)
+            _runtime_var.reset(rt_token)
+
+    async def reap_stale(self, *, on_stale=None) -> "list[str]":
+        """回收 stale 执行（§11 stale execution recovery 生命周期入口）。
+
+        检测租约超时且仍持有的执行，释放所有权并使其 checkpoint 可被 resume 接管。
+        跨进程真正唤醒另一副本去 resume 属环境依赖（§20），本方法只完成可单测的
+        进程内检测 + 所有权回收。
+        """
+        return await reap_stale_executions(
+            self.ownership_store,
+            self.checkpoint_store,
+            on_stale=on_stale,
+        )
 
     @asynccontextmanager
     async def skill_guard(self, name: str, kwargs: dict[str, Any] | None = None) -> AsyncIterator[None]:
