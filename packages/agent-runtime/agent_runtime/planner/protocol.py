@@ -80,6 +80,9 @@ class PlannerContext(BaseModel):
     user_id: str = "default"
     messages: list[Any] = Field(default_factory=list)
     llm: Any = None
+    # WS-2：上一轮执行的结构化快照（task/execution 层），由 app 层从 thread
+    # 持久化读出并注入；Planner 在 prompt 组装时结构化消费（不进对话历史存储）。
+    last_snapshot: dict[str, Any] | None = None
 
     # MCP 路由参数（route=mcp 时透传，可选；与 app/agent/state.py AgentState 对应字段一致）
     mcp_server: str = ""
@@ -118,6 +121,11 @@ class ExecutionContext:
     预算语义（与 ``PlannerRuntime.max_steps`` / ``max_skill_depth`` 对齐）：
     - ``step_count``：累计 Skill 调用数（只增不减，顺序 + 嵌套共享）；
     - ``call_stack``：当前嵌套调用栈（enter append / exit pop），``call_depth = len(call_stack)``。
+
+    P2-1 计量聚合（tokens / cost）：
+    - ``tokens_used`` / ``cost_used``：单次执行内累计 token 数与费用；
+    - ``max_tokens`` / ``max_cost``：可选上限，超限抛 ``SkillCompositionError``；
+    - 计量源在 ``agent-core`` llm client 层（P2-2），本类只做聚合器 + 闸门。
     """
 
     execution_id: str = field(default_factory=lambda: uuid.uuid4().hex)
@@ -127,6 +135,11 @@ class ExecutionContext:
     max_depth: int = 4
     deadline: float | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+    # P2-1：tokens / cost 聚合（计量点由 agent-core llm client 层提供）
+    tokens_used: int = 0
+    cost_used: float = 0.0
+    max_tokens: int | None = None
+    max_cost: float | None = None
 
     @property
     def call_depth(self) -> int:
@@ -154,6 +167,26 @@ class ExecutionContext:
         """退出 Skill：仅弹出调用栈，步数预算不回退（累计计数）。"""
         if self.call_stack:
             self.call_stack.pop()
+
+    def record_usage(self, tokens: int = 0, cost: float = 0.0) -> None:
+        """记录本次执行的 token / 费用消耗（P2-1 聚合器）。
+
+        累计到 ``tokens_used`` / ``cost_used``；若设置了 ``max_tokens`` / ``max_cost``
+        上限且累计值超限，抛 ``SkillCompositionError``（与步数/深度/循环护栏同级）。
+
+        调用方（Planner / agent-core llm client）在每次 LLM 调用后传入本次 usage，
+        本方法只做聚合 + 闸门，不关心计量来源。
+        """
+        self.tokens_used += tokens
+        self.cost_used += cost
+        if self.max_tokens is not None and self.tokens_used > self.max_tokens:
+            raise SkillCompositionError(
+                f"tokens 用量超上限（used={self.tokens_used}, max={self.max_tokens}）"
+            )
+        if self.max_cost is not None and self.cost_used > self.max_cost:
+            raise SkillCompositionError(
+                f"费用超上限（used={self.cost_used:.4f}, max={self.max_cost:.4f}）"
+            )
 
 
 class PlannerRuntime:
@@ -183,6 +216,8 @@ class PlannerRuntime:
         max_skill_depth: int = 4,
         max_steps: int = 20,
         max_duration_seconds: float | None = None,
+        max_tokens: int | None = None,
+        max_cost: float | None = None,
     ):
         self.registry = registry
         self.llm = llm
@@ -191,6 +226,13 @@ class PlannerRuntime:
         self.max_skill_depth = max_skill_depth
         self.max_steps = max_steps
         self.max_duration_seconds = max_duration_seconds
+        self.max_tokens = max_tokens
+        self.max_cost = max_cost
+        # P2-2 计量接线：把 llm 客户端的 usage 回调接到当前执行的 ExecutionContext。
+        # 计量源（agent-core FallbackChatModel）→ 聚合器（ExecutionContext.record_usage）
+        # 经 contextvars 按 asyncio task 隔离：LLM 调用发生时取当前执行上下文，跨执行不串。
+        if llm is not None and hasattr(llm, "set_on_usage"):
+            llm.set_on_usage(self._on_llm_usage)
         # 最近一次执行的 ContextManager snapshot（execute_plan 写入，供下一轮组装消费）
         self.last_snapshot: dict[str, Any] | None = None
         # 执行期上下文（per-request，经 ContextVar 隔离）：execution() 入口创建
@@ -203,6 +245,16 @@ class PlannerRuntime:
     def context(self) -> ExecutionContext | None:
         """当前执行上下文（``execution()`` 边界内有效，边界外为 None）。"""
         return self._ctx_var.get()
+
+    def _on_llm_usage(self, tokens: int, cost: float) -> None:
+        """P2-2 计量回调：LLM 客户端每次调用后上报 usage → 当前 ExecutionContext 聚合。
+
+        LLM 调用发生在 ``execution()`` 边界内时，取当前上下文计入预算；边界外
+        （如 deterministic 静态路径不经 runtime 护栏）回调静默丢弃，不污染跨执行预算。
+        """
+        ctx = self._ctx_var.get()
+        if ctx is not None:
+            ctx.record_usage(tokens, cost)
 
     @property
     def _steps(self) -> int:
@@ -231,7 +283,8 @@ class PlannerRuntime:
             else None
         )
         ctx = ExecutionContext(
-            max_steps=self.max_steps, max_depth=self.max_skill_depth, deadline=deadline
+            max_steps=self.max_steps, max_depth=self.max_skill_depth, deadline=deadline,
+            max_tokens=self.max_tokens, max_cost=self.max_cost,
         )
         token = self._ctx_var.set(ctx)
         try:

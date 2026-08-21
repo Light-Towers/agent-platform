@@ -73,6 +73,7 @@ class LangChainFallbackModel(BaseChatModel):
         fallback: Any,
         failure_threshold: int = 3,
         cooldown: float = 60.0,
+        on_usage: Any = None,
         **kwargs: Any,
     ) -> None:
         # pydantic BaseChatModel 初始化（无业务字段）。
@@ -86,6 +87,7 @@ class LangChainFallbackModel(BaseChatModel):
                 fallback=fallback,
                 failure_threshold=failure_threshold,
                 cooldown=cooldown,
+                on_usage=on_usage,
             ),
         )
         # P2.1：向 deepagents 暴露主模型上下文窗口（max_input_tokens）。
@@ -129,7 +131,11 @@ class LangChainFallbackModel(BaseChatModel):
     def cooldown_until(self) -> float:
         return self._core._cooldown_until
 
-    # ---- BaseChatModel 抽象接口适配（委托内核统一路由） ----    # ---- BaseChatModel 抽象接口适配（委托内核统一路由） ----
+    def set_on_usage(self, callback: Any) -> None:
+        """P2-2：转发 usage 回调到内核 FallbackChatModel（单一真相源）。"""
+        self._core.set_on_usage(callback)
+
+    # ---- BaseChatModel 抽象接口适配（委托内核统一路由） ----
 
     @property
     def _llm_type(self) -> str:
