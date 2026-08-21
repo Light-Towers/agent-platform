@@ -20,7 +20,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from functools import wraps
-from typing import Any, Awaitable, Callable, Iterable, Optional, Type, TypeVar
+from typing import Any, Awaitable, Callable, Iterable, Optional, Protocol, Type, TypeVar, List
 
 F = TypeVar("F", bound=Callable[..., Any])
 
@@ -133,14 +133,13 @@ def timeout(seconds: float, executor: Optional[ThreadPoolExecutor] = None) -> Ca
         @wraps(fn)
         def wrapper(*args: Any, **kwargs: Any) -> Any:
             ex = executor or ThreadPoolExecutor(max_workers=1)
+            future = ex.submit(fn, *args, **kwargs)
             try:
-                future = ex.submit(fn, *args, **kwargs)
-                try:
-                    return future.result(timeout=seconds)
-                except FuturesTimeoutError:
-                    raise TimeoutError(
-                        f"调用 {getattr(fn, '__name__', '<func>')} 超时（> {seconds}s）"
-                    ) from None
+                return future.result(timeout=seconds)
+            except FuturesTimeoutError:
+                raise TimeoutError(
+                    f"调用 {getattr(fn, '__name__', '<func>')} 超时（> {seconds}s）"
+                ) from None
             finally:
                 if executor is None:
                     ex.shutdown(wait=False)
@@ -151,28 +150,35 @@ def timeout(seconds: float, executor: Optional[ThreadPoolExecutor] = None) -> Ca
 
 
 # ---------------------------------------------------------------------------
-# CircuitBreaker
+# CircuitBreaker Engine + Policy Strategy (WS-3: 统一引擎 + 策略分离)
 # ---------------------------------------------------------------------------
-# 状态常量（WS-3：内核单一真相，适配层不再各自定义字符串）
+# 状态常量（内核单一真相，适配层不再各自定义字符串）
 STATE_CLOSED = "closed"
 STATE_OPEN = "open"
 STATE_HALF_OPEN = "half_open"
 
 
-class CircuitBreaker:
-    """简单熔断器：连续失败达到阈值后进入 OPEN（拒绝调用），冷却后转 HALF_OPEN 探测，
-    探测成功则回 CLOSED，失败则回到 OPEN。
+class _Policy(Protocol):
+    """熔断策略协议：定义如何根据执行结果判断状态转换。"""
 
-    状态：CLOSED（正常） / OPEN（熔断拒绝） / HALF_OPEN（探测中）。
+    def on_success(self, breaker: "CircuitBreaker") -> None:
+        """成功时的状态更新逻辑。"""
+        ...
 
-    并发安全（WS-3）：状态读写均受内部锁保护，多协程/多线程并发下
-    half_open 探测计数不会竞态。并发模型约束：单事件循环或多线程均适用，
-    但 ``call()`` 内的 fn 执行不在锁内（避免长时间持锁）。
+    def on_failure(self, breaker: "CircuitBreaker") -> None:
+        """失败时的状态更新逻辑。"""
+        ...
+
+    def check_transition(self, breaker: "CircuitBreaker") -> None:
+        """检查是否需要自动转换状态（如 OPEN→HALF_OPEN 冷却期到期）。"""
+        ...
+
+
+class ConsecutiveFailurePolicy:
+    """连续失败计数策略（原 CircuitBreaker 行为）。
+
+    连续失败达到阈值 → OPEN；冷却后 HALF_OPEN；连续成功 → CLOSED。
     """
-
-    CLOSED = STATE_CLOSED
-    OPEN = STATE_OPEN
-    HALF_OPEN = STATE_HALF_OPEN
 
     def __init__(
         self,
@@ -180,7 +186,6 @@ class CircuitBreaker:
         reset_timeout: float = 30.0,
         max_half_open_probe: int = 1,
         clock: Callable[[], float] = time.monotonic,
-        exceptions: "Iterable[Type[BaseException]] | Type[BaseException]" = Exception,
     ) -> None:
         if failure_threshold < 1:
             raise ValueError("failure_threshold 必须 >= 1")
@@ -190,14 +195,180 @@ class CircuitBreaker:
         self._reset_timeout = reset_timeout
         self._max_half_open_probe = max_half_open_probe
         self._clock = clock
-        self._exc_types = exceptions if isinstance(exceptions, tuple) else (exceptions,)
-        self._lock = threading.Lock()
+
+    def on_success(self, breaker: "CircuitBreaker") -> None:
+        with breaker._lock:
+            if breaker._state == breaker.HALF_OPEN:
+                breaker._half_open_inflight = max(0, breaker._half_open_inflight - 1)
+            breaker._failures = 0
+            breaker._state = breaker.CLOSED
+
+    def on_failure(self, breaker: "CircuitBreaker") -> None:
+        with breaker._lock:
+            if breaker._state == breaker.HALF_OPEN:
+                breaker._half_open_inflight = max(0, breaker._half_open_inflight - 1)
+                breaker._state = breaker.OPEN
+                breaker._opened_at = breaker._clock()
+                return
+            breaker._failures += 1
+            if breaker._failures >= breaker._failure_threshold:
+                breaker._state = breaker.OPEN
+                breaker._opened_at = breaker._clock()
+
+    def check_transition(self, breaker: "CircuitBreaker") -> None:
+        with breaker._lock:
+            if breaker._state == breaker.OPEN and breaker._opened_at is not None:
+                if breaker._clock() - breaker._opened_at >= breaker._reset_timeout:
+                    breaker._state = breaker.HALF_OPEN
+
+
+class SlidingWindowPolicy:
+    """滑动窗口失败率策略（agent_federation 原行为）。
+
+    滑动窗口内失败率超过阈值 → OPEN；冷却后 HALF_OPEN；连续探测成功 → CLOSED。
+    """
+
+    def __init__(
+        self,
+        failure_ratio: float = 0.5,
+        min_requests: int = 5,
+        window_size: int = 20,
+        cooldown_seconds: float = 30.0,
+        half_open_probes: int = 3,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        if not 0 <= failure_ratio <= 1:
+            raise ValueError("failure_ratio 必须在 [0, 1] 范围内")
+        if min_requests < 1:
+            raise ValueError("min_requests 必须 >= 1")
+        if half_open_probes < 1:
+            raise ValueError("half_open_probes 必须 >= 1")
+        self._failure_ratio = failure_ratio
+        self._min_requests = min_requests
+        self._window_size = window_size
+        self._cooldown_seconds = cooldown_seconds
+        self._half_open_probes = half_open_probes
+        self._clock = clock
+
+    def on_success(self, breaker: "CircuitBreaker") -> None:
+        with breaker._lock:
+            if breaker._state == breaker.HALF_OPEN:
+                breaker._half_open_successes += 1
+                if breaker._half_open_successes >= breaker._half_open_probes:
+                    breaker._successes.clear()
+                    breaker._failures_list.clear()
+                    breaker._state = breaker.CLOSED
+                return
+            breaker._successes.append(breaker._clock())
+            breaker._trim()
+
+    def on_failure(self, breaker: "CircuitBreaker") -> None:
+        with breaker._lock:
+            if breaker._state == breaker.HALF_OPEN:
+                breaker._opened_at = breaker._clock()
+                breaker._half_open_successes = 0
+                breaker._state = breaker.OPEN
+                return
+            breaker._failures_list.append(breaker._clock())
+            breaker._trim()
+            breaker._evaluate_locked()
+
+    def check_transition(self, breaker: "CircuitBreaker") -> None:
+        with breaker._lock:
+            if breaker._state == breaker.OPEN and breaker._opened_at is not None:
+                if breaker._clock() - breaker._opened_at >= breaker._cooldown_seconds:
+                    breaker._half_open_successes = 0
+                    breaker._state = breaker.HALF_OPEN
+
+
+class CircuitBreaker:
+    """统一熔断器引擎（WS-3: Engine + Policy 分离）。
+
+    - 支持同步/异步调用
+    - 策略可插拔：ConsecutiveFailurePolicy / SlidingWindowPolicy
+    - 线程/协程安全：内部锁保护所有状态变更
+    - 状态常量：CLOSED / OPEN / HALF_OPEN (内核用下划线，适配层自行转连字符)
+    """
+
+    CLOSED = STATE_CLOSED
+    OPEN = STATE_OPEN
+    HALF_OPEN = STATE_HALF_OPEN
+
+    def __init__(
+        self,
+        policy=None,
+        *,
+        exceptions: "Iterable[Type[BaseException]] | Type[BaseException]" = Exception,
+        clock: Callable[[], float] = time.monotonic,
+        # ConsecutiveFailurePolicy 配置
+        failure_threshold: int = 5,
+        reset_timeout: float = 30.0,
+        max_half_open_probe: int = 1,
+        # SlidingWindowPolicy 配置
+        failure_ratio: float = 0.5,
+        min_requests: int = 5,
+        window_size: int = 20,
+        cooldown_seconds: float = 30.0,
+        half_open_probes: int = 3,
+    ) -> None:
+        # 判断策略类型
+        if isinstance(policy, ConsecutiveFailurePolicy):
+            self._policy = policy
+        elif isinstance(policy, SlidingWindowPolicy):
+            self._policy = policy
+        elif isinstance(policy, type) and issubclass(policy, ConsecutiveFailurePolicy):
+            self._policy = policy(
+                failure_threshold=failure_threshold,
+                reset_timeout=reset_timeout,
+                max_half_open_probe=max_half_open_probe,
+            )
+        elif isinstance(policy, type) and issubclass(policy, SlidingWindowPolicy):
+            self._policy = policy(
+                failure_ratio=failure_ratio,
+                min_requests=min_requests,
+                window_size=window_size,
+                cooldown_seconds=cooldown_seconds,
+                half_open_probes=half_open_probes,
+            )
+        else:
+            # 默认 ConsecutiveFailurePolicy
+            self._policy = ConsecutiveFailurePolicy(
+                failure_threshold=failure_threshold,
+                reset_timeout=reset_timeout,
+                max_half_open_probe=max_half_open_probe,
+            )
+
+        self._exc_types = Exception
+        self._lock = threading.RLock()
+
+        # 运行时状态（兼容两种策略所需字段）
         self._state = self.CLOSED
-        self._failures = 0
+        self._failures: int = 0
+        self._failures_list: List[float] = []
+        self._successes: List[float] = []
         self._opened_at: Optional[float] = None
-        # HALF_OPEN 期间在飞的探测请求数；超过上限的并发 probe 被拒绝，
-        # 否则 OPEN→HALF_OPEN 后所有并发请求都会成为 probe（审计 P1 #六）。
         self._half_open_inflight = 0
+        self._half_open_successes = 0
+        # 兼容旧参数名：max_half_open_probe 映射到 half_open_probes
+        self._half_open_probes = half_open_probes if half_open_probes != 3 else max_half_open_probe
+        self._successes: List[float] = []
+        self._failures_list: List[float] = []
+        self._window_size = window_size
+        self._cooldown_seconds = cooldown_seconds
+        self._failure_threshold = failure_threshold
+        self._reset_timeout = reset_timeout
+        self._max_half_open_probe = max_half_open_probe
+        self._clock = clock
+        self._failure_ratio = failure_ratio
+        self._min_requests = min_requests
+        self._window_size = window_size
+        self._cooldown_seconds = cooldown_seconds
+        # self._half_open_probes = half_open_probes  # 已在上方设置，避免重复覆盖
+
+        self._lock = threading.RLock()
+        self._clock = clock
+        self._exc_types = Exception
+        self._state = self.CLOSED
 
     @property
     def state(self) -> str:
@@ -205,34 +376,19 @@ class CircuitBreaker:
             return self._state
 
     def resolved_state(self) -> str:
-        """返回计入冷却期后的等效状态（OPEN 且冷却到期 → HALF_OPEN），只读不突变。
-
-        适配层（如 agent_runtime.circuit_breaker）应经本方法读状态，而非直读
-        私有字段（WS-3：消除子类对 ``_state/_opened_at/_clock`` 的直读耦合）。
-        """
+        """返回计入冷却期后的等效状态（OPEN 且冷却到期 → HALF_OPEN）。"""
         with self._lock:
-            if self._state == self.OPEN and self._opened_at is not None:
-                if self._clock() - self._opened_at >= self._reset_timeout:
-                    return self.HALF_OPEN
+            self._policy.check_transition(self)
             return self._state
 
-    def _maybe_transition(self) -> None:
-        if self._state == self.OPEN and self._opened_at is not None:
-            if self._clock() - self._opened_at >= self._reset_timeout:
-                self._state = self.HALF_OPEN
-
     def allow(self) -> bool:
-        """调用前查询：是否允许执行（OPEN 且冷却未到则拒绝）。
-
-        HALF_OPEN 时限制并发探测数（max_half_open_probe）：已达到上限的
-        并发请求会被拒绝（视为仍 OPEN），避免 100 个并发请求同时成为 probe。
-        """
+        """调用前查询：是否允许执行（OPEN 且冷却未到则拒绝）。"""
         with self._lock:
-            self._maybe_transition()
+            self._policy.check_transition(self)
             if self._state == self.OPEN:
                 return False
             if self._state == self.HALF_OPEN:
-                if self._half_open_inflight < self._max_half_open_probe:
+                if self._half_open_inflight < self._half_open_probes:
                     self._half_open_inflight += 1
                     return True
                 return False
@@ -244,22 +400,11 @@ class CircuitBreaker:
 
     def record_success(self) -> None:
         with self._lock:
-            if self._state == self.HALF_OPEN:
-                self._end_half_open_probe()
-            self._failures = 0
-            self._state = self.CLOSED
+            self._policy.on_success(self)
 
     def record_failure(self) -> None:
         with self._lock:
-            if self._state == self.HALF_OPEN:
-                self._end_half_open_probe()
-                self._state = self.OPEN
-                self._opened_at = self._clock()
-                return
-            self._failures += 1
-            if self._failures >= self._failure_threshold:
-                self._state = self.OPEN
-                self._opened_at = self._clock()
+            self._policy.on_failure(self)
 
     def call(self, fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
         """受熔断保护地执行 fn：拒绝时抛 RuntimeError；否则按结果记录成功/失败。"""
@@ -267,52 +412,50 @@ class CircuitBreaker:
             raise RuntimeError("熔断器处于 OPEN 状态，暂时拒绝调用")
         try:
             result = fn(*args, **kwargs)
-        except self._exc_types:  # type: ignore[misc]
+        except Exception:
             self.record_failure()
             raise
         self.record_success()
         return result
 
+    # SlidingWindowPolicy 需要的辅助方法
+    def _trim(self) -> None:
+        for bucket in (self._successes, self._failures_list):
+            while len(bucket) > self._window_size:
+                bucket.pop(0)
 
-# ---------------------------------------------------------------------------
-# config validation
-# ---------------------------------------------------------------------------
-def validate_config(
-    config: dict,
-    *,
-    required: Iterable[str] = (),
-    types: Optional[dict] = None,
-    defaults: Optional[dict] = None,
-) -> dict:
-    """轻量配置校验与默认值填充。
-
-    :param config: 用户配置 dict。
-    :param required: 必填键集合；缺失抛 ValueError。
-    :param types: {key: type}，类型不符抛 TypeError。
-    :param defaults: {key: value}，缺失时填充。
-    :return: 合并默认值后的新 dict（不修改入参）。
-    """
-    out = dict(defaults or {})
-    out.update(config)
-    types = types or {}
-    for key in required:
-        if key not in out or out[key] is None:
-            raise ValueError(f"配置缺少必填项: {key}")
-    for key, expected in types.items():
-        if key in out and out[key] is not None and not isinstance(out[key], expected):
-            raise TypeError(
-                f"配置项 {key} 类型错误：期望 {expected.__name__}，实际 {type(out[key]).__name__}"
-            )
-    return out
+    def _evaluate_locked(self) -> None:
+        if self._state != self.CLOSED:
+            return
+        total = len(self._successes) + len(self._failures_list)
+        if total < self._window_size:
+            return
+        failures = len(self._failures_list)
+        if failures / total >= self._failure_ratio:
+            self._opened_at = self._clock()
+            self._state = self.OPEN
 
 
-__all__ = [
-    "retry",
-    "retry_async",
-    "timeout",
-    "CircuitBreaker",
-    "validate_config",
-    "STATE_CLOSED",
-    "STATE_OPEN",
-    "STATE_HALF_OPEN",
-]
+# 向后兼容：保留原 CircuitBreaker 类名，默认使用 ConsecutiveFailurePolicy
+class _LegacyCircuitBreaker(CircuitBreaker):
+    """向后兼容的旧接口：默认使用 ConsecutiveFailurePolicy。"""
+
+    def __init__(
+        self,
+        failure_threshold: int = 5,
+        reset_timeout: float = 30.0,
+        max_half_open_probe: int = 1,
+        clock: Callable[[], float] = time.monotonic,
+        exceptions: "Iterable[Type[BaseException]] | Type[BaseException]" = Exception,
+    ) -> None:
+        policy = ConsecutiveFailurePolicy(
+            failure_threshold=failure_threshold,
+            reset_timeout=reset_timeout,
+            max_half_open_probe=max_half_open_probe,
+        )
+        super().__init__(policy=policy, exceptions=exceptions)
+        # 同步旧字段名供旧代码读取
+        self._failure_threshold = failure_threshold
+        self._reset_timeout = reset_timeout
+        self._max_half_open_probe = max_half_open_probe
+        self._clock = time.monotonic
