@@ -1,0 +1,28 @@
+name: "qa_pipeline"
+description: "通用问答流水线：路由 → 搜索 → 总结"
+input_schema:
+  type: object
+  properties:
+    question:
+      type: string
+  required: [question]
+nodes:
+  - id: "route"
+    skill: "route"
+    inputs:
+      question: "$input.question"
+  - id: "search"
+    skill: "search"
+    inputs:
+      query: "$input.question"
+  - id: "summarize"
+    skill: "summarize"
+    inputs:
+      text: "$node.search"
+edges:
+  - dependent: "search"
+    dependency: "route"
+  - dependent: "summarize"
+    dependency: "search"
+output_node: "summarize"
+permissions: ["read", "search"]
