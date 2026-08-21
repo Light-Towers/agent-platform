@@ -7,13 +7,14 @@ WORKDIR /srv/agent-platform
 COPY pyproject.toml README.md ./
 COPY packages/agent-core ./packages/agent-core
 COPY packages/shared-schemas ./packages/shared-schemas
+COPY packages/agent-runtime ./packages/agent-runtime
 COPY applications/agent_server ./applications/agent_server
 
-# agent-core / shared-schemas 是 [project].dependencies 里的本地 workspace 包，
+# agent-core / shared-schemas / agent-runtime 是 [project].dependencies 里的本地 workspace 包，
 # [tool.uv.sources] workspace=true 仅 uv 能解析；普通 pip 会误当 PyPI 包去下载。
-# 故在同一安装事务中把两个本地路径一并传入，让 pip 识别为已满足的依赖。
+# 故在同一安装事务中把本地路径一并传入，让 pip 识别为已满足的依赖。
 # 注：pip 不认 [tool.uv.sources] workspace=true，故需显式传入本地路径。
-RUN pip install --no-cache-dir ./packages/agent-core ./packages/shared-schemas .
+RUN pip install --no-cache-dir ./packages/agent-core ./packages/shared-schemas ./packages/agent-runtime .
 
 # 容器安全：以非 root 用户运行（最佳实践）
 RUN useradd -m -u 10001 appuser

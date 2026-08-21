@@ -2,7 +2,8 @@
 
 - ``deterministic``：本模块 ``DeterministicPlanner``（决策与 graph.py 同源）；
 - ``graph``：本模块 ``GraphPlanner``（discover → ExecutionGraph → execute_plan，组合治理主链）；
-- ``agentic``：联邦侧 ``AgenticPlanner``（lazy import——app 不静态依赖 agent_federation）。
+- ``agentic``：联邦侧 ``AgenticPlanner``（lazy import——需安装 ``agent-federation-app``，
+  即 ``uv sync --extra agentic``；未安装时启动报 ImportError 明确提示）。
 
 Phase 3 统一 SSE/WS 出口后，``app.api`` 直接消费 ``get_planner()`` 返回的 Planner。
 """
@@ -33,7 +34,13 @@ def get_planner(settings=None, *, registry: "SkillRegistry | None" = None) -> "P
 
         return UnifiedPlanner(settings, registry=registry)
     if settings.planner == "agentic":
-        from agent_federation.planners.agentic import AgenticPlanner  # noqa: PLC0415
+        try:
+            from agent_federation.planners.agentic import AgenticPlanner  # noqa: PLC0415
+        except ImportError as exc:
+            raise ImportError(
+                "PLANNER=agentic 需要安装 agent-federation-app："
+                "运行 `uv sync --extra agentic` 或 `pip install agent-federation-app`"
+            ) from exc
 
         return AgenticPlanner()
     if settings.planner == "graph":
