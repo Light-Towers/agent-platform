@@ -89,7 +89,18 @@ async def _create_store():
             _dims = getattr(get_embedder(), "dim", None)
         except Exception:
             _dims = None
-        _dims = int(_dims or int(os.getenv("STORE_EMBED_DIMS", "512")))
+        # 向量维度单一事实源：embedder.dim。STORE_EMBED_DIMS 仅为向后兼容保留，
+        # 新部署不应设置此变量。
+        if _dims is None:
+            _legacy = os.getenv("STORE_EMBED_DIMS")
+            if _legacy:
+                logger.warning(
+                    "STORE_EMBED_DIMS 已弃用：向量维度应从 Embedding Provider 自动派生。"
+                    "请移除 STORE_EMBED_DIMS 环境变量。"
+                )
+                _dims = int(_legacy)
+            else:
+                _dims = 512  # embedder 不可用且无旧配置时的最终回退
 
         # 语义记忆命名空间：按 (tenant, thread) 组织；向量索引用 bge 维度。
         store = PostgresStore.from_conn_string(

@@ -81,14 +81,26 @@ class Plan(BaseModel):
     ``graph`` 类型为 ``Any`` 以避免 protocol ↔ execution_graph 循环导入，实际为
     ``ExecutionGraph | None``。``mode="graph"`` 时 ``graph`` 必须非空。
 
-    ``notes`` 承载决策期附加信息（脱敏后问题、workspace_id、记忆召回、重试迭代等），
-    供 execute 阶段消费；是 Plan 的扩展位，不新增字段即保持协议稳定。
+    .. deprecated:: 0.2.0
+       ``notes`` 承载决策期附加信息，正在迁移至对应 Context 层（PlannerContext/ConversationContext/TaskState/PlanningState/ExecutionIdentity）。
+       新代码禁止写入；读取路径暂保留兼容，后续版本将删除。
     """
 
     mode: Literal["deterministic", "workflow", "graph", "agentic"] = "deterministic"
     route: str = ""
     sub_query: str = ""
     reason: str = ""
+    # 显式字段：替代 Plan.notes 迁移（P1 架构债务）
+    question: str = ""
+    workspace_id: str = "default"
+    user_id: str = "default"
+    last_snapshot: dict[str, Any] | None = None
+    messages: list[Any] = Field(default_factory=list)
+    compacted: bool = False
+    iterations: int = 0
+    mcp_server: str = ""
+    mcp_tool: str = ""
+    mcp_params: dict[str, Any] = Field(default_factory=dict)
     notes: dict[str, Any] = Field(default_factory=dict)
     graph: Any = None
 
@@ -115,6 +127,22 @@ class PlannerContext(BaseModel):
     mcp_server: str = ""
     mcp_tool: str = ""
     mcp_params: dict[str, Any] = Field(default_factory=dict)
+
+    # 显式字段：替代 Plan.notes 迁移（P1 架构债务）
+    question: str = ""
+    previous_execution: dict[str, Any] | None = None  # 上一轮执行快照
+
+
+@dataclass(frozen=True)
+class ExecutionIdentity:
+    """执行身份/租户标识：替代 Plan.notes 中的 workspace_id / user_id。
+
+    生命周期：随 ExecutionContext 创建，随 execution 结束销毁。
+    用于：trace / audit / authorization / memory namespace / tenant isolation
+    """
+    execution_id: str
+    workspace_id: str = "default"
+    user_id: str = "default"
 
 
 class SkillCompositionError(RuntimeError):
@@ -156,6 +184,7 @@ class ExecutionContext:
     """
 
     execution_id: str = field(default_factory=lambda: uuid.uuid4().hex)
+    identity: ExecutionIdentity | None = None
     step_count: int = 0
     call_stack: list[str] = field(default_factory=list)
     max_steps: int = 20
@@ -290,6 +319,8 @@ class PlannerRuntime:
         checkpoint_store: Any = None,
         enable_loop_fingerprint: bool = False,
         ownership_store: Any = None,
+        workspace_id: str = "default",
+        user_id: str = "default",
     ):
         self.registry = registry
         self.llm = llm
@@ -300,19 +331,16 @@ class PlannerRuntime:
         self.max_duration_seconds = max_duration_seconds
         self.max_tokens = max_tokens
         self.max_cost = max_cost
-        # P3-1：轨迹存储后端（可选注入）；未注入则不持久化（单进程/测试默认跳过）
         self.trajectory_store = trajectory_store
-        # Phase E：执行级 checkpoint 存储（可选注入）；未注入则不落盘（resume 不可用）
         self.checkpoint_store = checkpoint_store
-        # §11 / §20：执行所有权 / 租约存储（默认进程内；多副本需 PgAdvisory 持久化后端）。
-        # 提供后，execution() 边界自动 acquire/release 所有权，reap_stale 可回收 stale 执行。
         self.ownership_store: ExecutionOwnershipStore = (
             ownership_store
             if ownership_store is not None
             else InMemoryExecutionOwnershipStore()
         )
-        # P5-1：语义循环指纹（增强项，默认关闭，避免误伤合法重放/重规划）
         self.enable_loop_fingerprint = enable_loop_fingerprint
+        self._workspace_id = workspace_id
+        self._user_id = user_id
         # P2-2 计量接线：把 llm 客户端的 usage 回调接到当前执行的 ExecutionContext。
         # 计量源（agent-core FallbackChatModel）→ 聚合器（ExecutionContext.record_usage）
         # 经 contextvars 按 asyncio task 隔离：LLM 调用发生时取当前执行上下文，跨执行不串。
@@ -375,10 +403,17 @@ class PlannerRuntime:
             if self.max_duration_seconds is not None
             else None
         )
+        eid = uuid.uuid4().hex
         ctx = ExecutionContext(
+            execution_id=eid,
             max_steps=self.max_steps, max_depth=self.max_skill_depth, deadline=deadline,
             max_tokens=self.max_tokens, max_cost=self.max_cost,
             loop_fingerprint=self.enable_loop_fingerprint,
+            identity=ExecutionIdentity(
+                execution_id=eid,
+                workspace_id=self._workspace_id,
+                user_id=self._user_id,
+            ),
         )
         # 组合静态校验（plan 期 fail-fast）：非法组合不进入执行。
         # 仅真实 SkillRegistry 具备 assert_composition_valid；测试替身（_FakeRegistry 等）

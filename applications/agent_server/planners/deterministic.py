@@ -66,12 +66,10 @@ class DeterministicPlanner(Planner):
                     route="blocked",
                     sub_query="",
                     reason="被输入护栏拦截（injection）",
-                    notes={
-                        "question": question,
-                        "workspace_id": ctx.workspace_id,
-                        "user_id": ctx.user_id,
-                        "last_snapshot": ctx.last_snapshot,
-                    },
+                    question=question,
+                    workspace_id=ctx.workspace_id,
+                    user_id=ctx.user_id,
+                    last_snapshot=ctx.last_snapshot,
                 )
             question = guard["redacted_text"]
 
@@ -92,16 +90,12 @@ class DeterministicPlanner(Planner):
                     route="direct",
                     sub_query=question,
                     reason="上下文已压缩，重新路由",
-                    notes={
-                        "question": question,
-                        "workspace_id": ctx.workspace_id,
-                        "user_id": ctx.user_id,
-                        "messages": compacted,
-                        "last_snapshot": ctx.last_snapshot,
-                        # WS-2：标记本轮已压缩，供 execute_plan 回填
-                        # ConversationContext.compacted（三层契约一致性）
-                        "compacted": True,
-                    },
+                    question=question,
+                    workspace_id=ctx.workspace_id,
+                    user_id=ctx.user_id,
+                    messages=compacted,
+                    compacted=True,
+                    last_snapshot=ctx.last_snapshot,
                 )
 
         # L1 轻量 short-circuit：高置信 chitchat 直答（与 graph.route_node 同源，eval 基线不受影响）
@@ -112,12 +106,10 @@ class DeterministicPlanner(Planner):
                 route=l1_hint,
                 sub_query=question,
                 reason="L1 chitchat short-circuit",
-                notes={
-                    "question": question,
-                    "workspace_id": ctx.workspace_id,
-                    "user_id": ctx.user_id,
-                    "last_snapshot": ctx.last_snapshot,
-                },
+                question=question,
+                workspace_id=ctx.workspace_id,
+                user_id=ctx.user_id,
+                last_snapshot=ctx.last_snapshot,
             )
 
         # LLM 主路由：失败自动回退确定性启发式（decide_route 内部处理）
@@ -126,16 +118,13 @@ class DeterministicPlanner(Planner):
             route=decision.capability,
             sub_query=decision.sub_query,
             reason=decision.reason,
-            notes={
-                "question": question,
-                "workspace_id": ctx.workspace_id,
-                "user_id": ctx.user_id,
-                "mcp_server": ctx.mcp_server,
-                "mcp_tool": ctx.mcp_tool,
-                "mcp_params": ctx.mcp_params,
-                # WS-2：上一轮结构化快照透传到 execute，合成时注入 prompt
-                "last_snapshot": ctx.last_snapshot,
-            },
+            question=question,
+            workspace_id=ctx.workspace_id,
+            user_id=ctx.user_id,
+            mcp_server=ctx.mcp_server,
+            mcp_tool=ctx.mcp_tool,
+            mcp_params=ctx.mcp_params,
+            last_snapshot=ctx.last_snapshot,
         )
 
     async def execute(
@@ -145,8 +134,8 @@ class DeterministicPlanner(Planner):
         ctx: ExecutionContext | None = None,
     ) -> AsyncIterator[StreamEvent]:
         settings = get_settings()
-        question = plan.notes.get("question") or plan.sub_query or ""
-        workspace_id = plan.notes.get("workspace_id", "default")
+        question = plan.question or plan.sub_query or ""
+        workspace_id = plan.workspace_id
 
         yield StreamEvent(type="route", payload={"capability": plan.route, "reason": plan.reason})
         if plan.route == "blocked":
@@ -176,8 +165,8 @@ class DeterministicPlanner(Planner):
         # 与 graph 控制平面共享同一执行边界契约。记忆召回/合成/沉淀是 Planner 编排，
         # 非 Skill 组合，不走 delegate；反思重试在边界内顺序调用，步数累计（max_steps=20 充裕）。
         async with runtime.execution():
-            iterations = int(plan.notes.get("iterations") or 0)
-            original_snapshot = plan.notes.get("last_snapshot")
+            iterations = plan.iterations
+            original_snapshot = plan.last_snapshot
             while True:
                 evidence = await self._run_capability(plan, runtime, workspace_id, question)
                 yield StreamEvent(
@@ -187,18 +176,20 @@ class DeterministicPlanner(Planner):
                 has_real = evidence and not any(e.startswith(_EMPTY_EVIDENCE_MARKERS) for e in evidence)
                 if not has_real and plan.route != "direct" and iterations < settings.max_iterations:
                     iterations += 1
+                    plan.iterations = iterations
                     previous_route = plan.route
                     plan = await self.plan(
                         PlannerContext(
                             question=question,
                             workspace_id=workspace_id,
-                            user_id=plan.notes.get("user_id", "default"),
+                            user_id=plan.user_id,
                             messages=[],
                             llm=runtime.llm,
                         )
                     )
                     # re-plan 新建的 Plan 不携带原快照，回填避免丢失（WS-2）
-                    plan.notes.setdefault("last_snapshot", original_snapshot)
+                    if not plan.last_snapshot:
+                        plan.last_snapshot = original_snapshot
                     yield StreamEvent(
                         type="replan",
                         payload={
@@ -212,15 +203,15 @@ class DeterministicPlanner(Planner):
                 break
 
             # 合成 + 记忆沉淀（与 synthesize_node 同源）
-            # compaction 路径：plan() 把摘要写入 notes["messages"]，这里消费它作为合成上下文
-            context_messages = plan.notes.get("messages") or []
+            # compaction 路径：plan() 把摘要写入 messages，这里消费它作为合成上下文
+            context_messages = plan.messages
             answer = await self._compose(
                 question,
                 evidence,
                 memory_notes,
                 runtime.llm,
                 context_messages,
-                snapshot=plan.notes.get("last_snapshot"),
+                snapshot=plan.last_snapshot,
             )
             if settings.memory_enabled and runtime.pool is not None:
                 facts = None
@@ -242,11 +233,11 @@ class DeterministicPlanner(Planner):
             state = AgentState(
                 question=question,
                 sub_query=plan.sub_query or question,
-                user_id=plan.notes.get("user_id", "default"),
+                user_id=plan.user_id,
                 workspace_id=workspace_id,
-                mcp_server=plan.notes.get("mcp_server", ""),
-                mcp_tool=plan.notes.get("mcp_tool", ""),
-                mcp_params=plan.notes.get("mcp_params", {}),
+                mcp_server=plan.mcp_server,
+                mcp_tool=plan.mcp_tool,
+                mcp_params=plan.mcp_params,
             )
             result = await runtime.delegate("mcp", state=state, mcp_manager=runtime.mcp_manager)
         else:

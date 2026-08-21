@@ -103,8 +103,8 @@ async def test_plan_heuristic_route_without_llm():
     plan = await planner.plan(PlannerContext(question="统计一下订单表里上个月的销售额"))
     assert plan.route == "sql"
     assert plan.sub_query == "统计一下订单表里上个月的销售额"
-    assert plan.notes["question"] == "统计一下订单表里上个月的销售额"
-    assert plan.notes["workspace_id"] == "default"
+    assert plan.question == "统计一下订单表里上个月的销售额"
+    assert plan.workspace_id == "default"
 
 
 @pytest.mark.asyncio
@@ -226,8 +226,8 @@ def _settings_with_compaction():
 
 
 @pytest.mark.asyncio
-async def test_plan_compaction_writes_summary_into_notes(monkeypatch):
-    """多轮消息超阈值时，plan() 触发压缩并把摘要写入 notes["messages"]。"""
+async def test_plan_compaction_writes_summary_into_messages(monkeypatch):
+    """多轮消息超阈值时，plan() 触发压缩并把摘要写入 messages。"""
     import agent_server.planners.deterministic as det_mod
     from langchain_core.messages import AIMessage, HumanMessage
 
@@ -247,8 +247,8 @@ async def test_plan_compaction_writes_summary_into_notes(monkeypatch):
 
     assert plan.route == "direct"
     assert "已压缩" in plan.reason
-    assert isinstance(plan.notes["messages"], list)
-    assert plan.notes["question"] == ctx.question
+    assert isinstance(plan.messages, list)
+    assert plan.question == ctx.question
 
 
 @pytest.mark.asyncio
@@ -262,7 +262,7 @@ async def test_execute_consumes_compacted_messages():
 
     # 无 LLM 模式同样消费：摘要文本应出现在模板输出中
     runtime2 = PlannerRuntime(registry=FakeRegistry(), llm=None, pool=None)
-    plan = Plan(route="direct", sub_query="再算一次", notes={"question": "再算一次", "messages": compacted})
+    plan = Plan(route="direct", sub_query="再算一次", messages=compacted, question="再算一次")
     events = [ev async for ev in DeterministicPlanner().execute(plan, runtime2)]
     assert "上下文摘要" in events[-1].payload["text"]
 
