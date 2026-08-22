@@ -261,6 +261,16 @@ async def _run_graph_in_place(
             except Exception as exc:
                 cls = classify_exception(exc)
                 return node_id, None, {"class": cls.value, "error": str(exc)}, cls is ErrorClass.FATAL
+            # §HA（H3）：同层 asyncio.gather 期间若租约已被新 owner 接管，下一层边界才
+            # 检查会放过本层在途节点继续发起副作用。此处 delegate 前先自查 ownership_lost，
+            # 已丢失则中止本节点（不再产生新副作用），复用 fatal 终止分支做协作式中止。
+            if exec_ctx is not None and exec_ctx.ownership_lost:
+                return (
+                    node_id,
+                    None,
+                    {"class": "ownership_lost", "error": "执行所有权已丢失，节点中止（不发起副作用）"},
+                    True,
+                )
             # 执行 + 业务级有限重试（仅瞬态可重试；transport 短重试已在底层 SDK 内，不叠加）
             attempt = 0
             last_exc: Exception | None = None
@@ -289,11 +299,16 @@ async def _run_graph_in_place(
                     "layer": i,
                 }
                 if fatal:
+                    err_class = (error_info or {}).get("class", "fatal")
                     yield StreamEvent(
                         type="error",
-                        payload={**payload_extra, "error": (error_info or {}).get("error", ""), "error_class": "fatal"},
+                        payload={**payload_extra, "error": (error_info or {}).get("error", ""), "error_class": err_class},
                     )
-                    return  # 致命异常 → 终止整次执行（已完成节点已 checkpoint，可 resume/诊断）
+                    # ownership_lost 是 §HA 协作式中止（split-brain A 侧），非业务 Fatal；
+                    # 统一置位并终止，保证 single-active-owner，避免继续产生副作用。
+                    if err_class == "ownership_lost" and exec_ctx is not None:
+                        exec_ctx.ownership_lost = True
+                    return  # 致命异常 / 所有权丢失 → 终止整次执行（已完成节点已 checkpoint，可 resume/诊断）
                 if error_info is not None:
                     yield StreamEvent(
                         type="error",
