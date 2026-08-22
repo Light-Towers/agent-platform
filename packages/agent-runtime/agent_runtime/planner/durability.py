@@ -145,12 +145,13 @@ class ExecutionOwnershipStore(abc.ABC):
         """获取执行所有权（租约 ttl_s 秒）。已持有且未过期则拒绝（返回 False）。"""
 
     @abc.abstractmethod
-    async def heartbeat(self, execution_id: str, ttl_s: float, owner: str | None = None) -> bool:
+    async def heartbeat(self, execution_id: str, ttl_s: float, owner: str) -> bool:
         """续租：把租约到期时间顺延 ttl_s。
 
-        §HA：返回 bool 表示「本次续租是否成功」。传 ``owner`` 时实现应校验租约仍由
-        ``owner`` 持有；被其他副本接管后（split-brain 的 A 侧）应返回 False，供心跳
-        协程感知所有权丢失并中止执行循环，避免旧 owner 继续产生副作用。
+        §HA：返回 bool 表示「本次续租是否成功」。``owner`` 为必填（非可选）——HA 审计
+        H2/H4 明确：保留 ``owner=None`` 的旁路会绕过 owner fencing，重新引入 split-brain
+        风险。被其他副本接管后（split-brain 的 A 侧）应返回 False，供心跳协程感知所有权
+        丢失并中止执行循环，避免旧 owner 继续产生副作用。
         """
 
     @abc.abstractmethod
@@ -183,11 +184,11 @@ class InMemoryExecutionOwnershipStore(ExecutionOwnershipStore):
         self._owners[execution_id] = (owner, now + ttl_s)
         return True
 
-    async def heartbeat(self, execution_id: str, ttl_s: float, owner: str | None = None) -> bool:
+    async def heartbeat(self, execution_id: str, ttl_s: float, owner: str) -> bool:
         cur = self._owners.get(execution_id)
         if cur is None:
             return False
-        if owner is not None and cur[0] != owner:
+        if cur[0] != owner:
             # §HA：租约已被其他 owner 接管，旧 owner 感知所有权丢失 → 返回 False
             return False
         self._owners[execution_id] = (cur[0], time.monotonic() + ttl_s)
@@ -257,6 +258,18 @@ class SideEffectStore(abc.ABC):
     每次 Skill 副作用落库一条 ``(execution_id, step_id, effect_type)`` 记录，
     ``effect_key`` 唯一约束使重复 attempt 的重复写被原子丢弃（ON CONFLICT DO NOTHING）。
     配合 checkpoint，B 接管后 resume 时可判断哪些 step 的副作用已真正落地，避免重复执行。
+
+    §HA 契约（H3 明确）：**同一个 ``(execution_id, step_id, effect_type)`` 只能有一次
+    副作用**。这意味着若一个 Skill 合法地产生多种业务副作用（如 ``WRITE-A`` 与
+    ``WRITE-B``），它们必须使用**不同的** ``effect_type``，否则会被错误地当成重复副作用
+    而丢弃。换句话说，abstraction 要求「一个 step 内，每一种 effect_type 仅发生一次」。
+
+    §HA 边界（H3 重要）：``record()`` 与真实业务副作用**不是原子事务**。若执行顺序为
+    「真实副作用 ✔ → 进程 crash → record() ✘」，B resume 时 checkpoint 与 side_effects
+    均无记录，会重跑 Skill，导致真实副作用 ×2。这是 distributed side-effect 的经典
+    atomicity 问题，无法靠一条 SQL 修复——**业务副作用本身必须支持幂等边界**
+    （idempotency_key / transactional outbox），Runtime 层只提供幂等证据（idempotency
+    marker），而非强制 exactly-once。
     """
 
     @abc.abstractmethod
@@ -271,6 +284,9 @@ class SideEffectStore(abc.ABC):
 
         ``effect_key`` 由实现拼接（默认 ``execution_id:step_id:effect_type``），
         ``owner`` 为当前 lease owner（``replica_id:uuid``），用于审计证明。
+
+        调用方必须在 Skill 的**真实业务副作用成功之后**调用本方法；且不同业务副作用
+        必须使用不同 ``effect_type``（见类文档 H3 契约）。
         """
 
     @abc.abstractmethod

@@ -147,3 +147,75 @@ HA RESULT: PASS
 - H1 原始定义为「测试未真正双容器 kill」。当前 `run_replica_a` 用「手动 acquire 短 ttl 不 release」语义等价 SIGKILL（heartbeat 死亡 → PG lease 过期 → B 接管），在无头环境下已捕获 split-brain / 接管 / 重复副作用的全部语义。
 - 真双进程验证已由 `scripts/ha_real_kill_verify.py` 补强：起两个真实 OS 进程（agent-a/agent-b）共享真实 PG，A 在 step_1 后真 `SIGKILL`，B 从 checkpoint 接管；Linux 真实验证 PASS（side_effects 每 step 各 1 条 WRITE + 1 条 skill，无重复）。
 - **CI 门禁**：`tests/ha` 全部测试加 `requires_pg` marker（conftest 自动打标 + 连接失败/Windows 平台自动 skip，避免误报）；`.github/workflows/agent-platform-ci.yml` 新增 `ha` job，在 `ubuntu-latest` 起 PostgreSQL 服务容器，跑 `pytest tests/ha -m requires_pg` + 真双进程 kill 脚本。Windows CI 下 HA 测试干净 skip，由 Linux CI 覆盖。
+
+---
+
+## 八、HA Final Hardening（2026-08-22 重新审计结论）
+
+> 完整重审后结论：**没有新的 Critical correctness bug**。剩余主要为 🟠 High/Medium，
+> 属架构边界与语义严谨性，不阻塞上线级 HA 验收。本节记录最终硬化动作。
+
+### 8.1 语义边界（最重要，面试可底气陈述）
+
+**不再宣称 Exactly-Once**。v2 实际能力对应的严谨定义：
+
+| 层 | 定义 | 保障来源 |
+|---|---|---|
+| Execution | **at-least-once** | attempt 可 >1（崩溃重跑） |
+| Checkpoint | **durable** | 每节点完成即落盘 |
+| Ownership | **single active owner** | PG CAS + `expires_at` 自动过期 |
+| Checkpoint write | **stale-writer protected** | `FencedWriteError`（version CAS） |
+| Side-effect log | **idempotency evidence** | `side_effects` 唯一约束 |
+| Business effect | **requires idempotency boundary** | 业务副作用自身需支持幂等 |
+
+最终：**Effectively-Once** 仅在业务副作用本身支持 `idempotency_key` 或 `transactional outbox` 时成立。
+Runtime 层提供的是**幂等证据（idempotency marker）**，而非强制 exactly-once。
+
+### 8.2 H2/H4 修复：heartbeat owner 改为必填
+
+- 原 `heartbeat(execution_id, ttl_s, owner=None)` 保留 `owner=None` 旁路，会绕过 owner fencing，
+  未来某调用方 `await ownership.heartbeat(eid, 30)` 可重新引入 split-brain。
+- 修复：`owner` 改为**必填参数**（删 `owner=None` 分支），`InMemory` / `Pg` 实现均强制校验
+  `cur[0] == owner`。生产主路径（`protocol.py:467` 始终传 `owner=owner`）无影响。
+
+### 8.3 H3 契约明确：SideEffectStore 的 effect_type 约束
+
+- `effect_key = execution_id : step_id : effect_type`，故**同一 step 内每种 effect_type 只能发生一次**。
+- 若一个 Skill 合法产生多种业务副作用（如 `WRITE-A` 与 `WRITE-B`），必须使用**不同 effect_type**，
+  否则被错误当成重复副作用丢弃。此契约已写入 `SideEffectStore` 类文档。
+- **边界**：`record()` 与真实业务副作用**非原子事务**。若「真实副作用 ✔ → 进程 crash →
+  record() ✘」，B resume 时二者均无记录 → 重跑 Skill → 真实副作用 ×2。这是 distributed
+  side-effect 的 classic atomicity 问题，需业务副作用自身支持幂等/Outbox，非单条 SQL 可解。
+
+### 8.4 H8 测试：最危险崩溃窗口（side-effect / checkpoint 双写窗口）
+
+- 新增 `tests/ha/test_h8_side_effect_before_checkpoint.py`：A 真实执行 step_1（checkpoint1+effect1），
+  在 step_2 的 **side_effect 已落、checkpoint 尚未写**的窗口注入 kill；B 从 checkpoint1 resume 重跑 step_2。
+- 验证点：step_2 `attempt ≥ 2` 但 `actual effect = 1`（唯一约束兜底），最终 checkpoint 完整。
+- 至此故障注入矩阵覆盖：checkpoint 后杀 / checkpoint 前杀 / **副作用后-检查点前杀（最危险窗口）** /
+  lease 过期 / 双恢复竞争 / 重复提交 / A→B→C 接管 / invariants。
+
+### 8.5 已知遗留（🟠，不阻塞验收）
+
+| # | 项 | 说明 |
+|---|---|---|
+| H1 | checkpoint `version = len(completed)` 非严格 fencing token | 当前能挡 stale downgrade，但 version 无法表达"谁更新更晚"。建议未来升级为 lease `generation/epoch`，B 接管 `generation+1`，A 写 `WHERE generation = 7` 严格拒绝。**当前不阻塞**。 |
+| H3 | side_effect 与真实业务副作用非原子 | 架构边界，需业务侧幂等，Runtime 仅提供证据 |
+| H5 | 心跳非实时强杀 | lease fencing + 幂等副作用为最终方案，不幻想"心跳强杀运行中的 Skill" |
+
+### 8.6 最终评级（2026-08-22）
+
+| 能力 | 评级 |
+|---|---|
+| Execution identity / PG source-of-truth / Lease CAS / Unique owner | 🟢 |
+| Acquire fail-closed / Owner fencing / Heartbeat / Stale recovery | 🟢 |
+| Checkpoint durability / stale-writer protection / Real crash / Dual contention / A→B→C | 🟢 |
+| Trajectory audit / Side-effect idempotency marker | 🟢 |
+| Business side-effect atomicity / True fencing token / Crash-in-side-effect-window | 🟠 |
+| Exactly-once | ❌（明确不承诺） |
+
+**结论**：v2 Execution HA 主体已完整，进入下一阶段。面试陈述可底气表达——
+> 我们没有把 Agent HA 简化成"多副本+重试"。Runtime 层实现了 durable checkpoint、lease-based
+> single ownership、owner fencing、stale recovery、跨进程 crash takeover 与 idempotent
+> side-effect boundary，并以真实 PostgreSQL + Linux 双进程 SIGKILL 做故障注入验证。执行语义
+> 采用 at-least-once，最终业务结果通过幂等副作用实现 effectively-once，而非不严谨宣称 exactly-once。

@@ -13,9 +13,10 @@ expires_at 使 lease 过期），模拟 SIGKILL / OOMKill / pod eviction。
 
 
 class FaultInjector:
-    def __init__(self, *, kill_after_checkpoint: list[str] | None = None, partition_db: list[str] | None = None):
+    def __init__(self, *, kill_after_checkpoint: list[str] | None = None, partition_db: list[str] | None = None, kill_after_side_effect: list[str] | None = None):
         self.kill_after_checkpoint = set(kill_after_checkpoint or [])
         self.partition_db = set(partition_db or [])
+        self.kill_after_side_effect = set(kill_after_side_effect or [])
         self.events: list[tuple[str, str]] = []
 
     def should_stop(self, step_id: str) -> tuple[bool, str | None]:
@@ -29,6 +30,18 @@ class FaultInjector:
         if step_id in self.partition_db:
             self.events.append((step_id, "partition_db"))
             return True, "partition_db"
+        return False, None
+
+    def should_stop_after_side_effect(self, step_id: str) -> tuple[bool, str | None]:
+        """§HA-I8：在 step 的 side_effect 已落库、但 checkpoint 尚未写入的窗口调用。
+
+        返回 (True, fault_name) 表示应在此窗口注入故障并停止副本（不续租、不 release、
+        不写 checkpoint → 等价 SIGKILL），模拟「真实副作用 ✔ → 进程 crash → checkpoint ✘」的
+        最危险双写窗口。
+        """
+        if step_id in self.kill_after_side_effect:
+            self.events.append((step_id, "kill_after_side_effect"))
+            return True, "kill_after_side_effect"
         return False, None
 
     def summary(self) -> str:
