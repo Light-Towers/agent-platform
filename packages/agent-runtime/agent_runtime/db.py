@@ -139,6 +139,34 @@ CREATE TABLE IF NOT EXISTS admission_slots (
 );
 CREATE INDEX IF NOT EXISTS idx_slots_expires ON admission_slots (expires_at);
 
+-- §HA: 副作用审计表（effectively-once 证据）
+-- effect_key = execution_id + step_id + effect_type，唯一约束保证幂等写。
+-- owner/attempt_id 用于最终审计「attempt 次数 vs actual effect 次数」。
+CREATE TABLE IF NOT EXISTS side_effects (
+    effect_key TEXT PRIMARY KEY,
+    execution_id TEXT NOT NULL,
+    attempt_id TEXT NOT NULL,
+    step_id TEXT NOT NULL,
+    effect_type TEXT NOT NULL,
+    owner TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_side_effects_execution ON side_effects (execution_id);
+
+-- §HA: 执行事件审计流（可证明的 trajectory 连续性证据）
+CREATE TABLE IF NOT EXISTS execution_events (
+    id BIGSERIAL PRIMARY KEY,
+    execution_id TEXT NOT NULL,
+    attempt_id TEXT NOT NULL,
+    replica TEXT NOT NULL,
+    event TEXT NOT NULL,
+    step_id TEXT,
+    detail JSONB,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_exec_events_execution ON execution_events (execution_id);
+CREATE INDEX IF NOT EXISTS idx_exec_events_created ON execution_events (created_at);
+
 -- §20.1/20.2/P3-1: Trajectory 轨迹存储
 CREATE TABLE IF NOT EXISTS trajectories (
     execution_id TEXT PRIMARY KEY,
@@ -234,7 +262,9 @@ async def ensure_schema(pool, vector_dim: int | None = None) -> None:
                 "生产环境建议显式注入或配置 EMBEDDING_DIM。",
                 vector_dim,
             )
-    ddl = SCHEMA_TEMPLATE.format(dim=vector_dim)
+    # 用 replace 而非 format：SCHEMA 内部分 DDL（如 execution_checkpoints 的
+    # DEFAULT '{}'）含裸花括号，str.format 会将其误判为占位符报 IndexError。
+    ddl = SCHEMA_TEMPLATE.replace("{dim}", str(vector_dim))
     async with pool.connection() as conn:
         await conn.execute(ddl)
     # 存量库迁移：新列 IF NOT EXISTS 不作用于已存在表，需幂等 ALTER（优化 G：workspace 隔离）

@@ -129,8 +129,13 @@ class ExecutionOwnershipStore(abc.ABC):
         """获取执行所有权（租约 ttl_s 秒）。已持有且未过期则拒绝（返回 False）。"""
 
     @abc.abstractmethod
-    async def heartbeat(self, execution_id: str, ttl_s: float) -> None:
-        """续租：把租约到期时间顺延 ttl_s。"""
+    async def heartbeat(self, execution_id: str, ttl_s: float, owner: str | None = None) -> bool:
+        """续租：把租约到期时间顺延 ttl_s。
+
+        §HA：返回 bool 表示「本次续租是否成功」。传 ``owner`` 时实现应校验租约仍由
+        ``owner`` 持有；被其他副本接管后（split-brain 的 A 侧）应返回 False，供心跳
+        协程感知所有权丢失并中止执行循环，避免旧 owner 继续产生副作用。
+        """
 
     @abc.abstractmethod
     async def release(self, execution_id: str, owner: str) -> None:
@@ -162,11 +167,15 @@ class InMemoryExecutionOwnershipStore(ExecutionOwnershipStore):
         self._owners[execution_id] = (owner, now + ttl_s)
         return True
 
-    async def heartbeat(self, execution_id: str, ttl_s: float) -> None:
+    async def heartbeat(self, execution_id: str, ttl_s: float, owner: str | None = None) -> bool:
         cur = self._owners.get(execution_id)
         if cur is None:
-            return
+            return False
+        if owner is not None and cur[0] != owner:
+            # §HA：租约已被其他 owner 接管，旧 owner 感知所有权丢失 → 返回 False
+            return False
         self._owners[execution_id] = (cur[0], time.monotonic() + ttl_s)
+        return True
 
     async def release(self, execution_id: str, owner: str) -> None:
         cur = self._owners.get(execution_id)
@@ -207,8 +216,12 @@ async def reap_stale_executions(
     stale = await ownership.list_stale(now)
     reclaimed: list[str] = []
     for eid in stale:
-        # stale 回收：租约已过期，owner 已失效，直接释放（不验证 owner）
-        await ownership.release(eid, owner="")
+        # §HA：stale 回收须真正释放所有权（否则 B 无法接管）。
+        # 租约已过期、owner 已失效，先取当前 owner 再精确释放（InMemory 的 release
+        # 要求 owner 匹配；PG 路径走 reap_stale_notifying，不经过本函数）。
+        cur_owner = await ownership.get_owner(eid)
+        if cur_owner is not None:
+            await ownership.release(eid, owner=cur_owner)
         if checkpoint_store is not None:
             cp = await checkpoint_store.load(eid)
             if cp is not None:

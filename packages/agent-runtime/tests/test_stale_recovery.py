@@ -26,7 +26,7 @@ async def test_ownership_heartbeat_extends():
     await store.heartbeat("e1", ttl_s=50.0)
     # heartbeat 顺延租约，应仍在持有
     assert await store.get_owner("e1") == "ownerA"
-    await store.release("e1")
+    await store.release("e1", "ownerA")
     assert await store.get_owner("e1") is None
 
 
