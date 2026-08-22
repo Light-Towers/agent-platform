@@ -8,13 +8,13 @@ import pytest
 
 from .conftest import side_effect_counts, unique_execution_id
 from .fault_injector import FaultInjector
+from .haprobe import HAProbeRegistry, build_probe_graph
 from .helpers import (
     make_runtime,
     run_replica_a,
     run_replica_b_takeover,
     wait_lease_expiry,
 )
-from .haprobe import HAProbeRegistry, build_probe_graph
 
 
 @pytest.mark.anyio
@@ -44,4 +44,4 @@ async def test_fault_injector_kill_after_checkpoint(ha_stores):
 
     counts = await side_effect_counts(ha_stores["pool"], execution_id)
     assert counts == {f"{execution_id}:step_{i}:WRITE": 1 for i in (1, 2, 3, 4)}, f"副作用异常: {counts}"
-    print(f"\n[HA FaultInjector] kill_after_checkpoint=step_2 驱动 A→B 接管，副作用各 1 次，PASS")
+    print("\n[HA FaultInjector] kill_after_checkpoint=step_2 驱动 A→B 接管，副作用各 1 次，PASS")
