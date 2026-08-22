@@ -60,6 +60,10 @@ class FakePool:
 
     async def close(self, timeout=None):
         self.close_count += 1
+        # 模拟 psycopg：close 会等待在途连接归还（connections==0）后再真正关闭，
+        # 不会主动强关正在使用的连接（shutdown 不破坏 in-flight DB usage）。
+        while self.connections > 0:
+            await asyncio.sleep(0)
         if self._block is not None:
             await self._block.wait()  # 测试用：close 进行中阻塞，制造 _closing 窗口
         if self.raise_on_close:
@@ -79,16 +83,25 @@ def _reset_pool_state():
 async def test_case_a_inflight_connection_survives_close():
     pool = FakePool()
     db._pool = pool
+    # 持有在途连接（未释放）
     cm = pool.connection()
     conn = await cm.__aenter__()
-    # 关闭进行中：已借出的连接在途仍可使用
-    await db.close_pool()
+    # 启动关闭：因 connections>0，close() 会阻塞等待该连接归还；
+    # 但全局 _pool 已在 await pool.close() 之前被摘掉（新请求立即降级）。
+    close_task = asyncio.create_task(db.close_pool())
+    for _ in range(200):
+        if db.get_pool() is None:
+            break
+        await asyncio.sleep(0)
+    assert db.get_pool() is None  # 关闭进行中：新请求已降级，不从关闭中池借用
+    # 在途连接仍可正常工作（shutdown 未主动掐断在途 DB 使用）
     await conn.execute("SELECT 1")
-    assert pool.closed is True
     assert "SELECT 1" in conn.executed
+    # 释放连接 → close() 等待循环退出，真正完成关闭
     await cm.__aexit__(None, None, None)
-    # 关闭后全局池已摘除
-    assert db.get_pool() is None
+    await close_task
+    assert pool.closed is True
+    assert pool.close_count == 1
 
 
 async def test_case_b_get_pool_none_after_close():
