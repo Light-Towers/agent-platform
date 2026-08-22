@@ -24,6 +24,7 @@ from agent_runtime.planner.durability import (
     Checkpoint,
     CheckpointStore,
     ExecutionOwnershipStore,
+    FencedWriteError,
     IdempotencyStore,
 )
 
@@ -64,7 +65,7 @@ class PgCheckpointStore(CheckpointStore):
 
     async def load(self, execution_id: str) -> Checkpoint | None:
         sql = (
-            f"SELECT completed, updated_at, resumable FROM {self._table} "
+            f"SELECT completed, updated_at, resumable, version FROM {self._table} "
             "WHERE execution_id = %s"
         )
         async with self._pool.connection() as conn:
@@ -72,7 +73,7 @@ class PgCheckpointStore(CheckpointStore):
             row = await cur.fetchone()
         if row is None:
             return None
-        completed, updated_at, resumable = row
+        completed, updated_at, resumable, _version = row
         # updated_at from PG is datetime; from fake pool may be float
         if isinstance(updated_at, (int, float)):
             updated_at_ts = updated_at
@@ -86,17 +87,38 @@ class PgCheckpointStore(CheckpointStore):
         )
 
     async def save(self, checkpoint: Checkpoint) -> None:
+        # §HA（C3 stale-writer fencing）：version = 已完成节点数，单调递增。
+        # ON CONFLICT 下仅当 EXCLUDED.version > 现有 version 才覆盖——旧 owner
+        # （completed 较少）的写入被原子拒绝，防止 zombie writer 降级覆盖新 owner 的
+        # checkpoint。拒绝时抛 FencedWriteError，上层协作式中止。
+        version = len(checkpoint.completed)
+        # §HA（C3）：仅当 version 单调递增（completed 前进）或 resumable 单向置位
+        # （False→True，reap 标记）时允许覆盖；stale writer 的 completed 降级写被原子拒绝。
         sql = (
-            f"INSERT INTO {self._table} (execution_id, completed, updated_at, resumable) "
-            "VALUES (%s, %s, now(), %s) "
+            f"INSERT INTO {self._table} "
+            "(execution_id, completed, updated_at, resumable, version) "
+            "VALUES (%s, %s, now(), %s, %s) "
             "ON CONFLICT (execution_id) DO UPDATE "
-            "SET completed = EXCLUDED.completed, updated_at = now(), resumable = EXCLUDED.resumable"
-        )
+            "SET completed = EXCLUDED.completed, updated_at = now(), "
+            "    resumable = EXCLUDED.resumable, version = EXCLUDED.version "
+            "WHERE {table}.version < EXCLUDED.version "
+            "   OR ({table}.resumable = FALSE AND EXCLUDED.resumable = TRUE) "
+            "RETURNING execution_id"
+        ).format(table=self._table)
         async with self._pool.connection() as conn:
-            await conn.execute(
+            cur = await conn.execute(
                 sql,
-                (checkpoint.execution_id, _dumps(checkpoint.completed), checkpoint.resumable),
+                (
+                    checkpoint.execution_id,
+                    _dumps(checkpoint.completed),
+                    checkpoint.resumable,
+                    version,
+                ),
             )
+            if await cur.fetchone() is None:
+                raise FencedWriteError(
+                    f"checkpoint 写入被拒绝（stale writer / version 降级）execution={checkpoint.execution_id}"
+                )
 
 
 class PgIdempotencyStore(IdempotencyStore):
@@ -251,9 +273,11 @@ class PgExecutionOwnershipStore(ExecutionOwnershipStore):
         now = now if now is not None else time.time()
         reclaimed: list[str] = []
 
+        # §HA（C4）：owner/expires_at 均为 NOT NULL，不能 SET NULL（会违反约束）。
+        # 改为 DELETE stale 行——回收所有权的最干净语义，同时使对应 checkpoint 可被
+        # resume 接管（下方置 resumable=True）。
         sql_reap = (
-            f"UPDATE {self._table} "
-            "SET owner = NULL, expires_at = NULL "
+            f"DELETE FROM {self._table} "
             "WHERE expires_at <= now() "
             "RETURNING execution_id"
         )

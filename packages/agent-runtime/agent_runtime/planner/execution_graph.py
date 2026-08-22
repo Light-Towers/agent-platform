@@ -17,7 +17,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from agent_runtime.planner.durability import Checkpoint
+from agent_runtime.planner.durability import Checkpoint, FencedWriteError
 from agent_runtime.planner.protocol import Plan, StreamEvent
 from agent_runtime.trajectory.models import TrajectoryRecord
 
@@ -258,11 +258,28 @@ async def _run_graph_in_place(
                     )
                 else:
                     results[node_id] = result
-                    # checkpoint 落盘：每完成一个节点即持久化（崩溃后 resume 可复用）
+                    # checkpoint 落盘：每完成一个节点即持久化（崩溃后 resume 可复用）。
+                    # §HA（C3）：save 带单调 version CAS，stale writer（已丢 lease 的旧
+                    # owner）写入会被 PgCheckpointStore 拒绝并抛 FencedWriteError——此处
+                    # 捕获并协作式中止，保持 single-active-owner，不降级覆盖新 owner 的
+                    # checkpoint。
                     if checkpoint_store is not None and execution_id is not None:
-                        await checkpoint_store.save(
-                            Checkpoint(execution_id, dict(results))
-                        )
+                        try:
+                            await checkpoint_store.save(
+                                Checkpoint(execution_id, dict(results))
+                            )
+                        except FencedWriteError as exc:
+                            if exec_ctx is not None:
+                                exec_ctx.ownership_lost = True
+                            yield StreamEvent(
+                                type="error",
+                                payload={
+                                    "node": node_id,
+                                    "error": f"checkpoint 写入被 fencing 拒绝（stale writer）: {exc}",
+                                    "completed": len(results),
+                                },
+                            )
+                            return
                     yield StreamEvent(
                         type="evidence",
                         payload={

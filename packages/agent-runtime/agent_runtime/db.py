@@ -113,9 +113,13 @@ CREATE TABLE IF NOT EXISTS execution_checkpoints (
     execution_id TEXT PRIMARY KEY,
     completed JSONB NOT NULL DEFAULT '{}',
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    resumable BOOLEAN NOT NULL DEFAULT FALSE
+    resumable BOOLEAN NOT NULL DEFAULT FALSE,
+    -- §HA（C3 checkpoint fencing）：单调 version = 已完成节点数，防止 stale writer 降级覆盖
+    version BIGINT NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_checkpoints_resumable ON execution_checkpoints (resumable) WHERE resumable;
+-- 兼容已有表：幂等补列
+ALTER TABLE execution_checkpoints ADD COLUMN IF NOT EXISTS version BIGINT NOT NULL DEFAULT 0;
 
 CREATE TABLE IF NOT EXISTS idempotency_keys (
     key TEXT PRIMARY KEY,

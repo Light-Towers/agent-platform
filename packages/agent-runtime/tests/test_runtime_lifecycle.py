@@ -73,7 +73,9 @@ async def test_ownership_acquired_and_released():
 
     async with rt.execution():
         eid = rt.context.execution_id
-        assert await store.get_owner(eid) == str(os.getpid())
+        # §HA（C2）：owner 为 <replica_id>:<uuid>，跨副本唯一（非 PID，避免多容器撞车）
+        owner = await store.get_owner(eid)
+        assert owner is not None and owner.startswith("replica:") and len(owner.split(":")[1]) == 32
 
     assert await store.get_owner(eid) is None
 
@@ -120,6 +122,8 @@ async def test_heartbeat_task_cancelled_on_exit():
 
     async with rt.execution():
         eid = rt.context.execution_id
-        assert await store.get_owner(eid) == str(os.getpid())
+        # §HA（C2）：owner 为 <replica_id>:<uuid>（非 PID）
+        owner = await store.get_owner(eid)
+        assert owner is not None and owner.startswith("replica:") and len(owner.split(":")[1]) == 32
     # 退出后心跳任务已取消，所有权已释放
     assert await store.get_owner(eid) is None

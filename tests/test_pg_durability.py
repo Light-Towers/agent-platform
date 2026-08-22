@@ -49,13 +49,23 @@ class _FakeCursor:
                 eid = params[0]
                 row = p.checkpoints.get(eid)
                 if row:
-                    self._results = [(json.dumps(row["completed"]), row["updated_at"], row["resumable"])]
+                    self._results = [(json.dumps(row["completed"]), row["updated_at"], row["resumable"], row.get("version", 0))]
             elif "insert" in sql and "on conflict" in sql:
-                # upsert
-                eid, completed_json, resumable = params
+                # upsert（§HA C3 monotonic CAS）：仅当新 version > 现有 version 时覆盖
+                eid, completed_json, resumable, version = params
                 completed = json.loads(completed_json)
-                p.checkpoints[eid] = {"completed": completed, "updated_at": time.time(), "resumable": bool(resumable)}
-                self._results = [("OK",)]
+                cur = p.checkpoints.get(eid)
+                # CAS：version 递增 或 resumable 单向置位（False→True）允许覆盖
+                if cur is None or version > cur.get("version", 0) or (
+                    cur.get("resumable") is False and bool(resumable) is True
+                ):
+                    p.checkpoints[eid] = {
+                        "completed": completed, "updated_at": time.time(),
+                        "resumable": bool(resumable), "version": version,
+                    }
+                    self._results = [(eid,)]
+                else:
+                    self._results = []  # 未命中 CAS → 视为未写（FencedWriteError 路径）
 
         # --- idempotency_keys ---
         elif "idempotency_keys" in sql:
@@ -113,12 +123,12 @@ class _FakeCursor:
                 # list_stale
                 now = time.time()
                 self._results = [(eid,) for eid, (_, exp) in p.leases.items() if exp <= now]
-            elif "update" in sql and "set owner = null" in sql and "expires_at <=" in sql:
-                # reap_stale_notifying
+            elif "delete" in sql and "expires_at <=" in sql:
+                # reap_stale_notifying（§HA C4：DELETE stale 行，而非 SET NULL——owner 为 NOT NULL）
                 now = time.time()
                 reclaimed = [eid for eid, (_, exp) in p.leases.items() if exp <= now]
                 for eid in reclaimed:
-                    p.leases[eid] = ("", 0)
+                    del p.leases[eid]
                 self._results = [(eid,) for eid in reclaimed]
 
         # --- admission_slots ---

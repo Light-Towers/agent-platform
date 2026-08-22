@@ -17,6 +17,22 @@ import uuid
 from typing import Any
 
 
+class ExecutionNotOwned(RuntimeError):
+    """§HA（C1 fail-closed）：执行所有权获取失败（acquire 返回 False）。
+
+    意味着该 execution_id 的 lease 当前被其他副本持有，或未过期。调用方必须
+    立即停止，不得继续执行任何 Skill——否则破坏 single-active-owner 不变量。
+    """
+
+
+class FencedWriteError(RuntimeError):
+    """§HA（C3 stale writer fencing）：checkpoint 写入被拒绝。
+
+    旧 owner（zombie/stale writer）尝试用较小/相等的 version 覆盖新 owner 的
+    checkpoint，或写入者已不再持有 lease 时触发。数据保持不变（不被降级覆盖）。
+    """
+
+
 class Checkpoint:
     """一次执行的中止点：已完成节点结果（keyed by node_id）。"""
 
