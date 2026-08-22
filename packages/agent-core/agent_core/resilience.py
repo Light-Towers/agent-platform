@@ -18,7 +18,9 @@ import asyncio
 import inspect
 import threading
 import time
+import urllib.error
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
+from enum import Enum
 from functools import wraps
 from typing import Any, Awaitable, Callable, Iterable, Optional, Protocol, Type, TypeVar, List
 
@@ -92,6 +94,9 @@ async def retry_async(
     :param backoff_base: 首次退避秒数。
     :param backoff_factor: 退避乘数（第 n 次等待 = backoff_base * backoff_factor ** (n-1)）。
     :param exceptions: 触发重试的异常类型（单个或元组）；其它异常直接抛出。
+        重试边界指引：transport 层（SDK/HTTP 客户端）已有 1–2 次短重试，此处业务重试
+        应仅对 ``agent_core.resilience.RetryableError`` 等**已判定可重试**的异常重试，
+        避免 ``exceptions=Exception`` 式全量重试与底层叠加成指数级重试风暴。
     :param sleep: 退避用的异步 sleep 函数（默认 asyncio.sleep，可注入以便测试）。
     :param on_retry: 每次重试前的回调 (exc, attempt)，attempt 从 1 开始；
         支持同步与异步回调（返回 coroutine 时自动 await）。
@@ -115,6 +120,77 @@ async def retry_async(
             await sleep(backoff_base * (backoff_factor ** (attempt - 1)))
     assert last_exc is not None
     raise last_exc
+
+
+# ---------------------------------------------------------------------------
+# 异常分类（M1.1：记录异常 ≠ 正确处理异常；作为 Execution HA 前置能力）
+# ---------------------------------------------------------------------------
+class ErrorClass(Enum):
+    """异常三类执行控制语义：执行层据此决定 重试 / 降级 / 终止。
+
+    不做大型异常继承树，仅一个枚举表达「控制意图」。
+    """
+
+    RETRYABLE = "retryable"  # 瞬态故障：有限次业务重试
+    RECOVERABLE = "recoverable"  # 可降级：fallback/skip，继续执行
+    FATAL = "fatal"  # 致命：立即终止当前 execution，不重试
+
+
+class RetryableError(Exception):
+    """显式标记：瞬态可重试（新代码主动 raise 用；类名含 Retryable 亦被启发式命中）。"""
+
+
+class FatalError(Exception):
+    """显式标记：致命不可恢复（checkpoint 损坏 / 状态不一致 / 编程错误包装）。"""
+
+
+# 白名单（优先级低于标记异常，高于默认）
+_RETRYABLE_TYPES: tuple[type[BaseException], ...] = (
+    asyncio.TimeoutError,
+    TimeoutError,
+    ConnectionError,
+    urllib.error.URLError,
+)
+_FATAL_TYPES: tuple[type[BaseException], ...] = (
+    TypeError,
+    ValueError,
+    KeyError,
+    AttributeError,
+    AssertionError,
+    ArithmeticError,
+    RecursionError,
+)
+_TRANSIENT_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
+_TRANSIENT_NAME_KEYS = ("RateLimit", "Timeout", "Transient", "Unavailable", "Retryable")
+
+
+def classify_exception(exc: BaseException) -> ErrorClass:
+    """把异常归入三类执行控制语义（最小分类层，不做大型异常体系）。
+
+    优先级：标记异常 > 类型白名单 > ``status_code`` 属性 > 类名启发式 > 默认。
+
+    - RETRYABLE：瞬态信号（超时 / 连接失败 / 429|5xx / 名字启发式 / ``RetryableError``）；
+    - FATAL：编程错误与状态不一致（``TypeError``/``ValueError``/... 或 ``FatalError``）；
+    - RECOVERABLE：未归类的第三方异常默认降级继续（保守可用性，已知错误均已显式归类）。
+
+    ``KeyboardInterrupt`` / ``SystemExit`` 属 ``BaseException``，调用方不应捕获，
+    此处一律判 FATAL 以阻止其被静默降级。
+    """
+    if isinstance(exc, (KeyboardInterrupt, SystemExit)):
+        return ErrorClass.FATAL
+    if isinstance(exc, (RetryableError, FatalError)):
+        return ErrorClass.RETRYABLE if isinstance(exc, RetryableError) else ErrorClass.FATAL
+    if isinstance(exc, _FATAL_TYPES):
+        return ErrorClass.FATAL
+    if isinstance(exc, _RETRYABLE_TYPES):
+        return ErrorClass.RETRYABLE
+    status = getattr(exc, "status_code", None)
+    if isinstance(status, int) and status in _TRANSIENT_STATUS_CODES:
+        return ErrorClass.RETRYABLE
+    name = type(exc).__name__
+    if any(k in name for k in _TRANSIENT_NAME_KEYS):
+        return ErrorClass.RETRYABLE
+    return ErrorClass.RECOVERABLE
 
 
 # ---------------------------------------------------------------------------
