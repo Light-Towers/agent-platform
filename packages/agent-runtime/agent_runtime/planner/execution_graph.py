@@ -17,9 +17,15 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from agent_core.resilience import ErrorClass, classify_exception
+
 from agent_runtime.planner.durability import Checkpoint
 from agent_runtime.planner.protocol import Plan, StreamEvent
 from agent_runtime.trajectory.models import TrajectoryRecord
+
+# 执行级业务重试上限（见 M1.1 重试边界：transport 1–2 < skill 级 2 < 本处 2，禁止叠加）
+_NODE_BUSINESS_RETRY_MAX = 2
+_NODE_BUSINESS_RETRY_BACKOFF = 0.2
 
 if TYPE_CHECKING:
     from agent_runtime.planner.protocol import PlannerRuntime
@@ -213,37 +219,74 @@ async def _run_graph_in_place(
         # 已完成节点（来自 checkpoint）：直接复用结果 + 补发 evidence 事件，不再执行
         pending = [nid for nid in layer if nid not in results]
 
-        async def _run(node_id: str) -> tuple[str, Any, str | None]:
+        async def _run(node_id: str) -> "tuple[str, Any, dict | None, bool]":
             node = graph.nodes[node_id]
+            # 依赖前置检查：上游在图内但无结果（上游已失败）→ 本节点降级跳过，
+            # 不把「依赖失败」误判为 Fatal；引用不存在的上游 = 构图编程错误 → Fatal。
+            for arg, ref in node.input_refs.items():
+                if ref.startswith("node:"):
+                    upstream = ref[len("node:") :]
+                    if upstream not in results:
+                        if upstream not in graph.nodes:
+                            return (
+                                node_id,
+                                None,
+                                {"class": "fatal", "error": f"节点 {node_id} 引用不存在的上游节点 {upstream}"},
+                                True,
+                            )
+                        return (
+                            node_id,
+                            None,
+                            {"class": "recoverable", "error": f"节点 {node_id} 跳过：上游 {upstream} 未产出（依赖降级）"},
+                            False,
+                        )
             try:
-                # 解析 input_refs：从已完成节点结果中取上游输出（多 Skill 依赖传递）
                 kwargs: dict[str, Any] = dict(node.kwargs)
                 for arg, ref in node.input_refs.items():
                     if ref.startswith("node:"):
-                        upstream = ref[len("node:") :]
-                        if upstream not in results:
-                            raise ValueError(
-                                f"节点 {node_id} 引用未就绪的上游节点 {upstream}"
-                            )
-                        kwargs[arg] = results[upstream]
+                        kwargs[arg] = results[ref[len("node:") :]]
                     else:
                         kwargs[arg] = ref
-                return node_id, await runtime.delegate(node.skill_name, **kwargs), None
             except Exception as exc:
-                return node_id, None, str(exc)
+                cls = classify_exception(exc)
+                return node_id, None, {"class": cls.value, "error": str(exc)}, cls is ErrorClass.FATAL
+            # 执行 + 业务级有限重试（仅瞬态可重试；transport 短重试已在底层 SDK 内，不叠加）
+            attempt = 0
+            last_exc: Exception | None = None
+            while attempt <= _NODE_BUSINESS_RETRY_MAX:
+                try:
+                    return node_id, await runtime.delegate(node.skill_name, **kwargs), None, False
+                except Exception as exc:
+                    last_exc = exc
+                    if classify_exception(exc) is not ErrorClass.RETRYABLE or attempt >= _NODE_BUSINESS_RETRY_MAX:
+                        break
+                    attempt += 1
+                    await asyncio.sleep(_NODE_BUSINESS_RETRY_BACKOFF * (2 ** (attempt - 1)))
+            # 重试耗尽或不可重试 → 按分类决定降级（继续）/ 终止（Fatal）
+            assert last_exc is not None
+            cls = classify_exception(last_exc)
+            fatal = cls is ErrorClass.FATAL
+            # 瞬态重试耗尽按 RECOVERABLE 降级（节点失败但执行继续）；Fatal 才终止
+            return node_id, None, {"class": "fatal" if fatal else "recoverable", "error": str(last_exc)}, fatal
 
         if pending:
             layer_results = await asyncio.gather(*(_run(nid) for nid in pending))
-            for node_id, result, error in layer_results:
-                if error is not None:
+            for node_id, result, error_info, fatal in layer_results:
+                payload_extra = {
+                    "node": node_id,
+                    "skill": graph.nodes[node_id].skill_name,
+                    "layer": i,
+                }
+                if fatal:
                     yield StreamEvent(
                         type="error",
-                        payload={
-                            "node": node_id,
-                            "skill": graph.nodes[node_id].skill_name,
-                            "layer": i,
-                            "error": error,
-                        },
+                        payload={**payload_extra, "error": (error_info or {}).get("error", ""), "error_class": "fatal"},
+                    )
+                    return  # 致命异常 → 终止整次执行（已完成节点已 checkpoint，可 resume/诊断）
+                if error_info is not None:
+                    yield StreamEvent(
+                        type="error",
+                        payload={**payload_extra, "error": error_info["error"], "error_class": error_info["class"]},
                     )
                 else:
                     results[node_id] = result
@@ -254,12 +297,7 @@ async def _run_graph_in_place(
                         )
                     yield StreamEvent(
                         type="evidence",
-                        payload={
-                            "node": node_id,
-                            "skill": graph.nodes[node_id].skill_name,
-                            "layer": i,
-                            "result": result,
-                        },
+                        payload={**payload_extra, "result": result},
                     )
         # 本层已完成的节点（来自 checkpoint）补发 evidence 事件，保持事件流完整
         for node_id in layer:
