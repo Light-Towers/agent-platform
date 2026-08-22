@@ -24,6 +24,7 @@ from agent_runtime.planner.durability_pg import (
     PgCheckpointStore,
     PgExecutionOwnershipStore,
     PgIdempotencyStore,
+    PgSideEffectStore,
 )
 
 
@@ -51,6 +52,7 @@ async def ha_stores(pg_pool):
         "checkpoint": PgCheckpointStore(pg_pool),
         "ownership": PgExecutionOwnershipStore(pg_pool),
         "idempotency": PgIdempotencyStore(pg_pool),
+        "side_effect": PgSideEffectStore(pg_pool),
         "pool": pg_pool,
     }
 

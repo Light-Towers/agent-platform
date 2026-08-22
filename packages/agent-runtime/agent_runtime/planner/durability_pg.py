@@ -26,6 +26,7 @@ from agent_runtime.planner.durability import (
     ExecutionOwnershipStore,
     FencedWriteError,
     IdempotencyStore,
+    SideEffectStore,
 )
 
 logger = logging.getLogger(__name__)
@@ -357,3 +358,50 @@ async def pg_reap_stale(
         now=now,
         on_stale=on_stale,
     )
+
+
+class PgSideEffectStore(SideEffectStore):
+    """PG 副作用审计存储：side_effects 表（§HA H2：effectively-once 证据）。
+
+    字段：
+    - effect_key PK = ``execution_id:step_id:effect_type``（唯一约束保证幂等写）
+    - execution_id / attempt_id / step_id / effect_type / owner / created_at
+
+    ``record()`` 用 ``INSERT … ON CONFLICT (effect_key) DO NOTHING``：同一副作用
+    重复 attempt 的重复写被原子丢弃（返回 False=已存在，即幂等去重生效），
+    从而可在 resume 时判断哪些 step 的副作用已真正落地、避免重复执行。
+    """
+
+    def __init__(self, pool: Any, *, table: str = "side_effects") -> None:
+        self._pool = pool
+        self._table = table
+
+    async def record(
+        self,
+        execution_id: str,
+        step_id: str,
+        effect_type: str,
+        owner: str,
+    ) -> bool:
+        effect_key = f"{execution_id}:{step_id}:{effect_type}"
+        # attempt_id 用 owner 派生（同一 lease 内的副作用视为同一 attempt 批次）
+        sql = (
+            f"INSERT INTO {self._table} "
+            "(effect_key, execution_id, attempt_id, step_id, effect_type, owner) "
+            "VALUES (%s, %s, %s, %s, %s, %s) "
+            "ON CONFLICT (effect_key) DO NOTHING "
+            "RETURNING effect_key"
+        )
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(
+                sql, (effect_key, execution_id, owner, step_id, effect_type, owner)
+            )
+            row = await cur.fetchone()
+        return row is not None
+
+    async def has(self, execution_id: str, step_id: str, effect_type: str) -> bool:
+        effect_key = f"{execution_id}:{step_id}:{effect_type}"
+        sql = f"SELECT 1 FROM {self._table} WHERE effect_key = %s"
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(sql, (effect_key,))
+            return (await cur.fetchone()) is not None

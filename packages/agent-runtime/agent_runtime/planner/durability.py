@@ -251,6 +251,56 @@ async def reap_stale_executions(
     return reclaimed
 
 
+class SideEffectStore(abc.ABC):
+    """副作用审计 / 幂等记录契约（§HA H2：effectively-once 证据）。
+
+    每次 Skill 副作用落库一条 ``(execution_id, step_id, effect_type)`` 记录，
+    ``effect_key`` 唯一约束使重复 attempt 的重复写被原子丢弃（ON CONFLICT DO NOTHING）。
+    配合 checkpoint，B 接管后 resume 时可判断哪些 step 的副作用已真正落地，避免重复执行。
+    """
+
+    @abc.abstractmethod
+    async def record(
+        self,
+        execution_id: str,
+        step_id: str,
+        effect_type: str,
+        owner: str,
+    ) -> bool:
+        """记录一次副作用。返回 True=新写入，False=已存在（幂等去重）。
+
+        ``effect_key`` 由实现拼接（默认 ``execution_id:step_id:effect_type``），
+        ``owner`` 为当前 lease owner（``replica_id:uuid``），用于审计证明。
+        """
+
+    @abc.abstractmethod
+    async def has(self, execution_id: str, step_id: str, effect_type: str) -> bool:
+        """查询某 step 的副作用是否已落地（resume 判断是否跳过重跑）。"""
+
+
+class InMemorySideEffectStore(SideEffectStore):
+    """进程内副作用存储（测试 / 单进程默认后端）。"""
+
+    def __init__(self) -> None:
+        self._store: dict[tuple[str, str, str], str] = {}
+
+    async def record(
+        self,
+        execution_id: str,
+        step_id: str,
+        effect_type: str,
+        owner: str,
+    ) -> bool:
+        key = (execution_id, step_id, effect_type)
+        if key in self._store:
+            return False
+        self._store[key] = owner
+        return True
+
+    async def has(self, execution_id: str, step_id: str, effect_type: str) -> bool:
+        return (execution_id, step_id, effect_type) in self._store
+
+
 __all__ = [
     "Checkpoint",
     "CheckpointStore",
@@ -262,6 +312,8 @@ __all__ = [
     "ExecutionOwnershipStore",
     "InMemoryExecutionOwnershipStore",
     "reap_stale_executions",
+    "SideEffectStore",
+    "InMemorySideEffectStore",
 ]
 
 

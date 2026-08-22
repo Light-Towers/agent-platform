@@ -35,6 +35,7 @@ class HAProbeRegistry:
         self.actual_effects: list[str] = [] # 真正落库的 side effect
 
     def assert_composition_valid(self) -> None:
+        # 测试替身：不持有真实组合策略校验，按 execution() 契约提供 no-op 实现
         return None
 
     async def execute(self, name: str, **kwargs) -> str:

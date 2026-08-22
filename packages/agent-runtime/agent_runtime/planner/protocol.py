@@ -324,6 +324,7 @@ class PlannerRuntime:
         max_cost: float | None = None,
         trajectory_store: Any = None,
         checkpoint_store: Any = None,
+        side_effect_store: Any = None,
         enable_loop_fingerprint: bool = False,
         ownership_store: Any = None,
         workspace_id: str = "default",
@@ -341,6 +342,9 @@ class PlannerRuntime:
         self.max_cost = max_cost
         self.trajectory_store = trajectory_store
         self.checkpoint_store = checkpoint_store
+        # §HA（H2）：副作用审计/幂等存储，运行时 delegate 成功后落库，配合 checkpoint
+        # 使 B 接管 resume 时可判断哪些 step 已真正落地（effectively-once 证据）。
+        self.side_effect_store = side_effect_store
         self.ownership_store: ExecutionOwnershipStore = (
             ownership_store
             if ownership_store is not None
