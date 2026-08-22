@@ -54,7 +54,11 @@
 2. **日志静默丢弃**：`agent_core.logging` 仅配置 `agent_core` 子树；`agent_runtime.*` 无 handler 且继承 WARNING → 非 agent_server 宿主下 agent-runtime 的 INFO/DEBUG 被吞。
 3. **配置所有权不清**：多个宿主各自 `basicConfig`，进程级 root 行为不可预期。
 
-**不做**：强制所有业务模块统一 `get_logger()` API；不重写 logger name 命名空间；不接入 zhanggui loguru。
+**真实语义（评审定稿）**：本方案是 **「统一配置入口 + root 默认出口，尊重已有宿主 root handler」**，而非「完全统一/接管 root」。
+- `configure_logging()` **仅当 root 尚无 handler 时**挂默认 stderr handler；若宿主（Gunicorn/Uvicorn/测试 runner/企业框架）已配置 root，则**尊重宿主 handler**，不覆盖其 formatter/level。
+- 因此 `agent_server` / `agent_federation` 之所以能建立自己的 root 出口，是因为它们在其它包 import **之前**主动调用了 `configure_logging()`；若由外部宿主先配置 root，则本调用退化为「仅保证 agent_core 子树不双打 + 设级别」，不强行控制 root 形态。
+
+**不做**：强制所有业务模块统一 `get_logger()` API；不重写 logger name 命名空间；不接入 zhanggui loguru；不引入 `force` 重置宿主 root。
 
 ### 2.2 影响面（收窄）
 - 核心：`packages/agent-core/agent_core/logging.py`（扩展 `configure_logging()` + `propagate=False` + 修正 `get_logger` 不改名）。
