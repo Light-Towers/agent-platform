@@ -1,0 +1,61 @@
+# §HA 双副本部署：真实故障注入 + 自动验收
+#
+# 用法（真 PG + 双 Agent 副本）：
+#   docker compose -f docker-compose.ha.yml up --build -d
+#   pytest tests/ha -v          # 需要 AGENT_PLATFORM_PG_URL 指向本 postgres
+#
+# 设计（用户红线）：
+# - 必须真实 PostgreSQL（SQLite 会给"测试通过但生产失败"的假象）。
+# - agent-a / agent-b 双副本共享同一 PG 事实源（checkpoint / lease / idempotency）。
+# - 副本间通过 execution_leases 的 CAS + expires_at 自动过期完成接管，无需外部协调。
+# - 用 `docker kill agent-a` 可模拟 SIGKILL / OOMKill / pod eviction 级故障（生产级验证）。
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: agent_platform
+      POSTGRES_USER: agent
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-agent_platform_dev}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agent -d agent_platform"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    ports:
+      # 暴露给宿主机 pytest（tests/ha conftest 连接串默认指向 5433）
+      - "127.0.0.1:${HA_PG_PORT:-5433}:5432"
+
+  agent-a:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://agent:${POSTGRES_PASSWORD:-agent_platform_dev}@postgres:5432/agent_platform
+      REPLICA_ID: agent-a
+      API_KEY: ${API_KEY:-}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_BASE_URL: ${LLM_BASE_URL:-https://api.openai.com/v1}
+      LLM_MODEL: ${LLM_MODEL:-gpt-4o-mini}
+      LLM_FALLBACK_MODEL: ${LLM_FALLBACK_MODEL:-gpt-4o-mini}
+    ports:
+      - "127.0.0.1:${HA_PORT_A:-8101}:8000"
+
+  agent-b:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://agent:${POSTGRES_PASSWORD:-agent_platform_dev}@postgres:5432/agent_platform
+      REPLICA_ID: agent-b
+      API_KEY: ${API_KEY:-}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_BASE_URL: ${LLM_BASE_URL:-https://api.openai.com/v1}
+      LLM_MODEL: ${LLM_MODEL:-gpt-4o-mini}
+      LLM_FALLBACK_MODEL: ${LLM_FALLBACK_MODEL:-gpt-4o-mini}
+    ports:
+      - "127.0.0.1:${HA_PORT_B:-8102}:8000"
