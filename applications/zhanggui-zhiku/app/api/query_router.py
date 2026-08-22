@@ -135,8 +135,8 @@ def run_query_graph(
             logger.error(f"流程执行异常: {e}")
             try:
                 span.record_exception(e)
-            except Exception:
-                pass
+            except Exception as e2:
+                logger.warning("记录异常到 span 失败: %s", e2)
             update_task_status(session_id, TASK_STATUS_FAILED, is_stream)
             if is_stream:
                 push_to_session(session_id, SSEEvent.ERROR, {"error": str(e)})

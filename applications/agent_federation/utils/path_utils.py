@@ -1,6 +1,9 @@
+import logging
 import os
 from pathlib import Path
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 
 def resolve_path(filename: str, session_dir: Optional[str] = None) -> str:
@@ -53,8 +56,8 @@ def resolve_path(filename: str, session_dir: Optional[str] = None) -> str:
                     if parts[i] == session_name and parts[i + 1] == session_name:
                         return str(session_path / full_path.name)
                 return str(full_path)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("路径解析失败，回退到原始路径: %s", e)
 
         return str(full_path)
 

@@ -8,11 +8,14 @@ LLM 路由为主路径，本词表仅作 LLM 不可用时的兜底。
 """
 
 import json
+import logging
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, Field
+
+logger = logging.getLogger(__name__)
 
 from agent_server.config import get_settings
 from agent_server.schemas import Capability
@@ -38,7 +41,8 @@ def _load_hints() -> dict[str, tuple[str, ...]]:
             key: tuple(words) for key, words in data.items()
             if key in ("sql", "search", "rag", "mcp") and isinstance(words, list)
         }
-    except Exception:
+    except Exception as e:
+        logger.warning("加载路由特征词失败，使用内置默认值: %s", e)
         return _FALLBACK_HINTS
 
 
@@ -88,8 +92,8 @@ async def decide_route(llm, question: str) -> RouteDecision:
             if decision.capability == "mcp" and not get_settings().mcp_enabled:
                 return heuristic_route(question)
             return decision
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("LLM 路由决策异常，回退启发式路由: %s", e)
     return heuristic_route(question)
 
 

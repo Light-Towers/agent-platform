@@ -61,8 +61,8 @@ def _post_json(url, headers, payload, timeout=DEFAULT_TIMEOUT_S, retries=DEFAULT
             detail = ""
             try:
                 detail = e.read().decode("utf-8")
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("读取 SiliconFlow HTTP 错误详情失败: %s", e)
             last_err = RuntimeError(f"SiliconFlow HTTP {e.code}: {detail[:500]}")
             # 仅对可重试状态重试；4xx 业务错误直接抛出
             if e.code not in (429, 500, 502, 503, 504) or attempt >= retries:

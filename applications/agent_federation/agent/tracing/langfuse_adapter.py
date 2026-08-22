@@ -21,11 +21,14 @@ v4 要点（langfuse>=4.0.0，当前 4.14.3）：
 
 from __future__ import annotations
 
+import logging
 import os
 from collections.abc import Callable
 from typing import Any, TypeVar
 
 F = TypeVar("F", bound=Callable[..., Any])
+
+logger = logging.getLogger(__name__)
 
 _langfuse_available: bool | None = None
 _langfuse_client: Any = None
@@ -104,8 +107,8 @@ def flush_langfuse() -> None:
     if _langfuse_client is not None:
         try:
             _langfuse_client.flush()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Langfuse flush 失败: %s", e)
 
 
 def shutdown_langfuse() -> None:
@@ -113,12 +116,12 @@ def shutdown_langfuse() -> None:
     if _langfuse_client is not None:
         try:
             _langfuse_client.flush()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Langfuse flush 失败: %s", e)
         try:
             _langfuse_client.shutdown()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Langfuse shutdown 失败: %s", e)
 
 
 def is_langfuse_enabled() -> bool:

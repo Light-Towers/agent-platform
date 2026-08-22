@@ -337,7 +337,8 @@ def _extract_json(text: str) -> dict:
     if match:
         try:
             return json.loads(match.group(0))
-        except Exception:
+        except Exception as e:
+            logger.warning("JSON 解析失败，返回空字典: %s", e)
             return {}
     return {}
 
@@ -534,8 +535,8 @@ async def run_deep_agent(task_query, workspace_id):
                         _cached_intent, task_query,
                         {"answer": _final_answer, "trace_id": workspace_id},
                     )
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning("语义缓存写入失败: %s", e)
 
 
 async def _execute_agent_core(task_query: str, workspace_id: str, main_agent=None) -> str:
@@ -639,8 +640,8 @@ async def _execute_agent_core(task_query: str, workspace_id: str, main_agent=Non
                                         _og = guard_output(final_answer)
                                         if not _og["safe"]:
                                             logger.warning("输出 guardrail 拦截: pii=%s", _og["pii_leaked"])
-                                    except Exception:
-                                        pass
+                                    except Exception as e:
+                                        logger.warning("输出 guardrail 执行异常: %s", e)
     except Exception as e:
         logger.exception("main_agent 执行异常 workspace_id=%s", workspace_id)
         monitor.report_error(f"执行主智能发生异常信息：{str(e)}")

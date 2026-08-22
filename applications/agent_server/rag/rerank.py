@@ -8,10 +8,13 @@
 """
 
 import json
+import logging
 import time
 import urllib.error
 import urllib.request
 from functools import lru_cache
+
+logger = logging.getLogger(__name__)
 
 _DEFAULT_TIMEOUT_S = 30.0
 _DEFAULT_RETRIES = 2
@@ -59,8 +62,8 @@ class ApiReranker:
                 detail = ""
                 try:
                     detail = e.read().decode("utf-8")
-                except Exception:
-                    pass
+                except Exception as e2:
+                    logger.warning("读取 SiliconFlow rerank HTTP 错误详情失败: %s", e2)
                 last_err = RuntimeError(f"SiliconFlow rerank HTTP {e.code}: {detail[:500]}")
                 if e.code not in (429, 500, 502, 503, 504) or attempt >= _DEFAULT_RETRIES:
                     break
@@ -112,4 +115,5 @@ def get_reranker() -> ApiReranker | None:
         api_key=s.rerank_api_key,
         base_url=s.rerank_base_url,
         model=s.rerank_model,
+        batch_size=s.rerank_batch_size,
     )
