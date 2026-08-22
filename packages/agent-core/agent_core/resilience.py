@@ -226,6 +226,34 @@ def timeout(seconds: float, executor: Optional[ThreadPoolExecutor] = None) -> Ca
 
 
 # ---------------------------------------------------------------------------
+# validate_config：轻量配置校验与默认值填充
+# ---------------------------------------------------------------------------
+def validate_config(
+    data: "dict[str, Any]",
+    defaults: "Optional[dict[str, Any]]" = None,
+    required: "Optional[Iterable[str]]" = None,
+    types: "Optional[dict[str, Type[Any]]]" = None,
+) -> "dict[str, Any]":
+    """轻量配置校验与默认值填充。
+
+    - 以 ``defaults`` 为底，``data`` 覆盖（仅填充缺失键），返回合并后的 dict；
+    - ``required`` 中任一键在合并结果中缺失 → 抛 ``ValueError``（消息含「必填项」）；
+    - ``types`` 中任一键的值类型不符 ``isinstance`` → 抛 ``TypeError``（消息含「类型错误」）。
+    """
+    out: "dict[str, Any]" = dict(defaults or {})
+    out.update(data or {})
+    for key in required or []:
+        if key not in out:
+            raise ValueError(f"必填项缺失: {key}")
+    for key, typ in (types or {}).items():
+        if key in out and not isinstance(out[key], typ):
+            raise TypeError(
+                f"类型错误: {key} 期望 {getattr(typ, '__name__', typ)}"
+            )
+    return out
+
+
+# ---------------------------------------------------------------------------
 # CircuitBreaker Engine + Policy Strategy (WS-3: 统一引擎 + 策略分离)
 # ---------------------------------------------------------------------------
 # 状态常量（内核单一真相，适配层不再各自定义字符串）
@@ -247,6 +275,10 @@ class _Policy(Protocol):
 
     def check_transition(self, breaker: "CircuitBreaker") -> None:
         """检查是否需要自动转换状态（如 OPEN→HALF_OPEN 冷却期到期）。"""
+        ...
+
+    def resolved_state(self, breaker: "CircuitBreaker") -> str:
+        """返回计入冷却期后的等效状态（只读投影，不修改 breaker 内部状态）。"""
         ...
 
 
@@ -296,6 +328,14 @@ class ConsecutiveFailurePolicy:
             if breaker._state == breaker.OPEN and breaker._opened_at is not None:
                 if breaker._clock() - breaker._opened_at >= breaker._reset_timeout:
                     breaker._state = breaker.HALF_OPEN
+
+    def resolved_state(self, breaker: "CircuitBreaker") -> str:
+        """只读投影：OPEN 且冷却到期 → HALF_OPEN，否则返回内部状态。"""
+        with breaker._lock:
+            if breaker._state == breaker.OPEN and breaker._opened_at is not None:
+                if breaker._clock() - breaker._opened_at >= breaker._reset_timeout:
+                    return breaker.HALF_OPEN
+            return breaker._state
 
 
 class SlidingWindowPolicy:
@@ -355,6 +395,14 @@ class SlidingWindowPolicy:
                 if breaker._clock() - breaker._opened_at >= breaker._cooldown_seconds:
                     breaker._half_open_successes = 0
                     breaker._state = breaker.HALF_OPEN
+
+    def resolved_state(self, breaker: "CircuitBreaker") -> str:
+        """只读投影：OPEN 且冷却到期 → HALF_OPEN，否则返回内部状态。"""
+        with breaker._lock:
+            if breaker._state == breaker.OPEN and breaker._opened_at is not None:
+                if breaker._clock() - breaker._opened_at >= breaker._cooldown_seconds:
+                    return breaker.HALF_OPEN
+            return breaker._state
 
 
 class CircuitBreaker:
@@ -452,10 +500,9 @@ class CircuitBreaker:
             return self._state
 
     def resolved_state(self) -> str:
-        """返回计入冷却期后的等效状态（OPEN 且冷却到期 → HALF_OPEN）。"""
+        """返回计入冷却期后的等效状态（OPEN 且冷却到期 → HALF_OPEN），只读不突变。"""
         with self._lock:
-            self._policy.check_transition(self)
-            return self._state
+            return self._policy.resolved_state(self)
 
     def allow(self) -> bool:
         """调用前查询：是否允许执行（OPEN 且冷却未到则拒绝）。"""
