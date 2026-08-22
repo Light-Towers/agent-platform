@@ -16,9 +16,12 @@ from pydantic import BaseModel
 
 load_dotenv(find_dotenv())
 
-from agent_core.logging import get_logger
+from agent_core.logging import configure_logging, get_logger
 from agent_core.tracing import init_tracing, start_span
 
+# 统一日志配置入口：配置 root + agent_core 子树（agent_core 子树 propagate=False，
+# 消除重复日志；使 agent_runtime.* 等未单独配置的子树正常输出）。级别可经 LOG_LEVEL 覆盖。
+configure_logging()
 logger = get_logger(__name__)
 
 # 持有后台任务引用，避免 CPython 在任务完成前回收 coroutine frame 导致静默丢失
