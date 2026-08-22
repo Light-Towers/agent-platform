@@ -16,8 +16,8 @@ from .conftest import (
     side_effect_counts,
     unique_execution_id,
 )
-from .helpers import wait_lease_expiry, make_runtime, run_replica_a, run_replica_b_takeover
 from .haprobe import HAProbeRegistry, build_probe_graph
+from .helpers import make_runtime, run_replica_a, run_replica_b_takeover, wait_lease_expiry
 
 
 @pytest.mark.anyio
@@ -55,4 +55,4 @@ async def test_kill_before_checkpoint_effectively_once(ha_stores):
 
     # checkpoint 完整
     assert set(await checkpoint_completed(ha_stores["pool"], execution_id)) == {"step_1", "step_2"}
-    print(f"\n[HA 场景3] kill-before-checkpoint：S2 attempt≥2 但 actual effect=1，effectively-once 成立")
+    print("\n[HA 场景3] kill-before-checkpoint：S2 attempt≥2 但 actual effect=1，effectively-once 成立")

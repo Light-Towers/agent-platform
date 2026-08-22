@@ -11,17 +11,16 @@ checkpoint 保持完整。
 """
 
 import pytest
-
 from agent_runtime.planner.durability import Checkpoint, FencedWriteError
 
 from .conftest import checkpoint_completed, side_effect_counts, unique_execution_id
+from .haprobe import HAProbeRegistry, build_probe_graph
 from .helpers import (
-    wait_lease_expiry,
     make_runtime,
     run_replica_a,
     run_replica_b_takeover,
+    wait_lease_expiry,
 )
-from .haprobe import HAProbeRegistry, build_probe_graph
 
 
 @pytest.mark.anyio
