@@ -202,6 +202,11 @@ class ExecutionContext:
     # P5-1：语义循环指纹（skill + 归一化 args），重复指纹拒绝继续（需 enable_loop_fingerprint 开启）
     fingerprints: set[str] = field(default_factory=set)
     loop_fingerprint: bool = False
+    # §HA：执行所有权丢失检测（split-brain 的 A 侧）。心跳协程发现租约被新 owner 接管后
+    # 置 True，执行循环逐层检查后协作式中止，避免旧 owner 继续产生副作用。
+    ownership_lost: bool = False
+    # §HA：本次执行持有的 lease owner 标识（供心跳/ownership-loss 检测用）。
+    lease_owner: str | None = None
 
     @property
     def call_depth(self) -> int:
@@ -385,7 +390,9 @@ class PlannerRuntime:
         return ctx.call_stack if ctx else []
 
     @asynccontextmanager
-    async def execution(self, *, validate_composition: bool = True) -> AsyncIterator[None]:
+    async def execution(
+        self, *, validate_composition: bool = True, execution_id: str | None = None
+    ) -> AsyncIterator[None]:
         """单次执行边界：创建 ExecutionContext 并绑定，退出时复位。
 
         语义（架构审核 P1 修正）：``max_steps`` 是「单次执行累计 Skill 调用数」——
@@ -393,18 +400,23 @@ class PlannerRuntime:
         约束同时嵌套深度。调用方（组合型 Planner 的 execute/arun 入口）须用本 scope
         包裹整次执行：预算不跨执行累计，同执行内顺序/嵌套 Skill 共享同一预算。
 
-        生命周期职责（§7.1 / §11）：
+        生命周期职责（§7.1 / §11 / §HA）：
         - 进入时若 ``validate_composition`` 且 registry 非空，先跑 ``CompositionValidator``
           静态校验（存在性 / 环 / 权限闭包），组合非法则 fail-fast；
         - 进入时经 ``ownership_store`` acquire 执行所有权（租约），并起心跳续租协程；
           退出时 release，stale 执行可由 ``reap_stale`` 回收（跨进程唤醒见 §20）。
+        - ``execution_id`` 可显式注入（resume/HA 接管他人执行时传被恢复执行的 id），
+          不传则新建——保证 lease 与 checkpoint 绑定同一 execution_id（§HA 修复合并回归）。
+        - §HA split-brain 防护：心跳续租带 owner 校验，租约被新 owner 接管时置
+          ``ctx.ownership_lost=True``，执行循环逐层检查后协作式中止，避免旧 owner
+          继续产生副作用。
         """
         deadline = (
             time.monotonic() + self.max_duration_seconds
             if self.max_duration_seconds is not None
             else None
         )
-        eid = uuid.uuid4().hex
+        eid = execution_id or uuid.uuid4().hex
         ctx = ExecutionContext(
             execution_id=eid,
             max_steps=self.max_steps, max_depth=self.max_skill_depth, deadline=deadline,
@@ -425,10 +437,10 @@ class PlannerRuntime:
                 validator()
 
         # 执行所有权 / 租约
-        eid = ctx.execution_id
         owner = str(os.getpid())
         lease_ttl = self.max_duration_seconds or 300.0
         await self.ownership_store.acquire(eid, owner, lease_ttl)
+        ctx.lease_owner = owner
 
         hb_task: "asyncio.Task | None" = None
         if lease_ttl is not None:
@@ -436,7 +448,11 @@ class PlannerRuntime:
                 try:
                     while True:
                         await asyncio.sleep(lease_ttl / 2)
-                        await self.ownership_store.heartbeat(eid, lease_ttl)
+                        ok = await self.ownership_store.heartbeat(eid, lease_ttl, owner=owner)
+                        if not ok:
+                            # §HA：租约被新 owner 接管/已过期——标记丢失，执行循环将中止
+                            ctx.ownership_lost = True
+                            return
                 except asyncio.CancelledError:
                     return
 

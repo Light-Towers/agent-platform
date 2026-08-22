@@ -177,17 +177,35 @@ class PgExecutionOwnershipStore(ExecutionOwnershipStore):
             row = await cur.fetchone()
         return row is not None
 
-    async def heartbeat(self, execution_id: str, ttl_s: float) -> None:
-        """续租：延长租约到期时间。"""
+    async def heartbeat(self, execution_id: str, ttl_s: float, owner: str | None = None) -> bool:
+        """续租：延长租约到期时间；当 owner 已被取代时返回 False（split-brain 的 A 侧感知）。
+
+        §HA：原实现 ``WHERE execution_id=%s`` 无条件续租——新 owner 接管后旧 owner 仍能
+        续租，导致「A 网络隔离 → B 接管 → A 仍续租成功」的假活跃。改为 ``WHERE owner=%s``
+        校验：仅当租约仍由本 owner 持有时才顺延，否则返回 False 供心跳协程中止执行循环。
+
+        返回 True=续租成功（仍持有）；False=租约已丢失（被接管/过期），调用方应停止执行。
+        ``owner=None`` 时退化为仅按 execution_id 续租（测试/兼容场景，不校验），返回 True。
+        """
+        if owner is None:
+            sql = (
+                f"UPDATE {self._table} "
+                "SET expires_at = now() + (%s || ' seconds')::interval "
+                "WHERE execution_id = %s "
+                "RETURNING execution_id"
+            )
+            async with self._pool.connection() as conn:
+                cur = await conn.execute(sql, (str(ttl_s), execution_id))
+                return (await cur.fetchone()) is not None
         sql = (
             f"UPDATE {self._table} "
             "SET expires_at = now() + (%s || ' seconds')::interval "
-            "WHERE execution_id = %s "
+            "WHERE execution_id = %s AND owner = %s "
             "RETURNING execution_id"
         )
         async with self._pool.connection() as conn:
-            cur = await conn.execute(sql, (str(ttl_s), execution_id))
-            await cur.fetchone()
+            cur = await conn.execute(sql, (str(ttl_s), execution_id, owner))
+            return (await cur.fetchone()) is not None
 
     async def release(self, execution_id: str, owner: str) -> None:
         """释放所有权：仅当 owner 一致时删除。"""
