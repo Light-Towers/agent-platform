@@ -33,6 +33,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from agent_runtime.planner.durability import (
+    ExecutionNotOwned,
     ExecutionOwnershipStore,
     InMemoryExecutionOwnershipStore,
     reap_stale_executions,
@@ -327,6 +328,7 @@ class PlannerRuntime:
         ownership_store: Any = None,
         workspace_id: str = "default",
         user_id: str = "default",
+        replica_id: str = "replica",
     ):
         self.registry = registry
         self.llm = llm
@@ -347,6 +349,9 @@ class PlannerRuntime:
         self.enable_loop_fingerprint = enable_loop_fingerprint
         self._workspace_id = workspace_id
         self._user_id = user_id
+        # §HA（C2）：副本标识（如 "agent-a"/"agent-b"），参与 owner identity，
+        # 避免多容器下 os.getpid() 撞车（容器内主进程常为 PID 1）。
+        self._replica_id = replica_id
         # P2-2 计量接线：把 llm 客户端的 usage 回调接到当前执行的 ExecutionContext。
         # 计量源（agent-core FallbackChatModel）→ 聚合器（ExecutionContext.record_usage）
         # 经 contextvars 按 asyncio task 隔离：LLM 调用发生时取当前执行上下文，跨执行不串。
@@ -437,9 +442,17 @@ class PlannerRuntime:
                 validator()
 
         # 执行所有权 / 租约
-        owner = str(os.getpid())
+        # §HA（C2）：owner 用 <replica_id>:<uuid>，跨副本唯一——多容器下
+        # os.getpid() 可能同为 1（Docker 主进程），会使 heartbeat fencing 失效。
+        owner = f"{self._replica_id}:{uuid.uuid4().hex}"
         lease_ttl = self.max_duration_seconds or 300.0
-        await self.ownership_store.acquire(eid, owner, lease_ttl)
+        acquired = await self.ownership_store.acquire(eid, owner, lease_ttl)
+        if not acquired:
+            # §HA（C1 fail-closed）：lease 被其他副本持有/未过期，立即拒绝执行，
+            # 不得进入 _run_graph_in_place——否则破坏 single-active-owner。
+            raise ExecutionNotOwned(
+                f"未能获取 execution={eid} 的所有权（lease 被其他副本持有或未过期）"
+            )
         ctx.lease_owner = owner
 
         hb_task: "asyncio.Task | None" = None
