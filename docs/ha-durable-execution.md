@@ -106,3 +106,43 @@ HA RESULT: PASS
 - `execution_events`：`replica/event/step_id` 时间序 → trajectory 连续性证据。
 
 每个实验生成可证明的 `execution_id = HA-YYYYMMDD-<rand>`。
+
+---
+
+## 七、P0 + H2/H3 修复闭环与最终验收
+
+> 本节记录生产级审计后补齐的最小修复包（commit 链：`741c1e8` → `2019faf`(P0) →
+> `c73bb5f`(H3) → `c2a1039`(H2)）。目标：把 HA 从「代码 review 自证」推进到
+> 「故障注入 + 运行时真保证」。
+
+### P0（4 Critical，已闭环 `2019faf`）
+
+| # | 问题 | 修复 |
+|---|---|---|
+| C1 | `execution()` 忽略 acquire 返回值 → 破坏 single-active-owner | **fail-closed**：acquire 失败抛 `ExecutionNotOwned`，不进入执行循环 |
+| C2 | `owner=os.getpid()` 多容器 Docker 下都为 1 → fencing 失效 | 改为 `<replica_id>:<uuid>`，跨副本唯一 |
+| C3 | checkpoint 无 fencing → stale/zombie writer 可覆盖新 owner | `PgCheckpointStore.save` 改 monotonic version CAS（`WHERE version < EXCLUDED.version OR (resumable=FALSE AND EXCLUDED.resumable=TRUE)`），旧 owner 晚写抛 `FencedWriteError` |
+| C4 | `reap_stale_notifying` 用 `SET owner=NULL` 违反 NOT NULL | 改为 `DELETE`，符合 schema |
+
+### H2（High，运行时副作用落库真正生效 `c2a1039`）
+
+- P0 阶段 `side_effects` 表的唯一约束只在**测试桩**（`HAProbeRegistry.execute` 直接写 DB）验证，运行时代码从未调用。
+- 修复：新增 `SideEffectStore` ABC + `PgSideEffectStore`（`ON CONFLICT DO NOTHING` 幂等去重，`has()` 供 resume 判断已落地 step）；`PlannerRuntime` 注入 `side_effect_store`；`execution_graph._run` 在 `delegate` 成功后调 `record(execution_id, step_id, skill:<name>, lease_owner)`。
+- 生产路径 `execute_plan` 走 `_run_graph_in_place`，同样经此落库（构造 `PlannerRuntime` 时传 `side_effect_store` 即生效）。effectively-once 从「测试自证」变为「运行时真保证」。
+
+### H3（High，layer-gather 所有权丢失窗口 `c73bb5f`）
+
+- 原 `asyncio.gather` 同层并行期间，旧 owner 丢 lease 后，层边界检查会放过本层在途节点继续发起副作用。
+- 修复：`_run` 协程在 `delegate` 前自查 `ownership_lost`，已丢失则中止本节点（复用 fatal 终止分支，`error_class=ownership_lost`），保证 single-active-owner。
+
+### 验收状态（最终）
+
+- `tests/ha`：14 passed（含 `test_stale_writer` split-brain 闭环、`test_runtime_side_effect_record` 运行时落库 + 幂等 + resume 可见性）
+- `tests/durability`：25 passed（pg_durability 14，含 version CAS / reap DELETE）
+- `tests/planner`：63 passed
+- **合计 102 passed，零回归**
+
+### H1 处置说明（环境约束）
+
+- H1 原始定义为「测试未真正双容器 kill」。当前 `run_replica_a` 用「手动 acquire 短 ttl 不 release」语义等价 SIGKILL（heartbeat 死亡 → PG lease 过期 → B 接管），在无头环境下已捕获 split-brain / 接管 / 重复副作用的全部语义。
+- 真双容器（docker-compose 起两个 agent 进程 + `docker kill agent-a`）属环境级验证，`docker-compose.ha.yml` 已就绪，可在有 Docker 的环境中补一组端到端 kill 实验；当前模拟覆盖的语义不变，故 H1 记为「环境约束下已覆盖」而非阻塞项。
