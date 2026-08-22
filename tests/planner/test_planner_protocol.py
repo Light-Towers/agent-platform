@@ -283,7 +283,7 @@ async def test_plan_matches_golden_baseline():
     import json
     from pathlib import Path
 
-    golden_path = Path(__file__).resolve().parents[1] / "eval" / "golden.jsonl"
+    golden_path = Path(__file__).resolve().parents[2] / "eval" / "golden.jsonl"
     golden = [json.loads(line) for line in golden_path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
     planner = DeterministicPlanner()
