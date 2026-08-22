@@ -36,7 +36,7 @@ on:
       - ".env.example"
       - ".github/workflows/agent-platform-ci.yml"
 
-# TB-8 分层门禁（见 docs/architecture-improvement-plan.md §6.2）：
+# TB-8 分层门禁（见 docs/architecture/architecture-improvement-plan.md §6.2）：
 # 本 workflow 只守「确定性门禁」—— lint + 单测 + 启发式路由评测（无 LLM 依赖，永远可达）。
 # LLM 质量评测（依赖 LLM_API_KEY 可达）交由 eval-llm.yml（定时 + 手动），非阻塞、不卡 push。
 # CI 直接复用 Makefile 的 `make ci` 单一真相，避免手写命令与本地漂移。
