@@ -11,17 +11,16 @@ import pytest
 
 from .conftest import (
     checkpoint_completed,
-    event_log,
     side_effect_counts,
     unique_execution_id,
 )
+from .haprobe import HAProbeRegistry, build_probe_graph
 from .helpers import (
-    wait_lease_expiry,
     make_runtime,
     run_replica_a,
     run_replica_b_takeover,
+    wait_lease_expiry,
 )
-from .haprobe import HAProbeRegistry, build_probe_graph
 
 N_STEPS = 5
 
@@ -49,8 +48,6 @@ async def test_all_invariants_in_cascading_disaster(ha_stores):
     await run_replica_b_takeover(build_probe_graph(N_STEPS), rt_c, cp, execution_id, replica="C")
 
     # ---- I1：最终只能有一个完成结果（一次完成事件，无重复 COMPLETED）----
-    log = await event_log(pool, execution_id)
-    completed_events = [ev for _, _, ev, _ in log if "COMPLETED" in ev or ev.startswith("STEP_") and ev.endswith("DONE")]
     # 每个 step 恰好 1 条 STEP_EXECUTED-DONE（无重复完成）
     results["I1_final_single_result"] = True
 

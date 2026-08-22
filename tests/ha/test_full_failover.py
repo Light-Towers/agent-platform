@@ -17,13 +17,13 @@ from .conftest import (
     side_effect_counts,
     unique_execution_id,
 )
+from .haprobe import HAProbeRegistry, build_probe_graph
 from .helpers import (
-    wait_lease_expiry,
     make_runtime,
     run_replica_a,
     run_replica_b_takeover,
+    wait_lease_expiry,
 )
-from .haprobe import HAProbeRegistry, build_probe_graph
 
 
 @pytest.mark.anyio
@@ -67,4 +67,4 @@ async def test_full_failover_a_kill_b_partition_c_completes(ha_stores):
     log = await event_log(ha_stores["pool"], execution_id)
     replicas_seen = {r for _, r, _, _ in log}
     assert {"A", "B", "C"} <= replicas_seen, f"审计事件应覆盖 A/B/C: {replicas_seen}"
-    print(f"\n[HA 组合灾难] A kill→B 接管→B 分区→C 接管→完成，全 5 步副作用各 1 次，PASS")
+    print("\n[HA 组合灾难] A kill→B 接管→B 分区→C 接管→完成，全 5 步副作用各 1 次，PASS")

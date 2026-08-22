@@ -15,9 +15,8 @@ from .conftest import (
     side_effect_counts,
     unique_execution_id,
 )
-from .helpers import wait_lease_expiry
 from .haprobe import HAProbeRegistry, build_probe_graph
-from .helpers import make_runtime, run_replica_a, run_replica_b_takeover
+from .helpers import make_runtime, run_replica_a, run_replica_b_takeover, wait_lease_expiry
 
 
 @pytest.mark.anyio
