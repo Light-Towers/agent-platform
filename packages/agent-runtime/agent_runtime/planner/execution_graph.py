@@ -276,7 +276,22 @@ async def _run_graph_in_place(
             last_exc: Exception | None = None
             while attempt <= _NODE_BUSINESS_RETRY_MAX:
                 try:
-                    return node_id, await runtime.delegate(node.skill_name, **kwargs), None, False
+                    result = await runtime.delegate(node.skill_name, **kwargs)
+                    # §HA（H2）：副作用（Skill 落地效果）一旦成功，立即落审计/幂等记录。
+                    # effect_key = execution_id:step_id:effect_type（唯一约束 → 重复 attempt 幂等去重）。
+                    # 配合 checkpoint，B 接管 resume 时可据此判断哪些 step 已真正落地，不重跑。
+                    if (
+                        runtime.side_effect_store is not None
+                        and execution_id is not None
+                        and exec_ctx is not None
+                    ):
+                        await runtime.side_effect_store.record(
+                            execution_id=execution_id,
+                            step_id=node_id,
+                            effect_type=f"skill:{node.skill_name}",
+                            owner=exec_ctx.lease_owner or "",
+                        )
+                    return node_id, result, None, False
                 except Exception as exc:
                     last_exc = exc
                     if classify_exception(exc) is not ErrorClass.RETRYABLE or attempt >= _NODE_BUSINESS_RETRY_MAX:
