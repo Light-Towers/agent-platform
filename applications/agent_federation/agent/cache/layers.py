@@ -122,8 +122,8 @@ class L2Cache:
                 await ft.info()
                 cls._index_created = True
                 return True
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("检查 L2 索引是否存在失败，将尝试创建: %s", e)
 
             from valkey.commands.search.field import TextField, VectorField
             from valkey.commands.search.indexDefinition import IndexDefinition, IndexType

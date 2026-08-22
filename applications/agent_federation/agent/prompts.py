@@ -1,7 +1,10 @@
 # 目标加载yml中的数据，供创建主和子智能体使用
+import logging
 from pathlib import Path
 
 import yaml  # yaml配置文件读取
+
+logger = logging.getLogger(__name__)
 
 
 # 定义一个加载函数，配置文件yaml加载成字典
@@ -48,5 +51,5 @@ for _yaml_file in sorted(prompt_dir.glob("*.yaml")) + sorted(prompt_dir.glob("*.
             rewrite_content = _data
         elif _key == "planner":
             planner_content = _data
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("加载 prompt 文件失败: %s, 错误: %s", _yaml_file, e)
