@@ -12,6 +12,7 @@ logger = logging.getLogger(__name__)
 
 _pool = None
 _pool_lock = asyncio.Lock()
+_closing = False  # 关闭进行中标记，防止关闭途中被重新拉起成双池
 
 SCHEMA_TEMPLATE = """
 CREATE TABLE IF NOT EXISTS chunks (
@@ -174,6 +175,9 @@ async def init_pool(
         logger.info("DATABASE_URL 未配置，以内存模式运行（无持久化）")
         return None
     async with _pool_lock:
+        if _closing:
+            logger.warning("连接池正在关闭，跳过初始化")
+            return None
         if _pool is not None:
             return _pool
         from pgvector.psycopg import register_vector_async
@@ -265,10 +269,30 @@ def get_pool():
 
 
 async def close_pool() -> None:
-    global _pool
-    if _pool is not None:
-        await _pool.close()
-        _pool = None
+    """优雅关闭连接池（多副本 SIGTERM → lifespan shutdown 路径）。
+
+    设计要点（消除关闭竞态）：
+    - 先置 ``_closing`` 并在锁内将全局 ``_pool`` 摘掉（置 None），使新请求
+      ``get_pool()`` 立即返回 None（优雅降级），不会从「关闭中」的池借用连接。
+    - 退出锁后再 ``await pool.close(timeout=30)``：优雅等待在途连接归还，
+      timeout 为等待上限，**不等于强关、不取消在途请求**；达到上限后允许
+      关闭流程继续，不阻塞进程退出。
+    - ``close()`` 自身异常被记录且 ``_closing`` 复位，绝不永久卡死 runtime。
+    - 并发/重复调用安全（幂等）。
+    """
+    global _pool, _closing
+    async with _pool_lock:
+        if _pool is None or _closing:
+            return
+        _closing = True
+        pool = _pool
+        _pool = None  # 立即摘掉全局引用，避免新请求从关闭中池借用连接
+    try:
+        await pool.close(timeout=30)
+    except Exception as e:
+        logger.warning("连接池关闭异常（忽略，进程即将退出）: %s", e)
+    finally:
+        _closing = False
 
 
 async def ping() -> bool:
