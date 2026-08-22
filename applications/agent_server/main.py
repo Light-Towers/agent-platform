@@ -3,9 +3,16 @@
 所有全局资源在 lifespan 一次性初始化（带锁），请求路径零懒加载竞态。
 """
 
-import logging
 from contextlib import asynccontextmanager
 
+from agent_core.logging import configure_logging, get_logger
+
+# 统一日志配置入口：必须在其它包 import 之前调用，使下列 format 优先生效
+# （agent_runtime 等模块在 import 时即触发 get_logger → 惰性 configure_logging，
+# 若晚于此调用则会用默认格式覆盖本 format）。配置 root + agent_core 子树
+# （agent_core propagate=False，消除与宿主 double-handler 的重复日志），
+# 级别可经环境变量 LOG_LEVEL 覆盖。
+configure_logging(fmt="%(asctime)s %(levelname)s %(name)s: %(message)s")
 from agent_runtime.admission import AdmissionQueue, RateLimiter
 from agent_runtime.admission_gateway import PgAdmissionController
 from agent_runtime.coordinator import SessionCoordinator
@@ -31,8 +38,7 @@ from agent_server.api.routes import router
 from agent_server.config import get_settings
 from agent_server.schemas import McpServerConfig
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 async def _build_checkpointer():
