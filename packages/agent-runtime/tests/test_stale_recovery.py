@@ -23,7 +23,7 @@ async def test_ownership_acquire_rejects_active():
 async def test_ownership_heartbeat_extends():
     store = InMemoryExecutionOwnershipStore()
     await store.acquire("e1", "ownerA", ttl_s=5.0)
-    await store.heartbeat("e1", ttl_s=50.0)
+    await store.heartbeat("e1", ttl_s=50.0, owner="ownerA")
     # heartbeat 顺延租约，应仍在持有
     assert await store.get_owner("e1") == "ownerA"
     await store.release("e1", "ownerA")

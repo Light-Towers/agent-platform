@@ -23,7 +23,7 @@ def make_runtime(registry, ownership_store, *, ttl_s: float = 5.0) -> PlannerRun
 
 async def run_replica_a(
     graph, runtime, checkpoint_store, execution_id, *,
-    acquire_ttl: float = 0.6, owner: str = "replica-A", fault_injector=None,
+    acquire_ttl: float = 0.6, owner: str = "replica-A", fault_injector=None, registry=None,
 ):
     """副本执行：手动 acquire lease（短 ttl）→ 跑节点写 checkpoint → 不续租即停（模拟 kill）。
 
@@ -46,6 +46,7 @@ async def run_replica_a(
             if stop:
                 break
     # 不 release、不续租 → 模拟 SIGKILL / 网络分区
+    # （§HA-I8：execute 内部抛 SideEffectWindowKill 时 _run 已走 fatal 终止分支，循环自然结束）
     return events
 
 

@@ -276,7 +276,7 @@ class TestPgExecutionOwnershipStore:
         pool = _FakePgPool()
         store = PgExecutionOwnershipStore(pool)
         await store.acquire("e1", "owner1", 10.0)
-        await store.heartbeat("e1", 20.0)
+        await store.heartbeat("e1", 20.0, owner="owner1")
         owner = await store.get_owner("e1")
         assert owner == "owner1"
 

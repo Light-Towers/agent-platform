@@ -21,6 +21,15 @@ from agent_runtime.planner.execution_graph import ExecutionGraph
 EFFECT_TYPES = ["WRITE", "MUTATE"]
 
 
+class SideEffectWindowKill(Exception):
+    """§HA-I8：side_effect 已落库、checkpoint 尚未写的窗口内被 kill 的信号。
+
+    在 HAProbeRegistry.execute 内部、side_effect 写完后抛出，使 _run_graph_in_place
+    走 fatal 终止分支（不写 checkpoint、不 release lease），精确复现「真实副作用 ✔ →
+    进程 crash → checkpoint ✘」的最危险双写窗口。由 run_replica_a 的调用方视为 SIGKILL。
+    """
+
+
 class HAProbeRegistry:
     """注册表：registry.execute(name, ...) 契约；name 形如 step_1/step_2/..."""
 
@@ -30,6 +39,7 @@ class HAProbeRegistry:
         self._sleep_s = sleep_s
         self._replica = replica
         self._fault_injector = fault_injector
+        self.killed_in_window = False  # §HA-I8：side_effect→checkpoint 窗口内被 kill 置位
         # 内存记录（便于快速断言）
         self.calls: list[str] = []          # 每次实际调用的 step（attempt 可能重复）
         self.actual_effects: list[str] = [] # 真正落库的 side effect
@@ -56,6 +66,18 @@ class HAProbeRegistry:
             effect_occurred = "yes"
         else:
             effect_occurred = "skipped-duplicate"
+
+        # 1.5) §HA-I8：side_effect 已落库、但 checkpoint 尚未写入的窗口注入 kill。
+        # 此时若停止副本（不续租），B resume 从「上一个 checkpoint」重跑本 step，
+        # 其 side_effect 会因唯一约束冲突被跳过 → 暴露 H3 atomicity 窗口与 effectively-once 语义。
+        if self._fault_injector is not None:
+            stop, _fault = self._fault_injector.should_stop_after_side_effect(step_id)
+            if stop:
+                # side_effect 已落库，但 checkpoint 尚未写（_run 写 checkpoint 在 delegate 成功后）。
+                # 抛异常使 _run 走 fatal 终止分支：不写 checkpoint、不 release lease → 等价 SIGKILL，
+                # 精确复现「真实副作用 ✔ → 进程 crash → checkpoint ✘」最危险窗口。
+                self.killed_in_window = True
+                raise SideEffectWindowKill(step_id)
 
         # 2) 记录执行事件审计流
         await self._log_event(step_id, f"STEP_EXECUTED (effect={effect_occurred})")
