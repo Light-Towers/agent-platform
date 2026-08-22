@@ -214,6 +214,17 @@ Runtime 层提供的是**幂等证据（idempotency marker）**，而非强制 e
 | Business side-effect atomicity / True fencing token / Crash-in-side-effect-window | 🟠 |
 | Exactly-once | ❌（明确不承诺） |
 
+---
+
+## 九、配套运维文档（v2 Release 收尾）
+
+| 文档 | 用途 |
+|---|---|
+| `docs/operations/side-effect-tool-contract.md` | Tool / Skill 副作用开发契约（`effect_key` / `idempotency_key` / 幂等要求 / Review Checklist） |
+| `docs/operations/ha-runbook.md` | 生产 HA 故障处理手册（lease / heartbeat / reap / 排查 / Incident Checklist / Recovery Decision Tree） |
+
+两份文档均为**纯文档**，不修改任何 Runtime 代码、DB schema、SideEffectStore / IdempotencyStore API、tests/ha 或 CI。
+
 **结论**：v2 Execution HA 主体已完整，进入下一阶段。面试陈述可底气表达——
 > 我们没有把 Agent HA 简化成"多副本+重试"。Runtime 层实现了 durable checkpoint、lease-based
 > single ownership、owner fencing、stale recovery、跨进程 crash takeover 与 idempotent
