@@ -200,8 +200,19 @@ async def _run_graph_in_place(
     layers = graph.topological_layers()
     results: dict[str, Any] = dict(completed)
     for i, layer in enumerate(layers):
-        # deadline 消费：超限时提前终止，产出 error 事件
         exec_ctx = runtime.context
+        # §HA split-brain 防护（A 侧）：心跳协程检测到租约被新 owner 接管后置
+        # ownership_lost，此处逐层检查并协作式中止——旧 owner 不得继续产生副作用。
+        if exec_ctx is not None and exec_ctx.ownership_lost:
+            yield StreamEvent(
+                type="error",
+                payload={
+                    "error": "执行所有权已丢失（lease 被新 owner 接管），协作式中止",
+                    "completed": len(results),
+                },
+            )
+            return
+        # deadline 消费：超限时提前终止，产出 error 事件
         if exec_ctx is not None and exec_ctx.deadline is not None:
             if time.monotonic() > exec_ctx.deadline:
                 yield StreamEvent(
@@ -293,7 +304,7 @@ async def execute_graph(
     避免重复创建边界导致预算复位。传 ``checkpoint_store`` + ``execution_id`` 启用执行级
     checkpoint/resume（doc §11 / Phase E）。
     """
-    async with runtime.execution():
+    async with runtime.execution(execution_id=execution_id):
         async for event in _run_graph_in_place(
             graph, runtime, checkpoint_store=checkpoint_store, execution_id=execution_id
         ):
