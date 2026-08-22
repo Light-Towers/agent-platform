@@ -6,11 +6,11 @@ side-effect idempotency 串起来（用户 §13）。
 """
 
 import pytest
+from agent_runtime.planner.execution_graph import _run_graph_in_place
 
 from .conftest import side_effect_counts, unique_execution_id
 from .haprobe import HAProbeRegistry, build_probe_graph
 from .helpers import make_runtime, run_replica_b_takeover
-from agent_runtime.planner.execution_graph import _run_graph_in_place
 
 
 @pytest.mark.anyio
@@ -36,7 +36,7 @@ async def test_duplicate_submit_effect_once(ha_stores):
     # 第二次提交（重复，同 execution_id）：checkpoint 已完整，无新副作用
     reg_b = HAProbeRegistry(ha_stores["pool"], execution_id, replica="B")
     rt_b = make_runtime(reg_b, own)
-    b_events = await run_replica_b_takeover(
+    await run_replica_b_takeover(
         build_probe_graph(3), rt_b, cp, execution_id, replica="B"
     )
     # 全部节点复用，B 无实际调用
@@ -44,4 +44,4 @@ async def test_duplicate_submit_effect_once(ha_stores):
 
     counts_after_second = await side_effect_counts(ha_stores["pool"], execution_id)
     assert counts_after_second == counts_after_first, "重复提交不应新增副作用"
-    print(f"[HA 场景7] 重复提交同一 execution：副作用保持各 1 次，PASS")
+    print("[HA 场景7] 重复提交同一 execution：副作用保持各 1 次，PASS")

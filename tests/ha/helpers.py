@@ -10,8 +10,6 @@ import asyncio
 from agent_runtime.planner.execution_graph import _run_graph_in_place
 from agent_runtime.planner.protocol import PlannerRuntime
 
-from .haprobe import HAProbeRegistry, build_probe_graph
-
 
 def make_runtime(registry, ownership_store, *, ttl_s: float = 5.0) -> PlannerRuntime:
     return PlannerRuntime(
