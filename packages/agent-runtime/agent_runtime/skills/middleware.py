@@ -86,10 +86,12 @@ class GuardMiddleware:
         fallback: Any = None,
         *,
         skill_names: tuple[str, ...] | None = None,
+        propagate_fatal: bool = True,
     ) -> None:
         self._timeout_s = timeout_s
         self._fallback = {} if fallback is None else fallback
         self._skill_names = skill_names
+        self._propagate_fatal = propagate_fatal
 
     async def around(self, name: str, kwargs: dict[str, Any], call_next: CallNext) -> Any:
         if self._skill_names is not None and name not in self._skill_names:
@@ -99,7 +101,13 @@ class GuardMiddleware:
         except asyncio.TimeoutError:
             logger.warning("skill %s 超时（> %.1fs），降级返回 fallback", name, self._timeout_s)
             return self._fallback
-        except Exception:  # noqa: BLE001 —— 单路失败降级，绝不向上抛
+        except Exception as exc:  # noqa: BLE001
+            # 致命异常（编程错误/状态不一致）必须向上冒泡，不得降级成空 fallback 静默结果；
+            # 瞬态/未知异常才降级继续（控制流由分类层决定，而非一律吞掉）。
+            from agent_core.resilience import ErrorClass, classify_exception
+
+            if self._propagate_fatal and classify_exception(exc) is ErrorClass.FATAL:
+                raise
             logger.exception("skill %s 执行失败，降级返回 fallback", name)
             return self._fallback
 
@@ -160,12 +168,10 @@ class RetryMiddleware:
 
     @staticmethod
     def _default_transient(exc: Exception) -> bool:
-        if isinstance(exc, asyncio.TimeoutError):
-            return True
-        name = type(exc).__name__
-        return any(
-            k in name for k in ("RateLimit", "Timeout", "Transient", "Unavailable")
-        )
+        # 优先使用统一分类层（超集：覆盖超时/连接/429|5xx/标记异常），保留旧类名启发式语义
+        from agent_core.resilience import ErrorClass, classify_exception
+
+        return classify_exception(exc) is ErrorClass.RETRYABLE
 
     async def around(self, name: str, kwargs: dict[str, Any], call_next: CallNext) -> Any:
         if self._skill_names is not None and name not in self._skill_names:
