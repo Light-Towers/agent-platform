@@ -9,6 +9,7 @@
 """
 
 import os
+import sys
 import uuid
 
 import pytest
@@ -28,6 +29,17 @@ from agent_runtime.planner.durability_pg import (
 )
 
 
+def pytest_collection_modifyitems(config, items):
+    """自动给 tests/ha 下所有测试打 requires_pg marker（无需逐个文件标注）。
+
+    配合 pg_pool fixture 的「无 PG 即 skip」逻辑，使 Windows CI / 无本地 PG 的开发机
+    干净跳过 HA 测试，避免 psycopg ProactorEventLoop 不可用 + 无 PG 导致的 setup 误报。
+    """
+    for item in items:
+        if "tests/ha" in str(item.fspath):
+            item.add_marker(pytest.mark.requires_pg)
+
+
 @pytest.fixture(scope="session")
 def anyio_backend():
     return "asyncio"
@@ -35,9 +47,20 @@ def anyio_backend():
 
 @pytest_asyncio.fixture(scope="session")
 async def pg_pool():
-    """真实 PG 连接池（session 级，共享；自动建表含 side_effects / execution_events）。"""
-    pool = await _db.init_pool(PG_URL)
-    assert pool is not None, "DATABASE_URL 应可连接（真 PostgreSQL 才能验证 HA）"
+    """真实 PG 连接池（session 级，共享；自动建表含 side_effects / execution_events）。
+
+    §HA：必须用真实 PostgreSQL（SQLite 会给出"测试通过但生产失败"的假象）。
+    无本地 PG（Windows CI / 无 PG 开发机）或平台不可用时**自动 skip**（而非 fail），
+    避免 setup 阶段连接失败被误报为测试错误。
+    """
+    if sys.platform == "win32":
+        pytest.skip("Windows 下 psycopg ProactorEventLoop 不可用，HA 测试需真实 PG（Linux CI 覆盖）")
+    try:
+        pool = await _db.init_pool(PG_URL)
+    except Exception as exc:  # noqa: BLE001 — 连接失败属环境缺失，应 skip 而非 fail
+        pytest.skip(f"未检测到可用 PostgreSQL（{PG_URL}）：{exc!r} —— HA 测试需真实 PG，Linux CI 自动覆盖")
+    if pool is None:
+        pytest.skip("init_pool 返回 None（无可用 PG），HA 测试需真实 PostgreSQL")
     # 清理历史 HA 审计数据，保证断言基线干净
     async with pool.connection() as conn:
         await conn.execute("TRUNCATE side_effects, execution_events, execution_checkpoints, execution_leases, idempotency_keys")

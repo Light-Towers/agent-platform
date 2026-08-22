@@ -10,10 +10,12 @@ on:
       - "tests/**"
       - "eval/**"
       - "docs/**"
+      - "scripts/ha_real_kill_verify.py"
       - "pyproject.toml"
       - "uv.lock"
       - "Makefile"
       - "docker-compose.yml"
+      - "docker-compose.ha.yml"
       - "Dockerfile"
       - ".env.example"
       - ".github/workflows/agent-platform-ci.yml"
@@ -24,10 +26,12 @@ on:
       - "tests/**"
       - "eval/**"
       - "docs/**"
+      - "scripts/ha_real_kill_verify.py"
       - "pyproject.toml"
       - "uv.lock"
       - "Makefile"
       - "docker-compose.yml"
+      - "docker-compose.ha.yml"
       - "Dockerfile"
       - ".env.example"
       - ".github/workflows/agent-platform-ci.yml"
@@ -51,3 +55,39 @@ jobs:
         run: make install
       - name: CI gate (lint + unit tests + heuristic eval)
         run: make ci
+
+  # §HA 端到端验证门禁：必须真实 PostgreSQL（lease/checkpoint/side_effects 持久化），
+  # 在 Linux runner 起 PG 服务容器，跑 tests/ha（requires_pg marker）+ 真双进程 kill -9 接管脚本。
+  # 与 ci 并行；Windows 下的 HA 测试已由 requires_pg marker + conftest skip 逻辑排除，不误报。
+  ha:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: agent
+          POSTGRES_PASSWORD: agent_platform_dev
+          POSTGRES_DB: agent_platform
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U agent -d agent_platform"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      AGENT_PLATFORM_PG_URL: postgresql://agent:agent_platform_dev@localhost:5432/agent_platform
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+      - name: Set up Python
+        uses: astral-sh/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install (all workspace packages + dev tools)
+        run: make install
+      - name: HA tests (requires_pg marker, real PostgreSQL)
+        run: uv run pytest tests/ha -m requires_pg -q
+      - name: HA real kill -9 takeover (dual-process, real PG)
+        run: uv run python scripts/ha_real_kill_verify.py
