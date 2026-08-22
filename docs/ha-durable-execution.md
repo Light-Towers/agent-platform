@@ -145,4 +145,5 @@ HA RESULT: PASS
 ### H1 处置说明（环境约束）
 
 - H1 原始定义为「测试未真正双容器 kill」。当前 `run_replica_a` 用「手动 acquire 短 ttl 不 release」语义等价 SIGKILL（heartbeat 死亡 → PG lease 过期 → B 接管），在无头环境下已捕获 split-brain / 接管 / 重复副作用的全部语义。
-- 真双容器（docker-compose 起两个 agent 进程 + `docker kill agent-a`）属环境级验证，`docker-compose.ha.yml` 已就绪，可在有 Docker 的环境中补一组端到端 kill 实验；当前模拟覆盖的语义不变，故 H1 记为「环境约束下已覆盖」而非阻塞项。
+- 真双进程验证已由 `scripts/ha_real_kill_verify.py` 补强：起两个真实 OS 进程（agent-a/agent-b）共享真实 PG，A 在 step_1 后真 `SIGKILL`，B 从 checkpoint 接管；Linux 真实验证 PASS（side_effects 每 step 各 1 条 WRITE + 1 条 skill，无重复）。
+- **CI 门禁**：`tests/ha` 全部测试加 `requires_pg` marker（conftest 自动打标 + 连接失败/Windows 平台自动 skip，避免误报）；`.github/workflows/agent-platform-ci.yml` 新增 `ha` job，在 `ubuntu-latest` 起 PostgreSQL 服务容器，跑 `pytest tests/ha -m requires_pg` + 真双进程 kill 脚本。Windows CI 下 HA 测试干净 skip，由 Linux CI 覆盖。

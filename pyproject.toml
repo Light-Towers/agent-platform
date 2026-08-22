@@ -63,6 +63,9 @@ testpaths = [
     "tests",
     "packages/agent-core/tests",
 ]
+markers = [
+    "requires_pg: 需要真实 PostgreSQL 的 HA 测试（lease/checkpoint/side_effects 持久化）；无本地 PG（如 Windows CI、无 PG 开发机）或平台不可用时自动 skip，避免误报。",
+]
 # 注：agent_federation/tests/unit 与 kefu-service/tests 经 Makefile `test` 目标以
 # 独立 pytest session 纳入 CI（避免与根 tests/ 的 conftest 插件名冲突）。
 # 分层（2026-08-19）：packages/ 放平台库（agent-core/agent-runtime/shared-schemas），
