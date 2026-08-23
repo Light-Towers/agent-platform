@@ -151,7 +151,7 @@ def _proc_a(execution_id: str, ready_path: str):
         runtime = _make_runtime(pool, registry, "agent-a")
         async for _ev in execute_graph(build_probe_graph(STEPS), runtime, execution_id=execution_id):
             pass
-        print(f"[agent-a] DONE (unexpected, should have been killed)", flush=True)
+        print("[agent-a] DONE (unexpected, should have been killed)", flush=True)
 
     asyncio.run(_main())
 
