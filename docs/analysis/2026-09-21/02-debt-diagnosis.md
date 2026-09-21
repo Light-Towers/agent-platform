@@ -118,8 +118,8 @@
 | F-S1-05 | ✅已修复（F-S1-05 实施）：修订契约 v1.1 → v1.2 直接 REST | 新 | 见 docs/plans/plan-fix-f-s1-05-contract-revise-to-rest.md |
 | F-S1-06 | ✅已修复（d67ed2a）：_NoOpTracer 2 套独立实现 | 新 | agent-runtime 从 agent-core 导入 |
 | TB-7 | docker compose 冒烟需 Docker | 可选 | 环境依赖 |
-| TB-11 | 双轨配置体系部分修复 | 部分修复 | pydantic-settings 收敛 |
-| TB-13 | 双轨认知/维护成本 | 结构性 | 优化 F 收敛中 |
+| TB-11 | 双轨配置体系部分修复 | 设计合理（分层有意） | agent_core dataclass（零依赖铁律）+ 应用 pydantic-settings，非债务 |
+| TB-13 | 双轨认知/维护成本 | Plan-F 已部分消解 | Runtime/Planner/Skill 层已收敛；完全消解需收口 F-S1-02/F-S1-04 |
 
 ### P3（配置不一致 / 文档漂移）
 
@@ -159,8 +159,8 @@
 | H-S0-03 | agent-runtime/tests 是否故意不纳入 CI | 查 pytest 配置 | ✅ 已关闭：非故意排除，门禁遗漏（F-S0-01 已修复，Makefile:33 已纳入） |
 | H-S1-02 | exhibition-agent 不依赖 agent-runtime 是否有意豁免红线 4 | 查 README 或问维护者 | ✅ 已有评估推荐：选项 A（有意豁免），见 [05-exhibition-positioning-evaluation](05-exhibition-positioning-evaluation.md)，待维护者拍板 |
 | H-S1-03 | agent-runtime otel.py _NoOpTracer 是否先于 agent-core tracing.py | git log 历史 | ✅ 已关闭：F-S1-06 已收敛到 agent-core noop_tracer()，历史先后不再重要 |
-| H-S2-01 | TB-11 pydantic-settings 收敛是否有实际需求驱动 | 查 agent_federation 配置使用 | 保留：待需求驱动调查 |
-| H-S2-02 | TB-13 双轨认知成本是否在 Plan-F 收敛后自然消解 | 查 plan-f 文档进度 | 保留：待 Plan-F 收敛进度验证 |
+| H-S2-01 | TB-11 pydantic-settings 收敛是否有实际需求驱动 | 查 agent_federation 配置使用 | ✅ 已关闭：无实际需求驱动。agent_core 用 dataclass（零依赖铁律），各应用用 pydantic-settings（环境变量校验），有意分层设计非债务 |
+| H-S2-02 | TB-13 双轨认知成本是否在 Plan-F 收敛后自然消解 | 查 plan-f 文档进度 | ✅ 已关闭：部分消解。Plan-F Phase 0-3 全部完成（Runtime/Planner/Skill 层已收敛），但 F-S1-02（agent_server 惰性 import agent_federation）+ F-S1-04（agent_federation 独立 CB/Cache）仍成立，完全消解需收口这两项 |
 
 ## 7. 统计
 
@@ -173,5 +173,5 @@
 | 仍成立 | 2（F-S1-02 / F-S1-04；TB-7 可选 / TB-11 部分修复 / TB-13 结构性） |
 | REFUTED | 6 |
 | 文档失效 | 3（已全部修复） |
-| 待验证假设 | 7（5 已关闭/有推荐，2 保留） |
+| 待验证假设 | 7（全部关闭） |
 | **最严重** | **F-S1-02 / F-S1-04（P2，收敛期）** |
