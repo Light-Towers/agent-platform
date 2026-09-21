@@ -25,7 +25,7 @@ ADR-0004 阶段4 的候选B（`eval/memory_reuse_llm.py`）评审中，发现 `_
 - 矛盾：`graph.py:3` docstring 声称"LLM 驱动的意图路由（复用 Phase 3）"，实际未调 LLM、未接 classifier。
 - 影响：换种说法即误路由；注释误导维护者以为已统一。
 - 范围说明：双轨收敛 `plan-e` 的 **S-5 范围外声明**明确 kefu 符合性核验"本期不纳入"，故未被统一意图架构覆盖。
-- 建议：① 修正 docstring 为真实状态；② 或令 kefu 意图节点复用 `agent_federation/agent/intent/classifier.py`（真正统一）。
+- 建议：① 修正 docstring 为真实状态；② 或令 kefu 意图节点复用 `packages/agent-core/agent_core/intent/classifier.py`（真正统一）。
 - 修复（v2 任务二）：`intent_node` 改为复用统一意图架构 `agent_core.intent`
   （`is_chitchat` 短路闲聊 + `classify_intent` 取 `IntentLabel`）；仅保留
   CUSTOMER_SERVICE 大类下订单/物流/售后的**业务二级分流**关键词（职责属业务路由，非意图识别）。
@@ -51,12 +51,12 @@ ADR-0004 阶段4 的候选B（`eval/memory_reuse_llm.py`）评审中，发现 `_
 
 ### TD-3 agent_federation 意图降级关键词含 typo
 - 文件：原 `agent_federation/agent/intent/classifier.py:89-103`（已不存在）
-- 现状：WS-6 统一意图架构已将分类器迁移到 `agent_core/intent/classifier.py`，关键词数据外置到 `data/prototypes.json`（数据驱动），原 typo "2么" 不再存在。
+- 现状：WS-6 统一意图架构已将分类器迁移到 `packages/agent-core/agent_core/intent/classifier.py`，关键词数据外置到 `data/prototypes.json`（数据驱动），原 typo "2么" 不再存在。
 - 状态：✅ 已由 WS-6 数据外置隐式解决
 
 ### TD-4 意图置信度阈值多处写死且重复
 - 文件：原 `agent_federation/agent/intent/llm_judge.py:17-18,87,97`、`classifier.py`（已不存在）
-- 现状：WS-6 统一意图架构已将阈值收敛到 `agent_core/intent/models.py` 单一来源（`L1_THRESHOLD=0.8` / `CLARIFY_THRESHOLD=0.5`），`classifier.py` 和 `llm_judge.py` 均 import 自此处，不再重复。
+- 现状：WS-6 统一意图架构已将阈值收敛到 `packages/agent-core/agent_core/intent/models.py` 单一来源（`L1_THRESHOLD=0.8` / `CLARIFY_THRESHOLD=0.5`），`classifier.py` 和 `llm_judge.py` 均 import 自此处，不再重复。
 - 状态：✅ 已由 WS-6 统一意图架构隐式解决
 
 ### TD-5 商品名确认阈值写死
