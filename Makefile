@@ -17,8 +17,8 @@ type:
 	uv run --with ruff ruff check . --select ALL 2>/dev/null || uv run --with ruff ruff check .
 
 # 单测门禁：根套件（tests/ + agent-core/tests/）走默认 conftest；
-# agent_federation/kefu 套件各自独立 pytest session，避免跨目录 conftest 插件名冲突
-# （两者都含 tests/conftest，importlib 模式下均注册为 tests.conftest）。
+# agent_federation/kefu/exhibition-agent 套件各自独立 pytest session，避免跨目录 conftest 插件名冲突
+# （三者都含 tests/conftest，importlib 模式下均注册为 tests.conftest）。
 # 三套件任一失败即中断，确保 #2 审查项（防回归测试纳入 CI）真正落地。
 # 注：本地目录原名 deepagents/（与 PyPI 依赖包同名），2026-08-19 重命名为
 # agent_federation/ 彻底消除遮蔽；test_tool_registry 已回归门禁（75 passed）。
@@ -26,6 +26,7 @@ test:
 	uv run pytest -q
 	uv run pytest applications/agent_federation/tests/unit -q
 	uv run pytest applications/kefu-service/tests -q
+	uv run pytest applications/exhibition-agent/tests -q
 
 # 评测门禁：默认启发式（确定性，CI 可达），阈值 0.8；LLM_API_KEY 缺失时回退启发式并 WARN。
 # 注意：必须用直接路径 `eval/run_eval.py` 而非 `-m eval.run_eval`，

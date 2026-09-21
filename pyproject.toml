@@ -108,4 +108,5 @@ members = [
     "applications/wenda-data-agent",
     "applications/zhanggui-zhiku",
     "applications/dialogue-framework",
+    "applications/exhibition-agent",
 ]
