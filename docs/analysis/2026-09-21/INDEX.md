@@ -62,6 +62,14 @@ Tier A×4 深入接手卡 + Tier B×4 卡头 + Tier C×1 仅卡头（zhanggui-zh
 
 ---
 
+## 后续修复跟踪（2026-09-21 更新）
+
+- 已修复（9 项）：F-S1-03 / F-S1-06 / F-S0-01~04 / F-S0-07 / F-S0-09 / F-S0-10 — 见 [02-debt-diagnosis](02-debt-diagnosis.md) §2/§3
+- 方案已立待实施：F-S1-01 — 见 [plan-fix-f-s1-01](../../plans/plan-fix-f-s1-01-test-reverse-import.md)
+- 剩余评估与立项计划：见 [04-remaining-evaluation](04-remaining-evaluation.md)
+
+---
+
 ## R6 自检
 
 - [x] 无未经复验的先验 ✅ 直引（A 级作判据引用，B 级逐条抽查）
