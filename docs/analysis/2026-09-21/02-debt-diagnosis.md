@@ -152,15 +152,15 @@
 
 ## 6. 待验证假设
 
-| 编号 | 假设 | 验证方式 |
-|------|------|----------|
-| H-S0-01 | agent_federation/tests 根级 2 测试是否故意排除（conftest 冲突？） | 查 Makefile 注释 + conftest |
-| H-S0-02 | zhanggui-zhiku/tests 是否故意不纳入 CI | 查 pyproject.toml dev 依赖 |
-| H-S0-03 | agent-runtime/tests 是否故意不纳入 CI | 查 pytest 配置 |
-| H-S1-02 | exhibition-agent 不依赖 agent-runtime 是否有意豁免红线 4 | 查 README 或问维护者 |
-| H-S1-03 | agent-runtime otel.py _NoOpTracer 是否先于 agent-core tracing.py | git log 历史 |
-| H-S2-01 | TB-11 pydantic-settings 收敛是否有实际需求驱动 | 查 agent_federation 配置使用 |
-| H-S2-02 | TB-13 双轨认知成本是否在 Plan-F 收敛后自然消解 | 查 plan-f 文档进度 |
+| 编号 | 假设 | 验证方式 | 状态 |
+|------|------|----------|------|
+| H-S0-01 | agent_federation/tests 根级 2 测试是否故意排除（conftest 冲突？） | 查 Makefile 注释 + conftest | ✅ 已关闭：非故意排除，门禁遗漏（F-S0-03 已修复，Makefile:35 已纳入） |
+| H-S0-02 | zhanggui-zhiku/tests 是否故意不纳入 CI | 查 pyproject.toml dev 依赖 | ✅ 已关闭：非故意排除，门禁遗漏（F-S0-02 已修复，Makefile:39 已纳入） |
+| H-S0-03 | agent-runtime/tests 是否故意不纳入 CI | 查 pytest 配置 | ✅ 已关闭：非故意排除，门禁遗漏（F-S0-01 已修复，Makefile:33 已纳入） |
+| H-S1-02 | exhibition-agent 不依赖 agent-runtime 是否有意豁免红线 4 | 查 README 或问维护者 | ✅ 已有评估推荐：选项 A（有意豁免），见 [05-exhibition-positioning-evaluation](05-exhibition-positioning-evaluation.md)，待维护者拍板 |
+| H-S1-03 | agent-runtime otel.py _NoOpTracer 是否先于 agent-core tracing.py | git log 历史 | ✅ 已关闭：F-S1-06 已收敛到 agent-core noop_tracer()，历史先后不再重要 |
+| H-S2-01 | TB-11 pydantic-settings 收敛是否有实际需求驱动 | 查 agent_federation 配置使用 | 保留：待需求驱动调查 |
+| H-S2-02 | TB-13 双轨认知成本是否在 Plan-F 收敛后自然消解 | 查 plan-f 文档进度 | 保留：待 Plan-F 收敛进度验证 |
 
 ## 7. 统计
 
@@ -172,6 +172,6 @@
 | 已修复 | 46（先验 34 + 2026-09-21 本批 12：F-S0-08/F-S1-03/F-S1-05/F-S1-06/F-S1-01/F-S0-01~04/F-S0-07/09/10） |
 | 仍成立 | 2（F-S1-02 / F-S1-04；TB-7 可选 / TB-11 部分修复 / TB-13 结构性） |
 | REFUTED | 6 |
-| 文档失效 | 4 |
-| 待验证假设 | 7 |
+| 文档失效 | 3（已全部修复） |
+| 待验证假设 | 7（5 已关闭/有推荐，2 保留） |
 | **最严重** | **F-S1-02 / F-S1-04（P2，收敛期）** |
