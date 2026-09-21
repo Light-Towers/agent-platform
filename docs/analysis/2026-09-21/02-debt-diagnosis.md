@@ -65,30 +65,30 @@
 
 | ID | 严重度 | 目录 | 文件数 | 实测 tests |
 |----|--------|------|--------|-----------|
-| F-S0-01 | P1 | packages/agent-runtime/tests/ | 12 | 62（--collect-only） |
-| F-S0-02 | P1 | applications/zhanggui-zhiku/tests/ | 23 | 223（--collect-only） |
-| F-S0-03 | P2 | applications/agent_federation/tests/（根级） | 2 | — |
-| F-S0-04 | P2 | applications/dialogue-framework/tests/ | 1 | — |
+| F-S0-01 | ✅P1 已修复 | packages/agent-runtime/tests/ | 12 | 62（--collect-only） |
+| F-S0-02 | ✅P1 已修复 | applications/zhanggui-zhiku/tests/ | 23 | 223（--collect-only） |
+| F-S0-03 | ✅P2 已修复 | applications/agent_federation/tests/（根级） | 2 | — |
+| F-S0-04 | ✅P2 已修复 | applications/dialogue-framework/tests/ | 1 | — |
 
 ### 2.2 架构违规（S1）
 
 | ID | 严重度 | 红线 | 问题 | 证据 |
 |----|--------|------|------|------|
-| **F-S1-03** | **P0** | 3 | agent-core.memory 模块级硬依赖 langgraph | memory/__init__.py:34 → mongo_checkpointer.py:24,31 |
-| F-S1-01 | P2 | 1 | agent-runtime 测试反向依赖 agent_server | test_graph_planner_dynamic.py:14 |
+| **F-S1-03** | ✅**P0** 已修复 | 3 | agent-core.memory 模块级硬依赖 langgraph | memory/__init__.py:34 → mongo_checkpointer.py:24,31 |
+| F-S1-01 | P2 方案已立 | 1 | agent-runtime 测试反向依赖 agent_server | test_graph_planner_dynamic.py:14 |
 | F-S1-02 | P2 | 2 | agent_server 惰性 import agent_federation | planners/unified.py:90, __init__.py:38 |
 | F-S1-04 | P2 | 4 | agent_federation CircuitBreaker+Cache 独立实现 | circuit_breaker.py:45, cache/layers.py:57+ |
 | F-S1-05 | P2 | 4 | exhibition-agent 独立实现 Skill+ExecutionContext | base_skill.py:43,53, execution_context.py:35 |
-| F-S1-06 | P2 | 再造 Runtime | _NoOpTracer 2 套独立实现 | tracing.py:137 vs otel.py:57 |
+| F-S1-06 | ✅P2 已修复 | 再造 Runtime | _NoOpTracer 2 套独立实现 | tracing.py:137 vs otel.py:57 |
 
 ### 2.3 配置/文档（S0）
 
 | ID | 严重度 | 问题 | 证据 |
 |----|--------|------|------|
-| F-S0-07 | P3 | ruff select 缺 I | agent-core/pyproject.toml:84 |
+| F-S0-07 | ✅P3 已修复 | ruff select 缺 I | agent-core/pyproject.toml:84 |
 | F-S0-08 | P2 | zhanggui-zhiku 包名仍为 app | zhanggui-zhiku/pyproject.toml:48,55 |
-| F-S0-09 | P3 | ARCHITECTURE.md §2.2 未列 exhibition-agent | ARCHITECTURE.md:47-52 |
-| F-S0-10 | P3 | agent-runtime 无 ruff/pytest 配置 | agent-runtime/pyproject.toml |
+| F-S0-09 | ✅P3 已修复 | ARCHITECTURE.md §2.2 未列 exhibition-agent | ARCHITECTURE.md:47-52 |
+| F-S0-10 | ✅P3 已修复 | agent-runtime 无 ruff/pytest 配置 | agent-runtime/pyproject.toml |
 
 ## 3. 仍成立债务汇总（按 P0/P1/P2/P3 排序）
 
@@ -96,27 +96,27 @@
 
 | ID | 问题 | 核验命令 | 修复方向 |
 |----|------|---------|---------|
-| **F-S1-03** | agent-core.memory 模块级硬依赖 langgraph+langchain_core | `python -c "import agent_core.memory"` | mongo_checkpointer 的 langgraph/langchain_core import 改为函数内惰性导入 |
+| **F-S1-03** | ✅已修复（d80a27e）：agent-core.memory 模块级硬依赖 langgraph+langchain_core | `python -c "import agent_core.memory"` | mongo_checkpointer 的 langgraph/langchain_core import 改为函数内惰性导入 |
 
 ### P1（门禁盲区）
 
 | ID | 问题 | 核验命令 | 修复方向 |
 |----|------|---------|---------|
-| F-S0-01 | agent-runtime/tests 62 测试在 CI 门外 | `git ls-files packages/agent-runtime/tests/ \| grep -vc __pycache__` → 12 | Makefile test 增加该路径 |
-| F-S0-02 | zhanggui-zhiku/tests 223 测试在 CI 门外 | `git ls-files applications/zhanggui-zhiku/tests/ \| grep -vc __pycache__` → 23 | Makefile test 增加该路径 |
+| F-S0-01 | ✅已修复（d80a27e）：agent-runtime/tests 62 测试在 CI 门外 | `git ls-files packages/agent-runtime/tests/ \| grep -vc __pycache__` → 12 | Makefile test 增加该路径 |
+| F-S0-02 | ✅已修复（d80a27e）：zhanggui-zhiku/tests 223 测试在 CI 门外 | `git ls-files applications/zhanggui-zhiku/tests/ \| grep -vc __pycache__` → 23 | Makefile test 增加该路径 |
 
 ### P2（重复实现 / 契约漂移 / 收敛期）
 
 | ID | 问题 | 状态 | 修复方向 |
 |----|------|------|---------|
-| F-S0-03 | agent_federation/tests 根级 2 测试门禁外 | 新 | Makefile 去掉 /unit |
-| F-S0-04 | dialogue-framework/tests 1 测试门禁外 | 新 | Makefile 补路径 |
+| F-S0-03 | ✅已修复（d80a27e）：agent_federation/tests 根级 2 测试门禁外 | 新 | Makefile 去掉 /unit |
+| F-S0-04 | ✅已修复（d80a27e）：dialogue-framework/tests 1 测试门禁外 | 新 | Makefile 补路径 |
 | F-S0-08 | zhanggui-zhiku 包名仍为 app | 已知 | 评估迁移成本 |
-| F-S1-01 | agent-runtime 测试反向依赖 agent_server | 新 | mock 替代 |
+| F-S1-01 | ⏳方案已立（plan-fix-f-s1-01）：agent-runtime 测试反向依赖 agent_server | 新 | 迁移归属到应用侧 |
 | F-S1-02 | agent_server 惰性 import agent_federation | 新（收敛期） | Plan-F 收敛后收口 |
 | F-S1-04 | agent_federation CB+Cache 独立实现 | 已知（§5） | 收敛到 agent-runtime |
 | F-S1-05 | exhibition-agent 独立实现 Skill+ExecutionContext | 新 | 评估依赖 agent-runtime |
-| F-S1-06 | _NoOpTracer 2 套独立实现 | 新 | agent-runtime 从 agent-core 导入 |
+| F-S1-06 | ✅已修复（d67ed2a）：_NoOpTracer 2 套独立实现 | 新 | agent-runtime 从 agent-core 导入 |
 | TB-7 | docker compose 冒烟需 Docker | 可选 | 环境依赖 |
 | TB-11 | 双轨配置体系部分修复 | 部分修复 | pydantic-settings 收敛 |
 | TB-13 | 双轨认知/维护成本 | 结构性 | 优化 F 收敛中 |
@@ -125,9 +125,9 @@
 
 | ID | 问题 | 修复方向 |
 |----|------|---------|
-| F-S0-07 | ruff select 缺 I | 统一为 ["E4","E7","E9","F","I"] |
-| F-S0-09 | ARCHITECTURE.md §2.2 未列 exhibition-agent | 补充 |
-| F-S0-10 | agent-runtime 无 ruff/pytest 配置 | 补充配置 |
+| F-S0-07 | ✅已修复（d80a27e）：ruff select 缺 I | 统一为 ["E4","E7","E9","F","I"] |
+| F-S0-09 | ✅已修复（d80a27e）：ARCHITECTURE.md §2.2 未列 exhibition-agent | 补充 |
+| F-S0-10 | ✅已修复（d80a27e）：agent-runtime 无 ruff/pytest 配置 | 补充配置 |
 
 ## 4. REFUTED 清单（先验声称 vs 实测）
 
@@ -168,9 +168,9 @@
 | 先验登记 | 38（TB 14 + TD 15 + U 1 + Roadmap 8） |
 | 新发现 | 10（S0 6 + S1 4） |
 | 总登记 | 48 |
-| 已修复 | 34 |
-| 仍成立 | 14（P0×1 + P1×2 + P2×8 + P3×3） |
+| 已修复 | 43（先验 34 + 2026-09-21 本批 9：F-S1-03/F-S1-06/F-S0-01~04/F-S0-07/09/10） |
+| 仍成立 | 5（F-S0-08 / F-S1-02 / F-S1-04 / F-S1-05 / TB-7；TB-11 部分修复、TB-13 结构性、F-S1-01 方案已立待实施） |
 | REFUTED | 6 |
 | 文档失效 | 4 |
 | 待验证假设 | 7 |
-| **最严重** | **F-S1-03（P0）** |
+| **最严重** | **F-S0-08 / F-S1-02 / F-S1-04 / F-S1-05（P2，收敛期）** |
