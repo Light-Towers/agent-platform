@@ -18,7 +18,8 @@
 | `applications/wenda-data-agent/` | Text-to-SQL 数据分析垂直场景（已直连联邦契约，无需 adapter） | — |
 | `applications/zhanggui-zhiku/` | 掌柜智库：RAG 知识库导入 + 多路检索问答（:8900；**注意包名仍为 `app`**，sys.path 上会遮蔽旧 app 名，勿在根测试中 import `app`） | `zhanggui-zhiku` 脚本 |
 | `applications/dialogue-framework/` | LLM 对话系统框架基础设施 | `dialogue_framework.cli:main` |
-| `tests/` | agent_server 单元测试 | `pytest -q` |
+| `tests/` | agent_server 单元测试（根套件） | `pytest -q` |
+| `applications/agent_server/tests/` | agent_server 应用层集成测试（GraphPlanner × runtime，2026-09-21 F-S1-01 迁入） | `pytest applications/agent_server/tests -q` |
 | `eval/` | agent_server 评测门禁（12 条 golden；`run_eval.py` 启发式 + `run_planner_eval.py` 双 Planner 基线） | `python eval/run_eval.py` |
 | `docs/` | 设计文档 | — |
 
@@ -26,8 +27,8 @@
 
 ```bash
 uv sync --all-packages --extra dev   # 安装（workspace 全量包 + dev 工具）
-make ci                              # CI 唯一门禁：lint + 7 个 pytest session（见 Makefile test 目标）+ 启发式 eval
-make test                            # 7 session pytest（根 / agent-runtime / 联邦 / kefu / exhibition / dialogue-framework / zhanggui-zhiku）
+make ci                              # CI 唯一门禁：lint + 8 个 pytest session（见 Makefile test 目标）+ 启发式 eval
+make test                            # 8 session pytest（根 / agent-runtime / agent-server / 联邦 / kefu / exhibition / dialogue-framework / zhanggui-zhiku）
 make eval                            # 评测门禁（启发式，CI 可达）
 DATABASE_URL= uvicorn agent_server.main:app --port 8000  # 零依赖冒烟
 ```

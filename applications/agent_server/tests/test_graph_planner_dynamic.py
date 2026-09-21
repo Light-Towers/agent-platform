@@ -1,10 +1,13 @@
-"""GraphPlanner（Phase B）集成测试：LLM 组合多 Skill DAG 并经 execute_plan 执行（含 input_refs 传递）。"""
+"""GraphPlanner（Phase B）集成测试：LLM 组合多 Skill DAG 并经 execute_plan 执行（含 input_refs 传递）。
+
+归属：applications/agent_server/tests/（应用层集成测试，测 agent_server.planners.graph.GraphPlanner
+× agent_runtime 执行链）。2026-09-21 由 packages/agent-runtime/tests/ 迁入，消除红线 1
+（共享包测试反向 import 应用层）违规——见 docs/plans/plan-fix-f-s1-01-test-reverse-import.md。
+"""
 
 from __future__ import annotations
 
 import json
-
-from agent_server.planners.graph import GraphPlanner
 
 from agent_runtime.planner.execution_graph import execute_plan
 from agent_runtime.planner.protocol import (
@@ -13,6 +16,7 @@ from agent_runtime.planner.protocol import (
     StreamEvent,
 )
 from agent_runtime.skills.registry import Skill, SkillKind, SkillRegistry
+from agent_server.planners.graph import GraphPlanner
 
 
 async def _fetch(**kwargs):
