@@ -13,6 +13,7 @@
 > 5. `execute_graph` 的 `_run` 已节点级异常隔离（`execution_graph.py:160-165`）；
 > 6. `deadline` 已由 P1-1 接入并在 `execute_graph` 消费。
 > **真正的缺口**是：新控制平面（graph 路径）已完整但**非默认**——`config.py:102` 默认 `planner="deterministic"`，`DeterministicPlanner` 仍走 `route→registry.execute`，`AgenticPlanner` 包装 `_execute_agent_core`（deep_agent 黑盒，不经 `registry`），两者均不产出 `graph`。后续优先级见下方 §0。
+> 本过时登记已收录于 `docs/analysis/2026-09-21/02-debt-diagnosis.md` §5。
 
 > **已完成基线速览**（P0-1 + P1-1/1-2/1-3 均已完成并验证）：
 > - **P0-1** 部署约束文档 → `docs/deployment.md`（multi-worker 约束 + coordinator.py 链接）。

@@ -140,14 +140,15 @@
 | exhibition-agent 未跟踪 | "整目录未跟踪" | **REFUTED**：已 commit d0c3800，44 跟踪文件 | `git log --oneline -1 -- applications/exhibition-agent/` |
 | TODO~35 | 预期约 35 处 TODO/FIXME | **REFUTED**：实际 8 处（1 TODO + 7 DeprecationWarning + 0 FIXME） | `grep -rn "TODO\|FIXME\|DeprecationWarning" packages/ applications/ tests/` |
 
-## 5. 文档失效（4 处）
+## 5. 文档失效（3 处，已全部修复）
 
-| 问题 | 说明 |
-|------|------|
-| tech-debt-hardcoded-logic.md 路径 | TD-3/TD-4 引用原 `agent_federation/agent/intent/classifier.py`（已迁移到 agent_core/intent/） |
-| runtime-governance-roadmap.md | 顶部已自警示"第三方审核稿部分过时"（:8-15） |
-| ARCHITECTURE.md §2.2 | 未列 exhibition-agent |
-| ARCHITECTURE.md :14 | 仍用旧名 `app`/`deepagents` |
+| 问题 | 说明 | 修复 |
+|------|------|------|
+| tech-debt-hardcoded-logic.md 路径 | TD-3/TD-4 引用原 `agent_federation/agent/intent/classifier.py`（已迁移） | ✅ 路径更新为 `packages/agent-core/agent_core/intent/` |
+| runtime-governance-roadmap.md | 顶部已自警示"第三方审核稿部分过时"（:8-15） | ✅ 自标补充 §5 引用 |
+| ARCHITECTURE.md 旧名 | :14/:49/:55/:82-84 仍用旧名 `app` | ✅ 统一为 `agent_server`，exhibition-agent 契约版本更新为 v1.2 |
+
+> 原「ARCHITECTURE.md §2.2 未列 exhibition-agent」经核实为误报（§2.2 :52 已列入），已移除。
 
 ## 6. 待验证假设
 

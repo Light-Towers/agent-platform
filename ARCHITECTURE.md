@@ -11,7 +11,7 @@
 
 - **Packages（平台基础设施）**：`agent-core`、`agent-runtime`、`shared-schemas`
   —— 它们是**库**，被其它成员以 `workspace = true` 依赖引用（见根 `pyproject.toml` 的 `[tool.uv.sources]`）。
-- **Applications（应用 / 产品）**：`app`（拟改名 `agent-server`）、`agent_federation`、`dialogue-framework`、`kefu-service`、`wenda-data-agent`、`zhanggui-zhiku`
+- **Applications（应用 / 产品）**：`agent_server`、`agent_federation`、`dialogue-framework`、`exhibition-agent`、`kefu-service`、`wenda-data-agent`、`zhanggui-zhiku`
   —— 它们是**独立可部署单元**，各自带 `pyproject.toml` / `Dockerfile` / `docker-compose.yml` / `README`。
 
 目录平铺是历史遗留；逻辑分层早已由 `uv workspace` 隐式承认（仅 3 个 packages 出现在 `[tool.uv.sources]`）。
@@ -46,13 +46,13 @@ agent-core  agent-runtime  shared-schemas  agent-server  agent_federation  dialo
 
 | 目录 | 定位 | 部署形态 |
 |------|------|----------|
-| `app` → **`agent-server`**（拟改名） | 默认宿主 / 单进程 Supervisor 平台参考应用 | 根 `docker-compose.yml` 编排，:8000 |
+| `agent_server` | 默认宿主 / 单进程 Supervisor 平台参考应用 | 根 `docker-compose.yml` 编排，:8000 |
 | `agent_federation` | 多 Agent 联邦网关编排系统（生产级） | 自带 `docker-compose.yml` + 全套可观测栈 |
 | `dialogue-framework` | 对话领域框架 / 上层对话引擎 | 独立 package，当前主供内部 |
-| `exhibition-agent` | 会展行业 AI Agent（平台侧骨架；按跨项目接口契约 v1.1 接入 mingyang-warehouse） | 独立部署 |
+| `exhibition-agent` | 会展行业 AI Agent（平台侧骨架；按跨项目接口契约 v1.2 接入 mingyang-warehouse） | 独立部署 |
 | `kefu-service` / `wenda-data-agent` / `zhanggui-zhiku` | 联邦下游子服务 / 领域应用 | 各自独立部署 |
 
-> `app` 不是「平台层」，而是「使用平台能力的应用」。改名 `agent-server` 以明确其为「默认 Runtime 宿主」。
+> `agent_server` 不是「平台层」，而是「使用平台能力的应用」（默认 Runtime 宿主）。
 > `agent_federation` / `dialogue-framework` 是**独立 Agent 应用 / 领域框架**，不是 `agent-runtime` 的底层模块。
 
 ## 3. 依赖方向（红线依据）
@@ -79,9 +79,9 @@ agent-core  agent-runtime  shared-schemas  agent-server  agent_federation  dialo
 
 ## 4. 架构红线（不可逾越）
 
-1. **Package 互不可反向依赖**：`agent-core` 不得 import `agent-runtime` / `app` / 任何 application；`agent-runtime` 不得 import 任何 application。
-2. **Application 不得互相 import 内部模块**：`agent_federation` 不得 `import app.`；各 application 仅通过 HTTP + `shared-schemas` 契约交互。
-3. **`agent-core` 内核零宿主依赖**：不得 import `app.core.config`、LangGraph、FastAPI 等宿主/PaaS 依赖（设计铁律）。
+1. **Package 互不可反向依赖**：`agent-core` 不得 import `agent-runtime` / `agent_server` / 任何 application；`agent-runtime` 不得 import 任何 application。
+2. **Application 不得互相 import 内部模块**：`agent_federation` 不得 `import agent_server.`；各 application 仅通过 HTTP + `shared-schemas` 契约交互。
+3. **`agent-core` 内核零宿主依赖**：不得 import `agent_server.core.config`、LangGraph、FastAPI 等宿主/PaaS 依赖（设计铁律）。
 4. **禁止再造 Runtime**：任何 application（`dialogue-framework` / `agent_federation` 等）需要的 Planner / Skill / Workflow，应从 `agent-runtime` 消费，不得另起一套执行引擎（当前 `agent-runtime` 仍在成形期，是收敛窗口）。
 5. **跨进程通信必须走 `shared-schemas`**：Request / Response / Event 不得各自定义导致字段漂移。
 
