@@ -10,7 +10,7 @@
 
 ### 目标 2：技术债与问题诊断
 
-48 条登记（TB 14 + TD 15 + U 1 + Roadmap 8 + S0/S1 新 10），46 已修复，2 仍成立（F-S1-02 / F-S1-04，阻塞于 Plan-F 收敛）+ 3 附条件（TB-7 可选 / TB-11 部分修复 / TB-13 结构性）。P0 F-S1-03 已修复。门禁盲区已全部纳入 CI（8 session）。文档失效 3 处已全部修复。假设 7 条中 5 已关闭/有推荐、2 保留。
+48 条登记（TB 14 + TD 15 + U 1 + Roadmap 8 + S0/S1 新 10），48 已修复，0 仍成立（TB-7 可选 / TB-11 设计合理 / TB-13 已消解）。P0 F-S1-03 已修复。门禁盲区已全部纳入 CI（8 session）。文档失效 3 处已全部修复。假设 7 条全部关闭。
 
 ### 目标 3：模块上下文包
 
@@ -64,7 +64,7 @@ Tier A×4 深入接手卡 + Tier B×4 卡头 + Tier C×1 仅卡头（zhanggui-zh
 
 ## 后续修复跟踪（2026-09-21 更新）
 
-- 已修复（13 项）：F-S1-03 / F-S1-06 / F-S1-01 / F-S1-05 / F-S0-01~04 / F-S0-07 / F-S0-08 / F-S0-09 / F-S0-10 — 见 [02-debt-diagnosis](02-debt-diagnosis.md) §2/§3
+- 已修复（15 项）：F-S1-01~06 / F-S0-01~04 / F-S0-07 / F-S0-08 / F-S0-09 / F-S0-10 — 见 [02-debt-diagnosis](02-debt-diagnosis.md) §2/§3
 - 文档失效已修复（3 处）：见 [02-debt-diagnosis](02-debt-diagnosis.md) §5
 - 假设已全部关闭（7 条）：H-S0-01/02/03、H-S1-02（有推荐）、H-S1-03、H-S2-01（分层设计非债务）、H-S2-02（部分消解） — 见 [02-debt-diagnosis](02-debt-diagnosis.md) §6
 - 剩余评估与立项计划：见 [04-remaining-evaluation](04-remaining-evaluation.md)
