@@ -210,6 +210,13 @@ async def lifespan(app: FastAPI):
     except Exception:
         logger.warning("workflow auto-discovery failed", exc_info=True)
 
+    # MCP 工具自动注册为 Skill（每个工具 → SkillKind.REMOTE Skill）
+    if mcp_manager is not None:
+        from agent_runtime.skills.mcp import register_mcp_skills
+
+        mcp_count = register_mcp_skills(mcp_manager, registry)
+        logger.info("auto-registered %d MCP tool skills", mcp_count)
+
     app.state.registry = registry
     app.state.planner = get_planner(settings, registry=registry)
     app.state.planner_runtime = PlannerRuntime(

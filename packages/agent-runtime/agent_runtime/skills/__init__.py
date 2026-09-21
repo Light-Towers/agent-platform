@@ -6,6 +6,7 @@
 
 from agent_runtime.skills.agent import as_agent_skill
 from agent_runtime.skills.function import as_function_skill
+from agent_runtime.skills.mcp import register_mcp_skills
 from agent_runtime.skills.registry import (
     DuplicateSkillError,
     Skill,
@@ -24,4 +25,5 @@ __all__ = [
     "as_agent_skill",
     "as_function_skill",
     "as_remote_skill",
+    "register_mcp_skills",
 ]
