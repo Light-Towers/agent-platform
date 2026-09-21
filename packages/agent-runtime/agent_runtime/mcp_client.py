@@ -14,6 +14,7 @@ import json
 import logging
 import time
 import uuid
+from contextlib import AsyncExitStack
 
 from agent_runtime.cache import spawn_background
 from agent_runtime.circuit_breaker import CircuitBreaker
@@ -23,6 +24,9 @@ logger = logging.getLogger(__name__)
 
 try:
     import mcp as mcp_sdk  # noqa: F401  SDK 可用性探测，_MCP_AVAILABLE 依赖其导入成功
+    from mcp import ClientSession, StdioServerParameters
+    from mcp.client.sse import sse_client
+    from mcp.client.stdio import stdio_client
 
     _MCP_AVAILABLE = True
 except ImportError:
@@ -38,6 +42,7 @@ class _MCPConnection:
         self.session = None
         self.tools: list[str] = []
         self.available: bool = False
+        self._exit_stack: AsyncExitStack | None = None
 
 
 class MCPClientManager:
@@ -72,13 +77,15 @@ class MCPClientManager:
             conn = _MCPConnection(config, breaker)
             try:
                 if config.transport == "stdio":
-                    conn.session = await self._connect_stdio(config)
+                    stack, session = await self._connect_stdio(config)
                 elif config.transport == "sse":
-                    conn.session = await self._connect_sse(config)
+                    stack, session = await self._connect_sse(config)
                 else:
                     logger.warning("MCP unknown transport: %s", config.transport)
                     continue
 
+                conn.session = session
+                conn._exit_stack = stack
                 conn.tools = await self._discover_tools(conn.session)
                 conn.available = True
                 self._connections[config.server_id] = conn
@@ -96,35 +103,36 @@ class MCPClientManager:
                 )
 
     async def _connect_stdio(self, config: McpServerConfig):
-        """stdio transport：启动子进程，通过 stdin/stdout 通信。"""
+        """stdio transport：启动子进程，经 MCP SDK 建立 ClientSession。"""
         parts = config.endpoint.split(maxsplit=1)
         command = parts[0]
         args = parts[1].split() if len(parts) > 1 else []
-        reader, writer = await asyncio.create_subprocess_exec(
-            command,
-            *args,
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        return {"reader": reader, "writer": writer}
+        params = StdioServerParameters(command=command, args=args)
+        stack = AsyncExitStack()
+        read, write = await stack.enter_async_context(stdio_client(params))
+        session = await stack.enter_async_context(ClientSession(read, write))
+        await session.initialize()
+        return stack, session
 
     async def _connect_sse(self, config: McpServerConfig):
-        """SSE transport：建立 HTTP SSE 连接。"""
-        return {"endpoint": config.endpoint}
+        """SSE transport：经 MCP SDK 建立 ClientSession。"""
+        stack = AsyncExitStack()
+        read, write = await stack.enter_async_context(sse_client(url=config.endpoint))
+        session = await stack.enter_async_context(ClientSession(read, write))
+        await session.initialize()
+        return stack, session
 
     async def _discover_tools(self, session) -> list[str]:
         """发现 server 暴露的工具列表。"""
-        if isinstance(session, dict) and "reader" in session:
-            return ["list_tools"]
-        return []
+        result = await session.list_tools()
+        return [t.name for t in result.tools]
 
     async def close_all(self) -> None:
         """关闭所有连接。"""
         for server_id, conn in self._connections.items():
             try:
-                if isinstance(conn.session, dict) and "writer" in conn.session:
-                    conn.session["writer"].terminate()
+                if conn._exit_stack is not None:
+                    await conn._exit_stack.aclose()
                 conn.available = False
             except Exception:
                 logger.warning("MCP close failed server=%s", server_id, exc_info=True)
@@ -199,7 +207,17 @@ class MCPClientManager:
                 duration_ms=duration_ms,
             )
 
-        evidence = self._reduce_result(server_id, tool_name, result)
+        try:
+            evidence = self._reduce_result(server_id, tool_name, result)
+        except RuntimeError:
+            spawn_background(
+                self._audit_call(caller, server_id, tool_name, params, "failed", duration_ms, "TOOL_RETURNED_ERROR")
+            )
+            return McpToolResult(
+                success=False,
+                error="TOOL_RETURNED_ERROR",
+                duration_ms=duration_ms,
+            )
         spawn_background(
             self._audit_call(caller, server_id, tool_name, params, "success", duration_ms, None)
         )
@@ -208,25 +226,41 @@ class MCPClientManager:
     async def _invoke_tool(self, conn: _MCPConnection, tool_name: str, params: dict):
         """实际调用 MCP 工具。
 
-        TODO: 当前为 MVP 桩，未接入 mcp_sdk 真实调用（connect_all / call_tool 等
-        外围逻辑已完整实现，但此处始终返回 mock）。真实接入时替换为
-        `await conn.session.call_tool(tool_name, params)` 并解析 Content 列表。
+        经 mcp_sdk ClientSession.call_tool 发起真实调用，返回 CallToolResult。
         子类可覆写此方法用于 mock 测试。
         """
         if not _MCP_AVAILABLE:
             raise RuntimeError("MCP SDK not installed")
-        return {"tool": tool_name, "params": params, "result": "mock"}
+        return await conn.session.call_tool(tool_name, params)
 
     def _reduce_result(self, server_id: str, tool_name: str, result) -> list[str]:
-        """将工具返回结果归约为 evidence list[str]。"""
-        if isinstance(result, dict):
-            content = json.dumps(result, ensure_ascii=False, default=str)
+        """将工具返回结果归约为 evidence list[str]。
+
+        处理 MCP SDK 的 CallToolResult（含 .content / .isError）以及其他类型。
+        """
+        if hasattr(result, "is_error") and result.is_error:
+            raise RuntimeError(f"MCP tool {tool_name} returned error: {result}")
+
+        pieces: list[str] = []
+        if hasattr(result, "content") and result.content:
+            for item in result.content:
+                text = getattr(item, "text", None)
+                if text is not None:
+                    pieces.append(text)
+                else:
+                    pieces.append(str(item))
+        elif isinstance(result, dict):
+            pieces.append(json.dumps(result, ensure_ascii=False, default=str))
         else:
-            content = str(result)
+            pieces.append(str(result))
+
         max_len = 500
-        if len(content) > max_len:
-            content = content[:max_len] + "..."
-        return [f"[MCP: {server_id}/{tool_name}] {content}"]
+        evidence: list[str] = []
+        for piece in pieces:
+            if len(piece) > max_len:
+                piece = piece[:max_len] + "..."
+            evidence.append(f"[MCP: {server_id}/{tool_name}] {piece}")
+        return evidence
 
     async def _audit_call(
         self,

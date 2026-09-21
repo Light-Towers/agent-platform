@@ -2,6 +2,27 @@
 
 本仓库为 uv workspace monorepo。**唯一受支持的安装/运行入口是根 `uv.lock` + `uv sync`**，子包不再维护独立 `uv.lock`（见 v2 修复 #14）。
 
+## MCP SDK 真实接入（2026-09-22）
+
+> `mcp_client.py` 的 MVP 桩（`_invoke_tool` / `_discover_tools` / `_connect_*`）替换为真实 MCP SDK 调用，MCP 工具可经 stdio / SSE transport 真正连接、发现、调用。
+> 验证：91 passed（agent-runtime）/ 361 passed 15 skipped（根）/ ruff 0 error。
+
+### 改动
+
+- **`_connect_stdio`**：`StdioServerParameters` + `stdio_client()` async ctx → `ClientSession(read, write)` → `session.initialize()`，返回 `(AsyncExitStack, session)`。
+- **`_connect_sse`**：`sse_client(url)` async ctx → `ClientSession` → `initialize()`，同上。
+- **`_discover_tools`**：`await session.list_tools()` → `[t.name for t in result.tools]`。
+- **`_invoke_tool`**：`await conn.session.call_tool(tool_name, params)` 返回 `CallToolResult`（替换原 mock dict）。
+- **`_reduce_result`**：处理 `CallToolResult.content`（`TextContent.text` 提取），`is_error=True` 时 raise `RuntimeError`（`call_tool` 捕获后返回 `McpToolResult(success=False, error="TOOL_RETURNED_ERROR")`）。
+- **`close_all`**：`await conn._exit_stack.aclose()` 按 LIFO 关闭 session → transport。
+- **`_MCPConnection`**：新增 `_exit_stack: AsyncExitStack | None` 字段。
+- **`pyproject.toml`**：`agent-runtime` 新增 `[project.optional-dependencies] mcp = ["mcp>=0.9"]`。
+
+### 测试
+
+- 新增 `test_mcp_client_real.py`（13 例）：`_reduce_result` 处理 `CallToolResult` / `is_error` / 截断 / dict 兼容 / 纯字符串；`_invoke_tool` 真实调用 + SDK 缺失降级；`_discover_tools` 真实 `list_tools`；`close_all` 关闭 `AsyncExitStack`；`call_tool` 集成（`is_error` → 失败 / `TextContent` → evidence）。
+- 现有 `test_mcp_skill.py` 8 例全绿（手动注入 `_MCPConnection`，不经 `connect_all`，不受影响）。
+
 ## Plan-F 架构收口 + Skill 体系完善（2026-09-21）
 
 > Plan-F 4 个演进方向全量闭合，Skill 注册体系完善，沙箱代码执行落地。
