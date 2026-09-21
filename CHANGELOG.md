@@ -117,7 +117,7 @@
 - **SessionCoordinator 语义明确（P0）**：docstring 声明 **process-local 单实例**（`_active/_queues/_conditions` 均 asyncio 进程内状态），多副本下「同 session 串行」不成立；演进方向：分布式 lease / durable execution 持有 ownership（本期不做）。
 - **Skill 入参契约真正执行（P1）**：`SkillRegistry.execute()` 新增 `_validate_input()`——`required` 存在性 + `properties` 类型校验，缺 schema 向后兼容、不拒绝注册方注入参数（mcp 的 state/mcp_manager）；传错参数抛明确 `SkillExecutionError` 而非内部 Python exception。新增 3 测试。
 - **术语精确化**：`SkillKind.WORKFLOW` 注释与架构文档统一「Static DAG → Workflow（Static/Conditional）」，LangGraph 明确为执行实现。
-- **演进方向留档（暂缓重构）**：SkillRegistry/SkillRuntime 分离、Dynamic Agent 纳入 Skill 体系、`Plan.notes`→`ExecutionContext`、Workflow Definition→Workflow Skill 编译——写入 `docs/plan-f-single-runtime-multi-planner.md`，按「边界出现再拆」原则执行。
+- **演进方向留档（暂缓重构）**：SkillRegistry/SkillRuntime 分离、Dynamic Agent 纨入 Skill 体系、Workflow Definition→Workflow Skill 编译——写入 `docs/plan-f-single-runtime-multi-planner.md`，按「边界出现再拆」原则执行。`Plan.notes`→显式字段已 ✅ 完成（2026-09-21）。
 - **测试**：根 tests 180 passed（governance 7 + capability registry 16 含契约测试）/ 联邦 unit 89 passed（零回归），ruff 0 error。
 
 ## Plan-F 收尾（2026-08-19）—— Capability→Skill 全量 rename

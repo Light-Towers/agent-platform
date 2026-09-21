@@ -81,28 +81,34 @@ class Plan(BaseModel):
     ``graph`` 类型为 ``Any`` 以避免 protocol ↔ execution_graph 循环导入，实际为
     ``ExecutionGraph | None``。``mode="graph"`` 时 ``graph`` 必须非空。
 
-    .. deprecated:: 0.2.0
-       ``notes`` 承载决策期附加信息，正在迁移至对应 Context 层（PlannerContext/ConversationContext/TaskState/PlanningState/ExecutionIdentity）。
-       新代码禁止写入；读取路径暂保留兼容，后续版本将删除。
+    字段归属（Plan.notes 解耦后）：
+    - ``question`` / ``last_snapshot``：决策期输入（与 PlannerContext 对应字段同源）；
+    - ``workspace_id`` / ``user_id`` / ``session_id`` / ``planner_name``：身份/轨迹元数据；
+    - ``messages`` / ``compacted``：对话状态（与 ConversationContext 对应）；
+    - ``constraints``：任务约束（与 TaskState.constraints 对应）；
+    - ``iterations``：重规划计数；
+    - ``kwargs``：单 route delegate 调用参数（execute_plan else 分支）。
     """
 
     mode: Literal["deterministic", "workflow", "graph", "agentic"] = "deterministic"
     route: str = ""
     sub_query: str = ""
     reason: str = ""
-    # 显式字段：替代 Plan.notes 迁移（P1 架构债务）
     question: str = ""
     workspace_id: str = "default"
     user_id: str = "default"
+    session_id: str = ""
+    planner_name: str = ""
     last_snapshot: dict[str, Any] | None = None
     messages: list[Any] = Field(default_factory=list)
     compacted: bool = False
     iterations: int = 0
+    constraints: dict[str, Any] = Field(default_factory=dict)
+    kwargs: dict[str, Any] = Field(default_factory=dict)
     mcp_server: str = ""
     mcp_tool: str = ""
     mcp_params: dict[str, Any] = Field(default_factory=dict)
     execution_mode: str = ""
-    notes: dict[str, Any] = Field(default_factory=dict)
     graph: Any = None
 
 
@@ -129,9 +135,8 @@ class PlannerContext(BaseModel):
     mcp_tool: str = ""
     mcp_params: dict[str, Any] = Field(default_factory=dict)
 
-    # 显式字段：替代 Plan.notes 迁移（P1 架构债务）
-    question: str = ""
-    previous_execution: dict[str, Any] | None = None  # 上一轮执行快照
+    # 上一轮执行的结构化快照（与 last_snapshot 同义，供 Planner 在 prompt 组装时消费）
+    previous_execution: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)

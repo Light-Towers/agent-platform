@@ -48,8 +48,8 @@ async def _persist_trajectory(
         return
     record = TrajectoryRecord(
         execution_id=exec_ctx.execution_id,
-        session_id=plan.notes.get("session_id"),
-        planner=plan.notes.get("planner"),
+        session_id=plan.session_id or None,
+        planner=plan.planner_name or None,
         plan=plan.model_dump(),
         steps=list(exec_ctx.steps),
         total_tokens=exec_ctx.tokens_used,
@@ -422,11 +422,11 @@ async def execute_plan(
     cm = ContextManager()
     ctx = cm.create_context(
         goal=plan.sub_query or plan.route,
-        constraints=plan.notes.get("constraints"),
+        constraints=plan.constraints or None,
     )
     # WS-2：compacted 标记回填——上游（Planner 路由期经 ContextAssembler 压缩）
-    # 在 notes 中标记后，由这里写入 ConversationContext，保持三层契约一致。
-    if plan.notes.get("compacted"):
+    # 在 Plan.compacted 标记后，由这里写入 ConversationContext，保持三层契约一致。
+    if plan.compacted:
         ctx.conversation.compacted = True
 
     if plan.graph is not None:
@@ -478,7 +478,7 @@ async def execute_plan(
     else:
         yield StreamEvent(type="route", payload={"capability": plan.route, "reason": plan.reason})
         async with runtime.execution():
-            kwargs = plan.notes.get("kwargs", {})
+            kwargs = plan.kwargs
             result = await runtime.delegate(plan.route, **kwargs)
             cm.record_skill(ctx, plan.route, result=result)
             yield StreamEvent(type="evidence", payload={"node": plan.route, "result": result})
