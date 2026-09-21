@@ -10,7 +10,7 @@
 
 ### 目标 2：技术债与问题诊断
 
-48 条登记（TB 14 + TD 15 + U 1 + Roadmap 8 + S0/S1 新 10），34 已修复（抽查确认），14 仍成立。最严重为 P0 F-S1-03（agent-core.memory 模块级硬依赖 langgraph）。门禁盲区 40 文件/285 实际测试（--collect-only 实测确认）。
+48 条登记（TB 14 + TD 15 + U 1 + Roadmap 8 + S0/S1 新 10），46 已修复，2 仍成立（F-S1-02 / F-S1-04，阻塞于 Plan-F 收敛）+ 3 附条件（TB-7 可选 / TB-11 部分修复 / TB-13 结构性）。P0 F-S1-03 已修复。门禁盲区已全部纳入 CI（8 session）。文档失效 3 处已全部修复。假设 7 条中 5 已关闭/有推荐、2 保留。
 
 ### 目标 3：模块上下文包
 
@@ -50,24 +50,25 @@ Tier A×4 深入接手卡 + Tier B×4 卡头 + Tier C×1 仅卡头（zhanggui-zh
 
 ## 待人工拍板项
 
-| 编号 | 问题 | 依据 |
-|------|------|------|
-| H-S0-01 | agent_federation/tests 根级 2 测试是否故意排除（conftest 冲突？） | Makefile 注释提冲突但根级共享 conftest |
-| H-S0-02 | zhanggui-zhiku/tests 是否故意不纳入 CI（无 pytest 依赖） | zhanggui-zhiku/pyproject.toml 无 dev 依赖 |
-| H-S0-03 | agent-runtime/tests 是否故意不纳入 CI | 无 pytest 配置 |
-| H-S1-02 |&nbsp;exhibition-agent 不依赖 agent-runtime 是否有意豁免红线 4 | 独立工程设计 |
-| H-S1-03 | agent-runtime otel.py 的 _NoOpTracer 是否先于 agent-core tracing.py | 历史遗留 vs 有意 |
-| H-S2-01 | TB-11 长期 pydantic-settings 收敛是否有实际需求驱动 | — |
-| H-S2-02 | TB-13 双轨认知成本是否在 Plan-F 收敛后自然消解 | — |
+| 编号 | 问题 | 依据 | 状态 |
+|------|------|------|------|
+| H-S0-01 | agent_federation/tests 根级 2 测试是否故意排除（conftest 冲突？） | Makefile 注释提冲突但根级共享 conftest | ✅ 已关闭：门禁遗漏（已修复） |
+| H-S0-02 | zhanggui-zhiku/tests 是否故意不纳入 CI（无 pytest 依赖） | zhanggui-zhiku/pyproject.toml 无 dev 依赖 | ✅ 已关闭：门禁遗漏（已修复） |
+| H-S0-03 | agent-runtime/tests 是否故意不纳入 CI | 无 pytest 配置 | ✅ 已关闭：门禁遗漏（已修复） |
+| H-S1-02 | exhibition-agent 不依赖 agent-runtime 是否有意豁免红线 4 | 独立工程设计 | ✅ 已有推荐：选项 A（有意豁免），待拍板 |
+| H-S1-03 | agent-runtime otel.py 的 _NoOpTracer 是否先于 agent-core tracing.py | 历史遗留 vs 有意 | ✅ 已关闭：F-S1-06 已收敛 |
+| H-S2-01 | TB-11 长期 pydantic-settings 收敛是否有实际需求驱动 | — | 保留 |
+| H-S2-02 | TB-13 双轨认知成本是否在 Plan-F 收敛后自然消解 | — | 保留 |
 
 ---
 
 ## 后续修复跟踪（2026-09-21 更新）
 
-- 已修复（9 项）：F-S1-03 / F-S1-06 / F-S0-01~04 / F-S0-07 / F-S0-09 / F-S0-10 — 见 [02-debt-diagnosis](02-debt-diagnosis.md) §2/§3
-- 方案已立待实施：F-S1-01 — 见 [plan-fix-f-s1-01](../../plans/plan-fix-f-s1-01-test-reverse-import.md)
+- 已修复（13 项）：F-S1-03 / F-S1-06 / F-S1-01 / F-S1-05 / F-S0-01~04 / F-S0-07 / F-S0-08 / F-S0-09 / F-S0-10 — 见 [02-debt-diagnosis](02-debt-diagnosis.md) §2/§3
+- 文档失效已修复（3 处）：见 [02-debt-diagnosis](02-debt-diagnosis.md) §5
+- 假设已关闭（5 条）：H-S0-01/02/03、H-S1-02（有推荐）、H-S1-03 — 见 [02-debt-diagnosis](02-debt-diagnosis.md) §6
 - 剩余评估与立项计划：见 [04-remaining-evaluation](04-remaining-evaluation.md)
-- exhibition 定位评估（F-S1-05 决策输入）：见 [05-exhibition-positioning-evaluation](05-exhibition-positioning-evaluation.md)
+- exhibition 定位评估（F-S1-05 决策输入）：见 [05-exhibition-positioning-evaluation](05-exhibition-positioning-evaluation.md) — 推荐选项 A（有意豁免），待拍板
 
 ---
 
