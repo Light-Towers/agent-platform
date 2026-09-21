@@ -11,7 +11,7 @@
 import logging
 from typing import Literal
 
-from agent_core.tracing import user_query_hash
+from agent_core.tracing import noop_tracer, user_query_hash
 
 logger = logging.getLogger(__name__)
 
@@ -32,38 +32,6 @@ except ImportError:
 _tracer = None
 
 
-class _NoOpSpan:
-    """空上下文管理器（OTel 未启用/未安装时）。"""
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *args):
-        return False
-
-    def set_attribute(self, key, value):
-        pass
-
-    def record_exception(self, exc):
-        pass
-
-    def add_event(self, name, attributes=None):
-        pass
-
-    def end(self):
-        pass
-
-
-class _NoOpTracer:
-    """空 tracer（OTel 未启用/未安装时）。"""
-
-    def start_as_current_span(self, name, **kwargs):
-        return _NoOpSpan()
-
-    def start_span(self, name, **kwargs):
-        return _NoOpSpan()
-
-
 def init_otel(
     exporter: Literal["otlp", "jaeger", "console", "none"] = "otlp",
     endpoint: str = "",
@@ -75,11 +43,11 @@ def init_otel(
 
     if not _OTEL_AVAILABLE:
         logger.warning("OTEL_INIT_FAILED: opentelemetry SDK not installed")
-        _tracer = _NoOpTracer()
+        _tracer = noop_tracer()
         return
 
     if exporter == "none":
-        _tracer = _NoOpTracer()
+        _tracer = noop_tracer()
         return
 
     # 采样率校验
@@ -132,13 +100,13 @@ def init_otel(
 
     except Exception:
         logger.warning("OTEL_INIT_FAILED", exc_info=True)
-        _tracer = _NoOpTracer()
+        _tracer = noop_tracer()
 
 
 def get_otel_tracer():
     """返回当前 tracer（未初始化时 NoOp）。"""
     if _tracer is None:
-        return _NoOpTracer()
+        return noop_tracer()
     return _tracer
 
 

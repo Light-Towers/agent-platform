@@ -133,6 +133,12 @@ class _NoOpSpanContextManager:
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> bool:
         return False  # 不吞异常
 
+    def __getattr__(self, name: str) -> Any:
+        # 兼容下游"手动进入 CM 后直接调 span 方法"用法
+        # （agent_server/api/routes.py:196-198）；with ... as span 路径不触发，语义不变。
+        span = object.__getattribute__(self, "_span")
+        return getattr(span, name)
+
 
 class _NoOpTracer:
     """no-op tracer：start_span / start_as_current_span 均可用。"""
@@ -149,6 +155,14 @@ class _NoOpTracer:
 def _make_noop_tracer() -> Any:
     """构造 no-op tracer（不依赖 OTel 全局 provider 状态，确定性零开销）。"""
     return _NoOpTracer()
+
+
+def noop_tracer() -> Any:
+    """公开 no-op tracer 工厂：供下游包（agent-runtime 等）复用，避免各自再造 shim。
+
+    语义与 :func:`_make_noop_tracer` 一致：零开销、绝不抛异常。
+    """
+    return _make_noop_tracer()
 
 
 # ---------------------------------------------------------------------------
@@ -466,5 +480,6 @@ __all__ = [
     "is_tracing_enabled",
     "is_initialized",
     "record_exception",
+    "noop_tracer",
     "_reset_for_tests",
 ]
