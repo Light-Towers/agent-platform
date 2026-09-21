@@ -291,3 +291,18 @@ app 的 search/rag/sql/mcp（进程内节点）与联邦 `database_query_agent`/
 - **Workflow Definition → Workflow Skill 编译**：支持 YAML/声明式 Workflow（`steps: [search, rag, summarize]`）编译为 WorkflowSkill 注册进 Registry，LangGraph 仅是其中一种执行后端。
 
 **验证**：root tests 180 passed（含 governance 7 + capability registry 16 契约测试）/ 联邦 unit 89 passed（零回归），ruff 0 error。未提交（待与真实 R1 基线一起）。
+
+### 2026-09-21 F-S1-02 / F-S1-04 收口（债务诊断全量闭合）
+
+> Plan-F Phase 0-3 完成后，债务诊断中 F-S1-02（agent_server 惰性 import agent_federation）和 F-S1-04（agent_federation CB+Cache 独立实现）的前置依赖已满足，本轮收口。
+
+**F-S1-02（3616a2e）**：AgenticPlanner 类从 `agent_federation/planners/agentic.py` 迁入 `agent_runtime/planner/agentic.py`（通用适配器）。执行器 `_execute_agent_core` 经 Python entry_points（`agent_runtime.agentic_executor` 组）发现注入——agent_federation 在 pyproject.toml 声明 entry point 并自动注册工厂，agent_server 改从 agent_runtime 导入，**消除 agent_server → agent_federation 的直接 import（红线 2）**。测试：root 361 passed / 联邦 92 passed，零回归。
+
+**F-S1-04（7680c76）**：
+- **CircuitBreaker**：`agent_federation/agent/circuit_breaker.py` 重构为委托 `agent_core.resilience.CircuitBreaker(SlidingWindowPolicy)` 引擎（agent_core 已有 SlidingWindowPolicy，注释标"agent_federation 原行为"），外层保留 async 接口 + 指标上报 + per-name 注册表。修复 agent_core `_evaluate_locked` 用 `_min_requests`（非 `_window_size`）作评估阈值的 bug。
+- **Singleflight**：迁入 `agent_runtime/singleflight.py`（通用，无 federation 依赖），原位置改为重导出。
+- **Cache layers**：`layers.py` 已复用 `agent_core.cache.build_cache_key`（TB-4 闭环），Valkey 后端有意保留（与 agent_runtime PG 后端面向不同场景）。
+
+**演进方向更新**：「Dynamic Agent 纳入 Skill 体系」——AgenticPlanner 已迁入 agent_runtime，执行器经 entry_points 注入（不再直调 `_execute_agent_core`）。完整收敛为 `SkillKind.AGENT` 仍作独立阶段（`_execute_agent_core` 副作用链包装须保行为），但跨应用 import 已消除。
+
+**验证**：root 361 passed / 联邦 92 passed，ruff 0 error。

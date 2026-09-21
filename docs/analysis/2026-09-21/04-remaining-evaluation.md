@@ -8,8 +8,8 @@
 | ID | 优先级 | 类型 | 立项建议 |
 |----|--------|------|---------|
 | F-S0-08 | P2 | 包名迁移 | 单独立方案（高成本，需迁移期） |
-| F-S1-02 | P2 | 收敛期收口 | 待 Plan-F 收敛里程碑后立 |
-| F-S1-04 | P2 | 重复实现收敛 | 单独立方案（依赖 agent-runtime 能力对齐 + F-S1-02） |
+| F-S1-02 | P2 | 收敛期收口 | ✅ 已修复（3616a2e）：AgenticPlanner 迁入 agent_runtime + entry_points |
+| F-S1-04 | P2 | 重复实现收敛 | ✅ 已修复（7680c76）：CB 复用 agent_core SlidingWindowPolicy + singleflight 迁入 agent_runtime |
 | F-S1-05 | P2 | 重复实现收敛 | 单独立方案（需先确认 exhibition 定位） |
 | TB-7 | P3 | 环境依赖 | 可选，不单独立项 |
 | TB-11 | P2 | 配置收敛 | 待 pydantic-settings 收敛需求驱动 |
@@ -29,24 +29,18 @@
 
 ## 2. F-S1-02 — agent_server 惰性 import agent_federation
 
-**现状**：`agent_server/planners/unified.py:90`、`__init__.py:38` 惰性 import agent_federation（收敛期产物）。
+**现状**：✅ 已修复（3616a2e，2026-09-21）。
 
-**评估方向**：Plan-F「单 Runtime + 多 Planner」收敛后，agent_server 应不再需要 agent_federation 的具体实现（Planner 策略可插拔）。收口方向：删除惰性 import，agent_server 仅依赖 agent-runtime + 自身 Planner 实现。
-
-**前置依赖**：Plan-F 收敛里程碑（agent_federation 是否仍作为独立编排中枢，还是其能力下沉到 agent-runtime）。
-**立项建议**：**不在现在立**，待 Plan-F 收敛方向明确后作为收口任务立项。
+**修复方案**：AgenticPlanner 类从 `agent_federation/planners/agentic.py` 迁入 `agent_runtime/planner/agentic.py`（通用适配器），执行器 `_execute_agent_core` 经 Python entry_points（`agent_runtime.agentic_executor` 组）发现注入。agent_federation 在 pyproject.toml 声明 entry point 并自动注册工厂。agent_server 改从 agent_runtime 导入 AgenticPlanner，消除对 agent_federation 的直接 import。
 
 ## 3. F-S1-04 — agent_federation CircuitBreaker+Cache 独立实现
 
-**现状**：`applications/agent_federation/agent/circuit_breaker.py` + `agent/cache/`（`layers.py` / `semantic_cache.py` / `singleflight.py`）独立实现，与 `agent_runtime` 的 circuit_breaker/cache 重复（红线 4）。
+**现状**：✅ 已修复（7680c76，2026-09-21）。
 
-**评估方向**：
-- 评估 agent_federation 的 CB/Cache 能力是否可改用 agent-runtime 的对应实现；
-- 差异点盘点（语义、配置、持久化）→ 决定"替换"还是"保留+桥接"；
-- agent_federation 是否在 Plan-F 后继续存在（若下沉，本项随 F-S1-02 收口）。
-
-**前置依赖**：F-S1-02 方向明确（agent_federation 去留）。
-**立项建议**：单独立 `plan-fix-f-s1-04-federation-cb-cache-converge.md`，但**在 F-S1-02 立项后做**（避免 agent_federation 去留未定就收敛其内部实现）。
+**修复方案**：
+- **CircuitBreaker**：`agent_federation/agent/circuit_breaker.py` 重构为委托 `agent_core.resilience.CircuitBreaker(SlidingWindowPolicy)` 引擎，外层保留 async 接口 + 指标上报 + per-name 注册表。同时修复 agent_core `_evaluate_locked` 用 `_min_requests`（非 `_window_size`）作评估阈值的 bug。
+- **Singleflight**：`agent_federation/agent/cache/singleflight.py` 迁入 `agent_runtime/singleflight.py`（通用，无 federation 依赖），原位置改为重导出。
+- **Cache layers**：`layers.py` 已复用 `agent_core.cache.build_cache_key`（TB-4 闭环），Valkey 后端有意保留（与 agent_runtime PG 后端面向不同场景）。
 
 ## 4. F-S1-05 — exhibition-agent 独立实现 Skill+ExecutionContext
 
@@ -83,12 +77,10 @@
 
 ## 立项顺序建议
 
-1. **现在可立**：F-S0-08（独立、无前置，但工期大）
-2. **待定位/收敛决策后立**：F-S1-05（待 exhibition 定位）→ F-S1-02（待 Plan-F 收敛）→ F-S1-04（跟 F-S1-02）
-3. **不单独立项**：TB-7 / TB-11 / TB-13（环境 / 需求驱动 / 自然消解）
+1. ✅ **已完成**：F-S0-08 / F-S1-05 / F-S1-02 / F-S1-04
+2. **不单独立项**：TB-7 / TB-11 / TB-13（环境 / 设计合理 / 已消解）
 
 ## 建议下一步
 
-- 若认可，先立 F-S0-08 方案（最大独立项）；
-- F-S1-05 立 exhibition 定位评估（轻量调研，为后续决策提供输入）；
-- F-S1-02/04 等 Plan-F 收敛里程碑。
+- 全部剩余项已闭合或附条件关闭，无待立项任务。
+- Plan-F 演进方向（SkillRegistry/SkillRuntime 分离、Dynamic Agent 纳入 Skill 体系、Plan.notes → ExecutionContext、Workflow Definition → Workflow Skill 编译）均标注"暂缓重构"，待实际需求驱动。
