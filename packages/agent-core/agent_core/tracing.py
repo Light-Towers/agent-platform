@@ -67,8 +67,8 @@ _otel_trace: Any = None
 _SDK_AVAILABLE: bool = False
 try:
     from opentelemetry import trace as _otel_trace
-    from opentelemetry.sdk.trace import TracerProvider as _SDKTracerProvider
     from opentelemetry.sdk.resources import Resource as _Resource
+    from opentelemetry.sdk.trace import TracerProvider as _SDKTracerProvider
     from opentelemetry.sdk.trace.export import BatchSpanProcessor as _BatchSpanProcessor
     from opentelemetry.sdk.trace.export import SimpleSpanProcessor as _SimpleSpanProcessor
 

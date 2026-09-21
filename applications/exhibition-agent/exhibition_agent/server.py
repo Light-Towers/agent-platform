@@ -26,6 +26,7 @@ from pydantic import BaseModel, Field, ValidationError
 
 from exhibition_agent.client.warehouse_client import WarehouseClient
 from exhibition_agent.config import Settings
+from exhibition_agent.contract.error_codes import ERROR_CODE_HTTP_MAP, PENDING_ANSWER_CODES, ErrorCode
 from exhibition_agent.contract.execution_context import ExecutionContext
 from exhibition_agent.graph.supervisor import run_supervisor
 from exhibition_agent.middleware.context_codec import encode_base64, encode_jwt
@@ -140,7 +141,9 @@ async def query(
     set_request_context(request_id=ctx.request_id, user_query_hash=query_hash)
 
     extra_headers: dict[str, str] = {}
-    if x_mock_scenario:
+    # X-Mock-Scenario 仅 DEV 档透传（审核建议 5）：STRICT 生产档忽略该头，
+    # 防客户端用 mock 头切换上游行为
+    if x_mock_scenario and not settings.verify_signature:
         extra_headers["X-Mock-Scenario"] = x_mock_scenario
 
     client = WarehouseClient(
@@ -167,7 +170,9 @@ async def query(
             "exhibition_agent.request",
             request_id=ctx.request_id,
             tenant_id=ctx.tenant_id,
-            query=body.query,
+            # W4 脱敏：span 属性不得含用户查询明文，只放稳定哈希（与 otel.py
+            # "数据脱敏（不含问题全文）"约定一致）
+            query_hash=query_hash,
         ):
             final_state = await run_supervisor(
                 initial_state,
@@ -176,37 +181,57 @@ async def query(
             # traceparent 必须在 span 内获取（span 退出后当前 context 已失效）
             tp = get_current_traceparent()
     except Exception as exc:
-        logger.exception("supervisor 执行失败：%s", exc)
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        # 审核安全修复（N2）：异常串（可能含栈信息）不得直出终端用户，
+        # 固定文案 + request_id 供日志关联定位
+        logger.exception("supervisor 执行失败（request_id=%s）：%s", ctx.request_id, exc)
+        raise HTTPException(
+            status_code=500,
+            detail={"code": "INTERNAL", "message": "supervisor 执行失败", "request_id": ctx.request_id},
+        ) from exc
 
     result = final_state.get("skill_result")
     answer = final_state.get("answer", "")
     sql_statements: list[str] = final_state.get("sql_statements", [])
     error_code = final_state.get("error")
 
-    # 重试耗尽的 retryable 错误（skill 内被捕获保证 trace 完整）→ 按契约 HTTP 语义返回，
-    # 不再吞成 200 通用文案，也不得丢成 500
-    _RETRYABLE_HTTP_STATUS: dict[str, int] = {"UPSTREAM_ERROR": 502, "RATE_LIMITED": 429}
-    if result is None and error_code in _RETRYABLE_HTTP_STATUS:
-        return JSONResponse(
-            status_code=_RETRYABLE_HTTP_STATUS[error_code],
-            content={
-                "request_id": ctx.request_id,
-                "answer": answer,
-                "readiness": "NOT_CONNECTED",
-                "classification": "INTERNAL",
-                "citations": [],
-                "sources": [],
-                "warnings": [f"{error_code}: warehouse 调用失败（已重试）"],
-                "error_code": error_code,
-                "retryable": True,
-                "sql_statements": sql_statements,
-            },
-        )
-
+    # traceparent 响应头对所有 JSON 响应统一附加（含 502/429 故障路径，审核建议 4：
+    # 故障路径不得断 C4 trace 链路），计算上移到分支之前。
     response_headers: dict[str, str] = {}
     if tp:
         response_headers["traceparent"] = tp
+
+    # skill 级错误 → 按契约 §C2 HTTP 映射返回（W3 完整修复，2026-09-21 二审）。
+    # 注意：skill 对 ScopeDeniedError / EgressDeniedError / KnowledgeNotPublishedError /
+    # GroundednessError / ReadinessMissingError 是 **return** 带 error_code 的 SkillResult
+    # （非 raise），故映射条件不得加 "result is None" 前置——否则这些 403/404/500
+    # 仍会落回 200。唯一例外：契约 §2.6 的"待接入"答案白名单（METRIC_NOT_VERIFIED /
+    # METRIC_BLOCKED / DATA_NOT_CONNECTED）保持 200 业务响应语义。
+    # retryable 语义仅保留给 429/502。
+    _RETRYABLE_HTTP_STATUS: dict[str, int] = {"UPSTREAM_ERROR": 502, "RATE_LIMITED": 429}
+    _PENDING_CODES: set[str] = {c.value for c in PENDING_ANSWER_CODES}
+    _mapped_status: int | None = None
+    if error_code:
+        try:
+            _mapped_status = ERROR_CODE_HTTP_MAP.get(ErrorCode(error_code))
+        except ValueError:
+            _mapped_status = None
+    if _mapped_status is not None and error_code not in _PENDING_CODES:
+        return JSONResponse(
+            status_code=_mapped_status,
+            content={
+                "request_id": ctx.request_id,
+                "answer": answer,
+                "readiness": result.readiness.value if result else "NOT_CONNECTED",
+                "classification": result.classification.value if result else "INTERNAL",
+                "citations": [c.model_dump() for c in result.citations] if result else [],
+                "sources": [s.model_dump() for s in result.sources] if result else [],
+                "warnings": result.warnings if result else [],
+                "error_code": error_code,
+                "retryable": error_code in _RETRYABLE_HTTP_STATUS,
+                "sql_statements": sql_statements,
+            },
+            headers=response_headers,
+        )
 
     return JSONResponse(
         content={

@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import time
+from collections import deque
 from typing import Protocol
 
 from agent_core.logging import get_logger
@@ -59,10 +60,14 @@ class TraceRecorder(Protocol):
 
 
 class InMemoryTraceRecorder:
-    """内存 trace 收集器（测试断言用）。"""
+    """内存 trace 收集器（测试断言用）。
 
-    def __init__(self) -> None:
-        self.traces: list[TraceRecord] = []
+    有界队列（审核建议 5）：默认 maxlen=1000，防长期运行进程无界增长；
+    超出后丢弃最旧记录（find_by_request_id 对近期 request_id 仍可用）。
+    """
+
+    def __init__(self, maxlen: int = 1000) -> None:
+        self.traces: deque[TraceRecord] = deque(maxlen=maxlen)
 
     def record(self, trace: TraceRecord) -> None:
         self.traces.append(trace)

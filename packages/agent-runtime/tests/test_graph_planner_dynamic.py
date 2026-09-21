@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 
+from agent_server.planners.graph import GraphPlanner
+
 from agent_runtime.planner.execution_graph import execute_plan
 from agent_runtime.planner.protocol import (
     PlannerContext,
@@ -11,7 +13,6 @@ from agent_runtime.planner.protocol import (
     StreamEvent,
 )
 from agent_runtime.skills.registry import Skill, SkillKind, SkillRegistry
-from agent_server.planners.graph import GraphPlanner
 
 
 async def _fetch(**kwargs):

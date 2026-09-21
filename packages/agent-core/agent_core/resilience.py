@@ -19,10 +19,11 @@ import inspect
 import threading
 import time
 import urllib.error
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FuturesTimeoutError
 from enum import Enum
 from functools import wraps
-from typing import Any, Awaitable, Callable, Iterable, Optional, Protocol, Type, TypeVar, List
+from typing import Any, Awaitable, Callable, Iterable, List, Optional, Protocol, Type, TypeVar
 
 F = TypeVar("F", bound=Callable[..., Any])
 
