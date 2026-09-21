@@ -552,7 +552,7 @@ class CircuitBreaker:
         if self._state != self.CLOSED:
             return
         total = len(self._successes) + len(self._failures_list)
-        if total < self._window_size:
+        if total < self._min_requests:
             return
         failures = len(self._failures_list)
         if failures / total >= self._failure_ratio:
