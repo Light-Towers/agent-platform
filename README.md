@@ -66,6 +66,8 @@ Agent Platform 是一个基于 **LangGraph Supervisor 模式** 的统一智能�
 - **会话回退**（`packages/agent-runtime/agent_runtime/revert.py`）：Checkpoint 级原子回退，不删除历史 checkpoint（支持 redo），跨用户禁止，异步审计日志
 - **OTel 分布式追踪**（`packages/agent-runtime/agent_runtime/otel.py`）：OpenTelemetry 接线，W3C traceparent 透传，问题脱敏（仅记录长度 + 哈希），与 Langfuse 共存，exporter 可插拔（otlp/jaeger/console/none）
 - **MCP Client**（`packages/agent-runtime/agent_runtime/mcp_client.py` + `applications/agent_server/subagents/mcp.py`）：多 MCP server 连接管理（stdio + SSE transport），工具白名单校验，per-server 独立熔断器隔离故障域，调用审计
+- **MCP 工具自动注册**（`packages/agent-runtime/agent_runtime/skills/mcp.py`）：MCP server 工具自动编译为 `SkillKind.REMOTE` Skill 注册到 SkillRegistry，Planner 经统一 `discover()` / `delegate()` 入口调用
+- **沙箱代码执行**（`packages/agent-runtime/agent_runtime/sandbox.py` + `agent_runtime/skills/sandbox.py`）：Docker 容器隔离执行用户代码（`--network=none --read-only --memory=512m --user=nobody`），Docker 不可用时降级 subprocess。注册为 `code_execution` Skill，Planner 启发式路由自动识别代码执行意图
 
 ---
 
