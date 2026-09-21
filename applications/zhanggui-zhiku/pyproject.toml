@@ -42,6 +42,7 @@ dependencies = [
     # uv 语法（推荐，本仓含 uv.lock）。pip 用户需改为：`pip install -e ../agent-core`，
     # 并在 requirements 去掉此行（setuptools 不解析 path 表）。
     "agent-core",
+    "shared-schemas",
 ]
 
 [project.scripts]

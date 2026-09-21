@@ -21,7 +21,7 @@ from __future__ import annotations
 from agent_core.monitor import monitor
 
 from agent.circuit_breaker import get_breaker_sync
-from agent.config import get_all_subservices
+from agent.config import TIMEOUT_SUBAGENT_HTTP, get_all_subservices
 from agent.metrics import record_delegation
 from agent.prompts import sub_agents_content
 from agent.tracing.langfuse_adapter import langfuse_observe as observe
@@ -108,7 +108,7 @@ class _HttpSubAgent:
             "tenant_id": input.get("tenant_id"),
             "trace_id": input.get("trace_id"),
         }
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with httpx.AsyncClient(timeout=TIMEOUT_SUBAGENT_HTTP) as client:
             resp = await client.post(self.url.rstrip("/") + endpoint, json=payload)
             resp.raise_for_status()
             data = resp.json()

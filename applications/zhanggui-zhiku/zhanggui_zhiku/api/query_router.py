@@ -17,6 +17,7 @@ from typing import List, Optional
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
+from shared_schemas import QueryRequest as FederatedQueryRequest
 
 from zhanggui_zhiku.utils.task_utils import *
 from zhanggui_zhiku.utils.sse_utils import create_sse_queue, SSEEvent, sse_generator
@@ -50,11 +51,15 @@ class HistoryItem(BaseModel):
     text: str = Field(default="", max_length=4096, description="对话内容（上限 4096 字符）")
 
 
-class QueryRequest(BaseModel):
-    """查询请求数据结构（M5：入站长度护栏，方案 §9）"""
+class QueryRequest(FederatedQueryRequest):
+    """查询请求数据结构（继承联邦契约 + 入站长度护栏，方案 §9）。
+
+    继承 shared_schemas.QueryRequest 的 query/session_id/tenant_id/trace_id/context/priority/user_id，
+    增加 is_stream/history 两个垂直扩展字段。
+    """
 
     query: str = Field(..., min_length=1, max_length=512, description="查询内容（上限 512 字符）")
-    session_id: str = Field(None, max_length=128, description="会话ID")
+    session_id: str | None = Field(None, max_length=128, description="会话ID")
     is_stream: bool = Field(False, description="是否流式返回")
     history: List[HistoryItem] = Field(default_factory=list, description="可选历史对话（超限截断保留最近 N 轮）")
 
