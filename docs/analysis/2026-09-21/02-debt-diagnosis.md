@@ -111,7 +111,7 @@
 |----|------|------|---------|
 | F-S0-03 | ✅已修复（d80a27e）：agent_federation/tests 根级 2 测试门禁外 | 新 | Makefile 去掉 /unit |
 | F-S0-04 | ✅已修复（d80a27e）：dialogue-framework/tests 1 测试门禁外 | 新 | Makefile 补路径 |
-| F-S0-08 | zhanggui-zhiku 包名仍为 app | 已知 | 评估迁移成本 |
+| F-S0-08 | ⏳方案已立（plan-fix-f-s0-08）：zhanggui-zhiku 包名仍为 app | 已知 | app → zhanggui_zhiku 迁移 |
 | F-S1-01 | ✅已修复（F-S1-01 实施）：agent-runtime 测试反向依赖 agent_server | 新 | 迁移归属到 applications/agent_server/tests/ |
 | F-S1-02 | agent_server 惰性 import agent_federation | 新（收敛期） | Plan-F 收敛后收口 |
 | F-S1-04 | agent_federation CB+Cache 独立实现 | 已知（§5） | 收敛到 agent-runtime |
