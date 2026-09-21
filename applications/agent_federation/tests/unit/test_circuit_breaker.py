@@ -46,10 +46,11 @@ class TestCircuitBreaker:
         from agent.circuit_breaker import CircuitState, get_breaker_sync
 
         br = get_breaker_sync("test-trip")
-        br._state = CircuitState.CLOSED
-        br._successes = []
-        br._failures = []
-        br.min_requests = 5
+        eng = br._engine
+        eng._state = CircuitState.CLOSED
+        eng._successes = []
+        eng._failures_list = []
+        eng._min_requests = 5
 
         async def run():
             for _ in range(5):
@@ -66,14 +67,15 @@ class TestCircuitBreaker:
         from agent.circuit_breaker import CircuitState, get_breaker_sync
 
         br = get_breaker_sync("test-recover")
-        br._state = CircuitState.OPEN
-        br._opened_at = 0.0  # 很久以前
-        br.cooldown_seconds = 0.0
+        eng = br._engine
+        eng._state = CircuitState.OPEN
+        eng._opened_at = 0.0  # 很久以前
+        eng._cooldown_seconds = 0.0
 
         async def run():
             assert await br.allow()  # 冷却到期 -> HALF_OPEN
             assert br.state() == CircuitState.HALF_OPEN
-            for _ in range(br.half_open_probes):
+            for _ in range(eng._half_open_probes):
                 await br.record_success()
             assert br.state() == CircuitState.CLOSED
 
@@ -121,8 +123,8 @@ class TestDelegatingSubAgent:
         out = asyncio.run(agent.ainvoke({"query": "x"}))
         assert out["degraded"] is True
         assert out["degraded_reason"] == "remote_failed"
-        # 熔断器已记录一次失败（窗口非空）
-        assert len(agent._breaker._failures) >= 1
+        # 熔断器已记录一次失败（窗口非; 非空）
+        assert len(agent._breaker._engine._failures_list) >= 1
 
 
 class TestP3Observability:
@@ -143,10 +145,11 @@ class TestP3Observability:
         )
 
         br = get_breaker_sync("obs-trip")
-        br._state = CircuitState.CLOSED
-        br._successes = []
-        br._failures = []
-        br.min_requests = 2
+        eng = br._engine
+        eng._state = CircuitState.CLOSED
+        eng._successes = []
+        eng._failures_list = []
+        eng._min_requests = 2
 
         async def run():
             for _ in range(2):
