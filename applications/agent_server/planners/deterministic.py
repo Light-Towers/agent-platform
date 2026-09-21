@@ -40,6 +40,21 @@ _SYNTHESIZE_PROMPT = (
 _EMPTY_EVIDENCE_MARKERS = ("知识库未启用", "知识库中未检索到", "联网搜索未配置", "SQL_DSN 未配置")
 
 
+def _extract_code(text: str) -> str:
+    """从用户输入中提取代码：优先提取 ```python ... ``` 代码块，否则返回原文。"""
+    import re
+
+    patterns = [
+        r"```python\s*\n(.*?)```",
+        r"```\s*\n(.*?)```",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, text, re.DOTALL)
+        if match:
+            return match.group(1).strip()
+    return text.strip()
+
+
 def _message_content(msg: Any) -> str:
     """从 LangChain 消息 / dict / 裸串提取文本（与 compact._msg_content 同构）。"""
     if hasattr(msg, "content"):
@@ -227,6 +242,18 @@ class DeterministicPlanner(Planner):
         """按 Plan.route 经 runtime.delegate（skill_guard 组合治理）执行能力，结果归一化为 evidence 列表。"""
         if plan.route == "direct":
             return []
+        if plan.route == "code_execution":
+            code = _extract_code(plan.sub_query or question)
+            result = await runtime.delegate("code_execution", code=code)
+            if isinstance(result, dict):
+                stdout = result.get("stdout", "")
+                stderr = result.get("stderr", "")
+                backend = result.get("backend", "")
+                evidence = [f"[沙箱执行 ({backend})]\nstdout:\n{stdout}"]
+                if stderr:
+                    evidence.append(f"stderr:\n{stderr}")
+                return evidence
+            return [str(result)]
         if plan.route == "mcp":
             if runtime.mcp_manager is None:
                 return ["MCP 未启用"]

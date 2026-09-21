@@ -310,7 +310,7 @@ def _node_event(node: str, payload: dict) -> dict | None:
             "capability": payload.get("route"),
             "reason": payload.get("route_reason"),
         }
-    if node in ("search", "rag", "sql", "mcp"):
+    if node in ("search", "rag", "sql", "mcp", "code_execution"):
         evidence = payload.get("evidence", [])
         return {"type": "evidence", "node": node, "count": len(evidence),
                 "preview": evidence[0][:200] if evidence else ""}

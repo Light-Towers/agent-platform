@@ -20,7 +20,7 @@ from pydantic import BaseModel, ConfigDict
 # 路由分支键：与 graph.py 的 add_conditional_edges 分支键集合一一对应。
 # 枚举化可在节点写入非法 route 时立即由 Pydantic 校验拦截，
 # 避免脏值穿透到 synthesize 才在条件路由处崩溃。
-Route = Literal["search", "rag", "sql", "direct", "mcp", "blocked"]
+Route = Literal["search", "rag", "sql", "direct", "mcp", "code_execution", "blocked"]
 
 
 class AgentState(BaseModel):
