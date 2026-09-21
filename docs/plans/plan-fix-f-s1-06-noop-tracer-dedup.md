@@ -3,7 +3,7 @@
 > 日期：2026-09-21
 > 严重度：**P2**（红线 4 违规 / 内核能力重复实现）
 > 来源：[S2 债务诊断](../analysis/2026-09-21/02-debt-diagnosis.md) §2.2 F-S1-06
-> 状态：**方案待确认**（未动代码）
+> 状态：**已确认并实施**（2026-09-21；二审修订补 `_NoOpSpanContextManager.__getattr__` 转发以兼容 agent_server 手动 CM 用法）
 
 ## 1. 目标
 
@@ -30,12 +30,21 @@
 |--------|------|------------------------------|
 | `agent_runtime/context/assembler.py:508-519` | `get_otel_tracer().start_span(name)` → `set_attribute` ×6 → `end()`（**非 with**） | ✅ set_attribute / end 均有 |
 | `agent_server/main.py:154,160` | `init_otel(...)` + `get_otel_tracer()` 存 `app.state` | 与 shim 无关（init 路径） |
+| `agent_server/api/routes.py:196-198,258` | `span = start_as_current_span("query")` → **手动** `span.__enter__()` / `span.set_attribute(...)` ×N / `span.__exit__()`（**非 with**，且直接在 CM 对象上调 span 方法） | ⚠️ **不兼容，须补 CM 转发**（见 §2.4） |
 | `otel.py:78,82,135,141` | 降级路径赋值 `_tracer = _NoOpTracer()` | 改为 `noop_tracer()` 即可 |
 
 **差异项核查**：
 - `add_event`（仅 runtime 版有）：全仓零调用 → 不迁移，YAGNI；
 - `set_attributes` / `set_status` / `is_recording`（仅 core 版有）：超集能力，无风险；
-- with 语义：runtime 无 `with start_as_current_span` 调用方；core 版返回 `_NoOpSpanContextManager`，语义等价。
+- **CM 语义（二审修订，原方案漏判）**：runtime 版 `_NoOpSpan` **自身兼作 CM**（同时具备 `__enter__/__exit__` 与 span 方法），故 `routes.py` 的"取 CM 对象 → 手动 `__enter__` → 直接调 `set_attribute`"可用；core 版 `_NoOpTracer.start_as_current_span` 返回的 `_NoOpSpanContextManager` **只有** `__enter__/__exit__`，直接调 `set_attribute` 会 `AttributeError`。原方案"runtime 无 with 调用方，语义等价"的结论**不成立**。
+- 触发条件：`routes.py` 该分支仅在 `otel_effective_enabled=True` 且（SDK 未装 或 `exporter="none"`）走 no-op 降级时进入；默认 opt-out（`app.state.otel_tracer=None`）不触发，故属"配置开启后才暴露"的行为差异。
+
+### 2.4 二审修订：CM 兼容补丁
+
+为保证"行为零变更"，agent-core 侧给 `_NoOpSpanContextManager` 增加 `__getattr__` 属性转发到内部 `_NoOpSpan`：
+
+- 覆盖 `routes.py` 手动 CM 用法（`cm.set_attribute(...)`）；
+- 不改变既有 `with _NoOpSpanContextManager() as span` 语义（`__enter__` 仍返回内部 span，`__getattr__` 不参与）。
 
 ### 2.4 现状事实补充
 
@@ -47,7 +56,7 @@
 
 | 文件 | 改动 |
 |------|------|
-| `packages/agent-core/agent_core/tracing.py` | **纯增量**：新增公开工厂 `noop_tracer()`（薄封装既有 `_make_noop_tracer`） |
+| `packages/agent-core/agent_core/tracing.py` | **纯增量**：新增公开工厂 `noop_tracer()`（薄封装既有 `_make_noop_tracer`）；`_NoOpSpanContextManager` 增 `__getattr__` 转发（兼容 agent_server 手动 CM 用法，见 §2.4） |
 | `packages/agent-runtime/agent_runtime/otel.py` | **纯删减**：删除 `_NoOpSpan`（:35-54）、`_NoOpTracer`（:57-64）共约 30 行；`from agent_core.tracing import noop_tracer, user_query_hash`；4 处 `_NoOpTracer()` 改 `noop_tracer()` |
 
 `assembler.py` / `agent_server/main.py` **不改**（接口兼容，消费方无感知）。
@@ -67,6 +76,28 @@ def noop_tracer() -> Any:
     语义与 :func:`_make_noop_tracer` 一致：零开销、绝不抛异常。
     """
     return _make_noop_tracer()
+```
+
+### 4.1b 改动 1b（二审修订）：`_NoOpSpanContextManager` 增属性转发
+
+```python
+class _NoOpSpanContextManager:
+    __slots__ = ("_span",)
+
+    def __init__(self) -> None:
+        self._span = _NoOpSpan()
+
+    def __enter__(self) -> _NoOpSpan:
+        return self._span
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> bool:
+        return False
+
+    def __getattr__(self, name: str) -> Any:
+        # 兼容下游"手动进入 CM 后直接调 span 方法"用法（agent_server/api/routes.py:196-198）；
+        # with ... as span 路径不触发 __getattr__，语义不变。
+        span = object.__getattribute__(self, "_span")
+        return getattr(span, name)
 ```
 
 ### 4.2 改动 2：agent-runtime otel.py 删减
@@ -91,6 +122,7 @@ from agent_core.tracing import noop_tracer, user_query_hash
 | 1 | `uv run pytest packages/agent-runtime/tests -q` | 62 passed（assembler 路径由 lifecycle/middleware 测试覆盖） |
 | 2 | `uv run pytest packages/agent-core/tests -q` | 198 passed（core 侧纯增量无回归） |
 | 3 | `uv run python -c "import agent_runtime.otel as o; t=o.get_otel_tracer(); s=t.start_span('x'); s.set_attribute('k','v'); s.end(); print('OK')"` | OK（no-op 链路可用） |
+| 4 | `uv run python -c "import agent_runtime.otel as o; t=o.get_otel_tracer(); c=t.start_as_current_span('q'); c.__enter__(); c.set_attribute('k','v'); c.__exit__(None,None,None); print('OK')"` | OK（agent_server 手动 CM 用法兼容，二审修订新增） |
 
 ### 5.2 架构验收
 
@@ -111,4 +143,4 @@ from agent_core.tracing import noop_tracer, user_query_hash
 
 ## 8. 工作量估计
 
-约 10 分钟编码 + 测试验证（core +5 行，otel.py -30 行 +1 行 import +4 处替换）。
+约 15 分钟编码 + 测试验证（core +5 行工厂 +3 行 CM 转发，otel.py -30 行 +1 行 import +4 处替换）。
