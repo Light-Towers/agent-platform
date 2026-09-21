@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-test_escape.py —— 验证 app/utils/escape_milvus_string_utils.py 的 Milvus 字符串转义。
+test_escape.py —— 验证 zhanggui_zhiku/utils/escape_milvus_string_utils.py 的 Milvus 字符串转义。
 
 【不依赖重型依赖，可在纯 pytest+numpy+python-dotenv 环境运行。】
 该模块为纯 stdlib 函数，无外部依赖。
@@ -14,7 +14,7 @@ test_escape.py —— 验证 app/utils/escape_milvus_string_utils.py 的 Milvus 
 
 import pytest
 
-from app.utils.escape_milvus_string_utils import escape_milvus_string
+from zhanggui_zhiku.utils.escape_milvus_string_utils import escape_milvus_string
 
 
 def test_escape_backslash():

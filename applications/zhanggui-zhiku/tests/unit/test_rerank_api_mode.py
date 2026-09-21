@@ -3,7 +3,7 @@
 test_rerank_api_mode.py —— 验证 reranker_utils 的 api 模式（M8）。
 
 【不依赖重型依赖 / 不依赖 FlagEmbedding / pymilvus.model，可在裸 venv 运行。】
-验证方式：mock app.lm.siliconflow_client._post_json（不真调网络）。
+验证方式：mock zhanggui_zhiku.lm.siliconflow_client._post_json（不真调网络）。
 验证重点：
 1. RERANK_MODE=api 时 get_reranker_model() 返回 ApiReranker（与 FlagReranker.compute_score 同签名）；
 2. compute_score 分数解析正确、返回顺序与输入 sentence_pairs 一致（即使 API 乱序返回）；
@@ -13,9 +13,9 @@ test_rerank_api_mode.py —— 验证 reranker_utils 的 api 模式（M8）。
 
 import pytest
 
-from app.conf.reranker_config import reranker_config
-from app.lm import reranker_utils
-from app.lm.reranker_utils import get_reranker_model
+from zhanggui_zhiku.conf.reranker_config import reranker_config
+from zhanggui_zhiku.lm import reranker_utils
+from zhanggui_zhiku.lm.reranker_utils import get_reranker_model
 
 
 def _enable_api_mode(monkeypatch):
@@ -53,7 +53,7 @@ def test_compute_score_order_and_values(monkeypatch):
         results.reverse()
         return {"id": "rerank-1", "results": results}
 
-    monkeypatch.setattr("app.lm.siliconflow_client._post_json", fake_post_json)
+    monkeypatch.setattr("zhanggui_zhiku.lm.siliconflow_client._post_json", fake_post_json)
 
     reranker = get_reranker_model()
     pairs = [["什么是RRF？", "RRF是倒数排名融合算法"], ["什么是RRF？", "FP16是半精度推理"], ["什么是RRF？", "无关内容"]]
@@ -79,7 +79,7 @@ def test_compute_score_multiple_queries_grouping(monkeypatch):
         results = [{"index": i, "relevance_score": 0.9 - 0.1 * i} for i in range(len(docs))]
         return {"id": "rerank-x", "results": results}
 
-    monkeypatch.setattr("app.lm.siliconflow_client._post_json", fake_post_json)
+    monkeypatch.setattr("zhanggui_zhiku.lm.siliconflow_client._post_json", fake_post_json)
 
     reranker = get_reranker_model()
     pairs = [["q1", "d1"], ["q2", "d2"], ["q1", "d3"]]
@@ -125,7 +125,7 @@ def test_api_mode_missing_score_field_raises(monkeypatch):
     def fake_post_json(url, headers, payload, **kwargs):
         return {"id": "x", "results": [{"index": 0}]}  # 缺 relevance_score
 
-    monkeypatch.setattr("app.lm.siliconflow_client._post_json", fake_post_json)
+    monkeypatch.setattr("zhanggui_zhiku.lm.siliconflow_client._post_json", fake_post_json)
 
     reranker = get_reranker_model()
     with pytest.raises(RuntimeError, match="relevance_score"):

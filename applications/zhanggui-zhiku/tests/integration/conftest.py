@@ -9,7 +9,7 @@ conftest.py —— tests/integration 目录的共享配置。
   MongoDB / MinIO）或 GPU，仅在 Nightly / 手动触发时执行。
 
 【本文件的作用】
-将「项目仓库根目录」加入 sys.path，使测试文件能 `import app.*`。
+将「项目仓库根目录」加入 sys.path，使测试文件能 `import zhanggui_zhiku.*`。
 （pytest 默认的 prepend import 模式只会把 tests/integration 加入 sys.path，
 因此需要这里手动补上仓库根，与 tests/unit/conftest.py 保持同样做法。）
 

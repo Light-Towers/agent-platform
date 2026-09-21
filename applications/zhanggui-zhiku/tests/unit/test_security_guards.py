@@ -22,9 +22,9 @@ import threading
 
 import pytest
 
-from app.utils.error_response_utils import ERROR_CODES, error_body, error_code_for_status
-from app.utils.inbound_rate_limit_utils import SlidingWindowRateLimiter
-from app.utils.security_guard_utils import (
+from zhanggui_zhiku.utils.error_response_utils import ERROR_CODES, error_body, error_code_for_status
+from zhanggui_zhiku.utils.inbound_rate_limit_utils import SlidingWindowRateLimiter
+from zhanggui_zhiku.utils.security_guard_utils import (
     DEFAULT_EXEMPT_PATHS,
     extract_api_key_from_headers,
     format_validation_error,
@@ -40,8 +40,8 @@ from app.utils.security_guard_utils import (
 try:
     from starlette.requests import Request  # noqa: F401
 
-    from app.api.errors import error_response, register_exception_handlers
-    from app.api.middleware.security_guards import SecurityGuardsMiddleware
+    from zhanggui_zhiku.api.errors import error_response, register_exception_handlers
+    from zhanggui_zhiku.api.middleware.security_guards import SecurityGuardsMiddleware
 
     HAVE_WEB = True
 except Exception:

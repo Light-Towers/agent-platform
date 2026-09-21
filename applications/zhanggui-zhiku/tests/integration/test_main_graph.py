@@ -32,10 +32,10 @@ SKIP_REASON = "需要 Milvus / Neo4j / MinIO 全栈与测试 PDF 素材，设置
 @pytest.mark.skipif(not INTEGRATION_ENABLED, reason=SKIP_REASON)
 def test_kg_import_full_workflow():
     """全流程测试：验证 PDF 导入 → Milvus 入库 → KG 导入完整链路。"""
-    from app.core.logger import logger
-    from app.import_process.agent.main_graph import kb_import_app
-    from app.import_process.agent.state import ImportGraphState
-    from app.utils.path_util import PROJECT_ROOT
+    from zhanggui_zhiku.core.logger import logger
+    from zhanggui_zhiku.import_process.agent.main_graph import kb_import_app
+    from zhanggui_zhiku.import_process.agent.state import ImportGraphState
+    from zhanggui_zhiku.utils.path_util import PROJECT_ROOT
 
     logger.info("===== 开始执行知识图谱导入全流程测试 =====")
 

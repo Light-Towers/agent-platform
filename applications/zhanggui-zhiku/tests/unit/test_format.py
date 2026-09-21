@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-test_format.py —— 验证 app/utils/format_utils.py 的 JSON 格式化工具。
+test_format.py —— 验证 zhanggui_zhiku/utils/format_utils.py 的 JSON 格式化工具。
 
 【不依赖重型依赖，可在纯 pytest+numpy+python-dotenv 环境运行。】
 仅依赖标准库 json / typing。
@@ -12,7 +12,7 @@ test_format.py —— 验证 app/utils/format_utils.py 的 JSON 格式化工具�
 
 import json
 
-from app.utils.format_utils import format_json, format_state
+from zhanggui_zhiku.utils.format_utils import format_json, format_state
 
 
 def test_format_state_returns_parseable_json():

@@ -45,14 +45,14 @@ dependencies = [
 ]
 
 [project.scripts]
-zhanggui-zhiku = "app.main:run"
+zhanggui-zhiku = "zhanggui_zhiku.main:run"
 
 [project.urls]
 Homepage = "https://github.com/Light-Towers/agent-platform"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["app*"]
+include = ["zhanggui_zhiku*"]
 
 # ---------------------------------------------------------------------------
 # ruff：静态检查与格式化基线（M1 引入，M3 收窄）
@@ -60,7 +60,7 @@ include = ["app*"]
 # 说明：本项目存量代码已有部分历史债。M1 的目标是
 # 「让 CI 门禁可用且结果可复现」，M3 完成全量整形并收窄豁免：
 #   - lint 规则集固定为 pyflakes(F) + pycodestyle 的错误类子集(E4/E7/E9)；
-#   - M3 已执行 `ruff format app tests eval` 全量整形，`ruff format --check`
+#   - M3 已执行 `ruff format zhanggui_zhiku tests eval` 全量整形，`ruff format --check`
 #     翻转为 CI 硬门禁（zhiku-ci.yml 不再 continue-on-error）；
 #   - M3 通过自动修复消除 F401（unused-import，18 处）与 F541（f-string 无占位符，
 #     6 处），二者已从 ignore 移除；剩余 ignore 为**非自动修复**存量告警
@@ -85,7 +85,7 @@ ignore = [
     "E722", # bare-except：存量 1 处（node_rrf.py:39）
     "F403", # star import：存量 6 处（query_router 2 / node_rerank 1 / node_search_embedding_hyde 3）
     "F405", # star import 派生的未定义名：存量 18 处
-    "F811", # 重复定义：存量 1 处（app/core/logger.py:95）
+    "F811", # 重复定义：存量 1 处（zhanggui_zhiku/core/logger.py:95）
 ]
 
 [project.optional-dependencies]

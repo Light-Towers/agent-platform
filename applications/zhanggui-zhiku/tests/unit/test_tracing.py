@@ -20,7 +20,7 @@ import re
 
 import pytest
 
-from app.core import tracing
+from zhanggui_zhiku.core import tracing
 
 
 # ---------------------------------------------------------------------------

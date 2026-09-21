@@ -3,12 +3,12 @@
 test_concurrency.py —— M6 并发与水平扩展单测（方案 §10.3 / §10.4）。
 
 覆盖：
-1. **fan-out 超时隔离**（`app/query_process/agent/fanout.guarded_call`）：
+1. **fan-out 超时隔离**（`zhanggui_zhiku/query_process/agent/fanout.guarded_call`）：
    - 单路超时 → 返回 {}（空状态更新），整体不抛异常；
    - 单路异常 → 返回 {}，不拖垮整体；
    - 正常路径透传节点返回的 dict；非 dict 结果（如 None）归一为 {}；
    - `wrap_channel_node` 从 retrieval.yaml 读 enabled/timeout_s（可注入假配置验证）。
-2. **reranker 并发闸门**（`app/utils/rerank_concurrency`）：
+2. **reranker 并发闸门**（`zhanggui_zhiku/utils/rerank_concurrency`）：
    - mock compute_score 并发调用数 ≤ max_concurrency；
    - 非法 max_concurrency 收敛到 1。
 3. **M6 探针豁免回归**：/health/live、/health/ready 免鉴权 / 免限流
@@ -22,10 +22,10 @@ pymilvus 等重型依赖，本地 venv 即可全绿。
 import threading
 import time
 
-from app.conf.yaml_config_utils import CfgDict
-from app.query_process.agent import fanout
-from app.utils.rerank_concurrency import call_under_semaphore, make_rerank_semaphore
-from app.utils.security_guard_utils import should_skip_all_guards, should_skip_auth, should_skip_rate_limit
+from zhanggui_zhiku.conf.yaml_config_utils import CfgDict
+from zhanggui_zhiku.query_process.agent import fanout
+from zhanggui_zhiku.utils.rerank_concurrency import call_under_semaphore, make_rerank_semaphore
+from zhanggui_zhiku.utils.security_guard_utils import should_skip_all_guards, should_skip_auth, should_skip_rate_limit
 
 
 # ===========================================================================

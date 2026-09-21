@@ -111,7 +111,7 @@
 |----|------|------|---------|
 | F-S0-03 | ✅已修复（d80a27e）：agent_federation/tests 根级 2 测试门禁外 | 新 | Makefile 去掉 /unit |
 | F-S0-04 | ✅已修复（d80a27e）：dialogue-framework/tests 1 测试门禁外 | 新 | Makefile 补路径 |
-| F-S0-08 | ⏳方案已立（plan-fix-f-s0-08）：zhanggui-zhiku 包名仍为 app | 已知 | app → zhanggui_zhiku 迁移 |
+| F-S0-08 | ✅已修复（F-S0-08 实施）：zhanggui-zhiku 包名 app → zhanggui_zhiku | 已知 | 包目录重命名 + import 替换 |
 | F-S1-01 | ✅已修复（F-S1-01 实施）：agent-runtime 测试反向依赖 agent_server | 新 | 迁移归属到 applications/agent_server/tests/ |
 | F-S1-02 | agent_server 惰性 import agent_federation | 新（收敛期） | Plan-F 收敛后收口 |
 | F-S1-04 | agent_federation CB+Cache 独立实现 | 已知（§5） | 收敛到 agent-runtime |
@@ -168,9 +168,9 @@
 | 先验登记 | 38（TB 14 + TD 15 + U 1 + Roadmap 8） |
 | 新发现 | 10（S0 6 + S1 4） |
 | 总登记 | 48 |
-| 已修复 | 44（先验 34 + 2026-09-21 本批 10：F-S1-03/F-S1-06/F-S1-01/F-S0-01~04/F-S0-07/09/10） |
-| 仍成立 | 4（F-S0-08 / F-S1-02 / F-S1-04 / F-S1-05；TB-7 可选 / TB-11 部分修复 / TB-13 结构性） |
+| 已修复 | 45（先验 34 + 2026-09-21 本批 11：F-S0-08/F-S1-03/F-S1-06/F-S1-01/F-S0-01~04/F-S0-07/09/10） |
+| 仍成立 | 3（F-S1-02 / F-S1-04 / F-S1-05；TB-7 可选 / TB-11 部分修复 / TB-13 结构性） |
 | REFUTED | 6 |
 | 文档失效 | 4 |
 | 待验证假设 | 7 |
-| **最严重** | **F-S0-08 / F-S1-02 / F-S1-04 / F-S1-05（P2，收敛期）** |
+| **最严重** | **F-S1-02 / F-S1-04 / F-S1-05（P2，收敛期）** |

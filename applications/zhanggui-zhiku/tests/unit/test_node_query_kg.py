@@ -10,9 +10,9 @@
 
 from unittest.mock import patch
 
-from app.clients import neo4j_utils
-from app.query_process.agent.nodes.node_query_kg import node_query_kg
-from app.query_process.agent.nodes.node_rrf import node_rrf
+from zhanggui_zhiku.clients import neo4j_utils
+from zhanggui_zhiku.query_process.agent.nodes.node_query_kg import node_query_kg
+from zhanggui_zhiku.query_process.agent.nodes.node_rrf import node_rrf
 
 
 class _FakeRecord:

@@ -31,9 +31,9 @@ SKIP_REASON = "需要 Milvus / MinIO / Mongo 等完整技术栈与模型依赖�
 @pytest.mark.skipif(not INTEGRATION_ENABLED, reason=SKIP_REASON)
 def test_kb_import_graph_stream_reaches_final_state():
     """导入图可流式执行到底，并产出非空最终状态。"""
-    from app.core.logger import logger
-    from app.import_process.agent.main_graph import kb_import_app
-    from app.import_process.agent.state import create_default_state
+    from zhanggui_zhiku.core.logger import logger
+    from zhanggui_zhiku.import_process.agent.main_graph import kb_import_app
+    from zhanggui_zhiku.import_process.agent.state import create_default_state
 
     logger.info("===== 开始测试 =====")
 
@@ -56,8 +56,8 @@ def test_kb_import_graph_stream_reaches_final_state():
 @pytest.mark.skipif(not INTEGRATION_ENABLED, reason=SKIP_REASON)
 def test_kb_import_graph_structure_printable():
     """导入图的 ASCII 结构可打印（依赖 grandalf）。"""
-    from app.core.logger import logger
-    from app.import_process.agent.main_graph import kb_import_app
+    from zhanggui_zhiku.core.logger import logger
+    from zhanggui_zhiku.import_process.agent.main_graph import kb_import_app
 
     logger.info("图结构:")
     graph = kb_import_app.get_graph()

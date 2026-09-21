@@ -8,7 +8,7 @@ loguru 日志器各级别输出与异常捕获验证。
 各打若干条日志，并用 `@logger.catch` 演示异常自动捕获。这里保留全部日志内容与
 调用方式，仅补上「调用不抛异常」「@logger.catch 吞掉除零异常并返回 None」两条断言。
 
-依赖：`app.core.logger`（间接依赖 loguru + app.core.config）。
+依赖：`zhanggui_zhiku.core.logger`（间接依赖 loguru + zhanggui_zhiku.core.config）。
 loguru 是 pyproject 声明的运行时依赖，但为避免在**未装依赖的裸环境**下收集期
 ImportError，import 一律放在函数体内，并配合 `importorskip` 守卫。
 """
@@ -19,7 +19,7 @@ import pytest
 def test_logger_all_levels_emit_without_error():
     """七个日志级别逐一调用，均不应抛异常。"""
     pytest.importorskip("loguru", reason="缺少 loguru，跳过日志测试")
-    from app.core.logger import logger
+    from zhanggui_zhiku.core.logger import logger
 
     # --- 1. TRACE (最详细) ---
     # 场景：极其详细的内部流程追踪，通常用于调试复杂的算法或状态机
@@ -62,7 +62,7 @@ def test_logger_all_levels_emit_without_error():
 def test_logger_catch_swallows_exception_and_returns_none():
     """`@logger.catch` 装饰的函数发生异常时应被记录并返回 None，而非向上抛出。"""
     pytest.importorskip("loguru", reason="缺少 loguru，跳过日志测试")
-    from app.core.logger import logger
+    from zhanggui_zhiku.core.logger import logger
 
     @logger.catch
     def divide(a: float, b: float) -> float:
