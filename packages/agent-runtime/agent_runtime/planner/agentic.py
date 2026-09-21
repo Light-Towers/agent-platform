@@ -24,6 +24,7 @@ from agent_runtime.planner.protocol import (
     Planner,
     PlannerContext,
     PlannerRuntime,
+    SkillCompositionError,
     StreamEvent,
 )
 
@@ -142,7 +143,12 @@ class AgenticPlanner(Planner):
 
         unsub = _subscribe_monitor(_handle)
         try:
-            answer = await executor(question, workspace_id)
+            async with runtime.execution():
+                async with runtime.skill_guard("agentic"):
+                    answer = await executor(question, workspace_id)
+        except SkillCompositionError:
+            unsub()
+            raise
         except Exception as exc:  # noqa: BLE001
             unsub()
             logger.warning("agentic 执行异常: %s", exc)
