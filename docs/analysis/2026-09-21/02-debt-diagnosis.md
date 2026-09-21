@@ -78,7 +78,7 @@
 | F-S1-01 | ✅P2 已修复 | 1 | agent-runtime 测试反向依赖 agent_server | test_graph_planner_dynamic.py:14 |
 | F-S1-02 | P2 | 2 | agent_server 惰性 import agent_federation | planners/unified.py:90, __init__.py:38 |
 | F-S1-04 | P2 | 4 | agent_federation CircuitBreaker+Cache 独立实现 | circuit_breaker.py:45, cache/layers.py:57+ |
-| F-S1-05 | P2 | 4 | exhibition-agent 独立实现 Skill+ExecutionContext | base_skill.py:43,53, execution_context.py:35 |
+| F-S1-05 | ✅P2 已修复 | 4 | exhibition-agent 独立实现 Skill+ExecutionContext | base_skill.py:43,53, execution_context.py:35（已修订契约 v1.1 → v1.2 直接 REST，见 plan-fix-f-s1-05-contract-revise-to-rest.md） |
 | F-S1-06 | ✅P2 已修复 | 再造 Runtime | _NoOpTracer 2 套独立实现 | tracing.py:137 vs otel.py:57 |
 
 ### 2.3 配置/文档（S0）
@@ -115,7 +115,7 @@
 | F-S1-01 | ✅已修复（F-S1-01 实施）：agent-runtime 测试反向依赖 agent_server | 新 | 迁移归属到 applications/agent_server/tests/ |
 | F-S1-02 | agent_server 惰性 import agent_federation | 新（收敛期） | Plan-F 收敛后收口 |
 | F-S1-04 | agent_federation CB+Cache 独立实现 | 已知（§5） | 收敛到 agent-runtime |
-| F-S1-05 | ⏳定位评估已立（05-evaluation），待决策：推荐选项 A（有意豁免，契约载体非运行时内核能力） | 新 | 见 05-exhibition-positioning-evaluation |
+| F-S1-05 | ✅已修复（F-S1-05 实施）：修订契约 v1.1 → v1.2 直接 REST | 新 | 见 docs/plans/plan-fix-f-s1-05-contract-revise-to-rest.md |
 | F-S1-06 | ✅已修复（d67ed2a）：_NoOpTracer 2 套独立实现 | 新 | agent-runtime 从 agent-core 导入 |
 | TB-7 | docker compose 冒烟需 Docker | 可选 | 环境依赖 |
 | TB-11 | 双轨配置体系部分修复 | 部分修复 | pydantic-settings 收敛 |
@@ -168,9 +168,9 @@
 | 先验登记 | 38（TB 14 + TD 15 + U 1 + Roadmap 8） |
 | 新发现 | 10（S0 6 + S1 4） |
 | 总登记 | 48 |
-| 已修复 | 45（先验 34 + 2026-09-21 本批 11：F-S0-08/F-S1-03/F-S1-06/F-S1-01/F-S0-01~04/F-S0-07/09/10） |
-| 仍成立 | 3（F-S1-02 / F-S1-04 / F-S1-05；TB-7 可选 / TB-11 部分修复 / TB-13 结构性） |
+| 已修复 | 46（先验 34 + 2026-09-21 本批 12：F-S0-08/F-S1-03/F-S1-05/F-S1-06/F-S1-01/F-S0-01~04/F-S0-07/09/10） |
+| 仍成立 | 2（F-S1-02 / F-S1-04；TB-7 可选 / TB-11 部分修复 / TB-13 结构性） |
 | REFUTED | 6 |
 | 文档失效 | 4 |
 | 待验证假设 | 7 |
-| **最严重** | **F-S1-02 / F-S1-04 / F-S1-05（P2，收敛期）** |
+| **最严重** | **F-S1-02 / F-S1-04（P2，收敛期）** |

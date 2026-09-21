@@ -273,10 +273,10 @@ async def test_metrics_knowledge_not_published(warehouse_client):
 # 8. warehouse_client.invoke 注入 traceparent 不崩
 # ---------------------------------------------------------------------------
 async def test_warehouse_client_invoke_injects_traceparent(warehouse_client):
-    """WarehouseClient.invoke 注入 traceparent 到 headers（no-op 模式不崩）。"""
+    """WarehouseClient.get_rest 注入 traceparent 到 headers（no-op 模式不崩）。"""
     context = ctx()
-    result = await warehouse_client.invoke(
-        skill="venue.schedule.query",
+    result = await warehouse_client.get_rest(
+        "/api/venue-schedule",
         params={"venue_id": "vn-001"},
         execution_context_header=ctx_header(context),
         request_id=context.request_id,
@@ -284,7 +284,7 @@ async def test_warehouse_client_invoke_injects_traceparent(warehouse_client):
         extra_headers={"X-Mock-Scenario": "normal_200"},
     )
     assert result is not None
-    assert result.readiness.value == "READY"
+    assert result["data_readiness"]["level"] == "complete"
 
 
 async def test_warehouse_client_invoke_with_traceparent_no_crash(warehouse_client):

@@ -6,7 +6,7 @@
 
 | 项 | 内容 |
 | --- | --- |
-| 契约版本 | **1.1**（草案，待双方 review；澄清集来自骨架实现反馈） |
+| 契约版本 | **1.2**（草案，待双方 review；v1.1 → v1.2 修订：C2 统一信封 → 直接 REST，F-S1-05 修复） |
 | 甲方（Domain / Data） | `mingyang-warehouse`（本体 / DDL / 领域 API / Metric Registry / 知识平台） |
 | 乙方（Foundation / Platform） | `agent-platform`（LangGraph Supervisor 编排、HITL、可观测、评测、Model Router） |
 | 状态 | 🟡 草案 · 待双方确认 |
@@ -38,7 +38,9 @@ mingyang-warehouse（领域 API / Metric Registry / 知识平台 → 业务事�
 
 ---
 
-## 0.5 v1.0 → v1.1 变更（澄清集，来自 exhibition-agent 骨架实现反馈）
+## 0.5 v1.0 → v1.1 → v1.2 变更
+
+### v1.0 → v1.1（澄清集，来自 exhibition-agent 骨架实现反馈）
 
 > 本版为**草案澄清集**，不改变既有字段语义的破坏性变更，仅补全"未定义/待定"条款，使骨架实现可无歧义落地。
 
@@ -54,6 +56,22 @@ mingyang-warehouse（领域 API / Metric Registry / 知识平台 → 业务事�
 | 8 | 权限校验让测试难做（前期可否不加 / 测试环境不强校验） | **校验恒开 + 身份来源可插拔**：`STRICT`/`DEV` 两档，**不设 `OFF`**；环境只切身份来源与验签，401/403 与 scope 下推在所有环境执行。**角色层级 / 权限后台延后**，本次只按 `scopes` 判定，`roles[]` 保留可留空 |
 | 9 | 实现侧新增 `REQUEST_CONTEXT_BROKEN`（400）但 v1.0 错误码表漏列 | **补进 C2 错误码表**（新增错误码 = minor，按版本规则单边可发）；实现侧须同步补进本地 `ErrorCode` enum 与 HTTP 映射 |
 
+### v1.1 → v1.2（F-S1-05 修复，2026-09-21：C2 统一信封 → 直接 REST）
+
+> **背景**：v1.1 走 `POST /api/v1/skills/{name}` + 统一信封，但真实 warehouse（mingyang-warehouse，48 个 REST 端点）无该路由，真实调用 404；mock 掩盖此缺口。
+> **决策**：修订契约本身（非豁免 exhibition-agent 偏离架构），C2 从「统一信封 + skill invoke」改成「直接 REST + 平台侧自组装 SkillResult」。
+> **方案**：`docs/plans/plan-fix-f-s1-05-contract-revise-to-rest.md`
+
+| # | v1.1 | v1.2 结论 |
+| --- | --- | --- |
+| 1 | C2 调用方式：`POST /api/v1/skills/{name}` + 信封 body | **直接调 warehouse REST 端点**（`GET /api/venue-schedule` 等 48 个端点） |
+| 2 | C2 响应格式：统一信封（readiness/classification/sources/citations 强制） | **REST JSON**；平台侧自组装 SkillResult（readiness 从 `data_readiness.level` 映射，classification 默认 INTERNAL，sources 从端点路径推导） |
+| 3 | C2 错误映射：信封 `error.code` → ContractError 子类 | **HTTP 状态码 + body.error.code** → ContractError 子类（401/403/404/422/429/502） |
+| 4 | INV-10 落地：信封 `8error.code = METRIC_NOT_VERIFIED` → 答"待接入" | **双轨**：422 错误码 + 200 `data_readiness.level=pending` → 答"待接入" |
+| 5 | C1 ExecutionContext | **保留不动** |
+| 6 | C4 trace（11 字段） | **保留不动** |
+| 7 | envelope.py 含 SkillRequest/SkillSuccessEnvelope/SkillErrorEnvelope | **移除信封模型**，保留 Readiness/DataClassification/EgressDecision/Source/Citation（平台侧自组装用） |
+
 ---
 
 ## 1. 传输与寻址
@@ -61,8 +79,8 @@ mingyang-warehouse（领域 API / Metric Registry / 知识平台 → 业务事�
 | 项 | 约定 |
 | --- | --- |
 | 通道 | HTTPS + JSON；MCP 为**第二阶段**可选增强，不改变本契约语义 |
-| 基址 | `https://<warehouse-host>/api/v1/` |
-| 契约版本头 | `X-Contract-Version: 1.1`（缺失按 `1.1` 处理） |
+| 基址 | `https://<warehouse-host>/`（v1.2：直接 REST，端点路径如 `/api/venue-schedule`） |
+| 契约版本头 | `X-Contract-Version: 1.2`（缺失按 `1.2` 处理） |
 | 上下文头 | `X-Execution-Context`（见 C1） |
 | 幂等 | 写操作须带 `Idempotency-Key` |
 | 分页 | cursor 分页（`cursor` + `limit`，不提供 offset） |
@@ -117,61 +135,69 @@ ExecutionContext
 
 ---
 
-## C2. Skill / 领域 API 调用契约（双向统一信封）
+## C2. Skill / 领域 API 调用契约（v1.2：直接 REST + 平台侧自组装）
 
-### 请求
+> **v1.2 修订（F-S1-05）**：从 v1.1 的「`POST /api/v1/skills/{name}` + 统一信封」改成「直接调 warehouse REST 端点」。
+> 原因：真实 warehouse（mingyang-warehouse）有 48 个 REST 端点（`GET /api/venue-schedule` 等），无 `POST /api/v1/skills/{name}` 路由；v1.1 信封方案要求 warehouse 改造加路由，非最佳解。
 
-```json
-{
-  "request_id": "...",
-  "skill": "venue.schedule.query",
-  "params": { "exhibition_id": "...", "from": "...", "to": "..." },
-  "options": { "include_readiness": true, "limit": 50 }
-}
+### 调用方式
+
+平台侧直接调 warehouse 已有的 REST 端点（GET 为主，写操作 POST/DELETE）：
+
+```
+GET  /api/venue-schedule?venue_id=vn-001
+GET  /api/portrait/exhibition/{exhibition_id}
+POST /api/leads  (写操作，HITL)
 ```
 
-### 成功响应（信封强制）
+端点清单由 warehouse 侧的 `SKILL.md`（能力总表）维护，平台侧动态加载（`skill_loader/parser.py` 解析 48 个端点）。
+
+### 成功响应（REST JSON，非信封）
+
+warehouse 返回端点原生 JSON，**不强制**统一信封字段。平台侧自组装 `SkillResult`：
+
+| SkillResult 字段 | 来源 |
+| --- | --- |
+| `readiness` | 从 REST JSON `data_readiness.level` 映射：`complete`→READY，`pending`/`sparse_sample`/`incomplete`→NOT_CONNECTED，`synthetic`→SYNTHETIC，`partial`→PARTIAL；缺失默认 READY |
+| `classification` | 默认 INTERNAL（REST 端点不返回分级） |
+| `sources` | 从端点路径推导（如 `/api/venue-schedule` → `Source(type="table", name="t_venue_schedule")`） |
+| `citations` | 从 REST JSON `citations` 字段提取（如有） |
+| `warnings` | SYNTHETIC/PARTIAL 时平台侧自加警告 |
+
+**`data_readiness` 强制标注（INV-3 红线，保留）**：
+- `level="sparse_sample"` / `"pending"` / `"incomplete"` → 平台侧必须向用户显式标注"该画像为样本/待接入数据，结论仅供参考"
+- 仅当 `level="complete"` 时可按完整数据呈现
+- 推荐/预测类（SYNTHETIC）同理：须标注"合成数据，仅供链路演示，非真实经营结论"
+
+### 错误响应（HTTP 状态码 + JSON body）
 
 ```json
-{
-  "request_id": "...",
-  "data": { },
-  "readiness": "READY | PARTIAL | SYNTHETIC | NOT_CONNECTED",
-  "classification": "PUBLIC | INTERNAL | CONFIDENTIAL | PII | FINANCIAL",
-  "sources": [ { "type": "table|api|knowledge", "name": "...", "as_of": "..." } ],
-  "citations": [ { "knowledge_id": "...", "chunk_id": "...", "scope": "..." } ],
-  "warnings": [ "..." ]
-}
+{ "error": { "code": "...", "message": "...", "retryable": false } }
 ```
 
-**强制点**：
-* **`readiness` 必带** —— 禁止返回裸数字而不标就绪度（INV-3 / §7）；`SYNTHETIC` / `PARTIAL` 必须同时写入 `warnings`
-* **`classification` 必带** —— 未标注时 warehouse 侧按 `CONFIDENTIAL` 兜底（默认从严，F02）
-* **知识类响应必带 `citations`** —— 判定规则：**`sources` 中至少一个 `type == "knowledge"` 即视为知识类响应**，此时 `citations` **必填**；平台侧遇「知识类却缺 citations」应**拒绝展示**（groundedness，F03）。非知识类响应的 `citations` 可为空列表
-* 数值类响应必须能追溯到 `sources`
-
-### 错误响应
-
-```json
-{ "request_id": "...", "error": { "code": "...", "message": "...", "retryable": false } }
-```
-
-| code | HTTP | 触发 | 平台侧应如何处理 |
+| HTTP | body.error.code | 触发 | 平台侧应如何处理 |
 | --- | --- | --- | --- |
-| `AUTH_CONTEXT_MISSING` | 401 | C1 头缺失 | 报错，**禁止**降级为默认租户 |
-| `AUTH_CONTEXT_INVALID` | 401 | 签名/字段非法 | 报错 |
-| `REQUEST_CONTEXT_BROKEN` | 400 | C1 `request_id` 缺失（审计链断裂） | 报错，不得放行（v1.1 补：实现侧已用，v1.0 表漏列） |
-| `SCOPE_DENIED` | 403 | 越权访问 | 报错（此计数须纳入"越权召回"监控） |
-| `EGRESS_DENIED` | 403 | 出域策略未过 | **直接拒绝，不得降级到云模型** |
-| `KNOWLEDGE_NOT_PUBLISHED` | 404 | 非 `PUBLISHED` 知识 | 不展示（F03 生命周期） |
-| `METRIC_NOT_VERIFIED` | 422 | 命中已注册但未 `VERIFIED` | **禁止 L3 自算**（INV-10） |
-| `METRIC_BLOCKED` | 422 | 指标 `BLOCKED`（如 B1/B2 限制） | 答"待接入"，禁止自造口径 |
-| `DATA_NOT_CONNECTED` | 422 | 数据源未接入 | 答"待接入" |
-| `RATE_LIMITED` | 429 | 限流 | 退避重试 |
-| `UPSTREAM_ERROR` | 502 | 上游故障 | 重试 / 降级提示 |
-| `INTERNAL` | 500 | — | 上报 |
+| 401 | `AUTH_CONTEXT_MISSING` / `AUTH_CONTEXT_INVALID` | C1 头缺失/非法 | 报错，**禁止**降级为默认租户 |
+| 400 | `REQUEST_CONTEXT_BROKEN` | C1 `request_id` 缺失 | 报错，不得放行 |
+| 403 | `SCOPE_DENIED` | 越权访问 | 报错（纳入"越权召回"监控） |
+| 403 | `EGRESS_DENIED` | 出域策略未过 | **直接拒绝，不得降级到云模型** |
+| 404 | `KNOWLEDGE_NOT_PUBLISHED` | 非 `PUBLISHED` 知识 | 不展示（F03 生命周期） |
+| 422 | `METRIC_NOT_VERIFIED` | 命中已注册但未 `VERIFIED` | **禁止 L3 自算**（INV-10） |
+| 422 | `METRIC_BLOCKED` | 指标 `BLOCKED` | 答"待接入"，禁止自造口径 |
+| 422 | `DATA_NOT_CONNECTED` | 数据源未接入 | 答"待接入" |
+| 429 | `RATE_LIMITED` | 限流 | 退避重试 |
+| 502 | `UPSTREAM_ERROR` | 上游故障 | 重试 / 降级提示 |
+| 500 | `INTERNAL` | — | 上报 |
 
-> 🔴 **INV-10 落地点**：`METRIC_NOT_VERIFIED` / `METRIC_BLOCKED` 是**平台侧禁止 L3 text2sql 自算**的确定性依据。平台收到这两个码时，**只能**回答"该指标待接入"，**不得**让 LLM 自己写 SQL 算。
+### INV-10 落地（v1.2 双轨）
+
+> 🔴 **INV-10 落地点**（v1.2 双轨）：
+
+**轨 1（422 错误码）**：warehouse 返回 422 + `body.error.code in (METRIC_NOT_VERIFIED, METRIC_BLOCKED, DATA_NOT_CONNECTED)` → 平台侧答"该指标待接入"，**不得**让 LLM 自己写 SQL 算。
+
+**轨 2（200 data_readiness）**：warehouse 返回 200 + `data_readiness.level in ("pending", "sparse_sample", "incomplete")` → 平台侧答"该指标待接入"。
+
+两轨均断言 `sql_statements == []`（全程未生成任何 SQL）。
 
 ---
 
@@ -261,14 +287,15 @@ warehouse 为每个响应/字段标注 `classification`（五级）；平台侧 
 
 ---
 
-## 3. 迁移策略（现有端点）
+## 3. 迁移策略（v1.2：warehouse 零改造）
 
-warehouse 现有端点（约 46 个）**不必一次改完**：
+v1.2 修订后，warehouse **无需改造**（直接用现有 48 个 REST 端点）：
 
-1. 未改造端点标注 `X-Contract-Version: legacy`，平台侧按 legacy 适配（宽松解析）
-2. 按 Skill 优先级分批改造：先改**知识类 + 指标类**（这两类涉及 INV-8 / INV-10，风险最高）
-3. 改造完成一个，从 legacy 列表移除一个
-4. **红线端点**（涉及身份、越权、指标口径）必须首批改造完，禁止留在 legacy
+1. ✅ 平台侧 exhibition-agent 已改完：skill 层从 `POST /api/v1/skills/{name}` + 信封改成直接调 `GET /api/venue-schedule` 等 REST 端点
+2. ✅ 平台侧自组装 `SkillResult`（readiness 从 `data_readiness.level` 映射）
+3. ✅ INV-10 双轨落地（422 错误码 + 200 data_readiness 字段）
+4. ✅ mock server 改成 REST 端点 mock（保持测试可跑）
+5. ⏳ warehouse 侧 `data_readiness` 字段标注补全（当前画像/推荐/预测类已标，其余端点按需补）
 
 ---
 
@@ -286,16 +313,17 @@ warehouse 现有端点（约 46 个）**不必一次改完**：
 
 ---
 
-## 5. 验收（契约 1.1 可视为生效的判据）
+## 5. 验收（契约 1.2 可视为生效的判据）
 
-> 勾选状态反映 `exhibition-agent` 骨架实现的实际测试覆盖（99 passed）。
+> 勾选状态反映 `exhibition-agent` v1.2 实现的实际测试覆盖（114 passed, 1 skipped）。
 > 标注测试名供回溯；未勾选项为显式留待后续阶段。
 
 - [x] 无 `X-Execution-Context` 调用 → **401**（不是 200 + 默认租户）— `test_c1_execution_context::test_missing_header_raises_401`
 - [x] 越权 scope → **403** — `test_c1_execution_context::test_empty_scopes_resource_level_raises_403` + `test_server::test_query_empty_scopes_returns_403`
 - [x] 命中未 `VERIFIED` 指标 → **422**，平台侧**不触发** L3 — `test_inv10_no_sql::test_inv10_metric_pending_answers_pending_and_no_sql`（断言 `sql_statements == []`）
 - [x] 非 `PUBLISHED` 知识 → **404** — `test_skill_venue_schedule::test_skill_knowledge_not_published`
-- [x] 每个响应含 `readiness` + `classification` + `sources` — `test_c2_envelope_client::test_normal_success_envelope`
+- [x] v1.2 直接 REST：200 响应返回 REST JSON dict，平台侧自组装 SkillResult — `test_warehouse_client_rest::test_normal_success_rest_returns_json_dict`
+- [x] v1.2 INV-10 双轨：200 + data_readiness.level=pending → 答"待接入" — `test_skill_venue_schedule::test_skill_data_not_connected_200_answers_pending`
 - [x] 每条 trace 含 `request_id` — `test_c4_trace::test_trace_request_id_mandatory`
 - [ ] 写请求必带 HITL + `Idempotency-Key` — 显式留待后续阶段（骨架不实现写操作，见 README 红线）
 - [x] 越权召回数 = 0、过期召回数 = 0（golden set 回归通过）— `test_observability::test_c4_scope_denied_zero_on_normal_path`（正常路径 `scope_denied_count == 0`）

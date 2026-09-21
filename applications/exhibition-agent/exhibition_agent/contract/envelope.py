@@ -1,14 +1,21 @@
-"""C2 统一信封契约模型。
+"""C2' 契约模型（v1.2：直接 REST，平台侧自组装 SkillResult）。
 
-来源：跨项目接口契约 v1.1 §C2。
-成功响应强制带 readiness + classification + sources；
-知识类响应必带 citations；数值类响应必须能追溯到 sources。
+来源：跨项目接口契约 v1.2 §C2（修订自 v1.1 统一信封）。
+v1.2 不再要求 warehouse 返回统一信封；exhibition-agent 直接调 warehouse REST 端点，
+平台侧根据 REST JSON 自组装 SkillResult（readiness 从 data_readiness.level 映射、
+classification 默认 INTERNAL、sources 从端点路径推导）。
+
+保留的枚举与模型（平台侧自组装用）：
+- Readiness / DataClassification / EgressDecision：枚举
+- Source / Citation：结构模型
+
+已移除（v1.1 信封，不再需要）：
+- SkillRequest / SkillSuccessEnvelope / SkillErrorEnvelope
 """
 
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -41,7 +48,7 @@ class EgressDecision(str, Enum):
 
 
 class Source(BaseModel):
-    """数据来源（数值类响应必须能追溯到 sources）。"""
+    """数据来源（平台侧自组装，从端点路径推导）。"""
 
     type: str = Field(description="table | api | knowledge")
     name: str
@@ -54,35 +61,3 @@ class Citation(BaseModel):
     knowledge_id: str
     chunk_id: str | None = None
     scope: str | None = None
-
-
-class SkillRequest(BaseModel):
-    """C2 请求信封。"""
-
-    request_id: str
-    skill: str
-    params: dict[str, Any] = Field(default_factory=dict)
-    options: dict[str, Any] = Field(default_factory=dict)
-
-
-class SkillSuccessEnvelope(BaseModel):
-    """C2 成功响应信封（强制 readiness + classification + sources）。
-
-    缺 readiness 的数值响应 → 客户端判 fail（不是 warn）。
-    SYNTHETIC / PARTIAL 必须同时写入 warnings。
-    """
-
-    request_id: str
-    data: dict[str, Any] = Field(default_factory=dict)
-    readiness: Readiness
-    classification: DataClassification
-    sources: list[Source] = Field(default_factory=list)
-    citations: list[Citation] = Field(default_factory=list)
-    warnings: list[str] = Field(default_factory=list)
-
-
-class SkillErrorEnvelope(BaseModel):
-    """C2 错误响应信封。"""
-
-    request_id: str
-    error: dict[str, Any] = Field(description="含 code / message / retryable")

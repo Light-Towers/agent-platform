@@ -4,14 +4,31 @@ updated: 2026-09-21
 
 # exhibition-agent
 
-会展行业 AI Agent 平台侧骨架，按《跨项目接口契约 v1.1》接入 `mingyang-warehouse`。
+会展行业 AI Agent 平台侧骨架，按《跨项目接口契约 v1.2：直接 REST》接入 `mingyang-warehouse`。
 
 ## 项目定位
 
-最小骨架验证 **C1（ExecutionContext）+ C2（统一信封 + 错误码）+ C4（trace）** 三条契约能落地，
+最小骨架验证 **C1（ExecutionContext）+ C2'（直接 REST + HTTP 状态码映射）+ C4（trace）** 三条契约能落地，
 重点是把 **INV-10（指标口径不可绕过）** 变成一条可回归的自动化测试。
 
 平台侧可**不等 warehouse 就绪**就跑通契约链路（全走 mock server）。
+
+## 契约版本 v1.1 → v1.2 变更（F-S1-05 修复，2026-09-21）
+
+> 详见 `docs/plans/plan-fix-f-s1-05-contract-revise-to-rest.md`。
+
+**问题**：v1.1 走 `POST /api/v1/skills/{name}` + 统一信封，但真实 warehouse（mingyang-warehouse，48 个 REST 端点）无该路由，真实调用 404；mock 掩盖此缺口。
+
+**修订**：契约 v1.2 选择直接 REST 方案——exhibition-agent 的 skill 层改成直接调 warehouse REST 端点（`GET /api/venue-schedule` 等），不再走统一信封。
+
+| 项 | v1.1（旧） | v1.2（新） |
+| --- | --- | --- |
+| 调用方式 | `POST /api/v1/skills/{name}` + 信封 body | 直接 `GET /api/venue-schedule` 等 REST 端点 |
+| 响应格式 | 统一信封（readiness/classification/sources/citations） | REST JSON（data_readiness.level 字段） |
+| 错误映射 | 信封 error.code → ContractError 子类 | HTTP 状态码 + body.error.code → ContractError 子类 |
+| INV-10 落地 | 信封 error.code = METRIC_NOT_VERIFIED → 答"待接入" | 双轨：422 错误码 + 200 data_readiness.level=pending → 答"待接入" |
+| C1 ExecutionContext | 保留 | 保留 |
+| C4 trace | 保留 | 保留 |
 
 ## 目录结构
 
@@ -20,27 +37,31 @@ applications/exhibition-agent/
 ├── pyproject.toml              uv workspace 成员
 ├── README.md
 └── exhibition_agent/
-    ├── contract/               C1 上下文模型 + C2 信封 / 错误码（唯一定义处）
-    │   ├── execution_context.py    ExecutionContext（字段冻结）
-    │   ├── envelope.py             Readiness / Classification / 信封模型
+    ├── contract/               C1 上下文模型 + C2' REST 契约（唯一定义处）
+    │   ├── execution_context.py    ExecutionContext（字段冻结，C1 保留）
+    │   ├── envelope.py             Readiness / Classification / Source / Citation（平台侧自组装用）
     │   └── error_codes.py          错误码表 + HTTP 映射 + INV-10 落地常量
-    ├── middleware/             ExecutionContext 解析与校验
+    ├── middleware/             ExecutionContext 解析与校验（C1 保留）
     │   ├── context_codec.py        JWT / base64 编解码
     │   └── execution_context_middleware.py  C1 校验（401/403/400）
-    ├── client/                warehouse 契约客户端（HTTP）
+    ├── client/                warehouse REST 客户端（HTTP，v1.2 直接 REST）
     │   ├── contract_errors.py      错误码 → 异常映射
-    │   └── warehouse_client.py     httpx + 信封解析 + 缺 readiness 判 fail
-    ├── skills/                只读 skill
+    │   └── warehouse_client.py     httpx + get_rest/post_rest + HTTP 状态码映射
+    ├── skills/                只读 skill（v1.2 直接 REST + 自组装 SkillResult）
     │   ├── base_skill.py           BaseSkill / SkillResult / SkillContext
-    │   └── venue_schedule_query.py venue.schedule.query（INV-10 落地）
+    │   └── venue_schedule_query.py venue.schedule.query（直接调 GET /api/venue-schedule，INV-10 双轨落地）
     ├── graph/                 最小 Supervisor 图（LangGraph）
     │   ├── state.py                ExhibitionAgentState
     │   ├── nodes.py                select_skill → run_skill → emit_trace
     │   └── supervisor.py           build_graph / run_supervisor
     ├── observability/         trace 记录（C4）
     │   └── trace.py                TraceRecord（11 字段）+ InMemoryTraceRecorder
-    ├── mock_server/           warehouse 契约假实现（9 场景）
-    │   └── warehouse_mock.py       FastAPI mock（X-Mock-Scenario 切换）
+    ├── mock_server/           warehouse REST 假实现（9 场景，v1.2 REST 端点）
+    │   └── warehouse_mock.py       FastAPI mock（GET /api/venue-schedule 等 + X-Mock-Scenario 切换）
+    ├── skill_loader/          SKILL.md 解析 + Web 调试界面（动态加载 48 个端点）
+    │   ├── parser.py               SKILL.md → Endpoint 列表
+    │   ├── app.py                  FastAPI Web 界面 + 代理调用
+    │   └── SKILL.md                mingyang-warehouse 能力总表副本
     ├── model_router.py        §17.5 Model Router 桩（不接真模型）
     ├── config.py              pydantic-settings 配置
     ├── server.py              FastAPI demo 入口
@@ -54,13 +75,13 @@ applications/exhibition-agent/
 ```bash
 cd applications/exhibition-agent
 uv run --extra dev pytest tests/ -v
-# 99 passed
+# 114 passed, 1 skipped
 ```
 
 ### 起 demo server + mock warehouse
 
 ```bash
-# 终端 1：mock warehouse（端口 9100）
+# 终端 1：mock warehouse（端口 9100，v1.2 REST 端点）
 uv run --extra dev uvicorn exhibition_agent.mock_server.warehouse_mock:create_mock_app --port 9100
 
 # 终端 2：exhibition-agent（端口 9000）
@@ -71,21 +92,28 @@ EXHIBITION_AGENT_WAREHOUSE_BASE_URL=http://127.0.0.1:9100 \
 curl -X POST http://localhost:9000/api/query \
   -H "Content-Type: application/json" \
   -H "X-Execution-Context: <JWT 或 base64 编码的 ExecutionContext>" \
-  -d '{"query": "查询 SIAL 广州 2026 场馆档期", "params": {"exhibition_id": "ex-001"}}'
+  -d '{"query": "查询 SIAL 广州 2026 场馆档期", "params": {"venue_id": "vn-001"}}'
+```
+
+### 接真实 warehouse（192.168.100.241:8000）
+
+```bash
+EXHIBITION_AGENT_WAREHOUSE_BASE_URL=http://192.168.100.241:8000 \
+  uv run --extra dev uvicorn exhibition_agent.server:app --port 9000
 ```
 
 ### mock / real 切换
 
 | 项 | mock | real |
 | --- | --- | --- |
-| `EXHIBITION_AGENT_WAREHOUSE_BASE_URL` | `http://127.0.0.1:9100`（mock） | `https://<warehouse-host>` |
+| `EXHIBITION_AGENT_WAREHOUSE_BASE_URL` | `http://127.0.0.1:9100`（mock） | `http://192.168.100.241:8000` |
 | `EXHIBITION_AGENT_CONTEXT_MODE` | `jwt`（默认）或 `base64` | 同左 |
 | `EXHIBITION_AGENT_EXECUTION_MODE` | `DEV`（不验签，校验恒开） | `STRICT`（验签，需 `CONTEXT_JWT_SECRET`） |
 | `EXHIBITION_AGENT_CONTEXT_JWT_SECRET` | 空 | HS256 密钥 |
 
 mock 场景通过请求头 `X-Mock-Scenario` 切换（9 场景见下表）。
 
-## 执行档位（契约 v1.1 §C1）
+## 执行档位（契约 v1.2 §C1，保留）
 
 | 档位 | 身份来源 | 验签 | 401/403 | scope 下推 |
 | --- | --- | --- | --- | --- |
@@ -99,29 +127,31 @@ mock 场景通过请求头 `X-Mock-Scenario` 切换（9 场景见下表）。
 
 | 项 | 值 |
 | --- | --- |
-| 契约版本 | **1.1** |
+| 契约版本 | **1.2**（直接 REST，修订自 v1.1 统一信封） |
 | 主本 | `mingyang-warehouse/docs/superpowers/specs/2026-09-20-cross-project-interface-contract.md` |
 | 副本 | `agent-platform/docs/architecture/cross-project-interface-contract.md` |
 | 本包实现 | `exhibition_agent/contract/`（唯一定义处） |
+| 修订方案 | `docs/plans/plan-fix-f-s1-05-contract-revise-to-rest.md` |
 
-## mock server 9 场景
+## mock server 9 场景（v1.2 REST 端点）
 
 | X-Mock-Scenario | 期望 |
 | --- | --- |
-| `normal_200` | 成功信封（readiness/classification/sources/citations 齐全） |
-| `missing_context` | 401 AUTH_CONTEXT_MISSING |
+| `normal_200` | 200 + REST JSON（data_readiness.level=complete + citations 齐全） |
+| `missing_context` | 401 AUTH_CONTEXT_MISSING（C1 中间件校验） |
 | `scope_denied` | 403 SCOPE_DENIED |
-| `knowledge_not_published` | 404 KNOWLEDGE_NOT_PUBLISHED |
-| `metric_not_verified` | 422 METRIC_NOT_VERIFIED |
-| `metric_blocked` | 422 METRIC_BLOCKED |
-| `data_not_connected` | 422 DATA_NOT_CONNECTED（答"待接入"，并入 INV-10） |
-| `knowledge_missing_citations` | 200 但 sources 含 knowledge 无 citations（GroundednessError 拒绝展示） |
-| `missing_readiness` | 200 但缺 readiness（客户端判 fail） |
+| `knowledge_not_published` | 404 + {"error":{"code":"KNOWLEDGE_NOT_PUBLISHED"}} |
+| `metric_not_verified` | 422 + {"error":{"code":"METRIC_NOT_VERIFIED"}} |
+| `metric_blocked` | 422 + {"error":{"code":"METRIC_BLOCKED"}} |
+| `data_not_connected` | 200 + {"data_readiness":{"level":"pending"}}（INV-10 200 路径） |
+| `data_not_connected_422` | 422 + {"error":{"code":"DATA_NOT_CONNECTED"}}（INV-10 422 路径） |
+| `missing_readiness` | 200 + 无 data_readiness 字段（skill 层默认 READY） |
 
-## INV-10 回归测试（最关键验收）
+## INV-10 回归测试（最关键验收，v1.2 双轨）
 
 `tests/test_inv10_no_sql.py`：
-- `METRIC_NOT_VERIFIED` / `METRIC_BLOCKED` / `DATA_NOT_CONNECTED` → 回答 **"该指标待接入"**
+- **422 路径**：`METRIC_NOT_VERIFIED` / `METRIC_BLOCKED` / `DATA_NOT_CONNECTED` → 回答 **"该指标待接入"**
+- **200 路径**：`data_readiness.level=pending` → 回答 **"该指标待接入"**（v1.2 新增）
 - 断言 `sql_statements == []`（全程未生成任何 SQL，禁止 L3 text2sql 自算）
 - 断言 trace.error_code 记录对应错误码
 - 断言 trace.model 不是 cloud 模型（出域不得降级）
@@ -136,33 +166,30 @@ mock 场景通过请求头 `X-Mock-Scenario` 切换（9 场景见下表）。
 | 不引入 LangChain 全家桶 | ✅ 只用 langgraph（平台已有），无 langchain Chain/Retriever/Agent |
 | 不实现写操作与 HITL 执行 | ✅ 只有只读 skill，HITL 未实现（留接口位） |
 | 不接真实 LLM / 真模型 | ✅ Model Router 是桩，不接真模型 |
-| 不设"测试环境跳过校验"开关 | ✅ 执行档位 STRICT/DEV 只切验签，401/403/scope 恒开，无 OFF 档（grep 确认无 if testing/skip/bypass 路径） |
+| 不设"测试环境跳过校验"开关 | ✅ 执行档位 STRICT/DEV 只切验签，401/403/scope 恒开，无 OFF 档 |
+| 真实 warehouse 可直连（v1.2 修复） | ✅ 直接调 GET /api/venue-schedule 等 REST 端点，不再走 POST /api/v1/skills/{name}（F-S1-05 闭环） |
 
-### 架构红线豁免披露（审核建议 1）
+### 架构红线豁免披露（F-S1-05 已修复，2026-09-21）
 
-本应用**显式不依赖** `shared-schemas` / `agent-runtime`，自带 Skill / 信封 / ExecutionContext 实现（`contract/__init__.py`），实质偏离仓库架构红线 4/5（"能力收口到内核/运行时，不重复实现"）。豁免理由：
+本应用**显式不依赖** `shared-schemas` / `agent-runtime`，自带 Skill / ExecutionContext 实现（`contract/__init__.py`）。
 
-- **跨项目独立交付**：exhibition-agent 按跨项目接口契约 v1.1（对端 mingyang-warehouse）独立交付，信封 / ExecutionContext 是**跨项目对外契约**，与联邦内部契约（shared-schemas）是另一套口径，复用 shared-schemas 会把内部契约泄漏给外部项目；
-- 豁免范围仅限 contract/skills/self-contained 中间件，observability 已复用 agent-core（`agent_core.tracing`）；
-- 该豁免需架构负责人登记确认后长期有效，收敛方向见 debt-diagnosis F-S1-05。
+**F-S1-05 已修复**：契约 v1.1 → v1.2 修订（直接 REST），exhibition-agent 的 skill 层从 `POST /api/v1/skills/{name}` + 信封改成直接调 warehouse REST 端点。详见 `docs/plans/plan-fix-f-s1-05-contract-revise-to-rest.md`。
 
-### 契约回提声明（审核建议 2）
+豁免理由（保留登记）：
+- **跨项目独立交付**：exhibition-agent 按跨项目接口契约（对端 mingyang-warehouse）独立交付，ExecutionContext 是**跨项目对外契约**，与联邦内部契约（shared-schemas）是另一套口径，复用 shared-schemas 会把内部契约泄漏给外部项目；
+- 豁免范围仅限 contract/skills/self-contained 中间件，observability 已复用 agent-core（`agent_core.tracing`）。
 
-本 README 所述「契约 v1.1」的澄清结论（§0.5 歧义反馈等）目前仅在仓库内实现侧落地，**尚未回提至契约主本**（主本在 mingyang-warehouse 侧仓库）。两份文本存在漂移风险，回提后本节同步移除。
+### 契约回提声明
 
-## 歧义 / 反馈清单
+本 README 所述「契约 v1.2」的修订结论目前仅在仓库内实现侧落地，**尚未回提至契约主本**（主本在 mingyang-warehouse 侧仓库）。两份文本存在漂移风险，回提后本节同步移除。
 
-v1.0 实现反馈的 7 项歧义，**契约 v1.1 §0.5 已全部给出结论**，本实现已按 v1.1 补丁全部落地：
+## v1.1 → v1.2 修订落地清单
 
-| # | v1.0 反馈点 | v1.1 结论 | 本实现落地 |
-| --- | --- | --- | --- |
-| 1 | 目录布局 src/ vs flat | 采用 flat layout | ✅ flat layout |
-| 2 | 自报 tenant_id 位置未定义 | body `params.tenant_id` | ✅ middleware 检测 `params.tenant_id` |
-| 3 | 资源级判定未定义 | 路径含 `/exhibition/`/`/venue/` 或 skill 前缀 `exhibition.`/`venue.` | ✅ `_is_resource_level(path, skill)` |
-| 4 | DATA_NOT_CONNECTED mock 缺失 | 补 mock 场景，答"待接入"，并入 INV-10 | ✅ mock + skill + 测试 |
-| 5 | error_code 必填性张力 | 仅出错时必填，其余 10 恒必填 | ✅ TraceRecord error_code 可选 |
-| 6 | JWT 验签密钥注入未定义 | mock 不验签，生产待决 | ✅ STRICT/DEV 档位，DEV 不验签 |
-| 7 | 知识类响应判定未定义 | sources 含 type=knowledge → citations 必填 | ✅ client `_check_groundedness` |
-| 8 | 权限校验让测试难做 | STRICT/DEV 档位，校验恒开，无 OFF | ✅ `execution_mode_to_verify_signature` + DEV 仍 401/403 测试 |
-
-**v1.1 实现无新增歧义。**
+| # | v1.1 | v1.2 落地 |
+| --- | --- | --- |
+| 1 | WarehouseClient.invoke(skill, params) → POST /api/v1/skills/{skill} + 信封 | WarehouseClient.get_rest(path, params) → GET /api/venue-schedule + REST JSON |
+| 2 | SkillSuccessEnvelope 信封解析（readiness/classification/sources/citations） | skill 层自组装 SkillResult（readiness 从 data_readiness.level 映射） |
+| 3 | mock_server 实现 POST /api/v1/skills/{skill} | mock_server 实现 GET /api/venue-schedule 等 REST 端点 |
+| 4 | INV-10 走信封 error.code = METRIC_NOT_VERIFIED | INV-10 双轨：422 错误码 + 200 data_readiness.level=pending |
+| 5 | envelope.py 含 SkillRequest/SkillSuccessEnvelope/SkillErrorEnvelope | envelope.py 移除信封模型，保留 Readiness/Source/Citation 等枚举 |
+| 6 | C1 ExecutionContext / C4 trace | 保留不动 |
