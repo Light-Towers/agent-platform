@@ -57,8 +57,8 @@
 - 接口契约对齐：exhibition 的 Skill/ExecutionContext 与 agent_runtime 的协议差异；
 - exhibition 当前是"平台侧骨架"（跨项目契约 v1.1），接入 agent-runtime 可能改变其定位。
 
-**前置依赖**：exhibition-agent 定位决策（独立骨架 vs agent-runtime 宿主，对应 H-S1-02 假设）。
-**立项建议**：单独立 `plan-fix-f-s1-05-exhibition-runtime-converge.md`，需先与维护者确认 exhibition 定位。
+**前置依赖**：exhibition-agent 定位决策（H-S1-02 假设）——**已出评估**（[05-exhibition-positioning-evaluation](05-exhibition-positioning-evaluation.md)），推荐选项 A（保持独立，契约载体非运行时内核能力，红线 4 有意豁免）。
+**立项建议**：待维护者拍板。若认可选项 A，F-S1-05 标记"有意豁免"关闭；若选 B/C，立 `plan-fix-f-s1-05-exhibition-runtime-converge.md`。
 
 ## 5. TB-7 — docker compose 冒烟需 Docker
 

@@ -115,7 +115,7 @@
 | F-S1-01 | ✅已修复（F-S1-01 实施）：agent-runtime 测试反向依赖 agent_server | 新 | 迁移归属到 applications/agent_server/tests/ |
 | F-S1-02 | agent_server 惰性 import agent_federation | 新（收敛期） | Plan-F 收敛后收口 |
 | F-S1-04 | agent_federation CB+Cache 独立实现 | 已知（§5） | 收敛到 agent-runtime |
-| F-S1-05 | exhibition-agent 独立实现 Skill+ExecutionContext | 新 | 评估依赖 agent-runtime |
+| F-S1-05 | ⏳定位评估已立（05-evaluation），待决策：推荐选项 A（有意豁免，契约载体非运行时内核能力） | 新 | 见 05-exhibition-positioning-evaluation |
 | F-S1-06 | ✅已修复（d67ed2a）：_NoOpTracer 2 套独立实现 | 新 | agent-runtime 从 agent-core 导入 |
 | TB-7 | docker compose 冒烟需 Docker | 可选 | 环境依赖 |
 | TB-11 | 双轨配置体系部分修复 | 部分修复 | pydantic-settings 收敛 |

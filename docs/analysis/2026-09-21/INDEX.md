@@ -67,6 +67,7 @@ Tier A×4 深入接手卡 + Tier B×4 卡头 + Tier C×1 仅卡头（zhanggui-zh
 - 已修复（9 项）：F-S1-03 / F-S1-06 / F-S0-01~04 / F-S0-07 / F-S0-09 / F-S0-10 — 见 [02-debt-diagnosis](02-debt-diagnosis.md) §2/§3
 - 方案已立待实施：F-S1-01 — 见 [plan-fix-f-s1-01](../../plans/plan-fix-f-s1-01-test-reverse-import.md)
 - 剩余评估与立项计划：见 [04-remaining-evaluation](04-remaining-evaluation.md)
+- exhibition 定位评估（F-S1-05 决策输入）：见 [05-exhibition-positioning-evaluation](05-exhibition-positioning-evaluation.md)
 
 ---
 
