@@ -31,7 +31,7 @@ from .parser import Endpoint, default_skill_md_path, load_endpoints
 
 WAREHOUSE_BASE_URL = os.environ.get(
     "WAREHOUSE_BASE_URL",
-    os.environ.get("EXHIBITION_API_BASE_URL", "http://192.168.100.241:8000"),
+    os.environ.get("EXHIBITION_API_BASE_URL", "http://127.0.0.1:8000"),
 )
 SKILL_MD_PATH = os.environ.get("SKILL_MD_PATH", str(default_skill_md_path()))
 

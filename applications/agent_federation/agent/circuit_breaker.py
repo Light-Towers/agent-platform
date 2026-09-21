@@ -1,7 +1,7 @@
 """P3：子 Agent 委派熔断器（F-S1-04 收口）。
 
 核心引擎复用 agent_core.resilience.CircuitBreaker(SlidingWindowPolicy)，
-本模块仅添加 async 接口 + 指标上报 + per-name 注册表。
+async 适配 + 指标上报经 agent_runtime.circuit_breaker.CircuitBreaker(on_state_change=) 注入。
 
 状态机（与 agent_core.resilience.SlidingWindowPolicy 一致）：
     CLOSED  --失败率超阈值-->  OPEN  --冷却到期-->  HALF_OPEN
@@ -23,9 +23,7 @@ from agent_core.resilience import (
     STATE_OPEN,
     SlidingWindowPolicy,
 )
-from agent_core.resilience import (
-    CircuitBreaker as _CoreBreaker,
-)
+from agent_runtime.circuit_breaker import CircuitBreaker as _RuntimeBreaker
 
 from agent.metrics import record_circuit_state
 
@@ -44,11 +42,11 @@ class CircuitState:
     HALF_OPEN = STATE_HALF_OPEN
 
 
-class CircuitBreaker:
+class CircuitBreaker(_RuntimeBreaker):
     """单个子服务（按 graph_id/name）的熔断器（async + 指标上报）。
 
-    内部委托 agent_core.resilience.CircuitBreaker(SlidingWindowPolicy) 引擎，
-    外层添加 async 接口 + record_circuit_state 指标上报。
+    复用 agent_runtime.circuit_breaker.CircuitBreaker(async 适配 + on_state_change 回调)，
+    策略用 SlidingWindowPolicy（与 agent_core.resilience 既有实现一致，勿新建）。
     """
 
     def __init__(
@@ -61,38 +59,31 @@ class CircuitBreaker:
         half_open_probes: int = _CB_HALF_OPEN_PROBES,
     ) -> None:
         self.name = name
-        self._engine = _CoreBreaker(
-            policy=SlidingWindowPolicy(
-                failure_ratio=failure_ratio,
-                min_requests=min_requests,
-                window_size=window_size,
-                cooldown_seconds=cooldown_seconds,
-                half_open_probes=half_open_probes,
-            ),
+        policy = SlidingWindowPolicy(
+            failure_ratio=failure_ratio,
+            min_requests=min_requests,
+            window_size=window_size,
+            cooldown_seconds=cooldown_seconds,
+            half_open_probes=half_open_probes,
         )
-        self._last_state = STATE_CLOSED
 
-    def _report_transition(self) -> None:
-        state = self._engine.resolved_state()
-        if state != self._last_state:
-            record_circuit_state(self.name, state)
-            logger.info("[circuit:%s] state %s -> %s", self.name, self._last_state, state)
-            self._last_state = state
+        def _on_state_change(old: str, new: str) -> None:
+            record_circuit_state(self.name, new)
+            logger.info("[circuit:%s] state %s -> %s", self.name, old, new)
 
-    def state(self) -> str:
-        return self._engine.resolved_state()
+        super().__init__(policy=policy, on_state_change=_on_state_change)
 
     async def allow(self) -> bool:
-        allowed = self._engine.allow()
+        allowed = super().allow()
         self._report_transition()
         return allowed
 
     async def record_success(self) -> None:
-        self._engine.record_success()
+        super().record_success()
         self._report_transition()
 
     async def record_failure(self) -> None:
-        self._engine.record_failure()
+        super().record_failure()
         self._report_transition()
 
 

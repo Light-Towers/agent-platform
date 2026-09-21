@@ -8,6 +8,7 @@ except ImportError:
 
 from langchain_core.tools import tool
 
+from agent.config import TIMEOUT_PDF_PARSE
 from api.context import get_session_context
 from api.monitor import monitor
 from tools._timeout import with_timeout
@@ -16,7 +17,7 @@ from utils.word_converter import convert_md_to_pdf_via_weasyprint
 
 
 @tool
-@with_timeout(timeout=30)
+@with_timeout(timeout=TIMEOUT_PDF_PARSE)
 def convert_md_to_pdf(
         md_filename: Annotated[str, "要转换的Markdown文档路径（包含.md后缀）"],
         pdf_filename: Annotated[Optional[str], "输出的PDF文件路径（可选，默认与源文件同名）"] = None

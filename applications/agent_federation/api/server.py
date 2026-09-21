@@ -13,6 +13,7 @@ from fastapi import FastAPI, File, Form, Query, Request, UploadFile, WebSocket, 
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
+from shared_schemas import QueryRequest
 
 load_dotenv(find_dotenv())
 
@@ -200,26 +201,28 @@ def _sanitize_filename(name: str) -> str:
     return safe
 
 
-class TaskRequest(BaseModel):
-    query: str
-    thread_id: str = None
+class TaskAcceptedResponse(BaseModel):
+    """异步任务受理响应（非 QueryResponse：/api/task 是 fire-and-forget）。"""
+
+    status: str
+    thread_id: str
 
 
 from agent.main_agent import run_deep_agent
 
 
 @app.post("/api/task")
-async def run_task(request: TaskRequest):
-    # 安全：API_KEY 启用时忽略客户端 thread_id，按密钥派生稳定会话（防劫持 + 跨请求续接）
+async def run_task(request: QueryRequest):
+    # 安全：API_KEY 启用时忽略客户端 session_id，按密钥派生稳定会话（防劫持 + 跨请求续接）
     api_key = _extract_api_key(request)
-    thread_id = resolve_thread_id(request.thread_id, api_key)
+    thread_id = resolve_thread_id(request.session_id, api_key)
     with start_span("api.task", attrs={"thread_id": thread_id}):
         async def _run():
             async with _concurrency_semaphore:
                 await run_deep_agent(request.query, workspace_id=thread_id)
 
         _track_task(asyncio.create_task(_run()))
-        return {"status": "started", "thread_id": thread_id}
+        return TaskAcceptedResponse(status="started", thread_id=thread_id)
 
 
 @app.post("/api/upload")
