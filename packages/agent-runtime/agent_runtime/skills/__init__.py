@@ -15,6 +15,7 @@ from agent_runtime.skills.registry import (
     SkillRegistry,
 )
 from agent_runtime.skills.remote import as_remote_skill
+from agent_runtime.skills.sandbox import as_sandbox_skill
 
 __all__ = [
     "Skill",
@@ -25,5 +26,6 @@ __all__ = [
     "as_agent_skill",
     "as_function_skill",
     "as_remote_skill",
+    "as_sandbox_skill",
     "register_mcp_skills",
 ]

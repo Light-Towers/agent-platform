@@ -217,6 +217,14 @@ async def lifespan(app: FastAPI):
         mcp_count = register_mcp_skills(mcp_manager, registry)
         logger.info("auto-registered %d MCP tool skills", mcp_count)
 
+    # 沙箱代码执行 Skill（Docker 优先 subprocess 降级）
+    from agent_runtime.skills.sandbox import as_sandbox_skill
+
+    sandbox_skill = as_sandbox_skill(timeout=settings.max_execution_seconds or 30)
+    if sandbox_skill.name not in registry:
+        registry.register(sandbox_skill)
+        logger.info("registered sandbox skill (backend=%s)", sandbox_skill.metadata.get("backend"))
+
     app.state.registry = registry
     app.state.planner = get_planner(settings, registry=registry)
     app.state.planner_runtime = PlannerRuntime(
