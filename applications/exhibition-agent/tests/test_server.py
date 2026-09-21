@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import importlib.util
+
 import httpx
 import pytest
 
 from exhibition_agent.client.warehouse_client import WarehouseClient
-from exhibition_agent.middleware.context_codec import encode_base64
+from exhibition_agent.middleware.context_codec import encode_base64, encode_jwt
 from exhibition_agent.mock_server.warehouse_mock import create_mock_app
 from exhibition_agent.server import app
 from exhibition_agent.testing_helpers import ctx, ctx_header, make_context_payload
@@ -152,3 +154,130 @@ async def test_query_metric_not_verified_answers_pending(server_transport, monke
     assert data["error_code"] == "METRIC_NOT_VERIFIED"
     assert data["readiness"] == "NOT_CONNECTED"
     assert data["sql_statements"] == []
+
+
+# ---------------------------------------------------------------------------
+# W3：skill 级错误码按契约 §C2 HTTP 映射（401/403 不再吞成 200）
+# ---------------------------------------------------------------------------
+async def test_query_warehouse_auth_error_maps_401(server_transport, monkeypatch):
+    """warehouse 侧 401（AUTH_CONTEXT_MISSING）→ 平台 401，不再吞成 200（W3）。"""
+    mock_transport = httpx.ASGITransport(app=create_mock_app())
+    _patch_warehouse_client(monkeypatch, mock_transport)
+    context = ctx()
+    async with httpx.AsyncClient(transport=server_transport, base_url="http://test") as client:
+        resp = await client.post(
+            "/api/query",
+            json={"query": "查询场馆排期", "params": {}},
+            headers={
+                "X-Execution-Context": ctx_header(context),
+                "X-Mock-Scenario": "missing_context",
+            },
+        )
+    assert resp.status_code == 401
+    data = resp.json()
+    assert data["error_code"] == "AUTH_CONTEXT_MISSING"
+
+
+async def test_query_mock_scenario_ignored_in_strict_mode(server_transport, monkeypatch):
+    """X-Mock-Scenario 仅 DEV 档生效；STRICT 档忽略该头（审核建议 5）。"""
+    monkeypatch.setattr("exhibition_agent.server.settings.execution_mode", "STRICT")
+    monkeypatch.setattr("exhibition_agent.server.settings.context_jwt_secret", "test-secret-key")
+    mock_transport = httpx.ASGITransport(app=create_mock_app())
+    _patch_warehouse_client(monkeypatch, mock_transport)
+    payload = make_context_payload()
+    signed = encode_jwt(payload, secret="test-secret-key")
+    async with httpx.AsyncClient(transport=server_transport, base_url="http://test") as client:
+        resp = await client.post(
+            "/api/query",
+            json={"query": "查询展位销售率", "params": {"metric": "sales_rate"}},
+            headers={
+                "X-Execution-Context": signed,
+                "X-Mock-Scenario": "metric_not_verified",
+            },
+        )
+    # STRICT 档忽略 mock 头：warehouse 走 mock 默认（normal_200）路径 → 正常 200 信封
+    assert resp.status_code == 200
+    assert resp.json()["answer"] != "该指标待接入"
+
+
+async def test_query_warehouse_scope_denied_maps_403(server_transport, monkeypatch):
+    """warehouse 403 → skill return(error_code=SCOPE_DENIED) → server 按契约 §C2 映射 403。
+
+    回归守卫（二审问题 1）：映射不得被 "result is None" 挡住——skill 对
+    ScopeDeniedError 是 return 带 error_code 的 SkillResult（非 raise）。
+    """
+    mock_transport = httpx.ASGITransport(app=create_mock_app())
+    _patch_warehouse_client(monkeypatch, mock_transport)
+    context = ctx()
+    async with httpx.AsyncClient(transport=server_transport, base_url="http://test") as client:
+        resp = await client.post(
+            "/api/query",
+            json={"query": "查询场馆排期", "params": {}},
+            headers={
+                "X-Execution-Context": ctx_header(context),
+                "X-Mock-Scenario": "scope_denied",
+            },
+        )
+    assert resp.status_code == 403, "SCOPE_DENIED 必须映射 403（不得因 result 非 None 落回 200）"
+    data = resp.json()
+    assert data["error_code"] == "SCOPE_DENIED"
+    assert data["answer"] == "无权访问该资源"
+
+
+async def test_query_knowledge_not_published_maps_404(server_transport, monkeypatch):
+    """warehouse 404（knowledge_not_published）→ 平台映射 404（§C2，非 200）。"""
+    mock_transport = httpx.ASGITransport(app=create_mock_app())
+    _patch_warehouse_client(monkeypatch, mock_transport)
+    context = ctx()
+    async with httpx.AsyncClient(transport=server_transport, base_url="http://test") as client:
+        resp = await client.post(
+            "/api/query",
+            json={"query": "查询知识条目", "params": {}},
+            headers={
+                "X-Execution-Context": ctx_header(context),
+                "X-Mock-Scenario": "knowledge_not_published",
+            },
+        )
+    assert resp.status_code == 404
+    assert resp.json()["error_code"] == "KNOWLEDGE_NOT_PUBLISHED"
+
+
+_OTEL_SDK_AVAILABLE = importlib.util.find_spec("opentelemetry.sdk") is not None
+
+
+@pytest.mark.skipif(
+    not _OTEL_SDK_AVAILABLE,
+    reason="需 OTel SDK（agent-core[tracing] extra）；未装时本用例跳过，no-op 下 traceparent 恒 None",
+)
+async def test_query_success_response_carries_traceparent(server_transport, monkeypatch):
+    """问题 2 回归守卫：注入真实 TracerProvider + InMemorySpanExporter 后，
+    成功路径响应头必须回传 traceparent（no-op 环境下该断言无意义，故条件 skip）。
+    """
+    import agent_core.tracing as core_tracing
+    from opentelemetry.sdk.trace.export import InMemorySpanExporter
+
+    # init_observability 在 import server 时已以 no-op 完成（幂等），先重置模块态再注入 exporter
+    monkeypatch.setattr(core_tracing, "_initialized", False)
+    monkeypatch.setattr(core_tracing, "_enabled", False)
+    monkeypatch.setattr(core_tracing, "_tracer", None)
+    core_tracing.init_tracing(
+        service_name="exhibition-test", enabled=True, exporter=InMemorySpanExporter()
+    )
+    assert core_tracing.is_tracing_enabled(), "OTel 注入失败，后续断言无意义"
+
+    mock_transport = httpx.ASGITransport(app=create_mock_app())
+    _patch_warehouse_client(monkeypatch, mock_transport)
+    context = ctx()
+    async with httpx.AsyncClient(transport=server_transport, base_url="http://test") as client:
+        resp = await client.post(
+            "/api/query",
+            json={"query": "查询场馆排期", "params": {"venue_id": "vn-001"}},
+            headers={
+                "X-Execution-Context": ctx_header(context),
+                "X-Mock-Scenario": "normal_200",
+            },
+        )
+    assert resp.status_code == 200
+    tp = resp.headers.get("traceparent")
+    assert tp, "启用 OTel 后响应头应回传 traceparent（C4 trace 链路）"
+    assert tp.startswith("00-"), f"traceparent 格式非法：{tp}"

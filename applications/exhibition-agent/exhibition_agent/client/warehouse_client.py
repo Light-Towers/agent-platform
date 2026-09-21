@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import random
+import time
 from typing import Any, NoReturn
 
 import httpx
@@ -36,6 +37,16 @@ from exhibition_agent.observability.otel import inject_traceparent, span
 logger = get_logger(__name__)
 
 _CONTRACT_VERSION = "1.1"
+
+# 重试安全边界（审核 N3）：
+# - 单次等待上限：防上游异常/恶意 Retry-After（如 300s）× max_retries 把单请求拖挂 15 分钟；
+# - 重试总预算：等待 + 调用累计超预算立即抛出，不再重试。
+_MAX_RETRY_DELAY_MS = 5_000
+_RETRY_TOTAL_BUDGET_MS = 20_000
+
+# 上游错误 body 回显截断上限（审核 N2）：warehouse 错误 message 缺失时兜底回显 body，
+# 全量回显可能把上游大响应体/敏感片段原样透给终端用户。
+_UPSTREAM_SNIPPET_LIMIT = 200
 
 
 def _map_error_code(code_str: str, message: str) -> ContractError:
@@ -76,6 +87,7 @@ class WarehouseClient:
         transport: httpx.AsyncBaseTransport | None = None,
         max_retries: int = 3,
         retry_base_delay_ms: int = 100,
+        retry_budget_ms: int = _RETRY_TOTAL_BUDGET_MS,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
@@ -83,6 +95,7 @@ class WarehouseClient:
         self.transport = transport
         self.max_retries = max_retries
         self.retry_base_delay_ms = retry_base_delay_ms
+        self.retry_budget_ms = retry_budget_ms
 
     async def invoke(
         self,
@@ -115,6 +128,9 @@ class WarehouseClient:
         当前所有 skill 均为只读，重试安全。
         """
         url = f"/api/v1/skills/{skill}"
+        # 重试总预算用局部 deadline（不挂实例态）：WarehouseClient 可能被并发复用，
+        # 实例变量会在协程间互相覆盖预算（二审建议）。
+        retry_deadline = time.monotonic() + self.retry_budget_ms / 1000
         headers = {
             "X-Execution-Context": execution_context_header,
             "X-Contract-Version": self.contract_version,
@@ -136,12 +152,22 @@ class WarehouseClient:
             except (UpstreamError, RateLimitedError) as exc:
                 if attempt >= self.max_retries:
                     raise
-                # 优先尊重 warehouse 的 Retry-After 头（429）；否则指数退避 + 10% 抖动
+                # 优先尊重 warehouse 的 Retry-After 头（429）；否则指数退避 + 10% 抖动。
+                # 无论来源，单次等待封顶 _MAX_RETRY_DELAY_MS（审核 N3）。
                 if isinstance(exc, RateLimitedError) and exc.retry_after_ms is not None:
                     delay_ms = float(exc.retry_after_ms)
                 else:
                     delay_ms = self.retry_base_delay_ms * (2**attempt)
                     delay_ms += random.uniform(0, delay_ms * 0.1)
+                delay_ms = min(delay_ms, _MAX_RETRY_DELAY_MS)
+                # 重试总预算（审核 N3）：等待后超出预算则直接抛出，不再消耗下一次调用
+                if time.monotonic() + delay_ms / 1000 > retry_deadline:
+                    logger.warning(
+                        "warehouse 重试总预算耗尽（%.0fms），停止重试：%s",
+                        self.retry_budget_ms,
+                        exc,
+                    )
+                    raise
                 logger.warning(
                     "warehouse 调用失败（attempt=%d/%d），%.0fms 后重试：%s",
                     attempt + 1,
@@ -225,15 +251,19 @@ class WarehouseClient:
             )
 
     def _parse_error(self, resp: httpx.Response, request_id: str) -> NoReturn:
-        """错误信封解析：按 error_code 映射为客户端异常。"""
+        """错误信封解析：按 error_code 映射为客户端异常。
+
+        上游 body 兜底回显截断到 _UPSTREAM_SNIPPET_LIMIT（审核 N2）：
+        message 缺失时只取 body 前 200 字符，防大响应体/上游内部细节原样透给终端用户。
+        """
         try:
             payload = resp.json()
             err = payload.get("error", {})
             code_str = err.get("code", "INTERNAL")
-            message = err.get("message", resp.text)
+            message = err.get("message", resp.text[:_UPSTREAM_SNIPPET_LIMIT])
         except ValueError:
             code_str = "INTERNAL"
-            message = resp.text
+            message = resp.text[:_UPSTREAM_SNIPPET_LIMIT]
 
         exc = _map_error_code(code_str, message)
         # 429 Retry-After 头提取（秒或 HTTP-date；仅解析秒数，date 形式忽略）

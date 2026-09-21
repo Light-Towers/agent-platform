@@ -49,6 +49,7 @@ agent-core  agent-runtime  shared-schemas  agent-server  agent_federation  dialo
 | `app` → **`agent-server`**（拟改名） | 默认宿主 / 单进程 Supervisor 平台参考应用 | 根 `docker-compose.yml` 编排，:8000 |
 | `agent_federation` | 多 Agent 联邦网关编排系统（生产级） | 自带 `docker-compose.yml` + 全套可观测栈 |
 | `dialogue-framework` | 对话领域框架 / 上层对话引擎 | 独立 package，当前主供内部 |
+| `exhibition-agent` | 会展行业 AI Agent（平台侧骨架；按跨项目接口契约 v1.1 接入 mingyang-warehouse） | 独立部署 |
 | `kefu-service` / `wenda-data-agent` / `zhanggui-zhiku` | 联邦下游子服务 / 领域应用 | 各自独立部署 |
 
 > `app` 不是「平台层」，而是「使用平台能力的应用」。改名 `agent-server` 以明确其为「默认 Runtime 宿主」。

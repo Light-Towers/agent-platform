@@ -15,13 +15,13 @@ import json
 import logging
 from typing import Any
 
+from agent_core.intent.classifier import _keyword_rule, classify_l1_async
 from agent_core.intent.models import (
     CLARIFY_THRESHOLD,
     IntentCandidate,
     IntentLabel,
     IntentResult,
 )
-from agent_core.intent.classifier import classify_l1_async, _keyword_rule
 
 logger = logging.getLogger(__name__)
 

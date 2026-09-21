@@ -119,6 +119,14 @@
 </div>
 
 <script>
+// HTML 转义：所有来自服务端/上游的动态文本（answer / warnings / request_id / citations 等）
+// 注入 innerHTML 前必须过本函数，防上游文本携带 <img onerror=...> 等造成 DOM XSS（审核 N1）。
+function esc(value) {
+  return String(value == null ? "" : value)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+
 function genRequestId() {
   return "req-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 }
@@ -167,7 +175,7 @@ async function sendQuery() {
     const data = await qResp.json();
     renderResult(data, qResp.status);
   } catch (err) {
-    main.innerHTML = '<div class="answer-box error">请求失败：' + err.message + "</div>";
+    main.innerHTML = '<div class="answer-box error">请求失败：' + esc(err && err.message ? err.message : err) + "</div>";
   } finally {
     btn.disabled = false; btn.textContent = "发送查询";
   }
@@ -182,12 +190,12 @@ function renderResult(data, status) {
   const sources = data.sources || [];
   const warnings = data.warnings || [];
 
-  let html = "<h2>查询结果" + (status !== 200 ? ' <span class="error">(HTTP ' + status + ")</span>" : "") + "</h2>";
+  let html = "<h2>查询结果" + (status !== 200 ? ' <span class="error">(HTTP ' + esc(status) + ")</span>" : "") + "</h2>";
 
-  html += '<div class="meta-row"><span class="badge ' + readiness + '">' + readiness + "</span>";
-  html += '<span class="badge classification">' + classification + "</span></div>";
+  html += '<div class="meta-row"><span class="badge ' + esc(readiness) + '">' + esc(readiness) + "</span>";
+  html += '<span class="badge classification">' + esc(classification) + "</span></div>";
 
-  html += '<div class="answer-box">' + (data.answer || "（无回答）") + "</div>";
+  html += '<div class="answer-box">' + esc(data.answer || "（无回答）") + "</div>";
 
   // INV-10 关键展示
   if (sqlStmts.length === 0) {
@@ -197,28 +205,28 @@ function renderResult(data, status) {
   }
 
   if (data.request_id) {
-    html += '<div class="list-section"><h3>Request ID</h3><div class="item">' + data.request_id + "</div></div>";
+    html += '<div class="list-section"><h3>Request ID</h3><div class="item">' + esc(data.request_id) + "</div></div>";
   }
 
   if (citations.length) {
     html += '<div class="list-section"><h3>Citations（' + citations.length + "）</h3>";
-    citations.forEach(c => { html += '<div class="item">' + JSON.stringify(c) + "</div>"; });
+    citations.forEach(c => { html += '<div class="item">' + esc(JSON.stringify(c)) + "</div>"; });
     html += "</div>";
   }
 
   if (sources.length) {
     html += '<div class="list-section"><h3>Sources（' + sources.length + "）</h3>";
-    sources.forEach(s => { html += '<div class="item">' + JSON.stringify(s) + "</div>"; });
+    sources.forEach(s => { html += '<div class="item">' + esc(JSON.stringify(s)) + "</div>"; });
     html += "</div>";
   }
 
   if (warnings.length) {
     html += '<div class="list-section"><h3>Warnings</h3>';
-    warnings.forEach(w => { html += '<div class="item warning">' + w + "</div>"; });
+    warnings.forEach(w => { html += '<div class="item warning">' + esc(w) + "</div>"; });
     html += "</div>";
   }
 
-  html += '<details><summary>原始 JSON</summary><pre>' + JSON.stringify(data, null, 2) + "</pre></details>";
+  html += '<details><summary>原始 JSON</summary><pre>' + esc(JSON.stringify(data, null, 2)) + "</pre></details>";
 
   main.innerHTML = html;
 }

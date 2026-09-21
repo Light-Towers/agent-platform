@@ -138,6 +138,18 @@ mock 场景通过请求头 `X-Mock-Scenario` 切换（9 场景见下表）。
 | 不接真实 LLM / 真模型 | ✅ Model Router 是桩，不接真模型 |
 | 不设"测试环境跳过校验"开关 | ✅ 执行档位 STRICT/DEV 只切验签，401/403/scope 恒开，无 OFF 档（grep 确认无 if testing/skip/bypass 路径） |
 
+### 架构红线豁免披露（审核建议 1）
+
+本应用**显式不依赖** `shared-schemas` / `agent-runtime`，自带 Skill / 信封 / ExecutionContext 实现（`contract/__init__.py`），实质偏离仓库架构红线 4/5（"能力收口到内核/运行时，不重复实现"）。豁免理由：
+
+- **跨项目独立交付**：exhibition-agent 按跨项目接口契约 v1.1（对端 mingyang-warehouse）独立交付，信封 / ExecutionContext 是**跨项目对外契约**，与联邦内部契约（shared-schemas）是另一套口径，复用 shared-schemas 会把内部契约泄漏给外部项目；
+- 豁免范围仅限 contract/skills/self-contained 中间件，observability 已复用 agent-core（`agent_core.tracing`）；
+- 该豁免需架构负责人登记确认后长期有效，收敛方向见 debt-diagnosis F-S1-05。
+
+### 契约回提声明（审核建议 2）
+
+本 README 所述「契约 v1.1」的澄清结论（§0.5 歧义反馈等）目前仅在仓库内实现侧落地，**尚未回提至契约主本**（主本在 mingyang-warehouse 侧仓库）。两份文本存在漂移风险，回提后本节同步移除。
+
 ## 歧义 / 反馈清单
 
 v1.0 实现反馈的 7 项歧义，**契约 v1.1 §0.5 已全部给出结论**，本实现已按 v1.1 补丁全部落地：

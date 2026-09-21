@@ -10,9 +10,29 @@ import pytest
 
 from exhibition_agent.contract.envelope import Readiness
 from exhibition_agent.contract.error_codes import PENDING_ANSWER
-from exhibition_agent.graph.supervisor import run_supervisor
+from exhibition_agent.graph.supervisor import build_graph, run_supervisor
 from exhibition_agent.observability.trace import InMemoryTraceRecorder
 from exhibition_agent.testing_helpers import ctx, ctx_header
+
+
+def test_inv10_graph_structure_guards_no_sql_node():
+    """结构守卫（审核 N4）：图节点集合固定为 select_skill → run_skill → emit_trace。
+
+    原运行时断言 ``sql_statements == []`` 恒真（全仓无任何位置向 sql_statements append），
+    不具备回归捕获能力；改为直接锁定图结构——若未来引入 L3 text2sql 类节点，
+    本断言立即失败，INV-10「零 SQL」契约不再靠侥幸成立。
+    """
+    compiled = build_graph()
+    assert set(compiled.get_graph().nodes) == {
+        "__start__",
+        "__end__",
+        "select_skill",
+        "run_skill",
+        "emit_trace",
+    }, (
+        "INV-10 违规：Supervisor 图节点集合发生变化，疑似引入 L3 text2sql 节点；"
+        "契约 §5 零 SQL 约束要求图内不得出现 SQL 生成节点"
+    )
 
 
 @pytest.mark.parametrize("scenario,expected_code", [

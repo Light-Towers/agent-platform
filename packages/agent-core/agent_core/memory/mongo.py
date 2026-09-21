@@ -26,8 +26,8 @@ class MongoHistoryStore:
     def __init__(self, mongo_url: str, db_name: str, collection: str = "chat_message") -> None:
         # pymongo 为可选依赖：懒导入，缺包时给出明确错误。
         try:
-            from pymongo import MongoClient, ASCENDING, DESCENDING
             from bson import ObjectId
+            from pymongo import ASCENDING, DESCENDING, MongoClient
         except Exception as e:  # pragma: no cover - 依赖缺失路径
             raise ImportError(
                 "pymongo 未安装；请安装 agent-core[memory-mongo]（uv sync --extra memory-mongo）"

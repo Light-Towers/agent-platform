@@ -20,7 +20,7 @@ import functools
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, AsyncIterator, Optional, Sequence
 
-from agent_core.logging import get_logger
+from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.base import (
     BaseCheckpointSaver,
     ChannelVersions,
@@ -28,7 +28,8 @@ from langgraph.checkpoint.base import (
     CheckpointMetadata,
     CheckpointTuple,
 )
-from langchain_core.runnables import RunnableConfig
+
+from agent_core.logging import get_logger
 
 logger = get_logger(__name__)
 
@@ -84,7 +85,7 @@ class MongoCheckpointer(BaseCheckpointSaver[str]):
     ) -> None:
         super().__init__(serde=serde)
         try:
-            from pymongo import MongoClient, ASCENDING
+            from pymongo import ASCENDING, MongoClient
         except Exception as e:  # pragma: no cover - 依赖缺失路径
             raise ImportError(
                 "pymongo 未安装；请安装 agent-core[memory-mongo]"
