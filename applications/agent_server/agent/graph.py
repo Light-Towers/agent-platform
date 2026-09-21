@@ -142,6 +142,21 @@ def build_graph(
     async def mcp_node(state: AgentState) -> dict:
         return await _invoke("mcp", state=state, mcp_manager=mcp_manager)
 
+    async def code_execution_node(state: AgentState) -> dict:
+        from agent_server.planners.deterministic import _extract_code
+
+        code = _extract_code(state.sub_query or state.question)
+        result = await _invoke("code_execution", code=code)
+        if isinstance(result, dict):
+            stdout = result.get("stdout", "")
+            stderr = result.get("stderr", "")
+            backend = result.get("backend", "")
+            evidence = [f"[沙箱执行 ({backend})]\nstdout:\n{stdout}"]
+            if stderr:
+                evidence.append(f"stderr:\n{stderr}")
+            return {"evidence": evidence}
+        return {"evidence": [str(result)]}
+
     async def synthesize_node(state: AgentState) -> dict:
         question = state.question
         evidence = state.evidence
@@ -210,19 +225,21 @@ def build_graph(
     builder.add_node("sql", sql_node)
     builder.add_node("direct", direct_node)
     builder.add_node("mcp", mcp_node)
+    builder.add_node("code_execution", code_execution_node)
     builder.add_node("synthesize", synthesize_node)
 
     builder.add_edge(START, "route")
     builder.add_conditional_edges(
         "route",
         pick_capability,
-        {"search": "search", "rag": "rag", "sql": "sql", "direct": "direct", "mcp": "mcp", "blocked": END},
+        {"search": "search", "rag": "rag", "sql": "sql", "direct": "direct", "mcp": "mcp", "code_execution": "code_execution", "blocked": END},
     )
     builder.add_edge("search", "synthesize")
     builder.add_edge("rag", "synthesize")
     builder.add_edge("sql", "synthesize")
     builder.add_edge("direct", "synthesize")
     builder.add_edge("mcp", "synthesize")
+    builder.add_edge("code_execution", "synthesize")
     builder.add_conditional_edges("synthesize", next_after_synthesize, {"route": "route", END: END})
 
     return builder.compile(checkpointer=checkpointer)
