@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-test_sparse_vectorizer.py —— 验证 app/lm/sparse_vectorizer.py 的零依赖稀疏向量生成。
+test_sparse_vectorizer.py —— 验证 zhanggui_zhiku/lm/sparse_vectorizer.py 的零依赖稀疏向量生成。
 
 【不依赖重型依赖，可在纯 pytest 环境运行。】
 验证重点：
@@ -15,7 +15,7 @@ test_sparse_vectorizer.py —— 验证 app/lm/sparse_vectorizer.py 的零依赖
 import hashlib
 import math
 
-from app.lm.sparse_vectorizer import _token_id, build_sparse_vector, build_sparse_vectors, tokenize
+from zhanggui_zhiku.lm.sparse_vectorizer import _token_id, build_sparse_vector, build_sparse_vectors, tokenize
 
 
 def test_same_text_stable_across_calls():

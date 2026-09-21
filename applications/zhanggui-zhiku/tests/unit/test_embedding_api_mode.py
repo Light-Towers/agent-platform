@@ -3,7 +3,7 @@
 test_embedding_api_mode.py —— 验证 embedding_utils 的 api 模式（M8）。
 
 【不依赖重型依赖 / 不依赖 FlagEmbedding / pymilvus.model，可在裸 venv 运行。】
-验证方式：mock app.lm.siliconflow_client._post_json（不真调网络）。
+验证方式：mock zhanggui_zhiku.lm.siliconflow_client._post_json（不真调网络）。
 验证重点：
 1. EMBEDDING_MODE=api 时 generate_embeddings 返回结构与 local 完全一致
    （{"dense": [...], "sparse": [...]}）；
@@ -17,9 +17,9 @@ import math
 import pytest
 
 from agent_core.memory import embedder as core_embedder
-from app.conf.embedding_config import embedding_config
-from app.lm import embedding_utils
-from app.lm.embedding_utils import generate_embeddings
+from zhanggui_zhiku.conf.embedding_config import embedding_config
+from zhanggui_zhiku.lm import embedding_utils
+from zhanggui_zhiku.lm.embedding_utils import generate_embeddings
 
 
 def _enable_api_mode(monkeypatch):

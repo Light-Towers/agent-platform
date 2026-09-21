@@ -16,7 +16,7 @@
 | `packages/shared-schemas/` | 联邦 4 服务共享 Pydantic 契约（QueryResponse / ThreadState 等） | — |
 | `applications/kefu-service/` | kefu 迁移版（deepagents + LangGraph），已接入联邦网关（Agent Protocol 兼容 `/invoke`，返回 `QueryResponse`；`KEFU_USE_ADAPTER=false` 默认直连） | — |
 | `applications/wenda-data-agent/` | Text-to-SQL 数据分析垂直场景（已直连联邦契约，无需 adapter） | — |
-| `applications/zhanggui-zhiku/` | 掌柜智库：RAG 知识库导入 + 多路检索问答（:8900；**注意包名仍为 `app`**，sys.path 上会遮蔽旧 app 名，勿在根测试中 import `app`） | `zhanggui-zhiku` 脚本 |
+| `applications/zhanggui-zhiku/` | 掌柜智库：RAG 知识库导入 + 多路检索问答（:8900） | `zhanggui-zhiku` 脚本 |
 | `applications/dialogue-framework/` | LLM 对话系统框架基础设施 | `dialogue_framework.cli:main` |
 | `tests/` | agent_server 单元测试（根套件） | `pytest -q` |
 | `applications/agent_server/tests/` | agent_server 应用层集成测试（GraphPlanner × runtime，2026-09-21 F-S1-01 迁入） | `pytest applications/agent_server/tests -q` |
@@ -43,5 +43,5 @@ DATABASE_URL= uvicorn agent_server.main:app --port 8000  # 零依赖冒烟
 
 - **勿提交真实 `.env` 文件**：所有 `.env` 已被 `.gitignore` 忽略，使用前按 `.env.example` 填值
 - **勿提交大二进制资产**：模型权重、数据集均未入库，需本地自备
-- **勿在根测试/共享代码中 `import app`**：`applications/zhanggui-zhiku/app/` 包名仍为 `app`，会遮蔽；统一用 `agent_server.*`
+- **根测试/共享代码统一用 `agent_server.*`**：各应用子包已有独立 Python 包名（`zhanggui_zhiku` / `agent_server` 等），无遮蔽风险
 - **所有代码优化/重构必须先制定方案**：除非方案已敲定（有文档/issue 记录并经确认），**禁止直接动手改代码**；方案需包含目标、影响面、迁移策略、验收标准，并在文档/issue 中记录

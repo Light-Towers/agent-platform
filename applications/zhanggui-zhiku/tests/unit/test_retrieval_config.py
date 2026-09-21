@@ -3,12 +3,12 @@
 test_retrieval_config.py —— M3 配置外置单测（方案 §7）。
 
 验证：
-1. `app/conf/retrieval.yaml` / `app/conf/rerank.yaml` 可加载，默认值与改造前硬编码一致
+1. `zhanggui_zhiku/conf/retrieval.yaml` / `zhanggui_zhiku/conf/rerank.yaml` 可加载，默认值与改造前硬编码一致
    （rrf.k=60、hybrid 0.8/0.2、dynamic_topk gap_ratio=0.25/gap_abs=0.5、max_k=10 等）；
 2. 轻量加载器（yaml_config_utils.load_yaml_config）返回属性访问对象；
 3. 配置值可被覆盖（环境变量指向替代 yaml 路径，部署 / 实验用）。
 
-【不依赖重型依赖】：本文件只 import app.conf.retrieval_config / rerank_config /
+【不依赖重型依赖】：本文件只 import zhanggui_zhiku.conf.retrieval_config / rerank_config /
 yaml_config_utils（仅依赖 os / pathlib / yaml / pytest），可在纯 pytest 环境运行。
 """
 
@@ -17,12 +17,12 @@ from pathlib import Path
 
 import pytest
 
-from app.conf import rerank_config, retrieval_config
-from app.conf.yaml_config_utils import CfgDict, load_yaml_config
+from zhanggui_zhiku.conf import rerank_config, retrieval_config
+from zhanggui_zhiku.conf.yaml_config_utils import CfgDict, load_yaml_config
 
 # 配置目录基于本包绝对定位（不依赖 pytest 运行 cwd），否则从仓库根运行
-# pytest 时相对路径 app/conf/retrieval.yaml 会解析到仓库根而非 zhanggui 子包。
-_CONF_DIR = Path(__file__).resolve().parents[2] / "app" / "conf"
+# pytest 时相对路径 zhanggui_zhiku/conf/retrieval.yaml 会解析到仓库根而非 zhanggui 子包。
+_CONF_DIR = Path(__file__).resolve().parents[2] / "zhanggui_zhiku" / "conf"
 _RETRIEVAL_YAML = _CONF_DIR / "retrieval.yaml"
 _RERANK_YAML = _CONF_DIR / "rerank.yaml"
 

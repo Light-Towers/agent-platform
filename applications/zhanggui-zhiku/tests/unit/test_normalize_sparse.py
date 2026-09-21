@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-test_normalize_sparse.py —— 验证 app/utils/normalize_sparse_vector.py 的稀疏向量 L2 归一化。
+test_normalize_sparse.py —— 验证 zhanggui_zhiku/utils/normalize_sparse_vector.py 的稀疏向量 L2 归一化。
 
 【不依赖重型依赖，可在纯 pytest+numpy+python-dotenv 环境运行。】
 仅依赖 numpy。
@@ -11,7 +11,7 @@ test_normalize_sparse.py —— 验证 app/utils/normalize_sparse_vector.py 的�
 
 import numpy as np
 
-from app.utils.normalize_sparse_vector import normalize_sparse_vector
+from zhanggui_zhiku.utils.normalize_sparse_vector import normalize_sparse_vector
 
 
 def test_empty_vector_returns_same():

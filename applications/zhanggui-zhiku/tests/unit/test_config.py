@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 """
-test_config.py —— 验证 app/core/config.py 的配置单例与默认值。
+test_config.py —— 验证 zhanggui_zhiku/core/config.py 的配置单例与默认值。
 
 【不依赖重型依赖，可在纯 pytest+numpy+python-dotenv 环境运行。】
-本测试只 import app.core.config（仅依赖 os / dataclasses / pathlib / dotenv），
+本测试只 import zhanggui_zhiku.core.config（仅依赖 os / dataclasses / pathlib / dotenv），
 不会触发任何 torch / langchain / pymilvus 等重型导入。
 
 重点验证：
@@ -14,7 +14,7 @@ test_config.py —— 验证 app/core/config.py 的配置单例与默认值。
 
 from pathlib import Path
 
-from app.core.config import PROJECT_ROOT, Settings, _as_bool, _as_int, settings
+from zhanggui_zhiku.core.config import PROJECT_ROOT, Settings, _as_bool, _as_int, settings
 
 
 def test_settings_default_milvus_url():
@@ -63,15 +63,15 @@ def test_project_root_is_path_instance():
 
 
 def test_project_root_points_to_repo_root():
-    # PROJECT_ROOT 应解析为仓库根目录，且其中包含 app/ 包
+    # PROJECT_ROOT 应解析为仓库根目录，且其中包含 zhanggui_zhiku/ 包
     assert PROJECT_ROOT.is_dir()
-    assert (PROJECT_ROOT / "app").is_dir()
-    assert (PROJECT_ROOT / "app" / "core" / "config.py").is_file()
+    assert (PROJECT_ROOT / "zhanggui_zhiku").is_dir()
+    assert (PROJECT_ROOT / "zhanggui_zhiku" / "core" / "config.py").is_file()
 
 
 def test_settings_is_dataclass_singleton():
     # import 多次返回的 settings 应为同一对象（模块级单例）
-    from app.core.config import settings as settings2
+    from zhanggui_zhiku.core.config import settings as settings2
 
     assert settings is settings2
     assert isinstance(settings, Settings)

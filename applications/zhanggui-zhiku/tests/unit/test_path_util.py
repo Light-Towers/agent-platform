@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
 """
-test_path_util.py —— 验证 app/utils/path_util.py 的路径工具。
+test_path_util.py —— 验证 zhanggui_zhiku/utils/path_util.py 的路径工具。
 
 【不依赖重型依赖，可在纯 pytest+numpy+python-dotenv 环境运行。】
-path_util 仅依赖 stdlib（pathlib / os）与 app.core.config，
-而 app.core.config 亦为纯逻辑模块，不会拉起重型依赖。
+path_util 仅依赖 stdlib（pathlib / os）与 zhanggui_zhiku.core.config，
+而 zhanggui_zhiku.core.config 亦为纯逻辑模块，不会拉起重型依赖。
 
 覆盖：
 - get_path_dir(ps)：基于 __file__ 向上取第 ps 级目录，返回 Path
@@ -13,7 +13,7 @@ path_util 仅依赖 stdlib（pathlib / os）与 app.core.config，
 
 from pathlib import Path
 
-from app.utils.path_util import get_path_dir, get_project_root
+from zhanggui_zhiku.utils.path_util import get_path_dir, get_project_root
 
 
 def test_get_path_dir_returns_path():
@@ -22,7 +22,7 @@ def test_get_path_dir_returns_path():
 
 
 def test_get_path_dir_zero_points_to_utils():
-    # path_util.py 位于 app/utils，parents[0] == app/utils
+    # path_util.py 位于 zhanggui_zhiku/utils，parents[0] == zhanggui_zhiku/utils
     d = get_path_dir(0)
     assert d.name == "utils"
     assert (d / "path_util.py").is_file()
@@ -30,7 +30,7 @@ def test_get_path_dir_zero_points_to_utils():
 
 def test_get_path_dir_one_points_to_app():
     d = get_path_dir(1)
-    assert d.name == "app"
+    assert d.name == "zhanggui_zhiku"
 
 
 def test_get_path_dir_two_points_to_repo_root():
@@ -51,7 +51,7 @@ def test_get_project_root_default_is_repo_root():
     env_val = os.environ.pop("PROJECT_ROOT", None)
     try:
         root = get_project_root()
-        assert (root / "app").is_dir()
+        assert (root / "zhanggui_zhiku").is_dir()
     finally:
         if env_val is not None:
             os.environ["PROJECT_ROOT"] = env_val
@@ -60,7 +60,7 @@ def test_get_project_root_default_is_repo_root():
 def test_get_project_root_env_override(monkeypatch):
     # 若 PROJECT_ROOT 环境变量存在且目录存在，应优先返回它
 
-    from app.core.config import PROJECT_ROOT as GLOBAL_ROOT
+    from zhanggui_zhiku.core.config import PROJECT_ROOT as GLOBAL_ROOT
 
     monkeypatch.setenv("PROJECT_ROOT", str(GLOBAL_ROOT))
     root = get_project_root()

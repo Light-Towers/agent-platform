@@ -12,7 +12,7 @@
                             [--enable-hyde] [--skip-rerank]
 
 环境要求（重要）：
-    - 依赖 Milvus（``app/clients/milvus_utils.get_milvus_client``）且 **已运行 import_process
+    - 依赖 Milvus（``zhanggui_zhiku/clients/milvus_utils.get_milvus_client``）且 **已运行 import_process
       建立索引**；Milvus 不可达或集合不存在时打印清晰错误并以非 0 退出码结束，**不吞异常**。
     - 依赖 BGE-M3 embedding 模型（检索向量化）；可选 BGE reranker（异常时节点自带降级为原序）。
     - HyDE 路默认关闭（需要 LLM 生成假设文档），用 ``--enable-hyde`` 显式开启。
@@ -37,20 +37,20 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 # 脚本直跑路径引导：`python eval/run_eval.py` 时把项目根加入 sys.path，
-# 使 `app.*` 可导入（uv run / 已安装 editable 包时此步为 no-op）。
+# 使 `zhanggui_zhiku.*` 可导入（uv run / 已安装 editable 包时此步为 no-op）。
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
-from app.conf.milvus_config import milvus_config  # noqa: E402 —— 路径引导后导入，脚本直跑必需
-from app.conf.retrieval_config import retrieval_cfg  # noqa: E402 TD-9：统一引用 yaml 配置
-from app.conf.rerank_config import rerank_cfg  # noqa: E402 TD-9：统一引用 yaml 配置
-from app.clients.milvus_utils import get_milvus_client  # noqa: E402
-from app.query_process.agent.nodes.node_search_embedding import node_search_embedding  # noqa: E402
-from app.query_process.agent.nodes.node_search_embedding_hyde import node_search_embedding_hyde  # noqa: E402
-from app.query_process.agent.nodes.node_rrf import _as_entity_list, reciprocal_rank_fusion  # noqa: E402
-from app.query_process.agent.nodes.node_rerank import node_rerank  # noqa: E402
-from app.core.tracing import init_tracing  # noqa: E402
+from zhanggui_zhiku.conf.milvus_config import milvus_config  # noqa: E402 —— 路径引导后导入，脚本直跑必需
+from zhanggui_zhiku.conf.retrieval_config import retrieval_cfg  # noqa: E402 TD-9：统一引用 yaml 配置
+from zhanggui_zhiku.conf.rerank_config import rerank_cfg  # noqa: E402 TD-9：统一引用 yaml 配置
+from zhanggui_zhiku.clients.milvus_utils import get_milvus_client  # noqa: E402
+from zhanggui_zhiku.query_process.agent.nodes.node_search_embedding import node_search_embedding  # noqa: E402
+from zhanggui_zhiku.query_process.agent.nodes.node_search_embedding_hyde import node_search_embedding_hyde  # noqa: E402
+from zhanggui_zhiku.query_process.agent.nodes.node_rrf import _as_entity_list, reciprocal_rank_fusion  # noqa: E402
+from zhanggui_zhiku.query_process.agent.nodes.node_rerank import node_rerank  # noqa: E402
+from zhanggui_zhiku.core.tracing import init_tracing  # noqa: E402
 from eval.metrics import compute_retrieval_metrics  # noqa: E402
 
 # ---------------------------------------------------------------------------
@@ -96,10 +96,10 @@ def compute_config_hash() -> str:
     """
     计算本次评测的配置哈希。
 
-    优先：app/conf/retrieval.yaml + app/conf/rerank.yaml（M3 起存在）内容 + 集合名。
+    优先：zhanggui_zhiku/conf/retrieval.yaml + zhanggui_zhiku/conf/rerank.yaml（M3 起存在）内容 + 集合名。
     兜底：M2 硬编码基线快照 + 集合名（yaml 尚不存在时退化）。
     """
-    conf_dir = Path(__file__).resolve().parent.parent / "app" / "conf"
+    conf_dir = Path(__file__).resolve().parent.parent / "zhanggui_zhiku" / "conf"
     parts: List[str] = [milvus_config.chunks_collection]
     yaml_files = [conf_dir / "retrieval.yaml", conf_dir / "rerank.yaml"]
     any_yaml = False
@@ -280,7 +280,7 @@ def backfill_registry(run_id: str, overall: Dict[str, float]) -> None:
     评测跑完后把得分回填到索引 registry 对应集合条目（方案 §5.4）。
     集合条目不存在（本地未跑过 import）时打印提示并跳过，不自动创建。
     """
-    from app.utils.index_registry import backfill_eval_scores
+    from zhanggui_zhiku.utils.index_registry import backfill_eval_scores
 
     collection = milvus_config.chunks_collection
     updated = backfill_eval_scores(

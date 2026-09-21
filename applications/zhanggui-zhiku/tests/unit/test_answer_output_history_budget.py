@@ -8,7 +8,7 @@ test_answer_output_history_budget.py —— 修复 2 回归测试：历史对话
     导致 used 严重高估、历史对话被过早截断。修复后每轮只累加该轮新增文本长度。
 
 本文件直接测试修复后抽取的纯函数 ``format_history``
-（app/query_process/agent/prompt_budget.py），不依赖 LLM / Milvus / MongoDB /
+（zhanggui_zhiku/query_process/agent/prompt_budget.py），不依赖 LLM / Milvus / MongoDB /
 fastapi / loguru 等重型依赖，可在纯逻辑环境独立运行（仅需 pytest）。
 
 覆盖：
@@ -19,7 +19,7 @@ fastapi / loguru 等重型依赖，可在纯逻辑环境独立运行（仅需 py
 5. 空历史 / 无效消息的兜底行为。
 """
 
-from app.query_process.agent.prompt_budget import format_history
+from zhanggui_zhiku.query_process.agent.prompt_budget import format_history
 
 
 # ---------------------------------------------------------------------------
