@@ -46,7 +46,7 @@ MODE = os.environ.get("HA_MODE", "run")   # run | a | b
 # ---- 内联 HAProbe 设施（自包含，不依赖 tests 包结构）----
 
 class HAProbeRegistry:
-    """注册表：registry.execute(name, ...) 契约；name 形如 step_1/step_2/...。
+    """注册表：按 name 执行 step 契约；name 形如 step_1/step_2/...。
 
     每个 step 先写 side_effects（幂等：effect_key 唯一约束冲突 → 跳过实际效果），
     再 sleep 留出故障注入窗，返回结果。
@@ -151,7 +151,7 @@ def _proc_a(execution_id: str, ready_path: str):
         runtime = _make_runtime(pool, registry, "agent-a")
         async for _ev in execute_graph(build_probe_graph(STEPS), runtime, execution_id=execution_id):
             pass
-        print(f"[agent-a] DONE (unexpected, should have been killed)", flush=True)
+        print("[agent-a] DONE (unexpected, should have been killed)", flush=True)
 
     asyncio.run(_main())
 

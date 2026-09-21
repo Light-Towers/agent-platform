@@ -23,6 +23,7 @@ members = [
     "agent-platform",
     "agent-runtime",
     "dialogue-framework",
+    "exhibition-agent",
     "kefu-service",
     "shared-schemas",
     "wenda-data-agent",
@@ -1619,6 +1620,40 @@ sdist = { url = "https://files.pythonhosted.org/packages/d3/38/af70d7ab1ae9d4da4
 wheels = [
     { url = "https://files.pythonhosted.org/packages/c1/8b/5fe2cc11fee489817272089c4203e679c63b570a5aaeb18d852ae3cbba6a/et_xmlfile-2.0.0-py3-none-any.whl", hash = "sha256:7a91720bc756843502c3b7504c77b8fe44217c85c537d85037f0f536151b2caa", size = 18059, upload-time = "2024-10-25T17:25:39.051Z" },
 ]
+
+[[package]]
+name = "exhibition-agent"
+version = "0.1.0"
+source = { editable = "applications/exhibition-agent" }
+dependencies = [
+    { name = "agent-core" },
+    { name = "fastapi" },
+    { name = "httpx" },
+    { name = "langgraph" },
+    { name = "pydantic" },
+    { name = "pydantic-settings" },
+    { name = "uvicorn", extra = ["standard"] },
+]
+
+[package.optional-dependencies]
+dev = [
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "agent-core", editable = "packages/agent-core" },
+    { name = "fastapi", specifier = ">=0.115" },
+    { name = "httpx", specifier = ">=0.27" },
+    { name = "langgraph", specifier = ">=1.2.10,<2" },
+    { name = "pydantic", specifier = ">=2.7" },
+    { name = "pydantic-settings", specifier = ">=2.2" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
+    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23" },
+    { name = "uvicorn", extras = ["standard"], specifier = ">=0.30" },
+]
+provides-extras = ["dev"]
 
 [[package]]
 name = "faiss-cpu"

@@ -15,7 +15,6 @@ P0 阶段 side_effects 表的唯一约束只在测试桩（HAProbeRegistry.execu
 运行时落库的 skill:* 类型记录，与桩记录互不冲突、各计各的。
 """
 
-import pytest
 
 from agent_runtime.planner.durability_pg import PgSideEffectStore
 from agent_runtime.planner.execution_graph import execute_graph
@@ -23,7 +22,6 @@ from agent_runtime.planner.protocol import PlannerRuntime
 
 from .conftest import side_effect_counts, unique_execution_id
 from .haprobe import HAProbeRegistry, build_probe_graph
-from .helpers import make_runtime
 
 
 def _make_runtime_with_side_effects(registry, ownership_store, side_effect_store, *, ttl_s=5.0):
