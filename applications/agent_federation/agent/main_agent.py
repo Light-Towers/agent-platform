@@ -27,6 +27,7 @@ from agent.subagents.network_search_agent import network_search_agent
 from agent.tracing.langfuse_adapter import langfuse_observe
 from api.context import reset_session_context, set_session_context, set_thread_context
 from api.monitor import monitor
+from tools.code_execution_tool import execute_python_code
 from tools.markdown_tools import generate_markdown
 from tools.pdf_tools import convert_md_to_pdf
 from tools.upload_file_read_tool import read_file_content
@@ -263,7 +264,7 @@ async def get_main_agent(checkpointer=None):
         _main_checkpointer = _cp
         _store = await _create_store()
         _main_store = _store
-        _tools = [generate_markdown, convert_md_to_pdf, read_file_content]
+        _tools = [generate_markdown, convert_md_to_pdf, read_file_content, execute_python_code]
         # Phase D 集成（opt-in, AGENTIC_RUNTIME_BRIDGE=true）：追加经统一 Runtime 治理的桥接工具，
         # 不改变默认工具集；任一环节失败仅跳过桥接工具，主链路零影响。
         _tools = _maybe_attach_bridged_tools(_tools, "")

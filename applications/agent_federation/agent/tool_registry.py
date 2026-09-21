@@ -23,6 +23,7 @@ TOOL_REGISTRY: dict[str, str] = {
     "execute_sql_query": "tools.db_tools:execute_sql_query",
     "internet_search": "tools.tavily_tool:internet_search",
     "zhiku_retrieve": "tools.zhiku_tools:zhiku_retrieve",
+    "execute_python_code": "tools.code_execution_tool:execute_python_code",
 }
 
 # 角色 -> 该角色默认挂载的工具名列表
