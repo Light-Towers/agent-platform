@@ -57,8 +57,8 @@ Tier A×4 深入接手卡 + Tier B×4 卡头 + Tier C×1 仅卡头（zhanggui-zh
 | H-S0-03 | agent-runtime/tests 是否故意不纳入 CI | 无 pytest 配置 | ✅ 已关闭：门禁遗漏（已修复） |
 | H-S1-02 | exhibition-agent 不依赖 agent-runtime 是否有意豁免红线 4 | 独立工程设计 | ✅ 已有推荐：选项 A（有意豁免），待拍板 |
 | H-S1-03 | agent-runtime otel.py 的 _NoOpTracer 是否先于 agent-core tracing.py | 历史遗留 vs 有意 | ✅ 已关闭：F-S1-06 已收敛 |
-| H-S2-01 | TB-11 长期 pydantic-settings 收敛是否有实际需求驱动 | — | 保留 |
-| H-S2-02 | TB-13 双轨认知成本是否在 Plan-F 收敛后自然消解 | — | 保留 |
+| H-S2-01 | TB-11 长期 pydantic-settings 收敛是否有实际需求驱动 | — | ✅ 已关闭：有意分层设计非债务 |
+| H-S2-02 | TB-13 双轨认知成本是否在 Plan-F 收敛后自然消解 | — | ✅ 已关闭：部分消解，需收口 F-S1-02/F-S1-04 |
 
 ---
 
@@ -66,7 +66,7 @@ Tier A×4 深入接手卡 + Tier B×4 卡头 + Tier C×1 仅卡头（zhanggui-zh
 
 - 已修复（13 项）：F-S1-03 / F-S1-06 / F-S1-01 / F-S1-05 / F-S0-01~04 / F-S0-07 / F-S0-08 / F-S0-09 / F-S0-10 — 见 [02-debt-diagnosis](02-debt-diagnosis.md) §2/§3
 - 文档失效已修复（3 处）：见 [02-debt-diagnosis](02-debt-diagnosis.md) §5
-- 假设已关闭（5 条）：H-S0-01/02/03、H-S1-02（有推荐）、H-S1-03 — 见 [02-debt-diagnosis](02-debt-diagnosis.md) §6
+- 假设已全部关闭（7 条）：H-S0-01/02/03、H-S1-02（有推荐）、H-S1-03、H-S2-01（分层设计非债务）、H-S2-02（部分消解） — 见 [02-debt-diagnosis](02-debt-diagnosis.md) §6
 - 剩余评估与立项计划：见 [04-remaining-evaluation](04-remaining-evaluation.md)
 - exhibition 定位评估（F-S1-05 决策输入）：见 [05-exhibition-positioning-evaluation](05-exhibition-positioning-evaluation.md) — 推荐选项 A（有意豁免），待拍板
 
