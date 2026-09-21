@@ -87,7 +87,7 @@ class UnifiedPlanner(Planner):
 
             return GraphPlanner(registry=self._registry)
         if mode == ExecutionMode.AGENTIC:
-            from agent_federation.planners.agentic import AgenticPlanner
+            from agent_runtime.planner.agentic import AgenticPlanner  # noqa: PLC0415
 
             return AgenticPlanner()
         return _DeterministicOrWorkflowPlanDelegate(self._settings)

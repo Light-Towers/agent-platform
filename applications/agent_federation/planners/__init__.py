@@ -11,7 +11,7 @@ max_skill_depth/max_steps 取环境变量（默认 4 / 20，与 PlannerRuntime �
 import logging
 import os
 
-from agent_federation.planners.agentic import AgenticPlanner
+from agent_runtime.planner.agentic import AgenticPlanner
 from agent_runtime.planner.protocol import PlannerRuntime
 
 logger = logging.getLogger(__name__)
