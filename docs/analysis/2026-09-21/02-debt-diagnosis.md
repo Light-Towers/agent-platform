@@ -76,8 +76,8 @@
 |----|--------|------|------|------|
 | **F-S1-03** | ✅**P0** 已修复 | 3 | agent-core.memory 模块级硬依赖 langgraph | memory/__init__.py:34 → mongo_checkpointer.py:24,31 |
 | F-S1-01 | ✅P2 已修复 | 1 | agent-runtime 测试反向依赖 agent_server | test_graph_planner_dynamic.py:14 |
-| F-S1-02 | P2 | 2 | agent_server 惰性 import agent_federation | planners/unified.py:90, __init__.py:38 |
-| F-S1-04 | P2 | 4 | agent_federation CircuitBreaker+Cache 独立实现 | circuit_breaker.py:45, cache/layers.py:57+ |
+| F-S1-02 | ✅P2 已修复 | 2 | agent_server 惰性 import agent_federation | AgenticPlanner 迁入 agent_runtime + entry_points 注入（3616a2e） |
+| F-S1-04 | ✅P2 已修复 | 4 | agent_federation CircuitBreaker+Cache 独立实现 | CB 复用 agent_core SlidingWindowPolicy + singleflight 迁入 agent_runtime>（7680c76） |
 | F-S1-05 | ✅P2 已修复 | 4 | exhibition-agent 独立实现 Skill+ExecutionContext | base_skill.py:43,53, execution_context.py:35（已修订契约 v1.1 → v1.2 直接 REST，见 plan-fix-f-s1-05-contract-revise-to-rest.md） |
 | F-S1-06 | ✅P2 已修复 | 再造 Runtime | _NoOpTracer 2 套独立实现 | tracing.py:137 vs otel.py:57 |
 
@@ -113,13 +113,13 @@
 | F-S0-04 | ✅已修复（d80a27e）：dialogue-framework/tests 1 测试门禁外 | 新 | Makefile 补路径 |
 | F-S0-08 | ✅已修复（F-S0-08 实施）：zhanggui-zhiku 包名 app → zhanggui_zhiku | 已知 | 包目录重命名 + import 替换 |
 | F-S1-01 | ✅已修复（F-S1-01 实施）：agent-runtime 测试反向依赖 agent_server | 新 | 迁移归属到 applications/agent_server/tests/ |
-| F-S1-02 | agent_server 惰性 import agent_federation | 新（收敛期） | Plan-F 收敛后收口 |
-| F-S1-04 | agent_federation CB+Cache 独立实现 | 已知（§5） | 收敛到 agent-runtime |
+| F-S1-02 | ✅已修复（3616a2e）：AgenticPlanner 迁入 agent_runtime + entry_points 注入 | 新（收敛期） | 消除 agent_server → agent_federation import |
+| F-S1-04 | ✅已修复（7680c76）：CB 复用 agent_core SlidingWindowPolicy + singleflight 迁入 agent_runtime | 已知（§5） | CB 引擎收敛 + singleflight 共享 |
 | F-S1-05 | ✅已修复（F-S1-05 实施）：修订契约 v1.1 → v1.2 直接 REST | 新 | 见 docs/plans/plan-fix-f-s1-05-contract-revise-to-rest.md |
 | F-S1-06 | ✅已修复（d67ed2a）：_NoOpTracer 2 套独立实现 | 新 | agent-runtime 从 agent-core 导入 |
 | TB-7 | docker compose 冒烟需 Docker | 可选 | 环境依赖 |
 | TB-11 | 双轨配置体系部分修复 | 设计合理（分层有意） | agent_core dataclass（零依赖铁律）+ 应用 pydantic-settings，非债务 |
-| TB-13 | 双轨认知/维护成本 | Plan-F 已部分消解 | Runtime/Planner/Skill 层已收敛；完全消解需收口 F-S1-02/F-S1-04 |
+| TB-13 | 双轨认知/维护成本 | Plan-F 已消解 | Runtime/Planner/Skill 层已收敛 + F-S1-02/F-S1-04 已收口 |
 
 ### P3（配置不一致 / 文档漂移）
 
@@ -169,9 +169,9 @@
 | 先验登记 | 38（TB 14 + TD 15 + U 1 + Roadmap 8） |
 | 新发现 | 10（S0 6 + S1 4） |
 | 总登记 | 48 |
-| 已修复 | 46（先验 34 + 2026-09-21 本批 12：F-S0-08/F-S1-03/F-S1-05/F-S1-06/F-S1-01/F-S0-01~04/F-S0-07/09/10） |
-| 仍成立 | 2（F-S1-02 / F-S1-04；TB-7 可选 / TB-11 部分修复 / TB-13 结构性） |
+| 已修复 | 48（先验 34 + 2026-09-21 本批 14：F-S0-08/F-S1-01~06/F-S0-01~04/F-S0-07/09/10） |
+| 仍成立 | 0（TB-7 可选 / TB-11 设计合理 / TB-13 已消解） |
 | REFUTED | 6 |
 | 文档失效 | 3（已全部修复） |
 | 待验证假设 | 7（全部关闭） |
-| **最严重** | **F-S1-02 / F-S1-04（P2，收敛期）** |
+| **最严重** | **无（全部已修复或附条件关闭）** |
