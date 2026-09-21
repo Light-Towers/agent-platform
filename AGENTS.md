@@ -33,6 +33,25 @@ make eval                            # 评测门禁（启发式，CI 可达）
 DATABASE_URL= uvicorn agent_server.main:app --port 8000  # 零依赖冒烟
 ```
 
+## 验证策略（分层，避免每次跑全量 8 session）
+
+> `make test`（8 个 pytest session）是 **CI 门禁**，不是每次小改动的必跑项。按改动范围分层收敛，先 lint 快速拦截再决定是否跑测试。
+
+| 改动范围 | 验证步骤 |
+|---------|---------|
+| 单包内小改 | `make lint` + 受影响子集 `uv run pytest <改动目录>/tests -q` |
+| 跨 2~3 包 | lint + 相关 session（取 Makefile `test` 目标对应行）|
+| 声称完成/可提交前 | `make test` 对齐 CI；必要时 `make eval` |
+| 修一轮失败后迭代 | `uv run pytest <目录> --lf -q`（只跑上次失败）或 `--ff`（失败优先）|
+
+**收窄手段**：`-k "test_auth"` 按名过滤 · `-m "not slow"` 按 marker 排除 · `--lf`/`--ff` 失败优先 · `-n auto` 并行（需 pytest-xdist）。
+
+**conftest 守卫识别**（来源：经验 `2026-09-21-gate-external-test-adoption-decision-flow`）：读 conftest docstring 与跳过守卫（如 `ZHIKU_INTEGRATION=1`、缺 OTel SDK），区分「每次 PR 必跑」vs「Nightly/手动/缺环境自动 skip」；后者本地缺环境跳过属设计意图，非失败。
+
+**红线**：测试红时修产品代码到契约要求，**禁止删用例/收窄断言/放宽前置条件凑绿**。
+
+**Windows 注意**：本机无 `make`，直接用 `uv run pytest ...` / `uv run --with ruff ruff check .` 等价命令。
+
 ## 技术栈
 
 - Python 3.11+（所有包的 `requires-python` 均为 `>=3.11`）
