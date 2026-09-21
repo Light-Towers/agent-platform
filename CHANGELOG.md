@@ -2,6 +2,35 @@
 
 本仓库为 uv workspace monorepo。**唯一受支持的安装/运行入口是根 `uv.lock` + `uv sync`**，子包不再维护独立 `uv.lock`（见 v2 修复 #14）。
 
+## Plan-F 架构收口 + Skill 体系完善（2026-09-21）
+
+> Plan-F 4 个演进方向全量闭合，Skill 注册体系完善，沙箱代码执行落地。
+> 验证：534 passed / 15 skipped / eval 15/15 = 100% / ruff 0 error。
+
+### Plan-F 演进方向闭合
+
+- **Plan.notes → 显式字段**（`36a3c0d`）：删除 `Plan.notes` 万能字典，所有字段提升为 Plan 显式字段（session_id/planner_name/constraints/kwargs 等），execution_graph.py 读取路径全部切换。PlannerContext 修复重复 `question` 字段 bug。
+- **Dynamic Agent 纳入 Skill 体系**（`e477397`）：`AgenticPlanner.execute()` 加 `runtime.execution()` + `skill_guard("agentic")` 包裹，与 `arun()` 对称。agentic 执行受统一组合治理（步数/深度/循环），`SkillCompositionError` 直接抛出。
+- **Workflow Definition → Workflow Skill 编译**（✅ 已实现）：`compile_workflow()` / `load_workflow_yaml()` / `discover_workflows()` 全部就绪，`agent_server/main.py` 启动期自动加载 `workflows/*.y*ml`。
+- **SkillRegistry/SkillRuntime 分离**：暂缓（"边界出现再拆"原则，当前仅 timeout + 契约校验两个边界）。
+
+### Skill 注册体系完善
+
+- **MCP 工具自动注册**（`c472d59`）：`register_mcp_skills()` 把 MCPClientManager 发现的每个工具编译为 `SkillKind.REMOTE` Skill，命名 `mcp.{server_id}.{tool_name}`。启动期自动注册，Planner 经统一 `discover()` / `delegate()` 入口。
+- **沙箱代码执行**（`7fcf303`）：`SandboxExecutor` 双后端（Docker 优先 subprocess 降级）。Docker 安全措施：`--rm --network=none --read-only --tmpfs /tmp --memory=512m --cpus=1 --security-opt=no-new-privileges --user=nobody`。注册为 `code_execution` Skill。
+- **Planner 路由到沙箱**（`bf1f44c`）：启发式路由增加 `code_execution`（优先级最高），`_extract_code` 从用户输入提取代码块（支持 ` ```python ... ``` ` 格式），graph.py 增加代码执行节点。eval golden 15 条（含 3 条 code_execution）。
+
+### Skill 注册体系终态
+
+| 函数 | 类型 | 用途 |
+|------|------|------|
+| `as_function_skill()` | FUNCTION | 进程内确定性函数 |
+| `as_agent_skill()` | AGENT | 本地 subagent（LLM self-reasoning） |
+| `as_remote_skill()` | REMOTE | 远程子服务（HTTP / Agent Protocol） |
+| `compile_workflow()` | WORKFLOW | YAML 声明式工作流编译 |
+| `register_mcp_skills()` | REMOTE | MCP 工具自动注册 |
+| `as_sandbox_skill()` | FUNCTION | 沙箱代码执行（Docker/subprocess 隔离） |
+
 ## Runtime 治理路线图全量闭环（2026-08-21）
 
 > `docs/runtime-governance-roadmap.md` P0~P5 全区段落地；`docs/tech-debt-hardcoded-logic.md` TD-1~TD-14 全部闭环。
