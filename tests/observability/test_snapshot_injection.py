@@ -2,7 +2,7 @@
 """WS-2：snapshot 消费闭环回归（第二轮 prompt 含上一轮 task 快照）。
 
 验证：
-- DeterministicPlanner.plan 把 PlannerContext.last_snapshot 透传到 plan.notes；
+- DeterministicPlanner.plan 把 PlannerContext.last_snapshot 透传到 plan.last_snapshot；
 - _compose 经 render_snapshot_prompt 把任务状态结构化注入 prompt（无 LLM 模板路径）；
 - 无快照时不注入（行为与改造前一致）。
 """

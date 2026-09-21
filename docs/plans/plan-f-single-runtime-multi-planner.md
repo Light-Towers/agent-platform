@@ -287,7 +287,7 @@ app 的 search/rag/sql/mcp（进程内节点）与联邦 `database_query_agent`/
 **演进方向（文档化，暂缓重构）**——按「边界出现再拆」原则留档：
 - **SkillRegistry / SkillRuntime 分离**：当前 execute 仅 timeout + 契约校验两个边界，拆两层为时尚早；待 retry/circuit 等第二边界真实出现时，按「Registry=Discover / Runtime=Execute」拆分。
 - **Dynamic Agent 纳入 Skill 体系**：`AgenticPlanner` 仍直调 `_execute_agent_core`（旁路）。收敛为 `SkillKind.AGENT` 是完整架构收口，但 `_execute_agent_core` 挂着 guard/intent/cache/memory/monitor 副作用链，包装须保行为，作独立阶段。
-- **`Plan.notes` → `ExecutionContext`**：notes 承载 question/workspace_id/user_id 已近隐形上下文；演进为独立 `ExecutionContext`（request_id/thread_id/messages/budget/deadline/trace_id），Plan 仅存 route/steps/reason。
+- **`Plan.notes` → 显式字段**（✅ 2026-09-21 完成）：notes 万能字典已删除，所有字段（question/workspace_id/user_id/session_id/planner_name/last_snapshot/messages/compacted/iterations/constraints/kwargs/execution_mode）已提升为 Plan 显式字段，execution_graph.py 读取路径全部切换。PlannerContext 修复重复 question 字段 bug。全量测试 + eval 12/12 通过。
 - **Workflow Definition → Workflow Skill 编译**：支持 YAML/声明式 Workflow（`steps: [search, rag, summarize]`）编译为 WorkflowSkill 注册进 Registry，LangGraph 仅是其中一种执行后端。
 
 **验证**：root tests 180 passed（含 governance 7 + capability registry 16 契约测试）/ 联邦 unit 89 passed（零回归），ruff 0 error。未提交（待与真实 R1 基线一起）。

@@ -17,7 +17,7 @@
 
 ## 1. F-S0-08 — zhanggui-zhiku 包名仍为 app
 
-**现状**：`applications/zhanggui-zhiku/pyproject.toml:6` `name = "zhanggui-zhiku"`，但实际包目录为 `app/`（`[tool.setuptools.packages.find]` 发现 `app`），全仓 `import app.*` 命中 zhanggui。AGENTS.md 已警告"勿在根测试/共享代码 import app"（会遮蔽其他 `app`）。
+**现状**：✅ 已修复。包目录已从 `app/` 改名为 `zhanggui_zhiku/`，`import app.*` 已全量替换为 `import zhanggui_zhiku.*`。
 
 **评估方向**：
 - 改包目录 `app/` → `zhanggui_zhiku/`，全量替换 `import app` → `import zhanggui_zhiku`；
@@ -83,4 +83,4 @@
 ## 建议下一步
 
 - 全部剩余项已闭合或附条件关闭，无待立项任务。
-- Plan-F 演进方向（SkillRegistry/SkillRuntime 分离、Dynamic Agent 纳入 Skill 体系、Plan.notes → ExecutionContext、Workflow Definition → Workflow Skill 编译）均标注"暂缓重构"，待实际需求驱动。
+- Plan-F 演进方向：SkillRegistry/SkillRuntime 分离、Dynamic Agent 纳入 Skill 体系、Workflow Definition → Workflow Skill 编译均标注"暂缓重构"，待实际需求驱动。Plan.notes → 显式字段已 ✅ 完成（2026-09-21）。
