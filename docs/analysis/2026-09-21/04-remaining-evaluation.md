@@ -83,4 +83,4 @@
 ## 建议下一步
 
 - 全部剩余项已闭合或附条件关闭，无待立项任务。
-- Plan-F 演进方向：SkillRegistry/SkillRuntime 分离、Dynamic Agent 纳入 Skill 体系、Workflow Definition → Workflow Skill 编译均标注"暂缓重构"，待实际需求驱动。Plan.notes → 显式字段已 ✅ 完成（2026-09-21）。
+- Plan-F 演进方向：Plan.notes → 显式字段 ✅ 完成、Dynamic Agent 纬入 Skill 体系 ✅ 完成、Workflow Definition → Workflow Skill 编译 ✅ 已实现。剩余 SkillRegistry/SkillRuntime 分离暂缓（无真实需求驱动）。

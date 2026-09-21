@@ -288,7 +288,7 @@ app 的 search/rag/sql/mcp（进程内节点）与联邦 `database_query_agent`/
 - **SkillRegistry / SkillRuntime 分离**：当前 execute 仅 timeout + 契约校验两个边界，拆两层为时尚早；待 retry/circuit 等第二边界真实出现时，按「Registry=Discover / Runtime=Execute」拆分。
 - **Dynamic Agent 纳入 Skill 体系**（✅ 2026-09-21 完成）：`AgenticPlanner.execute()` 已加 `runtime.execution()` + `runtime.skill_guard("agentic")` 包裹，与 `arun()` 对称。agentic 执行受统一组合治理（步数/深度/循环），`SkillCompositionError` 直接抛出不被吞为 error 事件。monitor 事件桥接 + entry_points 发现 + `_execute_agent_core` 副作用链保持不变。全量 845 passed + eval 12/12。
 - **`Plan.notes` → 显式字段**（✅ 2026-09-21 完成）：notes 万能字典已删除，所有字段（question/workspace_id/user_id/session_id/planner_name/last_snapshot/messages/compacted/iterations/constraints/kwargs/execution_mode）已提升为 Plan 显式字段，execution_graph.py 读取路径全部切换。PlannerContext 修复重复 question 字段 bug。全量测试 + eval 12/12 通过。
-- **Workflow Definition → Workflow Skill 编译**：支持 YAML/声明式 Workflow（`steps: [search, rag, summarize]`）编译为 WorkflowSkill 注册进 Registry，LangGraph 仅是其中一种执行后端。
+- **Workflow Definition → Workflow Skill 编译**（✅ 已实现）：`compile_workflow()` / `load_workflow_yaml()` / `discover_workflows()` 全部就绪，支持 YAML 声明式 Workflow（`steps: [search, rag, summarize]`）编译为 WorkflowSkill 注册进 Registry。`agent_server/main.py` 启动期经 `discover_workflows` 自动加载 `workflows/*.y*ml`。LangGraph 仅是其中一种执行后端。
 
 **验证**：root tests 180 passed（含 governance 7 + capability registry 16 契约测试）/ 联邦 unit 89 passed（零回归），ruff 0 error。未提交（待与真实 R1 基线一起）。
 
