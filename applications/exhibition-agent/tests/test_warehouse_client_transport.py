@@ -1,4 +1,4 @@
-"""warehouse_client 传输层异常映射 + 重试测试（#2 回归）。"""
+"""warehouse_client 传输层异常映射 + 重试测试（v1.2 直接 REST，#2 回归）。"""
 
 from __future__ import annotations
 
@@ -24,13 +24,8 @@ def _success_response() -> httpx.Response:
     return httpx.Response(
         200,
         json={
-            "request_id": "req-001",
-            "data": {},
-            "readiness": "READY",
-            "classification": "INTERNAL",
-            "sources": [],
-            "citations": [],
-            "warnings": [],
+            "venue": "保利世贸博览馆",
+            "data_readiness": {"level": "complete"},
         },
     )
 
@@ -43,9 +38,9 @@ async def test_timeout_mapped_to_upstream_error():
 
     client = _make_client(httpx.MockTransport(handler), max_retries=0)
     with pytest.raises(UpstreamError) as exc:
-        await client.invoke(
-            "venue.schedule.query",
-            {},
+        await client.get_rest(
+            "/api/venue-schedule",
+            params={"venue_id": "vn-001"},
             execution_context_header="dummy",
             request_id="req-001",
         )
@@ -61,9 +56,9 @@ async def test_connect_error_mapped_to_upstream_error():
 
     client = _make_client(httpx.MockTransport(handler), max_retries=0)
     with pytest.raises(UpstreamError) as exc:
-        await client.invoke(
-            "venue.schedule.query",
-            {},
+        await client.get_rest(
+            "/api/venue-schedule",
+            params={"venue_id": "vn-001"},
             execution_context_header="dummy",
             request_id="req-001",
         )
@@ -72,7 +67,7 @@ async def test_connect_error_mapped_to_upstream_error():
 
 
 async def test_upstream_error_retried_then_succeeds():
-    """前两次 ConnectError，第三次成功 → 重试后返回信封。"""
+    """前两次 ConnectError，第三次成功 → 重试后返回 REST JSON。"""
     call_count = 0
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -83,14 +78,14 @@ async def test_upstream_error_retried_then_succeeds():
         return _success_response()
 
     client = _make_client(httpx.MockTransport(handler), max_retries=3, retry_base_delay_ms=0)
-    envelope = await client.invoke(
-        "venue.schedule.query",
-        {},
+    data = await client.get_rest(
+        "/api/venue-schedule",
+        params={"venue_id": "vn-001"},
         execution_context_header="dummy",
         request_id="req-001",
     )
     assert call_count == 3
-    assert envelope.request_id == "req-001"
+    assert data["venue"] == "保利世贸博览馆"
 
 
 async def test_upstream_error_retry_exhausted():
@@ -104,9 +99,9 @@ async def test_upstream_error_retry_exhausted():
 
     client = _make_client(httpx.MockTransport(handler), max_retries=2, retry_base_delay_ms=0)
     with pytest.raises(UpstreamError):
-        await client.invoke(
-            "venue.schedule.query",
-            {},
+        await client.get_rest(
+            "/api/venue-schedule",
+            params={"venue_id": "vn-001"},
             execution_context_header="dummy",
             request_id="req-001",
         )
@@ -128,7 +123,7 @@ async def test_retry_after_parsed_and_capped(monkeypatch):
 
     async def _record_sleep(seconds: float) -> None:
         delays.append(seconds)
-        await orig_sleep(0)  # 测试不真等
+        await orig_sleep(0)
 
     call_count = 0
 
@@ -145,15 +140,15 @@ async def test_retry_after_parsed_and_capped(monkeypatch):
 
     monkeypatch.setattr(wc.asyncio, "sleep", _record_sleep)
     client = _make_client(httpx.MockTransport(handler), max_retries=2, retry_base_delay_ms=0)
-    envelope = await client.invoke(
-        "venue.schedule.query",
-        {},
+    data = await client.get_rest(
+        "/api/venue-schedule",
+        params={"venue_id": "vn-001"},
         execution_context_header="dummy",
         request_id="req-001",
     )
 
     assert call_count == 3
-    assert envelope.request_id == "req-001"
+    assert data["venue"] == "保利世贸博览馆"
     assert len(delays) == 2
     assert all(d <= wc._MAX_RETRY_DELAY_MS / 1000 for d in delays), (
         f"重试等待超封顶上限：{delays}"
@@ -179,12 +174,12 @@ async def test_retry_budget_exhausted_stops_retrying():
         timeout=5.0,
         max_retries=3,
         retry_base_delay_ms=0,
-        retry_budget_ms=1,  # 预算耗尽：首次失败后剩余预算不足以等待任何重试
+        retry_budget_ms=1,
     )
     with pytest.raises(RateLimitedError):
-        await client.invoke(
-            "venue.schedule.query",
-            {},
+        await client.get_rest(
+            "/api/venue-schedule",
+            params={"venue_id": "vn-001"},
             execution_context_header="dummy",
             request_id="req-001",
         )
@@ -203,9 +198,9 @@ async def test_retry_after_http_date_ignored_falls_back_to_backoff():
 
     client = _make_client(httpx.MockTransport(handler), max_retries=0)
     with pytest.raises(RateLimitedError) as exc:
-        await client.invoke(
-            "venue.schedule.query",
-            {},
+        await client.get_rest(
+            "/api/venue-schedule",
+            params={"venue_id": "vn-001"},
             execution_context_header="dummy",
             request_id="req-001",
         )

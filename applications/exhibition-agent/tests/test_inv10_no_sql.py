@@ -1,7 +1,8 @@
-"""INV-10 回归测试（本任务最重要的一条）。
+"""INV-10 回归测试（本任务最重要的一条，v1.2 直接 REST）。
 
-METRIC_NOT_VERIFIED / METRIC_BLOCKED / DATA_NOT_CONNECTED → 回答"该指标待接入"，
-且断言：全程未生成任何 SQL（INV-10：指标口径不可绕过，禁止 L3 text2sql 自算）。
+METRIC_NOT_VERIFIED / METRIC_BLOCKED / DATA_NOT_CONNECTED（422）→ 答"该指标待接入"。
+200 + data_readiness.level=pending → 答"该指标待接入"（v1.2 新增 200 路径）。
+两轨均断言：全程未生成任何 SQL（INV-10：指标口径不可绕过，禁止 L3 text2sql 自算）。
 """
 
 from __future__ import annotations
@@ -38,12 +39,13 @@ def test_inv10_graph_structure_guards_no_sql_node():
 @pytest.mark.parametrize("scenario,expected_code", [
     ("metric_not_verified", "METRIC_NOT_VERIFIED"),
     ("metric_blocked", "METRIC_BLOCKED"),
+    ("data_not_connected_422", "DATA_NOT_CONNECTED"),
     ("data_not_connected", "DATA_NOT_CONNECTED"),
 ])
 async def test_inv10_metric_pending_answers_pending_and_no_sql(
     warehouse_client, scenario, expected_code
 ):
-    """命中未 VERIFIED / BLOCKED / DATA_NOT_CONNECTED → 答'该指标待接入' + 全程零 SQL。"""
+    """命中未 VERIFIED / BLOCKED / DATA_NOT_CONNECTED（422 或 200 data_readiness）→ 答'该指标待接入' + 全程零 SQL。"""
     context = ctx()
     recorder = InMemoryTraceRecorder()
 
