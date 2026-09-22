@@ -21,12 +21,11 @@ F05 Evaluation & Golden Set — 脚手架版
 
 import json
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Optional
 
-from .knowledge_lifecycle import filter_published_for_retrieval, KNOWLEDGE_STATUS
+from .knowledge_lifecycle import KNOWLEDGE_STATUS, filter_published_for_retrieval
 
 _BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
 _DATA_DIR = os.path.join(_BACKEND_DIR, "data")

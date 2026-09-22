@@ -28,7 +28,7 @@ VERIFIED 分支通过 `ctx.warehouse_client.get_rest(_NL2SQL_ENDPOINT, ...)` 调
 当前 `_NL2SQL_ENDPOINT` 为 TODO 常量，骨架阶段不实际发起 HTTP，返回确定性 stub 结果
 （`readiness=READY`、`data.skeleton=True`）以贯通 VERIFIED 路径。
 
-nl2sql-service 通用化（`applications/wenda-data-agent/` 12 节点 LangGraph 抽通用服务）
+nl2sql-service 通用化（`applications/nl2sql-service/` 12 节点 LangGraph 通用服务）
 是后续步骤。通用化后填充 `_NL2SQL_ENDPOINT` 并按 `SqlQueryResponse` 契约
 （answer / sql / error / fallback / latency_ms）自组装 SkillResult。
 

@@ -94,8 +94,8 @@ def check_pyproject_package_names() -> None:
             or dir_name == "agent_federation"
             or dir_name == "agent_server"
             or dir_name == "kefu-service"
-            or dir_name == "wenda-data-agent"
-            or dir_name == "zhanggui-zhiku"
+            or dir_name == "nl2sql-service"
+            or dir_name == "knowledge-service"
             or dir_name == "dialogue-framework"
             or dir_name == "exhibition-agent"
         ):

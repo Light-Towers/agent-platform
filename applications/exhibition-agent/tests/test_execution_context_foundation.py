@@ -11,15 +11,12 @@
 from __future__ import annotations
 
 import json
-import os
 
 import pytest
 
 from exhibition_agent.contract.execution_context import ExecutionContext, TenantType
 from exhibition_agent.foundation.execution_context import (
-    VALID_AUTH_SOURCES,
     VALID_TENANT_TYPES,
-    ExecutionContext as FoundationExecutionContext,
     ForbiddenScopeInjection,
     ServiceCredential,
     Unauthorized,
@@ -34,7 +31,9 @@ from exhibition_agent.foundation.execution_context import (
     sign_context,
     verify_context,
 )
-
+from exhibition_agent.foundation.execution_context import (
+    ExecutionContext as FoundationExecutionContext,
+)
 
 # ---------------------------------------------------------------------------
 # tenant_type 枚举含 VENUE_OPERATOR

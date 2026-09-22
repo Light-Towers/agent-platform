@@ -28,7 +28,6 @@ from exhibition_agent.foundation.metric_registry import (
     get_readiness,
 )
 from exhibition_agent.foundation.production_readiness_gate import (
-    APPROVED,
     GATE_NOT_READY,
     GATE_PASS,
     GATE_READY,
@@ -36,7 +35,6 @@ from exhibition_agent.foundation.production_readiness_gate import (
     get_gate_status_with_evidence,
     is_production_ready,
 )
-
 
 # === 数据源台账可查 ===
 

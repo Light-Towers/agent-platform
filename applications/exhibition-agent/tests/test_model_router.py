@@ -24,7 +24,6 @@ from exhibition_agent.contract.envelope import DataClassification, EgressDecisio
 from exhibition_agent.foundation import data_egress
 from exhibition_agent.foundation.data_egress import (
     DataClass,
-    EgressDecision as EgressDecisionEgress,
     EgressPolicy,
     classify,
     evaluate_egress,
@@ -32,6 +31,11 @@ from exhibition_agent.foundation.data_egress import (
     get_audit_log,
     mask_pii,
     record_egress_audit,
+)
+from exhibition_agent.foundation.data_egress import (
+    EgressDecision as EgressDecisionEgress,
+)
+from exhibition_agent.foundation.data_egress import (
     route_model as egress_route_model,
 )
 from exhibition_agent.model_router import ModelDecision, route_model

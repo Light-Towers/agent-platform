@@ -13,10 +13,10 @@
 """
 import json
 import os
-import sys
 import socket
-import urllib.request
+import sys
 import urllib.error
+import urllib.request
 
 _real = socket.getaddrinfo
 

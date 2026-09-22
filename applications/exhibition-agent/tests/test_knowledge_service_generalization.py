@@ -14,14 +14,14 @@ from __future__ import annotations
 
 import pytest
 
-# zhanggui-zhiku 单向依赖 exhibition-agent（monorepo sibling），可安全 import
-from zhanggui_zhiku.core.knowledge_lifecycle_integration import (
+# knowledge-service 单向依赖 exhibition-agent（monorepo sibling），可安全 import
+from knowledge_service.core.knowledge_lifecycle_integration import (
     build_lifecycle_metadata,
     should_publish_to_production,
     transition_status,
 )
-from zhanggui_zhiku.import_process.agent.state import create_default_state, get_default_state
-from zhanggui_zhiku.utils.milvus_filter_utils import (
+from knowledge_service.import_process.agent.state import create_default_state, get_default_state
+from knowledge_service.utils.milvus_filter_utils import (
     build_item_name_filter,
     build_retrieval_filter,
     build_tenant_filter,
@@ -35,35 +35,35 @@ class TestItemNameNodePluggable:
 
     def test_import_graph_route_after_split_enabled_by_default(self):
         """默认 enable_item_name_recognition=True → 走商品名识别（向后兼容）。"""
-        from zhanggui_zhiku.import_process.agent.main_graph import route_after_split
+        from knowledge_service.import_process.agent.main_graph import route_after_split
 
         state = create_default_state(task_id="t1")
         assert route_after_split(state) == "node_item_name_recognition"
 
     def test_import_graph_route_after_split_disabled(self):
         """enable_item_name_recognition=False → 跳过商品名识别，直接进 BGE 向量化。"""
-        from zhanggui_zhiku.import_process.agent.main_graph import route_after_split
+        from knowledge_service.import_process.agent.main_graph import route_after_split
 
         state = create_default_state(task_id="t1", enable_item_name_recognition=False)
         assert route_after_split(state) == "node_bge_embedding"
 
     def test_query_graph_route_entry_enabled_by_default(self):
         """默认 enable_item_name_confirm=True → 走商品名确认（向后兼容）。"""
-        from zhanggui_zhiku.query_process.agent.main_graph import route_entry
+        from knowledge_service.query_process.agent.main_graph import route_entry
 
         state = {"session_id": "s1", "original_query": "q"}
         assert route_entry(state) == "node_item_name_confirm"
 
     def test_query_graph_route_entry_disabled(self):
         """enable_item_name_confirm=False → 跳过商品名确认，直接进多路检索。"""
-        from zhanggui_zhiku.query_process.agent.main_graph import route_entry
+        from knowledge_service.query_process.agent.main_graph import route_entry
 
         state = {"session_id": "s1", "original_query": "q", "enable_item_name_confirm": False}
         assert route_entry(state) == "node_multi_search"
 
     def test_import_graph_compiled_with_conditional_edge(self):
         """导入图编译成功，含 node_item_name_recognition 节点（可插拔不等于移除注册）。"""
-        from zhanggui_zhiku.import_process.agent.main_graph import kb_import_app
+        from knowledge_service.import_process.agent.main_graph import kb_import_app
 
         # LangGraph 编译后节点可通过 graph.nodes 访问
         node_names = set(kb_import_app.get_graph().nodes.keys())
@@ -72,7 +72,7 @@ class TestItemNameNodePluggable:
 
     def test_query_graph_compiled_with_entry_virtual_node(self):
         """查询图编译成功，入口为虚拟节点 node_entry_query。"""
-        from zhanggui_zhiku.query_process.agent.main_graph import query_app
+        from knowledge_service.query_process.agent.main_graph import query_app
 
         node_names = set(query_app.get_graph().nodes.keys())
         assert "node_entry_query" in node_names
@@ -388,7 +388,7 @@ class TestImportMilvusLifecycleGate:
 
     def test_draft_state_skips_milvus_insert(self):
         """status=DRAFT 时 node_import_milvus 直接返回，不触发 Milvus 写入。"""
-        from zhanggui_zhiku.import_process.agent.nodes.node_import_milvus import node_import_milvus
+        from knowledge_service.import_process.agent.nodes.node_import_milvus import node_import_milvus
 
         state = create_default_state(
             task_id="t1",
@@ -403,7 +403,7 @@ class TestImportMilvusLifecycleGate:
 
     def test_published_state_proceeds_to_milvus(self):
         """status=PUBLISHED + 完整 metadata → 进入 Milvus 流程（连接失败时抛 ValueError）。"""
-        from zhanggui_zhiku.import_process.agent.nodes.node_import_milvus import node_import_milvus
+        from knowledge_service.import_process.agent.nodes.node_import_milvus import node_import_milvus
 
         state = create_default_state(
             task_id="t1",
@@ -430,7 +430,7 @@ class TestEndToEndCombination:
 
     def test_disabled_item_name_with_tenant_and_draft(self):
         """禁用 item_name NER + 多租户 + DRAFT → 跳过 NER，不入生产。"""
-        from zhanggui_zhiku.import_process.agent.main_graph import route_after_split
+        from knowledge_service.import_process.agent.main_graph import route_after_split
 
         state = create_default_state(
             task_id="t1",

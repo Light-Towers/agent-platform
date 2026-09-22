@@ -15,8 +15,8 @@
 | `packages/agent-runtime/` | Plan-F 运行时中间件层：admission/coordinator/cache/circuit_breaker/revert/mcp_client/otel/tracing/db + planner/（protocol/agentic/agentic_bridge/registry/policy/mode_selector/context_manager/execution_graph/graph_compose/durability/durability_pg）+ skills/（registry/function/agent/remote/workflow/mcp/sandbox/middleware/composition/dag） + sandbox（双后端代码执行） | — |
 | `packages/shared-schemas/` | 联邦 4 服务共享 Pydantic 契约（QueryResponse / ThreadState 等） | — |
 | `applications/kefu-service/` | kefu 迁移版（deepagents + LangGraph），已接入联邦网关（Agent Protocol 兼容 `/invoke`，返回 `QueryResponse`；`KEFU_USE_ADAPTER=false` 默认直连） | — |
-| `applications/wenda-data-agent/` | Text-to-SQL 数据分析垂直场景（已直连联邦契约，无需 adapter） | — |
-| `applications/zhanggui-zhiku/` | 掌柜智库：RAG 知识库导入 + 多路检索问答（:8900） | `zhanggui-zhiku` 脚本 |
+| `applications/nl2sql-service/` | Text-to-SQL 数据分析通用服务（元知识参数化，已直连联邦契约） | — |
+| `applications/knowledge-service/` | 通用知识库服务：RAG 导入 + 多路检索问答（:8900，Metadata 参数化 + 生命周期 + 多租户 ACL） | `knowledge-service` 脚本 |
 | `applications/dialogue-framework/` | LLM 对话系统框架基础设施 | `dialogue_framework.cli:main` |
 | `applications/exhibition-agent/` | 会展行业 AI Agent（skill_loader + warehouse REST 集成） | `uvicorn exhibition_agent.skill_loader.app:app` |
 | `tests/` | agent_server 单元测试（根套件） | `pytest -q` |
@@ -29,7 +29,7 @@
 ```bash
 uv sync --all-packages --extra dev   # 安装（workspace 全量包 + dev 工具）
 make ci                              # CI 唯一门禁：lint + 10 个 pytest session（见 Makefile test 目标）+ 启发式 eval
-make test                            # 10 session pytest（根 / shared-schemas / agent-runtime / agent-server / 联邦 / kefu / exhibition / dialogue-framework / zhanggui-zhiku / wenda-data-agent）
+make test                            # 10 session pytest（根 / shared-schemas / agent-runtime / agent-server / 联邦 / kefu / exhibition / dialogue-framework / knowledge-service / nl2sql-service）
 make eval                            # 评测门禁（启发式，CI 可达）
 DATABASE_URL= uvicorn agent_server.main:app --port 8000  # 零依赖冒烟
 ```
@@ -63,7 +63,7 @@ DATABASE_URL= uvicorn agent_server.main:app --port 8000  # 零依赖冒烟
 
 - **勿提交真实 `.env` 文件**：所有 `.env` 已被 `.gitignore` 忽略，使用前按 `.env.example` 填值
 - **勿提交大二进制资产**：模型权重、数据集均未入库，需本地自备
-- **根测试/共享代码统一用 `agent_server.*`**：各应用子包已有独立 Python 包名（`zhanggui_zhiku` / `agent_server` 等），无遮蔽风险
+- **根测试/共享代码统一用 `agent_server.*`**：各应用子包已有独立 Python 包名（`knowledge_service` / `nl2sql_service` / `agent_server` 等），无遮蔽风险
 - **所有代码优化/重构必须先制定方案**：除非方案已敲定（有文档/issue 记录并经确认），**禁止直接动手改代码**；方案需包含目标、影响面、迁移策略、验收标准，并在文档/issue 中记录
 
 ## 框架选型规则

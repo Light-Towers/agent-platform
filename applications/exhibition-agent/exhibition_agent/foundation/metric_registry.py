@@ -17,8 +17,8 @@ SYNTHETIC：Tool 级声明覆盖，不由 metric status 推导。
 
 import json
 import os
-from typing import Optional
 from enum import Enum
+from typing import Optional
 
 _BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
 _METRIC_REGISTRY_PATH = os.path.join(_BACKEND_DIR, "metric_registry.json")

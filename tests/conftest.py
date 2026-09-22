@@ -37,7 +37,7 @@ def clean_env(monkeypatch):
     get_settings.cache_clear()
 
 
-# 2026-09-22 T0.4：dialogue_framework / wenda_data_agent 模块已落地，
+# 2026-09-22 T0.4：dialogue_framework / nl2sql_service 模块已落地，
 # collect_ignore_glob 移除，改为 Makefile 独立 session 跑（避免根 session conftest 冲突）。
 # 根 session（pytest -q）经 testpaths 收集 tests/ 时，这两个子目录的测试会被收集，
 # 若与根 conftest 冲突则需在根 pyproject testpaths 排除或在此恢复选择性 ignore。
