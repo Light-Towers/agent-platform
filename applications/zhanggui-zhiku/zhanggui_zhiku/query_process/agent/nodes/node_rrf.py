@@ -1,9 +1,10 @@
 import sys
-from typing import List, Dict, Any
-from zhanggui_zhiku.utils.task_utils import add_running_task, add_done_task
-from zhanggui_zhiku.core.logger import logger
+from typing import Any, Dict, List
+
 from zhanggui_zhiku.conf.retrieval_config import retrieval_cfg
+from zhanggui_zhiku.core.logger import logger
 from zhanggui_zhiku.core.tracing import traced_span
+from zhanggui_zhiku.utils.task_utils import add_done_task, add_running_task
 
 
 def _rrf_span_attrs(*args, result=None, **kwargs):

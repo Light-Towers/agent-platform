@@ -1,5 +1,5 @@
-from zhanggui_zhiku.utils.path_util import PROJECT_ROOT
 from zhanggui_zhiku.core.logger import logger  # 可选，加日志更友好
+from zhanggui_zhiku.utils.path_util import PROJECT_ROOT
 
 
 def load_prompt(name: str, **kwargs) -> str:

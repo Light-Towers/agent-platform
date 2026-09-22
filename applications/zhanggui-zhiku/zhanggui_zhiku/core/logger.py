@@ -11,13 +11,13 @@
 7. 位置终极精准：穿透loguru内部+工具类自身，完美显示业务模块实际调用位置
 """
 
-import sys
 import inspect
+import sys
+
 from loguru import logger
 
 # 统一配置：项目根目录与日志开关均来自 zhanggui_zhiku.core.config（全项目唯一配置入口）
-from zhanggui_zhiku.core.config import settings, PROJECT_ROOT
-
+from zhanggui_zhiku.core.config import PROJECT_ROOT, settings
 
 # -------------------------- 第一步：读取配置（带默认值，防止配置缺失） --------------------------
 LOG_CONSOLE_ENABLE = settings.log_console_enable.lower() == "true"

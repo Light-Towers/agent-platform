@@ -1,29 +1,30 @@
 # 导入LangGraph核心依赖：StateGraph(状态图)、START/END(内置起始/结束节点常量)
-from langgraph.graph import StateGraph, END
+from langgraph.graph import END, StateGraph
 
-
-# 导入自定义状态类：统一管理工作流全程的所有数据（各节点共享/修改）
-from zhanggui_zhiku.import_process.agent.state import ImportGraphState
-
-# 导入所有自定义业务节点：每个节点对应知识库导入的一个具体步骤
-from zhanggui_zhiku.import_process.agent.nodes.node_entry import node_entry  # 入口节点：初始化参数、校验输入
-from zhanggui_zhiku.import_process.agent.nodes.node_pdf_to_md import node_pdf_to_md  # PDF转MD：解析PDF文件为markdown格式
-from zhanggui_zhiku.import_process.agent.nodes.node_md_img import (
-    node_md_img,
-)  # MD图片处理：提取/下载markdown中的图片、修复图片路径
-from zhanggui_zhiku.import_process.agent.nodes.node_document_split import (
-    node_document_split,
-)  # 文档分块：将长文档切分为符合模型要求的小片段
-from zhanggui_zhiku.import_process.agent.nodes.node_item_name_recognition import (
-    node_item_name_recognition,
-)  # 项目名识别：从分块中提取核心项目名称（业务定制化）
 from zhanggui_zhiku.import_process.agent.nodes.node_bge_embedding import (
     node_bge_embedding,
 )  # BGE向量化：将文本分块转换为向量表示（适配Milvus向量库）
+from zhanggui_zhiku.import_process.agent.nodes.node_document_split import (
+    node_document_split,
+)  # 文档分块：将长文档切分为符合模型要求的小片段
+
+# 导入所有自定义业务节点：每个节点对应知识库导入的一个具体步骤
+from zhanggui_zhiku.import_process.agent.nodes.node_entry import node_entry  # 入口节点：初始化参数、校验输入
 from zhanggui_zhiku.import_process.agent.nodes.node_import_milvus import (
     node_import_milvus,
 )  # 导入Milvus：将向量数据写入Milvus向量数据库
+from zhanggui_zhiku.import_process.agent.nodes.node_item_name_recognition import (
+    node_item_name_recognition,
+)  # 项目名识别：从分块中提取核心项目名称（业务定制化）
+from zhanggui_zhiku.import_process.agent.nodes.node_md_img import (
+    node_md_img,
+)  # MD图片处理：提取/下载markdown中的图片、修复图片路径
+from zhanggui_zhiku.import_process.agent.nodes.node_pdf_to_md import (
+    node_pdf_to_md,  # PDF转MD：解析PDF文件为markdown格式
+)
 
+# 导入自定义状态类：统一管理工作流全程的所有数据（各节点共享/修改）
+from zhanggui_zhiku.import_process.agent.state import ImportGraphState
 
 # ===================== 1. 初始化LangGraph状态图 =====================
 # 核心：StateGraph是LangGraph的核心类，用于构建有状态的工作流

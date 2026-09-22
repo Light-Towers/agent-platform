@@ -1,10 +1,14 @@
+import base64
 import os
 import re
 import sys
-import base64
+from collections import deque
 from pathlib import Path
 from typing import Dict, List, Tuple
-from collections import deque
+
+# LangChain多模态依赖（消息构造+异常捕获）
+from langchain.messages import HumanMessage
+from langchain_core.exceptions import LangChainException
 
 # MinIO相关依赖
 from minio import Minio
@@ -12,29 +16,25 @@ from minio.deleteobjects import DeleteObject
 
 # 【核心改造1：移除原生OpenAI，导入LangChain工具类和多模态消息模块】
 from zhanggui_zhiku.clients.minio_utils import get_minio_client
+from zhanggui_zhiku.conf.lm_config import lm_config
+
+# 项目配置
+from zhanggui_zhiku.conf.minio_config import minio_config
+from zhanggui_zhiku.core.config import settings
+
+# 提示词加载工具
+from zhanggui_zhiku.core.load_prompt import load_prompt
+
+# 项目日志工具（统一使用）
+from zhanggui_zhiku.core.logger import logger
 from zhanggui_zhiku.import_process.agent.state import ImportGraphState
-from zhanggui_zhiku.utils.task_utils import add_running_task
 
 # LLM客户端工具类（核心复用，替换原生OpenAI调用）
 from zhanggui_zhiku.lm.lm_utils import get_llm_client
 
-# LangChain多模态依赖（消息构造+异常捕获）
-from langchain.messages import HumanMessage
-from langchain_core.exceptions import LangChainException
-
-# 项目配置
-from zhanggui_zhiku.conf.minio_config import minio_config
-from zhanggui_zhiku.conf.lm_config import lm_config
-from zhanggui_zhiku.core.config import settings
-
-# 项目日志工具（统一使用）
-from zhanggui_zhiku.core.logger import logger
-
 # api访问限速工具
 from zhanggui_zhiku.utils.rate_limit_utils import apply_api_rate_limit
-
-# 提示词加载工具
-from zhanggui_zhiku.core.load_prompt import load_prompt
+from zhanggui_zhiku.utils.task_utils import add_running_task
 
 # MinIO支持的图片格式集合（小写后缀，统一匹配标准）
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp"}

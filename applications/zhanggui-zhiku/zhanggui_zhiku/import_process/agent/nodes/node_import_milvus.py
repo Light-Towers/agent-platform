@@ -1,19 +1,19 @@
 import os
 import sys
 import time
-from typing import List, Dict, Any
+from typing import Any, Dict, List
 
 # 导入Milvus相关依赖
 from pymilvus import DataType
 
 # 导入自定义模块
 from zhanggui_zhiku.clients.milvus_utils import get_milvus_client
-from zhanggui_zhiku.utils.task_utils import add_running_task
-from zhanggui_zhiku.core.logger import logger
 from zhanggui_zhiku.conf.milvus_config import milvus_config
+from zhanggui_zhiku.core.logger import logger
+from zhanggui_zhiku.core.tracing import traced_span
 from zhanggui_zhiku.utils.escape_milvus_string_utils import escape_milvus_string
 from zhanggui_zhiku.utils.index_registry import register_index
-from zhanggui_zhiku.core.tracing import traced_span
+from zhanggui_zhiku.utils.task_utils import add_running_task
 
 # 从配置文件读取切片集合名称（M2：版本化命名 {prefix}_{schema_version}_{embedding_model}，
 # 与检索侧 node_search_embedding / node_search_embedding_hyde 统一读取同一配置，杜绝两侧写死不一致）
@@ -410,8 +410,8 @@ def step_5_register_index(chunks_json_data: List[Dict[str, Any]]) -> None:
 if __name__ == "__main__":
     # --- 单元测试 ---
     # 目的：验证 Milvus 导入节点的完整流程，包括连接、创建集合、清理旧数据和插入新数据。
-    import sys
     import os
+    import sys
 
     # 环境变量已由 zhanggui_zhiku.core.config 在导入时统一加载（全项目仅此一次）
     current_dir = os.path.dirname(os.path.abspath(__file__))

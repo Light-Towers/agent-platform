@@ -1,19 +1,20 @@
 import json
 import os
-from typing import List, Dict
-from langchain_core.messages import SystemMessage, HumanMessage
+from typing import Dict, List
 
-from zhanggui_zhiku.core.load_prompt import load_prompt
-from zhanggui_zhiku.query_process.agent.state import QueryGraphState
-from zhanggui_zhiku.utils.task_utils import add_running_task, add_done_task
+from langchain_core.messages import HumanMessage, SystemMessage
+
+from zhanggui_zhiku.clients.milvus_utils import create_hybrid_search_requests, get_milvus_client, hybrid_search
 from zhanggui_zhiku.clients.mongo_history_utils import get_recent_messages, save_chat_message, update_message_item_names
-from zhanggui_zhiku.lm.lm_utils import get_llm_client
-from zhanggui_zhiku.lm.embedding_utils import generate_embeddings
-from zhanggui_zhiku.clients.milvus_utils import get_milvus_client, create_hybrid_search_requests, hybrid_search
 from zhanggui_zhiku.conf.milvus_config import milvus_config
 from zhanggui_zhiku.conf.retrieval_config import retrieval_cfg
+from zhanggui_zhiku.core.load_prompt import load_prompt
 from zhanggui_zhiku.core.logger import logger
 from zhanggui_zhiku.core.tracing import start_span
+from zhanggui_zhiku.lm.embedding_utils import generate_embeddings
+from zhanggui_zhiku.lm.lm_utils import get_llm_client
+from zhanggui_zhiku.query_process.agent.state import QueryGraphState
+from zhanggui_zhiku.utils.task_utils import add_done_task, add_running_task
 
 # TD-5：商品名确认阈值参数化（环境变量可覆盖，默认与原硬编码一致）
 # 跨类目相似度分布不同，可按部署环境调整；智能阈值待采集基线后评估。

@@ -1,8 +1,10 @@
-import queue
 import asyncio
-from typing import Dict, Any, Optional
+import queue
+from typing import Any, Dict, Optional
+
 from fastapi import Request
 from shared_schemas import sse_pack as _sse_pack
+
 from zhanggui_zhiku.core.logger import logger
 
 

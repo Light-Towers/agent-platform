@@ -11,6 +11,7 @@ API（``save_chat_message`` / ``get_recent_messages`` / ``clear_history`` /
 from typing import Any, Dict, List, Optional
 
 from agent_core.memory.mongo import MongoHistoryStore
+
 from zhanggui_zhiku.core.config import settings
 
 # 模块级单例（懒加载），保持与原 get_history_mongo_tool 行为一致。

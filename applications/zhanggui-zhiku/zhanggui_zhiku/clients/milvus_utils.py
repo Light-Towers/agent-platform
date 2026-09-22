@@ -1,4 +1,5 @@
-from pymilvus import MilvusClient, AnnSearchRequest, WeightedRanker
+from pymilvus import AnnSearchRequest, MilvusClient, WeightedRanker
+
 from zhanggui_zhiku.conf.milvus_config import milvus_config
 from zhanggui_zhiku.core.logger import logger
 

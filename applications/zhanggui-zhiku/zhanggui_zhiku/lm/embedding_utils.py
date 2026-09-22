@@ -1,5 +1,5 @@
-from zhanggui_zhiku.lm._logging import logger
 from zhanggui_zhiku.conf.embedding_config import embedding_config
+from zhanggui_zhiku.lm._logging import logger
 
 # 模型单例对象，避免重复初始化
 _bge_m3_ef = None

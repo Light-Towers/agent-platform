@@ -1,5 +1,6 @@
 import json
 import os
+
 from minio import Minio
 
 from zhanggui_zhiku.conf.minio_config import minio_config

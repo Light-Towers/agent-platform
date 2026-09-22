@@ -15,8 +15,8 @@ test_embedding_api_mode.py —— 验证 embedding_utils 的 api 模式（M8）�
 import math
 
 import pytest
-
 from agent_core.memory import embedder as core_embedder
+
 from zhanggui_zhiku.conf.embedding_config import embedding_config
 from zhanggui_zhiku.lm import embedding_utils
 from zhanggui_zhiku.lm.embedding_utils import generate_embeddings
