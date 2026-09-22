@@ -11,7 +11,7 @@
 
 - **Packages（平台基础设施）**：`agent-core`、`agent-runtime`、`shared-schemas`
   —— 它们是**库**，被其它成员以 `workspace = true` 依赖引用（见根 `pyproject.toml` 的 `[tool.uv.sources]`）。
-- **Applications（应用 / 产品）**：`agent_server`、`agent_federation`、`dialogue-framework`、`exhibition-agent`、`kefu-service`、`wenda-data-agent`、`zhanggui-zhiku`
+- **Applications（应用 / 产品）**：`agent_server`、`agent_federation`、`dialogue-framework`、`exhibition-agent`、`kefu-service`、`nl2sql-service`、`knowledge-service`
   —— 它们是**独立可部署单元**，各自带 `pyproject.toml` / `Dockerfile` / `docker-compose.yml` / `README`。
 
 目录平铺是历史遗留；逻辑分层早已由 `uv workspace` 隐式承认（仅 3 个 packages 出现在 `[tool.uv.sources]`）。
@@ -28,7 +28,7 @@
     ┌─────────┼──────────┐                  ┌────────────┼─────────────┐
     │         │          │                  │            │             │
 agent-core  agent-runtime  shared-schemas  agent-server  agent_federation  dialogue-framework
- (基础原语)   (执行模型)     (数据契约)         kefu-service  wenda-data-agent  zhanggui-zhiku
+ (基础原语)   (执行模型)     (数据契约)         kefu-service  nl2sql-service  knowledge-service
 ```
 
 ### 2.1 Packages（平台基础设施，仅 3 个）
@@ -50,7 +50,7 @@ agent-core  agent-runtime  shared-schemas  agent-server  agent_federation  dialo
 | `agent_federation` | 多 Agent 联邦网关编排系统（生产级） | 自带 `docker-compose.yml` + 全套可观测栈 |
 | `dialogue-framework` | 对话领域框架 / 上层对话引擎 | 独立 package，当前主供内部 |
 | `exhibition-agent` | 会展行业 AI Agent（平台侧骨架；按跨项目接口契约 v1.2 接入 mingyang-warehouse） | 独立部署 |
-| `kefu-service` / `wenda-data-agent` / `zhanggui-zhiku` | 联邦下游子服务 / 领域应用 | 各自独立部署 |
+| `kefu-service` / `nl2sql-service` / `knowledge-service` | 联邦下游子服务 / 领域应用 | 各自独立部署 |
 
 > `agent_server` 不是「平台层」，而是「使用平台能力的应用」（默认 Runtime 宿主）。
 > `agent_federation` / `dialogue-framework` 是**独立 Agent 应用 / 领域框架**，不是 `agent-runtime` 的底层模块。
@@ -107,8 +107,8 @@ agent-platform/
 │   ├── dialogue-framework/
 │   ├── exhibition-agent/
 │   ├── kefu-service/
-│   ├── wenda-data-agent/
-│   └── zhanggui-zhiku/
+│   ├── nl2sql-service/
+│   └── knowledge-service/
 ├── tests/                   # 根项目测试（测 agent_server）
 ├── docs/  scripts/  eval/   # 仓库级
 └── pyproject.toml / Dockerfile / Makefile / docker-compose.yml

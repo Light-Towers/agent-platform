@@ -326,7 +326,7 @@ curl http://127.0.0.1:8000/health
 ## 测试与评测
 
 ```bash
-make test                            # 9 session pytest（根 / shared-schemas / agent-runtime / agent-server / 联邦 / kefu / exhibition / dialogue-framework / zhanggui-zhiku）
+make test                            # 10 session pytest（根 / shared-schemas / agent-runtime / agent-server / 联邦 / kefu / exhibition / dialogue-framework / knowledge-service / nl2sql-service）
 python eval/run_eval.py              # 启发式路由准确率基线（15 条 golden）
 python eval/run_eval.py --llm        # 配置 LLM 后评测结构化路由
 python eval/run_eval.py --fail-below 0.8   # CI 门禁用法
@@ -430,10 +430,10 @@ applications/kefu-service/   # kefu 迁移版（deepagents + LangGraph），已�
                           #      网关 KEFU_USE_ADAPTER=false 直连本服务（默认）
                           #   —— 原 kefu-adapter（legacy 适配层）已于 2026-08 移除（无调用方，
                           #      默认直连 kefu-service；外部 legacy 退役为运维动作）
-applications/wenda-data-agent/ # Text-to-SQL 数据分析垂直场景（生产化改造自 courses/.../data-agent）
-                          #   —— 原 wenda-adapter（SSE→JSON 适配层）已于 2026-08 退役，
-                          #      网关直连本服务 /api/query（wenda-data-agent 默认 :8000）
-applications/zhanggui-zhiku/ # 掌柜智库：RAG 知识库导入 + 多路检索问答一体化服务（:8900；包名仍为 app）
+applications/nl2sql-service/  # Text-to-SQL 数据分析通用服务（元知识参数化，已直连联邦契约）
+                           #   —— 原 wenda-adapter（SSE→JSON 适配层）已于 2026-08 退役，
+                           #      网关直连本服务 /api/query（nl2sql-service 默认 :8000）
+applications/knowledge-service/ # 通用知识库服务：RAG 导入 + 多路检索问答（:8900，Metadata 参数化 + 生命周期 + 多租户 ACL）
 applications/dialogue-framework/ # LLM 对话系统框架基础设施（生产化改造自 courses/.../legacy）
 ```
 

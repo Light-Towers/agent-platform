@@ -29,5 +29,5 @@ from shared_schemas import QueryRequest, QueryResponse, ThreadState, sse_pack
 
 - `applications/agent_federation/` — 联邦网关
 - `applications/kefu-service/` — 客服服务（`/invoke` 返回 `QueryResponse`）
-- `applications/wenda-data-agent/` — Text-to-SQL 数据分析
+- `applications/nl2sql-service/` — Text-to-SQL 数据分析
 - `applications/agent_server/` — 统一 Agent 平台（SSE 响应用 `sse_pack`）
