@@ -1,0 +1,30 @@
+[
+  {
+    "timestamp": "2026-09-22T07:37:50Z",
+    "knowledge_id": "k_001",
+    "from_status": "DRAFT",
+    "to_status": "REVIEWING",
+    "actor": "tester"
+  },
+  {
+    "timestamp": "2026-09-22T07:39:25Z",
+    "knowledge_id": "k_001",
+    "from_status": "DRAFT",
+    "to_status": "REVIEWING",
+    "actor": "tester"
+  },
+  {
+    "timestamp": "2026-09-22T07:44:18Z",
+    "knowledge_id": "k_001",
+    "from_status": "DRAFT",
+    "to_status": "REVIEWING",
+    "actor": "tester"
+  },
+  {
+    "timestamp": "2026-09-22T07:46:39Z",
+    "knowledge_id": "k_001",
+    "from_status": "DRAFT",
+    "to_status": "REVIEWING",
+    "actor": "tester"
+  }
+]

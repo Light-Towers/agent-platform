@@ -1,0 +1,110 @@
+{
+  "version": "F04-mvp-1.0",
+  "date": "2026-09-16",
+  "source_spec": "docs/superpowers/specs/2026-09-08-F04-metric-registry-spec.md",
+  "verified_upgrade_note": "VERIFIED 升级须由 F06 run_data_ready_gate_and_upgrade() 在 F02 真库接入后基于真库判定生效（MVP 阶段用 local_test.db 模拟判据，指标保持 CONNECTED，不基于模拟库误标 VERIFIED；守 INV-3）。待 F02 落地后显式运行该函数完成 D2 闭环。",
+  "status_state_machine": "CANDIDATE → REGISTERED → CONNECTED → VERIFIED; BLOCKED, DEPRECATED",
+  "readiness_mapping": {
+    "CONNECTED": "CONNECTED",
+    "VERIFIED": "CONNECTED",
+    "REGISTERED": "NOT_CONNECTED",
+    "CANDIDATE": "NOT_CONNECTED",
+    "BLOCKED": "PARTIAL",
+    "DEPRECATED": "NOT_CONNECTED"
+  },
+  "metrics": {
+    "exhibitor_count": {
+      "metric_id": "exhibitor_count",
+      "name": "展商数",
+      "definition": "某展会的参展商数量（去重）",
+      "grain": "exhibition",
+      "dimensions": ["exhibition_id", "exhibition_name", "start_date"],
+      "measure": "COUNT(DISTINCT exhibitor_id)",
+      "aggregation": "count_distinct",
+      "filters": [],
+      "source": {
+        "table": "ads_fct_exhibitor_participation",
+        "column": "exhibitor_id",
+        "join": "ads_dim_exhibition"
+      },
+      "readiness": "CONNECTED",
+      "status": "CONNECTED",
+      "status_reason": "数据可算，源已接入，待 F06 评测门禁升 VERIFIED",
+      "sql_template": "SELECT exhibition_id, COUNT(DISTINCT exhibitor_id) AS exhibitor_count FROM ads_fct_exhibitor_participation GROUP BY exhibition_id"
+    },
+    "booth_revenue": {
+      "metric_id": "booth_revenue",
+      "name": "展位收入",
+      "definition": "某展会的展位销售总收入",
+      "grain": "exhibition",
+      "dimensions": ["exhibition_id", "exhibition_name"],
+      "measure": "SUM(booth_fee_amount)",
+      "aggregation": "sum",
+      "filters": [],
+      "source": {
+        "table": "ads_fct_contract",
+        "column": "contract_amount",
+        "join": "ads_dim_exhibition"
+      },
+      "readiness": "CONNECTED",
+      "status": "CONNECTED",
+      "status_reason": "数据可算，源已接入，待 F06 评测门禁升 VERIFIED",
+      "sql_template": "SELECT c.exhibition_id, SUM(c.contract_amount) AS booth_revenue FROM ads_fct_contract c GROUP BY c.exhibition_id"
+    },
+    "venue_utilization_rate": {
+      "metric_id": "venue_utilization_rate",
+      "name": "场馆利用率（F3a）",
+      "definition": "某场馆某时段的利用率 = 已排档天数 / 可排档天数",
+      "grain": "venue x time_period",
+      "dimensions": ["venue_id", "venue_name", "year", "month"],
+      "measure": "SUM(scheduled_days) / SUM(available_days)",
+      "aggregation": "ratio",
+      "filters": [],
+      "source": {
+        "table": "ads_agg_venue_kpi",
+        "columns": ["total_exhibition_count", "avg_exhibitors_per_exhibition"],
+        "join": "ads_dim_venue"
+      },
+      "readiness": "CONNECTED",
+      "status": "CONNECTED",
+      "status_reason": "已有口径，源已接入，待真库标定后升 VERIFIED",
+      "sql_template": "SELECT venue_id, total_exhibition_count, avg_exhibitors_per_exhibition FROM ads_agg_venue_kpi"
+    },
+    "booth_sell_through_rate": {
+      "metric_id": "booth_sell_through_rate",
+      "name": "展位销售率",
+      "definition": "某展会展位售出率 = 已售展位数 / 规划展位数",
+      "grain": "exhibition",
+      "dimensions": ["exhibition_id", "exhibition_name"],
+      "measure": "COUNT(DISTINCT sold_booth_id) / COUNT(DISTINCT planned_booth_id)",
+      "aggregation": "ratio",
+      "filters": [],
+      "source": {
+        "table": "ads_dim_booth + ads_fct_exhibitor_participation",
+        "blocked_reason": "B1/B2: 规划展位数与已售展位数的口径对齐受数据限制"
+      },
+      "readiness": "PARTIAL",
+      "status": "BLOCKED",
+      "status_reason": "受 §5.5 B1/B2 限制，当前不可算；不得用 COALESCE(...,0) 补值",
+      "constraints": ["B1: 规划展位口径待统一", "B2: 已售展位关联待接入", "F04 §7.5: 禁止 COALESCE 补值"]
+    },
+    "booth_vacancy_rate": {
+      "metric_id": "booth_vacancy_rate",
+      "name": "展位空置率",
+      "definition": "某展会展位空置率 = 1 - 展位销售率",
+      "grain": "exhibition",
+      "dimensions": ["exhibition_id", "exhibition_name"],
+      "measure": "1 - (COUNT(DISTINCT sold_booth_id) / COUNT(DISTINCT planned_booth_id))",
+      "aggregation": "derived",
+      "filters": [],
+      "source": {
+        "table": "ads_dim_booth + ads_fct_exhibitor_participation",
+        "blocked_reason": "B1/B2: 依赖展位销售率，同源受限"
+      },
+      "readiness": "PARTIAL",
+      "status": "BLOCKED",
+      "status_reason": "受 §5.5 B1/B2 限制（依赖 booth_sell_through_rate），当前不可算",
+      "constraints": ["B1: 规划展位口径待统一", "B2: 已售展位关联待接入", "F04 §7.5: 禁止 COALESCE 补值"]
+    }
+  }
+}

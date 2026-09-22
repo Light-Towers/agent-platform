@@ -9,6 +9,10 @@ from pymilvus import DataType
 # 导入自定义模块
 from zhanggui_zhiku.clients.milvus_utils import get_milvus_client
 from zhanggui_zhiku.conf.milvus_config import milvus_config
+from zhanggui_zhiku.core.knowledge_lifecycle_integration import (
+    extract_tenant_scope_for_chunk,
+    should_publish_to_production,
+)
 from zhanggui_zhiku.core.logger import logger
 from zhanggui_zhiku.core.tracing import traced_span
 from zhanggui_zhiku.utils.escape_milvus_string_utils import escape_milvus_string
@@ -63,6 +67,13 @@ def node_import_milvus(state: Dict[str, Any]) -> Dict[str, Any]:
     add_running_task(state["task_id"], current_node)
     logger.info("--- Milvus切片数据入库流程启动 ---")
 
+    # 08+16 通用化：生命周期状态机集成——非 PUBLISHED 跳过生产入库（仅审计留痕）
+    should_publish, reason = should_publish_to_production(state)
+    if not should_publish:
+        logger.info(f"[{state.get('task_id', '')}] 跳过生产入库：{reason}")
+        return state
+    logger.info(f"[{state.get('task_id', '')}] 生命周期校验通过，进入生产入库流程")
+
     try:
         # 步骤1：输入数据有效性校验
         chunks_json_data, vector_dimension = step_1_check_input(state)
@@ -71,7 +82,7 @@ def node_import_milvus(state: Dict[str, Any]) -> Dict[str, Any]:
         # 步骤3：幂等性处理 - 清理同item_name旧数据
         step_3_clean_old_data(client, chunks_json_data)
         # 步骤4：批量插入数据+主键chunk_id回填
-        updated_chunks = step_4_insert_data(client, chunks_json_data)
+        updated_chunks = step_4_insert_data(client, chunks_json_data, state=state)
         # 步骤4.5：索引 registry 登记（M2：集合 ↔ 构建配置，评测指标留待实测回填）
         step_5_register_index(chunks_json_data)
         # 步骤5：更新全局状态，将回填后的切片回传下游
@@ -147,6 +158,9 @@ def create_collection(client, collection_name: str, vector_dimension: int):
     schema.add_field(field_name="part", datatype=DataType.INT8)  # 分片编号
     schema.add_field(field_name="file_title", datatype=DataType.VARCHAR, max_length=65535)  # 源文件标题
     schema.add_field(field_name="item_name", datatype=DataType.VARCHAR, max_length=65535)  # 商品名称（幂等性依据）
+    # 08+16 通用化：多租户隔离字段（ACL 前置，INV-8）
+    schema.add_field(field_name="tenant_id", datatype=DataType.VARCHAR, max_length=256)  # 租户 ID
+    schema.add_field(field_name="scope_type", datatype=DataType.VARCHAR, max_length=32)  # PUBLIC | PRIVATE
     # M2 索引生命周期（方案 §5.3）：chunk 元数据字段，保证"评测结果能归因到具体索引版本"
     schema.add_field(
         field_name="embedding_model", datatype=DataType.VARCHAR, max_length=256
@@ -314,7 +328,7 @@ def _clear_chunks_by_item_name(client, collection_name: str, item_name: str):
         raise ValueError(f"幂等清理失败（item_name={i_name}）: {e}")
 
 
-def _enrich_chunk_metadata(item: Dict[str, Any]) -> Dict[str, Any]:
+def _enrich_chunk_metadata(item: Dict[str, Any], state: Dict[str, Any] = None) -> Dict[str, Any]:
     """
     M2（方案 §5.3）：为切片补充版本化元数据字段。
 
@@ -323,6 +337,7 @@ def _enrich_chunk_metadata(item: Dict[str, Any]) -> Dict[str, Any]:
         - chunk_version：切分策略版本（读统一配置）
         - created_at：入库时间戳（epoch 秒）
         - source_doc：源文档名（优先 file_title，其次 parent_title）
+    08+16 通用化：补充 tenant_id / scope_type（多租户隔离，从 state 透传）。
     """
     item_copy = item.copy()
     item_copy.setdefault("embedding_model", milvus_config.embedding_model)
@@ -332,10 +347,15 @@ def _enrich_chunk_metadata(item: Dict[str, Any]) -> Dict[str, Any]:
         "source_doc",
         item_copy.get("file_title") or item_copy.get("parent_title") or "",
     )
+    # 多租户字段：优先用 chunk 自带值，其次从 state 透传
+    if state is not None:
+        tenant_id, scope_type = extract_tenant_scope_for_chunk(state)
+        item_copy.setdefault("tenant_id", tenant_id)
+        item_copy.setdefault("scope_type", scope_type)
     return item_copy
 
 
-def step_4_insert_data(client, chunks_json_data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def step_4_insert_data(client, chunks_json_data: List[Dict[str, Any]], state: Dict[str, Any] = None) -> List[Dict[str, Any]]:
     """
     步骤4：批量插入切片数据到Milvus+主键回填
     核心逻辑：
@@ -346,13 +366,14 @@ def step_4_insert_data(client, chunks_json_data: List[Dict[str, Any]]) -> List[D
     参数：
         client - MilvusClient实例
         chunks_json_data: List[Dict[str, Any]] - 待入库的切片列表
+        state: Dict[str, Any] - 流程状态对象（用于透传 tenant_id/scope_type，08+16）
     返回：
         List[Dict[str, Any]] - 回填了chunk_id的切片列表
     """
     # 1. 预处理数据：移除手动chunk_id，避免与Milvus自增主键冲突；补充版本化元数据
     data_to_insert = []
     for item in chunks_json_data:
-        item_copy = _enrich_chunk_metadata(item)
+        item_copy = _enrich_chunk_metadata(item, state=state)
         if isinstance(item_copy, dict) and "chunk_id" in item_copy:
             item_copy.pop("chunk_id", None)
         data_to_insert.append(item_copy)

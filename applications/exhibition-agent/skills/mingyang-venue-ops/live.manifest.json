@@ -1,0 +1,56 @@
+{
+  "name": "mingyang-venue-ops",
+  "base_url": "http://192.168.100.9",
+  "jwt_env": "MINGYANG_JWT",
+  "jwt_search": [".codebuddy/scripts/.mingyang_jwt"],
+  "jwt_files": {"site": ".codebuddy/scripts/.mingyang_site_jwt"},
+  "exhibition_list_path": "/mingyang-builder/api/builder/home/h5/exhibition/getExhibitionListByProject",
+  "golden_exhibition_id": "1963526156780019713",
+  "assertions": [
+    {"group": "A.鉴权", "type": "auth", "label": "JWT 已解析且非空"},
+    {"group": "A.鉴权", "type": "const", "label": "Base 地址已配置", "value": true},
+
+    {"group": "B1.全局", "type": "get_data", "label": "contractor/page", "path": "/mingyang-builder/api/builder/home/contractor/page"},
+    {"group": "B1.全局", "type": "get_data", "label": "getExhibitionListByProject", "path": "/mingyang-builder/api/builder/home/h5/exhibition/getExhibitionListByProject"},
+    {"group": "B1.全局", "type": "get_data", "label": "buildCompany/page(//)", "path": "/mingyang-builder/api/builder//home/private/workbench/buildCompany/page"},
+    {"group": "B1.全局", "type": "get_data", "label": "getBoothList(none)", "path": "/mingyang-builder/api/builder/build/workbench/booth/none/getBoothList"},
+    {"group": "B1.全局", "type": "get_data", "label": "pay/none/payConfig", "path": "/mingyang-builder/api/builder/build/pay/none/payConfig"},
+
+    {"group": "B2.默认", "type": "get_struct", "label": "page/backlog", "path": "/mingyang-builder/api/builder/home/page/backlog"},
+    {"group": "B2.默认", "type": "get_struct", "label": "page/booth", "path": "/mingyang-builder/api/builder/home/page/booth"},
+    {"group": "B2.默认", "type": "get_struct", "label": "page/getBoothCompleted", "path": "/mingyang-builder/api/builder/home/page/getBoothCompleted"},
+    {"group": "B2.默认", "type": "get_struct", "label": "statistic/boothStatistic", "path": "/mingyang-builder/api/builder/home/statistic/boothStatistic"},
+    {"group": "B2.默认", "type": "get_struct", "label": "statistic/builderStatistic", "path": "/mingyang-builder/api/builder/home/statistic/builderStatistic"},
+    {"group": "B2.默认", "type": "get_struct", "label": "h5/work-drawing/getBoothCompleted", "path": "/mingyang-builder/api/builder/home/h5/work-drawing/getBoothCompleted"},
+
+    {"group": "C.上下文", "type": "get_ctx", "label": "booth/map/boothStatistics", "path": "/mingyang-builder/api/builder/home/booth/map/boothStatistics"},
+    {"group": "C.上下文", "type": "get_ctx", "label": "carCert/page", "path": "/mingyang-builder/api/builder/home/carCert/page"},
+    {"group": "C.上下文", "type": "get_ctx", "label": "boothRemoval/page", "path": "/mingyang-builder/api/builder/home/boothRemoval/page"},
+
+    {"group": "D.sys", "type": "get_struct", "label": "unit/getThemeConfig", "path": "/mingyang-sys/api/sys/workbench/unit/getThemeConfig"},
+    {"group": "D.sys", "type": "post_struct", "label": "home/orgProject/page(项目列表)", "path": "/mingyang-sys/api/sys/home/orgProject/page", "params": {"page": 1, "pageSize": 10}},
+    {"group": "D.sys", "type": "post_struct", "label": "workbench/role/page", "path": "/mingyang-sys/api/sys/workbench/role/page", "params": {"page": 1, "pageSize": 10}},
+    {"group": "D.sys", "type": "post_struct", "label": "workbench/department/queryList", "path": "/mingyang-sys/api/sys/workbench/department/queryList", "params": {}},
+    {"group": "D.sys", "type": "post_struct", "label": "workbench/account/page", "path": "/mingyang-sys/api/sys/workbench/account/page", "params": {"page": 1, "pageSize": 10}},
+    {"group": "D.sys", "type": "post_struct", "label": "workbench/classify/queryTree", "path": "/mingyang-sys/api/sys/workbench/classify/queryTree", "params": {}},
+    {"group": "D.sys", "type": "get_data", "label": "home/orgProject/check", "path": "/mingyang-sys/api/sys/home/orgProject/check"},
+    {"group": "D.sys", "type": "get_struct", "label": "sysOrgClient/getAccountClientAuthority", "path": "/mingyang-sys/api/sys/sysOrgClient/getAccountClientAuthority"},
+    {"group": "D.sys", "type": "get_http", "label": "[受限]org/page", "path": "/mingyang-sys/api/sys/org/page", "expect_http": 401},
+    {"group": "D.sys", "type": "get_http", "label": "[受限]permission/page", "path": "/mingyang-sys/api/sys/permission/page", "expect_http": 401},
+
+    {"group": "F.company", "type": "get_data", "label": "company/datail(企业信息)", "path": "/mingyang-company/api/company/site/company/datail", "jwt": "site"},
+    {"group": "F.company", "type": "get_data", "label": "exhibitor/task-steps", "path": "/mingyang-company/api/company/site/exhibitor/task-steps", "jwt": "site"},
+    {"group": "F.company", "type": "get_struct", "label": "exhibitor/page(报名信息)", "path": "/mingyang-company/api/company/site/exhibitor/page", "params": {"page": 1, "pageSize": 10}, "jwt": "site"},
+    {"group": "F.company", "type": "post_struct", "label": "certificate/page(证件)", "path": "/mingyang-company/api/company/site/certificate/page", "params": {"page": 1, "pageSize": 10}, "jwt": "site"},
+    {"group": "F.company", "type": "post_struct", "label": "customer/page(客户)", "path": "/mingyang-company/api/company/site/customer/page", "params": {"page": 1, "pageSize": 10}, "jwt": "site"},
+    {"group": "F.company", "type": "post_struct", "label": "proceedings/query(论文集)", "path": "/mingyang-company/api/company/site/proceedings/query", "params": {"page": 1, "pageSize": 10}, "jwt": "site"},
+    {"group": "F.company", "type": "post_struct", "label": "userApplyMessage/getMyStatistics", "path": "/mingyang-company/api/company/site/userApplyMessage/getMyStatistics", "params": {}, "jwt": "site"},
+
+    {"group": "G.portal", "type": "post_struct", "label": "operation/audience/page(观众报名)", "path": "/mingyang-operation/api/operation/site/audience/page", "params": {"page": 1, "pageSize": 10}, "jwt": "site"},
+    {"group": "G.portal", "type": "post_struct", "label": "operation/information/page(资讯)", "path": "/mingyang-operation/api/operation/site/information/page", "params": {"page": 1, "pageSize": 10}, "jwt": "site"},
+    {"group": "G.portal", "type": "get_struct", "label": "operation/invitation/queryEffectiveInvitation", "path": "/mingyang-operation/api/operation/site/invitation/queryEffectiveInvitation", "jwt": "site"},
+    {"group": "G.portal", "type": "post_struct", "label": "public/classify/queryParentClassify", "path": "/mingyang-public/api/public/site/classify/queryParentClassify", "params": {}, "jwt": "site"},
+
+    {"group": "E.写护栏", "type": "write_guard", "label": "全程 0 次写请求"}
+  ]
+}

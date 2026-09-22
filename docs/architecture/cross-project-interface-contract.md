@@ -6,9 +6,9 @@
 
 | 项 | 内容 |
 | --- | --- |
-| 契约版本 | **1.2**（草案，待双方 review；v1.1 → v1.2 修订：C2 统一信封 → 直接 REST，F-S1-05 修复） |
-| 甲方（Domain / Data） | `mingyang-warehouse`（本体 / DDL / 领域 API / Metric Registry / 知识平台） |
-| 乙方（Foundation / Platform） | `agent-platform`（LangGraph Supervisor 编排、HITL、可观测、评测、Model Router） |
+| 契约版本 | **1.3**（v1.2 → v1.3：两项目边界纠正，知识平台/F01-F06 从 warehouse 迁到 agent-platform） |
+| 甲方（Domain / Data） | `mingyang-warehouse`（本体 / DDL / 领域 API → 纯数据服务，不做 agent/AI） |
+| 乙方（Foundation / Platform） | `agent-platform`（LangGraph Supervisor 编排、HITL、可观测、评测、Model Router、知识平台、Metric Registry、F01-F06 Foundation） |
 | 状态 | 🟡 草案 · 待双方确认 |
 | 依据 | 主方案 §2.2 三层责任边界 / §2.2.1 ExecutionContext / INV-3,6,8,10 / F01–F06 |
 | 主本位置 | `mingyang-warehouse/docs/superpowers/specs/` |
@@ -22,11 +22,11 @@
 > **只有本契约变更才需要双方协调**；各自内部重构不得影响对方。
 
 ```
-agent-platform（编排 / HITL / 评测 / Model Router）
+agent-platform（编排 / HITL / 评测 / Model Router / 知识平台 / Metric Registry / F01-F06 Foundation）
         │  ① ExecutionContext 下发   ④ HITL 回调 / trace 回传
         │  ② Skill 调用（HTTP / MCP）
         ▼
-mingyang-warehouse（领域 API / Metric Registry / 知识平台 → 业务事实底座）
+mingyang-warehouse（领域 API → 纯数据服务，不做 agent/AI）
 ```
 
 ### 🔴 红线（违反即视为架构事故）
@@ -71,6 +71,20 @@ mingyang-warehouse（领域 API / Metric Registry / 知识平台 → 业务事�
 | 5 | C1 ExecutionContext | **保留不动** |
 | 6 | C4 trace（11 字段） | **保留不动** |
 | 7 | envelope.py 含 SkillRequest/SkillSuccessEnvelope/SkillErrorEnvelope | **移除信封模型**，保留 Readiness/DataClassification/EgressDecision/Source/Citation（平台侧自组装用） |
+
+### v1.2 → v1.3（两项目边界纠正，2026-09-22：知识平台/Metric Registry/F01-F06 从 warehouse 迁到 agent-platform）
+
+> **背景**：v1.2 §0 将"知识平台 / Metric Registry"列在 warehouse 侧，但 warehouse 定位是纯数据服务，不做任何 agent/AI 内容。warehouse 侧新增的 F01-F06 脚手架 + skill_router + tool_catalog + skills/ 放错了位置。
+> **决策**：将 warehouse 侧所有 agent 相关代码迁移到 agent-platform（`exhibition_agent/foundation/`），建立两项目清晰边界。
+> **方案**：`docs/plans/plan-exhibition-p0-p1-landing.md` §2.0 迁移批次
+
+| # | v1.2 | v1.3 结论 |
+| --- | --- | --- |
+| 1 | §0 甲方：warehouse（本体 / DDL / 领域 API / Metric Registry / 知识平台） | **warehouse（本体 / DDL / 领域 API → 纯数据服务，不做 agent/AI）** |
+| 2 | §0 乙方：agent-platform（编排 / HITL / 评测 / Model Router） | **agent-platform（编排 / HITL / 评测 / Model Router / 知识平台 / Metric Registry / F01-F06 Foundation）** |
+| 3 | F01-F06 脚手架在 warehouse 侧 | **迁移到 `exhibition_agent/foundation/`**（execution_context / data_egress / knowledge_lifecycle / metric_registry / evaluation / production_readiness_gate / skill_router + JSON） |
+| 4 | skills/ 在 warehouse 侧 | **迁移到 `exhibition-agent/skills/`**（mingyang-venue-ops / exhibition-readonly） |
+| 5 | 知识存储边界未定 | **全在 agent-platform 侧**（knowledge-service 拥有 Metadata + 向量索引 + 生命周期状态机） |
 
 ---
 

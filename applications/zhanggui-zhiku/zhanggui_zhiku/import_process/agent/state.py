@@ -40,6 +40,23 @@ class ImportGraphState(TypedDict):
     # --- 数据库相关 ---
     embeddings_content: list  # 包含向量数据的列表，准备写入 Milvus
 
+    # --- 可插拔开关（08+16 通用化） ---
+    # item_name NER 节点可插拔：默认 True 保持向后兼容；False 时图跳过 node_item_name_recognition
+    enable_item_name_recognition: bool
+
+    # --- Metadata 参数化（08+16 通用化） ---
+    # 知识生命周期与多租户隔离入参，由 /upload 路由透传，非硬编码
+    knowledge_id: str  # 知识条目唯一标识（生命周期审计依据）
+    scope_type: str  # PUBLIC | PRIVATE（多知识空间隔离）
+    tenant_id: str  # 租户 ID（多租户隔离，ACL 前置 INV-8）
+    tenant_type: str  # 租户类型（如 enterprise/personal，预留）
+    effective_from: str  # 生效起始日（ISO yyyy-MM-dd，生命周期校验）
+    effective_to: str  # 生效截止日（ISO yyyy-MM-dd，生命周期校验）
+    version: str  # 知识版本号（如 v1，变更追溯）
+    authority: str  # 发布授权方（生命周期校验，缺则不得 PUBLISHED）
+    status: str  # 生命周期状态：DRAFT/REVIEWING/PUBLISHED/EXPIRED/REVOKED/SUPERSEDED
+    constraint_kind: str  # 约束类型（如 free/commercial，预留）
+
 
 # 建议定一个初始化对象，方便后续使用
 # 定义图状态的默认初始值
@@ -62,6 +79,19 @@ graph_default_state: ImportGraphState = {
     "chunks": [],
     "item_name": "",
     "embeddings_content": [],
+    # 可插拔开关：默认启用，保持既有部署行为不变
+    "enable_item_name_recognition": True,
+    # Metadata 默认值：status 默认 DRAFT（未发布不进生产检索）
+    "knowledge_id": "",
+    "scope_type": "PRIVATE",
+    "tenant_id": "",
+    "tenant_type": "",
+    "effective_from": "",
+    "effective_to": "",
+    "version": "",
+    "authority": "",
+    "status": "DRAFT",
+    "constraint_kind": "",
 }
 
 
@@ -81,7 +111,7 @@ def create_default_state(**overrides) -> ImportGraphState:
 
     # 默认状态
     state = copy.deepcopy(graph_default_state)
-    # 用 overrides 覆盖默认值
+    # 用 overrides 覆盖
     state.update(overrides)
     # 返回创建好的状态字典实例
     return state

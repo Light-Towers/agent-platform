@@ -57,12 +57,16 @@ class QueryRequest(FederatedQueryRequest):
 
     继承 shared_schemas.QueryRequest 的 query/session_id/tenant_id/trace_id/context/priority/user_id，
     增加 is_stream/history 两个垂直扩展字段。
+    08+16 通用化：新增 enable_item_name_confirm/scope_type（多租户隔离 + 可插拔开关）。
     """
 
     query: str = Field(..., min_length=1, max_length=512, description="查询内容（上限 512 字符）")
     session_id: str | None = Field(None, max_length=128, description="会话ID")
     is_stream: bool = Field(False, description="是否流式返回")
     history: List[HistoryItem] = Field(default_factory=list, description="可选历史对话（超限截断保留最近 N 轮）")
+    # 08+16 通用化
+    enable_item_name_confirm: bool = Field(True, description="是否启用商品名确认节点（False 时跳过直接进多路检索）")
+    scope_type: str = Field("", max_length=32, description="PUBLIC | PRIVATE，多知识空间隔离")
 
 
 class RetrieveRequest(BaseModel):
@@ -118,6 +122,9 @@ def run_query_graph(
     user_query: str,
     is_stream: bool = True,
     request_id: Optional[str] = None,
+    enable_item_name_confirm: bool = True,
+    tenant_id: str = "",
+    scope_type: str = "",
 ):
     logger.info(f"开始流程图处理...{session_id} {user_query} {is_stream}")
 
@@ -127,7 +134,15 @@ def run_query_graph(
     trace_query_hash = user_query_hash(user_query)
     set_request_context(request_id=trace_request_id, user_query_hash=trace_query_hash)
 
-    default_state = {"original_query": user_query, "session_id": session_id, "is_stream": is_stream}
+    default_state = {
+        "original_query": user_query,
+        "session_id": session_id,
+        "is_stream": is_stream,
+        # 08+16 通用化：可插拔开关 + 多租户隔离入参透传
+        "enable_item_name_confirm": enable_item_name_confirm,
+        "tenant_id": tenant_id,
+        "scope_type": scope_type,
+    }
     with start_span(
         "request.total",
         attrs={"request_id": trace_request_id, "user_query_hash": trace_query_hash, "session_id": session_id},
@@ -196,7 +211,16 @@ async def query(background_tasks: BackgroundTasks, request: Request, payload: Qu
     if is_stream:
         # 如果是流式，则返回一个流式响应，过程不断地推送
         # 运行执行图对象方法
-        background_tasks.add_task(run_query_graph, session_id, user_query, is_stream, trace_request_id)
+        background_tasks.add_task(
+            run_query_graph,
+            session_id,
+            user_query,
+            is_stream,
+            trace_request_id,
+            payload.enable_item_name_confirm,
+            payload.tenant_id,
+            payload.scope_type,
+        )
         # 返回结果
         logger.info("开始处理结果....")
         return JSONResponse(
@@ -205,7 +229,15 @@ async def query(background_tasks: BackgroundTasks, request: Request, payload: Qu
         )
     else:
         # 同步运行
-        run_query_graph(session_id, user_query, is_stream, trace_request_id)
+        run_query_graph(
+            session_id,
+            user_query,
+            is_stream,
+            trace_request_id,
+            payload.enable_item_name_confirm,
+            payload.tenant_id,
+            payload.scope_type,
+        )
         answer = get_task_result(session_id, "answer", "")
         return JSONResponse(
             {"message": "处理完成！", "session_id": session_id, "answer": answer, "done_list": []},

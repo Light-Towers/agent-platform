@@ -30,3 +30,9 @@ class QueryGraphState(TypedDict):
     rewritten_query: str  # 改写后的问题
     history: list  # 历史对话记录
     is_stream: bool  # 是否流式输出标记
+
+    # --- 可插拔开关 + 多租户隔离入参（08+16 通用化） ---
+    # item_name_confirm 节点可插拔：默认 True；False 时图跳过商品名确认直接进多路检索
+    enable_item_name_confirm: bool
+    tenant_id: str  # 租户 ID（ACL 前置过滤，INV-8）
+    scope_type: str  # PUBLIC | PRIVATE（多知识空间隔离）

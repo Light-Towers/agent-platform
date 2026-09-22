@@ -24,6 +24,7 @@ from exhibition_agent.observability.otel import (
 from exhibition_agent.observability.trace import (
     TRACE_REQUIRED_FIELDS,
     InMemoryTraceRecorder,
+    OTelTraceRecorder,
     TraceRecord,
     TraceRecorder,
 )
@@ -32,6 +33,7 @@ __all__ = [
     "TraceRecord",
     "TraceRecorder",
     "InMemoryTraceRecorder",
+    "OTelTraceRecorder",
     "TRACE_REQUIRED_FIELDS",
     "MetricsRegistry",
     "get_default_registry",

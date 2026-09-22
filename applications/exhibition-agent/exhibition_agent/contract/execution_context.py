@@ -16,12 +16,13 @@ from pydantic import BaseModel, Field, field_validator
 
 
 class TenantType(str, Enum):
-    """租户类型（主方案 §4.4）。"""
+    """租户类型（主方案 §4.4 + F01 §6）。"""
 
     SPONSOR = "SPONSOR"
     VENUE = "VENUE"
     CONTRACTOR = "CONTRACTOR"
     EXHIBITOR = "EXHIBITOR"
+    VENUE_OPERATOR = "VENUE_OPERATOR"
 
 
 class AuthSource(str, Enum):

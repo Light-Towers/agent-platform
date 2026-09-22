@@ -35,8 +35,27 @@ builder.add_node("node_answer_output", node_answer_output)  # 生成
 # lambda x:x 含义：接收 state 并原样返回，是最轻便的 “无逻辑传递” 方式；
 # 普通函数替换：定义 def 函数名(state): return state 即可完全等价，优势是易扩展、易调试；
 
-# 设置起点
-builder.set_entry_point("node_item_name_confirm")
+# 08+16 通用化：入口改为虚拟节点 node_entry_query，根据 enable_item_name_confirm 决定走
+#   商品名确认（既有行为，业务专属）还是直接进多路检索（通用知识库场景）。
+builder.add_node("node_entry_query", lambda x: x)  # 虚拟入口节点：可插拔分流
+builder.set_entry_point("node_entry_query")
+
+
+def route_entry(state: QueryGraphState) -> str:
+    """
+    入口条件路由：是否走商品名确认节点。
+    :return: node_item_name_confirm | node_multi_search
+    """
+    if state.get("enable_item_name_confirm", True):
+        return "node_item_name_confirm"
+    return "node_multi_search"
+
+
+builder.add_conditional_edges(
+    "node_entry_query",
+    route_entry,
+    {"node_item_name_confirm": "node_item_name_confirm", "node_multi_search": "node_multi_search"},
+)
 
 
 def route_after_item_confirm(state: QueryGraphState):

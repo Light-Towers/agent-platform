@@ -16,22 +16,39 @@ from exhibition_agent.model_router import route_model
 from exhibition_agent.observability.metrics import get_default_registry
 from exhibition_agent.observability.otel import span
 from exhibition_agent.observability.trace import TraceRecord, now_ms
-from exhibition_agent.skills.base_skill import SkillContext, SkillResult
+from exhibition_agent.skills.base_skill import BaseSkill, SkillContext, SkillResult
+from exhibition_agent.skills.data_analysis import DataAnalysisQuerySkill
 from exhibition_agent.skills.venue_schedule_query import VenueScheduleQuerySkill
 
 logger = get_logger(__name__)
 
-_SKILL = VenueScheduleQuerySkill()
+# Skill 注册表（Supervisor 路由分派）。
+# 图节点集合保持 select_skill → run_skill → emit_trace 不变（INV-10 结构守卫），
+# 多 skill 经 run_skill 节点内分派执行，不新增 LangGraph 节点。
+_VENUE_SKILL = VenueScheduleQuerySkill()
+_DATA_ANALYSIS_SKILL = DataAnalysisQuerySkill()
+_SKILLS: dict[str, BaseSkill] = {
+    _VENUE_SKILL.name: _VENUE_SKILL,
+    _DATA_ANALYSIS_SKILL.name: _DATA_ANALYSIS_SKILL,
+}
+_DEFAULT_SKILL: BaseSkill = _VENUE_SKILL
 
 
 def select_skill(state: ExhibitionAgentState) -> dict[str, Any]:
-    """选 skill（最小：只有 1 个，直接选中）。"""
-    return {"skill_name": _SKILL.name, "latency_start_ms": now_ms()}
+    """选 skill：params.skill 显式指定 → params.nl_query → 默认 venue.schedule.query。"""
+    params = state.get("params", {})
+    explicit = params.get("skill")
+    if isinstance(explicit, str) and explicit in _SKILLS:
+        return {"skill_name": explicit, "latency_start_ms": now_ms()}
+    if "nl_query" in params:
+        return {"skill_name": _DATA_ANALYSIS_SKILL.name, "latency_start_ms": now_ms()}
+    return {"skill_name": _DEFAULT_SKILL.name, "latency_start_ms": now_ms()}
 
 
 async def run_skill(state: ExhibitionAgentState) -> dict[str, Any]:
-    """执行 skill，处理结果（包 span + metrics 记录）。"""
-    skill_name = _SKILL.name
+    """执行 skill（按 skill_name 分派），处理结果（包 span + metrics 记录）。"""
+    skill_name = state.get("skill_name", _DEFAULT_SKILL.name)
+    skill = _SKILLS.get(skill_name, _DEFAULT_SKILL)
     registry = state.get("metrics_registry") or get_default_registry()
     ec = state["execution_context"]
 
@@ -52,7 +69,7 @@ async def run_skill(state: ExhibitionAgentState) -> dict[str, Any]:
             tenant_id=ec.tenant_id,
             skill=skill_name,
         ):
-            result: SkillResult = await _SKILL.run(params, ctx)
+            result: SkillResult = await skill.run(params, ctx)
     except Exception as exc:
         logger.exception("skill 执行异常：%s", exc)
         registry.record_latency(skill_name, now_ms() - start_ms)
@@ -132,7 +149,7 @@ def emit_trace(state: ExhibitionAgentState) -> dict[str, Any]:
         trace = TraceRecord(
             request_id=ec.request_id,
             tenant_id=ec.tenant_id,
-            skill=state.get("skill_name", _SKILL.name),
+            skill=state.get("skill_name", _DEFAULT_SKILL.name),
             latency_ms=latency_ms,
             readiness=result.readiness.value,
             data_classification=result.classification.value,
