@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from agent_runtime.circuit_breaker import CircuitBreaker
-from agent_runtime.mcp_client import MCPClientManager, _MCPConnection
+from agent_runtime.mcp_client import MCPClientManager, McpToolError, _MCPConnection
 from agent_runtime.schemas import McpServerConfig
 
 
@@ -64,7 +64,7 @@ def test_reduce_result_raises_on_is_error():
 
     manager = _make_manager()
     result = CallToolResult(content=[TextContent(text="boom")], is_error=True)
-    with pytest.raises(RuntimeError, match="returned error"):
+    with pytest.raises(McpToolError, match="returned error"):
         manager._reduce_result("srv", "tool", result)
 
 
