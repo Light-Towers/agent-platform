@@ -18,7 +18,6 @@ route(skill_name, ctx, **discriminator) -> dict
 
 import json
 import os
-from typing import Optional
 
 _BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
 _CATALOG_PATH = os.path.join(_BACKEND_DIR, "tool_catalog.json")

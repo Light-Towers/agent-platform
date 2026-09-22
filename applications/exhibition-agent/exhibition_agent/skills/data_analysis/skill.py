@@ -7,7 +7,7 @@ INV-10 落地点：指标 status 非 VERIFIED → 答"该指标待接入"，不�
   - status is None   → DATA_NOT_CONNECTED（metric 未登记）
   - 其他非 VERIFIED   → METRIC_NOT_VERIFIED（含 CONNECTED/CANDIDATE/REGISTERED/DEPRECATED）
 
-nl2sql-service 通用化（wenda-data-agent 12 节点 LangGraph 抽通用服务）是后续步骤；
+nl2sql-service 通用化（nl2sql-service 12 节点 LangGraph 通用服务）是后续步骤；
 当前 skill 结构完整，HTTP 端点标 TODO，VERIFIED 分支返回确定性骨架结果。
 """
 
@@ -108,7 +108,7 @@ class DataAnalysisQuerySkill(BaseSkill):
             request_id=ctx.execution_context.request_id,
             context_mode=ctx.context_mode,
             extra_headers=ctx.extra_headers,
-        ) 发起实际 HTTP 调用，并按 wenda-data-agent SqlQueryResponse 契约
+        ) 发起实际 HTTP 调用，并按 nl2sql-service SqlQueryResponse 契约
         （answer / sql / error / fallback / latency_ms）自组装 SkillResult。
         当前骨架阶段不发起 HTTP，返回确定性 stub 结果以贯通 VERIFIED 路径。
         """

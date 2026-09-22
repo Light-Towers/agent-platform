@@ -16,7 +16,6 @@ import json
 import os
 import sqlite3
 from datetime import datetime, timezone
-from typing import Optional
 
 _BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
 _DATA_DIR = os.path.join(_BACKEND_DIR, "data")
@@ -161,7 +160,7 @@ def _evaluate_data_gate() -> dict:
                 result["reason"] = f"sql_template 执行成功，返回 {exec_result['row_count']} 行"
             else:
                 result["data_ready"] = False
-                result["reason"] = exec_result.get("error", f"sql_template 返回 0 行")
+                result["reason"] = exec_result.get("error", "sql_template 返回 0 行")
                 any_pass = False
             metric_results.append(result)
             continue

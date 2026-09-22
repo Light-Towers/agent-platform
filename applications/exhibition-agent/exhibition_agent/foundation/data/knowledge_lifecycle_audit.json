@@ -26,5 +26,12 @@
     "from_status": "DRAFT",
     "to_status": "REVIEWING",
     "actor": "tester"
+  },
+  {
+    "timestamp": "2026-09-22T08:25:53Z",
+    "knowledge_id": "k_001",
+    "from_status": "DRAFT",
+    "to_status": "REVIEWING",
+    "actor": "tester"
   }
 ]

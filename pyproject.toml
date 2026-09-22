@@ -70,7 +70,7 @@ markers = [
 # 独立 pytest session 纳入 CI（避免与根 tests/ 的 conftest 插件名冲突）。
 # 分层（2026-08-19）：packages/ 放平台库（agent-core/agent-runtime/shared-schemas），
 # applications/ 放应用（agent_server/agent_federation/dialogue-framework/kefu-service/
-# wenda-data-agent/zhanggui-zhiku）。原 deepagents/ 因与 PyPI 包同名已重命名为
+# nl2sql-service/knowledge-service）。原 deepagents/ 因与 PyPI 包同名已重命名为
 # agent_federation/ 并清理残骸。根宿主原 app/ 已改名 agent_server/（包名同步）。
 addopts = "--import-mode=importlib"
 
@@ -105,8 +105,8 @@ members = [
     "packages/agent-runtime",
     "applications/agent_federation",
     "applications/kefu-service",
-    "applications/wenda-data-agent",
-    "applications/zhanggui-zhiku",
+    "applications/nl2sql-service",
+    "applications/knowledge-service",
     "applications/dialogue-framework",
     "applications/exhibition-agent",
 ]

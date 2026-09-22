@@ -17,7 +17,6 @@ import json
 import os
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Optional
 
 _BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
 _DATA_DIR = os.path.join(_BACKEND_DIR, "data")
