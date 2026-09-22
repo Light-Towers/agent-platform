@@ -67,7 +67,7 @@ memory = ["pymongo>=4.6", "pymilvus>=2.4", "asyncpg>=0.29"]
 factory = "agent_federation.planners.agentic:get_executor_factory"
 
 [tool.hatch.build.targets.wheel]
-packages = ["agent", "api", "tools", "utils", "prompt"]
+packages = ["agent", "api", "tools", "utils", "prompt", "planners"]
 
 [tool.ruff]
 line-length = 120

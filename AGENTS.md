@@ -1,7 +1,7 @@
 # agent-platform — Agent 上下文文件
 
-> 统一生产级 Agent 平台，本仓库为 **monorepo**（根 + `packages/` 3 个共享包 + `applications/` 6 个应用工程，各含独立 `pyproject.toml`）。
-> **演进方向（Plan-F）**：双轨正收敛为「单 Runtime + 多 Planner」——共享 `agent-runtime/` 承载运行时中间件（admission/coordinator/checkpoint/tracing/cache/rate_limit 等），Planner 策略（deterministic/agentic）可插拔，不统一 Agent 只统一 Runtime。详见 `docs/plan-f-single-runtime-multi-planner.md`。
+> 统一生产级 Agent 平台，本仓库为 **monorepo**（根 + `packages/` 3 个共享包 + `applications/` 7 个应用工程，各含独立 `pyproject.toml`）。
+> **演进方向（Plan-F）**：双轨正收敛为「单 Runtime + 多 Planner」——共享 `agent-runtime/` 承载运行时中间件（admission/coordinator/checkpoint/tracing/cache/rate_limit 等），Planner 策略（deterministic/agentic）可插拔，不统一 Agent 只统一 Runtime。详见 `docs/plans/plan-f-single-runtime-multi-planner.md`。
 > 各包经 `agent-core` / `shared-schemas` 共享内核与契约。
 > 详细人类阅读指南见 `README.md`（含完整目录结构），本文件面向 AI agent，仅列要点。
 
@@ -12,15 +12,16 @@
 | `applications/agent_server/` | 单进程 Supervisor 平台（统一 Agent 平台；2026-08-19 由根 `app/` 改名迁入） | `agent_server.main:app`（uvicorn） |
 | `applications/agent_federation/` | 联邦网关 + 3 子服务编排中枢（与 agent_server 并行，详见其 README；原名 `deepagents/`，为消除与 PyPI 依赖包 `deepagents` 同名冲突而改名） | `python -m api.server` |
 | `packages/agent-core/` | 零依赖运行时内核：tracing / guardrails / sql 守卫 / llm / memory（含 MemoryStore 统一门面 + CapabilityReport） / events（EventBus 多 sink 扇出） / config（KernelConfig + 类型化 env） / intent（L1 分类器） / resilience（CircuitBreaker + retry + timeout） | — |
-| `packages/agent-runtime/` | Plan-F 运行时中间件层：admission/coordinator/cache/circuit_breaker/revert/mcp_client/otel/tracing/db + planner/（Planner 协议、PlannerRuntime、skill_guard）+ skills/（SkillRegistry + Function/Agent/Remote/Workflow 四执行器） | — |
+| `packages/agent-runtime/` | Plan-F 运行时中间件层：admission/coordinator/cache/circuit_breaker/revert/mcp_client/otel/tracing/db + planner/（Planner 协议、PlannerRuntime、skill_guard、AgenticPlanner）+ skills/（SkillRegistry + Function/Agent/Remote/Workflow 四执行器 + MCP/Sandbox 特化注册） + sandbox（双后端代码执行） | — |
 | `packages/shared-schemas/` | 联邦 4 服务共享 Pydantic 契约（QueryResponse / ThreadState 等） | — |
 | `applications/kefu-service/` | kefu 迁移版（deepagents + LangGraph），已接入联邦网关（Agent Protocol 兼容 `/invoke`，返回 `QueryResponse`；`KEFU_USE_ADAPTER=false` 默认直连） | — |
 | `applications/wenda-data-agent/` | Text-to-SQL 数据分析垂直场景（已直连联邦契约，无需 adapter） | — |
 | `applications/zhanggui-zhiku/` | 掌柜智库：RAG 知识库导入 + 多路检索问答（:8900） | `zhanggui-zhiku` 脚本 |
 | `applications/dialogue-framework/` | LLM 对话系统框架基础设施 | `dialogue_framework.cli:main` |
+| `applications/exhibition-agent/` | 会展行业 AI Agent（skill_loader + warehouse REST 集成） | `uvicorn exhibition_agent.skill_loader.app:app` |
 | `tests/` | agent_server 单元测试（根套件） | `pytest -q` |
 | `applications/agent_server/tests/` | agent_server 应用层集成测试（GraphPlanner × runtime，2026-09-21 F-S1-01 迁入） | `pytest applications/agent_server/tests -q` |
-| `eval/` | agent_server 评测门禁（12 条 golden；`run_eval.py` 启发式 + `run_planner_eval.py` 双 Planner 基线） | `python eval/run_eval.py` |
+| `eval/` | agent_server 评测门禁（15 条 golden；`run_eval.py` 启发式 + `run_planner_eval.py` 双 Planner 基线） | `python eval/run_eval.py` |
 | `docs/` | 设计文档 | — |
 
 ## 运行方式

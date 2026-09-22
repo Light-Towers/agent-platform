@@ -57,7 +57,7 @@ Agent Platform 是一个基于 **LangGraph Supervisor 模式** 的统一智能�
 - **SSE 流式响应**：route → evidence → answer → done 全链路流式
 - **认证 + 会话防劫持**（`applications/agent_server/api/auth.py`）：API_KEY 启用时按密钥派生 thread_id，忽略客户端传入值
 - **Checkpoint 持久化**：Postgres（生产）/ Memory（开发），会话状态可恢复
-- **评测门禁**（`eval/`）：12 条 golden set，启发式路由准确率基线 100%，CI 阻断回归
+- **评测门禁**（`eval/`）：15 条 golden set，启发式路由准确率基线 100%，CI 阻断回归
 
 ### Phase 2 — 运行时增强
 
@@ -318,7 +318,7 @@ curl http://127.0.0.1:8000/health
 
 ```bash
 make test                            # 三套件 pytest（根 tests/ + 联邦 unit + kefu）
-python eval/run_eval.py              # 启发式路由准确率基线（12 条 golden）
+python eval/run_eval.py              # 启发式路由准确率基线（15 条 golden）
 python eval/run_eval.py --llm        # 配置 LLM 后评测结构化路由
 python eval/run_eval.py --fail-below 0.8   # CI 门禁用法
 ```
