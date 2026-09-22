@@ -23,6 +23,7 @@ COPY packages/shared-schemas ./packages/shared-schemas
 # 2) 拷贝源码与提示词，再以可编辑模式安装（源码改动即时生效，便于调试）
 COPY applications/knowledge-service/knowledge_service ./knowledge_service
 COPY applications/knowledge-service/prompts ./prompts
+COPY applications/knowledge-service/eval ./eval
 
 # 3) 安装依赖（构建阶段需要联网拉取 PyPI 包）
 #    先装共享包（agent-core + shared-schemas），再装本项目（editable），
