@@ -10,7 +10,7 @@
 依赖均为懒加载，缺包时抛出明确 ImportError，不阻断模块导入期。
 
 此前该逻辑散落在 deepagents/classifier.py（本地）、deepagents/memory/vector_backends.py
-（本地+远程）、zhanggui-zhiku/app/lm/siliconflow_client.py（远程）、app/rag/embed.py（mock+远程）
+（本地+远程）、knowledge-service/lm/siliconflow_client.py（远程）、app/rag/embed.py（mock+远程）
 四处，现统一收口到内核，子包统一 import。
 """
 
