@@ -107,3 +107,13 @@ d_*.txt
 k_*.txt
 result.txt
 _result.txt
+# === 历史遗留目录（monorepo 重组前的本地副本，不被 git 跟踪，防止误提交） ===
+/agent_federation/
+/app/
+/agent-core/
+/shared-schemas/
+/kefu-service/
+/zhanggui-zhiku/
+/wenda-data-agent/
+/dialogue-framework/
+/wenda-adapter/

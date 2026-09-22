@@ -6,6 +6,11 @@
 
 后端选择：优先 Docker（docker CLI 可用），不可用时降级 subprocess（日志警告）。
 
+远程 Docker 支持：
+- 设置 ``docker_host`` 参数（如 ``"tcp://192.168.100.126:2375"``）或 ``DOCKER_HOST`` 环境变量
+- Docker CLI 自动读取 ``DOCKER_HOST`` 连接远程 Docker daemon
+- 远程 Docker 需开启 Docker API（``dockerd -H tcp://0.0.0.0:2375``），生产环境建议配 TLS
+
 安全措施（Docker）：
 - ``--rm``：执行完自动清理容器
 - ``--network=none``：无网络访问
@@ -25,6 +30,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import shutil
 import sys
 from dataclasses import dataclass
@@ -73,10 +79,12 @@ class SandboxExecutor:
         image: str = _DOCKER_IMAGE,
         memory: str = _DEFAULT_MEMORY,
         cpus: str = _DEFAULT_CPUS,
+        docker_host: str | None = None,
     ) -> None:
         self._image = image
         self._memory = memory
         self._cpus = cpus
+        self._docker_host = docker_host or os.environ.get("DOCKER_HOST")
         if backend == "auto":
             self._backend = "docker" if _docker_available() else "subprocess"
         else:
@@ -85,6 +93,8 @@ class SandboxExecutor:
             logger.warning(
                 "Docker 不可用，沙箱降级为 subprocess 执行（安全性较低，仅开发环境适用）"
             )
+        if self._docker_host and self._backend == "docker":
+            logger.info("沙箱使用远程 Docker: %s", self._docker_host)
 
     @property
     def backend(self) -> str:
@@ -130,10 +140,14 @@ class SandboxExecutor:
             "python", "-c", code,
         ]
         try:
+            env = dict(os.environ)
+            if self._docker_host:
+                env["DOCKER_HOST"] = self._docker_host
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                env=env,
             )
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
             exit_code = proc.returncode or 0

@@ -3,6 +3,7 @@
 所有全局资源在 lifespan 一次性初始化（带锁），请求路径零懒加载竞态。
 """
 
+import pathlib
 from contextlib import asynccontextmanager
 
 from agent_core.logging import configure_logging, get_logger
@@ -200,13 +201,15 @@ async def lifespan(app: FastAPI):
 
     # §20 演进：自动发现并注册 Workflows 目录（声明式 YAML → Skill）
     try:
+        import agent_runtime
+        _wf_dir = str(pathlib.Path(agent_runtime.__file__).parent / "workflows")
         wf_skills = discover_workflows(
-            "packages/agent-runtime/workflows",
+            _wf_dir,
             registry=registry,
         )
         for sk in wf_skills:
             registry.register(sk)
-        logger.info("auto-registered %d workflow skills from packages/agent-runtime/workflows", len(wf_skills))
+        logger.info("auto-registered %d workflow skills from %s", len(wf_skills), _wf_dir)
     except Exception:
         logger.warning("workflow auto-discovery failed", exc_info=True)
 
