@@ -43,7 +43,9 @@ def node_search_embedding(state):
     add_running_task(state["session_id"], sys._getframe().f_code.co_name, state["is_stream"])
 
     # 1. 从会话状态中提取核心入参，为后续检索做准备
-    query = state.get("rewritten_query")  # 提取改写后的用户问题（含商品名，独立完整）
+    # 优先使用改写后的查询（经商品名确认节点处理后的），若无则降级使用原始查询
+    # （enable_item_name_confirm=false 时 rewritten_query 未设置，需 fallback）
+    query = state.get("rewritten_query") or state.get("original_query")
     item_names = state.get("item_names")  # 提取已确认的标准化商品名列表（精准过滤用）
 
     logger.info(f"核心入参提取: query='{query}', item_names={item_names}")
@@ -67,10 +69,9 @@ def node_search_embedding(state):
 
     # 4. 构造Milvus混合搜索请求对象（核心步骤）
     # 08+16 通用化：item_name + tenant_id + scope_type 复合过滤（多租户 ACL 前置，INV-8）
-    # 若无商品名，直接返回None（不做过滤）
+    # item_names 为空时不提前返回，仅用 tenant_id/scope_type 过滤（通用知识库场景）
     if not item_names:
-        logger.warning("item_names 为空，跳过检索，返回空结果")
-        return {"embedding_chunks": []}
+        logger.info("item_names 为空，将不做 item_name 过滤，执行租户/全库检索")
 
     expr = build_retrieval_filter(
         item_names=item_names,
