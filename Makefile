@@ -21,7 +21,7 @@ type:
 # 避免跨目录 conftest 插件名冲突（importlib 模式下均注册为 tests.conftest）。
 # agent_federation 收集整目录 tests/（含根级 test_auth/test_semantic_memory_typed，2026-09-21 F-S0-03 修复，
 # 原先只跑 tests/unit 导致根级 2 文件漏出门禁）。
-# agent-runtime/tests（零 conftest）与 zhanggui-zhiku/tests（tests/unit/conftest + 包名 app 遮蔽风险，
+# agent-runtime/tests（零 conftest）与 zhanggui-zhiku/tests（tests/unit/conftest，
 # integration 层有 ZHIKU_INTEGRATION=1 守卫、缺环境自动 skip）同样独立 session，2026-09-21 纳入门禁（F-S0-01/F-S0-02）。
 # agent_server/tests（GraphPlanner 等应用层集成测试，2026-09-21 F-S1-01 由 agent-runtime/tests 迁入，
 # 消除红线 1 反向依赖）同样独立 session。

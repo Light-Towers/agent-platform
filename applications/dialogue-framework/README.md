@@ -42,8 +42,8 @@ updated: 2026-08-13
 ## 运行方式
 
 ```bash
-pip install -e ./dialogue-framework
-cp dialogue-framework/.env.example dialogue-framework/.env  # 填值
+pip install -e ./applications/dialogue-framework
+cp applications/dialogue-framework/.env.example applications/dialogue-framework/.env  # 填值
 dialogue-framework run  # 或 python -m dialogue_framework run
 ```
 

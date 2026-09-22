@@ -1,8 +1,10 @@
 # PROPOSAL.md 审核报告
 
+> ⚠️ 时效性说明：本文写作于 2026-08-09，当时目录名为 `deepagents/`（已于 2026-08-19 重命名为 `agent_federation/`）。文中 `deepagents/` 路径均对应现 `applications/agent_federation/`，历史结论保留，路径不再逐一更新。
+>
 > 审核日期：2026-08-09
 > 审核方式：代码实况核对 + 可行性推演
-> 审核范围：`deepagents/eval/PROPOSAL.md` 全文
+> 审核范围：`deepagents/eval/PROPOSAL.md` 全文（现 `applications/agent_federation/eval/PROPOSAL.md`）
 
 ---
 

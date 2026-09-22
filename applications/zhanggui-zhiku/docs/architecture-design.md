@@ -11,8 +11,8 @@
 |---|---|
 | 源位置 | `D:\BaiduNetdiskDownload\...PythonProject16` |
 | 已有 `main.py` / `Dockerfile` / `docker-compose.yml` / `requirements.txt` / `.gitignore` / `.env.example` | **均无**（需新建） |
-| `app/__init__.py`、`app/core/__init__.py`、`app/import_process/__init__.py`、`app/import_process/agent/nodes/__init__.py`、`app/query_process/api/__init__.py`、`app/query_process/agent/nodes/__init__.py`、`app/api/__init__.py` | **缺失**（需补，否则 `packages.find` 会漏包） |
-| 散落的 `load_dotenv()` | **17 处**（见 §4 清单），需收敛到 `app/core/config.py` 单点 |
+| `zhanggui_zhiku/__init__.py`、`zhanggui_zhiku/core/__init__.py`、`zhanggui_zhiku/import_process/__init__.py`、`zhanggui_zhiku/import_process/agent/nodes/__init__.py`、`zhanggui_zhiku/query_process/api/__init__.py`、`zhanggui_zhiku/query_process/agent/nodes/__init__.py`、`zhanggui_zhiku/api/__init__.py` | **缺失**（需补，否则 `packages.find` 会漏包） |
+| 散落的 `load_dotenv()` | **17 处**（见 §4 清单），需收敛到 `zhanggui_zhiku/core/config.py` 单点 |
 | `mongo_history_utils_new.py` | **全仓零引用**（grep 确认），可安全删除 |
 | 前端写死地址 | `import.html`:`http://127.0.0.1:8000`；`chat.html`: 兜底 `http://127.0.0.1:8001` |
 | `.env` 中真实密钥 | `OPENAI_API_KEY`、`MINERU_API_TOKEN`、`NEO4J_PASSWORD`、`MINIO_SECRET_KEY` 等，**绝不进仓库** |
@@ -35,7 +35,7 @@ zhanggui-zhiku/
 ├── README.md                 # 【新】架构图+快速开始+API 速查+故障排查
 ├── pyproject.toml            # 【改】规范化元数据 + [tool.setuptools.packages.find] + [project.scripts]
 ├── requirements.txt          # 【新】pip 等价依赖（可由 uv export 生成）
-├── app/
+├── zhanggui_zhiku/
 │   ├── __init__.py           # 【补】缺失包标记
 │   ├── main.py               # 【新】单一 FastAPI 入口：建 app、CORS、include_router、run()
 │   ├── core/
@@ -43,7 +43,7 @@ zhanggui-zhiku/
 │   │   ├── config.py         # 【新】集中配置（dataclass + 单点 load_dotenv），全仓唯一 env 读取入口
 │   │   ├── logger.py         # 【改】去掉 load_dotenv，PROJECT_ROOT 改从 config 取
 │   │   └── load_prompt.py    # 【迁】不变
-│   ├── conf/                 # 【改】7 个文件全部去除 load_dotenv，改 from app.core.config import settings
+│   ├── conf/                 # 【改】7 个文件全部去除 load_dotenv，改 from zhanggui_zhiku.core.config import settings
 │   │   ├── embedding_config.py
 │   │   ├── lm_config.py
 │   │   ├── milvus_config.py
@@ -106,10 +106,10 @@ zhanggui-zhiku/
 ## 2. 配置外置方案
 
 ### 2.1 设计原则
-- **单点读取**：新建 `app/core/config.py`，在模块导入时 **唯一一次** `load_dotenv()`，用 `dataclass` 定义 `Settings`，全部 `os.getenv(...)` 带默认值；导出模块级单例 `settings = Settings()`。
+- **单点读取**：新建 `zhanggui_zhiku/core/config.py`，在模块导入时 **唯一一次** `load_dotenv()`，用 `dataclass` 定义 `Settings`，全部 `os.getenv(...)` 带默认值；导出模块级单例 `settings = Settings()`。
 - **零新增依赖**：沿用现有 `python-dotenv`（已在依赖中），**不引入** `pydantic-settings`（除非团队确认需要，见 §6）。
 - **派生默认值**：`MODELSCOPE_CACHE` / `HF_HOME` 默认基于 `MODELS_DIR` 派生，避免再出现 `D:/ai_models/...` 硬编码；同时允许独立覆盖。
-- **确定性 PROJECT_ROOT**：`config.py` 中 `PROJECT_ROOT = Path(__file__).resolve().parents[2]`（app/core → 上两级 = 仓库根），并允许 `PROJECT_ROOT` 环境变量覆盖。Docker 下无 `.env` 文件也能正确定位，解决原 `path_util.get_project_root()` 依赖 `.env` 存在的隐患。
+- **确定性 PROJECT_ROOT**：`config.py` 中 `PROJECT_ROOT = Path(__file__).resolve().parents[2]`（zhanggui_zhiku/core → 上两级 = 仓库根），并允许 `PROJECT_ROOT` 环境变量覆盖。Docker 下无 `.env` 文件也能正确定位，解决原 `path_util.get_project_root()` 依赖 `.env` 存在的隐患。
 
 ### 2.2 `config.py` 字段设计（属性名 → env key → 默认值 → 说明）
 
@@ -171,7 +171,7 @@ zhanggui-zhiku/
 ### 2.3 `config.py` 结构示意（仅骨架，非业务代码）
 
 ```python
-# app/core/config.py
+# zhanggui_zhiku/core/config.py
 from dataclasses import dataclass, field
 from pathlib import Path
 import os
@@ -201,7 +201,7 @@ class Settings:
 settings = Settings()
 ```
 
-各 `conf/*.py` 改为：删除 `from dotenv import load_dotenv` 与 `load_dotenv()`，删除本地 `os.getenv(...)`；改为 `from app.core.config import settings`，并 `milvus_config = MilvusConfig(milvus_url=settings.milvus_url, ...)`。
+各 `conf/*.py` 改为：删除 `from dotenv import load_dotenv` 与 `load_dotenv()`，删除本地 `os.getenv(...)`；改为 `from zhanggui_zhiku.core.config import settings`，并 `milvus_config = MilvusConfig(milvus_url=settings.milvus_url, ...)`。
 
 ---
 
@@ -226,12 +226,12 @@ settings = Settings()
 ### 3.2 `main.py` 组装示意（仅骨架）
 
 ```python
-# app/main.py
+# zhanggui_zhiku/main.py
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.core.config import settings
-from app.api.import_router import router as import_router
-from app.api.query_router import router as query_router
+from zhanggui_zhiku.core.config import settings
+from zhanggui_zhiku.api.import_router import router as import_router
+from zhanggui_zhiku.api.query_router import router as query_router
 
 def create_app() -> FastAPI:
     app = FastAPI(title="掌柜智库 (ZhangGui ZhiKu)", description="RAG 知识库导入与问答统一服务")
@@ -250,15 +250,15 @@ app = create_app()
 
 def run():
     import uvicorn
-    uvicorn.run("app.main:app", host=settings.app_host, port=settings.app_port)
+    uvicorn.run("zhanggui_zhiku.main:app", host=settings.app_host, port=settings.app_port)
 
 if __name__ == "__main__":
     run()
 ```
 
 ### 3.3 router 改造要点
-- `file_import_service.py` → `app/api/import_router.py`：`app = FastAPI(...)` 改为 `router = APIRouter()`；删除顶部 `uvicorn` 导入与底部 `if __name__ == "__main__"`；`PROJECT_ROOT` 改从 `settings.project_root` 取；`os.getenv("MINIO_PDF_DIR", "pdf_files")` / `os.getenv("MINIO_BUCKET_NAME", "kb-import-bucket")` 改从 `settings.minio_pdf_dir` / `settings.minio_bucket_name`。
-- `query_service.py` → `app/api/query_router.py`：同上改为 `APIRouter()`；保留 `QueryRequest` 模型与全部处理函数；`from app.utils.task_utils import *` 等保持；删除 `__main__` 与硬编码 8001。
+- `file_import_service.py` → `zhanggui_zhiku/api/import_router.py`：`app = FastAPI(...)` 改为 `router = APIRouter()`；删除顶部 `uvicorn` 导入与底部 `if __name__ == "__main__"`；`PROJECT_ROOT` 改从 `settings.project_root` 取；`os.getenv("MINIO_PDF_DIR", "pdf_files")` / `os.getenv("MINIO_BUCKET_NAME", "kb-import-bucket")` 改从 `settings.minio_pdf_dir` / `settings.minio_bucket_name`。
+- `query_service.py` → `zhanggui_zhiku/api/query_router.py`：同上改为 `APIRouter()`；保留 `QueryRequest` 模型与全部处理函数；`from zhanggui_zhiku.utils.task_utils import *` 等保持；删除 `__main__` 与硬编码 8001。
 - 两个原服务文件在合并后可**删除**（或保留为空壳 re-export 以兼容，默认删除，见 §6 待确认）。
 
 ### 3.4 CORS 策略
@@ -273,23 +273,23 @@ if __name__ == "__main__":
 ### 4.1 删除
 | 文件 | 动作 | 依据 |
 |---|---|---|
-| `app/clients/mongo_history_utils_new.py` | **删除** | 全仓 grep `mongo_history_utils_new` 零引用 |
+| `zhanggui_zhiku/clients/mongo_history_utils_new.py` | **删除** | 全仓 grep `mongo_history_utils_new` 零引用 |
 
 ### 4.2 去除散落 `load_dotenv()`（共 17 处 → 收敛为 1 处）
-以下文件删除 `from dotenv import load_dotenv` 与 `load_dotenv()` 调用，改为 `from app.core.config import settings`：
-- `app/conf/{embedding,lm,milvus,minio,mineru,reranker,bailian_mcp}_config.py`（7）
-- `app/lm/lm_utils.py`
-- `app/core/logger.py`（同时 `PROJECT_ROOT` 改从 `settings.project_root`）
-- `app/clients/mongo_history_utils.py`
-- `app/utils/path_util.py`（同时 `PROJECT_ROOT` 改从 `settings.project_root`，保留 `get_path_dir` 助手）
-- `app/import_process/agent/main_graph.py`
-- `app/query_process/agent/main_graph.py`
-- `app/query_process/agent/nodes/node_item_name_confirm.py`
-- `app/import_process/agent/nodes/node_import_milvus.py`
-- `app/query_process/agent/nodes/node_search_embedding.py`
-- `app/query_process/agent/nodes/node_search_embedding_hyde.py`
+以下文件删除 `from dotenv import load_dotenv` 与 `load_dotenv()` 调用，改为 `from zhanggui_zhiku.core.config import settings`：
+- `zhanggui_zhiku/conf/{embedding,lm,milvus,minio,mineru,reranker,bailian_mcp}_config.py`（7）
+- `zhanggui_zhiku/lm/lm_utils.py`
+- `zhanggui_zhiku/core/logger.py`（同时 `PROJECT_ROOT` 改从 `settings.project_root`）
+- `zhanggui_zhiku/clients/mongo_history_utils.py`
+- `zhanggui_zhiku/utils/path_util.py`（同时 `PROJECT_ROOT` 改从 `settings.project_root`，保留 `get_path_dir` 助手）
+- `zhanggui_zhiku/import_process/agent/main_graph.py`
+- `zhanggui_zhiku/query_process/agent/main_graph.py`
+- `zhanggui_zhiku/query_process/agent/nodes/node_item_name_confirm.py`
+- `zhanggui_zhiku/import_process/agent/nodes/node_import_milvus.py`
+- `zhanggui_zhiku/query_process/agent/nodes/node_search_embedding.py`
+- `zhanggui_zhiku/query_process/agent/nodes/node_search_embedding_hyde.py`
 
-**验收**：`grep -rn "load_dotenv" app/` 仅 `app/core/config.py` 命中。
+**验收**：`grep -rn "load_dotenv" zhanggui_zhiku/` 仅 `zhanggui_zhiku/core/config.py` 命中。
 
 ### 4.3 硬编码路径 / 地址
 - `.env` 中 `D:/ai_models/modelscope_cache`、`D:/ai_models/huggingface_cache` → 由 `MODELS_DIR` 派生默认，纳入 `.env.example`。
@@ -305,7 +305,7 @@ if __name__ == "__main__":
 - `chat.html` 第 302 行兜底 `'http://127.0.0.1:8001'` → `const API_BASE = window.location.origin;`
 
 ### 4.6 其他隐患（低优先级）
-- `app/lm/lm_utils.py` 错误提示写 `OPENAI_API_BASE`，实际变量为 `OPENAI_BASE_URL` → 文案修正。
+- `zhanggui_zhiku/lm/lm_utils.py` 错误提示写 `OPENAI_API_BASE`，实际变量为 `OPENAI_BASE_URL` → 文案修正。
 - `logger.py` 的 `PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent` 与 `path_util` 推导逻辑重复 → 统一引用 `settings.project_root`。
 - 缺失 `__init__.py`（见 §1）→ 补齐，确保 `packages.find` 完整收录。
 
@@ -317,58 +317,58 @@ if __name__ == "__main__":
 > 约定：每个任务只做结构/配置改造，**不改动任何业务节点逻辑**。
 
 ### T1 — 配置集中化（P0）
-- **文件**：`app/core/config.py`（新）；`app/conf/*.py`（×7 改）；`app/lm/lm_utils.py`、`app/core/logger.py`、`app/clients/mongo_history_utils.py`、`app/utils/path_util.py`（改）
+- **文件**：`zhanggui_zhiku/core/config.py`（新）；`zhanggui_zhiku/conf/*.py`（×7 改）；`zhanggui_zhiku/lm/lm_utils.py`、`zhanggui_zhiku/core/logger.py`、`zhanggui_zhiku/clients/mongo_history_utils.py`、`zhanggui_zhiku/utils/path_util.py`（改）
 - **做什么**：新建 `config.py`（按 §2.2 全字段 + 单点 `load_dotenv`）；上述文件删除 `load_dotenv` 改读 `settings`；`logger.py`/`path_util.py` 的 `PROJECT_ROOT` 改从 `settings.project_root`。
 - **依赖**：无
-- **验收**：`python -c "from app.core.config import settings"` 成功；`grep -rn "load_dotenv" app/ | grep -v "app/core/config.py"` 为空；`settings.milvus_url` 等取值符合默认。
+- **验收**：`python -c "from zhanggui_zhiku.core.config import settings"` 成功；`grep -rn "load_dotenv" zhanggui_zhiku/ | grep -v "zhanggui_zhiku/core/config.py"` 为空；`settings.milvus_url` 等取值符合默认。
 
 ### T2 — 删除死代码与散落 load_dotenv（P0）
-- **文件**：删除 `app/clients/mongo_history_utils_new.py`；改 `app/import_process/agent/main_graph.py`、`app/query_process/agent/main_graph.py`、`app/query_process/agent/nodes/node_item_name_confirm.py`、`app/import_process/agent/nodes/node_import_milvus.py`、`app/query_process/agent/nodes/node_search_embedding.py`、`app/query_process/agent/nodes/node_search_embedding_hyde.py`
+- **文件**：删除 `zhanggui_zhiku/clients/mongo_history_utils_new.py`；改 `zhanggui_zhiku/import_process/agent/main_graph.py`、`zhanggui_zhiku/query_process/agent/main_graph.py`、`zhanggui_zhiku/query_process/agent/nodes/node_item_name_confirm.py`、`zhanggui_zhiku/import_process/agent/nodes/node_import_milvus.py`、`zhanggui_zhiku/query_process/agent/nodes/node_search_embedding.py`、`zhanggui_zhiku/query_process/agent/nodes/node_search_embedding_hyde.py`
 - **做什么**：删除上述 6 个文件中的 `load_dotenv` 调用；删除死代码文件。
 - **依赖**：无（可与 T1 并行）
-- **验收**：`grep -rn "load_dotenv" app/` 仅 `config.py`；`grep -rn "mongo_history_utils_new" .` 无结果；`python -c "import app.import_process.agent.main_graph, app.query_process.agent.main_graph"` 成功。
+- **验收**：`grep -rn "load_dotenv" zhanggui_zhiku/` 仅 `config.py`；`grep -rn "mongo_history_utils_new" .` 无结果；`python -c "import zhanggui_zhiku.import_process.agent.main_graph, app.query_process.agent.main_graph"` 成功。
 
 ### T3 — 合并 import 服务为 router（P0）
-- **文件**：`app/api/import_router.py`（新）；`app/import_process/api/__init__.py`（补）；删除/退役 `app/import_process/api/file_import_service.py`
+- **文件**：`zhanggui_zhiku/api/import_router.py`（新）；`zhanggui_zhiku/import_process/api/__init__.py`（补）；删除/退役 `zhanggui_zhiku/import_process/api/file_import_service.py`
 - **做什么**：将 `file_import_service.py` 改写为 `APIRouter`，保留 `/import.html`、`/upload`、`/status/{task_id}`；`PROJECT_ROOT` 用 `settings.project_root`；`MINIO_PDF_DIR`/`MINIO_BUCKET_NAME` 用 `settings`；删除 `__main__`。
 - **依赖**：T1
-- **验收**：`python -c "from app.api.import_router import router"` 成功；router 路由路径与源一致；无 `8000` 硬编码。
+- **验收**：`python -c "from zhanggui_zhiku.api.import_router import router"` 成功；router 路由路径与源一致；无 `8000` 硬编码。
 
 ### T4 — 合并 query 服务为 router（P0）
-- **文件**：`app/api/query_router.py`（新）；`app/query_process/api/__init__.py`（补）；删除/退役 `app/query_process/api/query_service.py`
+- **文件**：`zhanggui_zhiku/api/query_router.py`（新）；`zhanggui_zhiku/query_process/api/__init__.py`（补）；删除/退役 `zhanggui_zhiku/query_process/api/query_service.py`
 - **做什么**：改写为 `APIRouter`，保留 `/chat.html`、`/health`、`/query`、`/stream/{session_id}`、`/history/{session_id}`(GET/DELETE)；删除 `__main__` 与 `8001` 硬编码。
 - **依赖**：T1
-- **验收**：`python -c "from app.api.query_router import router"` 成功；端点路径一致。
+- **验收**：`python -c "from zhanggui_zhiku.api.query_router import router"` 成功；端点路径一致。
 
 ### T5 — 单一入口 main.py + 补齐 __init__.py（P0）
-- **文件**：`app/main.py`（新）；`app/api/__init__.py`、`app/__init__.py`、`app/core/__init__.py`、`app/import_process/__init__.py`、`app/import_process/agent/__init__.py`、`app/import_process/agent/nodes/__init__.py`、`app/query_process/api/__init__.py`、`app/query_process/agent/nodes/__init__.py`（补）
+- **文件**：`zhanggui_zhiku/main.py`（新）；`zhanggui_zhiku/api/__init__.py`、`zhanggui_zhiku/__init__.py`、`zhanggui_zhiku/core/__init__.py`、`zhanggui_zhiku/import_process/__init__.py`、`zhanggui_zhiku/import_process/agent/__init__.py`、`zhanggui_zhiku/import_process/agent/nodes/__init__.py`、`zhanggui_zhiku/query_process/api/__init__.py`、`zhanggui_zhiku/query_process/agent/nodes/__init__.py`（补）
 - **做什么**：按 §3.2 建 `create_app()` + `run()`；`include_router` 两个 router；补齐所有缺失 `__init__.py`。
 - **依赖**：T1, T3, T4
-- **验收**：`python -c "from app.main import app"` 成功；`uvicorn app.main:app --port 8000` 启动后 `GET /health` 返回 `{"ok":true}`；`GET /openapi.json` 含全部 9 个端点。
+- **验收**：`python -c "from zhanggui_zhiku.main import app"` 成功；`uvicorn zhanggui_zhiku.main:app --port 8000` 启动后 `GET /health` 返回 `{"ok":true}`；`GET /openapi.json` 含全部 9 个端点。
 
 ### T6 — 前端 API_BASE 同源化（P1）
-- **文件**：`app/import_process/page/import.html`、`app/query_process/page/chat.html`
+- **文件**：`zhanggui_zhiku/import_process/page/import.html`、`zhanggui_zhiku/query_process/page/chat.html`
 - **做什么**：两文件 `API_BASE` 均改为 `window.location.origin`（去掉 `127.0.0.1:8000` / `:8001` 写死与兜底）。
 - **依赖**：无（独立）
 - **验收**：两文件中 `grep -n "127.0.0.1"` 无残留；页面经同源地址可正常调用 `/upload`、`/query`、`/stream`。
 
 ### T7 — 打包与依赖声明（P1）
 - **文件**：`pyproject.toml`（改）、`requirements.txt`（新）
-- **做什么**：`pyproject.toml` 改 `name="zhanggui-zhiku"`、补 `description`/`license`、`[tool.setuptools.packages.find]` 含 `app`、加 `[project.scripts] zhanggui-zhiku = "app.main:run"`；生成 `requirements.txt`（等价依赖列表，可由 `uv export -o requirements.txt` 得到）。
+- **做什么**：`pyproject.toml` 改 `name="zhanggui-zhiku"`、补 `description`/`license`、`[tool.setuptools.packages.find]` 含 `zhanggui_zhiku`、加 `[project.scripts] zhanggui-zhiku = "zhanggui_zhiku.main:run"`；生成 `requirements.txt`（等价依赖列表，可由 `uv export -o requirements.txt` 得到）。
 - **依赖**：T1, T5
-- **验收**：`uv pip install -r requirements.txt` 或 `pip install -e .` 成功；命令行 `zhanggui-zhiku` 可启动服务（等效 `uvicorn app.main:app`）。
+- **验收**：`uv pip install -r requirements.txt` 或 `pip install -e .` 成功；命令行 `zhanggui-zhiku` 可启动服务（等效 `uvicorn zhanggui_zhiku.main:app`）。
 
 ### T8 — 容器化（P1）
 - **文件**：`Dockerfile`、`docker-compose.yml`、`.dockerignore`（新）
-- **做什么**：`Dockerfile` 基于 `python:3.11-slim`，安装系统依赖（build-essential 等，适配 torch/magic-pdf），`COPY` 依赖与 `app`，`EXPOSE 8000`，`CMD` 跑 `zhanggui-zhiku`（或 `uvicorn app.main:app`）；`docker-compose.yml` 编排 `milvus-standalone`、`mongo`、`minio`、`neo4j` 与 `web`（本服务），端口/账号对齐 `.env.example`；`.dockerignore` 排除 `.env`、`output/`、`logs/`、`models/`、`__pycache__`。
+- **做什么**：`Dockerfile` 基于 `python:3.11-slim`，安装系统依赖（build-essential 等，适配 torch/magic-pdf），`COPY` 依赖与 `zhanggui_zhiku`，`EXPOSE 8000`，`CMD` 跑 `zhanggui-zhiku`（或 `uvicorn zhanggui_zhiku.main:app`）；`docker-compose.yml` 编排 `milvus-standalone`、`mongo`、`minio`、`neo4j` 与 `web`（本服务），端口/账号对齐 `.env.example`；`.dockerignore` 排除 `.env`、`output/`、`logs/`、`models/`、`__pycache__`。
 - **依赖**：T7
 - **验收**：`docker compose up --build` 拉起 5 服务；依赖就绪后服务日志无连接错误；`/health` 200。
 
 ### T9 — 文档与资源迁移（P2）
-- **文件**：`README.md`（新）；迁移 `prompts/`、`test/`、`app/tool/`（原样）
-- **做什么**：写 `README.md`（架构 Mermaid 图、技术栈、uv/pip 快速开始、环境变量表、docker 用法、API 速查、目录结构、测试、故障排查）；复制 `prompts/`（6 个 .prompt）、`test/`（标注需完整依赖）、`app/tool/`（下载脚本保留）。
+- **文件**：`README.md`（新）；迁移 `prompts/`、`test/`、`zhanggui_zhiku/tool/`（原样）
+- **做什么**：写 `README.md`（架构 Mermaid 图、技术栈、uv/pip 快速开始、环境变量表、docker 用法、API 速查、目录结构、测试、故障排查）；复制 `prompts/`（6 个 .prompt）、`test/`（标注需完整依赖）、`zhanggui_zhiku/tool/`（下载脚本保留）。
 - **依赖**：T1–T8
-- **验收**：README 中命令可复现；`prompts/`、`test/`、`app/tool/` 就位；`doc/`、`output/`、`logs/`、`models/` 不在仓库。
+- **验收**：README 中命令可复现；`prompts/`、`test/`、`zhanggui_zhiku/tool/` 就位；`doc/`、`output/`、`logs/`、`models/` 不在仓库。
 
 ---
 

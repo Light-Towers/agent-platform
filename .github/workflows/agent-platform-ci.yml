@@ -11,6 +11,7 @@ on:
       - "eval/**"
       - "docs/**"
       - "scripts/ha_real_kill_verify.py"
+      - "scripts/check_doc_sync.py"
       - "pyproject.toml"
       - "uv.lock"
       - "Makefile"
@@ -27,6 +28,7 @@ on:
       - "eval/**"
       - "docs/**"
       - "scripts/ha_real_kill_verify.py"
+      - "scripts/check_doc_sync.py"
       - "pyproject.toml"
       - "uv.lock"
       - "Makefile"
@@ -55,6 +57,8 @@ jobs:
         run: make install
       - name: CI gate (lint + unit tests + heuristic eval)
         run: make ci
+      - name: Doc sync check
+        run: uv run python scripts/check_doc_sync.py
 
   # §HA 端到端验证门禁：必须真实 PostgreSQL（lease/checkpoint/side_effects 持久化），
   # 在 Linux runner 起 PG 服务容器，跑 tests/ha（requires_pg marker）+ 真双进程 kill -9 接管脚本。

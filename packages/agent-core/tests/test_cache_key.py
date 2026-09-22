@@ -8,18 +8,18 @@ from agent_core.cache import BaseSemanticCache, build_cache_key
 
 class TestBuildCacheKey:
     def test_deterministic(self):
-        k1 = build_cache_key("refund", "如何退款", {"kefu": "v2"}, "t1", 0.0)
-        k2 = build_cache_key("refund", "如何退款", {"kefu": "v2"}, "t1", 0.0)
+        k1 = build_cache_key("intent_a", "如何退款", {"kb": "v2"}, "t1", 0.0)
+        k2 = build_cache_key("intent_a", "如何退款", {"kb": "v2"}, "t1", 0.0)
         assert k1 == k2
 
     def test_distinct_intent(self):
-        a = build_cache_key("refund", "如何退款", {}, "", 0.0)
-        b = build_cache_key("order", "如何退款", {}, "", 0.0)
+        a = build_cache_key("intent_a", "如何退款", {}, "", 0.0)
+        b = build_cache_key("intent_b", "如何退款", {}, "", 0.0)
         assert a != b
 
     def test_distinct_kb_version_invalidates(self):
-        old = build_cache_key("refund", "如何退款", {"kefu": "v1"}, "t1", 0.0)
-        new = build_cache_key("refund", "如何退款", {"kefu": "v2"}, "t1", 0.0)
+        old = build_cache_key("intent_a", "如何退款", {"kb": "v1"}, "t1", 0.0)
+        new = build_cache_key("intent_a", "如何退款", {"kb": "v2"}, "t1", 0.0)
         assert old != new  # KB 版本变更自动失效旧缓存
 
     def test_distinct_tenant(self):

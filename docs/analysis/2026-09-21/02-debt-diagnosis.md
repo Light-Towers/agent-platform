@@ -86,7 +86,7 @@
 | ID | 严重度 | 问题 | 证据 |
 |----|--------|------|------|
 | F-S0-07 | ✅P3 已修复 | ruff select 缺 I | agent-core/pyproject.toml:84 |
-| F-S0-08 | P2 | zhanggui-zhiku 包名仍为 app | zhanggui-zhiku/pyproject.toml:48,55 |
+| F-S0-08 | ✅P2 已修复 | zhanggui-zhiku 包名仍为 app | zhanggui-zhiku/pyproject.toml:48,55 |
 | F-S0-09 | ✅P3 已修复 | ARCHITECTURE.md §2.2 未列 exhibition-agent | ARCHITECTURE.md:47-52 |
 | F-S0-10 | ✅P3 已修复 | agent-runtime 无 ruff/pytest 配置 | agent-runtime/pyproject.toml |
 
