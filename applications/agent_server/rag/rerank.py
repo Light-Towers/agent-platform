@@ -1,6 +1,6 @@
 """Rerank 客户端：硅基流动 bge-reranker-v2-m3（OpenAI 兼容 /rerank）。
 
-零第三方依赖（仅标准库 urllib），与 zhanggui-zhiku 的 ApiReranker 同语义；
+零第三方依赖（仅标准库 urllib），与 knowledge-service 的 ApiReranker 同语义；
 放在 app 内自洽，避免跨子项目耦合。主 app RAG 在 RRF 融合后调用本模块对
 候选 chunk 做相关性重排，提升 top-K 精度。
 

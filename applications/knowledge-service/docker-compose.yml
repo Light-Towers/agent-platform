@@ -40,7 +40,7 @@ services:
       # （packages/agent-core 与 applications/ 均需进入 build context）
       context: ../..
       dockerfile: applications/knowledge-service/Dockerfile
-    container_name: zhanggui-zhiku-web
+    container_name: knowledge-service-web
     restart: unless-stopped
     ports:
       - "8000:8000"
@@ -91,7 +91,7 @@ services:
   # （≥500 IOPS、p99 fsync <10ms，可用 fio 验证）；本机为验证环境未做该项基准。
   etcd:
     image: quay.io/coreos/etcd:v3.5.18
-    container_name: zhanggui-zhiku-etcd
+    container_name: knowledge-service-etcd
     restart: unless-stopped
     environment:
       ETCD_AUTO_COMPACTION_MODE: revision
@@ -115,7 +115,7 @@ services:
 
   milvus:
     image: milvusdb/milvus:v2.5.10
-    container_name: zhanggui-zhiku-milvus
+    container_name: knowledge-service-milvus
     restart: unless-stopped
     command: ["milvus", "run", "standalone"]
     security_opt:
@@ -157,12 +157,12 @@ services:
 
   mongo:
     image: mongo:7
-    container_name: zhanggui-zhiku-mongo
+    container_name: knowledge-service-mongo
     restart: unless-stopped
     ports:
       - "27017:27017"
     environment:
-      MONGO_INITDB_DATABASE: ${MONGO_DB_NAME:-zhanggui-zhiku}
+      MONGO_INITDB_DATABASE: ${MONGO_DB_NAME:-knowledge-service}
     volumes:
       - mongo_data:/data/db
     profiles: ["core"]
@@ -176,7 +176,7 @@ services:
   minio:
     # M6：minio 锁版，消除 latest（方案 M1 已识别未锁版）
     image: minio/minio:RELEASE.2024-01-16T16-07-38Z
-    container_name: zhanggui-zhiku-minio
+    container_name: knowledge-service-minio
     restart: unless-stopped
     command: ["server", "/data", "--console-address", ":9001"]
     ports:
@@ -194,7 +194,7 @@ services:
     # 注意：minio/mc 的 RELEASE tag 体系与 minio/minio **相互独立**，不可复用同一 tag
     # （mc 无 RELEASE.2024-01-16T16-07-38Z，会报 manifest unknown）。此处独立锁版。
     image: minio/mc:RELEASE.2025-04-16T18-13-26Z
-    container_name: zhanggui-zhiku-minio-init
+    container_name: knowledge-service-minio-init
     restart: "no"
     depends_on:
       minio:
@@ -214,7 +214,7 @@ services:
 
   neo4j:
     image: neo4j:5
-    container_name: zhanggui-zhiku-neo4j
+    container_name: knowledge-service-neo4j
     restart: unless-stopped
     ports:
       - "7687:7687"
@@ -237,7 +237,7 @@ services:
   # OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317 + ZHANGUI_TRACE_ENABLED=true 即导出。
   jaeger:
     image: jaegertracing/all-in-one:1.57
-    container_name: zhanggui-zhiku-jaeger
+    container_name: knowledge-service-jaeger
     restart: unless-stopped
     ports:
       - "16686:16686"   # Jaeger UI

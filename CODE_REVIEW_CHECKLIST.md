@@ -98,7 +98,7 @@
 
 | 前序误报 | 精确复核结论 | 依据 |
 |---------|------------|------|
-| "wenda-data-agent 重实现 `validate_sql` 守卫" | **否**，直接复用 `agent_core.sql.guard.validate_sql` | `wenda-data-agent/wenda_data_agent/agent/nodes/validate_sql.py:6,15` |
+| "nl2sql-service 重实现 `validate_sql` 守卫" | **否**，直接复用 `agent_core.sql.guard.validate_sql` | `nl2sql-service/nl2sql_service/agent/nodes/validate_sql.py:6,15` |
 | "app/ 有 76 个 .pyc 污染（git 跟踪）" | **git 跟踪为 0 成立，但磁盘存在残留** | `git ls-files '*.pyc'` = 0（`.gitignore` 生效）；排除虚拟环境后磁盘仍有约 224 个 `.pyc`（`app/` 约 100 个），为本地构建缓存，非 git 污染 |
 | "code-review 报告 U-1 已修复" | **否**，U-1 的 QueryRequest 字段不统一仍属开放项（仅 HealthResponse 已对齐） | `code-review-final-report.md:71` + `app/schemas.py:41-54` |
 | 原清单 "README.md:26 称 3.10+" | **行号有误** | `:26` 为"可复位降级"无关行；实际见 `README.md:8` 徽章 |

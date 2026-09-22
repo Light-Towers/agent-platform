@@ -98,7 +98,7 @@ class Settings:
 
     # -------------------------- Mongo --------------------------
     mongo_url: str = os.getenv("MONGO_URL", "mongodb://localhost:27017")
-    mongo_db_name: str = os.getenv("MONGO_DB_NAME", "zhanggui-zhiku")
+    mongo_db_name: str = os.getenv("MONGO_DB_NAME", "knowledge-service")
 
     # -------------------------- MinIO --------------------------
     minio_endpoint: str = os.getenv("MINIO_ENDPOINT", "localhost:9000")

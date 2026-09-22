@@ -29,7 +29,7 @@ def test_settings_default_app_port_is_int_8000():
 
 
 def test_settings_default_mongo_db_name():
-    assert settings.mongo_db_name == "zhanggui-zhiku"
+    assert settings.mongo_db_name == "knowledge-service"
 
 
 def test_settings_default_cors_origins():
