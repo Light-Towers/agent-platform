@@ -54,7 +54,7 @@
 
 ## Runtime 治理路线图全量闭环（2026-08-21）
 
-> `docs/runtime-governance-roadmap.md` P0~P5 全区段落地；`docs/tech-debt-hardcoded-logic.md` TD-1~TD-14 全部闭环。
+> `docs/operations/runtime-governance-roadmap.md` P0~P5 全区段落地；`docs/tech-debt-hardcoded-logic.md` TD-1~TD-14 全部闭环。
 > 验证：ruff 0 error / 架构 lint 通过 / 根 tests **541 passed**（原 import 失败目录已修复）/ 联邦 unit **92 passed** / kefu **8 passed** / eval **12/12 = 100%**。
 
 ### 计量闭环（P2）
@@ -306,5 +306,9 @@
 - **TB-4 key 闭环** `app/infra/cache.py`：`_cache_write` 的 `cache_key` 由明文 `question.strip().lower()` 改为内核 `build_cache_key(intent="", rewritten_query=...)`，与 deepagents 共用同一 hash 逻辑（lookup 端纯向量命中，不受影响）。
 - **U-1 收敛** `app/schemas.py`：普查确认无生产客户端仍发旧名 `question`/`thread_id`（deepagents `run-all.py` 调 adapter `/query` 已用标准名 `query`），**彻底移除** `AliasChoices` 双写兼容，入站契约收敛为纯标准名 `query`/`session_id`；清理未使用 `AliasChoices` import。`tests/test_api_smoke.py`、`agent-core/tests/test_guardrails.py` 示例字段名同步改 `query`。内部 `AgentState.question` 为 graph state 字段，与入站契约无关，保持不动。
 - **文档一致性** `docs/architecture-improvement-plan.md`：§6.1 TB-1/TB-2 标注为「已落地（桥接）」；§6.2 U-1 标注「已闭环」；优化 A/B 标题回升「✅ 已落地」；#11 勘误回填。
+
+## eval golden 已增至 15 条（2026-09-22）
+
+> eval golden 集已增至 **15 条**（原 12 条）。上方历史条目中的 "eval 12/12" 为当时事实记录，按历史保留不改。
 
 

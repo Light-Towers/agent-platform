@@ -57,7 +57,7 @@ python -m api.server  # 启动 FastAPI，默认 :8000
 | `API_KEY` | 可选 | 服务鉴权 Key（空则不鉴权） |
 | `ALLOWED_ORIGINS` | 可选 | CORS 允许源（逗号分隔，默认 localhost:3000） |
 
-> **完整开关清单见 [`.env.example`](.env.example)**（80+ 项，源码为真相源盘点，2026-08-19 核销 TB-11 第一步）：能力开关（`INTENT_ENABLED` / `PLANNER_ENABLED` / `REFLEXION_ENABLED` / `GUARD_ENABLED` / `CACHE_ENABLED` / `DYNAMIC_AGENT_ENABLED` / `DYNAMIC_AGENT_CACHE_MAX`）、治理参数（熔断 `CB_*`、限流 `RATE_LIMIT_*`、灰度 `GRAY_PCT`、重试 `SUBAGENT_RETRIES` / `SUBAGENT_RETRY_BASE`、断言 `E1_CONTRACT_ASSERT` / `E1_CONTENT_ASSERT`、checkpoint 清理 `CHECKPOINT_*`）、缓存 key 版本（`KB_VERSION_*` / `TENANT_ID`）、Langfuse trace（`LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` / `LANGFUSE_HOST`）等均已登记。
+> **完整开关清单见 [`.env.example`](.env.example)**（23 项，源码为真相源盘点，2026-08-19 核销 TB-11 第一步）：能力开关（`INTENT_ENABLED` / `PLANNER_ENABLED` / `REFLEXION_ENABLED` / `GUARD_ENABLED` / `CACHE_ENABLED` / `DYNAMIC_AGENT_ENABLED` / `DYNAMIC_AGENT_CACHE_MAX`）、治理参数（熔断 `CB_*`、限流 `RATE_LIMIT_*`、灰度 `GRAY_PCT`、重试 `SUBAGENT_RETRIES` / `SUBAGENT_RETRY_BASE`、断言 `E1_CONTRACT_ASSERT` / `E1_CONTENT_ASSERT`、checkpoint 清理 `CHECKPOINT_*`）、缓存 key 版本（`KB_VERSION_*` / `TENANT_ID`）、Langfuse trace（`LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` / `LANGFUSE_HOST`）等均已登记。
 
 ## 改造历程
 
@@ -94,7 +94,7 @@ python -m api.server  # 启动 FastAPI，默认 :8000
 | **Phase 0-7** | ✅ 7 Phase 全部实现（见 `docs/audit-report.md`），所有新功能默认关闭，环境变量渐进启用 |
 | **评测集** | 200 题（10 人工 + 190 合成），需人工审核标注 |
 | **kefu-service** | Phase 7 已补全（9 命令 + 3 Flow + GraphRAG），用配置驱动模拟数据 |
-| **测试** | 24 个单元测试 + M7 验收测试（10/10 对话 + 5/5 GraphRAG） |
+| **测试** | 110 个单元测试 + M7 验收测试（10/10 对话 + 5/5 GraphRAG） |
 | **Docker** | docker-compose 含 web+mysql+zhiku+langfuse+clickhouse+valkey，未本地构建验证（无 Docker 环境） |
 
 ## 项目结构
@@ -121,7 +121,7 @@ agent_federation/
 │   └── _timeout.py           # 工具超时隔离装饰器（asyncio.wait_for wrapper）
 ├── prompt/prompts.yml         # 全量提示词配置（会展业务叙事）
 ├── utils/path_utils.py        # 路径安全工具
-├── tests/unit/                # 单元测试（24 tests）
+├── tests/unit/                # 单元测试（110 tests）
 ├── pyproject.toml             # 项目配置 + ruff
 ├── Dockerfile                 # 容器镜像
 ├── docker-compose.yml         # web + mysql

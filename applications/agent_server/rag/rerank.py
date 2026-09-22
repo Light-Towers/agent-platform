@@ -9,10 +9,11 @@
 
 import json
 import logging
-import time
 import urllib.error
 import urllib.request
 from functools import lru_cache
+
+from agent_core.resilience import retry
 
 logger = logging.getLogger(__name__)
 
@@ -53,8 +54,13 @@ class ApiReranker:
     def _post(self, payload: dict) -> dict:
         data = json.dumps(payload).encode("utf-8")
         req = urllib.request.Request(self._url, data=data, headers=self._headers, method="POST")
-        last_err: Exception | None = None
-        for attempt in range(_DEFAULT_RETRIES + 1):
+
+        @retry(
+            max_attempts=_DEFAULT_RETRIES + 1,
+            backoff_base=_DEFAULT_BACKOFF_S,
+            exceptions=(urllib.error.HTTPError, urllib.error.URLError, TimeoutError, ConnectionError, OSError),
+        )
+        def _do_post() -> dict:
             try:
                 with urllib.request.urlopen(req, timeout=self.timeout) as resp:
                     return json.loads(resp.read().decode("utf-8"))
@@ -62,18 +68,13 @@ class ApiReranker:
                 detail = ""
                 try:
                     detail = e.read().decode("utf-8")
-                except Exception as e2:
-                    logger.warning("读取 SiliconFlow rerank HTTP 错误详情失败: %s", e2)
-                last_err = RuntimeError(f"SiliconFlow rerank HTTP {e.code}: {detail[:500]}")
-                if e.code not in (429, 500, 502, 503, 504) or attempt >= _DEFAULT_RETRIES:
-                    break
-                time.sleep(_DEFAULT_BACKOFF_S * (attempt + 1))
-            except (urllib.error.URLError, TimeoutError, ConnectionError, OSError) as e:
-                last_err = RuntimeError(f"SiliconFlow rerank 网络请求失败: {e}")
-                if attempt >= _DEFAULT_RETRIES:
-                    break
-                time.sleep(_DEFAULT_BACKOFF_S * (attempt + 1))
-        raise last_err or RuntimeError("SiliconFlow rerank 请求失败")
+                except Exception:
+                    pass
+                if e.code not in (429, 500, 502, 503, 504):
+                    raise
+                raise RuntimeError(f"SiliconFlow rerank HTTP {e.code}: {detail[:500]}") from e
+
+        return _do_post()
 
     def compute_score(self, sentence_pairs: list[list[str]]) -> list[float]:
         scores = [0.0] * len(sentence_pairs)

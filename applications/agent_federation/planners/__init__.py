@@ -9,21 +9,14 @@ max_skill_depth/max_steps 取环境变量（默认 4 / 20，与 PlannerRuntime �
 """
 
 import logging
-import os
 
+from agent_core.config import env_int
 from agent_runtime.planner.agentic import AgenticPlanner
 from agent_runtime.planner.protocol import PlannerRuntime
 
 logger = logging.getLogger(__name__)
 
 __all__ = ["AgenticPlanner", "get_planner_runtime"]
-
-
-def _env_int(key: str, default: int) -> int:
-    try:
-        return int(os.getenv(key, str(default)))
-    except (TypeError, ValueError):
-        return default
 
 
 _runtime_singleton: PlannerRuntime | None = None
@@ -58,8 +51,8 @@ def get_planner_runtime() -> PlannerRuntime:
                 logger.warning("AGENTIC_RUNTIME_BRIDGE 注册表构建失败，回退 None: %s", exc)
         _runtime_singleton = PlannerRuntime(
             registry=registry,
-            max_skill_depth=_env_int("FED_MAX_SKILL_DEPTH", 4),
-            max_steps=_env_int("FED_MAX_STEPS", 20),
+            max_skill_depth=env_int("FED_MAX_SKILL_DEPTH", 4),
+            max_steps=env_int("FED_MAX_STEPS", 20),
         )
         _runtime_bridge_flag = bridge
     return _runtime_singleton

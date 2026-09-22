@@ -264,7 +264,13 @@ async def get_main_agent(checkpointer=None):
         _main_checkpointer = _cp
         _store = await _create_store()
         _main_store = _store
-        _tools = [generate_markdown, convert_md_to_pdf, read_file_content, execute_python_code]
+        # 沙箱工具默认不挂载（SANDBOX_TOOL_ENABLED=false，T1.2b）：
+        # 宿主代码执行面须显式开启，防 LLM 不可控调用
+        from agent.tool_registry import sandbox_tool_enabled
+
+        _tools = [generate_markdown, convert_md_to_pdf, read_file_content]
+        if sandbox_tool_enabled():
+            _tools.append(execute_python_code)
         # Phase D 集成（opt-in, AGENTIC_RUNTIME_BRIDGE=true）：追加经统一 Runtime 治理的桥接工具，
         # 不改变默认工具集；任一环节失败仅跳过桥接工具，主链路零影响。
         _tools = _maybe_attach_bridged_tools(_tools, "")

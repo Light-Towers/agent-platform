@@ -1,7 +1,8 @@
 # agent-platform 代码审核 — 问题清单与事实依据（最终核对版）
+> ⚠️ 时效性说明：本文写作于 2026-08-15（monorepo 重组前），文中 deepagents/、kefu-adapter/、app/ 等旧路径对应现 applications/agent_federation/、已退役 adapter、applications/agent_server/。历史记录保留，路径不再逐一更新。
 
 > 整理目的：供其他模型独立复核。所有结论均基于逐文件精确查证，已剔除检索误报，并吸收后续复核对根报告过时项的纠正。
-> 审核时间：2026-08-15｜仓库路径：`D:\Study\agent-platform`
+> 审核时间：2026-08-15｜仓库路径：`D:\Study\github\agent-platform`
 > 配套说明：根 `code-review-final-report.md` 为更早代码快照、部分结论已过时，其顶部已加时效性警告；本报告为最新逐行核实版，引用旧报告行号时须重新核对。
 
 ---

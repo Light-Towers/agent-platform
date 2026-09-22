@@ -1,6 +1,5 @@
-"""HTTP 端点：/health、/query(SSE)、/import、/sql/train、/session/revert。"""
+"""HTTP 端点：/health、/query(SSE)、/import、/sql/train、/session/revert、/history。"""
 
-import json
 import logging
 import uuid
 from datetime import UTC
@@ -13,6 +12,7 @@ from agent_runtime.planner.protocol import PlannerContext
 from agent_runtime.schemas import ADMISSION_ADMITTED, ADMISSION_QUEUED, ADMISSION_REJECTED
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, UploadFile
 from fastapi.responses import StreamingResponse
+from shared_schemas import sse_pack
 
 from agent_server.api.auth import resolve_thread_id, verify_api_key
 from agent_server.config import get_settings
@@ -265,7 +265,7 @@ async def query(
 
 
 def _sse(payload: dict) -> str:
-    return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+    return sse_pack("", payload)
 
 
 # 优化 I：精确回忆接口——按 thread_id 回溯历史对话原文（与 H 语义回忆正交）。

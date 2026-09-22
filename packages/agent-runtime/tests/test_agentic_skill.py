@@ -4,8 +4,15 @@ from __future__ import annotations
 
 import pytest
 
+from agent_runtime.planner import agentic as _agentic_mod
 from agent_runtime.planner.agentic import AgenticPlanner, register_agentic_executor_factory
 from agent_runtime.skills.registry import SkillKind, SkillRegistry
+
+
+@pytest.fixture(autouse=True)
+def _restore_executor_factory(monkeypatch):
+    """用例结束还原模块级执行器缓存，防测试间全局污染（S2）。"""
+    monkeypatch.setattr(_agentic_mod, "_executor_factory", None)
 
 
 @pytest.mark.asyncio

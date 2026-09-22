@@ -228,7 +228,7 @@ async def lifespan(app: FastAPI):
         registry.register(sandbox_skill)
         logger.info("registered sandbox skill (backend=%s)", sandbox_skill.metadata.get("backend"))
 
-    # AgenticPlanner → SkillKind.AGENT 收敛（entry_points 不可用时静默跳过）
+    # AgenticPlanner → SkillKind.AGENT 收敛（entry_points 不可用时跳过）
     try:
         from agent_runtime.planner.agentic import AgenticPlanner
 
@@ -237,7 +237,16 @@ async def lifespan(app: FastAPI):
             registry.register(agentic_skill)
             logger.info("registered agentic skill (SkillKind.AGENT)")
     except Exception:
-        logger.debug("agentic skill registration skipped (entry_points unavailable)", exc_info=True)
+        # entry_points 不可用是常见预期（非 agentic 部署）；仅当运行时实际需要
+        # agentic/auto planner 时才值得警告，否则 DEBUG 记录（T1.2c / B2 评审结论）
+        if settings.planner in ("agentic", "auto"):
+            logger.warning(
+                "agentic skill 注册失败（planner=%s 运行时需要该 skill）",
+                settings.planner,
+                exc_info=True,
+            )
+        else:
+            logger.debug("agentic skill registration skipped (entry_points unavailable)", exc_info=True)
 
     app.state.registry = registry
     app.state.planner = get_planner(settings, registry=registry)

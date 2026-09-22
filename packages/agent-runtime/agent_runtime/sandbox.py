@@ -122,6 +122,21 @@ class SandboxExecutor:
             return await self._execute_docker(code, timeout)
         return await self._execute_subprocess(code, timeout)
 
+    @staticmethod
+    async def _terminate(proc: asyncio.subprocess.Process, *, backend: str) -> None:
+        """超时后终止本地执行进程并回收管道，防僵尸进程与 PIPE 泄漏（T1.2a）。
+
+        局限：远程 Docker（DOCKER_HOST=tcp://...）下 kill 的是本地 docker CLI 进程，
+        远程容器可能成为孤儿继续运行；彻底终止需 --name + docker stop（P2 演进）。
+        """
+        try:
+            proc.kill()
+            await proc.communicate()  # 排空管道，回收子进程
+        except ProcessLookupError:
+            pass  # 进程已自行退出
+        except Exception:
+            logger.warning("sandbox %s 后端超时进程终止失败", backend, exc_info=True)
+
     async def _execute_docker(self, code: str, timeout: int) -> SandboxResult:
         """Docker 后端：启动临时容器执行代码。"""
         import time
@@ -139,6 +154,7 @@ class SandboxExecutor:
             self._image,
             "python", "-c", code,
         ]
+        proc = None
         try:
             env = dict(os.environ)
             if self._docker_host:
@@ -149,7 +165,11 @@ class SandboxExecutor:
                 stderr=asyncio.subprocess.PIPE,
                 env=env,
             )
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+            try:
+                stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+            except asyncio.TimeoutError:
+                await self._terminate(proc, backend="docker")
+                raise
             exit_code = proc.returncode or 0
             return SandboxResult(
                 success=exit_code == 0,
@@ -175,13 +195,18 @@ class SandboxExecutor:
         import time
 
         t0 = time.monotonic()
+        proc = None
         try:
             proc = await asyncio.create_subprocess_exec(
                 sys.executable, "-c", code,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+            try:
+                stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+            except asyncio.TimeoutError:
+                await self._terminate(proc, backend="subprocess")
+                raise
             exit_code = proc.returncode or 0
             return SandboxResult(
                 success=exit_code == 0,

@@ -42,8 +42,8 @@ curl -X POST http://localhost:8000/api/query -H 'Content-Type: application/json'
 
 ## 与既有生产服务关系
 
-- **垂直增强**：与 `app/sql` 通用基础分层。`app/sql` 为基础 Text-to-SQL（4 阶段），`wenda-data-agent` 增强列/指标/值召回 + SQL 纠正循环（12 节点），不强制复用。
-- **守卫复用**：`validate_sql` 节点复用 `app/sql/guard.py` 安全语义（单条 SELECT + 禁止 DDL/DML + LIMIT 强制），独立实现。
+- **垂直增强**：与 `applications/agent_server/sql/` 通用基础分层。`applications/agent_server/sql/` 为基础 Text-to-SQL（4 阶段），`wenda-data-agent` 增强列/指标/值召回 + SQL 纠正循环（12 节点），不强制复用。
+- **守卫复用**：`validate_sql` 节点复用 `applications/agent_server/sql/guard.py` 安全语义（单条 SELECT + 禁止 DDL/DML + LIMIT 强制），独立实现。
 - **wenda-adapter**：`WENDA_API_URL` 默认指向本服务（可环境变量覆盖回退课程快照）。
 
 ## 本地自备资产

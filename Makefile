@@ -30,6 +30,7 @@ type:
 # agent_federation/ 彻底消除遮蔽；test_tool_registry 已回归门禁（75 passed）。
 test:
 	uv run pytest -q
+	uv run pytest packages/shared-schemas/tests -q
 	uv run pytest packages/agent-runtime/tests -q
 	uv run pytest applications/agent_server/tests -q
 	uv run pytest applications/agent_federation/tests -q
