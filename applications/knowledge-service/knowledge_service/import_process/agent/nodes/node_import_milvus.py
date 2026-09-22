@@ -340,6 +340,7 @@ def _enrich_chunk_metadata(item: Dict[str, Any], state: Dict[str, Any] = None) -
     08+16 通用化：补充 tenant_id / scope_type（多租户隔离，从 state 透传）。
     """
     item_copy = item.copy()
+    item_copy.setdefault("item_name", "")
     item_copy.setdefault("embedding_model", milvus_config.embedding_model)
     item_copy.setdefault("chunk_version", milvus_config.chunk_version)
     item_copy.setdefault("created_at", int(time.time()))

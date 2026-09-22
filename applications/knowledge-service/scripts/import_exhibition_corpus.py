@@ -91,6 +91,8 @@ TENANT_ID = "exhibition"
 TENANT_TYPE = "enterprise"
 STATUS = "PUBLISHED"
 ENABLE_ITEM_NAME_RECOGNITION = False
+EFFECTIVE_TO = "2099-12-31"
+EXHIBITION_ID = "general"
 
 # 轮询配置
 POLL_INTERVAL_S = 5
@@ -117,16 +119,19 @@ def upload_one(
 
     with open(file_abs_path, "rb") as f:
         files = {"files": (file_abs_path.name, f, "application/octet-stream")}
+        knowledge_id = f"exhibition_{file_abs_path.stem[:50]}"
         data = {
             "scope_type": SCOPE_TYPE,
             "tenant_id": TENANT_ID,
             "tenant_type": TENANT_TYPE,
             "effective_from": item.effective_from,
-            "effective_to": item.effective_to,
+            "effective_to": EFFECTIVE_TO,
             "version": item.version,
             "authority": item.authority,
             "status": STATUS,
             "enable_item_name_recognition": str(ENABLE_ITEM_NAME_RECOGNITION).lower(),
+            "knowledge_id": knowledge_id,
+            "exhibition_id": EXHIBITION_ID,
         }
         resp = requests.post(url, headers=headers, files=files, data=data, timeout=120)
 
@@ -249,7 +254,7 @@ def main():
     parser = argparse.ArgumentParser(description="会展知识语料导入")
     parser.add_argument("--base-url", default="http://192.168.100.126:8000", help="knowledge-service 地址")
     parser.add_argument("--corpus-dir", default="", help="语料根目录（默认 D:/0-mingyang/文档）")
-    parser.add_argument("--api-key", default="", help="ZHANGUI_API_KEY（鉴权开启时需要）")
+    parser.add_argument("--api-key", default="", help="KNOWLEDGE_API_KEY（鉴权开启时需要）")
     parser.add_argument("--files", nargs="*", help="指定文件相对路径（默认首期 5 份）")
     parser.add_argument("--dry-run", action="store_true", help="只打印计划，不实际上传")
     args = parser.parse_args()
