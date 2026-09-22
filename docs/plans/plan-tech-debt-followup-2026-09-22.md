@@ -114,3 +114,29 @@
 | D6 | routes.py 拆分 | Low | 独立小任务 |
 | D7 | 清理裸 except | Medium | 分批逐文件处理 |
 | D8 | pydantic-settings 评估 | Low | 独立小任务 |
+| D9 | exhibition llm_client.py 收敛到 agent_core.llm | Medium | 接口根本不同（httpx 异步 vs langchain ChatOpenAI），需重大重构 |
+| D10 | zhanggui ApiReranker 收敛到 agent_core.resilience.retry | Medium | 双实现模式不同（内联 retry vs _post_json 无 retry），风险高 |
+
+---
+
+## D9 exhibition llm_client.py 收敛到 agent_core.llm
+
+| 字段 | 内容 |
+|------|------|
+| **现状** | `exhibition-agent/skill_loader/llm_client.py` 仍用 httpx 异步直调 OpenAI API，未经 `agent_core.llm.OpenAICompatibleProvider` |
+| **影响** | 与 wenda（已收敛）实现不一致；agent_core 的 LLM 抽象层未被 exhibition 复用 |
+| **跳过原因** | exhibition 用 httpx 异步直调 OpenAI API，wenda 用 langchain ChatOpenAI，接口根本不同，需重大重构而非简单替换 |
+| **建议推进** | ① 评估 exhibition 的 httpx 调用是否可改为 langchain ChatOpenAI → ② 若可，改用 `OpenAICompatibleProvider.build()` → ③ 跑 exhibition 测试确认契约不变 |
+| **优先级** | Medium |
+
+---
+
+## D10 zhanggui ApiReranker 收敛到 agent_core.resilience.retry
+
+| 字段 | 内容 |
+|------|------|
+| **现状** | `zhanggui-zhiku/lm/siliconflow_client.py` 的 ApiReranker 用 `_post_json` 无 retry，与 `agent_server/rag/rerank.py` 的 ApiReranker（已改用 `agent_core.resilience.retry`）是双份实现 |
+| **影响** | 同一 rerank 逻辑两套实现，维护成本翻倍；zhanggui 侧无 retry 保护 |
+| **跳过原因** | 双实现模式不同（agent_server 内联 retry + resilience.retry，zhanggui 用 _post_json 无 retry），统一需先对齐调用模式，风险高 |
+| **建议推进** | ① 对齐 zhanggui ApiReranker 的 `_post_json` 调用为可直接加 `@retry` 的形态 → ② 引入 `agent_core.resilience.retry` → ③ 跑 zhanggui 测试确认 rerank 行为不变 |
+| **优先级** | Medium |

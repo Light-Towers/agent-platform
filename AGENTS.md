@@ -28,15 +28,15 @@
 
 ```bash
 uv sync --all-packages --extra dev   # 安装（workspace 全量包 + dev 工具）
-make ci                              # CI 唯一门禁：lint + 9 个 pytest session（见 Makefile test 目标）+ 启发式 eval
-make test                            # 9 session pytest（根 / shared-schemas / agent-runtime / agent-server / 联邦 / kefu / exhibition / dialogue-framework / zhanggui-zhiku）
+make ci                              # CI 唯一门禁：lint + 10 个 pytest session（见 Makefile test 目标）+ 启发式 eval
+make test                            # 10 session pytest（根 / shared-schemas / agent-runtime / agent-server / 联邦 / kefu / exhibition / dialogue-framework / zhanggui-zhiku / wenda-data-agent）
 make eval                            # 评测门禁（启发式，CI 可达）
 DATABASE_URL= uvicorn agent_server.main:app --port 8000  # 零依赖冒烟
 ```
 
-## 验证策略（分层，避免每次跑全量 8 session）
+## 验证策略（分层，避免每次跑全量 10 session）
 
-> `make test`（8 个 pytest session）是 **CI 门禁**，不是每次小改动的必跑项。按改动范围分层收敛，先 lint 快速拦截再决定是否跑测试。
+> `make test`（10 个 pytest session）是 **CI 门禁**，不是每次小改动的必跑项。按改动范围分层收敛，先 lint 快速拦截再决定是否跑测试。
 
 | 改动范围 | 验证步骤 |
 |---------|---------|
