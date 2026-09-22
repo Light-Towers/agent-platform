@@ -105,13 +105,26 @@ def step_2_upload_and_poll(pdf_path_obj: Path, output_dir_obj: Path):
     upload_session.trust_env = False
 
     try:
-        # 首次上传：自动识别文件类型
+        # 首次上传：不指定 Content-Type，让 MinerU 根据文件名后缀自动识别
         put_resp = upload_session.put(url=signed_url, data=file_data, timeout=60)
-        # 重试逻辑：首次失败则强制指定PDF的Content-Type
+        # 重试逻辑：首次失败则根据文件后缀推断 Content-Type 重试
         if put_resp.status_code != 200:
-            logger.warning(f"[文件上传] 首次上传失败（状态码：{put_resp.status_code}），强制指定PDF类型重试")
-            pdf_headers = {"Content-Type": "application/pdf"}
-            put_resp = upload_session.put(url=signed_url, data=file_data, headers=pdf_headers, timeout=60)
+            suffix = pdf_path_obj.suffix.lower()
+            content_type_map = {
+                ".pdf": "application/pdf",
+                ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                ".doc": "application/msword",
+                ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                ".ppt": "application/vnd.ms-powerpoint",
+                ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                ".xls": "application/vnd.ms-excel",
+            }
+            inferred_ct = content_type_map.get(suffix, "application/octet-stream")
+            logger.warning(
+                f"[文件上传] 首次上传失败（状态码：{put_resp.status_code}），指定Content-Type={inferred_ct}重试"
+            )
+            retry_headers = {"Content-Type": inferred_ct}
+            put_resp = upload_session.put(url=signed_url, data=file_data, headers=retry_headers, timeout=60)
             # 重试仍失败则抛出异常
             if put_resp.status_code != 200:
                 raise RuntimeError(

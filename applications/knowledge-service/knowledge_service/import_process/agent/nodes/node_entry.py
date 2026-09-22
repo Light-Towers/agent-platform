@@ -33,6 +33,8 @@ def node_entry(state: ImportGraphState) -> ImportGraphState:
         return state
 
     # 2. 根据文件后缀判断类型，设置对应解析开关
+    # MinerU 云端 API 原生支持 PDF/DOCX/DOC/PPTX/PPT/XLSX/XLS → MD 解析
+    mineru_supported_extensions = (".pdf", ".docx", ".doc", ".pptx", ".ppt", ".xlsx", ".xls")
     if document_path.endswith(".pdf"):
         logger.info(f"【{func_name}】文件类型校验通过：{document_path} → PDF格式，开启PDF解析流程")
         state["is_pdf_read_enabled"] = True
@@ -41,8 +43,14 @@ def node_entry(state: ImportGraphState) -> ImportGraphState:
         logger.info(f"【{func_name}】文件类型校验通过：{document_path} → MD格式，开启MD解析流程")
         state["is_md_read_enabled"] = True
         state["md_path"] = document_path
+    elif document_path.endswith(mineru_supported_extensions):
+        logger.info(f"【{func_name}】文件类型校验通过：{document_path} → MinerU支持的文档格式，走MinerU解析链路")
+        state["is_pdf_read_enabled"] = True
+        state["pdf_path"] = document_path
     else:
-        logger.warning(f"【{func_name}】文件类型校验失败：{document_path} → 不支持的格式，仅支持.pdf/.md")
+        logger.warning(
+            f"【{func_name}】文件类型校验失败：{document_path} → 不支持的格式，仅支持.pdf/.md/.docx/.doc/.pptx/.ppt/.xlsx/.xls"
+        )
 
     # 3. 提取文件无后缀纯名称，作为全局业务标识
     file_name = os.path.basename(document_path)
