@@ -27,6 +27,7 @@ from agent_runtime.planner.protocol import (
     SkillCompositionError,
     StreamEvent,
 )
+from agent_runtime.skills.registry import Skill, SkillKind
 
 logger = logging.getLogger(__name__)
 
@@ -174,6 +175,48 @@ class AgenticPlanner(Planner):
         async with runtime.execution():
             async with runtime.skill_guard("agentic"):
                 return await executor(question, workspace_id, main_agent)
+
+    def to_skill(
+        self,
+        *,
+        timeout_ms: int | None = None,
+        permissions: frozenset[str] | set[str] | None = None,
+    ) -> Skill:
+        """将 AgenticPlanner 包装为 SkillKind.AGENT 型 Skill。
+
+        executor 经 entry_points 发现（或显式注册），接受 ``question`` / ``workspace_id`` kwargs。
+        注册到 SkillRegistry 后可通过 ``registry.execute("agentic", question=..., workspace_id=...)`` 调用，
+        也可在 ExecutionGraph 中作为节点引用。
+
+        :raises RuntimeError: entry_points 不可用且未显式注册执行器时。
+        """
+        factory = _discover_executor_factory()
+
+        async def execute(**kwargs: Any) -> Any:
+            executor = factory()
+            question = kwargs.get("question", "")
+            workspace_id = kwargs.get("workspace_id", "default")
+            main_agent = kwargs.get("main_agent")
+            if main_agent is not None:
+                return await executor(question, workspace_id, main_agent)
+            return await executor(question, workspace_id)
+
+        return Skill(
+            name="agentic",
+            description="Agentic Planner：LLM agent 自主决策（deep_agent）",
+            kind=SkillKind.AGENT,
+            executor=execute,
+            timeout_ms=timeout_ms,
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "question": {"type": "string"},
+                    "workspace_id": {"type": "string"},
+                },
+                "required": ["question"],
+            },
+            permissions=frozenset(permissions) if permissions else frozenset(),
+        )
 
 
 __all__ = [
