@@ -107,4 +107,4 @@ v2 已存在的设施：
 - [x] Phase 1 兼容层（与 Phase 2/3 合并实施）
 - [x] Phase 2 字段迁移（Plan 显式字段补齐 session_id/planner_name/constraints/kwargs，execution_graph 读取路径切换）
 - [x] Phase 3 删除 notes（Plan.notes 字段已删除，全量测试 + eval 通过）
-- [x] 全测试通过 + eval 通过（361 root + 59 runtime + 103 app/federation/kefu + 12/12 eval）
+- [x] 全测试通过 + eval 通过（361 root + 153 runtime + 103 app/federation/kefu + 15/15 eval）
