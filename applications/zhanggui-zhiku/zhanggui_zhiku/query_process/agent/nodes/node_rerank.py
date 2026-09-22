@@ -1,10 +1,11 @@
-from zhanggui_zhiku.utils.task_utils import *
-from zhanggui_zhiku.lm.reranker_utils import get_reranker_model
-from zhanggui_zhiku.core.logger import logger
-from zhanggui_zhiku.conf.rerank_config import rerank_cfg
-from zhanggui_zhiku.core.tracing import traced_span
-from zhanggui_zhiku.utils.rerank_concurrency import call_under_semaphore, make_rerank_semaphore
 import sys
+
+from zhanggui_zhiku.conf.rerank_config import rerank_cfg
+from zhanggui_zhiku.core.logger import logger
+from zhanggui_zhiku.core.tracing import traced_span
+from zhanggui_zhiku.lm.reranker_utils import get_reranker_model
+from zhanggui_zhiku.utils.rerank_concurrency import call_under_semaphore, make_rerank_semaphore
+from zhanggui_zhiku.utils.task_utils import *
 
 # M6（方案 §10.4）：reranker 并发闸门 —— 限制同时进入模型推理的调用数 ≤ max_concurrency
 # （来自 rerank.yaml max_concurrency，默认 8，M3 预留）。进程内模型副本有限，

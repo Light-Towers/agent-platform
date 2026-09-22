@@ -24,7 +24,7 @@ import json
 import random
 from pathlib import Path
 
-from locust import HttpUser, between, task, events
+from locust import HttpUser, between, events, task
 
 
 @events.init_command_line_parser.add_listener

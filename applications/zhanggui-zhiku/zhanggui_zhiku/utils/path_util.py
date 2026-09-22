@@ -8,8 +8,8 @@
 - get_project_root：优先读取 PROJECT_ROOT 环境变量，未配置时回退到全局 PROJECT_ROOT。
 """
 
-from pathlib import Path
 import os
+from pathlib import Path
 
 from zhanggui_zhiku.core.config import PROJECT_ROOT
 

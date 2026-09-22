@@ -14,6 +14,7 @@ from typing import Any, Dict
 from agent_core.logging import get_logger
 from agent_core.tools.adapters.mcp import MCPToolAdapter
 from agent_core.tracing import traced_span
+
 from zhanggui_zhiku.conf.bailian_mcp_config import mcp_config
 from zhanggui_zhiku.conf.retrieval_config import retrieval_cfg
 from zhanggui_zhiku.utils.task_utils import add_done_task, add_running_task

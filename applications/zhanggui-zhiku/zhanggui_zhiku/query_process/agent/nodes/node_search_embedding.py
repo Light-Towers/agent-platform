@@ -1,13 +1,14 @@
 import sys
-from zhanggui_zhiku.utils.task_utils import add_running_task, add_done_task
-from zhanggui_zhiku.lm.embedding_utils import generate_embeddings
-from zhanggui_zhiku.clients.milvus_utils import create_hybrid_search_requests, hybrid_search, get_milvus_client
+
+from zhanggui_zhiku.clients.milvus_utils import create_hybrid_search_requests, get_milvus_client, hybrid_search
 from zhanggui_zhiku.conf.milvus_config import milvus_config
 from zhanggui_zhiku.conf.retrieval_config import retrieval_cfg
 from zhanggui_zhiku.core.logger import logger
 from zhanggui_zhiku.core.tracing import traced_span
-from zhanggui_zhiku.utils.item_name_normalize_utils import normalize_item_name
+from zhanggui_zhiku.lm.embedding_utils import generate_embeddings
 from zhanggui_zhiku.utils.escape_milvus_string_utils import escape_milvus_string
+from zhanggui_zhiku.utils.item_name_normalize_utils import normalize_item_name
+from zhanggui_zhiku.utils.task_utils import add_done_task, add_running_task
 
 
 def _embedding_span_attrs(*args, result=None, **kwargs):

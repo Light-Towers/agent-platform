@@ -49,7 +49,6 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
-from zhanggui_zhiku.conf.milvus_config import milvus_config  # noqa: E402 —— 路径引导后导入，脚本直跑必需
 from eval.ablation import (  # noqa: E402 —— 同上
     STRATEGIES,
     aggregate_strategy_rows,
@@ -57,6 +56,7 @@ from eval.ablation import (  # noqa: E402 —— 同上
     estimate_tokens,
     extract_doc_text,
 )
+from zhanggui_zhiku.conf.milvus_config import milvus_config  # noqa: E402 —— 路径引导后导入，脚本直跑必需
 
 ABLATION_FILE = "ablation.md"
 
@@ -85,7 +85,6 @@ def _load_retrieval_deps():
     说明：这些模块顶部会 import pymilvus / 检索节点等重型依赖；只有真正执行评测
     （Milvus 守卫通过后）才需要，因此放在 main() 内加载，避免 `--help` 也被拖垮。
     """
-    from zhanggui_zhiku.clients.milvus_utils import get_milvus_client
     from eval.metrics import compute_retrieval_metrics
     from eval.run_eval import (
         _extract_ids,
@@ -93,6 +92,7 @@ def _load_retrieval_deps():
         load_golden_queries,
         retrieve_one,
     )
+    from zhanggui_zhiku.clients.milvus_utils import get_milvus_client
 
     return {
         "get_milvus_client": get_milvus_client,

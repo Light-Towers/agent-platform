@@ -42,16 +42,16 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
-from zhanggui_zhiku.conf.milvus_config import milvus_config  # noqa: E402 —— 路径引导后导入，脚本直跑必需
-from zhanggui_zhiku.conf.retrieval_config import retrieval_cfg  # noqa: E402 TD-9：统一引用 yaml 配置
-from zhanggui_zhiku.conf.rerank_config import rerank_cfg  # noqa: E402 TD-9：统一引用 yaml 配置
+from eval.metrics import compute_retrieval_metrics  # noqa: E402
 from zhanggui_zhiku.clients.milvus_utils import get_milvus_client  # noqa: E402
+from zhanggui_zhiku.conf.milvus_config import milvus_config  # noqa: E402 —— 路径引导后导入，脚本直跑必需
+from zhanggui_zhiku.conf.rerank_config import rerank_cfg  # noqa: E402 TD-9：统一引用 yaml 配置
+from zhanggui_zhiku.conf.retrieval_config import retrieval_cfg  # noqa: E402 TD-9：统一引用 yaml 配置
+from zhanggui_zhiku.core.tracing import init_tracing  # noqa: E402
+from zhanggui_zhiku.query_process.agent.nodes.node_rerank import node_rerank  # noqa: E402
+from zhanggui_zhiku.query_process.agent.nodes.node_rrf import _as_entity_list, reciprocal_rank_fusion  # noqa: E402
 from zhanggui_zhiku.query_process.agent.nodes.node_search_embedding import node_search_embedding  # noqa: E402
 from zhanggui_zhiku.query_process.agent.nodes.node_search_embedding_hyde import node_search_embedding_hyde  # noqa: E402
-from zhanggui_zhiku.query_process.agent.nodes.node_rrf import _as_entity_list, reciprocal_rank_fusion  # noqa: E402
-from zhanggui_zhiku.query_process.agent.nodes.node_rerank import node_rerank  # noqa: E402
-from zhanggui_zhiku.core.tracing import init_tracing  # noqa: E402
-from eval.metrics import compute_retrieval_metrics  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # TD-9：运行时配置快照（config_hash 的兜底来源），统一从 retrieval.yaml / rerank.yaml 读取。

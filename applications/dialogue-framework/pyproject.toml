@@ -42,3 +42,4 @@ packages = ["dialogue_framework"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+addopts = "--import-mode=importlib"

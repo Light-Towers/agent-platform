@@ -13,6 +13,7 @@
 
 from agent_core.logging import get_logger
 from agent_core.tracing import traced_span
+
 from zhanggui_zhiku.clients.neo4j_utils import query_kg
 from zhanggui_zhiku.conf.retrieval_config import retrieval_cfg
 

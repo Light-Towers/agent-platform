@@ -14,19 +14,20 @@
 
 import uuid
 from typing import List, Optional
+
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from shared_schemas import QueryRequest as FederatedQueryRequest
 
-from zhanggui_zhiku.utils.task_utils import *
-from zhanggui_zhiku.utils.sse_utils import create_sse_queue, SSEEvent, sse_generator
 from zhanggui_zhiku.clients.mongo_history_utils import *
-from zhanggui_zhiku.query_process.agent.main_graph import query_app
 from zhanggui_zhiku.conf.retrieval_config import retrieval_cfg
 from zhanggui_zhiku.core.config import PROJECT_ROOT, settings
 from zhanggui_zhiku.core.logger import logger
 from zhanggui_zhiku.core.tracing import generate_request_id, set_request_context, start_span, user_query_hash
+from zhanggui_zhiku.query_process.agent.main_graph import query_app
+from zhanggui_zhiku.utils.sse_utils import SSEEvent, create_sse_queue, sse_generator
+from zhanggui_zhiku.utils.task_utils import *
 
 # 子路由实例：由 create_app() 挂载到根路径
 router = APIRouter()
@@ -224,9 +225,9 @@ async def retrieve(payload: RetrieveRequest):
     """
     # 懒导入：与线上检索链同一批节点函数（query_router 顶部已加载 main_graph，
     # 此处再引仅为了直接复用节点函数本身，避免经 graph 全链路含生成）
-    from zhanggui_zhiku.query_process.agent.nodes.node_search_embedding import node_search_embedding
-    from zhanggui_zhiku.query_process.agent.nodes.node_rrf import _as_entity_list, reciprocal_rank_fusion
     from zhanggui_zhiku.query_process.agent.nodes.node_rerank import node_rerank
+    from zhanggui_zhiku.query_process.agent.nodes.node_rrf import _as_entity_list, reciprocal_rank_fusion
+    from zhanggui_zhiku.query_process.agent.nodes.node_search_embedding import node_search_embedding
 
     session_id = f"retrieve_{uuid.uuid4().hex[:12]}"
     state = {

@@ -3,9 +3,8 @@ import os
 import re
 from dataclasses import dataclass
 
-from zhanggui_zhiku.core.config import settings
 from zhanggui_zhiku.conf.embedding_config import embedding_config
-
+from zhanggui_zhiku.core.config import settings
 
 # ===================== 其他配置类（LLM/Embedding）可放在上方，保持原有代码不变 =====================
 # ... 你的LLMConfig、EmbeddingConfig代码 ...

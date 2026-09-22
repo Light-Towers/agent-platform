@@ -42,3 +42,4 @@ packages = ["wenda_data_agent"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+addopts = "--import-mode=importlib"

@@ -1,20 +1,20 @@
-from langgraph.graph import StateGraph, END
-from zhanggui_zhiku.query_process.agent.state import QueryGraphState
-
-# 导入所有节点函数
-from zhanggui_zhiku.query_process.agent.nodes.node_item_name_confirm import node_item_name_confirm
-from zhanggui_zhiku.query_process.agent.nodes.node_query_kg import node_query_kg
-from zhanggui_zhiku.query_process.agent.nodes.node_answer_output import node_answer_output
-from zhanggui_zhiku.query_process.agent.nodes.node_rerank import node_rerank
-from zhanggui_zhiku.query_process.agent.nodes.node_rrf import node_rrf
-from zhanggui_zhiku.query_process.agent.nodes.node_search_embedding import node_search_embedding
-from zhanggui_zhiku.query_process.agent.nodes.node_search_embedding_hyde import node_search_embedding_hyde
-from zhanggui_zhiku.query_process.agent.nodes.node_web_search_mcp import node_web_search_mcp
+from langgraph.graph import END, StateGraph
 
 # M6（方案 §10.3）：四路召回并行分支由 LangGraph 并发执行，本模块为每路补
 # 「逐路超时 + 失败降级 return {} + 异常路径 span 埋点」；超时来源 = retrieval.yaml
 # channels.*.timeout_s（M3 预留），enabled=false 的路直接跳过。
 from zhanggui_zhiku.query_process.agent.fanout import wrap_channel_node
+from zhanggui_zhiku.query_process.agent.nodes.node_answer_output import node_answer_output
+
+# 导入所有节点函数
+from zhanggui_zhiku.query_process.agent.nodes.node_item_name_confirm import node_item_name_confirm
+from zhanggui_zhiku.query_process.agent.nodes.node_query_kg import node_query_kg
+from zhanggui_zhiku.query_process.agent.nodes.node_rerank import node_rerank
+from zhanggui_zhiku.query_process.agent.nodes.node_rrf import node_rrf
+from zhanggui_zhiku.query_process.agent.nodes.node_search_embedding import node_search_embedding
+from zhanggui_zhiku.query_process.agent.nodes.node_search_embedding_hyde import node_search_embedding_hyde
+from zhanggui_zhiku.query_process.agent.nodes.node_web_search_mcp import node_web_search_mcp
+from zhanggui_zhiku.query_process.agent.state import QueryGraphState
 
 # 初始化状态图
 builder = StateGraph(QueryGraphState)

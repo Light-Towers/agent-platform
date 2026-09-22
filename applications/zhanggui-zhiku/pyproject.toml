@@ -82,7 +82,7 @@ extend-exclude = [
 ]
 
 [tool.ruff.lint]
-select = ["E4", "E7", "E9", "F"]
+select = ["E4", "E7", "E9", "F", "I"]
 # 存量基线（M3 收窄后剩余非自动修复项），后续里程碑按目录逐条收窄；新增代码请勿依赖这些豁免。
 ignore = [
     "E722", # bare-except：存量 1 处（node_rrf.py:39）
