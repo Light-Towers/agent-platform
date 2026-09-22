@@ -157,7 +157,7 @@ def step_3_generate_embeddings(texts_to_embed: List[Dict[str, Any]], bge_m3_ef: 
             # 构造模型输入文本：拼接商品名+切片内容，增强核心特征
             input_texts = []
             for doc in batch_texts:
-                item_name = doc["item_name"]
+                item_name = doc.get("item_name", "")
                 content = doc["content"]
                 # 有商品名则拼接（换行分隔提升模型识别效率），无则直接使用内容
                 # 几乎所有的 Embedding 模型（尤其是基于 BERT 架构的），对前 128 个 token 的注意力是最集中的。越往后的词，对最终向量方向的拉扯力越弱。

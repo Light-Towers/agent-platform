@@ -56,6 +56,8 @@ class ImportGraphState(TypedDict):
     authority: str  # 发布授权方（生命周期校验，缺则不得 PUBLISHED）
     status: str  # 生命周期状态：DRAFT/REVIEWING/PUBLISHED/EXPIRED/REVOKED/SUPERSEDED
     constraint_kind: str  # 约束类型（如 free/commercial，预留）
+    exhibition_id: str  # 会展 ID（生命周期校验，通用知识库可设 general）
+    venue_id: str  # 场馆 ID（生命周期校验，通用知识库可设 general）
 
 
 # 建议定一个初始化对象，方便后续使用
@@ -92,6 +94,8 @@ graph_default_state: ImportGraphState = {
     "authority": "",
     "status": "DRAFT",
     "constraint_kind": "",
+    "exhibition_id": "",
+    "venue_id": "",
 }
 
 

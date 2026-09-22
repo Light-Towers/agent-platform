@@ -109,6 +109,8 @@ def run_graph_task(
                 "authority",
                 "status",
                 "constraint_kind",
+                "exhibition_id",
+                "venue_id",
             ):
                 if key in metadata and metadata[key] is not None:
                     init_state[key] = metadata[key]
@@ -152,6 +154,8 @@ async def upload_files(
     constraint_kind: str = Form("", description="约束类型，预留"),
     enable_item_name_recognition: bool = Form(True, description="是否启用商品名 NER 节点"),
     knowledge_id: str = Form("", description="知识条目唯一标识"),
+    exhibition_id: str = Form("", description="会展 ID（生命周期校验用）"),
+    venue_id: str = Form("", description="场馆 ID（生命周期校验用）"),
 ):
     """
     文件上传核心接口
@@ -178,6 +182,8 @@ async def upload_files(
         "constraint_kind": constraint_kind,
         "enable_item_name_recognition": enable_item_name_recognition,
         "knowledge_id": knowledge_id,
+        "exhibition_id": exhibition_id,
+        "venue_id": venue_id,
     }
     # 1. 构建本地存储根目录：项目根目录/output/YYYYMMDD（按日期分层，方便管理）
     date_based_root_dir = os.path.join(PROJECT_ROOT / "output", datetime.now().strftime("%Y%m%d"))
