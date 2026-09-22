@@ -9,8 +9,7 @@ from zhanggui_zhiku.core.logger import logger
 from zhanggui_zhiku.core.tracing import traced_span
 from zhanggui_zhiku.lm.embedding_utils import *
 from zhanggui_zhiku.lm.lm_utils import *
-from zhanggui_zhiku.utils.escape_milvus_string_utils import escape_milvus_string
-from zhanggui_zhiku.utils.item_name_normalize_utils import normalize_item_name
+from zhanggui_zhiku.utils.milvus_filter_utils import build_retrieval_filter
 from zhanggui_zhiku.utils.task_utils import add_done_task, add_running_task
 
 
@@ -72,6 +71,8 @@ def step_2_search_embedding_hyde(
     ranker_weights=None,  # 默认 None → 从 retrieval.yaml 读取（M3，方案 §7.2）
     norm_score: bool = True,  # 默认开启归一化
     output_fields=["chunk_id", "content", "item_name"],
+    tenant_id: str = None,
+    scope_type: str = None,
 ):
     """
     阶段2：利用“重写问题 + 假设性文档”生成 embedding，并到向量库检索切片。
@@ -84,6 +85,8 @@ def step_2_search_embedding_hyde(
     :param ranker_weights: 混合检索权重 (Dense, Sparse)；None 时读 zhanggui_zhiku/conf/retrieval.yaml
     :param norm_score: 是否对分数进行归一化
     :param output_fields: 返回结果中包含的字段
+    :param tenant_id: 租户 ID（08+16 多租户隔离，ACL 前置）
+    :param scope_type: PUBLIC | PRIVATE（多知识空间隔离）
     :return: 检索结果列表
     """
     if not rewritten_query:
@@ -111,15 +114,16 @@ def step_2_search_embedding_hyde(
 
     logger.info(f"Step 2: 准备在集合 '{collection_name}' 中执行混合检索")
 
-    # 构造过滤表达式 (如果有商品名限制)
-    expr = None
-    if item_names:
-        # 与 node_search_embedding.py 统一：先规范化商品名，再转义引号防止 Milvus 表达式注入/语法错误
-        quoted = ", ".join(f'"{escape_milvus_string(normalize_item_name(v))}"' for v in item_names)
-        expr = f"item_name in [{quoted}]"
+    # 08+16 通用化：item_name + tenant_id + scope_type 复合过滤（多租户 ACL 前置，INV-8）
+    expr = build_retrieval_filter(
+        item_names=item_names,
+        tenant_id=tenant_id,
+        scope_type=scope_type,
+    )
+    if expr:
         logger.info(f"Step 2: 应用过滤条件: {expr}")
     else:
-        logger.info("Step 2: 未指定商品名过滤，将全库检索")
+        logger.info("Step 2: 未指定任何过滤，将全库检索")
 
     try:
         # 构造搜索请求
@@ -211,6 +215,8 @@ def node_search_embedding_hyde(state):
             hyde_doc=hyde_doc,
             item_names=item_names,
             top_k=5,
+            tenant_id=state.get("tenant_id"),
+            scope_type=state.get("scope_type"),
         )
 
         hit_count = len(res[0]) if res and len(res) > 0 else 0

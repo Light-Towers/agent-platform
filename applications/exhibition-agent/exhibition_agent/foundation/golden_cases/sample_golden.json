@@ -1,0 +1,70 @@
+[
+  {
+    "category": "positive",
+    "query": "租户A的展位政策是什么",
+    "tenant_context": {"tenant_id": "tenant_A", "scope_type": "PRIVATE"},
+    "candidates": [
+      {
+        "knowledge_id": "k_001",
+        "tenant_id": "tenant_A",
+        "scope_type": "PRIVATE",
+        "status": "PUBLISHED",
+        "authority": "展会主办方",
+        "effective_from": "2020-01-01",
+        "effective_to": "2099-12-31",
+        "exhibition_id": "exp_001",
+        "citation": {"knowledge_id": "k_001", "authority": "展会主办方"},
+        "content": "租户A的展位政策：标准展位9平米。"
+      }
+    ],
+    "expected": {"min_hits": 1}
+  },
+  {
+    "category": "cross_tenant_negative",
+    "query": "租户B不应看到租户A的知识",
+    "tenant_context": {"tenant_id": "tenant_B", "scope_type": "PRIVATE"},
+    "candidates": [
+      {
+        "knowledge_id": "k_002",
+        "tenant_id": "tenant_A",
+        "scope_type": "PRIVATE",
+        "status": "PUBLISHED",
+        "citation": {"knowledge_id": "k_002"}
+      }
+    ],
+    "expected": {"violation_count": 0}
+  },
+  {
+    "category": "lifecycle_negative",
+    "query": "DRAFT知识不得进生产回答",
+    "tenant_context": {"tenant_id": "tenant_A"},
+    "candidates": [
+      {
+        "knowledge_id": "k_003",
+        "tenant_id": "tenant_A",
+        "scope_type": "PRIVATE",
+        "status": "DRAFT",
+        "authority": "展会主办方",
+        "effective_from": "2020-01-01",
+        "effective_to": "2099-12-31",
+        "exhibition_id": "exp_001"
+      }
+    ],
+    "expected": {}
+  },
+  {
+    "category": "conflict_set",
+    "query": "垂类知识与通用知识冲突",
+    "tenant_context": {"tenant_id": "tenant_A"},
+    "candidates": [
+      {
+        "knowledge_id": "k_004",
+        "tenant_id": "tenant_A",
+        "scope_type": "PRIVATE",
+        "status": "PUBLISHED",
+        "conflict_warning": "垂类 vs 通用"
+      }
+    ],
+    "expected": {"has_conflict": true}
+  }
+]

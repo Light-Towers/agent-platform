@@ -80,12 +80,30 @@ workflow.add_conditional_edges(
     "node_entry", route_after_entry, {"node_md_img": "node_md_img", "node_pdf_to_md": "node_pdf_to_md", END: END}
 )
 
-# ===================== 5. 注册静态顺序边（分支合并后的统一流程） =====================
+# ===================== 5. 注册静态顺序边 + item_name 可插拔条件边 =====================
 # 核心：所有分支最终合并为「固定顺序执行流程」，从MD图片处理到知识图谱入库，一步到底
-# 语法：add_edge("源节点标识", "目标节点标识/END") → 静态边，固定路由关系，无分支逻辑
+# 08+16 通用化：node_item_name_recognition 改为可插拔——
+#   state.enable_item_name_recognition=True（默认）→ 走商品名识别（既有行为）
+#   state.enable_item_name_recognition=False → 跳过，直接进 BGE 向量化（通用知识库场景）
 workflow.add_edge("node_pdf_to_md", "node_md_img")  # PDF转MD完成 → MD图片处理
 workflow.add_edge("node_md_img", "node_document_split")  # MD处理完成 → 文档分块
-workflow.add_edge("node_document_split", "node_item_name_recognition")  # 分块完成 → 项目名识别
+
+
+def route_after_split(state: ImportGraphState) -> str:
+    """
+    文档分块后的条件路由：是否走商品名识别节点。
+    :return: node_item_name_recognition | node_bge_embedding
+    """
+    if state.get("enable_item_name_recognition", True):
+        return "node_item_name_recognition"
+    return "node_bge_embedding"
+
+
+workflow.add_conditional_edges(
+    "node_document_split",
+    route_after_split,
+    {"node_item_name_recognition": "node_item_name_recognition", "node_bge_embedding": "node_bge_embedding"},
+)
 workflow.add_edge("node_item_name_recognition", "node_bge_embedding")  # 项目名识别完成 → BGE向量化
 workflow.add_edge("node_bge_embedding", "node_import_milvus")  # 向量化完成 → 导入Milvus向量库
 workflow.add_edge("node_import_milvus", END)  # Milvus入库完成 → 工作流执行结束（END是内置结束节点）

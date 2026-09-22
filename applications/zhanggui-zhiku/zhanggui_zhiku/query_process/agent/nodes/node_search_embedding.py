@@ -6,8 +6,7 @@ from zhanggui_zhiku.conf.retrieval_config import retrieval_cfg
 from zhanggui_zhiku.core.logger import logger
 from zhanggui_zhiku.core.tracing import traced_span
 from zhanggui_zhiku.lm.embedding_utils import generate_embeddings
-from zhanggui_zhiku.utils.escape_milvus_string_utils import escape_milvus_string
-from zhanggui_zhiku.utils.item_name_normalize_utils import normalize_item_name
+from zhanggui_zhiku.utils.milvus_filter_utils import build_retrieval_filter
 from zhanggui_zhiku.utils.task_utils import add_done_task, add_running_task
 
 
@@ -67,19 +66,17 @@ def node_search_embedding(state):
     logger.info(f"正在连接到 Milvus 并准备集合 '{collection_name}'...")
 
     # 4. 构造Milvus混合搜索请求对象（核心步骤）
-    # 先通过辅助函数生成商品名过滤表达式，精准过滤检索范围
-    # 'item_name in ["苹果15", "华为P60"]'
-
+    # 08+16 通用化：item_name + tenant_id + scope_type 复合过滤（多租户 ACL 前置，INV-8）
     # 若无商品名，直接返回None（不做过滤）
     if not item_names:
         logger.warning("item_names 为空，跳过检索，返回空结果")
         return {"embedding_chunks": []}
 
-    # 对每个商品名做规范化（去空白/品牌前缀/料号），再添加双引号，拼接为Milvus支持的in语法格式
-    # 与导入侧共用 normalize_item_name，保证精确过滤口径一致（如 "HAK 180 烫金机" → "HAK180烫金机"）
-    quoted = ", ".join(f'"{escape_milvus_string(normalize_item_name(v))}"' for v in item_names)
-    # 构造最终过滤表达式
-    expr = f"item_name in [{quoted}]"
+    expr = build_retrieval_filter(
+        item_names=item_names,
+        tenant_id=state.get("tenant_id"),
+        scope_type=state.get("scope_type"),
+    )
     logger.info(f"创建搜索请求过滤表达式: {expr}")
 
     # 构造稠密+稀疏混合搜索请求，整合向量、过滤条件、搜索参数

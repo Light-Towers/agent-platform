@@ -14,10 +14,10 @@ import os
 import shutil
 import uuid
 from datetime import datetime
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 # 第三方库
-from fastapi import APIRouter, BackgroundTasks, File, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 
 # 项目内部工具/配置/客户端
@@ -68,7 +68,12 @@ async def get_import_page():
 # 后台任务：LangGraph全流程执行
 # 独立于主请求线程，由BackgroundTasks触发，避免阻塞接口响应
 # --------------------------
-def run_graph_task(task_id: str, local_dir: str, local_file_path: str):
+def run_graph_task(
+    task_id: str,
+    local_dir: str,
+    local_file_path: str,
+    metadata: Optional[Dict[str, Any]] = None,
+):
     """
     LangGraph全流程执行后台任务
     核心流程：初始化状态 → 流式执行图节点 → 实时更新任务状态 → 异常捕获
@@ -78,6 +83,7 @@ def run_graph_task(task_id: str, local_dir: str, local_file_path: str):
     :param task_id: 全局唯一任务ID，关联单个文件的全流程处理
     :param local_dir: 该任务的本地文件存储目录（含临时文件/解析结果）
     :param local_file_path: 上传文件的本地绝对路径
+    :param metadata: 08+16 通用化 metadata 入参（scope_type/tenant_id/status/...），透传到 state
     """
     try:
         # 1. 更新任务全局状态为：处理中
@@ -89,6 +95,23 @@ def run_graph_task(task_id: str, local_dir: str, local_file_path: str):
         init_state["task_id"] = task_id  # 任务ID关联
         init_state["local_dir"] = local_dir  # 任务本地目录
         init_state["local_file_path"] = local_file_path  # 上传文件本地路径
+        # 08+16 通用化：透传 metadata 参数化字段（非硬编码）
+        if metadata:
+            for key in (
+                "enable_item_name_recognition",
+                "knowledge_id",
+                "scope_type",
+                "tenant_id",
+                "tenant_type",
+                "effective_from",
+                "effective_to",
+                "version",
+                "authority",
+                "status",
+                "constraint_kind",
+            ):
+                if key in metadata and metadata[key] is not None:
+                    init_state[key] = metadata[key]
 
         # 3. 流式执行LangGraph全流程（stream模式：实时获取每个节点的执行结果）
         for event in kb_import_app.stream(init_state):
@@ -114,7 +137,22 @@ def run_graph_task(task_id: str, local_dir: str, local_file_path: str):
 # 访问地址：/upload （POST请求，form-data格式传参）
 # --------------------------
 @router.post("/upload", summary="文件上传接口", description="支持多文件批量上传，自动触发知识库导入全流程")
-async def upload_files(background_tasks: BackgroundTasks, files: List[UploadFile] = File(...)):
+async def upload_files(
+    background_tasks: BackgroundTasks,
+    files: List[UploadFile] = File(...),
+    # 08+16 通用化：metadata 参数化（Form 字段，非硬编码）
+    scope_type: str = Form("PRIVATE", description="PUBLIC | PRIVATE，多知识空间隔离"),
+    tenant_id: str = Form("", description="租户 ID，多租户隔离（ACL 前置 INV-8）"),
+    tenant_type: str = Form("", description="租户类型（enterprise/personal，预留）"),
+    effective_from: str = Form("", description="生效起始日 ISO yyyy-MM-dd"),
+    effective_to: str = Form("", description="生效截止日 ISO yyyy-MM-dd"),
+    version: str = Form("", description="知识版本号"),
+    authority: str = Form("", description="发布授权方"),
+    status: str = Form("DRAFT", description="生命周期状态 DRAFT/REVIEWING/PUBLISHED/..."),
+    constraint_kind: str = Form("", description="约束类型，预留"),
+    enable_item_name_recognition: bool = Form(True, description="是否启用商品名 NER 节点"),
+    knowledge_id: str = Form("", description="知识条目唯一标识"),
+):
     """
     文件上传核心接口
     1. 接收前端上传的多文件（PDF/MD为主）
@@ -127,6 +165,20 @@ async def upload_files(background_tasks: BackgroundTasks, files: List[UploadFile
     :param files: 前端上传的文件列表（form-data格式）
     :return: 包含上传结果和所有任务ID的JSON响应
     """
+    # 08+16 通用化：聚合 metadata 入参，透传到后台任务
+    metadata = {
+        "scope_type": scope_type,
+        "tenant_id": tenant_id,
+        "tenant_type": tenant_type,
+        "effective_from": effective_from,
+        "effective_to": effective_to,
+        "version": version,
+        "authority": authority,
+        "status": status,
+        "constraint_kind": constraint_kind,
+        "enable_item_name_recognition": enable_item_name_recognition,
+        "knowledge_id": knowledge_id,
+    }
     # 1. 构建本地存储根目录：项目根目录/output/YYYYMMDD（按日期分层，方便管理）
     date_based_root_dir = os.path.join(PROJECT_ROOT / "output", datetime.now().strftime("%Y%m%d"))
     # 初始化任务ID列表，用于返回给前端（一个文件对应一个TaskID）
@@ -190,7 +242,7 @@ async def upload_files(background_tasks: BackgroundTasks, files: List[UploadFile
         add_done_task(task_id, "upload_file")
 
         # 8. 将LangGraph全流程处理加入FastAPI后台任务（异步执行，不阻塞当前接口响应）
-        background_tasks.add_task(run_graph_task, task_id, task_local_dir, local_file_abs_path)
+        background_tasks.add_task(run_graph_task, task_id, task_local_dir, local_file_abs_path, metadata)
         logger.info(f"[{task_id}] 已将LangGraph全流程加入后台任务，任务已启动")
 
     # 9. 所有文件处理完毕，返回上传成功信息和所有TaskID（前端基于TaskID轮询进度）
