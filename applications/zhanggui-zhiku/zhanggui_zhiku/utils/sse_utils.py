@@ -1,8 +1,8 @@
-import json
 import queue
 import asyncio
 from typing import Dict, Any, Optional
 from fastapi import Request
+from shared_schemas import sse_pack as _sse_pack
 from zhanggui_zhiku.core.logger import logger
 
 
@@ -37,12 +37,6 @@ def remove_sse_queue(session_id: str):
     """移除指定 session 的队列"""
     logger.debug(f"[SSE] Removing queue for session: {session_id}")
     _session_stream.pop(session_id, None)
-
-
-def _sse_pack(event: str, data: Dict[str, Any]) -> str:
-    """打包 SSE 消息格式"""
-    payload = json.dumps(data, ensure_ascii=False)
-    return f"event: {event}\ndata: {payload}\n\n"
 
 
 def push_to_session(session_id: str, event: str, data: Dict[str, Any]):

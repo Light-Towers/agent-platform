@@ -37,7 +37,7 @@ Agent Platform 是一个基于 **LangGraph Supervisor 模式** 的统一智能�
 - **不是 pip 依赖**：`packages/agent-core/pyproject.toml` 的 `dependencies=[]`，全仓库无任何 `reliable-agent` 引用 —— `agent-core` 是**自研实现等价内核**，而非直接 `pip install` 该包。
 - **本地是 superset**：`reliable-agent` 的 memory 仅指对话历史、eval.metrics 仅对给定 ID 列表算指标，**不含 embedding / vector store / 语义记忆**；本地 `agent-core` 额外提供了 `embedder.py` 与 `vector_backend.py`（pgvector 语义记忆），能力更全。
 
-更完整的上游对照与护栏清单见 [`docs/architecture-improvement-plan.md` §0.1](docs/architecture-improvement-plan.md)。
+更完整的上游对照与护栏清单见 [`docs/architecture/architecture-improvement-plan.md` §0.1](docs/architecture/architecture-improvement-plan.md)。
 
 ---
 
@@ -234,6 +234,15 @@ curl -X POST http://127.0.0.1:8000/session/revert \
 
 将会话状态回退至指定 checkpoint，不删除历史（支持 redo）。
 
+### `GET /history` — 精确回忆（优化 I）
+
+```bash
+curl "http://127.0.0.1:8000/history?session_id=thread-xxx&keyword=GMV&limit=10" \
+  -H "X-API-Key: $API_KEY"
+```
+
+按 session_id 取回历史对话**原文**（与 /query 的语义召回正交，返回字面记录），支持 `keyword` 过滤与 `limit` 条数限制；需 API_KEY 鉴权。
+
 ### `GET /health` — 健康检查
 
 ```bash
@@ -317,7 +326,7 @@ curl http://127.0.0.1:8000/health
 ## 测试与评测
 
 ```bash
-make test                            # 三套件 pytest（根 tests/ + 联邦 unit + kefu）
+make test                            # 9 session pytest（根 / shared-schemas / agent-runtime / agent-server / 联邦 / kefu / exhibition / dialogue-framework / zhanggui-zhiku）
 python eval/run_eval.py              # 启发式路由准确率基线（15 条 golden）
 python eval/run_eval.py --llm        # 配置 LLM 后评测结构化路由
 python eval/run_eval.py --fail-below 0.8   # CI 门禁用法
@@ -351,7 +360,7 @@ uv run --package agent-federation-app python -m pytest applications/agent_federa
 uv run python -m pytest tests/ -q          # 根 agent_server 包
 ```
 
-> 详见 `docs/architecture-improvement-plan.md` §6 TB-3（uv workspace 环境脆弱）。
+> 详见 `docs/architecture/architecture-improvement-plan.md` §6 TB-3（uv workspace 环境脆弱）。
 
 ### 单进程平台（本 README 描述对象）
 

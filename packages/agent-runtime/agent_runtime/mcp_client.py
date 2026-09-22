@@ -79,6 +79,7 @@ class MCPClientManager:
                 recovery_seconds=self._breaker_recovery_seconds,
             )
             conn = _MCPConnection(config, breaker)
+            stack = None
             try:
                 if config.transport == "stdio":
                     stack, session = await self._connect_stdio(config)
@@ -105,25 +106,49 @@ class MCPClientManager:
                     config.server_id,
                     exc_info=True,
                 )
+                # 已建立的连接 stack 须回收，防 MCP 子进程/网络连接泄漏（T1.2a）
+                if stack is not None:
+                    try:
+                        await stack.aclose()
+                    except Exception:
+                        logger.warning(
+                            "MCP exit stack cleanup failed server=%s",
+                            config.server_id,
+                            exc_info=True,
+                        )
 
     async def _connect_stdio(self, config: McpServerConfig):
-        """stdio transport：启动子进程，经 MCP SDK 建立 ClientSession。"""
+        """stdio transport：启动子进程，经 MCP SDK 建立 ClientSession。
+
+        失败时自清理 exit stack，防 stdio 子进程泄漏（T1.2a）。
+        """
         parts = config.endpoint.split(maxsplit=1)
         command = parts[0]
         args = parts[1].split() if len(parts) > 1 else []
         params = StdioServerParameters(command=command, args=args)
         stack = AsyncExitStack()
-        read, write = await stack.enter_async_context(stdio_client(params))
-        session = await stack.enter_async_context(ClientSession(read, write))
-        await session.initialize()
+        try:
+            read, write = await stack.enter_async_context(stdio_client(params))
+            session = await stack.enter_async_context(ClientSession(read, write))
+            await session.initialize()
+        except BaseException:
+            await stack.aclose()
+            raise
         return stack, session
 
     async def _connect_sse(self, config: McpServerConfig):
-        """SSE transport：经 MCP SDK 建立 ClientSession。"""
+        """SSE transport：经 MCP SDK 建立 ClientSession。
+
+        失败时自清理 exit stack，防连接资源泄漏（T1.2a）。
+        """
         stack = AsyncExitStack()
-        read, write = await stack.enter_async_context(sse_client(url=config.endpoint))
-        session = await stack.enter_async_context(ClientSession(read, write))
-        await session.initialize()
+        try:
+            read, write = await stack.enter_async_context(sse_client(url=config.endpoint))
+            session = await stack.enter_async_context(ClientSession(read, write))
+            await session.initialize()
+        except BaseException:
+            await stack.aclose()
+            raise
         return stack, session
 
     async def _discover_tools(self, session) -> list[str]:

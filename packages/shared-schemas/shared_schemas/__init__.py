@@ -8,6 +8,7 @@
 from shared_schemas.health import DependencyHealth, HealthResponse, HealthStatus
 from shared_schemas.intent import IntentCandidate, IntentResult
 from shared_schemas.query import Priority, QueryData, QueryRequest, QueryResponse
+from shared_schemas.sse import sse_pack
 from shared_schemas.subagent import SubagentCall, SubagentResult
 from shared_schemas.thread import THREAD_STATE_VERSION, ThreadState, empty_thread_state, message_dict
 
@@ -27,4 +28,5 @@ __all__ = [
     "ThreadState",
     "empty_thread_state",
     "message_dict",
+    "sse_pack",
 ]

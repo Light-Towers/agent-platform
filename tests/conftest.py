@@ -37,12 +37,8 @@ def clean_env(monkeypatch):
     get_settings.cache_clear()
 
 
-# 预先存在的测试问题（handoff-2026-08-21 §四「建议」）：以下两目录的测试 import 的
-# 应用模块尚未实现（dialogue_framework 的 agent.graph.builder / channels / nlg 等；
-# wenda_data_agent 同属未接入路径），会导致 `pytest` 收集期 ModuleNotFoundError 并中断
-# 整个 `make test` 门禁。这些模块非本轮范围，先将其测试从根套件收集中忽略，使 CI 可达；
-# 待对应应用模块落地后移除此处忽略即可纳入回归。
-collect_ignore_glob = [
-    "dialogue_framework/test_*.py",
-    "wenda_data_agent/test_*.py",
-]
+# 2026-09-22 T0.4：dialogue_framework / wenda_data_agent 模块已落地，
+# collect_ignore_glob 移除，改为 Makefile 独立 session 跑（避免根 session conftest 冲突）。
+# 根 session（pytest -q）经 testpaths 收集 tests/ 时，这两个子目录的测试会被收集，
+# 若与根 conftest 冲突则需在根 pyproject testpaths 排除或在此恢复选择性 ignore。
+collect_ignore_glob: list[str] = []

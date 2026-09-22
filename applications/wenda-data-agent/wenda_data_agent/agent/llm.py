@@ -1,14 +1,17 @@
-"""LLM 客户端：对齐 langchain-openai>=0.3。"""
+"""LLM 客户端：经 agent_core.llm.OpenAICompatibleProvider 构造 ChatOpenAI 实例。"""
 
 from typing import Any
 
+from agent_core.llm.providers import OpenAICompatibleProvider
 from agent_core.logging import get_logger
 
 logger = get_logger(__name__)
 
+_provider = OpenAICompatibleProvider()
+
 
 class LLMClient:
-    """LLM 客户端封装。"""
+    """LLM 客户端封装：薄壳复用 agent_core.llm.OpenAICompatibleProvider。"""
 
     def __init__(self, api_key: str = "", model: str = "gpt-4o-mini", base_url: str = "") -> None:
         self._api_key = api_key
@@ -18,12 +21,11 @@ class LLMClient:
 
     def _ensure_llm(self) -> Any:
         if self._llm is None:
-            from langchain_openai import ChatOpenAI
-
-            kwargs: dict[str, Any] = {"api_key": self._api_key, "model": self._model}
-            if self._base_url:
-                kwargs["base_url"] = self._base_url
-            self._llm = ChatOpenAI(**kwargs)
+            self._llm = _provider.build(
+                model=self._model,
+                api_key=self._api_key,
+                base_url=self._base_url or None,
+            )
         return self._llm
 
     async def invoke(self, prompt: str) -> str:

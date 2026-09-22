@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import pytest
 
+pytest.importorskip("mcp")
+
 from agent_runtime.circuit_breaker import CircuitBreaker
 from agent_runtime.mcp_client import MCPClientManager, McpToolError, _MCPConnection
 from agent_runtime.schemas import McpServerConfig

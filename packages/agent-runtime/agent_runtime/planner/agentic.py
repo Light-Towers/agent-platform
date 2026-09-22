@@ -185,7 +185,7 @@ class AgenticPlanner(Planner):
         """将 AgenticPlanner 包装为 SkillKind.AGENT 型 Skill。
 
         executor 经 entry_points 发现（或显式注册），接受 ``question`` / ``workspace_id`` kwargs。
-        注册到 SkillRegistry 后可通过 ``registry.execute("agentic", question=..., workspace_id=...)`` 调用，
+        注册到 SkillRegistry 后可经 ``runtime.delegate("agentic", question=..., workspace_id=...)`` 调用，
         也可在 ExecutionGraph 中作为节点引用。
 
         :raises RuntimeError: entry_points 不可用且未显式注册执行器时。

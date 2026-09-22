@@ -36,8 +36,10 @@
 services:
   web:
     build:
-      context: ..
-      dockerfile: zhanggui-zhiku/Dockerfile
+      # 2026-09-22 T1.1：context 改为仓库根，Dockerfile COPY 路径相对仓库根
+      # （packages/agent-core 与 applications/ 均需进入 build context）
+      context: ../..
+      dockerfile: applications/zhanggui-zhiku/Dockerfile
     container_name: zhanggui-zhiku-web
     restart: unless-stopped
     ports:
@@ -67,7 +69,7 @@ services:
       - ./logs:/app/logs
       - ./models:/app/models
     # M6（§10.5）：显式单 worker 容量模型（模型进程内加载，多 worker = 多份模型副本内存放大）
-    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+    command: ["uvicorn", "zhanggui_zhiku.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
     # M6（§2.2）：存活探针（/health/live 已由 M6 新增；/health 旧探针保留兼容）。
     # 就绪语义由业务层 /health/ready 提供（Milvus 连通判据）；此处用轻量存活探针避免误摘除。
     healthcheck:

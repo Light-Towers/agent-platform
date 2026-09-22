@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import importlib
+import os
 
 # 工具名 -> "module.attr" 延迟定位串（module 相对 agent_federation 包）
 TOOL_REGISTRY: dict[str, str] = {
@@ -32,7 +33,21 @@ ROLE_TOOLS: dict[str, list[str]] = {
     "data": ["execute_sql_query", "read_file_content"],
     "search": ["internet_search", "read_file_content"],
     "knowledge": ["zhiku_retrieve", "read_file_content"],
+    # T1.2b：code 角色仅当调用方显式传入 roles 时生效；LLM 自主输出会被
+    # normalize_roles 剥离（LLM_EXCLUDED_ROLES），防不可控地拿到宿主代码执行面。
+    "code": ["execute_python_code"],
 }
+
+# LLM 不可自选的角色（T1.2b）：normalize_roles（LLM 输出规整路径）永远剥离。
+LLM_EXCLUDED_ROLES = frozenset({"code"})
+
+
+def sandbox_tool_enabled() -> bool:
+    """沙箱工具开关（T1.2b）：运行时读取 env，宿主代码执行面默认关闭。
+
+    静态挂载（main_agent）与动态角色模式（get_tools_for_roles，含全量回退）均受此约束。
+    """
+    return os.getenv("SANDBOX_TOOL_ENABLED", "false").lower() == "true"
 
 # 基础角色始终挂载（任何模式都需要文件读写能力）
 BASE_ROLES = ["files"]
@@ -76,6 +91,11 @@ def get_tools_for_roles(roles: list[str] | None) -> list[object]:
         seen: set[str] = set()
         names = [n for n in selected if not (n in seen or seen.add(n))]
 
+    # 沙箱工具统一受 SANDBOX_TOOL_ENABLED 约束（T1.2b）：无论显式角色还是
+    # 全量回退，开关关闭时一律剔除（roles=None 全量回退曾是绕过面）。
+    if not sandbox_tool_enabled():
+        names = [n for n in names if n != "execute_python_code"]
+
     tools = []
     for n in names:
         obj = _resolve(n)
@@ -90,8 +110,8 @@ def normalize_roles(raw: list[str] | None) -> list[str]:
     防止 LLM 返回未知 role 导致工具集为空（主管无任何工具 = 不可用）。
     """
     if not raw:
-        return list(ALL_ROLES)
-    known = [r for r in raw if r in ROLE_TOOLS]
+        return [r for r in ALL_ROLES if r not in LLM_EXCLUDED_ROLES]
+    known = [r for r in raw if r in ROLE_TOOLS and r not in LLM_EXCLUDED_ROLES]
     roles = list(BASE_ROLES)
     for r in known:
         if r not in roles:

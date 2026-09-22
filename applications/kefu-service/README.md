@@ -11,7 +11,7 @@
 
 ```bash
 # 安装（在仓库根目录，editable 安装共享内核）
-pip install -e ./agent-core -e ./shared-schemas -e ./kefu-service
+pip install -e ./packages/agent-core -e ./packages/shared-schemas -e ./applications/kefu-service
 
 # 启动（默认 :8003）
 uvicorn kefu_agent:app --host 0.0.0.0 --port 8003

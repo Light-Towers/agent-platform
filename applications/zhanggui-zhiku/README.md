@@ -15,7 +15,7 @@ flowchart TB
         CHAT["chat.html<br/>问答对话"]
     end
 
-    subgraph API["单一 FastAPI 应用 (app.main:app)"]
+    subgraph API["单一 FastAPI 应用 (zhanggui_zhiku.main:app)"]
         IR["import_router<br/>/import.html /upload /status"]
         QR["query_router<br/>/chat.html /health /query /stream /history"]
     end
@@ -82,7 +82,7 @@ flowchart TB
 
 ### 3.2 安装依赖
 
-使用 [`uv`](https://github.com/astral-sh/uv)（推荐，已提供 `uv.lock` 锁定 171 个包版本，可精确复现）：
+使用 [`uv`](https://github.com/astral-sh/uv)（推荐，依赖版本由 monorepo 根 `uv.lock` 统一锁定（workspace 模式，本包不单独持有 `uv.lock`），可精确复现）：
 
 ```bash
 uv sync                 # 按 uv.lock 创建 .venv 并安装全部依赖（含 torch/langchain/magic-pdf 等）
@@ -114,13 +114,13 @@ cp .env.example .env
 方式一：命令行入口（由 `pyproject.toml` 的 `scripts` 提供）
 
 ```bash
-zhanggui-zhiku            # 等价于 uvicorn app.main:app --host 0.0.0.0 --port 8000
+zhanggui-zhiku            # 等价于 uvicorn zhanggui_zhiku.main:app --host 0.0.0.0 --port 8000
 ```
 
 方式二：直接用 uvicorn
 
 ```bash
-uvicorn app.main:app --host 0.0.0.0 --port 8000
+uvicorn zhanggui_zhiku.main:app --host 0.0.0.0 --port 8000
 ```
 
 启动后访问：
@@ -272,7 +272,7 @@ python test/04-test_graph_flow.py
 ## 9. 常见问题（Troubleshooting）
 
 - **启动报 `ModuleNotFoundError`**：确认已 `pip install -e .` 且 Python >= 3.11；重型包（torch 等）需联网安装。
-- **`.env` 未生效**：`.env` 由 `app.core.config` 在导入时**仅加载一次**，请确保在启动进程前已存在；`PROJECT_ROOT` 等也可通过环境变量覆盖。
+- **`.env` 未生效**：`.env` 由 `zhanggui_zhiku.core.config` 在导入时**仅加载一次**，请确保在启动进程前已存在；`PROJECT_ROOT` 等也可通过环境变量覆盖。
 - **MinIO 上传失败**：检查 `.env` 中 `MINIO_ENDPOINT` / `MINIO_ACCESS_KEY` / `MINIO_SECRET_KEY`；桶 `MINIO_BUCKET_NAME` 默认由 `minio-init` 自动创建，若未跑该服务请手动在 MinIO 控制台建桶。上传失败不阻断本地处理流程（仅记录警告）。
 - **Milvus 连接失败**：确认 `MILVUS_URL` 可达（本地 `http://localhost:19530`，容器网络内为 `http://milvus:19530`）。
 - **页面 API 跨域**：前端 `API_BASE` 已统一为 `window.location.origin`（同源）；如需跨域，调整 `CORS_ORIGINS`。
@@ -282,8 +282,7 @@ python test/04-test_graph_flow.py
 
 ## 10. 生产化改造（v1.1.0）
 
-> 本仓库按**生产标准**做了 M1~M8 工程化改造（方案见
-> `pending/zhanggui-zhiku-production-plan.md`），主线：CI / 版本治理 / 评测 / 索引版本化 /
+> 本仓库按**生产标准**做了 M1~M8 工程化改造，主线：CI / 版本治理 / 评测 / 索引版本化 /
 > 配置外置 / OTel 全链路 / 入站安全护栏 / 并发与水平扩展 / 压测闭环 / 硅基流动 API 模式（无 GPU 运行）。
 
 ### 10.1 M1~M8 一句话总览

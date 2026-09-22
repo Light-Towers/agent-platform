@@ -7,7 +7,7 @@
 
 ## 1. 核心论断：本仓库是「Platform + Applications」的 monorepo
 
-根目录的 13 个顶层条目其实分属两类，**视觉平铺导致误判为同级架构层**：
+根目录的 16 个顶层条目其实分属两类，**视觉平铺导致误判为同级架构层**：
 
 - **Packages（平台基础设施）**：`agent-core`、`agent-runtime`、`shared-schemas`
   —— 它们是**库**，被其它成员以 `workspace = true` 依赖引用（见根 `pyproject.toml` 的 `[tool.uv.sources]`）。
@@ -36,7 +36,7 @@ agent-core  agent-runtime  shared-schemas  agent-server  agent_federation  dialo
 | 目录 | 定位 | 职责 | 稳定性 |
 |------|------|------|--------|
 | `agent-core` | **基础 Agent 能力内核** | logging / tracing / metrics / llm / memory（含 MemoryStore 统一门面） / tools / guardrails / resilience / events（EventBus 多 sink 扇出） / config（KernelConfig + 类型化 env 解析） / intent（L1 分类器） | 稳定、底层、框架无关（不得 import 任何宿主） |
-| `agent-runtime` | **Agent 执行 / 组合运行时** | Planner / Plan / Skill（Function/Agent/Remote/Workflow/MCP/Sandbox 六型） / SkillRegistry / Workflow / ExecutionContext / ExecutionRuntime / Sandbox | 重点建设，架构收口完成 |
+| `agent-runtime` | **Agent 执行 / 组合运行时** | Planner / Plan / Skill（Function/Agent/Remote/Workflow 四型 SkillKind，MCP/Sandbox 经特化注册函数挂载） / SkillRegistry / Workflow / ExecutionContext / ExecutionRuntime / Sandbox | 重点建设，架构收口完成 |
 | `shared-schemas` | **跨边界数据 / 协议契约** | Request / Response / Event / Error / Protocol DTO | 稳定，跨进程通信单一事实来源 |
 
 > `agent-core` 提供**零件**，`agent-runtime` 把零件**组装成执行引擎**。二者不可反向依赖。
@@ -70,8 +70,8 @@ agent-core  agent-runtime  shared-schemas  agent-server  agent_federation  dialo
                          │                   │
               ┌──────────┼──────────┬────────┼──────────┐
               │          │          │        │          │
-              ▼          ▼          ▼        ▼          ▼
-        agent-server  agent_federation  dialogue  kefu  wenda  zhiku
+▼          ▼          ▼        ▼          ▼          ▼
+         agent-server  agent_federation  dialogue  exhibition  kefu  wenda  zhiku
         (applications 仅向下依赖 packages)
 ```
 
@@ -105,6 +105,7 @@ agent-platform/
 │   ├── agent_server/       # (原 app/，根宿主，包名同步 agent_server)
 │   ├── agent_federation/
 │   ├── dialogue-framework/
+│   ├── exhibition-agent/
 │   ├── kefu-service/
 │   ├── wenda-data-agent/
 │   └── zhanggui-zhiku/
@@ -113,5 +114,5 @@ agent-platform/
 └── pyproject.toml / Dockerfile / Makefile / docker-compose.yml
 ```
 
-> 注：`agent_server`（原 `app`）是**根项目本体**，不是独立 workspace 成员（无自身 `pyproject.toml`），由根 `pyproject.toml` 的 `[tool.hatch.build.targets.wheel] packages=["applications/agent_server"]` 管理；其余 5 个 applications 是独立成员。
+> 注：`agent_server`（原 `app`）是**根项目本体**，不是独立 workspace 成员（无自身 `pyproject.toml`），由根 `pyproject.toml` 的 `[tool.hatch.build.targets.wheel] packages=["applications/agent_server"]` 管理；其余 6 个 applications 是独立成员。
 > 物理分层 + `app`→`agent_server` 改名已于 2026-08-19 完成，根 `pytest` 17 passed、`uv sync` 通过、`uvicorn agent_server.main:app` 可导入。
