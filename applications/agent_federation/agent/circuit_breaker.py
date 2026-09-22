@@ -86,6 +86,23 @@ class CircuitBreaker(_RuntimeBreaker):
         super().record_failure()
         self._report_transition()
 
+    async def call(self, fn, fallback=None):
+        """覆盖父类 call：正确 await async allow/record_*。
+
+        父类 agent_runtime.CircuitBreaker.call 内部同步调用 self.allow() 等，
+        但本子类将其覆盖为 async，若不覆盖 call 则 self.allow() 返回 coroutine
+        （bool 恒 True），熔断 OPEN 状态不生效。
+        """
+        if not await self.allow():
+            return fallback
+        try:
+            result = await fn()
+        except Exception:
+            await self.record_failure()
+            return fallback
+        await self.record_success()
+        return result
+
 
 _breakers: dict[str, CircuitBreaker] = {}
 _breakers_lock = asyncio.Lock()

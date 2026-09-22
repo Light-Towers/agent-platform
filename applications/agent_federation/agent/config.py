@@ -45,7 +45,6 @@ AGENT_MODE = _env("AGENT_MODE", "local")
 TIMEOUT_DB_QUERY = float(_env("TIMEOUT_DB_QUERY", "15"))      # DB 查询超时
 TIMEOUT_PDF_PARSE = float(_env("TIMEOUT_PDF_PARSE", "30"))    # PDF 解析超时
 TIMEOUT_SUBAGENT_HTTP = float(_env("TIMEOUT_SUBAGENT_HTTP", "30"))  # 子服务 HTTP 调用超时
-TIMEOUT_ZHIKU_HEALTH = float(_env("TIMEOUT_ZHIKU_HEALTH", "5"))    # zhiku 健康探活超时
 
 _subservices: dict[str, SubserviceConfig] = {
     "text_to_sql": SubserviceConfig(

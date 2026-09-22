@@ -22,6 +22,10 @@ from agent_runtime.schemas import McpServerConfig, McpToolResult
 
 logger = logging.getLogger(__name__)
 
+
+class McpToolError(RuntimeError):
+    """MCP 工具返回 is_error=True 或结果归约失败时抛出。"""
+
 try:
     import mcp as mcp_sdk  # noqa: F401  SDK 可用性探测，_MCP_AVAILABLE 依赖其导入成功
     from mcp import ClientSession, StdioServerParameters
@@ -209,7 +213,7 @@ class MCPClientManager:
 
         try:
             evidence = self._reduce_result(server_id, tool_name, result)
-        except RuntimeError:
+        except McpToolError:
             spawn_background(
                 self._audit_call(caller, server_id, tool_name, params, "failed", duration_ms, "TOOL_RETURNED_ERROR")
             )
@@ -239,7 +243,7 @@ class MCPClientManager:
         处理 MCP SDK 的 CallToolResult（含 .content / .isError）以及其他类型。
         """
         if hasattr(result, "is_error") and result.is_error:
-            raise RuntimeError(f"MCP tool {tool_name} returned error: {result}")
+            raise McpToolError(f"MCP tool {tool_name} returned error: {result}")
 
         pieces: list[str] = []
         if hasattr(result, "content") and result.content:
