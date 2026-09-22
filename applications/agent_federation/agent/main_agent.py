@@ -292,11 +292,6 @@ def get_main_checkpointer():
     return _main_checkpointer
 
 
-def get_main_store():
-    """返回当前 main_agent 使用的长期记忆 store（P2.2）。"""
-    return _main_store
-
-
 # P5：动态子 Agent（工具注册表 + 角色规约）
 _ROLE_CACHE: "OrderedDict[str, object]" = OrderedDict()
 _ROLE_CACHE_MAX = int(os.getenv("DYNAMIC_AGENT_CACHE_MAX", "10"))  # LRU 容量

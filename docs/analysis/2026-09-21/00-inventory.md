@@ -13,7 +13,7 @@
 | 4 | applications/agent_federation | agent-federation-app | hatchling | >=3.11 | agent-core, shared-schemas, agent-runtime | ~80 |
 | 5 | applications/kefu-service | kefu_agent | hatchling | >=3.11 | agent-core[memory-embed-local], shared-schemas | ~10 |
 | 6 | applications/wenda-data-agent | wenda_data_agent | hatchling | >=3.11 | agent-core, shared-schemas | ~15 |
-| 7 | applications/zhanggui-zhiku | **app** | **setuptools** | >=3.11 | agent-core | ~110 |
+| 7 | applications/zhanggui-zhiku | zhanggui_zhiku | setuptools | >=3.11 | agent-core, shared-schemas | ~110 |
 | 8 | applications/dialogue-framework | dialogue_framework | hatchling | >=3.11 | agent-core, shared-schemas | ~30 |
 | 9 | applications/exhibition-agent | exhibition_agent | hatchling | >=3.11 | agent-core | ~30%20 |
 

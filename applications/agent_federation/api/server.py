@@ -119,7 +119,7 @@ async def lifespan(app: FastAPI):
     await close_pool()
 
 
-app = FastAPI(title="DeepAgents API", lifespan=lifespan)
+app = FastAPI(title="agent_federation API", lifespan=lifespan)
 
 output_dir = project_root / "output"
 output_dir.mkdir(exist_ok=True)

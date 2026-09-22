@@ -115,4 +115,4 @@ agent-platform/
 ```
 
 > 注：`agent_server`（原 `app`）是**根项目本体**，不是独立 workspace 成员（无自身 `pyproject.toml`），由根 `pyproject.toml` 的 `[tool.hatch.build.targets.wheel] packages=["applications/agent_server"]` 管理；其余 6 个 applications 是独立成员。
-> 物理分层 + `app`→`agent_server` 改名已于 2026-08-19 完成，根 `pytest` 17 passed、`uv sync` 通过、`uvicorn agent_server.main:app` 可导入。
+> 物理分层 + `app`→`agent_server` 改名已于 2026-08-19 完成，`uv sync --all-packages --extra dev` 通过、`uvicorn agent_server.main:app` 可导入。

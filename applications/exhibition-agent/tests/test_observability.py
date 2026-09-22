@@ -70,7 +70,7 @@ def test_inject_traceparent_noop_returns_headers():
 def test_extract_traceparent_noop_returns_none_or_context():
     """no-op 模式下 extract_traceparent 返回 None 或空 context（不崩）。"""
     result = extract_traceparent({"traceparent": "00-aaa-bbb-01"})
-    assert result is None or result is not None
+    assert result is None
 
 
 def test_use_context_none_returns_nullcontext():
@@ -94,8 +94,7 @@ def test_init_observability_idempotent():
     s = Settings(otel_enabled=False, otel_endpoint=None)
     tracer1 = init_observability(s)
     tracer2 = init_observability(s)
-    assert tracer1 is not None
-    assert tracer2 is not None
+    assert tracer1 is tracer2
 
 
 def test_init_observability_enabled_but_no_sdk():

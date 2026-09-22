@@ -146,7 +146,7 @@ flowchart LR
 ### 零依赖冒烟（开发模式）
 
 ```bash
-pip install -e ".[dev]"
+uv sync --all-packages --extra dev
 DATABASE_URL= uvicorn agent_server.main:app --port 8000
 ```
 
@@ -162,7 +162,7 @@ docker compose up -d    # pgvector + 服务（127.0.0.1:8000）
 ### 可选依赖
 
 ```bash
-pip install -e ".[otel,mcp,pdf,dev]"
+uv sync --all-packages --extra dev --extra otel --extra mcp --extra pdf
 ```
 
 | Extra | 用途 |

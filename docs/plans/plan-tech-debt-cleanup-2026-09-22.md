@@ -1,11 +1,12 @@
 # Plan：全局技术债务治理（2026-09-22 扫描成果）
 
-> 状态：2026-09-22 制定，P0+P1 已完成，P2/P3 待实施
+> 状态：2026-09-22 制定，P0+P1+P2(T2.1/T2.3) 已完成，P2(T2.2/T2.4)+P3 待实施
 > 来源：6 维度并行扫描（代码质量 / 架构 / 依赖配置 / 测试覆盖 / 文档注释 / 重构遗留）
 > 范围：当前工作区快照（存在并发写入，实施前须冻结基线）
 > 总计：发现 97 项，去重后约 80 项实质债务，分 4 优先级 13 批次任务
 > 已确认无问题 12 项（红线 1/2/3 通过、Plan-F 中间件全实现、CI 矩阵对齐、eval 15 条对齐等）不列入任务
 > P1 完成详情：86 新测试 / env helper + sse_pack + ApiReranker + LLMClient 收敛 / revert.py checkpoint_ns bug 修复
+> P2 完成详情：61 新测试（cache/tracing/guards/schema_store/embed_rerank）/ zhanggui ruff I + 48 import fix / 4 包 addopts / .env.example
 
 ## 总览
 
@@ -257,22 +258,22 @@
 ### T2.4 修 26 项 Medium 文档 + 补 README
 
 **改动**（精选）：
-- [ ] 新增 `packages/agent-runtime/README.md`（列 planner/skills/sandbox 模块职责与公开 API）
-- [ ] 新增 `packages/shared-schemas/README.md`（列 QueryResponse/ThreadState/HealthResponse 契约）
-- [ ] `README.md:148 vs :344` 安装命令统一为 `uv sync --all-packages --extra dev`
-- [ ] `applications/kefu-service/README.md:33,35` kefu-adapter 矛盾清理
-- [ ] `applications/zhanggui-zhiku/CHANGELOG.md:18-20` `app/`→`zhanggui_zhiku/`
-- [ ] `applications/zhanggui-zhiku/docs/architecture-design.md` 24 处 `app.`→`zhanggui_zhiku.`
-- [ ] `applications/agent_federation/api/server.py:122` FastAPI title "DeepAgents API"→"agent_federation API"
-- [ ] `applications/dialogue-framework/README.md:45,46` 安装路径补 applications/
-- [ ] `ARCHITECTURE.md:117` "17 passed"→当前数或删除具体数字
-- [ ] `CODE_REVIEW_CHECKLIST.md` 多处旧路径更新或加时效性标注
-- [ ] `docs/analysis/2026-09-21/00-inventory.md:16` 包名 `app`→`zhanggui_zhiku`
-- [ ] `docs/analysis/2026-09-21/02-debt-diagnosis.md:89` F-S0-08 状态标 ✅ 已修复（与 §3 一致）
+- [x] 新增 `packages/agent-runtime/README.md`（列 planner/skills/sandbox 模块职责与公开 API）
+- [x] 新增 `packages/shared-schemas/README.md`（列 QueryResponse/ThreadState/HealthResponse 契约）
+- [x] `README.md:148 vs :344` 安装命令统一为 `uv sync --all-packages --extra dev`
+- [x] `applications/kefu-service/README.md:33,35` kefu-adapter 矛盾清理
+- [x] `applications/zhanggui-zhiku/CHANGELOG.md:18-20` `app/`→`zhanggui_zhiku/`
+- [x] `applications/zhanggui-zhiku/docs/architecture-design.md` 24 处 `app.`→`zhanggui_zhiku.`
+- [x] `applications/agent_federation/api/server.py:122` FastAPI title "DeepAgents API"→"agent_federation API"
+- [x] `applications/dialogue-framework/README.md:45,46` 安装路径补 applications/
+- [x] `ARCHITECTURE.md:117` "17 passed"→当前数或删除具体数字
+- [x] `CODE_REVIEW_CHECKLIST.md` 多处旧路径更新或加时效性标注（已有第 2 行时效性说明，无需再改）
+- [x] `docs/analysis/2026-09-21/00-inventory.md:16` 包名 `app`→`zhanggui_zhiku`
+- [x] `docs/analysis/2026-09-21/02-debt-diagnosis.md:89` F-S0-08 状态标 ✅ 已修复（与 §3 一致）
 
 **验收**：
-- [ ] 文档间无矛盾
-- [ ] 文档路径引用全有效
+- [x] 文档间无矛盾
+- [x] 文档路径引用全有效
 
 ---
 
@@ -281,30 +282,30 @@
 ### T3.1 Low 19 项
 
 **改动**（精选，低优先级）：
-- [ ] 删除 `agent_federation/agent/main_agent.py:289-294` `get_main_store` 死代码（确认无引用后）
-- [ ] 产品代码单字母变量改语义名（`q/p/s/v/k` → `normalized_query/pythonized_path/...`）
-- [ ] `zhanggui-zhiku` 节点函数裸阈值集中到 conf/ 配置模块
-- [ ] 评估 `zhanggui-zhiku` setuptools → hatchling 迁移
-- [ ] `kefu-service` + `zhanggui-zhiku` 补 `[tool.pytest.ini_options]` 显式声明
-- [ ] `docker-compose.ha.yml:19` postgres 改 `${POSTGRES_PASSWORD:?}` 强制
-- [ ] `zhanggui-zhiku/.env.example:59,67-68` MinIO/Neo4j 弱凭据改占位符
-- [ ] ruff ignore 存量基线逐包收窄（记忆 `project_agent-runtime-ruff-ignore-baseline`：豁免不可清理，但可逐条评估）
-- [ ] `exhibition-agent/tests/test_observability.py:73` 恒真断言改具体行为断言
-- [ ] `exhibition-agent/tests/test_observability.py:92-98` 幂等测试补 `assert tracer1 is tracer2`
-- [ ] `agent_core` 注释中应用名改泛化表述（"宿主应用"）
-- [ ] `agent_core/tests/test_cache_key.py:11` 业务术语 "refund"/"kefu" 改中性词
-- [ ] `agent_server/api/routes.py` 按业务域拆分（query/import/sql/session/health_router）
-- [ ] `AGENTS.md:15` planner/ 模块清单补全（11 个）+ skills/ 清单补全（10 个）
-- [ ] `Makefile:24` 注释移除"包名 app 遮蔽风险"
-- [ ] `agent_federation/VERIFICATION_REPORT.md:19` wenda-adapter 标注已退役
-- [ ] `agent_federation/eval/AUDIT.md` 旧名 `deepagents/` 加时效性标注或替换
-- [ ] 清理 87 处裸 `except Exception:`（区分可恢复 vs 编程错误）
-- [ ] `zhanggui-zhiku/core/config.py` 评估引入 pydantic-settings 统一配置风格
+- [x] 删除 `agent_federation/agent/main_agent.py:289-294` `get_main_store` 死代码（确认无引用后）
+- [ ] 产品代码单字母变量改语义名（`q/p/s/v/k` → `normalized_query/pythonized_path/...`）— 跳过：大规模重构，风险高
+- [ ] `zhanggui-zhiku` 节点函数裸阈值集中到 conf/ 配置模块 — 跳过：大规模重构
+- [ ] 评估 `zhanggui-zhiku` setuptools → hatchling 迁移 — 跳过：评估性任务
+- [ ] `kefu-service` + `zhanggui-zhiku` 补 `[tool.pytest.ini_options]` 显式声明 — 跳过：已有 addopts 配置
+- [x] `docker-compose.ha.yml:19` postgres 改 `${POSTGRES_PASSWORD:?}` 强制
+- [x] `zhanggui-zhiku/.env.example:59,67-68` MinIO/Neo4j 弱凭据改占位符
+- [ ] ruff ignore 存量基线逐包收窄 — 跳过：逐包评估，记忆 `project_agent-runtime-ruff-ignore-baseline`
+- [x] `exhibition-agent/tests/test_observability.py:73` 恒真断言改具体行为断言
+- [x] `exhibition-agent/tests/test_observability.py:92-98` 幂等测试补 `assert tracer1 is tracer2`
+- [ ] `agent_core` 注释中应用名改泛化表述（"宿主应用"） — 跳过：81 处历史注释有保留价值
+- [x] `agent_core/tests/test_cache_key.py:11` 业务术语 "refund"/"kefu" 改中性词
+- [ ] `agent_server/api/routes.py` 按业务域拆分 — 跳过：大规模重构
+- [x] `AGENTS.md:15` planner/ 模块清单补全（11 个）+ skills/ 清单补全（10 个）
+- [x] `Makefile:24` 注释移除"包名 app 遮蔽风险"
+- [x] `agent_federation/VERIFICATION_REPORT.md:19` wenda-adapter 标注已退役
+- [x] `agent_federation/eval/AUDIT.md` 旧名 `deepagents/` 加时效性标注或替换
+- [ ] 清理 87 处裸 `except Exception:` — 跳过：大规模重构，需逐个区分可恢复 vs 编程错误
+- [ ] `zhanggui-zhiku/core/config.py` 评估引入 pydantic-settings 统一配置风格 — 跳过：评估性任务
 
 **验收**：
-- [ ] 无死代码
-- [ ] 无恒真断言
-- [ ] ruff 全绿
+- [x] 无死代码（get_main_store 已删）
+- [x] 无恒真断言（test_observability 已修）
+- [x] ruff 全绿
 
 ---
 
@@ -313,17 +314,17 @@
 **问题**：文档数字/路径/命名靠人工维护，无 CI 自动校验，已多次漂移。
 
 **改动**：
-- [ ] 新增 `scripts/check_doc_sync.py` CI 脚本，自动校验：
+- [x] 新增 `scripts/check_doc_sync.py` CI 脚本，自动校验：
   - 文档中提到的路径经 Glob 验证存在
   - 文档中提到的数字（测试数/eval 条数/代码行数/.env 项数）经 bash 验证一致
   - 文档中提到的模块/类名经 grep 验证存在
-- [ ] CI workflow 增加该脚本执行步骤
-- [ ] 失败时输出"文档说 X，实际是 Y"对比
+- [x] CI workflow 增加该脚本执行步骤
+- [x] 失败时输出"文档说 X，实际是 Y"对比
 
 **验收**：
-- [ ] `scripts/check_doc_sync.py` 在 CI 运行
-- [ ] 现有文档通过校验
-- [ ] 后续文档漂移被 CI 拦截
+- [x] `scripts/check_doc_sync.py` 在 CI 运行
+- [x] 现有文档通过校验
+- [x] 后续文档漂移被 CI 拦截
 
 ---
 
