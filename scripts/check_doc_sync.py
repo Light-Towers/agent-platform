@@ -9,6 +9,8 @@
   3. 文档中引用的 pyproject.toml 包名与实际一致
   4. ARCHITECTURE.md 目录树路径存在
   5. applications/*/pyproject.toml 包名与目录名匹配
+  6. Makefile test session 数 == AGENTS.md 声称数
+  7. agent_federation FastAPI title 一致性
 
 用法：
   python scripts/check_doc_sync.py          # 校验，0=通过 1=有漂移
@@ -123,6 +125,44 @@ def check_federation_title() -> None:
         err("agent_federation/api/server.py: FastAPI title 仍为 'DeepAgents API'，应为 'agent_federation API'")
 
 
+def check_session_count() -> None:
+    makefile = REPO_ROOT / "Makefile"
+    agents = REPO_ROOT / "AGENTS.md"
+    if not makefile.exists() or not agents.exists():
+        return
+
+    mk_content = makefile.read_text(encoding="utf-8")
+    in_test = False
+    mk_sessions = 0
+    for line in mk_content.splitlines():
+        if line.startswith("test:"):
+            in_test = True
+            continue
+        if in_test:
+            if line.startswith("\tuv run pytest "):
+                mk_sessions += 1
+            elif line and not line.startswith("\t") and not line.startswith("#"):
+                in_test = False
+
+    agents_content = agents.read_text(encoding="utf-8")
+    declared = set()
+    for m in re.finditer(r"(\d+)\s*(?:个\s*)?pytest\s*session", agents_content):
+        declared.add(int(m.group(1)))
+    for m in re.finditer(r"(\d+)\s*session\s*pytest", agents_content):
+        declared.add(int(m.group(1)))
+    for m in re.finditer(r"全量\s*(\d+)\s*session", agents_content):
+        declared.add(int(m.group(1)))
+
+    if mk_sessions == 0:
+        warn("Makefile: 未找到 test session 行")
+        return
+
+    if declared and mk_sessions not in declared:
+        err(f"session 数不一致: Makefile 有 {mk_sessions} 个 session，AGENTS.md 声称 {sorted(declared)}")
+    elif not declared:
+        warn("AGENTS.md: 未找到 session 数声明")
+
+
 def main() -> bool:
     verbose = "--verbose" in sys.argv
 
@@ -131,6 +171,7 @@ def main() -> bool:
     check_pyproject_package_names()
     check_architecture_paths()
     check_federation_title()
+    check_session_count()
 
     if WARNINGS:
         if verbose:

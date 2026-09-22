@@ -25,7 +25,7 @@ type:
 # integration 层有 ZHIKU_INTEGRATION=1 守卫、缺环境自动 skip）同样独立 session，2026-09-21 纳入门禁（F-S0-01/F-S0-02）。
 # agent_server/tests（GraphPlanner 等应用层集成测试，2026-09-21 F-S1-01 由 agent-runtime/tests 迁入，
 # 消除红线 1 反向依赖）同样独立 session。
-# 8 个 session 任一失败即中断，确保 #2 审查项（防回归测试纳入 CI）真正落地。
+# 10 个 session 任一失败即中断，确保 #2 审查项（防回归测试纳入 CI）真正落地。
 # 注：本地目录原名 deepagents/（与 PyPI 依赖包同名），2026-08-19 重命名为
 # agent_federation/ 彻底消除遮蔽；test_tool_registry 已回归门禁（75 passed）。
 test:
@@ -38,6 +38,7 @@ test:
 	uv run pytest applications/exhibition-agent/tests -q
 	uv run pytest applications/dialogue-framework/tests -q
 	uv run pytest applications/zhanggui-zhiku/tests -q
+	uv run pytest applications/wenda-data-agent/tests -q
 
 # 评测门禁：默认启发式（确定性，CI 可达），阈值 0.8；LLM_API_KEY 缺失时回退启发式并 WARN。
 # 注意：必须用直接路径 `eval/run_eval.py` 而非 `-m eval.run_eval`，
