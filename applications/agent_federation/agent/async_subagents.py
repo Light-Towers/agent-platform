@@ -12,7 +12,7 @@ AGENT_MODE=local 时仍用本地 subagent。
   优先使用外部 `deepagents` 包的 `AsyncSubAgent`（graph_id+url，Agent Protocol）。
   若该包未安装（当前 .venv 未包含），自动回退到基于 httpx 的
   `_HttpSubAgent`：POST 到子服务各自的 endpoint（见 SubserviceConfig.endpoint），
-  例如 kefu 直连走 /invoke（返回 QueryResponse），wenda-data-agent 走 /api/query
+  例如 kefu 直连走 /invoke（返回 QueryResponse），nl2sql-service 走 /api/query
   （返回 SqlQueryResponse）。两路径对外暴露同一 `ainvoke(input)` 接口。
 """
 
@@ -112,7 +112,7 @@ class _HttpSubAgent:
             resp = await client.post(self.url.rstrip("/") + endpoint, json=payload)
             resp.raise_for_status()
             data = resp.json()
-        # kefu /invoke 返回 QueryResponse(dict)；wenda-data-agent /api/query 返回 SqlQueryResponse(dict，QueryResponse 子类)；
+        # kefu /invoke 返回 QueryResponse(dict)；nl2sql-service /api/query 返回 SqlQueryResponse(dict，QueryResponse 子类)；
         # 旧 adapter /api/messages 返回 list。统一规整为 {"answer": ...} 供 main_agent 消费。
         return _normalize_response(data, self.name)
 
@@ -255,8 +255,8 @@ class DelegatingSubAgent:
 def get_remote_subagents():
     """构建 3 个远程子 Agent。
 
-    text_to_sql → wenda-data-agent(:8001)/api/query（Text-to-SQL，adapter 已退役）
-    rag_query   → zhiku（RAG 知识库）
+    text_to_sql → nl2sql-service(:8001)/api/query（Text-to-SQL，adapter 已退役）
+    rag_query   → knowledge-service（RAG 知识库）
     customer_service → kefu-service(:8003)/invoke（直连）或 kefu-adapter(:8002)
     """
     return [

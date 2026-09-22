@@ -41,8 +41,8 @@ python -m api.server  # 启动 FastAPI，默认 :8000
 | `LLM_QWEN_MAX` | ✅ | 主模型名称 |
 | `LLM_QWEN_FALLBACK` / `OPENAI_FALLBACK_*` | 可选 | 备用模型（主模型不可用时自动降级） |
 | `AGENT_MODE` | 可选 | 编排模式：local / remote（默认 local） |
-| `WENDA_DATA_AGENT_URL` | 可选 | wenda-data-agent 地址（Text-to-SQL 子 Agent） |
-| `ZHIKU_API_URL` / `ZHIKU_API_KEY` | 可选 | zhiku 检索服务地址 / Key |
+| `WENDA_DATA_AGENT_URL` | 可选 | nl2sql-service 地址（Text-to-SQL 子 Agent；env var 名待后续统一重命名） |
+| `ZHIKU_API_URL` / `ZHIKU_API_KEY` | 可选 | knowledge-service 检索服务地址 / Key（env var 名待后续统一重命名） |
 | `KEFU_SERVICE_URL` / `KEFU_USE_ADAPTER` / `KEFU_ADAPTER_URL` | 可选 | kefu 直连地址 / 是否经 adapter 中转 / adapter 地址 |
 | `TAVILY_API_KEY` | ✅ | Tavily 搜索 API |
 | `MYSQL_*` | ✅ | MySQL 连接信息（生产环境应使用只读用户；池参数 `MYSQL_POOL_SIZE` 等） |

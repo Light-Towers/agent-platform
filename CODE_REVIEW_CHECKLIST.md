@@ -12,7 +12,7 @@
 ### 问题 1：README / AGENTS.md 只描述 `app/`，完全遗漏 9 个 sibling 包
 - **事实依据**：
   - `README.md` "目录结构"章节（约 296–340 行）仅列 `app/`、`tests/`、`eval/`、`docs/`。
-  - 仓库实际含：`deepagents/`、`dialogue-framework/`、`kefu-adapter/`、`kefu-service/`、`wenda-adapter/`、`wenda-data-agent/`、`zhanggui-zhiku/`、`agent-core/`、`shared-schemas/`（共 9 个独立包）。
+  - 仓库实际含：`deepagents/`、`dialogue-framework/`、`kefu-adapter/`、`kefu-service/`、`wenda-adapter/`、`nl2sql-service/`、`knowledge-service/`、`agent-core/`、`shared-schemas/`（共 9 个独立包）。
   - `AGENTS.md` 同样只提 `app/`、`tests/`、`eval/`、`docs/`。
 - **影响**：文档与 monorepo 现实严重脱节，新读者无法理解整体拓扑。
 - **处理状态**：✅ 已修复。`README.md` 目录结构已分层（单进程平台 / 联邦网关 / 共享内核 / 业务适配包 / 测试评测）；`AGENTS.md` 目录表已列全部 13 项（10 包 + tests/eval/docs），并声明 monorepo 与 `app/` `deepagents/` 并行关系。
@@ -56,7 +56,7 @@
 
 ### 问题 6：kefu-service / kefu-adapter 缺失 `.env.example`
 - **事实依据**：
-  - 全仓 `.env.example` 共 6 份：根 / `deepagents/` / `dialogue-framework/` / `kefu-service/` / `wenda-data-agent/` / `zhanggui-zhiku/`。
+  - 全仓 `.env.example` 共 6 份：根 / `deepagents/` / `dialogue-framework/` / `kefu-service/` / `nl2sql-service/` / `knowledge-service/`。
   - `kefu-adapter` 包已于 2026-08 移除（无调用方，网关默认直连 `kefu-service:8003`），故无 `.env.example`。`kefu-service/.env.example` 标注配置继承自 `agent-core`，列端口锚点。
   - `deepagents/docs/production-action-plan.md:147` 声称 `Test-Path "kefu-service/.env.example"` 应通过 → 现已成立。
 - **影响**：部署缺文档，环境变量无据可查。
