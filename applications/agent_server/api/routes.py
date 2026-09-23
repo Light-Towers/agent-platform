@@ -193,7 +193,12 @@ async def query(
         # Phase 2: OTel request span
         span = None
         _span_cm = None
+        _parent_ctx_cm = None
         if otel_tracer is not None:
+            from agent_core.tracing_propagation import extract_traceparent, use_context
+
+            _parent_ctx_cm = use_context(extract_traceparent(request.headers))
+            _parent_ctx_cm.__enter__()
             _span_cm = otel_tracer.start_as_current_span("query")
             span = _span_cm.__enter__()
             span.set_attribute("thread_id", thread_id)
@@ -277,6 +282,8 @@ async def query(
         finally:
             if _span_cm is not None:
                 _span_cm.__exit__(None, None, None)
+            if _parent_ctx_cm is not None:
+                _parent_ctx_cm.__exit__(None, None, None)
             # Phase 2: 统一生命周期清理（幂等，覆盖 graph 异常 / 客户端断开 /
             # 正常完成）。reject 与 cache-hit 路径已在 _stream 外提前调用过，
             # 此处再调用安全无副作用（AsyncLease 幂等）。

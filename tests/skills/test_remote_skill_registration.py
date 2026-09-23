@@ -15,10 +15,11 @@ from agent_runtime.skills.registry import SkillKind, SkillRegistry
 
 @pytest.mark.asyncio
 async def test_remote_skills_register_when_url_set(monkeypatch):
-    """P1: 配置 URL 时，knowledge/nl2sql/kefu skill 注册到 SkillRegistry。"""
+    """P1: 配置 URL 时，knowledge/nl2sql/kefu/exhibition skill 注册到 SkillRegistry。"""
     monkeypatch.setenv("KNOWLEDGE_SERVICE_URL", "http://localhost:8900")
     monkeypatch.setenv("NL2SQL_SERVICE_URL", "http://localhost:8000")
     monkeypatch.setenv("KEFU_SERVICE_URL", "http://localhost:8003")
+    monkeypatch.setenv("EXHIBITION_SERVICE_URL", "http://localhost:9000")
 
     from agent_server.capabilities import build_registry
 
@@ -29,10 +30,12 @@ async def test_remote_skills_register_when_url_set(monkeypatch):
     assert "knowledge_retrieve" in names, "knowledge_retrieve skill 未注册"
     assert "nl2sql_query" in names, "nl2sql_query skill 未注册"
     assert "kefu_query" in names, "kefu_query skill 未注册"
+    assert "exhibition_query" in names, "exhibition_query skill 未注册"
 
     assert registry.get("knowledge_query").kind == SkillKind.REMOTE
     assert registry.get("nl2sql_query").kind == SkillKind.REMOTE
     assert registry.get("kefu_query").kind == SkillKind.REMOTE
+    assert registry.get("exhibition_query").kind == SkillKind.REMOTE
 
 
 @pytest.mark.asyncio
@@ -41,6 +44,7 @@ async def test_remote_skills_skip_when_url_unset(monkeypatch):
     monkeypatch.delenv("KNOWLEDGE_SERVICE_URL", raising=False)
     monkeypatch.delenv("NL2SQL_SERVICE_URL", raising=False)
     monkeypatch.delenv("KEFU_SERVICE_URL", raising=False)
+    monkeypatch.delenv("EXHIBITION_SERVICE_URL", raising=False)
 
     from agent_server.capabilities import build_registry
 
@@ -50,6 +54,7 @@ async def test_remote_skills_skip_when_url_unset(monkeypatch):
     assert "knowledge_query" not in names
     assert "nl2sql_query" not in names
     assert "kefu_query" not in names
+    assert "exhibition_query" not in names
     assert "search" in names, "基础 skill 仍应注册"
 
 

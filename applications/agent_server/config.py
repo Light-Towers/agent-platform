@@ -130,6 +130,7 @@ class Settings(BaseLLMSettings):
     knowledge_service_key: str = ""
     nl2sql_service_url: str = ""  # 空 = 不注册 nl2sql skill
     kefu_service_url: str = ""  # 空 = 不注册 kefu skill
+    exhibition_service_url: str = ""  # 空 = 不注册 exhibition skill（G4）
 
     # §20: 运行时模式（决定持久化后端与 fail-fast 行为）
     # local       -> InMemory 后端，无需 DATABASE_URL（开发/测试默认）
