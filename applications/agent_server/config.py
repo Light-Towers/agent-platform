@@ -138,6 +138,21 @@ class Settings(BaseLLMSettings):
     # distributed -> PG 必须（无 DATABASE_URL 启动即报错，fail fast）
     runtime_mode: str = "local"
 
+    # V3 Phase 2: ExecutionScheduler（opt-in，默认关）
+    # 启用后请求过 Queue → Dispatch → Execute，未启用时走原路径（Admission → Planner → Execute）
+    scheduler_enabled: bool = False
+    scheduler_max_concurrent: int = 10
+    scheduler_max_concurrent_per_tenant: int = 5
+    scheduler_queue_capacity: int = 1000
+
+    # V3 Phase 4: Cost Governance（opt-in，默认关）
+    # 启用后请求路径加 budget check/record，超限返回 429
+    cost_governance_enabled: bool = False
+    budget_limit_requests: int = 0  # 0 = 不限制
+    budget_limit_tokens: int = 0
+    budget_limit_cost: float = 0.0
+    budget_window_seconds: float = 3600.0
+
     @property
     def db_enabled(self) -> bool:
         return bool(self.database_url)

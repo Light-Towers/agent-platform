@@ -348,6 +348,101 @@ async def lifespan(app: FastAPI):
         secret_key=settings.langfuse_secret_key,
         host=settings.langfuse_host,
     )
+    # V3 Phase 2: ExecutionScheduler + ExecutionStatusStore（opt-in）
+    if settings.scheduler_enabled:
+        from agent_runtime.execution_scheduler import (
+            ExecutionScheduler,
+            InMemorySchedulerStore,
+            SchedulerConfig,
+        )
+        from agent_runtime.execution_status import InMemoryExecutionStatusStore
+
+        if pool is not None:
+            from agent_runtime.execution_scheduler import PgSchedulerStore
+            from agent_runtime.execution_state_pg import PgExecutionStatusStore
+
+            scheduler_store = PgSchedulerStore(pool)
+            status_store = PgExecutionStatusStore(pool)
+        else:
+            scheduler_store = InMemorySchedulerStore()
+            status_store = InMemoryExecutionStatusStore()
+        scheduler = ExecutionScheduler(
+            scheduler_store,
+            config=SchedulerConfig(
+                max_concurrent=settings.scheduler_max_concurrent,
+                max_concurrent_per_tenant=settings.scheduler_max_concurrent_per_tenant,
+                queue_capacity=settings.scheduler_queue_capacity,
+            ),
+        )
+        app.state.scheduler = scheduler
+        app.state.status_store = status_store
+        # V3 Phase 3: Scheduler Reaper（lease-based 回收）
+        if ownership_store is not None:
+            from agent_runtime.execution_scheduler import SchedulerReaper
+
+            reaper = SchedulerReaper(scheduler, ownership_store)
+            reaper.start()
+            app.state.scheduler_reaper = reaper
+            logger.info("V3 scheduler reaper started (lease-based)")
+        else:
+            app.state.scheduler_reaper = None
+        # V3 Phase 4: Control Plane（组合 scheduler + status_store + checkpoint_store）
+        from agent_runtime.control_plane import ControlPlane
+
+        app.state.control_plane = ControlPlane(
+            scheduler=scheduler,
+            status_store=status_store,
+            checkpoint_store=checkpoint_store,
+        )
+        logger.info(
+            "V3 scheduler enabled: max_concurrent=%d per_tenant=%d queue=%d backend=%s",
+            settings.scheduler_max_concurrent,
+            settings.scheduler_max_concurrent_per_tenant,
+            settings.scheduler_queue_capacity,
+            "pg" if pool is not None else "memory",
+        )
+    else:
+        app.state.scheduler = None
+        app.state.status_store = None
+    # V3 Phase 4: Cost Governance（opt-in）
+    if settings.cost_governance_enabled:
+        from agent_runtime.cost_governance import (
+            BudgetDimension,
+            BudgetLimit,
+            CostGovernance,
+            InMemoryBudgetStore,
+        )
+
+        limits: dict[BudgetDimension, BudgetLimit] = {}
+        if settings.budget_limit_requests > 0:
+            limits[BudgetDimension.REQUESTS] = BudgetLimit(
+                BudgetDimension.REQUESTS, settings.budget_limit_requests,
+                window_seconds=settings.budget_window_seconds,
+            )
+        if settings.budget_limit_tokens > 0:
+            limits[BudgetDimension.TOKENS] = BudgetLimit(
+                BudgetDimension.TOKENS, settings.budget_limit_tokens,
+                window_seconds=settings.budget_window_seconds,
+            )
+        if settings.budget_limit_cost > 0:
+            limits[BudgetDimension.COST] = BudgetLimit(
+                BudgetDimension.COST, settings.budget_limit_cost,
+                window_seconds=settings.budget_window_seconds,
+            )
+        if pool is not None:
+            from agent_runtime.cost_governance_pg import PgBudgetStore
+
+            budget_store = PgBudgetStore(pool)
+        else:
+            budget_store = InMemoryBudgetStore()
+        app.state.cost_governance = CostGovernance(budget_store, limits)
+        logger.info(
+            "V3 cost governance enabled: limits=%s backend=%s",
+            {dim.value: lim.limit for dim, lim in limits.items()},
+            "pg" if pool is not None else "memory",
+        )
+    else:
+        app.state.cost_governance = None
     logger.info(
         "agent-platform 就绪 storage=%s llm=%s pool=%s coordination=%s admission=%s revert=%s otel=%s mcp=%s planner=%s runtime_mode=%s",
         "postgres" if settings.db_enabled else "memory",
@@ -362,6 +457,10 @@ async def lifespan(app: FastAPI):
         settings.runtime_mode,
     )
     yield
+    # V3 Phase 3: Scheduler Reaper 停止
+    reaper = getattr(app.state, "scheduler_reaper", None)
+    if reaper is not None:
+        await reaper.stop()
     # Phase 2: OTel flush
     otel_force_flush()
     # Phase 2: MCP close

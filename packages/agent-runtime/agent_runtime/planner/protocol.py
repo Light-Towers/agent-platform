@@ -32,6 +32,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from agent_runtime.effect_contract import EffectContract
+from agent_runtime.forensic import StepForensic
 from agent_runtime.planner.durability import (
     ExecutionNotOwned,
     ExecutionOwnershipStore,
@@ -152,10 +153,16 @@ class ExecutionIdentity:
 
     生命周期：随 ExecutionContext 创建，随 execution 结束销毁。
     用于：trace / audit / authorization / memory namespace / tenant isolation
+
+    V3 §0.5 三层 ID 关系：
+    - session_id：对话/业务会话上下文（跨多次 AgentRun）
+    - agent_run_id：一次 Agent 目标执行（跨多次 Execution / retry）
+    - execution_id：Runtime 可恢复、可调度的执行单元（全局唯一，不可复用）
     """
     execution_id: str
     workspace_id: str = "default"
     user_id: str = "default"
+    tenant_id: str = "default"
 
 
 class SkillCompositionError(RuntimeError):
@@ -222,6 +229,18 @@ class ExecutionContext:
     # V3-1：本次执行持有的 ownership generation（takeover 时单调递增）。
     # checkpoint save 带此值做 generation fencing——旧 owner 用过期 generation 写被拒。
     lease_generation: int | None = None
+    # V3 §10：企业级平台执行上下文字段（全部向后兼容，默认值不破坏现有调用方）
+    # 三层 ID：session > agent_run > execution（§0.5）
+    agent_run_id: str | None = None
+    session_id: str | None = None
+    # 租户 / 认证 / 授权
+    tenant_id: str | None = None
+    principal: str | None = None
+    authorization_context: dict[str, Any] = field(default_factory=dict)
+    # 可观测性
+    trace_id: str | None = None
+    # 取消令牌（asyncio.Event 或外部信号）
+    cancellation_token: Any = None
 
     @property
     def call_depth(self) -> int:
@@ -289,10 +308,12 @@ class ExecutionContext:
         error: str | None = None,
         latency: float = 0.0,
         tokens: int = 0,
+        forensic: dict[str, Any] | None = None,
     ) -> None:
         """记录一次 Skill 调用明细（P3-1 Trajectory 来源）。
 
         ``index`` 取当前 ``steps`` 长度（同 execution 内从 0 递增），保证 replay 顺序。
+        ``forensic`` 为 V3-9 per-step 版本指纹（StepForensic.to_dict()）。
         """
         self.steps.append(
             TrajectoryStep(
@@ -303,6 +324,7 @@ class ExecutionContext:
                 latency=latency,
                 tokens=tokens,
                 index=len(self.steps),
+                forensic=forensic,
             )
         )
 
@@ -573,6 +595,22 @@ class PlannerRuntime:
             ctx = self._ctx_var.get()
             t0 = time.monotonic()
             tokens_before = ctx.tokens_used if ctx else 0
+            # V3-9: 构建 per-step 版本指纹
+            _skill_version = None
+            try:
+                _skill = self.registry.get(name)
+                _skill_version = getattr(_skill, "version", None)
+            except Exception:
+                pass
+            _model = getattr(self.llm, "model", None) if self.llm else None
+            step_forensic = StepForensic(
+                skill_name=name,
+                skill_version=_skill_version,
+                tool_name=name,
+                tool_version=_skill_version,
+                model=_model,
+            )
+            _forensic_dict = step_forensic.to_dict()
             try:
                 result = await self.registry.execute(name, **kwargs)
             except Exception as exc:
@@ -580,12 +618,14 @@ class PlannerRuntime:
                     ctx.record_step(
                         name, kwargs, None, str(exc),
                         time.monotonic() - t0, ctx.tokens_used - tokens_before,
+                        forensic=_forensic_dict,
                     )
                 raise
             if ctx is not None:
                 ctx.record_step(
                     name, kwargs, result, None,
                     time.monotonic() - t0, ctx.tokens_used - tokens_before,
+                    forensic=_forensic_dict,
                 )
             return result
 
