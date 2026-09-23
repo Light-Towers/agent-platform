@@ -364,7 +364,7 @@ def test_middleware_accepts_bearer_key():
 
 @requires_web
 def test_middleware_auth_disabled_when_no_key_configured():
-    # ZHANGUI_API_KEY 为空 → 鉴权关闭，正常放行（向后兼容既有行为）
+    # KNOWLEDGE_API_KEY 为空 → 鉴权关闭，正常放行（向后兼容既有行为）
     mw = _build_middleware({"api_key": ""})
     status, _, _ = _parse_response(_run(mw, _scope("/query")))
     assert status == 200

@@ -52,13 +52,14 @@ _subservices: dict[str, SubserviceConfig] = {
         graph_id="text_to_sql",
         # wenda-adapter 已退役，Text-to-SQL 能力由 nl2sql-service 直连提供
         # nl2sql-service 实际监听 :8000（见其 README 启动命令）
-        url=_env("WENDA_DATA_AGENT_URL", "http://localhost:8000"),
+        url=_env("NL2SQL_SERVICE_URL", "http://localhost:8000"),
         endpoint="/api/query",
     ),
     "rag_query": SubserviceConfig(
         name="知识库检索助手",
         graph_id="rag_query",
-        url=_env("ZHIKU_API_URL", "http://localhost:8900"),
+        url=_env("KNOWLEDGE_SERVICE_URL", "http://localhost:8900"),
+        endpoint="/query",
     ),
     "customer_service": SubserviceConfig(
         name="智能客服助手",

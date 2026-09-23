@@ -8,7 +8,7 @@
 - yaml 解析用标准库生态的 ``yaml.safe_load``（pyyaml 已随项目依赖传递存在，见 uv.lock）。
 - 返回 ``CfgDict``：dict 子类 + 属性访问，支持 ``cfg.rrf.k`` 与 ``cfg.rrf.weights["embedding"]``
   两种风格，便于节点代码以最自然的方式读取。
-- 支持环境变量覆盖 yaml 路径（如 ``ZHANGUI_RETRIEVAL_YAML``），便于部署与单测覆盖。
+- 支持环境变量覆盖 yaml 路径（如 ``KNOWLEDGE_RETRIEVAL_YAML``），便于部署与单测覆盖。
 """
 
 import os

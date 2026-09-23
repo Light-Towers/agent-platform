@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import httpx
 import pytest
 
 from exhibition_agent.contract.envelope import Readiness
@@ -20,6 +21,32 @@ from exhibition_agent.observability.trace import InMemoryTraceRecorder
 from exhibition_agent.skills.base_skill import BaseSkill, SkillContext
 from exhibition_agent.skills.data_analysis.skill import DataAnalysisQuerySkill
 from exhibition_agent.testing_helpers import ctx, ctx_header
+
+
+@pytest.fixture
+def mock_nl2sql_success(monkeypatch):
+    """Mock nl2sql-service HTTP 调用返回成功响应。"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "answer": "参展商数量为 42",
+                "sql": "SELECT COUNT(*) FROM exhibitor",
+                "error": None,
+                "latency_ms": 10.0,
+                "fallback": False,
+            },
+        )
+
+    original_init = httpx.AsyncClient.__init__
+
+    def patched_init(self, *args, **kwargs):
+        kwargs["transport"] = httpx.MockTransport(handler)
+        original_init(self, *args, **kwargs)
+
+    monkeypatch.setattr(httpx.AsyncClient, "__init__", patched_init)
+
 
 # --- skill 定义完整 ---
 
@@ -47,8 +74,8 @@ def skill_context(warehouse_client):
     )
 
 
-async def test_metric_verified_returns_result(skill_context, monkeypatch):
-    """VERIFIED → 非 pending 结果（骨架 stub，readiness=READY，不答'待接入'）。
+async def test_metric_verified_returns_result(skill_context, monkeypatch, mock_nl2sql_success):
+    """VERIFIED → HTTP 调 nl2sql-service → readiness=READY + 有 sql 结果。
 
     registry 当前无 VERIFIED 指标（待 F06 评测门禁升级），用 monkeypatch 模拟。
     """
@@ -61,8 +88,8 @@ async def test_metric_verified_returns_result(skill_context, monkeypatch):
     assert result.readiness == Readiness.READY
     assert result.answer != PENDING_ANSWER
     assert result.error_code is None
-    assert result.data.get("skeleton") is True
-    assert result.data.get("nl2sql_endpoint", "").startswith("TODO")
+    assert result.data.get("sql") == "SELECT COUNT(*) FROM exhibitor"
+    assert result.data.get("metric_id") == "exhibitor_count"
 
 
 async def test_metric_blocked_answers_pending(skill_context):
@@ -171,8 +198,10 @@ def test_graph_node_set_unchanged_inv10_guard():
     )
 
 
-async def test_supervisor_routes_to_data_analysis_by_explicit_skill(warehouse_client, monkeypatch):
-    """params.skill=data_analysis.query → 路由到 data_analysis（VERIFIED 骨架路径）。"""
+async def test_supervisor_routes_to_data_analysis_by_explicit_skill(
+    warehouse_client, monkeypatch, mock_nl2sql_success
+):
+    """params.skill=data_analysis.query → 路由到 data_analysis（VERIFIED → HTTP 调用 → READY）。"""
     monkeypatch.setattr(metric_registry, "get_metric_status", lambda mid: "VERIFIED")
     context = ctx()
     state = await run_supervisor({

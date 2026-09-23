@@ -31,7 +31,7 @@
 ### 1.2 `docker compose restart` 不会重新读取 `.env`
 
 - `web` 服务用 `env_file: .env`。`docker compose restart web` **复用容器创建时固化的
-  环境变量**，`.env` 的改动不会生效（实测：改 `ZHANGUI_API_KEY` 后 `restart`，容器内
+  环境变量**，`.env` 的改动不会生效（实测：改 `KNOWLEDGE_API_KEY` 后 `restart`，容器内
   `printenv` 仍为空）。
 - 同理 `docker restart <container>` 也不重读。
 
@@ -55,12 +55,12 @@
 
 ## 2. 鉴权（验收项 ④）
 
-### 2.1 `ZHANGUI_API_KEY` 是自定密钥，不是第三方 key
+### 2.1 `KNOWLEDGE_API_KEY` 是自定密钥，不是第三方 key
 
 - 它是**本项目自己的入站 API Key**（FastAPI 中间件 `SecurityGuardsMiddleware`），
   与 `OPENAI_API_KEY`（魔搭）/ `SILICONFLOW_API_KEY`（硅基流动）**无关**。
 - 不需要去任何平台申请——在 `.env` 填一个自定字符串即可（如
-  `ZHANGUI_API_KEY=zk-<随机>`，用 `secrets.token_urlsafe` 生成）。
+  `KNOWLEDGE_API_KEY=zk-<随机>`，用 `secrets.token_urlsafe` 生成）。
 - 为空 → 鉴权**整体关闭**（向后兼容既有行为）；非空 → 请求须带
   `X-API-Key` 或 `Authorization: Bearer <key>`，不匹配 → `401`（用
   `secrets.compare_digest` 防时序攻击）。
@@ -126,7 +126,7 @@
 # 1) 起全栈 + 可观测
 docker compose --profile core --profile obs up -d web jaeger
 # 2) .env 关键项
-#    ZHANGUI_TRACE_ENABLED=true
+#    KNOWLEDGE_TRACE_ENABLED=true
 #    OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318/v1/traces
 # 3) 发请求
 curl -X POST localhost:8000/query -H 'Content-Type: application/json' \
@@ -181,7 +181,7 @@ curl 'http://localhost:16686/api/traces?service=knowledge-service'
 | 验证 ④ 鉴权 | `POST /query` 带/不带头，看 401/200（`/query` 必须 POST） |
 | 验证 ⑦ 导出 | 发请求后 `curl 'localhost:16686/api/traces?service=knowledge-service'` |
 | 看 jaeger 服务列表 | `curl localhost:16686/api/services` |
-| 本地无 collector 不崩 | 删 `OTEL_EXPORTER_OTLP_ENDPOINT` / 关 `ZHANGUI_TRACE_ENABLED` → 自动 no-op |
+| 本地无 collector 不崩 | 删 `OTEL_EXPORTER_OTLP_ENDPOINT` / 关 `KNOWLEDGE_TRACE_ENABLED` → 自动 no-op |
 
 ---
 

@@ -33,13 +33,16 @@ def save_chat_message(
     item_names: Optional[List[str]] = None,
     image_urls: Optional[List[str]] = None,
     message_id: Optional[str] = None,
+    tenant_id: Optional[str] = None,
 ) -> str:
-    """写入/更新单条会话记录（兼容原签名，item_names/image_urls 透传扩展字段）。"""
+    """写入/更新单条会话记录（兼容原签名，item_names/image_urls/tenant_id 透传扩展字段）。"""
     extras: Dict[str, Any] = {}
     if item_names is not None:
         extras["item_names"] = item_names
     if image_urls is not None:
         extras["image_urls"] = image_urls
+    if tenant_id is not None:
+        extras["tenant_id"] = tenant_id
     return _get_store().save(
         session_id,
         role,
@@ -50,14 +53,26 @@ def save_chat_message(
     )
 
 
-def get_recent_messages(session_id: str, limit: int = 10) -> List[Dict[str, Any]]:
-    """查询指定会话最近 ``limit`` 条记录（时间正序）。"""
-    return _get_store().get_recent(session_id, limit=limit)
+def get_recent_messages(
+    session_id: str,
+    limit: int = 10,
+    tenant_id: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """查询指定会话最近 ``limit`` 条记录（时间正序）。
+
+    tenant_id 非空时追加租户隔离过滤（defense-in-depth，ACL 前置 INV-8）。
+    """
+    extra_filter = {"tenant_id": tenant_id} if tenant_id else None
+    return _get_store().get_recent(session_id, limit=limit, extra_filter=extra_filter)
 
 
-def clear_history(session_id: str) -> int:
-    """清空指定会话的全部历史，返回删除条数。"""
-    return _get_store().clear(session_id)
+def clear_history(session_id: str, tenant_id: Optional[str] = None) -> int:
+    """清空指定会话的全部历史，返回删除条数。
+
+    tenant_id 非空时追加租户隔离过滤（defense-in-depth，ACL 前置 INV-8）。
+    """
+    extra_filter = {"tenant_id": tenant_id} if tenant_id else None
+    return _get_store().clear(session_id, extra_filter=extra_filter)
 
 
 def update_message_item_names(ids: List[str], item_names: List[str]) -> int:

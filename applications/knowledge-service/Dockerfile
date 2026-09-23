@@ -29,7 +29,7 @@ COPY applications/knowledge-service/eval ./eval
 # 3) 安装依赖（构建阶段需要联网拉取 PyPI 包）
 #    先装共享包（agent-core + shared-schemas + exhibition-agent），再装本项目（editable），
 #    opentelemetry-* 为可选 tracing 依赖（M4 全链路追踪，方案 §8），此处随镜像一并安装，
-#    确保 OTel 真实导出开箱即用（默认 no-op 降级，配置 ZHANGUI_TRACE_ENABLED + endpoint 后启用）。
+#    确保 OTel 真实导出开箱即用（默认 no-op 降级，配置 KNOWLEDGE_TRACE_ENABLED + endpoint 后启用）。
 RUN pip install --upgrade pip && pip install -e ./packages/agent-core && pip install -e ./packages/shared-schemas && pip install -e ./applications/exhibition-agent && pip install -e . \
     && pip install opentelemetry-sdk opentelemetry-api opentelemetry-exporter-otlp-proto-http
 

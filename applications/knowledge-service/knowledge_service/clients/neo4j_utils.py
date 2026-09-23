@@ -32,12 +32,20 @@ def get_neo4j_driver():
         return None
 
 
-def query_kg(query: str, item_names: list | None = None, limit: int = 8) -> list[dict]:
+def query_kg(
+    query: str,
+    item_names: list | None = None,
+    limit: int = 8,
+    tenant_id: str | None = None,
+    scope_type: str | None = None,
+) -> list[dict]:
     """知识图谱实体/关系检索，返回标准化 doc 列表（与向量召回同构）。
 
     通用 schema（与写入端约定）：``Entity`` 节点携带 ``name`` / ``content`` /
-    ``item_name`` 属性，关系任意。查询按 item_name 限定知识库范围（若提供），
-    并匹配实体 ``name`` 或 ``content`` 包含查询词；无命中退化返回空。
+    ``item_name`` / ``tenant_id`` / ``scope_type`` 属性，关系任意。查询按
+    item_name 限定知识库范围（若提供），并匹配实体 ``name`` 或 ``content``
+    包含查询词；tenant_id / scope_type 隔离（多租户 ACL 前置 INV-8）；
+    无命中退化返回空。
 
     无连接 / 查询异常 / 空库一律返回 ``[]``，绝不抛错（KG 是增强通道，
     失败不应阻断主检索链路）。
@@ -52,12 +60,20 @@ def query_kg(query: str, item_names: list | None = None, limit: int = 8) -> list
     cypher = """
     MATCH (e:Entity)
     WHERE ($item_names IS NULL OR e.item_name IN $item_names)
+      AND ($tenant_id IS NULL OR e.tenant_id = $tenant_id)
+      AND ($scope_type IS NULL OR e.scope_type = $scope_type)
       AND (toLower(e.name) CONTAINS toLower($q)
            OR toLower(e.content) CONTAINS toLower($q))
     RETURN e.name AS name, e.content AS content, e.item_name AS item_name
     LIMIT $limit
     """
-    params = {"q": query, "item_names": item_names, "limit": limit}
+    params = {
+        "q": query,
+        "item_names": item_names,
+        "limit": limit,
+        "tenant_id": tenant_id,
+        "scope_type": scope_type,
+    }
     try:
         with driver.session(database=os.getenv("NEO4J_DATABASE", "neo4j")) as session:
             records = session.run(cypher, params)

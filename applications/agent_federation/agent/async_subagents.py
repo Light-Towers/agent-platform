@@ -255,9 +255,9 @@ class DelegatingSubAgent:
 def get_remote_subagents():
     """构建 3 个远程子 Agent。
 
-    text_to_sql → nl2sql-service(:8001)/api/query（Text-to-SQL，adapter 已退役）
+    text_to_sql → nl2sql-service /api/query（Text-to-SQL，adapter 已退役，URL 经 NL2SQL_SERVICE_URL 配置）
     rag_query   → knowledge-service（RAG 知识库）
-    customer_service → kefu-service(:8003)/invoke（直连）或 kefu-adapter(:8002)
+    customer_service → kefu-service /invoke（直连）或 kefu-adapter
     """
     return [
         _build_async_subagent(

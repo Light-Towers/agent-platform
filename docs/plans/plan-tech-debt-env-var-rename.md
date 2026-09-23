@@ -1,7 +1,7 @@
 # 技术债务：通用服务改名后 env var 统一重命名
 
 > 创建：2026-09-22
-> 状态：待推进（deployment-breaking，需协调）
+> 状态：仓库内已完成（2026-09-22）；126 服务器部署脚本待同步（用户 2026-09-23 部署）
 > 前置：通用服务改名已完成（zhanggui-zhiku → knowledge-service / wenda-data-agent → nl2sql-service）
 
 ## 背景
@@ -41,7 +41,7 @@
 
 ## 验收标准
 
-- [ ] 所有 env var 名统一为新名
-- [ ] `.env.example` / docker-compose.yml / README 更新
-- [ ] 部署脚本（126 服务器）更新
-- [ ] 全量测试通过
+- [x] 所有 env var 名统一为新名
+- [x] `.env.example` / docker-compose.yml / README 更新
+- [ ] 部署脚本（126 服务器）更新（用户 2026-09-23 部署）
+- [x] 受影响包单元测试通过（knowledge-service 221 passed / agent_federation 114 passed，2026-09-22）；全量 10 session 待 CI

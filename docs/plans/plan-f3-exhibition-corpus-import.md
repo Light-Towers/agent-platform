@@ -238,7 +238,7 @@ MINIO_SECRET_KEY=<设置>
 ITEM_NAME_DIAG=0
 
 # 鉴权（首期关闭，便于测试；生产开启）
-ZHANGUI_API_KEY=
+KNOWLEDGE_API_KEY=
 ```
 
 ### 3.3 外部资源依赖清单
@@ -419,4 +419,4 @@ else:
 | 现有 plan | 关系 |
 |-----------|------|
 | `plan-exhibition-p0-p1-landing.md` | 本方案是其 §2.3 件 08 的 F3 解除阻塞执行项 |
-| `plan-tech-debt-env-var-rename.md` | 本方案中 `.env` 仍用 `ZHANGUI_*` 前缀（变量名重命名是独立技术债务） |
+| `plan-tech-debt-env-var-rename.md` | 本方案中 `.env` 已改用 `KNOWLEDGE_*` 前缀（变量名重命名已完成） |

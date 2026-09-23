@@ -41,8 +41,11 @@ CREATE TABLE IF NOT EXISTS semantic_cache (
     question TEXT NOT NULL,
     answer TEXT NOT NULL,
     embedding vector({dim}),
+    tenant_id TEXT NOT NULL DEFAULT '',
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+ALTER TABLE semantic_cache ADD COLUMN IF NOT EXISTS tenant_id TEXT NOT NULL DEFAULT '';
+CREATE INDEX IF NOT EXISTS idx_semantic_cache_tenant ON semantic_cache (tenant_id);
 
 CREATE TABLE IF NOT EXISTS sql_ddl (
     id BIGSERIAL PRIMARY KEY,
@@ -120,6 +123,9 @@ CREATE TABLE IF NOT EXISTS execution_checkpoints (
 CREATE INDEX IF NOT EXISTS idx_checkpoints_resumable ON execution_checkpoints (resumable) WHERE resumable;
 -- 兼容已有表：幂等补列
 ALTER TABLE execution_checkpoints ADD COLUMN IF NOT EXISTS version BIGINT NOT NULL DEFAULT 0;
+-- V3-1: checkpoint 关联的 ownership generation（NULL = 向后兼容旧 checkpoint，仅按 version fencing）
+ALTER TABLE execution_checkpoints ADD COLUMN IF NOT EXISTS generation BIGINT;
+ALTER TABLE execution_checkpoints ADD COLUMN IF NOT EXISTS state_schema_version INTEGER NOT NULL DEFAULT 1;
 
 CREATE TABLE IF NOT EXISTS idempotency_keys (
     key TEXT PRIMARY KEY,
@@ -133,6 +139,9 @@ CREATE TABLE IF NOT EXISTS execution_leases (
     expires_at TIMESTAMPTZ NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_leases_expires ON execution_leases (expires_at);
+-- V3-1: strict fencing generation（ownership epoch，与 checkpoint version 解耦）
+-- takeover（不同 owner 抢过期 lease）时 generation = old + 1；同 owner 不递增
+ALTER TABLE execution_leases ADD COLUMN IF NOT EXISTS generation BIGINT NOT NULL DEFAULT 1;
 
 CREATE TABLE IF NOT EXISTS admission_slots (
     slot_key TEXT PRIMARY KEY,
@@ -186,6 +195,94 @@ CREATE TABLE IF NOT EXISTS trajectories (
 );
 CREATE INDEX IF NOT EXISTS idx_trajectories_session ON trajectories (session_id);
 CREATE INDEX IF NOT EXISTS idx_trajectories_created ON trajectories (created_at);
+
+-- V3-3: Execution 一等状态（durable status state machine）
+CREATE TABLE IF NOT EXISTS execution_status (
+    execution_id TEXT PRIMARY KEY,
+    status TEXT NOT NULL,
+    generation BIGINT,
+    reason TEXT NOT NULL DEFAULT '',
+    metadata JSONB NOT NULL DEFAULT '{}',
+    updated_at DOUBLE PRECISION NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_exec_status_status ON execution_status (status);
+
+-- V3-3: 可等待任务（External / Human / Timer / Callback durable execution）
+CREATE TABLE IF NOT EXISTS awaitable_tasks (
+    task_id TEXT PRIMARY KEY,
+    execution_id TEXT NOT NULL,
+    step_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    state TEXT NOT NULL,
+    provider_task_id TEXT,
+    submission_receipt JSONB,
+    completion_receipt JSONB,
+    submitted_at DOUBLE PRECISION,
+    completed_at DOUBLE PRECISION,
+    deadline DOUBLE PRECISION,
+    resume_payload JSONB,
+    metadata JSONB NOT NULL DEFAULT '{}',
+    updated_at DOUBLE PRECISION NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_awaitable_execution ON awaitable_tasks (execution_id);
+CREATE INDEX IF NOT EXISTS idx_awaitable_state ON awaitable_tasks (state);
+
+-- V3-4A: Execution Scheduler 调度队列
+CREATE TABLE IF NOT EXISTS execution_queue (
+    execution_id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    priority TEXT NOT NULL DEFAULT 'normal',
+    status TEXT NOT NULL DEFAULT 'queued',
+    created_at DOUBLE PRECISION NOT NULL,
+    dispatched_at DOUBLE PRECISION,
+    worker_id TEXT,
+    resource_hints JSONB NOT NULL DEFAULT '{}',
+    metadata JSONB NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_exec_queue_status ON execution_queue (status);
+CREATE INDEX IF NOT EXISTS idx_exec_queue_priority ON execution_queue (priority, created_at);
+CREATE INDEX IF NOT EXISTS idx_exec_queue_tenant ON execution_queue (tenant_id, status);
+
+-- 四类 Memory: Episodic Memory 持久化
+CREATE TABLE IF NOT EXISTS episodic_memories (
+    episode_id TEXT PRIMARY KEY,
+    execution_id TEXT NOT NULL,
+    task_summary TEXT NOT NULL,
+    outcome TEXT NOT NULL,
+    key_steps JSONB NOT NULL DEFAULT '[]',
+    lessons JSONB NOT NULL DEFAULT '[]',
+    skill_names JSONB NOT NULL DEFAULT '[]',
+    total_tokens INTEGER NOT NULL DEFAULT 0,
+    total_cost DOUBLE PRECISION NOT NULL DEFAULT 0,
+    duration DOUBLE PRECISION NOT NULL DEFAULT 0,
+    importance DOUBLE PRECISION NOT NULL DEFAULT 0.5,
+    created_at DOUBLE PRECISION NOT NULL,
+    metadata JSONB NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_episodic_execution ON episodic_memories (execution_id);
+CREATE INDEX IF NOT EXISTS idx_episodic_importance ON episodic_memories (importance DESC);
+CREATE INDEX IF NOT EXISTS idx_episodic_task ON episodic_memories (task_summary);
+
+-- 四类 Memory: Procedural Memory 持久化（Skill 定义落库）
+CREATE TABLE IF NOT EXISTS procedural_memories (
+    name TEXT NOT NULL,
+    version TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    description TEXT NOT NULL,
+    input_schema JSONB,
+    output_schema JSONB,
+    effect_contract JSONB,
+    lifecycle TEXT NOT NULL DEFAULT 'stable',
+    definition JSONB NOT NULL DEFAULT '{}',
+    created_at DOUBLE PRECISION NOT NULL,
+    updated_at DOUBLE PRECISION NOT NULL,
+    PRIMARY KEY (name, version)
+);
+CREATE INDEX IF NOT EXISTS idx_procedural_name ON procedural_memories (name);
+CREATE INDEX IF NOT EXISTS idx_procedural_lifecycle ON procedural_memories (lifecycle);
 """
 
 

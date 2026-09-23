@@ -39,7 +39,7 @@
 
 **改动**：
 - `exhibition-agent/skill_loader/app.py:34`：`192.168.100.241` → `127.0.0.1`
-- agent_federation：`api/server.py` 中的 `API_KEY`/`ZHIKU_API_URL`/`ALLOWED_ORIGINS` 等保留 `os.getenv` 但统一加注释指向 `agent/config.py`
+- agent_federation：`api/server.py` 中的 `API_KEY`/`KNOWLEDGE_SERVICE_URL`/`ALLOWED_ORIGINS` 等保留 `os.getenv` 但统一加注释指向 `agent/config.py`
 
 ## #5 硬编码 timeout 提取为配置项（中）
 

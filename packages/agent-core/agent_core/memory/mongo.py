@@ -82,11 +82,22 @@ class MongoHistoryStore:
         result = self.collection.insert_one(document)
         return str(result.inserted_id)
 
-    def get_recent(self, session_id: str, limit: int = 10) -> List[Dict[str, Any]]:
-        """查询指定会话最近 ``limit`` 条记录（按 ts 升序返回），失败返回空列表。"""
+    def get_recent(
+        self,
+        session_id: str,
+        limit: int = 10,
+        extra_filter: Optional[Dict[str, Any]] = None,
+    ) -> List[Dict[str, Any]]:
+        """查询指定会话最近 ``limit`` 条记录（按 ts 升序返回），失败返回空列表。
+
+        :param extra_filter: 额外过滤条件（如 {"tenant_id": "t1"}），与 session_id 取交集。
+        """
         try:
+            query: Dict[str, Any] = {"session_id": session_id}
+            if extra_filter:
+                query.update(extra_filter)
             cursor = (
-                self.collection.find({"session_id": session_id})
+                self.collection.find(query)
                 .sort("ts", self._DESCENDING)
                 .limit(limit)
             )
@@ -97,10 +108,13 @@ class MongoHistoryStore:
             logger.error("Error getting recent messages: %s", e)
             return []
 
-    def clear(self, session_id: str) -> int:
+    def clear(self, session_id: str, extra_filter: dict | None = None) -> int:
         """清空指定会话的全部历史，返回删除条数；失败返回 0。"""
         try:
-            result = self.collection.delete_many({"session_id": session_id})
+            query: dict[str, Any] = {"session_id": session_id}
+            if extra_filter:
+                query.update(extra_filter)
+            result = self.collection.delete_many(query)
             logger.info("Deleted %s messages for session %s", result.deleted_count, session_id)
             return result.deleted_count
         except Exception as e:

@@ -1,20 +1,22 @@
-"""data_analysis.query：数据分析 Agent skill（P1 骨架，只读）。
+"""data_analysis.query：数据分析 Agent skill（只读）。
 
-链路：NL → Metric Registry 校验（INV-10）→ HTTP 调 nl2sql-service（端点 TODO）→ 返回结果。
+链路：NL → Metric Registry 校验（INV-10）→ HTTP 调 nl2sql-service → 返回结果。
 
 INV-10 落地点：指标 status 非 VERIFIED → 答"该指标待接入"，不触 L3 text2sql、不生成 SQL。
   - BLOCKED          → METRIC_BLOCKED
   - status is None   → DATA_NOT_CONNECTED（metric 未登记）
   - 其他非 VERIFIED   → METRIC_NOT_VERIFIED（含 CONNECTED/CANDIDATE/REGISTERED/DEPRECATED）
 
-nl2sql-service 通用化（nl2sql-service 12 节点 LangGraph 通用服务）是后续步骤；
-当前 skill 结构完整，HTTP 端点标 TODO，VERIFIED 分支返回确定性骨架结果。
+nl2sql-service 通用化已完成（元知识参数化 + 命名去课程化），本 skill 经 HTTP
+调 nl2sql-service /api/query 端点，按 SqlQueryResponse 契约组装 SkillResult。
 """
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
+import httpx
 from agent_core.logging import get_logger
 
 from exhibition_agent.contract.envelope import (
@@ -28,9 +30,9 @@ from exhibition_agent.skills.base_skill import BaseSkill, SkillContext, SkillRes
 
 logger = get_logger(__name__)
 
-# nl2sql-service 端点（TODO：nl2sql-service 通用化后填充实际端点）。
-# 骨架阶段为常量，VERIFIED 分支不实际发起 HTTP，返回确定性 stub 结果。
-_NL2SQL_ENDPOINT: str = "TODO: /api/nl2sql/query (nl2sql-service 通用化后填充)"
+_NL2SQL_SERVICE_URL = os.environ.get("NL2SQL_SERVICE_URL", "http://localhost:8000")
+_NL2SQL_ENDPOINT = "/api/query"
+_NL2SQL_TIMEOUT_S = 30.0
 
 _VERIFIED_STATUS = "VERIFIED"
 
@@ -57,14 +59,14 @@ def _pending_result(code: str, metric_id: str, status: str | None) -> SkillResul
 
 
 class DataAnalysisQuerySkill(BaseSkill):
-    """数据分析 Agent skill（P1 骨架，只读）。
+    """数据分析 Agent skill（只读）。
 
     NL → Metric Registry 校验 → HTTP 调 nl2sql-service → 返回结果。
     非 VERIFIED 指标不得执行（INV-10），答"该指标待接入"，不生成 SQL。
     """
 
     name = "data_analysis.query"
-    description = "自然语言问数 → Metric Registry 校验 → HTTP 调 nl2sql-service → 返回结果（只读骨架）"
+    description = "自然语言问数 → Metric Registry 校验 → HTTP 调 nl2sql-service → 返回结果（只读）"
 
     async def run(self, params: dict[str, Any], ctx: SkillContext) -> SkillResult:
         metric_id = params.get("metric_id")
@@ -99,34 +101,67 @@ class DataAnalysisQuerySkill(BaseSkill):
         nl_query: str | None,
         ctx: SkillContext,
     ) -> SkillResult:
-        """HTTP 调 nl2sql-service（骨架：端点 TODO，返回确定性 stub 结果）。
+        """HTTP 调 nl2sql-service /api/query，按 SqlQueryResponse 契约组装 SkillResult。
 
-        TODO: nl2sql-service 通用化后，通过 ctx.warehouse_client.get_rest(
-            _NL2SQL_ENDPOINT,
-            params={"query": nl_query, "metric_id": metric_id},
-            execution_context_header=ctx.execution_context_header,
-            request_id=ctx.execution_context.request_id,
-            context_mode=ctx.context_mode,
-            extra_headers=ctx.extra_headers,
-        ) 发起实际 HTTP 调用，并按 nl2sql-service SqlQueryResponse 契约
-        （answer / sql / error / fallback / latency_ms）自组装 SkillResult。
-        当前骨架阶段不发起 HTTP，返回确定性 stub 结果以贯通 VERIFIED 路径。
+        nl2sql-service 返回 {"answer", "sql", "error", "data", "latency_ms", "fallback"}；
+        error 非空时标记 NOT_CONNECTED，否则 READY。
         """
-        logger.info(
-            "data_analysis 骨架：metric_id=%s 已 VERIFIED，nl2sql 端点待接入（%s）",
-            metric_id,
-            _NL2SQL_ENDPOINT,
-        )
+        url = f"{_NL2SQL_SERVICE_URL}{_NL2SQL_ENDPOINT}"
+        payload: dict[str, Any] = {"query": nl_query or ""}
+        if metric_id:
+            payload["metric_id"] = metric_id
+
+        try:
+            async with httpx.AsyncClient(timeout=_NL2SQL_TIMEOUT_S) as client:
+                resp = await client.post(url, json=payload)
+                resp.raise_for_status()
+                result = resp.json()
+        except httpx.TimeoutException:
+            logger.warning("nl2sql-service 超时: metric_id=%s url=%s", metric_id, url)
+            return SkillResult(
+                answer="数据查询超时，请稍后重试",
+                readiness=Readiness.NOT_CONNECTED,
+                classification=DataClassification.INTERNAL,
+                error_code="UPSTREAM_TIMEOUT",
+                data={"metric_id": metric_id, "nl_query": nl_query},
+            )
+        except Exception as exc:
+            logger.warning("nl2sql-service 调用失败: metric_id=%s error=%s", metric_id, exc)
+            return SkillResult(
+                answer="数据查询服务暂时不可用",
+                readiness=Readiness.NOT_CONNECTED,
+                classification=DataClassification.INTERNAL,
+                error_code="UPSTREAM_ERROR",
+                data={"metric_id": metric_id, "nl_query": nl_query},
+            )
+
+        answer = result.get("answer", "")
+        sql = result.get("sql")
+        error = result.get("error")
+        latency_ms = result.get("latency_ms")
+        fallback = result.get("fallback", False)
+
+        if error:
+            logger.warning("nl2sql-service 返回错误: metric_id=%s error=%s", metric_id, error)
+            return SkillResult(
+                answer=answer or "数据查询失败",
+                readiness=Readiness.NOT_CONNECTED,
+                classification=DataClassification.INTERNAL,
+                error_code="NL2SQL_ERROR",
+                sources=[Source(type="api", name="nl2sql-service")],
+                data={"metric_id": metric_id, "sql": sql, "error": error},
+            )
+
         return SkillResult(
-            answer=f"指标 {metric_id} 已校验，问数结果待 nl2sql-service 接入",
+            answer=answer,
             readiness=Readiness.READY,
             classification=DataClassification.INTERNAL,
             sources=[Source(type="api", name="nl2sql-service")],
-            warnings=[f"骨架：nl2sql 端点待接入（{_NL2SQL_ENDPOINT}）"],
             data={
                 "metric_id": metric_id,
                 "nl_query": nl_query,
-                "nl2sql_endpoint": _NL2SQL_ENDPOINT,
-                "skeleton": True,
+                "sql": sql,
+                "latency_ms": latency_ms,
+                "fallback": fallback,
             },
         )

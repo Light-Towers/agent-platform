@@ -102,8 +102,8 @@ def test_init_empty_endpoint_is_noop():
 
 
 def test_init_disabled_by_default_env_is_noop(monkeypatch):
-    # 未设置 ZHANGUI_TRACE_ENABLED → 默认 false → no-op（即使 SDK 已装）
-    monkeypatch.delenv("ZHANGUI_TRACE_ENABLED", raising=False)
+    # 未设置 KNOWLEDGE_TRACE_ENABLED → 默认 false → no-op（即使 SDK 已装）
+    monkeypatch.delenv("KNOWLEDGE_TRACE_ENABLED", raising=False)
     monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317")
     tracing.init_tracing()
     assert tracing.is_tracing_enabled() is False

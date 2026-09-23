@@ -10,7 +10,7 @@
 
 运行（需先安装 locust，并启用 M5 API Key）：
     locust -f benchmark/locustfile.py --host http://localhost:8000 --web-port 8089 \
-        -u 50 -r 5 -t 5m --api-key <ZHANGUI_API_KEY>
+        -u 50 -r 5 -t 5m --api-key <KNOWLEDGE_API_KEY>
     浏览器打开 http://localhost:8089 开始压测；也可 --headless 无 UI 直跑。
 
 说明：
@@ -30,7 +30,7 @@ from locust import HttpUser, between, events, task
 @events.init_command_line_parser.add_listener
 def _init_parser(parser):
     """注册自定义命令行参数 --api-key（M5 启用 API Key 后压测请求需携带）。"""
-    parser.add_argument("--api-key", dest="api_key", default="", help="ZHANGUI_API_KEY")
+    parser.add_argument("--api-key", dest="api_key", default="", help="KNOWLEDGE_API_KEY")
 
 _GOLDEN_PATH = Path(__file__).resolve().parent.parent / "eval" / "golden_queries.jsonl"
 

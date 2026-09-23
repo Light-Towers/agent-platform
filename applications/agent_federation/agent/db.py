@@ -15,8 +15,12 @@ from __future__ import annotations
 import logging
 
 from agent_runtime.db import (
+    close_pool,
     get_pool,
+    init_pool,
 )
+
+__all__ = ["init_pool", "get_pool", "close_pool"]
 
 logger = logging.getLogger(__name__)
 

@@ -36,8 +36,8 @@ def as_sandbox_skill(
 
     async def execute(**kwargs: Any) -> Any:
         code = kwargs.get("code", "")
-        language = kwargs.get("language", "python")
-        t = kwargs.get("timeout", timeout)
+        language = kwargs.get("language") or "python"
+        t = kwargs.get("timeout") or timeout
         result = await sandbox.execute(code, language=language, timeout=t)
         if not result.success:
             raise RuntimeError(

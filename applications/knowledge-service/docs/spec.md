@@ -16,7 +16,7 @@
 - 验证：停 Milvus → `/health/ready` 返回 503；重启 Milvus → 自动恢复 200
 
 ### ④ 鉴权（通过）
-- `ZHANGUI_API_KEY` 已配置，`/query` 无 key→401、错 key→401、正确 key→200
+- `KNOWLEDGE_API_KEY` 已配置，`/query` 无 key→401、错 key→401、正确 key→200
 - 探针 `/health`、`/health/live`、`/health/ready` 无 key 仍 200（M6 豁免）
 
 ### ⑥ kg 通道 stub（已标注）
