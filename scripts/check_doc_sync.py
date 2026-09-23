@@ -105,7 +105,14 @@ def check_architecture_paths() -> None:
     arch = REPO_ROOT / "ARCHITECTURE.md"
     if not arch.exists():
         return
+    in_code_block = False
+    current_parent = ""
     for i, line in enumerate(arch.read_text(encoding="utf-8").splitlines(), 1):
+        if line.strip().startswith("```"):
+            in_code_block = not in_code_block
+            current_parent = ""
+            continue
+        # 反引号包裹的路径（如 `applications/agent_server/`）
         for m in re.finditer(r"`([^`]+/[^`]+)`", line):
             path_str = m.group(1)
             if path_str.startswith("http") or "." not in path_str.split("/")[-1]:
@@ -113,6 +120,16 @@ def check_architecture_paths() -> None:
                     continue
             if path_str.endswith("/"):
                 check_path_exists("ARCHITECTURE.md", i, path_str)
+        # 代码块内目录树路径（F1 增强：检测 applications/ packages/ 下子目录漂移）
+        if in_code_block:
+            m = re.search(r"[├└]──\s+(\S+)", line)
+            if m:
+                name = m.group(1)
+                is_top_level = not line.startswith("│") and not line.startswith(" ")
+                if is_top_level and name.endswith("/"):
+                    current_parent = name
+                elif current_parent in ("applications/", "packages/") and name.endswith("/"):
+                    check_path_exists("ARCHITECTURE.md", i, current_parent + name)
 
 
 def check_federation_title() -> None:

@@ -35,7 +35,11 @@ _WHITELIST = (
     "packages/agent-core/tests/",
     "packages/agent-runtime/tests/",
     "applications/agent_federation/tests/",
+    "applications/agent_server/tests/",
     "applications/kefu-service/tests/",
+    "applications/exhibition-agent/tests/",
+    "applications/knowledge-service/tests/",
+    "applications/nl2sql-service/tests/",
 )
 
 
