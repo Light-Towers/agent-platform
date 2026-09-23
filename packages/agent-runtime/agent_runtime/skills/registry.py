@@ -237,6 +237,27 @@ class SkillRegistry:
             raise DuplicateSkillError(
                 f"能力已注册: {capability.name}（重复注册会掩盖行为差异，拒绝覆盖）"
             )
+        # V3 Phase 4: Skill Lifecycle 强制
+        lifecycle = capability.lifecycle
+        if lifecycle is not None:
+            try:
+                from agent_runtime.skill_lifecycle import SkillLifecycle
+
+                if lifecycle is SkillLifecycle.RETIRED:
+                    raise DuplicateSkillError(
+                        f"能力 {capability.name} 已 RETIRED，拒绝注册"
+                    )
+                if lifecycle is SkillLifecycle.DEPRECATED:
+                    import logging
+
+                    logging.getLogger(__name__).warning(
+                        "注册 DEPRECATED 能力 %s（deprecated_since=%s, replaced_by=%s）",
+                        capability.name,
+                        capability.deprecated_since,
+                        capability.replaced_by,
+                    )
+            except ImportError:
+                pass
         self._capabilities[capability.name] = capability
 
     def get(self, name: str) -> Skill:

@@ -255,6 +255,45 @@ CREATE INDEX IF NOT EXISTS idx_exec_queue_status ON execution_queue (status);
 CREATE INDEX IF NOT EXISTS idx_exec_queue_priority ON execution_queue (priority, created_at);
 CREATE INDEX IF NOT EXISTS idx_exec_queue_tenant ON execution_queue (tenant_id, status);
 
+-- V3 Phase 3: Cost Governance 预算表
+CREATE TABLE IF NOT EXISTS budget_usage (
+    tenant_id TEXT NOT NULL,
+    dimension TEXT NOT NULL,
+    bucket_index BIGINT NOT NULL,
+    used DOUBLE PRECISION NOT NULL DEFAULT 0,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (tenant_id, dimension, bucket_index)
+);
+
+CREATE TABLE IF NOT EXISTS budget_limits (
+    tenant_id TEXT NOT NULL,
+    dimension TEXT NOT NULL,
+    limit_value DOUBLE PRECISION NOT NULL,
+    window_seconds INTEGER NOT NULL DEFAULT 3600,
+    PRIMARY KEY (tenant_id, dimension)
+);
+
+-- V3 Phase 4: CostRecord 可追溯成本记录
+CREATE TABLE IF NOT EXISTS cost_records (
+    id BIGSERIAL PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    session_id TEXT,
+    agent_run_id TEXT,
+    execution_id TEXT NOT NULL,
+    step_id TEXT,
+    model TEXT,
+    skill_name TEXT,
+    input_tokens INTEGER NOT NULL DEFAULT 0,
+    output_tokens INTEGER NOT NULL DEFAULT 0,
+    total_tokens INTEGER NOT NULL DEFAULT 0,
+    estimated_cost DOUBLE PRECISION NOT NULL DEFAULT 0.0,
+    actual_cost DOUBLE PRECISION NOT NULL DEFAULT 0.0,
+    timestamp DOUBLE PRECISION NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_cost_records_tenant ON cost_records (tenant_id);
+CREATE INDEX IF NOT EXISTS idx_cost_records_execution ON cost_records (execution_id);
+CREATE INDEX IF NOT EXISTS idx_cost_records_timestamp ON cost_records (timestamp);
+
 -- 四类 Memory: Episodic Memory 持久化
 CREATE TABLE IF NOT EXISTS episodic_memories (
     episode_id TEXT PRIMARY KEY,

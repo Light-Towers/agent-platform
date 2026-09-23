@@ -26,6 +26,7 @@
 from __future__ import annotations
 
 import abc
+import asyncio
 import copy
 import json
 import time
@@ -522,6 +523,85 @@ class ExecutionScheduler:
         """查询执行请求状态。"""
         return await self._store.get(execution_id)
 
+    async def list_overdue(
+        self, dispatch_timeout: float, running_timeout: float
+    ) -> list[ExecutionRequest]:
+        """列出超时的 DISPATCHED / RUNNING 执行（供 Reaper 扫描）。"""
+        return await self._store.list_overdue(dispatch_timeout, running_timeout)
+
+
+class SchedulerReaper:
+    """回收 lease 已失效的执行：标记 FAILED + 释放 slot（V3 Phase 3）。
+
+    核心约束：**只回收 lease 已失效的执行，不依据 wall-clock timeout 判定执行已终止。**
+
+    ``list_overdue()`` 给出超时候选，``ownership_store.get_owner()`` 做安全门控——
+    lease 仍有效（owner 非 None）则跳过（Worker 仍在跑），lease 已失效（owner 为 None）
+    才标记 FAILED。这避免 Reaper 与活 Worker 竞态导致 slot 双重占用。
+
+    与 V2 Lease/Fencing 的关系：复用 V2 已有的 lease 过期 + generation fencing，
+    不重新设计恢复语义。Reaper 是 Scheduler 层的"lease 过期清扫器"。
+    """
+
+    def __init__(
+        self,
+        scheduler: ExecutionScheduler,
+        ownership_store: Any,
+        *,
+        interval_s: float = 30.0,
+        dispatch_timeout: float = 60.0,
+        running_timeout: float = 300.0,
+    ) -> None:
+        self._scheduler = scheduler
+        self._ownership = ownership_store
+        self._interval_s = interval_s
+        self._dispatch_timeout = dispatch_timeout
+        self._running_timeout = running_timeout
+        self._stopped = False
+        self._task: Any = None
+
+    async def run(self) -> None:
+        """周期扫描超时执行，对 lease 已失效的标记 FAILED + 释放 slot。"""
+        import logging
+
+        logger = logging.getLogger(__name__)
+        while not self._stopped:
+            try:
+                overdue = await self._scheduler.list_overdue(
+                    self._dispatch_timeout, self._running_timeout
+                )
+                for req in overdue:
+                    # 安全门控：确认 lease 确实已失效（get_owner 返回 None = 无/过期）
+                    owner = await self._ownership.get_owner(req.execution_id)
+                    if owner is not None:
+                        continue  # lease 仍有效，Worker 可能还在跑，跳过
+                    # lease 已失效 → 安全标记 FAILED + 释放 slot
+                    await self._scheduler.complete(req.execution_id, QueueStatus.FAILED)
+                    logger.warning(
+                        "reaper: execution %s lease expired, marked FAILED",
+                        req.execution_id,
+                    )
+            except Exception:
+                logger.debug("reaper scan failed", exc_info=True)
+            await asyncio.sleep(self._interval_s)
+
+    def start(self) -> None:
+        """启动 Reaper 后台协程。"""
+        import asyncio
+
+        self._task = asyncio.ensure_future(self.run())
+
+    async def stop(self) -> None:
+        """停止 Reaper（优雅关闭）。"""
+        self._stopped = True
+        if self._task is not None:
+            self._task.cancel()
+            try:
+                await self._task
+            except asyncio.CancelledError:
+                pass
+            self._task = None
+
 
 __all__ = [
     "ExecutionPriority",
@@ -533,4 +613,5 @@ __all__ = [
     "InMemorySchedulerStore",
     "PgSchedulerStore",
     "ExecutionScheduler",
+    "SchedulerReaper",
 ]

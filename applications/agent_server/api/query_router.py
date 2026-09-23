@@ -38,6 +38,9 @@ async def query(
     planner_runtime = getattr(request.app.state, "planner_runtime", None)
     checkpointer = getattr(request.app.state, "checkpointer", None)
     pool = get_pool()
+    scheduler = getattr(request.app.state, "scheduler", None)
+    status_store = getattr(request.app.state, "status_store", None)
+    cost_governance = getattr(request.app.state, "cost_governance", None)
 
     # priority 来源优先级：X-Priority header > req.priority body > 默认 normal
     priority: Priority = "normal"
@@ -47,6 +50,40 @@ async def query(
         priority = req.priority
 
     request_id = str(uuid.uuid4())
+
+    # V3 Phase 2: ExecutionScheduler 入队（opt-in，未启用时跳过）
+    # Admission 回答"允不允许"，Scheduler 叠加回答"什么时候执行"——两者不互斥
+    scheduler_enqueued = False
+    if scheduler is not None:
+        from agent_runtime.execution_scheduler import ExecutionPriority, ExecutionRequest
+
+        sched_priority = ExecutionPriority.NORMAL
+        if priority == "high":
+            sched_priority = ExecutionPriority.HIGH
+        elif priority == "low":
+            sched_priority = ExecutionPriority.LOW
+        try:
+            await scheduler.submit(ExecutionRequest(
+                execution_id=request_id,
+                tenant_id=req.tenant_id or "default",
+                session_id=thread_id,
+                user_id=req.user_id,
+                priority=sched_priority,
+            ))
+            scheduler_enqueued = True
+        except Exception:
+            logger.warning("scheduler submit failed, continuing without queue", exc_info=True)
+            scheduler = None
+
+    # V3 Phase 4: Cost Governance check（opt-in，超限返回 429）
+    if cost_governance is not None:
+        from agent_runtime.cost_governance import BudgetDimension, BudgetExceeded
+
+        _tenant = req.tenant_id or "default"
+        try:
+            await cost_governance.check(_tenant, BudgetDimension.REQUESTS, estimated_amount=1)
+        except BudgetExceeded:
+            raise HTTPException(status_code=429, detail="BUDGET_EXCEEDED")
 
     # Phase 2: durable admission 前置
     decision = None
@@ -171,6 +208,7 @@ async def query(
         try:
             final_answer = ""
             round_snapshot: dict | None = None
+            _stream_failed = False
             if planner is None or planner_runtime is None:
                 # 兜底：Planner 未装配（理论不发生，lifespan 保证），走 graph 静态 DAG。
                 async for update in graph.astream(
@@ -217,6 +255,23 @@ async def query(
                     governed_memories=governed_memories,
                 )
                 plan = await planner.plan(ctx)
+                # V3 Phase 2: Scheduler dispatch（从队列取出并标记 RUNNING）
+                if scheduler is not None and scheduler_enqueued:
+                    try:
+                        await scheduler.dispatch_next()
+                    except Exception:
+                        logger.debug("scheduler dispatch failed", exc_info=True)
+                # V3 Phase 2: ExecutionStatus → RUNNING
+                if status_store is not None:
+                    from agent_runtime.execution_status import ExecutionStatus, ExecutionStatusRecord
+
+                    try:
+                        await status_store.save(ExecutionStatusRecord(
+                            execution_id=request_id,
+                            status=ExecutionStatus.RUNNING,
+                        ))
+                    except Exception:
+                        logger.debug("status save RUNNING failed", exc_info=True)
                 async for event in planner.execute(plan, planner_runtime):
                     sse = _stream_event(event)
                     if sse:
@@ -239,6 +294,7 @@ async def query(
                 )
             yield _sse({"type": "done", "thread_id": thread_id, "answer": final_answer})
         except Exception as exc:
+            _stream_failed = True
             yield _sse({"type": "error", "error": str(exc)})
             yield _sse({"type": "done", "thread_id": thread_id, "answer": ""})
         finally:
@@ -246,6 +302,37 @@ async def query(
                 _span_cm.__exit__(None, None, None)
             if _parent_ctx_cm is not None:
                 _parent_ctx_cm.__exit__(None, None, None)
+            # V3 Phase 2: Scheduler complete + ExecutionStatus → SUCCEEDED/FAILED
+            if scheduler is not None and scheduler_enqueued:
+                try:
+                    await scheduler.complete(request_id)
+                except Exception:
+                    logger.debug("scheduler complete failed", exc_info=True)
+            if status_store is not None:
+                from agent_runtime.execution_status import ExecutionStatus, ExecutionStatusRecord
+
+                try:
+                    await status_store.save(ExecutionStatusRecord(
+                        execution_id=request_id,
+                        status=ExecutionStatus.FAILED if _stream_failed else ExecutionStatus.SUCCEEDED,
+                    ))
+                except Exception:
+                    logger.debug("status save terminal failed", exc_info=True)
+            # V3 Phase 4: Cost Governance record（opt-in）
+            if cost_governance is not None:
+                from agent_runtime.cost_governance import BudgetDimension
+
+                _tenant = req.tenant_id or "default"
+                try:
+                    await cost_governance.record(_tenant, BudgetDimension.REQUESTS, 1)
+                    traj = getattr(planner_runtime, "last_trajectory", None)
+                    if traj is not None:
+                        if traj.total_tokens > 0:
+                            await cost_governance.record(_tenant, BudgetDimension.TOKENS, traj.total_tokens)
+                        if traj.total_cost > 0:
+                            await cost_governance.record(_tenant, BudgetDimension.COST, traj.total_cost)
+                except Exception:
+                    logger.debug("cost governance record failed", exc_info=True)
             # Phase 2: 统一生命周期清理（幂等，覆盖 graph 异常 / 客户端断开 /
             # 正常完成）。reject 与 cache-hit 路径已在 _stream 外提前调用过，
             # 此处再调用安全无副作用（AsyncLease 幂等）。

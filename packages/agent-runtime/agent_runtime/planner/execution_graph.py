@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Any
 from agent_core.resilience import ErrorClass, classify_exception
 
 from agent_runtime.effect_contract import FailureAction, decide_failure_action
+from agent_runtime.forensic import ForensicContext
 from agent_runtime.planner.durability import Checkpoint, FencedWriteError
 from agent_runtime.planner.protocol import Plan, StreamEvent
 from agent_runtime.trajectory.models import TrajectoryRecord
@@ -52,6 +53,12 @@ async def _persist_trajectory(
     """
     if exec_ctx is None:
         return
+    # V3-9: 执行级版本指纹
+    _model = getattr(runtime.llm, "model", None) if runtime.llm else None
+    forensic_ctx = ForensicContext(
+        model=_model,
+        planner_version=plan.planner_name or None,
+    )
     record = TrajectoryRecord(
         execution_id=exec_ctx.execution_id,
         session_id=plan.session_id or None,
@@ -61,6 +68,7 @@ async def _persist_trajectory(
         total_tokens=exec_ctx.tokens_used,
         total_cost=exec_ctx.cost_used,
         snapshot=exec_ctx.metadata.get("snapshot") or agent_ctx.snapshot(),
+        forensic=forensic_ctx.to_dict(),
     )
     store = runtime.trajectory_store
     if store is not None:
