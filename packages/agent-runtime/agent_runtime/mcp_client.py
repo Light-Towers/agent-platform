@@ -342,7 +342,7 @@ class MCPClientManager:
         """脱敏：截断 + 哈希摘要。"""
         try:
             raw = json.dumps(data, ensure_ascii=False, default=str)
-        except Exception:
+        except (TypeError, ValueError):
             raw = str(data)
         if len(raw) > 200:
             raw = raw[:200] + "..."

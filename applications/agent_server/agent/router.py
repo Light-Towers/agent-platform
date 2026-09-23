@@ -42,7 +42,7 @@ def _load_hints() -> dict[str, tuple[str, ...]]:
             key: tuple(words) for key, words in data.items()
             if key in ("sql", "search", "rag", "mcp", "code_execution") and isinstance(words, list)
         }
-    except Exception as e:
+    except (OSError, json.JSONDecodeError) as e:
         logger.warning("加载路由特征词失败，使用内置默认值: %s", e)
         return _FALLBACK_HINTS
 

@@ -68,7 +68,7 @@ class ApiReranker:
                 detail = ""
                 try:
                     detail = e.read().decode("utf-8")
-                except Exception:
+                except (OSError, UnicodeDecodeError):
                     pass
                 if e.code not in (429, 500, 502, 503, 504):
                     raise
