@@ -24,7 +24,7 @@ async def mcp_query(state: AgentState, mcp_manager: MCPClientManager | None) -> 
 
     try:
         result = await mcp_manager.call_tool(server_id, tool_name, params, caller)
-    except Exception:  # noqa: BLE001
+    except Exception:
         logger.warning("mcp_query failed", exc_info=True)
         return {"evidence": ["MCP 工具调用异常"]}
 

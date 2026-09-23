@@ -553,7 +553,7 @@ class PlannerRuntime:
                 hb_task.cancel()
                 try:
                     await hb_task
-                except (asyncio.CancelledError, Exception):  # noqa: BLE001 - heartbeat task cancel cleanup
+                except (asyncio.CancelledError, Exception):
                     pass
             await self.ownership_store.release(eid, owner)
             self._ctx_var.reset(token)
@@ -629,7 +629,7 @@ class PlannerRuntime:
             _forensic_dict = step_forensic.to_dict()
             try:
                 result = await self.registry.execute(name, **kwargs)
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 if ctx is not None:
                     ctx.record_step(
                         name, kwargs, None, str(exc),
@@ -728,7 +728,7 @@ def _fingerprint(name: str, kwargs: dict[str, Any]) -> str:
             ensure_ascii=False,
             default=_default,
         )
-    except Exception:  # noqa: BLE001 极端情况下回退 repr
+    except Exception:
         normalized = repr((name, sorted(kwargs.items())))
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
 

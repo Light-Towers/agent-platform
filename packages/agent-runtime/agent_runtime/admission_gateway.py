@@ -253,7 +253,7 @@ class PgAdmissionController:
                             notified.set()
                         if stop_event is not None and stop_event.is_set():
                             break
-            except Exception:  # noqa: BLE001
+            except Exception:
                 # LISTEN 失败不影响正确性，回退纯轮询
                 pass
 
@@ -283,7 +283,7 @@ class PgAdmissionController:
                 listen_task.cancel()
                 try:
                     await listen_task
-                except (asyncio.CancelledError, Exception):  # noqa: BLE001 - task cancel cleanup
+                except (asyncio.CancelledError, Exception):
                     pass
 
     async def mark_completed(self, request_id: str) -> None:
@@ -293,7 +293,7 @@ class PgAdmissionController:
             await conn.execute(sql, (request_id,))
             try:
                 await conn.execute(f"NOTIFY {self._notify_channel}")
-            except Exception:  # noqa: BLE001
+            except Exception:
                 logger.warning("NOTIFY %s 发送失败", self._notify_channel, exc_info=True)
 
     async def recover_on_startup(self) -> int:

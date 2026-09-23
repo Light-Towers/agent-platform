@@ -189,7 +189,7 @@ def _execute_sql_template(sql: str) -> dict:
         rows = cur.fetchall()
         conn.close()
         return {"executable": True, "row_count": len(rows)}
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return {"executable": False, "error": str(e)}
 
 
@@ -295,7 +295,7 @@ def _write_audit(evaluation_results: list, upgrades: list) -> dict:
             audit_log = _load_json(_AUDIT_LOG_PATH)
             if not isinstance(audit_log, list):
                 audit_log = []
-        except Exception:  # noqa: BLE001
+        except Exception:
             audit_log = []
 
     audit_log.append(audit_record)

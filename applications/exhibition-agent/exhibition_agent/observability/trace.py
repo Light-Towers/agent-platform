@@ -161,7 +161,7 @@ class OTelTraceRecorder:
             for k, v in attrs.items():
                 try:
                     s.set_attribute(k, v)
-                except Exception:  # noqa: BLE001 - pragma: no cover - no-op span 不应抛
+                except Exception:  # pragma: no cover - no-op span 不应抛
                     pass
         self._recorded += 1
 

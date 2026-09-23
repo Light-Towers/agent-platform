@@ -93,7 +93,7 @@ class RevertHandler:
                 context_summary=context_summary,
             )
 
-        except Exception:  # noqa: BLE001
+        except Exception:
             self._logger.warning(
                 "revert failed session=%s checkpoint=%s",
                 session_id,
@@ -141,7 +141,7 @@ class RevertHandler:
                             status,
                         ),
                     )
-            except Exception:  # noqa: BLE001
+            except Exception:
                 self._logger.warning("revert audit write failed", exc_info=True)
         else:
             self._logger.info(

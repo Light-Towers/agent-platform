@@ -52,7 +52,7 @@ async def rewrite_query(query: str, context: str = "", model: Any = None) -> str
         if rewritten and rewritten != query:
             logger.info("Query 改写: %r → %r", query, rewritten)
             return rewritten
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         logger.warning("Query 改写失败: %s，返回原始查询", e)
 
     return query

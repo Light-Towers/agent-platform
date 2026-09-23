@@ -223,7 +223,7 @@ def discover_workflows(
     for file in sorted(root.rglob(pattern)):
         try:
             skills.append(load_workflow_yaml(file, registry=registry))
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             raise RuntimeError(f"Failed to load workflow {file}: {e}") from e
     return skills
 

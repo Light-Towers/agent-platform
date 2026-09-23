@@ -35,7 +35,7 @@ async def read_thread_messages(checkpointer: Any, thread_id: str) -> list[Any]:
             return []
         # checkpoint 的 channel_values.messages 即线程累积的完整历史（追加写）
         return list(latest.checkpoint.get("channel_values", {}).get("messages", []))
-    except Exception as exc:  # noqa: BLE001 - 历史读取失败不影响主链路
+    except Exception as exc:
         logger.warning("读取线程历史失败（忽略，无上下文执行）: %s", exc)
         return []
 
@@ -56,7 +56,7 @@ async def read_thread_snapshot(checkpointer: Any, thread_id: str) -> dict[str, A
             return None
         snapshot = latest.checkpoint.get("channel_values", {}).get("task_snapshot")
         return dict(snapshot) if isinstance(snapshot, dict) else None
-    except Exception as exc:  # noqa: BLE001 - 快照读取失败不影响主链路
+    except Exception as exc:
         logger.warning("读取线程快照失败（忽略，无快照执行）: %s", exc)
         return None
 
@@ -114,5 +114,5 @@ async def append_thread(
     checkpoint["channel_versions"] = channel_versions
     try:
         await checkpointer.aput(config, checkpoint, metadata, new_versions)
-    except Exception as exc:  # noqa: BLE001 - 历史写入失败不影响本次回答
+    except Exception as exc:
         logger.warning("写入线程历史失败（忽略）: %s", exc)

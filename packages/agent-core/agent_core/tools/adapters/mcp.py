@@ -80,7 +80,7 @@ class MCPToolAdapter:
         if self._on_start is not None:
             try:
                 self._on_start(state)
-            except Exception as e:  # noqa: BLE001 - 记账失败不影响主流程
+            except Exception as e:
                 logger.warning("MCP on_start 失败: %s", e)
 
         query = self._query_extractor(state)
@@ -95,14 +95,14 @@ class MCPToolAdapter:
             # guarded 线程池子线程执行，无 running loop）；用 wait_for 施加超时，
             # 与 guarded 的超时语义保持一致。
             result = asyncio.run(asyncio.wait_for(self._call(query, state), timeout=self.timeout_s))
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             logger.error("MCP 适配器调用异常 %s: %s", self.name, e)
             result = None
 
         if self._on_done is not None:
             try:
                 self._on_done(state)
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 logger.warning("MCP on_done 失败: %s", e)
 
         if result is None:
@@ -113,7 +113,7 @@ class MCPToolAdapter:
         # agents.mcp 为可选依赖：懒导入。
         try:
             from agents.mcp import MCPServerSse
-        except Exception as e:  # noqa: BLE001 - pragma: no cover - 依赖缺失路径
+        except Exception as e:  # pragma: no cover - 依赖缺失路径
             raise ImportError(
                 "openai-agents 未安装；请安装 agent-core[tools-mcp]（uv sync --extra tools-mcp）"
             ) from e
@@ -143,13 +143,13 @@ class MCPToolAdapter:
             except (json.JSONDecodeError, ValueError) as e:
                 logger.error("MCP 结果解析失败 %s: %s", self.name, e)
                 return None
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             logger.error("MCP 调用过程异常 %s: %s", self.name, e, exc_info=True)
             return None
         finally:
             try:
                 await search_mcp.cleanup()
-            except Exception:  # noqa: BLE001 - pragma: no cover - 防御：清理失败不影响返回
+            except Exception:  # pragma: no cover - 防御：清理失败不影响返回
                 pass
 
 

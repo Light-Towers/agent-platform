@@ -30,13 +30,13 @@ try:
     from opentelemetry.sdk.trace.export import InMemorySpanExporter  # noqa: F401
 
     HAVE_OTEL_SDK = True
-except Exception:  # noqa: BLE001 - optional import guard
+except Exception:
     # opentelemetry-sdk >= 1.44：移入独立子模块 in_memory_span_exporter
     try:
         from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter  # noqa: F401
 
         HAVE_OTEL_SDK = True
-    except Exception:  # noqa: BLE001 - optional import guard
+    except Exception:
         HAVE_OTEL_SDK = False
 
 requires_sdk = pytest.mark.skipif(not HAVE_OTEL_SDK, reason="opentelemetry-sdk 未安装（可选 extra tracing）")

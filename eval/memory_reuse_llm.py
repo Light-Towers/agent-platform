@@ -58,7 +58,7 @@ async def _judge_reused(llm, answer: str) -> bool:
 
         data = json.loads(text)
         return bool(data.get("reused", False))
-    except Exception:  # noqa: BLE001
+    except Exception:
         # 裁判失败时退化为关键词启发式，不阻断（雷达本就非阻塞）
         return any(sig in answer for sig in _PREFERENCE_SIGNALS)
 

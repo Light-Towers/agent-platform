@@ -26,7 +26,7 @@ def get_milvus_client():
             _milvus_client = MilvusClient(uri=milvus_uri)
             logger.info("Milvus客户端连接成功")
         return _milvus_client
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         logger.error(f"Milvus客户端连接异常：{str(e)}", exc_info=True)
         return None
 
@@ -46,7 +46,7 @@ def milvus_ready() -> bool:
     try:
         client.list_collections(timeout=3)
         return True
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         logger.warning(f"Milvus 连通性探测失败，单例缓存已重置：{str(e)}")
         _milvus_client = None
         return False
@@ -65,7 +65,7 @@ def _coerce_int64_ids(ids):
             continue
         try:
             ok.append(int(x))
-        except Exception:  # noqa: BLE001
+        except Exception:
             bad.append(x)
     return ok, bad
 
@@ -120,7 +120,7 @@ def fetch_chunks_by_chunk_ids(
                 if got:
                     results.extend(got)
                 continue
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 logger.warning(f"Milvus get方法查询失败，将回退至query方法：{str(e)}")
 
         # 方式2：get方法失败，回退使用filter过滤查询
@@ -129,7 +129,7 @@ def fetch_chunks_by_chunk_ids(
             q = client.query(collection_name=collection_name, filter=expr, output_fields=output_fields)
             if q:
                 results.extend(q)
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             logger.error(f"Milvus query方法批量查询chunk_id失败：{str(e)}", exc_info=True)
 
     return results
@@ -213,6 +213,6 @@ def hybrid_search(
 
         logger.info(f"Milvus混合搜索完成，集合[{collection_name}]共检索到{len(res[0])}条结果")
         return res
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         logger.error(f"Milvus混合搜索执行失败，集合[{collection_name}]：{str(e)}", exc_info=True)
         return None

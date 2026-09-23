@@ -86,7 +86,7 @@ class MongoCheckpointer(BaseCheckpointSaver[str]):
         super().__init__(serde=serde)
         try:
             from pymongo import ASCENDING, MongoClient
-        except Exception as e:  # noqa: BLE001 - pragma: no cover - 依赖缺失路径
+        except Exception as e:  # pragma: no cover - 依赖缺失路径
             raise ImportError(
                 "pymongo 未安装；请安装 agent-core[memory-mongo]"
             ) from e
@@ -103,7 +103,7 @@ class MongoCheckpointer(BaseCheckpointSaver[str]):
                 unique=True,
             )
             logger.info("MongoCheckpointer 已连接: %s/%s", db_name, collection)
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             logger.error("MongoCheckpointer 连接失败: %s", e)
             raise
 

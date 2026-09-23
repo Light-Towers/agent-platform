@@ -73,7 +73,7 @@ def guarded_invoke(
         _mark_guard_span(channel, timeout_s, "timeout")
         logger.warning("tool invoke timeout channel=%s timeout_s=%s", channel, timeout_s)
         return {}
-    except Exception as e:  # noqa: BLE001 —— 单路失败降级，绝不向上抛
+    except Exception as e:
         _mark_guard_span(channel, timeout_s, "error", exception=e)
         logger.exception("tool invoke failed channel=%s", channel)
         return {}
@@ -110,7 +110,7 @@ def _mark_guard_span(
         if exception is not None:
             try:
                 span.record_exception(exception)
-            except Exception:  # noqa: BLE001 - pragma: no cover - 防御
+            except Exception:  # pragma: no cover - 防御
                 pass
 
 

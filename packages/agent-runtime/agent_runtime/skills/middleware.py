@@ -101,7 +101,7 @@ class GuardMiddleware:
         except asyncio.TimeoutError:
             logger.warning("skill %s 超时（> %.1fs），降级返回 fallback", name, self._timeout_s)
             return self._fallback
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             # 致命异常（编程错误/状态不一致）必须向上冒泡，不得降级成空 fallback 静默结果；
             # 瞬态/未知异常才降级继续（控制流由分类层决定，而非一律吞掉）。
             from agent_core.resilience import ErrorClass, classify_exception
@@ -180,7 +180,7 @@ class RetryMiddleware:
         for attempt in range(self._max_retries + 1):
             try:
                 return await call_next(name, kwargs)
-            except Exception as exc:  # noqa: BLE001 —— 由 is_transient 判定是否重试
+            except Exception as exc:
                 if attempt < self._max_retries and is_transient(exc):
                     if self._backoff_s:
                         await asyncio.sleep(self._backoff_s)
@@ -275,12 +275,12 @@ class AuditMiddleware:
         try:
             result = await call_next(name, kwargs)
             return result
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             error = str(exc)
             raise
         finally:
             logged_kwargs = {"<redacted>": True} if self._redact else kwargs
             try:
                 await self._sink(name, logged_kwargs, result, error, time.monotonic() - t0)
-            except Exception:  # noqa: BLE001 —— 审计旁路故障不影响主链路
+            except Exception:
                 logger.warning("audit sink 失败（已忽略）", exc_info=True)

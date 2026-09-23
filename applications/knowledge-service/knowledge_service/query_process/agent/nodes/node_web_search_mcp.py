@@ -101,5 +101,5 @@ if __name__ == "__main__":
         else:
             print("未获取到搜索结果")
         print("=" * 50)
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         logger.exception("测试运行期间发生未捕获异常: %s", e)

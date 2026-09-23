@@ -246,7 +246,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                     enable_hyde=args.enable_hyde,
                     skip_rerank=args.skip_rerank,
                 )
-            except Exception as e:  # noqa: BLE001 —— 单条失败显式暴露（不吞），便于定位
+            except Exception as e:
                 print(f"[ablation] {qid} {strategy} 检索链路异常：{e}", file=sys.stderr)
                 raise
             latency_ms = (time.perf_counter() - t0) * 1000.0

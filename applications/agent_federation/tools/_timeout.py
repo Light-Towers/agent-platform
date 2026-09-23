@@ -47,7 +47,7 @@ def with_timeout(timeout: float = 30.0):
                 monitor.report_tool_outcome(
                     tool_name=func.__name__, outcome="guarded", error_class="ValueError", detail=str(e))
                 return f"工具 {func.__name__} 输入被护栏拒绝：{e}"
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 monitor.report_tool_outcome(
                     tool_name=func.__name__, outcome="exception", error_class=type(e).__name__, detail=str(e))
                 return f"工具 {func.__name__} 执行失败：{type(e).__name__}: {e}"

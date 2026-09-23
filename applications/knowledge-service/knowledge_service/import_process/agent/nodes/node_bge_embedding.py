@@ -65,7 +65,7 @@ def node_bge_embedding(state: ImportGraphState) -> ImportGraphState:
         state["chunks"] = output_data
         logger.info(f"--- BGE-M3 向量化处理完成，共处理 {len(output_data)} 条文本切片 ---")
         add_done_task(state.get("task_id", ""), current_node)
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         # 捕获节点所有异常，记录错误堆栈，不中断整体流程
         logger.error(f"BGE-M3向量化节点执行失败：{str(e)}", exc_info=True)
 
@@ -117,7 +117,7 @@ def step_2_init_model():
 
         logger.info("BGE-M3模型实例初始化成功（单例模式）")
         return ef
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         # 包装异常信息，明确错误原因和排查方向
         error_msg = f"BGE-M3模型初始化失败：{e}，请检查模型路径/环境变量配置是否正确"
         logger.error(error_msg)
@@ -186,7 +186,7 @@ def step_3_generate_embeddings(texts_to_embed: List[Dict[str, Any]], bge_m3_ef: 
 
             logger.info(f"第{start_idx}-{end_idx}条切片：双向量生成成功")
 
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             # 捕获单批次所有异常，记录错误堆栈，不终止整体批量处理
             logger.error(f"第{start_idx}-{end_idx}条切片：向量生成失败，保留原数据 | 错误原因：{str(e)}", exc_info=True)
             # 异常批次保留原切片数据，保证数据完整性，后续可人工排查
@@ -248,7 +248,7 @@ if __name__ == "__main__":
                 f"第{idx + 1}条切片：稠密向量生成{'' if has_dense else '未'}成功 | 稀疏向量生成{'' if has_sparse else '未'}成功"
             )
 
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         logger.error(f"=== 向量化节点本地测试失败 ===错误原因：{str(e)}", exc_info=True)
         # 新手友好提示：给出核心排查方向
         logger.warning("排查提示：请检查BGE-M3模型路径、显存是否充足、环境变量配置是否正确")

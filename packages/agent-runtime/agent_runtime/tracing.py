@@ -22,6 +22,6 @@ def get_langfuse_callbacks(public_key: str = "", secret_key: str = "", host: str
             host=host,
         )
         return [handler]
-    except Exception:  # noqa: BLE001
+    except Exception:
         logger.warning("Langfuse 初始化失败，已降级为无 trace 模式")
         return []

@@ -71,7 +71,7 @@ class CircuitBreaker(_BaseBreaker):
             return fallback
         try:
             result = await fn()
-        except Exception:  # noqa: BLE001
+        except Exception:
             self.record_failure()
             self._report_transition()
             return fallback

@@ -44,7 +44,7 @@ try:
     from knowledge_service.api.middleware.security_guards import SecurityGuardsMiddleware
 
     HAVE_WEB = True
-except Exception:  # noqa: BLE001 - optional import guard
+except Exception:
     HAVE_WEB = False
 
 requires_web = pytest.mark.skipif(not HAVE_WEB, reason="fastapi/starlette 未安装（web 集成用例跳过）")
@@ -138,7 +138,7 @@ def test_limiter_thread_safety_smoke():
                 ok, _ = limiter.allow("shared")
                 if ok:
                     allowed_count["n"] += 1
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             errors.append(e)
 
     threads = [threading.Thread(target=worker) for _ in range(4)]

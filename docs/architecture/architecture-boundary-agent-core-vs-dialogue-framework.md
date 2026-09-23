@@ -1,5 +1,6 @@
 # 架构边界建议：agent-core 与 dialogue-framework
 
+> **Status: SUPERSEDED（2026-09-23 dialogue-framework 已作为孤儿框架移除，能力已被 agent_server 吸收。本文保留作历史记录。）**
 > 调研日期：2026-08-15
 > 范围：仅梳理职责边界，**未改动任何代码**。
 > 结论：两者无实质性功能重复，依赖单向（DF → AC），无需合并；仅需统一两处接口冗余。

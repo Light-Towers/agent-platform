@@ -18,7 +18,7 @@ try:
     from agent_core.sql.guard import validate_sql as _core_validate_sql
 
     _HAS_CORE_GUARD = True
-except Exception:  # noqa: BLE001 - pragma: no cover - 兜底：内核缺失时走本地实现
+except Exception:  # pragma: no cover - 兜底：内核缺失时走本地实现
     _core_validate_sql = None
     _HAS_CORE_GUARD = False
 

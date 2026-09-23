@@ -63,7 +63,7 @@ def _discover_executor_factory() -> Callable[[], Callable]:
         for ep in eps:
             _executor_factory = ep.load()
             return _executor_factory
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         raise RuntimeError(
             "发现 agentic 执行器 entry point 失败。"
             "若未安装 agent-federation-app，运行 `uv sync --extra agentic`。"
@@ -150,7 +150,7 @@ class AgenticPlanner(Planner):
         except SkillCompositionError:
             unsub()
             raise
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             unsub()
             logger.warning("agentic 执行异常: %s", exc)
             yield StreamEvent(type="error", payload={"error": str(exc)})

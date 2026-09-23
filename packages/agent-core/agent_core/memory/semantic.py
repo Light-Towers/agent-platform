@@ -73,7 +73,7 @@ def _get_backend() -> Any:
             collection=env_str("SEMANTIC_MEMORY_COLLECTION", "semantic_memory"),
             tenant_id=env_str("TENANT_ID", "default"),
         )
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         logger.warning("语义记忆后端初始化失败，降级为无记忆: %s", e)
         return None
 
@@ -103,7 +103,7 @@ async def recall_memories(user_id: str, question: str, k: int = 3) -> list[str]:
         return []
     try:
         return await backend.recall(pool=None, user_id=user_id, question=question, k=k)
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         logger.warning("语义记忆召回失败: %s", e)
         return []
 
@@ -121,9 +121,9 @@ def remember_memory(user_id: str, content: str) -> None:
         # 无运行中的事件循环（如测试/脚本），直接同步调用
         try:
             backend.remember(pool=None, user_id=user_id, content=content)
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             logger.warning("语义记忆沉淀失败: %s", e)
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         logger.warning("语义记忆沉淀调度失败: %s", e)
 
 

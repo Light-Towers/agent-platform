@@ -66,7 +66,7 @@ def check_zhiku_health() -> bool:
             _zhiku_healthy = False
             _zhiku_logger.warning("zhiku 健康探活失败 HTTP %d (%s)", resp.status_code, url)
             return False
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         _zhiku_healthy = False
         _zhiku_logger.warning("zhiku 健康探活异常: %s", e)
         return False
@@ -157,7 +157,7 @@ def zhiku_retrieve(query: str, item_name: str = "") -> str:
                 tool_name="zhiku_retrieve", outcome="exception", error_class="HTTPStatusError",
                 detail=f"HTTP {e.response.status_code}")
             return f"知识库检索失败（HTTP {e.response.status_code}）：{e.response.text[:200]}"
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             monitor.report_tool_outcome(
                 tool_name="zhiku_retrieve", outcome="exception", error_class=type(e).__name__, detail=str(e))
             return f"知识库检索异常：{str(e)}"

@@ -135,7 +135,7 @@ class PgMemoryStore:
                 embedding=embedding,
             )
             return [m.content for m in memories]
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             logger.warning("PgMemoryStore.recall 失败，降级为空: %s", e)
             return []
 
@@ -161,7 +161,7 @@ class PgMemoryStore:
                 importance=importance,
                 embedding=embedding,
             )
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             logger.warning("PgMemoryStore.remember 失败，静默降级: %s", e)
 
     async def consolidate(
@@ -182,7 +182,7 @@ class PgMemoryStore:
                 forget_threshold=forget_threshold,
                 age_days=age_days,
             )
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             logger.warning("PgMemoryStore.consolidate 失败: %s", e)
             return 0
 
@@ -193,7 +193,7 @@ class PgMemoryStore:
             from agent_core.memory.typed import forget
 
             return await forget(user_id, self._pool, memory_id)
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             logger.warning("PgMemoryStore.forget 失败: %s", e)
             return False
 
@@ -234,7 +234,7 @@ class VectorMemoryStore:
             return []
         try:
             return await self._backend.recall(self._pool, user_id, question, k=k)
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             logger.warning("VectorMemoryStore.recall 失败，降级为空: %s", e)
             return []
 
@@ -243,7 +243,7 @@ class VectorMemoryStore:
             return
         try:
             self._backend.remember(self._pool, user_id, content)
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             logger.warning("VectorMemoryStore.remember 调度失败: %s", e)
 
     async def consolidate(self, user_id: str, **kwargs: Any) -> int:

@@ -331,5 +331,5 @@ if __name__ == "__main__":
 
         print("=" * 50)
 
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         logger.exception(f"测试运行期间发生未捕获异常: {e}")

@@ -209,7 +209,7 @@ def step_3_call_llm(file_title: str, context: str) -> str:
         return item_name
 
     # 捕获所有异常：大模型调用超时、网络错误、格式错误等，均不中断主流程
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         logger.error(f"步骤3：大模型调用失败，原因：{str(e)}", exc_info=True)
         # 异常时返回文件标题兜底，保证流程继续执行
         return file_title
@@ -275,7 +275,7 @@ def step_5_generate_vectors(item_name: str) -> Tuple[Any, Any]:
             dense_vector, sparse_vector = None, None
 
     # 捕获所有异常：模型加载失败、向量生成超时、格式错误等
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         logger.error(f"步骤5：向量生成失败，原因：{str(e)}", exc_info=True)
         dense_vector, sparse_vector = None, None
 
@@ -394,7 +394,7 @@ def step_6_save_to_milvus(state: ImportGraphState, file_title: str, item_name: s
         logger.info(f"步骤6：商品名称[{item_name}]成功存入Milvus集合[{collection_name}]，数据：{list(data.keys())}")
 
     # 捕获所有Milvus操作异常：连接中断、入库失败、索引错误等，不中断主流程
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         logger.error(f"步骤6：数据存入Milvus失败，原因：{str(e)}", exc_info=True)
 
 
@@ -450,7 +450,7 @@ def node_item_name_recognition(state: ImportGraphState) -> ImportGraphState:
         # 节点执行完成日志
         logger.info(f">>> 核心节点执行完成：【商品名称识别】{node_name}，识别结果：{item_name}，已存入Milvus")
 
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         # 全局异常捕获：保证节点执行失败不崩溃整个流程，记录详细错误日志便于排查
         logger.error(f">>> 核心节点执行失败：【商品名称识别】{node_name}，错误信息：{str(e)}", exc_info=True)
         # 可选：失败时设置默认值或标记状态
@@ -524,7 +524,7 @@ def test_node_item_name_recognition():
             )
             logger.info(f"Milvus中检索到的数据：{res}")
 
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         logger.error(f"商品名称识别节点本地测试失败，原因：{str(e)}", exc_info=True)
 
 
