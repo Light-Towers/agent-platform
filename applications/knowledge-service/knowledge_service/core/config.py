@@ -145,6 +145,7 @@ class Settings:
     # 输入长度护栏：query 长度上限在 Pydantic 层强制（512）；历史轮数 / 请求体大小可配置
     knowledge_max_history_rounds: int = _as_int(os.getenv("KNOWLEDGE_MAX_HISTORY_ROUNDS"), 20)
     knowledge_max_body_bytes: int = _as_int(os.getenv("KNOWLEDGE_MAX_BODY_BYTES"), 65536)
+    knowledge_max_context_chars: int = _as_int(os.getenv("KNOWLEDGE_MAX_CONTEXT_CHARS"), 12000)
 
     # -------------------------- 导入：图片摘要（可选增强） --------------------------
     # 图片摘要需多模态（VL）模型；缺省关闭：无 VL 能力时跳过摘要（图片标题用默认值
