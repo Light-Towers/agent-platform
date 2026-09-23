@@ -34,9 +34,17 @@ def federation_capability_registry() -> "Any":
 
     任一能力注册失败仅跳过该能力（不中断），保证降级安全。返回 ``SkillRegistry``。
     """
+    from agent_runtime.circuit_breaker import CircuitBreaker
+    from agent_runtime.skills.middleware import CircuitBreakerMiddleware, RetryMiddleware
     from agent_runtime.skills.registry import Skill, SkillKind, SkillRegistry
 
-    reg = SkillRegistry()
+    _breaker = CircuitBreaker(failure_threshold=5, recovery_seconds=30)
+    reg = SkillRegistry(
+        middlewares=[
+            CircuitBreakerMiddleware(_breaker, skill_names=("search",)),
+            RetryMiddleware(max_retries=2, backoff_s=0.5),
+        ]
+    )
 
     # 文件工具（FUNCTION）
     for name, fn, desc in _file_tool_specs():
