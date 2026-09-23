@@ -17,7 +17,7 @@ type:
 	uv run --with ruff ruff check . --select ALL 2>/dev/null || uv run --with ruff ruff check .
 
 # 单测门禁：根套件（tests/ + agent-core/tests/）走默认 conftest；
-# agent_federation/kefu/exhibition-agent/dialogue-framework 套件各自独立 pytest session，
+# agent_federation/kefu/exhibition-agent 套件各自独立 pytest session，
 # 避免跨目录 conftest 插件名冲突（importlib 模式下均注册为 tests.conftest）。
 # agent_federation 收集整目录 tests/（含根级 test_auth/test_semantic_memory_typed，2026-09-21 F-S0-03 修复，
 # 原先只跑 tests/unit 导致根级 2 文件漏出门禁）。
@@ -36,7 +36,6 @@ test:
 	uv run pytest applications/agent_federation/tests -q
 	uv run pytest applications/kefu-service/tests -q
 	uv run pytest applications/exhibition-agent/tests -q
-	uv run pytest applications/dialogue-framework/tests -q
 	uv run pytest applications/knowledge-service/tests -q
 	uv run pytest applications/nl2sql-service/tests -q
 

@@ -107,6 +107,5 @@ members = [
     "applications/kefu-service",
     "applications/nl2sql-service",
     "applications/knowledge-service",
-    "applications/dialogue-framework",
     "applications/exhibition-agent",
 ]
