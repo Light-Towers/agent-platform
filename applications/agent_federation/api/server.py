@@ -346,19 +346,21 @@ async def websocket_endpoint(
                 await websocket.send_json({"type": "pong", "message": f"服务端已收到: {data}"})
                 continue
 
-            plan = await planner.plan(PlannerContext(question=msg["text"], workspace_id=ws_thread_id))
-            final_answer = ""
-            async for event in planner.execute(plan, runtime):
-                out = serialize_stream_event(event)
-                if out is None:
-                    continue
-                if event.type == "answer":
-                    final_answer = event.payload.get("text", "")
-                await websocket.send_json(out)
-            await websocket.send_json({"type": "done", "thread_id": ws_thread_id, "answer": final_answer})
+            with start_span("ws.query", attrs={"thread_id": ws_thread_id}):
+                plan = await planner.plan(PlannerContext(question=msg["text"], workspace_id=ws_thread_id))
+                final_answer = ""
+                async for event in planner.execute(plan, runtime):
+                    out = serialize_stream_event(event)
+                    if out is None:
+                        continue
+                    if event.type == "answer":
+                        final_answer = event.payload.get("text", "")
+                    await websocket.send_json(out)
+                await websocket.send_json({"type": "done", "thread_id": ws_thread_id, "answer": final_answer})
     except WebSocketDisconnect:
         manager.disconnect(websocket, ws_thread_id)
     except Exception:
+        logger.exception("WS handler error: thread_id=%s", ws_thread_id)
         manager.disconnect(websocket, ws_thread_id)
 
 
