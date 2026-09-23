@@ -1,6 +1,6 @@
-"""LLM 客户端 — 收敛! agent_core.llm（FallbackFallsModel + ChatOpenAI）。
+"""LLM 客户端 — 已收敛到 agent_core.llm（OpenAICompatibleProvider + FallbackChatModel）。
 
-支持任何兼容 OpenAI ChatB Chat Completions 格式的 provider：
+支持任何兼容 OpenAI Chat Completions 格式的 provider：
 - OpenAI: https://api.openai.com/v1
 - 通义千问: https://dashscope.aliyuncs.com/compatible-mode/v1
 - 智谱: https://open.bigmodel.cn/api/paas/v4
@@ -9,11 +9,12 @@
 - 本地 Ollama: http://localhost:11434/v1
 
 环境变量：
-- LLM_API_KEY：API 密钥（> 必填）
+- LLM_API_KEY：API 密钥（必填）
 - LLM_BASE_URL：API 地址（默认 https://api.openai.com/v1）
 - LLM_MODEL：模型名（默认 gpt-4o-mini）
 
-收敛到 agent_core.llm.FallbackChatModel（主备降级 + 熔断 + usage 回调），
+经 agent_core.llm.OpenAICompatibleProvider 构造 ChatOpenAI，
+经 agent_core.llm.FallbackChatModel 包装主备降级 + 熔断 + usage 回调。
 接口保持 chat_completion(messages, tools) → dict 不变，ExhibitionAgent 无需改。
 """
 
@@ -41,16 +42,22 @@ class LLMClient:
             self._llm = self._build_llm()
 
     def _build_llm(self) -> Any:
+        from agent_core.llm import OpenAICompatibleProvider
         from agent_core.llm.fallback import FallbackChatModel
-        from langchain_openai import ChatOpenAI
 
-        common = {
-            "api_key": self.api_key,
-            "base_url": self.base_url,
-            "temperature": 0.3,
-        }
-        primary = ChatOpenAI(model=self.model, **common)
-        fallback = ChatOpenAI(model="gpt-4o-mini", **common)
+        provider = OpenAICompatibleProvider()
+        primary = provider.build(
+            model=self.model,
+            api_key=self.api_key,
+            base_url=self.base_url,
+            temperature=0.3,
+        )
+        fallback = provider.build(
+            model="gpt-4o-mini",
+            api_key=self.api_key,
+            base_url=self.base_url,
+            temperature=0.3,
+        )
         return FallbackChatModel(primary, fallback)
 
     @property
