@@ -116,7 +116,7 @@ class _RecordingWrapper:
     async def execute(self, name: str, **kwargs: Any) -> Any:
         try:
             result = await self.inner.execute(name, **kwargs)
-        except Exception as exc:  # noqa: BLE001 记录失败步并向上抛
+        except Exception as exc:
             self.actual_steps.append(
                 TrajectoryStep(name=name, args=kwargs, result=None, error=str(exc), index=len(self.actual_steps))
             )
@@ -158,7 +158,7 @@ async def replay_trajectory(
     # 重放走真实执行链（execute_plan→delegate→registry.execute），route/顺序/多余调用均暴露
     try:
         _ = [ev async for ev in execute_plan(plan, runtime)]
-    except Exception:  # noqa: BLE001 重放中预期内的失败（录制即失败）不阻断比对
+    except Exception:
         pass
 
     # inner 自带 divergence（如 ReplayRegistry 的 order / extra_call）合并；actual 以 wrapper 为准

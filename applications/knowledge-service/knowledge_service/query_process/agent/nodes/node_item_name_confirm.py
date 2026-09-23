@@ -53,7 +53,7 @@ def step_3_extract_info(query: str, history: List[Dict]) -> Dict:
         # 使用关键字参数传递，避免参数位置错误
         prompt = load_prompt("rewritten_query_and_itemnames", history_text=history_text, query=query)
         logger.debug(f"Step 3: 提示词加载成功，Prompt长度: {len(prompt)}")
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         logger.error(f"Step 3: 加载提示词失败: {e}")
         return {"item_names": [], "rewritten_query": query}
 
@@ -83,7 +83,7 @@ def step_3_extract_info(query: str, history: List[Dict]) -> Dict:
         logger.info(f"Step 3: 提取结果解析成功 - 商品名: {result['item_names']}, 重写问题: {result['rewritten_query']}")
         return result
 
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         logger.error(f"Step 3: LLM 提取或解析失败: {e}")
         return {"item_names": [], "rewritten_query": query}
 
@@ -153,11 +153,11 @@ def step_4_vectorize_and_query(
                 results.append({"extracted_name": name, "matches": matches})
                 logger.info(f"Step 4: 商品 '{name}' 检索完成，找到 {len(matches)} 个匹配项")
 
-            except Exception as inner_e:  # noqa: BLE001
+            except Exception as inner_e:
                 logger.error(f"Step 4: 处理商品 '{name}' 时出错: {inner_e}")
                 results.append({"extracted_name": name, "matches": []})
 
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         logger.error(f"Step 4: 向量化或搜索过程发生全局错误: {e}")
 
     return results
@@ -406,5 +406,5 @@ if __name__ == "__main__":
         print(f"Answer: {result.get('answer')}")
         print("=" * 50)
 
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         logger.exception(f"测试运行期间发生未捕获异常: {e}")

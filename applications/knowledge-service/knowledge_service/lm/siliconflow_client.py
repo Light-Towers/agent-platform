@@ -73,7 +73,7 @@ def _post_json(url, headers, payload, timeout=DEFAULT_TIMEOUT_S, retries=DEFAULT
             detail = ""
             try:
                 detail = e.read().decode("utf-8")
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 logger.warning("读取 SiliconFlow HTTP 错误详情失败: %s", e)
             if e.code in (429, 500, 502, 503, 504):
                 raise RuntimeError(f"SiliconFlow HTTP {e.code}: {detail[:500]}") from e

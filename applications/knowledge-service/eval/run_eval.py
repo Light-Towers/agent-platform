@@ -374,7 +374,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                 enable_hyde=args.enable_hyde,
                 skip_rerank=args.skip_rerank,
             )
-        except Exception as e:  # noqa: BLE001 —— 单条评测失败要显式暴露（不吞），便于定位
+        except Exception as e:
             print(f"[eval] {qid} 检索链路异常：{e}", file=sys.stderr)
             raise
 

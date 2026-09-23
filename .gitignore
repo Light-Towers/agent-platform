@@ -116,3 +116,6 @@ _result.txt
 /zhanggui-zhiku/
 /wenda-data-agent/
 /wenda-adapter/
+
+# === 测试产物（审计日志，不应入库） ===
+applications/exhibition-agent/exhibition_agent/foundation/data/knowledge_lifecycle_audit.json

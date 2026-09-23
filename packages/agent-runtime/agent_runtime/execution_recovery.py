@@ -194,7 +194,7 @@ class Rescheduler:
                 stuck.execution_id, new_id, stuck.attempt + 1,
             )
             return new_req
-        except Exception:  # noqa: BLE001
+        except Exception:
             logger.warning(
                 "recovery retry failed execution=%s", stuck.execution_id, exc_info=True
             )
@@ -243,7 +243,7 @@ class RecoveryOrchestrator:
             contract = None
             try:
                 contract = self._resolve_contract(stuck.execution_id)
-            except Exception:  # noqa: BLE001
+            except Exception:
                 logger.warning(
                     "contract resolve failed execution=%s", stuck.execution_id, exc_info=True
                 )

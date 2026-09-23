@@ -75,7 +75,7 @@ def check_pyproject_package_names() -> None:
             continue
         try:
             data = tomllib.loads(pyproj.read_text(encoding="utf-8"))
-        except Exception:  # noqa: BLE001
+        except Exception:
             continue
         project = data.get("project", {})
         name = project.get("name", "")

@@ -43,7 +43,7 @@ if _GOLDEN_PATH.exists():
                 for line in _f
                 if line.strip() and not line.strip().startswith("#")
             ]
-    except Exception:  # noqa: BLE001 —— 样例加载失败退化为内置样例，不阻断压测入口
+    except Exception:
         _QUERIES = []
 
 if not _QUERIES:

@@ -291,7 +291,7 @@ class PgVectorMemoryBackend(MemoryBackend):
         ):
             try:
                 await conn.execute(_ddl)
-            except Exception:  # noqa: BLE001
+            except Exception:
                 # duplicate_column 等幂等失败忽略
                 pass
 

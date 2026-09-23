@@ -104,7 +104,7 @@ async def chat(req: ChatRequest) -> JSONResponse:
     try:
         result = await agent.chat(req.messages)
         return JSONResponse(result)
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return JSONResponse(
             {"error": f"Agent 处理失败: {e}", "llm_config": _llm.config_info()},
             status_code=500,
@@ -150,7 +150,7 @@ async def invoke(req: InvokeRequest) -> JSONResponse:
 
     try:
         body = resp.json()
-    except Exception:  # noqa: BLE001
+    except Exception:
         body = resp.text
 
     return JSONResponse(
@@ -176,7 +176,7 @@ async def health() -> JSONResponse:
                     "warehouse": resp.json(),
                 }
             )
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             return JSONResponse(
                 {
                     "status": "fail",

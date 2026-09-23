@@ -34,6 +34,6 @@ class QueryService:
                 "error": result.get("error"),
                 "fallback": False,
             }
-        except Exception:  # noqa: BLE001
+        except Exception:
             logger.exception("query service failed")
             return {"answer": "", "error": "internal error", "fallback": True}

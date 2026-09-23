@@ -98,7 +98,7 @@ def init_otel(
         _tracer = trace.get_tracer("agent-platform")
         logger.info("OTel initialized: exporter=%s sampling=%s", exporter, sampling_rate)
 
-    except Exception:  # noqa: BLE001
+    except Exception:
         logger.warning("OTEL_INIT_FAILED", exc_info=True)
         _tracer = noop_tracer()
 
@@ -121,7 +121,7 @@ def parse_traceparent(header: str | None):
 
         ctx = TraceContextFormat().extract({"traceparent": header})
         return ctx
-    except Exception:  # noqa: BLE001
+    except Exception:
         return None
 
 
@@ -140,5 +140,5 @@ def force_flush() -> None:
             provider = trace.get_tracer_provider()
             if hasattr(provider, "force_flush"):
                 provider.force_flush()
-        except Exception:  # noqa: BLE001
+        except Exception:
             logger.warning("otel force_flush failed", exc_info=True)

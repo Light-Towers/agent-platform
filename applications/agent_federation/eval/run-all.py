@@ -90,7 +90,7 @@ async def eval_subservice(records: list[dict], adapter_url: str) -> list[dict]:
                         "fallback": True,
                         "error": f"adapter 返回 {resp.status_code}",
                     })
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 results.append({
                     "id": r.get("id", ""),
                     "query": query,

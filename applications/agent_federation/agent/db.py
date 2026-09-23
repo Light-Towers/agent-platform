@@ -51,7 +51,7 @@ async def _ensure_memories_schema() -> None:
     try:
         from agent_core.memory.embedder import get_embedder
         dim = get_embedder().dim
-    except Exception:  # noqa: BLE001
+    except Exception:
         dim = 512
 
     ddl = f"""
@@ -78,6 +78,6 @@ async def _ensure_memories_schema() -> None:
         try:
             async with get_pool().connection() as conn:
                 await conn.execute(_ddl)
-        except Exception:  # noqa: BLE001
+        except Exception:
             # duplicate_column / 索引已存在等幂等失败忽略
             pass

@@ -345,7 +345,7 @@ def step_6_backup(state: ImportGraphState, sections: List[Dict[str, Any]]) -> No
                 indent=2,  # 格式化缩进，便于阅读
             )
         logger.info(f"步骤6：Chunk结果备份成功，备份文件路径：{backup_path}")
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         # 备份失败仅记录日志，不终止主流程
         logger.error(f"步骤6：Chunk结果备份失败，错误信息：{str(e)}", exc_info=False)
 
@@ -414,7 +414,7 @@ def node_document_split(state: ImportGraphState) -> ImportGraphState:
             f">>> 核心节点执行完成：【文档切分】{node_name}，已生成{len(sections)}个有效Chunk，结果已写入状态字典"
         )
 
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         # 全局异常捕获：保证节点执行失败不崩溃整个流程，记录详细错误日志便于排查
         logger.error(f">>> 核心节点执行失败：【文档切分】{node_name}，错误信息：{str(e)}", exc_info=True)
 

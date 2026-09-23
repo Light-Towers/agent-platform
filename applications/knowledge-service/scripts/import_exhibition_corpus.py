@@ -214,7 +214,7 @@ def run_import(
             else:
                 print(f"  ⏰ 超时 ({elapsed:.1f}s)")
 
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             elapsed = time.time() - start
             result = ImportResult(
                 relative_path=item.relative_path,

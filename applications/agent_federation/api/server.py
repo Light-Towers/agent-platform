@@ -88,7 +88,7 @@ async def lifespan(app: FastAPI):
         from agent.main_agent import get_main_agent
         await get_main_agent()
         logger.info("main_agent 预初始化完成（lifespan）")
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         logger.warning("main_agent 预初始化失败（非致命，首次请求懒加载兜底）: %s", e)
 
     # P1.3：启动 checkpoint 定时清理后台任务（复用 main_agent 的 checkpointer）。
@@ -98,7 +98,7 @@ async def lifespan(app: FastAPI):
         from agent.checkpoint_cleaner import start_checkpoint_cleaner
         from agent.main_agent import get_main_checkpointer
         _cleaner_task = await start_checkpoint_cleaner(get_main_checkpointer())
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         logger.warning("checkpoint 清理任务启动失败（非致命）: %s", e)
 
     yield
@@ -108,7 +108,7 @@ async def lifespan(app: FastAPI):
         try:
             from agent.checkpoint_cleaner import stop_checkpoint_cleaner
             await stop_checkpoint_cleaner(_cleaner_task)
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             logger.warning("checkpoint 清理任务停止异常: %s", e)
 
     from agent.tracing.langfuse_adapter import shutdown_langfuse
@@ -224,7 +224,7 @@ async def run_task(request: QueryRequest):
                         run_deep_agent(request.query, workspace_id=thread_id),
                         timeout=float(os.getenv("FED_TASK_TIMEOUT_S", "300")),
                     )
-            except Exception:  # noqa: BLE001
+            except Exception:
                 logger.exception("background task failed: thread_id=%s", thread_id)
 
         _track_task(asyncio.create_task(_run()))
@@ -261,7 +261,7 @@ async def download_file(path: str):
         output_abs = output_dir.resolve()
         if not abs_path.is_relative_to(output_abs):
             return {"error": "拒绝访问: 只能下载输出目录下的文件"}
-    except Exception:  # noqa: BLE001
+    except Exception:
         return {"error": "无效的路径参数"}
     if not abs_path.exists():
         return {"error": "文件不存在"}
@@ -275,7 +275,7 @@ async def list_files(path: str):
         output_abs = output_dir.resolve()
         if not abs_path.is_relative_to(output_abs):
             return {"error": "拒绝访问: 只能访问输出目录下的文件"}
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return {"error": f"路径无效: {e}"}
     if not abs_path.exists():
         return {"error": "目录不存在"}
@@ -291,7 +291,7 @@ async def list_files(path: str):
                     "size": stat.st_size,
                     "mtime": stat.st_mtime
                 })
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return {"error": str(e)}
     files.sort(key=lambda x: x.get("mtime", 0), reverse=True)
     return {"files": files}
@@ -359,7 +359,7 @@ async def websocket_endpoint(
                 await websocket.send_json({"type": "done", "thread_id": ws_thread_id, "answer": final_answer})
     except WebSocketDisconnect:
         manager.disconnect(websocket, ws_thread_id)
-    except Exception:  # noqa: BLE001
+    except Exception:
         logger.exception("WS handler error: thread_id=%s", ws_thread_id)
         manager.disconnect(websocket, ws_thread_id)
 

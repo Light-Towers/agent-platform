@@ -149,5 +149,5 @@ if __name__ == "__main__":
         else:
             print("\n>>> 警告：未检索到任何结果，请检查 Milvus 数据或 item_names 是否匹配")
 
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         logger.error(f"测试运行失败: {e}", exc_info=True)

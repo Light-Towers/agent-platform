@@ -130,7 +130,7 @@ class ControlPlane:
                         "state_schema_version": cp.state_schema_version,
                     }
                     snapshot.generation = cp.generation
-            except Exception:  # noqa: BLE001
+            except Exception:
                 logger.warning(
                     "control plane checkpoint load failed execution=%s",
                     execution_id,
@@ -150,7 +150,7 @@ class ControlPlane:
                     }
                     for t in tasks
                 ]
-            except Exception:  # noqa: BLE001
+            except Exception:
                 logger.warning(
                     "control plane awaitable load failed execution=%s",
                     execution_id,
@@ -228,7 +228,7 @@ class ControlPlane:
                         )
                         logger.info("control plane cancel_request execution=%s", execution_id)
                         return True
-                except (InvalidStatusTransition, Exception):  # noqa: BLE001 - best-effort terminate
+                except (InvalidStatusTransition, Exception):
                     logger.warning(
                         "control plane cancel failed execution=%s", execution_id, exc_info=True
                     )
@@ -265,7 +265,7 @@ class ControlPlane:
             await self._scheduler.submit(new_req)
             logger.info("control plane retry execution=%s → %s", execution_id, new_id)
             return new_id
-        except Exception:  # noqa: BLE001
+        except Exception:
             logger.warning("control plane retry failed execution=%s", execution_id, exc_info=True)
             return None
 
@@ -292,7 +292,7 @@ class ControlPlane:
                             reason="terminated_by_control_plane",
                         )
                     )
-            except (InvalidStatusTransition, Exception):  # noqa: BLE001 - best-effort terminate
+            except (InvalidStatusTransition, Exception):
                 pass
 
         logger.info("control plane terminate execution=%s", execution_id)

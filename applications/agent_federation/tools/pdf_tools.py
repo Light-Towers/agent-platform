@@ -48,7 +48,7 @@ def convert_md_to_pdf(
         # 4. 调用核心转换逻辑
         return convert_md_to_pdf_via_weasyprint(md_abs_path, pdf_abs_path)
 
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         logging.error(f"转换失败: {e}", exc_info=True)
         return f"转换失败: {str(e)}"
 

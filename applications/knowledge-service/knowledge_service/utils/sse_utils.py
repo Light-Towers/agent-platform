@@ -97,7 +97,7 @@ async def sse_generator(session_id: str, request: Request):
         logger.debug(f"[SSE] Client disconnected (Cancelled/Reset/Pipe): {session_id}")
         # 生成器被取消/对端断开：静默退出
         return
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         logger.debug(f"[SSE] Exception in generator for {session_id}: {e}")
     finally:
         logger.debug(f"[SSE] Generator finished for {session_id}")

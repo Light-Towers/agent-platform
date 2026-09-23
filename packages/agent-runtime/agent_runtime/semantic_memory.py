@@ -124,7 +124,7 @@ class SemanticMemory:
                 for r in shared_results:
                     r.source = "shared"
                     results.append(r)
-            except Exception:  # noqa: BLE001
+            except Exception:
                 logger.warning("shared semantic recall failed", exc_info=True)
 
         if self._user is not None and request.user_id is not None:
@@ -133,7 +133,7 @@ class SemanticMemory:
                 for r in user_results:
                     r.source = "user"
                     results.append(r)
-            except Exception:  # noqa: BLE001
+            except Exception:
                 logger.warning("user semantic recall failed", exc_info=True)
 
         results.sort(key=lambda r: r.score, reverse=True)

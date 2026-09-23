@@ -52,7 +52,7 @@ def _build_pg_stores() -> dict:
         stores["trajectory_store"] = PgTrajectoryStore(pool)
         stores["ownership_store"] = PgExecutionOwnershipStore(pool)
         stores["side_effect_store"] = PgSideEffectStore(pool)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.warning("PG stores 构建失败，退化为 None: %s", exc)
     return stores
 
@@ -63,7 +63,7 @@ def _build_llm():
         from agent_core.llm import build_chat_model
 
         return build_chat_model()
-    except Exception:  # noqa: BLE001
+    except Exception:
         return None
 
 
@@ -96,7 +96,7 @@ def get_planner_runtime() -> PlannerRuntime:
                 )
 
                 registry = federation_capability_registry()
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 logger.warning("AGENTIC_RUNTIME_BRIDGE 注册表构建失败，回退 None: %s", exc)
 
         stores = _build_pg_stores()

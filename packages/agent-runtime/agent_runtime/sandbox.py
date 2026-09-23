@@ -140,7 +140,7 @@ class SandboxExecutor:
             await proc.communicate()  # 排空管道，回收子进程
         except ProcessLookupError:
             pass  # 进程已自行退出
-        except Exception:  # noqa: BLE001
+        except Exception:
             logger.warning("sandbox %s 后端超时进程终止失败", backend, exc_info=True)
 
     async def _execute_docker(self, code: str, timeout: int) -> SandboxResult:
@@ -190,7 +190,7 @@ class SandboxExecutor:
                 success=False, stderr=f"执行超时（{timeout}s）", exit_code=-1,
                 duration_ms=int((time.monotonic() - t0) * 1000), backend="docker",
             )
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             return SandboxResult(
                 success=False, stderr=str(exc), exit_code=-1,
                 duration_ms=int((time.monotonic() - t0) * 1000), backend="docker",
@@ -228,7 +228,7 @@ class SandboxExecutor:
                 success=False, stderr=f"执行超时（{timeout}s）", exit_code=-1,
                 duration_ms=int((time.monotonic() - t0) * 1000), backend="subprocess",
             )
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             return SandboxResult(
                 success=False, stderr=str(exc), exit_code=-1,
                 duration_ms=int((time.monotonic() - t0) * 1000), backend="subprocess",

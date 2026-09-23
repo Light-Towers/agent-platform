@@ -80,7 +80,7 @@ def _chitchat_words() -> tuple[list[str], list[str]]:
         weak = list(shortcuts.get("weak") or [])
         if strong and weak:
             return strong, weak
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass
     return list(_CHITCHAT_STRONG_FALLBACK), list(_CHITCHAT_WEAK_FALLBACK)
 
@@ -182,7 +182,7 @@ def classify_l1(query: str) -> IntentResult:
             candidates=candidates, source="l1",
             need_clarify=top[1] < CLARIFY_THRESHOLD,
         )
-    except Exception:  # noqa: BLE001
+    except Exception:
         # 3. 嵌入失败时降级关键词
         return _keyword_rule(query) or _fallback_result()
 

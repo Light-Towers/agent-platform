@@ -95,7 +95,7 @@ async def decide_route(llm, question: str) -> RouteDecision:
             if decision.capability == "mcp" and not get_settings().mcp_enabled:
                 return heuristic_route(question)
             return decision
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         logger.warning("LLM 路由决策异常，回退启发式路由: %s", e)
     return heuristic_route(question)
 

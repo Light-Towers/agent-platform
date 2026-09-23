@@ -111,7 +111,7 @@ async def health_ready():
 
         checks["milvus"] = milvus_ready()
         ready = checks["milvus"]
-    except Exception as e:  # noqa: BLE001 —— 探针不抛异常，只标记不健康
+    except Exception as e:
         logger.warning("health/ready milvus check failed: %s", e)
     if not ready:
         return JSONResponse(status_code=503, content={"ok": False, "checks": checks})
@@ -154,11 +154,11 @@ def run_query_graph(
             query_app.invoke(default_state)
             # 整体任务就更新完了！ 接下来就是数据的更新了！
             update_task_status(session_id, TASK_STATUS_COMPLETED, is_stream)
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             logger.error(f"流程执行异常: {e}")
             try:
                 span.record_exception(e)
-            except Exception as e2:  # noqa: BLE001
+            except Exception as e2:
                 logger.warning("记录异常到 span 失败: %s", e2)
             update_task_status(session_id, TASK_STATUS_FAILED, is_stream)
             if is_stream:
@@ -349,7 +349,7 @@ async def history(
                 }
             )
         return {"session_id": session_id, "items": items}
-    except Exception:  # noqa: BLE001
+    except Exception:
         # M5：对外脱敏（详情仅入服务端日志，不泄露内部异常细节）
         logger.exception("history error for session %s", session_id)
         raise HTTPException(status_code=500, detail="获取会话历史失败")

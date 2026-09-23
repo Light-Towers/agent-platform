@@ -30,7 +30,7 @@ try:
     from api.context import get_thread_context
 
     _monitor.set_context_getter(get_thread_context)
-except Exception:  # noqa: BLE001 - pragma: no cover
+except Exception:  # pragma: no cover
     pass
 
 # 公开兼容符号

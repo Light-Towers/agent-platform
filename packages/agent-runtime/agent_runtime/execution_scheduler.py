@@ -581,7 +581,7 @@ class SchedulerReaper:
                         "reaper: execution %s lease expired, marked FAILED",
                         req.execution_id,
                     )
-            except Exception:  # noqa: BLE001
+            except Exception:
                 logger.debug("reaper scan failed", exc_info=True)
             await asyncio.sleep(self._interval_s)
 

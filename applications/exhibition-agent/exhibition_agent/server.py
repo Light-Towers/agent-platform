@@ -86,7 +86,7 @@ async def encode_context(request: Request) -> JSONResponse:
 
     try:
         payload = await request.json()
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         raise HTTPException(status_code=400, detail=f"JSON 解析失败：{exc}") from exc
 
     try:
@@ -180,7 +180,7 @@ async def query(
             )
             # traceparent 必须在 span 内获取（span 退出后当前 context 已失效）
             tp = get_current_traceparent()
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         # 审核安全修复（N2）：异常串（可能含栈信息）不得直出终端用户，
         # 固定文案 + request_id 供日志关联定位
         logger.exception("supervisor 执行失败（request_id=%s）：%s", ctx.request_id, exc)

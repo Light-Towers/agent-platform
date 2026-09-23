@@ -57,7 +57,7 @@ def register_mcp_skills(
             try:
                 registry.register(skill)
                 count += 1
-            except Exception:  # noqa: BLE001
+            except Exception:
                 logger.warning("MCP Skill 注册失败: %s", skill_name, exc_info=True)
     return count
 

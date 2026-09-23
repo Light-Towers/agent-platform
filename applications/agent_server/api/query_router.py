@@ -71,7 +71,7 @@ async def query(
                 priority=sched_priority,
             ))
             scheduler_enqueued = True
-        except Exception:  # noqa: BLE001
+        except Exception:
             logger.warning("scheduler submit failed, continuing without queue", exc_info=True)
             scheduler = None
 
@@ -243,7 +243,7 @@ async def query(
                             tenant_id=req.workspace_id,
                             user_id=req.user_id,
                         )
-                    except Exception:  # noqa: BLE001
+                    except Exception:
                         logger.warning("context governance failed, degrading", exc_info=True)
                 ctx = PlannerContext(
                     question=req.query,
@@ -259,7 +259,7 @@ async def query(
                 if scheduler is not None and scheduler_enqueued:
                     try:
                         await scheduler.dispatch_next()
-                    except Exception:  # noqa: BLE001
+                    except Exception:
                         logger.debug("scheduler dispatch failed", exc_info=True)
                 # V3 Phase 2: ExecutionStatus → RUNNING
                 if status_store is not None:
@@ -270,7 +270,7 @@ async def query(
                             execution_id=request_id,
                             status=ExecutionStatus.RUNNING,
                         ))
-                    except Exception:  # noqa: BLE001
+                    except Exception:
                         logger.debug("status save RUNNING failed", exc_info=True)
                 async for event in planner.execute(plan, planner_runtime):
                     sse = _stream_event(event)
@@ -289,7 +289,7 @@ async def query(
                                 execution_id=request_id,
                                 status=ExecutionStatus.WAITING_EXTERNAL,
                             ))
-                        except Exception:  # noqa: BLE001
+                        except Exception:
                             logger.debug("status save WAITING_EXTERNAL failed", exc_info=True)
             if final_answer and q_embedding is not None:
                 semantic_cache.cache_store(pool, req.query, final_answer, q_embedding, tenant_id=req.tenant_id or "")
@@ -304,7 +304,7 @@ async def query(
                     snapshot=round_snapshot,
                 )
             yield _sse({"type": "done", "thread_id": thread_id, "answer": final_answer})
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             _stream_failed = True
             yield _sse({"type": "error", "error": str(exc)})
             yield _sse({"type": "done", "thread_id": thread_id, "answer": ""})
@@ -317,7 +317,7 @@ async def query(
             if scheduler is not None and scheduler_enqueued:
                 try:
                     await scheduler.complete(request_id)
-                except Exception:  # noqa: BLE001
+                except Exception:
                     logger.debug("scheduler complete failed", exc_info=True)
             if status_store is not None:
                 from agent_runtime.execution_status import ExecutionStatus, ExecutionStatusRecord
@@ -327,7 +327,7 @@ async def query(
                         execution_id=request_id,
                         status=ExecutionStatus.FAILED if _stream_failed else ExecutionStatus.SUCCEEDED,
                     ))
-                except Exception:  # noqa: BLE001
+                except Exception:
                     logger.debug("status save terminal failed", exc_info=True)
             # V3 Phase 4: Cost Governance record（opt-in）
             if cost_governance is not None:
@@ -342,7 +342,7 @@ async def query(
                             await cost_governance.record(_tenant, BudgetDimension.TOKENS, traj.total_tokens)
                         if traj.total_cost > 0:
                             await cost_governance.record(_tenant, BudgetDimension.COST, traj.total_cost)
-                except Exception:  # noqa: BLE001
+                except Exception:
                     logger.debug("cost governance record failed", exc_info=True)
             # Phase 2: 统一生命周期清理（幂等，覆盖 graph 异常 / 客户端断开 /
             # 正常完成）。reject 与 cache-hit 路径已在 _stream 外提前调用过，

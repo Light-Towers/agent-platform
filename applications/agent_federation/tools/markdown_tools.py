@@ -47,7 +47,7 @@ def generate_markdown(
         file_path.write_text(content, encoding='utf-8')
         logger.info("Markdown 已生成: %s", file_path)
         return f"Markdown文件 '{file_path}' 已成功生成并保存。"
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         logger.error("生成 Markdown 失败: %s", e)
         return f"生成Markdown文件失败: {str(e)}"
 
