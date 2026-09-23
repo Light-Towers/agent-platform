@@ -30,15 +30,14 @@
 
 ---
 
-## D3 zhanggui-zhiku setuptools → hatchling 迁移
+## D3 zhanggui-zhiku setuptools → hatchling 迁移（已完成）
 
 | 字段 | 内容 |
 |------|------|
-| **现状** | zhanggui-zhiku 是全仓唯一用 setuptools 的包（其余 8 包均 hatchling） |
-| **影响** | 构建后端不统一；setuptools 的 `packages.find` 语法与 hatchling 的 `packages` 列表不同，维护成本略高 |
-| **跳过原因** | 评估性任务，迁移需改 `[build-system]` + `[tool.hatch.build.targets.wheel]` 语法，需验证 `zhanggui-zhiku` 脚本入口仍工作 |
-| **建议推进** | ① 改 `build-backend` 为 `hatchling.build` → ② 加 `[tool.hatch.build.targets.wheel] packages = ["zhanggui_zhiku"]` → ③ 删 `[tool.setuptools.*]` → ④ `uv sync` + 跑 zhanggui 测试 |
-| **优先级** | Low（功能无影响，纯统一性） |
+| **现状** | knowledge-service（原 zhanggui-zhiku，已改名）已从 setuptools 迁移到 hatchling |
+| **影响** | 构建后端统一（全仓 9 包均 hatchling） |
+| **完成方式** | 改 `build-backend` 为 `hatchling.build` + `[tool.hatch.build.targets.wheel] only-include = ["knowledge_service"]` + 删 `[tool.setuptools.*]` |
+| **优先级** | ✅ 已完成 |
 
 ---
 
@@ -108,7 +107,7 @@
 |----|------|--------|----------|
 | D1 | 单字母变量改语义名 | Low | 可随各包日常改动顺带改 |
 | D2 | zhanggui 裸阈值集中 | Medium | 独立方案（M3 目标） |
-| D3 | setuptools→hatchling | Low | 独立小任务 |
+| D3 | setuptools→hatchling | ✅ 已完成 | 已完成 |
 | D4 | ruff ignore 收窄 | Low | 逐包日常改动顺带 |
 | D5 | agent_core 注释泛化 | Low | 人工逐条判断 |
 | D6 | routes.py 拆分 | Low | 独立小任务 |
