@@ -103,17 +103,61 @@
 ### 2.3 并发模型
 
 ```
-用户 A → async task A → 调 knowledge 模块 → await Milvus 查询（yield）
-用户 B → async task B → 调 nl2sql 模块   → await pgvector 查询（yield）
-用户 C → async task C → 调 kefu 模块     → await LLM 调用（yield）
-                    ↓
-           asyncio 事件循环调度，I/O 并行
+agent_server 进程（1 个线程，1 个 asyncio 事件循环）
+│
+├── 用户 A 请求 → async task A
+│   └── Planner 决定调 knowledge 子 Agent
+│       └── await knowledge.query(messages)    ← 普通函数调用，不 spawn
+│           └── await milvus.search(...)        ← I/O，yield 让出
+│           └── await llm.chat(...)             ← I/O，yield 让出
+│
+├── 用户 B 请求 → async task B
+│   └── Planner 决定调 nl2sql 子 Agent
+│       └── await nl2sql.query(messages)        ← 普通函数调用，不 spawn
+│           └── await pgvector.query(...)       ← I/O，yield 让出
+│
+└── 事件循环调度：A yield 时 B 执行，B yield 时 A 执行
 ```
 
 - FastAPI + asyncio 天然支持多用户并发
 - 能力模块操作全是 I/O 密集（查 Milvus / 调 LLM / 查 Neo4j），asyncio 在 I/O 等待时 yield
 - 连接池管资源竞争（Milvus max_connections）
 - 熔断管故障隔离（模块出错不拖垮进程）
+- 每个用户是独立 async task，有自己的对话上下文和执行状态
+- 共享进程内存空间，但对话历史在 DB 不在内存（不互相污染）
+
+### 2.4 子 Agent 运行时模型
+
+**子 Agent 既不是独立进程也不是线程——它是带状态的 async 函数。**
+
+动态创建子 Agent = 创建一个 async task + 独立执行上下文，不 spawn 进程/线程：
+
+```python
+# Planner 动态决定创建子 Agent
+agent = SubAgentRegistry.get("knowledge")           # 选/实例化
+ctx = ExecutionContext(messages=..., session_id=...) # 独立上下文
+result = await agent.run(ctx)                        # async 调用，不 spawn
+```
+
+并发调多个子 Agent（如并行查知识库 + 生成 SQL）：
+
+```python
+results = await asyncio.gather(
+    knowledge_agent.run(ctx1),    # task A
+    nl2sql_agent.run(ctx2),       # task B
+)
+# 同一事件循环里并发，不创建进程/线程
+```
+
+**什么时候才真的需要进程/线程？**
+
+| 场景 | 解法 | 原因 |
+|------|------|------|
+| CPU 密集（local embedding/rerank） | `asyncio.to_thread()` | 阻塞事件循环 |
+| 执行用户代码（sandbox） | 子进程 | 安全隔离 |
+| 子 Agent 业务流程（检索/LLM/DB） | **都不需要** | 全是 I/O，asyncio 够 |
+
+动态创建的代价是一个 Python 对象 + 一个 async task，不是 fork 一个进程。
 
 ---
 
