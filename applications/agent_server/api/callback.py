@@ -17,6 +17,9 @@ from pydantic import BaseModel
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/callback", tags=["callback"])
 
+# 后台 resume task 引用集合：防止 GC 回收未完成的 task（asyncio 最佳实践）。
+_background_tasks: set[asyncio.Task] = set()
+
 
 class CallbackPayload(BaseModel):
     """外部回调载荷。"""
@@ -61,7 +64,9 @@ async def handle_callback(task_id: str, payload: CallbackPayload, request: Reque
 
     # 触发执行恢复（后台 asyncio task，不阻塞 callback 响应）
     if task.state == AwaitableState.COMPLETED:
-        asyncio.create_task(_resume_execution(request.app.state, task))
+        bg = asyncio.create_task(_resume_execution(request.app.state, task))
+        _background_tasks.add(bg)
+        bg.add_done_callback(_background_tasks.discard)
 
     return {"status": task.state.value, "task_id": task_id}
 
@@ -132,7 +137,7 @@ async def _resume_execution(app_state, task) -> None:
         return
 
     try:
-        trajectory = await trajectory_store.load(task.execution_id)
+        trajectory = await trajectory_store.get(task.execution_id)
     except Exception:
         logger.warning("failed to load trajectory for execution %s", task.execution_id, exc_info=True)
         return
