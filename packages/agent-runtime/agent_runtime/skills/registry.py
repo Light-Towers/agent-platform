@@ -249,6 +249,17 @@ class SkillRegistry:
         """按名称排序返回全部能力。"""
         return sorted(self._capabilities.values(), key=lambda c: c.name)
 
+    def list_by_boundary(self, boundary: ExecutionBoundary) -> list[Skill]:
+        """按执行边界筛选能力（V3：部署边界可查询）。
+
+        供运维/部署决策：如 ``list_by_boundary(REMOTE)`` 返回所有远程能力，
+        可据此配置健康探活、独立扩缩容、网络策略。
+        """
+        return sorted(
+            (c for c in self._capabilities.values() if c.execution_boundary == boundary),
+            key=lambda c: c.name,
+        )
+
     def validate_composition(self) -> list[str]:
         """静态校验 Skill 组合图（§7.1 一等公民组合模型）。
 
