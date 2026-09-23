@@ -43,6 +43,16 @@ from agent_core.resilience import retry_async
 
 logger = get_logger(__name__)
 
+# C-3: 进程级共享 httpx.AsyncClient（连接池复用）
+_shared_async_client: httpx.AsyncClient | None = None
+
+
+def _get_shared_async_client() -> httpx.AsyncClient:
+    global _shared_async_client
+    if _shared_async_client is None:
+        _shared_async_client = httpx.AsyncClient(timeout=TIMEOUT_SUBAGENT_HTTP)
+    return _shared_async_client
+
 # E-1 契约断言灰度开关（优化 E / P4.1 / S-1）：默认开启。
 # 关闭时回退到原 str(data)/dict 规整，便于现网快速回滚（无需发版）。
 _E1_CONTRACT_ASSERT = os.getenv("E1_CONTRACT_ASSERT", "on").lower() in ("1", "true", "yes", "on")
@@ -108,10 +118,13 @@ class _HttpSubAgent:
             "tenant_id": input.get("tenant_id"),
             "trace_id": input.get("trace_id"),
         }
-        async with httpx.AsyncClient(timeout=TIMEOUT_SUBAGENT_HTTP) as client:
-            resp = await client.post(self.url.rstrip("/") + endpoint, json=payload)
-            resp.raise_for_status()
-            data = resp.json()
+        from agent_core.tracing_propagation import inject_traceparent
+
+        headers = inject_traceparent({"Content-Type": "application/json"})
+        client = _get_shared_async_client()
+        resp = await client.post(self.url.rstrip("/") + endpoint, json=payload, headers=headers)
+        resp.raise_for_status()
+        data = resp.json()
         # kefu /invoke 返回 QueryResponse(dict)；nl2sql-service /api/query 返回 SqlQueryResponse(dict，QueryResponse 子类)；
         # 旧 adapter /api/messages 返回 list。统一规整为 {"answer": ...} 供 main_agent 消费。
         return _normalize_response(data, self.name)

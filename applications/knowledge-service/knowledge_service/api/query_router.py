@@ -186,6 +186,12 @@ async def query(background_tasks: BackgroundTasks, request: Request, payload: Qu
     # 而非 payload（Pydantic 模型，无 .state）；此前误用 payload.state 导致所有 /query 直接 500。
     trace_request_id = getattr(request.state, "request_id", None) or generate_request_id()
 
+    # C-1: 提取入站 W3C traceparent，关联上游 span（联邦→knowledge-service 链路）
+    from agent_core.tracing_propagation import extract_traceparent, use_context
+
+    _parent_ctx = use_context(extract_traceparent(request.headers))
+    _parent_ctx.__enter__()
+
     # M5：历史轮数护栏（超限截断保留最近 N 轮，防 prompt 无限膨胀）。
     # 说明：当前检索管线历史来自 MongoDB（node_item_name_confirm 服务端 limit=10 已兜底），
     # 入站 history 字段为兼容/预留（方案 §9 ChatRequest 设计），超限截断后透传。
@@ -225,30 +231,34 @@ async def query(background_tasks: BackgroundTasks, request: Request, payload: Qu
         )
         # 返回结果
         logger.info("开始处理结果....")
+        _parent_ctx.__exit__(None, None, None)
         return JSONResponse(
             {"message": "结果正在处理中...", "session_id": session_id},
             headers={"X-Trace-Id": trace_request_id},
         )
     else:
         # 同步运行
-        run_query_graph(
-            session_id,
-            user_query,
-            is_stream,
-            trace_request_id,
-            payload.enable_item_name_confirm,
-            payload.tenant_id,
-            payload.scope_type,
-        )
-        answer = get_task_result(session_id, "answer", "")
-        return JSONResponse(
-            {"message": "处理完成！", "session_id": session_id, "answer": answer, "done_list": []},
-            headers={"X-Trace-Id": trace_request_id},
-        )
+        try:
+            run_query_graph(
+                session_id,
+                user_query,
+                is_stream,
+                trace_request_id,
+                payload.enable_item_name_confirm,
+                payload.tenant_id,
+                payload.scope_type,
+            )
+            answer = get_task_result(session_id, "answer", "")
+            return JSONResponse(
+                {"message": "处理完成！", "session_id": session_id, "answer": answer, "done_list": []},
+                headers={"X-Trace-Id": trace_request_id},
+            )
+        finally:
+            _parent_ctx.__exit__(None, None, None)
 
 
 @router.post("/api/v1/retrieve")
-async def retrieve(payload: RetrieveRequest):
+async def retrieve(payload: RetrieveRequest, request: Request):
     """
     纯检索链路（M6，§10.6 /retrieve 压测档）：embedding 召回 → 加权 RRF → BGE 重排，
     **不含 LLM 生成**（全部为自有组件，压测 QPS 目标 ≥ 100 / P95 < 3s，实测后回填
@@ -259,38 +269,46 @@ async def retrieve(payload: RetrieveRequest):
     """
     # 懒导入：与线上检索链同一批节点函数（query_router 顶部已加载 main_graph，
     # 此处再引仅为了直接复用节点函数本身，避免经 graph 全链路含生成）
+    # C-1: 提取入站 W3C traceparent，关联上游 span
+    from agent_core.tracing_propagation import extract_traceparent, use_context
+
     from knowledge_service.query_process.agent.nodes.node_rerank import node_rerank
     from knowledge_service.query_process.agent.nodes.node_rrf import _as_entity_list, reciprocal_rank_fusion
     from knowledge_service.query_process.agent.nodes.node_search_embedding import node_search_embedding
 
-    session_id = f"retrieve_{uuid.uuid4().hex[:12]}"
-    state = {
-        "session_id": session_id,
-        "original_query": payload.query,
-        "rewritten_query": payload.query,
-        "item_names": [payload.item_name] if payload.item_name else [],
-        "is_stream": False,
-        "tenant_id": payload.tenant_id or "",
-        "scope_type": payload.scope_type or "",
-    }
+    _parent_ctx = use_context(extract_traceparent(request.headers))
+    _parent_ctx.__enter__()
+    try:
+        session_id = f"retrieve_{uuid.uuid4().hex[:12]}"
+        state = {
+            "session_id": session_id,
+            "original_query": payload.query,
+            "rewritten_query": payload.query,
+            "item_names": [payload.item_name] if payload.item_name else [],
+            "is_stream": False,
+            "tenant_id": payload.tenant_id or "",
+            "scope_type": payload.scope_type or "",
+        }
 
-    # 1) 召回：embedding 路（与线上 node_search_embedding 同一函数；M6 fanout 超时隔离已作用于线上图）
-    emb_result = node_search_embedding(state)
-    embedding_weight = float(retrieval_cfg.rrf.weights.get("embedding", 1.0))
-    sources = [(_as_entity_list(emb_result.get("embedding_chunks")), embedding_weight)]
+        # 1) 召回：embedding 路（与线上 node_search_embedding 同一函数；M6 fanout 超时隔离已作用于线上图）
+        emb_result = node_search_embedding(state)
+        embedding_weight = float(retrieval_cfg.rrf.weights.get("embedding", 1.0))
+        sources = [(_as_entity_list(emb_result.get("embedding_chunks")), embedding_weight)]
 
-    # 2) 融合：加权 RRF（与线上 node_rrf 同一配置源）
-    rrf_cfg = retrieval_cfg.rrf
-    fused = reciprocal_rank_fusion(sources, k=rrf_cfg.k, max_results=rrf_cfg.max_results)
-    rrf_chunks = [doc for doc, _score in fused]
+        # 2) 融合：加权 RRF（与线上 node_rrf 同一配置源）
+        rrf_cfg = retrieval_cfg.rrf
+        fused = reciprocal_rank_fusion(sources, k=rrf_cfg.k, max_results=rrf_cfg.max_results)
+        rrf_chunks = [doc for doc, _score in fused]
 
-    # 3) 重排：BGE reranker + 动态 TopK（异常由节点降级为原序；与线上 node_rerank 同一函数）
-    rerank_state = dict(state)
-    rerank_state["rrf_chunks"] = rrf_chunks
-    rerank_state["web_search_docs"] = []
-    reranked = node_rerank(rerank_state).get("reranked_docs", [])
+        # 3) 重排：BGE reranker + 动态 TopK（异常由节点降级为原序；与线上 node_rerank 同一函数）
+        rerank_state = dict(state)
+        rerank_state["rrf_chunks"] = rrf_chunks
+        rerank_state["web_search_docs"] = []
+        reranked = node_rerank(rerank_state).get("reranked_docs", [])
 
-    return {"query": payload.query, "hits": len(reranked), "docs": reranked}
+        return {"query": payload.query, "hits": len(reranked), "docs": reranked}
+    finally:
+        _parent_ctx.__exit__(None, None, None)
 
 
 @router.get("/stream/{session_id}")

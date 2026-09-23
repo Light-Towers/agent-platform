@@ -8,6 +8,8 @@ from pydantic import AliasChoices, BaseModel, Field
 
 Priority = Literal["high", "normal", "low"]
 
+CONTRACT_VERSION = "1.0"
+
 
 class QueryRequest(BaseModel):
     """统一查询请求（所有子服务共用）。"""
@@ -25,6 +27,7 @@ class QueryRequest(BaseModel):
     # 以下为 app（统一 Agent 平台）贡献的可选扩展，向后兼容：旧调用方不传亦工作
     priority: Priority | None = Field(None, description="请求优先级（admission 限流用）")
     user_id: str | None = Field(None, description="用户标识（审计/配额用）")
+    version: str = Field(CONTRACT_VERSION, description="契约版本号（缺省 1.0，向后兼容）")
 
 
 class QueryData(BaseModel):
@@ -44,3 +47,4 @@ class QueryResponse(BaseModel):
     latency_ms: float | None = Field(None, description="处理延迟（毫秒）")
     intent: str | None = Field(None, description="命中的意图标签（可选）")
     fallback: bool = Field(False, description="是否走了降级路径")
+    version: str = Field(CONTRACT_VERSION, description="契约版本号（缺省 1.0，向后兼容）")

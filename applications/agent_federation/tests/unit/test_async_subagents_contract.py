@@ -40,6 +40,8 @@ def _make_agent(monkeypatch, json_data):
     client.post = AsyncMock(return_value=resp)
 
     monkeypatch.setattr("agent.async_subagents.httpx.AsyncClient", lambda *a, **kw: client)
+    # C-3: 重置共享 client 缓存，使每次测试用新的 mock client
+    monkeypatch.setattr("agent.async_subagents._shared_async_client", None)
     return _HttpSubAgent(_FakeSvc(), "desc")
 
 
