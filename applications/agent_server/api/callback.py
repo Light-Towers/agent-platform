@@ -7,7 +7,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import time
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
@@ -54,20 +56,12 @@ async def handle_callback(task_id: str, payload: CallbackPayload, request: Reque
     if payload.error:
         task.state = AwaitableState.FAILED
         task.completion_receipt = {"error": payload.error}
-    import time
-
     task.completed_at = time.time()
     await awaitable_task_store.save(task)
 
-    # 触发执行恢复
-    checkpoint_store = getattr(request.app.state, "planner_runtime", None)
-    if checkpoint_store is not None:
-        checkpoint_store = getattr(checkpoint_store, "checkpoint_store", None)
-    if checkpoint_store is not None and task.state == AwaitableState.COMPLETED:
-        try:
-            await _resume_execution(request.app.state, task)
-        except Exception:
-            logger.warning("resume execution failed for task %s", task_id, exc_info=True)
+    # 触发执行恢复（后台 asyncio task，不阻塞 callback 响应）
+    if task.state == AwaitableState.COMPLETED:
+        asyncio.create_task(_resume_execution(request.app.state, task))
 
     return {"status": task.state.value, "task_id": task_id}
 
@@ -79,13 +73,16 @@ async def _resume_execution(app_state, task) -> None:
     2. inject: completed[task.step_id] = task.resume_payload
     3. save checkpoint（updated completed）
     4. ExecutionStatus → RUNNING
-    5. 实际 re-run 由 Scheduler / 手动触发（此处仅准备 checkpoint + 状态）
+    5. load TrajectoryRecord → plan → 重建 ExecutionGraph
+    6. re-run execute_graph（checkpoint resume：跳过 completed 节点）
+    7. ExecutionStatus → SUCCEEDED/FAILED
     """
     from agent_runtime.planner.durability import Checkpoint
 
     runtime = app_state.planner_runtime
     checkpoint_store = runtime.checkpoint_store
     status_store = getattr(app_state, "status_store", None)
+    trajectory_store = runtime.trajectory_store
 
     if checkpoint_store is None:
         logger.debug("no checkpoint store, skip resume")
@@ -96,11 +93,11 @@ async def _resume_execution(app_state, task) -> None:
         logger.warning("checkpoint not found for execution %s, cannot resume", task.execution_id)
         return
 
-    # 注入挂起节点的结果
+    # 1. 注入挂起节点的结果
     completed = dict(cp.completed)
     completed[task.step_id] = task.resume_payload
 
-    # 保存更新后的 checkpoint
+    # 2. 保存更新后的 checkpoint
     await checkpoint_store.save(
         Checkpoint(
             task.execution_id,
@@ -110,7 +107,7 @@ async def _resume_execution(app_state, task) -> None:
         )
     )
 
-    # ExecutionStatus → RUNNING
+    # 3. ExecutionStatus → RUNNING
     if status_store is not None:
         from agent_runtime.execution_status import ExecutionStatus, ExecutionStatusRecord
 
@@ -128,3 +125,58 @@ async def _resume_execution(app_state, task) -> None:
         task.step_id,
         list(task.resume_payload.keys()) if task.resume_payload else [],
     )
+
+    # 4. 从 TrajectoryRecord 加载 plan → 重建 ExecutionGraph → re-run
+    if trajectory_store is None:
+        logger.debug("no trajectory store, cannot rebuild graph for re-run")
+        return
+
+    try:
+        trajectory = await trajectory_store.load(task.execution_id)
+    except Exception:
+        logger.warning("failed to load trajectory for execution %s", task.execution_id, exc_info=True)
+        return
+
+    if trajectory is None or not trajectory.plan:
+        logger.debug("no trajectory or plan for execution %s, skip re-run", task.execution_id)
+        return
+
+    plan_dict = trajectory.plan
+    graph_dict = plan_dict.get("graph")
+    if graph_dict is None:
+        logger.debug("no graph in plan for execution %s, skip re-run", task.execution_id)
+        return
+
+    # 5. 重建 ExecutionGraph + re-run
+    from agent_runtime.planner.execution_graph import ExecutionGraph, execute_graph
+
+    graph = ExecutionGraph.from_dict(graph_dict)
+
+    # 6. re-run（checkpoint resume：跳过 completed 节点，从下一层继续）
+    _stream_failed = False
+    try:
+        async for event in execute_graph(
+            graph, runtime,
+            checkpoint_store=checkpoint_store,
+            execution_id=task.execution_id,
+        ):
+            if event.type == "error":
+                _stream_failed = True
+                logger.warning("resume re-run error: %s", event.payload.get("error"))
+    except Exception:
+        _stream_failed = True
+        logger.warning("resume re-run failed for execution %s", task.execution_id, exc_info=True)
+
+    # 7. ExecutionStatus → SUCCEEDED/FAILED
+    if status_store is not None:
+        from agent_runtime.execution_status import ExecutionStatus, ExecutionStatusRecord
+
+        try:
+            await status_store.save(ExecutionStatusRecord(
+                execution_id=task.execution_id,
+                status=ExecutionStatus.FAILED if _stream_failed else ExecutionStatus.SUCCEEDED,
+            ))
+        except Exception:
+            logger.debug("status save terminal on resume failed", exc_info=True)
+
+    logger.info("execution %s re-run %s", task.execution_id, "failed" if _stream_failed else "succeeded")

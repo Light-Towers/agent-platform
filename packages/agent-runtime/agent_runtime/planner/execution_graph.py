@@ -59,11 +59,15 @@ async def _persist_trajectory(
         model=_model,
         planner_version=plan.planner_name or None,
     )
+    # V3-3: 序列化 plan 时把 ExecutionGraph 转 dict（供 resume 重建）
+    plan_dict = plan.model_dump()
+    if plan.graph is not None and hasattr(plan.graph, "to_dict"):
+        plan_dict["graph"] = plan.graph.to_dict()
     record = TrajectoryRecord(
         execution_id=exec_ctx.execution_id,
         session_id=plan.session_id or None,
         planner=plan.planner_name or None,
-        plan=plan.model_dump(),
+        plan=plan_dict,
         steps=list(exec_ctx.steps),
         total_tokens=exec_ctx.tokens_used,
         total_cost=exec_ctx.cost_used,
@@ -94,6 +98,23 @@ class GraphNode:
     skill_name: str
     kwargs: dict[str, Any] = field(default_factory=dict)
     input_refs: dict[str, str] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "node_id": self.node_id,
+            "skill_name": self.skill_name,
+            "kwargs": self.kwargs,
+            "input_refs": self.input_refs,
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> GraphNode:
+        return cls(
+            node_id=d["node_id"],
+            skill_name=d["skill_name"],
+            kwargs=d.get("kwargs", {}),
+            input_refs=d.get("input_refs", {}),
+        )
 
 
 class GraphCycleError(ValueError):
@@ -199,6 +220,25 @@ class ExecutionGraph:
     def step_count(self) -> int:
         """总节点数（Skill 调用步数）。"""
         return len(self._nodes)
+
+    def to_dict(self) -> dict[str, Any]:
+        """序列化为 dict（供 TrajectoryRecord 持久化 + resume 重建）。"""
+        return {
+            "nodes": {nid: node.to_dict() for nid, node in self._nodes.items()},
+            "deps": {nid: sorted(deps) for nid, deps in self._deps.items()},
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> ExecutionGraph:
+        """从 dict 重建 ExecutionGraph。"""
+        g = cls()
+        for nid, node_d in d.get("nodes", {}).items():
+            node = GraphNode.from_dict(node_d)
+            g._nodes[node.node_id] = node
+            g._deps.setdefault(node.node_id, set())
+        for nid, deps in d.get("deps", {}).items():
+            g._deps[nid] = set(deps)
+        return g
 
 
 async def _run_graph_in_place(
