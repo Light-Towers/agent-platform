@@ -29,12 +29,25 @@ Executor = Callable[..., Awaitable[Any]]
 
 
 class SkillKind(str, Enum):
-    """能力执行方式：决定走哪个执行器语义。"""
+    """能力执行语义：决定走哪个执行器语义。"""
 
     FUNCTION = "function"
     AGENT = "agent"
     REMOTE = "remote"
     WORKFLOW = "workflow"  # Workflow Skill：Static/Conditional 编排（graph.py → general_qa），LangGraph 仅是执行实现
+
+
+class ExecutionBoundary(str, Enum):
+    """执行边界：Capability 的运行位置（V3 核心抽象——语义与部署解耦）。
+
+    - INPROCESS：进程内调用（asyncio / 函数调用），低延迟、共享故障域
+    - REMOTE：远程服务调用（HTTP / RPC / MCP），独立扩缩容、强故障隔离
+    - SANDBOX：隔离进程执行（用户代码 / 不可信脚本），进程级安全隔离
+    """
+
+    INPROCESS = "inprocess"
+    REMOTE = "remote"
+    SANDBOX = "sandbox"
 
 
 @dataclass(frozen=True)
@@ -50,6 +63,10 @@ class Skill:
     description: str
     kind: SkillKind
     executor: Executor
+    # V3 Execution Boundary：Capability 的运行位置。None 时从 kind 推断（向后兼容）。
+    # 显式声明后，Execution Router 可据此选择 InProcess/Remote/Sandbox 执行器，
+    # 使部署边界与能力语义解耦（V3 §2.1 核心设计原则）。
+    execution_boundary: ExecutionBoundary | None = None
     timeout_ms: int | None = None
     # 保留扩展位：metadata（来源轨/是否降级/评估标签等）后续按需填充
     metadata: dict[str, Any] = field(default_factory=dict)
