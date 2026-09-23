@@ -1,6 +1,6 @@
 [build-system]
-requires = ["setuptools>=61.0", "wheel"]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 [project]
 name = "knowledge-service"
@@ -42,7 +42,7 @@ dependencies = [
     "requests>=2.34.2",
     # agent-core 共享内核（monorepo sibling 包，editable 安装，import 名 agent_core）。
     # uv 语法（推荐，本仓含 uv.lock）。pip 用户需改为：`pip install -e ../agent-core`，
-    # 并在 requirements 去掉此行（setuptools 不解析 path 表）。
+    # 并在 requirements 去掉此行（hatchling 不解析 path 表）。
     "agent-core",
     "shared-schemas",
 ]
@@ -53,9 +53,8 @@ knowledge-service = "knowledge_service.main:run"
 [project.urls]
 Homepage = "https://github.com/Light-Towers/agent-platform"
 
-[tool.setuptools.packages.find]
-where = ["."]
-include = ["knowledge_service*"]
+[tool.hatch.build.targets.wheel]
+only-include = ["knowledge_service"]
 
 # ---------------------------------------------------------------------------
 # ruff：静态检查与格式化基线（M1 引入，M3 收窄）
