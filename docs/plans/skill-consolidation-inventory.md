@@ -99,8 +99,8 @@
 | G1 | knowledge-service 未注册为 RemoteExecutor skill | P1 | REMOTE | ✅ 已修 |
 | G2 | nl2sql-service 未注册为 RemoteExecutor skill | P1 | REMOTE | ✅ 已修 |
 | G3 | kefu-service 未注册为 RemoteExecutor skill | P3 | REMOTE | ✅ 已修 |
-| G4 | exhibition-agent 2 skill 未注册 | P2 | FUNCTION | ⏳ 后续（exhibition-agent 保留独立 HTTP 壳） |
-| G5 | dialogue-framework 孤儿，去留未决 | P3 | — | ✅ 确认孤儿，待用户确认后移除 |
+| G4 | exhibition-agent 2 skill 未注册 | P2 | FUNCTION | ✅ 已修（exhibition_query RemoteExecutor skill 注册） |
+| G5 | dialogue-framework 孤儿，去留未决 | P3 | — | ✅ 已删除（孤儿框架移除） |
 | G6 | agent_federation 编排层与 agent_server 重叠 | P5 | — | ✅ 已收敛（entry_points 提供 executor） |
 
 ## 四、Executor 类型映射表
@@ -143,8 +143,8 @@ dialogue-framework: 孤岛，无消费关系
 | nl2sql-service | RemoteExecutor skill（`nl2sql_query`） | ✅ |
 | kefu-service | RemoteExecutor skill（`kefu_query`） | ✅ |
 | agent_federation | agentic executor 提供方（entry_points → AgenticPlanner） | ✅ |
-| exhibition-agent | 保留独立 HTTP 壳（warehouse 契约 + skill_loader），不强行收编 | ⏳ |
-| dialogue-framework | 确认孤儿（106 引用全在自身内部），待用户确认后移除 | ✅ 确认 |
+| exhibition-agent | RemoteExecutor skill（`exhibition_query`）+ 保留独立 HTTP 壳 | ✅ |
+| dialogue-framework | 已删除（孤儿框架，-2604 行） | ✅ 已移除 |
 | agent_server | 统一编排入口（Planner + SkillRegistry + PlannerRuntime） | ✅ |
 
 ### 编排层单一性
@@ -162,5 +162,4 @@ agent_federation 保留 HTTP 壳（WS + 文件上传/下载）供前端直连，
 - **引用检查**：106 个 `dialogue_framework` 引用全部在 `applications/dialogue-framework/` 自身内部
 - **消费方**：无任何其他应用 import dialogue_framework
 - **功能重叠**：kefu-service 已独立实现客服（意图路由 + Flow + GraphRAG），是 dialogue-framework 的功能子集
-- **建议**：移除 dialogue-framework（package + workspace member + Makefile test session）
-- **阻塞**：需用户确认无外部部署引用后执行删除
+- **决策**：已移除 dialogue-framework（package + workspace member + Makefile test session + tests），-2604 行
