@@ -65,15 +65,14 @@
 
 ---
 
-## D6 agent_server/api/routes.py 按业务域拆分
+## D6 agent_server/api/routes.py 按业务域拆分（已完成）
 
 | 字段 | 内容 |
 |------|------|
-| **现状** | `agent_server/api/routes.py` 单文件承载所有路由（query/import/sql/session/health） |
-| **影响** | 单文件过大，改动互相影响；按域拆分后各域可独立演进 |
-| **跳过原因** | 路由拆 5 个子模块（query_router/import_router/sql_router/session_router/health_router），涉及 import 重构 + main.py 注册调整 + 测试 import 路径更新 |
-| **建议推进** | ① 按域提取子模块 → ② main.py 改 `include_router` → ③ 测试 import 路径更新 → ④ 跑 agent_server 测试 |
-| **优先级** | Low（功能无影响，纯可维护性） |
+| **现状** | routes.py 已拆分为 5 个子模块（health/query/import/sql/session），本文件为聚合入口 |
+| **影响** | 各域可独立演进，单文件不再过大 |
+| **完成方式** | 按域提取子模块 → routes.py 聚合 include_router → 测试 mock 路径更新为 query_router |
+| **优先级** | ✅ 已完成 |
 
 ---
 
@@ -110,7 +109,7 @@
 | D3 | setuptools→hatchling | ✅ 已完成 | 已完成 |
 | D4 | ruff ignore 收窄 | Low | 逐包日常改动顺带 |
 | D5 | agent_core 注释泛化 | Low | 人工逐条判断 |
-| D6 | routes.py 拆分 | Low | 独立小任务 |
+| D6 | routes.py 拆分 | ✅ 已完成 | 已完成 |
 | D7 | 清理裸 except | Medium | 分批逐文件处理 |
 | D8 | pydantic-settings 评估 | Low | 独立小任务 |
 | D9 | exhibition llm_client.py 收敛到 agent_core.llm | Medium | 接口根本不同（httpx 异步 vs langchain ChatOpenAI），需重大重构 |
