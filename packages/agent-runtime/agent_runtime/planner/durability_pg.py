@@ -369,6 +369,11 @@ class PgExecutionOwnershipStore(ExecutionOwnershipStore):
                     try:
                         await conn.execute(sql_listen)
                     except Exception:
+                        logger.warning(
+                            "LISTEN %s 重连失败，5s 后重试",
+                            self._notify_channel,
+                            exc_info=True,
+                        )
                         await asyncio.sleep(5)
 
 

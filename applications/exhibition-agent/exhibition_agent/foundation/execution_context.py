@@ -24,6 +24,8 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from typing import Optional
 
+from ._audit_writer import append_audit_record, read_audit_log
+
 _BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
 _DATA_DIR = os.path.join(_BACKEND_DIR, "data")
 _AUDIT_LOG_PATH = os.path.join(_DATA_DIR, "execution_context_audit.json")
@@ -222,31 +224,14 @@ def record_cross_tenant_attempt(ctx: ExecutionContext, target_tenant: str) -> di
         "action": "CROSS_TENANT_ATTEMPT",
     }
 
-    audit_log = []
-    if os.path.exists(_AUDIT_LOG_PATH):
-        try:
-            with open(_AUDIT_LOG_PATH, "r", encoding="utf-8") as f:
-                audit_log = json.load(f)
-            if not isinstance(audit_log, list):
-                audit_log = []
-        except Exception:
-            audit_log = []
-
-    audit_log.append(record)
-
-    os.makedirs(os.path.dirname(_AUDIT_LOG_PATH), exist_ok=True)
-    with open(_AUDIT_LOG_PATH, "w", encoding="utf-8") as f:
-        json.dump(audit_log, f, ensure_ascii=False, indent=2)
+    append_audit_record(_AUDIT_LOG_PATH, record)
 
     return record
 
 
 def get_audit_log() -> list:
     """读取审计日志。"""
-    if not os.path.exists(_AUDIT_LOG_PATH):
-        return []
-    with open(_AUDIT_LOG_PATH, "r", encoding="utf-8") as f:
-        return json.load(f)
+    return read_audit_log(_AUDIT_LOG_PATH)
 
 
 # ---------------------------------------------------------------------------
