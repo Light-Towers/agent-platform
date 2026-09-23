@@ -36,7 +36,7 @@ def _message_to_record(msg, idx: int) -> dict:
     if ts:
         try:
             created = datetime.fromisoformat(ts) if isinstance(ts, str) else ts
-        except Exception:
+        except ValueError:
             created = None
     return {
         "index": idx,

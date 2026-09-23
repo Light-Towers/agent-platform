@@ -150,6 +150,11 @@ async def replay_trajectory(
     wrapper = _RecordingWrapper(registry)
     runtime = runtime_cls(registry=wrapper, max_steps=max_steps)
     plan = Plan(**record.plan)
+    # graph 可能被持久化为 dict（_persist_trajectory 序列化），重建为 ExecutionGraph
+    if isinstance(plan.graph, dict):
+        from agent_runtime.planner.execution_graph import ExecutionGraph
+
+        plan.graph = ExecutionGraph.from_dict(plan.graph)
     # 重放走真实执行链（execute_plan→delegate→registry.execute），route/顺序/多余调用均暴露
     try:
         _ = [ev async for ev in execute_plan(plan, runtime)]

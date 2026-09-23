@@ -439,7 +439,7 @@ class PlannerRuntime:
         """
         try:
             skill = self.registry.get(skill_name)
-        except Exception:
+        except (KeyError, AttributeError):
             return None
         return getattr(skill, "effect_contract", None)
 
@@ -616,7 +616,7 @@ class PlannerRuntime:
             try:
                 _skill = self.registry.get(name)
                 _skill_version = getattr(_skill, "version", None)
-            except Exception:
+            except (KeyError, AttributeError):
                 pass
             _model = getattr(self.llm, "model", None) if self.llm else None
             step_forensic = StepForensic(
