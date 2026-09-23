@@ -17,6 +17,8 @@ import os
 import sqlite3
 from datetime import datetime, timezone
 
+from ._audit_writer import append_audit_record, read_audit_log
+
 _BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
 _DATA_DIR = os.path.join(_BACKEND_DIR, "data")
 _MANIFEST_PATH = os.path.join(_BACKEND_DIR, "readiness_gate_manifest.json")
@@ -289,26 +291,14 @@ def _write_audit(evaluation_results: list, upgrades: list) -> dict:
         "conclusion": f"{len(upgrades)} metric(s) upgraded to VERIFIED",
     }
 
-    audit_log = []
-    if os.path.exists(_AUDIT_LOG_PATH):
-        try:
-            audit_log = _load_json(_AUDIT_LOG_PATH)
-            if not isinstance(audit_log, list):
-                audit_log = []
-        except Exception:
-            audit_log = []
-
-    audit_log.append(audit_record)
-    _save_json(_AUDIT_LOG_PATH, audit_log)
+    append_audit_record(_AUDIT_LOG_PATH, audit_record)
 
     return audit_record
 
 
 def get_audit_log() -> list:
     """读取审计日志。"""
-    if not os.path.exists(_AUDIT_LOG_PATH):
-        return []
-    return _load_json(_AUDIT_LOG_PATH)
+    return read_audit_log(_AUDIT_LOG_PATH)
 
 
 def is_production_ready(skill_id: str) -> dict:

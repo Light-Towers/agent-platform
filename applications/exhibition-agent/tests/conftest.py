@@ -13,6 +13,31 @@ from exhibition_agent.mock_server.warehouse_mock import create_mock_app
 from exhibition_agent.testing_helpers import ctx, ctx_header, make_context_payload, make_header
 
 
+@pytest.fixture(autouse=True)
+def _isolate_audit_log_paths(tmp_path, monkeypatch):
+    """重定向所有审计日志路径到 tmp_path，防止测试污染真实 data 目录。"""
+    monkeypatch.setattr(
+        "exhibition_agent.foundation.data_egress._AUDIT_LOG_PATH",
+        str(tmp_path / "data_egress_audit.json"),
+    )
+    monkeypatch.setattr(
+        "exhibition_agent.foundation.evaluation._AUDIT_LOG_PATH",
+        str(tmp_path / "evaluation_audit.json"),
+    )
+    monkeypatch.setattr(
+        "exhibition_agent.foundation.execution_context._AUDIT_LOG_PATH",
+        str(tmp_path / "execution_context_audit.json"),
+    )
+    monkeypatch.setattr(
+        "exhibition_agent.foundation.knowledge_lifecycle._AUDIT_LOG_PATH",
+        str(tmp_path / "knowledge_lifecycle_audit.json"),
+    )
+    monkeypatch.setattr(
+        "exhibition_agent.foundation.production_readiness_gate._AUDIT_LOG_PATH",
+        str(tmp_path / "readiness_gate_audit.json"),
+    )
+
+
 @pytest.fixture
 def execution_context() -> ExecutionContext:
     """默认合法 ExecutionContext（v1.1 测试便利性：正常用例无感）。"""

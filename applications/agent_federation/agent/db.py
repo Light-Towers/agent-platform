@@ -52,7 +52,12 @@ async def _ensure_memories_schema() -> None:
         from agent_core.memory.embedder import get_embedder
         dim = get_embedder().dim
     except Exception:
-        dim = 512
+        logger.exception(
+            "Failed to determine embedding dimension from get_embedder().dim; "
+            "refusing to create memories table with guessed dim=512 "
+            "(would permanently固化 wrong schema, vector dim mismatch not self-healing)"
+        )
+        raise
 
     ddl = f"""
     CREATE TABLE IF NOT EXISTS memories (

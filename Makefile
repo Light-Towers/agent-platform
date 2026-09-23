@@ -63,8 +63,9 @@ eval-rag:
 	RERANK_ENABLED=false uv run --extra eval python scripts/flashrag_eval/run_eval.py
 	RERANK_ENABLED=true  uv run --extra eval python scripts/flashrag_eval/run_eval.py
 
-# CI 串联：lint + 单测 + 评测门禁；任一失败即中断。
+# CI 串联：lock 校验 + lint + 单测 + 评测门禁；任一失败即中断。
 ci: lint test eval
+	uv lock --check
 
 # TB-7 端到端冒烟：需本机 Docker 守护进程可用。启动 pgvector + agent-platform，
 # 等待两服务 healthcheck 变 healthy，再探测 /health 返回，最后清理。

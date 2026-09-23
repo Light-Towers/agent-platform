@@ -25,6 +25,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
 
+from ._audit_writer import append_audit_record
 from .knowledge_lifecycle import KNOWLEDGE_STATUS, filter_published_for_retrieval
 
 _BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -224,21 +225,7 @@ def run_evaluation(cases: list) -> dict:
 
 def _write_audit(report: dict):
     """写审计日志。"""
-    audit_log = []
-    if os.path.exists(_AUDIT_LOG_PATH):
-        try:
-            with open(_AUDIT_LOG_PATH, "r", encoding="utf-8") as f:
-                audit_log = json.load(f)
-            if not isinstance(audit_log, list):
-                audit_log = []
-        except Exception:
-            audit_log = []
-
-    audit_log.append(report)
-
-    os.makedirs(os.path.dirname(_AUDIT_LOG_PATH), exist_ok=True)
-    with open(_AUDIT_LOG_PATH, "w", encoding="utf-8") as f:
-        json.dump(audit_log, f, ensure_ascii=False, indent=2)
+    append_audit_record(_AUDIT_LOG_PATH, report)
 
 
 def assert_regression_before_deploy(report: dict) -> dict:
