@@ -14,7 +14,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from agent_runtime.skills.registry import Skill, SkillKind
+from agent_runtime.skills.registry import ExecutionBoundary, Skill, SkillKind
 
 if TYPE_CHECKING:
     from agent_runtime.mcp_client import MCPClientManager
@@ -86,6 +86,7 @@ def _make_mcp_skill(
         description=description,
         kind=SkillKind.REMOTE,
         executor=execute,
+        execution_boundary=ExecutionBoundary.REMOTE,
         metadata={"source": "mcp", "server_id": server_id, "tool_name": tool_name},
         permissions=permissions,
     )

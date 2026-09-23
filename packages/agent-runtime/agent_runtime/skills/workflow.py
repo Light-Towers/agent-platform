@@ -58,7 +58,7 @@ from agent_runtime.planner.execution_graph import (
     _run_graph_in_place,
 )
 from agent_runtime.planner.protocol import PlannerRuntime, get_current_runtime
-from agent_runtime.skills.registry import Skill, SkillKind
+from agent_runtime.skills.registry import ExecutionBoundary, Skill, SkillKind
 
 
 class WorkflowNode(BaseModel):
@@ -180,6 +180,7 @@ def compile_workflow(spec: "WorkflowSpec | dict[str, Any]", *, registry: Any | N
         description=spec.description,
         kind=SkillKind.WORKFLOW,
         executor=executor.execute,
+        execution_boundary=ExecutionBoundary.INPROCESS,
         input_schema=spec.input_schema,
         output_schema=spec.output_schema,
         permissions=frozenset(spec.permissions),

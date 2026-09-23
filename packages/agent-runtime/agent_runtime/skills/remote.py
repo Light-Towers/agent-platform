@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any, Awaitable, Callable
 
-from agent_runtime.skills.registry import Skill, SkillKind
+from agent_runtime.skills.registry import ExecutionBoundary, Skill, SkillKind
 
 
 def as_remote_skill(
@@ -31,6 +31,7 @@ def as_remote_skill(
         description=description,
         kind=SkillKind.REMOTE,
         executor=execute,
+        execution_boundary=ExecutionBoundary.REMOTE,
         timeout_ms=timeout_ms,
         input_schema=input_schema,
         output_schema=output_schema,

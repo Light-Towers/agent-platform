@@ -11,7 +11,7 @@ from __future__ import annotations
 from typing import Any
 
 from agent_runtime.sandbox import SandboxExecutor
-from agent_runtime.skills.registry import Skill, SkillKind
+from agent_runtime.skills.registry import ExecutionBoundary, Skill, SkillKind
 
 
 def as_sandbox_skill(
@@ -56,6 +56,7 @@ def as_sandbox_skill(
         description="在隔离沙箱中执行 Python 代码（Docker 容器或 subprocess 隔离）",
         kind=SkillKind.FUNCTION,
         executor=execute,
+        execution_boundary=ExecutionBoundary.SANDBOX,
         input_schema={
             "type": "object",
             "properties": {

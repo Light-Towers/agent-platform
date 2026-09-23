@@ -9,6 +9,7 @@ from agent_runtime.skills.function import as_function_skill
 from agent_runtime.skills.mcp import register_mcp_skills
 from agent_runtime.skills.registry import (
     DuplicateSkillError,
+    ExecutionBoundary,
     Skill,
     SkillKind,
     SkillNotFoundError,
@@ -20,6 +21,7 @@ from agent_runtime.skills.sandbox import as_sandbox_skill
 __all__ = [
     "Skill",
     "SkillKind",
+    "ExecutionBoundary",
     "SkillNotFoundError",
     "SkillRegistry",
     "DuplicateSkillError",
