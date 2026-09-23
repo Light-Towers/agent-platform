@@ -249,7 +249,7 @@ async def lifespan(app: FastAPI):
                 breaker_recovery_seconds=settings.breaker_recovery_seconds,
             )
             await mcp_manager.connect_all()
-        except Exception:
+        except Exception:  # noqa: BLE001
             logger.warning("MCP init failed, degrading", exc_info=True)
             mcp_manager = None
     app.state.mcp_manager = mcp_manager
@@ -283,7 +283,7 @@ async def lifespan(app: FastAPI):
         for sk in wf_skills:
             registry.register(sk)
         logger.info("auto-registered %d workflow skills from %s", len(wf_skills), _wf_dir)
-    except Exception:
+    except Exception:  # noqa: BLE001
         logger.warning("workflow auto-discovery failed", exc_info=True)
 
     # MCP 工具自动注册为 Skill（每个工具 → SkillKind.REMOTE Skill）
@@ -309,7 +309,7 @@ async def lifespan(app: FastAPI):
         if agentic_skill.name not in registry:
             registry.register(agentic_skill)
             logger.info("registered agentic skill (SkillKind.AGENT)")
-    except Exception:
+    except Exception:  # noqa: BLE001
         # entry_points 不可用是常见预期（非 agentic 部署）；仅当运行时实际需要
         # agentic/auto planner 时才值得警告，否则 DEBUG 记录（T1.2c / B2 评审结论）
         if settings.planner in ("agentic", "auto"):

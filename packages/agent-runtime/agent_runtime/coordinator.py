@@ -207,7 +207,7 @@ class SessionCoordinator:
                         wait_seconds=float(q.qsize()),
                     )
 
-        except Exception:
+        except Exception:  # noqa: BLE001
             # 协调器内部错误：降级为无互斥并发执行
             self._logger.warning(
                 "COORDINATION_DEGRADED session=%s request=%s",
@@ -296,7 +296,7 @@ class SessionCoordinator:
                     if q is None or q.empty():
                         self._queues.pop(session_id, None)
                         self._conditions.pop(session_id, None)
-        except Exception:
+        except Exception:  # noqa: BLE001
             self._logger.warning(
                 "coordination release failed session=%s request=%s",
                 session_id,
@@ -307,7 +307,7 @@ class SessionCoordinator:
             # P4-1：释放分布式/本地 lease（未持有则 no-op）
             try:
                 await self._lease.release(session_id, request_id)
-            except Exception:
+            except Exception:  # noqa: BLE001
                 self._logger.warning(
                     "lease release failed session=%s request=%s",
                     session_id,

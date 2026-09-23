@@ -94,7 +94,7 @@ async def score_conclusion(query: str, answer: str | None, value: str, model) ->
             data = json.loads(match.group())
             return bool(data.get("satisfied", False)), data.get("reason", "")
         return False, f"judge 返回解析失败: {content[:100]}"
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.warning("conclusion judge 异常: %s", e)
         return False, f"judge 异常: {type(e).__name__}"
 

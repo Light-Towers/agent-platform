@@ -51,5 +51,5 @@ for _yaml_file in sorted(prompt_dir.glob("*.yaml")) + sorted(prompt_dir.glob("*.
             rewrite_content = _data
         elif _key == "planner":
             planner_content = _data
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.warning("加载 prompt 文件失败: %s, 错误: %s", _yaml_file, e)

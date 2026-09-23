@@ -326,7 +326,7 @@ curl http://127.0.0.1:8000/health
 ## 测试与评测
 
 ```bash
-make test                            # 10 session pytest（根 / shared-schemas / agent-runtime / agent-server / 联邦 / kefu / exhibition / dialogue-framework / knowledge-service / nl2sql-service）
+make test                            # 9 session pytest（根 / shared-schemas / agent-runtime / agent-server / 联邦 / kefu / exhibition / knowledge-service / nl2sql-service）
 python eval/run_eval.py              # 启发式路由准确率基线（15 条 golden）
 python eval/run_eval.py --llm        # 配置 LLM 后评测结构化路由
 python eval/run_eval.py --fail-below 0.8   # CI 门禁用法
@@ -434,7 +434,6 @@ applications/nl2sql-service/  # Text-to-SQL 数据分析通用服务（元知识
                            #   —— 原 wenda-adapter（SSE→JSON 适配层）已于 2026-08 退役，
                            #      网关直连本服务 /api/query（nl2sql-service 默认 :8000）
 applications/knowledge-service/ # 通用知识库服务：RAG 导入 + 多路检索问答（:8900，Metadata 参数化 + 生命周期 + 多租户 ACL）
-applications/dialogue-framework/ # LLM 对话系统框架基础设施（生产化改造自 courses/.../legacy）
 ```
 
 ### 测试与评测
@@ -471,10 +470,7 @@ tests/                     # 单元测试（针对 agent_server 平台；含 pla
   - ✅ `kefu-service` 已升级为 Agent Protocol 兼容 server：新增 `POST /invoke`（接受 `QueryRequest`，返回 `QueryResponse`，`kefu-service/main.py` + 依赖 `shared-schemas`）；旧 `/api/messages` 保留为 legacy 兼容入口。
   - ✅ 网关 `applications/agent_federation/agent/config.py` 新增 `KEFU_SERVICE_URL` + `KEFU_USE_ADAPTER` 开关（默认 `false`，直连 `kefu-service:8003`）；`async_subagents.py` 增加 httpx 远程回退（外部 `deepagents` 包未安装时直连 `/invoke`）。
   - ✅ `kefu-adapter` 包已于 2026-08 移除（无调用方，默认直连 `kefu-service` 生效）。`applications/agent_federation/eval/run-all.py` 的 kefu 项目已改默认指向 `KEFU_SERVICE_URL`（`KEFU_ADAPTER_URL` 仍可覆盖）。*注：原评审称「非简单改 URL 可接入」属实，但根因（缺 Agent Protocol + QueryResponse）已在本轮修复。*
-- **TB-1 / TB-2 · dialogue-framework 与内核协议对齐（已完成）**：
-  - ✅ **TB-1**：`dialogue_framework/shared/llm/core_adapter.py` 新增 `LLMCoreClient`，把 agent_core `BaseLLMProvider`（工厂协议）桥接为 DF `BaseChatClient`（运行时协议）；两协议互补不合并，DF 不删除。
-  - ✅ **TB-2**：`dialogue_framework/core/tracker_memory.py` 新增 `TrackerConversationMemory`，实现 agent_core `ConversationMemory` 协议，把消息落进 `Tracker.events`；`Tracker.to_conversation_memory()` 桥接挂载。DF 自有数据结构未改动。
-  - 验证：`dialogue-framework/tests/test_tb_bridge.py`（3 passed），`ruff check .` 全绿。详见 `CHANGELOG.md` 技术债 TB 闭环小节。
+- **TB-1 / TB-2 · dialogue-framework 与内核协议对齐（已完成，后随 DF 移除而归档）**：dialogue-framework 已于 2026-09-23 作为孤儿框架移除（能力已被 agent_server 吸收），TB-1/TB-2 桥接代码随之删除。历史记录见 `CHANGELOG.md`。
 
 ## 路线图
 

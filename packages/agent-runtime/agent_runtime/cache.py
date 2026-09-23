@@ -66,7 +66,7 @@ async def cache_lookup(pool, embedding: list[float], threshold: float, tenant_id
         if rec and rec[1] is not None and rec[1] < threshold:
             _stats.record("l2_hit")
             return rec[0]
-    except Exception:
+    except Exception:  # noqa: BLE001
         logger.exception("语义缓存查询失败，降级为未命中")
     _stats.record("miss")
     return None
@@ -102,7 +102,7 @@ def cache_store(pool, question: str, answer: str, embedding: list[float], tenant
     async def _guarded():
         try:
             await _cache_write(pool, question, answer, embedding, tenant_id)
-        except Exception:
+        except Exception:  # noqa: BLE001
             logger.exception("语义缓存写入失败")
 
     spawn_background(_guarded())

@@ -97,7 +97,7 @@ class CircuitBreaker(_RuntimeBreaker):
             return fallback
         try:
             result = await fn()
-        except Exception:
+        except Exception:  # noqa: BLE001
             await self.record_failure()
             return fallback
         await self.record_success()

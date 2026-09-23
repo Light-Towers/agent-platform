@@ -51,7 +51,7 @@ def get_assistant_list() -> str:
             # 法律资源小助手  xxxxxx  关联知识库：xx、xxx、xxx
             count_chat_info += f"助手名称:{chat.name};功能介绍：{chat.description}; 关联的知识库：{'、'.join(dataset_names)} \n"
         return count_chat_info
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return f"查询助手信息异常，无可用助手,异常信息:{str(e)}"
 
 # 2. 对某个助手进行提问（创建会话 -》 提问 -》 删除会话）
@@ -89,7 +89,7 @@ def create_ask_delete(chat_name,question)->str:
         use_chat.delete_sessions(ids=[session.id])
         # 6. 返回结果
         return result
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return f"提问失败，错误原因：{str(e)}"
 
 # if __name__ == '__main__':

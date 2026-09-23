@@ -120,7 +120,7 @@ class StateSchemaMigrator:
             fn, step = entry
             try:
                 result = fn(result)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 raise StateMigrationError(
                     f"迁移失败：版本 {cur} → {cur + 1}: {e}"
                 ) from e

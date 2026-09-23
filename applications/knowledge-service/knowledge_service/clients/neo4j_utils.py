@@ -26,7 +26,7 @@ def get_neo4j_driver():
 
         _neo4j_driver = GraphDatabase.driver(uri, auth=(user, pwd))
         return _neo4j_driver
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.warning("Neo4j 驱动初始化失败: %s", e)
         _neo4j_driver = None
         return None
@@ -89,6 +89,6 @@ def query_kg(
                     "score": 1.0,
                 })
             return docs
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.warning("query_kg 失败，降级为空: %s", e)
         return []

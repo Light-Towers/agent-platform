@@ -81,7 +81,7 @@ def get_checkpointer(pg_pool=None):
         # AsyncPostgresSaver 直接接受 AsyncConnectionPool，setup() 为异步，由调用方 await）。
         try:
             from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
-        except Exception as e:  # pragma: no cover - 依赖缺失路径
+        except Exception as e:  # noqa: BLE001 - pragma: no cover - 依赖缺失路径
             raise ImportError(
                 "langgraph[postgres] 未安装；请安装 agent-core[memory-pgvector] 或 langgraph 的 postgres 扩展"
             ) from e
@@ -102,7 +102,7 @@ def get_checkpointer(pg_pool=None):
                 ),
                 tenant_id=__import__("os").getenv("TENANT_ID", "default"),
             )
-        except Exception as e:  # pragma: no cover - Mongo 不可用时降级
+        except Exception as e:  # noqa: BLE001 - pragma: no cover - Mongo 不可用时降级
             import logging
 
             logging.getLogger(__name__).warning(

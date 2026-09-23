@@ -132,7 +132,7 @@ def _wire_local_fallbacks() -> None:
                     endpoint=old.endpoint, local_agent=local_agent, healthy=old.healthy,
                 )
                 logger.info("[config] %s 本地 fallback 已装配（%s）", key, mod_path)
-        except Exception as exc:  # pragma: no cover - 装配失败不阻断启动
+        except Exception as exc:  # noqa: BLE001 - pragma: no cover - 装配失败不阻断启动
             logger.warning("[config] %s 本地 fallback 装配失败: %s", key, exc)
 
 

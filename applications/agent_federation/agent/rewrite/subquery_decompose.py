@@ -48,7 +48,7 @@ async def decompose(query: str, model: Any = None) -> list[dict[str, str]]:
             if isinstance(result, list) and result:
                 logger.info("子问题分解: %r → %d 子问题", query, len(result))
                 return result
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.warning("子问题分解失败: %s", e)
 
     return []

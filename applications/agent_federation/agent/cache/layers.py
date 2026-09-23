@@ -43,7 +43,7 @@ async def _get_valkey() -> Any:
     except ImportError:
         logger.warning("valkey 包未安装，缓存层降级为 no-op")
         _valkey_available = False
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.warning("Valkey 连接失败: %s，缓存层降级为 no-op", e)
         _valkey_available = False
     return _valkey_client if _valkey_available else None
@@ -70,7 +70,7 @@ class L1Cache:
                 result["_layer"] = "l1"
                 logger.debug("L1 命中: %s", key[:16])
                 return result
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("L1 get 失败: %s", e)
         return None
 
@@ -87,7 +87,7 @@ class L1Cache:
                 json.dumps(value, ensure_ascii=False),
                 ex=ttl,
             )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("L1 set 失败: %s", e)
 
     @staticmethod
@@ -98,7 +98,7 @@ class L1Cache:
         cfg = get_cache_config()
         try:
             await client.delete(f"{cfg.l1_prefix}{key}")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("L1 invalidate 失败: %s", e)
 
 
@@ -122,7 +122,7 @@ class L2Cache:
                 await ft.info()
                 cls._index_created = True
                 return True
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 logger.warning("检查 L2 索引是否存在失败，将尝试创建: %s", e)
 
             from valkey.commands.search.field import TextField, VectorField
@@ -148,7 +148,7 @@ class L2Cache:
             cls._index_created = True
             logger.info("L2 Valkey Search 索引已创建: %s", cfg.index_name)
             return True
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("L2 索引创建失败: %s，L2 降级为 no-op", e)
             return False
 
@@ -182,7 +182,7 @@ class L2Cache:
                     value["_similarity"] = similarity
                     logger.debug("L2 命中: similarity=%.4f", similarity)
                     return value
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("L2 get 失败: %s", e)
         return None
 
@@ -215,7 +215,7 @@ class L2Cache:
             await client.hset(key, mapping=mapping)
             ttl = ttl or cfg.l2_ttl_seconds
             await client.expire(key, ttl)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("L2 set 失败: %s", e)
 
 
@@ -235,7 +235,7 @@ class L3Cache:
                 result["_layer"] = "l3"
                 logger.debug("L3 命中: %s", key[:16])
                 return result
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("L3 get 失败: %s", e)
         return None
 
@@ -252,7 +252,7 @@ class L3Cache:
                 json.dumps(value, ensure_ascii=False),
                 ex=ttl,
             )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("L3 set 失败: %s", e)
 
 
@@ -271,7 +271,7 @@ class NullCache:
         try:
             data = await client.get(f"{cfg.null_prefix}{key}")
             return data is not None
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("NullCache get 失败: %s", e)
             return False
 
@@ -289,5 +289,5 @@ class NullCache:
                 "1",
                 ex=cfg.null_cache_ttl_seconds,
             )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("NullCache set 失败: %s", e)

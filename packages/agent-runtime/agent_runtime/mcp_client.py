@@ -100,7 +100,7 @@ class MCPClientManager:
                     config.transport,
                     conn.tools,
                 )
-            except Exception:
+            except Exception:  # noqa: BLE001
                 logger.warning(
                     "MCP connect failed server=%s, degrading",
                     config.server_id,
@@ -110,7 +110,7 @@ class MCPClientManager:
                 if stack is not None:
                     try:
                         await stack.aclose()
-                    except Exception:
+                    except Exception:  # noqa: BLE001
                         logger.warning(
                             "MCP exit stack cleanup failed server=%s",
                             config.server_id,
@@ -163,7 +163,7 @@ class MCPClientManager:
                 if conn._exit_stack is not None:
                     await conn._exit_stack.aclose()
                 conn.available = False
-            except Exception:
+            except Exception:  # noqa: BLE001
                 logger.warning("MCP close failed server=%s", server_id, exc_info=True)
         self._connections.clear()
 
@@ -325,7 +325,7 @@ class MCPClientManager:
                             status,
                         ),
                     )
-            except Exception:
+            except Exception:  # noqa: BLE001
                 logger.warning("MCP audit write failed", exc_info=True)
         else:
             logger.info(

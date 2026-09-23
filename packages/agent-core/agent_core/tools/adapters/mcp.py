@@ -113,7 +113,7 @@ class MCPToolAdapter:
         # agents.mcp 为可选依赖：懒导入。
         try:
             from agents.mcp import MCPServerSse
-        except Exception as e:  # pragma: no cover - 依赖缺失路径
+        except Exception as e:  # noqa: BLE001 - pragma: no cover - 依赖缺失路径
             raise ImportError(
                 "openai-agents 未安装；请安装 agent-core[tools-mcp]（uv sync --extra tools-mcp）"
             ) from e
@@ -149,7 +149,7 @@ class MCPToolAdapter:
         finally:
             try:
                 await search_mcp.cleanup()
-            except Exception:  # pragma: no cover - 防御：清理失败不影响返回
+            except Exception:  # noqa: BLE001 - pragma: no cover - 防御：清理失败不影响返回
                 pass
 
 

@@ -165,7 +165,7 @@ async def run_eval(golden_path: Path, limit: int, cleanup: bool, judge: bool):
                 rs = record["rubric_score"]
                 line += f" | rubric: {rs['hit']}/{rs['total']} ({rs['rate']:.0%})"
             print(line)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             print(f"    异常: {type(e).__name__}: {e}")
             results.append({"id": item["id"], "error": str(e)})
 
@@ -231,7 +231,7 @@ async def run_evaluation(records: list[dict], no_judge: bool = False, cleanup: b
             if not no_judge and record.get("acceptance_points"):
                 record.update(await judge_record(record, judge_model))
             results.append(record)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             print(f"    异常: {type(e).__name__}: {e}")
             results.append({"id": item["id"], "error": str(e)})
 

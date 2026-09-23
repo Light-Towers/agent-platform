@@ -48,7 +48,7 @@ def _parse_llm_json(content: str) -> dict[str, Any] | None:
             text = text[4:]
     try:
         return json.loads(text)
-    except Exception:
+    except Exception:  # noqa: BLE001
         return None
 
 
@@ -86,7 +86,7 @@ async def l2_judge(query: str, *, model=None) -> IntentResult:
                 source="l2",
                 need_clarify=conf < CLARIFY_THRESHOLD,
             )
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.warning("L2 intent judge failed, fallback to L1: %s", e)
 
     # 降级：L1 嵌入 + 关键词（经异步入口，不阻塞事件循环，WS-6）

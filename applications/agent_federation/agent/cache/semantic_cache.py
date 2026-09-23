@@ -41,7 +41,7 @@ def _get_embedding(text: str) -> np.ndarray | None:
         provider = get_embedder()
         vec = provider.embed([text])[0]
         return np.array(vec, dtype=np.float32)
-    except Exception:
+    except Exception:  # noqa: BLE001
         return None
 
 
@@ -142,7 +142,7 @@ class SemanticCache:
             task = asyncio.create_task(SemanticCache.set(*args, **kwargs))
             _pending_writes.add(task)
             task.add_done_callback(_pending_writes.discard)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("缓存异步写入失败: %s", e)
 
     @staticmethod

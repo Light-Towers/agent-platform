@@ -28,7 +28,7 @@ async def query(request: SqlQueryRequest, http_request: Request) -> SqlQueryResp
             latency_ms=round(latency, 2),
             trace_id=request.trace_id,
         )
-    except Exception:
+    except Exception:  # noqa: BLE001
         logger.exception("query handler failed")
         latency = (time.perf_counter() - start) * 1000
         return SqlQueryResponse(

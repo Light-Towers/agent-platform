@@ -69,7 +69,7 @@ markers = [
 # 注：agent_federation/tests/unit 与 kefu-service/tests 经 Makefile `test` 目标以
 # 独立 pytest session 纳入 CI（避免与根 tests/ 的 conftest 插件名冲突）。
 # 分层（2026-08-19）：packages/ 放平台库（agent-core/agent-runtime/shared-schemas），
-# applications/ 放应用（agent_server/agent_federation/dialogue-framework/kefu-service/
+# applications/ 放应用（agent_server/agent_federation/kefu-service/
 # nl2sql-service/knowledge-service）。原 deepagents/ 因与 PyPI 包同名已重命名为
 # agent_federation/ 并清理残骸。根宿主原 app/ 已改名 agent_server/（包名同步）。
 addopts = "--import-mode=importlib"

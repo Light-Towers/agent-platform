@@ -1,7 +1,8 @@
 # agent-platform — Agent 上下文文件
 
-> 统一生产级 Agent 平台，本仓库为 **monorepo**（根 + `packages/` 3 个共享包 + `applications/` 7 个应用工程，各含独立 `pyproject.toml`）。
+> 统一生产级 Agent 平台，本仓库为 **monorepo**（根 + `packages/` 3 个共享包 + `applications/` 6 个应用工程，各含独立 `pyproject.toml`）。
 > **演进方向（Plan-F）**：双轨正收敛为「单 Runtime + 多 Planner」——共享 `agent-runtime/` 承载运行时中间件（admission/coordinator/checkpoint/tracing/cache/rate_limit 等），Planner 策略（deterministic/agentic）可插拔，不统一 Agent 只统一 Runtime。详见 `docs/plans/plan-f-single-runtime-multi-planner.md`。
+> **V3 企业执行平台（Phase 2-4 + 3.4 已完成）**：执行链路升级为 `Admission → Scheduler Queue → Dispatch → Planner → Execute → Forensic/CostGov`；新增 ExecutionScheduler（PG 队列 + `FOR UPDATE SKIP LOCKED` 跨实例并发）/ ExecutionStatus 状态机 / AwaitableTask（挂起 + 回调恢复）/ ControlPlane HTTP API / CostGovernance / ForensicContext / SchedulerReaper（lease-based 回收）。架构真相源：`docs/plans/plan-enterprise-platform-skeleton-2026-09-23.md` + `docs/plans/plan-v3-execution-platform-final-architecture-2026-09-22.md`。
 > 各包经 `agent-core` / `shared-schemas` 共享内核与契约。
 > 详细人类阅读指南见 `README.md`（含完整目录结构），本文件面向 AI agent，仅列要点。
 
@@ -9,15 +10,14 @@
 
 | 目录 | 定位 | 入口 |
 |------|------|------|
-| `applications/agent_server/` | 单进程 Supervisor 平台（统一 Agent 平台；2026-08-19 由根 `app/` 改名迁入） | `agent_server.main:app`（uvicorn） |
+| `applications/agent_server/` | 单进程 Supervisor 平台（统一 Agent 平台；V3 Phase 2-4 已接入 Scheduler/ControlPlane/CostGov/Forensic，`api/` 含 `callback.py` + `control.py`；2026-08-19 由根 `app/` 改名迁入） | `agent_server.main:app`（uvicorn） |
 | `applications/agent_federation/` | 联邦网关 + 3 子服务编排中枢（与 agent_server 并行，详见其 README；原名 `deepagents/`，为消除与 PyPI 依赖包 `deepagents` 同名冲突而改名） | `python -m api.server` |
 | `packages/agent-core/` | 零依赖运行时内核：tracing / guardrails / sql 守卫 / llm / memory（含 MemoryStore 统一门面 + CapabilityReport） / events（EventBus 多 sink 扇出） / config（KernelConfig + 类型化 env） / intent（L1 分类器） / resilience（CircuitBreaker + retry + timeout） | — |
-| `packages/agent-runtime/` | Plan-F 运行时中间件层：admission/coordinator/cache/circuit_breaker/revert/mcp_client/otel/tracing/db + planner/（protocol/agentic/agentic_bridge/registry/policy/mode_selector/context_manager/execution_graph/graph_compose/durability/durability_pg）+ skills/（registry/function/agent/remote/workflow/mcp/sandbox/middleware/composition/dag） + sandbox（双后端代码执行） | — |
+| `packages/agent-runtime/` | Plan-F 运行时中间件层 + V3 企业执行平台：admission/coordinator/cache/circuit_breaker/revert/mcp_client/otel/tracing/db + **execution_scheduler/execution_status/awaitable_task/control_plane/cost_governance/forensic/human_task/effect_contract/execution_recovery/state_migration/payload_externalization**（V3 Phase 2-4） + planner/（protocol/agentic/agentic_bridge/registry/policy/mode_selector/context_manager/execution_graph/graph_compose/durability/durability_pg）+ skills/（registry/function/agent/remote/workflow/mcp/sandbox/middleware/composition/dag） + sandbox（双后端代码执行） + memory 体系（episodic/semantic/procedural/working/decay/recall/seed/sink） | — |
 | `packages/shared-schemas/` | 联邦 4 服务共享 Pydantic 契约（QueryResponse / ThreadState 等） | — |
 | `applications/kefu-service/` | kefu 迁移版（deepagents + LangGraph），已接入联邦网关（Agent Protocol 兼容 `/invoke`，返回 `QueryResponse`；`KEFU_USE_ADAPTER=false` 默认直连） | — |
 | `applications/nl2sql-service/` | Text-to-SQL 数据分析通用服务（元知识参数化，已直连联邦契约） | — |
 | `applications/knowledge-service/` | 通用知识库服务：RAG 导入 + 多路检索问答（:8900，Metadata 参数化 + 生命周期 + 多租户 ACL） | `knowledge-service` 脚本 |
-| `applications/dialogue-framework/` | LLM 对话系统框架基础设施 | `dialogue_framework.cli:main` |
 | `applications/exhibition-agent/` | 会展行业 AI Agent（skill_loader + warehouse REST 集成） | `uvicorn exhibition_agent.skill_loader.app:app` |
 | `tests/` | agent_server 单元测试（根套件） | `pytest -q` |
 | `applications/agent_server/tests/` | agent_server 应用层集成测试（GraphPlanner × runtime，2026-09-21 F-S1-01 迁入） | `pytest applications/agent_server/tests -q` |
@@ -29,7 +29,7 @@
 ```bash
 uv sync --all-packages --extra dev   # 安装（workspace 全量包 + dev 工具）
 make ci                              # CI 唯一门禁：lint + 10 个 pytest session（见 Makefile test 目标）+ 启发式 eval
-make test                            # 10 session pytest（根 / shared-schemas / agent-runtime / agent-server / 联邦 / kefu / exhibition / dialogue-framework / knowledge-service / nl2sql-service）
+make test                            # 9 session pytest（根 / shared-schemas / agent-runtime / agent-server / 联邦 / kefu / exhibition / knowledge-service / nl2sql-service）
 make eval                            # 评测门禁（启发式，CI 可达）
 DATABASE_URL= uvicorn agent_server.main:app --port 8000  # 零依赖冒烟
 ```
@@ -53,6 +53,8 @@ DATABASE_URL= uvicorn agent_server.main:app --port 8000  # 零依赖冒烟
 
 **Windows 注意**：本机无 `make`，直接用 `uv run pytest ...` / `uv run --with ruff ruff check .` 等价命令。
 
+**文档防漂移**：`scripts/check_doc_sync.py` 在 CI 单独跑（非 `make lint`），校验 AGENTS.md/ARCHITECTURE.md 路径存在 + Makefile session 数一致。改目录结构后须保证其通过。
+
 ## 技术栈
 
 - Python 3.11+（所有包的 `requires-python` 均为 `>=3.11`）
@@ -61,6 +63,7 @@ DATABASE_URL= uvicorn agent_server.main:app --port 8000  # 零依赖冒烟
 
 ## 禁止行为
 
+- **依赖方向单向（红线 1）**：`agent-runtime` / `agent-core` 不得反向 import `applications/`（含 `agent_server.*`）；依赖方向必须是 `application → agent-runtime → agent-core`，单向。共享包测试需具体 Planner 实现时用 mock/协议替身，不得引入应用层 import。
 - **勿提交真实 `.env` 文件**：所有 `.env` 已被 `.gitignore` 忽略，使用前按 `.env.example` 填值
 - **勿提交大二进制资产**：模型权重、数据集均未入库，需本地自备
 - **根测试/共享代码统一用 `agent_server.*`**：各应用子包已有独立 Python 包名（`knowledge_service` / `nl2sql_service` / `agent_server` 等），无遮蔽风险
@@ -76,3 +79,12 @@ DATABASE_URL= uvicorn agent_server.main:app --port 8000  # 零依赖冒烟
   - 引入：**RAGAS** 或 **DeepEval**（RAG 评测通用指标）· **Microsoft Presidio**（PII 脱敏）· **OpenTelemetry**（可观测，已有底座）
   - 保持手写：知识生命周期状态机（太简单）· 数据分级/出域/模型路由（业务逻辑）· Metric Registry（当前规模不需要）· 检索链路（已有 Milvus+RRF+rerank）· SQL 问数（已有 pgvector+sqlglot）
   - 需评估：ExecutionContext 是否迁移到 **PyJWT** + 标准 JWT（契约变更，需谨慎）
+
+## 技术债追踪
+
+> D1-D10 全部闭合（2026-09-23）。追踪文档：
+> - `docs/plans/plan-tech-debt-followup-2026-09-22.md` — D1-D10 完整追踪（D2/D3/D6 已标记完成）
+> - `docs/plans/tech-debt-multi-agent-2026-09-23.md` — 多 Agent 缺陷 P0/P1/C/B 修复记录（全部已修/豁免）
+> - `docs/plans/skill-consolidation-inventory.md` — Skill 收敛 P0-P5 状态（G1-G6 全部 ✅）
+>
+> 后续如再遇裸 except / llm_client 散落，按已建立的 agent_core.llm 统一门面与 except 收窄规范处理。

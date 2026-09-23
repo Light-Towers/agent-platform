@@ -65,7 +65,7 @@ async def get_thread_history(
         msgs = await checkpointer.alist_messages(
             {"configurable": {"thread_id": thread_id}}
         )
-    except Exception:
+    except Exception:  # noqa: BLE001
         logger.exception("精确回忆：读取 thread=%s 历史失败", thread_id)
         return []
 

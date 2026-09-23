@@ -26,6 +26,6 @@ async def execute_sql(state: dict[str, Any]) -> dict[str, Any]:
     try:
         result = await ctx.dw_repository.execute_readonly(sql)
         return {"result": result, "error": ""}
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         logger.exception("SQL execution failed")
         return {"result": None, "error": str(exc)}

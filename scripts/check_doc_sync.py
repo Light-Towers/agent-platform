@@ -75,7 +75,7 @@ def check_pyproject_package_names() -> None:
             continue
         try:
             data = tomllib.loads(pyproj.read_text(encoding="utf-8"))
-        except Exception:
+        except Exception:  # noqa: BLE001
             continue
         project = data.get("project", {})
         name = project.get("name", "")
@@ -96,7 +96,6 @@ def check_pyproject_package_names() -> None:
             or dir_name == "kefu-service"
             or dir_name == "nl2sql-service"
             or dir_name == "knowledge-service"
-            or dir_name == "dialogue-framework"
             or dir_name == "exhibition-agent"
         ):
             warn(f"{pyproj.relative_to(REPO_ROOT)}: 包名 '{name}' 与目录名 '{dir_name}' 不匹配")

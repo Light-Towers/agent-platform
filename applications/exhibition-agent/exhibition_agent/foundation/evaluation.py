@@ -231,7 +231,7 @@ def _write_audit(report: dict):
                 audit_log = json.load(f)
             if not isinstance(audit_log, list):
                 audit_log = []
-        except Exception:
+        except Exception:  # noqa: BLE001
             audit_log = []
 
     audit_log.append(report)

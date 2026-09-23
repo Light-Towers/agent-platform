@@ -536,7 +536,7 @@ class CircuitBreaker:
             raise RuntimeError("熔断器处于 OPEN 状态，暂时拒绝调用")
         try:
             result = fn(*args, **kwargs)
-        except Exception:
+        except Exception:  # noqa: BLE001
             self.record_failure()
             raise
         self.record_success()

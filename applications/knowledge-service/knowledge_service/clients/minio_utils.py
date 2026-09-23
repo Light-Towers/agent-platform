@@ -45,7 +45,7 @@ try:
     else:
         logger.info(f"MinIO存储桶[{bucket_name}]未启用公网只读（设 MINIO_PUBLIC_READ=true 开启）")
 
-except Exception as e:
+except Exception as e:  # noqa: BLE001
     # 捕获初始化异常，记录错误日志并置空客户端
     logger.error(f"MinIO客户端初始化失败，错误信息：{str(e)}", exc_info=True)
     minio_client = None

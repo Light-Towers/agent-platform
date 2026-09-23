@@ -73,7 +73,7 @@ try:
     from opentelemetry.sdk.trace.export import SimpleSpanProcessor as _SimpleSpanProcessor
 
     _SDK_AVAILABLE = True
-except Exception:  # pragma: no cover - 依赖缺失路径（CI / 本地无 OTel）
+except Exception:  # noqa: BLE001 - pragma: no cover - 依赖缺失路径（CI / 本地无 OTel）
     _otel_trace = None
     _SDK_AVAILABLE = False
 
@@ -88,7 +88,7 @@ if _SDK_AVAILABLE:
             _exporter_module = __import__(_exporter_module_name, fromlist=["OTLPSpanExporter"])
             _OTLP_EXPORTER_CLS = getattr(_exporter_module, "OTLPSpanExporter")
             break
-        except Exception:  # pragma: no cover - exporter 未安装路径
+        except Exception:  # noqa: BLE001 - pragma: no cover - exporter 未安装路径
             continue
 
 
@@ -359,14 +359,14 @@ def init_tracing(
                     provider.add_span_processor(_BatchSpanProcessor(_OTLP_EXPORTER_CLS(endpoint=otel_endpoint)))
                 try:
                     _otel_trace.set_tracer_provider(provider)
-                except Exception:  # pragma: no cover - 防御：全局 provider 设置失败不影响本地 tracer
+                except Exception:  # noqa: BLE001 - pragma: no cover - 防御：全局 provider 设置失败不影响本地 tracer
                     pass
             _provider = provider
             _tracer = provider.get_tracer(service_name)
             _initialized = True
             _enabled = True
             logger.info("OTel tracing 已启用: service=%s endpoint=%s", service_name, otel_endpoint or "in-memory")
-        except Exception as e:  # pragma: no cover - 初始化异常兜底，绝不外抛
+        except Exception as e:  # noqa: BLE001 - pragma: no cover - 初始化异常兜底，绝不外抛
             logger.warning("OTel tracing 初始化失败（%s），降级为 no-op", e)
             _initialized = True
             _enabled = False
@@ -429,7 +429,7 @@ def traced_span(
                 except Exception as e:  # noqa: BLE001 —— 记录异常后继续抛出
                     try:
                         span.record_exception(e)
-                    except Exception:  # pragma: no cover - 防御
+                    except Exception:  # noqa: BLE001 - pragma: no cover - 防御
                         pass
                     raise
 
@@ -446,7 +446,7 @@ def record_exception(exception: BaseException) -> None:
         current_span = _otel_trace.get_current_span()
         if current_span is not None and current_span.is_recording():
             current_span.record_exception(exception)
-    except Exception:  # pragma: no cover - 防御
+    except Exception:  # noqa: BLE001 - pragma: no cover - 防御
         pass
 
 
@@ -457,7 +457,7 @@ def _reset_for_tests() -> None:
         if _provider is not None:
             try:
                 _provider.shutdown()
-            except Exception:  # pragma: no cover - 防御
+            except Exception:  # noqa: BLE001 - pragma: no cover - 防御
                 pass
             _provider = None
         _initialized = False

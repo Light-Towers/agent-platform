@@ -51,7 +51,7 @@ def convert_md_to_pdf_via_weasyprint(md_abs_path: Path, pdf_abs_path: Path) -> s
         else:
             return f"转换完成但未生成文件: {pdf_abs_path}"
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logging.error("weasyprint 转换 PDF 失败: %s", e, exc_info=True)
         return f"转换失败: {str(e)}"
 
@@ -108,7 +108,7 @@ def convert_md_to_pdf_via_word(md_abs_path: Path, pdf_abs_path: Path) -> str:
 
     except ImportError:
         return convert_md_to_pdf_via_weasyprint(md_abs_path, pdf_abs_path)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logging.error("Word转换PDF失败: %s", e, exc_info=True)
         return f"转换失败: {str(e)}"
 
@@ -116,14 +116,14 @@ def convert_md_to_pdf_via_word(md_abs_path: Path, pdf_abs_path: Path) -> str:
         if word_app:
             try:
                 word_app.Quit()
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 logging.warning("Word 应用退出失败: %s", e)
         if temp_html_path.exists():
             try:
                 temp_html_path.unlink()
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 logging.warning("临时 HTML 文件清理失败: %s", e)
         try:
             pythoncom.CoUninitialize()
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logging.warning("COM 反初始化失败: %s", e)

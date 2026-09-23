@@ -89,7 +89,7 @@ def node_import_milvus(state: Dict[str, Any]) -> Dict[str, Any]:
         state["chunks"] = updated_chunks
 
         logger.info("--- Milvus切片数据入库流程完成 ---")
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.error(f"Milvus切片数据入库节点执行失败：{str(e)}", exc_info=True)
         raise ValueError(f"Milvus 导入过程中发生错误: {e}")
 
@@ -319,11 +319,11 @@ def _clear_chunks_by_item_name(client, collection_name: str, item_name: str):
         if hasattr(client, "flush"):
             try:
                 client.flush(collection_name=collection_name)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 logger.warning(f"Milvus幂等性清理：flush操作失败，不影响主流程 | 错误：{str(e)}")
 
         logger.info(f"Milvus幂等性清理完成：成功删除item_name={i_name}的旧数据")
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.error(f"Milvus幂等性清理失败：item_name={i_name} | 错误：{str(e)}", exc_info=True)
         raise ValueError(f"幂等清理失败（item_name={i_name}）: {e}")
 
@@ -425,7 +425,7 @@ def step_5_register_index(chunks_json_data: List[Dict[str, Any]]) -> None:
             f"索引 registry 登记完成：{CHUNKS_COLLECTION_NAME} | "
             f"doc_count={len(item_names)} chunk_count={len(chunks_json_data or [])}"
         )
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.error(f"索引 registry 登记失败（不影响已入库数据）：{str(e)}", exc_info=True)
 
 
@@ -475,5 +475,5 @@ if __name__ == "__main__":
             else:
                 print("❌ 测试失败：未能获取 chunk_id")
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         print(f"❌ 测试失败: {e}")

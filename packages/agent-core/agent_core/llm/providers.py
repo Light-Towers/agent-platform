@@ -63,7 +63,7 @@ class OpenAICompatibleProvider:
         # langchain-openai 为可选依赖：懒导入，缺包时给出明确错误。
         try:
             from langchain_openai import ChatOpenAI
-        except Exception as e:  # pragma: no cover - 依赖缺失路径
+        except Exception as e:  # noqa: BLE001 - pragma: no cover - 依赖缺失路径
             raise ImportError(
                 "langchain-openai 未安装；请安装 agent-core[llm-openai]（uv sync --extra llm-openai）"
             ) from e

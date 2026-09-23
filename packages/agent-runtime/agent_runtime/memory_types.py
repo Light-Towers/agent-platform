@@ -104,7 +104,7 @@ class MemoryRetriever:
             try:
                 results = await self._recall_one(category, retriever, request)
                 all_results.extend(results)
-            except Exception:
+            except Exception:  # noqa: BLE001
                 logger.warning(
                     "memory recall failed category=%s", category.value, exc_info=True
                 )

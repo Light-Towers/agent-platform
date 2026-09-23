@@ -83,7 +83,7 @@ def _http_post_json(url, headers, payload, timeout=60.0, retries=2, backoff=0.5)
             detail = ""
             try:
                 detail = e.read().decode("utf-8")
-            except Exception:
+            except Exception:  # noqa: BLE001
                 pass
             last_err = RuntimeError(f"Embedding HTTP {e.code}: {detail[:500]}")
             if e.code not in (429, 500, 502, 503, 504) or attempt >= retries:

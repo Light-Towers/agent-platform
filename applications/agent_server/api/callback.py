@@ -121,7 +121,7 @@ async def _resume_execution(app_state, task) -> None:
                 execution_id=task.execution_id,
                 status=ExecutionStatus.RUNNING,
             ))
-        except Exception:
+        except Exception:  # noqa: BLE001
             logger.debug("status save RUNNING on resume failed", exc_info=True)
 
     logger.info(
@@ -138,7 +138,7 @@ async def _resume_execution(app_state, task) -> None:
 
     try:
         trajectory = await trajectory_store.get(task.execution_id)
-    except Exception:
+    except Exception:  # noqa: BLE001
         logger.warning("failed to load trajectory for execution %s", task.execution_id, exc_info=True)
         return
 
@@ -168,7 +168,7 @@ async def _resume_execution(app_state, task) -> None:
             if event.type == "error":
                 _stream_failed = True
                 logger.warning("resume re-run error: %s", event.payload.get("error"))
-    except Exception:
+    except Exception:  # noqa: BLE001
         _stream_failed = True
         logger.warning("resume re-run failed for execution %s", task.execution_id, exc_info=True)
 
@@ -181,7 +181,7 @@ async def _resume_execution(app_state, task) -> None:
                 execution_id=task.execution_id,
                 status=ExecutionStatus.FAILED if _stream_failed else ExecutionStatus.SUCCEEDED,
             ))
-        except Exception:
+        except Exception:  # noqa: BLE001
             logger.debug("status save terminal on resume failed", exc_info=True)
 
     logger.info("execution %s re-run %s", task.execution_id, "failed" if _stream_failed else "succeeded")

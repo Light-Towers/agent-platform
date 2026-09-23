@@ -80,7 +80,7 @@ def read_file_content(
 
             try:
                 df = pd.read_excel(str(file_path))  # 转字符串传给pandas
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 return f"读取 Excel 失败: {str(e)}"
 
             result = [
@@ -101,7 +101,7 @@ def read_file_content(
             except UnicodeDecodeError:
                 return f"错误：不支持的文件格式 '{ext}'，且无法作为文本读取。"
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return f"读取文件出错: {str(e)}"
 
 # ====================== 测试入口（完全按你要求的格式） ======================

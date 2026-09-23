@@ -74,7 +74,7 @@ async def extract_memory_facts(llm, question: str, answer: str) -> list[dict]:
             if fact:
                 out.append({"type": t, "importance": imp, "fact": fact})
         return out
-    except Exception:
+    except Exception:  # noqa: BLE001
         logger.exception("记忆事实抽取失败，返回空（不阻断主链路）")
         return []
 
@@ -86,7 +86,7 @@ async def recall(pool, workspace_id: str, question: str, k: int = 3) -> list[str
     if pool is not None and semantic_memory_typed_enabled():
         try:
             return await _mb.recall_typed(pool, workspace_id, question, k=k)
-        except Exception:
+        except Exception:  # noqa: BLE001
             logger.exception("类型感知召回失败，降级内核/空")
     # 降级路径：内核后端（pool=None，内核自建 asyncpg 池）
     backend = _mb.get_default_backend()
@@ -94,7 +94,7 @@ async def recall(pool, workspace_id: str, question: str, k: int = 3) -> list[str
         return []
     try:
         return await backend.recall(pool=None, user_id=workspace_id, question=question, k=k)
-    except Exception:
+    except Exception:  # noqa: BLE001
         logger.exception("长期记忆召回失败，降级为空")
         return []
 
@@ -119,7 +119,7 @@ async def remember(
                         pool, workspace_id, f["fact"], f.get("type", "semantic"),
                         f.get("importance", 0.5),
                     )
-                except Exception:
+                except Exception:  # noqa: BLE001
                     logger.exception("结构化记忆写入失败，跳过该条")
         else:
             # 无池（内存模式）无法落库，静默跳过
@@ -133,7 +133,7 @@ async def remember(
             await _mb.remember_fact(
                 pool, workspace_id, content, memory_type="semantic", importance=0.5,
             )
-        except Exception:
+        except Exception:  # noqa: BLE001
             logger.exception("typed 退化写入失败，跳过")
         return
     # 旧行为：内核后端平权存原文（内存模式或 typed 关闭）
@@ -166,6 +166,6 @@ async def maybe_consolidate(pool, workspace_id: str) -> int:
     try:
         threshold = get_settings().memory_forget_threshold
         return await _mb.consolidate_memories(pool, workspace_id, forget_threshold=threshold)
-    except Exception:
+    except Exception:  # noqa: BLE001
         logger.exception("记忆巩固/遗忘失败，跳过（不阻断主链路）")
         return 0

@@ -41,7 +41,7 @@ async def recall_typed_context(workspace_id: str, query: str) -> str:
             "\n\n【相关历史记忆（仅供参考，请勿复述此标签）】\n"
             + "\n".join(lines)
         )
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.warning("类型化记忆召回失败（非致命，跳过）: %s", e)
         return ""
 
@@ -65,5 +65,5 @@ async def remember_episodic(workspace_id: str, query: str, answer: str) -> None:
             pool, workspace_id, fact,
             memory_type="episodic", importance=0.5,
         )
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.warning("类型化记忆落库失败（非致命，跳过）: %s", e)

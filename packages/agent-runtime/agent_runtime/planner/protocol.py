@@ -553,7 +553,7 @@ class PlannerRuntime:
                 hb_task.cancel()
                 try:
                     await hb_task
-                except (asyncio.CancelledError, Exception):
+                except (asyncio.CancelledError, Exception):  # noqa: BLE001 - heartbeat task cancel cleanup
                     pass
             await self.ownership_store.release(eid, owner)
             self._ctx_var.reset(token)
@@ -629,7 +629,7 @@ class PlannerRuntime:
             _forensic_dict = step_forensic.to_dict()
             try:
                 result = await self.registry.execute(name, **kwargs)
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001
                 if ctx is not None:
                     ctx.record_step(
                         name, kwargs, None, str(exc),

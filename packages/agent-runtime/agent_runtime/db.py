@@ -404,7 +404,7 @@ async def ensure_schema(pool, vector_dim: int | None = None) -> None:
             from agent_core.memory.embedder import get_embedder
             vector_dim = get_embedder().dim
             logger.debug("ensure_schema: vector_dim 从 embedder 派生 = %d", vector_dim)
-        except Exception:
+        except Exception:  # noqa: BLE001
             vector_dim = 512
             logger.warning(
                 "ensure_schema: embedder 不可用，回退默认 vector_dim=%d。"
@@ -425,7 +425,7 @@ async def ensure_schema(pool, vector_dim: int | None = None) -> None:
             await conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_chunks_workspace ON chunks (workspace_id)"
             )
-    except Exception:
+    except Exception:  # noqa: BLE001
         # duplicate_column 等幂等失败忽略；新库由建表语句已含该列
         pass
     # 优化 H：长期记忆质量升级——memories 表扩展类型/重要性/时间元数据（幂等 ALTER）
@@ -437,7 +437,7 @@ async def ensure_schema(pool, vector_dim: int | None = None) -> None:
         try:
             async with pool.connection() as conn:
                 await conn.execute(_ddl)
-        except Exception:
+        except Exception:  # noqa: BLE001
             # duplicate_column / 索引已存在等幂等失败忽略
             pass
 
@@ -468,7 +468,7 @@ async def close_pool() -> None:
         _pool = None  # 立即摘掉全局引用，避免新请求从关闭中池借用连接
     try:
         await pool.close(timeout=30)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.warning("连接池关闭异常（忽略，进程即将退出）: %s", e)
     finally:
         _closing = False
@@ -482,7 +482,7 @@ async def ping() -> bool:
         async with _pool.connection() as conn:
             await conn.execute("SELECT 1")
         return True
-    except Exception:
+    except Exception:  # noqa: BLE001
         return False
 
 
