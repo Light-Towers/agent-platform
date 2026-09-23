@@ -125,7 +125,7 @@ def step_4_vectorize_and_query(
                 sparse_vector = embeddings.get("sparse")[i]
 
                 # 构造混合搜索请求（带 tenant 过滤）
-                reqs = create_hybrid_search_requests(dense_vector=dense_vector, sparse_vector=sparse_vector, limit=5, expr=tenant_expr)
+                reqs = create_hybrid_search_requests(dense_vector=dense_vector, sparse_vector=sparse_vector, limit=retrieval_cfg.item_confirm.candidate_limit, expr=tenant_expr)
 
                 # 执行混合搜索
                 # M3：稠密/稀疏权重从 knowledge_service/conf/retrieval.yaml 读取（与 node_search_embedding 同一配置源）
@@ -134,7 +134,7 @@ def step_4_vectorize_and_query(
                     collection_name=collection_name,
                     reqs=reqs,
                     ranker_weights=(retrieval_cfg.hybrid.dense_weight, retrieval_cfg.hybrid.sparse_weight),
-                    limit=5,
+                    limit=retrieval_cfg.item_confirm.top_k,
                     norm_score=True,
                     output_fields=["item_name"],
                 )
@@ -219,7 +219,7 @@ def step_5_align_item_names(query_results: List[Dict]) -> Dict:
 
         # 规则 C: 无高置信度，取中置信度候选
         if len(mid) > 0:
-            current_options = [m.get("item_name") for m in mid[:5]]
+            current_options = [m.get("item_name") for m in mid[:retrieval_cfg.item_confirm.mid_option_limit]]
             options.extend(current_options)
             logger.info(f"Step 5: 规则C命中 (Mid Confidence) -> 添加候选: {current_options}")
             continue
@@ -271,7 +271,7 @@ def step_6_check_confirmation(
     # 分支 B: 有候选商品名
     if options:
         logger.info(f"Step 6: [分支B] 存在候选商品名: {options}")
-        options_str = "、".join(options[:3])
+        options_str = "、".join(options[:retrieval_cfg.item_confirm.display_option_limit])
         answer = f"您是想问以下哪个产品：{options_str}？请明确一下型号。"
         state["answer"] = answer
         state["item_names"] = []

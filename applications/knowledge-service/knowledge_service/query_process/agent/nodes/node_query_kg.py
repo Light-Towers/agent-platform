@@ -53,7 +53,7 @@ def node_query_kg(state: dict) -> dict:
             kg_docs = query_kg(
                 rewritten,
                 item_names=item_names,
-                limit=8,
+                limit=retrieval_cfg.channels.kg.top_k,
                 tenant_id=tenant_id,
                 scope_type=scope_type,
             )

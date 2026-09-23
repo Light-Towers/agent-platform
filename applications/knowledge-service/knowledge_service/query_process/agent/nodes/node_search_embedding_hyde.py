@@ -66,8 +66,8 @@ def step_2_search_embedding_hyde(
     rewritten_query: str,
     hyde_doc: str,
     item_names=None,
-    req_limit: int = 10,
-    top_k: int = 5,
+    req_limit: int = None,
+    top_k: int = None,
     ranker_weights=None,  # 默认 None → 从 retrieval.yaml 读取（M3，方案 §7.2）
     norm_score: bool = True,  # 默认开启归一化
     output_fields=["chunk_id", "content", "item_name"],
@@ -96,6 +96,10 @@ def step_2_search_embedding_hyde(
     # M3：权重外置（与 node_search_embedding 同一配置源，杜绝两侧写死不一致）
     if ranker_weights is None:
         ranker_weights = (retrieval_cfg.hybrid.dense_weight, retrieval_cfg.hybrid.sparse_weight)
+    if req_limit is None:
+        req_limit = retrieval_cfg.channels.hyde.candidate_limit
+    if top_k is None:
+        top_k = retrieval_cfg.channels.hyde.top_k
 
     # 1. 拼接查询与假设文档，形成更丰富的语义上下文
     combined_text = rewritten_query + " " + hyde_doc
@@ -214,7 +218,6 @@ def node_search_embedding_hyde(state):
             rewritten_query=rewritten_query,
             hyde_doc=hyde_doc,
             item_names=item_names,
-            top_k=5,
             tenant_id=state.get("tenant_id"),
             scope_type=state.get("scope_type"),
         )

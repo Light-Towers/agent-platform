@@ -18,15 +18,14 @@
 
 ---
 
-## D2 zhanggui-zhiku 节点函数裸阈值集中到 conf/
+## D2 knowledge-service 裸阈值集中到 conf/（已完成）
 
 | 字段 | 内容 |
 |------|------|
-| **现状** | zhanggui-zhiku 的 12 个 LangGraph 节点函数内硬编码检索阈值（top_k、相似度下界、重排数量等） |
-| **影响** | 调参须改代码而非配置，实验不可追溯；与 M3「配置外置」目标不一致 |
-| **跳过原因** | 涉及 12 个节点函数，需逐个提取阈值、改读 `settings.xxx`、验证调用链不断 |
-| **建议推进** | 立独立方案，按节点逐个迁移：① 列出所有硬编码阈值 → ② 在 `core/config.py` 加对应字段 → ③ 逐节点改读 settings → ④ 跑 zhanggui 测试 |
-| **优先级** | Medium（影响实验可追溯性，M3 目标） |
+| **现状** | 15 个硬编码阈值已全部外部化到 retrieval.yaml + Settings |
+| **影响** | 调参须改配置而非代码；实验可追溯；与 M3 目标一致 |
+| **完成方式** | retrieval.yaml channels.* 加 top_k/candidate_limit + item_confirm 段 + Settings 加 knowledge_max_context_chars；节点改读配置 |
+| **优先级** | ✅ 已完成 |
 
 ---
 
@@ -105,7 +104,7 @@
 | ID | 任务 | 优先级 | 建议批次 |
 |----|------|--------|----------|
 | D1 | 单字母变量改语义名 | Low | 可随各包日常改动顺带改 |
-| D2 | zhanggui 裸阈值集中 | Medium | 独立方案（M3 目标） |
+| D2 | knowledge-service 裸阈值集中 | ✅ 已完成 | 已完成 |
 | D3 | setuptools→hatchling | ✅ 已完成 | 已完成 |
 | D4 | ruff ignore 收窄 | Low | 逐包日常改动顺带 |
 | D5 | agent_core 注释泛化 | Low | 人工逐条判断 |

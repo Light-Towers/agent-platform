@@ -85,7 +85,7 @@ def node_search_embedding(state):
         dense_vector=dense_vec,  # 取用户问题的稠密向量（单条，故取索引0）
         sparse_vector=sparse_vec,  # 取用户问题的稀疏向量（单条，故取索引0）
         expr=expr,  # 商品名过滤表达式，缩小检索范围（仅检索指定商品名的向量）
-        limit=10,  # 底层检索返回数量（后续会再过滤为5，预留更多结果做重排序）
+        limit=retrieval_cfg.channels.embedding.candidate_limit,  # 底层检索返回数量（后续会再过滤为 top_k，预留更多结果做重排序）
     )
 
     # 5. 执行Milvus稠密+稀疏混合向量检索（核心调用）
@@ -101,7 +101,7 @@ def node_search_embedding(state):
             retrieval_cfg.hybrid.sparse_weight,
         ),  # 稠/稀疏向量评分权重配比
         norm_score=True,  # 开启评分归一化，将距离值转为0-1区间的相似度评分
-        limit=5,  # 最终返回的TOP5相似度最高结果
+        limit=retrieval_cfg.channels.embedding.top_k,  # 最终返回的 TOP_K 相似度最高结果
         output_fields=["chunk_id", "content", "item_name"],  # 指定返回的业务字段
     )
 
