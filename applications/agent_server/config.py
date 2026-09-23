@@ -125,6 +125,12 @@ class Settings(BaseLLMSettings):
     # CORS：允许的前端来源（逗号分隔），为空时默认回环 127.0.0.1:5173
     cors_allow_origins: str = ""
 
+    # Remote Skill 端点（P1：重服务 HTTP 调用）
+    knowledge_service_url: str = ""  # 空 = 不注册 knowledge skill
+    knowledge_service_key: str = ""
+    nl2sql_service_url: str = ""  # 空 = 不注册 nl2sql skill
+    kefu_service_url: str = ""  # 空 = 不注册 kefu skill
+
     # §20: 运行时模式（决定持久化后端与 fail-fast 行为）
     # local       -> InMemory 后端，无需 DATABASE_URL（开发/测试默认）
     # single_node -> PG 可选（有 DATABASE_URL 用 PG，无则降级 InMemory）

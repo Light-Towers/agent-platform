@@ -195,7 +195,131 @@ def build_registry(graph: Any | None = None) -> SkillRegistry:
                 timeout_ms=120_000,
             )
         )
+    _register_remote_skills(registry)
     return registry
+
+
+def _register_remote_skills(registry: SkillRegistry) -> None:
+    """P1：注册重服务为 RemoteExecutor skill（HTTP 调用）。
+
+    URL 未配置时跳过（不崩溃、不警告——开发环境常见只起 agent_server）。
+    重依赖（torch/Milvus/Neo4j/pgvector）隔离在远端进程，编排进程不传染。
+    """
+    import os
+
+    from agent_runtime.skills.remote import as_remote_skill
+
+    knowledge_url = os.getenv("KNOWLEDGE_SERVICE_URL", "")
+    if knowledge_url:
+        knowledge_key = os.getenv("KNOWLEDGE_SERVICE_KEY", "")
+
+        async def _knowledge_query(**kwargs: Any) -> Any:
+            import httpx
+
+            headers = {"Authorization": f"Bearer {knowledge_key}"} if knowledge_key else {}
+            async with httpx.AsyncClient(timeout=30) as client:
+                resp = await client.post(f"{knowledge_url}/query", json=kwargs, headers=headers)
+                resp.raise_for_status()
+                return resp.json()
+
+        registry.register(
+            as_remote_skill(
+                "knowledge_query",
+                "知识库问答：RAG 检索 + LLM 生成，返回答案文本",
+                _knowledge_query,
+                timeout_ms=30_000,
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string", "description": "查询文本"},
+                        "session_id": {"type": "string", "description": "会话 ID"},
+                    },
+                    "required": ["query"],
+                },
+            )
+        )
+
+        async def _knowledge_retrieve(**kwargs: Any) -> Any:
+            import httpx
+
+            headers = {"Authorization": f"Bearer {knowledge_key}"} if knowledge_key else {}
+            async with httpx.AsyncClient(timeout=30) as client:
+                resp = await client.post(f"{knowledge_url}/api/v1/retrieve", json=kwargs, headers=headers)
+                resp.raise_for_status()
+                return resp.json()
+
+        registry.register(
+            as_remote_skill(
+                "knowledge_retrieve",
+                "知识库纯检索：embedding→RRF→rerank，返回文档列表（无 LLM 生成）",
+                _knowledge_retrieve,
+                timeout_ms=30_000,
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string", "description": "检索文本"},
+                        "tenant_id": {"type": "string", "description": "租户 ID"},
+                        "scope_type": {"type": "string", "description": "PUBLIC 或 PRIVATE"},
+                    },
+                    "required": ["query", "tenant_id"],
+                },
+            )
+        )
+
+    nl2sql_url = os.getenv("NL2SQL_SERVICE_URL", "")
+    if nl2sql_url:
+
+        async def _nl2sql_query(**kwargs: Any) -> Any:
+            import httpx
+
+            async with httpx.AsyncClient(timeout=30) as client:
+                resp = await client.post(f"{nl2sql_url}/api/query", json=kwargs)
+                resp.raise_for_status()
+                return resp.json()
+
+        registry.register(
+            as_remote_skill(
+                "nl2sql_query",
+                "Text-to-SQL：自然语言→SQL→执行→结果，返回 SQL + 查询结果",
+                _nl2sql_query,
+                timeout_ms=30_000,
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string", "description": "自然语言查询"},
+                    },
+                    "required": ["query"],
+                },
+            )
+        )
+
+    kefu_url = os.getenv("KEFU_SERVICE_URL", "")
+    if kefu_url:
+
+        async def _kefu_query(**kwargs: Any) -> Any:
+            import httpx
+
+            async with httpx.AsyncClient(timeout=30) as client:
+                resp = await client.post(f"{kefu_url}/invoke", json=kwargs)
+                resp.raise_for_status()
+                return resp.json()
+
+        registry.register(
+            as_remote_skill(
+                "kefu_query",
+                "客服问答：意图路由 + Flow + GraphRAG，返回客服回复",
+                _kefu_query,
+                timeout_ms=30_000,
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string", "description": "用户消息"},
+                        "session_id": {"type": "string", "description": "会话 ID"},
+                    },
+                    "required": ["query"],
+                },
+            )
+        )
 
 
 def get_registry(graph: Any | None = None) -> SkillRegistry:
