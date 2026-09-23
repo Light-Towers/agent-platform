@@ -56,11 +56,11 @@ def create_app() -> FastAPI:
     # 保证 CORS 先处理 OPTIONS 预检，再进入鉴权/限流（预检不带自定义头，不会被 401 拦截）。
     app.add_middleware(
         SecurityGuardsMiddleware,
-        api_key=settings.zhanggui_api_key,
-        rate_limit_per_client=settings.zhanggui_rate_limit_per_client,
-        rate_limit_global=settings.zhanggui_rate_limit_global,
-        rate_limit_window_s=settings.zhanggui_rate_limit_window_s,
-        max_body_bytes=settings.zhanggui_max_body_bytes,
+        api_key=settings.knowledge_api_key,
+        rate_limit_per_client=settings.knowledge_rate_limit_per_client,
+        rate_limit_global=settings.knowledge_rate_limit_global,
+        rate_limit_window_s=settings.knowledge_rate_limit_window_s,
+        max_body_bytes=settings.knowledge_max_body_bytes,
         error_response=error_response,
     )
 

@@ -18,6 +18,7 @@ from knowledge_service.core.tracing import start_span
 from knowledge_service.lm.embedding_utils import generate_embeddings
 from knowledge_service.lm.lm_utils import get_llm_client
 from knowledge_service.query_process.agent.state import QueryGraphState
+from knowledge_service.utils.milvus_filter_utils import build_tenant_filter
 from knowledge_service.utils.task_utils import add_done_task, add_running_task
 
 # TD-5：商品名确认阈值参数化（环境变量可覆盖，默认与原硬编码一致）
@@ -86,9 +87,14 @@ def step_3_extract_info(query: str, history: List[Dict]) -> Dict:
         return {"item_names": [], "rewritten_query": query}
 
 
-def step_4_vectorize_and_query(item_names: List[str]) -> List[Dict]:
+def step_4_vectorize_and_query(
+    item_names: List[str],
+    tenant_id: str | None = None,
+    scope_type: str | None = None,
+) -> List[Dict]:
     """
-    对提取的 item_names 进行向量化并在 Milvus 中进行混合搜索
+    对提取的 item_names 进行向量化并在 Milvus 中进行混合搜索。
+    tenant_id / scope_type 用于多租户隔离过滤（ACL 前置 INV-8）。
     """
     logger.info(f"Step 4: 开始向量化检索，目标商品: {item_names}")
     results = []
@@ -104,6 +110,9 @@ def step_4_vectorize_and_query(item_names: List[str]) -> List[Dict]:
         logger.error("Step 4: item_name_collection 未配置")
         return results
 
+    # 多租户隔离过滤表达式
+    tenant_expr = build_tenant_filter(tenant_id, scope_type)
+
     try:
         logger.info("Step 4: 正在生成 Embedding (Dense + Sparse)...")
         embeddings = generate_embeddings(item_names)
@@ -114,8 +123,8 @@ def step_4_vectorize_and_query(item_names: List[str]) -> List[Dict]:
                 dense_vector = embeddings.get("dense")[i]
                 sparse_vector = embeddings.get("sparse")[i]
 
-                # 构造混合搜索请求
-                reqs = create_hybrid_search_requests(dense_vector=dense_vector, sparse_vector=sparse_vector, limit=5)
+                # 构造混合搜索请求（带 tenant 过滤）
+                reqs = create_hybrid_search_requests(dense_vector=dense_vector, sparse_vector=sparse_vector, limit=5, expr=tenant_expr)
 
                 # 执行混合搜索
                 # M3：稠密/稀疏权重从 knowledge_service/conf/retrieval.yaml 读取（与 node_search_embedding 同一配置源）
@@ -286,7 +295,8 @@ def step_7_write_history(
     if state.get("answer"):
         logger.info("Step 7: 保存助手回答")
         save_chat_message(
-            session_id=session_id, role="assistant", text=state["answer"], rewritten_query="", item_names=[]
+            session_id=session_id, role="assistant", text=state["answer"], rewritten_query="", item_names=[],
+            tenant_id=state.get("tenant_id"),
         )
 
     # 更新用户消息（关联 rewrite_query 和 item_names）
@@ -298,6 +308,7 @@ def step_7_write_history(
         rewritten_query=rewritten_query,
         item_names=state.get("item_names", []),
         message_id=message_id,
+        tenant_id=state.get("tenant_id"),
     )
 
     return state
@@ -316,12 +327,17 @@ def node_item_name_confirm(state: QueryGraphState) -> QueryGraphState:
     # 标记任务开始
     add_running_task(session_id, "node_item_name_confirm", is_stream)
 
-    # 1. 获取历史记录
-    history = get_recent_messages(session_id, limit=10)
+    # 1. 获取历史记录（带 tenant 隔离）
+    tenant_id = state.get("tenant_id")
+    history = get_recent_messages(session_id, limit=10, tenant_id=tenant_id)
     logger.info(f"Node: 获取到 {len(history)} 条历史消息")
 
     # 2. 保存用户当前消息 (初始保存，后续 step 7 会更新)
-    message_id = save_chat_message(session_id, "user", original_query, "", state.get("item_names", []))
+    message_id = save_chat_message(
+        session_id, "user", original_query, "",
+        state.get("item_names", []),
+        tenant_id=tenant_id,
+    )
     logger.debug(f"Node: 用户消息已初始保存, ID: {message_id}")
 
     # 3. 提取信息（M4：retrieval.rewrite span —— query 改写节点，属性 original_len / rewritten_len）
@@ -339,7 +355,11 @@ def node_item_name_confirm(state: QueryGraphState) -> QueryGraphState:
 
     # 4. & 5. 如果有提取到商品名，进行搜索和对齐
     if len(item_names) > 0:
-        query_results = step_4_vectorize_and_query(item_names)
+        query_results = step_4_vectorize_and_query(
+            item_names,
+            tenant_id=state.get("tenant_id"),
+            scope_type=state.get("scope_type"),
+        )
         align_result = step_5_align_item_names(query_results)
     else:
         logger.info("Node: 未提取到商品名，跳过向量检索")

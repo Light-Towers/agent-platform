@@ -14,7 +14,7 @@
 | 4 | 索引已建立（先跑 import_process） | `/api/v1/retrieve` 返回非空 `hits` | QPS 全是空召回，无意义 |
 | 5 | golden 集已标注 | `eval/golden_queries.jsonl` 存在且 ≥50 条 | 压测样本退化（locustfile 有内置样例兜底，仅冒烟用） |
 | 6 | LLM API Key（仅 /query 档需要） | `.env` `OPENAI_API_KEY` / `LLM_DEFAULT_MODEL` 已配 | /query 档无法执行 |
-| 7 | M5 鉴权 Key（若已启用） | `.env` `ZHANGUI_API_KEY`；压测时 `--api-key` 传入 | 401 |
+| 7 | M5 鉴权 Key（若已启用） | `.env` `KNOWLEDGE_API_KEY`；压测时 `--api-key` 传入 | 401 |
 
 ## 1. 一键命令（可执行形态）
 
@@ -28,16 +28,16 @@ pip install locust
 # 2) 无头直跑（推荐脚本化；-u 并发 / -r 爬坡 / -t 时长）
 mkdir -p benchmark/runs
 locust -f benchmark/locustfile.py --host http://localhost:8000 --headless \
-    -u 20 -r 5 -t 10m --api-key <ZHANGUI_API_KEY> \
+    -u 20 -r 5 -t 10m --api-key <KNOWLEDGE_API_KEY> \
     --csv benchmark/runs/$(date +%Y%m%d_%H%M%S)
 
 # 3) 交互式（浏览器打开 http://localhost:8089 实时看曲线）
 locust -f benchmark/locustfile.py --host http://localhost:8000 --web-port 8089 \
-    -u 50 -r 5 -t 5m --api-key <ZHANGUI_API_KEY>
+    -u 50 -r 5 -t 5m --api-key <KNOWLEDGE_API_KEY>
 ```
 
 > 建议先跑 `-u 20 -r 5 -t 10m` 冒烟，确认无 429/5xx 后再按容量模型（见 CAPACITY.md）
-> 逐档加压。压测期间保持 `ZHANGUI_TRACE_ENABLED=false`（或独立观测 Jaeger），
+> 逐档加压。压测期间保持 `KNOWLEDGE_TRACE_ENABLED=false`（或独立观测 Jaeger），
 > 避免 OTel 导出对极短请求的延迟干扰（如实说明测量口径）。
 
 ## 2. 结果收集（locust 输出落 benchmark/runs/）
@@ -67,7 +67,7 @@ locust -f benchmark/locustfile.py --host http://localhost:8000 --web-port 8089 \
 > 当前 M8 配置 `EMBEDDING_MODE=api` / `RERANK_MODE=api`，embedding 与 rerank 均走 SiliconFlow 远程 API，
 > 卡点即外部 API 排队（非自有组件瓶颈）。M6 §10.6 的 QPS≥100 目标仅适用于「全部自有组件（local 模式）」假设，
 > 在 api 模式下该目标不适用，不应作为当前验收判据。
-> 压测期间 `ZHANGUI_RATE_LIMIT_PER_CLIENT` 临时调至 5000/50000（默认 20/500），跑完恢复。
+> 压测期间 `KNOWLEDGE_RATE_LIMIT_PER_CLIENT` 临时调至 5000/50000（默认 20/500），跑完恢复。
 
 > 口径提醒：上了 streaming 后必须区分 **TTFT** 与 **total latency**（方案 §10.4），
 > 压测报告里混着写会被追问。
@@ -93,4 +93,4 @@ locust -f benchmark/locustfile.py --host http://localhost:8000 --web-port 8089 \
 - `benchmark/locustfile.py` 的 `/api/v1/retrieve` 为 M6 新增纯检索端点；`/api/v1/chat`
   为方案示例命名，当前代码未实现，端到端直打真实端点 `/query`。
 - 入站限流（M5：20 req/min/client）在压测并发用户超过配额时会 429，需调大
-  `ZHANGUI_RATE_LIMIT_PER_CLIENT` 或按不同 key 分桶（这是服务自我保护，非故障）。
+  `KNOWLEDGE_RATE_LIMIT_PER_CLIENT` 或按不同 key 分桶（这是服务自我保护，非故障）。

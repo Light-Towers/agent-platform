@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
+from agent_runtime.effect_contract import EffectContract
 from agent_runtime.skills.middleware import SkillMiddleware
 
 # 执行器签名：**kwargs 透传（如 search(query=...)、mcp(state=..., mcp_manager=...)）
@@ -62,6 +63,14 @@ class Skill:
     # 须经 Runtime/Registry（runtime.delegate）组合，由 CompositionValidator 静态校验
     # （存在性 / 环 / 权限闭包），避免组合治理仅靠运行时 skill_guard 兜底。
     sub_skills: tuple[str, ...] = field(default_factory=tuple)
+    # 副作用语义契约（V3-2 Effect Contract）：声明本能力的 delivery/retry/recover 语义。
+    # None = 未声明（平台按 v2 保守行为：仅按异常分类重试）；声明后执行图据其做失败决策。
+    effect_contract: EffectContract | None = None
+    # V3-10: 版本 / 生命周期 / 兼容性
+    version: str | None = None  # 语义化版本，如 "1.2.3"
+    lifecycle: Any = None  # SkillLifecycle，延迟导入避免循环
+    deprecated_since: str | None = None  # 废弃起始版本
+    replaced_by: str | None = None  # 替代能力名
 
     def to_tool_schema(self) -> dict[str, Any]:
         """生成 Agent 工具描述（供 Planner / Agent 组合调用时注入工具列表）。

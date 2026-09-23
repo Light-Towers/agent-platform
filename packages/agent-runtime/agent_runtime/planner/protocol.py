@@ -31,6 +31,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from agent_runtime.effect_contract import EffectContract
 from agent_runtime.planner.durability import (
     ExecutionNotOwned,
     ExecutionOwnershipStore,
@@ -138,6 +139,12 @@ class PlannerContext(BaseModel):
     # 上一轮执行的结构化快照（与 last_snapshot 同义，供 Planner 在 prompt 组装时消费）
     previous_execution: dict[str, Any] | None = None
 
+    # Context Governance：经 ContextGovernor 治理后的 Memory 字符串列表
+    #（Select → Recall → Authorize → Validate → QualityScore）。
+    # 由 app 层在构建 PlannerContext 前调 governor.govern_memories() 填充；
+    # Planner 在 prompt 组装时注入这些已治理的记忆（空列表 = 无可用记忆或 Governor 未接入）。
+    governed_memories: list[str] = Field(default_factory=list)
+
 
 @dataclass(frozen=True)
 class ExecutionIdentity:
@@ -212,6 +219,9 @@ class ExecutionContext:
     ownership_lost: bool = False
     # §HA：本次执行持有的 lease owner 标识（供心跳/ownership-loss 检测用）。
     lease_owner: str | None = None
+    # V3-1：本次执行持有的 ownership generation（takeover 时单调递增）。
+    # checkpoint save 带此值做 generation fencing——旧 owner 用过期 generation 写被拒。
+    lease_generation: int | None = None
 
     @property
     def call_depth(self) -> int:
@@ -334,6 +344,7 @@ class PlannerRuntime:
         workspace_id: str = "default",
         user_id: str = "default",
         replica_id: str = "replica",
+        post_execution_hooks: list[Any] | None = None,
     ):
         self.registry = registry
         self.llm = llm
@@ -369,6 +380,9 @@ class PlannerRuntime:
         self.last_snapshot: dict[str, Any] | None = None
         # 最近一次执行的 Trajectory 记录（execute_plan 写入，P3-1 持久化后回写）
         self.last_trajectory: Any = None
+        # 执行完成后自动触发的 hooks（如 EpisodicSink / ProceduralSink），
+        # 每个 hook 签名：async hook(trajectory: TrajectoryRecord, runtime: PlannerRuntime) -> None
+        self.post_execution_hooks: list[Any] = post_execution_hooks or []
         # 执行期上下文（per-request，经 ContextVar 隔离）：execution() 入口创建
         # ExecutionContext 并 set，同 task 链内共享，跨 task 互不干扰。
         self._ctx_var: contextvars.ContextVar[ExecutionContext | None] = contextvars.ContextVar(
@@ -379,6 +393,17 @@ class PlannerRuntime:
     def context(self) -> ExecutionContext | None:
         """当前执行上下文（``execution()`` 边界内有效，边界外为 None）。"""
         return self._ctx_var.get()
+
+    def get_effect_contract(self, skill_name: str) -> "EffectContract | None":
+        """V3-2：查询 Skill 声明的 EffectContract（未注册 / 未声明返回 None）。
+
+        执行图节点失败时据此决定 retry / recover 动作（``decide_failure_action``）。
+        """
+        try:
+            skill = self.registry.get(skill_name)
+        except Exception:
+            return None
+        return getattr(skill, "effect_contract", None)
 
     def _on_llm_usage(self, tokens: int, cost: float) -> None:
         """P2-2 计量回调：LLM 客户端每次调用后上报 usage → 当前 ExecutionContext 聚合。
@@ -462,6 +487,8 @@ class PlannerRuntime:
                 f"未能获取 execution={eid} 的所有权（lease 被其他副本持有或未过期）"
             )
         ctx.lease_owner = owner
+        # V3-1：记录本次 acquire 拿到的 generation，供 checkpoint save 做 generation fencing。
+        ctx.lease_generation = await self.ownership_store.get_generation(eid)
 
         hb_task: "asyncio.Task | None" = None
         if lease_ttl is not None:

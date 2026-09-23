@@ -263,6 +263,7 @@ def step_4_write_history(state: QueryGraphState, image_urls=None) -> QueryGraphS
                 item_names=item_names,
                 image_urls=image_urls,
                 message_id=None,
+                tenant_id=state.get("tenant_id"),
             )
     except Exception as e:
         # 写历史失败不应影响主链路

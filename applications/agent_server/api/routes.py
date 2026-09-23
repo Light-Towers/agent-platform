@@ -88,9 +88,9 @@ async def query(
 
     # Phase 2: durable admission 前置
     decision = None
-    admission_queue = getattr(request.app.state, "admission_queue", None)
-    if admission_queue is not None and settings.admission_effective_enabled:
-        decision = await admission_queue.enqueue(
+    admission_controller = getattr(request.app.state, "admission_controller", None)
+    if admission_controller is not None and settings.admission_effective_enabled:
+        decision = await admission_controller.enqueue(
             request_id, thread_id, req.user_id, priority
         )
         if decision.status == ADMISSION_REJECTED:
@@ -116,8 +116,8 @@ async def query(
         lease.on_release(lambda: coordinator.release(thread_id, request_id))
         if hasattr(coordinator, "cancel"):
             lease.on_release(lambda: coordinator.cancel(thread_id, request_id))
-    if admission_queue is not None and settings.admission_effective_enabled:
-        lease.on_release(lambda: admission_queue.mark_completed(request_id))
+    if admission_controller is not None and settings.admission_effective_enabled:
+        lease.on_release(lambda: admission_controller.mark_completed(request_id))
 
     if coordinator is not None and settings.coordination_enabled:
         coord_decision = await coordinator.acquire(thread_id, request_id)
@@ -137,7 +137,7 @@ async def query(
     q_embedding: list[float] | None = None
     if settings.cache_enabled and pool is not None:
         q_embedding = await embed_query(req.query)
-        cached = await semantic_cache.cache_lookup(pool, q_embedding, settings.cache_threshold)
+        cached = await semantic_cache.cache_lookup(pool, q_embedding, settings.cache_threshold, tenant_id=req.tenant_id or "")
         if cached:
             await lease.release()
 
@@ -156,7 +156,7 @@ async def query(
         nonlocal decision
         # Phase 2: admission 排队阻塞等待（路径一：queued 时真正等待补位唤醒）
         if (
-            admission_queue is not None
+            admission_controller is not None
             and settings.admission_effective_enabled
             and decision is not None
             and decision.status == ADMISSION_QUEUED
@@ -166,7 +166,7 @@ async def query(
                 "status": ADMISSION_QUEUED,
                 "position": decision.queue_position,
             })
-            decision = await admission_queue.wait_for_admit(request_id)
+            decision = await admission_controller.wait_for_admit(request_id)
         if decision is not None and decision.status == ADMISSION_REJECTED:
             yield _sse({
                 "type": "admission",
@@ -192,9 +192,10 @@ async def query(
 
         # Phase 2: OTel request span
         span = None
+        _span_cm = None
         if otel_tracer is not None:
-            span = otel_tracer.start_as_current_span("query")
-            span.__enter__()
+            _span_cm = otel_tracer.start_as_current_span("query")
+            span = _span_cm.__enter__()
             span.set_attribute("thread_id", thread_id)
             span.set_attribute("priority", priority)
             for k, v in redact_question(req.query).items():
@@ -223,13 +224,30 @@ async def query(
                 # 事件流经 StreamEvent 直通 SSE（与 graph 路径事件同构）。
                 # WS-2：从 thread 持久化读上一轮结构化快照，注入 PlannerContext；
                 # 本轮 status 事件携带的 snapshot 随 append_thread 落 checkpoint。
+                # Context Governance：在构建 PlannerContext 前，用 Governor
+                # 召回 + 治理 Memory（Authorize → Validate → QualityScore），
+                # 把治理后的记忆注入 PlannerContext.governed_memories。
+                governor = getattr(request.app.state, "context_governor", None)
+                governed_memories: list[str] = []
+                last_snapshot = await _thread_persist.read_thread_snapshot(checkpointer, thread_id)
+                if governor is not None:
+                    try:
+                        governed_memories, _gov_report = await governor.govern_memories(
+                            query=req.query,
+                            state=last_snapshot,
+                            tenant_id=req.workspace_id,
+                            user_id=req.user_id,
+                        )
+                    except Exception:
+                        logger.warning("context governance failed, degrading", exc_info=True)
                 ctx = PlannerContext(
                     question=req.query,
                     workspace_id=req.workspace_id,
                     user_id=req.user_id,
                     messages=await _thread_persist.read_thread_messages(checkpointer, thread_id),
                     llm=planner_runtime.llm,
-                    last_snapshot=await _thread_persist.read_thread_snapshot(checkpointer, thread_id),
+                    last_snapshot=last_snapshot,
+                    governed_memories=governed_memories,
                 )
                 plan = await planner.plan(ctx)
                 async for event in planner.execute(plan, planner_runtime):
@@ -241,7 +259,7 @@ async def query(
                     elif event.type == "status" and event.payload.get("snapshot"):
                         round_snapshot = event.payload["snapshot"]
             if final_answer and q_embedding is not None:
-                semantic_cache.cache_store(pool, req.query, final_answer, q_embedding)
+                semantic_cache.cache_store(pool, req.query, final_answer, q_embedding, tenant_id=req.tenant_id or "")
             # Phase 3: 对话历史写回——Planner 协议中立（不持线程语义），由 app 层承担。
             # 与 graph 路径的 checkpoint 持久化行为等价，/history 与 revert 不回退。
             if final_answer and checkpointer is not None:
@@ -254,8 +272,8 @@ async def query(
                 )
             yield _sse({"type": "done", "thread_id": thread_id, "answer": final_answer})
         finally:
-            if span is not None:
-                span.__exit__(None, None, None)
+            if _span_cm is not None:
+                _span_cm.__exit__(None, None, None)
             # Phase 2: 统一生命周期清理（幂等，覆盖 graph 异常 / 客户端断开 /
             # 正常完成）。reject 与 cache-hit 路径已在 _stream 外提前调用过，
             # 此处再调用安全无副作用（AsyncLease 幂等）。

@@ -62,6 +62,20 @@ def federation_capability_registry() -> "Any":
         except Exception as exc:  # noqa: BLE001
             logger.warning("bridge: 子智能体 %s 注册失败（跳过）: %s", ag.get("name"), exc)
 
+    # 沙箱代码执行 Skill（FUNCTION，经统一 Runtime 治理）
+    # 补齐 AgenticPlanner → 沙箱路由缺口：bridge 开启后 agentic 路径经
+    # discover_agent_tools 发现 code_execution → runtime.delegate 调用，
+    # 受步数/深度/循环/权限/轨迹统一治理。
+    try:
+        from agent_runtime.skills.sandbox import as_sandbox_skill
+
+        sandbox_skill = as_sandbox_skill()
+        if sandbox_skill.name not in reg:
+            reg.register(sandbox_skill)
+            logger.info("bridge: 沙箱 skill 注册成功 (name=%s)", sandbox_skill.name)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("bridge: 沙箱 skill 注册失败（跳过）: %s", exc)
+
     return reg
 
 

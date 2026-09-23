@@ -29,6 +29,8 @@ class TrajectoryStep:
     tokens: int = 0
     # 调用序（同 execution 内从 0 递增），便于 replay 还原顺序
     index: int = 0
+    # V3-9: per-step 版本指纹（skill / tool / model 版本 + external receipt）
+    forensic: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -39,6 +41,7 @@ class TrajectoryStep:
             "latency": self.latency,
             "tokens": self.tokens,
             "index": self.index,
+            "forensic": self.forensic,
         }
 
 
@@ -56,6 +59,8 @@ class TrajectoryRecord:
     total_cost: float = 0.0
     snapshot: dict[str, Any] = field(default_factory=dict)
     created_at: float = field(default_factory=time.monotonic)
+    # V3-9: 执行级版本指纹（model / prompt / skill / planner / policy 版本）
+    forensic: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -69,6 +74,7 @@ class TrajectoryRecord:
             "total_cost": self.total_cost,
             "snapshot": self.snapshot,
             "created_at": self.created_at,
+            "forensic": self.forensic,
         }
 
 

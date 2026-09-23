@@ -108,3 +108,35 @@ async def test_bridge_disabled_returns_default_tools():
         pytest.skip("AGENTIC_RUNTIME_BRIDGE 已开启，跳过默认分支断言")
     base = [object()]
     assert _maybe_attach_bridged_tools(base, "q") is base
+
+
+async def test_bridge_registry_includes_sandbox_skill():
+    """沙箱 skill 须注册到桥接能力注册表，AgenticPlanner 才能经 Runtime 路由到沙箱。"""
+    from agent_federation.planners.agentic_runtime_bridge import (
+        federation_capability_registry,
+    )
+
+    reg = federation_capability_registry()
+    assert "code_execution" in reg
+    skill = reg._capabilities["code_execution"]
+    assert skill.kind == SkillKind.FUNCTION
+
+
+async def test_bridged_tools_include_sandbox_via_runtime_delegate():
+    """bridge 开启后，discover_agent_tools 能发现 code_execution 并经 runtime.delegate 调用。"""
+    from agent_federation.planners.agentic_runtime_bridge import (
+        build_bridged_langchain_tools,
+        federation_capability_registry,
+    )
+
+    reg = federation_capability_registry()
+    assert "code_execution" in reg
+    rt = _FakeRuntime(reg)
+
+    tools = build_bridged_langchain_tools(rt, "执行代码", top_k=20)
+    sandbox_tools = [t for t in tools if t.name == "code_execution"]
+    assert len(sandbox_tools) == 1
+
+    await sandbox_tools[0].ainvoke({"code": "print(1+1)"})
+    assert rt.delegate_calls[0][0] == "code_execution"
+    assert "code" in rt.delegate_calls[0][1]

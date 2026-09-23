@@ -137,14 +137,14 @@ class Settings:
     # -------------------------- 入站安全护栏（M5，方案 §9） --------------------------
     # API Key 鉴权：为空 → 鉴权关闭（向后兼容既有行为）；非空时请求需带
     # X-API-Key 或 Authorization: Bearer <key>。/health、静态页面与 /stream SSE 免鉴权。
-    zhanggui_api_key: str = os.getenv("ZHANGUI_API_KEY", "")
+    knowledge_api_key: str = os.getenv("KNOWLEDGE_API_KEY", "")
     # 入站限流（进程内滑动窗口；数值可 env 覆盖，多副本部署需外置共享存储，见 CHANGELOG）
-    zhanggui_rate_limit_per_client: int = _as_int(os.getenv("ZHANGUI_RATE_LIMIT_PER_CLIENT"), 20)
-    zhanggui_rate_limit_global: int = _as_int(os.getenv("ZHANGUI_RATE_LIMIT_GLOBAL"), 500)
-    zhanggui_rate_limit_window_s: int = _as_int(os.getenv("ZHANGUI_RATE_LIMIT_WINDOW_S"), 60)
+    knowledge_rate_limit_per_client: int = _as_int(os.getenv("KNOWLEDGE_RATE_LIMIT_PER_CLIENT"), 20)
+    knowledge_rate_limit_global: int = _as_int(os.getenv("KNOWLEDGE_RATE_LIMIT_GLOBAL"), 500)
+    knowledge_rate_limit_window_s: int = _as_int(os.getenv("KNOWLEDGE_RATE_LIMIT_WINDOW_S"), 60)
     # 输入长度护栏：query 长度上限在 Pydantic 层强制（512）；历史轮数 / 请求体大小可配置
-    zhanggui_max_history_rounds: int = _as_int(os.getenv("ZHANGUI_MAX_HISTORY_ROUNDS"), 20)
-    zhanggui_max_body_bytes: int = _as_int(os.getenv("ZHANGUI_MAX_BODY_BYTES"), 65536)
+    knowledge_max_history_rounds: int = _as_int(os.getenv("KNOWLEDGE_MAX_HISTORY_ROUNDS"), 20)
+    knowledge_max_body_bytes: int = _as_int(os.getenv("KNOWLEDGE_MAX_BODY_BYTES"), 65536)
 
     # -------------------------- 导入：图片摘要（可选增强） --------------------------
     # 图片摘要需多模态（VL）模型；缺省关闭：无 VL 能力时跳过摘要（图片标题用默认值

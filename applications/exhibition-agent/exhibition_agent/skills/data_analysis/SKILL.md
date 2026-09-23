@@ -1,4 +1,4 @@
-# data_analysis.query — 数据分析 Agent Skill（P1 骨架）
+# data_analysis.query — 数据分析 Agent Skill
 
 > 只读 skill。自然语言问数 → Metric Registry 校验 → HTTP 调 nl2sql-service → 返回结果。
 
@@ -8,7 +8,7 @@
 NL query
   → 提取 metric_id + nl_query
   → Metric Registry 校验（foundation/metric_registry.py get_metric_status）
-      ├─ status == VERIFIED   → HTTP 调 nl2sql-service（端点 TODO，骨架返回 stub）
+      ├─ status == VERIFIED   → HTTP 调 nl2sql-service /api/query
       └─ status != VERIFIED   → 答"该指标待接入"，不触 L3、不生成 SQL（INV-10）
            ├─ BLOCKED          → error_code = METRIC_BLOCKED
            ├─ status is None   → error_code = DATA_NOT_CONNECTED
@@ -22,15 +22,16 @@ NL query
 （`PENDING_ANSWER`），不触 L3 text2sql、不生成任何 SQL。本 skill 不向 `sql_statements`
 append，Supervisor 透传初始空列表，故全程零 SQL。
 
-## nl2sql-service 端点（TODO）
+## nl2sql-service HTTP 调用
 
-VERIFIED 分支通过 `ctx.warehouse_client.get_rest(_NL2SQL_ENDPOINT, ...)` 调 nl2sql-service。
-当前 `_NL2SQL_ENDPOINT` 为 TODO 常量，骨架阶段不实际发起 HTTP，返回确定性 stub 结果
-（`readiness=READY`、`data.skeleton=True`）以贯通 VERIFIED 路径。
+VERIFIED 分支经 `httpx.AsyncClient` POST `{NL2SQL_SERVICE_URL}/api/query`，
+按 `SqlQueryResponse` 契约（answer / sql / error / latency_ms / fallback）组装 SkillResult。
 
-nl2sql-service 通用化（`applications/nl2sql-service/` 12 节点 LangGraph 通用服务）
-是后续步骤。通用化后填充 `_NL2SQL_ENDPOINT` 并按 `SqlQueryResponse` 契约
-（answer / sql / error / fallback / latency_ms）自组装 SkillResult。
+- `NL2SQL_SERVICE_URL` 环境变量配置服务地址（默认 `http://localhost:8000`）
+- 超时（30s）→ `UPSTREAM_TIMEOUT` + `NOT_CONNECTED`
+- 异常/非 2xx → `UPSTREAM_ERROR` + `NOT_CONNECTED`
+- 响应 `error` 非空 → `NL2SQL_ERROR` + `NOT_CONNECTED`
+- 成功 → `READY` + `data.sql` / `data.latency_ms` / `data.fallback`
 
 ## 挂载方式
 

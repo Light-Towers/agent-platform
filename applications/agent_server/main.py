@@ -75,6 +75,79 @@ def _build_pg_stores(pool):
     return checkpoint_store, idempotency_store, ownership_store, trajectory_store
 
 
+def _build_memory_hooks(pool):
+    """构建执行后记忆沉淀 hooks（EpisodicSink + ProceduralSink + MemoryDecayManager）。
+
+    pool 非 None 时用 PG 后端，否则 InMemory。使记忆框架"越用越好"——
+    执行完成后自动沉淀 Episode → 定期挖掘候选 Skill → 衰减清理。
+    """
+    from agent_runtime.episodic_memory import EpisodicMemory, InMemoryEpisodicStore
+    from agent_runtime.memory_decay import MemoryDecayManager
+    from agent_runtime.memory_sink import EpisodicSink, ProceduralSink
+    from agent_runtime.procedural_memory import InMemoryProceduralStore
+
+    if pool is not None:
+        from agent_runtime.memory_pg import PgEpisodicStore, PgProceduralStore
+
+        ep_store = PgEpisodicStore(pool)
+        proc_store = PgProceduralStore(pool)
+    else:
+        ep_store = InMemoryEpisodicStore()
+        proc_store = InMemoryProceduralStore()
+
+    ep_mem = EpisodicMemory(ep_store)
+    return [
+        EpisodicSink(ep_mem),
+        ProceduralSink(ep_mem, proc_store, trigger_interval=10),
+        MemoryDecayManager(ep_store, cleanup_interval=50),
+    ]
+
+
+def _build_context_governor(pool, llm):
+    """构建 Context 治理管道（ContextGovernor）：Select → Recall → Authorize → Validate → Score。
+
+    pool 非 None 时用 PG 后端 Memory，否则 InMemory。Governor 挂 app.state，
+    供 routes.py 在构建 PlannerContext 前调 govern_memories() 注入已治理的记忆。
+    """
+    from agent_runtime.context.assembler import ContextAssembler
+    from agent_runtime.context.authorizer import ContextAuthorizer
+    from agent_runtime.context.budget import ContextBudget
+    from agent_runtime.context.governor import ContextGovernor
+    from agent_runtime.context.quality import ContextQualityScorer
+    from agent_runtime.context.validator import ContextValidator
+    from agent_runtime.episodic_memory import EpisodicMemory, InMemoryEpisodicStore
+    from agent_runtime.memory_types import ContextSelector, MemoryRetriever
+    from agent_runtime.procedural_memory import (
+        InMemoryProceduralStore,
+        ProceduralMemory,
+    )
+
+    if pool is not None:
+        from agent_runtime.memory_pg import PgEpisodicStore, PgProceduralStore
+
+        ep_store = PgEpisodicStore(pool)
+        proc_store = PgProceduralStore(pool)
+    else:
+        ep_store = InMemoryEpisodicStore()
+        proc_store = InMemoryProceduralStore()
+
+    ep_mem = EpisodicMemory(ep_store)
+    proc_mem = ProceduralMemory(proc_store)
+    retriever = MemoryRetriever(episodic=ep_mem, procedural=proc_mem)
+
+    budget = ContextBudget(model_window=32_000)
+    assembler = ContextAssembler(budget, llm=llm)
+
+    return ContextGovernor(
+        assembler=assembler,
+        retriever=retriever,
+        selector=ContextSelector(),
+        validator=ContextValidator(),
+        authorizer=ContextAuthorizer(),
+        quality_scorer=ContextQualityScorer(),
+    )
+
+
 def _build_admission_controller(pool, settings):
     """构建 admission 控制器：distributed 模式用 PgAdmissionController，其余用 AdmissionQueue。"""
     if pool is None:
@@ -250,6 +323,8 @@ async def lifespan(app: FastAPI):
 
     app.state.registry = registry
     app.state.planner = get_planner(settings, registry=registry)
+    post_execution_hooks = _build_memory_hooks(pool)
+    app.state.context_governor = _build_context_governor(pool, llm)
     app.state.planner_runtime = PlannerRuntime(
         registry=registry,
         llm=llm,
@@ -264,6 +339,7 @@ async def lifespan(app: FastAPI):
         enable_loop_fingerprint=settings.enable_loop_fingerprint,
         workspace_id="default",
         user_id="default",
+        post_execution_hooks=post_execution_hooks,
     )
     # 绑定 delegate：graph 节点的 _invoke 此后经 runtime.delegate 调用
     delegate_ref.delegate = app.state.planner_runtime.delegate

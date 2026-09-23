@@ -87,7 +87,7 @@ async def health():
 
 # M6（方案 §2.2）：存活 / 就绪双探针（compose healthcheck 使用；旧 /health 保留兼容）。
 # 注意：/health/live 与 /health/ready 已在 M5 安全护栏中按 /health* 前缀豁免鉴权/限流，
-# 启用 ZHANGUI_API_KEY 后容器探针仍可通过（见 security_guard_utils.is_health_path）。
+# 启用 KNOWLEDGE_API_KEY 后容器探针仍可通过（见 security_guard_utils.is_health_path）。
 @router.get("/health/live")
 async def health_live():
     """存活探针：进程活着即返回 200（不依赖外部组件）。"""
@@ -188,14 +188,14 @@ async def query(background_tasks: BackgroundTasks, request: Request, payload: Qu
     # 说明：当前检索管线历史来自 MongoDB（node_item_name_confirm 服务端 limit=10 已兜底），
     # 入站 history 字段为兼容/预留（方案 §9 ChatRequest 设计），超限截断后透传。
     history = payload.history
-    if len(history) > settings.zhanggui_max_history_rounds:
+    if len(history) > settings.knowledge_max_history_rounds:
         logger.warning(
             "history 轮数超限（%d > %d），截断保留最近 %d 轮",
             len(history),
-            settings.zhanggui_max_history_rounds,
-            settings.zhanggui_max_history_rounds,
+            settings.knowledge_max_history_rounds,
+            settings.knowledge_max_history_rounds,
         )
-        history = history[-settings.zhanggui_max_history_rounds :]
+        history = history[-settings.knowledge_max_history_rounds :]
 
     # 处理是不是流式返回结果
     is_stream = payload.is_stream
@@ -303,12 +303,16 @@ async def stream(session_id: str, request: Request):
 
 
 @router.get("/history/{session_id}")
-async def history(session_id: str, limit: int = Query(50, ge=1, le=200)):
+async def history(
+    session_id: str,
+    limit: int = Query(50, ge=1, le=200),
+    tenant_id: str = Query("", description="租户 ID（多租户隔离）"),
+):
     """
     查询当前会话历史记录（M5：limit 上限 200，防一次性拉取全量）
     """
     try:
-        records = get_recent_messages(session_id, limit=limit)
+        records = get_recent_messages(session_id, limit=limit, tenant_id=tenant_id or None)
         items = []
         for r in records:
             items.append(
@@ -330,6 +334,9 @@ async def history(session_id: str, limit: int = Query(50, ge=1, le=200)):
 
 
 @router.delete("/history/{session_id}")
-async def clear_chat_history(session_id: str):
-    count = clear_history(session_id)
+async def clear_chat_history(
+    session_id: str,
+    tenant_id: str = Query("", description="租户 ID（多租户隔离）"),
+):
+    count = clear_history(session_id, tenant_id=tenant_id or None)
     return {"message": "History cleared", "deleted_count": count}

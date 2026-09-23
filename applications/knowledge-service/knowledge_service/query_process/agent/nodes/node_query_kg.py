@@ -44,11 +44,19 @@ def node_query_kg(state: dict) -> dict:
     """
     rewritten = state.get("rewritten_query") or state.get("original_query") or ""
     item_names = state.get("item_names") or None
+    tenant_id = state.get("tenant_id") or None
+    scope_type = state.get("scope_type") or None
 
     kg_docs = []
     if rewritten:
         try:
-            kg_docs = query_kg(rewritten, item_names=item_names, limit=8)
+            kg_docs = query_kg(
+                rewritten,
+                item_names=item_names,
+                limit=8,
+                tenant_id=tenant_id,
+                scope_type=scope_type,
+            )
         except Exception as e:
             logger.warning("KG 检索异常，跳过: %s", e)
             kg_docs = []

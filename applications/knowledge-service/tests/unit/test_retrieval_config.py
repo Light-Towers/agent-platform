@@ -67,7 +67,7 @@ def test_rerank_yaml_loads_with_expected_defaults():
 # 轻量加载器
 # ---------------------------------------------------------------------------
 def test_loader_returns_attr_dict():
-    cfg = load_yaml_config(_RETRIEVAL_YAML, "ZHANGUI_RETRIEVAL_YAML")
+    cfg = load_yaml_config(_RETRIEVAL_YAML, "KNOWLEDGE_RETRIEVAL_YAML")
     assert isinstance(cfg, CfgDict)
     # 属性访问 + dict 访问 + 混合访问
     assert cfg.rrf.k == 60
@@ -90,8 +90,8 @@ def test_loader_env_override_path(tmp_path, monkeypatch):
         "    hyde: 0.6\n",
         encoding="utf-8",
     )
-    monkeypatch.setenv("ZHANGUI_RETRIEVAL_YAML", str(alt))
-    cfg = load_yaml_config(_RETRIEVAL_YAML, "ZHANGUI_RETRIEVAL_YAML")
+    monkeypatch.setenv("KNOWLEDGE_RETRIEVAL_YAML", str(alt))
+    cfg = load_yaml_config(_RETRIEVAL_YAML, "KNOWLEDGE_RETRIEVAL_YAML")
     assert cfg.hybrid.dense_weight == pytest.approx(0.6)
     assert cfg.hybrid.sparse_weight == pytest.approx(0.4)
     assert cfg.rrf.k == 30
@@ -99,9 +99,9 @@ def test_loader_env_override_path(tmp_path, monkeypatch):
 
 
 def test_loader_missing_yaml_raises(tmp_path, monkeypatch):
-    monkeypatch.setenv("ZHANGUI_RERANK_YAML", str(tmp_path / "nope.yaml"))
+    monkeypatch.setenv("KNOWLEDGE_RERANK_YAML", str(tmp_path / "nope.yaml"))
     with pytest.raises(FileNotFoundError):
-        load_yaml_config(_RERANK_YAML, "ZHANGUI_RERANK_YAML")
+        load_yaml_config(_RERANK_YAML, "KNOWLEDGE_RERANK_YAML")
 
 
 # ---------------------------------------------------------------------------
@@ -121,12 +121,12 @@ def test_module_singleton_respects_env_override(tmp_path, monkeypatch):
         "    hyde: 1.0\n",
         encoding="utf-8",
     )
-    monkeypatch.setenv("ZHANGUI_RETRIEVAL_YAML", str(alt))
+    monkeypatch.setenv("KNOWLEDGE_RETRIEVAL_YAML", str(alt))
     mod = importlib.reload(retrieval_config)
     try:
         assert mod.retrieval_cfg.hybrid.dense_weight == pytest.approx(0.9)
         assert mod.retrieval_cfg.rrf.k == 100
     finally:
-        monkeypatch.delenv("ZHANGUI_RETRIEVAL_YAML", raising=False)
+        monkeypatch.delenv("KNOWLEDGE_RETRIEVAL_YAML", raising=False)
         importlib.reload(retrieval_config)  # 恢复默认配置，避免影响后续用例
     assert retrieval_config.retrieval_cfg.rrf.k == 60

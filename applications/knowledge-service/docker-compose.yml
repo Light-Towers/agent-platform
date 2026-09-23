@@ -18,7 +18,7 @@
 #
 # 启用链路追踪（可选，M4/M6）：
 #   docker compose --profile core --profile obs up -d --build
-#   并在 .env 设置：OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317 且 ZHANGUI_TRACE_ENABLED=true
+#   并在 .env 设置：OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317 且 KNOWLEDGE_TRACE_ENABLED=true
 #   （jaeger all-in-one 原生接收 OTLP gRPC；UI: http://localhost:16686）
 #
 # 说明：
@@ -234,7 +234,7 @@ services:
 
   # M6（方案 §8.3）：链路追踪 —— 仅 profile obs 拉起（默认不启动，避免加重依赖）。
   # jaeger all-in-one 原生接收 OTLP gRPC（4317）；web 侧在 .env 配置
-  # OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317 + ZHANGUI_TRACE_ENABLED=true 即导出。
+  # OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317 + KNOWLEDGE_TRACE_ENABLED=true 即导出。
   jaeger:
     image: jaegertracing/all-in-one:1.57
     container_name: knowledge-service-jaeger

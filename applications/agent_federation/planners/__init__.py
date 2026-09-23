@@ -53,6 +53,7 @@ def get_planner_runtime() -> PlannerRuntime:
             registry=registry,
             max_skill_depth=env_int("FED_MAX_SKILL_DEPTH", 4),
             max_steps=env_int("FED_MAX_STEPS", 20),
+            max_duration_seconds=env_int("FED_MAX_DURATION_SECONDS", 60),
         )
         _runtime_bridge_flag = bridge
     return _runtime_singleton

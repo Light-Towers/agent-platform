@@ -319,10 +319,10 @@ python test/04-test_graph_flow.py
 # 默认栈（基础设施 core profile + web；可观测 obs 按需追加）
 docker compose --profile core up -d --build
 
-# 链路追踪（可选）：.env 配 OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317 + ZHANGUI_TRACE_ENABLED=true
+# 链路追踪（可选）：.env 配 OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317 + KNOWLEDGE_TRACE_ENABLED=true
 docker compose --profile core --profile obs up -d --build
 
-# 启用入站鉴权（可选）：.env 设 ZHANGUI_API_KEY，请求带 X-API-Key 或 Authorization: Bearer
+# 启用入站鉴权（可选）：.env 设 KNOWLEDGE_API_KEY，请求带 X-API-Key 或 Authorization: Bearer
 ```
 
 > 注意：因 Compose profile 语义，`docker compose up -d`（不带 `--profile core`）会报

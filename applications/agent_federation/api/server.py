@@ -39,7 +39,7 @@ project_root = current_dir.parent
 from api.monitor import manager
 
 API_KEY = os.getenv("API_KEY", "")
-ZHIKU_API_URL = os.getenv("ZHIKU_API_URL", "")
+KNOWLEDGE_SERVICE_URL = os.getenv("KNOWLEDGE_SERVICE_URL", "")
 
 from api.auth import resolve_thread_id
 
@@ -65,7 +65,7 @@ async def lifespan(app: FastAPI):
         logger.info("Langfuse 未配置，trace 走 agent-core OTel（开发期 no-op 降级）")
 
     # zhiku 健康探活（异步，不阻塞启动）
-    if ZHIKU_API_URL:
+    if KNOWLEDGE_SERVICE_URL:
         import threading
 
         from tools.zhiku_tools import check_zhiku_health
