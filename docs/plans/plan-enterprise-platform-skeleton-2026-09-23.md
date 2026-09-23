@@ -1,7 +1,8 @@
-# 企业级智能平台骨架方案
+# 企业级智能平台骨架方案（已被取代）
 
 > 创建日期：2026-09-23
-> 状态：方案制定（待执行）
+> 状态：**已被取代** — 见 `docs/architecture/agent-execution-platform.md`
+> 取代原因：本方案提议 Application 互相 import，违反 ARCHITECTURE.md 红线 2；且"torch 已替代"判断不准确（knowledge-service 仍依赖 torch/transformers/flagembedding）；"有状态=Agent"边界定义不够准确（应为"谁决定下一步"）
 > 定位：企业级智能平台 — 单进程 + 插件式能力模块 + 外部基础设施
 
 ---
