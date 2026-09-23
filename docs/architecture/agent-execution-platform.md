@@ -10,6 +10,55 @@
 
 ---
 
+## 0. 本文件覆盖什么 / 不覆盖什么
+
+### 覆盖
+
+- Capability 语义模型（Tool / Agent / Workflow 定义与区分）
+- Execution Boundary 抽象（InProcess / Remote / Sandbox）
+- Scheduler 与并发治理概念框架（Admission / Concurrency Pool / Backpressure）
+- Agent Runtime 分层与执行流程
+- Reliability 概念（Checkpoint / Lease / Idempotency / Retry）
+- ExecutionContext 与 Capability Contract 契约
+- 会展业务映射示例
+
+### 不覆盖（由其他文档承载）
+
+| 不覆盖的内容 | 承载文档 | 说明 |
+|-------------|---------|------|
+| 8 层架构完整定义 + 十大缺口 P0 五项 | `docs/plans/plan-v3-execution-platform-final-architecture-2026-09-22.md` | 本文件是 8 层中 ①–④ 的语义展开，⑤–⑧ 见该文档 |
+| V2 C1–C5 生产级验收约束 | `docs/architecture/complete-agent-runtime-architecture.md` §20 | 本文件继承而非替代，见 §42 |
+| 仓库级依赖红线与 Application 边界 | `ARCHITECTURE.md` | 本文件不修改红线，与红线保持一致 |
+| 7 域能力域划分与 milestone 依赖图 | `docs/plans/v3-roadmap-breakdown.md` | 7 域与 8 层是同一批能力的两种切法 |
+| 具体实现代码与施工步骤 | 各 plan 文档 | 本文件是架构基线，非施工图 |
+
+### 与 8 层总纲的映射
+
+`plan-v3-execution-platform-final-architecture-2026-09-22.md` 定义了 8 层架构与十大缺口。本文件覆盖关系：
+
+| 8 层 | 名称 | 本文件覆盖？ | 对应章节 |
+|------|------|------------|---------|
+| ① | Execution Kernel | 部分（概念） | §9 Checkpoint / §22 Lease |
+| ② | Execution Semantics | 部分（概念） | §11 Capability Contract / §21 Idempotency |
+| ③ | Execution Scheduler | 部分（概念） | §16–§20 Scheduler / Admission / Backpressure |
+| ④ | Agent Runtime | **是** | §5–§7 总体架构 / Runtime / §28 Registry |
+| ⑤ | Execution Observability | 否 | 见 8 层总纲 |
+| ⑥ | Control Plane | 否 | 见 8 层总纲 |
+| ⑦ | Governance Plane | 部分（§40 安全边界） | 8 层总纲为母 |
+| ⑧ | Storage / Scale Plane | 否 | 见 8 层总纲 |
+
+**P0 五项缺口（均不在本文件范围内）**：
+
+1. 严格 Fencing Generation — 8 层总纲缺口 1
+2. Effect Contract — 8 层总纲缺口 2
+3. External Task + Receipt — 8 层总纲缺口 3
+4. Execution Scheduler（完整 Dispatch/Queue/Worker） — 8 层总纲缺口 4
+5. Durable Execution Status State Machine — 8 层总纲缺口 5
+
+> **本文件是 8 层中 ④ Agent Runtime 的语义展开 + ①②③ 的概念框架，不是 V3 全部。**
+
+---
+
 # 1. 架构目标
 
 Agent Platform V3 不以"提供一个 Agent 框架"为主要目标，而是提供一个能够承载企业 Agent 长期运行的 **Execution Platform**。
@@ -1076,6 +1125,8 @@ shared-schemas
 
 # 27. 推荐目录结构
 
+> **注意：以下为目标态示意，非当前仓库状态，也不是改造指令。** 当前仓库结构见 `ARCHITECTURE.md` §6。此处仅表达 Capability / Execution Boundary / Scheduler 三层在目录中应如何分离的意图。
+
 ```text
 packages/
 ├── agent-core/
@@ -1699,6 +1750,16 @@ Retry
 Recovery
 HA
 ```
+
+V2 生产级验收约束（C1–C5，定义见 `complete-agent-runtime-architecture.md` §20）：
+
+- **C1** — 跨副本状态变更必须原子 CAS
+- **C2** — PG = source of truth，LISTEN/NOTIFY = 唤醒信号
+- **C3** — admission 是行级事实 + TTL，不是全局 counter
+- **C4** — 生产模式 fail fast，不自动 fallback InMemory
+- **C5** — 测试必须覆盖四组（单元语义 / 并发 CAS / kill-pod resume / NOTIFY 丢失恢复）
+
+> **V3 继承 C1–C5，不替代。** V3 在 C1–C5 之上增加平台化能力，不放松任何 V2 约束。
 
 V3：
 
