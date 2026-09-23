@@ -53,7 +53,7 @@ def check() -> list[str]:
             for lineno, line in enumerate(py_file.read_text(encoding="utf-8").splitlines(), 1):
                 if _PATTERN.search(line):
                     violations.append(f"{rel}:{lineno}: {line.strip()}")
-        except Exception:
+        except Exception:  # noqa: BLE001
             pass
     return violations
 

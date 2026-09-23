@@ -131,7 +131,7 @@ class WorkingMemory:
                 if rec is not None:
                     snap.status = rec.status
                     snap.status_generation = rec.generation
-            except Exception:
+            except Exception:  # noqa: BLE001
                 logger.warning(
                     "working memory status load failed execution=%s",
                     execution_id, exc_info=True,
@@ -140,7 +140,7 @@ class WorkingMemory:
         if self._checkpoint is not None:
             try:
                 snap.checkpoint = await self._checkpoint.load(execution_id)
-            except Exception:
+            except Exception:  # noqa: BLE001
                 logger.warning(
                     "working memory checkpoint load failed execution=%s",
                     execution_id, exc_info=True,
@@ -149,7 +149,7 @@ class WorkingMemory:
         if self._awaitable is not None:
             try:
                 snap.awaitable_tasks = await self._awaitable.list_by_execution(execution_id)
-            except Exception:
+            except Exception:  # noqa: BLE001
                 logger.warning(
                     "working memory awaitable load failed execution=%s",
                     execution_id, exc_info=True,
@@ -199,7 +199,7 @@ class WorkingMemory:
                             generation=rec.generation,
                         )
                     )
-            except Exception:
+            except Exception:  # noqa: BLE001
                 logger.warning(
                     "working memory clear failed execution=%s",
                     execution_id, exc_info=True,

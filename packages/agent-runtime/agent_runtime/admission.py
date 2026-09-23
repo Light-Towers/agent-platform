@@ -138,7 +138,7 @@ class AdmissionQueue:
                     priority=priority,
                     queue_position=current + 1,
                 )
-        except Exception:
+        except Exception:  # noqa: BLE001
             logger.warning("admission enqueue failed", exc_info=True)
             return AdmissionDecision(
                 status=ADMISSION_REJECTED, priority=priority, reason="ADMISSION_UNAVAILABLE"
@@ -166,7 +166,7 @@ class AdmissionQueue:
                         "rejection_reason = %s WHERE request_id = %s AND status = %s",
                         (ADMISSION_REJECTED, reason, request_id, ADMISSION_QUEUED),
                     )
-            except Exception:
+            except Exception:  # noqa: BLE001
                 logger.warning("admission timeout db-mark failed", exc_info=True)
 
         try:
@@ -193,7 +193,7 @@ class AdmissionQueue:
                             reason="ADMISSION_TIMEOUT",
                         )
                 state = self._states.get(request_id)
-        except Exception:
+        except Exception:  # noqa: BLE001
             logger.warning("admission wait_for_admit failed", exc_info=True)
             return AdmissionDecision(
                 status=ADMISSION_REJECTED, priority="normal", reason="ADMISSION_UNAVAILABLE"
@@ -216,7 +216,7 @@ class AdmissionQueue:
                         "WHERE status = 'queued'"
                     )
                     recovered = result.rowcount if hasattr(result, "rowcount") else 0
-            except Exception:
+            except Exception:  # noqa: BLE001
                 logger.warning("admission recover failed", exc_info=True)
         # 唤醒可能遗留的等待协程，避免挂起
         async with self._cond:
@@ -259,7 +259,7 @@ class AdmissionQueue:
                         (ADMISSION_ADMITTED, nxt_id),
                     )
                     promoted.append(nxt_id)
-        except Exception:
+        except Exception:  # noqa: BLE001
             logger.warning("admission mark_completed failed", exc_info=True)
         finally:
             async with self._cond:

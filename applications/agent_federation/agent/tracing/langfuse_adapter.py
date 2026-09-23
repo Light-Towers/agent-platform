@@ -107,7 +107,7 @@ def flush_langfuse() -> None:
     if _langfuse_client is not None:
         try:
             _langfuse_client.flush()
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("Langfuse flush 失败: %s", e)
 
 
@@ -116,11 +116,11 @@ def shutdown_langfuse() -> None:
     if _langfuse_client is not None:
         try:
             _langfuse_client.flush()
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("Langfuse flush 失败: %s", e)
         try:
             _langfuse_client.shutdown()
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("Langfuse shutdown 失败: %s", e)
 
 

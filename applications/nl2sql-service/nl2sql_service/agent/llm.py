@@ -37,7 +37,7 @@ class LLMClient:
             llm = self._ensure_llm()
             result = await llm.ainvoke([HumanMessage(content=prompt)])
             return result.content.strip()
-        except Exception:
+        except Exception:  # noqa: BLE001
             logger.exception("LLM invoke failed")
             return ""
 

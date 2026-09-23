@@ -184,7 +184,7 @@ def step_2_rerank_docs(state, doc_items):
         # 按分数降序排序
         scored_docs.sort(key=lambda x: x["score"], reverse=True)
         return scored_docs
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.error(f"Step 2: 重排序过程发生异常: {e}", exc_info=True)
         # 出错时降级：返回原始文档顺序，分数置为 0 或 None
         # 避免整个流程中断
@@ -360,5 +360,5 @@ if __name__ == "__main__":
 
         print("=" * 50)
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.exception(f"测试运行期间发生未捕获异常: {e}")

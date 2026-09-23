@@ -275,7 +275,7 @@ class AuditMiddleware:
         try:
             result = await call_next(name, kwargs)
             return result
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             error = str(exc)
             raise
         finally:

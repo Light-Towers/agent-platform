@@ -80,7 +80,7 @@ async def intent_node(state: KefuState) -> KefuState:
                 label = l1.primary
             else:
                 label = (await l2_judge(message)).primary
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             # 4. 分类器不可用（L1 嵌入缺失 / L2 LLM 未配置）时，安全回退知识库兜底
             #    （业务关键词已在第 1 步判定为 None，故此处直接 knowledge，不再借
             #    IntentLabel.DIRECT 表达，语义更清晰，建议 #5）。

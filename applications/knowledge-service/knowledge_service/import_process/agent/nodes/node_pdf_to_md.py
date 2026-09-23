@@ -131,7 +131,7 @@ def step_2_upload_and_poll(pdf_path_obj: Path, output_dir_obj: Path):
                     f"[文件上传] 重试后仍失败，状态码：{put_resp.status_code}，响应内容：{put_resp.text}"
                 )
         logger.info(f"[文件上传] 成功，文件{pdf_path_obj.name}已存入云存储")
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         raise RuntimeError(f"[文件上传] 网络异常导致上传失败，错误信息：{str(e)}")
     finally:
         # 无论成败，关闭Session释放网络连接，避免资源泄漏
@@ -153,7 +153,7 @@ def step_2_upload_and_poll(pdf_path_obj: Path, output_dir_obj: Path):
         # 发起轮询请求，短超时10秒，异常则重试
         try:
             poll_resp = requests.get(url=poll_url, headers=request_headers, timeout=10)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning(f"[任务轮询] 网络请求异常，{poll_interval}秒后重试：{str(e)}")
             time.sleep(poll_interval)
             continue
@@ -236,7 +236,7 @@ def step_3_download_and_extract(zip_url: str, output_dir_obj: Path, pdf_stem: st
             # 递归删除整个目录树，包括目录本身及其所有子目录和文件。
             shutil.rmtree(extract_target_dir)
             logger.info(f"[步骤2/4] 已清理旧的解压目录：{extract_target_dir}")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning(f"[步骤2/4] 清理旧目录失败，可能不影响新文件解压：{str(e)}")
 
     # 重新创建解压目录
@@ -336,12 +336,12 @@ def node_pdf_to_md(state: ImportGraphState) -> ImportGraphState:
             with open(md_path, "r", encoding="utf-8") as f:
                 state["md_content"] = f.read()
             logger.debug(f"【{func_name}】MD文件内容读取成功，内容长度：{len(state['md_content'])}字符")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error(f"【{func_name}】读取MD文件内容失败：{str(e)}")
 
         logger.info(f"【{func_name}】节点执行完成，更新后工作流状态键：{list(state.keys())}")
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         # 异常日志分级，精准提示配置问题
         logger.error(f"【{func_name}】PDF转MD流程执行失败：{str(e)}", exc_info=True)
         raise  # 抛出异常，终止工作流

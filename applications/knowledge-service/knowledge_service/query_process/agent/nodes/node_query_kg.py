@@ -57,7 +57,7 @@ def node_query_kg(state: dict) -> dict:
                 tenant_id=tenant_id,
                 scope_type=scope_type,
             )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("KG 检索异常，跳过: %s", e)
             kg_docs = []
     else:

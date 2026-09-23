@@ -156,7 +156,7 @@ def step_3_generate_response(state: QueryGraphState, prompt: str) -> QueryGraphS
 
             logger.info(f"流式输出完成，总长度: {len(final_text)}")
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error(f"流式生成出错: {e}", exc_info=True)
             # 发生错误时，尝试推送到前端
             push_to_session(session_id, SSEEvent.ERROR, {"error": str(e)})
@@ -171,7 +171,7 @@ def step_3_generate_response(state: QueryGraphState, prompt: str) -> QueryGraphS
             state["answer"] = content
             set_task_result(session_id, "answer", content)
             logger.info(f"生成回答完成，长度: {len(content)}")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error(f"生成回答出错: {e}", exc_info=True)
             state["answer"] = "抱歉，生成回答时出现错误。"
 
@@ -265,7 +265,7 @@ def step_4_write_history(state: QueryGraphState, image_urls=None) -> QueryGraphS
                 message_id=None,
                 tenant_id=state.get("tenant_id"),
             )
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         # 写历史失败不应影响主链路
         logger.error(f"写入Mongo历史记录失败: {e}")
 

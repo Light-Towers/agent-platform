@@ -334,7 +334,7 @@ class PgExecutionOwnershipStore(ExecutionOwnershipStore):
             try:
                 async with self._pool.connection() as conn:
                     await conn.execute(f"NOTIFY {self._notify_channel}")
-            except Exception:
+            except Exception:  # noqa: BLE001
                 logger.warning("NOTIFY %s 发送失败", self._notify_channel, exc_info=True)
 
         return reclaimed
@@ -363,12 +363,12 @@ class PgExecutionOwnershipStore(ExecutionOwnershipStore):
                             break
                 except asyncio.CancelledError:
                     break
-                except Exception:
+                except Exception:  # noqa: BLE001
                     logger.warning("LISTEN %s 异常，重连中", self._notify_channel, exc_info=True)
                     await asyncio.sleep(1)
                     try:
                         await conn.execute(sql_listen)
-                    except Exception:
+                    except Exception:  # noqa: BLE001
                         await asyncio.sleep(5)
 
 

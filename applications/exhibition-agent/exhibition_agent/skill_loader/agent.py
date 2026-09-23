@@ -248,7 +248,7 @@ class ExhibitionAgent:
 
         try:
             body = resp.json()
-        except Exception:
+        except Exception:  # noqa: BLE001
             body = resp.text
 
         return {

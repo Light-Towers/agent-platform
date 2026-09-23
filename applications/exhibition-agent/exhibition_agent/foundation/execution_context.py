@@ -135,7 +135,7 @@ def verify_context(token: str, secret: Optional[str] = None) -> Optional[Executi
             auth_source=payload.get("auth_source", "PLATFORM_LOCAL"),
             request_id=payload.get("request_id", str(uuid.uuid4())),
         )
-    except Exception:
+    except Exception:  # noqa: BLE001
         return None
 
 
@@ -229,7 +229,7 @@ def record_cross_tenant_attempt(ctx: ExecutionContext, target_tenant: str) -> di
                 audit_log = json.load(f)
             if not isinstance(audit_log, list):
                 audit_log = []
-        except Exception:
+        except Exception:  # noqa: BLE001
             audit_log = []
 
     audit_log.append(record)

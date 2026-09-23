@@ -68,7 +68,7 @@ def _resolve(name: str) -> object | None:
     try:
         mod = importlib.import_module(module_path)
         obj = getattr(mod, attr)
-    except Exception as exc:  # 缺失 SDK / 导入失败：该工具不参与角色
+    except Exception as exc:  # noqa: BLE001 - 缺失 SDK / 导入失败：该工具不参与角色
         import logging
         logging.getLogger(__name__).warning(
             "[tool-registry] 工具 %s 加载失败（缺失依赖？）: %s", name, exc

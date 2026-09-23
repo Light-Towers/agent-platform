@@ -232,7 +232,7 @@ class HumanTaskResolver:
                         "execution resumed after human approval execution=%s",
                         task.execution_id,
                     )
-            except Exception:
+            except Exception:  # noqa: BLE001
                 logger.warning(
                     "resume after human approval failed execution=%s",
                     task.execution_id,
@@ -262,7 +262,7 @@ class HumanTaskResolver:
                             reason=f"human_rejected:{task_id}",
                         )
                     )
-            except Exception:
+            except Exception:  # noqa: BLE001
                 logger.warning(
                     "mark failed after human rejection failed execution=%s",
                     task.execution_id,

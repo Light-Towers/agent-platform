@@ -43,7 +43,7 @@ def call(method, path):
             return r.status, r.read().decode("utf-8", "replace")
     except urllib.error.HTTPError as e:
         return e.code, e.read().decode("utf-8", "replace")
-    except Exception as e:  # 网络/连接错误
+    except Exception as e:  # noqa: BLE001 - 网络/连接错误
         return "ERR", repr(e)
 
 

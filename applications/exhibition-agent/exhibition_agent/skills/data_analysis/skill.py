@@ -125,7 +125,7 @@ class DataAnalysisQuerySkill(BaseSkill):
                 error_code="UPSTREAM_TIMEOUT",
                 data={"metric_id": metric_id, "nl_query": nl_query},
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             logger.warning("nl2sql-service 调用失败: metric_id=%s error=%s", metric_id, exc)
             return SkillResult(
                 answer="数据查询服务暂时不可用",

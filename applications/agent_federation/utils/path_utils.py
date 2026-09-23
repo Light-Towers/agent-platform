@@ -56,7 +56,7 @@ def resolve_path(filename: str, session_dir: Optional[str] = None) -> str:
                     if parts[i] == session_name and parts[i + 1] == session_name:
                         return str(session_path / full_path.name)
                 return str(full_path)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("路径解析失败，回退到原始路径: %s", e)
 
         return str(full_path)

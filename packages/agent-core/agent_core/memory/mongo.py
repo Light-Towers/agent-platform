@@ -28,7 +28,7 @@ class MongoHistoryStore:
         try:
             from bson import ObjectId
             from pymongo import ASCENDING, DESCENDING, MongoClient
-        except Exception as e:  # pragma: no cover - 依赖缺失路径
+        except Exception as e:  # noqa: BLE001 - pragma: no cover - 依赖缺失路径
             raise ImportError(
                 "pymongo 未安装；请安装 agent-core[memory-mongo]（uv sync --extra memory-mongo）"
             ) from e
@@ -43,7 +43,7 @@ class MongoHistoryStore:
             # 复合索引：session_id 升序 + ts 降序，适配"按会话查最新记录"；幂等。
             self.collection.create_index([("session_id", 1), ("ts", -1)])
             logger.info("Successfully connected to MongoDB: %s", db_name)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error("Failed to connect to MongoDB: %s", e)
             raise
 
@@ -104,7 +104,7 @@ class MongoHistoryStore:
             rows = list(cursor)
             rows.reverse()
             return rows
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error("Error getting recent messages: %s", e)
             return []
 
@@ -117,7 +117,7 @@ class MongoHistoryStore:
             result = self.collection.delete_many(query)
             logger.info("Deleted %s messages for session %s", result.deleted_count, session_id)
             return result.deleted_count
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error("Error clearing history for session %s: %s", session_id, e)
             return 0
 
@@ -129,7 +129,7 @@ class MongoHistoryStore:
                 {"$set": kwargs},
             )
             return result.modified_count
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error("Error updating history message %s: %s", message_id, e)
             return 0
 
@@ -143,7 +143,7 @@ class MongoHistoryStore:
             )
             logger.info("Updated %s records with %s", result.modified_count, list(kwargs))
             return result.modified_count
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error("Error updating history messages: %s", e)
             return 0
 
@@ -152,7 +152,7 @@ class MongoHistoryStore:
         try:
             self.client.close()
             logger.info("MongoDB connection closed")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error("Error closing MongoDB connection: %s", e)
 
 

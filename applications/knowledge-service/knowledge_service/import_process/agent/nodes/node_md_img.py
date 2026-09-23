@@ -189,7 +189,7 @@ def summarize_image(image_path: str, root_folder: str, image_content: Tuple[str,
     except LangChainException as e:
         logger.error(f"图片摘要生成失败（LangChain框架异常）：{image_path}，错误信息：{str(e)}")
         return "图片描述"
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.error(f"图片摘要生成失败（系统异常）：{image_path}，错误信息：{str(e)}")
         return "图片描述"
 
@@ -241,7 +241,7 @@ def clean_minio_directory(minio_client: Minio, prefix: str) -> None:
                 logger.error(f"MinIO文件删除失败：{error}")
         else:
             logger.debug(f"MinIO目录无旧文件，无需清理：{prefix}")
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.error(f"MinIO目录清理失败：{prefix}，错误信息：{str(e)}")
 
 
@@ -310,7 +310,7 @@ def upload_to_minio(minio_client: Minio, local_path: str, object_name: str) -> s
         img_url = f"{base_url}{object_name}"
         logger.info(f"图片上传成功，访问URL：{img_url}")
         return img_url
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.error(f"图片上传MinIO失败：{local_path}，错误信息：{str(e)}")
         return None
 

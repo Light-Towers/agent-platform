@@ -154,7 +154,7 @@ async def retrieve_chunks(pool, query: str, k: int | None = None, workspace_id: 
         pairs = [[query, c[3]] for c in candidates]
         try:
             scores = reranker.compute_score(pairs)
-        except Exception as e:  # rerank 失败则优雅回退到 RRF 融合序
+        except Exception as e:  # noqa: BLE001 - rerank 失败则优雅回退到 RRF 融合序
             import logging
 
             logging.getLogger(__name__).warning("rerank 失败，回退 RRF 融合序: %s", e)

@@ -23,7 +23,7 @@ try:
     from opentelemetry import propagate as _otel_propagate  # noqa: PLC0415
 
     _propagation_available = True
-except Exception:  # pragma: no cover - OTel 未安装
+except Exception:  # noqa: BLE001 - pragma: no cover - OTel 未安装
     _propagation_available = False
 
 
@@ -39,7 +39,7 @@ def inject_traceparent(headers: dict[str, str]) -> dict[str, str]:
 
         if not is_tracing_enabled():
             return headers
-    except Exception:
+    except Exception:  # noqa: BLE001
         return headers
 
     try:
@@ -63,7 +63,7 @@ def extract_traceparent(headers: Mapping[str, str]) -> Any:
 
         if not is_tracing_enabled():
             return None
-    except Exception:
+    except Exception:  # noqa: BLE001
         return None
 
     try:
@@ -114,7 +114,7 @@ def get_current_traceparent() -> str | None:
 
         if not is_tracing_enabled():
             return None
-    except Exception:
+    except Exception:  # noqa: BLE001
         return None
 
     try:
@@ -127,7 +127,7 @@ def get_current_traceparent() -> str | None:
         if ctx is None or not ctx.is_valid:
             return None
         return f"00-{ctx.trace_id:032x}-{ctx.span_id:016x}-{int(ctx.trace_flags):02x}"
-    except Exception:
+    except Exception:  # noqa: BLE001
         return None
 
 

@@ -88,7 +88,7 @@ async def _create_store():
         try:
             from agent_core.memory.embedder import get_embedder
             _dims = getattr(get_embedder(), "dim", None)
-        except Exception:
+        except Exception:  # noqa: BLE001
             _dims = None
         # 向量维度单一事实源：embedder.dim。STORE_EMBED_DIMS 仅为向后兼容保留，
         # 新部署不应设置此变量。
@@ -151,7 +151,7 @@ def _build_middleware():
 
             middleware.append(GuardMiddleware())
             logger.info("GuardMiddleware 已启用（输入护栏挂入 agent_federation 栈）")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("GuardMiddleware 启用失败: %s", e)
 
     if os.getenv("PLANNER_ENABLED", "false").lower() == "true":
@@ -164,7 +164,7 @@ def _build_middleware():
 
             middleware.append(TodoListMiddleware())
             logger.info("TodoListMiddleware 已启用（planner_prompt=%d chars）", len(planner_prompt))
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("TodoListMiddleware 启用失败: %s", e)
 
     if os.getenv("REFLEXION_ENABLED", "false").lower() == "true":
@@ -183,7 +183,7 @@ def _build_middleware():
                 max_iterations=max_iter,
             ))
             logger.info("RubricMiddleware 已启用（max_iterations=%d）", max_iter)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("RubricMiddleware 启用失败: %s", e)
 
     return middleware if middleware else None
@@ -322,7 +322,7 @@ async def _plan_roles(task_query: str) -> list[str] | None:
         if not isinstance(raw_roles, list):
             return None
         return normalize_roles([str(r) for r in raw_roles])
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         logger.warning("[dynamic-agent] 角色规划失败，回退静态模式: %s", exc)
         return None
 
@@ -339,7 +339,7 @@ def _extract_json(text: str) -> dict:
     if match:
         try:
             return json.loads(match.group(0))
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("JSON 解析失败，返回空字典: %s", e)
             return {}
     return {}
@@ -436,7 +436,7 @@ async def run_deep_agent(task_query, workspace_id):
                 task_query = guard_result["redacted_text"]
                 if guard_result["pii_types"]:
                     logger.info("PII 已脱敏: %s", guard_result["pii_types"])
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 logger.warning("输入 guardrail 失败（非致命）: %s", e)
 
         # Phase 3：意图识别 + short-circuit
@@ -474,7 +474,7 @@ async def run_deep_agent(task_query, workspace_id):
                     task_query = rewritten
                     logger.info("Query 已改写: %s", rewritten)
 
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 logger.warning("意图识别/改写失败（非致命），继续走 LLM 路由: %s", e)
 
         # Phase 5：语义缓存查询
@@ -490,7 +490,7 @@ async def run_deep_agent(task_query, workspace_id):
                     monitor._emit('cache', {"layer": _cache_hit.get("_layer"), "hit": True, **SemanticCache.get_stats()})
                     return
                 monitor._emit('cache', {"layer": "miss", "hit": False})
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 logger.warning("缓存查询失败（非致命）: %s", e)
 
         # P5：动态子 Agent（渐进启用）。开启时先用 LLM 规划角色，再取对应 agent；
@@ -500,7 +500,7 @@ async def run_deep_agent(task_query, workspace_id):
             try:
                 roles = await _plan_roles(task_query)
                 selected_agent = await get_main_agent_for_task(roles)
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001
                 logger.warning("[dynamic-agent] 决策失败，回退静态 agent: %s", exc)
                 selected_agent = await get_main_agent()
 
@@ -537,7 +537,7 @@ async def run_deep_agent(task_query, workspace_id):
                         _cached_intent, task_query,
                         {"answer": _final_answer, "trace_id": workspace_id},
                     )
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001
                     logger.warning("语义缓存写入失败: %s", e)
 
 
@@ -663,9 +663,9 @@ async def _execute_agent_core(task_query: str, workspace_id: str, main_agent=Non
                                         _og = guard_output(final_answer)
                                         if not _og["safe"]:
                                             logger.warning("输出 guardrail 拦截: pii=%s", _og["pii_leaked"])
-                                    except Exception as e:
+                                    except Exception as e:  # noqa: BLE001
                                         logger.warning("输出 guardrail 执行异常: %s", e)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.exception("main_agent 执行异常 workspace_id=%s", workspace_id)
         monitor.report_error(f"执行主智能发生异常信息：{str(e)}")
     finally:

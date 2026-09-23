@@ -49,7 +49,7 @@ def _default_context_getter() -> str | None:
         from agent_core.tracing import get_request_id
 
         return get_request_id() or None
-    except Exception:
+    except Exception:  # noqa: BLE001
         return None
 
 

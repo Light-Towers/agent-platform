@@ -127,7 +127,7 @@ def run_graph_task(
         update_task_status(task_id, "completed")
         logger.info(f"[{task_id}] LangGraph全流程执行完毕，任务完成")
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         # 5. 捕获全流程异常，更新任务全局状态为：失败，并记录错误日志（含堆栈）
         update_task_status(task_id, "failed")
         logger.error(f"[{task_id}] LangGraph全流程执行失败，异常信息：{str(e)}", exc_info=True)
@@ -240,7 +240,7 @@ async def upload_files(
                 content_type=file.content_type,  # 传递文件原始MIME类型
             )
             logger.info(f"[{task_id}] 文件已成功上传至MinIO，桶名：{minio_bucket_name}，对象名：{minio_object_name}")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             # MinIO上传失败，记录警告日志（不中断后续流程，本地文件仍可继续处理）
             logger.warning(f"[{task_id}] 文件上传MinIO失败，将继续执行本地处理流程，异常信息：{str(e)}", exc_info=True)
 

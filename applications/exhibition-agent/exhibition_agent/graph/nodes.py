@@ -85,7 +85,7 @@ async def run_skill(state: ExhibitionAgentState) -> dict[str, Any]:
             skill=skill_name,
         ):
             result: SkillResult = await skill.run(params, ctx)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         logger.exception("skill 执行异常：%s", exc)
         registry.record_latency(skill_name, now_ms() - start_ms)
         raw_code = getattr(exc, "code", None)

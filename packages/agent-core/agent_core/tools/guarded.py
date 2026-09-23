@@ -110,7 +110,7 @@ def _mark_guard_span(
         if exception is not None:
             try:
                 span.record_exception(exception)
-            except Exception:  # pragma: no cover - 防御
+            except Exception:  # noqa: BLE001 - pragma: no cover - 防御
                 pass
 
 

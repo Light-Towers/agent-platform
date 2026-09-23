@@ -30,7 +30,7 @@ try:  # 外部 deepagents 包（Agent Protocol 原生支持）
     from deepagents import AsyncSubAgent
 
     _HAS_DEEPAGENTS = True
-except Exception:  # pragma: no cover - 回退路径
+except Exception:  # noqa: BLE001 - pragma: no cover - 回退路径
     AsyncSubAgent = None  # type: ignore[assignment]
     _HAS_DEEPAGENTS = False
 
@@ -64,7 +64,7 @@ try:  # shared-schemas 已在 dependencies 声明（优化 E / B-1）
     from shared_schemas import QueryResponse as _QueryResponse
 
     _HAS_SHARED_SCHEMAS = True
-except Exception:  # pragma: no cover - 兜底：依赖缺失时跳过断言
+except Exception:  # noqa: BLE001 - pragma: no cover - 兜底：依赖缺失时跳过断言
     _QueryResponse = None
     _HAS_SHARED_SCHEMAS = False
 
@@ -87,7 +87,7 @@ def _normalize_response(data, name: str) -> dict:
         if _E1_CONTRACT_ASSERT and _HAS_SHARED_SCHEMAS:
             try:
                 _QueryResponse(**data)
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001
                 raise ValueError(
                     f"[{name}] 远程响应不符合 shared_schemas.QueryResponse 契约: {exc} | keys={list(data.keys())}"
                 ) from exc
@@ -187,7 +187,7 @@ class DelegatingSubAgent:
             from agent.config import get_subservice
 
             healthy = get_subservice(self._svc_key).healthy
-        except Exception:
+        except Exception:  # noqa: BLE001
             healthy = self._healthy_fallback
         if not healthy:
             logger.warning("[%s] 健康探活标记不可用，跳过远程委派，走本地 fallback", self.name)
@@ -215,7 +215,7 @@ class DelegatingSubAgent:
                 backoff_base=self.RETRY_BASE,
                 on_retry=self._log_delegate_retry,
             )
-        except Exception as last_exc:  # 网络/协议/子服务异常，用尽重试仍失败
+        except Exception as last_exc:  # noqa: BLE001 - 网络/协议/子服务异常，用尽重试仍失败
             # 4. 计入熔断 + 本地 fallback
             await self._breaker.record_failure()
             logger.error("[%s] 远程委派彻底失败，转入本地 fallback: %s", self.name, last_exc)
@@ -244,7 +244,7 @@ class DelegatingSubAgent:
                 result.setdefault("degraded_reason", reason)
                 record_delegation(success=True, degraded=True)
                 return result
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001
                 logger.error("[%s] 本地 fallback 也失败: %s", self.name, exc)
                 # 落入结构化降级响应
         # 熔断 + 本地兜底均不可用，才是「彻底失败」——驱动 delegation_failure_total（#4 修复）。

@@ -81,7 +81,7 @@ async def _persist_trajectory(
     for hook in runtime.post_execution_hooks:
         try:
             await hook(record, runtime)
-        except Exception:
+        except Exception:  # noqa: BLE001
             logger.warning("post-execution hook failed", exc_info=True)
 
 
@@ -319,7 +319,7 @@ async def _run_graph_in_place(
                         kwargs[arg] = results[ref[len("node:") :]]
                     else:
                         kwargs[arg] = ref
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001
                 cls = classify_exception(exc)
                 return node_id, None, {"class": cls.value, "error": str(exc)}, cls is ErrorClass.FATAL
             # §HA（H3）：同层 asyncio.gather 期间若租约已被新 owner 接管，下一层边界才
@@ -363,7 +363,7 @@ async def _run_graph_in_place(
                     return node_id, result, None, False
                 except ExecutionSuspended:
                     raise  # 控制流信号，不进入重试 / 异常分类
-                except Exception as exc:
+                except Exception as exc:  # noqa: BLE001
                     last_exc = exc
                     action = decide_failure_action(contract, classify_exception(exc))
                     if action is not FailureAction.RETRY_SAFE or attempt >= _NODE_BUSINESS_RETRY_MAX:

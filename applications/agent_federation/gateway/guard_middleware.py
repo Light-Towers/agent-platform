@@ -44,7 +44,7 @@ class GuardMiddleware(AgentMiddleware):
 
         try:
             result = guard_input(last.content)
-        except Exception as e:  # 护栏自身失败不应阻断 agent
+        except Exception as e:  # noqa: BLE001 - 护栏自身失败不应阻断 agent
             logger.warning("[guard] guard_input 失败，跳过脱敏: %s", e)
             return None
 

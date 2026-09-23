@@ -60,7 +60,7 @@ class AsyncLease:
         for callback in callbacks:
             try:
                 await callback()
-            except Exception:
+            except Exception:  # noqa: BLE001
                 logger.exception("AsyncLease release 回调执行失败: %r", callback)
 
     async def __aenter__(self) -> "AsyncLease":

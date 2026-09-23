@@ -27,13 +27,13 @@ def _check_one(name: str, url: str) -> bool:
             resp = client.get(f"{url}/health")
             if resp.status_code == 200:
                 return True
-    except Exception:
+    except Exception:  # noqa: BLE001
         pass
     try:
         with httpx.Client(timeout=_TIMEOUT) as client:
             resp = client.get(url)
             return resp.status_code < 500
-    except Exception:
+    except Exception:  # noqa: BLE001
         return False
 
 

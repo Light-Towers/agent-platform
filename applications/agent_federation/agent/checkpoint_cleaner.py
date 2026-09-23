@@ -126,7 +126,7 @@ async def clean_checkpoints(checkpointer, *, keep_per_thread: int | None = None)
             return await _clean_postgres(checkpointer, keep_per_thread)
         # InMemorySaver / 其他：无需持久化清理
         return 0
-    except Exception as e:  # 清理失败不应影响主服务
+    except Exception as e:  # noqa: BLE001 - 清理失败不应影响主服务
         logger.warning("checkpoint 清理异常（已跳过）: %s", e)
         return 0
 
@@ -141,7 +141,7 @@ async def _cleanup_loop(checkpointer, interval_hours: float, keep_per_thread: in
                 logger.info("checkpoint 定时清理完成，删除 %d 条", deleted)
         except asyncio.CancelledError:
             raise
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning("checkpoint 定时清理失败（下轮重试）: %s", e)
 
 
