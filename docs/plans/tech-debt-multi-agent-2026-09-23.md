@@ -2,7 +2,7 @@
 
 > **创建时间**：2026-09-23
 > **来源**：多 Agent 架构三层扫描（编排/通信/运行时）+ 逐条实跑核验
-> **已修**：P0×4 + P1×3 + C×11（18 条），**未修**：B 组架构落差 + C-3 httpx 复用
+> **已修**：P0×4 + P1×3 + C×14（18+3 条）+ B-2/B-3/B-4/B-5a，**豁免**：B-1/B-5b
 
 ## 已修复（第一批 P0+P1）
 
@@ -38,36 +38,29 @@
 kefu / nl2sql / knowledge / dialogue-framework 完全无 admission / coordinator / durability / 统一 Skill 治理。
 **决策**：这些服务各有自己的框架（LangGraph/deepagents），强行接入 agent-runtime 违反"框架选型偏好"。明确声明豁免——轻量服务不需要 Runtime 中间件，中间件由消费方（agent_server/federation）承担。
 
-### B-2: federation PlannerRuntime 缺 pool/checkpoint/trajectory/llm 注入（方案已制定）
-`planners/__init__.py:52` 只传 registry + max_*。已加 `max_duration_seconds`，但 pool/checkpoint/trajectory/llm 仍缺。
-**影响**：联邦 agentic 无 checkpoint/resume、无 trajectory、无记忆沉淀、无 LLM usage 计量。
-**方案**：`docs/plans/plan-b-group-architecture-2026-09-23.md` §B-2——懒构建 PG stores + llm 注入 `get_planner_runtime()`，pool 不可用时退化为 None。
+### B-2: federation PlannerRuntime 缺 pool/checkpoint/trajectory/llm 注入（已修）
+`planners/__init__.py` 已加 `_build_pg_stores()` + `_build_llm()` 懒构建注入 `get_planner_runtime()`，pool 不可用时退化为 None。
 
-### B-3: agentic 默认绕过 skill_guard（方案已制定）
-子服务委派走 deepagents 内置 `task` 工具，不经 `runtime.delegate` → `step_count` 恒为 1，深度/步数/循环约束不生效。
-**影响**：无委派深度限制，理论上可无限递归。
-**方案**：`docs/plans/plan-b-group-architecture-2026-09-23.md` §B-3——方案 D（文档化 + recursion_limit 兜底）+ 方案 C 轻量版（monitor 事件手动计数），不改 deepagents PyPI 包内部。
+### B-3: agentic 默认绕过 skill_guard（已修）
+`main_agent.py` astream 循环中加 task tool 调用计数，超 max_steps 中止。
 
 ### B-4: WS 路径绕过全部中间件（已修）
 `api/server.py` 的 `/ws/{thread_id}` 已加 `start_span("ws.query")` + 异常日志。admission/coordinator 暂未接入（WS 长连接语义与 HTTP 请求不同，需专门设计）。
 
-### B-5: 一批中间件零装配（方案已制定）
-ExecutionScheduler / ControlPlane / WorkingMemory / side_effect_store / ExecutionRecovery 定义了但未接线。SkillRegistry 6 个中间件只装配了 search 熔断。
-**方案**：`docs/plans/plan-b-group-architecture-2026-09-23.md` §B-5——5a（RetryMiddleware + AuditMiddleware 装配，快速可做）+ 5b（side_effect_store 随 B-2 完成；ExecutionScheduler/ControlPlane/WorkingMemory/ExecutionRecovery 豁免——已有等价能力，强行装配产生双重编排）。
+### B-5: 一批中间件零装配（B-5a 已修，B-5b 豁免）
+B-5a: SkillRegistry 已装配 RetryMiddleware + AuditMiddleware（agent_server + agent_federation）。
+B-5b: ExecutionScheduler/ControlPlane/WorkingMemory/ExecutionRecovery 豁免——已有等价能力，强行装配产生双重编排。
 
-## 未修：C 组（一致性缺陷）
+## 已修复：C 组（一致性缺陷，含 C-1/C-2/C-3）
 
-### C-1: trace 多处断链
-联邦→子服务不传 traceparent；agent_server 接收 `traceparent` 却弃用；knowledge 忽略 `trace_id`。
-**修复方向**：联邦出站注入 traceparent header；各服务入口提取并建立 parent span 关联。
+### C-1: trace 多处断链（已修）
+联邦出站注入 traceparent（`async_subagents.py` + `zhiku_tools.py`）；agent_server 入站提取+use_context（`routes.py`）；knowledge-service 入站提取（`query_router.py` /query + /api/v1/retrieve）。
 
-### C-2: 契约无版本字段
-`QueryRequest` / `QueryResponse` 无 `version` 字段，无漂移检测。
-**修复方向**：加 `version` 字段 + `X-Contract-Version` header 协商。
+### C-2: 契约无 version 字段（已修）
+`shared_schemas.query` QueryRequest/QueryResponse 新增 `version` 字段（缺省 "1.0"，向后兼容），导出 `CONTRACT_VERSION`。
 
-### C-3: 全仓 httpx client 不复用
-每次调用新建 `httpx.AsyncClient`，无连接池复用（仅 dialogue-framework 复用）。
-**修复方向**：各服务用模块级懒加载 client（参考 `rest_channel.py:45-47`）。
+### C-3: 全仓 httpx client 不复用（已修）
+agent_server `capabilities.py` + 联邦 `async_subagents.py` + `zhiku_tools.py` 改为进程级共享 client（连接池复用）。
 
 ### C-4: deterministic vs agentic 错误处理漂移
 deterministic 异常炸断 SSE（无 error 事件），agentic 有完整 error 事件。
