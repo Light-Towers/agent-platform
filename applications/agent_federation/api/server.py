@@ -218,8 +218,14 @@ async def run_task(request: QueryRequest):
     thread_id = resolve_thread_id(request.session_id, api_key)
     with start_span("api.task", attrs={"thread_id": thread_id}):
         async def _run():
-            async with _concurrency_semaphore:
-                await run_deep_agent(request.query, workspace_id=thread_id)
+            try:
+                async with _concurrency_semaphore:
+                    await asyncio.wait_for(
+                        run_deep_agent(request.query, workspace_id=thread_id),
+                        timeout=float(os.getenv("FED_TASK_TIMEOUT_S", "300")),
+                    )
+            except Exception:
+                logger.exception("background task failed: thread_id=%s", thread_id)
 
         _track_task(asyncio.create_task(_run()))
         return TaskAcceptedResponse(status="started", thread_id=thread_id)

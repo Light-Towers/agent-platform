@@ -9,38 +9,44 @@ from agent_runtime.db import vector_search
 from agent_server.rag.embed import embed_query, embed_texts
 
 
-async def store_ddl(pool, ddl: str) -> None:
+async def store_ddl(pool, ddl: str, workspace_id: str = "") -> None:
     vec = (await embed_texts([ddl]))[0]
     async with pool.connection() as conn:
         await conn.execute(
-            "INSERT INTO sql_ddl (content, embedding) VALUES (%s, %s)", (ddl, vec)
+            "INSERT INTO sql_ddl (content, embedding, workspace_id) VALUES (%s, %s, %s)", (ddl, vec, workspace_id)
         )
 
 
-async def store_doc(pool, doc: str) -> None:
+async def store_doc(pool, doc: str, workspace_id: str = "") -> None:
     vec = (await embed_texts([doc]))[0]
     async with pool.connection() as conn:
         await conn.execute(
-            "INSERT INTO sql_docs (content, embedding) VALUES (%s, %s)", (doc, vec)
+            "INSERT INTO sql_docs (content, embedding, workspace_id) VALUES (%s, %s, %s)", (doc, vec, workspace_id)
         )
 
 
-async def store_example(pool, question: str, sql: str) -> None:
+async def store_example(pool, question: str, sql: str, workspace_id: str = "") -> None:
     vec = (await embed_texts([question]))[0]
     async with pool.connection() as conn:
         await conn.execute(
-            "INSERT INTO sql_examples (question, sql, embedding) VALUES (%s, %s, %s)",
-            (question, sql, vec),
+            "INSERT INTO sql_examples (question, sql, embedding, workspace_id) VALUES (%s, %s, %s, %s)",
+            (question, sql, vec, workspace_id),
         )
 
 
-async def fetch_context(pool, question: str, k: int = 3) -> dict:
+async def fetch_context(pool, question: str, k: int = 3, workspace_id: str = "") -> dict:
     """按语义相似度召回最相关的 DDL / 文档 / 范例。"""
     if pool is None:
         return {"ddl": [], "docs": [], "examples": []}
     embedding = await embed_query(question)
 
     async def _top(table: str, cols: str) -> list:
+        if workspace_id:
+            return await vector_search(
+                pool, table, cols, embedding, k=k,
+                where="embedding IS NOT NULL AND workspace_id = %s",
+                where_params=(workspace_id,),
+            )
         return await vector_search(pool, table, cols, embedding, k=k)
 
     ddl_rows = await _top("sql_ddl", "content")

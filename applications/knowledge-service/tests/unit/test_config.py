@@ -22,10 +22,10 @@ def test_settings_default_milvus_url():
     assert settings.milvus_url == "http://localhost:19530"
 
 
-def test_settings_default_app_port_is_int_8000():
-    # 端口应为 int 类型，默认 8000
+def test_settings_default_app_port_is_int_8900():
+    # 端口应为 int 类型，默认 8900（与 AGENTS.md 声明 + 联邦期望一致）
     assert isinstance(settings.app_port, int)
-    assert settings.app_port == 8000
+    assert settings.app_port == 8900
 
 
 def test_settings_default_mongo_db_name():

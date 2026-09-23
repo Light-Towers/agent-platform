@@ -51,23 +51,32 @@ CREATE TABLE IF NOT EXISTS sql_ddl (
     id BIGSERIAL PRIMARY KEY,
     content TEXT NOT NULL,
     embedding vector({dim}),
+    workspace_id TEXT NOT NULL DEFAULT '',
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+ALTER TABLE sql_ddl ADD COLUMN IF NOT EXISTS workspace_id TEXT NOT NULL DEFAULT '';
+CREATE INDEX IF NOT EXISTS idx_sql_ddl_workspace ON sql_ddl (workspace_id);
 
 CREATE TABLE IF NOT EXISTS sql_docs (
     id BIGSERIAL PRIMARY KEY,
     content TEXT NOT NULL,
     embedding vector({dim}),
+    workspace_id TEXT NOT NULL DEFAULT '',
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+ALTER TABLE sql_docs ADD COLUMN IF NOT EXISTS workspace_id TEXT NOT NULL DEFAULT '';
+CREATE INDEX IF NOT EXISTS idx_sql_docs_workspace ON sql_docs (workspace_id);
 
 CREATE TABLE IF NOT EXISTS sql_examples (
     id BIGSERIAL PRIMARY KEY,
     question TEXT NOT NULL,
     sql TEXT NOT NULL,
     embedding vector({dim}),
+    workspace_id TEXT NOT NULL DEFAULT '',
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+ALTER TABLE sql_examples ADD COLUMN IF NOT EXISTS workspace_id TEXT NOT NULL DEFAULT '';
+CREATE INDEX IF NOT EXISTS idx_sql_examples_workspace ON sql_examples (workspace_id);
 
 CREATE TABLE IF NOT EXISTS admission_queue (
     request_id TEXT PRIMARY KEY,

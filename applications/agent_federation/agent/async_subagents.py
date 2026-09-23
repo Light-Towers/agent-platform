@@ -160,15 +160,23 @@ class DelegatingSubAgent:
         self.endpoint = svc.endpoint
         self.description = description or getattr(inner, "description", "")
         self._inner = inner
-        self._svc = svc
+        self._svc_key = key
+        self._healthy_fallback = svc.healthy
+        self._local_agent_spec = svc.local_agent
         self._breaker = get_breaker_sync(self.name)
         self._local_agent = None  # 懒编译
 
     @observe(name="subagent.delegate", as_type="span")
     async def ainvoke(self, input: dict) -> dict:
         monitor.report_assistant(self.name, {"event": "delegate_start"})
-        # 1. 健康探活短路（config.healthy 由 health_check 维护）
-        if not self._svc.healthy:
+        # 1. 健康探活短路（动态查最新状态，查不到时回退构造时状态）
+        try:
+            from agent.config import get_subservice
+
+            healthy = get_subservice(self._svc_key).healthy
+        except Exception:
+            healthy = self._healthy_fallback
+        if not healthy:
             logger.warning("[%s] 健康探活标记不可用，跳过远程委派，走本地 fallback", self.name)
             monitor.report_assistant(self.name, {"event": "delegate_degraded", "reason": "unhealthy"})
             return await self._fallback(input, reason="unhealthy")
@@ -214,7 +222,7 @@ class DelegatingSubAgent:
         配置了 local_agent（dict）时尝试编译并调用本地 subagent；
         否则返回结构化降级响应，避免把失败抛给主管线程。
         """
-        local_spec = self._svc.local_agent
+        local_spec = self._local_agent_spec
         if local_spec:
             try:
                 agent = self._get_local_agent(local_spec)

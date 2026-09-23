@@ -44,7 +44,7 @@ def _as_int(value: str, default: int) -> int:
 class Settings:
     # -------------------------- 应用 --------------------------
     app_host: str = os.getenv("APP_HOST", "0.0.0.0")
-    app_port: int = _as_int(os.getenv("APP_PORT"), 8000)
+    app_port: int = _as_int(os.getenv("APP_PORT"), 8900)
     _project_root_env = os.environ.get("PROJECT_ROOT")
     project_root: Path = Path(_project_root_env) if _project_root_env else Path(__file__).resolve().parent.parent.parent
     cors_origins: str = os.getenv("CORS_ORIGINS", "http://localhost:8000")
