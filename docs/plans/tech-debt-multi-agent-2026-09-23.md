@@ -2,9 +2,9 @@
 
 > **创建时间**：2026-09-23
 > **来源**：多 Agent 架构三层扫描（编排/通信/运行时）+ 逐条实跑核验
-> **已修**：P0×4 + P1×3（7 条），**未修**：B 组架构落差 + C 组一致性缺陷
+> **已修**：P0×4 + P1×3 + C×11（18 条），**未修**：B 组架构落差 + C-3 httpx 复用
 
-## 已修复（本次）
+## 已修复（第一批 P0+P1）
 
 | # | 缺陷 | 文件 | 修复方式 |
 |---|------|------|---------|
@@ -15,6 +15,22 @@
 | P1-1 | federation Runtime 缺 `max_duration_seconds` | `agent_federation/planners/__init__.py` | 加 `FED_MAX_DURATION_SECONDS` 默认 60 |
 | P1-2 | rag_query 端点配错 | `agent_federation/agent/config.py` | `/api/messages` → `/query` |
 | P1-3 | 语义缓存跨租户 + knowledge /history 无租户 | `cache.py` / `db.py` / `routes.py` / `mongo.py` / `query_router.py` | 加 `tenant_id` 参数 + WHERE 过滤 + DDL 加列 |
+
+## 已修复（第二批 C 组）
+
+| # | 缺陷 | 文件 | 修复方式 |
+|---|------|------|---------|
+| C-9 | health_check 404 误判 | `health_check.py` | `/health` 非 200 时 fall through 到 fallback |
+| C-5 | 无 recursion_limit | `main_agent.py` | config 加 `recursion_limit` 默认 50 |
+| C-10 | 默认端口冲突 | `knowledge_service/core/config.py` | 默认端口 8000 → 8900 |
+| C-6 | select_skill 未知 skill 静默落默认 | `exhibition_agent/graph/nodes.py` | 加 `skill_error` + run_skill 检查 |
+| C-12 | sandbox env 泄漏 | `agent_runtime/sandbox.py` | 白名单 env（PATH/SystemRoot/TEMP 等） |
+| C-4 | deterministic 异常炸断 SSE | `agent_server/api/routes.py` | `_stream()` 加 except yield error+done |
+| C-13 | 健康探活标记对已构造 subagent 失效 | `async_subagents.py` | `_svc` → `_svc_key` 动态查 + healthy fallback |
+| C-14 | /api/task 无超时+异常静默 | `agent_federation/api/server.py` | 加 wait_for + try/except |
+| C-11 | singleflight 互斥失效 | `agent_runtime/singleflight.py` | lock 延迟 300s 移除（与结果缓存同步） |
+| C-7 | SQL 元知识跨租户 | `db.py` / `schema_store.py` | 加 workspace_id 列 + WHERE 过滤 |
+| C-8 | knowledge /api/v1/retrieve 无租户 | `query_router.py` | RetrieveRequest 加 tenant_id/scope_type + 透传 |
 
 ## 未修：B 组（架构落差）
 

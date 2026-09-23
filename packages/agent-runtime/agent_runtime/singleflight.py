@@ -50,9 +50,11 @@ async def singleflight(
             _inflight_results[key] = result
             return result
         finally:
-            _locks.pop(key, None)
             loop = asyncio.get_event_loop()
-            loop.call_later(300, lambda: _inflight_results.pop(key, None))
+            loop.call_later(300, lambda: (
+                _inflight_results.pop(key, None),
+                _locks.pop(key, None),
+            ))
 
 
 __all__ = ["singleflight"]

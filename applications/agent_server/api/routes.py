@@ -271,6 +271,9 @@ async def query(
                     snapshot=round_snapshot,
                 )
             yield _sse({"type": "done", "thread_id": thread_id, "answer": final_answer})
+        except Exception as exc:
+            yield _sse({"type": "error", "error": str(exc)})
+            yield _sse({"type": "done", "thread_id": thread_id, "answer": ""})
         finally:
             if _span_cm is not None:
                 _span_cm.__exit__(None, None, None)

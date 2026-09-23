@@ -40,6 +40,13 @@ def select_skill(state: ExhibitionAgentState) -> dict[str, Any]:
     explicit = params.get("skill")
     if isinstance(explicit, str) and explicit in _SKILLS:
         return {"skill_name": explicit, "latency_start_ms": now_ms()}
+    if isinstance(explicit, str) and explicit:
+        logger.warning("未知 skill: %s，回退默认", explicit)
+        return {
+            "skill_name": _DEFAULT_SKILL.name,
+            "latency_start_ms": now_ms(),
+            "skill_error": f"unknown skill: {explicit}",
+        }
     if "nl_query" in params:
         return {"skill_name": _DATA_ANALYSIS_SKILL.name, "latency_start_ms": now_ms()}
     return {"skill_name": _DEFAULT_SKILL.name, "latency_start_ms": now_ms()}
@@ -47,6 +54,14 @@ def select_skill(state: ExhibitionAgentState) -> dict[str, Any]:
 
 async def run_skill(state: ExhibitionAgentState) -> dict[str, Any]:
     """执行 skill（按 skill_name 分派），处理结果（包 span + metrics 记录）。"""
+    skill_error = state.get("skill_error")
+    if skill_error:
+        return {
+            "skill_result": None,
+            "answer": f"未知 skill: {skill_error}",
+            "error": "UNKNOWN_SKILL",
+            "sql_statements": state.get("sql_statements", []),
+        }
     skill_name = state.get("skill_name", _DEFAULT_SKILL.name)
     skill = _SKILLS.get(skill_name, _DEFAULT_SKILL)
     registry = state.get("metrics_registry") or get_default_registry()

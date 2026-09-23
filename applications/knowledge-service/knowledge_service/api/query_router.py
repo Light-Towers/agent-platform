@@ -74,6 +74,8 @@ class RetrieveRequest(BaseModel):
 
     query: str = Field(..., min_length=1, max_length=512, description="查询内容（上限 512 字符）")
     item_name: str = Field("", max_length=128, description="商品名（Milvus item_name 过滤依据）")
+    tenant_id: str = Field("", description="租户 ID（多租户隔离）")
+    scope_type: str = Field("", max_length=32, description="PUBLIC | PRIVATE，多知识空间隔离")
 
 
 # 证明服务器启动即可
@@ -268,6 +270,8 @@ async def retrieve(payload: RetrieveRequest):
         "rewritten_query": payload.query,
         "item_names": [payload.item_name] if payload.item_name else [],
         "is_stream": False,
+        "tenant_id": payload.tenant_id or "",
+        "scope_type": payload.scope_type or "",
     }
 
     # 1) 召回：embedding 路（与线上 node_search_embedding 同一函数；M6 fanout 超时隔离已作用于线上图）

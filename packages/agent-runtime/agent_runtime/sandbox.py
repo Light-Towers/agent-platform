@@ -33,6 +33,12 @@ import logging
 import os
 import shutil
 import sys
+
+_SAFE_ENV_KEYS = frozenset({
+    "PATH", "Path", "PYTHONPATH", "PATHEXT",
+    "SystemRoot", "SYSTEMROOT", "TEMP", "TMP",
+    "HOME", "USER", "USERNAME", "LANG", "LC_ALL", "LC_CTYPE",
+})
 from dataclasses import dataclass
 from typing import Literal
 
@@ -201,6 +207,7 @@ class SandboxExecutor:
                 sys.executable, "-c", code,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                env={k: v for k, v in os.environ.items() if k in _SAFE_ENV_KEYS},
             )
             try:
                 stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)

@@ -579,7 +579,10 @@ async def _execute_agent_core(task_query: str, workspace_id: str, main_agent=Non
     thread_token = set_thread_context(workspace_id)
     monitor.report_session_dir(session_dir_str)
 
-    config = {"configurable": {"thread_id": workspace_id}}
+    config = {
+        "configurable": {"thread_id": workspace_id},
+        "recursion_limit": int(os.getenv("FED_RECURSION_LIMIT", "50")),
+    }
 
     path_instruction = f"""
     【工作环境指令】
