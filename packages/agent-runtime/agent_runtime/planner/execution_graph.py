@@ -23,7 +23,7 @@ from agent_core.resilience import ErrorClass, classify_exception
 from agent_runtime.effect_contract import FailureAction, decide_failure_action
 from agent_runtime.forensic import ForensicContext
 from agent_runtime.planner.durability import Checkpoint, FencedWriteError
-from agent_runtime.planner.protocol import Plan, StreamEvent
+from agent_runtime.planner.protocol import ExecutionSuspended, Plan, StreamEvent
 from agent_runtime.trajectory.models import TrajectoryRecord
 
 # 执行级业务重试上限（见 M1.1 重试边界：transport 1–2 < skill 级 2 < 本处 2，禁止叠加）
@@ -321,6 +321,8 @@ async def _run_graph_in_place(
                             owner=exec_ctx.lease_owner or "",
                         )
                     return node_id, result, None, False
+                except ExecutionSuspended:
+                    raise  # 控制流信号，不进入重试 / 异常分类
                 except Exception as exc:
                     last_exc = exc
                     action = decide_failure_action(contract, classify_exception(exc))
@@ -348,7 +350,35 @@ async def _run_graph_in_place(
             )
 
         if pending:
-            layer_results = await asyncio.gather(*(_run(nid) for nid in pending))
+            try:
+                layer_results = await asyncio.gather(*(_run(nid) for nid in pending))
+            except ExecutionSuspended as exc:
+                # V3-3: 执行挂起——保存 checkpoint（已完成节点，不含挂起节点）+ 产出 suspended 事件
+                if checkpoint_store is not None and execution_id is not None:
+                    try:
+                        await checkpoint_store.save(
+                            Checkpoint(
+                                execution_id,
+                                dict(results),
+                                resumable=True,
+                                generation=(
+                                    exec_ctx.lease_generation
+                                    if exec_ctx is not None
+                                    else None
+                                ),
+                            )
+                        )
+                    except FencedWriteError:
+                        pass  # stale writer，checkpoint 已被新 owner 覆盖
+                yield StreamEvent(
+                    type="suspended",
+                    payload={
+                        "task_id": exc.task_id,
+                        "node_id": exc.node_id,
+                        "execution_id": execution_id,
+                    },
+                )
+                return
             for node_id, result, error_info, fatal in layer_results:
                 payload_extra = {
                     "node": node_id,

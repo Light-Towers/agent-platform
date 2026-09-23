@@ -325,6 +325,16 @@ async def lifespan(app: FastAPI):
     app.state.planner = get_planner(settings, registry=registry)
     post_execution_hooks = _build_memory_hooks(pool)
     app.state.context_governor = _build_context_governor(pool, llm)
+    # V3-3: AwaitableTask 持久化（PG 优先，InMemory 降级）
+    if pool is not None:
+        from agent_runtime.awaitable_task_pg import PgAwaitableTaskStore
+
+        awaitable_task_store = PgAwaitableTaskStore(pool)
+    else:
+        from agent_runtime.awaitable_task import InMemoryAwaitableTaskStore
+
+        awaitable_task_store = InMemoryAwaitableTaskStore()
+    app.state.awaitable_task_store = awaitable_task_store
     app.state.planner_runtime = PlannerRuntime(
         registry=registry,
         llm=llm,
@@ -340,6 +350,7 @@ async def lifespan(app: FastAPI):
         workspace_id="default",
         user_id="default",
         post_execution_hooks=post_execution_hooks,
+        awaitable_task_store=awaitable_task_store,
     )
     # 绑定 delegate：graph 节点的 _invoke 此后经 runtime.delegate 调用
     delegate_ref.delegate = app.state.planner_runtime.delegate

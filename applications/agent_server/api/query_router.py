@@ -280,6 +280,17 @@ async def query(
                         final_answer = event.payload.get("text", "")
                     elif event.type == "status" and event.payload.get("snapshot"):
                         round_snapshot = event.payload["snapshot"]
+                    elif event.type == "suspended" and status_store is not None:
+                        # V3-3: 执行挂起 → ExecutionStatus → WAITING_EXTERNAL
+                        from agent_runtime.execution_status import ExecutionStatus, ExecutionStatusRecord
+
+                        try:
+                            await status_store.save(ExecutionStatusRecord(
+                                execution_id=request_id,
+                                status=ExecutionStatus.WAITING_EXTERNAL,
+                            ))
+                        except Exception:
+                            logger.debug("status save WAITING_EXTERNAL failed", exc_info=True)
             if final_answer and q_embedding is not None:
                 semantic_cache.cache_store(pool, req.query, final_answer, q_embedding, tenant_id=req.tenant_id or "")
             # Phase 3: 对话历史写回——Planner 协议中立（不持线程语义），由 app 层承担。

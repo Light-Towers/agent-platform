@@ -41,7 +41,20 @@ from agent_runtime.planner.durability import (
 )
 from agent_runtime.trajectory.models import TrajectoryStep
 
-StreamEventType = Literal["route", "evidence", "memory", "answer", "error", "status", "replan"]
+StreamEventType = Literal["route", "evidence", "memory", "answer", "error", "status", "replan", "suspended"]
+
+
+class ExecutionSuspended(Exception):
+    """执行挂起信号：Skill 返回 ``__awaitable__`` 标记，执行暂停等待外部回调。
+
+    非业务异常——是控制流信号，被 ``_run_graph_in_place`` 捕获后保存 checkpoint
+    并产出 ``suspended`` 事件。同步 Skill 路径不触发。
+    """
+
+    def __init__(self, task_id: str, node_id: str | None = None) -> None:
+        self.task_id = task_id
+        self.node_id = node_id
+        super().__init__(f"execution suspended: task_id={task_id} node_id={node_id}")
 
 # 当前执行上下文绑定的 Runtime（在 ``execution()`` 边界内 set，边界外为 None）。
 # 供嵌套 Skill 执行器（如 Workflow Skill 内部执行子 Skill）获取 Runtime 并经
@@ -367,6 +380,7 @@ class PlannerRuntime:
         user_id: str = "default",
         replica_id: str = "replica",
         post_execution_hooks: list[Any] | None = None,
+        awaitable_task_store: Any = None,
     ):
         self.registry = registry
         self.llm = llm
@@ -405,6 +419,8 @@ class PlannerRuntime:
         # 执行完成后自动触发的 hooks（如 EpisodicSink / ProceduralSink），
         # 每个 hook 签名：async hook(trajectory: TrajectoryRecord, runtime: PlannerRuntime) -> None
         self.post_execution_hooks: list[Any] = post_execution_hooks or []
+        # V3-3: AwaitableTask 持久化（delegate 检测 __awaitable__ 时创建 AwaitableTask）
+        self.awaitable_task_store = awaitable_task_store
         # 执行期上下文（per-request，经 ContextVar 隔离）：execution() 入口创建
         # ExecutionContext 并 set，同 task 链内共享，跨 task 互不干扰。
         self._ctx_var: contextvars.ContextVar[ExecutionContext | None] = contextvars.ContextVar(
@@ -621,6 +637,36 @@ class PlannerRuntime:
                         forensic=_forensic_dict,
                     )
                 raise
+            # V3-3: 检测异步 Skill 返回（__awaitable__ 标记）→ 创建 AwaitableTask + 挂起执行
+            if (
+                isinstance(result, dict)
+                and result.get("__awaitable__")
+                and ctx is not None
+                and self.awaitable_task_store is not None
+            ):
+                from agent_runtime.awaitable_task import (
+                    AwaitableKind,
+                    AwaitableState,
+                    AwaitableTask,
+                )
+
+                task = AwaitableTask(
+                    execution_id=ctx.execution_id,
+                    step_id=name,
+                    kind=AwaitableKind.EXTERNAL,
+                    provider=str(result.get("provider", "unknown")),
+                    provider_task_id=str(result.get("task_id", "")),
+                    state=AwaitableState.SUBMITTED,
+                    metadata={"skill_name": name, "submitted_result": result},
+                )
+                await self.awaitable_task_store.save(task)
+                if ctx is not None:
+                    ctx.record_step(
+                        name, kwargs, result, None,
+                        time.monotonic() - t0, ctx.tokens_used - tokens_before,
+                        forensic=_forensic_dict,
+                    )
+                raise ExecutionSuspended(task_id=task.task_id, node_id=name)
             if ctx is not None:
                 ctx.record_step(
                     name, kwargs, result, None,
@@ -722,5 +768,12 @@ def serialize_stream_event(event: StreamEvent) -> dict | None:
         return {"type": "answer", "text": event.payload.get("text", "")}
     if event.type == "error":
         return {"type": "error", **event.payload}
+    if event.type == "suspended":
+        return {
+            "type": "suspended",
+            "task_id": event.payload.get("task_id"),
+            "node_id": event.payload.get("node_id"),
+            "execution_id": event.payload.get("execution_id"),
+        }
     return None
 
