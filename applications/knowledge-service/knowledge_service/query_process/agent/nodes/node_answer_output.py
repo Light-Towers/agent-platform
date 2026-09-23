@@ -13,7 +13,7 @@ from knowledge_service.utils.sse_utils import SSEEvent, push_to_session
 from knowledge_service.utils.task_utils import add_done_task, add_running_task, set_task_result
 
 _IMAGE_BLOCK_MARKER = "【图片】"
-MAX_CONTEXT_CHARS = 12000
+MAX_CONTEXT_CHARS = settings.knowledge_max_context_chars
 
 
 def step_1_check_answer(state) -> bool:

@@ -12,6 +12,7 @@ from knowledge_service.clients.mongo_history_utils import (
 )
 from knowledge_service.conf.milvus_config import milvus_config
 from knowledge_service.conf.retrieval_config import retrieval_cfg
+from knowledge_service.core.config import settings
 from knowledge_service.core.load_prompt import load_prompt
 from knowledge_service.core.logger import logger
 from knowledge_service.core.tracing import start_span
@@ -329,7 +330,7 @@ def node_item_name_confirm(state: QueryGraphState) -> QueryGraphState:
 
     # 1. 获取历史记录（带 tenant 隔离）
     tenant_id = state.get("tenant_id")
-    history = get_recent_messages(session_id, limit=10, tenant_id=tenant_id)
+    history = get_recent_messages(session_id, limit=settings.knowledge_max_history_rounds, tenant_id=tenant_id)
     logger.info(f"Node: 获取到 {len(history)} 条历史消息")
 
     # 2. 保存用户当前消息 (初始保存，后续 step 7 会更新)

@@ -28,7 +28,7 @@ def format_history(history: List[dict], used: int = 0, max_chars: int = 12000) -
 
     :param history: MongoDB 历史消息列表，元素形如 {"role": ..., "text": ...}
     :param used: 已使用的预算（通常为上文文档部分累加后的值）
-    :param max_chars: 上下文总预算（默认与 node_answer_output.MAX_CONTEXT_CHARS 一致）
+    :param max_chars: 上下文总预算（默认 12000，与 settings.knowledge_max_context_chars 默认值对齐；调用方应显式传入）
     :return: (history_str, 累加后的 used)
     """
     history_str = ""
