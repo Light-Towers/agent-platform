@@ -599,6 +599,13 @@ async def _execute_agent_core(task_query: str, workspace_id: str, main_agent=Non
     memory_ctx = await recall_typed_context(workspace_id, task_query)
 
     final_answer = ""
+    # B-3：子 agent 委派步数计数——在 astream 循环中检测 task tool 调用，
+    # 超 max_steps 时中止执行（recursion_limit 作为框架级兜底）。
+    from agent_runtime.planner.protocol import get_current_runtime
+
+    _runtime = get_current_runtime()
+    _max_subagent_steps = _runtime.max_steps if _runtime else int(os.getenv("FED_MAX_STEPS", "20"))
+    _subagent_step_count = 0
     # P1.6：同一 workspace_id（thread_id）串行执行，避免并发撕裂 checkpointer 状态。
     agent = main_agent or await get_main_agent()
     lock = await _get_thread_lock(workspace_id)
@@ -619,8 +626,19 @@ async def _execute_agent_core(task_query: str, workspace_id: str, main_agent=Non
                             if last_msg.tool_calls:
                                 for tool_call in last_msg.tool_calls:
                                     if tool_call['name'] == 'task':
+                                        _subagent_step_count += 1
+                                        if _subagent_step_count > _max_subagent_steps:
+                                            raise RuntimeError(
+                                                f"子 agent 委派步数超上限（{_max_subagent_steps}），"
+                                                f"中止执行以防无限递归"
+                                            )
                                         subagent_type = tool_call['args']['subagent_type']
-                                        logger.info("委派子智能体: %s", subagent_type)
+                                        logger.info(
+                                            "委派子智能体: %s (step %d/%d)",
+                                            subagent_type,
+                                            _subagent_step_count,
+                                            _max_subagent_steps,
+                                        )
                                         monitor.report_assistant(
                                             subagent_type,
                                             {'description': tool_call['args']['description']}

@@ -17,6 +17,7 @@ Runtime 边界（架构审核 P1）：熔断经 ``CircuitBreakerMiddleware`` 挂
 
 from __future__ import annotations
 
+import logging
 from functools import partial
 from typing import Any
 
@@ -24,7 +25,7 @@ from agent_runtime.circuit_breaker import CircuitBreaker
 from agent_runtime.mcp_client import MCPClientManager
 from agent_runtime.skills.dag import as_dag_skill
 from agent_runtime.skills.function import as_function_skill
-from agent_runtime.skills.middleware import CircuitBreakerMiddleware
+from agent_runtime.skills.middleware import AuditMiddleware, CircuitBreakerMiddleware, RetryMiddleware
 from agent_runtime.skills.registry import SkillRegistry
 
 from agent_server.agent.state import AgentState
@@ -113,6 +114,19 @@ def _get_breaker() -> CircuitBreaker:
     return _breaker
 
 
+_audit_logger = logging.getLogger("skill.audit")
+
+
+async def _audit_sink(name: str, kwargs: dict, result: Any, error: str | None, latency_s: float) -> None:
+    """审计 sink：记录每次 Skill 调用的审计事件（合规留痕 / 攻击溯源）。"""
+    _audit_logger.info(
+        "skill_call name=%s latency=%.3fs error=%s",
+        name,
+        latency_s,
+        error or "none",
+    )
+
+
 def build_registry(graph: Any | None = None) -> SkillRegistry:
     """构建 app 能力注册表（幂等；重复调用返回新实例，供测试隔离）。
 
@@ -122,7 +136,11 @@ def build_registry(graph: Any | None = None) -> SkillRegistry:
     Runtime 边界（架构审核 P1）：熔断经中间件链收敛——``CircuitBreakerMiddleware``
     仅包裹 search（隔离故障域），search 实现不再内嵌 breaker。
     """
-    middlewares = [CircuitBreakerMiddleware(_get_breaker(), skill_names=("search",))]
+    middlewares = [
+        CircuitBreakerMiddleware(_get_breaker(), skill_names=("search",)),
+        RetryMiddleware(max_retries=2, backoff_s=0.5),
+        AuditMiddleware(_audit_sink, redact=True),
+    ]
     settings = get_settings()
     if settings.tool_result_compression_enabled:
         from agent_runtime.skills.middleware import ToolResultCompressionMiddleware

@@ -38,22 +38,22 @@
 kefu / nl2sql / knowledge / dialogue-framework 完全无 admission / coordinator / durability / 统一 Skill 治理。
 **决策**：这些服务各有自己的框架（LangGraph/deepagents），强行接入 agent-runtime 违反"框架选型偏好"。明确声明豁免——轻量服务不需要 Runtime 中间件，中间件由消费方（agent_server/federation）承担。
 
-### B-2: federation PlannerRuntime 缺 pool/checkpoint/trajectory/llm 注入（后续架构方案）
+### B-2: federation PlannerRuntime 缺 pool/checkpoint/trajectory/llm 注入（方案已制定）
 `planners/__init__.py:52` 只传 registry + max_*。已加 `max_duration_seconds`，但 pool/checkpoint/trajectory/llm 仍缺。
 **影响**：联邦 agentic 无 checkpoint/resume、无 trajectory、无记忆沉淀、无 LLM usage 计量。
-**修复方向**：在 `get_planner_runtime()` 中注入 pool（从 `agent.db.get_pool()`）+ checkpoint/trajectory store。但 federation agentic 走 deepagents `create_deep_agent`，不走 `execution_graph`，即使注入也不会被用——需先改 `AgenticPlanner.execute/arun` 走 execution_graph 或手动调 checkpoint/trajectory。**架构级改动，需先制定方案。**
+**方案**：`docs/plans/plan-b-group-architecture-2026-09-23.md` §B-2——懒构建 PG stores + llm 注入 `get_planner_runtime()`，pool 不可用时退化为 None。
 
-### B-3: agentic 默认绕过 skill_guard（后续架构方案）
+### B-3: agentic 默认绕过 skill_guard（方案已制定）
 子服务委派走 deepagents 内置 `task` 工具，不经 `runtime.delegate` → `step_count` 恒为 1，深度/步数/循环约束不生效。
 **影响**：无委派深度限制，理论上可无限递归。
-**修复方向**：将 deepagents `task` 工具调用改为经 `runtime.delegate`，或在 `_execute_agent_core` 中手动累计步数 + 深度检查。**架构级改动，需先制定方案。**
+**方案**：`docs/plans/plan-b-group-architecture-2026-09-23.md` §B-3——方案 D（文档化 + recursion_limit 兜底）+ 方案 C 轻量版（monitor 事件手动计数），不改 deepagents PyPI 包内部。
 
 ### B-4: WS 路径绕过全部中间件（已修）
 `api/server.py` 的 `/ws/{thread_id}` 已加 `start_span("ws.query")` + 异常日志。admission/coordinator 暂未接入（WS 长连接语义与 HTTP 请求不同，需专门设计）。
 
-### B-5: 一批中间件零装配（后续评估）
+### B-5: 一批中间件零装配（方案已制定）
 ExecutionScheduler / ControlPlane / WorkingMemory / side_effect_store / ExecutionRecovery 定义了但未接线。SkillRegistry 6 个中间件只装配了 search 熔断。
-**修复方向**：逐个评估装配必要性，按需接线。**需先制定方案。**
+**方案**：`docs/plans/plan-b-group-architecture-2026-09-23.md` §B-5——5a（RetryMiddleware + AuditMiddleware 装配，快速可做）+ 5b（side_effect_store 随 B-2 完成；ExecutionScheduler/ControlPlane/WorkingMemory/ExecutionRecovery 豁免——已有等价能力，强行装配产生双重编排）。
 
 ## 未修：C 组（一致性缺陷）
 
