@@ -15,17 +15,18 @@ knowledge_service/lm/siliconflow_client.py —— 硅基流动（SiliconFlow）A
    POST {BASE_URL}/rerank，与 FlagReranker.compute_score **同签名 / 同语义**：
    入参 list[[query, doc], ...]，返回顺序与输入一一对应，分数越高越相关。
 
-批量与重试为简单实现（技术债见 CHANGELOG M8）：
+批量与重试：
 - embedding 单批默认 16 条（上游 node_bge_embedding 按 5 条/批喂入，api 端一次多传）；
 - rerank 单批默认 64 条（query 相同的一批 documents 一次调用）；
-- 429/5xx/网络异常简单重试（默认 2 次、退避 0.5s 起），不做熔断。
+- 429/5xx/网络异常重试经 agent_core.resilience.retry（默认 2 次、指数退避 0.5s 起），不做熔断。
 """
 
 import json
 import math
-import time
 import urllib.error
 import urllib.request
+
+from agent_core.resilience import retry
 
 from knowledge_service.lm._logging import logger
 
@@ -38,21 +39,32 @@ DEFAULT_RERANK_BATCH_SIZE = 64
 
 def _post_json(url, headers, payload, timeout=DEFAULT_TIMEOUT_S, retries=DEFAULT_RETRIES, backoff=DEFAULT_BACKOFF_S):
     """
-    POST JSON 请求并返回解析后的响应（简单重试：429/5xx/网络异常）。
+    POST JSON 请求并返回解析后的响应（429/5xx/网络异常重试，经 agent_core.resilience.retry）。
 
     :param url: 完整请求地址
     :param headers: 请求头（含 Authorization）
     :param payload: JSON 请求体（dict）
     :param timeout: 单次请求超时（秒）
     :param retries: 重试次数（在首次尝试之外）
-    :param backoff: 退避基数（秒），第 n 次重试前等待 backoff * n
+    :param backoff: 退避基数（秒），指数退避 backoff * 2^(n-1)
     :return: 解析后的响应（dict / list）
-    :raises RuntimeError: 重试耗尽后仍失败，附带最后错误与 HTTP 状态
+    :raises RuntimeError: 429/5xx 重试耗尽后仍失败；HTTPError: 4xx 业务错误直接抛出
     """
     body = json.dumps(payload).encode("utf-8")
-    last_err = None
-    for attempt in range(retries + 1):
-        req = urllib.request.Request(url, data=body, headers=headers, method="POST")
+    req = urllib.request.Request(url, data=body, headers=headers, method="POST")
+
+    @retry(
+        max_attempts=retries + 1,
+        backoff_base=backoff,
+        exceptions=(
+            urllib.error.URLError,
+            TimeoutError,
+            ConnectionError,
+            OSError,
+            RuntimeError,
+        ),
+    )
+    def _do_post():
         try:
             with urllib.request.urlopen(req, timeout=timeout) as resp:
                 raw = resp.read().decode("utf-8")
@@ -63,19 +75,11 @@ def _post_json(url, headers, payload, timeout=DEFAULT_TIMEOUT_S, retries=DEFAULT
                 detail = e.read().decode("utf-8")
             except Exception as e:
                 logger.warning("读取 SiliconFlow HTTP 错误详情失败: %s", e)
-            last_err = RuntimeError(f"SiliconFlow HTTP {e.code}: {detail[:500]}")
-            # 仅对可重试状态重试；4xx 业务错误直接抛出
-            if e.code not in (429, 500, 502, 503, 504) or attempt >= retries:
-                break
-            logger.warning(f"SiliconFlow HTTP {e.code}，第 {attempt + 1} 次重试后仍失败，稍后重试")
-            time.sleep(backoff * (attempt + 1))
-        except (urllib.error.URLError, TimeoutError, ConnectionError, OSError) as e:
-            last_err = RuntimeError(f"SiliconFlow 网络请求失败: {e}")
-            if attempt >= retries:
-                break
-            logger.warning(f"SiliconFlow 网络异常，第 {attempt + 1} 次重试")
-            time.sleep(backoff * (attempt + 1))
-    raise last_err
+            if e.code in (429, 500, 502, 503, 504):
+                raise RuntimeError(f"SiliconFlow HTTP {e.code}: {detail[:500]}") from e
+            raise
+
+    return _do_post()
 
 
 def _l2_normalize(vector):

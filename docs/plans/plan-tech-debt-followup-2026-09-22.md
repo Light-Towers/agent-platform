@@ -112,7 +112,7 @@
 | D7 | 清理裸 except | Medium | 分批逐文件处理 |
 | D8 | pydantic-settings 评估 | Low | 独立小任务 |
 | D9 | exhibition llm_client.py 收敛到 agent_core.llm | Medium | 接口根本不同（httpx 异步 vs langchain ChatOpenAI），需重大重构 |
-| D10 | zhanggui ApiReranker 收敛到 agent_core.resilience.retry | Medium | 双实现模式不同（内联 retry vs _post_json 无 retry），风险高 |
+| D10 | zhanggui ApiReranker 收敛到 agent_core.resilience.retry | ✅ 已完成 | 已完成 |
 
 ---
 
@@ -128,12 +128,11 @@
 
 ---
 
-## D10 zhanggui ApiReranker 收敛到 agent_core.resilience.retry
+## D10 zhanggui ApiReranker 收敛到 agent_core.resilience.retry（已完成）
 
 | 字段 | 内容 |
 |------|------|
-| **现状** | `zhanggui-zhiku/lm/siliconflow_client.py` 的 ApiReranker 用 `_post_json` 无 retry，与 `agent_server/rag/rerank.py` 的 ApiReranker（已改用 `agent_core.resilience.retry`）是双份实现 |
-| **影响** | 同一 rerank 逻辑两套实现，维护成本翻倍；zhanggui 侧无 retry 保护 |
-| **跳过原因** | 双实现模式不同（agent_server 内联 retry + resilience.retry，zhanggui 用 _post_json 无 retry），统一需先对齐调用模式，风险高 |
-| **建议推进** | ① 对齐 zhanggui ApiReranker 的 `_post_json` 调用为可直接加 `@retry` 的形态 → ② 引入 `agent_core.resilience.retry` → ③ 跑 zhanggui 测试确认 rerank 行为不变 |
-| **优先级** | Medium |
+| **现状** | `knowledge-service/lm/siliconflow_client.py` 的 `_post_json` 已改用 `agent_core.resilience.retry` 装饰器，消除手写重试循环 |
+| **影响** | 与 `agent_server/rag/rerank.py` 的 ApiReranker 重试策略统一（均经 agent_core.resilience.retry） |
+| **完成方式** | `_post_json` 内部 `@retry` 装饰器替代手写循环；429/5xx 转 RuntimeError（被 retry 重试），4xx 抛 HTTPError（不重试）；函数签名与异常类型向后兼容 |
+| **优先级** | ✅ 已完成 |
