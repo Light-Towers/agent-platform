@@ -19,7 +19,7 @@ from __future__ import annotations
 import logging
 import time
 
-from fastapi import FastAPI
+from agent_core.guardrails.app_factory import build_api_app
 from langgraph.checkpoint.memory import InMemorySaver
 from shared_schemas import QueryRequest, QueryResponse
 from shared_schemas.query import QueryData
@@ -29,7 +29,7 @@ from kefu_agent.state import KefuState
 
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="kefu-service", version="0.1.0")
+app = build_api_app(title="kefu-service", version="0.1.0")
 
 _kefu_graph = build_kefu_graph(checkpointer=InMemorySaver())
 

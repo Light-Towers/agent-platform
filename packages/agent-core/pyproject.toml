@@ -34,9 +34,10 @@ tracing = [
 llm-openai = [
     "langchain-openai",
 ]
-# ASGI 安全护栏中间件
+# ASGI 安全护栏中间件 + 统一 app 工厂（P2）：starlette 供护栏/错误响应，fastapi 供 build_api_app。
 web = [
     "starlette",
+    "fastapi",
 ]
 # Mongo 历史记忆实现（MongoHistoryStore + MongoCheckpointer）
 memory-mongo = [

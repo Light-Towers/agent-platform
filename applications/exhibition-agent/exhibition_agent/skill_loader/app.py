@@ -21,7 +21,7 @@ from __future__ import annotations
 import os
 
 import httpx
-from fastapi import FastAPI
+from agent_core.guardrails.app_factory import build_api_app
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
 
@@ -49,7 +49,7 @@ def _ensure_agent() -> ExhibitionAgent:
     return _agent
 
 
-app = FastAPI(title="会展 Skill 加载服务", docs_url="/docs")
+app = build_api_app(title="会展 Skill 加载服务", docs_url="/docs")
 
 
 class ChatRequest(BaseModel):

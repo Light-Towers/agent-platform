@@ -62,16 +62,64 @@ def check() -> list[str]:
     return violations
 
 
+# ---------------------------------------------------------------------------
+# P2 架构不变量：生产 FastAPI app 必须经 agent_core 统一工厂 ``build_api_app``
+# 创建，由构造保证注册统一 500 脱敏 handler（仅扫 applications/**）。
+# 见 docs/plans/plan-p2-unified-exception-handlers-2026-09-24.md §3.2/§3.3。
+# 白名单：knowledge-service main.py（已有自实现 handler，D-3 本轮不迁移）、
+# exhibition mock_server（dev fixture、非网关服务）；各 tests/ 已跳。
+# ---------------------------------------------------------------------------
+_FASTAPI_PATTERN = re.compile(r"\bFastAPI\s*\(")
+_FASTAPI_WHITELIST = (
+    "applications/knowledge-service/knowledge_service/main.py",
+    "applications/exhibition-agent/exhibition_agent/mock_server/warehouse_mock.py",
+)
+
+
+def check_fastapi_apps() -> list[str]:
+    violations: list[str] = []
+    for py_file in ROOT.rglob("*.py"):
+        rel = py_file.relative_to(ROOT).as_posix()
+        if not rel.startswith("applications/"):
+            continue
+        if any(p in rel for p in (".venv", "__pycache__", ".ruff_cache", ".egg-info",
+                                   ".codeartsdoer", ".codebuddy")):
+            continue
+        if "/tests/" in rel:
+            continue
+        if any(rel == w or rel.startswith(w) for w in _FASTAPI_WHITELIST):
+            continue
+        try:
+            for lineno, line in enumerate(py_file.read_text(encoding="utf-8").splitlines(), 1):
+                if _FASTAPI_PATTERN.search(line):
+                    violations.append(f"{rel}:{lineno}: {line.strip()}")
+        except Exception:
+            pass
+    return violations
+
+
 def main() -> int:
-    violations = check()
-    if violations:
+    rc = 0
+    v1 = check()
+    if v1:
         print("P4-2 架构约束违反：registry.execute() 仅允许经 delegate() 调用")
         print("白名单文件外的直接调用：")
-        for v in violations:
+        for v in v1:
             print(f"  {v}")
-        return 1
-    print("P4-2 架构约束通过：无白名单外 registry.execute() 调用")
-    return 0
+        rc = 1
+    else:
+        print("P4-2 架构约束通过：无白名单外 registry.execute() 调用")
+
+    v2 = check_fastapi_apps()
+    if v2:
+        print("P2 架构约束违反：生产 FastAPI app 必须经 agent_core build_api_app 创建（裸 FastAPI( 不允许）")
+        print("白名单外的裸构造：")
+        for v in v2:
+            print(f"  {v}")
+        rc = 1
+    else:
+        print("P2 架构约束通过：无白名单外裸 FastAPI() 构造")
+    return rc
 
 
 if __name__ == "__main__":
