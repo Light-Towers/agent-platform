@@ -135,6 +135,7 @@ async def remember_typed(
     pool,
     user_id: str,
     fact: str,
+    tenant_id: str = "default",
     memory_type: object = "semantic",
     importance: float = 0.5,
     embedding: list[float] | None = None,
@@ -156,9 +157,9 @@ async def remember_typed(
         )
     async with pool.connection() as conn:
         await conn.execute(
-            "INSERT INTO memories (user_id, content, embedding, memory_type, importance) "
-            "VALUES (%s, %s, %s, %s, %s)",
-            (user_id, fact, embedding, mtype.value, importance),
+            "INSERT INTO memories (tenant_id, user_id, content, embedding, memory_type, importance) "
+            "VALUES (%s, %s, %s, %s, %s, %s)",
+            (tenant_id, user_id, fact, embedding, mtype.value, importance),
         )
 
 
@@ -166,6 +167,7 @@ async def recall_typed(
     pool,
     user_id: str,
     question: str,
+    tenant_id: str = "default",
     k: int = 3,
     weights: Iterable[tuple[str, float]] | None = None,
     embedding: list[float] | None = None,
@@ -183,7 +185,7 @@ async def recall_typed(
         raise ValueError(
             "embed_memory 由宿主层提供；内核 typed.recall_typed 不内嵌 embedder"
         )
-    rows = await _vector_search_memories(pool, user_id, embedding, k=k * 2)
+    rows = await _vector_search_memories(pool, tenant_id, user_id, embedding, k=k * 2)
     if not rows:
         return []
     # rows: (content, memory_type, importance, created_at) 或 (content, created_at) 降级
@@ -248,6 +250,7 @@ def memory_forget_age_days() -> int:
 async def consolidate(
     user_id,
     pool,
+    tenant_id: str = "default",
     forget_threshold: float | None = None,
     age_days: int | None = None,
 ) -> int:
@@ -267,9 +270,9 @@ async def consolidate(
     async with pool.connection() as conn:
         cur = await conn.execute(
             "DELETE FROM memories "
-            "WHERE user_id = %s AND importance < %s "
+            "WHERE tenant_id = %s AND user_id = %s AND importance < %s "
             "AND created_at < now() - interval '%s days'",
-            (user_id, forget_threshold, age_days),
+            (tenant_id, user_id, forget_threshold, age_days),
         )
         deleted = getattr(cur, "rowcount", 0) or 0
         logger.info(
@@ -279,19 +282,21 @@ async def consolidate(
         return deleted
 
 
-async def forget(user_id, pool, memory_id) -> bool:
+async def forget(user_id, pool, memory_id, tenant_id: str = "default") -> bool:
     """按 memory_id 删除单条记忆，返回是否实际删除。"""
     async with pool.connection() as conn:
         cur = await conn.execute(
-            "DELETE FROM memories WHERE user_id = %s AND id = %s",
-            (user_id, memory_id),
+            "DELETE FROM memories WHERE tenant_id = %s AND user_id = %s AND id = %s",
+            (tenant_id, user_id, memory_id),
         )
         return (getattr(cur, "rowcount", 0) or 0) > 0
 
 
 # --- 内部：带类型的向量召回（%s 风格，宿主 psycopg 池）---------------------
 
-async def _vector_search_memories(pool, user_id: str, embedding: list[float], k: int = 6):
+async def _vector_search_memories(
+    pool, tenant_id: str, user_id: str, embedding: list[float], k: int = 6
+):
     """memories 表带类型的向量召回，返回 (content, memory_type, importance, created_at)。
 
     使用 pgvector 余弦距离 ``embedding <=> %s``；标识符 ``memories`` 写死（内核内部
@@ -301,9 +306,9 @@ async def _vector_search_memories(pool, user_id: str, embedding: list[float], k:
         cur = await conn.execute(
             "SELECT content, memory_type, importance, created_at "
             "FROM memories "
-            "WHERE user_id = %s AND embedding IS NOT NULL "
+            "WHERE tenant_id = %s AND user_id = %s AND embedding IS NOT NULL "
             "ORDER BY embedding <=> %s LIMIT %s",
-            (user_id, embedding, k),
+            (tenant_id, user_id, embedding, k),
         )
         return await cur.fetchall()
 
