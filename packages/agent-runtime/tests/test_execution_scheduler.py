@@ -373,3 +373,89 @@ async def test_scheduler_facade_try_start():
     assert await scheduler.running_count() == 0
     # 释放后可认领 e2
     assert await scheduler.try_start("e2") is not None
+
+
+# ===== SchedulerReaper 生命周期边界 =====
+
+async def test_reaper_reclaims_running_after_lease_expiry(monkeypatch):
+    """try_start 成功但 worker 未继续执行时，lease 失效后 Reaper 必须释放槽位。"""
+    store = InMemorySchedulerStore()
+    scheduler = ExecutionScheduler(store, SchedulerConfig(max_concurrent=1))
+    await scheduler.submit(_req("e1"))
+    claimed = await scheduler.try_start("e1")
+    assert claimed is not None
+
+    current = await store.get("e1")
+    assert current is not None
+    current.dispatched_at = 0.0
+    store._store["e1"] = current
+
+    class _ExpiredOwnership:
+        def __init__(self):
+            self.reaper = None
+
+        async def get_owner(self, execution_id):
+            assert execution_id == "e1"
+            self.reaper._stopped = True
+            return None
+
+    ownership = _ExpiredOwnership()
+    reaper = SchedulerReaper(
+        scheduler,
+        ownership,
+        interval_s=0,
+        dispatch_timeout=1,
+        running_timeout=1,
+    )
+    ownership.reaper = reaper
+    monkeypatch.setattr("agent_runtime.execution_scheduler.asyncio.sleep", lambda _: _done())
+    await reaper.run()
+
+    final = await store.get("e1")
+    assert final is not None
+    assert final.status is QueueStatus.FAILED
+    assert await scheduler.running_count() == 0
+
+
+async def test_reaper_does_not_reclaim_live_lease(monkeypatch):
+    """lease 仍有效时，Reaper 不得把 RUNNING 误判为 FAILED。"""
+    store = InMemorySchedulerStore()
+    scheduler = ExecutionScheduler(store, SchedulerConfig(max_concurrent=1))
+    await scheduler.submit(_req("e1"))
+    assert await scheduler.try_start("e1") is not None
+
+    current = await store.get("e1")
+    assert current is not None
+    current.dispatched_at = 0.0
+    store._store["e1"] = current
+
+    class _LiveOwnership:
+        def __init__(self):
+            self.reaper = None
+            self.calls = 0
+
+        async def get_owner(self, execution_id):
+            self.calls += 1
+            self.reaper._stopped = True
+            return "worker-1"
+
+    ownership = _LiveOwnership()
+    reaper = SchedulerReaper(
+        scheduler,
+        ownership,
+        interval_s=0,
+        dispatch_timeout=1,
+        running_timeout=1,
+    )
+    ownership.reaper = reaper
+    monkeypatch.setattr("agent_runtime.execution_scheduler.asyncio.sleep", lambda _: _done())
+    await reaper.run()
+
+    final = await store.get("e1")
+    assert final is not None
+    assert final.status is QueueStatus.RUNNING
+    assert await scheduler.running_count() == 1
+
+
+async def _done():
+    return None
