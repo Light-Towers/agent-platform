@@ -79,13 +79,13 @@ async def extract_memory_facts(llm, question: str, answer: str) -> list[dict]:
         return []
 
 
-async def recall(pool, workspace_id: str, question: str, k: int = 3) -> list[str]:
+async def recall(pool, workspace_id: str, question: str, k: int = 3, tenant_id: str = "default") -> list[str]:
     # ADR-0004 阶段3：总开关由 SEMANTIC_MEMORY_TYPED 控制（与内核 typed 语义统一）。
     # 开启 → 走内核 typed 加权/平权召回（仍用 app psycopg 池，遵守 ADR-0003）；
     # 关闭或内存模式 → 退化内核后端平权召回（pool=None 由内核自建池）。
     if pool is not None and semantic_memory_typed_enabled():
         try:
-            return await _mb.recall_typed(pool, workspace_id, question, k=k)
+            return await _mb.recall_typed(pool, workspace_id, question, k=k, tenant_id=tenant_id)
         except Exception:
             logger.exception("类型感知召回失败，降级内核/空")
     # 降级路径：内核后端（pool=None，内核自建 asyncpg 池）
@@ -104,6 +104,7 @@ async def remember(
     workspace_id: str,
     content: str,
     facts: list[dict] | None = None,
+    tenant_id: str = "default",
 ) -> None:
     """沉淀记忆（优化 H）。
 
@@ -117,7 +118,7 @@ async def remember(
                 try:
                     await _mb.remember_fact(
                         pool, workspace_id, f["fact"], f.get("type", "semantic"),
-                        f.get("importance", 0.5),
+                        f.get("importance", 0.5), tenant_id=tenant_id,
                     )
                 except Exception:
                     logger.exception("结构化记忆写入失败，跳过该条")
@@ -132,6 +133,7 @@ async def remember(
         try:
             await _mb.remember_fact(
                 pool, workspace_id, content, memory_type="semantic", importance=0.5,
+                tenant_id=tenant_id,
             )
         except Exception:
             logger.exception("typed 退化写入失败，跳过")
@@ -149,7 +151,7 @@ _CONSOLIDATE_EVERY = 5  # 每 5 轮对话触发一次惰性遗忘
 _consolidate_counter = 0
 
 
-async def maybe_consolidate(pool, workspace_id: str) -> int:
+async def maybe_consolidate(pool, workspace_id: str, tenant_id: str = "default") -> int:
     """低频触发 typed 巩固/遗忘（旁路，失败不阻断，返回淘汰条数）。
 
     - 仅当 ``SEMANTIC_MEMORY_TYPED`` 开启且 pool 存在时生效；
@@ -165,7 +167,7 @@ async def maybe_consolidate(pool, workspace_id: str) -> int:
         return 0
     try:
         threshold = get_settings().memory_forget_threshold
-        return await _mb.consolidate_memories(pool, workspace_id, forget_threshold=threshold)
+        return await _mb.consolidate_memories(pool, workspace_id, forget_threshold=threshold, tenant_id=tenant_id)
     except Exception:
         logger.exception("记忆巩固/遗忘失败，跳过（不阻断主链路）")
         return 0
