@@ -1,6 +1,12 @@
 """
 P1 Skill Router — discriminator→Tool 映射 + INV-4 整体拒绝 + F06 SYNTHETIC 拦截
 
+.. note::
+   **STATUS: NOT WIRED** – 本模块已完整实现但尚未接入 `graph/nodes.py:run_skill`。
+   当前各 Skill 实现内部直接调用 WarehouseClient，未走本路由的统一门禁链。
+   接线方向：`run_skill` → `route(skill_name, ctx, **params)` → 得到 tool/endpoint → 执行。
+   不得删除：包含已设计的 Tool 映射表 + scope 校验 + readiness 拦截逻辑。(2026-09-24)
+
 route(skill_name, ctx, **discriminator) -> dict
 
 门禁链：

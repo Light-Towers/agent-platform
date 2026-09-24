@@ -2,7 +2,7 @@
 
 > 统一生产级 Agent 平台，本仓库为 **monorepo**（根 + `packages/` 3 个共享包 + `applications/` 6 个应用工程，各含独立 `pyproject.toml`）。
 > **演进方向（Plan-F）**：双轨正收敛为「单 Runtime + 多 Planner」——共享 `agent-runtime/` 承载运行时中间件（admission/coordinator/checkpoint/tracing/cache/rate_limit 等），Planner 策略（deterministic/agentic）可插拔，不统一 Agent 只统一 Runtime。详见 `docs/plans/plan-f-single-runtime-multi-planner.md`。
-> **V3 企业执行平台（Phase 2-4 + 3.4 已接线；按项目自定 P0 五项验收标准尚未全闭环，详见 `docs/plans/arch-audit-2026-09-24.md` §6）**：主执行链路为 `Admission → Planner → Execute → Forensic/CostGov`；`ExecutionScheduler`（`scheduler_enabled` 默认 False）当前为**旁路记账 + 独立控制面**，`submit` 仅校验队列容量、不做并发门控（并非执行门控链路的一环，见审计 P0-1）；已接线模块：ExecutionScheduler（PG 队列 + `FOR UPDATE SKIP LOCKED`）/ ExecutionStatus 状态机 / AwaitableTask（挂起 + 回调恢复）/ ControlPlane HTTP API / CostGovernance / ForensicContext / SchedulerReaper（lease-based 回收）；**未接线半成品**：human_task / execution_recovery / state_migration / payload_externalization（见审计 P1-7）。架构真相源：`docs/plans/plan-enterprise-platform-skeleton-2026-09-23.md` + `docs/plans/plan-v3-execution-platform-final-architecture-2026-09-22.md`。
+> **V3 企业执行平台（Phase 2-4 + 3.4 代码已接线；P0-1 并发门控已修（submit 实际入队 + claim_token fencing）；端到端双实例物理故障转移验收未达）**：主执行链路 `Admission → Scheduler submit → Planner → Execute → Forensic/CostGov`；`scheduler_enabled` 默认 False（渐进式开启，待验收达标后翻转）；**未接线半成品**（P1-7 已标注）：human_task / execution_recovery / state_migration / payload_externalization / skill_router(exhibition)。架构真相源：`docs/plans/plan-enterprise-platform-skeleton-2026-09-23.md` + `docs/plans/plan-v3-execution-platform-final-architecture-2026-09-22.md` + `docs/plans/arch-audit-2026-09-24.md`。
 > 各包经 `agent-core` / `shared-schemas` 共享内核与契约。
 > 详细人类阅读指南见 `README.md`（含完整目录结构），本文件面向 AI agent，仅列要点。
 
@@ -14,7 +14,7 @@
 | `applications/agent_federation/` | 联邦网关 + 3 子服务编排中枢（与 agent_server 并行，详见其 README；原名 `deepagents/`，为消除与 PyPI 依赖包 `deepagents` 同名冲突而改名） | `python -m api.server` |
 | `packages/agent-core/` | 零依赖运行时内核：tracing / guardrails / sql 守卫 / llm / memory（含 MemoryStore 统一门面 + CapabilityReport） / events（EventBus 多 sink 扇出） / config（KernelConfig + 类型化 env） / intent（L1 分类器） / resilience（CircuitBreaker + retry + timeout） | — |
 | `packages/agent-runtime/` | Plan-F 运行时中间件层 + V3 企业执行平台：admission/coordinator/cache/circuit_breaker/revert/mcp_client/otel/tracing/db + **execution_scheduler/execution_status/awaitable_task/control_plane/cost_governance/forensic/human_task/effect_contract/execution_recovery/state_migration/payload_externalization**（V3 Phase 2-4） + planner/（protocol/agentic/agentic_bridge/registry/policy/mode_selector/context_manager/execution_graph/graph_compose/durability/durability_pg）+ skills/（registry/function/agent/remote/workflow/mcp/sandbox/middleware/composition/dag） + sandbox（双后端代码执行） + memory 体系（episodic/semantic/procedural/working/decay/recall/seed/sink） | — |
-| `packages/shared-schemas/` | 联邦 4 服务共享 Pydantic 契约（QueryResponse / ThreadState 等） | — |
+| `packages/shared-schemas/` | 联邦 4 服务共享 Pydantic 契约（QueryRequest/Response · ErrorResponse · KNOWLEDGE_STATUS · ThreadState 等） | — |
 | `applications/kefu-service/` | kefu 迁移版（deepagents + LangGraph），已接入联邦网关（Agent Protocol 兼容 `/invoke`，返回 `QueryResponse`；`KEFU_USE_ADAPTER=false` 默认直连） | — |
 | `applications/nl2sql-service/` | Text-to-SQL 数据分析通用服务（元知识参数化，已直连联邦契约） | — |
 | `applications/knowledge-service/` | 通用知识库服务：RAG 导入 + 多路检索问答（:8900，Metadata 参数化 + 生命周期 + 多租户 ACL） | `knowledge-service` 脚本 |
