@@ -107,6 +107,7 @@ async def remember_fact(
     fact: str,
     memory_type: str = "semantic",
     importance: float = 0.5,
+    tenant_id: str = "default",
 ) -> None:
     """沉淀一条带类型/重要性的结构化记忆（ADO-0004 re-export）。
 
@@ -122,6 +123,7 @@ async def remember_fact(
     await _core_remember_typed(
         pool,
         user_id=workspace_id,
+        tenant_id=tenant_id,
         fact=fact,
         memory_type=memory_type,
         importance=importance,
@@ -134,6 +136,7 @@ async def recall_typed(
     workspace_id: str,
     question: str,
     k: int = 3,
+    tenant_id: str = "default",
     weights: Iterable[tuple[str, float]] | None = None,
 ) -> list[str]:
     """分层加权召回（ADR-0004 re-export，向下投影为 list[str]）。
@@ -146,6 +149,7 @@ async def recall_typed(
     typed: list[TypedMemory] = await _core_recall_typed(
         pool,
         user_id=workspace_id,
+        tenant_id=tenant_id,
         question=question,
         k=k,
         weights=weights,
@@ -158,6 +162,7 @@ async def consolidate_memories(
     pool,
     workspace_id: str,
     forget_threshold: float | None = None,
+    tenant_id: str = "default",
     age_days: int | None = None,
 ) -> int:
     """巩固 + 遗忘（ADR-0004 re-export，委托内核 typed.consolidate，TD-6 参数化）。
@@ -169,16 +174,18 @@ async def consolidate_memories(
     """
     return await _core_consolidate(
         user_id=workspace_id,
+        tenant_id=tenant_id,
         pool=pool,
         forget_threshold=forget_threshold,
         age_days=age_days,
     )
 
 
-async def forget_memory(pool, workspace_id: str, memory_id: int) -> bool:
+async def forget_memory(pool, workspace_id: str, memory_id: int, tenant_id: str = "default") -> bool:
     """按 id 显式遗忘一条记忆（ADR-0004 re-export，委托内核 typed.forget）。"""
     return await _core_forget(
         user_id=workspace_id,
+        tenant_id=tenant_id,
         pool=pool,
         memory_id=memory_id,
     )
