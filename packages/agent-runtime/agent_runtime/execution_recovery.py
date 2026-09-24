@@ -1,5 +1,9 @@
 """Execution Recovery / Reaper / Reschedule（V3-4B）。
 
+.. warning::
+   **STATUS: NOT WIRED** – 本模块有完整实现与单测，但 applications/ 层零调用。
+   属「设计就绪、待集成」状态，不得视为已上线能力。(P1-7 审计披露 2026-09-24)
+
 补 V3-4A 留的恢复侧：执行超时 / Worker 死亡 / lease 过期后，如何把 stuck execution
 拉回正轨。
 

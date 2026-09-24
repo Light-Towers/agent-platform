@@ -1,5 +1,9 @@
 """Large Payload Externalization（V3-6 Layer B）。
 
+.. warning::
+   **STATUS: NOT WIRED** – 本模块有完整实现与单测，但 applications/ 层零调用。
+   属「设计就绪、待集成」状态，不得视为已上线能力。(P1-7 审计披露 2026-09-24)
+
 现状（v3 之前）：工具返回 50MB JSON 直接塞 checkpoint JSONB，影响 compaction /
 retention / 查询性能。
 

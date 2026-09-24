@@ -1,5 +1,9 @@
 """Human Task / Approval（V3 补-1 应用层）。
 
+.. warning::
+   **STATUS: NOT WIRED** – 本模块有完整实现与单测，但 applications/ 层零调用。
+   属「设计就绪、待集成」状态，不得视为已上线能力。(P1-7 审计披露 2026-09-24)
+
 V3-3 的 ``AwaitableTask`` 已支持 ``AwaitableKind.HUMAN``，``ExecutionStatus`` 已支持
 ``WAITING_HUMAN``。本模块是人工审批 / 介入的**应用层**：
 

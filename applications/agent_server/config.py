@@ -33,7 +33,7 @@ class Settings(BaseLLMSettings):
 
     # Text-to-SQL
     sql_dsn: str = ""
-    sql_max_rows: int = 100
+    sql_max_rows: int = 100  # LLM 上下文窗口约束，区别于 nl2sql-service(1000)：本服务将结果注入 prompt，需严格控制 token 数
 
     # 健壮性
     cache_enabled: bool = True
@@ -50,7 +50,7 @@ class Settings(BaseLLMSettings):
     langfuse_host: str = ""
 
     # RAG
-    rag_top_k: int = 4
+    rag_top_k: int = 4  # 区别于 knowledge(5)/nl2sql(10)：本服务为 supervisor 级多工具编排，每个子查询只注入少量高相关文档
     # Rerank：RRF 融合后是否用硅基流动 bge-reranker-v2-m3 重排 top-K
     rerank_enabled: bool = False
     rerank_top_n: int = 8  # 融合后送入 rerank 的候选数（>= rag_top_k）
