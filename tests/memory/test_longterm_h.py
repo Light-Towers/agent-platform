@@ -141,7 +141,7 @@ async def test_recall_typed_weights_and_ranks(patch_settings, monkeypatch):
     # 内核 recall_typed 经宿主池调 _vector_search_memories；mock 它返回带类型行
     monkeypatch.setattr(
         typed_core, "_vector_search_memories",
-        lambda pool, user_id, embedding, k: _async(rows),
+        lambda pool, tenant_id, user_id, embedding, k: _async(rows),
     )
     monkeypatch.setattr(mb, "embed_memory", lambda t: [0.0] * 512)
 
@@ -175,12 +175,13 @@ async def test_remember_fact_writes_typed(patch_settings, monkeypatch):
 
     monkeypatch.setattr("agent_server.memory.memory_backend.embed_memory", lambda t: [0.1] * 512)
 
-    await mb.remember_fact(_CapturePool(), "ws1", "用户是财务", "semantic", 0.8)
+    await mb.remember_fact(_CapturePool(), "ws1", "用户是财务", "semantic", 0.8, tenant_id="tenant-a")
     assert "INSERT INTO memories" in captured["sql"]
-    assert captured["params"][0] == "ws1"      # workspace_id 作 user_id
-    assert captured["params"][1] == "用户是财务"
-    assert captured["params"][3] == "semantic"
-    assert abs(captured["params"][4] - 0.8) < 1e-6
+    assert captured["params"][0] == "tenant-a"
+    assert captured["params"][1] == "ws1"
+    assert captured["params"][2] == "用户是财务"
+    assert captured["params"][4] == "semantic"
+    assert abs(captured["params"][5] - 0.8) < 1e-6
 
 
 async def test_remember_fact_clamps_type_and_importance(patch_settings, monkeypatch):
@@ -206,9 +207,11 @@ async def test_remember_fact_clamps_type_and_importance(patch_settings, monkeypa
     monkeypatch.setattr("agent_server.memory.memory_backend.embed_memory", lambda t: [0.0] * 512)
 
     # 非法类型 → 退化 semantic；importance 超界 → 截断
-    await mb.remember_fact(_CapturePool(), "ws", "f", "bogus", 5.0)
-    assert captured["params"][3] == "semantic"
-    assert captured["params"][4] == 1.0
+    await mb.remember_fact(_CapturePool(), "ws", "f", "bogus", 5.0, tenant_id="tenant-a")
+    assert captured["params"][0] == "tenant-a"
+    assert captured["params"][1] == "ws"
+    assert captured["params"][4] == "semantic"
+    assert captured["params"][5] == 1.0
 
 
 async def test_consolidate_deletes_low_value_old(patch_settings, monkeypatch):
@@ -238,92 +241,39 @@ async def test_consolidate_deletes_low_value_old(patch_settings, monkeypatch):
         def connection(self):
             return _CaptureConn()
 
-    deleted = await mb.consolidate_memories(_CapturePool(), "ws1", forget_threshold=0.1)
+    deleted = await mb.consolidate_memories(_CapturePool(), "ws1", forget_threshold=0.1, tenant_id="tenant-a")
     assert deleted == 3
     assert "DELETE FROM memories" in captured["sql"]
-    # TD-6 参数化：三元组 (user, threshold, age_days)，默认 age_days=30
-    assert captured["params"] == ("ws1", 0.1, 30)
+    assert captured["params"] == ("tenant-a", "ws1", 0.1, 30)
 
 
-async def test_recall_falls_back_to_core_when_disabled(patch_settings, monkeypatch):
-    # memory_extraction_enabled=False：recall 走内核降级路径（pool=None → 内核自建池）
+async def test_recall_without_pool_has_no_persistent_fallback(patch_settings, monkeypatch):
     import agent_server.memory.longterm as l
-
-    called = {}
-
     class _FakeCoreBackend:
-        async def recall(self, pool, user_id, question, k=3):
-            called["recall"] = (user_id, question)
-            return ["历史记忆"]
-
-    monkeypatch.setattr(
-        "agent_server.memory.memory_backend.get_default_backend", lambda: _FakeCoreBackend()
-    )
-    # 强制退化路径：pool=None
-    res = await l.recall(None, "ws-x", "问题")
-    assert res == ["历史记忆"]
-    assert called["recall"][0] == "ws-x"
+        async def recall(self, *args, **kwargs):
+            raise AssertionError("unscoped persistent fallback must not be used")
+    monkeypatch.setattr("agent_server.memory.memory_backend.get_default_backend", lambda: _FakeCoreBackend())
+    assert await l.recall(None, "ws-x", "问题") == []
 
 
-async def test_recall_forwards_to_recall_typed_when_enabled(patch_settings, monkeypatch):
-    # ADR-0004 阶段3：总开关 SEMANTIC_MEMORY_TYPED 控制转发；即使
-    # memory_extraction_enabled=False（默认），开启 typed 开关也应转发。
-    import agent_core.memory.typed as typed_core
+async def test_recall_forwards_to_recall_typed_with_tenant(patch_settings, monkeypatch):
     import agent_server.memory.longterm as l
-
-    # SEMANTIC_MEMORY_TYPED 开启（与内核 typed 开关语义统一）
-    monkeypatch.setenv("SEMANTIC_MEMORY_TYPED", "true")
-    monkeypatch.setattr(typed_core, "semantic_memory_typed_enabled", lambda: True)
-    # longterm 用 `from app.config import get_settings` 绑定副本，需直接 patch 模块内引用
-    monkeypatch.setattr("agent_server.memory.longterm.get_settings", lambda: patch_settings)
-    assert patch_settings.memory_extraction_enabled is False  # 强调：抽取未开也转发
     spy = {"called": None}
-
-    async def _fake_recall_typed(pool, ws, q, k=3):
-        spy["called"] = (ws, q, k)
+    async def _fake_recall_typed(pool, ws, q, k=3, *, tenant_id="default"):
+        spy["called"] = (ws, q, k, tenant_id)
         return ["typed-mem"]
-
     monkeypatch.setattr("agent_server.memory.memory_backend.recall_typed", _fake_recall_typed)
-
     class _Pool:
         pass
-
-    res = await l.recall(_Pool(), "ws-typed", "q", k=2)
+    res = await l.recall(_Pool(), "ws-typed", "q", k=2, tenant_id="tenant-a")
     assert res == ["typed-mem"]
-    assert spy["called"] == ("ws-typed", "q", 2)
+    assert spy["called"] == ("ws-typed", "q", 2, "tenant-a")
 
 
-async def test_recall_does_not_forward_when_typed_disabled(patch_settings, monkeypatch):
-    # ADR-0004 阶段3：typed 开关关闭时，即使 pool 非空也不走 typed 路径（退化内核后端）。
-    # 注意：longterm 顶层 import 已绑定符号，须 patch 其自身命名空间的引用
-    # （WS-1 起 TYPED 默认开，显式关闭才是本用例意图）。
+async def test_recall_without_pool_never_uses_unscoped_fallback(patch_settings, monkeypatch):
     import agent_server.memory.longterm as l
-
-    monkeypatch.setattr(l, "semantic_memory_typed_enabled", lambda: False)
-    monkeypatch.setattr("agent_server.memory.longterm.get_settings", lambda: patch_settings)
-
-    forwarded = {"hit": False}
-
-    async def _fake_recall_typed(pool, ws, q, k=3):
-        forwarded["hit"] = True
-        return []
-
-    monkeypatch.setattr("agent_server.memory.memory_backend.recall_typed", _fake_recall_typed)
-    # 退化路径 mock：内核 backend.recall 返回原文（async，匹配 longterm 的 await）
-    async def _fake_back_recall(*a, **k):
-        return ["fallback-mem"]
-
-    monkeypatch.setattr(
-        "agent_server.memory.memory_backend.get_default_backend",
-        lambda: SimpleNamespace(recall=_fake_back_recall),
-    )
-
-    class _Pool:
-        pass
-
-    res = await l.recall(_Pool(), "ws-x", "q")
-    assert forwarded["hit"] is False
-    assert res == ["fallback-mem"]
+    monkeypatch.setattr("agent_server.memory.memory_backend.get_default_backend", lambda: (_ for _ in ()).throw(AssertionError("unscoped fallback must not be resolved")))
+    assert await l.recall(None, "ws-x", "q") == []
 
 
 async def test_maybe_consolidate_triggers_every_n(patch_settings, monkeypatch):
@@ -336,8 +286,9 @@ async def test_maybe_consolidate_triggers_every_n(patch_settings, monkeypatch):
 
     calls = {"n": 0}
 
-    async def _fake_consolidate(pool, ws, forget_threshold=0.1):
+    async def _fake_consolidate(pool, ws, forget_threshold=0.1, *, tenant_id="default"):
         calls["n"] += 1
+        assert tenant_id == "tenant-a"
         return 0
 
     monkeypatch.setattr("agent_server.memory.memory_backend.consolidate_memories", _fake_consolidate)
@@ -349,7 +300,7 @@ async def test_maybe_consolidate_triggers_every_n(patch_settings, monkeypatch):
 
     # 前 4 次不应触发，第 5 次触发（_CONSOLIDATE_EVERY=5）
     for _ in range(4):
-        await l.maybe_consolidate(_Pool(), "ws")
+        await l.maybe_consolidate(_Pool(), "ws", tenant_id="tenant-a")
     assert calls["n"] == 0
     await l.maybe_consolidate(_Pool(), "ws")
     assert calls["n"] == 1
@@ -385,8 +336,8 @@ async def test_remember_forwards_to_remember_fact_when_enabled(patch_settings, m
     monkeypatch.setattr("agent_server.memory.longterm.get_settings", lambda: patch_settings)
     spy = {"facts": []}
 
-    async def _fake_remember_fact(pool, ws, fact, mtype, importance):
-        spy["facts"].append((ws, fact, mtype, importance))
+    async def _fake_remember_fact(pool, ws, fact, mtype, importance, *, tenant_id="default"):
+        spy["facts"].append((ws, fact, mtype, importance, tenant_id))
 
     monkeypatch.setattr("agent_server.memory.memory_backend.remember_fact", _fake_remember_fact)
 
@@ -397,10 +348,10 @@ async def test_remember_forwards_to_remember_fact_when_enabled(patch_settings, m
         {"type": "semantic", "importance": 0.8, "fact": "用户是财务"},
         {"type": "episodic", "importance": 0.5, "fact": "上周做了报表"},
     ]
-    await l.remember(_Pool(), "ws-typed", "原文不存", facts=facts)
+    await l.remember(_Pool(), "ws-typed", "原文不存", facts=facts, tenant_id="tenant-a")
     assert spy["facts"] == [
-        ("ws-typed", "用户是财务", "semantic", 0.8),
-        ("ws-typed", "上周做了报表", "episodic", 0.5),
+        ("ws-typed", "用户是财务", "semantic", 0.8, "tenant-a"),
+        ("ws-typed", "上周做了报表", "episodic", 0.5, "tenant-a"),
     ]
 
 
