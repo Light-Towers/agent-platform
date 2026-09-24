@@ -136,8 +136,9 @@ async def recall_typed(
     workspace_id: str,
     question: str,
     k: int = 3,
-    tenant_id: str = "default",
     weights: Iterable[tuple[str, float]] | None = None,
+    *,
+    tenant_id: str = "default",
 ) -> list[str]:
     """分层加权召回（ADR-0004 re-export，向下投影为 list[str]）。
 
@@ -162,8 +163,9 @@ async def consolidate_memories(
     pool,
     workspace_id: str,
     forget_threshold: float | None = None,
-    tenant_id: str = "default",
     age_days: int | None = None,
+    *,
+    tenant_id: str = "default",
 ) -> int:
     """巩固 + 遗忘（ADR-0004 re-export，委托内核 typed.consolidate，TD-6 参数化）。
 
