@@ -32,12 +32,12 @@ class Settings(BaseLLMSettings):
     vector_dim: int = 1536
 
     # 检索
-    retrieval_top_k: int = 10
+    retrieval_top_k: int = 10  # 区别于 agent_server(4)/knowledge(5)：本服务为专用 Text-to-SQL，元知识召回需广泛覆盖表/列/指标
     rrf_k: int = 60
 
     # SQL 守卫（强制只读）
     sql_read_only_guard: bool = True
-    sql_max_rows: int = 1000
+    sql_max_rows: int = 1000  # 区别于 agent_server(100)：本服务为专职数据查询工具，结果由前端 UI 展示而非注入 LLM prompt
     sql_max_correct_retries: int = 3
 
     # 分词器：jieba | bigram

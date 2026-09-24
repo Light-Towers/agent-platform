@@ -1,5 +1,9 @@
 """State Schema Version / Migration（V3-6 Layer B）。
 
+.. warning::
+   **STATUS: NOT WIRED** – 本模块有完整实现与单测，但 applications/ 层零调用。
+   属「设计就绪、待集成」状态，不得视为已上线能力。(P1-7 审计披露 2026-09-24)
+
 现状（v3 之前）：PG checkpoint 是 ``completed JSONB / version / resumable``，
 无 ``state_schema_version``，假设 checkpoint 永远兼容当前代码。
 
