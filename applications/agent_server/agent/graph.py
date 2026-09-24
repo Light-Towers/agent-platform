@@ -118,7 +118,7 @@ def build_graph(
         decision = await decide_route(llm, question)
         memory_notes: list[str] = []
         if settings.memory_enabled:
-            memory_notes = await recall(get_pool(), state.workspace_id, question)
+            memory_notes = await recall(get_pool(), state.workspace_id, question, tenant_id=state.tenant_id)
         return {
             "route": decision.capability,
             "sub_query": decision.sub_query,
@@ -177,9 +177,9 @@ def build_graph(
             facts = None
             if get_settings().memory_extraction_enabled and llm is not None:
                 facts = await extract_memory_facts(llm, question, answer)
-            await remember(get_pool(), state.workspace_id, f"Q: {question}\nA: {answer}", facts=facts)
+            await remember(get_pool(), state.workspace_id, f"Q: {question}\nA: {answer}", facts=facts, tenant_id=state.tenant_id)
             # ADR-0004 阶段3：低频触发 typed 巩固/遗忘（旁路，不阻断）
-            await maybe_consolidate(get_pool(), state.workspace_id)
+            await maybe_consolidate(get_pool(), state.workspace_id, tenant_id=state.tenant_id)
         return {
             "answer": answer,
             "iterations": iterations,
