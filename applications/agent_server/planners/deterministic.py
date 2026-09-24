@@ -166,12 +166,12 @@ class DeterministicPlanner(Planner):
 
                 gate = MemoryGate(top_k=settings.memory_gate_top_k)
                 memory_notes = await gate_recall(
-                    lambda question: recall(runtime.pool, workspace_id, question),
+                    lambda question: recall(runtime.pool, workspace_id, question, tenant_id=plan.tenant_id),
                     question,
                     gate=gate,
                 )
             else:
-                memory_notes = await recall(runtime.pool, workspace_id, question)
+                memory_notes = await recall(runtime.pool, workspace_id, question, tenant_id=plan.tenant_id)
             if memory_notes:
                 yield StreamEvent(type="memory", payload={"notes": memory_notes})
 
@@ -198,6 +198,7 @@ class DeterministicPlanner(Planner):
                             question=question,
                             workspace_id=workspace_id,
                             user_id=plan.user_id,
+                            tenant_id=plan.tenant_id,
                             messages=[],
                             llm=runtime.llm,
                         )
@@ -232,8 +233,8 @@ class DeterministicPlanner(Planner):
                 facts = None
                 if settings.memory_extraction_enabled and runtime.llm is not None:
                     facts = await extract_memory_facts(runtime.llm, question, answer)
-                await remember(runtime.pool, workspace_id, f"Q: {question}\nA: {answer}", facts=facts)
-                await maybe_consolidate(runtime.pool, workspace_id)
+                await remember(runtime.pool, workspace_id, f"Q: {question}\nA: {answer}", facts=facts, tenant_id=plan.tenant_id)
+                await maybe_consolidate(runtime.pool, workspace_id, tenant_id=plan.tenant_id)
             yield StreamEvent(type="answer", payload={"text": answer})
 
     async def _run_capability(
