@@ -134,7 +134,7 @@ def build_graph(
         return {"evidence": await _invoke("rag", query=state.sub_query, workspace_id=state.workspace_id)}
 
     async def sql_node(state: AgentState) -> dict:
-        return {"evidence": await _invoke("sql", query=state.sub_query, llm=llm)}
+        return {"evidence": await _invoke("sql", query=state.sub_query, llm=llm, workspace_id=state.workspace_id)}
 
     async def direct_node(state: AgentState) -> dict:
         return {"evidence": []}

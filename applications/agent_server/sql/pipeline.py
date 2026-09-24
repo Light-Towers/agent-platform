@@ -72,6 +72,7 @@ async def execute_readonly(sql: str, max_rows: int) -> dict:
         # 连接级只读第二道防线：用 psycopg 原生 options 参数（避免 URL 编码在含 ?
         # 的 conninfo 下被版本相关行为跳过），并在建连后显式 SET 双保险，
         # 即使白名单守卫被绕过（如 sqlglot 未知 CVE），业务库也不可写入。
+        # TODO(P1-10): 业务库查询每次新建连接而非复用 pool，属已知性能缺口（待引入 AsyncConnectionPool for sql_dsn）。
         async with await psycopg.AsyncConnection.connect(
             dsn, options="-c default_transaction_read_only=on"
         ) as conn:
@@ -84,10 +85,10 @@ async def execute_readonly(sql: str, max_rows: int) -> dict:
     raise RuntimeError(f"暂不支持的业务库类型: {dsn.split('://')[0]}（MySQL 留待 Phase 3）")
 
 
-async def text_to_sql(pool, question: str, llm=None) -> dict:
+async def text_to_sql(pool, question: str, llm=None, *, workspace_id: str = "") -> dict:
     """完整管线；返回 {question, context_found, sql, result|error}。"""
     settings = get_settings()
-    context = await fetch_context(pool, question)
+    context = await fetch_context(pool, question, workspace_id=workspace_id)
     context_found = bool(context["ddl"] or context["docs"] or context["examples"])
 
     if llm is None:
