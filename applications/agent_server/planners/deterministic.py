@@ -84,6 +84,7 @@ class DeterministicPlanner(Planner):
                     question=question,
                     workspace_id=ctx.workspace_id,
                     user_id=ctx.user_id,
+                tenant_id=ctx.tenant_id,
                     last_snapshot=ctx.last_snapshot,
                 )
             question = guard["redacted_text"]
@@ -108,6 +109,7 @@ class DeterministicPlanner(Planner):
                     question=question,
                     workspace_id=ctx.workspace_id,
                     user_id=ctx.user_id,
+                tenant_id=ctx.tenant_id,
                     messages=compacted,
                     compacted=True,
                     last_snapshot=ctx.last_snapshot,
@@ -124,6 +126,7 @@ class DeterministicPlanner(Planner):
                 question=question,
                 workspace_id=ctx.workspace_id,
                 user_id=ctx.user_id,
+                tenant_id=ctx.tenant_id,
                 last_snapshot=ctx.last_snapshot,
             )
 
