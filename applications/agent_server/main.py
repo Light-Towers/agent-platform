@@ -3,8 +3,10 @@
 所有全局资源在 lifespan 一次性初始化（带锁），请求路径零懒加载竞态。
 """
 
+import pathlib
 from contextlib import asynccontextmanager
 
+from agent_core.guardrails.app_factory import build_api_app
 from agent_core.logging import configure_logging, get_logger
 
 # 统一日志配置入口：必须在其它包 import 之前调用，使下列 format 优先生效
@@ -72,6 +74,79 @@ def _build_pg_stores(pool):
     ownership_store = PgExecutionOwnershipStore(pool)
     trajectory_store = PgTrajectoryStore(pool)
     return checkpoint_store, idempotency_store, ownership_store, trajectory_store
+
+
+def _build_memory_hooks(pool):
+    """构建执行后记忆沉淀 hooks（EpisodicSink + ProceduralSink + MemoryDecayManager）。
+
+    pool 非 None 时用 PG 后端，否则 InMemory。使记忆框架"越用越好"——
+    执行完成后自动沉淀 Episode → 定期挖掘候选 Skill → 衰减清理。
+    """
+    from agent_runtime.episodic_memory import EpisodicMemory, InMemoryEpisodicStore
+    from agent_runtime.memory_decay import MemoryDecayManager
+    from agent_runtime.memory_sink import EpisodicSink, ProceduralSink
+    from agent_runtime.procedural_memory import InMemoryProceduralStore
+
+    if pool is not None:
+        from agent_runtime.memory_pg import PgEpisodicStore, PgProceduralStore
+
+        ep_store = PgEpisodicStore(pool)
+        proc_store = PgProceduralStore(pool)
+    else:
+        ep_store = InMemoryEpisodicStore()
+        proc_store = InMemoryProceduralStore()
+
+    ep_mem = EpisodicMemory(ep_store)
+    return [
+        EpisodicSink(ep_mem),
+        ProceduralSink(ep_mem, proc_store, trigger_interval=10),
+        MemoryDecayManager(ep_store, cleanup_interval=50),
+    ]
+
+
+def _build_context_governor(pool, llm):
+    """构建 Context 治理管道（ContextGovernor）：Select → Recall → Authorize → Validate → Score。
+
+    pool 非 None 时用 PG 后端 Memory，否则 InMemory。Governor 挂 app.state，
+    供 routes.py 在构建 PlannerContext 前调 govern_memories() 注入已治理的记忆。
+    """
+    from agent_runtime.context.assembler import ContextAssembler
+    from agent_runtime.context.authorizer import ContextAuthorizer
+    from agent_runtime.context.budget import ContextBudget
+    from agent_runtime.context.governor import ContextGovernor
+    from agent_runtime.context.quality import ContextQualityScorer
+    from agent_runtime.context.validator import ContextValidator
+    from agent_runtime.episodic_memory import EpisodicMemory, InMemoryEpisodicStore
+    from agent_runtime.memory_types import ContextSelector, MemoryRetriever
+    from agent_runtime.procedural_memory import (
+        InMemoryProceduralStore,
+        ProceduralMemory,
+    )
+
+    if pool is not None:
+        from agent_runtime.memory_pg import PgEpisodicStore, PgProceduralStore
+
+        ep_store = PgEpisodicStore(pool)
+        proc_store = PgProceduralStore(pool)
+    else:
+        ep_store = InMemoryEpisodicStore()
+        proc_store = InMemoryProceduralStore()
+
+    ep_mem = EpisodicMemory(ep_store)
+    proc_mem = ProceduralMemory(proc_store)
+    retriever = MemoryRetriever(episodic=ep_mem, procedural=proc_mem)
+
+    budget = ContextBudget(model_window=32_000)
+    assembler = ContextAssembler(budget, llm=llm)
+
+    return ContextGovernor(
+        assembler=assembler,
+        retriever=retriever,
+        selector=ContextSelector(),
+        validator=ContextValidator(),
+        authorizer=ContextAuthorizer(),
+        quality_scorer=ContextQualityScorer(),
+    )
 
 
 def _build_admission_controller(pool, settings):
@@ -200,18 +275,67 @@ async def lifespan(app: FastAPI):
 
     # §20 演进：自动发现并注册 Workflows 目录（声明式 YAML → Skill）
     try:
+        import agent_runtime
+        _wf_dir = str(pathlib.Path(agent_runtime.__file__).parent / "workflows")
         wf_skills = discover_workflows(
-            "packages/agent-runtime/workflows",
+            _wf_dir,
             registry=registry,
         )
         for sk in wf_skills:
             registry.register(sk)
-        logger.info("auto-registered %d workflow skills from packages/agent-runtime/workflows", len(wf_skills))
+        logger.info("auto-registered %d workflow skills from %s", len(wf_skills), _wf_dir)
     except Exception:
         logger.warning("workflow auto-discovery failed", exc_info=True)
 
+    # MCP 工具自动注册为 Skill（每个工具 → SkillKind.REMOTE Skill）
+    if mcp_manager is not None:
+        from agent_runtime.skills.mcp import register_mcp_skills
+
+        mcp_count = register_mcp_skills(mcp_manager, registry)
+        logger.info("auto-registered %d MCP tool skills", mcp_count)
+
+    # 沙箱代码执行 Skill（Docker 优先 subprocess 降级）
+    from agent_runtime.skills.sandbox import as_sandbox_skill
+
+    sandbox_skill = as_sandbox_skill(timeout=settings.max_execution_seconds or 30)
+    if sandbox_skill.name not in registry:
+        registry.register(sandbox_skill)
+        logger.info("registered sandbox skill (backend=%s)", sandbox_skill.metadata.get("backend"))
+
+    # AgenticPlanner → SkillKind.AGENT 收敛（entry_points 不可用时跳过）
+    try:
+        from agent_runtime.planner.agentic import AgenticPlanner
+
+        agentic_skill = AgenticPlanner().to_skill()
+        if agentic_skill.name not in registry:
+            registry.register(agentic_skill)
+            logger.info("registered agentic skill (SkillKind.AGENT)")
+    except Exception:
+        # entry_points 不可用是常见预期（非 agentic 部署）；仅当运行时实际需要
+        # agentic/auto planner 时才值得警告，否则 DEBUG 记录（T1.2c / B2 评审结论）
+        if settings.planner in ("agentic", "auto"):
+            logger.warning(
+                "agentic skill 注册失败（planner=%s 运行时需要该 skill）",
+                settings.planner,
+                exc_info=True,
+            )
+        else:
+            logger.debug("agentic skill registration skipped (entry_points unavailable)", exc_info=True)
+
     app.state.registry = registry
     app.state.planner = get_planner(settings, registry=registry)
+    post_execution_hooks = _build_memory_hooks(pool)
+    app.state.context_governor = _build_context_governor(pool, llm)
+    # V3-3: AwaitableTask 持久化（PG 优先，InMemory 降级）
+    if pool is not None:
+        from agent_runtime.awaitable_task_pg import PgAwaitableTaskStore
+
+        awaitable_task_store = PgAwaitableTaskStore(pool)
+    else:
+        from agent_runtime.awaitable_task import InMemoryAwaitableTaskStore
+
+        awaitable_task_store = InMemoryAwaitableTaskStore()
+    app.state.awaitable_task_store = awaitable_task_store
     app.state.planner_runtime = PlannerRuntime(
         registry=registry,
         llm=llm,
@@ -226,6 +350,8 @@ async def lifespan(app: FastAPI):
         enable_loop_fingerprint=settings.enable_loop_fingerprint,
         workspace_id="default",
         user_id="default",
+        post_execution_hooks=post_execution_hooks,
+        awaitable_task_store=awaitable_task_store,
     )
     # 绑定 delegate：graph 节点的 _invoke 此后经 runtime.delegate 调用
     delegate_ref.delegate = app.state.planner_runtime.delegate
@@ -234,6 +360,101 @@ async def lifespan(app: FastAPI):
         secret_key=settings.langfuse_secret_key,
         host=settings.langfuse_host,
     )
+    # V3 Phase 2: ExecutionScheduler + ExecutionStatusStore（opt-in）
+    if settings.scheduler_enabled:
+        from agent_runtime.execution_scheduler import (
+            ExecutionScheduler,
+            InMemorySchedulerStore,
+            SchedulerConfig,
+        )
+        from agent_runtime.execution_status import InMemoryExecutionStatusStore
+
+        if pool is not None:
+            from agent_runtime.execution_scheduler import PgSchedulerStore
+            from agent_runtime.execution_state_pg import PgExecutionStatusStore
+
+            scheduler_store = PgSchedulerStore(pool)
+            status_store = PgExecutionStatusStore(pool)
+        else:
+            scheduler_store = InMemorySchedulerStore()
+            status_store = InMemoryExecutionStatusStore()
+        scheduler = ExecutionScheduler(
+            scheduler_store,
+            config=SchedulerConfig(
+                max_concurrent=settings.scheduler_max_concurrent,
+                max_concurrent_per_tenant=settings.scheduler_max_concurrent_per_tenant,
+                queue_capacity=settings.scheduler_queue_capacity,
+            ),
+        )
+        app.state.scheduler = scheduler
+        app.state.status_store = status_store
+        # V3 Phase 3: Scheduler Reaper（lease-based 回收）
+        if ownership_store is not None:
+            from agent_runtime.execution_scheduler import SchedulerReaper
+
+            reaper = SchedulerReaper(scheduler, ownership_store)
+            reaper.start()
+            app.state.scheduler_reaper = reaper
+            logger.info("V3 scheduler reaper started (lease-based)")
+        else:
+            app.state.scheduler_reaper = None
+        # V3 Phase 4: Control Plane（组合 scheduler + status_store + checkpoint_store）
+        from agent_runtime.control_plane import ControlPlane
+
+        app.state.control_plane = ControlPlane(
+            scheduler=scheduler,
+            status_store=status_store,
+            checkpoint_store=checkpoint_store,
+        )
+        logger.info(
+            "V3 scheduler enabled: max_concurrent=%d per_tenant=%d queue=%d backend=%s",
+            settings.scheduler_max_concurrent,
+            settings.scheduler_max_concurrent_per_tenant,
+            settings.scheduler_queue_capacity,
+            "pg" if pool is not None else "memory",
+        )
+    else:
+        app.state.scheduler = None
+        app.state.status_store = None
+    # V3 Phase 4: Cost Governance（opt-in）
+    if settings.cost_governance_enabled:
+        from agent_runtime.cost_governance import (
+            BudgetDimension,
+            BudgetLimit,
+            CostGovernance,
+            InMemoryBudgetStore,
+        )
+
+        limits: dict[BudgetDimension, BudgetLimit] = {}
+        if settings.budget_limit_requests > 0:
+            limits[BudgetDimension.REQUESTS] = BudgetLimit(
+                BudgetDimension.REQUESTS, settings.budget_limit_requests,
+                window_seconds=settings.budget_window_seconds,
+            )
+        if settings.budget_limit_tokens > 0:
+            limits[BudgetDimension.TOKENS] = BudgetLimit(
+                BudgetDimension.TOKENS, settings.budget_limit_tokens,
+                window_seconds=settings.budget_window_seconds,
+            )
+        if settings.budget_limit_cost > 0:
+            limits[BudgetDimension.COST] = BudgetLimit(
+                BudgetDimension.COST, settings.budget_limit_cost,
+                window_seconds=settings.budget_window_seconds,
+            )
+        if pool is not None:
+            from agent_runtime.cost_governance_pg import PgBudgetStore
+
+            budget_store = PgBudgetStore(pool)
+        else:
+            budget_store = InMemoryBudgetStore()
+        app.state.cost_governance = CostGovernance(budget_store, limits)
+        logger.info(
+            "V3 cost governance enabled: limits=%s backend=%s",
+            {dim.value: lim.limit for dim, lim in limits.items()},
+            "pg" if pool is not None else "memory",
+        )
+    else:
+        app.state.cost_governance = None
     logger.info(
         "agent-platform 就绪 storage=%s llm=%s pool=%s coordination=%s admission=%s revert=%s otel=%s mcp=%s planner=%s runtime_mode=%s",
         "postgres" if settings.db_enabled else "memory",
@@ -248,6 +469,10 @@ async def lifespan(app: FastAPI):
         settings.runtime_mode,
     )
     yield
+    # V3 Phase 3: Scheduler Reaper 停止
+    reaper = getattr(app.state, "scheduler_reaper", None)
+    if reaper is not None:
+        await reaper.stop()
     # Phase 2: OTel flush
     otel_force_flush()
     # Phase 2: MCP close
@@ -260,7 +485,7 @@ async def lifespan(app: FastAPI):
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="agent-platform", version="0.1.0", lifespan=lifespan)
+    app = build_api_app(title="agent-platform", version="0.1.0", lifespan=lifespan)
     # CORS：允许前端跨域调用 /query 等接口；allow_origins 应从环境变量注入，
     # 默认为回环，避免开发期浏览器被阻断的同时不暴露给任意来源。
     app.add_middleware(

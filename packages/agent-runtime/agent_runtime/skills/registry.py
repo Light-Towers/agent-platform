@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
+from agent_runtime.effect_contract import EffectContract
 from agent_runtime.skills.middleware import SkillMiddleware
 
 # 执行器签名：**kwargs 透传（如 search(query=...)、mcp(state=..., mcp_manager=...)）
@@ -28,12 +29,25 @@ Executor = Callable[..., Awaitable[Any]]
 
 
 class SkillKind(str, Enum):
-    """能力执行方式：决定走哪个执行器语义。"""
+    """能力执行语义：决定走哪个执行器语义。"""
 
     FUNCTION = "function"
     AGENT = "agent"
     REMOTE = "remote"
     WORKFLOW = "workflow"  # Workflow Skill：Static/Conditional 编排（graph.py → general_qa），LangGraph 仅是执行实现
+
+
+class ExecutionBoundary(str, Enum):
+    """执行边界：Capability 的运行位置（V3 核心抽象——语义与部署解耦）。
+
+    - INPROCESS：进程内调用（asyncio / 函数调用），低延迟、共享故障域
+    - REMOTE：远程服务调用（HTTP / RPC / MCP），独立扩缩容、强故障隔离
+    - SANDBOX：隔离进程执行（用户代码 / 不可信脚本），进程级安全隔离
+    """
+
+    INPROCESS = "inprocess"
+    REMOTE = "remote"
+    SANDBOX = "sandbox"
 
 
 @dataclass(frozen=True)
@@ -49,6 +63,10 @@ class Skill:
     description: str
     kind: SkillKind
     executor: Executor
+    # V3 Execution Boundary：Capability 的运行位置。None 时从 kind 推断（向后兼容）。
+    # 显式声明后，Execution Router 可据此选择 InProcess/Remote/Sandbox 执行器，
+    # 使部署边界与能力语义解耦（V3 §2.1 核心设计原则）。
+    execution_boundary: ExecutionBoundary | None = None
     timeout_ms: int | None = None
     # 保留扩展位：metadata（来源轨/是否降级/评估标签等）后续按需填充
     metadata: dict[str, Any] = field(default_factory=dict)
@@ -62,6 +80,14 @@ class Skill:
     # 须经 Runtime/Registry（runtime.delegate）组合，由 CompositionValidator 静态校验
     # （存在性 / 环 / 权限闭包），避免组合治理仅靠运行时 skill_guard 兜底。
     sub_skills: tuple[str, ...] = field(default_factory=tuple)
+    # 副作用语义契约（V3-2 Effect Contract）：声明本能力的 delivery/retry/recover 语义。
+    # None = 未声明（平台按 v2 保守行为：仅按异常分类重试）；声明后执行图据其做失败决策。
+    effect_contract: EffectContract | None = None
+    # V3-10: 版本 / 生命周期 / 兼容性
+    version: str | None = None  # 语义化版本，如 "1.2.3"
+    lifecycle: Any = None  # SkillLifecycle，延迟导入避免循环
+    deprecated_since: str | None = None  # 废弃起始版本
+    replaced_by: str | None = None  # 替代能力名
 
     def to_tool_schema(self) -> dict[str, Any]:
         """生成 Agent 工具描述（供 Planner / Agent 组合调用时注入工具列表）。
@@ -211,6 +237,27 @@ class SkillRegistry:
             raise DuplicateSkillError(
                 f"能力已注册: {capability.name}（重复注册会掩盖行为差异，拒绝覆盖）"
             )
+        # V3 Phase 4: Skill Lifecycle 强制
+        lifecycle = capability.lifecycle
+        if lifecycle is not None:
+            try:
+                from agent_runtime.skill_lifecycle import SkillLifecycle
+
+                if lifecycle is SkillLifecycle.RETIRED:
+                    raise DuplicateSkillError(
+                        f"能力 {capability.name} 已 RETIRED，拒绝注册"
+                    )
+                if lifecycle is SkillLifecycle.DEPRECATED:
+                    import logging
+
+                    logging.getLogger(__name__).warning(
+                        "注册 DEPRECATED 能力 %s（deprecated_since=%s, replaced_by=%s）",
+                        capability.name,
+                        capability.deprecated_since,
+                        capability.replaced_by,
+                    )
+            except ImportError:
+                pass
         self._capabilities[capability.name] = capability
 
     def get(self, name: str) -> Skill:
@@ -222,6 +269,17 @@ class SkillRegistry:
     def list(self) -> list[Skill]:
         """按名称排序返回全部能力。"""
         return sorted(self._capabilities.values(), key=lambda c: c.name)
+
+    def list_by_boundary(self, boundary: ExecutionBoundary) -> list[Skill]:
+        """按执行边界筛选能力（V3：部署边界可查询）。
+
+        供运维/部署决策：如 ``list_by_boundary(REMOTE)`` 返回所有远程能力，
+        可据此配置健康探活、独立扩缩容、网络策略。
+        """
+        return sorted(
+            (c for c in self._capabilities.values() if c.execution_boundary == boundary),
+            key=lambda c: c.name,
+        )
 
     def validate_composition(self) -> list[str]:
         """静态校验 Skill 组合图（§7.1 一等公民组合模型）。

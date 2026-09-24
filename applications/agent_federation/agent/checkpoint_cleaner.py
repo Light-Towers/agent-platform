@@ -126,7 +126,7 @@ async def clean_checkpoints(checkpointer, *, keep_per_thread: int | None = None)
             return await _clean_postgres(checkpointer, keep_per_thread)
         # InMemorySaver / 其他：无需持久化清理
         return 0
-    except Exception as e:  # 清理失败不应影响主服务
+    except Exception as e:
         logger.warning("checkpoint 清理异常（已跳过）: %s", e)
         return 0
 

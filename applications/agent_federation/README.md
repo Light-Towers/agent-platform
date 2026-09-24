@@ -41,8 +41,8 @@ python -m api.server  # 启动 FastAPI，默认 :8000
 | `LLM_QWEN_MAX` | ✅ | 主模型名称 |
 | `LLM_QWEN_FALLBACK` / `OPENAI_FALLBACK_*` | 可选 | 备用模型（主模型不可用时自动降级） |
 | `AGENT_MODE` | 可选 | 编排模式：local / remote（默认 local） |
-| `WENDA_DATA_AGENT_URL` | 可选 | wenda-data-agent 地址（Text-to-SQL 子 Agent） |
-| `ZHIKU_API_URL` / `ZHIKU_API_KEY` | 可选 | zhiku 检索服务地址 / Key |
+| `NL2SQL_SERVICE_URL` | 可选 | nl2sql-service 地址（Text-to-SQL 子 Agent） |
+| `KNOWLEDGE_SERVICE_URL` / `KNOWLEDGE_SERVICE_KEY` | 可选 | knowledge-service 检索服务地址 / Key |
 | `KEFU_SERVICE_URL` / `KEFU_USE_ADAPTER` / `KEFU_ADAPTER_URL` | 可选 | kefu 直连地址 / 是否经 adapter 中转 / adapter 地址 |
 | `TAVILY_API_KEY` | ✅ | Tavily 搜索 API |
 | `MYSQL_*` | ✅ | MySQL 连接信息（生产环境应使用只读用户；池参数 `MYSQL_POOL_SIZE` 等） |
@@ -57,7 +57,7 @@ python -m api.server  # 启动 FastAPI，默认 :8000
 | `API_KEY` | 可选 | 服务鉴权 Key（空则不鉴权） |
 | `ALLOWED_ORIGINS` | 可选 | CORS 允许源（逗号分隔，默认 localhost:3000） |
 
-> **完整开关清单见 [`.env.example`](.env.example)**（80+ 项，源码为真相源盘点，2026-08-19 核销 TB-11 第一步）：能力开关（`INTENT_ENABLED` / `PLANNER_ENABLED` / `REFLEXION_ENABLED` / `GUARD_ENABLED` / `CACHE_ENABLED` / `DYNAMIC_AGENT_ENABLED` / `DYNAMIC_AGENT_CACHE_MAX`）、治理参数（熔断 `CB_*`、限流 `RATE_LIMIT_*`、灰度 `GRAY_PCT`、重试 `SUBAGENT_RETRIES` / `SUBAGENT_RETRY_BASE`、断言 `E1_CONTRACT_ASSERT` / `E1_CONTENT_ASSERT`、checkpoint 清理 `CHECKPOINT_*`）、缓存 key 版本（`KB_VERSION_*` / `TENANT_ID`）、Langfuse trace（`LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` / `LANGFUSE_HOST`）等均已登记。
+> **完整开关清单见 [`.env.example`](.env.example)**（23 项，源码为真相源盘点，2026-08-19 核销 TB-11 第一步）：能力开关（`INTENT_ENABLED` / `PLANNER_ENABLED` / `REFLEXION_ENABLED` / `GUARD_ENABLED` / `CACHE_ENABLED` / `DYNAMIC_AGENT_ENABLED` / `DYNAMIC_AGENT_CACHE_MAX`）、治理参数（熔断 `CB_*`、限流 `RATE_LIMIT_*`、灰度 `GRAY_PCT`、重试 `SUBAGENT_RETRIES` / `SUBAGENT_RETRY_BASE`、断言 `E1_CONTRACT_ASSERT` / `E1_CONTENT_ASSERT`、checkpoint 清理 `CHECKPOINT_*`）、缓存 key 版本（`KB_VERSION_*` / `TENANT_ID`）、Langfuse trace（`LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` / `LANGFUSE_HOST`）等均已登记。
 
 ## 改造历程
 
@@ -94,7 +94,7 @@ python -m api.server  # 启动 FastAPI，默认 :8000
 | **Phase 0-7** | ✅ 7 Phase 全部实现（见 `docs/audit-report.md`），所有新功能默认关闭，环境变量渐进启用 |
 | **评测集** | 200 题（10 人工 + 190 合成），需人工审核标注 |
 | **kefu-service** | Phase 7 已补全（9 命令 + 3 Flow + GraphRAG），用配置驱动模拟数据 |
-| **测试** | 24 个单元测试 + M7 验收测试（10/10 对话 + 5/5 GraphRAG） |
+| **测试** | 110 个单元测试 + M7 验收测试（10/10 对话 + 5/5 GraphRAG） |
 | **Docker** | docker-compose 含 web+mysql+zhiku+langfuse+clickhouse+valkey，未本地构建验证（无 Docker 环境） |
 
 ## 项目结构
@@ -121,7 +121,7 @@ agent_federation/
 │   └── _timeout.py           # 工具超时隔离装饰器（asyncio.wait_for wrapper）
 ├── prompt/prompts.yml         # 全量提示词配置（会展业务叙事）
 ├── utils/path_utils.py        # 路径安全工具
-├── tests/unit/                # 单元测试（24 tests）
+├── tests/unit/                # 单元测试（110 tests）
 ├── pyproject.toml             # 项目配置 + ruff
 ├── Dockerfile                 # 容器镜像
 ├── docker-compose.yml         # web + mysql

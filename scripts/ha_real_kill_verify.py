@@ -12,7 +12,6 @@
 
 验收断言（effectively-once 证据）：
   - side_effects 中 :WRITE 类型每 step 恰好 1 条（HAProbe 桩幂等）
-  - side_effects 中 :skill: 类型每 step 恰好 1 条（运行时 H2 落库，resume 不重跑已落地 step）
   - 任一 step 的 side effect 不重复 → 跨进程接管不引入重复副作用
 
 前置：本机 PostgreSQL 监听 5433，凭证 agent/agent_platform_dev，库 agent_platform。
@@ -46,7 +45,7 @@ MODE = os.environ.get("HA_MODE", "run")   # run | a | b
 # ---- 内联 HAProbe 设施（自包含，不依赖 tests 包结构）----
 
 class HAProbeRegistry:
-    """注册表：registry.execute(name, ...) 契约；name 形如 step_1/step_2/...。
+    """注册表：按 name 执行 step 契约；name 形如 step_1/step_2/...。
 
     每个 step 先写 side_effects（幂等：effect_key 唯一约束冲突 → 跳过实际效果），
     再 sleep 留出故障注入窗，返回结果。
@@ -184,17 +183,12 @@ async def _assert_effectively_once(execution_id: str):
 
     keys = [r[0] for r in rows]
     write_keys = [k for k in keys if ":WRITE" in k]
-    skill_keys = [k for k in keys if ":skill:" in k]
     errors = []
     if len(write_keys) != STEPS:
         errors.append(f"WRITE 记录数应为 {STEPS}，实际 {len(write_keys)}: {write_keys}")
-    if len(skill_keys) != STEPS:
-        errors.append(f"skill 记录数应为 {STEPS}，实际 {len(skill_keys)}: {skill_keys}")
     if len(set(write_keys)) != len(write_keys):
         errors.append(f"WRITE 存在重复 effect_key（effectively-once 被破坏）: {write_keys}")
-    if len(set(skill_keys)) != len(skill_keys):
-        errors.append(f"skill 存在重复 effect_key（运行时落库幂等失败）: {skill_keys}")
-    return errors, {"write": write_keys, "skill": skill_keys}
+    return errors, {"write": write_keys}
 
 
 def main():

@@ -25,14 +25,16 @@ def _check_one(name: str, url: str) -> bool:
     try:
         with httpx.Client(timeout=_TIMEOUT) as client:
             resp = client.get(f"{url}/health")
-            return resp.status_code == 200
+            if resp.status_code == 200:
+                return True
     except Exception:
-        try:
-            with httpx.Client(timeout=_TIMEOUT) as client:
-                resp = client.get(url)
-                return resp.status_code < 500
-        except Exception:
-            return False
+        pass
+    try:
+        with httpx.Client(timeout=_TIMEOUT) as client:
+            resp = client.get(url)
+            return resp.status_code < 500
+    except Exception:
+        return False
 
 
 def _health_loop() -> None:

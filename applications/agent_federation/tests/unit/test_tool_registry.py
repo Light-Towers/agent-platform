@@ -22,10 +22,45 @@ def test_tool_registry_consistency():
         for n in names:
             assert n in TOOL_REGISTRY, f"role {role} 引用了未注册工具 {n}"
     # 全量工具：每个注册项都应能解析（或优雅跳过），不应抛错
-    from agent.tool_registry import _resolve
+    from agent.tool_registry import _resolve, sandbox_tool_enabled
 
     resolved = sum(1 for n in TOOL_REGISTRY if _resolve(n) is not None)
-    assert len(get_tools_for_roles(None)) == resolved
+    tools_all = get_tools_for_roles(None)
+    names_all = {getattr(t, "name", getattr(t, "__name__", "")) for t in tools_all}
+    if not sandbox_tool_enabled():
+        # T1.2b：开关关闭时全量回退必须剔除沙箱工具
+        assert "execute_python_code" not in names_all
+        resolved -= 1
+    assert len(tools_all) == resolved
+
+
+def test_sandbox_tool_gate(monkeypatch):
+    """T1.2b：SANDBOX_TOOL_ENABLED 开关约束全量回退与显式 code 角色两条路径。"""
+    from agent.tool_registry import sandbox_tool_enabled
+
+    monkeypatch.delenv("SANDBOX_TOOL_ENABLED", raising=False)
+    assert sandbox_tool_enabled() is False
+    names_off = {getattr(t, "name", getattr(t, "__name__", "")) for t in get_tools_for_roles(None)}
+    assert "execute_python_code" not in names_off
+    # 显式 code 角色也受开关约束
+    names_code_off = {
+        getattr(t, "name", getattr(t, "__name__", "")) for t in get_tools_for_roles(["code"])
+    }
+    assert "execute_python_code" not in names_code_off
+
+    monkeypatch.setenv("SANDBOX_TOOL_ENABLED", "true")
+    assert sandbox_tool_enabled() is True
+    names_on = {getattr(t, "name", getattr(t, "__name__", "")) for t in get_tools_for_roles(None)}
+    assert "execute_python_code" in names_on
+
+
+def test_normalize_roles_strips_code_role():
+    """T1.2b：LLM 输出规整路径永远剥离 code 角色，沙箱角色须显式配置。"""
+    out = normalize_roles(["data", "code"])
+    assert "data" in out
+    assert "code" not in out
+    # raw 为空的全量兜底同样不含 code
+    assert "code" not in normalize_roles(None)
 
 
 def test_get_tools_for_roles_filters_and_dedups():

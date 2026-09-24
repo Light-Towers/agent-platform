@@ -8,7 +8,7 @@
 _cleanup()，否则同 session 后续请求会永久排队（capacity 泄漏）。
 
 注意：通过 ASGITransport 直接驱动 app（不触发 lifespan 真实 DB 初始化），
-手动注入 mock coordinator / admission_queue，并 patch 缓存相关函数。
+手动注入 mock coordinator / admission_controller，并 patch 缓存相关函数。
 """
 
 import httpx  # noqa: E402
@@ -80,12 +80,12 @@ def app_with_mocks(monkeypatch):
     app = _app
     # 重置可能因其他测试污染的 state
     settings = _make_settings()
-    monkeypatch.setattr("agent_server.api.routes.get_settings", lambda: settings)
+    monkeypatch.setattr("agent_server.api.query_router.get_settings", lambda: settings)
 
     coordinator = _MockCoordinator()
     admission = _MockAdmission()
     app.state.coordinator = coordinator
-    app.state.admission_queue = admission
+    app.state.admission_controller = admission
     # 这些路径不访问 graph / otel，留 None 即可
     app.state.graph = None
     app.state.otel_tracer = None
@@ -93,7 +93,7 @@ def app_with_mocks(monkeypatch):
     yield app, coordinator, admission
 
     # 清理，避免影响其它用例
-    for attr in ("coordinator", "admission_queue", "graph", "otel_tracer"):
+    for attr in ("coordinator", "admission_controller", "graph", "otel_tracer"):
         if hasattr(app.state, attr):
             delattr(app.state, attr)
 
@@ -128,11 +128,11 @@ async def test_cache_hit_releases_resources(app_with_mocks, monkeypatch):
 
     # 让缓存查询命中：pool 非 None、embed_query 返回定长向量、cache_lookup 命中
     fake_pool = object()
-    monkeypatch.setattr("agent_server.api.routes.get_pool", lambda: fake_pool)
-    monkeypatch.setattr("agent_server.api.routes.embed_query", lambda q: _async_embed())
+    monkeypatch.setattr("agent_server.api.query_router.get_pool", lambda: fake_pool)
+    monkeypatch.setattr("agent_server.api.query_router.embed_query", lambda q: _async_embed())
     monkeypatch.setattr(
-        "agent_server.api.routes.semantic_cache.cache_lookup",
-        lambda pool, emb, thr: _async_cache_hit(),
+        "agent_server.api.query_router.semantic_cache.cache_lookup",
+        lambda pool, emb, thr, tenant_id="": _async_cache_hit(),
     )
 
     status, body = await _post_query(app, "repeat question")

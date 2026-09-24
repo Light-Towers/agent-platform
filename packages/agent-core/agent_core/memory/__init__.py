@@ -19,19 +19,18 @@
   统一从此处 import。
 """
 
-from agent_core.memory.base import ConversationMemory
 from agent_core.memory.backend import MemoryBackend
+from agent_core.memory.base import ConversationMemory
 from agent_core.memory.embedder import (
     EmbeddingProvider,
     LocalEmbedder,
     LocalFnEmbedder,
     MockEmbedder,
-    SiliconFlowEmbedder,
     RemoteEmbedder,
+    SiliconFlowEmbedder,
     get_embedder,
 )
 from agent_core.memory.mongo import MongoHistoryStore
-from agent_core.memory.mongo_checkpointer import MongoCheckpointer
 from agent_core.memory.semantic import (
     MemoryType,
     TypedMemory,
@@ -91,7 +90,11 @@ def get_checkpointer(pg_pool=None):
     mongo_url = __import__("os").getenv("MONGO_URL")
     if mongo_url:
         try:
-            return MongoCheckpointer(
+            from agent_core.memory.mongo_checkpointer import (
+                MongoCheckpointer as _MC,
+            )
+
+            return _MC(
                 mongo_url=mongo_url,
                 db_name=__import__("os").getenv("MONGO_DB", "deepagents"),
                 collection=__import__("os").getenv(
@@ -108,6 +111,19 @@ def get_checkpointer(pg_pool=None):
     from langgraph.checkpoint.memory import InMemorySaver
 
     return InMemorySaver()
+
+
+def __getattr__(name: str):
+    """惰性加载 MongoCheckpointer——避免 import agent_core.memory 硬依赖 langgraph。
+
+    MongoCheckpointer 需要 langgraph + langchain_core 作为基类，仅在显式访问时才加载。
+    """
+    if name == "MongoCheckpointer":
+        from agent_core.memory.mongo_checkpointer import MongoCheckpointer as _MC
+
+        return _MC
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 __all__ = [
     "ConversationMemory",

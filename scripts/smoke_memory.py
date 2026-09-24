@@ -36,7 +36,7 @@ async def main() -> int:
             print("graph built=", graph is not None)
             print("checkpoint type=", type(checkpointer).__name__)
             return 0 if (graph is not None and checkpointer is not None) else 1
-    except Exception:  # noqa: BLE001
+    except Exception:
         print("LIFESPAN_FAILED")
         traceback.print_exc()
         return 1

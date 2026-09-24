@@ -160,7 +160,7 @@ async def compose_execution_graph(
                 ]
             )
             raw = resp
-        except Exception:  # noqa: BLE001 回退到普通 invoke + JSON 解析
+        except Exception:
             raw = None
     if raw is None:
         resp = await llm.ainvoke(

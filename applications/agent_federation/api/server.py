@@ -9,13 +9,15 @@ from pathlib import Path
 
 import uvicorn
 from dotenv import find_dotenv, load_dotenv
-from fastapi import FastAPI, File, Form, Query, Request, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
+from shared_schemas import QueryRequest
 
 load_dotenv(find_dotenv())
 
+from agent_core.guardrails.app_factory import build_api_app
 from agent_core.logging import configure_logging, get_logger
 from agent_core.tracing import init_tracing, start_span
 
@@ -38,7 +40,7 @@ project_root = current_dir.parent
 from api.monitor import manager
 
 API_KEY = os.getenv("API_KEY", "")
-ZHIKU_API_URL = os.getenv("ZHIKU_API_URL", "")
+KNOWLEDGE_SERVICE_URL = os.getenv("KNOWLEDGE_SERVICE_URL", "")
 
 from api.auth import resolve_thread_id
 
@@ -64,7 +66,7 @@ async def lifespan(app: FastAPI):
         logger.info("Langfuse 未配置，trace 走 agent-core OTel（开发期 no-op 降级）")
 
     # zhiku 健康探活（异步，不阻塞启动）
-    if ZHIKU_API_URL:
+    if KNOWLEDGE_SERVICE_URL:
         import threading
 
         from tools.zhiku_tools import check_zhiku_health
@@ -118,7 +120,7 @@ async def lifespan(app: FastAPI):
     await close_pool()
 
 
-app = FastAPI(title="DeepAgents API", lifespan=lifespan)
+app = build_api_app(title="agent_federation API", lifespan=lifespan)
 
 output_dir = project_root / "output"
 output_dir.mkdir(exist_ok=True)
@@ -200,26 +202,34 @@ def _sanitize_filename(name: str) -> str:
     return safe
 
 
-class TaskRequest(BaseModel):
-    query: str
-    thread_id: str = None
+class TaskAcceptedResponse(BaseModel):
+    """异步任务受理响应（非 QueryResponse：/api/task 是 fire-and-forget）。"""
+
+    status: str
+    thread_id: str
 
 
 from agent.main_agent import run_deep_agent
 
 
 @app.post("/api/task")
-async def run_task(request: TaskRequest):
-    # 安全：API_KEY 启用时忽略客户端 thread_id，按密钥派生稳定会话（防劫持 + 跨请求续接）
+async def run_task(request: QueryRequest):
+    # 安全：API_KEY 启用时忽略客户端 session_id，按密钥派生稳定会话（防劫持 + 跨请求续接）
     api_key = _extract_api_key(request)
-    thread_id = resolve_thread_id(request.thread_id, api_key)
+    thread_id = resolve_thread_id(request.session_id, api_key)
     with start_span("api.task", attrs={"thread_id": thread_id}):
         async def _run():
-            async with _concurrency_semaphore:
-                await run_deep_agent(request.query, workspace_id=thread_id)
+            try:
+                async with _concurrency_semaphore:
+                    await asyncio.wait_for(
+                        run_deep_agent(request.query, workspace_id=thread_id),
+                        timeout=float(os.getenv("FED_TASK_TIMEOUT_S", "300")),
+                    )
+            except Exception:
+                logger.exception("background task failed: thread_id=%s", thread_id)
 
         _track_task(asyncio.create_task(_run()))
-        return {"status": "started", "thread_id": thread_id}
+        return TaskAcceptedResponse(status="started", thread_id=thread_id)
 
 
 @app.post("/api/upload")
@@ -251,11 +261,13 @@ async def download_file(path: str):
         abs_path = Path(path).resolve()
         output_abs = output_dir.resolve()
         if not abs_path.is_relative_to(output_abs):
-            return {"error": "拒绝访问: 只能下载输出目录下的文件"}
+            raise HTTPException(status_code=403, detail="拒绝访问: 只能下载输出目录下的文件")
+    except HTTPException:
+        raise
     except Exception:
-        return {"error": "无效的路径参数"}
+        raise HTTPException(status_code=400, detail="无效的路径参数") from None
     if not abs_path.exists():
-        return {"error": "文件不存在"}
+        raise HTTPException(status_code=404, detail="文件不存在")
     return FileResponse(abs_path, filename=abs_path.name)
 
 
@@ -265,11 +277,13 @@ async def list_files(path: str):
         abs_path = Path(path).resolve()
         output_abs = output_dir.resolve()
         if not abs_path.is_relative_to(output_abs):
-            return {"error": "拒绝访问: 只能访问输出目录下的文件"}
+            raise HTTPException(status_code=403, detail="拒绝访问: 只能访问输出目录下的文件")
+    except HTTPException:
+        raise
     except Exception as e:
-        return {"error": f"路径无效: {e}"}
+        raise HTTPException(status_code=400, detail=f"路径无效: {e}") from e
     if not abs_path.exists():
-        return {"error": "目录不存在"}
+        raise HTTPException(status_code=404, detail="目录不存在")
     files = []
     try:
         for file_path in abs_path.rglob("*"):
@@ -283,7 +297,7 @@ async def list_files(path: str):
                     "mtime": stat.st_mtime
                 })
     except Exception as e:
-        return {"error": str(e)}
+        raise HTTPException(status_code=500, detail=str(e)) from e
     files.sort(key=lambda x: x.get("mtime", 0), reverse=True)
     return {"files": files}
 
@@ -337,19 +351,30 @@ async def websocket_endpoint(
                 await websocket.send_json({"type": "pong", "message": f"服务端已收到: {data}"})
                 continue
 
-            plan = await planner.plan(PlannerContext(question=msg["text"], workspace_id=ws_thread_id))
-            final_answer = ""
-            async for event in planner.execute(plan, runtime):
-                out = serialize_stream_event(event)
-                if out is None:
-                    continue
-                if event.type == "answer":
-                    final_answer = event.payload.get("text", "")
-                await websocket.send_json(out)
-            await websocket.send_json({"type": "done", "thread_id": ws_thread_id, "answer": final_answer})
+            with start_span("ws.query", attrs={"thread_id": ws_thread_id}):
+                plan = await planner.plan(PlannerContext(question=msg["text"], workspace_id=ws_thread_id))
+                final_answer = ""
+                async for event in planner.execute(plan, runtime):
+                    out = serialize_stream_event(event)
+                    if out is None:
+                        continue
+                    if event.type == "answer":
+                        final_answer = event.payload.get("text", "")
+                    await websocket.send_json(out)
+                await websocket.send_json({"type": "done", "thread_id": ws_thread_id, "answer": final_answer})
     except WebSocketDisconnect:
         manager.disconnect(websocket, ws_thread_id)
-    except Exception:
+    except Exception as e:
+        logger.exception("WS handler error: thread_id=%s", ws_thread_id)
+        # P2-3: 向客户端发送错误帧后再断连，避免客户端无感知挂起
+        try:
+            await websocket.send_json({
+                "type": "error",
+                "error": f"Internal error: {type(e).__name__}",
+                "thread_id": ws_thread_id,
+            })
+        except Exception:  # noqa: S110 — 客户端已断开，发送失败是预期路径
+            pass
         manager.disconnect(websocket, ws_thread_id)
 
 

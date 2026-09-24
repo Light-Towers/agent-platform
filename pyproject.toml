@@ -69,8 +69,8 @@ markers = [
 # 注：agent_federation/tests/unit 与 kefu-service/tests 经 Makefile `test` 目标以
 # 独立 pytest session 纳入 CI（避免与根 tests/ 的 conftest 插件名冲突）。
 # 分层（2026-08-19）：packages/ 放平台库（agent-core/agent-runtime/shared-schemas），
-# applications/ 放应用（agent_server/agent_federation/dialogue-framework/kefu-service/
-# wenda-data-agent/zhanggui-zhiku）。原 deepagents/ 因与 PyPI 包同名已重命名为
+# applications/ 放应用（agent_server/agent_federation/kefu-service/
+# nl2sql-service/knowledge-service）。原 deepagents/ 因与 PyPI 包同名已重命名为
 # agent_federation/ 并清理残骸。根宿主原 app/ 已改名 agent_server/（包名同步）。
 addopts = "--import-mode=importlib"
 
@@ -80,13 +80,30 @@ target-version = "py311"
 
 [tool.ruff.lint]
 # 显式 select，固化 lint 门禁规则集，避免依赖 ruff 默认 select（E4,E7,E9,F）漂移导致 I(isort) 等规则被静默关闭。
-select = ["E4", "E7", "E9", "F", "I"]
+select = ["E4", "E7", "E9", "F", "I", "BLE001", "S110"]
 # 以下为既有风格/惯例类告警，非逻辑阻断；收敛以让 CI 门禁（ruff check .）转绿。
 # B008: FastAPI 在依赖注入（Depends(...)）中于函数默认参数位置调用是官方推荐写法，非真实 bug。
 # E402: 模块级 import 不在顶部（agent_federation 多因 load_dotenv()/sys.path 后再 import，deliberate）。
-# E731: lambda 赋值（风格）。BLE001/S110: 盲捕获（既有合理降级）。B017: pytest.raises(Exception)。
+# E731: lambda 赋值（风格）。B017: pytest.raises(Exception)。
 # PERF102: .items()→.values()。RUF059: 未使用解包变量。
-ignore = ["B008", "E402", "E731", "BLE001", "S110", "B017", "PERF102", "RUF059"]
+# 注：BLE001/S110 已于 P0-4（2026-09-24）从 ignore 移除并纳入 select（根长尾的 legacy 入下方基线）。
+ignore = ["B008", "E402", "E731", "B017", "PERF102", "RUF059"]
+
+# P0-4 盲捕获门禁棘轮基线（根配置仅覆盖无独立 [tool.ruff] 的子树：agent_server / kefu / nl2sql / eval / scripts / tests）。
+# 逐文件锁定 legacy 存量，新代码不得新增；烧净一个删一行。进度见 docs/plans/plan-p0-4-blind-except-ratchet-2026-09-24.md。
+[tool.ruff.lint.per-file-ignores]
+"applications/agent_server/agent/router.py" = ["BLE001"]
+"applications/agent_server/memory/thread_persist.py" = ["BLE001"]
+"applications/agent_server/rag/store.py" = ["BLE001"]
+"applications/agent_server/sql/pipeline.py" = ["BLE001"]
+"applications/kefu-service/kefu_agent/graph.py" = ["BLE001"]
+"applications/nl2sql-service/nl2sql_service/agent/nodes/recall_column.py" = ["BLE001"]
+"applications/nl2sql-service/nl2sql_service/agent/nodes/recall_metric.py" = ["BLE001"]
+"eval/memory_reuse_llm.py" = ["BLE001"]
+"scripts/check_doc_sync.py" = ["BLE001"]
+"scripts/lint_architecture.py" = ["BLE001", "S110"]
+"scripts/smoke_memory.py" = ["BLE001"]
+"tests/ha/conftest.py" = ["BLE001"]
 
 [tool.uv.sources]
 agent-core = { workspace = true }
@@ -105,7 +122,7 @@ members = [
     "packages/agent-runtime",
     "applications/agent_federation",
     "applications/kefu-service",
-    "applications/wenda-data-agent",
-    "applications/zhanggui-zhiku",
-    "applications/dialogue-framework",
+    "applications/nl2sql-service",
+    "applications/knowledge-service",
+    "applications/exhibition-agent",
 ]

@@ -1,0 +1,67 @@
+name: agent-platform-ha
+
+# TB-8 分层门禁 · HA 重型基础设施验证。
+# 验证真实 PostgreSQL lease/checkpoint/side_effects 持久化，以及双进程 kill -9 接管。
+# 默认仅在 HA/Runtime 相关代码变更时触发；也支持 workflow_dispatch 手工执行。
+on:
+  push:
+    paths:
+      - "packages/agent-runtime/**"
+      - "packages/agent-core/**"
+      - "packages/shared-schemas/**"
+      - "applications/**"
+      - "tests/ha/**"
+      - "scripts/ha_real_kill_verify.py"
+      - "docker-compose.ha.yml"
+      - "pyproject.toml"
+      - "uv.lock"
+      - "Makefile"
+      - ".github/workflows/ha.yml"
+  pull_request:
+    paths:
+      - "packages/agent-runtime/**"
+      - "packages/agent-core/**"
+      - "packages/shared-schemas/**"
+      - "applications/**"
+      - "tests/ha/**"
+      - "scripts/ha_real_kill_verify.py"
+      - "docker-compose.ha.yml"
+      - "pyproject.toml"
+      - "uv.lock"
+      - "Makefile"
+      - ".github/workflows/ha.yml"
+  workflow_dispatch:
+
+jobs:
+  ha:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: agent
+          POSTGRES_PASSWORD: agent_platform_dev
+          POSTGRES_DB: agent_platform
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U agent -d agent_platform"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      AGENT_PLATFORM_PG_URL: postgresql://agent:agent_platform_dev@localhost:5432/agent_platform
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install (all workspace packages + dev tools)
+        run: make install
+      - name: HA tests (requires_pg marker, real PostgreSQL)
+        run: uv run pytest tests/ha -m requires_pg -q
+      - name: HA real kill -9 takeover (dual-process, real PG)
+        run: uv run python scripts/ha_real_kill_verify.py

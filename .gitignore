@@ -107,3 +107,15 @@ d_*.txt
 k_*.txt
 result.txt
 _result.txt
+# === 历史遗留目录（monorepo 重组前的本地副本，不被 git 跟踪，防止误提交） ===
+/agent_federation/
+/app/
+/agent-core/
+/shared-schemas/
+/kefu-service/
+/zhanggui-zhiku/
+/wenda-data-agent/
+/wenda-adapter/
+
+# === 测试产物（审计日志，不应入库） ===
+applications/exhibition-agent/exhibition_agent/foundation/data/knowledge_lifecycle_audit.json

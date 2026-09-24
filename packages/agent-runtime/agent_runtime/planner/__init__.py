@@ -1,13 +1,15 @@
-"""Planner 协议包（Plan-F Phase 2 + 组合治理）。
+"""Planner 协议包（Plan-F Phase 2 + 组合治理 + F-S1-02 收口）。
 
 导出：Planner 协议核心（Plan / StreamEvent / PlannerContext / PlannerRuntime / Planner /
 ExecutionContext / SkillCompositionError）+ PlannerRegistry + 动态执行图
 （ExecutionGraph / GraphNode / GraphCycleError / execute_graph）+ 策略校验
-（PolicyValidator / PlanViolationError）。双实现位于各侧：
-app/planners/deterministic.py（确定性）、agent_federation/planners/agentic.py（agentic），
-经 PLANNER env 由调用方选择。
+（PolicyValidator / PlanViolationError）+ AgenticPlanner（通用 agentic 适配器，
+执行器经 entry_points 发现）。双实现位于各侧：
+app/planners/deterministic.py（确定性）、agent_runtime/planner/agentic.py（agentic，
+执行器由 agent_federation 经 entry_points 注入），经 PLANNER env 由调用方选择。
 """
 
+from agent_runtime.planner.agentic import AgenticPlanner
 from agent_runtime.planner.context_manager import (
     AgentContext,
     ContextManager,
@@ -35,6 +37,7 @@ from agent_runtime.planner.protocol import (
 from agent_runtime.planner.registry import PlannerRegistry
 
 __all__ = [
+    "AgenticPlanner",
     "AgentContext",
     "ContextManager",
     "ConversationContext",

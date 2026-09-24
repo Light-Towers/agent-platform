@@ -32,6 +32,7 @@ from typing import Any
 import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
+from shared_schemas import sse_pack
 
 OPENAI_MODELS = {"opencode": "opencode/deepseek-v4-flash-free"}
 
@@ -64,7 +65,7 @@ def _build_prompt(messages: list[dict[str, Any]]) -> str:
 
 
 def _sse(data: dict) -> str:
-    return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
+    return sse_pack("", data)
 
 
 async def _opencode_events(prompt: str, model: str, req_id: str):

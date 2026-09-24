@@ -46,7 +46,7 @@ def test_plan_defaults():
     plan = Plan(route="rag")
     assert plan.sub_query == ""
     assert plan.reason == ""
-    assert plan.notes == {}
+    assert plan.kwargs == {}
 
 
 def test_stream_event_payload_defaults():
@@ -310,7 +310,8 @@ async def test_execute_capability_goes_through_skill_guard():
     plan = Plan(
         route="search",
         sub_query="测试问题",
-        notes={"question": "测试问题", "workspace_id": "default"},
+        question="测试问题",
+        workspace_id="default",
     )
     runtime = PlannerRuntime(registry=FakeRegistry(), llm=None, pool=None, max_steps=0)
 
@@ -329,7 +330,8 @@ async def test_execute_capability_step_count_accounted():
     plan = Plan(
         route="search",
         sub_query="正常问题",
-        notes={"question": "正常问题", "workspace_id": "default"},
+        question="正常问题",
+        workspace_id="default",
     )
     runtime = PlannerRuntime(registry=FakeRegistry(), llm=None, pool=None, max_steps=20)
 

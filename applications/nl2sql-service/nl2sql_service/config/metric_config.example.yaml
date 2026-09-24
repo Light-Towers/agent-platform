@@ -1,0 +1,52 @@
+# nl2sql-service 元知识配置模板
+#
+# 元知识（表/列/指标/值定义）参数化示例。可经两种方式注入：
+#   1. API 入参：POST /api/query 的 metric_config 字段（JSON，结构同下）
+#   2. 预置库：经 build_meta_knowledge 脚本写入 Postgres+pgvector，召回节点向量检索
+#
+# 本模板为通用示例，不绑定特定业务表结构。实际使用时替换为业务真实 schema。
+
+# 表定义
+tables:
+  - table_name: "orders"
+    table_comment: "订单表"
+  - table_name: "customers"
+    table_comment: "客户表"
+
+# 列定义
+columns:
+  - table_name: "orders"
+    column_name: "order_id"
+    column_comment: "订单ID"
+    data_type: "bigint"
+  - table_name: "orders"
+    column_name: "amount"
+    column_comment: "订单金额"
+    data_type: "numeric"
+  - table_name: "orders"
+    column_name: "created_at"
+    column_comment: "下单时间"
+    data_type: "timestamp"
+  - table_name: "customers"
+    column_name: "customer_id"
+    column_comment: "客户ID"
+    data_type: "bigint"
+  - table_name: "customers"
+    column_name: "customer_name"
+    column_comment: "客户名称"
+    data_type: "varchar"
+
+# 指标定义
+metrics:
+  - metric_name: "销售额"
+    metric_desc: "订单金额合计"
+    metric_expr: "SUM(orders.amount)"
+  - metric_name: "订单数"
+    metric_desc: "订单总数"
+    metric_expr: "COUNT(orders.order_id)"
+
+# 值定义（枚举值，供值召回）
+values:
+  - column_name: "customers.customer_name"
+    value: "VIP"
+    value_desc: "VIP 客户"

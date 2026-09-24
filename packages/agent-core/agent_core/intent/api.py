@@ -10,7 +10,6 @@
 
 from __future__ import annotations
 
-
 from agent_core.intent.classifier import classify_l1, classify_l1_async
 from agent_core.intent.llm_judge import l2_judge
 from agent_core.intent.models import (

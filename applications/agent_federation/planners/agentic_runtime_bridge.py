@@ -34,15 +34,23 @@ def federation_capability_registry() -> "Any":
 
     任一能力注册失败仅跳过该能力（不中断），保证降级安全。返回 ``SkillRegistry``。
     """
+    from agent_runtime.circuit_breaker import CircuitBreaker
+    from agent_runtime.skills.middleware import CircuitBreakerMiddleware, RetryMiddleware
     from agent_runtime.skills.registry import Skill, SkillKind, SkillRegistry
 
-    reg = SkillRegistry()
+    _breaker = CircuitBreaker(failure_threshold=5, recovery_seconds=30)
+    reg = SkillRegistry(
+        middlewares=[
+            CircuitBreakerMiddleware(_breaker, skill_names=("search",)),
+            RetryMiddleware(max_retries=2, backoff_s=0.5),
+        ]
+    )
 
     # 文件工具（FUNCTION）
     for name, fn, desc in _file_tool_specs():
         try:
             reg.register(Skill(name, desc, SkillKind.FUNCTION, fn))
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.warning("bridge: 文件工具 %s 注册失败（跳过）: %s", name, exc)
 
     # 3 个子智能体（AGENT/FUNCTION 包裹，经统一 Runtime 执行）
@@ -59,8 +67,22 @@ def federation_capability_registry() -> "Any":
             reg.register(
                 Skill(name, ag.get("description", ""), SkillKind.FUNCTION, _invoke)
             )
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.warning("bridge: 子智能体 %s 注册失败（跳过）: %s", ag.get("name"), exc)
+
+    # 沙箱代码执行 Skill（FUNCTION，经统一 Runtime 治理）
+    # 补齐 AgenticPlanner → 沙箱路由缺口：bridge 开启后 agentic 路径经
+    # discover_agent_tools 发现 code_execution → runtime.delegate 调用，
+    # 受步数/深度/循环/权限/轨迹统一治理。
+    try:
+        from agent_runtime.skills.sandbox import as_sandbox_skill
+
+        sandbox_skill = as_sandbox_skill()
+        if sandbox_skill.name not in reg:
+            reg.register(sandbox_skill)
+            logger.info("bridge: 沙箱 skill 注册成功 (name=%s)", sandbox_skill.name)
+    except Exception as exc:
+        logger.warning("bridge: 沙箱 skill 注册失败（跳过）: %s", exc)
 
     return reg
 
@@ -125,7 +147,7 @@ def _file_tool_specs() -> "list[tuple[str, Any, str]]":
             ("convert_md_to_pdf", convert_md_to_pdf, "Markdown 转 PDF"),
             ("read_file_content", read_file_content, "读取上传文件内容"),
         ]
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.warning("bridge: 文件工具导入失败: %s", exc)
         return []
 
@@ -162,6 +184,6 @@ def _subagent_specs() -> "list[dict[str, Any]]":
                         "instance": sub,
                     }
                 )
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.warning("bridge: 子智能体导入失败: %s", exc)
     return specs

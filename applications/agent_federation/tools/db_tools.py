@@ -6,6 +6,7 @@ from langchain_core.tools import tool
 from sqlalchemy import create_engine
 from sqlalchemy.exc import DBAPIError
 
+from agent.config import TIMEOUT_DB_QUERY
 from api.monitor import monitor
 from tools._timeout import with_timeout
 from tools.sql_guard import validate_sql_mysql
@@ -104,7 +105,7 @@ def _get_connection():
 
 
 @tool
-@with_timeout(timeout=15)
+@with_timeout(timeout=TIMEOUT_DB_QUERY)
 def list_sql_tables()->str:
     """
     查询当前库中所有可用的表！
@@ -143,7 +144,7 @@ def list_sql_tables()->str:
 
 
 @tool
-@with_timeout(timeout=15)
+@with_timeout(timeout=TIMEOUT_DB_QUERY)
 def get_table_data(table_name)->str:
     """
     查询指定表名的数据！当前工具调用之前，必须先调用list_sql_tables完成表名的校验！
@@ -211,7 +212,7 @@ def get_table_data(table_name)->str:
 
 
 @tool
-@with_timeout(timeout=15)
+@with_timeout(timeout=TIMEOUT_DB_QUERY)
 def execute_sql_query(query)->str:
     """
     执行自定义查询sql语句！切记：执行之前，需要通过执行 list_sql_tables明确表名！执行get_table_data

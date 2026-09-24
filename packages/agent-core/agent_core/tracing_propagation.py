@@ -23,7 +23,7 @@ try:
     from opentelemetry import propagate as _otel_propagate  # noqa: PLC0415
 
     _propagation_available = True
-except Exception:  # pragma: no cover - OTel 未安装
+except ImportError:  # pragma: no cover - OTel 未安装
     _propagation_available = False
 
 
@@ -46,7 +46,7 @@ def inject_traceparent(headers: dict[str, str]) -> dict[str, str]:
         _otel_propagate.inject(headers)
         if "traceparent" in headers:
             logger.debug("traceparent 已注入: %s", headers["traceparent"][:32])
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         logger.debug("traceparent 注入失败（非致命）: %s", e)
     return headers
 
@@ -71,7 +71,7 @@ def extract_traceparent(headers: Mapping[str, str]) -> Any:
         if ctx is not None:
             logger.debug("traceparent 已提取")
         return ctx
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         logger.debug("traceparent 提取失败（非致命）: %s", e)
         return None
 
@@ -100,7 +100,7 @@ def use_context(ctx: Any):
                 return False
 
         return _DetachCM()
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         logger.debug("use_context 失败（非致命）: %s", e)
         return nullcontext()
 

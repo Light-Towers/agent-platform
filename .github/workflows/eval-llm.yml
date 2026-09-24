@@ -2,13 +2,13 @@ name: eval-llm
 
 # TB-8 分层门禁 · 第 2 层：LLM 质量评测雷达（非阻塞）。
 # 验证端到端答案质量 / 路由决策正确性 / 护栏实际拦截 / 跨模型回归——
-# 这些依赖 LLM_API_KEY 可达，CI 推送门禁不可达，故独立为定时 + 手动触发。
+# 这些依赖 LLM_API_KEY 可达，CI 推送门禁不可达，故独立为手动触发。
 # 不可达时显式 SKIP（退出码 2，不假装通过），结果存 artifact 供趋势查看，不卡 push。
+#
+# 当前没有稳定的 LLM 评测环境，因此不做每日定时消耗 GitHub Actions 资源。
+# 后续有可用模型环境后，可恢复 schedule 或继续通过 workflow_dispatch 手动执行。
 
 on:
-  schedule:
-    # 每日 03:17 UTC 跑一次质量雷达（避开整点，降低调度峰值）
-    - cron: "17 3 * * *"
   workflow_dispatch:
     # 发布前手动触发，作为质量卡点的人为确认
     inputs:

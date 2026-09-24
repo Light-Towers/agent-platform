@@ -33,7 +33,7 @@ class Settings(BaseLLMSettings):
 
     # Text-to-SQL
     sql_dsn: str = ""
-    sql_max_rows: int = 100
+    sql_max_rows: int = 100  # LLM 上下文窗口约束，区别于 nl2sql-service(1000)：本服务将结果注入 prompt，需严格控制 token 数
 
     # 健壮性
     cache_enabled: bool = True
@@ -50,7 +50,7 @@ class Settings(BaseLLMSettings):
     langfuse_host: str = ""
 
     # RAG
-    rag_top_k: int = 4
+    rag_top_k: int = 4  # 区别于 knowledge(5)/nl2sql(10)：本服务为 supervisor 级多工具编排，每个子查询只注入少量高相关文档
     # Rerank：RRF 融合后是否用硅基流动 bge-reranker-v2-m3 重排 top-K
     rerank_enabled: bool = False
     rerank_top_n: int = 8  # 融合后送入 rerank 的候选数（>= rag_top_k）
@@ -125,11 +125,33 @@ class Settings(BaseLLMSettings):
     # CORS：允许的前端来源（逗号分隔），为空时默认回环 127.0.0.1:5173
     cors_allow_origins: str = ""
 
+    # Remote Skill 端点（P1：重服务 HTTP 调用）
+    knowledge_service_url: str = ""  # 空 = 不注册 knowledge skill
+    knowledge_service_key: str = ""
+    nl2sql_service_url: str = ""  # 空 = 不注册 nl2sql skill
+    kefu_service_url: str = ""  # 空 = 不注册 kefu skill
+    exhibition_service_url: str = ""  # 空 = 不注册 exhibition skill（G4）
+
     # §20: 运行时模式（决定持久化后端与 fail-fast 行为）
     # local       -> InMemory 后端，无需 DATABASE_URL（开发/测试默认）
     # single_node -> PG 可选（有 DATABASE_URL 用 PG，无则降级 InMemory）
     # distributed -> PG 必须（无 DATABASE_URL 启动即报错，fail fast）
     runtime_mode: str = "local"
+
+    # V3 Phase 2: ExecutionScheduler（opt-in，默认关）
+    # 启用后请求过 Queue → Dispatch → Execute，未启用时走原路径（Admission → Planner → Execute）
+    scheduler_enabled: bool = False
+    scheduler_max_concurrent: int = 10
+    scheduler_max_concurrent_per_tenant: int = 5
+    scheduler_queue_capacity: int = 1000
+
+    # V3 Phase 4: Cost Governance（opt-in，默认关）
+    # 启用后请求路径加 budget check/record，超限返回 429
+    cost_governance_enabled: bool = False
+    budget_limit_requests: int = 0  # 0 = 不限制
+    budget_limit_tokens: int = 0
+    budget_limit_cost: float = 0.0
+    budget_window_seconds: float = 3600.0
 
     @property
     def db_enabled(self) -> bool:

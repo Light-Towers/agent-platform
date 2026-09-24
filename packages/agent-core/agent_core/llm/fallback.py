@@ -76,7 +76,7 @@ class FallbackChatModel:
         if hasattr(um, "model_dump"):
             try:
                 um = um.model_dump()
-            except Exception:  # noqa: BLE001 防御：非 pydantic 实体
+            except Exception:
                 um = dict(um) if isinstance(um, dict) else {}
         if not isinstance(um, dict):
             return 0
@@ -132,7 +132,7 @@ class FallbackChatModel:
             return result
         try:
             result = model.invoke(*args, **kwargs)
-        except Exception:  # noqa: BLE001 降级语义
+        except Exception:
             self._on_primary_failure()
             result = self.fallback.invoke(*args, **kwargs)
             self._emit_usage(self._extract_usage(result))
@@ -149,7 +149,7 @@ class FallbackChatModel:
             return result
         try:
             result = await model.ainvoke(*args, **kwargs)
-        except Exception:  # noqa: BLE001 降级语义
+        except Exception:
             self._on_primary_failure()
             result = await self.fallback.ainvoke(*args, **kwargs)
             self._emit_usage(self._extract_usage(result))
@@ -192,7 +192,7 @@ class FallbackChatModel:
             for chunk in self._wrap_stream(model.stream(*args, **kwargs)):
                 emitted = True
                 yield chunk
-        except Exception:  # noqa: BLE001 降级语义
+        except Exception:
             if emitted:
                 # 已有 chunk 产出：切换会产出混杂内容，向上抛（WS-3 契约）
                 self._on_primary_failure()
@@ -213,7 +213,7 @@ class FallbackChatModel:
             async for chunk in self._wrap_astream(model.astream(*args, **kwargs)):
                 emitted = True
                 yield chunk
-        except Exception:  # noqa: BLE001 降级语义
+        except Exception:
             if emitted:
                 # 已有 chunk 产出：切换会产出混杂内容，向上抛（WS-3 契约）
                 self._on_primary_failure()

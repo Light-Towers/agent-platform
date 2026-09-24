@@ -63,8 +63,11 @@ excel = ["pandas>=3.0.1", "openpyxl>=3.1.5", "python-docx>=1.2.0"]
 # - asyncpg: PostgreSQL + pgvector 备选向量后端
 memory = ["pymongo>=4.6", "pymilvus>=2.4", "asyncpg>=0.29"]
 
+[project.entry-points."agent_runtime.agentic_executor"]
+factory = "agent_federation.planners.agentic:get_executor_factory"
+
 [tool.hatch.build.targets.wheel]
-packages = ["agent", "api", "tools", "utils", "prompt"]
+packages = ["agent", "api", "tools", "utils", "prompt", "planners"]
 
 [tool.ruff]
 line-length = 120
@@ -73,11 +76,47 @@ extend-exclude = [".venv", "tests"]
 
 [tool.ruff.lint]
 # 与根 pyproject.toml 固化规则集对齐（含 I/isort），避免跨包 import 排序门禁漂移。
-select = ["E4", "E7", "E9", "F", "I"]
+select = ["E4", "E7", "E9", "F", "I", "BLE001", "S110"]
 # E402: 模块级 import 不在顶部（多因 load_dotenv()/sys.path 后再 import，deliberate）。
 # E731: lambda 赋值（风格）。两者非逻辑阻断，忽略以让 CI 门禁转绿。
 ignore = ["E402", "E731"]
 
+# P0-4 盲捕获门禁棘轮基线（2026-09-24）：逐文件锁定 legacy 存量，新代码不得新增。烧净一个删一行。
+# BLE001/S110 已上方 select 启用；进度见 docs/plans/plan-p0-4-blind-except-ratchet-2026-09-24.md。
+[tool.ruff.lint.per-file-ignores]
+"agent/async_subagents.py" = ["BLE001"]
+"agent/cache/layers.py" = ["BLE001"]
+"agent/cache/semantic_cache.py" = ["BLE001"]
+"agent/checkpoint_cleaner.py" = ["BLE001"]
+"agent/circuit_breaker.py" = ["BLE001"]
+"agent/config.py" = ["BLE001"]
+"agent/db.py" = ["BLE001", "S110"]
+"agent/health_check.py" = ["BLE001", "S110"]
+"agent/main_agent.py" = ["BLE001"]
+"agent/memory/main_agent_memory.py" = ["BLE001"]
+"agent/prompts.py" = ["BLE001"]
+"agent/rewrite/rewrite_node.py" = ["BLE001"]
+"agent/rewrite/subquery_decompose.py" = ["BLE001"]
+"agent/tool_registry.py" = ["BLE001"]
+"agent/tracing/langfuse_adapter.py" = ["BLE001"]
+"api/monitor.py" = ["BLE001", "S110"]
+"api/server.py" = ["BLE001"]
+"eval/judge.py" = ["BLE001"]
+"eval/run-all.py" = ["BLE001"]
+"eval/run_eval.py" = ["BLE001"]
+"gateway/guard_middleware.py" = ["BLE001"]
+"planners/__init__.py" = ["BLE001"]
+"planners/agentic_runtime_bridge.py" = ["BLE001"]
+"tools/_timeout.py" = ["BLE001"]
+"tools/markdown_tools.py" = ["BLE001"]
+"tools/ragflow_tools.py" = ["BLE001"]
+"tools/sql_guard.py" = ["BLE001"]
+"tools/upload_file_read_tool.py" = ["BLE001"]
+"tools/zhiku_tools.py" = ["BLE001"]
+"utils/path_utils.py" = ["BLE001"]
+"utils/word_converter.py" = ["BLE001"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+addopts = "--import-mode=importlib"

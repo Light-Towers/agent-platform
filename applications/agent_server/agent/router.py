@@ -28,6 +28,7 @@ _FALLBACK_HINTS = {
     "search": ("最新", "最近", "新闻", "github", "趋势", "今天", "本周", "发布", "开源项目", "联网"),
     "rag": ("知识库", "文档", "什么是", "解释", "原理", "怎么理解", "wiki", "笔记", "介绍"),
     "mcp": ("调用工具", "运行工具", "执行工具", "调用外部", "mcp", "调用 mcp"),
+    "code_execution": ("执行代码", "运行代码", "跑一下代码", "跑这段", "python代码", "代码块", "帮我执行", "sandbox", "沙箱执行", "print("),
 }
 
 
@@ -39,9 +40,9 @@ def _load_hints() -> dict[str, tuple[str, ...]]:
             data = json.load(f)
         return {
             key: tuple(words) for key, words in data.items()
-            if key in ("sql", "search", "rag", "mcp") and isinstance(words, list)
+            if key in ("sql", "search", "rag", "mcp", "code_execution") and isinstance(words, list)
         }
-    except Exception as e:
+    except (OSError, json.JSONDecodeError) as e:
         logger.warning("加载路由特征词失败，使用内置默认值: %s", e)
         return _FALLBACK_HINTS
 
@@ -52,16 +53,18 @@ def _hints(route: str) -> tuple[str, ...]:
 
 
 class RouteDecision(BaseModel):
-    capability: Literal["search", "rag", "sql", "direct", "mcp"] = Field(
-        description="应调用的能力：search=联网搜索, rag=本地知识库, sql=数据库查询, direct=直接回答, mcp=外部工具"
+    capability: Literal["search", "rag", "sql", "direct", "mcp", "code_execution"] = Field(
+        description="应调用的能力：search=联网搜索, rag=本地知识库, sql=数据库查询, direct=直接回答, mcp=外部工具, code_execution=沙箱代码执行"
     )
     sub_query: str = Field(description="传给子能力的关键查询词")
     reason: str = Field(description="一句话路由理由")
 
 
 def heuristic_route(question: str) -> RouteDecision:
-    """确定性关键词路由；优先级 mcp > sql > search > rag > direct。"""
+    """确定性关键词路由；优先级 code_execution > mcp > sql > search > rag > direct。"""
     q = question.lower()
+    if any(h in q for h in _hints("code_execution")):
+        return RouteDecision(capability="code_execution", sub_query=question, reason="命中代码执行特征词")
     if get_settings().mcp_enabled and any(h in q for h in _hints("mcp")):
         return RouteDecision(capability="mcp", sub_query=question, reason="命中外部工具调用特征词")
     if any(h in q for h in _hints("sql")):
@@ -78,7 +81,7 @@ async def decide_route(llm, question: str) -> RouteDecision:
     if llm is None:
         return heuristic_route(question)
     try:
-        capabilities = "search=联网搜索, rag=本地知识库, sql=数据库查询, direct=直接回答"
+        capabilities = "search=联网搜索, rag=本地知识库, sql=数据库查询, direct=直接回答, code_execution=沙箱代码执行"
         if get_settings().mcp_enabled:
             capabilities += ", mcp=调用外部工具"
         structured = llm.with_structured_output(RouteDecision)
@@ -104,4 +107,5 @@ def capability_label(cap: Capability) -> str:
         "sql": "数据库查询",
         "direct": "直接回答",
         "mcp": "外部工具",
+        "code_execution": "沙箱代码执行",
     }[cap]

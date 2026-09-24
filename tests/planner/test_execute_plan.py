@@ -46,7 +46,7 @@ def _runtime(max_duration_seconds: float | None = None) -> PlannerRuntime:
 
 @pytest.mark.asyncio
 async def test_execute_plan_single_route():
-    plan = Plan(route="search", sub_query="test", notes={"kwargs": {"query": "x"}})
+    plan = Plan(route="search", sub_query="test", kwargs={"query": "x"})
     events = [ev async for ev in execute_plan(plan, _runtime())]
     assert [e.type for e in events] == ["route", "evidence", "answer", "status"]
     assert events[0].payload["capability"] == "search"
@@ -56,11 +56,12 @@ async def test_execute_plan_single_route():
 
 @pytest.mark.asyncio
 async def test_execute_plan_compacted_flag_backfilled():
-    """WS-2：notes["compacted"] 回填到 snapshot 的 conversation.compacted。"""
+    """WS-2：Plan.compacted 回填到 snapshot 的 conversation.compacted。"""
     plan = Plan(
         route="search",
         sub_query="test",
-        notes={"kwargs": {"query": "x"}, "compacted": True},
+        kwargs={"query": "x"},
+        compacted=True,
     )
     events = [ev async for ev in execute_plan(plan, _runtime())]
     snapshot = events[-1].payload["snapshot"]
@@ -69,7 +70,7 @@ async def test_execute_plan_compacted_flag_backfilled():
 
 @pytest.mark.asyncio
 async def test_execute_plan_compacted_flag_default_false():
-    plan = Plan(route="search", sub_query="test", notes={"kwargs": {"query": "x"}})
+    plan = Plan(route="search", sub_query="test", kwargs={"query": "x"})
     events = [ev async for ev in execute_plan(plan, _runtime())]
     snapshot = events[-1].payload["snapshot"]
     assert snapshot["conversation"]["compacted"] is False

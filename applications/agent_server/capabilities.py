@@ -17,6 +17,7 @@ Runtime 边界（架构审核 P1）：熔断经 ``CircuitBreakerMiddleware`` 挂
 
 from __future__ import annotations
 
+import logging
 from functools import partial
 from typing import Any
 
@@ -24,7 +25,7 @@ from agent_runtime.circuit_breaker import CircuitBreaker
 from agent_runtime.mcp_client import MCPClientManager
 from agent_runtime.skills.dag import as_dag_skill
 from agent_runtime.skills.function import as_function_skill
-from agent_runtime.skills.middleware import CircuitBreakerMiddleware
+from agent_runtime.skills.middleware import AuditMiddleware, CircuitBreakerMiddleware, RetryMiddleware
 from agent_runtime.skills.registry import SkillRegistry
 
 from agent_server.agent.state import AgentState
@@ -113,6 +114,33 @@ def _get_breaker() -> CircuitBreaker:
     return _breaker
 
 
+_audit_logger = logging.getLogger("skill.audit")
+
+
+async def _audit_sink(name: str, kwargs: dict, result: Any, error: str | None, latency_s: float) -> None:
+    """审计 sink：记录每次 Skill 调用的审计事件（合规留痕 / 攻击溯源）。"""
+    _audit_logger.info(
+        "skill_call name=%s latency=%.3fs error=%s",
+        name,
+        latency_s,
+        error or "none",
+    )
+
+
+# C-3: 进程级共享 httpx.AsyncClient（连接池复用，避免每次 skill 调用新建 client）
+_http_client: Any = None
+
+
+def _get_http_client() -> Any:
+    """惰性创建进程级 httpx.AsyncClient（连接池复用）。"""
+    global _http_client
+    if _http_client is None:
+        import httpx
+
+        _http_client = httpx.AsyncClient(timeout=30)
+    return _http_client
+
+
 def build_registry(graph: Any | None = None) -> SkillRegistry:
     """构建 app 能力注册表（幂等；重复调用返回新实例，供测试隔离）。
 
@@ -122,7 +150,11 @@ def build_registry(graph: Any | None = None) -> SkillRegistry:
     Runtime 边界（架构审核 P1）：熔断经中间件链收敛——``CircuitBreakerMiddleware``
     仅包裹 search（隔离故障域），search 实现不再内嵌 breaker。
     """
-    middlewares = [CircuitBreakerMiddleware(_get_breaker(), skill_names=("search",))]
+    middlewares = [
+        CircuitBreakerMiddleware(_get_breaker(), skill_names=("search",)),
+        RetryMiddleware(max_retries=2, backoff_s=0.5),
+        AuditMiddleware(_audit_sink, redact=True),
+    ]
     settings = get_settings()
     if settings.tool_result_compression_enabled:
         from agent_runtime.skills.middleware import ToolResultCompressionMiddleware
@@ -177,7 +209,152 @@ def build_registry(graph: Any | None = None) -> SkillRegistry:
                 timeout_ms=120_000,
             )
         )
+    _register_remote_skills(registry)
     return registry
+
+
+def _register_remote_skills(registry: SkillRegistry) -> None:
+    """P1：注册重服务为 RemoteExecutor skill（HTTP 调用）。
+
+    URL 未配置时跳过（不崩溃、不警告——开发环境常见只起 agent_server）。
+    重依赖（torch/Milvus/Neo4j/pgvector）隔离在远端进程，编排进程不传染。
+    """
+    import os
+
+    from agent_runtime.skills.remote import as_remote_skill
+
+    knowledge_url = os.getenv("KNOWLEDGE_SERVICE_URL", "")
+    if knowledge_url:
+        knowledge_key = os.getenv("KNOWLEDGE_SERVICE_KEY", "")
+
+        async def _knowledge_query(**kwargs: Any) -> Any:
+            headers = {"Authorization": f"Bearer {knowledge_key}"} if knowledge_key else {}
+            client = _get_http_client()
+            resp = await client.post(f"{knowledge_url}/query", json=kwargs, headers=headers)
+            resp.raise_for_status()
+            return resp.json()
+
+        registry.register(
+            as_remote_skill(
+                "knowledge_query",
+                "知识库问答：RAG 检索 + LLM 生成，返回答案文本",
+                _knowledge_query,
+                timeout_ms=30_000,
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string", "description": "查询文本"},
+                        "session_id": {"type": "string", "description": "会话 ID"},
+                    },
+                    "required": ["query"],
+                },
+            )
+        )
+
+        async def _knowledge_retrieve(**kwargs: Any) -> Any:
+            headers = {"Authorization": f"Bearer {knowledge_key}"} if knowledge_key else {}
+            client = _get_http_client()
+            resp = await client.post(f"{knowledge_url}/api/v1/retrieve", json=kwargs, headers=headers)
+            resp.raise_for_status()
+            return resp.json()
+
+        registry.register(
+            as_remote_skill(
+                "knowledge_retrieve",
+                "知识库纯检索：embedding→RRF→rerank，返回文档列表（无 LLM 生成）",
+                _knowledge_retrieve,
+                timeout_ms=30_000,
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string", "description": "检索文本"},
+                        "tenant_id": {"type": "string", "description": "租户 ID"},
+                        "scope_type": {"type": "string", "description": "PUBLIC 或 PRIVATE"},
+                    },
+                    "required": ["query", "tenant_id"],
+                },
+            )
+        )
+
+    nl2sql_url = os.getenv("NL2SQL_SERVICE_URL", "")
+    if nl2sql_url:
+
+        async def _nl2sql_query(**kwargs: Any) -> Any:
+            client = _get_http_client()
+            resp = await client.post(f"{nl2sql_url}/api/query", json=kwargs)
+            resp.raise_for_status()
+            return resp.json()
+
+        registry.register(
+            as_remote_skill(
+                "nl2sql_query",
+                "Text-to-SQL：自然语言→SQL→执行→结果，返回 SQL + 查询结果",
+                _nl2sql_query,
+                timeout_ms=30_000,
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string", "description": "自然语言查询"},
+                    },
+                    "required": ["query"],
+                },
+            )
+        )
+
+    kefu_url = os.getenv("KEFU_SERVICE_URL", "")
+    if kefu_url:
+
+        async def _kefu_query(**kwargs: Any) -> Any:
+            client = _get_http_client()
+            resp = await client.post(f"{kefu_url}/invoke", json=kwargs)
+            resp.raise_for_status()
+            return resp.json()
+
+        registry.register(
+            as_remote_skill(
+                "kefu_query",
+                "客服问答：意图路由 + Flow + GraphRAG，返回客服回复",
+                _kefu_query,
+                timeout_ms=30_000,
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string", "description": "用户消息"},
+                        "session_id": {"type": "string", "description": "会话 ID"},
+                    },
+                    "required": ["query"],
+                },
+            )
+        )
+
+    exhibition_url = os.getenv("EXHIBITION_SERVICE_URL", "")
+    if exhibition_url:
+
+        async def _exhibition_query(**kwargs: Any) -> Any:
+            client = _get_http_client()
+            resp = await client.post(f"{exhibition_url}/api/query", json=kwargs)
+            resp.raise_for_status()
+            return resp.json()
+
+        registry.register(
+            as_remote_skill(
+                "exhibition_query",
+                "会展查询：Supervisor 图路由 → warehouse REST，返回 answer + readiness + citations",
+                _exhibition_query,
+                timeout_ms=30_000,
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string", "description": "查询文本"},
+                        "params": {
+                            "type": "object",
+                            "description": "附加参数（tenant_id 等）",
+                        },
+                    },
+                    "required": ["query"],
+                },
+            )
+        )
 
 
 def get_registry(graph: Any | None = None) -> SkillRegistry:

@@ -67,13 +67,13 @@ _otel_trace: Any = None
 _SDK_AVAILABLE: bool = False
 try:
     from opentelemetry import trace as _otel_trace
-    from opentelemetry.sdk.trace import TracerProvider as _SDKTracerProvider
     from opentelemetry.sdk.resources import Resource as _Resource
+    from opentelemetry.sdk.trace import TracerProvider as _SDKTracerProvider
     from opentelemetry.sdk.trace.export import BatchSpanProcessor as _BatchSpanProcessor
     from opentelemetry.sdk.trace.export import SimpleSpanProcessor as _SimpleSpanProcessor
 
     _SDK_AVAILABLE = True
-except Exception:  # pragma: no cover - 依赖缺失路径（CI / 本地无 OTel）
+except ImportError:  # pragma: no cover - 依赖缺失路径（CI / 本地无 OTel）
     _otel_trace = None
     _SDK_AVAILABLE = False
 
@@ -88,7 +88,7 @@ if _SDK_AVAILABLE:
             _exporter_module = __import__(_exporter_module_name, fromlist=["OTLPSpanExporter"])
             _OTLP_EXPORTER_CLS = getattr(_exporter_module, "OTLPSpanExporter")
             break
-        except Exception:  # pragma: no cover - exporter 未安装路径
+        except ImportError:  # pragma: no cover - exporter 未安装路径
             continue
 
 
@@ -133,6 +133,12 @@ class _NoOpSpanContextManager:
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> bool:
         return False  # 不吞异常
 
+    def __getattr__(self, name: str) -> Any:
+        # 兼容下游"手动进入 CM 后直接调 span 方法"用法
+        # （agent_server/api/routes.py:196-198）；with ... as span 路径不触发，语义不变。
+        span = object.__getattribute__(self, "_span")
+        return getattr(span, name)
+
 
 class _NoOpTracer:
     """no-op tracer：start_span / start_as_current_span 均可用。"""
@@ -149,6 +155,14 @@ class _NoOpTracer:
 def _make_noop_tracer() -> Any:
     """构造 no-op tracer（不依赖 OTel 全局 provider 状态，确定性零开销）。"""
     return _NoOpTracer()
+
+
+def noop_tracer() -> Any:
+    """公开 no-op tracer 工厂：供下游包（agent-runtime 等）复用，避免各自再造 shim。
+
+    语义与 :func:`_make_noop_tracer` 一致：零开销、绝不抛异常。
+    """
+    return _make_noop_tracer()
 
 
 # ---------------------------------------------------------------------------
@@ -409,10 +423,10 @@ def traced_span(
                             extra = attributes_fn(*args, result=result, **kwargs)
                             if extra:
                                 span.set_attributes(extra)
-                        except Exception as e:  # noqa: BLE001 —— 埋点失败不影响业务
+                        except Exception as e:
                             logger.debug("tracing attributes_fn 执行失败: %s", e)
                     return result
-                except Exception as e:  # noqa: BLE001 —— 记录异常后继续抛出
+                except Exception as e:
                     try:
                         span.record_exception(e)
                     except Exception:  # pragma: no cover - 防御
@@ -466,5 +480,6 @@ __all__ = [
     "is_tracing_enabled",
     "is_initialized",
     "record_exception",
+    "noop_tracer",
     "_reset_for_tests",
 ]

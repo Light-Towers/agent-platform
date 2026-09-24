@@ -19,10 +19,11 @@ import inspect
 import threading
 import time
 import urllib.error
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FuturesTimeoutError
 from enum import Enum
 from functools import wraps
-from typing import Any, Awaitable, Callable, Iterable, Optional, Protocol, Type, TypeVar, List
+from typing import Any, Awaitable, Callable, Iterable, List, Optional, Protocol, Type, TypeVar
 
 F = TypeVar("F", bound=Callable[..., Any])
 
@@ -551,7 +552,7 @@ class CircuitBreaker:
         if self._state != self.CLOSED:
             return
         total = len(self._successes) + len(self._failures_list)
-        if total < self._window_size:
+        if total < self._min_requests:
             return
         failures = len(self._failures_list)
         if failures / total >= self._failure_ratio:

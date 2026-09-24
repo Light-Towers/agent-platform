@@ -1,8 +1,11 @@
-"""PostgreSQL + pgvector 连接池与幂等建表。
+"""PostgreSQL + pgvector 连接池与 schema 迁移。
 
 设计要点（吸取 deepagents 评审教训）：
 - 懒加载必须加锁 + lifespan 预热，避免竞态；
-- 建表语句全部 IF NOT EXISTS，重启安全。
+- Schema 管理统一委托 agent_runtime.migrations.runner（P1-4 轻量版迁移系统）。
+- 建表/ALTER 均由 migrations/*.up.sql 执行，本文件不包含 DDL 常量。
+
+红线（lint_architecture R007）：禁止在本文件内联 CREATE TABLE / ALTER TABLE ADD COLUMN。
 """
 
 import asyncio
@@ -13,180 +16,6 @@ logger = logging.getLogger(__name__)
 _pool = None
 _pool_lock = asyncio.Lock()
 _closing = False  # 关闭进行中标记，防止关闭途中被重新拉起成双池
-
-SCHEMA_TEMPLATE = """
-CREATE TABLE IF NOT EXISTS chunks (
-    id BIGSERIAL PRIMARY KEY,
-    doc_id TEXT NOT NULL,
-    source TEXT NOT NULL,
-    heading TEXT NOT NULL DEFAULT '',
-    content TEXT NOT NULL,
-    embedding vector({dim}),
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-CREATE INDEX IF NOT EXISTS idx_chunks_doc ON chunks (doc_id);
-
-CREATE TABLE IF NOT EXISTS memories (
-    id BIGSERIAL PRIMARY KEY,
-    user_id TEXT NOT NULL DEFAULT 'default',
-    content TEXT NOT NULL,
-    embedding vector({dim}),
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-CREATE INDEX IF NOT EXISTS idx_memories_user ON memories (user_id);
-
-CREATE TABLE IF NOT EXISTS semantic_cache (
-    id BIGSERIAL PRIMARY KEY,
-    cache_key TEXT NOT NULL,
-    question TEXT NOT NULL,
-    answer TEXT NOT NULL,
-    embedding vector({dim}),
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-CREATE TABLE IF NOT EXISTS sql_ddl (
-    id BIGSERIAL PRIMARY KEY,
-    content TEXT NOT NULL,
-    embedding vector({dim}),
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-CREATE TABLE IF NOT EXISTS sql_docs (
-    id BIGSERIAL PRIMARY KEY,
-    content TEXT NOT NULL,
-    embedding vector({dim}),
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-CREATE TABLE IF NOT EXISTS sql_examples (
-    id BIGSERIAL PRIMARY KEY,
-    question TEXT NOT NULL,
-    sql TEXT NOT NULL,
-    embedding vector({dim}),
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-CREATE TABLE IF NOT EXISTS admission_queue (
-    request_id TEXT PRIMARY KEY,
-    session_id TEXT NOT NULL,
-    user_id TEXT NOT NULL,
-    priority TEXT NOT NULL DEFAULT 'normal',
-    status TEXT NOT NULL DEFAULT 'queued',
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    admitted_at TIMESTAMPTZ,
-    completed_at TIMESTAMPTZ,
-    queue_position INTEGER,
-    rejection_reason TEXT
-);
-CREATE INDEX IF NOT EXISTS idx_admission_status_priority ON admission_queue (status, created_at);
-CREATE INDEX IF NOT EXISTS idx_admission_session ON admission_queue (session_id);
-CREATE INDEX IF NOT EXISTS idx_admission_user ON admission_queue (user_id);
-
-CREATE TABLE IF NOT EXISTS revert_audit (
-    revert_id TEXT PRIMARY KEY,
-    operator TEXT NOT NULL,
-    session_id TEXT NOT NULL,
-    source_checkpoint_id TEXT NOT NULL,
-    target_checkpoint_id TEXT NOT NULL,
-    reverted_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    status TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_revert_session ON revert_audit (session_id);
-CREATE INDEX IF NOT EXISTS idx_revert_operator ON revert_audit (operator);
-
-CREATE TABLE IF NOT EXISTS mcp_call_audit (
-    call_id TEXT PRIMARY KEY,
-    caller TEXT NOT NULL,
-    server_id TEXT NOT NULL,
-    tool_name TEXT NOT NULL,
-    params_summary TEXT NOT NULL,
-    result_summary TEXT,
-    duration_ms INTEGER NOT NULL,
-    status TEXT NOT NULL,
-    called_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-CREATE INDEX IF NOT EXISTS idx_mcp_audit_server ON mcp_call_audit (server_id);
-CREATE INDEX IF NOT EXISTS idx_mcp_audit_caller ON mcp_call_audit (caller);
-
--- §20.1/20.2: Durability PG 后端表
-CREATE TABLE IF NOT EXISTS execution_checkpoints (
-    execution_id TEXT PRIMARY KEY,
-    completed JSONB NOT NULL DEFAULT '{}',
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    resumable BOOLEAN NOT NULL DEFAULT FALSE,
-    -- §HA（C3 checkpoint fencing）：单调 version = 已完成节点数，防止 stale writer 降级覆盖
-    version BIGINT NOT NULL DEFAULT 0
-);
-CREATE INDEX IF NOT EXISTS idx_checkpoints_resumable ON execution_checkpoints (resumable) WHERE resumable;
--- 兼容已有表：幂等补列
-ALTER TABLE execution_checkpoints ADD COLUMN IF NOT EXISTS version BIGINT NOT NULL DEFAULT 0;
-
-CREATE TABLE IF NOT EXISTS idempotency_keys (
-    key TEXT PRIMARY KEY,
-    result JSONB NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-CREATE TABLE IF NOT EXISTS execution_leases (
-    execution_id TEXT PRIMARY KEY,
-    owner TEXT NOT NULL,
-    expires_at TIMESTAMPTZ NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_leases_expires ON execution_leases (expires_at);
-
-CREATE TABLE IF NOT EXISTS admission_slots (
-    slot_key TEXT PRIMARY KEY,
-    execution_id TEXT NOT NULL UNIQUE,
-    owner TEXT NOT NULL,
-    acquired_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    expires_at TIMESTAMPTZ NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_slots_expires ON admission_slots (expires_at);
-
--- §HA: 副作用审计表（effectively-once 证据）
--- effect_key = execution_id + step_id + effect_type，唯一约束保证幂等写。
--- owner/attempt_id 用于最终审计「attempt 次数 vs actual effect 次数」。
-CREATE TABLE IF NOT EXISTS side_effects (
-    effect_key TEXT PRIMARY KEY,
-    execution_id TEXT NOT NULL,
-    attempt_id TEXT NOT NULL,
-    step_id TEXT NOT NULL,
-    effect_type TEXT NOT NULL,
-    owner TEXT NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-CREATE INDEX IF NOT EXISTS idx_side_effects_execution ON side_effects (execution_id);
-
--- §HA: 执行事件审计流（可证明的 trajectory 连续性证据）
-CREATE TABLE IF NOT EXISTS execution_events (
-    id BIGSERIAL PRIMARY KEY,
-    execution_id TEXT NOT NULL,
-    attempt_id TEXT NOT NULL,
-    replica TEXT NOT NULL,
-    event TEXT NOT NULL,
-    step_id TEXT,
-    detail JSONB,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-CREATE INDEX IF NOT EXISTS idx_exec_events_execution ON execution_events (execution_id);
-CREATE INDEX IF NOT EXISTS idx_exec_events_created ON execution_events (created_at);
-
--- §20.1/20.2/P3-1: Trajectory 轨迹存储
-CREATE TABLE IF NOT EXISTS trajectories (
-    execution_id TEXT PRIMARY KEY,
-    parent_execution_id TEXT,
-    session_id TEXT,
-    planner TEXT,
-    plan JSONB NOT NULL DEFAULT '{}',
-    steps JSONB NOT NULL DEFAULT '[]',
-    total_tokens INTEGER NOT NULL DEFAULT 0,
-    total_cost DOUBLE PRECISION NOT NULL DEFAULT 0.0,
-    snapshot JSONB NOT NULL DEFAULT '{}',
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-CREATE INDEX IF NOT EXISTS idx_trajectories_session ON trajectories (session_id);
-CREATE INDEX IF NOT EXISTS idx_trajectories_created ON trajectories (created_at);
-"""
 
 
 async def init_pool(
@@ -247,54 +76,27 @@ async def ensure_extensions(database_url: str) -> None:
 
 
 async def ensure_schema(pool, vector_dim: int | None = None) -> None:
-    """幂等建表 + 存量库 ALTER。
+    """委托迁移 runner 执行 schema 管理（P1-4 轻量版）。
 
-    vector_dim 单一事实源：
-    1. 调用方显式注入（配置依赖倒置）；
-    2. 否则从 agent_core.memory.embedder.get_embedder().dim 自动派生；
-    3. embedder 不可用时回退 512（兼容 mock/测试场景）。
+    原逻辑（CREATE IF NOT EXISTS 大模板 + ALTER try/except: pass）已重构为：
+    - migrations/001_baseline.up.sql：全量建表
+    - migrations/002_*.up.sql / 003_*.up.sql：增量 ALTER
+    - runner：advisory_xact_lock + 事务 + 版本追踪 + 模板替换
+
+    vector_dim 参数保留以兼容现有调用方（init_pool 传入），
+    runner 内部统一从 embedder 解析维度并替换 SQL 模板。
     """
-    if vector_dim is None:
-        try:
-            from agent_core.memory.embedder import get_embedder
-            vector_dim = get_embedder().dim
-            logger.debug("ensure_schema: vector_dim 从 embedder 派生 = %d", vector_dim)
-        except Exception:
-            vector_dim = 512
-            logger.warning(
-                "ensure_schema: embedder 不可用，回退默认 vector_dim=%d。"
-                "生产环境建议显式注入或配置 EMBEDDING_DIM。",
-                vector_dim,
-            )
-    # 用 replace 而非 format：SCHEMA 内部分 DDL（如 execution_checkpoints 的
-    # DEFAULT '{}'）含裸花括号，str.format 会将其误判为占位符报 IndexError。
-    ddl = SCHEMA_TEMPLATE.replace("{dim}", str(vector_dim))
-    async with pool.connection() as conn:
-        await conn.execute(ddl)
-    # 存量库迁移：新列 IF NOT EXISTS 不作用于已存在表，需幂等 ALTER（优化 G：workspace 隔离）
-    try:
-        async with pool.connection() as conn:
-            await conn.execute(
-                "ALTER TABLE chunks ADD COLUMN workspace_id TEXT NOT NULL DEFAULT 'default'"
-            )
-            await conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_chunks_workspace ON chunks (workspace_id)"
-            )
-    except Exception:
-        # duplicate_column 等幂等失败忽略；新库由建表语句已含该列
-        pass
-    # 优化 H：长期记忆质量升级——memories 表扩展类型/重要性/时间元数据（幂等 ALTER）
-    for _ddl in (
-        "ALTER TABLE memories ADD COLUMN memory_type TEXT NOT NULL DEFAULT 'semantic'",
-        "ALTER TABLE memories ADD COLUMN importance FLOAT NOT NULL DEFAULT 0.5",
-        "CREATE INDEX IF NOT EXISTS idx_memories_user_type ON memories (user_id, memory_type)",
-    ):
-        try:
-            async with pool.connection() as conn:
-                await conn.execute(_ddl)
-        except Exception:
-            # duplicate_column / 索引已存在等幂等失败忽略
-            pass
+    from agent_runtime.migrations.runner import run_migrations
+
+    applied = await run_migrations(pool)
+    if applied:
+        logger.info(
+            "ensure_schema: %d migration(s) applied, now at version %d",
+            len(applied),
+            applied[-1].version,
+        )
+    else:
+        logger.debug("ensure_schema: schema already up-to-date")
 
 
 def get_pool():

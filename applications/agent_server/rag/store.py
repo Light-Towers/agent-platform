@@ -74,6 +74,19 @@ async def add_document(pool, source: str, chunks: list[Chunk], workspace_id: str
     return doc_id
 
 
+async def delete_document(pool, doc_id: str, workspace_id: str = "default") -> int:
+    """删除文档及其所有分块（与 add_document 对称）。返回删除行数。"""
+    async with pool.connection() as conn:
+        cur = await conn.execute(
+            "DELETE FROM chunks WHERE doc_id = %s AND workspace_id = %s",
+            (doc_id, workspace_id),
+        )
+        deleted = cur.rowcount
+    if deleted:
+        _invalidate_bm25_cache()
+    return deleted
+
+
 async def _vector_ids(pool, embedding: list[float], k: int, workspace_id: str = "default") -> list[int]:
     rows = await vector_search(
         pool, "chunks", "id", embedding, k=k,
@@ -154,7 +167,7 @@ async def retrieve_chunks(pool, query: str, k: int | None = None, workspace_id: 
         pairs = [[query, c[3]] for c in candidates]
         try:
             scores = reranker.compute_score(pairs)
-        except Exception as e:  # rerank 失败则优雅回退到 RRF 融合序
+        except Exception as e:
             import logging
 
             logging.getLogger(__name__).warning("rerank 失败，回退 RRF 融合序: %s", e)

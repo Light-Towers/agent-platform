@@ -7,8 +7,12 @@
 # 使用 uv 管理的联邦网关请直接依赖 pyproject.toml（本文件为非 uv 用户备选）。
 
 # --- 本地 editable 包 ---
--e ../agent-core
--e ../shared-schemas
+# 相对路径基准：仓库根（本地 pip install -r applications/agent_federation/requirements.txt）
+# 与 Docker 构建（WORKDIR=/app，packages/ 已 COPY）两个场景均有效。
+# 2026-09-22 T1.1：monorepo 重组后 ../agent-core 旧路径失效，已改 packages/ 前缀并补 agent-runtime。
+-e packages/agent-core
+-e packages/shared-schemas
+-e packages/agent-runtime
 
 # --- SQL 守卫（agent_federation 委托 agent_core 的 mysql dialect 守卫，需 sqlglot 透传） ---
 sqlglot>=25.0
