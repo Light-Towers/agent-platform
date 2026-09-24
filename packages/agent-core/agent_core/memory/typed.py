@@ -135,10 +135,11 @@ async def remember_typed(
     pool,
     user_id: str,
     fact: str,
-    tenant_id: str = "default",
     memory_type: object = "semantic",
     importance: float = 0.5,
     embedding: list[float] | None = None,
+    *,
+    tenant_id: str = "default",
 ) -> None:
     """沉淀一条带类型/重要性的结构化记忆。
 
@@ -167,10 +168,11 @@ async def recall_typed(
     pool,
     user_id: str,
     question: str,
-    tenant_id: str = "default",
     k: int = 3,
     weights: Iterable[tuple[str, float]] | None = None,
     embedding: list[float] | None = None,
+    *,
+    tenant_id: str = "default",
 ) -> list[TypedMemory]:
     """分层加权召回（pg 模式）。
 
@@ -250,9 +252,10 @@ def memory_forget_age_days() -> int:
 async def consolidate(
     user_id,
     pool,
-    tenant_id: str = "default",
     forget_threshold: float | None = None,
     age_days: int | None = None,
+    *,
+    tenant_id: str = "default",
 ) -> int:
     """巩固 + 遗忘（ADR-0004 D4/D5，TD-6 阈值/老化天数参数化）。
 
@@ -282,7 +285,7 @@ async def consolidate(
         return deleted
 
 
-async def forget(user_id, pool, memory_id, tenant_id: str = "default") -> bool:
+async def forget(user_id, pool, memory_id, *, tenant_id: str = "default") -> bool:
     """按 memory_id 删除单条记忆，返回是否实际删除。"""
     async with pool.connection() as conn:
         cur = await conn.execute(
