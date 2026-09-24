@@ -33,6 +33,7 @@ class AgentState(BaseModel):
     question: str = ""
     user_id: str = "default"
     workspace_id: str = "default"
+    tenant_id: str = "default"
     route: Route = "direct"
     sub_query: str = ""
     route_reason: str = ""
