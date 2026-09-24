@@ -112,6 +112,7 @@ class Plan(BaseModel):
     question: str = ""
     workspace_id: str = "default"
     user_id: str = "default"
+    tenant_id: str = "default"
     session_id: str = ""
     planner_name: str = ""
     last_snapshot: dict[str, Any] | None = None
@@ -139,6 +140,7 @@ class PlannerContext(BaseModel):
     question: str
     workspace_id: str = "default"
     user_id: str = "default"
+    tenant_id: str = "default"
     messages: list[Any] = Field(default_factory=list)
     llm: Any = None
     # WS-2：上一轮执行的结构化快照（task/execution 层），由 app 层从 thread
