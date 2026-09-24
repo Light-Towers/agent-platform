@@ -87,11 +87,11 @@ class _FakeConnWriter:
             })
             return _FakeCur(self._db, sql, p, self._log)
         if sql.startswith("DELETE FROM memories"):
-            tenant, ws = p[0], p[1]
+            tenant, ws, memory_id = p[0], p[1], p[2]
             before = len(self._db["memories"])
             self._db["memories"] = [
                 m for m in self._db["memories"]
-                if not (m["tenant_id"] == tenant and m["user_id"] == ws)
+                if not (m["tenant_id"] == tenant and m["user_id"] == ws and m["id"] == memory_id)
             ]
             cur = _FakeCur(self._db, sql, p, self._log)
             cur.rowcount = before - len(self._db["memories"])
@@ -247,6 +247,20 @@ async def test_memory_cross_tenant_same_workspace_isolated(patch_embed):
     assert all("租户B" not in r for r in res_a)
     assert any("租户B" in r for r in res_b)
     assert all("租户A" not in r for r in res_b)
+
+
+async def test_memory_forget_is_tenant_scoped(patch_embed):
+    pool = _FakePool()
+    await mb.remember_fact(pool, "ws-shared", "租户A私有事实", tenant_id="tenantA")
+    await mb.remember_fact(pool, "ws-shared", "租户B私有事实", tenant_id="tenantB")
+
+    # tenantB 不能删除 tenantA 的同 workspace 记录。
+    assert await mb.forget_memory(pool, "ws-shared", 1, tenant_id="tenantB") is False
+    assert len(pool._db["memories"]) == 2
+
+    assert await mb.forget_memory(pool, "ws-shared", 1, tenant_id="tenantA") is True
+    assert len(pool._db["memories"]) == 1
+    assert pool._db["memories"][0]["tenant_id"] == "tenantB"
 
 
 async def test_memory_default_space_isolated(patch_embed):
