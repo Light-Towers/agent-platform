@@ -43,10 +43,10 @@ class _FakeCur:
                 if r["id"] in set(ids) and r["workspace_id"] == ws
             ]
         if "FROM memories" in sql and "COUNT" not in sql:
-            ws = p[0]
+            tenant, ws = p[0], p[1]
             return [
                 (r["content"], r["memory_type"], r["importance"], r["created_at"])
-                for r in self._db["memories"] if r["user_id"] == ws
+                for r in self._db["memories"] if r["tenant_id"] == tenant and r["user_id"] == ws
             ]
         return []
 
@@ -81,8 +81,9 @@ class _FakeConnWriter:
         if sql.startswith("INSERT INTO memories"):
             self._db["memories"].append({
                 "id": len(self._db["memories"]) + 1,
-                "user_id": p[0], "content": p[1], "embedding": p[2],
-                "memory_type": p[3], "importance": p[4], "created_at": None,
+                "tenant_id": p[0],
+                "user_id": p[1], "content": p[2], "embedding": p[3],
+                "memory_type": p[4], "importance": p[5], "created_at": None,
             })
             return _FakeCur(self._db, sql, p, self._log)
         if sql.startswith("DELETE FROM memories"):
@@ -205,28 +206,32 @@ async def test_memory_insert_carries_workspace_id(patch_embed):
     await mb.remember_fact(pool, "wsA", "用户A是财务", "semantic", 0.9)
     inserts = _calls_with(pool, "INSERT INTO memories")
     assert inserts, "remember_fact 应执行 INSERT INTO memories"
-    assert inserts[-1][0] == "wsA"  # user_id 列承载 workspace_id
+    assert inserts[-1][0] == "default"
+    assert inserts[-1][1] == "wsA"  # tenant_id + workspace(user_id)
 
 
 async def test_memory_recall_scoped_to_workspace(patch_embed):
     pool = _FakePool()
     await mb.remember_fact(pool, "wsA", "事实A", "semantic", 0.9)
     pool.calls.clear()  # 清掉写入记录，只看召回查询
-    await mb.recall_typed(pool, "wsA", "任意", k=3)
+    await mb.recall_typed(pool, "wsA", "任意", k=3, tenant_id="tenantA")
     # 优化 G 决策：长期记忆复用 memories 表的 user_id 列承载 workspace_id
     where_ws = [p for sql, p in pool.calls if "user_id" in sql]
     assert where_ws, "recall SQL 应含 user_id（承载 workspace_id）WHERE"
     assert all("wsA" in p for p in where_ws)
+    assert any("tenantA" in p for p in where_ws)
 
 
 async def test_memory_no_cross_contamination(patch_embed):
     pool = _FakePool()
-    await mb.remember_fact(pool, "wsA", "用户A是财务", "semantic", 0.9)
-    await mb.remember_fact(pool, "wsB", "用户B是工程师", "semantic", 0.9)
-    res_b = await mb.recall_typed(pool, "wsB", "职业", k=3)
+    await mb.remember_fact(pool, "wsA", "用户A是财务", "semantic", 0.9, tenant_id="tenantA")
+    await mb.remember_fact(pool, "wsA", "用户A在租户B", "semantic", 0.9, tenant_id="tenantB")
+    await mb.remember_fact(pool, "wsB", "用户B是工程师", "semantic", 0.9, tenant_id="tenantB")
+    res_b = await mb.recall_typed(pool, "wsA", "职业", k=3, tenant_id="tenantB")
     assert all("财务" not in r for r in res_b)
-    res_a = await mb.recall_typed(pool, "wsA", "职业", k=3)
+    res_a = await mb.recall_typed(pool, "wsA", "职业", k=3, tenant_id="tenantA")
     assert all("工程师" not in r for r in res_a)
+    assert all("财务" not in r for r in res_b)
 
 
 async def test_memory_default_space_isolated(patch_embed):
