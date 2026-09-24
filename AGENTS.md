@@ -1,10 +1,8 @@
 # agent-platform — Agent 上下文文件
 
-> 统一生产级 Agent 平台，本仓库为 **monorepo**（根 + `packages/` 3 个共享包 + `applications/` 6 个应用工程，各含独立 `pyproject.toml`）。
-> **演进方向（Plan-F）**：双轨正收敛为「单 Runtime + 多 Planner」——共享 `agent-runtime/` 承载运行时中间件（admission/coordinator/checkpoint/tracing/cache/rate_limit 等），Planner 策略（deterministic/agentic）可插拔，不统一 Agent 只统一 Runtime。详见 `docs/plans/plan-f-single-runtime-multi-planner.md`。
-> **V3 企业执行平台（Phase 2-4 + 3.4 代码已接线；P0-1 并发门控已修（submit 实际入队 + claim_token fencing）；端到端双实例物理故障转移验收未达）**：主执行链路 `Admission → Scheduler submit → Planner → Execute → Forensic/CostGov`；`scheduler_enabled` 默认 False（渐进式开启，待验收达标后翻转）；**未接线半成品**（P1-7 已标注）：human_task / execution_recovery / state_migration / payload_externalization / skill_router(exhibition)。架构真相源：`docs/plans/plan-enterprise-platform-skeleton-2026-09-23.md` + `docs/plans/plan-v3-execution-platform-final-architecture-2026-09-22.md` + `docs/plans/arch-audit-2026-09-24.md`。
-> 各包经 `agent-core` / `shared-schemas` 共享内核与契约。
-> 详细人类阅读指南见 `README.md`（含完整目录结构），本文件面向 AI agent，仅列要点。
+> 统一生产级 Agent 平台，本仓库为 **monorepo**（根 + `packages/` 3 个共享包 + `applications/` 6 个应用工程）。**分层契约、依赖图、各包子模块完整清单见 `ARCHITECTURE.md`（按需读取）**；人类阅读指南见 `README.md`。本文件面向 AI agent，仅列每轮必守的行为约束 + 定向信息。
+> **演进方向（Plan-F）**：双轨收敛为「单 Runtime + 多 Planner」（`agent-runtime/` 承载运行时中间件，Planner 策略可插拔，不统一 Agent 只统一 Runtime）。详见 `docs/plans/plan-f-single-runtime-multi-planner.md`。
+> **V3 企业执行平台**：Phase 2-4 + 3.4 代码已接线（主链路 `Admission → Scheduler submit → Planner → Execute → Forensic/CostGov`，`scheduler_enabled` 默认 False 渐进开启）；**端到端双实例物理故障转移验收未达，不得当作已上线能力声明**。未接线半成品（P1-7 标注）：human_task / execution_recovery / state_migration / payload_externalization / skill_router(exhibition)。架构真相源：`plan-enterprise-platform-skeleton-2026-09-23.md` + `plan-v3-execution-platform-final-architecture-2026-09-22.md` + `arch-audit-2026-09-24.md`（均在 `docs/plans/`）。
 
 ## 目录结构
 
@@ -12,8 +10,8 @@
 |------|------|------|
 | `applications/agent_server/` | 单进程 Supervisor 平台（统一 Agent 平台；V3 Phase 2-4 已接入 Scheduler/ControlPlane/CostGov/Forensic，`api/` 含 `callback.py` + `control.py`；2026-08-19 由根 `app/` 改名迁入） | `agent_server.main:app`（uvicorn） |
 | `applications/agent_federation/` | 联邦网关 + 3 子服务编排中枢（与 agent_server 并行，详见其 README；原名 `deepagents/`，为消除与 PyPI 依赖包 `deepagents` 同名冲突而改名） | `python -m api.server` |
-| `packages/agent-core/` | 零依赖运行时内核：tracing / guardrails / sql 守卫 / llm / memory（含 MemoryStore 统一门面 + CapabilityReport） / events（EventBus 多 sink 扇出） / config（KernelConfig + 类型化 env） / intent（L1 分类器） / resilience（CircuitBreaker + retry + timeout） | — |
-| `packages/agent-runtime/` | Plan-F 运行时中间件层 + V3 企业执行平台：admission/coordinator/cache/circuit_breaker/revert/mcp_client/otel/tracing/db + **execution_scheduler/execution_status/awaitable_task/control_plane/cost_governance/forensic/human_task/effect_contract/execution_recovery/state_migration/payload_externalization**（V3 Phase 2-4） + planner/（protocol/agentic/agentic_bridge/registry/policy/mode_selector/context_manager/execution_graph/graph_compose/durability/durability_pg）+ skills/（registry/function/agent/remote/workflow/mcp/sandbox/middleware/composition/dag） + sandbox（双后端代码执行） + memory 体系（episodic/semantic/procedural/working/decay/recall/seed/sink） | — |
+| `packages/agent-core/` | 零依赖运行时内核：tracing / guardrails / sql 守卫 / llm / memory / events / config / intent / resilience（子模块职责清单见 `ARCHITECTURE.md` §2.1） | — |
+| `packages/agent-runtime/` | Plan-F 运行时中间件 + V3 执行平台：admission / scheduler / coordinator / checkpoint / cache / tracing / planner/ / skills/ / memory 体系 / sandbox / forensic / cost_governance 等（各包职责与分层定位见 `ARCHITECTURE.md` §2.1） | — |
 | `packages/shared-schemas/` | 联邦 4 服务共享 Pydantic 契约（QueryRequest/Response · ErrorResponse · KNOWLEDGE_STATUS · ThreadState 等） | — |
 | `applications/kefu-service/` | kefu 迁移版（deepagents + LangGraph），已接入联邦网关（Agent Protocol 兼容 `/invoke`，返回 `QueryResponse`；`KEFU_USE_ADAPTER=false` 默认直连） | — |
 | `applications/nl2sql-service/` | Text-to-SQL 数据分析通用服务（元知识参数化，已直连联邦契约） | — |
@@ -77,8 +75,8 @@ DATABASE_URL= uvicorn agent_server.main:app --port 8000  # 零依赖冒烟
   1. **单一实现**：逻辑收敛到 kernel（`agent-core`），不在各 app 复制；
   2. **全局装配**：由构造保证不可漏接（统一 app 工厂 / 统一门面 / 中间件），而非靠每个调用点"记得调一次"——**接线散落 = 反模式**，即便逻辑已共享也不算全局；
   3. **强制门禁**：用不变量 lint（`scripts/lint_architecture.py`：全仓扫描 + 白名单，计入 `make ci`）拦截未来漂移，让违规在 CI 失败而非靠自觉。
-- **先实测再动手**：判断"是否已有全局兜底"要靠读代码/跑验证，不凭模式猜。例：FastAPI 未捕获异常其实已被 Starlette `ServerErrorMiddleware` 全局兜底为裸 500（`debug=True` 不开时堆栈不外泄），真正缺的只是统一信封——据此把改动收敛到"补统一 handler"而非"重造防泄露"。
-- **范例（2026-09-24 P2）**：入站错误脱敏 handler 从"仅 1/6 应用手写、其余裸默认"收敛为 `agent_core.guardrails.app_factory.build_api_app`（工厂，全部生产 app 经此创建）+ `agent_core.guardrails.errors`（单一实现）+ `lint_architecture.py` 的"裸 `FastAPI(` 即失败"不变量（门禁）。方案见 `docs/plans/plan-p2-unified-exception-handlers-2026-09-24.md`。
+- **先实测再动手**：判断"是否已有全局兜底"靠读代码/跑验证，不凭模式猜（例：FastAPI 未捕获异常已被 Starlette 全局兜底为裸 500，堆栈不外泄，真正缺的只是统一信封）。
+- **范例（P2）**：入站错误脱敏 handler 从"仅 1/6 应用手写"收敛为 `build_api_app`（工厂）+ `agent_core.guardrails.errors`（单一实现）+ `lint_architecture.py` "裸 `FastAPI(` 即失败"（门禁）。方案见 `docs/plans/plan-p2-unified-exception-handlers-2026-09-24.md`。
 - **边界**：全局优先不等于强行统一对外契约——若改写会影响下游消费者（前端/网关解析的错误体形状），须先审计消费者、按"先方案后编码"另行决策，不得为求统一而静默破坏兼容。
 
 ## 框架选型规则
@@ -94,9 +92,4 @@ DATABASE_URL= uvicorn agent_server.main:app --port 8000  # 零依赖冒烟
 
 ## 技术债追踪
 
-> D1-D10 **非全部闭合**（2026-09-24 复核更正）：D2/D3/D6/D9/D10 已完成，D7 门禁已恢复启用 + 存量烧除中（见审计 P0-4 ratchet），D1/D4/D5/D8 为 Low 优先级**跳过项（未闭合）**。追踪文档：
-> - `docs/plans/plan-tech-debt-followup-2026-09-22.md` — D1-D10 完整追踪（D2/D3/D6 已标记完成）
-> - `docs/plans/tech-debt-multi-agent-2026-09-23.md` — 多 Agent 缺陷 P0/P1/C/B 修复记录（全部已修/豁免）
-> - `docs/plans/skill-consolidation-inventory.md` — Skill 收敛 P0-P5 状态（G1-G6 全部 ✅）
->
-> 后续如再遇裸 except / llm_client 散落，按已建立的 agent_core.llm 统一门面与 except 收窄规范处理。
+> 技术债追踪（D1-D10 + 多 Agent + Skill 收敛）状态详见追踪文档（会变，不在此内联快照）：`docs/plans/plan-tech-debt-followup-2026-09-22.md`（D1-D10，D1/D4/D5/D8 为 Low 跳过项）、`docs/plans/tech-debt-multi-agent-2026-09-23.md`、`docs/plans/skill-consolidation-inventory.md`。后续如再遇裸 except / llm_client 散落，按已建立的 `agent_core.llm` 统一门面与 except 收窄规范处理（非新增任务）。
