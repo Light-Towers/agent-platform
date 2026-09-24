@@ -143,7 +143,7 @@ async def test_recall_typed_ranks_by_weighted_score(monkeypatch):
     ]
     monkeypatch.setattr(
         "agent_core.memory.typed._vector_search_memories",
-        lambda pool, user_id, embedding, k: _async(rows),
+        lambda pool, tenant_id, user_id, embedding, k: _async(rows),
     )
     result = await recall_typed(_FakePool(), "u1", "q", k=3, embedding=[0.0] * 8)
     assert isinstance(result[0], TypedMemory)
@@ -157,7 +157,7 @@ async def test_recall_typed_ranks_by_weighted_score(monkeypatch):
 async def test_recall_typed_empty_returns_empty(monkeypatch):
     monkeypatch.setattr(
         "agent_core.memory.typed._vector_search_memories",
-        lambda pool, user_id, embedding, k: _async([]),
+        lambda pool, tenant_id, user_id, embedding, k: _async([]),
     )
     result = await recall_typed(_FakePool(), "u1", "q", k=3, embedding=[0.0] * 8)
     assert result == []
@@ -197,11 +197,12 @@ async def test_remember_typed_inserts_typed_columns(monkeypatch):
         _CapturePool(), "u1", "用户是财务", "semantic", 0.8, embedding=[0.1] * 8
     )
     assert "INSERT INTO memories" in captured["sql"]
-    # 列顺序：user_id, content, embedding, memory_type, importance
-    assert captured["params"][0] == "u1"
-    assert captured["params"][1] == "用户是财务"
-    assert captured["params"][3] == "semantic"
-    assert abs(captured["params"][4] - 0.8) < 1e-9
+    # 列顺序：tenant_id, user_id, content, embedding, memory_type, importance
+    assert captured["params"][0] == "default"
+    assert captured["params"][1] == "u1"
+    assert captured["params"][2] == "用户是财务"
+    assert captured["params"][4] == "semantic"
+    assert abs(captured["params"][5] - 0.8) < 1e-9
 
 
 async def test_remember_typed_clamps_type_and_importance(monkeypatch):
@@ -230,8 +231,8 @@ async def test_remember_typed_clamps_type_and_importance(monkeypatch):
         _CapturePool(), "u", "f", "bogus", 5.0, embedding=[0.0] * 8
     )
     # 非法类型 → semantic；importance 超界 → 1.0
-    assert captured["params"][3] == "semantic"
-    assert captured["params"][4] == 1.0
+    assert captured["params"][4] == "semantic"
+    assert captured["params"][5] == 1.0
 
 
 async def test_remember_typed_requires_embedding():
@@ -270,7 +271,7 @@ async def test_consolidate_deletes_low_value_old(monkeypatch):
     assert deleted == 3
     assert "DELETE FROM memories" in captured["sql"]
     # TD-6 参数化：参数三元组 (user, threshold, age_days)，默认 age_days=30
-    assert captured["params"] == ("ws1", 0.1, 30)
+    assert captured["params"] == ("default", "ws1", 0.1, 30)
     # 含 30 天窗口与 importance 阈值条件（SQL 用参数化 interval '%s days'）
     assert "importance <" in captured["sql"]
     assert "interval '%s days'" in captured["sql"]
@@ -309,7 +310,7 @@ async def test_consolidate_reads_env_threshold_and_age_days(monkeypatch):
 
     await consolidate("ws2", _Pool())
     # 环境变量生效：params 三元组最后一维应为 7，阈值应为 0.35
-    assert captured["params"] == ("ws2", 0.35, 7)
+    assert captured["params"] == ("default", "ws2", 0.35, 7)
 
 
 async def test_consolidate_env_invalid_falls_back(monkeypatch):
@@ -341,7 +342,7 @@ async def test_consolidate_env_invalid_falls_back(monkeypatch):
             return _Conn()
 
     await consolidate("ws3", _Pool())
-    assert captured["params"] == ("ws3", 0.1, 30)
+    assert captured["params"] == ("default", "ws3", 0.1, 30)
 
 
 # --- forget 删除（fake 池）------------------------------------------------
@@ -372,7 +373,7 @@ async def test_forget_deletes_when_matched(monkeypatch):
 
     ok = await forget("u1", _CapturePool(), 42)
     assert ok is True
-    assert captured["params"] == ("u1", 42)
+    assert captured["params"] == ("default", "u1", 42)
 
 
 async def test_forget_returns_false_when_no_match(monkeypatch):
