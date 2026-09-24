@@ -44,7 +44,7 @@ try:
     from knowledge_service.api.middleware.security_guards import SecurityGuardsMiddleware
 
     HAVE_WEB = True
-except Exception:
+except ImportError:
     HAVE_WEB = False
 
 requires_web = pytest.mark.skipif(not HAVE_WEB, reason="fastapi/starlette 未安装（web 集成用例跳过）")

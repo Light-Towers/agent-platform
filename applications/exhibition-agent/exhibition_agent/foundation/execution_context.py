@@ -264,16 +264,16 @@ class ServiceCredential:
             raise ValueError("credential_ref 必填（指向外部密钥管理后端，非明文）")
 
 
-def get_service_credential(system: str) -> ServiceCredential:
-    """F1-D 占位：获取平台访问下游业务系统的机器通道凭证。
+def get_service_credential(system: str) -> "ServiceCredential":
+    """F1-D 机器通道凭证获取（**fail-close**）。
 
-    当前返回占位凭证（credential_ref="placeholder"），不读取真实密钥。
-    接入真实后端后替换此实现（见 TODO(F1-D)）。
+    真实凭证后端（Vault/KMS）尚未接入（见 TODO(F1-D)）。在此之前本函数**绝不返回
+    占位/真值凭证**——早期实现返回 `credential_ref="placeholder"` 的对象是 truthy，
+    一旦被调用方以 `if cred:` 判定放行，即构成 fail-open 越权（审计 P1-8）。
+    故显式抛错，强制凭证后端就绪前无法误用本通道。
     """
-    # TODO(F1-D): 从 Vault/KMS 读取真实凭证引用。当前仅占位。
-    return ServiceCredential(
-        system=system,
-        credential_ref="placeholder",
-        permissions=[],
-        expires_at=None,
+    # TODO(F1-D): 接入 Vault/KMS 后替换为真实凭证引用读取（返回非占位 ServiceCredential）。
+    raise NotImplementedError(
+        "服务凭证后端（Vault/KMS）尚未接入；get_service_credential 拒绝返回占位凭证"
+        "（fail-close，见审计 arch-audit-2026-09-24.md P1-8）"
     )

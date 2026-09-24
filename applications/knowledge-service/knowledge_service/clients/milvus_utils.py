@@ -65,7 +65,7 @@ def _coerce_int64_ids(ids):
             continue
         try:
             ok.append(int(x))
-        except Exception:
+        except (ValueError, TypeError):
             bad.append(x)
     return ok, bad
 

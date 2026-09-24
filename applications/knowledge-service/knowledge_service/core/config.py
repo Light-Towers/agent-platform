@@ -61,8 +61,9 @@ class Settings:
     modelscope_offline: str = os.getenv("MODELSCOPE_OFFLINE", "1")
 
     # -------------------------- LLM --------------------------
-    openai_base_url: str = os.getenv("OPENAI_BASE_URL", "")
-    openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
+    # P0-3：`LLM_*` 为跨服务权威名（与根 .env.example 对齐），`OPENAI_*` 保留为兼容别名。
+    openai_base_url: str = os.getenv("LLM_BASE_URL") or os.getenv("OPENAI_BASE_URL", "")
+    openai_api_key: str = os.getenv("LLM_API_KEY") or os.getenv("OPENAI_API_KEY", "")
     vl_model: str = os.getenv("VL_MODEL", "")
     llm_default_model: str = os.getenv("LLM_DEFAULT_MODEL", "")
     llm_default_temperature: str = os.getenv("LLM_DEFAULT_TEMPERATURE", "0.7")

@@ -62,6 +62,8 @@ async def query(
             sched_priority = ExecutionPriority.HIGH
         elif priority == "low":
             sched_priority = ExecutionPriority.LOW
+        # P0-1（方案 B）：submit 入队（backpressure）；真正的并发门控在下方返回流之前
+        # 经 try_start 认领专属槽位完成（超并发 → 503）。
         try:
             await scheduler.submit(ExecutionRequest(
                 execution_id=request_id,
@@ -139,6 +141,13 @@ async def query(
         cached = await semantic_cache.cache_lookup(pool, q_embedding, settings.cache_threshold, tenant_id=req.tenant_id or "")
         if cached:
             await lease.release()
+            # P0-1（方案 B）：cache-hit 从未经 try_start 认领，但 submit 已留下 QUEUED 行——
+            # 若不撤销会永久虚增 queue_depth、误导 backpressure（记错账）。撤销自己那行。
+            if scheduler is not None and scheduler_enqueued:
+                try:
+                    await scheduler.cancel(request_id)
+                except Exception:
+                    logger.warning("scheduler cancel on cache-hit failed", exc_info=True)
 
             async def _cached_stream():
                 yield _sse({"type": "cache_hit", "text": cached})
@@ -255,12 +264,8 @@ async def query(
                     governed_memories=governed_memories,
                 )
                 plan = await planner.plan(ctx)
-                # V3 Phase 2: Scheduler dispatch（从队列取出并标记 RUNNING）
-                if scheduler is not None and scheduler_enqueued:
-                    try:
-                        await scheduler.dispatch_next()
-                    except Exception:
-                        logger.debug("scheduler dispatch failed", exc_info=True)
+                # P0-1（方案 B）：Scheduler 认领已在进入流式前由 try_start 完成（见 handler 末尾），
+                # 认领即置 RUNNING；不再调 dispatch_next()（旧写法无参会错标队首他人任务）。
                 # V3 Phase 2: ExecutionStatus → RUNNING
                 if status_store is not None:
                     from agent_runtime.execution_status import ExecutionStatus, ExecutionStatusRecord
@@ -271,7 +276,7 @@ async def query(
                             status=ExecutionStatus.RUNNING,
                         ))
                     except Exception:
-                        logger.debug("status save RUNNING failed", exc_info=True)
+                        logger.warning("status save RUNNING failed", exc_info=True)
                 async for event in planner.execute(plan, planner_runtime):
                     sse = _stream_event(event)
                     if sse:
@@ -290,7 +295,7 @@ async def query(
                                 status=ExecutionStatus.WAITING_EXTERNAL,
                             ))
                         except Exception:
-                            logger.debug("status save WAITING_EXTERNAL failed", exc_info=True)
+                            logger.warning("status save WAITING_EXTERNAL failed", exc_info=True)
             if final_answer and q_embedding is not None:
                 semantic_cache.cache_store(pool, req.query, final_answer, q_embedding, tenant_id=req.tenant_id or "")
             # Phase 3: 对话历史写回——Planner 协议中立（不持线程语义），由 app 层承担。
@@ -305,6 +310,7 @@ async def query(
                 )
             yield _sse({"type": "done", "thread_id": thread_id, "answer": final_answer})
         except Exception as exc:
+            logger.exception("query stream failed: thread_id=%s", thread_id)
             _stream_failed = True
             yield _sse({"type": "error", "error": str(exc)})
             yield _sse({"type": "done", "thread_id": thread_id, "answer": ""})
@@ -314,11 +320,17 @@ async def query(
             if _parent_ctx_cm is not None:
                 _parent_ctx_cm.__exit__(None, None, None)
             # V3 Phase 2: Scheduler complete + ExecutionStatus → SUCCEEDED/FAILED
+            # P0-1（方案 B）：complete 现带终态 status（COMPLETED/FAILED），槽位真实释放。
             if scheduler is not None and scheduler_enqueued:
+                from agent_runtime.execution_scheduler import QueueStatus
+
                 try:
-                    await scheduler.complete(request_id)
+                    await scheduler.complete(
+                        request_id,
+                        QueueStatus.FAILED if _stream_failed else QueueStatus.COMPLETED,
+                    )
                 except Exception:
-                    logger.debug("scheduler complete failed", exc_info=True)
+                    logger.warning("scheduler complete failed", exc_info=True)
             if status_store is not None:
                 from agent_runtime.execution_status import ExecutionStatus, ExecutionStatusRecord
 
@@ -328,7 +340,7 @@ async def query(
                         status=ExecutionStatus.FAILED if _stream_failed else ExecutionStatus.SUCCEEDED,
                     ))
                 except Exception:
-                    logger.debug("status save terminal failed", exc_info=True)
+                    logger.warning("status save terminal failed", exc_info=True)
             # V3 Phase 4: Cost Governance record（opt-in）
             if cost_governance is not None:
                 from agent_runtime.cost_governance import BudgetDimension
@@ -343,11 +355,27 @@ async def query(
                         if traj.total_cost > 0:
                             await cost_governance.record(_tenant, BudgetDimension.COST, traj.total_cost)
                 except Exception:
-                    logger.debug("cost governance record failed", exc_info=True)
+                    logger.warning("cost governance record failed", exc_info=True)
             # Phase 2: 统一生命周期清理（幂等，覆盖 graph 异常 / 客户端断开 /
             # 正常完成）。reject 与 cache-hit 路径已在 _stream 外提前调用过，
             # 此处再调用安全无副作用（AsyncLease 幂等）。
             await lease.release()
+
+    # V3 P0-1（方案 B）：真执行门控——认领本请求专属槽位（原子 QUEUED→RUNNING）。
+    # 放在返回流之前：此时 admission/coordinator 的 reject 与 cache-hit 早退均已发生，
+    # 认领成功唯一的出口是进入 _stream()，其 finally 必落终态释放，无槽位泄漏。
+    if scheduler is not None and scheduler_enqueued:
+        if await scheduler.try_start(request_id) is None:
+            # 超并发：撤销刚入队的 QUEUED 行并拒绝（不占用槽位）。
+            try:
+                await scheduler.cancel(request_id)
+            except Exception:
+                logger.warning("scheduler cancel on gating reject failed", exc_info=True)
+            raise HTTPException(
+                status_code=503,
+                detail="SCHEDULER_SLOTS_EXHAUSTED",
+                headers={"Retry-After": "5"},
+            )
 
     return StreamingResponse(_stream(), media_type="text/event-stream")
 

@@ -26,7 +26,7 @@ try:  # pragma: no cover - 依赖可选
     import tiktoken
 
     _TIKTOKEN_AVAILABLE = True
-except Exception:
+except ImportError:
     _TIKTOKEN_AVAILABLE = False
     tiktoken = None  # type: ignore[assignment]
 

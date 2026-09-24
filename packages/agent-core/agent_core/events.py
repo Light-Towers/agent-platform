@@ -108,7 +108,7 @@ class OTelSpanSink:
     def emit(self, event: dict[str, Any]) -> None:
         try:
             from opentelemetry import trace as otel_trace
-        except Exception:
+        except ImportError:
             return
         try:
             span = otel_trace.get_current_span()

@@ -73,7 +73,7 @@ try:
     from opentelemetry.sdk.trace.export import SimpleSpanProcessor as _SimpleSpanProcessor
 
     _SDK_AVAILABLE = True
-except Exception:  # pragma: no cover - 依赖缺失路径（CI / 本地无 OTel）
+except ImportError:  # pragma: no cover - 依赖缺失路径（CI / 本地无 OTel）
     _otel_trace = None
     _SDK_AVAILABLE = False
 
@@ -88,7 +88,7 @@ if _SDK_AVAILABLE:
             _exporter_module = __import__(_exporter_module_name, fromlist=["OTLPSpanExporter"])
             _OTLP_EXPORTER_CLS = getattr(_exporter_module, "OTLPSpanExporter")
             break
-        except Exception:  # pragma: no cover - exporter 未安装路径
+        except ImportError:  # pragma: no cover - exporter 未安装路径
             continue
 
 

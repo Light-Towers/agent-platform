@@ -51,6 +51,8 @@ kefu / nl2sql / knowledge / dialogue-framework 完全无 admission / coordinator
 B-5a: SkillRegistry 已装配 RetryMiddleware + AuditMiddleware（agent_server + agent_federation）。
 B-5b: ExecutionScheduler/ControlPlane/WorkingMemory/ExecutionRecovery 豁免——已有等价能力，强行装配产生双重编排。
 
+> ⚠️ **补充披露（2026-09-24 审计 P1-7 勘误）**：B-5b 原仅隐含 `ExecutionRecovery` 一个未接线模块，实际另外 3 个 V3 模块同为「半成品（有单测、生产零调用）」且未被本条涵盖：`human_task`（`applications/` 零命中）、`state_migration`（仅自身 + 单测，且它只做 checkpoint JSONB 版本迁移、**非** DDL 迁移）、`payload_externalization`（`applications/` 零命中）。它们与「豁免」不同 —— 豁免是主动判定不需装配，而这 3 个是「设计就绪、待集成」但尚未计入文档。需明确归属：要么排期接线，要么标记为待集成，避免被误认为已上线能力。详见 `arch-audit-2026-09-24.md` P1-7。
+
 ## 已修复：C 组（一致性缺陷，含 C-1/C-2/C-3）
 
 ### C-1: trace 多处断链（已修）

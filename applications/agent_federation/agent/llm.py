@@ -10,13 +10,23 @@ load_dotenv(find_dotenv())
 
 _logger = logging.getLogger(__name__)
 
+
+def _env_first(*names: str) -> str:
+    """按顺序返回第一个非空环境变量（P0-3：`LLM_*` 为权威名，`OPENAI_*` 为兼容别名）。"""
+    for n in names:
+        v = os.getenv(n)
+        if v:
+            return v
+    return ""
+
+
 # ---------------------------------------------------------------------------
 # 模型配置（支持主备路由 + 重试）
 # ---------------------------------------------------------------------------
 # 主模型：qwen-max（DashScope）
 _PRIMARY_MODEL = os.getenv("LLM_QWEN_MAX", "qwen-max")
-_PRIMARY_BASE_URL = os.getenv("OPENAI_BASE_URL", "")
-_PRIMARY_API_KEY = os.getenv("OPENAI_API_KEY", "")
+_PRIMARY_BASE_URL = _env_first("LLM_BASE_URL", "OPENAI_BASE_URL")
+_PRIMARY_API_KEY = _env_first("LLM_API_KEY", "OPENAI_API_KEY")
 
 # 备用模型：qwen-plus（成本更低，主模型不可用时降级）
 _FALLBACK_MODEL = os.getenv("LLM_QWEN_FALLBACK", "")
@@ -51,15 +61,15 @@ def create_fallback_model():
     每次调用重新读取环境变量（支持测试 monkeypatch）。
     """
     primary_model = os.getenv("LLM_QWEN_MAX", "qwen-max")
-    primary_base = os.getenv("OPENAI_BASE_URL", "")
-    primary_key = os.getenv("OPENAI_API_KEY", "")
+    primary_base = _env_first("LLM_BASE_URL", "OPENAI_BASE_URL")
+    primary_key = _env_first("LLM_API_KEY", "OPENAI_API_KEY")
     fallback_model = os.getenv("LLM_QWEN_FALLBACK", "")
     fallback_base = os.getenv("OPENAI_FALLBACK_BASE_URL", primary_base)
     fallback_key = os.getenv("OPENAI_FALLBACK_API_KEY", primary_key)
 
     primary = _build_model(primary_model, primary_base, primary_key, "主模型")
     if primary is None:
-        raise RuntimeError("主模型配置缺失：请设置 OPENAI_API_KEY / OPENAI_BASE_URL")
+        raise RuntimeError("主模型配置缺失：请设置 LLM_API_KEY / LLM_BASE_URL（或兼容名 OPENAI_API_KEY / OPENAI_BASE_URL）")
 
     fallback = None
     if fallback_model:

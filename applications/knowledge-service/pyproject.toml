@@ -81,7 +81,8 @@ extend-exclude = [
 ]
 
 [tool.ruff.lint]
-select = ["E4", "E7", "E9", "F", "I"]
+# BLE001/S110：P0-4 盲捕获门禁（2026-09-24）已启用；legacy 存量入下方基线，只减不增。
+select = ["E4", "E7", "E9", "F", "I", "BLE001", "S110"]
 # 存量基线（M3 收窄后剩余非自动修复项），后续里程碑按目录逐条收窄；新增代码请勿依赖这些豁免。
 ignore = [
     "E722", # bare-except：存量 1 处（node_rrf.py:39）
@@ -89,6 +90,32 @@ ignore = [
     "F405", # star import 派生的未定义名：存量 18 处
     "F811", # 重复定义：存量 1 处（knowledge_service/core/logger.py:95）
 ]
+
+# P0-4 盲捕获门禁棘轮基线：逐文件锁定 legacy 存量，新代码不得新增。进度见 docs/plans/plan-p0-4-blind-except-ratchet-2026-09-24.md。
+# 策略（用户 2026-09-24 定）：保留文件级基线，不往源码烧逐点 noqa。
+# 真实降量（见 plan-p0-4-blind-except-real-reduction-2026-09-24.md）：桶 A 安全窄化已将 locustfile / node_pdf_to_md / test_tracing 3 文件清零并移出基线；余下条目均为承重降级（桶 C），保留豁免。
+[tool.ruff.lint.per-file-ignores]
+"knowledge_service/api/import_router.py" = ["BLE001"]
+"knowledge_service/api/query_router.py" = ["BLE001"]
+"knowledge_service/clients/milvus_utils.py" = ["BLE001"]
+"knowledge_service/clients/minio_utils.py" = ["BLE001"]
+"knowledge_service/clients/neo4j_utils.py" = ["BLE001"]
+"knowledge_service/import_process/agent/nodes/node_bge_embedding.py" = ["BLE001"]
+"knowledge_service/import_process/agent/nodes/node_document_split.py" = ["BLE001"]
+"knowledge_service/import_process/agent/nodes/node_import_milvus.py" = ["BLE001"]
+"knowledge_service/import_process/agent/nodes/node_item_name_recognition.py" = ["BLE001"]
+"knowledge_service/import_process/agent/nodes/node_md_img.py" = ["BLE001"]
+"knowledge_service/lm/siliconflow_client.py" = ["BLE001"]
+"knowledge_service/query_process/agent/nodes/node_answer_output.py" = ["BLE001"]
+"knowledge_service/query_process/agent/nodes/node_item_name_confirm.py" = ["BLE001"]
+"knowledge_service/query_process/agent/nodes/node_query_kg.py" = ["BLE001"]
+"knowledge_service/query_process/agent/nodes/node_rerank.py" = ["BLE001"]
+"knowledge_service/query_process/agent/nodes/node_rrf.py" = ["BLE001"]
+"knowledge_service/query_process/agent/nodes/node_search_embedding.py" = ["BLE001"]
+"knowledge_service/query_process/agent/nodes/node_search_embedding_hyde.py" = ["BLE001"]
+"knowledge_service/utils/sse_utils.py" = ["BLE001"]
+"scripts/import_exhibition_corpus.py" = ["BLE001"]
+"tests/unit/test_security_guards.py" = ["BLE001"]
 
 [project.optional-dependencies]
 tracing = [
