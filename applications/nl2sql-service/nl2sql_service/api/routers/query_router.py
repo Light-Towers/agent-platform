@@ -3,7 +3,7 @@
 import time
 
 from agent_core.logging import get_logger
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 
 from nl2sql_service.api.schemas.query_schema import SqlQueryRequest, SqlQueryResponse
 
@@ -28,12 +28,6 @@ async def query(request: SqlQueryRequest, http_request: Request) -> SqlQueryResp
             latency_ms=round(latency, 2),
             trace_id=request.trace_id,
         )
-    except Exception:
+    except Exception as exc:
         logger.exception("query handler failed")
-        latency = (time.perf_counter() - start) * 1000
-        return SqlQueryResponse(
-            answer="抱歉，处理时发生错误。",
-            fallback=True,
-            latency_ms=round(latency, 2),
-            trace_id=request.trace_id,
-        )
+        raise HTTPException(status_code=500, detail=f"Internal query error: {type(exc).__name__}") from exc

@@ -381,7 +381,9 @@ async def query(
 
 
 def _sse(payload: dict) -> str:
-    return sse_pack("", payload)
+    """打包 SSE 帧：将 payload.type 提升为 event name，与 knowledge-service 对齐。"""
+    event_name = payload.get("type", "")
+    return sse_pack(event_name, payload)
 
 
 def _node_event(node: str, payload: dict) -> dict | None:

@@ -14,7 +14,7 @@ CONTRACT_VERSION = "1.0"
 class QueryRequest(BaseModel):
     """统一查询请求（所有子服务共用）。"""
 
-    query: str = Field(..., description="用户查询文本")
+    query: str = Field(..., min_length=1, max_length=4000, description="用户查询文本（全局上限 4000；子服务可按业务收窄）")
     tenant_id: str | None = Field(None, description="租户 ID（多租户隔离）")
     trace_id: str | None = Field(None, description="W3C traceparent（跨服务链路追踪）")
     # 兼容旧字段名 thread_id（2026-08-21 前 /api/task 契约），老客户端平滑迁移（T1.8/C3）

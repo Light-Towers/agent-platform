@@ -9,7 +9,7 @@ from pathlib import Path
 
 import uvicorn
 from dotenv import find_dotenv, load_dotenv
-from fastapi import FastAPI, File, Form, Query, Request, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -261,11 +261,13 @@ async def download_file(path: str):
         abs_path = Path(path).resolve()
         output_abs = output_dir.resolve()
         if not abs_path.is_relative_to(output_abs):
-            return {"error": "拒绝访问: 只能下载输出目录下的文件"}
+            raise HTTPException(status_code=403, detail="拒绝访问: 只能下载输出目录下的文件")
+    except HTTPException:
+        raise
     except Exception:
-        return {"error": "无效的路径参数"}
+        raise HTTPException(status_code=400, detail="无效的路径参数") from None
     if not abs_path.exists():
-        return {"error": "文件不存在"}
+        raise HTTPException(status_code=404, detail="文件不存在")
     return FileResponse(abs_path, filename=abs_path.name)
 
 
@@ -275,11 +277,13 @@ async def list_files(path: str):
         abs_path = Path(path).resolve()
         output_abs = output_dir.resolve()
         if not abs_path.is_relative_to(output_abs):
-            return {"error": "拒绝访问: 只能访问输出目录下的文件"}
+            raise HTTPException(status_code=403, detail="拒绝访问: 只能访问输出目录下的文件")
+    except HTTPException:
+        raise
     except Exception as e:
-        return {"error": f"路径无效: {e}"}
+        raise HTTPException(status_code=400, detail=f"路径无效: {e}") from e
     if not abs_path.exists():
-        return {"error": "目录不存在"}
+        raise HTTPException(status_code=404, detail="目录不存在")
     files = []
     try:
         for file_path in abs_path.rglob("*"):
@@ -293,7 +297,7 @@ async def list_files(path: str):
                     "mtime": stat.st_mtime
                 })
     except Exception as e:
-        return {"error": str(e)}
+        raise HTTPException(status_code=500, detail=str(e)) from e
     files.sort(key=lambda x: x.get("mtime", 0), reverse=True)
     return {"files": files}
 
