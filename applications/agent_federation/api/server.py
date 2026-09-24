@@ -364,8 +364,17 @@ async def websocket_endpoint(
                 await websocket.send_json({"type": "done", "thread_id": ws_thread_id, "answer": final_answer})
     except WebSocketDisconnect:
         manager.disconnect(websocket, ws_thread_id)
-    except Exception:
+    except Exception as e:
         logger.exception("WS handler error: thread_id=%s", ws_thread_id)
+        # P2-3: 向客户端发送错误帧后再断连，避免客户端无感知挂起
+        try:
+            await websocket.send_json({
+                "type": "error",
+                "error": f"Internal error: {type(e).__name__}",
+                "thread_id": ws_thread_id,
+            })
+        except Exception:  # noqa: S110 — 客户端已断开，发送失败是预期路径
+            pass
         manager.disconnect(websocket, ws_thread_id)
 
 
