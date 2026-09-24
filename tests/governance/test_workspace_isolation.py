@@ -87,9 +87,12 @@ class _FakeConnWriter:
             })
             return _FakeCur(self._db, sql, p, self._log)
         if sql.startswith("DELETE FROM memories"):
-            ws = p[0]
+            tenant, ws = p[0], p[1]
             before = len(self._db["memories"])
-            self._db["memories"] = [m for m in self._db["memories"] if m["user_id"] != ws]
+            self._db["memories"] = [
+                m for m in self._db["memories"]
+                if not (m["tenant_id"] == tenant and m["user_id"] == ws)
+            ]
             cur = _FakeCur(self._db, sql, p, self._log)
             cur.rowcount = before - len(self._db["memories"])
             return cur
@@ -232,6 +235,18 @@ async def test_memory_no_cross_contamination(patch_embed):
     res_a = await mb.recall_typed(pool, "wsA", "职业", k=3, tenant_id="tenantA")
     assert all("工程师" not in r for r in res_a)
     assert all("财务" not in r for r in res_b)
+
+
+async def test_memory_cross_tenant_same_workspace_isolated(patch_embed):
+    pool = _FakePool()
+    await mb.remember_fact(pool, "ws-shared", "租户A私有事实", tenant_id="tenantA")
+    await mb.remember_fact(pool, "ws-shared", "租户B私有事实", tenant_id="tenantB")
+    res_a = await mb.recall_typed(pool, "ws-shared", "事实", k=10, tenant_id="tenantA")
+    res_b = await mb.recall_typed(pool, "ws-shared", "事实", k=10, tenant_id="tenantB")
+    assert any("租户A" in r for r in res_a)
+    assert all("租户B" not in r for r in res_a)
+    assert any("租户B" in r for r in res_b)
+    assert all("租户A" not in r for r in res_b)
 
 
 async def test_memory_default_space_isolated(patch_embed):
