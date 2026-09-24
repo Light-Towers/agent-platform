@@ -83,20 +83,13 @@ async def recall(pool, workspace_id: str, question: str, k: int = 3, tenant_id: 
     # ADR-0004 阶段3：总开关由 SEMANTIC_MEMORY_TYPED 控制（与内核 typed 语义统一）。
     # 开启 → 走内核 typed 加权/平权召回（仍用 app psycopg 池，遵守 ADR-0003）；
     # 关闭或内存模式 → 退化内核后端平权召回（pool=None 由内核自建池）。
-    if pool is not None and semantic_memory_typed_enabled():
+    if pool is not None:
         try:
             return await _mb.recall_typed(pool, workspace_id, question, k=k, tenant_id=tenant_id)
         except Exception:
             logger.exception("类型感知召回失败，降级内核/空")
-    # 降级路径：内核后端（pool=None，内核自建 asyncpg 池）
-    backend = _mb.get_default_backend()
-    if backend is None:
-        return []
-    try:
-        return await backend.recall(pool=None, user_id=workspace_id, question=question, k=k)
-    except Exception:
-        logger.exception("长期记忆召回失败，降级为空")
-        return []
+    # 无 pool 时没有持久化记忆；DB 模式统一经 tenant-scoped typed PG 路径。
+    return []
 
 
 async def remember(
@@ -127,7 +120,7 @@ async def remember(
             logger.debug("内存模式：跳过结构化记忆落库")
         return
     # 退化路径：整条原文
-    if pool is not None and semantic_memory_typed_enabled():
+    if pool is not None:
         # ADR-0004 阶段3：typed 开关开启时，原文也落入 typed 表（semantic 类型），
         # 保证下一轮 typed recall 能命中（D1 抽取未开启时仍可用整条记忆）。
         try:
@@ -138,11 +131,7 @@ async def remember(
         except Exception:
             logger.exception("typed 退化写入失败，跳过")
         return
-    # 旧行为：内核后端平权存原文（内存模式或 typed 关闭）
-    backend = _mb.get_default_backend()
-    if backend is None:
-        return
-    backend.remember(pool=None, user_id=workspace_id, content=content)
+    # 无 pool 时没有持久化记忆；DB 模式统一经 tenant-scoped typed PG 路径。
 
 
 # ADR-0004 阶段3：巩固/遗忘调度钩子（typed 闭环最后一块）
