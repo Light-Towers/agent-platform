@@ -216,33 +216,40 @@ async def upload_files(
             shutil.copyfileobj(file.file, file_buffer)
         logger.info(f"[{task_id}] 文件已保存至本地，路径：{local_file_abs_path}")
 
-        # 6. 将本地文件上传至MinIO对象存储，做持久化保存
-        # 从统一配置获取MinIO的PDF存储目录配置
+        # 6. 将本地文件上传至MinIO对象存储，做持久化保存（P2-7: retry + fail-fast）
+        # 策略：重试 2 次（1s/2s 退避）后仍失败则拒绝整个上传（避免孤儿处理数据无源可溯）。
         minio_pdf_base_dir = settings.minio_pdf_dir  # 缺省值：pdf_files（见 knowledge_service.core.config）
         # 构建MinIO中的文件对象名：配置目录/YYYYMMDD/文件名（按日期分层，和本地一致）
         minio_object_name = f"{minio_pdf_base_dir}/{datetime.now().strftime('%Y%m%d')}/{safe_filename}"
-        try:
-            # 获取MinIO客户端实例
-            minio_client = get_minio_client()
-            if minio_client is None:
-                # MinIO客户端获取失败，抛出500服务异常
-                raise HTTPException(
-                    status_code=500, detail="MinIO service connection failed, please check MinIO config"
-                )
-            # 从统一配置获取MinIO的桶名配置
-            minio_bucket_name = settings.minio_bucket_name  # 缺省值：kb-import-bucket（见 knowledge_service.core.config）
-
-            # 本地文件上传至MinIO（同名文件会自动覆盖，保证文件最新）
-            minio_client.fput_object(
-                bucket_name=minio_bucket_name,
-                object_name=minio_object_name,
-                file_path=local_file_abs_path,
-                content_type=file.content_type,  # 传递文件原始MIME类型
+        minio_client = get_minio_client()
+        if minio_client is None:
+            raise HTTPException(
+                status_code=500, detail="MinIO service connection failed, please check MinIO config"
             )
-            logger.info(f"[{task_id}] 文件已成功上传至MinIO，桶名：{minio_bucket_name}，对象名：{minio_object_name}")
-        except Exception as e:
-            # MinIO上传失败，记录警告日志（不中断后续流程，本地文件仍可继续处理）
-            logger.warning(f"[{task_id}] 文件上传MinIO失败，将继续执行本地处理流程，异常信息：{str(e)}", exc_info=True)
+        minio_bucket_name = settings.minio_bucket_name  # 缺省值：kb-import-bucket
+
+        _MINIO_RETRIES = 2
+        for attempt in range(_MINIO_RETRIES + 1):
+            try:
+                minio_client.fput_object(
+                    bucket_name=minio_bucket_name,
+                    object_name=minio_object_name,
+                    file_path=local_file_abs_path,
+                    content_type=file.content_type,
+                )
+                logger.info(f"[{task_id}] 文件已成功上传至MinIO，桶名：{minio_bucket_name}，对象名：{minio_object_name}")
+                break
+            except Exception as e:
+                if attempt < _MINIO_RETRIES:
+                    import time
+                    time.sleep(1 << attempt)  # 1s, 2s
+                    logger.warning(f"[{task_id}] MinIO上传第{attempt+1}次失败，重试中: {e}")
+                else:
+                    logger.error(f"[{task_id}] MinIO上传失败（已重试{_MINIO_RETRIES}次），拒绝本次导入", exc_info=True)
+                    raise HTTPException(
+                        status_code=502,
+                        detail=f"Object storage unavailable: {type(e).__name__}"
+                    ) from e
 
         # 7. 标记「文件上传」阶段为「已完成」，前端轮询可查
         add_done_task(task_id, "upload_file")

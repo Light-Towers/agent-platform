@@ -94,7 +94,7 @@ DATABASE_URL= uvicorn agent_server.main:app --port 8000  # 零依赖冒烟
 
 ## 技术债追踪
 
-> D1-D10 **非全部闭合**（2026-09-24 复核更正）：D2/D3/D6 已完成，D7 已反转为全局豁免（见审计 P0-4），D1/D4/D5/D8 为 Low 优先级**跳过项（未闭合）**。追踪文档：
+> D1-D10 **非全部闭合**（2026-09-24 复核更正）：D2/D3/D6/D9/D10 已完成，D7 门禁已恢复启用 + 存量烧除中（见审计 P0-4 ratchet），D1/D4/D5/D8 为 Low 优先级**跳过项（未闭合）**。追踪文档：
 > - `docs/plans/plan-tech-debt-followup-2026-09-22.md` — D1-D10 完整追踪（D2/D3/D6 已标记完成）
 > - `docs/plans/tech-debt-multi-agent-2026-09-23.md` — 多 Agent 缺陷 P0/P1/C/B 修复记录（全部已修/豁免）
 > - `docs/plans/skill-consolidation-inventory.md` — Skill 收敛 P0-P5 状态（G1-G6 全部 ✅）

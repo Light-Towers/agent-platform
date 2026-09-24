@@ -6,7 +6,7 @@ import asyncio
 
 import pytest
 
-from agent_runtime.singleflight import singleflight
+from agent_runtime.singleflight import _cleanup, _inflight_results, _locks, _refs, singleflight
 
 
 @pytest.mark.asyncio
@@ -66,3 +66,57 @@ async def test_singleflight_exception_propagates():
 
     with pytest.raises(ValueError, match="boom"):
         await singleflight("err", failing)
+
+
+@pytest.mark.asyncio
+async def test_cleanup_skipped_when_refs_positive():
+    """P2-2 回归：_refs>0 时 _cleanup 不得删除 lock/result。"""
+    key = "race_test"
+    lock = asyncio.Lock()
+    _locks[key] = lock
+    _refs[key] = 2  # 模拟还有等待者
+    _inflight_results[key] = "cached"
+
+    # 调用 cleanup，应因 refcount>0 而跳过
+    _cleanup(key, lock)
+    assert key in _locks, "_cleanup 不应在 refs>0 时删除 lock"
+    assert key in _inflight_results
+
+    # 清理测试状态
+    _locks.pop(key, None)
+    _refs.pop(key, None)
+    _inflight_results.pop(key, None)
+
+
+@pytest.mark.asyncio
+async def test_cleanup_skipped_on_lock_identity_mismatch():
+    """P2-2 回归：lock 已被替换时，旧 callback 不得删除新 lock。"""
+    key = "mismatch_test"
+    old_lock = asyncio.Lock()
+    new_lock = asyncio.Lock()
+    _locks[key] = new_lock  # 已被替换
+    _refs[key] = 0
+    _inflight_results[key] = "new_result"
+
+    _cleanup(key, old_lock)  # 传入旧的 lock对象
+    assert key in _locks, "_cleanup 不应删除身份不匹配的 lock"
+    assert _locks[key] is new_lock
+
+    # 清理
+    _locks.pop(key, None)
+    _refs.pop(key, None)
+    _inflight_results.pop(key, None)
+
+
+@pytest.mark.asyncio
+async def test_singleflight_refcount_after_completion():
+    """singleflight 正常完成后 refs 应归零，允许后续 cleanup。"""
+    key = "ref_count_test"
+
+    async def fn():
+        return 42
+
+    result = await singleflight(key, fn)
+    assert result == 42
+    # fn 完成后 refs 应已减到 0
+    assert _refs.get(key, 0) == 0
