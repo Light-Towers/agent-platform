@@ -16,6 +16,11 @@
 
 Agent Platform 是一个基于 **LangGraph Supervisor 模式** 的统一智能体平台，将联网搜索、本地知识库（RAG）、Text-to-SQL、外部工具调用（MCP）四条能力链路统一编排在一个单进程多节点架构中。平台在设计上针对生产环境常见缺陷模式（懒加载竞态、降级不复位、会话劫持、微服务 SSE 聚合等）逐一设防，并在 Phase 2 引入会话并发协调、持久化准入控制、会话回退、分布式追踪、MCP 协议支持五项运行时增强能力。
 
+本仓库为 **monorepo**，下文主要描述的 `agent_server` 只是平台能力的**默认参考宿主**（另有 `agent_federation` 联邦网关、`exhibition-agent`、`kefu-service`、`nl2sql-service`、`knowledge-service` 共 6 个应用，均基于同一套 `packages/agent-core` 内核与 `packages/agent-runtime` 中间件，完整分层与依赖契约见 `ARCHITECTURE.md`）。平台演进采用两条并行主线：
+
+- **Plan-F（单 Runtime 多 Planner）**：`agent-runtime` 承载运行时中间件，Planner 策略可插拔（`DeterministicPlanner` / `AgenticPlanner`），不统一 Agent 只统一 Runtime。
+- **V3 企业执行平台（代码已接线，验收进行中）**：执行链路升级为 `Admission → Scheduler Queue → Dispatch → Planner → Execute → Forensic/CostGov`，新增 ExecutionScheduler / ExecutionStatus / AwaitableTask / Control Plane / Cost Governance / Forensic / SchedulerReaper。**目前 `scheduler_enabled` 默认 `False`**（渐进式开启，端到端双实例故障转移验收尚未完成，详见路线图与 `AGENTS.md` V3 口径，不得当作已上线能力）。
+
 ### 核心设计原则
 
 | 原则 | 实现 |
@@ -68,6 +73,24 @@ Agent Platform 是一个基于 **LangGraph Supervisor 模式** 的统一智能�
 - **MCP Client**（`packages/agent-runtime/agent_runtime/mcp_client.py` + `applications/agent_server/subagents/mcp.py`）：多 MCP server 连接管理（stdio + SSE transport），工具白名单校验，per-server 独立熔断器隔离故障域，调用审计
 - **MCP 工具自动注册**（`packages/agent-runtime/agent_runtime/skills/mcp.py`）：MCP server 工具自动编译为 `SkillKind.REMOTE` Skill 注册到 SkillRegistry，Planner 经统一 `discover()` / `delegate()` 入口调用
 - **沙箱代码执行**（`packages/agent-runtime/agent_runtime/sandbox.py` + `agent_runtime/skills/sandbox.py`）：Docker 容器隔离执行用户代码（`--network=none --read-only --memory=512m --user=nobody`），Docker 不可用时降级 subprocess。注册为 `code_execution` Skill，Planner 启发式路由自动识别代码执行意图
+
+### Plan-F — 单 Runtime 多 Planner
+
+- **运行时中间件层**（`packages/agent-runtime/`）：从 `agent_server/infra/` 迁入的 admission / coordinator / cache / circuit_breaker / revert / mcp_client / otel / tracing / db 等中间件，零依赖具体应用（依赖方向单向：`application → agent-runtime → agent-core`）
+- **Planner 协议 + 组合治理**（`agent_runtime/planner/protocol.py`）：`PlannerRuntime.skill_guard` 提供 max_skill_depth / max_steps / 循环检测（P5-1 语义指纹），仅约束 agentic 组合路径
+- **可插拔 Planner**：`DeterministicPlanner`（`applications/agent_server/planners/deterministic.py`）与 `AgenticPlanner`（`applications/agent_federation/planners/agentic.py`）共享同一 `StreamEvent` 契约与 `ThreadState` checkpoint 状态格式
+- **Skill 体系**（`agent_runtime/skills/`）：Function/Agent/Remote/Workflow 四型 `SkillKind` + MCP/Sandbox 特化注册，`SkillRegistry` 统一 `discover()` / `delegate()` 入口
+
+### V3 — 企业执行平台（代码已接线，验收进行中）
+
+> 本区块能力均已实现并可经配置开启，但 **`scheduler_enabled` 默认 `False`**（见「配置」章节）；端到端双实例物理故障转移验收未完成，具体缺口清单见 [`docs/TODO.md`](docs/TODO.md) 第 2 节，不得当作已上线能力对外声明。
+
+- **ExecutionScheduler**（`packages/agent-runtime/agent_runtime/execution_scheduler.py`）：PG 队列 + `FOR UPDATE SKIP LOCKED` 实现跨实例并发不重不丢；`submit` 实际入队 + `claim_token` fencing（P0-1 并发门控已修）
+- **ExecutionStatus 状态机**（`execution_status.py`）：PENDING / RUNNING / WAITING / WAITING_EXTERNAL / WAITING_HUMAN / PAUSED / CANCEL_REQUESTED / CANCELLED / SUCCEEDED / FAILED 十态与合法转换矩阵，非法转换拒绝
+- **AwaitableTask 挂起 + 回调恢复**（`awaitable_task.py` + `awaitable_task_pg.py` + `applications/agent_server/api/callback.py`）：执行链在外部异步任务处可挂起，外部系统回调 `POST /api/callback/{task_id}` 后从 checkpoint 恢复注入结果继续执行（幂等，重复回调 no-op）
+- **Control Plane HTTP API**（`control_plane.py` + `applications/agent_server/api/control.py`）：`/api/executions/{id}` 提供 inspect/pause/resume/cancel/retry/terminate 六个操作，非法状态转换返 409
+- **Cost Governance**（`cost_governance.py`）：按 `budget_limit_requests/tokens/cost` + `budget_window_seconds` 滑动窗口计量，超限返回 429（`cost_governance_enabled` 默认 `False`）
+- **ForensicContext + SchedulerReaper**（`forensic.py` + lease-based 回收）：执行现场取证快照 + 本地任务租约过期后的孤儿回收
 
 ---
 
@@ -137,6 +160,26 @@ flowchart LR
     P5 -- "mcp_node" --> Supervisor2["Supervisor"]
 
     style Phase2 fill:#e8f5e9,stroke:#4caf50
+```
+
+### V3 执行链路（`scheduler_enabled=True` 时生效）
+
+> 默认 `False`（上方 Phase 2 链路为当前实际运行路径）；下方链路代码已接线，但端到端双实例物理故障转移验收未完成，见「概述」与 [`docs/TODO.md`](docs/TODO.md) 第 2 节。
+
+```mermaid
+flowchart LR
+    A["Admission<br/>限流/配额"] --> B["Scheduler Queue<br/>PG 队列 + FOR UPDATE SKIP LOCKED<br/>跨实例并发不重不丢"]
+    B --> C["Dispatch<br/>claim_token fencing"]
+    C --> D["Planner<br/>Deterministic / Agentic"]
+    D --> E["Execute<br/>ExecutionGraph + Checkpoint"]
+    E --> F["Forensic / CostGov<br/>取证快照 + 预算计量"]
+    E -- "外部异步任务挂起" --> G["AwaitableTask"]
+    G -- "POST /api/callback/{id}" --> E
+    H["Control Plane<br/>inspect/pause/resume/cancel/retry/terminate"] -.-> E
+
+    style B fill:#fff3e0,stroke:#ff9800
+    style G fill:#fff3e0,stroke:#ff9800
+    style H fill:#fff3e0,stroke:#ff9800
 ```
 
 ---
@@ -264,6 +307,34 @@ curl http://127.0.0.1:8000/health
 }
 ```
 
+> 当前 `/health` **不上报 V3 组件状态**（scheduler / control_plane / cost_governance / forensic），已登记为待办，见 [`docs/TODO.md`](docs/TODO.md)。
+
+### V3 Control Plane API（`scheduler_enabled=True` 时生效）
+
+```bash
+# 查看执行快照
+curl http://127.0.0.1:8000/api/executions/{execution_id}
+
+# 暂停 / 恢复 / 取消 / 重试 / 强制终止（POST，非法状态转换返 409）
+curl -X POST http://127.0.0.1:8000/api/executions/{execution_id}/pause
+curl -X POST http://127.0.0.1:8000/api/executions/{execution_id}/resume
+curl -X POST http://127.0.0.1:8000/api/executions/{execution_id}/cancel
+curl -X POST http://127.0.0.1:8000/api/executions/{execution_id}/retry
+curl -X POST http://127.0.0.1:8000/api/executions/{execution_id}/terminate
+```
+
+`control plane not enabled (scheduler disabled)` 时报 503（`scheduler_enabled=False` 默认情形）。
+
+### V3 Callback API（AwaitableTask 外部回调）
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/callback/{task_id} \
+  -H "Content-Type: application/json" \
+  -d '{"result": {"approved": true}}'
+```
+
+外部异步任务完成后回调，标记 AwaitableTask 为 COMPLETED 并从 checkpoint 恢复注入结果继续执行。幂等：同一 `task_id` 重复回调不会重复 resume（任务已终态则 no-op）。
+
 ---
 
 ## 配置
@@ -319,6 +390,34 @@ curl http://127.0.0.1:8000/health
 | `BREAKER_FAILURE_THRESHOLD` | `3` | 熔断器连续失败阈值（触发熔断） |
 | `BREAKER_RECOVERY_SECONDS` | `30` | 熔断器半开恢复等待（秒） |
 
+### Plan-F 配置
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `MAX_SKILL_DEPTH` | `4` | `PlannerRuntime.skill_guard` 嵌套深度上限 |
+| `MAX_STEPS` | `20` | 单次执行步数上限 |
+| `ENABLE_LOOP_FINGERPRINT` | `false` | P5-1 语义循环指纹（skill + 归一化 args 重复拒绝） |
+| `MAX_EXECUTION_SECONDS` | `60` | 单次 execution wall-clock 上限（0/None 不启用） |
+| `RUNTIME_MODE` | `local` | `local`（内存）/ `single_node`（PG 可选）/ `distributed`（PG 必须，fail-fast） |
+| `CONTEXT_BUDGET_TOOL_RESULTS_RATIO` | `0.35` | 上下文预算中 tool_results 层占比 |
+| `TOOL_RESULT_MAX_TOKENS` | `8192` | 单条工具结果超此阈值则外置 + 截断视图 |
+| `KNOWLEDGE_SERVICE_URL` / `NL2SQL_SERVICE_URL` / `KEFU_SERVICE_URL` / `EXHIBITION_SERVICE_URL` | `""` | 远程子服务端点（空 = 不注册对应 Remote Skill） |
+| `CORS_ALLOW_ORIGINS` | `""` | 前端来源白名单（逗号分隔），为空时默认 `http://127.0.0.1:5173` |
+
+### V3 执行平台配置（`applications/agent_server/config.py`）
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `SCHEDULER_ENABLED` | `false` | ExecutionScheduler 开关（opt-in，未端到端验收前不得生产开启，见「概述」/`AGENTS.md` V3 口径） |
+| `SCHEDULER_MAX_CONCURRENT` | `10` | 全局并发上限 |
+| `SCHEDULER_MAX_CONCURRENT_PER_TENANT` | `5` | 每租户并发上限 |
+| `SCHEDULER_QUEUE_CAPACITY` | `1000` | 调度队列容量 |
+| `COST_GOVERNANCE_ENABLED` | `false` | 成本治理开关（opt-in），启用后请求路径加 budget check/record，超限 429 |
+| `BUDGET_LIMIT_REQUESTS` | `0` | 时间窗口内请求数上限（0 = 不限制） |
+| `BUDGET_LIMIT_TOKENS` | `0` | 时间窗口内 token 数上限 |
+| `BUDGET_LIMIT_COST` | `0.0` | 时间窗口内成本上限 |
+| `BUDGET_WINDOW_SECONDS` | `3600` | 预算滑动窗口长度（秒） |
+
 完整变量见 [`.env.example`](.env.example)。
 
 ---
@@ -371,7 +470,14 @@ applications/agent_server/
 ├── schemas.py             # API Pydantic 契约（复用 shared-schemas，QueryRequest 经 AliasChoices 双写兼容 question/thread_id；HealthResponse 已对齐联邦契约，无需改动）
 ├── api/
 │   ├── auth.py            # 认证 + 会话防劫持
-│   └── routes.py          # /query /import /sql/train /session/revert /health
+│   ├── routes.py          # 聚合入口（挂载下列 router）
+│   ├── query_router.py    # /query（SSE 流式）
+│   ├── import_router.py   # /import 知识库导入
+│   ├── sql_router.py      # /sql/train
+│   ├── session_router.py  # /session/revert /history
+│   ├── health_router.py   # /health
+│   ├── callback.py        # POST /api/callback/{task_id}（V3 AwaitableTask 外部回调）
+│   └── control.py         # /api/executions/{id}（V3 Control Plane：inspect/pause/resume/cancel/retry/terminate）
 ├── agent/
 │   ├── graph.py           # Supervisor 图（route → capability → synthesize；Phase 3 起包装为 general_qa Workflow Skill）
 │   ├── router.py          # LLM 结构化路由 + 启发式兜底
@@ -419,6 +525,11 @@ packages/agent-core/         # 零依赖运行时内核：tracing / guardrails /
 packages/agent-runtime/      # 运行时中间件（admission/coordinator/cache/circuit_breaker/revert/mcp/otel/tracing/db）
                              #   + planner/（Planner 协议 + PlannerRuntime.skill_guard 组合治理）
                              #   + skills/（SkillRegistry + Function/Agent/Remote/Workflow 四执行器）
+                             #   + V3 执行平台（execution_scheduler / execution_status / awaitable_task /
+                             #     control_plane / cost_governance / forensic / human_task / effect_contract /
+                             #     execution_recovery / state_migration / payload_externalization，均未完全接线，
+                             #     详见 docs/TODO.md 第 3 节）
+                             #   + memory 体系（episodic/semantic/procedural/working/decay/recall）+ sandbox（双后端代码执行）
 packages/shared-schemas/     # agent_federation 联邦 4 服务共享的 Pydantic 契约（QueryResponse / ThreadState 等）
 ```
 
@@ -434,6 +545,9 @@ applications/nl2sql-service/  # Text-to-SQL 数据分析通用服务（元知识
                            #   —— 原 wenda-adapter（SSE→JSON 适配层）已于 2026-08 退役，
                            #      网关直连本服务 /api/query（nl2sql-service 默认 :8000）
 applications/knowledge-service/ # 通用知识库服务：RAG 导入 + 多路检索问答（:8900，Metadata 参数化 + 生命周期 + 多租户 ACL）
+applications/exhibition-agent/ # 会展行业 AI Agent（skill_loader + warehouse REST 集成）
+                           #   —— uvicorn exhibition_agent.skill_loader.app:app；含 foundation/skill_router.py
+                           #      （Skill→Tool 统一路由，已实现未接线，见 docs/TODO.md 第 3 节）
 ```
 
 ### 测试与评测
@@ -476,89 +590,12 @@ tests/                     # 单元测试（针对 agent_server 平台；含 pla
 
 - [x] **Phase 1**：Supervisor + Search + RAG + Text-to-SQL + 记忆 + 缓存 + 熔断 + 评测门禁
 - [x] **Phase 2**：会话并发协调 + Durable Admission + 会话回退 + OTel 追踪 + MCP Client
+- [x] **Plan-F**：单 Runtime 多 Planner 架构收口（`agent-runtime` 中间件层 + 可插拔 Planner，详见 `docs/plans/plan-f-single-runtime-multi-planner.md`）
+- [x] **V3 Phase 2-4 + 3.4**：ExecutionScheduler（PG 队列）/ AwaitableTask（挂起+回调恢复）/ Control Plane HTTP API / Cost Governance / Forensic —— 代码已接线，`scheduler_enabled` 默认 `False` 渐进开启
+- [ ] **V3 验收未达**：端到端双实例物理故障转移尚未验证；Fencing / Effect Contract / Scheduler priority+fairness+backpressure 等 10 项缺口未闭合（见下）
+- [ ] **Phase 3 产品化补全（未开始）**：前端界面、检索/存储增强、会展 Agent 业务功能等
 
-### Phase 3 — 产品化补全（未开始）
-
-> 本节汇总当前仓库所有已识别但未落地的待办项，按来源分组；除标注「可直接开工」外，均遵循红线「所有代码优化/重构必须先制定方案」，动工前需先出独立方案文档。
-
-#### 3.1 前端界面（缺口最大项）
-
-现状盘点（本仓库未追踪任何 `package.json` / Vue / React 工程，`courses/zhanggui-wenda/data-agent-fronted` 仅为课程脚手架，本地未入库）：
-
-| 应用 | 当前形态 | 待办 |
-|------|---------|------|
-| `agent_server` | ❌ 无独立前端代码；`config.py` CORS 默认允许 `http://127.0.0.1:5173`（Vite 开发服务器），但仓库内无对应工程 | 需新建 SSE 流式对话控制台，复用 `/query`（SSE）+ `/history` + `/session/revert` 现有接口 |
-| `agent_federation` | ❌ 无前端；`skill-consolidation-inventory.md` 标注「保留 HTTP 壳（WS + 文件上传/下载）供前端直连」，但直连方尚无实现 | 需基于已就绪的 `serialize_stream_event` 统一 schema（见 CHANGELOG「WS 出口统一收尾」）做多 Agent 会话界面 |
-| `exhibition-agent` | 🟡 已有 `static/index.html`（235 行单文件暗色控制台，仅覆盖 skill 调试） | 需产品化；且依赖 3.3 `skill_router` 接线后才能展示统一门禁/route 拦截反馈 |
-| `kefu-service` | ❌ 无前端 | 需接入联邦 `/invoke`（Agent Protocol）的客服会话窗口 |
-| `nl2sql-service` | ❌ 无前端 | 需自建问答式 SQL 数据面板（查询构建 + 结果可视化）；课程脚手架仅作参考，不直接引入 |
-| `knowledge-service` | 🟡 已有 2 个静态页（`import_process/page/import.html` + `query_process/page/chat.html`），未组件化 | 需补：知识库列表 / 生命周期状态机可视化 / 多租户 ACL 管理页 |
-
-待办拆解（需独立方案）：
-- [ ] 前端技术栈选型（未定，需按 AGENTS.md「框架选型规则」评估成熟度，不预先绑定 Vue/React）
-- [ ] 各应用前端 ↔ 后端错误契约对齐审计：`{detail}` 语义码目前是前端要解析的形状，须先于 `plan-p2-unified-exception-handlers-2026-09-24.md` 的 D-2/D-4 后端收敛决策落地，避免后端改契约打破前端
-- [ ] 若引入前端工程，需同步补 CI 门禁（当前 `make lint`/pytest 仅覆盖 Python 侧，前端代码漂移将无人拦截）
-
-#### 3.2 V3 企业执行平台验收缺口
-
-来源：`docs/plans/plan-v3-execution-platform-final-architecture-2026-09-22.md` §6 缺口清单（架构真相源，非本 README 重复展开，此处仅索引优先级）：
-
-| 缺口 | 内容 | 优先级 |
-|------|------|--------|
-| 1 | 严格 Fencing Generation：fencing 边界需覆盖 5 类 durable write（checkpoint / execution status / external task receipt / side effect receipt / scheduler ownership），当前仅防 checkpoint stale write | High |
-| 2 | Effect Contract：`SideEffectStore` ≠ 语义契约，缺 delivery/retry/recover 分类 | High |
-| 3 | External Task + Receipt：未独立持久化，crash recovery 无法查询外部系统真实状态 | High |
-| 4 | Execution Scheduler：仅有 Admission 容量门控，缺 priority / fairness / backpressure / stuck / reschedule | High |
-| 5 | Durable Execution Status State Machine | High |
-| 6 | State Schema Version / Migration（V3-6 Layer B） | Medium |
-| 7 | Large Payload Externalization（V3-6 Layer B） | Medium |
-| 8 | Control Plane：底层数据/Replay 已有，缺 pause/resume/cancel/retry/requeue/recover/inspect/terminate 可操作面 | Medium |
-| 9 | Replay Forensic / Reproducibility：Trajectory 未记录 model/prompt/skill/policy version | Medium |
-| 10 | Skill Version / Lifecycle / Compatibility：Skill 热更新会破坏 Runtime Replay / Checkpoint Recovery / Workflow | Medium |
-
-- [ ] 端到端双实例物理故障转移验收：`scheduler_enabled` 默认 `False`（渐进式开启，见 AGENTS.md V3 口径），缺口 1~5 未闭合前不得翻转为已上线能力声明
-
-#### 3.3 未接线半成品转正（P1-7 已标注，同「未接线≠死代码」教训，禁止直接删除）
-
-- [ ] `human_task` / `execution_recovery` / `state_migration` / `payload_externalization`（`agent-runtime`，代码完整但主链路未接线）
-- [ ] `skill_router`（exhibition-agent）：已实现 Skill→Tool 统一路由 + scope 校验 + readiness 拦截，但当前各 Skill 内部直连 `WarehouseClient` 绕过门禁链；接线方向：`run_skill → route(skill_name, ctx, **params) → 执行`
-
-#### 3.4 会展 Agent 业务功能骨架 TODO
-
-来源：`docs/tech-debt/tech-debt-audit-2026-09-22.md`（约 15 处 `TODO(...)` 标记，均为未落地功能占位，非技术债）：
-
-- [ ] F1-D：Vault/KMS 凭证后端接入（`execution_context.py`）
-- [ ] F2：真实 LLM 连接接入（`model_router.py` / `data_egress.py`）——数据分级出域模型路由，需产品决策输入
-- [ ] F01：`enforce_scope_filter` 落地（`evaluation.py`）
-- [ ] F02：READY 数据源连接（`production_readiness_gate.py`）
-- [ ] F03：同具体性不同租户样本规则
-- [ ] nl2sql-service 通用化后填充具体端点（`skills/data_analysis/skill.py`）
-
-#### 3.5 技术债 Low 优先级跳过项（非阻塞，可随日常改动顺带处理）
-
-来源：`docs/plans/plan-tech-debt-followup-2026-09-22.md`（D2/D3/D6/D9/D10 已完成，不列此）：
-
-- [ ] D1：产品代码单字母变量改语义名（全仓散布，纯可读性，风险高于收益，仅随包内其它改动顺带）
-- [ ] D4：ruff `ignore` 存量基线逐包收窄（需逐条评估删除后是否仍违规）
-- [ ] D5：`agent_core` 历史溯源注释泛化改写（81 处中多数有档案价值，需人工逐条判断）
-- [ ] D7：裸 `except Exception:` 存量按 ratchet 基线逐文件烧除（门禁已常驻防新增，见 `plan-p0-4-blind-except-ratchet-2026-09-24.md`；不追求逐点清零）
-- [ ] D8：`zhanggui-zhiku/core/config.py` 评估迁移 pydantic-settings
-
-#### 3.6 待评估架构决策（未立项，动工前须先出方案，红线：禁止直接动手改代码）
-
-- [ ] `ExecutionContext` 是否迁移到 PyJWT + 标准 JWT（契约变更，需先审计下游消费者）
-- [ ] Milvus 与 pgvector 双向量库长期是否统一（当前 knowledge-service 用 Milvus，agent-core/agent-runtime 默认 pgvector，见 P1-6 双库现状说明）
-- [ ] U-1：`QueryRequest` 入站字段名（`query`/`question`、`session_id`/`thread_id`）双写兼容层能否移除（见「已知待拍板项」）
-
-#### 3.7 检索 / 存储增强（原 Phase 3 笼统列举项，现拆分明确）
-
-- [ ] LightRAG 式图谱增强检索
-- [ ] MySQL 业务库支持（当前仅 pgvector/PostgreSQL 单栈）
-- [ ] 多租户（当前仅 `TENANT_ID` 环境变量粗粒度区分，缺租户级配额/隔离/计费）
-
-#### 3.8 外部条件依赖项（非代码缺口）
-
-- [ ] agent_federation R1 漂移门禁真实基线（`eval/fed_latest.jsonl`）：本地开发环境无 LLM API key，无法生成；需在有 key 的环境执行一次 `uv run python -m agent_federation.eval.run_eval --baseline eval/fed_latest.jsonl` 锁定基线，之后 `--compare --fail-below` 才能作为 CI 门禁生效（比对逻辑本身已通过单测覆盖，无缺口）
+> **本节仅为阶段性摘要。** 完整待办清单（前端 6 应用现状盘点、V3 验收缺口 1~10、未接线半成品、会展骨架 TODO、技术债 Low 跳过项、待评估架构决策、检索/存储增强、外部条件依赖项）已拆分至独立文档：[**`docs/TODO.md`**](docs/TODO.md)。
 
 ---
 
