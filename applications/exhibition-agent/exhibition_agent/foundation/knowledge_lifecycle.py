@@ -10,48 +10,32 @@ PUBLISHED 是唯一可进入生产检索的状态。
   无 Citation 的知识型答案 → 拒绝作答
   每次状态变更写审计
 
-迁移来源：mingyang-warehouse/ontology/web/backend/knowledge_lifecycle.py（2026-09-22）
+P1-3: 核心状态契约已下沉到 shared_schemas.knowledge_lifecycle，
+本模块从 shared_schemas 重导出并提供审计 I/O 扩展。
 """
 
 import os
 from datetime import datetime, timezone
-from enum import Enum
 
-from ._audit_writer import append_audit_record, read_audit_log
+# 从 shared_schemas 重导出契约定义（保持 exhibition_agent 内部现有 import 路径兼容）
+from shared_schemas.knowledge_lifecycle import (  # noqa: F401 — re-export
+    KNOWLEDGE_STATUS,
+    REQUIRED_METADATA_FIELDS,
+    VALID_SCOPE_TYPES,
+    VALID_TRANSITIONS,
+)
+from shared_schemas.knowledge_lifecycle import validate_metadata as _validate_metadata
+
+from exhibition_agent.foundation._audit_writer import append_audit_record, read_audit_log
 
 _BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
 _DATA_DIR = os.path.join(_BACKEND_DIR, "data")
 _AUDIT_LOG_PATH = os.path.join(_DATA_DIR, "knowledge_lifecycle_audit.json")
 
-
-class KNOWLEDGE_STATUS(str, Enum):
-    DRAFT = "DRAFT"
-    REVIEWING = "REVIEWING"
-    PUBLISHED = "PUBLISHED"
-    EXPIRED = "EXPIRED"
-    REVOKED = "REVOKED"
-    SUPERSEDED = "SUPERSEDED"
-    UNKNOWN = "UNKNOWN"
-
-
-_VALID_TRANSITIONS = {
-    (KNOWLEDGE_STATUS.DRAFT, KNOWLEDGE_STATUS.REVIEWING),
-    (KNOWLEDGE_STATUS.REVIEWING, KNOWLEDGE_STATUS.PUBLISHED),
-    (KNOWLEDGE_STATUS.PUBLISHED, KNOWLEDGE_STATUS.EXPIRED),
-    (KNOWLEDGE_STATUS.PUBLISHED, KNOWLEDGE_STATUS.REVOKED),
-    (KNOWLEDGE_STATUS.PUBLISHED, KNOWLEDGE_STATUS.SUPERSEDED),
-}
-
-_REQUIRED_METADATA_FIELDS = [
-    "knowledge_id",
-    "tenant_id",
-    "scope_type",
-    "authority",
-    "effective_from",
-    "effective_to",
-]
-
-_VALID_SCOPE_TYPES = {"PUBLIC", "PRIVATE"}
+# 兼容别名（exhibition 内部其他模块可能引用 _VALID_TRANSITIONS / _REQUIRED_METADATA_FIELDS / _VALID_SCOPE_TYPES）
+_VALID_TRANSITIONS = VALID_TRANSITIONS
+_REQUIRED_METADATA_FIELDS = REQUIRED_METADATA_FIELDS
+_VALID_SCOPE_TYPES = VALID_SCOPE_TYPES
 
 
 def _now_iso() -> str:
@@ -94,31 +78,8 @@ class LifecycleStateMachine:
 
 
 def validate_metadata(meta: dict) -> tuple:
-    """
-    校验 Metadata 必备项。
-    返回 (ok: bool, errors: list)。
-    缺以下任一即失败（不得 PUBLISHED）：
-      knowledge_id / tenant_id / scope_type(PUBLIC|PRIVATE) /
-      exhibition_id 或 venue_id（至少一非空）/
-      authority / effective_from / effective_to
-    """
-    errors = []
-
-    for field in _REQUIRED_METADATA_FIELDS:
-        val = meta.get(field)
-        if val is None or (isinstance(val, str) and val.strip() == ""):
-            errors.append(f"缺必填字段: {field}")
-
-    scope_type = meta.get("scope_type")
-    if scope_type and scope_type not in _VALID_SCOPE_TYPES:
-        errors.append(f"scope_type 取值非法: {scope_type}，应为 PUBLIC 或 PRIVATE")
-
-    exhibition_id = meta.get("exhibition_id")
-    venue_id = meta.get("venue_id")
-    if not exhibition_id and not venue_id:
-        errors.append("exhibition_id 和 venue_id 至少需一个非空（用于推导具体性）")
-
-    return (len(errors) == 0, errors)
+    """保留本地版本供未迁移的 import 路径使用（委托到 shared_schemas 权威实现）。"""
+    return _validate_metadata(meta)
 
 
 def filter_published_for_retrieval(items: list) -> list:

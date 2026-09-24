@@ -34,7 +34,7 @@ from exhibition_agent.observability.otel import inject_traceparent, span
 
 logger = get_logger(__name__)
 
-_CONTRACT_VERSION = "1.2"
+_WAREHOUSE_API_VERSION = "1.2"  # Warehouse REST 接口版本（非联邦查询契约版本，勿与 shared_schemas.CONTRACT_VERSION 混淆）
 
 _MAX_RETRY_DELAY_MS = 5_000
 _RETRY_TOTAL_BUDGET_MS = 20_000
@@ -88,7 +88,7 @@ class WarehouseClient:
         base_url: str,
         *,
         timeout: float = 10.0,
-        contract_version: str = _CONTRACT_VERSION,
+        contract_version: str = _WAREHOUSE_API_VERSION,
         transport: httpx.AsyncBaseTransport | None = None,
         max_retries: int = 3,
         retry_base_delay_ms: int = 100,

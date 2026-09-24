@@ -24,7 +24,7 @@ from exhibition_agent.middleware.context_codec import decode_base64, decode_jwt
 
 EXECUTION_CONTEXT_HEADER: str = "X-Execution-Context"
 CONTRACT_VERSION_HEADER: str = "X-Contract-Version"
-CONTRACT_VERSION: str = "1.1"
+EXEC_CTX_VERSION: str = "1.1"  # ExecutionContext 规范版本（非联邦查询契约版本，勿与 shared_schemas.CONTRACT_VERSION 混淆）
 
 _RESOURCE_PATH_MARKERS: tuple[str, ...] = ("/exhibition/", "/venue/")
 _RESOURCE_SKILL_PREFIXES: tuple[str, ...] = ("exhibition.", "venue.")

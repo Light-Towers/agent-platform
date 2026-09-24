@@ -1,23 +1,22 @@
 """
 知识生命周期集成桥接（08+16 通用化）。
 
-复用 exhibition_agent.foundation.knowledge_lifecycle 状态机定义，
+复用 shared_schemas.knowledge_lifecycle 状态契约，
 为 knowledge-service 入库链路提供：
   - 入库前校验：metadata 必备项 + status 校验
   - 非 PUBLISHED 跳过生产入库（仅写审计）
   - PUBLISHED 前置校验：缺 authority/effective_from/effective_to 不得发布
 
-单向依赖：knowledge-service → exhibition-agent（monorepo sibling，无循环）。
+P1-3 修复：依赖从 exhibition_agent 下沉到 shared_schemas，消除跨应用横向 import。
 """
 
 from __future__ import annotations
 
 from typing import Optional
 
-# 复用 exhibition-agent 的状态机定义（迁移自 mingyang-warehouse）
-from exhibition_agent.foundation.knowledge_lifecycle import (  # noqa: E402
+from shared_schemas.knowledge_lifecycle import (
     KNOWLEDGE_STATUS,
-    LifecycleStateMachine,
+    VALID_TRANSITIONS,
     validate_metadata,
 )
 
@@ -67,18 +66,20 @@ def should_publish_to_production(state: dict) -> tuple[bool, str]:
 
 def transition_status(state: dict, to: str, actor: str = "system") -> dict:
     """
-    触发状态迁移（写审计 + 返回更新后 state）。
+    触发状态迁移（校验合法性 + 返回更新后 state）。
     非法迁移抛 ValueError。
+
+    审计留痕由上层业务实现（本函数仅做契约校验）。
     """
-    updated = LifecycleStateMachine.transition(
-        record={
-            "knowledge_id": state.get("knowledge_id", ""),
-            "status": state.get("status", "UNKNOWN"),
-        },
-        to=to,
-        actor=actor,
-    )
-    state["status"] = updated["status"]
+    frm = state.get("status", "UNKNOWN")
+    try:
+        s_from = KNOWLEDGE_STATUS(frm)
+        s_to = KNOWLEDGE_STATUS(to)
+    except ValueError:
+        raise ValueError(f"未知状态: {frm} 或 {to}") from None
+    if (s_from, s_to) not in VALID_TRANSITIONS:
+        raise ValueError(f"非法迁移: {frm} → {to}")
+    state["status"] = to
     return state
 
 
