@@ -223,6 +223,7 @@ async def query(
                 async for update in graph.astream(
                     {"messages": [("user", req.query)], "question": req.query,
                      "user_id": req.user_id, "workspace_id": req.workspace_id,
+                     "tenant_id": req.tenant_id or "default",
                      "iterations": 0},
                     config=config,
                     stream_mode="updates",
@@ -258,6 +259,7 @@ async def query(
                     question=req.query,
                     workspace_id=req.workspace_id,
                     user_id=req.user_id,
+                    tenant_id=req.tenant_id or "default",
                     messages=await _thread_persist.read_thread_messages(checkpointer, thread_id),
                     llm=planner_runtime.llm,
                     last_snapshot=last_snapshot,
