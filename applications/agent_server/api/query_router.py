@@ -250,7 +250,7 @@ async def query(
                         governed_memories, _gov_report = await governor.govern_memories(
                             query=req.query,
                             state=last_snapshot,
-                            tenant_id=req.workspace_id,
+                            tenant_id=req.tenant_id or "default",
                             user_id=req.user_id,
                         )
                     except Exception:
