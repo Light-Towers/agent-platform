@@ -10,6 +10,7 @@
 跨域（CORS）统一在 knowledge_service.main.create_app() 中配置，本路由不再单独处理。
 """
 
+import asyncio
 import os
 import shutil
 import uuid
@@ -241,8 +242,7 @@ async def upload_files(
                 break
             except Exception as e:
                 if attempt < _MINIO_RETRIES:
-                    import time
-                    time.sleep(1 << attempt)  # 1s, 2s
+                    await asyncio.sleep(1 << attempt)  # 1s, 2s
                     logger.warning(f"[{task_id}] MinIO上传第{attempt+1}次失败，重试中: {e}")
                 else:
                     logger.error(f"[{task_id}] MinIO上传失败（已重试{_MINIO_RETRIES}次），拒绝本次导入", exc_info=True)
