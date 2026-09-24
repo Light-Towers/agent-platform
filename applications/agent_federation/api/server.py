@@ -17,6 +17,7 @@ from shared_schemas import QueryRequest
 
 load_dotenv(find_dotenv())
 
+from agent_core.guardrails.app_factory import build_api_app
 from agent_core.logging import configure_logging, get_logger
 from agent_core.tracing import init_tracing, start_span
 
@@ -119,7 +120,7 @@ async def lifespan(app: FastAPI):
     await close_pool()
 
 
-app = FastAPI(title="agent_federation API", lifespan=lifespan)
+app = build_api_app(title="agent_federation API", lifespan=lifespan)
 
 output_dir = project_root / "output"
 output_dir.mkdir(exist_ok=True)

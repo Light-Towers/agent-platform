@@ -1,5 +1,6 @@
 """FastAPI server：nl2sql-service API 入口。"""
 
+from agent_core.guardrails.app_factory import build_api_app
 from fastapi import FastAPI, Request
 from shared_schemas import HealthResponse, HealthStatus
 
@@ -12,7 +13,7 @@ async def handle_health(http_request: Request) -> HealthResponse:
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="nl2sql-service", version="0.1.0", lifespan=lifespan)
+    app = build_api_app(title="nl2sql-service", version="0.1.0", lifespan=lifespan)
     app.include_router(router)
     app.get("/health", response_model=HealthResponse)(handle_health)
     return app

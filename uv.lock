@@ -89,6 +89,7 @@ tracing = [
     { name = "opentelemetry-sdk" },
 ]
 web = [
+    { name = "fastapi" },
     { name = "starlette" },
 ]
 
@@ -96,6 +97,7 @@ web = [
 requires-dist = [
     { name = "asyncpg", marker = "extra == 'memory'", specifier = ">=0.29" },
     { name = "asyncpg", marker = "extra == 'memory-pgvector'", specifier = ">=0.29" },
+    { name = "fastapi", marker = "extra == 'web'" },
     { name = "langchain-core", marker = "extra == 'langchain'" },
     { name = "langchain-openai", marker = "extra == 'llm-openai'" },
     { name = "openai-agents", marker = "extra == 'tools-mcp'" },

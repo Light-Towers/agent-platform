@@ -19,8 +19,9 @@ import hashlib
 from pathlib import Path
 from typing import Any
 
+from agent_core.guardrails.app_factory import build_api_app
 from agent_core.logging import get_logger
-from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi import Header, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field, ValidationError
 
@@ -50,7 +51,7 @@ from exhibition_agent.observability.trace import InMemoryTraceRecorder
 logger = get_logger(__name__)
 
 settings = Settings()
-app = FastAPI(title="exhibition-agent", version="0.1.0")
+app = build_api_app(title="exhibition-agent", version="0.1.0")
 _trace_recorder = InMemoryTraceRecorder()
 _metrics_registry = get_default_registry()
 _llm_obs_backend = get_llm_obs_backend(settings.llm_obs_backend)
