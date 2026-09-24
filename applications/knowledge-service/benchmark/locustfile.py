@@ -43,7 +43,7 @@ if _GOLDEN_PATH.exists():
                 for line in _f
                 if line.strip() and not line.strip().startswith("#")
             ]
-    except Exception:
+    except (OSError, ValueError):
         _QUERIES = []
 
 if not _QUERIES:

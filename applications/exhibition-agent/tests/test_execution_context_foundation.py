@@ -173,13 +173,10 @@ class TestDemoModeLabel:
 
 
 class TestServiceCredentialPlaceholder:
-    def test_get_service_credential_returns_placeholder(self):
-        cred = get_service_credential("warehouse")
-        assert isinstance(cred, ServiceCredential)
-        assert cred.system == "warehouse"
-        assert cred.credential_ref == "placeholder"
-        assert cred.permissions == []
-        assert cred.expires_at is None
+    def test_get_service_credential_fail_close(self):
+        # 审计 P1-8：凭证后端未就绪前必须 fail-close（不得返回 truthy 占位对象）。
+        with pytest.raises(NotImplementedError):
+            get_service_credential("warehouse")
 
     def test_service_credential_requires_system(self):
         with pytest.raises(ValueError, match="system"):

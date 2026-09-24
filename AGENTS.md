@@ -2,7 +2,7 @@
 
 > 统一生产级 Agent 平台，本仓库为 **monorepo**（根 + `packages/` 3 个共享包 + `applications/` 6 个应用工程，各含独立 `pyproject.toml`）。
 > **演进方向（Plan-F）**：双轨正收敛为「单 Runtime + 多 Planner」——共享 `agent-runtime/` 承载运行时中间件（admission/coordinator/checkpoint/tracing/cache/rate_limit 等），Planner 策略（deterministic/agentic）可插拔，不统一 Agent 只统一 Runtime。详见 `docs/plans/plan-f-single-runtime-multi-planner.md`。
-> **V3 企业执行平台（Phase 2-4 + 3.4 已完成）**：执行链路升级为 `Admission → Scheduler Queue → Dispatch → Planner → Execute → Forensic/CostGov`；新增 ExecutionScheduler（PG 队列 + `FOR UPDATE SKIP LOCKED` 跨实例并发）/ ExecutionStatus 状态机 / AwaitableTask（挂起 + 回调恢复）/ ControlPlane HTTP API / CostGovernance / ForensicContext / SchedulerReaper（lease-based 回收）。架构真相源：`docs/plans/plan-enterprise-platform-skeleton-2026-09-23.md` + `docs/plans/plan-v3-execution-platform-final-architecture-2026-09-22.md`。
+> **V3 企业执行平台（Phase 2-4 + 3.4 已接线；按项目自定 P0 五项验收标准尚未全闭环，详见 `docs/plans/arch-audit-2026-09-24.md` §6）**：主执行链路为 `Admission → Planner → Execute → Forensic/CostGov`；`ExecutionScheduler`（`scheduler_enabled` 默认 False）当前为**旁路记账 + 独立控制面**，`submit` 仅校验队列容量、不做并发门控（并非执行门控链路的一环，见审计 P0-1）；已接线模块：ExecutionScheduler（PG 队列 + `FOR UPDATE SKIP LOCKED`）/ ExecutionStatus 状态机 / AwaitableTask（挂起 + 回调恢复）/ ControlPlane HTTP API / CostGovernance / ForensicContext / SchedulerReaper（lease-based 回收）；**未接线半成品**：human_task / execution_recovery / state_migration / payload_externalization（见审计 P1-7）。架构真相源：`docs/plans/plan-enterprise-platform-skeleton-2026-09-23.md` + `docs/plans/plan-v3-execution-platform-final-architecture-2026-09-22.md`。
 > 各包经 `agent-core` / `shared-schemas` 共享内核与契约。
 > 详细人类阅读指南见 `README.md`（含完整目录结构），本文件面向 AI agent，仅列要点。
 
@@ -82,7 +82,7 @@ DATABASE_URL= uvicorn agent_server.main:app --port 8000  # 零依赖冒烟
 
 ## 技术债追踪
 
-> D1-D10 全部闭合（2026-09-23）。追踪文档：
+> D1-D10 **非全部闭合**（2026-09-24 复核更正）：D2/D3/D6 已完成，D7 已反转为全局豁免（见审计 P0-4），D1/D4/D5/D8 为 Low 优先级**跳过项（未闭合）**。追踪文档：
 > - `docs/plans/plan-tech-debt-followup-2026-09-22.md` — D1-D10 完整追踪（D2/D3/D6 已标记完成）
 > - `docs/plans/tech-debt-multi-agent-2026-09-23.md` — 多 Agent 缺陷 P0/P1/C/B 修复记录（全部已修/豁免）
 > - `docs/plans/skill-consolidation-inventory.md` — Skill 收敛 P0-P5 状态（G1-G6 全部 ✅）

@@ -8,7 +8,8 @@
 - 公平性：per-tenant 已运行数少者优先；
 - 槽位约束：全局 max_concurrent + per-tenant max_concurrent_per_tenant；
 - Backpressure：队列满时 submit 抛 QueueFull；
-- ExecutionScheduler 门面：submit / dispatch_next / complete / queue_depth。
+- try_start（P0-1 方案 B）：请求驱动认领，全局/per-tenant 槽位门控、只认领指定 id、非 QUEUED/不存在返回 None；
+- ExecutionScheduler 门面：submit / dispatch_next / try_start / complete / queue_depth。
 """
 
 import pytest
@@ -275,3 +276,100 @@ async def test_scheduler_cancel():
     await scheduler.submit(_req("e1"))
     assert await scheduler.cancel("e1") is True
     assert await scheduler.queue_depth() == 0
+
+
+# ===== try_start（P0-1 方案 B：请求驱动认领）=====
+
+async def test_try_start_claims_queued():
+    """空闲时认领指定 execution_id → 返回该 req、状态 RUNNING、worker_id 非空。"""
+    store = InMemorySchedulerStore()
+    config = SchedulerConfig(max_concurrent=2, max_concurrent_per_tenant=2)
+    await store.enqueue(_req("e1", tenant_id="ta"))
+
+    got = await store.try_start("e1", config)
+    assert got is not None
+    assert got.execution_id == "e1"
+    assert got.status is QueueStatus.RUNNING
+    assert got.worker_id  # 非空
+    assert await store.count_running() == 1
+
+
+async def test_try_start_global_limit_blocks():
+    """全局 running_total >= max_concurrent → 返回 None 且不改状态（仍 QUEUED）。"""
+    store = InMemorySchedulerStore()
+    config = SchedulerConfig(max_concurrent=1, max_concurrent_per_tenant=1)
+    await store.enqueue(_req("e1", tenant_id="ta"))
+    await store.enqueue(_req("e2", tenant_id="tb"))
+
+    assert await store.try_start("e1", config) is not None
+    # 全局已满（e1 占唯一槽位），e2 认领失败
+    assert await store.try_start("e2", config) is None
+    r2 = await store.get("e2")
+    assert r2 is not None
+    assert r2.status is QueueStatus.QUEUED
+
+
+async def test_try_start_per_tenant_limit_blocks():
+    """单租户 >= max_concurrent_per_tenant（全局未满）→ 返回 None。"""
+    store = InMemorySchedulerStore()
+    config = SchedulerConfig(max_concurrent=10, max_concurrent_per_tenant=1)
+    await store.enqueue(_req("a1", tenant_id="ta"))
+    await store.enqueue(_req("a2", tenant_id="ta"))
+
+    assert await store.try_start("a1", config) is not None
+    # ta 已占 1 槽（per-tenant 上限），a2 被挡；全局仍有富余
+    assert await store.try_start("a2", config) is None
+    assert await store.count_running() == 1
+
+
+async def test_try_start_non_queued_or_missing():
+    """目标行非 QUEUED（已认领/终态）或不存在 → 返回 None。"""
+    store = InMemorySchedulerStore()
+    config = SchedulerConfig(max_concurrent=5, max_concurrent_per_tenant=5)
+    await store.enqueue(_req("e1"))
+
+    # 不存在
+    assert await store.try_start("nope", config) is None
+    # 首次认领成功 → RUNNING
+    assert await store.try_start("e1", config) is not None
+    # 已 RUNNING（非 QUEUED）→ 再认领返回 None
+    assert await store.try_start("e1", config) is None
+
+
+async def test_try_start_only_claims_specified_not_head():
+    """与 dequeue 不同：try_start 只认领指定 id，不会抢队首他人任务。"""
+    store = InMemorySchedulerStore()
+    config = SchedulerConfig(max_concurrent=5, max_concurrent_per_tenant=5)
+    # e_head created_at 最早（若按队首拉取会先选它），e_target 在后
+    await store.enqueue(_req("e_head", created_at=1.0))
+    await store.enqueue(_req("e_target", created_at=2.0))
+
+    got = await store.try_start("e_target", config)
+    assert got is not None
+    assert got.execution_id == "e_target"
+    # e_head 仍是 QUEUED（未被误标）
+    head = await store.get("e_head")
+    assert head is not None
+    assert head.status is QueueStatus.QUEUED
+
+
+async def test_scheduler_facade_try_start():
+    """门面 try_start(execution_id) 注入 config；认领后 running_count+1、queue_depth-1。"""
+    store = InMemorySchedulerStore()
+    scheduler = ExecutionScheduler(store, SchedulerConfig(max_concurrent=1, max_concurrent_per_tenant=1))
+
+    await scheduler.submit(_req("e1", tenant_id="ta"))
+    await scheduler.submit(_req("e2", tenant_id="tb"))
+    assert await scheduler.queue_depth() == 2
+    assert await scheduler.running_count() == 0
+
+    got = await scheduler.try_start("e1")
+    assert got is not None and got.execution_id == "e1"
+    assert await scheduler.running_count() == 1
+    # 全局上限 1 已满 → e2 认领失败
+    assert await scheduler.try_start("e2") is None
+
+    await scheduler.complete("e1", QueueStatus.COMPLETED)
+    assert await scheduler.running_count() == 0
+    # 释放后可认领 e2
+    assert await scheduler.try_start("e2") is not None

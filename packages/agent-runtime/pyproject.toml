@@ -33,11 +33,29 @@ line-length = 120
 target-version = "py311"
 
 [tool.ruff.lint]
-select = ["E4", "E7", "E9", "F", "I"]
+# BLE001/S110：P0-4 盲捕获门禁（2026-09-24）——内核运行时已启用；legacy 存量入下方基线，只减不增。
+select = ["E4", "E7", "E9", "F", "I", "BLE001", "S110"]
 # 存量豁免基线（与根 pyproject.toml 对齐，配置化前靠继承根 ignore 生效，F-S0-10 显式固化）：
 # E402: admission_gateway.py 模块级 import 在 logger 定义后（deliberate 顺序）；
 # E731: skills/registry.py 中间件链 lambda 闭包（风格，非逻辑阻断）。
 ignore = ["E402", "E731"]
+
+# P0-4 盲捕获门禁棘轮基线：逐文件锁定 legacy 存量，新代码不得新增；策略为整包基线豁免（源码不写逐点 noqa）。
+# 进度见 docs/plans/plan-p0-4-blind-except-ratchet-2026-09-24.md。
+[tool.ruff.lint.per-file-ignores]
+"agent_runtime/admission_gateway.py" = ["BLE001", "S110"]
+"agent_runtime/circuit_breaker.py" = ["BLE001"]
+"agent_runtime/context/compact.py" = ["BLE001"]
+"agent_runtime/control_plane.py" = ["BLE001", "S110"]
+"agent_runtime/db.py" = ["BLE001", "S110"]
+"agent_runtime/otel.py" = ["BLE001"]
+"agent_runtime/planner/agentic.py" = ["BLE001"]
+"agent_runtime/planner/execution_graph.py" = ["BLE001"]
+"agent_runtime/planner/graph_compose.py" = ["BLE001"]
+"agent_runtime/planner/protocol.py" = ["BLE001", "S110"]
+"agent_runtime/sandbox.py" = ["BLE001"]
+"agent_runtime/tracing.py" = ["BLE001"]
+"agent_runtime/trajectory/replay.py" = ["BLE001", "S110"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

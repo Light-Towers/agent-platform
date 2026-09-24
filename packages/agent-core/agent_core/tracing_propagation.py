@@ -23,7 +23,7 @@ try:
     from opentelemetry import propagate as _otel_propagate  # noqa: PLC0415
 
     _propagation_available = True
-except Exception:  # pragma: no cover - OTel 未安装
+except ImportError:  # pragma: no cover - OTel 未安装
     _propagation_available = False
 
 

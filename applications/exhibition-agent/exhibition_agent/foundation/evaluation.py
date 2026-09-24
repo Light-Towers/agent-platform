@@ -14,7 +14,7 @@ F05 Evaluation & Golden Set — 脚手架版
 
 依赖：
   F03 knowledge_lifecycle.filter_published_for_retrieval（已落地 ✅）
-  F01 execution_context.enforce_scope_filter（尚未落地 → MVP 内联 mock，标注 TODO）
+  F01 execution_context.enforce_scope_filter（跨租户负样本评测已接入**真实实现**，审计 P1-9；positive 路径仍用内联 mock）
 
 迁移来源：mingyang-warehouse/ontology/web/backend/evaluation.py（2026-09-22）
 """
@@ -26,6 +26,7 @@ from datetime import datetime, timezone
 from enum import Enum
 
 from ._audit_writer import append_audit_record
+from .execution_context import ExecutionContext, enforce_scope_filter
 from .knowledge_lifecycle import KNOWLEDGE_STATUS, filter_published_for_retrieval
 
 _BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -108,19 +109,47 @@ def _evaluate_positive(case: GoldenCase) -> dict:
 
 
 def _evaluate_cross_tenant_negative(case: GoldenCase) -> dict:
-    """Cross-Tenant Negative：越权召回数 = 0。"""
+    """Cross-Tenant Negative：对**真实实现** enforce_scope_filter 的输出检测越权召回。
+
+    审计 P1-9：原实现先用 _mock_scope_filter 过滤、再在已过滤集合上统计越权项，
+    因 mock 已剔除跨租户非 PUBLIC 项 → violations 恒为 0（自证式假绿）。现改为把
+    原始候选下推给生产代码 enforce_scope_filter，并对其结果做越权检测；另加防空转
+    守卫：当输入确含跨租户候选时，过滤器必须产出严格更小的集合，否则判为无鉴别力。
+    """
     tenant_id = case.tenant_context.get("tenant_id", "")
-    scoped = _mock_scope_filter(case.candidates, tenant_id)
+    ctx = ExecutionContext(
+        user_id=case.tenant_context.get("user_id", "eval-negative"),
+        tenant_id=tenant_id,
+        tenant_type=case.tenant_context.get("tenant_type", "SPONSOR"),
+        scopes=case.tenant_context.get("scopes", []),
+    )
+    scope_key = case.expected.get("scope_key", "exhibition_id")
+    # 对真实实现下推过滤（非 mock）——这是 P1-9 的核心：让评测跑生产代码
+    result = enforce_scope_filter(ctx, case.candidates, scope_key)
 
     violations = [
-        c for c in scoped
+        c for c in result
         if c.get("tenant_id", "") != tenant_id and c.get("scope_type") != "PUBLIC"
     ]
+    cross_tenant_inputs = [
+        c for c in case.candidates if c.get("tenant_id", "") != tenant_id
+    ]
+    # 防空转：若输入本就含跨租户候选，过滤器必须确实剔除（结果严格更小），否则用例无鉴别力
+    discriminating = (not cross_tenant_inputs) or (len(result) < len(case.candidates))
+    passed = len(violations) == 0 and discriminating
+
+    if violations:
+        detail = f"越权召回={len(violations)}（P0）"
+    elif not discriminating:
+        detail = "无跨租户负样本，用例无鉴别力"
+    else:
+        detail = "越权召回=0"
 
     return {
-        "passed": len(violations) == 0,
+        "passed": passed,
         "violation_count": len(violations),
-        "detail": "越权召回=0" if len(violations) == 0 else f"越权召回={len(violations)}（P0）",
+        "cross_tenant_input_count": len(cross_tenant_inputs),
+        "detail": detail,
     }
 
 

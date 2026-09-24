@@ -35,6 +35,9 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
+# execution_queue 槽位认领 advisory lock key（'SCHS'）：跨实例串行化「数槽 + 认领」临界区。
+_SLOT_LOCK_KEY = 0x5343_4853
+
 
 class ExecutionPriority(str, Enum):
     """调度优先级。"""
@@ -133,6 +136,17 @@ class SchedulerStore(abc.ABC):
         """标记为 RUNNING（Worker 开始执行）。"""
 
     @abc.abstractmethod
+    async def try_start(
+        self, execution_id: str, config: SchedulerConfig
+    ) -> ExecutionRequest | None:
+        """请求驱动认领：若全局与 per-tenant 槽位允许，把指定 QUEUED 执行原子置为 RUNNING，
+        返回认领后的请求；无槽位 / 目标非 QUEUED / 不存在 → 返回 None（不改状态）。
+
+        与 ``dequeue``（Worker 拉取队首、按优先级/公平性选**任意**任务）不同：本方法**只认领
+        execution_id 指定的那一个**，供请求驱动（request-scoped）执行门控使用（P0-1 方案 B）。
+        """
+
+    @abc.abstractmethod
     async def mark_completed(self, execution_id: str, status: QueueStatus) -> None:
         """标记终态（COMPLETED / FAILED / CANCELLED），释放槽位。"""
 
@@ -213,6 +227,29 @@ class InMemorySchedulerStore(SchedulerStore):
             return cand
 
         return None
+
+    async def try_start(
+        self, execution_id: str, config: SchedulerConfig
+    ) -> ExecutionRequest | None:
+        # 单事件循环内本方法无内部 await → 从读取到改写天然原子。
+        r = self._store.get(execution_id)
+        if r is None or r.status is not QueueStatus.QUEUED:
+            return None
+        running_total = sum(1 for x in self._store.values() if x.status.occupies_slot)
+        if running_total >= config.max_concurrent:
+            return None
+        tenant_running = sum(
+            1
+            for x in self._store.values()
+            if x.status.occupies_slot and x.tenant_id == r.tenant_id
+        )
+        if tenant_running >= config.max_concurrent_per_tenant:
+            return None
+        r.status = QueueStatus.RUNNING
+        r.dispatched_at = time.time()
+        r.worker_id = f"worker-{uuid.uuid4().hex[:8]}"
+        self._store[execution_id] = copy.deepcopy(r)
+        return copy.deepcopy(r)
 
     async def mark_running(self, execution_id: str, worker_id: str) -> None:
         r = self._store.get(execution_id)
@@ -358,6 +395,47 @@ class PgSchedulerStore(SchedulerStore):
                 dispatched_at=now,
             )
 
+    async def try_start(
+        self, execution_id: str, config: SchedulerConfig
+    ) -> ExecutionRequest | None:
+        async with self._pool.connection() as conn, conn.transaction():
+            # 跨实例串行化「数槽 + 认领」临界区（较 dequeue 的 SKIP LOCKED 更严格，避免边界超额）
+            await conn.execute("SELECT pg_advisory_xact_lock(%s)", (_SLOT_LOCK_KEY,))
+            row = await conn.execute(
+                "SELECT status, tenant_id FROM execution_queue WHERE execution_id = %s FOR UPDATE",
+                (execution_id,),
+            )
+            r = await row.fetchone()
+            if not r or r[0] != QueueStatus.QUEUED.value:
+                return None
+            tenant_id = r[1]
+            running_row = await conn.execute(
+                "SELECT count(*) FROM execution_queue WHERE status IN (%s, %s)",
+                (QueueStatus.DISPATCHED.value, QueueStatus.RUNNING.value),
+            )
+            running_total = (await running_row.fetchone())[0]
+            if running_total >= config.max_concurrent:
+                return None
+            tenant_row = await conn.execute(
+                "SELECT count(*) FROM execution_queue "
+                "WHERE tenant_id = %s AND status IN (%s, %s)",
+                (tenant_id, QueueStatus.DISPATCHED.value, QueueStatus.RUNNING.value),
+            )
+            tenant_running = (await tenant_row.fetchone())[0]
+            if tenant_running >= config.max_concurrent_per_tenant:
+                return None
+            worker_id = f"worker-{uuid.uuid4().hex[:8]}"
+            now = time.time()
+            await conn.execute(
+                "UPDATE execution_queue SET status = %s, dispatched_at = %s, worker_id = %s "
+                "WHERE execution_id = %s AND status = %s",
+                (
+                    QueueStatus.RUNNING.value, now, worker_id,
+                    execution_id, QueueStatus.QUEUED.value,
+                ),
+            )
+        return await self.get(execution_id)
+
     async def mark_running(self, execution_id: str, worker_id: str) -> None:
         async with self._pool.connection() as conn:
             await conn.execute(
@@ -498,6 +576,10 @@ class ExecutionScheduler:
     async def dispatch_next(self) -> ExecutionRequest | None:
         """选下一个待调度执行并标记 DISPATCHED。无可用时返回 None。"""
         return await self._store.dequeue(self._config)
+
+    async def try_start(self, execution_id: str) -> ExecutionRequest | None:
+        """请求驱动认领本执行专属槽位（P0-1 方案 B）：成功→RUNNING 返回请求；无槽位→None。"""
+        return await self._store.try_start(execution_id, self._config)
 
     async def mark_running(self, execution_id: str, worker_id: str) -> None:
         """Worker 开始执行时标记 RUNNING。"""

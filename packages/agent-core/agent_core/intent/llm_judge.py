@@ -48,7 +48,7 @@ def _parse_llm_json(content: str) -> dict[str, Any] | None:
             text = text[4:]
     try:
         return json.loads(text)
-    except Exception:
+    except (ValueError, TypeError):  # json.loads 仅抛非 str/非法 JSON
         return None
 
 

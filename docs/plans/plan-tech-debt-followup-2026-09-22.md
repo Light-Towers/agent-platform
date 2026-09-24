@@ -75,14 +75,14 @@
 
 ---
 
-## D7 清理裸 `except Exception:`（已完成）
+## D7 清理裸 `except Exception:`（✅ 门禁已恢复为启用态 + ratchet 基线；存量待逐文件烧除 —— 见 `arch-audit-2026-09-24.md` P0-4 / `plan-p0-4-blind-except-ratchet-2026-09-24.md`）
 
 | 字段 | 内容 |
 |------|------|
-| **现状** | 全仓 211 处 BLE001 违规已全部标注 `# noqa: BLE001` + 上下文注释，ruff BLE001 归零 |
-| **影响** | 每处 broad catch 有明确注释说明为何宽捕获（防御性清理/可选导入/幂等DDL/回调降级等），便于后续审查 |
-| **完成方式** | 自动脚本批量添加 `# noqa: BLE001` + 手动修复 7 处脚本未覆盖模式（`except (..., Exception):` 和可选导入守卫）+ 修复 control_plane.py 缩进回归 |
-| **优先级** | ✅ 已完成 |
+| **现状（2026-09-24 复核更正）** | 本条原记录「全仓 211 处 BLE001 违规已全部标注 `# noqa: BLE001` + 上下文注释」**已失效**：提交 `92ba46f`（标题「清理 358 处 BLE001 死代码 noqa」）主动删除了这些 noqa 留痕，改由根 `pyproject.toml` 的 `ignore = [..., "BLE001", "S110", ...]` **全局关闭**该规则。当前受管代码（`packages/`、`applications/`、`tests/`、`scripts/`、`eval/`）中 `# noqa: BLE001` = **0 处**，`courses/`（未入库）亦为 0。 |
+| **影响（倒退风险）** | 全局 `ignore` 使仓内**不再有任何痕迹**标明哪些位置做了宽捕获及原因，后续审查只能 `grep "except Exception"`；且**新写的裸 except 不再被任何门禁拦截**，同类问题可无限复发 —— 与 D4「逐包收窄 ruff ignore」方向相反。 |
+| **原始完成方式（历史记录，已被上述反转覆盖）** | 自动脚本批量添加 `# noqa: BLE001` + 手动修复 7 处脚本未覆盖模式 + 修复 control_plane.py 缩进回归。 |
+| **优先级** | 🟡 **M1-only 稳态**（2026-09-24 策略修订，经用户复核）：已抛弃「全局豁免」，改为 6 份配置均**启用** `BLE001/S110` + legacy 入各包 `per-file-ignores` 文件级基线。**放弃逐点烧法**：曾对 agent-core/agent-runtime 逐点加 `# noqa: BLE001` 并删基线，但逐点 noqa 依附 `BLE001` 是否常驻 select（历史 `3ccc90e` 加 → 移出 → `92ba46f` 清 → 反复 churn），故已 `git restore` 回退源码、基线由 ruff 真值重建。现态：**6 包源码干净 + 文件级基线豁免**，仅保留**无 noqa 的安全窄化**（纯导入守卫→`except ImportError`、`json.loads`→`except (ValueError, TypeError)`）。agent-core `pytest 200 passed`、agent-runtime `539 passed`。🔧 **真实降量轮次（2026-09-24，`plan-p0-4-blind-except-real-reduction-2026-09-24.md`）**：经用户逐站核查后执行桶 A 安全窄化——knowledge-service 5 文件 9 站点（requests/IO/import 探测/`int()`），其中 locustfile/node_pdf_to_md/test_tracing 3 文件清零脱基线（ks 基线 24→21），`pytest 41 passed/6 skipped`；桶 B（删冗余交全局 handler）因丢 session_id 日志上下文、收益边际→本轮跳过；桶 C（后台任务/SSE/探针/可选通道降级，含 `import_exhibition_corpus:217` HTTP 批次降级）维持豁免。全局 handler 实测仅 1/6 应用有→仓库级大降量需先补各应用 handler（P2 独立）。门禁常驻防新增盲捕获，存量宽捕获为文件级豁免，**不再追求逐点清零**。 |
 
 ---
 
@@ -108,7 +108,7 @@
 | D4 | ruff ignore 收窄 | Low | 逐包日常改动顺带 |
 | D5 | agent_core 注释泛化 | Low | 人工逐条判断 |
 | D6 | routes.py 拆分 | ✅ 已完成 | 已完成 |
-| D7 | 清理裸 except | ✅ 已完成 | 211 处全标注 noqa: BLE001 |
+| D7 | 清理裸 except | 🟡 M1-only 稳态 + 桶 A 窄化（真实降量轮次） | 全局豁免已改**启用 + 文件级基线豁免**（见 `plan-p0-4-blind-except-ratchet-2026-09-24.md`）；逐点 noqa 已回退；**真实降量**：agent-core 6 处 + knowledge-service 桶 A 5 文件（3 文件脱基线，见 `plan-p0-4-blind-except-real-reduction-2026-09-24.md`）；余下承重降级维持豁免 |
 | D8 | pydantic-settings 评估 | Low | 独立小任务 |
 | D9 | exhibition llm_client.py 收敛到 agent_core.llm | ✅ 已完成 | OpenAICompatibleProvider.build() 替代直接 ChatOpenAI |
 | D10 | zhanggui ApiReranker 收敛到 agent_core.resilience.retry | ✅ 已完成 | 已完成 |

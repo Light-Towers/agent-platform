@@ -191,10 +191,10 @@ class TestEvaluators:
     def test_cross_tenant_negative_fail_on_leak(self, monkeypatch):
         """scope filter 失效（检索层 bug）→ 跨租户候选泄漏 → 越权召回=1（P0）。
 
-        当前 _mock_scope_filter 正确工作时跨租户 PRIVATE 候选会被过滤（violations=0）。
+        当前真实 enforce_scope_filter 正确工作时跨租户 PRIVATE 候选会被过滤（violations=0）。
         此测试模拟检索层 bug（scope filter 退化为 identity），验证评估器能 catch 越权。
         """
-        monkeypatch.setattr(evaluation, "_mock_scope_filter", lambda cands, tid: cands)
+        monkeypatch.setattr(evaluation, "enforce_scope_filter", lambda ctx, items, scope_key: items)
         case = _make_case(
             GoldenCategory.CROSS_TENANT_NEGATIVE,
             tenant_id="tenant_B",
@@ -315,7 +315,7 @@ class TestCrossTenantNegativeGeneration:
         scope filter 正确时 A 的候选会被过滤（无越权）；此测试模拟检索层 bug，
         验证生成的负样本能 catch 越权召回。
         """
-        monkeypatch.setattr(evaluation, "_mock_scope_filter", lambda cands, tid: cands)
+        monkeypatch.setattr(evaluation, "enforce_scope_filter", lambda ctx, items, scope_key: items)
         positive = _make_case(
             GoldenCategory.POSITIVE,
             tenant_id="tenant_A",
