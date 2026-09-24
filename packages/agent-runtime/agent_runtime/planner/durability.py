@@ -42,6 +42,8 @@ class Checkpoint:
         completed: dict[str, Any] | None = None,
         updated_at: float | None = None,
         resumable: bool = False,
+        generation: int | None = None,
+        state_schema_version: int | None = None,
     ) -> None:
         self.execution_id = execution_id
         self.completed = completed or {}
@@ -49,6 +51,14 @@ class Checkpoint:
         # stale 回收后置 True：所有权已释放，ExecutionGraph 的 resume 路径可基于本
         # checkpoint 继续未完成任务（默认 False = 正常推进中的 checkpoint）。
         self.resumable = resumable
+        # V3-1: ownership generation（与 checkpoint version 解耦）。
+        # None = 向后兼容旧 checkpoint（仅按 version fencing）；
+        # 非 None = save 时带 WHERE generation = ? fencing，旧 owner 写被拒。
+        self.generation = generation
+        # V3-6: 状态 schema 版本（记录写入时的格式版本，load 时据此迁移）。
+        # None = 向后兼容旧 checkpoint（视为 version 1）。
+        from agent_runtime.state_migration import CURRENT_STATE_SCHEMA_VERSION
+        self.state_schema_version = state_schema_version or CURRENT_STATE_SCHEMA_VERSION
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -56,6 +66,8 @@ class Checkpoint:
             "completed": self.completed,
             "updated_at": self.updated_at,
             "resumable": self.resumable,
+            "generation": self.generation,
+            "state_schema_version": self.state_schema_version,
         }
 
 
@@ -163,6 +175,14 @@ class ExecutionOwnershipStore(abc.ABC):
         """返回当前所有者；无 / 已过期返回 None。"""
 
     @abc.abstractmethod
+    async def get_generation(self, execution_id: str) -> "int | None":
+        """V3-1: 返回当前 lease 的 ownership generation；无 / 已过期返回 None。
+
+        generation 在 takeover（不同 owner 抢过期 lease）时单调递增，
+        供 checkpoint / status 等 durable write 做 fencing（WHERE generation = ?）。
+        """
+
+    @abc.abstractmethod
     async def list_stale(self, now: float) -> "list[str]":
         """返回「租约已过期且仍持有」的执行（stale，应被回收 / 恢复）。"""
 
@@ -170,18 +190,25 @@ class ExecutionOwnershipStore(abc.ABC):
 class InMemoryExecutionOwnershipStore(ExecutionOwnershipStore):
     """进程内执行所有权存储（测试 / 单进程默认后端）。
 
-    ``_owners``：execution_id -> (owner, expires_at)。
+    ``_owners``：execution_id -> (owner, expires_at, generation)。
     """
 
     def __init__(self) -> None:
-        self._owners: dict[str, tuple[str, float]] = {}
+        self._owners: dict[str, tuple[str, float, int]] = {}
 
     async def acquire(self, execution_id: str, owner: str, ttl_s: float) -> bool:
         cur = self._owners.get(execution_id)
         now = time.monotonic()
         if cur is not None and cur[1] > now:
             return False  # 仍被他人/自己持有且未过期
-        self._owners[execution_id] = (owner, now + ttl_s)
+        # V3-1: generation 计算
+        if cur is None:
+            generation = 1  # 首次
+        elif cur[0] == owner:
+            generation = cur[2]  # 同 owner 续租，不递增
+        else:
+            generation = cur[2] + 1  # takeover（不同 owner 抢过期 lease），递增
+        self._owners[execution_id] = (owner, now + ttl_s, generation)
         return True
 
     async def heartbeat(self, execution_id: str, ttl_s: float, owner: str) -> bool:
@@ -191,7 +218,7 @@ class InMemoryExecutionOwnershipStore(ExecutionOwnershipStore):
         if cur[0] != owner:
             # §HA：租约已被其他 owner 接管，旧 owner 感知所有权丢失 → 返回 False
             return False
-        self._owners[execution_id] = (cur[0], time.monotonic() + ttl_s)
+        self._owners[execution_id] = (cur[0], time.monotonic() + ttl_s, cur[2])
         return True
 
     async def release(self, execution_id: str, owner: str) -> None:
@@ -208,9 +235,18 @@ class InMemoryExecutionOwnershipStore(ExecutionOwnershipStore):
             return None
         return cur[0]
 
+    async def get_generation(self, execution_id: str) -> "int | None":
+        cur = self._owners.get(execution_id)
+        if cur is None:
+            return None
+        if cur[1] <= time.monotonic():
+            self._owners.pop(execution_id, None)
+            return None
+        return cur[2]
+
     async def list_stale(self, now: float) -> "list[str]":
         # 已释放（不在表）或租约未过期都不算 stale；仅「仍在表且 expiry<=now」为 stale
-        return [eid for eid, (_, exp) in self._owners.items() if exp <= now]
+        return [eid for eid, (_, exp, _) in self._owners.items() if exp <= now]
 
 
 async def reap_stale_executions(

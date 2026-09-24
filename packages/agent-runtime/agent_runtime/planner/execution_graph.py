@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
@@ -19,13 +20,16 @@ from typing import TYPE_CHECKING, Any
 
 from agent_core.resilience import ErrorClass, classify_exception
 
+from agent_runtime.effect_contract import FailureAction, decide_failure_action
+from agent_runtime.forensic import ForensicContext
 from agent_runtime.planner.durability import Checkpoint, FencedWriteError
-from agent_runtime.planner.protocol import Plan, StreamEvent
+from agent_runtime.planner.protocol import ExecutionSuspended, Plan, StreamEvent
 from agent_runtime.trajectory.models import TrajectoryRecord
 
 # 执行级业务重试上限（见 M1.1 重试边界：transport 1–2 < skill 级 2 < 本处 2，禁止叠加）
 _NODE_BUSINESS_RETRY_MAX = 2
 _NODE_BUSINESS_RETRY_BACKOFF = 0.2
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from agent_runtime.planner.protocol import PlannerRuntime
@@ -42,22 +46,43 @@ def _usage_payload(runtime: PlannerRuntime) -> dict[str, Any]:
 async def _persist_trajectory(
     runtime: PlannerRuntime, plan: Plan, agent_ctx: Any, exec_ctx: Any
 ) -> None:
-    """P3-1：把一次执行的结构化轨迹持久化到 trajectory_store（未注入则跳过）。"""
-    store = runtime.trajectory_store
-    if store is None or exec_ctx is None:
+    """P3-1：持久化轨迹 + 触发 post-execution hooks（记忆自动沉淀）。
+
+    trajectory_store 未注入时跳过持久化，但仍创建 record 并触发 hooks
+    （使 EpisodicSink 等记忆沉淀不依赖 trajectory_store 的存在）。
+    """
+    if exec_ctx is None:
         return
+    # V3-9: 执行级版本指纹
+    _model = getattr(runtime.llm, "model", None) if runtime.llm else None
+    forensic_ctx = ForensicContext(
+        model=_model,
+        planner_version=plan.planner_name or None,
+    )
+    # V3-3: 序列化 plan 时把 ExecutionGraph 转 dict（供 resume 重建）
+    plan_dict = plan.model_dump()
+    if plan.graph is not None and hasattr(plan.graph, "to_dict"):
+        plan_dict["graph"] = plan.graph.to_dict()
     record = TrajectoryRecord(
         execution_id=exec_ctx.execution_id,
-        session_id=plan.notes.get("session_id"),
-        planner=plan.notes.get("planner"),
-        plan=plan.model_dump(),
+        session_id=plan.session_id or None,
+        planner=plan.planner_name or None,
+        plan=plan_dict,
         steps=list(exec_ctx.steps),
         total_tokens=exec_ctx.tokens_used,
         total_cost=exec_ctx.cost_used,
         snapshot=exec_ctx.metadata.get("snapshot") or agent_ctx.snapshot(),
+        forensic=forensic_ctx.to_dict(),
     )
-    await store.save(record)
+    store = runtime.trajectory_store
+    if store is not None:
+        await store.save(record)
     runtime.last_trajectory = record
+    for hook in runtime.post_execution_hooks:
+        try:
+            await hook(record, runtime)
+        except Exception:
+            logger.warning("post-execution hook failed", exc_info=True)
 
 
 @dataclass(frozen=True)
@@ -73,6 +98,23 @@ class GraphNode:
     skill_name: str
     kwargs: dict[str, Any] = field(default_factory=dict)
     input_refs: dict[str, str] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "node_id": self.node_id,
+            "skill_name": self.skill_name,
+            "kwargs": self.kwargs,
+            "input_refs": self.input_refs,
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> GraphNode:
+        return cls(
+            node_id=d["node_id"],
+            skill_name=d["skill_name"],
+            kwargs=d.get("kwargs", {}),
+            input_refs=d.get("input_refs", {}),
+        )
 
 
 class GraphCycleError(ValueError):
@@ -179,6 +221,25 @@ class ExecutionGraph:
         """总节点数（Skill 调用步数）。"""
         return len(self._nodes)
 
+    def to_dict(self) -> dict[str, Any]:
+        """序列化为 dict（供 TrajectoryRecord 持久化 + resume 重建）。"""
+        return {
+            "nodes": {nid: node.to_dict() for nid, node in self._nodes.items()},
+            "deps": {nid: sorted(deps) for nid, deps in self._deps.items()},
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> ExecutionGraph:
+        """从 dict 重建 ExecutionGraph。"""
+        g = cls()
+        for nid, node_d in d.get("nodes", {}).items():
+            node = GraphNode.from_dict(node_d)
+            g._nodes[node.node_id] = node
+            g._deps.setdefault(node.node_id, set())
+        for nid, deps in d.get("deps", {}).items():
+            g._deps[nid] = set(deps)
+        return g
+
 
 async def _run_graph_in_place(
     graph: ExecutionGraph,
@@ -271,7 +332,9 @@ async def _run_graph_in_place(
                     {"class": "ownership_lost", "error": "执行所有权已丢失，节点中止（不发起副作用）"},
                     True,
                 )
-            # 执行 + 业务级有限重试（仅瞬态可重试；transport 短重试已在底层 SDK 内，不叠加）
+            # 执行 + 业务级有限重试（V3-2：据 Skill 声明的 EffectContract 决策重试安全性；
+            # 未声明时保持 v2 语义——仅瞬态可重试；transport 短重试已在底层 SDK 内，不叠加）
+            contract = runtime.get_effect_contract(node.skill_name)
             attempt = 0
             last_exc: Exception | None = None
             while attempt <= _NODE_BUSINESS_RETRY_MAX:
@@ -280,21 +343,30 @@ async def _run_graph_in_place(
                     # §HA（H2）：副作用（Skill 落地效果）一旦成功，立即落审计/幂等记录。
                     # effect_key = execution_id:step_id:effect_type（唯一约束 → 重复 attempt 幂等去重）。
                     # 配合 checkpoint，B 接管 resume 时可据此判断哪些 step 已真正落地，不重跑。
+                    # V3-2：effect_type 优先用 EffectContract.effect_key（语义化），未声明回退 skill:<name>。
                     if (
                         runtime.side_effect_store is not None
                         and execution_id is not None
                         and exec_ctx is not None
                     ):
+                        effect_type = (
+                            contract.effect_key
+                            if contract is not None
+                            else f"skill:{node.skill_name}"
+                        )
                         await runtime.side_effect_store.record(
                             execution_id=execution_id,
                             step_id=node_id,
-                            effect_type=f"skill:{node.skill_name}",
+                            effect_type=effect_type,
                             owner=exec_ctx.lease_owner or "",
                         )
                     return node_id, result, None, False
+                except ExecutionSuspended:
+                    raise  # 控制流信号，不进入重试 / 异常分类
                 except Exception as exc:
                     last_exc = exc
-                    if classify_exception(exc) is not ErrorClass.RETRYABLE or attempt >= _NODE_BUSINESS_RETRY_MAX:
+                    action = decide_failure_action(contract, classify_exception(exc))
+                    if action is not FailureAction.RETRY_SAFE or attempt >= _NODE_BUSINESS_RETRY_MAX:
                         break
                     attempt += 1
                     await asyncio.sleep(_NODE_BUSINESS_RETRY_BACKOFF * (2 ** (attempt - 1)))
@@ -302,11 +374,51 @@ async def _run_graph_in_place(
             assert last_exc is not None
             cls = classify_exception(last_exc)
             fatal = cls is ErrorClass.FATAL
-            # 瞬态重试耗尽按 RECOVERABLE 降级（节点失败但执行继续）；Fatal 才终止
-            return node_id, None, {"class": "fatal" if fatal else "recoverable", "error": str(last_exc)}, fatal
+            action = decide_failure_action(contract, cls)
+            # 瞬态重试耗尽按 RECOVERABLE 降级（节点失败但执行继续）；Fatal 才终止。
+            # failure_action 记入 error_info，供 Scheduler / Control Plane 消费
+            # （QUERY_BEFORE_RETRY 在 V3-3 ExternalTask 落地后接入外部状态查询）。
+            return (
+                node_id,
+                None,
+                {
+                    "class": "fatal" if fatal else "recoverable",
+                    "error": str(last_exc),
+                    "failure_action": action.value,
+                },
+                fatal,
+            )
 
         if pending:
-            layer_results = await asyncio.gather(*(_run(nid) for nid in pending))
+            try:
+                layer_results = await asyncio.gather(*(_run(nid) for nid in pending))
+            except ExecutionSuspended as exc:
+                # V3-3: 执行挂起——保存 checkpoint（已完成节点，不含挂起节点）+ 产出 suspended 事件
+                if checkpoint_store is not None and execution_id is not None:
+                    try:
+                        await checkpoint_store.save(
+                            Checkpoint(
+                                execution_id,
+                                dict(results),
+                                resumable=True,
+                                generation=(
+                                    exec_ctx.lease_generation
+                                    if exec_ctx is not None
+                                    else None
+                                ),
+                            )
+                        )
+                    except FencedWriteError:
+                        pass  # stale writer，checkpoint 已被新 owner 覆盖
+                yield StreamEvent(
+                    type="suspended",
+                    payload={
+                        "task_id": exc.task_id,
+                        "node_id": exc.node_id,
+                        "execution_id": execution_id,
+                    },
+                )
+                return
             for node_id, result, error_info, fatal in layer_results:
                 payload_extra = {
                     "node": node_id,
@@ -315,20 +427,28 @@ async def _run_graph_in_place(
                 }
                 if fatal:
                     err_class = (error_info or {}).get("class", "fatal")
-                    yield StreamEvent(
-                        type="error",
-                        payload={**payload_extra, "error": (error_info or {}).get("error", ""), "error_class": err_class},
-                    )
+                    fatal_payload = {
+                        **payload_extra,
+                        "error": (error_info or {}).get("error", ""),
+                        "error_class": err_class,
+                    }
+                    if error_info and "failure_action" in error_info:
+                        fatal_payload["failure_action"] = error_info["failure_action"]
+                    yield StreamEvent(type="error", payload=fatal_payload)
                     # ownership_lost 是 §HA 协作式中止（split-brain A 侧），非业务 Fatal；
                     # 统一置位并终止，保证 single-active-owner，避免继续产生副作用。
                     if err_class == "ownership_lost" and exec_ctx is not None:
                         exec_ctx.ownership_lost = True
                     return  # 致命异常 / 所有权丢失 → 终止整次执行（已完成节点已 checkpoint，可 resume/诊断）
                 if error_info is not None:
-                    yield StreamEvent(
-                        type="error",
-                        payload={**payload_extra, "error": error_info["error"], "error_class": error_info["class"]},
-                    )
+                    err_payload = {
+                        **payload_extra,
+                        "error": error_info["error"],
+                        "error_class": error_info["class"],
+                    }
+                    if "failure_action" in error_info:
+                        err_payload["failure_action"] = error_info["failure_action"]
+                    yield StreamEvent(type="error", payload=err_payload)
                 else:
                     results[node_id] = result
                     # checkpoint 落盘：每完成一个节点即持久化（崩溃后 resume 可复用）。
@@ -339,7 +459,15 @@ async def _run_graph_in_place(
                     if checkpoint_store is not None and execution_id is not None:
                         try:
                             await checkpoint_store.save(
-                                Checkpoint(execution_id, dict(results))
+                                Checkpoint(
+                                    execution_id,
+                                    dict(results),
+                                    generation=(
+                                        exec_ctx.lease_generation
+                                        if exec_ctx is not None
+                                        else None
+                                    ),
+                                )
                             )
                         except FencedWriteError as exc:
                             if exec_ctx is not None:
@@ -422,11 +550,11 @@ async def execute_plan(
     cm = ContextManager()
     ctx = cm.create_context(
         goal=plan.sub_query or plan.route,
-        constraints=plan.notes.get("constraints"),
+        constraints=plan.constraints or None,
     )
     # WS-2：compacted 标记回填——上游（Planner 路由期经 ContextAssembler 压缩）
-    # 在 notes 中标记后，由这里写入 ConversationContext，保持三层契约一致。
-    if plan.notes.get("compacted"):
+    # 在 Plan.compacted 标记后，由这里写入 ConversationContext，保持三层契约一致。
+    if plan.compacted:
         ctx.conversation.compacted = True
 
     if plan.graph is not None:
@@ -478,7 +606,7 @@ async def execute_plan(
     else:
         yield StreamEvent(type="route", payload={"capability": plan.route, "reason": plan.reason})
         async with runtime.execution():
-            kwargs = plan.notes.get("kwargs", {})
+            kwargs = plan.kwargs
             result = await runtime.delegate(plan.route, **kwargs)
             cm.record_skill(ctx, plan.route, result=result)
             yield StreamEvent(type="evidence", payload={"node": plan.route, "result": result})

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from agent_runtime.skills.registry import Skill, SkillKind
+from agent_runtime.skills.registry import ExecutionBoundary, Skill, SkillKind
 
 
 def as_agent_skill(
@@ -46,6 +46,7 @@ def as_agent_skill(
         description=description,
         kind=SkillKind.AGENT,
         executor=execute,
+        execution_boundary=ExecutionBoundary.INPROCESS,
         timeout_ms=timeout_ms,
         input_schema=input_schema,
         output_schema=output_schema,

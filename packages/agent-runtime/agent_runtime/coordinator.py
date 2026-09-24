@@ -103,7 +103,7 @@ class PgAdvisoryLeaseBackend:
                     str(ttl),
                 )
                 ok = acquired == owner
-        except Exception:  # noqa: BLE001 分布式锁不可用时降级为拒绝（调用方走 queue/reject）
+        except Exception:
             logger.warning("PG lease 获取失败 session=%s，降级拒绝", session_id, exc_info=True)
             return False
         if ok:
@@ -118,7 +118,7 @@ class PgAdvisoryLeaseBackend:
                     session_id,
                     owner,
                 )
-        except Exception:  # noqa: BLE001 清理失败不影响主流程
+        except Exception:
             logger.warning("PG lease 释放失败 session=%s", session_id, exc_info=True)
         await self._local.release(session_id, owner)
 

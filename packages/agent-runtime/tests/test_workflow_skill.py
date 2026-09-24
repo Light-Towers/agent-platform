@@ -52,8 +52,8 @@ async def test_compile_and_execute_via_runtime():
 
     # 经 execute_plan 单 route delegate 调用（处于 execution 边界 → 复用上下文）
     runtime = PlannerRuntime(registry=reg)
-    plan = Plan(mode="workflow", route="research_report", notes={"kwargs": {"topic": "北京天气"}})
-    # execute_plan 的 else 分支从 notes["kwargs"] 取参并 delegate
+    plan = Plan(mode="workflow", route="research_report", kwargs={"topic": "北京天气"})
+    # execute_plan 的 else 分支从 plan.kwargs 取参并 delegate
     events = [ev async for ev in execute_plan(plan, runtime)]
     answer = next(e for e in events if e.type == "answer")
     # workflow 经 delegate 执行，结果被 execute_plan 包装为 str(text)

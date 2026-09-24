@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+
 from agent_runtime.skills.composition import CompositionError, CompositionValidator
 from agent_runtime.skills.registry import Skill, SkillKind, SkillRegistry
 

@@ -187,7 +187,7 @@ async def test_status_event_carries_accumulated_tokens():
 
     llm = _FakeLLM()
     runtime = PlannerRuntime(registry=_FakeRegistry(), llm=llm, max_tokens=100)
-    plan = Plan(route="search", sub_query="q", notes={"question": "q", "workspace_id": "default"})
+    plan = Plan(route="search", sub_query="q", question="q", workspace_id="default")
 
     events = [ev async for ev in execute_plan(plan, runtime)]
     status = next(ev for ev in events if ev.type == "status")

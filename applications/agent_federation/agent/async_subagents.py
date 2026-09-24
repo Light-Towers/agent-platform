@@ -12,7 +12,7 @@ AGENT_MODE=local 时仍用本地 subagent。
   优先使用外部 `deepagents` 包的 `AsyncSubAgent`（graph_id+url，Agent Protocol）。
   若该包未安装（当前 .venv 未包含），自动回退到基于 httpx 的
   `_HttpSubAgent`：POST 到子服务各自的 endpoint（见 SubserviceConfig.endpoint），
-  例如 kefu 直连走 /invoke（返回 QueryResponse），wenda-data-agent 走 /api/query
+  例如 kefu 直连走 /invoke（返回 QueryResponse），nl2sql-service 走 /api/query
   （返回 SqlQueryResponse）。两路径对外暴露同一 `ainvoke(input)` 接口。
 """
 
@@ -21,7 +21,7 @@ from __future__ import annotations
 from agent_core.monitor import monitor
 
 from agent.circuit_breaker import get_breaker_sync
-from agent.config import get_all_subservices
+from agent.config import TIMEOUT_SUBAGENT_HTTP, get_all_subservices
 from agent.metrics import record_delegation
 from agent.prompts import sub_agents_content
 from agent.tracing.langfuse_adapter import langfuse_observe as observe
@@ -42,6 +42,16 @@ from agent_core.logging import get_logger
 from agent_core.resilience import retry_async
 
 logger = get_logger(__name__)
+
+# C-3: 进程级共享 httpx.AsyncClient（连接池复用）
+_shared_async_client: httpx.AsyncClient | None = None
+
+
+def _get_shared_async_client() -> httpx.AsyncClient:
+    global _shared_async_client
+    if _shared_async_client is None:
+        _shared_async_client = httpx.AsyncClient(timeout=TIMEOUT_SUBAGENT_HTTP)
+    return _shared_async_client
 
 # E-1 契约断言灰度开关（优化 E / P4.1 / S-1）：默认开启。
 # 关闭时回退到原 str(data)/dict 规整，便于现网快速回滚（无需发版）。
@@ -108,11 +118,14 @@ class _HttpSubAgent:
             "tenant_id": input.get("tenant_id"),
             "trace_id": input.get("trace_id"),
         }
-        async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.post(self.url.rstrip("/") + endpoint, json=payload)
-            resp.raise_for_status()
-            data = resp.json()
-        # kefu /invoke 返回 QueryResponse(dict)；wenda-data-agent /api/query 返回 SqlQueryResponse(dict，QueryResponse 子类)；
+        from agent_core.tracing_propagation import inject_traceparent
+
+        headers = inject_traceparent({"Content-Type": "application/json"})
+        client = _get_shared_async_client()
+        resp = await client.post(self.url.rstrip("/") + endpoint, json=payload, headers=headers)
+        resp.raise_for_status()
+        data = resp.json()
+        # kefu /invoke 返回 QueryResponse(dict)；nl2sql-service /api/query 返回 SqlQueryResponse(dict，QueryResponse 子类)；
         # 旧 adapter /api/messages 返回 list。统一规整为 {"answer": ...} 供 main_agent 消费。
         return _normalize_response(data, self.name)
 
@@ -160,15 +173,23 @@ class DelegatingSubAgent:
         self.endpoint = svc.endpoint
         self.description = description or getattr(inner, "description", "")
         self._inner = inner
-        self._svc = svc
+        self._svc_key = key
+        self._healthy_fallback = svc.healthy
+        self._local_agent_spec = svc.local_agent
         self._breaker = get_breaker_sync(self.name)
         self._local_agent = None  # 懒编译
 
     @observe(name="subagent.delegate", as_type="span")
     async def ainvoke(self, input: dict) -> dict:
         monitor.report_assistant(self.name, {"event": "delegate_start"})
-        # 1. 健康探活短路（config.healthy 由 health_check 维护）
-        if not self._svc.healthy:
+        # 1. 健康探活短路（动态查最新状态，查不到时回退构造时状态）
+        try:
+            from agent.config import get_subservice
+
+            healthy = get_subservice(self._svc_key).healthy
+        except Exception:
+            healthy = self._healthy_fallback
+        if not healthy:
             logger.warning("[%s] 健康探活标记不可用，跳过远程委派，走本地 fallback", self.name)
             monitor.report_assistant(self.name, {"event": "delegate_degraded", "reason": "unhealthy"})
             return await self._fallback(input, reason="unhealthy")
@@ -194,7 +215,7 @@ class DelegatingSubAgent:
                 backoff_base=self.RETRY_BASE,
                 on_retry=self._log_delegate_retry,
             )
-        except Exception as last_exc:  # 网络/协议/子服务异常，用尽重试仍失败
+        except Exception as last_exc:
             # 4. 计入熔断 + 本地 fallback
             await self._breaker.record_failure()
             logger.error("[%s] 远程委派彻底失败，转入本地 fallback: %s", self.name, last_exc)
@@ -214,7 +235,7 @@ class DelegatingSubAgent:
         配置了 local_agent（dict）时尝试编译并调用本地 subagent；
         否则返回结构化降级响应，避免把失败抛给主管线程。
         """
-        local_spec = self._svc.local_agent
+        local_spec = self._local_agent_spec
         if local_spec:
             try:
                 agent = self._get_local_agent(local_spec)
@@ -255,9 +276,9 @@ class DelegatingSubAgent:
 def get_remote_subagents():
     """构建 3 个远程子 Agent。
 
-    text_to_sql → wenda-data-agent(:8001)/api/query（Text-to-SQL，adapter 已退役）
-    rag_query   → zhiku（RAG 知识库）
-    customer_service → kefu-service(:8003)/invoke（直连）或 kefu-adapter(:8002)
+    text_to_sql → nl2sql-service /api/query（Text-to-SQL，adapter 已退役，URL 经 NL2SQL_SERVICE_URL 配置）
+    rag_query   → knowledge-service（RAG 知识库）
+    customer_service → kefu-service /invoke（直连）或 kefu-adapter
     """
     return [
         _build_async_subagent(

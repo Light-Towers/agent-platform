@@ -34,11 +34,11 @@
 **现象**：
 
 - `app`：`app/memory/longterm.py` 的 pgvector 长期语义记忆（`recall`/`remember`），并有 `app/main.py` 的 `AsyncPostgresSaver` checkpoint + `app/infra/revert.py` 会话回退。
-- `agent_federation`：仅 `InMemorySaver`/`AsyncSqliteSaver`（`main_agent.py:37-43`），**无 pgvector 长期记忆**（收敛规划 §1 已登记）。
+- `agent_federation`：`InMemorySaver`/`AsyncSqliteSaver`（`main_agent.py:37-43`）+ pgvector 长期语义记忆（`agent/memory/semantic_memory.py` + `main_agent_memory.py`，2026-08-19 挂载，TB-10 已核销）。
 
 **影响**：同一用户跨两轨无法共享长期上下文；agent_federation 重启/多实例下会话状态丢失，而 `app` 可回放。两套"会话记忆"语义不等价，是隐性一致性缺陷。
 
-**趋势**：E-3 已将 `MemoryBackend` Protocol 下沉 `agent_core.memory/backend.py`（仅协议），但 **agent_federation 侧尚未挂载 pgvector 后端**，仅协议就位、实现缺位。
+**趋势**：E-3 已将 `MemoryBackend` Protocol 下沉 `agent_core.memory/backend.py`（仅协议）。**agent_federation 侧已挂载 pgvector 后端**（`main_agent.py:532,599` 调用 `remember_episodic`/`recall_typed_context`，`agent/db.py` 建 pgvector `memories` 表，ADR-0003 定案），TB-10 已核销。
 
 **建议**：agent_federation `create_deep_agent` 的 memory 挂载点接入内核 `MemoryBackend`，使双轨记忆后端可插拔、语义一致；短期至少在文档固化"agent_federation 无长期记忆"的边界声明。
 
@@ -59,7 +59,7 @@
 
 - `agent_federation` 引用 `agent_core` 24 处、`app` 仅 7 处；
 - `shared-schemas` 原仅 `app` 直接 import，`agent_federation` 仅经下游子服务间接消费（E-1/P4.1 已补断言，已闭环）；
-- `agent_core.cache` 的 `CacheStats`/`build_cache_key` 双轨复用（TB-4 已落地），但 `PgSemanticCache`(app) 与 `ValkeySemanticCache`(agent_federation) 尚未统一到 `BaseSemanticCache` 接口实现层。
+- `agent_core.cache` 的 `CacheStats`/`build_cache_key` 双轨复用（TB-4 已落地）；统计接口 `get_stats`/`reset_stats` 已统一到 `BaseSemanticCache` Protocol。app 侧为模块级函数 `cache_lookup`/`cache_store`（未类化为 `PgSemanticCache`），联邦侧为 `class SemanticCache`（未改名 `ValkeySemanticCache`、未显式继承 Protocol）；`get`/`set` 主接口入参因后端而异，Protocol 有意不强制。
 
 **影响**："共享内核"这一收敛支点本身是歪的——核心能力（缓存、记忆、SQL 守卫）的采用深度不一致，导致双轨行为对内核升级的敏感度不同。
 
@@ -89,7 +89,7 @@
 | 问题 | 技术债编号 | 收敛状态 |
 |---|---|---|
 | AR-1 职责重叠（意图/改写双份） | TB-9 | 待排期（仅 SQL/契约已收口） |
-| AR-2 状态/记忆冲突 | TB-10 | 协议就位（E-3），agent_federation 实现缺位 |
+| AR-2 状态/记忆冲突 | TB-10 | 已核销（E-3 协议下沉 + agent_federation 已挂载 pgvector 后端，2026-08-19） |
 | AR-3 配置体系分裂 | TB-11 | 待排期 |
 | AR-4 内核采用度不对称 | TB-12 | 部分已闭环（E-1/TB-4/TB-5） |
 | AR-5 认知/维护成本 | TB-13 | 结构性，靠文档固化缓解 |

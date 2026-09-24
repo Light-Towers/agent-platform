@@ -60,13 +60,21 @@ class PgCheckpointStore(CheckpointStore):
     - resumable bool（stale 回收后置 True，允许 resume 接管）
     """
 
-    def __init__(self, pool: Any, *, table: str = "execution_checkpoints") -> None:
+    def __init__(
+        self,
+        pool: Any,
+        *,
+        table: str = "execution_checkpoints",
+        migrator: Any = None,
+    ) -> None:
         self._pool = pool
         self._table = table
+        self._migrator = migrator
 
     async def load(self, execution_id: str) -> Checkpoint | None:
         sql = (
-            f"SELECT completed, updated_at, resumable, version FROM {self._table} "
+            f"SELECT completed, updated_at, resumable, version, generation, "
+            f"state_schema_version FROM {self._table} "
             "WHERE execution_id = %s"
         )
         async with self._pool.connection() as conn:
@@ -74,17 +82,26 @@ class PgCheckpointStore(CheckpointStore):
             row = await cur.fetchone()
         if row is None:
             return None
-        completed, updated_at, resumable, _version = row
+        completed, updated_at, resumable, _version, generation, state_schema_version = row
         # updated_at from PG is datetime; from fake pool may be float
         if isinstance(updated_at, (int, float)):
             updated_at_ts = updated_at
         else:
             updated_at_ts = updated_at.timestamp()
+        completed_data = _loads(completed) if completed is not None else {}
+
+        # V3-6: 自动迁移旧 schema 版本
+        schema_ver = state_schema_version or 1
+        if self._migrator is not None and self._migrator.needs_migration(schema_ver):
+            completed_data, _steps = self._migrator.migrate(completed_data, schema_ver)
+
         return Checkpoint(
             execution_id=execution_id,
-            completed=_loads(completed) if completed is not None else {},
+            completed=completed_data,
             updated_at=updated_at_ts,
             resumable=bool(resumable),
+            generation=generation,
+            state_schema_version=schema_ver,
         )
 
     async def save(self, checkpoint: Checkpoint) -> None:
@@ -93,17 +110,23 @@ class PgCheckpointStore(CheckpointStore):
         # （completed 较少）的写入被原子拒绝，防止 zombie writer 降级覆盖新 owner 的
         # checkpoint。拒绝时抛 FencedWriteError，上层协作式中止。
         version = len(checkpoint.completed)
-        # §HA（C3）：仅当 version 单调递增（completed 前进）或 resumable 单向置位
-        # （False→True，reap 标记）时允许覆盖；stale writer 的 completed 降级写被原子拒绝。
+        # V3-1: generation fencing——checkpoint 带 generation 时，仅当 generation 匹配
+        # 当前 lease 的 generation 才允许写。旧 owner（takeover 后 generation 过期）
+        # 的写被原子拒绝。不带 generation（None）时仅按 version fencing（向后兼容）。
         sql = (
             f"INSERT INTO {self._table} "
-            "(execution_id, completed, updated_at, resumable, version) "
-            "VALUES (%s, %s, now(), %s, %s) "
+            "(execution_id, completed, updated_at, resumable, version, generation, "
+            " state_schema_version) "
+            "VALUES (%s, %s, now(), %s, %s, %s, %s) "
             "ON CONFLICT (execution_id) DO UPDATE "
             "SET completed = EXCLUDED.completed, updated_at = now(), "
-            "    resumable = EXCLUDED.resumable, version = EXCLUDED.version "
-            "WHERE {table}.version < EXCLUDED.version "
-            "   OR ({table}.resumable = FALSE AND EXCLUDED.resumable = TRUE) "
+            "    resumable = EXCLUDED.resumable, version = EXCLUDED.version, "
+            "    generation = EXCLUDED.generation, "
+            "    state_schema_version = EXCLUDED.state_schema_version "
+            "WHERE ({table}.version < EXCLUDED.version "
+            "       OR ({table}.resumable = FALSE AND EXCLUDED.resumable = TRUE)) "
+            "  AND (EXCLUDED.generation IS NULL OR {table}.generation IS NULL "
+            "       OR EXCLUDED.generation >= {table}.generation) "
             "RETURNING execution_id"
         ).format(table=self._table)
         async with self._pool.connection() as conn:
@@ -114,11 +137,13 @@ class PgCheckpointStore(CheckpointStore):
                     _dumps(checkpoint.completed),
                     checkpoint.resumable,
                     version,
+                    checkpoint.generation,
+                    checkpoint.state_schema_version,
                 ),
             )
             if await cur.fetchone() is None:
                 raise FencedWriteError(
-                    f"checkpoint 写入被拒绝（stale writer / version 降级）execution={checkpoint.execution_id}"
+                    f"checkpoint 写入被拒绝（stale writer / version 降级 / generation fencing）execution={checkpoint.execution_id}"
                 )
 
 
@@ -186,12 +211,16 @@ class PgExecutionOwnershipStore(ExecutionOwnershipStore):
         """CAS 抢占所有权：仅当无行/已过期/同 owner 时成功。
 
         返回 True 表示获得所有权；False 表示被他人持有且未过期。
+
+        V3-1: takeover（不同 owner 抢过期 lease）时 generation = old + 1；
+        同 owner 续租时 generation 不变。generation 通过 get_generation() 查询。
         """
         sql = (
-            f"INSERT INTO {self._table} (execution_id, owner, expires_at) "
-            "VALUES (%s, %s, now() + (%s || ' seconds')::interval) "
+            f"INSERT INTO {self._table} (execution_id, owner, expires_at, generation) "
+            "VALUES (%s, %s, now() + (%s || ' seconds')::interval, 1) "
             "ON CONFLICT (execution_id) DO UPDATE "
-            "SET owner = EXCLUDED.owner, expires_at = EXCLUDED.expires_at "
+            "SET owner = EXCLUDED.owner, expires_at = EXCLUDED.expires_at, "
+            "    generation = {table}.generation + CASE WHEN {table}.owner = EXCLUDED.owner THEN 0 ELSE 1 END "
             "WHERE {table}.expires_at < now() OR {table}.owner = EXCLUDED.owner "
             "RETURNING execution_id"
         ).format(table=self._table)
@@ -232,6 +261,17 @@ class PgExecutionOwnershipStore(ExecutionOwnershipStore):
         """返回当前 owner（租约未过期）；无/过期返回 None。"""
         sql = (
             f"SELECT owner FROM {self._table} "
+            "WHERE execution_id = %s AND expires_at > now()"
+        )
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(sql, (execution_id,))
+            row = await cur.fetchone()
+        return row[0] if row else None
+
+    async def get_generation(self, execution_id: str) -> int | None:
+        """V3-1: 返回当前 lease 的 ownership generation（租约未过期）；无/过期返回 None。"""
+        sql = (
+            f"SELECT generation FROM {self._table} "
             "WHERE execution_id = %s AND expires_at > now()"
         )
         async with self._pool.connection() as conn:
@@ -329,6 +369,11 @@ class PgExecutionOwnershipStore(ExecutionOwnershipStore):
                     try:
                         await conn.execute(sql_listen)
                     except Exception:
+                        logger.warning(
+                            "LISTEN %s 重连失败，5s 后重试",
+                            self._notify_channel,
+                            exc_info=True,
+                        )
                         await asyncio.sleep(5)
 
 

@@ -1,8 +1,10 @@
 # PROPOSAL.md 审核报告
 
+> ⚠️ 时效性说明：本文写作于 2026-08-09，当时目录名为 `deepagents/`（已于 2026-08-19 重命名为 `agent_federation/`）。文中 `deepagents/` 路径均对应现 `applications/agent_federation/`，历史结论保留，路径不再逐一更新。
+>
 > 审核日期：2026-08-09
 > 审核方式：代码实况核对 + 可行性推演
-> 审核范围：`deepagents/eval/PROPOSAL.md` 全文
+> 审核范围：`deepagents/eval/PROPOSAL.md` 全文（现 `applications/agent_federation/eval/PROPOSAL.md`）
 
 ---
 
@@ -204,7 +206,7 @@ monitor.report_tool_outcome(
 **问题**："人工产出，或从 zhiku 语料反推"——zhiku 目前只有 50 条烫金机数据，与会展领域无关。
 
 **代码实况**：
-- `zhanggui-zhiku/eval/golden_queries.jsonl` 全部是烫金机/万用表/电磁炉（家电领域）
+- `knowledge-service/eval/golden_queries.jsonl` 全部是烫金机/万用表/电磁炉（家电领域）
 - 会展领域语料尚未导入 zhiku（Issue #120 决策记录要求导入，但未执行）
 
 **影响**：如果会展语料未就绪，评测跑的 query 无法验证知识库子 Agent 的实际能力，只能测路由决策（不验证检索质量）。

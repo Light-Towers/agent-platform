@@ -237,7 +237,6 @@ class AdmissionQueue:
                     "UPDATE admission_queue SET status = 'completed', completed_at = now() "
                     "WHERE request_id = %s AND status IN (%s, %s)",
                     (request_id, ADMISSION_ADMITTED, ADMISSION_QUEUED),
-                    (request_id,),
                 )
                 # 取队首 queued（按优先级升序、最旧优先），行锁跳过并发已锁行
                 row = await conn.execute(

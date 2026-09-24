@@ -14,6 +14,7 @@ import pytest
 from agent_runtime.admission_gateway import PgAdmissionController
 from agent_runtime.planner.durability import (
     Checkpoint,
+    FencedWriteError,
     InMemoryCheckpointStore,
     InMemoryExecutionOwnershipStore,
     InMemoryIdempotencyStore,
@@ -49,19 +50,30 @@ class _FakeCursor:
                 eid = params[0]
                 row = p.checkpoints.get(eid)
                 if row:
-                    self._results = [(json.dumps(row["completed"]), row["updated_at"], row["resumable"], row.get("version", 0))]
+                    self._results = [(json.dumps(row["completed"]), row["updated_at"], row["resumable"], row.get("version", 0), row.get("generation"), row.get("state_schema_version", 1))]
             elif "insert" in sql and "on conflict" in sql:
-                # upsert（§HA C3 monotonic CAS）：仅当新 version > 现有 version 时覆盖
-                eid, completed_json, resumable, version = params
+                # upsert（§HA C3 monotonic CAS + V3-1 generation fencing）
+                eid, completed_json, resumable, version, generation, state_schema_version = params
                 completed = json.loads(completed_json)
                 cur = p.checkpoints.get(eid)
                 # CAS：version 递增 或 resumable 单向置位（False→True）允许覆盖
-                if cur is None or version > cur.get("version", 0) or (
+                version_ok = cur is None or version > cur.get("version", 0) or (
                     cur.get("resumable") is False and bool(resumable) is True
-                ):
+                )
+                # V3-1: generation fencing——None = 向后兼容，不 fencing
+                # 新 generation >= 现有 generation 才允许覆盖（新 owner 能覆盖旧 owner 的 checkpoint）
+                gen_ok = (
+                    generation is None
+                    or cur is None
+                    or cur.get("generation") is None
+                    or generation >= cur.get("generation")
+                )
+                if version_ok and gen_ok:
                     p.checkpoints[eid] = {
                         "completed": completed, "updated_at": time.time(),
                         "resumable": bool(resumable), "version": version,
+                        "generation": generation,
+                        "state_schema_version": state_schema_version or 1,
                     }
                     self._results = [(eid,)]
                 else:
@@ -82,22 +94,28 @@ class _FakeCursor:
         # --- execution_leases ---
         elif "execution_leases" in sql:
             if "insert" in sql and "on conflict" in sql:
-                # acquire CAS
+                # acquire CAS (V3-1: takeover 时 generation + 1)
                 eid, owner, ttl_s = params[0], params[1], float(params[2])
                 now = time.time()
                 cur = p.leases.get(eid)
                 if cur is None or cur[1] < now or cur[0] == owner:
-                    p.leases[eid] = (owner, now + ttl_s)
+                    if cur is None:
+                        generation = 1
+                    elif cur[0] == owner:
+                        generation = cur[2]
+                    else:
+                        generation = cur[2] + 1
+                    p.leases[eid] = (owner, now + ttl_s, generation)
                     self._results = [(eid,)]
                 else:
                     self._results = []
             elif "update" in sql and "set expires_at" in sql and "where execution_id" in sql and "owner" in sql:
-                # heartbeat (no owner check in our simplified impl)
+                # heartbeat (保留 generation)
                 eid, ttl_s = params[1], float(params[0])
                 now = time.time()
                 if eid in p.leases:
-                    cur_owner, _ = p.leases[eid]
-                    p.leases[eid] = (cur_owner, now + ttl_s)
+                    cur_owner, _, cur_gen = p.leases[eid]
+                    p.leases[eid] = (cur_owner, now + ttl_s, cur_gen)
                     self._results = [(eid,)]
                 else:
                     self._results = []
@@ -110,6 +128,15 @@ class _FakeCursor:
                     self._results = [("DELETE 1",)]
                 else:
                     self._results = [("DELETE 0",)]
+            elif "select generation" in sql and "where execution_id" in sql and "expires_at > now" in sql:
+                # get_generation (V3-1)
+                eid = params[0]
+                cur = p.leases.get(eid)
+                now = time.time()
+                if cur is not None and cur[1] > now:
+                    self._results = [(cur[2],)]
+                else:
+                    self._results = []
             elif "select owner" in sql and "where execution_id" in sql and "expires_at > now" in sql:
                 # get_owner
                 eid = params[0]
@@ -122,11 +149,11 @@ class _FakeCursor:
             elif "select execution_id" in sql and "expires_at <=" in sql:
                 # list_stale
                 now = time.time()
-                self._results = [(eid,) for eid, (_, exp) in p.leases.items() if exp <= now]
+                self._results = [(eid,) for eid, (_, exp, _) in p.leases.items() if exp <= now]
             elif "delete" in sql and "expires_at <=" in sql:
                 # reap_stale_notifying（§HA C4：DELETE stale 行，而非 SET NULL——owner 为 NOT NULL）
                 now = time.time()
-                reclaimed = [eid for eid, (_, exp) in p.leases.items() if exp <= now]
+                reclaimed = [eid for eid, (_, exp, _) in p.leases.items() if exp <= now]
                 for eid in reclaimed:
                     del p.leases[eid]
                 self._results = [(eid,) for eid in reclaimed]
@@ -192,7 +219,7 @@ class _FakePgPool:
     def __init__(self):
         self.checkpoints: dict[str, dict] = {}
         self.idempotency: dict[str, Any] = {}
-        self.leases: dict[str, tuple[str, float]] = {}  # execution_id -> (owner, expires_at)
+        self.leases: dict[str, tuple[str, float, int]] = {}  # execution_id -> (owner, expires_at, generation)
         self.slots: dict[str, float] = {}  # execution_id -> expires_at
 
     def connection(self):
@@ -299,6 +326,131 @@ class TestPgExecutionOwnershipStore:
         stale = await store.list_stale(time.time())
         assert "e1" in stale
         assert "e2" not in stale
+
+
+# ===== V3-1: strict fencing generation =====
+
+class TestV1FencingGeneration:
+    """V3-1: ownership generation 在 takeover 时单调递增，checkpoint 受 generation fencing 保护。"""
+
+    @pytest.mark.asyncio
+    async def test_first_acquire_generation_is_1(self):
+        pool = _FakePgPool()
+        store = PgExecutionOwnershipStore(pool)
+        assert await store.acquire("e1", "ownerA", 10.0) is True
+        assert await store.get_generation("e1") == 1
+
+    @pytest.mark.asyncio
+    async def test_takeover_generation_increments(self):
+        pool = _FakePgPool()
+        store = PgExecutionOwnershipStore(pool)
+        await store.acquire("e1", "ownerA", 0.01)
+        await asyncio.sleep(0.02)
+        # ownerB 抢过期 lease → generation 2
+        assert await store.acquire("e1", "ownerB", 0.01) is True
+        assert await store.get_generation("e1") == 2
+        await asyncio.sleep(0.02)
+        # ownerC 抢过期 lease → generation 3
+        assert await store.acquire("e1", "ownerC", 10.0) is True
+        assert await store.get_generation("e1") == 3
+
+    @pytest.mark.asyncio
+    async def test_same_owner_reacquire_generation_unchanged(self):
+        pool = _FakePgPool()
+        store = PgExecutionOwnershipStore(pool)
+        await store.acquire("e1", "ownerA", 0.01)
+        await asyncio.sleep(0.02)
+        # 同 owner 再 acquire（过期后续租）→ generation 不变
+        assert await store.acquire("e1", "ownerA", 10.0) is True
+        assert await store.get_generation("e1") == 1
+
+    @pytest.mark.asyncio
+    async def test_get_generation_expired_returns_none(self):
+        pool = _FakePgPool()
+        store = PgExecutionOwnershipStore(pool)
+        await store.acquire("e1", "ownerA", 0.01)
+        assert await store.get_generation("e1") == 1
+        await asyncio.sleep(0.02)
+        assert await store.get_generation("e1") is None
+
+    @pytest.mark.asyncio
+    async def test_old_generation_checkpoint_rejected(self):
+        """旧 owner（generation=1）在 takeover（generation=2）后写 checkpoint → FencedWriteError。"""
+        pool = _FakePgPool()
+        own = PgExecutionOwnershipStore(pool)
+        cp_store = PgCheckpointStore(pool)
+
+        # ownerA acquire → generation 1
+        await own.acquire("e1", "ownerA", 0.01)
+        gen_a = await own.get_generation("e1")
+        assert gen_a == 1
+
+        # ownerA 写 checkpoint（generation=1）
+        cp_a = Checkpoint("e1", {"n1": "r1"}, generation=gen_a)
+        await cp_store.save(cp_a)
+
+        # lease 过期，ownerB takeover → generation 2
+        await asyncio.sleep(0.02)
+        assert await own.acquire("e1", "ownerB", 10.0) is True
+        gen_b = await own.get_generation("e1")
+        assert gen_b == 2
+
+        # ownerB 写 checkpoint（generation=2，version 前进）→ 成功
+        cp_b = Checkpoint("e1", {"n1": "r1", "n2": "r2"}, generation=gen_b)
+        await cp_store.save(cp_b)
+
+        # ownerA（zombie）用旧 generation=1 写 checkpoint → FencedWriteError
+        cp_a_zombie = Checkpoint("e1", {"n1": "r1", "n3": "r3"}, generation=gen_a)
+        with pytest.raises(FencedWriteError):
+            await cp_store.save(cp_a_zombie)
+
+        # 验证 checkpoint 未被 zombie 覆盖
+        loaded = await cp_store.load("e1")
+        assert "n3" not in loaded.completed
+        assert loaded.completed == {"n1": "r1", "n2": "r2"}
+
+    @pytest.mark.asyncio
+    async def test_correct_generation_checkpoint_accepted(self):
+        """新 owner 用正确 generation 写 checkpoint → 成功。"""
+        pool = _FakePgPool()
+        own = PgExecutionOwnershipStore(pool)
+        cp_store = PgCheckpointStore(pool)
+
+        await own.acquire("e1", "ownerA", 0.01)
+        await asyncio.sleep(0.02)
+        await own.acquire("e1", "ownerB", 10.0)
+        gen_b = await own.get_generation("e1")
+
+        cp = Checkpoint("e1", {"n1": "r1"}, generation=gen_b)
+        await cp_store.save(cp)
+        loaded = await cp_store.load("e1")
+        assert loaded.completed == {"n1": "r1"}
+        assert loaded.generation == gen_b
+
+    @pytest.mark.asyncio
+    async def test_no_generation_backward_compatible(self):
+        """不带 generation 的 checkpoint 仅按 version fencing（向后兼容）。"""
+        pool = _FakePgPool()
+        cp_store = PgCheckpointStore(pool)
+
+        cp1 = Checkpoint("e1", {"n1": "r1"})  # generation=None
+        await cp_store.save(cp1)
+
+        cp2 = Checkpoint("e1", {"n1": "r1", "n2": "r2"})  # version 前进，generation=None
+        await cp_store.save(cp2)
+
+        loaded = await cp_store.load("e1")
+        assert loaded.completed == {"n1": "r1", "n2": "r2"}
+
+    @pytest.mark.asyncio
+    async def test_inmemory_takeover_generation(self):
+        """InMemory 实现同样支持 generation fencing。"""
+        store = InMemoryExecutionOwnershipStore()
+        assert await store.acquire("e1", "ownerA", 0.01) is True
+        assert await store.get_generation("e1") == 1
+        await asyncio.sleep(0.02)
+        assert await store.acquire("e1", "ownerB", 10.0) is True
+        assert await store.get_generation("e1") == 2
 
 
 # ===== B 组：并发 CAS 正确性 =====

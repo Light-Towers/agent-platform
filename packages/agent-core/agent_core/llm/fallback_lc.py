@@ -25,7 +25,6 @@ from langchain_core.language_models import BaseChatModel
 
 from agent_core.llm.fallback import FallbackChatModel
 
-
 # 各模型上下文窗口（tokens），用于向 deepagents 的 SummarizationMiddleware 暴露
 # max_input_tokens，使其按「模型窗口比例」自适应触发（而非硬编码 170K）。
 # 留约 2K 余量给系统提示与工具调用开销。

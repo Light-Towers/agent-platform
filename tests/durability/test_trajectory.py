@@ -72,7 +72,10 @@ async def test_execute_plan_persists_trajectory():
     plan = Plan(
         route="search",
         sub_query="q",
-        notes={"question": "q", "workspace_id": "default", "session_id": "sess-1", "planner": "deterministic"},
+        question="q",
+        workspace_id="default",
+        session_id="sess-1",
+        planner_name="deterministic",
     )
 
     events = [ev async for ev in execute_plan(plan, runtime)]

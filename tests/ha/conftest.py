@@ -57,7 +57,7 @@ async def pg_pool():
         pytest.skip("Windows 下 psycopg ProactorEventLoop 不可用，HA 测试需真实 PG（Linux CI 覆盖）")
     try:
         pool = await _db.init_pool(PG_URL)
-    except Exception as exc:  # noqa: BLE001 — 连接失败属环境缺失，应 skip 而非 fail
+    except Exception as exc:
         pytest.skip(f"未检测到可用 PostgreSQL（{PG_URL}）：{exc!r} —— HA 测试需真实 PG，Linux CI 自动覆盖")
     if pool is None:
         pytest.skip("init_pool 返回 None（无可用 PG），HA 测试需真实 PostgreSQL")

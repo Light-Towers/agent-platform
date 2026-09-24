@@ -27,6 +27,7 @@ from agent.subagents.network_search_agent import network_search_agent
 from agent.tracing.langfuse_adapter import langfuse_observe
 from api.context import reset_session_context, set_session_context, set_thread_context
 from api.monitor import monitor
+from tools.code_execution_tool import execute_python_code
 from tools.markdown_tools import generate_markdown
 from tools.pdf_tools import convert_md_to_pdf
 from tools.upload_file_read_tool import read_file_content
@@ -212,7 +213,7 @@ def _maybe_attach_bridged_tools(tools: list, query: str) -> list:
         if bridged:
             logger.info("AGENTIC_RUNTIME_BRIDGE：追加 %d 个桥接工具", len(bridged))
             return tools + bridged
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.warning("AGENTIC_RUNTIME_BRIDGE 工具构建失败，回退默认工具: %s", exc)
     return tools
 
@@ -263,7 +264,13 @@ async def get_main_agent(checkpointer=None):
         _main_checkpointer = _cp
         _store = await _create_store()
         _main_store = _store
+        # 沙箱工具默认不挂载（SANDBOX_TOOL_ENABLED=false，T1.2b）：
+        # 宿主代码执行面须显式开启，防 LLM 不可控调用
+        from agent.tool_registry import sandbox_tool_enabled
+
         _tools = [generate_markdown, convert_md_to_pdf, read_file_content]
+        if sandbox_tool_enabled():
+            _tools.append(execute_python_code)
         # Phase D 集成（opt-in, AGENTIC_RUNTIME_BRIDGE=true）：追加经统一 Runtime 治理的桥接工具，
         # 不改变默认工具集；任一环节失败仅跳过桥接工具，主链路零影响。
         _tools = _maybe_attach_bridged_tools(_tools, "")
@@ -283,11 +290,6 @@ async def get_main_agent(checkpointer=None):
 def get_main_checkpointer():
     """返回当前 main_agent 使用的 checkpointer（供 P1.3 定时清理复用）。"""
     return _main_checkpointer
-
-
-def get_main_store():
-    """返回当前 main_agent 使用的长期记忆 store（P2.2）。"""
-    return _main_store
 
 
 # P5：动态子 Agent（工具注册表 + 角色规约）
@@ -577,7 +579,10 @@ async def _execute_agent_core(task_query: str, workspace_id: str, main_agent=Non
     thread_token = set_thread_context(workspace_id)
     monitor.report_session_dir(session_dir_str)
 
-    config = {"configurable": {"thread_id": workspace_id}}
+    config = {
+        "configurable": {"thread_id": workspace_id},
+        "recursion_limit": int(os.getenv("FED_RECURSION_LIMIT", "50")),
+    }
 
     path_instruction = f"""
     【工作环境指令】
@@ -594,6 +599,13 @@ async def _execute_agent_core(task_query: str, workspace_id: str, main_agent=Non
     memory_ctx = await recall_typed_context(workspace_id, task_query)
 
     final_answer = ""
+    # B-3：子 agent 委派步数计数——在 astream 循环中检测 task tool 调用，
+    # 超 max_steps 时中止执行（recursion_limit 作为框架级兜底）。
+    from agent_runtime.planner.protocol import get_current_runtime
+
+    _runtime = get_current_runtime()
+    _max_subagent_steps = _runtime.max_steps if _runtime else int(os.getenv("FED_MAX_STEPS", "20"))
+    _subagent_step_count = 0
     # P1.6：同一 workspace_id（thread_id）串行执行，避免并发撕裂 checkpointer 状态。
     agent = main_agent or await get_main_agent()
     lock = await _get_thread_lock(workspace_id)
@@ -614,8 +626,19 @@ async def _execute_agent_core(task_query: str, workspace_id: str, main_agent=Non
                             if last_msg.tool_calls:
                                 for tool_call in last_msg.tool_calls:
                                     if tool_call['name'] == 'task':
+                                        _subagent_step_count += 1
+                                        if _subagent_step_count > _max_subagent_steps:
+                                            raise RuntimeError(
+                                                f"子 agent 委派步数超上限（{_max_subagent_steps}），"
+                                                f"中止执行以防无限递归"
+                                            )
                                         subagent_type = tool_call['args']['subagent_type']
-                                        logger.info("委派子智能体: %s", subagent_type)
+                                        logger.info(
+                                            "委派子智能体: %s (step %d/%d)",
+                                            subagent_type,
+                                            _subagent_step_count,
+                                            _max_subagent_steps,
+                                        )
                                         monitor.report_assistant(
                                             subagent_type,
                                             {'description': tool_call['args']['description']}

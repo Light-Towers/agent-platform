@@ -11,7 +11,7 @@
 
 ```bash
 # 安装（在仓库根目录，editable 安装共享内核）
-pip install -e ./agent-core -e ./shared-schemas -e ./kefu-service
+pip install -e ./packages/agent-core -e ./packages/shared-schemas -e ./applications/kefu-service
 
 # 启动（默认 :8003）
 uvicorn kefu_agent:app --host 0.0.0.0 --port 8003
@@ -30,6 +30,5 @@ uvicorn kefu_agent:app --host 0.0.0.0 --port 8003
 `agent_federation/agent/config.py` 中：
 
 - `KEFU_USE_ADAPTER=false`（默认）→ 直连本服务 `KEFU_SERVICE_URL`（默认 `http://localhost:8003`）的 `/invoke`。
-- `KEFU_USE_ADAPTER=true` → 经 `kefu-adapter`（`:8002`）兼容路径。
 
-> 历史说明：`kefu-adapter` 转换层已于 2026-08 移除（无调用方），外部 `legacy` 退役由运维执行。
+> 历史说明：`kefu-adapter` 转换层已于 2026-08 移除（无调用方），`KEFU_USE_ADAPTER` 开关保留仅为兼容旧配置，实际均走直连路径。外部 `legacy` 退役由运维执行。

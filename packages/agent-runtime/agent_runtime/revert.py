@@ -61,6 +61,7 @@ class RevertHandler:
                         "thread_id": session_id,
                         "checkpoint_id": new_checkpoint["id"],
                         "parent_checkpoint_id": checkpoint_id,
+                        "checkpoint_ns": "",
                     }
                 },
                 new_checkpoint,

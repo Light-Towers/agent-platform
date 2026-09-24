@@ -22,10 +22,21 @@ except ImportError:
     def _start_span(*a, **kw):
         yield None
 
-ZHIKU_API_URL = os.getenv("ZHIKU_API_URL", "http://localhost:8900")
-ZHIKU_API_KEY = os.getenv("ZHIKU_API_KEY", "")
+KNOWLEDGE_SERVICE_URL = os.getenv("KNOWLEDGE_SERVICE_URL", "http://localhost:8900")
+KNOWLEDGE_SERVICE_KEY = os.getenv("KNOWLEDGE_SERVICE_KEY", "")
 
 _TIMEOUT_S = 10.0
+
+# C-3: 进程级共享 httpx.Client（连接池复用）
+_shared_sync_client: httpx.Client | None = None
+
+
+def _get_shared_sync_client() -> httpx.Client:
+    global _shared_sync_client
+    if _shared_sync_client is None:
+        _shared_sync_client = httpx.Client(timeout=_TIMEOUT_S)
+    return _shared_sync_client
+
 
 # 可重试：网络超时 / 连接错误；不可重试：HTTP 4xx（含 429 限流）
 _RETRYABLE = (httpx.TimeoutException, httpx.ConnectError)
@@ -44,7 +55,7 @@ def check_zhiku_health() -> bool:
     不抛异常，所有错误静默处理。
     """
     global _zhiku_healthy
-    url = f"{ZHIKU_API_URL.rstrip('/')}/health"
+    url = f"{KNOWLEDGE_SERVICE_URL.rstrip('/')}/health"
     try:
         with httpx.Client(timeout=5.0) as client:
             resp = client.get(url)
@@ -79,8 +90,8 @@ def is_zhiku_healthy() -> bool:
 )
 def _zhiku_post(url: str, payload: dict, headers: dict) -> httpx.Response:
     """带重试的知识库 HTTP POST（仅网络超时/连接错误重试，4xx 不重试）。"""
-    with httpx.Client(timeout=_TIMEOUT_S) as client:
-        return client.post(url, json=payload, headers=headers)
+    client = _get_shared_sync_client()
+    return client.post(url, json=payload, headers=headers)
 
 
 @tool
@@ -100,10 +111,13 @@ def zhiku_retrieve(query: str, item_name: str = "") -> str:
         return "知识库服务暂不可用（已探测到不健康），请使用其他工具获取信息。如为紧急问题，可尝试网络搜索。"
 
     with _start_span("tool.zhiku_retrieve", attrs={"query": query}):
-        url = f"{ZHIKU_API_URL.rstrip('/')}/api/v1/retrieve"
+        from agent_core.tracing_propagation import inject_traceparent
+
+        url = f"{KNOWLEDGE_SERVICE_URL.rstrip('/')}/api/v1/retrieve"
         headers = {"Content-Type": "application/json"}
-        if ZHIKU_API_KEY:
-            headers["Authorization"] = f"Bearer {ZHIKU_API_KEY}"
+        if KNOWLEDGE_SERVICE_KEY:
+            headers["Authorization"] = f"Bearer {KNOWLEDGE_SERVICE_KEY}"
+        headers = inject_traceparent(headers)
 
         payload = {"query": query}
         if item_name:

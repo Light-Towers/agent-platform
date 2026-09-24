@@ -3,8 +3,8 @@
 from agent_server.sql.pipeline import format_result, text_to_sql
 
 
-async def sql_query(query: str, llm=None) -> list[str]:
+async def sql_query(query: str, llm=None, workspace_id: str = "") -> list[str]:
     from agent_runtime.db import get_pool
 
-    payload = await text_to_sql(get_pool(), query, llm=llm)
+    payload = await text_to_sql(get_pool(), query, llm=llm, workspace_id=workspace_id)
     return [format_result(payload)]

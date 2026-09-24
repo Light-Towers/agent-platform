@@ -48,15 +48,15 @@ class TestCircuitBreaker:
         br = get_breaker_sync("test-trip")
         br._state = CircuitState.CLOSED
         br._successes = []
-        br._failures = []
-        br.min_requests = 5
+        br._failures_list = []
+        br._min_requests = 5
 
         async def run():
             for _ in range(5):
                 assert await br.allow()
                 await br.record_failure()
             # 5/5 失败 -> 超过 0.5 阈值 -> OPEN
-            assert br.state() == CircuitState.OPEN
+            assert br.state == CircuitState.OPEN
             # OPEN 且冷却未到期 -> 拒绝
             assert not await br.allow()
 
@@ -68,14 +68,14 @@ class TestCircuitBreaker:
         br = get_breaker_sync("test-recover")
         br._state = CircuitState.OPEN
         br._opened_at = 0.0  # 很久以前
-        br.cooldown_seconds = 0.0
+        br._cooldown_seconds = 0.0
 
         async def run():
             assert await br.allow()  # 冷却到期 -> HALF_OPEN
-            assert br.state() == CircuitState.HALF_OPEN
-            for _ in range(br.half_open_probes):
+            assert br.resolved_state() == CircuitState.HALF_OPEN
+            for _ in range(br._half_open_probes):
                 await br.record_success()
-            assert br.state() == CircuitState.CLOSED
+            assert br.resolved_state() == CircuitState.CLOSED
 
         asyncio.run(run())
 
@@ -121,8 +121,8 @@ class TestDelegatingSubAgent:
         out = asyncio.run(agent.ainvoke({"query": "x"}))
         assert out["degraded"] is True
         assert out["degraded_reason"] == "remote_failed"
-        # 熔断器已记录一次失败（窗口非空）
-        assert len(agent._breaker._failures) >= 1
+        # 熔断器已记录一次失败（窗口非; 非空）
+        assert len(agent._breaker._failures_list) >= 1
 
 
 class TestP3Observability:
@@ -145,14 +145,14 @@ class TestP3Observability:
         br = get_breaker_sync("obs-trip")
         br._state = CircuitState.CLOSED
         br._successes = []
-        br._failures = []
-        br.min_requests = 2
+        br._failures_list = []
+        br._min_requests = 2
 
         async def run():
             for _ in range(2):
                 assert await br.allow()
                 await br.record_failure()
-            assert br.state() == CircuitState.OPEN
+            assert br.state == CircuitState.OPEN
 
         asyncio.run(run())
 

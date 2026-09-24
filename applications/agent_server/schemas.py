@@ -54,7 +54,7 @@ __all__ = [
     "HistoryResponse",
 ]
 
-Capability = Literal["search", "rag", "sql", "direct", "mcp"]
+Capability = Literal["search", "rag", "sql", "direct", "mcp", "code_execution"]
 
 
 class QueryRequest(BaseQueryRequest):

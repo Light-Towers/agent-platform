@@ -2,9 +2,59 @@
 
 本仓库为 uv workspace monorepo。**唯一受支持的安装/运行入口是根 `uv.lock` + `uv sync`**，子包不再维护独立 `uv.lock`（见 v2 修复 #14）。
 
+## MCP SDK 真实接入（2026-09-22）
+
+> `mcp_client.py` 的 MVP 桩（`_invoke_tool` / `_discover_tools` / `_connect_*`）替换为真实 MCP SDK 调用，MCP 工具可经 stdio / SSE transport 真正连接、发现、调用。
+> 验证：91 passed（agent-runtime）/ 361 passed 15 skipped（根）/ ruff 0 error。
+
+### 改动
+
+- **`_connect_stdio`**：`StdioServerParameters` + `stdio_client()` async ctx → `ClientSession(read, write)` → `session.initialize()`，返回 `(AsyncExitStack, session)`。
+- **`_connect_sse`**：`sse_client(url)` async ctx → `ClientSession` → `initialize()`，同上。
+- **`_discover_tools`**：`await session.list_tools()` → `[t.name for t in result.tools]`。
+- **`_invoke_tool`**：`await conn.session.call_tool(tool_name, params)` 返回 `CallToolResult`（替换原 mock dict）。
+- **`_reduce_result`**：处理 `CallToolResult.content`（`TextContent.text` 提取），`is_error=True` 时 raise `RuntimeError`（`call_tool` 捕获后返回 `McpToolResult(success=False, error="TOOL_RETURNED_ERROR")`）。
+- **`close_all`**：`await conn._exit_stack.aclose()` 按 LIFO 关闭 session → transport。
+- **`_MCPConnection`**：新增 `_exit_stack: AsyncExitStack | None` 字段。
+- **`pyproject.toml`**：`agent-runtime` 新增 `[project.optional-dependencies] mcp = ["mcp>=0.9"]`。
+
+### 测试
+
+- 新增 `test_mcp_client_real.py`（13 例）：`_reduce_result` 处理 `CallToolResult` / `is_error` / 截断 / dict 兼容 / 纯字符串；`_invoke_tool` 真实调用 + SDK 缺失降级；`_discover_tools` 真实 `list_tools`；`close_all` 关闭 `AsyncExitStack`；`call_tool` 集成（`is_error` → 失败 / `TextContent` → evidence）。
+- 现有 `test_mcp_skill.py` 8 例全绿（手动注入 `_MCPConnection`，不经 `connect_all`，不受影响）。
+
+## Plan-F 架构收口 + Skill 体系完善（2026-09-21）
+
+> Plan-F 4 个演进方向全量闭合，Skill 注册体系完善，沙箱代码执行落地。
+> 验证：534 passed / 15 skipped / eval 15/15 = 100% / ruff 0 error。
+
+### Plan-F 演进方向闭合
+
+- **Plan.notes → 显式字段**（`36a3c0d`）：删除 `Plan.notes` 万能字典，所有字段提升为 Plan 显式字段（session_id/planner_name/constraints/kwargs 等），execution_graph.py 读取路径全部切换。PlannerContext 修复重复 `question` 字段 bug。
+- **Dynamic Agent 纳入 Skill 体系**（`e477397`）：`AgenticPlanner.execute()` 加 `runtime.execution()` + `skill_guard("agentic")` 包裹，与 `arun()` 对称。agentic 执行受统一组合治理（步数/深度/循环），`SkillCompositionError` 直接抛出。
+- **Workflow Definition → Workflow Skill 编译**（✅ 已实现）：`compile_workflow()` / `load_workflow_yaml()` / `discover_workflows()` 全部就绪，`agent_server/main.py` 启动期自动加载 `workflows/*.y*ml`。
+- **SkillRegistry/SkillRuntime 分离**：暂缓（"边界出现再拆"原则，当前仅 timeout + 契约校验两个边界）。
+
+### Skill 注册体系完善
+
+- **MCP 工具自动注册**（`c472d59`）：`register_mcp_skills()` 把 MCPClientManager 发现的每个工具编译为 `SkillKind.REMOTE` Skill，命名 `mcp.{server_id}.{tool_name}`。启动期自动注册，Planner 经统一 `discover()` / `delegate()` 入口。
+- **沙箱代码执行**（`7fcf303`）：`SandboxExecutor` 双后端（Docker 优先 subprocess 降级）。Docker 安全措施：`--rm --network=none --read-only --tmpfs /tmp --memory=512m --cpus=1 --security-opt=no-new-privileges --user=nobody`。注册为 `code_execution` Skill。
+- **Planner 路由到沙箱**（`bf1f44c`）：启发式路由增加 `code_execution`（优先级最高），`_extract_code` 从用户输入提取代码块（支持 ` ```python ... ``` ` 格式），graph.py 增加代码执行节点。eval golden 15 条（含 3 条 code_execution）。
+
+### Skill 注册体系终态
+
+| 函数 | 类型 | 用途 |
+|------|------|------|
+| `as_function_skill()` | FUNCTION | 进程内确定性函数 |
+| `as_agent_skill()` | AGENT | 本地 subagent（LLM self-reasoning） |
+| `as_remote_skill()` | REMOTE | 远程子服务（HTTP / Agent Protocol） |
+| `compile_workflow()` | WORKFLOW | YAML 声明式工作流编译 |
+| `register_mcp_skills()` | REMOTE | MCP 工具自动注册 |
+| `as_sandbox_skill()` | FUNCTION | 沙箱代码执行（Docker/subprocess 隔离） |
+
 ## Runtime 治理路线图全量闭环（2026-08-21）
 
-> `docs/runtime-governance-roadmap.md` P0~P5 全区段落地；`docs/tech-debt-hardcoded-logic.md` TD-1~TD-14 全部闭环。
+> `docs/operations/runtime-governance-roadmap.md` P0~P5 全区段落地；`docs/tech-debt-hardcoded-logic.md` TD-1~TD-14 全部闭环。
 > 验证：ruff 0 error / 架构 lint 通过 / 根 tests **541 passed**（原 import 失败目录已修复）/ 联邦 unit **92 passed** / kefu **8 passed** / eval **12/12 = 100%**。
 
 ### 计量闭环（P2）
@@ -117,7 +167,7 @@
 - **SessionCoordinator 语义明确（P0）**：docstring 声明 **process-local 单实例**（`_active/_queues/_conditions` 均 asyncio 进程内状态），多副本下「同 session 串行」不成立；演进方向：分布式 lease / durable execution 持有 ownership（本期不做）。
 - **Skill 入参契约真正执行（P1）**：`SkillRegistry.execute()` 新增 `_validate_input()`——`required` 存在性 + `properties` 类型校验，缺 schema 向后兼容、不拒绝注册方注入参数（mcp 的 state/mcp_manager）；传错参数抛明确 `SkillExecutionError` 而非内部 Python exception。新增 3 测试。
 - **术语精确化**：`SkillKind.WORKFLOW` 注释与架构文档统一「Static DAG → Workflow（Static/Conditional）」，LangGraph 明确为执行实现。
-- **演进方向留档（暂缓重构）**：SkillRegistry/SkillRuntime 分离、Dynamic Agent 纳入 Skill 体系、`Plan.notes`→`ExecutionContext`、Workflow Definition→Workflow Skill 编译——写入 `docs/plan-f-single-runtime-multi-planner.md`，按「边界出现再拆」原则执行。
+- **演进方向留档（暂缓重构）**：SkillRegistry/SkillRuntime 分离——写入 `docs/plan-f-single-runtime-multi-planner.md`，按「边界出现再拆」原则执行。`Plan.notes`→显式字段 ✅ 完成、Dynamic Agent 纳入 Skill 体系 ✅ 完成、Workflow Definition→Workflow Skill 编译 ✅ 已实现（2026-09-21）。
 - **测试**：根 tests 180 passed（governance 7 + capability registry 16 含契约测试）/ 联邦 unit 89 passed（零回归），ruff 0 error。
 
 ## Plan-F 收尾（2026-08-19）—— Capability→Skill 全量 rename
@@ -256,5 +306,9 @@
 - **TB-4 key 闭环** `app/infra/cache.py`：`_cache_write` 的 `cache_key` 由明文 `question.strip().lower()` 改为内核 `build_cache_key(intent="", rewritten_query=...)`，与 deepagents 共用同一 hash 逻辑（lookup 端纯向量命中，不受影响）。
 - **U-1 收敛** `app/schemas.py`：普查确认无生产客户端仍发旧名 `question`/`thread_id`（deepagents `run-all.py` 调 adapter `/query` 已用标准名 `query`），**彻底移除** `AliasChoices` 双写兼容，入站契约收敛为纯标准名 `query`/`session_id`；清理未使用 `AliasChoices` import。`tests/test_api_smoke.py`、`agent-core/tests/test_guardrails.py` 示例字段名同步改 `query`。内部 `AgentState.question` 为 graph state 字段，与入站契约无关，保持不动。
 - **文档一致性** `docs/architecture-improvement-plan.md`：§6.1 TB-1/TB-2 标注为「已落地（桥接）」；§6.2 U-1 标注「已闭环」；优化 A/B 标题回升「✅ 已落地」；#11 勘误回填。
+
+## eval golden 已增至 15 条（2026-09-22）
+
+> eval golden 集已增至 **15 条**（原 12 条）。上方历史条目中的 "eval 12/12" 为当时事实记录，按历史保留不改。
 
 

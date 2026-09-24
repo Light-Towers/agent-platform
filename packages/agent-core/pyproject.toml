@@ -34,9 +34,10 @@ tracing = [
 llm-openai = [
     "langchain-openai",
 ]
-# ASGI 安全护栏中间件
+# ASGI 安全护栏中间件 + 统一 app 工厂（P2）：starlette 供护栏/错误响应，fastapi 供 build_api_app。
 web = [
     "starlette",
+    "fastapi",
 ]
 # Mongo 历史记忆实现（MongoHistoryStore + MongoCheckpointer）
 memory-mongo = [
@@ -81,10 +82,32 @@ target-version = "py311"
 extend-exclude = [".venv", "tests"]
 
 [tool.ruff.lint]
-select = ["E4", "E7", "E9", "F"]
+# I(isort)：2026-09-21 F-S0-07 与根配置对齐（存量 10 处 I001 已 --fix 收敛，新代码不得再引入未排序 import）。
+# BLE001/S110：P0-4 盲捕获门禁（2026-09-24）——内核包最高优先，已启用；legacy 存量入下方基线，只减不增。
+select = ["E4", "E7", "E9", "F", "I", "BLE001", "S110"]
 ignore = [
     "E722",
     "F403",
     "F405",
     "F811",
 ]
+
+# P0-4 盲捕获门禁棘轮基线：逐文件锁定 legacy 存量，新代码不得新增；策略为整包基线豁免（源码不写逐点 noqa）。
+# 进度见 docs/plans/plan-p0-4-blind-except-ratchet-2026-09-24.md。
+[tool.ruff.lint.per-file-ignores]
+"agent_core/events.py" = ["BLE001"]
+"agent_core/intent/classifier.py" = ["BLE001", "S110"]
+"agent_core/intent/llm_judge.py" = ["BLE001"]
+"agent_core/llm/fallback.py" = ["BLE001"]
+"agent_core/memory/__init__.py" = ["BLE001"]
+"agent_core/memory/embedder.py" = ["BLE001", "S110"]
+"agent_core/memory/mongo.py" = ["BLE001"]
+"agent_core/memory/semantic.py" = ["BLE001"]
+"agent_core/memory/store.py" = ["BLE001"]
+"agent_core/memory/vector_backend.py" = ["BLE001", "S110"]
+"agent_core/monitor.py" = ["BLE001"]
+"agent_core/tokenizer.py" = ["BLE001"]
+"agent_core/tools/adapters/mcp.py" = ["BLE001", "S110"]
+"agent_core/tools/guarded.py" = ["BLE001", "S110"]
+"agent_core/tracing.py" = ["BLE001", "S110"]
+"agent_core/tracing_propagation.py" = ["BLE001"]

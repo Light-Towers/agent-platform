@@ -20,8 +20,8 @@ All notable changes to this project are documented here.
 - **docker-compose 扩展**: 新增 langfuse + clickhouse + valkey-bundle:9.1.2
 
 #### Phase 1 · 服务化拆分
-- **wenda-adapter** (`../wenda-adapter/`): SSE→JSON 适配层，消费 wenda SSE 流聚合 QueryResponse
-- **kefu-adapter** (`../kefu-adapter/`): legacy REST 适配层，转发 /api/messages
+- **wenda-adapter** (`../wenda-adapter/`): SSE→JSON 适配层，消费 wenda SSE 流聚合 QueryResponse（已于 2026-08 退役移除，历史记录保留）
+- **kefu-adapter** (`../kefu-adapter/`): legacy REST 适配层，转发 /api/messages（已于 2026-08 退役移除，历史记录保留）
 - **shared-schemas** (`../shared-schemas/`): 统一 Pydantic schema（QueryRequest/QueryResponse/HealthResponse/IntentResult/SubagentCall）
 - **deepagents 入站鉴权**: 复用 SecurityGuardsMiddleware + API_KEY
 

@@ -26,7 +26,7 @@ try:  # pragma: no cover - 依赖可选
     import tiktoken
 
     _TIKTOKEN_AVAILABLE = True
-except Exception:  # noqa: BLE001 - 导入失败直接降级
+except ImportError:
     _TIKTOKEN_AVAILABLE = False
     tiktoken = None  # type: ignore[assignment]
 
@@ -58,7 +58,7 @@ def _resolve_encoding(model: str | None):
         if model.startswith(prefix):
             try:
                 return tiktoken.get_encoding(enc_name)
-            except Exception:  # noqa: BLE001
+            except Exception:
                 return None
     # 非 OpenAI 模型：不调用 encoding_for_model 兜底（会误用 OpenAI 编码表）。
     return None
@@ -95,7 +95,7 @@ def count_tokens(text: str, model: str | None = None) -> int:
     if enc is not None:
         try:
             return len(enc.encode(text))
-        except Exception:  # noqa: BLE001 - 极端输入防御
+        except Exception:
             logger.debug("tiktoken 编码失败，降级启发式: %r", text[:32])
     return int(len(text) / _HEURISTIC_DIVISOR)
 

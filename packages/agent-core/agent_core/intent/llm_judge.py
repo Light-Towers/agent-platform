@@ -15,13 +15,13 @@ import json
 import logging
 from typing import Any
 
+from agent_core.intent.classifier import _keyword_rule, classify_l1_async
 from agent_core.intent.models import (
     CLARIFY_THRESHOLD,
     IntentCandidate,
     IntentLabel,
     IntentResult,
 )
-from agent_core.intent.classifier import classify_l1_async, _keyword_rule
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +48,7 @@ def _parse_llm_json(content: str) -> dict[str, Any] | None:
             text = text[4:]
     try:
         return json.loads(text)
-    except Exception:
+    except (ValueError, TypeError):  # json.loads 仅抛非 str/非法 JSON
         return None
 
 

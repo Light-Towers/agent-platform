@@ -31,6 +31,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from agent_runtime.effect_contract import EffectContract
+from agent_runtime.forensic import StepForensic
 from agent_runtime.planner.durability import (
     ExecutionNotOwned,
     ExecutionOwnershipStore,
@@ -39,7 +41,20 @@ from agent_runtime.planner.durability import (
 )
 from agent_runtime.trajectory.models import TrajectoryStep
 
-StreamEventType = Literal["route", "evidence", "memory", "answer", "error", "status", "replan"]
+StreamEventType = Literal["route", "evidence", "memory", "answer", "error", "status", "replan", "suspended"]
+
+
+class ExecutionSuspended(Exception):
+    """执行挂起信号：Skill 返回 ``__awaitable__`` 标记，执行暂停等待外部回调。
+
+    非业务异常——是控制流信号，被 ``_run_graph_in_place`` 捕获后保存 checkpoint
+    并产出 ``suspended`` 事件。同步 Skill 路径不触发。
+    """
+
+    def __init__(self, task_id: str, node_id: str | None = None) -> None:
+        self.task_id = task_id
+        self.node_id = node_id
+        super().__init__(f"execution suspended: task_id={task_id} node_id={node_id}")
 
 # 当前执行上下文绑定的 Runtime（在 ``execution()`` 边界内 set，边界外为 None）。
 # 供嵌套 Skill 执行器（如 Workflow Skill 内部执行子 Skill）获取 Runtime 并经
@@ -81,28 +96,34 @@ class Plan(BaseModel):
     ``graph`` 类型为 ``Any`` 以避免 protocol ↔ execution_graph 循环导入，实际为
     ``ExecutionGraph | None``。``mode="graph"`` 时 ``graph`` 必须非空。
 
-    .. deprecated:: 0.2.0
-       ``notes`` 承载决策期附加信息，正在迁移至对应 Context 层（PlannerContext/ConversationContext/TaskState/PlanningState/ExecutionIdentity）。
-       新代码禁止写入；读取路径暂保留兼容，后续版本将删除。
+    字段归属（Plan.notes 解耦后）：
+    - ``question`` / ``last_snapshot``：决策期输入（与 PlannerContext 对应字段同源）；
+    - ``workspace_id`` / ``user_id`` / ``session_id`` / ``planner_name``：身份/轨迹元数据；
+    - ``messages`` / ``compacted``：对话状态（与 ConversationContext 对应）；
+    - ``constraints``：任务约束（与 TaskState.constraints 对应）；
+    - ``iterations``：重规划计数；
+    - ``kwargs``：单 route delegate 调用参数（execute_plan else 分支）。
     """
 
     mode: Literal["deterministic", "workflow", "graph", "agentic"] = "deterministic"
     route: str = ""
     sub_query: str = ""
     reason: str = ""
-    # 显式字段：替代 Plan.notes 迁移（P1 架构债务）
     question: str = ""
     workspace_id: str = "default"
     user_id: str = "default"
+    session_id: str = ""
+    planner_name: str = ""
     last_snapshot: dict[str, Any] | None = None
     messages: list[Any] = Field(default_factory=list)
     compacted: bool = False
     iterations: int = 0
+    constraints: dict[str, Any] = Field(default_factory=dict)
+    kwargs: dict[str, Any] = Field(default_factory=dict)
     mcp_server: str = ""
     mcp_tool: str = ""
     mcp_params: dict[str, Any] = Field(default_factory=dict)
     execution_mode: str = ""
-    notes: dict[str, Any] = Field(default_factory=dict)
     graph: Any = None
 
 
@@ -129,9 +150,14 @@ class PlannerContext(BaseModel):
     mcp_tool: str = ""
     mcp_params: dict[str, Any] = Field(default_factory=dict)
 
-    # 显式字段：替代 Plan.notes 迁移（P1 架构债务）
-    question: str = ""
-    previous_execution: dict[str, Any] | None = None  # 上一轮执行快照
+    # 上一轮执行的结构化快照（与 last_snapshot 同义，供 Planner 在 prompt 组装时消费）
+    previous_execution: dict[str, Any] | None = None
+
+    # Context Governance：经 ContextGovernor 治理后的 Memory 字符串列表
+    #（Select → Recall → Authorize → Validate → QualityScore）。
+    # 由 app 层在构建 PlannerContext 前调 governor.govern_memories() 填充；
+    # Planner 在 prompt 组装时注入这些已治理的记忆（空列表 = 无可用记忆或 Governor 未接入）。
+    governed_memories: list[str] = Field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -140,10 +166,16 @@ class ExecutionIdentity:
 
     生命周期：随 ExecutionContext 创建，随 execution 结束销毁。
     用于：trace / audit / authorization / memory namespace / tenant isolation
+
+    V3 §0.5 三层 ID 关系：
+    - session_id：对话/业务会话上下文（跨多次 AgentRun）
+    - agent_run_id：一次 Agent 目标执行（跨多次 Execution / retry）
+    - execution_id：Runtime 可恢复、可调度的执行单元（全局唯一，不可复用）
     """
     execution_id: str
     workspace_id: str = "default"
     user_id: str = "default"
+    tenant_id: str = "default"
 
 
 class SkillCompositionError(RuntimeError):
@@ -207,6 +239,21 @@ class ExecutionContext:
     ownership_lost: bool = False
     # §HA：本次执行持有的 lease owner 标识（供心跳/ownership-loss 检测用）。
     lease_owner: str | None = None
+    # V3-1：本次执行持有的 ownership generation（takeover 时单调递增）。
+    # checkpoint save 带此值做 generation fencing——旧 owner 用过期 generation 写被拒。
+    lease_generation: int | None = None
+    # V3 §10：企业级平台执行上下文字段（全部向后兼容，默认值不破坏现有调用方）
+    # 三层 ID：session > agent_run > execution（§0.5）
+    agent_run_id: str | None = None
+    session_id: str | None = None
+    # 租户 / 认证 / 授权
+    tenant_id: str | None = None
+    principal: str | None = None
+    authorization_context: dict[str, Any] = field(default_factory=dict)
+    # 可观测性
+    trace_id: str | None = None
+    # 取消令牌（asyncio.Event 或外部信号）
+    cancellation_token: Any = None
 
     @property
     def call_depth(self) -> int:
@@ -274,10 +321,12 @@ class ExecutionContext:
         error: str | None = None,
         latency: float = 0.0,
         tokens: int = 0,
+        forensic: dict[str, Any] | None = None,
     ) -> None:
         """记录一次 Skill 调用明细（P3-1 Trajectory 来源）。
 
         ``index`` 取当前 ``steps`` 长度（同 execution 内从 0 递增），保证 replay 顺序。
+        ``forensic`` 为 V3-9 per-step 版本指纹（StepForensic.to_dict()）。
         """
         self.steps.append(
             TrajectoryStep(
@@ -288,6 +337,7 @@ class ExecutionContext:
                 latency=latency,
                 tokens=tokens,
                 index=len(self.steps),
+                forensic=forensic,
             )
         )
 
@@ -329,6 +379,8 @@ class PlannerRuntime:
         workspace_id: str = "default",
         user_id: str = "default",
         replica_id: str = "replica",
+        post_execution_hooks: list[Any] | None = None,
+        awaitable_task_store: Any = None,
     ):
         self.registry = registry
         self.llm = llm
@@ -364,6 +416,11 @@ class PlannerRuntime:
         self.last_snapshot: dict[str, Any] | None = None
         # 最近一次执行的 Trajectory 记录（execute_plan 写入，P3-1 持久化后回写）
         self.last_trajectory: Any = None
+        # 执行完成后自动触发的 hooks（如 EpisodicSink / ProceduralSink），
+        # 每个 hook 签名：async hook(trajectory: TrajectoryRecord, runtime: PlannerRuntime) -> None
+        self.post_execution_hooks: list[Any] = post_execution_hooks or []
+        # V3-3: AwaitableTask 持久化（delegate 检测 __awaitable__ 时创建 AwaitableTask）
+        self.awaitable_task_store = awaitable_task_store
         # 执行期上下文（per-request，经 ContextVar 隔离）：execution() 入口创建
         # ExecutionContext 并 set，同 task 链内共享，跨 task 互不干扰。
         self._ctx_var: contextvars.ContextVar[ExecutionContext | None] = contextvars.ContextVar(
@@ -374,6 +431,17 @@ class PlannerRuntime:
     def context(self) -> ExecutionContext | None:
         """当前执行上下文（``execution()`` 边界内有效，边界外为 None）。"""
         return self._ctx_var.get()
+
+    def get_effect_contract(self, skill_name: str) -> "EffectContract | None":
+        """V3-2：查询 Skill 声明的 EffectContract（未注册 / 未声明返回 None）。
+
+        执行图节点失败时据此决定 retry / recover 动作（``decide_failure_action``）。
+        """
+        try:
+            skill = self.registry.get(skill_name)
+        except (KeyError, AttributeError):
+            return None
+        return getattr(skill, "effect_contract", None)
 
     def _on_llm_usage(self, tokens: int, cost: float) -> None:
         """P2-2 计量回调：LLM 客户端每次调用后上报 usage → 当前 ExecutionContext 聚合。
@@ -457,6 +525,8 @@ class PlannerRuntime:
                 f"未能获取 execution={eid} 的所有权（lease 被其他副本持有或未过期）"
             )
         ctx.lease_owner = owner
+        # V3-1：记录本次 acquire 拿到的 generation，供 checkpoint save 做 generation fencing。
+        ctx.lease_generation = await self.ownership_store.get_generation(eid)
 
         hb_task: "asyncio.Task | None" = None
         if lease_ttl is not None:
@@ -541,6 +611,22 @@ class PlannerRuntime:
             ctx = self._ctx_var.get()
             t0 = time.monotonic()
             tokens_before = ctx.tokens_used if ctx else 0
+            # V3-9: 构建 per-step 版本指纹
+            _skill_version = None
+            try:
+                _skill = self.registry.get(name)
+                _skill_version = getattr(_skill, "version", None)
+            except (KeyError, AttributeError):
+                pass
+            _model = getattr(self.llm, "model", None) if self.llm else None
+            step_forensic = StepForensic(
+                skill_name=name,
+                skill_version=_skill_version,
+                tool_name=name,
+                tool_version=_skill_version,
+                model=_model,
+            )
+            _forensic_dict = step_forensic.to_dict()
             try:
                 result = await self.registry.execute(name, **kwargs)
             except Exception as exc:
@@ -548,12 +634,44 @@ class PlannerRuntime:
                     ctx.record_step(
                         name, kwargs, None, str(exc),
                         time.monotonic() - t0, ctx.tokens_used - tokens_before,
+                        forensic=_forensic_dict,
                     )
                 raise
+            # V3-3: 检测异步 Skill 返回（__awaitable__ 标记）→ 创建 AwaitableTask + 挂起执行
+            if (
+                isinstance(result, dict)
+                and result.get("__awaitable__")
+                and ctx is not None
+                and self.awaitable_task_store is not None
+            ):
+                from agent_runtime.awaitable_task import (
+                    AwaitableKind,
+                    AwaitableState,
+                    AwaitableTask,
+                )
+
+                task = AwaitableTask(
+                    execution_id=ctx.execution_id,
+                    step_id=name,
+                    kind=AwaitableKind.EXTERNAL,
+                    provider=str(result.get("provider", "unknown")),
+                    provider_task_id=str(result.get("task_id", "")),
+                    state=AwaitableState.SUBMITTED,
+                    metadata={"skill_name": name, "submitted_result": result},
+                )
+                await self.awaitable_task_store.save(task)
+                if ctx is not None:
+                    ctx.record_step(
+                        name, kwargs, result, None,
+                        time.monotonic() - t0, ctx.tokens_used - tokens_before,
+                        forensic=_forensic_dict,
+                    )
+                raise ExecutionSuspended(task_id=task.task_id, node_id=name)
             if ctx is not None:
                 ctx.record_step(
                     name, kwargs, result, None,
                     time.monotonic() - t0, ctx.tokens_used - tokens_before,
+                    forensic=_forensic_dict,
                 )
             return result
 
@@ -610,7 +728,7 @@ def _fingerprint(name: str, kwargs: dict[str, Any]) -> str:
             ensure_ascii=False,
             default=_default,
         )
-    except Exception:  # noqa: BLE001 极端情况下回退 repr
+    except Exception:
         normalized = repr((name, sorted(kwargs.items())))
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
 
@@ -650,5 +768,12 @@ def serialize_stream_event(event: StreamEvent) -> dict | None:
         return {"type": "answer", "text": event.payload.get("text", "")}
     if event.type == "error":
         return {"type": "error", **event.payload}
+    if event.type == "suspended":
+        return {
+            "type": "suspended",
+            "task_id": event.payload.get("task_id"),
+            "node_id": event.payload.get("node_id"),
+            "execution_id": event.payload.get("execution_id"),
+        }
     return None
 

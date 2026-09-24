@@ -67,7 +67,7 @@ class EventBus:
         for sink in self.sinks:
             try:
                 sink.emit(event)
-            except Exception as e:  # noqa: BLE001 —— sink 故障不影响主链路
+            except Exception as e:
                 self.dropped += 1
                 logger.warning("EventSink %r 处理事件失败（已隔离）: %s", sink, e)
 
@@ -108,11 +108,11 @@ class OTelSpanSink:
     def emit(self, event: dict[str, Any]) -> None:
         try:
             from opentelemetry import trace as otel_trace
-        except Exception:  # noqa: BLE001 - OTel 未安装时降级 no-op
+        except ImportError:
             return
         try:
             span = otel_trace.get_current_span()
-        except Exception:  # noqa: BLE001
+        except Exception:
             return
         if span is None or not span.is_recording():
             return
@@ -149,7 +149,7 @@ class CallbackSink:
         for cb in self.callbacks(event_type):
             try:
                 cb(event)
-            except Exception:  # noqa: BLE001 —— 订阅方异常隔离
+            except Exception:
                 logger.warning("事件回调执行失败（已隔离）: event=%s", event_type)
 
 

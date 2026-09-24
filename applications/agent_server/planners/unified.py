@@ -2,7 +2,7 @@
 
 保持 ``Planner`` 协议（plan/execute），对上游（``app.api`` / ``app.state.planner``）透明：
 - ``plan()``：先经 ModeSelector 选范式，再委托对应子 Planner 产出 Plan；范式写入
-  ``plan.notes["execution_mode"]``；
+  ``plan.execution_mode``；
 - ``execute()``：按范式分发执行（workflow 复用 ``execute_plan`` 的统一 Runtime 路径，
   其余委托对应子 Planner 的 execute）。
 
@@ -87,7 +87,7 @@ class UnifiedPlanner(Planner):
 
             return GraphPlanner(registry=self._registry)
         if mode == ExecutionMode.AGENTIC:
-            from agent_federation.planners.agentic import AgenticPlanner
+            from agent_runtime.planner.agentic import AgenticPlanner  # noqa: PLC0415
 
             return AgenticPlanner()
         return _DeterministicOrWorkflowPlanDelegate(self._settings)

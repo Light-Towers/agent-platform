@@ -35,22 +35,33 @@ def pending_background_tasks() -> int:
     return len(_background_tasks)
 
 
-async def cache_lookup(pool, embedding: list[float], threshold: float) -> str | None:
+async def cache_lookup(pool, embedding: list[float], threshold: float, tenant_id: str = "") -> str | None:
     """返回余弦距离小于 threshold 的缓存答案；未命中返回 None。
 
     纯向量相似度命中，不参与 cache_key 匹配——故改用 build_cache_key 仅影响
     写入落库 metadata，不影响命中逻辑。
+
+    tenant_id 非空时加 WHERE 过滤，防止跨租户命中（P1 安全修复）。
     """
     if pool is None:
         _stats.record("miss")
         return None
-    sql = (
-        "SELECT answer, embedding <=> %s::vector AS distance FROM semantic_cache "
-        "ORDER BY embedding <=> %s::vector LIMIT 1"
-    )
+    if tenant_id:
+        sql = (
+            "SELECT answer, embedding <=> %s::vector AS distance FROM semantic_cache "
+            "WHERE tenant_id = %s "
+            "ORDER BY embedding <=> %s::vector LIMIT 1"
+        )
+        params = (embedding, tenant_id, embedding)
+    else:
+        sql = (
+            "SELECT answer, embedding <=> %s::vector AS distance FROM semantic_cache "
+            "ORDER BY embedding <=> %s::vector LIMIT 1"
+        )
+        params = (embedding, embedding)
     try:
         async with pool.connection() as conn:
-            row = await conn.execute(sql, (embedding, embedding))
+            row = await conn.execute(sql, params)
             rec = await row.fetchone()
         if rec and rec[1] is not None and rec[1] < threshold:
             _stats.record("l2_hit")
@@ -71,26 +82,26 @@ def reset_stats() -> None:
     _stats.reset()
 
 
-async def _cache_write(pool, question: str, answer: str, embedding: list[float]) -> None:
+async def _cache_write(pool, question: str, answer: str, embedding: list[float], tenant_id: str = "") -> None:
     # cache_key 复用内核 build_cache_key 单一真相（intent/kb/tenant 在 app 侧缺省，
     # 退化为 sha256(""|query|{}|""|0.0)，与 deepagents 同款 hash 逻辑对齐）。
-    cache_key = build_cache_key(intent="", rewritten_query=question.strip().lower())
+    cache_key = build_cache_key(intent="", rewritten_query=question.strip().lower(), tenant_id=tenant_id)
     async with pool.connection() as conn:
         await conn.execute(
-            "INSERT INTO semantic_cache (cache_key, question, answer, embedding) "
-            "VALUES (%s, %s, %s, %s)",
-            (cache_key, question, answer, embedding),
+            "INSERT INTO semantic_cache (cache_key, question, answer, embedding, tenant_id) "
+            "VALUES (%s, %s, %s, %s, %s)",
+            (cache_key, question, answer, embedding, tenant_id),
         )
 
 
-def cache_store(pool, question: str, answer: str, embedding: list[float]) -> None:
+def cache_store(pool, question: str, answer: str, embedding: list[float], tenant_id: str = "") -> None:
     """非阻塞写入；失败静默（缓存是优化不是正确性依赖）。"""
     if pool is None or not answer:
         return
 
     async def _guarded():
         try:
-            await _cache_write(pool, question, answer, embedding)
+            await _cache_write(pool, question, answer, embedding, tenant_id)
         except Exception:
             logger.exception("语义缓存写入失败")
 
