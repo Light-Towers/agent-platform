@@ -3,8 +3,8 @@
 > 背景：工具埋点收口复审修复推送 v3 后，GitHub 在默认分支（main）报 21 个 Dependabot 告警。
 > 逐项对照 **v3 的 uv.lock 锁定版本**与官方修复版本 triage（`gh api dependabot/alerts` 拉活告警 + 解析 uv.lock 取实际解析版本与反向依赖）：
 > - **weasyprint 69→70.0 本轮升级修复**（agent_federation `docs` extra，dev-only）——v3 此前落后 main 一个补丁版本（main 已于 ef3c0fd 修，v3 本次补齐，避免合并回归）；
-> - **anyio / mcp / transformers 为陈旧告警**：v3 锁已分别为 4.14.2 / 2.0.0 / 5.15.0，均 ≥ 官方 FIX 版本，Dependabot 重扫后自动关闭；
-> - **asyncmy 已不在 v3 锁**：告警陈旧，自动关闭；
+> - **anyio / mcp / transformers 为 manifest-range 误报**：v3 锁已分别为 4.14.2 / 2.0.0 / 5.15.0，均 ≥ 官方 first_patched；但 pyproject 声明下界低于修复版，Dependabot 依赖图按声明范围判定为「可引入漏洞版本」故保持 open。已于 v3 与 main 同步收紧下界（见「已修复（本轮）」），Dependabot 重扫后关闭；
+> - **asyncmy 已不在 v3 锁**：依赖图陈旧条目，重扫自动关闭；
 > - 剩余 3 个为上游无补丁依赖，全部 dev-only（生产运行时不安装），本文件登记接受理由。
 > 注：GitHub 告警基于默认分支（main）扫描；v3 与 main 锁基本一致（v3 仅 weasyprint 此前落后，现已对齐）。
 
@@ -13,6 +13,9 @@
 | 包 | 改前→改后 | 告警 | 来源 | 说明 |
 |---|---|---|---|---|
 | weasyprint | 69.0 → 70.0 | 1 medium（SSRF） | agent_federation `docs` extra | dev-only（文档构建），升级到首个修复版本 70.0；`uv lock --upgrade-package weasyprint` 仅动本包，无传递版本漂移 |
+| anyio | （原未声明，纯传递）→ `>=4.14.2` | critical+medium | 根 `[project].dependencies`（传递自 httpx/mcp） | 锁定 4.14.2 已达标；v3/main 同步收紧下界 |
+| mcp | `>=0.9` → `>=2.0.0` | high×3 | 根 + agent-runtime `mcp` extra | 锁定 2.0.0 已达标；v3/main 同步收紧下界 |
+| transformers | eval 边经 `flashrag-dev` 传递（松散）→ eval extra 显式 `>=5.15.0` | high×3+medium×1 | 根 `eval` extra（prod `knowledge-service` 早已 `>=5.15.0`） | 锁定 5.15.0 已达标；v3/main 同步收紧下界 |
 
 ## 接受清单（上游无补丁，dev-only）
 
