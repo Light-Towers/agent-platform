@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 
-from agent_federation.eval.run_eval import compare_baseline, save_baseline
+from agent_federation.evaluation.run_eval import compare_baseline, save_baseline
 
 
 def _make_results() -> list[dict]:

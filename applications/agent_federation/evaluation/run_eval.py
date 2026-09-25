@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 agent_federation 多智能体评测驱动器（MVP）。
-按 eval/PROPOSAL.md §8 步骤 2-3 落地：路由准确率集合匹配 + rubric judge。
+按 evaluation/PROPOSAL.md §8 步骤 2-3 落地：路由准确率集合匹配 + rubric judge。
 """
 import argparse
 import asyncio
@@ -142,7 +142,7 @@ async def run_eval(golden_path: Path, limit: int, cleanup: bool, judge: bool):
 
     judge_model = None
     if judge:
-        from eval.judge import build_judge_model, judge_record
+        from evaluation.judge import build_judge_model, judge_record
         judge_model, is_fallback = build_judge_model()
         if is_fallback:
             print("警告: judge 降级同主模型（未配 EVAL_JUDGE_*，self-bias 风险）")
@@ -215,7 +215,7 @@ async def run_evaluation(records: list[dict], no_judge: bool = False, cleanup: b
 
     judge_model = None
     if not no_judge:
-        from eval.judge import build_judge_model, judge_record
+        from evaluation.judge import build_judge_model, judge_record
         judge_model, is_fallback = build_judge_model()
         if is_fallback:
             print("警告: judge 降级同主模型（未配 EVAL_JUDGE_*，self-bias 风险）")
@@ -278,8 +278,8 @@ def _require_real_llm_key_for_baseline() -> None:
         "  - 配置 LLM_BASE_URL( http(s) 端点 ) + LLM_API_KEY（如本地 opencode-gateway）\n"
         "  - 配置 OPENAI_API_KEY（非 test-key/x 等占位值）\n"
         "例如（本地 gateway）：\n"
-        "    uv run python -m agent_federation.eval.run_eval --baseline eval/fed_latest.jsonl\n"
-        "（R1 漂移门禁的比对逻辑本身无 LLM 依赖，已通过 eval/test_eval_baseline.py 覆盖。）"
+        "    uv run python -m agent_federation.evaluation.run_eval --baseline evaluation/fed_latest.jsonl\n"
+        "（R1 漂移门禁的比对逻辑本身无 LLM 依赖，已通过 evaluation/test_eval_baseline.py 覆盖。）"
     )
     sys.exit(2)
 

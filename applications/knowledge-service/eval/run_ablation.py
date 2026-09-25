@@ -88,11 +88,11 @@ def _load_retrieval_deps():
     from eval.metrics import compute_retrieval_metrics
     from eval.run_eval import (
         _extract_ids,
-        compute_config_hash,
         load_golden_queries,
         retrieve_one,
     )
     from knowledge_service.clients.milvus_utils import get_milvus_client
+    from knowledge_service.conf.config_hash import compute_config_hash  # 单一实现已上收至 conf 包
 
     return {
         "get_milvus_client": get_milvus_client,

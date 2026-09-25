@@ -2,7 +2,7 @@
 """
 agent_federation 评测裁判：rubric 逐项打分 + 不同 provider 去偏。
 
-按 eval/PROPOSAL.md §8 步骤 3 落地。
+按 evaluation/PROPOSAL.md §8 步骤 3 落地。
 - entity 验收点：字符串包含判断（无需 LLM）
 - conclusion 验收点：LLM 语义判断（judge 用不同 provider 去偏）
 - judge provider 由环境变量 EVAL_JUDGE_* 覆盖，缺省降级同主模型并告警

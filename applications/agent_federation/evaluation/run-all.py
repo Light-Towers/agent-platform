@@ -2,16 +2,16 @@
 """全项目评测驱动器：跑 4 项目评测集 + 汇总报告。
 
 用法：
-  python eval/run-all.py                    # 跑全量（所有项目）
-  python eval/run-all.py --project deepagents  # 只跑 deepagents
-  python eval/run-all.py --project wenda    # 只跑 wenda（通过 adapter）
-  python eval/run-all.py --limit 10         # 每项目限制 10 题
-  python eval/run-all.py --no-judge         # 跳过 rubric judge
-  python eval/run-all.py --cleanup          # 清理评测 session 目录
+  python evaluation/run-all.py                    # 跑全量（所有项目）
+  python evaluation/run-all.py --project deepagents  # 只跑 deepagents
+  python evaluation/run-all.py --project wenda    # 只跑 wenda（通过 adapter）
+  python evaluation/run-all.py --limit 10         # 每项目限制 10 题
+  python evaluation/run-all.py --no-judge         # 跳过 rubric judge
+  python evaluation/run-all.py --cleanup          # 清理评测 session 目录
 
 输出：
-  eval/results/<timestamp>/all-results.jsonl   # 全量结果
-  eval/results/<timestamp>/summary.json        # 汇总报告
+  evaluation/results/<timestamp>/all-results.jsonl   # 全量结果
+  evaluation/results/<timestamp>/summary.json        # 汇总报告
 """
 
 from __future__ import annotations
@@ -23,8 +23,8 @@ import sys
 import time
 from pathlib import Path
 
-eval_dir = Path(__file__).resolve().parent
-project_root = eval_dir.parent
+evaluation_dir = Path(__file__).resolve().parent
+project_root = evaluation_dir.parent
 sys.path.insert(0, str(project_root))
 
 from dotenv import find_dotenv, load_dotenv
@@ -52,7 +52,7 @@ def group_by_project(records: list[dict]) -> dict[str, list[dict]]:
 
 async def eval_deepagents(records: list[dict], no_judge: bool, cleanup: bool) -> list[dict]:
     """跑 deepagents 评测（复用 run-eval.py 逻辑）。"""
-    from eval.run_eval import run_evaluation
+    from evaluation.run_eval import run_evaluation
     return await run_evaluation(records, no_judge=no_judge, cleanup=cleanup)
 
 
@@ -136,7 +136,7 @@ def write_report(results: list[dict], output_dir: Path) -> None:
 
 
 async def main_async(args: argparse.Namespace) -> None:
-    golden_path = eval_dir / args.golden
+    golden_path = evaluation_dir / args.golden
     if not golden_path.exists():
         print(f"评测集不存在: {golden_path}")
         sys.exit(1)
@@ -180,7 +180,7 @@ async def main_async(args: argparse.Namespace) -> None:
         all_results.extend(results)
 
     timestamp = time.strftime("%Y%m%d_%H%M%S")
-    output_dir = eval_dir / "results" / timestamp
+    output_dir = evaluation_dir / "results" / timestamp
     write_report(all_results, output_dir)
 
 

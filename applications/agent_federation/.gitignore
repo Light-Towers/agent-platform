@@ -17,5 +17,5 @@ tools/test_session_*/
 venv/
 .venv/
 
-# 评测结果（不进仓库，见 eval/PROPOSAL.md §5）
-eval/results/
+# 评测结果（不进仓库，见 evaluation/PROPOSAL.md §5）
+evaluation/results/

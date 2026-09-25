@@ -583,7 +583,7 @@ tests/                     # 单元测试（针对 agent_server 平台；含 pla
 - **U-2 · kefu 迁移（已完成）**：
   - ✅ `kefu-service` 已升级为 Agent Protocol 兼容 server：新增 `POST /invoke`（接受 `QueryRequest`，返回 `QueryResponse`，`kefu-service/main.py` + 依赖 `shared-schemas`）；旧 `/api/messages` 保留为 legacy 兼容入口。
   - ✅ 网关 `applications/agent_federation/agent/config.py` 新增 `KEFU_SERVICE_URL` + `KEFU_USE_ADAPTER` 开关（默认 `false`，直连 `kefu-service:8003`）；`async_subagents.py` 增加 httpx 远程回退（外部 `deepagents` 包未安装时直连 `/invoke`）。
-  - ✅ `kefu-adapter` 包已于 2026-08 移除（无调用方，默认直连 `kefu-service` 生效）。`applications/agent_federation/eval/run-all.py` 的 kefu 项目已改默认指向 `KEFU_SERVICE_URL`（`KEFU_ADAPTER_URL` 仍可覆盖）。*注：原评审称「非简单改 URL 可接入」属实，但根因（缺 Agent Protocol + QueryResponse）已在本轮修复。*
+  - ✅ `kefu-adapter` 包已于 2026-08 移除（无调用方，默认直连 `kefu-service` 生效）。`applications/agent_federation/evaluation/run-all.py` 的 kefu 项目已改默认指向 `KEFU_SERVICE_URL`（`KEFU_ADAPTER_URL` 仍可覆盖）。*注：原评审称「非简单改 URL 可接入」属实，但根因（缺 Agent Protocol + QueryResponse）已在本轮修复。*
 - **TB-1 / TB-2 · dialogue-framework 与内核协议对齐（已完成，后随 DF 移除而归档）**：dialogue-framework 已于 2026-09-23 作为孤儿框架移除（能力已被 agent_server 吸收），TB-1/TB-2 桥接代码随之删除。历史记录见 `CHANGELOG.md`。
 
 ## 路线图
