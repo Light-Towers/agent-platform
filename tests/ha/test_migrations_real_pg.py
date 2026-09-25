@@ -41,7 +41,7 @@ def _skip_or_fail(reason: str) -> None:
 
 def _scratch_url() -> str:
     """把 PG_URL 的库名替换为 scratch 库（其余连接参数保持一致）。"""
-    base, _, db = PG_URL.rsplit("/", 1)
+    base, _ = PG_URL.rsplit("/", 1)
     return f"{base}/{SCRATCH_DB}"
 
 
