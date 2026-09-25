@@ -45,5 +45,5 @@
 
 1. `uv run pytest packages/agent-runtime/tests/test_schema_migrations.py packages/agent-core/tests/test_typed_memory.py packages/agent-core/tests -q` 全绿；
 2. `ruff check` 通过；
-3. push 后 GitHub Actions：`agent-platform-ha` 的 pytest 步骤 **15 passed（0 skipped）**；kill-9 步骤通过 F1 修复后进入真实接管验证；
+3. push 后 GitHub Actions：`agent-platform-ha` 的 pytest 步骤 **全 passed（0 skipped）**（用例数随 tests/ha 增长，不锁定具体数字；实施记录：86e3077/b77be4e 两轮均 17 passed + 2 项新增 migration 集成测试 + kill-9 接管 PASS「effectively-once 成立」）；
 4. 若 HA 仍红，新失败点即下一轮真实问题（门禁语义已可信）。
