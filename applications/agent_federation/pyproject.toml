@@ -53,7 +53,7 @@ observability = ["langfuse>=4.0.0"]
 # 语义缓存（layers 软降级，无 valkey 时 no-op）
 cache = ["valkey>=0.1.0"]
 # Markdown→PDF 文档生成（word_converter 软降级）
-docs = ["markdown>=3.10.2", "weasyprint>=69.0", "pypdf>=4.0"]
+docs = ["markdown>=3.10.2", "weasyprint>=70.0", "pypdf>=4.0"]
 # Excel/Word 文件读取（upload_file_read_tool 软降级）
 excel = ["pandas>=3.0.1", "openpyxl>=3.1.5", "python-docx>=1.2.0"]
 # 记忆架构（MongoCheckpointer + Milvus 语义记忆；代码内 try/except ImportError 软降级）
