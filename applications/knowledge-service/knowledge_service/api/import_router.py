@@ -213,8 +213,9 @@ async def upload_files(
         local_file_abs_path = os.path.join(task_local_dir, safe_filename)
 
         # 5. 将上传的文件保存到本地临时目录（后续MinIO上传/文件解析均基于此文件）
+        # 整文件落盘为同步 IO，移入线程池避免阻塞事件循环（大文件并发上传时会饿死其它请求）
         with open(local_file_abs_path, "wb") as file_buffer:
-            shutil.copyfileobj(file.file, file_buffer)
+            await asyncio.to_thread(shutil.copyfileobj, file.file, file_buffer)
         logger.info(f"[{task_id}] 文件已保存至本地，路径：{local_file_abs_path}")
 
         # 6. 将本地文件上传至MinIO对象存储，做持久化保存（P2-7: retry + fail-fast）
@@ -232,7 +233,9 @@ async def upload_files(
         _MINIO_RETRIES = 2
         for attempt in range(_MINIO_RETRIES + 1):
             try:
-                minio_client.fput_object(
+                # minio SDK 为同步实现，移入线程池，避免上传阻塞事件循环
+                await asyncio.to_thread(
+                    minio_client.fput_object,
                     bucket_name=minio_bucket_name,
                     object_name=minio_object_name,
                     file_path=local_file_abs_path,
@@ -241,6 +244,8 @@ async def upload_files(
                 logger.info(f"[{task_id}] 文件已成功上传至MinIO，桶名：{minio_bucket_name}，对象名：{minio_object_name}")
                 break
             except Exception as e:
+                # 不收窄到 S3Error：minio SDK 连接层错误（urllib3 HTTPError 族）不经 S3Error 包装，
+                # 收窄会跳过重试直接冒泡 500；此处统一转 502 信封，堆栈仅落日志
                 if attempt < _MINIO_RETRIES:
                     await asyncio.sleep(1 << attempt)  # 1s, 2s
                     logger.warning(f"[{task_id}] MinIO上传第{attempt+1}次失败，重试中: {e}")

@@ -75,6 +75,13 @@ VALUES (%s, %s, %s)
 ON CONFLICT (version) DO NOTHING
 """
 
+_UPDATE_MIGRATION_CHECKSUM = "UPDATE schema_migrations SET checksum = %s WHERE version = %s"
+
+# 旧版 runner 在 baseline stamp 时写入的字面量哨兵 "stamped"（及列默认值 ''）。
+# 这类记录无法与文件 checksum 比对，视为"未知来源"，首次启动时用文件真实
+# checksum 回填（而非判死），兼容升级前已被旧代码 stamp 的存量库。
+_LEGACY_CHECKSUM_SENTINELS = frozenset({"stamped", ""})
+
 _SELECT_MAX_VERSION = "SELECT COALESCE(MAX(version), 0) FROM schema_migrations"
 
 
@@ -169,7 +176,14 @@ def _resolve_templates_sync(sql: str, *, vector_dim: int) -> str:
 
 
 async def _validate_applied_checksums(conn: Any, migrations: list[Migration]) -> None:
-    """校验已应用 migration 的文件 checksum，发现漂移立即失败。"""
+    """校验已应用 migration 的文件 checksum，发现漂移立即失败。
+
+    兼容历史：旧版 stamp 写入的哨兵值（"stamped" / 空串）无法比对，
+    在同事务内回填为文件真实 checksum 并告警，不视为漂移。
+    注意：checksum 基于未渲染 {{vector_dim}} 的原始文件字节（见 base.py），
+    更换 embedder 维度不会触发漂移；跨平台字节稳定性由 .gitattributes
+    （* text=auto eol=lf）保证，勿改为对渲染后内容取 hash。
+    """
     cur = await conn.execute(
         "SELECT version, name, checksum FROM schema_migrations ORDER BY version"
     )
@@ -182,11 +196,24 @@ async def _validate_applied_checksums(conn: Any, migrations: list[Migration]) ->
             continue
         recorded = row[2]
         expected = migration.checksum()
-        if recorded != expected:
-            raise MigrationError(
-                f"migration checksum mismatch for v{migration.version} "
-                f"({migration.name!r}): database={recorded!r}, file={expected!r}"
+        if recorded == expected:
+            continue
+        if recorded in _LEGACY_CHECKSUM_SENTINELS:
+            await conn.execute(_UPDATE_MIGRATION_CHECKSUM, (expected, migration.version))
+            logger.warning(
+                "migration v%d (%s): legacy checksum %r backfilled from file checksum",
+                migration.version,
+                migration.name,
+                recorded,
             )
+            continue
+        raise MigrationError(
+            f"migration checksum mismatch for v{migration.version} "
+            f"({migration.name!r}): database={recorded!r}, file={expected!r}. "
+            "If the SQL file was legitimately edited, repair with: "
+            "UPDATE schema_migrations SET checksum = <file checksum> WHERE version = "
+            f"{migration.version}."
+        )
 
 
 async def _try_baseline_stamp(
@@ -213,7 +240,10 @@ async def _try_baseline_stamp(
         raise MigrationError(
             "existing database has an incomplete baseline schema; "
             f"missing tables: {', '.join(missing)}. "
-            "Refusing to stamp v1; inspect/repair the database before migration."
+            "Refusing to stamp v1; inspect/repair the database before migration. "
+            "Diagnose with: SELECT table_name FROM information_schema.tables "
+            "WHERE table_schema = 'public' ORDER BY table_name; "
+            "then apply the missing DDL from 001_baseline.up.sql or stamp manually."
         )
 
     baseline_migrations = [m for m in migrations if m.version <= 1]
