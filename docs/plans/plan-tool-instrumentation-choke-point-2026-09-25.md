@@ -27,20 +27,28 @@
 | **B. 注册器/执行器收口** | 在 tool 注册处（`tool_registry` / `SkillRegistry.register`）统一 wrap | 构造保证不可漏接，新工具零改动 | 包装层需透传函数元数据（name/doc） | **采用** |
 | C. OTel 官方 instrumentation | langchain/community instrumentation 自动捕 tool run | 零代码 | 语义是 OTel span 而非业务事件（WS 前端拿不到）；覆盖面受第三方包限制 | 作为 LLM/框架层补充，不替代 B |
 
-**推荐 B**：在 tool 注册（收口点）把原函数包一层 `_instrumented(fn)`：进入时 `report_tool(name, args)`，正常返回 `report_tool_outcome(success)`，异常 `report_tool_outcome(error, error_class=classify_exception(exc).value)`（复用 `agent_core.resilience.ErrorClass`），配合现有 `_timeout.py` 超时语义（outcome=timeout）。
+**推荐 B'（2026-09-25 自审修正）**：原假设"tool_registry 是唯一收口点"**不成立**——实测存在两条挂载路径：
+1. `main_agent.py:271` **静态列表**直接 import 工具对象（`[generate_markdown, convert_md_to_pdf, read_file_content]`，默认主 Agent 工具集走这条路），不经 tool_registry；
+2. `tool_registry.get_tools_for_roles()`（动态角色模式，main_agent.py:364 调用）；
+3. `ragflow_tools`（get_assistant_list / create_ask_delete）**未见于 TOOL_REGISTRY**，挂载路径未盘点——批 1 动工前必须先完成全量挂载面盘点。
+
+因此收口分两步：**先把 main_agent 静态列表改为经 tool_registry 取用**（工具定位单一真相源），再在 `_resolve()` 解析处统一 wrap（`observed(fn)` 包装器：进入 report_tool、正常返回 report_tool_outcome(success)、异常 report_tool_outcome(error, error_class=classify_exception(exc).value)，复用 `agent_core.resilience.ErrorClass`，配合现有 `_timeout.py` 超时语义）。包装 langchain `@tool` 对象时必须保留 name/description/args_schema 元数据（否则 LLM 看到的工具签名变化）。
 
 ## 4. 影响面
 
-- `applications/agent_federation/agent/tool_registry.py`：注册收口点，增加 wrap 逻辑（~30 行）；
+- `applications/agent_federation/agent/tool_registry.py`：改造为**唯一工具出口**（`_resolve` 统一 wrap，~40 行）；
+- `applications/agent_federation/agent/main_agent.py`：静态工具列表（:271）改为经 tool_registry 取用（消除旁路）；
 - `applications/agent_federation/tools/*.py`：摘除 ~30 处手写埋点（12 文件）；
 - `applications/agent_federation/tools/_timeout.py`：outcome 上报迁入包装器（超时/成功/异常三态）；
+- **挂载面盘点（批 1 前置）**：确认 ragflow_tools 等未注册工具的实际挂载路径并收编入 registry；
 - `packages/agent-core/agent_core/monitor.py`：不动（事件 API 保持稳定）；`report_tool_outcome` 增加 `error_class` 透传已支持；
 - `applications/agent_server`：P2 阶段评估接入（其 skill 经 `agent_runtime` SkillRegistry 执行，天然有第二个收口点）；
 - 测试：`tests/unit/test_agentic_planner.py` 中 2 处测试内直调 `monitor.report_tool` 属测试自证，移入白名单。
 
 ## 5. 迁移策略（3 批，每批独立 commit，可独立回滚）
 
-1. **批 1（落地不摘除）**：实现注册器收口包装器 + 单测（EventBus 采集断言：一次调用产生 tool_start + tool_outcome 且 data 字段齐全）；手写埋点暂留，双跑验证事件不重复（包装器对已手写埋点的工具去重：注册元数据标记 `instrumented=True`，或接受短期重复、批 2 立即摘除）。
+0. **批 0（前置盘点）**：全量挂载面盘点——枚举 tools/ 全部导出工具 × 实际挂载点（main_agent 静态 / get_tools_for_roles / 其他未知路径如 ragflow_tools），产出挂载矩阵，杜绝批 1 漏包。
+1. **批 1（落地不摘除）**：main_agent 静态列表改经 registry 取用；`_resolve` 处实现 `observed()` 包装器 + 单测（EventBus 采集断言：一次调用产生 tool_start + tool_outcome 且 data 字段齐全；langchain 工具元数据 name/description/args_schema 不变）；手写埋点暂留，双跑验证事件不重复（注册元数据标记 `instrumented=True`，或接受短期重复、批 2 立即摘除）。
 2. **批 2（摘除）**：删除 tools/ 全部手写埋点；核对 `tool_outcome` 的 outcome 取值集合（success/empty/degraded/error/timeout）与既有监控消费方兼容。
 3. **批 3（门禁）**：`scripts/lint_architecture.py` 增规则——`applications/*/tools/**` 与 `applications/*/agent/**` 中裸调 `monitor.report_tool` 即失败（白名单：agent_core/monitor.py 自身、tests/）；计入 `make ci`。
 
