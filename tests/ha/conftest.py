@@ -37,11 +37,13 @@ from agent_runtime.planner.durability_pg import (
 def pytest_collection_modifyitems(config, items):
     """自动给 tests/ha 下所有测试打 requires_pg marker（无需逐个文件标注）。
 
-    配合 pg_pool fixture 的「无 PG 即 skip」逻辑，使 Windows CI / 无本地 PG 的开发机
-    干净跳过 HA 测试，避免 psycopg ProactorEventLoop 不可用 + 无 PG 导致的 setup 误报。
+    配合 pg_pool fixture 的「本地无 PG 即 skip / CI 无 PG 即 fail」语义。
+    路径判断必须平台无关：Windows fspath 是反斜杠，硬编码 "tests/ha" 会导致
+    本机 marker 永远打不上（-m requires_pg 全部 deselect、-m "not requires_pg"
+    全部混入普通套件）——Linux CI 不受影响所以此前未暴露。
     """
     for item in items:
-        if "tests/ha" in str(item.fspath):
+        if "tests/ha" in str(item.fspath).replace("\\", "/"):
             item.add_marker(pytest.mark.requires_pg)
 
 
