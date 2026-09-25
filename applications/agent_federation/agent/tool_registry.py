@@ -22,9 +22,24 @@ TOOL_REGISTRY: dict[str, str] = {
     "convert_md_to_pdf": "tools.pdf_tools:convert_md_to_pdf",
     "read_file_content": "tools.upload_file_read_tool:read_file_content",
     "execute_sql_query": "tools.db_tools:execute_sql_query",
+    "get_table_data": "tools.db_tools:get_table_data",
+    "list_sql_tables": "tools.db_tools:list_sql_tables",
     "internet_search": "tools.tavily_tool:internet_search",
     "zhiku_retrieve": "tools.zhiku_tools:zhiku_retrieve",
     "execute_python_code": "tools.code_execution_tool:execute_python_code",
+}
+
+# tool.name -> 展示名（迁移期兼容现中文人工名；方案 v3 §3.2④ display_names）
+DISPLAY_NAMES: dict[str, str] = {
+    "generate_markdown": "Markdown文档生成工具",
+    "convert_md_to_pdf": "Markdown转PDF工具",
+    "read_file_content": "文件内容读取工具",
+    "list_sql_tables": "数据库表名查询工具：list_sql_tables",
+    "get_table_data": "数据库表数据查询工具：get_table_data",
+    "execute_sql_query": "数据库表数据查询工具：execute_sql_query",
+    "zhiku_retrieve": "知识库检索工具：zhiku_retrieve",
+    "internet_search": "网络搜索工具",
+    "execute_python_code": "代码执行工具",
 }
 
 # 角色 -> 该角色默认挂载的工具名列表
@@ -79,6 +94,36 @@ def _resolve(name: str) -> object | None:
     return obj
 
 
+# 批 2 统一工具出口：包装后实例缓存（key = TOOL_REGISTRY 名）
+_WRAPPED_CACHE: dict[str, object] = {}
+
+
+def get_tool(name: str) -> object | None:
+    """批 2 统一工具出口（方案 v3 §3.2②）：解析 + observe_tool 观测包装。
+
+    所有挂载点（main_agent 静态列表 / get_tools_for_roles / subagents /
+    bridge 直引改造后）必须经本函数取工具——构造保证不漏观测。
+    langchain 依赖缺失时 observe_tool 内部报错，此处按加载失败降级 None。
+    """
+    if name in _WRAPPED_CACHE:
+        return _WRAPPED_CACHE[name]
+    obj = _resolve(name)
+    if obj is None:
+        return None
+    try:
+        from agent_core.observability import observe_tool
+
+        wrapped = observe_tool(obj, display_names=DISPLAY_NAMES)
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).warning(
+            "[tool-registry] 工具 %s 观测包装失败，降级裸对象: %s", name, exc
+        )
+        wrapped = obj
+    _WRAPPED_CACHE[name] = wrapped
+    return wrapped
+
+
 def get_tools_for_roles(roles: list[str] | None) -> list[object]:
     """按角色列表解析出实际工具对象；None 或空 -> 全量工具（回退静态模式）。"""
     if not roles:
@@ -98,7 +143,7 @@ def get_tools_for_roles(roles: list[str] | None) -> list[object]:
 
     tools = []
     for n in names:
-        obj = _resolve(n)
+        obj = get_tool(n)
         if obj is not None:
             tools.append(obj)
     return tools

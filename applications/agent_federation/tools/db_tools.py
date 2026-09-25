@@ -1,13 +1,13 @@
 import os
 import threading
 
+from agent_core.observability import ToolOutcome, ToolResult
 from dotenv import load_dotenv
 from langchain_core.tools import tool
 from sqlalchemy import create_engine
 from sqlalchemy.exc import DBAPIError
 
 from agent.config import TIMEOUT_DB_QUERY
-from api.monitor import monitor
 from tools._timeout import with_timeout
 from tools.sql_guard import validate_sql_mysql
 from tools.sql_validation import _validate_identifier
@@ -113,15 +113,7 @@ def list_sql_tables()->str:
     :return: 有表： 可用的表有：表1,表2,表3....  没有表: 没有可用的表   出现异常：查询出现异常：异常信息
     """
 
-    # 埋点,调用工具了告诉前端哪个工具被调用了！！
-    monitor.report_tool(tool_name="数据库表名查询工具：list_sql_tables", args={})
-
-    # 1. 从连接池获取连接
-    # 2. 创建cursor
-    # 3. cursor执行sql语句
-    # 4. cursor获取返回结果
-    # 5. 释放连接和cursor资源
-    # 确保要捕捉异常信息，返回异常提示，避免直接报错！
+    # outcome 语义经 ToolResult 承载（observe_tool 包装器统一上报，方案 v3.1）
     try:
         with _get_connection() as conn:
             with conn.cursor() as cursor:
@@ -131,16 +123,18 @@ def list_sql_tables()->str:
                 # [(表1),(表2),(表3)]
                 tables = cursor.fetchall()
                 if not tables:
-                    monitor.report_tool_outcome(tool_name="list_sql_tables", outcome="empty")
-                    return "没有可用的表"
+                    return ToolResult(text="没有可用的表", outcome=ToolOutcome.EMPTY)
                 # 可用的表有：表1,表2,表3....
                 # [表1,表2,表3]
                 table_names = [table[0] for table in tables]
                 return f"可用的表有：{', '.join(table_names)}"
     except DBAPIError as e:
-        monitor.report_tool_outcome(
-            tool_name="list_sql_tables", outcome="exception", error_class="MySQLError", detail=str(e))
-        return f"查询出现异常：{str(e)}"
+        return ToolResult(
+            text=f"查询出现异常：{str(e)}",
+            outcome=ToolOutcome.EXCEPTION,
+            error_class="MySQLError",
+            detail=str(e),
+        )
 
 
 @tool
@@ -163,8 +157,6 @@ def get_table_data(table_name)->str:
                 1,张三,18\n
     """
     # 埋点,调用工具了告诉前端哪个工具被调用了！！
-    monitor.report_tool(tool_name="数据库表数据查询工具：get_table_data", args={"table_name": table_name})
-
     try:
         safe_name = _validate_identifier(table_name)
         with _get_connection() as conn:
@@ -172,10 +164,12 @@ def get_table_data(table_name)->str:
                 cursor.execute("SHOW TABLES")
                 allowed = {row[0] for row in cursor.fetchall()}
                 if safe_name not in allowed:
-                    monitor.report_tool_outcome(
-                        tool_name="get_table_data", outcome="guarded", error_class="TableWhitelist",
-                        detail=f"表名 '{safe_name}' 不存在")
-                    return f"表名 '{safe_name}' 不存在，可用表：{', '.join(sorted(allowed))}"
+                    return ToolResult(
+                        text=f"表名 '{safe_name}' 不存在，可用表：{', '.join(sorted(allowed))}",
+                        outcome=ToolOutcome.GUARDED,
+                        error_class="TableWhitelist",
+                        detail=f"表名 '{safe_name}' 不存在",
+                    )
                 sql = f"SELECT * FROM `{safe_name}` LIMIT 100"
                 cursor.execute(sql)
                 # 4. cursor获取返回结果
@@ -185,9 +179,11 @@ def get_table_data(table_name)->str:
                 # 如果查询没有结果 -》 description 也是None
                 description = cursor.description
                 if not description:
-                    monitor.report_tool_outcome(
-                        tool_name="get_table_data", outcome="empty", detail=f"表 {table_name} 无数据")
-                    return f"数据表：{table_name}为空没有数据！"
+                    return ToolResult(
+                        text=f"数据表：{table_name}为空没有数据！",
+                        outcome=ToolOutcome.EMPTY,
+                        detail=f"表 {table_name} 无数据",
+                    )
                 # 4.2 获取查询结果
                 # description =>  [(id,列长度...),(date,....),()] => 元组 index = 0 列名
                 # [列1,列2,列3...]
@@ -206,9 +202,12 @@ def get_table_data(table_name)->str:
                 data_str = "\n".join(results)
                 return f"{header_str}\n{data_str}"
     except DBAPIError as e:
-        monitor.report_tool_outcome(
-            tool_name="get_table_data", outcome="exception", error_class="MySQLError", detail=str(e))
-        return f"查询出现异常：{str(e)}"
+        return ToolResult(
+            text=f"查询出现异常：{str(e)}",
+            outcome=ToolOutcome.EXCEPTION,
+            error_class="MySQLError",
+            detail=str(e),
+        )
 
 
 @tool
@@ -230,15 +229,15 @@ def execute_sql_query(query)->str:
                 1,张三,18\n
                 1,张三,18\n
     """
-    # 埋点,调用工具了告诉前端哪个工具被调用了！！
-    monitor.report_tool(tool_name="数据库表数据查询工具：execute_sql_query", args={"query": query})
-
     try:
         ok, reason, safe_query = validate_sql_mysql(query)
         if not ok:
-            monitor.report_tool_outcome(
-                tool_name="execute_sql_query", outcome="guarded", error_class="SqlGuard", detail=reason)
-            return f"SQL 校验未通过：{reason}"
+            return ToolResult(
+                text=f"SQL 校验未通过：{reason}",
+                outcome=ToolOutcome.GUARDED,
+                error_class="SqlGuard",
+                detail=reason,
+            )
         with _get_connection() as conn:
             with conn.cursor() as cursor:
                 cursor.execute(safe_query)
@@ -249,9 +248,11 @@ def execute_sql_query(query)->str:
                 # 如果查询没有结果 -》 description 也是None
                 description = cursor.description
                 if not description:
-                    monitor.report_tool_outcome(
-                        tool_name="execute_sql_query", outcome="empty", detail=f"sql: {query}")
-                    return f"执行自定义SQL语句查询没有结果，sql为：{query}！"
+                    return ToolResult(
+                        text=f"执行自定义SQL语句查询没有结果，sql为：{query}！",
+                        outcome=ToolOutcome.EMPTY,
+                        detail=f"sql: {query}",
+                    )
                 # 4.2 获取查询结果
                 # description =>  [(id,列长度...),(date,....),()] => 元组 index = 0 列名
                 # [列1,列2,列3...]
@@ -270,10 +271,12 @@ def execute_sql_query(query)->str:
                 data_str = "\n".join(results)
                 return f"{header_str}\n{data_str}"
     except DBAPIError as e:
-        monitor.report_tool_outcome(
-            tool_name="execute_sql_query", outcome="exception", error_class="MySQLError", detail=str(e))
-        return f"查询出现异常：{str(e)}"
-
+        return ToolResult(
+            text=f"查询出现异常：{str(e)}",
+            outcome=ToolOutcome.EXCEPTION,
+            error_class="MySQLError",
+            detail=str(e),
+        )
 
 
 if __name__ == "__main__":
