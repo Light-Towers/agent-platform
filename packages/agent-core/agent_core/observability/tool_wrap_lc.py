@@ -82,7 +82,7 @@ def observe_tool_lc(
             _report_start(kwargs)
             try:
                 result = func(*args, **kwargs)
-            except Exception as exc:
+            except BaseException as exc:
                 _report_outcome(
                     ToolOutcome.EXCEPTION,
                     error_class=type(exc).__name__,
@@ -100,7 +100,7 @@ def observe_tool_lc(
             _report_start(kwargs)
             try:
                 result = await coro_func(*args, **kwargs)
-            except Exception as exc:
+            except BaseException as exc:
                 _report_outcome(
                     ToolOutcome.EXCEPTION,
                     error_class=type(exc).__name__,
