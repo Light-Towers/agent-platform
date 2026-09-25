@@ -7,6 +7,7 @@
 > - v1.1 自审：发现 main_agent 静态列表旁路；
 > - v2：吸收外部评审一（7 条）——outcome 枚举实测修正、包装栈定义、桥接工具旁路、eval 口径、截断下沉 monitor、SkillMiddleware、lint 词边界；
 > - **v3：吸收外部评审二（本轮）**——C1 收口点前提再修正（3 个 subagent 直引 @tool 对象 + bridge 直引，实测坐实）、W1 包装器下沉 kernel（lint 自家判自家红 + 避免两份实现）、C3 tool_name/args 取值漂移（"无感兼容"降级为"结构兼容+取值审计"）、W2 计数订正（27 处/8 文件）、W3 ragflow 疑似死代码改"确认后删除"、S1 feature flag 替代双跑重复、S2 按工具原子合并、W4 sync/async 双路补全。
+> - **v3.1（2026-09-25 用户定板）**：§7.1 outcome 语义承载定为 **ToolResult 结构化返回唯一方案，删除 mark 钩子过渡**（避免冗余代码）；回退手段 = git revert（原子合并天然支持），不再设 feature flag。
 
 ## 1. 背景与问题
 
@@ -48,10 +49,10 @@
 
 **② 收口形态**：全部挂载点（§2 六处）统一改为"经注册表/工厂取工具"；工厂在返回前对 **StructuredTool 内侧**包装（`.copy(update=...)` 或重建），**sync（tool.func）与 async（tool.coroutine）双路分别覆盖**，包装前后 name/description/args_schema 逐字段断言相等。`functools.wraps` 对 pydantic 实例不适用，禁用。
 
-**③ outcome 语义保真（C2，二选一定板）**：通用包装器只能观察"正常返回"，而现工具靠体内 catch 上报富 outcome。两条路线：
-- **(a) ToolResult 结构化返回协议**（推荐，长期正解）：工具返回 `ToolResult(outcome=..., detail=...)`（或抛异常），包装器从返回值读取语义；富语义工具渐进改造；
-- (b) 短期过渡：保留 contextvar `tool_ctx.mark(outcome)` 覆写钩子（v2 设计），`_timeout.py` 三分支改为钩子使用方。
-- **目标修正（重要）**：「零埋点」仅对简单工具（纯成功/异常二态）成立；**富语义工具的 outcome 标记是正式 API（ToolResult/mark），不是散点埋点**——数量与现手写埋点相当但语义统一、可 lint 管辖。§2 目标据此重述。
+**③ outcome 语义承载（v3.1 定板：ToolResult 唯一方案，无过渡）**：
+- 内核新增 `ToolResult(text, outcome, detail, error_class)` 协议（`agent_core.observability`，stdlib 零依赖）——工具体内 catch 分支不再调 monitor，而是**返回 ToolResult**；`text` 为 LLM 可见文本（包装器转发为工具返回值），`outcome/detail/error_class` 为事件维度；
+- 包装器判定规则：返回 `ToolResult` → 上报其 outcome 并转发 `text`；返回普通值 → **success**；外抛 → `exception`（error_class=类型名，复用 `classify_exception` 语义）并 re-raise；timeout 由 `_timeout.py` 返回 `ToolResult(outcome=timeout)`（隔离行为不变：仍不把异常抛给主管 Agent）；
+- **目标重述**：「零埋点」仅对纯二态工具（成功/抛异常）成立；富语义工具（empty/degraded/guarded）需把 catch-return 改造为 ToolResult 返回——这是**正式 API 替换散点埋点**（27 处 monitor 调用 → 27 处 ToolResult 返回），lint 可管辖、无 monitor 依赖。
 
 **④ 下游取值兼容（C3）**：包装器派生 `tool_name` 取自 `tool.name`（英文），与现中文展示名不一致——附 **name→display_name 映射表**（迁移期包装器优先查表）；args 先经 monitor 层截断（512 字符）+ 摘要/hash（复用 `user_query_hash`）再入事件。对外口径改为：**"事件字段结构兼容；取值语义变更（英文名/全量摘要 args），需下游（WS 前端 / Langfuse 看板 / run_eval）审计"**——放弃"下游无感"表述。
 
@@ -62,8 +63,8 @@
 - `packages/agent-core/agent_core/observability/`：**新增** `observe_tool()` 包装器 + args 截断/摘要单一实现 + StructuredTool sync/async 双路包装（估 150-250 行 + 测试）；
 - `agent_federation/agent/tool_registry.py`：装配点接入 observe_tool；
 - `agent_federation/agent/main_agent.py:30-33`、`agent/subagents/{database_query,knowledge_base,network_search}_agent.py`、`planners/agentic_runtime_bridge.py:141-143`：直引改经 registry/工厂取用（消除 6 处旁路）；
-- `agent_federation/tools/*.py`：摘除 27 处手写埋点（按工具原子渐进，见 §5）；
-- `agent_federation/tools/_timeout.py`：三分支改 ToolResult/mark；
+- `agent_federation/tools/*.py`：手写埋点改造为 ToolResult 语义返回（按工具原子渐进，见 §5）；
+- `agent_federation/tools/_timeout.py`：三分支改返回 `ToolResult`（隔离行为不变，不再直调 monitor）；
 - `agent_federation/tools/ragflow_tools.py`：确认死代码后删除；
 - `agent_server`：SkillRegistry 侧接入同一 kernel 包装器（装配点，非第二实现）；
 - `agent_federation/evaluation/run_eval.py`：工具统计口径同步（success 新增 + 映射后名称）；
@@ -75,8 +76,8 @@
 > **批 0 已完成**（2026-09-25）：产出 [tool-mount-matrix-2026-09-25.md](tool-mount-matrix-2026-09-25.md)——11 工具 × 4 路径挂载矩阵（**三重挂载×3、双重×4、死代码×2**，严重性高于评审二估计）、ragflow 死代码确认、eval 无现存基线（批 2 前首录）、下游消费方审计（WS 前端在仓外需人工确认；evidence 链仅 agent_server 存在）、§7.4 定板建议（**桥接工具不重复包装**，事件由 SkillRegistry middleware 承接）。
 
 0. **批 0（前置盘点）**：挂载矩阵终版（工具 × 路径 × 双重挂载标记）+ ragflow 死代码确认 + eval 基线快照 + 下游 tool_name 消费方审计清单。
-1. **批 1（kernel 落地）**：`agent_core.observability.observe_tool()` + 单测（EventBus 断言 start+outcome、sync/async 双路、元数据逐字段、截断/映射）。
-2. **批 2（按工具收编，原子粒度）**：逐工具执行「所有挂载路径改经工厂 → 双跑验证（feature flag `TOOL_OBS_ENABLED` 可随时切回手写埋点，S1）→ 删该工具手写埋点 → 该工具挂载矩阵回归测试绿」四步闭环；全部工具完成后进入批 3。避免"包装器未覆盖某路径、手写已删"的观测空窗。
+1. **批 1（kernel 落地，2026-09-25 完成）**：`agent_core.observability`（ToolResult/ToolOutcome 协议 + `observe_tool` StructuredTool 双路包装，langchain 依赖隔离模式同 `llm/fallback_lc`）+ monitor `duration_ms` 追加字段 + 单测。
+2. **批 2（按工具收编，原子粒度）**：逐工具执行「所有挂载路径改经工厂 → 该工具体内 catch 分支改 ToolResult 返回 → 删该工具手写埋点 → 挂载矩阵回归测试绿」四步闭环（回退 = git revert，无 feature flag）；全部工具完成后进入批 3。
 3. **批 3（门禁）**：lint 规则——app 层裸调 `monitor.report_tool*` 即失败（词边界），kernel observability / api/monitor.py / tests / evaluation 订阅豁免；`tool_ctx.mark`/ToolResult 为合法通道；自证（故意裸调 → CI 红）。
 
 ## 6. 验收标准
@@ -93,7 +94,7 @@
 
 | # | 事项 | 建议定板值 |
 |---|---|---|
-| 1 | outcome 语义承载 | **ToolResult 协议为目标态 + mark 钩子为过渡**（C2 二选一 → 两者并存分阶段） |
+| 1 | outcome 语义承载 | **✅ 已定板（v3.1）：ToolResult 结构化返回唯一方案**，mark 钩子过渡取消（用户决策：避免冗余代码）；回退 = git revert |
 | 2 | args 截断阈值/位置 | 512 字符，monitor `_emit` 层单一实现 |
 | 3 | outcome 枚举 | `Literal["success","empty","exception","guarded","degraded","timeout"]` + error_class 扩展位 |
 | 4 | 桥接工具包装层级 | 批 0 定（build_tool 包装 vs delegate 层承接） |
