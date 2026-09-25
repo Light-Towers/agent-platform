@@ -20,6 +20,11 @@ PG_URL = os.environ.get(
     "postgresql://agent:agent_platform_dev@localhost:5433/agent_platform",
 )
 
+# 门禁语义（P0 审计修复，2026-09-25）：CI 环境下 PG 不可用 = FAIL 而非 SKIP。
+# 本 workflow 名为 agent-platform-ha——"15 skipped 但 green" 会让人误以为 HA 已验证。
+# GitHub Actions / 任何设置了 CI=true 的环境必须提供真实 PG；本地开发保留 skip。
+_IN_CI = os.environ.get("CI", "").strip().lower() in {"true", "1"}
+
 from agent_runtime import db as _db
 from agent_runtime.planner.durability_pg import (
     PgCheckpointStore,
@@ -50,16 +55,23 @@ async def pg_pool():
     """真实 PG 连接池（session 级，共享；自动建表含 side_effects / execution_events）。
 
     §HA：必须用真实 PostgreSQL（SQLite 会给出"测试通过但生产失败"的假象）。
-    无本地 PG（Windows CI / 无 PG 开发机）或平台不可用时**自动 skip**（而非 fail），
-    避免 setup 阶段连接失败被误报为测试错误。
+    本地无 PG（Windows 开发机）或平台不可用时自动 skip；
+    **CI 环境（CI=true）一律 FAIL**——PG service 已由 workflow 显式提供，
+    init 失败属于真实故障，不得以 skip 掩盖（P0 审计修复）。
     """
     if sys.platform == "win32":
+        if _IN_CI:
+            pytest.fail("Windows CI 不支持 HA 测试（psycopg ProactorEventLoop），应使用 Linux runner")
         pytest.skip("Windows 下 psycopg ProactorEventLoop 不可用，HA 测试需真实 PG（Linux CI 覆盖）")
     try:
         pool = await _db.init_pool(PG_URL)
     except Exception as exc:
+        if _IN_CI:
+            pytest.fail(f"CI 环境必须提供可用 PostgreSQL（{PG_URL}），init_pool 失败：{exc!r}")
         pytest.skip(f"未检测到可用 PostgreSQL（{PG_URL}）：{exc!r} —— HA 测试需真实 PG，Linux CI 自动覆盖")
     if pool is None:
+        if _IN_CI:
+            pytest.fail(f"CI 环境 init_pool 返回 None（PG 未配置），禁止以 skip 掩盖：{PG_URL}")
         pytest.skip("init_pool 返回 None（无可用 PG），HA 测试需真实 PostgreSQL")
     # 清理历史 HA 审计数据，保证断言基线干净
     async with pool.connection() as conn:
