@@ -72,6 +72,8 @@
 
 ## 5. 迁移策略（S2：按工具原子合并，替代批次横切）
 
+> **批 0 已完成**（2026-09-25）：产出 [tool-mount-matrix-2026-09-25.md](tool-mount-matrix-2026-09-25.md)——11 工具 × 4 路径挂载矩阵（**三重挂载×3、双重×4、死代码×2**，严重性高于评审二估计）、ragflow 死代码确认、eval 无现存基线（批 2 前首录）、下游消费方审计（WS 前端在仓外需人工确认；evidence 链仅 agent_server 存在）、§7.4 定板建议（**桥接工具不重复包装**，事件由 SkillRegistry middleware 承接）。
+
 0. **批 0（前置盘点）**：挂载矩阵终版（工具 × 路径 × 双重挂载标记）+ ragflow 死代码确认 + eval 基线快照 + 下游 tool_name 消费方审计清单。
 1. **批 1（kernel 落地）**：`agent_core.observability.observe_tool()` + 单测（EventBus 断言 start+outcome、sync/async 双路、元数据逐字段、截断/映射）。
 2. **批 2（按工具收编，原子粒度）**：逐工具执行「所有挂载路径改经工厂 → 双跑验证（feature flag `TOOL_OBS_ENABLED` 可随时切回手写埋点，S1）→ 删该工具手写埋点 → 该工具挂载矩阵回归测试绿」四步闭环；全部工具完成后进入批 3。避免"包装器未覆盖某路径、手写已删"的观测空窗。
