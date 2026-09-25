@@ -675,11 +675,11 @@ async def test_fallback_model_recovery():
 
 ### 6.3 评测集实跑标定与覆盖度补充（复用 run-all.py，不新建脚本）
 
-**状态**：`eval/golden.jsonl` 已有 200 条（Phase 0 已落地，VERIFICATION_REPORT Phase 5 PASS）；`eval/run-all.py` + `run_eval`/`judge`/`score_routing` 均已就位
+**状态**：`evaluation/golden.jsonl` 已有 200 条（Phase 0 已落地，VERIFICATION_REPORT Phase 5 PASS）；`evaluation/run-all.py` + `run_eval`/`judge`/`score_routing` 均已就位
 **遗留问题**：200 条的实跑标定（路由准确率 / 工具调用四分类 / 任务完成率）尚未全量跑通，覆盖度需补充
 **动作**：
 
-1. 用现有 `python -m eval.run-all` 全量实跑 200 条，产出标定报告落盘（缺的是实跑结果，不是脚本；若指标有缺口，增量改 `run_eval`/`judge`，不另起入口）
+1. 用现有 `python -m evaluation.run-all` 全量实跑 200 条，产出标定报告落盘（缺的是实跑结果，不是脚本；若指标有缺口，增量改 `run_eval`/`judge`，不另起入口）
 2. 覆盖度矩阵盘点：意图分类 × 子服务 × 单轮/多轮 × 中文/英文 × 简单/复杂，**只补缺格样本**进 `golden.jsonl`，目标每格 ≥10 条
 
 ### 6.4 zhiku golden 标注修复

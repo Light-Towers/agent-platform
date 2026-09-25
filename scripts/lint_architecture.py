@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import re
 import sys
+import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -98,6 +99,67 @@ def check_fastapi_apps() -> list[str]:
     return violations
 
 
+# ---------------------------------------------------------------------------
+# P5 架构不变量：workspace 成员间顶层包名不得重复。
+# 背景：uv/hatchling editable 安装以朴素 .pth 把成员源码根整体加入 sys.path，
+# 源码根下任何含 __init__.py 的子目录都会成为可全局 import 的顶层包；
+# 跨成员重名时解析结果取决于 .pth 顺序（隐式遮蔽，曾导致 ks 单测 collection 失败）。
+# 历史冲突 eval（agent_federation vs knowledge-service）已于 2026-09-25 消歧义，
+# 见 docs/plans/plan-workspace-toplevel-eval-disambiguation-2026-09-25.md。
+# 规则：若成员源码根本身是包（含 __init__.py）则只暴露包名；否则暴露其下
+# 含 __init__.py 且名为合法标识符的直接子目录（与 .pth 真实暴露机制同源）。
+# ---------------------------------------------------------------------------
+_IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def _exposed_toplevel_names(source_root: Path) -> set[str]:
+    """返回某 sys.path 暴露根下的顶层 regular package 名集合。"""
+    if (source_root / "__init__.py").exists():
+        # 源码根自身就是包：作为整体被暴露，其子目录已在包命名空间内，不占顶层
+        return {source_root.name} if _IDENT_RE.match(source_root.name) else set()
+    exposed: set[str] = set()
+    for child in source_root.iterdir():
+        if (
+            child.is_dir()
+            and not child.name.startswith((".", "_"))
+            and _IDENT_RE.match(child.name)
+            and (child / "__init__.py").exists()
+        ):
+            exposed.add(child.name)
+    return exposed
+
+
+def check_toplevel_package_clashes() -> list[str]:
+    """跨 workspace 成员检测顶层包名重复；返回违规描述列表（空=通过）。"""
+    with (ROOT / "pyproject.toml").open("rb") as f:
+        data = tomllib.load(f)
+
+    # 暴露根 = 各 workspace 成员目录 + 根包 wheel packages 的父目录（如 applications/）
+    source_roots: list[Path] = [
+        ROOT / m for m in data.get("tool", {}).get("uv", {}).get("workspace", {}).get("members", [])
+    ]
+    for pkg in data.get("tool", {}).get("hatch", {}).get("build", {}).get("targets", {}).get("wheel", {}).get("packages", []):
+        pkg_dir = ROOT / pkg
+        if pkg_dir.exists():
+            source_roots.append(pkg_dir.parent)
+
+    owners: dict[str, list[Path]] = {}
+    seen_roots: set[Path] = set()
+    for root in source_roots:
+        if not root.is_dir() or root in seen_roots:
+            continue
+        seen_roots.add(root)
+        for name in _exposed_toplevel_names(root):
+            owners.setdefault(name, []).append(root)
+
+    violations: list[str] = []
+    for name, roots in sorted(owners.items()):
+        uniq = sorted({r.relative_to(ROOT).as_posix() for r in roots})
+        if len(uniq) > 1:
+            violations.append(f"顶层包名 '{name}' 被多个成员同时暴露: {uniq}")
+    return violations
+
+
 def main() -> int:
     rc = 0
     v1 = check()
@@ -119,6 +181,15 @@ def main() -> int:
         rc = 1
     else:
         print("P2 架构约束通过：无白名单外裸 FastAPI() 构造")
+    v3 = check_toplevel_package_clashes()
+    if v3:
+        print("P5 架构约束违反：workspace 成员间顶层包名重复（editable .pth 全暴露，解析取决于安装顺序）")
+        print("修复：重命名其中一方或将工具目录收进各自命名空间包（见 plan-workspace-toplevel-eval-disambiguation）：")
+        for v in v3:
+            print(f"  {v}")
+        rc = 1
+    else:
+        print("P5 架构约束通过：无跨成员顶层包名冲突")
     return rc
 
 

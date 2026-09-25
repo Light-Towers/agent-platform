@@ -4,7 +4,7 @@
 基于原型向量 + 模板生成，覆盖 4 项目 × 5 意图。
 保留原 10 题作核心回归，新增 190 题。
 
-用法：python eval/expand-golden.py
+用法：python evaluation/expand-golden.py
 """
 
 from __future__ import annotations

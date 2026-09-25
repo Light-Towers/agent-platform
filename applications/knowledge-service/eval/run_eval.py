@@ -28,7 +28,6 @@
 """
 
 import argparse
-import hashlib
 import json
 import sys
 import time
@@ -44,9 +43,8 @@ if str(_PROJECT_ROOT) not in sys.path:
 
 from eval.metrics import compute_retrieval_metrics  # noqa: E402
 from knowledge_service.clients.milvus_utils import get_milvus_client  # noqa: E402
+from knowledge_service.conf.config_hash import compute_config_hash  # noqa: E402 —— 单一实现已上收至 conf 包
 from knowledge_service.conf.milvus_config import milvus_config  # noqa: E402 —— 路径引导后导入，脚本直跑必需
-from knowledge_service.conf.rerank_config import rerank_cfg  # noqa: E402 TD-9：统一引用 yaml 配置
-from knowledge_service.conf.retrieval_config import retrieval_cfg  # noqa: E402 TD-9：统一引用 yaml 配置
 from knowledge_service.core.tracing import init_tracing  # noqa: E402
 from knowledge_service.query_process.agent.nodes.node_rerank import node_rerank  # noqa: E402
 from knowledge_service.query_process.agent.nodes.node_rrf import _as_entity_list, reciprocal_rank_fusion  # noqa: E402
@@ -55,28 +53,6 @@ from knowledge_service.query_process.agent.nodes.node_search_embedding_hyde impo
     node_search_embedding_hyde,
 )
 
-# ---------------------------------------------------------------------------
-# TD-9：运行时配置快照（config_hash 的兜底来源），统一从 retrieval.yaml / rerank.yaml 读取。
-# 不再硬编码超参，避免与线上配置漂移。yaml 缺失时退化为空 dict（compute_config_hash 直接读文件内容）。
-# ---------------------------------------------------------------------------
-_RUNTIME_BASELINE: Dict[str, Any] = {
-    "rrf": {
-        "k": retrieval_cfg.rrf.k,
-        "max_results": retrieval_cfg.rrf.max_results,
-        "weights": list(retrieval_cfg.rrf.weights.values()) if hasattr(retrieval_cfg.rrf.weights, 'values') else retrieval_cfg.rrf.weights,
-    },
-    "hybrid": {
-        "dense_weight": retrieval_cfg.hybrid.dense_weight,
-        "sparse_weight": retrieval_cfg.hybrid.sparse_weight,
-    },
-    "rerank_dynamic_topk": {
-        "gap_ratio": rerank_cfg.dynamic_topk.gap_ratio,
-        "gap_abs": rerank_cfg.dynamic_topk.gap_abs,
-        "min_k": rerank_cfg.dynamic_topk.min_k,
-        "max_k": rerank_cfg.dynamic_topk.max_k,
-    },
-}
-
 DEFAULT_GOLDEN: Path = Path(__file__).resolve().parent / "golden_queries.jsonl"
 DEFAULT_OUT: Path = Path(__file__).resolve().parent / "runs"
 
@@ -84,34 +60,6 @@ DEFAULT_OUT: Path = Path(__file__).resolve().parent / "runs"
 METRICS_FILE = "metrics.json"
 PER_QUERY_FILE = "per_query.jsonl"
 BADCASES_FILE = "badcases.md"
-
-
-# ---------------------------------------------------------------------------
-# 配置哈希（实验追踪，方案 §7.5）
-# ---------------------------------------------------------------------------
-def _sha256_hex(content: str) -> str:
-    """返回内容 sha256 前 8 位十六进制，作为短 config_hash。"""
-    return hashlib.sha256(content.encode("utf-8")).hexdigest()[:8]
-
-
-def compute_config_hash() -> str:
-    """
-    计算本次评测的配置哈希。
-
-    优先：knowledge_service/conf/retrieval.yaml + knowledge_service/conf/rerank.yaml（M3 起存在）内容 + 集合名。
-    兜底：M2 硬编码基线快照 + 集合名（yaml 尚不存在时退化）。
-    """
-    conf_dir = Path(__file__).resolve().parent.parent / "knowledge_service" / "conf"
-    parts: List[str] = [milvus_config.chunks_collection]
-    yaml_files = [conf_dir / "retrieval.yaml", conf_dir / "rerank.yaml"]
-    any_yaml = False
-    for yf in yaml_files:
-        if yf.exists():
-            any_yaml = True
-            parts.append(yf.read_text(encoding="utf-8"))
-    if not any_yaml:
-        parts.append(json.dumps(_RUNTIME_BASELINE, sort_keys=True, ensure_ascii=False))
-    return _sha256_hex("\n".join(parts))
 
 
 # ---------------------------------------------------------------------------

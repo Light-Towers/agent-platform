@@ -40,8 +40,8 @@ test:
 	uv run pytest applications/nl2sql-service/tests -q
 
 # 评测门禁：默认启发式（确定性，CI 可达），阈值 0.8；LLM_API_KEY 缺失时回退启发式并 WARN。
-# 注意：必须用直接路径 `eval/run_eval.py` 而非 `-m eval.run_eval`，
-# 否则会命中 agent_federation 包内同名模块（workspace 命名冲突）。
+# 注：历史上 agent_federation 曾有同名顶层 eval 包（workspace 命名冲突，已于
+# 2026-09-25 重命名为 evaluation 根除，见 lint_architecture P5 门禁防复发）。
 # CI 完整 LLM 评测用 `make eval-llm-required`（环境不可达时 SKIP 退出码 2，不假装通过）。
 eval:
 	uv run python eval/run_eval.py --fail-below 0.8

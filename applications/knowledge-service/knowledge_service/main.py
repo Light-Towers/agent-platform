@@ -13,11 +13,11 @@ from typing import AsyncIterator
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from eval.run_eval import compute_config_hash
 from knowledge_service.api.errors import error_response, register_exception_handlers
 from knowledge_service.api.import_router import router as import_router
 from knowledge_service.api.middleware.security_guards import SecurityGuardsMiddleware
 from knowledge_service.api.query_router import router as query_router
+from knowledge_service.conf.config_hash import compute_config_hash
 from knowledge_service.conf.milvus_config import milvus_config
 from knowledge_service.core.config import settings
 from knowledge_service.core.logger import logger

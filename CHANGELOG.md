@@ -2,6 +2,15 @@
 
 本仓库为 uv workspace monorepo。**唯一受支持的安装/运行入口是根 `uv.lock` + `uv sync`**，子包不再维护独立 `uv.lock`（见 v2 修复 #14）。
 
+## workspace 顶层包名冲突全局治理（eval 消歧义 + P5 门禁，2026-09-25）
+
+> 方案：`docs/plans/plan-workspace-toplevel-eval-disambiguation-2026-09-25.md`。背景：editable 安装以朴素 `.pth` 把成员源码根整体加入 `sys.path`，顶层包名 `eval` 被 agent_federation 与 knowledge-service 双重暴露，解析取决于安装顺序；前次 conftest 局部重绑补丁（c6b60a5）属散点止血，本次按「单一实现 + 全局装配 + 强制门禁」三层收口并撤销该补丁。
+
+- **① 单一实现（ks 架构倒挂修复）**：`compute_config_hash`（含 `_RUNTIME_BASELINE`/`_sha256_hex`）从 `knowledge-service/eval/run_eval.py` 上收至新建 `knowledge_service/conf/config_hash.py`；`main.py` 不再 `from eval.run_eval import`（生产链路反向依赖评测 harness，且 wheel only-include 不含 eval/，打包部署必挂）；评测脚本与生产运行时共指同一实现。函数行为零变更。
+- **② 消歧义（全局装配）**：`agent_federation/eval/` → `agent_federation/evaluation/`（`git mv` 保留历史；冲突引用面较小方），同步更新：包内 `from eval.*` 导入、docstring/用法路径、`tests/unit/test_eval_baseline.py`（`agent_federation.evaluation.run_eval`）、`pyproject.toml` ruff per-file-ignores、`.gitignore`（`evaluation/results/`）；live 文档同步（根 README/Makefile 注释/docs/TODO、federation production-action-plan 命令）。历史快照文档（CHANGELOG/AUDIT/PROPOSAL/analysis）不回改。全仓仅剩 ks 一个顶层 `eval` regular package，`.pth` 顺序敏感性消除。
+- **撤销散点补丁**：`knowledge-service/tests/unit/conftest.py` 的 importlib 重绑 hack 恢复原样（止血措施随根因修复退场）。
+- **③ 强制门禁（P5）**：`scripts/lint_architecture.py` 新增不变量——与 uv workspace members + 根包 wheel packages 同源解析暴露根，扫描源码根下含 `__init__.py` 的直接子目录，跨成员顶层包名重复即 CI 失败；当前树零违规无需白名单，自测：人为制造重名目录→退出码 1。
+
 ## 分支评审修复：Planner 租户传播 + SEMANTIC_MEMORY_TYPED 语义收口（2026-09-25，分支 `fix/v3-scheduler-tenant-isolation-20260924`）
 
 > 来源：2026-09-25 对昨日新建分支的 CodeReview（Critical#2/#3、Warning#7）。

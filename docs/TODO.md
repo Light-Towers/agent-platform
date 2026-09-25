@@ -82,4 +82,4 @@
 
 ## 8. 外部条件依赖项（非代码缺口）
 
-- [ ] agent_federation R1 漂移门禁真实基线（`eval/fed_latest.jsonl`）：本地开发环境无 LLM API key，无法生成；需在有 key 的环境执行一次 `uv run python -m agent_federation.eval.run_eval --baseline eval/fed_latest.jsonl` 锁定基线，之后 `--compare --fail-below` 才能作为 CI 门禁生效（比对逻辑本身已通过单测覆盖，无缺口）
+- [ ] agent_federation R1 漂移门禁真实基线（`evaluation/fed_latest.jsonl`）：本地开发环境无 LLM API key，无法生成；需在有 key 的环境执行一次 `uv run python -m agent_federation.evaluation.run_eval --baseline evaluation/fed_latest.jsonl` 锁定基线，之后 `--compare --fail-below` 才能作为 CI 门禁生效（比对逻辑本身已通过单测覆盖，无缺口）
