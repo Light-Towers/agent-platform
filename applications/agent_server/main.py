@@ -1,0 +1,506 @@
+"""应用工厂与生命周期：lifespan 内完成连接池 + 图的预热构建。
+
+所有全局资源在 lifespan 一次性初始化（带锁），请求路径零懒加载竞态。
+"""
+
+import pathlib
+from contextlib import asynccontextmanager
+
+from agent_core.guardrails.app_factory import build_api_app
+from agent_core.logging import configure_logging, get_logger
+
+# 统一日志配置入口：必须在其它包 import 之前调用，使下列 format 优先生效
+# （agent_runtime 等模块在 import 时即触发 get_logger → 惰性 configure_logging，
+# 若晚于此调用则会用默认格式覆盖本 format）。配置 root + agent_core 子树
+# （agent_core propagate=False，消除与宿主 double-handler 的重复日志），
+# 级别可经环境变量 LOG_LEVEL 覆盖。
+configure_logging(fmt="%(asctime)s %(levelname)s %(name)s: %(message)s")
+from agent_runtime.admission import AdmissionQueue, RateLimiter
+from agent_runtime.admission_gateway import PgAdmissionController
+from agent_runtime.coordinator import SessionCoordinator
+from agent_runtime.db import close_pool, get_pool, init_pool
+from agent_runtime.mcp_client import MCPClientManager
+from agent_runtime.otel import force_flush as otel_force_flush
+from agent_runtime.otel import get_otel_tracer, init_otel
+from agent_runtime.planner.durability_pg import (
+    PgCheckpointStore,
+    PgExecutionOwnershipStore,
+    PgIdempotencyStore,
+)
+from agent_runtime.revert import RevertHandler
+from agent_runtime.skills.workflow import discover_workflows
+from agent_runtime.tracing import get_langfuse_callbacks
+from agent_runtime.trajectory import PgTrajectoryStore
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+from agent_server.agent.graph import DelegateRef, build_graph
+from agent_server.agent.llm import build_chat_model
+from agent_server.api.routes import router
+from agent_server.config import get_settings
+from agent_server.schemas import McpServerConfig
+
+logger = get_logger(__name__)
+
+
+async def _build_checkpointer():
+    """有 DATABASE_URL 复用 PG 连接池走 Postgres checkpoint；否则内存版（开发模式）。
+
+    统一委托内核 ``get_checkpointer(pg_pool=...)`` 工厂（C8 收口：避免各子包重复
+    if MONGO_URL / if DATABASE_URL 样板）。PG 池由 app 自己的 init_pool() 管理，
+    仅把池句柄透传给工厂；Mongo/InMemory 分支完全由内核负责降级。
+    """
+    pool = get_pool()  # db_enabled 为 False 时返回 None → 工厂降级 InMemorySaver
+    if pool is None and get_settings().db_enabled:
+        raise RuntimeError("db_enabled 但连接池未初始化，检查 lifespan 中 init_pool 顺序")
+    from agent_core.memory import get_checkpointer
+
+    saver = get_checkpointer(pg_pool=pool)
+    # AsyncPostgresSaver 需要异步建表；InMemorySaver / MongoCheckpointer 无需 setup。
+    if pool is not None:
+        await saver.setup()
+    return saver
+
+
+def _build_pg_stores(pool):
+    """构建 PG 持久化后端（§20.1/20.2 + P3-1）。
+
+    仅在 pool 非 None 时创建；返回 (checkpoint_store, idempotency_store, ownership_store, trajectory_store)。
+    """
+    if pool is None:
+        return None, None, None, None
+    checkpoint_store = PgCheckpointStore(pool)
+    idempotency_store = PgIdempotencyStore(pool)
+    ownership_store = PgExecutionOwnershipStore(pool)
+    trajectory_store = PgTrajectoryStore(pool)
+    return checkpoint_store, idempotency_store, ownership_store, trajectory_store
+
+
+def _build_memory_hooks(pool):
+    """构建执行后记忆沉淀 hooks（EpisodicSink + ProceduralSink + MemoryDecayManager）。
+
+    pool 非 None 时用 PG 后端，否则 InMemory。使记忆框架"越用越好"——
+    执行完成后自动沉淀 Episode → 定期挖掘候选 Skill → 衰减清理。
+    """
+    from agent_runtime.episodic_memory import EpisodicMemory, InMemoryEpisodicStore
+    from agent_runtime.memory_decay import MemoryDecayManager
+    from agent_runtime.memory_sink import EpisodicSink, ProceduralSink
+    from agent_runtime.procedural_memory import InMemoryProceduralStore
+
+    if pool is not None:
+        from agent_runtime.memory_pg import PgEpisodicStore, PgProceduralStore
+
+        ep_store = PgEpisodicStore(pool)
+        proc_store = PgProceduralStore(pool)
+    else:
+        ep_store = InMemoryEpisodicStore()
+        proc_store = InMemoryProceduralStore()
+
+    ep_mem = EpisodicMemory(ep_store)
+    return [
+        EpisodicSink(ep_mem),
+        ProceduralSink(ep_mem, proc_store, trigger_interval=10),
+        MemoryDecayManager(ep_store, cleanup_interval=50),
+    ]
+
+
+def _build_context_governor(pool, llm):
+    """构建 Context 治理管道（ContextGovernor）：Select → Recall → Authorize → Validate → Score。
+
+    pool 非 None 时用 PG 后端 Memory，否则 InMemory。Governor 挂 app.state，
+    供 routes.py 在构建 PlannerContext 前调 govern_memories() 注入已治理的记忆。
+    """
+    from agent_runtime.context.assembler import ContextAssembler
+    from agent_runtime.context.authorizer import ContextAuthorizer
+    from agent_runtime.context.budget import ContextBudget
+    from agent_runtime.context.governor import ContextGovernor
+    from agent_runtime.context.quality import ContextQualityScorer
+    from agent_runtime.context.validator import ContextValidator
+    from agent_runtime.episodic_memory import EpisodicMemory, InMemoryEpisodicStore
+    from agent_runtime.memory_types import ContextSelector, MemoryRetriever
+    from agent_runtime.procedural_memory import (
+        InMemoryProceduralStore,
+        ProceduralMemory,
+    )
+
+    if pool is not None:
+        from agent_runtime.memory_pg import PgEpisodicStore, PgProceduralStore
+
+        ep_store = PgEpisodicStore(pool)
+        proc_store = PgProceduralStore(pool)
+    else:
+        ep_store = InMemoryEpisodicStore()
+        proc_store = InMemoryProceduralStore()
+
+    ep_mem = EpisodicMemory(ep_store)
+    proc_mem = ProceduralMemory(proc_store)
+    retriever = MemoryRetriever(episodic=ep_mem, procedural=proc_mem)
+
+    budget = ContextBudget(model_window=32_000)
+    assembler = ContextAssembler(budget, llm=llm)
+
+    return ContextGovernor(
+        assembler=assembler,
+        retriever=retriever,
+        selector=ContextSelector(),
+        validator=ContextValidator(),
+        authorizer=ContextAuthorizer(),
+        quality_scorer=ContextQualityScorer(),
+    )
+
+
+def _build_admission_controller(pool, settings):
+    """构建 admission 控制器：distributed 模式用 PgAdmissionController，其余用 AdmissionQueue。"""
+    if pool is None:
+        return None
+    if settings.runtime_mode == "distributed":
+        return PgAdmissionController(
+            pool,
+            capacity=settings.admission_queue_capacity,
+            timeout_s=settings.admission_queue_timeout_seconds,
+        )
+    # single_node / local：继续用现有 AdmissionQueue（内存调度 + PG 持久化队列）
+    if settings.admission_effective_enabled:
+        limiter = RateLimiter(
+            per_user=settings.admission_rate_limit_per_user,
+            per_session=settings.admission_rate_limit_per_session,
+            global_=settings.admission_rate_limit_global,
+        )
+        return AdmissionQueue(
+            pool=pool,
+            capacity=settings.admission_queue_capacity,
+            timeout_seconds=settings.admission_queue_timeout_seconds,
+            rate_limiter=limiter,
+            effective_enabled=True,
+        )
+    return None
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    settings = get_settings()
+
+    # §20 C4: distributed 模式必须有 PG，否则 fail fast
+    if settings.runtime_mode == "distributed" and not settings.db_enabled:
+        raise RuntimeError(
+            "runtime_mode=distributed 要求配置 DATABASE_URL，当前为空。"
+            "请设置 DATABASE_URL 或改用 runtime_mode=single_node/local。"
+        )
+
+    await init_pool(
+        database_url=settings.database_url,
+        db_pool_max_size=settings.db_pool_max_size,
+    )
+    pool = get_pool()
+    checkpointer = await _build_checkpointer()
+
+    # §20.1/20.2 + P3-1: 构建 PG 持久化后端
+    checkpoint_store, idempotency_store, ownership_store, trajectory_store = _build_pg_stores(pool)
+
+    llm = build_chat_model()
+
+    # Phase 2: 会话并发协调
+    if settings.coordination_enabled:
+        app.state.coordinator = SessionCoordinator(
+            policy=settings.coordination_policy,
+            enabled=True,
+        )
+    else:
+        app.state.coordinator = None
+
+    # Phase 2: admission 控制器（按 runtime_mode 选择实现）
+    admission_controller = _build_admission_controller(pool, settings)
+    if admission_controller is not None:
+        recovered = await admission_controller.recover_on_startup()
+        if recovered:
+            logger.info("admission recovered %d interrupted requests", recovered)
+        app.state.admission_controller = admission_controller
+    else:
+        app.state.admission_controller = None
+
+    # Phase 2: 会话回退 revert
+    if settings.revert_enabled:
+        app.state.revert_handler = RevertHandler(checkpointer, pool)
+    else:
+        app.state.revert_handler = None
+
+    # Phase 2: OTel 接线（opt-in）
+    if settings.otel_effective_enabled:
+        init_otel(
+            exporter=settings.otel_exporter,
+            endpoint=settings.otel_endpoint,
+            sampling_rate=settings.otel_sampling_rate,
+            service_name=settings.otel_service_name,
+        )
+        app.state.otel_tracer = get_otel_tracer()
+    else:
+        app.state.otel_tracer = None
+
+    # Phase 2: MCP client（opt-in）
+    mcp_manager = None
+    if settings.mcp_enabled and settings.mcp_servers:
+        try:
+            import json
+
+            configs = [McpServerConfig(**c) for c in json.loads(settings.mcp_servers)]
+            mcp_manager = MCPClientManager(
+                server_configs=configs,
+                pool=pool,
+                breaker_failure_threshold=settings.breaker_failure_threshold,
+                breaker_recovery_seconds=settings.breaker_recovery_seconds,
+            )
+            await mcp_manager.connect_all()
+        except Exception:
+            logger.warning("MCP init failed, degrading", exc_info=True)
+            mcp_manager = None
+    app.state.mcp_manager = mcp_manager
+
+    # delegate_ref 延迟绑定：graph 节点经 runtime.delegate 调用能力（受 skill_guard 组合治理），
+    # 解决循环依赖（graph → registry → runtime → graph）——先传空 holder，runtime 创建后填充。
+    delegate_ref = DelegateRef()
+    app.state.graph = build_graph(
+        llm, checkpointer=checkpointer, mcp_manager=mcp_manager, delegate_ref=delegate_ref
+    )
+    app.state.checkpointer = checkpointer
+    # Plan-F Phase 2: Planner 实现（PLANNER env 选择，Phase 3 统一 SSE 出口后供 api 消费）
+    # Plan-F Phase 3: PlannerRuntime——注册表注入 graph（含 general_qa Workflow Skill），
+    # llm/mcp_manager/pool 一并装配；组合治理（max_skill_depth/max_steps）约束 agentic 路径。
+    from agent_runtime.planner.protocol import PlannerRuntime
+
+    from agent_server.capabilities import get_registry
+    from agent_server.planners import get_planner
+
+    # 装配顺序：registry 先于 planner（GraphPlanner plan() 需 registry 做 discover）
+    registry = get_registry(graph=app.state.graph)
+
+    # §20 演进：自动发现并注册 Workflows 目录（声明式 YAML → Skill）
+    try:
+        import agent_runtime
+        _wf_dir = str(pathlib.Path(agent_runtime.__file__).parent / "workflows")
+        wf_skills = discover_workflows(
+            _wf_dir,
+            registry=registry,
+        )
+        for sk in wf_skills:
+            registry.register(sk)
+        logger.info("auto-registered %d workflow skills from %s", len(wf_skills), _wf_dir)
+    except Exception:
+        logger.warning("workflow auto-discovery failed", exc_info=True)
+
+    # MCP 工具自动注册为 Skill（每个工具 → SkillKind.REMOTE Skill）
+    if mcp_manager is not None:
+        from agent_runtime.skills.mcp import register_mcp_skills
+
+        mcp_count = register_mcp_skills(mcp_manager, registry)
+        logger.info("auto-registered %d MCP tool skills", mcp_count)
+
+    # 沙箱代码执行 Skill（Docker 优先 subprocess 降级）
+    from agent_runtime.skills.sandbox import as_sandbox_skill
+
+    sandbox_skill = as_sandbox_skill(timeout=settings.max_execution_seconds or 30)
+    if sandbox_skill.name not in registry:
+        registry.register(sandbox_skill)
+        logger.info("registered sandbox skill (backend=%s)", sandbox_skill.metadata.get("backend"))
+
+    # AgenticPlanner → SkillKind.AGENT 收敛（entry_points 不可用时跳过）
+    try:
+        from agent_runtime.planner.agentic import AgenticPlanner
+
+        agentic_skill = AgenticPlanner().to_skill()
+        if agentic_skill.name not in registry:
+            registry.register(agentic_skill)
+            logger.info("registered agentic skill (SkillKind.AGENT)")
+    except Exception:
+        # entry_points 不可用是常见预期（非 agentic 部署）；仅当运行时实际需要
+        # agentic/auto planner 时才值得警告，否则 DEBUG 记录（T1.2c / B2 评审结论）
+        if settings.planner in ("agentic", "auto"):
+            logger.warning(
+                "agentic skill 注册失败（planner=%s 运行时需要该 skill）",
+                settings.planner,
+                exc_info=True,
+            )
+        else:
+            logger.debug("agentic skill registration skipped (entry_points unavailable)", exc_info=True)
+
+    app.state.registry = registry
+    app.state.planner = get_planner(settings, registry=registry)
+    post_execution_hooks = _build_memory_hooks(pool)
+    app.state.context_governor = _build_context_governor(pool, llm)
+    # V3-3: AwaitableTask 持久化（PG 优先，InMemory 降级）
+    if pool is not None:
+        from agent_runtime.awaitable_task_pg import PgAwaitableTaskStore
+
+        awaitable_task_store = PgAwaitableTaskStore(pool)
+    else:
+        from agent_runtime.awaitable_task import InMemoryAwaitableTaskStore
+
+        awaitable_task_store = InMemoryAwaitableTaskStore()
+    app.state.awaitable_task_store = awaitable_task_store
+    app.state.planner_runtime = PlannerRuntime(
+        registry=registry,
+        llm=llm,
+        mcp_manager=mcp_manager,
+        pool=pool,
+        max_skill_depth=settings.max_skill_depth,
+        max_steps=settings.max_steps,
+        max_duration_seconds=settings.max_execution_seconds or None,
+        checkpoint_store=checkpoint_store,
+        ownership_store=ownership_store,
+        trajectory_store=trajectory_store,
+        enable_loop_fingerprint=settings.enable_loop_fingerprint,
+        workspace_id="default",
+        user_id="default",
+        post_execution_hooks=post_execution_hooks,
+        awaitable_task_store=awaitable_task_store,
+    )
+    # 绑定 delegate：graph 节点的 _invoke 此后经 runtime.delegate 调用
+    delegate_ref.delegate = app.state.planner_runtime.delegate
+    app.state.callbacks = get_langfuse_callbacks(
+        public_key=settings.langfuse_public_key,
+        secret_key=settings.langfuse_secret_key,
+        host=settings.langfuse_host,
+    )
+    # V3 Phase 2: ExecutionScheduler + ExecutionStatusStore（opt-in）
+    if settings.scheduler_enabled:
+        from agent_runtime.execution_scheduler import (
+            ExecutionScheduler,
+            InMemorySchedulerStore,
+            SchedulerConfig,
+        )
+        from agent_runtime.execution_status import InMemoryExecutionStatusStore
+
+        if pool is not None:
+            from agent_runtime.execution_scheduler import PgSchedulerStore
+            from agent_runtime.execution_state_pg import PgExecutionStatusStore
+
+            scheduler_store = PgSchedulerStore(pool)
+            status_store = PgExecutionStatusStore(pool)
+        else:
+            scheduler_store = InMemorySchedulerStore()
+            status_store = InMemoryExecutionStatusStore()
+        scheduler = ExecutionScheduler(
+            scheduler_store,
+            config=SchedulerConfig(
+                max_concurrent=settings.scheduler_max_concurrent,
+                max_concurrent_per_tenant=settings.scheduler_max_concurrent_per_tenant,
+                queue_capacity=settings.scheduler_queue_capacity,
+            ),
+        )
+        app.state.scheduler = scheduler
+        app.state.status_store = status_store
+        # V3 Phase 3: Scheduler Reaper（lease-based 回收）
+        if ownership_store is not None:
+            from agent_runtime.execution_scheduler import SchedulerReaper
+
+            reaper = SchedulerReaper(scheduler, ownership_store)
+            reaper.start()
+            app.state.scheduler_reaper = reaper
+            logger.info("V3 scheduler reaper started (lease-based)")
+        else:
+            app.state.scheduler_reaper = None
+        # V3 Phase 4: Control Plane（组合 scheduler + status_store + checkpoint_store）
+        from agent_runtime.control_plane import ControlPlane
+
+        app.state.control_plane = ControlPlane(
+            scheduler=scheduler,
+            status_store=status_store,
+            checkpoint_store=checkpoint_store,
+        )
+        logger.info(
+            "V3 scheduler enabled: max_concurrent=%d per_tenant=%d queue=%d backend=%s",
+            settings.scheduler_max_concurrent,
+            settings.scheduler_max_concurrent_per_tenant,
+            settings.scheduler_queue_capacity,
+            "pg" if pool is not None else "memory",
+        )
+    else:
+        app.state.scheduler = None
+        app.state.status_store = None
+    # V3 Phase 4: Cost Governance（opt-in）
+    if settings.cost_governance_enabled:
+        from agent_runtime.cost_governance import (
+            BudgetDimension,
+            BudgetLimit,
+            CostGovernance,
+            InMemoryBudgetStore,
+        )
+
+        limits: dict[BudgetDimension, BudgetLimit] = {}
+        if settings.budget_limit_requests > 0:
+            limits[BudgetDimension.REQUESTS] = BudgetLimit(
+                BudgetDimension.REQUESTS, settings.budget_limit_requests,
+                window_seconds=settings.budget_window_seconds,
+            )
+        if settings.budget_limit_tokens > 0:
+            limits[BudgetDimension.TOKENS] = BudgetLimit(
+                BudgetDimension.TOKENS, settings.budget_limit_tokens,
+                window_seconds=settings.budget_window_seconds,
+            )
+        if settings.budget_limit_cost > 0:
+            limits[BudgetDimension.COST] = BudgetLimit(
+                BudgetDimension.COST, settings.budget_limit_cost,
+                window_seconds=settings.budget_window_seconds,
+            )
+        if pool is not None:
+            from agent_runtime.cost_governance_pg import PgBudgetStore
+
+            budget_store = PgBudgetStore(pool)
+        else:
+            budget_store = InMemoryBudgetStore()
+        app.state.cost_governance = CostGovernance(budget_store, limits)
+        logger.info(
+            "V3 cost governance enabled: limits=%s backend=%s",
+            {dim.value: lim.limit for dim, lim in limits.items()},
+            "pg" if pool is not None else "memory",
+        )
+    else:
+        app.state.cost_governance = None
+    logger.info(
+        "agent-platform 就绪 storage=%s llm=%s pool=%s coordination=%s admission=%s revert=%s otel=%s mcp=%s planner=%s runtime_mode=%s",
+        "postgres" if settings.db_enabled else "memory",
+        settings.llm_enabled,
+        pool is not None,
+        settings.coordination_enabled,
+        admission_controller is not None,
+        settings.revert_enabled,
+        settings.otel_effective_enabled,
+        mcp_manager is not None,
+        getattr(app.state.planner, "kind", "unknown"),
+        settings.runtime_mode,
+    )
+    yield
+    # V3 Phase 3: Scheduler Reaper 停止
+    reaper = getattr(app.state, "scheduler_reaper", None)
+    if reaper is not None:
+        await reaper.stop()
+    # Phase 2: OTel flush
+    otel_force_flush()
+    # Phase 2: MCP close
+    mcp_mgr = getattr(app.state, "mcp_manager", None)
+    if mcp_mgr is not None:
+        await mcp_mgr.close_all()
+    # checkpointer 复用 init_pool 的连接池（db_enabled 时 conn 即 _pool），
+    # 生命周期归 close_pool() 统一管理，此处不再单独关闭连接。
+    await close_pool()
+
+
+def create_app() -> FastAPI:
+    app = build_api_app(title="agent-platform", version="0.1.0", lifespan=lifespan)
+    # CORS：允许前端跨域调用 /query 等接口；allow_origins 应从环境变量注入，
+    # 默认为回环，避免开发期浏览器被阻断的同时不暴露给任意来源。
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=[
+            o.strip()
+            for o in (get_settings().cors_allow_origins or "http://127.0.0.1:5173").split(",")
+            if o.strip()
+        ],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+    app.include_router(router)
+    return app
+
+
+app = create_app()

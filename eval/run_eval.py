@@ -26,7 +26,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.agent.router import decide_route, heuristic_route
+from agent_server.agent.router import decide_route, heuristic_route
 
 # 退出码约定：0=通过，1=未达门禁阈值，2=环境缺失导致 SKIP（LLM 评测被要求但 key 不可用）
 EXIT_SKIP = 2
@@ -49,7 +49,7 @@ async def run(use_llm: bool, require_llm: bool) -> tuple[list[dict], bool]:
                 return [], False
             print("WARN: LLM_API_KEY 未配置，回退启发式评测（非完整 LLM 评测）")
         else:
-            from app.agent.llm import build_chat_model
+            from agent_server.agent.llm import build_chat_model
 
             llm = build_chat_model()
             if llm is None and require_llm:

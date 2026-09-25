@@ -1,0 +1,16 @@
+name: "search_pipeline"
+description: "搜索流水线：直接调用搜索能力（演示 Workflow Skill 编译）"
+input_schema:
+  type: object
+  properties:
+    question:
+      type: string
+  required: [question]
+nodes:
+  - id: "search"
+    skill: "search"
+    inputs:
+      query: "$input.question"
+edges: []
+output_node: "search"
+permissions: ["read", "search"]

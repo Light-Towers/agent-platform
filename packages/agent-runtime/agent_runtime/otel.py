@@ -1,0 +1,144 @@
+"""OpenTelemetry 分布式追踪集成。
+
+- 遵循 GenAI 语义约定 gen_ai.*
+- exporter 可插拔（otlp/jaeger/console/none）
+- 与 Langfuse 共存，不替代
+- W3C traceparent 透传
+- 数据脱敏（不含问题全文）
+- 默认 false（opt-in）
+"""
+
+import logging
+from typing import Literal
+
+from agent_core.tracing import noop_tracer, user_query_hash
+
+logger = logging.getLogger(__name__)
+
+# 可选导入 opentelemetry
+try:
+    from opentelemetry import trace
+    from opentelemetry.sdk.resources import Resource
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.sampling import (
+        ALWAYS_ON,
+        TraceIdRatioBasedSampler,
+    )
+
+    _OTEL_AVAILABLE = True
+except ImportError:
+    _OTEL_AVAILABLE = False
+
+_tracer = None
+
+
+def init_otel(
+    exporter: Literal["otlp", "jaeger", "console", "none"] = "otlp",
+    endpoint: str = "",
+    sampling_rate: float = 1.0,
+    service_name: str = "agent-platform",
+) -> None:
+    """初始化 OTel tracer provider。"""
+    global _tracer
+
+    if not _OTEL_AVAILABLE:
+        logger.warning("OTEL_INIT_FAILED: opentelemetry SDK not installed")
+        _tracer = noop_tracer()
+        return
+
+    if exporter == "none":
+        _tracer = noop_tracer()
+        return
+
+    # 采样率校验
+    if not 0.0 <= sampling_rate <= 1.0:
+        logger.warning("OTEL_SAMPLING_INVALID: %s, using 1.0", sampling_rate)
+        sampling_rate = 1.0
+
+    try:
+        sampler = (
+            ALWAYS_ON if sampling_rate >= 1.0 else TraceIdRatioBasedSampler(sampling_rate)
+        )
+        resource = Resource.create({"service.name": service_name})
+        provider = TracerProvider(resource=resource, sampler=sampler)
+
+        if exporter == "console":
+            from opentelemetry.sdk.trace.export import (
+                ConsoleSpanExporter,
+                SimpleSpanProcessor,
+            )
+
+            provider.add_span_processor(SimpleSpanProcessor(ConsoleSpanExporter()))
+        elif exporter == "otlp":
+            from opentelemetry.exporter.otlp.proto.http.trace_exporter import (
+                OTLPSpanExporter,
+            )
+            from opentelemetry.sdk.trace.export import BatchSpanProcessor
+
+            exporter_obj = OTLPSpanExporter(endpoint=endpoint or None)
+            provider.add_span_processor(BatchSpanProcessor(exporter_obj))
+        elif exporter == "jaeger":
+            # 弃用：opentelemetry-exporter-jaeger 在 OTel SDK 1.x 后已归档（thrift 协议停更）。
+            # 故不再导入归档的 JaegerExporter，自动映射为 OTLP（Jaeger 现推荐 OTLP 接收端），
+            # 旧配置 exporter="jaeger" 仍可工作（endpoint 指向 Jaeger OTLP 端口即可），
+            # 无需安装 opentelemetry-exporter-jaeger。
+            logger.warning(
+                "OTEL_EXPORTER=jaeger 已弃用（JaegerExporter 归档），已自动映射为 OTLP；"
+                "建议显式配置 exporter='otlp'"
+            )
+            from opentelemetry.exporter.otlp.proto.http.trace_exporter import (
+                OTLPSpanExporter,
+            )
+            from opentelemetry.sdk.trace.export import BatchSpanProcessor
+
+            exporter_obj = OTLPSpanExporter(endpoint=endpoint or None)
+            provider.add_span_processor(BatchSpanProcessor(exporter_obj))
+
+        trace.set_tracer_provider(provider)
+        _tracer = trace.get_tracer("agent-platform")
+        logger.info("OTel initialized: exporter=%s sampling=%s", exporter, sampling_rate)
+
+    except Exception:
+        logger.warning("OTEL_INIT_FAILED", exc_info=True)
+        _tracer = noop_tracer()
+
+
+def get_otel_tracer():
+    """返回当前 tracer（未初始化时 NoOp）。"""
+    if _tracer is None:
+        return noop_tracer()
+    return _tracer
+
+
+def parse_traceparent(header: str | None):
+    """解析 W3C traceparent header，返回 OTel Context 或 None。"""
+    if not header or not _OTEL_AVAILABLE:
+        return None
+    try:
+        from opentelemetry.trace.propagation.tracecontext import (
+            TraceContextFormat,
+        )
+
+        ctx = TraceContextFormat().extract({"traceparent": header})
+        return ctx
+    except Exception:
+        return None
+
+
+def redact_question(question: str) -> dict:
+    """脱敏：返回问题长度 + 哈希摘要，不含全文。复用 agent_core.tracing.user_query_hash。"""
+    return {
+        "question_length": len(question),
+        "question_hash": user_query_hash(question),
+    }
+
+
+def force_flush() -> None:
+    """关闭前 flush 所有 span。"""
+    if _tracer is not None and _OTEL_AVAILABLE:
+        try:
+            provider = trace.get_tracer_provider()
+            if hasattr(provider, "force_flush"):
+                provider.force_flush()
+        except Exception:
+            logger.warning("otel force_flush failed", exc_info=True)

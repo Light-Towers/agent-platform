@@ -10,3 +10,6 @@
 {"id": 10, "question": "介绍一下 RAGFlow 的文档解析能力", "expected_capability": "rag", "expected_keywords": ["ragflow"]}
 {"id": 11, "question": "今天有什么科技新闻", "expected_capability": "search", "expected_keywords": ["新闻"]}
 {"id": 12, "question": "用 SQL 统计每个地区的订单数量", "expected_capability": "sql", "expected_keywords": ["订单"]}
+{"id": 13, "question": "帮我执行这段代码: print(sum(range(1, 101)))", "expected_capability": "code_execution", "expected_keywords": ["5050"]}
+{"id": 14, "question": "运行代码算一下 2 的 10 次方", "expected_capability": "code_execution", "expected_keywords": ["1024"]}
+{"id": 15, "question": "执行代码\n```python\nimport math\nprint(math.factorial(5))\n```", "expected_capability": "code_execution", "expected_keywords": ["120"]}

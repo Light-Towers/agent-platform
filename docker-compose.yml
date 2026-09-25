@@ -5,7 +5,7 @@ services:
     environment:
       POSTGRES_DB: agent_platform
       POSTGRES_USER: agent
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-agent_platform_dev}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?请设置 POSTGRES_PASSWORD}
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:

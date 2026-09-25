@@ -1,0 +1,54 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "exhibition-agent"
+version = "0.1.0"
+description = "会展行业 AI Agent（平台侧骨架；按跨项目接口契约 v1.1 接入 mingyang-warehouse）"
+requires-python = ">=3.11"
+license = { text = "Apache-2.0" }
+dependencies = [
+    "agent-core",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "httpx>=0.27",
+    "langgraph>=1.2.10,<2",
+    "langchain-openai>=0.2",
+    "pydantic>=2.7",
+    "pydantic-settings>=2.2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["exhibition_agent"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "--import-mode=importlib"
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+# BLE001/S110：P0-4 盲捕获门禁（2026-09-24）已启用；legacy 存量入下方基线，只减不增。
+select = ["E4", "E7", "E9", "F", "I", "BLE001", "S110"]
+ignore = ["B008", "E402", "E731"]
+
+# P0-4 盲捕获门禁棘轮基线：逐文件锁定 legacy 存量，新代码不得新增。烧净一个删一行。
+# 进度见 docs/plans/plan-p0-4-blind-except-ratchet-2026-09-24.md。
+[tool.ruff.lint.per-file-ignores]
+"exhibition_agent/foundation/execution_context.py" = ["BLE001"]
+"exhibition_agent/foundation/production_readiness_gate.py" = ["BLE001"]
+"exhibition_agent/observability/trace.py" = ["BLE001", "S110"]
+"exhibition_agent/skill_loader/agent.py" = ["BLE001"]
+"exhibition_agent/skill_loader/app.py" = ["BLE001"]
+"exhibition_agent/skills/data_analysis/skill.py" = ["BLE001"]
+"skills/exhibition-readonly/tests/run_golden_api.py" = ["BLE001"]

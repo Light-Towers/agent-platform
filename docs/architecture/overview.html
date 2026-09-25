@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agent Platform 架构总览</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0d1117; color: #c9d1d9; padding: 40px; }
+  h1 { text-align: center; font-size: 28px; margin-bottom: 8px; color: #58a6ff; }
+  .subtitle { text-align: center; color: #8b949e; margin-bottom: 32px; font-size: 14px; }
+
+  .layer { background: #161b22; border: 1px solid #30363d; border-radius: 12px; padding: 20px; margin-bottom: 20px; }
+  .layer-title { font-size: 16px; font-weight: 600; color: #58a6ff; margin-bottom: 14px; display: flex; align-items: center; gap: 8px; }
+  .layer-title .tag { font-size: 11px; padding: 2px 8px; border-radius: 10px; background: #1f6feb33; color: #58a6ff; }
+
+  .row { display: flex; gap: 12px; flex-wrap: wrap; }
+  .box { flex: 1; min-width: 180px; background: #21262d; border: 1px solid #30363d; border-radius: 8px; padding: 14px; }
+  .box h3 { font-size: 13px; color: #f0f6fc; margin-bottom: 6px; }
+  .box .desc { font-size: 12px; color: #8b949e; line-height: 1.5; }
+  .box .meta { font-size: 11px; color: #58a6ff; margin-top: 8px; font-family: monospace; }
+  .box.highlight { border-color: #f0883e; }
+  .box.highlight h3 { color: #f0883e; }
+
+  .arrow { text-align: center; font-size: 20px; color: #484f58; margin: 6px 0; }
+
+  .legend { display: flex; gap: 20px; justify-content: center; margin-top: 24px; font-size: 12px; color: #8b949e; }
+  .legend span { display: flex; align-items: center; gap: 6px; }
+  .legend .dot { width: 10px; height: 10px; border-radius: 50%; }
+
+  .status-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 16px; }
+  .status-item { background: #21262d; border: 1px solid #30363d; border-radius: 6px; padding: 8px 12px; font-size: 12px; }
+  .status-item .label { color: #8b949e; }
+  .status-item .value { color: #3fb950; font-weight: 600; float: right; }
+
+  .skill-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-top: 12px; }
+  .skill { background: #1c2128; border: 1px solid #30363d; border-radius: 6px; padding: 8px; text-align: center; font-size: 11px; }
+  .skill .kind { display: block; font-size: 9px; color: #8b949e; margin-top: 2px; }
+  .skill.remote { border-color: #f0883e66; }
+  .skill.function { border-color: #3fb95066; }
+  .skill.workflow { border-color: #a371f766; }
+  .skill.agent { border-color: #58a6ff66; }
+
+  table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 12px; }
+  th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid #30363d; }
+  th { color: #8b949e; font-weight: 500; }
+  td { color: #c9d1d9; }
+  td.pass { color: #3fb950; }
+</style>
+</head>
+<body>
+
+<h1>Agent Platform — 架构总览</h1>
+<p class="subtitle">单 Runtime + 多 Planner · Skill 动态组合 · 2026-09-23 v3 分支</p>
+
+<!-- 入口层 -->
+<div class="layer">
+  <div class="layer-title">入口层 <span class="tag">FastAPI :8000</span></div>
+  <div class="row">
+    <div class="box highlight">
+      <h3>agent_server</h3>
+      <div class="desc">统一入口。接收 /query SSE，经 AgenticPlanner 驱动 agentic loop，动态组合 SkillRegistry 中的能力。</div>
+      <div class="meta">applications/agent_server · main:app</div>
+    </div>
+    <div class="box">
+      <h3>agent_federation</h3>
+      <div class="desc">联邦网关。编排 3 子服务，Agent Protocol 兼容 /invoke，返回 QueryResponse 契约。</div>
+      <div class="meta">applications/agent_federation · api.server</div>
+    </div>
+  </div>
+</div>
+
+<div class="arrow">▼</div>
+
+<!-- 编排层 -->
+<div class="layer">
+  <div class="layer-title">编排层 — Planner 可插拔 <span class="tag">Plan-F</span></div>
+  <div class="row">
+    <div class="box">
+      <h3>AgenticPlanner</h3>
+      <div class="desc">LLM 驱动。每步决定调哪个 skill、传什么参数，直到任务完成。支持 tool calling 多轮。</div>
+      <div class="meta">SkillKind.AGENT · to_skill()</div>
+    </div>
+    <div class="box">
+      <h3>DeterministicPlanner</h3>
+      <div class="desc">固定图执行。LangGraph StateGraph 驱动，适用于确定性流程。</div>
+      <div class="meta">SkillKind.WORKFLOW</div>
+    </div>
+    <div class="box">
+      <h3>Planner Registry</h3>
+      <div class="desc">策略可插拔。mode_selector 按请求特征路由到对应 Planner。</div>
+      <div class="meta">protocol / policy / registry</div>
+    </div>
+  </div>
+</div>
+
+<div class="arrow">▼</div>
+
+<!-- 运行时层 -->
+<div class="layer">
+  <div class="layer-title">运行时中间件层 — agent-runtime <span class="tag">共享</span></div>
+  <div class="row">
+    <div class="box"><h3>SkillRegistry</h3><div class="desc">能力注册中心。所有 skill 统一注册、按名路由、中间件组合。</div><div class="meta">skills/registry</div></div>
+    <div class="box"><h3>Admission</h3><div class="desc">准入控制。限流、配额、黑名单。</div><div class="meta">admission</div></div>
+    <div class="box"><h3>Coordinator</h3><div class="desc">执行协调。步数计数、超时、中断。</div><div class="meta">coordinator</div></div>
+    <div class="box"><h3>Cache</h3><div class="desc">语义缓存。命中跳过 LLM 调用。</div><div class="meta">cache</div></div>
+    <div class="box"><h3>CircuitBreaker</h3><div class="desc">熔断。SlidingWindow / Consecutive 策略。</div><div class="meta">circuit_breaker</div></div>
+    <div class="box"><h3>Tracing</h3><div class="desc">OTel + traceparent 传播。</div><div class="meta">otel / tracing</div></div>
+    <div class="box"><h3>Sandbox</h3><div class="desc">代码执行沙箱。双后端隔离。</div><div class="meta">sandbox</div></div>
+    <div class="box"><h3>MCP Client</h3><div class="desc">MCP 协议客户端。远程工具调用。</div><div class="meta">mcp_client</div></div>
+  </div>
+</div>
+
+<div class="arrow">▼</div>
+
+<!-- 子 Agent 层 -->
+<div class="layer">
+  <div class="layer-title">子 Agent 层 — 有状态 · 有内部流程 · 有自己对话上下文 <span class="tag">委托任务，它自己决定怎么做</span></div>
+  <div class="skill-grid">
+    <div class="skill remote">knowledge_query<span class="kind">子Agent · :8900 · Milvus+Neo4j</span></div>
+    <div class="skill remote">nl2sql_query<span class="kind">子Agent · :8901 · pgvector</span></div>
+    <div class="skill remote">kefu_chat<span class="kind">子Agent · :8902 · LangGraph</span></div>
+    <div class="skill remote">exhibition_query<span class="kind">子Agent · :8903 · 仓储REST</span></div>
+    <div class="skill workflow">general_qa<span class="kind">子Agent · 固定流程</span></div>
+  </div>
+  <div class="legend" style="margin-top:12px">
+    <span><span class="dot" style="background:#f0883e"></span> RemoteExecutor（独立进程，HTTP 委托）</span>
+    <span><span class="dot" style="background:#a371f7"></span> WorkflowExecutor（同进程，固定图）</span>
+    <span style="color:#8b949e">类比 Codex 的 code-reviewer / test-runner 子 agent</span>
+  </div>
+</div>
+
+<div class="arrow">+ </div>
+
+<!-- Tool 层 -->
+<div class="layer">
+  <div class="layer-title">Tool 层 — 无状态 · 原子调用 · 调一下拿结果 <span class="tag">传参数，拿返回值</span></div>
+  <div class="skill-grid">
+    <div class="skill function">search<span class="kind">FUNCTION</span></div>
+    <div class="skill function">rag<span class="kind">FUNCTION</span></div>
+    <div class="skill function">sql<span class="kind">FUNCTION</span></div>
+    <div class="skill function">mcp<span class="kind">FUNCTION</span></div>
+  </div>
+  <div class="legend" style="margin-top:12px">
+    <span><span class="dot" style="background:#3fb950"></span> FunctionExecutor（轻量内联，无状态）</span>
+    <span style="color:#8b949e">类比 Codex 的 read_file / bash / grep</span>
+  </div>
+</div>
+
+<div class="arrow">▼</div>
+
+<!-- 内核层 -->
+<div class="layer">
+  <div class="layer-title">内核层 — agent-core <span class="tag">零依赖</span></div>
+  <div class="row">
+    <div class="box"><h3>tracing</h3><div class="desc">traceparent 注入/提取/传播</div></div>
+    <div class="box"><h3>llm</h3><div class="desc">OpenAICompatibleProvider + registry</div></div>
+    <div class="box"><h3>memory</h3><div class="desc">MemoryStore 门面 + embedder</div></div>
+    <div class="box"><h3>resilience</h3><div class="desc">retry / CircuitBreaker / timeout</div></div>
+    <div class="box"><h3>events</h3><div class="desc">EventBus 多 sink 扇出</div></div>
+    <div class="box"><h3>config</h3><div class="desc">KernelConfig 类型化 env</div></div>
+    <div class="box"><h3>guardrails</h3><div class="desc">SQL 守卫 + 安全</div></div>
+    <div class="box"><h3>intent</h3><div class="desc">L1 分类器</div></div>
+  </div>
+</div>
+
+<div class="arrow">▼</div>
+
+<!-- 契约层 -->
+<div class="layer">
+  <div class="layer-title">契约层 — shared-schemas <span class="tag">Pydantic v2</span></div>
+  <div class="row">
+    <div class="box"><h3>QueryRequest / QueryResponse</h3><div class="desc">联邦统一契约。version 字段支持版本协商（当前 "1.0"）。</div><div class="meta">shared_schemas.query</div></div>
+    <div class="box"><h3>ThreadState</h3><div class="desc">对话线程状态。跨服务传递执行上下文。</div><div class="meta">shared_schemas.thread</div></div>
+  </div>
+</div>
+
+<hr style="border-color:#30363d; margin: 24px 0">
+
+<!-- 部署拓扑 -->
+<div class="layer">
+  <div class="layer-title">部署拓扑 <span class="tag">Docker</span></div>
+  <table>
+    <tr><th>服务</th><th>主机</th><th>端口</th><th>说明</th></tr>
+    <tr><td>agent_server + federation</td><td>192.168.100.126</td><td>:8000</td><td>统一入口 + 联邦网关</td></tr>
+    <tr><td>knowledge-service</td><td>192.168.100.126</td><td>:8900</td><td>通用知识库 RAG（Milvus + Neo4j）</td></tr>
+    <tr><td>nl2sql-service</td><td>192.168.100.126</td><td>:8901</td><td>Text-to-SQL 数据分析</td></tr>
+    <tr><td>kefu-service</td><td>192.168.100.126</td><td>:8902</td><td>客服对话</td></tr>
+    <tr><td>exhibition-agent</td><td>192.168.100.126</td><td>:8903</td><td>会展行业 Agent</td></tr>
+    <tr><td>mingyang-warehouse</td><td>192.168.100.241</td><td>:8000</td><td>业务数据服务（REST）</td></tr>
+    <tr><td>MySQL</td><td>192.168.100.21</td><td>:33306</td><td>exhibition_ontology 数据库</td></tr>
+  </table>
+</div>
+
+<!-- 验证状态 -->
+<div class="layer">
+  <div class="layer-title">验证状态 <span class="tag">2026-09-23</span></div>
+  <div class="status-grid">
+    <div class="status-item"><span class="label">agent-runtime</span><span class="value">551 passed</span></div>
+    <div class="status-item"><span class="label">agent_server</span><span class="value">434 passed</span></div>
+    <div class="status-item"><span class="label">federation</span><span class="value">134 passed</span></div>
+    <div class="status-item"><span class="label">knowledge-service</span><span class="value">181 passed</span></div>
+    <div class="status-item"><span class="label">kefu</span><span class="value">43 passed</span></div>
+    <div class="status-item"><span class="label">exhibition</span><span class="value">330 passed</span></div>
+    <div class="status-item"><span class="label">nl2sql</span><span class="value">18 passed</span></div>
+    <div class="status-item"><span class="label">eval</span><span class="value">15/15 = 100%</span></div>
+    <div class="status-item"><span class="label">lint</span><span class="value">All passed</span></div>
+    <div class="status-item"><span class="label">总测试</span><span class="value">1691 passed</span></div>
+    <div class="status-item"><span class="label">技术债</span><span class="value">D7/D9 待推进</span></div>
+    <div class="status-item"><span class="label">未推送</span><span class="value">16 commits</span></div>
+  </div>
+</div>
+
+</body>
+</html>
