@@ -168,7 +168,7 @@ async def main_async(args: argparse.Namespace) -> None:
                 "KEFU_SERVICE_URL", "http://localhost:8003"
             )
             results = await eval_subservice(items, adapter_url)
-        elif project == "zhiku":
+        elif project == "knowledge":
             adapter_url = os.getenv("KNOWLEDGE_SERVICE_URL", "http://localhost:8900")
             results = await eval_subservice(items, adapter_url)
         else:
@@ -187,7 +187,7 @@ async def main_async(args: argparse.Namespace) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="全项目评测驱动器")
     parser.add_argument("--golden", default="golden.jsonl", help="评测集文件名")
-    parser.add_argument("--project", default="", help="只跑指定项目（agent_federation/wenda/zhiku/kefu）")
+    parser.add_argument("--project", default="", help="只跑指定项目（agent_federation/wenda/knowledge/kefu）")
     parser.add_argument("--limit", type=int, default=0, help="每项目限制题数（0=全部）")
     parser.add_argument("--no-judge", action="store_true", help="跳过 rubric judge")
     parser.add_argument("--no-cleanup", action="store_true", help="不清理评测 session 目录")

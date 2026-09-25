@@ -1,6 +1,6 @@
 """子服务健康探活：定期检查 3 个子服务可达性。
 
-复用 zhiku_tools.py 已有的异步线程探活模式。
+复用 knowledge_tools.py 已有的异步线程探活模式。
 不可达时 mark_unhealthy，影响路由决策。
 """
 
