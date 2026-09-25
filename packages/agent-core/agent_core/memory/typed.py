@@ -27,6 +27,8 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Iterable
 
+from agent_core.memory._tenant_gate import _TENANT_UNSET, resolve_tenant
+
 logger = logging.getLogger(__name__)
 
 
@@ -165,7 +167,7 @@ async def remember_typed(
     importance: float = 0.5,
     embedding: list[float] | None = None,
     *,
-    tenant_id: str = "default",
+    tenant_id: str= _TENANT_UNSET,
 ) -> None:
     """沉淀一条带类型/重要性的结构化记忆。
 
@@ -177,6 +179,7 @@ async def remember_typed(
     ``extract_memory_facts`` 等 LLM 抽取留宿主层）。list/tuple 入参在 SQL
     参数边界经 :func:`_to_pg_vector` 归一（真实 PG 参数适配）。
     """
+    tenant_id = resolve_tenant(tenant_id)
     mtype = MemoryType.normalize(memory_type)
     importance = _clamp_importance(importance)
     if embedding is None:
@@ -199,7 +202,7 @@ async def recall_typed(
     weights: Iterable[tuple[str, float]] | None = None,
     embedding: list[float] | None = None,
     *,
-    tenant_id: str = "default",
+    tenant_id: str= _TENANT_UNSET,
 ) -> list[TypedMemory]:
     """分层加权召回（pg 模式）。
 
@@ -210,6 +213,7 @@ async def recall_typed(
     不参与打分。若 ``SEMANTIC_MEMORY_TYPED`` 关闭，则退化为平权召回
     （按 created_at 倒序，不加权），保持与旧行为一致。
     """
+    tenant_id = resolve_tenant(tenant_id)
     if embedding is None:
         raise ValueError(
             "embed_memory 由宿主层提供；内核 typed.recall_typed 不内嵌 embedder"
@@ -282,7 +286,7 @@ async def consolidate(
     forget_threshold: float | None = None,
     age_days: int | None = None,
     *,
-    tenant_id: str = "default",
+    tenant_id: str= _TENANT_UNSET,
 ) -> int:
     """巩固 + 遗忘（ADR-0004 D4/D5，TD-6 阈值/老化天数参数化）。
 
@@ -293,6 +297,7 @@ async def consolidate(
         forget_threshold: 重要度淘汰阈值；``None`` 时取 ``memory_forget_threshold()``。
         age_days: 老化天数；``None`` 时取 ``memory_forget_age_days()``。
     """
+    tenant_id = resolve_tenant(tenant_id)
     if forget_threshold is None:
         forget_threshold = memory_forget_threshold()
     if age_days is None:
@@ -312,8 +317,9 @@ async def consolidate(
         return deleted
 
 
-async def forget(user_id, pool, memory_id, *, tenant_id: str = "default") -> bool:
+async def forget(user_id, pool, memory_id, *, tenant_id: str= _TENANT_UNSET) -> bool:
     """按 memory_id 删除单条记忆，返回是否实际删除。"""
+    tenant_id = resolve_tenant(tenant_id)
     async with pool.connection() as conn:
         cur = await conn.execute(
             "DELETE FROM memories WHERE tenant_id = %s AND user_id = %s AND id = %s",

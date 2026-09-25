@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from typing import Any, Iterable, Protocol, runtime_checkable
 
 from agent_core.logging import get_logger
+from agent_core.memory._tenant_gate import _TENANT_UNSET, resolve_tenant
 
 logger = get_logger(__name__)
 
@@ -76,25 +77,25 @@ class MemoryStore(Protocol):
     """
 
     async def recall(
-        self, user_id: str, question: str, k: int = 3, *, tenant_id: str = "default"
+        self, user_id: str, question: str, k: int = 3, *, tenant_id: str= _TENANT_UNSET
     ) -> list[str]:
         """召回与 question 相关的记忆文本（未启用/失败返回 []）。"""
         ...
 
     async def remember(
-        self, user_id: str, content: str, *, tenant_id: str = "default"
+        self, user_id: str, content: str, *, tenant_id: str= _TENANT_UNSET
     ) -> None:
         """沉淀一条记忆（非阻塞语义：实现可 fire-and-forget）。"""
         ...
 
     async def consolidate(
-        self, user_id: str, *, tenant_id: str = "default", **kwargs: Any
+        self, user_id: str, *, tenant_id: str= _TENANT_UNSET, **kwargs: Any
     ) -> int:
         """巩固 + 遗忘低价值记忆，返回删除条数（不支持时返回 0）。"""
         ...
 
     async def forget(
-        self, user_id: str, memory_id: Any, *, tenant_id: str = "default"
+        self, user_id: str, memory_id: Any, *, tenant_id: str= _TENANT_UNSET
     ) -> bool:
         """显式遗忘单条记忆（不支持时返回 False）。"""
         ...
@@ -134,8 +135,9 @@ class PgMemoryStore:
         return list(result)
 
     async def recall(
-        self, user_id: str, question: str, k: int = 3, *, tenant_id: str = "default"
+        self, user_id: str, question: str, k: int = 3, *, tenant_id: str= _TENANT_UNSET
     ) -> list[str]:
+        tenant_id = resolve_tenant(tenant_id)
         if not user_id or not question or self._pool is None:
             return []
         try:
@@ -163,8 +165,9 @@ class PgMemoryStore:
         *,
         memory_type: str = "semantic",
         importance: float = 0.5,
-        tenant_id: str = "default",
+        tenant_id: str= _TENANT_UNSET,
     ) -> None:
+        tenant_id = resolve_tenant(tenant_id)
         if not user_id or not content or self._pool is None:
             return
         try:
@@ -189,8 +192,9 @@ class PgMemoryStore:
         *,
         forget_threshold: float | None = None,
         age_days: int | None = None,
-        tenant_id: str = "default",
+        tenant_id: str= _TENANT_UNSET,
     ) -> int:
+        tenant_id = resolve_tenant(tenant_id)
         if not user_id or self._pool is None:
             return 0
         try:
@@ -207,7 +211,8 @@ class PgMemoryStore:
             logger.warning("PgMemoryStore.consolidate 失败: %s", e)
             return 0
 
-    async def forget(self, user_id: str, memory_id: Any, *, tenant_id: str = "default") -> bool:
+    async def forget(self, user_id: str, memory_id: Any, *, tenant_id: str= _TENANT_UNSET) -> bool:
+        tenant_id = resolve_tenant(tenant_id)
         if not user_id or self._pool is None:
             return False
         try:
@@ -255,8 +260,9 @@ class VectorMemoryStore:
         self._pool = pool
 
     async def recall(
-        self, user_id: str, question: str, k: int = 3, *, tenant_id: str = "default"
+        self, user_id: str, question: str, k: int = 3, *, tenant_id: str= _TENANT_UNSET
     ) -> list[str]:
+        tenant_id = resolve_tenant(tenant_id)
         if not user_id or not question or self._backend is None:
             return []
         try:
@@ -266,8 +272,9 @@ class VectorMemoryStore:
             return []
 
     async def remember(
-        self, user_id: str, content: str, *, tenant_id: str = "default"
+        self, user_id: str, content: str, *, tenant_id: str= _TENANT_UNSET
     ) -> None:
+        tenant_id = resolve_tenant(tenant_id)
         if not user_id or not content or self._backend is None:
             return
         try:
@@ -275,11 +282,11 @@ class VectorMemoryStore:
         except Exception as e:
             logger.warning("VectorMemoryStore.remember 调度失败: %s", e)
 
-    async def consolidate(self, user_id: str, *, tenant_id: str = "default", **kwargs: Any) -> int:
+    async def consolidate(self, user_id: str, *, tenant_id: str= _TENANT_UNSET, **kwargs: Any) -> int:
         return 0  # 向量后端无类型/重要性列，不支持巩固遗忘
 
     async def forget(
-        self, user_id: str, memory_id: Any, *, tenant_id: str = "default"
+        self, user_id: str, memory_id: Any, *, tenant_id: str= _TENANT_UNSET
     ) -> bool:
         return False  # 同上
 

@@ -78,7 +78,7 @@ async def test_pg_store_recall_delegates_typed():
     ]
     pool = _FakePool(rows=rows)
     store = PgMemoryStore(pool, _embed_fn)
-    out = await store.recall("ws1", "任意问题", k=2)
+    out = await store.recall("ws1", "任意问题", k=2, tenant_id="default")
     assert set(out) == {"事实A", "事实B"}
 
 
@@ -122,17 +122,17 @@ async def test_pg_store_threads_tenant_id_to_typed(monkeypatch):
     }
     # 缺省仍为 default（向后兼容），但宿主必须显式传入才能隔离
     captured.clear()
-    await store.recall("ws1", "q")
+    await store.recall("ws1", "q", tenant_id="default")
     assert captured == {"recall": "default"}
 
 
 @pytest.mark.asyncio
 async def test_pg_store_recall_empty_on_no_pool_or_blank_input():
     store = PgMemoryStore(None, _embed_fn)
-    assert await store.recall("ws1", "q") == []
+    assert await store.recall("ws1", "q", tenant_id="default") == []
     store2 = PgMemoryStore(_FakePool(), _embed_fn)
-    assert await store2.recall("", "q") == []
-    assert await store2.recall("ws1", "") == []
+    assert await store2.recall("", "q", tenant_id="default") == []
+    assert await store2.recall("ws1", "", tenant_id="default") == []
 
 
 @pytest.mark.asyncio
@@ -142,14 +142,14 @@ async def test_pg_store_recall_failure_isolates():
             raise RuntimeError("db down")
 
     store = PgMemoryStore(_BoomPool(), _embed_fn)
-    assert await store.recall("ws1", "q") == []  # 绝不向上抛
+    assert await store.recall("ws1", "q", tenant_id="default") == []  # 绝不向上抛
 
 
 @pytest.mark.asyncio
 async def test_pg_store_remember_writes_via_typed():
     pool = _FakePool(rowcount=1)
     store = PgMemoryStore(pool, _embed_fn)
-    await store.remember("ws1", "一条记忆", memory_type="semantic", importance=0.8)
+    await store.remember("ws1", "一条记忆", memory_type="semantic", importance=0.8, tenant_id="default")
 
 
 @pytest.mark.asyncio
@@ -159,23 +159,23 @@ async def test_pg_store_remember_supports_async_embed_fn():
 
     pool = _FakePool(rowcount=1)
     store = PgMemoryStore(pool, _aembed)
-    await store.remember("ws1", "异步嵌入记忆")
+    await store.remember("ws1", "异步嵌入记忆", tenant_id="default")
 
 
 @pytest.mark.asyncio
 async def test_pg_store_consolidate_returns_deleted():
     pool = _FakePool(rowcount=3)
     store = PgMemoryStore(pool, _embed_fn)
-    assert await store.consolidate("ws1", forget_threshold=0.1, age_days=30) == 3
+    assert await store.consolidate("ws1", forget_threshold=0.1, age_days=30, tenant_id="default") == 3
 
 
 @pytest.mark.asyncio
 async def test_pg_store_forget_bool():
     pool = _FakePool(rowcount=1)
     store = PgMemoryStore(pool, _embed_fn)
-    assert await store.forget("ws1", 42) is True
+    assert await store.forget("ws1", 42, tenant_id="default") is True
     pool0 = _FakePool(rowcount=0)
-    assert await PgMemoryStore(pool0, _embed_fn).forget("ws1", 99) is False
+    assert await PgMemoryStore(pool0, _embed_fn).forget("ws1", 99, tenant_id="default") is False
 
 
 def test_pg_store_probe_full_capabilities():
@@ -214,12 +214,12 @@ class _FakeBackend:
 async def test_vector_store_delegates_backend():
     backend = _FakeBackend()
     store = VectorMemoryStore(backend)
-    assert await store.recall("u1", "q", k=2) == ["m1", "m2"]
-    await store.remember("u1", "内容")
+    assert await store.recall("u1", "q", k=2, tenant_id="default") == ["m1", "m2"]
+    await store.remember("u1", "内容", tenant_id="default")
     assert backend.remembers == [("u1", "内容")]
     # 向量后端不支持巩固/遗忘，如实返回
-    assert await store.consolidate("u1") == 0
-    assert await store.forget("u1", 1) is False
+    assert await store.consolidate("u1", tenant_id="default") == 0
+    assert await store.forget("u1", 1, tenant_id="default") is False
 
 
 @pytest.mark.asyncio
@@ -232,8 +232,8 @@ async def test_vector_store_failure_isolates():
             raise RuntimeError("milvus down")
 
     store = VectorMemoryStore(_BoomBackend())
-    assert await store.recall("u1", "q") == []
-    await store.remember("u1", "c")  # 不抛
+    assert await store.recall("u1", "q", tenant_id="default") == []
+    await store.remember("u1", "c", tenant_id="default")  # 不抛
 
 
 def test_vector_store_probe():

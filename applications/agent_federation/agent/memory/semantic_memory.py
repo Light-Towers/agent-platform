@@ -32,6 +32,7 @@ from agent_core.memory import (
     remember_memory,
     semantic_memory_enabled,
 )
+from agent_core.memory._tenant_gate import _TENANT_UNSET, resolve_tenant
 from agent_core.memory.typed import (
     MemoryType,
     TypedMemory,
@@ -74,7 +75,7 @@ async def remember_fact(
     memory_type: str = "semantic",
     importance: float = 0.5,
     *,
-    tenant_id: str = "default",
+    tenant_id: str= _TENANT_UNSET,
 ) -> None:
     """沉淀一条带类型/重要性的结构化记忆（ADR-0004 阶段2 re-export）。
 
@@ -82,6 +83,7 @@ async def remember_fact(
     关闭时回退内核旧 ``remember_memory``（保持零行为变更）。``pool`` 为宿主 psycopg 池。
     ``tenant_id`` 透传内核 typed 路径（与 agent_server 共表，缺省落共享 default 桶）。
     """
+    tenant_id = resolve_tenant(tenant_id)
     if memory_type not in _MEMORY_TYPES:
         memory_type = "semantic"
     importance = max(0.0, min(1.0, float(importance)))
@@ -114,7 +116,7 @@ async def recall_typed(
     k: int = 3,
     weights: Iterable[tuple[str, float]] | None = None,
     *,
-    tenant_id: str = "default",
+    tenant_id: str= _TENANT_UNSET,
 ) -> list[TypedMemory]:
     """分层加权召回（ADR-0004 阶段2 re-export，返回 list[TypedMemory]）。
 
@@ -123,6 +125,7 @@ async def recall_typed(
     零行为变更），并把结果包装为 ``TypedMemory``（memory_type 默认 semantic、
     importance 0.5）以保持返回类型一致。``pool`` 为宿主 psycopg 池。
     """
+    tenant_id = resolve_tenant(tenant_id)
     if semantic_memory_typed_enabled():
         emb = embed_memory(question)
         return await _core_recall_typed(
@@ -157,7 +160,7 @@ async def consolidate(
     forget_threshold: float | None = None,
     age_days: int | None = None,
     *,
-    tenant_id: str = "default",
+    tenant_id: str= _TENANT_UNSET,
 ) -> int:
     """巩固 + 遗忘（ADR-0004 阶段2 re-export，TD-6 参数化）。
 
@@ -165,6 +168,7 @@ async def consolidate(
     关闭时返回 0（agent_federation 历史无此能力，保持零行为变更）。``pool`` 为宿主 psycopg 池。
     ``forget_threshold`` / ``age_days`` 为 ``None`` 时由内核取环境变量默认值。
     """
+    tenant_id = resolve_tenant(tenant_id)
     if not semantic_memory_typed_enabled():
         return 0
     return await _core_consolidate(
@@ -176,12 +180,13 @@ async def consolidate(
     )
 
 
-async def forget(pool, user_id: str, memory_id, *, tenant_id: str = "default") -> bool:
+async def forget(pool, user_id: str, memory_id, *, tenant_id: str= _TENANT_UNSET) -> bool:
     """按 id 显式遗忘一条记忆（ADR-0004 阶段2 re-export）。
 
     仅 ``SEMANTIC_MEMORY_TYPED=true`` 时调用内核 typed.forget；关闭时返回 False
     （agent_federation 历史无此能力，保持零行为变更）。``pool`` 为宿主 psycopg 池。
     """
+    tenant_id = resolve_tenant(tenant_id)
     if not semantic_memory_typed_enabled():
         return False
     return await _core_forget(
