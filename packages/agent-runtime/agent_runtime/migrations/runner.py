@@ -225,9 +225,12 @@ async def _try_baseline_stamp(
     若只存在部分表，说明数据库可能处于半初始化/损坏状态，直接失败，
     避免跳过 baseline migration 后永久遗留缺失表。
     """
+    # psycopg 参数适配：list → PostgreSQL array；tuple → record/composite。
+    # 此处必须传 list，否则 ANY(%s) 在真实 PG 上报 malformed array literal
+    # （fake connection 单测无法复现，见 tests/ha/test_migrations_real_pg.py）。
     cur = await conn.execute(
         _CHECK_EXISTING_TABLES,
-        (_BASELINE_REQUIRED_TABLES,),
+        (list(_BASELINE_REQUIRED_TABLES),),
     )
     rows = await cur.fetchall()
     existing = {row[0] for row in rows}
@@ -279,11 +282,16 @@ async def rollback(pool: Any, *, target_version: int) -> list[Migration]:
         已回滚的 migration 列表。
     """
     migrations = discover()
-    to_rollback = sorted(
-        [m for m in migrations if m.version > target_version and m.down_sql is not None],
-        key=lambda m: m.version,
-        reverse=True,
-    )
+    above_target = [m for m in migrations if m.version > target_version]
+    # 语义强一致：target 之上存在不可回滚 migration 时直接拒绝，
+    # 而非静默跳过（否则"回滚到 v0"后实际版本可能停在 v1，目标 ≠ 实际）。
+    irreversible = [m for m in above_target if m.down_sql is None]
+    if irreversible:
+        raise MigrationError(
+            f"cannot rollback to v{target_version}: irreversible migration(s) above target: "
+            + ", ".join(f"v{m.version} ({m.name!r})" for m in irreversible)
+        )
+    to_rollback = sorted(above_target, key=lambda m: m.version, reverse=True)
     if not to_rollback:
         logger.info("rollback: no reversible migrations above v%d", target_version)
         return []

@@ -475,3 +475,84 @@ class TestGetVersion:
         pool = FakePool(conn)
         v = await get_current_version(pool)
         assert v == 0
+
+
+class TestRollback:
+    """rollback 语义：目标之上存在不可回滚 migration 时必须拒绝，不静默跳过。"""
+
+    @pytest.mark.asyncio
+    async def test_rollback_rejects_irreversible_above_target(self, tmp_path: Path):
+        """v1 无 down、v2 有 down：rollback(target=0) 必须报错而非只回滚 v2。"""
+        from agent_runtime.migrations import runner as runner_mod
+        from agent_runtime.migrations.base import Migration
+        from agent_runtime.migrations.runner import MigrationError
+
+        up1 = tmp_path / "001_init.up.sql"
+        up1.write_text("SELECT 1;")  # v1 无 down
+        up2 = tmp_path / "002_rev.up.sql"
+        up2.write_text("SELECT 2;")
+        down2 = tmp_path / "002_rev.down.sql"
+        down2.write_text("SELECT -2;")  # v2 可回滚
+        migrations = [
+            Migration(version=1, name="init", up_sql=up1),
+            Migration(version=2, name="rev", up_sql=up2, down_sql=down2),
+        ]
+
+        conn = FakeConnection(existing_tables=set())
+        pool = FakePool(conn)
+
+        with patch.object(runner_mod, "discover", return_value=migrations):
+            with pytest.raises(MigrationError, match="v1"):
+                await runner_mod.rollback(pool, target_version=0)
+
+        # 拒绝时不得执行任何 down SQL
+        sqls = [s for s, _ in conn.executed]
+        assert not any("SELECT -2" in s for s in sqls)
+
+    @pytest.mark.asyncio
+    async def test_rollback_applies_reversible_descending(self, tmp_path: Path):
+        """全部可回滚时按版本降序执行 down 并删除版本记录。"""
+        from agent_runtime.migrations import runner as runner_mod
+        from agent_runtime.migrations.base import Migration
+
+        up2 = tmp_path / "002_a.up.sql"
+        up2.write_text("SELECT 2;")
+        down2 = tmp_path / "002_a.down.sql"
+        down2.write_text("SELECT -2;")
+        up3 = tmp_path / "003_b.up.sql"
+        up3.write_text("SELECT 3;")
+        down3 = tmp_path / "003_b.down.sql"
+        down3.write_text("SELECT -3;")
+        migrations = [
+            Migration(version=2, name="a", up_sql=up2, down_sql=down2),
+            Migration(version=3, name="b", up_sql=up3, down_sql=down3),
+        ]
+
+        conn = FakeConnection(existing_tables=set())
+        pool = FakePool(conn)
+
+        with patch.object(runner_mod, "discover", return_value=migrations):
+            rolled = await runner_mod.rollback(pool, target_version=1)
+
+        assert [m.version for m in rolled] == [3, 2]
+        sqls = [s for s, _ in conn.executed]
+        assert sqls.index("SELECT -3;") < sqls.index("SELECT -2;")
+        deletes = [(s, p) for s, p in conn.executed if "DELETE FROM schema_migrations" in s]
+        assert [d[1][0] for d in deletes] == [3, 2]
+
+    @pytest.mark.asyncio
+    async def test_rollback_nothing_above_target(self, tmp_path: Path):
+        from agent_runtime.migrations import runner as runner_mod
+        from agent_runtime.migrations.base import Migration
+
+        up1 = tmp_path / "001_x.up.sql"
+        up1.write_text("SELECT 1;")
+        migrations = [Migration(version=1, name="x", up_sql=up1)]
+
+        conn = FakeConnection(existing_tables=set())
+        pool = FakePool(conn)
+
+        with patch.object(runner_mod, "discover", return_value=migrations):
+            rolled = await runner_mod.rollback(pool, target_version=5)
+
+        assert rolled == []
