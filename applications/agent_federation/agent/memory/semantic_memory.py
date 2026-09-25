@@ -73,11 +73,14 @@ async def remember_fact(
     fact: str,
     memory_type: str = "semantic",
     importance: float = 0.5,
+    *,
+    tenant_id: str = "default",
 ) -> None:
     """沉淀一条带类型/重要性的结构化记忆（ADR-0004 阶段2 re-export）。
 
     ``SEMANTIC_MEMORY_TYPED=true`` 时走内核 typed.remember_typed（带类型列）；
     关闭时回退内核旧 ``remember_memory``（保持零行为变更）。``pool`` 为宿主 psycopg 池。
+    ``tenant_id`` 透传内核 typed 路径（与 agent_server 共表，缺省落共享 default 桶）。
     """
     if memory_type not in _MEMORY_TYPES:
         memory_type = "semantic"
@@ -92,6 +95,7 @@ async def remember_fact(
             memory_type=memory_type,
             importance=importance,
             embedding=emb,
+            tenant_id=tenant_id,
         )
         return
 
@@ -109,6 +113,8 @@ async def recall_typed(
     question: str,
     k: int = 3,
     weights: Iterable[tuple[str, float]] | None = None,
+    *,
+    tenant_id: str = "default",
 ) -> list[TypedMemory]:
     """分层加权召回（ADR-0004 阶段2 re-export，返回 list[TypedMemory]）。
 
@@ -126,6 +132,7 @@ async def recall_typed(
             k=k,
             weights=weights,
             embedding=emb,
+            tenant_id=tenant_id,
         )
 
     # 回退：旧门面（无类型加权），包装为 TypedMemory 保持契约
@@ -149,6 +156,8 @@ async def consolidate(
     user_id: str,
     forget_threshold: float | None = None,
     age_days: int | None = None,
+    *,
+    tenant_id: str = "default",
 ) -> int:
     """巩固 + 遗忘（ADR-0004 阶段2 re-export，TD-6 参数化）。
 
@@ -159,11 +168,15 @@ async def consolidate(
     if not semantic_memory_typed_enabled():
         return 0
     return await _core_consolidate(
-        user_id=user_id, pool=pool, forget_threshold=forget_threshold, age_days=age_days
+        user_id=user_id,
+        pool=pool,
+        forget_threshold=forget_threshold,
+        age_days=age_days,
+        tenant_id=tenant_id,
     )
 
 
-async def forget(pool, user_id: str, memory_id) -> bool:
+async def forget(pool, user_id: str, memory_id, *, tenant_id: str = "default") -> bool:
     """按 id 显式遗忘一条记忆（ADR-0004 阶段2 re-export）。
 
     仅 ``SEMANTIC_MEMORY_TYPED=true`` 时调用内核 typed.forget；关闭时返回 False
@@ -171,7 +184,9 @@ async def forget(pool, user_id: str, memory_id) -> bool:
     """
     if not semantic_memory_typed_enabled():
         return False
-    return await _core_forget(user_id=user_id, pool=pool, memory_id=memory_id)
+    return await _core_forget(
+        user_id=user_id, pool=pool, memory_id=memory_id, tenant_id=tenant_id
+    )
 
 
 __all__ = [

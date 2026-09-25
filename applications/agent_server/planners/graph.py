@@ -59,6 +59,7 @@ class GraphPlanner(Planner):
             question=ctx.question,
             workspace_id=ctx.workspace_id,
             user_id=ctx.user_id,
+            tenant_id=ctx.tenant_id,
             last_snapshot=ctx.last_snapshot,
         )
 
@@ -70,6 +71,9 @@ class GraphPlanner(Planner):
                 route="direct",
                 reason="GraphPlanner 无 registry，回退 deterministic",
                 question=ctx.question,
+                workspace_id=ctx.workspace_id,
+                user_id=ctx.user_id,
+                tenant_id=ctx.tenant_id,
             )
 
         candidates = registry.discover(ctx.question, top_k=10)
@@ -79,6 +83,9 @@ class GraphPlanner(Planner):
                 route="direct",
                 reason="无候选 Skill，回退 direct",
                 question=ctx.question,
+                workspace_id=ctx.workspace_id,
+                user_id=ctx.user_id,
+                tenant_id=ctx.tenant_id,
             )
 
         # 单候选或无 LLM：基础版单节点（兼容旧行为，避免无意义组合）
@@ -102,6 +109,7 @@ class GraphPlanner(Planner):
             question=ctx.question,
             workspace_id=ctx.workspace_id,
             user_id=ctx.user_id,
+            tenant_id=ctx.tenant_id,
             last_snapshot=ctx.last_snapshot,
         )
 
@@ -135,6 +143,7 @@ class GraphPlanner(Planner):
             question=plan.question or plan.sub_query,
             workspace_id=plan.workspace_id,
             user_id=plan.user_id,
+            tenant_id=plan.tenant_id,
             llm=runtime.llm,
             last_snapshot=plan.last_snapshot,
         )

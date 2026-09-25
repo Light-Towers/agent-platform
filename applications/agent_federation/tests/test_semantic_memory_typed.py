@@ -27,10 +27,10 @@ async def test_recall_typed_delegates_to_core_typed(monkeypatch):
     monkeypatch.setattr(sm, "semantic_memory_typed_enabled", lambda: True)
     captured = {}
 
-    async def _fake_core_recall(pool, user_id, question, k, weights, embedding):
+    async def _fake_core_recall(pool, user_id, question, k, weights, embedding, *, tenant_id="default"):
         captured.update(
             pool=pool, user_id=user_id, question=question, k=k,
-            weights=weights, embedding=embedding,
+            weights=weights, embedding=embedding, tenant_id=tenant_id,
         )
         from agent_core.memory.typed import MemoryType, TypedMemory
 
@@ -47,51 +47,58 @@ async def test_recall_typed_delegates_to_core_typed(monkeypatch):
     assert captured["k"] == 5
     assert captured["weights"] == [("episodic", 2.0)]
     assert captured["embedding"] == [0.1, 0.2]
+    assert captured["tenant_id"] == "default"  # 未传时缺省落 default 桶
     assert result[0].content == "x"
+    # 显式 tenant 必须透传到内核 typed（共表按 (tenant, user) 过滤，不透传即越权）
+    captured.clear()
+    await sm.recall_typed(pool, "u1", "q", k=5, tenant_id="tenantA")
+    assert captured["tenant_id"] == "tenantA"
 
 
 async def test_remember_fact_delegates_to_core_typed(monkeypatch):
     monkeypatch.setattr(sm, "semantic_memory_typed_enabled", lambda: True)
     captured = {}
 
-    async def _fake_core_remember(pool, user_id, fact, memory_type, importance, embedding):
+    async def _fake_core_remember(pool, user_id, fact, memory_type, importance, embedding, *, tenant_id="default"):
         captured.update(
             pool=pool, user_id=user_id, fact=fact,
             memory_type=memory_type, importance=importance, embedding=embedding,
+            tenant_id=tenant_id,
         )
 
     monkeypatch.setattr(sm, "_core_remember_typed", _fake_core_remember)
     monkeypatch.setattr(sm, "embed_memory", lambda t: [0.3, 0.4])
 
     pool = _FakePool()
-    await sm.remember_fact(pool, "u1", "用户是财务", "procedural", 0.9)
+    await sm.remember_fact(pool, "u1", "用户是财务", "procedural", 0.9, tenant_id="tenantA")
 
     assert captured["fact"] == "用户是财务"
     assert captured["memory_type"] == "procedural"
     assert captured["importance"] == 0.9
     assert captured["embedding"] == [0.3, 0.4]
+    assert captured["tenant_id"] == "tenantA"
 
 
 async def test_consolidate_and_forget_delegate_when_enabled(monkeypatch):
     monkeypatch.setattr(sm, "semantic_memory_typed_enabled", lambda: True)
     calls = {"consolidate": 0, "forget": 0}
 
-    async def _fake_consolidate(user_id, pool, forget_threshold, age_days=None):
+    async def _fake_consolidate(user_id, pool, forget_threshold, age_days=None, *, tenant_id="default"):
         calls["consolidate"] += 1
-        assert user_id == "u1" and pool is not None
+        assert user_id == "u1" and pool is not None and tenant_id == "tenantA"
         return 2
 
-    async def _fake_forget(user_id, pool, memory_id):
+    async def _fake_forget(user_id, pool, memory_id, *, tenant_id="default"):
         calls["forget"] += 1
-        assert memory_id == 7
+        assert memory_id == 7 and tenant_id == "tenantA"
         return True
 
     monkeypatch.setattr(sm, "_core_consolidate", _fake_consolidate)
     monkeypatch.setattr(sm, "_core_forget", _fake_forget)
 
     pool = _FakePool()
-    assert await sm.consolidate(pool, "u1", 0.1) == 2
-    assert await sm.forget(pool, "u1", 7) is True
+    assert await sm.consolidate(pool, "u1", 0.1, tenant_id="tenantA") == 2
+    assert await sm.forget(pool, "u1", 7, tenant_id="tenantA") is True
     assert calls == {"consolidate": 1, "forget": 1}
 
 
@@ -196,8 +203,8 @@ async def test_recall_context_injects_when_enabled(monkeypatch):
     captured = {}
     monkeypatch.setattr("agent.db.get_pool", lambda: _FakePool())
 
-    async def _fake_recall(pool, user_id, question, k, weights, embedding):
-        captured.update(pool=pool, user_id=user_id, question=question)
+    async def _fake_recall(pool, user_id, question, k, weights, embedding, *, tenant_id="default"):
+        captured.update(pool=pool, user_id=user_id, question=question, tenant_id=tenant_id)
         from agent_core.memory.typed import MemoryType, TypedMemory
 
         return [
@@ -239,9 +246,10 @@ async def test_remember_episodic_stores_when_enabled(monkeypatch):
     monkeypatch.setattr("agent.db.get_pool", lambda: _FakePool())
     captured = {}
 
-    async def _fake_remember(pool, user_id, fact, memory_type, importance, embedding):
+    async def _fake_remember(pool, user_id, fact, memory_type, importance, embedding, *, tenant_id="default"):
         captured.update(pool=pool, user_id=user_id, fact=fact,
-                        memory_type=memory_type, importance=importance)
+                        memory_type=memory_type, importance=importance,
+                        tenant_id=tenant_id)
 
     monkeypatch.setattr(sm, "_core_remember_typed", _fake_remember)
     monkeypatch.setattr(sm, "embed_memory", lambda t: [0.1])
@@ -249,7 +257,36 @@ async def test_remember_episodic_stores_when_enabled(monkeypatch):
     await remember_episodic("sess-1", "用户问X", "答Y")
     assert captured["user_id"] == "sess-1"
     assert captured["memory_type"] == "episodic"
+    assert captured["tenant_id"] == "default"
     assert "用户问：用户问X" in captured["fact"]
+
+
+async def test_memory_wiring_uses_request_tenant(monkeypatch):
+    """请求链路 ContextVar 有租户时，召回/落库均透传该 tenant（非 default 隔离）。"""
+    from api.context import reset_tenant_context, set_tenant_context
+
+    monkeypatch.setattr(sm, "semantic_memory_typed_enabled", lambda: True)
+    monkeypatch.setattr("agent.db.get_pool", lambda: _FakePool())
+    monkeypatch.setattr(sm, "embed_memory", lambda t: [0.1])
+    captured = {}
+
+    async def _fake_recall(pool, user_id, question, k, weights, embedding, *, tenant_id="default"):
+        captured["recall_tenant"] = tenant_id
+        return []
+
+    async def _fake_remember(pool, user_id, fact, memory_type, importance, embedding, *, tenant_id="default"):
+        captured["remember_tenant"] = tenant_id
+
+    monkeypatch.setattr(sm, "_core_recall_typed", _fake_recall)
+    monkeypatch.setattr(sm, "_core_remember_typed", _fake_remember)
+
+    token = set_tenant_context("tenantX")
+    try:
+        await recall_typed_context("sess-1", "q")
+        await remember_episodic("sess-1", "问", "答")
+    finally:
+        reset_tenant_context(token)
+    assert captured == {"recall_tenant": "tenantX", "remember_tenant": "tenantX"}
 
 
 async def test_remember_episodic_noop_without_pool(monkeypatch):

@@ -22,14 +22,15 @@ from agent_core.memory.typed import (
     MemoryType,
     TypedMemory,
     _normalize_weights,
+    _read_tenant_scope,
     _score_memory,
     _time_decay,
+    _vector_search_memories,
     consolidate,
     forget,
     recall_typed,
     remember_typed,
 )
-
 
 # --- fake psycopg 池 -------------------------------------------------------
 
@@ -166,6 +167,82 @@ async def test_recall_typed_empty_returns_empty(monkeypatch):
 async def test_recall_typed_requires_embedding():
     with pytest.raises(ValueError):
         await recall_typed(_FakePool(), "u1", "q", k=3, embedding=None)
+
+
+# --- v5 过渡期租户读作用域（Warning#8）------------------------------
+
+def test_read_tenant_scope_includes_legacy_default_bucket():
+    # 真实租户：读作用域额外包含 legacy 'default' 桶，保证升级后历史记忆可读
+    assert _read_tenant_scope("tenant-a") == ["tenant-a", "default"]
+    # default 租户：不重复
+    assert _read_tenant_scope("default") == ["default"]
+
+
+async def test_vector_search_memories_uses_tenant_scope_for_reads():
+    captured = {}
+
+    class _CaptureCur:
+        def fetchall(self):
+            return _async([])
+
+    class _CaptureConn:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def execute(self, sql, params):
+            captured["sql"] = sql
+            captured["params"] = params
+            return _CaptureCur()
+
+    class _CapturePool:
+        def connection(self):
+            return _CaptureConn()
+
+    await _vector_search_memories(_CapturePool(), "tenant-a", "u1", [0.0] * 8, k=6)
+    # 读谓词使用 ANY(作域)，首参为含 legacy default 的租户列表
+    assert "tenant_id = ANY(%s)" in captured["sql"]
+    assert captured["params"][0] == ["tenant-a", "default"]
+
+
+async def test_consolidate_and_forget_stay_exact_tenant_scoped(monkeypatch):
+    # 删除路径不跨桶：仍用精确 tenant_id = %s（不用 ANY），避免过渡期误删共享 legacy 记忆。
+    for fn, args in (
+        (consolidate, ("u1", _FakePool())),
+        (forget, ("u1", _FakePool(), 123)),
+    ):
+        captured = {}
+
+        class _CaptureCur:
+            rowcount = 0
+
+            def fetchall(self):
+                return []
+
+        class _CaptureConn:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *a):
+                return False
+
+            async def execute(self, sql, params):
+                captured["sql"] = sql
+                captured["params"] = params
+                return _CaptureCur()
+
+        class _CapturePool:
+            def connection(self):
+                return _CaptureConn()
+
+        real_args = list(args)
+        real_args[1] = _CapturePool()
+        await fn(*real_args, tenant_id="tenant-a")
+        assert "tenant_id = %s" in captured["sql"]
+        assert "ANY" not in captured["sql"]
+        assert captured["params"][0] == "tenant-a"
 
 
 # --- remember_typed（fake 池，校验列顺序/SQL）------------------------------
