@@ -1,0 +1,35 @@
+# Dependabot 依赖更新配置
+# 本仓库为 uv workspace monorepo（uv.lock 为唯一锁文件真相源），必须用 "uv" 生态而非 "pip"：
+# pip 生态只改 pyproject.toml、不感知 uv.lock，会导致 PR 锁文件漂移；
+# uv 生态会同时更新 pyproject.toml + uv.lock，rebase 时重跑 locker。
+version: 2
+updates:
+  # Python 依赖（workspace 全量包，含 packages/ + applications/）
+  - package-ecosystem: "uv"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    groups:
+      # minor/patch 低风险更新合并为单个 PR，major 单独出 PR 便于审阅
+      minor-and-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+      major:
+        patterns:
+          - "*"
+        update-types:
+          - "major"
+
+  # GitHub Actions 版本更新（checkout/setup-uv/setup-python 等）
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      actions:
+        patterns:
+          - "*"
