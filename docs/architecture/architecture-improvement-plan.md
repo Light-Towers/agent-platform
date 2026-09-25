@@ -240,7 +240,7 @@
 2. **`sqlglot` SQL 守卫**（`agent_core/sql/guard.py`）：强制 LIMIT/禁 DDL，合规硬约束。
 3. **BGE-M3 双向量 + 本地稀疏向量生成器**（md5 稳定 id，`zhanggui-zhiku/lm/sparse_vectorizer.py:73`）：零依赖可复现硬约束。
 4. **动态 TopK 断崖截断 + 索引版本 registry + eval 回填**（`zhanggui-zhiku/node_rerank.py:208`）：检索治理闭环。
-5. **联邦网关 remote subagent 委派治理**（`tools/zhiku_tools.py:86` 重试/429）：平台级 SLA。
+5. **联邦网关 remote subagent 委派治理**（`tools/knowledge_tools.py:86` 重试/429）：平台级 SLA。
 6. **PII 脱敏 + injection 检测 + 输出合规**（`gateway/input_guard.py`）：国产合规策略。
 
 ## 4. 实施路线图（分阶段，每阶段独立可测）
