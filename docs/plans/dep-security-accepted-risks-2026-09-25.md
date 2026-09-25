@@ -1,9 +1,23 @@
 # 依赖安全风险接受登记（2026-09-25）
 
 > 背景：v3 → main 合并后 Dependabot 报 23 个告警。经逐项对照 uv.lock 锁定版本与官方修复版本：
-> - **13 个为陈旧告警**（anyio×4 / asyncmy×2 / mcp×3 / transformers×4），锁定版本已达标或包已移除，Dependabot 重扫后自动关闭；
-> - **weasyprint 69→70.0 已升级修复**（agent_federation docs extra）；
+> - **weasyprint 69→70.0 已升级修复**（agent_federation docs extra），告警已翻转 fixed；
+> - **anyio / asyncmy / mcp / transformers 共 13 个为 manifest-range 误报**：uv.lock 实际锁定版本已 ≥ 官方 first_patched，但 pyproject 声明下界低于修复版，Dependabot 依赖图按「声明范围可引入漏洞版本」判定故保持 open。已于 main 经 `fix/main-dep-security-floors` 主动收紧下界（见下「本轮主动修复」），Dependabot 重扫后关闭；
+> - **asyncmy 不在 uv.lock**（依赖图陈旧条目），重扫后自动关闭；
 > - 剩余 9 个为**上游无补丁**的依赖，全部为 dev-only（生产运行时不安装），本文件登记接受理由。
+
+## 本轮主动修复（收紧下界，fix/main-dep-security-floors → main）
+
+Dependabot 依赖图按 pyproject 声明的版本范围判定，不读 uv.lock 锁定版本；故锁定已安全但声明下界过低时告警保持 open。以下改动把声明下界抬到 ≥ first_patched，重扫即关闭。
+
+| 包 | 改动 | 关闭告警（severity×n） | first_patched | 锁定版本 | 引入位置 |
+|---|---|---|---|---|---|
+| mcp | `>=0.9` → `>=2.0.0` | high×3（DNS 重绑定 / WebSocket / HTTP session） | 1.28.1 | 2.0.0 | 根 `mcp` extra + `packages/agent-runtime` `mcp` extra |
+| anyio | （原未声明，纯传递）→ `>=4.14.2` | critical×1 + medium×1（TLSStream IDNA 2003 / process-pool 阻塞） | 4.14.2 | 4.14.2 | 根 `[project].dependencies` |
+| transformers | eval 边经 `flashrag-dev` 传递（松散）→ eval extra 显式 `>=5.15.0` | high×3 + medium×1（RCE / 路径遍历） | 5.10.0 | 5.15.0 | 根 `eval` extra（prod `knowledge-service` 早已 `>=5.15.0`） |
+| asyncmy | 不在 uv.lock，无需改动 | critical×1（SQL 注入） | 无补丁但非依赖 | — | 依赖图陈旧条目，重扫自动关闭 |
+
+> 验证：`uv lock --check` 通过（锁定版本已满足新下界，无传递漂移）；`ruff` 干净。
 
 ## 接受清单
 
