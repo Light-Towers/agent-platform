@@ -25,6 +25,7 @@ dependencies = [
     "asyncpg>=0.29",
     "rank-bm25>=0.2.2",
     "sqlglot>=25.0",
+    "anyio>=4.14.2",  # Dependabot: AnyIO TLSStream IDNA 2003 / process-pool 阻塞（critical+medium，first_patched 4.14.2）
 ]
 
 [project.optional-dependencies]
@@ -33,7 +34,7 @@ otel = [
     "opentelemetry-sdk>=1.20",
     "opentelemetry-exporter-otlp>=1.20",
 ]
-mcp = ["mcp>=0.9"]
+mcp = ["mcp>=2.0.0"]  # Dependabot: MCP SDK DNS 重绑定/WebSocket/HTTP session（high×3，first_patched 1.28.1）
 # Agentic Planner 模式（PLANNER=agentic）需要联邦侧 AgenticPlanner；
 # 默认 deterministic/graph/auto 模式无需安装。安装：uv sync --extra agentic
 agentic = ["agent-federation-app"]
@@ -48,6 +49,7 @@ dev = [
 eval = [
     "flashrag-dev",
     "faiss-cpu",
+    "transformers>=5.15.0",  # Dependabot: transformers 多条 RCE/路径遍历（high×3+medium×1，first_patched 5.10.0），强制下界覆盖 flashrag-dev 传递边
 ]
 
 [build-system]
