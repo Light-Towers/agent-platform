@@ -161,3 +161,28 @@ def test_args_summary_truncated(monkeypatch):
     # 单值 repr 截断（512 + 截断标记）
     assert len(arg_repr) <= 512 + len("…<truncated>")
     assert arg_repr.endswith("…<truncated>")
+
+
+async def test_cancelled_error_recorded_and_reraised():
+    """W2 修复回归：asyncio.CancelledError 是 BaseException 子类，
+    except Exception 会漏掉它，导致 start/outcome 不配对（观测断点）。
+    observe_tool 须捕获 BaseException，仍上报 tool_outcome(exception) 并原样 re-raise。
+    """
+    import asyncio
+
+    m, events = _make_monitor()
+
+    async def cancelled(q: str) -> str:
+        """cancelled."""
+        raise asyncio.CancelledError()
+
+    tool = StructuredTool.from_function(coroutine=cancelled, name="cancelled", description="d")
+    wrapped = observe_tool(tool, monitor=m)
+
+    with pytest.raises(asyncio.CancelledError):
+        await wrapped.ainvoke({"q": "x"})
+
+    outcomes = [e for e in events if e["event"] == "tool_outcome"]
+    assert len(outcomes) == 1, "取消异常下 start/outcome 必须配对，否则观测断点"
+    assert outcomes[0]["data"]["outcome"] == "exception"
+    assert outcomes[0]["data"]["error_class"] == "CancelledError"
