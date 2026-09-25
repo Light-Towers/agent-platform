@@ -24,12 +24,40 @@ logger = logging.getLogger(__name__)
 # advisory lock key（全局唯一常量，与 execution_scheduler 的 _SLOT_LOCK_KEY 不冲突）
 _MIGRATION_LOCK_KEY = 0xCAFE0001
 
-# 用于检测存量库是否已有业务表（排除 schema_migrations 本身）
-_CHECK_EXISTING_TABLE = """
-SELECT 1 FROM information_schema.tables
+# baseline 的关键表集合。只有完整存在时才允许把 v1 标记为已应用；
+# 仅检查 chunks 会把“半初始化/损坏”的数据库误判为完整存量库。
+_BASELINE_REQUIRED_TABLES = (
+    "chunks",
+    "memories",
+    "semantic_cache",
+    "sql_ddl",
+    "sql_docs",
+    "sql_examples",
+    "admission_queue",
+    "revert_audit",
+    "mcp_call_audit",
+    "execution_checkpoints",
+    "idempotency_keys",
+    "execution_leases",
+    "admission_slots",
+    "side_effects",
+    "execution_events",
+    "trajectories",
+    "execution_status",
+    "awaitable_tasks",
+    "execution_queue",
+    "budget_usage",
+    "budget_limits",
+    "cost_records",
+    "episodic_memories",
+    "procedural_memories",
+)
+
+_CHECK_EXISTING_TABLES = """
+SELECT table_name
+FROM information_schema.tables
 WHERE table_schema = 'public'
-  AND table_name = 'chunks'
-LIMIT 1
+  AND table_name = ANY(%s)
 """
 
 _CREATE_MIGRATIONS_TABLE = """
@@ -46,6 +74,13 @@ INSERT INTO schema_migrations (version, name, checksum)
 VALUES (%s, %s, %s)
 ON CONFLICT (version) DO NOTHING
 """
+
+_UPDATE_MIGRATION_CHECKSUM = "UPDATE schema_migrations SET checksum = %s WHERE version = %s"
+
+# 旧版 runner 在 baseline stamp 时写入的字面量哨兵 "stamped"（及列默认值 ''）。
+# 这类记录无法与文件 checksum 比对，视为"未知来源"，首次启动时用文件真实
+# checksum 回填（而非判死），兼容升级前已被旧代码 stamp 的存量库。
+_LEGACY_CHECKSUM_SENTINELS = frozenset({"stamped", ""})
 
 _SELECT_MAX_VERSION = "SELECT COALESCE(MAX(version), 0) FROM schema_migrations"
 
@@ -95,19 +130,22 @@ async def run_migrations(pool: Any) -> list[Migration]:
         async with conn.transaction():
             await conn.execute("SELECT pg_advisory_xact_lock(%s)", (_MIGRATION_LOCK_KEY,))
 
-            # 3. 读当前版本
+            # 3. 校验已应用 migration 的 checksum，防止 SQL 文件被静默修改。
+            await _validate_applied_checksums(conn, migrations)
+
+            # 4. 读当前版本
             cur = await conn.execute(_SELECT_MAX_VERSION)
             row = await cur.fetchone()
             current_version = row[0] if row else 0
 
-            # 4. Baseline stamp：存量库有业务表但无版本记录 → mark baseline 已应用
+            # 5. Baseline stamp：存量库有完整 baseline 表但无版本记录 → mark baseline 已应用
             if current_version == 0:
                 stamped = await _try_baseline_stamp(conn, migrations)
                 if stamped:
                     current_version = stamped[0]
                     applied.extend(stamped[1])
 
-            # 5. 应用 pending
+            # 6. 应用 pending
             pending = [m for m in migrations if m.version > current_version]
             if not pending:
                 logger.debug("run_migrations: already at version %d, nothing to do", current_version)
@@ -137,21 +175,77 @@ def _resolve_templates_sync(sql: str, *, vector_dim: int) -> str:
     return sql.replace("{{vector_dim}}", str(vector_dim))
 
 
+async def _validate_applied_checksums(conn: Any, migrations: list[Migration]) -> None:
+    """校验已应用 migration 的文件 checksum，发现漂移立即失败。
+
+    兼容历史：旧版 stamp 写入的哨兵值（"stamped" / 空串）无法比对，
+    在同事务内回填为文件真实 checksum 并告警，不视为漂移。
+    注意：checksum 基于未渲染 {{vector_dim}} 的原始文件字节（见 base.py），
+    更换 embedder 维度不会触发漂移；跨平台字节稳定性由 .gitattributes
+    （* text=auto eol=lf）保证，勿改为对渲染后内容取 hash。
+    """
+    cur = await conn.execute(
+        "SELECT version, name, checksum FROM schema_migrations ORDER BY version"
+    )
+    rows = await cur.fetchall()
+    by_version = {row[0]: row for row in rows}
+
+    for migration in migrations:
+        row = by_version.get(migration.version)
+        if row is None:
+            continue
+        recorded = row[2]
+        expected = migration.checksum()
+        if recorded == expected:
+            continue
+        if recorded in _LEGACY_CHECKSUM_SENTINELS:
+            await conn.execute(_UPDATE_MIGRATION_CHECKSUM, (expected, migration.version))
+            logger.warning(
+                "migration v%d (%s): legacy checksum %r backfilled from file checksum",
+                migration.version,
+                migration.name,
+                recorded,
+            )
+            continue
+        raise MigrationError(
+            f"migration checksum mismatch for v{migration.version} "
+            f"({migration.name!r}): database={recorded!r}, file={expected!r}. "
+            "If the SQL file was legitimately edited, repair with: "
+            "UPDATE schema_migrations SET checksum = <file checksum> WHERE version = "
+            f"{migration.version}."
+        )
+
+
 async def _try_baseline_stamp(
     conn: Any, migrations: list[Migration]
 ) -> tuple[int, list[Migration]] | None:
-    """存量库检测：有业务表但 schema_migrations 为空 → 仅 stamp baseline。
+    """存量库检测：有完整 baseline 表但 schema_migrations 为空 → stamp baseline。
 
-    策略：只 stamp version=1（全量建表）为已应用，跳过重跑 CREATE TABLE。
-    v2+ 增量迁移（ALTER ADD COLUMN IF NOT EXISTS）仍正常 apply，
-    因为存量库可能缺失后加的列。
+    只在 baseline 所要求的全部关键表都存在时 stamp v1。
+    若只存在部分表，说明数据库可能处于半初始化/损坏状态，直接失败，
+    避免跳过 baseline migration 后永久遗留缺失表。
     """
-    cur = await conn.execute(_CHECK_EXISTING_TABLE)
-    existing = await cur.fetchone()
-    if not existing:
-        return None  # 全新库，需要跑 baseline migration
+    cur = await conn.execute(
+        _CHECK_EXISTING_TABLES,
+        (_BASELINE_REQUIRED_TABLES,),
+    )
+    rows = await cur.fetchall()
+    existing = {row[0] for row in rows}
 
-    # 只 stamp version <= 1 的 baseline migration
+    if not existing:
+        return None
+
+    missing = sorted(set(_BASELINE_REQUIRED_TABLES) - existing)
+    if missing:
+        raise MigrationError(
+            "existing database has an incomplete baseline schema; "
+            f"missing tables: {', '.join(missing)}. "
+            "Refusing to stamp v1; inspect/repair the database before migration. "
+            "Diagnose with: SELECT table_name FROM information_schema.tables "
+            "WHERE table_schema = 'public' ORDER BY table_name; "
+            "then apply the missing DDL from 001_baseline.up.sql or stamp manually."
+        )
+
     baseline_migrations = [m for m in migrations if m.version <= 1]
     if not baseline_migrations:
         return None
@@ -160,13 +254,14 @@ async def _try_baseline_stamp(
     for m in baseline_migrations:
         await conn.execute(
             _INSERT_MIGRATION_RECORD,
-            (m.version, m.name, "stamped"),
+            (m.version, m.name, m.checksum()),
         )
         stamped.append(m)
 
     max_v = max(m.version for m in stamped)
     logger.info(
-        "run_migrations: baseline stamp — existing DB marked baseline as v%d (%d stamped, v2+ will apply)",
+        "run_migrations: baseline stamp — existing DB verified against required tables "
+        "(v%d, %d stamped; v2+ will apply)",
         max_v,
         len(stamped),
     )
