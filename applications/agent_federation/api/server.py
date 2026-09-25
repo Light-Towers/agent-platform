@@ -65,12 +65,12 @@ async def lifespan(app: FastAPI):
     else:
         logger.info("Langfuse 未配置，trace 走 agent-core OTel（开发期 no-op 降级）")
 
-    # zhiku 健康探活（异步，不阻塞启动）
+    # knowledge 健康探活（异步，不阻塞启动）
     if KNOWLEDGE_SERVICE_URL:
         import threading
 
-        from tools.zhiku_tools import check_zhiku_health
-        threading.Thread(target=check_zhiku_health, daemon=True).start()
+        from tools.knowledge_tools import check_knowledge_health
+        threading.Thread(target=check_knowledge_health, daemon=True).start()
 
     # 子服务健康探活（Phase 2 联邦网关）
     from agent.health_check import start_health_check

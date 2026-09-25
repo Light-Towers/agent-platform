@@ -25,7 +25,7 @@ TOOL_REGISTRY: dict[str, str] = {
     "get_table_data": "tools.db_tools:get_table_data",
     "list_sql_tables": "tools.db_tools:list_sql_tables",
     "internet_search": "tools.tavily_tool:internet_search",
-    "zhiku_retrieve": "tools.zhiku_tools:zhiku_retrieve",
+    "knowledge_retrieve": "tools.knowledge_tools:knowledge_retrieve",
     "execute_python_code": "tools.code_execution_tool:execute_python_code",
 }
 
@@ -37,7 +37,7 @@ DISPLAY_NAMES: dict[str, str] = {
     "list_sql_tables": "数据库表名查询工具：list_sql_tables",
     "get_table_data": "数据库表数据查询工具：get_table_data",
     "execute_sql_query": "数据库表数据查询工具：execute_sql_query",
-    "zhiku_retrieve": "知识库检索工具：zhiku_retrieve",
+    "knowledge_retrieve": "知识库检索工具：knowledge_retrieve",
     "internet_search": "网络搜索工具",
     "execute_python_code": "代码执行工具",
 }
@@ -47,7 +47,7 @@ ROLE_TOOLS: dict[str, list[str]] = {
     "files": ["generate_markdown", "convert_md_to_pdf", "read_file_content"],
     "data": ["execute_sql_query", "read_file_content"],
     "search": ["internet_search", "read_file_content"],
-    "knowledge": ["zhiku_retrieve", "read_file_content"],
+    "knowledge": ["knowledge_retrieve", "read_file_content"],
     # T1.2b：code 角色仅当调用方显式传入 roles 时生效；LLM 自主输出会被
     # normalize_roles 剥离（LLM_EXCLUDED_ROLES），防不可控地拿到宿主代码执行面。
     "code": ["execute_python_code"],

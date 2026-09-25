@@ -9,10 +9,10 @@ from tools._timeout import with_timeout
 
 try:
     from agent_core.logging import get_logger
-    _zhiku_logger = get_logger(__name__)
+    _knowledge_logger = get_logger(__name__)
 except ImportError:
     import logging
-    _zhiku_logger = logging.getLogger(__name__)
+    _knowledge_logger = logging.getLogger(__name__)
 
 try:
     from agent_core.tracing import start_span as _start_span
@@ -45,41 +45,41 @@ _RETRYABLE = (httpx.TimeoutException, httpx.ConnectError)
 # ---------------------------------------------------------------------------
 # 健康探活（在服务启动时调用，不阻塞请求路径）
 # ---------------------------------------------------------------------------
-_zhiku_healthy: bool | None = None  # None=未探测, True=健康, False=不健康
+_knowledge_healthy: bool | None = None  # None=未探测, True=健康, False=不健康
 
 
-def check_zhiku_health() -> bool:
-    """检查 zhiku 知识库服务是否可达。
+def check_knowledge_health() -> bool:
+    """检查 knowledge 知识库服务是否可达。
 
-    在 lifespan 中调用一次，后续通过 is_zhiku_healthy() 获取缓存结果。
+    在 lifespan 中调用一次，后续通过 is_knowledge_healthy() 获取缓存结果。
     不抛异常，所有错误静默处理。
     """
-    global _zhiku_healthy
+    global _knowledge_healthy
     url = f"{KNOWLEDGE_SERVICE_URL.rstrip('/')}/health"
     try:
         with httpx.Client(timeout=5.0) as client:
             resp = client.get(url)
             if resp.status_code < 500:
-                _zhiku_healthy = True
-                _zhiku_logger.info("zhiku 健康探活成功 (%s)", url)
+                _knowledge_healthy = True
+                _knowledge_logger.info("knowledge 健康探活成功 (%s)", url)
                 return True
-            _zhiku_healthy = False
-            _zhiku_logger.warning("zhiku 健康探活失败 HTTP %d (%s)", resp.status_code, url)
+            _knowledge_healthy = False
+            _knowledge_logger.warning("knowledge 健康探活失败 HTTP %d (%s)", resp.status_code, url)
             return False
     except Exception as e:
-        _zhiku_healthy = False
-        _zhiku_logger.warning("zhiku 健康探活异常: %s", e)
+        _knowledge_healthy = False
+        _knowledge_logger.warning("knowledge 健康探活异常: %s", e)
         return False
 
 
-def is_zhiku_healthy() -> bool:
-    """返回 zhiku 当前健康状态（不触发探测，只读缓存）。
+def is_knowledge_healthy() -> bool:
+    """返回 knowledge 当前健康状态（不触发探测，只读缓存）。
 
     如果尚未探测过（None），视为健康（乐观假设），避免首次调用时阻塞。
     """
-    if _zhiku_healthy is None:
+    if _knowledge_healthy is None:
         return True  # 未探测时乐观假设健康
-    return _zhiku_healthy
+    return _knowledge_healthy
 
 
 @retry(
@@ -88,7 +88,7 @@ def is_zhiku_healthy() -> bool:
     retry=retry_if_exception_type(_RETRYABLE),
     reraise=True,
 )
-def _zhiku_post(url: str, payload: dict, headers: dict) -> httpx.Response:
+def _knowledge_post(url: str, payload: dict, headers: dict) -> httpx.Response:
     """带重试的知识库 HTTP POST（仅网络超时/连接错误重试，4xx 不重试）。"""
     client = _get_shared_sync_client()
     return client.post(url, json=payload, headers=headers)
@@ -96,7 +96,7 @@ def _zhiku_post(url: str, payload: dict, headers: dict) -> httpx.Response:
 
 @tool
 @with_timeout(timeout=20)
-def zhiku_retrieve(query: str, item_name: str = "") -> str:
+def knowledge_retrieve(query: str, item_name: str = "") -> str:
     """
     从企业知识库检索与问题相关的专业知识。
     :param query: 检索问题（自然语言）
@@ -104,15 +104,15 @@ def zhiku_retrieve(query: str, item_name: str = "") -> str:
     :return: 检索到的相关文档内容摘要
     """
     # outcome 语义经 ToolResult 承载（observe_tool 包装器统一上报，方案 v3.1）
-    # 降级：zhiku 不健康时直接返回提示，避免无效等待
-    if not is_zhiku_healthy():
+    # 降级：knowledge 不健康时直接返回提示，避免无效等待
+    if not is_knowledge_healthy():
         return ToolResult(
             text="知识库服务暂不可用（已探测到不健康），请使用其他工具获取信息。如为紧急问题，可尝试网络搜索。",
             outcome=ToolOutcome.DEGRADED,
             detail="服务不健康",
         )
 
-    with _start_span("tool.zhiku_retrieve", attrs={"query": query}):
+    with _start_span("tool.knowledge_retrieve", attrs={"query": query}):
         from agent_core.tracing_propagation import inject_traceparent
 
         url = f"{KNOWLEDGE_SERVICE_URL.rstrip('/')}/api/v1/retrieve"
@@ -126,7 +126,7 @@ def zhiku_retrieve(query: str, item_name: str = "") -> str:
             payload["item_name"] = item_name
 
         try:
-            resp = _zhiku_post(url, payload, headers)
+            resp = _knowledge_post(url, payload, headers)
             if resp.status_code == 429:
                 retry_after = resp.headers.get("Retry-After", "unknown")
                 return ToolResult(

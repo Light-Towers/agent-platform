@@ -18,7 +18,7 @@ _DOUBLE_MOUNTED = {
     "execute_sql_query",
     "get_table_data",
     "list_sql_tables",
-    "zhiku_retrieve",
+    "knowledge_retrieve",
     "internet_search",
     "execute_python_code",
 }
@@ -42,7 +42,7 @@ def test_get_tool_returns_wrapped_copy_with_metadata():
 
 
 def test_get_tool_cached_idempotent():
-    assert get_tool("zhiku_retrieve") is get_tool("zhiku_retrieve")
+    assert get_tool("knowledge_retrieve") is get_tool("knowledge_retrieve")
 
 
 def test_double_mounted_tools_resolvable_via_single_exit():
