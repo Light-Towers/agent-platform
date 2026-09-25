@@ -7,20 +7,44 @@ install:
 	uv sync --all-packages --extra dev
 
 lint:
-	uv run ruff check .
+	uv run --with ruff ruff check .
+	uv run python scripts/lint_architecture.py
 
 format:
-	uv run ruff format .
+	uv run --with ruff ruff format .
 
 type:
-	uv run ruff check . --select ALL 2>/dev/null || uv run ruff check .
+	uv run --with ruff ruff check . --select ALL 2>/dev/null || uv run --with ruff ruff check .
 
+# 单测门禁：根套件（tests/ + agent-core/tests/）走默认 conftest；
+# agent_federation/kefu/exhibition-agent 套件各自独立 pytest session，
+# 避免跨目录 conftest 插件名冲突（importlib 模式下均注册为 tests.conftest）。
+# agent_federation 收集整目录 tests/（含根级 test_auth/test_semantic_memory_typed，2026-09-21 F-S0-03 修复，
+# 原先只跑 tests/unit 导致根级 2 文件漏出门禁）。
+# agent-runtime/tests（零 conftest）与 knowledge-service/tests（tests/unit/conftest，
+# integration 层有 ZHIKU_INTEGRATION=1 守卫、缺环境自动 skip）同样独立 session，2026-09-21 纳入门禁（F-S0-01/F-S0-02）。
+# agent_server/tests（GraphPlanner 等应用层集成测试，2026-09-21 F-S1-01 由 agent-runtime/tests 迁入，
+# 消除红线 1 反向依赖）同样独立 session。
+# 根套件排除 requires_pg（2026-09-25）：tests/ha 属 HA 重型门禁（agent-platform-ha
+# workflow 以 -m requires_pg + 真实 PG service 强制执行，CI=true 下环境不满足即 FAIL），
+# 普通 CI 无 PG service，混入会导致 skip 掩盖或 FAIL 误报。
+# 10 个 session 任一失败即中断，确保 #2 审查项（防回归测试纳入 CI）真正落地。
+# 注：本地目录原名 deepagents/（与 PyPI 依赖包同名），2026-08-19 重命名为
+# agent_federation/ 彻底消除遮蔽；test_tool_registry 已回归门禁（75 passed）。
 test:
-	uv run pytest -q
+	uv run pytest -q -m "not requires_pg"
+	uv run pytest packages/shared-schemas/tests -q
+	uv run pytest packages/agent-runtime/tests -q
+	uv run pytest applications/agent_server/tests -q
+	uv run pytest applications/agent_federation/tests -q
+	uv run pytest applications/kefu-service/tests -q
+	uv run pytest applications/exhibition-agent/tests -q
+	uv run pytest applications/knowledge-service/tests -q
+	uv run pytest applications/nl2sql-service/tests -q
 
 # 评测门禁：默认启发式（确定性，CI 可达），阈值 0.8；LLM_API_KEY 缺失时回退启发式并 WARN。
-# 注意：必须用直接路径 `eval/run_eval.py` 而非 `-m eval.run_eval`，
-# 否则会命中 deepagents 包内同名模块（workspace 命名冲突）。
+# 注：历史上 agent_federation 曾有同名顶层 eval 包（workspace 命名冲突，已于
+# 2026-09-25 重命名为 evaluation 根除，见 lint_architecture P5 门禁防复发）。
 # CI 完整 LLM 评测用 `make eval-llm-required`（环境不可达时 SKIP 退出码 2，不假装通过）。
 eval:
 	uv run python eval/run_eval.py --fail-below 0.8
@@ -33,8 +57,18 @@ eval-llm-required:
 eval-llm-memory:
 	uv run python eval/memory_reuse_llm.py
 
-# CI 串联：lint + 单测 + 评测门禁；任一失败即中断。
+# 检索回归评测：用 FlashRAG 的 retrieval_recall@k 对照「关 rerank」vs「开 rerank」。
+# 需 pgvector 容器（见 docs/opencode-llm-setup.md §1.1）与真实 embedding/rerank 可达。
+# 两次结果差值 Δ 即 rerank 带来的准确率变化；基线见文档 §8。
+# 注意：必须在项目根运行（不 cd 进子目录），否则 pydantic-settings 找不到 .env
+# 导致走内存模式、init_pool 返回 None。
+eval-rag:
+	RERANK_ENABLED=false uv run --extra eval python scripts/flashrag_eval/run_eval.py
+	RERANK_ENABLED=true  uv run --extra eval python scripts/flashrag_eval/run_eval.py
+
+# CI 串联：lock 校验 + lint + 单测 + 评测门禁；任一失败即中断。
 ci: lint test eval
+	uv lock --check
 
 # TB-7 端到端冒烟：需本机 Docker 守护进程可用。启动 pgvector + agent-platform，
 # 等待两服务 healthcheck 变 healthy，再探测 /health 返回，最后清理。

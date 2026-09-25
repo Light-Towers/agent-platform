@@ -1,0 +1,1592 @@
+{
+  "version": "v2.1-p1",
+  "date": "2026-09-16",
+  "source_spec": "docs/superpowers/specs/2026-09-16-ontology-api-skill-mcp-agent-v2.md",
+  "mvp_scope": "拍板 D: S5(recommend_organizer) + S9(get_venue_operation) + W1(create_lead) + W3(delete_lead); P1 扩展至 48 Tool/13 Skill",
+  "readiness_convention": "skill.readiness 由 metric_registry.py get_readiness(skill_id) 运行时推导（F04 Metric Registry）；readiness_static_snapshot 为 2026-09-16 静态快照 fallback。SYNTHETIC 为 Tool 级声明覆盖，不由 metric 推导。现有端点返回 is_sample(真/样例二态) 为旧标记，不改端点返回。",
+  "auth_common": {
+    "credential_mode": "static_token",
+    "inject_scope_params": [
+      "tenant_id",
+      "user_id",
+      "scope"
+    ],
+    "on_credential_missing": "FAIL_CLOSED"
+  },
+  "skills": {
+    "search_entity": {
+      "domain": "查询",
+      "skill_card_no": 1,
+      "tools": [
+        "search_portrait_exhibitions",
+        "search_portrait_exhibitors",
+        "search_portrait_audiences",
+        "list_exhibitions",
+        "list_venues",
+        "list_exhibitors",
+        "organizer_project_map",
+        "list_timeslot_exhibitions"
+      ],
+      "readiness": "PARTIAL",
+      "readiness_static_snapshot": "PARTIAL",
+      "readiness_source": "metric_registry",
+      "depends_on_metrics": [],
+      "mvp_role": "P1 扩展",
+      "discriminator": "entity_type ∈ {exhibition, exhibitor, audience, venue} → 对应 search/list Tool"
+    },
+    "get_entity_profile": {
+      "domain": "查询",
+      "skill_card_no": 2,
+      "tools": [
+        "portrait_exhibition",
+        "portrait_exhibitor",
+        "portrait_audience",
+        "venue_dimension",
+        "venue_exhibition_profile",
+        "venue_party",
+        "organizer",
+        "audience"
+      ],
+      "readiness": "PARTIAL",
+      "readiness_static_snapshot": "PARTIAL",
+      "readiness_source": "metric_registry",
+      "depends_on_metrics": [],
+      "mvp_role": "P1 扩展",
+      "discriminator": "entity_type ∈ {exhibition, exhibitor, audience, venue} → 对应 portrait/detail Tool"
+    },
+    "get_overview": {
+      "domain": "查询",
+      "skill_card_no": 3,
+      "tools": [
+        "overview",
+        "business_overview",
+        "profile"
+      ],
+      "readiness": "PARTIAL",
+      "readiness_static_snapshot": "PARTIAL",
+      "readiness_source": "metric_registry",
+      "depends_on_metrics": [],
+      "mvp_role": "P1 扩展"
+    },
+    "list_business_records": {
+      "domain": "查询",
+      "skill_card_no": 4,
+      "tools": [
+        "contract",
+        "safety",
+        "safety_monthly",
+        "meeting",
+        "clue"
+      ],
+      "readiness": "PARTIAL",
+      "readiness_static_snapshot": "PARTIAL",
+      "readiness_source": "metric_registry",
+      "depends_on_metrics": [],
+      "mvp_role": "P1 扩展",
+      "discriminator": "record_type ∈ {contract, safety, safety_monthly, meeting, clue} → 5 Tool"
+    },
+    "recommend_organizer": {
+      "domain": "推荐",
+      "skill_card_no": 5,
+      "tools": [
+        "venue_organizer_recommend"
+      ],
+      "readiness": "SYNTHETIC",
+      "readiness_static_snapshot": "SYNTHETIC",
+      "readiness_source": "tool_override",
+      "depends_on_metrics": [],
+      "mvp_role": "验证推荐域链路（合成数据，仅链路实验）"
+    },
+    "recommend_venue": {
+      "domain": "推荐",
+      "skill_card_no": 6,
+      "tools": [
+        "organizer_venue_recommend"
+      ],
+      "readiness": "SYNTHETIC",
+      "readiness_static_snapshot": "SYNTHETIC",
+      "readiness_source": "tool_override",
+      "depends_on_metrics": [],
+      "mvp_role": "P1 扩展"
+    },
+    "recommend_exhibition": {
+      "domain": "推荐",
+      "skill_card_no": 7,
+      "tools": [
+        "exhibitor_exhibition_recommend",
+        "exhibitor_exhibition_schedule",
+        "exhibition_cf_recommend"
+      ],
+      "readiness": "SYNTHETIC",
+      "readiness_static_snapshot": "SYNTHETIC",
+      "readiness_source": "tool_override",
+      "depends_on_metrics": [],
+      "mvp_role": "P1 扩展",
+      "discriminator": "mode ∈ {profile_match, schedule, collaborative} → 3 Tool"
+    },
+    "get_external_affinity": {
+      "domain": "推荐",
+      "skill_card_no": 8,
+      "tools": [
+        "external_affinity_recommend"
+      ],
+      "readiness": "PARTIAL",
+      "readiness_static_snapshot": "PARTIAL",
+      "readiness_source": "metric_registry",
+      "depends_on_metrics": [],
+      "mvp_role": "P1 扩展",
+      "constraints": "外部真实数据，非行为预测（§2.3③）"
+    },
+    "get_venue_operation": {
+      "domain": "洞察",
+      "skill_card_no": 9,
+      "tools": [
+        "venue_audience_radiation",
+        "venue_positioning",
+        "venue_schedule",
+        "venue_cf_recommend",
+        "venue_whitepaper"
+      ],
+      "readiness": "PARTIAL",
+      "readiness_static_snapshot": "PARTIAL",
+      "readiness_source": "metric_registry",
+      "depends_on_metrics": [
+        "venue_utilization_rate",
+        "booth_sell_through_rate",
+        "booth_vacancy_rate"
+      ],
+      "mvp_role": "验证洞察域路由 + B2「待接入」返回",
+      "discriminator": "card ∈ {radiation, positioning, schedule, project_fit, whitepaper} → 5 Tool"
+    },
+    "get_strategy_insight": {
+      "domain": "洞察",
+      "skill_card_no": 10,
+      "tools": [
+        "venue_recruit_strategy",
+        "organizer_risk_signal",
+        "organizer_retention",
+        "venue_retention_risk"
+      ],
+      "readiness": "SYNTHETIC",
+      "readiness_static_snapshot": "SYNTHETIC",
+      "readiness_source": "tool_override",
+      "depends_on_metrics": [],
+      "mvp_role": "P1 扩展",
+      "discriminator": "card ∈ {venue_recruit, organizer_risk, organizer_retention, venue_retention} → 4 Tool"
+    },
+    "get_forecast": {
+      "domain": "洞察",
+      "skill_card_no": 11,
+      "tools": [
+        "exhibition_forecast",
+        "venue_forecast",
+        "timeslot_predictions",
+        "timeslot_macro",
+        "exhibition_heat"
+      ],
+      "readiness": "SYNTHETIC",
+      "readiness_static_snapshot": "SYNTHETIC",
+      "readiness_source": "tool_override",
+      "depends_on_metrics": [],
+      "mvp_role": "P1 扩展",
+      "discriminator": "subject ∈ {exhibition, venue, audience_timeslot, heat} → 5 Tool"
+    },
+    "create_lead": {
+      "domain": "执行",
+      "skill_card_no": 12,
+      "tools": [
+        "create_lead"
+      ],
+      "readiness": "N/A (write)",
+      "readiness_static_snapshot": "N/A (write)",
+      "readiness_source": "write_op",
+      "depends_on_metrics": [],
+      "mvp_role": "验证幂等重放 + source_readiness 持久化（W1 自动放行）"
+    },
+    "delete_lead": {
+      "domain": "执行",
+      "skill_card_no": 13,
+      "tools": [
+        "delete_lead",
+        "confirm_lead",
+        "reject_lead"
+      ],
+      "readiness": "N/A (write)",
+      "readiness_static_snapshot": "N/A (write)",
+      "readiness_source": "write_op",
+      "depends_on_metrics": [],
+      "mvp_role": "验证 Execution Approval 挂起（W3 强制 HITL）"
+    }
+  },
+  "tools": {
+    "search_portrait_exhibitions": {
+      "name": "search_portrait_exhibitions",
+      "skill": "search_entity",
+      "endpoint": {
+        "method": "GET",
+        "path": "/api/portrait/exhibitions"
+      },
+      "input": {
+        "q": {
+          "type": "string",
+          "required": false
+        },
+        "limit": {
+          "type": "int",
+          "default": 20,
+          "required": false
+        }
+      },
+      "output": {
+        "records": "array",
+        "is_sample": "bool",
+        "readiness": "PARTIAL"
+      },
+      "auth": {
+        "required_capability": "exhibition:read"
+      },
+      "side_effects": "none",
+      "idempotency": "natural",
+      "timeout_retry": "3s / 2",
+      "readiness": "PARTIAL",
+      "readiness_snapshot": "2026-09-16"
+    },
+    "search_portrait_exhibitors": {
+      "name": "search_portrait_exhibitors",
+      "skill": "search_entity",
+      "endpoint": {
+        "method": "GET",
+        "path": "/api/portrait/exhibitors"
+      },
+      "input": {
+        "q": {
+          "type": "string",
+          "required": false
+        },
+        "limit": {
+          "type": "int",
+          "default": 20,
+          "required": false
+        }
+      },
+      "output": {
+        "records": "array",
+        "is_sample": "bool",
+        "readiness": "PARTIAL"
+      },
+      "auth": {
+        "required_capability": "exhibitor:read"
+      },
+      "side_effects": "none",
+      "idempotency": "natural",
+      "timeout_retry": "3s / 2",
+      "readiness": "PARTIAL",
+      "readiness_snapshot": "2026-09-16"
+    },
+    "search_portrait_audiences": {
+      "name": "search_portrait_audiences",
+      "skill": "search_entity",
+      "endpoint": {
+        "method": "GET",
+        "path": "/api/portrait/audiences"
+      },
+      "input": {
+        "q": {
+          "type": "string",
+          "required": false
+        },
+        "limit": {
+          "type": "int",
+          "default": 20,
+          "required": false
+        }
+      },
+      "output": {
+        "records": "array",
+        "is_sample": "bool",
+        "readiness": "PARTIAL"
+      },
+      "auth": {
+        "required_capability": "audience:read"
+      },
+      "side_effects": "none",
+      "idempotency": "natural",
+      "timeout_retry": "3s / 2",
+      "readiness": "PARTIAL",
+      "readiness_snapshot": "2026-09-16"
+    },
+    "list_exhibitions": {
+      "name": "list_exhibitions",
+      "skill": "search_entity",
+      "endpoint": {
+        "method": "GET",
+        "path": "/api/exhibition"
+      },
+      "input": {},
+      "output": {
+        "records": "array",
+        "is_sample": "bool",
+        "readiness": "PARTIAL"
+      },
+      "auth": {
+        "required_capability": "exhibition:read"
+      },
+      "side_effects": "none",
+      "idempotency": "natural",
+      "timeout_retry": "3s / 2",
+      "readiness": "PARTIAL",
+      "readiness_snapshot": "2026-09-16"
+    },
+    "list_venues": {
+      "name": "list_venues",
+      "skill": "search_entity",
+      "endpoint": {
+        "method": "GET",
+        "path": "/api/venue"
+      },
+      "input": {},
+      "output": {
+        "records": "array",
+        "is_sample": "bool",
+        "readiness": "PARTIAL"
+      },
+      "auth": {
+        "required_capability": "venue:read"
+      },
+      "side_effects": "none",
+      "idempotency": "natural",
+      "timeout_retry": "3s / 2",
+      "readiness": "PARTIAL",
+      "readiness_snapshot": "2026-09-16"
+    },
+    "list_exhibitors": {
+      "name": "list_exhibitors",
+      "skill": "search_entity",
+      "endpoint": {
+        "method": "GET",
+        "path": "/api/exhibitor"
+      },
+      "input": {},
+      "output": {
+        "records": "array",
+        "is_sample": "bool",
+        "readiness": "PARTIAL"
+      },
+      "auth": {
+        "required_capability": "exhibitor:read"
+      },
+      "side_effects": "none",
+      "idempotency": "natural",
+      "timeout_retry": "3s / 2",
+      "readiness": "PARTIAL",
+      "readiness_snapshot": "2026-09-16"
+    },
+    "organizer_project_map": {
+      "name": "organizer_project_map",
+      "skill": "search_entity",
+      "endpoint": {
+        "method": "GET",
+        "path": "/api/organizer-project-map"
+      },
+      "input": {},
+      "output": {
+        "records": "array",
+        "is_sample": "bool",
+        "readiness": "PARTIAL"
+      },
+      "auth": {
+        "required_capability": "sponsor:read"
+      },
+      "side_effects": "none",
+      "idempotency": "natural",
+      "timeout_retry": "3s / 2",
+      "readiness": "PARTIAL",
+      "readiness_snapshot": "2026-09-16"
+    },
+    "list_timeslot_exhibitions": {
+      "name": "list_timeslot_exhibitions",
+      "skill": "search_entity",
+      "endpoint": {
+        "method": "GET",
+        "path": "/api/timeslot/exhibitions"
+      },
+      "input": {},
+      "output": {
+        "records": "array",
+        "is_sample": "bool",
+        "readiness": "PARTIAL"
+      },
+      "auth": {
+        "required_capability": "exhibition:read"
+      },
+      "side_effects": "none",
+      "idempotency": "natural",
+      "timeout_retry": "3s / 2",
+      "readiness": "PARTIAL",
+      "readiness_snapshot": "2026-09-16"
+    },
+    "portrait_exhibition": {
+      "name": "portrait_exhibition",
+      "skill": "get_entity_profile",
+      "endpoint": {
+        "method": "GET",
+        "path": "/api/portrait/exhibition/{exhibition_id}"
+      },
+      "input": {
+        "exhibition_id": {
+          "type": "string",
+          "required": true,
+          "in_path": true
+        }
+      },
+      "output": {
+        "records": "array",
+        "is_sample": "bool",
+        "readiness": "PARTIAL"
+      },
+      "auth": {
+        "required_capability": "exhibition:read"
+      },
+      "side_effects": "none",
+      "idempotency": "natural",
+      "timeout_retry": "3s / 2",
+      "readiness": "PARTIAL",
+      "readiness_snapshot": "2026-09-16"
+    },
+    "portrait_exhibitor": {
+      "name": "portrait_exhibitor",
+      "skill": "get_entity_profile",
+      "endpoint": {
+        "method": "GET",
+        "path": "/api/portrait/exhibitor/{exhibitor_id}"
+      },
+      "input": {
+        "exhibitor_id": {
+          "type": "string",
+          "required": true,
+          "in_path": true
+        }
+      },
+      "output": {
+        "records": "array",
+        "is_sample": "bool",
+        "readiness": "PARTIAL"
+      },
+      "auth": {
+        "required_capability": "exhibitor:read"
+      },
+      "side_effects": "none",
+      "idempotency": "natural",
+      "timeout_retry": "3s / 2",
+      "readiness": "PARTIAL",
+      "readiness_snapshot": "2026-09-16"
+    },
+    "portrait_audience": {
+      "name": "portrait_audience",
+      "skill": "get_entity_profile",
+      "endpoint": {
+        "method": "GET",
+        "path": "/api/portrait/audience/{audience_id}"
+      },
+      "input": {
+        "audience_id": {
+          "type": "string",
+          "required": true,
+          "in_path": true
+        }
+      },
+      "output": {
+        "records": "array",
+        "is_sample": "bool",
+        "readiness": "PARTIAL"
+      },
+      "auth": {
+        "required_capability": "audience:read"
+      },
+      "side_effects": "none",
+      "idempotency": "natural",
+      "timeout_retry": "3s / 2",
+      "readiness": "PARTIAL",
+      "readiness_snapshot": "2026-09-16"
+    },
+    "venue_dimension": {
+      "name": "venue_dimension",
+      "skill": "get_entity_profile",
+      "endpoint": {
+        "method": "GET",
+        "path": "/api/venue-dimension"
+      },
+      "input": {
+        "venue_id": {
+          "type": "string",
+          "required": true
+        }
+      },
+      "output": {
+        "records": "array",
+        "is_sample": "bool",
+        "readiness": "PARTIAL"
+      },
+      "auth": {
+        "required_capability": "venue:read"
+      },
+      "side_effects": "none",
+      "idempotency": "natural",
+      "timeout_retry": "3s / 2",
+      "readiness": "PARTIAL",
+      "readiness_snapshot": "2026-09-16"
+    },
+    "venue_exhibition_profile": {
+      "name": "venue_exhibition_profile",
+      "skill": "get_entity_profile",
+      "endpoint": {
+        "method": "GET",
+        "path": "/api/venue-exhibition-profile"
+      },
+      "input": {
+        "venue_id": {
+          "type": "string",
+          "required": true
+        }
+      },
+      "output": {
+        "records": "array",
+        "is_sample": "bool",
+        "readiness": "PARTIAL"
+      },
+      "auth": {
+        "required_capability": "venue:read"
+      },
+      "side_effects": "none",
+      "idempotency": "natural",
+      "timeout_retry": "3s / 2",
+      "readiness": "PARTIAL",
+      "readiness_snapshot": "2026-09-16"
+    },
+    "venue_party": {
+      "name": "venue_party",
+      "skill": "get_entity_profile",
+      "endpoint": {
+        "method": "GET",
+        "path": "/api/venue_party"
+      },
+      "input": {
+        "venue_id": {
+          "type": "string",
+          "required": true
+        }
+      },
+      "output": {
+        "records": "array",
+        "is_sample": "bool",
+        "readiness": "PARTIAL"
+      },
+      "auth": {
+        "required_capability": "venue:read"
+      },
+      "side_effects": "none",
+      "idempotency": "natural",
+      "timeout_retry": "3s / 2",
+      "readiness": "PARTIAL",
+      "readiness_snapshot": "2026-09-16"
+    },
+    "organizer": {
+      "name": "organizer",
+      "skill": "get_entity_profile",
+      "endpoint": {
+        "method": "GET",
+        "path": "/api/organizer"
+      },
+      "input": {},
+      "output": {
+        "records": "array",
+        "is_sample": "bool",
+        "readiness": "PARTIAL"
+      },
+      "auth": {
+        "required_capability": "sponsor:read"
+      },
+      "side_effects": "none",
+      "idempotency": "natural",
+      "timeout_retry": "3s / 2",
+      "readiness": "PARTIAL",
+      "readiness_snapshot": "2026-09-16"
+    },
+    "audience": {
+      "name": "audience",
+      "skill": "get_entity_profile",
+      "endpoint": {
+        "method": "GET",
+        "path": "/api/audience"
+      },
+      "input": {},
+      "output": {
+        "records": "array",
+        "is_sample": "bool",
+        "readiness": "PARTIAL"
+      },
+      "auth": {
+        "required_capability": "audience:read"
+      },
+      "side_effects": "none",
+      "idempotency": "natural",
+      "timeout_retry": "3s / 2",
+      "readiness": "PARTIAL",
+      "readiness_snapshot": "2026-09-16"
+    },
+    "overview": {
+      "name": "overview",
+      "skill": "get_overview",
+      "endpoint": {
+        "method": "GET",
+        "path": "/api/overview"
+      },
+      "input": {},
+      "output": {
+        "records": "array",
+        "is_sample": "bool",
+        "readiness": "PARTIAL"
+      },
+      "auth": {
+        "required_capability": "overview:read"
+      },
+      "side_effects": "none",
+      "idempotency": "natural",
+      "timeout_retry": "3s / 2",
+      "readiness": "PARTIAL",
+      "readiness_snapshot": "2026-09-16"
+    },
+    "business_overview": {
+      "name": "business_overview",
+      "skill": "get_overview",
+      "endpoint": {
+        "method": "GET",
+        "path": "/api/business-overview"
+      },
+      "input": {},
+      "output": {
+        "records": "array",
+        "is_sample": "bool",
+        "readiness": "PARTIAL"
+      },
+      "auth": {
+        "required_capability": "overview:read"
+      },
+      "side_effects": "none",
+      "idempotency": "natural",
+      "timeout_retry": "3s / 2",
+      "readiness": "PARTIAL",
+      "readiness_snapshot": "2026-09-16"
+    },
+    "profile": {
+      "name": "profile",
+      "skill": "get_overview",
+      "endpoint": {
+        "method": "GET",
+        "path": "/api/profile"
+      },
+      "input": {},
+      "output": {
+        "records": "array",
+        "is_sample": "bool",
+        "readiness": "PARTIAL"
+      },
+      "auth": {
+        "required_capability": "overview:read"
+      },
+      "side_effects": "none",
+      "idempotency": "natural",
+      "timeout_retry": "3s / 2",
+      "readiness": "PARTIAL",
+      "readiness_snapshot": "2026-09-16"
+    },
+    "contract": {
+      "name": "contract",
+      "skill": "list_business_records",
+      "endpoint": {
+        "method": "GET",
+        "path": "/api/contract"
+      },
+      "input": {},
+      "output": {
+        "records": "array",
+        "is_sample": "bool",
+        "readiness": "PARTIAL"
+      },
+      "auth": {
+        "required_capability": "contract:read"
+      },
+      "side_effects": "none",
+      "idempotency": "natural",
+      "timeout_retry": "3s / 2",
+      "readiness": "PARTIAL",
+      "readiness_snapshot": "2026-09-16"
+    },
+    "safety": {
+      "name": "safety",
+      "skill": "list_business_records",
+      "endpoint": {
+        "method": "GET",
+        "path": "/api/safety"
+      },
+      "input": {},
+      "output": {
+        "records": "array",
+        "is_sample": "bool",
+        "readiness": "PARTIAL"
+      },
+      "auth": {
+        "required_capability": "safety:read"
+      },
+      "side_effects": "none",
+      "idempotency": "natural",
+      "timeout_retry": "3s / 2",
+      "readiness": "PARTIAL",
+      "readiness_snapshot": "2026-09-16"
+    },
+    "safety_monthly": {
+      "name": "safety_monthly",
+      "skill": "list_business_records",
+      "endpoint": {
+        "method": "GET",
+        "path": "/api/safety_monthly"
+      },
+      "input": {},
+      "output": {
+        "records": "array",
+        "is_sample": "bool",
+        "readiness": "PARTIAL"
+      },
+      "auth": {
+        "required_capability": "safety:read"
+      },
+      "side_effects": "none",
+      "idempotency": "natural",
+      "timeout_retry": "3s / 2",
+      "readiness": "PARTIAL",
+      "readiness_snapshot": "2026-09-16"
+    },
+    "meeting": {
+      "name": "meeting",
+      "skill": "list_business_records",
+      "endpoint": {
+        "method": "GET",
+        "path": "/api/meeting"
+      },
+      "input": {},
+      "output": {
+        "records": "array",
+        "is_sample": "bool",
+        "readiness": "PARTIAL"
+      },
+      "auth": {
+        "required_capability": "meeting:read"
+      },
+      "side_effects": "none",
+      "idempotency": "natural",
+      "timeout_retry": "3s / 2",
+      "readiness": "PARTIAL",
+      "readiness_snapshot": "2026-09-16"
+    },
+    "clue": {
+      "name": "clue",
+      "skill": "list_business_records",
+      "endpoint": {
+        "method": "GET",
+        "path": "/api/clue"
+      },
+      "input": {},
+      "output": {
+        "records": "array",
+        "is_sample": "bool",
+        "readiness": "PARTIAL"
+      },
+      "auth": {
+        "required_capability": "clue:read"
+      },
+      "side_effects": "none",
+      "idempotency": "natural",
+      "timeout_retry": "3s / 2",
+      "readiness": "PARTIAL",
+      "readiness_snapshot": "2026-09-16"
+    },
+    "venue_organizer_recommend": {
+      "name": "venue_organizer_recommend",
+      "skill": "recommend_organizer",
+      "endpoint": {
+        "method": "GET",
+        "path": "/api/venue-organizer-recommend"
+      },
+      "input": {
+        "venue_id": {
+          "type": "string",
+          "required": true,
+          "injected": false
+        },
+        "top_k": {
+          "type": "int",
+          "default": 20,
+          "required": false
+        }
+      },
+      "output": {
+        "records": "array",
+        "is_sample": "bool",
+        "readiness": "SYNTHETIC"
+      },
+      "auth": {
+        "required_capability": "venue:read"
+      },
+      "side_effects": "none",
+      "idempotency": "natural",
+      "timeout_retry": "3s / 2",
+      "readiness": "SYNTHETIC",
+      "readiness_snapshot": "2026-09-16",
+      "constraints": [
+        "B3: 合同无结构化关联",
+        "D1: 主办名单未接入",
+        "INV-3: 合成数据禁作业务事实交付",
+        "对外 spec §14 已裁决场馆招商 Agent 推迟，仅链路实验"
+      ]
+    },
+    "organizer_venue_recommend": {
+      "name": "organizer_venue_recommend",
+      "skill": "recommend_venue",
+      "endpoint": {
+        "method": "GET",
+        "path": "/api/organizer-venue-recommend"
+      },
+      "input": {
+        "sponsor_id": {
+          "type": "string",
+          "required": true
+        },
+        "top_k": {
+          "type": "int",
+          "default": 10,
+          "required": false
+        }
+      },
+      "output": {
+        "records": "array",
+        "is_sample": "bool",
+        "readiness": "SYNTHETIC"
+      },
+      "auth": {
+        "required_capability": "sponsor:read"
+      },
+      "side_effects": "none",
+      "idempotency": "natural",
+      "timeout_retry": "3s / 2",
+      "readiness": "SYNTHETIC",
+      "readiness_snapshot": "2026-09-16",
+      "constraints": [
+        "INV-3: 合成数据禁作业务事实交付"
+      ]
+    },
+    "exhibitor_exhibition_recommend": {
+      "name": "exhibitor_exhibition_recommend",
+      "skill": "recommend_exhibition",
+      "endpoint": {
+        "method": "GET",
+        "path": "/api/exhibitor-exhibition-recommend"
+      },
+      "input": {
+        "exhibitor_id": {
+          "type": "string",
+          "required": true
+        },
+        "top_k": {
+          "type": "int",
+          "default": 15,
+          "required": false
+        }
+      },
+      "output": {
+        "records": "array",
+        "is_sample": "bool",
+        "readiness": "SYNTHETIC"
+      },
+      "auth": {
+        "required_capability": "exhibitor:read"
+      },
+      "side_effects": "none",
+      "idempotency": "natural",
+      "timeout_retry": "3s / 2",
+      "readiness": "SYNTHETIC",
+      "readiness_snapshot": "2026-09-16",
+      "card": "profile_match"
+    },
+    "exhibitor_exhibition_schedule": {
+      "name": "exhibitor_exhibition_schedule",
+      "skill": "recommend_exhibition",
+      "endpoint": {
+        "method": "GET",
+        "path": "/api/exhibitor-exhibition-schedule"
+      },
+      "input": {
+        "exhibitor_id": {
+          "type": "string",
+          "required": true
+        },
+        "top_k": {
+          "type": "int",
+          "default": 15,
+          "required": false
+        }
+      },
+      "output": {
+        "records": "array",
+        "is_sample": "bool",
+        "readiness": "SYNTHETIC"
+      },
+      "auth": {
+        "required_capability": "exhibitor:read"
+      },
+      "side_effects": "none",
+      "idempotency": "natural",
+      "timeout_retry": "3s / 2",
+      "readiness": "SYNTHETIC",
+      "readiness_snapshot": "2026-09-16",
+      "card": "schedule"
+    },
+    "exhibition_cf_recommend": {
+      "name": "exhibition_cf_recommend",
+      "skill": "recommend_exhibition",
+      "endpoint": {
+        "method": "GET",
+        "path": "/api/exhibition-cf-recommend"
+      },
+      "input": {
+        "exhibitor_id": {
+          "type": "string",
+          "required": true
+        },
+        "top_k": {
+          "type": "int",
+          "default": 15,
+          "required": false
+        }
+      },
+      "output": {
+        "records": "array",
+        "is_sample": "bool",
+        "readiness": "SYNTHETIC"
+      },
+      "auth": {
+        "required_capability": "exhibitor:read"
+      },
+      "side_effects": "none",
+      "idempotency": "natural",
+      "timeout_retry": "3s / 2",
+      "readiness": "SYNTHETIC",
+      "readiness_snapshot": "2026-09-16",
+      "card": "collaborative"
+    },
+    "external_affinity_recommend": {
+      "name": "external_affinity_recommend",
+      "skill": "get_external_affinity",
+      "endpoint": {
+        "method": "GET",
+        "path": "/api/external-affinity-recommend"
+      },
+      "input": {
+        "entity": {
+          "type": "string",
+          "required": false
+        },
+        "entity_type": {
+          "type": "string",
+          "required": false
+        },
+        "industry": {
+          "type": "string",
+          "required": false
+        },
+        "city": {
+          "type": "string",
+          "required": false
+        },
+        "year": {
+          "type": "int",
+          "required": false
+        },
+        "top_k": {
+          "type": "int",
+          "required": false
+        }
+      },
+      "output": {
+        "records": "array",
+        "is_sample": "bool",
+        "readiness": "PARTIAL"
+      },
+      "auth": {
+        "required_capability": "external:read"
+      },
+      "side_effects": "none",
+      "idempotency": "natural",
+      "timeout_retry": "3s / 2",
+      "readiness": "PARTIAL",
+      "readiness_snapshot": "2026-09-16",
+      "constraints": [
+        "外部真实数据，非行为预测",
+        "不设置授权门禁（公开数据已入库）"
+      ]
+    },
+    "venue_audience_radiation": {
+      "name": "venue_audience_radiation",
+      "skill": "get_venue_operation",
+      "endpoint": {
+        "method": "GET",
+        "path": "/api/venue-audience-radiation"
+      },
+      "input": {},
+      "output": {
+        "records": "array",
+        "is_sample": "bool",
+        "readiness": "PARTIAL"
+      },
+      "auth": {
+        "required_capability": "venue:read"
+      },
+      "side_effects": "none",
+      "idempotency": "natural",
+      "timeout_retry": "3s / 2",
+      "readiness": "PARTIAL",
+      "readiness_snapshot": "2026-09-16",
+      "card": "radiation"
+    },
+    "venue_positioning": {
+      "name": "venue_positioning",
+      "skill": "get_venue_operation",
+      "endpoint": {
+        "method": "GET",
+        "path": "/api/venue-positioning"
+      },
+      "input": {},
+      "output": {
+        "records": "array",
+        "is_sample": "bool",
+        "readiness": "PARTIAL"
+      },
+      "auth": {
+        "required_capability": "venue:read"
+      },
+      "side_effects": "none",
+      "idempotency": "natural",
+      "timeout_retry": "3s / 2",
+      "readiness": "PARTIAL",
+      "readiness_snapshot": "2026-09-16",
+      "card": "positioning"
+    },
+    "venue_schedule": {
+      "name": "venue_schedule",
+      "skill": "get_venue_operation",
+      "endpoint": {
+        "method": "GET",
+        "path": "/api/venue-schedule"
+      },
+      "input": {},
+      "output": {
+        "records": "array",
+        "is_sample": "bool",
+        "readiness": "PARTIAL"
+      },
+      "auth": {
+        "required_capability": "venue:read"
+      },
+      "side_effects": "none",
+      "idempotency": "natural",
+      "timeout_retry": "3s / 2",
+      "readiness": "PARTIAL",
+      "readiness_snapshot": "2026-09-16",
+      "card": "schedule",
+      "constraints": [
+        "B2: 空置率/利用率算不出时返回结构化「待接入」(reason 字段)，不得用 0 掩盖"
+      ]
+    },
+    "venue_cf_recommend": {
+      "name": "venue_cf_recommend",
+      "skill": "get_venue_operation",
+      "endpoint": {
+        "method": "GET",
+        "path": "/api/venue-cf-recommend"
+      },
+      "input": {
+        "venue_id": {
+          "type": "string",
+          "required": true
+        },
+        "top_k": {
+          "type": "int",
+          "default": 10,
+          "required": false
+        }
+      },
+      "output": {
+        "records": "array",
+        "is_sample": "bool",
+        "readiness": "SYNTHETIC"
+      },
+      "auth": {
+        "required_capability": "venue:read"
+      },
+      "side_effects": "none",
+      "idempotency": "natural",
+      "timeout_retry": "3s / 2",
+      "readiness": "SYNTHETIC",
+      "readiness_snapshot": "2026-09-16",
+      "card": "project_fit",
+      "constraints": [
+        "project_fit 豁免：虽输出列表但属运营推测，归洞察域（v2.1 §4）",
+        "SVD 协同过滤，合成数据"
+      ]
+    },
+    "venue_whitepaper": {
+      "name": "venue_whitepaper",
+      "skill": "get_venue_operation",
+      "endpoint": {
+        "method": "GET",
+        "path": "/api/venue-whitepaper"
+      },
+      "input": {
+        "venue_id": {
+          "type": "string",
+          "required": true
+        }
+      },
+      "output": {
+        "records": "array",
+        "is_sample": "bool",
+        "readiness": "PARTIAL"
+      },
+      "auth": {
+        "required_capability": "venue:read"
+      },
+      "side_effects": "none",
+      "idempotency": "natural",
+      "timeout_retry": "3s / 2",
+      "readiness": "PARTIAL",
+      "readiness_snapshot": "2026-09-16",
+      "card": "whitepaper",
+      "constraints": [
+        "聚合 P0/P1/P2，部分合成"
+      ]
+    },
+    "venue_recruit_strategy": {
+      "name": "venue_recruit_strategy",
+      "skill": "get_strategy_insight",
+      "endpoint": {
+        "method": "GET",
+        "path": "/api/venue-recruit-strategy"
+      },
+      "input": {
+        "venue_id": {
+          "type": "string",
+          "required": true
+        },
+        "top_k": {
+          "type": "int",
+          "default": 20,
+          "required": false
+        }
+      },
+      "output": {
+        "records": "array",
+        "is_sample": "bool",
+        "readiness": "SYNTHETIC"
+      },
+      "auth": {
+        "required_capability": "venue:read"
+      },
+      "side_effects": "none",
+      "idempotency": "natural",
+      "timeout_retry": "3s / 2",
+      "readiness": "SYNTHETIC",
+      "readiness_snapshot": "2026-09-16",
+      "card": "venue_recruit"
+    },
+    "organizer_risk_signal": {
+      "name": "organizer_risk_signal",
+      "skill": "get_strategy_insight",
+      "endpoint": {
+        "method": "GET",
+        "path": "/api/organizer-risk-signal"
+      },
+      "input": {
+        "venue_id": {
+          "type": "string",
+          "required": true
+        },
+        "top_k": {
+          "type": "int",
+          "default": 20,
+          "required": false
+        }
+      },
+      "output": {
+        "records": "array",
+        "is_sample": "bool",
+        "readiness": "SYNTHETIC"
+      },
+      "auth": {
+        "required_capability": "venue:read"
+      },
+      "side_effects": "none",
+      "idempotency": "natural",
+      "timeout_retry": "3s / 2",
+      "readiness": "SYNTHETIC",
+      "readiness_snapshot": "2026-09-16",
+      "card": "organizer_risk"
+    },
+    "organizer_retention": {
+      "name": "organizer_retention",
+      "skill": "get_strategy_insight",
+      "endpoint": {
+        "method": "GET",
+        "path": "/api/organizer-retention"
+      },
+      "input": {
+        "venue_id": {
+          "type": "string",
+          "required": true
+        },
+        "top_k": {
+          "type": "int",
+          "default": 20,
+          "required": false
+        }
+      },
+      "output": {
+        "records": "array",
+        "is_sample": "bool",
+        "readiness": "SYNTHETIC"
+      },
+      "auth": {
+        "required_capability": "venue:read"
+      },
+      "side_effects": "none",
+      "idempotency": "natural",
+      "timeout_retry": "3s / 2",
+      "readiness": "SYNTHETIC",
+      "readiness_snapshot": "2026-09-16",
+      "card": "organizer_retention"
+    },
+    "venue_retention_risk": {
+      "name": "venue_retention_risk",
+      "skill": "get_strategy_insight",
+      "endpoint": {
+        "method": "GET",
+        "path": "/api/venue-retention-risk"
+      },
+      "input": {
+        "venue_id": {
+          "type": "string",
+          "required": true
+        },
+        "top_k": {
+          "type": "int",
+          "default": 20,
+          "required": false
+        }
+      },
+      "output": {
+        "records": "array",
+        "is_sample": "bool",
+        "readiness": "SYNTHETIC"
+      },
+      "auth": {
+        "required_capability": "venue:read"
+      },
+      "side_effects": "none",
+      "idempotency": "natural",
+      "timeout_retry": "3s / 2",
+      "readiness": "SYNTHETIC",
+      "readiness_snapshot": "2026-09-16",
+      "card": "venue_retention"
+    },
+    "exhibition_forecast": {
+      "name": "exhibition_forecast",
+      "skill": "get_forecast",
+      "endpoint": {
+        "method": "GET",
+        "path": "/api/exhibition-forecast"
+      },
+      "input": {
+        "exhibition_id": {
+          "type": "string",
+          "required": true
+        }
+      },
+      "output": {
+        "records": "array",
+        "is_sample": "bool",
+        "readiness": "SYNTHETIC"
+      },
+      "auth": {
+        "required_capability": "exhibition:read"
+      },
+      "side_effects": "none",
+      "idempotency": "natural",
+      "timeout_retry": "3s / 2",
+      "readiness": "SYNTHETIC",
+      "readiness_snapshot": "2026-09-16"
+    },
+    "venue_forecast": {
+      "name": "venue_forecast",
+      "skill": "get_forecast",
+      "endpoint": {
+        "method": "GET",
+        "path": "/api/venue-forecast"
+      },
+      "input": {
+        "venue_id": {
+          "type": "string",
+          "required": true
+        }
+      },
+      "output": {
+        "records": "array",
+        "is_sample": "bool",
+        "readiness": "SYNTHETIC"
+      },
+      "auth": {
+        "required_capability": "venue:read"
+      },
+      "side_effects": "none",
+      "idempotency": "natural",
+      "timeout_retry": "3s / 2",
+      "readiness": "SYNTHETIC",
+      "readiness_snapshot": "2026-09-16"
+    },
+    "timeslot_predictions": {
+      "name": "timeslot_predictions",
+      "skill": "get_forecast",
+      "endpoint": {
+        "method": "GET",
+        "path": "/api/timeslot/predictions"
+      },
+      "input": {
+        "exhibition_id": {
+          "type": "string",
+          "required": true
+        }
+      },
+      "output": {
+        "records": "array",
+        "is_sample": "bool",
+        "readiness": "SYNTHETIC"
+      },
+      "auth": {
+        "required_capability": "audience:read"
+      },
+      "side_effects": "none",
+      "idempotency": "natural",
+      "timeout_retry": "3s / 2",
+      "readiness": "SYNTHETIC",
+      "readiness_snapshot": "2026-09-16"
+    },
+    "timeslot_macro": {
+      "name": "timeslot_macro",
+      "skill": "get_forecast",
+      "endpoint": {
+        "method": "GET",
+        "path": "/api/timeslot/macro"
+      },
+      "input": {},
+      "output": {
+        "records": "array",
+        "is_sample": "bool",
+        "readiness": "SYNTHETIC"
+      },
+      "auth": {
+        "required_capability": "audience:read"
+      },
+      "side_effects": "none",
+      "idempotency": "natural",
+      "timeout_retry": "3s / 2",
+      "readiness": "SYNTHETIC",
+      "readiness_snapshot": "2026-09-16"
+    },
+    "exhibition_heat": {
+      "name": "exhibition_heat",
+      "skill": "get_forecast",
+      "endpoint": {
+        "method": "GET",
+        "path": "/api/exhibition-heat"
+      },
+      "input": {},
+      "output": {
+        "records": "array",
+        "is_sample": "bool",
+        "readiness": "SYNTHETIC"
+      },
+      "auth": {
+        "required_capability": "exhibition:read"
+      },
+      "side_effects": "none",
+      "idempotency": "natural",
+      "timeout_retry": "3s / 2",
+      "readiness": "SYNTHETIC",
+      "readiness_snapshot": "2026-09-16"
+    },
+    "create_lead": {
+      "name": "create_lead",
+      "skill": "create_lead",
+      "endpoint": {
+        "method": "POST",
+        "path": "/api/leads"
+      },
+      "input": {
+        "sponsor_id": {
+          "type": "string",
+          "required": true
+        },
+        "lead_date": {
+          "type": "string",
+          "default": "today",
+          "required": false
+        },
+        "source_readiness": {
+          "type": "string",
+          "enum": [
+            "SYNTHETIC",
+            "REAL_EVENT"
+          ],
+          "required": true,
+          "description": "必填，守 INV-3"
+        },
+        "idempotency_key": {
+          "type": "string",
+          "required": false
+        },
+        "context": {
+          "type": "string",
+          "required": false
+        }
+      },
+      "output": {
+        "lead_id": "string",
+        "status": "string",
+        "created_at": "string",
+        "idempotent": "bool",
+        "created": "bool"
+      },
+      "auth": {
+        "required_capability": "lead:write",
+        "inject_user_scope": true
+      },
+      "side_effects": "write (low risk, auto-release)",
+      "idempotency": "idempotency_key (重放返回首次结果)",
+      "timeout_retry": "3s / 2",
+      "hitl_policy": "auto (W1 自动放行，delete_only 档默认)",
+      "audit": "request_id + actor + idempotency_key + source_readiness",
+      "constraints": [
+        "source_readiness 必填且持久化（INV-3）",
+        "user_id/scope 平台注入（本期 mock）",
+        "落独立 SQLite agent_skill_lab.db（F-2）"
+      ]
+    },
+    "delete_lead": {
+      "name": "delete_lead",
+      "skill": "delete_lead",
+      "endpoint": {
+        "method": "DELETE",
+        "path": "/api/leads/{lead_id}"
+      },
+      "input": {
+        "lead_id": {
+          "type": "string",
+          "required": true,
+          "in_path": true
+        },
+        "delete_reason": {
+          "type": "string",
+          "required": false,
+          "in_query": true
+        }
+      },
+      "output": {
+        "lead_id": "string",
+        "status": "pending_approval",
+        "previous_status": "string"
+      },
+      "auth": {
+        "required_capability": "lead:delete",
+        "inject_user_scope": true
+      },
+      "side_effects": "write (soft delete, HITL gated)",
+      "idempotency": "natural (pending_delete 幂等)",
+      "timeout_retry": "3s / 2",
+      "hitl_policy": "forced (W3 强制 HITL，返回 202 pending_approval)",
+      "audit": "request_id + actor + lead_id + delete_reason",
+      "constraints": [
+        "不物理删除，置 pending_delete（软删除可恢复）",
+        "经 confirm 桥才转 deleted",
+        "INV-5: Approve/Delete 不得由 Agent 自主执行"
+      ]
+    },
+    "confirm_lead": {
+      "name": "confirm_lead",
+      "skill": "delete_lead",
+      "endpoint": {
+        "method": "POST",
+        "path": "/api/leads/{lead_id}/confirm"
+      },
+      "input": {
+        "lead_id": {
+          "type": "string",
+          "required": true,
+          "in_path": true
+        },
+        "delete_reason": {
+          "type": "string",
+          "required": false,
+          "in_body": true
+        }
+      },
+      "output": {
+        "lead_id": "string",
+        "status": "string (deleted|active)"
+      },
+      "auth": {
+        "required_capability": "lead:approve",
+        "inject_user_scope": true
+      },
+      "side_effects": "write (HITL confirm)",
+      "idempotency": "natural",
+      "timeout_retry": "3s / 2",
+      "hitl_policy": "human (人工确认桥)",
+      "semantics": "pending_delete→deleted / pending_approval→active"
+    },
+    "reject_lead": {
+      "name": "reject_lead",
+      "skill": "delete_lead",
+      "endpoint": {
+        "method": "POST",
+        "path": "/api/leads/{lead_id}/reject"
+      },
+      "input": {
+        "lead_id": {
+          "type": "string",
+          "required": true,
+          "in_path": true
+        }
+      },
+      "output": {
+        "lead_id": "string",
+        "status": "string (active|deleted)"
+      },
+      "auth": {
+        "required_capability": "lead:approve",
+        "inject_user_scope": true
+      },
+      "side_effects": "write (HITL reject)",
+      "idempotency": "natural",
+      "timeout_retry": "3s / 2",
+      "hitl_policy": "human (人工驳回桥)",
+      "semantics": "pending_delete→active(恢复) / pending_approval→deleted(驳回创建)"
+    }
+  }
+}

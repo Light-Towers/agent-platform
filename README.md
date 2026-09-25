@@ -16,6 +16,11 @@
 
 Agent Platform 是一个基于 **LangGraph Supervisor 模式** 的统一智能体平台，将联网搜索、本地知识库（RAG）、Text-to-SQL、外部工具调用（MCP）四条能力链路统一编排在一个单进程多节点架构中。平台在设计上针对生产环境常见缺陷模式（懒加载竞态、降级不复位、会话劫持、微服务 SSE 聚合等）逐一设防，并在 Phase 2 引入会话并发协调、持久化准入控制、会话回退、分布式追踪、MCP 协议支持五项运行时增强能力。
 
+本仓库为 **monorepo**，下文主要描述的 `agent_server` 只是平台能力的**默认参考宿主**（另有 `agent_federation` 联邦网关、`exhibition-agent`、`kefu-service`、`nl2sql-service`、`knowledge-service` 共 6 个应用，均基于同一套 `packages/agent-core` 内核与 `packages/agent-runtime` 中间件，完整分层与依赖契约见 `ARCHITECTURE.md`）。平台演进采用两条并行主线：
+
+- **Plan-F（单 Runtime 多 Planner）**：`agent-runtime` 承载运行时中间件，Planner 策略可插拔（`DeterministicPlanner` / `AgenticPlanner`），不统一 Agent 只统一 Runtime。
+- **V3 企业执行平台（代码已接线，验收进行中）**：执行链路升级为 `Admission → Scheduler Queue → Dispatch → Planner → Execute → Forensic/CostGov`，新增 ExecutionScheduler / ExecutionStatus / AwaitableTask / Control Plane / Cost Governance / Forensic / SchedulerReaper。**目前 `scheduler_enabled` 默认 `False`**（渐进式开启，端到端双实例故障转移验收尚未完成，详见路线图与 `AGENTS.md` V3 口径，不得当作已上线能力）。
+
 ### 核心设计原则
 
 | 原则 | 实现 |
@@ -33,11 +38,11 @@ Agent Platform 是一个基于 **LangGraph Supervisor 模式** 的统一智能�
 本仓库的 `agent-core` 并非从零发明，而是受开源包 [Light-Towers/reliable-agent](https://github.com/Light-Towers/reliable-agent)（框架无关的 LLM/Agent 生产可靠性原语）启发/改写后的**本项目落地版**。两者组件一一映射、设计铁律一致：
 
 - **组件映射**：tracing / eval.metrics / guardrails / llm_client / memory / tool_registry 在 `reliable-agent` 与 `agent-core` 中均有对应。
-- **设计铁律同源**："框架无关、core 绝不 import langgraph/宿主应用、重依赖全部 extra + lazy import、仅 stdlib 可 import"原则与 `agent-core` 逐字对应（见 `agent-core/README.md`）。
-- **不是 pip 依赖**：`agent-core/pyproject.toml` 的 `dependencies=[]`，全仓库无任何 `reliable-agent` 引用 —— `agent-core` 是**自研实现等价内核**，而非直接 `pip install` 该包。
+- **设计铁律同源**："框架无关、core 绝不 import langgraph/宿主应用、重依赖全部 extra + lazy import、仅 stdlib 可 import"原则与 `agent-core` 逐字对应（见 `packages/agent-core/README.md`）。
+- **不是 pip 依赖**：`packages/agent-core/pyproject.toml` 的 `dependencies=[]`，全仓库无任何 `reliable-agent` 引用 —— `agent-core` 是**自研实现等价内核**，而非直接 `pip install` 该包。
 - **本地是 superset**：`reliable-agent` 的 memory 仅指对话历史、eval.metrics 仅对给定 ID 列表算指标，**不含 embedding / vector store / 语义记忆**；本地 `agent-core` 额外提供了 `embedder.py` 与 `vector_backend.py`（pgvector 语义记忆），能力更全。
 
-更完整的上游对照与护栏清单见 [`docs/architecture-improvement-plan.md` §0.1](docs/architecture-improvement-plan.md)。
+更完整的上游对照与护栏清单见 [`docs/architecture/architecture-improvement-plan.md` §0.1](docs/architecture/architecture-improvement-plan.md)。
 
 ---
 
@@ -45,36 +50,56 @@ Agent Platform 是一个基于 **LangGraph Supervisor 模式** 的统一智能�
 
 ### Phase 1 — 核心能力
 
-- **Supervisor 编排**（`app/agent/graph.py`）：意图路由 → 子能力执行 → 证据汇总 → 反思重试，LLM 结构化路由失败时回退确定性启发式
-- **联网搜索**（`app/subagents/search.py`）：Tavily API + 熔断器保护，超时/错误自动降级
-- **混合检索 RAG**（`app/subagents/rag.py` + `app/rag/`）：文档导入 → 语义切分 → pgvector 向量检索 + BM25 关键词检索 → RRF 融合排序
-- **Text-to-SQL**（`app/subagents/sql_agent.py` + `app/sql/`）：训练三件套（DDL + 业务文档 + 问题-SQL 范例）→ sqlglot 白名单守卫 → 连接级只读执行
-- **长期记忆**（`app/memory/longterm.py`）：pgvector 语义召回历史对话，跨会话上下文关联
-- **语义缓存**（`app/infra/cache.py`）：余弦距离阈值判定同义命中，命中时跳过编排直接返回
-- **上下文压缩**（`app/agent/compact.py`）：多轮会话 token 超阈值时自动摘要旧消息，参考 Claude Code / Codex / OpenCode
-- **熔断器**（`app/infra/circuit_breaker.py`）：closed → open → half-open 状态机，连续失败达阈值后熔断，冷却窗口到期放行试探
-- **LLM 主备降级**（`app/agent/llm.py`）：主模型超时/错误时自动切换 fallback 模型
+- **Supervisor 编排**（`applications/agent_server/agent/graph.py`）：意图路由 → 子能力执行 → 证据汇总 → 反思重试，LLM 结构化路由失败时回退确定性启发式
+- **联网搜索**（`applications/agent_server/subagents/search.py`）：Tavily API + 熔断器保护，超时/错误自动降级
+- **混合检索 RAG**（`applications/agent_server/subagents/rag.py` + `applications/agent_server/rag/`）：文档导入 → 语义切分 → pgvector 向量检索 + BM25 关键词检索 → RRF 融合排序
+- **Text-to-SQL**（`applications/agent_server/subagents/sql_agent.py` + `applications/agent_server/sql/`）：训练三件套（DDL + 业务文档 + 问题-SQL 范例）→ sqlglot 白名单守卫 → 连接级只读执行
+- **长期记忆**（`applications/agent_server/memory/longterm.py`）：pgvector 语义召回历史对话，跨会话上下文关联
+- **语义缓存**（`packages/agent-runtime/agent_runtime/cache.py`）：余弦距离阈值判定同义命中，命中时跳过编排直接返回
+- **上下文压缩**（`applications/agent_server/agent/compact.py`）：多轮会话 token 超阈值时自动摘要旧消息，参考 Claude Code / Codex / OpenCode
+- **熔断器**（`packages/agent-runtime/agent_runtime/circuit_breaker.py`）：closed → open → half-open 状态机，连续失败达阈值后熔断，冷却窗口到期放行试探
+- **LLM 主备降级**（`applications/agent_server/agent/llm.py`）：主模型超时/错误时自动切换 fallback 模型
 - **SSE 流式响应**：route → evidence → answer → done 全链路流式
-- **认证 + 会话防劫持**（`app/api/auth.py`）：API_KEY 启用时按密钥派生 thread_id，忽略客户端传入值
+- **认证 + 会话防劫持**（`applications/agent_server/api/auth.py`）：API_KEY 启用时按密钥派生 thread_id，忽略客户端传入值
 - **Checkpoint 持久化**：Postgres（生产）/ Memory（开发），会话状态可恢复
-- **评测门禁**（`eval/`）：12 条 golden set，启发式路由准确率基线 100%，CI 阻断回归
+- **评测门禁**（`eval/`）：15 条 golden set，启发式路由准确率基线 100%，CI 阻断回归
 
 ### Phase 2 — 运行时增强
 
-- **会话并发协调**（`app/infra/coordinator.py`）：per-session `asyncio.Lock` 互斥，同 session 串行 / 异 session 并发；支持 coalesce（合并）/ queue（排队）/ reject（拒绝）三策略
-- **Durable Admission**（`app/infra/admission.py`）：PG 持久化准入队列 + 三维滑动窗口限流（per-user / per-session / global）+ 优先级调度 + 崩溃恢复；不存储问题全文（脱敏约束）
-- **会话回退**（`app/infra/revert.py`）：Checkpoint 级原子回退，不删除历史 checkpoint（支持 redo），跨用户禁止，异步审计日志
-- **OTel 分布式追踪**（`app/infra/otel.py`）：OpenTelemetry 接线，W3C traceparent 透传，问题脱敏（仅记录长度 + 哈希），与 Langfuse 共存，exporter 可插拔（otlp/jaeger/console/none）
-- **MCP Client**（`app/infra/mcp_client.py` + `app/subagents/mcp.py`）：多 MCP server 连接管理（stdio + SSE transport），工具白名单校验，per-server 独立熔断器隔离故障域，调用审计
+- **会话并发协调**（`packages/agent-runtime/agent_runtime/coordinator.py`）：per-session `asyncio.Lock` 互斥，同 session 串行 / 异 session 并发；支持 coalesce（合并）/ queue（排队）/ reject（拒绝）三策略
+- **Durable Admission**（`packages/agent-runtime/agent_runtime/admission.py`）：PG 持久化准入队列 + 三维滑动窗口限流（per-user / per-session / global）+ 优先级调度 + 崩溃恢复；不存储问题全文（脱敏约束）
+- **会话回退**（`packages/agent-runtime/agent_runtime/revert.py`）：Checkpoint 级原子回退，不删除历史 checkpoint（支持 redo），跨用户禁止，异步审计日志
+- **OTel 分布式追踪**（`packages/agent-runtime/agent_runtime/otel.py`）：OpenTelemetry 接线，W3C traceparent 透传，问题脱敏（仅记录长度 + 哈希），与 Langfuse 共存，exporter 可插拔（otlp/jaeger/console/none）
+- **MCP Client**（`packages/agent-runtime/agent_runtime/mcp_client.py` + `applications/agent_server/subagents/mcp.py`）：多 MCP server 连接管理（stdio + SSE transport），工具白名单校验，per-server 独立熔断器隔离故障域，调用审计
+- **MCP 工具自动注册**（`packages/agent-runtime/agent_runtime/skills/mcp.py`）：MCP server 工具自动编译为 `SkillKind.REMOTE` Skill 注册到 SkillRegistry，Planner 经统一 `discover()` / `delegate()` 入口调用
+- **沙箱代码执行**（`packages/agent-runtime/agent_runtime/sandbox.py` + `agent_runtime/skills/sandbox.py`）：Docker 容器隔离执行用户代码（`--network=none --read-only --memory=512m --user=nobody`），Docker 不可用时降级 subprocess。注册为 `code_execution` Skill，Planner 启发式路由自动识别代码执行意图
+
+### Plan-F — 单 Runtime 多 Planner
+
+- **运行时中间件层**（`packages/agent-runtime/`）：从 `agent_server/infra/` 迁入的 admission / coordinator / cache / circuit_breaker / revert / mcp_client / otel / tracing / db 等中间件，零依赖具体应用（依赖方向单向：`application → agent-runtime → agent-core`）
+- **Planner 协议 + 组合治理**（`agent_runtime/planner/protocol.py`）：`PlannerRuntime.skill_guard` 提供 max_skill_depth / max_steps / 循环检测（P5-1 语义指纹），仅约束 agentic 组合路径
+- **可插拔 Planner**：`DeterministicPlanner`（`applications/agent_server/planners/deterministic.py`）与 `AgenticPlanner`（`applications/agent_federation/planners/agentic.py`）共享同一 `StreamEvent` 契约与 `ThreadState` checkpoint 状态格式
+- **Skill 体系**（`agent_runtime/skills/`）：Function/Agent/Remote/Workflow 四型 `SkillKind` + MCP/Sandbox 特化注册，`SkillRegistry` 统一 `discover()` / `delegate()` 入口
+
+### V3 — 企业执行平台（代码已接线，验收进行中）
+
+> 本区块能力均已实现并可经配置开启，但 **`scheduler_enabled` 默认 `False`**（见「配置」章节）；端到端双实例物理故障转移验收未完成，具体缺口清单见 [`docs/TODO.md`](docs/TODO.md) 第 2 节，不得当作已上线能力对外声明。
+
+- **ExecutionScheduler**（`packages/agent-runtime/agent_runtime/execution_scheduler.py`）：PG 队列 + `FOR UPDATE SKIP LOCKED` 实现跨实例并发不重不丢；`submit` 实际入队 + `claim_token` fencing（P0-1 并发门控已修）
+- **ExecutionStatus 状态机**（`execution_status.py`）：PENDING / RUNNING / WAITING / WAITING_EXTERNAL / WAITING_HUMAN / PAUSED / CANCEL_REQUESTED / CANCELLED / SUCCEEDED / FAILED 十态与合法转换矩阵，非法转换拒绝
+- **AwaitableTask 挂起 + 回调恢复**（`awaitable_task.py` + `awaitable_task_pg.py` + `applications/agent_server/api/callback.py`）：执行链在外部异步任务处可挂起，外部系统回调 `POST /api/callback/{task_id}` 后从 checkpoint 恢复注入结果继续执行（幂等，重复回调 no-op）
+- **Control Plane HTTP API**（`control_plane.py` + `applications/agent_server/api/control.py`）：`/api/executions/{id}` 提供 inspect/pause/resume/cancel/retry/terminate 六个操作，非法状态转换返 409
+- **Cost Governance**（`cost_governance.py`）：按 `budget_limit_requests/tokens/cost` + `budget_window_seconds` 滑动窗口计量，超限返回 429（`cost_governance_enabled` 默认 `False`）
+- **ForensicContext + SchedulerReaper**（`forensic.py` + lease-based 回收）：执行现场取证快照 + 本地任务租约过期后的孤儿回收
 
 ---
 
 ## 架构
 
 ```text
-                                    REQUEST
-                                        │
-                                        ▼
+                                         REQUEST
+                                            │
+                                            ▼
                     ┌─────────────┐   ┌──────────────┐   ┌────────────────┐
                     │  Gateway    │ → │  Admission   │ → │   Supervisor   │
                     │ Auth/Session│   │  Queue       │   │   Intent Route │
@@ -137,6 +162,26 @@ flowchart LR
     style Phase2 fill:#e8f5e9,stroke:#4caf50
 ```
 
+### V3 执行链路（`scheduler_enabled=True` 时生效）
+
+> 默认 `False`（上方 Phase 2 链路为当前实际运行路径）；下方链路代码已接线，但端到端双实例物理故障转移验收未完成，见「概述」与 [`docs/TODO.md`](docs/TODO.md) 第 2 节。
+
+```mermaid
+flowchart LR
+    A["Admission<br/>限流/配额"] --> B["Scheduler Queue<br/>PG 队列 + FOR UPDATE SKIP LOCKED<br/>跨实例并发不重不丢"]
+    B --> C["Dispatch<br/>claim_token fencing"]
+    C --> D["Planner<br/>Deterministic / Agentic"]
+    D --> E["Execute<br/>ExecutionGraph + Checkpoint"]
+    E --> F["Forensic / CostGov<br/>取证快照 + 预算计量"]
+    E -- "外部异步任务挂起" --> G["AwaitableTask"]
+    G -- "POST /api/callback/{id}" --> E
+    H["Control Plane<br/>inspect/pause/resume/cancel/retry/terminate"] -.-> E
+
+    style B fill:#fff3e0,stroke:#ff9800
+    style G fill:#fff3e0,stroke:#ff9800
+    style H fill:#fff3e0,stroke:#ff9800
+```
+
 ---
 
 ## 快速开始
@@ -144,8 +189,8 @@ flowchart LR
 ### 零依赖冒烟（开发模式）
 
 ```bash
-pip install -e ".[dev]"
-DATABASE_URL= uvicorn app.main:app --port 8000
+uv sync --all-packages --extra dev
+DATABASE_URL= uvicorn agent_server.main:app --port 8000
 ```
 
 无需 PostgreSQL、无需 LLM API Key，直答链路即可跑通。
@@ -160,7 +205,7 @@ docker compose up -d    # pgvector + 服务（127.0.0.1:8000）
 ### 可选依赖
 
 ```bash
-pip install -e ".[otel,mcp,pdf,dev]"
+uv sync --all-packages --extra dev --extra otel --extra mcp --extra pdf
 ```
 
 | Extra | 用途 |
@@ -232,6 +277,15 @@ curl -X POST http://127.0.0.1:8000/session/revert \
 
 将会话状态回退至指定 checkpoint，不删除历史（支持 redo）。
 
+### `GET /history` — 精确回忆（优化 I）
+
+```bash
+curl "http://127.0.0.1:8000/history?session_id=thread-xxx&keyword=GMV&limit=10" \
+  -H "X-API-Key: $API_KEY"
+```
+
+按 session_id 取回历史对话**原文**（与 /query 的语义召回正交，返回字面记录），支持 `keyword` 过滤与 `limit` 条数限制；需 API_KEY 鉴权。
+
 ### `GET /health` — 健康检查
 
 ```bash
@@ -252,6 +306,34 @@ curl http://127.0.0.1:8000/health
   "mcp": false
 }
 ```
+
+> 当前 `/health` **不上报 V3 组件状态**（scheduler / control_plane / cost_governance / forensic），已登记为待办，见 [`docs/TODO.md`](docs/TODO.md)。
+
+### V3 Control Plane API（`scheduler_enabled=True` 时生效）
+
+```bash
+# 查看执行快照
+curl http://127.0.0.1:8000/api/executions/{execution_id}
+
+# 暂停 / 恢复 / 取消 / 重试 / 强制终止（POST，非法状态转换返 409）
+curl -X POST http://127.0.0.1:8000/api/executions/{execution_id}/pause
+curl -X POST http://127.0.0.1:8000/api/executions/{execution_id}/resume
+curl -X POST http://127.0.0.1:8000/api/executions/{execution_id}/cancel
+curl -X POST http://127.0.0.1:8000/api/executions/{execution_id}/retry
+curl -X POST http://127.0.0.1:8000/api/executions/{execution_id}/terminate
+```
+
+`control plane not enabled (scheduler disabled)` 时报 503（`scheduler_enabled=False` 默认情形）。
+
+### V3 Callback API（AwaitableTask 外部回调）
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/callback/{task_id} \
+  -H "Content-Type: application/json" \
+  -d '{"result": {"approved": true}}'
+```
+
+外部异步任务完成后回调，标记 AwaitableTask 为 COMPLETED 并从 checkpoint 恢复注入结果继续执行。幂等：同一 `task_id` 重复回调不会重复 resume（任务已终态则 no-op）。
 
 ---
 
@@ -308,6 +390,34 @@ curl http://127.0.0.1:8000/health
 | `BREAKER_FAILURE_THRESHOLD` | `3` | 熔断器连续失败阈值（触发熔断） |
 | `BREAKER_RECOVERY_SECONDS` | `30` | 熔断器半开恢复等待（秒） |
 
+### Plan-F 配置
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `MAX_SKILL_DEPTH` | `4` | `PlannerRuntime.skill_guard` 嵌套深度上限 |
+| `MAX_STEPS` | `20` | 单次执行步数上限 |
+| `ENABLE_LOOP_FINGERPRINT` | `false` | P5-1 语义循环指纹（skill + 归一化 args 重复拒绝） |
+| `MAX_EXECUTION_SECONDS` | `60` | 单次 execution wall-clock 上限（0/None 不启用） |
+| `RUNTIME_MODE` | `local` | `local`（内存）/ `single_node`（PG 可选）/ `distributed`（PG 必须，fail-fast） |
+| `CONTEXT_BUDGET_TOOL_RESULTS_RATIO` | `0.35` | 上下文预算中 tool_results 层占比 |
+| `TOOL_RESULT_MAX_TOKENS` | `8192` | 单条工具结果超此阈值则外置 + 截断视图 |
+| `KNOWLEDGE_SERVICE_URL` / `NL2SQL_SERVICE_URL` / `KEFU_SERVICE_URL` / `EXHIBITION_SERVICE_URL` | `""` | 远程子服务端点（空 = 不注册对应 Remote Skill） |
+| `CORS_ALLOW_ORIGINS` | `""` | 前端来源白名单（逗号分隔），为空时默认 `http://127.0.0.1:5173` |
+
+### V3 执行平台配置（`applications/agent_server/config.py`）
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `SCHEDULER_ENABLED` | `false` | ExecutionScheduler 开关（opt-in，未端到端验收前不得生产开启，见「概述」/`AGENTS.md` V3 口径） |
+| `SCHEDULER_MAX_CONCURRENT` | `10` | 全局并发上限 |
+| `SCHEDULER_MAX_CONCURRENT_PER_TENANT` | `5` | 每租户并发上限 |
+| `SCHEDULER_QUEUE_CAPACITY` | `1000` | 调度队列容量 |
+| `COST_GOVERNANCE_ENABLED` | `false` | 成本治理开关（opt-in），启用后请求路径加 budget check/record，超限 429 |
+| `BUDGET_LIMIT_REQUESTS` | `0` | 时间窗口内请求数上限（0 = 不限制） |
+| `BUDGET_LIMIT_TOKENS` | `0` | 时间窗口内 token 数上限 |
+| `BUDGET_LIMIT_COST` | `0.0` | 时间窗口内成本上限 |
+| `BUDGET_WINDOW_SECONDS` | `3600` | 预算滑动窗口长度（秒） |
+
 完整变量见 [`.env.example`](.env.example)。
 
 ---
@@ -315,10 +425,10 @@ curl http://127.0.0.1:8000/health
 ## 测试与评测
 
 ```bash
-pytest -q                            # 单元测试（40 用例，无外部依赖）
-python -m eval.run_eval              # 启发式路由准确率基线（12 条 golden）
-python -m eval.run_eval --llm        # 配置 LLM 后评测结构化路由
-python -m eval.run_eval --fail-below 1.0   # CI 门禁用法
+make test                            # 9 session pytest（根 / shared-schemas / agent-runtime / agent-server / 联邦 / kefu / exhibition / knowledge-service / nl2sql-service）
+python eval/run_eval.py              # 启发式路由准确率基线（15 条 golden）
+python eval/run_eval.py --llm        # 配置 LLM 后评测结构化路由
+python eval/run_eval.py --fail-below 0.8   # CI 门禁用法
 ```
 
 CI（`.github/workflows/agent-platform-ci.yml`）在每次推送时执行 pytest + 评测门禁，不调用模型，不需要 LLM API Key。
@@ -327,14 +437,14 @@ CI（`.github/workflows/agent-platform-ci.yml`）在每次推送时执行 pytest
 
 ## 目录结构
 
-> 本仓库为 **monorepo**，根 `app/` 只是其中一套「单进程 Supervisor 平台」。
-> 另有 `deepagents/` 联邦网关编排系统（与 `app/` 并行，二者不构成上下级关系），
+> 本仓库为 **monorepo**（根 + `packages/` + `applications/`），`applications/agent_server/` 只是其中一套「单进程 Supervisor 平台」。
+> 另有 `applications/agent_federation/` 联邦网关编排系统（与 agent_server 并行，二者不构成上下级关系），
 > 以及若干 sibling 业务包与共享内核包。各包均为独立 `pyproject.toml` 工程，
-> 通过 `agent-core` / `shared-schemas` 共享内核与契约，以 `uv` workspace 或 editable 安装互联。
+> 通过 `packages/agent-core` / `packages/shared-schemas` 共享内核与契约，以 `uv` workspace 互联。
 
 ### uv workspace 环境约定（重要）
 
-本仓库是 uv workspace（根 `pyproject.toml` 含 `[tool.uv.workspace]`）。**默认 `uv sync` 只安装根包及其依赖，会卸载其它 member 包**（如 `deepagents`/`kefu-service`/`wenda-data-agent`/`zhanggui-zhiku`/`dialogue-framework`），导致跨包测试/导入失败。
+本仓库是 uv workspace（根 `pyproject.toml` 含 `[tool.uv.workspace]`）。**默认 `uv sync` 只安装根包及其依赖，会卸载其它 member 包**（如 `applications/` 下各应用），导致跨包测试/导入失败。
 
 完整开发环境请用（装全部 workspace 包 + dev 工具）：
 
@@ -345,24 +455,31 @@ uv sync --all-packages --extra dev
 运行单个包的测试（无需手动装依赖）：
 
 ```bash
-uv run --package deepagents-app python -m pytest deepagents/tests/unit/ -q
-uv run python -m pytest tests/ -q          # 根 app 包
+uv run --package agent-federation-app python -m pytest applications/agent_federation/tests/unit/ -q
+uv run python -m pytest tests/ -q          # 根 agent_server 包
 ```
 
-> 详见 `docs/architecture-improvement-plan.md` §6 TB-3（uv workspace 环境脆弱）。
+> 详见 `docs/architecture/architecture-improvement-plan.md` §6 TB-3（uv workspace 环境脆弱）。
 
 ### 单进程平台（本 README 描述对象）
 
 ```
-app/
+applications/agent_server/
 ├── main.py                # 应用工厂 + lifespan 预热（五项 Phase 2 资源初始化）
 ├── config.py              # pydantic-settings 集中配置
 ├── schemas.py             # API Pydantic 契约（复用 shared-schemas，QueryRequest 经 AliasChoices 双写兼容 question/thread_id；HealthResponse 已对齐联邦契约，无需改动）
 ├── api/
 │   ├── auth.py            # 认证 + 会话防劫持
-│   └── routes.py          # /query /import /sql/train /session/revert /health
+│   ├── routes.py          # 聚合入口（挂载下列 router）
+│   ├── query_router.py    # /query（SSE 流式）
+│   ├── import_router.py   # /import 知识库导入
+│   ├── sql_router.py      # /sql/train
+│   ├── session_router.py  # /session/revert /history
+│   ├── health_router.py   # /health
+│   ├── callback.py        # POST /api/callback/{task_id}（V3 AwaitableTask 外部回调）
+│   └── control.py         # /api/executions/{id}（V3 Control Plane：inspect/pause/resume/cancel/retry/terminate）
 ├── agent/
-│   ├── graph.py           # Supervisor 图（route → capability → synthesize）
+│   ├── graph.py           # Supervisor 图（route → capability → synthesize；Phase 3 起包装为 general_qa Workflow Skill）
 │   ├── router.py          # LLM 结构化路由 + 启发式兜底
 │   ├── state.py           # AgentState TypedDict
 │   ├── llm.py             # LLM 主备降级
@@ -381,55 +498,63 @@ app/
 │   ├── pipeline.py        # Text-to-SQL 管线
 │   └── schema_store.py    # 训练三件套存储
 ├── memory/
-│   └── longterm.py        # pgvector 长期记忆
-└── infra/
-    ├── db.py              # 连接池 + schema 初始化
-    ├── cache.py           # 语义缓存
-    ├── circuit_breaker.py # 熔断器
-    ├── tracing.py         # Langfuse 接线
-    ├── coordinator.py     # 会话并发协调（Phase 2）
-    ├── admission.py       # 持久化准入 + 限流（Phase 2）
-    ├── revert.py          # 会话回退（Phase 2）
-    ├── otel.py            # OTel 追踪（Phase 2）
-    └── mcp_client.py      # MCP client（Phase 2）
+│   ├── longterm.py        # pgvector 长期记忆
+│   └── thread_persist.py  # 对话历史写回 checkpointer（Planner 协议中立）
+├── planners/
+│   ├── deterministic.py   # DeterministicPlanner（Plan-F Phase 2）
+│   └── __init__.py        # PLANNER env 切换实现
+├── capabilities.py        # SkillRegistry 装配（search/rag/sql/mcp + general_qa Workflow Skill）
+└── infra/                 # 退役占位（运行时模块已迁入 packages/agent-runtime）
 ```
 
 ### 联邦网关编排系统（并行 sibling）
 
 ```
-deepagents/                # 联邦网关 + 3 子服务编排中枢（详见 deepagents/README.md）
-                          #   - api.server：网关入口（guardrail / 意图分类 / 改写 / 语义缓存 / Planner）
-                          #   - agent/：3 子 Agent（text_to_sql / rag_query / customer_service）
-                          #   - AGENT_MODE=local|remote 切换本地子 Agent 或远程 AsyncSubAgent
+applications/agent_federation/  # 联邦网关 + 3 子服务编排中枢（详见 applications/agent_federation/README.md）
+                              #   - api.server：网关入口（guardrail / 意图分类 / 改写 / 语义缓存 / Planner）
+                              #   - agent/：3 子 Agent（text_to_sql / rag_query / customer_service）
+                              #   - planners/agentic.py：AgenticPlanner（统一 Planner 协议适配）
+                              #   - AGENT_MODE=local|remote 切换本地子 Agent 或远程 AsyncSubAgent
 ```
 
 ### 共享内核与契约
 
 ```
-agent-core/                # 零依赖运行时内核：tracing / guardrails / sql 守卫 / llm / memory / tool registry
-shared-schemas/            # deepagents 联邦 4 服务共享的 Pydantic 契约（QueryResponse 等）
+packages/agent-core/         # 零依赖运行时内核：tracing / guardrails / sql 守卫 / llm / memory（MemoryStore 统一门面）
+                             #   / events（EventBus 多 sink 扇出） / config（KernelConfig） / intent / resilience
+packages/agent-runtime/      # 运行时中间件（admission/coordinator/cache/circuit_breaker/revert/mcp/otel/tracing/db）
+                             #   + planner/（Planner 协议 + PlannerRuntime.skill_guard 组合治理）
+                             #   + skills/（SkillRegistry + Function/Agent/Remote/Workflow 四执行器）
+                             #   + V3 执行平台（execution_scheduler / execution_status / awaitable_task /
+                             #     control_plane / cost_governance / forensic / human_task / effect_contract /
+                             #     execution_recovery / state_migration / payload_externalization，均未完全接线，
+                             #     详见 docs/TODO.md 第 3 节）
+                             #   + memory 体系（episodic/semantic/procedural/working/decay/recall）+ sandbox（双后端代码执行）
+packages/shared-schemas/     # agent_federation 联邦 4 服务共享的 Pydantic 契约（QueryResponse / ThreadState 等）
 ```
 
 ### 业务 / 适配 sibling 包
 
 ```
-kefu-service/              # kefu 迁移版（deepagents + LangGraph），已实现且 CI 通过，已接入网关
+applications/kefu-service/   # kefu 迁移版（deepagents + LangGraph），已实现且 CI 通过，已接入网关
                           #   —— 提供 Agent Protocol 兼容 /invoke（返回 QueryResponse）；
                           #      网关 KEFU_USE_ADAPTER=false 直连本服务（默认）
                           #   —— 原 kefu-adapter（legacy 适配层）已于 2026-08 移除（无调用方，
                           #      默认直连 kefu-service；外部 legacy 退役为运维动作）
-wenda-data-agent/          # Text-to-SQL 数据分析垂直场景（生产化改造自 courses/.../data-agent）
-                          #   —— 原 wenda-adapter（SSE→JSON 适配层）已于 2026-08 退役，
-                          #      网关直连本服务 /api/query（wenda-data-agent 默认 :8000）
-zhanggui-zhiku/            # 掌柜智库：RAG 知识库导入 + 多路检索问答一体化服务（:8900）
-dialogue-framework/        # LLM 对话系统框架基础设施（生产化改造自 courses/.../legacy）
+applications/nl2sql-service/  # Text-to-SQL 数据分析通用服务（元知识参数化，已直连联邦契约）
+                           #   —— 原 wenda-adapter（SSE→JSON 适配层）已于 2026-08 退役，
+                           #      网关直连本服务 /api/query（nl2sql-service 默认 :8000）
+applications/knowledge-service/ # 通用知识库服务：RAG 导入 + 多路检索问答（:8900，Metadata 参数化 + 生命周期 + 多租户 ACL）
+applications/exhibition-agent/ # 会展行业 AI Agent（skill_loader + warehouse REST 集成）
+                           #   —— uvicorn exhibition_agent.skill_loader.app:app；含 foundation/skill_router.py
+                           #      （Skill→Tool 统一路由，已实现未接线，见 docs/TODO.md 第 3 节）
 ```
 
 ### 测试与评测
 
 ```
-eval/                      # golden set + 评测脚本（针对 app/ 平台）
-tests/                     # 单元测试（40 用例，针对 app/ 平台）
+eval/                      # golden set + 评测脚本（针对 agent_server 平台；run_eval.py + run_planner_eval.py 双基线）
+tests/                     # 单元测试（针对 agent_server 平台；含 planner/skill/governance 契约测试）
 ```
 
 ---
@@ -454,21 +579,23 @@ tests/                     # 单元测试（40 用例，针对 app/ 平台）
 
 > 下列项为架构决策 / 迁移工程，需在拍板后实施，**非文档层面的简单修复**。
 
-- **U-1 · QueryRequest 入站字段名不统一（待拍板）**：`app/schemas.py:41-54` 经 `AliasChoices("query","question")` / `AliasChoices("session_id","thread_id")` 双写兼容。内部 state 与 DB 列名均为 `question`（`app/agent/graph.py`、`app/sql/schema_store.py`）。移除兼容层前须确认全部入站/出站边界已统一。*注：旧评审称 `HealthResponse` 字段集完全不同属误判——`HealthResponse` 已 `class HealthResponse(BaseHealthResponse)` 对齐联邦契约（`shared-schemas/health.py:25-40`），无需处理。*
+- **U-1 · QueryRequest 入站字段名不统一（待拍板）**：`applications/agent_server/schemas.py:41-54` 经 `AliasChoices("query","question")` / `AliasChoices("session_id","thread_id")` 双写兼容。内部 state 与 DB 列名均为 `question`（`applications/agent_server/agent/graph.py`、`applications/agent_server/sql/schema_store.py`）。移除兼容层前须确认全部入站/出站边界已统一。*注：旧评审称 `HealthResponse` 字段集完全不同属误判——`HealthResponse` 已 `class HealthResponse(BaseHealthResponse)` 对齐联邦契约（`packages/shared-schemas/shared_schemas/health.py:25-40`），无需处理。*
 - **U-2 · kefu 迁移（已完成）**：
   - ✅ `kefu-service` 已升级为 Agent Protocol 兼容 server：新增 `POST /invoke`（接受 `QueryRequest`，返回 `QueryResponse`，`kefu-service/main.py` + 依赖 `shared-schemas`）；旧 `/api/messages` 保留为 legacy 兼容入口。
-  - ✅ 网关 `deepagents/agent/config.py` 新增 `KEFU_SERVICE_URL` + `KEFU_USE_ADAPTER` 开关（默认 `false`，直连 `kefu-service:8003`）；`async_subagents.py` 增加 httpx 远程回退（外部 `deepagents` 包未安装时直连 `/invoke`）。
-  - ✅ `kefu-adapter` 包已于 2026-08 移除（无调用方，默认直连 `kefu-service` 生效）。`deepagents/eval/run-all.py` 的 kefu 项目已改默认指向 `KEFU_SERVICE_URL`（`KEFU_ADAPTER_URL` 仍可覆盖）。*注：原评审称「非简单改 URL 可接入」属实，但根因（缺 Agent Protocol + QueryResponse）已在本轮修复。*
-- **TB-1 / TB-2 · dialogue-framework 与内核协议对齐（已完成）**：
-  - ✅ **TB-1**：`dialogue_framework/shared/llm/core_adapter.py` 新增 `LLMCoreClient`，把 agent_core `BaseLLMProvider`（工厂协议）桥接为 DF `BaseChatClient`（运行时协议）；两协议互补不合并，DF 不删除。
-  - ✅ **TB-2**：`dialogue_framework/core/tracker_memory.py` 新增 `TrackerConversationMemory`，实现 agent_core `ConversationMemory` 协议，把消息落进 `Tracker.events`；`Tracker.to_conversation_memory()` 桥接挂载。DF 自有数据结构未改动。
-  - 验证：`dialogue-framework/tests/test_tb_bridge.py`（3 passed），`ruff check .` 全绿。详见 `CHANGELOG.md` 技术债 TB 闭环小节。
+  - ✅ 网关 `applications/agent_federation/agent/config.py` 新增 `KEFU_SERVICE_URL` + `KEFU_USE_ADAPTER` 开关（默认 `false`，直连 `kefu-service:8003`）；`async_subagents.py` 增加 httpx 远程回退（外部 `deepagents` 包未安装时直连 `/invoke`）。
+  - ✅ `kefu-adapter` 包已于 2026-08 移除（无调用方，默认直连 `kefu-service` 生效）。`applications/agent_federation/evaluation/run-all.py` 的 kefu 项目已改默认指向 `KEFU_SERVICE_URL`（`KEFU_ADAPTER_URL` 仍可覆盖）。*注：原评审称「非简单改 URL 可接入」属实，但根因（缺 Agent Protocol + QueryResponse）已在本轮修复。*
+- **TB-1 / TB-2 · dialogue-framework 与内核协议对齐（已完成，后随 DF 移除而归档）**：dialogue-framework 已于 2026-09-23 作为孤儿框架移除（能力已被 agent_server 吸收），TB-1/TB-2 桥接代码随之删除。历史记录见 `CHANGELOG.md`。
 
 ## 路线图
 
 - [x] **Phase 1**：Supervisor + Search + RAG + Text-to-SQL + 记忆 + 缓存 + 熔断 + 评测门禁
 - [x] **Phase 2**：会话并发协调 + Durable Admission + 会话回退 + OTel 追踪 + MCP Client
-- [ ] **Phase 3**：LightRAG 式图谱增强检索、MySQL 业务库支持、前端 UI、多租户
+- [x] **Plan-F**：单 Runtime 多 Planner 架构收口（`agent-runtime` 中间件层 + 可插拔 Planner，详见 `docs/plans/plan-f-single-runtime-multi-planner.md`）
+- [x] **V3 Phase 2-4 + 3.4**：ExecutionScheduler（PG 队列）/ AwaitableTask（挂起+回调恢复）/ Control Plane HTTP API / Cost Governance / Forensic —— 代码已接线，`scheduler_enabled` 默认 `False` 渐进开启
+- [ ] **V3 验收未达**：端到端双实例物理故障转移尚未验证；Fencing / Effect Contract / Scheduler priority+fairness+backpressure 等 10 项缺口未闭合（见下）
+- [ ] **Phase 3 产品化补全（未开始）**：前端界面、检索/存储增强、会展 Agent 业务功能等
+
+> **本节仅为阶段性摘要。** 完整待办清单（前端 6 应用现状盘点、V3 验收缺口 1~10、未接线半成品、会展骨架 TODO、技术债 Low 跳过项、待评估架构决策、检索/存储增强、外部条件依赖项）已拆分至独立文档：[**`docs/TODO.md`**](docs/TODO.md)。
 
 ---
 

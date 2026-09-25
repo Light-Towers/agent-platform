@@ -1,0 +1,63 @@
+{
+  "version": "F06-mvp-1.0",
+  "date": "2026-09-16",
+  "source_spec": "docs/superpowers/specs/2026-09-08-F06-production-readiness-spec.md",
+  "gate_state_model": "每门 ∈ {NOT_READY, READY, PASS}",
+  "aggregation": "6 门全 PASS → APPROVED；否则 NOT_APPROVED + 未过门清单",
+  "gates": {
+    "identity": {
+      "gate_id": "identity",
+      "name": "Identity Ready",
+      "dependency": "F01",
+      "status": "NOT_READY",
+      "implemented": false,
+      "description": "ExecutionContext 可用且被强制校验；越权召回 = 0",
+      "evidence_source": "F01 + Golden Set"
+    },
+    "knowledge": {
+      "gate_id": "knowledge",
+      "name": "Knowledge Ready",
+      "dependency": "F03",
+      "status": "NOT_READY",
+      "implemented": false,
+      "description": "真实语料已入库为 PUBLISHED 且 Metadata 齐备",
+      "evidence_source": "F03"
+    },
+    "data": {
+      "gate_id": "data",
+      "name": "Data Ready",
+      "dependency": "F04",
+      "status": "NOT_READY",
+      "implemented": true,
+      "description": "数据源为 READY（非 SYNTHETIC/NOT_CONNECTED）、指标为 VERIFIED",
+      "evidence_source": "F04 Metric Registry + ads_* 真库"
+    },
+    "evaluation": {
+      "gate_id": "evaluation",
+      "name": "Evaluation Pass",
+      "dependency": "F05",
+      "status": "NOT_READY",
+      "implemented": false,
+      "description": "四类测试通过，统计指标有基线",
+      "evidence_source": "F05"
+    },
+    "security": {
+      "gate_id": "security",
+      "name": "Security Pass",
+      "dependency": "F02",
+      "status": "NOT_READY",
+      "implemented": false,
+      "description": "数据分类与出域策略已执行，PII 脱敏，审计留痕",
+      "evidence_source": "F02"
+    },
+    "observability": {
+      "gate_id": "observability",
+      "name": "Observability Pass",
+      "dependency": "§20",
+      "status": "NOT_READY",
+      "implemented": false,
+      "description": "retrieval trace 字段完整（§20.1），成本可观测",
+      "evidence_source": "§20"
+    }
+  }
+}

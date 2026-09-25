@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>exhibition-agent 控制台</title>
+<style>
+  :root {
+    --bg: #0d1117; --panel: #161b22; --border: #30363d; --text: #c9d1d9;
+    --muted: #8b949e; --accent: #58a6ff; --green: #3fb950; --yellow: #d29922;
+    --red: #f85149; --blue: #58a6ff; --code-bg: #1c2128;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, "Segoe UI", sans-serif; background: var(--bg); color: var(--text); display: flex; height: 100vh; }
+  /* 左栏 */
+  .sidebar { width: 380px; min-width: 380px; background: var(--panel); border-right: 1px solid var(--border); padding: 20px; overflow-y: auto; }
+  .sidebar h1 { font-size: 18px; margin-bottom: 4px; }
+  .sidebar .subtitle { font-size: 12px; color: var(--muted); margin-bottom: 20px; }
+  .section { margin-bottom: 18px; }
+  .section label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+  .section input, .section select, .section textarea {
+    width: 100%; background: var(--code-bg); border: 1px solid var(--border); border-radius: 6px;
+    color: var(--text); padding: 8px 10px; font-size: 13px; font-family: "Cascadia Code", monospace;
+  }
+  .section textarea { resize: vertical; min-height: 60px; }
+  .section input:focus, .section select:focus, .section textarea:focus { outline: none; border-color: var(--accent); }
+  .row { display: flex; gap: 10px; }
+  .row .section { flex: 1; }
+  button.send {
+    width: 100%; background: var(--accent); color: #fff; border: none; border-radius: 6px;
+    padding: 10px; font-size: 14px; font-weight: 600; cursor: pointer; margin-top: 4px;
+  }
+  button.send:hover { background: #4493f8; }
+  button.send:disabled { background: var(--border); cursor: not-allowed; }
+  /* 右栏 */
+  .main { flex: 1; padding: 24px; overflow-y: auto; }
+  .main h2 { font-size: 16px; margin-bottom: 16px; }
+  .badge { display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: 12px; font-weight: 600; margin-right: 8px; }
+  .badge.READY { background: rgba(63,185,80,.2); color: var(--green); }
+  .badge.PARTIAL { background: rgba(210,153,34,.2); color: var(--yellow); }
+  .badge.SYNTHETIC { background: rgba(88,166,255,.2); color: var(--blue); }
+  .badge.NOT_CONNECTED { background: rgba(248,81,73,.2); color: var(--red); }
+  .badge.classification { background: var(--code-bg); color: var(--muted); border: 1px solid var(--border); }
+  .answer-box { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 16px; white-space: pre-wrap; font-size: 14px; line-height: 1.6; }
+  .meta-row { margin-bottom: 12px; }
+  .list-section { margin-bottom: 16px; }
+  .list-section h3 { font-size: 13px; color: var(--muted); margin-bottom: 8px; }
+  .list-section .item { background: var(--code-bg); border: 1px solid var(--border); border-radius: 6px; padding: 8px 12px; margin-bottom: 6px; font-size: 12px; font-family: monospace; }
+  .warning { color: var(--yellow); }
+  .error { color: var(--red); }
+  .sql-empty { color: var(--green); font-size: 12px; }
+  .sql-nonempty { color: var(--red); font-size: 12px; font-weight: 600; }
+  details { margin-bottom: 16px; }
+  details summary { cursor: pointer; font-size: 13px; color: var(--muted); }
+  details pre { background: var(--code-bg); border: 1px solid var(--border); border-radius: 6px; padding: 12px; margin-top: 8px; font-size: 12px; overflow-x: auto; }
+  .empty-state { color: var(--muted); text-align: center; margin-top: 60px; }
+  .loading { opacity: .5; pointer-events: none; }
+</style>
+</head>
+<body>
+<div class="sidebar">
+  <h1>exhibition-agent</h1>
+  <div class="subtitle">会展 AI Agent 控制台 · 契约 v1.1</div>
+
+  <div class="section">
+    <label>用户 ID</label>
+    <input id="user_id" value="u-001">
+  </div>
+  <div class="section">
+    <label>租户 ID</label>
+    <input id="tenant_id" value="t-sponsor-001">
+  </div>
+  <div class="row">
+    <div class="section">
+      <label>租户类型</label>
+      <select id="tenant_type">
+        <option>SPONSOR</option><option>VENUE</option><option>CONTRACTOR</option><option>EXHIBITOR</option>
+      </select>
+    </div>
+    <div class="section">
+      <label>身份来源</label>
+      <select id="auth_source">
+        <option>PLATFORM_LOCAL</option><option>IAM</option><option>SSO</option>
+      </select>
+    </div>
+  </div>
+  <div class="section">
+    <label>Scopes（逗号分隔，留空 = 越权用例）</label>
+    <input id="scopes" value="exhibition:ex-001,venue:vn-001">
+  </div>
+  <div class="section">
+    <label>Request ID（留空 = 自动生成）</label>
+    <input id="request_id" placeholder="req-自动生成">
+  </div>
+  <div class="section">
+    <label>Mock 场景（X-Mock-Scenario）</label>
+    <select id="mock_scenario">
+      <option value="">（不传 / 真实 warehouse）</option>
+      <option value="normal_200">normal_200 · 正常成功</option>
+      <option value="missing_context">missing_context · 缺头 401</option>
+      <option value="scope_denied">scope_denied · 越权 403</option>
+      <option value="knowledge_not_published">knowledge_not_published · 未发布 404</option>
+      <option value="metric_not_verified">metric_not_verified · 未验证 422</option>
+      <option value="metric_blocked">metric_blocked · BLOCKED 422</option>
+      <option value="data_not_connected">data_not_connected · 未接入 422</option>
+      <option value="knowledge_missing_citations">knowledge_missing_citations · 缺引用</option>
+      <option value="missing_readiness">missing_readiness · 缺就绪度</option>
+    </select>
+  </div>
+  <div class="section">
+    <label>查询</label>
+    <textarea id="query">查询 SIAL 广州 2026 场馆档期</textarea>
+  </div>
+  <button class="send" id="sendBtn" onclick="sendQuery()">发送查询</button>
+</div>
+
+<div class="main" id="main">
+  <div class="empty-state">在左侧构造上下文并输入查询，点击「发送查询」</div>
+</div>
+
+<script>
+// HTML 转义：所有来自服务端/上游的动态文本（answer / warnings / request_id / citations 等）
+// 注入 innerHTML 前必须过本函数，防上游文本携带 <img onerror=...> 等造成 DOM XSS（审核 N1）。
+function esc(value) {
+  return String(value == null ? "" : value)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+
+function genRequestId() {
+  return "req-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+}
+
+async function sendQuery() {
+  const btn = document.getElementById("sendBtn");
+  btn.disabled = true; btn.textContent = "发送中…";
+  const main = document.getElementById("main");
+  main.innerHTML = '<div class="empty-state">加载中…</div>';
+
+  const requestId = document.getElementById("request_id").value.trim() || genRequestId();
+  const scopes = document.getElementById("scopes").value.trim()
+    ? document.getElementById("scopes").value.split(",").map(s => s.trim()).filter(Boolean)
+    : [];
+
+  const ctxPayload = {
+    user_id: document.getElementById("user_id").value,
+    tenant_id: document.getElementById("tenant_id").value,
+    tenant_type: document.getElementById("tenant_type").value,
+    roles: [],
+    scopes: scopes,
+    auth_source: document.getElementById("auth_source").value,
+    request_id: requestId,
+  };
+
+  const mockScenario = document.getElementById("mock_scenario").value;
+  const query = document.getElementById("query").value.trim();
+
+  try {
+    const encResp = await fetch("/api/encode-context", {
+      method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(ctxPayload),
+    });
+    if (!encResp.ok) { const e = await encResp.json(); throw new Error(JSON.stringify(e)); }
+    const enc = await encResp.json();
+
+    const qResp = await fetch("/api/query", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Execution-Context": enc.header,
+        "X-Context-Mode": enc.mode,
+        ...(mockScenario ? {"X-Mock-Scenario": mockScenario} : {}),
+      },
+      body: JSON.stringify({query: query, params: {exhibition_id: "ex-001"}}),
+    });
+    const data = await qResp.json();
+    renderResult(data, qResp.status);
+  } catch (err) {
+    main.innerHTML = '<div class="answer-box error">请求失败：' + esc(err && err.message ? err.message : err) + "</div>";
+  } finally {
+    btn.disabled = false; btn.textContent = "发送查询";
+  }
+}
+
+function renderResult(data, status) {
+  const main = document.getElementById("main");
+  const readiness = data.readiness || "UNKNOWN";
+  const classification = data.classification || "UNKNOWN";
+  const sqlStmts = data.sql_statements || [];
+  const citations = data.citations || [];
+  const sources = data.sources || [];
+  const warnings = data.warnings || [];
+
+  let html = "<h2>查询结果" + (status !== 200 ? ' <span class="error">(HTTP ' + esc(status) + ")</span>" : "") + "</h2>";
+
+  html += '<div class="meta-row"><span class="badge ' + esc(readiness) + '">' + esc(readiness) + "</span>";
+  html += '<span class="badge classification">' + esc(classification) + "</span></div>";
+
+  html += '<div class="answer-box">' + esc(data.answer || "（无回答）") + "</div>";
+
+  // INV-10 关键展示
+  if (sqlStmts.length === 0) {
+    html += '<div class="sql-empty">✓ 全程未生成 SQL（INV-10 合规）</div>';
+  } else {
+    html += '<div class="sql-nonempty">✗ 检测到 SQL 生成（INV-10 违规）：' + sqlStmts.length + " 条</div>";
+  }
+
+  if (data.request_id) {
+    html += '<div class="list-section"><h3>Request ID</h3><div class="item">' + esc(data.request_id) + "</div></div>";
+  }
+
+  if (citations.length) {
+    html += '<div class="list-section"><h3>Citations（' + citations.length + "）</h3>";
+    citations.forEach(c => { html += '<div class="item">' + esc(JSON.stringify(c)) + "</div>"; });
+    html += "</div>";
+  }
+
+  if (sources.length) {
+    html += '<div class="list-section"><h3>Sources（' + sources.length + "）</h3>";
+    sources.forEach(s => { html += '<div class="item">' + esc(JSON.stringify(s)) + "</div>"; });
+    html += "</div>";
+  }
+
+  if (warnings.length) {
+    html += '<div class="list-section"><h3>Warnings</h3>';
+    warnings.forEach(w => { html += '<div class="item warning">' + esc(w) + "</div>"; });
+    html += "</div>";
+  }
+
+  html += '<details><summary>原始 JSON</summary><pre>' + esc(JSON.stringify(data, null, 2)) + "</pre></details>";
+
+  main.innerHTML = html;
+}
+</script>
+</body>
+</html>
