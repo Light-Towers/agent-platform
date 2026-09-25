@@ -37,6 +37,8 @@ class CapabilityReport:
     - ``backend``：后端标识（pg-typed / milvus / pgvector / ...）；
     - ``embedder_source``：embedding 来源描述（injected / backend-internal / none）；
     - ``supports_consolidate`` / ``supports_forget``：生命周期动词支持性；
+    - ``supports_tenant_isolation``：``tenant_id`` 是否真正参与数据隔离过滤
+      （False = 仅为协议兼容位被忽略，调用方不可误以为已获得租户隔离）；
     - ``reason``：enabled=False 时的原因（缺依赖 / 未配置 / 初始化失败）。
     """
 
@@ -45,6 +47,7 @@ class CapabilityReport:
     embedder_source: str = "none"
     supports_consolidate: bool = False
     supports_forget: bool = False
+    supports_tenant_isolation: bool = False
     reason: str = ""
 
     def as_dict(self) -> dict[str, Any]:
@@ -54,6 +57,7 @@ class CapabilityReport:
             "embedder_source": self.embedder_source,
             "supports_consolidate": self.supports_consolidate,
             "supports_forget": self.supports_forget,
+            "supports_tenant_isolation": self.supports_tenant_isolation,
             "reason": self.reason,
         }
 
@@ -229,6 +233,7 @@ class PgMemoryStore:
             embedder_source="injected",
             supports_consolidate=True,
             supports_forget=True,
+            supports_tenant_isolation=True,  # typed SQL 按 tenant_id 精确过滤
         )
 
 
@@ -290,6 +295,7 @@ class VectorMemoryStore:
             embedder_source="backend-internal",
             supports_consolidate=False,
             supports_forget=False,
+            supports_tenant_isolation=False,  # 后端无 tenant 列，tenant_id 被忽略
         )
 
 
