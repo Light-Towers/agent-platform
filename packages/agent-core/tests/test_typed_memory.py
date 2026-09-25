@@ -22,7 +22,6 @@ from agent_core.memory.typed import (
     MemoryType,
     TypedMemory,
     _normalize_weights,
-    _read_tenant_scope,
     _score_memory,
     _time_decay,
     _vector_search_memories,
@@ -169,16 +168,14 @@ async def test_recall_typed_requires_embedding():
         await recall_typed(_FakePool(), "u1", "q", k=3, embedding=None)
 
 
-# --- v5 过渡期租户读作用域（Warning#8）------------------------------
+# --- v5 租户安全语义（P0 审计修复，2026-09-25）----------------------
 
-def test_read_tenant_scope_includes_legacy_default_bucket():
-    # 真实租户：读作用域额外包含 legacy 'default' 桶，保证升级后历史记忆可读
-    assert _read_tenant_scope("tenant-a") == ["tenant-a", "default"]
-    # default 租户：不重复
-    assert _read_tenant_scope("default") == ["default"]
+async def test_vector_search_memories_exact_tenant_scoped():
+    """召回读谓词必须精确 tenant_id = %s，禁止 legacy default 过渡读。
 
-
-async def test_vector_search_memories_uses_tenant_scope_for_reads():
+    过渡读（tenantA → tenantA + default）会让 tenantA/tenantB 共享 default
+    桶记忆，形成跨租户泄漏——安全边界宁可历史不可见，也不跨租户可见。
+    """
     captured = {}
 
     class _CaptureCur:
@@ -202,9 +199,10 @@ async def test_vector_search_memories_uses_tenant_scope_for_reads():
             return _CaptureConn()
 
     await _vector_search_memories(_CapturePool(), "tenant-a", "u1", [0.0] * 8, k=6)
-    # 读谓词使用 ANY(作域)，首参为含 legacy default 的租户列表
-    assert "tenant_id = ANY(%s)" in captured["sql"]
-    assert captured["params"][0] == ["tenant-a", "default"]
+    # 读谓词与删除路径（consolidate/forget）同一严格语义：精确匹配
+    assert "tenant_id = %s" in captured["sql"]
+    assert "ANY(" not in captured["sql"]
+    assert captured["params"][0] == "tenant-a"
 
 
 async def test_consolidate_and_forget_stay_exact_tenant_scoped(monkeypatch):

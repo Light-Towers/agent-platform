@@ -185,6 +185,7 @@ def test_pg_store_probe_full_capabilities():
     assert report.embedder_source == "injected"
     assert report.supports_consolidate is True
     assert report.supports_forget is True
+    assert report.supports_tenant_isolation is True  # typed SQL 按 tenant_id 精确过滤
     assert report.as_dict()["backend"] == "pg-typed"
 
 
@@ -241,6 +242,7 @@ def test_vector_store_probe():
     assert report.backend == "_FakeBackend"
     assert report.embedder_source == "backend-internal"
     assert report.supports_consolidate is False
+    assert report.supports_tenant_isolation is False  # 后端无 tenant 列，tenant_id 被忽略
     assert VectorMemoryStore(None).probe().enabled is False
 
 

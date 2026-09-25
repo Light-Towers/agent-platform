@@ -111,22 +111,11 @@ def _clamp_importance(importance: float) -> float:
     return max(0.0, min(1.0, float(importance)))
 
 
-# v5 租户隔离过渡期常量：历史行在 v5 前 tenant_id 为 ''，v5 迁移一次性归入 'default'。
-# 过渡期召回读谓词需同时命中请求租户与 legacy 'default' 桶，否则带真实租户的请求
-# 升级后读不到任何多租户上线前的历史记忆（Warning#8）。收敛后可移除本 helper。
-_LEGACY_TENANT_BUCKET = "default"
-
-
-def _read_tenant_scope(tenant_id: str) -> list[str]:
-    """过渡期召回读作用域：请求租户 + legacy ``default`` 桶（去重）。
-
-    仅用于**读**（recall）；``consolidate``/``forget`` 等**删除**路径仍按精确
-    ``tenant_id`` 匹配，不跨桶淘汰，避免过渡期误删共享 legacy 记忆。
-    ``user_id`` 隔离维度不受影响，故放宽租户不削弱同用户内的隔离。
-    """
-    if tenant_id == _LEGACY_TENANT_BUCKET:
-        return [tenant_id]
-    return [tenant_id, _LEGACY_TENANT_BUCKET]
+# v5 租户隔离安全语义（P0 审计修复，2026-09-25）：
+# 历史 legacy 行（v5 前 tenant_id=''，迁移后归入 'default'）只归属 'default'
+# 租户可见。**不做** "真实租户 + default" 过渡读——那会让 tenantA/tenantB 共享
+# default 桶记忆，形成跨租户泄漏。原则：归属不明的 legacy 记忆宁可暂时不可见，
+# 也不跨租户可见；读/写/删路径统一精确 tenant_id 匹配。
 
 
 def _time_decay(created_at: datetime.datetime | None, now: datetime.datetime) -> float:
@@ -322,14 +311,16 @@ async def _vector_search_memories(
 
     使用 pgvector 余弦距离 ``embedding <=> %s``；标识符 ``memories`` 写死（内核内部
     单一表名），无注入风险。宿主池须已 ``register_vector`` 并支持 ``<=>>`` 算子。
+    租户谓词为精确 ``tenant_id = %s``（与 consolidate/forget 删除路径同一严格语义），
+    不做 legacy ``default`` 桶过渡读（跨租户泄漏风险，见文件头安全语义注释）。
     """
     async with pool.connection() as conn:
         cur = await conn.execute(
             "SELECT content, memory_type, importance, created_at "
             "FROM memories "
-            "WHERE tenant_id = ANY(%s) AND user_id = %s AND embedding IS NOT NULL "
+            "WHERE tenant_id = %s AND user_id = %s AND embedding IS NOT NULL "
             "ORDER BY embedding <=> %s LIMIT %s",
-            (_read_tenant_scope(tenant_id), user_id, embedding, k),
+            (tenant_id, user_id, embedding, k),
         )
         return await cur.fetchall()
 
