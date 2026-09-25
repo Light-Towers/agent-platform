@@ -225,7 +225,7 @@ async def test_rag_default_space_isolated(patch_embed):
 
 async def test_memory_insert_carries_workspace_id(patch_embed):
     pool = _FakePool()
-    await mb.remember_fact(pool, "wsA", "用户A是财务", "semantic", 0.9)
+    await mb.remember_fact(pool, "wsA", "用户A是财务", "semantic", 0.9, tenant_id="default")
     inserts = _calls_with(pool, "INSERT INTO memories")
     assert inserts, "remember_fact 应执行 INSERT INTO memories"
     assert inserts[-1][0] == "default"
@@ -234,7 +234,7 @@ async def test_memory_insert_carries_workspace_id(patch_embed):
 
 async def test_memory_recall_scoped_to_workspace(patch_embed):
     pool = _FakePool()
-    await mb.remember_fact(pool, "wsA", "事实A", "semantic", 0.9)
+    await mb.remember_fact(pool, "wsA", "事实A", "semantic", 0.9, tenant_id="default")
     pool.calls.clear()  # 清掉写入记录，只看召回查询
     await mb.recall_typed(pool, "wsA", "任意", k=3, tenant_id="tenantA")
     # 优化 G 决策：长期记忆复用 memories 表的 user_id 列承载 workspace_id
@@ -285,6 +285,6 @@ async def test_memory_forget_is_tenant_scoped(patch_embed):
 
 async def test_memory_default_space_isolated(patch_embed):
     pool = _FakePool()
-    await mb.remember_fact(pool, "default", "默认空间事实", "semantic", 0.8)
-    res = await mb.recall_typed(pool, "custom", "事实", k=3)
+    await mb.remember_fact(pool, "default", "默认空间事实", "semantic", 0.8, tenant_id="default")
+    res = await mb.recall_typed(pool, "custom", "事实", k=3, tenant_id="default")
     assert all("默认空间" not in r for r in res)

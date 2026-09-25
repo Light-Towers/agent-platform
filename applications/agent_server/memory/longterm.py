@@ -16,6 +16,8 @@ typed PG 栈为唯一持久化记忆路径（Critical#3 收口：无池时不再
 import json
 import logging
 
+from agent_core.memory._tenant_gate import _TENANT_UNSET, resolve_tenant
+
 from agent_server.config import get_settings
 from agent_server.memory import memory_backend as _mb
 
@@ -77,7 +79,8 @@ async def extract_memory_facts(llm, question: str, answer: str) -> list[dict]:
         return []
 
 
-async def recall(pool, workspace_id: str, question: str, k: int = 3, tenant_id: str = "default") -> list[str]:
+async def recall(pool, workspace_id: str, question: str, k: int = 3, tenant_id: str= _TENANT_UNSET) -> list[str]:
+    tenant_id = resolve_tenant(tenant_id)
     # WS-1 语义收口（Warning#7）：本模块不设栈开关——有池即走 tenant-scoped typed PG 路径
     # （仍用 app psycopg 池，遵守 ADR-0003）。``SEMANTIC_MEMORY_TYPED`` 只在内核控制
     # 召回加权融合（关闭退化为平权），不控制是否使用 typed 栈；记忆总开关为
@@ -96,7 +99,7 @@ async def remember(
     workspace_id: str,
     content: str,
     facts: list[dict] | None = None,
-    tenant_id: str = "default",
+    tenant_id: str= _TENANT_UNSET,
 ) -> None:
     """沉淀记忆（优化 H）。
 
@@ -104,6 +107,7 @@ async def remember(
       重要性的结构化事实（D1 抽取不存原文）；
     - 否则退化：存整条原文（保持优化 G 之前行为，兼容 memory_extraction_enabled=False）。
     """
+    tenant_id = resolve_tenant(tenant_id)
     if facts:
         if pool is not None:
             for f in facts:
@@ -140,7 +144,7 @@ _CONSOLIDATE_EVERY = 5  # 每 5 轮对话触发一次惰性遗忘
 _consolidate_counter = 0
 
 
-async def maybe_consolidate(pool, workspace_id: str, tenant_id: str = "default") -> int:
+async def maybe_consolidate(pool, workspace_id: str, tenant_id: str= _TENANT_UNSET) -> int:
     """低频触发 typed 巩固/遗忘（旁路，失败不阻断，返回淘汰条数）。
 
     - 仅当 pool 存在时生效（巩固对象是 typed 表，无池即无持久化记忆）；
@@ -150,6 +154,7 @@ async def maybe_consolidate(pool, workspace_id: str, tenant_id: str = "default")
       可由 ``MEMORY_FORGET_AGE_DAYS`` 配置，TD-6）的低价值记忆；
     - 不抛错，异常吞掉（记忆维护是增强项，不应影响主链路）。
     """
+    tenant_id = resolve_tenant(tenant_id)
     global _consolidate_counter
     if pool is None:
         return 0

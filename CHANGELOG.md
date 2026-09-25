@@ -4,13 +4,14 @@
 
 ## 租户隔离收紧 + HA 门禁语义 + CI 收窄（2026-09-25，`7e442c4..b77be4e`）
 
-> 方案：`docs/plans/plan-p0-ha-tenant-fixes-2026-09-25.md`。外部审计（36 commits, c6b60a55）P0/P1 修复。
+> 方案：`docs/plans/plan-p0-ha-tenant-fixes-2026-09-25.md`。外部审计（36 commits, c6b60a55）P0/P1 修复。评审修复（W-2）续见本节末。
 
 - **⚠️ 破坏性行为变更（有意，不可逆）**：召回读谓词从过渡期 `tenant_id = ANY(%s)`（真实租户 + legacy `default` 桶）收紧为精确 `tenant_id = %s`（`7e442c4`）。真实租户升级后**不再读到**多租户上线前的历史记忆（v5 迁移已把历史行归并进 `default` 桶）；该数据仅 `default` 租户可见，或由管理员迁移工具重新归属。**回滚指引**：005 down 仅回滚列默认值、刻意不回滚数据（见该文件注释）——升级前如需保留跨租户历史可见性，须先完成数据归属迁移。配套：治理 fake 收紧为标量契约（泄漏形态直接断言失败）+ 新增真 PG 行为级回归 `tests/ha/test_tenant_isolation_real_pg.py`（legacy default 行对真实租户不可见 / default 租户仍可读 / 跨租户同 workspace 隔离），变异验证：谓词退回 ANY → 治理测试 4 failed。
 - **`CapabilityReport.supports_tenant_isolation`**：新增能力声明字段并纳入 `as_dict()`/`/health`（pg-typed=true / vector=false），消除「调用方误以为已获得租户隔离」。
 - **HA 门禁语义（skip→fail-not-skip）**：`tests/ha` 在 CI 环境（`CI`/`GITHUB_ACTIONS` 任一为 true）PG 不可用 = **FAIL** 而非 skip，杜绝「15 skipped 但 green」假信号；本地无 PG 保留 skip。普通 `make test` 根 session 以 `-m "not requires_pg"` 排除 HA 测试（归属 agent-platform-ha workflow）；conftest marker 路径判断修复 Windows 反斜杠兼容。
 - **CI 收窄**：`ha.yml` 触发移除 `applications/**`（重型 HA 仅由 packages/tests/ha/脚本/配置变更触发）。
 - **勘误**：下文 Warning#8 段描述的「过渡期 ANY 历史可读」为当时过渡契约，**已于本次收紧删除**，以本节为准。
+- **W-2 补充（同日评审修复）**：内核 typed/store 五动词 + 宿主门面（agent_server longterm/memory_backend、federation semantic_memory）共 27 处 `tenant_id: str = "default"` 隐式缺省全部改为哨兵 `_TENANT_UNSET`（`agent_core/memory/_tenant_gate.py`）——**漏传即 `ValueError`**，不再静默落共享 default 桶。全链生产调用点已核实显式传租户（graph/planner/router/federation ContextVar），爆炸半径仅测试补显式 `tenant_id="default"`（67 处调用点，AST 脚本机械修复）。新增 AST 治理红线 `tests/governance/test_tenant_default_forbidden.py`（默认值形态回潮即 CI 失败；构造期配置类 `mongo_checkpointer`/`vector_backend` 白名单，其 tenant 语义矛盾另立任务）。
 
 ## workspace 顶层包名冲突全局治理（eval 消歧义 + P5 门禁，2026-09-25）
 

@@ -20,6 +20,8 @@ from __future__ import annotations
 
 from typing import Iterable
 
+from agent_core.memory._tenant_gate import _TENANT_UNSET, resolve_tenant
+
 # 内核类型化记忆（单一真相源）
 from agent_core.memory.store import CapabilityReport, MemoryStore, PgMemoryStore
 from agent_core.memory.typed import (
@@ -107,7 +109,7 @@ async def remember_fact(
     fact: str,
     memory_type: str = "semantic",
     importance: float = 0.5,
-    tenant_id: str = "default",
+    tenant_id: str= _TENANT_UNSET,
 ) -> None:
     """沉淀一条带类型/重要性的结构化记忆（ADO-0004 re-export）。
 
@@ -116,6 +118,7 @@ async def remember_fact(
     实现委托内核 ``typed.remember_typed``（列顺序与旧实现完全一致，
     以便既有测试 ``test_remember_fact_writes_typed`` 不变）。
     """
+    tenant_id = resolve_tenant(tenant_id)
     if memory_type not in _MEMORY_TYPES:
         memory_type = "semantic"
     importance = max(0.0, min(1.0, float(importance)))
@@ -138,7 +141,7 @@ async def recall_typed(
     k: int = 3,
     weights: Iterable[tuple[str, float]] | None = None,
     *,
-    tenant_id: str = "default",
+    tenant_id: str= _TENANT_UNSET,
 ) -> list[str]:
     """分层加权召回（ADR-0004 re-export，向下投影为 list[str]）。
 
@@ -146,6 +149,7 @@ async def recall_typed(
     再投影 ``TypedMemory.content`` 回 app 既有 ``list[str]`` 契约，保持
     ``longterm.recall`` 与既有测试不变。``SEMANTIC_MEMORY_TYPED`` 关闭时内核降级平权召回。
     """
+    tenant_id = resolve_tenant(tenant_id)
     emb = embed_memory(question)
     typed: list[TypedMemory] = await _core_recall_typed(
         pool,
@@ -165,7 +169,7 @@ async def consolidate_memories(
     forget_threshold: float | None = None,
     age_days: int | None = None,
     *,
-    tenant_id: str = "default",
+    tenant_id: str= _TENANT_UNSET,
 ) -> int:
     """巩固 + 遗忘（ADR-0004 re-export，委托内核 typed.consolidate，TD-6 参数化）。
 
@@ -174,6 +178,7 @@ async def consolidate_memories(
       （``MEMORY_FORGET_THRESHOLD`` / ``MEMORY_FORGET_AGE_DAYS``，默认 0.1 / 30）；
     - 返回被淘汰的记忆条数。
     """
+    tenant_id = resolve_tenant(tenant_id)
     return await _core_consolidate(
         user_id=workspace_id,
         tenant_id=tenant_id,
@@ -183,8 +188,9 @@ async def consolidate_memories(
     )
 
 
-async def forget_memory(pool, workspace_id: str, memory_id: int, tenant_id: str = "default") -> bool:
+async def forget_memory(pool, workspace_id: str, memory_id: int, tenant_id: str= _TENANT_UNSET) -> bool:
     """按 id 显式遗忘一条记忆（ADR-0004 re-export，委托内核 typed.forget）。"""
+    tenant_id = resolve_tenant(tenant_id)
     return await _core_forget(
         user_id=workspace_id,
         tenant_id=tenant_id,
