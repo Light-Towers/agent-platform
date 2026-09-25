@@ -1,5 +1,8 @@
 from agent.prompts import sub_agents_content
-from tools.zhiku_tools import zhiku_retrieve
+from agent.tool_registry import get_tool
+
+# 批 2：经 tool_registry 统一出口取工具（observe_tool 包装）
+zhiku_retrieve = get_tool("zhiku_retrieve")
 
 knowledge_base_agent = {
     "name": sub_agents_content['knowledge_base']['name'],

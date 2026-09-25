@@ -10,26 +10,30 @@ agent_core.tools.guarded.guarded_invoke 是 LangGraph 节点模式 ``(tool, stat
 
     @tool
     @with_timeout(timeout=15)
-    def my_tool(...) -> str:
+    def my_tool(...) -> str | ToolResult:
         ...
+
+批 2 改造（方案 v3.1 定板）：三分支返回 ``ToolResult``（outcome 语义承载唯一
+方案），事件上报统一由 ``agent_core.observability.observe_tool`` 包装器派生——
+本模块不再直调 monitor。包装器把 ToolResult.text 转发给 LLM 链路，
+ToolResult.outcome 进 tool_outcome 事件；observe_tool 未接线时降级为
+str(ToolResult) = text（行为兼容）。
 """
 
 import asyncio
 from functools import wraps
 
-from api.monitor import monitor
+from agent_core.observability import ToolOutcome, ToolResult
 
 
 def with_timeout(timeout: float = 30.0):
     """
     装饰器：将同步工具函数包装为异步 + 超时隔离 + 失败降级。
 
-    - 超时 → 返回错误提示字符串（不抛异常），发 outcome=timeout
-    - ValueError（护栏拦截）→ 发 outcome=guarded
-    - 其他异常 → 返回错误提示字符串，发 outcome=exception
-    - 正常 → 返回工具原结果（不发事件，success 由调用方或 runner 补）
-
-    :param timeout: 超时上界（秒），默认 30s
+    - 超时 → 返回 ToolResult(outcome=timeout, text=提示)（不抛异常）
+    - ValueError（护栏拦截）→ 返回 ToolResult(outcome=guarded)
+    - 其他异常 → 返回 ToolResult(outcome=exception)
+    - 正常 → 返回工具原结果（success 由包装器派生）
     """
     def decorator(func):
         @wraps(func)
@@ -40,16 +44,24 @@ def with_timeout(timeout: float = 30.0):
                     timeout=timeout,
                 )
             except asyncio.TimeoutError:
-                monitor.report_tool_outcome(
-                    tool_name=func.__name__, outcome="timeout", error_class="TimeoutError")
-                return f"工具 {func.__name__} 执行超时（{timeout}s），已隔离"
+                return ToolResult(
+                    text=f"工具 {func.__name__} 执行超时（{timeout}s），已隔离",
+                    outcome=ToolOutcome.TIMEOUT,
+                    error_class="TimeoutError",
+                )
             except ValueError as e:
-                monitor.report_tool_outcome(
-                    tool_name=func.__name__, outcome="guarded", error_class="ValueError", detail=str(e))
-                return f"工具 {func.__name__} 输入被护栏拒绝：{e}"
+                return ToolResult(
+                    text=f"工具 {func.__name__} 输入被护栏拒绝：{e}",
+                    outcome=ToolOutcome.GUARDED,
+                    error_class="ValueError",
+                    detail=str(e),
+                )
             except Exception as e:
-                monitor.report_tool_outcome(
-                    tool_name=func.__name__, outcome="exception", error_class=type(e).__name__, detail=str(e))
-                return f"工具 {func.__name__} 执行失败：{type(e).__name__}: {e}"
+                return ToolResult(
+                    text=f"工具 {func.__name__} 执行失败：{type(e).__name__}: {e}",
+                    outcome=ToolOutcome.EXCEPTION,
+                    error_class=type(e).__name__,
+                    detail=str(e),
+                )
         return wrapper
     return decorator

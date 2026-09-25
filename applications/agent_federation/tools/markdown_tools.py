@@ -14,7 +14,6 @@ except ImportError:
 from langchain_core.tools import tool
 
 from api.context import get_session_context
-from api.monitor import monitor
 from utils.path_utils import resolve_path
 
 
@@ -26,7 +25,6 @@ def generate_markdown(
 ):
     """根据提供的文本内容，生成对应的Markdown(.md)文件"""
     logger.debug("generate_markdown path=%s", path)
-    monitor.report_tool("Markdown文档生成工具", {"写入的文本内容": content})
     if not filename.endswith('.md'):
         filename += '.md'
 

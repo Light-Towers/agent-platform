@@ -1,10 +1,10 @@
 import os
 
 import httpx
+from agent_core.observability import ToolOutcome, ToolResult
 from langchain_core.tools import tool
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
-from api.monitor import monitor
 from tools._timeout import with_timeout
 
 try:
@@ -103,12 +103,14 @@ def zhiku_retrieve(query: str, item_name: str = "") -> str:
     :param item_name: 可选，按知识条目名称过滤（留空则全库检索）
     :return: 检索到的相关文档内容摘要
     """
-    monitor.report_tool(tool_name="知识库检索工具：zhiku_retrieve", args={"query": query, "item_name": item_name})
-
+    # outcome 语义经 ToolResult 承载（observe_tool 包装器统一上报，方案 v3.1）
     # 降级：zhiku 不健康时直接返回提示，避免无效等待
     if not is_zhiku_healthy():
-        monitor.report_tool_outcome(tool_name="zhiku_retrieve", outcome="degraded", detail="服务不健康")
-        return "知识库服务暂不可用（已探测到不健康），请使用其他工具获取信息。如为紧急问题，可尝试网络搜索。"
+        return ToolResult(
+            text="知识库服务暂不可用（已探测到不健康），请使用其他工具获取信息。如为紧急问题，可尝试网络搜索。",
+            outcome=ToolOutcome.DEGRADED,
+            detail="服务不健康",
+        )
 
     with _start_span("tool.zhiku_retrieve", attrs={"query": query}):
         from agent_core.tracing_propagation import inject_traceparent
@@ -127,18 +129,23 @@ def zhiku_retrieve(query: str, item_name: str = "") -> str:
             resp = _zhiku_post(url, payload, headers)
             if resp.status_code == 429:
                 retry_after = resp.headers.get("Retry-After", "unknown")
-                monitor.report_tool_outcome(
-                    tool_name="zhiku_retrieve", outcome="degraded", error_class="HTTP429",
-                    detail=f"Retry-After: {retry_after}s")
-                return f"知识库检索被限流（429），请稍后重试（Retry-After: {retry_after}s）"
+                return ToolResult(
+                    text=f"知识库检索被限流（429），请稍后重试（Retry-After: {retry_after}s）",
+                    outcome=ToolOutcome.DEGRADED,
+                    error_class="HTTP429",
+                    detail=f"Retry-After: {retry_after}s",
+                )
             resp.raise_for_status()
             data = resp.json()
 
             docs = data.get("docs", [])
             hits = data.get("hits", 0)
             if not docs:
-                monitor.report_tool_outcome(tool_name="zhiku_retrieve", outcome="empty", detail=f"query: {query}")
-                return f"知识库未检索到相关内容（query: {query}）"
+                return ToolResult(
+                    text=f"知识库未检索到相关内容（query: {query}）",
+                    outcome=ToolOutcome.EMPTY,
+                    detail=f"query: {query}",
+                )
 
             parts = [f"检索到 {hits} 条相关结果："]
             for i, doc in enumerate(docs[:5], 1):
@@ -149,15 +156,22 @@ def zhiku_retrieve(query: str, item_name: str = "") -> str:
             return "\n".join(parts)
 
         except httpx.TimeoutException:
-            monitor.report_tool_outcome(
-                tool_name="zhiku_retrieve", outcome="timeout", error_class="httpx.TimeoutException")
-            return f"知识库检索超时（{_TIMEOUT_S}s），服务可能暂时不可用"
+            return ToolResult(
+                text=f"知识库检索超时（{_TIMEOUT_S}s），服务可能暂时不可用",
+                outcome=ToolOutcome.TIMEOUT,
+                error_class="httpx.TimeoutException",
+            )
         except httpx.HTTPStatusError as e:
-            monitor.report_tool_outcome(
-                tool_name="zhiku_retrieve", outcome="exception", error_class="HTTPStatusError",
-                detail=f"HTTP {e.response.status_code}")
-            return f"知识库检索失败（HTTP {e.response.status_code}）：{e.response.text[:200]}"
+            return ToolResult(
+                text=f"知识库检索失败（HTTP {e.response.status_code}）：{e.response.text[:200]}",
+                outcome=ToolOutcome.EXCEPTION,
+                error_class="HTTPStatusError",
+                detail=f"HTTP {e.response.status_code}",
+            )
         except Exception as e:
-            monitor.report_tool_outcome(
-                tool_name="zhiku_retrieve", outcome="exception", error_class=type(e).__name__, detail=str(e))
-            return f"知识库检索异常：{str(e)}"
+            return ToolResult(
+                text=f"知识库检索异常：{str(e)}",
+                outcome=ToolOutcome.EXCEPTION,
+                error_class=type(e).__name__,
+                detail=str(e),
+            )

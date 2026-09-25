@@ -4,7 +4,6 @@ from typing import Annotated
 from langchain_core.tools import tool
 
 from api.context import get_session_context
-from api.monitor import monitor
 from utils.path_utils import resolve_path
 
 # 尝试导入可选依赖，实现按需加载
@@ -42,8 +41,6 @@ def read_file_content(
     读取指定文件的内容。支持 Markdown(.md)、Word(.docx)、PDF(.pdf) 和 Excel(.xlsx/.xls)。
     对于 Excel 文件，会自动提供数据统计信息（head 和 describe）。
     """
-    monitor.report_tool("文件内容读取工具", {"filename": filename, "instruction": instruction})
-
     # ====================== 1. Path 重构路径解析 ======================
     session_dir = get_session_context()
     file_path = Path(resolve_path(filename, session_dir))  # 转为Path对象
