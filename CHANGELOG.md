@@ -2,6 +2,16 @@
 
 本仓库为 uv workspace monorepo。**唯一受支持的安装/运行入口是根 `uv.lock` + `uv sync`**，子包不再维护独立 `uv.lock`（见 v2 修复 #14）。
 
+## 租户隔离收紧 + HA 门禁语义 + CI 收窄（2026-09-25，`7e442c4..b77be4e`）
+
+> 方案：`docs/plans/plan-p0-ha-tenant-fixes-2026-09-25.md`。外部审计（36 commits, c6b60a55）P0/P1 修复。
+
+- **⚠️ 破坏性行为变更（有意，不可逆）**：召回读谓词从过渡期 `tenant_id = ANY(%s)`（真实租户 + legacy `default` 桶）收紧为精确 `tenant_id = %s`（`7e442c4`）。真实租户升级后**不再读到**多租户上线前的历史记忆（v5 迁移已把历史行归并进 `default` 桶）；该数据仅 `default` 租户可见，或由管理员迁移工具重新归属。**回滚指引**：005 down 仅回滚列默认值、刻意不回滚数据（见该文件注释）——升级前如需保留跨租户历史可见性，须先完成数据归属迁移。配套：治理 fake 收紧为标量契约（泄漏形态直接断言失败）+ 新增真 PG 行为级回归 `tests/ha/test_tenant_isolation_real_pg.py`（legacy default 行对真实租户不可见 / default 租户仍可读 / 跨租户同 workspace 隔离），变异验证：谓词退回 ANY → 治理测试 4 failed。
+- **`CapabilityReport.supports_tenant_isolation`**：新增能力声明字段并纳入 `as_dict()`/`/health`（pg-typed=true / vector=false），消除「调用方误以为已获得租户隔离」。
+- **HA 门禁语义（skip→fail-not-skip）**：`tests/ha` 在 CI 环境（`CI`/`GITHUB_ACTIONS` 任一为 true）PG 不可用 = **FAIL** 而非 skip，杜绝「15 skipped 但 green」假信号；本地无 PG 保留 skip。普通 `make test` 根 session 以 `-m "not requires_pg"` 排除 HA 测试（归属 agent-platform-ha workflow）；conftest marker 路径判断修复 Windows 反斜杠兼容。
+- **CI 收窄**：`ha.yml` 触发移除 `applications/**`（重型 HA 仅由 packages/tests/ha/脚本/配置变更触发）。
+- **勘误**：下文 Warning#8 段描述的「过渡期 ANY 历史可读」为当时过渡契约，**已于本次收紧删除**，以本节为准。
+
 ## workspace 顶层包名冲突全局治理（eval 消歧义 + P5 门禁，2026-09-25）
 
 > 方案：`docs/plans/plan-workspace-toplevel-eval-disambiguation-2026-09-25.md`。背景：editable 安装以朴素 `.pth` 把成员源码根整体加入 `sys.path`，顶层包名 `eval` 被 agent_federation 与 knowledge-service 双重暴露，解析取决于安装顺序；前次 conftest 局部重绑补丁（c6b60a5）属散点止血，本次按「单一实现 + 全局装配 + 强制门禁」三层收口并撤销该补丁。
@@ -18,7 +28,7 @@
 - **Critical#2 — Planner 租户传播**：`GraphPlanner`（4 处 Plan + execute 重建 plan_ctx）、`UnifiedPlanner` WORKFLOW 分支（Plan 身份字段 + kwargs 携带 tenant/workspace/user）、`AgenticPlanner`、`deterministic` MCP AgentState、`capabilities._run_general_qa` state 注入全部补齐 `tenant_id`；新增治理红线测试 `tests/governance/test_planner_tenant_propagation.py`（枚举全部 Planner 构造点，防漏传静默落共享桶）。
 - **Critical#3 — 内核/federation 透传 tenant**：`agent_core.memory.store.MemoryStore` 协议五动词加 `tenant_id` keyword 参数，`PgMemoryStore` 透传内核 typed；`VectorMemoryStore` 显式声明不支持隔离（接口兼容）。federation `semantic_memory.py` 封装函数 + `main_agent_memory.py` 接线经 `api.context` ContextVar 取租户透传。
 - **Warning#7 — 开关语义收口（WS-1）**：`agent_server/memory/longterm.py` 删除 `maybe_consolidate()` 中残留的 `SEMANTIC_MEMORY_TYPED` 栈门控（与读写路径对齐：该开关自 WS-1 起只在内核控制召回加权融合，不控栈选择；记忆总开关为 `SEMANTIC_MEMORY_ENABLED`），消除“读写不受控、巩固受控”分裂；模块/函数 docstring 与过时注释同步收口。测试：`test_maybe_consolidate_noop_when_disabled` 按新语义改写为 `test_maybe_consolidate_not_gated_by_typed_switch`（门禁：开关关闭时有池仍须触发巩固）+ 新增 `test_maybe_consolidate_noop_without_pool`（无池空操作），断言未收窄。
-- **Warning#8 — v5 迁移可回滚 + 历史行过渡读**：新增 `005_memory_tenant_enforcement.down.sql`（仅回滚列默认值，刻意不回滚数据并在注释说明不可逆理由）与 `004_memory_tenant_id.down.sql`（对称 DROP，对齐 002/003 惯例）；内核 `agent_core/memory/typed.py` 召回读谓词改为过渡期 `tenant_id = ANY(%s)`（`_read_tenant_scope` 含 legacy `default` 桶，user_id 隔离维度不变），修复升级后带真实租户的请求读不到多租户上线前历史记忆的问题；删除路径（consolidate/forget）仍精确匹配不跨桶，收敛后可收紧。测试：新增 `TestTenantMigrationsRollback`（v4/v5 down 守卫）与 agent-core 读作用域/删除精确性 3 用例。
+- **Warning#8 — v5 迁移可回滚 + 历史行过渡读**：新增 `005_memory_tenant_enforcement.down.sql`（仅回滚列默认值，刻意不回滚数据并在注释说明不可逆理由）与 `004_memory_tenant_id.down.sql`（对称 DROP，对齐 002/003 惯例）；内核 `agent_core/memory/typed.py` 召回读谓词改为过渡期 `tenant_id = ANY(%s)`（`_read_tenant_scope` 含 legacy `default` 桶，user_id 隔离维度不变），修复升级后带真实租户的请求读不到多租户上线前历史记忆的问题；删除路径（consolidate/forget）仍精确匹配不跨桶，收敛后可收紧。测试：新增 `TestTenantMigrationsRollback`（v4/v5 down 守卫）与 agent-core 读作用域/删除精确性 3 用例。**【2026-09-25 勘误】过渡读契约已收紧删除（读谓词精确 `= %s`，`_read_tenant_scope` 已删除），见顶部「租户隔离收紧」节。**
 
 ## MCP SDK 真实接入（2026-09-22）
 
