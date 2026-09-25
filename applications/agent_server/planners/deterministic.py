@@ -267,6 +267,7 @@ class DeterministicPlanner(Planner):
                 sub_query=plan.sub_query or question,
                 user_id=plan.user_id,
                 workspace_id=workspace_id,
+                tenant_id=plan.tenant_id,
                 mcp_server=plan.mcp_server,
                 mcp_tool=plan.mcp_tool,
                 mcp_params=plan.mcp_params,

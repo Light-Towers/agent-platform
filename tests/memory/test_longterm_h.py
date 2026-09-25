@@ -1,10 +1,10 @@
 """优化 H：长期记忆质量升级单测（三层抽取 + 三分存储 + consolidation/forgetting）。
 
 不连真实 PG：用 monkeypatch 替换 DB 层与 embedder，验证
-- 配置开关默认 False（退化路径与旧行为一致）；
+- ``MEMORY_EXTRACTION_ENABLED`` 默认 False（抽取旁路默认关，行为与旧一致）；
 - extract_memory_facts 解析 LLM JSON 输出、容错；
-- recall_typed 分层加权融合排序；
-- remember_fact / consolidate_memories 的写入与惰性淘汰逻辑（经 mock 池）。
+- recall_typed 分层加权融合排序（SEMANTIC_MEMORY_TYPED 只控加权不控选栈，WS-1 语义）；
+- remember_fact / consolidate_memories 的写入与惰性淘汰逻辑（经 mock 池，tenant 透传）。
 """
 
 from types import SimpleNamespace
@@ -280,8 +280,6 @@ async def test_maybe_consolidate_triggers_every_n(patch_settings, monkeypatch):
     # ADR-0004 阶段3：maybe_consolidate 每 _CONSOLIDATE_EVERY 次触发一次 consolidate。
     import agent_server.memory.longterm as l
 
-    # 经 env 打开 typed 开关（longterm 用 from-import 副本，patch 函数对象无效）
-    monkeypatch.setenv("SEMANTIC_MEMORY_TYPED", "true")
     monkeypatch.setattr("agent_server.memory.longterm.get_settings", lambda: patch_settings)
 
     calls = {"n": 0}
@@ -306,11 +304,37 @@ async def test_maybe_consolidate_triggers_every_n(patch_settings, monkeypatch):
     assert calls["n"] == 1
 
 
-async def test_maybe_consolidate_noop_when_disabled(patch_settings, monkeypatch):
-    # typed 开关关闭 → 不触发 consolidate
+async def test_maybe_consolidate_not_gated_by_typed_switch(patch_settings, monkeypatch):
+    # WS-1 语义收口（Warning#7）门禁：SEMANTIC_MEMORY_TYPED 只在内核控制召回加权融合，
+    # 不控制栈选择；读写与巩固统一按池存在性判定。开关关闭时有池仍须触发巩固，
+    # 否则低价值记忆永不会被淘汰（读写不受控、巩固受控的分裂语义已废弃）。
     import agent_server.memory.longterm as l
 
     monkeypatch.setenv("SEMANTIC_MEMORY_TYPED", "false")
+    monkeypatch.setattr("agent_server.memory.longterm.get_settings", lambda: patch_settings)
+
+    calls = {"n": 0}
+
+    async def _fake_consolidate(pool, ws, forget_threshold=0.1, *, tenant_id="default"):
+        calls["n"] += 1
+        return 0
+
+    monkeypatch.setattr("agent_server.memory.memory_backend.consolidate_memories", _fake_consolidate)
+    l._consolidate_counter = 0
+
+    class _Pool:
+        pass
+
+    for _ in range(l._CONSOLIDATE_EVERY):
+        await l.maybe_consolidate(_Pool(), "ws")
+    assert calls["n"] == 1
+
+
+async def test_maybe_consolidate_noop_without_pool(patch_settings, monkeypatch):
+    # 无池（内存模式）：巩固必须空操作（typed 表是唯一持久化栈，无池即无落点）。
+    import agent_server.memory.longterm as l
+
+    monkeypatch.setenv("SEMANTIC_MEMORY_TYPED", "true")
     monkeypatch.setattr("agent_server.memory.longterm.get_settings", lambda: patch_settings)
 
     calls = {"n": 0}
@@ -319,11 +343,8 @@ async def test_maybe_consolidate_noop_when_disabled(patch_settings, monkeypatch)
         lambda *a, **k: calls.__setitem__("n", calls["n"] + 1),
     )
 
-    class _Pool:
-        pass
-
     for _ in range(10):
-        await l.maybe_consolidate(_Pool(), "ws")
+        assert await l.maybe_consolidate(None, "ws") == 0
     assert calls["n"] == 0
 
 

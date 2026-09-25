@@ -2,6 +2,15 @@
 
 本仓库为 uv workspace monorepo。**唯一受支持的安装/运行入口是根 `uv.lock` + `uv sync`**，子包不再维护独立 `uv.lock`（见 v2 修复 #14）。
 
+## 分支评审修复：Planner 租户传播 + SEMANTIC_MEMORY_TYPED 语义收口（2026-09-25，分支 `fix/v3-scheduler-tenant-isolation-20260924`）
+
+> 来源：2026-09-25 对昨日新建分支的 CodeReview（Critical#2/#3、Warning#7）。
+
+- **Critical#2 — Planner 租户传播**：`GraphPlanner`（4 处 Plan + execute 重建 plan_ctx）、`UnifiedPlanner` WORKFLOW 分支（Plan 身份字段 + kwargs 携带 tenant/workspace/user）、`AgenticPlanner`、`deterministic` MCP AgentState、`capabilities._run_general_qa` state 注入全部补齐 `tenant_id`；新增治理红线测试 `tests/governance/test_planner_tenant_propagation.py`（枚举全部 Planner 构造点，防漏传静默落共享桶）。
+- **Critical#3 — 内核/federation 透传 tenant**：`agent_core.memory.store.MemoryStore` 协议五动词加 `tenant_id` keyword 参数，`PgMemoryStore` 透传内核 typed；`VectorMemoryStore` 显式声明不支持隔离（接口兼容）。federation `semantic_memory.py` 封装函数 + `main_agent_memory.py` 接线经 `api.context` ContextVar 取租户透传。
+- **Warning#7 — 开关语义收口（WS-1）**：`agent_server/memory/longterm.py` 删除 `maybe_consolidate()` 中残留的 `SEMANTIC_MEMORY_TYPED` 栈门控（与读写路径对齐：该开关自 WS-1 起只在内核控制召回加权融合，不控栈选择；记忆总开关为 `SEMANTIC_MEMORY_ENABLED`），消除“读写不受控、巩固受控”分裂；模块/函数 docstring 与过时注释同步收口。测试：`test_maybe_consolidate_noop_when_disabled` 按新语义改写为 `test_maybe_consolidate_not_gated_by_typed_switch`（门禁：开关关闭时有池仍须触发巩固）+ 新增 `test_maybe_consolidate_noop_without_pool`（无池空操作），断言未收窄。
+- **Warning#8 — v5 迁移可回滚 + 历史行过渡读**：新增 `005_memory_tenant_enforcement.down.sql`（仅回滚列默认值，刻意不回滚数据并在注释说明不可逆理由）与 `004_memory_tenant_id.down.sql`（对称 DROP，对齐 002/003 惯例）；内核 `agent_core/memory/typed.py` 召回读谓词改为过渡期 `tenant_id = ANY(%s)`（`_read_tenant_scope` 含 legacy `default` 桶，user_id 隔离维度不变），修复升级后带真实租户的请求读不到多租户上线前历史记忆的问题；删除路径（consolidate/forget）仍精确匹配不跨桶，收敛后可收紧。测试：新增 `TestTenantMigrationsRollback`（v4/v5 down 守卫）与 agent-core 读作用域/删除精确性 3 用例。
+
 ## MCP SDK 真实接入（2026-09-22）
 
 > `mcp_client.py` 的 MVP 桩（`_invoke_tool` / `_discover_tools` / `_connect_*`）替换为真实 MCP SDK 调用，MCP 工具可经 stdio / SSE transport 真正连接、发现、调用。

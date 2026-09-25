@@ -1,22 +1,20 @@
 """长期记忆：pgvector 语义召回 + 后台异步沉淀（兼容门面）。
 
-实现统一收口到内核 ``agent_core.memory.vector_backend.PgVectorMemoryBackend``
-（app 的备选向量后端），并由 app 层类型感知读写扩展（优化 H）。
+实现统一收口到内核 ``agent_core.memory.typed``（经 ``memory_backend`` 门面），
+typed PG 栈为唯一持久化记忆路径（Critical#3 收口：无池时不再退化无作用域的
+内核后端，直接返回空/跳过，避免跨租户泄漏）。
 
-隔离模型（优化 G）：``workspace_id`` 是长期记忆的隔离主键（跨会话流动、不同空间隔离）。
-- 降级路径（无 DB / 内核后端）：``workspace_id`` 透传为内核 ``recall/remember`` 的
-  ``user_id`` 形参位，内核表结构与其余维度不变，零侵入。
-- 类型增强路径（优化 H）：``workspace_id`` 复用为 memories 表 user_id 列值，并额外写入
-  ``memory_type``/``importance`` 元数据，recall 按类型加权融合。
+隔离模型（优化 G + tenant）：复合隔离键 ``(tenant_id, workspace_id)``，
+``workspace_id`` 复用为 memories 表 user_id 列值（跨会话流动、不同空间隔离），
+并额外写入 ``memory_type``/``importance`` 元数据，recall 按类型加权融合。
 
-注意：内核 PgVectorMemoryBackend 使用独立 asyncpg 连接池（与 app 的 psycopg 池隔离），
-降级路径调用时统一传 ``pool=None``，由内核自建/复用池；类型增强路径使用 app psycopg 池。
+开关语义（WS-1 收口）：本模块不设栈开关，读写与巩固统一按池存在性判定；
+``SEMANTIC_MEMORY_TYPED`` 仅在内核控制召回是否加权融合，记忆总开关为
+``SEMANTIC_MEMORY_ENABLED``（由调用方门控）。
 """
 
 import json
 import logging
-
-from agent_core.memory.typed import semantic_memory_typed_enabled
 
 from agent_server.config import get_settings
 from agent_server.memory import memory_backend as _mb
@@ -80,9 +78,10 @@ async def extract_memory_facts(llm, question: str, answer: str) -> list[dict]:
 
 
 async def recall(pool, workspace_id: str, question: str, k: int = 3, tenant_id: str = "default") -> list[str]:
-    # ADR-0004 阶段3：总开关由 SEMANTIC_MEMORY_TYPED 控制（与内核 typed 语义统一）。
-    # 开启 → 走内核 typed 加权/平权召回（仍用 app psycopg 池，遵守 ADR-0003）；
-    # 关闭或内存模式 → 退化内核后端平权召回（pool=None 由内核自建池）。
+    # WS-1 语义收口（Warning#7）：本模块不设栈开关——有池即走 tenant-scoped typed PG 路径
+    # （仍用 app psycopg 池，遵守 ADR-0003）。``SEMANTIC_MEMORY_TYPED`` 只在内核控制
+    # 召回加权融合（关闭退化为平权），不控制是否使用 typed 栈；记忆总开关为
+    # ``SEMANTIC_MEMORY_ENABLED``（由调用方门控）。
     if pool is not None:
         try:
             return await _mb.recall_typed(pool, workspace_id, question, k=k, tenant_id=tenant_id)
@@ -121,8 +120,9 @@ async def remember(
         return
     # 退化路径：整条原文
     if pool is not None:
-        # ADR-0004 阶段3：typed 开关开启时，原文也落入 typed 表（semantic 类型），
+        # typed 表为唯一持久化记忆栈：原文退化写入也落 typed 表（semantic 类型），
         # 保证下一轮 typed recall 能命中（D1 抽取未开启时仍可用整条记忆）。
+        # 不受 SEMANTIC_MEMORY_TYPED 门控——与 recall() 读写对称（WS-1 语义收口）。
         try:
             await _mb.remember_fact(
                 pool, workspace_id, content, memory_type="semantic", importance=0.5,
@@ -143,13 +143,15 @@ _consolidate_counter = 0
 async def maybe_consolidate(pool, workspace_id: str, tenant_id: str = "default") -> int:
     """低频触发 typed 巩固/遗忘（旁路，失败不阻断，返回淘汰条数）。
 
-    - 仅当 ``SEMANTIC_MEMORY_TYPED`` 开启且 pool 存在时生效；
+    - 仅当 pool 存在时生效（巩固对象是 typed 表，无池即无持久化记忆）；
+      WS-1 语义收口：不受 ``SEMANTIC_MEMORY_TYPED`` 门控——该开关只在内核控制
+      召回加权融合，读写与巩固统一按池存在性判定，保持栈内语义一致；
     - 内部惰性淘汰 importance 低于阈值且超过老化天数（默认 30 天，
       可由 ``MEMORY_FORGET_AGE_DAYS`` 配置，TD-6）的低价值记忆；
     - 不抛错，异常吞掉（记忆维护是增强项，不应影响主链路）。
     """
     global _consolidate_counter
-    if pool is None or not semantic_memory_typed_enabled():
+    if pool is None:
         return 0
     _consolidate_counter += 1
     if _consolidate_counter % _CONSOLIDATE_EVERY != 0:

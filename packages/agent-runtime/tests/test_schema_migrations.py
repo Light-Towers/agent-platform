@@ -180,6 +180,39 @@ class TestDiscovery:
             assert len(sql) > 10, f"v{m.version} SQL file seems empty"
 
 
+class TestTenantMigrationsRollback:
+    """v4/v5 租户迁移必须成对可回滚（评审 Warning#8）。
+
+    惯例基准：002/003 均有 down；v4/v5 引入的 tenant_id 列若无回滚出口，
+    升级失败时无法退回，故 here 钉住：两者必须存在 down 且内容与 up 对称。
+    """
+
+    def _get(self, version: int):
+        from agent_runtime.migrations.base import discover
+
+        return next(m for m in discover() if m.version == version)
+
+    def test_v4_has_down_that_drops_tenant_column(self):
+        m = self._get(4)
+        assert m.down_sql is not None, "v4 tenant_id 迁移缺 down，不可回滚"
+        down = m.read_down()
+        assert "DROP COLUMN IF EXISTS tenant_id" in down
+        assert "DROP INDEX IF EXISTS idx_memories_tenant" in down
+
+    def test_v5_has_down_that_restores_column_default(self):
+        m = self._get(5)
+        assert m.down_sql is not None, "v5 tenant 强制迁移缺 down，不可回滚"
+        down = m.read_down()
+        # up 把列默认值改为 'default'，down 须恢复 v4 的 ''
+        assert "SET DEFAULT ''" in down
+
+    def test_v5_up_backfills_empty_tenant_and_sets_default(self):
+        m = self._get(5)
+        up = m.read_up()
+        assert "SET tenant_id = 'default' WHERE tenant_id = ''" in up
+        assert "SET DEFAULT 'default'" in up
+
+
 # ---------------------------------------------------------------------------
 # Tests: runner.py
 # ---------------------------------------------------------------------------

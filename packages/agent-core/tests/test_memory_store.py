@@ -83,6 +83,50 @@ async def test_pg_store_recall_delegates_typed():
 
 
 @pytest.mark.asyncio
+async def test_pg_store_threads_tenant_id_to_typed(monkeypatch):
+    """门面必须把 tenant_id 透传到内核 typed 五动词（漏传即读写共享 default 桶）。"""
+    import agent_core.memory.typed as typed_mod
+
+    captured: dict = {}
+
+    async def _fake_recall_typed(pool, *, user_id, question, k, weights, embedding, tenant_id):
+        captured["recall"] = tenant_id
+        return []
+
+    async def _fake_remember_typed(pool, *, user_id, fact, memory_type, importance, embedding, tenant_id):
+        captured["remember"] = tenant_id
+
+    async def _fake_consolidate(user_id, pool, *, forget_threshold, age_days, tenant_id):
+        captured["consolidate"] = tenant_id
+        return 0
+
+    async def _fake_forget(user_id, pool, memory_id, *, tenant_id):
+        captured["forget"] = tenant_id
+        return True
+
+    monkeypatch.setattr(typed_mod, "recall_typed", _fake_recall_typed)
+    monkeypatch.setattr(typed_mod, "remember_typed", _fake_remember_typed)
+    monkeypatch.setattr(typed_mod, "consolidate", _fake_consolidate)
+    monkeypatch.setattr(typed_mod, "forget", _fake_forget)
+
+    store = PgMemoryStore(_FakePool(), _embed_fn)
+    await store.recall("ws1", "q", tenant_id="tenantA")
+    await store.remember("ws1", "事实", tenant_id="tenantA")
+    await store.consolidate("ws1", tenant_id="tenantA")
+    await store.forget("ws1", 1, tenant_id="tenantA")
+    assert captured == {
+        "recall": "tenantA",
+        "remember": "tenantA",
+        "consolidate": "tenantA",
+        "forget": "tenantA",
+    }
+    # 缺省仍为 default（向后兼容），但宿主必须显式传入才能隔离
+    captured.clear()
+    await store.recall("ws1", "q")
+    assert captured == {"recall": "default"}
+
+
+@pytest.mark.asyncio
 async def test_pg_store_recall_empty_on_no_pool_or_blank_input():
     store = PgMemoryStore(None, _embed_fn)
     assert await store.recall("ws1", "q") == []

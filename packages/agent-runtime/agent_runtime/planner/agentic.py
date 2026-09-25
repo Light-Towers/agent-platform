@@ -119,6 +119,7 @@ class AgenticPlanner(Planner):
             question=ctx.question,
             workspace_id=ctx.workspace_id,
             user_id=ctx.user_id,
+            tenant_id=ctx.tenant_id,
         )
 
     async def execute(

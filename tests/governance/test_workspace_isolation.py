@@ -43,10 +43,13 @@ class _FakeCur:
                 if r["id"] in set(ids) and r["workspace_id"] == ws
             ]
         if "FROM memories" in sql and "COUNT" not in sql:
-            tenant, ws = p[0], p[1]
+            # 过渡期读谓词为 tenant_id = ANY(%s)：p[0] 为租户作用域列表（含 legacy default）；
+            # 兼容旧标量形式（写入/精确删除路径）。
+            tenant_param, ws = p[0], p[1]
+            scope = set(tenant_param) if isinstance(tenant_param, (list, tuple, set)) else {tenant_param}
             return [
                 (r["content"], r["memory_type"], r["importance"], r["created_at"])
-                for r in self._db["memories"] if r["tenant_id"] == tenant and r["user_id"] == ws
+                for r in self._db["memories"] if r["tenant_id"] in scope and r["user_id"] == ws
             ]
         return []
 
@@ -159,6 +162,17 @@ def _calls_with(pool, substr):
     return [params for sql, params in pool.calls if substr in sql]
 
 
+def _params_contain(params, needle):
+    """检查 needle 是否出现在查询参数中（含嵌套列表，如 ANY 租户作用域）。"""
+    for p in params:
+        if isinstance(p, (list, tuple, set)):
+            if needle in p:
+                return True
+        elif p == needle:
+            return True
+    return False
+
+
 async def test_rag_insert_carries_workspace_id(patch_embed):
     pool = _FakePool()
     from agent_server.rag.chunker import Chunk
@@ -222,7 +236,8 @@ async def test_memory_recall_scoped_to_workspace(patch_embed):
     where_ws = [p for sql, p in pool.calls if "user_id" in sql]
     assert where_ws, "recall SQL 应含 user_id（承载 workspace_id）WHERE"
     assert all("wsA" in p for p in where_ws)
-    assert any("tenantA" in p for p in where_ws)
+    # 过渡期召回 tenant 以 ANY(作用域列表) 绑定，tenantA 应在作用域内
+    assert all(_params_contain(p, "tenantA") for p in where_ws)
 
 
 async def test_memory_no_cross_contamination(patch_embed):

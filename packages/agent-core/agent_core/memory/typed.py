@@ -111,6 +111,24 @@ def _clamp_importance(importance: float) -> float:
     return max(0.0, min(1.0, float(importance)))
 
 
+# v5 租户隔离过渡期常量：历史行在 v5 前 tenant_id 为 ''，v5 迁移一次性归入 'default'。
+# 过渡期召回读谓词需同时命中请求租户与 legacy 'default' 桶，否则带真实租户的请求
+# 升级后读不到任何多租户上线前的历史记忆（Warning#8）。收敛后可移除本 helper。
+_LEGACY_TENANT_BUCKET = "default"
+
+
+def _read_tenant_scope(tenant_id: str) -> list[str]:
+    """过渡期召回读作用域：请求租户 + legacy ``default`` 桶（去重）。
+
+    仅用于**读**（recall）；``consolidate``/``forget`` 等**删除**路径仍按精确
+    ``tenant_id`` 匹配，不跨桶淘汰，避免过渡期误删共享 legacy 记忆。
+    ``user_id`` 隔离维度不受影响，故放宽租户不削弱同用户内的隔离。
+    """
+    if tenant_id == _LEGACY_TENANT_BUCKET:
+        return [tenant_id]
+    return [tenant_id, _LEGACY_TENANT_BUCKET]
+
+
 def _time_decay(created_at: datetime.datetime | None, now: datetime.datetime) -> float:
     """双曲时间衰减 1/(1 + 0.01*age_days)；无时间信息时退化为 1.0。"""
     if created_at is None:
@@ -309,9 +327,9 @@ async def _vector_search_memories(
         cur = await conn.execute(
             "SELECT content, memory_type, importance, created_at "
             "FROM memories "
-            "WHERE tenant_id = %s AND user_id = %s AND embedding IS NOT NULL "
+            "WHERE tenant_id = ANY(%s) AND user_id = %s AND embedding IS NOT NULL "
             "ORDER BY embedding <=> %s LIMIT %s",
-            (tenant_id, user_id, embedding, k),
+            (_read_tenant_scope(tenant_id), user_id, embedding, k),
         )
         return await cur.fetchall()
 

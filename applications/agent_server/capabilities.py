@@ -62,6 +62,7 @@ _GENERAL_QA_INPUT_SCHEMA: dict[str, Any] = {
         "question": {"type": "string", "description": "用户问题"},
         "workspace_id": {"type": "string", "description": "知识库空间 ID，缺省 default"},
         "user_id": {"type": "string", "description": "用户 ID，缺省 default"},
+        "tenant_id": {"type": "string", "description": "租户 ID，缺省 default（记忆读写按租户隔离）"},
         "thread_id": {"type": "string", "description": "会话线程 ID（对话历史持久化）"},
     },
     "required": ["question"],
@@ -91,6 +92,8 @@ async def _run_general_qa(graph: Any, **kwargs: Any) -> str:
             "question": question,
             "user_id": kwargs.get("user_id", "default"),
             "workspace_id": kwargs.get("workspace_id", "default"),
+            # 租户身份随 state 注入：缺失会在 default 桶读写记忆，造成跨租户可见
+            "tenant_id": kwargs.get("tenant_id", "default"),
             "iterations": 0,
         },
         config={"configurable": {"thread_id": kwargs.get("thread_id", "default")}},
