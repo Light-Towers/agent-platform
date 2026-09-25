@@ -22,20 +22,10 @@ from typing import Any, Callable
 from langchain_core.tools import StructuredTool
 
 from agent_core.monitor import monitor as _global_monitor
+from agent_core.observability.summary import summarize_args, truncate
 from agent_core.observability.tool_result import ToolOutcome, ToolResult
 
 __all__ = ["observe_tool_lc"]
-
-_DETAIL_TRUNCATE = 512
-
-
-def _truncate(text: str) -> str:
-    return text if len(text) <= _DETAIL_TRUNCATE else text[:_DETAIL_TRUNCATE] + "…<truncated>"
-
-
-def _summarize_args(args: dict[str, Any]) -> dict[str, str]:
-    """入参摘要：逐值 repr 截断（全量 args/result 全文在 Trajectory，不入事件）。"""
-    return {k: _truncate(repr(v)) for k, v in (args or {}).items()}
 
 
 def observe_tool_lc(
@@ -56,7 +46,7 @@ def observe_tool_lc(
     display = (display_names or {}).get(tool.name, tool.name)
 
     def _report_start(kwargs: dict[str, Any]) -> None:
-        mon.report_tool(tool_name=display, args=_summarize_args(kwargs))
+        mon.report_tool(tool_name=display, args=summarize_args(kwargs))
 
     def _report_outcome(
         outcome: str | ToolOutcome,
@@ -69,7 +59,7 @@ def observe_tool_lc(
             tool_name=display,
             outcome=outcome.value if isinstance(outcome, ToolOutcome) else outcome,
             error_class=error_class,
-            detail=_truncate(detail),
+            detail=truncate(detail),
             duration_ms=duration_ms,
         )
 

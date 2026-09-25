@@ -18,6 +18,10 @@ import time
 from collections.abc import Awaitable, Callable
 from typing import Any, Protocol
 
+from agent_core.monitor import monitor as _global_monitor
+from agent_core.observability import ToolOutcome, ToolResult
+from agent_core.observability.summary import summarize_args, truncate
+
 from agent_runtime.circuit_breaker import CircuitBreaker
 from agent_runtime.context.tool_result import ToolResultCompressor
 
@@ -284,3 +288,59 @@ class AuditMiddleware:
                 await self._sink(name, logged_kwargs, result, error, time.monotonic() - t0)
             except Exception:
                 logger.warning("audit sink 失败（已忽略）", exc_info=True)
+
+
+class ToolObservedMiddleware:
+    """观测中间件（方案 v3 §4 第二装配点）：Skill 调用 → tool_start / tool_outcome 事件。
+
+    与 federation ``observe_tool`` 共用同一事件契约（agent_core.monitor 单例、
+    ToolResult 语义、duration_ms 追加字段、args 逐值 repr 截断 512）——两装配点、
+    单一实现，事件下游（WS / OTel / Langfuse）无感复用。
+
+    - 普通返回 → success；Skill 返回 ``ToolResult`` → 其 outcome 并转发 text
+      （与 observe_tool 判定规则一致）；
+    - 外抛 → exception（error_class=类型名）后原样 re-raise（不改变链上
+      Guard/CircuitBreaker 的降级语义——装配顺序决定观测的是哪一层的最终结果，
+      建议挂链首位以记录整链最终 outcome）。
+    """
+
+    def __init__(
+        self,
+        *,
+        monitor: Any | None = None,
+        display_names: dict[str, str] | None = None,
+    ) -> None:
+        self._monitor = monitor if monitor is not None else _global_monitor
+        self._display_names = display_names or {}
+
+    async def around(self, name: str, kwargs: dict[str, Any], call_next: CallNext) -> Any:
+        display = self._display_names.get(name, name)
+        self._monitor.report_tool(tool_name=display, args=summarize_args(kwargs))
+        start = time.monotonic()
+        try:
+            result = await call_next(name, kwargs)
+        except Exception as exc:
+            self._monitor.report_tool_outcome(
+                tool_name=display,
+                outcome=ToolOutcome.EXCEPTION.value,
+                error_class=type(exc).__name__,
+                detail=truncate(str(exc)),
+                duration_ms=round((time.monotonic() - start) * 1000, 1),
+            )
+            raise
+        duration_ms = round((time.monotonic() - start) * 1000, 1)
+        if isinstance(result, ToolResult):
+            self._monitor.report_tool_outcome(
+                tool_name=display,
+                outcome=result.outcome.value,
+                error_class=result.error_class,
+                detail=truncate(result.detail),
+                duration_ms=duration_ms,
+            )
+            return result.text
+        self._monitor.report_tool_outcome(
+            tool_name=display,
+            outcome=ToolOutcome.SUCCESS.value,
+            duration_ms=duration_ms,
+        )
+        return result
