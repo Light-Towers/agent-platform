@@ -1,102 +1,99 @@
 # 方案：Tool 埋点收口（单一实现 + 全局装配 + 门禁）
 
-> 状态：**v2 修订稿，待评审**（未动代码）。按 AGENTS.md「所有代码优化/重构必须先制定方案」红线立项。
+> 状态：**v3 修订稿，待评审定板**（未动代码）。按 AGENTS.md「所有代码优化/重构必须先制定方案」红线立项。
 > 日期：2026-09-25 · 来源：可观测性审计（同日会话，另见 callbacks 断线修复）
-> 修订记录：v1 自审修正收口点假设（B'）；**v2 吸收外部评审 7 条建议**——修正 outcome 枚举事实错误、补包装栈定义、收口点扩为全集、新增 outcome 覆写钩子、eval 基线同步、截断下沉 monitor 层。v1 的三处事实错误（收口点假设 / outcome 枚举 / 异常路径可达性）已全部实测修正。
+> 修订记录：
+> - v1：初稿（收口点假设有误）；
+> - v1.1 自审：发现 main_agent 静态列表旁路；
+> - v2：吸收外部评审一（7 条）——outcome 枚举实测修正、包装栈定义、桥接工具旁路、eval 口径、截断下沉 monitor、SkillMiddleware、lint 词边界；
+> - **v3：吸收外部评审二（本轮）**——C1 收口点前提再修正（3 个 subagent 直引 @tool 对象 + bridge 直引，实测坐实）、W1 包装器下沉 kernel（lint 自家判自家红 + 避免两份实现）、C3 tool_name/args 取值漂移（"无感兼容"降级为"结构兼容+取值审计"）、W2 计数订正（27 处/8 文件）、W3 ragflow 疑似死代码改"确认后删除"、S1 feature flag 替代双跑重复、S2 按工具原子合并、W4 sync/async 双路补全。
 
 ## 1. 背景与问题
 
 可观测性审计发现 tool 级埋点存在「接线散落」反模式，违反 AGENTS.md 横切关注点原则（三层齐备才算全局解）：
 
-1. **单一实现缺失**：`agent_federation/tools/` 约 **30 处**手写 `monitor.report_tool(...)` / `monitor.report_tool_outcome(...)`（db_tools / zhiku_tools / ragflow_tools / tavily_tool / pdf_tools / markdown_tools / upload_file_read_tool / _timeout.py 等 ~12 个文件）。每写一个新工具要记得埋 2-4 处点，漏埋无感知。
-2. **全局装配缺失**：事件虽经 `EventBus → OTelSpanSink → OTLP → Langfuse` 可达后端，但上报的正确性靠每个工具作者"记得调"，无构造保证。
-3. **覆盖缺口**：`agent_server` 的 tool/skill 执行完全无 tool 级事件；federation 的 args 多为摘要（部分传 `{}`），全量 args/result 只在 Trajectory。
-4. **强制门禁缺失**：无 lint 规则拦截未来新工具继续手写散点埋点。
+1. **单一实现缺失**：手写 `monitor.report_tool(...)` / `monitor.report_tool_outcome(...)` **实测 27 处 / 8 文件**（db_tools ×11、zhiku_tools ×7、_timeout ×3、ragflow_tools ×2、markdown/pdf/tavily/upload 各 1）。每写一个新工具要记得埋 2-4 处点，漏埋无感知。
+2. **全局装配缺失**：上报正确性靠每个工具作者"记得调"，无构造保证。
+3. **覆盖缺口**：`agent_server` 的 skill 执行无 tool 级事件；federation args 多为人工精选子集甚至 `{}`，全量 args/result 只在 Trajectory。
+4. **强制门禁缺失**：无 lint 规则拦截散点埋点回归。
 
-## 2. 现状事实基线（v2 实测，方案全部决策以此为据）
+## 2. 现状事实基线（全部有当场 grep 证据）
 
-- **outcome 实测全集**（生产代码）：`empty` ×4 / `exception` ×6 / `guarded` ×3 / `degraded` ×2 / `timeout` ×2。**无 success、无 error**（v1 所写 "error" 实为 exception、漏 guarded）。
-- **成功路径现状无 outcome 事件**：`_timeout.py` docstring 自述"正常不发事件，success 由调用方或 runner 补"——该补报机制未见实现。引入 success 是**从无到有**的新增语义，非口径漂移。
-- **异常被吞（阻塞级事实）**：`_timeout.py:36-53` 把 TimeoutError / ValueError / Exception 全部转为错误字符串返回、不外抛。**包装器若只能看到"正常返回"，任何基于异常的 error 上报路径都走不通**——分支语义必须显式承载（见 §3.2）。
-- **挂载路径全集（批 0 盘点前已知 3 条 + 1 条未知）**：
-  1. `main_agent.py:271` 静态列表直接 import 工具对象（默认主 Agent 工具集）；
-  2. `tool_registry.get_tools_for_roles()`（动态角色，main_agent.py:364）；
-  3. `planners/agentic_runtime_bridge.py:90 build_bridged_langchain_tools()`：StructuredTool.from_function 动态构建桥接工具，**完全绕开 registry**（经 RuntimeToolCaller → runtime.delegate 治理）；
-  4. `ragflow_tools` 2 工具不在 TOOL_REGISTRY（埋点却在 ragflow_tools.py:31,69）——挂载路径未知，批 0 盘点。
-- **消费方**：`agent_federation/evaluation/run_eval.py:32,47-51,187` 直接订阅 `tool_outcome` 统计"工具四分类"（注意：是 federation 的 evaluation/，非根 eval/）。
+- **挂载/直引路径全集（v3 实测 `grep "^from tools\.|^import tools\."`）**——同一 @tool 对象存在**多路径触达**，收口必须覆盖全部：
+  1. `agent/main_agent.py:30-33`：静态列表直引 4 个工具（code/markdown/pdf/upload）；
+  2. `agent/tool_registry.py`（TOOL_REGISTRY 7 项，经 `get_tools_for_roles` 动态取用，main_agent.py:364 调用）；
+  3. **`agent/subagents/database_query_agent.py:2` 直引 execute_sql_query / get_table_data / list_sql_tables**；
+  4. **`agent/subagents/knowledge_base_agent.py:2` 直引 zhiku_retrieve**；
+  5. **`agent/subagents/network_search_agent.py:4` 直引 internet_search**；
+  6. `planners/agentic_runtime_bridge.py:141-143` 直引 generate_markdown / convert_md_to_pdf / read_file_content（+ :90 `StructuredTool.from_function` 动态桥接工具）；
+  - **双重挂载实例**：`execute_sql_query` 同时在 TOOL_REGISTRY（:24）与 subagent 直引——若只包 `_resolve`，同工具"经 registry 有事件、经 subagent 无事件"，静默观测回归。
+- **outcome 实测全集**：`empty` ×4 / `exception` ×6 / `guarded` ×3 / `degraded` ×2 / `timeout` ×2；**无 success**（成功路径现状无事件）。注：多数工具**体内 catch 异常后 return 降级文本**（db_tools.py:140-143 `except DBAPIError → outcome="exception"` 后 return；zhiku_tools.py:108-163 同构）——包装器外层只见"正常返回"。
+- **tool_name 取值现状**：人工中文可读名（markdown_tools.py:29 "Markdown文档生成工具"、db_tools.py:117 "数据库表名查询工具：list_sql_tables"）；args 为人工精选子集甚至 `{}`。
+- **ragflow_tools 疑似死代码**：全仓无 import（rawflow/chat_assistant_demo.py 自建 ragflow_sdk 客户端，非引用该模块），其 2 处埋点为死埋点。
+- **消费方**：`agent_federation/evaluation/run_eval.py:32,47-51,187` 订阅 `tool_outcome` 统计"工具四分类"。
 
 ## 3. 方案
 
 ### 3.1 比选
 
-| 方案 | 做法 | 优点 | 缺点 | 结论 |
-|---|---|---|---|---|
-| A. 装饰器 `@tool_observed(name=)` | 每个 tool 函数加一行装饰器 | 显式、可读 | 仍需逐个记得加（退化为约定） | 否 |
-| **B'. 工具构造出口全集收口** | 所有挂载路径统一经一个 `build_tool()` 工厂取用并 wrap | 构造保证不可漏接 | 需先完成挂载面盘点 | **采用** |
-| C. OTel 官方 instrumentation | 自动捕 tool run | 零代码 | OTel span 而非业务事件（WS 前端拿不到）；覆盖受第三方包限制 | LLM/框架层补充，不替代 B' |
-
-### 3.2 核心设计
-
-**包装栈（自外向内，v2 明确定义）**：
-
-```
-@tool → build_tool() 包装器 → [原装饰链：with_timeout 等] → 裸函数
-```
-
-- 包装器在**最外层**产生 `tool_start`（含 args 摘要），调用结束后产生 `tool_outcome`；
-- **outcome 判定优先级**：分支覆写 > 异常分类 > 默认 success：
-  1. **分支覆写钩子**（R1 核心）：提供 contextvar `tool_ctx.mark("degraded" | "empty" | "guarded")`——工具函数体内遇到业务分支时标记，包装器结束时优先采用覆写值。这给 empty/degraded/guarded 这类"正常返回但非成功"的分支语义一条**正式表达通道**；
-  2. `_timeout.py` 改造为覆写钩子的第一个使用方：其 timeout/guarded/exception 分支从"直接调 monitor"改为"标记 tool_ctx"（上报动作统一收归包装器）；
-  3. 未覆写且调用外抛 → `report_tool_outcome(exception, error_class=classify_exception(exc).value)`（复用 `agent_core.resilience.ErrorClass`）；
-  4. 默认 → success。
-- **langchain 工具元数据保留**：`_resolve` 返回的是 `@tool` 产物（StructuredTool，pydantic 实例）。包装不得替换 StructuredTool 外壳——对 `_run` / `coroutine` 内侧包装（`StructuredTool` → wrapper → 原装饰链 → fn），或以 `create_model` 重建时透传 args_schema/name/description；单测断言包装前后 `name/description/args_schema` 逐字段相等。
-
-### 3.3 收口点全集（v2 修正：四处，非一处）
-
-| # | 收口点 | 处置 |
+| 方案 | 做法 | 结论 |
 |---|---|---|
-| 1 | `tool_registry._resolve()` | 统一经 build_tool() 包装 |
-| 2 | `main_agent.py:271` 静态列表 | **改为经 tool_registry 取用**（消除旁路；工具定位单一真相源） |
-| 3 | `agentic_runtime_bridge.build_bridged_langchain_tools()` | 桥接工具同样经 build_tool() 包装（或在其 RuntimeToolCaller.delegate 层承接——批 0 定） |
-| 4 | ragflow_tools 等未在册工具 | 批 0 盘出挂载路径后收编入 registry |
+| A. 装饰器逐个加 | 每工具一行 | 否——退化为约定 |
+| **B''. 构造/出口全集收口 + 包装器下沉 kernel** | 包装器实现收敛 `agent_core.observability`；全部挂载点改经统一工厂取用 | **采用** |
+| C. OTel 官方 instrumentation | 自动捕 span | LLM/框架层补充，不替代 B'' |
+
+### 3.2 核心设计（v3）
+
+**① 包装器实现下沉 kernel（W1）**：`observe_tool()` 置于 `packages/agent-core/agent_core/observability/`——federation `_resolve` 与 agent_server `SkillRegistry` 各为**装配点**而非实现副本；批 3 lint 天然命中 app 层散点而不命中 kernel，消除"自家门禁判自家红"。
+
+**② 收口形态**：全部挂载点（§2 六处）统一改为"经注册表/工厂取工具"；工厂在返回前对 **StructuredTool 内侧**包装（`.copy(update=...)` 或重建），**sync（tool.func）与 async（tool.coroutine）双路分别覆盖**，包装前后 name/description/args_schema 逐字段断言相等。`functools.wraps` 对 pydantic 实例不适用，禁用。
+
+**③ outcome 语义保真（C2，二选一定板）**：通用包装器只能观察"正常返回"，而现工具靠体内 catch 上报富 outcome。两条路线：
+- **(a) ToolResult 结构化返回协议**（推荐，长期正解）：工具返回 `ToolResult(outcome=..., detail=...)`（或抛异常），包装器从返回值读取语义；富语义工具渐进改造；
+- (b) 短期过渡：保留 contextvar `tool_ctx.mark(outcome)` 覆写钩子（v2 设计），`_timeout.py` 三分支改为钩子使用方。
+- **目标修正（重要）**：「零埋点」仅对简单工具（纯成功/异常二态）成立；**富语义工具的 outcome 标记是正式 API（ToolResult/mark），不是散点埋点**——数量与现手写埋点相当但语义统一、可 lint 管辖。§2 目标据此重述。
+
+**④ 下游取值兼容（C3）**：包装器派生 `tool_name` 取自 `tool.name`（英文），与现中文展示名不一致——附 **name→display_name 映射表**（迁移期包装器优先查表）；args 先经 monitor 层截断（512 字符）+ 摘要/hash（复用 `user_query_hash`）再入事件。对外口径改为：**"事件字段结构兼容；取值语义变更（英文名/全量摘要 args），需下游（WS 前端 / Langfuse 看板 / run_eval）审计"**——放弃"下游无感"表述。
+
+**⑤ ragflow_tools**：批 0 确认死代码后**删除**（非收编）。
 
 ## 4. 影响面
 
-- `applications/agent_federation/agent/tool_registry.py`：新增 `build_tool()` 工厂 + `_resolve` 接入；
-- `applications/agent_federation/agent/main_agent.py`：静态工具列表（:271）改经 registry 取用；
-- `applications/agent_federation/planners/agentic_runtime_bridge.py`：桥接工具接入包装（归属细节批 0 定）；
-- `applications/agent_federation/tools/*.py`：摘除 ~30 处手写埋点（12 文件）；
-- `applications/agent_federation/tools/_timeout.py`：三分支改为 tool_ctx 覆写（上报动作收归包装器）；
-- `packages/agent-core/agent_core/monitor.py`：**新增** args 截断/脱敏（横切下沉到单一实现，见 §6）+ 事件新增 `duration_ms` 字段（包装器天然可测，向后兼容追加）；
-- `applications/agent_federation/evaluation/run_eval.py`：批 2 同步更新工具统计口径（新增 success 类目 + 四分类→新枚举映射）；
-- `applications/agent_server`：接入方式改为 **SkillRegistry middleware**（`skills/registry.py:224` 已有洋葱链扩展点，实现为 `ToolObservedMiddleware`，不改 registry 本体）；
-- 前端（P2 评估）：agent_server 桥接链 monitor 事件经 evidence StreamEvent 流向前端（deterministic.py:191 出口已核实），success 事件是否透出/如何展示批 0 一并确认；
-- 测试白名单：`tests/unit/test_agentic_planner.py`（fake_core 自证）、`api/monitor.py`（re-export 层）、evaluation 订阅处。
+- `packages/agent-core/agent_core/observability/`：**新增** `observe_tool()` 包装器 + args 截断/摘要单一实现 + StructuredTool sync/async 双路包装（估 150-250 行 + 测试）；
+- `agent_federation/agent/tool_registry.py`：装配点接入 observe_tool；
+- `agent_federation/agent/main_agent.py:30-33`、`agent/subagents/{database_query,knowledge_base,network_search}_agent.py`、`planners/agentic_runtime_bridge.py:141-143`：直引改经 registry/工厂取用（消除 6 处旁路）；
+- `agent_federation/tools/*.py`：摘除 27 处手写埋点（按工具原子渐进，见 §5）；
+- `agent_federation/tools/_timeout.py`：三分支改 ToolResult/mark；
+- `agent_federation/tools/ragflow_tools.py`：确认死代码后删除；
+- `agent_server`：SkillRegistry 侧接入同一 kernel 包装器（装配点，非第二实现）；
+- `agent_federation/evaluation/run_eval.py`：工具统计口径同步（success 新增 + 映射后名称）；
+- 下游审计：WS 前端 / Langfuse 看板的 tool_name 聚合维度；
+- 测试白名单：`tests/unit/test_agentic_planner.py`（fake_core）、`agent_core/observability` 自身、`api/monitor.py`（re-export）、evaluation 订阅处。
 
-## 5. 迁移策略（4 批，每批独立 commit，可独立回滚）
+## 5. 迁移策略（S2：按工具原子合并，替代批次横切）
 
-0. **批 0（前置盘点）**：全量挂载面矩阵（tools/ 全部导出 × 全部挂载点，含 ragflow 归属、桥接工具、subagent 工具集归属）+ evidence 前端桥接链确认 + eval 基线快照留底（批 2 对比用）。
-1. **批 1（落地不摘除）**：`build_tool()` + tool_ctx 覆写钩子落地；main_agent 静态列表改经 registry；单测（EventBus 断言 start+outcome、覆写优先级、元数据逐字段相等、_timeout 三分支经钩子上报）；手写埋点暂留双跑，事件去重（`instrumented=True` 注册标记）。
-2. **批 2（摘除）**：删除 tools/ 全部手写埋点；**eval 口径同步**（run_eval 工具统计纳入 success，基线重录并注明"新增 success 维度"而非漂移修正）。
-3. **批 3（门禁）**：`scripts/lint_architecture.py` 增规则——`applications/*/tools/**`、`applications/*/agent/**`、`applications/*/planners/**` 裸调 `monitor.report_tool*` 即失败（**正则词边界**，`report_tool` 是 `report_tool_outcome` 前缀）；放行 `tool_ctx.mark`；白名单：`agent_core/monitor.py`、`api/monitor.py`（re-export）、`tests/`、evaluation 订阅处；计入 `make ci`，自证（故意裸调 → CI 红）。
+0. **批 0（前置盘点）**：挂载矩阵终版（工具 × 路径 × 双重挂载标记）+ ragflow 死代码确认 + eval 基线快照 + 下游 tool_name 消费方审计清单。
+1. **批 1（kernel 落地）**：`agent_core.observability.observe_tool()` + 单测（EventBus 断言 start+outcome、sync/async 双路、元数据逐字段、截断/映射）。
+2. **批 2（按工具收编，原子粒度）**：逐工具执行「所有挂载路径改经工厂 → 双跑验证（feature flag `TOOL_OBS_ENABLED` 可随时切回手写埋点，S1）→ 删该工具手写埋点 → 该工具挂载矩阵回归测试绿」四步闭环；全部工具完成后进入批 3。避免"包装器未覆盖某路径、手写已删"的观测空窗。
+3. **批 3（门禁）**：lint 规则——app 层裸调 `monitor.report_tool*` 即失败（词边界），kernel observability / api/monitor.py / tests / evaluation 订阅豁免；`tool_ctx.mark`/ToolResult 为合法通道；自证（故意裸调 → CI 红）。
 
 ## 6. 验收标准
 
-- [ ] `grep -rnE "monitor\.report_tool(_outcome)?\(" applications/ --include="*.py"` 仅命中白名单（0 个生产代码命中）；
-- [ ] 行为级：单测覆盖四类路径——成功→success、函数内 mark("degraded")→degraded、外抛→exception、_timeout 超时→timeout；EventBus 各采集到 `tool_start` ×1 + `tool_outcome` ×1，data 含 tool_name/outcome/error_class/**duration_ms**；
-- [ ] 包装前后 StructuredTool 元数据逐字段相等（name/description/args_schema）；
-- [ ] 事件 schema 向后兼容：`monitor_event` 既有字段不变，`duration_ms` 为追加字段；
-- [ ] args 截断/脱敏实现在 **monitor 层单一实现**（`_emit` 统一截断 512 字符 + 摘要），不在各包装器重复；
-- [ ] eval 基线重录完成，run_eval 工具统计含 success 类目且文档注明口径变化；
-- [ ] lint 门禁自证通过（词边界正确：`report_tool_outcome` 调用不被 `report_tool` 规则误伤漏网）；
-- [ ] `make ci` 全绿（10 个 pytest session + lint + eval）。
+- [ ] grep 口径：app 层（applications/**，除白名单）零生产 `monitor.report_tool*` 命中；kernel observability 豁免；
+- [ ] **挂载矩阵回归测试**：每工具 × 每挂载路径断言成对 tool_start+tool_outcome（封死 C1 旁路）；
+- [ ] **outcome 保真测试**：catch-return 工具包装后仍能区分 empty/degraded/timeout/guarded/exception（封死 C2）；
+- [ ] **兼容测试**：name→display_name 映射生效、args 经 512 截断+摘要、StructuredTool 元数据逐字段相等（封死 C3/W4）；
+- [ ] **lint 自证**：非白名单裸调 → CI 红；kernel 包装器不误伤（封死 W1）；
+- [ ] eval 基线重录（success 新增 + 名称映射注明）；
+- [ ] `make ci` 全绿（10 session + lint + eval）。
 
 ## 7. 未决问题 → 评审定板
 
 | # | 事项 | 建议定板值 |
 |---|---|---|
-| 1 | agent_server skill 侧接入方式 | **SkillMiddleware**（复用现成洋葱链，非改 SkillRegistry 本体） |
-| 2 | args 截断阈值与实现位置 | **512 字符，monitor `_emit` 层单一实现** |
-| 3 | outcome 枚举 | **Literal["success","empty","exception","guarded","degraded","timeout"]** + `error_class` 保留业务字符串扩展位 |
-| 4 | 桥接工具（agentic_runtime_bridge）包装层级 | 批 0 定（build_tool 包装 vs delegate 层承接） |
-| 5 | success 事件前端透出策略 | 批 0 随 evidence 桥接链一并确认 |
+| 1 | outcome 语义承载 | **ToolResult 协议为目标态 + mark 钩子为过渡**（C2 二选一 → 两者并存分阶段） |
+| 2 | args 截断阈值/位置 | 512 字符，monitor `_emit` 层单一实现 |
+| 3 | outcome 枚举 | `Literal["success","empty","exception","guarded","degraded","timeout"]` + error_class 扩展位 |
+| 4 | 桥接工具包装层级 | 批 0 定（build_tool 包装 vs delegate 层承接） |
+| 5 | success 事件前端透出策略 | 批 0 随 evidence 桥接链确认 |
+| 6 | 工作量重估 | 包装器下沉 kernel + ToolResult + 双路包装 ≈ **150-250 行 + 全套测试**（原 ~40 行严重低估，采纳 W4） |
