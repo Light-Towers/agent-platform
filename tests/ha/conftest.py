@@ -21,9 +21,12 @@ PG_URL = os.environ.get(
 )
 
 # 门禁语义（P0 审计修复，2026-09-25）：CI 环境下 PG 不可用 = FAIL 而非 SKIP。
-# 本 workflow 名为 agent-platform-ha——"15 skipped 但 green" 会让人误以为 HA 已验证。
+# 本 workflow 名为 agent-platform-ha——"HA 测试 skipped 但 green" 会让人误以为 HA 已验证。
 # GitHub Actions / 任何设置了 CI=true 的环境必须提供真实 PG；本地开发保留 skip。
-_IN_CI = os.environ.get("CI", "").strip().lower() in {"true", "1"}
+_IN_CI = any(
+    os.environ.get(k, "").strip().lower() in {"true", "1"}
+    for k in ("CI", "GITHUB_ACTIONS")
+)
 
 from agent_runtime import db as _db
 from agent_runtime.planner.durability_pg import (
@@ -63,14 +66,16 @@ async def pg_pool():
     """
     if sys.platform == "win32":
         if _IN_CI:
-            pytest.fail("Windows CI 不支持 HA 测试（psycopg ProactorEventLoop），应使用 Linux runner")
+            pytest.fail("Windows CI 不支持 HA 测试（psycopg ProactorEventLoop），应使用 Linux runner；与 PG 可达性无关")
         pytest.skip("Windows 下 psycopg ProactorEventLoop 不可用，HA 测试需真实 PG（Linux CI 覆盖）")
     try:
         pool = await _db.init_pool(PG_URL)
     except Exception as exc:
+        # 归因信息显式带异常类型（W-3）：区分 PG 不可达 / 事件循环 / 权限等根因
+        kind = type(exc).__name__
         if _IN_CI:
-            pytest.fail(f"CI 环境必须提供可用 PostgreSQL（{PG_URL}），init_pool 失败：{exc!r}")
-        pytest.skip(f"未检测到可用 PostgreSQL（{PG_URL}）：{exc!r} —— HA 测试需真实 PG，Linux CI 自动覆盖")
+            pytest.fail(f"CI 环境必须提供可用 PostgreSQL（{PG_URL}），init_pool 失败 [{kind}]：{exc}")
+        pytest.skip(f"未检测到可用 PostgreSQL（{PG_URL}）[{kind}]：{exc} —— HA 测试需真实 PG，Linux CI 自动覆盖")
     if pool is None:
         if _IN_CI:
             pytest.fail(f"CI 环境 init_pool 返回 None（PG 未配置），禁止以 skip 掩盖：{PG_URL}")
@@ -80,6 +85,23 @@ async def pg_pool():
         await conn.execute("TRUNCATE side_effects, execution_events, execution_checkpoints, execution_leases, idempotency_keys")
     yield pool
     await _db.close_pool()
+
+
+@pytest.fixture(scope="session")
+def pg_gate():
+    """PG 可用性门禁策略的**单一来源**（W-3，2026-09-25）。
+
+    HA 相关测试文件判定 PG 环境一律经本 fixture，禁止各自复制 _IN_CI /
+    skip/fail 逻辑（此前 conftest 与 test_migrations_real_pg.py 两份复制已漂移，
+    且宽 except 把 Windows 事件循环问题误诊为「缺 PG」）。归因信息由调用方
+    拼入 fail/skip 文案（须带异常类型名）。
+    """
+    def _gate(*, fail_reason: str, skip_reason: str) -> None:
+        if _IN_CI:
+            pytest.fail(fail_reason)
+        pytest.skip(skip_reason)
+
+    return _gate
 
 
 @pytest_asyncio.fixture
