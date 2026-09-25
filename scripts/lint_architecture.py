@@ -160,6 +160,41 @@ def check_toplevel_package_clashes() -> list[str]:
     return violations
 
 
+# ---------------------------------------------------------------------------
+# 批 3 架构不变量：tool 事件上报唯一出口 = agent_core.observability.observe_tool。
+# applications/** 生产代码禁止裸调 monitor.report_tool / monitor.report_tool_outcome
+# （散点埋点反模式，见 docs/plans/plan-tool-instrumentation-choke-point-2026-09-25.md
+# §5 批 3）；outcome 语义经 ToolResult 返回承载（v3.1 定板）。
+# 作用域仅 applications/**：kernel（agent_core/observability）为合法实现位；
+# tests/ 由作用域排除；evaluation 订阅走 monitor.on 非本模式，天然不命中。
+# ---------------------------------------------------------------------------
+_TOOL_MONITOR_PATTERN = re.compile(r"monitor\.report_tool(?:_outcome)?\s*\(")
+_TOOL_MONITOR_WHITELIST: tuple[str, ...] = ()
+
+
+def check_tool_monitor_scatter() -> list[str]:
+    """app 层禁止裸调 monitor.report_tool*（散点埋点）；返回违规描述列表。"""
+    violations: list[str] = []
+    for py_file in ROOT.rglob("*.py"):
+        rel = py_file.relative_to(ROOT).as_posix()
+        if not rel.startswith("applications/"):
+            continue
+        if any(p in rel for p in (".venv", "__pycache__", ".ruff_cache", ".egg-info",
+                                   ".codeartsdoer", ".codebuddy")):
+            continue
+        if "/tests/" in rel:
+            continue
+        if any(rel == w or rel.startswith(w) for w in _TOOL_MONITOR_WHITELIST):
+            continue
+        try:
+            for lineno, line in enumerate(py_file.read_text(encoding="utf-8").splitlines(), 1):
+                if _TOOL_MONITOR_PATTERN.search(line):
+                    violations.append(f"{rel}:{lineno}: {line.strip()}")
+        except Exception:
+            pass
+    return violations
+
+
 def main() -> int:
     rc = 0
     v1 = check()
@@ -190,6 +225,16 @@ def main() -> int:
         rc = 1
     else:
         print("P5 架构约束通过：无跨成员顶层包名冲突")
+
+    v4 = check_tool_monitor_scatter()
+    if v4:
+        print("批 3 架构约束违反：app 层禁止裸调 monitor.report_tool*（散点埋点）")
+        print("修复：工具经 tool_registry.get_tool() 取用，outcome 语义经 ToolResult 返回承载：")
+        for v in v4:
+            print(f"  {v}")
+        rc = 1
+    else:
+        print("批 3 架构约束通过：无白名单外散点 tool 埋点")
     return rc
 
 

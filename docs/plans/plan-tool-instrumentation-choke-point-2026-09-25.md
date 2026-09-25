@@ -78,7 +78,7 @@
 0. **批 0（前置盘点）**：挂载矩阵终版（工具 × 路径 × 双重挂载标记）+ ragflow 死代码确认 + eval 基线快照 + 下游 tool_name 消费方审计清单。
 1. **批 1（kernel 落地，2026-09-25 完成）**：`agent_core.observability`（ToolResult/ToolOutcome 协议 + `observe_tool` StructuredTool 双路包装，langchain 依赖隔离模式同 `llm/fallback_lc`）+ monitor `duration_ms` 追加字段 + 单测。
 2. **批 2（按工具收编，原子粒度）**：逐工具执行「所有挂载路径改经工厂 → 该工具体内 catch 分支改 ToolResult 返回 → 删该工具手写埋点 → 挂载矩阵回归测试绿」四步闭环（回退 = git revert，无 feature flag）；全部工具完成后进入批 3。
-3. **批 3（门禁）**：lint 规则——app 层裸调 `monitor.report_tool*` 即失败（词边界），kernel observability / api/monitor.py / tests / evaluation 订阅豁免；`tool_ctx.mark`/ToolResult 为合法通道；自证（故意裸调 → CI 红）。
+3. **批 3（门禁，2026-09-25 完成）**：`scripts/lint_architecture.py` 增 `check_tool_monitor_scatter()`——app 层裸调 `monitor.report_tool*` 即失败（词边界正则 `monitor\.report_tool(?:_outcome)?\s*\(`），kernel observability 天然豁免（作用域仅 applications/**）、tests/ 排除；合法通道 = ToolResult 返回；**自证通过**（注入违规 → CI 红 → 还原绿）。
 
 ## 6. 验收标准
 
