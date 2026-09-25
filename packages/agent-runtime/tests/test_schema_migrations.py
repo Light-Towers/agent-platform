@@ -55,11 +55,15 @@ class FakeCursor:
                 if "INSERT INTO schema_migrations" in sql and params:
                     max_v = max(max_v, params[0])
             return (max_v,)
-        if "information_schema.tables" in self._sql:
-            if "chunks" in self._conn._existing_tables:
-                return (1,)
-            return None
         return None
+
+    async def fetchall(self):
+        if "schema_migrations" in self._sql:
+            return [params for sql, params in self._conn.executed
+                    if "INSERT INTO schema_migrations" in sql and params]
+        if "information_schema.tables" in self._sql:
+            return [(name,) for name in self._conn._existing_tables]
+        return []
 
 
 class FakePool:
@@ -228,7 +232,8 @@ class TestExistingDatabase:
         from agent_runtime.migrations import runner as runner_mod
 
         migrations = _make_test_migrations(tmp_path)
-        conn = FakeConnection(existing_tables={"chunks"})
+        from agent_runtime.migrations.runner import _BASELINE_REQUIRED_TABLES
+        conn = FakeConnection(existing_tables=set(_BASELINE_REQUIRED_TABLES))
         pool = FakePool(conn)
 
         with (
@@ -254,9 +259,9 @@ class TestAlreadyUpToDate:
         from agent_runtime.migrations import runner as runner_mod
 
         migrations = _make_test_migrations(tmp_path)
-        conn = FakeConnection(existing_tables={"chunks"})
-        # 预设已有 v1 + v2 记录
-        conn.executed.append(("INSERT INTO schema_migrations ...", (2, "test2", "h")))
+        conn = FakeConnection(existing_tables=set())
+        # 预设已有 v1 + v2 记录；checksum 与 migration 文件一致。
+        conn.executed.append(("INSERT INTO schema_migrations ...", (2, "test2", migrations[1].checksum())))
         pool = FakePool(conn)
 
         with (
@@ -266,6 +271,117 @@ class TestAlreadyUpToDate:
             applied = await runner_mod.run_migrations(pool)
 
         assert len(applied) == 0
+
+
+
+class TestBaselineValidation:
+    """baseline 只能在完整 schema 上 stamp，半初始化库必须 fail-fast。"""
+
+    @pytest.mark.asyncio
+    async def test_partial_existing_schema_is_rejected(self, tmp_path: Path):
+        from agent_runtime.migrations import runner as runner_mod
+
+        migrations = _make_test_migrations(tmp_path)
+        conn = FakeConnection(existing_tables={"chunks"})
+        pool = FakePool(conn)
+
+        with (
+            patch.object(runner_mod, "discover", return_value=migrations),
+            patch.object(runner_mod, "_get_vector_dim", return_value=512),
+        ):
+            with pytest.raises(runner_mod.MigrationError, match="incomplete baseline schema"):
+                await runner_mod.run_migrations(pool)
+
+
+class TestChecksumValidation:
+    """已应用 migration 的 SQL 文件被修改后必须 fail-fast。"""
+
+    @pytest.mark.asyncio
+    async def test_checksum_mismatch_is_rejected(self, tmp_path: Path):
+        from agent_runtime.migrations import runner as runner_mod
+
+        migrations = _make_test_migrations(tmp_path)
+        conn = FakeConnection(existing_tables=set())
+        conn.executed.append(("INSERT INTO schema_migrations ...", (1, "test", "tampered")))
+        pool = FakePool(conn)
+
+        with (
+            patch.object(runner_mod, "discover", return_value=migrations),
+            patch.object(runner_mod, "_get_vector_dim", return_value=512),
+        ):
+            with pytest.raises(runner_mod.MigrationError, match="checksum mismatch"):
+                await runner_mod.run_migrations(pool)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("legacy_sentinel", ["stamped", ""], ids=["stamped", "empty"])
+    async def test_legacy_sentinel_checksum_is_backfilled(self, tmp_path: Path, legacy_sentinel: str):
+        """旧版 stamp 写入的哨兵 checksum → 不报错，启动时用文件 checksum 回填。"""
+        from agent_runtime.migrations import runner as runner_mod
+
+        migrations = _make_test_migrations(tmp_path)
+        conn = FakeConnection(existing_tables=set())
+        conn.executed.append(("INSERT INTO schema_migrations ...", (1, "test", legacy_sentinel)))
+        pool = FakePool(conn)
+
+        with (
+            patch.object(runner_mod, "discover", return_value=migrations),
+            patch.object(runner_mod, "_get_vector_dim", return_value=512),
+        ):
+            applied = await runner_mod.run_migrations(pool)
+
+        updates = [
+            p for s, p in conn.executed
+            if "UPDATE schema_migrations" in s and p and p[1] == 1
+        ]
+        assert updates == [(migrations[0].checksum(), 1)], "哨兵记录应被回填为文件真实 checksum"
+        # v1 已记录 → 仅增量 v2 被应用，不应因哨兵报 MigrationError
+        assert [m.version for m in applied] == [2]
+
+    @pytest.mark.asyncio
+    async def test_no_update_when_checksum_matches(self, tmp_path: Path):
+        """已应用记录 checksum 与文件一致 → 不产生任何 UPDATE（回填仅限哨兵）。"""
+        from agent_runtime.migrations import runner as runner_mod
+
+        migrations = _make_test_migrations(tmp_path)
+        conn = FakeConnection(existing_tables=set())
+        conn.executed.append(("INSERT INTO schema_migrations ...", (1, "test", migrations[0].checksum())))
+        pool = FakePool(conn)
+
+        with (
+            patch.object(runner_mod, "discover", return_value=migrations),
+            patch.object(runner_mod, "_get_vector_dim", return_value=512),
+        ):
+            applied = await runner_mod.run_migrations(pool)
+
+        assert [m.version for m in applied] == [2]
+        assert not any("UPDATE schema_migrations" in s for s, _ in conn.executed)
+
+
+class TestBaselineTableListDrift:
+    """_BASELINE_REQUIRED_TABLES 与 001_baseline.up.sql 必须一致。
+
+    漂移守卫：把新表并入 baseline 或重命名表时，若忘了同步手工清单，
+    应在测试阶段变红，而不是线上启动时 fail-fast。
+    """
+
+    def test_required_tables_match_baseline_sql(self):
+        import re
+
+        from agent_runtime.migrations.base import _MIGRATIONS_DIR
+        from agent_runtime.migrations.runner import _BASELINE_REQUIRED_TABLES
+
+        sql = (_MIGRATIONS_DIR / "001_baseline.up.sql").read_text(encoding="utf-8")
+        created = set(
+            re.findall(
+                r"CREATE TABLE IF NOT EXISTS\s+(?:public\.)?(\w+)",
+                sql,
+                flags=re.IGNORECASE,
+            )
+        )
+        assert created == set(_BASELINE_REQUIRED_TABLES), (
+            f"baseline SQL 与手工清单漂移: sql-only={sorted(created - set(_BASELINE_REQUIRED_TABLES))}, "
+            f"list-only={sorted(set(_BASELINE_REQUIRED_TABLES) - created)}"
+        )
 
 
 class TestMigrationFailure:
