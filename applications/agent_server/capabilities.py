@@ -25,7 +25,12 @@ from agent_runtime.circuit_breaker import CircuitBreaker
 from agent_runtime.mcp_client import MCPClientManager
 from agent_runtime.skills.dag import as_dag_skill
 from agent_runtime.skills.function import as_function_skill
-from agent_runtime.skills.middleware import AuditMiddleware, CircuitBreakerMiddleware, RetryMiddleware
+from agent_runtime.skills.middleware import (
+    AuditMiddleware,
+    CircuitBreakerMiddleware,
+    RetryMiddleware,
+    ToolObservedMiddleware,
+)
 from agent_runtime.skills.registry import SkillRegistry
 
 from agent_server.agent.state import AgentState
@@ -154,6 +159,8 @@ def build_registry(graph: Any | None = None) -> SkillRegistry:
     仅包裹 search（隔离故障域），search 实现不再内嵌 breaker。
     """
     middlewares = [
+        # 观测挂链首位（最外层）：记录整链最终 outcome（含 retry/熔断降级后）
+        ToolObservedMiddleware(),
         CircuitBreakerMiddleware(_get_breaker(), skill_names=("search",)),
         RetryMiddleware(max_retries=2, backoff_s=0.5),
         AuditMiddleware(_audit_sink, redact=True),
