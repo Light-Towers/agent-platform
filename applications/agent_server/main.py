@@ -29,7 +29,6 @@ from agent_runtime.planner.durability_pg import (
 )
 from agent_runtime.revert import RevertHandler
 from agent_runtime.skills.workflow import discover_workflows
-from agent_runtime.tracing import get_langfuse_callbacks
 from agent_runtime.trajectory import PgTrajectoryStore
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -355,11 +354,9 @@ async def lifespan(app: FastAPI):
     )
     # 绑定 delegate：graph 节点的 _invoke 此后经 runtime.delegate 调用
     delegate_ref.delegate = app.state.planner_runtime.delegate
-    app.state.callbacks = get_langfuse_callbacks(
-        public_key=settings.langfuse_public_key,
-        secret_key=settings.langfuse_secret_key,
-        host=settings.langfuse_host,
-    )
+    # Langfuse LLM 观测不在 lifespan 装配 callbacks：原 app.state.callbacks 装配后
+    # 无消费方（断线），已收敛到 build_chat_model() 构造期单点注入（覆盖 planner /
+    # graph / bind_tools 全部 LLM 调用路径），见 agent_server/agent/llm.py。
     # V3 Phase 2: ExecutionScheduler + ExecutionStatusStore（opt-in）
     if settings.scheduler_enabled:
         from agent_runtime.execution_scheduler import (
