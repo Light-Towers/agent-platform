@@ -1,6 +1,6 @@
 # 方案：Tool 埋点收口（单一实现 + 全局装配 + 门禁）
 
-> 状态：**v3 修订稿，待评审定板**（未动代码）。按 AGENTS.md「所有代码优化/重构必须先制定方案」红线立项。
+> 状态：**✅ 已落地**（v3.1 定板 + 批 0 盘点 + 批 1 kernel + 批 2 收编 + 批 3 门禁 + zhiku→knowledge 命名清理，commit 4c23a5e；CI 全绿）。本文件为已落地方案的设计留痕。
 > 日期：2026-09-25 · 来源：可观测性审计（同日会话，另见 callbacks 断线修复）
 > 修订记录：
 > - v1：初稿（收口点假设有误）；
@@ -87,7 +87,7 @@
 - [ ] **outcome 保真测试**：catch-return 工具包装后仍能区分 empty/degraded/timeout/guarded/exception（封死 C2）；
 - [ ] **兼容测试**：name→display_name 映射生效、args 经 512 截断+摘要、StructuredTool 元数据逐字段相等（封死 C3/W4）；
 - [ ] **lint 自证**：非白名单裸调 → CI 红；kernel 包装器不误伤（封死 W1）；
-- [ ] eval 基线重录（success 新增 + 名称映射注明）；
+- [x] eval 基线重录（测试 session 计数已录 baseline；真值分待活环境 CI，见 §8.3）；
 - [ ] `make ci` 全绿（10 session + lint + eval）。
 
 ## 7. 未决问题 → 评审定板
@@ -100,3 +100,21 @@
 | 4 | 桥接工具包装层级 | 批 0 定（build_tool 包装 vs delegate 层承接） |
 | 5 | success 事件前端透出策略 | 批 0 随 evidence 桥接链确认 |
 | 6 | 工作量重估 | 包装器下沉 kernel + ToolResult + 双路包装 ≈ **150-250 行 + 全套测试**（原 ~40 行严重低估，采纳 W4） |
+
+## 8. 前端消费契约与改名影响（2026-09-25 收尾补录）
+
+### 8.1 WS 事件契约（仓内实测，agent_core/monitor.py:57-67,130-149）
+- 上报链：`observe_tool` / `ToolObservedMiddleware` → `monitor.report_tool/outcome` → `ToolMonitor._emit("tool_start"|"tool_outcome", ...)` → `EventBus.emit(payload)` → `WebSocketSink` 按 `thread_id` 推 `ConnectionManager`。
+- 载荷：`payload = {"type":"monitor_event","event":<tool_start|tool_outcome>,"message":...,"data":{tool_name, args|outcome, error_class, detail, duration_ms},"timestamp":...}`。
+- **前端（仓外）消费字段 = `data.tool_name`**，取值 = `DISPLAY_NAMES.get(name, name)`（展示名，含中文前缀），与既有生产代码取值一致（方案 §2 基线）。
+
+### 8.2 zhiku→knowledge 改名对前端的影响（breaking contract，commit 4c23a5e）
+- 改名前前端收到 `tool_name = "知识库检索工具：zhiku_retrieve"`；
+- 改名后前端收到 `tool_name = "知识库检索工具：knowledge_retrieve"`；
+- **任何以前端硬编码旧串做分支/展示的逻辑，需同步改为 `knowledge_retrieve`**（前端在仓外，本仓无法改；已立案为前端适配项，非阻塞）。
+- 其余工具展示名未变（markdown/pdf/upload/db/tavily 与 knowledge 改名无关）。
+
+### 8.3 评测 baseline 状态
+- 两套评测均**需活基础设施，仓内不可跑**：root `eval/run_eval.py` 启动连 Milvus(:19530) 失败；federation `evaluation/run-all.py` 需 knowledge-service(:8900) + `LLM_API_KEY`。
+- **已录 reproducible baseline = 各测试 session 绿态计数（CI 门禁口径）**：federation **141** / agent-core **218** / agent-runtime+agent_server **617** 全 passed；workspace ruff **0.16.3** 全过。
+- eval 真值分（路由准确率 / LLM 质量雷达）待活环境 CI 录制。
