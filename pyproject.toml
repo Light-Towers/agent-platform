@@ -126,3 +126,11 @@ members = [
     "applications/knowledge-service",
     "applications/exhibition-agent",
 ]
+
+[tool.uv]
+# Windows 本机修复（2026-09-25）：pyarrow 24.0.0 在 Windows 上与
+# jwt→cryptography(rust) + sentence_transformers 依赖链（torch/datasets 等几十个
+# 原生扩展）同进程导入时，pyarrow 原生模块加载 access violation（确定性 segfault，
+# pyarrow 25.0.1 已修复）。resolver 出于未知原因拒绝升到 25，用约束下限强制。
+# Linux CI 不受 24 影响，升到 25 属常规 minor 升级。
+constraint-dependencies = ["pyarrow>=25.0.1"]
