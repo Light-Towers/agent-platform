@@ -54,7 +54,7 @@
 - 包装器判定规则：返回 `ToolResult` → 上报其 outcome 并转发 `text`；返回普通值 → **success**；外抛 → `exception`（error_class=类型名，复用 `classify_exception` 语义）并 re-raise；timeout 由 `_timeout.py` 返回 `ToolResult(outcome=timeout)`（隔离行为不变：仍不把异常抛给主管 Agent）；
 - **目标重述**：「零埋点」仅对纯二态工具（成功/抛异常）成立；富语义工具（empty/degraded/guarded）需把 catch-return 改造为 ToolResult 返回——这是**正式 API 替换散点埋点**（27 处 monitor 调用 → 27 处 ToolResult 返回），lint 可管辖、无 monitor 依赖。
 
-**④ 下游取值兼容（C3）**：包装器派生 `tool_name` 取自 `tool.name`（英文），与现中文展示名不一致——附 **name→display_name 映射表**（迁移期包装器优先查表）；args 先经 monitor 层截断（512 字符）+ 摘要/hash（复用 `user_query_hash`）再入事件。对外口径改为：**"事件字段结构兼容；取值语义变更（英文名/全量摘要 args），需下游（WS 前端 / Langfuse 看板 / run_eval）审计"**——放弃"下游无感"表述。
+**④ 下游取值兼容（C3）**：包装器派生 `tool_name` 取自 `tool.name`（英文），与现中文展示名不一致——附 **name→display_name 映射表**（迁移期包装器优先查表）；args 先经 monitor 层截断（512 字符，逐值 repr）+ 摘要（复用 `summarize_args`）再入事件。**不计算 hash**（v3 评审 W3 纠正：原承诺的 `user_query_hash` 未实现，已删除该承诺，以实际实现为准）。对外口径改为：**"事件字段结构兼容；取值语义变更（英文名/全量摘要 args），需下游（WS 前端 / Langfuse 看板 / run_eval）审计"**——放弃"下游无感"表述。
 
 **⑤ ragflow_tools**：批 0 确认死代码后**删除**（非收编）。
 
@@ -118,3 +118,8 @@
 - 两套评测均**需活基础设施，仓内不可跑**：root `eval/run_eval.py` 启动连 Milvus(:19530) 失败；federation `evaluation/run-all.py` 需 knowledge-service(:8900) + `LLM_API_KEY`。
 - **已录 reproducible baseline = 各测试 session 绿态计数（CI 门禁口径）**：federation **141** / agent-core **218** / agent-runtime+agent_server **617** 全 passed；workspace ruff **0.16.3** 全过。
 - eval 真值分（路由准确率 / LLM 质量雷达）待活环境 CI 录制。
+
+### 8.4 args 取值 breaking 登记 + hash 承诺撤回（评审 W3，2026-09-25）
+- **args 键名 breaking（与 §8.2 tool_name 同类）**：事件 `data.args` 取值由旧手写「中文精选子集甚至 `{}`」改为**函数参数英文键 + 全量 repr 摘要**（`observe_tool` / `summary.summarize_args`）。与 §8.2 同理属「结构兼容 + 取值变更」类 breaking，下游（WS 前端 / Langfuse 看板 / `run_eval`）须审计 args 键名取值；但 args 键名为动态参数名、无旧串硬编码分支风险，归为「下游取值审计」项而非「前端硬编码改造」项。
+- **hash 承诺撤回**：§3.2④ 原承诺「args + 摘要/hash（复用 `user_query_hash`）」中的 hash **未实现**——`summary.summarize_args` 仅做逐值 repr + 512 截断（见 `agent_core/observability/summary.py`）。v3 评审已删除该承诺，以实际实现为准，避免文档过度承诺（over-promise）。
+- 配套加固：`scripts/lint_architecture.py` 已封死散点埋点与 `@tool` 直引旁路（批 3 + S5），确保新增工具统一经 `get_tool()` 取用、args 摘要走单一实现。
