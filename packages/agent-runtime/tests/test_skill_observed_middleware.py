@@ -80,3 +80,24 @@ def test_display_name_mapping():
         mw.around("search", {}, call_next)
     )
     assert events[0]["data"]["tool_name"] == "网络搜索工具"
+
+
+async def test_cancelled_error_recorded_and_reraised():
+    """W2 修复回归（第二装配点）：asyncio.CancelledError 是 BaseException 子类，
+    except Exception 会漏掉它导致 start/outcome 不配对。ToolObservedMiddleware
+    须捕获 BaseException，仍上报 tool_outcome(exception) 并原样 re-raise。
+    """
+    import asyncio
+
+    mw, events = _make_mw_and_events()
+
+    async def call_next(name, kwargs):
+        raise asyncio.CancelledError()
+
+    with pytest.raises(asyncio.CancelledError):
+        await mw.around("search", {"q": "x"}, call_next)
+
+    outcomes = [e for e in events if e["event"] == "tool_outcome"]
+    assert len(outcomes) == 1, "取消异常下 start/outcome 必须配对，否则观测断点"
+    assert outcomes[0]["data"]["outcome"] == "exception"
+    assert outcomes[0]["data"]["error_class"] == "CancelledError"
