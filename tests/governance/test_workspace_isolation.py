@@ -43,13 +43,17 @@ class _FakeCur:
                 if r["id"] in set(ids) and r["workspace_id"] == ws
             ]
         if "FROM memories" in sql and "COUNT" not in sql:
-            # 过渡期读谓词为 tenant_id = ANY(%s)：p[0] 为租户作用域列表（含 legacy default）；
-            # 兼容旧标量形式（写入/精确删除路径）。
+            # 隔离契约（2026-09-25 P0 收紧后）：召回读谓词必须精确标量 tenant_id = %s。
+            # 作用域列表（legacy 过渡读 ANY(%s)）= 跨租户泄漏形态，在这里直接断言失败：
+            # 若有人把读谓词改回 ANY 作用域，隔离断言会在 setup 期变红而非假通过。
             tenant_param, ws = p[0], p[1]
-            scope = set(tenant_param) if isinstance(tenant_param, (list, tuple, set)) else {tenant_param}
+            assert not isinstance(tenant_param, (list, tuple, set)), (
+                f"读谓词退化为作用域列表（legacy 过渡读）→ 跨租户泄漏，禁止: {tenant_param!r}"
+            )
             return [
                 (r["content"], r["memory_type"], r["importance"], r["created_at"])
-                for r in self._db["memories"] if r["tenant_id"] in scope and r["user_id"] == ws
+                for r in self._db["memories"]
+                if r["tenant_id"] == tenant_param and r["user_id"] == ws
             ]
         return []
 
@@ -163,11 +167,12 @@ def _calls_with(pool, substr):
 
 
 def _params_contain(params, needle):
-    """检查 needle 是否出现在查询参数中（含嵌套列表，如 ANY 租户作用域）。"""
+    """检查 needle 是否出现在查询参数中（仅标量形态；作用域列表已列为泄漏形态）。"""
     for p in params:
         if isinstance(p, (list, tuple, set)):
-            if needle in p:
-                return True
+            raise AssertionError(
+                f"租户参数出现集合/列表形态（legacy 过渡读泄漏契约）: {p!r}"
+            )
         elif p == needle:
             return True
     return False
@@ -236,7 +241,7 @@ async def test_memory_recall_scoped_to_workspace(patch_embed):
     where_ws = [p for sql, p in pool.calls if "user_id" in sql]
     assert where_ws, "recall SQL 应含 user_id（承载 workspace_id）WHERE"
     assert all("wsA" in p for p in where_ws)
-    # 过渡期召回 tenant 以 ANY(作用域列表) 绑定，tenantA 应在作用域内
+    # 隔离契约：召回 tenant 精确标量绑定（tenant_id = %s），不带任何作用域列表
     assert all(_params_contain(p, "tenantA") for p in where_ws)
 
 
