@@ -138,6 +138,25 @@ def _score_memory(mtype: MemoryType, importance: float, created_at, now,
 
 # --- 内核 API（pg 模式，接收宿主 psycopg 池）-------------------------------
 
+def _to_pg_vector(embedding):
+    """list/tuple embedding → ``pgvector.Vector``（真实 PG 参数适配，P1 修复）。
+
+    pgvector 的 psycopg 适配器只为 ``Vector``/``numpy.ndarray`` 注册了 dumper；
+    宿主 embed_fn 返回的 plain list 会被适配成 ``double precision[]``，
+    在真实 PG 上 ``<=>`` 算子与 vector 列赋值均报
+    ``operator does not exist: vector <=> double precision[]``
+    （由 tests/ha/test_tenant_isolation_real_pg.py 行为级回归首次暴露）。
+    pgvector 未安装时惰性回退 list（内存 fake / 单测场景不受影响）。
+    """
+    if isinstance(embedding, (list, tuple)):
+        try:
+            from pgvector import Vector
+        except ImportError:
+            return list(embedding)
+        return Vector(embedding)
+    return embedding
+
+
 async def remember_typed(
     pool,
     user_id: str,
@@ -155,7 +174,8 @@ async def remember_typed(
     以兼容 ``app/memory/memory_backend.py`` 既有 SQL 与既有测试。
 
     embedding 必须由宿主层提供（内核不下沉 embedder，遵守 ADR-0004 约束：
-    ``extract_memory_facts`` 等 LLM 抽取留宿主层）。
+    ``extract_memory_facts`` 等 LLM 抽取留宿主层）。list/tuple 入参在 SQL
+    参数边界经 :func:`_to_pg_vector` 归一（真实 PG 参数适配）。
     """
     mtype = MemoryType.normalize(memory_type)
     importance = _clamp_importance(importance)
@@ -167,7 +187,7 @@ async def remember_typed(
         await conn.execute(
             "INSERT INTO memories (tenant_id, user_id, content, embedding, memory_type, importance) "
             "VALUES (%s, %s, %s, %s, %s, %s)",
-            (tenant_id, user_id, fact, embedding, mtype.value, importance),
+            (tenant_id, user_id, fact, _to_pg_vector(embedding), mtype.value, importance),
         )
 
 
@@ -320,7 +340,7 @@ async def _vector_search_memories(
             "FROM memories "
             "WHERE tenant_id = %s AND user_id = %s AND embedding IS NOT NULL "
             "ORDER BY embedding <=> %s LIMIT %s",
-            (tenant_id, user_id, embedding, k),
+            (tenant_id, user_id, _to_pg_vector(embedding), k),
         )
         return await cur.fetchall()
 
