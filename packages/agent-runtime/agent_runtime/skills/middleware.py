@@ -67,7 +67,10 @@ class CircuitBreakerMiddleware:
             return await call_next(name, kwargs)
         result = await self._breaker.call(lambda: call_next(name, kwargs), fallback=None)
         if result is None:
-            return [self._degraded_message]
+            # 熔断短路：返回 ToolResult(DEGRADED) 而非裸 list，
+            # 使 ToolObservedMiddleware 能区分降级与正常成功（封死 W1：降级误报 success）。
+            # Planner 侧对结果做 str() 包裹（graph.py:131/158），list/str 形态无关，入参不变。
+            return ToolResult(text=self._degraded_message, outcome=ToolOutcome.DEGRADED)
         return result
 
 
@@ -319,7 +322,7 @@ class ToolObservedMiddleware:
         start = time.monotonic()
         try:
             result = await call_next(name, kwargs)
-        except Exception as exc:
+        except BaseException as exc:
             self._monitor.report_tool_outcome(
                 tool_name=display,
                 outcome=ToolOutcome.EXCEPTION.value,
@@ -330,9 +333,10 @@ class ToolObservedMiddleware:
             raise
         duration_ms = round((time.monotonic() - start) * 1000, 1)
         if isinstance(result, ToolResult):
+            oc = result.outcome
             self._monitor.report_tool_outcome(
                 tool_name=display,
-                outcome=result.outcome.value,
+                outcome=oc.value if isinstance(oc, ToolOutcome) else str(oc),
                 error_class=result.error_class,
                 detail=truncate(result.detail),
                 duration_ms=duration_ms,

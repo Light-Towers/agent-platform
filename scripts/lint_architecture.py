@@ -168,7 +168,8 @@ def check_toplevel_package_clashes() -> list[str]:
 # 作用域仅 applications/**：kernel（agent_core/observability）为合法实现位；
 # tests/ 由作用域排除；evaluation 订阅走 monitor.on 非本模式，天然不命中。
 # ---------------------------------------------------------------------------
-_TOOL_MONITOR_PATTERN = re.compile(r"monitor\.report_tool(?:_outcome)?\s*\(")
+# 负向前瞻 (?<![\w.])：排除 foo_monitor / self._monitor 等误命中（仍精准匹配裸 monitor）
+_TOOL_MONITOR_PATTERN = re.compile(r"(?<![\w.])monitor\.report_tool(?:_outcome)?\s*\(")
 _TOOL_MONITOR_WHITELIST: tuple[str, ...] = ()
 
 
@@ -190,6 +191,62 @@ def check_tool_monitor_scatter() -> list[str]:
             for lineno, line in enumerate(py_file.read_text(encoding="utf-8").splitlines(), 1):
                 if _TOOL_MONITOR_PATTERN.search(line):
                     violations.append(f"{rel}:{lineno}: {line.strip()}")
+        except Exception:
+            pass
+    return violations
+
+
+_TOOL_REGISTRY_PATH = ROOT / "applications" / "agent_federation" / "agent" / "tool_registry.py"
+_DIRECT_IMPORT_PATTERN = re.compile(r"^\s*from\s+tools\.[\w.]*\s+import\s+(.+)$")
+
+
+def _load_registry_tool_names() -> set[str]:
+    """从 TOOL_REGISTRY 解析已注册 @tool 属性名（module:attr 的 attr 即工具名）。"""
+    try:
+        text = _TOOL_REGISTRY_PATH.read_text(encoding="utf-8")
+    except OSError:
+        return set()
+    names: set[str] = set()
+    for m in re.finditer(r'"([\w]+)"\s*:\s*"tools\.[\w]+:([\w]+)"', text):
+        names.add(m.group(2))
+    return names
+
+
+def check_tool_direct_import() -> list[str]:
+    """禁止经 ``from tools.* import <@tool>`` 直引绕过 tool_registry.get_tool()（C1 根因防回归）。
+
+    批 2 已将六条挂载路径统一经 get_tool() 取用（含 subagent 直引、bridge 直引），
+    本检查封死「未来新增工具时直接 import @tool 对象跳过观测包装」的回归面。
+    合法例外：tool_registry.py 自身（用字符串延迟定位）、tests/、普通函数
+    （如 check_knowledge_health 非 @tool，不在 TOOL_REGISTRY 故不命中）。
+    """
+    tool_names = _load_registry_tool_names()
+    if not tool_names:
+        return []
+    violations: list[str] = []
+    for py_file in ROOT.rglob("*.py"):
+        rel = py_file.relative_to(ROOT).as_posix()
+        if not rel.startswith("applications/"):
+            continue
+        if any(p in rel for p in (".venv", "__pycache__", ".ruff_cache", ".egg-info",
+                                   ".codeartsdoer", ".codebuddy")):
+            continue
+        if "/tests/" in rel:
+            continue
+        if rel == "applications/agent_federation/agent/tool_registry.py":
+            continue
+        try:
+            for lineno, line in enumerate(py_file.read_text(encoding="utf-8").splitlines(), 1):
+                m = _DIRECT_IMPORT_PATTERN.match(line)
+                if not m:
+                    continue
+                for part in m.group(1).split(","):
+                    sym = part.strip().split(" as ")[0].strip()
+                    if sym in tool_names:
+                        violations.append(
+                            f"{rel}:{lineno}: 直引 @tool '{sym}' 绕过 get_tool()"
+                            f"（应经 tool_registry.get_tool 取用，否则缺失 tool 级事件）"
+                        )
         except Exception:
             pass
     return violations
@@ -235,6 +292,16 @@ def main() -> int:
         rc = 1
     else:
         print("批 3 架构约束通过：无白名单外散点 tool 埋点")
+
+    v5 = check_tool_direct_import()
+    if v5:
+        print("C1 回归面约束违反：经 from tools.* import <@tool> 直引绕过 get_tool()（观测断点）")
+        print("修复：统一经 tool_registry.get_tool() 取用：")
+        for v in v5:
+            print(f"  {v}")
+        rc = 1
+    else:
+        print("C1 回归面约束通过：无 @tool 直引旁路")
     return rc
 
 
