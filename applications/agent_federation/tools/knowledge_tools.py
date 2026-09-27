@@ -135,6 +135,16 @@ def knowledge_retrieve(query: str, item_name: str = "") -> str:
             _tenant = None
         if _tenant:
             payload["tenant_id"] = _tenant
+            # ADR-0007 A4：配置了内部 HMAC 密钥时，附签名内部头向子服务断言租户
+            # （取代“客户端可传 body tenant_id”；子服务侧硬校验在 A4/A6 接线）。
+            try:
+                from agent_runtime.identity import load_hmac_key, sign_internal_header
+
+                _hk = load_hmac_key()
+                if _hk:
+                    headers["X-Internal-Tenant"] = sign_internal_header(_tenant, key=_hk)
+            except ImportError:
+                pass
 
         try:
             resp = _knowledge_post(url, payload, headers)
