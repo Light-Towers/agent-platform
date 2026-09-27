@@ -17,6 +17,7 @@ dependencies = [
 
 [project.optional-dependencies]
 mcp = ["mcp>=2.0.0"]  # Dependabot: MCP SDK 多 high 告警（first_patched 1.28.1）
+identity = ["PyJWT[crypto]>=2.9"]  # ADR-0007 A3：RS256 令牌签/验（不进 agent-core，红线 1）
 
 [tool.hatch.build.targets.wheel]
 packages = ["agent_runtime"]

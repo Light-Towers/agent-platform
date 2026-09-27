@@ -29,11 +29,16 @@ logger = logging.getLogger(__name__)
 # 请求链路租户上下文（服务端绑定，与 agent_federation/api/context.py 同构）。
 # default=None：未绑定即读取 = 漏接线，resolve 时 fail-fast，不给隐式缺省。
 _tenant_id_ctx: ContextVar[object] = ContextVar("server_tenant_id", default=_TENANT_UNSET)
+# 用户身份上下文（ADR-0007：与 tenant 同为服务端断言 claim；当前供审计/画像读取，不单独承担隔离）。
+_user_id_ctx: ContextVar[object] = ContextVar("server_user_id", default=_TENANT_UNSET)
 
 __all__ = [
     "WorkspaceTenantMismatch",
     "bind_tenant_context",
     "reset_tenant_context",
+    "bind_user_context",
+    "reset_user_context",
+    "server_user_id",
     "resolve_workspace",
     "register_workspace",
     "assert_workspace_access",
@@ -54,6 +59,23 @@ def bind_tenant_context(tenant_id: str) -> Token:
 
 def reset_tenant_context(token: Token) -> None:
     _tenant_id_ctx.reset(token)
+
+
+def bind_user_context(user_id: str | None) -> Token:
+    """绑定服务端断言的 user（来自已验签令牌 claim）；返回 Token 供复位。"""
+    return _user_id_ctx.set(user_id if user_id else _TENANT_UNSET)
+
+
+def reset_user_context(token: Token) -> None:
+    _user_id_ctx.reset(token)
+
+
+def server_user_id(default: object = _TENANT_UNSET) -> str:
+    """解析服务端 user：ContextVar 优先，其次显式 default；两者都缺 → 抛错（fail-fast）。"""
+    bound = _user_id_ctx.get()
+    if bound is not _TENANT_UNSET:
+        return bound  # type: ignore[no-any-return]
+    return resolve_tenant(default)
 
 
 def server_tenant_id(default: object = _TENANT_UNSET) -> str:
