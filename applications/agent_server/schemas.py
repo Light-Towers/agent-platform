@@ -100,6 +100,9 @@ class SqlTrainRequest(BaseModel):
     documentation: str | None = None
     question: str | None = None
     sql: str | None = None
+    # 归属维（ADR-0006）：训练语料落到哪个 workspace；租户边界由服务端上下文
+    # 解析，不在请求体开放（旧实现缺省落 '' 空串桶，已收敛到 default）。
+    workspace_id: str = Field(default="default", max_length=128)
 
 
 class SqlTrainResponse(BaseModel):

@@ -24,6 +24,7 @@ from agent_server.memory import memory_backend as _mb
 logger = logging.getLogger(__name__)
 
 _MEMORY_TYPES = ("episodic", "semantic", "procedural")
+_VALID_SCOPES = ("workspace", "user")
 
 # 抽取系统提示：要求 LLM 产出结构化事实 JSON 数组（优化 H, D1 抽取不存原文）
 # TD-8：示例泛化为中性模板，不内嵌具体职业/偏好（避免引导模型偏向特定偏好）。
@@ -34,8 +35,11 @@ _EXTRACT_PROMPT = (
     "  - episodic：特定发生过的事（含时间/事件/结果）\n"
     "  - semantic：用户稳定偏好/人设/事实（跨会话复用）\n"
     "  - procedural：该怎么做某事的方法论/指令\n"
+    "并为每条事实判定归属范围（scope）：\n"
+    "  - user：属于用户本人的跨项目画像（个人身份/长期偏好/习惯）\n"
+    "  - workspace：仅与当前工作空间/项目相关的内容（默认）\n"
     "仅输出 JSON 数组，元素形如 {\"type\":\"semantic\",\"importance\":0.8,"
-    "\"fact\":\"<用户偏好或事实的中性描述>\"}。importance 为 0~1 重要性。\n"
+    "\"scope\":\"user\",\"fact\":\"<用户偏好或事实的中性描述>\"}。importance 为 0~1 重要性。\n"
     "若无有价值事实，输出 []\n"
     "不要输出原文寒暄，不要包含 PII 原文，只抽取可复用结论。\n"
     "问题：%(question)s\n回答：%(answer)s"
@@ -71,23 +75,32 @@ async def extract_memory_facts(llm, question: str, answer: str) -> list[dict]:
                 t = "semantic"
             imp = max(0.0, min(1.0, float(item.get("importance", 0.5))))
             fact = (item.get("fact") or "").strip()
+            scope = item.get("scope", "workspace")
+            if scope not in _VALID_SCOPES:
+                scope = "workspace"
             if fact:
-                out.append({"type": t, "importance": imp, "fact": fact})
+                out.append({"type": t, "importance": imp, "fact": fact, "scope": scope})
         return out
     except Exception:
         logger.exception("记忆事实抽取失败，返回空（不阻断主链路）")
         return []
 
 
-async def recall(pool, workspace_id: str, question: str, k: int = 3, tenant_id: str= _TENANT_UNSET) -> list[str]:
+async def recall(
+    pool, workspace_id: str, question: str, k: int = 3, tenant_id: str= _TENANT_UNSET,
+    *, user_id: str | None = None,
+) -> list[str]:
     tenant_id = resolve_tenant(tenant_id)
     # WS-1 语义收口（Warning#7）：本模块不设栈开关——有池即走 tenant-scoped typed PG 路径
     # （仍用 app psycopg 池，遵守 ADR-0003）。``SEMANTIC_MEMORY_TYPED`` 只在内核控制
     # 召回加权融合（关闭退化为平权），不控制是否使用 typed 栈；记忆总开关为
     # ``SEMANTIC_MEMORY_ENABLED``（由调用方门控）。
+    # v8 双 scope：user_id 作为跨 workspace 画像的归属键（仅 dual_scope 开启时第二路生效）。
     if pool is not None:
         try:
-            return await _mb.recall_typed(pool, workspace_id, question, k=k, tenant_id=tenant_id)
+            return await _mb.recall_typed(
+                pool, workspace_id, question, k=k, tenant_id=tenant_id, profile_user_id=user_id
+            )
         except Exception:
             logger.exception("类型感知召回失败，降级内核/空")
     # 无 pool 时没有持久化记忆；DB 模式统一经 tenant-scoped typed PG 路径。
@@ -100,11 +113,13 @@ async def remember(
     content: str,
     facts: list[dict] | None = None,
     tenant_id: str= _TENANT_UNSET,
+    *,
+    user_id: str | None = None,
 ) -> None:
-    """沉淀记忆（优化 H）。
+    """沉淀记忆（优化 H + v8 双 scope）。
 
     - 若 ``facts`` 提供（已由调用方经 ``extract_memory_facts`` 抽取），逐条写入带类型/
-      重要性的结构化事实（D1 抽取不存原文）；
+      重要性的结构化事实（D1 抽取不存原文）；每条按 ``scope`` 路由（user 画像需真实 user_id）；
     - 否则退化：存整条原文（保持优化 G 之前行为，兼容 memory_extraction_enabled=False）。
     """
     tenant_id = resolve_tenant(tenant_id)
@@ -115,6 +130,7 @@ async def remember(
                     await _mb.remember_fact(
                         pool, workspace_id, f["fact"], f.get("type", "semantic"),
                         f.get("importance", 0.5), tenant_id=tenant_id,
+                        scope=f.get("scope", "workspace"), user_id=user_id,
                     )
                 except Exception:
                     logger.exception("结构化记忆写入失败，跳过该条")

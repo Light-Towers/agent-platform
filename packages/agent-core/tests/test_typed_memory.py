@@ -345,8 +345,12 @@ async def test_consolidate_deletes_low_value_old(monkeypatch):
     deleted = await consolidate("ws1", _CapturePool(), forget_threshold=0.1, tenant_id="default")
     assert deleted == 3
     assert "DELETE FROM memories" in captured["sql"]
-    # TD-6 参数化：参数三元组 (user, threshold, age_days)，默认 age_days=30
-    assert captured["params"] == ("default", "ws1", 0.1, 30)
+    # TD-6 参数化 + ADR-0006 T13 双列归属：params =
+    # (tenant, scope, workspace_id, user_id, threshold, age_days)，默认 age_days=30
+    assert captured["params"] == ("default", "workspace", "ws1", "ws1", 0.1, 30)
+    # 含 scope 谓词 + workspace 双列兼容（新行落 workspace_id、旧行落 user_id）
+    assert "scope = %s" in captured["sql"]
+    assert "workspace_id = %s OR user_id = %s" in captured["sql"]
     # 含 30 天窗口与 importance 阈值条件（SQL 用参数化 interval '%s days'）
     assert "importance <" in captured["sql"]
     assert "interval '%s days'" in captured["sql"]
@@ -384,8 +388,8 @@ async def test_consolidate_reads_env_threshold_and_age_days(monkeypatch):
             return _Conn()
 
     await consolidate("ws2", _Pool(), tenant_id="default")
-    # 环境变量生效：params 三元组最后一维应为 7，阈值应为 0.35
-    assert captured["params"] == ("default", "ws2", 0.35, 7)
+    # 环境变量生效：params 末两维为阈值/老化天数（前置 tenant + scope + 双列归属键）
+    assert captured["params"] == ("default", "workspace", "ws2", "ws2", 0.35, 7)
 
 
 async def test_consolidate_env_invalid_falls_back(monkeypatch):
@@ -417,7 +421,7 @@ async def test_consolidate_env_invalid_falls_back(monkeypatch):
             return _Conn()
 
     await consolidate("ws3", _Pool(), tenant_id="default")
-    assert captured["params"] == ("default", "ws3", 0.1, 30)
+    assert captured["params"] == ("default", "workspace", "ws3", "ws3", 0.1, 30)
 
 
 # --- forget 删除（fake 池）------------------------------------------------
@@ -448,7 +452,8 @@ async def test_forget_deletes_when_matched(monkeypatch):
 
     ok = await forget("u1", _CapturePool(), 42, tenant_id="default")
     assert ok is True
-    assert captured["params"] == ("default", "u1", 42)
+    # forget 谓词双列兼容（workspace_id OR user_id）+ 精确 id：params=(tenant, ws, ws, id)
+    assert captured["params"] == ("default", "u1", "u1", 42)
 
 
 async def test_forget_returns_false_when_no_match(monkeypatch):

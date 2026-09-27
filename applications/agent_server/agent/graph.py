@@ -118,7 +118,9 @@ def build_graph(
         decision = await decide_route(llm, question)
         memory_notes: list[str] = []
         if settings.memory_enabled:
-            memory_notes = await recall(get_pool(), state.workspace_id, question, tenant_id=state.tenant_id)
+            memory_notes = await recall(
+                get_pool(), state.workspace_id, question, tenant_id=state.tenant_id, user_id=state.user_id
+            )
         return {
             "route": decision.capability,
             "sub_query": decision.sub_query,
@@ -131,10 +133,19 @@ def build_graph(
         return {"evidence": await _invoke("search", query=state.sub_query)}
 
     async def rag_node(state: AgentState) -> dict:
-        return {"evidence": await _invoke("rag", query=state.sub_query, workspace_id=state.workspace_id)}
+        # 隔离双维透传（ADR-0006 T9）：tenant 安全边界 + workspace 归属维，缺一即 fail-fast
+        return {
+            "evidence": await _invoke(
+                "rag", query=state.sub_query, workspace_id=state.workspace_id, tenant_id=state.tenant_id
+            )
+        }
 
     async def sql_node(state: AgentState) -> dict:
-        return {"evidence": await _invoke("sql", query=state.sub_query, llm=llm, workspace_id=state.workspace_id)}
+        return {
+            "evidence": await _invoke(
+                "sql", query=state.sub_query, llm=llm, workspace_id=state.workspace_id, tenant_id=state.tenant_id
+            )
+        }
 
     async def direct_node(state: AgentState) -> dict:
         return {"evidence": []}
@@ -177,9 +188,14 @@ def build_graph(
             facts = None
             if get_settings().memory_extraction_enabled and llm is not None:
                 facts = await extract_memory_facts(llm, question, answer)
-            await remember(get_pool(), state.workspace_id, f"Q: {question}\nA: {answer}", facts=facts, tenant_id=state.tenant_id)
+            await remember(
+                get_pool(), state.workspace_id, f"Q: {question}\nA: {answer}",
+                facts=facts, tenant_id=state.tenant_id, user_id=state.user_id,
+            )
             # ADR-0004 阶段3：低频触发 typed 巩固/遗忘（旁路，不阻断）
-            await maybe_consolidate(get_pool(), state.workspace_id, tenant_id=state.tenant_id)
+            await maybe_consolidate(
+                get_pool(), state.workspace_id, tenant_id=state.tenant_id
+            )
         return {
             "answer": answer,
             "iterations": iterations,
