@@ -40,6 +40,12 @@
 
 产出：审计报告（含每个可疑点的 SQL、结果、判定、处置建议）；若发现确认越权 → 升级事故响应（受影响租户清单 + 数据修复 + 通知决策，另行立项）。
 
+**实施记录（2026-09-27）**：
+- 新增 `scripts/audit_tenant_access.py`（只读，`--dsn`/`--default-tenant`/`--orphan-max`/`--out`）：`conn.read_only=True` + 全程 SELECT；5 项检查逐项 try/except 不中断；输出 JSON（stdout）+ Markdown 报告（含“先于 A3 上线”取证基线声明）。检查 1 对 7 张已知业务表逐表 GROUP BY tenant_id 并打“孤立小租户/疑似占位名”标记；2 semantic_cache 按租户聚合+高命中抽样；3 探测 request_logs 类表、同来源 key 自报多租户标红（information_schema 自省，缺则跳过）；4 T11 注入审计属应用日志非 DB 表 → 诚实 SKIP+注（需日志系统汇总）；5 探测轨迹表。
+- 新增 `tests/governance/test_audit_tenant_access_helpers.py`（6 例，无 DB、CI 可达）：验证 `_tag_tenant`/`_PLACEHOLDER_RE` 启发式不误标真实租户名、不漏标孤立小租户。脚本主体需目标库，不连 CI。
+- 仓库不提交任何真实查询结果（脚本仅运行时连库）。
+- 验证：py_compile 通过；helper 测试 6 passed；governance 135 passed / 0 failed；ruff 通过；lint_architecture 通过。
+
 ### A2（P0·代码先行）移除 LLM 可填租户通道
 
 ADR-0007 §4.3（评审补强·最高优先）。**不依赖 A3，可当天上线**：
