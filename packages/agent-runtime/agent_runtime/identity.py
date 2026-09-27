@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from agent_core.internal_header import InternalHeaderError
+from agent_core.internal_header import load_hmac_key as _core_load_hmac_key
 from agent_core.internal_header import sign_internal_header as _core_sign
 from agent_core.internal_header import verify_internal_header as _core_verify
 
@@ -152,12 +153,8 @@ def load_private_key(path: str | None = None) -> str | None:
 
 
 def load_hmac_key(path: str | None = None) -> bytes | None:
-    """加载内部签名头共享对称密钥（网关 + 子服务双方持有）。"""
-    path = path or os.getenv("INTERNAL_HMAC_KEY_FILE", "")
-    if not path or not os.path.exists(path):
-        return None
-    with open(path, "rb") as f:
-        return f.read().strip()
+    """加载内部签名头共享密钥（委托 agent-core 单一实现）。"""
+    return _core_load_hmac_key(path)
 
 
 # --- RS256 JWT 签发 / 验签 --------------------------------------------------
