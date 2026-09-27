@@ -49,6 +49,9 @@ class CapabilityReport:
     supports_consolidate: bool = False
     supports_forget: bool = False
     supports_tenant_isolation: bool = False
+    supports_episodic: bool = False
+    supports_procedural: bool = False
+    supports_working: bool = False
     reason: str = ""
 
     def as_dict(self) -> dict[str, Any]:
@@ -59,6 +62,9 @@ class CapabilityReport:
             "supports_consolidate": self.supports_consolidate,
             "supports_forget": self.supports_forget,
             "supports_tenant_isolation": self.supports_tenant_isolation,
+            "supports_episodic": self.supports_episodic,
+            "supports_procedural": self.supports_procedural,
+            "supports_working": self.supports_working,
             "reason": self.reason,
         }
 
