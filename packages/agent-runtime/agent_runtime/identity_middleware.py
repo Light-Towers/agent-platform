@@ -85,6 +85,7 @@ class IdentityMiddleware:
         apply: _Apply = apply_tenant_context,
         reset: _Reset | None = None,
         verify_header: Callable | None = _verify_header_value,
+        token_header: str = "Authorization",
         enforce_missing: bool | None = None,
         single_tenant: str | None | Callable[[], str | None] = None,
         skip_paths: tuple[str, ...] = ("/health", "/healthz", "/metrics", "/docs", "/openapi.json", "/redoc", "/ws"),
@@ -94,6 +95,7 @@ class IdentityMiddleware:
         self._apply = apply
         self._reset = reset or self._default_reset
         self._verify_header = verify_header
+        self._token_header = token_header
         # enforce 默认读环境 TENANT_JWT_ENFORCE（子服务软模式设 verify_header + 环境不置 enforce 即可）
         self._enforce_missing = env_bool("TENANT_JWT_ENFORCE", False) if enforce_missing is None else enforce_missing
         self._single_tenant = single_tenant
@@ -118,9 +120,16 @@ class IdentityMiddleware:
             await self.app(scope, receive, send)
             return
 
-        bearer = extract_bearer(_header(scope, "Authorization"))
-        # 仅当 Bearer 形如 JWT 才当作租户身份凭据；不透明 Bearer（如静态 API_KEY）交下游既有认证。
-        if bearer and _looks_like_jwt(bearer):
+        raw = _header(scope, self._token_header)
+        if self._token_header.lower() == "authorization":
+            # Authorization：仅当 Bearer 形如 JWT 才当租户凭据；不透明 Bearer（静态 API_KEY）交下游既有认证。
+            bearer = extract_bearer(raw)
+            is_credential = bool(bearer) and _looks_like_jwt(bearer)
+        else:
+            # 专用头（如 X-Tenant-JWT）：存在即视为租户 JWT。
+            bearer = raw
+            is_credential = bool(bearer)
+        if is_credential and bearer:
             try:
                 claims = self._verify(bearer)
             except IdentityError as e:
