@@ -8,6 +8,8 @@ from contextlib import asynccontextmanager
 
 from agent_core.guardrails.app_factory import build_api_app
 from agent_core.logging import configure_logging, get_logger
+from agent_runtime.identity import require_identity_startup_guard
+from agent_runtime.identity_middleware import IdentityMiddleware
 
 # 统一日志配置入口：必须在其它包 import 之前调用，使下列 format 优先生效
 # （agent_runtime 等模块在 import 时即触发 get_logger → 惰性 configure_logging，
@@ -185,6 +187,10 @@ async def lifespan(app: FastAPI):
             "runtime_mode=distributed 要求配置 DATABASE_URL，当前为空。"
             "请设置 DATABASE_URL 或改用 runtime_mode=single_node/local。"
         )
+
+    # ADR-0007 A3: 身份启动守卫——既无 RS256 验签公钥又未声明 SINGLE_TENANT 且
+    # DEPLOY_ENFORCE_IDENTITY=true → 拒绝启动（封死 auth.py 未配 key 即不校验旁路）。
+    require_identity_startup_guard("agent_server")
 
     await init_pool(
         database_url=settings.database_url,
@@ -496,6 +502,9 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    # ADR-0007 A3: 入站租户身份断言中间件（observe 默认：有 Bearer 则验签绑定 tenant，
+    # 无凭据交下游既有 provided>default 语义 → 零行为变更；配 TENANT_JWT_PUBLIC_KEYS_FILE/SINGLE_TENANT 后激活）。
+    app.add_middleware(IdentityMiddleware)
     app.include_router(router)
     return app
 

@@ -43,6 +43,7 @@ API_KEY = os.getenv("API_KEY", "")
 KNOWLEDGE_SERVICE_URL = os.getenv("KNOWLEDGE_SERVICE_URL", "")
 
 from api.auth import resolve_thread_id
+from api.identity_bridge import mount_identity_middleware
 
 _HAS_SECURITY_GUARDS = False
 try:
@@ -136,6 +137,10 @@ app.add_middleware(
     allow_methods=["GET", "POST"],
     allow_headers=["Content-Type", "Authorization"],
 )
+
+# ADR-0007 决策2=B1：从专用头 X-Tenant-JWT 断言租户（与 Authorization: Bearer <API_KEY> 传输鉴权并存）。
+# 未配验签公钥/无该头时 observe 透传，零行为变更。
+mount_identity_middleware(app)
 
 _ALLOW_NO_AUTH = os.getenv("DISABLE_AUTH", "false").lower() in ("1", "true", "yes")
 
