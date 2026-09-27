@@ -2,6 +2,22 @@
 
 本仓库为 uv workspace monorepo。**唯一受支持的安装/运行入口是根 `uv.lock` + `uv sync`**，子包不再维护独立 `uv.lock`（见 v2 修复 #14）。
 
+## 隔离域加固：tenant 边界 / workspace 归属 / memories 双 scope（2026-09-27，分支 `feat/isolation-hardening`，`f072bc2..28877fc`）
+
+> 方案：`docs/adr/0006-isolation-dimension-contract.md`（已采纳）+ `docs/plans/plan-isolation-hardening-2026-09-27.md`（T9–T13）；episodic/procedural 部分依 `docs/plans/plan-memory-hardening-2026-09-27.md` T1。核心：`tenant_id` 为唯一安全边界（服务端解析、漏传 fail-fast 沿用 `_tenant_gate`），`workspace_id`/`user_id` 为归属维不单独承担隔离。
+
+- **T9 corpus 补 tenant_id（`f072bc2`，W1）**：migration `006_tenant_corpus` 为 `chunks`/`sql_ddl`/`sql_docs`/`sql_examples` 加 `tenant_id`（`DEFAULT 'default'`）+ `(tenant_id, workspace_id)` 复合索引；`rag/store.py`、`sql/schema_store.py` 读写 SQL 成对带 tenant 谓词、消除「空 workspace = 全库召回」旁路；写入口（`/import`、`/sql/train`）收服务端租户（不收表单值）。
+- **T10 workspaces 归属表（`28feae4`，W2/D4 方案 A）**：migration `007_workspaces` + 新模块 `agent_runtime/workspace_registry.py`；**复合 PK `(tenant_id, id)` 按租户命名空间化**（`workspace_id` 当前为客户端扁平串且共享 `'default'`，不能用全局唯一 `id` PK，否则跨租户撞名）；`resolve_workspace(tenant_id, workspace_id)->bool` 首次引用自动注册、越权 `assert_workspace_access` 抛 `WorkspaceTenantMismatch`；migration `009_workspaces_backfill` 幂等补注册现网 `(default, workspace_id)`。`import/sql/query_router` 使用前统一 `resolve_workspace`（读路径 best-effort）。
+- **T11 knowledge-service 租户强制化（`0163fc6`，W4）**：`utils/tenant_utils.resolve_server_tenant()`——空 tenant → 服务端注入 `KNOWLEDGE_DEFAULT_TENANT_ID` + 审计（**选注入而非 422**：避免同步打断多个历史不传 tenant 的存量链路，同时关掉「空→不过滤=全库」真旁路）；删 `mongo_history_utils` 的 `if tenant_id else None` 回退；调用方审计：联邦 `tools/knowledge_tools.py::knowledge_retrieve` 改为下传请求链路租户（`api.context.get_tenant_context`），非 server 环境降级注入。
+- **T12 隔离维度契约测试（`9c27c82`，W5）**：`tests/governance/test_isolation_dimension_contract.py`——迁移回放最终 schema 断言每张业务表含 `tenant_id`（系统/待判定表显式白名单+理由，人为建无 tenant 业务表→红）；AST 断言 `workspace_id =` 谓词必与 `tenant_id` 成对（已知误报源：docstring/日志，按“含表名 token + SQL 动词”过滤）。
+- **T13 memories 双 scope（`e5566bf`，W3/用户拍板“画像层必须存在”）**：migration `008_memories_dual_scope`（`workspace_id`/`scope` 列 + 两索引 + user_id←workspace_id 回填）；内核 `typed.py` **新增** `remember_typed_scoped`/`recall_user_profile`（既有 5 动词签名不变、ADR-0004 向后兼容），workspace/user 两路各自 top-k 后按同一 `type_weight×importance×decay` 融合（不改评分公式，融合置于门面 `memory_backend.recall_typed`）；`MEMORY_DUAL_SCOPE` 渐进开关默认关=零变更，读路径双列兼容滚动升级窗口。
+- **T1 episodic/procedural 补租户（`28877fc`，G1 / plan-memory-hardening T1）**：migration `010_episodic_tenant` 为 `episodic_memories`/`procedural_memories` 补 `tenant_id` + 复合索引，**procedural PK 命名空间化 `(tenant_id, name, version)`**（技能名由 `task_summary` 派生易跨租户撞名，仅加 WHERE 不改 PK 会写覆盖=假隔离）；`EpisodicStore`/`ProceduralStore` 及 InMemory/Pg 实现、`memory_sink`/`memory_decay`/`memory_seed`/`memory_types` 全链路带 `tenant_id`（`_tenant_gate` 必填 fail-fast）；**写路径租户源缺口修复**：`TrajectoryRecord` 加 `tenant_id`，`_persist_trajectory` 从 `plan.tenant_id` 填充；recall 路径 `MemoryRecallRequest.tenant_id` 下传并映射为 `MemoryRecallResult`。
+- **迁移编号 006–010**：均 up/down 成对、`IF [NOT] EXISTS` 幂等、SQL 英文注释、LF 行尾；agent-core 零宿主依赖保持（`typed.py` 仅 stdlib；`workspace_registry`/执行记忆 store 落 agent-runtime，红线 1 无反向 import）。
+- **未决 / 边界（诚实标注）**：① corpus/memories/episodic 存量 `DEFAULT 'default'` 回填为**目标库部署前置**——应用前须抽样确认无真实多租户混入（混则停工建归属映射，见 plan §8.2/§8.4），开发机无目标 PG 未执行；② agent_server→knowledge-service 真实多租户 tenant 下传、`/query` 服务端租户断言属跨服务契约变更，需另立 ADR（现注入策略下安全不 422）；③ HA 真实 PG 用例（`tests/ha/test_tenant_isolation_real_pg.py`：corpus/workspaces/dual-scope/episodic/procedural 跨租户）需 Linux CI `requires_pg` 跑，本机 skip。
+
+> 验证（本机可跑，全绿）：根 438 / agent-core 219 / agent-runtime 580 / agent_server 44 / federation 142 / knowledge-service 235 / kefu 43 / nl2sql 18 / exhibition 343 / shared-schemas 28；`ruff check .` 0；`lint_architecture` + `check_doc_sync` 通过。唯一失败 `test_circuit_breaker_middleware_degrades` 为 v3 既有、与本工作无关。
+
+
 ## 租户隔离收紧 + HA 门禁语义 + CI 收窄（2026-09-25，`7e442c4..b77be4e`）
 
 > 方案：`docs/plans/plan-p0-ha-tenant-fixes-2026-09-25.md`。外部审计（36 commits, c6b60a55）P0/P1 修复。评审修复（W-2）续见本节末。
