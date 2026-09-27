@@ -17,14 +17,19 @@ from agent_runtime.episodic_memory import (
 )
 from agent_runtime.trajectory.models import TrajectoryRecord, TrajectoryStep
 
+# 隔离域（plan T1）：store/façade 方法必显式传 tenant_id（无 'default' 兜底）。
+TENANT = "t-ep"
+
 
 def _trajectory(
     execution_id: str = "e1",
     steps: list[TrajectoryStep] | None = None,
     plan: dict | None = None,
+    tenant_id: str = TENANT,
 ) -> TrajectoryRecord:
     return TrajectoryRecord(
         execution_id=execution_id,
+        tenant_id=tenant_id,
         planner="agentic",
         plan=plan or {"task": "会展招商分析"},
         steps=steps or [],
@@ -120,29 +125,38 @@ def test_extractor_skill_names():
 async def test_store_save_and_get():
     store = InMemoryEpisodicStore()
     ep = Episode(execution_id="e1", task_summary="test")
-    await store.save(ep)
-    loaded = await store.get(ep.episode_id)
+    await store.save(ep, tenant_id=TENANT)
+    loaded = await store.get(ep.episode_id, tenant_id=TENANT)
     assert loaded is not None
     assert loaded.task_summary == "test"
 
 
 async def test_store_recall():
     store = InMemoryEpisodicStore()
-    await store.save(Episode(execution_id="e1", task_summary="会展招商分析", importance=0.9))
-    await store.save(Episode(execution_id="e2", task_summary="SQL查询", importance=0.5))
+    await store.save(Episode(execution_id="e1", task_summary="会展招商分析", importance=0.9), tenant_id=TENANT)
+    await store.save(Episode(execution_id="e2", task_summary="SQL查询", importance=0.5), tenant_id=TENANT)
 
-    results = await store.recall("会展")
+    results = await store.recall("会展", tenant_id=TENANT)
     assert len(results) == 1
     assert results[0].task_summary == "会展招商分析"
 
 
+async def test_store_cross_tenant_recall_isolated():
+    """plan T1：tenantA 写入的 Episode，tenantB recall 为空（消除跨租户可见）。"""
+    store = InMemoryEpisodicStore()
+    await store.save(Episode(execution_id="e1", task_summary="tenantA专有经历", importance=0.9), tenant_id="tA")
+    assert await store.recall("tenantA专有", tenant_id="tB") == []
+    assert len(await store.recall("tenantA专有", tenant_id="tA")) == 1
+    assert await store.list_all(tenant_id="tB") == []
+
+
 async def test_store_list_by_execution():
     store = InMemoryEpisodicStore()
-    await store.save(Episode(execution_id="e1", task_summary="test1"))
-    await store.save(Episode(execution_id="e1", task_summary="test2"))
-    await store.save(Episode(execution_id="e2", task_summary="test3"))
+    await store.save(Episode(execution_id="e1", task_summary="test1"), tenant_id=TENANT)
+    await store.save(Episode(execution_id="e1", task_summary="test2"), tenant_id=TENANT)
+    await store.save(Episode(execution_id="e2", task_summary="test3"), tenant_id=TENANT)
 
-    results = await store.list_by_execution("e1")
+    results = await store.list_by_execution("e1", tenant_id=TENANT)
     assert len(results) == 2
 
 
@@ -159,7 +173,7 @@ async def test_episodic_remember_and_recall():
     assert episode is not None
     assert episode.outcome is EpisodeOutcome.SUCCESS
 
-    results = await ep_mem.recall("会展招商分析")
+    results = await ep_mem.recall("会展招商分析", tenant_id=TENANT)
     assert len(results) == 1
     assert results[0].execution_id == "e1"
 
@@ -189,7 +203,7 @@ async def test_episodic_remember_partial_with_lessons():
     assert len(episode.lessons) == 1
 
     # 召回时能找到
-    results = await ep_mem.recall("会展")
+    results = await ep_mem.recall("会展", tenant_id=TENANT)
     assert len(results) == 1
     assert results[0].importance == 0.9
 

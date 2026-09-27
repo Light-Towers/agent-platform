@@ -31,6 +31,8 @@ from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any
 
+from agent_core.memory._tenant_gate import _TENANT_UNSET, resolve_tenant
+
 from agent_runtime.episodic_memory import Episode, EpisodeOutcome
 from agent_runtime.memory_recall import text_similarity
 from agent_runtime.skill_lifecycle import SkillLifecycle
@@ -100,62 +102,78 @@ class CandidateSkill:
 
 
 class ProceduralStore(abc.ABC):
-    """Procedural Memory 持久化契约。"""
+    """Procedural Memory 持久化契约。
+
+    隔离域（plan T1 / ADR-0006 D3）：技能“租户内共享、跨租户隔离”，每个方法**必须显式
+    传 ``tenant_id``**，漏传 fail-fast（``_tenant_gate``），跨租户同名技能各自独立不互见。
+    """
 
     @abc.abstractmethod
-    async def save(self, entry: ProceduralEntry) -> None:
-        """保存 Skill 定义（同 name + version 覆盖）。"""
+    async def save(self, entry: ProceduralEntry, *, tenant_id: str = _TENANT_UNSET) -> None:
+        """保存 Skill 定义（同租户内 name + version 覆盖）。"""
 
     @abc.abstractmethod
     async def load(
-        self, name: str, version: str | None = None
+        self, name: str, version: str | None = None, *, tenant_id: str = _TENANT_UNSET
     ) -> ProceduralEntry | None:
-        """加载 Skill 定义。version=None 时返回最新 stable 版本。"""
+        """加载本租户 Skill 定义。version=None 时返回最新 stable 版本。"""
 
     @abc.abstractmethod
-    async def list_all(self) -> list[ProceduralEntry]:
-        """列出所有 Skill 定义。"""
+    async def list_all(self, *, tenant_id: str = _TENANT_UNSET) -> list[ProceduralEntry]:
+        """列出**本租户**所有 Skill 定义。"""
 
     @abc.abstractmethod
-    async def list_by_name(self, name: str) -> list[ProceduralEntry]:
-        """列出某 Skill 的所有版本。"""
+    async def list_by_name(
+        self, name: str, *, tenant_id: str = _TENANT_UNSET
+    ) -> list[ProceduralEntry]:
+        """列出本租户某 Skill 的所有版本。"""
 
     @abc.abstractmethod
-    async def delete(self, name: str, version: str) -> bool:
-        """删除 Skill 定义。"""
+    async def delete(
+        self, name: str, version: str, *, tenant_id: str = _TENANT_UNSET
+    ) -> bool:
+        """删除本租户 Skill 定义。"""
 
 
 class InMemoryProceduralStore(ProceduralStore):
-    """进程内 Procedural 存储（测试 / 单进程默认）。"""
+    """进程内 Procedural 存储（测试 / 单进程默认）。以 ``(tenant_id, name, version)`` 为键。"""
 
     def __init__(self) -> None:
-        self._store: dict[tuple[str, str], ProceduralEntry] = {}
+        self._store: dict[tuple[str, str, str], ProceduralEntry] = {}
 
-    async def save(self, entry: ProceduralEntry) -> None:
+    async def save(self, entry: ProceduralEntry, *, tenant_id: str = _TENANT_UNSET) -> None:
+        tenant = resolve_tenant(tenant_id)
         entry.updated_at = time.time()
-        self._store[(entry.name, entry.version)] = copy.deepcopy(entry)
+        self._store[(tenant, entry.name, entry.version)] = copy.deepcopy(entry)
 
     async def load(
-        self, name: str, version: str | None = None
+        self, name: str, version: str | None = None, *, tenant_id: str = _TENANT_UNSET
     ) -> ProceduralEntry | None:
+        tenant = resolve_tenant(tenant_id)
         if version is not None:
-            return self._store.get((name, version))
-        versions = [e for (n, _v), e in self._store.items() if n == name]
+            return self._store.get((tenant, name, version))
+        versions = [e for (t, n, _v), e in self._store.items() if t == tenant and n == name]
         if not versions:
             return None
         stable = [e for e in versions if e.lifecycle == SkillLifecycle.STABLE.value]
         pool = stable if stable else versions
         return max(pool, key=lambda e: e.version)
 
-    async def list_all(self) -> list[ProceduralEntry]:
-        return list(self._store.values())
+    async def list_all(self, *, tenant_id: str = _TENANT_UNSET) -> list[ProceduralEntry]:
+        tenant = resolve_tenant(tenant_id)
+        return [e for (t, _n, _v), e in self._store.items() if t == tenant]
 
-    async def list_by_name(self, name: str) -> list[ProceduralEntry]:
-        return [e for (n, _v), e in self._store.items() if n == name]
+    async def list_by_name(
+        self, name: str, *, tenant_id: str = _TENANT_UNSET
+    ) -> list[ProceduralEntry]:
+        tenant = resolve_tenant(tenant_id)
+        return [e for (t, n, _v), e in self._store.items() if t == tenant and n == name]
 
-    async def delete(self, name: str, version: str) -> bool:
-        key = (name, version)
-        return self._store.pop(key, None) is not None
+    async def delete(
+        self, name: str, version: str, *, tenant_id: str = _TENANT_UNSET
+    ) -> bool:
+        tenant = resolve_tenant(tenant_id)
+        return self._store.pop((tenant, name, version), None) is not None
 
 
 class ProceduralMemory:
@@ -187,8 +205,11 @@ class ProceduralMemory:
         effect_contract: dict | None = None,
         lifecycle: str = SkillLifecycle.STABLE.value,
         definition: dict | None = None,
+        *,
+        tenant_id: str = _TENANT_UNSET,
     ) -> ProceduralEntry:
-        """持久化 Skill 定义。"""
+        """持久化本租户 Skill 定义。"""
+        tenant = resolve_tenant(tenant_id)
         entry = ProceduralEntry(
             name=name,
             version=version,
@@ -200,25 +221,27 @@ class ProceduralMemory:
             lifecycle=lifecycle,
             definition=definition or {},
         )
-        await self._store.save(entry)
+        await self._store.save(entry, tenant_id=tenant)
         logger.info(
-            "procedural memory saved skill=%s version=%s", name, version
+            "procedural memory saved tenant=%s skill=%s version=%s", tenant, name, version
         )
         return entry
 
     async def load_skill(
-        self, name: str, version: str | None = None
+        self, name: str, version: str | None = None, *, tenant_id: str = _TENANT_UNSET
     ) -> ProceduralEntry | None:
-        """加载 Skill 定义。"""
-        return await self._store.load(name, version)
+        """加载本租户 Skill 定义。"""
+        return await self._store.load(name, version, tenant_id=tenant_id)
 
-    async def list_all(self) -> list[ProceduralEntry]:
-        """列出所有持久化的 Skill。"""
-        return await self._store.list_all()
+    async def list_all(self, *, tenant_id: str = _TENANT_UNSET) -> list[ProceduralEntry]:
+        """列出本租户所有持久化的 Skill。"""
+        return await self._store.list_all(tenant_id=tenant_id)
 
-    async def recall(self, query: str, top_k: int = 10) -> list[ProceduralEntry]:
-        """召回相关 Skill（按 bigram Jaccard 相似度）。"""
-        all_entries = await self._store.list_all()
+    async def recall(
+        self, query: str, top_k: int = 10, *, tenant_id: str = _TENANT_UNSET
+    ) -> list[ProceduralEntry]:
+        """召回本租户相关 Skill（按 bigram Jaccard 相似度）。"""
+        all_entries = await self._store.list_all(tenant_id=tenant_id)
         scored: list[tuple[float, ProceduralEntry]] = []
         for e in all_entries:
             sim = max(
@@ -230,9 +253,11 @@ class ProceduralMemory:
         scored.sort(key=lambda x: x[0], reverse=True)
         return [e for _, e in scored[:top_k]]
 
-    async def delete_skill(self, name: str, version: str) -> bool:
-        """删除 Skill 定义。"""
-        return await self._store.delete(name, version)
+    async def delete_skill(
+        self, name: str, version: str, *, tenant_id: str = _TENANT_UNSET
+    ) -> bool:
+        """删除本租户 Skill 定义。"""
+        return await self._store.delete(name, version, tenant_id=tenant_id)
 
 
 class ProceduralExtractor:

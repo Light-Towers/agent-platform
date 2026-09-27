@@ -52,6 +52,9 @@ class TrajectoryRecord:
     execution_id: str = field(default_factory=lambda: uuid.uuid4().hex)
     parent_execution_id: str | None = None
     session_id: str | None = None
+    # 隔离域（plan T1）：服务端租户，供 post-execution 记忆 sink 按租户落库。
+    # 由 _persist_trajectory 从 plan.tenant_id 填充；空 = 无租户上下文（sink 会 fail-fast）。
+    tenant_id: str = ""
     planner: str | None = None
     plan: dict[str, Any] = field(default_factory=dict)
     steps: list[TrajectoryStep] = field(default_factory=list)
@@ -67,6 +70,7 @@ class TrajectoryRecord:
             "execution_id": self.execution_id,
             "parent_execution_id": self.parent_execution_id,
             "session_id": self.session_id,
+            "tenant_id": self.tenant_id,
             "planner": self.planner,
             "plan": self.plan,
             "steps": [s.to_dict() for s in self.steps],
