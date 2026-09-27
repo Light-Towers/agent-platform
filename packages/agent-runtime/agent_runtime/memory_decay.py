@@ -14,6 +14,8 @@ import logging
 import time
 from typing import Any
 
+from agent_core.memory._tenant_gate import _TENANT_UNSET, resolve_tenant
+
 from agent_runtime.episodic_memory import EpisodicStore
 from agent_runtime.trajectory.models import TrajectoryRecord
 
@@ -37,36 +39,37 @@ class MemoryDecayManager:
         self._count = 0
 
     async def __call__(self, trajectory: TrajectoryRecord, runtime: Any) -> None:
-        """作为 post_execution_hook：每 cleanup_interval 次执行触发一次清理。"""
+        """作为 post_execution_hook：每 cleanup_interval 次执行触发一次本租户清理。"""
         self._count += 1
         if self._count < self._cleanup_interval:
             return
         self._count = 0
-        await self.cleanup()
+        await self.cleanup(tenant_id=trajectory.tenant_id or _TENANT_UNSET)
 
-    async def cleanup(self) -> tuple[int, int]:
-        """清理过期 + 超容量，返回 (expired_count, evicted_count)。"""
+    async def cleanup(self, *, tenant_id: str = _TENANT_UNSET) -> tuple[int, int]:
+        """清理本租户过期 + 超容量，返回 (expired_count, evicted_count)。"""
+        tenant = resolve_tenant(tenant_id)
         now = time.time()
-        all_eps = await self._store.list_all(limit=1000000)
+        all_eps = await self._store.list_all(limit=1000000, tenant_id=tenant)
 
         expired_count = 0
         for ep in all_eps:
             if now - ep.created_at > self._max_age:
-                await self._store.delete(ep.episode_id)
+                await self._store.delete(ep.episode_id, tenant_id=tenant)
                 expired_count += 1
 
-        remaining = await self._store.list_all(limit=1000000)
+        remaining = await self._store.list_all(limit=1000000, tenant_id=tenant)
         evicted_count = 0
         if len(remaining) > self._max_size:
             remaining.sort(key=lambda e: e.importance)
             to_evict = remaining[: len(remaining) - self._max_size]
             for ep in to_evict:
-                await self._store.delete(ep.episode_id)
+                await self._store.delete(ep.episode_id, tenant_id=tenant)
                 evicted_count += 1
 
         if expired_count > 0 or evicted_count > 0:
             logger.info(
-                "memory decay: expired=%d evicted=%d", expired_count, evicted_count
+                "memory decay: tenant=%s expired=%d evicted=%d", tenant, expired_count, evicted_count
             )
         return expired_count, evicted_count
 

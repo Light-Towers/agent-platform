@@ -25,6 +25,8 @@ import logging
 import time
 from typing import Any
 
+from agent_core.memory._tenant_gate import _TENANT_UNSET, resolve_tenant
+
 from agent_runtime.episodic_memory import EpisodicMemory
 from agent_runtime.procedural_memory import (
     CandidateSkill,
@@ -84,21 +86,26 @@ class ProceduralSink:
             return
         self._count = 0
 
-        episodes = await self._ep._store.list_all()
+        # 租户隔离（plan T1）：挖掘与写候选 Skill 均限本租户；无租户上下文 fail-fast。
+        tenant = resolve_tenant(trajectory.tenant_id or _TENANT_UNSET)
+        episodes = await self._ep._store.list_all(tenant_id=tenant)
         candidates = self._extractor.extract_patterns(episodes)
 
         for candidate in candidates:
-            await self._save_candidate(candidate, runtime)
+            await self._save_candidate(candidate, runtime, tenant)
             logger.info(
-                "procedural sink: candidate=%s confidence=%.2f success=%d/%d",
+                "procedural sink: tenant=%s candidate=%s confidence=%.2f success=%d/%d",
+                tenant,
                 candidate.name,
                 candidate.confidence,
                 candidate.success_count,
                 candidate.total_count,
             )
 
-    async def _save_candidate(self, candidate: CandidateSkill, runtime: Any) -> None:
-        """把候选 Skill 持久化为 draft ProceduralEntry。
+    async def _save_candidate(
+        self, candidate: CandidateSkill, runtime: Any, tenant: str
+    ) -> None:
+        """把候选 Skill 持久化为本租户 draft ProceduralEntry。
 
         验证 pattern_steps 是否对应 registry 中已注册的 skill，
         未验证的候选跳过（防止"空壳" skill）。
@@ -115,7 +122,7 @@ class ProceduralSink:
                 )
                 return
 
-        existing = await self._proc.load(candidate.name, "auto")
+        existing = await self._proc.load(candidate.name, "auto", tenant_id=tenant)
         if existing is not None:
             return
 
@@ -134,7 +141,7 @@ class ProceduralSink:
             },
             lifecycle="draft",
         )
-        await self._proc.save(entry)
+        await self._proc.save(entry, tenant_id=tenant)
 
 
 class SkillUsageTracker:
@@ -166,29 +173,37 @@ class SkillUsageTracker:
         self._promote = promote_threshold
         self._demote = demote_threshold
         self._min_uses = min_uses
-        self._stats: dict[tuple[str, str], dict[str, int]] = {}
+        self._stats: dict[tuple[str, str, str], dict[str, int]] = {}
 
-    def record_use(self, name: str, version: str, success: bool) -> None:
-        """记录一次 Skill 使用结果。"""
-        key = (name, version)
+    def record_use(
+        self, name: str, version: str, success: bool, *, tenant_id: str = _TENANT_UNSET
+    ) -> None:
+        """记录一次本租户 Skill 使用结果（按租户隔离统计）。"""
+        tenant = resolve_tenant(tenant_id)
+        key = (tenant, name, version)
         if key not in self._stats:
             self._stats[key] = {"success": 0, "total": 0}
         self._stats[key]["total"] += 1
         if success:
             self._stats[key]["success"] += 1
 
-    def get_stats(self, name: str, version: str) -> dict[str, int] | None:
-        """获取 Skill 使用统计。"""
-        return self._stats.get((name, version))
+    def get_stats(
+        self, name: str, version: str, *, tenant_id: str = _TENANT_UNSET
+    ) -> dict[str, int] | None:
+        """获取本租户 Skill 使用统计。"""
+        return self._stats.get((resolve_tenant(tenant_id), name, version))
 
-    async def check_and_adjust(self, name: str, version: str) -> str | None:
-        """检查 Skill 使用效果，自动调整 lifecycle，返回新 lifecycle 或 None（不变）。"""
-        key = (name, version)
+    async def check_and_adjust(
+        self, name: str, version: str, *, tenant_id: str = _TENANT_UNSET
+    ) -> str | None:
+        """检查本租户 Skill 使用效果，自动调整 lifecycle，返回新 lifecycle 或 None（不变）。"""
+        tenant = resolve_tenant(tenant_id)
+        key = (tenant, name, version)
         stats = self._stats.get(key)
         if stats is None or stats["total"] < self._min_uses:
             return None
 
-        entry = await self._proc.load(name, version)
+        entry = await self._proc.load(name, version, tenant_id=tenant)
         if entry is None:
             return None
 
@@ -216,7 +231,7 @@ class SkillUsageTracker:
             created_at=entry.created_at,
             updated_at=time.time(),
         )
-        await self._proc.save(updated)
+        await self._proc.save(updated, tenant_id=tenant)
         logger.info(
             "skill %s/%s lifecycle %s → %s (rate=%.2f n=%d)",
             name,
