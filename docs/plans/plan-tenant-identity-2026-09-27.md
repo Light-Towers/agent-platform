@@ -73,6 +73,14 @@ ADR-0007 §4.3（评审补强·最高优先）。**不依赖 A3，可当天上�
 - **生产 fail-fast 启动校验**（ADR-0007 §4.1）：既未配置令牌公钥/key→tenant、又未显式 `SINGLE_TENANT=<tenant>` 时**拒绝启动**；开发模式（`SINGLE_TENANT` 显式声明）保留。
 - 验收：伪造令牌/过期令牌/无 `tenant` claim → 401；合法令牌但 body 自报他租户 → 见 A5 双读行为。
 
+**实施记录（A3/A4 第一阶段：identity 内核，2026-09-27，随网关）**：
+- 新增 `packages/agent-runtime/agent_runtime/identity.py`（零宿主依赖，jwt 惰性 import）：`mint_token`/`verify_token`（RS256，kid 必带且需匹配在架公钥、强制 exp/iat/sub、leeway、max_ttl、必填 tenant_id claim，任何不符→`IdentityError` fail-closed）；`sign_internal_header`/`verify_internal_header`（HMAC-SHA256 内部头，缺头→None、伪造/过期→IdentityError）；`resolve_startup_tenant_mode`/`require_identity_startup_guard`（既无公钥又未声明 SINGLE_TENANT 且 DEPLOY_ENFORCE_IDENTITY=true → 拒启动）。
+- `workspace_registry.py` 新增 user 上下文 `bind_user_context`/`reset_user_context`/`server_user_id`（与 tenant 同一 `_tenant_id_ctx` 机制，`identity.apply_tenant_context` 复用 `bind_tenant_context`避免裂脑）。
+- `pyproject.toml` 新增可选 extra `identity = ["PyJWT[crypto]>=2.9"]`（不进 agent-core，红线 1）。
+- 测试 `packages/agent-runtime/tests/test_identity.py`（15 例，真实 RSA 密钥对，无网络/DB）：签/验回环、篡改/过期/缺 claim/超长 TTL/错 issuer、kid 轮转、HMAC 头回环/缺失/伪造/过期、上下文绑定、启动守卫三态。
+- 验证：agent-runtime session 595 passed（+15）；`ruff check .` 0；lint_architecture 通过。
+- **待下一提交**：HTTP middleware 接线（网关/agent_server Bearer JWT 验签+绑定、gateway 出站 HMAC、knowledge-service 子服务软模式校验 + `resolve_server_tenant` 优先级），属改请求路径、需逐 app 测试，不入本提交。
+
 ### A4（P0）内部签名头（网关 → 子服务）
 
 - 网关（agent_federation → knowledge/kefu/nl2sql）出站附 `X-Internal-Tenant` / `X-Internal-User` + HMAC（内部密钥 `INTERNAL_HMAC_KEY`，独立于 KNOWLEDGE_API_KEY）或短 JWT-svc（复用 A3 签发，内部 audience）。
