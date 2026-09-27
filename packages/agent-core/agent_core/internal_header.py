@@ -15,6 +15,7 @@ import base64
 import hashlib
 import hmac
 import json
+import os
 import time
 
 __all__ = [
@@ -22,6 +23,7 @@ __all__ = [
     "b64url_encode",
     "b64url_decode",
     "compute_header_sig",
+    "load_hmac_key",
     "sign_internal_header",
     "verify_internal_header",
 ]
@@ -42,6 +44,18 @@ def b64url_decode(s: str) -> bytes:
 def compute_header_sig(key: bytes, body: str) -> str:
     """对 ``body``（``v1.<payload>`` 段）计算 HMAC-SHA256 十六进制签名。"""
     return hmac.new(key, body.encode(), hashlib.sha256).hexdigest()
+
+
+def load_hmac_key(path: str | None = None) -> bytes | None:
+    """加载内部签名头共享对称密钥（网关 + 子服务双方持有）。
+
+    从 ``INTERNAL_HMAC_KEY_FILE`` 指向的文件读取（密钥走挂载/密钥库，绝不进仓库）。缺 → None。
+    """
+    path = path or os.getenv("INTERNAL_HMAC_KEY_FILE", "")
+    if not path or not os.path.exists(path):
+        return None
+    with open(path, "rb") as f:
+        return f.read().strip()
 
 
 def sign_internal_header(tenant: str, user: str | None = None, *, key: bytes, now: int | None = None) -> str:
