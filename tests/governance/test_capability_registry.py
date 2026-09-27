@@ -354,7 +354,12 @@ async def test_circuit_breaker_middleware_degrades():
 
     # 首次失败触发熔断（breaker.call fallback=None → 降级消息）
     degraded = await registry.execute("search", q="x")
-    assert degraded == ["联网搜索暂时不可用（熔断或请求失败）"]
+    # Tool 埋点收口后 registry.execute 返回结构化 ToolResult（原「== [list]」断言已过期）。
+    # 修正为对齐 ToolResult 契约：仍校验降级消息文本 + outcome=DEGRADED，非放宽断言。
+    from agent_core.observability import ToolOutcome
+
+    assert degraded.text == "联网搜索暂时不可用（熔断或请求失败）"
+    assert degraded.outcome is ToolOutcome.DEGRADED
     # 熔断打开后短路：执行器不再被调用
     await registry.execute("search", q="x")
     assert len(calls) == 1
