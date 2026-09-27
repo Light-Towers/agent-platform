@@ -16,14 +16,15 @@
 
 from __future__ import annotations
 
-import base64
-import hashlib
-import hmac
 import json
 import os
 import time
 from dataclasses import dataclass
 from typing import Any
+
+from agent_core.internal_header import InternalHeaderError
+from agent_core.internal_header import sign_internal_header as _core_sign
+from agent_core.internal_header import verify_internal_header as _core_verify
 
 from agent_runtime.workspace_registry import (
     _TENANT_UNSET,
@@ -257,24 +258,15 @@ def verify_token(
 
 
 # --- 内部签名头（信任边界 B：网关 → 子服务）--------------------------------
-
-def _b64url(data: bytes) -> str:
-    return base64.urlsafe_b64encode(data).decode().rstrip("=")
-
-
-def _unb64url(s: str) -> bytes:
-    return base64.urlsafe_b64decode(s + "=" * (-len(s) % 4))
-
+# 签名/验签原语单一实现于 agent_core.internal_header（零依赖 stdlib，knowledge-service 亦复用）；
+# 本层仅负责密钥加载 + max_age 环境默认 + 将 InternalHeaderError 归一为 IdentityError。
 
 def sign_internal_header(tenant_id: str, user_id: str | None = None, *, key: bytes | None = None) -> str:
-    """签发 ``v1.<payload>.<sig>`` 内部头（HMAC-SHA256 over ``v1.<payload>``）。key 缺则加载。"""
+    """签发 ``v1.<payload>.<sig>`` 内部头。key 缺则从 INTERNAL_HMAC_KEY 加载。"""
     key = key if key is not None else load_hmac_key()
     if not key:
         raise IdentityError("未配置 INTERNAL_HMAC_KEY（内部签名头无法签发）")
-    payload = _b64url(json.dumps({"t": tenant_id, "u": user_id, "ts": int(time.time())}, separators=(",", ":")).encode())
-    body = f"v1.{payload}"
-    sig = hmac.new(key, body.encode(), hashlib.sha256).hexdigest()
-    return f"{body}.{sig}"
+    return _core_sign(tenant_id, user_id, key=key)
 
 
 def verify_internal_header(
@@ -283,36 +275,18 @@ def verify_internal_header(
     key: bytes | None = None,
     max_age: int | None = None,
 ) -> tuple[str, str | None] | None:
-    """校验内部签名头。
-
-    - ``value`` 缺/空 → 返回 ``None``（头不存在，交由调用方按软/硬模式处置）；
-    - 存在但签名不符 / 过期 / 缺租户 → :class:`IdentityError`（存在即须可信，伪造一律拒）。
-    """
+    """校验内部签名头（委托 agent-core 原语）。缺头→None；伪造/过期/格式非法→IdentityError。"""
     if not value:
         return None
     key = key if key is not None else load_hmac_key()
     if not key:
         raise IdentityError("收到内部头但未配置 INTERNAL_HMAC_KEY，无法校验")
-    max_age = max_age if max_age is not None else _int_env("INTERNAL_HEADER_MAX_AGE_S", 300)
-    parts = value.split(".")
-    if len(parts) != 3 or parts[0] != "v1":
-        raise IdentityError("内部头格式非法")
-    _, payload, sig = parts
-    expected = hmac.new(key, f"v1.{payload}".encode(), hashlib.sha256).hexdigest()
-    if not hmac.compare_digest(expected, sig):
-        raise IdentityError("内部头签名不符（疑似伪造）")
+    if max_age is None:
+        max_age = _int_env("INTERNAL_HEADER_MAX_AGE_S", 300)
     try:
-        data = json.loads(_unb64url(payload))
-    except (ValueError, UnicodeDecodeError) as e:
-        raise IdentityError("内部头 payload 解析失败") from e
-    ts = data.get("ts")
-    if not isinstance(ts, int) or int(time.time()) - ts > max_age:
-        raise IdentityError("内部头过期/时间戳非法")
-    tenant = data.get("t")
-    if not isinstance(tenant, str) or not tenant.strip():
-        raise IdentityError("内部头缺 tenant")
-    user = data.get("u")
-    return tenant, user if isinstance(user, str) else None
+        return _core_verify(value, key=key, max_age=max_age)
+    except InternalHeaderError as e:
+        raise IdentityError(str(e)) from e
 
 
 def apply_tenant_context(tenant_id: str, user_id: str | None = None):
