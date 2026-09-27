@@ -30,6 +30,10 @@ from agent_core.memory.embedder import (
     SiliconFlowEmbedder,
     get_embedder,
 )
+from agent_core.memory.execution import (
+    EpisodicStoreProtocol,
+    ProceduralStoreProtocol,
+)
 from agent_core.memory.mongo import MongoHistoryStore
 from agent_core.memory.semantic import (
     MemoryType,
@@ -45,10 +49,6 @@ from agent_core.memory.semantic import (
     reset_backend_cache,
     semantic_memory_enabled,
     semantic_memory_typed_enabled,
-)
-from agent_core.memory.execution import (
-    EpisodicStoreProtocol,
-    ProceduralStoreProtocol,
 )
 from agent_core.memory.store import (
     CapabilityReport,

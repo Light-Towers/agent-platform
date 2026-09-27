@@ -9,7 +9,6 @@ runtime_checkable Protocol 的 isinstance 仅校验方法存在性与参数名�
 from __future__ import annotations
 
 import pytest
-
 from agent_core.memory.execution import (
     EpisodicStoreProtocol,
     ProceduralStoreProtocol,
