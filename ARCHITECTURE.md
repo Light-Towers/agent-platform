@@ -86,6 +86,14 @@ agent-core  agent-runtime  shared-schemas  agent-server  agent_federation  exhib
 
 ## 5. 当前已知技术债（登记，非本期处理）
 
+- **【2026-09-27 新增】记忆层契约缺位：`agent-runtime` 自建执行记忆**：`memory` 的法定归属是 `agent-core`（§2.1 明列「含 MemoryStore 统一门面」），且内核已声明「各子包不得再各自为政重复实现」（`agent_core/memory/__init__.py:20-21`）。但内核现有契约**只覆盖语义记忆**（`store.py` 的 `MemoryStore` 五动词与 `CapabilityReport` 均无 episodic/procedural/working 能力位），对执行记忆零覆盖 → `agent-runtime` 只能在包内自建 8 个 `memory_*.py`（对 `agent_core` 的 import 数为 0）。
+  - **定性**：不是重复实现，是**内核能力缺位导致的必然自建**。语义记忆那条线（`agent_federation` 与 `agent_server` 双侧均走 `agent_core.memory.typed`）已证明——内核一旦提供契约，两侧会自然收敛。
+  - **附带**：`agent_server` 单进程内并行两套记忆（语义走 `longterm.py`→内核 `memories` 表；执行走 `main.py`→runtime `episodic_memories`/`procedural_memories` 表）；`UserSemanticStore`/`SharedSemanticStore` 无生产实现；`episodic` 在两层同名不同义。
+  - **处置**：见 `docs/adr/0005-execution-memory-kernel-contract.md`（提案）——协议下沉内核、实现留宿主，沿用优化 E/P4.3 已验证范式。执行细节见 `docs/plans/plan-memory-hardening-2026-09-27.md`。
+- **【2026-09-27 新增】隔离维度无统一契约，且部分表缺 `tenant_id`**：七类表存在四种隔离组合（`chunks`/`sql_*` 仅 `workspace_id`；`memories` 为 `tenant_id`+`user_id`；`execution_queue`/`rate_limit_buckets`/`cost_records` 仅 `tenant_id`；`episodic_memories`/`procedural_memories` 无隔离列）。
+  - **定性**：`workspace_id` 是**归属维度**（客户端传入、默认 `default`、无 `workspaces` 归属表可证明其租户归属），**不可单独承担隔离**；`tenant_id` 才是**安全边界**（服务端 ContextVar 断言）。
+  - **定级（2026-09-27 已确认多租户部署）**：`chunks`（RAG 文档切片）与 `sql_ddl`/`sql_docs`/`sql_examples` 仅靠 workspace 隔离 → **跨租户可见为现实风险（活跃 P0）**；`workspace_id` 无归属校验（活跃 P0）；`memories.user_id` 位实装 `workspace_id`（TD-13）致用户维度缺失（用户已拍板画像层必须存在，P0）；knowledge-service `tenant_id` 默认空可选（P1）。
+  - **处置**：`docs/adr/0006-isolation-dimension-contract.md`（**已采纳**：tenant 为边界、workspace/user/knowledge 为正交归属；`procedural_memories` 定级「租户内共享、跨租户隔离」）。执行见 `docs/plans/plan-isolation-hardening-2026-09-27.md`（T9–T13）。
 - **`agent_federation` 自有 planner**：应用层 `agent_federation` 仍实现独立 planner/agent，需随 runtime 成形逐步收敛到红线 4。
 - **dialogue-framework 已移除**（2026-09-23，孤儿框架，能力已被 agent_server 吸收）。
 - **历史命名残留**：`docs/architecture-boundary-app-vs-agent-federation.md` 中仍出现的 `deepagents/` 旧名，已于 2026-08-19 清理为 `agent_federation/`；本文统一使用新名。

@@ -10,6 +10,8 @@ import json
 import time
 from typing import Any
 
+from agent_core.memory._tenant_gate import _TENANT_UNSET, resolve_tenant
+
 from agent_runtime.episodic_memory import Episode, EpisodeOutcome, EpisodicStore
 from agent_runtime.procedural_memory import ProceduralEntry, ProceduralStore
 
@@ -20,14 +22,15 @@ class PgEpisodicStore(EpisodicStore):
     def __init__(self, pool: Any) -> None:
         self._pool = pool
 
-    async def save(self, episode: Episode) -> None:
+    async def save(self, episode: Episode, *, tenant_id: str = _TENANT_UNSET) -> None:
+        tenant = resolve_tenant(tenant_id)
         async with self._pool.connection() as conn:
             await conn.execute(
                 "INSERT INTO episodic_memories "
-                "(episode_id, execution_id, task_summary, outcome, key_steps, "
+                "(tenant_id, episode_id, execution_id, task_summary, outcome, key_steps, "
                 " lessons, skill_names, total_tokens, total_cost, duration, "
                 " importance, created_at, metadata) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
                 "ON CONFLICT (episode_id) DO UPDATE SET "
                 " task_summary = EXCLUDED.task_summary, "
                 " outcome = EXCLUDED.outcome, "
@@ -37,6 +40,7 @@ class PgEpisodicStore(EpisodicStore):
                 " importance = EXCLUDED.importance, "
                 " metadata = EXCLUDED.metadata",
                 (
+                    tenant,
                     episode.episode_id,
                     episode.execution_id,
                     episode.task_summary,
@@ -53,62 +57,74 @@ class PgEpisodicStore(EpisodicStore):
                 ),
             )
 
-    async def recall(self, query: str, top_k: int = 10) -> list[Episode]:
+    async def recall(
+        self, query: str, top_k: int = 10, *, tenant_id: str = _TENANT_UNSET
+    ) -> list[Episode]:
+        tenant = resolve_tenant(tenant_id)
         async with self._pool.connection() as conn:
             cur = await conn.execute(
                 "SELECT episode_id, execution_id, task_summary, outcome, key_steps, "
                 "       lessons, skill_names, total_tokens, total_cost, duration, "
                 "       importance, created_at, metadata "
                 "FROM episodic_memories "
-                "WHERE task_summary ILIKE %s OR key_steps::text ILIKE %s "
+                "WHERE tenant_id = %s AND (task_summary ILIKE %s OR key_steps::text ILIKE %s) "
                 "ORDER BY importance DESC LIMIT %s",
-                (f"%{query}%", f"%{query}%", top_k),
+                (tenant, f"%{query}%", f"%{query}%", top_k),
             )
             rows = await cur.fetchall()
             return [self._row_to_episode(r) for r in rows]
 
-    async def get(self, episode_id: str) -> Episode | None:
+    async def get(self, episode_id: str, *, tenant_id: str = _TENANT_UNSET) -> Episode | None:
+        tenant = resolve_tenant(tenant_id)
         async with self._pool.connection() as conn:
             cur = await conn.execute(
                 "SELECT episode_id, execution_id, task_summary, outcome, key_steps, "
                 "       lessons, skill_names, total_tokens, total_cost, duration, "
                 "       importance, created_at, metadata "
-                "FROM episodic_memories WHERE episode_id = %s",
-                (episode_id,),
+                "FROM episodic_memories WHERE episode_id = %s AND tenant_id = %s",
+                (episode_id, tenant),
             )
             row = await cur.fetchone()
             return self._row_to_episode(row) if row else None
 
-    async def list_by_execution(self, execution_id: str) -> list[Episode]:
+    async def list_by_execution(
+        self, execution_id: str, *, tenant_id: str = _TENANT_UNSET
+    ) -> list[Episode]:
+        tenant = resolve_tenant(tenant_id)
         async with self._pool.connection() as conn:
             cur = await conn.execute(
                 "SELECT episode_id, execution_id, task_summary, outcome, key_steps, "
                 "       lessons, skill_names, total_tokens, total_cost, duration, "
                 "       importance, created_at, metadata "
-                "FROM episodic_memories WHERE execution_id = %s "
+                "FROM episodic_memories WHERE execution_id = %s AND tenant_id = %s "
                 "ORDER BY created_at DESC",
-                (execution_id,),
+                (execution_id, tenant),
             )
             rows = await cur.fetchall()
             return [self._row_to_episode(r) for r in rows]
 
-    async def list_all(self, limit: int = 10000) -> list[Episode]:
+    async def list_all(
+        self, limit: int = 10000, *, tenant_id: str = _TENANT_UNSET
+    ) -> list[Episode]:
+        tenant = resolve_tenant(tenant_id)
         async with self._pool.connection() as conn:
             cur = await conn.execute(
                 "SELECT episode_id, execution_id, task_summary, outcome, key_steps, "
                 "       lessons, skill_names, total_tokens, total_cost, duration, "
                 "       importance, created_at, metadata "
-                "FROM episodic_memories ORDER BY created_at DESC LIMIT %s",
-                (limit,),
+                "FROM episodic_memories WHERE tenant_id = %s "
+                "ORDER BY created_at DESC LIMIT %s",
+                (tenant, limit),
             )
             rows = await cur.fetchall()
             return [self._row_to_episode(r) for r in rows]
 
-    async def delete(self, episode_id: str) -> bool:
+    async def delete(self, episode_id: str, *, tenant_id: str = _TENANT_UNSET) -> bool:
+        tenant = resolve_tenant(tenant_id)
         async with self._pool.connection() as conn:
             result = await conn.execute(
-                "DELETE FROM episodic_memories WHERE episode_id = %s",
-                (episode_id,),
+                "DELETE FROM episodic_memories WHERE episode_id = %s AND tenant_id = %s",
+                (episode_id, tenant),
             )
             return (result.rowcount if hasattr(result, "rowcount") else 0) > 0
 
@@ -137,15 +153,16 @@ class PgProceduralStore(ProceduralStore):
     def __init__(self, pool: Any) -> None:
         self._pool = pool
 
-    async def save(self, entry: ProceduralEntry) -> None:
+    async def save(self, entry: ProceduralEntry, *, tenant_id: str = _TENANT_UNSET) -> None:
+        tenant = resolve_tenant(tenant_id)
         now = time.time()
         async with self._pool.connection() as conn:
             await conn.execute(
                 "INSERT INTO procedural_memories "
-                "(name, version, kind, description, input_schema, output_schema, "
+                "(tenant_id, name, version, kind, description, input_schema, output_schema, "
                 " effect_contract, lifecycle, definition, created_at, updated_at) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
-                "ON CONFLICT (name, version) DO UPDATE SET "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
+                "ON CONFLICT (tenant_id, name, version) DO UPDATE SET "
                 " kind = EXCLUDED.kind, "
                 " description = EXCLUDED.description, "
                 " input_schema = EXCLUDED.input_schema, "
@@ -155,6 +172,7 @@ class PgProceduralStore(ProceduralStore):
                 " definition = EXCLUDED.definition, "
                 " updated_at = EXCLUDED.updated_at",
                 (
+                    tenant,
                     entry.name,
                     entry.version,
                     entry.kind,
@@ -170,16 +188,17 @@ class PgProceduralStore(ProceduralStore):
             )
 
     async def load(
-        self, name: str, version: str | None = None
+        self, name: str, version: str | None = None, *, tenant_id: str = _TENANT_UNSET
     ) -> ProceduralEntry | None:
+        tenant = resolve_tenant(tenant_id)
         if version is not None:
             async with self._pool.connection() as conn:
                 cur = await conn.execute(
                     "SELECT name, version, kind, description, input_schema, "
                     "       output_schema, effect_contract, lifecycle, definition, "
                     "       created_at, updated_at "
-                    "FROM procedural_memories WHERE name = %s AND version = %s",
-                    (name, version),
+                    "FROM procedural_memories WHERE tenant_id = %s AND name = %s AND version = %s",
+                    (tenant, name, version),
                 )
                 row = await cur.fetchone()
                 return self._row_to_entry(row) if row else None
@@ -189,44 +208,52 @@ class PgProceduralStore(ProceduralStore):
                 "SELECT name, version, kind, description, input_schema, "
                 "       output_schema, effect_contract, lifecycle, definition, "
                 "       created_at, updated_at "
-                "FROM procedural_memories WHERE name = %s "
+                "FROM procedural_memories WHERE tenant_id = %s AND name = %s "
                 "ORDER BY "
                 "  CASE lifecycle WHEN 'stable' THEN 0 ELSE 1 END, "
                 "  version DESC "
                 "LIMIT 1",
-                (name,),
+                (tenant, name),
             )
             row = await cur.fetchone()
             return self._row_to_entry(row) if row else None
 
-    async def list_all(self) -> list[ProceduralEntry]:
+    async def list_all(self, *, tenant_id: str = _TENANT_UNSET) -> list[ProceduralEntry]:
+        tenant = resolve_tenant(tenant_id)
         async with self._pool.connection() as conn:
             cur = await conn.execute(
                 "SELECT name, version, kind, description, input_schema, "
                 "       output_schema, effect_contract, lifecycle, definition, "
                 "       created_at, updated_at "
-                "FROM procedural_memories ORDER BY name, version DESC"
+                "FROM procedural_memories WHERE tenant_id = %s ORDER BY name, version DESC",
+                (tenant,),
             )
             rows = await cur.fetchall()
             return [self._row_to_entry(r) for r in rows]
 
-    async def list_by_name(self, name: str) -> list[ProceduralEntry]:
+    async def list_by_name(
+        self, name: str, *, tenant_id: str = _TENANT_UNSET
+    ) -> list[ProceduralEntry]:
+        tenant = resolve_tenant(tenant_id)
         async with self._pool.connection() as conn:
             cur = await conn.execute(
                 "SELECT name, version, kind, description, input_schema, "
                 "       output_schema, effect_contract, lifecycle, definition, "
                 "       created_at, updated_at "
-                "FROM procedural_memories WHERE name = %s ORDER BY version DESC",
-                (name,),
+                "FROM procedural_memories WHERE tenant_id = %s AND name = %s ORDER BY version DESC",
+                (tenant, name),
             )
             rows = await cur.fetchall()
             return [self._row_to_entry(r) for r in rows]
 
-    async def delete(self, name: str, version: str) -> bool:
+    async def delete(
+        self, name: str, version: str, *, tenant_id: str = _TENANT_UNSET
+    ) -> bool:
+        tenant = resolve_tenant(tenant_id)
         async with self._pool.connection() as conn:
             result = await conn.execute(
-                "DELETE FROM procedural_memories WHERE name = %s AND version = %s",
-                (name, version),
+                "DELETE FROM procedural_memories WHERE tenant_id = %s AND name = %s AND version = %s",
+                (tenant, name, version),
             )
             return (result.rowcount if hasattr(result, "rowcount") else 0) > 0
 

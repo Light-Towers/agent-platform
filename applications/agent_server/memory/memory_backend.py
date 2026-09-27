@@ -36,10 +36,16 @@ from agent_core.memory.typed import (
     forget as _core_forget,
 )
 from agent_core.memory.typed import (
+    memory_dual_scope_enabled as _dual_scope_enabled,
+)
+from agent_core.memory.typed import (
     recall_typed as _core_recall_typed,
 )
 from agent_core.memory.typed import (
-    remember_typed as _core_remember_typed,
+    recall_user_profile as _core_recall_user_profile,
+)
+from agent_core.memory.typed import (
+    remember_typed_scoped as _core_remember_typed_scoped,
 )
 
 # 降级路径（无 DB/内核后端）的门面：app 仍用自己的 _resolve_default_backend
@@ -110,27 +116,36 @@ async def remember_fact(
     memory_type: str = "semantic",
     importance: float = 0.5,
     tenant_id: str= _TENANT_UNSET,
+    *,
+    scope: str = "workspace",
+    user_id: str | None = None,
 ) -> None:
-    """沉淀一条带类型/重要性的结构化记忆（ADO-0004 re-export）。
+    """沉淀一条带类型/重要性的结构化记忆（ADR-0004 re-export + v8 双 scope）。
 
-    ``workspace_id`` 复用内核 ``remember_typed(pool, user_id, ...)`` 的 user_id 形参位，
-    与优化 G 的隔离维度一致；``memory_type`` 取 episodic/semantic/procedural。
-    实现委托内核 ``typed.remember_typed``（列顺序与旧实现完全一致，
-    以便既有测试 ``test_remember_fact_writes_typed`` 不变）。
+    归属路由（ADR-0006 T13）：
+    - ``scope='workspace'``（缺省）：``workspace_id`` 落在内核 ``user_id`` 形参位
+      （归属键），与优化 G 隔离一致；
+    - ``scope='user'``：需同时传真实 ``user_id``（跨 workspace 画像），此时归属键
+      为真实用户；未传 user_id 时降级 workspace 行（不写错位）。
+    ``user_id`` 为 None 时行为与旧版一致（零变更）。内核仅在 ``MEMORY_DUAL_SCOPE``
+    开启时按新布局落行。
     """
     tenant_id = resolve_tenant(tenant_id)
     if memory_type not in _MEMORY_TYPES:
         memory_type = "semantic"
     importance = max(0.0, min(1.0, float(importance)))
     emb = embed_memory(fact)
-    await _core_remember_typed(
-        pool,
-        user_id=workspace_id,
-        tenant_id=tenant_id,
-        fact=fact,
-        memory_type=memory_type,
-        importance=importance,
-        embedding=emb,
+    # 统一走内核 remember_typed_scoped（内部按 MEMORY_DUAL_SCOPE 降级/新布局）：
+    # scope='user' 需真实 user_id；否则按 workspace 行（归属键=workspace_id）。
+    if scope == "user" and user_id:
+        await _core_remember_typed_scoped(
+            pool, tenant_id, user_id, workspace_id, "user",
+            fact, memory_type, importance, embedding=emb,
+        )
+        return
+    await _core_remember_typed_scoped(
+        pool, tenant_id, workspace_id, workspace_id, "workspace",
+        fact, memory_type, importance, embedding=emb,
     )
 
 
@@ -142,25 +157,36 @@ async def recall_typed(
     weights: Iterable[tuple[str, float]] | None = None,
     *,
     tenant_id: str= _TENANT_UNSET,
+    profile_user_id: str | None = None,
 ) -> list[str]:
-    """分层加权召回（ADR-0004 re-export，向下投影为 list[str]）。
+    """两路分层加权召回（ADR-0004 re-export，投影回 list[str]）。
 
-    委托内核 ``typed.recall_typed``（按 type_weight × importance × time_decay 融合），
-    再投影 ``TypedMemory.content`` 回 app 既有 ``list[str]`` 契约，保持
-    ``longterm.recall`` 与既有测试不变。``SEMANTIC_MEMORY_TYPED`` 关闭时内核降级平权召回。
+    ADR-0006 T13 门面编排（不改评分公式）：
+    - workspace 路：``_core_recall_typed(pool, user_id=workspace_id, ...)``（scope='workspace'）；
+    - user 画像路：当 ``profile_user_id`` 传入且 ``MEMORY_DUAL_SCOPE`` 开启，额外调
+      ``_core_recall_user_profile``（跨该用户所有 workspace 的 scope='user'）；
+    - 两路各取 top-k 后按 ``TypedMemory.score`` 融合降序取 k（两路同一评分公式→得分可比）。
+    未传 profile / 开关关时仅 workspace 路（行为与旧版一致）。
     """
     tenant_id = resolve_tenant(tenant_id)
     emb = embed_memory(question)
-    typed: list[TypedMemory] = await _core_recall_typed(
-        pool,
-        user_id=workspace_id,
-        tenant_id=tenant_id,
-        question=question,
-        k=k,
-        weights=weights,
-        embedding=emb,
+    ws_memories = await _core_recall_typed(
+        pool, user_id=workspace_id, tenant_id=tenant_id, question=question,
+        k=k, weights=weights, embedding=emb,
     )
-    return [m.content for m in typed]
+    merged = list(ws_memories)
+    if (
+        profile_user_id is not None
+        and profile_user_id != workspace_id
+        and _dual_scope_enabled()
+    ):
+        profile_memories = await _core_recall_user_profile(
+            pool, tenant_id=tenant_id, user_id=profile_user_id, question=question,
+            k=k, embedding=emb, weights=weights,
+        )
+        merged = merged + list(profile_memories)
+    merged.sort(key=lambda m: m.score, reverse=True)
+    return [m.content for m in merged[:k]]
 
 
 async def consolidate_memories(

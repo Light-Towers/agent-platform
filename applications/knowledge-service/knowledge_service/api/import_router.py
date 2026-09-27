@@ -36,6 +36,7 @@ from knowledge_service.utils.task_utils import (
     get_task_status,
     update_task_status,
 )
+from knowledge_service.utils.tenant_utils import resolve_server_tenant
 
 # 子路由实例：由 create_app() 挂载到根路径
 router = APIRouter()
@@ -171,6 +172,8 @@ async def upload_files(
     :return: 包含上传结果和所有任务ID的JSON响应
     """
     # 08+16 通用化：聚合 metadata 入参，透传到后台任务
+    # 隔离域（ADR-0006 T11）：tenant 为空时服务端注入默认租户（审计），不再静默全量。
+    tenant_id = resolve_server_tenant(tenant_id, endpoint="/upload")
     metadata = {
         "scope_type": scope_type,
         "tenant_id": tenant_id,

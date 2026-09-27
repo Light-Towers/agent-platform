@@ -1,9 +1,16 @@
-"""文档导入路由。"""
+"""文档导入路由。
+
+隔离契约（ADR-0006 T9/T10）：tenant_id 取服务端上下文（请求链路 ContextVar，
+未绑定时回退部署级 DEFAULT_TENANT_ID），**不收客户端表单值**；
+workspace_id 保留为归属维，写入前经 resolve_workspace 按调用方租户首次注册（幂等）。
+"""
 
 from agent_runtime.db import get_pool
+from agent_runtime.workspace_registry import resolve_workspace, server_tenant_id
 from fastapi import APIRouter, Depends, HTTPException, UploadFile
 
 from agent_server.api.auth import verify_api_key
+from agent_server.config import get_settings
 from agent_server.rag.chunker import split_markdown
 from agent_server.rag.embed import embed_query  # noqa: F401 — re-export 保持兼容
 from agent_server.rag.store import add_document
@@ -37,7 +44,13 @@ async def import_document(
     chunks = split_markdown(text)
     if not chunks:
         raise HTTPException(status_code=400, detail="文档内容为空或无法切分")
-    doc_id = await add_document(pool, source=filename, chunks=chunks, workspace_id=workspace_id)
+    # 服务端租户边界（不收表单值）+ workspace 归属解析（ADR-0006 D4 方案 A，首次自动注册）
+    tenant_id = server_tenant_id(get_settings().default_tenant_id)
+    ws = workspace_id or "default"
+    await resolve_workspace(pool, tenant_id, ws)
+    doc_id = await add_document(
+        pool, source=filename, chunks=chunks, workspace_id=ws, tenant_id=tenant_id
+    )
     return ImportResponse(doc_id=doc_id, source=filename, chunks=len(chunks))
 
 

@@ -9,6 +9,7 @@ from agent_runtime.db import get_pool
 from agent_runtime.otel import redact_question
 from agent_runtime.planner.protocol import PlannerContext
 from agent_runtime.schemas import ADMISSION_ADMITTED, ADMISSION_QUEUED, ADMISSION_REJECTED
+from agent_runtime.workspace_registry import resolve_workspace
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from shared_schemas import sse_pack
@@ -41,6 +42,15 @@ async def query(
     scheduler = getattr(request.app.state, "scheduler", None)
     status_store = getattr(request.app.state, "status_store", None)
     cost_governance = getattr(request.app.state, "cost_governance", None)
+
+    # ADR-0006 T10/D4：使用 workspace_id 前解析其租户归属（首次引用自动注册，幂等）。
+    # 读路径 best-effort：注册失败不阻断对话（数据召回仍由 (tenant_id, workspace_id)
+    # 谓词兜底隔离，见 rag/store.py / schema_store.py）；租户取 req.tenant_id 沿用现状。
+    if pool is not None:
+        try:
+            await resolve_workspace(pool, req.tenant_id or "default", req.workspace_id)
+        except Exception:
+            logger.warning("workspace 归属解析失败（降级继续，读侧仍按租户谓词）", exc_info=True)
 
     # priority 来源优先级：X-Priority header > req.priority body > 默认 normal
     priority: Priority = "normal"

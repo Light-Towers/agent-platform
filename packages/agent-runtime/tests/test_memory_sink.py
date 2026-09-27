@@ -26,14 +26,19 @@ from agent_runtime.procedural_memory import (
 from agent_runtime.skills.registry import SkillRegistry
 from agent_runtime.trajectory.models import TrajectoryRecord, TrajectoryStep
 
+# 隔离域（plan T1）：sink/tracker/store 全链路带 tenant_id。
+TENANT = "t-sink"
+
 
 def _trajectory(
     execution_id: str = "e1",
     steps: list[TrajectoryStep] | None = None,
     task: str = "招商分析",
+    tenant_id: str = TENANT,
 ) -> TrajectoryRecord:
     return TrajectoryRecord(
         execution_id=execution_id,
+        tenant_id=tenant_id,
         planner="agentic",
         plan={"task": task},
         steps=steps or [
@@ -53,7 +58,7 @@ async def test_episodic_sink_saves_episode():
     traj = _trajectory()
     await sink(traj, runtime=None)
 
-    all_eps = await store.list_all()
+    all_eps = await store.list_all(tenant_id=TENANT)
     assert len(all_eps) == 1
     assert all_eps[0].task_summary == "招商分析"
 
@@ -65,14 +70,25 @@ async def test_episodic_sink_skips_low_steps():
 
     traj = TrajectoryRecord(
         execution_id="e1",
+        tenant_id=TENANT,
         planner="agentic",
         plan={"task": "简单"},
         steps=[TrajectoryStep(name="only", latency=1.0, tokens=50)],
     )
     await sink(traj, runtime=None)
 
-    all_eps = await store.list_all()
+    all_eps = await store.list_all(tenant_id=TENANT)
     assert len(all_eps) == 0
+
+
+async def test_episodic_sink_cross_tenant_isolated():
+    """plan T1：tenantA 沉淀的 Episode，tenantB list_all 为空。"""
+    store = InMemoryEpisodicStore()
+    ep_mem = EpisodicMemory(store)
+    sink = EpisodicSink(ep_mem)
+    await sink(_trajectory(tenant_id="tA"), runtime=None)
+    assert await store.list_all(tenant_id="tB") == []
+    assert len(await store.list_all(tenant_id="tA")) == 1
 
 
 # ===== ProceduralSink =====
@@ -90,7 +106,7 @@ async def test_procedural_sink_triggers_at_interval():
         await ep_sink(traj, runtime=None)
         await proc_sink(traj, runtime=None)
 
-    entries = await proc_store.list_all()
+    entries = await proc_store.list_all(tenant_id=TENANT)
     assert len(entries) >= 1
     assert entries[0].lifecycle == "draft"
 
@@ -108,7 +124,7 @@ async def test_procedural_sink_not_triggered_before_interval():
         await ep_sink(traj, runtime=None)
         await proc_sink(traj, runtime=None)
 
-    entries = await proc_store.list_all()
+    entries = await proc_store.list_all(tenant_id=TENANT)
     assert len(entries) == 0
 
 
@@ -118,11 +134,11 @@ async def test_skill_usage_tracker_record_and_stats():
     proc_store = InMemoryProceduralStore()
     tracker = SkillUsageTracker(proc_store)
 
-    tracker.record_use("search", "1.0", success=True)
-    tracker.record_use("search", "1.0", success=False)
-    tracker.record_use("search", "1.0", success=True)
+    tracker.record_use("search", "1.0", success=True, tenant_id=TENANT)
+    tracker.record_use("search", "1.0", success=False, tenant_id=TENANT)
+    tracker.record_use("search", "1.0", success=True, tenant_id=TENANT)
 
-    stats = tracker.get_stats("search", "1.0")
+    stats = tracker.get_stats("search", "1.0", tenant_id=TENANT)
     assert stats is not None
     assert stats["success"] == 2
     assert stats["total"] == 3
@@ -134,17 +150,17 @@ async def test_skill_usage_tracker_promote_draft_to_stable():
     await proc_store.save(ProceduralEntry(
         name="search", version="1.0", kind="function",
         description="", lifecycle="draft",
-    ))
+    ), tenant_id=TENANT)
 
     tracker = SkillUsageTracker(proc_store, promote_threshold=0.8, min_uses=5)
 
     for _ in range(5):
-        tracker.record_use("search", "1.0", success=True)
+        tracker.record_use("search", "1.0", success=True, tenant_id=TENANT)
 
-    new_lc = await tracker.check_and_adjust("search", "1.0")
+    new_lc = await tracker.check_and_adjust("search", "1.0", tenant_id=TENANT)
     assert new_lc == "stable"
 
-    entry = await proc_store.load("search", "1.0")
+    entry = await proc_store.load("search", "1.0", tenant_id=TENANT)
     assert entry.lifecycle == "stable"
 
 
@@ -154,18 +170,18 @@ async def test_skill_usage_tracker_demote_stable_to_deprecated():
     await proc_store.save(ProceduralEntry(
         name="search", version="1.0", kind="function",
         description="", lifecycle="stable",
-    ))
+    ), tenant_id=TENANT)
 
     tracker = SkillUsageTracker(proc_store, demote_threshold=0.3, min_uses=5)
 
     for _ in range(4):
-        tracker.record_use("search", "1.0", success=False)
-    tracker.record_use("search", "1.0", success=True)
+        tracker.record_use("search", "1.0", success=False, tenant_id=TENANT)
+    tracker.record_use("search", "1.0", success=True, tenant_id=TENANT)
 
-    new_lc = await tracker.check_and_adjust("search", "1.0")
+    new_lc = await tracker.check_and_adjust("search", "1.0", tenant_id=TENANT)
     assert new_lc == "deprecated"
 
-    entry = await proc_store.load("search", "1.0")
+    entry = await proc_store.load("search", "1.0", tenant_id=TENANT)
     assert entry.lifecycle == "deprecated"
 
 
@@ -175,14 +191,14 @@ async def test_skill_usage_tracker_no_adjust_below_min_uses():
     await proc_store.save(ProceduralEntry(
         name="search", version="1.0", kind="function",
         description="", lifecycle="draft",
-    ))
+    ), tenant_id=TENANT)
 
     tracker = SkillUsageTracker(proc_store, min_uses=10)
 
     for _ in range(5):
-        tracker.record_use("search", "1.0", success=True)
+        tracker.record_use("search", "1.0", success=True, tenant_id=TENANT)
 
-    new_lc = await tracker.check_and_adjust("search", "1.0")
+    new_lc = await tracker.check_and_adjust("search", "1.0", tenant_id=TENANT)
     assert new_lc is None
 
 
@@ -192,16 +208,16 @@ async def test_skill_usage_tracker_no_adjust_when_rate_in_range():
     await proc_store.save(ProceduralEntry(
         name="search", version="1.0", kind="function",
         description="", lifecycle="stable",
-    ))
+    ), tenant_id=TENANT)
 
     tracker = SkillUsageTracker(proc_store, promote_threshold=0.8, demote_threshold=0.3, min_uses=5)
 
     for _ in range(3):
-        tracker.record_use("search", "1.0", success=True)
+        tracker.record_use("search", "1.0", success=True, tenant_id=TENANT)
     for _ in range(2):
-        tracker.record_use("search", "1.0", success=False)
+        tracker.record_use("search", "1.0", success=False, tenant_id=TENANT)
 
-    new_lc = await tracker.check_and_adjust("search", "1.0")
+    new_lc = await tracker.check_and_adjust("search", "1.0", tenant_id=TENANT)
     assert new_lc is None
 
 
@@ -262,7 +278,7 @@ async def test_post_execution_hook_failure_does_not_propagate():
 
 
 async def test_episodic_sink_integration_with_persist_trajectory():
-    """端到端：_persist_trajectory → EpisodicSink → Episode 沉淀。"""
+    """端到端：_persist_trajectory（携 plan.tenant_id）→ EpisodicSink → Episode 沉淀。"""
     ep_store = InMemoryEpisodicStore()
     ep_mem = EpisodicMemory(ep_store)
     sink = EpisodicSink(ep_mem)
@@ -271,7 +287,7 @@ async def test_episodic_sink_integration_with_persist_trajectory():
         SkillRegistry(),
         post_execution_hooks=[sink],
     )
-    plan = Plan(route="test", planner_name="test")
+    plan = Plan(route="test", planner_name="test", tenant_id=TENANT)
 
     class _MockExecCtx:
         execution_id = "e1"
@@ -289,6 +305,6 @@ async def test_episodic_sink_integration_with_persist_trajectory():
 
     await _persist_trajectory(runtime, plan, _MockAgentCtx(), _MockExecCtx())
 
-    all_eps = await ep_store.list_all()
+    all_eps = await ep_store.list_all(tenant_id=TENANT)
     assert len(all_eps) == 1
     assert all_eps[0].execution_id == "e1"
