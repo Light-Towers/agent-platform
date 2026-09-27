@@ -79,7 +79,15 @@ ADR-0007 §4.3（评审补强·最高优先）。**不依赖 A3，可当天上�
 - `pyproject.toml` 新增可选 extra `identity = ["PyJWT[crypto]>=2.9"]`（不进 agent-core，红线 1）。
 - 测试 `packages/agent-runtime/tests/test_identity.py`（15 例，真实 RSA 密钥对，无网络/DB）：签/验回环、篡改/过期/缺 claim/超长 TTL/错 issuer、kid 轮转、HMAC 头回环/缺失/伪造/过期、上下文绑定、启动守卫三态。
 - 验证：agent-runtime session 595 passed（+15）；`ruff check .` 0；lint_architecture 通过。
-- **待下一提交**：HTTP middleware 接线（网关/agent_server Bearer JWT 验签+绑定、gateway 出站 HMAC、knowledge-service 子服务软模式校验 + `resolve_server_tenant` 优先级），属改请求路径、需逐 app 测试，不入本提交。
+- **待下一提交**：HTTP middleware 接线（网关/agent_server Bearer JWT 验签绑定、gateway 出站 HMAC、knowledge-service 子服务软模式校验 + `resolve_server_tenant` 优先级），属改请求路径、需逐 app 测试，不入本提交。
+
+**实施记录（A3/A4 第二阶段：agent_server 接线 + 网关出站，2026-09-27）**：
+- 新增 `agent_runtime/identity_middleware.py`：**纯 ASGI、框架无关**（只读 scope headers、不消费请求体）的 `IdentityMiddleware`：合法 Bearer JWT→`verify_token`+`bind_tenant_context`；非法/过期 JWT→401；`X-Internal-Tenant` 合法→绑定、伪造/过期→401；无凭据→`SINGLE_TENANT` 声明则绑定、否则 observe 放行（兼容存量）。**`_looks_like_jwt` 形态判别**：不透明 Bearer（如部分部署把静态 API_KEY 放 Authorization）不当作租户凭据，交下游既有认证，避免误拒。
+- `identity.py` 补纯函数 `extract_bearer`/`get_header_tenant`/`resolve_tenant_context`（优先级 ContextVar>provided>default）供 app/子服务复用。
+- **agent_server 接线**：`main.py` `create_app` 挂 `IdentityMiddleware`（agent_server 用 X-API-Key 头，与 Authorization Bearer 无冲突）+ `lifespan` 调 `require_identity_startup_guard`。默认 observe 零行为变更，配 `TENANT_JWT_PUBLIC_KEYS_FILE`/`SINGLE_TENANT`/`TENANT_JWT_ENFORCE` 后激活。`.env.example` 补全身份配置段（全占位符）。
+- **agent_federation 出站**：`tools/knowledge_tools.py` 当配 `INTERNAL_HMAC_KEY` 时附 `X-Internal-Tenant` 签名头向子服务断言租户（A4 信任边界 B）。
+- 测试：`test_identity_middleware.py`（11 例，纯 ASGI 驱动，真实 RS256+HMAC）+ identity 15 例。验证：agent-runtime identity+middleware 26 passed；agent_server 44 passed（真 app + 挂载中间件 + lifespan 守卫）；federation 142 passed；ruff 新文件均干净。
+- **未接线（诚实标注 + 原因）**：① knowledge-service **入站**内部头校验 + `resolve_server_tenant` 改优先级——因 **knowledge-service 不依赖 agent-runtime**（服务边界），需自带 stdlib 校验器或新增依赖，另议；② **agent_federation 入站** JWT——与现有 `Authorization: Bearer <静态 API_KEY>` 冲突，需先统一 header 命名空间（如改用 `X-Tenant-JWT`）再接，否则与 API_KEY 相冲（已由 `_looks_like_jwt` 保证不破坏现有，但真正确认入站链路待此决策）。③④ A5/A6（双读过渡 + fail-closed 切换）依 A4 观测期。
 
 ### A4（P0）内部签名头（网关 → 子服务）
 

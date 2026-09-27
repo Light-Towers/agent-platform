@@ -25,7 +25,12 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
-from agent_runtime.workspace_registry import bind_tenant_context, bind_user_context
+from agent_runtime.workspace_registry import (
+    _TENANT_UNSET,
+    bind_tenant_context,
+    bind_user_context,
+    server_tenant_id,
+)
 
 __all__ = [
     "IdentityError",
@@ -41,6 +46,9 @@ __all__ = [
     "apply_tenant_context",
     "resolve_startup_tenant_mode",
     "require_identity_startup_guard",
+    "extract_bearer",
+    "get_header_tenant",
+    "resolve_tenant_context",
 ]
 
 
@@ -64,6 +72,52 @@ def env_bool(name: str, default: bool = False) -> bool:
     if raw is None or raw == "":
         return default
     return raw.strip().lower() in ("1", "true", "yes", "on")
+
+
+def extract_bearer(authorization: str | None) -> str | None:
+    """从 Authorization 头取 Bearer token（大小写不敏感）；非 Bearer → None。"""
+    if authorization and authorization.lower().startswith("bearer "):
+        tok = authorization[7:].strip()
+        return tok or None
+    return None
+
+
+def get_header_tenant(headers, *, header_name: str = "X-Internal-Tenant", hmac_key: bytes | None = None):
+    """校验内部签名头，返回 (tenant, user) 或 None（缺头）。供子服务软/硬模式复用。
+
+    无该头 → None（交调用方按软/硬模式处置）；有头但伪造/过期 → IdentityError。
+    """
+    value = headers.get(header_name) if headers is not None else None
+    if not value:
+        return None
+    return verify_internal_header(value, key=hmac_key if hmac_key is not None else load_hmac_key())
+
+
+def resolve_tenant_context(provided: str | None = None, *, default: str | None = None) -> str:
+    """统一租户解析优先级（ADR-0007）：ContextVar 断言 > 入站 provided > default。
+
+    default=None 且 ContextVar 未绑定 → 交由 server_tenant_id fail-fast（不静默兜底）。
+    """
+    bound = _tenant_ctx_value()
+    if bound is not None:
+        return bound
+    p = (provided or "").strip()
+    if p:
+        return p
+    return server_tenant_id(default if default is not None else _TENANT_UNSET)
+
+
+def _tenant_ctx_value() -> str | None:
+    """读服务端租户 ContextVar：绑定过则返回值，否则 None（不触发 fail-fast）。"""
+    from agent_runtime import workspace_registry as _wr
+
+    v = _wr._tenant_id_ctx.get()
+    return None if v is _TENANT_UNSET else v
+
+
+# 直接读 ContextVar（避免 default 哨兵干扰）：绑定过则返回值，否则 None。
+def _read_tenant_ctx() -> str | None:
+    return _tenant_ctx_value()
 
 
 def _int_env(name: str, default: int) -> int:
