@@ -87,7 +87,11 @@ ADR-0007 §4.3（评审补强·最高优先）。**不依赖 A3，可当天上�
 - **agent_server 接线**：`main.py` `create_app` 挂 `IdentityMiddleware`（agent_server 用 X-API-Key 头，与 Authorization Bearer 无冲突）+ `lifespan` 调 `require_identity_startup_guard`。默认 observe 零行为变更，配 `TENANT_JWT_PUBLIC_KEYS_FILE`/`SINGLE_TENANT`/`TENANT_JWT_ENFORCE` 后激活。`.env.example` 补全身份配置段（全占位符）。
 - **agent_federation 出站**：`tools/knowledge_tools.py` 当配 `INTERNAL_HMAC_KEY` 时附 `X-Internal-Tenant` 签名头向子服务断言租户（A4 信任边界 B）。
 - 测试：`test_identity_middleware.py`（11 例，纯 ASGI 驱动，真实 RS256+HMAC）+ identity 15 例。验证：agent-runtime identity+middleware 26 passed；agent_server 44 passed（真 app + 挂载中间件 + lifespan 守卫）；federation 142 passed；ruff 新文件均干净。
-- **未接线（诚实标注 + 原因）**：① knowledge-service **入站**内部头校验 + `resolve_server_tenant` 改优先级——因 **knowledge-service 不依赖 agent-runtime**（服务边界），需自带 stdlib 校验器或新增依赖，另议；② **agent_federation 入站** JWT——与现有 `Authorization: Bearer <静态 API_KEY>` 冲突，需先统一 header 命名空间（如改用 `X-Tenant-JWT`）再接，否则与 API_KEY 相冲（已由 `_looks_like_jwt` 保证不破坏现有，但真正确认入站链路待此决策）。③④ A5/A6（双读过渡 + fail-closed 切换）依 A4 观测期。
+### 决策落地记录（2026-09-27，用户拍板：决策1=A3、决策2=B1）
+- **决策1（A3·签名原语下沉 agent-core）**：`agent_core/internal_header.py`（零依赖 stdlib）承载 HMAC sign/verify + `load_hmac_key`；`agent_runtime/identity.py` 与 knowledge-service **共用同一实现**（runtime 薄封装委托，`test_internal_header_contract.py` 禁 runtime 再自带 hmac.new）。ks `utils/tenant_identity.py` 新增纯 ASGI `TenantHeaderMiddleware`（**不新增 agent-runtime 依赖**，只依赖 agent-core）校验 `X-Internal-Tenant`→绑定断言 ContextVar（伪造→401、缺头/未配密钥→透传）；`resolve_server_tenant` 改为 **签名断言 > provided(仅审计) > default**（即 A5 双读）。commit e4e1d04 / 1266a86。
+- **决策2（B1·X-Tenant-JWT 独立头）**：`identity_middleware` 加 `token_header` 参数；`api/identity_bridge.py` 复用 `IdentityMiddleware(token_header="X-Tenant-JWT", verify_header=None)` 把断言**桥接到联邦自己的 `api.context`**（避免双 ContextVar 裂脑），与 `Authorization: Bearer <静态 API_KEY>` 并存零冲突。server.py 挂载。commit （B1）。
+- 累计测试：agent-core internal_header 8、agent-runtime identity 15 + middleware 12、governance contract 2、ks tenant_identity 9、federation identity_bridge 4；根 449 / federation 146 / ks 233 全绿。
+- **剩余**：A5/A6 的 **fail-closed 硬切换**（`TENANT_JWT_ENFORCE` / `TENANT_HEADER_ENFORCE`=true）依 A4 签名头全量上线 + 观测期（时间闸门，代码已就绪，仅需灰度到位后翻开关）；私钥/公钥/HMAC 的实际密钥材料由运维经密钥库注入（`.env.example` 已列占位）。
 
 ### A4（P0）内部签名头（网关 → 子服务）
 
