@@ -322,6 +322,9 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+identity = [
+    { name = "pyjwt", extra = ["crypto"] },
+]
 mcp = [
     { name = "mcp" },
 ]
@@ -332,9 +335,10 @@ requires-dist = [
     { name = "mcp", marker = "extra == 'mcp'", specifier = ">=2.0.0" },
     { name = "pydantic", specifier = ">=2.13" },
     { name = "pydantic-settings", specifier = ">=2.0" },
+    { name = "pyjwt", extras = ["crypto"], marker = "extra == 'identity'", specifier = ">=2.9" },
     { name = "shared-schemas", editable = "packages/shared-schemas" },
 ]
-provides-extras = ["mcp"]
+provides-extras = ["mcp", "identity"]
 
 [[package]]
 name = "aiohappyeyeballs"
