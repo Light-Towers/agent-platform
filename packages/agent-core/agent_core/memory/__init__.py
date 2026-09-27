@@ -46,6 +46,10 @@ from agent_core.memory.semantic import (
     semantic_memory_enabled,
     semantic_memory_typed_enabled,
 )
+from agent_core.memory.execution import (
+    EpisodicStoreProtocol,
+    ProceduralStoreProtocol,
+)
 from agent_core.memory.store import (
     CapabilityReport,
     MemoryStore,
@@ -155,6 +159,8 @@ __all__ = [
     "MemoryStore",
     "PgMemoryStore",
     "VectorMemoryStore",
+    "EpisodicStoreProtocol",
+    "ProceduralStoreProtocol",
     "DEFAULT_COLLECTION",
     "MilvusMemoryBackend",
     "PgVectorMemoryBackend",
