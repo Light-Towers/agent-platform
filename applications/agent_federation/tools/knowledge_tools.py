@@ -124,6 +124,17 @@ def knowledge_retrieve(query: str, item_name: str = "") -> str:
         payload = {"query": query}
         if item_name:
             payload["item_name"] = item_name
+        # 上线前置（T11 强制化）：传当前请求链路的租户，避免 knowledge-service 将
+        # 多租户请求误归 'default' 桶。非 server 环境（api.context 不可导入）或无上下文
+        # → 不传，由 knowledge-service 服务端注入部署默认租户（不 422）。
+        try:
+            from api.context import get_tenant_context
+
+            _tenant = get_tenant_context()
+        except ImportError:
+            _tenant = None
+        if _tenant:
+            payload["tenant_id"] = _tenant
 
         try:
             resp = _knowledge_post(url, payload, headers)
