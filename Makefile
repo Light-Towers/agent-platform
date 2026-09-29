@@ -1,7 +1,7 @@
 # Agent Platform 本地/CI 工程门禁
 # 统一任务入口，避免各脚本分散调用；所有目标零业务副作用。
 
-.PHONY: install lint format type test eval eval-llm-required eval-llm-memory ci compose-smoke
+.PHONY: install lint format type test eval eval-llm-required eval-llm-memory eval-rag eval-rag-routes eval-rag-retrieval eval-rag-e2e eval-rag-gate ci compose-smoke
 
 install:
 	uv sync --all-packages --extra dev
@@ -65,6 +65,34 @@ eval-llm-memory:
 eval-rag:
 	RERANK_ENABLED=false uv run --extra eval python scripts/flashrag_eval/run_eval.py
 	RERANK_ENABLED=true  uv run --extra eval python scripts/flashrag_eval/run_eval.py
+
+# knowledge-service 检索路线消融（RRF 混合排名 vs 单路召回 + embedding 内 dense/sparse 向量级）。
+# 非 hermetic（依赖真实 Milvus + embedding，另可选 Neo4j/LLM/rerank）→ 不进 make ci，手动/nightly。
+# 流程：先 seed（写专用集合 eval_rag_routes + 回填真实 chunk_id 生成 labeled golden），再跑消融。
+# 缺环境时脚本清晰报错并 return 1，不吞异常、不预填数字。cd 进子目录以加载其 .env。
+eval-rag-routes:
+	cd applications/knowledge-service && uv run python eval/seed_synthetic_corpus.py
+	cd applications/knowledge-service && uv run python eval/run_route_ablation.py --golden eval/golden_queries.labeled.jsonl
+
+# RAG 可持续评测体系（分层，非 hermetic → 不进 make ci，手动/nightly）。
+# 依赖真实 Milvus/Neo4j/LLM；缺环境由脚本清晰报错并 return 1（不吞异常、不预填数字）。
+# 前置用真实语料自举 golden（gen_golden.py，写 eval/golden_queries.real.jsonl，含难负例打破 Recall 饱和）。
+
+# Phase B：真实语料自举 golden + 多路召回数据源贡献归因（LOO/add-one per-bucket + bootstrap 显著性）
+#          + 参数敏感度扫描。需 Milvus(+可选 Neo4j/rerank)。
+eval-rag-retrieval:
+	cd applications/knowledge-service && uv run python eval/gen_golden.py
+	cd applications/knowledge-service && uv run python eval/run_route_ablation.py --golden eval/golden_queries.real.jsonl --with-contrib --param-scan
+
+# Phase C：端到端答案质量（检索层/生成层归因分离，faithfulness/relevance/correctness）。需 LLM。
+eval-rag-e2e:
+	cd applications/knowledge-service && uv run python eval/run_e2e_eval.py --golden eval/golden_queries.real.jsonl --scorer judge
+
+# Phase D：baseline vs candidate 配对 bootstrap 回归门禁；任一核心指标显著回归即非 0 退出。
+# 用法：BASELINE=eval/runs/<tsA_hashA> CANDIDATE=eval/runs/<tsB_hashB> make eval-rag-gate
+eval-rag-gate:
+	@test -n "$(BASELINE)" -a -n "$(CANDIDATE)" || { echo "用法: BASELINE=<runA> CANDIDATE=<runB> make eval-rag-gate"; exit 2; }
+	cd applications/knowledge-service && uv run python eval/compare_runs.py --baseline "$(BASELINE)" --candidate "$(CANDIDATE)" --fail-on-regression
 
 # CI 串联：lock 校验 + lint + 单测 + 评测门禁；任一失败即中断。
 ci: lint test eval
