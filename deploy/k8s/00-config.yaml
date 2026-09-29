@@ -1,0 +1,28 @@
+# 命名空间 + 配置（ConfigMap 非敏感默认值 / Secret 敏感项）
+# 注意：本 Secret 仅本地 demo 用途，禁止提交真实密钥。
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: agent-platform
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: agent-platform-config
+  namespace: agent-platform
+data:
+  LLM_BASE_URL: "https://api.openai.com/v1"
+  LLM_MODEL: "gpt-4o-mini"
+  LLM_FALLBACK_MODEL: "gpt-4o-mini"
+  EMBEDDING_MODEL: "bge-small-zh"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: agent-platform-secrets
+  namespace: agent-platform
+type: Opaque
+stringData:
+  POSTGRES_PASSWORD: "agent_platform_dev"
+  # 与 compose 的 DATABASE_URL 同构：user=agent / db=agent_platform / svc 名 postgres
+  DATABASE_URL: "postgresql://agent:agent_platform_dev@postgres:5432/agent_platform"

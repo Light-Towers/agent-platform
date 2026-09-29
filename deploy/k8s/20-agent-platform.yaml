@@ -1,0 +1,113 @@
+# agent-platform API：Deployment + Service
+# 镜像构建见 README 步骤 2（minikube image build -t agent-platform:dev .）
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agent-platform
+  namespace: agent-platform
+  labels:
+    app: agent-platform
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: agent-platform
+  template:
+    metadata:
+      labels:
+        app: agent-platform
+    spec:
+      containers:
+        - name: agent-platform
+          image: agent-platform:dev
+          imagePullPolicy: IfNotPresent   # 本地构建镜像，不拉远端
+          ports:
+            - containerPort: 8000
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: agent-platform-secrets
+                  key: DATABASE_URL
+            - name: LLM_BASE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: agent-platform-config
+                  key: LLM_BASE_URL
+            - name: LLM_MODEL
+              valueFrom:
+                configMapKeyRef:
+                  name: agent-platform-config
+                  key: LLM_MODEL
+            - name: LLM_FALLBACK_MODEL
+              valueFrom:
+                configMapKeyRef:
+                  name: agent-platform-config
+                  key: LLM_FALLBACK_MODEL
+            - name: EMBEDDING_MODEL
+              valueFrom:
+                configMapKeyRef:
+                  name: agent-platform-config
+                  key: EMBEDDING_MODEL
+          # compose TB-7：lifespan 内 init_pool 连不上 pg 会阻塞 ~30s
+          # → startupProbe 给足 8*5s=40s 窗口，期间 readiness/liveness 不生效
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            periodSeconds: 5
+            failureThreshold: 8
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          securityContext:
+            runAsNonRoot: true   # 对应 Dockerfile 的非 root appuser(10001) 最佳实践
+            runAsUser: 10001
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: agent-platform
+  namespace: agent-platform
+spec:
+  type: ClusterIP   # 访问用 port-forward 或 minikube service，不直接暴露
+  selector:
+    app: agent-platform
+  ports:
+    - port: 8000
+      targetPort: 8000
+---
+# （可选加分项）HPA：先 minikube addons enable metrics-server 再启用本块
+# apiVersion: autoscaling/v2
+# kind: HorizontalPodAutoscaler
+# metadata:
+#   name: agent-platform-hpa
+#   namespace: agent-platform
+# spec:
+#   scaleTargetRef:
+#     apiVersion: apps/v1
+#     kind: Deployment
+#     name: agent-platform
+#   minReplicas: 1
+#   maxReplicas: 3
+#   metrics:
+#     - type: Resource
+#       resource:
+#         name: cpu
+#         target:
+#           type: Utilization
+#           averageUtilization: 70
