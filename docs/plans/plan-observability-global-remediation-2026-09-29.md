@@ -172,4 +172,18 @@ uv run python scripts/check_doc_sync.py                # 必须通过
 | R18（本轮新发现） | 旧门面 `parse_traceparent` import 不存在类名 `TraceContextFormat`（真名 `TraceContextTextMapPropagator`），ImportError 被吞→从诞生起恒返回 None（生产零调用点，仅测试钉住）；已修 | test_otel 伴随用例更新（原断言钉的是缺陷行为，据实改写并说明） |
 | S0 止血（R8③） | knowledge-service `query_router.py` `/query`+`/retrieve` 4 处手动 enter/exit 改 `with use_context(...)` 标准形；流式分支 background_task 不继承上下文的限制如实注记（父链透传属 S2） | ks unit 376 passed；tests/api 16 passed；ruff 全仓过；check_doc_sync 0 警告 |
 
-**未完成（后续批次）**：S2（build_api_app 装配 TracingMiddleware + R9/R10/R11/R12 旁路与 health 真状态）；S3（CI 补 `--extra otel` 真 SDK session——需先适配 test_otel 中钉"本机无 SDK"前提的用例）；S4（Langfuse 代际契约）；S5（构建 rev 绑定/部署脚本入库）；R6 真集群端到端复验（本地已证状态机贯通，Jaeger 父子同 trace 待集群重验后更新 VERIFICATION L141 勘误注）；门面退役（L-2 白名单清零后删 otel.py 本体+白名单行）。
+**未完成（后续批次）**：S2 尾项（ks 开启中间件：ks main.py 尚未迁 build_api_app，裸 FastAPI 白名单现状；ks 流式父链透传；ks/federation/exhibition lifespan 接 shutdown_tracing——仅 agent_server 已接，随各 app 开启节奏）；S4（Langfuse 代际契约）；S5（构建 rev 绑定/部署脚本入库）；R6 真集群端到端复验（本地已由 tests/observability 真 SDK 钉住父子一致，Jaeger 现场复验待集群重验后更新 VERIFICATION L141 勘误注）；门面退役（L-2 白名单已空，otel.py 本体+白名单行待后续删除）。
+
+## 11. 实施进度（S2+S3 已落地，2026-09-29）
+
+| 项 | 内容 | 验证证据 |
+|---|---|---|
+| kernel 中间件（R10/R12） | 新增 `agent_core/tracing_middleware.py`：纯 ASGI `TracingMiddleware`，每请求 SERVER span（finally 恒 end，含断连 CancelledError）；入站 traceparent 提取为父（R6 唯一挂载点）；关闭态逐请求门控透传零开销 | 真 SDK 钉用例：200/429/500 旁路各产出 1 span；trace_id/parent_span_id 与头段一致 |
+| 全局装配（构造保证） | `build_api_app` 新增 `enable_tracing` 参数（默认关，opt-in 逐 app 开启，方案 §4 兼容顺序）；agent_server 已开 | 工厂单测路径（tests/observability 经工厂建 app）全部绿 |
+| 手写 span 退役（R8） | agent_server `query_router` 删 `app.state.otel_tracer` 散点取用与手写 request span（含 finally end）；切 handler 早段 `record_request_attributes`（thread_id/priority/脱敏 question 覆盖 429/409/cache_hit 旁路）+ cache_hit 专属属性 | tests/api 25 passed；agent_server session 44 passed；lint L-2 白名单空通过 |
+| lifespan 统一退出（R9） | kernel 新增 `shutdown_tracing()`（flush+shutdown provider）；agent_server 替掉手写 `otel_force_flush`；门面 `force_flush` 保留供过渡 | 真 SDK session 无尾批丢失告警 |
+| /health 真状态（R11） | `shared_schemas.HealthResponse` 只增 `otel_status` 字段（不改形状，§5 审计）；health_router 读 `get_tracing_status()` 真值非 settings 意愿值 | shared-schemas session 入 881 passed 全套 |
+| L-2/L-4 门禁 | L-2：禁 app.state 取 tracer（白名单空）；L-4：OTel/langfuse extras 声明齐备且多处下界一致（根[otel]与 core[tracing]/runtime[otel] 归一 >=1.24；agent-runtime 新增 otel+langfuse extras；langfuse import v2→v3 迁面属 S4 已注记）；`uv lock` 重生 | lint 9 条全过；`uv lock --check` RC=0 |
+| S3 真 SDK session（R3 补盲） | Makefile `test` 新增 `uv run --extra otel pytest tests/observability -q`（不计入标准 session 计数，仍 9）；新建 `test_tracing_middleware.py`（旁路/父子/三态 5 钉）；`test_otel.py` 环境自适应（autouse reset + 无 SDK 前提用例按 _SDK_AVAILABLE 分支 skip） | 真 SDK session 14 passed；无 SDK 根 session 自动 skip（1 skipped）；check_doc_sync 0 警告 |
+
+本地全套验证（无 SDK 窄层 + 真 SDK 补盲均实跑）：lint 9 条、ruff 全仓、agent-core+runtime+shared-schemas 881 passed、tests/api+observability 25 passed/1 skipped、--extra otel session 14 passed、agent_server 44 passed、federation 146 passed、check_doc_sync 0 警告。

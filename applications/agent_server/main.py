@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 
 from agent_core.guardrails.app_factory import build_api_app
 from agent_core.logging import configure_logging, get_logger
+from agent_core.tracing import shutdown_tracing
 from agent_runtime.identity import require_identity_startup_guard
 from agent_runtime.identity_middleware import IdentityMiddleware
 
@@ -22,8 +23,7 @@ from agent_runtime.admission_gateway import PgAdmissionController
 from agent_runtime.coordinator import SessionCoordinator
 from agent_runtime.db import close_pool, get_pool, init_pool
 from agent_runtime.mcp_client import MCPClientManager
-from agent_runtime.otel import force_flush as otel_force_flush
-from agent_runtime.otel import get_otel_tracer, init_otel
+from agent_runtime.otel import init_otel
 from agent_runtime.planner.durability_pg import (
     PgCheckpointStore,
     PgExecutionOwnershipStore,
@@ -229,7 +229,9 @@ async def lifespan(app: FastAPI):
     else:
         app.state.revert_handler = None
 
-    # Phase 2: OTel 接线（opt-in）
+    # Phase 2: OTel 接线（opt-in）；观测单状态机在 kernel（S1），请求级 span 由
+    # build_api_app(enable_tracing=True) 装配的 TracingMiddleware 创建（S2），
+    # 不再往 app.state 挂 tracer 散点取用（lint L-2 拦截）。
     if settings.otel_effective_enabled:
         init_otel(
             exporter=settings.otel_exporter,
@@ -237,9 +239,6 @@ async def lifespan(app: FastAPI):
             sampling_rate=settings.otel_sampling_rate,
             service_name=settings.otel_service_name,
         )
-        app.state.otel_tracer = get_otel_tracer()
-    else:
-        app.state.otel_tracer = None
 
     # Phase 2: MCP client（opt-in）
     mcp_manager = None
@@ -476,8 +475,8 @@ async def lifespan(app: FastAPI):
     reaper = getattr(app.state, "scheduler_reaper", None)
     if reaper is not None:
         await reaper.stop()
-    # Phase 2: OTel flush
-    otel_force_flush()
+    # Phase 2: OTel 统一退出（kernel flush+shutdown provider，尾批 span 不丢）
+    shutdown_tracing()
     # Phase 2: MCP close
     mcp_mgr = getattr(app.state, "mcp_manager", None)
     if mcp_mgr is not None:
@@ -488,7 +487,7 @@ async def lifespan(app: FastAPI):
 
 
 def create_app() -> FastAPI:
-    app = build_api_app(title="agent-platform", version="0.1.0", lifespan=lifespan)
+    app = build_api_app(title="agent-platform", version="0.1.0", lifespan=lifespan, enable_tracing=True)
     # CORS：允许前端跨域调用 /query 等接口；allow_origins 应从环境变量注入，
     # 默认为回环，避免开发期浏览器被阻断的同时不暴露给任意来源。
     app.add_middleware(

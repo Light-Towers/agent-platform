@@ -275,6 +275,14 @@ _INIT_WHITELIST = (
 _MANUAL_CM_PATTERN = re.compile(r"\.__(?:enter|exit)__\s*\(")
 _MANUAL_CM_WHITELIST: tuple[str, ...] = ()
 
+# L-2（S2/S3）：禁止经 app.state 散点取用 tracer（R8/R12 土壤）——请求级 span 由
+# TracingMiddleware 创建，业务层经 agent_core.tracing.current_span/record_request_attributes
+# 取用；S2 迁移完成后白名单清零，新代码走散点即 CI 红。
+_TRACER_STATE_PATTERN = re.compile(
+    r"getattr\([^,)]*app\.state\s*,\s*[\"'](?:otel_)?tracer[\"']|app\.state\.(?:otel_)?tracer\b"
+)
+_TRACER_STATE_WHITELIST: tuple[str, ...] = ()
+
 
 def _iter_prod_py():
     """遍历生产 py 文件（跳过 .venv/tests/缓存与 IDE 目录）。"""
@@ -331,6 +339,84 @@ def check_manual_cm_lifecycle() -> list[str]:
                     )
         except Exception:
             pass
+    return violations
+
+
+def check_tracer_state_scatter() -> list[str]:
+    """L-2：禁止 app.state 取用 tracer 散点（应走中间件请求 span + current_span）。"""
+    violations: list[str] = []
+    for rel, py_file in _iter_prod_py():
+        if not rel.startswith("applications/"):
+            continue
+        if any(rel == w or rel.startswith(w) for w in _TRACER_STATE_WHITELIST):
+            continue
+        try:
+            for lineno, line in enumerate(py_file.read_text(encoding="utf-8").splitlines(), 1):
+                if _TRACER_STATE_PATTERN.search(line) and _is_code_line(line):
+                    violations.append(
+                        f"{rel}:{lineno}: {line.strip()}"
+                        f"（tracer 不得经 app.state 散点取用；请求级 span 由 TracingMiddleware 创建，"
+                        f"业务属性经 agent_core.tracing.record_request_attributes 写入）"
+                    )
+        except Exception:
+            pass
+    return violations
+
+
+# ---------------------------------------------------------------------------
+# L-4（S3，依赖契约）：OTel/langfuse 可选依赖版本区间三处归一（R1/R2 防回归）。
+# 背景：根 [otel]、agent-core [tracing]、agent-runtime [otel] 三处 extras 与
+# federation [observability] 的 langfuse 各自声明下界曾漂移（sdk>=1.20 vs >=1.24），
+# 叠加 langfuse v2/v3 代际冲突导致 pip 必回溯。规则：
+#   1) agent-runtime 必须声明 otel extras（其 otel.py 软导入 opentelemetry）；
+#   2) 同一包在多处声明时下界版本必须一致；
+#   3) agent-runtime 必须为 langfuse 软导入（tracing.py）声明 extras，且下界与
+#      federation [observability] 一致（import 路径 v2→v3 迁移属 S4，见方案 §3.4）。
+# ---------------------------------------------------------------------------
+_OTEL_EXTRAS_SITES = (
+    ("pyproject.toml", "otel"),
+    ("packages/agent-core/pyproject.toml", "tracing"),
+    ("packages/agent-runtime/pyproject.toml", "otel"),
+    ("packages/agent-runtime/pyproject.toml", "langfuse"),
+    ("applications/agent_federation/pyproject.toml", "observability"),
+)
+_OTEL_TRACKED_PKGS = ("opentelemetry-api", "opentelemetry-sdk", "opentelemetry-exporter-otlp", "langfuse")
+
+
+def _normalize_dep_name(name: str) -> str:
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def check_otel_extras_alignment() -> list[str]:
+    """L-4：校验 OTel/langfuse extras 声明存在且多处下界一致。"""
+    violations: list[str] = []
+    declared: dict[str, list[tuple[str, str]]] = {}  # pkg -> [(site, lower)]
+    for rel, extra in _OTEL_EXTRAS_SITES:
+        path = ROOT / rel
+        try:
+            with path.open("rb") as f:
+                data = tomllib.load(f)
+        except (OSError, tomllib.TOMLDecodeError) as e:
+            violations.append(f"{rel}: 无法解析（{e}）")
+            continue
+        deps = data.get("project", {}).get("optional-dependencies", {}).get(extra)
+        site = f"{rel}[{extra}]"
+        if deps is None:
+            violations.append(f"{site}: extras 缺失（观测软依赖必须显式声明，见方案 §3.3 L-4）")
+            continue
+        for req in deps:
+            name = _normalize_dep_name(re.split(r"[<>=!~;\[ ]", req, 1)[0])
+            if name not in _OTEL_TRACKED_PKGS:
+                continue
+            m = re.search(r">=\s*([0-9][0-9a-zA-Z.]*)", req)
+            lower = m.group(1) if m else "(无下界)"
+            declared.setdefault(name, []).append((site, lower))
+
+    for pkg, sites in sorted(declared.items()):
+        lowers = {lower for _site, lower in sites}
+        if len(lowers) > 1:
+            detail = " vs ".join(f"{site}: >={lower}" for site, lower in sites)
+            violations.append(f"'{pkg}' 下界不一致（{detail}）——归一到方案敲定版本，防组合解析回溯")
     return violations
 
 
@@ -404,6 +490,26 @@ def main() -> int:
         rc = 1
     else:
         print("L-1 观测架构约束通过：无手动 CM 生命周期拆分配对")
+
+    v8 = check_tracer_state_scatter()
+    if v8:
+        print("L-2 观测架构约束违反：禁止经 app.state 散点取用 tracer（应走 TracingMiddleware 请求 span）")
+        print("修复：业务属性经 agent_core.tracing.record_request_attributes / current_span 写入：")
+        for v in v8:
+            print(f"  {v}")
+        rc = 1
+    else:
+        print("L-2 观测架构约束通过：无 app.state tracer 散点取用")
+
+    v9 = check_otel_extras_alignment()
+    if v9:
+        print("L-4 依赖契约违反：OTel/langfuse extras 必须声明且多处下界一致（R1/R2 防回归）")
+        print("修复：归一到方案敲定下界（见 plan-observability §3.3 L-4）：")
+        for v in v9:
+            print(f"  {v}")
+        rc = 1
+    else:
+        print("L-4 依赖契约通过：OTel/langfuse extras 声明齐备且下界一致")
     return rc
 
 

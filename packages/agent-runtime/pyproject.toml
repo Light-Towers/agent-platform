@@ -18,6 +18,16 @@ dependencies = [
 [project.optional-dependencies]
 mcp = ["mcp>=2.0.0"]  # Dependabot: MCP SDK 多 high 告警（first_patched 1.28.1）
 identity = ["PyJWT[crypto]>=2.9"]  # ADR-0007 A3：RS256 令牌签/验（不进 agent-core，红线 1）
+# OTel 观测软依赖（otel.py 门面 console exporter/propagator 路径）；下界与根 [otel]、
+# agent-core [tracing] 归一，lint L-4 拦截漂移（方案 §3.3）。
+otel = [
+    "opentelemetry-api>=1.24",
+    "opentelemetry-sdk>=1.24",
+]
+# Langfuse 回调软依赖（tracing.py get_langfuse_callbacks 懒导入）；下界与 federation
+# [observability] 一致。注：import 路径仍为 v2 写法（langfuse.callback），v3+ 迁移属 S4
+#（方案 §3.4 代际契约），声明先行固化支持面，防 R1/R2 组合回溯复发。
+langfuse = ["langfuse>=4.0.0"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["agent_runtime"]

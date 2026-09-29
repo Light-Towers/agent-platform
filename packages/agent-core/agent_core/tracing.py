@@ -209,6 +209,35 @@ def _merge_attrs(attrs: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     return merged
 
 
+# OTel API 缺失时的恒定无效 span（current_span 降级替身，写操作静默）。
+try:  # pragma: no cover - 取决于可选依赖
+    from opentelemetry.trace import INVALID_SPAN as _INVALID_SPAN
+except ImportError:
+    class _InvalidSpanShim:
+        def is_recording(self) -> bool:
+            return False
+
+        def set_attribute(self, key: str, value: Any) -> None:
+            return None
+
+        def set_attributes(self, attributes: Dict[str, Any]) -> None:
+            return None
+
+        def record_exception(self, exception: BaseException, attributes: Optional[Dict[str, Any]] = None) -> None:
+            return None
+
+        def set_status(self, status: Any, description: Optional[str] = None) -> None:
+            return None
+
+        def update_name(self, name: str) -> None:
+            return None
+
+        def end(self) -> None:
+            return None
+
+    _INVALID_SPAN: Any = _InvalidSpanShim()
+
+
 # ---------------------------------------------------------------------------
 # 对外 API
 # ---------------------------------------------------------------------------
@@ -455,6 +484,54 @@ def force_flush() -> None:
         logger.warning("tracing force_flush failed", exc_info=True)
 
 
+def shutdown_tracing() -> None:
+    """统一 lifespan 退出入口：flush + shutdown provider。
+
+    取代各 app 手写 force_flush（方案 §3.2）；BatchSpanProcessor 未 flush 会丢
+    尾批 span，所有经 init_tracing（含门面）装配的应用都应在 lifespan 末尾调本函数。
+    """
+    with _state_lock:
+        provider = _provider
+    if provider is None:
+        return
+    try:
+        if hasattr(provider, "force_flush"):
+            provider.force_flush()
+        provider.shutdown()
+    except Exception:  # pragma: no cover - 防御：退出不影响主流程
+        logger.warning("tracing shutdown failed", exc_info=True)
+
+
+def current_span() -> Any:
+    """当前上下文中的 span（TracingMiddleware 创建的请求级 server span）。
+
+    未启用/无 SDK 返回 InvalidSpan（写属性静默无效、绝不抛异常）；业务层补属性
+    的正规入口，取代 handler 内手写 span / app.state 取 tracer（方案 §3.2 L-2）。
+    """
+    if not _enabled or _otel_trace is None:
+        return _INVALID_SPAN
+    try:
+        return _otel_trace.get_current_span()
+    except Exception:  # pragma: no cover - 防御
+        return _INVALID_SPAN
+
+
+def record_request_attributes(attrs: Dict[str, Any]) -> None:
+    """向当前请求 span 补业务属性（thread_id/priority/脱敏 question 等）。
+
+    放在 handler 早段即可覆盖 cache_hit/429/409/断连全部旁路路径（R10）；
+    未启用时静默 no-op（opt-in 铁律零开销）。
+    """
+    if not _enabled or not attrs:
+        return
+    try:
+        span = current_span()
+        if span is not None and span.is_recording():
+            span.set_attributes(attrs)
+    except Exception:  # pragma: no cover - 防御：观测不得影响业务主流程
+        logger.debug("record_request_attributes failed", exc_info=True)
+
+
 @contextmanager
 def start_span(name: str, attrs: Optional[Dict[str, Any]] = None) -> Iterator[Any]:
     """启动一个 span 的 context manager（``with start_span("retrieval.embedding") as span:``）。"""
@@ -557,5 +634,8 @@ __all__ = [
     "record_exception",
     "noop_tracer",
     "force_flush",
+    "shutdown_tracing",
+    "current_span",
+    "record_request_attributes",
     "_reset_for_tests",
 ]
