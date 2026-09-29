@@ -158,3 +158,18 @@ uv run python scripts/check_doc_sync.py                # 必须通过
 - 不改错误体/`/query` 对外契约形状（消费者审计通过前）。
 - 不在本方案内处理无关旁路发现（memory embedder `dim=` 参数错误、coroutine not subscriptable——已另行登记为独立缺陷，建议进 tech-debt 追踪）。
 - 集群 kubeadm reset 清理仍待用户二次确认，与本方案解耦。
+
+## 10. 实施进度（2026-09-29 S0+S1 已落地）
+
+**已实施**（commit 见 git log，本轮范围内全部本地实跑验证）：
+
+| 项 | 内容 | 验证证据 |
+|---|---|---|
+| L-3 门禁 | `lint_architecture.py` 新增观测 init 散点禁令（装配点/过渡门面/eval 白名单；注释行过滤） | 首跑即抓到真实违规 exhibition（定性为合法装配封装入白名单）；终跑 7 条全过 |
+| L-1 门禁 | 禁止手动 `.__enter__()/.__exit__()`（全仓生产码，白名单空） | 通过；存量违规随 S0 修复清零 |
+| kernel 单状态机 | `agent_core.tracing` 新增：三态 `get_tracing_status()`（UNINITIALIZED/DISABLED/DEGRADED/ACTIVE+reason，R5）、`sampling_rate` 参数（门面能力下沉）、`force_flush()`；删 `_NoOpSpanContextManager.__getattr__` hack（R7，删前全仓 grep 确认零依赖） | agent-core 全套 + runtime 全套 259 passed |
+| 门面化（R6 消除） | `agent_runtime/otel.py` 重写：销毁 `_OTEL_AVAILABLE/_tracer` 第二状态机，`init_otel/get_otel_tracer/force_flush` 全部委托 kernel；签名兼容，agent_server main.py 零改动 | 真 SDK smoke（`--with opentelemetry-sdk`）：门面 init→status=ACTIVE、`is_tracing_enabled()`=True、inject 出真 traceparent、extract 非 None——R6 链路物理贯通；`exporter=none`→DISABLED |
+| R18（本轮新发现） | 旧门面 `parse_traceparent` import 不存在类名 `TraceContextFormat`（真名 `TraceContextTextMapPropagator`），ImportError 被吞→从诞生起恒返回 None（生产零调用点，仅测试钉住）；已修 | test_otel 伴随用例更新（原断言钉的是缺陷行为，据实改写并说明） |
+| S0 止血（R8③） | knowledge-service `query_router.py` `/query`+`/retrieve` 4 处手动 enter/exit 改 `with use_context(...)` 标准形；流式分支 background_task 不继承上下文的限制如实注记（父链透传属 S2） | ks unit 376 passed；tests/api 16 passed；ruff 全仓过；check_doc_sync 0 警告 |
+
+**未完成（后续批次）**：S2（build_api_app 装配 TracingMiddleware + R9/R10/R11/R12 旁路与 health 真状态）；S3（CI 补 `--extra otel` 真 SDK session——需先适配 test_otel 中钉"本机无 SDK"前提的用例）；S4（Langfuse 代际契约）；S5（构建 rev 绑定/部署脚本入库）；R6 真集群端到端复验（本地已证状态机贯通，Jaeger 父子同 trace 待集群重验后更新 VERIFICATION L141 勘误注）；门面退役（L-2 白名单清零后删 otel.py 本体+白名单行）。

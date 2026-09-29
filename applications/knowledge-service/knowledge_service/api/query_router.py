@@ -189,59 +189,61 @@ async def query(background_tasks: BackgroundTasks, request: Request, payload: Qu
     # 而非 payload（Pydantic 模型，无 .state）；此前误用 payload.state 导致所有 /query 直接 500。
     trace_request_id = getattr(request.state, "request_id", None) or generate_request_id()
 
-    # C-1: 提取入站 W3C traceparent，关联上游 span（联邦→knowledge-service 链路）
+    # C-1: 提取入站 W3C traceparent，关联上游 span（联邦→knowledge-service 链路）。
+    # 标准形（L-1 门禁）：attach/detach 必须 with 配对——真 OTel 下手动
+    # __enter__/__exit__ 跨任务边界会抛 ValueError，kernel 关闭态的 NoOp 兜底
+    # 曾掩盖这一误用（复盘 R8③，与 agent_server 同模式缺陷）。
+    # 注：非流式分支的 attach 覆盖 run_query_graph 同步执行，节点 traced_span
+    # 才真正挂入父 span；流式分支 background_task 不继承本上下文（历史行为一致），
+    # 父链接需后续经任务参数透传 ctx（方案 S2）。
     from agent_core.tracing_propagation import extract_traceparent, use_context
 
-    _parent_ctx = use_context(extract_traceparent(request.headers))
-    _parent_ctx.__enter__()
+    with use_context(extract_traceparent(request.headers)):
+        # M5：历史轮数护栏（超限截断保留最近 N 轮，防 prompt 无限膨胀）。
+        # 说明：当前检索管线历史来自 MongoDB（node_item_name_confirm 服务端 limit=10 已兜底），
+        # 入站 history 字段为兼容/预留（方案 §9 ChatRequest 设计），超限截断后透传。
+        history = payload.history
+        if len(history) > settings.knowledge_max_history_rounds:
+            logger.warning(
+                "history 轮数超限（%d > %d），截断保留最近 %d 轮",
+                len(history),
+                settings.knowledge_max_history_rounds,
+                settings.knowledge_max_history_rounds,
+            )
+            history = history[-settings.knowledge_max_history_rounds :]
 
-    # M5：历史轮数护栏（超限截断保留最近 N 轮，防 prompt 无限膨胀）。
-    # 说明：当前检索管线历史来自 MongoDB（node_item_name_confirm 服务端 limit=10 已兜底），
-    # 入站 history 字段为兼容/预留（方案 §9 ChatRequest 设计），超限截断后透传。
-    history = payload.history
-    if len(history) > settings.knowledge_max_history_rounds:
-        logger.warning(
-            "history 轮数超限（%d > %d），截断保留最近 %d 轮",
-            len(history),
-            settings.knowledge_max_history_rounds,
-            settings.knowledge_max_history_rounds,
-        )
-        history = history[-settings.knowledge_max_history_rounds :]
+        # 处理是不是流式返回结果
+        is_stream = payload.is_stream
+        if is_stream:
+            # 创建一个字典 存储对一个session_id : queue 结果队列
+            create_sse_queue(session_id)
+        # 更新任务状态
+        # 当前会话id作为key! 整体装填处于运行中！
+        update_task_status(session_id, TASK_STATUS_PROCESSING, is_stream)
 
-    # 处理是不是流式返回结果
-    is_stream = payload.is_stream
-    if is_stream:
-        # 创建一个字典 存储对一个session_id : queue 结果队列
-        create_sse_queue(session_id)
-    # 更新任务状态
-    # 当前会话id作为key! 整体装填处于运行中！
-    update_task_status(session_id, TASK_STATUS_PROCESSING, is_stream)
+        logger.info(f"开始处理流程... 是否流式: {is_stream} 其他参数:{user_query}, session_id:{session_id}")
 
-    logger.info(f"开始处理流程... 是否流式: {is_stream} 其他参数:{user_query}, session_id:{session_id}")
-
-    if is_stream:
-        # 如果是流式，则返回一个流式响应，过程不断地推送
-        # 运行执行图对象方法
-        background_tasks.add_task(
-            run_query_graph,
-            session_id,
-            user_query,
-            is_stream,
-            trace_request_id,
-            payload.enable_item_name_confirm,
-            tenant_id,
-            payload.scope_type,
-        )
-        # 返回结果
-        logger.info("开始处理结果....")
-        _parent_ctx.__exit__(None, None, None)
-        return JSONResponse(
-            {"message": "结果正在处理中...", "session_id": session_id},
-            headers={"X-Trace-Id": trace_request_id},
-        )
-    else:
-        # 同步运行
-        try:
+        if is_stream:
+            # 如果是流式，则返回一个流式响应，过程不断地推送
+            # 运行执行图对象方法
+            background_tasks.add_task(
+                run_query_graph,
+                session_id,
+                user_query,
+                is_stream,
+                trace_request_id,
+                payload.enable_item_name_confirm,
+                tenant_id,
+                payload.scope_type,
+            )
+            # 返回结果
+            logger.info("开始处理结果....")
+            return JSONResponse(
+                {"message": "结果正在处理中...", "session_id": session_id},
+                headers={"X-Trace-Id": trace_request_id},
+            )
+        else:
+            # 同步运行
             run_query_graph(
                 session_id,
                 user_query,
@@ -256,8 +258,6 @@ async def query(background_tasks: BackgroundTasks, request: Request, payload: Qu
                 {"message": "处理完成！", "session_id": session_id, "answer": answer, "done_list": []},
                 headers={"X-Trace-Id": trace_request_id},
             )
-        finally:
-            _parent_ctx.__exit__(None, None, None)
 
 
 @router.post("/api/v1/retrieve")
@@ -272,16 +272,14 @@ async def retrieve(payload: RetrieveRequest, request: Request):
     """
     # 懒导入：与线上检索链同一批节点函数（query_router 顶部已加载 main_graph，
     # 此处再引仅为了直接复用节点函数本身，避免经 graph 全链路含生成）
-    # C-1: 提取入站 W3C traceparent，关联上游 span
+    # C-1: 提取入站 W3C traceparent，关联上游 span（标准形 with 配对，L-1 门禁）
     from agent_core.tracing_propagation import extract_traceparent, use_context
 
     from knowledge_service.query_process.agent.nodes.node_rerank import node_rerank
     from knowledge_service.query_process.agent.nodes.node_rrf import _as_entity_list, reciprocal_rank_fusion
     from knowledge_service.query_process.agent.nodes.node_search_embedding import node_search_embedding
 
-    _parent_ctx = use_context(extract_traceparent(request.headers))
-    _parent_ctx.__enter__()
-    try:
+    with use_context(extract_traceparent(request.headers)):
         session_id = f"retrieve_{uuid.uuid4().hex[:12]}"
         state = {
             "session_id": session_id,
@@ -310,8 +308,6 @@ async def retrieve(payload: RetrieveRequest, request: Request):
         reranked = node_rerank(rerank_state).get("reranked_docs", [])
 
         return {"query": payload.query, "hits": len(reranked), "docs": reranked}
-    finally:
-        _parent_ctx.__exit__(None, None, None)
 
 
 @router.get("/stream/{session_id}")
