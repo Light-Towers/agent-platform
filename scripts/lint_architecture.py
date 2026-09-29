@@ -252,6 +252,88 @@ def check_tool_direct_import() -> list[str]:
     return violations
 
 
+# ---------------------------------------------------------------------------
+# S1/S3 观测架构不变量（plan-observability-global-remediation-2026-09-29.md）：
+# L-3：观测 init（init_tracing/init_otel）只允许出现在应用装配点（main/server）
+#      与过渡门面，业务模块禁止私起——防止再长出第二个状态机（R6 根因）。
+# L-1：禁止对上下文管理器手动 .__enter__()/.__exit__()——真 OTel（api≥1.27）
+#      的 CM 生命周期与 SSE/后台任务跨 asyncio 任务边界不安全（R4/R8 根因，
+#      NoOp 替身 __getattr__ 兜底使其在关闭态隐形）。
+# ---------------------------------------------------------------------------
+_INIT_PATTERN = re.compile(r"(?<!def )\b(?:init_otel|init_tracing)\s*\(")
+_INIT_WHITELIST = (
+    "applications/agent_server/main.py",
+    "applications/knowledge-service/knowledge_service/main.py",
+    "applications/agent_federation/api/server.py",
+    "applications/knowledge-service/eval/",  # 评测入口脚本（非服务进程，装配点等价）
+    # 过渡门面：委托 kernel 的唯一合法中转（S1 完成后随门面退役删除本行）。
+    "packages/agent-runtime/agent_runtime/otel.py",
+    # exhibition 装配薄封装：无本地状态、委托 kernel，由其 server.py:59 装配点调用。
+    "applications/exhibition-agent/exhibition_agent/observability/otel.py",
+)
+
+_MANUAL_CM_PATTERN = re.compile(r"\.__(?:enter|exit)__\s*\(")
+_MANUAL_CM_WHITELIST: tuple[str, ...] = ()
+
+
+def _iter_prod_py():
+    """遍历生产 py 文件（跳过 .venv/tests/缓存与 IDE 目录）。"""
+    for py_file in ROOT.rglob("*.py"):
+        rel = py_file.relative_to(ROOT).as_posix()
+        if any(p in rel for p in (".venv", "__pycache__", ".ruff_cache", ".egg-info",
+                                   ".codeartsdoer", ".codebuddy")):
+            continue
+        if "/tests/" in rel or rel.startswith("tests/"):
+            continue
+        yield rel, py_file
+
+
+def _is_code_line(line: str) -> bool:
+    """过滤注释行与 rst 内联代码（``docstring 提及不算调用）。"""
+    s = line.strip()
+    return not (s.startswith("#") or "``" in s)
+
+
+def check_init_scatter() -> list[str]:
+    """L-3：观测 init 只允许在装配点/过渡门面出现（业务模块私起 init 即违规）。"""
+    violations: list[str] = []
+    for rel, py_file in _iter_prod_py():
+        if not rel.startswith(("applications/", "packages/")):
+            continue
+        if any(rel == w or rel.startswith(w) for w in _INIT_WHITELIST):
+            continue
+        try:
+            for lineno, line in enumerate(py_file.read_text(encoding="utf-8").splitlines(), 1):
+                if _INIT_PATTERN.search(line) and _is_code_line(line):
+                    violations.append(
+                        f"{rel}:{lineno}: {line.strip()}"
+                        f"（观测 init 仅限装配点 main/server 与过渡门面，禁止业务模块私起第二状态机）"
+                    )
+        except Exception:
+            pass
+    return violations
+
+
+def check_manual_cm_lifecycle() -> list[str]:
+    """L-1：禁止手动 .__enter__()/.__exit__()（CM 生命周期必须 with 配对，跨任务手动拆分配方=500）。"""
+    violations: list[str] = []
+    for rel, py_file in _iter_prod_py():
+        if not rel.startswith(("applications/", "packages/")):
+            continue
+        if any(rel == w or rel.startswith(w) for w in _MANUAL_CM_WHITELIST):
+            continue
+        try:
+            for lineno, line in enumerate(py_file.read_text(encoding="utf-8").splitlines(), 1):
+                if _MANUAL_CM_PATTERN.search(line) and _is_code_line(line):
+                    violations.append(
+                        f"{rel}:{lineno}: {line.strip()}"
+                        f"（span/attach 上下文管理器必须 with 配对；手动 enter/exit 跨异步任务边界不安全）"
+                    )
+        except Exception:
+            pass
+    return violations
+
+
 def main() -> int:
     rc = 0
     v1 = check()
@@ -302,6 +384,26 @@ def main() -> int:
         rc = 1
     else:
         print("C1 回归面约束通过：无 @tool 直引旁路")
+
+    v6 = check_init_scatter()
+    if v6:
+        print("L-3 观测架构约束违反：init_tracing/init_otel 仅限装配点（main/server/过渡门面/eval 入口）调用")
+        print("修复：接线收敛到应用启动装配点，业务模块经 get_tracer()/请求上下文取用（见 plan-observability-global-remediation）：")
+        for v in v6:
+            print(f"  {v}")
+        rc = 1
+    else:
+        print("L-3 观测架构约束通过：观测 init 无业务模块私起")
+
+    v7 = check_manual_cm_lifecycle()
+    if v7:
+        print("L-1 观测架构约束违反：禁止手动 .__enter__()/.__exit__()（真 OTel 下 CM 跨任务拆分配方=500）")
+        print("修复：with start_span(...)/with use_context(...) 标准形配对，或 start_span(context=)+finally end()：")
+        for v in v7:
+            print(f"  {v}")
+        rc = 1
+    else:
+        print("L-1 观测架构约束通过：无手动 CM 生命周期拆分配对")
     return rc
 
 

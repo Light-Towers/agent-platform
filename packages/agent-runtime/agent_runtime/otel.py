@@ -1,38 +1,25 @@
-"""OpenTelemetry 分布式追踪集成。
+"""OpenTelemetry 分布式追踪集成 —— **薄门面**（委托 agent_core.tracing 唯一状态机）。
 
-- 遵循 GenAI 语义约定 gen_ai.*
-- exporter 可插拔（otlp/jaeger/console/none）
-- 与 Langfuse 共存，不替代
-- W3C traceparent 透传
-- 数据脱敏（不含问题全文）
-- 默认 false（opt-in）
+S1 收敛（docs/plans/plan-observability-global-remediation-2026-09-29.md §3.1）：
+- 本模块**不再自持** ``_tracer`` / ``_OTEL_AVAILABLE`` 全局态——历史"双状态机"
+  （kernel ``_enabled`` vs 本模块 ``_tracer``）导致 tracing_propagation 的
+  traceparent 透传门读错状态机、agent_server 链路静默断裂（复盘 R6），已销毁。
+- ``init_otel`` 仅做**参数映射 + 委托** ``agent_core.tracing.init_tracing``；
+  开关/降级/三态状态（DISABLED/DEGRADED/ACTIVE）全部由 kernel 唯一持有。
+- 与 Langfuse 共存（kernel 复用全局 TracerProvider 路径），不替代。
+
+DEPRECATED 路径：新代码请直接引用 ``agent_core.tracing``；当 lint L-2 白名单
+（app.state.tracer 散点取用）清零后，本门面随之退役删除。
 """
 
 import logging
 from typing import Literal
 
-from agent_core.tracing import noop_tracer, user_query_hash
+from agent_core.tracing import force_flush as _kernel_force_flush
+from agent_core.tracing import get_tracer, get_tracing_status, init_tracing
+from agent_core.tracing import user_query_hash as _user_query_hash
 
 logger = logging.getLogger(__name__)
-
-# 可选导入 opentelemetry
-try:
-    from opentelemetry import trace
-    from opentelemetry.sdk.resources import Resource
-    from opentelemetry.sdk.trace import TracerProvider
-
-    # 注：SDK 公开符号为 TraceIdRatioBased（历史误写 TraceIdRatioBasedSampler 在
-    # opentelemetry-sdk 全版本不存在，导致 ImportError 被下方 guard 吞掉、OTel 静默降级 NoOp）。
-    from opentelemetry.sdk.trace.sampling import (
-        ALWAYS_ON,
-        TraceIdRatioBased,
-    )
-
-    _OTEL_AVAILABLE = True
-except ImportError:
-    _OTEL_AVAILABLE = False
-
-_tracer = None
 
 
 def init_otel(
@@ -41,89 +28,89 @@ def init_otel(
     sampling_rate: float = 1.0,
     service_name: str = "agent-platform",
 ) -> None:
-    """初始化 OTel tracer provider。"""
-    global _tracer
+    """初始化 OTel tracer（参数映射后委托 kernel 唯一状态机，幂等）。
 
-    if not _OTEL_AVAILABLE:
-        logger.warning("OTEL_INIT_FAILED: opentelemetry SDK not installed")
-        _tracer = noop_tracer()
-        return
-
+    签名保持历史调用方（agent_server/main.py）兼容；状态与降级语义全部由
+    ``agent_core.tracing.init_tracing`` 决定：
+      - exporter="none"        → 显式关闭（kernel status=DISABLED）
+      - exporter="console"     → 注入 ConsoleSpanExporter（kernel 统一挂载）
+      - exporter="otlp"/"jaeger" → OTLP 端点导出（jaeger thrift exporter 已归档，
+        自动映射 OTLP，endpoint 指向 Jaeger OTLP 接收端即可，无需安装停更包）
+      - 启用但 SDK/exporter 缺失或端点为空 → kernel 记 DEGRADED+真因（R5：
+        运维可区分"显式关"与"启用但坏了"），本模块不再吞成因。
+    """
     if exporter == "none":
-        _tracer = noop_tracer()
+        init_tracing(service_name=service_name, enabled=False)
         return
 
-    # 采样率校验
-    if not 0.0 <= sampling_rate <= 1.0:
-        logger.warning("OTEL_SAMPLING_INVALID: %s, using 1.0", sampling_rate)
-        sampling_rate = 1.0
+    if exporter == "console":
+        exporter_obj = None
+        try:
+            from opentelemetry.sdk.trace.export import ConsoleSpanExporter
 
-    try:
-        sampler = (
-            ALWAYS_ON if sampling_rate >= 1.0 else TraceIdRatioBased(sampling_rate)
-        )
-        resource = Resource.create({"service.name": service_name})
-        provider = TracerProvider(resource=resource, sampler=sampler)
-
-        if exporter == "console":
-            from opentelemetry.sdk.trace.export import (
-                ConsoleSpanExporter,
-                SimpleSpanProcessor,
-            )
-
-            provider.add_span_processor(SimpleSpanProcessor(ConsoleSpanExporter()))
-        elif exporter == "otlp":
-            from opentelemetry.exporter.otlp.proto.http.trace_exporter import (
-                OTLPSpanExporter,
-            )
-            from opentelemetry.sdk.trace.export import BatchSpanProcessor
-
-            exporter_obj = OTLPSpanExporter(endpoint=endpoint or None)
-            provider.add_span_processor(BatchSpanProcessor(exporter_obj))
-        elif exporter == "jaeger":
-            # 弃用：opentelemetry-exporter-jaeger 在 OTel SDK 1.x 后已归档（thrift 协议停更）。
-            # 故不再导入归档的 JaegerExporter，自动映射为 OTLP（Jaeger 现推荐 OTLP 接收端），
-            # 旧配置 exporter="jaeger" 仍可工作（endpoint 指向 Jaeger OTLP 端口即可），
-            # 无需安装 opentelemetry-exporter-jaeger。
+            exporter_obj = ConsoleSpanExporter()
+        except ImportError:
             logger.warning(
-                "OTEL_EXPORTER=jaeger 已弃用（JaegerExporter 归档），已自动映射为 OTLP；"
-                "建议显式配置 exporter='otlp'"
+                "OTEL_INIT_FAILED: opentelemetry SDK 未安装，console exporter 无法构造"
+                "（kernel 将记 DEGRADED）"
             )
-            from opentelemetry.exporter.otlp.proto.http.trace_exporter import (
-                OTLPSpanExporter,
-            )
-            from opentelemetry.sdk.trace.export import BatchSpanProcessor
+        init_tracing(
+            service_name=service_name,
+            enabled=True,
+            exporter=exporter_obj,
+            sampling_rate=sampling_rate,
+        )
+        return
 
-            exporter_obj = OTLPSpanExporter(endpoint=endpoint or None)
-            provider.add_span_processor(BatchSpanProcessor(exporter_obj))
+    if exporter == "jaeger":
+        # 弃用：opentelemetry-exporter-jaeger 在 OTel SDK 1.x 后已归档（thrift 协议停更）。
+        # 不再导入归档的 JaegerExporter，自动映射为 OTLP（Jaeger 现推荐 OTLP 接收端），
+        # 旧配置 exporter="jaeger" 仍可工作（endpoint 指向 Jaeger OTLP 端口即可）。
+        logger.warning(
+            "OTEL_EXPORTER=jaeger 已弃用（JaegerExporter 归档），已自动映射为 OTLP；"
+            "建议显式配置 exporter='otlp'"
+        )
 
-        trace.set_tracer_provider(provider)
-        _tracer = trace.get_tracer("agent-platform")
-        logger.info("OTel initialized: exporter=%s sampling=%s", exporter, sampling_rate)
-
-    except Exception:
-        logger.warning("OTEL_INIT_FAILED", exc_info=True)
-        _tracer = noop_tracer()
+    # otlp / jaeger→otlp：endpoint 为空时传 None 让 kernel 回退标准 env
+    # （OTEL_EXPORTER_OTLP_ENDPOINT）；仍为空则 kernel 记 DEGRADED=no_export_endpoint。
+    init_tracing(
+        service_name=service_name,
+        otel_endpoint=endpoint or None,
+        enabled=True,
+        sampling_rate=sampling_rate,
+    )
 
 
 def get_otel_tracer():
-    """返回当前 tracer（未初始化时 NoOp）。"""
-    if _tracer is None:
-        return noop_tracer()
-    return _tracer
+    """返回 kernel 当前 tracer（未初始化/未启用时 no-op；本模块不持状态）。"""
+    return get_tracer()
+
+
+def get_otel_status() -> dict:
+    """观测三态（供装配点/health 查询初始化**结果**而非配置意图，R11）。
+
+    返回 {"status": UNINITIALIZED|DISABLED|DEGRADED|ACTIVE, "reason": str}。
+    """
+    return get_tracing_status()
 
 
 def parse_traceparent(header: str | None):
-    """解析 W3C traceparent header，返回 OTel Context 或 None。"""
-    if not header or not _OTEL_AVAILABLE:
+    """解析 W3C traceparent header，返回 OTel Context 或 None。
+
+    修复（复盘 R18，门面化时发现）：旧实现 import 了不存在的类名
+    ``TraceContextFormat``（真名 ``TraceContextTextMapPropagator``），ImportError
+    被 ``except Exception`` 吞掉 → 该函数从诞生起从未成功解析过任何 header。
+    生产零调用点（仅历史 API 兼容保留）；跨服务传播请用
+    ``agent_core.tracing_propagation.extract_traceparent``（读 kernel 唯一状态机）。
+    """
+    if not header:
         return None
     try:
         from opentelemetry.trace.propagation.tracecontext import (
-            TraceContextFormat,
+            TraceContextTextMapPropagator,
         )
 
-        ctx = TraceContextFormat().extract({"traceparent": header})
-        return ctx
+        return TraceContextTextMapPropagator().extract({"traceparent": header})
     except Exception:
         return None
 
@@ -132,16 +119,10 @@ def redact_question(question: str) -> dict:
     """脱敏：返回问题长度 + 哈希摘要，不含全文。复用 agent_core.tracing.user_query_hash。"""
     return {
         "question_length": len(question),
-        "question_hash": user_query_hash(question),
+        "question_hash": _user_query_hash(question),
     }
 
 
 def force_flush() -> None:
-    """关闭前 flush 所有 span。"""
-    if _tracer is not None and _OTEL_AVAILABLE:
-        try:
-            provider = trace.get_tracer_provider()
-            if hasattr(provider, "force_flush"):
-                provider.force_flush()
-        except Exception:
-            logger.warning("otel force_flush failed", exc_info=True)
+    """关闭前 flush 所有 span（委托 kernel；无 provider 时 no-op）。"""
+    _kernel_force_flush()

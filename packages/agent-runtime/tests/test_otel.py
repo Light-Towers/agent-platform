@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import pytest
 from agent_core.tracing import _NoOpTracer
 
 from agent_runtime.otel import (
@@ -60,10 +61,21 @@ def test_parse_traceparent_none_header():
     assert parse_traceparent("") is None
 
 
-def test_parse_traceparent_without_sdk():
-    """OTel SDK 未安装时 parse_traceparent 返回 None。"""
-    result = parse_traceparent("00-abcdef1234567890abcdef1234567890-1234567890abcdef-01")
-    assert result is None
+def test_parse_traceparent_valid_header():
+    """有效 traceparent 解析为 OTel Context（复盘 R18 修复的伴随用例更新）。
+
+    旧实现 import 不存在的 ``TraceContextFormat`` 类名，ImportError 被吞 → 恒返回
+    None，旧用例钉的就是该缺陷行为。修复后解析走 **API 层** propagator（非 SDK），
+    本机无 SDK 但有 api 即可成功；api 缺失环境按降级路径 skip（返回 None）。
+    """
+    header = "00-abcdef1234567890abcdef1234567890-1234567890abcdef-01"
+    result = parse_traceparent(header)
+    try:
+        import opentelemetry.trace.propagation.tracecontext  # noqa: F401
+    except ImportError:  # 连 API 层都缺失 → 降级 None 是正确行为
+        assert result is None
+        pytest.skip("opentelemetry-api 未安装，parse 降级路径")
+    assert result is not None
 
 
 def test_redact_question_no_full_text():
