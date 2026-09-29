@@ -3,6 +3,14 @@
 检索评测指标子包（框架无关，纯 stdlib）。
 """
 
+from agent_core.metrics.compare import (
+    average_rank,
+    bootstrap_mean_diff_ci,
+    cohens_kappa,
+    kendall_tau,
+    pearson_r,
+    spearman_rho,
+)
 from agent_core.metrics.retrieval import (
     DEFAULT_K,
     Grade,
@@ -25,4 +33,10 @@ __all__ = [
     "dcg_at_k",
     "ndcg_at_k",
     "compute_retrieval_metrics",
+    "bootstrap_mean_diff_ci",
+    "pearson_r",
+    "average_rank",
+    "spearman_rho",
+    "kendall_tau",
+    "cohens_kappa",
 ]
