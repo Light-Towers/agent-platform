@@ -119,3 +119,15 @@ _result.txt
 
 # === 测试产物（审计日志，不应入库） ===
 applications/exhibition-agent/exhibition_agent/foundation/data/knowledge_lifecycle_audit.json
+
+# === knowledge-service RAG 评测运行产物与生成数据（可由 eval/*.py 重建，不入库） ===
+# 消融/e2e/门禁的 run 输出目录（含 per-query jsonl、报告 md、指标 json）
+applications/knowledge-service/eval/runs/
+applications/knowledge-service/eval/runs_server/
+applications/knowledge-service/eval/route_run/
+# gen_golden.py 自举的真实语料 benchmark + remap 前备份 + 审计报告
+applications/knowledge-service/eval/golden_queries.real.jsonl
+applications/knowledge-service/eval/golden_queries.real.jsonl.*.bak
+applications/knowledge-service/eval/golden_audit.md
+# meta_eval_judge mode1 产出的待人工标注模板
+applications/knowledge-service/eval/adjudication_template.jsonl
