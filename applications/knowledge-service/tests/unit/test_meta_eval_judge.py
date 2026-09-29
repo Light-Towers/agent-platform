@@ -8,9 +8,11 @@ meta_eval_judge 顶层只导入纯 stdlib + agent-core 统计原语（scorers/ab
 - agreement_metrics：缺标剔除、κ/ρ 计算、样本 <2 全 None（不猜显著性）；
 - direct_requires：self→0、未安装→None（n/a，不伪造）；
 - make_candidate_scorer：self 可用、未安装包 available False；
-- decide：五种决策分支（无候选/无标注/self 最优/噪声内取自研/外部显著胜出）；
+- decide：五种决策分支（无候选/无标注/self 最优/噪声内取自研/外部显著胜出）；   
 - render_judge_selection：四维表结构 + 未安装诚实标注；
-- export/load 裁决集模板往返。
+- export/load 裁决集模板往返；
+- 路径 3（AI 交叉一致性）：agreement_symmetric + pairwise_agreement + decide_cross_agreement
+  三分支（收敛/离群/未收敛） + render/run_mode3 端到端（monkeypatch 桩候选，不连 LLM）。
 """
 
 import json
@@ -18,12 +20,18 @@ from pathlib import Path
 
 from eval.meta_eval_judge import (
     agreement_metrics,
+    agreement_symmetric,
     decide,
+    decide_cross_agreement,
     direct_requires,
     export_adjudication_template,
     load_adjudication,
     make_candidate_scorer,
+    pairwise_agreement,
+    render_cross_agreement,
     render_judge_selection,
+    run_mode3_cross_agreement,
+    score_records_for_candidate,
     to_bucket,
 )
 
@@ -185,3 +193,130 @@ def test_export_and_load_adjudication_roundtrip(tmp_path: Path):
     tmpl2 = tmp_path / "template2.jsonl"
     export_adjudication_template(per_query, tmpl2, sample=5, seed=42)
     assert [r["qid"] for r in load_adjudication(tmpl2)] == [r["qid"] for r in loaded]
+
+
+# ---------------------------------------------------------------------------
+# 路径 3：AI 交叉一致性（纯函数）
+# ---------------------------------------------------------------------------
+def _score_map(pairs):
+    return {q: {"faithfulness": f, "correctness": c} for q, (f, c) in pairs.items()}
+
+
+def _self_outlier_maps():
+    """self 与两个外部反向，外部之间完全一致 → 应判 self 离群。"""
+    self_scores = {f"q{i}": (1.0 if i % 2 == 0 else 0.0, 1.0 if i % 2 == 0 else 0.0) for i in range(6)}
+    ext_scores = {f"q{i}": (0.0 if i % 2 == 0 else 1.0, 0.0 if i % 2 == 0 else 1.0) for i in range(6)}
+    return {
+        "self": _score_map(self_scores),
+        "ragas": _score_map(ext_scores),
+        "deepeval": _score_map(ext_scores),
+    }
+
+
+def test_agreement_symmetric_identical_series_perfect():
+    xs = [1.0, 1.0, 0.5, 0.5, 0.0, 0.0]
+    r = agreement_symmetric(xs, xs)
+    assert r["n"] == 6
+    assert r["kappa"] == 1.0
+    assert r["spearman"] == 1.0
+
+
+def test_agreement_symmetric_drops_missing_pairs():
+    r = agreement_symmetric([1.0, None, 0.5, 0.0], [1.0, 1.0, None, 0.0])
+    assert r["n"] == 2  # 仅保留两边都非 None 的两对
+
+
+def test_agreement_symmetric_too_few_returns_none():
+    assert agreement_symmetric([1.0, None], [1.0, None]) == {"kappa": None, "spearman": None, "n": 1}
+
+
+def test_pairwise_agreement_keys_sorted_no_self_pair():
+    smaps = _self_outlier_maps()
+    m = pairwise_agreement(smaps, ["self", "ragas", "deepeval"])
+    # 对称、按名字字典序排，无对角。
+    assert set(m.keys()) == {("deepeval", "self"), ("ragas", "self"), ("deepeval", "ragas")}
+    for pair in m.values():
+        assert set(pair.keys()) == {"faithfulness", "correctness"}
+
+
+def test_decide_cross_only_self_returns_pending():
+    d = decide_cross_agreement({}, ["self"])
+    assert d[0] == "self"
+    assert "无外部对比" in d[1]
+
+
+def test_decide_cross_no_comparable_samples_fallback():
+    # 有外部候选但矩阵无可用对→ 回退分支。
+    d = decide_cross_agreement({}, ["self", "ragas", "deepeval"])
+    assert d[0] == "self"
+    assert "无可比对样本" in d[1]
+
+
+def test_decide_cross_all_converged_keeps_self():
+    same = {f"q{i}": (1.0 if i % 2 == 0 else 0.0, 1.0 if i % 2 == 0 else 0.0) for i in range(6)}
+    smaps = {c: _score_map(same) for c in ["self", "ragas", "deepeval"]}
+    m = pairwise_agreement(smaps, ["self", "ragas", "deepeval"])
+    d = decide_cross_agreement(m, ["self", "ragas", "deepeval"], threshold=0.6)
+    assert d[0] == "self"
+    assert "判据收敛" in d[1]
+
+
+def test_decide_cross_self_outlier_recommends_external():
+    smaps = _self_outlier_maps()
+    m = pairwise_agreement(smaps, ["self", "ragas", "deepeval"])
+    d = decide_cross_agreement(m, ["self", "ragas", "deepeval"], threshold=0.6)
+    assert d[0] == "external"
+    assert "离群者" in d[1]
+
+
+def test_decide_cross_all_divergent_signals_human_fallback():
+    # 三方两两反向：self-外部 低、外部对也低 → 回退人工信号。
+    a = {f"q{i}": (1.0 if i % 2 == 0 else 0.0, 1.0 if i % 2 == 0 else 0.0) for i in range(6)}
+    b = {f"q{i}": (0.0 if i % 2 == 0 else 1.0, 0.0 if i % 2 == 0 else 1.0) for i in range(6)}
+    c = {f"q{i}": (1.0 if (i % 3 == 0) else 0.0, 1.0 if (i % 3 == 0) else 0.0) for i in range(6)}
+    smaps = {"self": _score_map(a), "ragas": _score_map(b), "deepeval": _score_map(c)}
+    m = pairwise_agreement(smaps, ["self", "ragas", "deepeval"])
+    d = decide_cross_agreement(m, ["self", "ragas", "deepeval"], threshold=0.6)
+    # 不强行断言具体文案（取决于 κ 实际分布），只确保不往 “external” 误判。
+    assert d[0] == "self"
+    assert "external" not in d[1]
+
+
+def test_score_records_unavailable_candidate_returns_empty():
+    recs = [{"qid": "q1", "query": "", "context": "", "answer": "", "reference": ""}]
+    assert score_records_for_candidate("pkg_obviously_not_installed", recs, llm=None) == {}
+
+
+def test_render_cross_agreement_structure():
+    smaps = _self_outlier_maps()
+    m = pairwise_agreement(smaps, ["self", "ragas", "deepeval"])
+    d = decide_cross_agreement(m, ["self", "ragas", "deepeval"])
+    md = render_cross_agreement(["self", "ragas", "deepeval"], smaps, m, d, "6 条", 0.6)
+    assert "路径 3" in md
+    assert "决策" in md
+    assert "| self |" in md and "| ragas |" in md and "| deepeval |" in md
+
+
+def test_run_mode3_end_to_end_with_stubbed_scorer(tmp_path, monkeypatch):
+    ds = tmp_path / "ds.jsonl"
+    recs = [{"qid": f"q{i}", "query": "x", "context": "c", "answer": "a", "reference": "r"} for i in range(6)]
+    ds.write_text("\n".join(json.dumps(r, ensure_ascii=False) for r in recs), encoding="utf-8")
+
+    def _fake(candidate, llm=None):  # noqa: ARG001 —— 桩位，不真使 llm
+        def _fn(rec, meter):  # noqa: ARG001
+            i = int(rec["qid"][1:])
+            if candidate == "self":
+                v = 1.0 if i % 2 == 0 else 0.0
+            else:
+                v = 0.0 if i % 2 == 0 else 1.0
+            return {"faithfulness": v, "correctness": v}
+        return True, _fn
+
+    monkeypatch.setattr("eval.meta_eval_judge.make_candidate_scorer", _fake)
+    out = tmp_path / "judge_selection.md"
+    rc = run_mode3_cross_agreement(ds, ["self", "ragas", "deepeval"], 0.6, out)
+    assert rc == 0
+    md = out.read_text(encoding="utf-8")
+    assert "路径 3" in md
+    # 外部两个同分、与 self 反向 → 应判 external
+    assert "external" in md

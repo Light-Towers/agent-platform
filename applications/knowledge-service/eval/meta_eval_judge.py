@@ -62,6 +62,10 @@ CANDIDATE_PACKAGES: Dict[str, Optional[str]] = {
 # 是否可导出可复核理由（元信息；ragas 部分指标带 reason 视版本，保守标 False 待核）。
 EXPLAINABLE: Dict[str, bool] = {"self": True, "ragas": False, "deepeval": False}
 
+# 路径 3（AI 交叉一致）中“收敛”的 κ 阈值（Landis & Koch substantial）。
+# 背景与三分支决策见 docs/plans/plan-c2-cross-agreement-pivot-2026-09-29.md。
+CROSS_AGREEMENT_THRESHOLD: float = 0.6
+
 
 # ---------------------------------------------------------------------------
 # 纯统计/装配（可完全单测）
@@ -347,6 +351,210 @@ def evaluate_candidate(candidate: str, records: List[Dict[str, Any]], llm: Any =
     return base
 
 
+# ---------------------------------------------------------------------------
+# 路径 3：AI 交叉一致性（无人工金标准，只回答“要不要引入外部框架”）
+# ---------------------------------------------------------------------------
+def agreement_symmetric(
+    a: Sequence[Optional[float]], b: Sequence[Optional[float]]
+) -> Dict[str, Any]:
+    """两个模型分数列→成对一致性（双方都分箱算 κ，原值算 ρ）。缺值剔除，<2 返 None。"""
+    av: List[float] = []
+    bv: List[float] = []
+    for x, y in zip(a, b):
+        if x is None or y is None:
+            continue
+        av.append(float(x))
+        bv.append(float(y))
+    n = len(av)
+    if n < 2:
+        return {"kappa": None, "spearman": None, "n": n}
+    ab = [to_bucket(v) for v in av]
+    bb = [to_bucket(v) for v in bv]
+    kappa = cohens_kappa([int(i) for i in ab], [int(i) for i in bb])
+    rho = spearman_rho(av, bv)
+    return {"kappa": round(kappa, 4), "spearman": round(rho, 4), "n": n}
+
+
+def score_records_for_candidate(
+    candidate: str, records: List[Dict[str, Any]], llm: Any = None
+) -> Dict[str, Dict[str, Optional[float]]]:
+    """跑一个候选在整批 records 上打分 → {qid: {faithfulness, correctness}}；不可用/未接线→{}。"""
+    available, score_fn = make_candidate_scorer(candidate, llm=llm)
+    if not available:
+        return {}
+    meter = CostMeter()
+    out: Dict[str, Dict[str, Optional[float]]] = {}
+    for rec in records:
+        qid = rec.get("qid")
+        if qid in (None, ""):
+            continue
+        try:
+            s = score_fn(rec, meter)
+        except NotImplementedError:
+            return {}
+        out[str(qid)] = {
+            "faithfulness": s.get("faithfulness"),
+            "correctness": s.get("correctness"),
+        }
+    return out
+
+
+def pairwise_agreement(
+    score_maps: Dict[str, Dict[str, Dict[str, Optional[float]]]],
+    candidates: Sequence[str],
+    dims: Sequence[str] = ("faithfulness", "correctness"),
+) -> Dict[Tuple[str, str], Dict[str, Dict[str, Any]]]:
+    """对称矩阵 {(a,b) 名字排序: {dim: agreement_symmetric 结果}}，跳过对角。"""
+    result: Dict[Tuple[str, str], Dict[str, Dict[str, Any]]] = {}
+    for i, a in enumerate(candidates):
+        for b in candidates[i + 1:]:
+            ma, mb = score_maps.get(a, {}), score_maps.get(b, {})
+            common = sorted(set(ma.keys()) & set(mb.keys()))
+            pair: Dict[str, Dict[str, Any]] = {}
+            for dim in dims:
+                xs = [ma[q].get(dim) for q in common]
+                ys = [mb[q].get(dim) for q in common]
+                pair[dim] = agreement_symmetric(xs, ys)
+            key: Tuple[str, str] = (a, b) if a <= b else (b, a)
+            result[key] = pair
+    return result
+
+
+def decide_cross_agreement(
+    matrix: Dict[Tuple[str, str], Dict[str, Dict[str, Any]]],
+    candidates: Sequence[str],
+    threshold: float = CROSS_AGREEMENT_THRESHOLD,
+) -> Tuple[str, str]:
+    """三分支：三方收敛 → self；self 离群 → external；未收敛 → self + 回退信号。"""
+    others = [c for c in candidates if c != "self"]
+    if not others:
+        return "self", "候选仅含 self，无外部对比；等待 RAGAS/DeepEval 接线后复跑。"
+    self_ks: List[float] = []
+    ext_ks: List[float] = []
+    for (_a, _b), pair in matrix.items():
+        vals = [(pair.get(d) or {}).get("kappa") for d in ("faithfulness", "correctness")]
+        nums = [v for v in vals if v is not None]
+        if not nums:
+            continue
+        avg = sum(nums) / len(nums)
+        if _a == "self" or _b == "self":
+            self_ks.append(avg)
+        else:
+            ext_ks.append(avg)
+    if not self_ks:
+        return "self", (
+            "self 与外部候选无可比对样本（外部未安装/未接线，或共同 qid 不足）；"
+            "按 spec.md 保留 self，Stage 2 补齐外部适配后复跑。"
+        )
+    avg_se = sum(self_ks) / len(self_ks)
+    avg_ee = (sum(ext_ks) / len(ext_ks)) if ext_ks else None
+    label_se = f"self-外部 κ={avg_se:.3f}"
+    label_ee = f"外部对 κ={avg_ee:.3f}" if avg_ee is not None else "外部对 κ=n/a"
+    if avg_se >= threshold and (avg_ee is None or avg_ee >= threshold):
+        return "self", (
+            f"三方交叉一致（{label_se}≥{threshold}，{label_ee}）"
+            f"→ 判据收敛，维持零依赖 self。"
+        )
+    if avg_ee is not None and avg_ee >= threshold and avg_se < threshold:
+        return "external", (
+            f"self 与外部低一致（{label_se}<{threshold}）、外部之间高（{label_ee}≥{threshold}）"
+            f"→ self 为离群者，建议评估引入外部胜出方（不固化 pyproject 生产依赖，另行批准）。"
+        )
+    return "self", (
+        f"判据未收敛（{label_se}，{label_ee}）→ 三对都低，评判标准本身分歧过大；"
+        f"回退路径 2：补人工标注后再评。"
+    )
+
+
+def render_cross_agreement(
+    candidates: Sequence[str],
+    score_maps: Dict[str, Dict[str, Dict[str, Optional[float]]]],
+    matrix: Dict[Tuple[str, str], Dict[str, Dict[str, Any]]],
+    decision: Tuple[str, str],
+    sample_note: str,
+    threshold: float,
+) -> str:
+    winner, reason = decision
+    lines: List[str] = [
+        "# Judge 选型决策备忘（Phase C2 · 路径 3 AI 交叉一致性）",
+        "",
+        f"- 数据源：{sample_note}",
+        f"- 阈值：κ ≥ {threshold}（substantial，Landis & Koch）",
+        f"- **决策**：`{winner}`",
+        f"- 依据：{reason}",
+        "",
+        "## 成对一致性矩阵（对角略；F=faithfulness，C=correctness）",
+        "",
+        "|  \\  | " + " | ".join(candidates) + " |",
+        "|---|" + "---|" * len(candidates),
+    ]
+    for a in candidates:
+        row: List[str] = [a]
+        for b in candidates:
+            if a == b:
+                row.append("—")
+                continue
+            key = (a, b) if a <= b else (b, a)
+            pair = matrix.get(key)
+            if not pair or all(
+                (pair.get(d) or {}).get("kappa") is None for d in ("faithfulness", "correctness")
+            ):
+                row.append("n/a")
+                continue
+            f = pair.get("faithfulness", {})
+            c = pair.get("correctness", {})
+            row.append(
+                f"F κ={_fmt_num(f.get('kappa'))} ρ={_fmt_num(f.get('spearman'))} · "
+                f"C κ={_fmt_num(c.get('kappa'))} ρ={_fmt_num(c.get('spearman'))}"
+            )
+        lines.append("| " + " | ".join(row) + " |")
+    lines += [
+        "",
+        "## 候选覆盖",
+        "",
+        "| 候选 | 打分数 | 额外依赖数 | 可解释 |",
+        "|---|---|---|---|",
+    ]
+    for c in candidates:
+        n = len(score_maps.get(c, {}))
+        fp = direct_requires(CANDIDATE_PACKAGES.get(c))
+        lines.append(f"| {c} | {n} | {_fmt_num(fp)} | {'是' if EXPLAINABLE.get(c) else '否'} |")
+    lines += [
+        "",
+        "> 路径 3 的 κ 为**代理指标**（AI 间一致度），不直接回答 self 对人是否准确。",
+        "> 三方都低→应回退补人工（路径 2），不是“选外部”的信号。",
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def run_mode3_cross_agreement(
+    dataset_path: Path, candidates: Sequence[str], threshold: float, out_path: Path
+) -> int:
+    records = load_adjudication(dataset_path)
+    if not records:
+        print(f"错误：数据集 {dataset_path} 为空或格式不符。", file=sys.stderr)
+        return 1
+    llm: Any = None
+    if "self" in candidates:
+        try:
+            from knowledge_service.lm.lm_utils import get_llm_client
+
+            llm = get_llm_client(json_mode=True)
+        except Exception as e:  # noqa: BLE001 —— 无 LLM 环境 self 不可评，诚实标注
+            print(f"[cross] 警告：self judge LLM 不可用（{e}），其打分为空。", file=sys.stderr)
+    score_maps = {c: score_records_for_candidate(c, records, llm=llm) for c in candidates}
+    matrix = pairwise_agreement(score_maps, candidates)
+    decision = decide_cross_agreement(matrix, candidates, threshold=threshold)
+    sample_note = f"{len(records)} 条（候选：{', '.join(candidates)}；数据源 {dataset_path.name}）"
+    md = render_cross_agreement(candidates, score_maps, matrix, decision, sample_note, threshold)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(md, encoding="utf-8")
+    print(f"[cross] 完成：{out_path}")
+    print(f"[cross] 决策：{decision[0]} —— {decision[1]}")
+    return 0
+
+
 def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="端到端 judge 选型 meta-eval：自研 judge vs RAGAS/DeepEval 四维对比（有界 spike，不进生产）。",
@@ -359,6 +567,13 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     parser.add_argument("--adjudication", default=None, help="已人工标注的裁决集 jsonl（跑对比）")
     parser.add_argument("--candidates", default="self", help="逗号分隔候选（self,ragas,deepeval）")
     parser.add_argument("--out", default=str(DEFAULT_OUT_DIR / JUDGE_SELECTION_FILE), help="judge_selection.md 输出")
+    # 路径 3：AI 交叉一致性（无人工金标准）
+    parser.add_argument("--cross-agreement", action="store_true",
+                        help="路径 3：AI 交叉一致性（无需人工金标准，只回答‘要不要引入外部框架’）")
+    parser.add_argument("--dataset", default=None,
+                        help="路径 3 数据集 jsonl（含 qid/query/context/answer/reference，human 列忽略）")
+    parser.add_argument("--threshold", type=float, default=CROSS_AGREEMENT_THRESHOLD,
+                        help="路径 3 κ 收敛阈值（substantial）")
     return parser.parse_args(argv)
 
 
@@ -372,9 +587,22 @@ def main(argv: Optional[List[str]] = None) -> int:
         print("[meta-eval] 请人工在每条 human.faithfulness / human.correctness 填 0/1/2 后用 --adjudication 复跑。")
         return 0
 
+    # 模式 3：AI 交叉一致（路径 3，无需人工金标准）
+    if args.cross_agreement:
+        if not args.dataset:
+            print("错误：--cross-agreement 需配 --dataset <path>。", file=sys.stderr)
+            return 1
+        cands3 = [c.strip() for c in args.candidates.split(",") if c.strip()]
+        return run_mode3_cross_agreement(
+            Path(args.dataset), cands3, args.threshold, Path(args.out)
+        )
+
     # 模式 2：跑对比
     if not args.adjudication:
-        print("错误：需提供 --from-e2e（出模板）或 --adjudication（跑对比）。", file=sys.stderr)
+        print(
+            "错误：需提供 --from-e2e（出模板）/ --adjudication（跑人机对比）/ --cross-agreement+--dataset（跑 AI 交叉对比）。",
+            file=sys.stderr,
+        )
         return 1
 
     records = load_adjudication(Path(args.adjudication))
