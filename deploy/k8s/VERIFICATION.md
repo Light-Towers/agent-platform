@@ -126,3 +126,50 @@ agent-platform-...-xdc7m  ambari01
 kubectl delete namespace agent-platform
 # 如需彻底还原：每台 kubeadm reset；删除 containerd-k8s.service 及 /var/lib/containerd-k8s（切勿动 docker 的共享 containerd）
 ```
+
+---
+
+# 观测链路补证（第二次演练 · 2026-09-29）
+
+> 目标：OTel + Jaeger 端到端取证 + 真实 LLM 调用。**结论：OTel→Jaeger 面 ✅、业务面（真实 LLM）✅、Langfuse 面 ❌（根本性依赖冲突，决策性放弃）、/metrics ❌（agent_server 不提供该端点，任务前提偏差）**。
+> 部署源说明：镜像从 126:`/opt/agent-platform` @`031c89a`（api 尚未拆分 query_router 的旧提交）构建，与本仓 HEAD 存在版本差；发现的两个产品 bug 在两侧同步修复（本地 `query_router.py` / 126 旧版 `routes.py` 等价补丁）。
+
+## A. 前置探测 ✅
+
+- dockerhub 从 126 可达（aliyun mirror 无 jaeger 路径，直连 `jaegertracing/all-in-one:latest` 拉取成功）。
+- 运行中镜像内确认无 `opentelemetry-sdk`（pip show 为空）→ 观测依赖必须在 Dockerfile 加装。
+- 集群无 LLM key（pod 启动日志 `llm=False`，"无 LLM 模式"），后经用户补充魔搭 ModelScope key。
+
+## B. Dockerfile 加装 OTel 依赖 + 重建分发 ✅
+
+- `Dockerfile` L23 增 `".[otel]"` extras（opentelemetry-sdk + exporter-otlp），L17-22 注释登记 Langfuse 不装原因。
+- 重建三轮：#1（otel-only）**3m32s**/390MB → #2（otel.py 符号修复后）~6min → #3（span 生命周期修复后）**3m43s**，均 RC=0。
+- 分发三轮均成功：`docker save | gzip`（~118M）→ scp 125/241 → 三台 `ctr --address /run/containerd-k8s/containerd.sock -n k8s.io images import`，`IfNotPresent` + 同 tag 覆盖需 `kubectl rollout restart` 生效。
+- 镜像内验证：`pip show opentelemetry-sdk` = 1.45.0（构建机 + pod 内双确认）。
+
+## C. 观测基础设施与配置注入 ✅
+
+- **Jaeger**：all-in-one 以 docker 起于 126（`COLLECTOR_OTLP_ENABLED=true`，16686 UI / 4317 gRPC / 4318 OTLP-HTTP），常驻运行。
+- **OTel env**：`kubectl set env deploy/agent-platform OTEL_ENABLED=true OTEL_EXPORTER=otlp OTEL_SERVICE_NAME=agent-platform OTEL_ENDPOINT=http://192.168.100.126:4318/v1/traces`（agent_server 读 OTel 官方 env 名的任务假设不成立，实际为 pydantic-settings 字段大写）。
+- **LLM 凭据**：`kubectl create secret generic observability-keys --from-literal=LLM_API_KEY=...`（key 未落任何 git 文件），`--from=secret` 注入 + `LLM_BASE_URL=https://api-inference.modelscope.cn/v1`、`LLM_MODEL=deepseek-ai/DeepSeek-V4.1-Flash` → 启动日志 `llm=True`。
+- **Langfuse：未部署（决策性放弃）**。根因：`agent_runtime/tracing.py` 的 `from langfuse.callback import CallbackHandler` 是 v2-only API；v2 锁 langchain-core<0.4，与应用栈 `langgraph>=1.2.10,<2`（langchain-core 1.x）不可共存，pip 实测无限回溯。修复需改产品码 `tracing.py` 迁 v3 OTel-based API，超出本次授权范围。用户决策：只做 OTel+Jaeger，Langfuse 如实标注不可用。
+
+## D. 端到端三面验收
+
+| 面 | 结果 | 证据 |
+|---|---|---|
+| 业务面（真实 LLM） | ✅ | `POST /query`（SSE）事件流完整：`route(search) → evidence → replan×2 → answer → done`；answer 为 DeepSeek-V4.1-Flash 真实推理输出（证据不足时拒绝编造并给出配置建议，非模板拼接），无异常无 500 |
+| Jaeger 面 | ✅ | `traceID=d377f513b63f7addb6305c9f33564e3a`（链路首证）→ 最终干净通过轮 `traceID=cd4d9a667d58bda327c78369e773f1ba`；`/api/services` 含 `agent-platform`，span op=`query` |
+| Langfuse 面 | ❌ | 未启用（见 C 根因与用户决策） |
+| /metrics | ❌ | agent_server 无 `/metrics` 端点（任务假设来自 agent_federation 口径），如实标注 |
+
+### D 过程发现的两个产品 bug（均先报告、获用户授权后修复）
+
+1. **`agent_runtime/otel.py` 符号错误**：`TraceIdRatioBasedSampler` 在 opentelemetry-sdk 全部版本不存在（正确符号 `TraceIdRatioBased`），模块加载 ImportError 被 guard 吞 → OTel opt-in 路径从未真正生效，静默降级 NoOp，且告警文案误导（"SDK not installed"）。修复 2 处 + 注释；用户授权「授权改 otel.py（2行）修复后继续」。
+2. **`query_router.py`（旧版 `routes.py`）span 生命周期误用**：对 `start_as_current_span()` 返回的 CM 手动 `__enter__()` 后直接 `set_attribute` —— 真 OTel（api≥1.27）的 `_AgnosticContextManager.__enter__()` 不返回 span → **/query 直接 500**；且 attach/detach 跨 SSE 生成器 asyncio 任务报 `created in a different Context`。此前从未暴露因为 bug 1 导致恒走 NoOp，而 NoOp shim 的 `__getattr__` 恰好兼容此误用。修复：改 `start_span(context=extract_traceparent(...))` + `finally: span.end()`（不挂当前上下文，保留 W3C 父链接），本地与 126 旧版双同步。
+
+### 测试方法学记录
+
+- `query_router.py` 的 cache_hit 短路在 span 创建前 return，**缓存命中不产生 trace** → 端到端用例必须用带时间戳后缀的唯一 query 绕语义缓存。
+- BatchSpanProcessor 默认 ~5s 调度 flush，取证脚本请求后 `sleep 8` 再查 Jaeger API。
+

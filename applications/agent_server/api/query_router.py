@@ -209,16 +209,16 @@ async def query(
             await coordinator.wait_for_turn(thread_id, request_id)
 
         # Phase 2: OTel request span
+        # 注：不可用 start_as_current_span + 手动 __enter__()：真 OTel（api≥1.27）的
+        # _AgnosticContextManager.__enter__() 不返回 span，且 attach/detach 会因 SSE
+        # 生成器跨 asyncio 任务报 "created in a different Context"，导致带真 SDK 时
+        # /query 直接 500。start_span 不挂当前上下文，context= 直传仍保持 W3C
+        # traceparent 父链接，finally 中 end() 对称安全。
         span = None
-        _span_cm = None
-        _parent_ctx_cm = None
         if otel_tracer is not None:
-            from agent_core.tracing_propagation import extract_traceparent, use_context
+            from agent_core.tracing_propagation import extract_traceparent
 
-            _parent_ctx_cm = use_context(extract_traceparent(request.headers))
-            _parent_ctx_cm.__enter__()
-            _span_cm = otel_tracer.start_as_current_span("query")
-            span = _span_cm.__enter__()
+            span = otel_tracer.start_span("query", context=extract_traceparent(request.headers))
             span.set_attribute("thread_id", thread_id)
             span.set_attribute("priority", priority)
             for k, v in redact_question(req.query).items():
@@ -327,10 +327,8 @@ async def query(
             yield _sse({"type": "error", "error": str(exc)})
             yield _sse({"type": "done", "thread_id": thread_id, "answer": ""})
         finally:
-            if _span_cm is not None:
-                _span_cm.__exit__(None, None, None)
-            if _parent_ctx_cm is not None:
-                _parent_ctx_cm.__exit__(None, None, None)
+            if span is not None:
+                span.end()
             # V3 Phase 2: Scheduler complete + ExecutionStatus → SUCCEEDED/FAILED
             # P0-1（方案 B）：complete 现带终态 status（COMPLETED/FAILED），槽位真实释放。
             if scheduler is not None and scheduler_enqueued:
