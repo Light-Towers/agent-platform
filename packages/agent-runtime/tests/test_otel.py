@@ -1,13 +1,15 @@
-"""OTel no-op 降级路径测试。
+"""OTel 门面降级路径测试（kernel 单状态机委托，S1 门面化后形态）。
 
-本机未装 opentelemetry SDK，测 no-op 降级路径（记忆 feedback_otel-sdk-missing）。
+默认 CI 本机未装 opentelemetry SDK，主测 no-op 降级路径（记忆 feedback_otel-sdk-missing）；
+钉“无 SDK”前提的用例按 _SDK_AVAILABLE 环境分支 skip，真 SDK ACTIVE 路径钉用例见
+ tests/observability（--extra otel session，S3 补盲）。
 覆盖：init_otel 幂等 / 采样率校验 / no-op 降级 / traceparent 透传 / 脱敏 / force_flush。
 """
 
 from __future__ import annotations
 
 import pytest
-from agent_core.tracing import _NoOpTracer
+from agent_core.tracing import _SDK_AVAILABLE, _NoOpTracer
 
 from agent_runtime.otel import (
     force_flush,
@@ -16,6 +18,16 @@ from agent_runtime.otel import (
     parse_traceparent,
     redact_question,
 )
+
+
+@pytest.fixture(autouse=True)
+def _isolate_kernel_state():
+    """每用例前后重置 kernel 观测状态机（真 SDK 环境下防用例间 ACTIVE 泄漏）。"""
+    from agent_core.tracing import _reset_for_tests
+
+    _reset_for_tests()
+    yield
+    _reset_for_tests()
 
 
 def test_get_tracer_uninit_returns_noop():
@@ -32,7 +44,13 @@ def test_init_exporter_none_sets_noop():
 
 
 def test_init_without_sdk_sets_noop():
-    """OTel SDK 未安装时 init_otel 降级为 no-op（本机无 SDK 的默认路径）。"""
+    """OTel SDK 未安装时 init_otel 降级为 no-op（无 SDK 环境的降级路径钉用例）。
+
+    真 SDK 环境走 ACTIVE 路径（非本用例钉的降级面），skip；ACTIVE 面由
+    tests/observability 真 SDK session 钉住（S3）。
+    """
+    if _SDK_AVAILABLE:
+        pytest.skip("已装真 SDK：init 走 ACTIVE 路径，降级前提不成立（见 tests/observability）")
     init_otel(exporter="otlp", endpoint="http://localhost:4318")
     tracer = get_otel_tracer()
     assert isinstance(tracer, _NoOpTracer)

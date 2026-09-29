@@ -31,6 +31,9 @@ type:
 # 10 个 session 任一失败即中断，确保 #2 审查项（防回归测试纳入 CI）真正落地。
 # 注：本地目录原名 deepagents/（与 PyPI 依赖包同名），2026-08-19 重命名为
 # agent_federation/ 彻底消除遮蔽；test_tool_registry 已回归门禁（75 passed）。
+# S3 真 SDK 补盲（观测方案 §3.3）：末行以 --extra otel 单独解析环境跑 tests/observability
+# 真 SDK 钉用例（旁路 span/traceparent 父子/三态）；不计入 check_doc_sync 的
+# 「\tuv run pytest」标准 session 计数（仍为 9），根 session 无 SDK 时同目录自动 skip。
 test:
 	uv run pytest -q -m "not requires_pg"
 	uv run pytest packages/shared-schemas/tests -q
@@ -41,6 +44,7 @@ test:
 	uv run pytest applications/exhibition-agent/tests -q
 	uv run pytest applications/knowledge-service/tests -q
 	uv run pytest applications/nl2sql-service/tests -q
+	uv run --extra otel pytest tests/observability -q
 
 # 评测门禁：默认启发式（确定性，CI 可达），阈值 0.8；LLM_API_KEY 缺失时回退启发式并 WARN。
 # 注：历史上 agent_federation 曾有同名顶层 eval 包（workspace 命名冲突，已于
