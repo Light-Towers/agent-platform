@@ -20,9 +20,12 @@ try:
     from opentelemetry import trace
     from opentelemetry.sdk.resources import Resource
     from opentelemetry.sdk.trace import TracerProvider
+
+    # 注：SDK 公开符号为 TraceIdRatioBased（历史误写 TraceIdRatioBasedSampler 在
+    # opentelemetry-sdk 全版本不存在，导致 ImportError 被下方 guard 吞掉、OTel 静默降级 NoOp）。
     from opentelemetry.sdk.trace.sampling import (
         ALWAYS_ON,
-        TraceIdRatioBasedSampler,
+        TraceIdRatioBased,
     )
 
     _OTEL_AVAILABLE = True
@@ -57,7 +60,7 @@ def init_otel(
 
     try:
         sampler = (
-            ALWAYS_ON if sampling_rate >= 1.0 else TraceIdRatioBasedSampler(sampling_rate)
+            ALWAYS_ON if sampling_rate >= 1.0 else TraceIdRatioBased(sampling_rate)
         )
         resource = Resource.create({"service.name": service_name})
         provider = TracerProvider(resource=resource, sampler=sampler)

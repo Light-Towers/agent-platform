@@ -168,6 +168,13 @@ sudo kubeadm reset   # 每台；worker 侧另有 reset 提示按提示执行
 | apt-get update 因无关第三方坏源报错 | 系统准备脚本 `set -e` 意外中止 | nodesource（focal 与 22.04 版本不匹配）/ gitlab-runner（GPG key 过期）两类无关源 404/GPG fail | k8s 源本身正常，update 用 `... \|\| true` 容忍坏源，仅 `apt-mark hold` k8s 组件 |
 | metrics-server 无指标 / HPA targets unknown | `kubectl top` 报 `x509: ... doesn't contain any IP SANs` | kubeadm kubelet 自签服务证书不含节点 IP SAN | metrics-server 部署加 `--kubelet-insecure-tls`，`kubectl top nodes` 随即出数、HPA 正常扩缩 |
 | control-plane 组件冷启动重启 | 部署初期 ReplicaSet 短暂不创建（约 20s 内 `No resources found`） | `kube-controller-manager` 启动初期证书/leader 选举抖动，重启 4 次后稳定 | 自愈，非缺陷；稳定后 deployment `Available=True`，pod 正常拉起 |
+| Langfuse 与应用栈根本性依赖冲突（观测二轮） | Dockerfile 加 langfuse 后 pip 无限回溯装不上 | `tracing.py` 用 v2-only `langfuse.callback`；v2 锁 langchain-core<0.4 与 `langgraph>=1.2.10`（core 1.x）不可共存 | 决策性放弃 Langfuse 面（用户确认），如实标注不可用；根治需迁 v3 OTel-based API（产品码改动，另行立项） |
+| OTel 符号潜伏 bug 致静默降级 | 设了 OTEL_ENABLED 但 Jaeger 0 trace，告警文案"SDK not installed"与实际 pip show 1.45.0 矛盾 | `otel.py` import 了不存在的 `TraceIdRatioBasedSampler`（正确符号 `TraceIdRatioBased`），ImportError 被 try guard 吞成 NoOp | pod 内逐条 import 测试定位；改 `TraceIdRatioBased` 2 处（用户授权）；教训：可选依赖 guard 的告警文案必须区分"未安装"与"安装但导入失败" |
+| 真 OTel 下 /query 直接 500（观测二轮） | SSE 无任何事件、日志 `AttributeError: '_AgnosticContextManager' object has no attribute 'set_attribute'` + `created in a different Context` | 对 `start_as_current_span()` 返回的 CM 手动 `__enter__()` 后当 span 用（真 OTel api≥1.27 不返回 span）；attach/detach 跨 SSE 生成器 asyncio 任务不安全；NoOp shim 的 `__getattr__` 兼容掩盖了问题，因 bug 链 1 从未暴露 | 改 `start_span(context=extract_traceparent(...))` + `finally: span.end()`（不挂当前上下文，保留 W3C 父链接）；本地 query_router.py 与 126 旧版 routes.py 同步修 |
+| cache_hit 不产生 trace | 修复后重跑同文本请求 Jaeger 仍 0 trace | 语义缓存命中在 span 创建前短路 return | 端到端用例用带时间戳后缀的唯一 query 绕缓存；另：取证脚本需 sleep ≥8s 等 BatchSpanProcessor flush |
+| 126 仓库与本地 HEAD 版本漂移 | 本地 routes.py 仅 24 行，镜像内 routes.py 却 426 行报错 | `/opt/agent-platform` 停在旧提交 `031c89a`（api 未拆分），镜像从旧源构建 | 修产品码前先 `ssh grep` 远端实际文件核实形态；补丁用 python 精确替换（未命中即退出）+ `ast.parse` 语法自检 |
+| PowerShell/sandbox 长命令回显风暴且 scp 未落地 | 合并多条 scp+ssh 时终端被 base64 EncodedCommand 回显淹没，后续发现远端文件还是旧版 | sandbox 包装层对长复合命令处理异常 | 拆逐条短命令；每次同步后远端 `grep`/`md5sum` 验证落地；.sh 脚本先 `sed -i 's/\r$//'` 去 CRLF 再 bash 执行 |
+| port-forward 内联后台起不来 | 进程存活但 curl HTTP=000，随后退出 | setsid 内联命令的 `--address 0.0.0.0` 被引号层吞掉；残留旧 pf 占端口 | 固化为脚本（pkill 旧 pf + nohup + disown + ss 验证 + health 探测）一次拉起 |
 
 ## 完成后
 
