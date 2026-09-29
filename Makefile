@@ -1,7 +1,7 @@
 # Agent Platform 本地/CI 工程门禁
 # 统一任务入口，避免各脚本分散调用；所有目标零业务副作用。
 
-.PHONY: install lint format type test eval eval-llm-required eval-llm-memory eval-rag eval-rag-routes eval-rag-retrieval eval-rag-e2e eval-rag-gate ci compose-smoke
+.PHONY: install lint format type test eval eval-llm-required eval-llm-memory eval-rag eval-rag-routes eval-rag-retrieval eval-rag-e2e eval-rag-gate eval-rag-baseline ci compose-smoke
 
 install:
 	uv sync --all-packages --extra dev
@@ -89,10 +89,21 @@ eval-rag-e2e:
 	cd applications/knowledge-service && uv run python eval/run_e2e_eval.py --golden eval/golden_queries.real.jsonl --scorer judge
 
 # Phase D：baseline vs candidate 配对 bootstrap 回归门禁；任一核心指标显著回归即非 0 退出。
-# 用法：BASELINE=eval/runs/<tsA_hashA> CANDIDATE=eval/runs/<tsB_hashB> make eval-rag-gate
+# BASELINE 缺省指向已冻结的脱敏锚点（eval/baselines/…，仅含 qid/tags/指标数值、无正文）；
+# 只需给 CANDIDATE（改动后新跑的 run）。要临时对比两个 run 也可显式传 BASELINE 覆盖。
+# 用法：CANDIDATE=eval/runs/<tsB_hashB> make eval-rag-gate
+#       [BASELINE=eval/runs/<tsA_hashA>] 覆盖默认锚点
+BASELINE ?= eval/baselines/e2e_post_sparse_fix_2026-09-29
 eval-rag-gate:
-	@test -n "$(BASELINE)" -a -n "$(CANDIDATE)" || { echo "用法: BASELINE=<runA> CANDIDATE=<runB> make eval-rag-gate"; exit 2; }
+	@test -n "$(CANDIDATE)" || { echo "用法: CANDIDATE=<runB> [BASELINE=<runA>] make eval-rag-gate（BASELINE 缺省=已冻结锚点）"; exit 2; }
 	cd applications/knowledge-service && uv run python eval/compare_runs.py --baseline "$(BASELINE)" --candidate "$(CANDIDATE)" --fail-on-regression
+
+# 把一次已验证的 e2e run 冻结为脱敏回归基准锚点（写入 eval/baselines/<LABEL>/，剥正文、可入库）。
+# 确认某次改动为净提升后 re-freeze，作为后续回归对比的新基准。
+# 用法：RUN=eval/runs/<ts_hash> LABEL=e2e_<主题>_<日期> make eval-rag-baseline
+eval-rag-baseline:
+	@test -n "$(RUN)" -a -n "$(LABEL)" || { echo "用法: RUN=<run目录> LABEL=<基准名> make eval-rag-baseline"; exit 2; }
+	cd applications/knowledge-service && uv run python eval/make_baseline.py --run "$(RUN)" --label "$(LABEL)"
 
 # CI 串联：lock 校验 + lint + 单测 + 评测门禁；任一失败即中断。
 ci: lint test eval
