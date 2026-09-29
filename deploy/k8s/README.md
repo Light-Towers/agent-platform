@@ -175,6 +175,7 @@ sudo kubeadm reset   # 每台；worker 侧另有 reset 提示按提示执行
 | 126 仓库与本地 HEAD 版本漂移 | 本地 routes.py 仅 24 行，镜像内 routes.py 却 426 行报错 | `/opt/agent-platform` 停在旧提交 `031c89a`（api 未拆分），镜像从旧源构建 | 修产品码前先 `ssh grep` 远端实际文件核实形态；补丁用 python 精确替换（未命中即退出）+ `ast.parse` 语法自检 |
 | PowerShell/sandbox 长命令回显风暴且 scp 未落地 | 合并多条 scp+ssh 时终端被 base64 EncodedCommand 回显淹没，后续发现远端文件还是旧版 | sandbox 包装层对长复合命令处理异常 | 拆逐条短命令；每次同步后远端 `grep`/`md5sum` 验证落地；.sh 脚本先 `sed -i 's/\r$//'` 去 CRLF 再 bash 执行 |
 | port-forward 内联后台起不来 | 进程存活但 curl HTTP=000，随后退出 | setsid 内联命令的 `--address 0.0.0.0` 被引号层吞掉；残留旧 pf 占端口 | 固化为脚本（pkill 旧 pf + nohup + disown + ss 验证 + health 探测）一次拉起 |
+| 双 tracing 状态机致 traceparent 透传断裂（复盘新发现，未修） | agent_server 设好 OTel 且 span 能出，但联邦→子服务链路 trace 无法串联 | `agent_core.tracing_propagation` 的 extract/inject 以 `agent_core.tracing.is_tracing_enabled()` 为门；agent_server 只调 `agent_runtime.otel.init_otel()`（另一套状态机）→ extract 恒 None，透传静默失效 | 待全局方案：`docs/plans/plan-observability-global-remediation-2026-09-29.md`（R6，S1 收敛单状态机 + S2 middleware 装配后复验） |
 
 ## 完成后
 

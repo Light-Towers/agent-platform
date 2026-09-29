@@ -166,7 +166,8 @@ kubectl delete namespace agent-platform
 ### D 过程发现的两个产品 bug（均先报告、获用户授权后修复）
 
 1. **`agent_runtime/otel.py` 符号错误**：`TraceIdRatioBasedSampler` 在 opentelemetry-sdk 全部版本不存在（正确符号 `TraceIdRatioBased`），模块加载 ImportError 被 guard 吞 → OTel opt-in 路径从未真正生效，静默降级 NoOp，且告警文案误导（"SDK not installed"）。修复 2 处 + 注释；用户授权「授权改 otel.py（2行）修复后继续」。
-2. **`query_router.py`（旧版 `routes.py`）span 生命周期误用**：对 `start_as_current_span()` 返回的 CM 手动 `__enter__()` 后直接 `set_attribute` —— 真 OTel（api≥1.27）的 `_AgnosticContextManager.__enter__()` 不返回 span → **/query 直接 500**；且 attach/detach 跨 SSE 生成器 asyncio 任务报 `created in a different Context`。此前从未暴露因为 bug 1 导致恒走 NoOp，而 NoOp shim 的 `__getattr__` 恰好兼容此误用。修复：改 `start_span(context=extract_traceparent(...))` + `finally: span.end()`（不挂当前上下文，保留 W3C 父链接），本地与 126 旧版双同步。
+2. **`query_router.py`（旧版 `routes.py`）span 生命周期误用**：对 `start_as_current_span()` 返回的 CM 手动 `__enter__()` 后直接 `set_attribute` —— 真 OTel（api≥1.27）的 `_AgnosticContextManager.__enter__()` 不返回 span → **/query 直接 500**；且 attach/detach 跨 SSE 生成器 asyncio 任务报 `created in a different Context`。此前从未暴露因为 bug 1 导致恒走 NoOp，而 NoOp shim 的 `__getattr__` 恰好兼容此误用。修复：改 `start_span(context=extract_traceparent(...))` + `finally: span.end()`（不挂当前上下文），本地与 126 旧版双同步。
+   **勘误（2026-09-29 复盘追加）**：该修复注释中"保留 W3C 父链接"的声称在 agent_server 实际不成立——`agent_core.tracing_propagation.extract/inject_traceparent` 以 `agent_core.tracing.is_tracing_enabled()` 为门，而 agent_server 只调 `agent_runtime.otel.init_otel()`（另一状态机，从不置 `_enabled`）→ extract 恒 None、透传实际断裂（双状态机接线缺陷 R6）。生命周期修复有效、父链接待全局方案 S2 落地后复验。见 `docs/plans/plan-observability-global-remediation-2026-09-29.md`。
 
 ### 测试方法学记录
 
