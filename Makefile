@@ -1,7 +1,7 @@
 # Agent Platform 本地/CI 工程门禁
 # 统一任务入口，避免各脚本分散调用；所有目标零业务副作用。
 
-.PHONY: install lint format type test eval eval-llm-required eval-llm-memory eval-rag eval-rag-routes eval-rag-retrieval eval-rag-e2e eval-rag-gate eval-rag-baseline ci compose-smoke
+.PHONY: install lint format type test eval eval-llm-required eval-llm-memory eval-rag eval-rag-routes eval-rag-retrieval eval-rag-e2e eval-rag-gate eval-rag-baseline eval-rag-meta-ui ci compose-smoke
 
 install:
 	uv sync --all-packages --extra dev
@@ -104,6 +104,15 @@ eval-rag-gate:
 eval-rag-baseline:
 	@test -n "$(RUN)" -a -n "$(LABEL)" || { echo "用法: RUN=<run目录> LABEL=<基准名> make eval-rag-baseline"; exit 2; }
 	cd applications/knowledge-service && uv run python eval/make_baseline.py --run "$(RUN)" --label "$(LABEL)"
+
+# Phase C2：把待人工标注的 adjudication_template.jsonl 渲染成离线单文件标注页（录入辅助）。
+# 页面逐条卡片呈现 query/context/answer/reference + 两组 0/1/2 单选，自动存 localStorage。
+# 产物含语料明文→不入库（见 .gitignore）；只做录入辅助，金标准判断仍由人给出。
+# 用法：make eval-rag-meta-ui  后双击 applications/knowledge-service/eval/adjudication_ui.html；
+#       标完点「导出 adjudication.jsonl」存回 eval/，再跑：
+#       cd applications/knowledge-service && uv run python eval/meta_eval_judge.py --adjudication eval/adjudication.jsonl --candidates self
+eval-rag-meta-ui:
+	cd applications/knowledge-service && uv run python eval/make_adjudication_ui.py
 
 # CI 串联：lock 校验 + lint + 单测 + 评测门禁；任一失败即中断。
 ci: lint test eval

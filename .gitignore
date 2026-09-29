@@ -131,3 +131,6 @@ applications/knowledge-service/eval/golden_queries.real.jsonl.*.bak
 applications/knowledge-service/eval/golden_audit.md
 # meta_eval_judge mode1 产出的待人工标注模板
 applications/knowledge-service/eval/adjudication_template.jsonl
+# make_adjudication_ui.py 生成的标注页 + 人工标完导出的裁决集（均含语料明文，禁入库）
+applications/knowledge-service/eval/adjudication_ui.html
+applications/knowledge-service/eval/adjudication.jsonl
