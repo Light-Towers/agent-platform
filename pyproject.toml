@@ -136,3 +136,13 @@ members = [
 # pyarrow 25.0.1 已修复）。resolver 出于未知原因拒绝升到 25，用约束下限强制。
 # Linux CI 不受 24 影响，升到 25 属常规 minor 升级。
 constraint-dependencies = ["pyarrow>=25.0.1"]
+# Dependabot R 系列收口（2026-09-30，方案 docs/plans/plan-dependabot-21-alerts-closure-2026-09-30.md）：
+# fschat 0.2.36（6 告警）+ nltk 3.10.3（1 告警）上游**无修复版本**（NLTK advisory 原文
+# “Patched versions: Not yet patched”，FastChat 仓库已归档），升版无法解决。
+# 两者唯一引入者是 flashrag-dev（仅根 eval extra），且经源码核实：本仓评测入口只 import
+# flashrag.config / dataset / evaluator，其 import 闭包为 rouge / rouge_chinese / jieba /
+# transformers / tiktoken，**不触及 fschat（只在 FlashRAG webui）与 nltk（只在 FlashRAG refiner）**；
+# rouge / rouge-chinese 仅依赖 six，spacy/bm25s/chonkie 均不依赖 nltk —— 故摘除两条边不破坏其它已锁包。
+# 手法：uv 官方的「假 marker 移除传递依赖」——本仓 requires-python >= 3.11，该 marker 恒假，解析器丢弃该边。
+# 副作用：若后续要跑 FlashRAG webui（streamlit）或 refiner（LLMLingua），需先移除本 override。
+override-dependencies = ["fschat ; python_version < '3.9'", "nltk ; python_version < '3.9'"]
