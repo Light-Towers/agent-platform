@@ -260,14 +260,13 @@ def check_tool_direct_import() -> list[str]:
 #      的 CM 生命周期与 SSE/后台任务跨 asyncio 任务边界不安全（R4/R8 根因，
 #      NoOp 替身 __getattr__ 兜底使其在关闭态隐形）。
 # ---------------------------------------------------------------------------
-_INIT_PATTERN = re.compile(r"(?<!def )\b(?:init_otel|init_tracing)\s*\(")
+_INIT_PATTERN = re.compile(r"(?<!def )\b(?:init_tracing)\s*\(")
 _INIT_WHITELIST = (
     "applications/agent_server/main.py",
     "applications/knowledge-service/knowledge_service/main.py",
     "applications/agent_federation/api/server.py",
     "applications/knowledge-service/eval/",  # 评测入口脚本（非服务进程，装配点等价）
-    # 过渡门面：委托 kernel 的唯一合法中转（S1 完成后随门面退役删除本行）。
-    "packages/agent-runtime/agent_runtime/otel.py",
+    # 门面 otel.py 已退役（观测方案 §12，2026-09-30）：kernel 直调后 init_tracing 仅剩装配点。
     # exhibition 装配薄封装：无本地状态、委托 kernel，由其 server.py:59 装配点调用。
     "applications/exhibition-agent/exhibition_agent/observability/otel.py",
 )
@@ -365,10 +364,11 @@ def check_tracer_state_scatter() -> list[str]:
 
 # ---------------------------------------------------------------------------
 # L-4（S3，依赖契约）：OTel/langfuse 可选依赖版本区间三处归一（R1/R2 防回归）。
-# 背景：根 [otel]、agent-core [tracing]、agent-runtime [otel] 三处 extras 与
+# 背景：根 [otel]、agent-core [tracing] 两处 extras 与
 # federation [observability] 的 langfuse 各自声明下界曾漂移（sdk>=1.20 vs >=1.24），
 # 叠加 langfuse v2/v3 代际冲突导致 pip 必回溯。规则：
-#   1) agent-runtime 必须声明 otel extras（其 otel.py 软导入 opentelemetry）；
+#   1) OTel 软导入面均在声明位有 extras（门面退役后 agent-runtime 无 otel 直导入，
+#      声明位已摘；kernel 在 agent-core [tracing]，装配方在根 [otel]）；
 #   2) 同一包在多处声明时下界版本必须一致；
 #   3) agent-runtime 必须为 langfuse 软导入（tracing.py）声明 extras，且下界与
 #      federation [observability] 一致（import 路径 v2→v3 迁移属 S4，见方案 §3.4）。
@@ -376,7 +376,6 @@ def check_tracer_state_scatter() -> list[str]:
 _OTEL_EXTRAS_SITES = (
     ("pyproject.toml", "otel"),
     ("packages/agent-core/pyproject.toml", "tracing"),
-    ("packages/agent-runtime/pyproject.toml", "otel"),
     ("packages/agent-runtime/pyproject.toml", "langfuse"),
     ("applications/agent_federation/pyproject.toml", "observability"),
     # exhibition 观测后端软依赖（llm_obs 懒导入）；S4 迁入，同受 langfuse 下界归一约束。

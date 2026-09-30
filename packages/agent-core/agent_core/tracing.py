@@ -45,9 +45,10 @@ DEFAULT_SERVICE_NAME = "agent-core"
 
 # ---------------------------------------------------------------------------
 # 运行状态（模块级；init 在启动阶段调用一次，之后只读，线程安全）
-# 全仓**唯一**观测状态机：任何宿主（含 agent_runtime.otel 薄门面）都不得自持
-# 第二套 enabled/tracer 全局态，否则跨服务传播门（tracing_propagation）与
-# 实际初始化脱钩（R6：traceparent 静默断裂的根因）。lint L-3 拦截私起 init。
+# 全仓**唯一**观测状态机：任何宿主都不得自持第二套 enabled/tracer 全局态，
+# 否则跨服务传播门（tracing_propagation）与实际初始化脱钩（R6：traceparent 静默
+# 断裂的根因）。lint L-3 拦截私起 init；agent_runtime.otel 过渡门面已于
+# 2026-09-30 退役删除，宿主装配点直调本 kernel。
 # 三态语义（运维可区分“显式关”与“启用但坏了”，R5）：
 #   UNINITIALIZED 未调 init / DISABLED 显式关闭或未配置 / 
 #   DEGRADED      请求启用但初始化失败（reason 记真因）/ ACTIVE 真实导出
@@ -310,7 +311,7 @@ def is_tracing_enabled() -> bool:
     """是否处于真实导出模式（SDK 可用 + 总开关开启 + 端点/注入 exporter 就绪）。
 
     全仓唯一的传播门开关（tracing_propagation 读此处）；宿主经任何入口 init
-    （含 agent_runtime.otel 门面）最终都落到本状态机，R6 型断裂不再可能。
+    （直调本 kernel，过渡门面已退役）最终都落到本状态机，R6 型断裂不再可能。
     """
     return bool(_enabled)
 

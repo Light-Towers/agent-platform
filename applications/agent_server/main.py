@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 
 from agent_core.guardrails.app_factory import build_api_app
 from agent_core.logging import configure_logging, get_logger
-from agent_core.tracing import shutdown_tracing
+from agent_core.tracing import init_tracing, shutdown_tracing
 from agent_runtime.identity import require_identity_startup_guard
 from agent_runtime.identity_middleware import IdentityMiddleware
 
@@ -23,7 +23,6 @@ from agent_runtime.admission_gateway import PgAdmissionController
 from agent_runtime.coordinator import SessionCoordinator
 from agent_runtime.db import close_pool, get_pool, init_pool
 from agent_runtime.mcp_client import MCPClientManager
-from agent_runtime.otel import init_otel
 from agent_runtime.planner.durability_pg import (
     PgCheckpointStore,
     PgExecutionOwnershipStore,
@@ -232,13 +231,31 @@ async def lifespan(app: FastAPI):
     # Phase 2: OTel 接线（opt-in）；观测单状态机在 kernel（S1），请求级 span 由
     # build_api_app(enable_tracing=True) 装配的 TracingMiddleware 创建（S2），
     # 不再往 app.state 挂 tracer 散点取用（lint L-2 拦截）。
+    # 门面退役（2026-09-30）：原 agent_runtime.otel.init_otel 参数映射内联至装配点，
+    # 直调 kernel init_tracing（jaeger thrift exporter 已归档 → 映射 OTLP 接收端）。
     if settings.otel_effective_enabled:
-        init_otel(
-            exporter=settings.otel_exporter,
-            endpoint=settings.otel_endpoint,
-            sampling_rate=settings.otel_sampling_rate,
-            service_name=settings.otel_service_name,
-        )
+        if settings.otel_exporter == "console":
+            try:
+                from opentelemetry.sdk.trace.export import ConsoleSpanExporter
+
+                _otel_exporter = ConsoleSpanExporter()
+            except ImportError:
+                _otel_exporter = None  # kernel 记 DEGRADED（R5：可区分显式关与坏了）
+            init_tracing(
+                service_name=settings.otel_service_name,
+                enabled=True,
+                exporter=_otel_exporter,
+                sampling_rate=settings.otel_sampling_rate,
+            )
+        else:
+            # otlp / jaeger→otlp：endpoint 为空传 None 让 kernel 回退标准 env
+            # （OTEL_EXPORTER_OTLP_ENDPOINT）；仍为空则记 DEGRADED=no_export_endpoint。
+            init_tracing(
+                service_name=settings.otel_service_name,
+                otel_endpoint=settings.otel_endpoint or None,
+                enabled=True,
+                sampling_rate=settings.otel_sampling_rate,
+            )
 
     # Phase 2: MCP client（opt-in）
     mcp_manager = None

@@ -23,12 +23,12 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from agent_core.tokenizer import count_messages, count_tokens
+from agent_core.tracing import start_span
 
 from agent_runtime.context.budget import ContextBudget, Layer
 from agent_runtime.context.compact import compact_messages
 from agent_runtime.context.memory_gate import MemoryGate
 from agent_runtime.context.tool_result import ToolResultCompressor
-from agent_runtime.otel import get_otel_tracer
 
 logger = logging.getLogger(__name__)
 
@@ -505,8 +505,8 @@ class ContextAssembler:
         属性遵循 GenAI 语义约定：``gen_ai.usage.input_tokens`` 计输入 token，
         其余为 Agent 平台自定义约定（``agent.context.*``）。不含消息全文，避免敏感内容入链路。
         """
-        span = get_otel_tracer().start_span(span_name)
-        try:
+        # 门面退役（2026-09-30）：直调 kernel start_span（with 语义，未启用时 no-op）
+        with start_span(span_name) as span:
             span.set_attribute("gen_ai.usage.input_tokens", report.total_tokens)
             span.set_attribute("gen_ai.usage.input_cost", report.total_tokens)
             span.set_attribute("agent.context.model_window", self.budget.model_window)
@@ -515,8 +515,6 @@ class ContextAssembler:
             span.set_attribute("agent.context.caps", json_dumps(caps))
             if report.actions:
                 span.set_attribute("agent.context.actions", json_dumps(report.actions))
-        finally:
-            span.end()
 
 
 def json_dumps(value: Any) -> str:

@@ -2,9 +2,14 @@
 
 get_langfuse_callbacks 三态：空凭据→[] / 全凭据→[handler] / 导入失败→[]+warning。
 主链路绝不因 tracing 失败中断。
+
+（2026-09-30 门面退役：原同目录 test_otel.py 的 kernel 降级钉用例迁至
+``packages/agent-core/tests/test_tracing_degradation.py``，真装组合钉用例收编至本文件末尾。）
 """
 
 from __future__ import annotations
+
+import pytest
 
 from agent_runtime.tracing import get_langfuse_callbacks
 
@@ -71,4 +76,26 @@ def test_import_failure_logs_warning(caplog):
 def test_return_type_is_always_list():
     """三态都返回 list，绝不返回 None。"""
     assert isinstance(get_langfuse_callbacks(), list)
+    assert isinstance(get_langfuse_callbacks(public_key="pk", secret_key="sk", host="h"), list)
+
+
+def test_get_langfuse_callbacks_real_import_path():
+    """S4 代际契约真 import 路径钉用例（方案 §6-6，2026-09-30 自 test_otel.py 收编）：
+    langfuse v3+/v4 下 callbacks 非空。
+
+    旧 v2 写法（langfuse.callback.CallbackHandler(secret_key=, host=)）在真装 v3+ 时
+    必 TypeError → 恒降级空列表，该组合从未被任何 session 覆盖（R1）。本用例钉住
+    迁移后的真实构造路径（离线，不发网络）。未装 langfuse 的默认 session
+    自动 skip（设计意图）；实测命令：``uv run --extra otel --with langfuse
+    pytest packages/agent-runtime/tests -q``。
+    """
+    pytest.importorskip("langfuse", reason="langfuse extras 未安装（默认 session 设计内 skip）")
+
+    cbs = get_langfuse_callbacks(
+        public_key="pk-lf-test", secret_key="sk-lf-test", host="http://localhost:3000"
+    )
+    assert len(cbs) == 1
+    assert type(cbs[0]).__name__ == "LangchainCallbackHandler"
+    # 凭据缺失 → 空列表（未启用语义不变，opt-in 铁律）
+    assert get_langfuse_callbacks() == []
     assert isinstance(get_langfuse_callbacks("pk", "sk"), list)

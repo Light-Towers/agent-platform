@@ -201,7 +201,7 @@ uv run python scripts/check_doc_sync.py                # 必须通过
 
 本地全套验证：lint 9 条、ruff 全仓、根 700 passed/26 skipped、core+schemas 273 passed、agent_server 44、agent-runtime 默认 607/2s + otel+langfuse 组合 608、exhibition 344、check_doc_sync 0 警告。
 
-**未完成（收口前剩）**：~~R6 真集群端到端复验~~（✅ 2026-09-30 闭环，见 §13）；~~S2 尾项~~（✅ 2026-09-30 落地，见 §14）；门面退役（otel.py 本体+L-3 白名单行）；集群 kubeadm reset 待用户确认。
+**未完成（收口前剩）**：~~R6 真集群端到端复验~~（✅ 2026-09-30 闭环，见 §13）；~~S2 尾项~~（✅ 2026-09-30 落地，见 §14）；~~门面退役~~（otel.py 本体+L-3 白名单行）（✅ 2026-09-30 落地，见 §15）；集群 kubeadm reset 待用户确认。
 
 ## 13. 实施进度（R6 真集群端到端复验已闭环，2026-09-30）
 
@@ -225,3 +225,16 @@ uv run python scripts/check_doc_sync.py                # 必须通过
 | ks 套件首跑真 SDK 揭出 5 存量失败（非本轮回归，HEAD 基线双验一致） | 根因：kernel `_reset_for_tests()` 只 shutdown 本模块 provider，不重置 OTel API 全局 `_TRACER_PROVIDER/_TRACER_PROVIDER_SET_ONCE`（Once 一次性语义）→ 首用例嵌入全局 provider 后，后续用例拿已 shutdown 的死 provider走"复用"路径，注入 exporter 永拿不到 span。CI 默认 session 无 SDK 该组 skip 从未暴露（skipif 守卫盲区，同 S4 轨迹）。修：测试钩子同步重置 API 全局（仅 `_reset_for_tests` 使用，不触生产路径） | 5→2→0；另 2 个存量契约错位用例对齐 S1 内核抽取后现实（env 回退路径钉住；`_provider` 改取 kernel 本体），断言不放宽只改错位前提 |
 
 本地全套验证：ruff 全仓、lint 9 条、check_doc_sync 0 警告；ks（默认+--extra otel）399/7s、根 455、observability SDK session 15、runtime 607、federation 146、exhibition 344、agent_server 44、kefu 43、nl2sql 18。
+
+## 15. 实施进度（门面退役已落地，2026-09-30）
+
+L-2 白名单清零后，按 §3.1 既定退役路径删除 `agent_runtime/otel.py` 过渡门面本体，消费方直调 kernel：
+
+| 项 | 内容 | 验证证据 |
+|---|---|---|
+| 消费方切 kernel 直调 | agent_server `main.py`：装配点内联 init_otel 参数映射（exporter console→ConsoleSpanExporter 软导入；otlp/jaeger→OTLP，endpoint 空传 None 由 kernel 回退标准 env；jaeger thrift exporter 已归档故映射 OTLP 接收端）直调 `init_tracing`；`query_router.py`：`redact_question` → kernel `user_query_hash` + question_length；runtime `context/assembler.py`：`get_otel_tracer` → kernel `start_span`（with 语义取代手动 span.end） | import 冒烟过；agent_server 44、runtime 594、根 455 全绿 |
+| 删除本体+测试迁移 | 删 `agent_runtime/otel.py`（129 行）+ `tests/test_otel.py`（167 行）；kernel 降级/幂等/脱敏面钉用例承接至新建 `packages/agent-core/tests/test_tracing_degradation.py`（默认 CI 即跑）；真装组合钉用例收编至 runtime `test_tracing.py` | agent-core 253 passed；runtime --extra otel --with langfuse 595 passed |
+| 门禁同步收窄 | lint L-3：`_INIT_PATTERN` 去 `init_otel`、`_INIT_WHITELIST` 摘除 runtime otel 行（exhibition `observability/otel.py` 为 app 级合法装配薄封装，保留）；L-4：`_OTEL_EXTRAS_SITES` 摘除 runtime `[otel]` 死声明；runtime pyproject 删 `[otel]` extras + ruff 豁免 | lint 9 条全绿（L-3/L-4 收窄后仍过）；uv lock 311 包无回溯 |
+| 全仓引用同步 | root pyproject `[otel]` / kernel tracing.py 注释门面表述更新；README OTel 条目改指 kernel（otel.py 已退役）；check_doc_sync 不扫 README，已人工同步 | ruff 全仓、check_doc_sync 0 警告；ks 399/7s、federation 146、exhibition 344、kefu+nl2sql+schemas 89 |
+
+至此本方案代码面收口全完成；唯余集群 kubeadm reset（§9 与本方案解耦，待用户二次确认）。

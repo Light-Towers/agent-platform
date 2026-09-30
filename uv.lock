@@ -333,24 +333,18 @@ langfuse = [
 mcp = [
     { name = "mcp" },
 ]
-otel = [
-    { name = "opentelemetry-api" },
-    { name = "opentelemetry-sdk" },
-]
 
 [package.metadata]
 requires-dist = [
     { name = "agent-core", editable = "packages/agent-core" },
     { name = "langfuse", marker = "extra == 'langfuse'", specifier = ">=4.0.0" },
     { name = "mcp", marker = "extra == 'mcp'", specifier = ">=2.0.0" },
-    { name = "opentelemetry-api", marker = "extra == 'otel'", specifier = ">=1.24" },
-    { name = "opentelemetry-sdk", marker = "extra == 'otel'", specifier = ">=1.24" },
     { name = "pydantic", specifier = ">=2.13" },
     { name = "pydantic-settings", specifier = ">=2.0" },
     { name = "pyjwt", extras = ["crypto"], marker = "extra == 'identity'", specifier = ">=2.9" },
     { name = "shared-schemas", editable = "packages/shared-schemas" },
 ]
-provides-extras = ["mcp", "identity", "otel", "langfuse"]
+provides-extras = ["mcp", "identity", "langfuse"]
 
 [[package]]
 name = "aiohappyeyeballs"

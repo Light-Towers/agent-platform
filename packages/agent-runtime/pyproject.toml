@@ -18,12 +18,8 @@ dependencies = [
 [project.optional-dependencies]
 mcp = ["mcp>=2.0.0"]  # Dependabot: MCP SDK 多 high 告警（first_patched 1.28.1）
 identity = ["PyJWT[crypto]>=2.9"]  # ADR-0007 A3：RS256 令牌签/验（不进 agent-core，红线 1）
-# OTel 观测软依赖（otel.py 门面 console exporter/propagator 路径）；下界与根 [otel]、
-# agent-core [tracing] 归一，lint L-4 拦截漂移（方案 §3.3）。
-otel = [
-    "opentelemetry-api>=1.24",
-    "opentelemetry-sdk>=1.24",
-]
+# OTel 观测软依赖声明位已摘（2026-09-30 门面退役）：otel.py 删除后本包无 opentelemetry
+# 直接导入，观测统一软导入面在 agent-core [tracing]（lint L-4 监控声明位与下界）。
 # Langfuse 回调软依赖（tracing.py get_langfuse_callbacks 懒导入）；下界与 federation
 # [observability] 一致。S4 已落地：import 路径迁 v3+/v4 代际契约 langfuse.langchain
 #（方案 §3.4 选项 a），v2 写法在真装 v3+ 时必 TypeError 恒降级，已终结。
@@ -59,7 +55,6 @@ ignore = ["E402", "E731"]
 "agent_runtime/context/compact.py" = ["BLE001"]
 "agent_runtime/control_plane.py" = ["BLE001", "S110"]
 "agent_runtime/db.py" = ["BLE001", "S110"]
-"agent_runtime/otel.py" = ["BLE001"]
 "agent_runtime/planner/agentic.py" = ["BLE001"]
 "agent_runtime/planner/execution_graph.py" = ["BLE001"]
 "agent_runtime/planner/graph_compose.py" = ["BLE001"]
