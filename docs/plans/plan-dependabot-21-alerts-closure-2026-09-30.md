@@ -1,7 +1,7 @@
 # Dependabot 21 项告警收口方案（2026-09-30）
 
 > 触发：门面退役推送后 GitHub 在 push 输出提示「21 vulnerabilities on default branch（4 critical / 11 high / 6 moderate）」。用户要求「将这 21 个漏洞修复掉」。
-> 本文是**方案 + 实施记录**（AGENTS.md 红线：改动前先出方案）。§0-§7 为取证与方案，§8-§10 为实施与验证结果（分支 `fix/dependabot-eval-transitive`，PR #24）。
+> 本文是**方案 + 实施记录**（AGENTS.md 红线：改动前先出方案）。§0-§7 为取证与方案，§8-§10 为实施与验证结果（分支 `fix/dependabot-eval-transitive`，PR #24），**§11 为 PR #24 合并后 Dependabot 重扫的二轮回报与后续维护（分支 `fix/dependabot-pyjwt`）**。
 
 ## 0. 一页结论
 
@@ -205,8 +205,70 @@ OPEN_TOTAL=7
 
 ## 10. 本任务遗留
 
-1. PR #24 待人工确认合并（本仓约定：合并动作等最终确认）。
-2. 合并后等 Dependabot 重扫，按 §9 命令复核应为 0；若仍有 open，重新取证而非直接 dismiss。
+1. ~~PR #24 待人工确认合并~~ → **已合并**（`2026-09-30T10:10:16Z`，merge commit `42cfe35`，CI 6/6 pass），见 §11。
+2. ~~合并后等 Dependabot 重扫，按 §9 命令复核应为 0~~ → 重扫已发生：**原 7 项全部 `fixed`**（override 真修被扫描器独立确认），但同一轮**新暴露 10 项 PyJWT**（#27–#36），预测的「应为 0」未成立；已按「先取证再定性、不直接 dismiss」处理，转 §11。
 3. L3（`make eval-rag` 端到端出数）在本机与 126 均无完整条件，**未验证**；若后续要声明「评测链路因 override 而回归」需先补环。
+
+## 11. PR #24 合并后的重扫回报：原 7 项 fixed，新暴露 10 项 PyJWT（2026-09-30 二轮）
+
+PR #24 于 `2026-09-30T10:10:16Z` 合入 main（merge commit `42cfe35`）。Dependabot 在 **10:11:23–10:11:25**（合并后约 1 分钟）自动重扫默认分支，实拉结果：
+
+**① 原 7 项全部翻 `fixed`（override 真修得到独立确认）**
+
+```
+ALERT#20 fschat state=fixed fixed_at=2026-09-30T10:11:23Z
+ALERT#21 fschat state=fixed fixed_at=2026-09-30T10:11:24Z
+ALERT#22 fschat state=fixed fixed_at=2026-09-30T10:11:24Z
+ALERT#23 fschat state=fixed fixed_at=2026-09-30T10:11:24Z
+ALERT#24 fschat state=fixed fixed_at=2026-09-30T10:11:24Z
+ALERT#25 fschat state=fixed fixed_at=2026-09-30T10:11:25Z
+ALERT#26 nltk   state=fixed fixed_at=2026-09-30T10:11:25Z
+```
+
+非 dismiss、非人工关闭，是扫描器对照新 `uv.lock` 判定的 fixed → §8 的静态/实装证据与真实扫描器结论一致。
+
+**② 同一轮重扫新暴露 10 项（alert #27–#36），全部 `PyJWT` / `manifest=uv.lock` / `scope=runtime` / `relationship=transitive`**
+
+| GHSA | severity | vulnerable range | first_patched | alert |
+|---|---|---|---|---|
+| GHSA-ffc3-869f-jxw9 | **critical** | `<= 2.13.0` | 2.14.0 | #33 |
+| GHSA-9v7f-9g4p-ffgj | high | `<= 2.13.0` | 2.14.0 | #31 |
+| GHSA-p4g4-x82p-q773 | high | `>= 2.4.0, < 2.14.0` | 2.14.0 | #30 |
+| GHSA-w2cx-738m-mc7w | high | `= 2.13.0` | 2.14.0 | #32 |
+| GHSA-r6x4-923q-g947 | high | `= 2.13.0` | 2.14.0 | #29 |
+| GHSA-9j54-fg26-wv3r | high | `>= 2.13.0, < 2.14.0` | 2.14.0 | #36 |
+| GHSA-2gx3-rcp4-g85q | medium | `<= 2.13.0` | 2.14.0 | #28 |
+| GHSA-hxm8-2xgr-2p9m | medium | `<= 2.13.0` | 2.14.0 | #34 |
+| GHSA-w6j9-cwv2-h6wq | medium | `>= 2.9.0, <= 2.13.0` | 2.14.0 | #27 |
+| GHSA-8wjv-2p76-3863 | medium | `>= 2.13.0, < 2.14.0` | 2.14.0 | #35 |
+
+10 条告警 = **10 个不同 advisory、但收敛于同一个包同一个版本线**，`first_patched` 全部是 **2.14.0** → 单点升版即可全清。包名在 Dependabot 侧以 `PyJWT / pyjwt / pyJWT` 三种大小写重复出现（同一 lock 内规范名为 `pyjwt`），是账号侧索引噪声，不影响处置动作。
+
+**为何 §10.2 的「重扫应为 0」没成立**：原始 21 项快照（推送时回显）只含 fschat/nltk（根 lock）+ 14 孤儿（courses/*），**从未包含 PyJWT**；pyjwt 2.13.0 一直在 lock 里，但原快照未将其列为告警（无法仅从告警 API 判定原因——可能是 advisory 发布时间晚于上次扫描，或上次扫描快照较早）。无论何种原因，本轮重扫把这 10 项补齐了，它们是对当前 lock 的真实命中。**处理原则不变**：仍 open 的先取证再定性，绝不因「不想再看」而直接 dismiss；也不得因「旧告警已处理」就推断总体已清零。
+
+### 11.1 反向依赖与可修性取证
+
+```
+MAIN_HEAD: 42cfe35      MAIN_LOCK_PKG_COUNT: 295      MAIN_PYJWT: 2.13.0
+DEPENDENTS_ON_PYJWT: mcp 2.0.0        （lock 内唯一第三方引入者）
+PYJWT_DEPS: cryptography              （自身只依赖 cryptography，已在 lock 内）
+```
+
+- `mcp 2.0.0` 的 PyPI 元数据要求：`pyjwt[crypto]>=2.10.1` —— **无上限**，升到 2.14.0+ 不违反其契约。
+- 根包 `[project.optional-dependencies] identity` 声明 `pyjwt[crypto]>=2.9`（同样无上限），本轮解析未被安装进 lock（唯一需求边来自 mcp）。
+- PyPI 现状：`LATEST=2.15.1`，可用版本线 `2.14.0 / 2.15.0 / 2.15.1` 全部高于所有 vulnerable range 上界。
+- 结论：**属于「有补丁版本」的常规可修项**，与 fschat/nltk 的「无补丁只能摘除」不同，走版本下限约束即可，不需要 override 摘边，也不需要考虑 dismiss。
+
+### 11.2 修复手法与验证
+
+- **手法**：沿用本仓既有 `[tool.uv] constraint-dependencies` 机制（与 `pyarrow>=25.0.1` 同处），追加 `pyjwt>=2.14.0`。选 2.14.0 作为下限而非钉死 2.15.1：与既有写法一致，让 resolver 取当前最新兼容版，后续小版本跟随不需改文件。
+- **L1（lock 回归判据）**：要求包集合不变（ADDED=0 / REMOVED=0），仅 `pyjwt` 一条 VERSION_DRIFT（2.13.0 → ≥2.14.0）；`pyjwt[crypto]` 的 crypto extra 与 cryptography 已在位，预期无新增包。
+- **门禁**：`uv run --with ruff ruff check .` + `lint_architecture.py` + `check_doc_sync.py` + 根 pytest session（与 §8.5 同口径）。
+- **不做**：`--extra eval` 相关链路本轮不涉及（PyJWT 由 mcp 带入，与 eval extra 无关），故无需再走 126 补跑；本机 Windows 的 chonkie 阻断（§8.3）依旧存在，不因此次改动变化。
+
+### 11.3 收口判据
+
+合并进 main 且下一轮重扫后复核 `state=open` 应为 **0**；若仍有残留，按本节日志法重新取证（列出编号/包/advisory/first_patched），不得直接 dismiss。
+
 
 
