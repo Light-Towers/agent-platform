@@ -167,10 +167,48 @@ kubectl delete namespace agent-platform
 
 1. **`agent_runtime/otel.py` 符号错误**：`TraceIdRatioBasedSampler` 在 opentelemetry-sdk 全部版本不存在（正确符号 `TraceIdRatioBased`），模块加载 ImportError 被 guard 吞 → OTel opt-in 路径从未真正生效，静默降级 NoOp，且告警文案误导（"SDK not installed"）。修复 2 处 + 注释；用户授权「授权改 otel.py（2行）修复后继续」。
 2. **`query_router.py`（旧版 `routes.py`）span 生命周期误用**：对 `start_as_current_span()` 返回的 CM 手动 `__enter__()` 后直接 `set_attribute` —— 真 OTel（api≥1.27）的 `_AgnosticContextManager.__enter__()` 不返回 span → **/query 直接 500**；且 attach/detach 跨 SSE 生成器 asyncio 任务报 `created in a different Context`。此前从未暴露因为 bug 1 导致恒走 NoOp，而 NoOp shim 的 `__getattr__` 恰好兼容此误用。修复：改 `start_span(context=extract_traceparent(...))` + `finally: span.end()`（不挂当前上下文），本地与 126 旧版双同步。
-   **勘误（2026-09-29 复盘追加）**：该修复注释中"保留 W3C 父链接"的声称在 agent_server 实际不成立——`agent_core.tracing_propagation.extract/inject_traceparent` 以 `agent_core.tracing.is_tracing_enabled()` 为门，而 agent_server 只调 `agent_runtime.otel.init_otel()`（另一状态机，从不置 `_enabled`）→ extract 恒 None、透传实际断裂（双状态机接线缺陷 R6）。生命周期修复有效、父链接待全局方案 S2 落地后复验。见 `docs/plans/plan-observability-global-remediation-2026-09-29.md`。
+   **勘误（2026-09-29 复盘追加）**：该修复注释中"保留 W3C 父链接"的声称在 agent_server 实际不成立——`agent_core.tracing_propagation.extract/inject_traceparent` 以 `agent_core.tracing.is_tracing_enabled()` 为门，而 agent_server 只调 `agent_runtime.otel.init_otel()`（另一状态机，从不置 `_enabled`）→ extract 恒 None、透传实际断裂（双状态机接线缺陷 R6）。生命周期修复有效、父链接待全局方案 S2 落地后复验。见 `docs/plans/plan-observability-global-remediation-2026-09-29.md`。**R6 复验已于 2026-09-30 闭环，见下方第三次演练节。**
 
 ### 测试方法学记录
 
 - `query_router.py` 的 cache_hit 短路在 span 创建前 return，**缓存命中不产生 trace** → 端到端用例必须用带时间戳后缀的唯一 query 绕语义缓存。
 - BatchSpanProcessor 默认 ~5s 调度 flush，取证脚本请求后 `sleep 8` 再查 Jaeger API。
+
+---
+
+# 第三次演练：S4+S5 后全局治理复验（R6 闭环 · 2026-09-30）
+
+> 目标：在 `30cbf25`（含 S2 统一 TracingMiddleware + S4/S5 全部内容）上复跑六件套取证链，验收 R6「W3C traceparent 父子同 trace」。**结论：R6 达标 ✅；途中拓出两个只有存量库升级路径才暴露的迁移链真实缺陷（已修+回归用例钉住，详见下）；六件套脚本自身两处缺陷也在实跑中磨出修正——印证「脚本未经实战即未拥有」。**
+
+## A. 同步与构建（GIT_REV 绑定首次实战）
+
+- 本地 `git bundle a5fa903..HEAD` → scp → 126 fetch+checkout：MD5 双端一致（`771a5f61…`），126 HEAD=`30cbf25a046eabb41db992617f173d9125e12048`，脏改动先备份 `/tmp/r6-dirty-*-20260930-1100.patch`。
+- `build.sh 30cbf25a…`：rev 门禁通过，镜像 `ab5fe54b6860`，label 回读 + `docker run cat /srv/agent-platform/GIT_REV` 双通道均 = `30cbf25a…`（dirty=no）。
+- `distribute.sh`：125/241 两 worker 均导入 `ab5fe54b6860`（脚本经上一轮实测修正：WORKER_USER=root、crictl IMAGE/TAG 分列 grep）。
+
+## B. 存量库迁移链两层缺陷（复验核心价值）
+
+新 pod 基线 stamp/续链在**存量库**（历史演练遗留，无 schema_migrations 记录）上必崩，而全新库路径（本地/CI）永不暴露：
+
+1. **baseline 拒 stamp：V3 八表缺失**。演练早期库未含 awaitable_tasks/budget_*/cost_records/execution_*/episodic_memories/procedural_memories 八表 → `_try_baseline_stamp` 不完整即拒（行为正确）。处置：只读侦察库形态后从 001 L188-312 精确提取纯新表块补建（老表缺口交由 runner 续链 002-010 增量补齐）。
+2. **v6 续链崩 UndefinedColumn：sql_* 三表无 workspace_id**。旧基线建 sql_ddl/sql_docs/sql_examples 时无此列、v2 只给 chunks 补、增量链从未补 → v6 复合索引 (tenant_id, workspace_id) 必崩。修复入产品码 `006_tenant_corpus.up.sql`（三表 `ADD COLUMN IF NOT EXISTS workspace_id TEXT NOT NULL DEFAULT ''`，幂等，新库 no-op）+ 回归用例 `test_v6_upgrade_from_legacy_corpus_shape`（commit `30cbf25`）。
+
+修复后 rollout：新 pod `66499c8569-k876q` Running 0 重启，schema_migrations 1..10 全落，容器内 `/srv/agent-platform/GIT_REV` = `30cbf25a…`（运行对象与提交一致，R14 达成）。
+
+## C. 端到端取证（R6 判据）
+
+- OTEL env 历史 set 保留在 deploy spec（`set env --list` 四点齐备）；jaeger 容器常驻复用。
+- `portforward.sh start` → /health：`"otel":true,"otel_status":"ACTIVE"`（S2 统一接线后首次集群内 ACTIVE，旧轮为手写局部接线）。
+- `e2e_traceparent.sh`：客户端自造 traceparent（parent_span=`0123456789abcdef`）→ /query 200 → sleep 8 → Jaeger 命中，span 数=8。
+- **父子同 trace 硬判据（Jaeger API 逐 span 解析）**：服务端两条 `POST /query` span 的 CHILD_OF 引用均 = `0123456789abcdef`（客户端父），全 trace 去重 traceID 仅 1 个，无断链/新 trace → **R6 闭环 ✅**。
+- `verify.sh 30cbf25a…`：L0 三节点 Ready / L1 pod+svc / L2 otel_status / GIT_REV 绑定四层全过（本次拓出脚本自身缺陷：nodes 不支持 `--field-selector=status!Ready`，pipefail 下静默中断脚本 → 改 awk 按 STATUS 列判定，随本轮入库）。
+
+## D. Windows skip 用例真实 PG 补盲
+
+`tests/ha/test_migrations_real_pg.py`（含新增 v6 存量库用例）在 Windows 本地 skip，本轮在集群 pod 内（Linux + 真实 pgvector PG）补盲实跑：**4 passed**（含全新库完整 baseline 链 + checksum 篡改拒绕 + 幂等重跑）。环内一次性 pytest（pip --user，pod 重启即失效）；中途两轮失败均为补盲环境搭建问题（pytest.ini 段名写错致 asyncio_mode 未生效），非产品码/用例问题，修正后全绿。
+
+## E. 环境事实登记
+
+- 126 脏改动备份：`/tmp/r6-dirty-{inventory,backup}-20260930-0947.{txt,patch}`、`/tmp/r6-dirty-backup-20260930-1100.patch`；verify 证据块 `/tmp/r6_verify.log`。
+- 本次后集群运行对象：镜像 `ab5fe54b6860` @ `30cbf25`，pod 内一次性验证残留（/tmp/r6_dep_check.py、/tmp/ha、pip --user pytest）随 pod 重启自然消失。
 

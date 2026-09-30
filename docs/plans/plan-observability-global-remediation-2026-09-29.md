@@ -201,4 +201,15 @@ uv run python scripts/check_doc_sync.py                # 必须通过
 
 本地全套验证：lint 9 条、ruff 全仓、根 700 passed/26 skipped、core+schemas 273 passed、agent_server 44、agent-runtime 默认 607/2s + otel+langfuse 组合 608、exhibition 344、check_doc_sync 0 警告。
 
-**未完成（收口前剩）**：R6 真集群端到端复验（可直接走 `deploy/k8s/scripts/` 六件套序列：同步 126 → build.sh <rev> → distribute → e2e_traceparent.sh → 关 VERIFICATION L141 勘误注；本地层面父子一致已由 tests/observability 钉住）；S2 尾项（ks 迁工厂+开中间件、流式父链、各 app lifespan）；门面退役（otel.py 本体+L-3 白名单行）；集群 kubeadm reset 待用户确认。
+**未完成（收口前剩）**：~~R6 真集群端到端复验~~（✅ 2026-09-30 闭环，见 §13）；S2 尾项（ks 迁工厂+开中间件、流式父链、各 app lifespan）；门面退役（otel.py 本体+L-3 白名单行）；集群 kubeadm reset 待用户确认。
+
+## 13. 实施进度（R6 真集群端到端复验已闭环，2026-09-30）
+
+| 项 | 内容 | 验证证据 |
+|---|---|---|
+| 同步/构建/分发（六件套首次全链实战） | bundle 增量同步 a5fa903→30cbf25（MD5 双端校验）→ `build.sh 30cbf25a…` rev 门禁+双通道回读 → `distribute.sh` 两 worker 导入 | 镜像 `ab5fe54b6860`，容器内 GIT_REV = `30cbf25a…`（R14 达成） |
+| R6 判据：父子同 trace | `portforward.sh`（/health `otel_status=ACTIVE`）→ `e2e_traceparent.sh` → Jaeger API 逐 span 解析 | 服务端 `POST /query` span 的 CHILD_OF 引用 = 客户端 parent_span `0123456789abcdef`，全 trace 去重 traceID 仅 1；`verify.sh` 四层全过；勘误注已关（VERIFICATION.md 第三次演练节） |
+| 复验拓出存量库迁移链两层缺陷（复验核心价值） | ① baseline 拒 stamp（历史演练库缺 V3 八表，行为正确）现场补建；② v6 复合索引在 sql_* 三表旧表形崩 UndefinedColumn（增量链缺口，新库 baseline 自带该列故本地/CI 永不暴露）→ 产品码修复 `006_tenant_corpus.up.sql` 幂等 ALTER + 回归用例 `test_v6_upgrade_from_legacy_corpus_shape`（commit 30cbf25） | 修复后 rollout 新 pod Running 0 重启，schema_migrations 1..10 全落；用例在集群 pod 内真实 pgvector PG 补盲实跑 **4 passed**（Windows skip 不得声称已验证纪律闭环） |
+| 脚本自身缺陷实战修正 | `verify.sh` nodes 不支持 field-selector 致 pipefail 静默中断 → 改 awk 按 STATUS 列判定（上一轮 build/distribute/portforward 修正已入 30cbf25） | 修正后全链重跑 RC=0，各层判据齐全 |
+
+**启示登记**：存量库升级路径是本地/CI 全新库路径的结构性盲区，唯有真集群端到端复验可暴露；取证脚本未经实战不得声称可用（同 R14 精髓：验证对象必须与提交一致且真实跑过）。
