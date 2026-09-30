@@ -25,8 +25,8 @@ otel = [
     "opentelemetry-sdk>=1.24",
 ]
 # Langfuse 回调软依赖（tracing.py get_langfuse_callbacks 懒导入）；下界与 federation
-# [observability] 一致。注：import 路径仍为 v2 写法（langfuse.callback），v3+ 迁移属 S4
-#（方案 §3.4 代际契约），声明先行固化支持面，防 R1/R2 组合回溯复发。
+# [observability] 一致。S4 已落地：import 路径迁 v3+/v4 代际契约 langfuse.langchain
+#（方案 §3.4 选项 a），v2 写法在真装 v3+ 时必 TypeError 恒降级，已终结。
 langfuse = ["langfuse>=4.0.0"]
 
 [tool.hatch.build.targets.wheel]

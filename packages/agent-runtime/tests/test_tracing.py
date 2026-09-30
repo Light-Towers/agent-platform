@@ -30,35 +30,40 @@ def test_host_alone_does_not_enable():
 
 
 def test_import_failure_returns_empty():
-    """langfuse 未安装时降级返回空 list。"""
+    """langfuse 导入失败时降级返回空 list。
+
+    S4 迁移后 import 面为 langfuse.langchain（v3+/v4 契约）；模拟点同步切换——
+    旧 langfuse.callback 条目已不在真实 import 路径上，在真装 langfuse 的环境下
+    置 None 无法触发降级（前提失效非断言放宽，三态契约不变）。
+    """
     import sys
 
-    original = sys.modules.get("langfuse.callback")
-    sys.modules["langfuse.callback"] = None
+    original = sys.modules.get("langfuse.langchain")
+    sys.modules["langfuse.langchain"] = None
     try:
         result = get_langfuse_callbacks(public_key="pk", secret_key="sk", host="h")
     finally:
         if original is not None:
-            sys.modules["langfuse.callback"] = original
+            sys.modules["langfuse.langchain"] = original
         else:
-            sys.modules.pop("langfuse.callback", None)
+            sys.modules.pop("langfuse.langchain", None)
     assert result == []
 
 
 def test_import_failure_logs_warning(caplog):
-    """导入失败时记录 warning 日志。"""
+    """导入失败时记录 warning 日志（模拟点随 S4 import 面切 langfuse.langchain）。"""
     import sys
 
-    original = sys.modules.get("langfuse.callback")
-    sys.modules["langfuse.callback"] = None
+    original = sys.modules.get("langfuse.langchain")
+    sys.modules["langfuse.langchain"] = None
     try:
         with caplog.at_level("WARNING", logger="agent_runtime.tracing"):
             result = get_langfuse_callbacks(public_key="pk", secret_key="sk", host="h")
     finally:
         if original is not None:
-            sys.modules["langfuse.callback"] = original
+            sys.modules["langfuse.langchain"] = original
         else:
-            sys.modules.pop("langfuse.callback", None)
+            sys.modules.pop("langfuse.langchain", None)
     assert result == []
     assert any("Langfuse" in r.message or "trace" in r.message for r in caplog.records)
 

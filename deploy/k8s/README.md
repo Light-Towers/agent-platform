@@ -177,6 +177,38 @@ sudo kubeadm reset   # 每台；worker 侧另有 reset 提示按提示执行
 | port-forward 内联后台起不来 | 进程存活但 curl HTTP=000，随后退出 | setsid 内联命令的 `--address 0.0.0.0` 被引号层吞掉；残留旧 pf 占端口 | 固化为脚本（pkill 旧 pf + nohup + disown + ss 验证 + health 探测）一次拉起 |
 | 双 tracing 状态机致 traceparent 透传断裂（复盘新发现，未修） | agent_server 设好 OTel 且 span 能出，但联邦→子服务链路 trace 无法串联 | `agent_core.tracing_propagation` 的 extract/inject 以 `agent_core.tracing.is_tracing_enabled()` 为门；agent_server 只调 `agent_runtime.otel.init_otel()`（另一套状态机）→ extract 恒 None，透传静默失效 | 待全局方案：`docs/plans/plan-observability-global-remediation-2026-09-29.md`（R6，S1 收敛单状态机 + S2 middleware 装配后复验） |
 
+## 可复跑取证（deploy/k8s/scripts/ 六件套，观测方案 §3.5 固化）
+
+> 本轮演练 16 个 scratch `_*.sh` 的等价固化版：每个脚本头部自带用法/成功判据/退出码语义，
+> 全部设计为 **在 126 上 bash 执行**（幂等可重入）。Windows 侧只负责分发与结果回收
+> （守则见 `docs/operations/testing-playbook.md` 远程演练节）。
+> 经 git checkout 的分发天然 LF（`.gitattributes` 已强制 `*.sh eol=lf`）；用 scp 直传工作区文件时若含 CRLF，先 `sed -i 's/\r$//' *.sh`。
+
+| 脚本 | 作用 | 成功判据 | 关键退出码 |
+|---|---|---|---|
+| `build.sh <expected-rev>` | 126 构建 + **GIT_REV 绑定** | 构建源 HEAD==期望 rev；镜像内 `/srv/agent-platform/GIT_REV` 回读相等 | 2=rev 不匹配（禁止旧源构建，假同步事故根治） |
+| `distribute.sh` | `docker save\|gzip` → scp 125/241 → 隔离 containerd 导入 | 每节点 `crictl images` 出现目标镜像行 | 1=某节点 scp/import/校验失败 |
+| `jaeger.sh [start\|status\|stop]` | 126 幂等拉起 all-in-one（4318 OTLP-HTTP） | `/api/services` 返回含 "services" | 1=15 次探测未就绪 |
+| `portforward.sh [start\|status\|stop]` | 固化版 port-forward（先清旧再拉起） | `ss` 监听行 + `/health` 200 且含 `otel_status` | 1=未监听或 /health 不可达 |
+| `e2e_traceparent.sh` | **R6 端到端复验主体**：带 traceparent POST /query（唯一 query 绕缓存）→ sleep 8 → Jaeger 查同 trace | Jaeger 返回该 trace_id 且 span 数 ≥1 | 1=未落 trace；2=请求非 200 |
+| `verify.sh [expected-rev]` | L0/L1/L2 聚合取证一键复跑 | 三节点 Ready + otel_status 存在 + rev 一致 | 1=任一层不达标 |
+
+典型复跑序列（新提交 `<rev>` 的全链路取证）：
+
+```bash
+# 0. 同步 126 构建源（固定动作，禁止手改远端文件）
+ssh 126 "git -C /opt/agent-platform fetch && git -C /opt/agent-platform checkout <rev>"
+# 1-2. 构建 + 分发（rev 门禁不过即中止）
+bash deploy/k8s/scripts/build.sh <rev> && bash deploy/k8s/scripts/distribute.sh
+kubectl -n agent-platform rollout restart deploy/agent-platform && kubectl -n agent-platform rollout status deploy/agent-platform
+# 3-5. 观测面拉起 + R6 复验 + 聚合取证
+bash deploy/k8s/scripts/jaeger.sh start && bash deploy/k8s/scripts/portforward.sh start
+bash deploy/k8s/scripts/e2e_traceparent.sh && bash deploy/k8s/scripts/verify.sh <rev>
+```
+
+> OTel env（一次性，已现场生效）：`kubectl set env deploy/agent-platform OTEL_ENABLED=true OTEL_EXPORTER=otlp OTEL_SERVICE_NAME=agent-platform OTEL_ENDPOINT=http://192.168.100.126:4318/v1/traces`
+> （agent_server 读 pydantic-settings 字段大写，非 OTel 官方 env 名——见踩坑表）。
+
 ## 完成后
 
 通知 AI 执行三件事：① `master.md:788` 待补项升级为已证（附 VERIFICATION.md 路径）；② `versions/ai-platform-v3.md` 工程化行加 `Kubernetes`；③ 证据锚登记「kubeadm 三节点集群最小实操」口径（比原计划 minikube 证据级别更高，面试话术同步升级）。
