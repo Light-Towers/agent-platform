@@ -379,6 +379,8 @@ _OTEL_EXTRAS_SITES = (
     ("packages/agent-runtime/pyproject.toml", "otel"),
     ("packages/agent-runtime/pyproject.toml", "langfuse"),
     ("applications/agent_federation/pyproject.toml", "observability"),
+    # exhibition 观测后端软依赖（llm_obs 懒导入）；S4 迁入，同受 langfuse 下界归一约束。
+    ("applications/exhibition-agent/pyproject.toml", "langfuse"),
 )
 _OTEL_TRACKED_PKGS = ("opentelemetry-api", "opentelemetry-sdk", "opentelemetry-exporter-otlp", "langfuse")
 

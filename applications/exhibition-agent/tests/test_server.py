@@ -254,7 +254,9 @@ async def test_query_success_response_carries_traceparent(server_transport, monk
     成功路径响应头必须回传 traceparent（no-op 环境下该断言无意义，故条件 skip）。
     """
     import agent_core.tracing as core_tracing
-    from opentelemetry.sdk.trace.export import InMemorySpanExporter
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
+        InMemorySpanExporter,
+    )
 
     # init_observability 在 import server 时已以 no-op 完成（幂等），先重置模块态再注入 exporter
     monkeypatch.setattr(core_tracing, "_initialized", False)

@@ -143,3 +143,24 @@ def test_noop_tracer_context_manager():
         assert span.is_recording() is False
         span.set_attribute("key", "value")
         span.set_status("OK")
+
+
+def test_get_langfuse_callbacks_real_import_path():
+    """S4 代际契约真 import 路径钉用例（方案 §6-6）：langfuse v3+/v4 下 callbacks 非空。
+
+    旧 v2 写法（langfuse.callback.CallbackHandler(secret_key=, host=)）在真装 v3+ 时
+    必 TypeError → 恒降级空列表，该组合从未被任何 session 覆盖（R1）。本用例钉住
+    迁移后的真实构造路径（离线，不发网络）。未装 langfuse 的默认 CI session
+    自动 skip（设计意图）；实测命令：``uv run --extra otel --with langfuse
+    pytest packages/agent-runtime/tests -q``。
+    """
+    pytest.importorskip("langfuse", reason="langfuse extras 未安装（默认 session 设计内 skip）")
+    from agent_runtime.tracing import get_langfuse_callbacks
+
+    cbs = get_langfuse_callbacks(
+        public_key="pk-lf-test", secret_key="sk-lf-test", host="http://localhost:3000"
+    )
+    assert len(cbs) == 1
+    assert type(cbs[0]).__name__ == "LangchainCallbackHandler"
+    # 凭据缺失 → 空列表（未启用语义不变，opt-in 铁律）
+    assert get_langfuse_callbacks() == []

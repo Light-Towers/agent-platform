@@ -187,3 +187,18 @@ uv run python scripts/check_doc_sync.py                # 必须通过
 | S3 真 SDK session（R3 补盲） | Makefile `test` 新增 `uv run --extra otel pytest tests/observability -q`（不计入标准 session 计数，仍 9）；新建 `test_tracing_middleware.py`（旁路/父子/三态 5 钉）；`test_otel.py` 环境自适应（autouse reset + 无 SDK 前提用例按 _SDK_AVAILABLE 分支 skip） | 真 SDK session 14 passed；无 SDK 根 session 自动 skip（1 skipped）；check_doc_sync 0 警告 |
 
 本地全套验证（无 SDK 窄层 + 真 SDK 补盲均实跑）：lint 9 条、ruff 全仓、agent-core+runtime+shared-schemas 881 passed、tests/api+observability 25 passed/1 skipped、--extra otel session 14 passed、agent_server 44 passed、federation 146 passed、check_doc_sync 0 警告。
+
+## 12. 实施进度（S4+S5 已落地，2026-09-30）
+
+| 项 | 内容 | 验证证据 |
+|---|---|---|
+| S4 代际契约（§3.4 选项 a） | `agent_runtime.tracing.get_langfuse_callbacks` 签名不变，内部迁 v3+/v4：凭据进 `Langfuse()` 客户端构造 + `langfuse.langchain.CallbackHandler(public_key=)` 绑定（langfuse 4.14.4 实探签名：handler 不再收 secret_key/host，旧 v2 写法真装必 TypeError）；exhibition `llm_obs.py` 同步迁 `langfuse.langchain`（无参 env 驱动形态不变） | 新钉用例 `test_get_langfuse_callbacks_real_import_path`（未装自动 skip）；`uv run --extra otel --with langfuse pytest packages/agent-runtime/tests` **608 passed**（方案 §6-6 组合首次可测）；默认 session 607 passed/2 skipped |
+| S4 伴随修复（实跑揭出的两个存量缺陷） | ① `test_tracing.py` 两用例模拟点 `sys.modules["langfuse.callback"]` 随 import 面切 `langfuse.langchain`（旧模拟点钉 v2 路径，真装环境下前提失效非断言放宽）；② exhibition `test_server.py` traceparent 守卫用例 `InMemorySpanExporter` 错误导入路径修正（venv 装了 otel extras 后 skip 遮蔽消失暴露；同 S2 钉用例踩过的同一坑） | 修复前后失败链定性存档；exhibition **344 passed**（含 SDK 环境下 traceparent 回归守卫实跑通过） |
+| S4 L-4 扩展 | exhibition pyproject 新增 `[langfuse] >=4.0.0` extras（此前无任何声明位）；L-4 作位增至 6 处 | lint 9 条全过（含 exhibition）；`uv lock` RC=0 无回溯 |
+| S5 GIT_REV 绑定（R14/126 假同步根治） | Dockerfile 新增 `ARG GIT_REV` + OCI revision label + `/srv/agent-platform/GIT_REV` 文件（置于依赖层之后防缓存失效）；注释中「Langfuse 不可共存」叙事更新为 S4 已终结；`build.sh <rev>` 构建源 HEAD 不匹配即 exit 2 拒绝构建 + 镜像内回读校验 | `bash -n` 六脚本语法全过（Git Bash） |
+| S5 六件套入库（R16） | `deploy/k8s/scripts/`：build/distribute/jaeger/portforward/e2e_traceparent/verify（本轮 16 个 scratch `_*.sh` 等价固化），每个头部自带用法/成功判据/退出码；README 增「可复跑取证」节（六件套表 + 典型复跑序列 + OTel env） | 语法检查 RC=0；与 VERIFICATION 现场形态对齐（隔离 containerd sock、IfNotPresent+rollout restart、sleep≥8 flush、唯一 query 绕缓存） |
+| S5 playbook 远程演练节 | `testing-playbook.md` 新增 §5：短命令+脚本承载、LF 行尾（.gitattributes 已强制）、落地验证不凭 RC、PowerShell 假阳性定性套路、验证对象绑定提交、共用机纪律 | 文档落位；check_doc_sync 0 警告 |
+
+本地全套验证：lint 9 条、ruff 全仓、根 700 passed/26 skipped、core+schemas 273 passed、agent_server 44、agent-runtime 默认 607/2s + otel+langfuse 组合 608、exhibition 344、check_doc_sync 0 警告。
+
+**未完成（收口前剩）**：R6 真集群端到端复验（可直接走 `deploy/k8s/scripts/` 六件套序列：同步 126 → build.sh <rev> → distribute → e2e_traceparent.sh → 关 VERIFICATION L141 勘误注；本地层面父子一致已由 tests/observability 钉住）；S2 尾项（ks 迁工厂+开中间件、流式父链、各 app lifespan）；门面退役（otel.py 本体+L-3 白名单行）；集群 kubeadm reset 待用户确认。
