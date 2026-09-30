@@ -67,8 +67,31 @@
 | faithfulness | κ=0.339 · ρ=0.275 |
 | correctness | κ=0.097 · ρ=0.101 |
 
-**决策 = `self`（判据未收敛 → 回退路径 2 补人工）**。三分支里只有「未收敛」能触发：因为只有 1 个外部候选，「外部↔外部」对为 n/a，「self 离群→采纳外部」这条规则**结构上无法触发**。
+**本轮实验的直接结论**：本轮验证 Self Judge 与 RAGAS Judge 在 faithfulness/correctness 上存在较低一致性（κ=0.34/0.10）；但由于缺乏**独立于两者的 Ground Truth**（下文「自举偏差声明」），无法判断哪一个更接近真实质量。与此同时，Self Judge 在**零额外依赖、逐维理由可解释性、成本控制**三方面更符合当前工程约束，因此**暂维持 Self Judge 方案**。三分支里只有「未收敛」能触发：因为只有 1 个外部候选，「外部↔外部」对为 n/a，「self 离群→采纳外部」这条规则**结构上无法触发**。
 
-**诚实边界（勿误读）**：κ 低 ≠ self judge 错。self 是 0/1/2 rubric、RAGAS AnswerCorrectness 是 claim-F1（且 weights=[1,0] 关 embedding），两者语义不同构；连续分再分箱到 0/1/2 损失分辨率，correctness κ=0.097 多为分箱错位。**结论是方法论级的**：路径 3（AI 交叉代理指标）不足以在无人工金标准时对 self vs RAGAS 做可信裁决——这正是当初选定路径 3 时预告的固有边界。产物见 `applications/knowledge-service/eval/judge_selection.md`（纯聚合、无语料明文，可入库）。
+**诚实边界（勿误读）**：
 
-**Stage 3 处置**：走「保 self」——维持自研 judge（零依赖、可解释），c2 关闭；不再折腾人工标注（路径 2 需用户实标 30 条）或引入第二框架（路径 C，用户已排除）。
+- κ 低 ≠ self judge 错。self 是 0/1/2 rubric、RAGAS AnswerCorrectness 是 claim-F1（weights=[1,0] 关 embedding），两者语义不同构；连续分再分箱到 0/1/2 损失分辨率，correctness κ=0.097 多为分箱错位。
+- **Agreement ≠ Accuracy**。本轮量化的是「两个评价器行为是否一致」，不是「哪个更接近真实质量」。前者已完成（结论：不一致），后者需独立 GT。
+- **GT 不必然 = 人工**。可用渠道至少四种：① 程序/规则（可抽 slot 子集）、② 权威数据源（如 exhibition-agent warehouse DB）、③ 人工专家标注、④ 多专家仲裁。本轮一个都未接入，因此无法给出选型定论。
+- 产物见 `applications/knowledge-service/eval/judge_selection.md`（脚本自动产出，纯聚合、无语料明文，可入库）。
+
+## 自举偏差声明（本 spike 的固有局限）
+
+本轮数据集的 `reference` 字段由 `gen_golden.py`（LLM 自举）生成，无独立权威背书。这构成两个层面的风险，**均需诚实声明而非当作已解决**：
+
+1. **锚自身可信度存疑**：若 `gen_golden.py` 对某条 query 给出了错误的 reference，self judge 与 RAGAS 会同时以同一错锚为参考 → 两方的 κ 上限被锤到锚自身质量，**高一致 ≠ 高准确**（共享同一种错误），**低一致 也不代表其中某方对**（它们可能在错锚周围各自抽射不同方向）。
+2. **循环验证风险**：同一个 LLM 网关既产生 reference（写）、又当 self judge 打分（读）→ “AI 生成标准 + AI 验证标准”的环。RAGAS 虽用不同算法，但同网关同模型（Qwen2.5-7B-Instruct）→ 共享训练数据先验、共享 prompt 偏置、共享 reference→“不同”不一定“独立”。
+
+**影响面**：本声明适用于本轮所有 κ 结果。即使后续跑人工标注（路径 2），若人工直接以同一 `gen_golden` reference 为据判断，仍受同一偏差支配。若要消除，需**至少**对 30 条抽样中的 reference 做一层独立校验（专家确认 / DB 查 / 程序抽 slot）。
+
+**不消除 ≠ 本轮无效**。本轮回答的是“评价器行为一致性”，该问题本身不依赖 GT（一致性直接可测）；未回答的是“哪个评价器更接近真实质量”，该问题需独立 GT。两个问题不混。
+
+## Stage 3 处置与后续分层
+
+本轮 c2 到此**关闭选型议题**（无选型信号、工程约束满足 self）。以下后续不属于 c2 范围，归入 benchmark 化的分层后续，待用户另行推动：
+
+- **短期（若用户想真拿定论）**：走路径 2——标注页（commit `1aea73e`）已就绪，用户人工标 30 条后跑 `--adjudication`，得 `self vs human κ` 与 `ragas vs human κ`。需先对 reference 做独立确认（避免同一偏差）。
+- **中期**：给 `scorers.py` 加 `ProgrammaticScorer`，对可抽 slot 子集（日期/枚举/数字）给确定性 gold，作为第二层交叉核验。
+- **长期（对齐分层）**：将 `judge_vs_human` / `judge_vs_program` / `judge_vs_db` 三张校准表显式建入 eval 架构，回答“哪个 judge 在哪个子集上可信”。检索层已分拆（`make_baseline.py` 已含 recall/mrr/ndcg，不依 LLM judge），本层仅针对 Generation 层。
+
