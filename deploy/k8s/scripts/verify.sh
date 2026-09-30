@@ -18,7 +18,8 @@ FAIL=0
 
 echo "== L0 nodes =="
 kubectl get nodes --no-headers | awk '{print $1, $2, $5}'
-NOT_READY=$(kubectl get nodes --no-headers --field-selector=status!Ready 2>/dev/null | wc -l)
+# nodes 不支持 field-selector（服务端报 field label not supported），按 STATUS 列判非 Ready（含 NotReady/SchedulingDisabled 等）
+NOT_READY=$(kubectl get nodes --no-headers | awk '$2!="Ready"' | wc -l)
 [ "$NOT_READY" -eq 0 ] || { echo "FAIL: $NOT_READY 个节点未 Ready"; FAIL=1; }
 
 echo "== L1 workload =="
