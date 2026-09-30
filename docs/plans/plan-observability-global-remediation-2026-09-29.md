@@ -1,6 +1,6 @@
 # 观测链路全局治理方案（复盘驱动，2026-09-29）
 
-> 状态：**方案（待确认，未动产品码）**。触发源：2026-09-29「观测链路补证（OTel/Jaeger + 真实 LLM + 端到端取证）」演练。
+> 状态：**已实施（代码面全收口，2026-09-30）**。commit 链：S0+S1 `585b1de` → S2+S3 `446dc35` → S4+S5 `a5fa903` → v6 迁移修复 `30cbf25` → R6 闭环 `3446013` → S2 尾项 `b3c5c97` → 门面退役 `e086483` → 清理登记 `2845d3f` → 收口决策（本 §16）。触发源：2026-09-29「观测链路补证（OTel/Jaeger + 真实 LLM + 端到端取证）」演练。
 > 原则（AGENTS.md 横切关注点全局优先）：三层齐备——单一实现（kernel）/ 全局装配（构造保证不可漏接）/ 强制门禁（lint 入 CI）。缺一层须说明理由。
 > 纪律：本方案不放宽断言、不删用例、不用注释掩盖根因；凭据只进 Secret/.env。
 
@@ -201,7 +201,7 @@ uv run python scripts/check_doc_sync.py                # 必须通过
 
 本地全套验证：lint 9 条、ruff 全仓、根 700 passed/26 skipped、core+schemas 273 passed、agent_server 44、agent-runtime 默认 607/2s + otel+langfuse 组合 608、exhibition 344、check_doc_sync 0 警告。
 
-**未完成（收口前剩）**：~~R6 真集群端到端复验~~（✅ 2026-09-30 闭环，见 §13）；~~S2 尾项~~（✅ 2026-09-30 落地，见 §14）；~~门面退役~~（otel.py 本体+L-3 白名单行）（✅ 2026-09-30 落地，见 §15）；集群 kubeadm reset 待用户确认。
+**未完成（收口前剩）**：~~R6 真集群端到端复验~~（✅ 2026-09-30 闭环，见 §13）；~~S2 尾项~~（✅ 2026-09-30 落地，见 §14）；~~门面退役~~（otel.py 本体+L-3 白名单行）（✅ 2026-09-30 落地，见 §15）；~~集群 kubeadm reset~~（✅ 用户决定保留集群，见 §16）。
 
 ## 13. 实施进度（R6 真集群端到端复验已闭环，2026-09-30）
 
@@ -237,4 +237,9 @@ L-2 白名单清零后，按 §3.1 既定退役路径删除 `agent_runtime/otel.
 | 门禁同步收窄 | lint L-3：`_INIT_PATTERN` 去 `init_otel`、`_INIT_WHITELIST` 摘除 runtime otel 行（exhibition `observability/otel.py` 为 app 级合法装配薄封装，保留）；L-4：`_OTEL_EXTRAS_SITES` 摘除 runtime `[otel]` 死声明；runtime pyproject 删 `[otel]` extras + ruff 豁免 | lint 9 条全绿（L-3/L-4 收窄后仍过）；uv lock 311 包无回溯 |
 | 全仓引用同步 | root pyproject `[otel]` / kernel tracing.py 注释门面表述更新；README OTel 条目改指 kernel（otel.py 已退役）；check_doc_sync 不扫 README，已人工同步 | ruff 全仓、check_doc_sync 0 警告；ks 399/7s、federation 146、exhibition 344、kefu+nl2sql+schemas 89 |
 
-至此本方案代码面收口全完成；另 126 远端 R6 演练临时文件已清理并只读复核归零（见 VERIFICATION.md §E）。唯余集群 kubeadm reset（§9 与本方案解耦，待用户二次确认）。
+至此本方案代码面收口全完成；另 126 远端 R6 演练临时文件已清理并只读复核归零（见 VERIFICATION.md §E）。集群处置见 §16。
+
+## 16. 收口决策（2026-09-30 用户确认）
+
+- **kubeadm reset：不执行，保留集群**。原 §9 将其列为与本方案解耦的待确认项；现场核实三节点全 Ready、`agent-platform` pod Running 4h31m、postgres Running 23h——集群仍是可用的端到端复验/HA 演练环境，reset 后需重建整套（init+join+flannel+镜像分发）且 postgres 数据不可恢复，收益不匹代价。
+- **同期观察（不属本方案缺陷）**：`kube-controller-manager`/`kube-scheduler` 各重启 18/19 次，`crictl logs` 取真因为 leader-election 续租超时（对 6443 的 lease PUT 超 5s 未完成即主动退出），非内存不足（available 12.6G）；当前 kubectl 往返 87ms、load 0.18，apiserver/etcd 零重启——属前期重活（镜像构建/分发 + HA 驱逐演练）期间的控制面瞬时延迟尖峰，非持续故障。后续如需根治转集群侧独立议题（提高 `--leader-elect-renew-deadline` 或降低该机上的并发负载），不在观测方案范围内。
