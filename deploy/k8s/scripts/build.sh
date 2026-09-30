@@ -31,5 +31,6 @@ EMBEDDED="$(docker run --rm "$IMAGE" cat /srv/agent-platform/GIT_REV)"
 if [ "$EMBEDDED" != "$ACTUAL_REV" ]; then
   echo "FAIL: 镜像内 GIT_REV=$EMBEDDED != $ACTUAL_REV"; exit 1
 fi
-docker inspect -f 'revision label: {{.Config.Labels.org.opencontainers.image.revision}}' "$IMAGE"
+# 注：Labels 是 map 且 key 含点，docker 模板必须用 index，直写 .Labels.org.xxx 会解出 <no value>
+docker inspect -f 'revision label: {{ index .Config.Labels "org.opencontainers.image.revision" }}' "$IMAGE"
 echo "OK: built $IMAGE @ $ACTUAL_REV (dirty=${DIRTY:+yes}${DIRTY:-no})"
