@@ -247,7 +247,7 @@ kubectl delete namespace agent-platform
 3. **业务属性落在 B 的子 span 而非请求 span**：`question_hash`/`question_length`/`request_id`/`thread_id` 全部出现在 `fastapi.endpoint`（B 的子）上，两条请求 span 自身均无业务属性；语义未丢但拓扑错位。
 4. **探针淹没**：limit=1500 的窗口内 `GET /health` 占 1496 条，真实 `/query` 仅 8 条——取证须按 operation 精查，否则拉不到目标样本。
 
-处置：**不在本演练内改代码**（AGENTS.md「先方案后编码」+ 影响对外观测拓扑）。已登记为观测方案 §18 R19，待消费者审计后定方案（候选：工厂内 `telemetry={"tracing": False}` 关原生 / 改用原生而退役我们的中间件 / 保留双层但去重+健忘 health）。
+处置：**不在本演练内改代码**（AGENTS.md「先方案后编码」+ 影响对外观测拓扑）。已登记为观测方案 §18 R19，并于 2026-09-30 按用户决策转独立 issue **[#23](https://github.com/Light-Towers/agent-platform/issues/23)**（label `bug`，含 4 条已验证事实 + 5 条验收标准）后续单独处理，默认取最小改动方案（工厂内 `telemetry={"tracing": False}` 关原生 + lint 门禁）；候选另两项（改用原生而退役我们的中间件 / 保留双层但去重 + 排除 health 降噪）见 §18 表。
 
 ## D. 取证脚本知识修正（本轮踩出，未入库代码只记经验）
 

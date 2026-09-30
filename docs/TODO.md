@@ -73,6 +73,7 @@
 - [ ] `ExecutionContext` 是否迁移到 PyJWT + 标准 JWT（契约变更，需先审计下游消费者）
 - [ ] Milvus 与 pgvector 双向量库长期是否统一（当前 knowledge-service 用 Milvus，agent-core/agent-runtime 默认 pgvector，见 P1-6 双库现状说明）
 - [ ] U-1：`QueryRequest` 入站字段名（`query`/`question`、`session_id`/`thread_id`）双写兼容层能否移除（见 `README.md`「已知待拍板项（技术债）」）
+- [ ] R19（GitHub issue #23）：FastAPI ≥ 0.142 **原生 telemetry 默认开启**，与 kernel `TracingMiddleware` 对同一请求各建一个同名 SERVER span（互为兄弟），且框架自行 `trace.set_tracer_provider()`——属本仓「第二状态机/双实现」反模式在框架层重现。默认取最小改动：`build_api_app` 内 `FastAPI(telemetry={"tracing": False})` + `scripts/lint_architecture.py` 新增门禁（裸 `FastAPI(` 未关 telemetry 即 CI 失败）；动工前需确认框架无其它自配 provider 残留路径，并做真集群端到端复验（见 `docs/plans/plan-observability-global-remediation-2026-09-29.md` §18）
 
 ## 7. 检索 / 存储增强
 
