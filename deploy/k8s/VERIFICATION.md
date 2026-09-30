@@ -211,5 +211,5 @@ kubectl delete namespace agent-platform
 
 - 126 脏改动备份（历史）：`/tmp/r6-dirty-{inventory,backup}-20260930-0947.{txt,patch}`、`/tmp/r6-dirty-backup-20260930-1100.patch`；verify 证据块 `/tmp/r6_verify.log`。**已于 2026-09-30 门面退役收尾时全部清理**：对应改动均已入库（b3c5c97 / e086483），bundle 与备份 patch 无保留价值；清理走 scp+sh 脚本通道逐项删除并独立只读复核，`/tmp` `/root` 两目录 r6 相关残留计数为 0。
 - 本次后集群运行对象：镜像 `ab5fe54b6860` @ `30cbf25`，pod 内一次性验证残留（/tmp/r6_dep_check.py、/tmp/ha、pip --user pytest）随 pod 重启自然消失。
-- 集群 kubeadm reset：未执行（destructive，与本方案解耦，仍待用户二次确认）。
+- 集群 kubeadm reset：**不执行（用户 2026-09-30 确认保留集群）**——三节点全 Ready、业务 pod 正常 Running，仍为可用的端到端复验环境；详见观测方案 §16（含 controller-manager 重启真因：leader-election 续租超时，非持续故障）。
 
