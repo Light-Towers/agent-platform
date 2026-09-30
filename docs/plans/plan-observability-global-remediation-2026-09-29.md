@@ -1,6 +1,6 @@
 # 观测链路全局治理方案（复盘驱动，2026-09-29）
 
-> 状态：**已实施（代码面全收口，2026-09-30）**。commit 链：S0+S1 `585b1de` → S2+S3 `446dc35` → S4+S5 `a5fa903` → v6 迁移修复 `30cbf25` → R6 闭环 `3446013` → S2 尾项 `b3c5c97` → 门面退役 `e086483` → 清理登记 `2845d3f` → 收口决策（本 §16）。触发源：2026-09-29「观测链路补证（OTel/Jaeger + 真实 LLM + 端到端取证）」演练。
+> 状态：**已实施（代码面全收口 + 真集群端到端复验闭环，2026-09-30）**。commit 链：S0+S1 `585b1de` → S2+S3 `446dc35` → S4+S5 `a5fa903` → v6 迁移修复 `30cbf25` → R6 闭环 `3446013` → S2 尾项 `b3c5c97` → 门面退役 `e086483` → 清理登记 `2845d3f` → 收口决策 `626ec17`（并于第四次演练后补登 §17/§18）。**唯一开放项：R19 待决策（§18）**。触发源：2026-09-29「观测链路补证（OTel/Jaeger + 真实 LLM + 端到端取证）」演练。
 > 原则（AGENTS.md 横切关注点全局优先）：三层齐备——单一实现（kernel）/ 全局装配（构造保证不可漏接）/ 强制门禁（lint 入 CI）。缺一层须说明理由。
 > 纪律：本方案不放宽断言、不删用例、不用注释掩盖根因；凭据只进 Secret/.env。
 
@@ -29,6 +29,7 @@
 | R15 | 镜像分发链路手工且隐性要求多 | save→gzip→scp→`ctr --address /run/containerd-k8s/... import` 三台 + `IfNotPresent` 同 tag 必须 `rollout restart` 才换镜像；无固化脚本、无成功判据，全靠会话内临场 | 任何"改了 Dockerfile/包重验证"的流程都走这条链，下次仍会漏步 | 流程卡点 | 本轮暴露 |
 | R16 | Windows PowerShell/sandbox 操作卡点 | 长合并命令触发 base64 EncodedCommand 回显风暴且 scp 静默未落地（本轮实际发生，靠远端 grep 才发现）；嵌套引号必坏；CRLF；port-forward 内联起不来 | 远程演练类任务通用；已有对策（脚本化+sed 去 CRLF+落地校验）未入库 | 流程卡点 | 本轮暴露 |
 | R17 | 文档口径失真 | ARCHITECTURE.md 包职责表只列 agent-core tracing，agent-runtime 的 `otel.py/tracing.py` 双实现无记载；AGENTS.md "agent-core 零依赖运行时内核：tracing…" 与 "agent-runtime … tracing/cache" 表述并存但未说明关系与状态机边界；cca9223 VERIFICATION"保留 W3C 父链接"表述因 R6 不成立 | 读文档的人/agent 会按失真口径决策 | 文档失真 | 长期潜伏+本轮新增 |
+| R19 | **FastAPI 原生 telemetry 与 kernel TracingMiddleware 重复埋点（第四次演练定性）** | FastAPI 0.142 自带 `fastapi/telemetry/`（**默认开启**，`FastAPI(telemetry={"tracing": False})` 可关），镜像内无任何 instrumentation 包却产出 `fastapi.dependencies`/`fastapi.endpoint`/新版 semconv `POST /query` span；与我们的 `agent_core.tracing_middleware`（旧版 semconv `http.method`/`http.target`）各建一个同名 SERVER span，**两者均直接提取入站 traceparent 作父→互为兄弟而非嵌套**；且 `fastapi/telemetry/_runtime.py:162` 自己调 `trace.set_tracer_provider()` 并从 `OTEL_*` 标准 env 自配 OTLP exporter | 每条请求 span 量翻倍；业务属性（question_hash/request_id/thread_id）落在 `fastapi.endpoint` 子 span 而非请求 span；`GET /health` 探针淹没真实样本（采样窗口 1496:8）；框架自设 provider = 第二状态机入口（R6/R12 反模式在框架层重现） | 架构缺陷（依赖框架演进引入） | **既存非回归**：旧镜像 `30cbf25`（门面在）历史 trace `025d50100af8b208` 同为 2 条；上轮已写下"两条 span"但未追因，第四次演练才定性 |
 
 **分类汇总**：产品码缺陷 R4/R5(码面)/R8/R11；架构缺陷 R3/R6/R7/R9/R10/R12/R13；依赖契约 R1/R2；流程卡点 R14/R15/R16；文档失真 R14(半)/R17。
 **"修复前从未真正生效"清单**：R4（OTel init）、R6（traceparent 透传）、R1（agent_server/exhibition 的 Langfuse callbacks）、R7（NoOp 态测试全绿≠真实现可用）。
@@ -201,7 +202,7 @@ uv run python scripts/check_doc_sync.py                # 必须通过
 
 本地全套验证：lint 9 条、ruff 全仓、根 700 passed/26 skipped、core+schemas 273 passed、agent_server 44、agent-runtime 默认 607/2s + otel+langfuse 组合 608、exhibition 344、check_doc_sync 0 警告。
 
-**未完成（收口前剩）**：~~R6 真集群端到端复验~~（✅ 2026-09-30 闭环，见 §13）；~~S2 尾项~~（✅ 2026-09-30 落地，见 §14）；~~门面退役~~（otel.py 本体+L-3 白名单行）（✅ 2026-09-30 落地，见 §15）；~~集群 kubeadm reset~~（✅ 用户决定保留集群，见 §16）。
+**未完成（收口前剩）**：~~R6 真集群端到端复验~~（✅ 2026-09-30 闭环，见 §13）；~~S2 尾项~~（✅ 2026-09-30 落地，见 §14）；~~门面退役~~（otel.py 本体+L-3 白名单行）（✅ 2026-09-30 落地，见 §15）；~~集群 kubeadm reset~~（✅ 用户决定保留集群，见 §16）；~~门面退役后端到端复验~~（✅ 2026-09-30 第四次演练闭环，见 §17）；**R19 FastAPI 原生 telemetry 重复埋点（新登记，待决策，见 §18）**。
 
 ## 13. 实施进度（R6 真集群端到端复验已闭环，2026-09-30）
 
@@ -243,3 +244,30 @@ L-2 白名单清零后，按 §3.1 既定退役路径删除 `agent_runtime/otel.
 
 - **kubeadm reset：不执行，保留集群**。原 §9 将其列为与本方案解耦的待确认项；现场核实三节点全 Ready、`agent-platform` pod Running 4h31m、postgres Running 23h——集群仍是可用的端到端复验/HA 演练环境，reset 后需重建整套（init+join+flannel+镜像分发）且 postgres 数据不可恢复，收益不匹代价。
 - **同期观察（不属本方案缺陷）**：`kube-controller-manager`/`kube-scheduler` 各重启 18/19 次，`crictl logs` 取真因为 leader-election 续租超时（对 6443 的 lease PUT 超 5s 未完成即主动退出），非内存不足（available 12.6G）；当前 kubectl 往返 87ms、load 0.18，apiserver/etcd 零重启——属前期重活（镜像构建/分发 + HA 驱逐演练）期间的控制面瞬时延迟尖峰，非持续故障。后续如需根治转集群侧独立议题（提高 `--leader-elect-renew-deadline` 或降低该机上的并发负载），不在观测方案范围内。
+
+## 17. 实施进度（门面退役后真集群端到端复验已闭环，2026-09-30 第四次演练）
+
+门面退役改的是「消费方如何拿到 kernel」，本地分层回归（含真 SDK 的 `--extra otel` session）无法证明真集群 + Jaeger 链路仍串，故将镜像重建到 `626ec17` 端到端复跑（全证据块见 `deploy/k8s/VERIFICATION.md` 第四次演练章）：
+
+| 项 | 内容 | 验证证据 |
+|---|---|---|
+| 同步→构建→分发 | bundle `30cbf25..626ec17`（MD5 双端 `b3772d26…`）→ `build.sh` rev 门禁 → `distribute.sh` 两 worker → rollout | 镜像 `f37bcdb1ed7a` @ `626ec17…` dirty=no；pod `5cd47d7c9b-ldhqn` Running 0 重启 |
+| 退役面确实进入运行制品 | 不拿本地工作树嘴述，进 pod 查 | `cat /srv/agent-platform/GIT_REV` = `626ec17…`；`ls packages/agent-runtime/agent_runtime/ \| grep -c otel.py` = **0** |
+| 关键回归信号 | `otel_status` 现在完全出自 kernel 单一状态机（不再经门面映射） | `/health` = `"otel":true,"otel_status":"ACTIVE"`；`verify.sh 626ec17…` 四层 RC=0 |
+| R6 父子硬判据 | 逐 span 解析 Jaeger API | trace `025d51b88e78f37d` 去重 traceID = 1，两条 `POST /query` 的 CHILD_OF 引用均 = 客户端 `0123456789abcdef` → **父链贯通，门面退役未造成回归 ✅** |
+| 本地收口门禁 | 补跑 golden 评测 | `eval/run_eval.py` 启发式路由 **15/15 = 100%** |
+| 环境收尾 | port-forward 停 + 三台临时产物清零 | 宽口径复核（`otel|e2e|distrib|build|tar.gz|evalsync|dirty`）126/125/241 计数均 **0**（本轮 5 项 + 历史 ad-hoc 19 项）；集群保留可用，详见 VERIFICATION 第四次演练 §E |
+
+## 18. R19 待决策（本方案唯一遗留开放项）
+
+第四次演练定性出 R19（见 §1 表）：**FastAPI 0.142 原生 telemetry 默认开启，与 kernel `TracingMiddleware` 构成重复埋点，并自行 `set_tracer_provider`**。这不是门面退役引入的（旧镜像同为双 span），但它是本方案「单一实现」原则的下一个对手：同一个关切（入站请求 tracing）现在有两个实现，且第二个来自框架默认行为，不拦截就会持续存在。
+
+**候选方案（均需先做消费者审计，不得静默切）**：
+
+| 方案 | 内容 | 优 | 劣 / 前置审计项 |
+|---|---|---|---|
+| A. 关原生留 kernel（倾向） | `build_api_app` 里 `FastAPI(telemetry={"tracing": False})`（或等价 env），单一实现仍为 kernel | 保住三态门控/R10 旁路覆盖/脱敏属性语义与 lint 可约束性；改动面最小（一个工厂参数） | 需确认框架是否另有自配 provider 残留路径；与「能用成熟框架优先」相左，需写明理由 |
+| B. 采原生退役自有中间件 | 删 `TracingMiddleware`，业务属性经 `current_span()` 写原生 span | 跟随框架 semconv、少维护一份代码 | **框架自设 provider = 第二状态机（直接踩 R6/R12 红线）**；`OTEL_*` 标准 env 与现有 `OTEL_ENDPOINT` 自定义字段需对齐；未 init 零开销铁律与三态可诊断性丢失；需证明 429/409/cache_hit 旁路仍有 span |
+| C. 双层共存但去重+降噪 | 中间件不再建 span（只注属性），并排除 health 路径 | 保留框架 semconv | 两个实现共存的口径靠约定维持（缺门禁层，按 AGENTS.md「缺一层即退化为约定」不该选） |
+
+**建议**：先做 A（单一实现+最小面），并把「禁止裸 `FastAPI(` 而不开 `telemetry=False`」纳入 lint 门禁三层齐备；B 需单独消费者审计 + 环境变量契约变更评估后另立项。本项开启前，本方案代码面已收口（§15/§16），**不得声称 R19 已修**。
