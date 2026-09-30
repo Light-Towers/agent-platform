@@ -237,4 +237,4 @@ L-2 白名单清零后，按 §3.1 既定退役路径删除 `agent_runtime/otel.
 | 门禁同步收窄 | lint L-3：`_INIT_PATTERN` 去 `init_otel`、`_INIT_WHITELIST` 摘除 runtime otel 行（exhibition `observability/otel.py` 为 app 级合法装配薄封装，保留）；L-4：`_OTEL_EXTRAS_SITES` 摘除 runtime `[otel]` 死声明；runtime pyproject 删 `[otel]` extras + ruff 豁免 | lint 9 条全绿（L-3/L-4 收窄后仍过）；uv lock 311 包无回溯 |
 | 全仓引用同步 | root pyproject `[otel]` / kernel tracing.py 注释门面表述更新；README OTel 条目改指 kernel（otel.py 已退役）；check_doc_sync 不扫 README，已人工同步 | ruff 全仓、check_doc_sync 0 警告；ks 399/7s、federation 146、exhibition 344、kefu+nl2sql+schemas 89 |
 
-至此本方案代码面收口全完成；唯余集群 kubeadm reset（§9 与本方案解耦，待用户二次确认）。
+至此本方案代码面收口全完成；另 126 远端 R6 演练临时文件已清理并只读复核归零（见 VERIFICATION.md §E）。唯余集群 kubeadm reset（§9 与本方案解耦，待用户二次确认）。
