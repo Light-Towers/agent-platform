@@ -1,7 +1,7 @@
 # Dependabot 21 项告警收口方案（2026-09-30）
 
 > 触发：门面退役推送后 GitHub 在 push 输出提示「21 vulnerabilities on default branch（4 critical / 11 high / 6 moderate）」。用户要求「将这 21 个漏洞修复掉」。
-> 本文是**方案**（AGENTS.md 红线：改动前先出方案），含取证证据、分类、候选处置、验证边界与回退。**尚未改动任何代码/依赖，也未 dismiss 任何告警。**
+> 本文是**方案 + 实施记录**（AGENTS.md 红线：改动前先出方案）。§0-§7 为取证与方案，§8-§10 为实施与验证结果（分支 `fix/dependabot-eval-transitive`，PR #24）。
 
 ## 0. 一页结论
 
@@ -171,7 +171,42 @@ uv run pytest -q（根 session）         → 622 passed, 17 skipped in 95.94s
 - L3（`make eval-rag` 端到端出数）：需 pgvector + 真实 embedding/rerank 服务，本机与 126 均不具备完整条件 → **未验证**，不写「通过」。
 - L4（告警侧）：见 §9 收口回报。
 
-## 9. 收口回报（实施后如实状态）
+## 9. 收口回报（2026-09-30 实拉状态）
 
-（实施完成后填写：剩余 open 告警数、乙类等待 Dependabot 重扫的窗口、甲类 dismiss 记录。）
+**甲类 14 项已 dismiss**（`dismissed_reason=not_used`，逐条附 ≤280 字符证据注释），执行前用守卫确认「只 dismiss `manifest_path` 不在 main tree 的告警」（tree `entries=1102`、`truncated=false`；若 manifest 仍存在于 tree 则脚本直接拒绝）：
+
+```
+#1 asyncmy critical | #2 anyio medium | #3 anyio critical   ← courses/zhanggui-wenda/data-agent/uv.lock
+#9 asyncmy critical | #10 anyio medium | #11 anyio critical ← zhanggui-wenda/data-agent/uv.lock
+#12 #16 #17 mcp high | #13 transformers medium | #14 #15 #18 transformers high
+#19 accelerate medium                                      ← zhanggui-zhiku/uv.lock
+→ 全部 state=dismissed reason=not_used dismissed_by=Light-Towers
+```
+
+**实拉剩余 open（`?state=open`）**：
+
+```
+OPEN_TOTAL=7
+  fschat  high x4 + medium x2   manifest=uv.lock
+  nltk    high x1               manifest=uv.lock
+按严重度：{high: 5, medium: 2}   （critical 0）
+```
+
+即 21 → 7：**critical 全部清除**（4 项均为甲类孤儿告警），high 11→5、moderate 6→2。
+
+**为何不是 0**：这 7 项的修复在 PR #24（`fix/dependabot-eval-transitive` → main），**必须等到合并进 main 且 Dependabot 重扫（weekly，`directory: "/"`）才会翻为 fixed**。在未合并、未重扫前声称「21 项已清零」即为伪报。合并与重扫后的复核动作：`gh api "/repos/Light-Towers/agent-platform/dependabot/alerts?state=open" --jq length` 应为 0。
+
+### 9.1 GitHub API 实操坑（写入以免下次重走）
+
+- dismiss 的键名是 **`dismissed_reason` / `dismissed_comment`**，不是 REST 文档常见引用的 `dismissal_*`；传错得 `HTTP 422 "… are not permitted keys"`。
+- `dismissed_comment` **上限 280 字符**，超长得 `HTTP 422 Only 280 characters are allowed`（此次先试长文本失败后改写为短版）。
+- 方法为 `PATCH /repos/{o}/{r}/dependabot/alerts/{n}`，body `{state:"dismissed", dismissed_reason:"not_used", dismissed_comment:"…"}`。
+- Windows PowerShell 5.1 传 `gh api --jq '…"…"…'` 会把内嵌双引号吞掉（jq 报 `unexpected token "\\"`）；需带引号的 jq 表达式改用 Python `subprocess` 直调 `gh` 传 argv。
+
+## 10. 本任务遗留
+
+1. PR #24 待人工确认合并（本仓约定：合并动作等最终确认）。
+2. 合并后等 Dependabot 重扫，按 §9 命令复核应为 0；若仍有 open，重新取证而非直接 dismiss。
+3. L3（`make eval-rag` 端到端出数）在本机与 126 均无完整条件，**未验证**；若后续要声明「评测链路因 override 而回归」需先补环。
+
 
