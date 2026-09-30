@@ -201,7 +201,7 @@ uv run python scripts/check_doc_sync.py                # 必须通过
 
 本地全套验证：lint 9 条、ruff 全仓、根 700 passed/26 skipped、core+schemas 273 passed、agent_server 44、agent-runtime 默认 607/2s + otel+langfuse 组合 608、exhibition 344、check_doc_sync 0 警告。
 
-**未完成（收口前剩）**：~~R6 真集群端到端复验~~（✅ 2026-09-30 闭环，见 §13）；S2 尾项（ks 迁工厂+开中间件、流式父链、各 app lifespan）；门面退役（otel.py 本体+L-3 白名单行）；集群 kubeadm reset 待用户确认。
+**未完成（收口前剩）**：~~R6 真集群端到端复验~~（✅ 2026-09-30 闭环，见 §13）；~~S2 尾项~~（✅ 2026-09-30 落地，见 §14）；门面退役（otel.py 本体+L-3 白名单行）；集群 kubeadm reset 待用户确认。
 
 ## 13. 实施进度（R6 真集群端到端复验已闭环，2026-09-30）
 
@@ -213,3 +213,15 @@ uv run python scripts/check_doc_sync.py                # 必须通过
 | 脚本自身缺陷实战修正 | `verify.sh` nodes 不支持 field-selector 致 pipefail 静默中断 → 改 awk 按 STATUS 列判定（上一轮 build/distribute/portforward 修正已入 30cbf25） | 修正后全链重跑 RC=0，各层判据齐全 |
 
 **启示登记**：存量库升级路径是本地/CI 全新库路径的结构性盲区，唯有真集群端到端复验可暴露；取证脚本未经实战不得声称可用（同 R14 精髓：验证对象必须与提交一致且真实跑过）。
+
+## 14. 实施进度（S2 尾项已落地，2026-09-30）
+
+| 项 | 内容 | 验证证据 |
+|---|---|---|
+| ks 迁工厂+开中间件（§3.2） | `main.py` 裸 `FastAPI(` → `build_api_app(enable_tracing=True, install_handlers=False)`（保留 M5 信封 {code,msg,request_id}，P2 D-3 消费者契约不改形状）；`query_router.py` 两处 handler 手写 `use_context(extract_traceparent(...))` 退役——入站提取/请求 span 由 middleware 由构造保证（R8 土壤移除） | lint P2 无白名单外裸 FastAPI（`_FASTAPI_WHITELIST` 摘除 ks main.py，仅剩 exhibition mock fixture）；ks 双环境 399 passed/7 skipped |
+| 流式父链（S0 断链注记的结构性修复） | `TracingMiddleware` 在整条 ASGI await 链外层 attach context，`TestClient`/uvicorn 均于 middleware 内同步 await background → 任务内 `start_span("request.total")` 自动挂请求 span（旧缺陷：handler 内 use_context 退出后 background_task 不继承上下文断链） | 新钉用例 `test_background_task_span_children_of_request_span`（parent span_id + trace_id 双断言）；`--extra otel` 15 passed |
+| lifespan 接 shutdown_tracing（§3.2） | ks/federation/exhibition 三 app 退出段统一 `shutdown_tracing()`（flush+shutdown provider，尾批 span 不丢；未 init 时 no-op）。federation/exhibition 未开 `enable_tracing`（按 §4 兼容顺序逐 app 开启，尾项只点名 ks） | federation 146、exhibition 344、agent_server 44 全绿 |
+| 钉用例 422 定性（实跑揭出的测试自坑） | `/mw-bg` POST 422：本文件开了 `from __future__ import annotations`（注解惰性为字符串）而 `BackgroundTasks` 在 fixture 函数体内局部 import——FastAPI 解 ForwardRef 只用 `handler.__globals__`，pydantic `try_eval_type` 静默失败返未解析串 → 不被识别为注入参降级为必填 query 参。修：三名字提到模块级（importorskip 之后）；产品码 ks query_router 模块级 import 且无 future annotations，不受影响 | standalone 同构复现 422↔200 双验；修复后 15 passed |
+| ks 套件首跑真 SDK 揭出 5 存量失败（非本轮回归，HEAD 基线双验一致） | 根因：kernel `_reset_for_tests()` 只 shutdown 本模块 provider，不重置 OTel API 全局 `_TRACER_PROVIDER/_TRACER_PROVIDER_SET_ONCE`（Once 一次性语义）→ 首用例嵌入全局 provider 后，后续用例拿已 shutdown 的死 provider走"复用"路径，注入 exporter 永拿不到 span。CI 默认 session 无 SDK 该组 skip 从未暴露（skipif 守卫盲区，同 S4 轨迹）。修：测试钩子同步重置 API 全局（仅 `_reset_for_tests` 使用，不触生产路径） | 5→2→0；另 2 个存量契约错位用例对齐 S1 内核抽取后现实（env 回退路径钉住；`_provider` 改取 kernel 本体），断言不放宽只改错位前提 |
+
+本地全套验证：ruff 全仓、lint 9 条、check_doc_sync 0 警告；ks（默认+--extra otel）399/7s、根 455、observability SDK session 15、runtime 607、federation 146、exhibition 344、agent_server 44、kefu 43、nl2sql 18。

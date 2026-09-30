@@ -11,7 +11,10 @@
 2. **traceparent 父子一致（R6）**：入站头 trace-id/span-id 段 == span 的
    trace_id/parent.span_id（跨服务串联的机器可验证据）；
 3. **业务属性经 record_request_attributes 落中间件请求 span**（R8 手写 span 退役后的正规面）;
-4. **三态可查（R5/R11）**：注入 exporter init 后 status=ACTIVE 且 ``is_tracing_enabled()==True``。
+4. **三态可查（R5/R11）**：注入 exporter init 后 status=ACTIVE 且 ``is_tracing_enabled()==True``；
+5. **后台任务父链（S2 尾项/流式父链）**：BackgroundTasks 在 middleware await 链内
+   执行（context 仍 attach），任务内 ``start_span`` 子 span 的 parent == 请求 span——
+   ks 流式分支（S0 时因 background_task 不继承 handler 上下文而断链）的结构性修复证据。
 
 注：本模块 module 级 init 一次（kernel 幂等 + 全局 provider 一次性），span 按
 ``http.target`` 唯一路径过滤断言，避免跨用例串扰。
@@ -27,6 +30,8 @@ pytest.importorskip("opentelemetry.sdk", reason="需真 opentelemetry-sdk（--ex
 from agent_core import tracing as kernel  # noqa: E402
 from agent_core.guardrails.app_factory import build_api_app  # noqa: E402
 from agent_core.tracing import record_request_attributes  # noqa: E402
+from fastapi import BackgroundTasks, HTTPException  # noqa: E402
+from fastapi.testclient import TestClient  # noqa: E402
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import (  # noqa: E402
     InMemorySpanExporter,
 )
@@ -51,9 +56,11 @@ def span_exporter():
 
 @pytest.fixture(scope="module")
 def client(span_exporter):
-    from fastapi import HTTPException
-    from fastapi.testclient import TestClient
-
+    # 注：BackgroundTasks/HTTPException/TestClient 必须模块级 import——本文件开了
+    # ``from __future__ import annotations``（注解惰性为字符串），若在其函数体内局部
+    # import，FastAPI 解析 ForwardRef 只用 handler.__globals__，局部名不可见；
+    # pydantic try_eval_type 静默失败返回未解析 ForwardRef → BackgroundTasks 不被
+    # 识别为注入参降级为必填 query 参 → POST 422（2026-09-30 定性实录）。
     app = build_api_app(enable_tracing=True)
 
     @app.get("/mw-ok")
@@ -69,6 +76,16 @@ def client(span_exporter):
     @app.get("/mw-boom")
     async def mw_boom():
         raise RuntimeError("boom")
+
+    @app.post("/mw-bg")
+    async def mw_bg(background_tasks: BackgroundTasks):
+        # 形态对齐 ks /query 流式分支：handler 早退，重活在后台任务内建 span
+        background_tasks.add_task(_bg_work)
+        return {"ok": True}
+
+    def _bg_work() -> None:
+        with kernel.start_span("request.total", attrs={"biz.bg": "1"}):
+            pass
 
     return TestClient(app, raise_server_exceptions=False)
 
@@ -141,3 +158,19 @@ def test_kernel_tri_state_active(span_exporter):
     status = kernel.get_tracing_status()
     assert status["status"] == "ACTIVE"
     assert status["reason"] == ""
+
+
+def test_background_task_span_children_of_request_span(client, span_exporter):
+    """S2 尾项（流式父链）钉：BackgroundTasks 内 start_span 的 parent == 请求 span。
+
+    ks /query 流式分支同构（S0 记录过：handler 内 use_context 退出后 background_task
+    不继承上下文→断链；现由 middleware 在整条 ASGI await 链外层 attach 结构性修复）。
+    """
+    resp = client.post("/mw-bg")
+    assert resp.status_code == 200
+    spans = span_exporter.get_finished_spans()
+    request_span = next(s for s in spans if s.attributes.get("http.target") == "/mw-bg")
+    bg_span = next(s for s in spans if s.name == "request.total")
+    assert bg_span.parent is not None, "后台任务 span 脱离了请求 span（父链断裂复发）"
+    assert bg_span.parent.span_id == request_span.get_span_context().span_id
+    assert bg_span.get_span_context().trace_id == request_span.get_span_context().trace_id

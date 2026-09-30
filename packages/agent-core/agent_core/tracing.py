@@ -600,7 +600,13 @@ def record_exception(exception: BaseException) -> None:
 
 
 def _reset_for_tests() -> None:
-    """重置模块状态，供单元测试隔离使用（shutdown provider 并清空全部状态）。"""
+    """重置模块状态，供单元测试隔离使用（shutdown provider 并清空全部状态）。
+
+    同步重置 OTel API 全局 provider：``set_tracer_provider`` 为 Once 一次性语义，
+    首个注入 exporter 的用例嵌入全局 provider 后，后续用例 teardown 仅 shutdown
+    不重置全局 → 再 init 走"复用"路径拿到已 shutdown 的死 provider，注入的
+    exporter 永远拿不到 span（2026-09-30 ks 套件首跑真 SDK 定性；CI 默认 session
+    无 SDK 该组用例 skip，从未暴露）。仅测试钩子使用，不触生产路径。"""
     global _initialized, _enabled, _tracer, _provider, _status, _status_reason
     with _state_lock:
         if _provider is not None:
@@ -617,6 +623,12 @@ def _reset_for_tests() -> None:
         _base_attrs.clear()
         _request_id_var.set("")
         _user_query_hash_var.set("")
+    if _SDK_AVAILABLE:  # 锁外重置 API 全局，避免与 init 嵌套取锁
+        try:
+            _otel_trace._TRACER_PROVIDER = None
+            _otel_trace._TRACER_PROVIDER_SET_ONCE = _otel_trace.Once()
+        except Exception:  # pragma: no cover - 防御：属性名随版本变化则跳过
+            pass
 
 
 __all__ = [

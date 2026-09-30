@@ -19,7 +19,7 @@ load_dotenv(find_dotenv())
 
 from agent_core.guardrails.app_factory import build_api_app
 from agent_core.logging import configure_logging, get_logger
-from agent_core.tracing import init_tracing, start_span
+from agent_core.tracing import init_tracing, shutdown_tracing, start_span
 
 # 统一日志配置入口：配置 root + agent_core 子树（agent_core 子树 propagate=False，
 # 消除重复日志；使 agent_runtime.* 等未单独配置的子树正常输出）。级别可经 LOG_LEVEL 覆盖。
@@ -115,6 +115,10 @@ async def lifespan(app: FastAPI):
 
     from agent.tracing.langfuse_adapter import shutdown_langfuse
     shutdown_langfuse()
+
+    # 观测方案 §3.2：lifespan 末尾统一 kernel 退出（flush+shutdown provider，尾批
+    # span 不丢）；未 init/未装 SDK 时 no-op。与 init_tracing 同一单状态机（S1）。
+    shutdown_tracing()
 
     from agent.db import close_pool
 
