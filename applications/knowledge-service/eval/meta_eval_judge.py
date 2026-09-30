@@ -166,6 +166,18 @@ def make_candidate_scorer(candidate: str, llm: Any = None):
 
         return True, _fn
 
+    # ragas：spike 环境已接线（见 eval/score_ragas.py，真实 API 端到端验证）。
+    # 生产未装 ragas → import 失败或 make_score_fn 返 (False, None)，上层标 available False，不伪造。
+    if candidate == "ragas":
+        try:
+            from eval.score_ragas import make_score_fn as _mk_ragas
+        except Exception:  # noqa: BLE001 - adapter 缺失/导入失败 → 诚实不可用
+            return False, None
+        try:
+            return _mk_ragas()
+        except Exception:  # noqa: BLE001
+            return False, None
+
     pkg = CANDIDATE_PACKAGES.get(candidate)
     try:
         importlib.metadata.version(pkg or candidate)
