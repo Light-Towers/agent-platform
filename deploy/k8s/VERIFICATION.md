@@ -207,9 +207,59 @@ kubectl delete namespace agent-platform
 
 `tests/ha/test_migrations_real_pg.py`（含新增 v6 存量库用例）在 Windows 本地 skip，本轮在集群 pod 内（Linux + 真实 pgvector PG）补盲实跑：**4 passed**（含全新库完整 baseline 链 + checksum 篡改拒绕 + 幂等重跑）。环内一次性 pytest（pip --user，pod 重启即失效）；中途两轮失败均为补盲环境搭建问题（pytest.ini 段名写错致 asyncio_mode 未生效），非产品码/用例问题，修正后全绿。
 
-## E. 环境事实登记
+## E. 环境事实登记（第三次演练时点）
 
 - 126 脏改动备份（历史）：`/tmp/r6-dirty-{inventory,backup}-20260930-0947.{txt,patch}`、`/tmp/r6-dirty-backup-20260930-1100.patch`；verify 证据块 `/tmp/r6_verify.log`。**已于 2026-09-30 门面退役收尾时全部清理**：对应改动均已入库（b3c5c97 / e086483），bundle 与备份 patch 无保留价值；清理走 scp+sh 脚本通道逐项删除并独立只读复核，`/tmp` `/root` 两目录 r6 相关残留计数为 0。
-- 本次后集群运行对象：镜像 `ab5fe54b6860` @ `30cbf25`，pod 内一次性验证残留（/tmp/r6_dep_check.py、/tmp/ha、pip --user pytest）随 pod 重启自然消失。
+- 该时点集群运行对象：镜像 `ab5fe54b6860` @ `30cbf25`，pod 内一次性验证残留（/tmp/r6_dep_check.py、/tmp/ha、pip --user pytest）随 pod 重启自然消失。**当前运行对象已推至镜像 `f37bcdb1ed7a` @ `626ec17`（见下方第四次演练 §A）。**
 - 集群 kubeadm reset：**不执行（用户 2026-09-30 确认保留集群）**——三节点全 Ready、业务 pod 正常 Running，仍为可用的端到端复验环境；详见观测方案 §16（含 controller-manager 重启真因：leader-election 续租超时，非持续故障）。
+
+---
+
+# 第四次演练：门面退役后端到端复验（2026-09-30）
+
+> 目标：上轮 R6 闭环验证的是 `30cbf25`（门面仍在）；门面退役（`e086483`）把消费方全部切为 kernel 直调，本地分层回归无法证明「真集群 + Jaeger 链路仍串」。本轮将镜像重建到 `626ec17` 并复跑取证链。**结论：父链贯通 ✅（双 span 属既存而非回归）；同时定性出上一轮只记下现象、未追源头的新缺陷 R19（FastAPI 原生 telemetry 与 kernel 中间件重复埋点）——待决策，本演练未改产品码。**
+
+## A. 同步/构建/分发（全链复跑，零手工）
+
+- bundle `30cbf25..626ec17`（MD5 双端 `b3772d26…`）→ 126 fetch + `checkout -f`：HEAD=`626ec17…`、工作树干净。**同步前核实**：126 仅剩的脏改动 `deploy/k8s/scripts/verify.sh` 与本地已提交版本 `git hash-object` 一致（`d5bf2af2…`），确认无信息损失后才丢弃旧副本（上轮清理的备份类临时文件未再产生）。
+- `build.sh 626ec17…`：rev 门禁通过 → 镜像 `f37bcdb1ed7a`，label + 容器内文件双通道回读均 = `626ec17…`（dirty=no）；RC=0。
+- `distribute.sh`：125/241 两 worker 均导入 `f37bcdb1ed7a9`；`rollout restart` 后新 pod `5cd47d7c9b-ldhqn` Running 0 重启。
+- **退役面进入运行制品的直接证据**：pod 内 `cat /srv/agent-platform/GIT_REV` = `626ec17…`，且 `ls packages/agent-runtime/agent_runtime/ | grep -c otel.py` = **0**（门面确实不在制品里，不是在本地工作树里嘴述）。
+- `verify.sh 626ec17…`：L0 三节点 Ready / L1 pod+svc / L2 `/health` = `"otel":true,"otel_status":"ACTIVE"` / GIT_REV 绑定——四层全过，RC=0。（`otel_status` 现在完全出自 kernel 单一状态机，不再经门面，这本身就是退役后的关键回归信号）
+
+## B. R6 父子链硬判据（门面退役后）
+
+- `e2e_traceparent.sh`：/query 200 → sleep 8 → Jaeger 命中，span 数≥ 1，RC=0。
+- **逐 span 解析**（本地拉 Jaeger API）：trace `025d51b88e78f37d` 去重 traceID = 1，两条 `POST /query` 的 CHILD_OF 引用均 = 客户端 `0123456789abcdef` → **父链贯通 ✅**。
+
+## C. 新发现 R19：FastAPI 原生 telemetry 与 kernel 中间件重复埋点（待决策）
+
+现象：每条请求产出 **2 个同名 `POST /query` SERVER span 且互为兄弟**（均直接挂客户端父）。逐 span 标签定性到源头：
+
+| span | 属性命名 | 归属 |
+|---|---|---|
+| `8f0055d3eaa3687b` | 新版 semconv（`http.request.method`/`http.route`/`url.path`/`server.address`） | **FastAPI 0.142 内置 `fastapi/telemetry/`**（镜像内无任何 instrumentation 包，grep 确认名字出自 fastapi 本体） |
+| `34a497f382548ea0` | 旧版 semconv（`http.method`/`http.target`） | 我们的 `agent_core.tracing_middleware` |
+
+取证得到的三个硬事实（均非推测）：
+1. **非门面退役回归**：按 rollout 时刻分桶对比，旧镜像 `30cbf25`（门面在）的历史 trace `025d50100af8b208` **同样是 2 条**。上轮 §C 当时已写下“两条 `POST /query` span”，但未追问为何是两条——本轮才定性到源头。
+2. **框架会自己 `set_tracer_provider`**（`fastapi/telemetry/_runtime.py:162`）并从 `OTEL_*` 标准 env 自配 OTLP exporter——这是 **第二个 provider/状态机入口**，属本方案 R6/R12 反模式在框架层的重现。
+3. **业务属性落在 B 的子 span 而非请求 span**：`question_hash`/`question_length`/`request_id`/`thread_id` 全部出现在 `fastapi.endpoint`（B 的子）上，两条请求 span 自身均无业务属性；语义未丢但拓扑错位。
+4. **探针淹没**：limit=1500 的窗口内 `GET /health` 占 1496 条，真实 `/query` 仅 8 条——取证须按 operation 精查，否则拉不到目标样本。
+
+处置：**不在本演练内改代码**（AGENTS.md「先方案后编码」+ 影响对外观测拓扑）。已登记为观测方案 §18 R19，待消费者审计后定方案（候选：工厂内 `telemetry={"tracing": False}` 关原生 / 改用原生而退役我们的中间件 / 保留双层但去重+健忘 health）。
+
+## D. 取证脚本知识修正（本轮踩出，未入库代码只记经验）
+
+- **Jaeger find API（`/api/traces?start=&end=`）的时间单位是微秒，不是毫秒**：传 ms 窗口会落到 1970 → 返回空列表且不报错（本轮两次误判为空结果）；而按 traceID 直查 `/api/traces/<id>` 不受影响。脚本内自检：空结果时换 µs 重试并打印实际单位。
+- 多层引号内联命令仍必碎（本轮 `\"query\":` 被吞成 `{query:` 导致 422）——一律走 scp+sh 脚本承载；本轮所有远端取证脚本执行完即删（`rm -f` + `ls | grep -c` 自证为 0，不留下轮清理债）。
+
+## E. 环境收尾（本轮为零残留）
+
+- port-forward 已停（126 `ss -ltn | grep -c :18000` = 0）；集群仍为可用复验环境：三节点 Ready，业务 pod `5cd47d7c9b-ldhqn` Running 0 重启（镜像 `f37bcdb1ed7a` @ `626ec17`），postgres Running。
+- 三台远端临时产物清零：本轮产生的 5 项（`/root/build-626ec17.log`、`/root/dist-626ec17.log`、`/tmp/retire_body.txt`、`/tmp/e2e_body.txt`、`/tmp/agent-platform.tar.gz` 119M×3 台）+ **宽口径复核扫出的 19 项历史 ad-hoc 残留**（第一/二次演练的 `_build_*.sh`/`_distrib*.sh`/`_otel_*.sh`/`build*.log`/`distrib*.log`、`ap_dev.tar.gz` 118M、`images.tar.gz` 255M、`evalsync_c/` eval 脚本副本、`e2e_smoke.sh`/`_e2e_otel.sh`）逐项删除。
+  - **删除前逐个 `ls -l` 定性**：全部为 `/tmp`（个别 `/root`）下一次性 sh/log/tar，非仓库工作树内容；镜像已导入 containerd、脚本正文已入库 `deploy/k8s/scripts/`，无信息损失。
+  - **复核口径教训**：本轮按前缀 tag（`626ec17`）复核得 0，但换**关键词宽口径**（`otel|e2e|distrib|build|tar.gz|evalsync|dirty`）才暴露历史三轮的 19 项残留——清干净的标准应是「目录里无 ad-hoc 文件」而非「无本轮 tag 文件」。
+  - 三台最终宽口径计数均 **0**（`/tmp` `/root` `/var/tmp`），磁盘 125 41G→40G / 241 49G→48G。
+- 本地 `.codeartsdoer/temp/` 本轮 8 个取证脚本（`retire_e2e_forensics.py`、`_dual_span_ab.py`、`_span_tags.py`、`_jaeger_probe.py`、`_span_forensics{,2,3}.sh`、`_drill4_cleanup.sh`）执行完即删，不形成下轮清理债。
 
