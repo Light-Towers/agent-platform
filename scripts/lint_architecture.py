@@ -67,12 +67,12 @@ def check() -> list[str]:
 # P2 架构不变量：生产 FastAPI app 必须经 agent_core 统一工厂 ``build_api_app``
 # 创建，由构造保证注册统一 500 脱敏 handler（仅扫 applications/**）。
 # 见 docs/plans/plan-p2-unified-exception-handlers-2026-09-24.md §3.2/§3.3。
-# 白名单：knowledge-service main.py（已有自实现 handler，D-3 本轮不迁移）、
-# exhibition mock_server（dev fixture、非网关服务）；各 tests/ 已跳。
+# 白名单：exhibition mock_server（dev fixture、非网关服务）；各 tests/ 已跳。
+# knowledge-service main.py 已迁 build_api_app（观测方案 S2 尾项，2026-09-30），
+# 其自有 M5 错误信封经 install_handlers=False 保留，不再占白名单。
 # ---------------------------------------------------------------------------
 _FASTAPI_PATTERN = re.compile(r"\bFastAPI\s*\(")
 _FASTAPI_WHITELIST = (
-    "applications/knowledge-service/knowledge_service/main.py",
     "applications/exhibition-agent/exhibition_agent/mock_server/warehouse_mock.py",
 )
 
