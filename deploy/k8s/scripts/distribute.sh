@@ -14,7 +14,7 @@ set -euo pipefail
 
 IMAGE="${IMAGE:-agent-platform:dev}"
 WORKERS="${*:-192.168.100.125 192.168.100.241}"
-WORKER_USER="${WORKER_USER:-osmondy}"
+WORKER_USER="${WORKER_USER:-root}"   # 126->workers 已配 key 免密（root，实测 BatchMode 通）
 CTR_SOCK="${CTR_SOCK:-/run/containerd-k8s/containerd.sock}"   # 隔离实例，勿打裸 ctr（踩坑表）
 TARBALL="${TARBALL:-/tmp/agent-platform.tar.gz}"
 
@@ -26,8 +26,9 @@ for host in $WORKERS; do
   ssh "$WORKER_USER@$host" \
     "sudo ctr --address $CTR_SOCK -n k8s.io images import $TARBALL" \
     || { echo "FAIL: import on $host"; exit 1; }
+  # crictl 输出 IMAGE/TAG 分列，无 "name:tag" 连串（首版 grep -F '$IMAGE' 误报 FAIL 的根因）
   ssh "$WORKER_USER@$host" \
-    "sudo crictl --runtime-endpoint unix://$CTR_SOCK images | grep -F '$IMAGE'" \
+    "sudo crictl --runtime-endpoint unix://$CTR_SOCK images | grep -E '${IMAGE%:*}[[:space:]]+${IMAGE##*:}'" \
     || { echo "FAIL: image not visible on $host"; exit 1; }
   echo "OK: $host"
 done

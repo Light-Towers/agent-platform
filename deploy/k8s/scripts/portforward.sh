@@ -21,9 +21,9 @@ stop_pf() { pkill -f "port-forward svc/$SVC" 2>/dev/null || true; }
 case "$ACTION" in
   start)
     stop_pf; sleep 1
-    nohup kubectl -n "$NAMESPACE" port-forward "svc/$SVC" "$LOCAL_PORT:$REMOTE_PORT" \
-      --address "$BIND" >/tmp/portforward.log 2>&1 &
-    disown
+    # 非交互 SSH 会话下 nohup 仍可能被 SIGHUP 掉（已验证经验），用 setsid 开新会话组 + 断开 stdio
+    setsid bash -c "kubectl -n $NAMESPACE port-forward svc/$SVC $LOCAL_PORT:$REMOTE_PORT --address $BIND >/tmp/portforward.log 2>&1" </dev/null >/dev/null 2>&1 &
+    sleep 2
     for i in $(seq 1 10); do
       ss -tlnp 2>/dev/null | grep -q ":$LOCAL_PORT " && break
       sleep 1
