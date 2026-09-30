@@ -135,7 +135,12 @@ members = [
 # 原生扩展）同进程导入时，pyarrow 原生模块加载 access violation（确定性 segfault，
 # pyarrow 25.0.1 已修复）。resolver 出于未知原因拒绝升到 25，用约束下限强制。
 # Linux CI 不受 24 影响，升到 25 属常规 minor 升级。
-constraint-dependencies = ["pyarrow>=25.0.1"]
+# Dependabot 重扫新暴露（2026-09-30 二轮，方案 §11）：PyJWT 2.13.0 命中 10 个 advisory
+# （critical×1 / high×5 / medium×4），first_patched 全部为 2.14.0，属「有补丁版本」的常规可修项。
+# lock 内唯一第三方引入者是 mcp 2.0.0（要求 pyjwt[crypto]>=2.10.1，无上限），根包 identity extra
+# 要求 >=2.9 亦无上限 → 加下限约束不违反任何上游契约，且 pyjwt 自身只依赖已在位的 cryptography，
+# 不引入新包。用 constraint（收紧版本下限）而非 override（摘边），因为这里要的是升级不是剔除。
+constraint-dependencies = ["pyarrow>=25.0.1", "pyjwt>=2.14.0"]
 # Dependabot R 系列收口（2026-09-30，方案 docs/plans/plan-dependabot-21-alerts-closure-2026-09-30.md）：
 # fschat 0.2.36（6 告警）+ nltk 3.10.3（1 告警）上游**无修复版本**（NLTK advisory 原文
 # “Patched versions: Not yet patched”，FastChat 仓库已归档），升版无法解决。

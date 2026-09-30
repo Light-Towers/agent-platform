@@ -33,7 +33,8 @@ push 时 GitHub 回显默认分支仍有 21 项告警（4 critical / 11 high / 6
 
 1. **14 项是孤儿告警**：其 `manifest_path` 指向 `courses/zhanggui-wenda/data-agent/uv.lock` 与 `courses/zhanggui-zhiku/uv.lock`，这些文件已从 main 删除（git tree 里不存在、`contents/` 返回 404），只存在于历史 commit。无可改代码，只能人工 dismiss（`not_used`）——本登记上一轮「重扫后自动关闭」的预期已被五天未关闭的事实证伪（`.github/dependabot.yml` 只配 `directory: "/"`，已删目录永不再扫）。
 2. **7 项（fschat 6 + nltk 1）由「接受风险」改为「从 lock 真剔除」**：上游无补丁，升版无解；经同一 commit 的 import 闭包分析证明评测入口不引用这两包，改用根 `pyproject.toml` 的 `[tool.uv] override-dependencies` 假 marker 摘除（lock 306→295 包，零版本漂移）。本文上方「接受清单」中这两行作为历史判断保留，不再代表当前状态。
-3. **新形态记录**：今后遇到「告警指向的 manifest 已不在默认分支」时，不得等待自动关闭，需人工 dismiss；判定方法：`gh api /repos/{o}/{r}/git/trees/{branch}?recursive=1` 查 `truncated=false` 后比对 `manifest_path` 是否存在。
+3. **PR #24 合入后重扫的回报（同日二轮）**：原 7 项被扫描器判为 `fixed`（非人工关闭），但同一轮重扫**新暴露 10 项 PyJWT 告警**（#27–#36，critical×1 / high×5 / medium×4，`first_patched` 均为 2.14.0）。这 10 项**不列入接受风险**：属「有补丁版本的常规可修项」，走 `[tool.uv] constraint-dependencies` 加 `pyjwt>=2.14.0` 升版（lock 解析为 2.15.1，包集合 295 不变、仅 1 条版本漂移）。取证与收口判据见 `plan-dependabot-21-alerts-closure-2026-09-30.md` §11。
+4. **新形态记录**：今后遇到「告警指向的 manifest 已不在默认分支」时，不得等待自动关闭，需人工 dismiss；判定方法：`gh api /repos/{o}/{r}/git/trees/{branch}?recursive=1` 查 `truncated=false` 后比对 `manifest_path` 是否存在。另：一次重扫可能同时「关闭旧项 + 新开新项」（本轮 #27–#36 就是原 21 项清单里没有的全新 PyJWT 告警），因此不能以「旧告警已处理」推断总体已清零，每轮都需重拉 open 清单重新取证。
 
 ## 复核触发条件
 
