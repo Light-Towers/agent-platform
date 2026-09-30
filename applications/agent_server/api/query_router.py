@@ -4,10 +4,9 @@ import logging
 import uuid
 
 from agent_core.runtime.lease import AsyncLease
-from agent_core.tracing import record_request_attributes
+from agent_core.tracing import record_request_attributes, user_query_hash
 from agent_runtime import cache as semantic_cache
 from agent_runtime.db import get_pool
-from agent_runtime.otel import redact_question
 from agent_runtime.planner.protocol import PlannerContext
 from agent_runtime.schemas import ADMISSION_ADMITTED, ADMISSION_QUEUED, ADMISSION_REJECTED
 from agent_runtime.workspace_registry import resolve_workspace
@@ -70,7 +69,8 @@ async def query(
             "request_id": request_id,
             "thread_id": thread_id,
             "priority": priority,
-            **redact_question(req.query),
+            "question_hash": user_query_hash(req.query),  # 脱敏：仅长度+哈希，不含全文
+            "question_length": len(req.query),
         }
     )
 
