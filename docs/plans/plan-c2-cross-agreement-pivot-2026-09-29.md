@@ -2,7 +2,7 @@
 
 - **日期**：2026-09-29
 - **范围**：`applications/knowledge-service/eval/meta_eval_judge.py`（仅 c2 spike，**不进生产**）
-- **状态**：Executing（Stage 1）
+- **状态**：Completed（Stage 1 已合并；Stage 2 于 126 spike 容器实跑完毕，结论=未收敛回退路径 2，见文末「Stage 2 实测结果」）
 - **偏离的原始设计**：批准计划「RAG 可持续评测体系设计」Phase C2 明确"主判据 = 与人工一致性 κ"（`decide()` 走 `mean_kappa(faithfulness, correctness)`，需 `human` 列）。
 
 ## 为什么要偏离
@@ -50,3 +50,25 @@
 - 不修改 `pyproject.toml` / `uv.lock`。
 - 不动 mode 1/2 的现有语义。
 - 不 commit（等 Stage 1 用户复核后再决定 commit 时机）。
+
+## Stage 2 实测结果（2026-09-30，126 spike 容器实跑）
+
+**环境**：`rageval-eval` 容器，`/tmp/spike-venv`（`--system-site-packages`）临时装 `ragas 0.4.3`；未进 pyproject，用完即弃。数据 = 真实 60 条 run（`e2e_after_reindex/20260929_103435`）经 mode 1 抽样 30 条（seed=0）。候选 = self + ragas（DeepEval 4.2.7 无 `AnswerCorrectnessMetric`，correctness 语义错配，本轮不接，诚实留 `_unwired`）。
+
+**RAGAS adapter 关键工程点**（`eval/score_ragas.py`，真实 API 端到端验证）：
+- ragas 0.4.3 无条件 `import langchain_community.chat_models.vertexai`（未装）→ 注入占位 `ChatVertexAI` 桩绕过；
+- collections API 用 `ascore(**kwargs)`（非 `.score(sample)`），`MetricResult.value` 取 0..1；
+- `AnswerCorrectness(llm, weights=[1.0, 0.0])` 关闭 embedding 相似度分量，走纯 claim-based 事实性，避免 spike 再引 embedding 模型。
+
+**成对一致性（30 条，RC=0）**：
+
+| 维度 | self ↔ ragas |
+|---|---|
+| faithfulness | κ=0.339 · ρ=0.275 |
+| correctness | κ=0.097 · ρ=0.101 |
+
+**决策 = `self`（判据未收敛 → 回退路径 2 补人工）**。三分支里只有「未收敛」能触发：因为只有 1 个外部候选，「外部↔外部」对为 n/a，「self 离群→采纳外部」这条规则**结构上无法触发**。
+
+**诚实边界（勿误读）**：κ 低 ≠ self judge 错。self 是 0/1/2 rubric、RAGAS AnswerCorrectness 是 claim-F1（且 weights=[1,0] 关 embedding），两者语义不同构；连续分再分箱到 0/1/2 损失分辨率，correctness κ=0.097 多为分箱错位。**结论是方法论级的**：路径 3（AI 交叉代理指标）不足以在无人工金标准时对 self vs RAGAS 做可信裁决——这正是当初选定路径 3 时预告的固有边界。产物见 `applications/knowledge-service/eval/judge_selection.md`（纯聚合、无语料明文，可入库）。
+
+**Stage 3 处置**：走「保 self」——维持自研 judge（零依赖、可解释），c2 关闭；不再折腾人工标注（路径 2 需用户实标 30 条）或引入第二框架（路径 C，用户已排除）。
