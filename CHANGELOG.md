@@ -2,7 +2,7 @@
 
 本仓库为 uv workspace monorepo。**唯一受支持的安装/运行入口是根 `uv.lock` + `uv sync`**，子包不再维护独立 `uv.lock`（见 v2 修复 #14）。
 
-## Batch 7c：#47 按官方编码形状重写 `resolve_within`（2026-10-01）
+## Batch 7c：#47 按官方编码形状重写 `resolve_within`（2026-10-01，分支 `fix/codeql-batch7c-path-shape`，PR #39 已合入 `bb46dd3`）
 
 > 接 Batch 7a：主干重扫发现 #42 只是**位移重开**为 #47（同一语句）。方案：`docs/plans/plan-codeql-batch7-no-dismiss-real-fixes-2026-10-01.md` §3.4。
 
@@ -10,6 +10,7 @@
 - **修法**：`resolve_within` 改为 `os.path.normpath(os.path.join(root, raw))` 词法定形 → `startswith(root_str)` 且带**分隔符边界**（补上 naive startswith 会误放行 `/data/root_evil` 的真漏洞）→ 才 `Path(norm).resolve()` → 保留解析后复检（挡软链逃逸）。POSIX 反斜杠二次解释改为**纯词法**否决，不再第二次触碰文件系统（顺带消掉同源的潜在 sink）。
 - **接受集不变是差分实测出来的，不是推演**：本机用 `posixpath` + `PurePosixPath` 模拟 POSIX 宿主，42 个入参对跑旧/新裁决 → **差异 0**。它当场推翻了我自己先写下的「lone `\` 入参改为拒绝」断言（`posixpath.join` 会自动插入分隔符，两版均放行），该用例已改正并入库。唯一真收紧在 **Windows 宿主的大小写变体绝对入参**（旧：`is_relative_to` 走 `normcase` 不区分大小写→放行；新：`startswith` 区分→拒绝），方向为变严，已用 `skipif(!win32)` 用例固定。
 - 新增 6 条回归（base 自身放行/兄弟前缀被拒/`..` 定形后不进 `resolve`/反斜杠否决不新增 `resolve` 调用/lone-`\` 仍放行/Windows 大小写变体拒绝）；本目录 49 passed / 5 skipped（Windows 宿主）。
+- **主干重扫验收通过（本批的终态判定）**：PR #39 全 checks pass（含 `CodeQL`，推送前另跑 L3 深度审查 findings 0），合入 `bb46dd3`@11:42:39Z；`refs/heads/main` 的 default-setup 分析（`Analyze (python)` success）于 11:44:14Z 将 **#47 置为 `state=fixed` 且 `dismissed_at=None`（自动闭合）**，且全仓告警最大号仍为 #47、合入后**无任何新建告警** —— 即 **#47 真消失，不是再一次位移重开**。`refs/heads/main` 总账：45 条 CodeQL 告警，`fixed` 43 / `open` 2，**open 仅剩 #38 / #39**（待 B7b principal_id 化）；43/43 闭合全为自动，**全仓零人工 dismiss**。
 
 ## Batch 7a：取消 dismiss 通道，剩余告警真修（2026-10-01，分支 `fix/codeql-batch7-real-fixes`，PR #38）
 
