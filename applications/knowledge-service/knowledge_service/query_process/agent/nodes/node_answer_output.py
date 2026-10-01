@@ -1,6 +1,8 @@
 import re
 import sys
 
+from agent_core.guardrails.errors import mask_exception_for_client
+
 from knowledge_service.clients.mongo_history_utils import save_chat_message
 from knowledge_service.core.config import settings
 from knowledge_service.core.load_prompt import load_prompt
@@ -158,8 +160,8 @@ def step_3_generate_response(state: QueryGraphState, prompt: str) -> QueryGraphS
 
         except Exception as e:
             logger.error(f"流式生成出错: {e}", exc_info=True)
-            # 发生错误时，尝试推送到前端
-            push_to_session(session_id, SSEEvent.ERROR, {"error": str(e)})
+            # 流式已推送 delta，无法改走全局 500 兜底；错误帧只给固定文案。
+            push_to_session(session_id, SSEEvent.ERROR, {"error": mask_exception_for_client(e)})
 
         state["answer"] = final_text
     else:

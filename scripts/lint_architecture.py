@@ -10,6 +10,10 @@ P4-2：收紧 registry.execute 直接可见性。
 - agent_server/agent/graph.py（_invoke 回退，向后兼容）
 - skills/registry.py（SkillRegistry 自身）
 - tests/ / eval/（测试与评测）
+
+P6：禁止在 kernel 外对密钥类标识手写裸哈希（DUP-1 横向重复门禁，见下文）。
+P7：禁止在 kernel 外手写路径 containment / api 层绕过 ``guardrails.fs``（A 类横切收敛）。
+P8：禁止在对外响应体（HTTP JSON / SSE 帧）回显异常消息或堆栈（C 类横切收敛）。
 """
 
 from __future__ import annotations
@@ -160,6 +164,238 @@ def check_toplevel_package_clashes() -> list[str]:
     return violations
 
 
+# ---------------------------------------------------------------------------
+# P6 架构不变量（DUP-1 横向重复门禁）：密钥 → 稳定指纹 只能由 kernel 单一实现
+# ``agent_core.guardrails.auth.fingerprint`` 产出。背景：CodeQL
+# ``py/weak-sensitive-data-hashing`` 的 5 条告警是同一操作被抄 4 遍且截断语义
+# 分裂（全量 vs ``[:12]`` 48bit、均无服务端 pepper）——前 3 条 lint 均为「禁止危险调
+# 用点」型检测，对「同类横切逻辑多实现」这一维度全空白，故新增本不变量防复发。
+# 规则：同一行出现弱哈希调用 + 密钥语义标识即失败。
+#   · ``hmac.new(secret, msg, hashlib.sha256)`` 不命中（hashlib 无紧跟 ``(``），
+#     因 HMAC 才是本门禁鼓励的写法；
+#   · 非敏感分桶（如 ``gateway/gray.py`` 的 ``md5(user_id)``）不含密钥语义名，
+#     天然不在拦截面内（无需为其开白名单）。
+# 白名单：kernel 单一实现所在文件（含迁移用的 legacy 派生助手）。
+# ---------------------------------------------------------------------------
+_WEAK_HASH_CALL = re.compile(r"hashlib\.(?:md5|sha1|sha224|sha256|sha384|sha512)\s*\(")
+_SECRET_IDENT = re.compile(r"api_?key|apikey|secret|passwo?rd|access_key|private_key", re.IGNORECASE)
+_BARE_SECRET_HASH_WHITELIST = (
+    "packages/agent-core/agent_core/guardrails/auth.py",
+)
+
+
+def _is_bare_secret_hash_line(stripped: str) -> bool:
+    """单行判定（抽出以便反例单测）：弱哈希调用 + 密钥语义标识同行共现。
+
+    纯注释行不判（文档/说明常引用反例写法）。
+    """
+    if stripped.startswith("#"):
+        return False
+    return bool(_WEAK_HASH_CALL.search(stripped) and _SECRET_IDENT.search(stripped))
+
+
+def check_bare_secret_hashing() -> list[str]:
+    """扫全仓：白名单外禁对 api_key/secret 类变量裸用 hashlib（DUP-1）。"""
+    violations: list[str] = []
+    for py_file in ROOT.rglob("*.py"):
+        rel = py_file.relative_to(ROOT).as_posix()
+        if any(p in rel for p in (".venv", "__pycache__", ".ruff_cache", ".egg-info",
+                                   ".codeartsdoer", ".codebuddy", "courses/")):
+            continue
+        if "/tests/" in rel or rel.startswith("tests/"):
+            continue
+        if any(rel == w or rel.startswith(w) for w in _BARE_SECRET_HASH_WHITELIST):
+            continue
+        try:
+            for lineno, line in enumerate(py_file.read_text(encoding="utf-8").splitlines(), 1):
+                stripped = line.strip()
+                if _is_bare_secret_hash_line(stripped):
+                    violations.append(f"{rel}:{lineno}: {stripped}")
+        except Exception:
+            pass
+    return violations
+
+
+# ---------------------------------------------------------------------------
+# P7 架构不变量（「用户可控路径」横切关注点单一实现门禁，CodeQL py/path-injection 根因）：
+# containment 与文件名净化只能由 kernel ``agent_core.guardrails.fs`` 提供。
+# 背景：``agent_federation/api/server.py`` 4 个文件端点各自手写
+# ``resolve()`` + ``is_relative_to()``（防护有效但语义不一致，且散在私有写法难以被
+# CodeQL / 人工 review 认定为统一 sanitizer）。与 P6 同构：前 3 条不变量均为
+# 「禁止危险调用点」型，本不变量守的是「同一横切逻辑不得第二次实现」这一维度。
+# 两条子检查：
+#   P7-1 白名单外禁手写 ``.is_relative_to(``（路径包含判定只允许 kernel 一处）；
+#   P7-2 api 层（``applications/**`` 下路径含 ``/api/`` 的模块）出现文件 I/O 出口
+#        （``FileResponse(`` / ``.rglob(`` / ``.glob(``）时，该文件必须调用
+#        ``safe_join`` / ``resolve_within``，否则视为新增端点绕过护栏。
+# 白名单：kernel 单一实现文件；P7-2 另含「路径来自模块常量、无请求输入」的静态页面站点。
+# ---------------------------------------------------------------------------
+_MANUAL_CONTAINMENT = re.compile(r"\.is_relative_to\s*\(")
+_FS_CONTAINMENT_WHITELIST = (
+    "packages/agent-core/agent_core/guardrails/fs.py",
+)
+
+_API_IO_MARKER = re.compile(r"\bFileResponse\s*\(|\.rglob\s*\(|\.glob\s*\(")
+_FS_HELPER_USE = re.compile(r"\bsafe_join\s*\(|\bresolve_within\s*\(")
+_FS_IO_WHITELIST = (
+    # 静态资源页：路径来自 PROJECT_ROOT / 模块常量拼接，不接受请求输入
+    "applications/knowledge-service/knowledge_service/api/import_router.py",
+    "applications/knowledge-service/knowledge_service/api/query_router.py",
+)
+
+
+def _skipped_rel(rel: str) -> bool:
+    """扫描排除面：依赖/缓存/IDE 产物/课件示例/测试代码（与 P6 保持一致）。"""
+    if any(p in rel for p in (".venv", "__pycache__", ".ruff_cache", ".egg-info",
+                              ".codeartsdoer", ".codebuddy", "courses/")):
+        return True
+    return "/tests/" in rel or rel.startswith("tests/")
+
+
+def _is_manual_containment_line(stripped: str) -> bool:
+    """单行判定（抽出以便反例单测）：手写 ``is_relative_to`` containment。
+
+    纯注释行不判（文档/方案常引用旧写法）。
+    """
+    if stripped.startswith("#"):
+        return False
+    return bool(_MANUAL_CONTAINMENT.search(stripped))
+
+
+def _api_io_violation(text: str) -> str | None:
+    """文件粒度判定（抽出以便单测）：有文件 I/O 出口但未调 kernel 护栏→返回首个违规行。"""
+    if not _API_IO_MARKER.search(text) or _FS_HELPER_USE.search(text):
+        return None
+    for lineno, line in enumerate(text.splitlines(), 1):
+        stripped = line.strip()
+        if stripped.startswith("#"):
+            continue
+        if _API_IO_MARKER.search(stripped):
+            return f"{lineno}: {stripped}（无 safe_join/resolve_within 调用）"
+    return None
+
+
+def check_manual_path_containment() -> list[str]:
+    """扫全仓：白名单外禁手写 ``is_relative_to`` 做路径 containment（P7-1）。"""
+    violations: list[str] = []
+    for py_file in ROOT.rglob("*.py"):
+        rel = py_file.relative_to(ROOT).as_posix()
+        if _skipped_rel(rel):
+            continue
+        if any(rel == w or rel.startswith(w) for w in _FS_CONTAINMENT_WHITELIST):
+            continue
+        try:
+            for lineno, line in enumerate(py_file.read_text(encoding="utf-8").splitlines(), 1):
+                stripped = line.strip()
+                if _is_manual_containment_line(stripped):
+                    violations.append(f"{rel}:{lineno}: {stripped}")
+        except Exception:
+            pass
+    return violations
+
+
+def check_api_layer_path_io() -> list[str]:
+    """扫 api 层：有文件 I/O 出口但未过 kernel ``guardrails.fs`` 护栏的文件（P7-2，按文件粒度）。"""
+    violations: list[str] = []
+    for py_file in ROOT.rglob("*.py"):
+        rel = py_file.relative_to(ROOT).as_posix()
+        if not rel.startswith("applications/") or "/api/" not in f"/{rel}":
+            continue
+        if _skipped_rel(rel):
+            continue
+        if any(rel == w or rel.startswith(w) for w in _FS_IO_WHITELIST):
+            continue
+        try:
+            text = py_file.read_text(encoding="utf-8")
+        except Exception:
+            continue
+        hit = _api_io_violation(text)
+        if hit:
+            violations.append(f"{rel}:{hit}")
+    return violations
+
+
+# ---------------------------------------------------------------------------
+# P8 架构不变量（「内部异常详情」横切关注点，CodeQL py/stack-trace-exposure 根因）：
+# 对外响应体（HTTP JSON / SSE 帧）不得回显异常消息或堆栈。
+# 背景：``install_error_handlers`` 只能兜住「未捕获异常 → 500 信封」，对已经自行
+# ``except`` 并 ``return JSONResponse`` / 推 SSE 帧的站点无能为力（流已开、状态码已发），
+# 这类站点历史上的 ``str(e)`` / ``f"...{e}"`` 会把内部路径 / 上游响应体 / SQL 片段
+# 送到客户端。脱敏边界点唯一：kernel ``agent_core.guardrails.errors``
+# （未捕获异常走 ``install_error_handlers``，自行 catch 的出口走 ``mask_exception_for_client``）。
+# 作用域：``applications/**`` 下含 HTTP/SSE 出口标记的模块（与 P7-2 同构的文件粒度前置）。
+# 放行（不进判定面）：
+#   1. 注释行（文档/方案常引用旧写法）；
+#   2. 服务端日志行（``logger.*``——异常全貌的合规去向）；
+#   3. 仅异常类名 ``type(x).__name__``（不含消息，不属堆栈回显）；
+#   4. 4xx 客户端错误回显（D-2=A：不动各 app 现有 4xx ``{detail}`` 信封，
+#      输入校验失败详情面向调用方自身输入）。
+# ---------------------------------------------------------------------------
+_HTTP_EXIT_MARKER = re.compile(
+    r"@app\.|@router\.|add_api_route|JSONResponse\(|HTTPException\(|StreamingResponse\("
+    r"|TextResponse\(|FileResponse\(|push_to_session\(|sse_pack\(|\b_sse\("
+)
+_EXC_MSG_CALL = re.compile(r"\bstr\(\s*(?:e|exc|err|error|exception)\b", re.IGNORECASE)
+_EXC_F_INTERP = re.compile(r"\{\s*(?:e|exc|err|error|exception)\s*(?::[^{}]*)?\}")
+_F_PREFIX = re.compile(r"\bf['\"]")
+_TB_CALL = re.compile(r"\btraceback\.|format_exc\s*\(")
+_CLASS_NAME_TOKEN = re.compile(r"type\(\s*[A-Za-z_]\w*\s*\)\.__name__")
+_LOGGER_LINE = re.compile(r"\b(?:logger|log)\w*\.\w+\(")
+_STATUS_4XX = re.compile(r"status_code\s*=\s*4\d\d")
+# 白名单：故意置空——本不变量不允许静默例外，任何新增必须先在方案文档里说理。
+_EXC_ECHO_WHITELIST: tuple[str, ...] = ()
+
+
+def _is_http_exit_module(text: str) -> bool:
+    """文件粒度前置：是否 HTTP/SSE 出口模块（含路由装饰器或响应/帧构造）。"""
+    return bool(_HTTP_EXIT_MARKER.search(text))
+
+
+def _is_exception_echo_line(stripped: str) -> bool:
+    """单行判定（抽出以便反例单测）：对外出口回显异常消息 / 堆栈。
+
+    先把仅类名写法 ``type(x).__name__`` 从行内剔除，剩下的才是消息级插值；
+    否则 ``f"{type(e).__name__}: {e}"`` 这种「含消息」的行会被误放行。
+    """
+    if stripped.startswith("#"):
+        return False
+    if _STATUS_4XX.search(stripped):
+        return False
+    if _LOGGER_LINE.search(stripped):
+        return False
+    line = _CLASS_NAME_TOKEN.sub("__cls__", stripped)
+    if _TB_CALL.search(line):
+        return True
+    has_interp = bool(_EXC_MSG_CALL.search(line)) or (
+        bool(_EXC_F_INTERP.search(line)) and bool(_F_PREFIX.search(line))
+    )
+    return has_interp
+
+
+def check_exception_echo_in_api_responses() -> list[str]:
+    """扫 applications/** 的 HTTP/SSE 出口模块：禁回显异常消息/堆栈（P8）。"""
+    violations: list[str] = []
+    for py_file in ROOT.rglob("*.py"):
+        rel = py_file.relative_to(ROOT).as_posix()
+        if not rel.startswith("applications/"):
+            continue
+        if _skipped_rel(rel):
+            continue
+        if any(rel == w or rel.startswith(w) for w in _EXC_ECHO_WHITELIST):
+            continue
+        try:
+            text = py_file.read_text(encoding="utf-8")
+        except Exception:
+            continue
+        if not _is_http_exit_module(text):
+            continue
+        for lineno, line in enumerate(text.splitlines(), 1):
+            stripped = line.strip()
+            if _is_exception_echo_line(stripped):
+                violations.append(f"{rel}:{lineno}: {stripped}")
+    return violations
+
+
 def main() -> int:
     rc = 0
     v1 = check()
@@ -190,6 +426,33 @@ def main() -> int:
         rc = 1
     else:
         print("P5 架构约束通过：无跨成员顶层包名冲突")
+    v4 = check_bare_secret_hashing()
+    if v4:
+        print("P6 架构约束违反：密钥→指纹 必须走 kernel 单一实现 agent_core.guardrails.auth.fingerprint（DUP-1）")
+        print("白名单外对 api_key/secret 裸用 hashlib 的站点（各站截断/pepper 语义不一致属安全相关缺陷，为 CodeQL weak-sensitive-data-hashing 根因）：")
+        for v in v4:
+            print(f"  {v}")
+        rc = 1
+    else:
+        print("P6 架构约束通过：无白名单外裸 hashlib 作用于密钥类标识")
+    v5 = check_manual_path_containment() + check_api_layer_path_io()
+    if v5:
+        print("P7 架构约束违反：路径 containment / 文件名净化 必须走 kernel 单一实现 agent_core.guardrails.fs（A 类 py/path-injection 根因）")
+        print("白名单外手写 is_relative_to，或 api 层文件 I/O 未过 safe_join/resolve_within 护栏的站点：")
+        for v in v5:
+            print(f"  {v}")
+        rc = 1
+    else:
+        print("P7 架构约束通过：无白名单外手写路径 containment，api 层文件 I/O 均经 kernel guardrails.fs")
+    v6 = check_exception_echo_in_api_responses()
+    if v6:
+        print("P8 架构约束违反：对外响应体（HTTP JSON / SSE 帧）不得回显异常消息或堆栈（C 类 py/stack-trace-exposure 根因）")
+        print("自行 catch 的出口请取 kernel 脱敏边界点：未捕获异常走 install_error_handlers，其余走 mask_exception_for_client（异常全貌只入服务端日志）：")
+        for v in v6:
+            print(f"  {v}")
+        rc = 1
+    else:
+        print("P8 架构约束通过：HTTP/SSE 出口无异常消息/堆栈回显")
     return rc
 
 

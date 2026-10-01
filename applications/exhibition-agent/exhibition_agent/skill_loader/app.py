@@ -22,12 +22,16 @@ import os
 
 import httpx
 from agent_core.guardrails.app_factory import build_api_app
+from agent_core.guardrails.errors import mask_exception_for_client
+from agent_core.logging import get_logger
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
 
 from .agent import ExhibitionAgent
 from .llm_client import LLMClient
 from .parser import Endpoint, default_skill_md_path, load_endpoints
+
+logger = get_logger(__name__)
 
 WAREHOUSE_BASE_URL = os.environ.get(
     "WAREHOUSE_BASE_URL",
@@ -105,8 +109,12 @@ async def chat(req: ChatRequest) -> JSONResponse:
         result = await agent.chat(req.messages)
         return JSONResponse(result)
     except Exception as e:
+        # 异常全貌仅入服务端日志；对外只给固定文案（内部路径 / provider 响应体不得外泄）。
         return JSONResponse(
-            {"error": f"Agent 处理失败: {e}", "llm_config": _llm.config_info()},
+            {
+                "error": mask_exception_for_client(e, logger=logger, context="POST /api/chat"),
+                "llm_config": _llm.config_info(),
+            },
             status_code=500,
         )
 
@@ -145,7 +153,16 @@ async def invoke(req: InvokeRequest) -> JSONResponse:
                 )
         except httpx.RequestError as e:
             return JSONResponse(
-                {"error": f"warehouse 请求失败: {e}", "url": url}, status_code=502
+                {
+                    "error": mask_exception_for_client(
+                        e,
+                        logger=logger,
+                        context="POST /api/invoke",
+                        message="warehouse 服务不可达，请稍后重试",
+                    ),
+                    "url": url,
+                },
+                status_code=502,
             )
 
     try:
@@ -181,7 +198,12 @@ async def health() -> JSONResponse:
                 {
                     "status": "fail",
                     "warehouse_base_url": WAREHOUSE_BASE_URL,
-                    "error": str(e),
+                    # 健康检查保留异常类名供运维定位（类名不含消息，不属堆栈回显），
+                    # 具体原因只写服务端日志。
+                    "error": mask_exception_for_client(
+                        e, logger=logger, context="GET /api/health", message="warehouse 健康检查失败"
+                    ),
+                    "error_type": type(e).__name__,
                 },
                 status_code=502,
             )
