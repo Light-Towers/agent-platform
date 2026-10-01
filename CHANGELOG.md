@@ -2,6 +2,20 @@
 
 本仓库为 uv workspace monorepo。**唯一受支持的安装/运行入口是根 `uv.lock` + `uv sync`**，子包不再维护独立 `uv.lock`（见 v2 修复 #14）。
 
+## B7b 强制前置取证完成（2026-10-01，未动任何代码，含一次自我推翻）
+
+> 方案：`docs/plans/plan-codeql-b7b-principal-thread-identity-2026-10-01.md`（新立）。触发：B7d 收尾时我立的那条强制前置——「拉 `github/codeql` 该查询与其 `SensitiveData` 模型源码，判定源/汇的配置范围，然后才能写 B7b 的验收标准（否则又是一次『看起来能修』）」。
+
+- **取证不靠猜**：`gh api -H "Accept: application/vnd.github.raw"` 直接拉上游 7 个模型文件（`WeakSensitiveDataHashing.ql` / `WeakSensitiveDataHashingQuery.qll` / `…Customizations.qll` / `SensitiveDataSources.qll` / `SensitiveDataHeuristics.qll` / `concepts/CryptoAlgorithms.qll` / `internal/CryptoAlgorithmNames.qll`）。SARIF `codeFlows` 通道仍不可用（`analyses/{id}` 无 `download_url`、`sarifs/{id}` 无 `sip`，令牌缺 `security_events` scope）⇒ 路径结论由「规则源码 + 全仓 grep + 告警列号逐列比对」三者交叉定案。
+- **触发条件定案（一条可验证的合取）**：`py/weak-sensitive-data-hashing` 合并两个分支，而 **`"SHA256"` 在 `isStrongHashingAlgorithm` 名单内（`isWeak()=false`）**⇒ sha256 在 `NormalHashFunction` 分支**根本不是汇**（该分支要求 `isWeak()`），只在 `ComputationallyExpensiveHashFunction` 分支成汇，而后者**只接受 `password` 分类的源**。⇒ **`#38`/`#39` 触发当且仅当「一个 `password` 分类的值流入摘要的被摘要位」**（列号已逐列核实：`#38` col 47-69 恰为 `secret.encode(…)` 即 `hmac.new` 消息位，同行的 `pepper.encode(…)` 未被报；`#39` col 29 恰为 `(api_key or "").encode(…)`）。
+- **由此推翻我自己几小时前写下的推论（三次自纠）**：新方案初稿 §1 我写「形参 `secret` 自身即源 ⇒ 即使所有调用方都传非敏感值、只要 `fingerprint` 还在摘要就仍报，所以必须删函数才能消 `#38`」——**错**。错因：看到 `SensitiveParameter` 存在就直接推结论，没读完「源分类 ∧ 汇条件」两侧的最终合取（`secret` 分类是 `secret`、不是 `password`，够不到唯一能触发的汇）；更该自查的是**告警文案已经写明 “insecure for password hashing”**，这个在我手上的信息本可直接区分分支。影响：初稿会把方案导向「以删除换绿灯」，实际必要条件是**拆三条链**。教训已入新方案 §1.3：**规则源码取证必须读到两侧合取；告警 message 的措辞是分支指纹，必须优先用来收敛假设**。
+- **新锁住一条真通道**：分类**纯由名字决定**（`maybePassword()` 含 `api.?(key|tok)` / `oauth` / `mfa` / `pass(wd|word|code|.?phrase)`，`notSensitiveRegexp()` 也只看名字）⇒「把 `api_key` 改名成中性词」确实能告警消失且属 gaming。因此 B7b 的门禁必须守**语义**（凭据不得进摘要）而非守名字；`scripts/` 也不是逃逸口（仓内无 `.github/codeql/` 配置，Glob 实取 **0** 个 ⇒ default setup 走 autobuild 全仓，脚本仍在分析面）。
+- **影响面实取（均为数量/否定式断言，逐条 grep）**：`derive_thread_id` 生产调用点 = **2**（`agent_server/api/auth.py:32` / `agent_federation/api/auth.py:32`，全仓 47 命中其余为测试/脚本/文档）；`server_user_id()` 生产消费者 = **0**（能力存在但从未接线）；联邦 `api/identity_bridge.py:16-18` **显式丢弃 user**；`agent_server/main.py:507` 以 observe 默认挂载（无凭据不绑定）⇒ 新方案写下硬约束：**「有 user 断言」在今天的默认部署里不成立**，必须给主体 id 分阶段来源（否则切 thread_id 直接炸零依赖冒烟）。
+- **一个必须写破的现行为**：`resolve_thread_id` 在鉴权启用时忽略客户端 `session_id`、而 `API_KEY` 每部署一把 ⇒ **今天所有持同一密钥的客户端共用同一个 thread_id 会话桶**。任何「按主体细化」都是对外可见的行为变更，不得当作无副作用重构（已列 §8-Q1 待拍板）。
+- **另一条机制级修正**：换 scrypt/pbkdf2 **确实能让告警消失**（`SCRYPT` 属 `isStrongPasswordHashingAlgorithm`，两分支汇条件都不再命中），所以它不是「看不见」而是「按规则字面要求办」；仍不选的理由降为纯工程判断（本仓输入是高熵随机密钥、产物只做查表标识、在中间件热路径每请求算一次，慢哈希前提不成立且使既有会话全漂移）——把「能不能消」与「该不该消」分开记账，以免后续争论失去事实底座。
+- **账面同步三处**：新方案入库；Batch 7 方案新增 **§4.2**（宣布强制前置已完成 + 订正 §4.1 的过头推论，并保留原文不改写）；`docs/TODO.md` §8 将「B7b 可直接落在已断言主体上」这句乐观说法订正为两处硬约束 + 接上新方案。**未动 `auth.py` 一行代码**（先方案后编码）。
+- **工具链异常登记**：本次新方案首次落盘时出现部分中文 mojibake（全角标点处被误作 GBK 重编码），已整份重写，并用 `git grep -I -e 锛 -e 锟 -e 鎴` 全仓扫描确认现存跟踪文件 **0 命中**。以后写中文长文档后必须回读一次校验编码。
+
 ## B7d：合流后主干复验发现新告警 #48，按三层齐备真修（2026-10-01，PR #42 已合入 `9ee0000`，主干复验通过）
 
 > 方案：`docs/plans/plan-codeql-batch7-no-dismiss-real-fixes-2026-10-01.md` §7。触发：v3 合流（PR #41）合入后回主干复验，硬指标未达成——open 不是 2 而是 3。
