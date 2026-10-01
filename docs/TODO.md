@@ -83,3 +83,4 @@
 ## 8. 外部条件依赖项（非代码缺口）
 
 - [ ] agent_federation R1 漂移门禁真实基线（`evaluation/fed_latest.jsonl`）：本地开发环境无 LLM API key，无法生成；需在有 key 的环境执行一次 `uv run python -m agent_federation.evaluation.run_eval --baseline evaluation/fed_latest.jsonl` 锁定基线，之后 `--compare --fail-below` 才能作为 CI 门禁生效（比对逻辑本身已通过单测覆盖，无缺口）
+- [ ] GitHub 侧 Copilot「Code scanning AI findings」工作流恒失败（非本仓代码问题，只登记）：Actions 列表里每条 PR 的 push 都会多出一个 `GitHub Advanced Security / Code scanning AI findings on PR #N` 红 X，日志根因为 `CAPIError: 400 The requested model is not supported`（autofind 请求模型被拒，平台侧）。与 diff 内容无关：最近 60 次运行窗口内共 7 条同名失败（PR #33 上 6 次 + PR #34 上 1 次），而同一窗口的 `Push on main` 与 Dependabot dynamic 运行均 success。（取证 check-run `110254555532`，annotations 仅“Process completed with exit code 1”，无代码告警）。该 check 未挂为 PR 状态检查，不阻塞合并；但看到红 X 时勿误读为“安全扫描发现漏洞”。若要消掉：在 GHAS 设置关 AI findings 分析，或等平台侧模型可用。

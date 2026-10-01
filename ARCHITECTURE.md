@@ -88,7 +88,7 @@ agent-core  agent-runtime  shared-schemas  agent-server  agent_federation  exhib
 
 - **`agent_federation` 自有 planner**：应用层 `agent_federation` 仍实现独立 planner/agent，需随 runtime 成形逐步收敛到红线 4。
 - **dialogue-framework 已移除**（2026-09-23，孤儿框架，能力已被 agent_server 吸收）。
-- **历史命名残留**：`docs/architecture-boundary-app-vs-agent-federation.md` 中仍出现的 `deepagents/` 旧名，已于 2026-08-19 清理为 `agent_federation/`；本文统一使用新名。
+- **历史命名残留**：`docs/architecture/architecture-boundary-app-vs-agent-federation.md` 中仍出现的 `deepagents/` 旧名，已于 2026-08-19 清理为 `agent_federation/`；本文统一使用新名。
 
 > 2026-08-20 更新：WS-1~WS-8 八工作流全量落地后，内核记忆/可靠性/可观测/配置/意图/Skill 中间件/LLM 缓存八大维度已收敛，详见 CHANGELOG 对应条目。兼容期为一个小版本（弃用路径保留 + DeprecationWarning），下轮清理专项删除。
 
