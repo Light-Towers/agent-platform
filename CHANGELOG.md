@@ -2,6 +2,17 @@
 
 本仓库为 uv workspace monorepo。**唯一受支持的安装/运行入口是根 `uv.lock` + `uv sync`**，子包不再维护独立 `uv.lock`（见 v2 修复 #14）。
 
+## CodeQL 合入后默认分支重扫对账：19/21 闭合，另暴露 5 条 kernel 模型缺失告警（2026-10-01，分支 `docs/codeql-post-merge-rescan`）
+
+> 本分支**纯文档**（不改产品代码）。触发：PR #33（`8b6d416`）与 PR #34（`4f8ae4c`）合入 `main` 后自动重扫的结果核对。
+
+- **闭合情况**：`refs/heads/main` open 21 → 9，其中原 21 条有 **19 条 `state=fixed`**（无 dismiss）——C 类 `py/stack-trace-exposure` ×4、D 类 `actions/missing-workflow-permissions` ×3、E 类 `py/incomplete-url-substring-sanitization` ×1 全清，A 类 8 条中 7 条清，B 类 4 个 api-key 站点全清。PR #34 自身 `CodeQL` 检查 pass（doc-sync 改动零告警）。
+- **新暴露 5 条（本条重点）**：`#40`/`#41`/`#42` `py/path-injection` 落在新建 kernel `agent_core/guardrails/fs.py` 内部的 `Path(...).resolve()` 调用点（`:119`/`:134`/`:162`），`#43`/`#44` 为新规则类 `py/clear-text-logging-sensitive-data`（同文件 `:93`/`:103` 两处拒绝日志回带入参原文）；另 `#23`（`FileResponse(abs_path)`）未闭合。**根因同一**：CodeQL 内建模型不认识 `safe_join`/`resolve_within`/`safe_filename` 为 sanitizer，所以污点既能追到调用点 sink，也能追进 sanitizer 内部把其 `resolve()` 当 sink 报。
+- **推理越界的纠正**：上游方案曾以「PR 重扫无新增 A/C/E/D 告警」作为反向证据，判定「无需为此补 data-extension」——**不成立**。`refs/pull/33/head` 与 `refs/heads/main` 是两套告警集合，跨过程的 kernel 内部 sink 只在默认分支模式下暴露。教训：**证据的作用域不能超出产生它的分析模式**；所以下结论必须回到最终作用域（默认分支）复验。已在原文处加纠正标记。
+- **预测命中**：`#38`/`#39`（kernel `guardrails/auth.py:92`/`:117`）如预期从 PR 作用域迁入 `refs/heads/main` 并重新开号——印证 dismiss 是按 ref 生效、不能只在 PR 上做一次。
+- **后续方案（待确认，未动工）**：`docs/plans/plan-codeql-batch6-kernel-sanitizer-models-2026-10-01.md`。选型实查：本仓为 PUBLIC（advanced setup 不占 GHAS 许可）；CodeQL 跑的是 default setup（仓内无 codeql workflow/config），而 default setup 只接受**已发布**的模型包——所以仓内本地 `.model.yml` 必须配 advanced setup 才生效。推荐以「切 advanced setup + 仓内模型包声明 sanitizer」为终态，期间用 dismiss 附证据维持面板可信；已否决「在调用点内联 `is_relative_to` 复检」（与 P7-1 不变量正面冲突且消不掉 kernel 内部告警）。
+- **仍待人工**：`#34`（`gateway/gray.py:40` 灰度分桶，真误报）与 `#38`/`#39` 的 dismiss 需 `security_events` scope（实测本机令牌仍不含）；部署需配 `AGENT_PLATFORM_SECURITY_PEPPER` 并先 dry-run `scripts/migrate_thread_identity.py`。
+
 ## doc-sync 门禁补齐「文件引用」校验 + 修复存量路径漂移（2026-10-01，分支 `fix/doc-sync-file-ref-gate`）
 
 > 方案：`docs/plans/plan-doc-sync-file-ref-gate-2026-10-01.md`。背景：PR #33（CodeQL 收敛）收尾排查时发现 `ARCHITECTURE.md` 一条文件引用指向不存在的路径而 CI 全绿；与 CodeQL 主题无关，故拆独立分支。
