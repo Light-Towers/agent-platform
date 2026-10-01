@@ -2,7 +2,7 @@
 
 本仓库为 uv workspace monorepo。**唯一受支持的安装/运行入口是根 `uv.lock` + `uv sync`**，子包不再维护独立 `uv.lock`（见 v2 修复 #14）。
 
-## B7d：合流后主干复验发现新告警 #48，按三层齐备真修（2026-10-01，方案 §7）
+## B7d：合流后主干复验发现新告警 #48，按三层齐备真修（2026-10-01，PR #42 已合入 `9ee0000`，主干复验通过）
 
 > 方案：`docs/plans/plan-codeql-batch7-no-dismiss-real-fixes-2026-10-01.md` §7。触发：v3 合流（PR #41）合入后回主干复验，硬指标未达成——open 不是 2 而是 3。
 
@@ -14,6 +14,9 @@
 - **登记位**：`ARCHITECTURE.md` 新增 **§4.1 强制门禁登记表**（P2/P4-2/P5/P6+P6-2/P7/P8/P9/P10/P11 × 锁住的告警形状 × 治理用例）。这是补合流方案 §8-3 的欠账——当时承诺「在 `ARCHITECTURE.md` 登记」但只落在 CHANGELOG，P9/P10 一直无登记位。
 - **本地验证**：`lint_architecture` exit 0（9 组：P4-2/P2/P5/P6+P6-2/P7/P8/P9/P10/P11）· 新用例 17 passed · `tests/governance` 全 session **242 passed** · `ruff check` 无告警。门禁有效性反喂取证：将 `git show HEAD:` 的**修复前原文**送进 P11 → 判「缺顶层 permissions 块」，修复后同一函数 → `None`。
 - **账面自纠（顺带查到，与本告警无因果）**：`plan-v3-identity-merge` §9.2 与 PR #41 描述均写着「仓内无 `uv lock --check` 门禁」——**错**：`make ci` 末行就是 `uv lock --check`（Makefile:71），而 CI 直接复用 `make ci`（`agent-platform-ci.yml:65`）。「不破 CI」的结论仍成立，但依据换成实证：本机 `uv lock --check` exit 0，且 PR #41 的 `ci` ×2 job（含 `--check`）已 pass。残留风险已登记：CI 的 uv 版本由 `setup-uv@v7` 决定且不钉，将来两端 marker 规范化不一致时 `--check` 可报「lock 已过期」而红；根治是在 workflow 钉 uv 版本（独立决策，未在本批做）。教训：**否定式断言（“仓内无 X”）必须 grep 过才能写**。
+- **主干重扫验收通过（本批的终态判定）**：PR #42 自身 5 项 checks 全 pass（`Analyze (actions)`/`Analyze (python)`/`CodeQL`/`ci` ×2），merge commit `9ee0000`@13:41:19Z。合入后在 `refs/heads/main` 实跑复验（`.codeartsdoer/temp/verify_main_b7d.py --once`）：**open 2 / fixed 44 / dismissed 0**；**#48 `state=fixed`、`fixed_at=2026-10-01T13:42:00Z`、`dismissed_at`/`dismissed_by`/`dismissal_reasons` 全为 `None`**（合入后 41 秒自动闭合，非人工 dismiss）；全仓最大告警号仍为 **48**，合入时刻之后**新建告警 0**；`#38`/`#39` 位置不变（`auth.py:92` col=47 / `:117` col=29），**无位移重开**。主干 push 的 check-runs：`Analyze (actions)` success@13:42:11Z、`Analyze (python)` success@13:42:59Z、`ci`（含 P11 lint + 17 条治理用例）**success@13:46:20Z** ⇒ P11 是**在主干真实跑过**，不只是本地跑过。
+- **判据脚本自身的一次纠错**：v3 版复验脚本第 [G] 项靠 `check-suites` 的套件名关键词过滤 CodeQL，实测该接口 `name` 字段为 **null** ⇒ 判据永远落在「尚未 completed」，属于「查不到就当没完成」的假保守；同时 `most_recent_instance.location` 是 `{path, start_line, start_column}` 而**非** SARIF 的 `physicalLocation`，误按后者解析会得到 `?:?`。本版改为直读 `check-runs` 的 `Analyze (python)`/`Analyze (actions)`/`ci`，并把「**未见主干 push 触发的 ci run**」也判为验收未达成（fail-closed），避免把取证工具的盲区当成通过信号。
+- **B7b 账面两处订正（收尾时 grep 实取，未改任何代码）**：① 方案 §4 原写 principal_id 化后「#38 与 #39 同时**真消失**」——**错**：`#38` 落点在共享实现 `fingerprint()` 内部（`auth.py:92`），除会话派生外还喂着 `resolve_client_key` 限流桶与 **`llm/registry.py:46`**（LLM 客户端缓存键，且它是**上游 provider 密钥而非调用方身份**，拿 principal_id 替代不成立）两个输入源；`#39` 落在 `legacy_thread_id`（为算 legacy→new 映射而故意保留，P6-2 锁调用面）。⇒ 已新增方案 **§4.1** 写清三个输入源与「规则是过程内还是全局流」这个待验证前置（沿用 Batch 7c「先实测再动手」）。② 旧 Batch 2 方案 `plan-codeql-codescanning-remediation` 至今仍列着两条可执行的 dismiss 文案/命令（#38 `false_positive` / #39 `wont_fix`）——已加 **作废横幅**：实测主干 `state=dismissed` 计数为 0，它们从未执行也不得再执行（破窗风险：历史文档里存着看似仍有效的 dismiss 步骤）。订正过程中我自己又写了一句未经 grep 的引用（「TODO 原写两调用点」，实际全仓 md 无此句），已当场删除并登记为二次自纠。
 
 ## v3 身份层合流 main（B7b principal_id 化的前置）（2026-10-01，PR #41 已合入 `a660e76`）
 
