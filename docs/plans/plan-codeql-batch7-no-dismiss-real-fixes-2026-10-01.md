@@ -1,6 +1,6 @@
 # CodeQL Batch 7：取消 dismiss 通道，剩余告警全部真修
 
-> 状态：**B7a 已执行**（#34 / #43 / #44 真闭合；#42 未消除，位移重开为 #47）→ **B7c 已执行并验收通过**（PR #39 合入 `bb46dd3`，主干重扫 **#47 真消失、无新号重开**，main open 3 → 2）；**B7b 已拍板走 principal_id 化**（待另立方案与 PR，本方案不动 `auth.py`）
+> 状态：**B7a 已执行**（#34 / #43 / #44 真闭合；#42 未消除，位移重开为 #47）→ **B7c 已执行并验收通过**（PR #39 合入 `bb46dd3`，主干重扫 **#47 真消失、无新号重开**，main open 3 → 2）；**B7b 已拍板走 principal_id 化**（待另立方案与 PR，本方案不动 `auth.py`）；**B7d 新增**（v3 合流后主干复验发现新告警 **#48**，见 §7）
 > 日期：2026-10-01　触发：用户明确「不要用 dismiss 这种简单的处理方式」
 > 前置：Batch 1-6 见 `plan-codeql-codescanning-remediation-2026-10-01.md` 与 `plan-codeql-batch6-kernel-sanitizer-models-2026-10-01.md`
 
@@ -109,3 +109,50 @@
   - **#47 真消失（不是位移重开）**：`state=fixed`、`fixed_at=2026-10-01T11:44:14Z`、`dismissed_at=None`；同时全仓告警最大号仍为 **#47**，合入时刻之后**无任何新建告警**（号段 1..47，缺号 45/46）→ 同一 sink 未在新行号重开。
   - `refs/heads/main` CodeQL 告警总账：**45 条，`fixed` 43 / `open` 2**，open 仅剩 **#38 / #39**（`py/weak-sensitive-data-hashing` @ `guardrails/auth.py:92`/`:117`）→ 待 B7b。**43/43 闭合均为自动（`dismissed_at=None`），全仓零人工 dismiss。**
   - 取证脚本：`.codeartsdoer/temp/verify_main_rescan.py`、`.codeartsdoer/temp/verify_no_new_alert.py`（告警按 `ref=refs/heads/main` 过滤；`state` 三段 open/closed/dismissed 并集去重）。
+
+## 7. B7d：合流后主干复验发现的新告警 #48（本批执行）
+
+### 7.1 事实（`.codeartsdoer/temp/verify_main_rescan_v3.py` 实取，非推演）
+
+v3 身份层合流（PR #41，merge commit `889d417` → `a660e76`，2026-10-01T13:00:43Z）后回主干复验：
+
+| 项 | 实测值 |
+|---|---|
+| 主干 `ref=refs/heads/main` 告警分布 | **open 3 / fixed 43 / dismissed 0**（预期 open 2） |
+| 新增号 | **#48** `actions/missing-workflow-permissions`，`created_at=2026-10-01T12:55:08Z`（PR CI 期间）、`updated_at=13:01:20Z`（主干重扫复现） |
+| 位置 | `.github/workflows/ha-assembly.yml:30-56`（job `assembly` 体） |
+| 引入源 | `70f2b83`（经 merge 第二父进来，即 **v3 侧提交**新增该 workflow），`git diff --name-status b67546d 889d417 -- .github/workflows/` = `A .github/workflows/ha-assembly.yml` |
+| #38/#39 位移核对 | 无位移：`auth.py:92` col=47 / `:117`，仍 open |
+| 合入时刻之后新建告警 | 0（#48 创建于合入之前，属本 PR 自身带出） |
+
+⇒ 合流**确实新增了 1 条告警**，方案 §5-5 的硬指标未达成，按同一约束处置：**真修，不 dismiss**。
+
+### 7.2 目标与全局口径
+
+只把被点名的那一行补上权限块即可让 #48 归零，但那是散点式做法（AGENTS.md「横切关注点三层齐备」）。故按三层落地：
+
+| 层 | 内容 |
+|---|---|
+| **单一实现（约定）** | 仓库既有约定即为「顶层 `permissions: contents: read`」——审计 4 个根 workflow：`agent-platform-ci.yml:49` / `eval-llm.yml:23` / `ha.yml:35` 三处已在位，**`ha-assembly.yml` 是唯一漏接者**（顶层与 job 级均无）。修法为对齐既有约定，不新发明。 |
+| **全局装配** | workflow 是声明式的，无装配点；由下一条的 lint 不变量承担「构造保证不漏接」。 |
+| **强制门禁** | 新增 **P11**：`scripts/lint_architecture.py` 扫 `.github/workflows/*.{yml,yaml}`，**缺顶层 `permissions:` 块**或取值为 **`write-all`** 即 CI 失败。白名单为空（无存量豁免）。 |
+
+**P11 判据口径（为何只要顶层）**：GitHub 对未声明 `permissions` 的 job 会回落到组织/仓库默认（常为读写），job 级声明容易漏且不可核；顶层声明由构造保证覆盖该 workflow 全部 job。确需某 job 提升权限时，在 job 级单独声明即可，顶层块仍不得省略。
+
+**实现约束**：沿用 `lint_architecture.py` 既有性质——**只走 stdlib**（`re`/`sys`/`tomllib`），不因本门禁引入 PyYAML（venv 里虽因 `agent_federation`/`nl2sql-service` 声明而存在，但脚本需能在无依赖环境直跑）。YAML 语法本身的校验不属本门禁职责（已由 GitHub 侧与一次本地 `yaml.safe_load` 取证完成：4 个根 workflow 均解析通过且顶层 `permissions={'contents': 'read'}`）。
+
+### 7.3 影响面与运行侧风险
+
+- `ha-assembly.yml` 实际用量：仅 `actions/checkout@v4` + `docker compose` 本地构建/起服务 + `curl` 打 `/health`，**不上传 artifact、不发 PR 评论、不写仓库** ⇒ `contents: read` 是它所需最小面，收敛不会让它跑不动。
+- 存量佐证：该 workflow 在 PR #41 的 `assembly` ×2 job 已 pass，而当时 token 权限比 `contents: read` 更宽——收窄后所需能力是它的子集。
+- 无数据迁移、无对外契约变更、不改任何默认值。
+
+### 7.4 验收标准（合入后回主干复验）
+
+1. **#48 `state=fixed`**、`fixed_at` 有值、`dismissed_at=None`（自动闭合）。
+2. 主干 `ref=refs/heads/main` **open 回到 2**，且仅剩 #38/#39，位置不变。
+3. 全仓最大告警号仍为 **48**（修复本身不得引入新号），合入时刻之后新建告警 = 0。
+4. `lint_architecture.py` exit 0 且 P11 在位；P11 治理用例含**正反例 + 当前树零违规 + 临时根探针验扫描面**（与 P6/P6-2 同构）。
+5. 三层齐备第③层不得缺席：若只改 workflow 不加 P11，本批不算完成。
+
+**不选**：dismiss（含 `wont_fix`／`allowlist`）；在 default setup 里按路径排除 `actions/*` 查询（看不见而非修好了）；把权限写成 `write-all` 求个「不报」。

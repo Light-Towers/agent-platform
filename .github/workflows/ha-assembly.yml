@@ -25,6 +25,11 @@ on:
       - "uv.lock"
   workflow_dispatch:
 
+# 最小权限（CodeQL actions/missing-workflow-permissions）：checkout + compose 本地构建/起服务
+# + curl 打 /health，全程只读仓库，不上传 artifact 也不写仓库。
+permissions:
+  contents: read
+
 jobs:
   assembly:
     runs-on: ubuntu-latest
