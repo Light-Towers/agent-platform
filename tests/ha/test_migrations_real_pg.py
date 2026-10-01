@@ -10,14 +10,17 @@
          → 版本记录 → 幂等重跑 → checksum 校验
 
 使用独立 scratch 数据库（agent_platform_mig_selftest），不污染 HA 测试库；
-CI 由 pgvector/pgvector:pg16 service 提供 PG，本地无 PG 自动 skip（CI=true 时 FAIL，
-语义与 conftest 一致）。
+连接池配置对齐生产 `db.init_pool`（autocommit + register_vector_async +
+ensure_extensions，W-5），保证事务拓扑与 pgvector codec 与生产一致。
+CI 由 pgvector/pgvector:pg16 service 提供 PG，本地无 PG 自动 skip（CI=true 时
+FAIL，门禁策略单一来源见 conftest `pg_gate` fixture，W-3）。
 """
 
 from __future__ import annotations
 
 import os
 import sys
+from urllib.parse import urlsplit, urlunsplit
 
 import pytest
 
@@ -29,52 +32,102 @@ PG_URL = os.environ.get(
 )
 SCRATCH_DB = "agent_platform_mig_selftest"
 
-_IN_CI = os.environ.get("CI", "").strip().lower() in {"true", "1"}
+
+def scratch_url_of(url: str) -> str:
+    """把 PG URL 的库名替换为 scratch 库（其余连接参数/查询串原样保留）。
+
+    纯函数（S-2）：用 urlsplit 解析，兼容查询串（?sslmode=require）、尾斜杠、
+    driver 前缀（postgresql+psycopg://）等真实 URL 形态。
+    """
+    parts = urlsplit(url.strip())
+    db = parts.path.strip("/")
+    if not db or "/" in db:
+        raise ValueError(f"PG URL 缺少或多段库名路径: {url!r}")
+    return urlunsplit(parts._replace(path=f"/{SCRATCH_DB}"))
 
 
-def _skip_or_fail(reason: str) -> None:
-    """本地无 PG → skip；CI 环境必须真实执行 → fail（与 tests/ha/conftest.py 一致）。"""
-    if _IN_CI:
-        pytest.fail(f"CI 环境必须提供可用 PostgreSQL，migration 集成测试前置失败：{reason}")
-    pytest.skip(reason)
-
-
-def _scratch_url() -> str:
-    """把 PG_URL 的库名替换为 scratch 库（其余连接参数保持一致）。"""
-    base, _ = PG_URL.rsplit("/", 1)
-    return f"{base}/{SCRATCH_DB}"
+def test_scratch_url_of_handles_real_world_shapes():
+    """S-2 回归：scratch URL 改写对真实 URL 形态健壮（纯函数，无需 PG）。"""
+    cases = [
+        "postgresql://agent:pwd@localhost:5432/db",
+        "postgresql://agent:pwd@localhost:5432/db/",
+        "postgresql://agent:pwd@localhost:5432/db?sslmode=require",
+        "postgresql+psycopg://agent:pwd@host:5433/db",
+    ]
+    for url in cases:
+        out = scratch_url_of(url)
+        assert out.rsplit("/", 1)[-1].split("?")[0] == SCRATCH_DB, url
+        if "?" in url:
+            assert out.endswith(url.rsplit("?", 1)[1]), url
+    with pytest.raises(ValueError):
+        scratch_url_of("postgresql://agent:pwd@localhost:5432")
 
 
 @pytest.fixture()
-async def scratch_db():
-    """创建一次性 scratch 数据库，测试结束销毁。"""
-    if sys.platform == "win32" and not _IN_CI:
-        pytest.skip("Windows 本地默认跳过（psycopg ProactorEventLoop），由 Linux CI 覆盖")
-
+async def scratch_db(pg_gate):
+    """创建一次性 scratch 数据库，测试结束销毁（清理置于 try/finally，W-6）。"""
     import psycopg
 
+    if sys.platform == "win32":
+        pg_gate(
+            fail_reason="Windows CI 不支持 HA 测试（psycopg ProactorEventLoop），与 PG 可达性无关",
+            skip_reason="Windows 本地默认跳过（psycopg ProactorEventLoop），由 Linux CI 覆盖",
+        )
+
+    created = False
     try:
-        async with await psycopg.AsyncConnection.connect(PG_URL, autocommit=True) as conn:
-            await conn.execute(f'DROP DATABASE IF EXISTS "{SCRATCH_DB}" WITH (FORCE)')
-            await conn.execute(f'CREATE DATABASE "{SCRATCH_DB}"')
-    except Exception as exc:  # noqa: BLE001 —— 环境守卫：任何连接/建库失败都归一为 skip（CI 为 fail）
-        _skip_or_fail(repr(exc))
+        try:
+            async with await psycopg.AsyncConnection.connect(PG_URL, autocommit=True) as conn:
+                await conn.execute(f'DROP DATABASE IF EXISTS "{SCRATCH_DB}" WITH (FORCE)')
+                await conn.execute(f'CREATE DATABASE "{SCRATCH_DB}"')
+            created = True
+        except Exception as exc:  # noqa: BLE001 —— 环境守卫：连接/建库失败归一门禁（CI=FAIL，本地=skip）
+            pg_gate(
+                fail_reason=(
+                    f"CI 环境必须提供可用 PostgreSQL，migration 集成测试建库失败 "
+                    f"[{type(exc).__name__}]：{exc}"
+                ),
+                skip_reason=(
+                    f"本地无可用 PostgreSQL（migration 集成测试）"
+                    f"[{type(exc).__name__}]：{exc}"
+                ),
+            )
 
-    yield _scratch_url()
-
-    async with await psycopg.AsyncConnection.connect(PG_URL, autocommit=True) as conn:
-        await conn.execute(f'DROP DATABASE IF EXISTS "{SCRATCH_DB}" WITH (FORCE)')
+        yield scratch_url_of(PG_URL)
+    finally:
+        if created:
+            async with await psycopg.AsyncConnection.connect(PG_URL, autocommit=True) as conn:
+                await conn.execute(f'DROP DATABASE IF EXISTS "{SCRATCH_DB}" WITH (FORCE)')
 
 
 @pytest.fixture()
 async def scratch_pool(scratch_db: str):
-    """scratch 库的独立连接池（不走 _db.init_pool 单例，避免污染其他测试）。"""
+    """scratch 库连接池——**配置对齐生产 db.init_pool**（W-5）。
+
+    - kwargs autocommit=True：与生产同事务拓扑（advisory lock 获取/释放边界等价）；
+    - configure=register_vector_async：pgvector codec 注册（未来 migration 读写
+      vector 列不失真）；
+    - ensure_extensions 先行：生产在开池前启用扩展（db.py 记录的顺序约束），
+      不依赖 baseline SQL 兜底。
+    """
+    from agent_runtime.db import ensure_extensions
+    from pgvector.psycopg import register_vector_async
     from psycopg_pool import AsyncConnectionPool
 
-    pool = AsyncConnectionPool(conninfo=scratch_db, min_size=1, max_size=2, open=False)
-    await pool.open(wait=True)
-    yield pool
-    await pool.close()
+    await ensure_extensions(scratch_db)
+    pool = AsyncConnectionPool(
+        conninfo=scratch_db,
+        min_size=1,
+        max_size=2,
+        kwargs={"autocommit": True},
+        configure=register_vector_async,
+        open=False,
+    )
+    try:
+        await pool.open(wait=True)
+        yield pool
+    finally:
+        await pool.close()
 
 
 async def test_fresh_db_full_migration_chain(scratch_pool):

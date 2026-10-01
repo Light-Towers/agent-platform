@@ -148,6 +148,12 @@ class Settings:
     knowledge_max_body_bytes: int = _as_int(os.getenv("KNOWLEDGE_MAX_BODY_BYTES"), 65536)
     knowledge_max_context_chars: int = _as_int(os.getenv("KNOWLEDGE_MAX_CONTEXT_CHARS"), 12000)
 
+    # -------------------------- 隔离域（ADR-0006 T11 / W4） --------------------------
+    # 租户安全边界：多租户下“不传 tenant 即全库检索/写”为跨租户泄漏通道。
+    # 入站 tenant 为空时由服务端注入本部署级默认租户（并审计告警），而非静默全量；
+    # 单租户开发态保持 default，多租户部署按部署单元注入真实租户。
+    knowledge_default_tenant_id: str = os.getenv("KNOWLEDGE_DEFAULT_TENANT_ID", "default")
+
     # -------------------------- 导入：图片摘要（可选增强） --------------------------
     # 图片摘要需多模态（VL）模型；缺省关闭：无 VL 能力时跳过摘要（图片标题用默认值
     # "图片描述"），避免不可用/收费的 VL 模型拖慢或阻塞导入主链路（正文检索不依赖摘要）。

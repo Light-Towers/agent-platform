@@ -24,13 +24,10 @@ from agent.prompts import main_agent_content, planner_content
 from agent.subagents.database_query_agent import database_query_agent
 from agent.subagents.knowledge_base_agent import knowledge_base_agent
 from agent.subagents.network_search_agent import network_search_agent
+from agent.tool_registry import get_tool
 from agent.tracing.langfuse_adapter import langfuse_observe
 from api.context import reset_session_context, set_session_context, set_thread_context
 from api.monitor import monitor
-from tools.code_execution_tool import execute_python_code
-from tools.markdown_tools import generate_markdown
-from tools.pdf_tools import convert_md_to_pdf
-from tools.upload_file_read_tool import read_file_content
 
 _main_agent = None
 _main_agent_lock = asyncio.Lock()  # P1.1/1.4：保护 _main_agent 构造，防并发首请求重复构造
@@ -268,9 +265,10 @@ async def get_main_agent(checkpointer=None):
         # 宿主代码执行面须显式开启，防 LLM 不可控调用
         from agent.tool_registry import sandbox_tool_enabled
 
-        _tools = [generate_markdown, convert_md_to_pdf, read_file_content]
+        # 批 2：全部经 tool_registry 统一出口取工具（observe_tool 包装，构造保证不漏观测）
+        _tools = [get_tool("generate_markdown"), get_tool("convert_md_to_pdf"), get_tool("read_file_content")]
         if sandbox_tool_enabled():
-            _tools.append(execute_python_code)
+            _tools.append(get_tool("execute_python_code"))
         # Phase D 集成（opt-in, AGENTIC_RUNTIME_BRIDGE=true）：追加经统一 Runtime 治理的桥接工具，
         # 不改变默认工具集；任一环节失败仅跳过桥接工具，主链路零影响。
         _tools = _maybe_attach_bridged_tools(_tools, "")

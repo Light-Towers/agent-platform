@@ -40,7 +40,7 @@ async def test_recall_typed_delegates_to_core_typed(monkeypatch):
     monkeypatch.setattr(sm, "embed_memory", lambda t: [0.1, 0.2])
 
     pool = _FakePool()
-    result = await sm.recall_typed(pool, "u1", "q", k=5, weights=[("episodic", 2.0)])
+    result = await sm.recall_typed(pool, "u1", "q", k=5, weights=[("episodic", 2.0)], tenant_id="default")
 
     assert captured["pool"] is pool
     assert captured["user_id"] == "u1"
@@ -120,7 +120,7 @@ async def test_fallback_recall_uses_old_recall(monkeypatch):
     monkeypatch.setattr(sm, "recall_memories", _fake_recall)
 
     pool = _FakePool()
-    result = await sm.recall_typed(pool, "u1", "q", k=3)
+    result = await sm.recall_typed(pool, "u1", "q", k=3, tenant_id="default")
 
     assert captured["user_id"] == "u1"
     assert captured["query"] == "q"
@@ -146,7 +146,7 @@ async def test_fallback_remember_uses_old_remember(monkeypatch):
     monkeypatch.setattr(sm, "remember_memory", _fake_remember)
 
     pool = _FakePool()
-    await sm.remember_fact(pool, "u1", "事实", "procedural", 0.9)
+    await sm.remember_fact(pool, "u1", "事实", "procedural", 0.9, tenant_id="default")
 
     assert captured["user_id"] == "u1"
     assert captured["fact"] == "事实"
@@ -160,7 +160,7 @@ async def test_fallback_remember_noop_without_backend(monkeypatch):
     monkeypatch.setattr(sm, "remember_memory", lambda **k: called.__setitem__("remember", True))
 
     pool = _FakePool()
-    await sm.remember_fact(pool, "u1", "事实")  # 不应调用旧门面
+    await sm.remember_fact(pool, "u1", "事实", tenant_id="default")  # 不应调用旧门面
     assert called["remember"] is False
 
 
@@ -168,8 +168,8 @@ async def test_consolidate_and_forget_noop_when_disabled(monkeypatch):
     monkeypatch.setattr(sm, "semantic_memory_typed_enabled", lambda: False)
     pool = _FakePool()
     # typed 关闭时保持零行为变更
-    assert await sm.consolidate(pool, "u1") == 0
-    assert await sm.forget(pool, "u1", 7) is False
+    assert await sm.consolidate(pool, "u1", tenant_id="default") == 0
+    assert await sm.forget(pool, "u1", 7, tenant_id="default") is False
 
 
 # --- embed_memory 使用 agent-core embedder 单例 ---------------------------

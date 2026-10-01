@@ -442,6 +442,102 @@ def check_exception_echo_in_api_responses() -> list[str]:
     return violations
 
 
+# ---------------------------------------------------------------------------
+# P9 架构不变量（v3 合流并入，原「批 3」门禁）：tool 事件上报唯一出口 = agent_core.observability.observe_tool。
+# applications/** 生产代码禁止裸调 monitor.report_tool / monitor.report_tool_outcome
+# （散点埋点反模式，见 docs/plans/plan-tool-instrumentation-choke-point-2026-09-25.md
+# §5 批 3）；outcome 语义经 ToolResult 返回承载（v3.1 定板）。
+# 作用域仅 applications/**：kernel（agent_core/observability）为合法实现位；
+# tests/ 由作用域排除；evaluation 订阅走 monitor.on 非本模式，天然不命中。
+# ---------------------------------------------------------------------------
+# 负向前瞻 (?<![\w.])：排除 foo_monitor / self._monitor 等误命中（仍精准匹配裸 monitor）
+_TOOL_MONITOR_PATTERN = re.compile(r"(?<![\w.])monitor\.report_tool(?:_outcome)?\s*\(")
+_TOOL_MONITOR_WHITELIST: tuple[str, ...] = ()
+
+
+def check_tool_monitor_scatter() -> list[str]:
+    """app 层禁止裸调 monitor.report_tool*（散点埋点）；返回违规描述列表。"""
+    violations: list[str] = []
+    for py_file in ROOT.rglob("*.py"):
+        rel = py_file.relative_to(ROOT).as_posix()
+        if not rel.startswith("applications/"):
+            continue
+        if any(p in rel for p in (".venv", "__pycache__", ".ruff_cache", ".egg-info",
+                                   ".codeartsdoer", ".codebuddy")):
+            continue
+        if "/tests/" in rel:
+            continue
+        if any(rel == w or rel.startswith(w) for w in _TOOL_MONITOR_WHITELIST):
+            continue
+        try:
+            for lineno, line in enumerate(py_file.read_text(encoding="utf-8").splitlines(), 1):
+                if _TOOL_MONITOR_PATTERN.search(line):
+                    violations.append(f"{rel}:{lineno}: {line.strip()}")
+        except Exception:
+            pass
+    return violations
+
+
+# ---------------------------------------------------------------------------
+# P10 架构不变量（v3 合流并入，原「C1 防回归」）：禁用 from tools.* 直引 @tool 对象
+# 绕过 tool_registry.get_tool()（一旦绕过就丢掉 tool 级观测）。
+# ---------------------------------------------------------------------------
+_TOOL_REGISTRY_PATH = ROOT / "applications" / "agent_federation" / "agent" / "tool_registry.py"
+_DIRECT_IMPORT_PATTERN = re.compile(r"^\s*from\s+tools\.[\w.]*\s+import\s+(.+)$")
+
+
+def _load_registry_tool_names() -> set[str]:
+    """从 TOOL_REGISTRY 解析已注册 @tool 属性名（module:attr 的 attr 即工具名）。"""
+    try:
+        text = _TOOL_REGISTRY_PATH.read_text(encoding="utf-8")
+    except OSError:
+        return set()
+    names: set[str] = set()
+    for m in re.finditer(r'"([\w]+)"\s*:\s*"tools\.[\w]+:([\w]+)"', text):
+        names.add(m.group(2))
+    return names
+
+
+def check_tool_direct_import() -> list[str]:
+    """禁止经 ``from tools.* import <@tool>`` 直引绕过 tool_registry.get_tool()（C1 根因防回归）。
+
+    批 2 已将六条挂载路径统一经 get_tool() 取用（含 subagent 直引、bridge 直引），
+    本检查封死「未来新增工具时直接 import @tool 对象跳过观测包装」的回归面。
+    合法例外：tool_registry.py 自身（用字符串延迟定位）、tests/、普通函数
+    （如 check_knowledge_health 非 @tool，不在 TOOL_REGISTRY 故不命中）。
+    """
+    tool_names = _load_registry_tool_names()
+    if not tool_names:
+        return []
+    violations: list[str] = []
+    for py_file in ROOT.rglob("*.py"):
+        rel = py_file.relative_to(ROOT).as_posix()
+        if not rel.startswith("applications/"):
+            continue
+        if any(p in rel for p in (".venv", "__pycache__", ".ruff_cache", ".egg-info",
+                                   ".codeartsdoer", ".codebuddy")):
+            continue
+        if "/tests/" in rel:
+            continue
+        if rel == "applications/agent_federation/agent/tool_registry.py":
+            continue
+        try:
+            for lineno, line in enumerate(py_file.read_text(encoding="utf-8").splitlines(), 1):
+                m = _DIRECT_IMPORT_PATTERN.match(line)
+                if not m:
+                    continue
+                for part in m.group(1).split(","):
+                    sym = part.strip().split(" as ")[0].strip()
+                    if sym in tool_names:
+                        violations.append(
+                            f"{rel}:{lineno}: 直引 @tool '{sym}' 绕过 get_tool()"
+                            f"（应经 tool_registry.get_tool 取用，否则缺失 tool 级事件）"
+                        )
+        except Exception:
+            pass
+    return violations
+
+
 def main() -> int:
     rc = 0
     v1 = check()
@@ -500,6 +596,24 @@ def main() -> int:
         rc = 1
     else:
         print("P8 架构约束通过：HTTP/SSE 出口无异常消息/堆栈回显")
+    v7 = check_tool_monitor_scatter()
+    if v7:
+        print("P9 架构约束违反：app 层禁止裸调 monitor.report_tool*（散点埋点）")
+        print("修复：工具经 tool_registry.get_tool() 取用，outcome 语义经 ToolResult 返回承载：")
+        for v in v7:
+            print(f"  {v}")
+        rc = 1
+    else:
+        print("P9 架构约束通过：无白名单外散点 tool 埋点")
+    v8 = check_tool_direct_import()
+    if v8:
+        print("P10 架构约束违反：经 from tools.* import <@tool> 直引绕过 get_tool()（观测断点）")
+        print("修复：统一经 tool_registry.get_tool() 取用：")
+        for v in v8:
+            print(f"  {v}")
+        rc = 1
+    else:
+        print("P10 架构约束通过：无 @tool 直引旁路")
     return rc
 
 

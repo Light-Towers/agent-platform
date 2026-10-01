@@ -2,6 +2,19 @@
 
 本仓库为 uv workspace monorepo。**唯一受支持的安装/运行入口是根 `uv.lock` + `uv sync`**，子包不再维护独立 `uv.lock`（见 v2 修复 #14）。
 
+## v3 身份层合流 main（B7b principal_id 化的前置）（2026-10-01，分支 `integration/v3-into-main`，待 PR/CI）
+
+> 方案：`docs/plans/plan-v3-identity-merge-2026-10-01.md`（§9 为执行记录）。触发：用户在 B7b 落地上拍板「先合流 v3 身份层，再做 principal_id 化」——`#38`/`#39` 的病根（单一静态 `API_KEY`、无 key→主体映射）与 v3 上已 Accepted 的 ADR-0007 同一条；直接在 main 再造 principal 注册表就会形成**第三套身份机制**，违反「横切关注点单一实现」。
+
+- **合流粒度**：`git merge origin/v3` 一次全量（v3 ahead 47 / main ahead 49，merge-base `2a5e633`），**不 cherry-pick、不用 `-X ours/theirs` 压冲突**；47 个 commit 的作者与关联完整保留。
+- **带入的内容**（main 此前全无）：`agent_runtime/identity.py`（RS256 签/验 + 网关→子服务 HMAC 内部头 + JWKS 轮转 + 启动守卫）、`identity_middleware.py`（纯 ASGI）、联邦 `api/identity_bridge.py`（`X-Tenant-JWT`）、ks `utils/tenant_identity.py`、内核 `memory/_tenant_gate.py`、ADR-0006/0007、migration `006`–`010`、5 条 governance 红线测试与 HA 租户隔离用例。
+- **五处冲突的处置**：`lint_architecture.py` 两侧门禁**全保留**，v3 两条续编为 **P9（禁散点 tool 埋点）/ P10（禁 `from tools.*` 直引绕过 `get_tool()`）**；`agent-runtime/pyproject.toml` 取并集（新 `identity = ["PyJWT[crypto]>=2.9"]` extra）；`CHANGELOG.md` 两条时间线分段并存（append-only，不改写不重排）；`dep-security-accepted-risks` add/add **以 main 为基底**（它是含 09-30 证伪的演进后超集）并并回 v3 独有的一条 `uv tree -i` 排查手法；`uv.lock` 经 `uv lock` 重生成（未手改）。
+- **合流新暴露并已真修的第 6 处（非 dismiss、非放宽门禁）**：`check_doc_sync.py` 报 `ARCHITECTURE.md` 两条**悬空引用**（`docs/adr/0005`、`docs/plans/plan-memory-hardening-2026-09-27.md`）——两文件在 `main`/`v3` 均不存在（v3 自身早就不一致），只存在于 `feat/isolation-hardening`@`d4b6faa`。导入其**「提案」版**并逐文件加来源标注：该分支后续 `ff68aee` 声称「T0 已落地」，但主干 `git grep -l -e EpisodicStoreProtocol -e supports_episodic` **0 命中**、`agent_core/memory/` 无 `execution.py`，故**不采信该修订**；真正随合流落地的是 T1（`010_episodic_tenant` + HA 用例）。
+- **运行侧（已在 `.env.example` 登记 12 项）**：`DEPLOY_ENFORCE_IDENTITY` **默认 false** ⇒ 零依赖冒烟不受影响（实测：默认档 `agent_server.main:app` 构造成功、中间件栈含 `IdentityMiddleware`；置 true 且无公钥无 `SINGLE_TENANT` → `RuntimeError` 拒启动，开关不是摆设）；本次**不**把默认值改成 fail-closed（独立决策）。
+- **新登记技术债（`ARCHITECTURE.md` §2.3/§5）**：`IdentityMiddleware` 仅覆盖 2/6 应用（agent_server + federation 无条件挂载；ks 走自有 `TenantHeaderMiddleware`；exhibition/kefu/nl2sql 入口 grep **0 命中**）——`TENANT_JWT_ENFORCE` 硬切换前必须先补齐装配层 + 新增 lint 不变量，不得靠「每个 app 记得调一次」。
+- **本地验证（全绿）**：`ruff` 无告警 · `lint_architecture` exit 0（P4-2/P2/P5/P6+P6-2/P7/P8/P9/P10 全在位）· `check_doc_sync` exit 0 · 9 个 pytest session：根 839 passed/5 skipped、agent-runtime 606（含 27 条 identity）、governance 225、agent-core 300/5、agent_server 44、联邦 163、ks 238/13、shared-schemas 28、kefu 43、exhibition 347/1、nl2sql 18；`tests/ha` 1 passed/26 skipped（本机无 PG，skip 属设计意图，真 PG 结果交 CI）。`uv lock` 除 identity 条目外还归一化了约 30 行 environment marker（本机 uv 0.11.21 与 lock 原生成版差异，无包名/版本变动，已实查确认 CI 不走 `--frozen`）。
+- **验收硬指标（尚未达成，不得提前声明）**：主干 `refs/heads/main` open 仍为 2（`#38`/`#39`）、且合流未新增任何告警；若新增，按同一流程真修，**不 dismiss**。
+
 ## Batch 7c：#47 按官方编码形状重写 `resolve_within`（2026-10-01，分支 `fix/codeql-batch7c-path-shape`，PR #39 已合入 `bb46dd3`）
 
 > 接 Batch 7a：主干重扫发现 #42 只是**位移重开**为 #47（同一语句）。方案：`docs/plans/plan-codeql-batch7-no-dismiss-real-fixes-2026-10-01.md` §3.4。
@@ -96,6 +109,35 @@
 - **二次重扫（`c8e512e`+`45373dd`）无新增告警**：`ci`（push/PR 两事件）、`ha`、`Analyze (python|actions)` 均 pass；PR ref 上 open 仍只有 #38/#39 两条，**编号未因 kernel docstring 导致的行号漂移（78→92、99→117）而变动**——CodeQL 分组跟住了纯注释变更，本轮定调无需重开。CodeQL 检查仍 fail 的唯一剩余原因就是这两条未 dismiss（定性已同步回帖到 PR 上的两条 annotation，当前权限下能做的替代动作）。
 - **新增 P6-2 门禁（约定 → 不变量）**：`legacy_thread_id` 的调用面原先只靠 docstring 约束（kernel 在 P6 白名单内，lint 拦不住新增调用点），现由 `scripts/lint_architecture.py` P6-2 锁死：除 kernel 定义处与 `scripts/migrate_thread_identity.py` 外出现调用即 CI 失败；补 4 个治理用例（单行正反例 + 当前树零违规 + 临时根埋探针验扫描面）。
 
+## 隔离域加固：tenant 边界 / workspace 归属 / memories 双 scope（2026-09-27，分支 `feat/isolation-hardening`，`f072bc2..28877fc`）
+
+> 归属说明：以下两节（09-27 隔离域加固、09-25 租户隔离收紧）原为 `v3` 分支历史条目，随 2026-10-01 `integration/v3-into-main` 合流**首次进入 `main` 时间线**。按 append-only 约定，不重写、不重排任何已有条目，仅加本行归属标记。
+
+> 方案：`docs/adr/0006-isolation-dimension-contract.md`（已采纳）+ `docs/plans/plan-isolation-hardening-2026-09-27.md`（T9–T13）；episodic/procedural 部分依 `docs/plans/plan-memory-hardening-2026-09-27.md` T1。核心：`tenant_id` 为唯一安全边界（服务端解析、漏传 fail-fast 沿用 `_tenant_gate`），`workspace_id`/`user_id` 为归属维不单独承担隔离。
+
+- **T9 corpus 补 tenant_id（`f072bc2`，W1）**：migration `006_tenant_corpus` 为 `chunks`/`sql_ddl`/`sql_docs`/`sql_examples` 加 `tenant_id`（`DEFAULT 'default'`）+ `(tenant_id, workspace_id)` 复合索引；`rag/store.py`、`sql/schema_store.py` 读写 SQL 成对带 tenant 谓词、消除「空 workspace = 全库召回」旁路；写入口（`/import`、`/sql/train`）收服务端租户（不收表单值）。
+- **T10 workspaces 归属表（`28feae4`，W2/D4 方案 A）**：migration `007_workspaces` + 新模块 `agent_runtime/workspace_registry.py`；**复合 PK `(tenant_id, id)` 按租户命名空间化**（`workspace_id` 当前为客户端扁平串且共享 `'default'`，不能用全局唯一 `id` PK，否则跨租户撞名）；`resolve_workspace(tenant_id, workspace_id)->bool` 首次引用自动注册、越权 `assert_workspace_access` 抛 `WorkspaceTenantMismatch`；migration `009_workspaces_backfill` 幂等补注册现网 `(default, workspace_id)`。`import/sql/query_router` 使用前统一 `resolve_workspace`（读路径 best-effort）。
+- **T11 knowledge-service 租户强制化（`0163fc6`，W4）**：`utils/tenant_utils.resolve_server_tenant()`——空 tenant → 服务端注入 `KNOWLEDGE_DEFAULT_TENANT_ID` + 审计（**选注入而非 422**：避免同步打断多个历史不传 tenant 的存量链路，同时关掉「空→不过滤=全库」真旁路）；删 `mongo_history_utils` 的 `if tenant_id else None` 回退；调用方审计：联邦 `tools/knowledge_tools.py::knowledge_retrieve` 改为下传请求链路租户（`api.context.get_tenant_context`），非 server 环境降级注入。
+- **T12 隔离维度契约测试（`9c27c82`，W5）**：`tests/governance/test_isolation_dimension_contract.py`——迁移回放最终 schema 断言每张业务表含 `tenant_id`（系统/待判定表显式白名单+理由，人为建无 tenant 业务表→红）；AST 断言 `workspace_id =` 谓词必与 `tenant_id` 成对（已知误报源：docstring/日志，按“含表名 token + SQL 动词”过滤）。
+- **T13 memories 双 scope（`e5566bf`，W3/用户拍板“画像层必须存在”）**：migration `008_memories_dual_scope`（`workspace_id`/`scope` 列 + 两索引 + user_id←workspace_id 回填）；内核 `typed.py` **新增** `remember_typed_scoped`/`recall_user_profile`（既有 5 动词签名不变、ADR-0004 向后兼容），workspace/user 两路各自 top-k 后按同一 `type_weight×importance×decay` 融合（不改评分公式，融合置于门面 `memory_backend.recall_typed`）；`MEMORY_DUAL_SCOPE` 渐进开关默认关=零变更，读路径双列兼容滚动升级窗口。
+- **T1 episodic/procedural 补租户（`28877fc`，G1 / plan-memory-hardening T1）**：migration `010_episodic_tenant` 为 `episodic_memories`/`procedural_memories` 补 `tenant_id` + 复合索引，**procedural PK 命名空间化 `(tenant_id, name, version)`**（技能名由 `task_summary` 派生易跨租户撞名，仅加 WHERE 不改 PK 会写覆盖=假隔离）；`EpisodicStore`/`ProceduralStore` 及 InMemory/Pg 实现、`memory_sink`/`memory_decay`/`memory_seed`/`memory_types` 全链路带 `tenant_id`（`_tenant_gate` 必填 fail-fast）；**写路径租户源缺口修复**：`TrajectoryRecord` 加 `tenant_id`，`_persist_trajectory` 从 `plan.tenant_id` 填充；recall 路径 `MemoryRecallRequest.tenant_id` 下传并映射为 `MemoryRecallResult`。
+- **迁移编号 006–010**：均 up/down 成对、`IF [NOT] EXISTS` 幂等、SQL 英文注释、LF 行尾；agent-core 零宿主依赖保持（`typed.py` 仅 stdlib；`workspace_registry`/执行记忆 store 落 agent-runtime，红线 1 无反向 import）。
+- **未决 / 边界（诚实标注）**：① corpus/memories/episodic 存量 `DEFAULT 'default'` 回填为**目标库部署前置**——应用前须抽样确认无真实多租户混入（混则停工建归属映射，见 plan §8.2/§8.4），开发机无目标 PG 未执行；② agent_server→knowledge-service 真实多租户 tenant 下传、`/query` 服务端租户断言属跨服务契约变更，需另立 ADR（现注入策略下安全不 422）；③ HA 真实 PG 用例（`tests/ha/test_tenant_isolation_real_pg.py`：corpus/workspaces/dual-scope/episodic/procedural 跨租户）需 Linux CI `requires_pg` 跑，本机 skip。
+
+> 验证（本机可跑，全绿）：根 438 / agent-core 219 / agent-runtime 580 / agent_server 44 / federation 142 / knowledge-service 235 / kefu 43 / nl2sql 18 / exhibition 343 / shared-schemas 28；`ruff check .` 0；`lint_architecture` + `check_doc_sync` 通过。唯一失败 `test_circuit_breaker_middleware_degrades` 为 v3 既有、与本工作无关。
+
+
+## 租户隔离收紧 + HA 门禁语义 + CI 收窄（2026-09-25，`7e442c4..b77be4e`）
+
+> 方案：`docs/plans/plan-p0-ha-tenant-fixes-2026-09-25.md`。外部审计（36 commits, c6b60a55）P0/P1 修复。评审修复（W-2）续见本节末。
+
+- **⚠️ 破坏性行为变更（有意，不可逆）**：召回读谓词从过渡期 `tenant_id = ANY(%s)`（真实租户 + legacy `default` 桶）收紧为精确 `tenant_id = %s`（`7e442c4`）。真实租户升级后**不再读到**多租户上线前的历史记忆（v5 迁移已把历史行归并进 `default` 桶）；该数据仅 `default` 租户可见，或由管理员迁移工具重新归属。**回滚指引**：005 down 仅回滚列默认值、刻意不回滚数据（见该文件注释）——升级前如需保留跨租户历史可见性，须先完成数据归属迁移。配套：治理 fake 收紧为标量契约（泄漏形态直接断言失败）+ 新增真 PG 行为级回归 `tests/ha/test_tenant_isolation_real_pg.py`（legacy default 行对真实租户不可见 / default 租户仍可读 / 跨租户同 workspace 隔离），变异验证：谓词退回 ANY → 治理测试 4 failed。
+- **`CapabilityReport.supports_tenant_isolation`**：新增能力声明字段并纳入 `as_dict()`/`/health`（pg-typed=true / vector=false），消除「调用方误以为已获得租户隔离」。
+- **HA 门禁语义（skip→fail-not-skip）**：`tests/ha` 在 CI 环境（`CI`/`GITHUB_ACTIONS` 任一为 true）PG 不可用 = **FAIL** 而非 skip，杜绝「15 skipped 但 green」假信号；本地无 PG 保留 skip。普通 `make test` 根 session 以 `-m "not requires_pg"` 排除 HA 测试（归属 agent-platform-ha workflow）；conftest marker 路径判断修复 Windows 反斜杠兼容。
+- **CI 收窄**：`ha.yml` 触发移除 `applications/**`（重型 HA 仅由 packages/tests/ha/脚本/配置变更触发）。
+- **勘误**：下文 Warning#8 段描述的「过渡期 ANY 历史可读」为当时过渡契约，**已于本次收紧删除**，以本节为准。
+- **W-2 补充（同日评审修复）**：内核 typed/store 五动词 + 宿主门面（agent_server longterm/memory_backend、federation semantic_memory）共 27 处 `tenant_id: str = "default"` 隐式缺省全部改为哨兵 `_TENANT_UNSET`（`agent_core/memory/_tenant_gate.py`）——**漏传即 `ValueError`**，不再静默落共享 default 桶。全链生产调用点已核实显式传租户（graph/planner/router/federation ContextVar），爆炸半径仅测试补显式 `tenant_id="default"`（67 处调用点，AST 脚本机械修复）。新增 AST 治理红线 `tests/governance/test_tenant_default_forbidden.py`（默认值形态回潮即 CI 失败；构造期配置类 `mongo_checkpointer`/`vector_backend` 白名单，其 tenant 语义矛盾另立任务）。
+
 ## workspace 顶层包名冲突全局治理（eval 消歧义 + P5 门禁，2026-09-25）
 
 > 方案：`docs/plans/plan-workspace-toplevel-eval-disambiguation-2026-09-25.md`。背景：editable 安装以朴素 `.pth` 把成员源码根整体加入 `sys.path`，顶层包名 `eval` 被 agent_federation 与 knowledge-service 双重暴露，解析取决于安装顺序；前次 conftest 局部重绑补丁（c6b60a5）属散点止血，本次按「单一实现 + 全局装配 + 强制门禁」三层收口并撤销该补丁。
@@ -112,7 +154,7 @@
 - **Critical#2 — Planner 租户传播**：`GraphPlanner`（4 处 Plan + execute 重建 plan_ctx）、`UnifiedPlanner` WORKFLOW 分支（Plan 身份字段 + kwargs 携带 tenant/workspace/user）、`AgenticPlanner`、`deterministic` MCP AgentState、`capabilities._run_general_qa` state 注入全部补齐 `tenant_id`；新增治理红线测试 `tests/governance/test_planner_tenant_propagation.py`（枚举全部 Planner 构造点，防漏传静默落共享桶）。
 - **Critical#3 — 内核/federation 透传 tenant**：`agent_core.memory.store.MemoryStore` 协议五动词加 `tenant_id` keyword 参数，`PgMemoryStore` 透传内核 typed；`VectorMemoryStore` 显式声明不支持隔离（接口兼容）。federation `semantic_memory.py` 封装函数 + `main_agent_memory.py` 接线经 `api.context` ContextVar 取租户透传。
 - **Warning#7 — 开关语义收口（WS-1）**：`agent_server/memory/longterm.py` 删除 `maybe_consolidate()` 中残留的 `SEMANTIC_MEMORY_TYPED` 栈门控（与读写路径对齐：该开关自 WS-1 起只在内核控制召回加权融合，不控栈选择；记忆总开关为 `SEMANTIC_MEMORY_ENABLED`），消除“读写不受控、巩固受控”分裂；模块/函数 docstring 与过时注释同步收口。测试：`test_maybe_consolidate_noop_when_disabled` 按新语义改写为 `test_maybe_consolidate_not_gated_by_typed_switch`（门禁：开关关闭时有池仍须触发巩固）+ 新增 `test_maybe_consolidate_noop_without_pool`（无池空操作），断言未收窄。
-- **Warning#8 — v5 迁移可回滚 + 历史行过渡读**：新增 `005_memory_tenant_enforcement.down.sql`（仅回滚列默认值，刻意不回滚数据并在注释说明不可逆理由）与 `004_memory_tenant_id.down.sql`（对称 DROP，对齐 002/003 惯例）；内核 `agent_core/memory/typed.py` 召回读谓词改为过渡期 `tenant_id = ANY(%s)`（`_read_tenant_scope` 含 legacy `default` 桶，user_id 隔离维度不变），修复升级后带真实租户的请求读不到多租户上线前历史记忆的问题；删除路径（consolidate/forget）仍精确匹配不跨桶，收敛后可收紧。测试：新增 `TestTenantMigrationsRollback`（v4/v5 down 守卫）与 agent-core 读作用域/删除精确性 3 用例。
+- **Warning#8 — v5 迁移可回滚 + 历史行过渡读**：新增 `005_memory_tenant_enforcement.down.sql`（仅回滚列默认值，刻意不回滚数据并在注释说明不可逆理由）与 `004_memory_tenant_id.down.sql`（对称 DROP，对齐 002/003 惯例）；内核 `agent_core/memory/typed.py` 召回读谓词改为过渡期 `tenant_id = ANY(%s)`（`_read_tenant_scope` 含 legacy `default` 桶，user_id 隔离维度不变），修复升级后带真实租户的请求读不到多租户上线前历史记忆的问题；删除路径（consolidate/forget）仍精确匹配不跨桶，收敛后可收紧。测试：新增 `TestTenantMigrationsRollback`（v4/v5 down 守卫）与 agent-core 读作用域/删除精确性 3 用例。**【2026-09-25 勘误】过渡读契约已收紧删除（读谓词精确 `= %s`，`_read_tenant_scope` 已删除），见顶部「租户隔离收紧」节。**
 
 ## MCP SDK 真实接入（2026-09-22）
 

@@ -1,5 +1,10 @@
 from agent.prompts import sub_agents_content
-from tools.db_tools import execute_sql_query, get_table_data, list_sql_tables
+from agent.tool_registry import get_tool
+
+# 批 2：经 tool_registry 统一出口取工具（observe_tool 包装）
+execute_sql_query = get_tool("execute_sql_query")
+get_table_data = get_tool("get_table_data")
+list_sql_tables = get_tool("list_sql_tables")
 
 database_query_agent = {
     "name":sub_agents_content['db']['name'],

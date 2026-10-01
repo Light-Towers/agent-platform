@@ -59,3 +59,5 @@ services:
       LLM_FALLBACK_MODEL: ${LLM_FALLBACK_MODEL:-gpt-4o-mini}
     ports:
       - "127.0.0.1:${HA_PORT_B:-8102}:8000"
+
+# 装配门禁：本文件变更会触发 agent-platform-ha-assembly（镜像构建 + 双副本 /health 冒烟），见 .github/workflows/ha-assembly.yml

@@ -17,7 +17,9 @@ class TestFetchContext:
 
         mock_pool = MagicMock()
 
-        async def mock_vector_search(pool, table, cols, embedding, k=3):
+        async def mock_vector_search(pool, table, cols, embedding, k=3, where="", where_params=()):
+            # ADR-0006 T9：sql_* 召回现必经 tenant 谓词（where 携带 tenant_id）。
+            assert "tenant_id" in where, f"sql_* 召回缺 tenant 边界谓词: {where}"
             if table == "sql_ddl":
                 return [("CREATE TABLE t1 (id int)",)]
             if table == "sql_docs":
@@ -28,7 +30,7 @@ class TestFetchContext:
 
         with patch("agent_server.sql.schema_store.embed_query", new_callable=AsyncMock, return_value=[0.1, 0.2]), \
              patch("agent_server.sql.schema_store.vector_search", side_effect=mock_vector_search):
-            result = await fetch_context(mock_pool, "test", k=3)
+            result = await fetch_context(mock_pool, "test", k=3, tenant_id="default")
         assert len(result["ddl"]) == 1
         assert len(result["docs"]) == 1
         assert len(result["examples"]) == 1

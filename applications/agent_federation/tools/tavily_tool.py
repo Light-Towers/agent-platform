@@ -11,8 +11,6 @@ from tools._timeout import with_timeout
 
 load_dotenv()
 
-from api.monitor import monitor
-
 try:
     from agent_core.tracing import start_span as _start_span
 except ImportError:
@@ -60,9 +58,6 @@ def internet_search(
     :param include_raw_content: 是否返回原内容 False 精简 True 详细
     :return:
     """
-    monitor.report_tool(tool_name="网络搜索工具",
-                        args={"query": query, "topic": topic, "max_results": max_results,
-                              "include_raw_content": include_raw_content})
     with _start_span("tool.tavily", attrs={"query": query, "topic": topic}):
         return _tavily_search(query=query, topic=topic,
                               max_results=max_results, include_raw_content=include_raw_content)

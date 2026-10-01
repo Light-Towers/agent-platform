@@ -13,7 +13,7 @@ os.environ.setdefault("OPENAI_API_KEY", "test-key")
 os.environ.setdefault("OPENAI_BASE_URL", "http://localhost:9999/v1")
 
 import agent.main_agent as ma
-from agent.tool_registry import TOOL_REGISTRY, ROLE_TOOLS, get_tools_for_roles, normalize_roles
+from agent.tool_registry import ROLE_TOOLS, TOOL_REGISTRY, get_tools_for_roles, normalize_roles
 
 
 def test_tool_registry_consistency():
@@ -67,7 +67,7 @@ def test_get_tools_for_roles_filters_and_dedups():
     tools = get_tools_for_roles(["data", "knowledge"])
     names = {getattr(t, "name", getattr(t, "__name__", "")) for t in tools}
     assert "execute_sql_query" in names
-    assert "zhiku_retrieve" in names
+    assert "knowledge_retrieve" in names
     assert "read_file_content" in names
 
 
