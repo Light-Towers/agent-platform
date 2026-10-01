@@ -164,7 +164,9 @@ AGENTS.md 已确立「入站错误脱敏」三层收敛范例：`build_api_app`(
 | #38 `py/weak-sensitive-data-hashing` | `:78` `hmac.new(pepper, secret, sha256)` | **误报**：规则针对口令类低熵秘密的离线暴破；此处输入是高熵 API Key，产物只做查表标识（限流桶/缓存键/会话 ID）且每请求计算。换 scrypt/pbkdf2 只有延迟成本、无暴破增益；带 pepper 时离线计算还需先取得 pepper | 不改码（不改名“躲检测器”）；dismiss `false_positive` + 理由同步写进 kernel docstring |
 | #39 `py/weak-sensitive-data-hashing` | `:99` `legacy_thread_id` 的 `sha256(...)[:12]` | **形状属实、不可消除**：必须能复算升级前的旧会话身份，否则历史目录/检查点找不回 | dismiss `wont_fix`；同时把原来“仅靠约定不得业务调用”**升级为 P6-2 门禁**（白名单：kernel 定义处 + `scripts/migrate_thread_identity.py`） |
 
-**反向证据（相等于本方案验收的强信号）**：本轮 PR 重扫 **没有**报出任何新的 `py/path-injection`、`py/stack-trace-exposure`、`py/incomplete-url-substring-sanitization` 或 `actions/missing-workflow-permissions`——即 A/C/E/D 四类的修改面在 CodeQL 眼里已无新问题（旧告警仍列 open 是因为默认分支尚未重扫，需合入后关闭；无需为此补 data-extension）。
+**反向证据（相等于本方案验收的强信号）**：本轮 PR 重扫 **没有**报出任何新的 `py/path-injection`、`py/stack-trace-exposure`、`py/incomplete-url-substring-sanitization` 或 `actions/missing-workflow-permissions`——即 A/C/E/D 四类的修改面在 CodeQL 眼里已无新问题（旧告警仍列 open 是因为默认分支尚未重扫，需合入后关闭；~~无需为此补 data-extension~~）。
+
+> **⚠️ 上句「无需为此补 data-extension」已被证伪（2026-10-01 合入后默认分支重扫）**：合入 `main` 后重扫报出 `#40`/`#41`/`#42`（`py/path-injection` 落在 kernel `guardrails/fs.py` 内部的 `resolve()` 调用点）与 `#43`/`#44`（新规则类 `py/clear-text-logging-sensitive-data`，同文件的两处 `logger.warning`），且 `#23`（`FileResponse(abs_path)`）未闭合。根因正是本节当初排除掉的那件事：**CodeQL 内建模型不认识 `safe_join`/`resolve_within`/`safe_filename` 为 sanitizer**。误因是把「PR 模式的检出」当成全量反证——`refs/pull/33/head` 与 `refs/heads/main` 是两套告警集合，跨过程的 kernel 内部 sink 只在默认分支模式下暴露。后续处置与选型见 `docs/plans/plan-codeql-batch6-kernel-sanitizer-models-2026-10-01.md`（本文其余结论不受影响：19/21 已闭合，C/D/E 三类全清）。
 
 **为何选“门禁 + dismiss”而不是改算法**：改名（如把 `secret` 改成不含语义的变量）可静默退掉 #38，但那是**干扰检测器而非修正问题**，违反方案原则；而 #39 是本方案主动保留的技术债（迁移一致性 > 算法纯度），只能用硬门禁限制其扩散面。
 
