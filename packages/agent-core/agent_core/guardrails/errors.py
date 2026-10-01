@@ -6,7 +6,8 @@
 错误处理是这一层的另一面。
 
 分层：
-- 纯逻辑（``ERROR_CODES`` / ``error_code_for_status`` / ``error_body``）零第三方依赖，
+- 纯逻辑（``ERROR_CODES`` / ``error_code_for_status`` / ``error_body`` /
+  ``mask_exception_for_client``）零第三方依赖，
   仅装 stdlib 的 venv 也能 import、可独立单测；
 - ``make_error_response`` / ``install_error_handlers`` 需要的 starlette 为**函数内懒导入**
   （``web`` extra），保持本模块可无 starlette 导入。
@@ -43,6 +44,33 @@ ERROR_CODES: Dict[int, str] = {
 def error_code_for_status(status_code: int) -> str:
     """状态码 → 对外错误码；未登记的状态码退回通用 HTTP_ERROR。"""
     return ERROR_CODES.get(status_code, "HTTP_ERROR")
+
+
+def mask_exception_for_client(
+    exc: BaseException | None,
+    *,
+    logger: Optional[Any] = None,
+    context: str = "",
+    message: str = SANITIZED_5XX_MSG,
+) -> str:
+    """把异常转成**可对外展示**的固定文案：全貌只入服务端日志，绝不回显消息/堆栈。
+
+    P8 不变量的单一实现落点。``install_error_handlers`` 只能兜住「未捕获异常 →
+    500 信封」这一条路；**SSE 帧与手写 JSONResponse 兜不住**（流已开、状态码已发），
+    于是各站历史上各自写 ``str(e)`` / ``f"...{e}"``，把内部路径 / 上游响应体 /
+    SQL 片段送到客户端（CodeQL ``py/stack-trace-exposure`` 根因）。本函数是人与
+    静态分析工具都能识别的**脱敏边界点**：调用它即表示「异常在此终止，不外泄」。
+
+    - ``exc`` 只为语义显式（表明哪个异常被吞掉），**不参与返回值**——任何从异常消息
+      派生的字段都会重新打开泄漏面；
+    - ``logger`` 给出则先把全貌（含 traceback）落服务端日志。内部用 f-string 而非
+      ``%s`` 惰性格式化，以兼容 std logging 与 loguru 两类 logger；传 loguru 站点请
+      自行在原地记录异常，此处只取固定文案；
+    - ``message`` 可按业务语义覆盖（如上游不可达比「服务器内部错误」更准确）。
+    """
+    if logger is not None:
+        logger.exception(f"client-facing error masked (context={context or '-'})")
+    return message
 
 
 def error_body(code: str, msg: str, request_id: str) -> Dict[str, Any]:
@@ -109,6 +137,7 @@ __all__ = [
     "ERROR_CODES",
     "error_code_for_status",
     "error_body",
+    "mask_exception_for_client",
     "make_error_response",
     "install_error_handlers",
 ]

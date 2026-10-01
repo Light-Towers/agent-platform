@@ -15,6 +15,7 @@
 import uuid
 from typing import List, Optional
 
+from agent_core.guardrails.errors import mask_exception_for_client
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
@@ -162,7 +163,9 @@ def run_query_graph(
                 logger.warning("记录异常到 span 失败: %s", e2)
             update_task_status(session_id, TASK_STATUS_FAILED, is_stream)
             if is_stream:
-                push_to_session(session_id, SSEEvent.ERROR, {"error": str(e)})
+                # 流已开始、状态码已发，install_error_handlers 兜不到；SSE 错误帧只给
+                # 固定文案，异常全貌已在上方写入服务端日志（loguru 站点就地记录）。
+                push_to_session(session_id, SSEEvent.ERROR, {"error": mask_exception_for_client(e)})
 
 
 @router.post("/query")
