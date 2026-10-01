@@ -17,6 +17,11 @@ on:
         required: false
         default: "0.8"
 
+# 最小权限（CodeQL actions/missing-workflow-permissions）：checkout + 跑评测 + 上传 artifact。
+# upload-artifact 走独立 artifacts 服务、不需 GITHUB_TOKEN 额外 scope，contents: read 足矣。
+permissions:
+  contents: read
+
 jobs:
   llm-eval:
     runs-on: ubuntu-latest

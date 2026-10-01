@@ -1,15 +1,20 @@
 """会话标识解析（对齐 app/api/auth.py 已验证策略）。
 
 安全设计：
-- API_KEY 启用时，忽略客户端传入的 thread_id，改为按 API_KEY 哈希派生稳定会话
-  （"user-" + sha256(API_KEY)[:12]），既防止会话劫持（客户端无法指定/猜测他人会话），
-  又保证同一密钥的连续请求落到同一 thread，使 checkpointer 能跨请求复用（修复 TB-14）。
+- API_KEY 启用时，忽略客户端传入的 thread_id，改为按 API_KEY 派生稳定会话
+  （内核 ``derive_thread_id``："user-" + HMAC-SHA256(pepper, API_KEY) 摘要），既防止
+  会话劫持（客户端无法指定/猜测他人会话），又保证同一密钥的连续请求落到同一
+  thread，使 checkpointer 能跨请求复用（修复 TB-14）。
 - API_KEY 未启用（开发模式，DISABLE_AUTH=true）时，信任客户端 thread_id，缺省
   "dev-default-thread"，方便本地多轮联调。
+
+DUP-1/DUP-3 收敛：派生算法上提至 agent_core（原与 agent_server 各写一份裸
+``sha256(...)[:12]``）；旧格式落盘会话的一次性迁移见 scripts/migrate_thread_identity.py。
 """
 
-import hashlib
 import os
+
+from agent_core.guardrails.auth import DEV_THREAD_ID, derive_thread_id
 
 API_KEY = os.getenv("API_KEY", "")
 
@@ -24,6 +29,5 @@ def resolve_thread_id(client_thread_id: str | None, api_key: str | None = None) 
     """
     if API_KEY:
         # 认证启用：按密钥派生稳定会话，忽略客户端 thread_id（防劫持）
-        digest = hashlib.sha256((api_key or "").encode()).hexdigest()[:12]
-        return f"user-{digest}"
-    return client_thread_id or "dev-default-thread"
+        return derive_thread_id(api_key)
+    return client_thread_id or DEV_THREAD_ID

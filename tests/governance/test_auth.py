@@ -3,6 +3,7 @@
 import hashlib
 
 import pytest
+from agent_core.guardrails.auth import ENV_SECURITY_PEPPER, derive_thread_id
 from agent_server.api.auth import resolve_thread_id, verify_api_key
 from agent_server.config import get_settings
 from fastapi import HTTPException
@@ -41,10 +42,15 @@ def test_resolve_thread_id_disabled_trusts_client(monkeypatch):
 
 
 def test_resolve_thread_id_enabled_derives_from_key(monkeypatch):
+    """DUP-1 收敛后的契约：会话身份由 kernel fingerprint 单一实现派生，且不再是旧 48bit 裸哈希。"""
     _set_api_key(monkeypatch, "secret123")
-    expected = f"user-{hashlib.sha256(b'secret123').hexdigest()[:12]}"
+    monkeypatch.delenv(ENV_SECURITY_PEPPER, raising=False)
+    expected = derive_thread_id("secret123")
     assert resolve_thread_id("client-tid", "secret123") == expected
     assert resolve_thread_id(None, "secret123") == expected
+    # 旧实现（裸 sha256 前 12 hex = 48bit）必须已被替换
+    assert expected != f"user-{hashlib.sha256(b'secret123').hexdigest()[:12]}"
+    assert len(expected) == len("user-") + 32  # 128bit
 
 
 def test_resolve_thread_id_enabled_different_keys_isolate(monkeypatch):

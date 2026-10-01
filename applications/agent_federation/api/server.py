@@ -1,7 +1,6 @@
 import asyncio
 import json
 import os
-import re
 import secrets
 import shutil
 from contextlib import asynccontextmanager
@@ -18,6 +17,7 @@ from shared_schemas import QueryRequest
 load_dotenv(find_dotenv())
 
 from agent_core.guardrails.app_factory import build_api_app
+from agent_core.guardrails.fs import PathTraversalError, resolve_within, safe_filename, safe_join
 from agent_core.logging import configure_logging, get_logger
 from agent_core.tracing import init_tracing, start_span
 
@@ -194,14 +194,6 @@ def _check_api_key(key: str | None) -> bool:
     return secrets.compare_digest(key or "", API_KEY)
 
 
-def _sanitize_filename(name: str) -> str:
-    base = Path(name).name
-    safe = re.sub(r'[^\w.\- ]', '_', base)
-    if safe in (".", ".."):
-        safe = "_"
-    return safe
-
-
 class TaskAcceptedResponse(BaseModel):
     """异步任务受理响应（非 QueryResponse：/api/task 是 fire-and-forget）。"""
 
@@ -241,13 +233,14 @@ async def upload_files(
     # 安全：API_KEY 启用时忽略客户端 thread_id，按密钥派生，保证上传文件落到与对话同一会话目录
     api_key = _extract_api_key(request) if request else None
     safe_thread_id = resolve_thread_id(thread_id, api_key)
-    target_dir = updated_dir / f"session_{_sanitize_filename(safe_thread_id)}"
+    # 会话目录名与文件名均经 kernel 单一实现净化 + safe_join 拼接（A 类 py/path-injection 收口）
+    target_dir = safe_join(updated_dir, f"session_{safe_filename(safe_thread_id)}")
     target_dir.mkdir(parents=True, exist_ok=True)
 
     saved_files = []
     for file in files:
-        safe_name = _sanitize_filename(file.filename or "unnamed")
-        file_path = target_dir / safe_name
+        safe_name = safe_filename(file.filename or "unnamed")
+        file_path = safe_join(target_dir, safe_name)
         with file_path.open("wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
         saved_files.append(safe_name)
@@ -257,31 +250,30 @@ async def upload_files(
 
 @app.get("/api/download")
 async def download_file(path: str):
+    """下载输出目录下的文件：路径由 kernel ``resolve_within`` 做 containment 判定。"""
     try:
-        abs_path = Path(path).resolve()
-        output_abs = output_dir.resolve()
-        if not abs_path.is_relative_to(output_abs):
-            raise HTTPException(status_code=403, detail="拒绝访问: 只能下载输出目录下的文件")
-    except HTTPException:
-        raise
-    except Exception:
+        abs_path = resolve_within(output_dir, path)
+    except PathTraversalError:
+        # 入参原文只进服务端日志（kernel helper 已记），出站文案固定
+        raise HTTPException(status_code=403, detail="拒绝访问: 只能下载输出目录下的文件") from None
+    except OSError:
+        logger.exception("download path cannot be resolved")
         raise HTTPException(status_code=400, detail="无效的路径参数") from None
-    if not abs_path.exists():
+    if not abs_path.is_file():
         raise HTTPException(status_code=404, detail="文件不存在")
     return FileResponse(abs_path, filename=abs_path.name)
 
 
 @app.get("/api/files")
 async def list_files(path: str):
+    """列输出目录下的文件：同 ``/api/download``，路径必须位于 base 内。"""
     try:
-        abs_path = Path(path).resolve()
-        output_abs = output_dir.resolve()
-        if not abs_path.is_relative_to(output_abs):
-            raise HTTPException(status_code=403, detail="拒绝访问: 只能访问输出目录下的文件")
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"路径无效: {e}") from e
+        abs_path = resolve_within(output_dir, path)
+    except PathTraversalError:
+        raise HTTPException(status_code=403, detail="拒绝访问: 只能访问输出目录下的文件") from None
+    except OSError:
+        logger.exception("list path cannot be resolved")
+        raise HTTPException(status_code=400, detail="无效的路径参数") from None
     if not abs_path.exists():
         raise HTTPException(status_code=404, detail="目录不存在")
     files = []
@@ -292,12 +284,15 @@ async def list_files(path: str):
                 files.append({
                     "name": file_path.name,
                     "type": "file",
+                    # 对外仍给绝对路径：既有消费者把它原样传回 /api/download（故保留 resolve_within 对绝对入口的宽容）
                     "path": str(file_path),
                     "size": stat.st_size,
                     "mtime": stat.st_mtime
                 })
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
+    except OSError:
+        # 已校验过的目录下出错（磁盘满/权限/竞态删除）：只记服务端，不回显异常原文
+        logger.exception("failed to list files under a validated directory")
+        raise HTTPException(status_code=500, detail="文件列表读取失败") from None
     files.sort(key=lambda x: x.get("mtime", 0), reverse=True)
     return {"files": files}
 

@@ -15,6 +15,7 @@ from agent_core.guardrails.errors import (
     SANITIZED_5XX_MSG,
     error_body,
     error_code_for_status,
+    mask_exception_for_client,
 )
 
 _has_fastapi = importlib.util.find_spec("fastapi") is not None
@@ -57,6 +58,60 @@ def test_error_body_request_id_empty():
 
 def test_error_codes_registered():
     assert ERROR_CODES[503] == "SERVICE_UNAVAILABLE"
+
+
+# ---------------------------------------------------------------------------
+# mask_exception_for_client（P8 堆栈回显收敛的单一脱敏边界点）
+# ---------------------------------------------------------------------------
+class _RecordingLogger:
+    """记录 kernel 写入服务端日志的内容，不往测试输出里报 traceback。"""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[tuple, dict]] = []
+
+    def exception(self, *args, **kwargs) -> None:
+        self.calls.append((args, kwargs))
+
+
+def test_mask_returns_fixed_text():
+    assert mask_exception_for_client(ValueError("boom")) == SANITIZED_5XX_MSG
+
+
+def test_mask_never_leaks_exception_message():
+    """对外文案不得含异常消息任何片段（内部路径 / 内网主机 / 上游响应体）。"""
+    secret = "/opt/secrets/db.yaml refused host=10.0.0.1"
+    out = mask_exception_for_client(RuntimeError(secret))
+    assert secret not in out
+    assert "10.0.0.1" not in out
+    assert "secrets" not in out
+
+
+def test_mask_message_override_is_business_text():
+    """message 允许按业务语义覆盖（但仍是常量文案，不由异常派生）。"""
+    fixed = "warehouse 服务不可达，请稍后重试"
+    assert mask_exception_for_client(OSError("timed out"), message=fixed) == fixed
+
+
+def test_mask_logs_full_exception_and_keeps_context():
+    log = _RecordingLogger()
+    secret = "SELECT * FROM internal_billing failed"
+    out = mask_exception_for_client(ValueError(secret), logger=log, context="POST /api/chat")
+    assert out == SANITIZED_5XX_MSG
+    assert len(log.calls) == 1
+    logged = log.calls[0][0][0]
+    # context 供人定位；异常消息不拼进日志行（由 logger.exception 自带 traceback）
+    assert "POST /api/chat" in logged
+    assert secret not in logged
+
+
+def test_mask_without_logger_is_silent_and_safe():
+    """日志已在位的站点（如 loguru 侧）只取固定文案，kernel 不强制接 logger。"""
+    assert mask_exception_for_client(KeyError("missing")) == SANITIZED_5XX_MSG
+
+
+def test_mask_accepts_none_exception():
+    """无异常对象也能取到安全文案（退出已丢失 exc 的分支）。"""
+    assert mask_exception_for_client(None) == SANITIZED_5XX_MSG
 
 
 # ---------------------------------------------------------------------------

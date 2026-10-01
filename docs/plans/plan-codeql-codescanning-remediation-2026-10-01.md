@@ -1,0 +1,193 @@
+# Plan：Code Scanning（CodeQL）21 条告警的全局收口方案
+
+> 触发：`/security/code-scanning` 下 **21 条 open**（全 CodeQL，14 high / 7 medium）。用户要求「站在项目全局整体角度，先出方案」。
+> 本文性质：**方案（待批准后再编码）**。遵循 AGENTS.md 红线——安全敏感代码（鉴权/路径/错误处理）改动前必须先出方案；横切关注点走「单一实现(kernel) + 全局装配(构造保证) + 强制门禁(lint)」三层收敛，禁止逐处散点打补丁。
+> 取证基于实读代码（非仅 CodeQL 标签），file:line 均可复核。
+
+## 0. 一页结论
+
+21 条按规则聚为 5 类，**处置性质三分**：真修 / 横切收口 / triage 误报。
+
+| 类 | 数(sev) | 位置 | 实读判定 | 处置档位 |
+|---|---|---|---|---|
+| **A. py/path-injection** | 8 high | `agent_federation/api/server.py` 244–289 | download/list **已有 `is_relative_to` 防护**、upload 已有 `_sanitize_filename`（`Path().name`）——**均可控遍历，CodeQL 不认这些为 sanitizer**；但 284/300 把 `str(e)` 塞进 detail | **真修（横切）**：抽 kernel 级 `safe_join` 单一实现 + 停用 `str(e)`；让 CodeQL 与人共同可识别 |
+| **B. py/weak-sensitive-data-hashing** | 5 high | `agent_core/guardrails/auth.py:46`、`agent_server/api/auth.py:29`、`agent_federation/api/auth.py:27`、`agent_federation/gateway/gray.py:40`、`agent_core/llm/registry.py:45` | **同一「从 api_key 派生稳定 token」的操作被抄了 4 遍、且强度不一致**：`auth.py:29`/`federation:27` 用 `sha256(key)[:12]`（48bit 截断）派生**会话身份**（防跨租户串会话，安全相关，真该修）；`auth.py:46`(限流桶)/`registry.py:45`(缓存键) 全量 sha256（弱安全相关）；`gray.py:40` `md5(user_id)` 灰度 0–99 桶（**非敏感、非隔离，唯一真误报**） | **根因修（收敛），非 dismiss**：抽单一实现 `agent_core.guardrails.auth.fingerprint(key)`＝HMAC-SHA256 + 服务端 pepper + 定长摘要，替换 4 处；仅 `gray.py:40` dismiss。**dismiss 只用于「已证明非真问题」** |
+| **C. py/stack-trace-exposure** | 4 medium | `exhibition-agent/.../skill_loader/app.py` 109/148/181、`agent_server/api/query_router.py:382` | 路由**主动** `except Exception as e: return JSONResponse({"error": f"...{e}"})`，绕过 `install_error_handlers`（各 app 已装配） | **横切收口**：删手动 traceback 回显、交全局 handler 兜底；补 lint 门禁 |
+| **D. actions/missing-workflow-permissions** | 3 medium | `.github/workflows/{eval-llm,ha,agent-platform-ci}.yml` | workflow 缺顶层 `permissions:` 块，默认全授权 | **真修（快赢）**：加最小 `permissions:` |
+| **E. py/incomplete-url-substring-sanitization** | 1 high | `packages/agent-runtime/tests/test_skills_remote_dag.py:22` | **测试文件**夹具里的 URL 子串判断 | **先核生产代码是否同模式**：若生产用同款弱判断→根因修生产；确认仅测试夹具→dismiss |
+
+**净可编辑真修**：A(8) + C(4) + D(3) + **B 收敛(4 api-key 站点)** = 真修主体，其中 A/B/C 归并为「kernel 横切能力（safe_join / fingerprint）+ 站点收敛 + lint 门禁」，D 独立快赢。
+**仅真误报可 dismiss**：B 中 `gray.py:40`(1) + E(待核) 。**原则：dismiss 是「证明其非真问题」的收尾，不是压告警的手段**；凡真实反模式一律根因收敛。
+
+## 1. 全局原则（对齐 AGENTS.md P2 先例）
+
+AGENTS.md 已确立「入站错误脱敏」三层收敛范例：`build_api_app`(全局装配) + `agent_core.guardrails.errors`(单一实现) + `lint_architecture.py`「裸 `FastAPI(` 即失败」(门禁)。本方案把 **路径** 与 **错误回显** 也纳入同一范式：
+
+| 关注点 | 单一实现(kernel) | 全局装配 | 强制门禁 |
+|---|---|---|---|
+| A 路径注入 | 新增 `agent_core.guardrails.fs.safe_join(base, *user_parts) -> Path`（resolve + `is_relative_to` 包含判定，越界抛错） | federation 各文件端点统一调用它 | `lint_architecture.py` 新增：api 层禁用裸 `Path(<request>)` 直接 I/O（白名单 helper 外） |
+| C 堆栈回显 | 复用 `agent_core.guardrails.errors.install_error_handlers`（已存在） | 各 app 已装配（main.py/server.py 均引用） | `lint_architecture.py` 新增：api handler 内 `return ...(f"...{e}" / traceback / str(e))` 即失败 |
+| B 敏感指纹 | 新增 `agent_core.guardrails.auth.fingerprint(secret) -> str`（HMAC-SHA256 + 服务端 pepper，定长） | 4 处 api-key 哈希改调它（消除 4× 重复 + 无 pepper/截断弱点） | 禁裸 `hashlib.(md5|sha1|sha256)(api_key)`（白名单 helper + gray 路由桶外） |
+
+> **dismiss 仅用于「已证明非真问题」**：B 中只有 `gray.py:40`（非密钥、非隔离的 md5 分桶）属此类；E 需先核生产代码后定。**不以 dismiss 压告警数**。
+
+## 2. 关键取证（实读，可复核）
+
+- `agent_federation/api/server.py`
+  - `:197` `_sanitize_filename` = `Path(name).name` + 正则白名单 + `.`/`..` 归 `_`（**已防目录穿越**）。
+  - `:244/251` upload 路径经 `_sanitize_filename`，base 固定 `updated_dir`。
+  - `:258–271` `/api/download`、`:274–300` `/api/files`：**已 `abs_path.is_relative_to(output_dir)` → 403**；唯 `:284` `detail=f"路径无效: {e}"`、`:300` `detail=str(e)` **回显异常**。
+- `agent_core/guardrails/auth.py:46` `sha256(api_key).hexdigest()` → 限流桶 key（注释「避免内存留存明文」）。
+- `gateway/gray.py:40` `md5(user_id)` → 灰度百分比分桶（**非敏感、非安全用途**）。
+- `skill_loader/app.py:105–110` `except Exception as e: return JSONResponse({"error": f"Agent 处理失败: {e}", ...}, 500)`（**主动回显**）。
+- 各 app 已 `install_error_handlers`（grep 命中 main/server/app_factory）→ 全局兜底在位，站点却各自 catch。
+
+## 3. 分批实施（批准后执行；每批独立 PR + 全门禁 + L3 + eval）
+
+**Batch 1 — 快赢（D，独立）**：3 个 workflow 加顶层 `permissions:`（按最小权限：如 `contents: read`，需写产物的 job 单独 `pull-requests: write` 等，逐 job 核）。验收：CodeQL `missing-workflow-permissions` 归零。
+
+**Batch 2 — 敏感指纹收敛（B，根因修）**：
+1. kernel 新增 `agent_core.guardrails.auth.fingerprint(api_key)`＝`hmac.new(server_pepper, api_key, sha256)`，返回定长（≥ 32 hex）摘要；pepper 来自配置（无则启动告警）。含单测：同 key 稳定、异 key 不等、不同 pepper 结果不同（防跨部署碰撞）。
+2. 替换 4 处 `hashlib.sha256(key)[:12]`/全量：`auth.py:46`、`agent_server/api/auth.py:29`、`federation/api/auth.py:27`、`registry.py:45`。
+   - **注意**：`thread_id`/会话目录已按旧 `[:12]` 落盘——切换派生法需**兼容迁移**（新键 + 一次性 rename 或双读过渡），避免用户历史会话失联；此项列入实施风险。
+3. `gray.py:40`（md5 非敏感）→ **dismiss 附证据**，不改码。
+4. `lint_architecture.py` 增「禁裸哈希 api_key（白名单 helper 外）」。
+验收：B 4 条从根因消除、gray dismiss；会话迁移有回归测试；make ci 绿。
+
+**Batch 3 — 路径横切（A，原 Batch 2 顺延）**：
+1. kernel 新增 `agent_core/guardrails/fs.py::safe_join`（含单测：正常拼接 / `..` 越界抛 `PathTraversalError` / 绝对路径拒绝）。
+2. `server.py` 4 个文件端点改用 `safe_join`；`:284/:300` 的 `detail` 改固定脱敏文案（异常仅入服务端日志）。
+3. `lint_architecture.py` 增「api 层裸路径 I/O」规则 + 白名单。
+验收：A 8 条消除；新增 fs 单测过；make ci 绿。
+
+**Batch 4 — 堆栈回显横切（C）**：
+1. `skill_loader/app.py` 3 处 + `query_router.py:382`：移除 `f"...{e}"`/`str(e)` 回显，改为不 catch（交全局 handler）或返回 `SANITIZED` 固定文案（异常 `logger.exception`）。
+2. `lint_architecture.py` 增「api 响应体禁回显异常/traceback」规则。
+验收：C 4 条消除；lint 反例用例过（沿用 `test_guardrails_errors.py` 风格）。
+
+**Batch 5 — 误报收尾（E）**：先核 `test_skills_remote_dag.py:22` 对应的**生产逻辑**是否同款弱判断；若生产有则并入 A/新批次根因修，若纯测试夹具→dismiss 附注「测试专用」。
+验收：open 告警降到 0（或仅剩登记在案的已接受风险）。
+
+## 4. 验收门禁（对齐用户"实跑证据"纪律）
+
+- 每批：`uv run --with ruff ruff check .` + `lint_architecture.py` + `check_doc_sync.py` + 受影响 pytest session + `make eval` 冒烟；声称完成前 `make test` 对齐 CI。
+- 横切新增 kernel 能力**必带单测**（safe_join / fingerprint / lint 反例）。
+- 安全敏感改动 push 前走 **L3 深度审查**。
+- **红线**：不得为消警放宽断言/删用例；dismiss 必须附可复核证据注释。
+
+## 5. 不做 / 边界
+
+- **不改对外 4xx `{detail}` 信封形状**（沿用 errors.py 的 D-2=A 零破坏原则）；错误体收敛为独立决策，另案。
+- **不在本方案处理 Dependabot #26**（13 项例行升级，非安全；当前卡 CONFLICTING + 本机 SSH 限流，另议）。
+- B 是否引入 HMAC helper 为 D-0 决策点，取决于「消警彻底度 vs 改动面」权衡，**待用户拍板**。
+
+## 6. 待用户确认的决策点
+
+- **D-0（已定）**：B 走**根因收敛**（kernel HMAC `fingerprint()`）替换 4 处 api-key 哈希；仅 `gray.py:40` 真误报 dismiss。撤销早先「纯 dismiss」倾向（那是压告警非解决）。
+- **D-1（已定）**：按 1(D) → 2(B) → 3(A) → 4(C) → 5(E) 执行（先快赢，再安全相关的 B）。
+- **D-2（已定）**：新增 lint 门禁**纳入本批**（P6）——三层缺第③层就只是约定，契合 AGENTS.md 全局优先原则。
+
+## 7. 实施进度（随批次更新）
+
+| Batch | 状态 | 落地位置 | 验收证据 |
+|---|---|---|---|
+| 1（D 类 workflow 最小权限） | ✅ 已 commit `e488c96`（已 push，PR #33） | 3 个 workflow 顶层 `permissions: contents: read` | 全仓 3/3 workflow 均有顶层 `permissions:`；CodeQL 需重扫确认归零 |
+| 2（B 类指纹收敛） | ✅ 已 commit `ba1b968` | kernel `guardrails/auth.fingerprint`/`derive_thread_id`/`legacy_thread_id`；4 站点改指；`lint_architecture.py` P6；`scripts/migrate_thread_identity.py` | 实跑结果（2026-10-01）：`ruff check .` 干净；`lint_architecture.py` P4-2/P2/P5/P6 全通过（含全仓零违规）；`check_doc_sync.py` 0 警告；根 session **661 passed**、联邦 **135 passed**、agent_server **41 passed**、agent-runtime **569 passed**、shared-schemas **28 passed**、kefu **43 passed**、nl2sql **18 passed**；`eval/run_eval.py --fail-below 0.8` → **15/15 = 100%** |
+| 3（A 类 safe_join） | ✅ 已 commit `a586859` + 跨平台补修（见下方记录末条） | kernel 新增 `guardrails/fs.py`（`safe_join`/`resolve_within`/`safe_filename`/`PathTraversalError`）；federation 3 个文件端点收敛 + `:284/:300` 固定脱敏文案；`lint_architecture.py` P7-1/P7-2 | 实跑结果（2026-10-01）：`ruff check .` 干净；`lint_architecture.py` P4-2/P2/P5/P6/**P7** 全通过（当前树零违规）；`check_doc_sync.py` 0 警告；根 session **711 passed, 2 skipped, 17 deselected**、agent-core **268 passed, 2 skipped**、联邦 **152 passed**、agent-runtime **569 passed**、shared-schemas **28 passed**、agent_server **41 passed**、kefu **43 passed**、nl2sql **18 passed**；`eval/run_eval.py --fail-below 0.8` → **15/15 = 100%**；ks 231 passed（+5 存量红）、exhibition 343 passed（+1 存量红），与 Batch 2 基线一致无新增失败。CodeQL A 类归零仍需 GitHub 重扫确认 |
+| 4（C 类堆栈回显） | ✅ 已 commit `7cc9e1d` | kernel `guardrails/errors.mask_exception_for_client`（脱敏边界点，复用 `SANITIZED_5XX_MSG`）；6 站点收敛（exhibition `skill_loader/app.py` ×3 + `skill_loader/agent.py` + agent_server SSE 帧 + ks SSE 帧 ×2）；`lint_architecture.py` P8 | 实跑结果（2026-10-01）：`ruff check .` 干净；`lint_architecture.py` P4-2/P2/P5/P6/P7/**P8** 全通过（当前树零违规）；`check_doc_sync.py` 0 警告；**对 HEAD 版本回放 P8 命中 6 条**（与修复前站点逐条对应，规则非空转）；根 session **749 passed, 2 skipped, 17 deselected**、agent-core **274 passed, 2 skipped**、联邦 **152 passed**、agent-runtime **569 passed**、shared-schemas **28 passed**、agent_server **41 passed**、kefu **43 passed**、nl2sql **18 passed**；`eval/run_eval.py --fail-below 0.8` → **15/15 = 100%**；ks 231 passed（+5 存量红）、exhibition **347** passed（+4 新用例，+1 存量红），与 Batch 3 基线一致无新增失败。CodeQL C 类归零仍需 GitHub 重扫确认 |
+| 5（E 类夹具核实） | ✅ 已 commit `88f56c8` | 生产面核定：无生产侧同款弱判断（扫全仓非测试面 0 命中）；夹具本身**根因消除**而非仅 dismiss：`test_skills_remote_dag.py:22` 子串包含 → 等值断言 | 实跑结果（2026-10-01）：`uv run pytest packages/agent-runtime/tests/test_skills_remote_dag.py -q` → **5 passed**（断言由子串包含收紧为等值，未放宽）；`ruff check .` 干净；`lint_architecture.py` P4-2/P2/P5/P6/P7/P8 全通过；`check_doc_sync.py` 0 警告。**生产面核定**：packages/ 与 applications/ 非测试代码内对「子串包含判定 URL 域名/主机」命中 **0 条**（正则：字面量含 `.com/.cn/localhost/://` 与 `in <url 类变量>` 两面均零），因此无生产根因可修。**全 9 session 收口复跑（同一时点）**：根 749 passed / 2 skipped / 17 deselected、agent-core 274、agent-runtime **569**、shared-schemas 28、agent_server 41、联邦 152、kefu 43、nl2sql 18、exhibition 347（+1 存量红）、ks 231（+5 存量红）；`eval` 15/15=100%。E 类归零仍需 GitHub 重扫确认 |
+
+**五批收口盘点（本仓代码面已无待修项，余下均为人工/环外动作）**：
+
+| 告警 | 处置 | 尚需人工动作 |
+|---|---|---|
+| A `py/path-injection` ×8 | Batch 3 已根因收敛（kernel `guardrails.fs` + P7），PR 重扫无新增 A 类告警 | 默认分支重扫后关闭旧告警（合入后自动）；若仍报，补 CodeQL data-extension 将 `safe_join`/`resolve_within` 声明为 sanitizer |
+| B `py/weak-sensitive-data-hashing` ×5 | Batch 2 已收敛 4 个 api-key 站点（kernel `fingerprint` + P6）；`gray.py:40` 为真误报；PR 重扫另报的 kernel 定义处 2 条见下方「PR #33 实测重扫结果」 | 仅 `gateway/gray.py:40` 需 dismiss，附证据：非密钥、非隔离的 `md5(user_id)` 灰度 0–99 分桶 |
+| C `py/stack-trace-exposure` ×4 | Batch 4 已收敛 6 站点（kernel `mask_exception_for_client` + P8），PR 重扫无新增 C 类告警 | 默认分支重扫后关闭旧告警；若仍报，同 A 补 sanitizer 模型声明 |
+| D `actions/missing-workflow-permissions` ×3 | Batch 1 已加顶层 `permissions: contents: read` | push + PR 后由重扫确认 |
+| E `py/incomplete-url-substring-sanitization` ×1 | Batch 5 已根因消除（夹具等值断言），无需 dismiss | GitHub 重扫后本条应自行关闭 |
+| 运维随 Batch 2 | 指纹/会话 ID 切换 | 部署时配 `AGENT_PLATFORM_SECURITY_PEPPER` 并先 dry-run 后执行 `scripts/migrate_thread_identity.py` |
+
+**Batch 2 实施记录与偏差**：
+- 会话摘要宽度定为 **32 hex（128bit）**（方案只写「定长 ≥ 32 hex」）；`fingerprint(length=...)` 对低于 32 的请求直接 `ValueError`，把「弱截断」做不成合法调用而不是靠注释约束。
+- pepper env 定名 `AGENT_PLATFORM_SECURITY_PEPPER`（对齐已有 `AGENT_PLATFORM_DATABASE_URL` 前缀）；未配置时**仍可用**，只在首次派生告警一次（不做 fail-open 开关，也不阻断启动）。
+- 会话兼容策略选了「**一次性迁移脚本**」而非双读/兼容开关：双读需改对外契约（历史接口返回哪个 thread 的会话），而 pepper/派生法切换本质是一次性运维动作；`dev-default-thread` 字面量顺手上收为 `DEV_THREAD_ID`（DUP-3 残留）。
+- **未执行项（需人工）**：GitHub 上对 `gray.py:40` 的 dismiss（附证据：非密钥、非隔离的灰度分桶）；上线时根据部署实际情况跑 `scripts/migrate_thread_identity.py`（先 dry-run）与配 pepper。
+- **两处与本批无关的存量红**（已用 `git stash` 回基线复核确认为 **先前就失败**，非本批引入）：
+  1. `applications/knowledge-service/tests/unit/test_tracing.py` 5 条 SDK 用例失败（全局 TracerProvider 被先前用例占用 → in-memory exporter 收到 0 span）；
+  2. `applications/exhibition-agent/tests/test_server.py::test_query_success_response_carries_traceparent` ImportError：该用例从 `opentelemetry.sdk.trace.export` 导 `InMemorySpanExporter`，而本地 SDK 版本仅子模块 `...export.in_memory_span_exporter` 暴露。
+  两者均属可观测性测试的环境/泄漏问题，归后续单列处理，不混进安全批次。
+
+**Batch 3 实施记录与偏差**：
+- 拆为**两个入口而非一个**：`safe_join`（拼接语义，绝对片段/`..`/NUL/空一律拒绝）与 `resolve_within`（解析语义，允许绝对入口但必须落在 base 内）。原因见对外契约审计：`/api/files` 返回绝对路径、前端原样回传，若只用严格 `safe_join` 会静默破坏既有消费者（AGENTS.md「全局优先不等于强行统一对外契约」）；仓内 grep 确认 `path` 入参无仓内消费者，外部前端无法在此仓验证，故选宽容入口。
+- `PathTraversalError` **异常消息不回带入参原文**（越界线索只写服务端日志），并把该性质固定为单测（`test_safe_join_error_message_does_not_leak_input`）——否则下游一句 `detail=str(e)` 就能把内部路径泄出去。
+- 顺带消除两个 **C 类同源站点**：`:284` `detail=f"路径无效: {e}"` 与 `:300` `detail=str(e)` 改固定文案 + `logger.exception`；`/api/download` 的存在判定由 `exists()` 收紧为 `is_file()`（旧实现会把目录当文件回传）。Batch 4 仍负责 `skill_loader/app.py` 3 处与 `query_router.py:382`。
+- 文件名净化一并上收为 `guardrails/fs.safe_filename`（原 `_sanitize_filename` 是本文件私有实现，CodeQL 不认），行为等价 + 空串归 `_`。
+- P7 拆两条子检查：P7-1 白名单外禁手写 `.is_relative_to(`；P7-2 `applications/**` 下路径含 `/api/` 的模块若有 `FileResponse(`/`.rglob(`/`.glob(` 出口却未调 kernel helper 即失败。白名单：kernel `fs.py` + ks 两个静态页面 router（`PROJECT_ROOT` 常量拼接，无请求输入）。
+- **未执行项（需人工）**：A 类 8 条告警的归零确认需在 GitHub 侧重扫（本机无 CodeQL CLI）；若重扫仍残留，下一步是补 CodeQL data-extension model 把 `safe_join`/`resolve_within` 声明为 sanitizer，而非回到各处手写。
+- **跨平台补修（PR #33 的 CI 把实现里的宿主依赖拉出来了）**：Linux runner 上 `test_guardrails_fs.py` 真实失败 4 条（`safe_join` 对 `C:\Windows\win.ini` 与 `\\server\share\x` DID NOT RAISE、`resolve_within` 对 `C:\Windows\win.ini` DID NOT RAISE、`safe_filename("..\\..\\windows\\win.ini")` 未去目录）。**定性为真实缺陷而非 flake**：根因是 kernel 实现直接依赖 `pathlib` 的宿主语义（`Path.is_absolute()` / `Path.parts` / `Path().name` 在 POSIX 下都不把 `\` 当分隔符），而入参可能来自 Windows 客户端。修法为**改实现、不动断言**（红线：测试红时修产品代码到契约要求）：新增 `_ANY_SEP_RE`/`_ABS_FORM_RE`/`_WINDOWS_ABS_RE`/`_split_fragments`/`_is_foreign_absolute`，绝对判定与 `..` 判定按两套分隔符做，`resolve_within` 额外对 POSIX 宿主含 `\` 的入参做“反斜杠也是分隔符”的二次 containment（否则 `..\evil` 会被当成单个合法文件名而绕过穿越检查），`safe_filename` 的 basename 改按分隔符切分取末段。
+  - 保留 Windows 宿主对 `C:\...` 绝对入口的宽容（`_is_foreign_absolute` 在 `os.name == "nt"` 返回 `False`），否则会破坏 `/api/files` 绝对路径原样回传的对外契约（`test_resolve_within_accepts_absolute_input_inside_base` 钉住）。
+  - 测试面**拓宽**（非收窄）：补 `C:/Windows/win.ini`、`..\..\win.ini`、`..\..\outside.txt`、`C:\Windows\System32\cmd.exe` 四个形式，并在模块 docstring 写明这些用例**不得改成 `skipif` 只跑一边**。
+  - 证据层级：Windows 本地实跑（2026-10-01）`ruff check` 干净、`lint_architecture.py` P4-2/P2/P5/P6/P7/P8 全通过、根 session **753 passed / 2 skipped / 17 deselected**（较 749 多 4 条即新增用例）、agent-core **278 passed / 2 skipped**、联邦 **152 passed**、governance **161 passed**。**POSIX 证据本机不可得**（无 docker、WSL 未装分发），只能由 push 后的 CI 复验；在 CI 转绿前不得声称此类平台差异已验证。
+
+**Batch 4 实施记录与偏差**：
+- **按不变量收敛，不按告警条数收敛**：CodeQL 只标 4 条（`app.py` 3 + `query_router` 1），实修 **6 处**：另两处是 ks `api/query_router.py:165` 与 `nodes/node_answer_output.py:162` 的 SSE `ERROR` 帧（完全同构的出口，CodeQL 跟不到因为中途经队列传递），以及 `skill_loader/agent.py:243`（工具 502 body 经 `/api/chat` 的 `tool_calls[].result_summary` 回传客户端）。若不一次收干净，P8 上线后这些同模式站点仍会逐批被重新发现。
+- kernel **不新增第二套文案常量**：方案已定复用 `install_error_handlers`，但它兜不住流式/手写出口（状态码已发），故只新增一个**边界函数** `mask_exception_for_client(exc, *, logger, context, message)`，文案仍用已有 `SANITIZED_5XX_MSG`（D-2=A 零破坏）。`exc` 参数刻意**不参与返回值**——一旦从异常派生任何字段，泄漏面就重开。
+- **日志器类型差异（先实测后发现）**：kernel 内部日志用 f-string 而非 `%s` 惰性格式化，因为 ks 全仓用 **loguru**（`{}` 格式化，`%s` 会被丢弃）；因此 ks 两处站点**不传 logger**（它们已在就地 `logger.error(...)` 记录），exhibition / agent_server（std logging）才传 `logger=`。已写进函数 docstring。
+- **4xx 回显从判定面排除**（而不用白名单）：exhibition `server.py:91/96` 的 `detail=f"...{exc}"` 是 JSON/pydantic 输入校验回显，面向调用方自身输入且 CodeQL 未标；按 D-2=A「不动各 app 现有 4xx `{detail}` 信封」，将其作为规则的第 4 条放行面写进 lint 注释与单测（含反例），而非留为静默例外。
+- P8 白名单**故意置空**并有单测钉住（`test_p8_whitelist_is_deliberately_empty`）：本不变量不允许未说理的例外，与 P6/P7 “白名单只放单一实现”写法不同。
+- **范围外登记（需先做“内部详情 vs 对外文案”通道分离）**：nl2sql `agent/nodes/execute_sql.py:31` 的 `state["error"] = str(exc)` 会经 `SqlQueryResponse.error` 出到客户端，但**同一字段又是 `correct_sql` 节点的 LLM 纠错输入**，直接脱敏会削弱纠错回路；同类还有 federation `tools/*` 的 LLM 观察字符串与 `monitor.report_error(detail=str(e))` 审计遥测、agent_server `planners/graph.py` / `sql/pipeline.py` 的 StreamEvent error payload、exhibition `foundation/production_readiness_gate.py`。均为非 HTTP 出口行内拼接，P8 不命中，归后续单列。
+- **测试层次取舍**：ks 两处站点**无行为级回归用例**——ks `tests/unit/conftest.py` 明文“本套测试刻意不依赖任何重型依赖”，导入 router/main_graph 会破其设计；改由 kernel 单测（脱敏性质）+ P8 结构门禁（含以 ks 原始行作为正例）覆盖。exhibition 4 个出口与 agent_server SSE 帧均有端点级行为回归。
+- **未执行项（需人工）**：C 类 4 条告警的归零确认同样需 GitHub 重扫；若重扫仍残留（例如认为 `mask_exception_for_client` 不是 sanitizer），下一步是补 CodeQL data-extension model 声明该函数为 sink barrier。
+- **附带发现的纠正（原记为文档漂移，结论有误）**：本条原写「根 `AGENTS.md` 推荐的 `docs/operations/testing-playbook.md` 在仓内不存在」——**该判断不成立**。误因：把会话上下文里缓存的 `feat/isolation-hardening` 版 `AGENTS.md` 当成了本分支事实。实测 `git grep testing-playbook` 对各 ref 的 `AGENTS.md`：`HEAD` / `origin/main` / `origin/v3` / 本分支远端 命中 **0**，仅 `feat/isolation-hardening` 命中 **1**（该分支同时持有该文件，属其未合并内容，非主干漂移）。
+- **真实存在的两处（另案处理）**：① `ARCHITECTURE.md:91` 引 `docs/architecture-boundary-app-vs-agent-federation.md`，实际位于 `docs/architecture/` 下（`origin/main` 同样如此）；② 门禁确有覆盖缺口，但成因与上述无关——`check_doc_sync.py` 的 `check_architecture_paths()` 仅对以 `/` 结尾的目录引用调 `check_path_exists()`，带扩展名的文件引用直接落空；`check_agents_md_paths()` 只匹配表格首列 `` | `path` | ``，行文内引用一概不查。两项与本批 CodeQL 主题无关，拆到独立分支处理，本处只留纠正记录。
+
+**Batch 5 实施记录与偏差**：
+- **把 dismiss 升级为根因消除**：方案原定“纯测试夹具→dismiss 附注”，实测发现该断言可改为**更强的等值断言**（`result == "content from http://example.com"`）而无任何覆盖损失，于是不留永久人工动作（dismiss 需去 GitHub 点，且代码里的“已核实为误报”注释债会长期跟仓）。红线「不得为消警放宽断言/删用例」在此不适用——改动方向是收紧。额外补一条 `isinstance(result, str)` 钉住薄包装不得多包一层。
+- **不开 P9 lint，并在这里承认它是「三层齐备」的例外**（本例只修了单一形式，第③层门禁故意缺失，故属约定而非门禁）。理由：本仓 `lint_architecture.py` 只走 stdlib 正则、无类型推断，无法区分弱校验形态 `"example.com" in result`（子串包含）与**正确形态** `host in ALLOWED_HOSTS`（集合成员）——同一行内两者写法相似，任何正则判定面都会误伤后者；而正确写法正是我们希望鼓动的。生产面命中为 0，无存量需守，因此该维度继续交给 **CodeQL 自身规则**（已在 code scanning 里）而不是自造窄 lint。
+- **同类形状未改码（仅登记）**：`applications/exhibition-agent/tests/test_model_router.py:230` 的 `assert "z***@example.com" in masked` 同为子串包含，但主语是邮箱脱敏结果且 CodeQL 未标（规则只跟 URL）；相邻 `:229` 的 `not in` 反而是「不得泄漏」的正确断言。若日后重扫命中同规则，按本法改等值断言即可，本轮不动。
+- **核生产时的两条附带观察（不构成 E 类，不改码）**：
+  1. `applications/agent_server/sql/pipeline.py:48` `sqlite3.connect(f"file:{unquote(path)}?mode=ro", uri=True)`——若 `path` 解码后含 `?`，`mode=ro` 会落到首个参数的值里而静默失效（只读「双保险」退化为只靠 SQL 守卫一层）。当前 `path` 源自服务端配置 `SQL_DSN`（非请求入参），故不列为可利用漏洞；登记为硬化候选（用 `?`/`#` 转义或 `uri` 参数拼接）。
+  2. 同文件 `:65` 的 `dsn.startswith("sqlite:///")` 是对 URL 的**前缀**判定（非子串包含），属方案选型可接受的写法；仅因与 E 类同属「URL 字符串形状判定」一并登记。
+- **未执行项（需人工）**：E 类 1 条在 GitHub 侧的最终关闭确认（本仓无 CodeQL CLI，无法本地复扫）；若重扫因历史基线仍列 open，手动关闭并指回本节即可。
+
+## PR #33 实测重扫结果与二次处置（2026-10-01）
+
+合入前 GitHub 已对本 PR 跑了一轮 CodeQL 分析（默认配置、PR 模式），这是比“等合入后重扫”强得多的证据。
+
+**绿灯部分**：`ci`（push 与 PR 两个事件）与 `ha` 均 **pass**（含 `packages/agent-core` 在 Linux runner 上的跨平台用例）；`Analyze (python)` / `Analyze (actions)` pass。
+
+**新增告警只余 2 条，全在 B 类的 kernel 定义处**（`packages/agent-core/agent_core/guardrails/auth.py`）：
+
+| PR 告警 | 位置 | 定性 | 处置 |
+|---|---|---|---|
+| #38 `py/weak-sensitive-data-hashing` | `:78` `hmac.new(pepper, secret, sha256)` | **误报**：规则针对口令类低熵秘密的离线暴破；此处输入是高熵 API Key，产物只做查表标识（限流桶/缓存键/会话 ID）且每请求计算。换 scrypt/pbkdf2 只有延迟成本、无暴破增益；带 pepper 时离线计算还需先取得 pepper | 不改码（不改名“躲检测器”）；dismiss `false_positive` + 理由同步写进 kernel docstring |
+| #39 `py/weak-sensitive-data-hashing` | `:99` `legacy_thread_id` 的 `sha256(...)[:12]` | **形状属实、不可消除**：必须能复算升级前的旧会话身份，否则历史目录/检查点找不回 | dismiss `wont_fix`；同时把原来“仅靠约定不得业务调用”**升级为 P6-2 门禁**（白名单：kernel 定义处 + `scripts/migrate_thread_identity.py`） |
+
+**反向证据（相等于本方案验收的强信号）**：本轮 PR 重扫 **没有**报出任何新的 `py/path-injection`、`py/stack-trace-exposure`、`py/incomplete-url-substring-sanitization` 或 `actions/missing-workflow-permissions`——即 A/C/E/D 四类的修改面在 CodeQL 眼里已无新问题（旧告警仍列 open 是因为默认分支尚未重扫，需合入后关闭；无需为此补 data-extension）。
+
+**为何选“门禁 + dismiss”而不是改算法**：改名（如把 `secret` 改成不含语义的变量）可静默退掉 #38，但那是**干扰检测器而非修正问题**，违反方案原则；而 #39 是本方案主动保留的技术债（迁移一致性 > 算法纯度），只能用硬门禁限制其扩散面。
+
+**dismiss 未能脚本化：根因已定位到令牌 scope（可一条命令修好）**：`gh api` 对告警状态写入端点返回 **HTTP 404**（`PUT`、`PATCH` 两个动词都试了，并对 `refs/heads/main` 上的 #31 做过同探针），而读取端点 `GET /code-scanning/alerts/38` 正常 200——不是 ID 或路径问题。用 `gh api -i` 对比响应头即得确证：该端点的 `X-Accepted-OAuth-Scopes` 含 `security_events`，而本机令牌的 `X-Oauth-Scopes` **不含** `security_events`（有 `repo`/`admin:org` 也不够）。GitHub 对「scope 不足」统一回 404 而非 403，这就是先前误判为「订阅无权限」的原因。补齐方式：`gh auth refresh -s security_events` 后重跑下面两条命令（未擅自执行：该命令会重新授权并可能替换本机 gh 存储的 PAT，属凭据级动作，需本人确认）。若不补 scope，则在 Security 面板手工 dismiss 亦可（PR #33 的 CodeQL 门禁未设为 required，`mergeStateStatus=UNSTABLE` 不阻断合入）。下面两段即建议文案（与本文表格同口径，入库以免理由只存于浏览器会话）：
+
+- **#38（`auth.py` HMAC-SHA256 行）→ `False positive`**：输入为高熵 API Key（非人工口令），产物只作查表标识（限流桶 / LLM 客户端缓存键 / 会话 `thread_id`），**不用于验证密钥**；慢 KDF（scrypt/pbkdf2/bcrypt）在此只会拖慢中间件热路径，对 ≥128bit 随机密钥无暴破增益，且离线计算额外需要服务端 pepper。原有 48bit 截断反模式已结构性封住：`fingerprint()` 对 <32 hex 的请求直接 `ValueError`，四处散点收敛为单一实现并由 P6 拦截。未采“改变量名躲检测器”的做法。
+- **#39（`legacy_thread_id` 的 `sha256(...)[:12]`）→ `Won't fix`**：告警形状属实但不可消除——必须能复算升级前的旧会话身份，否则 `updated/session_user-<legacy>/` 目录与 checkpointer `thread_id` 行无法找回；它不是认证路径，只产出一次性迁移的映射键。扩散面已由约定升级为不变量：`lint_architecture.py` **P6-2** 使 kernel 定义处与 `scripts/migrate_thread_identity.py` 之外的任何调用在 CI 失败（用例：`tests/governance/test_thread_identity_migration.py::test_p6_2_*`）；业务侧链路只用 `derive_thread_id()`/`fingerprint()`。
+
+**补 scope 后的可复跑命令**（body 与上面两条文案一致，逐字段填 `state`/`dismissed_reason`/`dismissed_comment`）：
+
+```bash
+gh auth refresh -s security_events
+gh api --method PATCH repos/:owner/:repo/code-scanning/alerts/38/states \
+  --input ./dismiss-38.json   # {"state":"dismissed","dismissed_reason":"false_positive",...}
+gh api --method PATCH repos/:owner/:repo/code-scanning/alerts/39/states \
+  --input ./dismiss-39.json   # {"state":"dismissed","dismissed_reason":"wont_fix",...}
+```
+
+### 二次重扫（`c8e512e` + `45373dd` 推上后，2026-10-01）
+
+- `ci`（push 与 PR 两个事件）仍 **pass**（2m27s / 2m48s），`ha` pass（1m11s），`Analyze (python)`、`Analyze (actions)` pass。
+- **告警编号未变**：PR ref 上 open 仍只有 **#38 / #39** 两条，`annotations_count` 仍为 2。但因 `c8e512e` 给 kernel 加了 docstring，行号漂了——`#38: 78 → 92`（`hmac.new(pepper, secret, sha256)`）、`#39: 99 → 117`（`legacy_thread_id` 的 `sha256(...)[:12]`）。CodeQL 的分组跟住了纯注释变更，**没有因行号漂移产生新告警**，这也是「定调入库不需要重开一轮」的直接依据。
+- CodeQL 检查仍 fail 的原因**只剩** #38/#39 尚未 dismiss（见上节 scope 修法），无新增待办。
+- **第三轮（`9e43d3c`，纯文档）依旧只有同样 2 条 annotation**（同一规则、同一两处位置），`ci`（push/PR）/`ha`/`Analyze (python|actions)` 全 pass——确认本轮不产生新告警的结论稳定。
+- **当前权限下能做的替代动作（已执行）**：告警**状态**写入需 `security_events`，但**评论**只需 `repo`——故已把两段定性以 thread reply 形式回帖到 PR 上的两条 CodeQL annotation（`pulls/33/comments` 下 id `4152287050` → #38、`4152287253` → #39）。这样 reviewer 在 diff 处直接看到定调，dismiss 只剩“到 Security 面板把这两条点掉”这一下人工操作。
+

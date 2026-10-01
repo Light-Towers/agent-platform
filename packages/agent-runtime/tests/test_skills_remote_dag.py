@@ -19,7 +19,13 @@ async def test_as_remote_skill_basic():
     assert skill.description == "远程获取"
     assert skill.kind == SkillKind.REMOTE
     result = await skill.executor(url="http://example.com")
-    assert "example.com" in result
+    # 契约是「kwargs 透传 + 原样返回」，故用等值断言（比子串包含更强）。
+    # 刻意不写成 ``"example.com" in result``：形似 URL 子串白名单校验，会被
+    # CodeQL ``py/incomplete-url-substring-sanitization`` 判为「URL 安全校验依赖子串」
+    # （见 docs/plans/plan-codeql-codescanning-remediation-2026-10-01.md Batch 5）。
+    assert result == "content from http://example.com"
+    # 返回值类型也钉住：薄包装不得把协程结果再包一层
+    assert isinstance(result, str)
 
 
 @pytest.mark.asyncio
