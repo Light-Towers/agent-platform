@@ -2,7 +2,20 @@
 
 本仓库为 uv workspace monorepo。**唯一受支持的安装/运行入口是根 `uv.lock` + `uv sync`**，子包不再维护独立 `uv.lock`（见 v2 修复 #14）。
 
-## v3 身份层合流 main（B7b principal_id 化的前置）（2026-10-01，分支 `integration/v3-into-main`，待 PR/CI）
+## B7d：合流后主干复验发现新告警 #48，按三层齐备真修（2026-10-01，方案 §7）
+
+> 方案：`docs/plans/plan-codeql-batch7-no-dismiss-real-fixes-2026-10-01.md` §7。触发：v3 合流（PR #41）合入后回主干复验，硬指标未达成——open 不是 2 而是 3。
+
+- **事实**：新增 **#48 `actions/missing-workflow-permissions`** @ `.github/workflows/ha-assembly.yml:30-56`，`created_at=2026-10-01T12:55:08Z`（PR CI 期间）、`updated_at=13:01:20Z`（主干重扫复现）。引入源：`70f2b83` 经 merge 第二父进来，即 **v3 侧提交新增该 workflow**（`git diff --name-status b67546d 889d417 -- .github/workflows/` = `A`）。#38/#39 无位移（仍 `auth.py:92` col=47 / `:117`）。
+- **不采的捷径**：只给被点名的 job 补一行权限（散点式）；dismiss；在 default setup 里按路径排除 `actions/*` 查询；把权限写成 `write-all` 求个「不报」。
+- **单一实现（对齐既有约定，不新发明）**：审计 4 个根 workflow，`agent-platform-ci.yml`/`eval-llm.yml`/`ha.yml` 均已有顶层 `permissions: contents: read`，**`ha-assembly.yml` 是唯一漏接者**（顶层与 job 级均无）。已按同形状补齐；`contents: read` 是它实际所需最小面（只用 `actions/checkout` + `docker compose` + `curl`，不上传 artifact、不写仓库）。
+- **强制门禁（新增 P11）**：`scripts/lint_architecture.py` 扫根 `.github/workflows/*.yml|yaml`，**缺顶层 `permissions:` 块**、取值为 **`write-all`**、或为空块即 exit 1；自研 fail-closed（workflow 目录不存在也不得静默放行）。只认顶层块的理由：顶层声明由构造保证覆盖全部 job，job 级声明易漏。
+- **治理用例**：`tests/governance/test_workflow_permissions_governance.py` 17 条——正反例（缺块/仅 job 级/`write-all`/空块/注释伪装）、当前树零违规、临时根探针验扫描面、目录缺失 fail-closed，及一条**回归锁**：把任一真实 workflow 的顶层 `permissions` 块剥掉必须立刻判违规（排除「门禁只是恰好没命中」的假通过）。
+- **登记位**：`ARCHITECTURE.md` 新增 **§4.1 强制门禁登记表**（P2/P4-2/P5/P6+P6-2/P7/P8/P9/P10/P11 × 锁住的告警形状 × 治理用例）。这是补合流方案 §8-3 的欠账——当时承诺「在 `ARCHITECTURE.md` 登记」但只落在 CHANGELOG，P9/P10 一直无登记位。
+- **本地验证**：`lint_architecture` exit 0（9 组：P4-2/P2/P5/P6+P6-2/P7/P8/P9/P10/P11）· 新用例 17 passed · `tests/governance` 全 session **242 passed** · `ruff check` 无告警。门禁有效性反喂取证：将 `git show HEAD:` 的**修复前原文**送进 P11 → 判「缺顶层 permissions 块」，修复后同一函数 → `None`。
+- **账面自纠（顺带查到，与本告警无因果）**：`plan-v3-identity-merge` §9.2 与 PR #41 描述均写着「仓内无 `uv lock --check` 门禁」——**错**：`make ci` 末行就是 `uv lock --check`（Makefile:71），而 CI 直接复用 `make ci`（`agent-platform-ci.yml:65`）。「不破 CI」的结论仍成立，但依据换成实证：本机 `uv lock --check` exit 0，且 PR #41 的 `ci` ×2 job（含 `--check`）已 pass。残留风险已登记：CI 的 uv 版本由 `setup-uv@v7` 决定且不钉，将来两端 marker 规范化不一致时 `--check` 可报「lock 已过期」而红；根治是在 workflow 钉 uv 版本（独立决策，未在本批做）。教训：**否定式断言（“仓内无 X”）必须 grep 过才能写**。
+
+## v3 身份层合流 main（B7b principal_id 化的前置）（2026-10-01，PR #41 已合入 `a660e76`）
 
 > 方案：`docs/plans/plan-v3-identity-merge-2026-10-01.md`（§9 为执行记录）。触发：用户在 B7b 落地上拍板「先合流 v3 身份层，再做 principal_id 化」——`#38`/`#39` 的病根（单一静态 `API_KEY`、无 key→主体映射）与 v3 上已 Accepted 的 ADR-0007 同一条；直接在 main 再造 principal 注册表就会形成**第三套身份机制**，违反「横切关注点单一实现」。
 
@@ -13,7 +26,7 @@
 - **运行侧（已在 `.env.example` 登记 12 项）**：`DEPLOY_ENFORCE_IDENTITY` **默认 false** ⇒ 零依赖冒烟不受影响（实测：默认档 `agent_server.main:app` 构造成功、中间件栈含 `IdentityMiddleware`；置 true 且无公钥无 `SINGLE_TENANT` → `RuntimeError` 拒启动，开关不是摆设）；本次**不**把默认值改成 fail-closed（独立决策）。
 - **新登记技术债（`ARCHITECTURE.md` §2.3/§5）**：`IdentityMiddleware` 仅覆盖 2/6 应用（agent_server + federation 无条件挂载；ks 走自有 `TenantHeaderMiddleware`；exhibition/kefu/nl2sql 入口 grep **0 命中**）——`TENANT_JWT_ENFORCE` 硬切换前必须先补齐装配层 + 新增 lint 不变量，不得靠「每个 app 记得调一次」。
 - **本地验证（全绿）**：`ruff` 无告警 · `lint_architecture` exit 0（P4-2/P2/P5/P6+P6-2/P7/P8/P9/P10 全在位）· `check_doc_sync` exit 0 · 9 个 pytest session：根 839 passed/5 skipped、agent-runtime 606（含 27 条 identity）、governance 225、agent-core 300/5、agent_server 44、联邦 163、ks 238/13、shared-schemas 28、kefu 43、exhibition 347/1、nl2sql 18；`tests/ha` 1 passed/26 skipped（本机无 PG，skip 属设计意图，真 PG 结果交 CI）。`uv lock` 除 identity 条目外还归一化了约 30 行 environment marker（本机 uv 0.11.21 与 lock 原生成版差异，无包名/版本变动，已实查确认 CI 不走 `--frozen`）。
-- **验收硬指标（尚未达成，不得提前声明）**：主干 `refs/heads/main` open 仍为 2（`#38`/`#39`）、且合流未新增任何告警；若新增，按同一流程真修，**不 dismiss**。
+- **验收硬指标（实跑结果：未达成，已转入 B7d 真修）**：PR #41 自身 checks **全 pass**（`Analyze (actions)`/`Analyze (python)`/`CodeQL`/`assembly` ×2/`ci` ×2/`ha` ×2），其中 `ha` job 在真实 PostgreSQL 16.15 上 **27 passed in 8.07s**（覆盖本机 26 条 skip，kill -9 双进程接管真跑）——此前唯一未知项已坐实。但合入（13:00:43Z）后主干 `refs/heads/main` 复验为 **open 3 / fixed 43 / dismissed 0**：多出的 **#48 由 v3 侧新增的 workflow 带入**，即「合流未新增任何告警」不成立 → 按本批约束真修，见顶部 **B7d** 节。
 
 ## Batch 7c：#47 按官方编码形状重写 `resolve_within`（2026-10-01，分支 `fix/codeql-batch7c-path-shape`，PR #39 已合入 `bb46dd3`）
 

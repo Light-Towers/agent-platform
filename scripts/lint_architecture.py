@@ -15,6 +15,10 @@ P6：禁止在 kernel 外对密钥类标识手写裸哈希（DUP-1 横向重复�
     并封锁【刻意保留的弱派生】``legacy_thread_id`` 的调用面（仅迁移脚本可用）。
 P7：禁止在 kernel 外手写路径 containment / api 层绕过 ``guardrails.fs``（A 类横切收敛）。
 P8：禁止在对外响应体（HTTP JSON / SSE 帧）回显异常消息或堆栈（C 类横切收敛）。
+P9：禁止在 app 层裸调 ``monitor.report_tool*``（散点埋点，v3 合流并入）。
+P10：禁止 ``from tools.*`` 直引 ``@tool`` 绕过 ``tool_registry.get_tool()``（v3 合流并入）。
+P11：禁止无顶层 ``permissions:`` 块的 GitHub Actions workflow（GITHUB_TOKEN 未限权，
+     对应 CodeQL ``actions/missing-workflow-permissions``，见 B7d 方案 §7）。
 """
 
 from __future__ import annotations
@@ -538,6 +542,63 @@ def check_tool_direct_import() -> list[str]:
     return violations
 
 
+# ---------------------------------------------------------------------------
+# P11 架构不变量：GitHub Actions workflow 必须显式声明顶层 GITHUB_TOKEN 权限。
+# 根因（CodeQL actions/missing-workflow-permissions）：未声明 permissions 的 job
+# 会回落到组织/仓库级默认（常为读写），任何被引入的第三方 action 都能拿写权限。
+# 判据只认顶层块：顶层声明由构造保证覆盖该 workflow 的全部 job，而 job 级声明
+# 易漏且不可核（确需某 job 提升权限时在 job 级单独声明，顶层块仍不得省略）。
+# 作用域仅仓库根 .github/workflows/：GitHub 只解析该目录，applications/** 下的
+# 同名目录不会被 Actions 运行时加载，列入只会误伤占位文件。
+# ---------------------------------------------------------------------------
+_WORKFLOW_DIR_REL = ".github/workflows"
+
+
+def _workflow_permission_violation(text: str) -> str | None:
+    """单个 workflow 文本的权限判定：违规返回原因，合规返回 ``None``。"""
+    lines = text.splitlines()
+    idx = None
+    for i, line in enumerate(lines):
+        if line.startswith("permissions:"):
+            idx = i
+            break
+    if idx is None:
+        return "缺顶层 permissions: 块（GITHUB_TOKEN 权限未限制）"
+    value = lines[idx].split(":", 1)[1].strip()
+    if value == "write-all":
+        return "顶层 permissions 取值为 write-all（等于放开全部作用域）"
+    if value in ("", "{}", "null", "~"):
+        # 块式声明：必须至少有一个缩进的子作用域
+        for nxt in lines[idx + 1:]:
+            if not nxt.strip() or nxt.strip().startswith("#"):
+                continue
+            if nxt[:1] in (" ", "\t"):
+                return None
+            break
+        return "顶层 permissions: 为空块（未声明任何作用域）"
+    return None
+
+
+def check_workflow_permissions() -> list[str]:
+    """根 workflow 必须带顶层 permissions 块；返回违规描述列表。"""
+    workflow_dir = ROOT / _WORKFLOW_DIR_REL
+    if not workflow_dir.is_dir():
+        # fail-closed：目录被搬走也不能静默放行，否则本门禁退化为约定
+        return [f"{_WORKFLOW_DIR_REL}/ 不存在（workflow 目录被移动？请同步修正本门禁作用域）"]
+    violations: list[str] = []
+    for wf in sorted(workflow_dir.glob("*.yml")) + sorted(workflow_dir.glob("*.yaml")):
+        rel = wf.relative_to(ROOT).as_posix()
+        try:
+            text = wf.read_text(encoding="utf-8")
+        except OSError as exc:  # 读不到就是违规，不等于通过
+            violations.append(f"{rel}: 无法读取（{exc}）")
+            continue
+        reason = _workflow_permission_violation(text)
+        if reason:
+            violations.append(f"{rel}: {reason}")
+    return violations
+
+
 def main() -> int:
     rc = 0
     v1 = check()
@@ -614,6 +675,15 @@ def main() -> int:
         rc = 1
     else:
         print("P10 架构约束通过：无 @tool 直引旁路")
+    v9 = check_workflow_permissions()
+    if v9:
+        print("P11 架构约束违反：workflow 必须显式声明顶层 permissions（GITHUB_TOKEN 最小权限）")
+        print("修复：在 jobs: 之前加顶层块，只开该 workflow 实际需要的最小作用域（常规为 contents: read）：")
+        for v in v9:
+            print(f"  {v}")
+        rc = 1
+    else:
+        print("P11 架构约束通过：所有根 workflow 均声明了顶层 permissions")
     return rc
 
 

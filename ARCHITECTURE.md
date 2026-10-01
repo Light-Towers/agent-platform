@@ -98,6 +98,25 @@ agent-core  agent-runtime  shared-schemas  agent-server  agent_federation  exhib
 4. **禁止再造 Runtime**：任何 application（`agent_federation` 等）需要的 Planner / Skill / Workflow，应从 `agent-runtime` 消费，不得另起一套执行引擎。
 5. **跨进程通信必须走 `shared-schemas`**：Request / Response / Event 不得各自定义导致字段漂移。
 
+### 4.1 强制门禁登记表（lint 不变量，计入 `make ci`）
+
+> 约定只靠自觉迟早被破窗，故每条横切收敛都对应一条全仓扫描 + 白名单的不变量，实现在 `scripts/lint_architecture.py`，违规直接 CI 失败。「消除 CodeQL 告警」不是目的，**防止同类问题再长出来**才是，故第③列记录被锁住的告警形状。
+
+| 编号 | 不变量（白名单外即失败） | 锁住的告警形状 | 治理用例 |
+|------|------------------------|------------------|----------|
+| P4-2 | `registry.execute()` 只能经 `delegate()` 调用 | Skill 组合绕过运行时契约 | — |
+| P2 | 生产 `FastAPI(` 必须经 `agent_core` 的 `build_api_app` | 异常处理/错误信封装配漏接 | — |
+| P5 | workspace 成员间不得顶层包名重复 | editable `.pth` 解析取决于安装顺序 | — |
+| P6 | 密钥类标识不得裸用 `hashlib`，必走 `guardrails.auth.fingerprint` | `py/weak-sensitive-data-hashing` 的散点源头 | `tests/governance/test_thread_identity_migration.py` |
+| P6-2 | 弱派生 `legacy_thread_id` 调用面封闭（仅定义处 + 迁移脚本） | 同一规则的不可消除存量（历史会话复算） | `tests/governance/test_thread_identity_migration.py` |
+| P7 | 路径 containment 必走 `guardrails.fs`；api 层文件 I/O 必过 `safe_join`/`resolve_within` | `py/path-injection`、`py/clear-text-logging-sensitive-data` | `tests/governance/test_path_io_governance.py` |
+| P8 | 对外响应体（HTTP JSON / SSE 帧）不回显异常消息或堆栈 | `py/stack-trace-exposure` | `tests/governance/test_exception_echo_governance.py` |
+| P9 | app 层禁裸调 `monitor.report_tool*`（散点埋点） | 工具观测断点（v3 合流并入） | — |
+| P10 | 禁 `from tools.*` 直引 `@tool` 绕过 `get_tool()` | 同上（v3 合流并入） | — |
+| P11 | 根 `.github/workflows/*.yml` 必须声明顶层 `permissions:` 块 | `actions/missing-workflow-permissions`（GITHUB_TOKEN 未限权） | `tests/governance/test_workflow_permissions_governance.py` |
+
+P11 只认顶层块：未声明 `permissions` 的 job 会回落到组织/仓库默认（常为读写），job 级声明易漏且不可核。背景与判定口径见 `docs/plans/plan-codeql-batch7-no-dismiss-real-fixes-2026-10-01.md` §7。
+
 ## 5. 当前已知技术债（登记，非本期处理）
 
 - **【2026-09-27 新增】记忆层契约缺位：`agent-runtime` 自建执行记忆**：`memory` 的法定归属是 `agent-core`（§2.1 明列「含 MemoryStore 统一门面」），且内核已声明「各子包不得再各自为政重复实现」（`agent_core/memory/__init__.py:20-21`）。但内核现有契约**只覆盖语义记忆**（`store.py` 的 `MemoryStore` 五动词与 `CapabilityReport` 均无 episodic/procedural/working 能力位），对执行记忆零覆盖 → `agent-runtime` 只能在包内自建 8 个 `memory_*.py`（对 `agent_core` 的 import 数为 0）。
