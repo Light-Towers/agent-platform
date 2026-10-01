@@ -1,0 +1,32 @@
+# agent_core.guardrails.fs 的流模型：把内核路径校验出口声明为 path-injection 的 barrier
+# 依据（官方 Python 数据扩展谓词）：
+#   barrierModel(type, path, kind)
+#   barrierGuardModel(type, path, acceptingValue, kind)
+# sink kind "path-injection" 取自官方在册列表；barrier 的 kind 与被抑制的 sink kind 同名。
+#
+# 同一函数写两种 type 形态（并集语义，重复行会被去重）：
+#   - 调用点是 `from agent_core.guardrails.fs import resolve_within`
+#   - 也可能以 `import agent_core` 的成员链形式被解析
+extensions:
+  - addsTo:
+      pack: codeql/python-all
+      extensible: barrierModel
+    data:
+      # safe_filename：只留 [A-Za-z0-9._-]、剥前导点、限长、拒空——归一化为安全文件名
+      - ["agent_core.guardrails.fs", "Member[safe_filename].ReturnValue", "path-injection"]
+      - ["agent_core", "Member[guardrails].Member[fs].Member[safe_filename].ReturnValue", "path-injection"]
+      # safe_join：逐段清洗 + resolve 后强制基准目录不变量，越界抛 PathTraversalError
+      - ["agent_core.guardrails.fs", "Member[safe_join].ReturnValue", "path-injection"]
+      - ["agent_core", "Member[guardrails].Member[fs].Member[safe_join].ReturnValue", "path-injection"]
+      # resolve_within：拒空 + resolve 后基准目录不变量，越界抛 PathTraversalError
+      - ["agent_core.guardrails.fs", "Member[resolve_within].ReturnValue", "path-injection"]
+      - ["agent_core", "Member[guardrails].Member[fs].Member[resolve_within].ReturnValue", "path-injection"]
+
+  # helper 体内仍会报出 sink（CodeQL 看不到不变量检查的作用域）。is_relative_to 返回 True
+  # 即在数学上约束了「在该目录之下」，这是真实的守卫语义，不是为了让告警消失而编造的模型。
+  - addsTo:
+      pack: codeql/python-all
+      extensible: barrierGuardModel
+    data:
+      - ["pathlib.Path", "Member[is_relative_to].Argument[this]", "true", "path-injection"]
+      - ["pathlib", "Member[Path].Instance.Member[is_relative_to].Argument[this]", "true", "path-injection"]

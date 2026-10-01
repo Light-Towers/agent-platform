@@ -2,6 +2,16 @@
 
 本仓库为 uv workspace monorepo。**唯一受支持的安装/运行入口是根 `uv.lock` + `uv sync`**，子包不再维护独立 `uv.lock`（见 v2 修复 #14）。
 
+## Batch 6 执行：仓内 CodeQL 模型包把 kernel guardrails 声明为 path-injection barrier（2026-10-01，分支 `fix/codeql-batch6-model-pack`）
+
+> 零产品代码变更，仅新增 2 个 YAML。**同时推翻本文件下一节的一个选型前提**（已就地标记）。
+
+- **产物**：`.github/codeql/extensions/agent-platform-python/codeql-pack.yml`（`library: true` + 无 dependencies + `extensionTargets: codeql/python-all: "*"` + `dataExtensions`）与 `models/agent_core.guardrails.fs.model.yml`：`barrierModel` 将 `safe_filename`/`safe_join`/`resolve_within` 的返回值声明为 `path-injection` barrier（每个 helper 写两种 `type` 形态匹配不同导入形式），`barrierGuardModel` 将 `Path.is_relative_to`（接收者用 `Argument[this]`）声明为守卫。
+- **选型前提纠正**：原计划「必须停用 default setup 并切 advanced setup」错误——官方文档明说仓级模型包放 `.github/codeql/extensions/` **会被自动检测并使用**，两种配置模式均识别。“已发布”限制只适用组织级扩展。结果：**零基础设施变更、零扫描黑窗、不多花 Actions 分钟**，避免了一次多余且有风险的面板切换。
+- **写法修正**：原方案写的「声明为 `sanitizer`」与「`PathTraversalError` 声明为 taint-blocking 异常」在 Python 数据扩展中**没有对应谓词**（官方只有 `sourceModel`/`sinkModel`/`summaryModel`/`barrierModel`/`barrierGuardModel`/`typeModel`），改为 barrier + guard 两种可表达的形式。
+- **边界说明**：`py/clear-text-logging-sensitive-data`（`#43`/`#44`）**不在可自定义的 sink kind 清单内**（官方列 9 种），因此无 barrier 可写，只能人工 dismiss——原「两个终态二选一」由此变成技术上的单选项。
+- **验收分层**：本机已验——两个 YAML `safe_load` 通过、列数与官方谓词签名一致、pack 无依赖、`check_doc_sync.py` 0 警告、`lint_architecture.py` exit 0（P7 未放宽）；**未验**——包是否真被加载、`#23`/`#40`~`#42` 是否闭合（本机无 CodeQL CLI，以 PR 的 CodeQL 作业不报红 + 合入后主干重扫差集为准）。
+
 ## CodeQL 合入后默认分支重扫对账：19/21 闭合，另暴露 5 条 kernel 模型缺失告警（2026-10-01，分支 `docs/codeql-post-merge-rescan`）
 
 > 本分支**纯文档**（不改产品代码）。触发：PR #33（`8b6d416`）与 PR #34（`4f8ae4c`）合入 `main` 后自动重扫的结果核对。
@@ -10,7 +20,7 @@
 - **新暴露 5 条（本条重点）**：`#40`/`#41`/`#42` `py/path-injection` 落在新建 kernel `agent_core/guardrails/fs.py` 内部的 `Path(...).resolve()` 调用点（`:119`/`:134`/`:162`），`#43`/`#44` 为新规则类 `py/clear-text-logging-sensitive-data`（同文件 `:93`/`:103` 两处拒绝日志回带入参原文）；另 `#23`（`FileResponse(abs_path)`）未闭合。**根因同一**：CodeQL 内建模型不认识 `safe_join`/`resolve_within`/`safe_filename` 为 sanitizer，所以污点既能追到调用点 sink，也能追进 sanitizer 内部把其 `resolve()` 当 sink 报。
 - **推理越界的纠正**：上游方案曾以「PR 重扫无新增 A/C/E/D 告警」作为反向证据，判定「无需为此补 data-extension」——**不成立**。`refs/pull/33/head` 与 `refs/heads/main` 是两套告警集合，跨过程的 kernel 内部 sink 只在默认分支模式下暴露。教训：**证据的作用域不能超出产生它的分析模式**；所以下结论必须回到最终作用域（默认分支）复验。已在原文处加纠正标记。
 - **预测命中**：`#38`/`#39`（kernel `guardrails/auth.py:92`/`:117`）如预期从 PR 作用域迁入 `refs/heads/main` 并重新开号——印证 dismiss 是按 ref 生效、不能只在 PR 上做一次。
-- **后续方案（待确认，未动工）**：`docs/plans/plan-codeql-batch6-kernel-sanitizer-models-2026-10-01.md`。选型实查：本仓为 PUBLIC（advanced setup 不占 GHAS 许可）；CodeQL 跑的是 default setup（仓内无 codeql workflow/config），而 default setup 只接受**已发布**的模型包——所以仓内本地 `.model.yml` 必须配 advanced setup 才生效。推荐以「切 advanced setup + 仓内模型包声明 sanitizer」为终态，期间用 dismiss 附证据维持面板可信；已否决「在调用点内联 `is_relative_to` 复检」（与 P7-1 不变量正面冲突且消不掉 kernel 内部告警）。
+- **后续方案（已执行，见上一节）**：`docs/plans/plan-codeql-batch6-kernel-sanitizer-models-2026-10-01.md`。选型实查：本仓为 PUBLIC；CodeQL 跑的是 default setup（仓内无 codeql workflow/config），而 ~~default setup 只接受**已发布**的模型包——所以仓内本地 `.model.yml` 必须配 advanced setup 才生效~~ **【此句已于执行时被推翻：仓级包放 `.github/codeql/extensions/` 即自动加载，该限制只适用组织级扩展，见上一节】**。“已切 advanced setup + 仓内模型包”的推荐收敛为“只加仓内模型包”；已否决的「在调用点内联 `is_relative_to` 复检」（与 P7-1 不变量正面冲突且消不掉 kernel 内部告警）维持否决。
 - **仍待人工**：`#34`（`gateway/gray.py:40` 灰度分桶，真误报）与 `#38`/`#39` 的 dismiss 需 `security_events` scope（实测本机令牌仍不含）；部署需配 `AGENT_PLATFORM_SECURITY_PEPPER` 并先 dry-run `scripts/migrate_thread_identity.py`。
 
 ## doc-sync 门禁补齐「文件引用」校验 + 修复存量路径漂移（2026-10-01，分支 `fix/doc-sync-file-ref-gate`）
