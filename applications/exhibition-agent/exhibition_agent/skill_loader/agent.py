@@ -17,9 +17,13 @@ import os
 import re
 
 import httpx
+from agent_core.guardrails.errors import mask_exception_for_client
+from agent_core.logging import get_logger
 
 from .llm_client import LLMClient
 from .parser import Endpoint
+
+logger = get_logger(__name__)
 
 TOOL_RESULT_MAX_CHARS = int(os.environ.get("TOOL_RESULT_MAX_CHARS", "8000"))
 MAX_TOOL_ROUNDS = int(os.environ.get("MAX_TOOL_ROUNDS", "6"))
@@ -238,9 +242,16 @@ class ExhibitionAgent:
                         "url": url,
                     }
             except httpx.RequestError as e:
+                # 该 body 会同时喂给 LLM 与经 /api/chat 的 tool_calls 轨迹回传客户端，
+                # 故不得拼异常原文（httpx 异常带完整上游 URL 与内网主机）。
                 return {
                     "status_code": 502,
-                    "body": {"error": f"warehouse 请求失败: {e}"},
+                    "body": {
+                        "error": mask_exception_for_client(
+                            e, logger=logger, context="warehouse tool invoke",
+                            message="warehouse 服务不可达，请稍后重试",
+                        )
+                    },
                     "method": ep.method,
                     "path": path,
                     "url": url,

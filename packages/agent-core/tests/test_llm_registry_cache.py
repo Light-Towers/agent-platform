@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import hashlib
 
+from agent_core.guardrails.auth import ENV_SECURITY_PEPPER, fingerprint
 from agent_core.llm import registry
 from agent_core.llm.protocols import ChatModel
 from agent_core.llm.providers import BaseLLMProvider
@@ -39,15 +40,19 @@ def test_cache_hit_same_instance():
     assert prov.builds == 1
 
 
-def test_api_key_not_stored_plaintext_in_cache_key():
+def test_api_key_not_stored_plaintext_in_cache_key(monkeypatch):
+    """DUP-1 收敛后：缓存键里的摘要 = kernel ``fingerprint``（HMAC+pepper），不再是裸 sha256、更不是明文。"""
     _setup()
+    monkeypatch.delenv(ENV_SECURITY_PEPPER, raising=False)
     registry.get_llm_client(model="m", api_key="sk-secret-123", base_url="http://x", provider="fake")
-    digest = hashlib.sha256(b"sk-secret-123").hexdigest()
+    digest = fingerprint("sk-secret-123")
     keys = list(registry._CLIENT_CACHE.keys())
     assert len(keys) == 1
-    # cache key 含摘要、不含明文密钥
+    # cache key 含指纹、不含明文密钥
     assert digest in keys[0]
     assert "sk-secret-123" not in repr(keys[0])
+    # 且不再是本模块手写的裸 sha256（避免散点实现回归）
+    assert hashlib.sha256(b"sk-secret-123").hexdigest() not in keys[0]
 
 
 def test_lru_evicts_beyond_max():

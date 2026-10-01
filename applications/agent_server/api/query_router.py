@@ -3,6 +3,7 @@
 import logging
 import uuid
 
+from agent_core.guardrails.errors import mask_exception_for_client
 from agent_core.runtime.lease import AsyncLease
 from agent_runtime import cache as semantic_cache
 from agent_runtime.db import get_pool
@@ -314,7 +315,9 @@ async def query(
         except Exception as exc:
             logger.exception("query stream failed: thread_id=%s", thread_id)
             _stream_failed = True
-            yield _sse({"type": "error", "error": str(exc)})
+            # 流已开、状态码已发，无法交由 install_error_handlers 兜底，
+            # 故在帧层面脱敏：异常全貌已在上一行落服务端日志。
+            yield _sse({"type": "error", "error": mask_exception_for_client(exc)})
             yield _sse({"type": "done", "thread_id": thread_id, "answer": ""})
         finally:
             if _span_cm is not None:

@@ -43,6 +43,11 @@ on:
 # HA 是重量级基础设施验证，独立为 ha.yml：仅相关变更或手工触发。
 # LLM 质量评测依赖外部模型环境，独立为 eval-llm.yml：仅手工触发。
 # CI 直接复用 Makefile 的 make ci 单一真相，避免手写命令与本地漂移。
+# 最小权限（CodeQL actions/missing-workflow-permissions）：本 workflow 全程只读仓库
+# （checkout + make ci + doc sync），无 PR 写 / 无 package 推送 / 无 id-token。
+permissions:
+  contents: read
+
 jobs:
   ci:
     runs-on: ubuntu-latest

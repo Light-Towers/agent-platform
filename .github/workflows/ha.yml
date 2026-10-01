@@ -30,6 +30,11 @@ on:
       - ".github/workflows/ha.yml"
   workflow_dispatch:
 
+# 最小权限（CodeQL actions/missing-workflow-permissions）：checkout + 起 postgres service
+# + 跑 HA 测试，全程只读仓库。
+permissions:
+  contents: read
+
 jobs:
   ha:
     runs-on: ubuntu-latest
