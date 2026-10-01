@@ -12,7 +12,7 @@ dependencies = [
     "agent-core",
     "shared-schemas",
     "fastapi>=0.115",
-    "uvicorn[standard]>=0.30",
+    "uvicorn[standard]>=0.54.0",
     "langgraph>=1.2.10,<2",
     "langchain-core>=0.3",
     "langchain-openai>=0.3",
