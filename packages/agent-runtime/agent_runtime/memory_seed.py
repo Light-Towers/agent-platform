@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import logging
 
+from agent_core.memory._tenant_gate import _TENANT_UNSET, resolve_tenant
+
 from agent_runtime.episodic_memory import Episode, EpisodicMemory
 
 logger = logging.getLogger(__name__)
@@ -29,14 +31,15 @@ class MemorySeeder:
     def __init__(self, episodic_memory: EpisodicMemory) -> None:
         self._ep = episodic_memory
 
-    async def seed(self, episodes: list[Episode]) -> int:
-        """预置种子 Episode，跳过已存在的，返回新增数量。"""
+    async def seed(self, episodes: list[Episode], *, tenant_id: str = _TENANT_UNSET) -> int:
+        """预置本租户种子 Episode，跳过已存在的，返回新增数量。"""
+        tenant = resolve_tenant(tenant_id)
         count = 0
         for ep in episodes:
-            existing = await self._ep._store.get(ep.episode_id)
+            existing = await self._ep._store.get(ep.episode_id, tenant_id=tenant)
             if existing is not None:
                 continue
-            await self._ep._store.save(ep)
+            await self._ep._store.save(ep, tenant_id=tenant)
             count += 1
         if count > 0:
             logger.info("seeded %d episodes", count)

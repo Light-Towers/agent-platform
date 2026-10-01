@@ -1,6 +1,6 @@
 """Query 改写：指代消解 + standalone question。
 
-复用 zhiku rewritten_query_and_itemnames.prompt 模式。
+复用 knowledge rewritten_query_and_itemnames.prompt 模式。
 改写前后 A/B 评测（召回率/正确率）。
 """
 

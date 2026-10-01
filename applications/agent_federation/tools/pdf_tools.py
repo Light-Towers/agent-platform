@@ -10,7 +10,6 @@ from langchain_core.tools import tool
 
 from agent.config import TIMEOUT_PDF_PARSE
 from api.context import get_session_context
-from api.monitor import monitor
 from tools._timeout import with_timeout
 from utils.path_utils import resolve_path
 from utils.word_converter import convert_md_to_pdf_via_weasyprint
@@ -26,8 +25,6 @@ def convert_md_to_pdf(
     将Markdown文档转换为PDF（基于 weasyprint，跨平台）
     核心优化：路径与资源管理逻辑分离，只保留Tool层的基础调用
     """
-    monitor.report_tool("Markdown转PDF工具")
-
     try:
         # 1. 路径预处理
         session_dir = get_session_context()

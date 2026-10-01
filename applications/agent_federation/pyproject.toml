@@ -112,7 +112,7 @@ ignore = ["E402", "E731"]
 "tools/ragflow_tools.py" = ["BLE001"]
 "tools/sql_guard.py" = ["BLE001"]
 "tools/upload_file_read_tool.py" = ["BLE001"]
-"tools/zhiku_tools.py" = ["BLE001"]
+"tools/knowledge_tools.py" = ["BLE001"]
 "utils/path_utils.py" = ["BLE001"]
 "utils/word_converter.py" = ["BLE001"]
 

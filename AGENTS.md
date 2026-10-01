@@ -11,7 +11,7 @@
 | `applications/agent_server/` | 单进程 Supervisor 平台（统一 Agent 平台；V3 Phase 2-4 已接入 Scheduler/ControlPlane/CostGov/Forensic，`api/` 含 `callback.py` + `control.py`；2026-08-19 由根 `app/` 改名迁入） | `agent_server.main:app`（uvicorn） |
 | `applications/agent_federation/` | 联邦网关 + 3 子服务编排中枢（与 agent_server 并行，详见其 README；原名 `deepagents/`，为消除与 PyPI 依赖包 `deepagents` 同名冲突而改名） | `python -m api.server` |
 | `packages/agent-core/` | 零依赖运行时内核：tracing / guardrails / sql 守卫 / llm / memory / events / config / intent / resilience（子模块职责清单见 `ARCHITECTURE.md` §2.1） | — |
-| `packages/agent-runtime/` | Plan-F 运行时中间件 + V3 执行平台：admission / scheduler / coordinator / checkpoint / cache / tracing / planner/ / skills/ / memory 体系 / sandbox / forensic / cost_governance 等（各包职责与分层定位见 `ARCHITECTURE.md` §2.1） | — |
+| `packages/agent-runtime/` | Plan-F 运行时中间件 + V3 执行平台：admission / scheduler / coordinator / checkpoint / cache / tracing / planner/ / skills/ / memory 体系 / sandbox / forensic / cost_governance / identity（服务端断言租户，ADR-0007；`DEPLOY_ENFORCE_IDENTITY` 默认关）等（各包职责与分层定位见 `ARCHITECTURE.md` §2.1，身份层见 §2.3） | — |
 | `packages/shared-schemas/` | 联邦 4 服务共享 Pydantic 契约（QueryRequest/Response · ErrorResponse · KNOWLEDGE_STATUS · ThreadState 等） | — |
 | `applications/kefu-service/` | kefu 迁移版（deepagents + LangGraph），已接入联邦网关（Agent Protocol 兼容 `/invoke`，返回 `QueryResponse`；`KEFU_USE_ADAPTER=false` 默认直连） | — |
 | `applications/nl2sql-service/` | Text-to-SQL 数据分析通用服务（元知识参数化，已直连联邦契约） | — |

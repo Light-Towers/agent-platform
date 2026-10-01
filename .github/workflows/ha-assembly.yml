@@ -1,0 +1,56 @@
+name: agent-platform-ha-assembly
+
+# S-1 装配门禁（2026-09-25 评审）：HA 部署镜像（含 applications 层 COPY）此前
+# 从未被任何门禁验证——ha.yml 收窄触发后如实暴露该缺口。本 workflow 做轻量
+# 装配验证：镜像构建 + compose 配置校验 + 双副本 up --wait + /health 冒烟，
+# 不跑重型 kill -9（那是 agent-platform-ha 的职责）。
+on:
+  push:
+    paths:
+      - "Dockerfile"
+      - "docker-compose.ha.yml"
+      - "docker-compose.yml"
+      - "applications/**"
+      - "packages/**"
+      - "pyproject.toml"
+      - "uv.lock"
+  pull_request:
+    paths:
+      - "Dockerfile"
+      - "docker-compose.ha.yml"
+      - "docker-compose.yml"
+      - "applications/**"
+      - "packages/**"
+      - "pyproject.toml"
+      - "uv.lock"
+  workflow_dispatch:
+
+jobs:
+  assembly:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      POSTGRES_PASSWORD: agent_platform_dev
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compose config 校验
+        run: docker compose -f docker-compose.ha.yml config -q
+      - name: 构建并拉起双副本 + PG（含镜像装配验证）
+        run: docker compose -f docker-compose.ha.yml up -d --build --wait
+      - name: /health 冒烟（双副本）
+        run: |
+          ok=0
+          for port in 8101 8102; do
+            for i in $(seq 1 30); do
+              if curl -sf "http://127.0.0.1:${port}/health" > /dev/null 2>&1; then
+                echo "replica :${port} /health OK"
+                ok=$((ok+1))
+                break
+              fi
+              sleep 2
+            done
+          done
+          test "${ok}" -eq 2 || { echo "双副本 /health 未全部就绪"; docker compose -f docker-compose.ha.yml logs --tail=50; exit 1; }
+      - name: 清理
+        if: always()
+        run: docker compose -f docker-compose.ha.yml down -v

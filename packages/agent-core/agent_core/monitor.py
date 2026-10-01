@@ -186,11 +186,21 @@ class ToolMonitor:
         outcome: str,
         error_class: str | None = None,
         detail: str = "",
+        duration_ms: float | None = None,
     ) -> None:
+        data: dict[str, Any] = {
+            "tool_name": tool_name,
+            "outcome": outcome,
+            "error_class": error_class,
+            "detail": detail,
+        }
+        # 追加字段（向后兼容）：工具耗时毫秒，由 observe_tool 包装器上报
+        if duration_ms is not None:
+            data["duration_ms"] = duration_ms
         self._emit(
             "tool_outcome",
             f"工具 {tool_name} 结果: {outcome}",
-            {"tool_name": tool_name, "outcome": outcome, "error_class": error_class, "detail": detail},
+            data,
         )
 
     # -- 回调订阅（委托 CallbackSink）--------------------------------------

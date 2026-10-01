@@ -28,7 +28,7 @@ async def test_recall_empty_in_memory_mode(monkeypatch):
     )
     import agent_server.memory.longterm as l
 
-    assert await l.recall(None, "u1", "q") == []
+    assert await l.recall(None, "u1", "q", tenant_id="default") == []
 
 
 def test_default_backend_none_without_db(monkeypatch):

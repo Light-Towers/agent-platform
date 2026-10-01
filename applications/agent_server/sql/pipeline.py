@@ -8,6 +8,7 @@ import re
 import sqlite3
 import urllib.parse
 
+from agent_core.memory._tenant_gate import _TENANT_UNSET
 from agent_core.sql.guard import validate_sql
 
 from agent_server.config import get_settings
@@ -85,10 +86,12 @@ async def execute_readonly(sql: str, max_rows: int) -> dict:
     raise RuntimeError(f"暂不支持的业务库类型: {dsn.split('://')[0]}（MySQL 留待 Phase 3）")
 
 
-async def text_to_sql(pool, question: str, llm=None, *, workspace_id: str = "") -> dict:
+async def text_to_sql(
+    pool, question: str, llm=None, *, workspace_id: str = "", tenant_id: str = _TENANT_UNSET,
+) -> dict:
     """完整管线；返回 {question, context_found, sql, result|error}。"""
     settings = get_settings()
-    context = await fetch_context(pool, question, workspace_id=workspace_id)
+    context = await fetch_context(pool, question, workspace_id=workspace_id, tenant_id=tenant_id)
     context_found = bool(context["ddl"] or context["docs"] or context["examples"])
 
     if llm is None:

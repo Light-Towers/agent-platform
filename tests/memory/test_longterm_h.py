@@ -145,7 +145,7 @@ async def test_recall_typed_weights_and_ranks(patch_settings, monkeypatch):
     )
     monkeypatch.setattr(mb, "embed_memory", lambda t: [0.0] * 512)
 
-    result = await mb.recall_typed(_FakePool(), "ws1", "q", k=3)
+    result = await mb.recall_typed(_FakePool(), "ws1", "q", k=3, tenant_id="default")
     # procedural/semantic 应排在 episodic(旧) 之前
     assert result[0].startswith("procedural") or result[0].startswith("semantic")
     assert "episodic" not in result[0]
@@ -244,7 +244,10 @@ async def test_consolidate_deletes_low_value_old(patch_settings, monkeypatch):
     deleted = await mb.consolidate_memories(_CapturePool(), "ws1", forget_threshold=0.1, tenant_id="tenant-a")
     assert deleted == 3
     assert "DELETE FROM memories" in captured["sql"]
-    assert captured["params"] == ("tenant-a", "ws1", 0.1, 30)
+    # ADR-0006 T13：删除谓词现按 tenant + scope + workspace 归属双列（防跨租户/跨空间误删）。
+    assert "scope = %s" in captured["sql"]
+    assert "workspace_id = %s OR user_id = %s" in captured["sql"]
+    assert captured["params"] == ("tenant-a", "workspace", "ws1", "ws1", 0.1, 30)
 
 
 async def test_recall_without_pool_has_no_persistent_fallback(patch_settings, monkeypatch):
@@ -253,27 +256,28 @@ async def test_recall_without_pool_has_no_persistent_fallback(patch_settings, mo
         async def recall(self, *args, **kwargs):
             raise AssertionError("unscoped persistent fallback must not be used")
     monkeypatch.setattr("agent_server.memory.memory_backend.get_default_backend", lambda: _FakeCoreBackend())
-    assert await l.recall(None, "ws-x", "问题") == []
+    assert await l.recall(None, "ws-x", "问题", tenant_id="default") == []
 
 
 async def test_recall_forwards_to_recall_typed_with_tenant(patch_settings, monkeypatch):
     import agent_server.memory.longterm as l
     spy = {"called": None}
-    async def _fake_recall_typed(pool, ws, q, k=3, *, tenant_id="default"):
-        spy["called"] = (ws, q, k, tenant_id)
+    async def _fake_recall_typed(pool, ws, q, k=3, *, tenant_id="default", profile_user_id=None):
+        spy["called"] = (ws, q, k, tenant_id, profile_user_id)
         return ["typed-mem"]
     monkeypatch.setattr("agent_server.memory.memory_backend.recall_typed", _fake_recall_typed)
     class _Pool:
         pass
     res = await l.recall(_Pool(), "ws-typed", "q", k=2, tenant_id="tenant-a")
     assert res == ["typed-mem"]
-    assert spy["called"] == ("ws-typed", "q", 2, "tenant-a")
+    # 未传 user_id 时 profile_user_id 为 None（仅 workspace 路，行为零变更）
+    assert spy["called"] == ("ws-typed", "q", 2, "tenant-a", None)
 
 
 async def test_recall_without_pool_never_uses_unscoped_fallback(patch_settings, monkeypatch):
     import agent_server.memory.longterm as l
     monkeypatch.setattr("agent_server.memory.memory_backend.get_default_backend", lambda: (_ for _ in ()).throw(AssertionError("unscoped fallback must not be resolved")))
-    assert await l.recall(None, "ws-x", "q") == []
+    assert await l.recall(None, "ws-x", "q", tenant_id="default") == []
 
 
 async def test_maybe_consolidate_triggers_every_n(patch_settings, monkeypatch):
@@ -300,7 +304,7 @@ async def test_maybe_consolidate_triggers_every_n(patch_settings, monkeypatch):
     for _ in range(4):
         await l.maybe_consolidate(_Pool(), "ws", tenant_id="tenant-a")
     assert calls["n"] == 0
-    await l.maybe_consolidate(_Pool(), "ws")
+    await l.maybe_consolidate(_Pool(), "ws", tenant_id="default")
     assert calls["n"] == 1
 
 
@@ -326,7 +330,7 @@ async def test_maybe_consolidate_not_gated_by_typed_switch(patch_settings, monke
         pass
 
     for _ in range(l._CONSOLIDATE_EVERY):
-        await l.maybe_consolidate(_Pool(), "ws")
+        await l.maybe_consolidate(_Pool(), "ws", tenant_id="default")
     assert calls["n"] == 1
 
 
@@ -344,7 +348,7 @@ async def test_maybe_consolidate_noop_without_pool(patch_settings, monkeypatch):
     )
 
     for _ in range(10):
-        assert await l.maybe_consolidate(None, "ws") == 0
+        assert await l.maybe_consolidate(None, "ws", tenant_id="default") == 0
     assert calls["n"] == 0
 
 
@@ -357,8 +361,8 @@ async def test_remember_forwards_to_remember_fact_when_enabled(patch_settings, m
     monkeypatch.setattr("agent_server.memory.longterm.get_settings", lambda: patch_settings)
     spy = {"facts": []}
 
-    async def _fake_remember_fact(pool, ws, fact, mtype, importance, *, tenant_id="default"):
-        spy["facts"].append((ws, fact, mtype, importance, tenant_id))
+    async def _fake_remember_fact(pool, ws, fact, mtype, importance, *, tenant_id="default", scope="workspace", user_id=None):
+        spy["facts"].append((ws, fact, mtype, importance, tenant_id, scope, user_id))
 
     monkeypatch.setattr("agent_server.memory.memory_backend.remember_fact", _fake_remember_fact)
 
@@ -370,9 +374,10 @@ async def test_remember_forwards_to_remember_fact_when_enabled(patch_settings, m
         {"type": "episodic", "importance": 0.5, "fact": "上周做了报表"},
     ]
     await l.remember(_Pool(), "ws-typed", "原文不存", facts=facts, tenant_id="tenant-a")
+    # 无 scope 字段的事实默认 workspace、user_id 未传为 None（双 scope 首期行为零变更）。
     assert spy["facts"] == [
-        ("ws-typed", "用户是财务", "semantic", 0.8, "tenant-a"),
-        ("ws-typed", "上周做了报表", "episodic", 0.5, "tenant-a"),
+        ("ws-typed", "用户是财务", "semantic", 0.8, "tenant-a", "workspace", None),
+        ("ws-typed", "上周做了报表", "episodic", 0.5, "tenant-a", "workspace", None),
     ]
 
 

@@ -33,6 +33,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
+from agent_core.memory._tenant_gate import _TENANT_UNSET, resolve_tenant
+
 from agent_runtime.memory_recall import text_similarity, three_factor_score
 from agent_runtime.trajectory.models import TrajectoryRecord
 
@@ -104,49 +106,67 @@ class Episode:
 
 
 class EpisodicStore(abc.ABC):
-    """Episodic Memory 持久化契约。"""
+    """Episodic Memory 持久化契约。
+
+    隔离域（plan T1 / ADR-0006 G1）：每个方法**必须显式传 ``tenant_id``**（安全边界），
+    漏传经 ``_tenant_gate.resolve_tenant`` fail-fast，绝不静默落共享 ``default`` 桶；
+    归属不明的 Episode 宁可暂不可见，也不跨租户可见。
+    """
 
     @abc.abstractmethod
-    async def save(self, episode: Episode) -> None:
-        """保存 Episode。"""
+    async def save(self, episode: Episode, *, tenant_id: str = _TENANT_UNSET) -> None:
+        """保存 Episode（按 tenant 归属）。"""
 
     @abc.abstractmethod
-    async def recall(self, query: str, top_k: int = 10) -> list[Episode]:
-        """按查询召回相关 Episode。"""
+    async def recall(
+        self, query: str, top_k: int = 10, *, tenant_id: str = _TENANT_UNSET
+    ) -> list[Episode]:
+        """按查询召回**本租户**相关 Episode。"""
 
     @abc.abstractmethod
-    async def get(self, episode_id: str) -> Episode | None:
-        """按 ID 读取。"""
+    async def get(self, episode_id: str, *, tenant_id: str = _TENANT_UNSET) -> Episode | None:
+        """按 ID 读取（租户内）。"""
 
     @abc.abstractmethod
-    async def list_by_execution(self, execution_id: str) -> list[Episode]:
-        """列出某 execution 的所有 Episode。"""
+    async def list_by_execution(
+        self, execution_id: str, *, tenant_id: str = _TENANT_UNSET
+    ) -> list[Episode]:
+        """列出某 execution 的所有 Episode（租户内）。"""
 
     @abc.abstractmethod
-    async def list_all(self, limit: int = 10000) -> list[Episode]:
-        """列出所有 Episode（供 ProceduralExtractor 挖掘模式）。"""
+    async def list_all(
+        self, limit: int = 10000, *, tenant_id: str = _TENANT_UNSET
+    ) -> list[Episode]:
+        """列出**本租户**所有 Episode（供 ProceduralExtractor 挖掘模式）。"""
 
     @abc.abstractmethod
-    async def delete(self, episode_id: str) -> bool:
-        """删除 Episode（供 MemoryDecayManager 清理）。"""
+    async def delete(self, episode_id: str, *, tenant_id: str = _TENANT_UNSET) -> bool:
+        """删除本租户 Episode（供 MemoryDecayManager 清理）。"""
 
 
 class InMemoryEpisodicStore(EpisodicStore):
     """进程内 Episodic 存储（测试 / 单进程默认）。
 
-    召回用简单文本匹配（生产环境可替换为向量后端）。
+    以 ``(tenant_id, episode_id)`` 为键，内存态同样强制租户隔离（与 PG 后端语义一致，
+    跨租户读写互不可见）。召回用简单文本匹配（生产环境可替换为向量后端）。
     """
 
     def __init__(self) -> None:
-        self._store: dict[str, Episode] = {}
+        self._store: dict[tuple[str, str], Episode] = {}
 
-    async def save(self, episode: Episode) -> None:
-        self._store[episode.episode_id] = copy.deepcopy(episode)
+    async def save(self, episode: Episode, *, tenant_id: str = _TENANT_UNSET) -> None:
+        tenant = resolve_tenant(tenant_id)
+        self._store[(tenant, episode.episode_id)] = copy.deepcopy(episode)
 
-    async def recall(self, query: str, top_k: int = 10) -> list[Episode]:
+    async def recall(
+        self, query: str, top_k: int = 10, *, tenant_id: str = _TENANT_UNSET
+    ) -> list[Episode]:
+        tenant = resolve_tenant(tenant_id)
         now = time.time()
         scored: list[tuple[float, Episode]] = []
-        for ep in self._store.values():
+        for (t, _eid), ep in self._store.items():
+            if t != tenant:
+                continue
             sim = text_similarity(query, ep.content_for_recall())
             if sim > 0:
                 base = three_factor_score(sim, ep.importance, ep.created_at, now=now)
@@ -155,19 +175,26 @@ class InMemoryEpisodicStore(EpisodicStore):
         scored.sort(key=lambda x: x[0], reverse=True)
         return [ep for _, ep in scored[:top_k]]
 
-    async def get(self, episode_id: str) -> Episode | None:
-        return self._store.get(episode_id)
+    async def get(self, episode_id: str, *, tenant_id: str = _TENANT_UNSET) -> Episode | None:
+        tenant = resolve_tenant(tenant_id)
+        return self._store.get((tenant, episode_id))
 
-    async def list_by_execution(self, execution_id: str) -> list[Episode]:
+    async def list_by_execution(
+        self, execution_id: str, *, tenant_id: str = _TENANT_UNSET
+    ) -> list[Episode]:
+        tenant = resolve_tenant(tenant_id)
         return [
-            ep for ep in self._store.values() if ep.execution_id == execution_id
+            ep for (t, _eid), ep in self._store.items()
+            if t == tenant and ep.execution_id == execution_id
         ]
 
-    async def list_all(self, limit: int = 10000) -> list[Episode]:
-        return list(self._store.values())[:limit]
+    async def list_all(self, limit: int = 10000, *, tenant_id: str = _TENANT_UNSET) -> list[Episode]:
+        tenant = resolve_tenant(tenant_id)
+        return [ep for (t, _eid), ep in self._store.items() if t == tenant][:limit]
 
-    async def delete(self, episode_id: str) -> bool:
-        return self._store.pop(episode_id, None) is not None
+    async def delete(self, episode_id: str, *, tenant_id: str = _TENANT_UNSET) -> bool:
+        tenant = resolve_tenant(tenant_id)
+        return self._store.pop((tenant, episode_id), None) is not None
 
 
 class EpisodicExtractor:
@@ -282,29 +309,40 @@ class EpisodicMemory:
         self._extractor = extractor or EpisodicExtractor()
 
     async def remember(
-        self, trajectory: TrajectoryRecord
+        self, trajectory: TrajectoryRecord, *, tenant_id: str = _TENANT_UNSET
     ) -> Episode | None:
-        """从 Trajectory 沉淀 Episode。不值得沉淀时返回 None。"""
+        """从 Trajectory 沉淀 Episode（按 tenant 归属）。不值得沉淀时返回 None。
+
+        tenant 优先取显式传入，其次取 trajectory.tenant_id（_persist_trajectory 已填）。
+        两者都缺 → resolve_tenant fail-fast（不落共享 default 桶）。
+        """
         if not self._extractor.should_extract(trajectory):
             return None
+        raw = tenant_id if tenant_id is not _TENANT_UNSET else trajectory.tenant_id
+        # 空串（无租户上下文）等同漏传 → fail-fast，不落共享 ''/default 桶。
+        tenant = resolve_tenant(raw or _TENANT_UNSET)
 
         episode = self._extractor.extract(trajectory)
-        await self._store.save(episode)
+        await self._store.save(episode, tenant_id=tenant)
         logger.info(
-            "episodic memory saved execution=%s outcome=%s importance=%.1f",
-            episode.execution_id, episode.outcome.value, episode.importance,
+            "episodic memory saved tenant=%s execution=%s outcome=%s importance=%.1f",
+            tenant, episode.execution_id, episode.outcome.value, episode.importance,
         )
         return episode
 
-    async def recall(self, query: str, top_k: int = 10) -> list[Episode]:
-        """召回相关历史经历。"""
-        return await self._store.recall(query, top_k)
+    async def recall(
+        self, query: str, top_k: int = 10, *, tenant_id: str = _TENANT_UNSET
+    ) -> list[Episode]:
+        """召回本租户相关历史经历。"""
+        return await self._store.recall(query, top_k, tenant_id=tenant_id)
 
-    async def get(self, episode_id: str) -> Episode | None:
-        return await self._store.get(episode_id)
+    async def get(self, episode_id: str, *, tenant_id: str = _TENANT_UNSET) -> Episode | None:
+        return await self._store.get(episode_id, tenant_id=tenant_id)
 
-    async def list_by_execution(self, execution_id: str) -> list[Episode]:
-        return await self._store.list_by_execution(execution_id)
+    async def list_by_execution(
+        self, execution_id: str, *, tenant_id: str = _TENANT_UNSET
+    ) -> list[Episode]:
+        return await self._store.list_by_execution(execution_id, tenant_id=tenant_id)
 
 
 __all__ = [

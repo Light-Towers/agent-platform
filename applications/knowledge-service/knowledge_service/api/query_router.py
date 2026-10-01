@@ -29,6 +29,7 @@ from knowledge_service.core.tracing import generate_request_id, set_request_cont
 from knowledge_service.query_process.agent.main_graph import query_app
 from knowledge_service.utils.sse_utils import SSEEvent, create_sse_queue, sse_generator
 from knowledge_service.utils.task_utils import *
+from knowledge_service.utils.tenant_utils import resolve_server_tenant
 
 # 子路由实例：由 create_app() 挂载到根路径
 router = APIRouter()
@@ -182,6 +183,8 @@ async def query(background_tasks: BackgroundTasks, request: Request, payload: Qu
     """
     user_query = payload.query
     session_id = payload.session_id if payload.session_id else str(uuid.uuid4())
+    # 隔离域（ADR-0006 T11）：服务端解析租户（空→注入默认），不再透传空值导致全库检索。
+    tenant_id = resolve_server_tenant(payload.tenant_id, endpoint="/query")
 
     # M4/M5：请求级 trace id（优先复用 SecurityGuardsMiddleware 注入的 request_id，
     # 保证 401/429/400 与正常响应、后台任务共用同一 trace；无 middleware 时兜底生成）
@@ -229,7 +232,7 @@ async def query(background_tasks: BackgroundTasks, request: Request, payload: Qu
             is_stream,
             trace_request_id,
             payload.enable_item_name_confirm,
-            payload.tenant_id,
+            tenant_id,
             payload.scope_type,
         )
         # 返回结果
@@ -248,7 +251,7 @@ async def query(background_tasks: BackgroundTasks, request: Request, payload: Qu
                 is_stream,
                 trace_request_id,
                 payload.enable_item_name_confirm,
-                payload.tenant_id,
+                tenant_id,
                 payload.scope_type,
             )
             answer = get_task_result(session_id, "answer", "")
@@ -289,7 +292,7 @@ async def retrieve(payload: RetrieveRequest, request: Request):
             "rewritten_query": payload.query,
             "item_names": [payload.item_name] if payload.item_name else [],
             "is_stream": False,
-            "tenant_id": payload.tenant_id or "",
+            "tenant_id": resolve_server_tenant(payload.tenant_id, endpoint="/api/v1/retrieve"),
             "scope_type": payload.scope_type or "",
         }
 
@@ -337,7 +340,9 @@ async def history(
     查询当前会话历史记录（M5：limit 上限 200，防一次性拉取全量）
     """
     try:
-        records = get_recent_messages(session_id, limit=limit, tenant_id=tenant_id or None)
+        records = get_recent_messages(
+            session_id, limit=limit, tenant_id=resolve_server_tenant(tenant_id, endpoint="/history")
+        )
         items = []
         for r in records:
             items.append(
@@ -363,5 +368,5 @@ async def clear_chat_history(
     session_id: str,
     tenant_id: str = Query("", description="租户 ID（多租户隔离）"),
 ):
-    count = clear_history(session_id, tenant_id=tenant_id or None)
+    count = clear_history(session_id, tenant_id=resolve_server_tenant(tenant_id, endpoint="DELETE /history"))
     return {"message": "History cleared", "deleted_count": count}

@@ -1,0 +1,198 @@
+import os
+
+import httpx
+from agent_core.observability import ToolOutcome, ToolResult
+from langchain_core.tools import tool
+from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
+
+from tools._timeout import with_timeout
+
+try:
+    from agent_core.logging import get_logger
+    _knowledge_logger = get_logger(__name__)
+except ImportError:
+    import logging
+    _knowledge_logger = logging.getLogger(__name__)
+
+try:
+    from agent_core.tracing import start_span as _start_span
+except ImportError:
+    from contextlib import contextmanager as _contextmanager
+    @_contextmanager
+    def _start_span(*a, **kw):
+        yield None
+
+KNOWLEDGE_SERVICE_URL = os.getenv("KNOWLEDGE_SERVICE_URL", "http://localhost:8900")
+KNOWLEDGE_SERVICE_KEY = os.getenv("KNOWLEDGE_SERVICE_KEY", "")
+
+_TIMEOUT_S = 10.0
+
+# C-3: 进程级共享 httpx.Client（连接池复用）
+_shared_sync_client: httpx.Client | None = None
+
+
+def _get_shared_sync_client() -> httpx.Client:
+    global _shared_sync_client
+    if _shared_sync_client is None:
+        _shared_sync_client = httpx.Client(timeout=_TIMEOUT_S)
+    return _shared_sync_client
+
+
+# 可重试：网络超时 / 连接错误；不可重试：HTTP 4xx（含 429 限流）
+_RETRYABLE = (httpx.TimeoutException, httpx.ConnectError)
+
+
+# ---------------------------------------------------------------------------
+# 健康探活（在服务启动时调用，不阻塞请求路径）
+# ---------------------------------------------------------------------------
+_knowledge_healthy: bool | None = None  # None=未探测, True=健康, False=不健康
+
+
+def check_knowledge_health() -> bool:
+    """检查 knowledge 知识库服务是否可达。
+
+    在 lifespan 中调用一次，后续通过 is_knowledge_healthy() 获取缓存结果。
+    不抛异常，所有错误静默处理。
+    """
+    global _knowledge_healthy
+    url = f"{KNOWLEDGE_SERVICE_URL.rstrip('/')}/health"
+    try:
+        with httpx.Client(timeout=5.0) as client:
+            resp = client.get(url)
+            if resp.status_code < 500:
+                _knowledge_healthy = True
+                _knowledge_logger.info("knowledge 健康探活成功 (%s)", url)
+                return True
+            _knowledge_healthy = False
+            _knowledge_logger.warning("knowledge 健康探活失败 HTTP %d (%s)", resp.status_code, url)
+            return False
+    except Exception as e:
+        _knowledge_healthy = False
+        _knowledge_logger.warning("knowledge 健康探活异常: %s", e)
+        return False
+
+
+def is_knowledge_healthy() -> bool:
+    """返回 knowledge 当前健康状态（不触发探测，只读缓存）。
+
+    如果尚未探测过（None），视为健康（乐观假设），避免首次调用时阻塞。
+    """
+    if _knowledge_healthy is None:
+        return True  # 未探测时乐观假设健康
+    return _knowledge_healthy
+
+
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=1, max=10),
+    retry=retry_if_exception_type(_RETRYABLE),
+    reraise=True,
+)
+def _knowledge_post(url: str, payload: dict, headers: dict) -> httpx.Response:
+    """带重试的知识库 HTTP POST（仅网络超时/连接错误重试，4xx 不重试）。"""
+    client = _get_shared_sync_client()
+    return client.post(url, json=payload, headers=headers)
+
+
+@tool
+@with_timeout(timeout=20)
+def knowledge_retrieve(query: str, item_name: str = "") -> str:
+    """
+    从企业知识库检索与问题相关的专业知识。
+    :param query: 检索问题（自然语言）
+    :param item_name: 可选，按知识条目名称过滤（留空则全库检索）
+    :return: 检索到的相关文档内容摘要
+    """
+    # outcome 语义经 ToolResult 承载（observe_tool 包装器统一上报，方案 v3.1）
+    # 降级：knowledge 不健康时直接返回提示，避免无效等待
+    if not is_knowledge_healthy():
+        return ToolResult(
+            text="知识库服务暂不可用（已探测到不健康），请使用其他工具获取信息。如为紧急问题，可尝试网络搜索。",
+            outcome=ToolOutcome.DEGRADED,
+            detail="服务不健康",
+        )
+
+    with _start_span("tool.knowledge_retrieve", attrs={"query": query}):
+        from agent_core.tracing_propagation import inject_traceparent
+
+        url = f"{KNOWLEDGE_SERVICE_URL.rstrip('/')}/api/v1/retrieve"
+        headers = {"Content-Type": "application/json"}
+        if KNOWLEDGE_SERVICE_KEY:
+            headers["Authorization"] = f"Bearer {KNOWLEDGE_SERVICE_KEY}"
+        headers = inject_traceparent(headers)
+
+        payload = {"query": query}
+        if item_name:
+            payload["item_name"] = item_name
+        # 上线前置（T11 强制化）：传当前请求链路的租户，避免 knowledge-service 将
+        # 多租户请求误归 'default' 桶。非 server 环境（api.context 不可导入）或无上下文
+        # → 不传，由 knowledge-service 服务端注入部署默认租户（不 422）。
+        try:
+            from api.context import get_tenant_context
+
+            _tenant = get_tenant_context()
+        except ImportError:
+            _tenant = None
+        if _tenant:
+            payload["tenant_id"] = _tenant
+            # ADR-0007 A4：配置了内部 HMAC 密钥时，附签名内部头向子服务断言租户
+            # （取代“客户端可传 body tenant_id”；子服务侧硬校验在 A4/A6 接线）。
+            try:
+                from agent_runtime.identity import load_hmac_key, sign_internal_header
+
+                _hk = load_hmac_key()
+                if _hk:
+                    headers["X-Internal-Tenant"] = sign_internal_header(_tenant, key=_hk)
+            except ImportError:
+                pass
+
+        try:
+            resp = _knowledge_post(url, payload, headers)
+            if resp.status_code == 429:
+                retry_after = resp.headers.get("Retry-After", "unknown")
+                return ToolResult(
+                    text=f"知识库检索被限流（429），请稍后重试（Retry-After: {retry_after}s）",
+                    outcome=ToolOutcome.DEGRADED,
+                    error_class="HTTP429",
+                    detail=f"Retry-After: {retry_after}s",
+                )
+            resp.raise_for_status()
+            data = resp.json()
+
+            docs = data.get("docs", [])
+            hits = data.get("hits", 0)
+            if not docs:
+                return ToolResult(
+                    text=f"知识库未检索到相关内容（query: {query}）",
+                    outcome=ToolOutcome.EMPTY,
+                    detail=f"query: {query}",
+                )
+
+            parts = [f"检索到 {hits} 条相关结果："]
+            for i, doc in enumerate(docs[:5], 1):
+                content = doc.get("content", doc.get("text", str(doc)))
+                score = doc.get("score", "")
+                score_str = f" (相关度: {score:.3f})" if isinstance(score, (int, float)) else ""
+                parts.append(f"[{i}]{score_str} {content[:500]}")
+            return "\n".join(parts)
+
+        except httpx.TimeoutException:
+            return ToolResult(
+                text=f"知识库检索超时（{_TIMEOUT_S}s），服务可能暂时不可用",
+                outcome=ToolOutcome.TIMEOUT,
+                error_class="httpx.TimeoutException",
+            )
+        except httpx.HTTPStatusError as e:
+            return ToolResult(
+                text=f"知识库检索失败（HTTP {e.response.status_code}）：{e.response.text[:200]}",
+                outcome=ToolOutcome.EXCEPTION,
+                error_class="HTTPStatusError",
+                detail=f"HTTP {e.response.status_code}",
+            )
+        except Exception as e:
+            return ToolResult(
+                text=f"知识库检索异常：{str(e)}",
+                outcome=ToolOutcome.EXCEPTION,
+                error_class=type(e).__name__,
+                detail=str(e),
+            )

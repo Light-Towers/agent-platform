@@ -28,7 +28,7 @@ class CacheConfig:
 
     kb_versions: dict[str, str] = field(default_factory=lambda: {
         "wenda": os.getenv("KB_VERSION_WENDA", "v1"),
-        "zhiku": os.getenv("KB_VERSION_ZHIKU", "v1"),
+        "knowledge": os.getenv("KB_VERSION_KNOWLEDGE", "v1"),
         "kefu": os.getenv("KB_VERSION_KEFU", "v1"),
     })
     gray_pct: float = field(default_factory=lambda: env_float("GRAY_PCT", 0.0))

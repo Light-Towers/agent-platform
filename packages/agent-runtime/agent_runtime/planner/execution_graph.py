@@ -66,6 +66,9 @@ async def _persist_trajectory(
     record = TrajectoryRecord(
         execution_id=exec_ctx.execution_id,
         session_id=plan.session_id or None,
+        # 租户身份从 plan（PlannerContext → Plan.tenant_id，per-request）落到轨迹，
+        # 供 post-execution 记忆 sink（Episodic/Procedural/Decay）按租户隔离落库。
+        tenant_id=plan.tenant_id or "",
         planner=plan.planner_name or None,
         plan=plan_dict,
         steps=list(exec_ctx.steps),
