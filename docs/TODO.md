@@ -73,6 +73,7 @@
 - [ ] `ExecutionContext` 是否迁移到 PyJWT + 标准 JWT（契约变更，需先审计下游消费者）
 - [ ] Milvus 与 pgvector 双向量库长期是否统一（当前 knowledge-service 用 Milvus，agent-core/agent-runtime 默认 pgvector，见 P1-6 双库现状说明）
 - [ ] U-1：`QueryRequest` 入站字段名（`query`/`question`、`session_id`/`thread_id`）双写兼容层能否移除（见 `README.md`「已知待拍板项（技术债）」）
+- [ ] CodeQL Batch 6（已出方案 `docs/plans/plan-codeql-batch6-kernel-sanitizer-models-2026-10-01.md`，待确认未动工）：kernel `agent_core/guardrails/fs.py` 的 `safe_join`/`resolve_within`/`safe_filename` 不被 CodeQL 内建模型识别为 sanitizer，导致主干重扫报出 `#23`/`#40`/`#41`/`#42`。需拍板两点：（一）code scanning 是否从 default setup 切到 advanced setup（推荐；default setup 只接受已发布的模型包，仓内本地 `.model.yml` 不生效）；（二）`#43`/`#44`（`py/clear-text-logging-sensitive-data`，拒路径时日志回带入参原文）取「保留取证 + dismiss」还是「改码不打原文」。
 
 ## 7. 检索 / 存储增强
 
@@ -83,4 +84,6 @@
 ## 8. 外部条件依赖项（非代码缺口）
 
 - [ ] agent_federation R1 漂移门禁真实基线（`evaluation/fed_latest.jsonl`）：本地开发环境无 LLM API key，无法生成；需在有 key 的环境执行一次 `uv run python -m agent_federation.evaluation.run_eval --baseline evaluation/fed_latest.jsonl` 锁定基线，之后 `--compare --fail-below` 才能作为 CI 门禁生效（比对逻辑本身已通过单测覆盖，无缺口）
+- [ ] Code Scanning 存量 dismiss 仍需人工（凭据/面板级）：`#34`（`gateway/gray.py:40` `md5(user_id)` 灰度分桶，真误报）、`#38`/`#39`（kernel `guardrails/auth.py:92`/`:117`，定性见 `docs/plans/plan-codeql-codescanning-remediation-2026-10-01.md`）；写入端点需 `security_events` scope（实测本机令牌不含，只能面板手工）。**注意 dismiss 按 ref 生效**：只在 PR 上做过不算，合入后会在 `refs/heads/main` 重新开号。
+- [ ] 部署侧安全项：设置 `AGENT_PLATFORM_SECURITY_PEPPER`（一经使用勿再变更，否则会话身份整体漂移），并先 dry-run `scripts/migrate_thread_identity.py` 再决定是否 `--apply`。
 - [ ] GitHub 侧 Copilot「Code scanning AI findings」工作流恒失败（非本仓代码问题，只登记）：Actions 列表里每条 PR 的 push 都会多出一个 `GitHub Advanced Security / Code scanning AI findings on PR #N` 红 X，日志根因为 `CAPIError: 400 The requested model is not supported`（autofind 请求模型被拒，平台侧）。与 diff 内容无关：最近 60 次运行窗口内共 7 条同名失败（PR #33 上 6 次 + PR #34 上 1 次），而同一窗口的 `Push on main` 与 Dependabot dynamic 运行均 success。（取证 check-run `110254555532`，annotations 仅“Process completed with exit code 1”，无代码告警）。该 check 未挂为 PR 状态检查，不阻塞合并；但看到红 X 时勿误读为“安全扫描发现漏洞”。若要消掉：在 GHAS 设置关 AI findings 分析，或等平台侧模型可用。
