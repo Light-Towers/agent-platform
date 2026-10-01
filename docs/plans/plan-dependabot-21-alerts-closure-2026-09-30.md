@@ -270,5 +270,41 @@ PYJWT_DEPS: cryptography              （自身只依赖 cryptography，已在 l
 
 合并进 main 且下一轮重扫后复核 `state=open` 应为 **0**；若仍有残留，按本节日志法重新取证（列出编号/包/advisory/first_patched），不得直接 dismiss。
 
+## 12. 第三轮：PR #30 合并后重扫又暴露 13 项（2026-10-01）
+
+PR #30 于 `2026-09-30T23:59:41Z` 合入 main（merge `8d53333`）。Dependabot 在 **2026-10-01T00:01:49–00:01:55Z**（约 2 分钟后）再次重扫：10 项 PyJWT 已翻 `fixed`（本轮 open 清单里已无 pyjwt），但**同时新开 13 项**（#37–#49）。证明 §10.2/§11.3 的「重扫应为 0」预测连续两轮不成立——**本仓 Dependabot 处于「每有 advisory 发布就持续重开告警」的稳态，不能以旧告警已处理推断总体归零**。
+
+### 12.1 索引来源查证（为何不在 main 的 courses/* 仍产告警）
+
+- main 树内唯一的依赖配置只有根 `.github/dependabot.yml`（`package-ecosystem: uv` / `directory: "/"`），**无任何 pip 生态或 courses/* 目录的 config**。
+- 但这 13 项的 ecosystem 全是 `pip`，且 10 项落在不在 main 的 `courses/zhanggui-wenda/data-agent/uv.lock`、`zhanggui-wenda/data-agent/uv.lock`、`zhanggui-zhiku/uv.lock`。
+- **存在性双重否定证据**（互相印证）：`git/trees/main?recursive=1`（`truncated=false`）只含根 `uv.lock`；直接 `contents/courses/.../uv.lock?ref=main` 返回 **HTTP 404**。（注：曾一度用 PowerShell foreach 批量探测得出“存在”的相反结论，但该输出被 PS 报错污染不可信，以单次干净调用为准。）
+- **机制定性**：这些是早期 commit（`981adbb`/`b546aa5`/`e54aa62`，courses/ 尚未移除时）遗留在 Dependabot 依赖图中的**僵尸清单**。advisory 发布时 Dependabot 会把新 CVE 映射到这些已注册、但已从默认分支删除的历史 manifest 上→开新编号告警；因当前 config 不扫这些目录，它们**永不会自动 fixed**，只能 dismiss（与那 14 项同构）。
+
+### 12.2 13 项分类
+
+| 组 | 告警 | manifest | 包 / 状态 | 处置 |
+|---|---|---|---|---|
+| **真身（IN main）** | #40 #41 #42 | `uv.lock`（根）| urllib3 2.7.0（high×2/med×1），first_patched=2.8.0 | 升版到 2.8.0 可全清 |
+| **僵尸孤儿** | #37-39 #43-45 #46-48 | courses/*、zhanggui-* | urllib3，manifest 不在 main | dismiss `not_used` |
+| **僵尸+无补丁** | #49 | zhanggui-zhiku/uv.lock | transformers，first_patched=None 且不在 main | dismiss `not_used` |
+
+### 12.3 urllib3 真修：为何不直接合并 Dependabot #31
+
+Dependabot 已自开 PR **#31**（bump urllib3 2.7.0→2.8.0，单文件 uv.lock，CI 过、mergeable），看似可直接合。但 **扒它的 diff 发现不是外科式升级**：它是一次全量 re-resolution 抖动（重写 nvidia-*/cuda-pathfinder/h11/truststore/requests 等大量 marker，并改动 beartype/requests 的条件依赖）。这跟本仓由固定 uv 版本产出的 lock 不一致，合并爆炸半径不可控，还可能隐性 revert #24/#30 的不变量。**决定：自己用 `uv lock --upgrade-package urllib3` 做最小改动 PR，#31 关为 superseded。**
+
+### 12.4 实施与验证（本轮）
+
+- **改动**：`uv lock --upgrade-package urllib3` → **仅 3 行 diff**（urllib3 版本 + 两条 sdist/wheel 哈希）。
+- **L1**：包集合 295 不变，ADDED=0 / REMOVED=0，仅 1 条漂移 `urllib3 2.7.0→2.8.0`；`pyjwt` 仍 2.15.1（#30 在位）；fschat/nltk **无 `[[package]]` 块**（只在头部 `overrides` 回显 L36/37，#24 完好）。
+- **门禁**：ruff 全过 · lint_architecture 全过 · check_doc_sync 通过 · 根 pytest **622 passed, 17 skipped**。
+- **孤儿 dismiss**：10 项（#37-39/43-49）走与 §9 相同的守卫（dry-run + 仅 manifest 不在 main 树才放行）+ `not_used` 短证据注释。
+- **不动**：#26–#29 例行升级 PR（非安全告警，#26 含 13 更新）本轮不处理。
+
+### 12.5 验收与后续治理建议
+
+- 本轮预期：#40-42 随 urllib3 PR 合并+重扫后翻 fixed；#37-39/43-49 dismiss 后不再出现在 open。
+- **结构性问题**：只要僵尸清单还挂在 Dependabot 图上，每次 urllib3/transformers 等基库出 CVE 就会重开一批 courses/* 告警，dismiss 成可循环劳动。候选长期方案（需另行方案+确认）：核 GitHub 能否从依赖图移除已删 manifest（或开 GitHub Support 工单）；评估是否可以归档/删除历史引入这些锁文件的旧分支。本轮先按用户决策完成取证与记录，不改 dependabot config、不动 #26-29。
+
 
 
