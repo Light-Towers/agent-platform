@@ -2,6 +2,17 @@
 
 本仓库为 uv workspace monorepo。**唯一受支持的安装/运行入口是根 `uv.lock` + `uv sync`**，子包不再维护独立 `uv.lock`（见 v2 修复 #14）。
 
+## doc-sync 门禁补齐「文件引用」校验 + 修复存量路径漂移（2026-10-01，分支 `fix/doc-sync-file-ref-gate`）
+
+> 方案：`docs/plans/plan-doc-sync-file-ref-gate-2026-10-01.md`。背景：PR #33（CodeQL 收敛）收尾排查时发现 `ARCHITECTURE.md` 一条文件引用指向不存在的路径而 CI 全绿；与 CodeQL 主题无关，故拆独立分支。
+
+- **① 存量漂移修复**：`ARCHITECTURE.md` 「历史命名残留」条目中 `docs/architecture-boundary-app-vs-agent-federation.md` → `docs/architecture/architecture-boundary-app-vs-agent-federation.md`（原路径不存在；`origin/main` 同样如此）。
+- **② 强制门禁**：`scripts/check_doc_sync.py` 的 `check_architecture_paths()` 原先只对以 `/` 结尾的**目录**引用调存在性校验，带扩展名的文件引用直接落空；`check_agents_md_paths()` 只匹配表格首列。现新增 `is_doc_file_ref()` 谓词 + `check_doc_file_refs()`（由 `main()` 统一装配），对 `AGENTS.md` / `ARCHITECTURE.md` / `README.md` 三份现状文档逐行取反引号片段，命中「顶层前缀 + 已知扩展名 + 无通配/占位/空格」即复用既有 `check_path_exists()` 报错。判定面刻意保守：宁漏报不误报（误报会把门禁变成噪音并诱导关掉它）。
+- **CHANGELOG 故意不校**：一次性探测 4 份顶层文档得 117 个文件引用、25 个不存在，其中 24 个在 `CHANGELOG.md`（历史条目所指文件后来被移动/重命名）。append-only 历史快照按既有约定不回改，纳入校验即上线一片红；故范围排除，并在单测里钉住该排除（防后人“顺手”加回来）。
+- **防静默失效**：新增 `tests/governance/test_doc_sync_file_refs.py`（17 例）——真实树 0 违规 + 人为插入不存在的引用必报错（非空洞性）+ 通配/占位/模块路径/外链/目录引用不误报 + CHANGELOG 排除断言。门禁谓词若被改坏，检测面会归零而 CI 仍绿，本套用例即拦这一手。
+- **实测证据**：修前 `uv run python scripts/check_doc_sync.py` 退出码 1 且恰好报出上述 1 处（零误报）；修后退出码 0、0 警告。`uv run pytest tests/governance -q` 115 passed · `ruff check` 通过 · `scripts/lint_architecture.py` 全项通过。
+- **附带纠正（不属本分支代码改动）**：曾误登记「根 `AGENTS.md` 引用了不存在的 `docs/operations/testing-playbook.md`」——实测该引用只在 `feat/isolation-hardening` 的 AGENTS.md（该分支持有该文件），主干命中 0，属把会话上下文缓存的另一分支文件当成本分支事实。纠正记录在 PR #33 分支 `4acd366`。
+
 ## CodeQL 告警收口 Batch 1~5：workflow 最小权限 + 密钥指纹 DUP-1 + 路径注入 + 堆栈回显 三层收敛（2026-10-01）
 
 > 方案：`docs/plans/plan-codeql-codescanning-remediation-2026-10-01.md`（已批准）；散点根因复盘：`docs/plans/plan-duplicate-logic-inventory-2026-10-01.md`。

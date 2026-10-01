@@ -11,6 +11,8 @@
   5. applications/*/pyproject.toml 包名与目录名匹配
   6. Makefile test session 数 == AGENTS.md 声称数
   7. agent_federation FastAPI title 一致性
+  8. 现状文档（AGENTS/ARCHITECTURE/README）中的文件引用路径存在
+     （CHANGELOG 是 append-only 历史快照，所指文件后来常被移动/重命名，故意不校）
 
 用法：
   python scripts/check_doc_sync.py          # 校验，0=通过 1=有漂移
@@ -25,6 +27,20 @@ import tomllib
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+
+# 文档内联「文件引用」存在性校验的判定面（方案：docs/plans/plan-doc-sync-file-ref-gate-2026-10-01.md）。
+# 刻意保守：宁漏报不误报——误报会让门禁被当噪音关掉，反而破窗。
+DOC_FILE_REF_DOCS = ("AGENTS.md", "ARCHITECTURE.md", "README.md")
+DOC_FILE_REF_ROOTS = (
+    "applications/", "packages/", "docs/", "scripts/", "tests/",
+    "eval/", "deploy/", "courses/", ".github/",
+)
+DOC_FILE_REF_EXTS = {
+    "md", "py", "toml", "yml", "yaml", "sh", "sql", "jsonl", "json",
+    "cfg", "ini", "txt", "lock", "ps1", "cmd",
+}
+# 含通配符 / 占位符 / 空格的片段不判（如 `applications/*/pyproject.toml`、`<改动目录>/tests`）
+DOC_FILE_REF_SKIP_CHARS = "*?<>${}()| "
 
 ERRORS: list[str] = []
 WARNINGS: list[str] = []
@@ -132,6 +148,40 @@ def check_architecture_paths() -> None:
                     check_path_exists("ARCHITECTURE.md", i, current_parent + name)
 
 
+def is_doc_file_ref(text: str) -> bool:
+    """纯谓词：反引号片段是否应作为仓内文件引用校验存在性（无 IO，便于单测）。"""
+    ref = text.split("#", 1)[0].strip()
+    if not ref or any(ch in ref for ch in DOC_FILE_REF_SKIP_CHARS):
+        return False
+    if not ref.startswith(DOC_FILE_REF_ROOTS):
+        return False
+    last = ref.rsplit("/", 1)[-1]
+    dot = last.rfind(".")
+    if dot <= 0:  # 无扩展名（含目录引用 `a/b/`）→ 交由目录校验面
+        return False
+    return last[dot + 1:] in DOC_FILE_REF_EXTS
+
+
+def check_doc_file_refs(
+    root: Path = REPO_ROOT,
+    docs: tuple[str, ...] = DOC_FILE_REF_DOCS,
+) -> None:
+    """校验现状文档里以反引号写出的文件引用是否真的存在。
+
+    补齐原缺口：`check_architecture_paths()` 只对以 `/` 结尾的目录引用调存在性校验，
+    带扩展名的文件引用直接落空；`check_agents_md_paths()` 只看表格首列。
+    已知漏报面（登记在方案 §2 非目标）：非顶层前缀的相对路径、Markdown 链接形式。
+    """
+    for doc in docs:
+        path = root / doc
+        if not path.exists():
+            continue
+        for i, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            for m in re.finditer(r"`([^`]+)`", line):
+                if is_doc_file_ref(m.group(1)):
+                    check_path_exists(doc, i, m.group(1).split("#", 1)[0].strip(), base=root)
+
+
 def check_federation_title() -> None:
     server = REPO_ROOT / "applications/agent_federation/api/server.py"
     if not server.exists():
@@ -186,6 +236,7 @@ def main() -> bool:
     check_readme_install_cmd()
     check_pyproject_package_names()
     check_architecture_paths()
+    check_doc_file_refs()
     check_federation_title()
     check_session_count()
 
