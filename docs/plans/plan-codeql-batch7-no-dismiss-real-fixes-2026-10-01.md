@@ -1,6 +1,6 @@
 # CodeQL Batch 7：取消 dismiss 通道，剩余告警全部真修
 
-> 状态：**B7a 已执行**（#34 / #43 / #44 真闭合；#42 未消除，位移重开为 #47 → 由 **B7c** 处理）；**B7b 待拍板**（两条需架构决策，不得先动代码）
+> 状态：**B7a 已执行**（#34 / #43 / #44 真闭合；#42 未消除，位移重开为 #47）→ **B7c 已执行并验收通过**（PR #39 合入 `bb46dd3`，主干重扫 **#47 真消失、无新号重开**，main open 3 → 2）；**B7b 已拍板走 principal_id 化**（待另立方案与 PR，本方案不动 `auth.py`）
 > 日期：2026-10-01　触发：用户明确「不要用 dismiss 这种简单的处理方式」
 > 前置：Batch 1-6 见 `plan-codeql-codescanning-remediation-2026-10-01.md` 与 `plan-codeql-batch6-kernel-sanitizer-models-2026-10-01.md`
 
@@ -95,12 +95,17 @@
 1. 本 PR（B7a）：lint 门禁 + 定向测试 → 合 main → **主干重扫**按 alert number 做集合差。
 2. 判定标准：闭合的必须 `state=fixed` 且 `dismissed_at=None`（自动闭合）。
 3. 未闭合的：写进 `docs/TODO.md` §8，状态从「待 dismiss」改为「**未解，原因与下一步**」，**不点 dismiss**。
-4. B7b 待用户拍板后另立方案与 PR。
+4. B7b **已拍板：principal_id 化**（认证后使用服务端签发/存储的不透明主体 id 派生 thread id，密钥不再进哈希）。另立方案与 PR，涉及会话目录迁移 + 主体映射存储 + 联邦契约核对；本方案不动 `auth.py`。
 
 ## 6. 本批验证记录
 
 - PR #38 首轮（仅去 base 的版本）：`Analyze (python)` / `Analyze (actions)` / `ci` / `ha` 均 pass，`CodeQL` 检查 fail——**2 new alerts (high)**，注解 `fs.py:99` / `fs.py:110`；`raw_sarif` 不经 REST 暴露（分析详情无该字段），改用消除法定位。本轮未合入。
 - PR #38 次轮（不落路径文本 + `_input_shape`）本地实测：`lint_architecture.py` exit 0（P2/P4-2/P5/P6/P7/P8 全过）；`check_doc_sync.py` 0 警告；分 session 实跑 agent-core **281 passed / 3 skipped**、根 `tests` **500 passed / 17 skipped**、联邦 **152 passed**；`ruff check` 无告警。（本机无 CodeQL CLI，告警是否闭合以 PR 检查与主干重扫为准。）
 - 已回填：PR #38 次轮（`cab1eda`）**全 checks pass 含 CodeQL** → 合入 `a660220`；`refs/heads/main` 重扫（`/language:python` results=3、rules=43）后 **open 6 → 3**。
-- 逐条定性（均 `state=fixed` 且 `fixed_at=None` / `dismissed_at=None`，即**自动闭合，本轮未使用任何 dismiss**）：#34 ✅ 、#43 ✅ 、#44 ✅ ；#42 旧号闭合但同规则位移重开为 **#47 `py/path-injection` @ `fs.py:187`** → 见 §3.3 结论与 §3.4 修法；#38 / #39 仍 open → 等 B7b 拍板。
-- 待回填：B7c 的 PR CodeQL 检查结果与合入后主干重扫（目标：#47 真消失，而不是再次位移重开新号）。
+- 逐条定性（`state=fixed`、`fixed_at` 有值、`dismissed_at=None`，即**自动闭合，本轮未使用任何 dismiss**）：#34 ✅ 、#43 ✅ 、#44 ✅ ；#42 旧号闭合但同规则位移重开为 **#47 `py/path-injection` @ `fs.py:187`** → 见 §3.3 结论与 §3.4 修法；#38 / #39 仍 open → 走 B7b。
+- **B7c 已回填・验收通过**：
+  - PR #39（head `0db4ed1`，4 文件 +173/−38）：`Analyze (python)` / `Analyze (actions)` / `CodeQL` / `ci` ×2 / `ha` ×2 **全 pass**；推送前跑了 L3 深度安全审查，findings 0。合入为 merge commit `bb46dd3`（2026-10-01T11:42:39Z）。
+  - 主干重扫：`refs/heads/main` 上的 default-setup 分析（`dynamic/github-code-scanning/codeql`，run #42）`Analyze (python)` / `Analyze (actions)` 均 completed/success；分析完成时刻 11:44:14Z 晚于合入时刻，确认是针对 merge commit 的重扫而非旧结果。
+  - **#47 真消失（不是位移重开）**：`state=fixed`、`fixed_at=2026-10-01T11:44:14Z`、`dismissed_at=None`；同时全仓告警最大号仍为 **#47**，合入时刻之后**无任何新建告警**（号段 1..47，缺号 45/46）→ 同一 sink 未在新行号重开。
+  - `refs/heads/main` CodeQL 告警总账：**45 条，`fixed` 43 / `open` 2**，open 仅剩 **#38 / #39**（`py/weak-sensitive-data-hashing` @ `guardrails/auth.py:92`/`:117`）→ 待 B7b。**43/43 闭合均为自动（`dismissed_at=None`），全仓零人工 dismiss。**
+  - 取证脚本：`.codeartsdoer/temp/verify_main_rescan.py`、`.codeartsdoer/temp/verify_no_new_alert.py`（告警按 `ref=refs/heads/main` 过滤；`state` 三段 open/closed/dismissed 并集去重）。
