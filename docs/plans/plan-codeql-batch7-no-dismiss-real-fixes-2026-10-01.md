@@ -1,6 +1,6 @@
 # CodeQL Batch 7：取消 dismiss 通道，剩余告警全部真修
 
-> 状态：**B7a 已执行**（#34 / #43 / #44 真闭合；#42 未消除，位移重开为 #47）→ **B7c 已执行并验收通过**（PR #39 合入 `bb46dd3`，主干重扫 **#47 真消失、无新号重开**，main open 3 → 2）；**B7b 已拍板走 principal_id 化**（待另立方案与 PR，本方案不动 `auth.py`）；**B7d 新增**（v3 合流后主干复验发现新告警 **#48**，见 §7）
+> 状态：**B7a 已执行**（#34 / #43 / #44 真闭合；#42 未消除，位移重开为 #47）→ **B7c 已执行并验收通过**（PR #39 合入 `bb46dd3`，主干重扫 **#47 真消失、无新号重开**，main open 3 → 2）；**B7b 已拍板走 principal_id 化**（待另立方案与 PR，本方案不动 `auth.py`）；**B7d 已执行并主干复验通过**（PR #42 合入 `9ee0000`，#48 `state=fixed`/`dismissed_at=None`、main open 回到 2、新建 0，见 §7.5）
 > 日期：2026-10-01　触发：用户明确「不要用 dismiss 这种简单的处理方式」
 > 前置：Batch 1-6 见 `plan-codeql-codescanning-remediation-2026-10-01.md` 与 `plan-codeql-batch6-kernel-sanitizer-models-2026-10-01.md`
 
@@ -84,11 +84,29 @@
 
 | 选项 | 内容 | 代价 | 评价 |
 |------|------|------|------|
-| **B7b-1（推荐）** | **principal_id 化**：认证后使用服务端签发/存储的不透明主体 id 派生 thread id，密钥不再进哈希；#38 与 #39 同时**真消失** | 会话目录命名迁移（可复用 `scripts/migrate_thread_identity.py` 框架）、鉴权中间件需主体映射、联邦各服务契约核对 | 与 ADR-0007「服务端断言租户身份」同向，属真实架构改进 |
+| **B7b-1（推荐）** | **principal_id 化**：认证后使用服务端签发/存储的不透明主体 id 派生 thread id，密钥不再进哈希 | 会话目录命名迁移（可复用 `scripts/migrate_thread_identity.py` 框架）、鉴权中间件需主体映射、联邦各服务契约核对 | 与 ADR-0007「服务端断言租户身份」同向，属真实架构改进。**但「#38 与 #39 同时真消失」的原记法已证伪，见下方订正**；能否消告警取决于下面两个待验证问题 |
 | B7b-2 | 先执行历史会话迁移，**迁移完成后删除 `legacy_thread_id`**（消 #39）；#38 继续留 open | 需部署侧动作；#38 不解决 | 诚实但不完整 |
 | B7b-3 | default setup 的 query-suite 按路径排除这两个查询 | 会同时屏蔽该文件未来的真实同类问题 | **不推荐**：这是"看不见"而非"修好了" |
 
 不选：改用 scrypt/pbkdf2（把高熵密钥当口令做慢哈希，热路径纯损失，且使摘要与既有会话全部漂移）；改名 `secret`→其它以规避名称启发式（藏而非修）。
+
+### 4.1 事实订正（B7d 收尾时 grep 实取，推翻本节原记法）
+
+本节原写「principal_id 化后 #38 与 #39 同时真消失」——**错**。实取（`git grep` 全仓，含测试外的产品代码与 `scripts/`）：
+
+| 告警 | 真实落点 | 全部输入源（`git grep -n "fingerprint\|derive_thread_id" -- "*.py"`） |
+|---|---|---|
+| **#38** `auth.py:92` col=47-69 | **共享实现 `fingerprint()` 内部**的 `hmac.new(pepper, secret.encode(...), sha256)`，不是会话派生那一行 | ① `auth.py:103`（`derive_thread_id` 内）——principal_id 化能去掉这条；② `auth.py:149`（`resolve_client_key` 限流桶 `key:{fingerprint(provided)}`）；③ **`llm/registry.py:46`**（`_hash_api_key`，LLM 客户端缓存键） |
+| **#39** `auth.py:117` col=29 | `legacy_thread_id()` 体内的裸 `sha256(...)[:12]`（为算 legacy→new 映射而故意保留，调用面由 **P6-2** 锁死） | `scripts/migrate_thread_identity.py:49` 一处，属迁移工具专用 |
+
+由此得到两条硬结论：
+
+1. **只改会话身份不够**：`fingerprint` 还剩限流桶与 LLM 缓存键两个输入源；且第③个是**上游 LLM provider 的密钥**（基础设施秘密，不是调用方身份），**根本不能拿 principal_id 替代**——它的目的是「密钥不常驻内存」，缓存隔离仍需一个稳定摘要。
+2. **能否消告警取决于规则的流范围，本地推不出来**：若 `py/weak-sensitive-data-hashing` 是**过程内**（以形参 `secret` 为敏感源），则只要 `fingerprint` 存在，#38 就不会消失；若是**全局数据流**（按调用方实参判定），则改掉①②后仅余③，仍不断线。
+
+⇒ **B7b 开工前的强制前置（沿用 Batch 7c 的方法论：先实测再动手）**：拉 `github/codeql` 该查询与其 `SensitiveData` 模型源码，判定源/汇的配置范围；然后才能写 B7b 方案的验收标准（否则又是一次「看起来能修」）。另需同时考虑：③ 的合理修法是把「上游密钥摘要」从「用户身份摘要」里拆出去（两套不同语义共用一个函数本就是分类错），而不是硬凑 principal_id。
+
+**订正过程中的二次自纠**：初稿订正时我顺手写了「TODO 原写 kernel 现仅两调用点」，而 `git grep -n derive_thread_id -- "*.md"` 证明**全仓 md 无此句**——那是我自己臆造的一个靶子，已在上方删除（恰犯在本批刚立的红线上：否定式/数量断言必须 grep 过才能写）。教训：订正别人账面时，被引用的原文同样需要 grep 取证。
 
 ## 5. 批次与验收流程
 
@@ -156,3 +174,19 @@ v3 身份层合流（PR #41，merge commit `889d417` → `a660e76`，2026-10-01T
 5. 三层齐备第③层不得缺席：若只改 workflow 不加 P11，本批不算完成。
 
 **不选**：dismiss（含 `wont_fix`／`allowlist`）；在 default setup 里按路径排除 `actions/*` 查询（看不见而非修好了）；把权限写成 `write-all` 求个「不报」。
+
+### 7.5 执行记录（已达成，均为实跑非推演）
+
+| 步 | 实跑结果 |
+|---|---|
+| 提交 | `6fb57d5`（8 文件 +302/−6），分支 `fix/codeql-b7d-workflow-permissions` |
+| PR #42 checks | 5/5 pass：`Analyze (actions)` / `Analyze (python)` / `CodeQL` / `ci` ×2 |
+| 合入 | merge commit `9ee0000`@`2026-10-01T13:41:19Z`（沿用仓内 merge commit 惯例，非 squash） |
+| 验收 1 | ✅ `#48 state=fixed`、`fixed_at=13:42:00Z`、`dismissed_at`/`dismissed_by`/`dismissal_reasons` 全 None（合入后 41 秒自动闭合） |
+| 验收 2 | ✅ 主干 **open 2**（`#38` `auth.py:92` col=47 / `#39` `auth.py:117` col=29，位置未变⇒无位移重开）；fixed 44 / dismissed 0 |
+| 验收 3 | ✅ 全仓最大号仍 **48**；`created_at > 13:41:19Z` 的告警 **0** |
+| 验收 4/5 | ✅ 三层齐备：workflow 补齐 + P11 + 17 治理用例；且主干 push 触发的 `ci`（含 P11 + governance session）**success@13:46:20Z** ⇒ 门禁在主干真实生效，不只是本地跑过 |
+
+取证脚本：`.codeartsdoer/temp/verify_main_b7d.py --once`。本版修了 v3 版脚本的两处解析盲区（`check-suites` 的 `name` 字段为 **null**，靠关键词过滤等于永远判「未完成」；`most_recent_instance.location` 是 `{path,start_line,start_column}` 而非 SARIF `physicalLocation`），并把「未见主干 `Analyze (*)` / `ci` run」也归为 PENDING 而非 PASS（判据 fail-closed）。
+
+**结论**：B7d 已闭合，全仓仍零人工 dismiss。剩下 open 的 `#38`/`#39` 转 **B7b**（§4：principal_id 化，需另立方案）。
