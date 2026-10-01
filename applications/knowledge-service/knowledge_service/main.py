@@ -22,6 +22,7 @@ from knowledge_service.conf.milvus_config import milvus_config
 from knowledge_service.core.config import settings
 from knowledge_service.core.logger import logger
 from knowledge_service.core.tracing import init_tracing
+from knowledge_service.utils.tenant_identity import TenantHeaderMiddleware
 
 
 @asynccontextmanager
@@ -63,6 +64,10 @@ def create_app() -> FastAPI:
         max_body_bytes=settings.knowledge_max_body_bytes,
         error_response=error_response,
     )
+
+    # ADR-0007 A3/A4：入站内部签名租户头校验 → 绑定断言（供 resolve_server_tenant 优先采信）。
+    # 配了 INTERNAL_HMAC_KEY 才生效；缺头/未配密钥透传（observe）。
+    app.add_middleware(TenantHeaderMiddleware)
 
     # 跨域中间件：来源来自统一配置（CORS_ORIGINS 逗号分隔，去除空白项）
     allow_origins = [o.strip() for o in settings.cors_origins.split(",") if o.strip()]

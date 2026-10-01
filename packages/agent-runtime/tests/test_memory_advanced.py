@@ -21,6 +21,9 @@ from agent_runtime.memory_recall import (
 from agent_runtime.memory_seed import MemorySeeder
 from agent_runtime.trajectory.models import TrajectoryRecord, TrajectoryStep
 
+# 隔离域（plan T1）：store/decay/seeder 全链路带 tenant_id。
+TENANT = "t-adv"
+
 # ===== recency 衰减 =====
 
 def test_recency_score_fresh():
@@ -143,15 +146,15 @@ async def test_memory_decay_cleanup_expired():
         task_summary="new task",
         created_at=time.time(),
     )
-    await store.save(old_ep)
-    await store.save(new_ep)
+    await store.save(old_ep, tenant_id=TENANT)
+    await store.save(new_ep, tenant_id=TENANT)
 
     decay = MemoryDecayManager(store, max_age_seconds=100, max_size=10000)
-    expired, evicted = await decay.cleanup()
+    expired, evicted = await decay.cleanup(tenant_id=TENANT)
     assert expired == 1
     assert evicted == 0
-    assert await store.get("old") is None
-    assert await store.get("new") is not None
+    assert await store.get("old", tenant_id=TENANT) is None
+    assert await store.get("new", tenant_id=TENANT) is not None
 
 
 async def test_memory_decay_cleanup_evict_low_importance():
@@ -163,14 +166,25 @@ async def test_memory_decay_cleanup_evict_low_importance():
             task_summary=f"task{i}",
             importance=0.1 * i,
             created_at=time.time(),
-        ))
+        ), tenant_id=TENANT)
 
     decay = MemoryDecayManager(store, max_age_seconds=999999, max_size=3)
-    expired, evicted = await decay.cleanup()
+    expired, evicted = await decay.cleanup(tenant_id=TENANT)
     assert expired == 0
     assert evicted == 2
-    remaining = await store.list_all()
+    remaining = await store.list_all(tenant_id=TENANT)
     assert len(remaining) == 3
+
+
+async def test_memory_decay_cross_tenant_isolated():
+    """plan T1：cleanup 只影响本租户；tenantB 的旧 Episode 不被 tenantA 衰减误删。"""
+    store = InMemoryEpisodicStore()
+    old_b = Episode(episode_id="b", execution_id="e", task_summary="old", created_at=time.time() - 999999)
+    await store.save(old_b, tenant_id="tB")
+    decay = MemoryDecayManager(store, max_age_seconds=100, max_size=10000)
+    expired, _ = await decay.cleanup(tenant_id="tA")
+    assert expired == 0
+    assert await store.get("b", tenant_id="tB") is not None
 
 
 # ===== MemorySeeder =====
@@ -183,9 +197,9 @@ async def test_memory_seeder_seeds_new_episodes():
     count = await seeder.seed([
         Episode(episode_id="seed1", execution_id="s", task_summary="种子1"),
         Episode(episode_id="seed2", execution_id="s", task_summary="种子2"),
-    ])
+    ], tenant_id=TENANT)
     assert count == 2
-    all_eps = await store.list_all()
+    all_eps = await store.list_all(tenant_id=TENANT)
     assert len(all_eps) == 2
 
 
@@ -194,8 +208,8 @@ async def test_memory_seeder_skips_existing():
     ep_mem = EpisodicMemory(store)
     seeder = MemorySeeder(ep_mem)
 
-    await seeder.seed([Episode(episode_id="seed1", execution_id="s", task_summary="种子1")])
-    count = await seeder.seed([Episode(episode_id="seed1", execution_id="s", task_summary="种子1")])
+    await seeder.seed([Episode(episode_id="seed1", execution_id="s", task_summary="种子1")], tenant_id=TENANT)
+    count = await seeder.seed([Episode(episode_id="seed1", execution_id="s", task_summary="种子1")], tenant_id=TENANT)
     assert count == 0
 
 

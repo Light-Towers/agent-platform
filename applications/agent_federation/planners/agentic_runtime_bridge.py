@@ -138,14 +138,13 @@ def build_bridged_langchain_tools(
 def _file_tool_specs() -> "list[tuple[str, Any, str]]":
     """联邦文件工具（generate_markdown / convert_md_to_pdf / read_file_content）。"""
     try:
-        from tools.markdown_tools import generate_markdown
-        from tools.pdf_tools import convert_md_to_pdf
-        from tools.upload_file_read_tool import read_file_content
+        # 批 2：经 tool_registry 统一出口取工具（observe_tool 包装）
+        from agent.tool_registry import get_tool
 
         return [
-            ("generate_markdown", generate_markdown, "生成 Markdown 文档"),
-            ("convert_md_to_pdf", convert_md_to_pdf, "Markdown 转 PDF"),
-            ("read_file_content", read_file_content, "读取上传文件内容"),
+            ("generate_markdown", get_tool("generate_markdown"), "生成 Markdown 文档"),
+            ("convert_md_to_pdf", get_tool("convert_md_to_pdf"), "Markdown 转 PDF"),
+            ("read_file_content", get_tool("read_file_content"), "读取上传文件内容"),
         ]
     except Exception as exc:
         logger.warning("bridge: 文件工具导入失败: %s", exc)

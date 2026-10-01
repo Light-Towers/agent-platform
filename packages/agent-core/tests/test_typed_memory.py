@@ -145,7 +145,7 @@ async def test_recall_typed_ranks_by_weighted_score(monkeypatch):
         "agent_core.memory.typed._vector_search_memories",
         lambda pool, tenant_id, user_id, embedding, k: _async(rows),
     )
-    result = await recall_typed(_FakePool(), "u1", "q", k=3, embedding=[0.0] * 8)
+    result = await recall_typed(_FakePool(), "u1", "q", k=3, embedding=[0.0] * 8, tenant_id="default")
     assert isinstance(result[0], TypedMemory)
     assert result[0].content.startswith("procedural") or result[0].content.startswith(
         "semantic"
@@ -159,13 +159,13 @@ async def test_recall_typed_empty_returns_empty(monkeypatch):
         "agent_core.memory.typed._vector_search_memories",
         lambda pool, tenant_id, user_id, embedding, k: _async([]),
     )
-    result = await recall_typed(_FakePool(), "u1", "q", k=3, embedding=[0.0] * 8)
+    result = await recall_typed(_FakePool(), "u1", "q", k=3, embedding=[0.0] * 8, tenant_id="default")
     assert result == []
 
 
 async def test_recall_typed_requires_embedding():
     with pytest.raises(ValueError):
-        await recall_typed(_FakePool(), "u1", "q", k=3, embedding=None)
+        await recall_typed(_FakePool(), "u1", "q", k=3, embedding=None, tenant_id="default")
 
 
 # --- v5 租户安全语义（P0 审计修复，2026-09-25）----------------------
@@ -270,7 +270,7 @@ async def test_remember_typed_inserts_typed_columns(monkeypatch):
 
     await remember_typed(
         _CapturePool(), "u1", "用户是财务", "semantic", 0.8, embedding=[0.1] * 8
-    )
+    , tenant_id="default")
     assert "INSERT INTO memories" in captured["sql"]
     # 列顺序：tenant_id, user_id, content, embedding, memory_type, importance
     assert captured["params"][0] == "default"
@@ -304,7 +304,7 @@ async def test_remember_typed_clamps_type_and_importance(monkeypatch):
 
     await remember_typed(
         _CapturePool(), "u", "f", "bogus", 5.0, embedding=[0.0] * 8
-    )
+    , tenant_id="default")
     # 非法类型 → semantic；importance 超界 → 1.0
     assert captured["params"][4] == "semantic"
     assert captured["params"][5] == 1.0
@@ -312,7 +312,7 @@ async def test_remember_typed_clamps_type_and_importance(monkeypatch):
 
 async def test_remember_typed_requires_embedding():
     with pytest.raises(ValueError):
-        await remember_typed(_FakePool(), "u", "f", "semantic", 0.5, embedding=None)
+        await remember_typed(_FakePool(), "u", "f", "semantic", 0.5, embedding=None, tenant_id="default")
 
 
 # --- consolidate 遗忘阈值（fake 池，rowcount）------------------------------
@@ -342,11 +342,15 @@ async def test_consolidate_deletes_low_value_old(monkeypatch):
         def connection(self):
             return _CaptureConn()
 
-    deleted = await consolidate("ws1", _CapturePool(), forget_threshold=0.1)
+    deleted = await consolidate("ws1", _CapturePool(), forget_threshold=0.1, tenant_id="default")
     assert deleted == 3
     assert "DELETE FROM memories" in captured["sql"]
-    # TD-6 参数化：参数三元组 (user, threshold, age_days)，默认 age_days=30
-    assert captured["params"] == ("default", "ws1", 0.1, 30)
+    # TD-6 参数化 + ADR-0006 T13 双列归属：params =
+    # (tenant, scope, workspace_id, user_id, threshold, age_days)，默认 age_days=30
+    assert captured["params"] == ("default", "workspace", "ws1", "ws1", 0.1, 30)
+    # 含 scope 谓词 + workspace 双列兼容（新行落 workspace_id、旧行落 user_id）
+    assert "scope = %s" in captured["sql"]
+    assert "workspace_id = %s OR user_id = %s" in captured["sql"]
     # 含 30 天窗口与 importance 阈值条件（SQL 用参数化 interval '%s days'）
     assert "importance <" in captured["sql"]
     assert "interval '%s days'" in captured["sql"]
@@ -383,9 +387,9 @@ async def test_consolidate_reads_env_threshold_and_age_days(monkeypatch):
         def connection(self):
             return _Conn()
 
-    await consolidate("ws2", _Pool())
-    # 环境变量生效：params 三元组最后一维应为 7，阈值应为 0.35
-    assert captured["params"] == ("default", "ws2", 0.35, 7)
+    await consolidate("ws2", _Pool(), tenant_id="default")
+    # 环境变量生效：params 末两维为阈值/老化天数（前置 tenant + scope + 双列归属键）
+    assert captured["params"] == ("default", "workspace", "ws2", "ws2", 0.35, 7)
 
 
 async def test_consolidate_env_invalid_falls_back(monkeypatch):
@@ -416,8 +420,8 @@ async def test_consolidate_env_invalid_falls_back(monkeypatch):
         def connection(self):
             return _Conn()
 
-    await consolidate("ws3", _Pool())
-    assert captured["params"] == ("default", "ws3", 0.1, 30)
+    await consolidate("ws3", _Pool(), tenant_id="default")
+    assert captured["params"] == ("default", "workspace", "ws3", "ws3", 0.1, 30)
 
 
 # --- forget 删除（fake 池）------------------------------------------------
@@ -446,9 +450,10 @@ async def test_forget_deletes_when_matched(monkeypatch):
         def connection(self):
             return _CaptureConn()
 
-    ok = await forget("u1", _CapturePool(), 42)
+    ok = await forget("u1", _CapturePool(), 42, tenant_id="default")
     assert ok is True
-    assert captured["params"] == ("default", "u1", 42)
+    # forget 谓词双列兼容（workspace_id OR user_id）+ 精确 id：params=(tenant, ws, ws, id)
+    assert captured["params"] == ("default", "u1", "u1", 42)
 
 
 async def test_forget_returns_false_when_no_match(monkeypatch):
@@ -472,5 +477,5 @@ async def test_forget_returns_false_when_no_match(monkeypatch):
         def connection(self):
             return _CaptureConn()
 
-    ok = await forget("u1", _CapturePool(), 999)
+    ok = await forget("u1", _CapturePool(), 999, tenant_id="default")
     assert ok is False

@@ -25,10 +25,14 @@ from agent_runtime.procedural_memory import (
 )
 from agent_runtime.trajectory.models import TrajectoryRecord, TrajectoryStep
 
+# 隔离域（plan T1）：全链路带 tenant_id。
+TENANT = "t-e2e"
 
-def _trajectory(execution_id: str, task: str = "招商分析") -> TrajectoryRecord:
+
+def _trajectory(execution_id: str, task: str = "招商分析", tenant_id: str = TENANT) -> TrajectoryRecord:
     return TrajectoryRecord(
         execution_id=execution_id,
+        tenant_id=tenant_id,
         planner="agentic",
         plan={"task": task},
         steps=[
@@ -57,25 +61,25 @@ async def test_e2e_learning_closed_loop():
         await proc_sink(traj, runtime=None)
 
     # 验证：5 个 Episode 已沉淀
-    all_eps = await ep_store.list_all()
+    all_eps = await ep_store.list_all(tenant_id=TENANT)
     assert len(all_eps) == 5
 
     # 验证：候选 Skill 已挖掘（draft）
-    all_skills = await proc_store.list_all()
+    all_skills = await proc_store.list_all(tenant_id=TENANT)
     assert len(all_skills) >= 1
     candidate = all_skills[0]
     assert candidate.lifecycle == "draft"
 
     # Phase 2: 记录 5 次成功使用
     for _ in range(5):
-        tracker.record_use(candidate.name, candidate.version, success=True)
+        tracker.record_use(candidate.name, candidate.version, success=True, tenant_id=TENANT)
 
     # 验证：draft → stable
-    new_lc = await tracker.check_and_adjust(candidate.name, candidate.version)
+    new_lc = await tracker.check_and_adjust(candidate.name, candidate.version, tenant_id=TENANT)
     assert new_lc == "stable"
 
     # Phase 3: 下次相同任务 → 召回已学会的 Skill
-    results = await proc_mem.recall("招商分析")
+    results = await proc_mem.recall("招商分析", tenant_id=TENANT)
     assert len(results) >= 1
     assert results[0].lifecycle == "stable"
 
@@ -102,7 +106,7 @@ async def test_e2e_skill_demotion_on_failures():
         await ep_sink(traj, runtime=None)
         await proc_sink(traj, runtime=None)
 
-    all_skills = await proc_store.list_all()
+    all_skills = await proc_store.list_all(tenant_id=TENANT)
     assert len(all_skills) >= 1
     candidate = all_skills[0]
 
@@ -120,14 +124,14 @@ async def test_e2e_skill_demotion_on_failures():
         lifecycle="stable",
         created_at=candidate.created_at,
         updated_at=time.time(),
-    ))
+    ), tenant_id=TENANT)
 
     # 记录 5 次失败使用
     tracker = SkillUsageTracker(proc_store, demote_threshold=0.3, min_uses=5)
     for _ in range(5):
-        tracker.record_use(candidate.name, candidate.version, success=False)
+        tracker.record_use(candidate.name, candidate.version, success=False, tenant_id=TENANT)
 
-    new_lc = await tracker.check_and_adjust(candidate.name, candidate.version)
+    new_lc = await tracker.check_and_adjust(candidate.name, candidate.version, tenant_id=TENANT)
     assert new_lc == "deprecated"
 
 
@@ -144,12 +148,12 @@ async def test_e2e_recall_with_bigram_similarity():
         task_summary="会展招商分析",
         outcome=EpisodeOutcome.SUCCESS,
         importance=0.9,
-    ))
+    ), tenant_id=TENANT)
 
     # "分析招商" 与 "会展招商分析" 有 bigram 交集（"招商"、"分析"）
-    results = await ep_mem.recall("分析招商")
+    results = await ep_mem.recall("分析招商", tenant_id=TENANT)
     assert len(results) >= 1
 
     # "完全不同" 不应匹配
-    results = await ep_mem.recall("量子计算")
+    results = await ep_mem.recall("量子计算", tenant_id=TENANT)
     assert len(results) == 0

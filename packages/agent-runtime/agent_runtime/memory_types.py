@@ -158,12 +158,38 @@ class MemoryRetriever:
 
         if category is MemoryCategory.EPISODIC:
             if hasattr(retriever, "recall"):
-                return await retriever.recall(request)
+                # 租户透传（plan T1）：request.tenant_id 下传到 store；结果映回统一
+                # MemoryRecallResult（score 取 episode.importance，供上层排序可比）。
+                episodes = await retriever.recall(
+                    request.query, top_k=request.top_k, tenant_id=request.tenant_id
+                )
+                return [
+                    MemoryRecallResult(
+                        content=ep.content_for_recall(),
+                        category=MemoryCategory.EPISODIC,
+                        source="episode",
+                        score=float(ep.importance),
+                        metadata={"episode_id": ep.episode_id, "outcome": ep.outcome.value},
+                    )
+                    for ep in episodes
+                ]
             return []
 
         if category is MemoryCategory.PROCEDURAL:
             if hasattr(retriever, "recall"):
-                return await retriever.recall(request)
+                entries = await retriever.recall(
+                    request.query, top_k=request.top_k, tenant_id=request.tenant_id
+                )
+                return [
+                    MemoryRecallResult(
+                        content=f"{e.name}: {e.description}",
+                        category=MemoryCategory.PROCEDURAL,
+                        source="skill",
+                        score=0.5,
+                        metadata={"name": e.name, "version": e.version, "lifecycle": e.lifecycle},
+                    )
+                    for e in entries
+                ]
             return []
 
         return []
