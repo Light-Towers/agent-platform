@@ -9,17 +9,18 @@ LLM 客户端注册表（框架无关内核，源自 zhiku app/lm/lm_utils 的�
 
 WS-8 缓存治理：
 - 缓存为上限 ``_MAX_CACHE`` 的 LRU（长进程不无限增长）；
-- cache key 中 api_key 只存 ``sha256`` 摘要，密钥不再常驻内存缓存键。
+- cache key 中 api_key 只存摘要，密钥不再常驻内存缓存键；摘要统一走内核
+  ``guardrails.auth.fingerprint``（DUP-1 收敛：不在本模块手写裸 ``sha256``）。
 
 框架无关：核心层不依赖 langchain / app.conf；默认模型不再硬编码 ``qwen3-32b``，
 由 provider 的 ``default_model`` 或调用方传入决定。
 """
 
-import hashlib
 import threading
 from collections import OrderedDict
 from typing import Any, Dict, Optional
 
+from agent_core.guardrails.auth import fingerprint
 from agent_core.llm.providers import BaseLLMProvider, OpenAICompatibleProvider
 from agent_core.logging import get_logger
 
@@ -39,10 +40,10 @@ _PROVIDERS[_DEFAULT_OPENAI_PROVIDER.name] = _DEFAULT_OPENAI_PROVIDER
 
 
 def _hash_api_key(api_key: Optional[str]) -> str:
-    """api_key → sha256 摘要（WS-8：密钥不入缓存键，避免明文常驻内存）。"""
+    """api_key → 内核指纹（WS-8：密钥不入缓存键；DUP-1：不在此手写裸哈希）。"""
     if not api_key:
         return ""
-    return hashlib.sha256(api_key.encode("utf-8")).hexdigest()
+    return fingerprint(api_key)
 
 
 def _cache_get(key: tuple) -> Any:

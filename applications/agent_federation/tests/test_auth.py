@@ -1,9 +1,21 @@
 """resolve_thread_id 会话解析策略测试（对齐 app/api/auth.py）。
 
 覆盖：
-- 认证启用：按 API_KEY 哈希派生稳定会话，忽略客户端 thread_id（防劫持 + 跨请求续接，修复 TB-14）
+- 认证启用：按 API_KEY 经内核 ``derive_thread_id`` 派生稳定会话，忽略客户端 thread_id
+  （防劫持 + 跨请求续接，修复 TB-14；DUP-1 收敛后不再是本地裸 ``sha256(...)[:12]``）
 - 开发模式（未配置 API_KEY）：信任客户端 thread_id，缺省 dev-default-thread
 """
+
+import hashlib
+
+import pytest
+from agent_core.guardrails.auth import ENV_SECURITY_PEPPER, derive_thread_id
+
+
+@pytest.fixture(autouse=True)
+def _no_pepper(monkeypatch):
+    """隔离服务端 pepper：否则指纹值随宿主环境漂移。"""
+    monkeypatch.delenv(ENV_SECURITY_PEPPER, raising=False)
 
 
 def _load_with_api_key(monkeypatch, value: str):
@@ -21,7 +33,10 @@ def test_auth_enabled_derives_stable_session_from_key(monkeypatch):
     # 认证启用：忽略客户端 thread_id，同一 key 派生同一稳定会话
     assert t1 == t2
     assert t1.startswith("user-")
-    assert len(t1) == len("user-") + 12
+    assert len(t1) == len("user-") + 32  # 128bit（原 48bit 截断已收紧）
+    # 单一实现：与 kernel 派生一致，且不再是旧裸 sha256 前缀
+    assert t1 == derive_thread_id("secret-key")
+    assert t1 != "user-" + hashlib.sha256(b"secret-key").hexdigest()[:12]
 
 
 def test_auth_enabled_ignores_client_thread_id(monkeypatch):
