@@ -23,8 +23,10 @@ api 层文件 I/O 必须经本模块 helper）。
   "把此前 ``/api/files`` 列出的路径传回来"的端点（改契约会破坏既有前端）。
 - ``safe_filename``：文件名净化（取 basename + 字符白名单），消除路径分隔符与 ``.``/``..``。
 
-设计取舍：containment 用 ``resolve()`` 后的真包含判定，因此同时挡住
-``..`` 穿越与**符号链接逃逸**（base 内指向外部软链解析后落在 base 外）。
+设计取舍：containment 按**先词法、后解析**两步走——先用 ``os.path.normpath`` 折叠 ``.``/``..``
+（不访问文件系统），再用带分隔符边界的前缀判定拒掉明显越界，**之后**才 ``resolve()`` 并
+复检一次（挡住 base 内指向外部的符号链接）。因此越界输入不会触发文件系统遍历，
+且校验与最终使用的始终是同一个字符串。
 异常消息**不含**用户输入原文，避免被 ``detail=str(e)`` 之类写法带进出站响应。
 服务端留痕同样**不落路径文本**（无论入参还是解析结果）：用户回传的路径常含凭证派生的
 会话目录名（``session_user-<HMAC(api_key)>``），属于 ``py/clear-text-logging-sensitive-data``
@@ -77,8 +79,7 @@ def _is_foreign_absolute(raw: str) -> bool:
 
     Windows 宿主返回 ``False``：此时 ``C:\\...`` 是本平台**合法**绝对形态，必须允许
     消费者把 ``/api/files`` 返回的绝对路径原样回传（对外契约）；而 ``/etc/passwd``
-    在 Windows 下会被 ``resolve()`` 归到当前盘根，由 containment 判定自然拒掉，
-    无需在此特判。
+    在 Windows 下规范化后不以 ``root_str`` 为前缀，由 ② 的前缀判定直接拒掉。
     """
     return os.name != "nt" and bool(_WINDOWS_ABS_RE.match(raw))
 
@@ -159,8 +160,9 @@ def resolve_within(base: str | Path, user_path: str | Path) -> Path:
 
     与 ``safe_join`` 的区别只在入口宽容度：这里**允许绝对路径**（因为既有对外契约把
     ``/api/files`` 返回的绝对路径原样传回，收紧为"仅相对"会破坏消费者），
-    但绝对路径也必须本就落在 base 内——先做词法包含判定（不触碰文件系统即拒明显越界），
-    再 ``resolve()`` 并复检一次（挡住符号链接逃逸）。
+    但绝对路径也必须本就落在 base 内。校验顺序为三步，缺一不可：
+    **① 纯词法规范化（``os.path.normpath``）→ ② 带分隔符边界的前缀判定 → ③ 才 ``resolve()``
+    并复检**（挡符号链接逃逸）。② 必须先于 ③：未验证的入参不得触发文件系统访问。
     异平台的绝对形式（POSIX 宿主收到 ``C:\\...`` / UNC）一律拒绝，见
     ``_is_foreign_absolute``。
 
@@ -170,29 +172,38 @@ def resolve_within(base: str | Path, user_path: str | Path) -> Path:
     """
     raw = str(user_path)
     root = Path(base).resolve()
+    root_str = str(root)
     if not raw.strip():
         _reject(user_path, "路径参数不得为空")
     if "\x00" in raw:
         _reject(user_path, "路径参数含 NUL 字节")
     if _is_foreign_absolute(raw):
         _reject(user_path, "路径含非本平台绝对路径形式")
-    p = Path(raw)
-    candidate = p if p.is_absolute() else root / p
-    # 词法 containment 前置：明显越界（跨根 / 异盘符 / 绝对指向外部）在**不触碰文件系统**
-    # 的前提下就拒掉，不再对未验证输入做 resolve() 遍历；``a/../b`` 这类前缀内形式
-    # 词法判定为真，仍由解析后的复检裁决（符号链接逃逸在那一步挡住）。
-    if not candidate.is_relative_to(root):
+    # ① 纯词法规范化：``os.path.normpath`` 不访问文件系统，先把 ``.`` / ``..`` 折叠定形；
+    #    ``os.path.join`` 对绝对入参直接取该入参，因此相对/绝对入口都被统一成绝对形式。
+    norm = os.path.normpath(os.path.join(root_str, raw))
+    # ② 前缀守卫：必须先规范化再判前缀（顺序反了判定无效）。
+    #    第二个合取项补**分隔符边界**：否则 ``/data/root`` 基准会把兄弟目录 ``/data/root_evil``
+    #    也判为在内（naive ``startswith`` 的真实漏洞）；两侧都补边界后，base 自身仍算合法。
+    if norm.startswith(root_str) and (norm == root_str or norm.startswith(root_str + os.sep)):
+        try:
+            # ③ 通过 ①② 之后**才**允许接触文件系统：``resolve()`` 用于展开符号链接，
+            #    交由下方的 ``_ensure_within`` 复检；base 内的软链指向外部时在那一步被拒。
+            resolved = Path(norm).resolve()
+        except OSError:
+            # 某些平台对非法字符/超长路径在 resolve 阶段即报错，不外泄细节
+            _reject(user_path, "路径无法解析")
+    else:
         _reject(user_path, "路径越出基准目录")
-    try:
-        resolved = candidate.resolve()
-    except OSError:
-        # 某些平台对非法字符/超长路径在 resolve 阶段即报错，不外泄细节
-        _reject(user_path, "路径无法解析")
     result = _ensure_within(root, resolved, hint=user_path)
     if os.name != "nt" and "\\" in raw:
         # POSIX 宿主下反斜杠不是分隔符，`..\\evil` 会被 Path 当成单个合法片段从而绕过穿越
-        # 检查。故再按“反斜杠也是分隔符”解释一遍，两种解释任一越界即拒。
-        _ensure_within(root, root.joinpath(*_split_fragments(raw)).resolve(), hint=user_path)
+        # 检查。故再按“反斜杠也是分隔符”解释一遍，两种解释任一越界即拒。这一步**纯词法**
+        # （不再第二次触碰文件系统）：主解释已经在 ③ 做过解析后复检，这里的职责只是挡住
+        # 宿主语义误读。
+        alt = Path(os.path.normpath(os.path.join(root_str, *_split_fragments(raw))))
+        if alt != root and not alt.is_relative_to(root):
+            _reject(user_path, "路径越出基准目录")
     return result
 
 

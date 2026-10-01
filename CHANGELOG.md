@@ -2,13 +2,22 @@
 
 本仓库为 uv workspace monorepo。**唯一受支持的安装/运行入口是根 `uv.lock` + `uv sync`**，子包不再维护独立 `uv.lock`（见 v2 修复 #14）。
 
+## Batch 7c：#47 按官方编码形状重写 `resolve_within`（2026-10-01）
+
+> 接 Batch 7a：主干重扫发现 #42 只是**位移重开**为 #47（同一语句）。方案：`docs/plans/plan-codeql-batch7-no-dismiss-real-fixes-2026-10-01.md` §3.4。
+
+- **机制取证（先实测再动手：不凭记忆，直接拉 `github/codeql` 源码）**：`py/path-injection` 是**带状态**污点追踪（`NotNormalized` → `NormalizedUnchecked`），查询注释原话 “Such checks are ineffective in the `NotNormalized` state”。被识别的规范化**只有** `os.path.normpath`/`abspath`/`realpath`；被识别的 safe-access 守卫**只有** `str.startswith`；而 `Path.resolve()` 不是规范化、它是 `FileSystemAccess` 的 sink。⇒ Batch 6 的「结构不可消除」与 Batch 7a 的「已推翻 Batch 6」两头都错：真因是我们从未走官方编码的 **规范化→前缀守卫→才接触文件系统** 形状，`is_relative_to` 检测器根本不认。
+- **修法**：`resolve_within` 改为 `os.path.normpath(os.path.join(root, raw))` 词法定形 → `startswith(root_str)` 且带**分隔符边界**（补上 naive startswith 会误放行 `/data/root_evil` 的真漏洞）→ 才 `Path(norm).resolve()` → 保留解析后复检（挡软链逃逸）。POSIX 反斜杠二次解释改为**纯词法**否决，不再第二次触碰文件系统（顺带消掉同源的潜在 sink）。
+- **接受集不变是差分实测出来的，不是推演**：本机用 `posixpath` + `PurePosixPath` 模拟 POSIX 宿主，42 个入参对跑旧/新裁决 → **差异 0**。它当场推翻了我自己先写下的「lone `\` 入参改为拒绝」断言（`posixpath.join` 会自动插入分隔符，两版均放行），该用例已改正并入库。唯一真收紧在 **Windows 宿主的大小写变体绝对入参**（旧：`is_relative_to` 走 `normcase` 不区分大小写→放行；新：`startswith` 区分→拒绝），方向为变严，已用 `skipif(!win32)` 用例固定。
+- 新增 6 条回归（base 自身放行/兄弟前缀被拒/`..` 定形后不进 `resolve`/反斜杠否决不新增 `resolve` 调用/lone-`\` 仍放行/Windows 大小写变体拒绝）；本目录 49 passed / 5 skipped（Windows 宿主）。
+
 ## Batch 7a：取消 dismiss 通道，剩余告警真修（2026-10-01，分支 `fix/codeql-batch7-real-fixes`，PR #38）
 
 > 触发：用户明确「不要用 dismiss 这种简单的处理方式」。方案：`docs/plans/plan-codeql-batch7-no-dismiss-real-fixes-2026-10-01.md`。
 
 - **`#34`（`gateway/gray.py` 灰度分桶）MD5 → SHA-256**：官方 query help 对非口令场景的直接建议即 SHA-2，且 `user_id` 属可识别信息。影响面实测：`GRAY_PCT` 默认 `0`、`is_in_gray` 在产品代码里**无调用点**、分桶不持久化 → 人群重排无生产影响。
 - **`#43`/`#44`（`guardrails/fs.py` 拒绝日志）契约变更：不落任何路径文本**，只留原因 + 数值型结构摘要（`len`/`fragments`/`absolute`）。**演进过程值得记**：首版只去掉 `base`/`resolved`、保留 `input=%r`，PR #38 的 `CodeQL` 检查仍报 2 new alerts（high，注解 `fs.py:99`/`:110`）⇒ 消除法证明被判 secret 的是**入参本身**（路径含凭证派生的 `session_user-<HMAC(api_key)>` 目录名）——**这不是误报**。官方口径仅“Sensitive data should not be logged”，无 masking/哈希豁免。Batch 3 定的「留痕含原文」因此作废，排障改走接入层访问日志或本地复跑；`api/server.py` 依赖旧语义的注释同步修正。
-- **`#42`（`resolve_within`）在 `resolve()` 之前加纯词法 containment 守卫**：不再对未验证的越界输入做文件系统解析，且不放宽接受集（`a/../b` 词法判真，符号链接逃逸仍由解析后复检拒掉）。同时使 Batch 6 的 `barrierGuardModel` 能落在守卫之后的 sink 上——代码变强与工具可理解是叠加，不是用模型掩盖缺陷。注：**Batch 6 曾判定 `#42` 「结构不可消除」，本批以代码重构推翻了该结论**（当时把“不改代码”当成了默认前提）。
+- **`#42`（`resolve_within`）在 `resolve()` 之前加纯词法 containment 守卫**：不再对未验证的越界输入做文件系统解析，且不放宽接受集（`a/../b` 词法判真，符号链接逃逸仍由解析后复检拒掉）。**主干重扫实测：本动作未消除告警** —— #42 旧号 `state=fixed`，但同一语句（`resolved = candidate.resolve()`）在位移后的 `fs.py:187` 重开为 **#47**；因此当时写的「以代码重构推翻 Batch 6『结构不可消除』」**证据不成立，已撤回**（守卫前置作为纵深改进保留，真修见顶部 Batch 7c）。
 - **新增 4 条回归**：日志不含部署绝对路径×2、越界输入不进 `resolve`、软链逃逸仍拒（其中两条断言方向随契约修正，新断言比旧的多两项，非收窄凑绿）。
 - **本地验证**：`lint_architecture.py` exit 0、`check_doc_sync.py` 0 警告；分 session agent-core 281 passed/3 skipped、根 `tests` 500 passed/17 skipped、联邦 152 passed；`ruff` 无告警。本机无 CodeQL CLI，告警闭合以 PR 检查与主干重扫为准。
 - **不以 dismiss 收尾**：`#38`/`#39` 属「把 API Key 摘要成用户标识」的模式问题（取证：`verify_api_key` 走 `secrets.compare_digest` 明文比较，派生值从不参与验证，所以「用于口令哈希」的判定不成立；但「会话标识可由凭证推导」的耦合是真的），需 principal_id 化的架构决策，本批不动代码，三条出路已列在方案 §4 待拍板。
@@ -18,7 +27,7 @@
 > 纯文档（不改产品代码）。PR #36 合入 `main` = `0bc5175` @09:19:03Z，默认分支重扫 09:20:29Z（CodeQL 2.27.1）。
 
 - **闭合 3 条，均为 `state=fixed` 且 `dismissed_at=None`（自动闭合，非人工）**：`#23`（`agent_federation/api/server.py:264` `FileResponse(abs_path)`，barrier 生效）、`#40`（`fs.py:119`）、`#41`（`fs.py:134`）（后两条靠 `barrierGuardModel`）。`#23` 闭合同时反证仓内模型包**确实被 default setup 自动加载**（上一节据此推翻的选型前提得到实测支持）。
-- **`#42` 仍 open，且经分析为结构不可消除**：`resolve_within` 必然是 `candidate.resolve()`（`:162`）→ `_ensure_within`（`:167`），**不先 resolve 就无从判断越界**，sink 永远在守卫之前，所以 guard 建模无法覆盖。唯一能“消掉”它的做法是把 `Path.resolve` 返回值全局声明为 barrier，而 `resolve()` 本身不做任何净化、且会屏蔽全仓其他真实路径注入——**否决，转人工 dismiss**。这条边界写进方案 §9.1。
+- **`#42` 仍 open，且经分析为结构不可消除**：`resolve_within` 必然是 `candidate.resolve()`（`:162`）→ `_ensure_within`（`:167`），**不先 resolve 就无从判断越界**，sink 永远在守卫之前，所以 guard 建模无法覆盖。唯一能“消掉”它的做法是把 `Path.resolve` 返回值全局声明为 barrier，而 `resolve()` 本身不做任何净化、且会屏蔽全仓其他真实路径注入——**否决，转人工 dismiss**。这条边界写进方案 §9.1。**（订正：该判定已于 Batch 7c 推翻——真正的原因是 `Path.resolve()` 不被识别为规范化，必须先 `os.path.normpath` 再用 `str.startswith` 守卫；#42 后来位移重开为 #47 并在 7c 真修。）
 - **本会话累计账面**：`refs/heads/main` open 21 → 6。剩下 6 条全部是「代码无需修、只需面板 dismiss 附证据」：`#34`（灰度分桶真误报）、`#38`/`#39`（HMAC/sha256 形状属实不可消除）、`#43`/`#44`（不在可建模 sink kind 清单）、`#42`（上述结构边界）。**即已不存在应当改产品代码而未改的 CodeQL 告警。**
 - **仍未做的验收项**：模型包非空转自证（删 barrier 行→重扫必复报 `#23`）。现有旁证（加包前 open / 加包后 fixed，代码未动）不等于反证已做，已记在方案 §6-2。
 
