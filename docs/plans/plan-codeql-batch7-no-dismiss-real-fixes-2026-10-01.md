@@ -1,6 +1,6 @@
 # CodeQL Batch 7：取消 dismiss 通道，剩余告警全部真修
 
-> 状态：**B7a 已执行**（三条真修）；**B7b 待拍板**（两条需架构决策，不得先动代码）
+> 状态：**B7a 已执行**（#34 / #43 / #44 真闭合；#42 未消除，位移重开为 #47 → 由 **B7c** 处理）；**B7b 待拍板**（两条需架构决策，不得先动代码）
 > 日期：2026-10-01　触发：用户明确「不要用 dismiss 这种简单的处理方式」
 > 前置：Batch 1-6 见 `plan-codeql-codescanning-remediation-2026-10-01.md` 与 `plan-codeql-batch6-kernel-sanitizer-models-2026-10-01.md`
 
@@ -44,19 +44,39 @@
 - **额外收益**：不再把用户可控文本原样拼进日志，同时降低 `log-injection` 面（该 kind 属可建模清单，但我们选择不用模型糊弄）。
 - **回滚**：`_reject` / `_ensure_within` 的日志参数还原为 `%r` 原文形式（并可删 `_input_shape`）。
 
-### 3.3 #42 `resolve_within`：在解析**之前**加词法包含守卫
+### 3.3 #42 `resolve_within`：解析前加词法包含守卫（**执行结果：未消除，位移重开为 #47**）
 
-- **现状**：`:160` 拼出 candidate → `:162` `resolve()`（sink）→ `:166` 才做 containment。sink 永远早于守卫，`barrierGuardModel` 语义上覆盖不到（Batch 6 §9.1 结论）。
-- **真修**：先做**纯词法**包含判定（`candidate.is_relative_to(root)`，不触碰文件系统），明显越界直接拒；解析之后再复检一次（防符号链接逃逸）。
-  顺序变为：词法 containment → `resolve()` → 规范化 containment。
-- **为什么这是真加强而非躲检测器**：
-  1. 不再对未验证的越界输入调用 `resolve()`，避免在符号链接/超长路径/平台非法字符上先做文件系统遍历再拒绝（当前实现是"先解析后拒"）；
-  2. 绝对路径与异盘符输入更早失败，异常原因更准确；
-  3. **不放宽任何接受集**：词法判定对 `a/../b` 这类前缀内片段返回 True，仍由解析后的复检裁决，符号链接逃逸照旧被拒。
-- **副作用（如实记录）**：`PathTraversalError` 的原因字符串对"明显越界"输入可能由 `路径无法解析`（原经由 resolve OSError 分支）变为 `路径越出基准目录`。异常消息不回带路径（既有约定），对外 403 文案固定不回显原文（`tests/test_file_endpoints.py` 覆盖），故对外契约不变。
-- **模型协同**：Batch 6 已声明 `Path.is_relative_to` 的 `barrierGuardModel`，本改动使 sink 落入守卫之后，模型得以适用——**这是"代码变强 + 工具能理解"的叠加，不是靠模型掩盖缺陷**。若重扫仍不闭合，则如实报告并保持 open（不 dismiss、不加假模型）。
-- **验收**：`test_guardrails_fs.py` 现有穿越/NUL/绝对/异平台用例全绿；新增「词法越界在 resolve 前被拒」与「symlink 逃逸仍被拒」两类用例（若宿主不支持 symlink 创建则 skip 守卫，沿用现有 skip 约定）。
-- **回滚**：删除前置守卫 3 行。
+- **原判断**：`:160` 拼出 candidate → `:162` `resolve()`（sink）→ `:166` 才做 containment，守卫必然晚于 sink；把 containment 提到 `resolve()` 之前即可让 sink 落入守卫之后。
+- **真修动作**：在 `resolve()` 前加纯词法 `candidate.is_relative_to(root)` 判定，解析后仍复检一次。
+- **实测结论（2026-10-01 主干重扫，`a660220`）**：#42 `state=fixed`，但同规则在 `fs.py:187` 新开 **#47**。`git show 903c744^` 与面板行/列号比对确认：#42 的 `:162` 与 #47 的 `:187`（col 20 均指向接收者 `candidate`）是**同一语句** `resolved = candidate.resolve()`。即本动作**只是把行号挪了，没有消除告警**。
+- **撤回的话**：据此，「本改动推翻了 Batch 6 对 #42『结构不可消除』的判定」这一说法**证据不成立，撤回**。词法前置本身是真实的纵深改进（不再对未验证入参做文件系统遍历），作为 B7c 的一部分**保留**，但它不是消除告警的手段。
+- **保留的副作用说明**：`PathTraversalError` 的原因字符串对"明显越界"输入可能由 `路径无法解析`（原经由 resolve OSError 分支）变为 `路径越出基准目录`；异常消息不回带路径，对外 403 文案固定不回显原文（`tests/test_file_endpoints.py` 覆盖），对外契约不变。
+
+### 3.4 B7c：#47 按官方编码形状重写 `resolve_within` 的校验顺序
+
+先取回**机制证据**（不凭记忆：以下均从 `github/codeql` main 分支源码直接拉取）：
+
+- `PathInjectionQuery.qll`：该查询是**带状态**的污点追踪（`TaintTracking::GlobalWithState<PathInjectionConfig>`，状态 `NotNormalized` / `NormalizedUnchecked`），注释原话 *“Such checks are ineffective in the `NotNormalized` state”* —— **只做前缀包含判定不够，必须先经过被识别的规范化**。
+- `Stdlib.qll` 中 `Path::PathNormalization::Range` 的实现**只有三个**：`os.path.normpath` / `os.path.abspath` / `os.path.realpath`。`pathlib.Path.resolve()` **不在其中**，而它本身是 `FileSystemAccess` 的 path 参数 sink（`PathInjectionCustomizations.qll` 的 `FileSystemAccessAsSink`）—— 这才是 `:187` 一直被报的根因，也是 Batch 6「结构不可消除」错觉的来源。
+- `Stdlib.qll` 中 `Path::SafeAccessCheck::Range` 的默认实现**只有一个形状**：`str.startswith`（`checks(调用接收者, branch=true)`）。我们的 `Path.is_relative_to` 检测器完全不认。
+- 扩展点不可用：`PathInjectionCustomizations.qll` 开放 `PathNormalization::Range` / `SafeAccessCheck::Range` / MaD `barrierNode(this, "path-injection")`，但 default setup 下只能交**模型包**（MaD），而模型只能作用于**调用点**的返回值/入参，**消不掉 helper 函数体内部**的 sink。⇒ 本条只能改代码，与 §2 的结论一致。
+
+⇒ 官方编码的安全形状是：**`os.path.normpath` 词法规范化 → `startswith` 前缀守卫 → 之后才允许接触文件系统**。我们此前从未走过这个形状（直接 `Path(raw)` → `resolve()`）。
+
+**修法**（`resolve_within`，四步）：
+1. `norm = os.path.normpath(os.path.join(str(root), raw))`：纯词法，不访问文件系统（官方文档明确 normpath 不触碰 FS）；相对/绝对入口均由 `os.path.join` 统一成绝对形式。
+2. `if norm.startswith(root_str) and (norm == root_str or norm.startswith(root_str + os.sep))`：`startswith` 是被识别的 `SafeAccessCheck`；第二个合取项补**分隔符边界**，排除 `/data/root_evil` 被当成 `/data/root` 子路径的兄弟前缀误判（naive startswith 的真漏洞）。
+3. 通过 ①② 后才 `Path(norm).resolve()`，随后**保留** `_ensure_within` 解析后复检（挡符号链接逃逸）。
+4. POSIX 反斜杠二次解释改为**纯词法**否决（不再 `root.joinpath(...).resolve()`）：主解释已做过解析后复检，反斜杠解释的职责只是挡「宿主语义误读」，无需第二次触碰文件系统——顺带消掉该处同源的潜在 sink。
+
+**接受集不变的差分实测**（不是推演）：用 `posixpath` + `PurePosixPath` 在本机模拟 POSIX 宿主，对 42 个入参（含全部现有用例 + 穿越/绝对/UNC/盘符/混合分隔符/NUL/空白/兄弟前缀等边缘）同时跑**旧版（main a660220）**与**新版**裁决：
+- `sub/a.txt` / base 内绝对路径 / `a/../b.txt` / `.` / `/data/warehouse`（base 自身）→ 两版均放行。
+- `/etc/passwd`、`C:\\...`、`../outside.txt`、`..\\..\\outside.txt`、`sub/../../outside.txt`、`/data/warehouse_evil/x.txt`、空/空白/NUL → 两版均拒。
+- **差异 0 / 42**。特别提醒：原先根据直觉写下的「lone `\` 入参改拒」并不成立——`posixpath.join(root, "\\")` 会自动插入分隔符得到 `root + "/\\"`，仍在边界内，两版均放行（已写成回归用例固定）。
+- **唯一一处真收紧（仅 Windows 宿主）**：大小写变体的绝对入参。旧路径靠 `Path.is_relative_to`（nt 下 `normcase` 不区分大小写）放行，新路径靠 `startswith` 区分大小写 → 拒绝。方向为变严；该形式不可能由 `/api/files` 列出的结果产生（服务端拼出的串与 `root_str` 同构），全仓 `*.md` 与测试无断言。已用 `skipif(sys.platform != "win32")` 用例固定。
+- 符号链接逃逸路径本机无法验证（无 Linux/docker），靠现有 `skipif win32` 用例在 CI 的 Linux runner 上实跑。
+- **验收**：`test_guardrails_fs.py` 现有穿越/NUL/绝对/异平台用例全绿；新增：base 自身放行、兄弟前缀被拒、`..` 定形后不得进入 `resolve()`、反斜杠解释越界被拒且不新增 `resolve()` 调用、lone-`\` 仍放行、Windows 大小写变体拒绝。判定以 PR 作用域的 `CodeQL` 检查 + 合入后 `refs/heads/main` 重扫为准（本机无 CodeQL CLI）。
+- **回滚**：`resolve_within` 函数体回到 3.3 节描述的形式（`candidate = p if p.is_absolute() else root / p` 三连判定）。
 
 ## 4. B7b：两条待拍板（不在本批动代码）
 
@@ -81,4 +101,6 @@
 
 - PR #38 首轮（仅去 base 的版本）：`Analyze (python)` / `Analyze (actions)` / `ci` / `ha` 均 pass，`CodeQL` 检查 fail——**2 new alerts (high)**，注解 `fs.py:99` / `fs.py:110`；`raw_sarif` 不经 REST 暴露（分析详情无该字段），改用消除法定位。本轮未合入。
 - PR #38 次轮（不落路径文本 + `_input_shape`）本地实测：`lint_architecture.py` exit 0（P2/P4-2/P5/P6/P7/P8 全过）；`check_doc_sync.py` 0 警告；分 session 实跑 agent-core **281 passed / 3 skipped**、根 `tests` **500 passed / 17 skipped**、联邦 **152 passed**；`ruff check` 无告警。（本机无 CodeQL CLI，告警是否闭合以 PR 检查与主干重扫为准。）
-- 待回填：次轮 PR 检查结果、合入后 `refs/heads/main` 重扫差集（预期 #34 与 #43/#44 闭合；#42 待看，PR 作用域本轮未报 path-injection）。
+- 已回填：PR #38 次轮（`cab1eda`）**全 checks pass 含 CodeQL** → 合入 `a660220`；`refs/heads/main` 重扫（`/language:python` results=3、rules=43）后 **open 6 → 3**。
+- 逐条定性（均 `state=fixed` 且 `fixed_at=None` / `dismissed_at=None`，即**自动闭合，本轮未使用任何 dismiss**）：#34 ✅ 、#43 ✅ 、#44 ✅ ；#42 旧号闭合但同规则位移重开为 **#47 `py/path-injection` @ `fs.py:187`** → 见 §3.3 结论与 §3.4 修法；#38 / #39 仍 open → 等 B7b 拍板。
+- 待回填：B7c 的 PR CodeQL 检查结果与合入后主干重扫（目标：#47 真消失，而不是再次位移重开新号）。

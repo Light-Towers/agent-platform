@@ -6,9 +6,10 @@
 - ``resolve_within``：解析语义，绝对入口宽容但结果必须仍在 base 内；
 - ``safe_filename``：文件名净化，剥离目录成分与非法字符。
 
-另含四条安全属性断言：异常消息不回带入参原文（防经 ``detail=str(e)`` 外泄）、
-服务端日志不落任何路径文本（入参原文与部署绝对路径都不落）、明显越界的输入不进入
-``resolve()``、符号链接逃逸被拒（POSIX；Windows 建软链需特权，故跳过）。
+另含多条安全属性断言：异常消息不回带入参原文（防经 ``detail=str(e)`` 外泄）、
+服务端日志不落任何路径文本（入参原文与部署绝对路径都不落）、未验证入参不进入
+``resolve()``（先词法规范化与前缀守卫）、符号链接逃逸被拒（POSIX；Windows 建软链
+需特权，故跳过）。
 
 **跨平台契约**：Windows 绝对/穿越形式（``C:\\`` / ``..\\`` / UNC）的用例在两个宿主
 都必须被拒——``pathlib`` 只认宿主分隔符，这些用例是 CI 的 Linux runner 实测拦住
@@ -292,3 +293,95 @@ def test_symlink_escape_still_rejected_after_lexical_guard(tmp_path):
     (tmp_path / "link").symlink_to(outside, target_is_directory=True)
     with pytest.raises(PathTraversalError):
         resolve_within(tmp_path, "link/secret.txt")
+
+
+# ---------------------------------------------------------------------------
+# B7c：先规范化再判前缀（带分隔符边界），且未验证入参不得触碰文件系统
+# 机制依据（从 github/codeql 源码拉取）：``py/path-injection`` 是带状态追踪，
+# 被识别的规范化只有 ``os.path.normpath``/``abspath``/``realpath``，被识别的
+# safe-access 守卫只有 ``str.startswith``；而 ``Path.resolve()`` 本身就是 FS sink。
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_within_accepts_base_itself(tmp_path):
+    """前缀判定补分隔符边界后，base 自身仍算合法（旧实现由 ``_ensure_within`` 放行 root）。"""
+    root = tmp_path.resolve()
+    assert resolve_within(tmp_path, str(root)) == root
+
+
+def test_resolve_within_rejects_sibling_with_same_name_prefix(tmp_path):
+    """naive ``startswith`` 的真实漏洞：``/data/root_evil`` 不能被当成 ``/data/root`` 的子路径。"""
+    sibling = tmp_path.parent / f"{tmp_path.name}_evil"
+    sibling.mkdir()
+    target = sibling / "x.txt"
+    target.write_text("x", encoding="utf-8")
+    with pytest.raises(PathTraversalError):
+        resolve_within(tmp_path, str(target))
+
+
+def test_resolve_within_folded_escape_never_reaches_filesystem(tmp_path, monkeypatch):
+    """``..`` 经 ``normpath`` 定形后落在 base 外：不得进入 ``resolve()``（只允许 base 自身的规范化）。"""
+    resolved_calls: list[str] = []
+    real_resolve = Path.resolve
+
+    def spy(self, *args, **kwargs):
+        resolved_calls.append(str(self))
+        return real_resolve(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "resolve", spy)
+    with pytest.raises(PathTraversalError):
+        resolve_within(tmp_path, "sub/../../outside.txt")
+    assert not any("outside" in c for c in resolved_calls)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="反斜杠二次解释只在 POSIX 宿主上有意义")
+def test_backslash_interpretation_veto_is_lexical_only(tmp_path, monkeypatch):
+    """反斜杠解释越界时拒掉，但**不再新增一次 ``resolve()``**（旧实现会 ``joinpath().resolve()``）。
+
+    允许的两次 ``resolve()``：base 自身规范化 + 通过前缀守卫的主解释；旧实现在此会多出第三次。
+    """
+    resolved_calls: list[str] = []
+    real_resolve = Path.resolve
+
+    def spy(self, *args, **kwargs):
+        resolved_calls.append(str(self))
+        return real_resolve(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "resolve", spy)
+    with pytest.raises(PathTraversalError):
+        resolve_within(tmp_path, "sub\\..\\..\\outside.txt")
+    assert len(resolved_calls) <= 2
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="本用例断言 POSIX 宿主特有的入参语义")
+def test_posix_host_lone_backslash_input_still_accepted(tmp_path):
+    """无收紧（差分实测得出）：名字只含反斜杠的 POSIX 入参在新旧实现下都放行。
+
+    旧实现靠 ``root / Path("\\")`` 拼出子项，新实现靠 ``os.path.join`` 自动插入分隔符后
+    ``root + "/\\"`` 仍落在分隔符边界内。当初根据直觉写的“改为拒绝”断言会被
+    ``posixpath.join`` 的真实行为推翻，故把“不变”固定下来。
+    """
+    result = resolve_within(tmp_path, "\\")
+    assert result == tmp_path.resolve() / "\\"
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows 路径大小写不敏感，收紧只在该宿主出现")
+def test_windows_host_rejects_case_variant_absolute_input(tmp_path):
+    """故意收紧（方案 §3.4）：Windows 宿主上大小写变体的绝对入参由放行改为拒绝。
+
+    旧路径靠 ``Path.is_relative_to``（nt 下 normcase 不区分大小写）放行；新路径靠 ``startswith``
+    区分大小写。方向为变严而非放宽；该形式不可能由 ``/api/files`` 列出的结果产生。
+    """
+    root_str = str(tmp_path.resolve())
+    variant = root_str[0] + root_str[1:].upper()
+    if variant == root_str:
+        pytest.skip("该临时目录已无小写字母，无法构造大小写变体")
+    with pytest.raises(PathTraversalError):
+        resolve_within(tmp_path, variant)
+
+
+def test_resolve_within_accepts_mixed_separator_relative_input(tmp_path):
+    """常规形态不受影响：混合分隔符的相对入参在两个宿主都放行且结果仍在 base 内。"""
+    (tmp_path / "sub").mkdir()
+    result = resolve_within(tmp_path, "sub/file.txt")
+    assert result == (tmp_path / "sub" / "file.txt").resolve()
