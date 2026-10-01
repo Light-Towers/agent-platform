@@ -27,8 +27,15 @@ api 层文件 I/O 必须经本模块 helper）。
 ``..`` 穿越与**符号链接逃逸**（base 内指向外部软链解析后落在 base 外）。
 异常消息**不含**用户输入原文，避免被 ``detail=str(e)`` 之类写法带进出站响应；
 需要排查时由本模块写服务端日志。
+
+**跨平台语义（必读）**：入参可能来自任意客户端 OS，而 ``pathlib`` 只认**当前宿主**
+的分隔符——Linux 服务端收到 Windows 客户端的 ``C:\\x\\y`` 或 ``..\\..\\win.ini`` 时，
+反斜杠在 POSIX 下只是普通字符，若按宿主语义判定就会把它当成合法相对片段。
+本模块因此对绝对形式与目录分隔**同时覆盖 ``/`` 与 ``\\``**，不依赖服务部署在哪个
+平台（CI 的 Linux runner 实测拦住过这一类差异，见 Batch 3 的跨平台补修）。
 """
 
+import os
 import re
 from pathlib import Path
 
@@ -41,6 +48,36 @@ _TRAVERSAL_PART = ".."
 
 # 文件名字符白名单：仅允许 \w（含中文）、点、连字符、空格；其余（含 / \ : * ? " < > |）替换为 _
 _UNSAFE_FILENAME_RE = re.compile(r"[^\w.\- ]")
+
+# 两套分隔符（不随宿主变）：入参可能来自 Windows 客户端，POSIX 下反斜杠同样承载分隔语义
+_ANY_SEP_RE = re.compile(r"[\\/]+")
+
+# 跨平台绝对形式：POSIX 根 `/`、Windows 盘符 `C:\` 或 `C:/`、UNC `\\server\share`
+_ABS_FORM_RE = re.compile(r"^(?:[A-Za-z]:)?[\\/]")
+
+# Windows 专属绝对形式：盘符 `C:\` / `C:/` 与 UNC `\\server\share`
+_WINDOWS_ABS_RE = re.compile(r"^(?:[A-Za-z]:[\\/]|\\\\)")
+
+
+def _split_fragments(raw: str) -> list[str]:
+    """按**两套**分隔符切分并丢弃空片段与 ``.``，结果不随宿主变。"""
+    return [part for part in _ANY_SEP_RE.split(raw) if part and part != "."]
+
+
+def _is_foreign_absolute(raw: str) -> bool:
+    """在**非 Windows 宿主**上长得像 Windows 绝对路径（或 UNC）的入参。
+
+    这类形式不可能由本仓端点产出（POSIX 部署下 ``/api/files`` 返回的是 ``/`` 开头的
+    路径），却可能被 Windows 客户端原样递过来。而 POSIX 的 ``Path`` 不认反斜杠，
+    若仍按宿主语义把它当合法相对片段，就会拼出一个名字里带反斜杠的“安全”路径——
+    不越界但语义难测，所以直接拒绝。
+
+    Windows 宿主返回 ``False``：此时 ``C:\\...`` 是本平台**合法**绝对形态，必须允许
+    消费者把 ``/api/files`` 返回的绝对路径原样回传（对外契约）；而 ``/etc/passwd``
+    在 Windows 下会被 ``resolve()`` 归到当前盘根，由 containment 判定自然拒掉，
+    无需在此特判。
+    """
+    return os.name != "nt" and bool(_WINDOWS_ABS_RE.match(raw))
 
 
 class PathTraversalError(ValueError):
@@ -88,9 +125,10 @@ def safe_join(base: str | Path, *parts: str | Path) -> Path:
         if "\x00" in raw:
             _reject(root, part, "路径片段含 NUL 字节")
         p = Path(raw)
-        if p.is_absolute():
+        # 绝对判定不依赖宿主：``Path.is_absolute()`` 在 POSIX 下不认盘符与反斜杠形式
+        if _ABS_FORM_RE.match(raw) or p.is_absolute():
             _reject(root, part, "路径片段不得为绝对路径")
-        if _TRAVERSAL_PART in p.parts:
+        if _TRAVERSAL_PART in _split_fragments(raw):
             _reject(root, part, "路径片段不得含 ..")
         current = current / p
     return _ensure_within(root, current.resolve())
@@ -103,6 +141,8 @@ def resolve_within(base: str | Path, user_path: str | Path) -> Path:
     与 ``safe_join`` 的区别只在入口宽容度：这里**允许绝对路径**（因为既有对外契约把
     ``/api/files`` 返回的绝对路径原样传回，收紧为"仅相对"会破坏消费者），
     但绝对路径也必须本就落在 base 内——等价于先 ``resolve()`` 再做包含判定。
+    异平台的绝对形式（POSIX 宿主收到 ``C:\\...`` / UNC）一律拒绝，见
+    ``_is_foreign_absolute``。
 
     :param base: 服务端提供的基准目录
     :param user_path: 外部输入的路径字符串（相对或绝对）
@@ -114,6 +154,8 @@ def resolve_within(base: str | Path, user_path: str | Path) -> Path:
         _reject(root, user_path, "路径参数不得为空")
     if "\x00" in raw:
         _reject(root, user_path, "路径参数含 NUL 字节")
+    if _is_foreign_absolute(raw):
+        _reject(root, user_path, "路径含非本平台绝对路径形式")
     p = Path(raw)
     candidate = p if p.is_absolute() else root / p
     try:
@@ -121,7 +163,12 @@ def resolve_within(base: str | Path, user_path: str | Path) -> Path:
     except OSError:
         # 某些平台对非法字符/超长路径在 resolve 阶段即报错，不外泄细节
         _reject(root, user_path, "路径无法解析")
-    return _ensure_within(root, resolved)
+    result = _ensure_within(root, resolved)
+    if os.name != "nt" and "\\" in raw:
+        # POSIX 宿主下反斜杠不是分隔符，`..\\evil` 会被 Path 当成单个合法片段从而绕过穿越
+        # 检查。故再按“反斜杠也是分隔符”解释一遍，两种解释任一越界即拒。
+        _ensure_within(root, root.joinpath(*_split_fragments(raw)).resolve())
+    return result
 
 
 def safe_filename(name: str | None) -> str:
@@ -129,9 +176,10 @@ def safe_filename(name: str | None) -> str:
     上传/落盘文件名净化：取 basename，字符白名单过滤，``.``/``..``/空归一为 ``_``。
 
     只负责"变成单个安全片段"，是否拼到哪个目录由调用方经 ``safe_join`` 决定。
+    basename 按**两套**分隔符取（``Path().name`` 在 POSIX 下不去反斜杠目录）。
     """
-    base = Path(name or "").name
-    safe = _UNSAFE_FILENAME_RE.sub("_", base)
+    base = _split_fragments((name or "").rstrip("/\\"))
+    safe = _UNSAFE_FILENAME_RE.sub("_", base[-1] if base else "")
     if safe in (".", "..", ""):
         return "_"
     return safe

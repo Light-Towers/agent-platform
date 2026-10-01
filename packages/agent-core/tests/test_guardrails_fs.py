@@ -8,6 +8,10 @@
 
 另含两条安全属性断言：异常消息不回带入参原文（防经 ``detail=str(e)`` 外泄）、
 符号链接逃逸被拒（POSIX；Windows 建软链需特权，故跳过）。
+
+**跨平台契约**：Windows 绝对/穿越形式（``C:\\`` / ``..\\`` / UNC）的用例在两个宿主
+都必须被拒——``pathlib`` 只认宿主分隔符，这些用例是 CI 的 Linux runner 实测拦住
+宿主依赖写法后补上的，故不得改成 ``skipif`` 只跑一边。
 """
 
 import os
@@ -60,6 +64,7 @@ def test_safe_join_tolerates_relative_base(tmp_path, monkeypatch):
         "../secret.txt",
         "../../etc/passwd",
         "a/../../secret.txt",
+        "..\\..\\win.ini",
         os.path.join("..", "..", "escape"),
     ],
 )
@@ -68,8 +73,17 @@ def test_safe_join_rejects_traversal(tmp_path, fragment):
         safe_join(tmp_path, fragment)
 
 
-@pytest.mark.parametrize("fragment", ["/etc/passwd", "C:\\Windows\\win.ini", "\\\\server\\share\\x"])
+@pytest.mark.parametrize(
+    "fragment",
+    [
+        "/etc/passwd",
+        "C:\\Windows\\win.ini",
+        "C:/Windows/win.ini",
+        "\\\\server\\share\\x",
+    ],
+)
 def test_safe_join_rejects_absolute_fragment(tmp_path, fragment):
+    """绝对形式按**两套**分隔符判，不随部署宿主变（POSIX 的 ``Path`` 不认盘符与反斜杠）。"""
     with pytest.raises(PathTraversalError):
         safe_join(tmp_path, fragment)
 
@@ -129,6 +143,7 @@ def test_resolve_within_accepts_absolute_input_inside_base(tmp_path):
         "/etc/passwd",
         "C:\\Windows\\win.ini",
         "../outside.txt",
+        "..\\..\\outside.txt",
         "sub/../../outside.txt",
         "",
         "   ",
@@ -174,6 +189,7 @@ def test_resolve_within_is_subclass_of_value_error():
         ("月度 总结 v2.xlsx", "月度 总结 v2.xlsx"),
         ("a/b/c.txt", "c.txt"),
         ("..\\..\\windows\\win.ini", "win.ini"),
+        ("C:\\Windows\\System32\\cmd.exe", "cmd.exe"),
         ("/etc/passwd", "passwd"),
         ("we<i>rd:na?me|x.txt", "we_i_rd_na_me_x.txt"),
     ],
