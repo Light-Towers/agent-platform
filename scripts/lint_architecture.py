@@ -11,7 +11,8 @@ P4-2：收紧 registry.execute 直接可见性。
 - skills/registry.py（SkillRegistry 自身）
 - tests/ / eval/（测试与评测）
 
-P6：禁止在 kernel 外对密钥类标识手写裸哈希（DUP-1 横向重复门禁，见下文）。
+P6：禁止在 kernel 外对密钥类标识手写裸哈希（DUP-1 横向重复门禁，见下文）；
+    并封锁【刻意保留的弱派生】``legacy_thread_id`` 的调用面（仅迁移脚本可用）。
 P7：禁止在 kernel 外手写路径 containment / api 层绕过 ``guardrails.fs``（A 类横切收敛）。
 P8：禁止在对外响应体（HTTP JSON / SSE 帧）回显异常消息或堆栈（C 类横切收敛）。
 """
@@ -210,6 +211,51 @@ def check_bare_secret_hashing() -> list[str]:
             for lineno, line in enumerate(py_file.read_text(encoding="utf-8").splitlines(), 1):
                 stripped = line.strip()
                 if _is_bare_secret_hash_line(stripped):
+                    violations.append(f"{rel}:{lineno}: {stripped}")
+        except Exception:
+            pass
+    return violations
+
+
+# ---------------------------------------------------------------------------
+# P6-2：【刻意保留的弱派生】``legacy_thread_id`` 调用面封闭。
+# 背景：该函数必须复算升级前的 ``user-{sha256(api_key)[:12]}``（48bit 截断），否则
+# 历史会话目录 / checkpointer ``thread_id`` 无法找回。Batch 2 当时只靠 docstring
+# 「业务代码调用即违反 DUP-1」的**约定**约束，而 kernel 在 P6 白名单内， lint 拦不住
+# 新增调用点——PR 重扫时 CodeQL 果然又把这条当新告警报了出来（约定会腐，故升级为门禁）。
+# 规则：除 kernel 定义处与迁移脚本外，出现 ``legacy_thread_id(`` 调用即失败。
+# ---------------------------------------------------------------------------
+_LEGACY_ID_CALL = re.compile(r"\blegacy_thread_id\s*\(")
+_LEGACY_ID_ALLOWED = (
+    "packages/agent-core/agent_core/guardrails/auth.py",  # 定义 + __all__
+    "scripts/migrate_thread_identity.py",  # 唯一合法消费者（一次性迁移）
+)
+
+
+def _is_legacy_id_call_line(stripped: str) -> bool:
+    """单行判定（抽出以便反例单测）：弱派生名后紧跟左括号（调用或定义形式）。
+
+    本文刻意不写出完整的字面匹配形式，否则本文件会命中自己的规则（与
+    ``_WEAK_HASH_CALL`` 的写法同理）。
+    """
+    if stripped.startswith("#"):
+        return False
+    return bool(_LEGACY_ID_CALL.search(stripped))
+
+
+def check_legacy_identity_calls() -> list[str]:
+    """扫全仓：白名单外禁调用 ``legacy_thread_id``（弱派生不得进入业务链路）。"""
+    violations: list[str] = []
+    for py_file in ROOT.rglob("*.py"):
+        rel = py_file.relative_to(ROOT).as_posix()
+        if _skipped_rel(rel):
+            continue
+        if rel in _LEGACY_ID_ALLOWED:
+            continue
+        try:
+            for lineno, line in enumerate(py_file.read_text(encoding="utf-8").splitlines(), 1):
+                stripped = line.strip()
+                if _is_legacy_id_call_line(stripped):
                     violations.append(f"{rel}:{lineno}: {stripped}")
         except Exception:
             pass
@@ -426,15 +472,16 @@ def main() -> int:
         rc = 1
     else:
         print("P5 架构约束通过：无跨成员顶层包名冲突")
-    v4 = check_bare_secret_hashing()
+    v4 = check_bare_secret_hashing() + check_legacy_identity_calls()
     if v4:
-        print("P6 架构约束违反：密钥→指纹 必须走 kernel 单一实现 agent_core.guardrails.auth.fingerprint（DUP-1）")
-        print("白名单外对 api_key/secret 裸用 hashlib 的站点（各站截断/pepper 语义不一致属安全相关缺陷，为 CodeQL weak-sensitive-data-hashing 根因）：")
+        print("P6 架构约束违反：密钥→指纹 必须走 kernel 单一实现 agent_core.guardrails.auth.fingerprint（DUP-1），")
+        print("   且刻意保留的弱派生 legacy_thread_id 只允许迁移脚本调用（业务链路禁用）")
+        print("白名单外对 api_key/secret 裸用 hashlib，或白名单外调用 legacy_thread_id 的站点：")
         for v in v4:
             print(f"  {v}")
         rc = 1
     else:
-        print("P6 架构约束通过：无白名单外裸 hashlib 作用于密钥类标识")
+        print("P6 架构约束通过：无白名单外裸 hashlib 作用于密钥类标识，且 legacy_thread_id 调用面未外溢")
     v5 = check_manual_path_containment() + check_api_layer_path_io()
     if v5:
         print("P7 架构约束违反：路径 containment / 文件名净化 必须走 kernel 单一实现 agent_core.guardrails.fs（A 类 py/path-injection 根因）")

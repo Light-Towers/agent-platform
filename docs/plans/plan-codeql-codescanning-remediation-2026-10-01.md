@@ -101,9 +101,9 @@ AGENTS.md 已确立「入站错误脱敏」三层收敛范例：`build_api_app`(
 
 | 告警 | 处置 | 尚需人工动作 |
 |---|---|---|
-| A `py/path-injection` ×8 | Batch 3 已根因收敛（kernel `guardrails.fs` + P7） | GitHub 重扫确认归零；若仍报，补 CodeQL data-extension 将 `safe_join`/`resolve_within` 声明为 sanitizer |
-| B `py/weak-sensitive-data-hashing` ×5 | Batch 2 已收敛 4 个 api-key 站点（kernel `fingerprint` + P6）；`gray.py:40` 为真误报 | 仅 `gateway/gray.py:40` 需 dismiss，附证据：非密钥、非隔离的 `md5(user_id)` 灰度 0–99 分桶 |
-| C `py/stack-trace-exposure` ×4 | Batch 4 已收敛 6 站点（kernel `mask_exception_for_client` + P8） | GitHub 重扫；若仍报，同 A 补 sanitizer 模型声明 |
+| A `py/path-injection` ×8 | Batch 3 已根因收敛（kernel `guardrails.fs` + P7），PR 重扫无新增 A 类告警 | 默认分支重扫后关闭旧告警（合入后自动）；若仍报，补 CodeQL data-extension 将 `safe_join`/`resolve_within` 声明为 sanitizer |
+| B `py/weak-sensitive-data-hashing` ×5 | Batch 2 已收敛 4 个 api-key 站点（kernel `fingerprint` + P6）；`gray.py:40` 为真误报；PR 重扫另报的 kernel 定义处 2 条见下方「PR #33 实测重扫结果」 | 仅 `gateway/gray.py:40` 需 dismiss，附证据：非密钥、非隔离的 `md5(user_id)` 灰度 0–99 分桶 |
+| C `py/stack-trace-exposure` ×4 | Batch 4 已收敛 6 站点（kernel `mask_exception_for_client` + P8），PR 重扫无新增 C 类告警 | 默认分支重扫后关闭旧告警；若仍报，同 A 补 sanitizer 模型声明 |
 | D `actions/missing-workflow-permissions` ×3 | Batch 1 已加顶层 `permissions: contents: read` | push + PR 后由重扫确认 |
 | E `py/incomplete-url-substring-sanitization` ×1 | Batch 5 已根因消除（夹具等值断言），无需 dismiss | GitHub 重扫后本条应自行关闭 |
 | 运维随 Batch 2 | 指纹/会话 ID 切换 | 部署时配 `AGENT_PLATFORM_SECURITY_PEPPER` 并先 dry-run 后执行 `scripts/migrate_thread_identity.py` |
@@ -149,3 +149,21 @@ AGENTS.md 已确立「入站错误脱敏」三层收敛范例：`build_api_app`(
   1. `applications/agent_server/sql/pipeline.py:48` `sqlite3.connect(f"file:{unquote(path)}?mode=ro", uri=True)`——若 `path` 解码后含 `?`，`mode=ro` 会落到首个参数的值里而静默失效（只读「双保险」退化为只靠 SQL 守卫一层）。当前 `path` 源自服务端配置 `SQL_DSN`（非请求入参），故不列为可利用漏洞；登记为硬化候选（用 `?`/`#` 转义或 `uri` 参数拼接）。
   2. 同文件 `:65` 的 `dsn.startswith("sqlite:///")` 是对 URL 的**前缀**判定（非子串包含），属方案选型可接受的写法；仅因与 E 类同属「URL 字符串形状判定」一并登记。
 - **未执行项（需人工）**：E 类 1 条在 GitHub 侧的最终关闭确认（本仓无 CodeQL CLI，无法本地复扫）；若重扫因历史基线仍列 open，手动关闭并指回本节即可。
+
+## PR #33 实测重扫结果与二次处置（2026-10-01）
+
+合入前 GitHub 已对本 PR 跑了一轮 CodeQL 分析（默认配置、PR 模式），这是比“等合入后重扫”强得多的证据。
+
+**绿灯部分**：`ci`（push 与 PR 两个事件）与 `ha` 均 **pass**（含 `packages/agent-core` 在 Linux runner 上的跨平台用例）；`Analyze (python)` / `Analyze (actions)` pass。
+
+**新增告警只余 2 条，全在 B 类的 kernel 定义处**（`packages/agent-core/agent_core/guardrails/auth.py`）：
+
+| PR 告警 | 位置 | 定性 | 处置 |
+|---|---|---|---|
+| #38 `py/weak-sensitive-data-hashing` | `:78` `hmac.new(pepper, secret, sha256)` | **误报**：规则针对口令类低熵秘密的离线暴破；此处输入是高熵 API Key，产物只做查表标识（限流桶/缓存键/会话 ID）且每请求计算。换 scrypt/pbkdf2 只有延迟成本、无暴破增益；带 pepper 时离线计算还需先取得 pepper | 不改码（不改名“躲检测器”）；dismiss `false_positive` + 理由同步写进 kernel docstring |
+| #39 `py/weak-sensitive-data-hashing` | `:99` `legacy_thread_id` 的 `sha256(...)[:12]` | **形状属实、不可消除**：必须能复算升级前的旧会话身份，否则历史目录/检查点找不回 | dismiss `wont_fix`；同时把原来“仅靠约定不得业务调用”**升级为 P6-2 门禁**（白名单：kernel 定义处 + `scripts/migrate_thread_identity.py`） |
+
+**反向证据（相等于本方案验收的强信号）**：本轮 PR 重扫 **没有**报出任何新的 `py/path-injection`、`py/stack-trace-exposure`、`py/incomplete-url-substring-sanitization` 或 `actions/missing-workflow-permissions`——即 A/C/E/D 四类的修改面在 CodeQL 眼里已无新问题（旧告警仍列 open 是因为默认分支尚未重扫，需合入后关闭；无需为此补 data-extension）。
+
+**为何选“门禁 + dismiss”而不是改算法**：改名（如把 `secret` 改成不含语义的变量）可静默退掉 #38，但那是**干扰检测器而非修正问题**，违反方案原则；而 #39 是本方案主动保留的技术债（迁移一致性 > 算法纯度），只能用硬门禁限制其扩散面。
+

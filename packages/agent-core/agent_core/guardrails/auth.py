@@ -14,6 +14,14 @@ DUP-1 / CodeQL ``py/weak-sensitive-data-hashing`` 收口：本模块是全仓 **
 「密钥 → 稳定指纹」实现（``fingerprint``），宿主不得再各自 ``hashlib.sha256(api_key)``
 （由 ``scripts/lint_architecture.py`` P6 不变量拦截）。历史四处散点实现语义分裂
 （全量 vs ``[:12]`` 48bit 截断、均无服务端 pepper），现已收敛到此。
+
+已登记的 CodeQL 定调（PR #33 重扫报出的 2 条新告警，结论与证据同步入库）：
+- ``fingerprint`` 行（HMAC-SHA256）→ **误报**：本规则针对「口令类低熵秘密」的离线
+  暴破，而此处输入是高熵 bearer secret，产物只做**查表标识**（限流桶 / 客户端缓存键 /
+  会话身份），每请求计算；换 scrypt/pbkdf2 只添延迟、对 128bit+ 随机密钥无暴破增益，
+  且带 pepper 时离线计算还需先拿到 pepper。
+- ``legacy_thread_id`` 行（48bit 截断）→ **明知保留**：必须能复算升级前的旧身份，
+  否则历史会话无法找回；调用面由 P6-2 门禁锁死（仅迁移脚本），不入业务链路。
 """
 
 import hashlib
@@ -56,6 +64,12 @@ def fingerprint(secret: str, *, length: Optional[int] = None) -> str:
     裸 ``sha256(api_key)``：① 带服务端 pepper，同一密钥在不同部署下摘要不同
     （跨部署不可关联）；② 截断有下限，杜绝 48bit 弱身份。
 
+    为何不用口令散列 KDF（scrypt / pbkdf2 / bcrypt）：本函数输入是**高熵 API Key**
+    而非人工口令，产物只用作查表标识（不回用于验证密钥），属「密钥指纹」而非
+    「口令哈希」；慢 KDF 在此只会拖慢中间件热路径，对随机密钥的离线暴破无实际增益。
+    CodeQL 按变量语义名将其归为 password 类而报 ``py/weak-sensitive-data-hashing``，
+    定调为误报（理由同步记于本模块 docstring 与 ``docs/plans/plan-codeql-codescanning-remediation-2026-10-01.md``）。
+
     :param secret: 待派生的密钥原文（仅在此处短暂使用，不落入返回值）
     :param length: 返回的十六进制字符数；``None`` 为全量 64 位
     :raises ValueError: ``length`` 不在 ``[MIN_FINGERPRINT_HEX, 64]`` 区间
@@ -93,8 +107,12 @@ def legacy_thread_id(api_key: Optional[str]) -> str:
     """
     【仅供一次性迁移/回归测试使用】升级前的弱派生 ``user-{sha256(api_key)[:12]}``。
 
-    业务代码调用即违反 DUP-1 收敛（P6 lint 在本模块白名单内，故仅靠约定约束）；
-    保留它是为了让 ``legacy → new`` 映射可计算（否则历史会话目录/检查点无法找回）。
+    调用面由 ``scripts/lint_architecture.py`` **P6-2 门禁**锁死：除本定义处与
+    ``scripts/migrate_thread_identity.py`` 外，出现对该函数的调用即 CI 失败
+    （Batch 2 当时只靠本 docstring 的约定，而 kernel 在 P6 白名单内——PR 重扫时
+    CodeQL 又报了这一行，故把约定升级为不变量）。
+    保留它是为了让 ``legacy → new`` 映射可计算（否则历史会话目录/检查点无法找回）；
+    它是 48bit 截断弱摘要，CodeQL 的告警形状**属实**但不可消除，定调为已接受风险。
     """
     digest = hashlib.sha256((api_key or "").encode("utf-8")).hexdigest()[:12]
     return f"{THREAD_ID_PREFIX}{digest}"
