@@ -87,7 +87,9 @@ v3 的 47 个 commit 是**互相咬合的四条线**：ADR-0006 隔离域（W1-W
 - `uv lock` 解析 300 包；`uv lock --check` 通过。`git diff HEAD -- uv.lock` = **40 增 / 36 删**，其中：
   - **预期部分**：`agent-runtime` 新增 `[package.optional-dependencies] identity` + `requires-dist` 条目 + `provides-extras = ["mcp", "identity"]`；
   - **未预期部分**：无包名增删、无 `version = ` 行变动，但 `cuda-bindings`/`nvidia-*`/`beartype`/`requests`/`numpy` 等约 30 行 **environment marker 被归一化**（如 `platform_machine == 'x86_64'` → `platform_machine == 'x86_64' and sys_platform == 'linux'`），这是本机 uv `0.11.21` 与 lock 原始生成版本的语义差异，**非本次需求引入的版本漂移**。
-  - 影响判定（实查，非猜测）：CI 用 `astral-sh/setup-uv@v7` 且不钉版本、安装走 `uv sync --all-packages --extra dev`（Makefile:7，**非 `--frozen`**），仓内无 `uv lock --check` 门禁 ⇒ marker 重写不会破 CI。已在 PR 描述中记为已知副作用。
+  - 影响判定（**初稿结论错，已于 B7d 当场订正**）：初稿写「仓内无 `uv lock --check` 门禁」——**错**。`make ci` 末行就是 `uv lock --check`（Makefile:71），而 CI 直接复用 `make ci`（`agent-platform-ci.yml:65`），所以该门禁**在 CI 里确实生效**（讽刺的是上一行已记有本机 `uv lock --check` 通过，却未由此推翻自己的结论）。
+  - 订正后的判定：「不破 CI」这一**结论仍成立**，但依据换为实证而非“无门禁”：本机 `uv lock --check` exit 0；且 PR #41 的 `ci` ×2 job（在 CI 自带 uv 版本下跑完整 `make ci`，含 `--check`）**已 pass**。
+  - **残留风险（登记，本批不修）**：CI 的 uv 版本由 `astral-sh/setup-uv@v7` 决定且不钉，若将来 CI 端 uv 与本 lock 生成端对 marker 的规范化不一致，`uv lock --check` 可报“lock 已过期”而红。根治手段是在 workflow 钉 uv 版本（属独立决策，需先量它对各包解析的影响面）。
 - **§5-2 风险项（PyJWT 是否真可用）已实测回答**：`uv run python -c "import jwt"` → `2.15.1`（`constraint-dependencies` 已抬到 ≥2.14.0）；`uv run pytest packages/agent-runtime/tests -q -k identity` → **27 passed**。原因：PyJWT 经 mcp 2.0.0（`pyjwt[crypto]>=2.10.1`）已是工作区必装包，**无需**把 `agent-runtime[identity]` 额外挂进消费方依赖。
 
 ### 9.3 合流新暴露的第 6 个问题（不在 §4 清单内）：文档悬空引用
@@ -121,6 +123,6 @@ v3 的 47 个 commit 是**互相咬合的四条线**：ADR-0006 隔离域（W1-W
 
 ### 9.5 尚待完成
 
-- §5-5：PR → CI（含 `ha` workflow 真 PG）+ CodeQL；**硬指标：主干 open 仍为 2（`#38`/`#39`）且零新增告警**。
+- §5-5：**已执行，硬指标未达成**（见下）。PR #41 checks 全 pass（含 `ha` 在真 PostgreSQL 16.15 上 27 passed）→ 合入 `a660e76`（2026-10-01T13:00:43Z）。主干 `ref=refs/heads/main` 复验为 **open 3 / fixed 43 / dismissed 0**：多出的 **#48 `actions/missing-workflow-permissions`**（`.github/workflows/ha-assembly.yml:30-56`）由 v3 侧提交 `70f2b83` 新增的 workflow 带入 ⇒ 「合流未新增任何告警」不成立。**未 dismiss**，已转 `docs/plans/plan-codeql-batch7-no-dismiss-real-fixes-2026-10-01.md` §7（B7d）真修。#38/#39 无位移（仍 `auth.py:92` col=47 / `:117`），取证脚本：`.codeartsdoer/temp/verify_main_rescan_v3.py`。
 - §6 第二条：migrations `006`–`010` 在 `deploy/k8s` 与 `docker-compose` 初始化路径的登记（本 PR 未做，已归入待办）。
 - 新登记的技术债：`IdentityMiddleware` 仅覆盖 2/6 应用（已写入 `ARCHITECTURE.md` §5），`TENANT_JWT_ENFORCE` 硬切换前需先补齐装配层 + 新增 lint 不变量。
