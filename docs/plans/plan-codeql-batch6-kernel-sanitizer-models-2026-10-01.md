@@ -1,6 +1,7 @@
 # Batch 6 方案：kernel sanitizer 的 CodeQL 模型缺失（合入后默认分支重扫暴露 7 条新告警）
 
-> 状态：**待确认**（本文只登记实测事实与选型，未动任何产品代码；按 AGENTS.md 红线「先方案后编码」，批准后再实施）。
+> 状态：**已批准并执行**（Batch 6 模型包已入库，待主干重扫验收；产品代码零改动）。
+> **执行时推翻的关键前提**：本文 §4 原推荐「切 advanced setup」是基于**错误认知**——default setup 只接受已发布模型包这一限制只对**组织级**扩展成立，**仓级 local 包放 `.github/codeql/extensions/` 即被自动检测加载**（两模式均识别）。实际落地为零基础设施变更，详见 §4 纠正块与 §9。
 > 触发：PR #33（CodeQL Batch 1~5）与 PR #34（doc-sync 门禁）于 2026-10-01 08:25Z / 08:32Z 合入 `main` 后，默认分支自动重扫的结果核对。
 > 上游方案：`docs/plans/plan-codeql-codescanning-remediation-2026-10-01.md`（本文件同时纠正其中一处已被证伪的判断）。
 
@@ -51,10 +52,15 @@
 
 | 选项 | 做法 | 评价 |
 |---|---|---|
-| **A（推荐）切 advanced setup + 仓内 CodeQL 模型包** | 停用 default setup，新增 `.github/workflows/codeql.yml`（`github/codeql-action/init` + `config-file: .github/codeql/codeql-config.yml`），模型包目录放 `codeql/<pack>/`（`codeql-pack.yml` + `model-models/python/*.model.yml`），把 `resolve_within`/`safe_join` 的返回值声明为 `sanitizer`、`PathTraversalError` 声明为 taint-blocking 异常 | 唯一能让「收敛到 kernel」这一架构选择与 CodeQL 长期兼容的路；本仓是 **PUBLIC**，advanced setup 不占 GHAS 许可，只花 Actions 分钟。代价：要在 Settings 里「切换到高级」（会先禁用 default setup），扫描节奏改由 workflow 控制，切换期告警历史可能出现一次重开 |
+| **A（推荐→已执行）仓内 CodeQL 模型包** | 新增 `.github/codeql/extensions/agent-platform-python/`（`codeql-pack.yml` + `models/*.model.yml`），用 `barrierModel` 声明 `safe_filename`/`safe_join`/`resolve_within` 返回值为 `path-injection` barrier，用 `barrierGuardModel` 声明 `Path.is_relative_to` 为守卫 | 唯一能让「收敛到 kernel」这一架构选择与 CodeQL 长期兼容的路。**原列的「停用 default setup / 新增 workflow / 切换期告警重开 / 多花 Actions 分钟」四项代价经核查均不存在**（见下方纠正块） |
 | B 在调用点内联 containment 复检 | `FileResponse` 前手写 `if not abs_path.is_relative_to(base): raise` | **否决**：与本仓 P7-1 不变量（白名单外禁手写 `.is_relative_to(`）正面冲突，要它就得给 lint 开洞；且完全消不掉 kernel 内部的 `#40`~`#42` |
-| C default setup 下用「已发布的模型包」 | 把模型包 publish 到注册表，再在组织 Security 设置「展开 CodeQL 分析」中引用 | 可行但更重：GitHub 文档明确 default setup 只接受**已发布**的模型包（需组织级配置 + 包发布流水线），对本仓规模不划算 |
-| D 全部人工 dismiss 附证据 | `#23`/`#40`~`#42` dismiss `false_positive`（理由：containment 已由 kernel 单一实现强制，且有 `test_file_endpoints.py`/`test_guardrails_fs.py`/P7 三层佐证） | 作为 **A 落地前的过渡**保留面板可信度；不是终态——每加一个新调用点就可能再冒新告警 |
+| C default setup 下用「已发布的模型包」 | 把模型包 publish 到注册表，再在组织 Security 设置「展开 CodeQL 分析」中引用 | **否决（原因本身是错的）**：本文原写「GitHub 文档明确 default setup 只接受**已发布**的模型包」——那句只适用于**组织级**扩展；仓级本地包无需发布，故本选项的额外成本纯属虚构 |
+| D 全部人工 dismiss 附证据 | `#23`/`#40`~`#42` dismiss `false_positive`（理由：containment 已由 kernel 单一实现强制，且有 `test_file_endpoints.py`/`test_guardrails_fs.py`/P7 三层佐证） | 作为**模型包生效前的过渡**保留面板可信度；不是终态——每加一个新调用点就可能再冒新告警 |
+
+> **⚠️ §4 前提纠正（2026-10-01 查证官方文档《编辑默认设置配置》/《创建并使用 CodeQL 包》）**
+> 原判断「本地 `.model.yml` 需配 advanced setup 才能可靠加载」**错误**。原文：**在仓库的 `.github/codeql/extensions` 目录中复制模型包目录（含 `codeql-pack.yml` 与数据扩展 `.yml`），模型包将在 code scanning 分析中被自动检测并使用**；且「如果以后将配置更改为使用高级设置，`.github/codeql/extensions` 目录中的任何模型包也将被识别和使用」。
+> → **无需停用 default setup、无需新增 workflow、无扫描黑窗、不多花 Actions 分钟**。本批最终形态即「只加两个文件」。
+> 教训与 §2 同源且更进一步：**选型前必须把「能不能」查到原文出处**；把组织级限制误当仓级限制，会直接导致向用户推荐一个带风险的多余基础设施变更。
 
 **推荐组合**：**A 为终态**，落地前用 **D** 维持面板干净（一次性 6 条：`#23`/`#40`/`#41`/`#42` + `#34`/`#38`/`#39` 里未处置的部分）；`#43`/`#44` 单独决策，见 §5。
 
@@ -67,16 +73,21 @@
 
 **默认取终态 1**（取证价值 > 面板整洁，且出站已由 `PathTraversalError` 的「异常消息不带原文」与 P8 双重封住）。若你更看重告警归零，改选终态 2 即可，代码面很小。
 
+> **模型包无法覆盖此类的实测依据**：官方 Python 数据扩展的在册 sink kind 只有 `code-injection` / `command-injection` / `path-injection` / `sql-injection` / `html-injection` / `js-injection` / `url-redirection` / `unsafe-deserialization` / `log-injection`，**不含 `clear-text-logging-sensitive-data`**，并明说「并非每个 query 都支持自定义 sink」。故 `#43`/`#44` 无 barrier 可写，终态 1（人工 dismiss）是技术上唯一可行路径，不再是风格偏好。
+
 ## 6. 影响面与验收标准
 
-**影响面（选项 A）**：新增 2 个 `.github/` 文件 + 1 个 `codeql/` 模型包目录；`.github/workflows/agent-platform-ci.yml` 不变；**不改任何产品代码**；Security 面板需人工切换 default→advanced（本仓令牌有 `admin:org`，但切换动作影响扫描连续性，仍建议由你在面板执行）。
+**影响面（实际执行形态）**：仅新增 `.github/codeql/extensions/agent-platform-python/` 下 2 个 YAML；**不改任何产品代码、不改 CI workflow、不动 Security 面板配置**。
+
+**已实施记录见 §9。**
 
 **验收标准**
-1. 切换并跑通 advanced setup 后，`refs/heads/main` 重扫不再出现 `py/path-injection`（`#23`/`#40`/`#41`/`#42` 关闭）。
-2. **模型包非空转自证**：临时移除 `.model.yml` 中 `resolve_within` 的 sanitizer 声明 → 重扫必须重新报出 `#23`；随后恢复。（本机无 CodeQL CLI，此项只能在 CI 侧做，验收时如实标注证据层级。）
-3. `make ci` 全绿：`lint_architecture.py`（P4-2/P2/P5/P6/P6-2/P7/P8）+ 各 pytest session 无回归，尤其 P7 判定面未被放宽。
-4. `scripts/check_doc_sync.py` 通过（新增 workflow/config 路径若在文档中被引用，须能解析）。
-5. open 告警中除 `#34`/`#38`/`#39`（+ `#43`/`#44` 若取终态 1）外无其他项，且每条 dismiss 都附可复核理由并入库。
+1. 模型包入主干并触发重扫后，`refs/heads/main` 的 `#23`（调用点 `FileResponse(abs_path)`）应闭合；`#40`~`#42`（kernel 体内 `Path(...).resolve()`）是否闭合取决于 `barrierGuardModel` 能否匹配到守卫作用域——**这两类必须分开验收，不得因 guard 未生效就判定整个模型包无效**（barrier 对调用点生效即为架构收益）。
+2. **模型包非空转自证**：临时移除 `models/*.model.yml` 中 `resolve_within` 的 barrier 行 → 重扫必须重新报出 `#23`；随后恢复。（本机无 CodeQL CLI，此项只能在 CI 侧做，验收时如实标注证据层级。）
+3. **加载成功/失败的分界**：若包格式非法，default setup 分析会整体失败（而不是只丢这几条）——因此「PR 的 CodeQL 作业未报红且既有告警集仍在」就是包已被正常加载的证据。
+4. `make ci` 全绿：`lint_architecture.py`（P4-2/P2/P5/P6/P6-2/P7/P8）+ 各 pytest session 无回归，尤其 P7 判定面未被放宽。
+5. `scripts/check_doc_sync.py` 通过（新增 workflow/config 路径若在文档中被引用，须能解析）。
+6. open 告警中除 `#34`/`#38`/`#39`（+ `#43`/`#44` 若取终态 1，以及 `#40`~`#42` 若 guard 未生效）外无其他项，且每条 dismiss 都附可复核理由并入库。
 
 ## 7. 可复跑命令
 
@@ -98,6 +109,20 @@ gh api "repos/Light-Towers/agent-platform/branches/main/protection"   # 实测 H
 - 部署侧：配 `AGENT_PLATFORM_SECURITY_PEPPER`（一经使用勿再变更），上线前 dry-run `scripts/migrate_thread_identity.py`。
 - `docs/plans/plan-codeql-codescanning-remediation-2026-10-01.md` L167 的证伪结论已在原文处加纠正标记。
 
-## 9. 回滚
+## 9. 实施记录（2026-10-01 Batch 6 落地）
 
-选项 A 的回滚 = 删除 `codeql/` 模型包与两个 `.github/` 新增文件，并在面板把 code scanning 切回 default setup；产品代码未改动，故无数据/行为回滚面。
+**产物**（仅 2 个新文件，零产品代码变更）：
+- `.github/codeql/extensions/agent-platform-python/codeql-pack.yml`——`library: true`、**无 dependencies**（官方对模型包的硬约束）、`extensionTargets: codeql/python-all: "*"`、`dataExtensions: models/**/*.yml`。
+- `.github/codeql/extensions/agent-platform-python/models/agent_core.guardrails.fs.model.yml`——`barrierModel` 6 行（3 个 helper × 2 种 type 形态）、`barrierGuardModel` 2 行（`Path.is_relative_to` × 2 形态）。
+
+**与原方案的两处写法修正**（均在查到官方原文后确定，非臆测）：
+1. 原文写的「声明为 `sanitizer`」在 Python 数据扩展里不存在这个谓词——官方给的是 **`barrierModel(type, path, kind)`**（3 列，kind 与要抑制的 sink kind 同名，样例即 `html.escape`）与 **`barrierGuardModel(type, path, acceptingValue, kind)`**（4 列，样例即 django 的 `url_has_allowed_host_and_scheme`）。接收者用 `Argument[this]` 而非 `Receiver`。
+2. 原文写的「`PathTraversalError` 声明为 taint-blocking 异常」在 Python 侧无对应可扩展谓词（Java/C# 模型有 `throws` 类修饰，Python 官方谓词表里没有），**故本批未声明异常阻断**；kernel 体内 `#40`~`#42` 指望的是 `is_relative_to` 的 guard 建模，不生效则走 §4-D 人工 dismiss。
+
+**本机已验（证据层级：本地工具可查）**：两个 YAML 均 `yaml.safe_load` 通过，列数与官方谓词签名一致（barrierModel 3 列 / barrierGuardModel 4 列）、pack 无 dependencies；`check_doc_sync.py` 0 警告、`lint_architecture.py` exit 0（P7 判定面未动）。
+
+**未验（必须诚实标注）**：模型包是否真被 default setup 加载、`#23`/`#40`~`#42` 是否因此闭合——本机无 CodeQL CLI，只能靠 PR 的 CodeQL 作业不报红 + 合入后主干重扫的告警差集判定（§6 验收项 1~3）。
+
+## 10. 回滚
+
+本批回滚 = 删除 `.github/codeql/extensions/agent-platform-python/` 整个目录（2 个 YAML）。**不动面板配置、不动 workflow**（本来就没改），default setup 下一次重扫自动回到当前告警集；产品代码未改动，故无数据/行为回滚面。风险面仅在「若包格式非法会使分析整体失败」——已由 PR 的 CodeQL 作业先行验证后才合入。
