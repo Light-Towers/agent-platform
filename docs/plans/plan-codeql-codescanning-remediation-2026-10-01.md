@@ -167,3 +167,8 @@ AGENTS.md 已确立「入站错误脱敏」三层收敛范例：`build_api_app`(
 
 **为何选“门禁 + dismiss”而不是改算法**：改名（如把 `secret` 改成不含语义的变量）可静默退掉 #38，但那是**干扰检测器而非修正问题**，违反方案原则；而 #39 是本方案主动保留的技术债（迁移一致性 > 算法纯度），只能用硬门禁限制其扩散面。
 
+**dismiss 未能脚本化（实测障碍，留人工）**：`gh api` 对告警状态写入端点返回 **HTTP 404**（`PUT` 与 `PATCH` 两种动词都试了，并对 `refs/heads/main` 上的 #31 做了同探针）——读取端点 `GET /code-scanning/alerts/38` 正常 200，说明不是 ID/路径问题，而是该令牌与订阅对告警**状态写入**无权限。故 #38/#39 需在 Security 面板手工 dismiss（PR #33 的 CodeQL 门禁未设为 required，`mergeStateStatus=UNSTABLE` 不阻断合入）。下面两段即建议文案（与本文表格同口径，入库以免理由只存于浏览器会话）：
+
+- **#38（`auth.py` HMAC-SHA256 行）→ `False positive`**：输入为高熵 API Key（非人工口令），产物只作查表标识（限流桶 / LLM 客户端缓存键 / 会话 `thread_id`），**不用于验证密钥**；慢 KDF（scrypt/pbkdf2/bcrypt）在此只会拖慢中间件热路径，对 ≥128bit 随机密钥无暴破增益，且离线计算额外需要服务端 pepper。原有 48bit 截断反模式已结构性封住：`fingerprint()` 对 <32 hex 的请求直接 `ValueError`，四处散点收敛为单一实现并由 P6 拦截。未采“改变量名躲检测器”的做法。
+- **#39（`legacy_thread_id` 的 `sha256(...)[:12]`）→ `Won't fix`**：告警形状属实但不可消除——必须能复算升级前的旧会话身份，否则 `updated/session_user-<legacy>/` 目录与 checkpointer `thread_id` 行无法找回；它不是认证路径，只产出一次性迁移的映射键。扩散面已由约定升级为不变量：`lint_architecture.py` **P6-2** 使 kernel 定义处与 `scripts/migrate_thread_identity.py` 之外的任何调用在 CI 失败（用例：`tests/governance/test_thread_identity_migration.py::test_p6_2_*`）；业务侧链路只用 `derive_thread_id()`/`fingerprint()`。
+
