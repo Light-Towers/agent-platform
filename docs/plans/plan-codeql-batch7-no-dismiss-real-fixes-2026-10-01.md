@@ -32,14 +32,17 @@
 - **验收**：`test_deterministic` / `test_distribution`（30% 时 2700~3300）必须仍通过——SHA-256 均匀性满足；不新增豁免。
 - **回滚**：单行还原。
 
-### 3.2 #43 / #44 路径护栏日志：停止输出「配置派生的绝对路径」
+### 3.2 #43 / #44 路径护栏日志：不落任何路径文本
 
-- **根因**：`_reject` 打 `base=%s`（`root`，来自调用方经 env/配置解析出的部署目录）、`_ensure_within` 打 `resolved=%r`（同样以 `root` 为前缀）。CodeQL 把 env/配置派生值归为 secret，**日志因此外泄部署目录结构**。
-- **真修**：日志只保留**拒绝原因**与**用户输入原文**（请求侧数据，正是排障所需；不属于"服务端机密"），不再输出服务端基准目录与解析后的绝对路径。
-- **契约审计**：全仓 `*.md` 与 `packages/agent-core/tests/test_guardrails_fs.py` 均**未**断言这两行日志文案（已 grep 确认），故不构成破坏既有约定；模块 docstring 中「服务端留痕（含原文，便于排障）」的"原文"语义随之收窄为"用户输入原文"，同步改注释。
-- **额外收益**：不再把用户可控文本原样拼进路径日志之外的位置，降低 `log-injection` 面（该 kind 属可建模清单，但我们选择不用模型糊弄）。
-- **不确定性（如实标注）**：若重扫后 #43/#44 仍 open，说明被判定为 secret 的是 `input=%r` 而非 `base`，则下一步改为只打 `reason` + 关联 trace/request id（本仓已有统一 tracing），彻底不打路径文本。**不提前做**，避免无证据地削掉排障信息。
-- **回滚**：还原两处 logger 调用参数。
+- **根因（首轮假设，已被下面实测推翻一半）**：`_reject` 打 `base=%s`（`root`，来自调用方经 env/配置解析出的部署目录）、`_ensure_within` 打 `resolved=%r`（同样以 `root` 为前缀）。当时认为 CodeQL 把 env/配置派生值归为 secret。
+- **真修（经实测修正两次，以下为本批终态）**：日志**不再落任何路径文本**，只留「拒绝原因 + 不携带原文内容的数值型结构摘要」（`len` / `fragments` / `absolute`）。
+- **实测过程（重要，此为证据而非推测）**：第一版只去掉 `base=%s` 与 `resolved=%r`、保留 `input=%r`。PR #38 的 `CodeQL` 检查报 **2 new alerts (high)**，注解位置为 `fs.py:99` / `fs.py:110`（即同两处 logger 位移后的新行号）。两处语句此时只剩「字面量 reason + 入参」⇒ **被判 secret 的是入参本身**。消除法结论与 Batch 6 方案 §5 的先前假设一致：路径里经 `resolve_thread_id(thread_id, api_key)` 带入凭证派生的会话目录名 `session_user-<HMAC(api_key)>`，故**这不是误报**。
+- **官方口径**：`py/clear-text-logging-sensitive-data` 的 Recommendation 只有一句“Sensitive data should not be logged”，**未提供** masking / 哈希摘要之类的豁免→ 采取“不打”而不是赌“打了但不可逆”。
+- **契约变更与代价（如实记录）**：Batch 3 定的「留痕含原文」就此改为「不落路径文本」。排障路径改为：从接入层访问日志取完整 URL（`?path=` 本就在其中），或用同一入参本地复跑。结构摘要仍足以区分拒绝形态与量级。`applications/agent_federation/api/server.py` 中依赖旧语义的注释同步修正。
+- **测试断言方向反转的说明**：两条日志回归用例由「断言原文在内」改为「断言原文不在内 + 断言 reason 与 `len=` 在内」——依据是上述官方口径与实测，**不是为凑绿而收窄**（新断言比旧断言多两项）。
+- **契约审计（首轮前）**：全仓 `*.md` 与 `packages/agent-core/tests/test_guardrails_fs.py` 均未断言这两行日志文案（已 grep 确认），因此改动不打破外部可见契约。
+- **额外收益**：不再把用户可控文本原样拼进日志，同时降低 `log-injection` 面（该 kind 属可建模清单，但我们选择不用模型糊弄）。
+- **回滚**：`_reject` / `_ensure_within` 的日志参数还原为 `%r` 原文形式（并可删 `_input_shape`）。
 
 ### 3.3 #42 `resolve_within`：在解析**之前**加词法包含守卫
 
@@ -74,6 +77,8 @@
 3. 未闭合的：写进 `docs/TODO.md` §8，状态从「待 dismiss」改为「**未解，原因与下一步**」，**不点 dismiss**。
 4. B7b 待用户拍板后另立方案与 PR。
 
-## 6. 本批验证记录（执行后回填）
+## 6. 本批验证记录
 
-- 待回填：`lint_architecture.py` / `check_doc_sync.py` / `pytest`（agent-core + governance + federation 文件端点）/ PR CI / 主干重扫差集。
+- PR #38 首轮（仅去 base 的版本）：`Analyze (python)` / `Analyze (actions)` / `ci` / `ha` 均 pass，`CodeQL` 检查 fail——**2 new alerts (high)**，注解 `fs.py:99` / `fs.py:110`；`raw_sarif` 不经 REST 暴露（分析详情无该字段），改用消除法定位。本轮未合入。
+- PR #38 次轮（不落路径文本 + `_input_shape`）本地实测：`lint_architecture.py` exit 0（P2/P4-2/P5/P6/P7/P8 全过）；`check_doc_sync.py` 0 警告；分 session 实跑 agent-core **281 passed / 3 skipped**、根 `tests` **500 passed / 17 skipped**、联邦 **152 passed**；`ruff check` 无告警。（本机无 CodeQL CLI，告警是否闭合以 PR 检查与主干重扫为准。）
+- 待回填：次轮 PR 检查结果、合入后 `refs/heads/main` 重扫差集（预期 #34 与 #43/#44 闭合；#42 待看，PR 作用域本轮未报 path-injection）。

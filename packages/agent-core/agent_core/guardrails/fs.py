@@ -25,9 +25,11 @@ api 层文件 I/O 必须经本模块 helper）。
 
 设计取舍：containment 用 ``resolve()`` 后的真包含判定，因此同时挡住
 ``..`` 穿越与**符号链接逃逸**（base 内指向外部软链解析后落在 base 外）。
-异常消息**不含**用户输入原文，避免被 ``detail=str(e)`` 之类写法带进出站响应；
-需要排查时由本模块写服务端日志，但日志只记「原因 + 用户输入原文」，
-**不记基准目录与解析后的绝对路径**（后者以部署配置派生值为前缀，属服务端信息外泄）。
+异常消息**不含**用户输入原文，避免被 ``detail=str(e)`` 之类写法带进出站响应。
+服务端留痕同样**不落路径文本**（无论入参还是解析结果）：用户回传的路径常含凭证派生的
+会话目录名（``session_user-<HMAC(api_key)>``），属于 ``py/clear-text-logging-sensitive-data``
+的官方处置口径「敏感数据不应写日志」；日志只留原因与**不携带原文内容的数值型结构摘要**，
+需要看完整入参时从接入层访问日志取，或用同一入参本地复跑。
 
 **跨平台语义（必读）**：入参可能来自任意客户端 OS，而 ``pathlib`` 只认**当前宿主**
 的分隔符——Linux 服务端收到 Windows 客户端的 ``C:\\x\\y`` 或 ``..\\..\\win.ini`` 时，
@@ -89,25 +91,35 @@ class PathTraversalError(ValueError):
     """
 
 
-def _reject(raw: object, reason: str) -> None:
-    """统一拒绝出口：服务端留痕「原因 + 用户输入原文」，异常消息不回带路径。
+def _input_shape(raw: object) -> str:
+    """输入的**结构摘要**：长度 / 片段数 / 是否绝对形式，不含任何路径文本。
 
-    基准目录（``root``）**不进日志**：它由调用方的部署配置 / 环境变量派生，
-    CodeQL 把这类配置派生值判为 secret（``py/clear-text-logging-sensitive-data``），
-    打进日志等于外泄部署目录结构。排障要复现语义时，用同一输入本地重跑即可。
+    数值型投影不携带原文内容，因此不会把凭证派生的会话标识（或其他敏感片段）
+    写进日志，但足以区分「同一个拒绝原因下有多少种、多大的入参」。
     """
-    logger.warning("[guardrails.fs] 拒绝路径输入 reason=%s input=%r", reason, raw)
+    s = str(raw)
+    return f"len={len(s)} fragments={len(_split_fragments(s))} absolute={bool(_ABS_FORM_RE.match(s))}"
+
+
+def _reject(raw: object, reason: str) -> None:
+    """统一拒绝出口：服务端只留「原因 + 结构摘要」，异常消息与日志都不回带路径原文。
+
+    基准目录（``root``）与入参原文**均不进日志**：前者由部署配置 / 环境变量派生，
+    后者常含凭证派生的会话目录名，两者都会被 CodeQL 判为 secret
+    （``py/clear-text-logging-sensitive-data``，官方处置口径为「敏感数据不应写日志」）。
+    """
+    logger.warning("[guardrails.fs] 拒绝路径输入 reason=%s input=%s", reason, _input_shape(raw))
     raise PathTraversalError(reason)
 
 
 def _ensure_within(root: Path, candidate: Path, *, hint: object) -> Path:
     """规范化结果必须仍位于 root 内（root 自身算合法）。
 
-    越界线索只记**调用方原样给入的路径**（``hint``）：``root`` 与解析后的绝对路径
-    都带出部署目录前缀，同 ``_reject`` 的理由不进日志。
+    越界线索同样只记结构摘要（``hint`` 为调用方原样给入的路径）：``root``、
+    解析后的绝对路径、以及入参原文都带出敏感信息，理由见 ``_reject``。
     """
     if candidate != root and not candidate.is_relative_to(root):
-        logger.warning("[guardrails.fs] 拒绝越界路径 input=%r", hint)
+        logger.warning("[guardrails.fs] 拒绝越界路径 input=%s", _input_shape(hint))
         raise PathTraversalError("路径越出基准目录")
     return candidate
 

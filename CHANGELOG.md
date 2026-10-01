@@ -2,6 +2,17 @@
 
 本仓库为 uv workspace monorepo。**唯一受支持的安装/运行入口是根 `uv.lock` + `uv sync`**，子包不再维护独立 `uv.lock`（见 v2 修复 #14）。
 
+## Batch 7a：取消 dismiss 通道，剩余告警真修（2026-10-01，分支 `fix/codeql-batch7-real-fixes`，PR #38）
+
+> 触发：用户明确「不要用 dismiss 这种简单的处理方式」。方案：`docs/plans/plan-codeql-batch7-no-dismiss-real-fixes-2026-10-01.md`。
+
+- **`#34`（`gateway/gray.py` 灰度分桶）MD5 → SHA-256**：官方 query help 对非口令场景的直接建议即 SHA-2，且 `user_id` 属可识别信息。影响面实测：`GRAY_PCT` 默认 `0`、`is_in_gray` 在产品代码里**无调用点**、分桶不持久化 → 人群重排无生产影响。
+- **`#43`/`#44`（`guardrails/fs.py` 拒绝日志）契约变更：不落任何路径文本**，只留原因 + 数值型结构摘要（`len`/`fragments`/`absolute`）。**演进过程值得记**：首版只去掉 `base`/`resolved`、保留 `input=%r`，PR #38 的 `CodeQL` 检查仍报 2 new alerts（high，注解 `fs.py:99`/`:110`）⇒ 消除法证明被判 secret 的是**入参本身**（路径含凭证派生的 `session_user-<HMAC(api_key)>` 目录名）——**这不是误报**。官方口径仅“Sensitive data should not be logged”，无 masking/哈希豁免。Batch 3 定的「留痕含原文」因此作废，排障改走接入层访问日志或本地复跑；`api/server.py` 依赖旧语义的注释同步修正。
+- **`#42`（`resolve_within`）在 `resolve()` 之前加纯词法 containment 守卫**：不再对未验证的越界输入做文件系统解析，且不放宽接受集（`a/../b` 词法判真，符号链接逃逸仍由解析后复检拒掉）。同时使 Batch 6 的 `barrierGuardModel` 能落在守卫之后的 sink 上——代码变强与工具可理解是叠加，不是用模型掩盖缺陷。注：**Batch 6 曾判定 `#42` 「结构不可消除」，本批以代码重构推翻了该结论**（当时把“不改代码”当成了默认前提）。
+- **新增 4 条回归**：日志不含部署绝对路径×2、越界输入不进 `resolve`、软链逃逸仍拒（其中两条断言方向随契约修正，新断言比旧的多两项，非收窄凑绿）。
+- **本地验证**：`lint_architecture.py` exit 0、`check_doc_sync.py` 0 警告；分 session agent-core 281 passed/3 skipped、根 `tests` 500 passed/17 skipped、联邦 152 passed；`ruff` 无告警。本机无 CodeQL CLI，告警闭合以 PR 检查与主干重扫为准。
+- **不以 dismiss 收尾**：`#38`/`#39` 属「把 API Key 摘要成用户标识」的模式问题（取证：`verify_api_key` 走 `secrets.compare_digest` 明文比较，派生值从不参与验证，所以「用于口令哈希」的判定不成立；但「会话标识可由凭证推导」的耦合是真的），需 principal_id 化的架构决策，本批不动代码，三条出路已列在方案 §4 待拍板。
+
 ## Batch 6 验收：模型包生效，主干 open 9 → 6（2026-10-01，分支 `docs/codeql-batch6-acceptance`）
 
 > 纯文档（不改产品代码）。PR #36 合入 `main` = `0bc5175` @09:19:03Z，默认分支重扫 09:20:29Z（CodeQL 2.27.1）。

@@ -7,8 +7,8 @@
 - ``safe_filename``：文件名净化，剥离目录成分与非法字符。
 
 另含四条安全属性断言：异常消息不回带入参原文（防经 ``detail=str(e)`` 外泄）、
-服务端日志不回带部署侧绝对路径、明显越界的输入不进入 ``resolve()``、
-符号链接逃逸被拒（POSIX；Windows 建软链需特权，故跳过）。
+服务端日志不落任何路径文本（入参原文与部署绝对路径都不落）、明显越界的输入不进入
+``resolve()``、符号链接逃逸被拒（POSIX；Windows 建软链需特权，故跳过）。
 
 **跨平台契约**：Windows 绝对/穿越形式（``C:\\`` / ``..\\`` / UNC）的用例在两个宿主
 都必须被拒——``pathlib`` 只认宿主分隔符，这些用例是 CI 的 Linux runner 实测拦住
@@ -218,6 +218,8 @@ def test_safe_filename_output_is_single_path_fragment(tmp_path):
 
 # ---------------------------------------------------------------------------
 # 日志信息最小化与守卫顺序（Batch 7：真修而非 dismiss）
+# 实证结论：只去掉 base 后两处仍被告警，说明被判 secret 的是入参本身（路径里常含
+# 凭证派生的会话目录名），故契约从「留痕含原文」改为「不落任何路径文本」。
 # ---------------------------------------------------------------------------
 
 
@@ -242,23 +244,27 @@ def fs_logs():
     fs_mod.logger.removeHandler(handler)
 
 
-def test_reject_log_keeps_input_but_omits_server_base(tmp_path, fs_logs):
-    """拒绝日志保留入参原文（排障可用），但不带部署配置的绝对基准目录。"""
+def test_reject_log_keeps_reason_but_drops_path_text(tmp_path, fs_logs):
+    """拒绝日志只留原因与结构摘要：部署基准目录与入参原文都不落（官方口径：敏感数据不应写日志）。"""
     with pytest.raises(PathTraversalError):
         resolve_within(tmp_path, "/etc/passwd")
     blob = " ".join(fs_logs.messages)
     assert str(tmp_path.resolve()) not in blob
-    assert "etc/passwd" in blob
+    assert "etc/passwd" not in blob
+    # 仍可区分与关联：拒绝原因 + 不携带原文的数值型摘要
+    assert "路径越出基准目录" in blob
+    assert "len=" in blob
 
 
-def test_ensure_within_log_omits_resolved_absolute_path(tmp_path, fs_logs):
-    """解析后落在 base 外时，也不打拼出来的绝对路径（它带出部署目录前缀）。"""
+def test_ensure_within_log_drops_resolved_absolute_path(tmp_path, fs_logs):
+    """解析后落在 base 外时，既不打拼出来的绝对路径，也不打入参原文。"""
     (tmp_path / "a").mkdir()
     with pytest.raises(PathTraversalError):
         resolve_within(tmp_path, "a/../../outside.txt")
     blob = " ".join(fs_logs.messages)
     assert str(tmp_path.resolve()) not in blob
-    assert "a/../../outside.txt" in blob
+    assert "outside.txt" not in blob
+    assert "len=" in blob
 
 
 def test_lexical_escape_rejected_before_touching_filesystem(tmp_path, monkeypatch):
