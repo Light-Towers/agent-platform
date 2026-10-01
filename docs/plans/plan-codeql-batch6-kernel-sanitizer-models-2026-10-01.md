@@ -1,6 +1,6 @@
 # Batch 6 方案：kernel sanitizer 的 CodeQL 模型缺失（合入后默认分支重扫暴露 7 条新告警）
 
-> 状态：**已批准并执行**（Batch 6 模型包已入库，待主干重扫验收；产品代码零改动）。
+> 状态：**已执行并已验收**（PR #36 合入 `main` = `0bc5175`，主干重扫实测：open 9 → **6**，详见 §9 验收结果）。
 > **执行时推翻的关键前提**：本文 §4 原推荐「切 advanced setup」是基于**错误认知**——default setup 只接受已发布模型包这一限制只对**组织级**扩展成立，**仓级 local 包放 `.github/codeql/extensions/` 即被自动检测加载**（两模式均识别）。实际落地为零基础设施变更，详见 §4 纠正块与 §9。
 > 触发：PR #33（CodeQL Batch 1~5）与 PR #34（doc-sync 门禁）于 2026-10-01 08:25Z / 08:32Z 合入 `main` 后，默认分支自动重扫的结果核对。
 > 上游方案：`docs/plans/plan-codeql-codescanning-remediation-2026-10-01.md`（本文件同时纠正其中一处已被证伪的判断）。
@@ -82,9 +82,9 @@
 **已实施记录见 §9。**
 
 **验收标准**
-1. 模型包入主干并触发重扫后，`refs/heads/main` 的 `#23`（调用点 `FileResponse(abs_path)`）应闭合；`#40`~`#42`（kernel 体内 `Path(...).resolve()`）是否闭合取决于 `barrierGuardModel` 能否匹配到守卫作用域——**这两类必须分开验收，不得因 guard 未生效就判定整个模型包无效**（barrier 对调用点生效即为架构收益）。
-2. **模型包非空转自证**：临时移除 `models/*.model.yml` 中 `resolve_within` 的 barrier 行 → 重扫必须重新报出 `#23`；随后恢复。（本机无 CodeQL CLI，此项只能在 CI 侧做，验收时如实标注证据层级。）
-3. **加载成功/失败的分界**：若包格式非法，default setup 分析会整体失败（而不是只丢这几条）——因此「PR 的 CodeQL 作业未报红且既有告警集仍在」就是包已被正常加载的证据。
+1. ✅ 已测：`#23` 闭合（`state=fixed`）。⚪ `#40`~`#42`：`#40`/`#41` 已闭合，`#42` 未闭合且经分析为**结构不可消除**（见 §9.1），改走人工 dismiss。
+2. **模型包非空转自证**（仍未做，待下轮）：临时移除 `models/*.model.yml` 中 `resolve_within` 的 barrier 行 → 重扫必须重新报出 `#23`；随后恢复。（本机无 CodeQL CLI，只能在 CI 侧做。现已有旁证：`#23` 在加包前 open / 加包后 fixed，且代码未动，但这仍不等于反证已做。）
+3. ✅ 已测：包格式非法会使分析整体失败——实际 PR #36 的 `CodeQL` / `Analyze (python)` / `Analyze (actions)` 均 pass，包已正常加载。
 4. `make ci` 全绿：`lint_architecture.py`（P4-2/P2/P5/P6/P6-2/P7/P8）+ 各 pytest session 无回归，尤其 P7 判定面未被放宽。
 5. `scripts/check_doc_sync.py` 通过（新增 workflow/config 路径若在文档中被引用，须能解析）。
 6. open 告警中除 `#34`/`#38`/`#39`（+ `#43`/`#44` 若取终态 1，以及 `#40`~`#42` 若 guard 未生效）外无其他项，且每条 dismiss 都附可复核理由并入库。
@@ -121,7 +121,20 @@ gh api "repos/Light-Towers/agent-platform/branches/main/protection"   # 实测 H
 
 **本机已验（证据层级：本地工具可查）**：两个 YAML 均 `yaml.safe_load` 通过，列数与官方谓词签名一致（barrierModel 3 列 / barrierGuardModel 4 列）、pack 无 dependencies；`check_doc_sync.py` 0 警告、`lint_architecture.py` exit 0（P7 判定面未动）。
 
-**未验（必须诚实标注）**：模型包是否真被 default setup 加载、`#23`/`#40`~`#42` 是否因此闭合——本机无 CodeQL CLI，只能靠 PR 的 CodeQL 作业不报红 + 合入后主干重扫的告警差集判定（§6 验收项 1~3）。
+**未验（必须诚实标注）**（本段为实施当时的状态，已由 §9.1 补验）：模型包是否真被 default setup 加载、`#23`/`#40`~`#42` 是否因此闭合——本机无 CodeQL CLI，只能靠 PR 的 CodeQL 作业不报红 + 合入后主干重扫的告警差集判定（§6 验收项 1~3）。
+
+### 9.1 验收结果（2026-10-01，PR #36 合入 `0bc5175` @09:19:03Z，主干重扫 09:20:29Z，CodeQL 2.27.1）
+
+**open 9 → 6**，闭合的三条全部 `state=fixed` 且 `dismissed_at=None`（**自动闭合，非人工 dismiss**）：
+
+| 告警 | 位置 | 结果 | 归因 |
+|---|---|---|---|
+| `#23` | `agent_federation/api/server.py:264` `FileResponse(abs_path)` | **fixed** ✅ | `barrierModel` 对 helper 返回值生效——同时反证模型包**确被 default setup 加载** |
+| `#40` | `fs.py:119` `Path(base).resolve()`（`safe_join`） | **fixed** ✅ | `barrierGuardModel`（`is_relative_to`）生效 |
+| `#41` | `fs.py:134` `_ensure_within(root, current.resolve())` | **fixed** ✅ | 同上，guard 就在此行之后的分支里 |
+| `#42` | `fs.py:162` `resolved = candidate.resolve()`（`resolve_within`） | **仍 open** | 结构性不可消除，见下 |
+
+**`#42` 为何单独存活（不是漏修）**：`resolve_within` 的顺序必然是 `candidate.resolve()` → `_ensure_within(root, resolved)`（`:162` → `:167`）——**不先 resolve 就无从判断是否越界**，所以 sink 永远在守卫之前，`barrierGuardModel` 的作用域不可能覆盖它。`#40`/`#41` 能关是因为那两处的污点流经过已建模的守卫。要消掉 `#42` 只能把 `Path.resolve` 的返回值全局声明为 barrier——**那是假的**（`resolve()` 本身不做任何净化，且会屏蔽全仓其他真实路径注入），按「不为躲检测器而改结构/编模型」的纪律否决，转人工 dismiss 附本段理由。
 
 ## 10. 回滚
 
