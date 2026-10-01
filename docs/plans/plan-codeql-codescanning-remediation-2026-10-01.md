@@ -167,8 +167,24 @@ AGENTS.md 已确立「入站错误脱敏」三层收敛范例：`build_api_app`(
 
 **为何选“门禁 + dismiss”而不是改算法**：改名（如把 `secret` 改成不含语义的变量）可静默退掉 #38，但那是**干扰检测器而非修正问题**，违反方案原则；而 #39 是本方案主动保留的技术债（迁移一致性 > 算法纯度），只能用硬门禁限制其扩散面。
 
-**dismiss 未能脚本化（实测障碍，留人工）**：`gh api` 对告警状态写入端点返回 **HTTP 404**（`PUT` 与 `PATCH` 两种动词都试了，并对 `refs/heads/main` 上的 #31 做了同探针）——读取端点 `GET /code-scanning/alerts/38` 正常 200，说明不是 ID/路径问题，而是该令牌与订阅对告警**状态写入**无权限。故 #38/#39 需在 Security 面板手工 dismiss（PR #33 的 CodeQL 门禁未设为 required，`mergeStateStatus=UNSTABLE` 不阻断合入）。下面两段即建议文案（与本文表格同口径，入库以免理由只存于浏览器会话）：
+**dismiss 未能脚本化：根因已定位到令牌 scope（可一条命令修好）**：`gh api` 对告警状态写入端点返回 **HTTP 404**（`PUT`、`PATCH` 两个动词都试了，并对 `refs/heads/main` 上的 #31 做过同探针），而读取端点 `GET /code-scanning/alerts/38` 正常 200——不是 ID 或路径问题。用 `gh api -i` 对比响应头即得确证：该端点的 `X-Accepted-OAuth-Scopes` 含 `security_events`，而本机令牌的 `X-Oauth-Scopes` **不含** `security_events`（有 `repo`/`admin:org` 也不够）。GitHub 对「scope 不足」统一回 404 而非 403，这就是先前误判为「订阅无权限」的原因。补齐方式：`gh auth refresh -s security_events` 后重跑下面两条命令（未擅自执行：该命令会重新授权并可能替换本机 gh 存储的 PAT，属凭据级动作，需本人确认）。若不补 scope，则在 Security 面板手工 dismiss 亦可（PR #33 的 CodeQL 门禁未设为 required，`mergeStateStatus=UNSTABLE` 不阻断合入）。下面两段即建议文案（与本文表格同口径，入库以免理由只存于浏览器会话）：
 
 - **#38（`auth.py` HMAC-SHA256 行）→ `False positive`**：输入为高熵 API Key（非人工口令），产物只作查表标识（限流桶 / LLM 客户端缓存键 / 会话 `thread_id`），**不用于验证密钥**；慢 KDF（scrypt/pbkdf2/bcrypt）在此只会拖慢中间件热路径，对 ≥128bit 随机密钥无暴破增益，且离线计算额外需要服务端 pepper。原有 48bit 截断反模式已结构性封住：`fingerprint()` 对 <32 hex 的请求直接 `ValueError`，四处散点收敛为单一实现并由 P6 拦截。未采“改变量名躲检测器”的做法。
 - **#39（`legacy_thread_id` 的 `sha256(...)[:12]`）→ `Won't fix`**：告警形状属实但不可消除——必须能复算升级前的旧会话身份，否则 `updated/session_user-<legacy>/` 目录与 checkpointer `thread_id` 行无法找回；它不是认证路径，只产出一次性迁移的映射键。扩散面已由约定升级为不变量：`lint_architecture.py` **P6-2** 使 kernel 定义处与 `scripts/migrate_thread_identity.py` 之外的任何调用在 CI 失败（用例：`tests/governance/test_thread_identity_migration.py::test_p6_2_*`）；业务侧链路只用 `derive_thread_id()`/`fingerprint()`。
+
+**补 scope 后的可复跑命令**（body 与上面两条文案一致，逐字段填 `state`/`dismissed_reason`/`dismissed_comment`）：
+
+```bash
+gh auth refresh -s security_events
+gh api --method PATCH repos/:owner/:repo/code-scanning/alerts/38/states \
+  --input ./dismiss-38.json   # {"state":"dismissed","dismissed_reason":"false_positive",...}
+gh api --method PATCH repos/:owner/:repo/code-scanning/alerts/39/states \
+  --input ./dismiss-39.json   # {"state":"dismissed","dismissed_reason":"wont_fix",...}
+```
+
+### 二次重扫（`c8e512e` + `45373dd` 推上后，2026-10-01）
+
+- `ci`（push 与 PR 两个事件）仍 **pass**（2m27s / 2m48s），`ha` pass（1m11s），`Analyze (python)`、`Analyze (actions)` pass。
+- **告警编号未变**：PR ref 上 open 仍只有 **#38 / #39** 两条，`annotations_count` 仍为 2。但因 `c8e512e` 给 kernel 加了 docstring，行号漂了——`#38: 78 → 92`（`hmac.new(pepper, secret, sha256)`）、`#39: 99 → 117`（`legacy_thread_id` 的 `sha256(...)[:12]`）。CodeQL 的分组跟住了纯注释变更，**没有因行号漂移产生新告警**，这也是「定调入库不需要重开一轮」的直接依据。
+- CodeQL 检查仍 fail 的原因**只剩** #38/#39 尚未 dismiss（见上节 scope 修法），无新增待办。
 
