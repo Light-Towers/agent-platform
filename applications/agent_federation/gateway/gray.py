@@ -1,6 +1,10 @@
-"""灰度发布：按 user_id % 100 < gray_pct 分流。
+"""灰度发布：按 ``sha256(user_id) % 100 < gray_pct`` 分流。
 
 新 prompt / 新链路灰度切换，对比 SLO。
+
+分桶本身不需密码学强度，但 ``user_id`` 属可识别信息，故不用 MD5：
+CodeQL ``py/weak-sensitive-data-hashing`` 官方建议为「非口令场景用 SHA-2」。
+注意：换哈希函数会重排已有分桶人群（当前 ``GRAY_PCT`` 默认 0、分桶不持久化，无生产影响）。
 """
 
 from __future__ import annotations
@@ -37,7 +41,7 @@ def is_in_gray(user_id: str, gray_pct: float | None = None) -> bool:
     if gray_pct >= 100:
         return True
 
-    hash_val = int(hashlib.md5(user_id.encode("utf-8")).hexdigest(), 16) % 100
+    hash_val = int(hashlib.sha256(user_id.encode("utf-8")).hexdigest(), 16) % 100
     return hash_val < gray_pct
 
 
