@@ -61,7 +61,7 @@ WENDA_TEMPLATES = [
     "计算{period}{metric}同比增长率",
 ]
 
-ZHIKU_TEMPLATES = [
+KNOWLEDGE_TEMPLATES = [
     "{topic}的流程是什么",
     "{topic}有哪些规定",
     "如何申请{topic}",
@@ -87,7 +87,7 @@ WENDA_VARS = {
     "entity": ["订单", "展位", "客户", "交易记录"],
 }
 
-ZHIKU_VARS = {
+KNOWLEDGE_VARS = {
     "topic": ["报销", "年假", "差旅费", "绩效考核", "员工手册", "考勤", "入职", "离职", "展会搭建", "用电负荷"],
 }
 
@@ -166,10 +166,10 @@ def main() -> None:
 
     for _ in range(30):
         rid_counter += 1
-        template = random.choice(ZHIKU_TEMPLATES)
-        query = fill_template(template, ZHIKU_VARS)
+        template = random.choice(KNOWLEDGE_TEMPLATES)
+        query = fill_template(template, KNOWLEDGE_VARS)
         new_records.append(make_record(
-            f"syn-zhiku-{rid_counter:04d}", query, "rag_knowledge", "zhiku",
+            f"syn-knowledge-{rid_counter:04d}", query, "rag_knowledge", "knowledge",
         ))
 
     for _ in range(30):
@@ -196,7 +196,7 @@ def main() -> None:
     for _ in range(15):
         rid_counter += 1
         template, agents, cardinality, difficulty = random.choice(COMPLEX_TEMPLATES)
-        query = fill_template(template, {**WENDA_VARS, **ZHIKU_VARS})
+        query = fill_template(template, {**WENDA_VARS, **KNOWLEDGE_VARS})
         record = make_record(
             f"syn-complex-{rid_counter:04d}", query, "text_to_sql", "deepagents",
             difficulty, cardinality,

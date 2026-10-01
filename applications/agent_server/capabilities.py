@@ -25,8 +25,14 @@ from agent_runtime.circuit_breaker import CircuitBreaker
 from agent_runtime.mcp_client import MCPClientManager
 from agent_runtime.skills.dag import as_dag_skill
 from agent_runtime.skills.function import as_function_skill
-from agent_runtime.skills.middleware import AuditMiddleware, CircuitBreakerMiddleware, RetryMiddleware
+from agent_runtime.skills.middleware import (
+    AuditMiddleware,
+    CircuitBreakerMiddleware,
+    RetryMiddleware,
+    ToolObservedMiddleware,
+)
 from agent_runtime.skills.registry import SkillRegistry
+from agent_runtime.workspace_registry import server_tenant_id
 
 from agent_server.agent.state import AgentState
 from agent_server.config import get_settings
@@ -61,9 +67,9 @@ _GENERAL_QA_INPUT_SCHEMA: dict[str, Any] = {
     "properties": {
         "question": {"type": "string", "description": "用户问题"},
         "workspace_id": {"type": "string", "description": "知识库空间 ID，缺省 default"},
-        "user_id": {"type": "string", "description": "用户 ID，缺省 default"},
-        "tenant_id": {"type": "string", "description": "租户 ID，缺省 default（记忆读写按租户隔离）"},
         "thread_id": {"type": "string", "description": "会话线程 ID（对话历史持久化）"},
+        # 身份（tenant_id/user_id）故意不列为 LLM 可填参数（ADR-0007 §4.3）：
+        # 租户由服务端断言源注入，防模型幻觉/提示注入指定任意租户。
     },
     "required": ["question"],
 }
@@ -72,6 +78,18 @@ _GENERAL_QA_OUTPUT_SCHEMA: dict[str, Any] = {
     "type": "string",
     "description": "最终回答文本",
 }
+
+
+def _sanitize_identity(kwargs: dict[str, Any]) -> dict[str, Any]:
+    """剔除 LLM 可注入的身份键，租户由服务端断言源覆盖（ADR-0007 §4.3）。
+
+    防“模型幻觉/提示注入把 tenant_id 填成任意值 → 跨租户读写”。A3 绑定 ContextVar
+    前 server_tenant_id 回落部署级 default_tenant_id（与 T11 注入语义一致）；
+    A3 落地后自动返回真实断言租户。
+    """
+    out = {k: v for k, v in kwargs.items() if k not in ("tenant_id", "user_id", "api_key")}
+    out["tenant_id"] = server_tenant_id(get_settings().default_tenant_id)
+    return out
 
 
 async def _mcp_execute(state: AgentState, mcp_manager: MCPClientManager | None) -> dict[str, Any]:
@@ -85,6 +103,9 @@ async def _run_general_qa(graph: Any, **kwargs: Any) -> str:
     graph 保留 checkpoint（thread_id 恢复/持久化对话历史）语义；对调用方是黑盒 Skill。
     """
     question = kwargs["question"]
+    # 身份租户由服务端断言源提供，不接受 LLM/kwargs（防幻觉/注入指定任意租户，ADR-0007 §4.3）；
+    # TODO(A3): server_tenant_id 绑定 ContextVar 后自动返回真实断言租户。
+    tenant_id = server_tenant_id(get_settings().default_tenant_id)
     answer = ""
     async for update in graph.astream(
         {
@@ -92,8 +113,7 @@ async def _run_general_qa(graph: Any, **kwargs: Any) -> str:
             "question": question,
             "user_id": kwargs.get("user_id", "default"),
             "workspace_id": kwargs.get("workspace_id", "default"),
-            # 租户身份随 state 注入：缺失会在 default 桶读写记忆，造成跨租户可见
-            "tenant_id": kwargs.get("tenant_id", "default"),
+            "tenant_id": tenant_id,
             "iterations": 0,
         },
         config={"configurable": {"thread_id": kwargs.get("thread_id", "default")}},
@@ -154,6 +174,8 @@ def build_registry(graph: Any | None = None) -> SkillRegistry:
     仅包裹 search（隔离故障域），search 实现不再内嵌 breaker。
     """
     middlewares = [
+        # 观测挂链首位（最外层）：记录整链最终 outcome（含 retry/熔断降级后）
+        ToolObservedMiddleware(),
         CircuitBreakerMiddleware(_get_breaker(), skill_names=("search",)),
         RetryMiddleware(max_retries=2, backoff_s=0.5),
         AuditMiddleware(_audit_sink, redact=True),
@@ -231,6 +253,7 @@ def _register_remote_skills(registry: SkillRegistry) -> None:
         knowledge_key = os.getenv("KNOWLEDGE_SERVICE_KEY", "")
 
         async def _knowledge_query(**kwargs: Any) -> Any:
+            kwargs = _sanitize_identity(kwargs)  # 租户服务端注入，不信 LLM（ADR-0007 §4.3）
             headers = {"Authorization": f"Bearer {knowledge_key}"} if knowledge_key else {}
             client = _get_http_client()
             resp = await client.post(f"{knowledge_url}/query", json=kwargs, headers=headers)
@@ -255,6 +278,7 @@ def _register_remote_skills(registry: SkillRegistry) -> None:
         )
 
         async def _knowledge_retrieve(**kwargs: Any) -> Any:
+            kwargs = _sanitize_identity(kwargs)  # 租户服务端注入，不信 LLM（ADR-0007 §4.3）
             headers = {"Authorization": f"Bearer {knowledge_key}"} if knowledge_key else {}
             client = _get_http_client()
             resp = await client.post(f"{knowledge_url}/api/v1/retrieve", json=kwargs, headers=headers)
@@ -271,10 +295,9 @@ def _register_remote_skills(registry: SkillRegistry) -> None:
                     "type": "object",
                     "properties": {
                         "query": {"type": "string", "description": "检索文本"},
-                        "tenant_id": {"type": "string", "description": "租户 ID"},
                         "scope_type": {"type": "string", "description": "PUBLIC 或 PRIVATE"},
                     },
-                    "required": ["query", "tenant_id"],
+                    "required": ["query"],
                 },
             )
         )
@@ -283,6 +306,7 @@ def _register_remote_skills(registry: SkillRegistry) -> None:
     if nl2sql_url:
 
         async def _nl2sql_query(**kwargs: Any) -> Any:
+            kwargs = _sanitize_identity(kwargs)  # 不信 LLM 身份参数（ADR-0007 §4.3）
             client = _get_http_client()
             resp = await client.post(f"{nl2sql_url}/api/query", json=kwargs)
             resp.raise_for_status()
@@ -308,6 +332,7 @@ def _register_remote_skills(registry: SkillRegistry) -> None:
     if kefu_url:
 
         async def _kefu_query(**kwargs: Any) -> Any:
+            kwargs = _sanitize_identity(kwargs)  # 不信 LLM 身份参数（ADR-0007 §4.3）
             client = _get_http_client()
             resp = await client.post(f"{kefu_url}/invoke", json=kwargs)
             resp.raise_for_status()
@@ -334,6 +359,7 @@ def _register_remote_skills(registry: SkillRegistry) -> None:
     if exhibition_url:
 
         async def _exhibition_query(**kwargs: Any) -> Any:
+            kwargs = _sanitize_identity(kwargs)  # 不信 LLM 身份参数（ADR-0007 §4.3）
             client = _get_http_client()
             resp = await client.post(f"{exhibition_url}/api/query", json=kwargs)
             resp.raise_for_status()
@@ -351,7 +377,7 @@ def _register_remote_skills(registry: SkillRegistry) -> None:
                         "query": {"type": "string", "description": "查询文本"},
                         "params": {
                             "type": "object",
-                            "description": "附加参数（tenant_id 等）",
+                            "description": "附加参数（业务过滤；不含身份/租户，租户由服务端注入）",
                         },
                     },
                     "required": ["query"],

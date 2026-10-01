@@ -46,3 +46,5 @@ push 时 GitHub 回显默认分支仍有 21 项告警（4 critical / 11 high / 6
 ## 排查方法备忘
 
 uv.lock 反向依赖解析：按 `[[package]]` 分块，取每块 `dependencies = [` 段中的 `{ name = "X" }` 条目（非版本约束格式），可定位任意传递依赖的真实引入方。
+
+`uv tree -i <pkg>` 可直接拉反向依赖树，但需加 `--python 3.12` 规避 deepagents 改名残留导致的多 Python 版本解析失败（默认解析到 py3.14/win32 split 时会报 deepagents 不可达）。（此条随 v3 身份层合流并回，来源 `origin/v3` 版本文档。）

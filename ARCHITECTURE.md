@@ -54,6 +54,20 @@ agent-core  agent-runtime  shared-schemas  agent-server  agent_federation  exhib
 > `agent_server` 不是「平台层」，而是「使用平台能力的应用」（默认 Runtime 宿主）。
 > `agent_federation` 是**独立 Agent 应用**，不是 `agent-runtime` 的底层模块。
 
+### 2.3 横切：服务端断言的租户身份层（2026-10-01 随 `integration/v3-into-main` 合流入库）
+
+身份/租户是横切关注点，按「单一实现 + 全局装配 + 强制门禁」三层记录，缺一层即退化为约定：
+
+| 层 | 实现 | 说明 |
+|----|------|------|
+| **单一实现** | `packages/agent-runtime/agent_runtime/identity.py` | RS256 `mint_token`/`verify_token`、网关→子服务内部头 `sign_internal_header`/`verify_internal_header`（HMAC-SHA256）、`load_public_keys`（kid→PEM，支持轮转）、`resolve_startup_tenant_mode`、`require_identity_startup_guard`。PyJWT 仅挂在 `agent-runtime` 的 `identity` extra，**不进 `agent-core`**（红线 1）。漏传租户的哨兵拦截在内核 `packages/agent-core/agent_core/memory/_tenant_gate.py`。 |
+| **全局装配** | `packages/agent-runtime/agent_runtime/identity_middleware.py` | 纯 ASGI `IdentityMiddleware`，在 `applications/agent_server/main.py`（无条件）与 `applications/agent_federation/api/identity_bridge.py`（`X-Tenant-JWT`）挂载；**默认 observe 档零行为变更**（无凭据请求交下游既有语义）。 |
+| **强制门禁** | `docs/adr/0006-isolation-dimension-contract.md`、`docs/adr/0007-server-asserted-tenant-identity.md` + `tests/governance/` | 红线用例：`test_identity_not_in_tool_schema.py`（身份不得进 LLM tool schema）、`test_tenant_default_forbidden.py`（`tenant_id="default"` 隐式缺省回潮即失败）、`test_isolation_dimension_contract.py`（每张业务表必含 `tenant_id`）；跨租户真 DB 行为级回归见 `tests/ha/test_tenant_isolation_real_pg.py`（CI 缺 PG = FAIL，不得以 skip 凑绿）。 |
+
+**运行档位**：身份相关 env 共 12 项（清单见 `.env.example` 「租户身份断言」段）。**fail-fast 默认关**：`DEPLOY_ENFORCE_IDENTITY=false` 时零依赖冒烟不受影响；置 `true` 且既未配验签公钥又未显式声明 `SINGLE_TENANT` 则拒绝启动（2026-10-01 双向实跑：默认档 `agent_server.main:app` 构造成功且中间件栈含 `IdentityMiddleware`；开关置 true 则 `RuntimeError`）。执行细节见 `docs/plans/plan-isolation-hardening-2026-09-27.md`。
+
+**与 CodeQL B7b 的关系（不重叠）**：本身份层解决的是 **tenant 维**由服务端断言；`py/weak-sensitive-data-hashing` 的 `#38`/`#39` 属于 **user 维**仍在用「凭证摘要当用户标识」，principal_id 化将在本层之上替换 user 侧来源。
+
 ## 3. 依赖方向（红线依据）
 
 ```text
@@ -86,6 +100,15 @@ agent-core  agent-runtime  shared-schemas  agent-server  agent_federation  exhib
 
 ## 5. 当前已知技术债（登记，非本期处理）
 
+- **【2026-09-27 新增】记忆层契约缺位：`agent-runtime` 自建执行记忆**：`memory` 的法定归属是 `agent-core`（§2.1 明列「含 MemoryStore 统一门面」），且内核已声明「各子包不得再各自为政重复实现」（`agent_core/memory/__init__.py:20-21`）。但内核现有契约**只覆盖语义记忆**（`store.py` 的 `MemoryStore` 五动词与 `CapabilityReport` 均无 episodic/procedural/working 能力位），对执行记忆零覆盖 → `agent-runtime` 只能在包内自建 8 个 `memory_*.py`（对 `agent_core` 的 import 数为 0）。
+  - **定性**：不是重复实现，是**内核能力缺位导致的必然自建**。语义记忆那条线（`agent_federation` 与 `agent_server` 双侧均走 `agent_core.memory.typed`）已证明——内核一旦提供契约，两侧会自然收敛。
+  - **附带**：`agent_server` 单进程内并行两套记忆（语义走 `longterm.py`→内核 `memories` 表；执行走 `main.py`→runtime `episodic_memories`/`procedural_memories` 表）；`UserSemanticStore`/`SharedSemanticStore` 无生产实现；`episodic` 在两层同名不同义。
+  - **处置**：见 `docs/adr/0005-execution-memory-kernel-contract.md`（提案）——协议下沉内核、实现留宿主，沿用优化 E/P4.3 已验证范式。执行细节见 `docs/plans/plan-memory-hardening-2026-09-27.md`。
+- **【2026-09-27 新增】隔离维度无统一契约，且部分表缺 `tenant_id`**：七类表存在四种隔离组合（`chunks`/`sql_*` 仅 `workspace_id`；`memories` 为 `tenant_id`+`user_id`；`execution_queue`/`rate_limit_buckets`/`cost_records` 仅 `tenant_id`；`episodic_memories`/`procedural_memories` 无隔离列）。
+  - **定性**：`workspace_id` 是**归属维度**（客户端传入、默认 `default`、无 `workspaces` 归属表可证明其租户归属），**不可单独承担隔离**；`tenant_id` 才是**安全边界**（服务端 ContextVar 断言）。
+  - **定级（2026-09-27 已确认多租户部署）**：`chunks`（RAG 文档切片）与 `sql_ddl`/`sql_docs`/`sql_examples` 仅靠 workspace 隔离 → **跨租户可见为现实风险（活跃 P0）**；`workspace_id` 无归属校验（活跃 P0）；`memories.user_id` 位实装 `workspace_id`（TD-13）致用户维度缺失（用户已拍板画像层必须存在，P0）；knowledge-service `tenant_id` 默认空可选（P1）。
+  - **处置**：`docs/adr/0006-isolation-dimension-contract.md`（**已采纳**：tenant 为边界、workspace/user/knowledge 为正交归属；`procedural_memories` 定级「租户内共享、跨租户隔离」）。执行见 `docs/plans/plan-isolation-hardening-2026-09-27.md`（T9–T13）。
+- **【2026-10-01 新增】身份中间件未覆盖全部应用（§2.3 的「全局装配」层目前只覆盖 2/6 应用）**：`IdentityMiddleware` 仅在 `agent_server` 与 `agent_federation` 无条件挂载；knowledge-service 走自有的 `TenantHeaderMiddleware`（`applications/knowledge-service/knowledge_service/main.py`）；exhibition-agent / kefu-service / nl2sql-service **未接入**（入口 grep `IdentityMiddleware|add_middleware` 命中 0）。后果：observe 档下行为不变（安全），但 `TENANT_JWT_ENFORCE` 灰度末硬切换时，未接入的应用仍会接受客户端自报 tenant。处置：切换前须先把三个应用纳入同一装配，再加一条 `scripts/lint_architecture.py` 不变量防未来新增 app 漏接。装配上收点待定：`agent_core.guardrails.app_factory.build_api_app` 是其天然位置，但该文件 docstring 明写「不强推鉴权语义，避免改变各 app 行为」——收口需先修订该约定，不得默默反向。
 - **`agent_federation` 自有 planner**：应用层 `agent_federation` 仍实现独立 planner/agent，需随 runtime 成形逐步收敛到红线 4。
 - **dialogue-framework 已移除**（2026-09-23，孤儿框架，能力已被 agent_server 吸收）。
 - **历史命名残留**：`docs/architecture/architecture-boundary-app-vs-agent-federation.md` 中仍出现的 `deepagents/` 旧名，已于 2026-08-19 清理为 `agent_federation/`；本文统一使用新名。

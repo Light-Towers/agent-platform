@@ -22,6 +22,11 @@ class Settings(BaseLLMSettings):
     database_url: str = ""  # 空 = 内存模式（无持久化，仅开发）
     db_pool_max_size: int = 20  # 连接池上限（高并发 admission 全局限流 100/s 时避免池耗尽）
 
+    # 隔离域（ADR-0006）：服务端租户安全边界。/import、/sql/train 等无请求体租户的
+    # 写入口经 server_tenant_id() 解析：请求链路 ContextVar 优先，其次本配置。
+    # 单租户部署显式保持 default；多租户部署必须按部署单元注入真实租户。
+    default_tenant_id: str = "default"
+
     # LLM 补充字段
     llm_fallback_model: str = "gpt-4o-mini"
 
