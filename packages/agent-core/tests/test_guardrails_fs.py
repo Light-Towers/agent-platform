@@ -6,16 +6,19 @@
 - ``resolve_within``：解析语义，绝对入口宽容但结果必须仍在 base 内；
 - ``safe_filename``：文件名净化，剥离目录成分与非法字符。
 
-另含两条安全属性断言：异常消息不回带入参原文（防经 ``detail=str(e)`` 外泄）、
-符号链接逃逸被拒（POSIX；Windows 建软链需特权，故跳过）。
+另含四条安全属性断言：异常消息不回带入参原文（防经 ``detail=str(e)`` 外泄）、
+服务端日志不落任何路径文本（入参原文与部署绝对路径都不落）、明显越界的输入不进入
+``resolve()``、符号链接逃逸被拒（POSIX；Windows 建软链需特权，故跳过）。
 
 **跨平台契约**：Windows 绝对/穿越形式（``C:\\`` / ``..\\`` / UNC）的用例在两个宿主
 都必须被拒——``pathlib`` 只认宿主分隔符，这些用例是 CI 的 Linux runner 实测拦住
 宿主依赖写法后补上的，故不得改成 ``skipif`` 只跑一边。
 """
 
+import logging
 import os
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -211,3 +214,81 @@ def test_safe_filename_output_is_single_path_fragment(tmp_path):
     # 净化 + 拼接双重防护：即使原始入参是穿越式路径，落点仍在 base 内
     escaped = safe_join(tmp_path, safe_filename("../../etc/passwd"))
     assert escaped == (tmp_path / "passwd").resolve()
+
+
+# ---------------------------------------------------------------------------
+# 日志信息最小化与守卫顺序（Batch 7：真修而非 dismiss）
+# 实证结论：只去掉 base 后两处仍被告警，说明被判 secret 的是入参本身（路径里常含
+# 凭证派生的会话目录名），故契约从「留痕含原文」改为「不落任何路径文本」。
+# ---------------------------------------------------------------------------
+
+
+class _RecordingHandler(logging.Handler):
+    """直接挂到模块 logger：``agent_core.logging`` 可能关掉 propagate，caplog 不可靠。"""
+
+    def __init__(self) -> None:
+        super().__init__(level=logging.WARNING)
+        self.messages: list[str] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self.messages.append(record.getMessage())
+
+
+@pytest.fixture
+def fs_logs():
+    from agent_core.guardrails import fs as fs_mod
+
+    handler = _RecordingHandler()
+    fs_mod.logger.addHandler(handler)
+    yield handler
+    fs_mod.logger.removeHandler(handler)
+
+
+def test_reject_log_keeps_reason_but_drops_path_text(tmp_path, fs_logs):
+    """拒绝日志只留原因与结构摘要：部署基准目录与入参原文都不落（官方口径：敏感数据不应写日志）。"""
+    with pytest.raises(PathTraversalError):
+        resolve_within(tmp_path, "/etc/passwd")
+    blob = " ".join(fs_logs.messages)
+    assert str(tmp_path.resolve()) not in blob
+    assert "etc/passwd" not in blob
+    # 仍可区分与关联：拒绝原因 + 不携带原文的数值型摘要
+    assert "路径越出基准目录" in blob
+    assert "len=" in blob
+
+
+def test_ensure_within_log_drops_resolved_absolute_path(tmp_path, fs_logs):
+    """解析后落在 base 外时，既不打拼出来的绝对路径，也不打入参原文。"""
+    (tmp_path / "a").mkdir()
+    with pytest.raises(PathTraversalError):
+        resolve_within(tmp_path, "a/../../outside.txt")
+    blob = " ".join(fs_logs.messages)
+    assert str(tmp_path.resolve()) not in blob
+    assert "outside.txt" not in blob
+    assert "len=" in blob
+
+
+def test_lexical_escape_rejected_before_touching_filesystem(tmp_path, monkeypatch):
+    """词法 containment 前置：明显越界的输入不得进入 ``resolve()``。"""
+    resolved_calls: list[str] = []
+    real_resolve = Path.resolve
+
+    def spy(self, *args, **kwargs):
+        resolved_calls.append(str(self))
+        return real_resolve(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "resolve", spy)
+    with pytest.raises(PathTraversalError):
+        resolve_within(tmp_path, "/etc/passwd")
+    # base 自身的规范化允许（那是服务端目录，非用户输入）；用户输入不得被解析
+    assert not any("passwd" in c for c in resolved_calls)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows 建符号链接需特权/开发者模式")
+def test_symlink_escape_still_rejected_after_lexical_guard(tmp_path):
+    """词法上安全（base 内软链）的输入仍须被解析后的复检拒掉——前置守卫不得放宽接受集。"""
+    outside = tmp_path.parent / f"outside_lex_{tmp_path.name}"
+    outside.mkdir()
+    (outside / "secret.txt").write_text("x", encoding="utf-8")
+    (tmp_path / "link").symlink_to(outside, target_is_directory=True)
+    with pytest.raises(PathTraversalError):
+        resolve_within(tmp_path, "link/secret.txt")

@@ -25,8 +25,11 @@ api 层文件 I/O 必须经本模块 helper）。
 
 设计取舍：containment 用 ``resolve()`` 后的真包含判定，因此同时挡住
 ``..`` 穿越与**符号链接逃逸**（base 内指向外部软链解析后落在 base 外）。
-异常消息**不含**用户输入原文，避免被 ``detail=str(e)`` 之类写法带进出站响应；
-需要排查时由本模块写服务端日志。
+异常消息**不含**用户输入原文，避免被 ``detail=str(e)`` 之类写法带进出站响应。
+服务端留痕同样**不落路径文本**（无论入参还是解析结果）：用户回传的路径常含凭证派生的
+会话目录名（``session_user-<HMAC(api_key)>``），属于 ``py/clear-text-logging-sensitive-data``
+的官方处置口径「敏感数据不应写日志」；日志只留原因与**不携带原文内容的数值型结构摘要**，
+需要看完整入参时从接入层访问日志取，或用同一入参本地复跑。
 
 **跨平台语义（必读）**：入参可能来自任意客户端 OS，而 ``pathlib`` 只认**当前宿主**
 的分隔符——Linux 服务端收到 Windows 客户端的 ``C:\\x\\y`` 或 ``..\\..\\win.ini`` 时，
@@ -88,19 +91,35 @@ class PathTraversalError(ValueError):
     """
 
 
-def _reject(root: Path, raw: object, reason: str) -> None:
-    """统一拒绝出口：服务端留痕（含原文，便于排障），异常消息不回带路径。"""
-    logger.warning("[guardrails.fs] 拒绝路径输入 reason=%s base=%s input=%r", reason, root, raw)
+def _input_shape(raw: object) -> str:
+    """输入的**结构摘要**：长度 / 片段数 / 是否绝对形式，不含任何路径文本。
+
+    数值型投影不携带原文内容，因此不会把凭证派生的会话标识（或其他敏感片段）
+    写进日志，但足以区分「同一个拒绝原因下有多少种、多大的入参」。
+    """
+    s = str(raw)
+    return f"len={len(s)} fragments={len(_split_fragments(s))} absolute={bool(_ABS_FORM_RE.match(s))}"
+
+
+def _reject(raw: object, reason: str) -> None:
+    """统一拒绝出口：服务端只留「原因 + 结构摘要」，异常消息与日志都不回带路径原文。
+
+    基准目录（``root``）与入参原文**均不进日志**：前者由部署配置 / 环境变量派生，
+    后者常含凭证派生的会话目录名，两者都会被 CodeQL 判为 secret
+    （``py/clear-text-logging-sensitive-data``，官方处置口径为「敏感数据不应写日志」）。
+    """
+    logger.warning("[guardrails.fs] 拒绝路径输入 reason=%s input=%s", reason, _input_shape(raw))
     raise PathTraversalError(reason)
 
 
-def _ensure_within(root: Path, candidate: Path) -> Path:
+def _ensure_within(root: Path, candidate: Path, *, hint: object) -> Path:
     """规范化结果必须仍位于 root 内（root 自身算合法）。
 
-    越界时的排查线索（解析后的完整路径）只进服务端日志，不带进异常消息。
+    越界线索同样只记结构摘要（``hint`` 为调用方原样给入的路径）：``root``、
+    解析后的绝对路径、以及入参原文都带出敏感信息，理由见 ``_reject``。
     """
     if candidate != root and not candidate.is_relative_to(root):
-        logger.warning("[guardrails.fs] 拒绝越界路径 base=%s resolved=%r", root, str(candidate))
+        logger.warning("[guardrails.fs] 拒绝越界路径 input=%s", _input_shape(hint))
         raise PathTraversalError("路径越出基准目录")
     return candidate
 
@@ -121,17 +140,17 @@ def safe_join(base: str | Path, *parts: str | Path) -> Path:
     for part in parts:
         raw = str(part)
         if not raw:
-            _reject(root, part, "路径片段不得为空")
+            _reject(part, "路径片段不得为空")
         if "\x00" in raw:
-            _reject(root, part, "路径片段含 NUL 字节")
+            _reject(part, "路径片段含 NUL 字节")
         p = Path(raw)
         # 绝对判定不依赖宿主：``Path.is_absolute()`` 在 POSIX 下不认盘符与反斜杠形式
         if _ABS_FORM_RE.match(raw) or p.is_absolute():
-            _reject(root, part, "路径片段不得为绝对路径")
+            _reject(part, "路径片段不得为绝对路径")
         if _TRAVERSAL_PART in _split_fragments(raw):
-            _reject(root, part, "路径片段不得含 ..")
+            _reject(part, "路径片段不得含 ..")
         current = current / p
-    return _ensure_within(root, current.resolve())
+    return _ensure_within(root, current.resolve(), hint=parts)
 
 
 def resolve_within(base: str | Path, user_path: str | Path) -> Path:
@@ -140,7 +159,8 @@ def resolve_within(base: str | Path, user_path: str | Path) -> Path:
 
     与 ``safe_join`` 的区别只在入口宽容度：这里**允许绝对路径**（因为既有对外契约把
     ``/api/files`` 返回的绝对路径原样传回，收紧为"仅相对"会破坏消费者），
-    但绝对路径也必须本就落在 base 内——等价于先 ``resolve()`` 再做包含判定。
+    但绝对路径也必须本就落在 base 内——先做词法包含判定（不触碰文件系统即拒明显越界），
+    再 ``resolve()`` 并复检一次（挡住符号链接逃逸）。
     异平台的绝对形式（POSIX 宿主收到 ``C:\\...`` / UNC）一律拒绝，见
     ``_is_foreign_absolute``。
 
@@ -151,23 +171,28 @@ def resolve_within(base: str | Path, user_path: str | Path) -> Path:
     raw = str(user_path)
     root = Path(base).resolve()
     if not raw.strip():
-        _reject(root, user_path, "路径参数不得为空")
+        _reject(user_path, "路径参数不得为空")
     if "\x00" in raw:
-        _reject(root, user_path, "路径参数含 NUL 字节")
+        _reject(user_path, "路径参数含 NUL 字节")
     if _is_foreign_absolute(raw):
-        _reject(root, user_path, "路径含非本平台绝对路径形式")
+        _reject(user_path, "路径含非本平台绝对路径形式")
     p = Path(raw)
     candidate = p if p.is_absolute() else root / p
+    # 词法 containment 前置：明显越界（跨根 / 异盘符 / 绝对指向外部）在**不触碰文件系统**
+    # 的前提下就拒掉，不再对未验证输入做 resolve() 遍历；``a/../b`` 这类前缀内形式
+    # 词法判定为真，仍由解析后的复检裁决（符号链接逃逸在那一步挡住）。
+    if not candidate.is_relative_to(root):
+        _reject(user_path, "路径越出基准目录")
     try:
         resolved = candidate.resolve()
     except OSError:
         # 某些平台对非法字符/超长路径在 resolve 阶段即报错，不外泄细节
-        _reject(root, user_path, "路径无法解析")
-    result = _ensure_within(root, resolved)
+        _reject(user_path, "路径无法解析")
+    result = _ensure_within(root, resolved, hint=user_path)
     if os.name != "nt" and "\\" in raw:
         # POSIX 宿主下反斜杠不是分隔符，`..\\evil` 会被 Path 当成单个合法片段从而绕过穿越
         # 检查。故再按“反斜杠也是分隔符”解释一遍，两种解释任一越界即拒。
-        _ensure_within(root, root.joinpath(*_split_fragments(raw)).resolve())
+        _ensure_within(root, root.joinpath(*_split_fragments(raw)).resolve(), hint=user_path)
     return result
 
 

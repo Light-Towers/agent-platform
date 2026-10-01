@@ -254,7 +254,8 @@ async def download_file(path: str):
     try:
         abs_path = resolve_within(output_dir, path)
     except PathTraversalError:
-        # 入参原文只进服务端日志（kernel helper 已记），出站文案固定
+        # 拒绝原因经异常返回；入参原文不落任何日志（kernel helper 只记结构摘要，
+        # 因路径里可能含凭证派生的会话目录名），出站文案固定
         raise HTTPException(status_code=403, detail="拒绝访问: 只能下载输出目录下的文件") from None
     except OSError:
         logger.exception("download path cannot be resolved")
