@@ -124,5 +124,6 @@ v3 的 47 个 commit 是**互相咬合的四条线**：ADR-0006 隔离域（W1-W
 ### 9.5 尚待完成
 
 - §5-5：**已执行，硬指标未达成**（见下）。PR #41 checks 全 pass（含 `ha` 在真 PostgreSQL 16.15 上 27 passed）→ 合入 `a660e76`（2026-10-01T13:00:43Z）。主干 `ref=refs/heads/main` 复验为 **open 3 / fixed 43 / dismissed 0**：多出的 **#48 `actions/missing-workflow-permissions`**（`.github/workflows/ha-assembly.yml:30-56`）由 v3 侧提交 `70f2b83` 新增的 workflow 带入 ⇒ 「合流未新增任何告警」不成立。**未 dismiss**，已转 `docs/plans/plan-codeql-batch7-no-dismiss-real-fixes-2026-10-01.md` §7（B7d）真修。#38/#39 无位移（仍 `auth.py:92` col=47 / `:117`），取证脚本：`.codeartsdoer/temp/verify_main_rescan_v3.py`。
+  - **后续（已闭合，2026-10-01 B7d）**：#48 按三层齐备真修（workflow 补齐 + P11 不变量 + 17 治理用例），PR #42 合入 `9ee0000`@13:41:19Z；`refs/heads/main` 复验为 **open 2 / fixed 44 / dismissed 0**，#48 `state=fixed` 且 `dismissed_at=None`（自动闭合），合入后新建 0。即：该硬指标**在合流当时确实未达成**（账面对待不改写），破口已由 B7d 消除，主干现处于指标要求的状态。取证脚本 `.codeartsdoer/temp/verify_main_b7d.py`。
 - §6 第二条：migrations `006`–`010` 在 `deploy/k8s` 与 `docker-compose` 初始化路径的登记（本 PR 未做，已归入待办）。
 - 新登记的技术债：`IdentityMiddleware` 仅覆盖 2/6 应用（已写入 `ARCHITECTURE.md` §5），`TENANT_JWT_ENFORCE` 硬切换前需先补齐装配层 + 新增 lint 不变量。
