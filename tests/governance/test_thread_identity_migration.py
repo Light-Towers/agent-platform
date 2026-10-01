@@ -2,6 +2,7 @@
 
 两部分对应 Batch 2 的「第③层强制门禁」与「派生算法变更的兼容路径」：
 - ``scripts/lint_architecture.py`` P6：白名单外禁对 api_key/secret 裸用 hashlib；
+  P6-2：【刻意保留的弱派生】``legacy_thread_id`` 调用面封闭（仅迁移脚本可用）；
 - ``scripts/migrate_thread_identity.py``：legacy ``user-{sha256[:12]}`` → 新 ``user-{HMAC[:32]}`` 映射。
 
 脚本非包内模块，按文件路径加载（与 pytest ``--import-mode=importlib`` 一致的做法）。
@@ -85,6 +86,69 @@ def test_p6_scan_flags_non_whitelisted_and_spares_kernel_whitelist(tmp_path, mon
     monkeypatch.setattr(lint, "ROOT", tmp_path)
 
     violations = lint.check_bare_secret_hashing()
+    assert len(violations) == 1
+    assert "probe.py" in violations[0]
+
+
+# ---------------------------------------------------------------------------
+# P6-2 门禁：弱派生助手的调用面封闭（CodeQL PR 重扫把 :99 当新告警报出后补的硬拦截）
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "thread = legacy_thread_id(api_key)",
+        "    return legacy_thread_id(provided)",
+        "pairs = [legacy_thread_id(k) for k in keys]",
+    ],
+)
+def test_p6_2_flags_legacy_id_call(line):
+    assert lint._is_legacy_id_call_line(line) is True
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        # 合规写法：走新派生
+        "thread = derive_thread_id(api_key)",
+        # 名字后非左括号（引用而非调用）
+        "handlers = [legacy_thread_id]",
+        # 注释行放行
+        "# 旧实现 legacy_thread_id(x) 已禁止业务调用",
+    ],
+)
+def test_p6_2_allows_legitimate_lines(line):
+    assert lint._is_legacy_id_call_line(line) is False
+
+
+def test_p6_2_current_tree_has_zero_violations():
+    """当前树内该弱派生只出现在 kernel 定义处与迁移脚本（_LEGACY_ID_ALLOWED）。"""
+    assert lint.check_legacy_identity_calls() == []
+
+
+def test_p6_2_scan_flags_business_call_and_spares_allowed_sites(tmp_path, monkeypatch):
+    """端到端扫描面：业务侧新增调用点被报；kernel 定义处与迁移脚本不报。"""
+    bad = tmp_path / "applications" / "agent_server" / "probe.py"
+    bad.parent.mkdir(parents=True)
+    bad.write_text(
+        "from agent_core.guardrails.auth import legacy_thread_id\n\n\n"
+        "def f(api_key):\n    return legacy_thread_id(api_key)\n",
+        encoding="utf-8",
+    )
+    allowed_script = tmp_path / "scripts" / "migrate_thread_identity.py"
+    allowed_script.parent.mkdir(parents=True)
+    allowed_script.write_text(
+        "def pair(api_key):\n    return legacy_thread_id(api_key)\n", encoding="utf-8"
+    )
+    kernel = tmp_path / "packages" / "agent-core" / "agent_core" / "guardrails" / "auth.py"
+    kernel.parent.mkdir(parents=True)
+    kernel.write_text(
+        "def legacy_thread_id(api_key):\n    return api_key\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(lint, "ROOT", tmp_path)
+
+    violations = lint.check_legacy_identity_calls()
     assert len(violations) == 1
     assert "probe.py" in violations[0]
 
