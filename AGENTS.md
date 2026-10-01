@@ -51,7 +51,7 @@ DATABASE_URL= uvicorn agent_server.main:app --port 8000  # 零依赖冒烟
 
 **Windows 注意**：本机无 `make`，直接用 `uv run pytest ...` / `uv run --with ruff ruff check .` 等价命令。
 
-**文档防漂移**：`scripts/check_doc_sync.py` 在 CI 单独跑（非 `make lint`），校验 AGENTS.md/ARCHITECTURE.md 路径存在 + Makefile session 数一致。改目录结构后须保证其通过。
+**文档防漂移**：`scripts/check_doc_sync.py` 在 CI 单独跑（非 `make lint`），校验 AGENTS.md/ARCHITECTURE.md/README.md 的目录与文件引用路径存在 + Makefile session 数一致（CHANGELOG 是历史快照，故意不校）。改目录结构后须保证其通过。
 
 ## 技术栈
 
