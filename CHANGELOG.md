@@ -2,6 +2,15 @@
 
 本仓库为 uv workspace monorepo。**唯一受支持的安装/运行入口是根 `uv.lock` + `uv sync`**，子包不再维护独立 `uv.lock`（见 v2 修复 #14）。
 
+## Batch 6 验收：模型包生效，主干 open 9 → 6（2026-10-01，分支 `docs/codeql-batch6-acceptance`）
+
+> 纯文档（不改产品代码）。PR #36 合入 `main` = `0bc5175` @09:19:03Z，默认分支重扫 09:20:29Z（CodeQL 2.27.1）。
+
+- **闭合 3 条，均为 `state=fixed` 且 `dismissed_at=None`（自动闭合，非人工）**：`#23`（`agent_federation/api/server.py:264` `FileResponse(abs_path)`，barrier 生效）、`#40`（`fs.py:119`）、`#41`（`fs.py:134`）（后两条靠 `barrierGuardModel`）。`#23` 闭合同时反证仓内模型包**确实被 default setup 自动加载**（上一节据此推翻的选型前提得到实测支持）。
+- **`#42` 仍 open，且经分析为结构不可消除**：`resolve_within` 必然是 `candidate.resolve()`（`:162`）→ `_ensure_within`（`:167`），**不先 resolve 就无从判断越界**，sink 永远在守卫之前，所以 guard 建模无法覆盖。唯一能“消掉”它的做法是把 `Path.resolve` 返回值全局声明为 barrier，而 `resolve()` 本身不做任何净化、且会屏蔽全仓其他真实路径注入——**否决，转人工 dismiss**。这条边界写进方案 §9.1。
+- **本会话累计账面**：`refs/heads/main` open 21 → 6。剩下 6 条全部是「代码无需修、只需面板 dismiss 附证据」：`#34`（灰度分桶真误报）、`#38`/`#39`（HMAC/sha256 形状属实不可消除）、`#43`/`#44`（不在可建模 sink kind 清单）、`#42`（上述结构边界）。**即已不存在应当改产品代码而未改的 CodeQL 告警。**
+- **仍未做的验收项**：模型包非空转自证（删 barrier 行→重扫必复报 `#23`）。现有旁证（加包前 open / 加包后 fixed，代码未动）不等于反证已做，已记在方案 §6-2。
+
 ## Batch 6 执行：仓内 CodeQL 模型包把 kernel guardrails 声明为 path-injection barrier（2026-10-01，分支 `fix/codeql-batch6-model-pack`）
 
 > 零产品代码变更，仅新增 2 个 YAML。**同时推翻本文件下一节的一个选型前提**（已就地标记）。
