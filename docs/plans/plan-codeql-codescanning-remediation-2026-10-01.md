@@ -187,4 +187,6 @@ gh api --method PATCH repos/:owner/:repo/code-scanning/alerts/39/states \
 - `ci`（push 与 PR 两个事件）仍 **pass**（2m27s / 2m48s），`ha` pass（1m11s），`Analyze (python)`、`Analyze (actions)` pass。
 - **告警编号未变**：PR ref 上 open 仍只有 **#38 / #39** 两条，`annotations_count` 仍为 2。但因 `c8e512e` 给 kernel 加了 docstring，行号漂了——`#38: 78 → 92`（`hmac.new(pepper, secret, sha256)`）、`#39: 99 → 117`（`legacy_thread_id` 的 `sha256(...)[:12]`）。CodeQL 的分组跟住了纯注释变更，**没有因行号漂移产生新告警**，这也是「定调入库不需要重开一轮」的直接依据。
 - CodeQL 检查仍 fail 的原因**只剩** #38/#39 尚未 dismiss（见上节 scope 修法），无新增待办。
+- **第三轮（`9e43d3c`，纯文档）依旧只有同样 2 条 annotation**（同一规则、同一两处位置），`ci`（push/PR）/`ha`/`Analyze (python|actions)` 全 pass——确认本轮不产生新告警的结论稳定。
+- **当前权限下能做的替代动作（已执行）**：告警**状态**写入需 `security_events`，但**评论**只需 `repo`——故已把两段定性以 thread reply 形式回帖到 PR 上的两条 CodeQL annotation（`pulls/33/comments` 下 id `4152287050` → #38、`4152287253` → #39）。这样 reviewer 在 diff 处直接看到定调，dismiss 只剩“到 Security 面板把这两条点掉”这一下人工操作。
 
