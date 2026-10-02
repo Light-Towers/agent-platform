@@ -19,6 +19,8 @@
 
 ## 2. 保留的三条（2026-10-02 重核：其中 `v3` 的保留理由已失效）
 
+> 2026-10-02 终态指针：本表后两条（`feat/isolation-hardening`、`test/rag-route-ablation-eval`）已随 PR #49 / #50 入主干并**删除 ref**（本地+远端），`v3` 按当日拍板**保留**。删除动作的安全阀与可恢复性证明见 **§9.3**；本表保留为「当时为何不能删」的历史判据快照，不是现状。
+
 | 分支 | tip | 相对基准（今日实测） | 为什么不能删 |
 |------|-----|---------|-------------|
 | `v3` | 26cd2fa（09-27） | **ahead 0 / behind 67** vs `main`（原记 ahead 47 / behind 19，**已失效**） | ⚠️ 原写的理由「主干尚未吸收」**错了**：PR #41（2026-10-01）已 `git merge origin/v3` 全量合入，且 `git merge-base --is-ancestor 26cd2fa origin/main` 退出码 0 ⇒ 内容零丢失风险。是否删 ref 不再是取证问题而是**组织决策**（长期集成分支名带里程碑语义，同 §4 `origin/v2` 的情形），建议先 `git tag archive/v3 origin/v3` 再删，**待拍板**。
@@ -45,6 +47,9 @@
 - ~~`v3` → 与主干的合流是独立议题（47 commits）~~ → **已被现实关闭**：PR #41（2026-10-01）就是那次合流（`git merge origin/v3` 全量、不 cherry-pick、不用 `-X ours/theirs`），今天实测 v3 对 main ahead = 0。剩下的只是 §2 那条「是否删 `v3` ref」的组织决策。
 
 ## 4. 远端残余（需人工拍板，本轮未动）
+
+> 2026-10-02 订正：第二条所列 `origin/dependabot/uv/minor-and-patch-37a69dd668`（PR #26）**已不存在**——该 PR 关闭后 ref 被 `git fetch --prune` 回收，属历史快照。今天的远端 dependabot 残余是两支：`pypdf-6.19.0`（PR #51，已并入主干）与 `minor-and-patch-7e9aec2f8c`（PR #52，OPEN、对主干净独有 1 条 ⇒ 活分支勿删），逐条定性见 **§9.5**。
+> **同日二次订正（合入 #54 前实跑）**：上面这句已经又过期了一次——`pypdf-6.19.0` 的远端分支在 #51 合并时被 GitHub 自动回收（实测 `ls-remote --heads` 无此 ref），`minor-and-patch-7e9aec2f8c` 则由 **dependabot[bot] 自行关闭**（非本仓决策，取证见 §9.4）。故**此刻远端 dependabot 残余只有一支**：`minor-and-patch-f18118ef2b`（PR **#55**，OPEN，ci 被 L-4 拦）。教训同属一族：**dependabot 分支面是自愈的，不能拿一次 `ls-remote` 的快照当长期事实**（本会话第一次 `ls-remote` 只看到 5 个 head，#55 的分支在那之后几十秒才出现）。
 
 - `origin/v2`：本地已删（内容确已并入），**远端保留**。名字带里程碑语义（CHANGELOG 有"见 v2 修复 #14"的交叉引用），删 ref 会丢历史锚点。若要清，建议先 `git tag archive/v2 origin/v2 && git push origin archive/v2` 再删分支。
 - `origin/dependabot/uv/minor-and-patch-37a69dd668`：对应 **PR #26 OPEN**，是活分支，勿删。
@@ -154,3 +159,84 @@ $ git show --stat --format="" 85cd9bfe | tail -1   # 5 files changed, 216 insert
 ⇒ 删 ref 的判据只认**内容侧**：`git merge-base --is-ancestor <tip> origin/main` 退出码 0 **且** `git cherry -v origin/main <tip>` 无 `+` 行；PR 元数据只用来解释「怎么进去的」，不用来判「进去没有」。（本轮第一版取证脚本正是按「PR 非 MERGED ⇒ 不许删」写，对上面三条全部误判，已换成祖先判据。）
 
 **另记一条已登记过的坑再次踩到（不新增判据，只说明为何要写进脚本注释）**：`most_recent_instance.location` 是扁平 `{path,start_line,start_column}` 而非 SARIF 的 `physicalLocation.uri`，`check-suites` 的 `name` 恒为 `null`——这两处早先已在 CHANGELOG（B7d / B7b-2 段）登记并修过，但沿用的旧骨架 `verify_main_rescan_v3.py` 仍是错形状，本轮复用它时：location 取到 `?` ⇒ 「行号未漂移」这条判据**在旧脚本里其实一直在空转**（取值失败却被当成通过），check-suites 分支则直接 `KeyError` 崩掉。⇒ 防范：**判据取不到值必须 fail-closed**（缺失即 FAIL，不许 `dict.get(..., "?")` 兜底后继续比较），且旧脚本复用前先拿一条已知答案的告警做正对照。
+
+## 9. 追加登记（2026-10-02）：4 条 ref 删除终态、门禁预期集订正、依赖安全告警闭合、剩余项定性
+
+### 9.1 PR #53（纯文档收尾）合入终态
+
+`docs/pr50-merge-closeout` @ `a98f0fa` → **PR #53**：5 条 checks 全 pass（`ci` push 2m56s / pull_request 3m9s、`Analyze (python)` 52s、`Analyze (actions)` 35s、`CodeQL` 2s），`mergeable=MERGEABLE` 且 `mergeStateStatus=CLEAN`，2026-10-02T11:06:58Z 以 merge commit 合入 ⇒ 主干新 tip `63a8f23`（双亲 `617cbf2` + `a98f0fa`）。零漂移沿用 §5 的树 OID 直比：`git rev-parse "a98f0fa^{tree}" "63a8f23^{tree}"` 全等（`aacee653…`），对上一 tip 净差 `4 files / +315 / −4`（即本提交自身，GitHub 未掺入 PR 外内容）。
+
+主干复验（`.codeartsdoer/temp/verify_main_rescan_53b.py` → `=== 总体：PASS ===`）：open 仍恰 `#38`/`#39`（`auth.py:103` / `:128`，本批未碰源码故不漂）、两条实例 `most_recent_instance.commit_sha` = `63a8f239…`、`fixed` 44 / `dismissed` **0** / max **48** / `created_at > 11:06:58Z` 新建 **0**、analyses 两条落在新 tip（11:07:36Z / 11:08:14Z）。
+
+### 9.2 陷阱六：「主干应有的门禁集合」不能写成常量，必须按本批 changed paths 派生
+
+第一版（`verify_main_rescan_53.py`）沿用 §8 那张表的常量集 `{ci, ha, assembly, Analyze×2}`，对本批报 FAIL：`ha` / `assembly` 两条 check-run 在 `63a8f23` 上根本不存在。**不是漏跑，是 `paths:` 过滤**：`.github/workflows/ha.yml` 与 `ha-assembly.yml` 的 `push:` 都带白名单，二者均不含 `docs/**`，而本批 4 个文件全在 `docs/` 与根 `*.md`。交叉验证（不是推断）：`actions/workflows/{ha,ha-assembly}.yml/runs?head_sha=63a8f23` 均 `total_count=0`，而 `head_sha=617cbf2`（含代码改动）各为 1。
+
+⇒ 修订后的判据两条：① 预期集 = `{ci, Analyze (python), Analyze (actions)}` ∪ 按 `git diff --name-only <prev> <tip>` 对两组 `paths:` 求交命中的 `ha` / `assembly`；② **被过滤掉的门禁必须再用 workflow-runs API 证明确实 0 run**，否则会把「未触发」与「触发了但没挂上 check-run」两种相反的形状混为一谈。正向镜像用例已坐实：PR #51 只动 `pyproject.toml` / `applications/agent_federation/pyproject.toml` / `uv.lock`，两个过滤器同时命中 ⇒ 预期集自动变 5 条，实跑 5 条齐（9.4）。
+
+与 §8 末段那条（API 字段形状取错）同族但不同层：**这里错的是「判据的应有集合」本身，它是环境输入的函数**，写死即双向风险（假阳性白修 / 假阴性漏拦）。另注：`ci` 白名单里含 `docs/**`，故文档批次仍有 `make ci` 真跑兜底（push + pull_request 双事件），只是重型基础设施门禁按设计不参与。
+
+### 9.3 4 条 ref 的删除执行终态（`.codeartsdoer/temp/delete_merged_refs.py`）
+
+用户 2026-10-02 拍板范围为「只删 4 条已并完的 feature/test 分支」（`v3` / `v2` 带里程碑语义保留）。执行前脚本内再做四重安全阀（全 fail-closed，任一不满足则整批不删并 `exit 1`）：祖先 / `cherry` 无 `+` / 本地 tip == 远端 tip == 预期 tip / 白名单外 ref 一律不碰。
+
+| ref | tip | ancestor | `cherry +` | local | remote | 删除回显 |
+|---|---|---|---|---|---|---|
+| `test/rag-route-ablation-eval` | `4cffe7c` | YES | 0 | =预期 | =预期 | `- [deleted]` + `Deleted branch (was 4cffe7c)` |
+| `feat/isolation-hardening` | `d078312` | YES | 0 | =预期 | =预期 | 同上 |
+| `feat/execution-memory-kernel-onto-main` | `f459693` | YES | 0 | =预期 | =预期 | 同上 |
+| `feat/observability-eval-onto-main` | `afc738a` | YES | 0 | =预期 | =预期 | 同上 |
+
+执行：`git push origin --delete <4>` rc=0（远端回显 4 行 `- [deleted]`）、`git branch -d <4>` 四条 rc=0（用 `-d` 而非 `-D`：未并入者 git 自拒，等于第二道免费安全阀）。删后复查：本地剩 `docs/pr50-merge-closeout` / `main` / `v3`；远端剩 `main` / `v2` / `v3` / `docs/pr50-merge-closeout` / 两条 dependabot。
+
+**可恢复性证明（删 ref 不等于删内容）**：四个 tip 删后仍 `git merge-base --is-ancestor <tip> origin/main` = True ⇒ 对象由主干历史持有，`git branch <name> <sha>` 可原位重建。这条证明是「先落账再删」能成立的根：台账 §8 的取证表已进主干，所以删除动作自身可审计、可逆。
+
+### 9.4 依赖安全告警：主干默认分支 8 条 high 已闭合，另 1 组依赖 PR 被本仓 L-4 拦下
+
+发现路径本身是个盲区信号：这 8 条**不是本仓任何门禁报的**，而是 `git push --delete` 时远端回显带出的（`GitHub found 8 vulnerabilities … (8 high)`）。⇒ 仓内 CI 只看 CodeQL，不消费 Dependabot alerts，这类信号只能靠人工看到回显（已入 `docs/TODO.md` §8）。
+
+取证（`.codeartsdoer/temp/dependabot_inventory.py`）：8 条全为**同一个包** `pypdf`（pip / `relationship=direct` / manifest=`uv.lock`），全是解析不可信输入时的资源耗尽类（内存/长运行时），首补版本递增至 **6.19.0**；消费面确认为真·攻击者可控输入：`applications/agent_server/api/import_router.py:59` 与 `applications/agent_federation/tools/upload_file_read_tool.py:16` 都在解析上传文件时 `PdfReader(...)`。声明处两处：根 `pyproject.toml:32`（`pdf` extra）与 `applications/agent_federation/pyproject.toml:56`（`docs` extra）。
+
+处置（用户拍板「现在合入」）：**PR #51**（`pypdf 6.16.1 → 6.19.0`）合入前按交接门禁先跑一次 L3 深度审查，并且**先 `gh pr checkout 51` 把待审提交纳入本地基座**（否则审的不是我即将合入的代码，「无发现」就是空转）⇒ findings = 0。2026-10-02T11:28:03Z 合入，主干新 tip `baa965f`（双亲 `63a8f23` + `d3cf899`）。
+
+主干验收（`.codeartsdoer/temp/verify_main_pypdf_51.py` → `=== 总体：PASS ===`）：
+
+| 判据 | 实测 |
+|---|---|
+| Dependabot `state=open` | **0**（合入前 8） |
+| 闭合方式（强证据） | 8 条均 `state=fixed` 且 `dismissal_data=null` ⇒ 重扫判定消失，**未走 dismiss 通道**；`updated_at` 集中 `11:29:11Z–11:29:14Z`（合入后 68–71 秒） |
+| CodeQL 告警面 | 本批零源码改动，复验仍 open 恰 `#38`/`#39`、实例 sha = `baa965f7…`、`fixed` 44 / `dismissed` 0 / max 48 / 新建 0 |
+| 主干门禁（派生集 5 条） | `ci` / `ha` / `assembly` / `Analyze (python)` / `Analyze (actions)` 均 completed/success |
+
+又一条 API 形状伪影（同属「取不到值必须 fail-closed」族）：Dependabot 告警的 REST 列表**没有 `closed_at` 字段**（那是 GraphQL 的），且 `state` 的终态枚举是 **`fixed` / `dismissed`，不存在 `closed`** —— 第一版按 `state != "closed"` 断言，把 8 条正确的 `state=fixed` 全判为异常（幸好是假阴性方向，没造成误报成功）。
+
+**PR #52**（minor-and-patch 组 14 项，改 9 个 pyproject + lock）的 `ci` **失败**。根因是本仓 **L-4 架构门禁如实拦截**（非环境抖动，日志已取）：它把根 `pyproject.toml` 的 `opentelemetry-api` 抬到 `>=1.45.0`，而 `packages/agent-core/pyproject.toml` 仍是 `>=1.24`（主干当前两处均 `>=1.24`，一致），L-4 要求多处下界一致以防组合解析回溯。
+
+【合入 #54 前的二次实跑订正】当时拍板的「保持 open 不动」**已不再成立**，因为 #52 不是我们关的、也不是开着的：
+
+| 取证命令 | 实测值 |
+|---|---|
+| `issues/52/timeline` 里的 `closed` 事件 | actor = **`dependabot[bot]`**（`type=Bot`）、`created_at=2026-10-02T11:59:36Z`（无 `merged` 事件） |
+| `pulls/52` | `state=closed`、`merged=false`、`merged_at=null`、head `4aa4233`、base `617cbf29` |
+| bot 在 `issues/52/comments` 的留言（11:59:34Z，比 `closed_at` 早 2 秒）| "Looks like these dependencies are updatable in another way, so this is no longer needed." |
+| 替代 PR | **#55 OPEN**，同一 group 但 14 → **13 项**（pypdf 已随 #51 出去），新分支 `minor-and-patch-f18118ef2b` |
+| #55 的 `ci`（job `110828479303` 日志）| **12:01:16Z 以完全同一条 L-4 消息再红**（`'opentelemetry-api' 下界不一致（pyproject.toml[otel]: >=1.45.0 vs packages/agent-core/pyproject.toml[tracing]: >=1.24）`）；`ha`/`assembly` pass、CodeQL skipping |
+| 被回收的 `4aa4233` 可达性 | `refs/pull/52/head` 仍存在⇒ 提交不会因分支删除而丢；且 `is-ancestor origin/main` = False（内容未入主干） |
+
+⇒ 两个结论修正：① **L-4 不是偶然一次报红，而是连续两次拦下同一类回归**（这正是「三层齐备」里强制门禁层的价值：不靠人自觉）；② 待办形状从「等 #52 变绿/替 Dependabot 改它的分支」变为「**本仓先归一 OTel 下界，再重触组更新**」，属 `plan-observability §3.3` 的独立决策面（需先出方案，本轮不动）。取证脚本：`.codeartsdoer/temp/pr52_close_evidence.py`。
+
+### 9.5 剩余 ref 与待办的逐条定性（本轮明确不动的部分）
+
+> 表内不写 `behind` 绝对数：它每合一个主干提交就变，不具可复现性；定性只依赖不变量（ahead = 0 / `cherry` 无 `+` / 是 `origin/main` 祖先）。
+
+| 项 | 实测形状 | 定性与处置 |
+|---|---|---|
+| `v3` @ `26cd2fa` | `cherry -v origin/main` 0 行、ahead 0、本地=远端 | 内容零丢失风险，**删不删是组织决策不是取证问题**。2026-10-02 拍板：本轮**保留**（`archive/v3` tag 方案未采纳也未否决） |
+| `origin/v2` @ `b691ff1` | 同上；**本地无此分支**（`rev-parse v2` = `Needed a single revision`） | 同 `v3`，带里程碑语义，**保留**；本地无需动作 |
+| `dependabot/uv/pypdf-6.19.0` @ `d3cf899` | 已随 PR #51 入主干 ⇒ 现为「已并完」；**远端分支已被 GitHub 在合并时自动回收**（实测 `ls-remote --heads` 无此 ref），本地那份是 `gh pr checkout 51` 临时建出的 | 收尾登记后删**本地**分支 + `fetch --prune` 清残留跟踪 ref |
+| ~~`dependabot/uv/minor-and-patch-7e9aec2f8c` @ `4aa4233`~~ 【二次实跑订正，原判「活分支勿删」已过期】 | PR #52 由 **dependabot[bot] 自动关闭**（timeline `closed` actor=Bot、`closed_at=11:59:36Z`、`merged=false`），分支随之回收；head 提交仍可经 `refs/pull/52/head` 取回 | 不再是 ref 面待办；后继者见下一行 |
+| `dependabot/uv/minor-and-patch-f18118ef2b` @ PR **#55** | #52 关闭同时 Dependabot 重算组集开出替代 PR（14 → 13 项）；`ci` **同签名失败**（12:01:16Z L-4：根 `[otel] >=1.45.0` vs `agent-core [tracing] >=1.24`），`ha`/`assembly` pass | **活分支，勿删**；但它不是「等 review」的对象——前置是本仓先归一下界（见 9.4） |
+| B7b-4（`#38`/`#39` 真修） | 前置取证仍卡 `192.168.100.126`：banner 交换前被关闭，累计 5 次同签名 ⇒ 本轮**未再硬连**（沿用已入库结论，不拿旧结论冒充新实跑） | **不可开工**，属外部条件依赖非代码缺口 |
+| R19（issue #23） | 未动工；`FastAPI(telemetry=…)` 关闭项 + 新 lint 门禁均未实现 | 需先按红线出方案，并做真集群端到端复验（同样卡部署侧环境） |
+| `plan-multi-expert-adjudication-2026-09-30.md` | 已随 PR #53 入库（269 行，状态 Proposed） | 本轮不实施；其三个基座提交已在主干 |
+
