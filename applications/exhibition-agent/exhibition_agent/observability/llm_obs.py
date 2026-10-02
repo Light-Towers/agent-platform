@@ -101,7 +101,9 @@ class LangfuseBackend:
     def __init__(self) -> None:
         self._handler: Any = None
         try:
-            from langfuse.callback import CallbackHandler  # noqa: PLC0415
+            # S4（观测方案 §3.4）：v2 路径 langfuse.callback 已不存在，迁 v3+/v4 代际契约；
+            # 无参构造读 LANGFUSE_* 环境变量（本应用凭据走 env，与调用方注入模式无关）。
+            from langfuse.langchain import CallbackHandler  # noqa: PLC0415
 
             self._handler = CallbackHandler()
             logger.info("Langfuse callback handler 已加载")

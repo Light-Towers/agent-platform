@@ -19,6 +19,9 @@ P9：禁止在 app 层裸调 ``monitor.report_tool*``（散点埋点，v3 合流
 P10：禁止 ``from tools.*`` 直引 ``@tool`` 绕过 ``tool_registry.get_tool()``（v3 合流并入）。
 P11：禁止无顶层 ``permissions:`` 块的 GitHub Actions workflow（GITHUB_TOKEN 未限权，
      对应 CodeQL ``actions/missing-workflow-permissions``，见 B7d 方案 §7）。
+L-1：禁止手动 .__enter__()/.__exit__()；L-2：禁止经 app.state 散点取用 tracer；
+L-3：观测 init 仅限装配点（三条见 plan-observability-global-remediation-2026-09-29.md §3.3）。
+L-4：OTel/langfuse 可选依赖多处声明下界必须归一（同方案，防组合解析回溯）。
 """
 
 from __future__ import annotations
@@ -76,12 +79,12 @@ def check() -> list[str]:
 # P2 架构不变量：生产 FastAPI app 必须经 agent_core 统一工厂 ``build_api_app``
 # 创建，由构造保证注册统一 500 脱敏 handler（仅扫 applications/**）。
 # 见 docs/plans/plan-p2-unified-exception-handlers-2026-09-24.md §3.2/§3.3。
-# 白名单：knowledge-service main.py（已有自实现 handler，D-3 本轮不迁移）、
-# exhibition mock_server（dev fixture、非网关服务）；各 tests/ 已跳。
+# 白名单：exhibition mock_server（dev fixture、非网关服务）；各 tests/ 已跳。
+# knowledge-service main.py 已迁 build_api_app（观测方案 S2 尾项，2026-09-30），
+# 其自有 M5 错误信封经 install_handlers=False 保留，不再占白名单。
 # ---------------------------------------------------------------------------
 _FASTAPI_PATTERN = re.compile(r"\bFastAPI\s*\(")
 _FASTAPI_WHITELIST = (
-    "applications/knowledge-service/knowledge_service/main.py",
     "applications/exhibition-agent/exhibition_agent/mock_server/warehouse_mock.py",
 )
 
@@ -543,6 +546,172 @@ def check_tool_direct_import() -> list[str]:
 
 
 # ---------------------------------------------------------------------------
+# S1/S3 观测架构不变量（plan-observability-global-remediation-2026-09-29.md）：
+# L-3：观测 init（init_tracing/init_otel）只允许出现在应用装配点（main/server）
+#      与过渡门面，业务模块禁止私起——防止再长出第二个状态机（R6 根因）。
+# L-1：禁止对上下文管理器手动 .__enter__()/.__exit__()——真 OTel（api≥1.27）
+#      的 CM 生命周期与 SSE/后台任务跨 asyncio 任务边界不安全（R4/R8 根因，
+#      NoOp 替身 __getattr__ 兜底使其在关闭态隐形）。
+# ---------------------------------------------------------------------------
+_INIT_PATTERN = re.compile(r"(?<!def )\b(?:init_tracing)\s*\(")
+_INIT_WHITELIST = (
+    "applications/agent_server/main.py",
+    "applications/knowledge-service/knowledge_service/main.py",
+    "applications/agent_federation/api/server.py",
+    "applications/knowledge-service/eval/",  # 评测入口脚本（非服务进程，装配点等价）
+    # 门面 otel.py 已退役（观测方案 §12，2026-09-30）：kernel 直调后 init_tracing 仅剩装配点。
+    # exhibition 装配薄封装：无本地状态、委托 kernel，由其 server.py:59 装配点调用。
+    "applications/exhibition-agent/exhibition_agent/observability/otel.py",
+)
+
+_MANUAL_CM_PATTERN = re.compile(r"\.__(?:enter|exit)__\s*\(")
+_MANUAL_CM_WHITELIST: tuple[str, ...] = ()
+
+# L-2（S2/S3）：禁止经 app.state 散点取用 tracer（R8/R12 土壤）——请求级 span 由
+# TracingMiddleware 创建，业务层经 agent_core.tracing.current_span/record_request_attributes
+# 取用；S2 迁移完成后白名单清零，新代码走散点即 CI 红。
+_TRACER_STATE_PATTERN = re.compile(
+    r"getattr\([^,)]*app\.state\s*,\s*[\"'](?:otel_)?tracer[\"']|app\.state\.(?:otel_)?tracer\b"
+)
+_TRACER_STATE_WHITELIST: tuple[str, ...] = ()
+
+
+def _iter_prod_py():
+    """遍历生产 py 文件（复用 _skipped_rel，与 P6/P7 同一套排除面）。"""
+    for py_file in ROOT.rglob("*.py"):
+        rel = py_file.relative_to(ROOT).as_posix()
+        if _skipped_rel(rel):
+            continue
+        yield rel, py_file
+
+
+def _is_code_line(line: str) -> bool:
+    """过滤注释行与 rst 内联代码（``docstring 提及不算调用）。"""
+    s = line.strip()
+    return not (s.startswith("#") or "``" in s)
+
+
+def check_init_scatter() -> list[str]:
+    """L-3：观测 init 只允许在装配点/过渡门面出现（业务模块私起 init 即违规）。"""
+    violations: list[str] = []
+    for rel, py_file in _iter_prod_py():
+        if not rel.startswith(("applications/", "packages/")):
+            continue
+        if any(rel == w or rel.startswith(w) for w in _INIT_WHITELIST):
+            continue
+        try:
+            for lineno, line in enumerate(py_file.read_text(encoding="utf-8").splitlines(), 1):
+                if _INIT_PATTERN.search(line) and _is_code_line(line):
+                    violations.append(
+                        f"{rel}:{lineno}: {line.strip()}"
+                        f"（观测 init 仅限装配点 main/server 与过渡门面，禁止业务模块私起第二状态机）"
+                    )
+        except Exception:
+            pass
+    return violations
+
+
+def check_manual_cm_lifecycle() -> list[str]:
+    """L-1：禁止手动 .__enter__()/.__exit__()（CM 生命周期必须 with 配对，跨任务手动拆分配方=500）。"""
+    violations: list[str] = []
+    for rel, py_file in _iter_prod_py():
+        if not rel.startswith(("applications/", "packages/")):
+            continue
+        if any(rel == w or rel.startswith(w) for w in _MANUAL_CM_WHITELIST):
+            continue
+        try:
+            for lineno, line in enumerate(py_file.read_text(encoding="utf-8").splitlines(), 1):
+                if _MANUAL_CM_PATTERN.search(line) and _is_code_line(line):
+                    violations.append(
+                        f"{rel}:{lineno}: {line.strip()}"
+                        f"（span/attach 上下文管理器必须 with 配对；手动 enter/exit 跨异步任务边界不安全）"
+                    )
+        except Exception:
+            pass
+    return violations
+
+
+def check_tracer_state_scatter() -> list[str]:
+    """L-2：禁止 app.state 取用 tracer 散点（应走中间件请求 span + current_span）。"""
+    violations: list[str] = []
+    for rel, py_file in _iter_prod_py():
+        if not rel.startswith("applications/"):
+            continue
+        if any(rel == w or rel.startswith(w) for w in _TRACER_STATE_WHITELIST):
+            continue
+        try:
+            for lineno, line in enumerate(py_file.read_text(encoding="utf-8").splitlines(), 1):
+                if _TRACER_STATE_PATTERN.search(line) and _is_code_line(line):
+                    violations.append(
+                        f"{rel}:{lineno}: {line.strip()}"
+                        f"（tracer 不得经 app.state 散点取用；请求级 span 由 TracingMiddleware 创建，"
+                        f"业务属性经 agent_core.tracing.record_request_attributes 写入）"
+                    )
+        except Exception:
+            pass
+    return violations
+
+
+# ---------------------------------------------------------------------------
+# L-4（S3，依赖契约）：OTel/langfuse 可选依赖版本区间三处归一（R1/R2 防回归）。
+# 背景：根 [otel]、agent-core [tracing] 两处 extras 与
+# federation [observability] 的 langfuse 各自声明下界曾漂移（sdk>=1.20 vs >=1.24），
+# 叠加 langfuse v2/v3 代际冲突导致 pip 必回溯。规则：
+#   1) OTel 软导入面均在声明位有 extras（门面退役后 agent-runtime 无 otel 直导入，
+#      声明位已摘；kernel 在 agent-core [tracing]，装配方在根 [otel]）；
+#   2) 同一包在多处声明时下界版本必须一致；
+#   3) agent-runtime 必须为 langfuse 软导入（tracing.py）声明 extras，且下界与
+#      federation [observability] 一致（import 路径 v2→v3 迁移属 S4，见方案 §3.4）。
+# ---------------------------------------------------------------------------
+_OTEL_EXTRAS_SITES = (
+    ("pyproject.toml", "otel"),
+    ("packages/agent-core/pyproject.toml", "tracing"),
+    ("packages/agent-runtime/pyproject.toml", "langfuse"),
+    ("applications/agent_federation/pyproject.toml", "observability"),
+    # exhibition 观测后端软依赖（llm_obs 懒导入）；S4 迁入，同受 langfuse 下界归一约束。
+    ("applications/exhibition-agent/pyproject.toml", "langfuse"),
+)
+_OTEL_TRACKED_PKGS = ("opentelemetry-api", "opentelemetry-sdk", "opentelemetry-exporter-otlp", "langfuse")
+
+
+def _normalize_dep_name(name: str) -> str:
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def check_otel_extras_alignment() -> list[str]:
+    """L-4：校验 OTel/langfuse extras 声明存在且多处下界一致。"""
+    violations: list[str] = []
+    declared: dict[str, list[tuple[str, str]]] = {}  # pkg -> [(site, lower)]
+    for rel, extra in _OTEL_EXTRAS_SITES:
+        path = ROOT / rel
+        try:
+            with path.open("rb") as f:
+                data = tomllib.load(f)
+        except (OSError, tomllib.TOMLDecodeError) as e:
+            violations.append(f"{rel}: 无法解析（{e}）")
+            continue
+        deps = data.get("project", {}).get("optional-dependencies", {}).get(extra)
+        site = f"{rel}[{extra}]"
+        if deps is None:
+            violations.append(f"{site}: extras 缺失（观测软依赖必须显式声明，见方案 §3.3 L-4）")
+            continue
+        for req in deps:
+            name = _normalize_dep_name(re.split(r"[<>=!~;\[ ]", req, 1)[0])
+            if name not in _OTEL_TRACKED_PKGS:
+                continue
+            m = re.search(r">=\s*([0-9][0-9a-zA-Z.]*)", req)
+            lower = m.group(1) if m else "(无下界)"
+            declared.setdefault(name, []).append((site, lower))
+
+    for pkg, sites in sorted(declared.items()):
+        lowers = {lower for _site, lower in sites}
+        if len(lowers) > 1:
+            detail = " vs ".join(f"{site}: >={lower}" for site, lower in sites)
+            violations.append(f"'{pkg}' 下界不一致（{detail}）——归一到方案敲定版本，防组合解析回溯")
+    return violations
+
+
+# ---------------------------------------------------------------------------
 # P11 架构不变量：GitHub Actions workflow 必须显式声明顶层 GITHUB_TOKEN 权限。
 # 根因（CodeQL actions/missing-workflow-permissions）：未声明 permissions 的 job
 # 会回落到组织/仓库级默认（常为读写），任何被引入的第三方 action 都能拿写权限。
@@ -684,6 +853,45 @@ def main() -> int:
         rc = 1
     else:
         print("P11 架构约束通过：所有根 workflow 均声明了顶层 permissions")
+    v10 = check_init_scatter()
+    if v10:
+        print("L-3 观测架构约束违反：init_tracing/init_otel 仅限装配点（main/server/过渡门面/eval 入口）调用")
+        print("修复：接线收敛到应用启动装配点，业务模块经 get_tracer()/请求上下文取用（见 plan-observability-global-remediation）：")
+        for v in v10:
+            print(f"  {v}")
+        rc = 1
+    else:
+        print("L-3 观测架构约束通过：观测 init 无业务模块私起")
+
+    v11 = check_manual_cm_lifecycle()
+    if v11:
+        print("L-1 观测架构约束违反：禁止手动 .__enter__()/.__exit__()（真 OTel 下 CM 跨任务拆分配方=500）")
+        print("修复：with start_span(...)/with use_context(...) 标准形配对，或 start_span(context=)+finally end()：")
+        for v in v11:
+            print(f"  {v}")
+        rc = 1
+    else:
+        print("L-1 观测架构约束通过：无手动 CM 生命周期拆分配对")
+
+    v12 = check_tracer_state_scatter()
+    if v12:
+        print("L-2 观测架构约束违反：禁止经 app.state 散点取用 tracer（应走 TracingMiddleware 请求 span）")
+        print("修复：业务属性经 agent_core.tracing.record_request_attributes / current_span 写入：")
+        for v in v12:
+            print(f"  {v}")
+        rc = 1
+    else:
+        print("L-2 观测架构约束通过：无 app.state tracer 散点取用")
+
+    v13 = check_otel_extras_alignment()
+    if v13:
+        print("L-4 依赖契约违反：OTel/langfuse extras 必须声明且多处下界一致（R1/R2 防回归）")
+        print("修复：归一到方案敲定下界（见 plan-observability §3.3 L-4）：")
+        for v in v13:
+            print(f"  {v}")
+        rc = 1
+    else:
+        print("L-4 依赖契约通过：OTel/langfuse extras 声明齐备且下界一致")
     return rc
 
 

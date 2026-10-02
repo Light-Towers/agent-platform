@@ -74,6 +74,7 @@
 - [ ] Milvus 与 pgvector 双向量库长期是否统一（当前 knowledge-service 用 Milvus，agent-core/agent-runtime 默认 pgvector，见 P1-6 双库现状说明）
 - [ ] U-1：`QueryRequest` 入站字段名（`query`/`question`、`session_id`/`thread_id`）双写兼容层能否移除（见 `README.md`「已知待拍板项（技术债）」）
 - [x] CodeQL Batch 6（已执行，方案 `docs/plans/plan-codeql-batch6-kernel-sanitizer-models-2026-10-01.md` §9）：kernel `agent_core/guardrails/fs.py` 的 `safe_join`/`resolve_within`/`safe_filename` 不被 CodeQL 内建模型识别为 sanitizer，主干重扫报出 `#23`/`#40`/`#41`/`#42`。已新增仓内模型包 `.github/codeql/extensions/agent-platform-python/`（`barrierModel` + `barrierGuardModel`）。**两个原预设已被推翻**：（一）无需从 default setup 切 advanced setup——仓级包放 `.github/codeql/extensions/` 即被自动加载，“只接受已发布包”的限制只适用组织级扩展；（二）`#43`/`#44`（`py/clear-text-logging-sensitive-data`）**不在可自定义的 sink kind 清单内**，无 barrier 可写，“保留取证 + dismiss”是技术上唯一选项（非风格偏好）。待验：合入后主干重扫确认 `#23` 闭合。——**已验收（PR #36 合入 `0bc5175`，主干重扫 open 9 → 6）**：`#23`/`#40`/`#41` 均 `state=fixed` 自动闭合（反证模型包真被 default setup 加载）；`#42` 仍 open 且经分析为结构不可消除（`resolve()` 必须在 containment 检查之前，guard 建模无法覆盖），详见方案 §9.1。剩余待做：模型包非空转自证（删 barrier 行→重扫必复报 `#23`）。
+- [ ] R19（GitHub issue #23）：FastAPI ≥ 0.142 **原生 telemetry 默认开启**，与 kernel `TracingMiddleware` 对同一请求各建一个同名 SERVER span（互为兄弟），且框架自行 `trace.set_tracer_provider()`——属本仓「第二状态机/双实现」反模式在框架层重现。默认取最小改动：`build_api_app` 内 `FastAPI(telemetry={"tracing": False})` + `scripts/lint_architecture.py` 新增门禁（裸 `FastAPI(` 未关 telemetry 即 CI 失败）；动工前需确认框架无其它自配 provider 残留路径，并做真集群端到端复验（见 `docs/plans/plan-observability-global-remediation-2026-09-29.md` §18）
 
 ## 7. 检索 / 存储增强
 

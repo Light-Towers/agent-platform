@@ -10,6 +10,8 @@
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
+from agent_core.guardrails.app_factory import build_api_app
+from agent_core.tracing import shutdown_tracing
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -27,9 +29,12 @@ from knowledge_service.utils.tenant_identity import TenantHeaderMiddleware, curr
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """应用生命周期：启动/关闭时执行一次性逻辑（此处仅记录启动日志）。"""
+    """应用生命周期：启动/关闭时执行一次性逻辑（日志 + 观测统一退出）。"""
     logger.info("掌柜智库服务启动完成，监听 %s:%s", settings.app_host, settings.app_port)
     yield
+    # 观测方案 §3.2：lifespan 末尾统一 kernel 退出（flush+shutdown provider，
+    # 尾批 span 不丢）；未 init/未装 SDK 时 no-op，零开销。
+    shutdown_tracing()
     logger.info("掌柜智库服务已关闭")
 
 
@@ -42,11 +47,21 @@ def create_app() -> FastAPI:
     - 使用 lifespan 管理生命周期与日志。
     :return: 配置完成的 FastAPI 实例
     """
-    app = FastAPI(
+    app = build_api_app(
         title="掌柜智库 Zhanggui Zhiku",
         description="PDF/MD 知识库导入 + 多路检索问答一体化服务（RAG）",
         version="1.0.0",
         lifespan=lifespan,
+        # S2 尾项（观测方案 §3.2）：装配 kernel 统一 TracingMiddleware——
+        # 每个 HTTP 请求建 server span，入站 traceparent 提取为父由构造保证；
+        # BackgroundTasks/SSE 在 middleware await 链内继承 context，
+        # run_query_graph 的 request.total 及其下节点 traced_span 自动挂请求 span（流式父链）。
+        # 已知边界：SecurityGuards/CORS 更外层对其 401/429/预检短路返回不产 span
+        # （该层拒绝已由护栏自身日志/指标可观测）；按方案兼容顺序逐 app 开启。
+        enable_tracing=True,
+        # ks 保留自有 M5 错误信封 {code, msg, request_id}（P2 D-3：消费者已依赖该形状，
+        # 不改对外契约），下方 register_exception_handlers 继续生效，不装 kernel 默认 handler。
+        install_handlers=False,
     )
 
     # M5：统一错误响应（脱敏 {code, msg, request_id}）—— 注册在路由之前，对全路由生效

@@ -1,0 +1,8 @@
+{
+  "label": "e2e_post_sparse_fix_2026-09-29",
+  "source_run": "eval/runs_server/e2e_after_reindex/20260929_074853_fbcf7ec095",
+  "n_records": 60,
+  "created_at": "2026-09-29T09:09:37Z",
+  "sanitized": true,
+  "note": "sparse 编码一致性修复后 e2e(run 20260929_074853, config fbcf7ec095, golden real, scorer judge, hyde off, rerank on, n=60) 冻结的回归基准锚点"
+}

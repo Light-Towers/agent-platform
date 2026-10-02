@@ -27,7 +27,7 @@
 ```bash
 uv sync --all-packages --extra dev   # 安装（workspace 全量包 + dev 工具）
 make ci                              # CI 唯一门禁：lint + 10 个 pytest session（见 Makefile test 目标）+ 启发式 eval
-make test                            # 9 session pytest（根 / shared-schemas / agent-runtime / agent-server / 联邦 / kefu / exhibition / knowledge-service / nl2sql-service）
+make test                            # 9 session pytest（根 / shared-schemas / agent-runtime / agent-server / 联邦 / kefu / exhibition / knowledge-service / nl2sql-service）+ 1 个 --extra otel 真 SDK session（tests/observability，观测钉用例）
 make eval                            # 评测门禁（启发式，CI 可达）
 DATABASE_URL= uvicorn agent_server.main:app --port 8000  # 零依赖冒烟
 ```

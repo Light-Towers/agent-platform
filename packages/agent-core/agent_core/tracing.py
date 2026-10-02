@@ -45,9 +45,18 @@ DEFAULT_SERVICE_NAME = "agent-core"
 
 # ---------------------------------------------------------------------------
 # 运行状态（模块级；init 在启动阶段调用一次，之后只读，线程安全）
+# 全仓**唯一**观测状态机：任何宿主都不得自持第二套 enabled/tracer 全局态，
+# 否则跨服务传播门（tracing_propagation）与实际初始化脱钩（R6：traceparent 静默
+# 断裂的根因）。lint L-3 拦截私起 init；agent_runtime.otel 过渡门面已于
+# 2026-09-30 退役删除，宿主装配点直调本 kernel。
+# 三态语义（运维可区分“显式关”与“启用但坏了”，R5）：
+#   UNINITIALIZED 未调 init / DISABLED 显式关闭或未配置 / 
+#   DEGRADED      请求启用但初始化失败（reason 记真因）/ ACTIVE 真实导出
 # ---------------------------------------------------------------------------
 _initialized: bool = False
 _enabled: bool = False
+_status: str = "UNINITIALIZED"
+_status_reason: str = ""
 _tracer: Any = None
 _provider: Any = None
 _base_attrs: Dict[str, Any] = {}
@@ -120,7 +129,12 @@ class _NoOpSpan:
 
 
 class _NoOpSpanContextManager:
-    """no-op 上下文管理器，保证 ``with start_span(...)`` 可用且不抛异常。"""
+    """no-op 上下文管理器，保证 ``with start_span(...)`` 可用且不抛异常。
+
+    注：不提供 ``__getattr__`` 向 span 方法的兜底转发——该兼容 hack 曾掩盖
+    app 层“手动 CM 上调 span.set_attribute”的误用（NoOp 态隐形、真 SDK 态 500，
+    复盘 R7/R8）。误用应被 L-1 lint 拦截，替身必须与真实现同样报错。
+    """
 
     __slots__ = ("_span",)
 
@@ -132,12 +146,6 @@ class _NoOpSpanContextManager:
 
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> bool:
         return False  # 不吞异常
-
-    def __getattr__(self, name: str) -> Any:
-        # 兼容下游"手动进入 CM 后直接调 span 方法"用法
-        # （agent_server/api/routes.py:196-198）；with ... as span 路径不触发，语义不变。
-        span = object.__getattribute__(self, "_span")
-        return getattr(span, name)
 
 
 class _NoOpTracer:
@@ -200,6 +208,35 @@ def _merge_attrs(attrs: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     if attrs:
         merged.update(attrs)
     return merged
+
+
+# OTel API 缺失时的恒定无效 span（current_span 降级替身，写操作静默）。
+try:  # pragma: no cover - 取决于可选依赖
+    from opentelemetry.trace import INVALID_SPAN as _INVALID_SPAN
+except ImportError:
+    class _InvalidSpanShim:
+        def is_recording(self) -> bool:
+            return False
+
+        def set_attribute(self, key: str, value: Any) -> None:
+            return None
+
+        def set_attributes(self, attributes: Dict[str, Any]) -> None:
+            return None
+
+        def record_exception(self, exception: BaseException, attributes: Optional[Dict[str, Any]] = None) -> None:
+            return None
+
+        def set_status(self, status: Any, description: Optional[str] = None) -> None:
+            return None
+
+        def update_name(self, name: str) -> None:
+            return None
+
+        def end(self) -> None:
+            return None
+
+    _INVALID_SPAN: Any = _InvalidSpanShim()
 
 
 # ---------------------------------------------------------------------------
@@ -271,8 +308,21 @@ def get_traceparent() -> str:
 
 
 def is_tracing_enabled() -> bool:
-    """是否处于真实导出模式（SDK 可用 + 总开关开启 + 端点/注入 exporter 就绪）。"""
+    """是否处于真实导出模式（SDK 可用 + 总开关开启 + 端点/注入 exporter 就绪）。
+
+    全仓唯一的传播门开关（tracing_propagation 读此处）；宿主经任何入口 init
+    （直调本 kernel，过渡门面已退役）最终都落到本状态机，R6 型断裂不再可能。
+    """
     return bool(_enabled)
+
+
+def get_tracing_status() -> Dict[str, str]:
+    """当前观测状态（供 /health 与排障）：UNINITIALIZED / DISABLED / DEGRADED / ACTIVE。
+
+    DEGRADED = 请求启用但初始化失败（reason 记真因）；与“显式关闭”可区分（R5）。
+    """
+    with _state_lock:
+        return {"status": _status, "reason": _status_reason}
 
 
 def is_initialized() -> bool:
@@ -286,27 +336,45 @@ def init_tracing(
     enabled: Optional[bool] = None,
     *,
     exporter: Any = None,
+    sampling_rate: Optional[float] = None,
     config_hash: Optional[str] = None,
     collection: Optional[str] = None,
 ) -> Any:
-    """幂等初始化 OTel 追踪。
+    """幂等初始化 OTel 追踪（全仓唯一观测状态机，lint L-3 保证只在装配点调用）。
 
     参数：
         service_name: 服务名（默认读 ``AGENT_CORE_SERVICE_NAME``，再默认 ``agent-core``）
         otel_endpoint: OTLP 导出端点（默认读 ``OTEL_EXPORTER_OTLP_ENDPOINT``，空 → no-op）
         enabled: 总开关（默认读 ``AGENT_CORE_TRACE_ENABLED``，默认 False）
-        exporter: 显式 span exporter（单测注入 ``InMemorySpanExporter`` 用；生产不传）
+        exporter: 显式 span exporter（单测注入 ``InMemorySpanExporter`` 用；
+            宿主门面也可注入 ConsoleSpanExporter 映射 console 导出；生产不传）
+        sampling_rate: TraceIdRatioBased 采样率（None/>=1.0 → ALWAYS_ON；非法值钳制 1.0；
+            仅在自建 provider 路径生效，复用全局 provider 时采样由宿主决定）
         config_hash / collection: 统一 span 属性，由宿主应用**注入**；
             不传则按中性环境变量回退（绝不读取宿主配置路径）。
 
     返回：tracer（可能为 no-op tracer，绝不抛异常）。
     """
-    global _initialized, _enabled, _tracer, _provider
+    global _initialized, _enabled, _tracer, _provider, _status, _status_reason
 
     service_name = service_name or os.getenv(ENV_SERVICE_NAME, DEFAULT_SERVICE_NAME)
     otel_endpoint = otel_endpoint if otel_endpoint is not None else os.getenv(ENV_OTEL_ENDPOINT, "")
     if enabled is None:
         enabled = _as_bool(os.getenv(ENV_TRACE_ENABLED), False)
+
+    # 采样率校验（与历史门面行为一致：非法钳制 1.0 + 告警）
+    sampler = None
+    if sampling_rate is not None:
+        if not 0.0 <= sampling_rate <= 1.0:
+            logger.warning("OTEL_SAMPLING_INVALID: %s, using 1.0", sampling_rate)
+            sampling_rate = 1.0
+        if sampling_rate < 1.0:
+            try:
+                from opentelemetry.sdk.trace.sampling import TraceIdRatioBased
+
+                sampler = TraceIdRatioBased(sampling_rate)
+            except ImportError:  # pragma: no cover - SDK 缺失路径，后续分支统一降级
+                sampler = None
 
     with _state_lock:
         if _initialized:
@@ -323,17 +391,29 @@ def init_tracing(
             _tracer = _make_noop_tracer()
             _provider = None
             if enabled and not _SDK_AVAILABLE:
+                # 请求启用但包缺失 → DEGRADED（与“显式关”可区分，R5）
+                _status, _status_reason = "DEGRADED", "sdk_not_installed"
                 logger.warning(
-                    "OTel SDK 未安装（可选 extra tracing：uv sync --extra tracing），tracing 降级为 no-op"
+                    "OTel 启用失败：SDK 未安装（可选 extra tracing：uv sync --extra tracing），"
+                    "tracing 降级为 no-op（非‘显式关闭’，status=DEGRADED）"
                 )
             elif enabled and not can_export:
-                logger.info("OTel 未配置导出端点（OTEL_EXPORTER_OTLP_ENDPOINT 为空），tracing 降级为 no-op")
+                _status, _status_reason = "DEGRADED", "no_export_endpoint"
+                logger.warning(
+                    "OTel 已启用但未配置导出端点（OTEL_EXPORTER_OTLP_ENDPOINT 为空且未注入 exporter），"
+                    "tracing 降级为 no-op，status=DEGRADED"
+                )
+            else:
+                _status, _status_reason = "DISABLED", ""
             return _tracer
 
         try:
-            provider = _SDKTracerProvider(
-                resource=_Resource.create({"service.name": service_name})
-            )
+            provider_kwargs: Dict[str, Any] = {
+                "resource": _Resource.create({"service.name": service_name})
+            }
+            if sampler is not None:
+                provider_kwargs["sampler"] = sampler
+            provider = _SDKTracerProvider(**provider_kwargs)
             if exporter is not None:
                 provider.add_span_processor(_SimpleSpanProcessor(exporter))
             else:
@@ -343,6 +423,7 @@ def init_tracing(
                     )
                     _initialized = True
                     _enabled = False
+                    _status, _status_reason = "DEGRADED", "otlp_exporter_not_installed"
                     _tracer = _make_noop_tracer()
                     _provider = None
                     return _tracer
@@ -352,6 +433,8 @@ def init_tracing(
             existing = _otel_trace.get_tracer_provider()
             if not isinstance(existing, _otel_trace.ProxyTracerProvider):
                 provider = existing
+                if sampler is not None:
+                    logger.info("复用全局 TracerProvider，sampling_rate 不生效（采样由宿主 provider 决定）")
                 logger.info("复用已存在的全局 TracerProvider（如 Langfuse SDK），不覆盖")
             else:
                 # 仅在本模块自建 provider 时挂 OTLP 导出；复用路径依赖宿主 exporter，避免白挂/重复导出。
@@ -365,11 +448,14 @@ def init_tracing(
             _tracer = provider.get_tracer(service_name)
             _initialized = True
             _enabled = True
-            logger.info("OTel tracing 已启用: service=%s endpoint=%s", service_name, otel_endpoint or "in-memory")
-        except Exception as e:  # pragma: no cover - 初始化异常兜底，绝不外抛
-            logger.warning("OTel tracing 初始化失败（%s），降级为 no-op", e)
+            _status, _status_reason = "ACTIVE", ""
+            logger.info("OTel tracing 已启用: service=%s endpoint=%s",
+                        service_name, otel_endpoint or "injected-exporter")
+        except Exception as e:  # pragma: no cover - 初始化异常兜底，绝不外抛；真因进 status（R5）
+            logger.warning("OTel tracing 初始化失败（%s），降级为 no-op，status=DEGRADED", e)
             _initialized = True
             _enabled = False
+            _status, _status_reason = "DEGRADED", f"init_failed: {e}"
             _tracer = _make_noop_tracer()
             _provider = None
         return _tracer
@@ -381,6 +467,70 @@ def get_tracer() -> Any:
         if _tracer is not None:
             return _tracer
     return _make_noop_tracer()
+
+
+def force_flush() -> None:
+    """关闭/退出前 flush 全部 span（无 provider 或未启用时 no-op，绝不抛异常）。
+
+    BatchSpanProcessor 默认 ~5s 周期导出，短生命周期进程/验证脚本需显式 flush。
+    """
+    with _state_lock:
+        provider = _provider
+    if provider is None:
+        return
+    try:
+        if hasattr(provider, "force_flush"):
+            provider.force_flush()
+    except Exception:  # pragma: no cover - 防御：flush 失败不影响退出流程
+        logger.warning("tracing force_flush failed", exc_info=True)
+
+
+def shutdown_tracing() -> None:
+    """统一 lifespan 退出入口：flush + shutdown provider。
+
+    取代各 app 手写 force_flush（方案 §3.2）；BatchSpanProcessor 未 flush 会丢
+    尾批 span，所有经 init_tracing（含门面）装配的应用都应在 lifespan 末尾调本函数。
+    """
+    with _state_lock:
+        provider = _provider
+    if provider is None:
+        return
+    try:
+        if hasattr(provider, "force_flush"):
+            provider.force_flush()
+        provider.shutdown()
+    except Exception:  # pragma: no cover - 防御：退出不影响主流程
+        logger.warning("tracing shutdown failed", exc_info=True)
+
+
+def current_span() -> Any:
+    """当前上下文中的 span（TracingMiddleware 创建的请求级 server span）。
+
+    未启用/无 SDK 返回 InvalidSpan（写属性静默无效、绝不抛异常）；业务层补属性
+    的正规入口，取代 handler 内手写 span / app.state 取 tracer（方案 §3.2 L-2）。
+    """
+    if not _enabled or _otel_trace is None:
+        return _INVALID_SPAN
+    try:
+        return _otel_trace.get_current_span()
+    except Exception:  # pragma: no cover - 防御
+        return _INVALID_SPAN
+
+
+def record_request_attributes(attrs: Dict[str, Any]) -> None:
+    """向当前请求 span 补业务属性（thread_id/priority/脱敏 question 等）。
+
+    放在 handler 早段即可覆盖 cache_hit/429/409/断连全部旁路路径（R10）；
+    未启用时静默 no-op（opt-in 铁律零开销）。
+    """
+    if not _enabled or not attrs:
+        return
+    try:
+        span = current_span()
+        if span is not None and span.is_recording():
+            span.set_attributes(attrs)
+    except Exception:  # pragma: no cover - 防御：观测不得影响业务主流程
+        logger.debug("record_request_attributes failed", exc_info=True)
 
 
 @contextmanager
@@ -451,8 +601,14 @@ def record_exception(exception: BaseException) -> None:
 
 
 def _reset_for_tests() -> None:
-    """重置模块状态，供单元测试隔离使用（shutdown provider 并清空全部状态）。"""
-    global _initialized, _enabled, _tracer, _provider
+    """重置模块状态，供单元测试隔离使用（shutdown provider 并清空全部状态）。
+
+    同步重置 OTel API 全局 provider：``set_tracer_provider`` 为 Once 一次性语义，
+    首个注入 exporter 的用例嵌入全局 provider 后，后续用例 teardown 仅 shutdown
+    不重置全局 → 再 init 走"复用"路径拿到已 shutdown 的死 provider，注入的
+    exporter 永远拿不到 span（2026-09-30 ks 套件首跑真 SDK 定性；CI 默认 session
+    无 SDK 该组用例 skip，从未暴露）。仅测试钩子使用，不触生产路径。"""
+    global _initialized, _enabled, _tracer, _provider, _status, _status_reason
     with _state_lock:
         if _provider is not None:
             try:
@@ -462,15 +618,24 @@ def _reset_for_tests() -> None:
             _provider = None
         _initialized = False
         _enabled = False
+        _status = "UNINITIALIZED"
+        _status_reason = ""
         _tracer = None
         _base_attrs.clear()
         _request_id_var.set("")
         _user_query_hash_var.set("")
+    if _SDK_AVAILABLE:  # 锁外重置 API 全局，避免与 init 嵌套取锁
+        try:
+            _otel_trace._TRACER_PROVIDER = None
+            _otel_trace._TRACER_PROVIDER_SET_ONCE = _otel_trace.Once()
+        except Exception:  # pragma: no cover - 防御：属性名随版本变化则跳过
+            pass
 
 
 __all__ = [
     "init_tracing",
     "get_tracer",
+    "get_tracing_status",
     "start_span",
     "traced_span",
     "generate_request_id",
@@ -481,5 +646,9 @@ __all__ = [
     "is_initialized",
     "record_exception",
     "noop_tracer",
+    "force_flush",
+    "shutdown_tracing",
+    "current_span",
+    "record_request_attributes",
     "_reset_for_tests",
 ]
