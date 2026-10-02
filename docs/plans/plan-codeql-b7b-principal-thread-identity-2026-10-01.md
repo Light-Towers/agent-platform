@@ -110,7 +110,7 @@ isStrongPasswordHashing:   "ARGON2" "PBKDF2" "BCRYPT" "SCRYPT"                  
 > 3. **接线面只 1/3，且这是取证结果不是偷懒**：三个宿主里只有 **knowledge-service 在中间件时刻拿得到断言主体**——它先 `add_middleware(SecurityGuardsMiddleware)` 后 `add_middleware(TenantHeaderMiddleware)`，而 Starlette **后添加者更外层** ⇒ 租户已绑定（已接线 `subject_provider=current_asserted_tenant`）。`agent_federation` 的 `mount_identity_middleware`（`api/server.py:143`）在 guards（`:148`）**之前**添加 ⇒ guards 更外层、执行时主体尚未绑定；`agent_server` 根本不用 `SecurityGuardsMiddleware`。⇒ 两处的限流桶**今日实为 IP 兜底**，属诚实中间态；把联邦的接线序对调会让身份 401 抢在 API-Key 401 之前（行为变更，无现有用例覆盖），列入 B7b-4 一并处理，不在本 PR 偷改。
 > 4. **`subject_provider` 抛错不得把请求变成 500**：kernel 兜 `ValueError` 退 IP 并告警一次。因 `server_tenant_id()` 的 fail-fast 语义正是抛 `ValueError`（`agent_core/memory/_tenant_gate.py:21`），宿主若直接传它，限流桶这个辅助信息不该有杀伤主链路的能力（用例 `test_middleware_subject_provider_raising_falls_back_to_ip`）。
 >
-> **代价的实测新形状**（比初稿写得更具体）：旧实现下**同一把部署级密钥的所有客户端共用一个桶**，一个客户端打满配额会连带 429 同密钥的其他客户端；改为 IP 后各客户端独立（用例 `test_middleware_rate_limit_buckets_are_per_ip_not_per_credential` 锁住）。反面：**单客户端换 IP（拨号/代理/IPv6 前缀变化）即可重置配额**——旧实现下换 IP 无效（桶按密钥），新实现下有效。这是限流**强度**的实质下降，不属「无副作用重构」；缓解手段是已有的全局窗口 `_global`（`rate_limit_global`，默认 500/60s）与接入后的主体桶。【登记为待拍板：若需「每密钥配额」语义，应用**服务端可验证的密钥 id（非凭据摘要）**而非凭据派生值】
+> **代价的实测新形状**（比初稿写得更具体）：旧实现下**同一把部署级密钥的所有客户端共用一个桶**，一个客户端打满配额会连带 429 同密钥的其他客户端；改为 IP 后各客户端独立（用例 `test_middleware_rate_limit_buckets_are_per_ip_not_per_credential` 锁住）。反面：**单客户端换 IP（拨号/代理/IPv6 前缀变化）即可重置配额**——旧实现下换 IP 无效（桶按密钥），新实现下有效。这是限流**强度**的实质下降，不属「无副作用重构」；缓解手段是已有的全局窗口 `_global`（`rate_limit_global`，默认 500/60s）与接入后的主体桶。【已拍板（2026-10-02）：**不恢复「每密钥配额」语义**，保持现状（断言主体优先 / IP 兜底），依靠已有全局窗口 + ks 已接入的主体桶】——若将来运维反馈确实需要，再按「服务端可验证的密钥 id（非凭据摘要）」另开子项，**不得**回到凭据派生值。
 >
 > **新增语义门禁（三层齐备的第三层）**：`test_only_session_identity_still_digests_credentials`（AST）——`guardrails/auth.py` 内调用 `fingerprint` 的函数集合必恰为 `{derive_thread_id}`。链② 拆后它从「两元素」变「单元素」，B7b-4 拆完链①后应改为 `== set()`（注释已写，“拆完就删用例”不是选项）。
 
@@ -145,11 +145,13 @@ isStrongPasswordHashing:   "ARGON2" "PBKDF2" "BCRYPT" "SCRYPT"                  
 
 | 阶段 | 内容 | 对 `#38` 的作用 | 部署前提 | 状态 |
 |---|---|---|---|---|
-| B7b-1 | 链③ slot 化 + 删 `_hash_api_key`（纯 kernel/registry，无身份依赖） | 去 1/3 源 | 无 | **已实施（2026-10-02，PR #45）**：上注已订正代价判断；另自引入并真修了 1 条 `py/clear-text-logging-sensitive-data`（见 §4.3 末段；PR 的 CodeQL check 已 fail → pass，且该告警未进主干）；用例 5 → 10 → 11（新增 5 + 改写 1 + 日志 AST 守门 1） |
-| B7b-2 | 链② 限流桶去密钥 + 改 2 处用例契约 | 去 2/3 源 | 无 | **已实施（2026-10-02，PR #46）**：`resolve_client_key` 签名删 `headers`/`auth_enabled`⇒ 凭据类型层面进不来；`SecurityGuardsMiddleware` 新增 `subject_provider` 注入，ks 已接 `current_asserted_tenant`，联邦/agent_server 未接（取证原因见 §4.2 实施补记第 3 条，接线序对调归 B7b-4）。用例：改写 4 处旧契约 + 新增 AST 语义门禁 1 + kernel 新契约 3 + ks 中间件集成 3（详见 §4.2 补记）。**PR 面告警闭环已实取**：check-run `110690703578` → `conclusion=success`、`output.title` = “No new alerts in code changed by this pull request”、`output.summary` 只剩分支告警链接（无 “New alerts” 段）、annotations 空 ⇒ §7.2 要盯的「派生值改投另一个 sink」未发生（与 B7b-1 初版不同）。`ci`/`ha`/`assembly` 均 pass。 |
+| B7b-1 | 链③ slot 化 + 删 `_hash_api_key`（纯 kernel/registry，无身份依赖） | 去 1/3 链 | 无 | **已实施（2026-10-02，PR #45）**：上注已订正代价判断；另自引入并真修了 1 条 `py/clear-text-logging-sensitive-data`（见 §4.3 末段；PR 的 CodeQL check 已 fail → pass，且该告警未进主干）；用例 5 → 10 → 11（新增 5 + 改写 1 + 日志 AST 守门 1） |
+| B7b-2 | 链② 限流桶去密钥 + 改 2 处用例契约 | 去 2/3 链 | 无 | **已实施并已合入（2026-10-02，PR #46 → merge `76589c4`）**：`resolve_client_key` 签名删 `headers`/`auth_enabled`⇒ 凭据类型层面进不来；`SecurityGuardsMiddleware` 新增 `subject_provider` 注入，ks 已接 `current_asserted_tenant`，联邦/agent_server 未接（取证原因见 §4.2 实施补记第 3 条，接线序对调归 B7b-4）。用例：改写 4 处旧契约 + 新增 AST 语义门禁 1 + kernel 新契约 3 + ks 中间件集成 3（详见 §4.2 补记）。**PR 面告警闭环已实取**：check-run `110690703578` → `conclusion=success`、`output.title` = “No new alerts in code changed by this pull request”、`output.summary` 只剩分支告警链接（无 “New alerts” 段）、annotations 空 ⇒ §7.2 要盯的「派生值改投另一个 sink」未发生（与 B7b-1 初版不同）。`ci`/`ha`/`assembly` 均 pass。**主干复验已 PASS**（合入后 `refs/heads/main` 实取，§7.7 逐链判据：链② 具名节点所在通路 1 → 0，`#39` 未受影响，`dismissed` 0 / 最大告警号 48 不增 / 合入后新建 0）⇒ `#38` 进入「只剩链①」的预期中间态。 |
 | B7b-3 | ~~联邦 `_apply` 接入 user 断言~~ → **已移出本批关键路径**（Q1 定 (a) 租户级），随 A5 运行时身份接入另批推进 | 不再是前置 | — | 移出关键路径 |
-| B7b-4 | 链① thread_id ← `server_tenant_id()`（按 Q2(c) 三态兜底；`resolve_thread_id` 2 处 + 5 个消费点）**+ 联邦 `subject_provider` 接线（需对调 identity/guards 添加序，含 401 优先级影响面，见 §4.2 补记第 3 条）** | **去最后一源 ⇒ `#38` 应闭合** | 需 §6 兼容窗口 | 未开工 |
+| B7b-4 | 链① thread_id ← `server_tenant_id()`（按 Q2(c) 三态兜底；`resolve_thread_id` 2 处 + 5 个消费点）**+ 联邦 `subject_provider` 接线（需对调 identity/guards 添加序，含 401 优先级影响面，见 §4.2 补记第 3 条）** | **去最后一链 ⇒ `#38` 应闭合** | 需 §6 兼容窗口 | 未开工 |
 | B7b-5 | 删 `fingerprint` / `legacy_thread_id` + 枚举式迁移脚本 + P6 反转/P6-2 作废 | 死代码清理；**`#39` 闭合** | 部署侧先跑枚举核实 | 未开工 |
+
+**口径提醒（B7b-2 实测自纠）：“链数” ≠ “SARIF 通路数”**——本表“去 x/3 链”指的是**逻辑链**，不是扫描器报的通路条数。实测：`#38` 单个 sink 上 pre 面 4 条通路（链① 一家就被枚举为 `resolve_thread_id` 两形参 + default `None` + `derive_thread_id` 形参 = 4 个源节点，外加链② 1 条），拆掉整条链② 后 post 面**仍为 4 条**。⇒ **通路条数不能当验收指标**，逐 PR 的中间态判据见 §7.7。
 
 **兼容窗口**：新 thread_id 生效后，旧 `user-<digest>` 数据按 §4.5 枚举重挂；窗口内旧目录**只读不删**（改名失败/碰撞时保留双侧，沿用 `migrate_thread_identity.py:69-70` 的「目标已存在拒绝覆盖」策略）。
 
@@ -162,14 +164,16 @@ isStrongPasswordHashing:   "ARGON2" "PBKDF2" "BCRYPT" "SCRYPT"                  
 4. **缓存正确性**：新增用例覆盖「密钥变更 → slot 更替 → 不命中旧客户端」（§4.3 取舍的守门用例）。
 5. **门禁**：`scripts/lint_architecture.py` exit 0（P6 反转后白名单为空仍全仓零违规 + 反例单测红）；`check_doc_sync.py` 0 警告；`make test` 9 session 对齐 CI；`eval/run_eval.py --fail-below 0.8` 保持 100%。
 6. **账面同步**：`packages/agent-core/README.md:12/:42`（`derive_thread_id`、`AGENT_PLATFORM_SECURITY_PEPPER` 说明）、`ARCHITECTURE.md` 模块清单、`docs/TODO.md` §8、`CHANGELOG.md`，以及 Batch 7 方案 §4 的定调（该文档现仍写「`fingerprint` 行→误报」，且 §4.1 的「只改调用方不够」推论需按本文件 §1.3 订正）。
+7. **逐 PR 中间态判据（B7b-2 实测定型，适用于链①未拆完的所有子 PR）**：拆哪条链，就断言「**该链特有的具名节点集合**在 `#38` 的全部 codeFlows 上从 >0 变 0」，而**不是**断言通路数下降（§6 口径提醒）。具名节点清单：链① `def derive_thread_id` / `fingerprint(api_key`；链② `x-api-key` / `extract_api_key_from_headers` / `key:{fingerprint`；链③ `_hash_api_key` / `cache_key`。**必双向断言**：同时要求 pre 面该集合 > 0，否则判据本身不咬人（拿不到“真的拆了”的证据）。复验脚本：`.codeartsdoer/temp/verify_main_b7b2.py`（含取法与全部判据，可改 SHA 给 B7b-4 复用）。
 
-## 8. 拍板结果（2026-10-01，三项均按推荐值接受）
+## 8. 拍板结果（2026-10-01 三项均按推荐值接受；2026-10-02 补一项 Q4）
 
 | # | 问题 | 选项与代价（保留原始权衡记录） | **决定** |
 |---|---|---|---|
 | **Q1** | thread_id 主体粒度 | (a) **租户级**：行为最接近今天（今天≈单桶），会话不分裂，`server_tenant_id()` 已有软兜底；隔离度弱于 (b)。(b) **用户级**：隔离最好，但**今天共用一把 key 的客户端会分裂成多个会话**，历史数据归属需人工判定。(c) **有 user 用 user、否则 tenant**：兼顾，但同一部署内会话归属随部署配置漂移（运维易困惑） | **(a) 租户级**起步（B7b-4 不改变现有会话可见行为），(b) 随 A5 运行时身份接入另批推进 |
 | **Q2** | 无主体断言时的兜底（约束 A/B 的现实） | (a) 退回 `DEV_THREAD_ID`（开发模式现状，`auth.py:48`）——生产若忘配身份会**静默共用单一会话**（fail-open，危险）。(b) `raise`（fail-fast）——生产安全但破坏「零依赖冒烟 `DATABASE_URL= uvicorn agent_server.main:app`」（AGENTS.md 承诺的运行方式）。(c) 复用身份层现有三态：`jwt`/`single` 正常派生，`insecure` 下按 `DEPLOY_ENFORCE_IDENTITY` 决定拒答 or DEV 兜底，并**启动告警一次**（与 `require_identity_startup_guard` 同构） | **(c)**：与 ADR-0007 启动守卫同构，既不破坏冒烟，又不静默 fail-open |
 | **Q3** | 链③（LLM provider 密钥）是否纳入本批 | 不纳入则 `#38` 剩一源、**不闭合**（§1.2 结论）；纳入则 §4.3 的缓存命中取舍必须接受 | **纳入**，并补 §7 验收用例 4 作为守门 |
+| **Q4**（2026-10-02，B7b-2 后提） | 是否恢复「每密钥配额」语义（链② 拆除后的代价面） | 恢复则需服务端可验证的密钥 id（新能力，要 key→主体映射）；不恢复则限流强度下降（换 IP 可重置配额） | **不恢复，保持现状**（断言主体优先 / IP 兜底 + 已有全局窗口）。将来若运维确需，另开子项且**不得**回到凭据派生值 |
 
 ⇒ 开工顺序按 §6 表（B7b-1 先做链③：纯 kernel、无身份依赖、可单独回滚）。Q1 选 (a) 使 **B7b-3（联邦接入 user）不再是 B7b-4 的阻塞项**，可从关键路径移出、并入 A5 那一批；本批只需 `server_tenant_id()` 一条路径可用（它已在位，不像 `server_user_id()` 那样零消费者）。
 
@@ -187,9 +191,18 @@ gh api repos/github/codeql/contents/shared/concepts/codeql/concepts/internal/Cry
 # 告警三态与主干复验
 python .codeartsdoer/temp/verify_main_b7d.py --once
 
+# 通路（codeFlows）明细——alerts REST 不给，必须从单条 analysis 取内嵌 SARIF（B7b-2 实测定型）
+#   同一 commit 有 python / actions 两条 analysis，只取 results_count>0 的那条
+gh api "repos/Light-Towers/agent-platform/code-scanning/analyses?tool=CodeQL&per_page=40"
+gh api repos/Light-Towers/agent-platform/code-scanning/analyses/<ID> -H "Accept: application/sarif+json"
+#   ↑ 带该 Accept 头时**返回体本身就是 SARIF**（顶层 runs[]）；不带则只给 644B 元数据（无 sarif 字段）
+#   SARIF 行号相对该 analysis 的 commit，跳 commit 比较必须 `git show <sha>:<path>` 回源
+
 # 部署侧前置核实（B7b-5 开工前必须实跑，确认 §4.5 枚举假设成立）
 ls applications/agent_federation/updated/ applications/agent_federation/output/
 psql "$DATABASE_URL" -c "SELECT DISTINCT thread_id FROM checkpoints WHERE thread_id LIKE 'user-%';"
 ```
+
+> **该取证至今未跑通（2026-10-02 登记）**：部署侧 `root@192.168.100.126` 的 TCP 22 可达，但连接在 **banner 交换前**被关闭（`kex_exchange_identification: Connection closed by remote host`）—— 发生在任何认证之前，与本地密钥/`authorized_keys` 无关，属服务端侧限制（fail2ban / `hosts.deny` / `MaxStartups` 一类）；跨约 25 分钟含 220s 与 8min 冷却共 4 次同签名后停止硬连。本机也无可用的替代路径：主 `docker-compose.yml` 不发布 5432，HA compose 只绑 `127.0.0.1:${HA_PG_PORT:-5433}`，且本机无 docker 无 `.env`。⇒ **B7b-4 开工前必须拿到这两条命令的真实输出**（存量 `user-*` 为零 ⇒ 无需迁移窗口；非零 ⇒ 按 §4.5 枚举重挂并保留只读兼容窗口），不得以推定代替数据。
 
 **本方案的取证记录**（否定式/数量断言均逐条 grep 实取）：`derive_thread_id` 生产调用点 = **2**；`server_user_id` 生产消费者 = **0**；`.github/codeql/` 配置文件 = **0** 个；`*.sql` 中 thread_id 列 = **0** 处；`updated/` 目录当前为空。
