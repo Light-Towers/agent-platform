@@ -2,7 +2,7 @@
 
 本仓库为 uv workspace monorepo。**唯一受支持的安装/运行入口是根 `uv.lock` + `uv sync`**，子包不再维护独立 `uv.lock`（见 v2 修复 #14）。
 
-## B7b-1 实施：链③ LLM 客户端缓存凭据 slot 化（2026-10-02，含三处自纠）
+## B7b-1 实施：链③ LLM 客户端缓存凭据 slot 化（2026-10-02，含四处自纠）
 
 > 方案：`docs/plans/plan-codeql-b7b-principal-thread-identity-2026-10-01.md` §4.3 / §6（已拍板三项后开工的第一个 PR，纯 kernel）。只动 `llm/registry.py`，**未碰 `auth.py` 一行**（链①②属 B7b-2/4）。
 
@@ -12,7 +12,8 @@
 - **自纠 3（改漏的陈旧描述）**：模块 docstring 仍写 `(provider, model, json_mode, api_key_hash, …)`。修掉的同时把 `api_key_hash` 加进守门禁词，让这个守门用例能拦住「代码改了、文档没改」这一类回归。
 - **测试**（数量已实测：文件 `def test_` 计数 5 → 10，即**新增 5 个 + 改写 1 个 + 保留 4 个旧用例**）：新增覆盖 slot 入键不含任何摘要 / 换密钥不命中旧客户端 / 空凭据专用 slot 不占表位 / 达上限重置同时清客户端 / 同名覆盖 provider 失效旧缓存 / **源码级守门：registry 全文不得出现 `hashlib|hmac|fingerprint|sha256|digest|api_key_hash`**；旧用例 `test_api_key_not_stored_plaintext_in_cache_key` 按新契约改写为 `test_cache_key_carries_slot_not_any_digest`（原断言「键内必含指纹」属旧契约实现细节；改写后仍保留且**加严**了「无明文、无指纹、无裸 sha256」三条否定断言，非放宽）。
 - **实跑结果**：`test_llm_registry_cache.py` **10 passed**；定向集合（registry + guardrails + fingerprint + fs）**100 passed / 5 skipped（6.38s）**；`ruff check .` exit 0；`scripts/lint_architecture.py` exit 0（P2/P4-2/P5/P6/P7-P11 全过，含 P6 现有白名单未动）。
-- **卡点登记（不得规避）**：agent-core 全量 557 用例在本机**阻塞**，已用 `-v` 实时重定向定位到具体用例 `packages/agent-core/tests/test_intent.py::test_is_chitchat_false_for_query`（L1 embedder 路径，前 3 个 intent 用例已过）；`git grep` 实取该文件**不引用** `get_llm_client`/`registry`/`api_key` ⇒ 与本批无耦合。**本机不声称全量已验**，全量由 CI 的 `make test` 兜（PR 检查为权威）。
+- **卡点登记（不得规避）**：本地尝试跑 `packages/agent-core/tests` + `tests/governance` + `tests/llm`（collect 实取合计 **557** 用例，其中 agent-core 单目录 **310**）在本机**阻塞**，已用 `-v` 实时重定向定位到具体用例 `packages/agent-core/tests/test_intent.py::test_is_chitchat_false_for_query`（L1 embedder 路径，前 3 个 intent 用例已过）；`git grep` 实取该文件**不引用** `get_llm_client`/`registry`/`api_key` ⇒ 与本批无耦合。**本机不声称全量已验**，全量由 CI 的 `make test`（9 session）兜（PR 检查为权威）。
+- **自纠 4（数字作用域越界，本条即修正）**：上面那行原先写「agent-core 全量 557 用例」——**557 是三目录 collect 合计，agent-core 单目录实为 310**，把合计数字归给了单一目录。已按 `--collect-only` 实取重述。该错表述同时存在于 commit `fe74e78` 的 message 里；**不回改已推送历史**，以此处为准。
 - **验收预期（先说清免得误读）**：B7b-1 单独合入**不会**消 `#38`（还剩链①会话身份与链②限流桶两源）；按方案 §7 判据看「password 分类源数递减」而非闭合，且必须回 `refs/heads/main` 复验（PR 绿 ≠ 主干绿）。
 - 附带发现：本仓无 `pytest-timeout`（`uv run --with` 可临时注入），而 Windows 下 `Start-Process -RedirectStandardOutput` + Python 非 tty 会**块缓冲**导致日志 0 字节；可观测的进度定位靠 `-v` 直写文件或前台管道，长用例建议加 `PYTHONUNBUFFERED=1`。
 
