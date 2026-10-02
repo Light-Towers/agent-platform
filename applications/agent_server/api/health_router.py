@@ -1,5 +1,6 @@
 """健康检查路由。"""
 
+from agent_core.tracing import get_tracing_status
 from agent_runtime.db import ping
 from fastapi import APIRouter
 
@@ -28,5 +29,8 @@ async def health() -> HealthResponse:
         admission=settings.admission_effective_enabled,
         revert=settings.revert_enabled,
         otel=settings.otel_effective_enabled,
+        # R11：报 kernel 状态机真值（ACTIVE/DEGRADED/DISABLED/UNINITIALIZED），
+        # 不读 settings 意愿值；DEGRADED 真因进启动日志（get_tracing_status.reason）。
+        otel_status=get_tracing_status()["status"],
         mcp=settings.mcp_enabled,
     )
