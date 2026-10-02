@@ -1,11 +1,12 @@
 # ADR-0005: 执行记忆协议下沉内核（记忆层统一契约）
 
-- 状态：**提案（Proposed，待评审）**
-- 日期：2026-09-27
+- 状态：**采纳（Accepted，2026-10-02 随 T0 落地转正）**
+- 日期：2026-09-27（提案）／2026-10-02（T0 实际入主干后转采纳）
 - 关联：ADR-0003（双数据库驱动并存）、ADR-0004（类型化记忆下沉内核）、`ARCHITECTURE.md` §2.1 / §4 / §5、优化 E「双轨编排收敛」、`docs/plans/plan-memory-hardening-2026-09-27.md`
 - 触发：审计「记忆层是否为双层设计 / 是否需维护两份代码」时的实测发现
-- 入库来源：随 2026-10-01 `integration/v3-into-main` 合流从 `feat/isolation-hardening`@`d4b6faa` 导入。`ARCHITECTURE.md` §5 对本文件的引用由 `v3` 带入，而 `main` / `v3` 两个树里都没有这个文件（悬空引用，由 `scripts/check_doc_sync.py` 实测拦下）。
-- **主干保留「提案」态的理由**：来源分支后续修订 `ff68aee` 将其改为「已采纳」并声称 T0 已落地（`agent_core/memory/execution.py` 下沉 `EpisodicStoreProtocol`/`ProceduralStoreProtocol`、`CapabilityReport` 补 `supports_episodic` 等），但主干实测这些产物**不存在**（`git grep -l -e EpisodicStoreProtocol -e supports_episodic -- packages tests scripts` 返回空；`agent_core/memory/` 无 `execution.py`），故**未采信该修订**。T0 在主干真正落地后再更新状态。
+- 入库来源：随 2026-10-01 `integration/v3-into-main` 合流从 `feat/isolation-hardening`@`d4b6faa` 导入「提案」版（`ARCHITECTURE.md` §5 对本文件的引用由 `v3` 带入，而当时 `main` / `v3` 两个树里都没有这个文件——悬空引用，由 `scripts/check_doc_sync.py` 实测拦下）。
+- **状态转正的过程记录（两次实测隔出一段真实差距）**：导入时主干**不采信**来源分支 `ff68aee` 的「T0 已落地」修订，当时的依据是主干 `git grep -l -e EpisodicStoreProtocol -e supports_episodic` 返回空、`agent_core/memory/` 无 `execution.py`——结论对当时的事实为真，不是推定。本次并入（`feat/execution-memory-kernel-onto-main`）把 T0 真带进主干后，该理由失效，逐条复验：`agent_core/memory/execution.py`（两协议 `@runtime_checkable`，仅 import stdlib + `_tenant_gate`，无红线 1 反向依赖）、`store.CapabilityReport` 三个能力位、`memory/__init__.py` 导出均已在位，且两份契约测试在主干代码上实跑 **5 passed** ⇒ 据此转「采纳」并取用下方 §6 决策记录（分支于 09-27 已评审的四项拍板 + 一条实现新增决策）。
+- 未采信与采信的边界：**状态转采纳 ≠ T0–T8 全部完成**。`plan-memory-hardening` 的 T2–T8 仍未执行（见其「主干实态」行）。
 
 ---
 
@@ -142,12 +143,23 @@
 
 ---
 
-## 6. 待决策项（评审时拍板）
+## 6. 决策记录（2026-09-27 评审采纳，2026-10-02 随 T0 入主干生效）
 
-1. **执行记忆是并入 `MemoryStore` 门面，还是并列 `ExecutionMemoryStore`？** → 倾向并列（五动词语义已固化在语义记忆上，硬并会让门面承担两种生命周期）。
-2. **评分函数 `three_factor_score` 下沉后，是否同时替换 `typed.py` 的加权融合？** → 倾向**不替换**：语义记忆的 `type_weight × importance × 双曲衰减` 已通过生产审计，执行记忆用三因子；两者通过 `MemoryCategory` 分派，不混用。
-3. **`UserSemanticStore`（F9）此次一并收口，还是单独立项？** → 倾向一并：它是当前唯一"正在成形的重复入口"，成本极低（薄适配器，见 plan T8）。
-4. **`typed.MemoryType.episodic` 是否重命名以消除 §1.3 冲突？** → 倾向**不重命名**（涉及 `memories` 表既有数据值），改为在协议 docstring 显式互斥声明 + 加一条测试锁定两者语义。
+> 本轮评审将四项「倾向」锁定为正式决策，并补充实现中确定的数据模型归属决策。
+> 本节取代主干导入版所列的四项「待决策项」。**其中一项与当时的倾向相反**：项 3 「`UserSemanticStore`（F9）」在倾向阶段写的是「一并收口」，评审实际拍板为「单独立项（归 T8）」——以本节为准，不得再以「倾向一并」推断已收口。
+
+1. **执行记忆门面 → 并列 `ExecutionMemoryStore`（延后实现）**：T0 先下沉内核 Protocol + `CapabilityReport` 能力位；并列门面作为后续增量，不阻塞协议收口（避免引入未实现门面）。
+2. **`three_factor_score` 不替换 `typed.py` 加权融合**（锁定）：语义记忆评分已通过生产审计，执行记忆用三因子，按 `MemoryCategory` 分派，不混用。
+3. **`UserSemanticStore`（F9）单独立项**（归 plan-memory-hardening T8）：本次未实现，作为后续收口项（薄适配器）。
+4. **`typed.MemoryType.episodic` 不重命名**（锁定）：协议 docstring 显式互斥声明 + 测试锁定语义（见 `test_execution_memory_kernel_protocol.py`）。
+5. **（实现新增决策）数据模型归属**：`Episode` / `ProceduralEntry` dataclass 由 runtime 拥有（已是事实真相源），内核**只下沉 Protocol**、不重复定义 dataclass——在内核再定义一份会重现双份真相源，与 ADR-0005 目标相悖。
+
+### 6.1 实施状态（T0 已落地）
+
+- **内核协议层**：`packages/agent-core/agent_core/memory/execution.py`（`EpisodicStoreProtocol` / `ProceduralStoreProtocol`，`@runtime_checkable`，纯 stdlib + `_tenant_gate`，零反向依赖）；`store.CapabilityReport` 扩展 `supports_episodic` / `supports_procedural` / `supports_working`；`__init__.py` 导出两协议。
+- **验证**：`packages/agent-core/tests/test_execution_contract.py`（零第三方依赖断言 + Protocol 可满足性）+ `packages/agent-runtime/tests/test_execution_memory_kernel_protocol.py`（`PgEpisodicStore`/`PgProceduralStore` isinstance 满足协议，零基类改动）。该两条于 09-27 在来源分支跑出 5 passed；**2026-10-02 入主干时在新 base 上重跑仍为 5 passed**——重跑而非直接沿用分支旧结论，因为主干自 09-27 之后已演进不少（B7b 系列、错误信封、身份层），需确认这些演进没弄坏两份契约。
+- **runtime 适配零冲突**：因 `runtime_checkable` 仅校验方法存在性（structural typing），现有 `Pg*` 实现无需改基类即满足内核协议。
+- **未完项**：T8（UserSemanticStore 薄适配器）、并列 `ExecutionMemoryStore` 门面、评分函数下沉（决策 2 锁定为「不替换」，故评分下沉本身不再必要）。
 
 ---
 
