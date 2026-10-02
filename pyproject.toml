@@ -29,7 +29,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-pdf = ["pypdf>=4.0"]
+pdf = ["pypdf>=6.19.0"]
 otel = [
     # 下界与 agent-core [tracing] 归一（lint L-4 防漂移，方案 §3.3；agent-runtime [otel]
     # 声明位已随 2026-09-30 门面退役摘除）；
