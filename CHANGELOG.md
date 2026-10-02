@@ -2,6 +2,18 @@
 
 本仓库为 uv workspace monorepo。**唯一受支持的安装/运行入口是根 `uv.lock` + `uv sync`**，子包不再维护独立 `uv.lock`（见 v2 修复 #14）。
 
+## 执行记忆内核契约 ADR-0005 T0 入主干（并入 `feat/isolation-hardening` 真独有载荷）（2026-10-02）
+
+> 类型：产品代码变更（`agent-core` 记忆层新增契约协议）。方案：`docs/adr/0005-execution-memory-kernel-contract.md` + `docs/plans/plan-memory-hardening-2026-09-27.md`（属仓内「先方案后编码」已有的成件套件，本轮只执行台账 §3 第一条，未新增设计）。并入提交 `f666bc8`（真 merge，双亲 `aaefd1d2` + `d078312`，不 rewrite 历史）。
+
+- **base 从 `v3` 改指 `main`，因为台账的保留理由已被现实推翻**：今日实测 `git rev-list --left-right --count origin/main...origin/v3` = **67/0**，且 `git merge-base --is-ancestor 26cd2fa origin/main` 退出码 0 ⇒ v3 已被 PR #41全量合入主干。再往 v3 开 PR 等于把活落在一条落后主干 67 个提交的 ref 上。台账 §1/§2/§3 相应断言已同日订正（它们成文于 #41 **之前**，当时均对）。
+- **先分“真独有”**：`git cherry -v origin/main feat/isolation-hardening` 得 15 行，**8 个 `-` / 7 个 `+`**——那 8 条（ADR-0007 身份链）内容早已随 #41 等价入库。入主干净差因此只有 **11 files / +411 / −23**，而不是裸 `git diff` 的 36 files / +3037（后者把已等价入库的身份层也算了进来）。教训已入台账 **§7**。
+- **落地内容**：`agent_core/memory/execution.py`（+109）下沉 `EpisodicStoreProtocol` / `ProceduralStoreProtocol`（`@runtime_checkable`，**仅 import stdlib + `_tenant_gate` ⇒ 无红线 1 反向依赖）；`store.CapabilityReport` 补 `supports_episodic`/`supports_procedural`/`supports_working`；`memory/__init__.py` 导出两协议；两份契约测试（kernel 零第三方依赖断言 + runtime `Pg*` isinstance 满足协议，**零基类改动**）；`audit_tenant_access.py` 真库三项修复（autocommit 防事务 aborted 连坐、防御性列探测、`sec.get('status')` KeyError 兜底）；`docs/operations/testing-playbook.md`（+78）与 AGENTS.md 指向它的新行。**ADR-0005 状态由「提案」转「采纳」**，并记「转采纳 ≠ T0–T8 全完成」（T2–T8 包括 T8 `UserSemanticStore` 仍待收口）。
+- **四处冲突的取侧均有书面依据**（详见 merge 正文）：`audit_tenant_access.py` 取分支版（已先证明它是主干版严格超集：差异 +46/−9，删的 9 行全为被替换原句；解后 staged blob OID 与分支版逐字节相同 `2c139a2e`）；ks `main.py` 取主干版 import（`current_asserted_tenant` 是 B7b-2 需要的超集）；ADR-0005 与 memory-hardening 两份文档**不是二选一**——主干当时的「不采信分支 T0 声明」理由正好被本次并入抽掉，改成取分支拍板 + 保留主干来源标注 + 补一段状态转正记录，并显式记下与主干导入版的一处**实质分歧**（`UserSemanticStore` 倾向「一并收口」而拍板为「单独立项归 T8」，防下游按倾向推断已收口）。
+- **挡住一个 auto-merge 不报错的真问题**：`.env.example` 的 ADR-0007 身份断言 **12 个键整块重复两份**（主干一份 + 分支一份），`merge-tree` 不报冲突。发现靠后置不变量检查（抽键名做重复计数）而非冲突标记；先确认两份 17 行逐字节全等再删第二份，去重后 `git diff --cached HEAD -- .env.example` **为空**（等于还原主干版），59 个键零重复。
+- **验证（均为本机实跑，未沿用分支 09-27 旧结论）**：两份 T0 契约测试在新 base 上 5 passed；ruff `All checks passed`；`lint_architecture.py` rc=0；`check_doc_sync.py` 0 警告；pytest 四个受影响 session 全绿（agent-core 314 passed/5 skipped、agent-runtime 608 passed、根 871 passed/31 skipped、knowledge-service 241 passed/13 skipped）。未跑：联邦/kefu/exhibition/nl2sql 四个 session（本批未触及其代码路径），已由 PR 面 CI 兼顾。
+- 未改 `docs/TODO.md`：该线由台账 §3 与 `plan-memory-hardening` 追踪，避免开第二处真相源。
+
 ## 分支资产台账入库 + CodeQL Batch 7 系列 9 条分支处置（2026-10-02）
 
 > 类型：纯仓库卫生（不改任何产品代码，未跑 pytest）。方案/台账：`docs/plans/plan-branch-disposition-2026-10-01.md`。

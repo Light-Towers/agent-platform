@@ -82,6 +82,17 @@ def _table_has_tenant(conn, table: str) -> bool:
         return cur.fetchone() is not None
 
 
+def _table_columns(conn, table: str) -> set[str]:
+    """返回表 'public'.<table> 的全部列名（供防御性列探测，不硬编码 schema）。"""
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_schema='public' AND table_name=%s",
+            (table,),
+        )
+        return {r[0] for r in cur.fetchall()}
+
+
 def _group_by_tenant(conn, table: str) -> list[tuple[str, int]]:
     with conn.cursor() as cur:
         cur.execute(f'SELECT COALESCE(tenant_id,\'<NULL>\'), count(*) FROM "{table}" GROUP BY 1 ORDER BY 2 DESC')
@@ -118,22 +129,44 @@ def check_semantic_cache(conn, args) -> dict[str, Any]:
         if not table:
             entry.update({"status": "skip", "note": "semantic_cache 表不存在"})
             return entry
+        cols = _table_columns(conn, table)
+        if "tenant_id" not in cols:
+            entry.update({"status": "skip", "note": f"表 {table} 无 tenant_id 列，跳过"})
+            return entry
+        # 列名不硬编码（真实 schema 为 question、且可能无命中列，2026-09-28 实跑发现）：
+        # 探测问题列与可选命中列，缺失则降级而非报错。
+        qcol = next((c for c in ("question", "query") if c in cols), None)
+        hitcol = next((c for c in ("hit_count", "hits", "access_count", "use_count", "hit_times") if c in cols), None)
+        hit_sel = f", COALESCE(SUM({hitcol}),0)" if hitcol else ""
+        hit_out = f", COALESCE({hitcol},0)" if hitcol else ""
+        q_sel = f", left({qcol}::text, 80)" if qcol else ""
+        order = f" ORDER BY COALESCE({hitcol},0) DESC" if hitcol else " ORDER BY 2 DESC"
         with conn.cursor() as cur:
             cur.execute(
-                f'SELECT COALESCE(tenant_id,\'<NULL>\'), count(*), COALESCE(SUM(hit_count),0) '
+                f'SELECT COALESCE(tenant_id,\'<NULL>\'), count(*){hit_sel} '
                 f'FROM "{table}" GROUP BY 1 ORDER BY 2 DESC'
             )
-            agg = [(str(t), int(n), int(h)) for t, n, h in cur.fetchall()]
-            cur.execute(
-                f'SELECT COALESCE(tenant_id,\'<NULL>\'), left(query::text, 80), COALESCE(hit_count,0) '
-                f'FROM "{table}" ORDER BY COALESCE(hit_count,0) DESC LIMIT 20'
-            )
-            samples = [(str(t), q, int(h)) for t, q, h in cur.fetchall()]
+            if hitcol:
+                agg = [(str(t), int(n), int(h)) for t, n, h in cur.fetchall()]
+            else:
+                agg = [(str(t), int(n)) for t, n in cur.fetchall()]
+            if qcol:
+                cur.execute(
+                    f'SELECT COALESCE(tenant_id,\'<NULL>\'){q_sel}{hit_out} '
+                    f'FROM "{table}"{order} LIMIT 20'
+                )
+                if hitcol:
+                    samples = [(str(t), q, int(h)) for t, q, h in cur.fetchall()]
+                else:
+                    samples = [(str(t), q) for t, q in cur.fetchall()]
+            else:
+                samples = []
         entry.update({
             "status": "ok",
             "per_tenant": agg,
             "top_hit_samples": samples,
-            "note": "人工判定：query 内容与其归属租户业务是否相符；命中数跨租户偏高提示缓存串味",
+            "note": "人工判定：question 内容与其归属租户业务是否相符"
+                    + ("；命中数跨租户偏高提示缓存串味" if hitcol else "（本表无命中计数列，仅按条目数分布）"),
         })
     except Exception as e:  # noqa: BLE001
         entry.update({"status": "error", "error": str(e)})
@@ -218,7 +251,7 @@ def _render_markdown(report: dict[str, Any]) -> str:
         "",
     ]
     for sec in report["checks"]:
-        lines.append(f"## {sec['check']}  —  status: **{sec['status']}**")
+        lines.append(f"## {sec['check']}  —  status: **{sec.get('status', 'n/a')}**")
         if sec.get("note"):
             lines.append(f"- note: {sec['note']}")
         if sec["check"].startswith("1_"):
@@ -250,6 +283,10 @@ def main(argv: list[str] | None = None) -> int:
     except Exception as e:  # noqa: BLE001
         print(f"连接失败：{e}", file=sys.stderr)
         return 1
+    # 只读追溯扫描：逐条 SELECT 用 autocommit，任一检查项失败不污染事务、不连累后续
+    # （否则 psycopg 事务进入 aborted 态，后续检查全部报 "current transaction is aborted"，
+    #   使"逐项互不中断"沦为假象——真实 PG 实跑暴露的缺陷，2026-09-28）。
+    conn.autocommit = True
     conn.read_only = True
 
     checks = [fn(conn, args) for fn in (

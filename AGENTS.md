@@ -34,7 +34,7 @@ DATABASE_URL= uvicorn agent_server.main:app --port 8000  # 零依赖冒烟
 
 ## 验证策略（分层，避免每次跑全量 10 session）
 
-> `make test`（10 个 pytest session）是 **CI 门禁**，不是每次小改动的必跑项。按改动范围分层收敛，先 lint 快速拦截再决定是否跑测试。
+> `make test`（10 个 pytest session）是 **CI 门禁**，不是每次小改动的必跑项。按改动范围分层收敛，先 lint 快速拦截再决定是否跑测试。**完整实跑最佳操作（缺口盘点→最小依赖配方→环境盲区容器补跑→失败复跑定性）见 `docs/operations/testing-playbook.md`。**
 
 | 改动范围 | 验证步骤 |
 |---------|---------|
