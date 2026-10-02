@@ -22,7 +22,7 @@ from knowledge_service.conf.milvus_config import milvus_config
 from knowledge_service.core.config import settings
 from knowledge_service.core.logger import logger
 from knowledge_service.core.tracing import init_tracing
-from knowledge_service.utils.tenant_identity import TenantHeaderMiddleware
+from knowledge_service.utils.tenant_identity import TenantHeaderMiddleware, current_asserted_tenant
 
 
 @asynccontextmanager
@@ -55,6 +55,9 @@ def create_app() -> FastAPI:
     # M5：入站安全护栏 middleware（API Key 鉴权 + 入站限流 + 载荷大小护栏 + request_id 注入）。
     # ⚠️ 必须先于 CORS 添加：Starlette 中**后添加的 middleware 更外层**，
     # 保证 CORS 先处理 OPTIONS 预检，再进入鉴权/限流（预检不带自定义头，不会被 401 拦截）。
+    # subject_provider（B7b-2）：限流桶用**服务端已断言的租户**而非凭据摘要。
+    # 下方 TenantHeaderMiddleware 比本中间件更外层（后添加），故此处读得到断言；
+    # 无合法内部头（observe/开发态）时返回 None → 限流桶退回客户端 IP。
     app.add_middleware(
         SecurityGuardsMiddleware,
         api_key=settings.knowledge_api_key,
@@ -63,6 +66,7 @@ def create_app() -> FastAPI:
         rate_limit_window_s=settings.knowledge_rate_limit_window_s,
         max_body_bytes=settings.knowledge_max_body_bytes,
         error_response=error_response,
+        subject_provider=current_asserted_tenant,
     )
 
     # ADR-0007 A3/A4：入站内部签名租户头校验 → 绑定断言（供 resolve_server_tenant 优先采信）。

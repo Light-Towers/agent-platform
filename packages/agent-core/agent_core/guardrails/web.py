@@ -6,11 +6,13 @@
 1. 生成请求级 request_id 并注入 OTel 上下文（与 tracing 打通）；
 2. 载荷大小护栏（Content-Length 超限 → 413，最廉价 DoS 防护）；
 3. API Key 鉴权（配置了 api_key 非空才启用；缺失/不匹配 → 401，``secrets.compare_digest`` 防时序攻击）；
-4. 入站限流（按 client 优先 X-API-Key 其次 IP 的滑动窗口 + 全局窗口；超限 429 + Retry-After）。
+4. 入站限流（按 client 优先**服务端断言主体**、其次客户端 IP 的滑动窗口 + 全局窗口；超限 429 + Retry-After）。
 
 设计要点：
 - 纯 ASGI 中间件（不用 BaseHTTPMiddleware），避免对 /stream SSE 流式响应产生缓冲干扰；
 - 鉴权关闭语义：api_key 为空 → 跳过鉴权，限流与载荷护栏照常生效；
+- 限流桶主体可注入（``subject_provider``）：kernel 不 import 身份层（红线 1），由宿主传入
+  「返回已断言主体或 None」的回调；未注入/无断言 → 退回 IP（B7b-2 前是凭据摘要，已拆）；
 - 框架无关：``app.api.errors.error_response`` 改为**可注入回调** ``error_response``，
   starlette 为可选依赖（web extra），``app.core.tracing`` 改为 ``agent_core.tracing``。
 
@@ -38,6 +40,10 @@ logger = get_logger(__name__)
 
 # error_response 回调签名：(status_code, code, msg, request_id, headers=None) -> ASGI Response
 ErrorResponseFactory = Callable[..., Any]
+
+# subject_provider 回调签名：() -> 服务端已断言的主体标识（如租户 id）| None（无断言）
+# 契约：实现者**不得抛错、不得返回凭据或其派生值**（抛错的 fail-fast 取值函数会被兜底为无主体）。
+SubjectProvider = Callable[[], Optional[str]]
 
 
 def _default_error_response(
@@ -71,6 +77,7 @@ class SecurityGuardsMiddleware:
         per_client_limiter: Optional[SlidingWindowRateLimiter] = None,
         global_limiter: Optional[SlidingWindowRateLimiter] = None,
         error_response: Optional[ErrorResponseFactory] = None,
+        subject_provider: Optional[SubjectProvider] = None,
     ) -> None:
         self.app = app
         self.api_key = api_key or ""
@@ -85,6 +92,9 @@ class SecurityGuardsMiddleware:
         self._global = global_limiter or SlidingWindowRateLimiter(self.rate_limit_global, self.rate_limit_window_s)
         # error_response 可注入（宿主应用传入自己的统一错误构造器）；缺省用内置 starlette 实现。
         self._error_response: ErrorResponseFactory = error_response or _default_error_response
+        # 限流桶主体来源（B7b-2）：宿主注入「读服务端已断言主体」的回调；缺省一律退回 IP。
+        self._subject_provider: Optional[SubjectProvider] = subject_provider
+        self._subject_unsupported_warned = False
 
     async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
         if scope["type"] != "http":
@@ -143,7 +153,7 @@ class SecurityGuardsMiddleware:
 
         # 4) 入站限流（按 client + 全局）
         if not should_skip_rate_limit(path, self.exempt_paths):
-            client_key = resolve_client_key(request.headers, self._client_ip(request), bool(self.api_key))
+            client_key = resolve_client_key(self._client_ip(request), self._resolved_subject())
             allowed, retry_after = self._per_client.allow(client_key)
             if not allowed:
                 logger.warning("Rate limited client %s %s %s", method, path, client_key)
@@ -181,6 +191,27 @@ class SecurityGuardsMiddleware:
     def _client_ip(request: Request) -> str:
         return request.client.host if request.client else ""
 
+    def _resolved_subject(self) -> Optional[str]:
+        """取宿主注入的断言主体；未注入→ None（限流桶退回 IP）。
+
+        兜 ValueError 而不是让它冒上来：限流桶键属可观测性辅助信息，不应有能力把
+        一个正常请求变成 500。而 ``agent_runtime.workspace_registry.server_tenant_id()``
+        这类 fail-fast 取值函数在漏绑定时正是抛 ValueError ⇒ 宿主若直接传它，
+        本处会退 IP 并告警一次（提示改传「返回 None 而不抛错」的读法）。
+        """
+        if self._subject_provider is None:
+            return None
+        try:
+            return self._subject_provider()
+        except ValueError:
+            if not self._subject_unsupported_warned:
+                self._subject_unsupported_warned = True
+                logger.warning(
+                    "[guardrails] subject_provider 抛 ValueError（主体未绑定即 fail-fast）："
+                    "限流桶退回客户端 IP；宿主应改传「无断言时返回 None」的只读回调"
+                )
+            return None
+
     @staticmethod
     def _wrap_send(send: Any, request_id: str) -> Any:
         """包装 send：给 http.response.start 统一注入 X-Trace-Id 头。"""
@@ -210,4 +241,4 @@ class SecurityGuardsMiddleware:
         await response(scope, None, send)
 
 
-__all__ = ["SecurityGuardsMiddleware", "DEFAULT_EXEMPT_PATHS", "_default_error_response"]
+__all__ = ["SecurityGuardsMiddleware", "SubjectProvider", "DEFAULT_EXEMPT_PATHS", "_default_error_response"]

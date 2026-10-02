@@ -210,15 +210,13 @@ def test_extract_api_key_missing_or_invalid_scheme():
 
 
 def test_resolve_client_key():
-    # 鉴权启用 + 有 key → key:<sha256>，不明文
-    key = resolve_client_key({"x-api-key": "secret"}, "10.0.0.1", auth_enabled=True)
-    assert key.startswith("key:")
-    assert "secret" not in key
-    # 鉴权启用但无 key → ip
-    assert resolve_client_key({}, "10.0.0.1", auth_enabled=True) == "ip:10.0.0.1"
-    # 鉴权关闭 → 一律按 IP（不信任客户端自报 key）
-    assert resolve_client_key({"x-api-key": "secret"}, "10.0.0.2", auth_enabled=False) == "ip:10.0.0.2"
-    assert resolve_client_key({}, "", auth_enabled=False) == "ip:unknown"
+    # B7b-2 新契约：服务端已断言主体优先（直用明文，不经摘要）
+    assert resolve_client_key("10.0.0.1", "tenant-a") == "sub:tenant-a"
+    # 无断言主体 → ip（凭据完全不参与桶键，故签名里已无 headers/auth_enabled）
+    assert resolve_client_key("10.0.0.1") == "ip:10.0.0.1"
+    assert resolve_client_key("10.0.0.2", None) == "ip:10.0.0.2"
+    assert resolve_client_key("") == "ip:unknown"
+    assert resolve_client_key(None) == "ip:unknown"
 
 
 def test_exempt_paths():
@@ -413,6 +411,49 @@ def test_middleware_rate_limit_per_client():
     assert "retry-after" in headers
     assert json.loads(body)["code"] == "RATE_LIMITED"
     assert json.loads(body)["request_id"]
+
+
+@requires_web
+def test_middleware_rate_limit_buckets_are_per_ip_not_per_credential():
+    """B7b-2：桶键不再由凭据摘要派生 ⇒ 同一把密钥下的不同客户端各按 IP 限流。
+
+    旧实现会把它们归入同一个 ``key:<指纹>`` 桶（一个客户端打满配额→同密钥其他客户端被连带 429）。
+    """
+    mw = _build_middleware({"api_key": "secret123", "rate_limit_per_client": 2})
+    ok = {"X-API-Key": "secret123"}
+    assert _parse_response(_run(mw, _scope("/query", headers=ok, client=("10.0.0.1", 1))))[0] == 200
+    assert _parse_response(_run(mw, _scope("/query", headers=ok, client=("10.0.0.1", 2))))[0] == 200
+    assert _parse_response(_run(mw, _scope("/query", headers=ok, client=("10.0.0.1", 3))))[0] == 429
+    # 另一 IP 带同一把密钥：不受上一个桶影响
+    assert _parse_response(_run(mw, _scope("/query", headers=ok, client=("10.0.0.9", 1))))[0] == 200
+
+
+@requires_web
+def test_middleware_rate_limit_uses_injected_subject_provider():
+    """subject_provider（宿主注入已断言主体）：不同主体各自成桶，无断言时退回 IP 桶。"""
+    holder = {"tenant": "tenant-a"}
+    mw = _build_middleware(
+        {"api_key": "secret123", "rate_limit_per_client": 2, "subject_provider": lambda: holder["tenant"]}
+    )
+    ok = {"X-API-Key": "secret123"}
+    assert _parse_response(_run(mw, _scope("/query", headers=ok)))[0] == 200  # sub:tenant-a 1/2
+    holder["tenant"] = "tenant-b"
+    assert _parse_response(_run(mw, _scope("/query", headers=ok)))[0] == 200  # 新桶 1/2（IP 相同）
+    assert _parse_response(_run(mw, _scope("/query", headers=ok)))[0] == 200  # 2/2
+    assert _parse_response(_run(mw, _scope("/query", headers=ok)))[0] == 429  # tenant-b 耗尽
+    holder["tenant"] = None
+    assert _parse_response(_run(mw, _scope("/query", headers=ok)))[0] == 200  # 退回 ip: 桶，另计
+
+
+@requires_web
+def test_middleware_subject_provider_raising_falls_back_to_ip():
+    """fail-fast 型取值函数（抛 ValueError）不得把正常请求变成 500：兜底退回 IP 桶。"""
+
+    def boom():
+        raise ValueError("tenant_id 必须显式传入")
+
+    mw = _build_middleware({"api_key": "", "subject_provider": boom})
+    assert _parse_response(_run(mw, _scope("/query")))[0] == 200
 
 
 @requires_web
