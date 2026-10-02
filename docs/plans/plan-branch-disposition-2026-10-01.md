@@ -37,10 +37,10 @@
 
 > **本表是「2026-10-01 当时为何不能删」的历史取证，不是现状**：2026-10-02 该分支整支入主干后，五行 marker 的 `main` 列计数全部上移（尤其 `agent_runtime.otel` 行——门面退役正是本批带进去的，「主干仍是旧门面」这句已作废）。
 
-## 3. 处置路径（2026-10-02 更新：三条均已定案——前两条已执行，第三条被现实关闭）
+## 3. 处置路径（2026-10-02 更新：三条均已定案——前两条已**合入主干**，第三条被现实关闭）
 
 - ~~`feat/isolation-hardening` → 先解冲突再开 PR（base `v3`）~~ → **已执行，且 base 改为 `main`**（原写「唯一冲突文件 `scripts/audit_tenant_access.py`」只对 v3 成立；对 main 实为 **4 个文件**，多出的三个正是 PR #41 合流时手工处理过的那批：`knowledge_service/main.py`、`docs/adr/0005`、`plan-memory-hardening`）。取侧逐条记录在并入提交 `f666bc8` 的正文，及本文件 **§7**。
-- ~~`test/rag-route-ablation-eval` → 拆分成小 PR 进 `main`~~ → **已执行，但未拆分**（2026-10-02，分支 `feat/observability-eval-onto-main`）。不拆的理由是取证不支持它的前提：原写「75 个独有提交……很可能同样已大面积入主干」，实测 `git cherry -v origin/main test/rag-route-ablation-eval` = **25 `+` / 0 `-`**（全部真独有，无一已等价入库），拆分只能减少「评审面」而不能减少「内容量」；而两条主题链（观测全局装配 / RAG 分层评测）在分支上本就交织在同一批文件（`agent_core/tracing.py` 既被观测链重写又被 `--extra otel` 评测链消费），拆开各开一个 PR 会引入「先合的那半跑不过门禁」的中间态。沿用 PR #41 先例：`git merge --no-commit --no-ff` 全量、不 cherry-pick、不用 `-X ours/theirs`。
+- ~~`test/rag-route-ablation-eval` → 拆分成小 PR 进 `main`~~ → **已执行并已合入主干**（2026-10-02，分支 `feat/observability-eval-onto-main` → **PR #50 已 merge**，主干新 tip `617cbf2`@10:36:37Z；合入终态与 CodeQL 复验见 **§8**）。不拆的理由是取证不支持它的前提：原写「75 个独有提交……很可能同样已大面积入主干」，实测 `git cherry -v origin/main test/rag-route-ablation-eval` = **25 `+` / 0 `-`**（全部真独有，无一已等价入库），拆分只能减少「评审面」而不能减少「内容量」；而两条主题链（观测全局装配 / RAG 分层评测）在分支上本就交织在同一批文件（`agent_core/tracing.py` 既被观测链重写又被 `--extra otel` 评测链消费），拆开各开一个 PR 会引入「先合的那半跑不过门禁」的中间态。沿用 PR #41 先例：`git merge --no-commit --no-ff` 全量、不 cherry-pick、不用 `-X ours/theirs`。
   原写「lint 白名单需按现状重写」经实跑证伪为**无需重写**：合并版 lint（13 条门禁）在主干现状上 rc=0，`_FASTAPI_WHITELIST` 摘除 ks 也成立（本批同时带来 ks 迁 `build_api_app`）。真出问题的是分支自带的一个环境依赖型用例，见 §7 陷阱三。
 - ~~`v3` → 与主干的合流是独立议题（47 commits）~~ → **已被现实关闭**：PR #41（2026-10-01）就是那次合流（`git merge origin/v3` 全量、不 cherry-pick、不用 `-X ours/theirs`），今天实测 v3 对 main ahead = 0。剩下的只是 §2 那条「是否删 `v3` ref」的组织决策。
 
@@ -115,3 +115,42 @@ $ git show --stat --format="" 85cd9bfe | tail -1   # 5 files changed, 216 insert
 **陷阱三（ablation 并入）：「从未开过 PR」的分支，它的测试只在作者本地环境成立过**。`packages/agent-core/tests/test_tracing_degradation.py`（分支新增）里 `test_init_enabled_without_endpoint_degraded` 断言 `reason == "no_export_endpoint"`，而同文件另外两条环境敏感用例**都挂了 `@pytest.mark.skipif(_SDK_AVAILABLE)`**——唯独这条没挂。而 kernel 的降级原因判定是「依赖层先于配置层」（`tracing.py` 的 `if enabled and not _SDK_AVAILABLE` 在 `elif enabled and not can_export` 之前），所以不装 OTel SDK 的宿主上该用例必红。**默认 CI 恰好不装**（`make ci` → `make test` 根 session 无 `--extra otel`，只有末行单独那个 session 装）⇒ 分支作者本地装了 SDK，全绿；这条分支入主干后首次进 CI 即红。处置：不是改断言也不是删用例，而是**把隐含前置条件显式化**（该用例 `monkeypatch.setattr(kernel_tracing, "_SDK_AVAILABLE", True)`，早退分支不构造 provider，不需真 SDK），并**新增**一条 `skipif(_SDK_AVAILABLE)` 用例钉住「同时缺 SDK + 缺端点时先报 `sdk_not_installed`」的优先级——两条合起来把 2×2 在任一宿主都钉完整（实跑：无 SDK 环境 11 passed；`--extra otel` 环境 23 passed / 3 skipped）。⇒ 可复跑判据：并入无 PR 历史的分支前，先问「它绿过 CI 吗」；没绿过就把 **CI 环境**（不是本地环境）的 `make test` 全 session 当验收线，并特别盯那些“同文件邻居都有 guard、就它没有”的不对称。
 
 **陷阱四（ablation 并入）：auto-merge 不报冲突的另一种形状——Python 注册表里同名变量被两侧装不同门禁**。`scripts/lint_architecture.py` 的 `main()` 内，主干用局部变量 `v6..v9` 装 P8/P9/P10/P11，分支用**同名** `v6..v9` 装 L-3/L-1/L-2/L-4。合并后代码语法完全合法、ruff 不报、`import` 不报，但“后者覆盖前者”会让四条门禁静默失效——它不是重复定义（故上面那套顶层 `def` 重复不变量抓不到），而是同名赋值的控制流语义。另外分支侧的 registry 还带着收敛前的旧标签（「批 3 架构约束」/「C1 回归面约束」，主干已改号 P9/P10）。处置：以主干 `main()` 为基底（保留 P 编号与标签），分支四条门禁改用 `v10..v13` 追加；同名但两侧逐字一致的 7 个函数体保留一份；分支独有的 L-1〜L-4 常量/函数整段追加；`_iter_prod_py` 改为复用主干已有的 `_skipped_rel`（避免两套排除面各写一遍）。⇒ 对「注册表/累加器」类函数（一堆同名局部变量 + 末尾统一返回），合并后必须通读整个函数体，不能只看冲突标记。另附一条「门禁全绿不等于门禁有效」的防范：本次 13 条门禁 rc=0，额外用一棵伪造目录树做**负对照**（写入 `cm.__enter__()` / `app.state.tracer` / `init_tracing()` 三行），确认 L-1/L-2/L-3 真的各自报违规后才定案（合并后的 `_iter_prod_py` 扫到 515 个生产 `.py`）。
+
+## 8. 追加登记（2026-10-02）：PR #50 合入终态、主干 CodeQL 复验、5 条 ref 的并入取证
+
+> 场景：§3 第二条的收尾。`feat/observability-eval-onto-main` 开 **PR #50**，2026-10-02T10:36:37Z 以 **merge commit**（非 squash）合入，主干新 tip `617cbf2`，双亲 `b7448c1` + `afc738a`。取证脚本：`.codeartsdoer/temp/verify_main_rescan_50.py`（逐判据输出 `=== 总体：PASS ===`）与 `.codeartsdoer/temp/refs_evidence_vs_main.py`（只读，不删任何 ref）。
+
+**合入内容零漂移（用 §5 的最强判据，而非 diffstat 巧合）**：`git rev-parse "afc738a^{tree}" "617cbf2^{tree}"` 两个树 OID **全等**（`05974143…`）⇒ GitHub 那次 merge 未引入 PR 之外的任何内容。对上一 tip 的完整净差 `git diff --stat b7448c1..617cbf2` = **89 files / +10779 / −441**（= merge 提交自身的 87 files / +10752 / −435，再加台账 + CHANGELOG 两份文档回写）。
+
+**主干 CodeQL 告警面复验（PR 绿 ≠ 主干绿，全部在 `refs/heads/main` 实取）**：
+
+| 判据 | 实测 |
+|---|---|
+| `ref=refs/heads/main` 的 open | 恰 `#38` / `#39`（`py/weak-sensitive-data-hashing`） |
+| 位置 | `guardrails/auth.py:103` col 47-69（`fingerprint()` 的 hmac-sha256）/ `:128` col 29-60（`legacy_thread_id()` 的 `sha256[:12]`）。**不是**旧文档里的 `:92`/`:117`：位移 +11 由 PR #49 那批给 `auth.py` 加 docstring 造成（`c514f0f`，已实测为 `b7448c1` 的祖先），而本批 `git diff b7448c1..617cbf2 -- …/guardrails/auth.py` **为空** ⇒ 与本批无因果，只说明旧行号基线已过期 |
+| 重扫是否真发生在新 tip | 两条告警的 `most_recent_instance.commit_sha` 均 = `617cbf29…`；`code-scanning/analyses` 最新两条 created = `10:37:53Z` / `10:37:18Z`（python + actions），ref=`refs/heads/main`、commit=`617cbf29`，晚于合入时刻 10:36:37Z |
+| 存量与号段 | `fixed` 44 / `open` 2 / **`dismissed` 0**；全仓最大告警号 **48** 不增；`created_at > 10:36:37Z` 的告警 **0** 条 |
+| 主干门禁 | check-runs `ci` / `ha` / `assembly` / `Analyze (python)` / `Analyze (actions)` 均 completed/success（`ci` success 即在 `617cbf2` 上真跑过 `make ci`） |
+| 本机快验（同一 tip） | `ruff check .` passed · `lint_architecture.py` **13 条全 rc=0** · `check_doc_sync.py` 0 警告 · `eval` 15/15 = 100% |
+
+**5 条 ref 的并入取证（统一以 `origin/main` 为基准，消除 §1 的 base 陷阱；`cherry -v` 列的是输出行数，tip 已全量入主干时该命令输出为空）**：
+
+| ref | tip | `cherry -v origin/main` | beh/ahead | `merge-tree` | tip 是 `origin/main` 祖先 | 本地=远端 | 引入它的主干 merge（tip 为其父） |
+|---|---|---|---|---|---|---|---|
+| `test/rag-route-ablation-eval` | `4cffe7c` | 0 行 | 85/0 | 0 | **是** | 是 | `6ee7283`（经 PR #50） |
+| `feat/isolation-hardening` | `d078312` | 0 行 | 110/0 | 0 | **是** | 是 | `f666bc8`（经中间分支 → PR #49） |
+| `feat/execution-memory-kernel-onto-main` | `f459693` | 0 行 | 29/0 | 0 | **是** | 是 | `b7448c1` = PR #49 的 merge commit |
+| `feat/observability-eval-onto-main` | `afc738a` | 0 行 | 1/0 | 0 | **是** | 是 | `617cbf2` = PR #50 的 merge commit |
+| `v3` | `26cd2fa` | 0 行 | 113/0 | 0 | **是** | 是 | `889d417`（第二父恰为 `26cd2fa`） |
+
+⇒ 五条在**内容层面**都零丢失风险。但「取证充分」不等于「可删」：`v3` / `v2` 带里程碑语义（CHANGELOG 有跨版本交叉引用），处置建议仍是先 `git tag archive/<name>` 再删分支，**待拍板**（见 §2 / §4）。
+
+**陷阱五（本轮新增）：「该分支的 PR 是否 MERGED」不能当并入判据**。三条实测形状都会把判定带偏：
+
+1. `feat/isolation-hardening` 自己的 **PR #18 至今 CLOSED 未合**，但它的 7 条真独有提交是随中间分支 `feat/execution-memory-kernel-onto-main`（PR #49）进的——「分支没有已合并的 PR」在这里是**搬运路径的形状**，不是未并入的证据。
+2. `v3` 用 `gh pr list --head v3` **查不到任何 PR**（PR #41 的 head 是 `integration/v3-into-main`，不是 `v3`），按「有没有对应 PR」判会直接无从判定。
+3. REST `GET /pulls/{n}` 的 `state` 只有 `open`/`closed` 两值，**已合并的 PR 也返回 `closed`**（PR #41 即如此，`merged_at=2026-10-01T13:00:43Z` 才是 merged 信号）；要拿 `state=MERGED` 必须走 GraphQL（`gh pr list --json state` 已是 GraphQL）。
+
+⇒ 删 ref 的判据只认**内容侧**：`git merge-base --is-ancestor <tip> origin/main` 退出码 0 **且** `git cherry -v origin/main <tip>` 无 `+` 行；PR 元数据只用来解释「怎么进去的」，不用来判「进去没有」。（本轮第一版取证脚本正是按「PR 非 MERGED ⇒ 不许删」写，对上面三条全部误判，已换成祖先判据。）
+
+**另记一条已登记过的坑再次踩到（不新增判据，只说明为何要写进脚本注释）**：`most_recent_instance.location` 是扁平 `{path,start_line,start_column}` 而非 SARIF 的 `physicalLocation.uri`，`check-suites` 的 `name` 恒为 `null`——这两处早先已在 CHANGELOG（B7d / B7b-2 段）登记并修过，但沿用的旧骨架 `verify_main_rescan_v3.py` 仍是错形状，本轮复用它时：location 取到 `?` ⇒ 「行号未漂移」这条判据**在旧脚本里其实一直在空转**（取值失败却被当成通过），check-suites 分支则直接 `KeyError` 崩掉。⇒ 防范：**判据取不到值必须 fail-closed**（缺失即 FAIL，不许 `dict.get(..., "?")` 兜底后继续比较），且旧脚本复用前先拿一条已知答案的告警做正对照。
