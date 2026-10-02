@@ -3,12 +3,12 @@
 | 项 | 内容 |
 |----|------|
 | 日期 | 2026-09-27 |
-| 状态 | 待评审（尚未改代码） |
+| 状态 | **部分已执行**：T0 于 2026-10-02 入主干（内核协议下沉），T1 与 T9–T13 已在前序合流落地；T2–T8 尚未执行 |
 | 范围 | `agent-runtime` 四类 Memory + `agent-core/memory/typed.py` |
 | 结论 | **不重构**：保留架构优势，补齐「多租户一致性 / 检索质量 / 治理可审计性」三处硬伤 |
 | 依据 | 本仓库代码实测 + 外部研究报告《AI Agent Memory 企业级落地方案研究报告》(2026-09-26) + 实现层源码级调研（Mem0 / Graphiti / LangGraph / LangMem） |
-| 入库来源 | 随 2026-10-01 `integration/v3-into-main` 合流从 `feat/isolation-hardening`@`d4b6faa` 导入（`ARCHITECTURE.md` §5 与 `CHANGELOG.md` 的 09-27 条目引用本文件，而 `main`/`v3` 树内均无此文件，`check_doc_sync.py` 实测拦下）。 |
-| 主干实态（2026-10-01 逐项核对） | **已随合流落地：T1**（migration `006`–`010` 含 `010_episodic_tenant`、`tests/ha/test_tenant_isolation_real_pg.py`）与隔离域加固线的 T9–T13。**未落地：T0**（`agent_core/memory/execution.py` 与 `CapabilityReport.supports_episodic` 主干 0 命中）；T2–T8 未执行。故本表「状态」仍为**待评审**，不沿用来源分支后续将其标为「已采纳」的修订（理由见 `docs/adr/0005` 的「主干保留提案态」条）。 |
+| 入库来源 | 随 2026-10-01 `integration/v3-into-main` 合流从 `feat/isolation-hardening`@`d4b6faa` 导入（`ARCHITECTURE.md` §5 与 `CHANGELOG.md` 的 09-27 条目引用本文件，而当时 `main`/`v3` 树内均无此文件，`check_doc_sync.py` 实测拦下）。 |
+| 主干实态（2026-10-02 重核） | **已落地：T0**（`agent_core/memory/execution.py` 两协议 + `CapabilityReport.supports_episodic`，随 `feat/execution-memory-kernel-onto-main` 并入，两份契约测试新 base 实跑 5 passed）、**T1**（migration `006`–`010` 含 `010_episodic_tenant`、`tests/ha/test_tenant_isolation_real_pg.py`）与隔离域加固线的 T9–T13。**未落地：T2–T8**（T8 = `UserSemanticStore` 薄适配器，ADR-0005 §6 项 3 拍板为单独立项）。ADR-0005 状态据此从「提案」转「采纳」（逐条复验过程见其「状态转正的过程记录」条）。 |
 
 ---
 
