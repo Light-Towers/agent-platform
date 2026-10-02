@@ -76,3 +76,16 @@ uv run pytest <identity 测试目录> -q   # 预期 40 passed
 | 本地：`tests/` 直跑 | 450 passed, 26 skipped |
 | 本地：8 个子包 session | 全绿（agent-runtime 608×3 轮复跑稳定；首跑 8 failed 为冷启动环境 flake，不可复现） |
 | 门禁：ruff / lint_architecture / check_doc_sync / eval / uv lock --check | 全过 |
+
+## 5. 远程演练（k8s 集群取证复跑）
+
+> 适用：Windows 本机 → 126（control-plane，构建机）→ 125/241（worker）的三机实跑。
+> 工具面：§3.3 的 Posh-SSH 通道 + `deploy/k8s/scripts/` 六件套（用法/判据/退出码见其 README「可复跑取证」节）。
+> 本节只记**操作守则**（本轮 16 个 scratch 脚本踩出来的坑，每条都有对应事故）：
+
+1. **短命令 + 脚本承载复合逻辑**：sandbox/引号层对长复合命令（多条 scp+ssh 合并）会回显风暴且静默失败（曾现 scp 未落地而 RC=0）——复合逻辑一律落 `deploy/k8s/scripts/*.sh`，Windows 侧只发 `scp` + `bash xxx.sh` 两条短命令。
+2. **行尾**：经 git checkout 到远端的脚本天然 LF（`.gitattributes` 强制 `*.sh eol=lf`）；scp 直传工作区文件则先 `sed -i 's/\r$//' *.sh` 再执行。
+3. **落地验证不凭 RC**：每次同步/改动后远端 `grep` 关键字 / `md5sum` 比对确认内容真落地（126 假同步事故：本地改了 routes.py，镜像内仍是 426 行旧版）。
+4. **PowerShell 假阳性定性套路**：stderr 触发 NativeCommandError 包幕（uv 的 "Resolved N packages" 即走 stderr）——一律 `cmd; echo RC=$LASTEXITCODE` 看真退出码，不看 Red 文本下结论；`Access is denied` 拦 uv 多为命令内含删除类动作被沙箱降级，拆开用安全工具（DeleteFile）单独做。
+5. **验证对象绑定提交**：取证结论必须能说「镜像 rev == 待验 rev」：构建走 `build.sh <rev>`（rev 不匹配 exit 2 即中止），取证后 `verify.sh <rev>` 回查镜像内 GIT_REV；脏工作区构建须在证据块注明 dirty。
+6. **共用机纪律**：三台是共用测试机——containerd 走隔离实例（sock=`/run/containerd-k8s/containerd.sock`，勿打裸 ctr）；port-forward 用 `portforward.sh`（先清旧再拉起，防占端口 HTTP=000）；演练结束清理（kubeadm reset）须用户二次确认。

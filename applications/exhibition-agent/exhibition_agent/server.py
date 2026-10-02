@@ -16,12 +16,14 @@
 from __future__ import annotations
 
 import hashlib
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
 from agent_core.guardrails.app_factory import build_api_app
 from agent_core.logging import get_logger
-from fastapi import Header, HTTPException, Request
+from agent_core.tracing import shutdown_tracing
+from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field, ValidationError
 
@@ -51,7 +53,17 @@ from exhibition_agent.observability.trace import InMemoryTraceRecorder
 logger = get_logger(__name__)
 
 settings = Settings()
-app = build_api_app(title="exhibition-agent", version="0.1.0")
+
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    """观测方案 §3.2：lifespan 末尾统一 kernel 退出（flush+shutdown provider，
+    尾批 span 不丢）；未 init/未装 SDK 时 no-op，零开销。"""
+    yield
+    shutdown_tracing()
+
+
+app = build_api_app(title="exhibition-agent", version="0.1.0", lifespan=_lifespan)
 _trace_recorder = InMemoryTraceRecorder()
 _metrics_registry = get_default_registry()
 _llm_obs_backend = get_llm_obs_backend(settings.llm_obs_backend)

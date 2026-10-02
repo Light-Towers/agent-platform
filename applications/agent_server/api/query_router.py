@@ -5,9 +5,9 @@ import uuid
 
 from agent_core.guardrails.errors import mask_exception_for_client
 from agent_core.runtime.lease import AsyncLease
+from agent_core.tracing import record_request_attributes, user_query_hash
 from agent_runtime import cache as semantic_cache
 from agent_runtime.db import get_pool
-from agent_runtime.otel import redact_question
 from agent_runtime.planner.protocol import PlannerContext
 from agent_runtime.schemas import ADMISSION_ADMITTED, ADMISSION_QUEUED, ADMISSION_REJECTED
 from agent_runtime.workspace_registry import resolve_workspace
@@ -61,6 +61,19 @@ async def query(
         priority = req.priority
 
     request_id = str(uuid.uuid4())
+
+    # 观测（S2）：请求级 server span 由 TracingMiddleware 创建（含入站 traceparent 父链），
+    # 这里尽早补业务属性，使 429/409/cache_hit/断连等旁路路径同样落属性（R10）；
+    # 未启用 tracing 时静默 no-op（opt-in 铁律零开销）。
+    record_request_attributes(
+        {
+            "request_id": request_id,
+            "thread_id": thread_id,
+            "priority": priority,
+            "question_hash": user_query_hash(req.query),  # 脱敏：仅长度+哈希，不含全文
+            "question_length": len(req.query),
+        }
+    )
 
     # V3 Phase 2: ExecutionScheduler 入队（opt-in，未启用时跳过）
     # Admission 回答"允不允许"，Scheduler 叠加回答"什么时候执行"——两者不互斥
@@ -140,9 +153,6 @@ async def query(
             await lease.release()
             raise HTTPException(status_code=409, detail="CONCURRENCY_REJECTED")
 
-    # Phase 2: OTel tracer
-    otel_tracer = getattr(request.app.state, "otel_tracer", None)
-
     # 语义缓存：命中直接返回。命中是正常路径，但 coordinator.acquire 已占用槽位、
     # admission 已可能 admitted —— 必须在返回前统一清理，否则同 session 后续请求
     # 会永久排队（P0: cache-hit leak）。
@@ -164,6 +174,8 @@ async def query(
                 yield _sse({"type": "cache_hit", "text": cached})
                 yield _sse({"type": "done", "thread_id": thread_id})
 
+            # R10：cache_hit 旁路同样落 span 属性（请求级 span 由中间件创建，此处补业务语义）
+            record_request_attributes({"cache_hit": True})
             return StreamingResponse(_cached_stream(), media_type="text/event-stream")
 
     config = {"configurable": {"thread_id": thread_id}}
@@ -209,21 +221,9 @@ async def query(
             yield _sse({"type": "coordination", "decision": "queue"})
             await coordinator.wait_for_turn(thread_id, request_id)
 
-        # Phase 2: OTel request span
-        span = None
-        _span_cm = None
-        _parent_ctx_cm = None
-        if otel_tracer is not None:
-            from agent_core.tracing_propagation import extract_traceparent, use_context
-
-            _parent_ctx_cm = use_context(extract_traceparent(request.headers))
-            _parent_ctx_cm.__enter__()
-            _span_cm = otel_tracer.start_as_current_span("query")
-            span = _span_cm.__enter__()
-            span.set_attribute("thread_id", thread_id)
-            span.set_attribute("priority", priority)
-            for k, v in redact_question(req.query).items():
-                span.set_attribute(k, v)
+        # 观测（S2）：手写 request span 已退役——请求级 span 由 TracingMiddleware
+        # 创建/结束（含入站 traceparent 父链 R6），业务属性已在 handler 早段
+        # 经 record_request_attributes 写入，覆盖全部旁路路径。
 
         try:
             final_answer = ""
@@ -330,10 +330,6 @@ async def query(
             yield _sse({"type": "error", "error": mask_exception_for_client(exc)})
             yield _sse({"type": "done", "thread_id": thread_id, "answer": ""})
         finally:
-            if _span_cm is not None:
-                _span_cm.__exit__(None, None, None)
-            if _parent_ctx_cm is not None:
-                _parent_ctx_cm.__exit__(None, None, None)
             # V3 Phase 2: Scheduler complete + ExecutionStatus → SUCCEEDED/FAILED
             # P0-1（方案 B）：complete 现带终态 status（COMPLETED/FAILED），槽位真实释放。
             if scheduler is not None and scheduler_enqueued:

@@ -41,11 +41,25 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
+from eval.ablation import fallback_config_hash  # noqa: E402 —— 纯 stdlib，供落后镜像降级用
 from eval.metrics import compute_retrieval_metrics  # noqa: E402
-from knowledge_service.clients.milvus_utils import get_milvus_client  # noqa: E402
-from knowledge_service.conf.config_hash import compute_config_hash  # noqa: E402 —— 单一实现已上收至 conf 包
+from knowledge_service.clients.milvus_utils import (  # noqa: E402
+    create_hybrid_search_requests,
+    get_milvus_client,
+    hybrid_search,
+)
+
+try:
+    from knowledge_service.conf.config_hash import compute_config_hash  # noqa: E402 —— 单一实现已上收至 conf 包
+except ModuleNotFoundError:
+    # 部署镜像落后于工作树、缺 conf/config_hash；仅作归因标签/run_id 目录名，不影响检索数值。
+    compute_config_hash = fallback_config_hash  # noqa: E402
 from knowledge_service.conf.milvus_config import milvus_config  # noqa: E402 —— 路径引导后导入，脚本直跑必需
+from knowledge_service.conf.retrieval_config import (  # noqa: E402 —— 全库兜底路与线上同参（dense/sparse 权重）
+    retrieval_cfg,
+)
 from knowledge_service.core.tracing import init_tracing  # noqa: E402
+from knowledge_service.lm.embedding_utils import generate_embeddings  # noqa: E402
 from knowledge_service.query_process.agent.nodes.node_rerank import node_rerank  # noqa: E402
 from knowledge_service.query_process.agent.nodes.node_rrf import _as_entity_list, reciprocal_rank_fusion  # noqa: E402
 from knowledge_service.query_process.agent.nodes.node_search_embedding import node_search_embedding  # noqa: E402
@@ -106,6 +120,37 @@ def _extract_ids(docs: List[Dict[str, Any]]) -> List[str]:
     return ids
 
 
+def _global_embedding_search(query: str, limit: int = 10) -> List[Dict[str, Any]]:
+    """
+    全库（无 item 过滤）embedding 检索 —— eval 侧独立实现，不改线上节点。
+
+    背景：benchmark 语料的 chunk 普遍无 item_name（实测 product_manual_v1_bge_m3 全空）；
+    工作树新版 node_search_embedding 对空 item_names 已是"不过滤、全库检索"，但落后部署镜像
+    里的旧版会直接跳过返回空。此处用与消融 _embedding_route 同一批 Milvus 原语、与线上节点
+    同一组参数（retrieval_cfg.hybrid 权重 / norm_score / output_fields）做全库检索，
+    使 run_eval / run_e2e_eval 在新旧镜像上口径一致。
+    """
+    embeddings = generate_embeddings([query])
+    dense_vec = embeddings.get("dense")[0]
+    sparse_vec = embeddings.get("sparse")[0]
+    reqs = create_hybrid_search_requests(
+        dense_vector=dense_vec,
+        sparse_vector=sparse_vec,
+        expr=None,  # 全库：不带任何 item/租户过滤（benchmark 集合单租户）
+        limit=max(limit * 3, 20),  # 底层候选留余量，与节点 candidate_limit 同理
+    )
+    res = hybrid_search(
+        client=get_milvus_client(),
+        collection_name=milvus_config.chunks_collection,
+        reqs=reqs,
+        ranker_weights=(retrieval_cfg.hybrid.dense_weight, retrieval_cfg.hybrid.sparse_weight),
+        norm_score=True,
+        limit=limit,
+        output_fields=["chunk_id", "content", "item_name"],
+    )
+    return _as_entity_list(res[0]) if res else []
+
+
 def retrieve_one(
     query: str,
     item_name: str,
@@ -134,9 +179,15 @@ def retrieve_one(
         "is_stream": False,
     }
 
-    # 1) 召回：embedding 路（纯检索，无 LLM）
-    emb_result = node_search_embedding(state)
-    sources = [(_as_entity_list(emb_result.get("embedding_chunks")), 1.0)]
+    # 1) 召回：embedding 路（纯检索，无 LLM）。
+    #    item_name 为空时走 eval 侧全库兜底（新节点本就是该语义；落后镜像的旧节点会
+    #    误跳过返回空），与消融口径对齐；详见 _global_embedding_search docstring。
+    if item_name:
+        emb_result = node_search_embedding(state)
+        emb_docs = _as_entity_list(emb_result.get("embedding_chunks"))
+    else:
+        emb_docs = _global_embedding_search(query)
+    sources = [(emb_docs, 1.0)]
 
     # 2) 召回：HyDE 路（可选；节点自身在 LLM 失败时降级为空，不阻断）
     if enable_hyde:
@@ -259,6 +310,10 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     parser.add_argument("--golden", default=str(DEFAULT_GOLDEN), help="golden 数据集路径")
     parser.add_argument("--enable-hyde", action="store_true", help="启用 HyDE 召回路（需 LLM）")
     parser.add_argument("--skip-rerank", action="store_true", help="跳过 BGE 重排，直接使用 RRF 顺序")
+    parser.add_argument(
+        "--skip-sparse-check", action="store_true",
+        help="跳过稀疏编码一致性 canary（仅调试；正常应让导入/查询编码不一致时 fail-fast）",
+    )
     return parser.parse_args(argv)
 
 
@@ -290,6 +345,21 @@ def main(argv: Optional[List[str]] = None) -> int:
             file=sys.stderr,
         )
         return 1
+
+    # ---------- 稀疏编码一致性 fail-fast（导入/查询 EMBEDDING_MODE 不一致时混合检索会静默退化为纯 dense） ----------
+    if not args.skip_sparse_check:
+        from knowledge_service.utils.sparse_consistency import (
+            SparseEncodingMismatchError,
+            assert_sparse_encoding_consistent,
+        )
+
+        try:
+            assert_sparse_encoding_consistent(client, collection_name, use_cache=False)
+        except SparseEncodingMismatchError as e:
+            print(f"[eval] 稀疏编码门禁未通过，fail-fast（结果不可信）：\n  {e}", file=sys.stderr)
+            return 1
+        except Exception as e:  # noqa: BLE001 —— canary 自身环境异常（非错配判定）不阻断评测
+            print(f"[eval] 警告：稀疏编码 canary 无法执行（非错配判定），跳过校验继续：{e}", file=sys.stderr)
 
     # ---------- 加载 golden ----------
     queries = load_golden_queries(golden_path)
