@@ -2,6 +2,15 @@
 
 本仓库为 uv workspace monorepo。**唯一受支持的安装/运行入口是根 `uv.lock` + `uv sync`**，子包不再维护独立 `uv.lock`（见 v2 修复 #14）。
 
+## 分支资产台账入库 + CodeQL Batch 7 系列 9 条分支处置（2026-10-02）
+
+> 类型：纯仓库卫生（不改任何产品代码，未跑 pytest）。方案/台账：`docs/plans/plan-branch-disposition-2026-10-01.md`。
+
+- **先落账再删 ref**：上一轮（10-01）写成的分支处置台账**一直未提交**（仅在 `docs/plans/` 里漂着）——本轮先将其入库并追加 §6，再删分支；反序会让取证结论不可复现。
+- **§6 登记本批 9 条分支的逐条并入证据**（PR #38〜#47 全部已合主干）：均 `base=main`（逐条从 PR 的 `baseRefName` 取，不假定）、`state=MERGED`、本地 tip == 远端 tip。前 8 条 `cherry + = 0` / `ahead = 0` / `merge-tree` 退出码 0（完全并入）。
+- **新记一条 squash 最强判据（§5 补段）**：#45 是唯一 squash 入主干的，改用 `git rev-parse "<head>^{tree}" "<squash>^{tree}"` ——两个树 OID **完全相同**（`62fb9c1d…`），再由净差 `5 files +216/−35` 与 squash 提交逐项一致交叉验证。同时登记陷阱：squash 已并入后 `cherry +`/`ahead`/`merge-tree` 退出码**均为预期假阳性**，不得据此判“未并入”（差点误删一条真分支）。
+- **处置**：删本地 + 远端上述 9 条。§2 保留的三条资产分支（`v3` / `feat/isolation-hardening` / `test/rag-route-ablation-eval`）与 §4 两条远端残余（`origin/v2`、`origin/dependabot/…` 对应 OPEN PR #26）**本轮仍未动**；§3 的三条处置路径（isolation-hardening 解冲突开 PR / ablation 拆分小 PR / v3 合流）仍待排期。
+
 ## B7b-2 实施：链② 限流桶去凭据（断言主体 → IP）（2026-10-02，PR #46）
 
 > 方案：`docs/plans/plan-codeql-b7b-principal-thread-identity-2026-10-01.md` §4.2 / §6（B7b-1 后的第二个 PR，拆 `#38` 三条链中的第二条）。本批**不改 `fingerprint` 本体、不动链①会话身份**（那是 B7b-4）。
