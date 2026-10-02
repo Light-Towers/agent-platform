@@ -39,7 +39,7 @@
 | `SILICONFLOW_API_KEY` | `""` | memory.embedder | 配了则 embedding 走远程硅基流动 |
 | `MONGO_URL` / `MONGO_DB` | `""` / `deepagents` | memory | Mongo 会话历史/checkpoint |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` / `AGENT_CORE_TRACE_ENABLED` | `""` / `false` | tracing | OTel 导出总开关 |
-| `AGENT_PLATFORM_SECURITY_PEPPER` | `""` | guardrails.auth | 密钥指纹的服务端 pepper（`HMAC-SHA256(pepper, secret)`）；驱动 `fingerprint` / `derive_thread_id` / 限流桶 key。一经使用勿变更，否则会话身份漂移（迁移见根 `scripts/migrate_thread_identity.py`） |
+| `AGENT_PLATFORM_SECURITY_PEPPER` | `""` | guardrails.auth | 密钥指纹的服务端 pepper（`HMAC-SHA256(pepper, secret)`）；现仅驱动 `fingerprint` / `derive_thread_id`（会话身份）——限流桶 key 已改「断言主体 → IP」（B7b-2），LLM 客户端缓存键已改不透明 slot（B7b-1）。一经使用勿变更，否则会话身份漂移（迁移见根 `scripts/migrate_thread_identity.py`） |
 
 ## 安装
 

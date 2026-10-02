@@ -35,18 +35,20 @@ def test_extract_api_key_missing():
     assert extract_api_key_from_headers({}) == ""
 
 
-def test_resolve_client_key_with_auth():
-    key = resolve_client_key({"x-api-key": "secret"}, "1.2.3.4", auth_enabled=True)
-    assert key.startswith("key:")
+def test_resolve_client_key_prefers_asserted_subject():
+    """有服务端断言主体 → 按主体建桶（B7b-2 新契约）。"""
+    assert resolve_client_key("1.2.3.4", "tenant-a") == "sub:tenant-a"
 
 
 def test_resolve_client_key_fallback_ip():
-    key = resolve_client_key({}, "1.2.3.4", auth_enabled=False)
-    assert key == "ip:1.2.3.4"
+    """无断言主体 → 退回客户端 IP（不再有「凭据摘要」这一档）。"""
+    assert resolve_client_key("1.2.3.4") == "ip:1.2.3.4"
+    assert resolve_client_key("1.2.3.4", None) == "ip:1.2.3.4"
+    assert resolve_client_key("1.2.3.4", "   ") == "ip:1.2.3.4"
 
 
 def test_resolve_client_key_no_ip():
-    key = resolve_client_key({}, None, auth_enabled=False)
+    key = resolve_client_key(None)
     assert key == "ip:unknown"
 
 
