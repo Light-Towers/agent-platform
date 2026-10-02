@@ -30,6 +30,10 @@ from agent_core.memory.embedder import (
     SiliconFlowEmbedder,
     get_embedder,
 )
+from agent_core.memory.execution import (
+    EpisodicStoreProtocol,
+    ProceduralStoreProtocol,
+)
 from agent_core.memory.mongo import MongoHistoryStore
 from agent_core.memory.semantic import (
     MemoryType,
@@ -155,6 +159,8 @@ __all__ = [
     "MemoryStore",
     "PgMemoryStore",
     "VectorMemoryStore",
+    "EpisodicStoreProtocol",
+    "ProceduralStoreProtocol",
     "DEFAULT_COLLECTION",
     "MilvusMemoryBackend",
     "PgVectorMemoryBackend",
