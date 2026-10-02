@@ -151,9 +151,11 @@ def get_llm_client(
     )
     cached = _cache_get(cache_key)
     if cached is not None:
+        # 日志只打非凭据维度：slot id 虽不透明，但仍由凭据数据流而来，不得入日志 sink
+        # （CodeQL `py/clear-text-logging` 正是按这条数据流报的，有 AST 守门用例拦截回归）。
         logger.debug(
-            "LLM 客户端缓存命中：provider=%s model=%s json_mode=%s slot=%s",
-            provider, target_model, json_mode, api_key_slot,
+            "LLM 客户端缓存命中：provider=%s model=%s json_mode=%s",
+            provider, target_model, json_mode,
         )
         return cached
 

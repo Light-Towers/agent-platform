@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import ast
 import hashlib
 import pathlib
 
@@ -132,6 +133,32 @@ def test_registry_source_has_no_credential_digest_path():
     src = pathlib.Path(registry.__file__).read_text(encoding="utf-8")
     for forbidden in ("hashlib", "hmac", "fingerprint", "sha256", "digest", "api_key_hash"):
         assert forbidden not in src, f"registry 不应再出现摘要通路：{forbidden}"
+
+
+# 凭据及其派生值：不得作为日志调用的实参（B7b-1 实施时曾把 ``api_key_slot`` 写进
+# ``logger.debug``，被 CodeQL ``py/clear-text-logging`` 报为本 PR 新增 high 告警）。
+_CREDENTIAL_NAMES = {"api_key", "api_key_slot", "secret", "token"}
+
+
+def test_no_credential_value_reaches_logger_calls():
+    """AST 守门：registry 内任何 ``logger.*`` 的实参不得引用凭据或其派生值。
+
+    用 AST 而非文本 grep：本不变量的真实形态是「值进了 sink」，文本匹配既会被换行/重排
+    绕过、又会把「注释里提到该名字」误判为违规。
+    """
+    src = pathlib.Path(registry.__file__).read_text(encoding="utf-8")
+    offenders = []
+    for node in ast.walk(ast.parse(src)):
+        if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+            continue
+        recv = node.func.value
+        if not (isinstance(recv, ast.Name) and recv.id == "logger"):
+            continue
+        for arg in [*node.args, *(kw.value for kw in node.keywords)]:
+            for sub in ast.walk(arg):
+                if isinstance(sub, ast.Name) and sub.id in _CREDENTIAL_NAMES:
+                    offenders.append((node.lineno, sub.id))
+    assert not offenders, f"凭据/凭据派生值进入日志实参：{offenders}"
 
 
 def test_lru_evicts_beyond_max():
