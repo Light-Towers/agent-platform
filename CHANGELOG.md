@@ -2,6 +2,18 @@
 
 本仓库为 uv workspace monorepo。**唯一受支持的安装/运行入口是根 `uv.lock` + `uv sync`**，子包不再维护独立 `uv.lock`（见 v2 修复 #14）。
 
+## 观测全局装配 + RAG 分层评测入主干（并入 `test/rag-route-ablation-eval` 全量）（2026-10-02）
+
+> 类型：产品代码变更（观测状态机收敛为 kernel 单一实现、过渡门面退役、ks 迁统一工厂、依赖 extras 归一）+ 评测体系新增。方案：分支自带的 `docs/plans/plan-observability-global-remediation-2026-09-29.md`（S0–S5 / R1–R19）、`plan-rag-sparse-encoding-consistency-2026-09-29.md`、`plan-c2-cross-agreement-pivot-2026-09-29.md`。merge 提交 `6ee7283`（双亲 `b7448c1` + `4cffe7c`，不 rewrite 历史）。
+
+- **台账 §3 第二条执行，且未采纳其「拆分成小 PR」的建议**：拆分的前提被实测推翻——原写「75 个独有提交……很可能同样已大面积入主干」，实际 `git cherry -v origin/main test/rag-route-ablation-eval` = **25 `+` / 0 `-`**（与 isolation 那条 8/7 分布相反，无一已等价入库），所以拆分只能减少评审面、不能减少内容量；而两条主题链在分支上交织于同一批文件（`agent_core/tracing.py` 既被观测链重写又被 `--extra otel` 评测链消费），拆开会留下「先合的一半过不了门禁」的中间态。沿用 PR #41 先例全量 merge。
+- **落地内容**：观测侧——kernel `agent_core/tracing.py` 单状态机（`DISABLED`/`DEGRADED`/`ACTIVE` 三态可查，终结 R5/R9/R11 的「显式关 vs 坏了」不可区分）+ `tracing_middleware.py` 统一装配 + `agent_runtime/otel.py` 过渡门面退役（其单测迁至 kernel 与 `tests/observability`）+ ks `main.py` 迁 `build_api_app` + OTel/langfuse extras 下界归一（OTel 统一 `>=1.24`：根 `[otel]` 3 条 + agent-core `[tracing]` 2 条；langfuse 统一 `>=4.0.0`：runtime `[langfuse]` / federation `[observability]` / exhibition `[langfuse]` 三处）+ `deploy/k8s/` 真集群 traceparent 演练与验收记录。评测侧——`knowledge-service/eval` 分层体系（route ablation / `gen_golden` / `run_e2e_eval` / `compare_runs` / `make_baseline` / `meta_eval_judge`，+ 13 份新单测 + 一个已冻结的脱敏回归基准锚点）与 Makefile `eval-rag-*` 六个目标（均非 hermetic，不入 `make ci`）。
+- **门禁合并是本批最需要判断力的地方**（`scripts/lint_architecture.py` 6 块冲突）：主干 P11 与分支 L-1/L-2/L-3/L-4 是**两套互不冲突的新门禁**，故双保留；以主干为基底，分支四条在 `main()` 里改接 `v10..v13`——两侧原本都用 `v6..v9` 装**不同**门禁，若让这种形状 auto-merge 通过（语法合法、ruff 不报）就会静默覆盖四条。同时 `_iter_prod_py` 改为复用主干已有的 `_skipped_rel`（单一排除面），分支 registry 里收敛前的「批 3」「C1」旧标签不带入主干。
+- **`_FASTAPI_WHITELIST` 取分支收紧版（摘除 ks）**：主干版仍豁免 ks `main.py`（当时它自带 handler），分支把它摘掉是因为本批同时带来 ks 迁 `build_api_app`。这不是二选一的偏好，而是可验证的：实跑 `lint_architecture.py` 13 条全 rc=0（台账 §7 陷阱二的同类情形——一个带时间戳的「主干不采信」断言，本批反过来是「主干保留的豁免」因本批变更而作废）。
+- **修一个 auto-merge 不报错的真红**（分支自带缺陷，非合并引入）：`test_init_enabled_without_endpoint_degraded` 未挂 `skipif(_SDK_AVAILABLE)`，而 kernel 的降级原因优先级为「依赖层先于配置层」，导致它在**默认 CI 环境**（无 OTel SDK）必红——分支从未开 PR，从未进过 CI。处置按红线走：不改断言、不删用例、不放宽前置，而是**把隐含前置条件显式化**（`monkeypatch` 置 `_SDK_AVAILABLE=True`）+ **新增**一条 `skipif` 用例钉住优先级，两种宿主分别实跑至全绿。详细可复跑判据已入台账 **§7 陷阱三/四**。
+- **验证（均为本机实跑）**：ruff `All checks passed`；`lint_architecture.py` 13 条门禁 rc=0，并对 L-1/L-2/L-3 做**负对照**（伪造一棵目录树写三行违规）确认门禁非空转（扫 515 个生产 `.py`）；`check_doc_sync.py` 0 警告；`uv lock --check` rc=0（300 包）；`eval` 启发式 15/15 = 100%；`make test` 九个 session 全绿（根 **897 passed/6 skipped**、shared-schemas 28、agent-runtime 594/1、agent_server 44、联邦 163、kefu 43、exhibition 347/1、knowledge-service 396/13、nl2sql 18）；另对 35 个被修改的 `.py`/`.toml` 跑「顶层 `def`/`class` 重名 + `tomllib` 解析」不变量：零命中。
+- **未做**：不删 `test/rag-route-ablation-eval` ref（等本 PR 合入后按台账 §6 先例先取证再清）；不碰 `docs/plans/plan-multi-expert-adjudication-2026-09-30.md`（本地未跟踪、全仓零引用的草稿，不属本批载荷）；CodeQL 存量告警面复验另计。
+
 ## 执行记忆内核契约 ADR-0005 T0 入主干（并入 `feat/isolation-hardening` 真独有载荷）（2026-10-02）
 
 > 类型：产品代码变更（`agent-core` 记忆层新增契约协议）。方案：`docs/adr/0005-execution-memory-kernel-contract.md` + `docs/plans/plan-memory-hardening-2026-09-27.md`（属仓内「先方案后编码」已有的成件套件，本轮只执行台账 §3 第一条，未新增设计）。并入提交 `f666bc8`（真 merge，双亲 `aaefd1d2` + `d078312`，不 rewrite 历史）。
