@@ -49,6 +49,7 @@
 ## 4. 远端残余（需人工拍板，本轮未动）
 
 > 2026-10-02 订正：第二条所列 `origin/dependabot/uv/minor-and-patch-37a69dd668`（PR #26）**已不存在**——该 PR 关闭后 ref 被 `git fetch --prune` 回收，属历史快照。今天的远端 dependabot 残余是两支：`pypdf-6.19.0`（PR #51，已并入主干）与 `minor-and-patch-7e9aec2f8c`（PR #52，OPEN、对主干净独有 1 条 ⇒ 活分支勿删），逐条定性见 **§9.5**。
+> **同日二次订正（合入 #54 前实跑）**：上面这句已经又过期了一次——`pypdf-6.19.0` 的远端分支在 #51 合并时被 GitHub 自动回收（实测 `ls-remote --heads` 无此 ref），`minor-and-patch-7e9aec2f8c` 则由 **dependabot[bot] 自行关闭**（非本仓决策，取证见 §9.4）。故**此刻远端 dependabot 残余只有一支**：`minor-and-patch-f18118ef2b`（PR **#55**，OPEN，ci 被 L-4 拦）。教训同属一族：**dependabot 分支面是自愈的，不能拿一次 `ls-remote` 的快照当长期事实**（本会话第一次 `ls-remote` 只看到 5 个 head，#55 的分支在那之后几十秒才出现）。
 
 - `origin/v2`：本地已删（内容确已并入），**远端保留**。名字带里程碑语义（CHANGELOG 有"见 v2 修复 #14"的交叉引用），删 ref 会丢历史锚点。若要清，建议先 `git tag archive/v2 origin/v2 && git push origin archive/v2` 再删分支。
 - `origin/dependabot/uv/minor-and-patch-37a69dd668`：对应 **PR #26 OPEN**，是活分支，勿删。
@@ -209,7 +210,20 @@ $ git show --stat --format="" 85cd9bfe | tail -1   # 5 files changed, 216 insert
 
 又一条 API 形状伪影（同属「取不到值必须 fail-closed」族）：Dependabot 告警的 REST 列表**没有 `closed_at` 字段**（那是 GraphQL 的），且 `state` 的终态枚举是 **`fixed` / `dismissed`，不存在 `closed`** —— 第一版按 `state != "closed"` 断言，把 8 条正确的 `state=fixed` 全判为异常（幸好是假阴性方向，没造成误报成功）。
 
-**PR #52**（minor-and-patch 组 14 项，改 9 个 pyproject + lock）的 `ci` **失败，按拍板保持 open 不动**。根因是本仓 **L-4 架构门禁如实拦截**（非环境抖动，日志已取）：它把根 `pyproject.toml` 的 `opentelemetry-api` 抬到 `>=1.45.0`，而 `packages/agent-core/pyproject.toml` 仍是 `>=1.24`（主干当前两处均 `>=1.24`，一致），L-4 要求多处下界一致以防组合解析回溯 ⇒ 后续动作是「按 `plan-observability §3.3` 归一下界」，属独立决策面（已入 `docs/TODO.md`）。
+**PR #52**（minor-and-patch 组 14 项，改 9 个 pyproject + lock）的 `ci` **失败**。根因是本仓 **L-4 架构门禁如实拦截**（非环境抖动，日志已取）：它把根 `pyproject.toml` 的 `opentelemetry-api` 抬到 `>=1.45.0`，而 `packages/agent-core/pyproject.toml` 仍是 `>=1.24`（主干当前两处均 `>=1.24`，一致），L-4 要求多处下界一致以防组合解析回溯。
+
+【合入 #54 前的二次实跑订正】当时拍板的「保持 open 不动」**已不再成立**，因为 #52 不是我们关的、也不是开着的：
+
+| 取证命令 | 实测值 |
+|---|---|
+| `issues/52/timeline` 里的 `closed` 事件 | actor = **`dependabot[bot]`**（`type=Bot`）、`created_at=2026-10-02T11:59:36Z`（无 `merged` 事件） |
+| `pulls/52` | `state=closed`、`merged=false`、`merged_at=null`、head `4aa4233`、base `617cbf29` |
+| bot 在 `issues/52/comments` 的留言（11:59:34Z，比 `closed_at` 早 2 秒）| "Looks like these dependencies are updatable in another way, so this is no longer needed." |
+| 替代 PR | **#55 OPEN**，同一 group 但 14 → **13 项**（pypdf 已随 #51 出去），新分支 `minor-and-patch-f18118ef2b` |
+| #55 的 `ci`（job `110828479303` 日志）| **12:01:16Z 以完全同一条 L-4 消息再红**（`'opentelemetry-api' 下界不一致（pyproject.toml[otel]: >=1.45.0 vs packages/agent-core/pyproject.toml[tracing]: >=1.24）`）；`ha`/`assembly` pass、CodeQL skipping |
+| 被回收的 `4aa4233` 可达性 | `refs/pull/52/head` 仍存在⇒ 提交不会因分支删除而丢；且 `is-ancestor origin/main` = False（内容未入主干） |
+
+⇒ 两个结论修正：① **L-4 不是偶然一次报红，而是连续两次拦下同一类回归**（这正是「三层齐备」里强制门禁层的价值：不靠人自觉）；② 待办形状从「等 #52 变绿/替 Dependabot 改它的分支」变为「**本仓先归一 OTel 下界，再重触组更新**」，属 `plan-observability §3.3` 的独立决策面（需先出方案，本轮不动）。取证脚本：`.codeartsdoer/temp/pr52_close_evidence.py`。
 
 ### 9.5 剩余 ref 与待办的逐条定性（本轮明确不动的部分）
 
@@ -219,8 +233,9 @@ $ git show --stat --format="" 85cd9bfe | tail -1   # 5 files changed, 216 insert
 |---|---|---|
 | `v3` @ `26cd2fa` | `cherry -v origin/main` 0 行、ahead 0、本地=远端 | 内容零丢失风险，**删不删是组织决策不是取证问题**。2026-10-02 拍板：本轮**保留**（`archive/v3` tag 方案未采纳也未否决） |
 | `origin/v2` @ `b691ff1` | 同上；**本地无此分支**（`rev-parse v2` = `Needed a single revision`） | 同 `v3`，带里程碑语义，**保留**；本地无需动作 |
-| `dependabot/uv/pypdf-6.19.0` @ `d3cf899` | 已随 PR #51 入主干 ⇒ 现为「已并完」 | 收尾登记后即可删（不阻塞主干验收） |
-| `dependabot/uv/minor-and-patch-7e9aec2f8c` @ `4aa4233` | `is-ancestor` = **NO**、`cherry +` = 1、PR #52 OPEN | **活分支，勿删**（且其 ci 红，见 9.4） |
+| `dependabot/uv/pypdf-6.19.0` @ `d3cf899` | 已随 PR #51 入主干 ⇒ 现为「已并完」；**远端分支已被 GitHub 在合并时自动回收**（实测 `ls-remote --heads` 无此 ref），本地那份是 `gh pr checkout 51` 临时建出的 | 收尾登记后删**本地**分支 + `fetch --prune` 清残留跟踪 ref |
+| ~~`dependabot/uv/minor-and-patch-7e9aec2f8c` @ `4aa4233`~~ 【二次实跑订正，原判「活分支勿删」已过期】 | PR #52 由 **dependabot[bot] 自动关闭**（timeline `closed` actor=Bot、`closed_at=11:59:36Z`、`merged=false`），分支随之回收；head 提交仍可经 `refs/pull/52/head` 取回 | 不再是 ref 面待办；后继者见下一行 |
+| `dependabot/uv/minor-and-patch-f18118ef2b` @ PR **#55** | #52 关闭同时 Dependabot 重算组集开出替代 PR（14 → 13 项）；`ci` **同签名失败**（12:01:16Z L-4：根 `[otel] >=1.45.0` vs `agent-core [tracing] >=1.24`），`ha`/`assembly` pass | **活分支，勿删**；但它不是「等 review」的对象——前置是本仓先归一下界（见 9.4） |
 | B7b-4（`#38`/`#39` 真修） | 前置取证仍卡 `192.168.100.126`：banner 交换前被关闭，累计 5 次同签名 ⇒ 本轮**未再硬连**（沿用已入库结论，不拿旧结论冒充新实跑） | **不可开工**，属外部条件依赖非代码缺口 |
 | R19（issue #23） | 未动工；`FastAPI(telemetry=…)` 关闭项 + 新 lint 门禁均未实现 | 需先按红线出方案，并做真集群端到端复验（同样卡部署侧环境） |
 | `plan-multi-expert-adjudication-2026-09-30.md` | 已随 PR #53 入库（269 行，状态 Proposed） | 本轮不实施；其三个基座提交已在主干 |
