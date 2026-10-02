@@ -10,15 +10,21 @@
 框架无关：仅依赖 stdlib，不 import 任何宿主应用或第三方包。
 ``DEFAULT_EXEMPT_PATHS`` 为可配置默认值，所有决策函数均接受 ``exempt_paths`` 覆盖。
 
-DUP-1 / CodeQL ``py/weak-sensitive-data-hashing`` 收口：本模块是全仓 **唯一的**
+DUP-1 / CodeQL ``py/weak-sensitive-data-hashing`` 收口：本模块曾是全仓 **唯一的**
 「密钥 → 稳定指纹」实现（``fingerprint``），宿主不得再各自 ``hashlib.sha256(api_key)``
 （由 ``scripts/lint_architecture.py`` P6 不变量拦截）。历史四处散点实现语义分裂
 （全量 vs ``[:12]`` 48bit 截断、均无服务端 pepper），现已收敛到此。
 
+**B7b 进度（消费面收缩中，勿按旧账面判断）**：``fingerprint`` 的三条「凭据 → 摘要」
+通路已拆两条 —— 链③ LLM 客户端缓存键（B7b-1，改不透明 slot）、链② 限流桶
+（B7b-2，``resolve_client_key`` 改为「服务端断言主体优先 → IP 兜底」，不再读请求头
+凭据）。**唯一残留消费面是链① ``derive_thread_id``（会话身份）**，随 B7b-4 拆除后
+``fingerprint`` 与 ``AGENT_PLATFORM_SECURITY_PEPPER`` 一并退役（B7b-5）。
+
 已登记的 CodeQL 定调（PR #33 重扫报出的 2 条新告警，结论与证据同步入库）：
 - ``fingerprint`` 行（HMAC-SHA256）→ **误报**：本规则针对「口令类低熵秘密」的离线
-  暴破，而此处输入是高熵 bearer secret，产物只做**查表标识**（限流桶 / 客户端缓存键 /
-  会话身份），每请求计算；换 scrypt/pbkdf2 只添延迟、对 128bit+ 随机密钥无暴破增益，
+  暴破，而此处输入是高熵 bearer secret，产物只做**查表标识**（现仅会话身份一路），
+  每请求计算；换 scrypt/pbkdf2 只添延迟、对 128bit+ 随机密钥无暴破增益，
   且带 pepper 时离线计算还需先拿到 pepper。
 - ``legacy_thread_id`` 行（48bit 截断）→ **明知保留**：必须能复算升级前的旧身份，
   否则历史会话无法找回；调用面由 P6-2 门禁锁死（仅迁移脚本），不入业务链路。
@@ -69,6 +75,11 @@ def fingerprint(secret: str, *, length: Optional[int] = None) -> str:
     「口令哈希」；慢 KDF 在此只会拖慢中间件热路径，对随机密钥的离线暴破无实际增益。
     CodeQL 按变量语义名将其归为 password 类而报 ``py/weak-sensitive-data-hashing``，
     定调为误报（理由同步记于本模块 docstring 与 ``docs/plans/plan-codeql-codescanning-remediation-2026-10-01.md``）。
+
+    .. warning::
+       新增调用点前先自问：「被摘要的是不是凭据？」链②（限流桶）与链③（LLM 缓存键）
+       当初都以「只是查表标识、不算泄露」为由接入，最终仍是 CodeQL 的实锤通路
+       （B7b-1/B7b-2 已拆）。主体/租户类标识请直接使用明文，不要经本函数派生。
 
     :param secret: 待派生的密钥原文（仅在此处短暂使用，不落入返回值）
     :param length: 返回的十六进制字符数；``None`` 为全量 64 位
@@ -134,19 +145,25 @@ def extract_api_key_from_headers(headers: Mapping[str, str]) -> str:
     return ""
 
 
-def resolve_client_key(headers: Mapping[str, str], client_host: Optional[str], auth_enabled: bool) -> str:
+def resolve_client_key(client_host: Optional[str], subject: Optional[str] = None) -> str:
     """
-    解析限流 client 标识（优先 X-API-Key，其次客户端 IP）。
+    解析限流 client 标识：**服务端断言主体优先，否则退回客户端 IP**。
 
-    :param headers: 请求头
+    B7b-2（拆 CodeQL ``py/weak-sensitive-data-hashing`` 链②）：旧实现为鉴权启用且带上
+    ``X-API-Key``/``Bearer`` 时返回 ``key:{fingerprint(provided)}``——那是「凭据 → 摘要位」
+    的实锤通路。本函数**不再读任何请求头**（签名里没有 headers 参数 ⇒ 凭据无法再流进来）。
+    隔离粒度上两者不等价，**两面都得知道**：旧实现下同一把部署级密钥的所有客户端共用一个桶
+    （一个打满→同密钥其他客户端连带 429）；新实现按 IP/主体独立，但**单客户端换 IP 可重置配额**
+    ⇒ 限流强度下降（兜底的是已有的全局窗口与接入后的主体桶，见方案 §4.2 实施补记）。
+
     :param client_host: 客户端 IP（request.client.host，可能为 None）
-    :param auth_enabled: 是否启用 API Key 鉴权
-    :return: 限流桶 key；启用鉴权且有 key 时用 ``fingerprint`` 摘要（避免内存留存明文）
+    :param subject: 服务端**已断言**的主体标识（如租户 id），由宿主经中间件注入；
+                    无断言传 ``None`` ⇒ 退回 IP。**严禁传凭据或其派生值**
+    :return: 限流桶 key：``sub:<subject>`` / ``ip:<host>``（无 IP 时 ``ip:unknown``）
     """
-    if auth_enabled:
-        provided = extract_api_key_from_headers(headers)
-        if provided:
-            return f"key:{fingerprint(provided)}"
+    bound = (subject or "").strip()
+    if bound:
+        return f"sub:{bound}"
     ip = (client_host or "").strip() or "unknown"
     return f"ip:{ip}"
 
