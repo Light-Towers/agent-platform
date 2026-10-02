@@ -271,3 +271,27 @@ $ git show --stat --format="" 85cd9bfe | tail -1   # 5 files changed, 216 insert
 
 **停止规则（防「记录删除 → 再记录 → 再删除」的无穷回归）**：从本节起，收尾分支自身的删除**由合并动作携带**（`gh pr merge --delete-branch`），一次合并即原子地同时完成「内容入主干」与「ref 消失」，因此不需再为「删除这个登记分支」额外开一轮登记。本节所属的 PR 就按这条规则执行。台账至此 **无遗留 ref 面待办**：`v3`/`v2` 是组织决策（已拍板保留），#55 是活分支（勿删且前置在本仓），其余均为「已并完 + 已落账 + 已删」。
 
+### 9.7 闭合：PR #56 落账、停止规则首次执行、以及「登记动作作废自己写下的 tip」这条自我指涉订正
+
+**PR #56**（分支 `docs/ref-closeout-round3` @ `e521360`）于 2026-10-02T12:37:12Z 合入，主干新 tip `a53cf29`（双亲 `10c8629` + `e521360`）。零漂移用树 OID 直比：`e521360^{tree}` == `a53cf29^{tree}` = `0078c494…`；对前一 tip 净差 3 files / +37 / −3。
+
+**停止规则首次执行即生效（不需要「只为了删登记分支」的第四轮）**：合并命令用 `gh pr merge 56 --merge --delete-branch`，一次动作原子完成两件事——`git fetch --prune` 回显 `[deleted] (none) -> origin/docs/ref-closeout-round3`，随后 `git branch -d docs/ref-closeout-round3` 报 `not found`（本地也被一并删）。
+
+主干复验（`.codeartsdoer/temp/verify_main_rescan_54.py a53cf29 56` → `=== 总体：PASS ===`）：
+
+| 判据 | 实测 |
+|---|---|
+| CodeQL 告警面 | open 恰 `#38`/`#39`、实例 sha = `a53cf29c…`、`fixed` 44 / `dismissed` 0 / max 48 不增 / 合入后新建 0；analyses 两条落新 tip（`12:37:46Z` / `12:38:35Z`） |
+| Dependabot | `state=open` = **0**（pypdf 闭合未回退） |
+| 派生门禁集（陷阱六） | 本批仍全在 docs ⇒ 预期 `{ci, Analyze (python), Analyze (actions)}` 三条 completed/success；`ha`/`assembly` 命中空且 workflow-runs API 证 `total_count=0` |
+| CI 全量（同一 tip） | run `37007777285`（`agent-platform-ci`，push，12:37:15Z→12:40:22Z）success；CodeQL `dynamic` run success |
+
+CI 全量已逐条拉到 session 粒度（脚本 `.codeartsdoer/temp/ci_sessions.py`，以 Makefile `test` 的 10 条 `uv run pytest` 命令回显为边界切分），十个 session 全命中且与 Makefile 行数一一对应：根 **901 passed / 2 skipped / 28 deselected**、shared-schemas **28**、agent-runtime **594 / 1 skipped**、`applications/agent_server/tests` **44**、联邦 **163**、kefu **43**、exhibition **347 / 1 skipped**、knowledge-service **396 / 13 skipped**、nl2sql **18**、`--extra otel tests/observability` **15**；另启发式 eval **15/15 = 100%**、`uv lock --check` 300 包。【一个容易看错的巧合】observability session 的「15 passed」与 eval 的「15/15」是两个不同的 15（前者是用例数、后者是 golden 路由命中率），**不得归并为同一个数字**；第一版取数时只筛 `passed` 关键字，把纯数字形状相近的两行当成一个，差点漏计第十条 session（筛 `passed` 不筛 `skipped` 也会漏掉纯 skipped 的 session）。
+
+【本节最该留下的一条：自我指涉的 tip 漂移】§9.6 把「最终 ref 面」的 `main` 写成 `10c8629`，而 §9.6 正是靠 PR #56 入主干的——**它被合入的那一刻就把自己写下的 tip 变成了旧值**。这与 §9.5「不能拿一次 `ls-remote` 快照当长期事实」是同一个错误的两个方向：前者是拿远端快照当长期事实，这里是拿本地 tip 当长期事实，而文档里的 sha 恰恰会因「文档被合入」这个动作失效。⇒ 处置不是追改指针（那会开启「每合一次就得改一次」的新一轮回归），而是**改语义**：`docs/TODO.md` 的复验行由「最新复验」改称「最近一次复验取证」，并明写 sha 只代表取证时刻、判据必须在待验证 tip 上重跑脚本（脚本已参数化为 `verify_main_rescan_54.py <merge_sha> <pr_number>`，本节就是拿它跑的第二轮）。改后的措辞对合入操作不变（fixed point），所以**这是本主题最后一条内容性登记**。
+
+**闭合声明（台账至此收口）**：
+
+- ref 面无待办：远端 4 条（`main` / `v3` `26cd2fa` / `v2` `b691ff1` / `dependabot/uv/minor-and-patch-f18118ef2b`）、本地 2 条（`main` / `v3`）。两轮共删 7 条 ref，删前均证「已并完 + 本地=远端 + 白名单外」，删后 tip 仍为 `origin/main` 祖先（可原位重建）。
+- 明确不动项（各自有前置，均非「忘记做」）：① PR #55 的 `ci` 由本仓 **L-4** 如实拦下，前置是先归一 OTel 下界（`plan-observability §3.3`，需先出方案）；② Dependabot alerts 不在仓内门禁覆盖面，是否新增属「三层齐备」的强制门禁层缺位评估，需先出方案；③ B7b-4 卡部署侧 `192.168.100.126` 的 ssh 通路（banner 交换前被关闭）；④ R19（issue #23）需方案 + 真集群端到端复验；⑤ `plan-multi-expert-adjudication-2026-09-30.md` 状态 Proposed，本轮不实施；⑥ `v3`/`v2` 是否 archive 化是组织决策，已拍板保留。
+
