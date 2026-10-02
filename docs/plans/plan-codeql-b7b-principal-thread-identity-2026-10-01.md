@@ -104,9 +104,12 @@ isStrongPasswordHashing:   "ARGON2" "PBKDF2" "BCRYPT" "SCRYPT"                  
 `resolve_client_key` 改为「已断言主体优先」：主体在 → `sub:<subject>`；否则走现有 `ip:<host>` 分支（`auth_enabled=False` 时早已如此，见 `packages/agent-core/tests/test_guardrails.py:44-50`）。**删除 `key:{fingerprint(provided)}` 分支**，并去掉 `headers.get("x-api-key")` 结果向摘要的通路。
 > 代价要写清：桶粒度从「每密钥」变为「每 IP」（未接主体时）或「每主体」（接入后）。既有测试 `test_resolve_client_key_uses_fingerprint`（`packages/agent-core/tests/test_guardrails_fingerprint.py:116-119`，断言 `key == f"key:{fingerprint('secret')}"`）与 knowledge-service `tests/unit/test_security_guards.py:212-221` 的 `key:` 前缀断言必须**按新契约改写**——这不是放宽断言凑绿：桶键形状本就属内部实现，用例应断言语义「不把密钥明文放进桶键/日志」而非具体摘要值。
 
-### 4.3 链③：LLM 缓存键 ← 注册期分配的**不透明 slot id**
-`get_llm_client` 的 `api_key` 不再进 `cache_key`：注册期（或首次注入时）为每把 provider 凭据分配进程内不透明 slot（`_SLOTS: dict[slot_id, api_key]`），`cache_key` 用 `slot_id`，`prov.build(api_key=_SLOTS[slot_id])`。⇒ 链③的 password 源不再流入任何摘要。
-> 必须诚实记下的代价：缓存键不含密钥摘要 ⇒ 同 `(provider, model, base_url, …)` 但**换了密钥**的请求会命中同一客户端实例。缓解：密钥变更时调用 `clear_cache()`（`registry.py:128` 已存在），并在 `register_provider` 覆盖同名 provider 时主动清键。此取舍进 §7 验收用例 4。
+### 4.3 链③：LLM 缓存键 ← 首次注入时分配的**不透明 slot id**（B7b-1 已实施，含一处方案自订正）
+`get_llm_client` 的 `api_key` 不再进 `cache_key`：首次遇到某把凭据时分配进程内不透明 slot（`_SLOTS: dict[slot_id, api_key]`，同值幂等复用），`cache_key` 用 `slot_id`；`prov.build(api_key=api_key)` **仍直接用调用方传入的凭据**，不从 slot 表读回（读回会在超限重置窗口拿到 `None`，使真实 provider 误报「api_key 不能为空」）。⇒ 链③的 password 源不再流入任何摘要。
+
+> **初稿写下的「代价」判断是错的，实施时被证伪**：原文写「缓存键不含密钥摘要 ⇒ 同 `(provider, model, base_url, …)` 但换了密钥的请求会命中同一客户端实例」。错因：把「键里没有摘要」等同于「键失去密钥区分度」。实际 slot 是**按凭据值幂等分配**的——换密钥必得新 slot ⇒ 必不命中旧客户端，区分度与原摘要方案**等价保留**（已用 `test_changed_api_key_does_not_hit_old_client` 固化，即 §7 验收 4；该用例由「记录一项退化」变成「证明无此退化」）。
+> **真实代价是另一件事**：明文凭据驻留 `_SLOTS`。已兜住：`_MAX_SLOTS = 64` 上界，超限**整表重置并同步清客户端缓存**（否则 slot id 复用会让新密钥撞上旧密钥遗留的实例）；且这不是新增暴露面——客户端对象（`ChatOpenAI`）本就长期持有 `api_key` 明文，且正存放在 `_CLIENT_CACHE` 里（`providers.py:82-90` 实取）。
+> 仍保留的缓解措施：`register_provider` 同名覆盖时主动 `clear_cache()`（旧 provider 的客户端不能靠「键不同」自然逸出）。
 
 ### 4.4 已排除的三条「看起来能修」
 - **改名躲启发式**（`secret`→中性词、`api_key`→`token_ref`）：分类纯由名字决定，改名即可让告警消失，但被摘要的仍是凭据 ⇒ 典型 gaming，**禁止**，并要求 §5 的门禁守住语义而非名字。
@@ -123,16 +126,17 @@ isStrongPasswordHashing:   "ARGON2" "PBKDF2" "BCRYPT" "SCRYPT"                  
   2. **P6 现正则只抓 `hashlib.<algo>(` 同行共现**（`:185-186`），抓不到 `fingerprint(api_key)` 这类"走 kernel 但仍摘要凭据"的写法，也抓不到改名绕过。⇒ 反转后新增一条**语义不变量**：`derive_thread_id` / `legacy_thread_id` / `_hash_api_key` 三个"凭据→摘要"入口名不得再出现（白名单为空），并用反例单测证明（沿用 `_is_bare_secret_hash_line` 抽出判定的既有做法，见 `tests/governance/test_thread_identity_migration.py`）。
 - **P6-2**（`:225-266`，白名单 `:233-236`）：`legacy_thread_id` 删除后**整条规则作废**，其用例 `tests/governance/test_thread_identity_migration.py::test_p6_2_*` 随函数一同退役，不得留悬空断言。
 - 门禁是"防未来漂移"，不是"证明本批修好了"——本批的真相由 §7 的主干告警实取担保。
+- **B7b-1 实施后的 P6 语义补记（待 B7b-5 一并处理）**：链③ slot 化后 `llm/registry.py` 已不再 import `fingerprint`，于是 `tests/governance/test_thread_identity_migration.py:67` 的用例 docstring「四处散点（kernel auth / llm registry / 两个 app 的 `resolve_thread_id`）必须已收敛」已**过时**（registry 不再属于“收敛到 fingerprint”的散点，而是根本不需要摘要）。该 docstring 随 P6 反转一同订正；断言本身（`check_bare_secret_hashing() == []`）不受影响，已实跑 exit 0。
 
 ## 6. 分阶段实施（每阶段独立 PR，都可单独回滚）
 
-| 阶段 | 内容 | 对 `#38` 的作用 | 部署前提 |
-|---|---|---|---|
-| B7b-1 | 链③ slot 化 + 删 `_hash_api_key`（纯 kernel/registry，无身份依赖） | 去 1/3 源 | 无 |
-| B7b-2 | 链② 限流桶去密钥 + 改 2 处用例契约 | 去 2/3 源 | 无 |
-| B7b-3 | ~~联邦 `_apply` 接入 user 断言~~ → **已移出本批关键路径**（Q1 定 (a) 租户级），随 A5 运行时身份接入另批推进 | 不再是前置 | — |
-| B7b-4 | 链① thread_id ← `server_tenant_id()`（按 Q2(c) 三态兜底；`resolve_thread_id` 2 处 + 5 个消费点） | **去最后一源 ⇒ `#38` 应闭合** | 需 §6 兼容窗口 |
-| B7b-5 | 删 `fingerprint` / `legacy_thread_id` + 枚举式迁移脚本 + P6 反转/P6-2 作废 | 死代码清理；**`#39` 闭合** | 部署侧先跑枚举核实 |
+| 阶段 | 内容 | 对 `#38` 的作用 | 部署前提 | 状态 |
+|---|---|---|---|---|
+| B7b-1 | 链③ slot 化 + 删 `_hash_api_key`（纯 kernel/registry，无身份依赖） | 去 1/3 源 | 无 | **已实施（2026-10-02，待合入）**：上注已订正代价判断；用例 5 → 10（新增 5 + 改写 1），含源码级守门 |
+| B7b-2 | 链② 限流桶去密钥 + 改 2 处用例契约 | 去 2/3 源 | 无 | 未开工 |
+| B7b-3 | ~~联邦 `_apply` 接入 user 断言~~ → **已移出本批关键路径**（Q1 定 (a) 租户级），随 A5 运行时身份接入另批推进 | 不再是前置 | — | 移出关键路径 |
+| B7b-4 | 链① thread_id ← `server_tenant_id()`（按 Q2(c) 三态兜底；`resolve_thread_id` 2 处 + 5 个消费点） | **去最后一源 ⇒ `#38` 应闭合** | 需 §6 兼容窗口 | 未开工 |
+| B7b-5 | 删 `fingerprint` / `legacy_thread_id` + 枚举式迁移脚本 + P6 反转/P6-2 作废 | 死代码清理；**`#39` 闭合** | 部署侧先跑枚举核实 | 未开工 |
 
 **兼容窗口**：新 thread_id 生效后，旧 `user-<digest>` 数据按 §4.5 枚举重挂；窗口内旧目录**只读不删**（改名失败/碰撞时保留双侧，沿用 `migrate_thread_identity.py:69-70` 的「目标已存在拒绝覆盖」策略）。
 

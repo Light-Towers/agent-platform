@@ -1,9 +1,10 @@
 # -*- coding: utf-8 -*-
-"""WS-8：LLM 客户端缓存治理单测（LRU 淘汰 + api_key 哈希 + ChatModel 协议）。"""
+"""WS-8：LLM 客户端缓存治理单测（LRU 淘汰 + 凭据 slot 化 + ChatModel 协议）。"""
 
 from __future__ import annotations
 
 import hashlib
+import pathlib
 
 from agent_core.guardrails.auth import ENV_SECURITY_PEPPER, fingerprint
 from agent_core.llm import registry
@@ -12,21 +13,29 @@ from agent_core.llm.providers import BaseLLMProvider
 
 
 class _FakeProvider(BaseLLMProvider):
-    """构造计数型 fake provider：验证缓存命中/淘汰时客户端实例的构造次数。"""
+    """构造计数型 fake provider：验证缓存命中/淘汰时客户端实例的构造次数。
+
+    ``seen_keys`` 用于验证 ``prov.build`` 仍拿到明文凭据（客户端必须真能鉴权，
+    slot 化只改缓存键形态，不得把凭据弄丢）。
+    """
 
     name = "fake"
     default_model = "fake-model"
 
     def __init__(self):
         self.builds = 0
+        self.seen_keys: list = []
 
     def build(self, **kwargs):
         self.builds += 1
+        self.seen_keys.append(kwargs.get("api_key"))
         return object()
 
 
 def _setup(monkeypatch=None):
     registry.clear_cache()
+    registry._SLOTS.clear()
+    registry._SLOT_SEQ = 0
     prov = _FakeProvider()
     registry.register_provider(prov)
     return prov
@@ -40,19 +49,89 @@ def test_cache_hit_same_instance():
     assert prov.builds == 1
 
 
-def test_api_key_not_stored_plaintext_in_cache_key(monkeypatch):
-    """DUP-1 收敛后：缓存键里的摘要 = kernel ``fingerprint``（HMAC+pepper），不再是裸 sha256、更不是明文。"""
-    _setup()
+def test_cache_key_carries_slot_not_any_digest(monkeypatch):
+    """B7b-1（取代原「键内必含指纹」断言）：键放不透明 slot，明文与任何摘要都不进键。
+
+    原用例断言 ``fingerprint(api_key) in key``——那是旧契约的实现细节。新契约只关心语义：
+    键内不得出现凭据明文、不得出现内核指纹、不得出现裸 sha256；密钥区分度改由 slot 承担。
+    """
+    prov = _setup()
     monkeypatch.delenv(ENV_SECURITY_PEPPER, raising=False)
     registry.get_llm_client(model="m", api_key="sk-secret-123", base_url="http://x", provider="fake")
-    digest = fingerprint("sk-secret-123")
     keys = list(registry._CLIENT_CACHE.keys())
     assert len(keys) == 1
-    # cache key 含指纹、不含明文密钥
-    assert digest in keys[0]
+    slot = keys[0][3]
+    # 原摘要位现为整数 slot，凭据本体只存在 slot 表里
+    assert isinstance(slot, int)
+    assert slot != registry._EMPTY_SLOT
+    assert registry._SLOTS[slot] == "sk-secret-123"
+    # 构造仍拿到明文凭据（slot 化不得弄丢客户端鉴权所需信息）
+    assert prov.seen_keys == ["sk-secret-123"]
+    # 键内既无明文，也无内核指纹，也无裸 sha256
     assert "sk-secret-123" not in repr(keys[0])
-    # 且不再是本模块手写的裸 sha256（避免散点实现回归）
+    assert fingerprint("sk-secret-123") not in keys[0]
     assert hashlib.sha256(b"sk-secret-123").hexdigest() not in keys[0]
+
+
+def test_changed_api_key_does_not_hit_old_client():
+    """方案 §7 验收 4（§4.3 取舍的守门用例）：密钥变更 → slot 更替 → 不命中旧客户端。"""
+    prov = _setup()
+    c1 = registry.get_llm_client(model="m", api_key="sk-old", base_url="http://x", provider="fake")
+    c2 = registry.get_llm_client(model="m", api_key="sk-new", base_url="http://x", provider="fake")
+    assert c1 is not c2
+    assert prov.builds == 2
+    assert prov.seen_keys == ["sk-old", "sk-new"]
+    # 同值幂等：回到旧密钥仍复用旧实例，不因遍历顺序变化而重建
+    assert registry.get_llm_client(model="m", api_key="sk-old", base_url="http://x", provider="fake") is c1
+    assert prov.builds == 2
+    assert len(registry._SLOTS) == 2
+
+
+def test_empty_api_key_uses_dedicated_slot_and_leaves_table_clean():
+    """无凭据归专用 slot，不占表位（避免 None 驻留与额外分配）。"""
+    _setup()
+    registry.get_llm_client(model="m", api_key=None, base_url="http://x", provider="fake")
+    key = next(iter(registry._CLIENT_CACHE))
+    assert key[3] == registry._EMPTY_SLOT
+    assert not registry._SLOTS
+
+
+def test_slot_table_resets_at_cap_and_clears_clients(monkeypatch):
+    """明文驻留有界：达上限整表重置，并同步清客户端缓存（防 slot id 复用串到旧实例）。"""
+    prov = _setup()
+    monkeypatch.setattr(registry, "_MAX_SLOTS", 2)
+    registry.get_llm_client(model="m", api_key="k1", base_url="http://x", provider="fake")
+    registry.get_llm_client(model="m", api_key="k2", base_url="http://x", provider="fake")
+    assert len(registry._CLIENT_CACHE) == 2
+    registry.get_llm_client(model="m", api_key="k3", base_url="http://x", provider="fake")
+    # 重置后表内只剩新密钥；旧客户端全失效，不会让 k3 复用 k1 的实例
+    assert list(registry._SLOTS.values()) == ["k3"]
+    assert len(registry._CLIENT_CACHE) == 1
+    assert prov.builds == 3
+
+
+def test_register_provider_overwrite_clears_client_cache():
+    """同名覆盖 provider 时旧客户端必须失效（方案 §4.3）。"""
+    prov1 = _setup()
+    registry.get_llm_client(model="m", api_key="k", base_url="http://x", provider="fake")
+    assert len(registry._CLIENT_CACHE) == 1
+    prov2 = _FakeProvider()
+    registry.register_provider(prov2)
+    assert not registry._CLIENT_CACHE
+    registry.get_llm_client(model="m", api_key="k", base_url="http://x", provider="fake")
+    assert prov2.builds == 1
+    assert prov1.builds == 1  # 旧 provider 不再被调用
+
+
+def test_registry_source_has_no_credential_digest_path():
+    """B7b-1 语义不变量：registry 模块内不得再出现摘要通路（防有人把密钥摘要拄回来）。
+
+    全文扫描（含注释）而非仅 import：注释里的反例样本同样会被复制成真代码。
+    B7b-5 会在此基础上再补正式 lint 门禁（方案 §5）。
+    """
+    src = pathlib.Path(registry.__file__).read_text(encoding="utf-8")
+    for forbidden in ("hashlib", "hmac", "fingerprint", "sha256", "digest", "api_key_hash"):
+        assert forbidden not in src, f"registry 不应再出现摘要通路：{forbidden}"
 
 
 def test_lru_evicts_beyond_max():

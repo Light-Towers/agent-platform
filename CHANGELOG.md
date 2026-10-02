@@ -2,6 +2,20 @@
 
 本仓库为 uv workspace monorepo。**唯一受支持的安装/运行入口是根 `uv.lock` + `uv sync`**，子包不再维护独立 `uv.lock`（见 v2 修复 #14）。
 
+## B7b-1 实施：链③ LLM 客户端缓存凭据 slot 化（2026-10-02，含三处自纠）
+
+> 方案：`docs/plans/plan-codeql-b7b-principal-thread-identity-2026-10-01.md` §4.3 / §6（已拍板三项后开工的第一个 PR，纯 kernel）。只动 `llm/registry.py`，**未碰 `auth.py` 一行**（链①②属 B7b-2/4）。
+
+- **做了什么**：`get_llm_client` 的 `cache_key` 不再放凭据摘要，改放**进程内不透明 slot id**（新 `_slot_for_api_key`，首次遇到某把凭据时按值幂等分配）⇒ 上游 provider 密钥自此不再流入任何摘要函数（切断 `#38` 三条链中的链③）；`_hash_api_key` 连同对 `guardrails.auth.fingerprint` 的 import 一并删除（全仓 `git grep` 实取 `_hash_api_key` 残留 **0** 处）。
+- **自纠 1（方案层面的判断错）**：方案 §4.3 原写「代价：缓存键不含摘要 ⇒ 换了密钥会命中同一客户端实例」——**错**，把「键里没有摘要」等同于「键失去密钥区分度」。实际 slot 按凭据值幂等分配，换密钥必得新 slot ⇒ 必不命中旧客户端，区分度**等价保留**；原拟的「守门用例」从「记录退化」变成「证明无退化」（`test_changed_api_key_does_not_hit_old_client`）。**真实代价是另一件事**：明文凭据驻留 `_SLOTS`⇒ 已用 `_MAX_SLOTS = 64` 上界兜住（超限**整表重置并同步清客户端缓存**，否则 slot id 复用会让新密钥撞上旧密钥遗留的实例）；且先实取 `providers.py:82-90` 确认 `ChatOpenAI` 本就长期持有 `api_key` 明文，且正躺在 `_CLIENT_CACHE` 里 ⇒ **不是新增暴露面**。
+- **自纠 2（实现层面的无谓绕路）**：先写成 `prov.build(api_key=_slot_value(slot))`，而 `get_llm_client` 手里本来就有明文凭参——绕道 slot 表读回只引入一个**重置窗口竞态**（表刚被清时 `build` 拿到 `None`，使真实 provider 误报「api_key 不能为空」）。已删 `_slot_value`，改回直接用形参（slot 的用途只是缓存键别名，不是凭据的单一来源）。
+- **自纠 3（改漏的陈旧描述）**：模块 docstring 仍写 `(provider, model, json_mode, api_key_hash, …)`。修掉的同时把 `api_key_hash` 加进守门禁词，让这个守门用例能拦住「代码改了、文档没改」这一类回归。
+- **测试**（数量已实测：文件 `def test_` 计数 5 → 10，即**新增 5 个 + 改写 1 个 + 保留 4 个旧用例**）：新增覆盖 slot 入键不含任何摘要 / 换密钥不命中旧客户端 / 空凭据专用 slot 不占表位 / 达上限重置同时清客户端 / 同名覆盖 provider 失效旧缓存 / **源码级守门：registry 全文不得出现 `hashlib|hmac|fingerprint|sha256|digest|api_key_hash`**；旧用例 `test_api_key_not_stored_plaintext_in_cache_key` 按新契约改写为 `test_cache_key_carries_slot_not_any_digest`（原断言「键内必含指纹」属旧契约实现细节；改写后仍保留且**加严**了「无明文、无指纹、无裸 sha256」三条否定断言，非放宽）。
+- **实跑结果**：`test_llm_registry_cache.py` **10 passed**；定向集合（registry + guardrails + fingerprint + fs）**100 passed / 5 skipped（6.38s）**；`ruff check .` exit 0；`scripts/lint_architecture.py` exit 0（P2/P4-2/P5/P6/P7-P11 全过，含 P6 现有白名单未动）。
+- **卡点登记（不得规避）**：agent-core 全量 557 用例在本机**阻塞**，已用 `-v` 实时重定向定位到具体用例 `packages/agent-core/tests/test_intent.py::test_is_chitchat_false_for_query`（L1 embedder 路径，前 3 个 intent 用例已过）；`git grep` 实取该文件**不引用** `get_llm_client`/`registry`/`api_key` ⇒ 与本批无耦合。**本机不声称全量已验**，全量由 CI 的 `make test` 兜（PR 检查为权威）。
+- **验收预期（先说清免得误读）**：B7b-1 单独合入**不会**消 `#38`（还剩链①会话身份与链②限流桶两源）；按方案 §7 判据看「password 分类源数递减」而非闭合，且必须回 `refs/heads/main` 复验（PR 绿 ≠ 主干绿）。
+- 附带发现：本仓无 `pytest-timeout`（`uv run --with` 可临时注入），而 Windows 下 `Start-Process -RedirectStandardOutput` + Python 非 tty 会**块缓冲**导致日志 0 字节；可观测的进度定位靠 `-v` 直写文件或前台管道，长用例建议加 `PYTHONUNBUFFERED=1`。
+
 ## B7b 强制前置取证完成（2026-10-01，未动任何代码，含一次自我推翻）
 
 > 方案：`docs/plans/plan-codeql-b7b-principal-thread-identity-2026-10-01.md`（新立）。触发：B7d 收尾时我立的那条强制前置——「拉 `github/codeql` 该查询与其 `SensitiveData` 模型源码，判定源/汇的配置范围，然后才能写 B7b 的验收标准（否则又是一次『看起来能修』）」。
