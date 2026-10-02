@@ -136,7 +136,7 @@ def test_registry_source_has_no_credential_digest_path():
 
 
 # 凭据及其派生值：不得作为日志调用的实参（B7b-1 实施时曾把 ``api_key_slot`` 写进
-# ``logger.debug``，被 CodeQL ``py/clear-text-logging`` 报为本 PR 新增 high 告警）。
+# ``logger.debug``，被 CodeQL ``py/clear-text-logging-sensitive-data`` 报为本 PR 新增 high 告警）。
 _CREDENTIAL_NAMES = {"api_key", "api_key_slot", "secret", "token"}
 
 
