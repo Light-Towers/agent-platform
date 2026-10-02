@@ -167,3 +167,41 @@ async def test_checksum_detects_drift_on_real_pg(scratch_pool):
 
     with pytest.raises(MigrationError, match="checksum mismatch"):
         await run_migrations(scratch_pool)
+
+
+async def test_v6_upgrade_from_legacy_corpus_shape(scratch_pool):
+    """R6 真集群复验拓出（2026-09-30）：v6 在存量库旧表形上不得崩 UndefinedColumn。
+
+    旧基线形：chunks 的 workspace_id 由 v2 补，但 sql_ddl/sql_docs/sql_examples 在三表
+    旧基线建表时无此列、增量链从未补 → v6 复合索引 (tenant_id, workspace_id) 在存量库
+    升级路径必崩（集群实错：新库 baseline 自带该列故本地/CI 永不暴露）。
+    修复：v6 自身对三表 ADD COLUMN IF NOT EXISTS workspace_id（对齐 001 现行定义）。
+    本用例钉存量库升级语义本身，不经 runner（避开 baseline stamp 对全表集的依赖）。
+    """
+    from agent_runtime.migrations.base import discover
+
+    v6 = next(m for m in discover() if m.version == 6)
+    assert v6 is not None, "v6 不存在，测试前提不成立"
+    sql = v6.read_up()
+
+    async with scratch_pool.connection() as conn:
+        # 构造 v2~v5 已过的存量库最小学表形：chunks 含 workspace_id（v2 已补），
+        # 三张 sql_* 均无 workspace_id（缺陷复现点）；tenant_id 全缺（v6 职责）。
+        await conn.execute(
+            "CREATE TABLE chunks (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL DEFAULT 'default')"
+        )
+        for t in ("sql_ddl", "sql_docs", "sql_examples"):
+            await conn.execute(f"CREATE TABLE {t} (id TEXT PRIMARY KEY)")
+
+        await conn.execute(sql)  # 修复前：三表复合索引 UndefinedColumn；修复后：全过
+
+        for t in ("chunks", "sql_ddl", "sql_docs", "sql_examples"):
+            row = await conn.execute(
+                "SELECT count(*) FROM information_schema.columns "
+                "WHERE table_schema = 'public' AND table_name = %s "
+                "AND column_name IN ('workspace_id', 'tenant_id')",
+                (t,),
+            )
+            assert (await row.fetchone())[0] == 2, f"{t} 应同时具备 workspace_id/tenant_id"
+
+        await conn.execute(sql)  # 幂等重跑（全部 IF NOT EXISTS）

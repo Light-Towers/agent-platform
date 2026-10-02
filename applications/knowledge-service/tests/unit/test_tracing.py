@@ -18,6 +18,8 @@ test_tracing.py —— M4 OTel 全链路追踪单测（方案 §8）。
 
 import re
 
+# 私有状态断言用（_provider 不在 shim 重导出面内）：直取 kernel 模块本体
+import agent_core.tracing as _kernel  # noqa: E402
 import pytest
 
 from knowledge_service.core import tracing
@@ -171,8 +173,12 @@ def test_span_carries_request_context_attrs():
 
 
 @requires_sdk
-def test_init_default_unified_attrs_present():
-    # 不显式传 config_hash / collection → 自动兜底（读 milvus_config + yaml 配置）
+def test_init_default_unified_attrs_present(monkeypatch):
+    # S1 内核抽取后契约：config_hash / collection 由宿主注入，缺省按中性环境变量
+    # 回退（内核不再读宿主 milvus_config/yaml）。本用例钉住回退路径：
+    # 以 env 模拟宿主注入（env 名即内核 ENV_* 常量），无 env 时为空串。
+    monkeypatch.setenv("AGENT_CORE_CONFIG_HASH", "a1b2c3d4")
+    monkeypatch.setenv("AGENT_CORE_COLLECTION", "chunks_test")
     exporter = InMemorySpanExporter()
     tracing.init_tracing(enabled=True, exporter=exporter)
 
@@ -181,8 +187,8 @@ def test_init_default_unified_attrs_present():
 
     span = exporter.get_finished_spans()[0]
     attrs = dict(span.attributes)
-    assert len(attrs["config_hash"]) == 8  # sha256 前 8 位
-    assert isinstance(attrs["collection"], str) and attrs["collection"]
+    assert attrs["config_hash"] == "a1b2c3d4"  # env 回退生效（非空且透传）
+    assert attrs["collection"] == "chunks_test"
     assert "request_id" not in attrs  # 未设置请求上下文时不出现
 
 
@@ -230,12 +236,12 @@ def test_decorator_records_exception_and_rethrows():
 def test_init_is_idempotent():
     exporter1 = InMemorySpanExporter()
     tracer1 = tracing.init_tracing(enabled=True, exporter=exporter1)
-    provider1 = tracing._provider
+    provider1 = _kernel._provider
 
     # 第二次 init（即使传入不同的 exporter）应被幂等短路，不创建新 provider
     exporter2 = InMemorySpanExporter()
     tracer2 = tracing.init_tracing(enabled=True, exporter=exporter2)
-    assert tracing._provider is provider1
+    assert _kernel._provider is provider1
     assert tracer2 is tracer1
 
     with tracing.start_span("idem.span"):

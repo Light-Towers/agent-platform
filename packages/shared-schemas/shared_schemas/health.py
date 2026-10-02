@@ -37,4 +37,10 @@ class HealthResponse(BaseModel):
     admission: bool = Field(False, description="准入限流（admission）启用")
     revert: bool = Field(False, description="对话回退（revert）启用")
     otel: bool = Field(False, description="OpenTelemetry 追踪启用")
+    # R11（观测方案 §3.2）：上报 kernel 状态机真值，区分"显式关"与"坏了"；
+    # 只增字段不改形状（消费者审计见方案 §5），旧调用方不受影响。
+    otel_status: str | None = Field(
+        None,
+        description="OTel 观测状态机真值：ACTIVE / DEGRADED / DISABLED / UNINITIALIZED（DEGRADED 时 reason 记真因）",
+    )
     mcp: bool = Field(False, description="MCP 工具启用")

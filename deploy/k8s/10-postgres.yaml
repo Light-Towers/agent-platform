@@ -1,0 +1,75 @@
+# postgres(pgvector)：Deployment + hostPath 存储 + Service
+# ⚠️ kubeadm 三节点集群没有默认 storageclass（minikube/k3s 才自带），
+# 原 PVC 方案会永远 Pending → demo 改用 hostPath（数据不跟随 pod 重调度，demo 场景可接受）。
+# 拓扑：postgres 固定在 node-126（control-plane 兼任数据节点，nodeSelector+toleration）。
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: agent-platform
+  labels:
+    app: postgres
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: ambari03   # 真实 hostname（kubectl get nodes 实测），原占位 node-126 已替换；见 README 踩坑表
+      tolerations:
+        - key: node-role.kubernetes.io/control-plane
+          operator: Exists
+          effect: NoSchedule
+      containers:
+        - name: postgres
+          image: pgvector/pgvector:pg16
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_DB
+              value: agent_platform
+            - name: POSTGRES_USER
+              value: agent
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: agent-platform-secrets
+                  key: POSTGRES_PASSWORD
+          volumeMounts:
+            - name: pgdata
+              mountPath: /var/lib/postgresql/data
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "agent", "-d", "agent_platform"]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+      volumes:
+        - name: pgdata
+          hostPath:
+            path: /data/k8s-demo/agent-platform/pgdata
+            type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: agent-platform
+spec:
+  type: ClusterIP     # 对应 compose「默认不对外发布 5432」的安全面规约
+  selector:
+    app: postgres
+  ports:
+    - port: 5432
+      targetPort: 5432
