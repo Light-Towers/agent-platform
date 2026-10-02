@@ -5,11 +5,19 @@
 - ``fingerprint``：HMAC-SHA256 + 服务端 pepper + 截断下限；
 - ``derive_thread_id``：会话身份格式与强度（替代散点 ``sha256(...)[:12]``）；
 - ``legacy_thread_id``：迁移映射可计算（旧格式不漂移）。
+
+另含 B7b-2 对链②的**反向**守门：``resolve_client_key`` 与凭据摘要彻底无关
+（旧契约「限流桶 key 也走同一 fingerprint 实现」已于 B7b-2 作废，见文件末段）。
 """
 
+import ast
 import hashlib
+import inspect
+import pathlib
 
 import pytest
+
+from agent_core.guardrails import auth as auth_module
 
 from agent_core.guardrails.auth import (
     ENV_SECURITY_PEPPER,
@@ -109,16 +117,48 @@ def test_legacy_thread_id_keeps_old_derivation():
 
 
 # ---------------------------------------------------------------------------
-# resolve_client_key：限流桶 key 也走同一实现（消除第 3 处散点）
+# resolve_client_key：B7b-2 已拆链②（旧契约「桶键走 fingerprint 摘要」作废）
+# 下列守门锁的是「凭据进不了限流桶」这一语义，而非某个参数名。
 # ---------------------------------------------------------------------------
 
 
-def test_resolve_client_key_uses_fingerprint(monkeypatch):
+def test_resolve_client_key_signature_cannot_receive_credential():
+    """签名级守门：只接受 IP 与已断言主体（旧签名的 ``headers``/``auth_enabled`` 正是链②入口）。"""
+    params = set(inspect.signature(resolve_client_key).parameters)
+    assert params == {"client_host", "subject"}
+
+
+@pytest.mark.parametrize("credential", ["secret", "sk-123", "Bearer xyz", "a" * 64])
+def test_resolve_client_key_bucket_independent_of_credential(credential, monkeypatch):
+    """同一 IP 的桶键必与「带不带凭据 / 带哪把凭据 / pepper 为何」无关，且不含任何摘要形态。"""
     monkeypatch.setenv(ENV_SECURITY_PEPPER, "pepper-z")
-    key = resolve_client_key({"x-api-key": "secret"}, "1.2.3.4", auth_enabled=True)
-    assert key == f"key:{fingerprint('secret')}"
-    assert key != f"key:{hashlib.sha256(b'secret').hexdigest()}"
+    key = resolve_client_key("1.2.3.4")
+    assert key == "ip:1.2.3.4"
+    assert not key.startswith("key:")
+    assert fingerprint(credential) not in key
+    assert hashlib.sha256(credential.encode("utf-8")).hexdigest() not in key
 
 
-def test_resolve_client_key_still_falls_back_to_ip():
-    assert resolve_client_key({}, "1.2.3.4", auth_enabled=False) == "ip:1.2.3.4"
+def test_resolve_client_key_uses_subject_verbatim_not_digest(monkeypatch):
+    """主体直用明文：不得为了「看起来更安全」而把主体过一道 ``fingerprint``（那只是新散点）。"""
+    monkeypatch.setenv(ENV_SECURITY_PEPPER, "pepper-z")
+    assert resolve_client_key("1.2.3.4", "tenant-α") == "sub:tenant-α"
+    assert resolve_client_key("1.2.3.4", "  tenant-α  ") == "sub:tenant-α"
+
+
+def test_only_session_identity_still_digests_credentials():
+    """语义门禁（AST）：本模块内调 ``fingerprint`` 的函数只剩 ``derive_thread_id``。
+
+    链②（``resolve_client_key``）已按 B7b-2 拆除 ⇒ 今后任何新增的「凭据 → 摘要」消费点
+    都会在此红（对齐方案 §5：门禁守语义而非名字，改名绕过也会被拿到）。
+    B7b-4 拆完链①后本断言应改为 ``== set()``（而非删掉这个用例）。
+    """
+    tree = ast.parse(pathlib.Path(inspect.getfile(auth_module)).read_text(encoding="utf-8"))
+    callers = {
+        func.name
+        for func in ast.walk(tree)
+        if isinstance(func, ast.FunctionDef | ast.AsyncFunctionDef)
+        for call in ast.walk(func)
+        if isinstance(call, ast.Call) and getattr(call.func, "id", None) == "fingerprint"
+    }
+    assert callers == {"derive_thread_id"}

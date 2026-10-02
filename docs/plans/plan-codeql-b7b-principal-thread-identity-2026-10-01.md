@@ -74,7 +74,7 @@ isStrongPasswordHashing:   "ARGON2" "PBKDF2" "BCRYPT" "SCRYPT"                  
 | 链 | 源为何是 password 分类 | 生产站点 | 语义 |
 |---|---|---|---|
 | ① 会话身份 | `derive_thread_id(api_key)` 形参名命中 `api.?(key\|tok)` → `SensitiveParameter` | `applications/agent_server/api/auth.py:32`、`applications/agent_federation/api/auth.py:32`（**全仓仅此 2 个生产调用点**，穷尽 grep 47 命中，其余为测试 / `scripts/migrate_thread_identity.py:49` / 文档） | 调用方凭据当身份熵源 |
-| ② 限流桶 | `headers.get("x-api-key")`（`auth.py` 内）命中 `SensitiveGetCall`：`get` + 字面量 `x-api-key` | 消费者 `packages/agent-core/agent_core/guardrails/web.py:146`（中间件唯一消费点）；knowledge-service 经 `utils/security_guard_utils.py` re-export | 每密钥一个桶（`auth.py:149` 的 `key:{fingerprint(provided)}`） |
+| ② 限流桶 | `headers.get("x-api-key")`（`auth.py` 内）命中 `SensitiveGetCall`：`get` + 字面量 `x-api-key` | 消费者 `packages/agent-core/agent_core/guardrails/web.py:146`（中间件唯一消费点）；knowledge-service 经 `utils/security_guard_utils.py` re-export | 每密钥一个桶（`auth.py:149` 的 `key:{fingerprint(provided)}`）——**已于 B7b-2 拆除**，现为「断言主体 → IP」 |
 | ③ LLM 客户端缓存键 | `_hash_api_key(api_key)` 与 `get_llm_client(..., api_key=...)` 形参名 | `packages/agent-core/agent_core/llm/registry.py:46` → 进入 `cache_key`（`registry.py:107`） | **上游 provider 密钥**，属基础设施秘密，与调用方身份无关 |
 
 ### 3.2 thread_id 的持久化面（迁移必须覆盖）
@@ -100,9 +100,19 @@ isStrongPasswordHashing:   "ARGON2" "PBKDF2" "BCRYPT" "SCRYPT"                  
 `derive_thread_id(api_key)` 替换为 `resolve_thread_identity(tenant)`（**已拍板：租户级**）：入参是**已断言的租户字符串**（不是凭据），直接拼 `THREAD_ID_PREFIX + tenant`，**不做任何摘要**（租户 id 本身即可入目录名）。⇒ 链①的 password 源归零。
 > 注意（勿踩自己刚立的红线）：**不能靠把形参 `api_key` 改名来消告警**。分类是名字驱动的，改名确实能让规则闭嘴，但被摘要的仍是凭据 ⇒ 纯 gaming。修法必须改变**值的性质**（凭据 → 服务端主体 id），名字变化只是结果。
 
-### 4.2 链②：限流桶 ← 断言主体 / 租户，退回 IP 保持现状
+### 4.2 链②：限流桶 ← 断言主体 / 租户，退回 IP 保持现状（B7b-2 已实施，含实施补记）
 `resolve_client_key` 改为「已断言主体优先」：主体在 → `sub:<subject>`；否则走现有 `ip:<host>` 分支（`auth_enabled=False` 时早已如此，见 `packages/agent-core/tests/test_guardrails.py:44-50`）。**删除 `key:{fingerprint(provided)}` 分支**，并去掉 `headers.get("x-api-key")` 结果向摘要的通路。
 > 代价要写清：桶粒度从「每密钥」变为「每 IP」（未接主体时）或「每主体」（接入后）。既有测试 `test_resolve_client_key_uses_fingerprint`（`packages/agent-core/tests/test_guardrails_fingerprint.py:116-119`，断言 `key == f"key:{fingerprint('secret')}"`）与 knowledge-service `tests/unit/test_security_guards.py:212-221` 的 `key:` 前缀断言必须**按新契约改写**——这不是放宽断言凑绿：桶键形状本就属内部实现，用例应断言语义「不把密钥明文放进桶键/日志」而非具体摘要值。
+
+> **实施补记（2026-10-02，B7b-2）**——四点比初稿更硬，登记以免后人按初稿字面理解：
+> 1. **签名直接删掉 `headers`/`auth_enabled` 两个形参**（不只是「不再读它们」）：新签名 `resolve_client_key(client_host, subject=None)`。凭据在**类型层面**就进不来，而 CodeQL 的链②入口恰是 `headers.get("x-api-key")` 这一句——留着形参就是留着缺口。守门：`test_resolve_client_key_signature_cannot_receive_credential`（`inspect.signature` 断言参数集恰为 `{client_host, subject}`）。
+> 2. **主体不能由 kernel 自取**（红线 1：`agent-core` 不得 import `agent-runtime`，而 `server_tenant_id()` 在 runtime 的 `workspace_registry.py`）⇒ 改为**中间件构造参数注入** `subject_provider: Callable[[], Optional[str]]`（与既有 `error_response` 注入同构），kernel 只消费回调。
+> 3. **接线面只 1/3，且这是取证结果不是偷懒**：三个宿主里只有 **knowledge-service 在中间件时刻拿得到断言主体**——它先 `add_middleware(SecurityGuardsMiddleware)` 后 `add_middleware(TenantHeaderMiddleware)`，而 Starlette **后添加者更外层** ⇒ 租户已绑定（已接线 `subject_provider=current_asserted_tenant`）。`agent_federation` 的 `mount_identity_middleware`（`api/server.py:143`）在 guards（`:148`）**之前**添加 ⇒ guards 更外层、执行时主体尚未绑定；`agent_server` 根本不用 `SecurityGuardsMiddleware`。⇒ 两处的限流桶**今日实为 IP 兜底**，属诚实中间态；把联邦的接线序对调会让身份 401 抢在 API-Key 401 之前（行为变更，无现有用例覆盖），列入 B7b-4 一并处理，不在本 PR 偷改。
+> 4. **`subject_provider` 抛错不得把请求变成 500**：kernel 兜 `ValueError` 退 IP 并告警一次。因 `server_tenant_id()` 的 fail-fast 语义正是抛 `ValueError`（`agent_core/memory/_tenant_gate.py:21`），宿主若直接传它，限流桶这个辅助信息不该有杀伤主链路的能力（用例 `test_middleware_subject_provider_raising_falls_back_to_ip`）。
+>
+> **代价的实测新形状**（比初稿写得更具体）：旧实现下**同一把部署级密钥的所有客户端共用一个桶**，一个客户端打满配额会连带 429 同密钥的其他客户端；改为 IP 后各客户端独立（用例 `test_middleware_rate_limit_buckets_are_per_ip_not_per_credential` 锁住）。反面：**单客户端换 IP（拨号/代理/IPv6 前缀变化）即可重置配额**——旧实现下换 IP 无效（桶按密钥），新实现下有效。这是限流**强度**的实质下降，不属「无副作用重构」；缓解手段是已有的全局窗口 `_global`（`rate_limit_global`，默认 500/60s）与接入后的主体桶。【登记为待拍板：若需「每密钥配额」语义，应用**服务端可验证的密钥 id（非凭据摘要）**而非凭据派生值】
+>
+> **新增语义门禁（三层齐备的第三层）**：`test_only_session_identity_still_digests_credentials`（AST）——`guardrails/auth.py` 内调用 `fingerprint` 的函数集合必恰为 `{derive_thread_id}`。链② 拆后它从「两元素」变「单元素」，B7b-4 拆完链①后应改为 `== set()`（注释已写，“拆完就删用例”不是选项）。
 
 ### 4.3 链③：LLM 缓存键 ← 首次注入时分配的**不透明 slot id**（B7b-1 已实施，含一处方案自订正）
 `get_llm_client` 的 `api_key` 不再进 `cache_key`：首次遇到某把凭据时分配进程内不透明 slot（`_SLOTS: dict[slot_id, api_key]`，同值幂等复用），`cache_key` 用 `slot_id`；`prov.build(api_key=api_key)` **仍直接用调用方传入的凭据**，不从 slot 表读回（读回会在超限重置窗口拿到 `None`，使真实 provider 误报「api_key 不能为空」）。⇒ 链③的 password 源不再流入任何摘要。
@@ -136,9 +146,9 @@ isStrongPasswordHashing:   "ARGON2" "PBKDF2" "BCRYPT" "SCRYPT"                  
 | 阶段 | 内容 | 对 `#38` 的作用 | 部署前提 | 状态 |
 |---|---|---|---|---|
 | B7b-1 | 链③ slot 化 + 删 `_hash_api_key`（纯 kernel/registry，无身份依赖） | 去 1/3 源 | 无 | **已实施（2026-10-02，PR #45）**：上注已订正代价判断；另自引入并真修了 1 条 `py/clear-text-logging-sensitive-data`（见 §4.3 末段；PR 的 CodeQL check 已 fail → pass，且该告警未进主干）；用例 5 → 10 → 11（新增 5 + 改写 1 + 日志 AST 守门 1） |
-| B7b-2 | 链② 限流桶去密钥 + 改 2 处用例契约 | 去 2/3 源 | 无 | 未开工 |
+| B7b-2 | 链② 限流桶去密钥 + 改 2 处用例契约 | 去 2/3 源 | 无 | **已实施（2026-10-02，PR #46）**：`resolve_client_key` 签名删 `headers`/`auth_enabled`⇒ 凭据类型层面进不来；`SecurityGuardsMiddleware` 新增 `subject_provider` 注入，ks 已接 `current_asserted_tenant`，联邦/agent_server 未接（取证原因见 §4.2 实施补记第 3 条，接线序对调归 B7b-4）。用例：改写 4 处旧契约 + 新增 AST 语义门禁 1 + kernel 新契约 3 + ks 中间件集成 3（详见 §4.2 补记）。**PR 面告警闭环已实取**：check-run `110690703578` → `conclusion=success`、`output.title` = “No new alerts in code changed by this pull request”、`output.summary` 只剩分支告警链接（无 “New alerts” 段）、annotations 空 ⇒ §7.2 要盯的「派生值改投另一个 sink」未发生（与 B7b-1 初版不同）。`ci`/`ha`/`assembly` 均 pass。 |
 | B7b-3 | ~~联邦 `_apply` 接入 user 断言~~ → **已移出本批关键路径**（Q1 定 (a) 租户级），随 A5 运行时身份接入另批推进 | 不再是前置 | — | 移出关键路径 |
-| B7b-4 | 链① thread_id ← `server_tenant_id()`（按 Q2(c) 三态兜底；`resolve_thread_id` 2 处 + 5 个消费点） | **去最后一源 ⇒ `#38` 应闭合** | 需 §6 兼容窗口 | 未开工 |
+| B7b-4 | 链① thread_id ← `server_tenant_id()`（按 Q2(c) 三态兜底；`resolve_thread_id` 2 处 + 5 个消费点）**+ 联邦 `subject_provider` 接线（需对调 identity/guards 添加序，含 401 优先级影响面，见 §4.2 补记第 3 条）** | **去最后一源 ⇒ `#38` 应闭合** | 需 §6 兼容窗口 | 未开工 |
 | B7b-5 | 删 `fingerprint` / `legacy_thread_id` + 枚举式迁移脚本 + P6 反转/P6-2 作废 | 死代码清理；**`#39` 闭合** | 部署侧先跑枚举核实 | 未开工 |
 
 **兼容窗口**：新 thread_id 生效后，旧 `user-<digest>` 数据按 §4.5 枚举重挂；窗口内旧目录**只读不删**（改名失败/碰撞时保留双侧，沿用 `migrate_thread_identity.py:69-70` 的「目标已存在拒绝覆盖」策略）。
