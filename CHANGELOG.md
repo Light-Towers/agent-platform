@@ -2,7 +2,7 @@
 
 本仓库为 uv workspace monorepo。**唯一受支持的安装/运行入口是根 `uv.lock` + `uv sync`**，子包不再维护独立 `uv.lock`（见 v2 修复 #14）。
 
-## B7b-2 实施：链② 限流桶去凭据（断言主体 → IP）（2026-10-02）
+## B7b-2 实施：链② 限流桶去凭据（断言主体 → IP）（2026-10-02，PR #46）
 
 > 方案：`docs/plans/plan-codeql-b7b-principal-thread-identity-2026-10-01.md` §4.2 / §6（B7b-1 后的第二个 PR，拆 `#38` 三条链中的第二条）。本批**不改 `fingerprint` 本体、不动链①会话身份**（那是 B7b-4）。
 
@@ -14,6 +14,7 @@
 - **新增语义门禁（三层齐备的第三层）**：`test_only_session_identity_still_digests_credentials` 用 AST 断言 `guardrails/auth.py` 内调用 `fingerprint` 的函数集合恰为 `{derive_thread_id}`——守的是「凭据→摘要」的**语义**而非名字，改名绕过会被抓。B7b-4 拆完链①后该断言应改 `== set()`（已写在用例 docstring 里，不得删用例交差）。
 - **实跑结果**（本地）：`ruff check .` exit 0；`scripts/lint_architecture.py` exit 0（P2/P4-2/P5/P6/P7-P11 全过，P6 白名单本批未动，属 B7b-5）；`scripts/check_doc_sync.py` 0 警告；定向 4 文件 **109 passed**；ks unit **236 passed / 6 skipped**；联邦 **163 passed**；根 session（`-m "not requires_pg"`，含 agent-core 全量）**867 passed / 5 skipped / 27 deselected**。（备注：P6 正则只抓 `hashlib.<algo>(` 同行共现，**抓不到** `fingerprint(api_key)` 这类走 kernel 仍摘要凭据的写法 ⇒ 本批的语义守门落在测试层，上提为仓级 lint 与否按方案 §5 在 B7b-5 一并定，不中途擅自扩面。）
 - **验收预期（免得误读）**：B7b-2 单独合入**仍不会**消 `#38`——还剩链①（`derive_thread_id`，B7b-4）一源；判据是「password 分类源从 2 降为 1」而非闭合，且闭合与否只认 `refs/heads/main` 实取（PR 绿 ≠ 主干绿）。另按 §7.2，本 PR 必查 `gh pr checks` + CodeQL check-run annotations，防「链②拆了、派生值改投另一个 sink」（B7b-1 刚踩过一次）。
+- **PR 面告警闭环（已实取，不靠推定）**：check-run `110690703578` → `conclusion=success`，`output.title` = “No new alerts in code changed by this pull request”，`output.summary` 只剩分支告警链接（**无 “New alerts” 段**），annotations 为空 ⇒ 本批**未新引入任何 sink**（与 B7b-1 初版不一样，那条是自引入 `py/clear-text-logging-sensitive-data`）。`ci` / `ha` / `assembly` / `Analyze (python|actions)` 均 pass。**主干复验待合入后另跑**（`refs=refs/heads/main`，骨架同 `verify_main_b7d.py`），不得拿 PR 绿当主干绿。
 
 ## B7b-1 实施：链③ LLM 客户端缓存凭据 slot 化（2026-10-02，含五处自纠）
 
