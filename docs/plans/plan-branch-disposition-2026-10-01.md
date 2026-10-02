@@ -23,7 +23,7 @@
 |------|-----|---------|-------------|
 | `v3` | 26cd2fa（09-27） | **ahead 0 / behind 67** vs `main`（原记 ahead 47 / behind 19，**已失效**） | ⚠️ 原写的理由「主干尚未吸收」**错了**：PR #41（2026-10-01）已 `git merge origin/v3` 全量合入，且 `git merge-base --is-ancestor 26cd2fa origin/main` 退出码 0 ⇒ 内容零丢失风险。是否删 ref 不再是取证问题而是**组织决策**（长期集成分支名带里程碑语义，同 §4 `origin/v2` 的情形），建议先 `git tag archive/v3 origin/v3` 再删，**待拍板**。
 | `feat/isolation-hardening` | d078312（09-28） | ahead 15 / behind 79 vs `main`（cherry 真独有 7 条）；相对 v3 曾为 ahead 15 / behind 12 | ~~不是债~~ → **已处置**：真独有 7 条（ADR-0005 T0 内核协议下沉 + 2 个 kernel 测试 + audit 真库修复 + testing-playbook + lint/uv.lock 收尾）已随 `feat/execution-memory-kernel-onto-main` 入主干（对主干净差 **+411/−23 / 11 文件**，非原记 vs v3 的 +842/−46）。PR #18 仍 CLOSED 未合，其 base `v3` 已不再是合理目标。 |
-| `test/rag-route-ablation-eval` | 4cffe7c（09-30） | ahead 75 / behind 19 vs `main`（本行今日未重测） | **从未开过 PR**（`gh pr list --head` 返回空），即评审记录为零；且是唯一持有者（marker 计数见下） |
+| `test/rag-route-ablation-eval` | 4cffe7c（09-30） | ahead 25 / behind 82 vs `main`（2026-10-02 重测，原记 75/19 是 10-01 的 main tip）；cherry 真独有 **25 / 等价 0** | ~~唯一持有者~~ → **已处置**：25 条全为真独有（与 isolation 那条的 8/7 分布相反），已整支 `git merge` 入主干（对主干净差 **87 files / +10752 / −435**）。「从未开过 PR」在本批被证实为风险而非收益，见 §7 陷阱三。 |
 
 `test/rag-route-ablation-eval` 的唯一性取证（`git grep -c <marker> <ref>` 命中文件数）：
 
@@ -35,10 +35,13 @@
 | `RAGAS` | 1 | 1 | **7** | RAGAS adapter 接线 + 126 容器实跑（`4278e23`） |
 | `ablation` | 12 | 11 | **25** | RAG 路别消融评测主体 |
 
-## 3. 处置路径（2026-10-02 更新：第一条已执行完毕）
+> **本表是「2026-10-01 当时为何不能删」的历史取证，不是现状**：2026-10-02 该分支整支入主干后，五行 marker 的 `main` 列计数全部上移（尤其 `agent_runtime.otel` 行——门面退役正是本批带进去的，「主干仍是旧门面」这句已作废）。
+
+## 3. 处置路径（2026-10-02 更新：三条均已定案——前两条已执行，第三条被现实关闭）
 
 - ~~`feat/isolation-hardening` → 先解冲突再开 PR（base `v3`）~~ → **已执行，且 base 改为 `main`**（原写「唯一冲突文件 `scripts/audit_tenant_access.py`」只对 v3 成立；对 main 实为 **4 个文件**，多出的三个正是 PR #41 合流时手工处理过的那批：`knowledge_service/main.py`、`docs/adr/0005`、`plan-memory-hardening`）。取侧逐条记录在并入提交 `f666bc8` 的正文，及本文件 **§7**。
-- **`test/rag-route-ablation-eval` → 拆分成小 PR 进 `main`**：75 个独有提交里混着两类主题（观测全局装配 / RAG 消融评测 + 演练记录）。整体开一个 PR 评审面过大；建议按 `refactor(observability)` 链与 `feat(eval)` 链各切一刀，且注意主干已发生 P2/P6/P7/P8 门禁收敛（PR #33 系列），重放时 lint 白名单需按现状重写。**开工前先用 §5 重测真独有数**——isolation 那条的先例是「账面 15 → 真独有 7」，本条的 75 很可能同样已大面积入主干。
+- ~~`test/rag-route-ablation-eval` → 拆分成小 PR 进 `main`~~ → **已执行，但未拆分**（2026-10-02，分支 `feat/observability-eval-onto-main`）。不拆的理由是取证不支持它的前提：原写「75 个独有提交……很可能同样已大面积入主干」，实测 `git cherry -v origin/main test/rag-route-ablation-eval` = **25 `+` / 0 `-`**（全部真独有，无一已等价入库），拆分只能减少「评审面」而不能减少「内容量」；而两条主题链（观测全局装配 / RAG 分层评测）在分支上本就交织在同一批文件（`agent_core/tracing.py` 既被观测链重写又被 `--extra otel` 评测链消费），拆开各开一个 PR 会引入「先合的那半跑不过门禁」的中间态。沿用 PR #41 先例：`git merge --no-commit --no-ff` 全量、不 cherry-pick、不用 `-X ours/theirs`。
+  原写「lint 白名单需按现状重写」经实跑证伪为**无需重写**：合并版 lint（13 条门禁）在主干现状上 rc=0，`_FASTAPI_WHITELIST` 摘除 ks 也成立（本批同时带来 ks 迁 `build_api_app`）。真出问题的是分支自带的一个环境依赖型用例，见 §7 陷阱三。
 - ~~`v3` → 与主干的合流是独立议题（47 commits）~~ → **已被现实关闭**：PR #41（2026-10-01）就是那次合流（`git merge origin/v3` 全量、不 cherry-pick、不用 `-X ours/theirs`），今天实测 v3 对 main ahead = 0。剩下的只是 §2 那条「是否删 `v3` ref」的组织决策。
 
 ## 4. 远端残余（需人工拍板，本轮未动）
@@ -97,12 +100,18 @@ $ git show --stat --format="" 85cd9bfe | tail -1   # 5 files changed, 216 insert
 
 处置结果（**已执行**，非将来时）：本文件入库（`108ee24`）并合入主干后，§6 那 9 条**本地 + 远端均已删**；连同本 PR 自身分支（`docs/branch-disposition-closeout`）共 10 条（该条成文时不可能包含自己，此处补记）。终态实测：本地 4 条（`main` / `v3` / `feat/isolation-hardening` / `test/rag-route-ablation-eval`），远端 6 条（上述四条 + `v2` + `origin/dependabot/uv/minor-and-patch-37a69dd668`）。§2 保留项与 §4 两条远端残余本轮未动。（原先本段写的是「本文件入库后…均删」的将来时，那是待执行承诺而非结果；现已执行并改为实测终态。）
 
-## 7. 追加登记（2026-10-02）：并入 `feat/isolation-hardening` 时的两类新陷阱
+## 7. 追加登记（2026-10-02）：并入过程中暴露的四类判据盲区
 
-> 场景：台账 §3 第一条的执行过程。它不是「删分支」而是「让分支真进去」，暴露了两个 §5 四条命令盖不到的判据盲区。
+> 场景：台账 §3 前两条的执行过程。它们不是「删分支」而是「让分支真进去」，暴露了 §5 四条命令盖不到的判据盲区（陷阱一/二来自 isolation 并入，陷阱三/四来自 ablation 并入）。
 
 **陷阱一：auto-merge 不报冲突 ≠ 语义干净**。`git merge` 对 `.env.example` 自动合并不报错，但结果是 ADR-0007 的 12 个身份断言键**整块重复了两份**（主干 PR #41 登记过一份，来源分支 `d078312` 带的是同一块的早期副本）——两侧在不同行区域各加了自己的内容，三方合并看不出重叠。发现手段不是 `merge-tree` 而是**后置的领域不变量检查**：正则抽出全部 `^[A-Z0-9_]+=` 键名做 `Group-Object | Where Count -gt 1`。处置：先程序化确认两份 17 行区块逐字节全等，再删第二份；去重后 `git diff --cached HEAD -- .env.example` **为空**（等于还原主干版），59 个键零重复。⇒ 对配置/清单类文件（`.env.example`、白名单、路由表），合并后必须跑「重复项」不变量，而不能只看「无冲突」。
 
 同类手法在本文档已有先例：§2 的 marker 计数用 `git grep -c`，本处用键名重复检测——都是把「看起来合干净了」翻译成可复跑的命令。
 
-**陷阱二：「主干不采信 X」这类否定断言有时间戳**。主干 `docs/adr/0005` 当时写「不采信分支 `ff68aee` 的 T0 已落地声明，因为主干无 `execution.py`、grep 0 命中」——那句对当时为真。而本次并入**正好就是去落地 T0**，如果机械地「取主干侧」（因为它带来源标注、更权威），就会把一个已经作废的否定结论永久化。识别方式：读否定断言的**理由部分**（而非结论部分），判断本次变更是否正好抽掉了该理由。复验后取分支的 §6/§6.1，并保留主干的来源标注 + 加一段「状态转正的过程记录」（写明两次实测隔出一段真实差距）。配套防病：分支声明的每条产物（文件、能力位、导出、测试数）逐项 grep + 实跑后再写文书，不直接沿用**来源分支自带的结论**。
+合并后对**全部 35 个被修改（`--diff-filter=M`）的 `.py`/`.toml`** 跑了一遍同族不变量（顶层 `def`/`class` 名重复计数 + `tomllib` 解析）：零命中（全部 parse 通过、无重名）。但同族的另一种形状确实出现了，见下面的陷阱四。
+
+**陷阱二：「主干不采信 X」这类否定断言有时间戳**。主干 `docs/adr/0005` 当时写「不采信分支 `ff68aee` 的『T0 已落地』声明，因为主干无 `execution.py`、grep 0 命中」——那句对当时为真。而本次并入**正好就是去落地 T0**，如果机械地「取主干侧」（因为它带来源标注、更权威），就会把一个已经作废的否定结论永久化。识别方式：读否定断言的**理由部分**（而非结论部分），判断本次变更是否正好抽掉了该理由。复验后取分支的 §6/§6.1，并保留主干的来源标注 + 加一段「状态转正的过程记录」（写明两次实测隔出一段真实差距）。配套防范：分支声明的每条产物（文件、能力位、导出、测试数）逐项 grep + 实跑后再写文书，不直接沿用**来源分支自带的结论**。
+
+**陷阱三（ablation 并入）：「从未开过 PR」的分支，它的测试只在作者本地环境成立过**。`packages/agent-core/tests/test_tracing_degradation.py`（分支新增）里 `test_init_enabled_without_endpoint_degraded` 断言 `reason == "no_export_endpoint"`，而同文件另外两条环境敏感用例**都挂了 `@pytest.mark.skipif(_SDK_AVAILABLE)`**——唯独这条没挂。而 kernel 的降级原因判定是「依赖层先于配置层」（`tracing.py` 的 `if enabled and not _SDK_AVAILABLE` 在 `elif enabled and not can_export` 之前），所以不装 OTel SDK 的宿主上该用例必红。**默认 CI 恰好不装**（`make ci` → `make test` 根 session 无 `--extra otel`，只有末行单独那个 session 装）⇒ 分支作者本地装了 SDK，全绿；这条分支入主干后首次进 CI 即红。处置：不是改断言也不是删用例，而是**把隐含前置条件显式化**（该用例 `monkeypatch.setattr(kernel_tracing, "_SDK_AVAILABLE", True)`，早退分支不构造 provider，不需真 SDK），并**新增**一条 `skipif(_SDK_AVAILABLE)` 用例钉住「同时缺 SDK + 缺端点时先报 `sdk_not_installed`」的优先级——两条合起来把 2×2 在任一宿主都钉完整（实跑：无 SDK 环境 11 passed；`--extra otel` 环境 23 passed / 3 skipped）。⇒ 可复跑判据：并入无 PR 历史的分支前，先问「它绿过 CI 吗」；没绿过就把 **CI 环境**（不是本地环境）的 `make test` 全 session 当验收线，并特别盯那些“同文件邻居都有 guard、就它没有”的不对称。
+
+**陷阱四（ablation 并入）：auto-merge 不报冲突的另一种形状——Python 注册表里同名变量被两侧装不同门禁**。`scripts/lint_architecture.py` 的 `main()` 内，主干用局部变量 `v6..v9` 装 P8/P9/P10/P11，分支用**同名** `v6..v9` 装 L-3/L-1/L-2/L-4。合并后代码语法完全合法、ruff 不报、`import` 不报，但“后者覆盖前者”会让四条门禁静默失效——它不是重复定义（故上面那套顶层 `def` 重复不变量抓不到），而是同名赋值的控制流语义。另外分支侧的 registry 还带着收敛前的旧标签（「批 3 架构约束」/「C1 回归面约束」，主干已改号 P9/P10）。处置：以主干 `main()` 为基底（保留 P 编号与标签），分支四条门禁改用 `v10..v13` 追加；同名但两侧逐字一致的 7 个函数体保留一份；分支独有的 L-1〜L-4 常量/函数整段追加；`_iter_prod_py` 改为复用主干已有的 `_skipped_rel`（避免两套排除面各写一遍）。⇒ 对「注册表/累加器」类函数（一堆同名局部变量 + 末尾统一返回），合并后必须通读整个函数体，不能只看冲突标记。另附一条「门禁全绿不等于门禁有效」的防范：本次 13 条门禁 rc=0，额外用一棵伪造目录树做**负对照**（写入 `cm.__enter__()` / `app.state.tracer` / `init_tracing()` 三行），确认 L-1/L-2/L-3 真的各自报违规后才定案（合并后的 `_iter_prod_py` 扫到 515 个生产 `.py`）。
