@@ -2,6 +2,18 @@
 
 本仓库为 uv workspace monorepo。**唯一受支持的安装/运行入口是根 `uv.lock` + `uv sync`**，子包不再维护独立 `uv.lock`（见 v2 修复 #14）。
 
+## 分支处置收尾：PR #53 落账、4 条 ref 删除、pypdf 8 条 high 告警主干闭合（2026-10-02）
+
+> 类型：纯治理/卫生（零产品源码改动；依赖版本变更由 PR #51 单独承载）。台账：`docs/plans/plan-branch-disposition-2026-10-01.md` **§9**（本轮全部取证与判据订正均在彼处）。
+
+- **收尾登记先落账再执行**：台账新增 §9，§2/§4 补终态指针（它们列的两条已删 ref、一条已被 `--prune` 回收的 dependabot 旧分支均属历史快照，不能拿来做减法）。`docs/pr50-merge-closeout` @ `a98f0fa` → **PR #53**（11:06:58Z 合入，新 tip `63a8f23`），零漂移仍用树 OID 直比（`a98f0fa^{tree}` == `63a8f23^{tree}` = `aacee653…`）。同一 tip 主干 CodeQL 复验 PASS：open 恰 `#38`/`#39`、实例 sha = `63a8f239…`、`fixed` 44 / `dismissed` 0 / max 48 / 新建 0。
+- **陷阱六（本轮新得，已入台账 §9.2）：「主干应有的门禁集合」不能当常量**。沿用 §8 的 5 条常量集去验收文档批次会报假 FAIL：`ha` / `assembly` 两个 workflow 的 `push:` 都带 `paths:` 白名单且不含 `docs/**`。交叉验证而非推断：`actions/workflows/{ha,ha-assembly}.yml/runs?head_sha=63a8f23` 均 `total_count=0`，而 `617cbf2`（含代码）各为 1。⇒ 预期集改为按本批 `git diff --name-only` 对过滤器求交派生，并要求「被过滤掉的门禁必须再用 workflow-runs API 证明确实 0 run」。正向镜像也已坐实：PR #51 只动 `pyproject.toml`/`uv.lock` ⇒ 两个过滤器同时命中 ⇒ 预期集自动变 5 条且实跑 5 条齐。
+- **4 条 ref 已删（本地+远端）**：`test/rag-route-ablation-eval` `4cffe7c`、`feat/isolation-hardening` `d078312`、`feat/execution-memory-kernel-onto-main` `f459693`、`feat/observability-eval-onto-main` `afc738a`。删除器内置四重 fail-closed 安全阀（祖先 / `cherry` 无 `+` / 本地=远端=预期 tip / 白名单外不碰），本地用 `-d` 而非 `-D`；**可恢复性已证**：四个 tip 删后仍为 `origin/main` 祖先，`git branch <name> <sha>` 可原位重建（这正是「先落账再删」能成立的根）。`v3` / `v2` 按拍板保留（里程碑语义，属组织决策不是取证问题）。
+- **默认分支 8 条 high 依赖告警主干闭合**（发现路径本身就是盲区信号：不是本仓门禁报的，而是 `git push --delete` 的远端回显带出的）。取证：8 条全为同一个包 `pypdf`（direct / `uv.lock`），均为解析不可信输入时的资源耗尽类，且消费面确为攻击者可控（`agent_server/api/import_router.py:59`、`agent_federation/tools/upload_file_read_tool.py:16` 均 `PdfReader(...)` 读上传件）。→ **PR #51**（`6.16.1 → 6.19.0`，11:28:03Z 合入，新 tip `baa965f`）后实测：`dependabot/alerts?state=open` = **0**，8 条均 `state=fixed` 且 `dismissal_data=null`（**未走 dismiss 通道**，重扫后 68–71 秒自动消失）；CodeQL 面零源码改动故不变。合入前按交接门禁跑了 L3 深度审查（findings=0），且**先 `gh pr checkout 51` 把待审提交纳入本地基座**，避免「审的不是即将合入的代码」式空转。
+- **另一组依赖 PR 被本仓 L-4 如实拦下（保持 open 不动）**：**#52**（minor-and-patch 组 14 项）的 `ci` 失败根因不是环境抖动，而是它把根 `pyproject.toml` 的 `opentelemetry-api` 抬到 `>=1.45.0`、`packages/agent-core` 仍 `>=1.24`（主干当前两处一致均 `>=1.24`），违反 L-4「多处下界一致」⇒ 后续按 `plan-observability §3.3` 归一下界，属独立决策面。
+- **又一条 API 形状伪影（同属 fail-closed 族）**：Dependabot 告警的 REST 列表无 `closed_at` 字段（那是 GraphQL 的），且 `state` 终态枚举为 **`fixed`/`dismissed`，不存在 `closed`** —— 第一版按 `state != "closed"` 断言，把 8 条正确的 `state=fixed` 全判为异常（方向是假阴性，未致误报成功）。
+- **一份未跟踪草稿转为 Proposed 方案入库**：`docs/plans/plan-multi-expert-adjudication-2026-09-30.md`（269 行）随 PR #53 入库，此前全仓唯一副本只在本地。仅加一条来源标注 + 行尾 CRLF→LF，**本轮不实施**。
+
 ## 观测全局装配 + RAG 分层评测入主干（并入 `test/rag-route-ablation-eval` 全量）（2026-10-02）
 
 > 类型：产品代码变更（观测状态机收敛为 kernel 单一实现、过渡门面退役、ks 迁统一工厂、依赖 extras 归一）+ 评测体系新增。方案：分支自带的 `docs/plans/plan-observability-global-remediation-2026-09-29.md`（S0–S5 / R1–R19）、`plan-rag-sparse-encoding-consistency-2026-09-29.md`、`plan-c2-cross-agreement-pivot-2026-09-29.md`。merge 提交 `6ee7283`（双亲 `b7448c1` + `4cffe7c`，不 rewrite 历史）。
@@ -14,7 +26,7 @@
 - **验证（均为本机实跑）**：ruff `All checks passed`；`lint_architecture.py` 13 条门禁 rc=0，并对 L-1/L-2/L-3 做**负对照**（伪造一棵目录树写三行违规）确认门禁非空转（扫 515 个生产 `.py`）；`check_doc_sync.py` 0 警告；`uv lock --check` rc=0（300 包）；`eval` 启发式 15/15 = 100%；`make test` 九个 session 全绿（根 **897 passed/6 skipped**、shared-schemas 28、agent-runtime 594/1、agent_server 44、联邦 163、kefu 43、exhibition 347/1、knowledge-service 396/13、nl2sql 18）；另对 35 个被修改的 `.py`/`.toml` 跑「顶层 `def`/`class` 重名 + `tomllib` 解析」不变量：零命中。
 - **已合入主干（PR #50）**：2026-10-02T10:36:37Z 以 merge commit 方式入 `main`，新 tip `617cbf2`（双亲 `b7448c1` + `afc738a`）。GitHub 那次 merge **未引入 PR 之外的内容**：`git rev-parse "afc738a^{tree}" "617cbf2^{tree}"` 两个树 OID 全等（`05974143…`）。
 - **主干 CodeQL 告警面复验 PASS（PR 绿 ≠ 主干绿，在 `refs/heads/main` 实取）**：open 恰 `#38`/`#39`（`guardrails/auth.py:103` col 47-69 / `:128` col 29-60），两条告警的 `most_recent_instance.commit_sha` 均 = `617cbf29…`（`code-scanning/analyses` 最新两条 created=`10:37:53Z`/`10:37:18Z`，晚于合入时刻 ⇒ 重扫确已发生在新 tip）；`fixed` 44 / **`dismissed` 0**；全仓最大告警号 **48** 不增；合入时刻后新建告警 **0**；主干 check-runs `ci`/`ha`/`assembly`/`Analyze (python)`/`Analyze (actions)` 全 success。本批未改 `auth.py`（`git diff b7448c1..617cbf2 -- …/auth.py` 为空），旧文档里的 `:92`/`:117` 已因 PR #49 那批加 docstring 位移 +11。同一 tip 本机快验：ruff passed、`lint_architecture.py` 13 条全 rc=0、`check_doc_sync.py` 0 警告、`eval` 15/15。
-- **仍未做 / 不属于本批**：不碰 `docs/plans/plan-multi-expert-adjudication-2026-09-30.md`（本地未跟踪、全仓零引用的 Proposed 方案草稿，其基座提交 `1aea73e`/`4278e23`/`dd76835` 已随本批进主干，但方案本身未启动，去留待拍板）；不删任何 ref（五条已并入分支的逐项取证已入台账 **§8**，含新登记的**陷阱五：「分支的 PR 是否 MERGED」不能当并入判据**）。
+- **仍未做 / 不属于本批**（下列三项已由同日的 **PR #53 / #51 收尾批**完成，终态见顶部新段与台账 **§9**）：不碰 `docs/plans/plan-multi-expert-adjudication-2026-09-30.md`（当时为本地未跟踪、全仓零引用的 Proposed 方案草稿，其基座提交 `1aea73e`/`4278e23`/`dd76835` 已随本批进主干，但方案本身未启动 ⇒ 已拍板入库为 Proposed，本轮不实施）；不删任何 ref（五条已并入分支的逐项取证已入台账 **§8**，含新登记的**陷阱五：「分支的 PR 是否 MERGED」不能当并入判据** ⇒ 已拍板并删除其中 4 条，`v3`/`v2` 保留，见 §9.3）。
 
 ## 执行记忆内核契约 ADR-0005 T0 入主干（并入 `feat/isolation-hardening` 真独有载荷）（2026-10-02）
 
