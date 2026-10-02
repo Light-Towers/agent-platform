@@ -2,7 +2,7 @@
 
 本仓库为 uv workspace monorepo。**唯一受支持的安装/运行入口是根 `uv.lock` + `uv sync`**，子包不再维护独立 `uv.lock`（见 v2 修复 #14）。
 
-## 分支处置收尾：PR #53/#54 落账、7 条 ref 删除清零、pypdf 8 条 high 告警主干闭合（2026-10-02）
+## 分支处置收尾：PR #53/#54/#56 落账、7 条 ref 删除清零、pypdf 8 条 high 告警主干闭合（2026-10-02）
 
 > 类型：纯治理/卫生（零产品源码改动；依赖版本变更由 PR #51 单独承载）。台账：`docs/plans/plan-branch-disposition-2026-10-01.md` **§9**（本轮全部取证与判据订正均在彼处）。
 
@@ -14,7 +14,9 @@
 - **又一条 API 形状伪影（同属 fail-closed 族）**：Dependabot 告警的 REST 列表无 `closed_at` 字段（那是 GraphQL 的），且 `state` 终态枚举为 **`fixed`/`dismissed`，不存在 `closed`** —— 第一版按 `state != "closed"` 断言，把 8 条正确的 `state=fixed` 全判为异常（方向是假阴性，未致误报成功）。
 - **一份未跟踪草稿转为 Proposed 方案入库**：`docs/plans/plan-multi-expert-adjudication-2026-09-30.md`（269 行）随 PR #53 入库，此前全仓唯一副本只在本地。仅加一条来源标注 + 行尾 CRLF→LF，**本轮不实施**。
 - **第二轮收尾（PR #54 合入 `10c8629`@12:16:55Z，台账 §9.6）**：零漂移仍用树 OID 直比（`3239a8f^{tree}` == `10c8629^{tree}` = `c68ba952…`），对前 tip 净差 3 files / +101 / −2（注意：净差删除数 **不等于**两次提交 deletions 之和，第二次提交删的是第一次刚加的行，在累积 diff 里抵消）。主干复验 PASS：派生门禁集恰三条（本批全在 docs，`ha`/`assembly` 命中空并用 workflow-runs API 证 `total_count=0`）、open 恰 `#38`/`#39`、实例 sha = `10c86292…`、`fixed` 44 / `dismissed` 0 / max 48 / 新建 0、Dependabot open 仍 0。**一条时序教训**：合入后 6 秒就复验会假 FAIL（三条 check `in_progress` + 实例仍指 `baa965f7`），等约 170s 即 PASS ⇒ 先看 `status` 再看实例 sha；`status=completed` 而实例仍旧 tip 才是真没重扫。
-- **剩余 3 条 ref 已删（本地+远端，台账 §9.6）**：`docs/pr50-merge-closeout` `a98f0fa`、`docs/ref-cleanup-closeout` `3239a8f`（含收尾分支自身）、`dependabot/uv/pypdf-6.19.0` `d3cf899`（远端已由 GitHub 在 #51 合并时自动回收，只删本地）。三个 tip 删后均仍为 `origin/main` 祖先（可原位重建）。删除器比第一轮多两条阀：目标集与禁删集（`main`/`v3`/`v2`/活 dependabot 分支）求交非空即整批拒绝；先切回 `main` 并 `--ff-only`（当前分支不能自删）。**最终 ref 面：远端 4 条**（`main` `10c8629` / `v3` `26cd2fa` / `v2` `b691ff1` / `minor-and-patch-f18118ef2b` `b23269a`）**本地 2 条**（`main` / `v3`），无遗留 ref 面待办。
+- **剩余 3 条 ref 已删（本地+远端，台账 §9.6）**：`docs/pr50-merge-closeout` `a98f0fa`、`docs/ref-cleanup-closeout` `3239a8f`（含收尾分支自身）、`dependabot/uv/pypdf-6.19.0` `d3cf899`（远端已由 GitHub 在 #51 合并时自动回收，只删本地）。三个 tip 删后均仍为 `origin/main` 祖先（可原位重建）。删除器比第一轮多两条阀：目标集与禁删集（`main`/`v3`/`v2`/活 dependabot 分支）求交非空即整批拒绝；先切回 `main` 并 `--ff-only`（当前分支不能自删）。**ref 面（取证时刻）：远端 4 条**（`main` `10c8629` / `v3` `26cd2fa` / `v2` `b691ff1` / `minor-and-patch-f18118ef2b` `b23269a`）**本地 2 条**（`main` / `v3`），无遗留 ref 面待办（条数不随主干前进而变，但表内 `main` 的 sha 只代表取证时刻）。
+- **第三轮登记（PR #56）合入 `a53cf29`@12:37:12Z，停止规则首次执行即生效**：分支 `docs/ref-closeout-round3` @ `e521360`，零漂移仍用树 OID 直比（`e521360^{tree}` == `a53cf29^{tree}` = `0078c494…`），对前 tip 净差 3 files / +37 / −3。本次用 `gh pr merge 56 --merge --delete-branch` 一次原子完成「内容入主干」与「ref 消失」（`git fetch --prune` 回显 `[deleted] (none) -> origin/docs/ref-closeout-round3`，本地分支同批消失）⇒ 未再为「删这条登记分支」开第四轮。
+- **闭合订正（本轮登记自身，台账 §9.7）：把「最新 / 最终」型 tip 指针改成「取证时刻」语义**。上一轮把 ref 面的 `main` 写成 `10c8629`，而那段文字自己经 PR #56 合入后，主干就前进了——**登记动作本身会作废登记内容里写下的 tip**，与 §9.5 「不能拿一次 `ls-remote` 快照当长期事实」同族。⇒ `docs/TODO.md` 的复验行改称「最近一次复验取证」并明写：此类指针不随每次合入追改，判据必须在待验证 tip 上重跑 `verify_main_rescan_54.py <merge_sha> <pr_number>` 才算成立。闭合态复验在 `a53cf29` 实跑 PASS（open 恰 `#38`/`#39`、实例 sha = `a53cf29c…`、`fixed` 44 / `dismissed` 0 / max 48 / 新建 0、Dependabot open 0、派生门禁集三条齐、`ha`/`assembly` 证 `total_count=0`、两条 analyses 落新 tip）；同一 tip 的 CI 全量实跑 success（run `37007777285`，12:37:15→12:40:22Z）：**十个 pytest session 逐条对齐 Makefile `test` 目标**——根 **901 passed / 2 skipped / 28 deselected**、shared-schemas 28、agent-runtime 594/1、agent_server/tests 44、联邦 163、kefu 43、exhibition 347/1、knowledge-service 396/13、nl2sql 18、`--extra otel tests/observability` 15；启发式 eval **15/15 = 100%**（与上一行的「observability 15 passed」是两个不同的 15，巧合同值，不得混为一谈）；`uv lock --check` 300 包。
 - **停止规则入库（防「记录删除→再记录→再删除」的无穷回归）**：从本节起，收尾分支自身的删除由**合并动作携带**（`gh pr merge --delete-branch`），一次合并原子完成「内容入主干」与「ref 消失」，不再为删登记分支额外开一轮登记。
 
 ## 观测全局装配 + RAG 分层评测入主干（并入 `test/rag-route-ablation-eval` 全量）（2026-10-02）
