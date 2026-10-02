@@ -240,3 +240,34 @@ $ git show --stat --format="" 85cd9bfe | tail -1   # 5 files changed, 216 insert
 | R19（issue #23） | 未动工；`FastAPI(telemetry=…)` 关闭项 + 新 lint 门禁均未实现 | 需先按红线出方案，并做真集群端到端复验（同样卡部署侧环境） |
 | `plan-multi-expert-adjudication-2026-09-30.md` | 已随 PR #53 入库（269 行，状态 Proposed） | 本轮不实施；其三个基座提交已在主干 |
 
+### 9.6 第二轮收尾：PR #54 落账、剩余 3 条 ref 删除、最终 ref 面与停止规则
+
+**PR #54**（分支 `docs/ref-cleanup-closeout` @ `c4ce02a` + `3239a8f`）于 2026-10-02T12:16:55Z 合入，主干新 tip `10c8629`（双亲 `baa965f` + `3239a8f`）。零漂移仍用树 OID 直比：`3239a8f^{tree}` == `10c8629^{tree}` = `c68ba952…`；对前一 tip 净差 3 files / +101 / −2。【一处易读错的形状】净差的删除数 **不等于**两次提交 deletions 之和（2 + 5）：`3239a8f` 删的 5 行是 `c4ce02a` 刚加进去的行，相对 `baa965f` 它们从未存在过，所以在累积 diff 里相互抵消。拿两个提交的 stat 相加当「对主干净差」是错的，必须直比 `git diff --shortstat <前 tip> <新 tip>`。
+
+主干复验（`.codeartsdoer/temp/verify_main_rescan_54.py` → `=== 总体：PASS ===`）：
+
+| 判据 | 实测 |
+|---|---|
+| 派生门禁集（陷阱六） | 本批 3 个文件全在 `docs/` 与根 `*.md` ⇒ `ha`/`assembly` 过滤器命中 `[]` ⇒ 预期集 = `{ci, Analyze (python), Analyze (actions)}` 三条，实跑三条 completed/success；两条被过滤门禁用 workflow-runs API 证 `total_count=0` |
+| CodeQL 告警面 | open 恰 `#38`/`#39`、实例 sha = `10c86292…`、`fixed` 44 / `dismissed` 0 / max 48 不增 / 合入后新建 0；analyses 两条落新 tip（`12:17:40Z` / `12:18:20Z`） |
+| Dependabot | `state=open` = **0**（pypdf 闭合未回退） |
+
+**一条时序教训（不是判据缺陷）**：合入后 6 秒就跑去复验会得到 FAIL——三条 check 全 `status=in_progress`、`most_recent_instance.commit_sha` 仍指前一 tip `baa965f7`。等约 170s 重跑即 PASS。⇒ 判别口诀：**先看 `status` 是否 completed，再看实例 sha 是否已指向新 tip**；两者均呈「未完成」形状的是时序，稍等重跑即可；若 `status=completed` 而实例仍指旧 tip，那才是主干真的没重扫（属真失败）。
+
+**第二轮删除（`.codeartsdoer/temp/closeout_refs_54.py`，与 §9.3 同一套 fail-closed 安全阀）**：
+
+| ref | tip | 远端 | 本地 | 可恢复性 |
+|---|---|---|---|---|
+| `docs/pr50-merge-closeout` | `a98f0fa` | 删（回显 `- [deleted]`） | `-d` 删 | 仍为 `origin/main` 祖先 |
+| `docs/ref-cleanup-closeout` | `3239a8f` | 删（回显 `- [deleted]`） | `-d` 删 | 仍为 `origin/main` 祖先 |
+| `dependabot/uv/pypdf-6.19.0` | `d3cf899` | 早已由 GitHub 在 #51 合并时自动回收 ⇒ 只删本地 | `-d` 删 | 仍为 `origin/main` 祖先 |
+
+删除器比第一轮多两条阀：① 目标集合与禁删集合（`main` / `v3` / `v2` / 活 dependabot 分支 `f18118ef2b`）求交非空即**整批拒绝**；② 当前 checkout 的分支不能自删 ⇒ 先切回 `main` 再 `--ff-only`（不能 ff 就停）。远端 delete 只对「本地跟踪 ref 仍在」的目标发，已被平台回收的就当作已完成而不是错误。
+
+**最终 ref 面（实取：远端 heads 4 条 + 本地 branch 2 条）**：
+
+- 远端：`main` `10c8629`、`v3` `26cd2fa`、`v2` `b691ff1`、`dependabot/uv/minor-and-patch-f18118ef2b` `b23269a`（PR #55 活分支；其 head 已比开出时变过——Dependabot 在主干前进后重推，再次印证 §9.5 「不能拿一次 `ls-remote` 快照当长期事实」）。
+- 本地：仅 `main` 与 `v3`。`v2` 本地无分支（只保留远端里程碑锚点）。
+
+**停止规则（防「记录删除 → 再记录 → 再删除」的无穷回归）**：从本节起，收尾分支自身的删除**由合并动作携带**（`gh pr merge --delete-branch`），一次合并即原子地同时完成「内容入主干」与「ref 消失」，因此不需再为「删除这个登记分支」额外开一轮登记。本节所属的 PR 就按这条规则执行。台账至此 **无遗留 ref 面待办**：`v3`/`v2` 是组织决策（已拍板保留），#55 是活分支（勿删且前置在本仓），其余均为「已并完 + 已落账 + 已删」。
+

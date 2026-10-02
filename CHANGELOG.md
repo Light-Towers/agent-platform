@@ -2,7 +2,7 @@
 
 本仓库为 uv workspace monorepo。**唯一受支持的安装/运行入口是根 `uv.lock` + `uv sync`**，子包不再维护独立 `uv.lock`（见 v2 修复 #14）。
 
-## 分支处置收尾：PR #53 落账、4 条 ref 删除、pypdf 8 条 high 告警主干闭合（2026-10-02）
+## 分支处置收尾：PR #53/#54 落账、7 条 ref 删除清零、pypdf 8 条 high 告警主干闭合（2026-10-02）
 
 > 类型：纯治理/卫生（零产品源码改动；依赖版本变更由 PR #51 单独承载）。台账：`docs/plans/plan-branch-disposition-2026-10-01.md` **§9**（本轮全部取证与判据订正均在彼处）。
 
@@ -13,6 +13,9 @@
 - **另一组依赖 PR 被本仓 L-4 如实拦下，且已被 Dependabot 自行关闭重开（登记为独立决策面）**：**#52**（minor-and-patch 组 14 项）的 `ci` 失败根因不是环境抖动，而是它把根 `pyproject.toml` 的 `opentelemetry-api` 抬到 `>=1.45.0`、`packages/agent-core` 仍 `>=1.24`（主干当前两处一致均 `>=1.24`），违反 L-4「多处下界一致」。【合入 #54 前的二次实跑订正】#52 并非「保持 open 等 review」：`issues/52/timeline` 的 `closed` 事件 actor = **`dependabot[bot]`（type=Bot）**、`closed_at=11:59:36Z`、`merged=false`，bot 留言 "Looks like these dependencies are updatable in another way, so this is no longer needed."（11:59:34Z）；同一时刻它还把 pypdf 从组里摘掉并开出替代 **PR #55**（13 项，分支 `minor-and-patch-f18118ef2b`），而 #55 的 `ci` 在 12:01:16Z 以**同一条 L-4 消息**再次失败（`ha`/`assembly` pass）⇒ 拦下它的是本仓门禁而非巧合，且这条门禁连续两次生效。⇒ 后续动作不是「等 PR 变绿」，而是本仓先按 `plan-observability §3.3` 归一下界（独立决策面）。被回收的 `4aa4233` 仍可经 `refs/pull/52/head` 取回（实测存在，非祖先）。
 - **又一条 API 形状伪影（同属 fail-closed 族）**：Dependabot 告警的 REST 列表无 `closed_at` 字段（那是 GraphQL 的），且 `state` 终态枚举为 **`fixed`/`dismissed`，不存在 `closed`** —— 第一版按 `state != "closed"` 断言，把 8 条正确的 `state=fixed` 全判为异常（方向是假阴性，未致误报成功）。
 - **一份未跟踪草稿转为 Proposed 方案入库**：`docs/plans/plan-multi-expert-adjudication-2026-09-30.md`（269 行）随 PR #53 入库，此前全仓唯一副本只在本地。仅加一条来源标注 + 行尾 CRLF→LF，**本轮不实施**。
+- **第二轮收尾（PR #54 合入 `10c8629`@12:16:55Z，台账 §9.6）**：零漂移仍用树 OID 直比（`3239a8f^{tree}` == `10c8629^{tree}` = `c68ba952…`），对前 tip 净差 3 files / +101 / −2（注意：净差删除数 **不等于**两次提交 deletions 之和，第二次提交删的是第一次刚加的行，在累积 diff 里抵消）。主干复验 PASS：派生门禁集恰三条（本批全在 docs，`ha`/`assembly` 命中空并用 workflow-runs API 证 `total_count=0`）、open 恰 `#38`/`#39`、实例 sha = `10c86292…`、`fixed` 44 / `dismissed` 0 / max 48 / 新建 0、Dependabot open 仍 0。**一条时序教训**：合入后 6 秒就复验会假 FAIL（三条 check `in_progress` + 实例仍指 `baa965f7`），等约 170s 即 PASS ⇒ 先看 `status` 再看实例 sha；`status=completed` 而实例仍旧 tip 才是真没重扫。
+- **剩余 3 条 ref 已删（本地+远端，台账 §9.6）**：`docs/pr50-merge-closeout` `a98f0fa`、`docs/ref-cleanup-closeout` `3239a8f`（含收尾分支自身）、`dependabot/uv/pypdf-6.19.0` `d3cf899`（远端已由 GitHub 在 #51 合并时自动回收，只删本地）。三个 tip 删后均仍为 `origin/main` 祖先（可原位重建）。删除器比第一轮多两条阀：目标集与禁删集（`main`/`v3`/`v2`/活 dependabot 分支）求交非空即整批拒绝；先切回 `main` 并 `--ff-only`（当前分支不能自删）。**最终 ref 面：远端 4 条**（`main` `10c8629` / `v3` `26cd2fa` / `v2` `b691ff1` / `minor-and-patch-f18118ef2b` `b23269a`）**本地 2 条**（`main` / `v3`），无遗留 ref 面待办。
+- **停止规则入库（防「记录删除→再记录→再删除」的无穷回归）**：从本节起，收尾分支自身的删除由**合并动作携带**（`gh pr merge --delete-branch`），一次合并原子完成「内容入主干」与「ref 消失」，不再为删登记分支额外开一轮登记。
 
 ## 观测全局装配 + RAG 分层评测入主干（并入 `test/rag-route-ablation-eval` 全量）（2026-10-02）
 
