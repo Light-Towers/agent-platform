@@ -42,7 +42,8 @@ from api.monitor import manager
 API_KEY = os.getenv("API_KEY", "")
 KNOWLEDGE_SERVICE_URL = os.getenv("KNOWLEDGE_SERVICE_URL", "")
 
-from api.auth import resolve_thread_id
+from api.auth import PrincipalUndetermined, resolve_thread_id
+from api.context import get_asserted_tenant_context
 from api.identity_bridge import mount_identity_middleware
 
 _HAS_SECURITY_GUARDS = False
@@ -143,8 +144,8 @@ app.add_middleware(
 )
 
 # ADR-0007 决策2=B1：从专用头 X-Tenant-JWT 断言租户（与 Authorization: Bearer <API_KEY> 传输鉴权并存）。
-# 未配验签公钥/无该头时 observe 透传，零行为变更。
-mount_identity_middleware(app)
+# 未配验签公钥/无该头时 observe 透传，零行为变更。挂载点在本文件下方 guards 注册之后
+# （B7b-4 接线序对调，理由见那里的注释：Starlette 里「后注册者更外层」）。
 
 _ALLOW_NO_AUTH = os.getenv("DISABLE_AUTH", "false").lower() in ("1", "true", "yes")
 
@@ -155,6 +156,10 @@ if _HAS_SECURITY_GUARDS and API_KEY:
         rate_limit_per_client=int(os.getenv("RATE_LIMIT_PER_CLIENT", "30")),
         rate_limit_global=int(os.getenv("RATE_LIMIT_GLOBAL", "200")),
         exempt_paths=("/health", "/ws/"),
+        # B7b-2 主体注入：限流桶用**服务端已断言的租户**而非客户端 IP/凭据摘要。
+        # 必须用 get_asserted_tenant_context（无断言返 None ⇒ 退回 IP 桶），而**不是**
+        # get_tenant_context（它把未断言也读成 "default"，会把所有未断言请求并成一个主体桶）。
+        subject_provider=get_asserted_tenant_context,
     )
 elif _ALLOW_NO_AUTH:
     logger.warning(
@@ -185,15 +190,27 @@ else:
 
         return JSONResponse(status_code=401, content={"detail": "API key required"})
 
+# 【B7b-4 接线序对调】必须留在 guards 注册之后：Starlette 的 user_middleware 列表「后注册者更
+# 外层」，旧代码在本行之前挂载 identity ⇒ guards 跑在身份之前，限流取主体时租户尚未绑定、
+# 实质始终退回 IP 桶（B7b-2 §4.2 补记第 3 条登记的中间态）。现在 identity 更外层：先绑定
+# 主体、再进 guards。
+# 行为变更（两个方向均由 tests/unit/test_identity_guards_order.py 锁住）：伪造/过期
+# X-Tenant-JWT 的 401 从此抢在 API-Key 401 之前（身份断言优先于传输鉴权，与 ADR-0007 信任链一致）。
+mount_identity_middleware(app)
+
 _concurrency_semaphore = asyncio.Semaphore(int(os.getenv("MAX_CONCURRENT_TASKS", "10")))
 
 
-def _extract_api_key(request: Request) -> str | None:
-    """从请求头提取 API_KEY 原文（与 _require_api_key 校验逻辑一致）。"""
-    auth = request.headers.get("Authorization", "")
-    if auth.lower().startswith("bearer "):
-        return auth[len("Bearer ") :]
-    return request.headers.get("X-API-Key") or None
+def _resolve_thread_id_or_401(client_thread_id: str | None) -> str:
+    """HTTP 路由入口：主体不可断言 → 401（固定文案，不外泄推断细节）。
+
+    只兜 :class:`PrincipalUndetermined`：内核 ``resolve_thread_identity`` 的字符集 ValueError 是
+    部署配置错误（租户 id 含 ``:`` ``/`` 等），必须留在 500 语义而不是伪装成认证失败。
+    """
+    try:
+        return resolve_thread_id(client_thread_id)
+    except PrincipalUndetermined:
+        raise HTTPException(status_code=401, detail="UNABLE_TO_DETERMINE_IDENTITY") from None
 
 
 def _check_api_key(key: str | None) -> bool:
@@ -215,9 +232,8 @@ from agent.main_agent import run_deep_agent
 
 @app.post("/api/task")
 async def run_task(request: QueryRequest):
-    # 安全：API_KEY 启用时忽略客户端 session_id，按密钥派生稳定会话（防劫持 + 跨请求续接）
-    api_key = _extract_api_key(request)
-    thread_id = resolve_thread_id(request.session_id, api_key)
+    # 安全：鉴权启用时忽略客户端 session_id，按服务端断言主体派生稳定会话（防劫持 + 多个请求落到同一 thread）
+    thread_id = _resolve_thread_id_or_401(request.session_id)
     with start_span("api.task", attrs={"thread_id": thread_id}):
         async def _run():
             try:
@@ -237,11 +253,10 @@ async def run_task(request: QueryRequest):
 async def upload_files(
     files: list[UploadFile] = File(...),
     thread_id: str = Form(None),
-    request: Request = None,
 ):
-    # 安全：API_KEY 启用时忽略客户端 thread_id，按密钥派生，保证上传文件落到与对话同一会话目录
-    api_key = _extract_api_key(request) if request else None
-    safe_thread_id = resolve_thread_id(thread_id, api_key)
+    # 安全：鉴权启用时忽略客户端 thread_id，按服务端断言主体派生，保证上传件落到与对话同一会话目录
+    # （B7b-4：不再从请求头取凭据参与派生，故本路由不再需要 Request）
+    safe_thread_id = _resolve_thread_id_or_401(thread_id)
     # 会话目录名与文件名均经 kernel 单一实现净化 + safe_join 拼接（A 类 py/path-injection 收口）
     target_dir = safe_join(updated_dir, f"session_{safe_filename(safe_thread_id)}")
     target_dir.mkdir(parents=True, exist_ok=True)
@@ -328,8 +343,13 @@ async def websocket_endpoint(
     if not _check_api_key(api_key):
         await websocket.close(code=4001, reason="Invalid API key")
         return
-    # 认证启用时忽略 URL 中的 thread_id（不可信），按密钥派生，使 WS 桥接到与 /api/task 同一会话
-    ws_thread_id = resolve_thread_id(thread_id, api_key)
+    # 鉴权启用时忽略 URL 中的 thread_id（不可信），按服务端断言主体派生，使 WS 桥接到与 /api/task 同一会话
+    try:
+        ws_thread_id = resolve_thread_id(thread_id)
+    except PrincipalUndetermined:
+        # 与 API-Key 失败同用 close 语义（WS 不能 raise HTTPException）；reason 不带推断细节
+        await websocket.close(code=4001, reason="Unable to determine identity")
+        return
     await manager.connect(websocket, ws_thread_id)
     try:
         # Plan-F WS 出口统一：客户端发 {"type":"query","text":...} → 服务端经

@@ -60,7 +60,7 @@ Agent Platform 是一个基于 **LangGraph Supervisor 模式** 的统一智能�
 - **熔断器**（`packages/agent-runtime/agent_runtime/circuit_breaker.py`）：closed → open → half-open 状态机，连续失败达阈值后熔断，冷却窗口到期放行试探
 - **LLM 主备降级**（`applications/agent_server/agent/llm.py`）：主模型超时/错误时自动切换 fallback 模型
 - **SSE 流式响应**：route → evidence → answer → done 全链路流式
-- **认证 + 会话防劫持**（`applications/agent_server/api/auth.py`）：API_KEY 启用时按密钥派生 thread_id，忽略客户端传入值
+- **认证 + 会话防劫持**（`applications/agent_server/api/auth.py`）：API_KEY 启用时 thread_id 取**服务端断言租户**（`tenant-<id>`，**不从密钥派生**），忽略客户端传入值
 - **Checkpoint 持久化**：Postgres（生产）/ Memory（开发），会话状态可恢复
 - **评测门禁**（`eval/`）：15 条 golden set，启发式路由准确率基线 100%，CI 阻断回归
 
@@ -243,7 +243,7 @@ data: {"type": "done", "thread_id": "...", "answer": "..."}        # 完成
 |------|------|------|
 | `question` | body | 问题文本（1–2000 字符） |
 | `priority` | body / `X-Priority` header | `high` / `normal` / `low`，默认 `normal` |
-| `thread_id` | body | 会话 ID（启用 API_KEY 时忽略，按密钥派生） |
+| `thread_id` | body | 会话 ID（启用 API_KEY 时忽略，按服务端断言租户派生 `tenant-<id>`） |
 | `traceparent` | header | W3C Trace Context 透传（Phase 2） |
 
 ### `POST /import` — 知识库文档导入
@@ -568,7 +568,7 @@ tests/                     # 单元测试（针对 agent_server 平台；含 pla
 | 懒加载无锁竞态 | lifespan 预热 + 连接池加锁初始化 |
 | 降级标志只置位不复位 | 熔断器连续失败计数 + 冷却窗口，成功后自动复位 |
 | `asyncio.create_task` 无引用被 GC | 统一 `spawn_background`（集合持引用 + done 回调） |
-| 客户端 thread_id 会话劫持 | API_KEY 启用时忽略客户端 thread_id，按密钥派生 |
+| 客户端 thread_id 会话劫持 | API_KEY 启用时忽略客户端 thread_id，按服务端断言租户派生（不从密钥派生，B7b-4） |
 | compose 0.0.0.0 暴露 | docker-compose 只发布 `127.0.0.1:8000` |
 | 微服务适配层 SSE/会话键连环 bug | 单进程多节点，LangGraph 节点边界隔离 |
 | admission 崩溃恢复 vs 不存储问题全文 | 元数据可恢复，未执行请求标记 rejected，客户端可重试 |
@@ -603,7 +603,7 @@ tests/                     # 单元测试（针对 agent_server 平台；含 pla
 
 - `.env` 不入库；真实密钥只填本地 `.env`，**切勿提交**
 - SQL 链路双保险：sqlglot 白名单守卫 + 连接级只读
-- 认证启用时会话按密钥派生，忽略客户端 thread_id
+- 认证启用时会话按服务端断言租户派生（`tenant-<id>`，凭据不参与任何派生），忽略客户端 thread_id
 - OTel 追踪脱敏：仅记录问题长度 + SHA-256 哈希前 16 位，不含全文
 - Admission 队列不存储问题全文（脱敏约束）
 

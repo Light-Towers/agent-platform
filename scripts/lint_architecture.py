@@ -11,8 +11,8 @@ P4-2：收紧 registry.execute 直接可见性。
 - skills/registry.py（SkillRegistry 自身）
 - tests/ / eval/（测试与评测）
 
-P6：禁止在 kernel 外对密钥类标识手写裸哈希（DUP-1 横向重复门禁，见下文）；
-    并封锁【刻意保留的弱派生】``legacy_thread_id`` 的调用面（仅迁移脚本可用）。
+P6：禁止对密钥类标识手写裸哈希（DUP-1 横向重复门禁，见下文）。B7b-5 反转后无白名单：
+    kernel 的「凭据→摘要」单一实现已删，四个已退役入口名也不得再现（P6-3）。
 P7：禁止在 kernel 外手写路径 containment / api 层绕过 ``guardrails.fs``（A 类横切收敛）。
 P8：禁止在对外响应体（HTTP JSON / SSE 帧）回显异常消息或堆栈（C 类横切收敛）。
 P9：禁止在 app 层裸调 ``monitor.report_tool*``（散点埋点，v3 合流并入）。
@@ -173,22 +173,29 @@ def check_toplevel_package_clashes() -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# P6 架构不变量（DUP-1 横向重复门禁）：密钥 → 稳定指纹 只能由 kernel 单一实现
-# ``agent_core.guardrails.auth.fingerprint`` 产出。背景：CodeQL
-# ``py/weak-sensitive-data-hashing`` 的 5 条告警是同一操作被抄 4 遍且截断语义
-# 分裂（全量 vs ``[:12]`` 48bit、均无服务端 pepper）——前 3 条 lint 均为「禁止危险调
-# 用点」型检测，对「同类横切逻辑多实现」这一维度全空白，故新增本不变量防复发。
-# 规则：同一行出现弱哈希调用 + 密钥语义标识即失败。
-#   · ``hmac.new(secret, msg, hashlib.sha256)`` 不命中（hashlib 无紧跟 ``(``），
-#     因 HMAC 才是本门禁鼓励的写法；
-#   · 非敏感分桶（如 ``gateway/gray.py`` 的 ``md5(user_id)``）不含密钥语义名，
-#     天然不在拦截面内（无需为其开白名单）。
-# 白名单：kernel 单一实现所在文件（含迁移用的 legacy 派生助手）。
+# P6 架构不变量（DUP-1 横向重复门禁，**B7b-5 已反转**）：全仓不得再有「凭据 → 稳定
+# 指纹」实现。背景：CodeQL ``py/weak-sensitive-data-hashing`` 的 5 条告警是同一操作被抄
+# 4 遍且截断语义分裂（全量 vs ``[:12]`` 48bit、均无服务端 pepper）；当时新增本不变量，
+# 以 kernel ``guardrails.auth`` 为唯一白名单实现。B7b 拆完三条链（会话身份 / 限流桶 /
+# LLM 缓存键）后该实现已作为死代码删除 ⇒ **白名单置空**（继续留着就是留着缺口）。
+# 两条子检查：
+#   P6-1 同一行出现弱哈希调用 + 密钥语义标识即失败（无白名单）；
+#   P6-3 「凭据→摘要」入口名（已退役的四个函数）以调用/定义形式出现即失败。
+# 为何需要 P6-3：P6-1 的正则只抓 ``hashlib.<algo>(`` 同行共现，抓不到「调 kernel 函数
+# 但被摘要的仍是凭据」这类写法，也抓不到改名绕过。改名消警是纯 gaming，而「把旧函数
+# 名加回来」必须让 CI 失败而不是靠 review 自觉。判定抽成单行函数以便反例单测
+# （沿用 ``_is_bare_secret_hash_line`` 的做法）。
 # ---------------------------------------------------------------------------
 _WEAK_HASH_CALL = re.compile(r"hashlib\.(?:md5|sha1|sha224|sha256|sha384|sha512)\s*\(")
 _SECRET_IDENT = re.compile(r"api_?key|apikey|secret|passwo?rd|access_key|private_key", re.IGNORECASE)
-_BARE_SECRET_HASH_WHITELIST = (
-    "packages/agent-core/agent_core/guardrails/auth.py",
+# B7b-5：kernel 单一实现已删除 ⇒ 无白名单。置空而非删变量：保留名字供既有用例引用，
+# 并让「未来有人想加回白名单」在 diff 里一眼可见。
+_BARE_SECRET_HASH_WHITELIST: tuple[str, ...] = ()
+
+# 本文刻意不写出「名字 + 左括号」的完整字面形式（改用 ``\s*`` 隔开），否则本文件会
+# 命中自己的规则（与 ``_WEAK_HASH_CALL`` 的写法同理）。
+_RETIRED_IDENTITY_HELPERS = re.compile(
+    r"\b(?:fingerprint|derive_thread_id|legacy_thread_id|_hash_api_key)\s*\("
 )
 
 
@@ -202,16 +209,30 @@ def _is_bare_secret_hash_line(stripped: str) -> bool:
     return bool(_WEAK_HASH_CALL.search(stripped) and _SECRET_IDENT.search(stripped))
 
 
-def check_bare_secret_hashing() -> list[str]:
-    """扫全仓：白名单外禁对 api_key/secret 类变量裸用 hashlib（DUP-1）。"""
-    violations: list[str] = []
+def _is_retired_identity_helper_line(stripped: str) -> bool:
+    """单行判定（抽出以便反例单测）：已退役的「凭据→摘要」入口名以调用/定义形式出现。
+
+    纯注释行不判（文档/方案常引用旧写法）；名字后非左括号（如纯文本提及）也不判，
+    守的是「真的又有人写/调它」而不是「文档里提到它」。
+    """
+    if stripped.startswith("#"):
+        return False
+    return bool(_RETIRED_IDENTITY_HELPERS.search(stripped))
+
+
+def _iter_scanned_py_files():
+    """逐仓 ``*.py`` 产出 ``(rel, path)``，跳过依赖/缓存/课件/测试面（见 ``_skipped_rel``）。"""
     for py_file in ROOT.rglob("*.py"):
         rel = py_file.relative_to(ROOT).as_posix()
-        if any(p in rel for p in (".venv", "__pycache__", ".ruff_cache", ".egg-info",
-                                   ".codeartsdoer", ".codebuddy", "courses/")):
+        if _skipped_rel(rel):
             continue
-        if "/tests/" in rel or rel.startswith("tests/"):
-            continue
+        yield rel, py_file
+
+
+def check_bare_secret_hashing() -> list[str]:
+    """扫全仓：禁对 api_key/secret 类变量裸用 hashlib（DUP-1，B7b-5 后无白名单）。"""
+    violations: list[str] = []
+    for rel, py_file in _iter_scanned_py_files():
         if any(rel == w or rel.startswith(w) for w in _BARE_SECRET_HASH_WHITELIST):
             continue
         try:
@@ -224,45 +245,18 @@ def check_bare_secret_hashing() -> list[str]:
     return violations
 
 
-# ---------------------------------------------------------------------------
-# P6-2：【刻意保留的弱派生】``legacy_thread_id`` 调用面封闭。
-# 背景：该函数必须复算升级前的 ``user-{sha256(api_key)[:12]}``（48bit 截断），否则
-# 历史会话目录 / checkpointer ``thread_id`` 无法找回。Batch 2 当时只靠 docstring
-# 「业务代码调用即违反 DUP-1」的**约定**约束，而 kernel 在 P6 白名单内， lint 拦不住
-# 新增调用点——PR 重扫时 CodeQL 果然又把这条当新告警报了出来（约定会腐，故升级为门禁）。
-# 规则：除 kernel 定义处与迁移脚本外，出现 ``legacy_thread_id(`` 调用即失败。
-# ---------------------------------------------------------------------------
-_LEGACY_ID_CALL = re.compile(r"\blegacy_thread_id\s*\(")
-_LEGACY_ID_ALLOWED = (
-    "packages/agent-core/agent_core/guardrails/auth.py",  # 定义 + __all__
-    "scripts/migrate_thread_identity.py",  # 唯一合法消费者（一次性迁移）
-)
+def check_retired_identity_helpers() -> list[str]:
+    """扫全仓：已退役的「凭据→摘要」入口名不得再现（被治理对象已消失 ⇒ 无白名单）。
 
-
-def _is_legacy_id_call_line(stripped: str) -> bool:
-    """单行判定（抽出以便反例单测）：弱派生名后紧跟左括号（调用或定义形式）。
-
-    本文刻意不写出完整的字面匹配形式，否则本文件会命中自己的规则（与
-    ``_WEAK_HASH_CALL`` 的写法同理）。
+    P6-2 的继任者：旧规则守的是「弱派生只允许迁移脚本调用」，而枚举式迁移不再从密钥
+    复算 ⇒ 函数本体已删，守的是「不得再加回来」。
     """
-    if stripped.startswith("#"):
-        return False
-    return bool(_LEGACY_ID_CALL.search(stripped))
-
-
-def check_legacy_identity_calls() -> list[str]:
-    """扫全仓：白名单外禁调用 ``legacy_thread_id``（弱派生不得进入业务链路）。"""
     violations: list[str] = []
-    for py_file in ROOT.rglob("*.py"):
-        rel = py_file.relative_to(ROOT).as_posix()
-        if _skipped_rel(rel):
-            continue
-        if rel in _LEGACY_ID_ALLOWED:
-            continue
+    for rel, py_file in _iter_scanned_py_files():
         try:
             for lineno, line in enumerate(py_file.read_text(encoding="utf-8").splitlines(), 1):
                 stripped = line.strip()
-                if _is_legacy_id_call_line(stripped):
+                if _is_retired_identity_helper_line(stripped):
                     violations.append(f"{rel}:{lineno}: {stripped}")
         except Exception:
             pass
@@ -798,16 +792,16 @@ def main() -> int:
         rc = 1
     else:
         print("P5 架构约束通过：无跨成员顶层包名冲突")
-    v4 = check_bare_secret_hashing() + check_legacy_identity_calls()
+    v4 = check_bare_secret_hashing() + check_retired_identity_helpers()
     if v4:
-        print("P6 架构约束违反：密钥→指纹 必须走 kernel 单一实现 agent_core.guardrails.auth.fingerprint（DUP-1），")
-        print("   且刻意保留的弱派生 legacy_thread_id 只允许迁移脚本调用（业务链路禁用）")
-        print("白名单外对 api_key/secret 裸用 hashlib，或白名单外调用 legacy_thread_id 的站点：")
+        print("P6 架构约束违反：全仓不得再有「凭据 → 摘要」实现（DUP-1 / CodeQL py/weak-sensitive-data-hashing），")
+        print("   B7b 已拆完三条链并删除 kernel 单一实现 ⇒ 白名单为空，旧入口名也不得加回来")
+        print("对 api_key/secret 裸用 hashlib，或再现已退役身份派生入口名的站点：")
         for v in v4:
             print(f"  {v}")
         rc = 1
     else:
-        print("P6 架构约束通过：无白名单外裸 hashlib 作用于密钥类标识，且 legacy_thread_id 调用面未外溢")
+        print("P6 架构约束通过：无裸 hashlib 作用于密钥类标识，且已退役的「凭据→摘要」入口名零再现")
     v5 = check_manual_path_containment() + check_api_layer_path_io()
     if v5:
         print("P7 架构约束违反：路径 containment / 文件名净化 必须走 kernel 单一实现 agent_core.guardrails.fs（A 类 py/path-injection 根因）")

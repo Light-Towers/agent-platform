@@ -2,6 +2,54 @@
 
 本仓库为 uv workspace monorepo。**唯一受支持的安装/运行入口是根 `uv.lock` + `uv sync`**，子包不再维护独立 `uv.lock`（见 v2 修复 #14）。
 
+## B7b-4 + B7b-5 实施：链① 会话身份主体化（PR-A）+ 死代码/门禁/文档收口（PR-B）（2026-10-02）
+
+> 类型：产品代码变更（安全契约）+ 迁移脚本重写 + 门禁换代 + 文档同步。方案：`docs/plans/plan-codeql-b7b-principal-thread-identity-2026-10-01.md`（§8 三项已拍板；§9 取证受阻的**实施后记已就地补在彼处**）。闭合目标：`#38`（链①）、`#39`（`legacy_thread_id`）。硬约束（继承用户定调）：**不引入任何 `false_positive`/`wont_fix`**，只认 `state=fixed` 且 `dismissed_at`/`dismissed_by`/`dismissal_reasons` 全 `None`；不换 scrypt/pbkdf2（能消警但按错误前提付热路径延迟）；不靠改名躲启发式（分类由名字驱动，改名即 gaming）。
+
+### PR-A：会话身份主体化（拆链①）
+
+- **做了什么（kernel）**：`guardrails/auth.py` 新增 `resolve_thread_identity(principal)`——产物 `f"{THREAD_ID_PREFIX}{principal}"`，**不做任何摘要**（租户 id 本身即可入目录名）。两条 fail-fast：空/全空白即 `ValueError`（静默兜底 = 跨租户串会话）；主体必落 `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`。后者不是装饰：实取 `guardrails/fs.py` 白名单为 `[^\w.\- ]`，`:``/``\``*``?` 等一律被洗成 `_` ⇒ 若内核做清洗，租户 `a:b` 与 `a_b` 会落同一目录，而迁移的「目标已存在拒覆盖」会把这种配置误判成碰撞——**内核不做有损清洗（清洗 = 制造碰撞面）**，非 ASCII/含分隔符的 id 由宿主显式提供 filename-safe slug。主体兜底策略留在宿主层，kernel 保持零依赖（红线 1）。
+- **前缀由 `user-` 改 `tenant-`（与 B7b-5 同批，否则二次迁移）**：三条理由按档级排——① **数据面可分性**（决定判据能否退化成正则）：同为 `user-` 前缀时，若某租户 id 恰为 12/32 位十六进制串，新旧行在库内**完全不可区分**；换前缀后待迁移集合精确等于「两代凭据摘要形态」。② `user-` 是 overloaded 命名空间（实取 `agent_federation/api/monitor.py` `build_thread_id()` 的 `user-<uid>-session-<sid>` 兼容符号 + dev 模式客户端可自填）。③ 语义诚实：主体已定为租户，`user-` 名不副实（与本批「不为消警而 gaming」同源）。代价不当无副作用写破：会话 id 对外形态**第三次**变更（`user-<12hex>` → `user-<32hex>` → `tenant-<id>`），故兼容窗口与迁移必须同批交接。
+- **两个 app 签名级去凭据位**：`resolve_thread_id(client_thread_id)` **删掉 `api_key`/`api_key_header` 形参**（与 B7b-2 同构——留着形参就是留着缺口，CodeQL 的 Expensive 分支把**形参名即视为 password 源**）。agent_server 启用鉴权分支走 `resolve_thread_identity(server_tenant_id(get_settings().default_tenant_id))`（与 `import_router`/`sql_router`/`capabilities` 既有写法一致：ContextVar 断言优先，其次部署级 default）；**开发模式分支逐字不变**。`verify_api_key` 返回值仅作鉴权用途，不再参与身份派生；**不得**用 `req.tenant_id`（客户端可传 = 会话劫持回归）。
+- **联邦侧两个维度正交，不得合并成一条链**（原方案 §4.1/§6 混处的地方）：维度一「是否启用鉴权」决定**信任谁**（`API_KEY` 为空 ⇒ 一律 `client_thread_id or DEV_THREAD_ID`，逐字维持现状，三态完全不参与此分支）；维度二「主体来源三态」只在鉴权启用时求值：断言 ContextVar → `resolve_startup_tenant_mode()` 的 `single` → insecure（`DEPLOY_ENFORCE_IDENTITY=true` 抛 `PrincipalUndetermined` 由调用方兜为 401；未开启则退 `DEV_THREAD_ID` + **warn-once**）。**必须写破的等价性**：insecure→`DEV_THREAD_ID` 不砍 dev 多会话能力（那条能力活在维度一），与今天「同密钥共用一桶」相比**桶数不变（仍是 1）**，变的只是 id 形态；若把两维误合并（insecure 时无条件退共享桶），才会静默砍掉联调能力 ⇒ 用例双向锁住这两条。
+- **接线序对调（联邦，可独立回滚的最后一个 commit）**：`mount_identity_middleware(app)` 移到 `SecurityGuardsMiddleware` 注册**之后**（Starlette `add_middleware` 做 `insert(0, …)` ⇒ 后注册者更外层），并给 guards 传 `subject_provider=get_asserted_tenant_context`。修的是 B7b-2 登记的中间态：旧序下 guards 更外层、执行时租户尚未绑定 ⇒ **限流桶实为 IP 兜底**。行为变更写明并锁住：**伪造/过期 `X-Tenant-JWT` 的 401 会抢在 API-Key 401 之前**。
+- **迁移脚本改枚举式**（因删 `derive_thread_id` 而被迫同批）：`--api-key` → `--principal`（空则 `exit 2`），导入仅剩 `resolve_thread_identity`，**脚本内零 hashlib/hmac**（AST 用例锁）。判别式：`^user-[0-9a-f]{12}$`（48bit legacy）或 `^user-[0-9a-f]{32}$`（128bit），两代都是凭据派生都要重挂；`user-` 开头但不命中正则的**一律不动并列入人工核实**（实取两类来源：`monitor.build_thread_id()` 兼容形式、dev 自填如 `user-x`）。DB 侧：PG 的 `LIKE` 不认正则 ⇒ `LIKE 'user-%'` 取候选 + Python 侧正则定案（宁可多捞再筛），只**打印**三张 checkpoint 表的绑定变量 `UPDATE`、**不代执行**（沿用现脚本「CI 无 PG 故不把未验证写操作固化」的安全边界）；默认 dry-run，兼容窗口内旧目录**只读不删**。
+
+### PR-B（=B7b-5）：退役实现 + 门禁换代 + 文档同步
+
+- **删了全仓唯一的指纹实现**：`fingerprint` / `derive_thread_id` / `legacy_thread_id` / `ENV_SECURITY_PEPPER` / `MIN_FINGERPRINT_HEX` / `THREAD_ID_DIGEST_HEX` 及其在 `guardrails/__init__.py` 的转发导出；连带去 pepper 化（`.env.example` 段、`tests/conftest.py` 的 `_CLEARED_VARS`、agent-core README 环境变量表、TODO 部署项）。结果：**`guardrails/auth.py` 已不含 `hashlib`/`hmac` 一个字符**（不只靠人眼看）。
+- **门禁换代（横切三层齐备的第三层）**：P6-1 白名单**置空**（kernel 单一实现已不存在，继续留着就是留着缺口）+ 新增 P6-3「四个已退役入口名（`fingerprint`/`derive_thread_id`/`legacy_thread_id`/`_hash_api_key`）以调用或定义形式再现即失败」，判定抽成单行函数以便反例单测（沿用 `_is_bare_secret_hash_line` 的做法）；P6-2（「弱派生只允许迁移脚本调用」）随被治理对象消失而作废。**这是「被治理对象消失 + 门禁换代」，不是删用例凑绿**：`test_p6_2_*` 的同等语义由 `test_p6_3_*` 逐条承接（正例 5 / 反例 4 / 全仓零违规 / tmp_path 三处探针无豁免位）。
+- **自撞一次（新门禁立刻生效的证据）**：P6-3 首跑就报了 4 处——全在本批自己写的 docstring 里（`derive_thread_id(api_key)`、`key:{fingerprint(provided)}` 这种「名字 + 左括号」形式）。处置不是给自家开白名单，而是把文案改成不含 ASCII `name(` 的等价表述 ⇒ 门禁对所有人（包括写它的人）一致。
+- **文档同步面**：`packages/agent-core/README.md`（模块表 + 环境变量表去 pepper，改成一段「为何不再登记」）、`ARCHITECTURE.md`（§2.3 全局装配补**接线序属装配语义的一部分**、B7b 关系由「不重叠」改「已合流（会话身份是本层的消费者）」、门禁表 P6/P6-2 → P6/P6-3）、`docs/TODO.md`（§5 两条新登记 + §8 部署项改枚举式运维交接）、联邦 `docs/production-action-plan.md` §1.5（本批实际落地推翻该节原拟的 `uuid5(api_key)`，就地标「不得照抄」，保留历史意图）。`docs/plans/*` 与旧 CHANGELOG 条目为历史快照，不改写（只在新段与方案尾补后记）。
+
+### 测试（函数数相对 base `121f93e` 实取；本批落为两个 commit：主体 `55ac9f0` + 接线序对调 `1421b0f`）
+
+`tests/governance/test_auth.py` **6 → 8**（三个 `resolve_thread_id` 用例按新契约改写 + AST 签名守门参数化两 app）、`tests/governance/test_thread_identity_migration.py` **18 → 28**（枚举判别式/人工核实/幂等/不并挂/P6-3 正反例）、`packages/agent-core/tests/test_guardrails_fingerprint.py` **17 → 13**（删 8 个指纹用例，格式/区分度用例迁给 `resolve_thread_identity`，新增字符集 fail-fast + 单射性；AST 语义门禁由 `{derive_thread_id}` 收到 `== set()` 并**扩展**为「模块内 `hashlib`/`hmac` 的 import 与属性调用为零」）、`test_llm_registry_cache.py` 11 → 11（去 pepper 依赖，断言改为穷举 6 种摘要算法 × 全量/`[:12]`/`[:32]` 的否定式，**加严非收窄**）、联邦 `tests/test_auth.py` **5 → 10**（含 insecure 三态两例 + dev 多会话双向）、`test_file_endpoints.py` 14 → 14（3 处 `monkeypatch` 改单参）；新建 `tests/unit/test_identity_guards_order.py` **8**（2 个 AST 接线序门禁 + 6 个行为用例）。
+
+- **一条实测推翻的判据假设（自纠，写下来以免后人重踩）**：原以为「伪造 JWT + 正确 API_KEY」能区分新旧接线序。实跑发现旧序**同样**得到 identity 401（guards 虽更外层但凭据正确就放行，仍会进入内层 identity）⇒ 该组合不是判据。真正能区分的是另两条：① **两侧凭据都非法**时的 401 归属（新序 identity 先拒 / 旧序 guards 先拒）；② **合法 JWT + 正确 key 时 guards 看到的主体**（新序 `["tenantA"]` / 旧序 `[None]`，后者直接命中 B7b-2 登记的中间态）。用例已按此重构，两个方向各一个锁。
+
+### 验证（均为本机实跑）
+
+- 门禁：`ruff check .` `All checks passed`；`scripts/lint_architecture.py` **13 条全 rc=0**（新文案：“无裸 hashlib 作用于密钥类标识，且已退役的「凭据→摘要」入口名零再现”）；`scripts/check_doc_sync.py` **0 警告**；改动文件 `py_compile -W error::SyntaxWarning` 零告警（修过一处 `\w` docstring 转义）。
+- **合入前 CodeQL pre 面基线已实取（b3 的前半，脚本 `.codeartsdoer/temp/verify_main_b7b4.py --preflight`）**：`refs/heads/main` open **恰 `[38, 39]`**；base `121f93e` 自己那条 analysis（`1880957872`，results=2）给出 2 个 sink = `auth.py:103 in fingerprint()`（#38）与 `auth.py:128 in legacy_thread_id()`（#39）；按源码文本计的通路标记命中：**链① 合计 21 处**（弱摘要 8 + 摘要位派生 13）、kernel 摘要入口 11 处、**链② 0 处** ⇒ 双向断言的 pre 侧成立（合入后取到 0 才是本批起效，而非“本来就没扫到”），且链② 在 B7b-2（`76589c4`）的闭合到当前 base **未回退**。
+- **两条新踩的取证坑（已写进脚本注释）**：① analysis 按 SHA 匹配必须用**前缀**——`git rev-parse --short` 给 7 位（`121f93e`）而 API 给 40 位，旧脚本式 `[:8] == sha` 恒假，表现为“取不到 analysis”这种像是没扫描的假象；② **`gh auth status` 不可当门禁**——本机实测在 `api.github.com` 传输层 `EOF` 时它报“token is invalid”退出 1，而同一个 token 在三分钟前的调用刚成功；据此把脚本改成真实调用 + 重试，并按 stderr 把**传输失败**与**凭据失效（401/Bad credentials）**分开报出，前者退 2 且不出结论。
+- **十个 pytest session 逐条对齐 Makefile `test` 目标（数字在最终 tip `1421b0f` 重取）**：根 **935 passed / 8 skipped / 28 deselected**、shared-schemas 28、agent-runtime **594 / 1 skipped**、agent_server/tests 44、联邦 **176**、kefu 43、exhibition **348 passed / 0 skipped**、knowledge-service **402 / 7 skipped**、nl2sql 18、`--extra otel tests/observability` 15；另跑两个不在 `make test` 里但本批直改的目录：`tests/governance` **266 passed**、`packages/agent-core/tests` **349 passed / 8 skipped**。启发式 eval **15/15 = 100%**。十个 session 的 rc 全为 0（唯一例外见下条）。
+- **账面订正（不掩盖旧数字的错误）**：本段上一版写的「根 932 / 6 skipped」「exhibition 347/1」「knowledge-service 396/13」「agent-core 347/8」是**中间工作态**的数（当时 `test_thread_identity_migration.py` 的 P6-3 换代与 agent-core 指纹用例改写尚未全部落完），把它们当作本批结论属账面缺陷 ⇒ 现已换成在 commit 后的树上重跑一次的数字（总收集数不变，只是 skip↔pass 与新用例数发生漂移）。
+- **一次性未复现的红（不得当作已验，也不得当作已排除）**：包装脚本连跑十个 session 时，knowledge-service session 报 **rc=1 / 387 passed / 7 skipped / 15 errors**；同一命令随后 **5 次独立复跑均 402 passed / 7 skipped**（含一次单文件跑）。定性线索：15 个 errored 项恰为正常应 PASS 的 unit 用例（387 + 15 = 402），且报的是 **ERROR**（fixture 装配阶段）而非 FAIL ⇒ 不像本批引入（本批未改 ks 任何文件，且 ks 的 7 个 skip 全是 `ZHIKU_INTEGRATION` 设计内守卫）；已排除环境泄漏（`powershell -File` 子进程实测无 `ZHIKU_INTEGRATION`，User/Machine 级也无）。**根因未定**，因为包装脚本只保留每 session 末 3 行 ⇒ traceback 丢失（教训已转 `docs/TODO.md` §5：验证包装必须落完整日志，否则一次性红无从定性）。CI（Linux）为本批权威判据，push 后以 `gh pr checks` 为准。
+- **订正方案 A-6 给的一条命令（不可执行，不是环境问题）**：`uv run pytest tests/governance packages/agent-core/tests applications/agent_federation/tests -q` 在收集期即崩：`ValueError: Plugin already registered under a different name: …/agent_federation/tests/conftest.py=<module 'tests.conftest'>`。这正是 Makefile 注释写的拆 session 理由 ⇒ **分 session 跑是唯一正确做法**，后续接任务的人不要再试合并命令。
+- **未验面（不得当作已验）**：`tests/ha`（真 PG + 真多实例）在本机被 conftest 以 `win32` 硬跳过 ⇒ 属设计意图而非失败，需时在 Linux 容器按 `docs/operations/testing-playbook.md` 最小配方补跑。
+- **一次假红（与本批无关，已登记）**：`test_identity_middleware.py::test_forged_internal_header_rejected` 首次跑出 FAILED，随后 5 次全绿。根因非本批（该文件与 `identity*` 均不在本批 diff 内）：伪造方式是「把末尾 2 个 hex 换成 `ff`」，而签名 = HMAC(含时间戳的 payload)，若真签名末尾恰为 `ff` 则**伪造串 == 合法串** ⇒ 得 200 而断言 401（约 1/256）。修法与证据已入 `docs/TODO.md` §5，本批未动（不扩大爆炸半径）。
+
+### 取证未拿到与运维交接（不得美化）
+
+- 方案 §9 的两条部署侧核实（`updated/`/`output/` 目录 + `SELECT DISTINCT thread_id`）**至今拿不到**（126 的 22 端口在 banner 交换前被关闭；本机再确认无 `kubectl`、无 `~/.kube/config`、无 docker/`.env`，集群侧跳板在本地也不存在）。**本批的缓解不是补到数据，而是换策略**：迁移改枚举式 ⇒ 其正确性不依赖存量数量（存量为零则空转），故不再拿它当开工闸门。
+- 仍属未取证的两项（已入 `docs/TODO.md` §8 运维交接项）：① 存量是否非零；② 该部署历史上是否存在过多个密钥（枚举法会把同一部署的历史多把密钥视作同一主体）。⇒ **不得表述为「迁移已验证」**；兼容窗口内旧目录只读不删，运维在可达环境先 dry-run 再定。
+- 等价性两面都记账：今天 `API_KEY` 每部署一把 ⇒ 持同一密钥的客户端**本就共用一个 thread 桶**，改「按断言租户」不新增会话分裂；但旧 `user-<digest>` 会话/checkpoint **需运维执行枚举迁移后才可见**。
+
+### 验收（合入后实跑，不拿本批自报当结论）
+
+两条硬判据必须在 `refs/heads/main` 实取（PR 绿 ≠ 主干绿）：`#38`、`#39` 均 `state=fixed` 且 `dismissed_at`/`dismissed_by`/`dismissal_reasons` 全 `None`、`state=dismissed` 恒为 **0**；链① 具名节点（`def derive_thread_id` / 旧摘要入口）在全部 `codeFlows` 上**归零**，并**双向断言** pre 面 > 0（通路条数不作判据——单 sink 聚合多链、单链又枚举成多源，B7b-2 已踩过）；`created_at` 晚于合入时刻的新告警 0、全仓最大告警号不增；同规则在 `auth.py` 或任何其它文件重现即判未修。另附仓级可复跑判据：`git grep -n "hashlib\.\|hmac\." packages/agent-core/agent_core/guardrails/auth.py` 为空。判据脚本复用 `.codeartsdoer/temp/verify_main_b7b2.py`（改 SHA）。
+
 ## 分支处置收尾：PR #53/#54/#56 落账、7 条 ref 删除清零、pypdf 8 条 high 告警主干闭合（2026-10-02）
 
 > 类型：纯治理/卫生（零产品源码改动；依赖版本变更由 PR #51 单独承载）。台账：`docs/plans/plan-branch-disposition-2026-10-01.md` **§9**（本轮全部取证与判据订正均在彼处）。
