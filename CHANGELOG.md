@@ -2,6 +2,15 @@
 
 本仓库为 uv workspace monorepo。**唯一受支持的安装/运行入口是根 `uv.lock` + `uv sync`**，子包不再维护独立 `uv.lock`（见 v2 修复 #14）。
 
+## B7b 尾项：identity 中间件 flaky 用例定性并修复（仅测试代码，2026-10-03）
+
+> 来源：`docs/TODO.md` §5 登记的「1/256 概率假失败」，修法当时已定型（不属 `#38`/`#39` 通路，故 B7b 主批为不扩大爆炸半径而未动）。
+
+- **根因**：`test_forged_internal_header_rejected` 用 `val[:-2] + "ff"` 构造伪造内部头，而签名 = HMAC(含时间戳的 payload) 每秒一变 ⇒ 真签名末尾恰为 `ff` 时伪造串 == 合法串，中间件正确返 200，用例断 401 就假失败。
+- **改法**：末尾 hex 换成 `"11" if val.endswith("00") else "00"`，并加前置断言「伪造串必与合法串不同」。只破坏签名尾部、payload 与格式保持合法 ⇒ 401 仍必须来自**签名校验**而非格式报错；未删用例、未收窄断言。
+- **穷举证明**：对 256 种签名末尾取值全枚举，旧写法有 1 种（`ff`）使 `forged == val`，新写法 **0 种**。
+- **实跑**（计数附测量时点：在 commit 本身上重跑，非中间工作态）：`test_identity_middleware.py` **11 passed**；agent-runtime session **594 passed / 1 skipped**。CI（Linux）为权威判据。
+
 ## B7b-4 + B7b-5 实施：链① 会话身份主体化（PR-A）+ 死代码/门禁/文档收口（PR-B）（2026-10-02）
 
 > 类型：产品代码变更（安全契约）+ 迁移脚本重写 + 门禁换代 + 文档同步。方案：`docs/plans/plan-codeql-b7b-principal-thread-identity-2026-10-01.md`（§8 三项已拍板；§9 取证受阻的**实施后记已就地补在彼处**）。闭合目标：`#38`（链①）、`#39`（`legacy_thread_id`）。硬约束（继承用户定调）：**不引入任何 `false_positive`/`wont_fix`**，只认 `state=fixed` 且 `dismissed_at`/`dismissed_by`/`dismissal_reasons` 全 `None`；不换 scrypt/pbkdf2（能消警但按错误前提付热路径延迟）；不靠改名躲启发式（分类由名字驱动，改名即 gaming）。

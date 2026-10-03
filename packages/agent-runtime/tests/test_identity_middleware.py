@@ -97,7 +97,12 @@ def test_valid_internal_header_binds():
 
 def test_forged_internal_header_rejected():
     val = sign_internal_header("tenantB", None, key=HMAC_KEY)
-    forged = val[:-2] + "ff"
+    # 只破坏签名尾部 2 个 hex（payload/格式保持合法），且**按构造保证伪造串 != 合法串**：
+    # 旧写法固定换成 "ff"，而签名含时间戳每秒一变，真签名末尾恰为 "ff" 时
+    # forged == val ⇒ 中间件返 200，属 1/256 概率假失败（docs/TODO.md 已登记）。
+    tail = "11" if val.endswith("00") else "00"
+    forged = val[:-2] + tail
+    assert forged != val, "伪造串与合法串相同 ⇒ 本用例没在校验签名，判据失效"
     tenant, status = _run(
         {"verify": _verify, "verify_header": _vheader},
         {"X-Internal-Tenant": forged},
