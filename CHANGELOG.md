@@ -4,7 +4,7 @@
 
 ## 审计主体去凭据化（实施）：`operator` 改服务端断言租户 + 新 **P12** 门禁 + ks shim 契约用例（2026-10-03，单 PR）
 
-> 承接下一段（同日的只读审计 + 方案）。Q1–Q4 已拍板「按建议四项全部实施」，ks 守卫用例「落」。方案：`docs/plans/plan-audit-operator-principal-2026-10-03.md`。**测量时点：HEAD `ffd86ab` 之上的本工作树（未 commit），extras 形态两种都实跑**（见「验证」条）。
+> 承接下一段（同日的只读审计 + 方案）。Q1–Q4 已拍板「按建议四项全部实施」，ks 守卫用例「落」。方案：`docs/plans/plan-audit-operator-principal-2026-10-03.md`。**测量时点：HEAD `ffd86ab` 之上的本工作树（未 commit），extras 形态两种都实跑**（见「验证」条）。**后续状态**：已 commit（`116d51b`）→ PR #61 → 合入主干（`bb2b9a8`），合入与主干复验见 §6。
 
 ### 1. 代码改动（4 文件，均产品代码；schema 不变、无 migration）
 
@@ -44,10 +44,33 @@
 ### 5. 验收对照与未闭合项（不美化）
 
 - 方案 §6 判据 1–5 **本地已达**；判据 1 的表述按实取订正：`git grep "operator = api_key"` 在**码面** 0 命中，唯一命中是 lint docstring 里引着旧形状的那句说明；`session_router.py` 剩余的 `api_key` 字样只有 import 的 `verify_api_key`（依赖本体）与 docstring 叙述，**无任何名为 `api_key` 的形参**。另实取全 `applications/**` 已无 `api_key=Depends` 残留（0 命中）。
-- 判据 6「主干面」与判据 7 的 commit/PR **尚未执行**：本批只到「本地最终树全绿 + 账面入库」，合入后 `refs/heads/main` 重扫 open=0/dismissed=0 不回退仍待取（PR 绿 ≠ 主干绿）。
+- 判据 6「主干面」与判据 7 的 commit/PR——**本段初稿写为「尚未执行」，已由 §6 实取覆盖**（PR 绿 ≠ 主干绿，主干面另取）。
 - **P12 不得被汇报成「凭据不入审计已有全局完备门禁」**：名匹配抓不到别名间接流（本项缺陷本身就是人工发现的）、抓不到 `return` 等外流形状，kernel 侧归 P6。
 - 部署侧存量 `revert_audit.operator` 历史行**仍未取证**（本机三条通道不通），代跑命令在 `docs/operations/audit-operator-principal-runbook.md`；旧审计行**不自动改写**（Q3 拍板 (a)：不静默销毁痕迹）。
 - ks 一次性 15 errors **本批未定性为已解释**：它仍未再现（现累计 2×10 session 批量 + 5 次 ks 单 session + 契约用例两种形态各 1 次），本批落的是「再发生时立刻指向契约」的守卫，不是根因结论。
+
+### 6. 合入与主干复验（判据 6 实取，2026-10-03）
+
+- **L3 深度安全评审**：**0 findings**（在 commit 之后、push 之前实取）。
+- **链路**：commit **`116d51b`**（12 files，+934/−8）→ **PR #61** → 本仓自有门禁全 pass（`gh pr checks 61` 七行：`ci`×2、`assembly`×2、`Analyze (python)`、`Analyze (actions)`、`CodeQL` 汇总 check-run `111208049019` title「No new alerts in code changed by this pull request」、annotations **0**）→ **merge commit `bb2b9a8`** @ `2026-10-03T13:09:29Z`。
+- **merge 未夹带 PR 外内容**：`bb2b9a8` 的 tree OID `7ecbdff3f333b04b3ac09cb15b85573607660eca` 与 PR head 树**逐字全等** ⇒ §4 表里在「HEAD `ffd86ab` 之上的本树」跑出的全部计数，现在合法地适用于主干 tip（按 §2.1/§2.2「计数必须附 sha + extras 形态」的口径，sha 即 `116d51b` ≡ 树 `7ecbdff3…`）。
+- **判据 6 逐条实取**（脚本 `.codeartsdoer/temp/verify_main_p12.py`，七项均 fail-closed：查不到即判未达成，不「查不到当通过」）**总体 PASS**：
+
+| 项 | 实取结果 |
+|---|---|
+| [A] 主干确已重扫 | analysis `1885966935`（`/language:python`）@ `13:10:46Z`、`1885965733`（`/language:actions`）@ `13:10:02Z`；两者 `commit_sha = bb2b9a8…`、`ref = refs/heads/main`、CodeQL `2.27.1`，`results_count` **均为 0**（规则数 43 / 17） |
+| [B] open | **0** |
+| [C] `dismissed_at` 非空 | **0**（告警总数 46；逐条判 `dismissed_at` 字段，**不用** `?dismissed=` 过滤参数） |
+| [D] 全仓最大告警号 | **48**（= 合入前基线，不增） |
+| [E] 合入时刻后新建告警 | **0** |
+| [F] 主干 push 的 checks | `ci` / `assembly` / `Analyze (python)` / `Analyze (actions)` **全部 completed / success** |
+| [G] 同 tip 其余 check-run | **0 个**（非 success 也 0）——脚本已改为**不设白名单**：任何额外非 success 的 check-run 一律逐条报红，未定性即总体判未达成 |
+
+- **对判据 6 本身的两处表述订正（写计划时没实跑留下的偏差，不改判据强度）**：
+  - 原写「`ci`/`ha`/`assembly` success」中的 **`ha` 在本批根本不应出现**：`ha.yml` 的触发路径是 `packages/**`・`tests/ha/**`・`scripts/ha_real_kill_verify.py`・`Makefile` 等，而本批只改 `applications/**` + `scripts/lint_architecture.py` + `tests/governance/` + docs ⇒ **按路径过滤未命中，不触发**（push 与 PR 两个触发块同构），属「不适用」而非「漏跑」（旁证：近 300 次 run 窗口内 `agent-platform-ha` **48/48 success**）。真正该看的是 `ha-assembly.yml` 的 `assembly` job（它的 `paths` 含 `applications/**`），已在位并 success。下次按字面去找 `ha` 会误判为回退。
+  - **PR head 上确实有一条非本仓门禁的红**，不记就是掩盖：commit `116d51b` 的 check-runs 里除上述 7 项外还有 `github-advanced-security`（app=github-actions）conclusion=**failure**——它**不是仓内 workflow**（按文件名查 404），而是 GitHub 自家的 `Code scanning AI findings on PR #61`（`event=dynamic`）。逐层取到 job `111207991148` 日志定性：失败步 `Processing Request (Linux)`，异常为 **`SessionModelError: You have exceeded your monthly quota`，`statusCode: 402`、`errorCode: "quota"`**（即 Copilot 月度配额耗尽）。**非本批引入**：近 300 次 run 窗口内它对 **#33〜#61 几乎条条 failure**（仅 #45〜#47 短暂 success），#58/#59/#60 均同样红且均正常合入；它**不属必需检查**（未阻断 merge）、**仅 PR 触发**（主干 tip 无此 job）。⇒ 它不是门禁失败，但也不得被称成「全绿」；已作为外部条件依赖项登记 `docs/TODO.md` §8（原因在 GitHub 侧配额，本仓无法修）。
+
+- **三条 API 踩坑登记**（目的：让下一轮不会把「查不到」误读成「通过」）：① `?dismissed=true` **不是** code-scanning alerts 的有效过滤参数，它原样返回全部 46 条，险被误读成「dismissed = 46」；② `gh api -X` 的语义是 HTTP method，用它传 `ref=` 会静默走错（参数须写进路径 query string）；③ `commits/{sha}/check-runs` 带 `-f per_page=50` 时偶发 HTTP 404，去掉即可。另记一条同类坑：`code-scanning/analyses` 列表里 `commit_sha` / `ref` / `results_count` **在顶层**，没有 `most_recent_instance` 字段——按错路径取会得到空值并被误读成「重扫未绑定新 tip」，所以脚本已改成**按 sha 绑定判定**（仅时间晚于合入不够）。
 
 ## B7b 收尾衍生项：审计主体去凭据化（只立方案）+ ks 一次性 15 errors 定性 + 部署侧取证 runbook（**纯取证/文档，未动一行产品代码**，2026-10-03）
 
