@@ -114,8 +114,11 @@ agent-core  agent-runtime  shared-schemas  agent-server  agent_federation  exhib
 | P9 | app 层禁裸调 `monitor.report_tool*`（散点埋点） | 工具观测断点（v3 合流并入） | — |
 | P10 | 禁 `from tools.*` 直引 `@tool` 绕过 `get_tool()` | 同上（v3 合流并入） | — |
 | P11 | 根 `.github/workflows/*.yml` 必须声明顶层 `permissions:` 块 | `actions/missing-workflow-permissions`（GITHUB_TOKEN 未限权） | `tests/governance/test_workflow_permissions_governance.py` |
+| P12 | 绑 `Depends(verify_api_key)` 的形参**值不得作为任何 `Call` 的实参外流**（仅扫 `applications/**`，无白名单） | 凭据被当审计主体/日志字段（**CodeQL 未报**，人工语义审计发现） | `tests/governance/test_audit_operator_principal.py` |
 
 P11 只认顶层块：未声明 `permissions` 的 job 会回落到组织/仓库默认（常为读写），job 级声明易漏且不可核。背景与判定口径见 `docs/plans/plan-codeql-batch7-no-dismiss-real-fixes-2026-10-01.md` §7。
+
+P12 是**名匹配粗筛**，不得当作「凭据不入审计」的全局完备门禁：抓不到「先赋给别名/属性再传」的间接流，也抓不到 `return` 等其它外流形状；kernel 侧对凭据的处理归 P6。行为面由上表用例与人工语义审计补齐。背景见 `docs/plans/plan-audit-operator-principal-2026-10-03.md` §4.3。
 
 ## 5. 当前已知技术债（登记，非本期处理）
 
