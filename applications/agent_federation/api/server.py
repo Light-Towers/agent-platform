@@ -43,6 +43,7 @@ API_KEY = os.getenv("API_KEY", "")
 KNOWLEDGE_SERVICE_URL = os.getenv("KNOWLEDGE_SERVICE_URL", "")
 
 from api.auth import PrincipalUndetermined, resolve_thread_id
+from api.context import get_asserted_tenant_context
 from api.identity_bridge import mount_identity_middleware
 
 _HAS_SECURITY_GUARDS = False
@@ -143,8 +144,8 @@ app.add_middleware(
 )
 
 # ADR-0007 决策2=B1：从专用头 X-Tenant-JWT 断言租户（与 Authorization: Bearer <API_KEY> 传输鉴权并存）。
-# 未配验签公钥/无该头时 observe 透传，零行为变更。
-mount_identity_middleware(app)
+# 未配验签公钥/无该头时 observe 透传，零行为变更。挂载点在本文件下方 guards 注册之后
+# （B7b-4 接线序对调，理由见那里的注释：Starlette 里「后注册者更外层」）。
 
 _ALLOW_NO_AUTH = os.getenv("DISABLE_AUTH", "false").lower() in ("1", "true", "yes")
 
@@ -155,6 +156,10 @@ if _HAS_SECURITY_GUARDS and API_KEY:
         rate_limit_per_client=int(os.getenv("RATE_LIMIT_PER_CLIENT", "30")),
         rate_limit_global=int(os.getenv("RATE_LIMIT_GLOBAL", "200")),
         exempt_paths=("/health", "/ws/"),
+        # B7b-2 主体注入：限流桶用**服务端已断言的租户**而非客户端 IP/凭据摘要。
+        # 必须用 get_asserted_tenant_context（无断言返 None ⇒ 退回 IP 桶），而**不是**
+        # get_tenant_context（它把未断言也读成 "default"，会把所有未断言请求并成一个主体桶）。
+        subject_provider=get_asserted_tenant_context,
     )
 elif _ALLOW_NO_AUTH:
     logger.warning(
@@ -184,6 +189,14 @@ else:
         from fastapi.responses import JSONResponse
 
         return JSONResponse(status_code=401, content={"detail": "API key required"})
+
+# 【B7b-4 接线序对调】必须留在 guards 注册之后：Starlette 的 user_middleware 列表「后注册者更
+# 外层」，旧代码在本行之前挂载 identity ⇒ guards 跑在身份之前，限流取主体时租户尚未绑定、
+# 实质始终退回 IP 桶（B7b-2 §4.2 补记第 3 条登记的中间态）。现在 identity 更外层：先绑定
+# 主体、再进 guards。
+# 行为变更（两个方向均由 tests/unit/test_identity_guards_order.py 锁住）：伪造/过期
+# X-Tenant-JWT 的 401 从此抢在 API-Key 401 之前（身份断言优先于传输鉴权，与 ADR-0007 信任链一致）。
+mount_identity_middleware(app)
 
 _concurrency_semaphore = asyncio.Semaphore(int(os.getenv("MAX_CONCURRENT_TASKS", "10")))
 
