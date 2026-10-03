@@ -117,7 +117,7 @@ result = await revert_handler.revert(operator, req.session_id, req.checkpoint_id
 | 3 | 新用例：`operator == server_tenant_id(...)` 且 `!= api_key` 全绿 | `uv run pytest tests/governance -q` |
 | 4 | 受影响 session 全绿：governance（根 session 内）、agent-runtime（`test_revert.py` 未动断言方向）、agent_server | 按 AGENTS 分层验证 |
 | 5 | `ruff check .` / `check_doc_sync.py` exit 0 | 本地 |
-| 6 | **主干面**：合入后 `refs/heads/main` 重扫 `open=0 / dismissed=0` 不回退，`ci`/`ha`/`assembly` success（PR 绿 ≠ 主干绿） | `gh api` 实取 |
+| 6 | **主干面**：合入后 `refs/heads/main` 重扫 `open=0 / dismissed=0` 不回退，`ci`/`assembly` success（PR 绿 ≠ 主干绿）；**`ha` 已删——本批不命中 `ha.yml` 的触发路径，属「不适用」而非「漏跑」**（写在本行原文里会让人下次去找一个不会存在的 check） | `gh api` 实取 |
 | 7 | 账面：CHANGELOG 新增本批段 + `docs/TODO.md` L73 转 `[x]`（附测量时点 sha） | 人工 |
 
 ## 7. 未取证 / 风险登记（不美化）
@@ -137,11 +137,16 @@ result = await revert_handler.revert(operator, req.session_id, req.checkpoint_id
 
 **拍板结果（2026-10-03）**：Q1–Q4 **均按建议选项全部实施**（单 PR 做完）；同批追加一项用户拍板：ks shim 守卫用例「落」。
 
-## 9. 实施后记（2026-10-03，本地验收完成；主干面待合入后取）
+## 9. 实施后记（2026-10-03，本地验收 + 合入 + 主干复验均已完成）
 
 - **实际落地**：`session_router.py`（`operator = server_tenant_id(settings.default_tenant_id)` + `_auth=` + docstring）、`import_router.py:28` / `sql_router.py:21`（`_auth=`）、`scripts/lint_architecture.py` 新增 P12（`main()` 接 `v14`）、`ARCHITECTURE.md` §4.1 登记行；新用例 `tests/governance/test_audit_operator_principal.py`（29）+ `applications/knowledge-service/tests/unit/test_tracing_reset_hook_contract.py`（8）。
-- **验收实取（命令逐条对齐 Makefile，extras 两种形态都跑）**：判据 1–5 **已达**——lint rc=0（14 条全过，单跑 253s）、ruff rc=0、docsync rc=0、根 session **964 passed / 8 skipped / 28 deselected**（基线 935 + 新文件 29）、runtime 594/1、agent_server 44、ks SDK 在场 **410/7** 与不在场 **404/13**（基线 402/396 各 +8 ⇒ 契约用例形态无关）。判据 6（主干重扫 open=0/dismissed=0）与判据 7 的 commit/PR **未执行**（本批只到账面入库）。
+- **验收实取（命令逐条对齐 Makefile，extras 两种形态都跑）**：判据 1–5 **已达**——lint rc=0（14 条全过，单跑 253s）、ruff rc=0、docsync rc=0、根 session **964 passed / 8 skipped / 28 deselected**（基线 935 + 新文件 29）、runtime 594/1、agent_server 44、ks SDK 在场 **410/7** 与不在场 **404/13**（基线 402/396 各 +8 ⇒ 契约用例形态无关）。判据 6 与判据 7 已达，证据见本节后文「判据 7（commit/PR）与判据 6（主干面）」条。
 - **§6 判据 1 的表述订正（写计划时没实跑留下的偏差）**：原写「`session_router.py` 无 `api_key` 名字」——实取后剩余命中是 `verify_api_key`（import 的依赖本体，**应该存在**）与 docstring 叙述；能被守门的是「**无名为 `api_key` 的形参**」与「凭据形参在体内完全不被引用」（后者已做成用例，比 P12 更严）。判据本身不改，但只能按订正后的形状验收。
 - **实施中发现的计划外事实（P12 首跑假阳性）**：fail-closed 用 `encoding="utf-8"` + `ast.parse` 会把仓内 **10 个已入库的 UTF-8 BOM** `nl2sql_service/**/__init__.py` 误报为「无法解析」（rc=1，10 条假红）。Python 源码加载器本身剥 BOM（PEP 263），这些文件 import 一直正常 ⇒ **不是架构违规，是读取约定不对**。已改 `utf-8-sig`，并新增两条用例锁住修正的边界（语法真坏仍报 / BOM 文件里的真外流仍报）。教训：**假阳性会把门禁的首批用户训练成“改宽它”**，其危害不低于漏报；新门禁首次实跑必须逐条看违规是不是真的。
 - **计划外顺带度量**：`lint_architecture.py` 单跑 **253s**（全仓 rglob + AST）——写自动化验证时需按此设超时，否则“前台无输出”会被误读为脚本挂住。
+- **判据 7（commit/PR）与判据 6（主干面）已达**：L3 深度安全评审 **0 findings** → commit `116d51b`（12 files，+934/−8）→ **PR #61**（本仓自有门禁全 pass，CodeQL check-run annotations 0；另有一条 GitHub 侧 AI findings 红，见下文订正）→ merge commit **`bb2b9a8`** @ `2026-10-03T13:09:29Z`；merge 树 OID `7ecbdff3f333b04b3ac09cb15b85573607660eca` 与 PR head 树全等（实取：`git rev-parse "116d51b^{tree}"` 与 `"bb2b9a8^{tree}"` 均为该值）⇒ 未夹带 PR 外内容，§4 的计数可直接归给主干 tip。判据 6 七项**全部实取、总体 PASS**：主干重扫确已按 sha 绑定跑在 `bb2b9a8` 上（analysis `1885966935` python @ 13:10:46Z / `1885965733` actions @ 13:10:02Z，`ref=refs/heads/main`，`results_count` 均 0）、**open 0 / `dismissed_at` 非空 0 / 最大告警号 48 不增 / 合入时刻后新建 0 / `ci`・`assembly`・两个 `Analyze` 全 success / 同 tip 其余 check-run 0 个**。取证据脚本：`.codeartsdoer/temp/verify_main_p12.py`（七项均 fail-closed，不「查不到当通过」）；详细表格与 API 踩坑（`?dismissed=` 不是有效过滤、`-X` 是 HTTP method、check-runs 带 `-f per_page` 偶发 404、analyses 列表的 `commit_sha` 在顶层而非 `most_recent_instance`）见 CHANGELOG「审计主体去凭据化（实施）」§6。
+- **判据 6 取证据时的两处实取订正（不改判据强度，只改字面）**：
+  - `ha`：**不触发是路径过滤的结果**——`ha.yml` 的 `paths` 是 `packages/**`・`tests/ha/**`・`scripts/ha_real_kill_verify.py`・`Makefile` 等，本批只改 `applications/**` + `scripts/lint_architecture.py` + `tests/governance/` + docs，故 push/PR 两个触发块均未命中；旁证为近 300 次 run 窗口内 `agent-platform-ha` 48/48 success。本批对应的 HA 门禁是 `ha-assembly.yml` 的 `assembly` job（`paths` 含 `applications/**`），已实取 success。原表已按此订正。
+  - PR head 上另有一条**非本仓门禁的红**：`github-advanced-security`（app=github-actions）= GitHub 自家 `Code scanning AI findings on PR #61`（`event=dynamic`，非仓内 workflow），job `111207991148` 日志实取为 **`402 / errorCode "quota"` 「You have exceeded your monthly quota」**；它对 #33〜#61 几乎条条 failure（仅 #45〜#47 success）、不必需、仅 PR 触发。⇒ 不规为本批缺陷，但也不得计入「全绿」；已登记 `docs/TODO.md` §8。取证据脚本已加 **[G]：同 tip 其余任何非 success 的 check-run 一律逐条报红，不设白名单**（白名单就是下一个被误读成「已定性」的黑洞）。
+- **本方案仍开开的只剩两条外部条件依赖项**：① 部署侧 `revert_audit.operator` 存量历史行取证（本机 docker/kubectl/SSH 三通道均不通，代跑命令在 `docs/operations/audit-operator-principal-runbook.md`）；② P12 的三条局限（别名间接流 / `return` 外流 / kernel 侧归 P6）是**设计内残留面**，不是待办项，不得被当成已闭合。
 - **未改变的本方案约束**：P12 仍是名匹配粗筛（§4.3 三条局限逐字成立，已同步到 `ARCHITECTURE.md` §4.1 与用例 docstring）；旧审计行不自动改写（Q3 (a)）；部署侧存量仍未取证（runbook 待运维代跑）。
