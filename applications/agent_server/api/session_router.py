@@ -18,14 +18,15 @@ async def history(
     keyword: str | None = None,
     limit: int | None = None,
     request: Request = None,
-    api_key=Depends(verify_api_key),
+    _auth=Depends(verify_api_key),  # 仅作鉴权闸门（B7b-4：会话身份不再从凭据派生）
 ):
     """精确回忆：按会话 thread_id 取回历史对话原文（优化 I）。
 
     与 /query 的语义召回（优化 H）正交：此处返回字面原文，支持关键词过滤，
-    用于「找到我之前某次聊天里具体说了什么」。需 api_key 鉴权。
+    用于「找到我之前某次聊天里具体说了什么」。需 api_key 鉴权（但鉴权值不参与
+    thread_id 派生，归属取服务端断言主体）。
     """
-    thread_id = resolve_thread_id(session_id, api_key)
+    thread_id = resolve_thread_id(session_id)
     checkpointer = getattr(request.app.state, "checkpointer", None)
     if checkpointer is None:
         raise HTTPException(status_code=503, detail="CHECKPOINTER_UNAVAILABLE")

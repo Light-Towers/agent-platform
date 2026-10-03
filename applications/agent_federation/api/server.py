@@ -42,7 +42,7 @@ from api.monitor import manager
 API_KEY = os.getenv("API_KEY", "")
 KNOWLEDGE_SERVICE_URL = os.getenv("KNOWLEDGE_SERVICE_URL", "")
 
-from api.auth import resolve_thread_id
+from api.auth import PrincipalUndetermined, resolve_thread_id
 from api.identity_bridge import mount_identity_middleware
 
 _HAS_SECURITY_GUARDS = False
@@ -188,12 +188,16 @@ else:
 _concurrency_semaphore = asyncio.Semaphore(int(os.getenv("MAX_CONCURRENT_TASKS", "10")))
 
 
-def _extract_api_key(request: Request) -> str | None:
-    """从请求头提取 API_KEY 原文（与 _require_api_key 校验逻辑一致）。"""
-    auth = request.headers.get("Authorization", "")
-    if auth.lower().startswith("bearer "):
-        return auth[len("Bearer ") :]
-    return request.headers.get("X-API-Key") or None
+def _resolve_thread_id_or_401(client_thread_id: str | None) -> str:
+    """HTTP 路由入口：主体不可断言 → 401（固定文案，不外泄推断细节）。
+
+    只兜 :class:`PrincipalUndetermined`：内核 ``resolve_thread_identity`` 的字符集 ValueError 是
+    部署配置错误（租户 id 含 ``:`` ``/`` 等），必须留在 500 语义而不是伪装成认证失败。
+    """
+    try:
+        return resolve_thread_id(client_thread_id)
+    except PrincipalUndetermined:
+        raise HTTPException(status_code=401, detail="UNABLE_TO_DETERMINE_IDENTITY") from None
 
 
 def _check_api_key(key: str | None) -> bool:
@@ -215,9 +219,8 @@ from agent.main_agent import run_deep_agent
 
 @app.post("/api/task")
 async def run_task(request: QueryRequest):
-    # 安全：API_KEY 启用时忽略客户端 session_id，按密钥派生稳定会话（防劫持 + 跨请求续接）
-    api_key = _extract_api_key(request)
-    thread_id = resolve_thread_id(request.session_id, api_key)
+    # 安全：鉴权启用时忽略客户端 session_id，按服务端断言主体派生稳定会话（防劫持 + 多个请求落到同一 thread）
+    thread_id = _resolve_thread_id_or_401(request.session_id)
     with start_span("api.task", attrs={"thread_id": thread_id}):
         async def _run():
             try:
@@ -237,11 +240,10 @@ async def run_task(request: QueryRequest):
 async def upload_files(
     files: list[UploadFile] = File(...),
     thread_id: str = Form(None),
-    request: Request = None,
 ):
-    # 安全：API_KEY 启用时忽略客户端 thread_id，按密钥派生，保证上传文件落到与对话同一会话目录
-    api_key = _extract_api_key(request) if request else None
-    safe_thread_id = resolve_thread_id(thread_id, api_key)
+    # 安全：鉴权启用时忽略客户端 thread_id，按服务端断言主体派生，保证上传件落到与对话同一会话目录
+    # （B7b-4：不再从请求头取凭据参与派生，故本路由不再需要 Request）
+    safe_thread_id = _resolve_thread_id_or_401(thread_id)
     # 会话目录名与文件名均经 kernel 单一实现净化 + safe_join 拼接（A 类 py/path-injection 收口）
     target_dir = safe_join(updated_dir, f"session_{safe_filename(safe_thread_id)}")
     target_dir.mkdir(parents=True, exist_ok=True)
@@ -328,8 +330,13 @@ async def websocket_endpoint(
     if not _check_api_key(api_key):
         await websocket.close(code=4001, reason="Invalid API key")
         return
-    # 认证启用时忽略 URL 中的 thread_id（不可信），按密钥派生，使 WS 桥接到与 /api/task 同一会话
-    ws_thread_id = resolve_thread_id(thread_id, api_key)
+    # 鉴权启用时忽略 URL 中的 thread_id（不可信），按服务端断言主体派生，使 WS 桥接到与 /api/task 同一会话
+    try:
+        ws_thread_id = resolve_thread_id(thread_id)
+    except PrincipalUndetermined:
+        # 与 API-Key 失败同用 close 语义（WS 不能 raise HTTPException）；reason 不带推断细节
+        await websocket.close(code=4001, reason="Unable to determine identity")
+        return
     await manager.connect(websocket, ws_thread_id)
     try:
         # Plan-F WS 出口统一：客户端发 {"type":"query","text":...} → 服务端经

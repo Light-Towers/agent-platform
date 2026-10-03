@@ -205,4 +205,6 @@ psql "$DATABASE_URL" -c "SELECT DISTINCT thread_id FROM checkpoints WHERE thread
 
 > **该取证至今未跑通（2026-10-02 登记）**：部署侧 `root@192.168.100.126` 的 TCP 22 可达，但连接在 **banner 交换前**被关闭（`kex_exchange_identification: Connection closed by remote host`）—— 发生在任何认证之前，与本地密钥/`authorized_keys` 无关，属服务端侧限制（fail2ban / `hosts.deny` / `MaxStartups` 一类）；跨约 25 分钟含 220s 与 8min 冷却共 4 次同签名后停止硬连。本机也无可用的替代路径：主 `docker-compose.yml` 不发布 5432，HA compose 只绑 `127.0.0.1:${HA_PG_PORT:-5433}`，且本机无 docker 无 `.env`。⇒ **B7b-4 开工前必须拿到这两条命令的真实输出**（存量 `user-*` 为零 ⇒ 无需迁移窗口；非零 ⇒ 按 §4.5 枚举重挂并保留只读兼容窗口），不得以推定代替数据。
 
+> **实施后记（2026-10-02，B7b-4/B7b-5 已开工并落地）**：上述「开工前必须实跑」的前置**至今仍未拿到输出**（本批开工前再试 1 次，同签名 `Connection closed by 192.168.100.126 port 22`；本机亦无 `kubectl` / `~/.kube/config`）。**本批的缓解不是补到数据，而是换策略**：把迁移改为枚举式，其正确性不依赖存量数量（存量为零 ⇒ 脚本空转），因此不再拿它当开工闸门。仍成立的未取证项（**不得表述为「迁移已验证」**）：① 存量是否非零；② 该部署历史上是否存在过多个密钥（枚举法会把同一部署的历史多把密钥视作同一主体）。两项已转为运维交接项入 `docs/TODO.md` §8（含 dry-run 先行与「兼容窗口内旧目录只读不删」）。另：本方案正文里的行号（如 `auth.py:92`/`:117`）已因后续加 docstring 位移，实施时一律重 grep 定位；新格式定为 `tenant-<id>`（而非本方案原写的 `user-` 保留前缀），理由与代价见 `CHANGELOG.md` 本批段。
+
 **本方案的取证记录**（否定式/数量断言均逐条 grep 实取）：`derive_thread_id` 生产调用点 = **2**；`server_user_id` 生产消费者 = **0**；`.github/codeql/` 配置文件 = **0** 个；`*.sql` 中 thread_id 列 = **0** 处；`updated/` 目录当前为空。

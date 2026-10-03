@@ -9,9 +9,6 @@ _CLEARED_VARS = [
     "SEARCH_API_KEY",
     "SQL_DSN",
     "API_KEY",
-    # 内核会话身份/限流指纹的服务端 pepper（agent_core.guardrails.auth）：
-    # 不隔离则本机 shell 里设过 pepper 时指纹与测试期望不一致。
-    "AGENT_PLATFORM_SECURITY_PEPPER",
     "EMBEDDING_API_KEY",
     "EMBEDDING_MODE",
     "LANGFUSE_PUBLIC_KEY",
