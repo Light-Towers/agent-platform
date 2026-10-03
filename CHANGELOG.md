@@ -46,9 +46,29 @@
 - 仍属未取证的两项（已入 `docs/TODO.md` §8 运维交接项）：① 存量是否非零；② 该部署历史上是否存在过多个密钥（枚举法会把同一部署的历史多把密钥视作同一主体）。⇒ **不得表述为「迁移已验证」**；兼容窗口内旧目录只读不删，运维在可达环境先 dry-run 再定。
 - 等价性两面都记账：今天 `API_KEY` 每部署一把 ⇒ 持同一密钥的客户端**本就共用一个 thread 桶**，改「按断言租户」不新增会话分裂；但旧 `user-<digest>` 会话/checkpoint **需运维执行枚举迁移后才可见**。
 
-### 验收（合入后实跑，不拿本批自报当结论）
+### 验收（已实取：PR #58 合入 merge `cf73396`@`2026-10-03T02:57:21Z`，以下均为合入后在 `refs/heads/main` 的实测值，脚本 rc=0）
 
-两条硬判据必须在 `refs/heads/main` 实取（PR 绿 ≠ 主干绿）：`#38`、`#39` 均 `state=fixed` 且 `dismissed_at`/`dismissed_by`/`dismissal_reasons` 全 `None`、`state=dismissed` 恒为 **0**；链① 具名节点（`def derive_thread_id` / 旧摘要入口）在全部 `codeFlows` 上**归零**，并**双向断言** pre 面 > 0（通路条数不作判据——单 sink 聚合多链、单链又枚举成多源，B7b-2 已踩过）；`created_at` 晚于合入时刻的新告警 0、全仓最大告警号不增；同规则在 `auth.py` 或任何其它文件重现即判未修。另附仓级可复跑判据：`git grep -n "hashlib\.\|hmac\." packages/agent-core/agent_core/guardrails/auth.py` 为空。判据脚本复用 `.codeartsdoer/temp/verify_main_b7b2.py`（改 SHA）。
+**PR 面（先证「没新增债」）**：`ci` pass（3m5s）、`ha` pass、`assembly` pass、`Analyze (python)` / `Analyze (actions)` pass、`CodeQL` pass 且文案为 `No new alerts in code changed by this pull request`（annotations=0）；PR 作用域 open 告警 `refs/pull/58/merge` = 0、`refs/pull/58/head` = 0。（`Analyze (python)` 那 1 条 annotation 是 GitHub runner 镜像迁移提示 `ubuntu-latest` → Ubuntu 26 on 2026-10-19，与本批无关。）
+
+**主干面（逐条对应原先写下的判据）**：
+
+| 判据 | 实取结果 |
+|---|---|
+| `#38` | `state=fixed`、`fixed_at=2026-10-03T02:58:40Z`、`dismissed_at`/`dismissed_by`/`dismissal_reasons` **全 `None`**、`closed_at=None` ⇒ 自动闭合而非人工 |
+| `#39` | 同上（`fixed_at` 同一时刻）|
+| 主干 `state=open` | **0 条**（合入前为 `[38, 39]`）|
+| 主干 `state=dismissed` | **0 条**（本批未用任何 dismiss，得证）|
+| 链① 具名节点（post）| **0 处**；merge commit 自己的 analysis `1884785964` **`results_count=0`** ⇒ 整条规则在主干不再报任何 sink |
+| 链① 具名节点（pre，双向断言）| base `121f93e` 的 analysis `1880957872`：**21 处**（弱摘要 8 + 摘要位派生 13）+ kernel 摘要入口 11 处 ⇒ post 的 0 具证明力 |
+| 链②/链③ 不回升 | post 均 **0 处**（pre 面链② 也已为 0，属 B7b-2 已断链的正常态）|
+| 最大告警号 | **48**（基线 48，不增）；合入时刻后新建告警 **0 条** |
+| 仓级可复跑判据 | `git grep -nE "hashlib\.|hmac\." packages/agent-core/agent_core/guardrails/auth.py` ⇒ **零命中** |
+
+- **重扫时序**：合入 `02:57:21Z` → 主干 analysis 落地 `02:58:40Z`（差 79 秒），告警 `fixed_at` 与之同刻 ⇒ 本仓本轮不需长时间等待；但「先确认 merge commit 自己的 analysis 存在」仍是必需步骤。
+- **退役名在 kernel 里仍可 grep 到 3 处**（`auth.py:17/28/61`）——全在解释「为何删掉它」的 docstring 散文里，不含 `name(` 形式 ⇒ 与 P6-3 门禁一致。后人若只 grep 名字会误判「没删干净」，故在此留标。
+- **复验脚本自纠两个自己写的假阴性守卫**（都是会让成功被判成失败的形状）：① 首版拿 `completed_at` 当「扫描是否落地」信号——**该 API 根本没有这个字段**（keys 实测只有 `created_at`/`error`/`sarif_id`/`results_count`/`rules_count`…），连早已跑完的 pre 面也报 `None` ⇒ 改为 `error is None` + `sarif_id` 存在；② 拿 `results_count > 0` 筛选 analysis——而「合入后零结果」正是要的成功态，该筛选会过滤掉 merge commit 自己那条 ⇒ 改为按 `results_count` 降序取首条并区分报告。
+- **ks 一次性 15 errors 在 CI（Linux）未复现**：主干 push 的 `ci` 为 `pass`（含 knowledge-service session）⇒ 仍维持「不复现、根因未定」的记录，**不升级为「环境问题」结论**（本地 5 次 + CI 1 次均绿只排除不了什么，只能说明未再现）。
+- **仍未取证（不得美化）**：部署侧会话存量迁移仍属运维交接项（见上节），告警闭合不等于迁移已完成。
 
 ## 分支处置收尾：PR #53/#54/#56 落账、7 条 ref 删除清零、pypdf 8 条 high 告警主干闭合（2026-10-02）
 
