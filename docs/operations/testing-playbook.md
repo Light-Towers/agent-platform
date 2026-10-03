@@ -33,6 +33,34 @@
 1. **完整输出先落盘，汇总只是它的衍生物**。批量脚本里 `$out = cmd; $out | Select -Last 3` 这种写法会在内存里丢弃前文：一旦某 session 报 `15 errors`（ERROR = fixture 装配阶段，详情只在 traceback 里），现场就永久丢了，只剩"复跑 5 次均绿"这种无法定性的陈述。正确形状：`cmd > log 2>&1` 后再从 `log` 取尾行（或 `Tee-Object -FilePath`），并给 pytest 加 `-rf --tb=short` 以便失败项带名字与原因。
 2. **计数必须附带「在哪个 sha 上跑的」**。同一批测试在「中间工作态」与「commit 后的树」上 passed/skipped 常不同（新用例逐次落盘、skip↔pass 翻转都算），凭记忆写进账面的旧数字会被后人当真理。⇒ 任何「全量已绿」的声称后面要能回答：此数字对应哪个 commit？是否就是待 push 的那个 tip？
 
+### 2.2 计数还必须附「extras / venv 形态」——同一 sha 合法存在两套数字（2026-10-03 实取）
+
+§2.1 第 2 条只说「附 sha」并不充分：本仓 venv 由 uv 就地精确同步，**extras 状态会随命令序列翻动**，同一 commit 同一目录能跑出两种「全绿」计数。
+
+实取证据（Windows 本机 `.venv`）：
+
+| 动作 | 实测输出 | 对 ks session 的后果 |
+|---|---|---|
+| `uv sync --dry-run --all-packages --extra dev` | `Would uninstall 10 packages`，逐条为 `opentelemetry-*`（sdk / exporter-otlp / proto / semantic-conventions，仅 `opentelemetry-api` 留存） | —— |
+| `uv sync --all-packages --extra dev`（= `make install`） | 真的卸载，`uv pip list` 只剩 `opentelemetry-api` | `396 passed, 13 skipped` |
+| `uv run --extra otel pytest tests/observability`（Makefile session 10） | `Installed 8 packages` | `402 passed, 7 skipped` |
+
+差的 6 条正是 `applications/knowledge-service/tests/unit/test_tracing.py` 里 `@requires_sdk` 守卫的用例（`15 passed` ↔ `9 passed + 6 skipped`），skip 数随之 `7 ↔ 13`。**这两个数字都是真的**，把它们当成「计数漂移」是账面噪声的一半来源（TODO §5 已登记项）。⇒ 声称「某 session 全绿」时，除 sha 外还要说清 extras 形态（一句话即可：`SDK 在场` / `make install 后默认形态`）。
+
+**纪律**
+1. 诊断性复跑（为定性一次红而反复跑同一 session）一律 `uv run --no-sync pytest …`：不碰 venv，保证各轮可比。
+2. 改依赖后显式 `uv sync --all-packages --extra dev [--extra otel]`，并在账面记录该形态。
+3. **绝不与正在运行的 pytest 批量并发执行 `uv sync`**：uv 会就地删装包文件，已启动的进程在后续 import 时会看到消失的模块——这正是「一次性、不可复现的装配期 error」的典型来源。
+
+### 2.3 用计数算术把「一次性红」收窄到唯一站点（ks 15 errors 实操范式）
+
+拿到 `387 passed / 7 skipped / 15 errors` 这类只报数字不报现场的旧账时，按此三步，不必猜测：
+
+1. **对齐总数**：`--collect-only -q` 实取 collected（ks = 409）。若 `passed + skipped + errors == collected` 与全绿形态的 `passed + skipped` 相等 ⇒ 集合没变，失败形态是「同一集合里恰好 N 条在 **setup 阶段 error**（不是 fail）」。
+2. **按文件分组数用例**：找「恰好 N 条」的文件（ks 全 suite 中唯一 15 条的文件 = `tests/unit/test_tracing.py`），再看该文件是否共用同一个 autouse fixture（ks 为 `_reset_tracing`，前后各调一次 `tracing._reset_for_tests()`）——autouse fixture 抛错即精确复现「N errors + 其余全过 + skip 数不变」的现场签名。
+3. **别凭记忆断 skip 与 fixture 的先后**：实测探针（`.codeartsdoer/temp/fixture_skip_probe/`，一个抛错的 autouse fixture + 一条 `skipif` 用例）得 `1 skipped, 2 errors` ⇒ **`skipif` 判定早于 fixture，被 skip 的条目根本不执行 fixture**。推论对定性至关重要：SDK 不在场形态下该文件最多只能报 9 errors，**15 errors 这一签名只在真 SDK 在场时可能存在** ⇒ CI（`make install` 后跑 ks，SDK 不在场）报绿**不构成对该线索的排除**，它跑的是另一种形态。用「CI 也绿」当排除证据前，必须先确认 CI 的形态与现场一致。
+
+
 ## 3. 本仓特定配方
 
 ### 3.1 Linux 容器跑 tests/ha + identity（最小安装）

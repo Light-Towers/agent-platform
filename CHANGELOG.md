@@ -2,6 +2,87 @@
 
 本仓库为 uv workspace monorepo。**唯一受支持的安装/运行入口是根 `uv.lock` + `uv sync`**，子包不再维护独立 `uv.lock`（见 v2 修复 #14）。
 
+## 审计主体去凭据化（实施）：`operator` 改服务端断言租户 + 新 **P12** 门禁 + ks shim 契约用例（2026-10-03，单 PR）
+
+> 承接下一段（同日的只读审计 + 方案）。Q1–Q4 已拍板「按建议四项全部实施」，ks 守卫用例「落」。方案：`docs/plans/plan-audit-operator-principal-2026-10-03.md`。**测量时点：HEAD `ffd86ab` 之上的本工作树（未 commit），extras 形态两种都实跑**（见「验证」条）。
+
+### 1. 代码改动（4 文件，均产品代码；schema 不变、无 migration）
+
+- `applications/agent_server/api/session_router.py`：`operator = api_key or "default"` → **`operator = server_tenant_id(settings.default_tenant_id)`**，并新增函数 docstring 写明「`verify_api_key` 返回入站头**原文**（不是摘要），把它当 `operator` 等于把部署密钥持久化进审计痕迹」；`_auth=Depends(verify_api_key)`（形参不再叫 `api_key`）；新增 `from agent_runtime.workspace_registry import server_tenant_id`（依赖方向 app → agent-runtime，红线 1 合规）。值形状选 (a) 租户原值（Q1），与仓内 7 处既有写法同构；ContextVar 绑定时**请求租户优先**（与 `/import`、`/sql/train` 同语义，有用例锁）。
+- `api/import_router.py:28`、`api/sql_router.py:21`：两处**死凭据绑定**改 `_auth=`（FastAPI 的 `Depends` 只认 callable，形参名不参与解析 ⇒ 鉴权行为逐字不变）。收益是 P12 可以**零白名单**落地（不必给「绑了但没用」开后门）。
+- `scripts/lint_architecture.py` 新增 **P12**（`main()` 内接 `v14`）：AST 判据——凡形参默认值为 `Depends(<在册凭据依赖>)` / `Security(...)` 者，该形参名不得作为**任何 `Call` 的实参**（位置或关键字）出现在函数体内（含内层闭包）；作用域 `applications/**`，**无白名单**，fail-closed（解析不了即判违规，与 P11 同口径）。`_CREDENTIAL_DEPS` 现为 `("verify_api_key",)`。
+- 登记位：`ARCHITECTURE.md` §4.1 门禁登记表新增 P12 行（含「名匹配粗筛、不得当全局完备门禁」的局限句）。
+
+### 2. 本条是这批最重要的一条：P12 首跑报红，红的是**我自己实现的假阳性**
+
+首次实跑 `lint_architecture.py`（rc=1）报出的**不是**预期外流违规，而是 10 条 `无法解析（invalid non-printable character U+FEFF）`——`applications/nl2sql-service/nl2sql_service/**/__init__.py` **带 UTF-8 BOM 且已入库**（逐字节实取：全仓 `.py` 恰 10 个，全在此包），而我的 fail-closed 用 `read_text(encoding="utf-8")` + `ast.parse`。Python 自己的源码加载器会剥 BOM（PEP 263）⇒ 这些文件 import 一直正常，**BOM 从来不是缺陷，是我的读取编码不对**。已改 `utf-8-sig` 并在注释写明理由：
+
+- **为什么不能就这么算了**：fail-closed 的价值在于「真解析不了必报」，而假阳性会把门禁的第一批用户训练成「改宽它」——那才是破窗的开始。修的是读取约定，**不是**判定强度：语法真坏仍报（新增用例锁），BOM 文件里的真外流仍报（新增 BOM 回归锁）。
+- **顺带登记（不属本批、未动）**：这 10 个 BOM 文件是否统一改无 BOM 另属编码规范议题，本批只保证 lint 不被它误伤。
+- **另一条度量**：`lint_architecture.py` 单跑实测 **253s**（全仓 rglob + AST）。此前一轮「前台 rc=124 无输出」是**工具默认 180s 超时**，不是脚本异常；按 testing-playbook §2「静默不执行须以产物核实」改后台落盘才拿到结果。
+
+### 3. 三层齐备的②③层：新增用例 37 条
+
+- `tests/governance/test_audit_operator_principal.py` **29 条**（实测全绿）：行为面（`operator == server_tenant_id(default_tenant_id)`、ContextVar 优先、入站密钥值不进任何 `caplog` 记录、审计原语 `revert_audit` 行只带身份）+ 签名面（三处站点凭据形参在函数体内**完全不被引用**，比 P12 的「不当实参」更严）+ 门禁面（`_is_credential_dep` 八例分类、defaults 右对齐、四种外流形状、绑定本身不算外流、**已知盲区 `return` 显式写红为「不是免死牌」**、真实树零违规、`applications/` 外不扫、合成一坏一好、fail-closed、BOM 回归锁、**剥掉真实 `session_router` 防线必判红**的回归锁）。
+- `applications/knowledge-service/tests/unit/test_tracing_reset_hook_contract.py` **8 条**（上一段登记的防复发项落地）：钉 kernel `__all__` 含私有名 `_reset_for_tests`、shim 解析到的是 kernel **同一对象**、钩子可重复调用、shim 的 `import *` 仍在（结构早警）、消费方 `test_tracing.py::_reset_tracing` 确实还在用它、外加三条公共面兜住。**这条把「15 个莫名 setup error」变成「一条直白的红」**。
+- 未删用例、未收窄断言、未放宽前置；未引入任何 dismiss。
+
+### 4. 验证（最终树重跑，命令逐条对齐 Makefile `test`；extras 形态两种都跑）
+
+| 项 | 结果 |
+|---|---|
+| `lint_architecture.py` | **rc=0**，14 条门禁全过（含 P12「无『凭据绑定形参值被当作实参外流』的站点」），单跑 253s |
+| `ruff check .` | rc=0（首跑报出 **2 条我自己的** I001 import 排序，已 `--fix` 后在最终树复跑） |
+| `check_doc_sync.py` | rc=0（0 警告） |
+| 根 session `pytest -q -m "not requires_pg"` | **964 passed / 8 skipped / 28 deselected**（基线 935 → **+29 = 恰为本批新文件**） |
+| `packages/agent-runtime/tests` | 594 passed / 1 skipped（`test_revert.py` 传字面 `operator="test_user"`，断言方向未动） |
+| `applications/agent_server/tests` | 44 passed |
+| knowledge-service **SDK 在场** | **410 passed / 7 skipped**（= 基线 402 + 新契约 8） |
+| knowledge-service **SDK 不在场**（`uv sync --all-packages --extra dev` 后） | **404 passed / 13 skipped**（= 基线 396 + 新契约 8）⇒ 契约用例与 extras 形态无关，docstring 的承诺有实测支撑 |
+| 形态复原 | `uv run --extra otel pytest tests/observability` 15 passed，复跑 ks 回到 410/7 |
+
+### 5. 验收对照与未闭合项（不美化）
+
+- 方案 §6 判据 1–5 **本地已达**；判据 1 的表述按实取订正：`git grep "operator = api_key"` 在**码面** 0 命中，唯一命中是 lint docstring 里引着旧形状的那句说明；`session_router.py` 剩余的 `api_key` 字样只有 import 的 `verify_api_key`（依赖本体）与 docstring 叙述，**无任何名为 `api_key` 的形参**。另实取全 `applications/**` 已无 `api_key=Depends` 残留（0 命中）。
+- 判据 6「主干面」与判据 7 的 commit/PR **尚未执行**：本批只到「本地最终树全绿 + 账面入库」，合入后 `refs/heads/main` 重扫 open=0/dismissed=0 不回退仍待取（PR 绿 ≠ 主干绿）。
+- **P12 不得被汇报成「凭据不入审计已有全局完备门禁」**：名匹配抓不到别名间接流（本项缺陷本身就是人工发现的）、抓不到 `return` 等外流形状，kernel 侧归 P6。
+- 部署侧存量 `revert_audit.operator` 历史行**仍未取证**（本机三条通道不通），代跑命令在 `docs/operations/audit-operator-principal-runbook.md`；旧审计行**不自动改写**（Q3 拍板 (a)：不静默销毁痕迹）。
+- ks 一次性 15 errors **本批未定性为已解释**：它仍未再现（现累计 2×10 session 批量 + 5 次 ks 单 session + 契约用例两种形态各 1 次），本批落的是「再发生时立刻指向契约」的守卫，不是根因结论。
+
+## B7b 收尾衍生项：审计主体去凭据化（只立方案）+ ks 一次性 15 errors 定性 + 部署侧取证 runbook（**纯取证/文档，未动一行产品代码**，2026-10-03）
+
+> 来源：`docs/TODO.md` §5 三条尾项 + §8 两项未取证。**测量时点**：HEAD `ffd86ab`（工作区仅本段新增两份 docs），ks 计数均为 **OTel SDK 在场形态**（见下「extras 形态」条）。
+
+### 1. 会话回退审计把凭据当主体（`session_router.py`）——审计闭合 + 方案已立，**待拍板后才动码**
+
+- **缺陷链实取**：`api/auth.py:23` `verify_api_key` **返回入站头原文**（不是摘要）⇒ `session_router.py:57` `operator = api_key or "default"` 是**明文部署密钥** ⇒ 两条出口均落该值：PG 模式 `revert.py:131` `INSERT INTO revert_audit(..., operator, ...)`，内存模式 `revert.py:148` `logger.info("revert_audit ... operator=%s ...")`，两者均在 `spawn_background` 异步执行。表 DDL 在 `packages/agent-runtime/agent_runtime/migrations/001_baseline.up.sql:85-95`（`operator TEXT NOT NULL` + `idx_revert_operator`）。
+- **消费者审计（TODO 原定的动工前置）**：全仓 `SELECT ... FROM revert_audit` **0 处** ⇒ write-only 列，无前端/无对外 API ⇒ 换值不破已知消费者。基数等价论证（与 B7b-4 §3.4 同构）：`API_KEY` 每部署一把 ⇒「按密钥区分操作人」今天本就区分不出任何两个调用方，换租户主体**基数不变（仍是 1）**。
+- **为何 CodeQL 未报**（登记以免后人误读为「扫描器看过且认为没问题」）：`py/clear-text-logging-sensitive-data` 依赖数据流将值分类为 secret，而此处凭据经由 app → runtime 的形参 `operator`（两个模块之间的传递）传入，未被接到流上 ⇒ **未报出 ≠ 不存在**，本项由人工语义审计发现。
+- **额外扫出两处死凭据绑定**：`api/import_router.py:28` 与 `api/sql_router.py:21` 的 `api_key=Depends(verify_api_key)` 函数体从不使用（全仓 `Depends(verify_api_key)` 共 5 处，其余 2 处已是 `_auth=` 形态）⇒ 改形参名即**签名级**去掉凭据可见性（FastAPI 只认 callable，零行为变更）。
+- **方案**：`docs/plans/plan-audit-operator-principal-2026-10-03.md`——选型 A（`operator = server_tenant_id(get_settings().default_tenant_id)`，与仓内 7 处既有写法同构）、单 PR 实施步骤（含新增 **P12** lint 不变量：`Depends(verify_api_key)` 绑定的形参名不得作为任何 Call 的实参，并写破「名匹配抓不到别名间接流」的局限）、迁移与旧行处置（**不自动改写审计痕迹**，只给可选脱敏 SQL + 用 `reverted_at < 升级时刻` 判别新旧）、7 条验收硬指标（含「PR 绿 ≠ 主干绿，合入后 `refs/heads/main` 重扫 open=0/dismissed=0 不回退」）、Q1–Q4 待拍板项。
+
+### 2. ks session 一次性 15 errors：从「无从定性」推到「唯一候选站点 + 机理自洽」
+
+方法和实测结果已入 `docs/operations/testing-playbook.md` §2.3（三步法），此处只记结论：
+
+- **计数算术**：`--collect-only -q` 实取 collected = **409**；历史红为 `387 + 7 + 15 = 409`，全绿为 `402 + 7 = 409` ⇒ 集合未变，形态是「恰好 15 条在 **setup 阶段 error**」，而非集合/收集变化。
+- **唯一候选**：按文件分组实取，ks 全 suite **唯一**恰含 15 条用例的文件 = `applications/knowledge-service/tests/unit/test_tracing.py`，15 条共用同一个 autouse fixture `_reset_tracing`（前后各调 `tracing._reset_for_tests()`）⇒ 该 fixture 抛错能**精确**重现现场签名（15 errors + 其余全过 + skip 数不变）。
+- **两条关键实测（不凭记忆）**：① 探针（抛错的 autouse fixture + 一条 `skipif` 用例）得 `1 skipped, 2 errors` ⇒ **`skipif` 判定早于 fixture**；② `uv sync --all-packages --extra dev`（= `make install`）**会就地卸载 10 个 `opentelemetry-*` 包**（dry-run 先报 `Would uninstall 10 packages`），实测两形态计数：SDK 在场 `402/7`・该文件 `15 passed`；SDK 不在场 `396/13`・该文件 `9 passed + 6 skipped`（已按原状恢复并复核）。
+- **【账面订正，本段最重要一条】「CI 也绿」不能用作排除证据**：由 ①+② 得，CI（`make install` 后跑 ks，SDK 不在场）该文件**最多只能报 9 errors** ⇒ `15 errors` 这一签名**只在真 SDK 在场的本地 venv 才可能存在**，CI 跑的是与现场不同构的另一种形态。原 `docs/TODO.md` §5 追记把「PR #58 与主干 `cf73396` 的 ci 均 pass」当作「未复现」的加重证据，论证强度已被本条订正（追记就地订正为引用本实测）。
+- **未定项诚实登记**：kernel `agent_core/tracing.py:603` `_reset_for_tests` 的每步危险操作都被 `try/except` 包裹 ⇒ 自身几乎不可能抛；最可能破点是 `tracing._reset_for_tests` 的**名字解析**（kernel `__all__` 显式包含该私有名 + shim `import *` 这条链条**全仓无用例钉住**）；并发 `uv sync` 就地删装包文件与「一次性/不可复现」自洽，但**无现场证据**，只登记为假设。**定案仍需一次带 traceback 的再现**，本轮 2×10 session 批量全量日志（完整落盘）+ 4 次 ks 单 session + 1 次单文件均未再现。
+- **新登记的防复发项（属测试面，按红线先立项再动）**：给 ks shim 加一条守卫用例（`from knowledge_service.core import tracing` 必须解析得到 `_reset_for_tests`），把这类失败从「15 个莫名 error」变成「一条清晰的红」。
+
+### 3. 采样与部署侧环境取证（c4/c5）
+
+- **采样**（均 `rc=0`）：2 轮 10-session 批量（`sessions-b1` / `sessions-b2` 全量日志，root `935 passed / 8 skipped / 28 deselected`、agent-runtime `594/1`、exhibition `348`、ks `402/7`、observability-otel `15`）+ 4 次 ks 单 session 重复采样。
+- **本机无 docker / kubectl / podman / `.env` / `~/.kube/config`**；`root@192.168.100.126:22` 单次再试仍为 `Connection closed by ... port 22`（rc=255，与前四次同签名）⇒ **部署侧与 `tests/ha` 本机无法补跑**；`tests/ha` 真 PG 结果已由 CI run `37096026471`（`ha.yml`）承担。
+- **转为可代跑 runbook**：新建 `docs/operations/audit-operator-principal-runbook.md`（全程只读、输出不落敏感原值；取证 A = 存量 `user-*` thread_id，取证 B = `revert_audit.operator` 历史行形态；三选一解阻通道）。等值判定采「本地算 md5 后作为等值连接子传入」，**不把密钥送进 SQL 会话**。
+- **包装脚本两条自纠（同类假阴 bug 第二次）**：`_SUMMARY_RE` 只认 `=+ ... =+` 形态，而 `-q` 摘要行无装饰 ⇒ 每次正常跑都误报「无 pytest 摘要行」；改正则后又漏 `re.M`（`^`/`$` 只锚整串首尾）。两处均已就地修并写成注释防后人改回；另修正一个错字。上一段登记的后台批量跑「静默未执行」已用「预期产物文件是否生成」核实并重新拉起（testing-playbook §2 明文纪律）。
+
+### 4. 文档面变更清单
+
+新建：`docs/plans/plan-audit-operator-principal-2026-10-03.md`、`docs/operations/audit-operator-principal-runbook.md`。修改：`docs/operations/testing-playbook.md`（新增 §2.2 extras 形态、§2.3 计数算术三步法）、`docs/TODO.md`（§5 三条：15 errors 二次追记 + 计数时点项转 `[x]` + operator 项挂方案；§8 部署项挂 runbook）。**产品代码/测试代码零改动**（已 `git status --short` 核实：无 `.py` 文件在改动面内，仅本段列出的文档）。本轮编码校验改用 Python 脚本（`.codeartsdoer/temp/scan_mojibake.py`，显式按 UTF-8 解码 + 逐字符判定）：5 份文档共命中 2 行，**均为自命中**（命中行就是把扫描模式原样写进账里的那句），无真乱码。【工具链教训】旧写法 `git grep -I -c -e 锟 …` 在 PowerShell 下会因码页转换把多字节模式搞成“几乎每行都命中”的假阳性（本轮实测：三个文件各报 694/104/124 条），**不得再用它做中文乱码判定**；而脚本扫描的命中行也要回看内容，因为扫描字串本身常被写进文档。
+
 ## B7b 尾项：identity 中间件 flaky 用例定性并修复（仅测试代码，2026-10-03）
 
 > 来源：`docs/TODO.md` §5 登记的「1/256 概率假失败」，修法当时已定型（不属 `#38`/`#39` 通路，故 B7b 主批为不扩大爆炸半径而未动）。

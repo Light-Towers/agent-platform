@@ -19,6 +19,8 @@ P9：禁止在 app 层裸调 ``monitor.report_tool*``（散点埋点，v3 合流
 P10：禁止 ``from tools.*`` 直引 ``@tool`` 绕过 ``tool_registry.get_tool()``（v3 合流并入）。
 P11：禁止无顶层 ``permissions:`` 块的 GitHub Actions workflow（GITHUB_TOKEN 未限权，
      对应 CodeQL ``actions/missing-workflow-permissions``，见 B7d 方案 §7）。
+P12：禁止把 ``Depends(verify_api_key)`` 绑定的形参值当实参外流（凭据不得进审计/
+     日志/派生主体，见 plan-audit-operator-principal-2026-10-03.md §4.3）。
 L-1：禁止手动 .__enter__()/.__exit__()；L-2：禁止经 app.state 散点取用 tracer；
 L-3：观测 init 仅限装配点（三条见 plan-observability-global-remediation-2026-09-29.md §3.3）。
 L-4：OTel/langfuse 可选依赖多处声明下界必须归一（同方案，防组合解析回溯）。
@@ -26,6 +28,7 @@ L-4：OTel/langfuse 可选依赖多处声明下界必须归一（同方案，防
 
 from __future__ import annotations
 
+import ast
 import re
 import sys
 import tomllib
@@ -762,6 +765,113 @@ def check_workflow_permissions() -> list[str]:
     return violations
 
 
+# ---------------------------------------------------------------------------
+# P12 架构不变量：绑定凭据校验依赖的形参值，不得作为任何调用的实参外流。
+# 根因（**人工语义审计发现，CodeQL 未报**）：``agent_server/api/session_router.py``
+# 曾写 ``operator = api_key or "default"`` 再 ``revert(operator, ...)``，把
+# ``verify_api_key`` 的**返回值（入站头原文，不是摘要）**当审计主体写进
+# ``revert_audit.operator`` 与日志 ⇒ 部署密钥被持久化进审计痕迹。
+# 为何扫不出来：CodeQL ``py/clear-text-logging-sensitive-data`` 要靠数据流把值分类
+# 为 secret，而这里是凭据经跨模块形参（app → runtime）传出去的，未被接到流上
+# ⇒「未报出 ≠ 不存在」，本不变量补的正是这段盲区。
+# 判据（AST，作用域 ``applications/**``）：凡函数形参的默认值为
+# ``Depends(<在册凭据依赖>)``（或 ``Security(...)``）者，该形参名不得作为**任何
+# Call 的实参**（位置或关键字）出现在函数体内（含内层闭包）。违规即 CI 失败。
+# 已知局限（**不得当作完备门禁**，也不得在汇报里声称“凭据不入审计已有全局完备门禁”）：
+#   1) 名匹配抓不到「先赋给别名/属性再传」的间接流（本项缺陷本身就是人工发现的）；
+#   2) 抓不到 ``return`` / 写入模块状态等其它外流形状；
+#   3) kernel 内部对凭据的处理属 P6 地盘（那一层已无「凭据→摘要」实现）。
+# ⇒ 定位是**防未来漂移的粗筛**，与 `tests/governance/test_audit_operator_principal.py`
+# 的行为用例互补（AGENTS「三层齐备」的第三层）。不设白名单：同批清完两处死绑定后，
+# 全仓违规数应为 0（给“绑了但没用”开后门就等于给下一次真用开后门）。
+# ---------------------------------------------------------------------------
+_CREDENTIAL_DEPS = ("verify_api_key",)
+_INJECTION_MARKERS = ("Depends", "Security")
+_CREDENTIAL_PARAM_SCOPE_PREFIX = "applications/"
+
+
+def _is_credential_dep(default: ast.expr) -> bool:
+    """默认值形如 ``Depends(verify_api_key)`` / ``Security(verify_api_key)`` 即凭据绑定。
+
+    ``Depends(verify_api_key())`` 这一写法同样把返回值带进来 ⇒ 一并算。
+    """
+    if not isinstance(default, ast.Call) or not isinstance(default.func, ast.Name):
+        return False
+    if default.func.id not in _INJECTION_MARKERS:
+        return False
+    for value in (*default.args, *(kw.value for kw in default.keywords)):
+        if isinstance(value, ast.Name) and value.id in _CREDENTIAL_DEPS:
+            return True
+        if (
+            isinstance(value, ast.Call)
+            and isinstance(value.func, ast.Name)
+            and value.func.id in _CREDENTIAL_DEPS
+        ):
+            return True
+    return False
+
+
+def _credential_bound_params(node) -> set[str]:
+    """该函数里被 ``Depends(凭据依赖)`` 绑定的形参名集合。"""
+    a = node.args
+    names: set[str] = set()
+    positional = [*a.posonlyargs, *a.args]
+    if a.defaults:
+        offset = len(positional) - len(a.defaults)
+        for i, default in enumerate(a.defaults):
+            if _is_credential_dep(default) and positional[offset + i].arg:
+                names.add(positional[offset + i].arg)
+    for arg, default in zip(a.kwonlyargs, a.kw_defaults):
+        if default is not None and _is_credential_dep(default):
+            names.add(arg.arg)
+    return names
+
+
+def _credential_escape_lines(node, names: set[str]) -> list[tuple[int, str]]:
+    """函数体内把 ``names`` 当实参传出的 ``(行号, 形参名)``。
+
+    仅检查 ``node.body``：形参默认值里的 ``Depends(...)`` 本身不算外流。
+    """
+    if not names:
+        return []
+    hits: set[tuple[int, str]] = set()
+    for stmt in node.body:
+        for sub in ast.walk(stmt):
+            if not isinstance(sub, ast.Call):
+                continue
+            for value in (*sub.args, *(kw.value for kw in sub.keywords)):
+                if isinstance(value, ast.Name) and value.id in names:
+                    hits.add((sub.lineno, value.id))
+    return sorted(hits)
+
+
+def check_credential_param_escape() -> list[str]:
+    """扫 ``applications/**``：绑定凭据的形参值不得外流为实参（P12）。"""
+    violations: list[str] = []
+    for rel, py_file in _iter_scanned_py_files():
+        if not rel.startswith(_CREDENTIAL_PARAM_SCOPE_PREFIX):
+            continue
+        try:
+            # utf-8-sig：Python 源码加载器本身会剥 UTF-8 BOM（PEP 263），本仓有 10 个
+            # 已入库的 BOM 文件（nl2sql_service/**/__init__.py）；用 utf-8 读会把 BOM
+            # 变成 U+FEFF 非法字符 ⇒ fail-closed 退化为「噪音必红」。语法真坏仍会报。
+            tree = ast.parse(py_file.read_text(encoding="utf-8-sig"), filename=rel)
+        except (OSError, SyntaxError, ValueError) as exc:
+            # fail-closed：读不到/解析不了不等于通过（与 P11 同一口径）
+            violations.append(f"{rel}: 无法解析（{exc}）")
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            names = _credential_bound_params(node)
+            for lineno, pname in _credential_escape_lines(node, names):
+                violations.append(
+                    f"{rel}:{lineno}: 凭据绑定形参 `{pname}` 的值被当作实参外流"
+                    "（审计/日志/派生主体必须取服务端断言身份，见 lint P12）"
+                )
+    return violations
+
+
 def main() -> int:
     rc = 0
     v1 = check()
@@ -847,6 +957,15 @@ def main() -> int:
         rc = 1
     else:
         print("P11 架构约束通过：所有根 workflow 均声明了顶层 permissions")
+    v14 = check_credential_param_escape()
+    if v14:
+        print("P12 架构约束违反：绑定 ``Depends(verify_api_key)`` 的形参值不得作为实参外流（凭据不得进审计/日志/派生主体）")
+        print("修复：审计主体取服务端断言身份（``server_tenant_id`` / ``server_user_id``）；若确不使返回值，形参改名 _auth 以保证签名级不留缺口：")
+        for v in v14:
+            print(f"  {v}")
+        rc = 1
+    else:
+        print("P12 架构约束通过：无「凭据绑定形参值被当作实参外流」的站点")
     v10 = check_init_scatter()
     if v10:
         print("L-3 观测架构约束违反：init_tracing/init_otel 仅限装配点（main/server/过渡门面/eval 入口）调用")
