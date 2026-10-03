@@ -172,9 +172,9 @@ def test_list_files_error_detail_is_fixed_text(fs_roots, monkeypatch):
 def test_upload_sanitizes_traversal_filename(fs_roots, tmp_path, monkeypatch):
     """上传文件名含穿越：净化后落在会话目录内，仓库外零落盘。"""
     _, updated = fs_roots
-    monkeypatch.setattr(server, "resolve_thread_id", lambda client_id, api_key: client_id or "dev")
+    monkeypatch.setattr(server, "resolve_thread_id", lambda client_id: client_id or "dev")
     result = asyncio.run(
-        server.upload_files([_upload("../../etc/passwd", b"boom")], thread_id="user-x", request=None)
+        server.upload_files([_upload("../../etc/passwd", b"boom")], thread_id="user-x")
     )
     assert result["status"] == "uploaded"
     assert result["files"] == ["passwd"]
@@ -185,9 +185,9 @@ def test_upload_sanitizes_traversal_filename(fs_roots, tmp_path, monkeypatch):
 
 def test_upload_keeps_illegal_chars_replaced(fs_roots, monkeypatch):
     _, updated = fs_roots
-    monkeypatch.setattr(server, "resolve_thread_id", lambda client_id, api_key: client_id or "dev")
+    monkeypatch.setattr(server, "resolve_thread_id", lambda client_id: client_id or "dev")
     result = asyncio.run(
-        server.upload_files([_upload('we<i>rd:na?me.txt', b"ok")], thread_id="user-x", request=None)
+        server.upload_files([_upload('we<i>rd:na?me.txt', b"ok")], thread_id="user-x")
     )
     assert result["files"] == ["we_i_rd_na_me.txt"]
     assert (updated / "session_user-x" / "we_i_rd_na_me.txt").read_bytes() == b"ok"
@@ -196,9 +196,9 @@ def test_upload_keeps_illegal_chars_replaced(fs_roots, monkeypatch):
 def test_upload_escapable_thread_id_stays_in_updated_dir(fs_roots, tmp_path, monkeypatch):
     """客户端可控 thread_id 含穿越：会话目录名净化后仍在 ``updated/`` 内。"""
     _, updated = fs_roots
-    monkeypatch.setattr(server, "resolve_thread_id", lambda client_id, api_key: client_id or "dev")
+    monkeypatch.setattr(server, "resolve_thread_id", lambda client_id: client_id or "dev")
     result = asyncio.run(
-        server.upload_files([_upload("a.txt", b"x")], thread_id="../../escape", request=None)
+        server.upload_files([_upload("a.txt", b"x")], thread_id="../../escape")
     )
     assert result["status"] == "uploaded"
     assert list(updated.glob("session_escape/a.txt"))

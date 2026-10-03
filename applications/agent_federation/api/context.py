@@ -38,7 +38,15 @@ _thread_id_ctx: ContextVar[str | None] = ContextVar("thread_id", default=None)
 # Phase 6：多租户隔离
 # - 作用 ：用来记录 "当前请求属于哪个租户" 。
 # - 场景 ：缓存 namespace / KB 权限 / 限流隔离 都按 tenant_id 分隔，防串租户数据。
-_tenant_id_ctx: ContextVar[str | None] = ContextVar("tenant_id", default="default")
+#
+# 默认值故意用【哨兵】而非字面量 ``"default"``：需要区分
+#   ① 服务端已断言的租户（identity_bridge 验签 X-Tenant-JWT / SINGLE_TENANT 绑定）
+#   ② 从未绑定（observe 透传）
+# 把未绑定写成 ``"default"`` 会让「断言值为 default」与「没有断言」在数据面上完全同形，
+# 而会话身份派生（B7b-4）必须只认①。对外的缺省语义仍由 ``get_tenant_context()`` 保留。
+_TENANT_UNBOUND = object()
+DEFAULT_TENANT_ID = "default"
+_tenant_id_ctx: ContextVar[object] = ContextVar("tenant_id", default=_TENANT_UNBOUND)
 
 
 def set_session_context(path: str):
@@ -89,9 +97,25 @@ def set_tenant_context(tenant_id: str):
     return _tenant_id_ctx.set(tenant_id)
 
 
-def get_tenant_context() -> str | None:
-    """获取当前请求链路的租户 ID。"""
-    return _tenant_id_ctx.get()
+def get_tenant_context() -> str:
+    """获取当前请求链路的租户 ID（**向后兼容语义**：从未断言 → ``default``）。
+
+    现有消费者（``knowledge_tools`` / ``main_agent_memory``）把 ``default`` 当部署级
+    缺省桶使用，本函数行为不变。需要区分「已断言的 default」与「没断言」的调用点
+    （如会话身份派生）请改用 :func:`get_asserted_tenant_context`。
+    """
+    value = _tenant_id_ctx.get()
+    return DEFAULT_TENANT_ID if value is _TENANT_UNBOUND else value  # type: ignore[no-any-return]
+
+
+def get_asserted_tenant_context() -> str | None:
+    """仅当服务端**已断言**租户（JWT 验签后或 ``SINGLE_TENANT`` 绑定）时返回其值，否则 ``None``。
+
+    ``None`` 的含义是「本请求链路上没有任何服务端主体」，调用方必须自行兜底
+    （三态兜底见 ``api.auth.resolve_thread_id``），**不得**把 ``None`` 当成 ``default`` 租户。
+    """
+    value = _tenant_id_ctx.get()
+    return None if value is _TENANT_UNBOUND else value  # type: ignore[no-any-return]
 
 
 def reset_tenant_context(tenant_token):

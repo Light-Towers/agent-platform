@@ -61,12 +61,12 @@ agent-core  agent-runtime  shared-schemas  agent-server  agent_federation  exhib
 | 层 | 实现 | 说明 |
 |----|------|------|
 | **单一实现** | `packages/agent-runtime/agent_runtime/identity.py` | RS256 `mint_token`/`verify_token`、网关→子服务内部头 `sign_internal_header`/`verify_internal_header`（HMAC-SHA256）、`load_public_keys`（kid→PEM，支持轮转）、`resolve_startup_tenant_mode`、`require_identity_startup_guard`。PyJWT 仅挂在 `agent-runtime` 的 `identity` extra，**不进 `agent-core`**（红线 1）。漏传租户的哨兵拦截在内核 `packages/agent-core/agent_core/memory/_tenant_gate.py`。 |
-| **全局装配** | `packages/agent-runtime/agent_runtime/identity_middleware.py` | 纯 ASGI `IdentityMiddleware`，在 `applications/agent_server/main.py`（无条件）与 `applications/agent_federation/api/identity_bridge.py`（`X-Tenant-JWT`）挂载；**默认 observe 档零行为变更**（无凭据请求交下游既有语义）。 |
+| **全局装配** | `packages/agent-runtime/agent_runtime/identity_middleware.py` | 纯 ASGI `IdentityMiddleware`，在 `applications/agent_server/main.py`（无条件）与 `applications/agent_federation/api/identity_bridge.py`（`X-Tenant-JWT`）挂载；**默认 observe 档零行为变更**（无凭据请求交下游既有语义）。**接线序属装配语义的一部分**：联邦侧 `mount_identity_middleware` 必在 `SecurityGuardsMiddleware` **之后**注册（Starlette 后注册者更外层）且 guards 传 `subject_provider=get_asserted_tenant_context`，否则限流/护栏执行时主体尚未绑定而退 IP 兜底；由 `applications/agent_federation/tests/unit/test_identity_guards_order.py` 以 AST + 行为双向锁住。 |
 | **强制门禁** | `docs/adr/0006-isolation-dimension-contract.md`、`docs/adr/0007-server-asserted-tenant-identity.md` + `tests/governance/` | 红线用例：`test_identity_not_in_tool_schema.py`（身份不得进 LLM tool schema）、`test_tenant_default_forbidden.py`（`tenant_id="default"` 隐式缺省回潮即失败）、`test_isolation_dimension_contract.py`（每张业务表必含 `tenant_id`）；跨租户真 DB 行为级回归见 `tests/ha/test_tenant_isolation_real_pg.py`（CI 缺 PG = FAIL，不得以 skip 凑绿）。 |
 
 **运行档位**：身份相关 env 共 12 项（清单见 `.env.example` 「租户身份断言」段）。**fail-fast 默认关**：`DEPLOY_ENFORCE_IDENTITY=false` 时零依赖冒烟不受影响；置 `true` 且既未配验签公钥又未显式声明 `SINGLE_TENANT` 则拒绝启动（2026-10-01 双向实跑：默认档 `agent_server.main:app` 构造成功且中间件栈含 `IdentityMiddleware`；开关置 true 则 `RuntimeError`）。执行细节见 `docs/plans/plan-isolation-hardening-2026-09-27.md`。
 
-**与 CodeQL B7b 的关系（不重叠）**：本身份层解决的是 **tenant 维**由服务端断言；`py/weak-sensitive-data-hashing` 的 `#38`/`#39` 属于 **user 维**仍在用「凭证摘要当用户标识」，principal_id 化将在本层之上替换 user 侧来源。
+**与 CodeQL B7b 的关系（已合流）**：本身份层解决 **tenant 维**由服务端断言；`py/weak-sensitive-data-hashing` 的 `#38`/`#39` 源于会话身份仍在用「凭据摘要当标识」。B7b-4 已把会话身份接到本层的断言值（`resolve_thread_identity(principal)`，产物 `tenant-<主体>`、**不做摘要**）⇒ 会话身份不再是独立于本层的第二套身份机制，而是本层的一个消费者；**用户级（principal_id）细化仍待 A5 批次**，在本层之上替换主体来源。
 
 ## 3. 依赖方向（红线依据）
 
@@ -107,8 +107,8 @@ agent-core  agent-runtime  shared-schemas  agent-server  agent_federation  exhib
 | P4-2 | `registry.execute()` 只能经 `delegate()` 调用 | Skill 组合绕过运行时契约 | — |
 | P2 | 生产 `FastAPI(` 必须经 `agent_core` 的 `build_api_app` | 异常处理/错误信封装配漏接 | — |
 | P5 | workspace 成员间不得顶层包名重复 | editable `.pth` 解析取决于安装顺序 | — |
-| P6 | 密钥类标识不得裸用 `hashlib`，必走 `guardrails.auth.fingerprint` | `py/weak-sensitive-data-hashing` 的散点源头 | `tests/governance/test_thread_identity_migration.py` |
-| P6-2 | 弱派生 `legacy_thread_id` 调用面封闭（仅定义处 + 迁移脚本） | 同一规则的不可消除存量（历史会话复算） | `tests/governance/test_thread_identity_migration.py` |
+| P6 | 密钥类标识不得裸用 `hashlib`；**已退役的四个「凭据→摘要」入口名不得再现**（B7b-5 后白名单为空：kernel 单一实现已删） | `py/weak-sensitive-data-hashing` 的散点源头 + 改名绕过 / 死代码复生 | `tests/governance/test_thread_identity_migration.py` |
+| P6-3 | 「凭据→摘要」入口名（含旧 `legacy_thread_id`）以调用/定义形式出现即失败（取代已作废的 P6-2「仅定义处+迁移脚本可调」：被治理对象已消失 ⇒ 门禁换代） | 同名旧实现被加回来 ⇒ 同一告警重现 | `tests/governance/test_thread_identity_migration.py` |
 | P7 | 路径 containment 必走 `guardrails.fs`；api 层文件 I/O 必过 `safe_join`/`resolve_within` | `py/path-injection`、`py/clear-text-logging-sensitive-data` | `tests/governance/test_path_io_governance.py` |
 | P8 | 对外响应体（HTTP JSON / SSE 帧）不回显异常消息或堆栈 | `py/stack-trace-exposure` | `tests/governance/test_exception_echo_governance.py` |
 | P9 | app 层禁裸调 `monitor.report_tool*`（散点埋点） | 工具观测断点（v3 合流并入） | — |

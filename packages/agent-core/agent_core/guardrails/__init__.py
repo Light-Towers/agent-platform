@@ -2,8 +2,9 @@
 """
 安全护栏子包（框架无关内核）。
 
-- ``auth``：鉴权 / 限流 / 豁免决策纯函数（零依赖，可独立单测），含全仓唯一的
-  密钥指纹实现 ``fingerprint`` / 会话身份 ``derive_thread_id``（DUP-1 收敛点）；
+- ``auth``：鉴权 / 限流 / 豁免决策纯函数（零依赖，可独立单测），含会话身份
+  ``resolve_thread_identity``（DUP-1 收敛点，服务端断言主体明文、不做摘要）；
+  **不再包含任何「凭据 → 摘要」实现**（B7b 三链已拆，kernel 也不再 import hashlib/hmac）；
 - ``fs``：用户可控路径的安全拼接/解析/文件名净化（``safe_join`` /
   ``resolve_within`` / ``safe_filename``，路径注入收敛点）；
 - ``errors``：入站统一错误信封与异常脱敏（需 ``from agent_core.guardrails.errors``
@@ -20,14 +21,11 @@
 from agent_core.guardrails.auth import (
     DEFAULT_EXEMPT_PATHS,
     DEV_THREAD_ID,
-    ENV_SECURITY_PEPPER,
-    derive_thread_id,
     extract_api_key_from_headers,
-    fingerprint,
     format_validation_error,
     is_health_path,
-    legacy_thread_id,
     resolve_client_key,
+    resolve_thread_identity,
     should_skip_all_guards,
     should_skip_auth,
     should_skip_rate_limit,
@@ -43,11 +41,8 @@ from agent_core.guardrails.ratelimit import SlidingWindowRateLimiter, apply_api_
 __all__ = [
     "DEFAULT_EXEMPT_PATHS",
     "DEV_THREAD_ID",
-    "ENV_SECURITY_PEPPER",
     "PathTraversalError",
-    "derive_thread_id",
-    "fingerprint",
-    "legacy_thread_id",
+    "resolve_thread_identity",
     "resolve_within",
     "safe_filename",
     "safe_join",
