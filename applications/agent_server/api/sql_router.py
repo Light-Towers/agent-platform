@@ -18,7 +18,10 @@ router = APIRouter()
 
 
 @router.post("/sql/train", response_model=SqlTrainResponse)
-async def sql_train(req: SqlTrainRequest, api_key=Depends(verify_api_key)):
+async def sql_train(
+    req: SqlTrainRequest,
+    _auth=Depends(verify_api_key),  # 仅作鉴权闸门（函数体不取凭据值，lint P12）
+):
     pool = get_pool()
     if pool is None:
         raise HTTPException(status_code=503, detail="训练数据存储未启用（DATABASE_URL 未配置）")
