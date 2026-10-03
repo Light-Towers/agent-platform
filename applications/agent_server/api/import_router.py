@@ -25,7 +25,7 @@ _TEXT_SUFFIXES = {".md", ".markdown", ".txt"}
 async def import_document(
     file: UploadFile,
     workspace_id: str = "default",
-    api_key=Depends(verify_api_key),
+    _auth=Depends(verify_api_key),  # 仅作鉴权闸门（函数体不取凭据值，lint P12）
 ):
     pool = get_pool()
     if pool is None:

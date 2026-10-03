@@ -2,6 +2,7 @@
 
 from datetime import UTC
 
+from agent_runtime.workspace_registry import server_tenant_id
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from agent_server.api.auth import resolve_thread_id, verify_api_key
@@ -44,8 +45,14 @@ async def history(
 async def session_revert(
     req: RevertRequest,
     request: Request,
-    api_key=Depends(verify_api_key),
+    _auth=Depends(verify_api_key),  # 仅作鉴权闸门（审计主体不得取凭据值，lint P12）
 ):
+    """会话回退：审计主体取服务端断言租户，**不是**入站 API Key。
+
+    `verify_api_key` 返回入站头原文（不是摘要），若把它当 `operator` 写进
+    `revert_audit` 与日志，等于把部署密钥持久化进审计痕迹。基数不变：同一
+    部署只有一把 `API_KEY`，按密钥区分操作人本就区分不出两个调用方。
+    """
     settings = get_settings()
     if not settings.revert_enabled:
         raise HTTPException(status_code=404, detail="REVERT_NOT_ENABLED")
@@ -54,7 +61,7 @@ async def session_revert(
     if revert_handler is None:
         raise HTTPException(status_code=404, detail="REVERT_NOT_INITIALIZED")
 
-    operator = api_key or "default"
+    operator = server_tenant_id(settings.default_tenant_id)
     result = await revert_handler.revert(operator, req.session_id, req.checkpoint_id)
 
     if not result.success:
