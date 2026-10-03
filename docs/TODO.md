@@ -68,6 +68,8 @@
 - [ ] D7：裸 `except Exception:` 存量按 ratchet 基线逐文件烧除（门禁已常驻防新增，见 `docs/plans/plan-p0-4-blind-except-ratchet-2026-09-24.md`；不追求逐点清零）
 - [ ] D8：`zhanggui-zhiku/core/config.py` 评估迁移 pydantic-settings
 - [ ] （B7b-5 验证时撞见，1/256 概率）**flaky 用例**：`packages/agent-runtime/tests/test_identity_middleware.py::test_forged_internal_header_rejected` 用「把末尾 2 个 hex 换成 `ff`」构造伪造值，若真签名末尾本就是 `ff` 则伪造串 == 合法串 ⇒ 得 200 而断言 401（本批实跑撞到 1 次，随后 5 次全绿；签名 = HMAC(含时间戳的 payload)，故每秒一个值，属概率性而非环境缺陷）。修法定型且零产品代码风险：改「翻转首字符」或断言前校 `forged != val`（失败即重采样），带一条「伪造串必与合法串不同」的前置断言。本批未动（不扩大爆炸半径，且不属 #38/#39 通路）。
+- [ ] （B7b-4/5 收尾时撞见，**未复现且根因未定**）knowledge-service session 一次性 15 errors：批量脚本连跑十个 Makefile session 时，ks session 报 `rc=1 / 387 passed / 7 skipped / 15 errors`；同一命令之后 **5 次独立复跑均 402 passed / 7 skipped**（含单文件跑）。已排除了「本批引入」（ks 无文件在本批 diff 内）与「环境泄漏」（子进程无 `ZHIKU_INTEGRATION`，User/Machine 级也无），但**未能定根因**：包装脚本只保留每 session 末 3 行，traceback 丢了。⇒ 可执行项有二：① 验证包装脚本必须把完整输出落文件（只留末几行 ⇒ 一次性红无从定性），已写进 `docs/operations/testing-playbook.md`；② 若在 CI（Linux）或后续实跑再现，先拿到 ERROR 阶段的 fixture 名再定性，不得先猜为「环境抖动」。
+- [ ] （同上尾面，账面噪声）**计数漂移无错但需标明测量时点**：同一批测试在「中间工作态」与「commit 后的树」上计数不同（根 932/6 → 935/8、agent-core 347/8 → 349/8、exhibition 347+1 → 348+0）。已发生的错不是测试而是账面——把中间态数字当结论写进了 CHANGELOG（已订正）。⇒ 入项：任何声称「全绿」的计数必须附「在哪个 sha 上跑的」，否则下次仍会被当成真值。
 - [ ] （B7b 收尾登记，**属安全语义而非可读性**）`applications/agent_server/api/session_router.py` 的 `operator = api_key or "default"`：把**凭据当审计主体**写进会话操作记录（不在 `#38`/`#39` 通路内，故本批未改）。修复方向：应取服务端断言主体（与 B7b-4 同源），但审计字段形状可能已有下游消费 ⇒ **动工前须先审计消费者并另出方案**（红线：禁止直接改代码）。
 
 ## 6. 待评估架构决策（未立项，动工前须先出方案，红线：禁止直接动手改代码）
