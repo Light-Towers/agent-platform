@@ -251,6 +251,14 @@ def _get_engine():
 
 ### 1.5 API_KEY 模式下无法多轮对话
 
+> **【已实施，但下方方案已被推翻（2026-10-02，B7b-4）】**本节原拟 `thread_id = uuid5(api_key + label)`，
+> 仍是「拿凭据当身份熵源」——既属 CodeQL `py/weak-sensitive-data-hashing` 的实锤通路（持 key 即可推出
+> 他人 thread id），也与 ADR-0007「服务端断言租户身份」冲突。实际落地为**会话身份主体化**：
+> `resolve_thread_id(client_thread_id)`（签名里没有凭据位）→ 内核 `resolve_thread_identity(服务端断言主体)`，
+> 产物 `tenant-<主体>`；「同一部署共用一个桶」的语义保留，但熵源从密钥换为断言租户。
+> 多会话需求不再走「拿凭据做命名空间」，dev 档（未配 `API_KEY`）直接信任客户端 `session_id`；
+> 生产档的用户级（principal）细化归 A5 批次。下文代码块仅作历史意图保留，**不得照抄**。
+
 **问题**：`server.py:127-131` 启用 API_KEY 时每次请求生成新 UUID，checkpointer 形同虚设，无法维持多轮对话
 **安全约束**：现有代码有意忽略客户端传入的 thread_id 防止会话劫持（`server.py:127` 注释）
 **方案**：**无状态 uuid5 确定性派生，删除映射表**（多 worker 一致、重启无损、零内存增长）

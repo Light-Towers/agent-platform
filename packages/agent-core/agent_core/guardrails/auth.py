@@ -10,123 +10,78 @@
 框架无关：仅依赖 stdlib，不 import 任何宿主应用或第三方包。
 ``DEFAULT_EXEMPT_PATHS`` 为可配置默认值，所有决策函数均接受 ``exempt_paths`` 覆盖。
 
-DUP-1 / CodeQL ``py/weak-sensitive-data-hashing`` 收口：本模块曾是全仓 **唯一的**
-「密钥 → 稳定指纹」实现（``fingerprint``），宿主不得再各自 ``hashlib.sha256(api_key)``
-（由 ``scripts/lint_architecture.py`` P6 不变量拦截）。历史四处散点实现语义分裂
-（全量 vs ``[:12]`` 48bit 截断、均无服务端 pepper），现已收敛到此。
+DUP-1 / CodeQL ``py/weak-sensitive-data-hashing`` 收口（B7b 全批已闭合）：本模块曾是
+全仓**唯一的**「密钥 → 稳定指纹」实现，现三条「凭据 → 摘要」通路已全部拆除，**且实现
+本体一并删除** —— 链③ LLM 客户端缓存键（B7b-1，改不透明 slot）、
+链② 限流桶（B7b-2，``resolve_client_key`` 改「服务端断言主体优先 → IP 兜底」）、
+链① 会话身份（B7b-4，旧 ``derive_thread_id`` 形参为 ``api_key`` → 现
+``resolve_thread_identity(principal)``：入参是服务端已断言的主体明文，**不做任何摘要**）。
+**本模块不再包含 ``hashlib`` / ``hmac`` 调用**：凭据不参与任何派生，宿主也不得再手写
+（由 ``scripts/lint_architecture.py`` P6 不变量拦截：裸哈希白名单已空 + 「凭据→摘要」入口名黑名单）。
 
-**B7b 进度（消费面收缩中，勿按旧账面判断）**：``fingerprint`` 的三条「凭据 → 摘要」
-通路已拆两条 —— 链③ LLM 客户端缓存键（B7b-1，改不透明 slot）、链② 限流桶
-（B7b-2，``resolve_client_key`` 改为「服务端断言主体优先 → IP 兜底」，不再读请求头
-凭据）。**唯一残留消费面是链① ``derive_thread_id``（会话身份）**，随 B7b-4 拆除后
-``fingerprint`` 与 ``AGENT_PLATFORM_SECURITY_PEPPER`` 一并退役（B7b-5）。
+为何删函数而非只改调用方（CodeQL 取证结论，勿按字面理解「只要没人调就安全」）：
+该规则的 Expensive 分支把**形参名即视为源**（``api_key`` 命中 password 启发式），
+故只要「``api_key`` 形参 → 摘要位」这条函数体内通路还在，告警就在 —— 与外部是否
+调用无关。改名消警是纯 gaming（被摘要的仍是凭据），唯一诚实出路是让会话身份与限流
+都不再从凭据派生。
 
-已登记的 CodeQL 定调（PR #33 重扫报出的 2 条新告警，结论与证据同步入库）：
-- ``fingerprint`` 行（HMAC-SHA256）→ **误报**：本规则针对「口令类低熵秘密」的离线
-  暴破，而此处输入是高熵 bearer secret，产物只做**查表标识**（现仅会话身份一路），
-  每请求计算；换 scrypt/pbkdf2 只添延迟、对 128bit+ 随机密钥无暴破增益，
-  且带 pepper 时离线计算还需先拿到 pepper。
-- ``legacy_thread_id`` 行（48bit 截断）→ **明知保留**：必须能复算升级前的旧身份，
-  否则历史会话无法找回；调用面由 P6-2 门禁锁死（仅迁移脚本），不入业务链路。
+旧格式常量（``user-`` 前缀）与 ``legacy_thread_id`` 已随 B7b-5 删除：历史会话标识**本已
+存在于数据里**（``updated/session_*/`` 目录名、``checkpoints.thread_id`` 行），迁移改为
+**枚举现存标识后重挂**，不再从密钥反算（见根 ``scripts/migrate_thread_identity.py``）。
+
+会话 id 前缀已由 ``user-`` 改为 ``tenant-``（主体是租户而非用户，名字要反映真实
+主体）：新格式与两代凭据摘要（``user-<12hex>`` / ``user-<32hex>``）在数据面上
+天然可分，旧数据的枚举式重挂因此不需长度/字符集启发式。
 """
 
-import hashlib
-import hmac
-import threading
+import re
 from typing import Mapping, Optional, Tuple
 
-from agent_core.config import env_str
-from agent_core.logging import get_logger
+# 会话身份前缀：主体已按「租户级」断言（Q1=(a)），故前缀如实写 ``tenant-``。
+# 与两代凭据摘要形态（``user-<12hex>`` / ``user-<32hex>``）在数据面可分，
+# 迁移判别式因此不需启发式（见 scripts/migrate_thread_identity.py）。
+THREAD_ID_PREFIX = "tenant-"
 
-logger = get_logger(__name__)
-
-# 服务端 pepper（HMAC 密钥）：跨部署不可关联性的来源，新增 env 已登记（README 清单）
-ENV_SECURITY_PEPPER = "AGENT_PLATFORM_SECURITY_PEPPER"
-
-# 指纹最短十六进制长度（128bit）：身份/会话派生不得低于此值（CodeQL 截断弱点根因）
-MIN_FINGERPRINT_HEX = 32
-
-# 会话身份：前缀 + 摘要长度（原 ``[:12]`` 48bit → 128bit，目录名仍远小于文件系统上限）
-THREAD_ID_PREFIX = "user-"
-THREAD_ID_DIGEST_HEX = 32
+# 合法主体字符集：ASCII 字母数字开头，后续允许 ``.`` ``_`` ``-``（总长 ≤ 64）。
+# 必须落在 kernel ``guardrails.fs.safe_filename`` 的**恒等集**内：该白名单为
+# ``[^\w.\- ]``，会把 ``:`` ``/`` ``\\`` ``*`` ``?`` ``<`` ``>`` ``|`` 等一律替换为 ``_``，
+# 于是租户 ``a:b`` 与 ``a_b`` 落盘同目录（会话互串）。内核**不做有损清洗**
+# （清洗 = 制造碰撞面），不符即 fail-fast：宁可在首请求报错，不可静默共用目录。
+_PRINCIPAL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 
 # 开发模式（未启用鉴权）的缺省会话
 DEV_THREAD_ID = "dev-default-thread"
 
-_pepper_warned = False
-_pepper_warn_lock = threading.Lock()
 
-
-def _pepper() -> str:
-    """读取服务端 pepper（每次调用读 env，便于测试注入与运行期显式配置）。"""
-    return env_str(ENV_SECURITY_PEPPER, "")
-
-
-def fingerprint(secret: str, *, length: Optional[int] = None) -> str:
+def resolve_thread_identity(principal: str) -> str:
     """
-    密钥/敏感标识 → 定长摘要（**全仓唯一实现**，DUP-1 收敛点）。
+    认证启用期的会话身份：``tenant-<服务端断言主体>``（**不做任何摘要**）。
 
-    ``HMAC-SHA256(pepper, secret)`` 的十六进制摘要，可选截断。相比此前散点的
-    裸 ``sha256(api_key)``：① 带服务端 pepper，同一密钥在不同部署下摘要不同
-    （跨部署不可关联）；② 截断有下限，杜绝 48bit 弱身份。
+    B7b-4（拆 CodeQL ``py/weak-sensitive-data-hashing`` 链①）：旧实现
+    ``derive_thread_id``（形参名即 ``api_key``）把调用方凭据当身份熵源——那正是本规则 Expensive 分支
+    的实锤通路（形参名即源）。本函数的入参是**已经服务端验签/断言的主体明文**
+    （如租户 id），与凭据无任何派生关系；产物可直接入目录名，故不需摘要。
 
-    为何不用口令散列 KDF（scrypt / pbkdf2 / bcrypt）：本函数输入是**高熵 API Key**
-    而非人工口令，产物只用作查表标识（不回用于验证密钥），属「密钥指纹」而非
-    「口令哈希」；慢 KDF 在此只会拖慢中间件热路径，对随机密钥的离线暴破无实际增益。
-    CodeQL 按变量语义名将其归为 password 类而报 ``py/weak-sensitive-data-hashing``，
-    定调为误报（理由同步记于本模块 docstring 与 ``docs/plans/plan-codeql-codescanning-remediation-2026-10-01.md``）。
-
-    .. warning::
-       新增调用点前先自问：「被摘要的是不是凭据？」链②（限流桶）与链③（LLM 缓存键）
-       当初都以「只是查表标识、不算泄露」为由接入，最终仍是 CodeQL 的实锤通路
-       （B7b-1/B7b-2 已拆）。主体/租户类标识请直接使用明文，不要经本函数派生。
-
-    :param secret: 待派生的密钥原文（仅在此处短暂使用，不落入返回值）
-    :param length: 返回的十六进制字符数；``None`` 为全量 64 位
-    :raises ValueError: ``length`` 不在 ``[MIN_FINGERPRINT_HEX, 64]`` 区间
+    :param principal: 服务端**已断言**的主体标识（宿主取值点：agent_server 用
+        ``server_tenant_id(default)``，联邦用 ``get_tenant_context()``）。
+        **严禁传凭据、凭据摘要或客户端可控值**（客户端可指定 = 会话劫持回归）
+    :return: ``tenant-<principal>``
+    :raises ValueError: 主体为空/全空白，或不在 ``_PRINCIPAL_RE`` 字符集内
+        （含会被 ``safe_filename`` 有损改写的字符，如 ``:`` ``/`` 空格）
     """
-    if length is not None and not (MIN_FINGERPRINT_HEX <= length <= 64):
+    bound = (principal or "").strip()
+    if not bound:
         raise ValueError(
-            f"length 必须在 {MIN_FINGERPRINT_HEX}~64 之间（128bit~256bit），当前 {length}"
+            "principal 必须为非空服务端断言主体（不得静默落共享会话桶）；"
+            "请检查身份断言链路：SINGLE_TENANT / 令牌 tenant_id claim / 部署级 default"
         )
-    pepper = _pepper()
-    global _pepper_warned
-    if not pepper and not _pepper_warned:
-        with _pepper_warn_lock:
-            if not _pepper_warned:
-                _pepper_warned = True
-                logger.warning(
-                    "[guardrails] %s 未配置：指纹仍可确定性派生，但失去跨部署不可关联性；"
-                    "生产部署请设置稳定 pepper（一经使用勿再变更，否则会话身份整体漂移）",
-                    ENV_SECURITY_PEPPER,
-                )
-    digest = hmac.new(pepper.encode("utf-8"), secret.encode("utf-8"), hashlib.sha256).hexdigest()
-    return digest if length is None else digest[:length]
-
-
-def derive_thread_id(api_key: Optional[str]) -> str:
-    """
-    认证启用期的会话身份：``user-{fingerprint(api_key, 32 hex)}``。
-
-    语义与历史一致（同一密钥稳定、客户端不可指定/猜测他人会话），仅派生强度变更；
-    既有落盘会话的迁移见 ``scripts/migrate_thread_identity.py``。
-    """
-    return f"{THREAD_ID_PREFIX}{fingerprint(api_key or '', length=THREAD_ID_DIGEST_HEX)}"
-
-
-def legacy_thread_id(api_key: Optional[str]) -> str:
-    """
-    【仅供一次性迁移/回归测试使用】升级前的弱派生 ``user-{sha256(api_key)[:12]}``。
-
-    调用面由 ``scripts/lint_architecture.py`` **P6-2 门禁**锁死：除本定义处与
-    ``scripts/migrate_thread_identity.py`` 外，出现对该函数的调用即 CI 失败
-    （Batch 2 当时只靠本 docstring 的约定，而 kernel 在 P6 白名单内——PR 重扫时
-    CodeQL 又报了这一行，故把约定升级为不变量）。
-    保留它是为了让 ``legacy → new`` 映射可计算（否则历史会话目录/检查点无法找回）；
-    它是 48bit 截断弱摘要，CodeQL 的告警形状**属实**但不可消除，定调为已接受风险。
-    """
-    digest = hashlib.sha256((api_key or "").encode("utf-8")).hexdigest()[:12]
-    return f"{THREAD_ID_PREFIX}{digest}"
+    if not _PRINCIPAL_RE.match(bound):
+        raise ValueError(
+            "principal 字符集非法（需匹配 ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$）："
+            f"当前 {bound!r} 含会被 safe_filename 有损改写或超长的字符，"
+            "不同租户可能落同一会话目录；请在宿主侧改用 filename-safe 的租户 slug"
+        )
+    return f"{THREAD_ID_PREFIX}{bound}"
 
 
 def extract_api_key_from_headers(headers: Mapping[str, str]) -> str:
@@ -150,7 +105,7 @@ def resolve_client_key(client_host: Optional[str], subject: Optional[str] = None
     解析限流 client 标识：**服务端断言主体优先，否则退回客户端 IP**。
 
     B7b-2（拆 CodeQL ``py/weak-sensitive-data-hashing`` 链②）：旧实现为鉴权启用且带上
-    ``X-API-Key``/``Bearer`` 时返回 ``key:{fingerprint(provided)}``——那是「凭据 → 摘要位」
+    ``X-API-Key``/``Bearer`` 时返回以 ``key:`` 为前缀的凭据指纹桶键——那是「凭据 → 摘要位」
     的实锤通路。本函数**不再读任何请求头**（签名里没有 headers 参数 ⇒ 凭据无法再流进来）。
     隔离粒度上两者不等价，**两面都得知道**：旧实现下同一把部署级密钥的所有客户端共用一个桶
     （一个打满→同密钥其他客户端连带 429）；新实现按 IP/主体独立，但**单客户端换 IP 可重置配额**
@@ -227,14 +182,9 @@ def format_validation_error(errors: list) -> str:
 
 
 __all__ = [
-    "ENV_SECURITY_PEPPER",
-    "MIN_FINGERPRINT_HEX",
     "THREAD_ID_PREFIX",
-    "THREAD_ID_DIGEST_HEX",
     "DEV_THREAD_ID",
-    "fingerprint",
-    "derive_thread_id",
-    "legacy_thread_id",
+    "resolve_thread_identity",
     "extract_api_key_from_headers",
     "resolve_client_key",
     "DEFAULT_EXEMPT_PATHS",

@@ -7,7 +7,6 @@ import ast
 import hashlib
 import pathlib
 
-from agent_core.guardrails.auth import ENV_SECURITY_PEPPER, fingerprint
 from agent_core.llm import registry
 from agent_core.llm.protocols import ChatModel
 from agent_core.llm.providers import BaseLLMProvider
@@ -50,14 +49,15 @@ def test_cache_hit_same_instance():
     assert prov.builds == 1
 
 
-def test_cache_key_carries_slot_not_any_digest(monkeypatch):
+def test_cache_key_carries_slot_not_any_digest():
     """B7b-1（取代原「键内必含指纹」断言）：键放不透明 slot，明文与任何摘要都不进键。
 
-    原用例断言 ``fingerprint(api_key) in key``——那是旧契约的实现细节。新契约只关心语义：
-    键内不得出现凭据明文、不得出现内核指纹、不得出现裸 sha256；密钥区分度改由 slot 承担。
+    新契约只关心语义：键内不得出现凭据明文，也不得出现凭据的**任何**摘要形态
+    （旧契约曾经内核指纹写进键位，那个入口函数已随 B7b 全批删除 ⇒ 本用例改为
+    穷举常见摘要算法 + 常见截断长度做否定式断言，不收窄而是加严）。
+    密钥区分度改由 slot 承担。
     """
     prov = _setup()
-    monkeypatch.delenv(ENV_SECURITY_PEPPER, raising=False)
     registry.get_llm_client(model="m", api_key="sk-secret-123", base_url="http://x", provider="fake")
     keys = list(registry._CLIENT_CACHE.keys())
     assert len(keys) == 1
@@ -68,10 +68,14 @@ def test_cache_key_carries_slot_not_any_digest(monkeypatch):
     assert registry._SLOTS[slot] == "sk-secret-123"
     # 构造仍拿到明文凭据（slot 化不得弄丢客户端鉴权所需信息）
     assert prov.seen_keys == ["sk-secret-123"]
-    # 键内既无明文，也无内核指纹，也无裸 sha256
+    # 键成分里既无明文，也无任何摘要（含旧 48bit 截断与 128bit 两种长度）
     assert "sk-secret-123" not in repr(keys[0])
-    assert fingerprint("sk-secret-123") not in keys[0]
-    assert hashlib.sha256(b"sk-secret-123").hexdigest() not in keys[0]
+    cred = b"sk-secret-123"
+    digests: set[str] = set()
+    for algo in ("md5", "sha1", "sha224", "sha256", "sha384", "sha512"):
+        full = hashlib.new(algo, cred).hexdigest()
+        digests |= {full, full[:12], full[:32]}
+    assert not set(keys[0]) & digests, keys[0]
 
 
 def test_changed_api_key_does_not_hit_old_client():

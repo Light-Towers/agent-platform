@@ -29,12 +29,12 @@ router = APIRouter()
 async def query(
     req: QueryRequest,
     request: Request,
-    api_key=Depends(verify_api_key),
+    _auth=Depends(verify_api_key),  # 仅作鉴权闸门：B7b-4 后会话身份不再从凭据派生，故本函数不使用其返回值
     x_priority: str | None = Header(default=None, alias="X-Priority"),
     traceparent: str | None = Header(default=None),
 ):
     settings = get_settings()
-    thread_id = resolve_thread_id(req.session_id, api_key)
+    thread_id = resolve_thread_id(req.session_id)
     graph = request.app.state.graph
     planner = getattr(request.app.state, "planner", None)
     planner_runtime = getattr(request.app.state, "planner_runtime", None)

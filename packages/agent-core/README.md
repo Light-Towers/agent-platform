@@ -9,7 +9,7 @@
 |---|---|---|
 | `agent_core.tracing` | init_tracing / get_tracer / start_span / traced_span / generate_request_id / set_request_context / get_request_id / user_query_hash / is_tracing_enabled | 仅 stdlib（OTel 为 extra） |
 | `agent_core.metrics.retrieval` | recall_at_k / hit_rate_at_k / mrr / dcg_at_k / ndcg_at_k / compute_retrieval_metrics | 纯 stdlib |
-| `agent_core.guardrails.auth` | extract_api_key_from_headers / resolve_client_key / is_health_path / should_skip_* / format_validation_error / fingerprint / derive_thread_id | 纯 stdlib |
+| `agent_core.guardrails.auth` | resolve_thread_identity（会话身份 = `tenant-<服务端断言主体>`，**不做摘要**）/ extract_api_key_from_headers / resolve_client_key / is_health_path / should_skip_* / format_validation_error | 纯 stdlib（**不 import hashlib/hmac**，B7b 后凭据不参与任何派生） |
 | `agent_core.guardrails.fs` | safe_join / resolve_within / safe_filename / PathTraversalError（用户可控路径的唯一安全解析入口） | 纯 stdlib |
 | `agent_core.guardrails.errors` | install_error_handlers / make_error_response / error_body / SANITIZED_5XX_MSG / mask_exception_for_client（出站错误脱敏的唯一边界点：HTTP 5xx 与 SSE 错误帧只回固定文案，异常全貌仅入服务端日志） | 纯 stdlib（starlette 为函数内懒导入，extra `web`） |
 | `agent_core.guardrails.ratelimit` | SlidingWindowRateLimiter / apply_api_rate_limit | 纯 stdlib |
@@ -39,7 +39,11 @@
 | `SILICONFLOW_API_KEY` | `""` | memory.embedder | 配了则 embedding 走远程硅基流动 |
 | `MONGO_URL` / `MONGO_DB` | `""` / `deepagents` | memory | Mongo 会话历史/checkpoint |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` / `AGENT_CORE_TRACE_ENABLED` | `""` / `false` | tracing | OTel 导出总开关 |
-| `AGENT_PLATFORM_SECURITY_PEPPER` | `""` | guardrails.auth | 密钥指纹的服务端 pepper（`HMAC-SHA256(pepper, secret)`）；现仅驱动 `fingerprint` / `derive_thread_id`（会话身份）——限流桶 key 已改「断言主体 → IP」（B7b-2），LLM 客户端缓存键已改不透明 slot（B7b-1）。一经使用勿变更，否则会话身份漂移（迁移见根 `scripts/migrate_thread_identity.py`） |
+
+> 本表曾登记 `AGENT_PLATFORM_SECURITY_PEPPER`（密钥指纹的服务端 pepper）：B7b 拆完三条
+> 「凭据 → 摘要」链（会话身份 / 限流桶 / LLM 客户端缓存键）后，指纹实现已作为死代码删除
+> ⇒ 该变量已无任何消费者，不再登记。历史 `user-<摘要>` 会话的重挂为**枚举式**（不需任何密钥），
+> 见根 `scripts/migrate_thread_identity.py`。
 
 ## 安装
 
