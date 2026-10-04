@@ -12,10 +12,19 @@
 
 ## 1. 通道（三选一，按代价排序）
 
-本机（Windows 开发机）**三条路都不通**，已实取：无 `docker` / 无 `kubectl` / 无 `podman` / 无 `~/.kube/config` / 无 `.env`；主 `docker-compose.yml` 不发布 5432，HA compose 只绑 `127.0.0.1:5433`；`root@192.168.100.126:22` 在 banner 交换前即被关闭（`Connection closed by remote host`，2026-10-02 四次 + 2026-10-03 一次同签名，属服务端侧限制，与本地密钥无关）。
+本机（Windows 开发机）**三条路都不通**。但 2026-10-04 重探后**根因已订正**：此前账面写的「`126` 在 banner 交换前被关闭 ⇒ 属服务端侧限制（fail2ban / `hosts.deny` / `MaxStartups` 一类）」是**误判**，本机从未真正到达过对端，那 5 次「同签名」重复观察没有排除任何东西。
+
+**订正后的根因：本机网络位置 + 本地代理 TUN 劫持（不是对端封禁）**
+
+- 本机在 `WLAN 192.168.1.11/24`，与部署段 `192.168.100.0/24` **不同网段**；`Find-NetRoute -RemoteIPAddress 192.168.100.126` ⇒ `nextHop=198.18.0.1`，流量进的是 `Meta`（`Meta Tunnel`，Clash Verge / `verge-mihomo` 的 TUN，持有 `0.0.0.0/0 via 198.18.0.2`），不是物理网关。本机 `OpenVPN TAP-Windows6` 适配器存在但状态 `Disconnected`。（推断非实测：2026-09 的经验记录里 126 的 SSH/SFTP 曾走通，说明当时网络位置或代理规则与现在不同。）
+- 该 TUN 对**整段所有端口**都「完成三次握手后立刻关闭」：126 的 `2375/2376/22/6443/8000/30443/12345/9999/8888/4321/5432` 全报 `TcpTestSucceeded=True`，而**随机且不存在的** `192.168.100.254:12345`、`.99:22`、`.241:8000`、`.125:6443` 同样"成功"。⇒ **在这台机器上 `TcpTestSucceeded=True` 不含任何信息**（TCP 层假阳性），它既不能证明端口开放，也不能证明服务在场。
+- 应用层实取（只读 GET，探针 `.codeartsdoer/temp/probe_deploy_channels.py`，输出落 `deploy_channel_probe.txt`）：`http://126:2375/_ping` ⇒ `RemoteDisconnected`；`https://126:2376/_ping` 与 `https://126:6443/version` ⇒ `SSLEOFError [UNEXPECTED_EOF_WHILE_READING]`；裸 socket 读 22 / 2375 ⇒ `recv` 返回 0 字节。⇒ 一条请求都没落到真服务，**连"端口开没开"都判不出来**。
+- 本机工具面（`Get-Command` 实取，非 `$LASTEXITCODE`）：`docker` / `kubectl` / `helm` / `psql` / `minikube` / `kind` / `colima` **present=False**；Docker Desktop 未安装；`wsl -l -v` 报未装发行版；无 `~/.kube/config`；仓库根无 `.env`。主 `docker-compose.yml` 不发布 5432，HA compose 只绑 `127.0.0.1:5433`。
+
+**通道清单（按代价排序；原第 2 条「恢复 126 的 22 端口访问」不再成立，已撤下——对端从未拒绝过我们）**
 
 1. **（首选）运维/用户在可达环境代跑 §2 + §3，把输出原样贴回**——本 runbook 的每条查询都设计为"输出不含敏感原值"，可直接入档。
-2. 恢复 `126` 的 22 端口访问（`fail2ban`/`hosts.deny`/`MaxStartups` 任一侧放行），随后按 §2/§3 自跑。
+2. **自助解阻（须由本人操作，因涉及本机路由/代理状态）**：在与 `192.168.100.0/24` 同网段的机器上跑；或连上 `OpenVPN`；或把该段加进代理 bypass（mihomo 的 `DIRECT` 规则 / TUN `exclude` 列表），并确认物理网关确有到该段的路由。**改完先做对照复核**：对 `192.168.100.254:12345` 这类"必然不存在"的端口再测一次，若仍 `TcpTestSucceeded=True` 就说明劫持仍在，取证结论照旧不可得。
 3. 临时 `NodePort` 暴露只读 psql（**属临时扩面，用完必撤**）：`kubectl -n agent-platform expose deploy/postgres --type=NodePort --name=pg-ro-tmp` → 取回 `NodePort` → 跑完立即 `kubectl -n agent-platform delete svc pg-ro-tmp`。
 
 拓扑速查（`deploy/k8s/`）：namespace `agent-platform`；PG 为 Deployment `postgres`（`pgvector/pgvector:pg16`，固定在 control-plane 兼任的数据节点），库 `agent_platform` / 用户 `agent`，口令来自 Secret `agent-platform-secrets` 的 `POSTGRES_PASSWORD`。

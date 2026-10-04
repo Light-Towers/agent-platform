@@ -2,6 +2,47 @@
 
 本仓库为 uv workspace monorepo。**唯一受支持的安装/运行入口是根 `uv.lock` + `uv sync`**，子包不再维护独立 `uv.lock`（见 v2 修复 #14）。
 
+## 取证链收尾（2026-10-04）：#64 / #63 合入 + 两个 tip 复验 PASS + **部署侧通道根因订正**
+
+> 零产品代码改动（本段只动 `CHANGELOG.md`、`docs/TODO.md`、`docs/operations/audit-operator-principal-runbook.md`、`docs/plans/plan-codeql-b7b-principal-thread-identity-2026-10-01.md`）。上一段（「尾项续」二批）止于 PR #64 开出；本段接上合入、主干复验，并**推翻一条已写进四处账面的旧结论**。
+
+### 1. PR #64 合入与 tip `789309c` 复验（判据 6）
+
+- **链路**：`056516f`（6 个测试文件 +34/−6 + 账面）+ `044c26d`（账面二批）→ **PR #64** → repo 门禁全 pass → **merge `789309c` @ `2026-10-04T00:55Z`**。merge 未夹带：`f9c75ae8316bd7a978454fab942532b737fd3d1c`（merge 树）与 PR head 树**全等**，对第一父 changed files **恰 8 个**。
+- **合入后立即复验取到的是「未达成」**（正确行为）：`[F]` 里 `ci` / `assembly` / `Analyze (python)` 仍 `in_progress`（push 事件刚触发），脚本判 **总体未达成 rc=1**，我没有把「刚合入还没跑完」洗成 PASS。约 35 分钟后在同一 sha 复跑：**总体 PASS rc=0**。
+- 实取（`verify_main_tip.py --merge-sha 789309c… --merged-at 2026-10-04T00:55:00Z --baseline-max-number 48`）：[A] analysis `1887362420`（actions @ `00:59:51Z`，rules 17）/ `1887364142`（python @ `01:00:42Z`，rules 43）均 `commit_sha=789309c`・`ref=refs/heads/main`・`results_count=0`；[B] open **0**；[C] `dismissed_at` 非空 **0**（总数 46）；[D] 最大告警号 **48**（= 基线，不增）；[E] 合入后新建 **0**；[F] `ci` / `ha` / `assembly` / `Analyze (python)` / `Analyze (actions)` **全 completed・success**；[G] 预期外 **0**。派生式预期集这次把 `ha`・`assembly` 判为**应触发**（本批改了 `packages/**` + `applications/**`），与上一段 §6 的「路径过滤控制触发面」措辞订正互验一致。
+
+### 2. 兄弟 PR 撞车：#63 变 CONFLICTING，冲突两侧都不许丢
+
+- `#64` 合入后 `#63`（同为文档链，head `66aa699`）由 UNKNOWN → **DIRTY / CONFLICTING**。`git merge origin/main`：`CHANGELOG.md` 自动合并，**`docs/TODO.md` 冲突**（标记 L107/L109/L111）。
+- **不靠肉眼看折叠 diff**（CJK 长行经显示通道会掺入假空格，上一轮已为此丢过一次 SearchReplace）：写探针从 git 的三个 stage 取字节做前缀判定 ⇒ merge-base `c0a9133`，冲突条目 `base=1454` 字、`ours_add=284`、`theirs_add=825`，**两侧都以 base 为前缀**（纯追记型）、互不包含（公共前缀 2 字）⇒ 解法只能是「两侧都保留 + 按时间顺序拼接」。
+- **撞出来的实际问题：数据点编号撞车**。分支侧先写了「**第三个数据点**（2026-10-03 23:20Z，PR #62 第二次 push）」，主干侧后写了「（2026-10-04 **第三、第四**数据点）」⇒ 字面拼接会数出两个「第三个」。已按时间序重编主干侧为「**第四、第五**数据点」，并把其结论句「四个独立数据点（两个代码 PR + 两个零/低代码 PR）」相应改为「**五个**独立数据点（两个代码 PR：#61 / #64；三次纯文档 push：#62×2 / #63）」。**内容零删减**，只动序号与计数句。
+- 解析脚本 `.codeartsdoer/temp/resolve_todo_conflict.py`：断言前缀关系 → 重排编号 → 替换冲突块 → 写 UTF-8（无 BOM）→ **解析后自检**（无 `<<<<<<<`/`=======`/`>>>>>>>`、两侧追加均在、行数 112→108 符合预期）。复验：`check_doc_sync.py` **rc=0**，merge commit `44de710` 对 `origin/main` 的 diff 恰为 `CHANGELOG.md` +4 / `docs/TODO.md` 3 行改写。
+- **登记为流程项**：同一批里开多个改同样文档文件的 PR 时，后合入者必然 CONFLICTING，且**文档型冲突的风险不是编译不过而是静默丢信息**——本轮若随手选 `--theirs`/`--ours` 就会丢掉一整段取证。⇒ 下次同类 PR 要么串行，要么合入前预期冲突并走上述三 stage 字节比对。
+- PR #63 在新 base 上门禁全 pass（`ci`×2 / `ha` / `assembly` / `Analyze`×2 / `CodeQL`，`gh pr checks 63 --watch` rc=0）→ **merge `91cd79a` @ `2026-10-04T01:29:20Z`**；merge 未夹带：`91cd79a^{tree}` = `44de710^{tree}` = **`cfd3fadcd83cf1845a37da4fb033b10bfc5f746b`**，对第一父 diff 恰 2 个文档文件。新 tip 复验（`--merged-at 2026-10-04T01:29:20Z`）**总体 PASS rc=0**：[A] `1887424643`（actions @ `01:29:53Z`）/ `1887425562`（python @ `01:30:24Z`）均 `results_count=0`；[B] **0**；[C] **0**（总数 46）；[D] **48** 不增；[E] **0**；[F] `ci` + 两个 `Analyze` 全 success；[G] **0**。本次派生预期集为 `{Analyze (actions), Analyze (python), ci}`——`ha`/`assembly` **不触发**（#63 净改动只含 `.md`），与 §6 的措辞订正再次互验。
+
+### 3. 本段最重要一条：**部署侧取证失败的根因先前判错了，判据还反了**
+
+账面在 `docs/TODO.md` §8、`docs/operations/audit-operator-principal-runbook.md`、`docs/plans/plan-codeql-b7b-principal-thread-identity-2026-10-01.md`、本文件里连续三次（2026-10-02 四次 + 10-03 一次 + 10-03 13:44Z 一次）记的是同一句话：「`192.168.100.126` 的 TCP 22 **可达**，但连接在 banner 交换前被关闭 ⇒ **属服务端侧限制**（fail2ban / `hosts.deny` / `MaxStartups` 一类），与本地密钥无关」。**这条因果是错的**，而且错法很典型：
+
+- 本机在 **`WLAN 192.168.1.11/24`**，与部署段 `192.168.100.0/24` **不同网段**；`Find-NetRoute -RemoteIPAddress 192.168.100.126` ⇒ `nextHop=198.18.0.1`，即流量交给 **`Meta Tunnel`**（Clash Verge / `verge-mihomo` 的 TUN，持有 `0.0.0.0/0 via 198.18.0.2`），根本没走物理网关。本机 `OpenVPN TAP-Windows6` 适配器存在但 `Disconnected`。
+- **对照实验**（这一步先前完全没做，是整条误判的根源）：对「必然不存在」的目标测同样的动作 ⇒ `192.168.100.254:12345`、`192.168.100.99:22`、`192.168.100.241:8000`、`192.168.100.125:6443` **全部 `TcpTestSucceeded=True`**；126 上 `2375/2376/22/6443/8000/30443/12345/9999/8888/4321/5432` 十一个端口也**全 True**。⇒ 该 TUN 对整段所有端口**完成三次握手后立刻关闭**，**`TcpTestSucceeded=True` 在这台机器上不含任何信息**，「TCP 可达」这个前提从来没被证实过，因此「对端拒绝」的推论也一并作废。**五次同签名重复观察排除不了任何东西**（它排除的是「每次随机失败」，而现象本来就稳定）。
+- 应用层只读实取（`probe_deploy_channels.py`，输出落 `deploy_channel_probe.txt`）：`GET http://126:2375/_ping` ⇒ `RemoteDisconnected`；`GET https://126:2376/_ping`、`GET https://126:6443/version` ⇒ `SSLEOFError [UNEXPECTED_EOF_WHILE_READING]`；裸 socket 读 22 / 2375 ⇒ `recv` **0 字节**。⇒ 一条请求都没落到真服务，**连「端口开没开」都判不出来**，更不能反过来认定服务在场或不在场。旁证：仓内 `packages/agent-runtime/agent_runtime/sandbox.py:10` 与历史经验记录都把 `tcp://192.168.100.126:2375` 当 Docker 端点 ⇒ 这条通道值得在有路由时一试，但今天拿不到证据。
+- **处置**：runbook §1 整段重写为订正版，**通道 2「请运维恢复 126 的 22 端口访问」撤下**（对端从未拒绝过我们），改为「同网段机器 / 连 VPN / 把该段加进代理 bypass」，并明确要求**改完先做随机死端口对照复核**，否则又会被同一个假阳性骗一次。`docs/TODO.md` §8 该行同步订正并标「旧定性已作废」。
+
+### 4. 本段新增两条「通道骗人」（累计到第七条）
+
+- **⑦ TCP 连接成功 ≠ 服务在场**：跨网段取证前先看路由表里默认路由归谁（本机 TUN/代理会假完成整段握手）。判「不可达」的正确姿势是**随机死端口对照**，不是 `Test-NetConnection`。
+- **⑧ 命令不存在时 `$LASTEXITCODE` 是脏值**：本轮 `docker version` 不存在（PowerShell 抛 `CommandNotFoundException` 是**语句级**终止，命令根本没执行），而紧跟的 `echo "rc=$LASTEXITCODE"` 打出 **`rc=0`**（沿用上一条命令的值）⇒ 差点被读成「docker 在且正常」。存在性判定必须用 `Get-Command <n> -ErrorAction SilentlyContinue`（本轮实测：`docker`/`kubectl`/`helm`/`psql`/`minikube`/`kind`/`colima` 全部 `present=False`，Docker Desktop 未装，`wsl -l -v` 报无发行版）。
+- 第六条（`>` 默认写 UTF-16 LE）本轮**再次踩到**（`gh pr checks --watch >` 的产物以 utf-8 读全是夹 NUL 文本），已把解码动作固化成可重跑工具 `.codeartsdoer/temp/normalize_dump.py`（按 BOM 嗅探 → 转 UTF-8 落盘再读）。
+
+### 5. 本段仍未闭合（不美化）
+
+- **部署侧两项取证仍为零**：`checkpoints` 存量 `user-*`、`revert_audit.operator` 历史行形态。解阻动作已从「等对端放行」换成本段 §3 的三条，且**任一条都需要对本机网络状态或集群的写权限/操作权**，不在我可代做的范围内。旧审计行仍**不自动改写**（Q3 拍板 (a)）。
+- ks 一次性 15 errors：本批未再现，根因仍未定（既有防复发契约用例已在位）。
+- **取证脚本本身仍未入库**（`docs/TODO.md` §5 那条 `[ ]`）：本段的 `resolve_todo_conflict.py` / `probe_deploy_channels.py` / `normalize_dump.py` 又增加了三个只活在 `.codeartsdoer/` 的可重跑指针——**这是同一个遗留的第二批证据**，三条候选路径仍待拍板（不拿「先方案后编码」当拖延借口的办法是把它列入本次提问）。
+- 10 个 BOM `__init__.py`（编码规范议题，未动）；PR #55（dependabot，L-4 下界需先归一，属独立决策面）。
+
 ## 审计主体去凭据化（实施）：`operator` 改服务端断言租户 + 新 **P12** 门禁 + ks shim 契约用例（2026-10-03，单 PR）
 
 > 承接下一段（同日的只读审计 + 方案）。Q1–Q4 已拍板「按建议四项全部实施」，ks 守卫用例「落」。方案：`docs/plans/plan-audit-operator-principal-2026-10-03.md`。**测量时点：HEAD `ffd86ab` 之上的本工作树（未 commit），extras 形态两种都实跑**（见「验证」条）。**后续状态**：已 commit（`116d51b`）→ PR #61 → 合入主干（`bb2b9a8`），合入与主干复验见 §6。
