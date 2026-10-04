@@ -41,7 +41,8 @@
 
 ### 5. PR #66 合入 `24d71b8`，判据 6 在「docsync 新门自己的 tip」上复验 PASS
 
-- checks：PR #66 上 **5/5 pass**（含 `Doc sync check` 与两条 `Analyze`、`ci` 矩阵）；合入前 `qodersec` **L3 深度评审 0 findings**（注意：门禁须**每批重问**，上一批选过「跳过」不构成这一批的推定）。
+- checks：PR #66 上 **5/5 pass**（`Analyze (actions)`、`Analyze (python)`、`CodeQL`、`ci` ×2）；合入前 `qodersec` **L3 深度评审 0 findings**（注意：门禁须**每批重问**，上一批选过「跳过」不构成这一批的推定）。
+- **一条账面订正（我自己写错的，不粉饰）**：上一段把 `Doc sync check` 说成一条独立的 check——**错**。它是 `.github/workflows/agent-platform-ci.yml` 里 `ci` **job 内的一个 step**（L66-67），所以在 checks 列表里永远不会单列。真实证据用 `gh run view <run> --json jobs` 取步骤面：PR #67 的 run 37189458592 里 step `Doc sync check` = **success**（与同 job 的 `CI gate` 均 success）。⇒ 口径：**区分 check 名与 job 内 step 名**，把 step 当成 check 写进账面，下一个人按 check 名去查就会查到「门禁没跑」这个假结论。
 - 合入 `24d71b8e2c9eea99356c8532f69d45598f43443b` @ `2026-10-04T05:10:53Z`；未夹带自证四项全 True：merge 树 == head 树、`^1 == 3546190e3aca`（旧 main）、`^2 == 52e4c79f949c`（head）、对旧 main 恰 **8 个文件** == `changedFiles`。
 - 判据 6 在新 tip：`scripts/evidence/verify_main_tip.py` **首跑 rc=1「未达成」**——`Analyze (python)` 与 `ci` 仍 `in_progress`，这正是 fail-closed 该有的行为（不许把「还没跑完」读成「通过」）；等待 210s 后复跑 **rc=0 PASS**：`[A]` 两条 analysis（1887840620 actions @ 05:11:31Z、1887841851 python @ 05:12:09Z，`commit=24d71b8` / `ref=refs/heads/main` / `results=0`）、`[B]` open **0**、`[C]` dismissed **0**（总数 46）、`[D]` 最大告警号 **48**（基线 48，不增）、`[E]` 合入后新建 **0**、`[F]` 三条全 completed/success、`[G]` 0。
 - **一条不成立的读数（登记为纪律）**：合入后的第一次未夹带自证**整套都是假读数**——脚本在 `git fetch` 之前跑本地 git，得到 `TREE_EQUAL=False`、`files_vs_old_main=0`、`merge-base rc=128`。根因：对象不在本地时 `git rev-parse <sha>^{tree}` **原样回显入参**而不报错。⇒ **合入取证必须先 `git fetch`**；任何本地 git 读数 rc≠0 或值反常，先怀疑对象可用性，不得据此下「夹带」结论。
