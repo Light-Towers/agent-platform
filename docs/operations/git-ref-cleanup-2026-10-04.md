@@ -69,3 +69,7 @@ git branch -a    # 期望：本地只剩 main；远端只剩 main / v2 / v3 / de
 ```
 
 执行后预期 `git ls-remote --heads origin` 恰好 4 条：`main`、`v2`、`v3`、`dependabot/uv/minor-and-patch-f18118ef2b`。本地预期剩 `main` 一个分支。**实际执行读数不入库**（本文给出的是可复核判据与预期，任何人可自行 `ls-remote` 验证结果，无需依赖我的转述）。
+
+## 后记（2026-10-04 晚，v2/v3 处置变更）
+
+本文 §4 的「远端预期剩 4 条」已被晚间清理轮取代：`v2` / `v3` 经用户显式指令删除（`git push origin --delete v2 v3` rc=0，随后 `git remote prune origin`）。变更依据：两分支经 `git branch -r --merged origin/main` 实取均已**完全合入 `main`**（v3 tip `26cd2fa` = 2026-09-27 PR #22 合并点、v2 tip `b691ff1` @ 2026-08-22），无独有内容可失；本文原列「刻意保留」的理由（远端不可逆且无 reflog 兜底）属风险提示，被「已确认合入 + 显式指令」覆盖。`dependabot/*`（OPEN PR #55 的 head 现场）与 `company` remote（另一套远端）保留理由不变。**现远端实测恰 2 条**：`main` / `dependabot/uv/minor-and-patch-f18118ef2b`；本地恰 `main`。本批台账见 `CHANGELOG.md`「评审遗留收口一批」§6。

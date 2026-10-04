@@ -54,11 +54,11 @@
 
 | 对象 | 实测形态（2026-10-04） | 处置 |
 |------|------------------------|------|
-| open PR | **#55**（dependabot，L-4 下界冲突）——唯一存量 open PR | #55 归 C 组第 1 条。本台账所属批次 **#68 已合入**（`2674be5` @ `2026-10-04T10:27:59Z`，checks 5/5 pass、L3 0 findings），其 head 分支已按 `docs/operations/git-ref-cleanup-2026-10-04.md` 的三重判据删除（本地 `-d` + 远端，未用 `-D`） |
+| open PR | **#55**（dependabot，L-4 下界冲突）——唯一存量 open PR | #55 归 C 组第 1 条。本台账所属批次 **#68 已合入**（`2674be5` @ `2026-10-04T10:27:59Z`，checks 5/5 pass、L3 0 findings），其 head 分支已按 `docs/operations/git-ref-cleanup-2026-10-04.md` 的三重判据删除（本地 `-d` + 远端，未用 `-D`）。**（2026-10-04 晚追记）**评审遗留收口批 **#70 亦已合入**（`7297a24` @ `13:12:48Z`，checks 5/5 pass、判据 6 首跑 PASS），head 分支随合入删除；#55 仍为唯一 open PR，处置口径不变（C 组第 1 条） |
 | open issue | **#23**（R19）· **#11**（v2→v3 母路线） | #23 = C 组第 5 条；**#11 无独立开项是既定处置而非遗漏**——`docs/plans/plan-v3-execution-platform-final-architecture-2026-09-22.md` 已写明「保留为母路线，本文件精化其优先级并补 4 个语义层」 |
-| Code Scanning 存量面 | open **0** / dismissed **0** / 最大告警号 **48** 不增（零 dismiss 至今） | 无待办；按 §5「指针语义」条，任何合入后须在新 tip 重跑 `scripts/evidence/verify_main_tip.py` 才算成立——**本轮已在 `2674be5` 实跑并 PASS**（两条 analysis 落 `10:28:32Z` / `10:29:06Z`，`results=0`；预期三条 check 全 `completed/success`；预期外非 success 0） |
+| Code Scanning 存量面 | open **0** / dismissed **0** / 最大告警号 **48** 不增（零 dismiss 至今） | 无待办；按 §5「指针语义」条，任何合入后须在新 tip 重跑 `scripts/evidence/verify_main_tip.py` 才算成立——**本轮已在 `2674be5` 实跑并 PASS**（两条 analysis 落 `10:28:32Z` / `10:29:06Z`，`results=0`；预期三条 check 全 `completed/success`；预期外非 success 0）**（2026-10-04 晚追记）**#70 合入后于新 tip `7297a24` 重跑判据 6 **首跑即 PASS**（双 analysis 落 sha、open/dismissed 0、最大号 48 不增；此前两批首跑均 rc=1「未达成」再复跑，本批首跑即过属首次） |
 | Dependabot alerts | `state=open` **0**（本文件 §8 口径，2026-10-04 重新实取确认未回退） | 告警面本身无存量，缺的是**门禁覆盖**（归 C 组第 1 条） |
-| 分支形态 | **实测终态与 `git-ref-cleanup` §4 预期吻合**：本地只剩 `main`；远端恰 4 条 `main` / `v2` / `v3` / `dependabot/uv/minor-and-patch-f18118ef2b`；`git status` clean、worktree 1 | 判据、删除前读数与三条刻意保留的理由见 `docs/operations/git-ref-cleanup-2026-10-04.md`。待删项归零 ⇒ 剩下的 3 条（`dependabot/*`、`v2`、`v3`）全部是**有理由的保留**，不是遗漏 |
+| 分支形态 | **（2026-10-04 晚更新，v2/v3 已删）**本地只剩 `main`；远端恰 2 条 `main` / `dependabot/uv/minor-and-patch-f18118ef2b`；`git status` clean、worktree 1 | 判据与删除前读数见 `docs/operations/git-ref-cleanup-2026-10-04.md`（其 §4「远端 4 条」的预期已被晚间清理轮取代，见该文末尾后记）。`v2`/`v3` 原列「刻意保留」，本次经用户显式指令删除——两分支经 `git branch -r --merged` 实取均已完全合入 `main`（无独有提交），原「远端不可逆」顾虑被覆盖；`dependabot/*` 保留理由不变（OPEN PR #55 的 head 现场）；`company` remote 整体不触碰 |
 
 ## 1. 前端界面（缺口最大项）
 
@@ -131,6 +131,8 @@
 
 - [x] **取证脚本全住在 gitignored 目录里，而账面把它们当可重跑指针**（2026-10-03 主动扫遗留时发现）：CHANGELOG / 本文件 / PR 正文反复引用 `.codeartsdoer/temp/verify_main_*.py`（判据 6、B7b-2/4 主干复验等）作为「下次必须在新 tip 上重跑」的指针对象，但整个 `.codeartsdoer/` **未入库**（实取：`git check-ignore -v .codeartsdoer/temp/verify_main_p12.py` 命中 `.gitignore:60` 的 `.*/` 规则；`git ls-files .codeartsdoer` 计数 **0**）⇒ **新克隆 / 换机器上这些脚本根本不存在**，账面判据的可复现性目前只在本机工作副本成立（`gh` 依赖、fail-closed 写法均未入库）。若要闭合：先定方案再动代码，候选三条——① `scripts/evidence/` 只收「主干复验」类可重跑脚本（小、纯只读 API），并让它受 `check_doc_sync.py` 的路径存在性校验；② 把关键判据改写成仓内 pytest 用例（需 `--allow-external` 类守卫，避开 CI 依赖网络）；③ 保持现状但在每处引用旁标明「本机脚本，未入库」。**本批不动（零代码，属先方案后编码面）**，且无论选哪条，脚本内容本身已经实跑验证，不影响已有结论的有效性。另记一个**属于脚本自身的假阳性陷阱**（已踩到并修，归入本项的入库理由）：用正则从 workflow 提 `jobs:` 名时，`jobs:` 位于文件末尾会导致匹配失败⇒该 check 静默掉出「预期应跑集合」，真阳性红会被归成「预期外」而不计入判定（本轮就是 `ci`）；已改 `yaml.safe_load` 解析，并在旧 tip `bb2b9a8` 上回归自证派生集与当时硬编码逐项一致（详见 CHANGELOG 同段 §6）。 **（2026-10-04 已按候选 ① 闭合，先方案后编码）**方案 `docs/plans/plan-evidence-scripts-intake-2026-10-04.md`；入库 `scripts/evidence/verify_main_tip.py`（判据 6 七项 fail-closed + 预期集按 `on.push.paths` × changed paths 派生 + PyYAML 缺席即 exit 2、**绝不降级回正则**）、`scripts/evidence/normalize_dump.py`（第六条坑本轮第三次踩到：`gh pr checks --watch >` 产物 raw 21824B 为 UTF-16 LE）、`scripts/evidence/README.md`；登记于 `ARCHITECTURE.md` §4.2 ⇒ 受 `scripts/check_doc_sync.py` 的文件引用存在性校验；回归用例 `tests/governance/test_evidence_scripts.py` **22 条**（autouse 拦断 `_run`/`gh_api` ⇒ 结构上不可能访问网络）。实取（均在改动后的树上）：三个主干 tip `bb2b9a8` / `789309c` / `91cd79a` 用**入库脚本**复验均 **rc=0 且 `=== 总体：PASS ===`**；派生集在 `bb2b9a8` 为 `{ci, assembly, Analyze×2}`（与当年硬编码逐项一致 ⇒ 没把该跑的漏掉）、在 `789309c` 多出 `ha`、在纯文档 tip `91cd79a` 仅 `{ci, Analyze×2}`（⇒ 不该跑的没进集合）；ruff rc=0、lint rc=0、docsync rc=0、新用例 22 passed。**「剥掉防线必红」自证**：把 `ARCHITECTURE.md` 里一条 evidence 引用改成不存在路径 ⇒ docsync rc=1 并指名 `ARCHITECTURE.md:129`，还原后 rc=0 且文件逐字还原（不入库，结论在此）。产物目录 `.evidence-out/` 实取被 `.gitignore:60` 的 `.*/` 规则忽略（`git check-ignore -v` 命中）⇒ 无需改 `.gitignore`。候选 ②（全判据 pytest 化）按方案 §2 非目标**不做**：`[A]`–`[G]` 需打 API，进 CI 即引入网络与配额面；候选 ③ 已被 ① 取代。CHANGELOG / 历史方案文档里指向 `.codeartsdoer/temp/*` 的旧句**原样保留**（append-only 快照，docsync 故意不校）。
 
+- [x] **（2026-10-04 晚·二轮评审补强，承接上条，PR #70）**`verify_main_tip.py` 加 **HEAD==tip 前置守卫**：「门禁预期集取自本地工作区 workflow」的隐式假设显式化——checkout 漂移即 `RuntimeError` → 既有 rc=2 `PRECONDITION_FAIL` 通道（fail-closed，绝不拿漂移的预期集硬算），用例钉住漂移必前置失败；`normalize_dump.py` 加 **`.utf8` 产物防链式跳过**（再喂产物 rc=1 并指名将生成的链式副本，不生成 `x.utf8.utf8`）+ `ValueError` 收口（`..` 类输入裸栈）。合入后判据 6 在 `7297a24` **首跑即 PASS**，守卫实战首用即通过（本地 checkout 恰在 tip）。
+
 - [x] **`check_doc_sync.py` 的存在性校验以本机 FS 为基准，本机 gitignored 脏目录会把它喂绿**（2026-10-04 由 CI 而非本机发现，第十条工具假阳性）：`check_architecture_paths()` 对「反引号内含 `/` 且以 `/` 结尾」的片段一律调 `Path.exists()`（**不过滤 `DOC_FILE_REF_ROOTS`**），而工作区里有 `.codeartsdoer/`、`.venv/`、`output/` 等整片 gitignored 目录 ⇒ **文档里写一个只在本机存在的目录，本地 rc=0 而 CI 红**。本批实踩：PR #65 推上 `7949357` 后 `Doc sync check` 报 `ARCHITECTURE.md:125: 路径不存在 '.codeartsdoer/temp/'`，而本地同命令一直绿。**本批只修了措辞**（`ARCHITECTURE.md` §4.2 / `scripts/evidence/README.md` 改成不包反引号的普通文本并明写「不是仓内路径」；**未改一行判定代码、未加白名单、未放宽阈值**），并在干净 worktree 上双向实取（旧措辞 ⇒ rc=1 与 CI 逐字一致 / 新措辞 ⇒ rc=0）。**门禁盲区本尊仍开**：下次再写一个 gitignored 目录仍会本地绿 / CI 红。若要消除，候选三条（属产品代码面，**按红线先方案后编码**，本条仅立项）：① 校验前用 `git ls-files`/`git check-ignore` 把判定面限制在 tracked 路径（最贴该门的本意：文档只能引用仓内路径）；② 在 CI 里多一步导出干净树后跑校验（仅把证据搬到 CI，不解决本机假绿）；③ 只对匹配已知 gitignored 前缀的引用告警（比 ① 弱，但改动面最小）。操作面已先入库：`docs/operations/testing-playbook.md` §2.4（干净检出取证姿势与双向约束）。
   **（2026-10-04 已按候选 ① 闭合，先方案后编码）**方案 `docs/plans/plan-doc-sync-tracked-scope-2026-10-04.md`。
   落地：`check_path_exists()` 的判定基准由 `Path.exists()` 改为 `TrackedIndex`（`git -C <base> ls-files -z`
@@ -151,7 +153,13 @@
   确需在该环境跑则显式传 `tracked=`）；③ 索引里有、本机被临时删的引用不判红（判定基准 = 索引，与 CI 同构，
   不是缺陷）；④ `git ls-files` 默认读**索引**而非 HEAD ⇒ stage 而未 commit 的新文件也算「已入库」，
   该缝隙靠验收 6 的**干净 worktree 复验**兜住（不改成 `ls-tree HEAD`：那会让「新文件尚未 stage」这种
-  常见中间态假红，噪声风险大于收益）。§2.4 的干净检出双向实取**保留为通用纪律**（其他以本机 FS/环境为依据的校验仍可能本地绿/CI 红）。
+  常见中间态假红，噪声风险大于收益）。  §2.4 的干净检出双向实取**保留为通用纪律**（其他以本机 FS/环境为依据的校验仍可能本地绿/CI 红）。
+  **（2026-10-04 晚·二轮评审收口批，PR #70）**残余局限 ① 处置升级（漏报面本身保留——逃生舱是 AGENTS.md 既定设计）：
+  `check_doc_file_refs` docstring 明写「无反引号普通文本」为登记在案的漏报面 + 回归用例钉住「普通文本不校」
+  （防未来好心补全成扫普通文本把全仓 gitignored 引用一夜打红）；同批修复 `check_architecture_paths` 对
+  **尾斜杠外链 URL** 的误报（`http` 开头一律跳过，旧逻辑 http+`/` 结尾会落到存在性校验必红）+
+  agents/architecture 两面 fail-closed 自证用例（补齐本项方案 §5.3 三面自证欠账，doc-refs 面已有）。
+  实取（@ `7297a24`）：governance **340 passed**（含新 5 条）· docsync/ruff/lint rc=0。
 
 ## 6. 待评估架构决策（未立项，动工前须先出方案，红线：禁止直接动手改代码）
 
