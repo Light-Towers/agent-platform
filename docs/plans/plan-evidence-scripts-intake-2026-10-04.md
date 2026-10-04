@@ -78,6 +78,9 @@ tip 上重跑」的**指针对象**，但整个 `.codeartsdoer/` 被 `.gitignore
 5. `uv run python scripts/check_doc_sync.py` rc=0 ⇒ 证明 `ARCHITECTURE.md` 里新增的
    `scripts/evidence/*.py` 引用**确实被存在性校验覆盖**（故意把一个引用改成一个不存在的路径，
    临时验证门禁会红，验完还原；该"剥掉防线必红"自证不入库，只在 PR 正文里报结果）。
+   - **（2026-10-04 实施后追记订正）本条的 rc=0 必须在干净检出上取**：该校验拿本机 FS 做基准，
+     本机 gitignored 目录会把存在性判成「存在」而返绿。正确做法：`git worktree add --detach
+     $env:TEMP\wt <sha>`（只落地 tracked 文件）后在该目录内跑。订正缘由与双向实取证见 §6.1 第 3 条。
 6. 账面收口：`docs/TODO.md` §5 该条目转 `[x]` 并附测量时点；CHANGELOG 新增实施段；
    本方案 §6 追加「实施结果」段。
 7. **反向判据**：脚本在未安装 PyYAML 的环境里必须 **fail-closed（exit 1 + 明确原因）**，
@@ -103,16 +106,28 @@ tip 上重跑」的**指针对象**，但整个 `.codeartsdoer/` 被 `.gitignore
 | 6 | 账面收口 | `docs/TODO.md` §5 该条已转 `[x]`（附测量时点与本表同口径数字）；CHANGELOG 新增实施段；本节即 §6 回填 |
 | 7 | PyYAML 缺席必 fail-closed | 未靠“应该没问题”：`monkeypatch` 把模块 `_yaml` 置 `None` ⇒ `derive_expected_checks` 抛 `EvidenceDependencyError`；另以 `main()` 报 `IMPORT_FAIL` 且 **rc=2** 钉住。同时验了 `PRECONDITION_FAIL`（`gh` 不可用）与 rc 映射未写反（PASS⇒0 / 未达成⇒1） |
 
-### 6.1 实施期间修掉的两个自身缺陷
+### 6.1 实施期间修掉的三个自身缺陷
 
 1. `gh_api(..., want_key="analyses")` 会 `AttributeError`——`code-scanning/analyses` 与 `alerts` 返回
    **顶层数组**，而 `check-runs` 返回 `{check_runs: []}`。改为 `want_key is None` 直返 +
    `isinstance(data, dict)` 守卫。
 2. 用例里用 `Path.write_text(..., encoding="utf-8")` 写含 `\n` 的样本，在 Windows 被转成 `\r\n` 而断言
    失败 ⇒ 取证类断言一律 `write_bytes`（属本批新踩的第九条编码坑，与 §3 表格里的 `newline=""` 同源）。
+3. **判据 5 的「基线 rc=0」当时不成立**（推上 `7949357` 后由 CI 推翻，而非本机发现）：§4.2 的引用块里
+   把探针原住址写成了反引号 + 尾斜杠的目录形，而 .codeartsdoer/temp **不是仓内路径**（被根
+   `.gitignore` 的 `.*/` 忽略）⇒ 本机存在所以本地 docsync 假绿，CI 干净检出上不存在所以红。
+   处置（只改措辞，不改判定代码/不加白名单/不放宽阈值）：改成不包反引号的普通文本并明写
+   「不是仓内路径」，路径字面值保留以便 `git check-ignore` 复核；`scripts/evidence/README.md` 同步。
+   双向实取（§3.1 的 worktree 法）：干净树 + 旧措辞 **rc=1**（与 CI 逐字一致）、干净树 + 新措辞 **rc=0**。
+   另存一条**残留盲区**（不属本方案验收面）：门禁本身仍以本机 FS 为基准，已登记 `docs/TODO.md`，
+   若要消除需改 `check_doc_sync.py`（产品代码面，按红线先方案后编码）。
 
-### 6.2 未达项：无
+### 6.2 未达项：判据 5 曾被推翻一次，已闭环
 
-本轮 §5 七条均达。仍需如实说明的局限（不属本方案验收面）：本机只能证明脚本在
+如实登记：§5 判据 5 首次回填时拿的是**本机脏树 rc=0**，推上后在 CI 变红 ⇒ 那次「已取证据」实际不成立（
+详见 §6.1 第 3 条）。2026-10-04 已按订正后的口径重取：干净检出上 rc=0，且反向（旧措辞 ⇒ rc=1）也实取。
+本批其余六条判据未被推翻。最终状态下七条均达，但判据 5 是**推翻后重取**的，不是一次过的。
+
+仍需如实说明的局限（不属本方案验收面）：本机只能证明脚本在
 **已登录 `gh` + PyYAML 在场**的形态下成立；无 `gh` 凭据的环境会走 `PRECONDITION_FAIL`（rc=2），
 **不得被当成通过**。
