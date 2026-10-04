@@ -2,6 +2,64 @@
 
 本仓库为 uv workspace monorepo。**唯一受支持的安装/运行入口是根 `uv.lock` + `uv sync`**，子包不再维护独立 `uv.lock`（见 v2 修复 #14）。
 
+## 取证脚本入库（2026-10-04，候选 ①）：判据 6 从「只在本机成立」变成「新克隆可原样重跑」
+
+> 方案：`docs/plans/plan-evidence-scripts-intake-2026-10-04.md`（先方案后编码，2026-10-04 用户拍板候选 ①）。
+> 零产品代码、零 workflow、零 `pyproject.toml`/`uv.lock`/`.gitignore` 改动。
+
+### 1. 为什么要入库（不是整洁癖）
+
+CHANGELOG / TODO / runbook 把「任何一次合入后必须在新 tip 上重跑」写成了指针对象，而指针原本住在
+`.codeartsdoer/temp/`——该目录被 `.gitignore:60` 的 `.*/` 整目录规则忽略（实取：`git ls-files .codeartsdoer` =
+**0**）⇒ **新克隆上这些脚本根本不存在**，判据 6 的可复现性只在某台机器的工作副本上成立。本批又新增
+3 个同类脚本（解冲突 / 部署通道探针 / 转码），即同一遗留的第二批证据，故从「登记」转「闭合」。
+
+### 2. 落地清单
+
+- **`scripts/evidence/verify_main_tip.py`**（入库版，由本机探针移植 + 三处适配）：七项 `[A]`–`[G]` 全
+  fail-closed；门禁预期集由 `on.push.paths` × changed paths **派生**（硬编码两个方向都会错）；
+  纯函数 `derive_expected_checks()` 与网络部分切开；输出可 `--out`，默认落 `.evidence-out/<sha8>.txt`
+  （实取：`git check-ignore -v` 命中 `.*/` ⇒ 无需改 `.gitignore`）；**PyYAML 缺席即 `IMPORT_FAIL` + 退出码 2，
+  刻意不回退正则**（正则取 `jobs:` 曾把真阳性红漏成「预期外」）。
+- **`scripts/evidence/normalize_dump.py`**：第六条坑本批**再次踩到**（`gh pr checks 65 --watch >` 产物
+  raw **21824B = UTF-16 LE**，以 utf-8 读全是夹 NUL 文本）⇒ 把「按 BOM 嗅探→转 UTF-8 落盘再读」固化为工具。
+- **`scripts/evidence/README.md`**：收录判据（会不会被「下次必须重跑」引用）、可直接复制的完整命令（本批踩过
+  「位置参数报 usage」）、三条实踩过坑、以及「本机没跑通不得声称已验证」。
+- **`tests/governance/test_evidence_scripts.py`**（**22 条**）：钉住派生式预期集的纯逻辑不变量——路径命中/不命中、
+  `on: push` 无过滤恒触发、**`jobs:` 位于文件末尾**（旧正则坑）、YAML 1.1 把 `on:` 解成布尔 `True` 键、无 `push`
+  触发器不进集合、真实 workflow 文本上「纯文档批次不期望 `ha`/`assembly`」、`_yaml=None` 必抛、`main()` 的
+  `IMPORT_FAIL`/`PRECONDITION_FAIL` ⇒ 2 与 rc 映射未写反。autouse 替身拦断 `_run`/`gh_api` ⇒ 结构上不可能访问网络。
+- **`ARCHITECTURE.md` §4.2**（登记位）：`check_doc_file_refs()` 只覆盖 AGENTS/ARCHITECTURE/README 三份，故必须
+  登记在此才受存在性门禁保护。
+
+### 3. 验收逐条实取（详见方案 §6，七条全达）
+
+- **三个主干 tip 用入库脚本重跑均 rc=0 `=== 总体：PASS ===`**：`bb2b9a8`（派生集 `{Analyze×2, assembly, ci}`，
+  与当年硬编码**逐项一致**）、`789309c`（含 `packages/**` ⇒ **多出 `ha`**，证明派生没漏）、`91cd79a`
+  （纯文档 ⇒ 仅 `{Analyze×2, ci}`，证明不该跑的没进集合）。
+- 数字（`91cd79a` @ `2026-10-04T01:29:20Z`，基线 48）：[A] `1887424643` actions @`01:29:53Z` / `1887425562`
+  python @`01:30:24Z` 均 `commit=91cd79a`・`results=0`・rules 17/43；[B] **0**；[C] **0**（总 46）；[D] **48** 不增；
+  [E] **0**；[F] 全 success；[G] 预期外 **0**。**零 dismiss**（[C] 只认自动 fixed）。
+- `ruff check .` rc=0 · `lint_architecture.py` rc=0 · `check_doc_sync.py` rc=0 · 新用例 **22 passed**。
+- **剥掉防线必红自证**（不入库，只报结果）：把 `ARCHITECTURE.md` 一条 evidence 引用改成不存在路径 ⇒
+  docsync **rc=1** 并指名 `ARCHITECTURE.md:129: 路径不存在 'scripts/evidence/verify_main_tip_MISSING.py'`；
+  还原 ⇒ rc=0、文件逐字相同、`crlf=0 bom=False`。
+
+### 4. 本批新修的两个自身缺陷 + 第九条坑
+
+1. `gh_api(..., want_key="analyses")` 会 `AttributeError`：`code-scanning/analyses` 与 `alerts` 返回**顶层数组**，
+   而 `check-runs` 返回 `{check_runs: []}` ⇒ 改为 `want_key is None` 直返 + `isinstance(data, dict)` 守卫。
+2. **第九条工具假阳性（Windows text 模式写文件会掺 CRLF）**：用例里 `Path.write_text(..., encoding="utf-8")`
+   写含 `\n` 的样本，实跑断言拿到 `\r\n` 而失败——同族问题也解释了为什么仓内所有写盘一律
+   `io.open(..., newline="")`。纪律：**取证类断言写字节，不写文本**。
+
+### 5. 仍未闭合（不美化）
+
+- 部署侧两项存量取证仍为 **0**（`revert_audit.operator` 历史行 / `checkpoints`）：本机被 `Meta Tunnel`
+  劫持，等网络侧调整后按 runbook §1 的对照复核流程重试。
+- knowledge-service 一次性 15 errors：**根因未定**（已收窄到唯一站点，需一次带 traceback 的再现才能定案）。
+- 10 个已入库的 BOM `__init__.py`；PR #55（Dependabot，L-4 下界）；P12 三条局限（属设计内残留面）。
+
 ## 取证链收尾（2026-10-04）：#64 / #63 合入 + 两个 tip 复验 PASS + **部署侧通道根因订正**
 
 > 零产品代码改动（本段只动 `CHANGELOG.md`、`docs/TODO.md`、`docs/operations/audit-operator-principal-runbook.md`、`docs/plans/plan-codeql-b7b-principal-thread-identity-2026-10-01.md`）。上一段（「尾项续」二批）止于 PR #64 开出；本段接上合入、主干复验，并**推翻一条已写进四处账面的旧结论**。
