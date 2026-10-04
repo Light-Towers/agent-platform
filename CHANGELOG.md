@@ -65,6 +65,16 @@
   - 打扫与门禁的顺序：门禁复跑会重新生成 `__pycache__` / `.pytest_cache` / `.ruff_cache`（可再生 ⇒ 属预期），所以**最后再执行一次仅缓存面的清理**并取终态读数。
 - 本地门禁实取（测量时点 2026-10-04，extras 形态 `uv run --no-sync`，树 = `b2c28b5` + 本批 `docs/TODO.md` 改动）：docsync **rc=0**（0 警告）· `ruff check .` **rc=0** · `lint_architecture.py` **rc=0**（P2/P4-2/P5–P12/L-1..L-4 全过）· `tests/governance` **335 passed in 59.17s**。
 
+### 8. PR #68 合入 `2674be5` + 判据 6 复验 PASS + 本批 ref 删除（收尾轮，不属原 PR）
+
+- **合入取证**（先 `git fetch` 再取数，沿用上一批的教训）：`state=MERGED` / `mergedAt=2026-10-04T10:27:59Z` / `mergeCommit=2674be515ae7…`，**未夹带四项全 True**：merge 树 == head 树（`dc985ca64975`）、`^1` == 旧 main（`432c3b402c80`）、`^2` == head（`8420662f13b3`）、对旧 main 的文件集 = 2 == `changedFiles`（`['CHANGELOG.md','docs/TODO.md']`）；本地 `git switch main` + `git merge --ff-only` 均 rc=0。
+- **判据 6 在新 tip 上跑了两轮**（时序教训第三次生效，不是偶发）：合入后首次实跑 **RC=1「未达成」**——`[A]` 当时主干无新 analysis、`[F]` 三条全 `in_progress`，其余 `[B]` open 0 / `[C]` dismissed 0（总 46）/ `[D]` 最大号 48 == 基线 / `[E]` 新建 0 / `[G]` 0 均已达标。**这不是失败，是 fail-closed 的预期行为**；等待后复跑 → **RC=0 `=== 总体：PASS ===`**（两条 analysis 落 `10:28:32Z` / `10:29:06Z`，`results=0`，rules 17/43）。⇒ 若把首跑的 RC=1 当成「门禁有问题」去改产品代码，就是被时序假象牵着走。
+- **ref 删除**：三重判据先取数落盘再动手——`cherry(+/-) = 0/0`、相对 base 独有文件 `0`、head 树 == mergeCommit 树 `True`、本地/远端镜像 `True`（均 `8420662f13b3`）。本地 `git branch -d` rc=0（**未用 `-D`**）；远端**第一次删除未成功**：PowerShell 组合行里 `git push origin --delete` 先报 `RC=255` 且 **stderr 为空**，我再跑一次 `$LASTEXITCODE` 干脆变成**空值**，而独立只读的 `git ls-remote --heads` 显示**分支仍在** ⇒ 退出码与 stderr 双双不可信。改走 `subprocess` 逐个取 rc/stdout/stderr 后 `rc=0` + stderr 有 `- [deleted]`，再以 `ls-remote` 复验终态：**远端恰 4 条 = 既定保留集**、本地只剩 `main`、status clean、worktree 1。**新的工具纪律**：不可逆动作的成败**只以独立只读复验为准**，PowerShell 组合行的退出码连 `git push` 这种长连接命令都会失真（此前只在 `git rev-parse` 一类短命令上见过）。
+- **缓存面必须分层**（差点误伤环境）：无差别 `-Recurse -Include '__pycache__',…` 量出 **1073 目录 / 140,050,288 字节**，分组后发现其中 **`.venv` 占 1039 目录 / 138,302,402 字节**——那是已安装环境的字节码，删它零收益、纯自伤（只会拖慢之后每一次运行）。真正的目标面是 workspace 的 **34 目录 / 1,747,886 字节**。⇒ 任何「可再生缓存清理」都必须先按 `.venv` / `.git` / workspace 分组量一遍再决定删谁。
+- **§7 承诺的「最后一步仅缓存面清理」已执行**（`.codeartsdoer/temp/cache_clean.py`，三条硬守卫：排除 `.venv`/`.git`/`node_modules`/`.mypy_cache`、逐个 `git check-ignore` 命中、目录名必恰为三个缓存名）。终态实取：候选 **34** / check-ignore 命中 **34** / 未命中 **0** / 已删 **34 目录、释放 1,747,886 字节、失败 0** / **复测残留 0 目录 0 字节**；反向证据：`.venv` 内 **1039** 个 `__pycache__` **仍在原处**（排除生效，环境未被波及）；同时 `git status` 只余本轮两份文档改动。
+- **一条自己刚写下的账面粉饰（不遮掩）**：§0.5 里「open PR = #55 · #68」与「本地只剩 `main`（+ 本轮 PR head）」两行，在我合入 + 删 ref 之后**立刻变成陈旧读数**——写的人是我，把账面写旧的动作也是我。已订正为实测终态。**规矩**：执行完不可逆动作的**同一轮**就要回写被它影响的账面行，不能留给「下次再说」，否则台账又退化成需要会话记忆才能读对的东西。
+- **本段读数的取证件**（均在 gitignored 区，由 `.gitignore` 的 `.*/` 规则覆盖；写进账面是为了让打扫脚本的 `git grep` 保留集认得它们，不至于下一轮把证据删掉）：`.codeartsdoer/temp/ref_readings.py` → `ref68_readings.txt`（三重判据）、`.codeartsdoer/temp/del_remote_ref.py`（删除 + 独立只读复验）、`.codeartsdoer/temp/verify_tip_2674be51.txt` 与 `.evidence-out/2674be51.txt`（判据 6 PASS 落盘）。
+
 ## 取证链二批（2026-10-04）：docsync 修复在 CI 得证 + 部署通道协议级复探 + PR #55 定到根因
 
 > 承接上一段（候选 ① 入库）。零产品代码、零 workflow、零依赖声明改动；本段只动 `CHANGELOG.md`、`docs/TODO.md`、`docs/operations/audit-operator-principal-runbook.md`。
