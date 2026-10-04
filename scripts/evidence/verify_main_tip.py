@@ -25,8 +25,8 @@
         --merge-sha <merge commit sha> \\
         --merged-at 2026-10-04T01:29:20Z --baseline-max-number 48
 
-退出码：0 = 总体 PASS · 1 = 总体未达成 · 2 = 前置不可用（依赖缺失 / gh 调用失败 /
-git 取不到 changed paths），前置不可用**从不**被算成通过。
+退出码：0 = 总体 PASS · 1 = 总体未达成 · 2 = 前置不可用（依赖缺失 / 本地 HEAD 不在待复核
+tip / gh 调用失败 / git 取不到 changed paths），前置不可用**从不**被算成通过。
 """
 
 from __future__ import annotations
@@ -179,6 +179,16 @@ def verify(merge_sha: str, merged_at: datetime, baseline_max_number: int) -> tup
     ok = True
     tip = _run(["git", "rev-parse", merge_sha])
     out.append("tip = %s   merged_at = %s" % (tip, merged_at.isoformat()))
+
+    # 门禁预期集取自**本地工作区** workflow（见下方 load_workflow_texts），其成立前提是
+    # checkout 就停在被复核 tip 上；漂移时预期集与被复核对象错位（该红的 check 没进集合）。
+    # ⇒ fail-closed：HEAD != tip 直接前置失败，绝不拿漂移的预期集硬算。
+    head = _run(["git", "rev-parse", "HEAD"])
+    if head != tip:
+        raise RuntimeError(
+            "本地 HEAD (%s) != 待复核 tip (%s)：门禁预期集取自本地工作区 workflow，"
+            "checkout 漂移即错位；请先 git checkout 该 tip 再复核" % (head[:12], tip[:12])
+        )
 
     changed = _run(["git", "diff", "--name-only", "%s^1" % tip, tip]).splitlines()
     expected, audit = derive_expected_checks(load_workflow_texts(Path(__file__).resolve().parents[2]), changed)
