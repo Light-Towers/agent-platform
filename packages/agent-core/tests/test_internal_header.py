@@ -25,8 +25,14 @@ def test_verify_missing_returns_none():
 
 def test_forged_signature_rejected():
     v = sign_internal_header("tenantA", None, key=KEY)
+    # 只破坏签名尾部 2 个 hex（payload/格式保持合法），且**按构造保证伪造串 != 合法串**：
+    # 旧写法固定换成 "ff"，而签名含时间戳每秒一变，真签名末尾恰为 "ff" 时
+    # forged == val ⇒ verify 正常返回，属 1/256 概率假失败（实测 1/261，docs/TODO.md 已登记）。
+    tail = "11" if v.endswith("00") else "00"
+    forged = v[:-2] + tail
+    assert forged != v, "伪造串与合法串相同 ⇒ 本用例没在校验签名，判据失效"
     with pytest.raises(InternalHeaderError):
-        verify_internal_header(v[:-2] + "ff", key=KEY)
+        verify_internal_header(forged, key=KEY)
 
 
 def test_wrong_key_rejected():

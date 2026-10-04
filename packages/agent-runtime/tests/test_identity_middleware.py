@@ -81,7 +81,12 @@ def test_valid_bearer_binds_tenant():
 
 def test_forged_bearer_rejected():
     hdrs = _bearer()
-    hdrs["Authorization"] = hdrs["Authorization"][:-3] + "AAA"  # 破坏签名
+    auth = hdrs["Authorization"]
+    # 破坏签名尾部 3 个 b64url 字符，且按构造保证 != 原串（旧写法固定换成 "AAA"，
+    # 末尾恰为 "AAA" 时退化为原值，属 1/262144 概率假失败，docs/TODO.md 已登记）。
+    forged = auth[:-3] + ("AAA" if not auth.endswith("AAA") else "AAB")
+    assert forged != auth, "伪造串与合法串相同 ⇒ 本用例没在校验签名，判据失效"
+    hdrs["Authorization"] = forged
     tenant, status = _run({"verify": _verify, "verify_header": None}, hdrs)
     assert status == 401
 
