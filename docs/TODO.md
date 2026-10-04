@@ -54,11 +54,11 @@
 
 | 对象 | 实测形态（2026-10-04） | 处置 |
 |------|------------------------|------|
-| open PR | **#55**（dependabot，L-4 下界冲突）· **#68**（本台账与 §8 补录所属批次） | #55 归 C 组第 1 条；#68 合入后其 head 分支按 `docs/operations/git-ref-cleanup-2026-10-04.md` 的判据删除 |
+| open PR | **#55**（dependabot，L-4 下界冲突）——唯一存量 open PR | #55 归 C 组第 1 条。本台账所属批次 **#68 已合入**（`2674be5` @ `2026-10-04T10:27:59Z`，checks 5/5 pass、L3 0 findings），其 head 分支已按 `docs/operations/git-ref-cleanup-2026-10-04.md` 的三重判据删除（本地 `-d` + 远端，未用 `-D`） |
 | open issue | **#23**（R19）· **#11**（v2→v3 母路线） | #23 = C 组第 5 条；**#11 无独立开项是既定处置而非遗漏**——`docs/plans/plan-v3-execution-platform-final-architecture-2026-09-22.md` 已写明「保留为母路线，本文件精化其优先级并补 4 个语义层」 |
-| Code Scanning 存量面 | open **0** / dismissed **0** / 最大告警号 **48** 不增（零 dismiss 至今） | 无待办；按 §5「指针语义」条，任何合入后须在新 tip 重跑 `scripts/evidence/verify_main_tip.py` 才算成立 |
+| Code Scanning 存量面 | open **0** / dismissed **0** / 最大告警号 **48** 不增（零 dismiss 至今） | 无待办；按 §5「指针语义」条，任何合入后须在新 tip 重跑 `scripts/evidence/verify_main_tip.py` 才算成立——**本轮已在 `2674be5` 实跑并 PASS**（两条 analysis 落 `10:28:32Z` / `10:29:06Z`，`results=0`；预期三条 check 全 `completed/success`；预期外非 success 0） |
 | Dependabot alerts | `state=open` **0**（本文件 §8 口径，2026-10-04 重新实取确认未回退） | 告警面本身无存量，缺的是**门禁覆盖**（归 C 组第 1 条） |
-| 分支形态 | 本地只剩 `main`（+ 本轮 PR head）；远端恰 4 条 `main` / `v2` / `v3` / `dependabot/uv/minor-and-patch-f18118ef2b` | 判据、删除前读数与三条刻意保留的理由见 `docs/operations/git-ref-cleanup-2026-10-04.md` |
+| 分支形态 | **实测终态与 `git-ref-cleanup` §4 预期吻合**：本地只剩 `main`；远端恰 4 条 `main` / `v2` / `v3` / `dependabot/uv/minor-and-patch-f18118ef2b`；`git status` clean、worktree 1 | 判据、删除前读数与三条刻意保留的理由见 `docs/operations/git-ref-cleanup-2026-10-04.md`。待删项归零 ⇒ 剩下的 3 条（`dependabot/*`、`v2`、`v3`）全部是**有理由的保留**，不是遗漏 |
 
 ## 1. 前端界面（缺口最大项）
 
