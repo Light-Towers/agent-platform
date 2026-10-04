@@ -53,6 +53,18 @@
 - 判据取本仓既有经验：base 用**该分支 PR 的真实 `baseRefName`**（不是默认分支），`git cherry -v` 的 `+` 为 0 + 相对 base 独有文件为 0 + **树 OID 全等**（本仓 `--merge` 非 squash，`mergeCommit` 即真实 merge 提交）三重。计数类判据在 squash 场景会假阳性，不采信。
 - 结果分两段：**本地 7 个已在本批删除**（6 个已合并 PR 分支 + `v3` 本地副本），`git branch -d` 全部成功（**未使用 `-D`**，git 拒绝即说明判据不成立，届时停手不强删）；**远端 6 个同名分支待本 PR 合入后删除**（远端不可逆且无 reflog 兜底，所以取证必须先入库）。**刻意的保留**三条，且写清理由而非遗漏：`origin/dependabot/...`（open PR #55 的 head，独有 1 提交 + 10 文件，删它等于毁掉那条决策线现场）、`origin/v2`/`origin/v3`（版本线同名 + 远端不可逆且无 reflog 兜底）、`company` remote 整体不触碰。`git branch -d` 全部成功（未使用 `-D`）反证判据成立。
 
+### 7. 剩余问题台账化（`docs/TODO.md` §0）+ 工作区打扫（PR #68 追加）
+
+- 用户口径「剩余的问题记录到 TODO 任务中去 / 清理打扫下」⇒ 两件事分开做，**先对账再动手**。
+- **台账**（`docs/TODO.md` 新增 §0，**纯索引表、不写复选框 ⇒ 不改开项计数**）：把全部开项按解锁条件重排为 **B 需外部条件 4 / C 需拍板或先出方案 5 / D 功能面存量 16 / E Low 技术债 6 = 31**，每条给「锚点 + 卡在哪（实测）+ 最小可执行解锁动作」；另加 §0.5 **非开项对账**（open PR #55・#68 / open issue #23・#11 / Code Scanning 面 / Dependabot alerts / 分支终态），防「TODO 里没有」被误读成「不存在」。
+- **一条账面订正（我自己的，不粉饰）**：上一轮口头给出的「B4 / C5 / D13 / E7 = 29」与本文件实测的 **31** 不吻合——口头分表把两条**并非 TODO 开项**的账面残口算进了 A 类，又漏了 §7 检索/存储的 3 条。差异成因不做推定复现；**规矩改成：这类对账只从文件逐条生成，不做口头汇总**。改后重跑审计脚本实取 **open=31 / closed=7**（与改前一致 ⇒ 本次确实零新增开项）；同一次重跑再一次确认顶格正则 `^- \[ \]` 只取到 15 条（漏 16 条缩进/续行）。
+- 顺带重新实取两个外部面（不沿用旧读数）：`gh api repos/…/dependabot/alerts?state=open` **0**；`gh issue list --state open` = **#23 + #11**。#11 无独立开项属**既定处置**而非遗漏——`docs/plans/plan-v3-execution-platform-final-architecture-2026-09-22.md` 已写明「保留为母路线，本文件精化其优先级并补 4 个语义层」。
+- **打扫（全部在 gitignored 区）**：temp 顶层 **538 → 45** 个文件（余 339,894 字节）；**归档不销毁**——493 个一次性产物 + 2 个 scratch 目录（`sessions/` 第三批批量日志、`lint_selftest/`）压入 `temp/_archive/session-probe-artifacts-2026-10-04.zip`，实取 **508 条目 / 解压后 8,254,571 字节 / zip 4,384,680 字节 / `testzip()` 返回 None**；可再生缓存 **120** 个目录全删（释放 12,037,555 字节）。打扫当时 `git status` 只余 `M docs/TODO.md`（本段 CHANGELOG 改动写在其后）⇒ 结构上零 tracked 文件被触碰。
+  - **保留集是取证出来的，不是我记的**：脚本现取 `git grep` 全 tracked 文档里点名的 `.codeartsdoer/temp/*`（**32 个名字**，含 `verify_main_*.py` / `q_*.ql` 两个通配前缀）逐个保留，另整体保留 `fixture_skip_probe/`、`sessions-b1/`、`sessions-b2/`（§5 已登记为证据）与**不是本会话产物**的 `accept/`（IDE 会话快照，删它可能破坏该工具自己的回滚面）、`wiki-staging/` ⇒ 账面指针不会因一次打扫而失效。
+  - 两条属于打扫工具自己的坑（都已修，不掩盖）：① `git grep` 默认 BRE 里 `+` 是**字面加号**，我写成 `[…]+` ⇒ rc=1「无匹配」，脚本的 `assert rc == 0` 按 fail-closed 停手——**若没有那道断言，这会被读成「temp 里没有任何被账面引用的脚本 ⇒ 可全删」，又是一条「不存在型」假阴性**（与 §5 已登记的否定性结论需第二通道复核同源）；② PowerShell `> temp/cleanup_run.txt` 的**重定向目标止于扫描集内且被 shell 占用**，`p.unlink()` 撞 `PermissionError` 中途崩（此前已删 84 个）⇒ 修法：输出改到 temp 外、`unlink()` 捕获 `PermissionError` 只记账不崩、归档从 `mode="w"` 改 **append**（重写同名 zip 会毁掉上一轮已入档的条目）。
+  - 打扫与门禁的顺序：门禁复跑会重新生成 `__pycache__` / `.pytest_cache` / `.ruff_cache`（可再生 ⇒ 属预期），所以**最后再执行一次仅缓存面的清理**并取终态读数。
+- 本地门禁实取（测量时点 2026-10-04，extras 形态 `uv run --no-sync`，树 = `b2c28b5` + 本批 `docs/TODO.md` 改动）：docsync **rc=0**（0 警告）· `ruff check .` **rc=0** · `lint_architecture.py` **rc=0**（P2/P4-2/P5–P12/L-1..L-4 全过）· `tests/governance` **335 passed in 59.17s**。
+
 ## 取证链二批（2026-10-04）：docsync 修复在 CI 得证 + 部署通道协议级复探 + PR #55 定到根因
 
 > 承接上一段（候选 ① 入库）。零产品代码、零 workflow、零依赖声明改动；本段只动 `CHANGELOG.md`、`docs/TODO.md`、`docs/operations/audit-operator-principal-runbook.md`。

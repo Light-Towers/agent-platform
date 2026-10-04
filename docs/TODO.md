@@ -4,6 +4,62 @@
 >
 > 除标注「非阻塞，可随日常改动顺带处理」外，均遵循红线「所有代码优化/重构必须先制定方案」（见 `AGENTS.md`），动工前需先出独立方案文档。
 
+## 0. 剩余问题台账（按解锁条件分级 · 索引表，不新增开项）
+
+> **本节只做重排，不做双写**：行内不写复选框 ⇒ 不改变开项计数。实测（2026-10-04 @ 树 `b2c28b5`，脚本按小节分组统计、含缩进续行）：**open 31 / closed 7**；顶格正则 `^- \[ \]` 只能取到 15 条（漏 16 条）⇒ **计数口径必须先定义再引用**。
+> **一条订正（不粉饰）**：上一轮会话口头给出的「B4 / C5 / D13 / E7 = 29」与本文件实测的 **31** 不吻合（口头分表把两条**并非 TODO 开项**的账面残口算进了 A 类，又漏掉了 §7 的 3 条）。差异成因不做推定复现，**今后这类对账一律从文件逐条生成，不做口头汇总**。
+> 分级口径：**B** 需外部条件（本机与本仓都改不了）· **C** 需人拍板或需先出方案 · **D** 功能面存量（先方案后编码）· **E** Low 技术债（非阻塞，可随日常改动顺带）。B4 + C5 + D16 + E6 = **31**，与实测开项数吻合。
+
+### 0.1 B 需外部条件（4 条）
+
+| 事项 | 锚点 | 卡在哪（实测） | 解锁动作（最小可执行） |
+|------|------|----------------|------------------------|
+| knowledge-service session 一次性 15 errors 的**根因定案** | §5 | 现场包装脚本只留末 3 行 ⇒ traceback 丢了；本地 20 个 session 与 CI 均未再现，但 CI 跑的是另一种 extras 形态 ⇒ **不构成排除证据**（§5 已论证） | 复跑必须把**完整输出落文件**；一旦再现，先取 ERROR 阶段的 fixture 名再定性（已用计数算术收窄到唯一站点 `test_tracing.py` 的 autouse `_reset_tracing`） |
+| agent_federation R1 漂移门禁的真实基线 | §8 | 本机无 LLM API key ⇒ 基线文件（待生成）`evaluation/fed_latest.jsonl` 生成不了 | 在有 key 的环境跑一次 `--baseline`，此后 `--compare --fail-below` 才能进门禁（比对逻辑本身已有单测覆盖） |
+| 部署侧存量取证 A/B（`checkpoints` 里存量 `user-*` thread_id · `revert_audit.operator` 历史行） | §8 + §5「审计主体」条 | 本机 `Meta Tunnel`（TUN）把整段 `192.168.100.0/24` 接管 ⇒ `TcpTestSucceeded=True` **不携带任何信息**；`docker` / `kubectl` / `psql` 全部 NOT FOUND、根无 `.env` | 二选一：同网段机器或 VPN 上代跑 `docs/operations/audit-operator-principal-runbook.md`；或本人把该段加进代理 bypass，且**先用「随机死端口对照法」复核劫持已解除**再取证 |
+| Copilot「Code scanning AI findings」工作流恒失败 | §8 | 平台侧月度配额（`SessionModelError … monthly quota` / `statusCode 402`），五个独立数据点里含**零代码 PR** ⇒ 与本仓 diff 无关 | 本仓改不了；要消噪只能在 GHAS 设置里关 AI findings。它未挂必需检查，不阻塞合并 |
+
+### 0.2 C 需拍板 / 需先出方案（5 条）
+
+| 事项 | 锚点 | 卡在哪 | 解锁动作 |
+|------|------|--------|----------|
+| PR #55 处置两步 + Dependabot alerts **门禁盲区** | §8 | ① 关 #55 是外部可见、不可逆动作（须单独批准）；② 「哪些组可抬」需先出方案——实测影响面 **10 文件（9 个 `pyproject.toml` + `uv.lock`）/ 39 组 bump**，含 `langchain-core >=0.3 → 1.6.5`、`sqlglot >=25.0 → 30.20.0` **跨主版本线**；③ `maintainerCanModify: false` ⇒ 不能就地改 dependabot 分支；④ 是否新增 alerts 门禁仍未决策 | 先出方案（可抬组清单 + 保留 `opentelemetry-api>=1.24` 的已敲定口径 + 门禁三选一），获批后再执行「关票 + 自建 lock-only PR」，并同判据删除其 head 分支 |
+| `ExecutionContext` 是否迁移到 PyJWT + 标准 JWT | §6 | 契约变更，下游消费者未审计 | 先出消费者清单与兼容窗口/回滚路径，再决定动或不动 |
+| Milvus 与 pgvector 双向量库长期是否统一 | §6 | 两边各自可用，统一属架构取舍（运维一致性 vs 迁移风险） | 先写清收益判据；无判据不动 |
+| U-1：`QueryRequest` 入站字段双写兼容层能否移除 | §6 | 兼容层的真实消费者是否存在**未取证** | 采集真实调用形态 ⇒ 无消费者则删，有则定弃用窗口 |
+| R19（GitHub issue #23）：FastAPI ≥ 0.142 原生 telemetry 与 kernel `TracingMiddleware` 双埋点 | §6 | 需确认框架无其它自配 provider 残留路径；端到端复验要真集群（通道问题归 B 组第 3 条） | 最小改动已定型：`build_api_app` 内关 telemetry + `scripts/lint_architecture.py` 加门禁；集群复验等有通道时再做 |
+
+### 0.3 D 功能面存量（16 条，全部「先方案后编码」，无外部条件依赖）
+
+| 组 | 条数 | 逐条事项 | 锚点 |
+|----|------|----------|------|
+| 前端 | 3 | 技术栈选型 · 前端↔后端错误契约对齐审计（须先于 P2 的 D-2/D-4 后端收敛决策）· 引入前端工程时同步补 CI 门禁 | §1（6 个应用各自的形态盘点在 §1 表内，**表行不计入开项**） |
+| V3 执行平台验收 | 1 | 端到端双实例物理故障转移验收（背后是 §2 的缺口 1–10，逐条需独立方案） | §2 |
+| 未接线半成品转正 | 3 | `human_task` / `execution_recovery` / `state_migration` / `payload_externalization` · exhibition `skill_router` 接线 · `agent_server` `/health` 上报 V3 组件状态 | §3（禁止直接删除：未接线 ≠ 死代码） |
+| 会展业务骨架 | 6 | F1-D Vault/KMS · F2 真实 LLM 连接（需产品决策输入）· F01 `enforce_scope_filter` · F02 READY 数据源 · F03 同具体性不同租户样本规则 · nl2sql-service 通用化后填具体端点 | §4 |
+| 检索 / 存储增强 | 3 | LightRAG 式图谱增强检索 · MySQL 业务库支持 · 多租户配额/隔离/计费 | §7 |
+
+### 0.4 E Low 技术债（6 条，非阻塞，可随日常改动顺带处理）
+
+| 事项 | 锚点 | 为什么留着（不是遗漏） |
+|------|------|------------------------|
+| D1 产品代码单字母变量改语义名 | §5 | 全仓散布、纯可读性，风险高于收益 |
+| D4 ruff `ignore` 存量基线逐包收窄 | §5 | 需逐条评估删除后是否仍违规 |
+| D5 `agent_core` 历史溯源注释泛化改写 | §5 | 81 处多数有档案价值，需人工逐条判断 |
+| D7 裸 `except Exception:` 存量按 ratchet 逐文件烧除 | §5 | 门禁已常驻防新增，不追求逐点清零 |
+| D8 `zhanggui-zhiku/core/config.py` 评估迁 pydantic-settings | §5 | 课程脚手架，非主线 |
+| 10 个已入库的 UTF-8 BOM `.py` | §5 | 不影响 import（PEP 263 加载器剥 BOM）；若要清零须同时摘除 lint P12 里的 `utf-8-sig` 兼容并将该条回归用例调转 |
+
+### 0.5 非开项对账（防止「TODO 里没有 = 不存在」）
+
+| 对象 | 实测形态（2026-10-04） | 处置 |
+|------|------------------------|------|
+| open PR | **#55**（dependabot，L-4 下界冲突）· **#68**（本台账与 §8 补录所属批次） | #55 归 C 组第 1 条；#68 合入后其 head 分支按 `docs/operations/git-ref-cleanup-2026-10-04.md` 的判据删除 |
+| open issue | **#23**（R19）· **#11**（v2→v3 母路线） | #23 = C 组第 5 条；**#11 无独立开项是既定处置而非遗漏**——`docs/plans/plan-v3-execution-platform-final-architecture-2026-09-22.md` 已写明「保留为母路线，本文件精化其优先级并补 4 个语义层」 |
+| Code Scanning 存量面 | open **0** / dismissed **0** / 最大告警号 **48** 不增（零 dismiss 至今） | 无待办；按 §5「指针语义」条，任何合入后须在新 tip 重跑 `scripts/evidence/verify_main_tip.py` 才算成立 |
+| Dependabot alerts | `state=open` **0**（本文件 §8 口径，2026-10-04 重新实取确认未回退） | 告警面本身无存量，缺的是**门禁覆盖**（归 C 组第 1 条） |
+| 分支形态 | 本地只剩 `main`（+ 本轮 PR head）；远端恰 4 条 `main` / `v2` / `v3` / `dependabot/uv/minor-and-patch-f18118ef2b` | 判据、删除前读数与三条刻意保留的理由见 `docs/operations/git-ref-cleanup-2026-10-04.md` |
+
 ## 1. 前端界面（缺口最大项）
 
 现状盘点（本仓库未追踪任何 `package.json` / Vue / React 工程，`courses/zhanggui-wenda/data-agent-fronted` 仅为课程脚手架，本地未入库）：
