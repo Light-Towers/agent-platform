@@ -119,7 +119,11 @@ def test_internal_header_forged_rejected():
     # 攻击者篡改租户位、用错误密钥无法重签
     tenant, user = verify_internal_header(hdr, key=key, max_age=300)
     assert tenant == "tenantA"
-    forged = "v1." + hdr.split(".")[1][:-1] + "x." + hdr.split(".")[2]
+    # 篡改 payload 末位 ⇒ 被签名的 body 变化 ⇒ 先走验签不符分支。替换字符按构造
+    # 保证 != 原字符（旧写法固定用 "x"，若 payload 末尾恰为 "x" 则退化为原串，判据静默失效）。
+    payload = hdr.split(".")[1]
+    forged = "v1." + payload[:-1] + ("x" if not payload.endswith("x") else "y") + "." + hdr.split(".")[2]
+    assert forged != hdr, "伪造串与合法串相同 ⇒ 本用例没在校验签名，判据失效"
     with pytest.raises(IdentityError):
         verify_internal_header(forged, key=key, max_age=300)
 

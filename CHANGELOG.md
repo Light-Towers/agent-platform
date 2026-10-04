@@ -117,6 +117,26 @@
 - **穷举证明**：对 256 种签名末尾取值全枚举，旧写法有 1 种（`ff`）使 `forged == val`，新写法 **0 种**。
 - **实跑**（计数附测量时点：在 commit 本身上重跑，非中间工作态）：`test_identity_middleware.py` **11 passed**；agent-runtime session **594 passed / 1 skipped**。CI（Linux）为权威判据。
 
+### 尾项续：同类站点全集扫清（2026-10-03 二批，仍仅测试代码）
+
+> 触发：PR #63 的 `pull_request` 事件 `ci`（run `37163579948` / job `111321856117`）实报 `packages/agent-core/tests/test_internal_header.py::test_forged_signature_rejected - Failed: DID NOT RAISE InternalHeaderError`，`1 failed, 964 passed, 2 skipped, 28 deselected`，同 run lint 全过（含 P12、L-1..L-4）。`gh run rerun --failed` 后即绿 ⇒ 与上一条同构的「固定后缀伪造」假失败，非本批引入（本批未改该文件）。
+
+- **确定性复现（不再靠重跑碰运气）**：以 `sign_internal_header(..., now=)` 扫到碰撞点 `ts=1791072858`（签名尾 `c64ab6ff`）⇒ `forged == val` ⇒ `verify_internal_header` 正常返回 `('tenantA', None)` 不抛 ⇒ `pytest.raises` 必红；同一 ts 上新构造仍抛 `内部头签名不符（疑似伪造）`。实测碰撞率 `766/200000 = 1/261`（理论 1/256）。**探针自身踩了两坑**（均已写进探针注释防后人改回）：① 第一版只扫 256 个 ts 命中 0 碰撞——不是前提被证伪，而是**功效不足**（1/256 事件抽 256 次，P(0 命中) ≈ e⁻¹ ≈ 36.8%）；② 第二版基准 ts 取 2023 年 ⇒ `verify` 先验签再查过期，抱「过期」而**复现不出 DID NOT RAISE**，必须用接近当前时刻的 ts。
+- **判据换轴**：本类缺陷的正确判据不是「重跑变绿」（改前也有 255/256 概率绿，属弱证据），而是**按构造零碰撞**。穷举各站尾部空间：hex 两位 256、b64url 两位 4096、b64url 三位 262144、b64url 一位 64 ⇒ **旧写法每站恰有 1 种尾部使 `forged == original`，新写法 0 种**。
+- **全集清单**（全仓 258 个 `test*.py`，`[:-N] + "<字面量>"` 形态共 **9 站**）：本批改 6 处未受保护站点，另 3 处此前已用受保护写法（`test_identity.py:59`、`test_identity_middleware.py:109`、exhibition `test_execution_context_foundation.py:224`）：
+  | 站点 | 旧写法 | 碰撞概率 | 备注 |
+  |---|---|---|---|
+  | `packages/agent-core/tests/test_internal_header.py` | `+ "ff"` | 1/256 | **CI 已实报红** |
+  | `applications/knowledge-service/tests/unit/test_tenant_identity.py` | `+ "ff"` | 1/256 | 此前清单漏算，普查补回 |
+  | `applications/agent_federation/tests/unit/test_identity_bridge.py` | `+ "zz"` | 1/4096 | b64url 两位 |
+  | `applications/agent_federation/tests/unit/test_identity_guards_order.py` | `+ "zz"` | 1/4096 | `_forged_token` 工厂 |
+  | `packages/agent-runtime/tests/test_identity_middleware.py::test_forged_bearer_rejected` | `+ "AAA"` | 1/262144 | b64url 三位 |
+  | `packages/agent-runtime/tests/test_identity.py::test_internal_header_forged_rejected` | payload 末位 `+ "x"` | 敞口 1/64 | 当前**不可达**（payload 末字节恒为 `}` ⇒ 末位∈{Q,0,9}），但 payload 格式一变即可激活 ⇒ 一并改为构造受保护 + 自校验断言 |
+- **修法统一采仓内既有惯例**（不另造约定）：hex 站用 `"11" if val.endswith("00") else "00"`，b64url 站用主选/备选两字符互异（与 `test_identity.py:59` 已有的 `"aaa" if … else "bbb"` 同形），每站加前置断言 `assert forged != original, "伪造串与合法串相同 ⇒ 本用例没在校验签名，判据失效"`。仍只破坏尾部、格式与 payload 保持合法 ⇒ 401/异常来源仍必为签名校验；**未删用例、未收窄断言、未放宽前置**。
+- **未动面（明确排除，非漏项）**：`exhibition-agent/tests/test_jwt_signature.py:44-45` 篡改的是 **payload** 而非签名后缀，`forged` 与合法串结构上必异 ⇒ 不属本类；`test_audit_writer.py` 的 `corrupt.*` 是文件名 glob，无关。
+- **实跑**（计数附 extras 形态）：lint rc=0（ruff `All checks passed` + `lint_architecture` 含 P12、L-1..L-4 全过）；三个直站文件合跑 **33 passed**；联邦 session **176 passed**；ks session **410 passed / 7 skipped**（OTel SDK 在场形态；本机此次未复现 §5 那条一次性 15 errors，该遗留仍开）；根 session **964 passed / 8 skipped / 28 deselected**（`212.18s`）。CI（Linux）为权威判据。
+- **两条工具假阴性（差点写出错误账面，已就地纠正）**：① `Grep` 传 `path=<子目录>` + `glob=<裸文件名>`（`docs` + `TODO.md`）对 `1/256`、`flaky`、`伪造` **全返回 0 匹配**，我一度据此判定「CHANGELOG 与多处代码注释的 `docs/TODO.md 已登记` 指针失效」；而 `git show HEAD:docs/TODO.md` 与 `Select-String` 均证明该条登记**在 L70 且已 `[x]`** ⇒ 这是一条基于假阴性、差点被写进账面的**假发现**。任何「不存在/没登记」型的否定性结论，必须走第二通道复核。② 同一次普查在 PowerShell 显示里只出现 **7 条**，落盘文件实为 **9 条**（`hit_count=9`）⇒ 再次印证已入库的纪律：验证输出一律落文件再读，不走显示通道。
+
 ## B7b-4 + B7b-5 实施：链① 会话身份主体化（PR-A）+ 死代码/门禁/文档收口（PR-B）（2026-10-02）
 
 > 类型：产品代码变更（安全契约）+ 迁移脚本重写 + 门禁换代 + 文档同步。方案：`docs/plans/plan-codeql-b7b-principal-thread-identity-2026-10-01.md`（§8 三项已拍板；§9 取证受阻的**实施后记已就地补在彼处**）。闭合目标：`#38`（链①）、`#39`（`legacy_thread_id`）。硬约束（继承用户定调）：**不引入任何 `false_positive`/`wont_fix`**，只认 `state=fixed` 且 `dismissed_at`/`dismissed_by`/`dismissal_reasons` 全 `None`；不换 scrypt/pbkdf2（能消警但按错误前提付热路径延迟）；不靠改名躲启发式（分类由名字驱动，改名即 gaming）。
