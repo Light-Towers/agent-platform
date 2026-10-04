@@ -118,7 +118,7 @@ def check_path_exists(doc, line_no, path_str, base=REPO_ROOT, tracked=_AUTO) -> 
 | 4 用例全绿且 ≥22 | **达成（超预期）** | 17 → **35 passed**；被迁移的 2 条 tmp_path 用例**断言逐字未改**（`git diff` 可判），只补 `tracked=_idx(...)`；新增含 parametrize 共 18 条 |
 | 5 ruff / lint rc=0 | **达成** | `ruff check .` rc=0；`lint_architecture.py` rc=0 |
 | 6 干净 worktree 复验 | **达成** | `git worktree add --detach` 两个 sha（与 actions/checkout 同构，实取 `tracked files=1073`、`.codeartsdoer` 与 `.venv` 均不在场）：本批 tip `60655c0` 上**新实现 rc=0** 且用例 **35 passed**（证明绿不依赖本机脏工作树）；主干 `3546190` 上**旧实现 rc=0** 且 17 passed（基线对照）。验完 `worktree remove --force`，`git worktree list` 只剩主工作区。附带**入库 blob 逐字节面**（`git cat-file`）：8 个文件 crlf=0 / lone_cr=0 / 无 BOM / 无 NUL ⇒ `.gitattributes` 的 `* text=auto eol=lf` 已生效（工作树曾有 CRLF 不影响仓内形态） |
-| 7 CI + 合入后复验 | **达成** | PR #66 上 **5/5 checks pass**（含 `Doc sync check`）；合入前 L3 深度评审 **0 findings**；合入 `24d71b8` @ `2026-10-04T05:10:53Z`，未夹带四项 True（merge 树==head 树、`^1=3546190e3aca`、`^2=52e4c79f949c`、对旧 main 恰 **8 文件**==`changedFiles`）；`scripts/evidence/verify_main_tip.py` 在新 tip **首跑 rc=1**（`Analyze (python)`/`ci` 仍 `in_progress` ⇒ fail-closed 如期拒读），210s 后复跑 **rc=0 PASS**：open **0** / dismissed **0**（总 46）/ 最大告警号 **48**（基线 48 不增）/ 合入后新建 **0** / 三条 checks 全 success。详见 `CHANGELOG.md`「门禁收口三批」§5 |
+| 7 CI + 合入后复验 | **达成** | PR #66 上 **5/5 checks pass**（`Analyze (actions)`、`Analyze (python)`、`CodeQL`、`ci` ×2；docsync 本身是 `ci` job 内的 **step**、不单列，见偏差 5）；合入前 L3 深度评审 **0 findings**；合入 `24d71b8` @ `2026-10-04T05:10:53Z`，未夹带四项 True（merge 树==head 树、`^1=3546190e3aca`、`^2=52e4c79f949c`、对旧 main 恰 **8 文件**==`changedFiles`）；`scripts/evidence/verify_main_tip.py` 在新 tip **首跑 rc=1**（`Analyze (python)`/`ci` 仍 `in_progress` ⇒ fail-closed 如期拒读），210s 后复跑 **rc=0 PASS**：open **0** / dismissed **0**（总 46）/ 最大告警号 **48**（基线 48 不增）/ 合入后新建 **0** / 三条 checks 全 success。详见 `CHANGELOG.md`「门禁收口三批」§5 |
 
 **与计划的偏差**（只记真实发生的）：
 
@@ -129,3 +129,7 @@ def check_path_exists(doc, line_no, path_str, base=REPO_ROOT, tracked=_AUTO) -> 
    引了新方案文件，而它当时**尚未 stage** ⇒ docsync **rc=1** 并报两处「路径未纳入版本控制
    'docs/plans/plan-doc-sync-tracked-scope-2026-10-04.md'」；`git add` 后 **rc=0**。旧实现（FS 基准）同一棵树始终放行。
    ⇒ 这同一条就是残余局限 ④ 的镜像面（索引基准会把「写了但未入库的引用」挡在门外），也是本批里最强的一条真实证据。
+5. 回填判据 7 时发现自己先前的措辞错了（原写「PR 上 `Doc sync check` 与两条 `ci` 矩阵全 pass」）：`Doc sync check` 是
+   `.github/workflows/agent-platform-ci.yml` 里 `ci` **job 内的 step**（L66-67），**不是**一条独立 check，因此在 checks
+   列表里永不会单列。取证改走 `gh run view <run> --json jobs` 的步骤面（PR #67 run 37189458592：step `Doc sync check`
+   = success）。⇒ 口径修正已写回 `CHANGELOG.md` 同节，以免下一个人按 check 名去查、得到「门禁没跑」的假结论。
