@@ -2,6 +2,47 @@
 
 本仓库为 uv workspace monorepo。**唯一受支持的安装/运行入口是根 `uv.lock` + `uv sync`**，子包不再维护独立 `uv.lock`（见 v2 修复 #14）。
 
+## 评审遗留收口一批（2026-10-04）：PR #70 合入得证 + 判据 6 首跑 PASS + v2/v3 ref 清理
+
+> 承接上一段。改动面：`scripts/check_doc_sync.py` + `scripts/evidence/verify_main_tip.py` + `scripts/evidence/normalize_dump.py` + `tests/governance/` 两个测试文件 + `docs/operations/` 两份文档 + 回溯方案 `docs/plans/plan-review-findings-closeout-2026-10-04.md`。**零产品运行时代码**（全部落在评审/取证工具与其测试、文档口径）。
+
+### 1. 批次来源与「先方案后编码」的红线补录
+
+- 来源：同日对 `ffd86ab...HEAD`（28 提交）的三轴评审（Standards / Spec / Correctness 三子代理并行 + 关键结论实机复核）。评审结论：无 P0、无功能破坏；两条 P1（docsync 普通文本逃生舱未登记且零回归保护、verify_main_tip 预期集取自本地工作区）+ 四条 P2。
+- 方案先在会话中给出（6 代码项 + 1 文档项表格）并经用户确认后实施；**Standards 复审指出这按 AGENTS.md 字面是硬违规**（方案须有文档/issue 记录）⇒ 补录回溯方案 `docs/plans/plan-review-findings-closeout-2026-10-04.md`（标注 retrospective，内容与实施零偏差）闭合。规矩沉淀：**会话确认不能替代落盘**，下批起方案先写文档再动手。
+
+### 2. 六项改动 + 配套回归钉（8 文件 +151/−12，测试文件纯增量零删除）
+
+- `check_doc_sync.py`：① `check_architecture_paths` 对 `http` 开头**无条件 continue**——旧逻辑 http+尾斜杠会落到存在性校验必误红；原三行嵌套条件化简为等价两行（逐形态 trace：`x.y/` 在旧逻辑下 `split("/")[-1]` 得空串同样落校验 ⇒ **严格等价**，唯一行为差异即声明的修复）。② `check_doc_file_refs` docstring 漏报面登记第三条「无反引号普通文本」——AGENTS.md 口径的**逃生舱而非缺陷**，代价是坏引用去反引号即可静默逃逸。
+- `verify_main_tip.py`：`verify()` 开头 **HEAD==tip 前置守卫**——「预期集取自本地工作区 workflow」的隐式假设显式化，漂移即 RuntimeError → 既有 rc=2 `PRECONDITION_FAIL` 通道（fail-closed，绝不拿漂移的预期集硬算）。
+- `normalize_dump.py`：`.utf8` 产物再喂入即跳过 rc=1（防 `.utf8.utf8` 链式副本）+ `ValueError` 收口（`..` 类输入不再裸栈）。
+- 测试 +5 条（普通文本不校 / agents+architecture 两面 fail-closed 补齐方案 §5.3 三面自证欠账 / 尾斜杠 URL 钉 / HEAD 漂移钉 / 防链式钉），其中 URL 钉、HEAD 钉、防链式钉已核在旧代码下必红（反同义反复）。
+- 文档：playbook §2.3/§2.4 与 audit-operator runbook 各处反引号 gitignored 路径改普通文本（对齐 AGENTS.md「文档防漂移」口径）。
+
+### 3. 二轮复审：编辑失误当场修复无损 + 子代理一条发现被驳回（登记为纪律）
+
+- 实施中一次 Edit 失误吞掉 parametrize 装饰器头部，当场发现修复；**复审以全量 diff 证明修复无损**——该区域在 diff 中全部为上下文行（与改动前逐字节一致），governance 340 passed 佐证。
+- Spec 复审代理称「`x.y/` 形态新旧不等价」——**trace 驳回**（见上）。纪律：**子代理结论不当采信，逐条实机复核后再进账面**（与 §5「一条不成立的读数」同源）。
+
+### 4. 评审遗留中判为**不立项**的项（登记理由，不是遗漏）
+
+- per_page 截断（[A]=20 / [B..E]=100）：[B] 判定非空即红，分页安全；截断只影响统计行显示。
+- `verify_main_tip.REPO` 硬编码：脚本仓内自用，fork 复验是边际场景。
+- workflow 硬钉测试：刻意设计（防 workflow 静默变更），新增 workflow 时改一处即可。
+- 普通文本 warn 级探测器：形似路径的无反引号 token 在正常行文中大量存在，噪音 > 价值。
+- playbook :41 / :94 两处无斜杠反引号残留：不入门禁正则（`[^`]+/[^`]+` 要求含斜杠），纯口径残留。
+
+### 5. PR #70 合入得证 + 判据 6 首跑 PASS（新守卫实战首用）
+
+- checks **5/5 pass**（`ci` ×2 @ 3m07s / 3m17s、`Analyze (actions/python)`、`CodeQL`）；`mergedAt=2026-10-04T13:12:48Z`、merge `7297a2418c8e`、`changedFiles=8`。
+- 判据 6 用**本批改造后的入库脚本**在新 tip 重跑，**首跑即 PASS**（此前两批均为首跑 rc=1「未达成」→ 等待后复跑）：`[A]` 双 analysis 落 `7297a24`（actions `1888746316` @ 13:13:17Z / python `1888748539` @ 13:14:14Z，`results=0`）、`[B]` open **0**、`[C]` dismissed **0**（总数 46）、`[D]` 最大告警号 **48 不增**、`[E]` 新建 **0**、`[F]` 预期集 `{ci, Analyze (actions), Analyze (python)}` 全 `completed/success`（`ha`/`assembly`/`eval-llm` 按 `on.push.paths` × changed paths 不触发）、`[G]` 预期外 **0**。**HEAD==tip 守卫实战首用即通过**（本地 checkout 恰在 tip，守卫放行）。
+- 本地门禁实取（@ `7297a24`）：governance **340 passed**（63.16s，含新 5 条）· docsync rc=0 · ruff rc=0 · lint_architecture rc=0。
+
+### 6. ref 清理轮：v2/v3 删除（推翻上一批「刻意保留」的依据已登记）
+
+- `origin/v2` / `origin/v3` 经用户显式指令删除（`git push origin --delete v2 v3` rc=0 + `git remote prune origin`）。依据：两分支 `git branch -r --merged origin/main` 实取均已**完全合入 main**（v3 tip `26cd2fa` = 2026-09-27 PR #22 合并点）⇒ 无独有内容可失；`git-ref-cleanup-2026-10-04.md` 原「刻意保留」理由（远端不可逆且无 reflog 兜底）属风险提示，被「已确认合入 + 显式指令」覆盖，该文已追加后记。
+- **保留两条且理由不变**：`origin/dependabot/...`（OPEN PR #55 的 head 现场，删它毁决策线）；`company` remote（另一套远端，整体不触碰）。终态：本地恰 `main`，远端恰 2 条，本地与远端 main 双向 0 差异。
+
 ## 门禁收口三批（2026-10-04）：PR #65 合入得证 + docsync 判定基准改到版本控制清单 + PR #55 影响面订正
 
 > 承接上一段。改动面：`scripts/check_doc_sync.py` + `tests/governance/test_doc_sync_file_refs.py` + `AGENTS.md` / `ARCHITECTURE.md` / `docs/TODO.md` / `docs/operations/testing-playbook.md` + 新方案 `docs/plans/plan-doc-sync-tracked-scope-2026-10-04.md`。**零产品运行时代码、零 workflow、零依赖声明改动。**
