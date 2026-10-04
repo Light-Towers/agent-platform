@@ -2,6 +2,178 @@
 
 本仓库为 uv workspace monorepo。**唯一受支持的安装/运行入口是根 `uv.lock` + `uv sync`**，子包不再维护独立 `uv.lock`（见 v2 修复 #14）。
 
+## 取证链二批（2026-10-04）：docsync 修复在 CI 得证 + 部署通道协议级复探 + PR #55 定到根因
+
+> 承接上一段（候选 ① 入库）。零产品代码、零 workflow、零依赖声明改动；本段只动 `CHANGELOG.md`、`docs/TODO.md`、`docs/operations/audit-operator-principal-runbook.md`。
+
+### 1. 第三条 commit `101a92c`：PR #65 的 `ci` 由红转绿，且证明「干净检出」是正确等价物
+
+- 修复内容见上一段 §3.1 / §4 第 3 条（只改文档措辞，门禁判定代码一行未动）。
+- **CI 实况（head `101a92c`）**：`CodeQL` pass 3s · `ci` **两条矩阵均 pass**（2m51s / 3m6s）· `Analyze (actions)` pass 34s · `Analyze (python)` pass 56s ⇒ `gh pr checks 65 --watch` **rc=0**。
+- 这一步才算真验收：**本机干净 worktree 的 rc=0 与 CI 的绿互相印证**，而不是「本机绿 + 相信 CI」。
+- push 面顺带一条：`git push` 连续 **4 次 rc=128**（`Connection was reset` / `Failed to connect to github.com:443 after 21082 ms`），而同期 `gh api /zen` 与裸 `urllib` GET `https://github.com/Light-Towers/agent-platform` 均正常（200）⇒ 定性为 **git 传输面的瞬时抖动**，不是认证/仓库状态问题；第 5 次成功（`7949357..101a92c`）。纪律：**push 失败先做协议面复探再重试，不猜「网络坏了」**。
+
+### 2. 部署侧通道复探（2026-10-04 04:05Z，**由 TCP 层升级为协议层**）
+
+存量取证 A/B 仍为 **0**（未取到），这次给的是比上次更强的证据形状：
+
+| 探针 | 实取 |
+|---|---|
+| `Get-Command docker` / `kubectl` | **NOT FOUND**（`ssh` / `scp` 在 `System32\OpenSSH` 在场） |
+| `Test-Path ~/.kube/config` | **False** |
+| `GET http://192.168.100.126:2375/version` | `RemoteDisconnected: Remote end closed connection without response` |
+| `GET http://192.168.100.126:2376/version` | 同上 |
+| 裸 socket recv：`126:22` | connect OK，**0 字节**（拿不到 SSH banner） |
+| **对照 ①**：`192.168.100.254:12345`（同段不存在主机） | connect OK，**0 字节**（与目标同签名） |
+| **对照 ②**：`192.0.2.123:54321`（RFC 5737 TEST-NET，按定义不可路由） | connect OK，**0 字节** |
+
+⇒ 两级对照与真实目标**完全同签名**，说明本机流量仍被 `Meta Tunnel`（TUN）整段接管：既证明不了端口开，也证明不了服务在场。**runbook 的解阻条件与通道清单不变**（同网段机器 / 连 VPN / 把 `192.168.100.0/24` 加进 mihomo bypass，改完先做对照复核），取证仍走「运维或用户在可达环境代跑 §2+§3」。
+
+### 3. PR #55（Dependabot）红的根因：**L-4 依赖下界不一致**，属独立决策面
+
+- 现场：`ci` ×2 fail（31s / 39s），`assembly` / `ha` pass，`CodeQL` skipping；失败 step = `CI gate`；但 `gh run view --log` / `--log-failed` 均返回 **0 字符**（旧 run 日志通道不通），annotations 只有 `.github:33 exit code 2` ⇒ **不从「拿不到日志」倒推根因**。
+- 定根因手法（只读、不动工作树/venv/`uv.lock`）：取 PR head 的 5 个 `pyproject.toml` 到临时目录，`importlib` 载入**真实的** `scripts/lint_architecture.py`，把模块级 `ROOT` 指向该目录后调 `check_otel_extras_alignment()` ⇒ main：**通过**；PR #55 head：**`'opentelemetry-api' 下界不一致（pyproject.toml[otel]: >=1.45.0 vs packages/agent-core/pyproject.toml[tracing]: >=1.24）——归一到方案敲定版本，防组合解析回溯`**。
+- 即 #55 的 `ci` 红是**门禁如实拦下**（与 CHANGELOG 里 #52 同一模式，L-4 第二次起作用），不是环境抖动。具体只动了一行：PR 把**根 `pyproject.toml` 的 `[otel]`** 从 `opentelemetry-api>=1.24` 抬到 `>=1.45.0`，而 `packages/agent-core/pyproject.toml` 的 `[tracing]` 仍是 `>=1.24`（实取：PR diff 里 `opentelemetry-api` 约束行**仅此一处 `+/-`**）。
+- 口径冲突点：`docs/plans/plan-observability-global-remediation-2026-09-29.md` R2/L-4 已敲定的是「根 `[otel]` 与 core `[tracing]` / runtime `[otel]` **归一 `>=1.24`**」（其 §3.3 表行原文）。⇒ 抬到 1.45.0 = **改已敲定口径**，属方案变更面，按红线先出方案。待拍板三支：① 把三处一同抬到 `>=1.45.0`（需改方案 R2/L-4 口径 + 重跑依赖解析）② 先关 #55，保留下轮 dependabot（不动口径）③ 先补一条钉「三处下界必须相等」的用例再谈抬版。
+- 归因探针为本机一次性脚本（.codeartsdoer/temp/pr55_l4_probe.py，未入库；结论已在上面两句）。本轮**未改任何依赖声明、未动 `uv.lock`、未碰 venv**（探针只往临时目录导出文件副本并改模块 `ROOT`）。
+
+### 4. 一条**不成立**的读数（登记为纪律，不写进结论）
+
+同一批命令在一次读数里给出 `078b447 (HEAD -> docs/evidence-closeout-2026-10-04)` + 4 个 ` M` 文件 + 相对 `7949357` 的 diffstat；随后 `git cat-file -t 078b447` ⇒ **`fatal: Not a valid object name`**，`git reflog` / `git log --all` / `git ls-remote origin` 三处均无该对象，且当时 `git status --short` 为**空**、HEAD = `101a92c` = 远端 tip。⇒ 那次读数**不是本仓真实状态**，成因未能确定，**弃用不入库**。
+
+纪律补一条（是既有「否定性结论须走第二通道」的**反向对称**）：**「存在/已改」型阳性读数同样要复核**——复核用可判定谓词（对象是否存在 `git cat-file -t`、ref 指向 `git ls-remote`、内容标记 `Select-String`），而不是再跑一遍同一个命令。本段全部账面以复核后的状态为准。
+
+## 取证脚本入库（2026-10-04，候选 ①）：判据 6 从「只在本机成立」变成「新克隆可原样重跑」
+
+> 方案：`docs/plans/plan-evidence-scripts-intake-2026-10-04.md`（先方案后编码，2026-10-04 用户拍板候选 ①）。
+> 零产品代码、零 workflow、零 `pyproject.toml`/`uv.lock`/`.gitignore` 改动。
+
+### 1. 为什么要入库（不是整洁癖）
+
+CHANGELOG / TODO / runbook 把「任何一次合入后必须在新 tip 上重跑」写成了指针对象，而指针原本住在
+`.codeartsdoer/temp/`——该目录被 `.gitignore:60` 的 `.*/` 整目录规则忽略（实取：`git ls-files .codeartsdoer` =
+**0**）⇒ **新克隆上这些脚本根本不存在**，判据 6 的可复现性只在某台机器的工作副本上成立。本批又新增
+3 个同类脚本（解冲突 / 部署通道探针 / 转码），即同一遗留的第二批证据，故从「登记」转「闭合」。
+
+### 2. 落地清单
+
+- **`scripts/evidence/verify_main_tip.py`**（入库版，由本机探针移植 + 三处适配）：七项 `[A]`–`[G]` 全
+  fail-closed；门禁预期集由 `on.push.paths` × changed paths **派生**（硬编码两个方向都会错）；
+  纯函数 `derive_expected_checks()` 与网络部分切开；输出可 `--out`，默认落 `.evidence-out/<sha8>.txt`
+  （实取：`git check-ignore -v` 命中 `.*/` ⇒ 无需改 `.gitignore`）；**PyYAML 缺席即 `IMPORT_FAIL` + 退出码 2，
+  刻意不回退正则**（正则取 `jobs:` 曾把真阳性红漏成「预期外」）。
+- **`scripts/evidence/normalize_dump.py`**：第六条坑本批**再次踩到**（`gh pr checks 65 --watch >` 产物
+  raw **21824B = UTF-16 LE**，以 utf-8 读全是夹 NUL 文本）⇒ 把「按 BOM 嗅探→转 UTF-8 落盘再读」固化为工具。
+- **`scripts/evidence/README.md`**：收录判据（会不会被「下次必须重跑」引用）、可直接复制的完整命令（本批踩过
+  「位置参数报 usage」）、三条实踩过坑、以及「本机没跑通不得声称已验证」。
+- **`tests/governance/test_evidence_scripts.py`**（**22 条**）：钉住派生式预期集的纯逻辑不变量——路径命中/不命中、
+  `on: push` 无过滤恒触发、**`jobs:` 位于文件末尾**（旧正则坑）、YAML 1.1 把 `on:` 解成布尔 `True` 键、无 `push`
+  触发器不进集合、真实 workflow 文本上「纯文档批次不期望 `ha`/`assembly`」、`_yaml=None` 必抛、`main()` 的
+  `IMPORT_FAIL`/`PRECONDITION_FAIL` ⇒ 2 与 rc 映射未写反。autouse 替身拦断 `_run`/`gh_api` ⇒ 结构上不可能访问网络。
+- **`ARCHITECTURE.md` §4.2**（登记位）：`check_doc_file_refs()` 只覆盖 AGENTS/ARCHITECTURE/README 三份，故必须
+  登记在此才受存在性门禁保护。
+
+### 3. 验收逐条实取（详见方案 §6，七条全达）
+
+- **三个主干 tip 用入库脚本重跑均 rc=0 `=== 总体：PASS ===`**：`bb2b9a8`（派生集 `{Analyze×2, assembly, ci}`，
+  与当年硬编码**逐项一致**）、`789309c`（含 `packages/**` ⇒ **多出 `ha`**，证明派生没漏）、`91cd79a`
+  （纯文档 ⇒ 仅 `{Analyze×2, ci}`，证明不该跑的没进集合）。
+- 数字（`91cd79a` @ `2026-10-04T01:29:20Z`，基线 48）：[A] `1887424643` actions @`01:29:53Z` / `1887425562`
+  python @`01:30:24Z` 均 `commit=91cd79a`・`results=0`・rules 17/43；[B] **0**；[C] **0**（总 46）；[D] **48** 不增；
+  [E] **0**；[F] 全 success；[G] 预期外 **0**。**零 dismiss**（[C] 只认自动 fixed）。
+- `ruff check .` rc=0 · `lint_architecture.py` rc=0 · `check_doc_sync.py` rc=0 · 新用例 **22 passed**。
+  - **⚠ 上面那条 docsync rc=0 一度是假绿**，本批推翻了它（第十条工具假阳性，见 §4 第 3 条）：真正的
+    证据是后来在**干净检出**上取的（见 §3.1），本机 rc=0 不算证据。
+- **剥掉防线必红自证**（不入库，只报结果）：把 `ARCHITECTURE.md` 一条 evidence 引用改成不存在路径 ⇒
+  docsync **rc=1** 并指名 `ARCHITECTURE.md:129: 路径不存在 'scripts/evidence/verify_main_tip_MISSING.py'`；
+  还原 ⇒ rc=0、文件逐字相同、`crlf=0 bom=False`。
+
+### 3.1 干净检出复验（本机 docsync 绿的真实等价物）
+
+判据：存在性类校验的「绿」必须在**只含 tracked 文件**的树上取。实取手段（不靠猜 CI 行为）：
+
+```powershell
+git worktree add --detach $env:TEMP\wtdocsync7949357 7949357   # 只落地 tracked 内容
+cd $env:TEMP\wtdocsync7949357; <venv>\python.exe scripts/check_doc_sync.py
+```
+
+- 干净树顶目录实取：`.github applications deploy docs eval packages scripts tests`（**无 `.codeartsdoer/`**，
+  `Test-Path .codeartsdoer` = `False`）⇒ 与 CI 的 `actions/checkout` 检出同构。
+- **方向一（复现红）**：`7949357` 干净树上 docsync **rc=1**，报 `ARCHITECTURE.md:125: 路径不存在 '.codeartsdoer/temp/'`
+  —— 与 CI `Doc sync check` 步的输出**逐字相同** ⇒ 本机脏目录确为唯一差异源，不是 CI 环境问题。
+- **方向二（修后绿）**：把改好措辞的两个文件拷进同一干净树 ⇒ docsync **rc=0（0 警告）**；本机脏树同样 rc=0。
+- 验完 `git worktree remove --force` 回收，`git worktree list` 只剩主工作区（不残留痕迹）。
+
+### 4. 本批新修的三个自身缺陷 + 第九、十条工具假阳性
+
+1. `gh_api(..., want_key="analyses")` 会 `AttributeError`：`code-scanning/analyses` 与 `alerts` 返回**顶层数组**，
+   而 `check-runs` 返回 `{check_runs: []}` ⇒ 改为 `want_key is None` 直返 + `isinstance(data, dict)` 守卫。
+2. **第九条工具假阳性（Windows text 模式写文件会掺 CRLF）**：用例里 `Path.write_text(..., encoding="utf-8")`
+   写含 `\n` 的样本，实跑断言拿到 `\r\n` 而失败——同族问题也解释了为什么仓内所有写盘一律
+   `io.open(..., newline="")`。纪律：**取证类断言写字节，不写文本**。
+3. **第十条工具假阳性（本机 gitignored 脏目录会把存在性校验喂绿）**：`7949357` 推上后 PR #65 的 `ci`
+   **变红**，而本地同一命令一直 rc=0。根因：`check_doc_sync.py` 的存在性判定跑在**本机文件系统**上，
+   而 `ARCHITECTURE.md` §4.2 把探针的原住址写成了**反引号 + 尾斜杠的目录形式**（.codeartsdoer/temp/）
+   ——该路径**不是仓内路径**（被 `.gitignore` 的 `.*/` 忽略），本机存在所以本地绿，
+   CI 干净检出上不存在所以红。**由 CI 而非本机发现的这一条，是本链里第一条不是靠人工语义审计持住的回归**。
+   - **修的是文档措辞，不是门禁强度**：`check_architecture_paths()` 对「反引号内含 `/` 且以 `/` 结尾」的片段
+     一律调目录存在性校验（**不过滤 `DOC_FILE_REF_ROOTS`**），而本句真的在断言一个仓内不存在的目录 ⇒
+     按该门的语义把它改成「不包反引号的普通文本」并明写「不是仓内路径」，路径字面值仍保留以便第三者
+     `git check-ignore` 复核。**未改一行判定代码、未加任何白名单、未放宽阈值**。
+   - 取证双向均实取（见 §3.1）：干净树 + 旧措辞 ⇒ **rc=1**（与 CI 逐字一致）、干净树 + 新措辞 ⇒ **rc=0**。
+   - **残余盲区仍开**：门禁本身依旧拿本机 FS 做基准，下次再写一个 gitignored 目录仍会本地绿 / CI 红。
+     已登记 `docs/TODO.md`（属产品代码面，按红线先方案后编码），本批只修措辞。
+
+### 5. 仍未闭合（不美化）
+
+- 部署侧两项存量取证仍为 **0**（`revert_audit.operator` 历史行 / `checkpoints`）：本机被 `Meta Tunnel`
+  劫持，等网络侧调整后按 runbook §1 的对照复核流程重试。（2026-10-04 04:05Z 已做**协议级**复探，
+  两级死对照与目标同签名 ⇒ 劫持仍在，见本文件「取证链二批」§2。）
+- knowledge-service 一次性 15 errors：**根因未定**（已收窄到唯一站点，需一次带 traceback 的再现才能定案）。
+- 10 个已入库的 BOM `__init__.py`；PR #55（Dependabot，L-4 下界——**已实测定根因，三支待拍板**，
+  见本文件「取证链二批」§3）；P12 三条局限（属设计内残留面）。
+
+## 取证链收尾（2026-10-04）：#64 / #63 合入 + 两个 tip 复验 PASS + **部署侧通道根因订正**
+
+> 零产品代码改动（本段只动 `CHANGELOG.md`、`docs/TODO.md`、`docs/operations/audit-operator-principal-runbook.md`、`docs/plans/plan-codeql-b7b-principal-thread-identity-2026-10-01.md`）。上一段（「尾项续」二批）止于 PR #64 开出；本段接上合入、主干复验，并**推翻一条已写进四处账面的旧结论**。
+
+### 1. PR #64 合入与 tip `789309c` 复验（判据 6）
+
+- **链路**：`056516f`（6 个测试文件 +34/−6 + 账面）+ `044c26d`（账面二批）→ **PR #64** → repo 门禁全 pass → **merge `789309c` @ `2026-10-04T00:55Z`**。merge 未夹带：`f9c75ae8316bd7a978454fab942532b737fd3d1c`（merge 树）与 PR head 树**全等**，对第一父 changed files **恰 8 个**。
+- **合入后立即复验取到的是「未达成」**（正确行为）：`[F]` 里 `ci` / `assembly` / `Analyze (python)` 仍 `in_progress`（push 事件刚触发），脚本判 **总体未达成 rc=1**，我没有把「刚合入还没跑完」洗成 PASS。约 35 分钟后在同一 sha 复跑：**总体 PASS rc=0**。
+- 实取（`verify_main_tip.py --merge-sha 789309c… --merged-at 2026-10-04T00:55:00Z --baseline-max-number 48`）：[A] analysis `1887362420`（actions @ `00:59:51Z`，rules 17）/ `1887364142`（python @ `01:00:42Z`，rules 43）均 `commit_sha=789309c`・`ref=refs/heads/main`・`results_count=0`；[B] open **0**；[C] `dismissed_at` 非空 **0**（总数 46）；[D] 最大告警号 **48**（= 基线，不增）；[E] 合入后新建 **0**；[F] `ci` / `ha` / `assembly` / `Analyze (python)` / `Analyze (actions)` **全 completed・success**；[G] 预期外 **0**。派生式预期集这次把 `ha`・`assembly` 判为**应触发**（本批改了 `packages/**` + `applications/**`），与上一段 §6 的「路径过滤控制触发面」措辞订正互验一致。
+
+### 2. 兄弟 PR 撞车：#63 变 CONFLICTING，冲突两侧都不许丢
+
+- `#64` 合入后 `#63`（同为文档链，head `66aa699`）由 UNKNOWN → **DIRTY / CONFLICTING**。`git merge origin/main`：`CHANGELOG.md` 自动合并，**`docs/TODO.md` 冲突**（标记 L107/L109/L111）。
+- **不靠肉眼看折叠 diff**（CJK 长行经显示通道会掺入假空格，上一轮已为此丢过一次 SearchReplace）：写探针从 git 的三个 stage 取字节做前缀判定 ⇒ merge-base `c0a9133`，冲突条目 `base=1454` 字、`ours_add=284`、`theirs_add=825`，**两侧都以 base 为前缀**（纯追记型）、互不包含（公共前缀 2 字）⇒ 解法只能是「两侧都保留 + 按时间顺序拼接」。
+- **撞出来的实际问题：数据点编号撞车**。分支侧先写了「**第三个数据点**（2026-10-03 23:20Z，PR #62 第二次 push）」，主干侧后写了「（2026-10-04 **第三、第四**数据点）」⇒ 字面拼接会数出两个「第三个」。已按时间序重编主干侧为「**第四、第五**数据点」，并把其结论句「四个独立数据点（两个代码 PR + 两个零/低代码 PR）」相应改为「**五个**独立数据点（两个代码 PR：#61 / #64；三次纯文档 push：#62×2 / #63）」。**内容零删减**，只动序号与计数句。
+- 解析脚本 `.codeartsdoer/temp/resolve_todo_conflict.py`：断言前缀关系 → 重排编号 → 替换冲突块 → 写 UTF-8（无 BOM）→ **解析后自检**（无 `<<<<<<<`/`=======`/`>>>>>>>`、两侧追加均在、行数 112→108 符合预期）。复验：`check_doc_sync.py` **rc=0**，merge commit `44de710` 对 `origin/main` 的 diff 恰为 `CHANGELOG.md` +4 / `docs/TODO.md` 3 行改写。
+- **登记为流程项**：同一批里开多个改同样文档文件的 PR 时，后合入者必然 CONFLICTING，且**文档型冲突的风险不是编译不过而是静默丢信息**——本轮若随手选 `--theirs`/`--ours` 就会丢掉一整段取证。⇒ 下次同类 PR 要么串行，要么合入前预期冲突并走上述三 stage 字节比对。
+- PR #63 在新 base 上门禁全 pass（`ci`×2 / `ha` / `assembly` / `Analyze`×2 / `CodeQL`，`gh pr checks 63 --watch` rc=0）→ **merge `91cd79a` @ `2026-10-04T01:29:20Z`**；merge 未夹带：`91cd79a^{tree}` = `44de710^{tree}` = **`cfd3fadcd83cf1845a37da4fb033b10bfc5f746b`**，对第一父 diff 恰 2 个文档文件。新 tip 复验（`--merged-at 2026-10-04T01:29:20Z`）**总体 PASS rc=0**：[A] `1887424643`（actions @ `01:29:53Z`）/ `1887425562`（python @ `01:30:24Z`）均 `results_count=0`；[B] **0**；[C] **0**（总数 46）；[D] **48** 不增；[E] **0**；[F] `ci` + 两个 `Analyze` 全 success；[G] **0**。本次派生预期集为 `{Analyze (actions), Analyze (python), ci}`——`ha`/`assembly` **不触发**（#63 净改动只含 `.md`），与 §6 的措辞订正再次互验。
+
+### 3. 本段最重要一条：**部署侧取证失败的根因先前判错了，判据还反了**
+
+账面在 `docs/TODO.md` §8、`docs/operations/audit-operator-principal-runbook.md`、`docs/plans/plan-codeql-b7b-principal-thread-identity-2026-10-01.md`、本文件里连续三次（2026-10-02 四次 + 10-03 一次 + 10-03 13:44Z 一次）记的是同一句话：「`192.168.100.126` 的 TCP 22 **可达**，但连接在 banner 交换前被关闭 ⇒ **属服务端侧限制**（fail2ban / `hosts.deny` / `MaxStartups` 一类），与本地密钥无关」。**这条因果是错的**，而且错法很典型：
+
+- 本机在 **`WLAN 192.168.1.11/24`**，与部署段 `192.168.100.0/24` **不同网段**；`Find-NetRoute -RemoteIPAddress 192.168.100.126` ⇒ `nextHop=198.18.0.1`，即流量交给 **`Meta Tunnel`**（Clash Verge / `verge-mihomo` 的 TUN，持有 `0.0.0.0/0 via 198.18.0.2`），根本没走物理网关。本机 `OpenVPN TAP-Windows6` 适配器存在但 `Disconnected`。
+- **对照实验**（这一步先前完全没做，是整条误判的根源）：对「必然不存在」的目标测同样的动作 ⇒ `192.168.100.254:12345`、`192.168.100.99:22`、`192.168.100.241:8000`、`192.168.100.125:6443` **全部 `TcpTestSucceeded=True`**；126 上 `2375/2376/22/6443/8000/30443/12345/9999/8888/4321/5432` 十一个端口也**全 True**。⇒ 该 TUN 对整段所有端口**完成三次握手后立刻关闭**，**`TcpTestSucceeded=True` 在这台机器上不含任何信息**，「TCP 可达」这个前提从来没被证实过，因此「对端拒绝」的推论也一并作废。**五次同签名重复观察排除不了任何东西**（它排除的是「每次随机失败」，而现象本来就稳定）。
+- 应用层只读实取（`probe_deploy_channels.py`，输出落 `deploy_channel_probe.txt`）：`GET http://126:2375/_ping` ⇒ `RemoteDisconnected`；`GET https://126:2376/_ping`、`GET https://126:6443/version` ⇒ `SSLEOFError [UNEXPECTED_EOF_WHILE_READING]`；裸 socket 读 22 / 2375 ⇒ `recv` **0 字节**。⇒ 一条请求都没落到真服务，**连「端口开没开」都判不出来**，更不能反过来认定服务在场或不在场。旁证：仓内 `packages/agent-runtime/agent_runtime/sandbox.py:10` 与历史经验记录都把 `tcp://192.168.100.126:2375` 当 Docker 端点 ⇒ 这条通道值得在有路由时一试，但今天拿不到证据。
+- **处置**：runbook §1 整段重写为订正版，**通道 2「请运维恢复 126 的 22 端口访问」撤下**（对端从未拒绝过我们），改为「同网段机器 / 连 VPN / 把该段加进代理 bypass」，并明确要求**改完先做随机死端口对照复核**，否则又会被同一个假阳性骗一次。`docs/TODO.md` §8 该行同步订正并标「旧定性已作废」。
+
+### 4. 本段新增两条「通道骗人」（累计到第七条）
+
+- **⑦ TCP 连接成功 ≠ 服务在场**：跨网段取证前先看路由表里默认路由归谁（本机 TUN/代理会假完成整段握手）。判「不可达」的正确姿势是**随机死端口对照**，不是 `Test-NetConnection`。
+- **⑧ 命令不存在时 `$LASTEXITCODE` 是脏值**：本轮 `docker version` 不存在（PowerShell 抛 `CommandNotFoundException` 是**语句级**终止，命令根本没执行），而紧跟的 `echo "rc=$LASTEXITCODE"` 打出 **`rc=0`**（沿用上一条命令的值）⇒ 差点被读成「docker 在且正常」。存在性判定必须用 `Get-Command <n> -ErrorAction SilentlyContinue`（本轮实测：`docker`/`kubectl`/`helm`/`psql`/`minikube`/`kind`/`colima` 全部 `present=False`，Docker Desktop 未装，`wsl -l -v` 报无发行版）。
+- 第六条（`>` 默认写 UTF-16 LE）本轮**再次踩到**（`gh pr checks --watch >` 的产物以 utf-8 读全是夹 NUL 文本），已把解码动作固化成可重跑工具 `.codeartsdoer/temp/normalize_dump.py`（按 BOM 嗅探 → 转 UTF-8 落盘再读）。
+
+### 5. 本段仍未闭合（不美化）
+
+- **部署侧两项取证仍为零**：`checkpoints` 存量 `user-*`、`revert_audit.operator` 历史行形态。解阻动作已从「等对端放行」换成本段 §3 的三条，且**任一条都需要对本机网络状态或集群的写权限/操作权**，不在我可代做的范围内。旧审计行仍**不自动改写**（Q3 拍板 (a)）。
+- ks 一次性 15 errors：本批未再现，根因仍未定（既有防复发契约用例已在位）。
+- **取证脚本本身仍未入库**（`docs/TODO.md` §5 那条 `[ ]`）：本段的 `resolve_todo_conflict.py` / `probe_deploy_channels.py` / `normalize_dump.py` 又增加了三个只活在 `.codeartsdoer/` 的可重跑指针——**这是同一个遗留的第二批证据**，三条候选路径仍待拍板（不拿「先方案后编码」当拖延借口的办法是把它列入本次提问）。
+- 10 个 BOM `__init__.py`（编码规范议题，未动）；PR #55（dependabot，L-4 下界需先归一，属独立决策面）。
+
 ## 审计主体去凭据化（实施）：`operator` 改服务端断言租户 + 新 **P12** 门禁 + ks shim 契约用例（2026-10-03，单 PR）
 
 > 承接下一段（同日的只读审计 + 方案）。Q1–Q4 已拍板「按建议四项全部实施」，ks 守卫用例「落」。方案：`docs/plans/plan-audit-operator-principal-2026-10-03.md`。**测量时点：HEAD `ffd86ab` 之上的本工作树（未 commit），extras 形态两种都实跑**（见「验证」条）。**后续状态**：已 commit（`116d51b`）→ PR #61 → 合入主干（`bb2b9a8`），合入与主干复验见 §6。
