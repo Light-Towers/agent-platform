@@ -83,7 +83,12 @@ def test_mw_valid_header_binds_assertion(monkeypatch, tmp_path):
 def test_mw_forged_header_rejected(monkeypatch, tmp_path):
     _set_key(monkeypatch, tmp_path)
     hdr = sign_internal_header("tenantA", None, key=KEY)
-    asserted, status = _drive({}, {"X-Internal-Tenant": hdr[:-2] + "ff"})
+    # 按构造保证 forged != hdr：旧写法固定换成 "ff"，真签名末尾恰为 "ff" 时退化为原串
+    # ⇒ 中间件给 200，属 1/256 概率假失败（与 agent-core 同构，docs/TODO.md 已登记）。
+    tail = "11" if hdr.endswith("00") else "00"
+    forged = hdr[:-2] + tail
+    assert forged != hdr, "伪造串与合法串相同 ⇒ 本用例没在校验签名，判据失效"
+    asserted, status = _drive({}, {"X-Internal-Tenant": forged})
     assert status == 401
 
 
