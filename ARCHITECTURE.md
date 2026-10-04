@@ -131,7 +131,7 @@ P12 是**名匹配粗筛**，不得当作「凭据不入审计」的全局完备
 | `scripts/evidence/README.md` | 收录判据、可直接复制的运行命令、三条实踩过坑 | — |
 | `tests/governance/test_evidence_scripts.py` | 钉住派生式预期集的纯逻辑不变量（含 `jobs:` 位于文件末尾、YAML 1.1 `on:`→布尔 `True` 键、PyYAML 缺席必 exit 2） | 否（autouse 拦断子进程） |
 
-口径三条：① 退出码 `2` = **前置不可用**（依赖缺失 / `gh` 调用失败），从不折算成通过；② 预期 check 名一律派生，硬编码两个方向都会错（该跑的没进集合 ⇒ 红了没人看；不该跑的写进集合 ⇒ 等不到而误判未达成）；③ 本目录受 `scripts/check_doc_sync.py` 的文件引用存在性校验覆盖（本节即登记位），引用失效即 CI 红。方案与验收：`docs/plans/plan-evidence-scripts-intake-2026-10-04.md`。
+口径三条：① 退出码 `2` = **前置不可用**（依赖缺失 / `gh` 调用失败），从不折算成通过；② 预期 check 名一律派生，硬编码两个方向都会错（该跑的没进集合 ⇒ 红了没人看；不该跑的写进集合 ⇒ 等不到而误判未达成）；③ 本目录受 `scripts/check_doc_sync.py` 的文件引用存在性校验覆盖（本节即登记位），引用失效即 CI 红——该校验的**判定基准是版本控制清单（`git ls-files`）而不是本机文件系统**，取不到清单即 fail-closed（口径：`docs/plans/plan-doc-sync-tracked-scope-2026-10-04.md`）。方案与验收：`docs/plans/plan-evidence-scripts-intake-2026-10-04.md`。
 
 ## 5. 当前已知技术债（登记，非本期处理）
 

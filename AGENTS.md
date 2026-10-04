@@ -51,7 +51,7 @@ DATABASE_URL= uvicorn agent_server.main:app --port 8000  # 零依赖冒烟
 
 **Windows 注意**：本机无 `make`，直接用 `uv run pytest ...` / `uv run --with ruff ruff check .` 等价命令。
 
-**文档防漂移**：`scripts/check_doc_sync.py` 在 CI 单独跑（非 `make lint`），校验 AGENTS.md/ARCHITECTURE.md/README.md 的目录与文件引用路径存在 + Makefile session 数一致（CHANGELOG 是历史快照，故意不校）。改目录结构后须保证其通过。
+**文档防漂移**：`scripts/check_doc_sync.py` 在 CI 单独跑（非 `make lint`），校验 AGENTS.md/ARCHITECTURE.md/README.md 的目录与文件引用路径存在 + Makefile session 数一致（CHANGELOG 是历史快照，故意不校）。改目录结构后须保证其通过。**存在性判定基准 = 版本控制清单（`git ls-files`），不是本机文件系统**：本机工作区有整片 gitignored 目录，以 FS 为基准会把「文档引用只在本机存在的路径」喂成绿（2026-10-04 实踩，由 CI 而非本机发现）；取不到清单则 fail-closed 报红，不退回 `Path.exists()`、无旁路开关、无白名单。⇒ 要写「本机才有、不入库」的目录，用**不带反引号的普通文本**。方案：`docs/plans/plan-doc-sync-tracked-scope-2026-10-04.md`。
 
 ## 技术栈
 
