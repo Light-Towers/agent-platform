@@ -87,7 +87,10 @@
   `load_tracked_index` 单次 0.083s（1072 files / 179 dirs）；用例 17 → **35 passed**（新增：本机存在但未入库必红、
   清单里有而本机被删不判红、fail-closed 必红、`has` 语义 10 组、`load_tracked_index` 三种失败形态、真实树三条面
   在 auto 索引下 0 违规），被迁移的 2 条 tmp_path 用例**断言逐字未改**，只补 `tracked=` 输入；ruff rc=0、
-  docsync rc=0（耗时 2.48s 含解释器启动）。**残余局限（登记而不粉饰）**：① 判定面仍以**反引号形态**为入口
+  docsync rc=0（耗时 2.48s 含解释器启动）；lint rc=0；根 pytest **1005 passed / 35 skipped**；
+  **判据 6 干净 worktree 复验**（`tracked files=1073`、`.codeartsdoer` 与 `.venv` 均不在场）：本批 tip 上
+  新实现 rc=0 且 35 passed，主干 `3546190` 上旧实现 rc=0 且 17 passed（基线对照）。
+  **残余局限（登记而不粉饰）**：① 判定面仍以**反引号形态**为入口
   （不带反引号的目录名不判，属方案 §2 已知漏报面）；② 无 git 的环境跑该门会红（fail-closed 是刻意选择，
   确需在该环境跑则显式传 `tracked=`）；③ 索引里有、本机被临时删的引用不判红（判定基准 = 索引，与 CI 同构，
   不是缺陷）；④ `git ls-files` 默认读**索引**而非 HEAD ⇒ stage 而未 commit 的新文件也算「已入库」，

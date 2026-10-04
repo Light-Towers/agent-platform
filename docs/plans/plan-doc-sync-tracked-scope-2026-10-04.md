@@ -117,7 +117,7 @@ def check_path_exists(doc, line_no, path_str, base=REPO_ROOT, tracked=_AUTO) -> 
 | 3 fail-closed 自证 | **达成** | `load_tracked_index` 被换成返回 None ⇒ 三条面各产出一条「仓内路径清单不可用」；实取计数 agents=13 / arch=7 / refs=78 / explicit_None=1（均 >0）；用例 `test_fail_closed_when_index_unavailable` 钉住 |
 | 4 用例全绿且 ≥22 | **达成（超预期）** | 17 → **35 passed**；被迁移的 2 条 tmp_path 用例**断言逐字未改**（`git diff` 可判），只补 `tracked=_idx(...)`；新增含 parametrize 共 18 条 |
 | 5 ruff / lint rc=0 | **达成** | `ruff check .` rc=0；`lint_architecture.py` rc=0 |
-| 6 干净 worktree 复验 | **待取**（本批 tip commit 后执行） | 在主干 `3546190` 与本批 tip 各跑一次 ⇒ 均应 rc=0；此判据同时兜住残余局限 ④（见下方偏差 2：`ls-files` 读索引而非 HEAD） |
+| 6 干净 worktree 复验 | **达成** | `git worktree add --detach` 两个 sha（与 actions/checkout 同构，实取 `tracked files=1073`、`.codeartsdoer` 与 `.venv` 均不在场）：本批 tip `60655c0` 上**新实现 rc=0** 且用例 **35 passed**（证明绿不依赖本机脏工作树）；主干 `3546190` 上**旧实现 rc=0** 且 17 passed（基线对照）。验完 `worktree remove --force`，`git worktree list` 只剩主工作区。附带**入库 blob 逐字节面**（`git cat-file`）：8 个文件 crlf=0 / lone_cr=0 / 无 BOM / 无 NUL ⇒ `.gitattributes` 的 `* text=auto eol=lf` 已生效（工作树曾有 CRLF 不影响仓内形态） |
 | 7 CI + 合入后复验 | **待取** | PR 上 `Doc sync check` 与两条 `ci` 矩阵全 pass；合入后用 `scripts/evidence/verify_main_tip.py` 在新 tip 复验判据 6 |
 
 **与计划的偏差**（只记真实发生的）：

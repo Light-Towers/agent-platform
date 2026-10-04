@@ -22,6 +22,8 @@
 - **差分自证**（同一脏工作树 + 同一探针行）：旧实现（`git show 3546190:scripts/check_doc_sync.py`，放 ROOT 下恰好一层以保持 `REPO_ROOT` 正确）**rc=0 放行**；新实现 **rc=1** 并报「路径未纳入版本控制 '.codeartsdoer/temp/'（本机存在但未入库：CI / 新克隆上不存在）」；`finally` 还原 ⇒ sha256 全等 + rc=0。
 - **用例** 17 → **35 passed**：被迁移的 2 条 tmp_path 用例**断言逐字未改**（`git diff` 可判），只补 `tracked=_idx(...)` 输入；新增「本机存在但未入库必红」「清单里有而本机被删不判红」「清单不可用必红」「真实树三条面在 auto 索引下 0 违规」「`TrackedIndex.has` 语义 10 组」「`load_tracked_index` 三种失败形态」。红线自查：**未删用例、未收窄断言、未放宽前置条件**。
 - **新门当场拦下本批自己一次**（非构造探针）：往 `AGENTS.md` / `ARCHITECTURE.md` 引用的新方案文件当时**尚未 stage** ⇒ docsync **rc=1** 报两处「路径未纳入版本控制」，`git add` 后 rc=0；旧实现（FS 基准）在同一棵树上始终放行。
+- **干净 worktree 复验（方案 §5 判据 6）**：`git worktree add --detach` ⇒ 实取 `tracked files=1073`、`.codeartsdoer` 与 `.venv` 均不在场（与 actions/checkout 同构）。本批 tip 上**新实现 rc=0 且用例 35 passed**（证明绿不依赖本机脏树）；主干 `3546190` 上**旧实现 rc=0 且 17 passed**（基线对照）。验完 `worktree remove --force`，`git worktree list` 只剩主工作区。入库 blob 逐字节面：8 文件 crlf=0 / lone_cr=0 / 无 BOM / 无 NUL。
+- 其余门禁实取（改动后的树上）：docsync rc=0（2.58s）· `ruff check .` rc=0 · `lint_architecture.py` rc=0 · 根 pytest **1005 passed / 35 skipped**（测量时点 2026-10-04，工作树形态：本批 8 文件已 stage）。
 - 口径同步入文档：`AGENTS.md` 文档防漂移段、`ARCHITECTURE.md` §4.2 口径③、`docs/operations/testing-playbook.md` §2 流程表与 §2.4；`docs/TODO.md` L78 由开项改闭合并登记**四条残余局限**（判定面仍以反引号为入口 / 无 git 环境会红 / 索引有而本机删掉的不判红 / `git ls-files` 读**索引**而非 HEAD ⇒ stage 未 commit 的文件算数，真看 HEAD 靠验收 6 的干净 worktree）。
 
 ### 3. PR #55（Dependabot）影响面**比账面更宽**，且「就地修正」路线已封死
