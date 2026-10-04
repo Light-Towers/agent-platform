@@ -125,7 +125,11 @@ def _valid_token(priv: str) -> str:
 
 def _forged_token(priv: str) -> str:
     tok = _valid_token(priv)
-    return tok[:-2] + "zz"
+    # 按构造保证 != tok：旧写法固定换成 "zz"，签名末尾恰为 "zz" 时退化为原串
+    # ⇒ 本用例不再校验签名（1/4096 概率假失败，docs/TODO.md 已登记）。
+    forged = tok[:-2] + ("zz" if not tok.endswith("zz") else "zy")
+    assert forged != tok, "伪造串与合法串相同 ⇒ 本用例没在校验签名，判据失效"
+    return forged
 
 
 def _build_app(*, identity_first: bool = False, seen_subjects: list | None = None) -> FastAPI:

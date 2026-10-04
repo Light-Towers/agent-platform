@@ -77,7 +77,11 @@ def test_xtjwt_binds_federation_tenant_context():
 
 def test_xtjwt_forged_rejected():
     tok = mint_token("tenantA", private_key_pem=PRIV, kid="k1", issuer=ISS, audience=AUD)
-    tenant, status = _drive({"X-Tenant-JWT": tok[:-2] + "zz"})
+    # 按构造保证 forged != tok：旧写法固定换成 "zz"，签名末尾恰为 "zz" 时退化为原串
+    # ⇒ 中间件给 200，属 1/4096（b64url 两位）概率假失败（docs/TODO.md 已登记）。
+    forged = tok[:-2] + ("zz" if not tok.endswith("zz") else "zy")
+    assert forged != tok, "伪造串与合法串相同 ⇒ 本用例没在校验签名，判据失效"
+    tenant, status = _drive({"X-Tenant-JWT": forged})
     assert status == 401
 
 
