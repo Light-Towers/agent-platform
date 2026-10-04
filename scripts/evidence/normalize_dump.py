@@ -12,7 +12,8 @@
     uv run --no-sync python scripts/evidence/normalize_dump.py <文件> [<文件> ...]
     uv run --no-sync python scripts/evidence/normalize_dump.py --no-print <文件>
 
-输出写到 `<原文件名>.utf8`（同名目录内），退出码 0 = 全部转换成功，1 = 有文件读不到。
+输出写到 `<原文件名>.utf8`（同名目录内），退出码 0 = 全部转换成功，
+1 = 有文件读不到 / 被跳过（输入已是 `.utf8` 产物时跳过不转，防 `.utf8.utf8` 链式副本）。
 """
 
 from __future__ import annotations
@@ -53,9 +54,14 @@ def main(argv: list[str] | None = None) -> int:
     rc = 0
     for name in args:
         p = Path(name)
+        if p.suffix == ".utf8":
+            # 防链式：把上次产物再喂进来会生成 `x.utf8.utf8`；产物内容已稳定，跳过即幂等。
+            print("### %s 跳过：已是 .utf8 产物（再转将生成 %s 链式副本）" % (p, p.name + ".utf8"), file=sys.stderr)
+            rc = 1
+            continue
         try:
             dest, enc, text = normalize(p)
-        except OSError as exc:
+        except (OSError, ValueError) as exc:  # ValueError：`..` 等无名路径 with_name 抛出
             print("### %s 读取失败：%s" % (p, exc), file=sys.stderr)
             rc = 1
             continue
