@@ -90,6 +90,9 @@ git worktree remove --force $env:TEMP\wt<sha>         # 验完回收，`git work
 ⇒ 干净检出复验**不再是这一门的必需项**，但**保留为通用纪律**：任何仍以本机 FS 或本机环境为依据的
 校验（目录扫描、`uv lock --check`、需要外部服务/环境变量的分支）都可能本地绿 / CI 红，
 「旧内容能复现红 + 新内容同树转绿」的双向实取仍是唯一能给结论的取法。
+本批仍按方案 §5 判据 6 实取了两个 sha 的干净树（`git worktree add --detach`，实取 `tracked files=1073`、
+`.codeartsdoer` 与 `.venv` 均不在场）：本批 tip 上新实现 rc=0 且用例 35 passed，主干 `3546190` 上旧实现
+rc=0 且 17 passed（基线对照）⇒ 「绿」是在 CI 同构树上取到的，不依赖本机脏工作树。
 方案与验收：`docs/plans/plan-doc-sync-tracked-scope-2026-10-04.md`。
 
 ## 3. 本仓特定配方
