@@ -39,6 +39,19 @@
 - 处置：建一次性差集扫描（`.codeartsdoer/temp/cjk_proofread.py`，探针不入库）——列出「本批新写的汉字」与「全仓其余文本出现过的汉字」的**差集**并逐个校读，本批最终 `rare_chars=0`。
 - 同类坑一条：PowerShell `Out-File -Encoding ascii` 会把 CJK 写成 `?`（有损落盘）。读到 `???` 先怀疑自己的落盘姿势，**不要报成仓内 mojibake**。
 
+### 5. PR #66 合入 `24d71b8`，判据 6 在「docsync 新门自己的 tip」上复验 PASS
+
+- checks：PR #66 上 **5/5 pass**（含 `Doc sync check` 与两条 `Analyze`、`ci` 矩阵）；合入前 `qodersec` **L3 深度评审 0 findings**（注意：门禁须**每批重问**，上一批选过「跳过」不构成这一批的推定）。
+- 合入 `24d71b8e2c9eea99356c8532f69d45598f43443b` @ `2026-10-04T05:10:53Z`；未夹带自证四项全 True：merge 树 == head 树、`^1 == 3546190e3aca`（旧 main）、`^2 == 52e4c79f949c`（head）、对旧 main 恰 **8 个文件** == `changedFiles`。
+- 判据 6 在新 tip：`scripts/evidence/verify_main_tip.py` **首跑 rc=1「未达成」**——`Analyze (python)` 与 `ci` 仍 `in_progress`，这正是 fail-closed 该有的行为（不许把「还没跑完」读成「通过」）；等待 210s 后复跑 **rc=0 PASS**：`[A]` 两条 analysis（1887840620 actions @ 05:11:31Z、1887841851 python @ 05:12:09Z，`commit=24d71b8` / `ref=refs/heads/main` / `results=0`）、`[B]` open **0**、`[C]` dismissed **0**（总数 46）、`[D]` 最大告警号 **48**（基线 48，不增）、`[E]` 合入后新建 **0**、`[F]` 三条全 completed/success、`[G]` 0。
+- **一条不成立的读数（登记为纪律）**：合入后的第一次未夹带自证**整套都是假读数**——脚本在 `git fetch` 之前跑本地 git，得到 `TREE_EQUAL=False`、`files_vs_old_main=0`、`merge-base rc=128`。根因：对象不在本地时 `git rev-parse <sha>^{tree}` **原样回显入参**而不报错。⇒ **合入取证必须先 `git fetch`**；任何本地 git 读数 rc≠0 或值反常，先怀疑对象可用性，不得据此下「夹带」结论。
+
+### 6. 已合并 ref 清理：先落取证文档，再删 ref
+
+- 账面残口收口时顺手清掉长期积累的已合并分支。纪律是**取证结论先入库再删**（删完 tip 后逐条证据不可复现）：判据、删除前逐分支读数、复核命令、执行命令、预期结果全部落在 `docs/operations/git-ref-cleanup-2026-10-04.md`（本 commit 同时删本地 ref，所以本文档入库时本地删除已发生；远端删除在合入后执行，预期读数写在文档 §4）。
+- 判据取本仓既有经验：base 用**该分支 PR 的真实 `baseRefName`**（不是默认分支），`git cherry -v` 的 `+` 为 0 + 相对 base 独有文件为 0 + **树 OID 全等**（本仓 `--merge` 非 squash，`mergeCommit` 即真实 merge 提交）三重。计数类判据在 squash 场景会假阳性，不采信。
+- 结果分两段：**本地 7 个已在本批删除**（6 个已合并 PR 分支 + `v3` 本地副本），`git branch -d` 全部成功（**未使用 `-D`**，git 拒绝即说明判据不成立，届时停手不强删）；**远端 6 个同名分支待本 PR 合入后删除**（远端不可逆且无 reflog 兜底，所以取证必须先入库）。**刻意的保留**三条，且写清理由而非遗漏：`origin/dependabot/...`（open PR #55 的 head，独有 1 提交 + 10 文件，删它等于毁掉那条决策线现场）、`origin/v2`/`origin/v3`（版本线同名 + 远端不可逆且无 reflog 兜底）、`company` remote 整体不触碰。`git branch -d` 全部成功（未使用 `-D`）反证判据成立。
+
 ## 取证链二批（2026-10-04）：docsync 修复在 CI 得证 + 部署通道协议级复探 + PR #55 定到根因
 
 > 承接上一段（候选 ① 入库）。零产品代码、零 workflow、零依赖声明改动；本段只动 `CHANGELOG.md`、`docs/TODO.md`、`docs/operations/audit-operator-principal-runbook.md`。
