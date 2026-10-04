@@ -120,6 +120,19 @@ P11 只认顶层块：未声明 `permissions` 的 job 会回落到组织/仓库�
 
 P12 是**名匹配粗筛**，不得当作「凭据不入审计」的全局完备门禁：抓不到「先赋给别名/属性再传」的间接流，也抓不到 `return` 等其它外流形状；kernel 侧对凭据的处理归 P6。行为面由上表用例与人工语义审计补齐。背景见 `docs/plans/plan-audit-operator-principal-2026-10-03.md` §4.3。
 
+### 4.2 合入后复验脚本（判据 6 形态，必须可原样重跑）
+
+> 门禁 lint 管「未来不再长出来」，本节管「合入后的结论能不能被第三者重跑」。账面把某些验收写成「任何一次合入后必须在新 tip 上重跑」的指针 ⇒ 指针所指脚本**必须在仓内**，否则判据只在某台机器的工作副本上成立（原住址 .codeartsdoer/temp 不是仓内路径——被根 `.gitignore` 的 `.*/` 规则整目录忽略，新克隆上不存在）。
+
+| 路径 | 职责 | 是否访问网络 |
+|------|------|--------------|
+| `scripts/evidence/verify_main_tip.py` | 判据 6 七项 `[A]`–`[G]` 全 fail-closed 复验；门禁预期集按 `on.push.paths` × changed paths **派生**（不硬编码） | 是（`gh api`） |
+| `scripts/evidence/normalize_dump.py` | PowerShell 重定向产物默认 UTF-16 LE ⇒ 按 BOM 嗅探转 UTF-8，防「肉眼正常而计数全 0」 | 否 |
+| `scripts/evidence/README.md` | 收录判据、可直接复制的运行命令、三条实踩过坑 | — |
+| `tests/governance/test_evidence_scripts.py` | 钉住派生式预期集的纯逻辑不变量（含 `jobs:` 位于文件末尾、YAML 1.1 `on:`→布尔 `True` 键、PyYAML 缺席必 exit 2） | 否（autouse 拦断子进程） |
+
+口径三条：① 退出码 `2` = **前置不可用**（依赖缺失 / `gh` 调用失败），从不折算成通过；② 预期 check 名一律派生，硬编码两个方向都会错（该跑的没进集合 ⇒ 红了没人看；不该跑的写进集合 ⇒ 等不到而误判未达成）；③ 本目录受 `scripts/check_doc_sync.py` 的文件引用存在性校验覆盖（本节即登记位），引用失效即 CI 红。方案与验收：`docs/plans/plan-evidence-scripts-intake-2026-10-04.md`。
+
 ## 5. 当前已知技术债（登记，非本期处理）
 
 - **【2026-09-27 新增】记忆层契约缺位：`agent-runtime` 自建执行记忆**：`memory` 的法定归属是 `agent-core`（§2.1 明列「含 MemoryStore 统一门面」），且内核已声明「各子包不得再各自为政重复实现」（`agent_core/memory/__init__.py:20-21`）。但内核现有契约**只覆盖语义记忆**（`store.py` 的 `MemoryStore` 五动词与 `CapabilityReport` 均无 episodic/procedural/working 能力位），对执行记忆零覆盖 → `agent-runtime` 只能在包内自建 8 个 `memory_*.py`（对 `agent_core` 的 import 数为 0）。
