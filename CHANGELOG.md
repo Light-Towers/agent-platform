@@ -2,6 +2,43 @@
 
 本仓库为 uv workspace monorepo。**唯一受支持的安装/运行入口是根 `uv.lock` + `uv sync`**，子包不再维护独立 `uv.lock`（见 v2 修复 #14）。
 
+## 门禁收口三批（2026-10-04）：PR #65 合入得证 + docsync 判定基准改到版本控制清单 + PR #55 影响面订正
+
+> 承接上一段。改动面：`scripts/check_doc_sync.py` + `tests/governance/test_doc_sync_file_refs.py` + `AGENTS.md` / `ARCHITECTURE.md` / `docs/TODO.md` / `docs/operations/testing-playbook.md` + 新方案 `docs/plans/plan-doc-sync-tracked-scope-2026-10-04.md`。**零产品运行时代码、零 workflow、零依赖声明改动。**
+
+### 1. PR #65 合入 `3546190`，判据 6 首次在「真合入后的 tip」上给出结论
+
+- 合入前门禁（head `2268099`）：`gh pr checks 65` ⇒ **5/5 `COMPLETED SUCCESS`**（`Analyze (actions)` / `Analyze (python)` / `CodeQL` / `ci` ×2矩阵）。
+- **未夹带自证**（不靠「看起来只合了我的东西」）：merge commit `3546190e3aca…` @ `2026-10-04T04:28:26Z`、`state=MERGED`；merge 树 OID `b375d00d5e93…` **==** PR head 树 OID；`^1=91cd79a`（旧 main）、`^2=2268099`（head）且 `merge-base --is-ancestor ^2` rc=0；`git diff --name-only ^1..merge` **恰 11 个文件** == API `changedFiles=11`；`ls-remote` 远端 main 同步为 `3546190`。
+- **判据 6 首跑 rc=1「未达成」**（入库脚本 `scripts/evidence/verify_main_tip.py`）：`[F]` 面上 `Analyze (python)` 与 `ci` 仍 `in_progress` ⇒ 脚本**拒绝把「刚合入还没跑完」洗成 PASS**，这是 fail-closed 该有的表现，不是故障。数分钟后同 sha 复跑 ⇒ **rc=0 `=== 总体：PASS ===`**：`[A]` 两条 analysis（actions `1887767879` @ 04:28:54Z / python `1887769071` @ 04:29:37Z，commit 均为 `3546190`、ref `refs/heads/main`、`results=0`）、`[B]` open **0**、`[C]` dismissed **0**（总数 46）、`[D]` 全仓最大告警号 **48 不增**、`[E]` 合入时刻后新建 **0**、`[G]` 预期外 check-run **0**；派生预期集 = `{Analyze (actions), Analyze (python), ci}`（`ha` / `assembly` / `eval-llm` 按 `on.push.paths` × changed paths 不触发）。
+- 一条**不成立的读数**（登记为纪律，不写进结论）：合入脚本里我误用 `gh pr view --json merged`（**该字段不存在**）⇒ rc=1、`state=None`，读数形状像「什么都没发生」。没有据此推断，另取合法字段 + 本地 `rev-parse` / `ls-remote` 多通道才落上面那些数。
+
+### 2. docsync 的**门禁盲区本尊**闭合（TODO L78，候选 ①）
+
+- 上一段只改了措辞（`101a92c`），盲区本尊未动：该门以本机 FS 为存在性基准，而工作区有整片 gitignored 目录 ⇒ 本机绿 / CI 红。本批按「先方案后编码」实施候选 ①。
+- **动手前 dry-run**（`importlib` 载入真实模块、把 `check_path_exists` 换成记录器 ⇒ 判定面无漂移，不重新实现正则）：`tracked_files=1072 / tracked_dirs=179`，当前 98 条被断言的引用**全部「FS ∧ tracked」**，`fs_only=0` ⇒ **零新增红**。
+- **单一收口**：三条存在性面（`check_agents_md_paths` / `check_architecture_paths` / `check_doc_file_refs`）本就汇聚到同一个 `check_path_exists()`，故只改这一处 + 各面透传 `tracked`；新增 `TrackedIndex`（dirs 由 files 派生，git 不跟踪空目录 ⇒ 索引里没有的目录在新克隆上确实不存在，判红是**正确行为**）与 `load_tracked_index`（`git -C <base> ls-files -z`，用 `-z` 是为拿原始路径、不被 `core.quotepath` 转义 CJK/空格），按 base 缓存 ⇒ 一次调用服务三条面（实测 **0.083s**）。
+- **fail-closed**：取不到清单（git 不在 / rc≠0 / 输出不可解）⇒ 报红并说明原因，**不退回 `Path.exists()`、无 `--skip-git` 旁路、无白名单**。本机 FS 降级为「已判违规后只区分措辞」（「未纳入版本控制」 vs 「路径不存在」）。
+- **差分自证**（同一脏工作树 + 同一探针行）：旧实现（`git show 3546190:scripts/check_doc_sync.py`，放 ROOT 下恰好一层以保持 `REPO_ROOT` 正确）**rc=0 放行**；新实现 **rc=1** 并报「路径未纳入版本控制 '.codeartsdoer/temp/'（本机存在但未入库：CI / 新克隆上不存在）」；`finally` 还原 ⇒ sha256 全等 + rc=0。
+- **用例** 17 → **35 passed**：被迁移的 2 条 tmp_path 用例**断言逐字未改**（`git diff` 可判），只补 `tracked=_idx(...)` 输入；新增「本机存在但未入库必红」「清单里有而本机被删不判红」「清单不可用必红」「真实树三条面在 auto 索引下 0 违规」「`TrackedIndex.has` 语义 10 组」「`load_tracked_index` 三种失败形态」。红线自查：**未删用例、未收窄断言、未放宽前置条件**。
+- **新门当场拦下本批自己一次**（非构造探针）：往 `AGENTS.md` / `ARCHITECTURE.md` 引用的新方案文件当时**尚未 stage** ⇒ docsync **rc=1** 报两处「路径未纳入版本控制」，`git add` 后 rc=0；旧实现（FS 基准）在同一棵树上始终放行。
+- **干净 worktree 复验（方案 §5 判据 6）**：`git worktree add --detach` ⇒ 实取 `tracked files=1073`、`.codeartsdoer` 与 `.venv` 均不在场（与 actions/checkout 同构）。本批 tip 上**新实现 rc=0 且用例 35 passed**（证明绿不依赖本机脏树）；主干 `3546190` 上**旧实现 rc=0 且 17 passed**（基线对照）。验完 `worktree remove --force`，`git worktree list` 只剩主工作区。入库 blob 逐字节面：8 文件 crlf=0 / lone_cr=0 / 无 BOM / 无 NUL。
+- 其余门禁实取（改动后的树上）：docsync rc=0（2.58s）· `ruff check .` rc=0 · `lint_architecture.py` rc=0 · 根 pytest **1005 passed / 35 skipped**（测量时点 2026-10-04，工作树形态：本批 8 文件已 stage）。
+- 口径同步入文档：`AGENTS.md` 文档防漂移段、`ARCHITECTURE.md` §4.2 口径③、`docs/operations/testing-playbook.md` §2 流程表与 §2.4；`docs/TODO.md` L78 由开项改闭合并登记**四条残余局限**（判定面仍以反引号为入口 / 无 git 环境会红 / 索引有而本机删掉的不判红 / `git ls-files` 读**索引**而非 HEAD ⇒ stage 未 commit 的文件算数，真看 HEAD 靠验收 6 的干净 worktree）。
+
+### 3. PR #55（Dependabot）影响面**比账面更宽**，且「就地修正」路线已封死
+
+- 上一段只定性到 otel 系列；本批取全量 diff 后订正：**375259 字符 / 2023 行 / 10 个文件**（9 个 `pyproject.toml` + `uv.lock`）、**39 组版本 bump**。
+- 根 `pyproject.toml` 抬了 **10 处下界**，其中 `langchain-core >=0.3 → 1.6.5`、`sqlglot >=25.0 → 30.20.0` 是**跨主版本线**的跳线（`packages/agent-core` 的 `sqlglot` 同步被抬、多处 `pydantic → 2.13.5`、ks 的 `langgraph → 1.2.12`）⇒ 上一段那句「仅根声明一处被抬」**只对 `opentelemetry-api` 成立，不对整个 PR 成立**，已订正。
+- `gh pr view 55` ⇒ **`maintainerCanModify: false`** ⇒ 无法就地改 dependabot 分支；`mergeStateStatus UNSTABLE`，`ci` ×2 fail @ 31s/39s（与「挂在 lint 的 L-4 而非 10-session 测试面」自洽）。
+- 拍板：**关 #55，自建「lock-only + 仅安全项抬下界」PR**（保留 `opentelemetry-api>=1.24` 的已敲定口径，`anyio` / `mcp` / `transformers` 类可抬）。本段**未执行关闭**（外部可见动作，须单独征询后再动）。
+
+### 4. 一条工具纪律：同形字自我污染要用差集扫，不能靠肉眼
+
+- 本批我三次把形近字写错并**落盘**（「惄然」应为「悄然」、「绛不」应为「绝不」，另一次误改成「经不」）。都发生在我自己生成的文本里，不是编辑器或编码改写 ⇒ ruff / docsync / lint 全都不会报。
+- 处置：建一次性差集扫描（`.codeartsdoer/temp/cjk_proofread.py`，探针不入库）——列出「本批新写的汉字」与「全仓其余文本出现过的汉字」的**差集**并逐个校读，本批最终 `rare_chars=0`。
+- 同类坑一条：PowerShell `Out-File -Encoding ascii` 会把 CJK 写成 `?`（有损落盘）。读到 `???` 先怀疑自己的落盘姿势，**不要报成仓内 mojibake**。
+
 ## 取证链二批（2026-10-04）：docsync 修复在 CI 得证 + 部署通道协议级复探 + PR #55 定到根因
 
 > 承接上一段（候选 ① 入库）。零产品代码、零 workflow、零依赖声明改动；本段只动 `CHANGELOG.md`、`docs/TODO.md`、`docs/operations/audit-operator-principal-runbook.md`。
