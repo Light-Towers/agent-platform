@@ -75,7 +75,27 @@
 
 - [x] **取证脚本全住在 gitignored 目录里，而账面把它们当可重跑指针**（2026-10-03 主动扫遗留时发现）：CHANGELOG / 本文件 / PR 正文反复引用 `.codeartsdoer/temp/verify_main_*.py`（判据 6、B7b-2/4 主干复验等）作为「下次必须在新 tip 上重跑」的指针对象，但整个 `.codeartsdoer/` **未入库**（实取：`git check-ignore -v .codeartsdoer/temp/verify_main_p12.py` 命中 `.gitignore:60` 的 `.*/` 规则；`git ls-files .codeartsdoer` 计数 **0**）⇒ **新克隆 / 换机器上这些脚本根本不存在**，账面判据的可复现性目前只在本机工作副本成立（`gh` 依赖、fail-closed 写法均未入库）。若要闭合：先定方案再动代码，候选三条——① `scripts/evidence/` 只收「主干复验」类可重跑脚本（小、纯只读 API），并让它受 `check_doc_sync.py` 的路径存在性校验；② 把关键判据改写成仓内 pytest 用例（需 `--allow-external` 类守卫，避开 CI 依赖网络）；③ 保持现状但在每处引用旁标明「本机脚本，未入库」。**本批不动（零代码，属先方案后编码面）**，且无论选哪条，脚本内容本身已经实跑验证，不影响已有结论的有效性。另记一个**属于脚本自身的假阳性陷阱**（已踩到并修，归入本项的入库理由）：用正则从 workflow 提 `jobs:` 名时，`jobs:` 位于文件末尾会导致匹配失败⇒该 check 静默掉出「预期应跑集合」，真阳性红会被归成「预期外」而不计入判定（本轮就是 `ci`）；已改 `yaml.safe_load` 解析，并在旧 tip `bb2b9a8` 上回归自证派生集与当时硬编码逐项一致（详见 CHANGELOG 同段 §6）。 **（2026-10-04 已按候选 ① 闭合，先方案后编码）**方案 `docs/plans/plan-evidence-scripts-intake-2026-10-04.md`；入库 `scripts/evidence/verify_main_tip.py`（判据 6 七项 fail-closed + 预期集按 `on.push.paths` × changed paths 派生 + PyYAML 缺席即 exit 2、**绝不降级回正则**）、`scripts/evidence/normalize_dump.py`（第六条坑本轮第三次踩到：`gh pr checks --watch >` 产物 raw 21824B 为 UTF-16 LE）、`scripts/evidence/README.md`；登记于 `ARCHITECTURE.md` §4.2 ⇒ 受 `scripts/check_doc_sync.py` 的文件引用存在性校验；回归用例 `tests/governance/test_evidence_scripts.py` **22 条**（autouse 拦断 `_run`/`gh_api` ⇒ 结构上不可能访问网络）。实取（均在改动后的树上）：三个主干 tip `bb2b9a8` / `789309c` / `91cd79a` 用**入库脚本**复验均 **rc=0 且 `=== 总体：PASS ===`**；派生集在 `bb2b9a8` 为 `{ci, assembly, Analyze×2}`（与当年硬编码逐项一致 ⇒ 没把该跑的漏掉）、在 `789309c` 多出 `ha`、在纯文档 tip `91cd79a` 仅 `{ci, Analyze×2}`（⇒ 不该跑的没进集合）；ruff rc=0、lint rc=0、docsync rc=0、新用例 22 passed。**「剥掉防线必红」自证**：把 `ARCHITECTURE.md` 里一条 evidence 引用改成不存在路径 ⇒ docsync rc=1 并指名 `ARCHITECTURE.md:129`，还原后 rc=0 且文件逐字还原（不入库，结论在此）。产物目录 `.evidence-out/` 实取被 `.gitignore:60` 的 `.*/` 规则忽略（`git check-ignore -v` 命中）⇒ 无需改 `.gitignore`。候选 ②（全判据 pytest 化）按方案 §2 非目标**不做**：`[A]`–`[G]` 需打 API，进 CI 即引入网络与配额面；候选 ③ 已被 ① 取代。CHANGELOG / 历史方案文档里指向 `.codeartsdoer/temp/*` 的旧句**原样保留**（append-only 快照，docsync 故意不校）。
 
-- [ ] **`check_doc_sync.py` 的存在性校验以本机 FS 为基准，本机 gitignored 脏目录会把它喂绿**（2026-10-04 由 CI 而非本机发现，第十条工具假阳性）：`check_architecture_paths()` 对「反引号内含 `/` 且以 `/` 结尾」的片段一律调 `Path.exists()`（**不过滤 `DOC_FILE_REF_ROOTS`**），而工作区里有 `.codeartsdoer/`、`.venv/`、`output/` 等整片 gitignored 目录 ⇒ **文档里写一个只在本机存在的目录，本地 rc=0 而 CI 红**。本批实踩：PR #65 推上 `7949357` 后 `Doc sync check` 报 `ARCHITECTURE.md:125: 路径不存在 '.codeartsdoer/temp/'`，而本地同命令一直绿。**本批只修了措辞**（`ARCHITECTURE.md` §4.2 / `scripts/evidence/README.md` 改成不包反引号的普通文本并明写「不是仓内路径」；**未改一行判定代码、未加白名单、未放宽阈值**），并在干净 worktree 上双向实取（旧措辞 ⇒ rc=1 与 CI 逐字一致 / 新措辞 ⇒ rc=0）。**门禁盲区本尊仍开**：下次再写一个 gitignored 目录仍会本地绿 / CI 红。若要消除，候选三条（属产品代码面，**按红线先方案后编码**，本条仅立项）：① 校验前用 `git ls-files`/`git check-ignore` 把判定面限制在 tracked 路径（最贴该门的本意：文档只能引用仓内路径）；② 在 CI 里多一步导出干净树后跑校验（仅把证据搬到 CI，不解决本机假绿）；③ 只对匹配已知 gitignored 前缀的引用告警（比 ① 弱，但改动面最小）。操作面已先入库：`docs/operations/testing-playbook.md` §2.4（干净检出取证姿势与双向约束）。
+- [x] **`check_doc_sync.py` 的存在性校验以本机 FS 为基准，本机 gitignored 脏目录会把它喂绿**（2026-10-04 由 CI 而非本机发现，第十条工具假阳性）：`check_architecture_paths()` 对「反引号内含 `/` 且以 `/` 结尾」的片段一律调 `Path.exists()`（**不过滤 `DOC_FILE_REF_ROOTS`**），而工作区里有 `.codeartsdoer/`、`.venv/`、`output/` 等整片 gitignored 目录 ⇒ **文档里写一个只在本机存在的目录，本地 rc=0 而 CI 红**。本批实踩：PR #65 推上 `7949357` 后 `Doc sync check` 报 `ARCHITECTURE.md:125: 路径不存在 '.codeartsdoer/temp/'`，而本地同命令一直绿。**本批只修了措辞**（`ARCHITECTURE.md` §4.2 / `scripts/evidence/README.md` 改成不包反引号的普通文本并明写「不是仓内路径」；**未改一行判定代码、未加白名单、未放宽阈值**），并在干净 worktree 上双向实取（旧措辞 ⇒ rc=1 与 CI 逐字一致 / 新措辞 ⇒ rc=0）。**门禁盲区本尊仍开**：下次再写一个 gitignored 目录仍会本地绿 / CI 红。若要消除，候选三条（属产品代码面，**按红线先方案后编码**，本条仅立项）：① 校验前用 `git ls-files`/`git check-ignore` 把判定面限制在 tracked 路径（最贴该门的本意：文档只能引用仓内路径）；② 在 CI 里多一步导出干净树后跑校验（仅把证据搬到 CI，不解决本机假绿）；③ 只对匹配已知 gitignored 前缀的引用告警（比 ① 弱，但改动面最小）。操作面已先入库：`docs/operations/testing-playbook.md` §2.4（干净检出取证姿势与双向约束）。
+  **（2026-10-04 已按候选 ① 闭合，先方案后编码）**方案 `docs/plans/plan-doc-sync-tracked-scope-2026-10-04.md`。
+  落地：`check_path_exists()` 的判定基准由 `Path.exists()` 改为 `TrackedIndex`（`git -C <base> ls-files -z`
+  取仓内清单、派生 dirs、按 base 缓存 ⇒ 一次调用服务三条面），三条存在性面（`check_agents_md_paths` /
+  `check_architecture_paths` / `check_doc_file_refs`）统一透传 `tracked`，**收口点仍是同一个函数**；
+  取不到清单 ⇒ **fail-closed** 报红（不退回 FS、无 `--skip-git` 旁路、无白名单）。本机 FS 只在已判违规后
+  用于区分措辞（「未纳入版本控制」 vs 「路径不存在」）。**实取**：动手前影响面 dry-run 得 98 条引用全部
+  「FS ∧ tracked」（`fs_only=0` ⇒ **零新增红**）；**差分自证**（同一脏工作树 + 同一探针行）旧实现 rc=0 放行、
+  新实现 rc=1 并报「路径未纳入版本控制 '.codeartsdoer/temp/'」，还原后 sha256 全等 + rc=0；
+  `load_tracked_index` 单次 0.083s（1072 files / 179 dirs）；用例 17 → **35 passed**（新增：本机存在但未入库必红、
+  清单里有而本机被删不判红、fail-closed 必红、`has` 语义 10 组、`load_tracked_index` 三种失败形态、真实树三条面
+  在 auto 索引下 0 违规），被迁移的 2 条 tmp_path 用例**断言逐字未改**，只补 `tracked=` 输入；ruff rc=0、
+  docsync rc=0（耗时 2.48s 含解释器启动）；lint rc=0；根 pytest **1005 passed / 35 skipped**；
+  **判据 6 干净 worktree 复验**（`tracked files=1073`、`.codeartsdoer` 与 `.venv` 均不在场）：本批 tip 上
+  新实现 rc=0 且 35 passed，主干 `3546190` 上旧实现 rc=0 且 17 passed（基线对照）。
+  **残余局限（登记而不粉饰）**：① 判定面仍以**反引号形态**为入口
+  （不带反引号的目录名不判，属方案 §2 已知漏报面）；② 无 git 的环境跑该门会红（fail-closed 是刻意选择，
+  确需在该环境跑则显式传 `tracked=`）；③ 索引里有、本机被临时删的引用不判红（判定基准 = 索引，与 CI 同构，
+  不是缺陷）；④ `git ls-files` 默认读**索引**而非 HEAD ⇒ stage 而未 commit 的新文件也算「已入库」，
+  该缝隙靠验收 6 的**干净 worktree 复验**兜住（不改成 `ls-tree HEAD`：那会让「新文件尚未 stage」这种
+  常见中间态假红，噪声风险大于收益）。§2.4 的干净检出双向实取**保留为通用纪律**（其他以本机 FS/环境为依据的校验仍可能本地绿/CI 红）。
 
 ## 6. 待评估架构决策（未立项，动工前须先出方案，红线：禁止直接动手改代码）
 
