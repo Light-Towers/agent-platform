@@ -36,6 +36,8 @@ worktree 面：`git worktree list --porcelain` 只返回主工作区 1 条 ⇒ �
 
 - **本地 7 个 ref**（6 个已合并 PR 分支 + `v3` 本地副本）—— 本文档入库的同一批已执行，`git branch -d` 全部成功（未用 `-D`）。
 - **远端 6 个 ref**（同 6 个 PR 分支）—— 本 PR 合入后执行（远端不可逆且无 reflog 兜底，所以取证先入库）。
+  注：**本 PR（#67）自己的 head 分支 `docs/account-closeout-ref-cleanup-2026-10-04` 合入后同判据一并删除**（本地需先 `git switch main`）
+  ⇒ 本地共删 8 个、远端共删 7 个；该分支合入前不在上表（取证时它尚不存在），但它满足同一组判据（`cherry +/- = 0/0`、独有文件 0、merge 树 == head 树）。终态预期不变（§4）。
 - **保留并说明理由**（不是遗漏）：
   - `origin/dependabot/uv/minor-and-patch-f18118ef2b` —— 绑定 open PR #55，且相对 `origin/main` 有 1 个独有提交 + 10 个独有文件，属「唯一持有」，删它等于毁掉那条决策线的现场。
   - `origin/v2`、`origin/v3` —— 版本线同名，远端删除不可逆且无 reflog 兜底；本地已并入的部分只删本地副本。若日后要清 `vN` 系列，须单独决策。
@@ -59,7 +61,9 @@ git diff --name-only origin/main...<branch>           # 期望：空
 git branch -d fix/audit-operator-principal-p12 docs/p12-main-verification docs/p62-closeout \
               fix/forged-suffix-test-flake docs/evidence-closeout-2026-10-04 \
               fix/doc-sync-tracked-scope-2026-10-04 v3
-git push origin --delete <上表 6 个已合并 PR 分支名>
+git push origin --delete fix/audit-operator-principal-p12 docs/p12-main-verification docs/p62-closeout \
+              fix/forged-suffix-test-flake docs/evidence-closeout-2026-10-04 \
+              fix/doc-sync-tracked-scope-2026-10-04 docs/account-closeout-ref-cleanup-2026-10-04
 git fetch --prune origin
 git branch -a    # 期望：本地只剩 main；远端只剩 main / v2 / v3 / dependabot 那一条
 ```
