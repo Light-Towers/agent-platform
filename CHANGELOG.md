@@ -2,6 +2,47 @@
 
 本仓库为 uv workspace monorepo。**唯一受支持的安装/运行入口是根 `uv.lock` + `uv sync`**，子包不再维护独立 `uv.lock`（见 v2 修复 #14）。
 
+## 取证链二批（2026-10-04）：docsync 修复在 CI 得证 + 部署通道协议级复探 + PR #55 定到根因
+
+> 承接上一段（候选 ① 入库）。零产品代码、零 workflow、零依赖声明改动；本段只动 `CHANGELOG.md`、`docs/TODO.md`、`docs/operations/audit-operator-principal-runbook.md`。
+
+### 1. 第三条 commit `101a92c`：PR #65 的 `ci` 由红转绿，且证明「干净检出」是正确等价物
+
+- 修复内容见上一段 §3.1 / §4 第 3 条（只改文档措辞，门禁判定代码一行未动）。
+- **CI 实况（head `101a92c`）**：`CodeQL` pass 3s · `ci` **两条矩阵均 pass**（2m51s / 3m6s）· `Analyze (actions)` pass 34s · `Analyze (python)` pass 56s ⇒ `gh pr checks 65 --watch` **rc=0**。
+- 这一步才算真验收：**本机干净 worktree 的 rc=0 与 CI 的绿互相印证**，而不是「本机绿 + 相信 CI」。
+- push 面顺带一条：`git push` 连续 **4 次 rc=128**（`Connection was reset` / `Failed to connect to github.com:443 after 21082 ms`），而同期 `gh api /zen` 与裸 `urllib` GET `https://github.com/Light-Towers/agent-platform` 均正常（200）⇒ 定性为 **git 传输面的瞬时抖动**，不是认证/仓库状态问题；第 5 次成功（`7949357..101a92c`）。纪律：**push 失败先做协议面复探再重试，不猜「网络坏了」**。
+
+### 2. 部署侧通道复探（2026-10-04 04:05Z，**由 TCP 层升级为协议层**）
+
+存量取证 A/B 仍为 **0**（未取到），这次给的是比上次更强的证据形状：
+
+| 探针 | 实取 |
+|---|---|
+| `Get-Command docker` / `kubectl` | **NOT FOUND**（`ssh` / `scp` 在 `System32\OpenSSH` 在场） |
+| `Test-Path ~/.kube/config` | **False** |
+| `GET http://192.168.100.126:2375/version` | `RemoteDisconnected: Remote end closed connection without response` |
+| `GET http://192.168.100.126:2376/version` | 同上 |
+| 裸 socket recv：`126:22` | connect OK，**0 字节**（拿不到 SSH banner） |
+| **对照 ①**：`192.168.100.254:12345`（同段不存在主机） | connect OK，**0 字节**（与目标同签名） |
+| **对照 ②**：`192.0.2.123:54321`（RFC 5737 TEST-NET，按定义不可路由） | connect OK，**0 字节** |
+
+⇒ 两级对照与真实目标**完全同签名**，说明本机流量仍被 `Meta Tunnel`（TUN）整段接管：既证明不了端口开，也证明不了服务在场。**runbook 的解阻条件与通道清单不变**（同网段机器 / 连 VPN / 把 `192.168.100.0/24` 加进 mihomo bypass，改完先做对照复核），取证仍走「运维或用户在可达环境代跑 §2+§3」。
+
+### 3. PR #55（Dependabot）红的根因：**L-4 依赖下界不一致**，属独立决策面
+
+- 现场：`ci` ×2 fail（31s / 39s），`assembly` / `ha` pass，`CodeQL` skipping；失败 step = `CI gate`；但 `gh run view --log` / `--log-failed` 均返回 **0 字符**（旧 run 日志通道不通），annotations 只有 `.github:33 exit code 2` ⇒ **不从「拿不到日志」倒推根因**。
+- 定根因手法（只读、不动工作树/venv/`uv.lock`）：取 PR head 的 5 个 `pyproject.toml` 到临时目录，`importlib` 载入**真实的** `scripts/lint_architecture.py`，把模块级 `ROOT` 指向该目录后调 `check_otel_extras_alignment()` ⇒ main：**通过**；PR #55 head：**`'opentelemetry-api' 下界不一致（pyproject.toml[otel]: >=1.45.0 vs packages/agent-core/pyproject.toml[tracing]: >=1.24）——归一到方案敲定版本，防组合解析回溯`**。
+- 即 #55 的 `ci` 红是**门禁如实拦下**（与 CHANGELOG 里 #52 同一模式，L-4 第二次起作用），不是环境抖动。具体只动了一行：PR 把**根 `pyproject.toml` 的 `[otel]`** 从 `opentelemetry-api>=1.24` 抬到 `>=1.45.0`，而 `packages/agent-core/pyproject.toml` 的 `[tracing]` 仍是 `>=1.24`（实取：PR diff 里 `opentelemetry-api` 约束行**仅此一处 `+/-`**）。
+- 口径冲突点：`docs/plans/plan-observability-global-remediation-2026-09-29.md` R2/L-4 已敲定的是「根 `[otel]` 与 core `[tracing]` / runtime `[otel]` **归一 `>=1.24`**」（其 §3.3 表行原文）。⇒ 抬到 1.45.0 = **改已敲定口径**，属方案变更面，按红线先出方案。待拍板三支：① 把三处一同抬到 `>=1.45.0`（需改方案 R2/L-4 口径 + 重跑依赖解析）② 先关 #55，保留下轮 dependabot（不动口径）③ 先补一条钉「三处下界必须相等」的用例再谈抬版。
+- 归因探针为本机一次性脚本（.codeartsdoer/temp/pr55_l4_probe.py，未入库；结论已在上面两句）。本轮**未改任何依赖声明、未动 `uv.lock`、未碰 venv**（探针只往临时目录导出文件副本并改模块 `ROOT`）。
+
+### 4. 一条**不成立**的读数（登记为纪律，不写进结论）
+
+同一批命令在一次读数里给出 `078b447 (HEAD -> docs/evidence-closeout-2026-10-04)` + 4 个 ` M` 文件 + 相对 `7949357` 的 diffstat；随后 `git cat-file -t 078b447` ⇒ **`fatal: Not a valid object name`**，`git reflog` / `git log --all` / `git ls-remote origin` 三处均无该对象，且当时 `git status --short` 为**空**、HEAD = `101a92c` = 远端 tip。⇒ 那次读数**不是本仓真实状态**，成因未能确定，**弃用不入库**。
+
+纪律补一条（是既有「否定性结论须走第二通道」的**反向对称**）：**「存在/已改」型阳性读数同样要复核**——复核用可判定谓词（对象是否存在 `git cat-file -t`、ref 指向 `git ls-remote`、内容标记 `Select-String`），而不是再跑一遍同一个命令。本段全部账面以复核后的状态为准。
+
 ## 取证脚本入库（2026-10-04，候选 ①）：判据 6 从「只在本机成立」变成「新克隆可原样重跑」
 
 > 方案：`docs/plans/plan-evidence-scripts-intake-2026-10-04.md`（先方案后编码，2026-10-04 用户拍板候选 ①）。
@@ -86,9 +127,11 @@ cd $env:TEMP\wtdocsync7949357; <venv>\python.exe scripts/check_doc_sync.py
 ### 5. 仍未闭合（不美化）
 
 - 部署侧两项存量取证仍为 **0**（`revert_audit.operator` 历史行 / `checkpoints`）：本机被 `Meta Tunnel`
-  劫持，等网络侧调整后按 runbook §1 的对照复核流程重试。
+  劫持，等网络侧调整后按 runbook §1 的对照复核流程重试。（2026-10-04 04:05Z 已做**协议级**复探，
+  两级死对照与目标同签名 ⇒ 劫持仍在，见本文件「取证链二批」§2。）
 - knowledge-service 一次性 15 errors：**根因未定**（已收窄到唯一站点，需一次带 traceback 的再现才能定案）。
-- 10 个已入库的 BOM `__init__.py`；PR #55（Dependabot，L-4 下界）；P12 三条局限（属设计内残留面）。
+- 10 个已入库的 BOM `__init__.py`；PR #55（Dependabot，L-4 下界——**已实测定根因，三支待拍板**，
+  见本文件「取证链二批」§3）；P12 三条局限（属设计内残留面）。
 
 ## 取证链收尾（2026-10-04）：#64 / #63 合入 + 两个 tip 复验 PASS + **部署侧通道根因订正**
 

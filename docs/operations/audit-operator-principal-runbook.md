@@ -20,6 +20,7 @@
 - 该 TUN 对**整段所有端口**都「完成三次握手后立刻关闭」：126 的 `2375/2376/22/6443/8000/30443/12345/9999/8888/4321/5432` 全报 `TcpTestSucceeded=True`，而**随机且不存在的** `192.168.100.254:12345`、`.99:22`、`.241:8000`、`.125:6443` 同样"成功"。⇒ **在这台机器上 `TcpTestSucceeded=True` 不含任何信息**（TCP 层假阳性），它既不能证明端口开放，也不能证明服务在场。
 - 应用层实取（只读 GET，本机探针 `.codeartsdoer/temp/probe_deploy_channels.py`，输出落 `deploy_channel_probe.txt`；一次性定性证据，**结论已在下列句子，脚本未入库**——复现只需裸 socket + 一次 HTTP GET）：`http://126:2375/_ping` ⇒ `RemoteDisconnected`；`https://126:2376/_ping` 与 `https://126:6443/version` ⇒ `SSLEOFError [UNEXPECTED_EOF_WHILE_READING]`；裸 socket 读 22 / 2375 ⇒ `recv` 返回 0 字节。⇒ 一条请求都没落到真服务，**连"端口开没开"都判不出来**。（该探针为 TLS 自检关了证书校验，因目标是无凭据的 `_ping`/`/version` 只读探测；若将来要带凭据重试，**不得沿用该写法**，需按 §3 用运维侧已验证的客户端。）
 - 本机工具面（`Get-Command` 实取，非 `$LASTEXITCODE`）：`docker` / `kubectl` / `helm` / `psql` / `minikube` / `kind` / `colima` **present=False**；Docker Desktop 未安装；`wsl -l -v` 报未装发行版；无 `~/.kube/config`；仓库根无 `.env`。主 `docker-compose.yml` 不发布 5432，HA compose 只绑 `127.0.0.1:5433`。
+- **2026-10-04 04:05Z 复探（把证据从 TCP 层升级为协议层，结论未变）**：`Get-Command docker` / `kubectl` ⇒ NOT FOUND（`ssh` / `scp` 在 `System32\OpenSSH` 在场）、`Test-Path ~/.kube/config` ⇒ False；`GET http://192.168.100.126:2375/version` 与 `:2376/version` ⇒ `RemoteDisconnected`；裸 socket 读 `126:22` ⇒ connect OK 而 **0 字节**（拿不到 SSH banner）。**两级死对照与目标完全同签名**：`192.168.100.254:12345`（同段不存在主机）与 `192.0.2.123:54321`（RFC 5737 TEST-NET，按定义不可路由）都是 connect OK + 0 字节。⇒ 劫持未解除，取证 A/B **仍为 0**，本节的解阻通道与代跑要求**逐条不变**（对照方法本身就取本节上一条的纪律：随机死端口对照）。
 
 **通道清单（按代价排序；原第 2 条「恢复 126 的 22 端口访问」不再成立，已撤下——对端从未拒绝过我们）**
 
