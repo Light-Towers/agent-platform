@@ -19,7 +19,7 @@
 | 步骤 | 动作 | 耗时量级 |
 |---|---|---|
 | 1 | **缺口盘点先行**：列出"未实跑项"（仅 mock 覆盖、本机硬跳过、需真实 DB 的脚本），它们才是验证重点 | 分钟级 |
-| 2 | **快速门禁**：`py_compile` + `ruff` + `lint_architecture.py` + `check_doc_sync.py` | 秒级，先行拦截 |
+| 2 | **快速门禁**：`py_compile` + `ruff` + `lint_architecture.py` + `check_doc_sync.py`（后者的 rc=0 只能当快筛，正式证据按 §2.4 在干净检出上取） | 秒级，先行拦截 |
 | 3 | **最窄子集**：`uv run pytest <改动目录>/tests -q`；迭代用 `--lf`/`--ff`，收窄用 `-k`/`-m` | 十秒~分钟 |
 | 4 | **环境盲区补跑**：本机跑不了的（如 `tests/ha` 真实 PG，Windows 被 conftest 以 `sys.platform=="win32"` 硬跳过）在 Linux 容器/远程机实跑 | 视环境 |
 | 5 | **CI 等价全量**：`make test` 9 session + eval + `uv lock --check` 收口 | 十分钟级 |
@@ -61,6 +61,26 @@
 2. **按文件分组数用例**：找「恰好 N 条」的文件（ks 全 suite 中唯一 15 条的文件 = `tests/unit/test_tracing.py`），再看该文件是否共用同一个 autouse fixture（ks 为 `_reset_tracing`，前后各调一次 `tracing._reset_for_tests()`）——autouse fixture 抛错即精确复现「N errors + 其余全过 + skip 数不变」的现场签名。
 3. **别凭记忆断 skip 与 fixture 的先后**：实测探针（本机 `.codeartsdoer/temp/fixture_skip_probe/`，一个抛错的 autouse fixture + 一条 `skipif` 用例；一次性定性证据，**结论已在此句，脚本未入库**）得 `1 skipped, 2 errors` ⇒ **`skipif` 判定早于 fixture，被 skip 的条目根本不执行 fixture**。推论对定性至关重要：SDK 不在场形态下该文件最多只能报 9 errors，**15 errors 这一签名只在真 SDK 在场时可能存在** ⇒ CI（`make install` 后跑 ks，SDK 不在场）报绿**不构成对该线索的排除**，它跑的是另一种形态。用「CI 也绿」当排除证据前，必须先确认 CI 的形态与现场一致。
 
+
+### 2.4 存在性类校验的「绿」必须在干净检出上取（2026-10-04 实踩，第十条假阳性）
+
+`check_doc_sync.py` 这类门禁拿**本机文件系统**做存在性基准，而工作区里有一堆 gitignored 的脏目录
+（`.codeartsdoer/`、`.venv/`、`.pytest_cache/`、`output/`…）。文档里引用一个**只在本机存在**的目录时，
+本机 rc=0 而 CI 红（本批实踩：`ARCHITECTURE.md` 写了 .codeartsdoer/temp 的目录形，PR #65 的 `ci` 在
+`Doc sync check` 步报 `路径不存在`，而本地同命令一直绿）。⇒ **本机绿不构成证据**。
+
+固定取证据姿势（不靠猜 CI 行为，直接构造同构检出）：
+
+```powershell
+git worktree add --detach $env:TEMP\wt<sha> <sha>     # 只落地 tracked 文件 ⇒ 与 actions/checkout 同构
+Push-Location $env:TEMP\wt<sha>; <venv>\Scripts\python.exe scripts/check_doc_sync.py; $LASTEXITCODE; Pop-Location
+git worktree remove --force $env:TEMP\wt<sha>         # 验完回收，`git worktree list` 应只剩主工作区
+```
+
+两条约束：① **双向都要实取**——旧内容在干净树上能复现出与 CI 逐字相同的红（排除「CI 环境问题」），新内容在同一
+树上转绿（排除「改得不够」）；② 把改动文件拷进干净树时用 `Copy-Item`（按字节拷，不被编辑器改写行尾）。
+同理适用于**任何**以仓内路径存在性为依据的校验（`lint_architecture.py` 的全仓扫描、`uv lock --check` 等）：
+它们的本地绿都默认工作区无脏目录，而本仓不满足该默认。
 
 ## 3. 本仓特定配方
 

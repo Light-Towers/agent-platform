@@ -41,17 +41,47 @@ CHANGELOG / TODO / runbook 把「任何一次合入后必须在新 tip 上重跑
   python @`01:30:24Z` 均 `commit=91cd79a`・`results=0`・rules 17/43；[B] **0**；[C] **0**（总 46）；[D] **48** 不增；
   [E] **0**；[F] 全 success；[G] 预期外 **0**。**零 dismiss**（[C] 只认自动 fixed）。
 - `ruff check .` rc=0 · `lint_architecture.py` rc=0 · `check_doc_sync.py` rc=0 · 新用例 **22 passed**。
+  - **⚠ 上面那条 docsync rc=0 一度是假绿**，本批推翻了它（第十条工具假阳性，见 §4 第 3 条）：真正的
+    证据是后来在**干净检出**上取的（见 §3.1），本机 rc=0 不算证据。
 - **剥掉防线必红自证**（不入库，只报结果）：把 `ARCHITECTURE.md` 一条 evidence 引用改成不存在路径 ⇒
   docsync **rc=1** 并指名 `ARCHITECTURE.md:129: 路径不存在 'scripts/evidence/verify_main_tip_MISSING.py'`；
   还原 ⇒ rc=0、文件逐字相同、`crlf=0 bom=False`。
 
-### 4. 本批新修的两个自身缺陷 + 第九条坑
+### 3.1 干净检出复验（本机 docsync 绿的真实等价物）
+
+判据：存在性类校验的「绿」必须在**只含 tracked 文件**的树上取。实取手段（不靠猜 CI 行为）：
+
+```powershell
+git worktree add --detach $env:TEMP\wtdocsync7949357 7949357   # 只落地 tracked 内容
+cd $env:TEMP\wtdocsync7949357; <venv>\python.exe scripts/check_doc_sync.py
+```
+
+- 干净树顶目录实取：`.github applications deploy docs eval packages scripts tests`（**无 `.codeartsdoer/`**，
+  `Test-Path .codeartsdoer` = `False`）⇒ 与 CI 的 `actions/checkout` 检出同构。
+- **方向一（复现红）**：`7949357` 干净树上 docsync **rc=1**，报 `ARCHITECTURE.md:125: 路径不存在 '.codeartsdoer/temp/'`
+  —— 与 CI `Doc sync check` 步的输出**逐字相同** ⇒ 本机脏目录确为唯一差异源，不是 CI 环境问题。
+- **方向二（修后绿）**：把改好措辞的两个文件拷进同一干净树 ⇒ docsync **rc=0（0 警告）**；本机脏树同样 rc=0。
+- 验完 `git worktree remove --force` 回收，`git worktree list` 只剩主工作区（不残留痕迹）。
+
+### 4. 本批新修的三个自身缺陷 + 第九、十条工具假阳性
 
 1. `gh_api(..., want_key="analyses")` 会 `AttributeError`：`code-scanning/analyses` 与 `alerts` 返回**顶层数组**，
    而 `check-runs` 返回 `{check_runs: []}` ⇒ 改为 `want_key is None` 直返 + `isinstance(data, dict)` 守卫。
 2. **第九条工具假阳性（Windows text 模式写文件会掺 CRLF）**：用例里 `Path.write_text(..., encoding="utf-8")`
    写含 `\n` 的样本，实跑断言拿到 `\r\n` 而失败——同族问题也解释了为什么仓内所有写盘一律
    `io.open(..., newline="")`。纪律：**取证类断言写字节，不写文本**。
+3. **第十条工具假阳性（本机 gitignored 脏目录会把存在性校验喂绿）**：`7949357` 推上后 PR #65 的 `ci`
+   **变红**，而本地同一命令一直 rc=0。根因：`check_doc_sync.py` 的存在性判定跑在**本机文件系统**上，
+   而 `ARCHITECTURE.md` §4.2 把探针的原住址写成了**反引号 + 尾斜杠的目录形式**（.codeartsdoer/temp/）
+   ——该路径**不是仓内路径**（被 `.gitignore` 的 `.*/` 忽略），本机存在所以本地绿，
+   CI 干净检出上不存在所以红。**由 CI 而非本机发现的这一条，是本链里第一条不是靠人工语义审计持住的回归**。
+   - **修的是文档措辞，不是门禁强度**：`check_architecture_paths()` 对「反引号内含 `/` 且以 `/` 结尾」的片段
+     一律调目录存在性校验（**不过滤 `DOC_FILE_REF_ROOTS`**），而本句真的在断言一个仓内不存在的目录 ⇒
+     按该门的语义把它改成「不包反引号的普通文本」并明写「不是仓内路径」，路径字面值仍保留以便第三者
+     `git check-ignore` 复核。**未改一行判定代码、未加任何白名单、未放宽阈值**。
+   - 取证双向均实取（见 §3.1）：干净树 + 旧措辞 ⇒ **rc=1**（与 CI 逐字一致）、干净树 + 新措辞 ⇒ **rc=0**。
+   - **残余盲区仍开**：门禁本身依旧拿本机 FS 做基准，下次再写一个 gitignored 目录仍会本地绿 / CI 红。
+     已登记 `docs/TODO.md`（属产品代码面，按红线先方案后编码），本批只修措辞。
 
 ### 5. 仍未闭合（不美化）
 
