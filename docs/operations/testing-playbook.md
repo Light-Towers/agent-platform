@@ -25,8 +25,9 @@
 | 5 | **CI 等价全量**：`make test` 9 session + eval + `uv lock --check` 收口 | 十分钟级 |
 | 6 | **失败定性复跑**：单跑复验 1-2 次；不可复现的计时类失败记为环境 flake 并如实汇报，不改代码 | 分钟 |
 | 7 | **报告**：按"门禁项 / 命令 / 结果"分层表格输出，明确区分 passed / skip / 未跑 | — |
+| 8 | **合入后主干复验**（判据 6 形态）：`uv run --no-sync python scripts/evidence/verify_main_tip.py --merge-sha <merge sha> --merged-at <gh 的 mergedAt> --baseline-max-number <基线>` ⇒ 七项 `[A]`–`[G]` 全 fail-closed。**PR 绿 ≠ 主干绿**，不得拿 PR checks 代替本步 | 分钟 |
 
-**长任务执行方式**：后台化 + 输出落盘（bind-mount / `Tee-Object`）+ 轮询读取，抵御终端/SSH 通道断开；**读**时只看汇总行（`Select-Object -Last N`），但**写**时必须先把完整输出落盘——否则一次性红无从定性（见 §2.1）。共享 shell 若卡在续行提示符 `>>`，命令会**静默不执行**——以"预期产物文件是否生成"作为核实手段。
+**长任务执行方式**：后台化 + 输出落盘（bind-mount / `Tee-Object`）+ 轮询读取，抵御终端/SSH 通道断开；**读**时只看汇总行（`Select-Object -Last N`），但**写**时必须先把完整输出落盘——否则一次性红无从定性（见 §2.1）。共享 shell 若卡在续行提示符 `>>`，命令会**静默不执行**——以"预期产物文件是否生成"作为核实手段。**PowerShell 的 `>` / `Out-File` 默认写 UTF-16 LE**：拿它落盘的产物直接用 utf-8 读会得到夹 NUL 的文本（`print` 肉眼正常而正则/计数全 0）⇒ 读之前先 `uv run --no-sync python scripts/evidence/normalize_dump.py <dump>` 转码。
 
 ### 2.1 包装脚本的两条纪律（2026-10-03 实跑教训）
 
@@ -58,7 +59,7 @@
 
 1. **对齐总数**：`--collect-only -q` 实取 collected（ks = 409）。若 `passed + skipped + errors == collected` 与全绿形态的 `passed + skipped` 相等 ⇒ 集合没变，失败形态是「同一集合里恰好 N 条在 **setup 阶段 error**（不是 fail）」。
 2. **按文件分组数用例**：找「恰好 N 条」的文件（ks 全 suite 中唯一 15 条的文件 = `tests/unit/test_tracing.py`），再看该文件是否共用同一个 autouse fixture（ks 为 `_reset_tracing`，前后各调一次 `tracing._reset_for_tests()`）——autouse fixture 抛错即精确复现「N errors + 其余全过 + skip 数不变」的现场签名。
-3. **别凭记忆断 skip 与 fixture 的先后**：实测探针（`.codeartsdoer/temp/fixture_skip_probe/`，一个抛错的 autouse fixture + 一条 `skipif` 用例）得 `1 skipped, 2 errors` ⇒ **`skipif` 判定早于 fixture，被 skip 的条目根本不执行 fixture**。推论对定性至关重要：SDK 不在场形态下该文件最多只能报 9 errors，**15 errors 这一签名只在真 SDK 在场时可能存在** ⇒ CI（`make install` 后跑 ks，SDK 不在场）报绿**不构成对该线索的排除**，它跑的是另一种形态。用「CI 也绿」当排除证据前，必须先确认 CI 的形态与现场一致。
+3. **别凭记忆断 skip 与 fixture 的先后**：实测探针（本机 `.codeartsdoer/temp/fixture_skip_probe/`，一个抛错的 autouse fixture + 一条 `skipif` 用例；一次性定性证据，**结论已在此句，脚本未入库**）得 `1 skipped, 2 errors` ⇒ **`skipif` 判定早于 fixture，被 skip 的条目根本不执行 fixture**。推论对定性至关重要：SDK 不在场形态下该文件最多只能报 9 errors，**15 errors 这一签名只在真 SDK 在场时可能存在** ⇒ CI（`make install` 后跑 ks，SDK 不在场）报绿**不构成对该线索的排除**，它跑的是另一种形态。用「CI 也绿」当排除证据前，必须先确认 CI 的形态与现场一致。
 
 
 ## 3. 本仓特定配方
