@@ -14,6 +14,12 @@
   8. 现状文档（AGENTS/ARCHITECTURE/README）中的文件引用路径存在
      （CHANGELOG 是 append-only 历史快照，所指文件后来常被移动/重命名，故意不校）
 
+**存在性校验的判定基准 = 版本控制清单（`git ls-files`），不是本机文件系统**：
+  本机工作区里有整片 gitignored 目录（`.codeartsdoer/`、`.venv/`、`output/`），以 FS 为基准会把
+  「文档断言了只在本机存在的路径」喂成绿（第十条工具假阳性，实测由 CI 而非本机发现）。
+  取不到清单时**fail-closed**（报红并说明原因），刻意不退回 `Path.exists()`，也不提供旁路开关。
+  方案：`docs/plans/plan-doc-sync-tracked-scope-2026-10-04.md`。
+
 用法：
   python scripts/check_doc_sync.py          # 校验，0=通过 1=有漂移
   python scripts/check_doc_sync.py --verbose # 详细输出
@@ -22,8 +28,10 @@
 from __future__ import annotations
 
 import re
+import subprocess
 import sys
 import tomllib
+from collections.abc import Iterable
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -54,14 +62,103 @@ def warn(msg: str) -> None:
     WARNINGS.append(msg)
 
 
-def check_path_exists(doc: str, line_no: int, path_str: str, base: Path = REPO_ROOT) -> None:
-    p = base / path_str
-    if not p.exists():
+def _norm_rel(ref: str) -> str:
+    """仓内相对路径规范化：posix 分隔、去 `./` 前缀、去首尾斜杠。"""
+    r = ref.strip().replace("\\", "/")
+    while r.startswith("./"):
+        r = r[2:]
+    return r.strip("/")
+
+
+class TrackedIndex:
+    """版本控制清单（与 CI 检出面同构）——存在性校验的判定基准。
+
+    `files` 为 posix 相对路径；`dirs` 由 `files` 派生（git 不跟踪空目录，故索引里没有的目录
+    在新克隆上也不存在 ⇒ 文档引用它判红是**正确行为**，不是误报）。
+    """
+
+    def __init__(self, files: Iterable[str], source: str = "explicit") -> None:
+        self.files: frozenset[str] = frozenset(f for f in (_norm_rel(x) for x in files) if f)
+        dirs: set[str] = set()
+        for f in self.files:
+            parts = f.split("/")
+            for i in range(1, len(parts)):
+                dirs.add("/".join(parts[:i]))
+        self.dirs: frozenset[str] = frozenset(dirs)
+        self.source = source
+
+    def has(self, ref: str) -> bool:
+        r = _norm_rel(ref)
+        if not r:
+            return False
+        return r in self.files or r in self.dirs
+
+
+def load_tracked_index(base: Path) -> TrackedIndex | None:
+    """`git -C <base> ls-files -z` 取仓内清单；取不到即返回 None（调用方须 fail-closed）。
+
+    用 `-z` 而非默认输出：拿原始路径、不经过 `core.quotepath` 转义，CJK/空格路径不会被改写。
+    """
+    try:
+        p = subprocess.run(
+            ["git", "-C", str(base), "ls-files", "-z"],
+            capture_output=True,
+            check=False,
+        )
+    except OSError:  # git 不在 PATH 等
+        return None
+    if p.returncode != 0:
+        return None
+    try:
+        paths = [b.decode("utf-8") for b in p.stdout.split(b"\x00") if b]
+    except UnicodeDecodeError:
+        return None
+    return TrackedIndex(paths, source=f"git ls-files @ {base}")
+
+
+_AUTO = object()  # 哨兵：按 base 走 git（生产路径）；测试可显式传 TrackedIndex / None
+_TRACKED_CACHE: dict[Path, TrackedIndex | None] = {}
+
+
+def resolve_tracked(base: Path) -> TrackedIndex | None:
+    """按 base 缓存索引 ⇒ 一次 `ls-files` 服务三条存在性面。"""
+    key = Path(base).resolve()
+    if key not in _TRACKED_CACHE:
+        _TRACKED_CACHE[key] = load_tracked_index(key)
+    return _TRACKED_CACHE[key]
+
+
+def check_path_exists(
+    doc: str,
+    line_no: int,
+    path_str: str,
+    base: Path = REPO_ROOT,
+    tracked: TrackedIndex | object = _AUTO,
+) -> None:
+    idx = resolve_tracked(base) if tracked is _AUTO else tracked
+    if idx is None:
+        err(
+            f"{doc}:{line_no}: 仓内路径清单不可用（git ls-files 未取得）"
+            "⇒ 门禁 fail-closed，拒绝以本机 FS 为基准放行"
+        )
+        return
+    if idx.has(path_str):
+        return
+    # 本机 FS 只用于**区分措辞**，不参与判定（判定基准始终是清单）
+    if (base / path_str).exists():
+        err(
+            f"{doc}:{line_no}: 路径未纳入版本控制 '{path_str}'"
+            "（本机存在但未入库：CI / 新克隆上不存在）"
+        )
+    else:
         err(f"{doc}:{line_no}: 路径不存在 '{path_str}'")
 
 
-def check_agents_md_paths() -> None:
-    agents = REPO_ROOT / "AGENTS.md"
+def check_agents_md_paths(
+    base: Path = REPO_ROOT,
+    tracked: TrackedIndex | object = _AUTO,
+) -> None:
+    agents = base / "AGENTS.md"
     if not agents.exists():
         err("AGENTS.md 不存在")
         return
@@ -70,7 +167,7 @@ def check_agents_md_paths() -> None:
         if m:
             path_str = m.group(1)
             if "/" in path_str and not path_str.startswith("http"):
-                check_path_exists("AGENTS.md", i, path_str)
+                check_path_exists("AGENTS.md", i, path_str, base=base, tracked=tracked)
 
 
 def check_readme_install_cmd() -> None:
@@ -117,8 +214,11 @@ def check_pyproject_package_names() -> None:
             warn(f"{pyproj.relative_to(REPO_ROOT)}: 包名 '{name}' 与目录名 '{dir_name}' 不匹配")
 
 
-def check_architecture_paths() -> None:
-    arch = REPO_ROOT / "ARCHITECTURE.md"
+def check_architecture_paths(
+    base: Path = REPO_ROOT,
+    tracked: TrackedIndex | object = _AUTO,
+) -> None:
+    arch = base / "ARCHITECTURE.md"
     if not arch.exists():
         return
     in_code_block = False
@@ -135,7 +235,7 @@ def check_architecture_paths() -> None:
                 if not path_str.endswith("/"):
                     continue
             if path_str.endswith("/"):
-                check_path_exists("ARCHITECTURE.md", i, path_str)
+                check_path_exists("ARCHITECTURE.md", i, path_str, base=base, tracked=tracked)
         # 代码块内目录树路径（F1 增强：检测 applications/ packages/ 下子目录漂移）
         if in_code_block:
             m = re.search(r"[├└]──\s+(\S+)", line)
@@ -145,7 +245,9 @@ def check_architecture_paths() -> None:
                 if is_top_level and name.endswith("/"):
                     current_parent = name
                 elif current_parent in ("applications/", "packages/") and name.endswith("/"):
-                    check_path_exists("ARCHITECTURE.md", i, current_parent + name)
+                    check_path_exists(
+                        "ARCHITECTURE.md", i, current_parent + name, base=base, tracked=tracked
+                    )
 
 
 def is_doc_file_ref(text: str) -> bool:
@@ -165,8 +267,9 @@ def is_doc_file_ref(text: str) -> bool:
 def check_doc_file_refs(
     root: Path = REPO_ROOT,
     docs: tuple[str, ...] = DOC_FILE_REF_DOCS,
+    tracked: TrackedIndex | object = _AUTO,
 ) -> None:
-    """校验现状文档里以反引号写出的文件引用是否真的存在。
+    """校验现状文档里以反引号写出的文件引用是否真的**在版本控制清单里**。
 
     补齐原缺口：`check_architecture_paths()` 只对以 `/` 结尾的目录引用调存在性校验，
     带扩展名的文件引用直接落空；`check_agents_md_paths()` 只看表格首列。
@@ -179,7 +282,9 @@ def check_doc_file_refs(
         for i, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
             for m in re.finditer(r"`([^`]+)`", line):
                 if is_doc_file_ref(m.group(1)):
-                    check_path_exists(doc, i, m.group(1).split("#", 1)[0].strip(), base=root)
+                    check_path_exists(
+                        doc, i, m.group(1).split("#", 1)[0].strip(), base=root, tracked=tracked
+                    )
 
 
 def check_federation_title() -> None:

@@ -19,7 +19,7 @@
 | 步骤 | 动作 | 耗时量级 |
 |---|---|---|
 | 1 | **缺口盘点先行**：列出"未实跑项"（仅 mock 覆盖、本机硬跳过、需真实 DB 的脚本），它们才是验证重点 | 分钟级 |
-| 2 | **快速门禁**：`py_compile` + `ruff` + `lint_architecture.py` + `check_doc_sync.py`（后者的 rc=0 只能当快筛，正式证据按 §2.4 在干净检出上取） | 秒级，先行拦截 |
+| 2 | **快速门禁**：`py_compile` + `ruff` + `lint_architecture.py` + `check_doc_sync.py`（docsync 自 2026-10-04 二批起以 `git ls-files` 为判定基准，路径存在性类问题**本机即可复现**；其余仍以本机 FS/环境为依据的校验正式证据按 §2.4 在干净检出上取） | 秒级，先行拦截 |
 | 3 | **最窄子集**：`uv run pytest <改动目录>/tests -q`；迭代用 `--lf`/`--ff`，收窄用 `-k`/`-m` | 十秒~分钟 |
 | 4 | **环境盲区补跑**：本机跑不了的（如 `tests/ha` 真实 PG，Windows 被 conftest 以 `sys.platform=="win32"` 硬跳过）在 Linux 容器/远程机实跑 | 视环境 |
 | 5 | **CI 等价全量**：`make test` 9 session + eval + `uv lock --check` 收口 | 十分钟级 |
@@ -81,6 +81,16 @@ git worktree remove --force $env:TEMP\wt<sha>         # 验完回收，`git work
 树上转绿（排除「改得不够」）；② 把改动文件拷进干净树时用 `Copy-Item`（按字节拷，不被编辑器改写行尾）。
 同理适用于**任何**以仓内路径存在性为依据的校验（`lint_architecture.py` 的全仓扫描、`uv lock --check` 等）：
 它们的本地绿都默认工作区无脏目录，而本仓不满足该默认。
+
+**2026-10-04 二批：该门的判定基准已改，取证姿势不变但结论更强**。`check_doc_sync.py` 的存在性判定从
+「本机 FS 有没有」改为「版本控制清单（`git ls-files`）里有没有」⇒ 本机脏工作树现在**与 CI 同样会红**。
+差分实取（同一脏工作树 + 同一探针行）：旧实现 rc=0 放行，新实现 rc=1 并报
+「路径未纳入版本控制 '.codeartsdoer/temp/'（本机存在但未入库：CI / 新克隆上不存在）」；
+取不到清单时 **fail-closed** 报红，绝不退回 `Path.exists()`，也不提供 `--skip-git` 类旁路开关。
+⇒ 干净检出复验**不再是这一门的必需项**，但**保留为通用纪律**：任何仍以本机 FS 或本机环境为依据的
+校验（目录扫描、`uv lock --check`、需要外部服务/环境变量的分支）都可能本地绿 / CI 红，
+「旧内容能复现红 + 新内容同树转绿」的双向实取仍是唯一能给结论的取法。
+方案与验收：`docs/plans/plan-doc-sync-tracked-scope-2026-10-04.md`。
 
 ## 3. 本仓特定配方
 
