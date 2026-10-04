@@ -83,6 +83,24 @@ def test_existing_file_ref_passes(errors, tmp_path):
     assert errors == []
 
 
+def test_plain_text_ref_is_deliberately_not_checked(errors, tmp_path):
+    """逃生舱钉子：**无反引号普通文本**引用刻意不校（AGENTS.md 口径：本机才有、不入库的
+    路径用普通文本书写，否则永远过不了「必须在版本控制清单里」）。
+
+    钉住此行为是防「好心补全」：若将来有人把普通文本也纳入扫描，全仓 gitignored 引用会
+    一夜打红，门禁被当噪音关掉——比漏报更糟。改此断言前先读 AGENTS.md「文档防漂移」。
+    """
+    (tmp_path / "AGENTS.md").write_text(
+        "本机目录 .codeartsdoer/temp/probe/ 不入库，按口径写成普通文本；"
+        "链接形式见 [x](docs/nope-missing.md)。\n",
+        encoding="utf-8",
+    )
+    _doc_sync.check_doc_file_refs(
+        root=tmp_path, docs=("AGENTS.md",), tracked=_idx()
+    )
+    assert errors == []
+
+
 @pytest.mark.parametrize(
     "text",
     [
@@ -145,6 +163,18 @@ def test_local_but_untracked_ref_is_flagged(errors, tmp_path):
     assert ".codeartsdoer/temp/" in errors[0]
 
 
+def test_url_with_trailing_slash_is_not_a_repo_path(errors, tmp_path):
+    """尾斜杠外链 URL 不是仓内路径：旧逻辑里 http+尾斜杠会漏过 continue 落到
+    存在性校验 ⇒ 必误红。钉住「http 开头一律跳过」。"""
+    (tmp_path / "ARCHITECTURE.md").write_text(
+        "文档站：`https://example.com/docs/`\n", encoding="utf-8"
+    )
+    _doc_sync.check_architecture_paths(
+        base=tmp_path, tracked=_idx("scripts/gate.py")
+    )
+    assert errors == []
+
+
 def test_tracked_ref_passes_even_if_absent_locally(errors, tmp_path):
     """判定基准是清单而非工作树：索引里有、本机被临时删掉 ⇒ 不判红（不是文档漂移）。"""
     (tmp_path / "ARCHITECTURE.md").write_text(
@@ -166,6 +196,27 @@ def test_fail_closed_when_index_unavailable(errors, tmp_path, monkeypatch):
     _doc_sync.check_doc_file_refs(root=tmp_path, docs=("AGENTS.md",))
     assert len(errors) == 1
     assert "fail-closed" in errors[0]
+
+
+def test_fail_closed_covers_agents_and_architecture_faces(errors, tmp_path, monkeypatch):
+    """方案 §5.3：fail-closed 自证须钉满**三条面**——本用例补 agents 表格面与 arch 目录面
+    （doc-refs 面已由上一用例钉住），堵住「只在一条面上 fail-closed、其余面静默放行」的缝。"""
+    monkeypatch.setattr(_doc_sync, "load_tracked_index", lambda base: None)
+    (tmp_path / "AGENTS.md").write_text(
+        "| 目录 | 定位 |\n|------|------|\n| `applications/agent_server/` | 平台 |\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "ARCHITECTURE.md").write_text(
+        "## 目录\n\n- `applications/agent_server/` 单进程 Supervisor 平台\n"
+        "- 外链尾斜杠不判：`https://example.com/docs/`\n",
+        encoding="utf-8",
+    )
+    _doc_sync.check_agents_md_paths(base=tmp_path)
+    _doc_sync.check_architecture_paths(base=tmp_path)
+    assert len(errors) == 2
+    assert all("fail-closed" in e for e in errors)
+    assert any(e.startswith("AGENTS.md:") for e in errors)
+    assert any(e.startswith("ARCHITECTURE.md:") for e in errors)
 
 
 def test_real_tree_all_faces_pass_under_git_index(errors):

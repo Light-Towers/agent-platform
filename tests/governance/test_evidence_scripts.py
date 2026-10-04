@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import ast
 import importlib.util
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -183,6 +184,19 @@ def test_main_returns_exit_2_on_precondition_failure(monkeypatch, capsys):
     assert "PRECONDITION_FAIL" in capsys.readouterr().err
 
 
+def test_verify_fails_closed_when_head_is_not_tip(monkeypatch):
+    """预期集取自本地工作区 workflow ⇒ HEAD != tip 必须前置失败（走 rc=2 通道），
+    绝不拿漂移的预期集硬算——该红的 check 没进集合就是静默假绿。"""
+
+    def _fake_run(argv):
+        assert argv[:2] == ["git", "rev-parse"], "守卫通过前不应有其他子进程调用"
+        return "head-sha" if argv[-1] == "HEAD" else "tip-sha"
+
+    monkeypatch.setattr(_verify, "_run", _fake_run)
+    with pytest.raises(RuntimeError, match="本地 HEAD"):
+        _verify.verify("tip-sha", datetime(2026, 10, 4), 48)
+
+
 def test_verify_exit_code_mapping_is_not_inverted(monkeypatch, tmp_path, capsys):
     """PASS ⇒ 0，未达成 ⇒ 1（把 rc 映射写反会让 CI 上的红永远看不见）。"""
     out = str(tmp_path / "tip.txt")
@@ -220,3 +234,12 @@ def test_plain_utf8_dump_is_passed_through(tmp_path):
 
 def test_dump_main_reports_missing_file_as_rc_1(tmp_path):
     assert _dump.main([str(tmp_path / "nope.txt")]) == 1
+
+
+def test_dump_main_skips_already_utf8_product(tmp_path, capsys):
+    """防链式：`.utf8` 产物再喂进来必须跳过且 rc=1，不得生成 `x.utf8.utf8` 副本。"""
+    p = tmp_path / "x.txt.utf8"
+    p.write_bytes("ok\n".encode("utf-8"))
+    assert _dump.main([str(p)]) == 1
+    assert not (tmp_path / "x.txt.utf8.utf8").exists(), "链式副本被生成 ⇒ 防链式守卫失效"
+    assert "跳过" in capsys.readouterr().err

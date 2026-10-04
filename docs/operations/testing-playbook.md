@@ -59,13 +59,13 @@
 
 1. **对齐总数**：`--collect-only -q` 实取 collected（ks = 409）。若 `passed + skipped + errors == collected` 与全绿形态的 `passed + skipped` 相等 ⇒ 集合没变，失败形态是「同一集合里恰好 N 条在 **setup 阶段 error**（不是 fail）」。
 2. **按文件分组数用例**：找「恰好 N 条」的文件（ks 全 suite 中唯一 15 条的文件 = `tests/unit/test_tracing.py`），再看该文件是否共用同一个 autouse fixture（ks 为 `_reset_tracing`，前后各调一次 `tracing._reset_for_tests()`）——autouse fixture 抛错即精确复现「N errors + 其余全过 + skip 数不变」的现场签名。
-3. **别凭记忆断 skip 与 fixture 的先后**：实测探针（本机 `.codeartsdoer/temp/fixture_skip_probe/`，一个抛错的 autouse fixture + 一条 `skipif` 用例；一次性定性证据，**结论已在此句，脚本未入库**）得 `1 skipped, 2 errors` ⇒ **`skipif` 判定早于 fixture，被 skip 的条目根本不执行 fixture**。推论对定性至关重要：SDK 不在场形态下该文件最多只能报 9 errors，**15 errors 这一签名只在真 SDK 在场时可能存在** ⇒ CI（`make install` 后跑 ks，SDK 不在场）报绿**不构成对该线索的排除**，它跑的是另一种形态。用「CI 也绿」当排除证据前，必须先确认 CI 的形态与现场一致。
+3. **别凭记忆断 skip 与 fixture 的先后**：实测探针（本机 .codeartsdoer/temp/fixture_skip_probe/，一个抛错的 autouse fixture + 一条 `skipif` 用例；一次性定性证据，**结论已在此句，脚本未入库**）得 `1 skipped, 2 errors` ⇒ **`skipif` 判定早于 fixture，被 skip 的条目根本不执行 fixture**。推论对定性至关重要：SDK 不在场形态下该文件最多只能报 9 errors，**15 errors 这一签名只在真 SDK 在场时可能存在** ⇒ CI（`make install` 后跑 ks，SDK 不在场）报绿**不构成对该线索的排除**，它跑的是另一种形态。用「CI 也绿」当排除证据前，必须先确认 CI 的形态与现场一致。
 
 
 ### 2.4 存在性类校验的「绿」必须在干净检出上取（2026-10-04 实踩，第十条假阳性）
 
 `check_doc_sync.py` 这类门禁拿**本机文件系统**做存在性基准，而工作区里有一堆 gitignored 的脏目录
-（`.codeartsdoer/`、`.venv/`、`.pytest_cache/`、`output/`…）。文档里引用一个**只在本机存在**的目录时，
+（.codeartsdoer/、.venv/、.pytest_cache/、output/…）。文档里引用一个**只在本机存在**的目录时，
 本机 rc=0 而 CI 红（本批实踩：`ARCHITECTURE.md` 写了 .codeartsdoer/temp 的目录形，PR #65 的 `ci` 在
 `Doc sync check` 步报 `路径不存在`，而本地同命令一直绿）。⇒ **本机绿不构成证据**。
 

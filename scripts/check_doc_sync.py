@@ -228,12 +228,12 @@ def check_architecture_paths(
             in_code_block = not in_code_block
             current_parent = ""
             continue
-        # 反引号包裹的路径（如 `applications/agent_server/`）
+        # 反引号包裹的目录引用（如 `applications/agent_server/`）；带扩展名的文件引用
+        # 由 check_doc_file_refs 面覆盖（ARCHITECTURE.md 也在其判定面内）。
         for m in re.finditer(r"`([^`]+/[^`]+)`", line):
             path_str = m.group(1)
-            if path_str.startswith("http") or "." not in path_str.split("/")[-1]:
-                if not path_str.endswith("/"):
-                    continue
+            if path_str.startswith("http"):
+                continue  # 外链 URL（即使带尾斜杠）不是仓内路径，一律跳过
             if path_str.endswith("/"):
                 check_path_exists("ARCHITECTURE.md", i, path_str, base=base, tracked=tracked)
         # 代码块内目录树路径（F1 增强：检测 applications/ packages/ 下子目录漂移）
@@ -273,7 +273,10 @@ def check_doc_file_refs(
 
     补齐原缺口：`check_architecture_paths()` 只对以 `/` 结尾的目录引用调存在性校验，
     带扩展名的文件引用直接落空；`check_agents_md_paths()` 只看表格首列。
-    已知漏报面（登记在方案 §2 非目标）：非顶层前缀的相对路径、Markdown 链接形式。
+    已知漏报面（登记在方案 §2 非目标）：非顶层前缀的相对路径、Markdown 链接形式、
+    **无反引号的普通文本**——gitignored 路径按 AGENTS.md 口径刻意写成普通文本绕开本门禁
+    （否则其引用永远过不了「必须在版本控制清单里」），这是逃生舱而非缺陷；但代价是任何
+    坏引用去掉反引号即可静默逃逸。新增仓内路径引用时仍应写反引号，让门禁真正校到它。
     """
     for doc in docs:
         path = root / doc
