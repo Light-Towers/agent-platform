@@ -132,8 +132,8 @@
 4. `git diff main -- '*pyproject.toml'` **恰为 17 处**（全部是抬升；`opentelemetry-api` 已回退到主干值、故不在 diff 里），无第 18 处。**✅ 已过**
 5. 10 个 pytest session 全绿（缺环境自动 skip 者须在 PR 正文逐条登记，非静默）；`eval/run_eval.py` 15/15 或如实登记。**✅ 已过**（读数见 §5 S6；skip 项均为设计意图内的缺环境跳过，非失败）
 6. `scripts/check_doc_sync.py` rc=0。**✅ 已过**
-7. 新 PR 的 checks 5/5 pass（`ci` ×2 / `Analyze` ×2 / `CodeQL`）。
-8. `#55` 状态 = closed、head 分支已删、`git ls-remote --heads origin` 只剩 `main`；删前取证已入 `docs/operations/git-ref-cleanup-2026-10-04.md` 新增节。
+7. 新 PR 的 checks 全 pass。**✅ 已过**（tip `97c0d08`，7/7）：`ci` 2m50s / 2m58s · `Analyze (actions)` 29s · `Analyze (python)` 44s · `CodeQL` 2s · `assembly` 55s · `ha` 1m7s；`mergeStateStatus = CLEAN`（对照 #55 的 `UNSTABLE`）
+8. `#55` 状态 = closed、其 head 分支 `dependabot/uv/minor-and-patch-f18118ef2b` 已删；远端 ref 面 = `main` + 本 PR 分支（本 PR 合入后按既有判据删除其 head）。两处删除的删前取证均入 `docs/operations/git-ref-cleanup-2026-10-04.md` 新增节。
 
 ## 8. 待批准
 
