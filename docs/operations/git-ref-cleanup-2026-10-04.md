@@ -73,3 +73,33 @@ git branch -a    # 期望：本地只剩 main；远端只剩 main / v2 / v3 / de
 ## 后记（2026-10-04 晚，v2/v3 处置变更）
 
 本文 §4 的「远端预期剩 4 条」已被晚间清理轮取代：`v2` / `v3` 经用户显式指令删除（`git push origin --delete v2 v3` rc=0，随后 `git remote prune origin`）。变更依据：两分支经 `git branch -r --merged origin/main` 实取均已**完全合入 `main`**（v3 tip `26cd2fa` = 2026-09-27 PR #22 合并点、v2 tip `b691ff1` @ 2026-08-22），无独有内容可失；本文原列「刻意保留」的理由（远端不可逆且无 reflog 兜底）属风险提示，被「已确认合入 + 显式指令」覆盖。`dependabot/*`（OPEN PR #55 的 head 现场）与 `company` remote（另一套远端）保留理由不变。**现远端实测恰 2 条**：`main` / `dependabot/uv/minor-and-patch-f18118ef2b`；本地恰 `main`。本批台账见 `CHANGELOG.md`「评审遗留收口一批」§6。
+
+## 5. `dependabot/uv/minor-and-patch-f18118ef2b` 删除（2026-10-04，随 PR #55 关票）
+
+**本节判据与 §1 的三重判据不同，不得混用。** §1 的三重判据是为「**已合并**分支」设计的；本分支**三条全不满足**（`git cherry -v` 输出 `+`、相对 `origin/main` 独有文件 10 个、无 merge commit），因为它**从未合并**。⇒ 删除依据替换为下列三条，且关票属外部可见、不可逆动作，**必须先经用户显式批准**：
+
+1. **内容已被替代 PR [#71](https://github.com/Light-Towers/agent-platform/pull/71) 收编**：`uv.lock` 与 #55 head 的**解析版本逐包差异 = 0**（只差 1 行 `specifier` 记录），见 `docs/plans/plan-pr55-disposition-2026-10-04.md` §3；
+2. **用户显式批准关闭 #55**（2026-10-04 独立审核轮）；
+3. **删前读数先入库**（本节 §5.1），满足本仓「取证先入库再删」纪律（§1 判据、§2 读数、§3 保留理由同属此纪律）。
+
+### 5.1 删除前实取读数（2026-10-04）
+
+| 项 | 读数 |
+|----|------|
+| branch | `origin/dependabot/uv/minor-and-patch-f18118ef2b` |
+| tip sha | `b23269a4134905a63b89abce2c09e8c8c5532210`（与 `gh pr view 55 --json headRefOid` 一致） |
+| 相对 `origin/main` 独有提交 | **1**（`git cherry -v main <branch>` 输出 `+ b23269a`） |
+| 相对 `origin/main` 独有文件 | **10**：`pyproject.toml` · `uv.lock` · `applications/{agent_federation,exhibition-agent,kefu-service,knowledge-service,nl2sql-service}/pyproject.toml` · `packages/{agent-core,agent-runtime,shared-schemas}/pyproject.toml` |
+| merge-base | `baa965f79a7ba03ebecf8ffe7736fcfd6f588ce0` |
+| `git branch -r --merged origin/main` | **不含本分支**（从未合并 ⇒ §1 判据不适用） |
+
+### 5.2 执行（#71 合入后）
+
+```bash
+gh pr close 55 --comment "已被 #71 替代（同解析结果收编，见 plan-pr55-disposition-2026-10-04 §3）"
+git push origin --delete dependabot/uv/minor-and-patch-f18118ef2b
+git push origin --delete chore/deps-pr55-lock-only-2026-10-04   # 本 PR 自身 head，随合入删除
+git fetch --prune origin
+```
+
+**预期终态**（沿用 §4 口径：只给可复核判据与预期，实际读数不入库，任何人可自行 `ls-remote` 验证）：`git ls-remote --heads origin` 恰 1 条 = `main`；`git branch -a` 本地恰 `main`；`gh pr view 55 --json state` = `CLOSED`。
