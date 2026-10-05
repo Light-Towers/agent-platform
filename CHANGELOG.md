@@ -2,6 +2,14 @@
 
 本仓库为 uv workspace monorepo。**唯一受支持的安装/运行入口是根 `uv.lock` + `uv sync`**，子包不再维护独立 `uv.lock`（见 v2 修复 #14）。
 
+## 评审收口批：PR #55 处置双轴复审勘误 + Dependabot 注释口径订正（2026-10-05）
+
+> 改动面：根 `pyproject.toml`（3 处 Dependabot 注释补「现下界已高于修复版」定性，**版本值与 uv.lock 零改动**）+ `docs/plans/plan-pr55-disposition-2026-10-04.md`（新增 §10 复审与勘误 + S7 归因就地订正 + §1 指针语义显式纳入外部文件行号引用 + §9 `.venv` 去反引号）+ 本段。**零代码、零依赖值变更**。
+
+- 对当日 10 个 commit（`65c0622`→`4922044`，diff 基准 `0f85eba`）做 Standards / Spec 双轴复审：Standards 零硬违规；Spec 逐条兑现、无 scope creep（otel 回退 / 17 处抬升 / 45 包口径 / #55 CLOSED / #71 MERGED 7/7 checks / 远端 ref 面恰 main，gh 与 git 实核通过）。
+- 勘误（P3）：`65c0622`（标题「方案入库」）实际携带全部 deps 主体（8 子包 pyproject + 根声明 10 处 + uv.lock 1262 行），`4502330`（标题「收编 45 包 + 17 处抬升」）实际仅 2 行 specifier 修正——两 commit 已推送不可改写，权威归因记录见方案文档 §10，按 message 做历史取证时以 §10 为准。
+- 残余核查闭环：`packages/agent-runtime` 的 `mcp>=2.0.0` 维持不动——不在 17 处白名单系方案既定口径（只列根 `[mcp]` ×1）；`gh api dependabot/alerts?state=open` 实取 **0**，且声明下界 2.0.0 已高于 first_patched 1.28.1，无告警风险。
+
 ## Dependabot alerts 门禁拍板：**不新增**（2026-10-05）
 
 > 改动面：`docs/TODO.md`（§0.2 C 组第 1 条闭合、§0/§0.5 口径与状态同步）+ 本段 + 方案文档一处非目标口径。**零代码、零 workflow、零依赖**。
