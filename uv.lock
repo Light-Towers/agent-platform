@@ -299,7 +299,7 @@ requires-dist = [
     { name = "langgraph", specifier = ">=1.2.12,<2" },
     { name = "langgraph-checkpoint-postgres", specifier = ">=2.0" },
     { name = "mcp", marker = "extra == 'mcp'", specifier = ">=2.2.0" },
-    { name = "opentelemetry-api", marker = "extra == 'otel'", specifier = ">=1.45.0" },
+    { name = "opentelemetry-api", marker = "extra == 'otel'", specifier = ">=1.24" },
     { name = "opentelemetry-exporter-otlp", marker = "extra == 'otel'", specifier = ">=1.24" },
     { name = "opentelemetry-sdk", marker = "extra == 'otel'", specifier = ">=1.24" },
     { name = "pgvector", specifier = ">=0.3" },
