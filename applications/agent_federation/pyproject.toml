@@ -32,7 +32,7 @@ dependencies = [
     "tenacity>=9.1",
     "sqlglot>=25.0",  # E-2 SQL 守卫统一：委托 agent_core.sql.guard(dialect=mysql)
     "sqlparse>=0.5",
-    "pydantic>=2.13",
+    "pydantic>=2.13.5",
     "pydantic-settings>=2.14",
     "requests>=2.34.2",
     "ragflow-sdk>=0.22.1",
