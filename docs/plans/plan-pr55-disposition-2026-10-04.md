@@ -1,7 +1,7 @@
 # 方案：PR #55（Dependabot minor-and-patch 组）处置 —— 关票 + 自建 lock-only/白名单抬下界 PR
 
-> 状态：**已批准（甲档）；S1-S7 已执行** —— 本地门禁全绿、替代 PR **[#71](https://github.com/Light-Towers/agent-platform/pull/71)** CI **7/7 pass**、`mergeStateStatus=CLEAN`；独立审核已过（§9）；**S8 已获批准**，按 §5 顺序执行
-> 分支：`chore/deps-pr55-lock-only-2026-10-04`（从 `main` `0f85eba`）
+> 状态：**已全部执行完毕（甲档，S1-S8）** —— 本地门禁全绿；替代 PR **[#71](https://github.com/Light-Towers/agent-platform/pull/71)** CI 7/7 pass、`CLEAN`、已合入主干 **`4f1fa8c`**；**#55 已关 + 两个 head 分支已删** ⇒ 远端/本地 ref 面均恰 `main`；独立审核已过（§9）
+> 分支：`chore/deps-pr55-lock-only-2026-10-04`（已随 #71 合入删除；从 `main` `0f85eba` 起）
 > 上游处置口径：`CHANGELOG.md`「取证链二批」§3（L146-152）与 §3（L70-75）、`docs/TODO.md` §8（L191）「已拍板、尚未执行」
 > 相关口径来源：`docs/plans/plan-observability-global-remediation-2026-09-29.md` §3.3 R2/L-4
 > 指针语义（沿用本仓既有纪律）：本文所有 sha / tip / 耗时均为**取证时刻**值，不构成「至今仍绿」的持续断言；判据须在当前 tip 上重跑才算成立。
@@ -101,7 +101,7 @@
 | S5 | 让 lock 的 `specifier` 记录与 S4 后的 `pyproject` 对齐 | ✅ | **只改 1 行**；`uv lock --check` **rc=0**；与 #55 head 的解析版本差异 **0**、包集合相同 |
 | S6 | 本地实跑门禁（顺序即 CI 顺序）：`ruff check .` → `scripts/lint_architecture.py` → 10 个 pytest session → `eval/run_eval.py` → `scripts/check_doc_sync.py` | ✅ 全绿 | `ruff` rc=0；`lint_architecture` rc=0（**L-4 通过**）；`check_doc_sync` rc=0（0 警告）；10 session 逐条：root `1006 passed, 6 skipped, 28 deselected`(243.6s) · shared-schemas 28 · agent-runtime `594 passed, 1 skipped` · agent_server 44 · agent_federation 176 · kefu 43 · exhibition `347 passed, 1 skipped` · knowledge-service `404 passed, 13 skipped` · nl2sql 18 · observability（`--extra otel` 真 SDK）15 —— 10/10 EXIT=0；eval **15/15 = 100%** rc=0 |
 | S7 | 推送 + 开 PR（标题写明「替代 #55」、正文附 L-4 依据与实跑读数） | ✅ | 分支 4 笔提交（`65c0622` 方案 docs · `4502330` deps · `97c0d08` + `d6be688` 落账 docs）→ **PR [#71](https://github.com/Light-Towers/agent-platform/pull/71)**，CI 7/7 pass |
-| S8 | 关 #55（说明指回 #71）+ 删两个 head 分支（先取证后删，取证见 §4.1 与清理文档 §5） | 🟡 已获批准，执行中 | 删前读数见 `docs/operations/git-ref-cleanup-2026-10-04.md` §5.1 |
+| S8 | 关 #55（说明指回 #71）+ 删两个 head 分支（先取证后删） | ✅ | ① 合并 #71 → **`4f1fa8c`**（未夹带自证：`^1` = 旧 `main` `0f85eba`、`^2` = head `32e06f2`、merge 树 == head 树、相对旧 `main` 恰 12 文件）；② #55 **CLOSED** @ `2026-10-05T07:49:34Z`（actor = `Light-Towers`(User)，非 bot 自关）；③ 两个 head 分支已删 ⇒ 远端 `refs/heads` 恰 `main`、本地恰 `main`、工作树 clean；删前读数见清理文档 §5.1 |
 
 **S5 的一条工具纪律（本批实测得到，值得入库）**：对锁文件做「与 pyproject 对齐」时，**不要用 `uv lock` 全量重写**去替代最小改动 —— 本地 uv 0.11.21 重写会额外多写 **35 行**平台 marker 元数据（`sys_platform != 'emscripten'` 等，`main`/#55 的锁里各 24 处、重写后 34 处），而 `uv lock --check` 对标最小改动版**同样 rc=0**。即：判据是 `uv lock --check`，不是「与一次全量重写的字节等同」；全量重写把 diff 放大 36 倍且零收益。本批采用「#55 的锁 + 手工改 1 行」。
 
@@ -136,12 +136,12 @@
 5. 10 个 pytest session 全绿（缺环境自动 skip 者须在 PR 正文逐条登记，非静默）；`eval/run_eval.py` 15/15 或如实登记。**✅ 已过**（读数见 §5 S6；skip 项均为设计意图内的缺环境跳过，非失败）
 6. `scripts/check_doc_sync.py` rc=0。**✅ 已过**
 7. 新 PR 的 checks 全 pass。**✅ 已过**（7/7；两个 tip 各跑一次：`97c0d08` 与 `d6be688`，后者 `ci` 2m49s / 3m7s · `Analyze (actions)` 26s · `Analyze (python)` 58s · `CodeQL` 3s · `assembly` 56s · `ha` 1m6s；`mergeStateStatus = CLEAN`，对照 #55 的 `UNSTABLE`）。指针语义见文首纪律。
-8. `#55` 状态 = closed；两个 head 分支（`dependabot/uv/minor-and-patch-f18118ef2b` 与 `chore/deps-pr55-lock-only-2026-10-04`）均已删 ⇒ 远端 ref 面恰 `main`、本地恰 `main`。删前取证入 `docs/operations/git-ref-cleanup-2026-10-04.md` §5（已随本 PR 入库）。**🟡 S8 执行中**
+8. `#55` 状态 = closed；两个 head 分支（`dependabot/uv/minor-and-patch-f18118ef2b` 与 `chore/deps-pr55-lock-only-2026-10-04`）均已删 ⇒ 远端 ref 面恰 `main`、本地恰 `main`。删前取证入 `docs/operations/git-ref-cleanup-2026-10-04.md` §5（已随 #71 入库）。**✅ 已过**（2026-10-05：`#55` = CLOSED @ `07:49:34Z`、actor = User；两分支已删；远端/本地均恰 `main`；**主干预后复验**：`agent-platform-ci` / `ha` / `ha-assembly` / `Push on main` 全 success、Dependabot `state=open` = 0）
 
 ## 8. 批准状态
 
 - ~~A：方案 + 甲档~~ **已批准（2026-10-04）**
-- ~~B：S8 的两个远端不可逆动作（关 #55、删 head 分支）~~ **已批准（2026-10-04 独立审核轮）**，执行顺序：修文档 → 合并 #71 → 关 #55 + 删分支
+- ~~B：S8 的两个远端不可逆动作（关 #55、删 head 分支）~~ **已批准（2026-10-04 独立审核轮）**，执行顺序：修文档 → 合并 #71 → 关 #55 + 删分支 —— **已于 2026-10-05 全部执行完毕**（见 §5 S8 与 §7.8）
 
 ## 9. 独立审核（2026-10-04）
 

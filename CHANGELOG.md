@@ -2,6 +2,42 @@
 
 本仓库为 uv workspace monorepo。**唯一受支持的安装/运行入口是根 `uv.lock` + `uv sync`**，子包不再维护独立 `uv.lock`（见 v2 修复 #14）。
 
+## PR #55 处置收口（2026-10-05）：Dependabot 组更新以「lock-only + 白名单抬下界」收编 + 关票 + 删分支
+
+> 改动面：新增方案 `docs/plans/plan-pr55-disposition-2026-10-04.md`、清理文档新增 §5、9 个 `pyproject.toml`、`uv.lock`、本段与 `docs/TODO.md` 台账订正。**零产品运行时代码**。
+
+### 1. 根因：L-4 门禁如实拦下，非环境抖动
+
+- #55（dependabot minor-and-patch 组 13 项，2026-10-02 建票）自建票起 `ci` ×2 恒红，失败 step = `CI gate` 的 `make lint`。根因是本仓 `scripts/lint_architecture.py` 的 **L-4**：`opentelemetry-api` 在根 `pyproject.toml[otel]` 被抬到 `>=1.45.0`，而 `packages/agent-core/pyproject.toml[tracing]` 仍 `>=1.24`（L-4 要求同一包多处声明下界一致）。
+- 定根因手法（可复现、非推定）：在 `main` 上 merge #55 head（无冲突）后跑**真实** lint 脚本 ⇒ `exit 1`，报错行与 CI **逐字相同**；同一脚本在 `main` 上 `exit 0`。`gh pr view 55` 实取 `maintainerCanModify: false` ⇒ **无法就地改 dependabot 分支**，只能另开 PR。
+- 连带发现：lint 是测试的前置步骤 ⇒ **那套依赖组合的 10 个 pytest session 从未跑过**（本批补齐这一面）。
+
+### 2. 处置（用户拍板「甲档」）
+
+- **替代 PR [#71](https://github.com/Light-Towers/agent-platform/pull/71)**（head `32e06f2`，merge **`4f1fa8c`**）：
+  - `uv.lock` **全量收编 #55 的解析结果**（45 个包 = 42 原位升级 + 2 新增 + 1 移除 `greenlet`；相对 `main` 656+/604-），**只改 1 行**——根 `opentelemetry-api` 的 `specifier` 记录 `>=1.45.0 → >=1.24`。相对 #55 head 的锁恰 `1 insertion(+), 1 deletion(-)`，**解析版本逐包差异 = 0**。
+  - 9 个 `pyproject.toml`：**回退 1 处**（即 L-4 冲突点）+ **抬升 17 处**（`pydantic` 归一 `>=2.13.5` ×7、`langgraph` ×2、`anyio`/`mcp`/`transformers`（仓内已注明 CVE 依据）、`ruff`（dev-only）、以及跨线下界 `langchain-core`/`langchain-openai`/`sqlglot`——按甲档接受，残余影响登记在方案 §4.3）。
+  - 保留 `plan-observability §3.3` 已敲定口径：OTel **5 条**声明归一 `>=1.24`、langfuse 3 处 `>=4.0.0`。**零产品代码改动**。
+- **本地验收读数**（Windows / uv 0.11.21）：`ruff` rc=0 · `lint_architecture` rc=0（L-4 绿）· `check_doc_sync` rc=0 · `uv lock --check` rc=0 · 10 个 pytest session **10/10 EXIT=0**（root 1006 passed/6 skipped/28 deselected · shared-schemas 28 · agent-runtime 594/1 · agent_server 44 · federation 176 · kefu 43 · exhibition 347/1 · knowledge-service 404/13 · nl2sql 18 · observability `--extra otel` 真 SDK 15）· `eval` **15/15 = 100%**。PR #71 CI **7/7 pass**、`mergeStateStatus=CLEAN`（对照 #55 的 `UNSTABLE`）。
+
+### 3. 远端落地 + 主干预后复验
+
+- **#55 已关**（`2026-10-05T07:49:34Z`，closed actor = `Light-Towers`(type=User)；对照 #52 是 `dependabot[bot]` 自关，本批为**人工关**），关闭说明写明 L-4 根因并指回 #71。
+- **两个 head 分支已删**：`dependabot/uv/minor-and-patch-f18118ef2b` 与 `chore/deps-pr55-lock-only-2026-10-04`。前者**不适用**本仓「已合并分支」三重判据——它从未合并（`git cherry -v` 输出 `+`、相对 `origin/main` 独有 10 文件、无 merge commit）；替换判据（内容已被 #71 同解析结果收编 + 用户显式批准关票 + 删前读数入库）与执行命令入 `docs/operations/git-ref-cleanup-2026-10-04.md` **§5**。终态：远端 `refs/heads` 恰 `main`、本地恰 `main`、`git status` clean。
+- **未夹带自证**：`^1` = 旧 `main` `0f85eba`、`^2` = PR head `32e06f2`、merge 树 == head 树、相对旧 `main` 恰 12 文件。
+- **主干预后复验**：`agent-platform-ci` / `ha` / `ha-assembly` / `Push on main` 全 **success**；Dependabot `state=open` = **0**（同次实取 fixed 33 / dismissed 24）。
+
+### 4. 两条值得入库的纪律
+
+- **锁文件对齐不要用 `uv lock` 全量重写替代最小改动**：本地 uv 0.11.21 重写会额外多写 **35 行**平台 marker 元数据（`main`/`#55` 的锁各 24 处、重写后 34 处），而 `uv lock --check` 对最小改动版**同样 rc=0** ⇒ **判据是 `--check`，不是「与一次全量重写的字节等同」**（全量重写把 diff 放大 36 倍且零收益）。本批采用「#55 的锁 + 手工改 1 行」。
+- **空集合计数不要用 PowerShell 的 `ConvertFrom-Json | Measure-Object`**：PS 5.1 下 `[]` 会被计成 **1**，本批一度把「Dependabot open = 0」读成「新增 1 条告警」，按 `--jq 'length'` 复取才是 0（与本仓「阳性读数也要走第二通道」同族）。
+
+### 5. 独立审核（同批，reviewer 角色）
+
+- 审核方对全部硬数字逐项实测复核，**全部实锤**：47 提交落后 / 45 包口径（44 处 `+version` 含 2 个新增块）/ 17 处下界 / 锁 1 行 diff / L-4 实现（`_OTEL_EXTRAS_SITES` 恰 5 位、报错文案逐字相同）/ checks 7/7 与 `CLEAN` / `eval/golden.jsonl` 15 条 / 上游口径引用（CHANGELOG 两段、TODO §8、plan-observability §3.3、清理文档三重判据）全部存在且吻合。
+- 审核方指出 **4 处文档问题**并已在本批**逐条订正**（明细见方案文档 §9）：P1 文首状态行仍写「CI 待跑」与 §7.7 自相矛盾；P2 §7.7 钉旧 tip `97c0d08` 且 S7 记 2 笔实为 4 笔；P2 §4.1 用现在时描述尚未落盘的「清理文档新增节」；P3 §1.3「OTel 三处」应为 **5 条**声明。本方另自查出一处：文档内 `origin/pr55` 是本地手工别名、`--prune` 后已不存在 ⇒ 统一改为「#55 head（`b23269a`）」。
+- 审核方验证局限**如实登记**：其本机三次复跑 lint 脚本均因 `rglob` 扫 `.venv` 超时，未能重放本地 S6；改用「脚本源码静态核对 + 声明位现值 + CI 独立机器 7/7」构成等效证据链。两条证据链独立成立，互不替代。
+
 ## 评审遗留收口一批（2026-10-04）：PR #70 合入得证 + 判据 6 首跑 PASS + v2/v3 ref 清理
 
 > 承接上一段。改动面：`scripts/check_doc_sync.py` + `scripts/evidence/verify_main_tip.py` + `scripts/evidence/normalize_dump.py` + `tests/governance/` 两个测试文件 + `docs/operations/` 两份文档 + 回溯方案 `docs/plans/plan-review-findings-closeout-2026-10-04.md`。**零产品运行时代码**（全部落在评审/取证工具与其测试、文档口径）。
