@@ -4,7 +4,7 @@
 > 分支：`chore/deps-pr55-lock-only-2026-10-04`（已随 #71 合入删除；从 `main` `0f85eba` 起）
 > 上游处置口径：`CHANGELOG.md`「取证链二批」§3（L146-152）与 §3（L70-75）、`docs/TODO.md` §8（L191）「已拍板、尚未执行」
 > 相关口径来源：`docs/plans/plan-observability-global-remediation-2026-09-29.md` §3.3 R2/L-4
-> 指针语义（沿用本仓既有纪律）：本文所有 sha / tip / 耗时均为**取证时刻**值，不构成「至今仍绿」的持续断言；判据须在当前 tip 上重跑才算成立。
+> 指针语义（沿用本仓既有纪律）：本文所有 sha / tip / 耗时 / **外部文件行号引用**均为**取证时刻**值，不构成「至今仍绿」的持续断言；判据须在当前 tip 上重跑才算成立。
 
 ## 1. 背景与目标
 
@@ -100,7 +100,7 @@
 | S4 | 9 个 `pyproject.toml` 按 §3 落 **回退 1 处 + 抬升 17 处**（回退那处恢复主干值 ⇒ 相对 `main` 的净 diff = 17 处抬升） | ✅ | `9 files changed, 17 insertions(+), 17 deletions(-)` |
 | S5 | 让 lock 的 `specifier` 记录与 S4 后的 `pyproject` 对齐 | ✅ | **只改 1 行**；`uv lock --check` **rc=0**；与 #55 head 的解析版本差异 **0**、包集合相同 |
 | S6 | 本地实跑门禁（顺序即 CI 顺序）：`ruff check .` → `scripts/lint_architecture.py` → 10 个 pytest session → `eval/run_eval.py` → `scripts/check_doc_sync.py` | ✅ 全绿 | `ruff` rc=0；`lint_architecture` rc=0（**L-4 通过**）；`check_doc_sync` rc=0（0 警告）；10 session 逐条：root `1006 passed, 6 skipped, 28 deselected`(243.6s) · shared-schemas 28 · agent-runtime `594 passed, 1 skipped` · agent_server 44 · agent_federation 176 · kefu 43 · exhibition `347 passed, 1 skipped` · knowledge-service `404 passed, 13 skipped` · nl2sql 18 · observability（`--extra otel` 真 SDK）15 —— 10/10 EXIT=0；eval **15/15 = 100%** rc=0 |
-| S7 | 推送 + 开 PR（标题写明「替代 #55」、正文附 L-4 依据与实跑读数） | ✅ | 分支 4 笔提交（`65c0622` 方案 docs · `4502330` deps · `97c0d08` + `d6be688` 落账 docs）→ **PR [#71](https://github.com/Light-Towers/agent-platform/pull/71)**，CI 7/7 pass |
+| S7 | 推送 + 开 PR（标题写明「替代 #55」、正文附 L-4 依据与实跑读数） | ✅ | 分支 4 笔提交（`65c0622` 方案 docs **+ deps 主体**：8 子包 pyproject + 根声明 10 处 + uv.lock 1262 行 · `4502330` 仅 2 行 specifier 修正（根 otel + uv.lock 各 1 行）· `97c0d08` + `d6be688` 落账 docs；两笔 message 与携带内容互换，归因勘误见 §10）→ **PR [#71](https://github.com/Light-Towers/agent-platform/pull/71)**，CI 7/7 pass |
 | S8 | 关 #55（说明指回 #71）+ 删两个 head 分支（先取证后删） | ✅ | ① 合并 #71 → **`4f1fa8c`**（未夹带自证：`^1` = 旧 `main` `0f85eba`、`^2` = head `32e06f2`、merge 树 == head 树、相对旧 `main` 恰 12 文件）；② #55 **CLOSED** @ `2026-10-05T07:49:34Z`（actor = `Light-Towers`(User)，非 bot 自关）；③ 两个 head 分支已删 ⇒ 远端 `refs/heads` 恰 `main`、本地恰 `main`、工作树 clean；删前读数见清理文档 §5.1 |
 
 **S5 的一条工具纪律（本批实测得到，值得入库）**：对锁文件做「与 pyproject 对齐」时，**不要用 `uv lock` 全量重写**去替代最小改动 —— 本地 uv 0.11.21 重写会额外多写 **35 行**平台 marker 元数据（`sys_platform != 'emscripten'` 等，`main`/#55 的锁里各 24 处、重写后 34 处），而 `uv lock --check` 对标最小改动版**同样 rc=0**。即：判据是 `uv lock --check`，不是「与一次全量重写的字节等同」；全量重写把 diff 放大 36 倍且零收益。本批采用「#55 的锁 + 手工改 1 行」。
@@ -156,4 +156,17 @@
 | P2 | §4.1 用现在时描述「已记录在清理文档新增节」，而该节当时**尚未落盘** | 改为「已随本 PR 入库」，并新增清理文档 **§5**（删前读数 + 命令 + 预期终态） |
 | P3 | §1.3「OTel 三处 `>=1.24`」不精确（实为 **5 条**声明、3 个声明位） | §1.3 / §6.1 / §1.3 非目标同步改为「5 条」 |
 
-**审核方的验证局限（如实登记）**：其本机三次复跑 `lint_architecture.py` 均因 `rglob` 扫 `.venv` 巨量依赖目录超时，未能重放 S6；改用「脚本源码静态核对 + 声明位现值 + CI 独立机器 7/7 全绿」构成等效证据链。本方 S6 的实跑读数（§5）不受影响，两者独立成立。
+**审核方的验证局限（如实登记）**：其本机三次复跑 `lint_architecture.py` 均因 `rglob` 扫 .venv 巨量依赖目录超时，未能重放 S6；改用「脚本源码静态核对 + 声明位现值 + CI 独立机器 7/7 全绿」构成等效证据链。本方 S6 的实跑读数（§5）不受影响，两者独立成立。
+
+## 10. 复审与勘误（2026-10-05，双轴 review 收口批）
+
+对今日全部 10 个 commit（`65c0622`→`4922044`，含 merge #71/#72/#73；diff 基准 `0f85eba` 三点）做 Standards / Spec 双轴复审（两并行子代理 + 关键项独立复核）：**Standards 零硬违规**（`check_doc_sync.py` 实跑通过，新增文档引用路径均在 `git ls-files` 内）；**Spec 逐条兑现、无 scope creep**——otel 回退、17 处下界抬升、45 包口径（42 原位 + 2 新增 + 1 移除）、TODO 勾选翻转、GitHub 侧 #55 CLOSED / #71 MERGED（7/7 checks）/ #72·#73 MERGED / 远端 ref 面恰 main，全部 gh / git 实核通过。复审发现并随本批订正：
+
+| 级 | 问题 | 处置 |
+|----|------|------|
+| P3 | **S7 归因互换**：`65c0622` 标题「方案入库」实际携带全部依赖改动（8 子包 pyproject + 根声明 10 处 + uv.lock 1262 行）+ 方案文档；`4502330` 标题「收编 45 包 + 17 处下界抬升」实际仅 2 行 specifier 修正（本节数据为 `git show --stat` 亲验）。两 commit 已推送不可改写，按 message 做历史取证会误读 | S7 行已就地订正（本批）；本节为归因权威记录 |
+| P3 | 根 `pyproject.toml` 三处 Dependabot 注释口径：`anyio>=4.15.1` 注释仍写 first_patched 4.14.2（本批抬下界造成脱节）、`mcp>=2.2.0` / `transformers>=5.17.0` 沿用既有口径缺口扩大，易误读为「下界 = first_patched」 | 三处注释补「现下界已高于修复版」定性；**版本值与 uv.lock 零改动** |
+| P3 | §9 验证局限段 `.venv` 以反引号引用 gitignored 目录（AGENTS.md 文档防漂移惯例：本机不入库路径用普通文本）；check_doc_sync 当前不匹配裸目录名故未拦截，属潜在红线 | 已去反引号 |
+| 提示 | 文首行号引用（CHANGELOG L146-152 / L70-75、TODO L191）随上游编辑漂移 | 按 §1 指针语义纪律**不追改**；「外部文件行号引用」已显式纳入指针语义覆盖面 |
+
+**残余核查（2026-10-05 实取，结论：无需动作）**：`packages/agent-runtime/pyproject.toml` 的 `mcp>=2.0.0` 不在方案 17 处白名单（方案既定口径只列根 `[mcp]` ×1，非遗漏）——`gh api dependabot/alerts?state=open` 实取 **0**，且声明下界 2.0.0 本身已高于 first_patched 1.28.1，无告警风险，维持不动。
