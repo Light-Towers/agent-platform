@@ -9,7 +9,7 @@ description = "统一 Pydantic schema，agent_federation 联邦网关 4 服务�
 requires-python = ">=3.11"
 license = { text = "Apache-2.0" }
 dependencies = [
-    "pydantic>=2.13",
+    "pydantic>=2.13.5",
     "pydantic-settings>=2.0",
 ]
 
