@@ -1,6 +1,6 @@
 # 方案：PR #55（Dependabot minor-and-patch 组）处置 —— 关票 + 自建 lock-only/白名单抬下界 PR
 
-> 状态：**已批准（甲档）；S1-S6 已执行且门禁全绿**；S7（推分支 + 开 PR）执行中；S8（关 #55 + 删 head 分支）待单独批准
+> 状态：**已批准（甲档）；S1-S7 已执行且本地门禁全绿**；替代 PR = **[#71](https://github.com/Light-Towers/agent-platform/pull/71)**（CI 待跑）；S8（关 #55 + 删 head 分支）待单独批准
 > 分支：`chore/deps-pr55-lock-only-2026-10-04`（从 `main` `0f85eba`）
 > 上游处置口径：`CHANGELOG.md`「取证链二批」§3（L146-152）与 §3（L70-75）、`docs/TODO.md` §8（L191）「已拍板、尚未执行」
 > 相关口径来源：`docs/plans/plan-observability-global-remediation-2026-09-29.md` §3.3 R2/L-4
@@ -97,7 +97,7 @@
 | S4 | 9 个 `pyproject.toml` 按 §3 落 **回退 1 处 + 抬升 17 处**（回退那处恢复主干值 ⇒ 相对 `main` 的净 diff = 17 处抬升） | ✅ | `9 files changed, 17 insertions(+), 17 deletions(-)` |
 | S5 | 让 lock 的 `specifier` 记录与 S4 后的 `pyproject` 对齐 | ✅ | **只改 1 行**；`uv lock --check` **rc=0**；与 `origin/pr55` 的解析版本差异 **0**、包集合相同 |
 | S6 | 本地实跑门禁（顺序即 CI 顺序）：`ruff check .` → `scripts/lint_architecture.py` → 10 个 pytest session → `eval/run_eval.py` → `scripts/check_doc_sync.py` | ✅ 全绿 | `ruff` rc=0；`lint_architecture` rc=0（**L-4 通过**）；`check_doc_sync` rc=0（0 警告）；10 session 逐条：root `1006 passed, 6 skipped, 28 deselected`(243.6s) · shared-schemas 28 · agent-runtime `594 passed, 1 skipped` · agent_server 44 · agent_federation 176 · kefu 43 · exhibition `347 passed, 1 skipped` · knowledge-service `404 passed, 13 skipped` · nl2sql 18 · observability（`--extra otel` 真 SDK）15 —— 10/10 EXIT=0；eval **15/15 = 100%** rc=0 |
-| S7 | 推送 + 开 PR（标题写明「替代 #55」、正文附 L-4 依据与实跑读数） | ⏳ | — |
+| S7 | 推送 + 开 PR（标题写明「替代 #55」、正文附 L-4 依据与实跑读数） | ✅ | 分支 `chore/deps-pr55-lock-only-2026-10-04`（两笔提交 `65c0622` docs / `4502330` deps）→ **PR [#71](https://github.com/Light-Towers/agent-platform/pull/71)** |
 | S8 | 关 #55（说明指回 S7 的 PR）+ 删 head 分支（先取证后删） | ⛔ 待单独批准 | — |
 
 **S5 的一条工具纪律（本批实测得到，值得入库）**：对锁文件做「与 pyproject 对齐」时，**不要用 `uv lock` 全量重写**去替代最小改动 —— 本地 uv 0.11.21 重写会额外多写 **35 行**平台 marker 元数据（`sys_platform != 'emscripten'` 等，`main`/`#55` 的锁里各 24 处、重写后 34 处），而 `uv lock --check` 对标最小改动版**同样 rc=0**。即：判据是 `uv lock --check`，不是「与一次全量重写的字节等同」；全量重写把 diff 放大 36 倍且零收益。本批采用「#55 的锁 + 手工改 1 行」。
