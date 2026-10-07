@@ -37,7 +37,7 @@ jobs:
     env:
       POSTGRES_PASSWORD: agent_platform_dev
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Compose config 校验
         run: docker compose -f docker-compose.ha.yml config -q
       - name: 构建并拉起双副本 + PG（含镜像装配验证）
