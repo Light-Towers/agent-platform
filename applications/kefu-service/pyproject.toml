@@ -10,7 +10,7 @@ dependencies = [
     # 未安装时 classify_intent 自动降级，intent_node 回退业务关键词分流（可达性底线，#1）。
     "agent-core[memory-embed-local]",
     "shared-schemas",
-    "fastapi>=0.129.0",
+    "fastapi>=0.142.2",
     "uvicorn>=0.41.0",
     "langgraph>=1.2.10,<2",
     "pydantic>=2.13.5",
