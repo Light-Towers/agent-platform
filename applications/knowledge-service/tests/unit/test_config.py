@@ -18,7 +18,7 @@ from knowledge_service.core.config import PROJECT_ROOT, Settings, _as_bool, _as_
 
 
 def test_settings_default_milvus_url():
-    # 掌柜智库默认 Milvus 地址
+    # 知识库服务默认 Milvus 地址
     assert settings.milvus_url == "http://localhost:19530"
 
 

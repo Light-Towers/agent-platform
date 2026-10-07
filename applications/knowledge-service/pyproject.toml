@@ -5,11 +5,11 @@ build-backend = "hatchling.build"
 [project]
 name = "knowledge-service"
 version = "1.1.0"
-description = "掌柜智库：RAG 知识库导入与多路检索问答一体化服务"
+description = "知识库服务（Knowledge Service）：RAG 知识库导入与多路检索问答一体化服务"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "Apache-2.0" }
-authors = [{ name = "掌柜智库 Team" }]
+authors = [{ name = "Knowledge Service Team" }]
 keywords = ["rag", "langgraph", "fastapi", "milvus", "knowledge-base"]
 # 版本下界 = monorepo 根 uv.lock 当前锁定版本（2026-09-22 T1.1 提取），
 # 防止全新环境装到不兼容旧版；升级须同步评估 uv.lock。

@@ -1,4 +1,4 @@
-# 掌柜智库（Zhanggui Zhiku）本地一体化编排
+# 知识库服务（Knowledge Service）本地一体化编排
 # 服务：web(统一 FastAPI) / milvus(向量库) / mongo(历史会话) / minio(对象存储) / neo4j(知识图谱) / minio-init(自动建桶)
 #       可观测（可选 profile obs）：jaeger(链路追踪 UI)
 #
