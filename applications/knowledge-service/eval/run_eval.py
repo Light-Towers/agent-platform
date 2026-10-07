@@ -302,7 +302,7 @@ def backfill_registry(run_id: str, overall: Dict[str, float]) -> None:
 # ---------------------------------------------------------------------------
 def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="掌柜智库检索评测运行器（M2）：逐条跑检索链路并计算 Recall/MRR/nDCG 指标。",
+        description="知识库检索评测运行器（M2）：逐条跑检索链路并计算 Recall/MRR/nDCG 指标。",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument("--out", default=str(DEFAULT_OUT), help="评测输出根目录")

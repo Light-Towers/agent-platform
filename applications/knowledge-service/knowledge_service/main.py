@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-掌柜智库（Zhanggui Zhiku）统一服务入口。
+知识库服务（Knowledge Service）统一服务入口。
 
 将原本分散的「文件导入服务」与「查询服务」两个独立 FastAPI 应用，
 合并为**单一** FastAPI 应用：通过 APIRouter 挂载，统一配置 CORS、日志与生命周期。
@@ -30,12 +30,12 @@ from knowledge_service.utils.tenant_identity import TenantHeaderMiddleware, curr
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """应用生命周期：启动/关闭时执行一次性逻辑（日志 + 观测统一退出）。"""
-    logger.info("掌柜智库服务启动完成，监听 %s:%s", settings.app_host, settings.app_port)
+    logger.info("知识库服务启动完成，监听 %s:%s", settings.app_host, settings.app_port)
     yield
     # 观测方案 §3.2：lifespan 末尾统一 kernel 退出（flush+shutdown provider，
     # 尾批 span 不丢）；未 init/未装 SDK 时 no-op，零开销。
     shutdown_tracing()
-    logger.info("掌柜智库服务已关闭")
+    logger.info("知识库服务已关闭")
 
 
 def create_app() -> FastAPI:
@@ -48,7 +48,7 @@ def create_app() -> FastAPI:
     :return: 配置完成的 FastAPI 实例
     """
     app = build_api_app(
-        title="掌柜智库 Zhanggui Zhiku",
+        title="Knowledge Service",
         description="PDF/MD 知识库导入 + 多路检索问答一体化服务（RAG）",
         version="1.0.0",
         lifespan=lifespan,

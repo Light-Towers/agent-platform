@@ -1,4 +1,4 @@
-# 掌柜智库（Zhanggui Zhiku）
+# 知识库服务（Knowledge Service）
 
 一个基于 **LangGraph + FastAPI** 的 RAG 知识库项目：**PDF/Markdown 导入 → 解析/切分/向量化/入库（Milvus + Neo4j）**，并提供**多路检索 + 重排 + 融合 + 知识图谱 + LLM 问答**的一体化服务。
 
@@ -336,10 +336,11 @@ docker compose --profile core --profile obs up -d --build
   待真实文档入库后需按实际 chunk_id 重新标注。
 - 检索链路为同步 LangGraph invoke + 线程级超时隔离（M6 技术债：同步代码不可中断，
   由下游超时兜底）；入站限流为进程内实现，多副本需外置 Redis（M5 技术债）。
-- **KG 图谱检索通道（`node_query_kg.py`）为占位 stub（仅 `time.sleep(1)`，未接 Neo4j）**：
-  fan-out 超时降级框架（guarded_call / wrap_channel_node / retrieval.yaml timeout_s）代码已就位，
-  但 kg 通道真实故障隔离能力**未接入、未验证**（详见 docs/verification-checklist.md ⑥ 与
-  docs/ops-lessons-learned.md §4.1），接入真实 Neo4j 前不得声称该项已验证。
+- **KG 图谱检索通道（`node_query_kg.py`）已于 2026-08-18 从 stub 落地为真实 Neo4j 实体/关系检索**
+  （`neo4j_utils.query_kg`，结果与向量召回同构汇入 RRF；Neo4j 未配置/空库/异常时降级为空，不阻断主链路）。
+  **仍待重测**：verification-checklist ⑥「单路挂起/超时隔离」在 stub 时期（2026-08-06）记过偏差，
+  KG 落地后**重测未执行**——真实故障隔离能力未验证前，不得声称该项已验证
+  （详见 docs/verification-checklist.md ⑥ 与 docs/ops-lessons-learned.md §4.1）。
 - 端到端 `/query` QPS 受外部 LLM API 限流约束，**不承诺 100 QPS**（分档压测口径见 benchmark/）。
 
 ### 10.5 硅基流动 API 模式（M8，无 GPU 运行）

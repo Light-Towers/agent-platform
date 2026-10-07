@@ -1,6 +1,6 @@
 # agent-core
 
-框架无关的 Agent 运行时内核，可被任意宿主应用（如掌柜智库 zhanggui-zhiku）以
+框架无关的 Agent 运行时内核，可被任意宿主应用（如知识库服务 knowledge-service）以
 `import agent_core` 方式复用。
 
 ## 组件

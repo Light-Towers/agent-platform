@@ -1,4 +1,4 @@
-# 掌柜智库（Zhanggui Zhiku）运行依赖
+# 知识库服务（Knowledge Service）运行依赖
 # 与 pyproject.toml 的 dependencies 保持一致；优先使用 `uv` 或 `pip install -e .`
 # 若需锁定版本，可用 `pip freeze > requirements.txt` 覆盖本文件。
 

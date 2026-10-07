@@ -63,7 +63,7 @@ ABLATION_FILE = "ablation.md"
 
 def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="掌柜智库 Dynamic TopK 消融运行器（M3.5）：fixed_k=3/5/10 vs dynamic 对比。",
+        description="知识库 Dynamic TopK 消融运行器（M3.5）：fixed_k=3/5/10 vs dynamic 对比。",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument("--out", default="eval/runs", help="评测输出根目录")

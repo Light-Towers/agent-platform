@@ -1,4 +1,4 @@
-# 掌柜智库（Zhanggui Zhiku）生产镜像
+# 知识库服务（Knowledge Service）生产镜像
 # 说明：默认按 requirements 全量安装（含 torch / langchain / magic-pdf，镜像较大但开箱即用）。
 #       如需更小体积，可改用 CPU-only 依赖或按 README 的「CPU slim」说明裁剪。
 # 2026-09-22 T1.1：monorepo 重组后路径修复。build context = 仓库根
