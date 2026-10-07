@@ -16,7 +16,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-mcp = ["mcp>=2.0.0"]  # Dependabot: MCP SDK 多 high 告警（first_patched 1.28.1）
+mcp = ["mcp>=2.3.0"]  # Dependabot: MCP SDK 多 high 告警（first_patched 1.28.1）
 identity = ["PyJWT[crypto]>=2.9"]  # ADR-0007 A3：RS256 令牌签/验（不进 agent-core，红线 1）
 # OTel 观测软依赖声明位已摘（2026-09-30 门面退役）：otel.py 删除后本包无 opentelemetry
 # 直接导入，观测统一软导入面在 agent-core [tracing]（lint L-4 监控声明位与下界）。
