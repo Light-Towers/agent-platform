@@ -81,22 +81,26 @@
 
 ## 2. V3 企业执行平台验收缺口
 
-来源：`docs/plans/plan-v3-execution-platform-final-architecture-2026-09-22.md` §6 缺口清单（架构真相源，此处仅索引优先级，不重复展开）：
+来源：`docs/plans/plan-v3-execution-platform-final-architecture-2026-09-22.md` §6 缺口清单（架构真相源，不重复展开）：
 
-| 缺口 | 内容 | 优先级 |
-|------|------|--------|
-| 1 | 严格 Fencing Generation：fencing 边界需覆盖 5 类 durable write（checkpoint / execution status / external task receipt / side effect receipt / scheduler ownership），当前仅防 checkpoint stale write | High |
-| 2 | Effect Contract：`SideEffectStore` ≠ 语义契约，缺 delivery/retry/recover 分类 | High |
-| 3 | External Task + Receipt：未独立持久化，crash recovery 无法查询外部系统真实状态 | High |
-| 4 | Execution Scheduler：仅有 Admission 容量门控，缺 priority / fairness / backpressure / stuck / reschedule | High |
-| 5 | Durable Execution Status State Machine | High |
-| 6 | State Schema Version / Migration（V3-6 Layer B） | Medium |
-| 7 | Large Payload Externalization（V3-6 Layer B） | Medium |
-| 8 | Control Plane：底层数据/Replay 已有，缺 pause/resume/cancel/retry/requeue/recover/inspect/terminate 可操作面 | Medium |
-| 9 | Replay Forensic / Reproducibility：Trajectory 未记录 model/prompt/skill/policy version | Medium |
-| 10 | Skill Version / Lifecycle / Compatibility：Skill 热更新会破坏 Runtime Replay / Checkpoint Recovery / Workflow | Medium |
+> **状态列口径（2026-10-09 逐条实读对账新增）**：「已完成」= 代码已进主干且已接线；「部分」= 主干已存在但覆盖不全；「未接线」= 代码与单测俱在而主流程零调用。**本批与 §0 登记的 2026-10-05「只做状态订正、零翻转」同构**：只改状态列，**未新增、未翻转任何复选框**（可用 `git diff docs/TODO.md` 判：diff 内无 `- [ ]` ↔ `- [x]` 变更）⇒ §0 的开/关计数没有受影响（注：§0 的「不重开对账、不倒推历史数」约束的是**计数口径**，不禁止对缺口做状态订正）。逐条证据位置：`docs/plans/production-delivery-anchor-map-2026-10-09.md` 附录 A（本文只存结论，证据不在本文重述 ⇒ 两处不一致时以附录 A 为准）。
 
-- [ ] 端到端双实例物理故障转移验收：`scheduler_enabled` 默认 `False`（渐进式开启，见 `AGENTS.md` V3 口径），缺口 1~5 未闭合前不得翻转为已上线能力声明
+| 缺口 | 内容 | 优先级 | 实测状态（2026-10-09） |
+|------|------|--------|------------------------|
+| 1 | 严格 Fencing Generation：fencing 边界需覆盖 5 类 durable write（checkpoint / execution status / external task receipt / side effect receipt / scheduler ownership），当前仅防 checkpoint stale write | High | **部分 3/5**：checkpoint / execution status / scheduler ownership 已有；external task receipt 与 side effect receipt 无。另本轮新发现：`PgAwaitableTaskStore` 同名定义两份，生产接线的那份无保护 |
+| 2 | Effect Contract：`SideEffectStore` ≠ 语义契约，缺 delivery/retry/recover 分类 | High | **已完成**（本行记为缺口属过时）：三分类齐备且被 planner 调用。边界：按契约做恢复决策的执行层仍未接线 |
+| 3 | External Task + Receipt：未独立持久化，crash recovery 无法查询外部系统真实状态 | High | **部分**：已独立持久化并在服务启动时装配（「未独立持久化」已不成立）；后半句仍成立——恢复路径查不到，卡在 §3 未接线清单里的执行恢复模块 |
+| 4 | Execution Scheduler：仅有 Admission 容量门控，缺 priority / fairness / backpressure / stuck / reschedule | High | **部分**：priority / per-tenant fairness / backpressure / stuck 回收均已完成并接线（回收器在生产启动）；**仅 reschedule 未接**，且已接的回收动作只标 FAILED + 释放槽位，**不重新排队** |
+| 5 | Durable Execution Status State Machine | High | **已完成**（本行记为缺口属过时）：10 态状态机 + SQL 层原子拒绝旧 generation |
+| 6 | State Schema Version / Migration（V3-6 Layer B） | Medium | **未接线**（见 §3） |
+| 7 | Large Payload Externalization（V3-6 Layer B） | Medium | **未接线**（见 §3） |
+| 8 | Control Plane：底层数据/Replay 已有，缺 pause/resume/cancel/retry/requeue/recover/inspect/terminate 可操作面 | Medium | **部分**：8 项动作中 6 项已实现（inspect/pause/resume/cancel/retry/terminate），**缺 requeue 与 recover** ⇒ 本行不得整体计为已解决 |
+| 9 | Replay Forensic / Reproducibility：Trajectory 未记录 model/prompt/skill/policy version | Medium | **已完成**（本行记为缺口属过时）：model/model_version/prompt_version/skill_version/input/tool/planner/policy_version 均已记录 |
+| 10 | Skill Version / Lifecycle / Compatibility：Skill 热更新会破坏 Runtime Replay / Checkpoint Recovery / Workflow | Medium | **已完成**（本行记为缺口属过时）：能力生命周期已管控，退役能力注册被直接拒绝 |
+
+逐条小结：**已完成 4（缺口 2/5/9/10）· 部分 4（1/3/4/8）· 未接线 2（6/7）**。⇒ 风险在「已完成」那 4 项：旧表把它们计为 High/Medium 缺口，照旧表排期会**重复建设已完成的代码**；本批把 4 项标为已完成、另有 4 项标为部分（需拆成「已接」与「未接」两截排期），未接线的 2 项保持原判。
+
+- [ ] 端到端双实例物理故障转移验收：`scheduler_enabled` 默认 `False`（渐进式开启，见 `AGENTS.md` V3 口径），缺口 1~5 未闭合前不得翻转为已上线能力声明。**（2026-10-09 订正本句前提）**「缺口 1~5 未闭合」已过时：实测缺口 2/5 已完成，1/3/4 为部分（未闭合面收窄为：两类防覆盖缺失、恢复路径不查外部状态、reschedule 未接）。本条仍保持开项，但判据不是「1~5 全闭合」而是「双实例物理故障转移实测通过」。
 
 ## 3. 未接线半成品转正（P1-7 已标注，同「未接线≠死代码」教训，禁止直接删除）
 

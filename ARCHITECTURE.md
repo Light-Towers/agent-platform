@@ -115,10 +115,18 @@ agent-core  agent-runtime  shared-schemas  agent-server  agent_federation  exhib
 | P10 | 禁 `from tools.*` 直引 `@tool` 绕过 `get_tool()` | 同上（v3 合流并入） | — |
 | P11 | 根 `.github/workflows/*.yml` 必须声明顶层 `permissions:` 块 | `actions/missing-workflow-permissions`（GITHUB_TOKEN 未限权） | `tests/governance/test_workflow_permissions_governance.py` |
 | P12 | 绑 `Depends(verify_api_key)` 的形参**值不得作为任何 `Call` 的实参外流**（仅扫 `applications/**`，无白名单） | 凭据被当审计主体/日志字段（**CodeQL 未报**，人工语义审计发现） | `tests/governance/test_audit_operator_principal.py` |
+| L-3 | 观测 init（`init_tracing`/`init_otel`）只能出现在装配点（`main`/`server`/过渡门面/eval 入口） | 业务模块私起第二个 tracer 状态机（R6 根因） | — |
+| L-1 | 禁手动 `.__enter__()`/`.__exit__()`，上下文管理器生命周期必须 `with` 配对 | 真 OTel 下 CM 跨任务拆分配对 → 500（R4/R8；NoOp 替身的 `__getattr__` 兜底会让关闭态隐形） | — |
+| L-2 | 禁经 `app.state` 散点取用 tracer（请求级 span 由 `TracingMiddleware` 创建，业务属性经 `agent_core.tracing` 取用） | 散点取用是「第二实现」的土壤（R8/R12） | — |
+| L-4 | OTel / langfuse 可选依赖必须显式声明 extras，且多处下界一致 | extras 版本解析回溯（R1/R2）；曾据此连续拦下两次依赖升级 PR | — |
 
 P11 只认顶层块：未声明 `permissions` 的 job 会回落到组织/仓库默认（常为读写），job 级声明易漏且不可核。背景与判定口径见 `docs/plans/plan-codeql-batch7-no-dismiss-real-fixes-2026-10-01.md` §7。
 
 P12 是**名匹配粗筛**，不得当作「凭据不入审计」的全局完备门禁：抓不到「先赋给别名/属性再传」的间接流，也抓不到 `return` 等其它外流形状；kernel 侧对凭据的处理归 P6。行为面由上表用例与人工语义审计补齐。背景见 `docs/plans/plan-audit-operator-principal-2026-10-03.md` §4.3。
+
+L 系列（观测架构与依赖契约）由 `docs/plans/plan-observability-global-remediation-2026-09-29.md` §3.3 立项，**无独立治理用例**——判据就是 lint 自身，`make lint` / CI 常驻覆盖。这与 P 系列「每条配一组门禁用例」的形态不同，不得拿「有用例」与「无用例」当作重要性排序。
+
+> **计数口径（2026-10-09 实取，三个数字为何不同）**：本表 **15 行**（P 系列 11 + L 系列 4，其中 P6-3 单列）；`scripts/lint_architecture.py` 的 `main()` 打印 **14 条**门禁编号（P6-3 并入 P6、P7 的两个函数共用一个 P7 编号打印）；实现函数 **16 个**（`check()` 承接 P4-2，另有 15 个 `check_*`）。⇒ **对外陈述门禁强度一律用「14 条」**；表行数与函数数是不同计数对象，不得被引成「门禁条数」。历史文档里出现过的「7 条」无任何来源支撑，已作废（本轮对账记录：`docs/plans/production-delivery-anchor-map-2026-10-09.md`）。
 
 ### 4.2 合入后复验脚本（判据 6 形态，必须可原样重跑）
 
