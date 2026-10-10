@@ -76,6 +76,28 @@ def _build_pg_stores(pool):
     return checkpoint_store, idempotency_store, ownership_store, trajectory_store
 
 
+def _warm_embedding_backend() -> tuple[str, bool]:
+    """启动期解析一次实际 embedder，返回 (类型名, 是否真实语义后端)。
+
+    刻意不因失败而中断启动：EMBEDDING_REQUIRE_REAL=true 且后端退化为 Mock 时，
+    resolve_provider() 会抛错——那是**调用期**既有的硬失败护栏（检索真的算不出来就该失败，
+    而不是静默按字面比对）。若把它升级成启动期 crash-loop，反而会让"配了开关但镜像缺依赖"
+    这种现场直接起不来。折中形态：进程照常起来，红灯如实亮 unknown/false，任何真实检索仍硬失败。
+
+    失败必须留日志——静默降级正是「关了和坏了分不清」的来源。
+    """
+    try:
+        from agent_core.memory.embedder import MockEmbedder
+
+        from agent_server.rag.embed import resolve_provider
+
+        provider = resolve_provider()
+        return type(provider).__name__, not isinstance(provider, MockEmbedder)
+    except Exception:  # noqa: BLE001
+        logger.exception("embedding 后端预热失败：/health 报 embedding_backend=unknown / embedding_real=false")
+        return "unknown", False
+
+
 def _build_memory_hooks(pool):
     """构建执行后记忆沉淀 hooks（EpisodicSink + ProceduralSink + MemoryDecayManager）。
 
@@ -202,6 +224,12 @@ async def lifespan(app: FastAPI):
     checkpoint_store, idempotency_store, ownership_store, trajectory_store = _build_pg_stores(pool)
 
     llm = build_chat_model()
+
+    # 语义检索后端：启动期解析一次并把实际类型名存进 app.state，/health 只读该已存值。
+    # 放在 lifespan 而不是 /health 里现算，是因为集群存活/就绪探针的 timeoutSeconds 为 1、
+    # liveness 连错 3 次即杀容器，而本地 embedder 的构造是同步加载模型——在探针路径里
+    # 装模型等于自己造一次「探针连错三次 → 被 SIGKILL」。
+    app.state.embedding_backend, app.state.embedding_real = _warm_embedding_backend()
 
     # Phase 2: 会话并发协调
     if settings.coordination_enabled:

@@ -117,7 +117,33 @@ class HealthResponse(BaseHealthResponse):
     复用 shared_schemas.HealthResponse（status: HealthStatus enum / version /
     dependencies），app 独有能力标志（coordination/admission/revert/...）已在
     共享契约中以可选字段提供，此处仅做显式再导出以保持对外形态一致。
+
+    新增字段一律**带默认值的可选项、只加不改形状**，且只加在本 app 的子类上：
+    共享基类被另外三个服务直接返回，把 agent_server 独有的部件加到基类上，等于让
+    它们报出一堆默认 false 的误导性字段（它们根本没有这些部件）。
+
+    两个字段刻意只报布尔/模式名而不回显任何值——/health 是免鉴权的探针路径
+    （见 agent_core.guardrails.auth.DEFAULT_EXEMPT_PATHS）：
+    - auth_enabled：仅 bool(settings.api_key)，不含密钥；
+    - identity_mode：仅 jwt/single/insecure 三态名。
     """
+
+    # V3 执行平台装配态：由 main.py lifespan 按开关条件写入，None 即"未装配"。
+    scheduler: bool = Field(False, description="ExecutionScheduler 是否已装配（SCHEDULER_ENABLED）")
+    control_plane: bool = Field(False, description="ControlPlane 是否已装配（随 scheduler 一同）")
+    cost_governance: bool = Field(False, description="CostGovernance 是否已装配")
+    forensic: bool = Field(False, description="轨迹/取证存储（trajectory_store）是否已装配")
+    # 语义检索真值灯：backend 为实际类型名，real=False 即"退化成按字面比对"（MockEmbedder）。
+    embedding_backend: str | None = Field(
+        None, description="启动期预热得到的 embedder 实际类型名（LocalEmbedder/RemoteEmbedder/MockEmbedder/unknown）"
+    )
+    embedding_real: bool = Field(False, description="语义检索是否真在算（False=MockEmbedder 字面比对）")
+    planner: str | None = Field(None, description="当前执行路径（默认 deterministic）")
+    guard_enabled: bool = Field(False, description="输入护栏（PII/injection）是否打开")
+    auth_enabled: bool = Field(False, description="接口是否要求 X-API-Key（不回显密钥）")
+    identity_mode: str | None = Field(
+        None, description="租户身份模式：jwt / single / insecure（与启动守卫同一判定）"
+    )
 
 
 class RevertRequest(BaseModel):
