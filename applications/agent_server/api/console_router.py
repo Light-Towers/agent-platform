@@ -33,4 +33,7 @@ async def console_page():
         raise HTTPException(status_code=500, detail="CONSOLE_PAGE_UNAVAILABLE") from exc
     if not path.is_file():
         raise HTTPException(status_code=404, detail="console page not found")
-    return FileResponse(path=path, media_type="text/html")
+    # no-store：这个壳是打进镜像的，滚动升级后若浏览器沿用缓存壳，屏上跑的是**旧事件契约**
+    # 配**新接口**（实跑中已撞到一次：改完页面浏览器仍给旧行为，误判成"修复没生效"）。
+    # 页面无 Cookie、无用户数据，不缓存不损可用性。
+    return FileResponse(path=path, media_type="text/html", headers={"Cache-Control": "no-store"})

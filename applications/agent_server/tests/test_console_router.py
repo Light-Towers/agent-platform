@@ -104,6 +104,17 @@ class TestReadOnlyConstraint:
 
 
 class TestNoNewDataEndpoint:
+    def test_shell_is_not_cacheable(self):
+        """滚动升级后不能把旧事件契约的缓存壳发给使用者。"""
+        with TestClient(app) as client:
+            resp = client.get("/console.html")
+        assert resp.headers.get("cache-control") == "no-store", resp.headers
+
+    def test_unknown_event_type_is_not_silently_dropped(self):
+        """后端新增事件而页面没有分支时，必须在屏上留一行，而不是"接口给了但看不见"。"""
+        code = _code_of(TestClient(app).get("/console.html").text)
+        assert "未处理的事件类型" in code
+
     def test_error_paths_speak_plain_words_not_browser_jargon(self):
         """三条失败路径都要先挡/先翻译，再给使用者看（全部在浏览器里实跑过）：
         - 密钥含非 ASCII：HTTP 头只允许 ISO-8859-1，浏览器会在**发出请求前**抛
