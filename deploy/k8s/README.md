@@ -127,6 +127,39 @@ kubectl -n agent-platform get pods -o wide -w
 
 预期：postgres（在 126）先 Ready；agent-platform（125/241）走 startupProbe 40s 窗口后 Ready。
 
+### 6.1 清单与线上一致化（apply 前置，126 实战教训）
+
+> 事故形状：线上被 `kubectl set env` 就地改过（LLM_* 成字面值、OTEL_* 四键、LLM_API_KEY），
+> 而清单停留在旧值或根本没声明这些键 ⇒ 清单不再是真相源，**任何人一次 `kubectl apply`
+> 就会把国外模型地址注回线上、把可观测和凭据抹掉**。2026-10-10 已把在用的非敏感值回写进
+> `00-config.yaml`，并在 `20-agent-platform.yaml` 补齐 `LLM_API_KEY` / `API_KEY` / 4 个 `OTEL_*` /
+> 本地语义模型与护栏开关。敏感值永不入库，故 apply 前必须先在集群侧把键补齐：
+
+```bash
+# ① 凭据落位：模型密钥已在集群对象 observability-keys 里（2026-10-10 实测 keys=[LLM_API_KEY]），
+#    本轮新增的是入站密钥 API_KEY —— 只补这一个键，别重建对象。
+kubectl -n agent-platform get secret observability-keys -o json | jq -r '.data|keys[]'
+read -rsp "API_KEY=: " v; echo
+kubectl -n agent-platform create secret generic observability-keys \
+  --from-literal=API_KEY="$v" --dry-run=client -o yaml | kubectl apply -f -
+unset v   # 值只在终端与集群里，勿写进任何文件、脚本、命令历史可复用行
+# ② 别整片 apply 00-config.yaml：Secret 的 stringData 是整体覆盖，
+#    若线上 pg 口令与清单里的 demo 值不同，会被换回去 ⇒ 应用连不上库。
+#    要更新 ConfigMap 就只 apply 那一段（或先 diff 再决定）。
+# ③ 本地语义模型的前提：Pod 落到哪个节点，那个节点就得有权重缓存（三节点各自独立盘）
+for n in ambari03 ambari02 ambari01; do
+  ssh root@$n 'ls -d /opt/ap-models/hf-cache/hub/models--BAAI--bge-small-zh-v1.5 || echo MISSING_ON '"$n"
+done
+# ④ apply 后读回（"同步了"不等于"上线了"）
+kubectl -n agent-platform set env deploy/agent-platform --list | sort
+kubectl -n agent-platform get deploy agent-platform -o jsonpath='{.spec.template.spec.containers[0].env[*].name}{"\n"}'
+kubectl -n agent-platform exec deploy/agent-platform -- cat /srv/agent-platform/GIT_REV   # 必须 == 期望 rev
+curl -s 127.0.0.1:18000/health   # embedding_backend/embedding_real/auth_enabled/guard_enabled/identity_mode 逐盏灯
+```
+
+`hostPath.type: Directory` 是故意写的：缓存不在目标节点时 Pod 直接 Pending 并给出明确事件，
+而不是静默起来、等首次推理回连 huggingface.co 时才炸。守护用例见 `tests/deploy/`。
+
 ### 7. 分层验收（每层输出记入 VERIFICATION.md）
 
 | 层 | 命令 | 判定 |

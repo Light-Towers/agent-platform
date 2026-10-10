@@ -46,6 +46,9 @@ dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
     "ruff>=0.16.9",
+    # 清单接线用例（tests/deploy）要真解析 YAML 缩进，不能用行扫描替代；
+    # 今天它靠 uvicorn[standard] 传递在位，但守护用例不该赌传递依赖。
+    "pyyaml>=6.0",
 ]
 
 # 检索回归评测专用（FlashRAG 依赖较重：faiss/transformers/spacy 等），

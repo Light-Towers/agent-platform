@@ -17,6 +17,9 @@ spec:
       labels:
         app: agent-platform
     spec:
+      # 137 定性：外部依赖断连（postgres DNS + OTLP no route）让优雅关闭卡在「等后台任务」，
+      # 超过默认 30s 宽限期被 SIGKILL。放宽只买到时间，根因在集群网络，别当成修复。
+      terminationGracePeriodSeconds: 60
       containers:
         - name: agent-platform
           image: agent-platform:dev
@@ -29,6 +32,27 @@ spec:
                 secretKeyRef:
                   name: agent-platform-secrets
                   key: DATABASE_URL
+            # ---- 模型凭据 + 入站凭据：只引用键名，真实值永不入库 ----
+            # 这两个键在 126 上属集群单独持有的 `observability-keys`（对象名早于鉴权用途，
+            # 见 VERIFICATION.md §C 的 create secret 记录）；缺键时 Pod 以
+            # CreateContainerConfigError 起不来，是有意的 fail-closed：
+            # 宁可拒绝启动，也不要静默回退到无密钥 / 错误模型地址。
+            - name: LLM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: observability-keys
+                  key: LLM_API_KEY
+            # API_KEY 非空才启用 X-API-Key 校验，且客户端 thread_id 被忽略、会话归到服务端断言的租户桶。
+            # DEPLOY_ENFORCE_IDENTITY=true 时：无验签公钥且无 SINGLE_TENANT → 启动即失败。
+            - name: API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: observability-keys
+                  key: API_KEY
+            - name: SINGLE_TENANT
+              value: "default"
+            - name: DEPLOY_ENFORCE_IDENTITY
+              value: "true"
             - name: LLM_BASE_URL
               valueFrom:
                 configMapKeyRef:
@@ -44,39 +68,114 @@ spec:
                 configMapKeyRef:
                   name: agent-platform-config
                   key: LLM_FALLBACK_MODEL
+            # EMBEDDING_MODEL 只作用于 RemoteEmbedder 分支；本地模式的模型 id 由
+            # INTENT_EMBEDDING_MODEL 决定（内核 get_embedder 的落底分支），两者别混。
             - name: EMBEDDING_MODEL
               valueFrom:
                 configMapKeyRef:
                   name: agent-platform-config
                   key: EMBEDDING_MODEL
+            - name: EMBEDDING_MODE
+              value: "local"
+            # 本地 bge-small-zh-v1.5 = 512 维，与 settings.vector_dim(512) 及 pgvector 列宽对齐；
+            # 换 1024 维模型（如 bge-m3）会让新写入向量与既有列错位，必须连同维度一起改。
+            - name: INTENT_EMBEDDING_MODEL
+              value: "BAAI/bge-small-zh-v1.5"
+            # 护栏：后端退化为 Mock（确定性 hash，检索失去语义）时直接失败，而非静默退化。
+            - name: EMBEDDING_REQUIRE_REAL
+              value: "true"
+            # 离线加载：权重只在节点 hostPath 缓存里，禁止回连 huggingface.co。
+            - name: HF_HOME
+              value: "/opt/ap-models/hf-cache"
+            - name: HF_HUB_OFFLINE
+              value: "1"
+            - name: TRANSFORMERS_OFFLINE
+              value: "1"
+            # ---- 输入护栏（PII 脱敏 + injection 拦截）----
+            - name: GUARD_ENABLED
+              value: "true"
+            # 内核 input_guard 直接读 os.environ（默认已是 true，显式声明防被环境漂移改掉）。
+            - name: GUARD_BLOCK_INJECTION
+              value: "true"
+            # ---- 可观测：线上已跑很久但清单从未声明这 4 键，一次 apply 即被抹掉 ----
+            - name: OTEL_ENABLED
+              valueFrom:
+                configMapKeyRef:
+                  name: agent-platform-config
+                  key: OTEL_ENABLED
+            - name: OTEL_EXPORTER
+              valueFrom:
+                configMapKeyRef:
+                  name: agent-platform-config
+                  key: OTEL_EXPORTER
+            - name: OTEL_SERVICE_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: agent-platform-config
+                  key: OTEL_SERVICE_NAME
+            - name: OTEL_ENDPOINT
+              valueFrom:
+                configMapKeyRef:
+                  name: agent-platform-config
+                  key: OTEL_ENDPOINT
           # compose TB-7：lifespan 内 init_pool 连不上 pg 会阻塞 ~30s
           # → startupProbe 给足 8*5s=40s 窗口，期间 readiness/liveness 不生效
+          # 本地 embedding 在 lifespan 预热，重活不落进 /health 探测路径。
+          # 预热耗时实测（126 venv 容器，CUDA 轮）：torch import 3.4s + sentence_transformers
+          # import 8.4s + 权重加载 0.5s ≈ 12s；CPU 轮数值待通道恢复后复测，窗口按 40s 留足。
           startupProbe:
             httpGet:
               path: /health
               port: 8000
             periodSeconds: 5
             failureThreshold: 8
+            timeoutSeconds: 5
+          # timeoutSeconds 显式化：API 默认 1s，而 /health 实测中位 0.8ms 只在空闲时成立——
+          # CPU 推理持 GIL 时探测会被拖到秒级，1s 会连错 3 次把健康的 Pod 判死。
           readinessProbe:
             httpGet:
               path: /health
               port: 8000
             periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 3
           livenessProbe:
             httpGet:
               path: /health
               port: 8000
             periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 4
           resources:
             requests:
               cpu: 250m
-              memory: 512Mi
+              # requests 取「本地模型常驻 444MiB（CPU torch 实测峰值）+ 应用进程」的经验下限。
+              # 注：应用单独基线 RSS 尚未实测（探针缺 -i 没出数），通道恢复后补测再校准。
+              memory: 1Gi
             limits:
               cpu: "1"
-              memory: 1Gi
+              # 2Gi 为需求方拍板值（1Gi 装下本地语义模型后没有批量 encode 与碎片余量）。
+              memory: 2Gi
           securityContext:
             runAsNonRoot: true   # 对应 Dockerfile 的非 root appuser(10001) 最佳实践
             runAsUser: 10001
+          volumeMounts:
+            # ⚠ 待实测项：离线加载曾在「可写」bind 上跑通，只读挂载会不会因 huggingface_hub
+            #   往缓存写 .lock 而失败，尚未验证。通道恢复后先跑决定性用例：
+            #   docker run --rm -v /opt/ap-models/hf-cache:/opt/ap-models/hf-cache:ro \
+            #     -e HF_HOME=/opt/ap-models/hf-cache -e HF_HUB_OFFLINE=1 <img> python -c '...加载并 encode 一次'
+            #   报只读错则把本挂载改为 readOnly: false（缓存目录仅本项目自用，可接受）。
+            - name: ap-models
+              mountPath: /opt/ap-models
+              readOnly: true
+      volumes:
+        # type: Directory = 节点上没这个目录就调度失败（Pod Pending + 明确事件），
+        # 而不是静默起来、首次推理时才发现缓存不在本机、回连 huggingface.co 又不通。
+        # 跨节点前提：缓存必须存在于 Pod 实际落到的节点（126 三节点各自的 /opt/ap-models 是独立盘）。
+        - name: ap-models
+          hostPath:
+            path: /opt/ap-models
+            type: Directory
 ---
 apiVersion: v1
 kind: Service
