@@ -51,7 +51,6 @@ from agent_core.memory.typed import (
 # 降级路径（无 DB/内核后端）的门面：app 仍用自己的 _resolve_default_backend
 # （基于 database_url 解析，与内核 get_default_backend 的 SEMANTIC_MEMORY_ENABLED
 # 开关解耦），保持既有 app 测试契约不变。类型化读写已下沉内核 typed 模块。
-from agent_server.config import get_settings
 
 default_backend = None
 
@@ -68,26 +67,21 @@ def _resolve_default_backend():
     if not url:
         default_backend = None
         return None
+    from agent_core.memory.embedder import LocalFnEmbedder
     from agent_core.memory.vector_backend import PgVectorMemoryBackend
 
+    import agent_server.config as _cfg
+    from agent_server.rag.embed import embed_texts
+
+    # 内核 LocalFnEmbedder 就是「宿主自带 async embedding 函数」这一形态的单一实现
+    # （声明 dim + 附带 L2 归一化）；此前 app 手写的 _AppEmbedder 是它的重复实现，
+    # 且既没 await、又给 embed_texts 传了它不接受的 dim= —— 类型化记忆因此恒空。
     default_backend = PgVectorMemoryBackend(
-        database_url=url, tenant_id=None, embedder=_AppEmbedder()
+        database_url=url,
+        tenant_id=None,
+        embedder=LocalFnEmbedder(embed_texts, dim=_cfg.get_settings().vector_dim),
     )
     return default_backend
-
-
-class _AppEmbedder:
-    """把 app 的 embed_texts(module 函数) 适配为内核 Embedder 协议（dim + embed）。"""
-
-    def __init__(self) -> None:
-        import agent_server.config as _cfg
-
-        self.dim = _cfg.get_settings().vector_dim
-
-    async def embed(self, texts):
-        from agent_server.rag.embed import embed_texts
-
-        return embed_texts(texts, dim=self.dim)
 
 
 def get_default_backend():
@@ -98,15 +92,16 @@ _MEMORY_TYPES = {"episodic", "semantic", "procedural"}
 
 
 def embed_memory(text: str) -> list[float]:
-    """用 app 自有 embedder 计算记忆向量（512 维，与 memories 表一致）。
+    """用 app 自有 embedder 计算记忆向量（维度与 memories 表一致）。
 
-    直接复用 ``app.rag.embed.embed_texts``，避免依赖内核默认 embedder 选型，
-    保持与 RAG/缓存维度统一（CI 零密钥）。内核 typed 模块不内嵌 embedder，
-    embedding 必须由宿主层在此处提供。
+    保持**同步契约**：``PgMemoryStore(pool, embed_memory)`` 把它当同步回调注入。
+    走 ``rag.embed.embed_texts_sync`` 而非直接叫内核 ``get_embedder()``，是为了继续经过
+    ``_sync_env()`` —— app 的 ``embedding_*`` 配置正是在那里映射给内核的，跳过它
+    向量维度会与 memories 表错位。护栏（EMBEDDING_REQUIRE_REAL）同在一条路径上。
     """
-    from agent_server.rag.embed import embed_texts
+    from agent_server.rag.embed import embed_texts_sync
 
-    return embed_texts([text], dim=get_settings().vector_dim)[0]
+    return list(embed_texts_sync([text])[0])
 
 
 async def remember_fact(
