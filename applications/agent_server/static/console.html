@@ -255,6 +255,9 @@ async function ask() {
           $("answer").textContent = payload.text || "";
           break;
         default:
+          // 未识别事件不许静默吞掉：后端加了新事件而页面没分支时，屏上会出现"接口给了却看不见"的假象。
+          // 只报事件名，不 dump 载荷（载荷可能含资料原文）。
+          $("timeline").appendChild(el("div", "tag", "未处理的事件类型：" + (payload.type || name)));
           break;
       }
     });

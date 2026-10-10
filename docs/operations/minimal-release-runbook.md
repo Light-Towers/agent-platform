@@ -114,6 +114,15 @@ kubectl -n $NS apply -f deploy/k8s/20-agent-platform.yaml
 |---|---|---|---|
 | 1 | 接口要密钥 | `curl -s -o /dev/null -w '%{http_code}\n' -X POST 127.0.0.1:18000/query -H 'Content-Type: application/json' -d '{"query":"x"}'`（再带一个错密钥试一次） | 两种都 401；`/health` 与 `/console.html` 免密钥可取 |
 | 2 | 租户由服务端断言 | `kubectl -n $NS set env deploy/agent-platform SINGLE_TENANT-` → 看新 Pod | **启动直接失败**（`require_identity_startup_guard`），日志指名要 `SINGLE_TENANT`；验完改回 |
+
+> **基线 2 的表述必须收窄，别照方案原文念**：实测下来"服务端断言"目前**只对会话归属成立**
+> （`resolve_thread_id` 塌缩成 `tenant-<断言租户>`，已证）；`/query` 的数据面仍读客户端 body 里的
+> `tenant_id`（11 处），而 `/import` 等写入口用 `server_tenant_id()` ⇒ 两边来源不同。
+> 单租户 + 页面不发该字段时恰好自洽；一旦被追问"两个租户共用这把 key 呢"，如实答"数据面租户边界未收敛，
+> 方案见 `plan-query-tenant-from-client-not-server-asserted-2026-10-10.md`，待拍板"。
+> 另一个会当场踩的坑：把 `SINGLE_TENANT` 改成非 `default`（按"部署单元注入真实租户"的口径）后，
+> `/import` 写新桶、`/query` 读 `default` ⇒ **资料入库了却永远检索不到且不报错**；
+> 清单里钉 `SINGLE_TENANT: "default"` 只是掩盖，不是解决。
 | 3 | 只到内网 | `kubectl -n $NS get svc agent-platform -o jsonpath='{.spec.type}'`；从内网另一台机器 curl | `ClusterIP`（无 NodePort）；内网通、公网侧不通 |
 | 4 | 出错不泄内部细节 | 现场故意弄坏一次（如临时改错 `DATABASE_URL` 或真停依赖） | 响应是统一信封 + 错误编号，**不含堆栈/路径/密钥片段**；后台日志另有详情 |
 | 5 | 每次调用可按编号追到 | `API_KEY=... bash deploy/k8s/scripts/e2e_traceparent.sh` | Jaeger 按该 trace_id 查到 `POST /query` SERVER span；BatchSpanProcessor ~5s flush ⇒ 等 ≥8s 再查 |
