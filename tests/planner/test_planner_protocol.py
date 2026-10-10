@@ -143,20 +143,20 @@ def _settings_with(**overrides):
 
 
 @pytest.mark.asyncio
-async def test_execute_emits_route_evidence_answer():
+async def test_execute_emits_route_evidence_status_answer():
     planner = DeterministicPlanner()
     plan = await planner.plan(PlannerContext(question="最近 GitHub 有什么热门 Agent 项目"))
     runtime = PlannerRuntime(registry=FakeRegistry(), llm=None, pool=None)
 
     events = [ev async for ev in planner.execute(plan, runtime)]
 
-    assert [e.type for e in events] == ["route", "evidence", "answer"]
+    assert [e.type for e in events] == ["route", "evidence", "status", "answer"]
     route_ev = events[0]
     assert route_ev.payload["capability"] == "search"
     ev_ev = events[1]
     assert ev_ev.payload["count"] == 2
     assert ev_ev.payload["preview"] == "搜索证据一"
-    answer_ev = events[2]
+    answer_ev = events[3]
     assert "（无 LLM 模式）" in answer_ev.payload["text"]
     assert "搜索证据一" in answer_ev.payload["text"]
 
@@ -201,7 +201,7 @@ async def test_execute_mcp_without_manager_degrades():
 
     events = [ev async for ev in planner.execute(plan, runtime)]
 
-    assert [e.type for e in events] == ["route", "evidence", "answer"]
+    assert [e.type for e in events] == ["route", "evidence", "status", "answer"]
     assert events[1].payload["preview"].startswith("MCP 未启用")
 
 
@@ -337,7 +337,7 @@ async def test_execute_capability_step_count_accounted():
 
     events = [e async for e in planner.execute(plan, runtime)]
 
-    assert [e.type for e in events] == ["route", "evidence", "answer"]
+    assert [e.type for e in events] == ["route", "evidence", "status", "answer"]
     assert events[1].payload["count"] == 2  # FakeRegistry 默认 search 返回 2 条
     # 边界退出后 context 复位
     assert runtime.context is None
