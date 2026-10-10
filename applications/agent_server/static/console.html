@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>知识库服务控制台</title>
+<style>
+  :root { --line:#d8dee9; --dim:#6b7280; --ok:#0a7d33; --bad:#b00020; --warn:#8a6100; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:14px/1.6 system-ui,"Noto Sans CJK SC",sans-serif; color:#1f2937; background:#f6f7f9; }
+  header { padding:10px 16px; background:#fff; border-bottom:1px solid var(--line); display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+  header h1 { font-size:15px; margin:0 auto 0 0; font-weight:600; }
+  input[type=password], input[type=text] { padding:6px 8px; border:1px solid var(--line); border-radius:6px; font-size:13px; }
+  button { padding:6px 12px; border:1px solid var(--line); border-radius:6px; background:#fff; cursor:pointer; font-size:13px; }
+  button:disabled { opacity:.5; cursor:default; }
+  main { display:grid; grid-template-columns: 1.1fr 1.4fr 1fr; gap:12px; padding:12px; align-items:start; }
+  .col { background:#fff; border:1px solid var(--line); border-radius:10px; padding:12px; min-height:220px; }
+  .col h2 { font-size:13px; margin:0 0 10px; color:var(--dim); font-weight:600; letter-spacing:.02em; }
+  #timeline { display:flex; flex-direction:column; gap:6px; }
+  .ev { border-left:3px solid var(--line); padding:5px 8px; background:#fafbfc; font-size:12.5px; word-break:break-word; }
+  .ev.route { border-left-color:#2563eb; }
+  .ev.evidence { border-left-color:#0a7d33; }
+  .ev.replan { border-left-color:#8a6100; }
+  .ev.memory { border-left-color:#7c3aed; }
+  .ev.status { border-left-color:#0891b1; }
+  .ev.error { border-left-color:var(--bad); }
+  .ev b { font-weight:600; }
+  .steps { margin:4px 0 0; padding-left:16px; }
+  .steps li { font-variant-numeric:tabular-nums; }
+  #q { width:100%; padding:8px; border:1px solid var(--line); border-radius:8px; font-size:14px; }
+  #answer { margin-top:10px; white-space:pre-wrap; word-break:break-word; font-size:14px; min-height:60px; }
+  .ref { display:block; margin-top:6px; padding:6px 8px; border:1px dashed var(--line); border-radius:6px; font-size:12px; color:#374151; white-space:pre-wrap; word-break:break-word; }
+  #lights { display:flex; flex-direction:column; gap:4px; margin:0 0 12px; padding:0; list-style:none; font-size:12.5px; }
+  .lamp { display:flex; gap:6px; align-items:baseline; }
+  .lamp .dot { width:9px; height:9px; border-radius:50%; background:var(--dim); flex:0 0 auto; }
+  .lamp.on .dot { background:var(--ok); }
+  .lamp.off .dot { background:var(--bad); }
+  .lamp.warn .dot { background:var(--warn); }
+  #history { display:flex; flex-direction:column; gap:6px; font-size:12.5px; }
+  .hitem { padding:6px 8px; border:1px solid var(--line); border-radius:6px; background:#fafbfc; word-break:break-word; white-space:pre-wrap; }
+  .hitem .who { color:var(--dim); font-size:11px; }
+  footer { padding:10px 16px; border-top:1px solid var(--line); background:#fff; color:var(--dim); font-size:12px; }
+  footer p { margin:2px 0; }
+  .tag { font-size:11px; color:var(--dim); }
+</style>
+</head>
+<body>
+<header>
+  <h1>知识库服务 · 只读控制台</h1>
+  <label for="key">接口密钥</label>
+  <input id="key" type="password" placeholder="X-API-Key（仅存内存，刷新即失）" size="28" autocomplete="off">
+  <button id="loadLights" type="button">读取状态</button>
+  <button id="loadHistory" type="button">读取本会话历史</button>
+  <span id="headMsg" class="tag"></span>
+</header>
+
+<main>
+  <section class="col">
+    <h2>过程时间线</h2>
+    <div id="timeline"></div>
+  </section>
+
+  <section class="col">
+    <h2>问答</h2>
+    <input id="q" type="text" placeholder="输入问题，回车提交">
+    <button id="ask" type="button" style="margin-top:8px">提问</button>
+    <div id="answer"></div>
+    <div id="refs"></div>
+  </section>
+
+  <section class="col">
+    <h2>平台自述</h2>
+    <ul id="lights"></ul>
+    <div id="history"></div>
+  </section>
+</main>
+
+<footer>
+  <p>仅限内网访问；本页面不提供任何写操作，资料入库与问数语料录入只经运维命令行/正式接口。</p>
+  <p>会话隔离粒度到<b>租户</b>，未到具体用户：启用鉴权后会话由服务端断言，浏览器传入的会话号不参与归属。</p>
+  <p>提问原文与被检索到的资料片段会作为提示词发给所配置的模型服务。</p>
+  <p>本系统统计用量，<b>金额以模型平台账单为准</b>（平台内无模型定价表，故不显示金额）。</p>
+</footer>
+
+<script>
+"use strict";
+// 密钥只保存在内存：不落 localStorage/sessionStorage，也不写任何文件。
+// 页面所有可见内容均来自平台接口返回值；此处不含任何示例数据、预置回答或写死行。
+const state = { running: false };
+
+const $ = (id) => document.getElementById(id);
+
+// 一律用 textContent 写入：资料原文与模型回答都是不可信输入，绝不拼 innerHTML。
+function el(tag, cls, text) {
+  const node = document.createElement(tag);
+  if (cls) node.className = cls;
+  if (text !== undefined && text !== null) node.textContent = String(text);
+  return node;
+}
+
+function apiKey() { return $("key").value.trim(); }
+
+function authHeaders() {
+  const h = { "Content-Type": "application/json" };
+  const k = apiKey();
+  if (k) h["X-API-Key"] = k;
+  return h;
+}
+
+function clearTimeline() {
+  $("timeline").textContent = "";
+  $("answer").textContent = "";
+  $("refs").textContent = "";
+}
+
+function addTimeline(type, text) {
+  $("timeline").appendChild(el("div", "ev " + type, text));
+}
+
+function renderStatusEvent(payload) {
+  const box = el("div", "ev status");
+  const used = payload && typeof payload.tokens_used === "number" ? payload.tokens_used : 0;
+  // 只报用量：payload 里没有金额字段，页面也不留金额位。
+  box.appendChild(el("b", null, "模型用量：" + used + " tokens"));
+  const steps = (payload && payload.steps) || [];
+  if (steps.length) {
+    const list = el("ul", "steps");
+    for (const s of steps) {
+      const fingerprint = [s.skill_name, s.skill_version].filter(Boolean).join("@");
+      const tool = [s.tool_name, s.tool_version].filter(Boolean).join("@");
+      const bits = ["#" + s.index, s.name, s.latency_ms + " ms", s.tokens + " tokens"];
+      if (fingerprint) bits.push("技能 " + fingerprint);
+      if (tool) bits.push("工具 " + tool);
+      if (s.failed) bits.push("该步失败");
+      list.appendChild(el("li", null, bits.join(" · ")));
+    }
+    box.appendChild(list);
+  } else {
+    box.appendChild(el("div", "tag", "本次没有能力调用被记录（未走受控执行边界）"));
+  }
+  $("timeline").appendChild(box);
+}
+
+// SSE：/query 是 StreamingResponse，用 fetch 流式读，不受 EventSource 不能带请求头的限制。
+async function readSse(response, onEvent) {
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder("utf-8");
+  let buf = "";
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    let idx;
+    while ((idx = buf.indexOf("\n\n")) >= 0) {
+      const chunk = buf.slice(0, idx);
+      buf = buf.slice(idx + 2);
+      let name = "message";
+      const dataLines = [];
+      for (const line of chunk.split("\n")) {
+        if (line.startsWith("event:")) name = line.slice(6).trim();
+        else if (line.startsWith("data:")) dataLines.push(line.slice(5).trim());
+      }
+      if (!dataLines.length) continue;
+      let payload;
+      try { payload = JSON.parse(dataLines.join("\n")); }
+      catch (e) { payload = { raw: dataLines.join("\n") }; }
+      onEvent(name, payload);
+    }
+  }
+}
+
+async function ask() {
+  const question = $("q").value.trim();
+  if (!question || state.running) return;
+  state.running = true;
+  $("ask").disabled = true;
+  $("headMsg").textContent = "请求中…";
+  clearTimeline();
+  try {
+    // 会话号固定占位：启用鉴权后服务端忽略它并断言租户，页面不接受前端会话归属。
+    const resp = await fetch("query", {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({ query: question, session_id: "console" }),
+    });
+    if (!resp.ok) {
+      addTimeline("error", "接口返回 " + resp.status + "：" + (await resp.text()));
+      $("headMsg").textContent = "";
+      return;
+    }
+    await readSse(resp, (name, payload) => {
+      switch (payload.type || name) {
+        case "route":
+          addTimeline("route", "判给能力：" + payload.capability + "　理由：" + payload.reason);
+          break;
+        case "evidence":
+          addTimeline("evidence", "命中 " + payload.count + " 条依据（" + payload.node + "）"
+            + (payload.preview ? "\n首条片段：" + payload.preview : "\n（无依据）"));
+          if (payload.count > 0 && payload.preview) {
+            $("refs").appendChild(el("span", "ref", payload.node + " · " + payload.preview));
+          }
+          break;
+        case "replan":
+          addTimeline("replan", "推翻前判：" + payload.from_route + " → " + payload.to_route + "　" + payload.reason);
+          break;
+        case "memory":
+          addTimeline("memory", "召回记忆 " + ((payload.notes || []).length) + " 条"
+            + (payload.notes && payload.notes.length ? "：\n" + payload.notes.join("\n") : ""));
+          break;
+        case "status":
+          renderStatusEvent(payload);
+          break;
+        case "answer":
+          $("answer").textContent = payload.text || "（空回答）";
+          break;
+        case "error":
+          addTimeline("error", "出错：" + (payload.error || "未知"));
+          break;
+        case "suspended":
+          addTimeline("replan", "执行挂起，等待外部回执");
+          break;
+        case "cache_hit":
+          addTimeline("evidence", "命中语义缓存");
+          $("answer").textContent = payload.text || "";
+          break;
+        default:
+          break;
+      }
+    });
+    $("headMsg").textContent = "";
+  } catch (e) {
+    addTimeline("error", "请求失败：" + e.message);
+    $("headMsg").textContent = "";
+  } finally {
+    state.running = false;
+    $("ask").disabled = false;
+  }
+}
+
+async function loadLights() {
+  const ul = $("lights");
+  ul.textContent = "";
+  try {
+    const resp = await fetch("health");   // /health 是免鉴权探针路径
+    if (!resp.ok) { ul.appendChild(el("li", "lamp off", "状态接口返回 " + resp.status)); return; }
+    const d = await resp.json();
+    // 每盏灯都直接来自接口返回值，不做任何本地推断。
+    const L = (label, ok, warn, text) => {
+      const cls = warn ? "warn" : (ok ? "on" : "off");
+      const li = el("li", "lamp " + cls);
+      li.appendChild(el("span", "dot"));
+      li.appendChild(el("span", null, label + "：" + text));
+      ul.appendChild(li);
+    };
+    L("语义检索", d.embedding_real, false, d.embedding_backend + (d.embedding_real ? "（真在算向量）" : "（退化为按字面比对）"));
+    L("接口鉴权", d.auth_enabled, false, d.auth_enabled ? "已开启，数据接口需密钥" : "未开启，接口裸奔");
+    L("租户身份", d.identity_mode === "jwt" || d.identity_mode === "single", d.identity_mode === "insecure",
+      d.identity_mode === "insecure" ? "insecure（未断言租户）" : d.identity_mode);
+    L("输入护栏", d.guard_enabled, false, d.guard_enabled ? "已打开" : "未打开（不会拦截）");
+    L("大模型", d.llm, false, d.llm ? "已配置密钥（可用性以实际回答为准）" : "未配置");
+    L("存储", d.storage === "postgres", false, d.storage);
+    L("问数数据源", d.sql_backend !== "none", false, d.sql_backend);
+    L("追踪", d.otel_status === "ACTIVE", d.otel_status === "DEGRADED", d.otel_status);
+    L("执行路径", true, false, d.planner);
+    L("调度器", d.scheduler, false, d.scheduler ? "已装配" : "未装配（渐进开启项）");
+    L("过程档案", d.forensic, false, d.forensic ? "已装配" : "未装配");
+    $("headMsg").textContent = "状态更新于 " + new Date().toLocaleTimeString();
+  } catch (e) {
+    ul.appendChild(el("li", "lamp off", "状态读取失败：" + e.message));
+  }
+}
+
+async function loadHistory() {
+  const box = $("history");
+  box.textContent = "";
+  try {
+    const resp = await fetch("history?session_id=console&limit=20", { headers: authHeaders() });
+    if (resp.status === 401) { box.appendChild(el("div", "hitem", "未授权：请先填接口密钥")); return; }
+    if (resp.status === 503) { box.appendChild(el("div", "hitem", "会话存储不可用（不拿空列表冒充「没有历史」）")); return; }
+    if (!resp.ok) { box.appendChild(el("div", "hitem", "历史接口返回 " + resp.status)); return; }
+    const d = await resp.json();
+    // 显示服务端实际用的会话桶，而不是前端传进去的那个值。
+    box.appendChild(el("div", "tag", "服务端断言会话：" + d.thread_id + "　共 " + d.count + " 条"));
+    for (const it of d.items || []) {
+      const node = el("div", "hitem");
+      node.appendChild(el("span", "who", (it.role || "") + "　"));
+      node.appendChild(document.createTextNode(it.content || ""));
+      box.appendChild(node);
+    }
+    if (!(d.items || []).length) box.appendChild(el("div", "tag", "该会话桶下暂无已落库的对话原文"));
+  } catch (e) {
+    box.appendChild(el("div", "hitem", "历史读取失败：" + e.message));
+  }
+}
+
+$("ask").addEventListener("click", ask);
+$("q").addEventListener("keydown", (e) => { if (e.key === "Enter") ask(); });
+$("loadLights").addEventListener("click", loadLights);
+$("loadHistory").addEventListener("click", loadHistory);
+loadLights();
+</script>
+</body>
+</html>
