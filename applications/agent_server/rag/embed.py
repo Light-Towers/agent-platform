@@ -32,7 +32,7 @@ def _sync_env() -> None:
     os.environ["EMBEDDING_DIM"] = str(s.vector_dim)
 
 
-def _resolve_provider():
+def resolve_provider():
     """映射 app 配置到内核 env 并返回 embedder 实例（含 fail-fast 护栏）。
 
     async/sync 两条入口共用同一份选型与护栏逻辑——护栏若在调用方各抄一遍，
@@ -61,7 +61,7 @@ def _resolve_provider():
 async def embed_texts(texts: list[str]) -> list[list[float]]:
     if not texts:
         return []
-    provider = _resolve_provider()
+    provider = resolve_provider()
     # 优先异步路径（RemoteEmbedder/MockEmbedder 均支持 aembed），避免事件循环内阻塞
     if hasattr(provider, "aembed"):
         return await provider.aembed(texts)
@@ -78,7 +78,7 @@ def embed_texts_sync(texts: list[str]) -> list[list[float]]:
     """
     if not texts:
         return []
-    return _resolve_provider().embed(texts)
+    return resolve_provider().embed(texts)
 
 
 async def embed_query(text: str) -> list[float]:
