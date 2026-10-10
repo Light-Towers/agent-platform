@@ -19,6 +19,7 @@ import yaml
 
 _ROOT = Path(__file__).resolve().parents[2]
 _CONFIG = _ROOT / "deploy" / "k8s" / "00-config.yaml"
+_SECRETS = _ROOT / "deploy" / "k8s" / "05-secrets.yaml"
 _DEPLOY = _ROOT / "deploy" / "k8s" / "20-agent-platform.yaml"
 
 # 由第三方库直接消费、仓库内不出现读取点的标准 env（实测：设这三个可离线加载权重）
@@ -58,7 +59,15 @@ def configmap() -> dict:
 
 @pytest.fixture(scope="module")
 def secret() -> dict:
-    return next(d for d in _load(_CONFIG) if d["kind"] == "Secret")
+    return next(d for d in _load(_SECRETS) if d["kind"] == "Secret")
+
+
+def test_config_file_carries_no_secret_object():
+    """构造保证而非约定：人常 apply 的那份配置文件里不能有 Secret 对象。
+    "记得别把 Secret 一起 apply"迟早会被人破，写成文件切分才不会被忘掉。"""
+    kinds = [d["kind"] for d in _load(_CONFIG)]
+    assert "Secret" not in kinds, f"00-config.yaml 出现了 Secret 对象（{kinds}）"
+    assert "Secret" in [d["kind"] for d in _load(_SECRETS)]
 
 
 @pytest.fixture(scope="module")
