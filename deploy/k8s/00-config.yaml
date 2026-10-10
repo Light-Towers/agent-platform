@@ -1,5 +1,6 @@
-# 命名空间 + 配置（ConfigMap 非敏感默认值 / Secret 敏感项）
-# 注意：本 Secret 仅本地 demo 用途，禁止提交真实密钥。
+# 命名空间 + 配置（只放非敏感的 ConfigMap 默认值）
+# 本文件刻意不含 Secret 对象：apply 配置时不可能顺带覆盖集群里的真实凭据，
+# demo Secret 在 05-secrets.yaml（真实环境勿 apply，见该文件头部说明）。
 apiVersion: v1
 kind: Namespace
 metadata:
@@ -24,21 +25,3 @@ data:
   OTEL_SERVICE_NAME: "agent-platform"
   # 端点只能写宿主 IP：Jaeger all-in-one 是以 docker 跑在 126 宿主的容器，不在集群内（见 deploy/k8s/VERIFICATION.md）。
   OTEL_ENDPOINT: "http://192.168.100.126:4318/v1/traces"
----
-apiVersion: v1
-kind: Secret
-metadata:
-  name: agent-platform-secrets
-  namespace: agent-platform
-type: Opaque
-# ⚠ apply 本对象前必读：stringData 是整体覆盖，不是按键合并。
-#   模型/入站凭据（LLM_API_KEY、API_KEY）不住在这里——它们在集群单独建的 `observability-keys`
-#   对象里（真实密钥不入库），本文件也不该出现它们的任何值。
-#   若 126 的 pg 口令与这里的 demo 值不同，整片 apply 会把口令换回 demo 值 ⇒ 应用连不上库。
-#   动完整对象前先比对：
-#     kubectl -n agent-platform get secret agent-platform-secrets -o json | jq -r '.data|keys[]'
-#     kubectl -n agent-platform get secret observability-keys     -o json | jq -r '.data|keys[]'
-stringData:
-  POSTGRES_PASSWORD: "agent_platform_dev"
-  # 与 compose 的 DATABASE_URL 同构：user=agent / db=agent_platform / svc 名 postgres
-  DATABASE_URL: "postgresql://agent:agent_platform_dev@postgres:5432/agent_platform"

@@ -120,6 +120,7 @@ sudo crictl images | grep agent-platform   # 确认导入成功
 
 ```bash
 kubectl apply -f deploy/k8s/00-config.yaml
+kubectl apply -f deploy/k8s/05-secrets.yaml     # 仅本地 demo/minikube；真实环境的凭据在集群自有对象里，勿 apply
 kubectl apply -f deploy/k8s/10-postgres.yaml
 kubectl apply -f deploy/k8s/20-agent-platform.yaml
 kubectl -n agent-platform get pods -o wide -w
@@ -143,9 +144,10 @@ read -rsp "API_KEY=: " v; echo
 kubectl -n agent-platform create secret generic observability-keys \
   --from-literal=API_KEY="$v" --dry-run=client -o yaml | kubectl apply -f -
 unset v   # 值只在终端与集群里，勿写进任何文件、脚本、命令历史可复用行
-# ② 别整片 apply 00-config.yaml：Secret 的 stringData 是整体覆盖，
-#    若线上 pg 口令与清单里的 demo 值不同，会被换回去 ⇒ 应用连不上库。
-#    要更新 ConfigMap 就只 apply 那一段（或先 diff 再决定）。
+# ② apply 00-config.yaml 是安全的：它只含 Namespace + ConfigMap。
+#    demo Secret 已从这份文件里拆走（现为 05-secrets.yaml）——因为 stringData 是整体覆盖，
+#    真实环境 apply 它会把 pg 口令换成 demo 值；拆开之后，"别把 Secret 一起 apply"
+#    就不再依赖人的记性（守护用例：tests/deploy/test_k8s_manifest_wiring.py）。
 # ③ 本地语义模型的前提：Pod 落到哪个节点，那个节点就得有权重缓存（三节点各自独立盘）
 for n in ambari03 ambari02 ambari01; do
   ssh root@$n 'ls -d /opt/ap-models/hf-cache/hub/models--BAAI--bge-small-zh-v1.5 || echo MISSING_ON '"$n"
