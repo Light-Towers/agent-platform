@@ -32,14 +32,18 @@ def _sync_env() -> None:
     os.environ["EMBEDDING_DIM"] = str(s.vector_dim)
 
 
-async def embed_texts(texts: list[str]) -> list[list[float]]:
-    if not texts:
-        return []
+def _resolve_provider():
+    """映射 app 配置到内核 env 并返回 embedder 实例（含 fail-fast 护栏）。
+
+    async/sync 两条入口共用同一份选型与护栏逻辑——护栏若在调用方各抄一遍，
+    迟早出现「一条路有 fail-fast、另一条静默退化」的分叉。
+
+    fail-fast 护栏（审计 P1 #十一）：缺真实 embedding 时返回确定性 hash 向量会让
+    RAG/记忆检索完全失去语义，属「静默质量退化」，比硬失败更危险。
+    默认关闭（测试/CI/开发保持 mock 兼容）；生产部署设 EMBEDDING_REQUIRE_REAL=true
+    后，任何未显式配置真实 backend 的调用都将直接报错，而非静默退化。
+    """
     _sync_env()
-    # fail-fast 护栏（审计 P1 #十一）：缺真实 embedding 时返回确定性 hash 向量会让
-    # RAG/记忆检索完全失去语义，属「静默质量退化」，比硬失败更危险。
-    # 默认关闭（测试/CI/开发保持 mock 兼容）；生产部署设 EMBEDDING_REQUIRE_REAL=true
-    # 后，任何未显式配置真实 backend 的调用都将直接报错，而非静默退化。
     if os.getenv("EMBEDDING_REQUIRE_REAL", "").lower() in ("1", "true", "yes"):
         from agent_core.memory.embedder import MockEmbedder
 
@@ -50,13 +54,31 @@ async def embed_texts(texts: list[str]) -> list[list[float]]:
                 "EMBEDDING_API_KEY / SILICONFLOW_API_KEY 或 EMBEDDING_MODE=remote，"
                 "否则 RAG/记忆检索将失去语义。"
             )
-    else:
-        provider = get_embedder(force=True)
+        return provider
+    return get_embedder(force=True)
+
+
+async def embed_texts(texts: list[str]) -> list[list[float]]:
+    if not texts:
+        return []
+    provider = _resolve_provider()
     # 优先异步路径（RemoteEmbedder/MockEmbedder 均支持 aembed），避免事件循环内阻塞
     if hasattr(provider, "aembed"):
         return await provider.aembed(texts)
     # 本地 sentence-transformers 仅同步，但内部为 CPU 推理，开销可控
     return provider.embed(texts)
+
+
+def embed_texts_sync(texts: list[str]) -> list[list[float]]:
+    """同步入口，供必须保持 sync 契约的宿主调用点使用（如 memory_backend.embed_memory）。
+
+    刻意不走 ``LocalFnEmbedder.embed()``——其同步入口内部是 ``asyncio.run``，而本函数的
+    调用点全在已运行的事件循环内（``remember_typed`` / ``recall_typed`` 都是 ``async def``），
+    嵌套 run 必死锁。内核四个 provider 均实现协议要求的同步 ``embed``。
+    """
+    if not texts:
+        return []
+    return _resolve_provider().embed(texts)
 
 
 async def embed_query(text: str) -> list[float]:
