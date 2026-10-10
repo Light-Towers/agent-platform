@@ -205,3 +205,99 @@ async def test_v6_upgrade_from_legacy_corpus_shape(scratch_pool):
             assert (await row.fetchone())[0] == 2, f"{t} 应同时具备 workspace_id/tenant_id"
 
         await conn.execute(sql)  # 幂等重跑（全部 IF NOT EXISTS）
+
+
+async def test_v11_upgrade_from_legacy_execution_shape(scratch_pool):
+    """2026-10-10 真集群实跑拓出：存量库缺 4 列，/query 主链路必崩（v6 同族、成因不同）。
+
+    成因不是「增量链漏了 ALTER」而是「baseline 从未执行」：集群库 schema_migrations 的
+    1..10 applied_at 完全相同 ⇒ 走的是 runner._try_baseline_stamp() 的只记版本不执行 DDL
+    路径；此后 baseline 的 ``CREATE TABLE IF NOT EXISTS`` 对已存在的旧形状表永久 no-op。
+    ⇒ **重建镜像不会收敛该缺口**（运行 rev 的 001_baseline 已含 generation，线上表却没有）。
+
+    钉的是产品代码路径本身而非列存在性：``PlannerRuntime.execution()`` 每次进入执行边界都
+    acquire 租约（protocol.py:522 → durability_pg.py:219 的 INSERT 列含 generation），
+    所以修复前用真 store 打一次就必须崩——这条断言同时是本用例的非空洞性证明。
+    """
+    import psycopg
+    from agent_runtime.migrations.base import discover
+    from agent_runtime.planner.durability_pg import PgExecutionOwnershipStore
+
+    v11 = next(m for m in discover() if m.version == 11)
+    assert v11 is not None, "v11 不存在，测试前提不成立"
+    sql = v11.read_up()
+
+    async with scratch_pool.connection() as conn:
+        # 126 集群 information_schema 实测旧表形逐字复现（三张表各自的实际列集）
+        await conn.execute(
+            "CREATE TABLE execution_leases ("
+            "execution_id TEXT PRIMARY KEY, owner TEXT NOT NULL, expires_at TIMESTAMPTZ NOT NULL)"
+        )
+        await conn.execute(
+            "CREATE TABLE execution_checkpoints ("
+            "execution_id TEXT PRIMARY KEY, completed JSONB NOT NULL DEFAULT '{}', "
+            "updated_at TIMESTAMPTZ NOT NULL DEFAULT now(), "
+            "resumable BOOLEAN NOT NULL DEFAULT FALSE, version BIGINT NOT NULL DEFAULT 0)"
+        )
+        await conn.execute(
+            "CREATE TABLE semantic_cache ("
+            "id BIGSERIAL PRIMARY KEY, cache_key TEXT NOT NULL, question TEXT NOT NULL, "
+            "answer TEXT NOT NULL, embedding vector(512), "
+            "created_at TIMESTAMPTZ NOT NULL DEFAULT now())"
+        )
+
+    store = PgExecutionOwnershipStore(scratch_pool)
+
+    # 修复前：产品代码路径必崩（集群实错原文：column "generation" of relation
+    # "execution_leases" does not exist）
+    with pytest.raises(psycopg.errors.UndefinedColumn, match="generation"):
+        await store.acquire("exec-legacy", "replica-a:probe", 60.0)
+
+    async with scratch_pool.connection() as conn:
+        await conn.execute(sql)
+
+    # 修复后：同一条产品代码路径必须真的走通
+    assert await store.acquire("exec-legacy", "replica-a:probe", 60.0) is True
+    assert await store.get_generation("exec-legacy") == 1
+    assert await store.acquire("exec-legacy", "replica-a:probe", 60.0) is True
+    # 同 owner 续租 generation 不变；takeover 才 +1（V3-1 fencing 语义）
+    assert await store.get_generation("exec-legacy") == 1
+    assert await store.heartbeat("exec-legacy", 60.0, owner="replica-a:probe") is True
+    await store.release("exec-legacy", "replica-a:probe")
+
+    async with scratch_pool.connection() as conn:
+        # 列形状必须等于 001_baseline 现行声明（含 nullability / default 口径）
+        shape = {
+            ("execution_leases", "generation"): ("bigint", "NO", "1"),
+            ("execution_checkpoints", "generation"): ("bigint", "YES", None),
+            ("execution_checkpoints", "state_schema_version"): ("integer", "NO", "1"),
+            ("semantic_cache", "tenant_id"): ("text", "NO", "''::text"),
+        }
+        for (table, col), (dtype, nullable, default) in shape.items():
+            row = await conn.execute(
+                "SELECT data_type, is_nullable, column_default FROM information_schema.columns "
+                "WHERE table_schema = 'public' AND table_name = %s AND column_name = %s",
+                (table, col),
+            )
+            rec = await row.fetchone()
+            assert rec is not None, f"{table}.{col} 未被 v11 补上"
+            assert rec[0] == dtype, (table, col, rec)
+            assert rec[1] == nullable, (table, col, rec)
+            got_default = rec[2] if rec[2] is not None else None
+            if default is None:
+                assert got_default is None, (table, col, rec)
+            else:
+                assert got_default and got_default.startswith(default), (table, col, rec)
+
+        # semantic_cache 的租户谓词写入面（_cache_write 的列集含 tenant_id）
+        await conn.execute(
+            "INSERT INTO semantic_cache (cache_key, question, answer, embedding, tenant_id) "
+            "VALUES (%s, %s, %s, %s::vector, %s)",
+            ("k1", "q1", "a1", [0.0] * 512, "tenant-x"),
+        )
+        row = await conn.execute(
+            "SELECT count(*) FROM semantic_cache WHERE tenant_id = %s", ("tenant-x",)
+        )
+        assert (await row.fetchone())[0] == 1
+
+        await conn.execute(sql)  # 幂等重跑（全部 IF NOT EXISTS）
