@@ -83,6 +83,14 @@ kubectl -n $NS apply -f deploy/k8s/20-agent-platform.yaml
 | `planner: "deterministic"` | 默认路径；别把 graph/agentic 当已验收 |
 | `otel_status: "ACTIVE"` | 基线 5 前提 |
 
+**两处别读错的字段（本版无承载面，不是"都健康"的意思）**：
+
+- `llm: true` 只表示 `LLM_API_KEY` 这个配置项非空（`llm_enabled = bool(llm_api_key)`），**不是能力位**。
+  本轮 Gate 1 就是被它误导过一回：账号返回 403（要求邮箱验证）时 `llm` 仍是 `true`。
+  页面把它渲染成"已配置密钥（可用性以实际回答为准）"，口头汇报不得简化成"模型正常"。
+- `dependencies: []` 全平台**没有任何服务填过它**（`grep DependencyHealth/dependencies=` 只命中定义处与 nl2sql 的一句显式空列表）。
+  读成"所有依赖都健康"是错的；它当前就是一条无数据承载的字段。**待拍板**：填上真值还是从共享契约里摘掉。
+
 ## 4. 八条真实性底线 · 逐条打勾
 
 | # | 底线 | 当场怎么验（命令） | 期望 |
