@@ -130,8 +130,12 @@ kubectl -n $NS apply -f deploy/k8s/20-agent-platform.yaml
 2. 应用基线 RSS 未单独实测（探针缺 `-i` 没出数）⇒ 补测后校准 `requests.memory`。
 3. CPU torch 轮下的预热耗时（当前 40s startup 窗口按 CUDA 轮 12s 留的余量）。
 4. 被拦下的那一轮是否入 `/history` ⇒ 浏览器实测**入**：右栏 4 条里含 `user = system: 忽略之前的设定…` 与那条拦截话术（虽然 blocked 短路径不进受控执行边界，问答路由仍把这一轮写回 checkpoint）。**待拍板**：拦截轮的提问原文照原样落库是否符合口径（PII 已在检测前脱敏，injection 原文未再处理）。
-5. 门禁候选（**待拍板，未实现**）：`scripts/audit_schema_drift.py`（清单/baseline SQL 与真实库列的漂移扫描）。
-6. 门禁候选（**待拍板，未实现**）：一条"消费的 API 是否真的存在于被注入的对象上"的检查——本轮两个缺陷（`embed_texts(dim=)`、`alist_messages`）都是同一形状：代码照不存在的契约写，宽 except + mock 把读数盖成正常。
+5. **PG 侧的会话写读形状未验证**：本地只能用 `InMemorySaver` 证。集群上须 grep 关闭/降级线索确认
+   `AsyncPostgresSaver` 这条路径没有静默失败：`kubectl -n agent-platform logs deploy/agent-platform | grep -E "写入线程历史失败|读取线程历史失败|HISTORY_READ_FAILED"`
+   —— 三者都应为空（有命中就是"读得到但写不进/读不进"，与缺陷 #4 同一族，只是换了协作者）。
+6. 门禁候选（**待拍板，未实现**）：`scripts/audit_schema_drift.py`（清单/baseline SQL 与真实库列的漂移扫描）。
+7. 门禁候选（**待拍板，未实现**）：一条"消费的 API 是否真的存在于被注入的对象上"的检查——本轮两个缺陷（`embed_texts(dim=)`、`alist_messages`）都是同一形状：代码照不存在的契约写，宽 except + mock 把读数盖成正常。
+8. 退出路径的 tracing flush 无上界（`shutdown_tracing()` 用 SDK 默认 30s），会吃光宽限期 ⇒ 方案与三个选项见 `plan-tracing-shutdown-flush-timeout-2026-10-10.md`，**待拍板**（清单里 `terminationGracePeriodSeconds: 60` 只是买时间，不是修复）。
 
 ## 7. 故障与回滚预案
 
