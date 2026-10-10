@@ -24,7 +24,7 @@
 1. **"同步了"不等于"上线了"**：每次远端动作后回读 Pod 内 `/srv/agent-platform/GIT_REV`，与期望 rev 比对；`build.sh` 的 rev 门禁与 `verify.sh` 不得跳过。
 2. **动手前先做清单与线上一致化**：线上 `LLM_*` 曾被 `kubectl set env` 就地改成字面值，而清单写的是"从 ConfigMap 读" ⇒ 任何人一次 `kubectl apply` 就会把旧国外模型地址注回线上。回写已完成（§0），**但 apply 前仍要先读回现场**。
 3. **不重复取证、不重装依赖**：Pod 那次 exitCode 137 已定性（见 §5），126 宿主 Python 3.10 且无 uv，项目测试只能在容器里跑（bind 现成 6.4G venv，**严禁重装依赖**）。
-4. **先验通道再排期**：开工第一步是真实 `ssh <internal-ip> hostname`，不通就当天如实回报；`TcpTestSucceeded=True` 不含信息，"通道可用"不得写进任何完成标志。
+4. **先验通道再排期**：开工第一步是真实 `ssh <internal-ip> hostname`，不通就当天如实回报；`TcpTestSucceeded=True` 不含信息，"通道可用"不得写进任何完成标志。断了怎么读（哪些信号是红鲱鱼、为什么本机分不清"我的隧道断了"和"集群真停了"）见 `env-126-inventory.md` §2.8。
 
 ## 2. 唯一上线通道（六步，禁止本地 `docker run` 起服务冒充）
 
