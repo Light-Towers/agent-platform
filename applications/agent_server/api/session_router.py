@@ -2,6 +2,7 @@
 
 from datetime import UTC
 
+from agent_core.logging import get_logger
 from agent_runtime.workspace_registry import server_tenant_id
 from fastapi import APIRouter, Depends, HTTPException, Request
 
@@ -9,6 +10,8 @@ from agent_server.api.auth import resolve_thread_id, verify_api_key
 from agent_server.config import get_settings
 from agent_server.memory import recall_exact as _recall_exact
 from agent_server.schemas import HistoryItem, HistoryResponse, RevertRequest, RevertResponse
+
+logger = get_logger(__name__)
 
 router = APIRouter()
 
@@ -31,9 +34,13 @@ async def history(
     checkpointer = getattr(request.app.state, "checkpointer", None)
     if checkpointer is None:
         raise HTTPException(status_code=503, detail="CHECKPOINTER_UNAVAILABLE")
-    items = await _recall_exact.get_thread_history(
-        checkpointer, thread_id, keyword=keyword, limit=limit
-    )
+    try:
+        items = await _recall_exact.get_thread_history(
+            checkpointer, thread_id, keyword=keyword, limit=limit
+        )
+    except Exception as exc:  # 读失败 ≠ 没有历史：必须给两种读数（底线 7）
+        logger.warning("/history 读取失败 thread=%s: %s", thread_id, exc)
+        raise HTTPException(status_code=503, detail="HISTORY_READ_FAILED") from exc
     return HistoryResponse(
         thread_id=thread_id,
         count=len(items),

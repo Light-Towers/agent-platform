@@ -134,10 +134,15 @@ class HealthResponse(BaseHealthResponse):
     cost_governance: bool = Field(False, description="CostGovernance 是否已装配")
     forensic: bool = Field(False, description="轨迹/取证存储（trajectory_store）是否已装配")
     # 语义检索真值灯：backend 为实际类型名，real=False 即"退化成按字面比对"（MockEmbedder）。
+    # 覆盖面必须写清：本灯描述的是 RAG/记忆检索这条 resolve_provider() 路径；
+    # 意图路由（agent_core.intent.classifier）自己 `LocalEmbedder()` 直连，既不看
+    # EMBEDDING_MODE 也不受 EMBEDDING_REQUIRE_REAL 约束，失败静默降级关键词规则 ⇒ 不在本灯覆盖内。
     embedding_backend: str | None = Field(
-        None, description="启动期预热得到的 embedder 实际类型名（LocalEmbedder/RemoteEmbedder/MockEmbedder/unknown）"
+        None,
+        description="启动期预热得到的 embedder 实际类型名（LocalEmbedder/RemoteEmbedder/MockEmbedder/unknown）；"
+                    "仅描述 RAG/记忆检索路径，不含意图路由的本地模型路径",
     )
-    embedding_real: bool = Field(False, description="语义检索是否真在算（False=MockEmbedder 字面比对）")
+    embedding_real: bool = Field(False, description="RAG/记忆检索是否真在算语义（False=MockEmbedder 字面比对）")
     planner: str | None = Field(None, description="当前执行路径（默认 deterministic）")
     guard_enabled: bool = Field(False, description="输入护栏（PII/injection）是否打开")
     auth_enabled: bool = Field(False, description="接口是否要求 X-API-Key（不回显密钥）")

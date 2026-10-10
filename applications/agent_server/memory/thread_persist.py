@@ -1,7 +1,7 @@
 """对话线程历史持久化（Phase 3c）：Planner 路径下 checkpoint 的读/写。
 
 Planner 协议中立（不持有 LangGraph 依赖），对话历史的线程语义由 app 层承担：
-- 读：``checkpointer.alist_messages(thread_id)`` → ``PlannerContext.messages``
+- 读：``checkpointer.aget_tuple(...)`` → ``channel_values.messages`` → ``PlannerContext.messages``
   （供 compaction / 多轮上下文；与 graph.astream 的 checkpoint 恢复行为等价）；
 - 写：执行后把 (question, answer) 一轮追加回 checkpoint（``aget_tuple`` 模板 + ``aput``），
   保持 /history 与 revert 语义不回退（graph 保留为 general_qa Skill，checkpoint 格式同构）。
