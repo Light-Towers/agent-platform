@@ -5,9 +5,9 @@
 - 精确回忆（本模块）：按会话标识 ``thread_id`` 精确定位某次对话的真实内容，
   支持关键词过滤，返回逐条原文。用于「找到我之前某次聊天里具体说了什么」。
 
-复用 LangGraph ``AsyncPostgresSaver`` 的 ``alist_messages`` / ``aget_thread_state``
-（内核 ``get_checkpointer`` 工厂产出，已在 ``app.state.checkpointer`` 挂载）。
-本模块零依赖内核契约扩展，仅消费其返回的消息对象。
+读侧走 LangGraph checkpointer 的稳定接口 ``aget_tuple`` + ``channel_values.messages``
+（与 ``thread_persist.read_thread_messages`` 同一姿势，内核 ``get_checkpointer`` 工厂产出的
+``InMemorySaver`` / ``AsyncPostgresSaver`` 都支持）。
 """
 
 import logging
@@ -58,16 +58,21 @@ async def get_thread_history(
     - ``keyword`` 非空时仅保留 content 含该子串的消息（精确匹配，非语义）。
     - ``limit`` 限制返回条数（取最后 N 条）。
     返回 ``[{index, role, content, id, created_at}, ...]``。
+
+    **读取失败一律上抛，不在这里吞**：曾经这里是 ``except Exception → return []``，
+    而 ``alist_messages`` 在两种 checkpointer 上都不存在 ⇒ AttributeError 被盖成
+    「空历史 + HTTP 200」，接口永远成功、永远为空。方案见
+    ``docs/plans/plan-history-read-uses-nonexistent-checkpointer-api-2026-10-10.md``。
+    「这个会话确实没说过话」与「读不出来」必须是两个读数（底线 7：不拿空数组冒充没有历史）。
     """
     if checkpointer is None:
         return []
-    try:
-        msgs = await checkpointer.alist_messages(
-            {"configurable": {"thread_id": thread_id}}
-        )
-    except Exception:
-        logger.exception("精确回忆：读取 thread=%s 历史失败", thread_id)
+    latest = await checkpointer.aget_tuple(
+        {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}}
+    )
+    if latest is None:
         return []
+    msgs = latest.checkpoint.get("channel_values", {}).get("messages", []) or []
 
     records = [_message_to_record(m, i) for i, m in enumerate(msgs)]
     if keyword:

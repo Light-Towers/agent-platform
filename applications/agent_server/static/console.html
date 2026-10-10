@@ -136,7 +136,9 @@ function renderStatusEvent(payload) {
     }
     box.appendChild(list);
   } else {
-    box.appendChild(el("div", "tag", "本次没有能力调用被记录（未走受控执行边界）"));
+    // status 只在受控执行边界内发出（被拦下那条短路径根本不发 status），
+    // 所以 steps 为空只说明「本轮没有能力级步骤」，不能据此断言"没走边界"。
+    box.appendChild(el("div", "tag", "本轮没有能力调用步骤（未走 delegate 的路径下为空属正常）"));
   }
   $("timeline").appendChild(box);
 }
