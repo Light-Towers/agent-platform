@@ -53,6 +53,16 @@ DATABASE_URL= uvicorn agent_server.main:app --port 8000  # 零依赖冒烟
 
 **文档防漂移**：`scripts/check_doc_sync.py` 在 CI 单独跑（非 `make lint`），校验 AGENTS.md/ARCHITECTURE.md/README.md 的目录与文件引用路径存在 + Makefile session 数一致（CHANGELOG 是历史快照，故意不校）。改目录结构后须保证其通过。**存在性判定基准 = 版本控制清单（`git ls-files`），不是本机文件系统**：本机工作区有整片 gitignored 目录，以 FS 为基准会把「文档引用只在本机存在的路径」喂成绿（2026-10-04 实踩，由 CI 而非本机发现）；取不到清单则 fail-closed 报红，不退回 `Path.exists()`、无旁路开关、无白名单。⇒ 要写「本机才有、不入库」的目录，用**不带反引号的普通文本**。方案：`docs/plans/plan-doc-sync-tracked-scope-2026-10-04.md`。
 
+## 内网测试环境 126（<internal-host>）
+
+> 环境事实基线 + 可复核取证命令见 `docs/operations/env-126-inventory.md`。上 126 前先记住六条容易踩死的差异：
+> 1. **代码进来的通道是 `git bundle` + `scp`，不是 git push**（126 从未被推送过、无 hook、恒为 detached HEAD）。改完代码若未走 `deploy/k8s/scripts/build.sh`（rev 门禁）+ `distribute.sh`，**跑着的仍是旧 rev**——宿主 checkout 的 rev ≠ 镜像内 `/srv/agent-platform/GIT_REV`。
+> 2. **宿主 Python 3.10 + 无 uv** ⇒ 126 上 `uv run ...` 与项目测试**在宿主均不可执行**；宿主只能用 /usr/bin/python3 -B 跑单文件/只读脚本。两份项目 .venv（6.4G）的 bin/python 是指向 /usr/local/bin/python3 的断链——**因为 venv 建在容器内**：依赖树 454 包完整在位，用 ap-test-base / python:3.11-slim 容器 bind 该目录即可直接跑，**不要重装依赖**（补跑路径见 `docs/operations/testing-playbook.md` 第 4 层）。
+> 3. **双运行时两套镜像库**（docker moby 与 k8s 专用 containerd-k8s）互不可见、节点间不共享，导入须显式 `--address`。
+> 4. **存在第二条代码通道**：knowledge-service 侧有 /root/redeploy.sh 一类 `docker cp` + `sed -i` 直接覆盖容器内文件、不经 git ⇒ 线上代码会与仓库漂移。但**“漂移多少项”不是债**：md5 比对只给差异数（KS 侧 236 个 .py 中 74 个与仓库不同），mtime 只能分离“镜像自带 vs 事后热改”（8 个），**两者都答不了“线上这份内容丢了吗”**。答得了的是三步：`docker diff` 取权威热改清单（可写层 vs 镜像层，不靠推断、不漏非 .py 与删除项）→ `git hash-object`（**不带 `-w`**）得容器版 blob OID → `git cat-file -t` 判是否曾入库（命中 = 只是镜像旧，`git log --find-object` 直接告诉你哪个 commit）。2026-10-10 实测结论：8 个热改文件 = 5 个已入库 + 3 个被 HEAD 取代的 eval 草稿，**无一需救回**；真正的债是**线上 `import_router.py` 缺 3 项已入库修复**（`resolve_server_tenant` 租户注入 / `asyncio.to_thread` / MinIO fail-fast）⇒ **KS 镜像重建+分发是当前首要待执行项**，而非逐文件回写。
+> 5. **改 ConfigMap 的 LLM_* 不会生效**：线上 deployment 把 `LLM_BASE_URL/LLM_MODEL/LLM_FALLBACK_MODEL` 写成了字面值（仓库两个 rev 的 manifest 均为 `configMapKeyRef` ⇒ 属运行时改写），CM 里这三个是死键。改写者就是本项目自己：`deploy/k8s/VERIFICATION.md` §C 记录了 `kubectl set env`（一次性现场覆盖、忘记回写 manifest），deployment `last-applied-configuration` 注解仍为 CM 引用而 LIVE 为 `value:` 可证非 `kubectl apply`。**遇到“线上与 manifest 不一致”先查仓库自己的部署记录，再怀疑外部改动**。embedding 口径：**平台侧无 `EMBEDDING_MODE`/`EMBEDDING_API_KEY` ⇒ 实际跑 MockEmbedder**；`local` 不可用只是 `agent-platform:dev` 镜像裁剪（无 torch/sentence_transformers），**KS 镜像支持 local**，且同一 KS 镜像跑着两种 mode（web=api、rageval-eval=local）。
+> 6. **milvus 会随宿主磁盘 IO 抖动自行退出**：etcd `slow fdatasync` → lease 保活失败 → milvus 主动 exit（共 15 次）。看到 `ExitCode=0` + `OOMKilled=false` **不要当成人为 `docker stop`**，先取停机前 60s 的 `docker logs --since/--until` 窗口并全栈比 `RestartCount`（只有单容器有 rc ⇒ 非栈级操作）。pod 那次 137 同理：是外部依赖断连（postgres DNS + OTLP no route）导致优雅关闭超时被 SIGKILL，非应用崩溃。根因已查到顶：单盘 `vda` **ROTA=1** + 常态化 IO stall（`slow fdatasync` 自 09-20 起 953 条且**每天都有**）+ Ubuntu 默认 `apt-daily*`/`e2scrub_all` 定时器放大，而 etcd **无任何 blkio 隔离**。判“介质慢 vs 一次性事件”用 `cat /proc/pressure/io`（avg10 即“此刻” stall%）+ 按天计数，比事后日志强。
+
 ## 技术栈
 
 - Python 3.11+（所有包的 `requires-python` 均为 `>=3.11`）
