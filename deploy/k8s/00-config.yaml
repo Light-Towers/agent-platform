@@ -10,11 +10,20 @@ kind: ConfigMap
 metadata:
   name: agent-platform-config
   namespace: agent-platform
+# LLM_* 三键 2026-10-10 按「清单与线上一致化」回填为 126 在跑容器 env 的实测值。
+# 此前此处是 api.openai.com/v1 + gpt-4o-mini（死键）：线上被 kubectl set env 改成字面值后
+# 无人回写，任何人一次 kubectl apply 就会把国外模型地址注回线上、模型当场不可用。
 data:
-  LLM_BASE_URL: "https://api.openai.com/v1"
-  LLM_MODEL: "gpt-4o-mini"
-  LLM_FALLBACK_MODEL: "gpt-4o-mini"
+  LLM_BASE_URL: "https://api-inference.modelscope.cn/v1"
+  LLM_MODEL: "deepseek-ai/DeepSeek-V4.1-Flash"
+  LLM_FALLBACK_MODEL: "deepseek-ai/DeepSeek-V4.1-Flash"
   EMBEDDING_MODEL: "bge-small-zh"
+  # OTEL_* 是本应用自定义的键名（非 OTel 官方 OTEL_* 语义），线上已在跑但清单从未声明。
+  OTEL_ENABLED: "true"
+  OTEL_EXPORTER: "otlp"
+  OTEL_SERVICE_NAME: "agent-platform"
+  # 端点只能写宿主 IP：Jaeger all-in-one 是以 docker 跑在 126 宿主的容器，不在集群内（见 deploy/k8s/VERIFICATION.md）。
+  OTEL_ENDPOINT: "http://<internal-ip>:4318/v1/traces"
 ---
 apiVersion: v1
 kind: Secret
@@ -22,6 +31,13 @@ metadata:
   name: agent-platform-secrets
   namespace: agent-platform
 type: Opaque
+# ⚠ apply 本对象前必读：stringData 是整体覆盖，不是按键合并。
+#   模型/入站凭据（LLM_API_KEY、API_KEY）不住在这里——它们在集群单独建的 `observability-keys`
+#   对象里（真实密钥不入库），本文件也不该出现它们的任何值。
+#   若 126 的 pg 口令与这里的 demo 值不同，整片 apply 会把口令换回 demo 值 ⇒ 应用连不上库。
+#   动完整对象前先比对：
+#     kubectl -n agent-platform get secret agent-platform-secrets -o json | jq -r '.data|keys[]'
+#     kubectl -n agent-platform get secret observability-keys     -o json | jq -r '.data|keys[]'
 stringData:
   POSTGRES_PASSWORD: "agent_platform_dev"
   # 与 compose 的 DATABASE_URL 同构：user=agent / db=agent_platform / svc 名 postgres

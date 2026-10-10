@@ -20,7 +20,13 @@ COPY applications/agent_server ./applications/agent_server
 # [tool.uv.sources] workspace=true 仅 uv 能解析；普通 pip 会误当 PyPI 包去下载。
 # 故在同一安装事务中把本地路径一并传入，让 pip 识别为已满足的依赖。
 # 注：pip 不认 [tool.uv.sources] workspace=true，故需显式传入本地路径。
-RUN pip install --no-cache-dir ./packages/agent-core ./packages/shared-schemas ./packages/agent-runtime ".[otel]"
+#
+# 本地语义模型（EMBEDDING_MODE=local）依赖：
+# 1) extra 挂在 agent-core 上，不是根包 —— 写成 ".[otel,memory-embed-local]" 时 pip 只对未知
+#    extra 告警并继续，构建照样绿、镜像里却没有 sentence_transformers，属静默丢失（2026-10-10 实测）。
+# 2) torch 先从 CPU 索引装：否则 sentence-transformers 拉的是 CUDA 轮，白背 ~2G 且 Pod 内无 GPU可用。
+RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
+RUN pip install --no-cache-dir "./packages/agent-core[memory-embed-local]" ./packages/shared-schemas ./packages/agent-runtime ".[otel]"
 
 # 构建源 git rev 绑定（观测方案 §3.5，解 R14「验证对象与提交不一致」/126 假同步事故）：
 # 构建脚本传 --build-arg GIT_REV=$(git rev-parse HEAD)，写入 OCI label + 容器内文件，
