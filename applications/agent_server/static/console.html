@@ -103,8 +103,23 @@ function apiKey() { return $("key").value.trim(); }
 function authHeaders() {
   const h = { "Content-Type": "application/json" };
   const k = apiKey();
-  if (k) h["X-API-Key"] = k;
+  if (k) {
+    // HTTP 头值只允许 ISO-8859-1：粘进中文密钥时 fetch 在**发出请求之前**就抛浏览器内部异常
+    // （实跑读数："Failed to read the 'headers' property from 'RequestInit': String contains
+    // non ISO-8859-1 code point"），使用者看到 JS 术语而不是"密钥不对"。先挡一道，给一句人话。
+    if (!/^[\x20-\x7E]*$/.test(k)) {
+      throw new Error("接口密钥含非 ASCII 字符（HTTP 请求头不允许），请确认粘贴的是密钥本身而不是中文说明");
+    }
+    h["X-API-Key"] = k;
+  }
   return h;
+}
+
+// fetch 失败时浏览器只给术语（TypeError: "network error" / "Failed to fetch"），
+// 使用者需要的是"连不上/服务中途断了"这句话（实跑：提问中途 kill 服务 → 原文是 network error）。
+function failText(e) {
+  if (e instanceof TypeError) return "连接失败或服务中途不可用（请求未能完成）";
+  return e.message;
 }
 
 function clearTimeline() {
@@ -186,7 +201,21 @@ async function ask() {
       body: JSON.stringify({ query: question, session_id: "console" }),
     });
     if (!resp.ok) {
-      addTimeline("error", "接口返回 " + resp.status + "：" + (await resp.text()));
+      // 状态码原样报，原因优先取服务端统一信封里的 detail（不给使用者看裸 JSON 串）
+      const raw = await resp.text();
+      let why = raw;
+      try {
+        const j = JSON.parse(raw);
+        if (j.detail) why = typeof j.detail === "string" ? j.detail : JSON.stringify(j.detail);
+      } catch (e) {
+        // 不是 JSON 就原样给，别把真实读数编成好看的
+      }
+      if (resp.status === 401) {
+        addTimeline("error", "接口返回 401：密钥未填或不正确（服务端：" + why + "）");
+        $("headMsg").textContent = "";
+        return;
+      }
+      addTimeline("error", "接口返回 " + resp.status + "：" + why);
       $("headMsg").textContent = "";
       return;
     }
@@ -231,7 +260,7 @@ async function ask() {
     });
     $("headMsg").textContent = "";
   } catch (e) {
-    addTimeline("error", "请求失败：" + e.message);
+    addTimeline("error", "请求失败：" + failText(e));
     $("headMsg").textContent = "";
   } finally {
     state.running = false;
@@ -268,7 +297,7 @@ async function loadLights() {
     L("过程档案", d.forensic, false, d.forensic ? "已装配" : "未装配");
     $("headMsg").textContent = "状态更新于 " + new Date().toLocaleTimeString();
   } catch (e) {
-    ul.appendChild(el("li", "lamp off", "状态读取失败：" + e.message));
+    ul.appendChild(el("li", "lamp off", "状态读取失败：" + failText(e)));
   }
 }
 
@@ -291,7 +320,7 @@ async function loadHistory() {
     }
     if (!(d.items || []).length) box.appendChild(el("div", "tag", "该会话桶下暂无已落库的对话原文"));
   } catch (e) {
-    box.appendChild(el("div", "hitem", "历史读取失败：" + e.message));
+    box.appendChild(el("div", "hitem", "历史读取失败：" + failText(e)));
   }
 }
 

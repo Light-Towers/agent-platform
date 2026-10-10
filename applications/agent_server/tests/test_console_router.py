@@ -104,6 +104,18 @@ class TestReadOnlyConstraint:
 
 
 class TestNoNewDataEndpoint:
+    def test_error_paths_speak_plain_words_not_browser_jargon(self):
+        """三条失败路径都要先挡/先翻译，再给使用者看（全部在浏览器里实跑过）：
+        - 密钥含非 ASCII：HTTP 头只允许 ISO-8859-1，浏览器会在**发出请求前**抛
+          "Failed to read the 'headers' property from 'RequestInit'"，必须本地挡掉；
+        - 网络断开/服务中途不可用：fetch 抛 TypeError，原话是 "network error"；
+        - 其余错误经 failText() 归一，三处渲染点不得绕过它。
+        静态断言只保证这道防线还在，行为由浏览器实跑为凭。
+        """
+        code = _code_of(TestClient(app).get("/console.html").text)
+        assert "非 ASCII" in code, "缺少密钥字符集前置校验（会漏出浏览器术语）"
+        assert code.count("failText(e)") >= 3, "错误渲染点未全部经 failText 归一"
+
     def test_console_router_exposes_only_the_shell_path(self):
         """控制台不许新开返业务数据的口（恒等性约束）。"""
         paths = {(r.path, tuple(sorted(r.methods))) for r in console_router.router.routes}
