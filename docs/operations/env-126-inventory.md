@@ -104,6 +104,21 @@
 - build.sh：`git rev-parse HEAD` 与入参 expected-rev 不等即 exit 2；构建后从镜像内 /srv/agent-platform/GIT_REV 文件 + OCI label **双通道回读**，防"假同步"。
 - distribute.sh：`docker save | gzip` → scp 到 125/241（WORKER_USER=root）→ `ctr --address /run/containerd-k8s/containerd.sock -n k8s.io images import` → crictl 核对；126 本机也导入一次。**这解释了 agent-platform:dev 为何同时存在于 moby 与 k8s.io 两侧且同 ID（f37bcdb1ed7a）。**
 
+### 2.8 本机侧通道可达性判据（2026-10-10 实踩，写下来是为了下次别当成"126 宕机"）
+
+本机与 `192.168.100.0/24` **不同网段**（本机在 192.168.102.0/24），去 126 靠内网隧道；隧道一断，症状与"126 挂了"完全一样，所以按下面这套读，别凭一条命令下结论：
+
+| 读数 | 含义 |
+|---|---|
+| `ssh root@192.168.100.126 hostname` → `connect … port 22: Connection timed out` | 唯一有决定性的"通道不可用"信号（这才是排期前置，见 AGENTS.md 六条差异第 1 条相关纪律） |
+| `ipconfig` 里 `OpenVPN TAP-Windows6` / `OpenVPN Data Channel Offload` = **Media disconnected** | 本机侧隧道未连 ⇒ 断点大概率在我这边 |
+| `tracert -h 6 192.168.100.126`：hop1 = 192.168.102.1 通，hop2 起全 `Request timed out` | 报文出不了本机所在 LAN 的路由器，**没有进入 100 网段** |
+| `ping 192.168.100.1` 有回复（TTL=255、<1ms）而 `.125/.126` 100% loss | **红鲱鱼**：ARP 表无该条目、本机也无 100.x 接口 ⇒ 应答者是 LAN 路由器的另一侧地址，不代表 100 网段可达 |
+| `Test-NetConnection -Port 22` = False | 只在你已经知道其它读数时才有意义；单独一条 False 与单独一条 True 都不含信息 |
+
+**严谨边界**：从本机**无法区分**"我的路由/隧道断了"与"126 或整个集群真的停了"——两者的报文表现相同。要判开必须换一条不依赖该隧道的观察面（另一台已在 100 网段的机器、或集群侧带外）。恢复隧道属改用户本机网络，**不自动执行，先征询**。
+
+
 ## 3. 宿主解释器与工具链（决定"能在 126 上怎么测"）
 
 | 项 | 实测（e12 [9] / e13 [11]） | 影响 |
