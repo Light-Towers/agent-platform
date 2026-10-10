@@ -239,7 +239,44 @@ class DeterministicPlanner(Planner):
                     facts = await extract_memory_facts(runtime.llm, question, answer)
                 await remember(runtime.pool, workspace_id, f"Q: {question}\nA: {answer}", facts=facts, tenant_id=plan.tenant_id)
                 await maybe_consolidate(runtime.pool, workspace_id, tenant_id=plan.tenant_id)
+            yield StreamEvent(type="status", payload=self._status_payload(runtime))
             yield StreamEvent(type="answer", payload={"text": answer})
+
+    @staticmethod
+    def _status_payload(runtime: PlannerRuntime) -> dict:
+        """过程明细 payload：只搬平台自己已经记下的真实数值，不新造、不外发原文。
+
+        刻意不含的三类字段（各有原因，勿"顺手补上"）：
+        - ``args`` / ``result``：资料原文不得进对外推送（1.2 基线 4）。
+        - ``error`` 文本：异常原文属内部细节，只报成/败布尔。
+        - 费用：内核无模型定价表，``cost_used`` 恒为 0——报 0 会被读成"平台算错了钱"，
+          而「没有的字段不显示」优先于「显示 0」；金额只看模型供应方账单页。
+        - 模型 / 提示词版本：默认路径这两栏无数据承载（注入的是 FallbackChatModel，
+          没有 ``model`` 属性；``StepForensic`` 亦无 ``prompt_version``），故只报技能与
+          工具版本指纹。
+        """
+        ctx = runtime.context
+        steps = []
+        if ctx is not None:
+            for s in ctx.steps:
+                forensic = s.forensic or {}
+                steps.append(
+                    {
+                        "index": s.index,
+                        "name": s.name,
+                        "latency_ms": round(s.latency * 1000, 1),
+                        "tokens": s.tokens,
+                        "failed": bool(s.error),
+                        "skill_name": forensic.get("skill_name"),
+                        "skill_version": forensic.get("skill_version"),
+                        "tool_name": forensic.get("tool_name"),
+                        "tool_version": forensic.get("tool_version"),
+                    }
+                )
+        return {
+            "tokens_used": ctx.tokens_used if ctx is not None else 0,
+            "steps": steps,
+        }
 
     async def _run_capability(
         self, plan: Plan, runtime: PlannerRuntime, workspace_id: str, question: str
