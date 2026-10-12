@@ -135,3 +135,29 @@ ERROR: Application startup failed. Exiting.
    `terminationGracePeriodSeconds: 60` 只是买时间，不是修复。
 8. **浏览器端未在今天复跑**：入站 `API_KEY` 在密钥泄漏事故后已轮换，旧值作废。页面链路此前的实跑证据属轮换前，
    demo 当天需由持键者现场重新输入。今天证的是 HTTP 面（同一批接口、同一 Pod）。
+
+## 8. 模型不可用会怎样（10:24–10:30，抽验动作第 4 条 + 基线 4）
+
+用**隔离探针 Pod**（同镜像、真密钥引用、`LLM_BASE_URL=http://model-unreachable.invalid/v1`——RFC6761 保留域，
+保证不可解析且不会真打到任何服务），线上端点全程未受影响。
+
+| 读数 | 值 |
+|---|---|
+| 对照请求（被拦截那句，不碰模型） | **1s** 完成，`cache_hit`→`done` |
+| 真问（模型不可用） | `http=200 bytes=929 time_total=12.79s`，curl rc=0 |
+| 事件序列 | `route{direct}` → `memory` → `evidence{count:0, preview:""}` → **`error{服务器内部错误，请稍后重试}`** → `done` |
+| 漂亮假答案判据 | 响应体里时间/数字型答案 **0 命中**（没编出"9:00–18:00"之类） |
+| 泄漏计数（对非空响应体） | Traceback / 绝对路径 / site-packages / `postgres://` / `password` / **三个密钥的实际值子串** / 内部主机名与 PodIP ⇒ **9 项全 0** |
+| 服务端日志同期 | 完整 traceback：`openai.APIConnectionError` → `agent_core/llm/fallback.py:154` 主备都失败 → `langchain_openai ... OpenAIConnectionError` ⇒ 对外脱敏、对内留详情，**两边都有读数** |
+
+⇒ **基线 4（出错不泄内部细节）** 与 **抽验动作 4（模型不可用不许输出漂亮假答案）** 在本次失败形态上成立。
+边界见手册 §5 第 4 行与 §6.2 第 2 条：未证"未捕获异常导致的真 5xx"，且探针用 `EMBEDDING_MODE=mock` 与线上不同构。
+
+**r12 那一轮是错的，留在这里因为它顺手抓到了更值钱的东西**：探针没设 `HF_HUB_OFFLINE`，于是 260s 的
+0 字节根本不是在测模型——是意图路由旁路在请求路径上实例化 `LocalEmbedder` 并回连 huggingface.co
+（`[Errno 101] Network is unreachable` + `Retrying 1/5…3/5`，每次 HEAD 约 60s）。**配置明确写了
+`EMBEDDING_MODE=mock`，代码照样去加载本地语义模型** ⇒ 这是"旁路"缺陷第一次在运行现场成立（不是读代码推的），
+读数与影响面已回写 `docs/plans/plan-intent-embedder-bypasses-provider-2026-10-10.md` §5。
+我自己这一轮的取证纪律教训：`curl -s` 会把"客户端自己超时"吞掉，而 `curl -o` 在收到 0 字节时**不建文件**——
+所以上一版报的 `LEAK_OK` 是在一个不存在的文件上数出来的 0，属假证据。本轮改用 `-sS` + `http_code/time_total`
++ 先 `: > file`，并在响应体为空时**显式拒绝产出结论**。

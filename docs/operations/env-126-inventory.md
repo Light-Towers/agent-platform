@@ -494,6 +494,28 @@ git -C /opt/agent-platform show HEAD:<repo_path> > /tmp/h.py   # 再 diff：+ �
 > 反过来说，若 `vs HEAD` 的 `-` 侧是已入库的修复（本例 `resolve_server_tenant`/`asyncio.to_thread`/MinIO fail-fast），
 > 那真正的风险是**线上缺修复**，而不是"线上有野代码"——两者的处置完全不同，必须先分清楚。
 
+### 6.12 把"0 命中"当成证据之前，先证明被测请求真的跑到了那里（2026-10-12 实踩）
+
+同一轮里我连着造了两个**假绿灯**，形状值得记：
+
+```bash
+# 反例（上一版探针的写法）：报 LEAK_OK，其实数的是不存在的文件
+curl -s -N --max-time 150 -o /tmp/body.txt ... POST /query
+grep -c Traceback /tmp/body.txt        # → "grep: 没有那个文件"，被 tail 吞掉
+python3 -c 'print(len(open("/tmp/body.txt").read()))'  # 空体上任何计数都是 0
+```
+
+| 坑 | 为什么会骗人 | 正确写法 |
+|---|---|---|
+| `curl -s` | 把"我自己 `--max-time` 超时了"(rc=28) 和"服务端返回空"压成同一个观感 | 用 `-sS` 或 `-w 'http=%{http_code} bytes=%{size_download} time_total=%{time_total}'`，**先确认请求真的完成了** |
+| `curl -o f` 收 0 字节 | **不创建目标文件** ⇒ 下游 grep/python 的 0 命中是"文件不存在"而不是"没内容" | 先 `: > f`；并在读取处显式判空 ⇒ 空体**拒绝产出结论**，而不是报 OK |
+| 探针与线上不同构 | 我漏了 `HF_HUB_OFFLINE`，260s 全被 huggingface.co 的重试预算吃掉，测的根本不是模型 | 探针要复刻线上开关集合；差异项（如 `EMBEDDING_MODE`）**写进结论的边界**而不是留成隐含变量 |
+| 退出码只看最后一个命令 | `bash -c` 串里前面失败会被后面的成功盖掉 | 关键步骤各自 `rc=$?` 记录并打印 |
+
+顺带这条才是本轮最值钱的收获：**探针规格写错并没有让结论变错，而是让结论变得没测到东西**——
+分辨这两种失败的唯一办法，是把服务端日志与客户端读数**同时**抓（`kubectl logs -f` 早于提问启动，
+探针删除即不可恢复）。
+
 ## 7. 待查项验证结果（原待拍板清单）
 
 | # | 原问题 | 结果 | 关键证据 | 剩余边界 |

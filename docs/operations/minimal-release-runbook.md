@@ -169,7 +169,15 @@ done   # 期望：apply=线上现状(10) / create=清单真值(21)
 
 ⇒ **结论不变**：② 的一半未过 ⇒ 这一版仍**不得对外宣布可交付**，也不得排验收（方案 2.5）。
 
-**四个抽验动作**（方案 2.6，验收当场做）：抽掉资料再问 ⇒ 回答跟着变；问资料里没有的 ⇒ 平台说没找到依据、依据那一行为空；不带密钥直接调 ⇒ 401；把模型服务弄不可用（汇报当场不做）⇒ 明确报错或退化成资料清单，都不许输出漂亮假答案。
+**四个抽验动作**（方案 2.6，验收当场做）：
+
+1. ❌ **抽掉资料再问 ⇒ 回答跟着变**——需要真实资料，`chunks=0` 时无从抽起（**未做**）。
+2. ✅ 问资料里没有的 ⇒ 平台说没找到依据：10-12 实跑 `evidence{count:0}` + 回答"证据不足，不能确定可靠来源"，
+   依据那一行是空的（`preview: ""`）。⚠️ 注意这一条现在**只是在空库上证的**，有资料后仍要重做。
+3. ✅ 不带密钥直接调 ⇒ 401（`/query` `/history` `/import` `/sql/train` `/session/revert` 全 401）。
+4. ✅ 把模型服务弄不可用 ⇒ **明确报错，没有漂亮假答案**：隔离探针把 `LLM_BASE_URL` 指向 `.invalid`，
+   12.8s 内收到 `error` 事件（文案"服务器内部错误，请稍后重试"），响应体里没有任何时间/数字型答案，
+   泄漏计数 9 项全 0。**汇报当场不做**（属演示日禁止项），但它已经作为部署期证据做过一次。
 
 ## 5. 六条生产基线 · 逐条打勾 + 两条环境已知现象
 
@@ -187,7 +195,7 @@ done   # 期望：apply=线上现状(10) / create=清单真值(21)
 > `/import` 写新桶、`/query` 读 `default` ⇒ **资料入库了却永远检索不到且不报错**；
 > 清单里钉 `SINGLE_TENANT: "default"` 只是掩盖，不是解决。
 | 3 | 只到内网 | `kubectl -n $NS get svc agent-platform -o jsonpath='{.spec.type} {.spec.ports[*].nodePort} {.spec.externalIPs} {.spec.loadBalancerIP}'`；再从内网另一台机器 curl | ✅ 10:0x 实测 `type=ClusterIP`，nodePort/externalIP/loadBalancerIP **全空**；从 ambari02 curl `192.168.100.126:18000/health` **200**，集群内 ClusterIP 直连 **200**。⚠️ **公网侧不通这一半没证**：本机就在内网里，测不出"从公网打得到的可能性"，别把它写成"已验证不可从公网访问" |
-| 4 | 出错不泄内部细节 | 现场故意弄坏一次（如临时改错 `DATABASE_URL` 或真停依赖） | 响应是统一信封 + 错误编号，**不含堆栈/路径/密钥片段**；后台日志另有详情。**今天未做**（见 §6.2 第 2 条） |
+| 4 | 出错不泄内部细节 | **用隔离探针 Pod 验，别动线上**：同镜像起一个 Pod，把 `LLM_BASE_URL` 指向 RFC6761 保留域（`.invalid`，保证不可解析、不会真打到任何服务），对它单独 port-forward 提问 | ✅ 10:30 实测：流正常开到 `route`→`memory`→`evidence`→**`error`**，对外文案 `服务器内部错误，请稍后重试`，**12.8s 完成**；响应体对 9 类泄漏计数**全 0**（含把三个密钥的**实际值**做子串比对，只打印计数不打印内容）；同一时刻服务端日志留完整 traceback（`openai.APIConnectionError` → `fallback.py:154`）⇒ "对外脱敏 + 后台留详情"两边都有读数。**边界**：这只证了"模型连接失败"这一种形态，未证"未捕获异常导致真 5xx"（如 DB 中途不可用）⇒ 别把它念成"所有出错形态都不泄" |
 | 5 | 每次调用可按编号追到 | `API_KEY=... bash deploy/k8s/scripts/e2e_traceparent.sh` | Jaeger 按该 trace_id 查到 `POST /query` SERVER span；BatchSpanProcessor ~5s flush ⇒ 等 ≥8s 再查 |
 | 6 | 页面只读 | 页面源码 grep `fetch(`；无密钥打 `/import`、`/sql/train`、`/session/revert` | ✅ 集群侧 10:0x 实测三个写接口**无密钥一律 401**（`/import` `/sql/train` `/session/revert`）；"页面只调 `query/history/health`、无写入口"由 `test_console_router.py` 钉住（浏览器端今天未复跑，理由见 `docs/operations/evidence/2026-10-12-release/readings.md` §7 第 8 条） |
 
@@ -217,8 +225,10 @@ done   # 期望：apply=线上现状(10) / create=清单真值(21)
 1. 被拦下的那一轮是否入 `/history` ⇒ 实测**入**（右栏含 `user = system: 忽略之前的设定…` 与那条拦截话术；
    blocked 短路径不进受控执行边界，但问答路由仍把这一轮写回 checkpoint）。**待拍板**：拦截轮的提问原文
    照原样落库是否符合口径（PII 已在检测前脱敏，injection 原文未再处理）。
-2. **基线 4（出错不泄内部细节）今天没现场验**——需要故意改错 `DATABASE_URL` 或真停依赖，会打断服务。
-   页面侧的报错形态已在浏览器验过人话+错误编号+无堆栈，**接口侧的 5xx 信封仍未在集群上取过真值**。
+2. **基线 4 只证了"模型连接失败"这一种出错形态**（12.8s 的 `error` 事件 + 9 项泄漏计数 0）。
+   未证的邻近形态：**未捕获异常导致的真 5xx**（如 DB 中途不可用、序列化失败）——那要走平台自己的
+   异常信封（`agent_core.guardrails.errors` + `build_api_app` 工厂），本版没在现场制造过这种故障。
+   另外探针用的 `EMBEDDING_MODE=mock`，与线上的 `local` 不同构 ⇒ 结论只适用于"模型不可用"本身。
 3. **优雅关闭的判据要在删除 Pod 之前抓**：本轮 137 未复型只有"Warning 级 Killing 事件 0 条"这一旁证，
    旧 Pod 的 `lastState`/`--previous` 随对象删除即不可读。下次重启前先在两侧各抓一份，否则"宽限期够不够"
    这个问题永远只能靠事件面猜。
