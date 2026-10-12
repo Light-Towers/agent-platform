@@ -12,7 +12,7 @@
 | 126 构建源 HEAD | 同上（`build.sh` rev 门禁通过，`dirty=no`） |
 | **Pod 内** `/srv/agent-platform/GIT_REV` | `db1a8b8477539af2af00e104e36317c159f19c39` ✅ |
 | 镜像内依赖 | `find_spec('sentence_transformers')=True`、`torch=True` ✅ |
-| 仓库本地 HEAD | `7d00ab3`（比线上只多一个**文档**提交）⇒ 代码面等价，下次上线仍重走通道 |
+| 仓库本地 HEAD（**取证时刻**） | `7d00ab3`，比线上只多一个**文档**提交 ⇒ 代码面等价。（本文件写成之后 HEAD 又前进了文档提交，故"当前差集"请按 `git log --oneline db1a8b8..HEAD` 现查，别引用这一行） |
 | 落点节点 | 第一版落 `<internal-host>`，重启后落 `<internal-host>`（两节点都需在位缓存与镜像） |
 
 同步通道：`git bundle` → 126 `git fetch` + `checkout` → `build.sh` → `distribute.sh`（containerd 隔离实例，
