@@ -263,7 +263,33 @@ Exited 未清理 5 个：ap-id2 / ap-iso-lean / ap-iso-test(1) / ap-iso-test2(13
 
 > ⚠️ 工具子命令缺失（同一根因：apt 版 docker CLI 只带最小子命令集）：`docker compose`、`docker builder du`、`docker buildx` **均不存在**；看构建缓存只能用 `docker system df -v` 的 Build cache 段。另 etcd 官方镜像**无 `sh`**，`docker exec knowledge-service-etcd sh -c …` 会直接 `executable file not found`。
 
+### 4.8 2026-10-12 复测读数（模型可用了、通道回来了，两条旧结论要改口径）
+
+| # | 读数 | 对旧结论的修正 |
+|---|---|---|
+| 1 | 用 Pod 内既有密钥真打 `POST /v1/chat/completions` → **HTTP 200**，`content` 有正常中文回答，`usage` 有 token 计量 | 2026-10-10 的 Gate 1 失败（403 要求邮箱验证）已解除 |
+| 2 | 响应 `message` 的键是 `['content','function_calls','reasoning_content','role','tool_calls']`，其中 **`reasoning_content` 长 219 字、`content` 长 52 字** ⇒ 这是推理型模型。**小预算下 `content` 会是空串**：`max_tokens=16` 时 HTTP 200、`completion_tokens=16`、`content=''`（16 个 token 全被推理吃掉） | 平台侧**没有**设 `max_tokens`（`agent/llm.py` 只设 `timeout`），所以链路本身不会撞上；但任何人给它加 token 上限都会静默得到空回答 ⇒ 记进运维手册 |
+| 3 | **exitCode 137 会复发**：Pod `Restart Count=1`，`Last State: Terminated 18:29:21 +0800`，`--previous` 尾部又是同一序列 —— `Failed to export spans batch due to timeout` → `failed to resolve host 'postgres'` → `Waiting for background tasks to complete` → 再次 export timeout | §4.7/G6 那条"已定性"从**一次性现象**升级为**周期性复发**（诱因是集群 DNS/网络抖动）。直接支撑 `plan-tracing-shutdown-flush-timeout-2026-10-10.md` 的选项 A：上界必须由代码给 |
+| 4 | 权重缓存分布：ambari03(126) `/opt/ap-models` = 184M 在位；**ambari02(125) 与 ambari01(241) 原为 CACHE_MISSING**，本轮已铺（同 184M、`chmod a+rX`） | 印证"本地语义模型的前提是缓存存在于 Pod 实际落到的节点"——Pod 当时在 ambari01 |
+| 5 | 三节点 `allocatable.memory` 均约 16Gi / 8 CPU ⇒ 新 `requests 1Gi / limits 2Gi` 放得下 | 消掉"上调到 2Gi 可能调度不开"的疑虑 |
+| 6 | `observability-keys` 现有两键：`LLM_API_KEY`(len=39) 与新增 `API_KEY`(len=32)；用 `kubectl patch --type merge --patch-file /dev/stdin` 补的单个键，**merge 后 LLM_API_KEY 完好** | 实证 `00-config.yaml` 里那条警告：整对象 apply 是覆盖，补键必须走 merge patch / 单键 apply |
+| 7 | `semantic_cache` 已有 2 行（v11 之前写的，`tenant_id` 由默认值补成 `''`）、`chunks=0`、`memories=0` | 资料尚未入库（底线 4 未达），缓存里是历史试跑留下的行 |
+
+**取证时的密钥卫生（本轮我自己踩了两次）**：`kubectl get secret -o custom-columns=KEYS:.data` 与
+`-o jsonpath='{.data}' | tr ... | sed 's/=.*//'` 都会把 **base64 值整片打到终端**（后者因 JSON 形制没被剥掉），
+等于把密钥写进会话记录。只取键名的正确姿势：
+
+```bash
+kubectl -n agent-platform get secret observability-keys -o json | python3 -c 'import json,sys; print(sorted(json.load(sys.stdin)["data"]))'
+# 需要确认值在不在位时只量长度，不回显：
+kubectl -n agent-platform get secret observability-keys -o jsonpath='{.data.LLM_API_KEY}' | base64 -d | wc -c
+```
+
+处置：那次外泄的 `LLM_API_KEY` 建议按正常密钥轮换流程作废；本轮生成的入站 `API_KEY` 第一把已作废并重生成（32 字节，未回显）。
+
 ## 5. 三份代码副本与运行 rev（最易踩的坑）
+
+
 
 | 位置 | rev | 角色 | 工作区 |
 |---|---|---|---|
