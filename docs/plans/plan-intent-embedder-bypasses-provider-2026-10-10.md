@@ -34,6 +34,22 @@
 - 已做（不改行为）：`/health` 两个字段的 description 里写清覆盖面与这条旁路；控制台页面上把"steps 为空"的文案从"未走受控执行边界"改成不越证的表述；本方案入库留档。
 - **未做**：不动 `classifier.py`、不加 `intent_router_backend` 字段、不改 `EMBEDDING_MODE` 语义 —— 全部等拍板。
 
-## 5. 待拍板
+## 5. 现场运行证据（2026-10-12 上线后补，比代码阅读强一级）
+
+探针 Pod = 同一镜像 `db1a8b8`，**`EMBEDDING_MODE=mock`**，未挂 hostPath。分两轮：
+
+| 轮 | 探针规格 | 结果 | 这条证明了什么 |
+|---|---|---|---|
+| r12 | `EMBEDDING_MODE=mock`，**未设** `HF_HUB_OFFLINE`/`TRANSFORMERS_OFFLINE` | `POST /query` **260s 内 0 字节**，curl rc=28 超时；服务端日志：`'[Errno 101] Network is unreachable' thrown while requesting HEAD https://huggingface.co/BAAI/bge-small-zh-v1.5/resolve/main/./modules.json` + `Retrying in 1s [Retry 1/5]`（每次 HEAD 约 60s 才失败，重试 5 次） | **配置说"用 mock"，请求路径仍然去实例化 `LocalEmbedder` 并回连 huggingface.co**。这不是静态推断，是被 `EMBEDDING_MODE` 明确设为 mock 之后现场发生的。`EMBEDDING_REQUIRE_REAL` 更管不到它——mock 后端本来就是"允许退化"的语义，而意图路由的退化走的是自己的 `except Exception` |
+| r13 | 同上，但设了 `HF_HUB_OFFLINE=1`+`TRANSFORMERS_OFFLINE=1`（并故意不给权重缓存） | 请求 **12.8s** 正常完成（离线加载快速失败 ⇒ 关键词降级），不再卡 260s | 旁路的代价**完全取决于有没有离线开关**：线上清单恰好设了 `HF_HUB_OFFLINE=1` ⇒ 快速失败；**一旦这个开关被摘掉或 Pod 落到缓存不全的节点，代价就变成"每次提问先卡几分钟"**，而灯上什么都看不出来（`embedding_real` 仍 true，因为它测的是 RAG/memory 那条 `resolve_provider()` 路径） |
+
+**这条把 §2 的严重度从"覆盖面被高估"提到"有可用性代价"**：被吞掉的不只是降级事实，还包括
+**外网不可达时的重试预算**，且发生在**请求路径**而不是启动路径（启动期的重活我们特意挪出 `/health`
+和 lifespan，旁路却把一次模型加载放回了请求路径上）。
+
+拍板时请一并回答：**r13 那种"快速失败→关键词降级"是接受的稳态，还是必须让意图路由也吃到
+`EMBEDDING_MODE`/`EMBEDDING_REQUIRE_REAL` 并把失败显式暴露成读数**（选项 A/B/C 见 §3，本轮仍未动手）。
+
+## 6. 待拍板
 
 ① 选 A / B / C；② 若选 A，mock 提供方下的意图路由是"允许降级但必须报状态"还是"直接拒绝启动"。
