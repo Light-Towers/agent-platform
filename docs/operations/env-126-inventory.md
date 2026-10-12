@@ -300,6 +300,8 @@ kubectl -n agent-platform get secret observability-keys -o jsonpath='{.data.LLM_
 | 4 | LocalEmbedder 常驻、无并发时 `memory.current=442Mi`、`kubectl top=441Mi`、`pid1 VmRSS=553Mi`；`cgroup memory.max=2147483648` | `requests 1Gi / limits 2Gi` 有实测依据（此前只有 CUDA 轮经验值），且限额真落到 cgroup |
 | 5 | `kubectl apply -f 20-agent-platform.yaml` 第一次被整份拒绝：`env[N].valueFrom: Invalid value: "": may not be specified when value is not empty` | 线上字面值 + 清单 `valueFrom` 的三方合并冲突。**拒得完整 ⇒ 无半生效、无中断**。解法（整 Pod 模板原子 replace）与前置闸见 `deploy/k8s/README.md` §6.1 与运维手册 §3.1 |
 | 6 | `kubectl apply --dry-run=client -o json` 对同一份清单返回 **10 项 env**（线上现状），`kubectl create --dry-run=client -o json` 返回 **21 项**（清单真值） | **`apply --dry-run` 不能当"期望值"来源**：它会与线上对象合并。预检脚本一旦拿它派生期望态，就会自己骗过自己 |
+| 7 | 12:10 收盘库里真值：`chunks` **93 行 / 3 文档**（35+30+28，`vector_dims=512`，退化向量 0 行）、`semantic_cache` 只留最新问答、`memories` 为当日测试产物 | §4.8 第 7 条那条 `chunks=0` 到此翻页：**pgvector 表真的有内容、真的被查得到**。问答链路用的就是这张表，不是 Milvus（见本节第 4 条与手册 §5） |
+| 8 | 磁盘从 `73% used（68G/26G avail）` 回到 `72%（67G/27G）` | 三个节点上本轮共产出的 451M×3 镜像 tarball 与 `/tmp` 自建脚本已清；改动前的 Deployment 对象**没有**当垃圾删，移到 `/root/ap-release-backup-20261012/`（回滚位不是垃圾） |
 
 ## 5. 三份代码副本与运行 rev（最易踩的坑）
 
