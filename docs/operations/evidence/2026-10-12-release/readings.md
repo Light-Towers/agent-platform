@@ -121,9 +121,12 @@ ERROR: Application startup failed. Exiting.
 
 ## 7. 今天仍然没证的事（不得被上面任何一节顺手盖过去）
 
-1. **底线 4 未满足**：`chunks=0`，三份真实资料仍未入库 ⇒ 检索那一行永远空，"资料真入库真被查"这一环**没证**。
-   已证的只是"证据为空时平台如实说为空"。不造数据。
-2. **问数未接线**：`sql_backend=none`，等库类型 + DSN。**MySQL 执行侧未支持** ⇒ 若答案是 MySQL，该环节当场取消。
+> **本节写于 10:00 左右**。其中第 1、2 条已被同日 11:55–12:10 的 **§9 闭合**（`chunks` 0→93、问数已接并逐行对账）。
+> 原文保留不删，是为了让"当时真实是什么状态"可查——**留档不是留给赢家看的**，改了才算撒谎。
+
+1. ~~**底线 4 未满足**：`chunks=0`~~ ⇒ **已闭合，见 §9**（93 块 / 3 文档，dim=512，退化向量 0 行，检索命中且答案可溯源）。
+2. ~~**问数未接线**：`sql_backend=none`~~ ⇒ **已闭合，见 §9**（清单补 `SQL_DSN` 后 `sql_backend=postgres`，
+   执行 SQL 的 35/30/28 与库内真值逐行一致；本版数据源是 postgres，MySQL 那颗雷不涉及）。
 3. **意图路由仍无真值灯**：`agent_core/intent/classifier.py` 直连 `LocalEmbedder()`，不看 `EMBEDDING_MODE`、
    不受 `EMBEDDING_REQUIRE_REAL` 约束、异常被宽 except 吞掉。本轮镜像里 ST 已在位 ⇒ 它**不再必然**走关键词降级，
    但没有任何读数能证明它这次到底走了哪条。方案 `plan-intent-embedder-bypasses-provider-2026-10-10.md` **待拍板**。
@@ -161,3 +164,45 @@ ERROR: Application startup failed. Exiting.
 我自己这一轮的取证纪律教训：`curl -s` 会把"客户端自己超时"吞掉，而 `curl -o` 在收到 0 字节时**不建文件**——
 所以上一版报的 `LEAK_OK` 是在一个不存在的文件上数出来的 0，属假证据。本轮改用 `-sS` + `http_code/time_total`
 + 先 `: > file`，并在响应体为空时**显式拒绝产出结论**。
+
+## 9. 语料入库、抽验①与问数（11:55–12:10，需求方拍板口径后）
+
+**上线坐标（两个，别只记一个）**：镜像内 `GIT_REV=db1a8b8`（代码，未重建）；Pod 模板来自清单 rev
+`e07e518`（本轮只加 `SQL_DSN` 一个 env，走 bundle→checkout→apply，**没有**用 `kubectl set env` 就地改）。
+
+| 项 | 读数 |
+|---|---|
+| 入库 | `/import` 三份平台正式文档：ADR-0004 → 35 块、ADR-0006 → 30 块、ADR-0007 → 28 块，**合计 93 块 / 3 文档** |
+| 向量真伪 | `max(vector_dims)=512`；`count(*) FILTER (WHERE embedding <=> embedding > 0.0001)=0` ⇒ **没有退化向量**（那是 MockEmbedder 的指纹） |
+| 落位 | `tenant_id=default`、`workspace_id=default`（与检索侧默认值同源，`state.py:35-36`） |
+| 检索层独立验证（绕开路由直接 cosine） | top-5 = 0007 §7.2(0.5682)、0007 §3(0.5661)、0007 §4(0.5586)、0006 §5(0.5529)、0006 §2.2(0.5483) ⇒ **正确文档排第一** |
+| 底线 4 | ✅ 达成（此前 `chunks=0`） |
+| 抽验① V0 | 语料齐、缓存与记忆清空 ⇒ `evidence` 来源 `0004-typed-memory-kernel.md / 背景`，答案给出 `app/memory/memory_backend.py::recall_typed`（优化 H，仅 app 可用） |
+| 抽验① **V1** | `DELETE FROM chunks WHERE source='0004…' => rowcount 35`，再清 `semantic_cache`+`memories` ⇒ 依据只剩 0006，回答塌成 **"证据不足，无法回答该问题"**，并点名剩余片段只覆盖隔离维度。**没有编造** ⇒ 底线 5 同时被这条加强 |
+| 抽验① V2 | 重新 `/import` 同一文件（新 `doc_id=3f9fbcd6224f`）⇒ 有据回答恢复、chunks 回 93 |
+| 问数 | `/sql/train` → `{"ddl_stored":true,"doc_stored":true}`；提问路由 `capability=sql, reason=命中数据查询特征词`，执行 `SELECT doc_id, COUNT(*) AS chunk_count FROM chunks GROUP BY doc_id ORDER BY chunk_count DESC LIMIT 100` ⇒ 35/30/28，**与库里真值逐行一致**；`status.steps[0]={name:sql, latency_ms:5110.7, tokens:576, failed:false}` |
+| 验收第二遍 | 11:55 与 12:0x 两轮独立跑（不同 session_id、每轮前清缓存/记忆），三条知识问 + 一条问数，读数一致 ⇒ 方案 2.6 的"两遍"成立 |
+
+**两处我自己的错，留在这里因为它们是过程证据**：
+
+1. `r17`：`AP_WRITE="DELETE…" kubectl exec -i POD -- python -` —— **`kubectl exec` 不透传调用方环境变量**，
+   必须写在容器内侧（`-- env VAR=… python -`）。结果那轮三条 DELETE 一条都没执行，而"重新入库"变成追加，
+   把 0007 顶到了 56 块（同一内容两个 `doc_id`）。发现方式是输出里**没有** `[执行写] rowcount` 这一行。
+   脏数据已在 `r18` 第一步清掉（`DELETE … doc_id='3962e6a483c3' => rowcount 28`，回到 35/30/28）。
+2. `r19`：抽掉 ADR-0004 后回答仍然正确，我差点判成"抽验失败"。答案自己写着"**按历史记忆中的文档条目**"——
+   是 `memories` 表（`agent/graph.py:192` 每轮写 `Q:…\nA:…`）在复述刚才的答案，与语料无关。
+   清掉 `memories`（本轮删了 17 行，全是今天测试产生的）之后 V1 才出现"证据不足"。
+   **⇒ "0 变化"和"没变化"是两件事，得先排除回放源。**
+
+**今天顺带抓到的新缺陷（不修，已出方案待拍板）**：`agent/router.py:63-76` 的确定性路由是纯关键词包含，
+`rag` 特征词表没有"为什么"这类因果问法 ⇒ "为什么没配置单租户声明会拒绝启动"被路由到 `direct`，
+**evidence=0，检索器根本没被问**；同一句改成"根据文档，……"就 evidence=4。
+方案与验收见 `docs/plans/plan-router-keyword-gate-hides-corpus-2026-10-12.md`。
+
+## 10. 收盘状态（12:10）
+
+- Pod `agent-platform-56db955b8b-*`，1/1 Running，`restarts=0`，`/health` 全绿且 `sql_backend=postgres`；
+- 库内：`chunks=93`、`semantic_cache` 只留最新问答、`memories` 为今天测试产物（可清）；
+- `/tmp` 本项目产物已清零；改动前的 Deployment 对象在 `/root/ap-release-backup-20261012/`；
+- 探针 Pod（`identity-guard-probe`/`llm-failure-probe`）全部删除，18100 已释放，18000 正常服务。
+
