@@ -152,7 +152,17 @@ unset v   # 值只在终端与集群里，勿写进任何文件、脚本、命�
 for n in ambari03 ambari02 ambari01; do
   ssh root@$n 'ls -d /opt/ap-models/hf-cache/hub/models--BAAI--bge-small-zh-v1.5 || echo MISSING_ON '"$n"
 done
-# ④ apply 后读回（"同步了"不等于"上线了"）
+# ④ apply 20-agent-platform.yaml：**会撞 literal→reference 冲突**（2026-10-12 实踩）。
+#    线上 LLM_*/OTEL_* 是字面 value:，清单同项是 valueFrom: ⇒ 三方合并后两者共存 ⇒ API
+#    拒整份 Deployment（`env[N].valueFrom: Invalid value: "": may not be specified when value is not empty`）。
+#    拒得完整 ⇒ 无半生效、无中断。**别用"先 set env X- 再 apply"**：那会先滚出一个没有
+#    LLM_BASE_URL 的版本，起来即退回镜像默认的国外地址。正确姿势 = 整 Pod 模板一次原子替换，
+#    配方与前置闸（线上独有字段差集必须逐个可解释）见 docs/operations/minimal-release-runbook.md §3.1。
+awk '/^---$/{exit} {print}' deploy/k8s/20-agent-platform.yaml \
+  | kubectl create --dry-run=client -f - -o json > /tmp/want.json   # ← 必须 create
+#    ⚠ 别用 `kubectl apply --dry-run=client -o json` 取"清单期望值"：它返回与线上合并后的对象，
+#    实测把清单的 21 项 env 报成线上的 10 项 —— 拿它当真相源会让预检自己骗过自己。
+# ⑤ apply 后读回（"同步了"不等于"上线了"）
 kubectl -n agent-platform set env deploy/agent-platform --list | sort
 kubectl -n agent-platform get deploy agent-platform -o jsonpath='{.spec.template.spec.containers[0].env[*].name}{"\n"}'
 kubectl -n agent-platform exec deploy/agent-platform -- cat /srv/agent-platform/GIT_REV   # 必须 == 期望 rev

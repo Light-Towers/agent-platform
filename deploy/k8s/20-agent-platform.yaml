@@ -121,8 +121,8 @@ spec:
           # compose TB-7：lifespan 内 init_pool 连不上 pg 会阻塞 ~30s
           # → startupProbe 给足 8*5s=40s 窗口，期间 readiness/liveness 不生效
           # 本地 embedding 在 lifespan 预热，重活不落进 /health 探测路径。
-          # 预热耗时实测（126 venv 容器，CUDA 轮）：torch import 3.4s + sentence_transformers
-          # import 8.4s + 权重加载 0.5s ≈ 12s；CPU 轮数值待通道恢复后复测，窗口按 40s 留足。
+          # 预热耗时实测（2026-10-12 上线轮，CPU torch 镜像内、只读挂载）：权重加载 0.3s
+          # （页缓存热）~10.2s（冷）；Pod 从创建到 Ready 15s ⇒ 40s 窗口有余。
           startupProbe:
             httpGet:
               path: /health
@@ -149,22 +149,24 @@ spec:
           resources:
             requests:
               cpu: 250m
-              # requests 取「本地模型常驻 444MiB（CPU torch 实测峰值）+ 应用进程」的经验下限。
-              # 注：应用单独基线 RSS 尚未实测（探针缺 -i 没出数），通道恢复后补测再校准。
+              # 实测（2026-10-12 上线轮，LocalEmbedder 常驻、无并发查询时）：
+              # cgroup memory.current=442Mi、kubectl top 441Mi、pid1 VmRSS=553Mi。
+              # 1Gi = 该基线 + 一次批量 encode/上下文组装的余量，不是拍脑袋的上界。
               memory: 1Gi
             limits:
               cpu: "1"
               # 2Gi 为需求方拍板值（1Gi 装下本地语义模型后没有批量 encode 与碎片余量）。
+              # cgroup memory.max 回读 2147483648 ⇒ 限额真生效（不是被裁剪掉的空话）。
               memory: 2Gi
           securityContext:
             runAsNonRoot: true   # 对应 Dockerfile 的非 root appuser(10001) 最佳实践
             runAsUser: 10001
           volumeMounts:
-            # ⚠ 待实测项：离线加载曾在「可写」bind 上跑通，只读挂载会不会因 huggingface_hub
-            #   往缓存写 .lock 而失败，尚未验证。通道恢复后先跑决定性用例：
-            #   docker run --rm -v /opt/ap-models/hf-cache:/opt/ap-models/hf-cache:ro \
-            #     -e HF_HOME=/opt/ap-models/hf-cache -e HF_HUB_OFFLINE=1 <img> python -c '...加载并 encode 一次'
-            #   报只读错则把本挂载改为 readOnly: false（缓存目录仅本项目自用，可接受）。
+            # 只读挂载已证可行（2026-10-12，按 Pod 的真实运行条件跑：uid 10001 + :ro bind
+            # + HF_HUB_OFFLINE=1）：加载成功 dim=512。huggingface_hub 会尝试往缓存写
+            # trees/*.json 并报 `Permission denied`，但它自己降级为
+            # "Ignoring corrupted tree cache file" 后照常加载 ⇒ 是噪声日志，不是失败。
+            # 别把这条 readOnly 当"多余的谨慎"删掉：删了它，一次误写就会污染三个节点共用的权重缓存。
             - name: ap-models
               mountPath: /opt/ap-models
               readOnly: true

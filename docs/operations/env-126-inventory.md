@@ -287,6 +287,20 @@ kubectl -n agent-platform get secret observability-keys -o jsonpath='{.data.LLM_
 
 处置：那次外泄的 `LLM_API_KEY` 建议按正常密钥轮换流程作废；本轮生成的入站 `API_KEY` 第一把已作废并重生成（32 字节，未回显）。
 
+### 4.9 2026-10-12 上线生效后的环境读数（新清单第一次真跑）
+
+线上 Pod 模板第一次按清单生效（`GIT_REV=db1a8b8`，Pod 内回读）。完整业务反证在
+`docs/operations/evidence/2026-10-12-release/readings.md`，这里只留**环境侧**事实：
+
+| # | 读数 | 这条改变了什么判断 |
+|---|---|---|
+| 1 | Pod 落点在两次重启间移动：`ambari01` → `ambari02` → `ambari01` | "**三节点都要有权重缓存 + 都要导入镜像**"是承载性前提，不是保险。少铺一个节点，`hostPath type: Directory` 会让 Pod 在该节点 Pending（这是好事：失败在调度期而不是首次推理） |
+| 2 | 本轮删除 Pod 后 Warning 级 `Killing/OOMKilling/Evicted` 事件 **0 条**，自愈 15s；`otel_status=ACTIVE` 且 Jaeger 查到 8 span | §4.8 第 3 条的 137 复发诱因（OTLP 不可达 + DNS 断连拖住优雅关闭）在"Jaeger 在位 + 宽限期 60s"下**本轮未复现**。⚠️ 这是**一次观测**，不是"已修"——真修是给出网时的 flush 上界（`plan-tracing-shutdown-flush-timeout-2026-10-10.md`，待拍板）。旧 Pod 的 `lastState` 没抓到（对象随删除消失），下次须在删除前抓 |
+| 3 | `allocatable.memory = 16232772Ki`（**大写 K**），三节点约 15.9Gi / 8 CPU | 解析 k8s 资源量时 `[kMGT]` 字符类漏 `K` 会直接抛错；我本轮的容量预检就这么失败过一次。`Ki` 与 `k` 是两个不同单位（1024 vs 1000） |
+| 4 | LocalEmbedder 常驻、无并发时 `memory.current=442Mi`、`kubectl top=441Mi`、`pid1 VmRSS=553Mi`；`cgroup memory.max=2147483648` | `requests 1Gi / limits 2Gi` 有实测依据（此前只有 CUDA 轮经验值），且限额真落到 cgroup |
+| 5 | `kubectl apply -f 20-agent-platform.yaml` 第一次被整份拒绝：`env[N].valueFrom: Invalid value: "": may not be specified when value is not empty` | 线上字面值 + 清单 `valueFrom` 的三方合并冲突。**拒得完整 ⇒ 无半生效、无中断**。解法（整 Pod 模板原子 replace）与前置闸见 `deploy/k8s/README.md` §6.1 与运维手册 §3.1 |
+| 6 | `kubectl apply --dry-run=client -o json` 对同一份清单返回 **10 项 env**（线上现状），`kubectl create --dry-run=client -o json` 返回 **21 项**（清单真值） | **`apply --dry-run` 不能当"期望值"来源**：它会与线上对象合并。预检脚本一旦拿它派生期望态，就会自己骗过自己 |
+
 ## 5. 三份代码副本与运行 rev（最易踩的坑）
 
 
