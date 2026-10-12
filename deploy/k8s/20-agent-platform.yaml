@@ -32,6 +32,18 @@ spec:
                 secretKeyRef:
                   name: agent-platform-secrets
                   key: DATABASE_URL
+            # 问数（Text-to-SQL）的数据面。缺 SQL_DSN 时 /health 如实报 sql_backend=none。
+            # **复用上面那个键的值**：不新增任何密钥材料，也就不多一处需要轮换的东西。
+            # 复用 owner 口令是安全的前提：执行层连接级强制 `default_transaction_read_only=on`
+            # （sql/pipeline.py）+ sqlglot 白名单守卫（agent_core.sql.guard.validate_sql），双保险。
+            # ⚠ 残余边界要如实说：只读≠只读自己的行——同一角色能 SELECT 到全部租户的数据。
+            #   本版单租户（SINGLE_TENANT=default）不暴露该问题，多租户共用时必须先在库侧建只读角色 +
+            #   行级过滤，属独立方案，别在这里打开。
+            - name: SQL_DSN
+              valueFrom:
+                secretKeyRef:
+                  name: agent-platform-secrets
+                  key: DATABASE_URL
             # ---- 模型凭据 + 入站凭据：只引用键名，真实值永不入库 ----
             # 这两个键在 126 上属集群单独持有的 `observability-keys`（对象名早于鉴权用途，
             # 见 VERIFICATION.md §C 的 create secret 记录）；缺键时 Pod 以
