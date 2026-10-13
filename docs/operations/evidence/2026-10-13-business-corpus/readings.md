@@ -150,7 +150,7 @@ This response_format type is unavailable now', 'code': 'invalid_parameter_error'
 | 1 | 纯补全 | **200**（`/health` 的 `llm=true` 探的就是这个） |
 | 2 | `json_object`，prompt 不含 "json" | 400 `'messages' must contain the word 'json' in some form…` |
 | 3 | `json_schema` + `strict:true` | **400 `This response_format type is unavailable now`** |
-| 4 | `json_schema` 不带 strict | **400 同一句** ⇒ 与该类型整体不支持，不是 strict 的锅 |
+| 4 | `json_schema` 不带 strict | **400 同一句** ⇒ 与 `strict` 无关（这颗模型对该类型整体拒绝）。⚠️ 当时我由此写成"端点整体不支持"，**以偏概全，10:55 补测 Qwen 后更正**：同端点 `Qwen/Qwen3.8-Flash-Next` 的 `json_schema` 3/3 合规 ⇒ 是**按模型**，见 §11 |
 | 5 | `tools` + `tool_choice:"required"` | **200**，`finish_reason=tool_calls`，arguments 逐字符合 `RouteDecision`（`capability=rag` / `sub_query` / `reason`） |
 | A | `json_object` + prompt 含"以 JSON 返回" | 200，但模型自造字段名（`{"判断结果":{"应走链路":…}}`）⇒ 不保证贴 schema |
 
@@ -242,7 +242,7 @@ Anthropic 兼容（beta），**没有 `response_format` 结构化输出**；我�
 | `poolside/laguna-xs-2.1:free` | 6/8 `429 temporarily rate-limited upstream` | 没被限流的那次 200 且合规 |
 
 **三家合起来（本轮真正的结论）**：`tools` 是 11/11 个模型-提供方组合里唯一全绿的形态；
-`json_schema` 三家行为各不相同（魔搭整体不支持 / 硅基流动 60% 超时 / OpenRouter 按模型且受免费池支配）。
+`json_schema` 三家行为各不相同（魔搭**按模型**：DeepSeek 稳定 400 / Qwen3.8-Flash-Next 3/3 合规 / 硅基流动 60% 超时 / OpenRouter 按模型且受免费池支配）。
 ⇒ R1 不只是修当前 bug，它让路由层**跨提供方可移植**——以后换任何一家都不用再动 `router.py`。
 ⇒ 演示期仍不换提供方：OpenRouter 免费池的可用性不由我们控制，而现网魔搭的 tools 路线 5/5、2–4s、判对。
 
@@ -252,6 +252,26 @@ Anthropic 兼容（beta），**没有 `response_format` 结构化输出**；我�
 
 **这把 key 同样按 §9 的口径处置**：只经 ssh stdin → shell 变量 → `env` 注入 Pod 内探针，不落任何文件、不进 argv、未 echo；
 探针脚本 `/tmp/or*.py` 测完已删，`grep -rl 'sk-or-' /tmp` 返回 0。⚠️ 它也已出现在对话记录里 ⇒ **建议一并轮换**。
+
+### 9.2 需求方追问逼出的一次自我纠正：魔搭上 Qwen 支持 `json_schema`（10:50–11:00）
+
+问"魔搭的 Qwen 不是兼容 OpenAI 协议吗"——是的，而且它推翻了我 §5.1 的措辞。
+用**同一端点、同一把 key、同一问题**补测（现网 35 个可用模型，Qwen 7 个）：
+
+| 形态 | `deepseek-ai/DeepSeek-V4.1-Flash`（现网） | `Qwen/Qwen3.8-Flash-Next` |
+|---|---|---|
+| `json_schema`+strict | **3/3 全 400** | **3/3 合规**（5.0s）但 3/3 判成 `search` |
+| `tools` + `tool_choice=required` | **2/2 合规**，`rag`，2.7–3.0s | **2/2 全 400**：`tool_choice … does not support being set to required or object in thinking…` |
+| `tools` 不带 `tool_choice`（auto） | 200 合规，`rag` | 200 合规，**`rag`** |
+
+另两颗：`Qwen/Qwen3.5-27B` 的 `json_schema` 返 200 但**出参不是 JSON 对象**（"支持字段"≠"照 schema 出"）；
+文档里"Responses API 仅支持 Qwen3.5 系列"也试了——`text.format=json_schema` 对两颗 Qwen 都返回纯文本，
+DeepSeek 走 `/responses` 直接 400 `This text.format type is unavailable` ⇒ **Responses API 不是出路**。
+
+⇒ 三条更正后的结论（详见 `plan-router-keyword-gate-hides-corpus-2026-10-12.md` §12）：
+1. `json_schema` 在魔搭**按模型**，不是端点整体不支持（我前面说过头了）；
+2. **同一端点上两颗模型需要相反的方法** ⇒ 换模型随时可能把系统推回静默回退，R2 那盏灯的必要性上升；
+3. 唯一对两颗都成立的是 `tools` + `tool_choice` 留默认 auto（且都判对 `rag`）⇒ 落 R1 时**不要**传 `required`。
 
 ## 10. 今天仍然没证的事
 

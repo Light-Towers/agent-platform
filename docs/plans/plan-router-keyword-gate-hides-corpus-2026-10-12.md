@@ -207,3 +207,41 @@ DNS 104.18.3.115 / TCP443 通；共 459 个模型，其中 `:free` 15 个，**�
 同一个问题、同一个 schema，三家的小模型判成 `search` 的偏多（硅基流动 5/5 search、OpenRouter 两个模型 search、
 魔搭判 `rag`），说明**路由质量本身依赖模型能力，不依赖 `response_format` 形态**。⇒ 落在本方案 §4 的验收第 4 条：
 "因果问法能命中 rag"要有用例钉住，而不是改了 method 就默认路由变准。
+
+## 12. 自我纠正：`json_schema` 在魔搭**不是端点整体不支持，是按模型**（2026-10-13 补测 Qwen）
+
+需求方追问"魔搭上 Qwen 不是兼容 OpenAI 协议吗"——问得对，逼出了我上一条说过头的地方。
+§8 里那句"ModelScope 兼容端点整体不支持 `json_schema`"**只对我测过的那颗模型成立**，属于以偏概全，本节更正。
+
+同一端点（`api-inference.modelscope.cn/v1`）、同一把 key、同一问题，两颗模型要的方法**正好相反**：
+
+| 形态 | `deepseek-ai/DeepSeek-V4.1-Flash`（现网在用） | `Qwen/Qwen3.8-Flash-Next` |
+|---|---|---|
+| 纯补全 | 200 | 200 |
+| `json_schema`+strict | **3/3 全 400**（`This response_format type is unavailable now`） | **3/3 合规**（5.0s）⇒ 这正是 langchain 的**默认** method |
+| `json_object` | 400（要求 prompt 含 "json"）；含了 200 但 `capability` 出枚举（`document_retrieval`） | 同样 400→含 json 后 200 但越界（`document_qa`） |
+| `tools` + `tool_choice=required` | **2/2 合规**（2.7–3.0s，`capability=rag` 每次都对） | **2/2 全 400**：`The tool_choice parameter does not support being set to required or object in thinking…` |
+| `tools` 不带 `tool_choice`（= auto） | 200 合规，`rag` | **200 合规，`rag`** |
+
+另外两条附带读数：`Qwen/Qwen3.5-27B` 的 `json_schema` 返 200 但**出参不是 JSON 对象**（"支持这个字段"≠"照 schema 出"）；
+文档里"Responses API 仅支持 Qwen3.5 系列"那条也试了——`text.format=json_schema` 对两颗 Qwen 都**返回纯文本**，
+DeepSeek 走 `/responses` 直接 400 `This text.format type is unavailable`，所以 Responses API 不是出路。
+
+### 本节改变了哪三条判断
+
+1. **"换提供方/换模型就不用改代码"这个选项确实存在，但代价是路由变笨**：把 `LLM_MODEL` 改成
+   `Qwen/Qwen3.8-Flash-Next`（纯 ConfigMap 改动、零代码）就能让 langchain 默认的 `json_schema` 跑通；
+   可它 3/3 把"根据文档…"判成 `search`——而本部署 `/health` 报 `search: false`，等于把问题送进一条空链路。
+   **格式通了，判断错了**，这比现在"老实走词表"更糟。
+2. **R1 的适用面比我原先说的更宽**：`tools` + `tool_choice` 留默认（**auto**）是唯一在两颗模型上都合规的形态，
+   而且两颗都判对 `rag`、都在 2.7–3.0s。⇒ 落 R1 时**不要**传 `tool_choice="required"`
+   （langchain `method="function_calling"` 默认就是 auto，符合）；传了就会在 Qwen 上换一个 400 回来。
+3. **R2（启动期能力探针 + 出灯）的必要性上升**：同一端点上两颗模型需要**相反**的方法，
+   意味着任何一次"换个模型试试"都可能把系统推回静默回退态，而 `/health` 现在对此完全无感（它只探纯补全）。
+   没有灯的话，下一次还是靠人肉读 WARNING 才发现。
+
+### 更新后的建议
+
+**R1（`method="function_calling"`，`tool_choice` 保持默认 auto）+ R2（能力探针 + `/health` 出灯）**，
+提供方与模型**都不换**（现网 DeepSeek 的 tools 路线 3/3 合规、判对 `rag`）。
+被否掉的旁路：换 Qwen 走 `json_schema`（零代码但判错方向）、走 Responses API（两家都不吃 json_schema）。
