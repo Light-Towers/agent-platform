@@ -140,6 +140,29 @@ This response_format type is unavailable now', 'code': 'invalid_parameter_error'
 同族第 5 次：代码照着一个提供方不支持的契约写（`response_format`），宽 `except` + 能跑的启发式把读数盖成"正常"。
 前四次是 `embed_texts(dim=)`、`alist_messages`、空响应体数出的假绿灯、`asyncio.to_thread` 包 async 函数。
 
+### 5.1 根因探针矩阵（09:58–10:04，对同一端点直发四种形态）
+
+线上配置：`LLM_BASE_URL=https://api-inference.modelscope.cn/v1`、`LLM_MODEL=LLM_FALLBACK_MODEL=deepseek-ai/DeepSeek-V4.1-Flash`
+（`LLM_API_KEY` 只报口径：`ms-` 前缀、39 字符；值未打印、未落盘）。
+
+| # | 形态 | 结果 |
+|---|---|---|
+| 1 | 纯补全 | **200**（`/health` 的 `llm=true` 探的就是这个） |
+| 2 | `json_object`，prompt 不含 "json" | 400 `'messages' must contain the word 'json' in some form…` |
+| 3 | `json_schema` + `strict:true` | **400 `This response_format type is unavailable now`** |
+| 4 | `json_schema` 不带 strict | **400 同一句** ⇒ 与该类型整体不支持，不是 strict 的锅 |
+| 5 | `tools` + `tool_choice:"required"` | **200**，`finish_reason=tool_calls`，arguments 逐字符合 `RouteDecision`（`capability=rag` / `sub_query` / `reason`） |
+| A | `json_object` + prompt 含"以 JSON 返回" | 200，但模型自造字段名（`{"判断结果":{"应走链路":…}}`）⇒ 不保证贴 schema |
+
+SDK 侧（Pod 内实测）：`langchain-openai==1.7.0` / `langchain-core==1.6.9` / `openai==3.29.0`，
+`ChatOpenAI.with_structured_output(schema, *, method: Literal['function_calling','json_mode','json_schema'] = 'json_schema', …)`。
+
+⇒ **因果链闭合**：`router.py:87` 没传 `method` ⇒ 默认 `json_schema` ⇒ 端点不支持 ⇒ 每问必 400 ⇒ 被 `except → heuristic_route` 吞成正常。
+⇒ **修法只有两行**（且第 2 步不可省，否则被静默丢掉）：`router.py:87` 传 `method="function_calling"`；
+`packages/agent-core/agent_core/llm/fallback.py:227` 的 `with_structured_output(self, schema)` 改成收并透传 `**kwargs`
+——因为 `agent/llm.py:39` 给 router 的是 `FallbackChatModel` 包装，它现在的签名根本不收 `method`。
+方案与四条验收见 `docs/plans/plan-router-keyword-gate-hides-corpus-2026-10-12.md` §8/§9，**属改代码，待拍板未动手**。
+
 ## 6. 路由关键词闸门：从"一次观察"升级为"可稳定复现的演示级风险"
 
 方案文件：`docs/plans/plan-router-keyword-gate-hides-corpus-2026-10-12.md`（今天追加 §5 读数）。
@@ -180,9 +203,12 @@ This response_format type is unavailable now', 'code': 'invalid_parameter_error'
 
 ## 9. 今天仍然没证的事
 
-1. **`/health` 没有"结构化输出可用"这盏灯**（§5 只证了它今天恒失败，没证别的模型可用/不可用）。
+1. **`/health` 仍没有"结构化输出可用"这盏灯**——根因虽然定位了（§5.1），但**没有灯**这件事本身没变：换一个提供方/模型时，
+   同一条静默回退还会再发生一次，除非落 §5.1 的修法或启动期能力探针。
 2. **浏览器端仍未实拍**（任务 #13）：入站 `API_KEY` 轮换后需持键者现场输入。
    今天日志窗口里有 1 条非我发起的 `/query`，但没有页面侧证据，**不能**读成"页面已跑通"。
+   ⚠️ 且今天新定的口径要一并告知持键者：**业务文档出境到外部推理服务已由需求方点头（2026-10-13）**，
+   排除清单不因此放开。
 3. **并发/性能基线未测**：Q2 29.60s 是单发，没有并发对照。
 4. **检索质量指标未测**：命中率/召回排序没有量化（RAGAS/DeepEval 仍是选型未落地）。
 5. **真 5xx 异常信封**未在现场制造过（沿用昨天的未证条目）。
