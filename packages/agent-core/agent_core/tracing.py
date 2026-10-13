@@ -173,6 +173,27 @@ def noop_tracer() -> Any:
     return _make_noop_tracer()
 
 
+def _has_otlp_processor(provider: Any) -> bool:
+    """探测宿主 provider 是否已自备 OTLP 出口（避免同一 span 落两遍）。
+
+    读的是 OTel SDK 私有结构（`_active_span_processor._span_processors[].exporter`），
+    所以**只作"有则不重复挂"的优化**：探测失败一律当作"没有"，宁可多挂一个出口，
+    也不能因为读不到就判定"宿主会导"——那正是 D-LF-1 静默瞎掉的成因。
+    """
+    try:
+        procs = getattr(getattr(provider, "_active_span_processor", None), "_span_processors", [])
+        for p in procs or []:
+            # 属性名按 processor 类型而异（SDK 1.45 实测：SimpleSpanProcessor.span_exporter、
+            # BatchSpanProcessor.exporter）⇒ 三个名字都试，读不到就当没有。
+            exp = (getattr(p, "span_exporter", None) or getattr(p, "exporter", None)
+                   or getattr(p, "_exporter", None))
+            if exp is not None and _OTLP_EXPORTER_CLS is not None and isinstance(exp, _OTLP_EXPORTER_CLS):
+                return True
+    except Exception:  # pragma: no cover - 私有结构随 SDK 版本变化，失败走保守路径
+        return False
+    return False
+
+
 # ---------------------------------------------------------------------------
 # 工具函数
 # ---------------------------------------------------------------------------
@@ -414,8 +435,12 @@ def init_tracing(
             if sampler is not None:
                 provider_kwargs["sampler"] = sampler
             provider = _SDKTracerProvider(**provider_kwargs)
+            # 出口先攒着，最后挂到**真正生效的那个 provider**上（自建=provider，复用=宿主 existing）。
+            # 早先版本在复用分支之前就 add_span_processor 到自建 provider，随后把 provider 换成宿主
+            # ⇒ 导出器挂在孤儿对象上，谁都收不到（缺陷 D-LF-1 的一半）。
+            pending: list = []
             if exporter is not None:
-                provider.add_span_processor(_SimpleSpanProcessor(exporter))
+                pending.append(_SimpleSpanProcessor(exporter))
             else:
                 if _OTLP_EXPORTER_CLS is None:
                     logger.warning(
@@ -427,19 +452,28 @@ def init_tracing(
                     _tracer = _make_noop_tracer()
                     _provider = None
                     return _tracer
+                pending.append(_BatchSpanProcessor(_OTLP_EXPORTER_CLS(endpoint=otel_endpoint)))
+
             # 复用已存在的全局 TracerProvider（如 Langfuse SDK 已先设置），
             # 避免 "Overriding of current TracerProvider is not allowed"。
-            # 复用后框架层 span 与 SDK observation 共享同一 trace 树（不重复挂载本地 exporter）。
+            # 复用后框架层 span 与 SDK observation 共享同一 trace 树。
+            # **但"宿主自带 exporter"这个前提不可信**（2026-10-13 现网实测：Langfuse 的 provider
+            # 只有 LangfuseSpanProcessor，不导 OTLP ⇒ 我们一条 span 都到不了 Jaeger，
+            # 而 /health 仍报 ACTIVE）。所以复用路径要么确认宿主确有 OTLP 出口，要么自己补挂。
             existing = _otel_trace.get_tracer_provider()
             if not isinstance(existing, _otel_trace.ProxyTracerProvider):
                 provider = existing
                 if sampler is not None:
                     logger.info("复用全局 TracerProvider，sampling_rate 不生效（采样由宿主 provider 决定）")
-                logger.info("复用已存在的全局 TracerProvider（如 Langfuse SDK），不覆盖")
-            else:
-                # 仅在本模块自建 provider 时挂 OTLP 导出；复用路径依赖宿主 exporter，避免白挂/重复导出。
-                if exporter is None:
-                    provider.add_span_processor(_BatchSpanProcessor(_OTLP_EXPORTER_CLS(endpoint=otel_endpoint)))
+                if exporter is None and _has_otlp_processor(provider):
+                    pending = []  # 宿主已导 OTLP，再挂会同一 span 落两遍
+                    logger.info("复用已存在的全局 TracerProvider（宿主已含 OTLP 出口），不重复挂载")
+                else:
+                    logger.info("复用已存在的全局 TracerProvider，并补挂本平台 OTLP 出口（D-LF-1）")
+            for sp in pending:
+                provider.add_span_processor(sp)
+            if provider is not existing:
+                # 复用路径不 set（宿主已是全局，重复 set 会报 Overriding）；自建路径才装成全局
                 try:
                     _otel_trace.set_tracer_provider(provider)
                 except Exception:  # pragma: no cover - 防御：全局 provider 设置失败不影响本地 tracer
