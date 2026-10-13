@@ -223,6 +223,42 @@ async def lifespan(app: FastAPI):
     # §20.1/20.2 + P3-1: 构建 PG 持久化后端
     checkpoint_store, idempotency_store, ownership_store, trajectory_store = _build_pg_stores(pool)
 
+    # Phase 2: OTel 接线（opt-in）；观测单状态机在 kernel（S1），请求级 span 由
+    # build_api_app(enable_tracing=True) 装配的 TracingMiddleware 创建（S2），
+    # 不再往 app.state 挂 tracer 散点取用（lint L-2 拦截）。
+    # 门面退役（2026-09-30）：原 agent_runtime.otel.init_otel 参数映射内联至装配点，
+    # 直调 kernel init_tracing（jaeger thrift exporter 已归档 → 映射 OTLP 接收端）。
+    #
+    # 【顺序是硬约束，别挪到下面去】必须在 build_chat_model() **之前**：
+    # Langfuse 客户端的构造会把全局 TracerProvider 换成它自己那份（processors 只有
+    # LangfuseSpanProcessor），kernel 的 init_tracing 遇到"已存在非 Proxy provider"会复用而不覆盖
+    # ⇒ 本平台的 OTLP 导出器永远挂不上，Jaeger 面整体静默而 /health 仍报 ACTIVE
+    # （2026-10-13 现网实测，缺陷 D-LF-1，方案 §7）。反序则 Langfuse 复用我们的 provider
+    # 并把它的 processor 追加进去 = 一棵 span 树、两个后端。
+    if settings.otel_effective_enabled:
+        if settings.otel_exporter == "console":
+            try:
+                from opentelemetry.sdk.trace.export import ConsoleSpanExporter
+
+                _otel_exporter = ConsoleSpanExporter()
+            except ImportError:
+                _otel_exporter = None  # kernel 记 DEGRADED（R5：可区分显式关与坏了）
+            init_tracing(
+                service_name=settings.otel_service_name,
+                enabled=True,
+                exporter=_otel_exporter,
+                sampling_rate=settings.otel_sampling_rate,
+            )
+        else:
+            # otlp / jaeger→otlp：endpoint 为空传 None 让 kernel 回退标准 env
+            # （OTEL_EXPORTER_OTLP_ENDPOINT）；仍为空则记 DEGRADED=no_export_endpoint。
+            init_tracing(
+                service_name=settings.otel_service_name,
+                otel_endpoint=settings.otel_endpoint or None,
+                enabled=True,
+                sampling_rate=settings.otel_sampling_rate,
+            )
+
     llm = build_chat_model()
 
     # Langfuse 观测面两盏灯（方案 docs/plans/plan-langfuse-wiring-2026-10-13.md §2.2）。
@@ -266,34 +302,8 @@ async def lifespan(app: FastAPI):
     else:
         app.state.revert_handler = None
 
-    # Phase 2: OTel 接线（opt-in）；观测单状态机在 kernel（S1），请求级 span 由
-    # build_api_app(enable_tracing=True) 装配的 TracingMiddleware 创建（S2），
-    # 不再往 app.state 挂 tracer 散点取用（lint L-2 拦截）。
-    # 门面退役（2026-09-30）：原 agent_runtime.otel.init_otel 参数映射内联至装配点，
-    # 直调 kernel init_tracing（jaeger thrift exporter 已归档 → 映射 OTLP 接收端）。
-    if settings.otel_effective_enabled:
-        if settings.otel_exporter == "console":
-            try:
-                from opentelemetry.sdk.trace.export import ConsoleSpanExporter
-
-                _otel_exporter = ConsoleSpanExporter()
-            except ImportError:
-                _otel_exporter = None  # kernel 记 DEGRADED（R5：可区分显式关与坏了）
-            init_tracing(
-                service_name=settings.otel_service_name,
-                enabled=True,
-                exporter=_otel_exporter,
-                sampling_rate=settings.otel_sampling_rate,
-            )
-        else:
-            # otlp / jaeger→otlp：endpoint 为空传 None 让 kernel 回退标准 env
-            # （OTEL_EXPORTER_OTLP_ENDPOINT）；仍为空则记 DEGRADED=no_export_endpoint。
-            init_tracing(
-                service_name=settings.otel_service_name,
-                otel_endpoint=settings.otel_endpoint or None,
-                enabled=True,
-                sampling_rate=settings.otel_sampling_rate,
-            )
+    # Phase 2: OTel 接线已上移到 build_chat_model() 之前（缺陷 D-LF-1，方案 §7）——
+    # 那里写着顺序为什么是硬约束。
 
     # Phase 2: MCP client（opt-in）
     mcp_manager = None
