@@ -612,9 +612,9 @@ kubectl -n $NS exec -i $POD -- python - probe '报馆图纸' < /tmp/r30db.py
 | 宿主 moby 库（126） | `agent-platform:dev` = `9d72645cbafc`，内含 `GIT_REV=3cd5580` —— **中止构建的残留，不是线上对象**，别拿它做证明 |
 | `/health` 生效值 | `storage=postgres` `sql_backend=postgres` `embedding_backend=LocalEmbedder` `embedding_real=true` `llm=true` `otel=true/otel_status=ACTIVE` `langfuse_enabled=true` `langfuse_ready=true` `forensic=true` `guard_enabled=true` `auth_enabled=true` `identity_mode=single` `planner=deterministic`；`search/mcp/scheduler/control_plane/cost_governance/admission=false` |
 | 依赖 Pod | `postgres-6ff4688bb8-vn7v6` @ ambari03(126)（被 `nodeSelector` 钉住），14d，restarts 0 |
-| Jaeger（观测面 A） | **126 的 moby 容器** `jaeger`，Up 13 days，`4317/4318→host`、`16686→host`；OTLP 端点由 CM 注入 `OTEL_ENDPOINT=http://192.168.100.126:4318/v1/traces` |
+| Jaeger（观测面 A） | **126 的 moby 容器** `jaeger`，Up 13 days，`4317/4318→host`、`16686→host`；OTLP 端点由 CM 注入 `OTEL_ENDPOINT=http://192.168.100.126:4318/v1/traces`。**服务本身活着**：10-13 从 Pod 内查 `/api/services`、`/api/traces?operation=POST /query` 全部正常应答（所以"收得到 span"与"UI 打不开"是两件事，别混着讲）。UI 从办公网**当前不可达**，见手册 §9 ㉑ |
 | Langfuse（观测面 B） | **241 的 moby 栈** `lf-langfuse`/`lf-langfuse-worker`/`lf-clickhouse`/`lf-langfuse-db`/`lf-valkey`/`lf-minio`（6 个，均 healthy），只有 web 发布 `3000`；`LANGFUSE_HOST=http://192.168.100.241:3000`。**演示期暂常驻**（实测 PSI `avg10=3.59%`、241 磁盘余 25G、内存 avail 11G；冷启动需等 ~300s，故不停） |
-| port-forward | 126 `:18000 → svc/agent-platform:8000`；`portforward.sh` **无 restart 子命令**，换 Pod 要 stop+start |
+| port-forward | 126 `:18000 → svc/agent-platform:8000`；`portforward.sh` **无 restart 子命令**，换 Pod 要 stop+start。⚠️ 10-13 收盘前：**办公网侧 126:18000 与 126:16686 均无应答**（curl `HTTP 000`），而同刻 241:3000 → 200 ⇒ 观测/控制台入口别压在 126 上，两候选成因与判据见手册 §9 ㉑ |
 | 密钥落点 | `secret/observability-keys` 内 `API_KEY` / `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY`（+ `LLM_API_KEY`）——**只记键名与注入路径，值不落任何文件** |
 | 库内数据态（**10:27 UTC 复算**） | `chunks` 303 行 / 7 文档、`semantic_cache` 残留 0、**`checkpoints`/`checkpoint_blobs`/`checkpoint_writes` 三表 0 行**：演示前按拍板把取证残留句整桶清掉（备份在 `126:/tmp/ckpt-backup-host/*.csv`，0600，宿主 `/tmp` ⇒ 重启即失）。本节早前那句"今日 1 个 thread、33 个 blob"到此失效，别引用 |
 
