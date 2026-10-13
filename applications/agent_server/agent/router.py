@@ -84,7 +84,11 @@ async def decide_route(llm, question: str) -> RouteDecision:
         capabilities = "search=联网搜索, rag=本地知识库, sql=数据库查询, direct=直接回答, code_execution=沙箱代码执行"
         if get_settings().mcp_enabled:
             capabilities += ", mcp=调用外部工具"
-        structured = llm.with_structured_output(RouteDecision)
+        # method 必须显式指定：langchain-openai 默认走 json_schema，而提供方是否支持该
+        # response_format 类型按模型不同（126 现网 DeepSeek 稳定 400、同端点 Qwen 却可用），
+        # 失败会被下面的宽 except 吞成"静默回退启发式"。tools 是实测唯一跨模型都合规的形态，
+        # 且 tool_choice 要保持默认 auto（Qwen 侧 required 会 400）。
+        structured = llm.with_structured_output(RouteDecision, method="function_calling")
         decision = await structured.ainvoke(
             [
                 {"role": "system", "content": f"你是路由器。判断用户问题应走哪条能力链路：{capabilities}。"},
