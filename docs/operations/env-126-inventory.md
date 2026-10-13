@@ -596,3 +596,45 @@ kubectl -n $NS exec -i $POD -- python - probe '报馆图纸' < /tmp/r30db.py
 > 为什么 C③ 值得单列：2026-10-13 的 r30 整轮就是这么废的——问句"特装展台报馆的电子文件要压缩成哪几个文件包？"
 > 一字不含特征词 ⇒ 消融前/后/还原后**三次全部 `route=direct`、`evidence count=0`、答案全部"无法确定"**。
 > 三次读数高度"一致"，看着像实验很稳，实际是自变量从没生效。改带"根据文档"重跑（r31）才拿到有效对照。
+
+### 4.11 2026-10-13 观测面接线后的部署快照（rev `6ac466af`）
+
+> **这张表描述到取证时刻为止，滚动一次即失效**（§2 的教训：读数必须绑定 rev，别引用表、要复算命令）。
+> 取证时刻：2026-10-13 08:0x UTC（三节点 `date -u +%s` 互差 ≤1s，已量）。
+
+| 项 | 值 |
+|---|---|
+| namespace / 工作负载 | `agent-platform` / `deploy/agent-platform`，`replicas=1` |
+| Pod | `agent-platform-85794678c-9hjg4`，node **ambari01(241)**，Pod IP 10.244.2.15，restarts **0**，Ready 1/1 |
+| 镜像 | tag `agent-platform:dev`（可变），Pod `imageID=sha256:c18dc76a93f8fb55fbd5297f1a642d8f116894230b647beb32d401ff34819736` |
+| Pod 内 `GIT_REV` | `6ac466af2ebf2d6d9f09b1fb181525a72268bdc3`（`verify.sh` 回读，rc=0） |
+| 三节点 containerd-k8s | 125 / 126 / 241 全部 = **`c18dc76a93f8f`**（1.68GB）。241 是**补了一次本地导入**才齐的（见坑档 §4） |
+| 宿主 moby 库（126） | `agent-platform:dev` = `9d72645cbafc`，内含 `GIT_REV=3cd5580` —— **中止构建的残留，不是线上对象**，别拿它做证明 |
+| `/health` 生效值 | `storage=postgres` `sql_backend=postgres` `embedding_backend=LocalEmbedder` `embedding_real=true` `llm=true` `otel=true/otel_status=ACTIVE` `langfuse_enabled=true` `langfuse_ready=true` `forensic=true` `guard_enabled=true` `auth_enabled=true` `identity_mode=single` `planner=deterministic`；`search/mcp/scheduler/control_plane/cost_governance/admission=false` |
+| 依赖 Pod | `postgres-6ff4688bb8-vn7v6` @ ambari03(126)（被 `nodeSelector` 钉住），14d，restarts 0 |
+| Jaeger（观测面 A） | **126 的 moby 容器** `jaeger`，Up 13 days，`4317/4318→host`、`16686→host`；OTLP 端点由 CM 注入 `OTEL_ENDPOINT=http://192.168.100.126:4318/v1/traces` |
+| Langfuse（观测面 B） | **241 的 moby 栈** `lf-langfuse`/`lf-langfuse-worker`/`lf-clickhouse`/`lf-langfuse-db`/`lf-valkey`/`lf-minio`（6 个，均 healthy），只有 web 发布 `3000`；`LANGFUSE_HOST=http://192.168.100.241:3000`。**演示期暂常驻**（实测 PSI `avg10=3.59%`、241 磁盘余 25G、内存 avail 11G；冷启动需等 ~300s，故不停） |
+| port-forward | 126 `:18000 → svc/agent-platform:8000`；`portforward.sh` **无 restart 子命令**，换 Pod 要 stop+start |
+| 密钥落点 | `secret/observability-keys` 内 `API_KEY` / `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY`（+ `LLM_API_KEY`）——**只记键名与注入路径，值不落任何文件** |
+
+**本轮在这套现场跑通的判据**（都是回读，不是推断）：
+
+```bash
+# 1) 聚合取证（读**跑着的 Pod 内** rev，不再 docker run）
+bash deploy/k8s/scripts/verify.sh <expected-rev>          # rc=0：L0 三节点 Ready / Pod Ready /
+                                                          # /health 200 + otel_status / rev 相等
+# 2) Jaeger 面（单服务）
+API_KEY=... bash deploy/k8s/scripts/e2e_traceparent.sh     # rc=0：span 数=8、含 "POST /query"
+                                                          #       trace id == 注入的 W3C id
+# 3) Langfuse 面（唯一算数判据 A3）
+API_KEY=... LF_PK=... LF_SK=... LF_HOST=http://192.168.100.241:3000 \
+  python deploy/observability/langfuse_proof.py            # exit 0：2 条 GENERATION，
+  #  答案生成 in=1403/out=1547、input 摊平后含 "[来源: …]"；路由决策 in=475/out=164；
+  #  trace id == 注入 id。exit 4 = 取证不成立但平台没错（全部命中语义缓存）
+```
+
+**边界（不得当成已具备的能力）**：
+- 跨服务链路追踪（联邦网关→子服务）**仍未证过** ⇒ 只能说"单服务内一条请求链路"。
+- "哪个模型/prompt 版本"在 Langfuse v4 的 `v2/observations` 投影里是 `modelId=null`，UI 与库内 `model` 列才可见 ⇒ 不得声称是 API 可读列。
+- 不声明逐次调用成本（per-query cost）。
+- 演示侧仍欠：D7 录播、D8 整场彩排 + 六环节留证、浏览器面实拍（需持键者）、`demo-questions.md` §7 判定列。

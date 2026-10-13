@@ -64,6 +64,15 @@ DATABASE_URL= uvicorn agent_server.main:app --port 8000  # 零依赖冒烟
 > 6. **milvus 会随宿主磁盘 IO 抖动自行退出**：etcd `slow fdatasync` → lease 保活失败 → milvus 主动 exit（共 15 次）。看到 `ExitCode=0` + `OOMKilled=false` **不要当成人为 `docker stop`**，先取停机前 60s 的 `docker logs --since/--until` 窗口并全栈比 `RestartCount`（只有单容器有 rc ⇒ 非栈级操作）。pod 那次 137 同理：是外部依赖断连（postgres DNS + OTLP no route）导致优雅关闭超时被 SIGKILL，非应用崩溃。根因已查到顶：单盘 `vda` **ROTA=1** + 常态化 IO stall（`slow fdatasync` 自 09-20 起 953 条且**每天都有**）+ Ubuntu 默认 `apt-daily*`/`e2scrub_all` 定时器放大，而 etcd **无任何 blkio 隔离**。判“介质慢 vs 一次性事件”用 `cat /proc/pressure/io`（avg10 即“此刻” stall%）+ 按天计数，比事后日志强。
 > 7. **三台都可用，别把"构建在 126"当约束**（2026-10-13 实测纠正）：`ambari01=241 / ambari02=125 / ambari03=126`。**agent-platform 的 Pod 实际落在 ambari01(241)**，126 只是被 `nodeSelector` 钉住了 postgres。`docker build` 的 pip 层在同一块 `ROTA=1` 盘上铺上万个文件时，实测 `/proc/pressure/io avg10=67%`，连带把同机 KS 的 etcd 打进 `slow fdatasync`（5 分钟 41 条）、milvus 重启 30→31 ⇒ **构建放 241**（docker+git 齐、空闲 39G/13G，同机只有我们自己的东西；125 满载别人的 maxkb/dataease/apisix，不要去那儿加 IO）。换构建机后两条硬规则：`build.sh` 只认 `SRC_DIR` 那份 checkout 的 rev，与机器无关；**`distribute.sh` 的默认 `WORKERS=125 241` 是从 126 构建的历史形态，从 241 跑必须显式列 `125 126`**——部署无 nodeSelector，漏一台则 Pod 调度过去即 `ErrImagePull`（可变 tag + `IfNotPresent` 无本地层可退）。
 
+## 观测面与现网取证的硬规矩（2026-10-13 起；全部坑档见 `docs/operations/observability-pitfalls.md`）
+
+> 本轮接 Langfuse 时踩出来的五条，最常重复犯：
+> 1. **状态灯亮 ≠ 数据到**：`/health` 报 `otel_status=ACTIVE` 的同时 Jaeger 面可以整体静默瞎掉。观测类验收判据必须是"**后端里查得到本次原文**"，不是状态字段。
+> 2. **共用进程级全局单例时，装配顺序就是正确性**：Langfuse 客户端构造会抢全局 TracerProvider ⇒ `init_tracing` 必须**早于**模型构造（`applications/agent_server/main.py` 里有"别挪回去"的顺序注释）。OTel provider / 事件循环 / 连接池 同族。
+> 3. **现网读数必须绑定当时的 Pod `GIT_REV`**：换 rev 滚动后要复跑。"Jaeger ✅"写在手册里而现网为假，就是漏了这条（部署快照见 `docs/operations/env-126-inventory.md` §4.11）。
+> 4. **读镜像内容要从跑着的 Pod 读**（`kubectl exec`），不要 `docker run`——moby 与 containerd-k8s 两套库互不可见，`docker run` 可能读到中止构建的残留；且**构建机自身的 containerd-k8s 要补一次本地导入**，否则可变 tag + `IfNotPresent` 下是"静默跑旧代码"而不是报错。
+> 5. **读"另一个系统"的数据前，先读它的形状**，别照文档猜：SSE 事件帧是**平铺**的（`d["payload"]` 恒空）；Langfuse v4 `events_only` 撤了 `/api/public/traces`，读径是 `v2/observations?fields=io,usage`（猜错的 fields 名**静默返回不含该键的行**）；载荷是**多层 JSON 编码**的 `\uXXXX`（中文 needle 恒 miss 而 ASCII 命中）；异步后端**先命中≠全到**；命中语义缓存时模型根本没调用（取证问题要**语义新颖**）。
+
 ## 技术栈
 
 - Python 3.11+（所有包的 `requires-python` 均为 `>=3.11`）
