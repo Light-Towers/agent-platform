@@ -267,3 +267,29 @@ DeepSeek 走 `/responses` 直接 400 `This text.format type is unavailable`，�
 连打 6 次时后两次收到 `429 We have to rate limit you for model deepseek-ai/DeepSeek-V4.1-Flash`。
 ⇒ 落 R1 后每问 = 路由 1 次 + 综合作答 1 次 = **两跳模型调用**，演示连问要留间隔；
 `Qwen3.8-Flash-Next` 同批未 429（但不能当成"Qwen 更宽松"的结论，样本太小，只记现象）。
+
+## 14. 后续设计要求（需求方 2026-10-13 定）：**换模型不得要求重启服务**
+
+现状为什么必须重启，三层都卡着（都是今天读代码/读集群确认的，不是推测）：
+
+| 层 | 现状 | 后果 |
+|---|---|---|
+| k8s | `LLM_MODEL` 等是容器 `env`（`configMapKeyRef`） | **env 只在容器启动时解析一次**；改 CM 对跑着的 Pod 完全不可见，必须 `rollout restart` |
+| 配置 | `applications/agent_server/config.py:178` `@lru_cache def get_settings()` | 进程内**终身缓存**，即使换成文件挂载也读不到新值 |
+| 客户端 | LLM 实例在 lifespan 里建好挂在 `app.state.graph` 上 | 配置变了也不会重建，改到半路会出现"配置是新的、连接是旧的" |
+
+⇒ 所以"不重启换模型"不是一行改动，是要**同时**动这三层。候选（只记方案，未拍板未实现）：
+
+- **H1 配置即文件 + 按指纹重建**：CM 以 **volume 挂载**（kubelet 会自动同步，通常 ≤1min，无需重启），
+  `get_settings()` 去掉终身 `lru_cache`，改"带 TTL 的缓存 + 读到文件 mtime/内容变化即失效"，
+  LLM 客户端按 `(base_url, model)` **指纹**重建（指纹不变就复用，别每次请求都 new）。
+- **H2 管理面显式重载**：加一个受鉴权、只写审计的 `POST /admin/reload-config`，内部做与 H1 相同的失效+重建。
+  好处是切换时机由人决定、可留痕；坏处是多一个能改运行时状态的写口子（要与 `DEPLOY_ENFORCE_IDENTITY` 同级对待）。
+- **H3 不热替换，改为"预先声明多套 Profile"**：把模型组（base_url/model/结构化能力）做成 CM 里的一张表，
+  切换 = 选 profile id。它仍需一次轻量生效动作，但把"改三行 YAML + 滚 Pod"降成"改一个键"，
+  与 R2 的能力灯天然配套（每个 profile 记录它实测过的 `json_schema`/`tools` 支持位）。
+
+**必须一起考虑的一点**：热切换会让本方案的主缺陷**更容易复发**——今天 `json_schema` 只在 Qwen 上支持、
+`tools+required` 只在 DeepSeek 上支持（同端点两颗模型需要相反的方法，§12）。如果换模型不再重启、变成随手一改，
+而没有能力探针，那么每一次随手改都可能把路由**静默**推回词表，且 `/health` 依旧全绿。
+⇒ 因此 **H1/H2 不能单独落，必须与 R2（能力探针 + `/health` 出灯 + 不匹配时显式降级）绑定成一套**。
