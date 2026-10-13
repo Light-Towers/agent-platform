@@ -170,3 +170,40 @@ DNS 47.117.173.229 / TCP443 通），并把判据从"HTTP 200"收紧成"**能否
 **R1 落两行**（`router.py:87` 传 `method="function_calling"` + `fallback.py:227` 透传 `**kwargs`），
 提供方**继续用魔搭**；R2 作为第二步（启动期探一次结构化能力并出灯），避免下次换提供方再静默一次。
 不换提供方、不引入新密钥、`SILICONFLOW_API_KEY` 保持在它原有的 embedding/rerank 位置上。
+
+## 11. 第三家对照：OpenRouter（2026-10-13，需求方提供 key 后实测）
+
+同一套判据（**能否解析成 `RouteDecision`**，不是"HTTP 200"），打 `https://openrouter.ai/api/v1`（Pod 内可达，
+DNS 104.18.3.115 / TCP443 通；共 459 个模型，其中 `:free` 15 个，**无免费 deepseek**）。
+
+失败按三类分开记，混在一起就会把"配额问题"误读成"能力问题"：
+
+| 模型 | `json_schema`+strict | `tools`+`tool_choice=required` |
+|---|---|---|
+| `nvidia/nemotron-3.5-lightning:free` | **2/2 合规**（9.4s、12.8s）判成 `code_execution`/`mcp` | **2/2 合规**（2.3–2.9s）判成 `search` |
+| `liquid/lfm-2.5-2.6b:free` | **2/2 合规**（11.1–17.7s）判成 `search` | **2/2 合规**（4.1–4.2s）判成 **`rag`（判对）** |
+| `apodex/apodex-1.1-mini:free` | **400**（该模型侧 `INVALID_REQUEST`） | **2/2 合规**（2.2–2.5s） |
+| `google/gemma-4-26b-a4b-it:free` | 8/8 全失败：`Provider returned error … "API key not valid"` ⇒ **OpenRouter 自己的上游 Google 凭据失效**，与我们的代码无关 | 同左 |
+| `poolside/laguna-xs-2.1:free` | 6/8 `429 temporarily rate-limited upstream` | 唯一没被限流的那次 200 且合规（2.4s） |
+
+### 三家合起来看（这是本轮真正的结论）
+
+| 提供方 | `json_schema` | `tools` / function_calling |
+|---|---|---|
+| 魔搭 API-Inference（现网） | **端点整体不支持**，稳定 400 | **5/5 合规，2.2–3.7s，判对 `rag`** |
+| 硅基流动 | 名义支持，**5 次里 3 次 75s 超时** | 5/5 合规，8.6–14.4s，判成 `search` |
+| OpenRouter | **按模型**：两个 2/2 合规、一个 400、两个免费池被上游凭据/限流打死 | **3/3 可用模型全部 2/2 合规**，2.2–4.2s |
+
+⇒ **`tools` 是三家唯一全绿的形态（本轮 11/11 次模型-提供方组合都合规），`json_schema` 三家行为各不相同。**
+⇒ R1（`method="function_calling"`）因此不只是"修当前这个 bug"，它同时让路由层**跨提供方可移植**：
+   以后换魔搭/硅基流动/OpenRouter 任何一个，都不需要再动 `router.py`。
+⇒ 但**演示期仍不换提供方**：OpenRouter 免费池的可用性不由我们控制（`gemma:free` 8/8 死于它自己的上游 Google key，
+   `poolside` 6/8 限流），而现网魔搭的 tools 路线实测 5/5、2–4s、判断正确。
+   若将来要出公网演示，OpenRouter 的 **付费** 路由（非 `:free`）比免费池合适，`liquid/lfm-2.5-2.6b` 这类小模型
+   做路由这种"三分类"任务已经够（tools 路径 4s 内、判对 `rag`）。
+
+### 一个附带的产品观察（不改本轮结论）
+
+同一个问题、同一个 schema，三家的小模型判成 `search` 的偏多（硅基流动 5/5 search、OpenRouter 两个模型 search、
+魔搭判 `rag`），说明**路由质量本身依赖模型能力，不依赖 `response_format` 形态**。⇒ 落在本方案 §4 的验收第 4 条：
+"因果问法能命中 rag"要有用例钉住，而不是改了 method 就默认路由变准。
