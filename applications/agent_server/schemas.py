@@ -145,6 +145,14 @@ class HealthResponse(BaseHealthResponse):
     embedding_real: bool = Field(False, description="RAG/记忆检索是否真在算语义（False=MockEmbedder 字面比对）")
     planner: str | None = Field(None, description="当前执行路径（默认 deterministic）")
     guard_enabled: bool = Field(False, description="输入护栏（PII/injection）是否打开")
+    # Langfuse 观测面（方案 plan-langfuse-wiring §2.2）：两盏灯必须分开报，合成一盏就退回
+    # "配置项非空 = 可用"那个已被证伪的读法（llm 位在账号 403 时照样 true）。
+    langfuse_enabled: bool = Field(
+        False, description="LANGFUSE_PUBLIC_KEY/SECRET_KEY/HOST 三者是否都非空（配置意愿，**不是能力位**）"
+    )
+    langfuse_ready: bool = Field(
+        False, description="启动期 LLM 回调是否真装配成功（false 且 enabled=true ⇒ 配了但没接上，多为镜像未装客户端包）"
+    )
     auth_enabled: bool = Field(False, description="接口是否要求 X-API-Key（不回显密钥）")
     identity_mode: str | None = Field(
         None, description="租户身份模式：jwt / single / insecure（与启动守卫同一判定）"

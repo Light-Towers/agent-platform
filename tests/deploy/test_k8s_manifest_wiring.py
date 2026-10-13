@@ -26,8 +26,10 @@ _DEPLOY = _ROOT / "deploy" / "k8s" / "20-agent-platform.yaml"
 _THIRD_PARTY_ENV = {"HF_HOME", "HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE", "OMP_NUM_THREADS"}
 
 # 真实密钥永不入库。126 上它们住在集群单独建的 observability-keys（对象名早于鉴权用途）
+# LANGFUSE_* 两把是 Langfuse 项目 API key（2026-10-13 无头初始化生成，
+# 经 stdin 写入该对象；见 deploy/observability/langfuse.env.example 的注入去向表）
 _CLUSTER_OWNED_SECRET_OBJECTS = {"observability-keys"}
-_CLUSTER_OWNED_SECRET_KEYS = {"LLM_API_KEY", "API_KEY"}
+_CLUSTER_OWNED_SECRET_KEYS = {"LLM_API_KEY", "API_KEY", "LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY"}
 
 # k8s 对未知字段不报错、直接丢（非 strict validate）⇒ 用白名单把它变成用例失败
 _CONTAINER_FIELDS = {

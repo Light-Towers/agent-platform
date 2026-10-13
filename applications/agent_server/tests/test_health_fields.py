@@ -21,11 +21,14 @@ NEW_FIELDS = (
     "scheduler", "control_plane", "cost_governance", "forensic",
     "embedding_backend", "embedding_real", "planner",
     "guard_enabled", "auth_enabled", "identity_mode",
+    # Langfuse 两盏灯（方案 plan-langfuse-wiring §2.2）：enabled=配置意愿，ready=真装配。
+    "langfuse_enabled", "langfuse_ready",
 )
 
 _SWITCHES = (
     "SCHEDULER_ENABLED", "API_KEY", "SINGLE_TENANT", "GUARD_ENABLED",
     "DEPLOY_ENFORCE_IDENTITY", "LLM_PUBLIC_KEY",
+    "LLM_API_KEY", "LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY", "LANGFUSE_HOST",
 )
 
 
@@ -167,6 +170,98 @@ class TestEmbedBackendIsNotComputedInProbePath:
                 samples.append((time.perf_counter() - t0) * 1000)
         samples.sort()
         assert samples[10] < 100, f"/health median={samples[10]:.1f}ms，疑似把模型加载放进了探针路径"
+
+
+class TestLangfuseLights:
+    """两盏灯必须能区分"没配"与"配了但没接上"——合成一盏就是重蹈 llm 位的覆辙。"""
+
+    _CREDS = {
+        "LANGFUSE_PUBLIC_KEY": "pk-lf-test",
+        "LANGFUSE_SECRET_KEY": "sk-lf-test",
+        "LANGFUSE_HOST": "http://127.0.0.1:3000",
+    }
+
+    def test_enabled_only_means_three_keys_nonempty(self, monkeypatch):
+        """没有 LLM 就没有可挂载的模型：enabled 可以为 true，ready 必须 false。"""
+        off = _health_with(monkeypatch)
+        on = _health_with(monkeypatch, **self._CREDS)
+
+        assert (off["langfuse_enabled"], on["langfuse_enabled"]) == (False, True)
+        # 这一对 (true, false) 正是"配了但没接上"的唯一现场信号
+        assert (on["langfuse_enabled"], on["langfuse_ready"]) == (True, False)
+
+    def test_ready_tracks_actual_callback_assembly_not_config(self, monkeypatch):
+        """ready 取自构造期真挂上的 callbacks（装配点唯一：agent/llm.py:build_chat_model）。
+
+        替身必须与真实协作者同接口：get_langfuse_callbacks 返回 **BaseCallbackHandler
+        实例的 list**。第一版这里塞的是字符串哨兵，被 ChatOpenAI 的 pydantic 校验
+        （callbacks.is-instance[BaseCallbackManager]）当场拒绝——那测的是我的替身，
+        不是被测代码。
+        """
+        import agent_runtime.tracing as tracing_mod
+        from langchain_core.callbacks import BaseCallbackHandler
+
+        class _SentinelHandler(BaseCallbackHandler):
+            """真实 handler 的最小同接口替身（只要求是 BaseCallbackHandler 实例）。"""
+
+        env = {"LLM_API_KEY": "sk-test-must-not-appear", **self._CREDS}
+
+        orig = tracing_mod.get_langfuse_callbacks
+        tracing_mod.get_langfuse_callbacks = lambda **kw: [_SentinelHandler()]
+        try:
+            data = _health_with(monkeypatch, **env)
+        finally:
+            tracing_mod.get_langfuse_callbacks = orig
+
+        assert (data["langfuse_enabled"], data["langfuse_ready"]) == (True, True)
+
+    def test_import_failure_keeps_ready_red(self, monkeypatch):
+        """包没装/初始化失败时（tracing 返回空列表）ready 必须 false，服务照常起。"""
+        import agent_runtime.tracing as tracing_mod
+
+        orig = tracing_mod.get_langfuse_callbacks
+        tracing_mod.get_langfuse_callbacks = lambda **kw: []
+        try:
+            data = _health_with(monkeypatch, LLM_API_KEY="sk-test", **self._CREDS)
+        finally:
+            tracing_mod.get_langfuse_callbacks = orig
+
+        assert (data["langfuse_enabled"], data["langfuse_ready"]) == (True, False)
+
+    def test_probe_path_does_not_build_a_langfuse_client(self, monkeypatch):
+        """灯在启动期算一次；/health 里绝不再调 get_langfuse_callbacks。
+
+        与 embedder 预热同一条红线：那会让每次探针构造一个 Langfuse 客户端，
+        而集群探针 timeoutSeconds=1、liveness 连错 3 次即杀容器。
+        """
+        import agent_runtime.tracing as tracing_mod
+
+        calls = {"n": 0}
+
+        def _boom(**kw):
+            calls["n"] += 1
+            raise AssertionError("探针路径不得构造 Langfuse 客户端")
+
+        orig = tracing_mod.get_langfuse_callbacks
+        try:
+            with TestClient(app) as client:  # lifespan 正常跑一次（那一次是允许的）
+                tracing_mod.get_langfuse_callbacks = _boom
+                client.get("/health").json()
+        finally:
+            tracing_mod.get_langfuse_callbacks = orig
+
+        assert calls["n"] == 0
+
+    def test_health_never_echoes_langfuse_credentials(self, monkeypatch):
+        monkeypatch.setenv("LLM_API_KEY", "llm-secret-must-not-appear")
+        for key, value in self._CREDS.items():
+            monkeypatch.setenv(key, value + "-must-not-appear")
+        _clear_cache()
+        with TestClient(app) as client:
+            resp = client.get("/health")
+
+        for value in list(self._CREDS.values()) + ["llm-secret-must-not-appear"]:
+            assert value not in resp.text
 
 
 def _raise_runtime_error(*a, **k):

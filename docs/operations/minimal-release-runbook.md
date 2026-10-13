@@ -152,11 +152,17 @@ done   # 期望：apply=线上现状(10) / create=清单真值(21)
 | `planner: "deterministic"` | 默认路径；别把 graph/agentic 当已验收 |
 | `otel_status: "ACTIVE"` | 基线 5 前提 |
 
-**两处别读错的字段（本版无承载面，不是"都健康"的意思）**：
+**三处别读错的字段（本版无承载面，不是"都健康"的意思）**：
 
 - `llm: true` 只表示 `LLM_API_KEY` 这个配置项非空（`llm_enabled = bool(llm_api_key)`），**不是能力位**。
   本轮 Gate 1 就是被它误导过一回：账号返回 403（要求邮箱验证）时 `llm` 仍是 `true`。
   页面把它渲染成"已配置密钥（可用性以实际回答为准）"，口头汇报不得简化成"模型正常"。
+- **Langfuse 两盏灯各管一段，单独任何一盏都不等于"接上了"**（2026-10-13 起）：
+  `langfuse_enabled=true` 只代表 `LANGFUSE_PUBLIC_KEY/SECRET_KEY/HOST` 三个配置项非空；
+  `langfuse_ready=true` 只代表**启动期回调真挂上了 ChatOpenAI**（装配点唯一 `agent/llm.py`）。
+  "trace 真落进观测平台"是第三件事，判据只认 `deploy/observability/langfuse_proof.py` 的 A3。
+  两盏灯都是**启动期算一次、探针只读已存值**：绝不在 `/health` 里调 `get_langfuse_callbacks()`——
+  那会让每次探测构造一个 Langfuse 客户端，与"不在探针路径加载 embedder"是同一条红线。
 - `dependencies: []` 全平台**没有任何服务填过它**（`grep DependencyHealth/dependencies=` 只命中定义处与 nl2sql 的一句显式空列表）。
   读成"所有依赖都健康"是错的；它当前就是一条无数据承载的字段。**待拍板**：填上真值还是从共享契约里摘掉。
 
