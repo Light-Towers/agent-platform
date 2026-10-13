@@ -137,3 +137,36 @@ ChatOpenAI.with_structured_output(schema, *, method: Literal['function_calling',
 `FallbackChatModel.with_structured_output` 恒绑 primary ⇒ 当前"主备"在结构化路径上等于**没有备**。
 端点整体不可用时（10-12 已实测过那种形态）路由会全部落到词表，这没问题；但**没有任何一个模型能替另一个**这件事要写进运维口径，
 别把 `LLM_FALLBACK_MODEL` 当成"配了备用模型"。
+
+## 10. 两个提供方对照（2026-10-13，需求方要求实测硅基流动后补）
+
+先回答"是不是魔搭不兼容"：**是端点能力面的问题，不是模型选错**。魔搭 API-Inference 官方文档承诺的调用面是
+Chat Completions、Responses API（**且明说"只支持 Qwen3.5 系列模型"**）、Anthropic 兼容（beta）——
+**通篇没有 `response_format` 结构化输出这一项**。我们收到的 `<400> InternalError.Algo.InvalidParameter` 前缀
+与 `chatcmpl-*` 响应 id 是 DashScope 系兼容层的签名，那句 `This response_format type is unavailable now`
+就是该层对"没实现的 response_format 类型"的固定回绝。⇒ 换 `deepseek-ai/…` 为别的魔搭模型不会改变结论。
+
+对**同一套五种形态**打了第二个提供方（硅基流动 `https://api.siliconflow.cn/v1`，从 Pod 内直连可达，
+DNS 47.117.173.229 / TCP443 通），并把判据从"HTTP 200"收紧成"**能否解析成 `RouteDecision`**"
+（三必填字段齐 + `capability` 在枚举内）：
+
+| 提供方 / 模型 | 纯补全 | `json_schema`+strict | `json_object` | `tools`+`tool_choice=required` |
+|---|---|---|---|---|
+| 魔搭 `deepseek-ai/DeepSeek-V4.1-Flash`（现网在用） | 200 | **400，稳定拒绝**（带/不带 strict 都一样） | 400 要求 prompt 含 json；含了能用但不贴 schema | **200，5/5 合规**，2.2–3.7s，`capability=rag`（判断也对） |
+| 硅基流动 `Qwen/Qwen3-8B`（免费小模型） | 200 | 200 **但 5 次里 3 次 75s 读超时**，成功那 2 次字段合规、判断却错（`code_execution`/`search`） | 200 但**缺全部三个字段**（合规=False），耗时 56.6s | **200，5/5 合规**，8.6–14.4s，但 5/5 判成 `search`——"根据文档"的问题被判去联网 |
+
+三条要一起读的结论：
+
+1. **两个提供方的最大公约数是 `tools`/function_calling**，而不是 `json_schema`。⇒ 这直接否掉了"换提供方就不改代码"这条路：
+   换到硅基流动照样要动 `router.py`（它现在传的是默认 `json_schema`），换了也白换。
+2. **R1（`method="function_calling"`）的证据强度因此更高**：现网这把魔搭 key 上 5/5 合规、2–4s、判断正确。
+3. **演示期不要把 LLM 切到硅基流动**：小模型延迟 8.6–14.4s（魔搭 2.2–3.7s）、`json_schema` 有 60% 超时率，
+   而且路由质量更差。这和本仓库既有的教训一致（`knowledge-service` 早把"SiliconFlow API 偶发无响应挂起、
+   排队导致 P95 243s"记进 benchmark 与 eval harness 的 `--llm-timeout`）。
+   硅基流动在本项目的既定角色是 **embedding/rerank 的可选提供方**（`SILICONFLOW_API_KEY`），不是 LLM 主链路。
+
+### 由此定的建议（等拍板）
+
+**R1 落两行**（`router.py:87` 传 `method="function_calling"` + `fallback.py:227` 透传 `**kwargs`），
+提供方**继续用魔搭**；R2 作为第二步（启动期探一次结构化能力并出灯），避免下次换提供方再静默一次。
+不换提供方、不引入新密钥、`SILICONFLOW_API_KEY` 保持在它原有的 embedding/rerank 位置上。

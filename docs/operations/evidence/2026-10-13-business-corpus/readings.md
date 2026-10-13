@@ -201,7 +201,34 @@ SDK 侧（Pod 内实测）：`langchain-openai==1.7.0` / `langchain-core==1.6.9`
 | 126 侧保留脚本 | `/tmp/r30db.py`（counts/wipe_all/probe/ablate/del_source）、`/tmp/r30q.py`（单发问答探针）、`/tmp/r31.sh`（有效消融配方，可整轮复跑）+ 日志 `/tmp/r30.log`（作废那轮）`/tmp/r31.log`。被取代的 r23/r24/r25/r26/r27/r28/r29 已删 |
 | 密钥 | 全程只用键名；`API_KEY` 从 `observability-keys` 读入 shell 变量并以 **env**（非 argv，`ps aux` 全机可见）传给探针进程，未打印、未落盘 |
 
-## 9. 今天仍然没证的事
+## 9. 提供方对照与密钥处置（10:05–10:25，需求方要求实测硅基流动）
+
+| 判据 | 魔搭 `deepseek-ai/DeepSeek-V4.1-Flash`（现网） | 硅基流动 `Qwen/Qwen3-8B`（免费小模型） |
+|---|---|---|
+| 纯补全 | 200 | 200 |
+| `json_schema`+strict | **400 稳定拒绝**（不带 strict 同样 400） | 200 **但 5 次里 3 次 75s 读超时**；成功那 2 次字段合规、判断错 |
+| `json_object` | 400 要求 prompt 含 "json"；含了能返 200 但自造字段名 | 200 但**三个必填字段全缺**（56.6s） |
+| `tools`+`tool_choice=required` | **5/5 合规，2.2–3.7s，`capability=rag`（判断也对）** | **5/5 合规，8.6–14.4s，但 5/5 判成 `search`** |
+
+判据从"HTTP 200"收紧成"**能否解析成 `RouteDecision`**"（三必填字段齐 + `capability` 在枚举内）之后，
+`json_object` 那条假绿灯才现形——两家都能返 200，都**不贴 schema**。
+
+⇒ 两家的最大公约数是 `function_calling`，**不是** `json_schema` ⇒ "换个提供方就不用改代码"这条路被实测否掉：
+现网传的正是默认 `json_schema`，换到硅基流动照样得改 `router.py`。
+⇒ 演示期**不切**硅基流动：延迟是魔搭的 3–4 倍、`json_schema` 60% 超时、路由质量更差（"根据文档"被判去联网）。
+这与仓库既有教训一致（`knowledge-service` 的 benchmark 早记过"SiliconFlow API 偶发无响应挂起 / 排队 P95 243s"，
+`eval/run_e2e_eval.py` 为此专门加了 `--llm-timeout`）。它在本案里的既定位置是 **embedding/rerank 的可选提供方**。
+
+**密钥处置（如实记）**：需求方本轮在对话里**明文**给了这把硅基流动 key。用法是——经 ssh stdin 交给远端 shell 变量，
+再 `env SF_KEY=… python -` 注入 Pod 内探针；**未写入仓库任何文件、未写入 126 任何文件、未 echo、不进 argv**
+（`ps aux` 全主机可见 argv）。⚠️ 但它已出现在对话记录里 ⇒ **建议测完轮换**。126 上留下的 `/tmp/sf*.py` 只是探针代码，不含密钥。
+
+文档面佐证：魔搭 API-Inference 官方文档承诺的调用面只有 Chat Completions、Responses API（并明说"只支持 Qwen3.5 系列模型"）、
+Anthropic 兼容（beta），**没有 `response_format` 结构化输出**；我们吃到的 400 前缀 `InternalError.Algo.InvalidParameter`
+与 `chatcmpl-*` 响应 id 是 DashScope 系兼容层签名 ⇒ **是端点能力面的缺口，不是模型选错**，换魔搭上别的模型不改变结论。
+完整矩阵见 `plan-router-keyword-gate-hides-corpus-2026-10-12.md` §10。
+
+## 10. 今天仍然没证的事
 
 1. **`/health` 仍没有"结构化输出可用"这盏灯**——根因虽然定位了（§5.1），但**没有灯**这件事本身没变：换一个提供方/模型时，
    同一条静默回退还会再发生一次，除非落 §5.1 的修法或启动期能力探针。
