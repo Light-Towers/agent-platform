@@ -228,6 +228,31 @@ Anthropic 兼容（beta），**没有 `response_format` 结构化输出**；我�
 与 `chatcmpl-*` 响应 id 是 DashScope 系兼容层签名 ⇒ **是端点能力面的缺口，不是模型选错**，换魔搭上别的模型不改变结论。
 完整矩阵见 `plan-router-keyword-gate-hides-corpus-2026-10-12.md` §10。
 
+### 9.1 第三家：OpenRouter（10:30–10:40，需求方又给一把 key 后实测）
+
+`https://openrouter.ai/api/v1` 从 Pod 内可达（DNS 104.18.3.115 / TCP443 通），共 459 个模型、`:free` 15 个、
+**没有免费的 deepseek**。判据仍是"能否解析成 `RouteDecision`"，并把失败分三类记——**混在一起就会把配额问题误读成能力问题**：
+
+| 模型 | `json_schema`+strict | `tools` |
+|---|---|---|
+| `nvidia/nemotron-3.5-lightning:free` | 2/2 合规（9.4s、12.8s） | 2/2 合规（2.3–2.9s） |
+| `liquid/lfm-2.5-2.6b:free` | 2/2 合规（11.1–17.7s） | 2/2 合规（4.1–4.2s）且**判对 `rag`** |
+| `apodex/apodex-1.1-mini:free` | **400** `INVALID_REQUEST`（该模型不支持） | 2/2 合规（2.2–2.5s） |
+| `google/gemma-4-26b-a4b-it:free` | 8/8 失败：`Provider returned error … "API key not valid"` ⇒ **OpenRouter 自己的上游 Google 凭据失效** | 同左 |
+| `poolside/laguna-xs-2.1:free` | 6/8 `429 temporarily rate-limited upstream` | 没被限流的那次 200 且合规 |
+
+**三家合起来（本轮真正的结论）**：`tools` 是 11/11 个模型-提供方组合里唯一全绿的形态；
+`json_schema` 三家行为各不相同（魔搭整体不支持 / 硅基流动 60% 超时 / OpenRouter 按模型且受免费池支配）。
+⇒ R1 不只是修当前 bug，它让路由层**跨提供方可移植**——以后换任何一家都不用再动 `router.py`。
+⇒ 演示期仍不换提供方：OpenRouter 免费池的可用性不由我们控制，而现网魔搭的 tools 路线 5/5、2–4s、判对。
+
+附带一条产品观察：同一问题同一 schema，小模型普遍把"根据文档…"判成 `search`（硅基流动 5/5、OpenRouter 两个模型），
+只有魔搭 DeepSeek 和 `lfm-2.5-2.6b` 的 tools 路径判成 `rag` ⇒ **路由质量取决于模型能力，不取决于 `response_format` 形态**；
+改了 method 不等于路由变准，所以方案 §4 的验收第 4 条（"因果问法能命中 rag"要有用例钉住）不能省。
+
+**这把 key 同样按 §9 的口径处置**：只经 ssh stdin → shell 变量 → `env` 注入 Pod 内探针，不落任何文件、不进 argv、未 echo；
+探针脚本 `/tmp/or*.py` 测完已删，`grep -rl 'sk-or-' /tmp` 返回 0。⚠️ 它也已出现在对话记录里 ⇒ **建议一并轮换**。
+
 ## 10. 今天仍然没证的事
 
 1. **`/health` 仍没有"结构化输出可用"这盏灯**——根因虽然定位了（§5.1），但**没有灯**这件事本身没变：换一个提供方/模型时，
