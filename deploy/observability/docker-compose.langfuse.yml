@@ -1,0 +1,165 @@
+# Langfuse 观测栈（126 内网自托管 · 按需起停，非常驻）
+#
+# 为什么不直接用 applications/agent_federation/docker-compose.yml 里那套同名服务：
+#   1) 端口撞车（2026-10-13 在 126 实测）：那份编排要发布 9000/9091/6379，
+#      而这台机上 9000-9001 归 knowledge-service-minio、9091 归 knowledge-service-milvus、
+#      6379 已被占 ⇒ 六服务里三个起不来。本文件**只发布 langfuse web 的 3000**，
+#      其余全部留在 compose 内部网络（应用 Pod 经宿主 IP 访问 3000，与 jaeger.sh 同一条路）。
+#   2) 弱默认值：那份的 langfuse-db 写死 POSTGRES_PASSWORD=langfuse，且 web 的
+#      DATABASE_URL 把同一个弱值拼进了连接串 ⇒ 在共享主机上不可接受。
+#      本文件所有密钥一律 `${VAR:?}` fail-closed：不注入即拒绝启动，没有兜底弱值。
+#   3) 镜像 pin 与那份保持一致（clickhouse 25.12 / postgres 15-alpine / valkey-bundle 9.1.2 /
+#      minio:latest / langfuse{,-worker}:4）——版本真值在那份，本文件是 126 的运维形态。
+#
+# 密钥来源：deploy/observability/langfuse.env.example 列的是**配置项名**，
+# 真实值只在 126 上 `chmod 600` 的 env 文件里，不进仓库、不进 argv、不进聊天。
+name: langfuse-obs
+
+services:
+  langfuse-db:
+    image: postgres:15-alpine
+    container_name: lf-langfuse-db
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=langfuse
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?请设置 POSTGRES_PASSWORD}
+      - POSTGRES_DB=langfuse
+    volumes:
+      - lf-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U langfuse"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    networks: [lf-net]
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:25.12
+    container_name: lf-clickhouse
+    restart: unless-stopped
+    environment:
+      - CLICKHOUSE_DB=langfuse
+      - CLICKHOUSE_USER=${CLICKHOUSE_USER:?请设置 CLICKHOUSE_USER}
+      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD:?请设置 CLICKHOUSE_PASSWORD}
+      - CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1
+    volumes:
+      - lf-clickhouse-data:/var/lib/clickhouse
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:8123/ping || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    networks: [lf-net]
+
+  valkey:
+    image: valkey/valkey-bundle:9.1.2
+    container_name: lf-valkey
+    restart: unless-stopped
+    command: >
+      --requirepass ${REDIS_AUTH:?请设置 REDIS_AUTH}
+      --maxmemory-policy noeviction
+    volumes:
+      - lf-valkey-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "valkey-cli -a ${REDIS_AUTH} ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    networks: [lf-net]
+
+  minio:
+    # 不用 minio/minio:latest —— 2026-10-13 实测：这台机的 SWR mirror 不代理可变 tag，
+    # 直连 registry-1.docker.io 超时（两次都失败）。改用盘上已有的 release pin，
+    # 且已实测其镜像内 /usr/bin/mc 在位、`mc ready local` 返回 OK（健康检查依赖这两件事）。
+    image: minio/minio:RELEASE.2024-01-16T16-07-38Z
+    container_name: lf-minio
+    restart: unless-stopped
+    entrypoint: sh
+    # 桶必须在服务起来前存在：Langfuse v3+ 的事件落盘不支持懒建桶。
+    command: -c 'mkdir -p /data/langfuse && minio server --address ":9000" --console-address ":9001" /data'
+    environment:
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER:?请设置 MINIO_ROOT_USER}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:?请设置 MINIO_ROOT_PASSWORD}
+    volumes:
+      - lf-minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks: [lf-net]
+
+  langfuse: &langfuse-svc
+    image: langfuse/langfuse:4
+    container_name: lf-langfuse
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment: &langfuse-env
+      - DATABASE_URL=postgresql://langfuse:${POSTGRES_PASSWORD}@lf-langfuse-db:5432/langfuse
+      - NEXTAUTH_SECRET=${LANGFUSE_NEXTAUTH_SECRET:?请设置 LANGFUSE_NEXTAUTH_SECRET}
+      - SALT=${LANGFUSE_SALT:?请设置 LANGFUSE_SALT}
+      - ENCRYPTION_KEY=${LANGFUSE_ENCRYPTION_KEY:?请设置 LANGFUSE_ENCRYPTION_KEY（64 位 hex）}
+      # Pod/浏览器都经宿主 IP 访问，localhost 在 Pod 里指向 Pod 自身 ⇒ 必须是实例 IP。
+      - NEXTAUTH_URL=${LANGFUSE_NEXTAUTH_URL:?请设置 LANGFUSE_NEXTAUTH_URL}
+      - TELEMETRY_ENABLED=false
+      - CLICKHOUSE_URL=http://lf-clickhouse:8123
+      - CLICKHOUSE_MIGRATION_URL=clickhouse://lf-clickhouse:9000
+      - CLICKHOUSE_USER=${CLICKHOUSE_USER}
+      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD}
+      - CLICKHOUSE_CLUSTER_ENABLED=false
+      - REDIS_HOST=lf-valkey
+      - REDIS_PORT=6379
+      - REDIS_AUTH=${REDIS_AUTH}
+      - LANGFUSE_S3_EVENT_UPLOAD_BUCKET=langfuse
+      - LANGFUSE_S3_EVENT_UPLOAD_REGION=auto
+      - LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID=${MINIO_ROOT_USER}
+      - LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD}
+      - LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT=http://lf-minio:9000
+      - LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE=true
+      - LANGFUSE_S3_EVENT_UPLOAD_PREFIX=events/
+      - LANGFUSE_MEDIA_UPLOAD_BUCKET=langfuse
+      - LANGFUSE_MEDIA_UPLOAD_REGION=auto
+      - LANGFUSE_MEDIA_UPLOAD_ACCESS_KEY_ID=${MINIO_ROOT_USER}
+      - LANGFUSE_MEDIA_UPLOAD_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD}
+      - LANGFUSE_MEDIA_UPLOAD_ENDPOINT=http://lf-minio:9000
+      - LANGFUSE_MEDIA_UPLOAD_FORCE_PATH_STYLE=true
+      - LANGFUSE_MEDIA_UPLOAD_PREFIX=media/
+      # 无头初始化：不点浏览器也能建出 org/project/API key。
+      # 注意 **API key 的创建依赖账号存在**，所以"只想要 key、不建用户"这条路不成立 ⇒
+      # 这里必须给 email+password。它们不是接链路必需（接链路只吃 pk/sk），
+      # 但需求方要"开一个浏览器标签页直接看真界面"，那就得能登录。
+      - LANGFUSE_INIT_ORG_ID=${LANGFUSE_INIT_ORG_ID:?请设置 LANGFUSE_INIT_ORG_ID}
+      - LANGFUSE_INIT_ORG_NAME=${LANGFUSE_INIT_ORG_NAME:-agent-platform-126}
+      - LANGFUSE_INIT_PROJECT_ID=${LANGFUSE_INIT_PROJECT_ID:?请设置 LANGFUSE_INIT_PROJECT_ID}
+      - LANGFUSE_INIT_PROJECT_NAME=${LANGFUSE_INIT_PROJECT_NAME:-agent-platform}
+      - LANGFUSE_INIT_PROJECT_PUBLIC_KEY=${LANGFUSE_INIT_PROJECT_PUBLIC_KEY:?请设置 LANGFUSE_INIT_PROJECT_PUBLIC_KEY}
+      - LANGFUSE_INIT_PROJECT_SECRET_KEY=${LANGFUSE_INIT_PROJECT_SECRET_KEY:?请设置 LANGFUSE_INIT_PROJECT_SECRET_KEY}
+      - LANGFUSE_INIT_USER_EMAIL=${LANGFUSE_INIT_USER_EMAIL:?请设置 LANGFUSE_INIT_USER_EMAIL}
+      - LANGFUSE_INIT_USER_NAME=${LANGFUSE_INIT_USER_NAME:-ops}
+      - LANGFUSE_INIT_USER_PASSWORD=${LANGFUSE_INIT_USER_PASSWORD:?请设置 LANGFUSE_INIT_USER_PASSWORD}
+    depends_on:
+      langfuse-db: {condition: service_healthy}
+      clickhouse: {condition: service_healthy}
+      valkey: {condition: service_healthy}
+      minio: {condition: service_healthy}
+    networks: [lf-net]
+
+  langfuse-worker:
+    <<: *langfuse-svc
+    # image 必须显式覆盖：YAML 锚点复制的是**整个服务块**，只写 container_name/ports 的话
+    # worker 会拿着 web 镜像跑 ⇒ 两个进程同时对同一库执行 Prisma 迁移 ⇒ 40P01 deadlock
+    #（本文件 2026-10-13 就这么崩过一轮，日志实读：Process 72/73 互锁 advisory lock）。
+    image: langfuse/langfuse-worker:4
+    container_name: lf-langfuse-worker
+    ports: []
+
+volumes:
+  lf-db-data:
+  lf-clickhouse-data:
+  lf-valkey-data:
+  lf-minio-data:
+
+networks:
+  lf-net:
+    driver: bridge

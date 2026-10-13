@@ -130,6 +130,26 @@ spec:
                 configMapKeyRef:
                   name: agent-platform-config
                   key: OTEL_ENDPOINT
+            # Langfuse 观测面（方案 docs/plans/plan-langfuse-wiring-2026-10-13.md）。
+            # HOST 走 CM（非密钥，且必须与 OTEL_ENDPOINT 同一条"宿主 IP"链路——观测栈在
+            # 126 的 moby 上，不在集群内）；两把项目凭据走 Secret，缺键即
+            # CreateContainerConfigError fail-closed，与 LLM_API_KEY 同一口径。
+            # 注意：三键齐 ≠ 接上了。包没装 / 栈没起时这里照样注入 ⇒ 判据见 §4 A3。
+            - name: LANGFUSE_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: agent-platform-config
+                  key: LANGFUSE_HOST
+            - name: LANGFUSE_PUBLIC_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: observability-keys
+                  key: LANGFUSE_PUBLIC_KEY
+            - name: LANGFUSE_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: observability-keys
+                  key: LANGFUSE_SECRET_KEY
           # compose TB-7：lifespan 内 init_pool 连不上 pg 会阻塞 ~30s
           # → startupProbe 给足 8*5s=40s 窗口，期间 readiness/liveness 不生效
           # 本地 embedding 在 lifespan 预热，重活不落进 /health 探测路径。

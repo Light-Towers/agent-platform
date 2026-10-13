@@ -25,3 +25,8 @@ data:
   OTEL_SERVICE_NAME: "agent-platform"
   # 端点只能写宿主 IP：Jaeger all-in-one 是以 docker 跑在 126 宿主的容器，不在集群内（见 deploy/k8s/VERIFICATION.md）。
   OTEL_ENDPOINT: "http://<internal-ip>:4318/v1/traces"
+  # Langfuse 同理：观测栈按 deploy/observability/langfuse.sh **按需起在 126 的 moby 上**（非常驻），
+  # 只发布 web 的 3000，其余五个容器留在 compose 内网 ⇒ 集群内解析不到服务名，必须写宿主 IP。
+  # 栈没起时这三键仍算"已配置"，但回调发送失败 ⇒ /health 的 langfuse_ready 只反映装配态，
+  # 真判据是"Langfuse 里查得到这条 trace"（方案 §4 A3）。
+  LANGFUSE_HOST: "http://<internal-ip>:3000"

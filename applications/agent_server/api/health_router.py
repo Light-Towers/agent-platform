@@ -52,6 +52,10 @@ async def health(request: Request) -> HealthResponse:
         embedding_real=bool(getattr(state, "embedding_real", False)),
         planner=settings.planner,
         guard_enabled=settings.guard_enabled,
+        # Langfuse：与 embedding_backend/embedding_real 同一套"启动期算一次、这里只读已存值"。
+        # enabled=意愿（三键非空），ready=运行态（回调真挂上了）；两者的差值就是故障信号。
+        langfuse_enabled=bool(getattr(state, "langfuse_enabled", False)),
+        langfuse_ready=bool(getattr(state, "langfuse_ready", False)),
         auth_enabled=bool(settings.api_key),
         # 与 lifespan 的 require_identity_startup_guard 同一个函数，不另建一套判定。
         identity_mode=resolve_startup_tenant_mode()[0],

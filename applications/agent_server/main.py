@@ -225,6 +225,16 @@ async def lifespan(app: FastAPI):
 
     llm = build_chat_model()
 
+    # Langfuse 观测面两盏灯（方案 docs/plans/plan-langfuse-wiring-2026-10-13.md §2.2）。
+    # langfuse_enabled 只是"三个配置项非空"= 意愿；langfuse_ready 读**已装配的运行态**——
+    # callbacks 是否在 ChatOpenAI 构造期真挂上（装配点唯一：agent/llm.py:build_chat_model）。
+    # enabled=true 而 ready=false 就是"配了但没接上"，这是镜像没装客户端包时唯一的可见信号
+    #（此前它只记一行 warning 就静默不报，"关了"与"坏了"分不清）。
+    # 判据必须在启动期算：绝不在 /health 探针路径上调 get_langfuse_callbacks()——
+    # 那会让每次探测构造一个 Langfuse 客户端，与"不在探针里加载 embedder"是同一条红线。
+    app.state.langfuse_enabled = settings.langfuse_enabled
+    app.state.langfuse_ready = bool(llm is not None and getattr(llm.primary, "callbacks", None))
+
     # 语义检索后端：启动期解析一次并把实际类型名存进 app.state，/health 只读该已存值。
     # 放在 lifespan 而不是 /health 里现算，是因为集群存活/就绪探针的 timeoutSeconds 为 1、
     # liveness 连错 3 次即杀容器，而本地 embedder 的构造是同步加载模型——在探针路径里
