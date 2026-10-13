@@ -23,6 +23,8 @@
 | 12 | 一次长命令输出整个丢失 | **工具超时**：默认 2 分钟，命令被移入后台且本轮结束 | 长命令显式设 tool timeout 或 run_in_background 并轮询读数 |
 | 13 | 三个 `pkill -f` 把自己 ssh 会话杀了（本轮之前两次） | **自匹配**：模式匹配到自己的命令行 | 用括号技巧 `pkill -f "[d]ocker build"`，杀完必须回读真实进程状态 |
 | 14 | `git add -A docs` 把一份没审过的未跟踪文档扫进提交 | **暂存范围过宽** | 按文件名 `git add <path>`；提交前 `git status` 复核 included 内容 |
+| 15 | 「Jaeger 里没有 `POST /query`」 | **探针淹没**：`GET /health` 每 5s 一条把 `limit=40` 窗口刷满（`deploy/k8s/VERIFICATION.md` §C 第 4 条早已写明这条，我当天仍重犯） | 查询必须带 `operation=` 精查，不用大 `limit` 捞全量 |
+| 16 | 清库时漏删一行残留 | **肉眼列 id 而不是让谓词挑**（我的谓词命中 67，手写的集合是 68–73） | `WHERE id = ANY(谓词查出来的集合)` + `DELETE … RETURNING` 回读被删内容 |
 
 ## 1. 两个观测面互相顶掉（本轮最贵，D-LF-1）
 
@@ -118,7 +120,37 @@ TracerProvider 换成自己那份，processors 只有 `['LangfuseSpanProcessor']
 - 任何"读数为空"的轮次，先判**探针是否真的跑到了**（本轮就有一次：`crictl images --no-trims` 是假 flag，
   grep 无输出被读成"节点缺镜像"）。判据形状：脚本自己先打一行标题/哨兵，多分支都打计数。
 
-## 8. 我这台机器上的会话形状问题（与平台无关，但同样吃时间）
+## 8. 演示前的数据卫生（观众会当场念出来的那一类）
+
+平台的自观测表是**真数据**，所以取证残留会当成"历史"念给观众：
+
+- **`semantic_cache`**：现场问"我之前问了哪些问题？"会走 **sql 能力**，模型自己写
+  `SELECT id, question, answer … FROM semantic_cache ORDER BY created_at` 把清单念出来。
+  2026-10-13 实测该表 16 行里 **7 行是我的取证句**（`LFPROOF-…`／`SHAPECHECK-1`／`同窗对照-…`／
+  `e2e取证-…`／`e2e复验-…`），已按谓词清理，剩 9 行真实内容。**这些 id 会变，别引用行数，复跑谓词查询。**
+- **LangGraph checkpoints（`/history` 面板）**：同一批探针句在会话状态里**还有 8 条**，清它等于
+  **清空整个会话记录面板**（D10 消融时实测过这个副作用）⇒ 属"要不要牺牲一屏历史"的取舍，需拍板，别顺手删。
+- 清理纪律：**用谓词挑集合**（`WHERE question ~ 'LFPROOF|SHAPECHECK|同窗对照|e2e取证|e2e复验|取证标记'`），
+  且 `DELETE … RETURNING id, left(question,56)` 打印被删内容 + 删后回读残留计数 = 0。
+  我第一遍是肉眼列的 id 集合，结果**漏删一行、多包含一条不在谓词里的**（坑档表第 16 行）。
+- 残留行还有第二重代价：它们躺在**语义缓存**里，会以高相似度抢走后续提问的命中（取证问题因此必须
+  **语义新颖**，见 §6）。
+
+### R19 的归因方法（读 `otel.scope.name`，别猜标签）
+
+同一个请求的两条 `POST /query` SERVER span，一条来自 **FastAPI 自带 native telemetry**
+（`otel.scope.name=fastapi`，新 semconv：`http.request.method`/`url.path`/`server.address`），
+一条来自**我们的 kernel 中间件**（`otel.scope.name=agent-platform`，旧 semconv：`http.method`/`http.target`）。
+
+- **别用 `http.route` vs `http.target` 当归属判据**——那只是 semconv 代际差异的副产物，版本一换就骗人。
+- **可见形状取决于客户端带不带 `traceparent`**：带 ⇒ 两条 span 在同一 trace 里互为兄弟；
+  不带（浏览器真实点击）⇒ 两路各自起根，屏幕上变成**两棵独立 trace**（成对的 1-span + 5|6-span）。
+  ⇒ 演示前若不改，口径必须按"两条独立 trace"讲；这一条决定现场怎么解释，也决定改动值不值。
+- **状态灯/附录不是台账**：R19 早在 `deploy/k8s/VERIFICATION.md` §C 定性并转了 issue #23，但因为写在附录里，
+  演示前没人会翻 ⇒ 已提升到 `minimal-release-runbook.md` §9 作为第 **⑲** 条待拍板项。**凡是"当场会被观众
+  看到"的既存缺陷，都要进那张带责任人与时点的台账，而不是留在技术附录。**
+
+## 9. 我这台机器上的会话形状问题（与平台无关，但同样吃时间）
 
 - **ssh 里内联 python/awk 必炸**（本轮两次：嵌套 f-string 引号、三层 awk 引号）。可靠形状始终是
   `写本地文件 → scp → ssh 'bash -s' < 文件` 或 `… python - < 文件`；凭据经 env 传入，**不进 argv**。

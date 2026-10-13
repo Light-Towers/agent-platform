@@ -263,3 +263,23 @@ kubectl delete namespace agent-platform
   - 三台最终宽口径计数均 **0**（`/tmp` `/root` `/var/tmp`），磁盘 125 41G→40G / 241 49G→48G。
 - 本地 `.codeartsdoer/temp/` 本轮 8 个取证脚本（`retire_e2e_forensics.py`、`_dual_span_ab.py`、`_span_tags.py`、`_jaeger_probe.py`、`_span_forensics{,2,3}.sh`、`_drill4_cleanup.sh`）执行完即删，不形成下轮清理债。
 
+
+### C-补（2026-10-13，rev `6ac466af` 重测 R19：两条新读数）
+
+1. **可见形状取决于客户端是否带 `traceparent`**（§C 原文只记录了"同一 trace 内互为兄弟"这一种）：
+   带 ⇒ 两条 `POST /query` 落进同一 trace（`025db3351f5c4c77`、`a748c6fcaa7c418c92e274c89814338b`，
+   两者 `CHILD_OF` 客户端父 span，`warnings` 里的 `invalid parent span IDs` 是假父 id 所致，无害）；
+   **不带（浏览器真实点击）⇒ 两路各自起根，成为两棵互不串联的 trace**——
+   `d1d9e30bd2b3a3e9c70f88a39c0a227b`（1 span，`otel.scope.name=fastapi`）与
+   `1470265ea7ccb5bb7dd76adb2f0fe072`（5 span，`otel.scope.name=agent-platform`）成对，
+   09:50 那对同理。**演示口径要按"两条独立 trace"讲，不是一棵双 span 树。**
+2. **拓扑相对 §C 已变**：`agent-platform` 那条现在带着全部子 span（2× `ChatOpenAI` +
+   `fastapi.dependencies` + `fastapi.endpoint`），业务属性面在它身上；`fastapi` 那条仍是裸的框架
+   SERVER span（新 semconv `http.request.method`/`http.response.status_code`/`url.path`/`server.address`）。
+   ⇒ #23 的默认方案（工厂内 `telemetry={"tracing": False}` 关原生）**不会**丢掉 LLM 子 span 与业务属性，
+   代价只有 `fastapi.dependencies/endpoint/serialization` 三个框架内部细节 span。
+3. 版本读数：镜像内 `fastapi 0.143.0 / starlette 1.8.0`（§C 记录的是 0.142 时代），
+   归因方法固定为读 span 标签 `otel.scope.name`——**别用 `http.route` vs `http.target` 猜**，
+   那是 semconv 代际差异的副产物。
+4. 我自己的重犯（记进 `docs/operations/observability-pitfalls.md`）：§C 第 4 条早已写明"探针淹没，
+   必须按 operation 精查"，我仍在 `limit=40` 的 health 探针里误报过一次"Jaeger 里 0 条 `/query`"。
