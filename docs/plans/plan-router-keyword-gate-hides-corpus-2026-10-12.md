@@ -245,3 +245,25 @@ DeepSeek 走 `/responses` 直接 400 `This text.format type is unavailable`，�
 **R1（`method="function_calling"`，`tool_choice` 保持默认 auto）+ R2（能力探针 + `/health` 出灯）**，
 提供方与模型**都不换**（现网 DeepSeek 的 tools 路线 3/3 合规、判对 `rag`）。
 被否掉的旁路：换 Qwen 走 `json_schema`（零代码但判错方向）、走 Responses API（两家都不吃 json_schema）。
+
+## 13. 三种配置的**路由判定质量**实测（2026-10-13，同构复刻 `decide_route` 的 prompt）
+
+上一版探针只给了枚举、没给"rag=本地知识库"这些能力说明 ⇒ **不同构，结论作废**（我自己记过的那条教训又踩了一次）。
+逐字复刻 `router.py:84` 的 system 文案与 `RouteDecision` 三字段描述后，对 6 条演示问题重测：
+
+| 配置 | 判对 | 错在哪 |
+|---|---|---|
+| **现状**：`json_schema` 恒 400 ⇒ 实际由关键词词表决定 | 5/6 | "为什么特装展台施工必须先报馆才能进场？"（无特征词）→ `direct`，检索根本没发生 |
+| 换 `Qwen/Qwen3.8-Flash-Next`（零代码，`json_schema` 能通） | **4/6** | ①"解释一下报馆三个文件包…"→ `search`，而本部署联网未配置 ⇒ 直接落死路；②因果那题 → `direct` |
+| **现网 DeepSeek + `tools`（tool_choice 留默认 auto）= R1** | **6/6** | 无。含那道无特征词的因果题，reason 明确写"应优先检索本地知识库" |
+
+⇒ **零代码换模型这条路 measured 是负的**（5/6 → 4/6），而且它新增的那个错误恰好落进一条已验证的死链路：
+实测走 `search` 时 SSE 是 `evidence{node:search, count:1, preview:"联网搜索未配置（SEARCH_API_KEY 为空）"}` **重复 3 次**
+（replan 把空证据当"证据不足"重试），最终答案"无法回答该问题"。
+⇒ R1 的两行改动在**不换提供方、不换模型**的前提下拿到 6/6，还顺带省下现在每问一次必然失败的往返。
+
+### 附带抓到的一条演示期风险：魔搭对 DeepSeek 有速率限制
+
+连打 6 次时后两次收到 `429 We have to rate limit you for model deepseek-ai/DeepSeek-V4.1-Flash`。
+⇒ 落 R1 后每问 = 路由 1 次 + 综合作答 1 次 = **两跳模型调用**，演示连问要留间隔；
+`Qwen3.8-Flash-Next` 同批未 429（但不能当成"Qwen 更宽松"的结论，样本太小，只记现象）。
