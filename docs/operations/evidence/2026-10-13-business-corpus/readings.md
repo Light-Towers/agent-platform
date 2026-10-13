@@ -174,8 +174,8 @@ This response_format type is unavailable now', 'code': 'invalid_parameter_error'
 | `/health` | `storage=postgres`、`sql_backend=postgres`、`embedding_backend=LocalEmbedder`、`embedding_real=true`、`auth_enabled=true`、`otel_status=ACTIVE` |
 | chunks | 303（业务 210 + ADR 93），dim 512，唯一向量 301（差值已定性为 `'---'`） |
 | 126 侧语料 | `/tmp/corpus/*.md` 4 份（脱敏版），tar 包 `/tmp/corpus-20261013.tgz` |
-| 回放源 | 今天最后一次问答留下 `semantic_cache=2`、`memories=2`、`checkpoints=1`；演示前须清（见 §4 的清单） |
-| 脚本 | `/tmp/r23.sh` `/tmp/r26.py` `/tmp/r27.py` `/tmp/r28*.py` `/tmp/r30db.py` `/tmp/r30q.py` `/tmp/r31.sh` + 日志 `/tmp/r28.log` `/tmp/r30.log` `/tmp/r31.log` |
+| 回放源 | **全部清零**（09:52 收束：`semantic_cache`/`memories`/`episodic`/`procedural`/`checkpoint_*` 均 0）⇒ 演示第一问不会命中缓存、也不会被会话历史顶上。代价：控制台历史面板是空的，这是预期 |
+| 126 侧保留脚本 | `/tmp/r30db.py`（counts/wipe_all/probe/ablate/del_source）、`/tmp/r30q.py`（单发问答探针）、`/tmp/r31.sh`（有效消融配方，可整轮复跑）+ 日志 `/tmp/r30.log`（作废那轮）`/tmp/r31.log`。被取代的 r23/r24/r25/r26/r27/r28/r29 已删 |
 | 密钥 | 全程只用键名；`API_KEY` 从 `observability-keys` 读入 shell 变量并以 **env**（非 argv，`ps aux` 全机可见）传给探针进程，未打印、未落盘 |
 
 ## 9. 今天仍然没证的事
