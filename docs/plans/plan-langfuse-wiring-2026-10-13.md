@@ -106,7 +106,8 @@ try:
 
 ## 5. 风险与对策| 风险 | 具体 | 对策 |
 |---|---|---|
-| **R2 IO 放大**（本机最真实的风险） | 126 是 `ROTA=1` 单盘、etcd `slow fdatasync` 自 09-20 起 953 条且每天都有，milvus 已被它带死过 15 次；ClickHouse + MinIO 是**持续写**的 | ① 按需起、取证完即停，不做常驻；② 起栈期间盯 `/proc/pressure/io` 与 etcd/milvus 状态，`full avg10` 若冲到两位数立刻 `down`；③ 只喂**一条**取证提问，不做压测 |
+| **R2 IO 放大**（本机最真实的风险，**但对策对象被我搞错了一次**） | 原判断是"ClickHouse + MinIO 持续写会压垮 `ROTA=1` 单盘"。实测相反：六个容器空转一小时 `/proc/pressure/io` 仅 `avg10=1.4-1.9%`；**真正的大头是发布通道的 `docker build`**——pip 层铺上万个文件时 `avg10=67.47%`、同机 etcd 近 5 分钟 41 条 `slow fdatasync/took too long`、milvus 累计重启 30→31（又是 AGENTS.md 记的那条链） | ① **构建排到静默窗口**，且构建期间持续回读 `pressure/io` 与 milvus 重启计数，越线即中止（本轮我就是这样中止的）；② 观测栈仍按需起停（成本低、留作纪律）；③ 只喂**一条**取证提问，不做压测；④ 依赖类判据用一次性容器低成本复验（`langchain` 那条只花 ~10MB 写入），不要为验证而重建 |
+| **R6 依赖门禁验错层**（本轮新增） | G1 只验了"解析器不报错、无降级"，结果镜像里 `import langfuse.langchain` 仍失败——它的前置是顶层 `langchain` 包 | 依赖类验收判据必须是"**目标 import 真成功**"，且在**镜像内**跑（本地 venv 带着 `langchain 1.4.3`，十 session 全绿对这条缺陷零免疫力）。已把 `langchain` 纳入 lint L-4 跟踪包 |
 | R3 盘满 | 栈镜像 + 数据卷吃 22G 余量 | 每步 `df -h /` 回读；余量低于 12G 即停止并如实报告，不硬塞 |
 | R4 新灯被误读成能力位 | `langfuse_enabled=true` 只代表"三键非空" | 页脚与 runbook §3 的"两处别读错的字段"里并列写清；判据只认 A3 |
 | R5 密钥面 | 项目 sk 一旦进过 argv 就等于对全主机公开 | 全程 stdin/env，值不进 argv、不落文件、不进聊天；留证只记长度与指纹前缀 |

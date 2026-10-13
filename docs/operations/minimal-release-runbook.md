@@ -298,18 +298,22 @@ done   # 期望：apply=线上现状(10) / create=清单真值(21)
     答案全部"无法确定"。三次读数一模一样，但一次检索都没发生，删没删那块根本不影响结果。
     ⇒ 消融前置三查：(a) 谓词 `LIKE '%短语%'`（不是前缀 `短语%`）且**唯一命中一块**；(b) 提问确实带特征词、
     第一次读数就是 `route=rag` + `count>0`；(c) 四个回放源清零。改后为 r31，三次读数才构成有效对照。
-11. **观测面只有两层在跑，第三层（Langfuse）没接**（2026-10-13 审核指出未列进本清单，核实为真）。当场能讲的与不能讲的：
+11. **观测面：两层在跑，第三层（Langfuse）已拍板"接"但线上尚未生效**（2026-10-13；⑰ 的现场状态见该行）。当场能讲的与不能讲的：
     - ✅ **平台自建过程明细**：`status` 事件带能力级步骤的 name/latency/tokens，来自运行时记录。
     - ✅ **Jaeger**：`e2e_traceparent.sh` 实跑通过（trace 落库、含 `POST /query` SERVER span）——
       但它打的是**单个服务**（`TARGET=http://127.0.0.1:18000`，判据 `spans >= 1`），
       方案 D5.5 要求的"联邦网关→子服务"跨服务链路**没证过** ⇒ 口头只能说"这个服务内部的一条请求链路"，
       **不得说成"跨服务追踪已验证"**。
-    - ❌ **Langfuse**：代码侧接线是真的（`agent/llm.py` 构造期把 handler 挂到 primary+fallback，
-      `tracing.py` 走 v4 代际契约 `langfuse.langchain`，三态由 `test_tracing.py` 钉住），但**镜像不装**
-      （根 `Dockerfile:29` 只装 `".[otel]"`，`langfuse` 在 `packages/agent-runtime/pyproject.toml:26` 是**可选 extra**），
-      且 `deploy/k8s/20-agent-platform.yaml` 里**没有任何 `LANGFUSE_*` 注入**。后果不是报错而是**静默不报**
-      （导入失败只 `logger.warning` 后返回空列表）⇒ "配了密钥"与"客户端包没装"在页面上长得一样。
-      接不接见 §9 ⑰；不接则汇报时必须说"没有模型调用层的第三方观测屏"。
+    - ⏳ **Langfuse**：代码侧接线一直是真的（`agent/llm.py` 构造期挂 primary+fallback、`tracing.py` 走
+      v4 契约 `langfuse.langchain`、三态由 `test_tracing.py` 钉住）。本轮补的是**分发侧**：
+      包进默认镜像（`Dockerfile` 装 `./packages/agent-runtime[langfuse]`）、清单注入 `LANGFUSE_*` 三键、
+      观测栈起在 126。**但线上 Pod 仍是 `0425257`，镜像重建因 IO 冲突被中止** ⇒
+      **演示当天在此之前仍不能说"有第三块观测屏"**，只能说"平台自建明细 + Jaeger 两层"。
+      接完的判据不是 `/health` 的灯，而是 `deploy/observability/langfuse_proof.py` 的 A3。
+    - ⚠️ **一条通用的依赖验收纪律**（本轮踩出来的）：`langfuse.langchain` 的导入前置是**顶层 `langchain` 包**
+      （它只 `import langchain` 读 `__version__`，真用符号全在 `langchain_core`）。所以"pip 解析通过、
+      零降级"**不等于**"集成可用"——**依赖类判据必须在镜像里跑 `import`，不能在开发机跑**
+      （本地 venv 一直带着 langchain，十 session 全绿对这条缺陷零免疫力）。
     - ⚠️ 顺带：`deploy/k8s/README.md:216` 与 `VERIFICATION.md:155` 仍以"v2 与 langgraph 1.x 根本性依赖冲突"
       作为不部署 Langfuse 的理由——那是 2026-09-29 的事实，S4（`a5fa9031`）已把 import 面迁到 v4 契约，
       **现在的理由是"镜像减重 + 未注入凭据"，不是"接不上"**。
@@ -416,5 +420,5 @@ ssh root@<internal-ip> 'cd /opt/agent-platform && git fetch /tmp/ap-rollback.bun
 | ⑬ | tracing 退出 flush 无上界 | A/B/C | 待拍板（`terminationGracePeriodSeconds: 60` 只是买时间） |
 | ⑭ | 切块器把 `---`/页码行留成独立块 | 过滤 / 容忍 | 待拍板，属改代码 |
 | ⑯ | **D1 交付物"5 条演示问题"至今无产物**（2026-10-13 外部审核指出，核实为真） | 我从现库 7 份业务语料里选并附真跑读数，人工判定列由需求方填 / 需求方直接给题 | **产物已出**（2026-10-13 当天补：`demo-questions.md`，5 题 + 唯一承载块 + 单遍实跑读数 + 三条必须如实说出去的缺陷）。**只剩判定列**："敢不敢当着领导念"由需求方填，我不代判；在那之前不得声称"三道检查全过" |
-| ⑰ | **Langfuse 面要不要接**（方案 D5.5 的第二半，审核核实为未接线） | 接（重建镜像带 `--extra langfuse` + 注入 `LANGFUSE_*` 三个键）/ 不接（明确退回两层证据） | 建议**不接**并写进 §6.2。理由：内网那套服务当前是否在跑**我没证过**；接它要动镜像重建（属重分发），而主证据不依赖它。不接则页脚/汇报必须说"模型调用层原文只在平台自建明细与 Jaeger 里，没有第三方观测屏" |
+| ⑰ | **Langfuse 面要不要接**（方案 D5.5 的第二半，审核核实为未接线） | 接（重建镜像带 `--extra langfuse` + 注入 `LANGFUSE_*` 三个键）/ 不接（明确退回两层证据） | ✅ **已拍板"接"**（2026-10-13 需求方）。**代码已入库 `c63682d`，线上尚未生效**：观测栈在 126 已起（health 200 + 项目凭据打通 `/api/public/projects`），Secret/CM/清单三项注入就绪，但**镜像重建被我中止**——构建期间 `avg10=67.47%` IO stall、同机 etcd 5 分钟 41 条 `slow fdatasync/took too long`、milvus 累计重启 30→31。⇒ 待在**静默窗口**跑 `build.sh c63682d…` → 分发 → apply → 取 A3。**线上现仍是 `0425257`（R1），本轮没动过它**。留证 `evidence/2026-10-13-langfuse-stack/readings.md` |
 | ⑱ | **D7 录播保险 + D8 整场彩排未做**（审核核实为真；我此前把这两张任务卡标成 completed，是改名冒充完成） | 需求方在浏览器前坐一次（持键者输 `API_KEY`）我同步留证 / 我命令行侧先出一版"完整录制"当保险 | 至少要做第 2 项：断网是方案 R0 列的故障面，而现在**没有任何录播文件**。任务卡 #7/#9/#10 已改回未完成状态 |
