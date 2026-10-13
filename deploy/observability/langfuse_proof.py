@@ -178,7 +178,12 @@ def find_observations(w3c_trace_id: str, since: str, marker: str) -> tuple[list[
         rows = _rows(f"fromStartTime={since}&traceId={w3c_trace_id}&{fields}")
         gens = [r for r in rows if (r.get("type") or "").upper() == "GENERATION"]
         if gens:
-            return gens, "by-traceId"
+            # 先命中 ≠ 全到：路由那次比答案那次先落库，立刻判定会少读一条 GENERATION
+            # （于是"input 含检索原文"这条永远读不到）。等一个 settle 窗口再取一次。
+            time.sleep(_SLEEP)
+            later = [r for r in _rows(f"fromStartTime={since}&traceId={w3c_trace_id}&{fields}")
+                     if (r.get("type") or "").upper() == "GENERATION"]
+            return (later or gens), "by-traceId"
         time.sleep(_SLEEP)
         if i == _ROUNDS // 2:
             # 中途换通道：不等 traceId，直接在窗口里找 marker（顺带回答"id 等不等于"）
