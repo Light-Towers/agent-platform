@@ -303,6 +303,21 @@ kubectl -n agent-platform get secret observability-keys -o jsonpath='{.data.LLM_
 | 7 | 12:10 收盘库里真值：`chunks` **93 行 / 3 文档**（35+30+28，`vector_dims=512`，退化向量 0 行）、`semantic_cache` 只留最新问答、`memories` 为当日测试产物 | §4.8 第 7 条那条 `chunks=0` 到此翻页：**pgvector 表真的有内容、真的被查得到**。问答链路用的就是这张表，不是 Milvus（见本节第 4 条与手册 §5） |
 | 8 | 磁盘从 `73% used（68G/26G avail）` 回到 `72%（67G/27G）` | 三个节点上本轮共产出的 451M×3 镜像 tarball 与 `/tmp` 自建脚本已清；改动前的 Deployment 对象**没有**当垃圾删，移到 `/root/ap-release-backup-20261012/`（回滚位不是垃圾） |
 
+### 4.10 2026-10-13 业务语料入库后的读数（今天没发新 rev，只动数据）
+
+| # | 实测 | 口径影响 |
+|---|---|---|
+| 1 | Pod 内 `GIT_REV=db1a8b8477539af2af00e104e36317c159f19c39`，与 10-12 上线对象同一枚；今天**未** build/distribute/apply | "同步了≠上线了"反过来也成立：**没上线就别写上线读数**。今天所有读数都属于 `db1a8b8` |
+| 2 | `chunks` **303 行 / 7 文档**（业务 4 份 = 210 块，ADR 3 份 = 93 块），`vector_dims` 单一 `512`，范数 min=max=`1.0000`，近零向量 0 | 语料换成真实业务文档；维度没混 ⇒ 索引不会静默降级 |
+| 3 | `count(DISTINCT embedding::text)` = **301/303**，差值定性为 3 块内容都是 `---`（markdown 分隔线）共享 1 个向量 | **不是退化向量复现，是切块器把分隔线与页码行留成正文块**（另有 1 块仅 19 字符的"页码 + 目录行"）。只定性，未修 |
+| 4 | 含 `[已脱敏` 标记的块 **13** | 进库的确实是脱敏版，不是只改了本地原件 |
+| 5 | `/import` 单份墙钟：19KB→8.5s、18KB→6.8s、14KB→5.9s、**93KB→31.8s（133 块）** | 冷权重已由 lifespan 预热摊掉；入库耗时主要是 LocalEmbedder 逐块编码，**没有并发**（见手册 §6.2 未测项） |
+| 6 | **`/health` 的 `llm=true` 与"路由可用"无关**：`router.py:87` 的 `with_structured_output` 被上游拒 `<400> InternalError.Algo.InvalidParameter: This response_format type is unavailable now`，我发起的 16 次 `/query` 次次回退词表；单发因果核对告警计数 16→17（增量 1） | 本部署**没有 LLM 路由**，`route_hints.json` 那张词表就是主路由器 ⇒ 关键词闸门从"兜底路径缺陷"升级为"主路径行为"，见 `plan-router-keyword-gate-hides-corpus-2026-10-12.md` §7 |
+| 7 | 回放源是 **4 类不是 2 类**：`semantic_cache` / `memories` / `episodic_memories`+`procedural_memories`（今日恒 0）/ **LangGraph `checkpoints`+`checkpoint_blobs`+`checkpoint_writes`**（今日 1 个 thread `tenant-default`、33 个 blob） | 消融/抽验只清前两类会得出假结论：`evidence count=0` 却答对，靠的是 checkpoint 里的会话历史。**清它 = 清空控制台历史面板** |
+| 8 | `data/corpus/` 已入 `.gitignore`（规则 `data/corpus/`）；126 侧副本在 `/tmp/corpus/`，tar 在 `/tmp/corpus-20261013.tgz` | 脱敏只覆盖手机/邮箱，正文仍是未公开业务口径 ⇒ 整目录不入库，而不是只挡 `.pdf` 原件 |
+| 9 | 宿主侧跑 `/query` 探针：密钥经 **env** 传入（`env AP_KEY="$KEY" python3 -`），**不走 argv** | `ps aux` 对全主机可见 argv；env 只 root/属主可读。这是今天定下的口径 |
+| 10 | psycopg 默认不开 autocommit：一条语句失败后同一连接内后续读数全变 `InFailedSqlTransaction`；本库 `l2_norm(vector)` 有重名歧义，改用 `sqrt(-(embedding <#> embedding))`（pgvector 的 `<#>` 是**负**内积） | "5 项读数同时报错"看着像数据坏了，其实是读法问题 ⇒ 逐条 autocommit 才算独立读数 |
+
 ## 5. 三份代码副本与运行 rev（最易踩的坑）
 
 
@@ -547,3 +562,34 @@ python3 -c 'print(len(open("/tmp/body.txt").read()))'  # 空体上任何计数�
 - e24/e25 的宿主时钟：`16:26:13 +0800` / `16:29:22 +0800`（后者仅比前者晚 3 分钟，故两轮的容器读数可直接互校）。双端 MD5 一致：e24_hotedit_diff.sh = `3aca0fac231be2d50b7f7ee63b7a0982`（6279B，CR=0，117 行）、e25_verify_gap.sh = `c59f73261175677804d5ccacf11d8440`（6381B，CR=0，98 行）。
 - §5 的 G4 结论里，"容器内容是否曾入库"靠**对象库命中**判定，与 `B_rev` 无关；而"HEAD 已含全部关键概念"是靠**本机仓库工作区 grep**（`git status --porcelain`=0 且与 HEAD 同内容）而非远端读数，两者属不同机器，核对时需区分。
 - **e23 新增的只读工具面与边界**：`lsblk` / `cat /sys/block/*` / `/proc/pressure/io` / `vmstat 1 2` / `docker inspect` / `docker logs --since` / `dmesg -T` / `journalctl [-k] --since --until` / `systemctl list-timers --all`（只列不改）/ `kubectl get -o jsonpath` / `grep /etc/kubernetes/manifests` / `grep /root/.bash_history`。**未执行任何 `systemctl stop/disable/mask`、未动 timer、未动 deployment、未动容器**；`crictl ps -n k8s.io | grep -c kube-apiserver` 返回 0 **未作解读**（crictl 未显式指定 runtime endpoint，不能据此判 apiserver 在否）。
+
+### 6.13 判"路由到底谁在做"与"消融是否有效"（2026-10-13 实跑配方）
+
+这两件事都不能靠读答案判断，各自有可复核的取证面。
+
+```bash
+NS=agent-platform
+POD=$(kubectl -n $NS get pod -l app=agent-platform -o jsonpath='{.items[0].metadata.name}')
+KEY=$(kubectl -n $NS get secret observability-keys -o jsonpath='{.data.API_KEY}' | base64 -d)
+
+# A) 路由器到底是谁：数告警 + 因果核对（一发一问，计数必须 +1）
+b=$(kubectl -n $NS logs $POD | grep -c 'This response_format type is unavailable')
+env AP_KEY="$KEY" AP_Q="根据文档，<唯一标记防缓存>" python3 - < /tmp/r30q.py
+a=$(kubectl -n $NS logs $POD | grep -c 'This response_format type is unavailable')
+echo "增量=$((a-b))"          # =1 ⇒ 这一问确实走了"结构化失败→回退词表"
+
+# B) 回放源全集（四类，缺一个都可能把"没检索"读成"检索成功"）
+kubectl -n $NS exec -i $POD -- python - counts < /tmp/r30db.py
+#   semantic_cache / memories / episodic_memories / procedural_memories
+#   / checkpoints / checkpoint_blobs / checkpoint_writes   ← LangGraph 会话状态，最容易漏
+
+# C) 消融前"自变量是否成立"三查（缺一即整轮作废）
+kubectl -n $NS exec -i $POD -- python - probe '报馆图纸' < /tmp/r30db.py
+#   ① 谓词必须是 LIKE '%短语%'（写成 '短语%' 是前缀匹配，会命中 0 块而不报错）
+#   ② 命中必须唯一：'截止日期' 在库里命中 11 块，拿它当谓词删不干净 ⇒ 换更特定的短语
+#   ③ 提问必须带 rag 特征词且首读 route=rag + evidence count>0，否则删没删块结果都一样
+```
+
+> 为什么 C③ 值得单列：2026-10-13 的 r30 整轮就是这么废的——问句"特装展台报馆的电子文件要压缩成哪几个文件包？"
+> 一字不含特征词 ⇒ 消融前/后/还原后**三次全部 `route=direct`、`evidence count=0`、答案全部"无法确定"**。
+> 三次读数高度"一致"，看着像实验很稳，实际是自变量从没生效。改带"根据文档"重跑（r31）才拿到有效对照。

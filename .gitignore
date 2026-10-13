@@ -134,3 +134,8 @@ applications/knowledge-service/eval/adjudication_template.jsonl
 # make_adjudication_ui.py 生成的标注页 + 人工标完导出的裁决集（均含语料明文，禁入库）
 applications/knowledge-service/eval/adjudication_ui.html
 applications/knowledge-service/eval/adjudication.jsonl
+
+# === 演示语料（真实业务文档，禁入库）===
+# 展会/场馆方提供的正式文档，本地 pypdf 抽取 + 联系方式脱敏后的 .md。
+# 脱敏只覆盖手机/邮箱，正文仍含未公开的业务口径 ⇒ 整目录排除，不是只排除 *.pdf 原件。
+data/corpus/
