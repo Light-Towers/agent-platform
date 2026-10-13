@@ -317,6 +317,8 @@ kubectl -n agent-platform get secret observability-keys -o jsonpath='{.data.LLM_
 | 8 | `data/corpus/` 已入 `.gitignore`（规则 `data/corpus/`）；126 侧副本在 `/tmp/corpus/`，tar 在 `/tmp/corpus-20261013.tgz` | 脱敏只覆盖手机/邮箱，正文仍是未公开业务口径 ⇒ 整目录不入库，而不是只挡 `.pdf` 原件 |
 | 9 | 宿主侧跑 `/query` 探针：密钥经 **env** 传入（`env AP_KEY="$KEY" python3 -`），**不走 argv** | `ps aux` 对全主机可见 argv；env 只 root/属主可读。这是今天定下的口径 |
 | 10 | psycopg 默认不开 autocommit：一条语句失败后同一连接内后续读数全变 `InFailedSqlTransaction`；本库 `l2_norm(vector)` 有重名歧义，改用 `sqrt(-(embedding <#> embedding))`（pgvector 的 `<#>` 是**负**内积） | "5 项读数同时报错"看着像数据坏了，其实是读法问题 ⇒ 逐条 autocommit 才算独立读数 |
+| 11 | **AGENTS.md 第 5 条已过时并在今日修正**：deployment 的 `LLM_BASE_URL/LLM_MODEL/LLM_FALLBACK_MODEL` 现为 `configMapKeyRef`（不是字面值），且 **CM 值 == Pod 内生效值**（实测三行逐字相等）；`EMBEDDING_MODE=local` 也已显式注入 | 10-12 那次"整 Pod 模板原子替换"顺带把 10-09 之前 `kubectl set env` 留下的死键**修好了**。⇒ 现在改 CM + 滚动**会**生效；"CM 里这三个是死键"这句以后会误导人，已按实测改写。判 literal/ref 的口径：`last-applied-configuration` 注解 vs LIVE，期望态一律用 `kubectl create --dry-run=client -o json` 取 |
+| 12 | 本机**没有** `.env`（只有 `.env.example`，`.gitignore:2` 忽略 `.env`）；`config.py:13` 的 `env_file=".env"` 说明它就是设计好的本地注入口 | 三家 provider 的**密钥不落任何文件**（任务书硬口径）。现网唯一在用的那把在 `Secret observability-keys/LLM_API_KEY`；本轮需求方在对话里贴过的两把（硅基流动 / OpenRouter）**除对话外不存在于任何地方**，故已建议轮换 |
 
 ## 5. 三份代码副本与运行 rev（最易踩的坑）
 
