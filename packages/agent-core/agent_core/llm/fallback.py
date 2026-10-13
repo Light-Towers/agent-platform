@@ -224,9 +224,13 @@ class FallbackChatModel:
         else:
             self._breaker.record_success()
 
-    def with_structured_output(self, schema: Any) -> Any:
-        """路由等结构化场景直接用主模型；失败由调用方回退启发式。"""
-        return self.primary.with_structured_output(schema)
+    def with_structured_output(self, schema: Any, **kwargs: Any) -> Any:
+        """路由等结构化场景直接用主模型；失败由调用方回退启发式。
+
+        ``method`` 等参数必须透传：吞掉它们会让调用方以为选了 ``function_calling``，
+        实际仍走 primary 的默认 ``json_schema``（提供方不支持时又静默降级，无人察觉）。
+        """
+        return self.primary.with_structured_output(schema, **kwargs)
 
 
 __all__ = ["FallbackChatModel"]

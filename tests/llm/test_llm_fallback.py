@@ -14,6 +14,7 @@ class FakePrimary:
     def __init__(self, fail_times: int):
         self.fail_times = fail_times
         self.calls = 0
+        self.last_structured_kwargs: dict | None = None
 
     async def ainvoke(self, *args, **kwargs):
         self.calls += 1
@@ -21,7 +22,9 @@ class FakePrimary:
             raise RuntimeError("primary down")
         return FakeMessage("primary-answer")
 
-    def with_structured_output(self, schema):
+    def with_structured_output(self, schema, **kwargs):
+        # 签名与真实 ChatOpenAI 同构（schema 位置参 + method 等关键字参），否则替身会掩盖"参数被吞掉"
+        self.last_structured_kwargs = kwargs
         return self
 
 
@@ -124,3 +127,16 @@ async def test_astream_switches_before_first_chunk():
     model = FallbackChatModel(StreamPrimary(0), StreamFallback(), failure_threshold=5)
     chunks = [c async for c in model.astream("q")]
     assert chunks == ["f0", "f1"]
+
+
+def test_with_structured_output_forwards_kwargs_to_primary():
+    """内核不得吞 `method`：吞掉后调用方选的 function_calling 会退回 primary 默认的 json_schema，
+    而提供方不支持时又会被上层宽 except 静默降级成启发式路由（2026-10-13 126 就是这么跑的）。"""
+    from agent_core.llm.fallback import FallbackChatModel
+
+    primary = FakePrimary(fail_times=0)
+    model = FallbackChatModel(primary, FakeFallback())
+
+    model.with_structured_output(dict, method="function_calling")
+
+    assert primary.last_structured_kwargs == {"method": "function_calling"}
