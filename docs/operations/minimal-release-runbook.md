@@ -333,6 +333,12 @@ ssh root@<internal-ip> 'cd /opt/agent-platform && git fetch /tmp/ap-rollback.bun
    **多租户共用这把 key 之前**必须先在库侧建只读角色 + 行级过滤（属独立方案，别在这里打开）。
 5. **本版语料是平台自己的正式文档，不是样例数据、不是预置内容**。换成业务文档只需重跑 `/import`（代码不用动），
    但要连语料口径 + 出境口径一起定。
+6. **语义缓存的租户过滤是 fail-open 的**（今天实跑证到，PoC 与最小修法见
+   `plan-query-tenant-from-client-not-server-asserted-2026-10-10.md` §6）：`cache.py` 只在 `tenant_id` 非空时加
+   `WHERE`，而调用方传 `req.tenant_id or ""` ⇒ **不填租户就是查全表**。实测：A 桶写入答案后，
+   同一句话不带 `tenant_id` 在 **0.15s** 拿到 A 桶的 `cache_hit`。本版单租户 + 内网 ClusterIP 不可被外部利用，
+   但被追问"多租户共用这把 key 呢"时，**必须照这条回答**，不许说"缓存按租户隔离"。
+   同一次请求里还暴露了第二个不一致：`done.thread_id` 是服务端断言的 `tenant-default`，缓存却落进客户端自报的桶。
 
 ## 9. 未拍板不得自行决定的六件（截至本文档仍未拍板）
 
