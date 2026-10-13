@@ -319,6 +319,7 @@ kubectl -n agent-platform get secret observability-keys -o jsonpath='{.data.LLM_
 | 10 | psycopg 默认不开 autocommit：一条语句失败后同一连接内后续读数全变 `InFailedSqlTransaction`；本库 `l2_norm(vector)` 有重名歧义，改用 `sqrt(-(embedding <#> embedding))`（pgvector 的 `<#>` 是**负**内积） | "5 项读数同时报错"看着像数据坏了，其实是读法问题 ⇒ 逐条 autocommit 才算独立读数 |
 | 11 | **AGENTS.md 第 5 条已过时并在今日修正**：deployment 的 `LLM_BASE_URL/LLM_MODEL/LLM_FALLBACK_MODEL` 现为 `configMapKeyRef`（不是字面值），且 **CM 值 == Pod 内生效值**（实测三行逐字相等）；`EMBEDDING_MODE=local` 也已显式注入 | 10-12 那次"整 Pod 模板原子替换"顺带把 10-09 之前 `kubectl set env` 留下的死键**修好了**。⇒ 现在改 CM + 滚动**会**生效；"CM 里这三个是死键"这句以后会误导人，已按实测改写。判 literal/ref 的口径：`last-applied-configuration` 注解 vs LIVE，期望态一律用 `kubectl create --dry-run=client -o json` 取 |
 | 12 | 本机**没有** `.env`（只有 `.env.example`，`.gitignore:2` 忽略 `.env`）；`config.py:13` 的 `env_file=".env"` 说明它就是设计好的本地注入口 | 三家 provider 的**密钥不落任何文件**（任务书硬口径）。现网唯一在用的那把在 `Secret observability-keys/LLM_API_KEY`；本轮需求方在对话里贴过的两把（硅基流动 / OpenRouter）**除对话外不存在于任何地方**，故已建议轮换 |
+| 13 | 2026-10-13 扫 `/tmp` 明文密钥残留：91 个条目中 **1 个命中** `/tmp/_inject_llm.sh`（`-rw-r--r-- root:root`，mtime **2026-09-29 17:24**，内含 `kubectl create secret … --from-literal=<值>` 两行） ⇒ 已 `shred -u`，复扫 0 命中 | 那是"密钥经 env 不走 argv"这条口径**定下之前**我自己留下的取证脚本。两条要点：① **`--from-literal` 会把明文留在脚本文件里**，`/tmp` + `644` 在同主机上等于对全部用户公开 ⇒ 建 Secret 只能走 `--from-file`（stdin）或 `env` 注入，不得把值写进任何落盘命令；② 该 LLM 键已在世界可读位置存在约 **2 周** ⇒ **建议轮换**（决定权与执行都不在我） |
 
 ## 5. 三份代码副本与运行 rev（最易踩的坑）
 
