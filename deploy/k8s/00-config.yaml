@@ -25,8 +25,12 @@ data:
   OTEL_SERVICE_NAME: "agent-platform"
   # 端点只能写宿主 IP：Jaeger all-in-one 是以 docker 跑在 126 宿主的容器，不在集群内（见 deploy/k8s/VERIFICATION.md）。
   OTEL_ENDPOINT: "http://192.168.100.126:4318/v1/traces"
-  # Langfuse 同理：观测栈按 deploy/observability/langfuse.sh **按需起在 126 的 moby 上**（非常驻），
+  # Langfuse 同理：观测栈按 deploy/observability/langfuse.sh **按需起在 241 的 moby 上**（非常驻），
   # 只发布 web 的 3000，其余五个容器留在 compose 内网 ⇒ 集群内解析不到服务名，必须写宿主 IP。
+  # 为什么是 241 而不是 126（2026-10-13 实测改的）：126 那块 ROTA=1 单盘上挤着
+  # knowledge-service 的 etcd/milvus 与我们自己的 postgres，ClickHouse+MinIO 的持续写
+  # 直接进 etcd 的 `slow fdatasync` 那条链（milvus 已被它带死过 31 次）；
+  # 而 agent-platform 的 Pod 实测本来就落在 ambari01(241)，241 空闲盘 39G/内存 13G。
   # 栈没起时这三键仍算"已配置"，但回调发送失败 ⇒ /health 的 langfuse_ready 只反映装配态，
   # 真判据是"Langfuse 里查得到这条 trace"（方案 §4 A3）。
-  LANGFUSE_HOST: "http://192.168.100.126:3000"
+  LANGFUSE_HOST: "http://192.168.100.241:3000"

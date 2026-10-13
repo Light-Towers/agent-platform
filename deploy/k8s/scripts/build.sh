@@ -1,9 +1,14 @@
 #!/usr/bin/env bash
 # build.sh — 在 126（control-plane，构建机）上构建 agent-platform 镜像，并绑定 git rev。
 #
-# 用法（在 126 上执行；Windows 侧先 scp 本目录并去 CRLF）：
+# 用法（在**选定的构建机**上执行；Windows 侧先 scp 本目录并去 CRLF）：
 #   sed -i 's/\r$//' deploy/k8s/scripts/*.sh
 #   bash deploy/k8s/scripts/build.sh <expected-rev>
+#   SRC_DIR=/other/checkout bash deploy/k8s/scripts/build.sh <expected-rev>
+# 构建机不必是 126：本脚本只要求那台机有 docker + 一份处于 expected-rev 的 checkout。
+# 2026-10-13 起默认放 ambari01(241) —— 126 的 ROTA=1 单盘上 pip 铺上万个文件会把
+# 同机 etcd 打进 `slow fdatasync`（实测 avg10 冲到 67%，milvus 重启 30→31）。
+# 换机后 distribute.sh 必须显式带上其余全部节点（见该脚本头部）。
 #
 # 成功判据：构建源 HEAD == <expected-rev>（不等即中止——126 假同步事故的根治门禁，
 # 观测方案 §3.5 R14）；docker build 成功；镜像内 GIT_REV 文件回读 == expected-rev。
