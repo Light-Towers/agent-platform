@@ -98,7 +98,7 @@ try:
 |---|---|---|
 | A1 | 包真在镜像里 | Pod 内 `python -c "import langfuse, langfuse.langchain; print(langfuse.__version__)"` 成功；`/health` 报 `langfuse_importable=true` |
 | A2 | 配置真进容器 | Pod 内 `env` 中三个键**非空**（只比长度）；`/health` 报 `langfuse_enabled=true` |
-| A3 | **trace 真落在 Langfuse 里**（唯一算数的判据） | `curl -u <pk>:<sk> "$LF/api/public/traces?..."` 能查到本次提问的 trace；其 observation 的 input 含检索片段原文 |
+| A3 | **trace 真落在 Langfuse 里**（唯一算数的判据） | `deploy/observability/langfuse_proof.py` 退出码 0：按注入的 trace id 在 `GET /api/public/v2/observations?fields=io,usage` 查到 GENERATION，其 input 含检索片段原文、usageDetails 双值非零。（原写法 `curl /api/public/traces` 作废——v4 `events_only` 撤了该端点，见 §7 顺带修正） |
 | A4 | 主链路不因观测中断 | 把 `LANGFUSE_HOST` 指向 `.invalid` 重启一次应用，`/query` 仍完整返回事件序列（软降级必须是 fail-open，由 `test_tracing.py` + 现网各证一次） |
 
 > **不得凭 A1/A2 宣称"接上了"**——A.2 原文写得很清楚：客户端包没装时平台只记一行日志就静默不报，
@@ -118,3 +118,42 @@ try:
 回退方式 = 把 Dockerfile 改回无 extra 的 rev 再走一次六步通道。
 配置面回退 = 从 deployment 摘掉三个 env 引用并滚动，`/health` 两盏灯回落 false，主链路不受影响（软降级）。
 栈回退 = `docker compose down`，卷保留或删除均可，平台侧无状态依赖。
+
+## 7. 上线后实测出的缺陷 D-LF-1：两个观测面互相顶掉（装配顺序决定谁活着）
+
+**现象**（2026-10-13，rev `c01e9cf`，Pod 在 <internal-host>）：Langfuse 面 A3 通过（原文 + 用量可查），
+但 **Jaeger 面对 `/query` 彻底静默**——同窗口内一次 `GET /health` + 一次 `POST /query`，
+Jaeger 按服务查近 10 分钟 `rowcount=0`，注入的 traceparent id 直查 404；而 `/health` 报
+`otel_status=ACTIVE`。即"一盏说活着、一盏其实瞎"。
+
+**根因**（在 Pod 内用假凭据复现，非推断）：`build_chat_model()`（`main.py:226`）内的
+`get_langfuse_callbacks()` 会构造 Langfuse 客户端，**该构造把全局 TracerProvider 换成它自己的**
+`opentelemetry.sdk.trace.TracerProvider`，processors 只有 `['LangfuseSpanProcessor']`。
+随后 `init_tracing()`（`main.py:282/291`）走到 `agent_core/tracing.py:430-438` 的"复用已存在的
+全局 provider"分支——该分支的前提是"宿主 provider 自带 exporter，不必白挂"，**这个前提对
+Langfuse 的 provider 不成立**：它只导给 Langfuse，不导 OTLP。于是本平台的 OTLP 导出器**从未挂上**，
+Jaeger 收到的最后一条 span 时间戳 = Pod 启动那一刻（旧 Pod 优雅关闭前的最后一批）。
+
+**为什么反序是对的**（同实验）：先 `init_tracing()` 再构造 Langfuse ⇒ 全局 provider 是我们建的
+（带本服务的 resource 与 sampler），Langfuse **复用**它并把 `LangfuseSpanProcessor` **追加**进去，
+最终 processors = `['BatchSpanProcessor', 'LangfuseSpanProcessor']`——一棵 span 树、两个后端，
+这正是 OTel 的标准扇出形态。callback 侧不受影响（callbacks=1）。
+
+**修复（三层，缺一层就还是靠自觉）**：
+1. **装配层**（`applications/agent_server/main.py`）：把 OTel 接线整块移到 `build_chat_model()` **之前**。
+   判据不是"能跑"，而是"全局 provider 由本平台创建"。
+2. **单一实现层**（`packages/agent-core/agent_core/tracing.py` 复用分支）：复用宿主 provider 时
+   **best-effort 探测其是否已有指向同一 endpoint 的 OTLP 导出**；探不到就挂上自己的 BatchSpanProcessor，
+   并且**只有确认存在 OTLP 出口才报 ACTIVE**，否则 `DEGRADED/foreign_provider_no_otlp_exporter`。
+   把"静默瞎掉"变成"灯说真话"（R5 同源）。
+3. **门禁层**：内核用例固定这条不变量——宿主 provider 先存在时，`init_tracing` 之后该 provider 上
+   必须有 OTLP 出口；`agent_federation`（`api/server.py:61` 早于模型构建）本来就是正确顺序，
+   作为对照不参与改动。
+
+**影响面**：`agent_core/tracing.py` 复用分支、`agent_server/main.py` 启动顺序、新增内核用例。
+不改对外契约、不动事件帧、不动清单。**验收**：`e2e_traceparent.sh` 退出码 0 且注入 id 在 Jaeger 命中；
+`langfuse_proof.py` 仍 A3 PASS（两盏灯不能互相顶掉，必须同时真）；`/health` 的 `otel_status` 与
+Jaeger 实际可查性一致。
+
+**顺带修正本方案 §4 A3 的取数方式**：v4 `events_only` 部署下 `/api/public/traces` 已撤销（404），
+算数判据改用 `GET /api/public/v2/observations?fromStartTime=&traceId=&fields=io,usage`。
