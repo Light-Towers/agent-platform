@@ -292,6 +292,12 @@ async function loadLights() {
       d.identity_mode === "insecure" ? "insecure（未断言租户）" : d.identity_mode);
     L("输入护栏", d.guard_enabled, false, d.guard_enabled ? "已打开" : "未打开（不会拦截）");
     L("大模型", d.llm, false, d.llm ? "已配置密钥（可用性以实际回答为准）" : "未配置");
+    // 模型调用层观测：ready 只代表"回调真挂上了"，不代表 trace 已落库——那要去 Langfuse 自己
+    // 的页面查（方案 §4 A3）。enabled 而 !ready 就是"配了但没接上"，这条灯存在的全部理由
+    // 就是让这种状态别再静默不报（2026-10-13 之前它只写一行 warning）。
+    L("模型调用层观测", d.langfuse_ready, d.langfuse_enabled && !d.langfuse_ready,
+      d.langfuse_ready ? "回调已装配（trace 是否落库以观测平台为准）"
+        : (d.langfuse_enabled ? "配了但没接上：客户端包缺失或初始化失败" : "未配置（本部署不开该面）"));
     L("存储", d.storage === "postgres", false, d.storage);
     L("问数数据源", d.sql_backend !== "none", false, d.sql_backend);
     L("追踪", d.otel_status === "ACTIVE", d.otel_status === "DEGRADED", d.otel_status);

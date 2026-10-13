@@ -23,7 +23,12 @@ identity = ["PyJWT[crypto]>=2.9"]  # ADR-0007 A3：RS256 令牌签/验（不进 
 # Langfuse 回调软依赖（tracing.py get_langfuse_callbacks 懒导入）；下界与 federation
 # [observability] 一致。S4 已落地：import 路径迁 v3+/v4 代际契约 langfuse.langchain
 #（方案 §3.4 选项 a），v2 写法在真装 v3+ 时必 TypeError 恒降级，已终结。
-langfuse = ["langfuse>=4.0.0"]
+# langchain 顶层包是 langfuse.langchain 的**导入前置**：它只 `import langchain`
+# 读 __version__ 来选 v1/v0 分支（符号全来自 langchain_core），缺它即
+# ModuleNotFoundError ⇒ tracing.py 捕获后返回 []，配了凭据也静默不报
+#（2026-10-13 在镜像内实测到；镜像装 langfuse 但不装 langchain 时就是这个状态）。
+# 三处声明位（agent-runtime/federation/exhibition）必须一起带，见 lint L-4。
+langfuse = ["langfuse>=4.0.0", "langchain>=1,<2"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["agent_runtime"]
