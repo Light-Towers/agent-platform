@@ -616,6 +616,7 @@ kubectl -n $NS exec -i $POD -- python - probe '报馆图纸' < /tmp/r30db.py
 | Langfuse（观测面 B） | **241 的 moby 栈** `lf-langfuse`/`lf-langfuse-worker`/`lf-clickhouse`/`lf-langfuse-db`/`lf-valkey`/`lf-minio`（6 个，均 healthy），只有 web 发布 `3000`；`LANGFUSE_HOST=http://192.168.100.241:3000`。**演示期暂常驻**（实测 PSI `avg10=3.59%`、241 磁盘余 25G、内存 avail 11G；冷启动需等 ~300s，故不停） |
 | port-forward | 126 `:18000 → svc/agent-platform:8000`；`portforward.sh` **无 restart 子命令**，换 Pod 要 stop+start |
 | 密钥落点 | `secret/observability-keys` 内 `API_KEY` / `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY`（+ `LLM_API_KEY`）——**只记键名与注入路径，值不落任何文件** |
+| 库内数据态（**10:27 UTC 复算**） | `chunks` 303 行 / 7 文档、`semantic_cache` 残留 0、**`checkpoints`/`checkpoint_blobs`/`checkpoint_writes` 三表 0 行**：演示前按拍板把取证残留句整桶清掉（备份在 `126:/tmp/ckpt-backup-host/*.csv`，0600，宿主 `/tmp` ⇒ 重启即失）。本节早前那句"今日 1 个 thread、33 个 blob"到此失效，别引用 |
 
 **本轮在这套现场跑通的判据**（都是回读，不是推断）：
 
