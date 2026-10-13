@@ -1,10 +1,16 @@
 #!/usr/bin/env bash
 # distribute.sh — 镜像导出并导入到全部节点（containerd 隔离实例，命名空间 k8s.io）。
 #
-# 用法（在 126 上执行；默认分发到两个 worker）：
+# 用法（在**构建所在的那台**上执行；默认 WORKERS 是"从 126 构建"的历史形态）：
 #   bash deploy/k8s/scripts/distribute.sh
 #   bash deploy/k8s/scripts/distribute.sh <internal-ip> <internal-ip>
 #   WORKER_USER=<ssh_user> IMAGE=<tag> bash deploy/k8s/scripts/distribute.sh
+#
+# ⚠ 换构建机时必须显式传其余全部节点，别用默认值。
+#   例：2026-10-13 起构建放在 <internal-host>(241)（避开 126 那块挤着 etcd/milvus/postgres 的
+#   ROTA=1 单盘），此时默认列表 `125 241` 会**漏掉 126** —— 部署无 nodeSelector，
+#   Pod 一旦调度到 126 就是 ErrImagePull（可变 tag + IfNotPresent，本地没有层可回退）。
+#   正确写法：bash deploy/k8s/scripts/distribute.sh <internal-ip> <internal-ip>
 #
 # 成功判据：每个 worker 上 crictl images 出现目标镜像行。
 # 注意：同 tag 覆盖 + imagePullPolicy=IfNotPresent 时，须另行
