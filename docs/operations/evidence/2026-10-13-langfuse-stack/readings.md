@@ -120,3 +120,66 @@ A1 复验: import OK, langfuse 4.17.0 callbacks -> ['LangchainCallbackHandler']
    它不把判据压在"Langfuse trace id == W3C trace id"上（本 app 不回写 traceparent 响应头，
    id 映射关系作为**读数**打印）。
 5. 取证完 `langfuse.sh stop`（保留卷），并回写 runbook §6.2 第 11 条与 §9 ⑰。
+
+## 9. 完成段（同日稍后）：A3 真通过，以及接上之后才发现的 D-LF-1
+
+§7/§8 是当时的快照，**已被本节取代**。线上对象 = rev `6ac466af`，Pod `agent-platform-85794678c-9hjg4`，
+node **ambari01(241)**，imageID `c18dc76a93f8f`，restarts 0。
+
+### 9.1 六步通道跑通的两处非显然事实
+
+- **构建换机后必须补一次"本节点 containerd-k8s 导入"**：`distribute.sh` 的目标列表只覆盖*其余*节点，
+  构建机自己的 moby 与 containerd-k8s 又是两套库。本次三节点 CRI 回读一度是
+  `125=c18dc76a / 126=c18dc76a / 241=ff65490f(旧)` ⇒ 而新 Pod **恰好调度到 241**。
+  可变 tag + `IfNotPresent` 下这不是 `ErrImagePull` 而是**静默跑旧代码**，比报错更坏。补导入后三节点一致。
+- **`verify.sh` 原先用 `docker run` 读镜像内 GIT_REV，读的是 moby 库里那次中止构建的残留**
+  （`3cd5580`，created=2 hours ago），同期 Pod 内是 `c01e9cf` ⇒ 报出假 FAIL。改为 `kubectl exec` 读
+  跑着的 Pod 内那份，并列打印 node/imageID/restarts（`0e0f6e5`）。
+
+### 9.2 A3 读数（v4 真实取数面）
+
+`GET /api/public/v2/observations?fromStartTime=&traceId=&fields=io,usage`，一次 rag 问答 **2 条 GENERATION**：
+
+| 观测 | name | usage in/out | latency | input 含 marker | input 含 `[来源:` |
+|---|---|---|---|---|---|
+| 答案生成 | ChatOpenAI | 1403 / 1547 | 16.568s | HIT | **HIT**（摊平后 2356 字符） |
+| 路由决策 | ChatOpenAI | 475 / 164 | 4.117s | HIT | miss（路由本来不看证据，正常） |
+
+trace id `a748c6fcaa7c418c92e274c89814338b` **== 注入的 W3C id**（作为读数记录，不是前提）。
+
+三条读数纪律（都是本轮踩出来的，写探针的人必看）：
+1. **v4 `events_only` 撤了 v1 读数 API**：`/api/public/traces|observations|sessions|metrics` 全 404，
+   body 明写原因；可用的是 `v2/observations`。`/api/public/v2/traces` 不存在（404 返回 HTML 页面）。
+2. **`fields=` 与默认投影互斥**：`fields=io,usage` 里 `name/modelId` 被挤成 null，默认投影里没有 input/output；
+   ⇒ 要"原文+用量+名字"得两次取按 id 合并。`modelId` **在两种投影里都是 null**（模型名在库内 `model` 列、
+   UI 可见）⇒ 不得声称"哪个模型"是 API 可读列。猜错 fields 名时响应"键不存在"，与"真的没有内容"长得一样。
+3. **载荷是多层 JSON 编码的 `\uXXXX` 字面量**：`ensure_ascii=False` 只能解自己那一层 ⇒ ASCII marker 照常命中、
+   中文 needle（`[来源:`）恒 miss。必须先 `_flatten()` 再匹配。
+   另外 **SSE 事件帧是平铺的**（`_sse` 把 `payload.type` 提成事件名），按 `d["payload"]` 读恒得 `{}`
+   ——上一轮据此差点误报"没接上"。
+
+### 9.3 D-LF-1：接上 Langfuse 把 Jaeger 面顶掉了
+
+现象（rev `c01e9cf`）：`/health` 报 `otel_status=ACTIVE`，但同窗口一次 `GET /health` + 一次 `POST /query`
+在 Jaeger 里 `rowcount=0`；Jaeger 收到的最后一条 span = 旧 Pod 优雅关闭那一刻。三台机器时钟差 ≤1s（已量），
+Jaeger 容器 Up 13 days、`/api/services` 200、Pod 内到 `4318` 通（GET 得 405 = OTLP 端点正常拒绝 GET）。
+
+根因在 Pod 内用**假凭据**复现（不是推断）：`get_langfuse_callbacks()` 构造 Langfuse 客户端时把全局
+TracerProvider 换成自己那份（processors=`['LangfuseSpanProcessor']`），随后 kernel `init_tracing` 走
+"复用已存在 provider"分支，按"宿主自带 exporter"的前提**什么都不挂**。反序实验：先 init 再构造 Langfuse ⇒
+provider 是我们的，Langfuse **复用并追加**自己的 processor = `['BatchSpanProcessor','LangfuseSpanProcessor']`，
+callback 不受影响。附带发现第二半：注入 exporter 的分支把 processor 挂在随后被丢弃的自建 provider 上（孤儿）。
+
+修法三层（`e919caa`）：装配顺序上移 + 复用分支"探不到就补挂"（探测读私有结构失败一律当作"没有"，
+宁多挂少判）+ `tests/observability/test_provider_reuse_otlp.py` 三条钉不变量。
+本地验证：`--extra otel` 18 passed、agent-core 349 passed/8 skipped、agent_server 90 passed、
+ruff + lint_architecture + check_doc_sync 全绿。
+**修后现网复验（同一个新 Pod）**：`e2e_traceparent.sh` → `span 数=8`、含 `POST /query`、trace id==注入 id、rc=0；
+`langfuse_proof.py` → A3 PASS。两个判据同时为真才算接完。
+
+顺带修的两条取证脚本缺陷（都是"看着跑了、其实什么都没发生"那一族）：
+- `e2e_traceparent.sh`：`SPANS=$(curl -sf ... | grep -c ...)` 在 `set -e pipefail` 下于 404 时**直接终止脚本**，
+  解释原因的 FAIL 行永远打不出来 ⇒ 改为先落盘再判，并写清"404/连不通/服务名不符"三种情形怎么分。
+- `langfuse_proof.py`：命中语义缓存时图不跑、模型不调用 ⇒ 原来按"查不到=没接上"报 P1 FAIL 是**假阴性**。
+  现在候选问题轮转 + 退出码 4 专指"取证不成立但平台没错"，并加只读复核模式（不重发提问、不白污染缓存、
+  且不再要求 API_KEY）。marker 后缀**不改变语义**，查重按向量相似度 ⇒ 改几个字符没用。

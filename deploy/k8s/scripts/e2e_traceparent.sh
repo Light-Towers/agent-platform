@@ -48,10 +48,17 @@ fi
 echo "OK: /query 200，trace_id=$TRACE_ID，等 flush..."
 sleep 8
 
-SPANS=$(curl -sf "$JAEGER/api/traces/$TRACE_ID" | grep -o '"spanID"' | wc -l)
-if [ "${SPANS:-0}" -lt 1 ]; then
-  echo "FAIL: Jaeger 无 trace_id=$TRACE_ID 的 span（检查 OTEL_ENABLED/OTEL_ENDPOINT、GIT_REV 是否含 S2）"
+# 注意：不能写成 SPANS=$(curl -sf ... | grep -c ...)。在 `set -euo pipefail` 下，Jaeger 返回 404
+# 时 curl 的失败会让整条管道在赋值处直接终止脚本，下面那句解释 FAIL 原因的行**永远打印不出来**
+# ——只剩一个 exit=1 和一行"OK: /query 200"，读的人分不清是断链、没落库还是查询本身坏了。
+HTTP=$(curl -s -o /tmp/e2e_trace.json -w '%{http_code}' "$JAEGER/api/traces/$TRACE_ID")
+SPANS=$(grep -o '"spanID"' /tmp/e2e_trace.json 2>/dev/null | wc -l)
+if [ "$HTTP" != "200" ] || [ "${SPANS:-0}" -lt 1 ]; then
+  echo "FAIL: Jaeger 查 trace_id=$TRACE_ID 得 HTTP=$HTTP、span 数=$SPANS"
+  echo "      分辨三件事：① HTTP=404+平台 /query 200 ⇒ span 没落库（导出侧断了，查 otel_status 与"
+  echo "      全局 TracerProvider 归属：宿主 SDK 先设 provider 会让本平台 OTLP 出口挂不上，见 D-LF-1）；"
+  echo "      ② curl 连不通/Jaeger 没起（jaeger.sh status）；③ 服务名不符（/api/services）。"
   exit 1
 fi
-curl -sf "$JAEGER/api/traces/$TRACE_ID" | grep -o '"operationName": *"[^"]*"' | sort -u
+grep -o '"operationName": *"[^"]*"' /tmp/e2e_trace.json | sort -u
 echo "OK: trace 落 Jaeger，span 数=$SPANS（UI: $JAEGER/trace/$TRACE_ID）"

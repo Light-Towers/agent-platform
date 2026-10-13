@@ -298,25 +298,37 @@ done   # 期望：apply=线上现状(10) / create=清单真值(21)
     答案全部"无法确定"。三次读数一模一样，但一次检索都没发生，删没删那块根本不影响结果。
     ⇒ 消融前置三查：(a) 谓词 `LIKE '%短语%'`（不是前缀 `短语%`）且**唯一命中一块**；(b) 提问确实带特征词、
     第一次读数就是 `route=rag` + `count>0`；(c) 四个回放源清零。改后为 r31，三次读数才构成有效对照。
-11. **观测面：两层在跑，第三层（Langfuse）已拍板"接"但线上尚未生效**（2026-10-13；⑰ 的现场状态见该行）。当场能讲的与不能讲的：
+11. **观测面：三层现在都在线上（rev `6ac466af`），但中间发生过一次"两层互相顶掉"的真故障**（2026-10-13；⑰ 的现场状态见该行）。当场能讲的与不能讲的：
     - ✅ **平台自建过程明细**：`status` 事件带能力级步骤的 name/latency/tokens，来自运行时记录。
-    - ✅ **Jaeger**：`e2e_traceparent.sh` 实跑通过（trace 落库、含 `POST /query` SERVER span）——
-      但它打的是**单个服务**（`TARGET=http://127.0.0.1:18000`，判据 `spans >= 1`），
+    - ✅ **Jaeger**：`e2e_traceparent.sh` 实跑通过（`span 数=8`、含 `POST /query` SERVER span、
+      trace id == 注入的 W3C id）——但它打的是**单个服务**（`TARGET=http://127.0.0.1:18000`），
       方案 D5.5 要求的"联邦网关→子服务"跨服务链路**没证过** ⇒ 口头只能说"这个服务内部的一条请求链路"，
       **不得说成"跨服务追踪已验证"**。
-    - ⏳ **Langfuse**：代码侧接线一直是真的（`agent/llm.py` 构造期挂 primary+fallback、`tracing.py` 走
-      v4 契约 `langfuse.langchain`、三态由 `test_tracing.py` 钉住）。本轮补的是**分发侧**：
-      包进默认镜像（`Dockerfile` 装 `./packages/agent-runtime[langfuse]`）、清单注入 `LANGFUSE_*` 三键、
-      观测栈起在 126。**但线上 Pod 仍是 `0425257`，镜像重建因 IO 冲突被中止** ⇒
-      **演示当天在此之前仍不能说"有第三块观测屏"**，只能说"平台自建明细 + Jaeger 两层"。
-      接完的判据不是 `/health` 的灯，而是 `deploy/observability/langfuse_proof.py` 的 A3。
+    - ✅ **Langfuse**：A3 通过（唯一算数判据，不是 `/health` 的灯）。现网读数：一次 rag 问答落
+      **2 条 GENERATION**——答案生成 `in=1403/out=1547`（input 摊平后含 `[来源: …]` 检索原文）、
+      路由决策 `in=475/out=164`；trace id 与注入的 W3C id **相等**。取数走
+      `GET /api/public/v2/observations?fields=io,usage`——v4 `events_only` 撤了 `/api/public/traces`，
+      别照抄旧命令；`fields=` 与默认投影互斥（要 `name` 得两次取按 id 合并），`modelId` 在两种投影里
+      都是 null ⇒ **不得据此声称"哪个模型"是 API 可读列**。
+    - ⚠️ **D-LF-1（本轮最贵的一条）**：Langfuse 接上之后 **Jaeger 面整体静默瞎掉**，而 `/health`
+      仍报 `otel_status=ACTIVE`。机制：Langfuse 客户端构造把全局 TracerProvider 换成它自己那份
+      （只有 `LangfuseSpanProcessor`、不导 OTLP），kernel 的"复用已存在 provider"分支按
+      "宿主自带 exporter"的前提什么都不挂 ⇒ 本平台的 OTLP 出口从未存在。两条教训：
+      ① 两个后端共用一个 OTel 全局 provider 时**装配顺序决定谁活着**，且"灯亮"不等于"数据到"——
+      判据必须是"后端里查得到本次原文"，不是状态字段；
+      ② 我先前写的"Jaeger ✅"是在**接 Langfuse 之前**那个 Pod 上量的，换 rev 后没复跑 ⇒
+      **现网结论会随每次滚动失效**，观测面读数必须绑定"当前 Pod 的 GIT_REV"一起记。
+      修复（顺序上移 + 复用分支补挂出口 + 三条钉用例）后，`e2e_traceparent.sh` 与
+      `langfuse_proof.py` **在同一个新 Pod 上同时通过**才算数。
     - ⚠️ **一条通用的依赖验收纪律**（本轮踩出来的）：`langfuse.langchain` 的导入前置是**顶层 `langchain` 包**
       （它只 `import langchain` 读 `__version__`，真用符号全在 `langchain_core`）。所以"pip 解析通过、
       零降级"**不等于**"集成可用"——**依赖类判据必须在镜像里跑 `import`，不能在开发机跑**
       （本地 venv 一直带着 langchain，十 session 全绿对这条缺陷零免疫力）。
-    - ⚠️ 顺带：`deploy/k8s/README.md:216` 与 `VERIFICATION.md:155` 仍以"v2 与 langgraph 1.x 根本性依赖冲突"
-      作为不部署 Langfuse 的理由——那是 2026-09-29 的事实，S4（`a5fa9031`）已把 import 面迁到 v4 契约，
-      **现在的理由是"镜像减重 + 未注入凭据"，不是"接不上"**。
+    - ⚠️ 顺带：`deploy/k8s/README.md:216` 与 `VERIFICATION.md:155` 曾以"v2 与 langgraph 1.x 根本性依赖冲突"
+      作为不部署 Langfuse 的理由——那是 2026-09-29 的事实，S4（`a5fa9031`）已把 import 面迁到 v4 契约。
+      我上一轮把它改写成"现在不接的原因是镜像减重 + 未注入凭据"，**这句也已经过期**：自 rev `6ac466af`
+      起 extra 已在默认镜像、`LANGFUSE_*` 三键经 Secret 注入、A3 现网通过 ⇒ **Langfuse 已接且在线上**，
+      两处文档现在都指向本节。
 
 ## 7. 故障与回滚预案
 
@@ -420,5 +432,5 @@ ssh root@192.168.100.126 'cd /opt/agent-platform && git fetch /tmp/ap-rollback.b
 | ⑬ | tracing 退出 flush 无上界 | A/B/C | 待拍板（`terminationGracePeriodSeconds: 60` 只是买时间） |
 | ⑭ | 切块器把 `---`/页码行留成独立块 | 过滤 / 容忍 | 待拍板，属改代码 |
 | ⑯ | **D1 交付物"5 条演示问题"至今无产物**（2026-10-13 外部审核指出，核实为真） | 我从现库 7 份业务语料里选并附真跑读数，人工判定列由需求方填 / 需求方直接给题 | **产物已出**（2026-10-13 当天补：`demo-questions.md`，5 题 + 唯一承载块 + 单遍实跑读数 + 三条必须如实说出去的缺陷）。**只剩判定列**："敢不敢当着领导念"由需求方填，我不代判；在那之前不得声称"三道检查全过" |
-| ⑰ | **Langfuse 面要不要接**（方案 D5.5 的第二半，审核核实为未接线） | 接（重建镜像带 `--extra langfuse` + 注入 `LANGFUSE_*` 三个键）/ 不接（明确退回两层证据） | ✅ **已拍板"接"**（2026-10-13 需求方）。**代码已入库 `c63682d`，线上尚未生效**：观测栈在 126 已起（health 200 + 项目凭据打通 `/api/public/projects`），Secret/CM/清单三项注入就绪，但**镜像重建被我中止**——构建期间 `avg10=67.47%` IO stall、同机 etcd 5 分钟 41 条 `slow fdatasync/took too long`、milvus 累计重启 30→31。⇒ 待在**静默窗口**跑 `build.sh c63682d…` → 分发 → apply → 取 A3。**线上现仍是 `0425257`（R1），本轮没动过它**。留证 `evidence/2026-10-13-langfuse-stack/readings.md` |
+| ⑰ | **Langfuse 面要不要接**（方案 D5.5 的第二半，审核核实为未接线） | 接（重建镜像带 `--extra langfuse` + 注入 `LANGFUSE_*` 三个键）/ 不接（明确退回两层证据） | ✅ **已拍板"接"，且已在线上生效**（rev `6ac466af`，2026-10-13）。extra 进默认镜像（**镜像内** A1 复验 `langfuse 4.17.0`）、Secret+CM 三键注入、`/health` 两盏灯 `langfuse_enabled/ready=true`、**A3 现网通过**：一次 rag 问答落 2 条 GENERATION，答案那条 `in=1403/out=1547` 且 input 摊平后含 `[来源: …]` 检索原文，trace id 与注入的 W3C id 相等。过程：在 126 中止过一次构建（`avg10=67.47%`、同机 etcd 5 分钟 41 条 `slow fdatasync`、milvus 累计重启 30→31），改到 241 构建 + PSI 闸门脚本跑通，并**补做了一次 241 的 containerd-k8s 本地导入**——新 Pod 真落在 241，可变 tag + `IfNotPresent` 下漏导入就是"静默跑旧 rev"。**并暴露缺陷 D-LF-1**：接上 Langfuse 把 Jaeger 面顶掉而 `otel_status` 仍报 ACTIVE ⇒ 修法=装配顺序上移 + 复用分支补挂出口 + 三条钉用例，且今后**两个判据必须在同一个 Pod 上同时跑**。留证 `evidence/2026-10-13-langfuse-stack/readings.md`，修法 `docs/plans/plan-langfuse-wiring-2026-10-13.md` §7 |
 | ⑱ | **D7 录播保险 + D8 整场彩排未做**（审核核实为真；我此前把这两张任务卡标成 completed，是改名冒充完成） | 需求方在浏览器前坐一次（持键者输 `API_KEY`）我同步留证 / 我命令行侧先出一版"完整录制"当保险 | 至少要做第 2 项：断网是方案 R0 列的故障面，而现在**没有任何录播文件**。任务卡 #7/#9/#10 已改回未完成状态 |
