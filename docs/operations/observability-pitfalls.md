@@ -25,6 +25,7 @@
 | 14 | `git add -A docs` 把一份没审过的未跟踪文档扫进提交 | **暂存范围过宽** | 按文件名 `git add <path>`；提交前 `git status` 复核 included 内容 |
 | 15 | 「Jaeger 里没有 `POST /query`」 | **探针淹没**：`GET /health` 每 5s 一条把 `limit=40` 窗口刷满（`deploy/k8s/VERIFICATION.md` §C 第 4 条早已写明这条，我当天仍重犯） | 查询必须带 `operation=` 精查，不用大 `limit` 捞全量 |
 | 16 | 清库时漏删一行残留 | **肉眼列 id 而不是让谓词挑**（我的谓词命中 67，手写的集合是 68–73） | `WHERE id = ANY(谓词查出来的集合)` + `DELETE … RETURNING` 回读被删内容 |
+| 17 | 删 checkpoint 的脚本连撞两次，两次都在**删之前**失败 | **API/形状**：asyncpg 没有 `Connection.copy()`（那是 psycopg 的）；送进 `ssh 'bash -c'` 的 python 里 `"\x"` 被折叠成单反斜杠 ⇒ SyntaxError | 形状固定为 `本地文件 → ssh 'kubectl exec -i … python -' < 文件`；bytea 用 `chr(92)+"x"+hex` 拼；失败无损失正因为断言闸门在 DELETE 之前 |
 
 ## 1. 两个观测面互相顶掉（本轮最贵，D-LF-1）
 
@@ -128,11 +129,28 @@ TracerProvider 换成自己那份，processors 只有 `['LangfuseSpanProcessor']
   `SELECT id, question, answer … FROM semantic_cache ORDER BY created_at` 把清单念出来。
   2026-10-13 实测该表 16 行里 **7 行是我的取证句**（`LFPROOF-…`／`SHAPECHECK-1`／`同窗对照-…`／
   `e2e取证-…`／`e2e复验-…`），已按谓词清理，剩 9 行真实内容。**这些 id 会变，别引用行数，复跑谓词查询。**
-- **LangGraph checkpoints（`/history` 面板）**：同一批探针句在会话状态里**还有 8 条**，清它等于
-  **清空整个会话记录面板**（D10 消融时实测过这个副作用）⇒ 属"要不要牺牲一屏历史"的取舍，需拍板，别顺手删。
+- **LangGraph checkpoints（`/history` 面板）**：同一批探针句在会话状态里**还有 8 条**。2026-10-13 **10:27 UTC**
+  已拍板 **整桶清空并执行完毕**（备份后删；宿主 +0800 显示 18:27），删后读数：`checkpoints`/`checkpoint_blobs`/
+  `checkpoint_writes` 三表 `tenant-default` 桶与全表同为 **0**，`/history?session_id=tenant-default` →
+  **HTTP 200 `count=0`**，`/health` 仍 200。⇒ 控制台历史面板现在是空的，演示时**第一轮真实问答就是面板的第一条内容**，
+  别把"面板空白"讲成缺陷，要讲成"从这一句开始记账"。
+- **为什么只能整桶、不能挑着删**（动手前查出来的，别再走一遍弯路）：checkpointer 只保留**最新一条**
+  checkpoint 行（1 行装下整段会话），消息不是独立的表行，而是序列化在 `checkpoint_blobs` 的 channel
+  value 里；`identity_mode=single` 又把前端传的任意 `session_id` 折叠成 `tenant-default` ⇒
+  **既没有"某一句"的删除锚点，也没有更早的快照可回退**（`/session/revert` 是时间旅行，需要前序快照）。
+  备份只能整桶还原原状（含探针句），所以取舍只有"全清 / 全不清"两档。
+- **备份与恢复的诚实边界**：备份在 `126:/tmp/ckpt-backup-host/*.csv`（0600，
+  `checkpoints.csv` 472B md5 `4e05aca7…`、`checkpoint_blobs.csv` 289052B md5 `22c10dd2…`、
+  `checkpoint_writes.csv` 79B md5 `fb97a3bb…`）。它在宿主 `/tmp`，**主机重启即失**；且
+  **恢复路径（`COPY … FROM csv` 回灌）我没有实跑验证过**——把它当"能恢复"用之前先测一次。
 - 清理纪律：**用谓词挑集合**（`WHERE question ~ 'LFPROOF|SHAPECHECK|同窗对照|e2e取证|e2e复验|取证标记'`），
   且 `DELETE … RETURNING id, left(question,56)` 打印被删内容 + 删后回读残留计数 = 0。
   我第一遍是肉眼列的 id 集合，结果**漏删一行、多包含一条不在谓词里的**（坑档表第 16 行）。
+- 删前的硬闸门：**先备份、断言备份非空，再 DELETE**（`assert size > 0`），删除按 FK 顺序
+  `checkpoint_writes → checkpoint_blobs → checkpoints`，删后逐表回读"该桶 + 全表"两个数。
+  这段脚本连撞两次工具形状（都在**删之前**失败，数据无恙）：asyncpg **没有** `Connection.copy()`
+  （那是 psycopg 的 API），以及把 python 送进 `ssh 'bash -c'` 时 `"\x"` 被折叠成单反斜杠 ⇒ SyntaxError；
+  可靠形状是 `写本地文件 → ssh 'kubectl exec -i … -- python -' < 文件`，bytea 用 `chr(92) + "x" + hex` 拼。
 - 残留行还有第二重代价：它们躺在**语义缓存**里，会以高相似度抢走后续提问的命中（取证问题因此必须
   **语义新颖**，见 §6）。
 
