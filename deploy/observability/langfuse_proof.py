@@ -55,8 +55,9 @@ def _get(url: str, headers: dict | None = None, timeout: int = 30):
             return resp.status, resp.read().decode("utf-8", "replace")
     except urllib.error.HTTPError as e:
         return e.code, ""
-    except Exception as e:
-        return 0, f"{type(e).__name__}"
+    except urllib.error.URLError as e:
+        # 连不上/超时/DNS 都走这里：Langfuse 没起就是这个信号，不是"平台没记录"
+        return 0, f"URLError:{e.reason}"
 
 
 def _lf(path: str):
@@ -90,7 +91,7 @@ def ask() -> tuple[str, str, list[str], int]:
             elif line.startswith("data:"):
                 try:
                     d = json.loads(line[5:])
-                except Exception:
+                except json.JSONDecodeError:
                     continue
                 t = d.get("type") or cur or "?"
                 kinds.append(t)

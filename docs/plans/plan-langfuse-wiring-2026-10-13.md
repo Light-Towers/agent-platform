@@ -22,6 +22,39 @@
 | G2 现网无既有 Langfuse | 不能凭"编排文件里写了"当作"内网有服务" | 126 `docker ps -a` 无任何 langfuse/clickhouse 容器；`kubectl get pods -A` 无相关负载；126/125/241 三台 `:3000/api/public/health` **全部不通** ⇒ **必须自己起**，方案 A.2 里"内网那套早就在跑"是未证实假设 |
 | G3 拉取通道 | 镜像能进得来、盘装得下 | moby 配了华为云 SWR mirror，`docker pull valkey/valkey:8-alpine` 成功；PyPI 直连 200；`/` 与 `/data` 同一文件系统 `vda2`，**98G 用 72G 余 22G**；内存 15G（avail 11G） |
 
+## 1.5 G1 的结论被 A1 证伪了一半（本方案最重要的一条）
+
+第一版构建（rev `3cd5580`）出来后，在**镜像内**跑 A1：
+`import langfuse, langfuse.langchain` → **`ModuleNotFoundError: Please install langchain to use the
+Langfuse langchain integration`**。而 `pip list` 里 langfuse 4.17.0 明明在位。
+
+根因（读 `.venv/.../langfuse/langchain/CallbackHandler.py:40-45`）：该模块开头是
+
+```python
+try:
+    import langchain                       # ← 只为读 langchain.__version__ 选 v1/v0 分支
+    if langchain.__version__.startswith("1"):
+        from langchain_core.callbacks import BaseCallbackHandler   # 真正用的符号全在 core
+```
+
+⇒ **`langchain` 顶层包是 `langfuse.langchain` 的导入前置**，而我们只声明 `langchain-core`/
+`langchain-openai`。缺它时 `tracing.py` 的 `except Exception` 会把它吞成空列表 ——
+**"包装了但集成导不进来"与"包没装"在现场表现完全一样**，正是这次要消灭的静默失效。
+
+所以 G1 那句"只新增 3 个包、零降级"**不足以支撑结论**：它只回答了"langfuse 本人与现有栈是否共存"，
+没回答"装完之后集成到底能不能 import"。**教训：依赖门禁必须验到"目标 import 真成功"这一层，
+不能停在解析器不报错。** 补法与影响：
+
+- 三处声明位一起补 `langchain>=1,<2`：`agent-runtime[langfuse]`、`agent_federation[observability]`、
+  `exhibition-agent[langfuse]`（只补一处，另外两侧照样静默不报）。
+- lint **L-4 的跟踪包加 `langchain`**（`scripts/lint_architecture.py`），让"三处下界一致"由门禁而非
+  记性保证 —— 这是 AGENTS.md「三层齐备」里缺的第三层。
+- 镜像内重跑 `pip install --dry-run "langchain>=1,<2"`：**`Would install langchain-1.4.5`，其余全
+  `already satisfied`，9.7s 零回溯**（langsmith/orjson/zstandard 等都已在位，因为它们是
+  langchain-core 的传递依赖）。
+- 本地 venv 早就装着 `langchain 1.4.3`（langchain-core 的邻居），**所以十 session 全绿这件事
+  对这条缺陷毫无免疫力**——这就是为什么 A1 必须在镜像里跑，不能在开发机跑。
+
 ## 2. 影响面（六处，逐处标"改/不改"）
 
 | # | 面 | 改什么 | 为什么必须改在这里 |
@@ -71,9 +104,7 @@
 > **不得凭 A1/A2 宣称"接上了"**——A.2 原文写得很清楚：客户端包没装时平台只记一行日志就静默不报，
 > 配了环境变量 ≠ 接上。**只有 A3 是验收判据**，A1/A2 是它的前置。
 
-## 5. 风险与对策
-
-| 风险 | 具体 | 对策 |
+## 5. 风险与对策| 风险 | 具体 | 对策 |
 |---|---|---|
 | **R2 IO 放大**（本机最真实的风险） | 126 是 `ROTA=1` 单盘、etcd `slow fdatasync` 自 09-20 起 953 条且每天都有，milvus 已被它带死过 15 次；ClickHouse + MinIO 是**持续写**的 | ① 按需起、取证完即停，不做常驻；② 起栈期间盯 `/proc/pressure/io` 与 etcd/milvus 状态，`full avg10` 若冲到两位数立刻 `down`；③ 只喂**一条**取证提问，不做压测 |
 | R3 盘满 | 栈镜像 + 数据卷吃 22G 余量 | 每步 `df -h /` 回读；余量低于 12G 即停止并如实报告，不硬塞 |

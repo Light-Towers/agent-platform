@@ -27,7 +27,9 @@ dev = [
 # Langfuse 观测后端（llm_obs LangfuseBackend 软导入，ImportError 降级 no-op）；
 # 下界与 agent-runtime [langfuse] / federation [observability] 归一（lint L-4），
 # import 路径属 v3+/v4 代际契约（观测方案 §3.4，S4 已迁 langfuse.langchain）。
-langfuse = ["langfuse>=4.0.0"]
+# langchain 是 langfuse.langchain 的导入前置（只用于读 __version__），缺它则软降级
+# 成"配了但不报"。与 agent-runtime/federation 同下界，由 lint L-4 守。
+langfuse = ["langfuse>=4.0.0", "langchain>=1,<2"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["exhibition_agent"]

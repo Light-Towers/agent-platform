@@ -183,6 +183,7 @@ memory = [
     { name = "pymongo" },
 ]
 observability = [
+    { name = "langchain" },
     { name = "langfuse" },
 ]
 
@@ -195,6 +196,7 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.129" },
     { name = "httpx", specifier = ">=0.28" },
     { name = "langchain", specifier = ">=1.3.14" },
+    { name = "langchain", marker = "extra == 'observability'", specifier = ">=1,<2" },
     { name = "langchain-core", specifier = ">=1.5.3" },
     { name = "langchain-openai", specifier = ">=1.4" },
     { name = "langfuse", marker = "extra == 'observability'", specifier = ">=4.0.0" },
@@ -337,6 +339,7 @@ identity = [
     { name = "pyjwt", extra = ["crypto"] },
 ]
 langfuse = [
+    { name = "langchain" },
     { name = "langfuse" },
 ]
 mcp = [
@@ -346,6 +349,7 @@ mcp = [
 [package.metadata]
 requires-dist = [
     { name = "agent-core", editable = "packages/agent-core" },
+    { name = "langchain", marker = "extra == 'langfuse'", specifier = ">=1,<2" },
     { name = "langfuse", marker = "extra == 'langfuse'", specifier = ">=4.0.0" },
     { name = "mcp", marker = "extra == 'mcp'", specifier = ">=2.0.0" },
     { name = "pydantic", specifier = ">=2.13.5" },
@@ -1604,6 +1608,7 @@ dev = [
     { name = "pytest-asyncio" },
 ]
 langfuse = [
+    { name = "langchain" },
     { name = "langfuse" },
 ]
 
@@ -1612,6 +1617,7 @@ requires-dist = [
     { name = "agent-core", editable = "packages/agent-core" },
     { name = "fastapi", specifier = ">=0.115" },
     { name = "httpx", specifier = ">=0.27" },
+    { name = "langchain", marker = "extra == 'langfuse'", specifier = ">=1,<2" },
     { name = "langchain-openai", specifier = ">=0.2" },
     { name = "langfuse", marker = "extra == 'langfuse'", specifier = ">=4.0.0" },
     { name = "langgraph", specifier = ">=1.2.10,<2" },

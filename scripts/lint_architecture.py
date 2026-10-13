@@ -668,7 +668,15 @@ _OTEL_EXTRAS_SITES = (
     # exhibition 观测后端软依赖（llm_obs 懒导入）；S4 迁入，同受 langfuse 下界归一约束。
     ("applications/exhibition-agent/pyproject.toml", "langfuse"),
 )
-_OTEL_TRACKED_PKGS = ("opentelemetry-api", "opentelemetry-sdk", "opentelemetry-exporter-otlp", "langfuse")
+_OTEL_TRACKED_PKGS = (
+    "opentelemetry-api",
+    "opentelemetry-sdk",
+    "opentelemetry-exporter-otlp",
+    "langfuse",
+    # langchain 顶层包是 langfuse.langchain 的导入前置（只用于读 __version__ 选 v1/v0
+    # 分支），三处声明位漏其一就会在漏的那侧退化成"配了但不报"（2026-10-13 镜像内实测）。
+    "langchain",
+)
 
 
 def _normalize_dep_name(name: str) -> str:
