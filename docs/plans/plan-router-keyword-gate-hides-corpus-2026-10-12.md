@@ -87,3 +87,53 @@ B 等旁路那条落地再说。
    我的建议：**R2 + 本方案 A 一起落**。理由是 R1 的收益依赖提供方行为、需要现场再验一轮，而 R2 先把
    "看起来有 LLM 路由、实际没有"这个认知陷阱关掉；A 决定的是关掉之后检索还开不开门。
    R3 是任何选择下都要做的文档修正（不做就是留着一条会让下一个人误判的假陈述）。
+
+## 8. 根因已定位（2026-10-13，四路探针实跑，不是读码推的）
+
+线上配置（值面只到"哪个端点/哪个模型"，密钥只报长度口径）：`LLM_BASE_URL=https://api-inference.modelscope.cn/v1`、
+`LLM_MODEL=LLM_FALLBACK_MODEL=deepseek-ai/DeepSeek-V4.1-Flash`。对同一端点发四种形态：
+
+| # | 请求形态 | 结果 |
+|---|---|---|
+| 1 | 纯补全（`/health` 的 `llm=true` 探的就是这个） | **200** |
+| 2 | `response_format={"type":"json_object"}`，messages 里**不含** "json" | 400：`'messages' must contain the word 'json' in some form, to use 'response_format' of type 'json_object'` |
+| 3 | `response_format={"type":"json_schema", strict:true}` | **400：`This response_format type is unavailable now`** |
+| 4 | 同上但不带 strict | **400：同一句**（⇒ 与 strict 无关，是该类型整体不支持） |
+| 5 | `tools` + `tool_choice:"required"` | **200**，`finish_reason=tool_calls`，且 arguments **逐字符合** `RouteDecision` schema：`{"capability":"rag","reason":"…","sub_query":"展台搭建的安全要求有哪些"}` |
+| A | `json_object` + prompt 里含"以 JSON 返回" | 200，但模型自己造字段名（`{"判断结果":{"应走链路":…}}`）⇒ **不保证贴 schema**，还要自己解析 |
+
+版本侧（Pod 内实测）：`langchain-openai==1.7.0`，其签名为
+
+```
+ChatOpenAI.with_structured_output(schema, *, method: Literal['function_calling','json_mode','json_schema'] = 'json_schema', ...)
+```
+
+**因果链闭合**：`router.py:87` 写的是 `llm.with_structured_output(RouteDecision)` ⇒ `method` 取默认 `json_schema`
+⇒ ModelScope 兼容层没有实现这个 `response_format` 类型 ⇒ 每问必 400 ⇒ 被 `except Exception → heuristic_route`
+吞成"正常"。而 `/health` 的 `llm` 只探纯补全（第 1 路 200）⇒ 灯一直是绿的。
+
+## 9. 最小修法（两行，跨两个包；已验证目标形态可用，但**未拍板不动手**）
+
+1. `applications/agent_server/agent/router.py:87`：`with_structured_output(RouteDecision, method="function_calling")`
+   —— 走第 5 路，实测 200 且严格出参。
+2. `packages/agent-core/agent_core/llm/fallback.py:227`：`def with_structured_output(self, schema, **kwargs)`
+   并 `return self.primary.with_structured_output(schema, **kwargs)`。
+   **这一处是必需的第二步**：`agent/llm.py:39` 把模型包成 `FallbackChatModel`，而它现在的签名不收 `method`，
+   只改 router.py 会被这层静默丢掉（又一个"消费不存在的契约"形状）。
+
+不选 `json_mode`：第 A 路证明它能返 200 但不保证字段贴合 schema，省不掉解析代码，收益不如 function_calling。
+不选 `json_schema`：端点整体不支持（第 3/4 路）。
+
+### 验收（改完必须过）
+
+1. 线上单发一问 ⇒ pod 日志**不再**出现 `This response_format type is unavailable`（计数增量 0）；
+2. `route.reason` 变成模型写的话（不再是"命中知识库特征词"这类固定话术），且不带特征词的因果问法能拿到 `capability=rag`；
+3. `make eval` 的 15 条 golden 不掉基线（`decide_route` 是 eval 基线，`intent_bridge` 注释明确要求保持稳定）；
+4. 用例钉住"`FallbackChatModel` 把 `method` 透传给 primary"——否则第 2 步会被下一个人重构掉而无人察觉。
+
+### 顺带抓到的一条配置事实
+
+`LLM_MODEL` 与 `LLM_FALLBACK_MODEL` **是同一个模型**（`deepseek-ai/DeepSeek-V4.1-Flash`），且
+`FallbackChatModel.with_structured_output` 恒绑 primary ⇒ 当前"主备"在结构化路径上等于**没有备**。
+端点整体不可用时（10-12 已实测过那种形态）路由会全部落到词表，这没问题；但**没有任何一个模型能替另一个**这件事要写进运维口径，
+别把 `LLM_FALLBACK_MODEL` 当成"配了备用模型"。
