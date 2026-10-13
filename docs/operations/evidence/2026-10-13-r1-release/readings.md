@@ -63,7 +63,7 @@
 | Pod | `agent-platform-7d7944fdfc-hp9p8`，1/1 Running，restart=0，node=ambari01 |
 | Pod 内 `GIT_REV` | `0425257033621b031a1e2c33ff0c101ad17d7b95`（回读，非 apply 退出码） |
 | `/health` | `storage=postgres`、`sql_backend=postgres`、`embedding_backend=LocalEmbedder`、`embedding_real=true`、`otel_status=ACTIVE`、`auth_enabled=true`、**`search=false`（见 §5）** |
-| 本地门禁 | root 1028 passed / agent-core 349 / agent_server app 85 / federation 176 / exhibition 348 / agent-runtime 594 / shared-schemas 28；eval 15/15 |
+| 本地门禁（`make test` 十个 session 全跑，另加 agent-core） | root 1028 / shared-schemas 28 / agent-runtime 594 / agent_server app 85 / federation 176 / kefu 43 / exhibition 348 / knowledge-service 410（+7 skip）/ nl2sql 18 / tests-observability 15（真 OTel SDK）= **2745 passed**；再加 `packages/agent-core/tests` 349（改的就是这个包，Makefile 的 test 目标里没有独立 session）⇒ **3094 passed，0 失败**；eval `15/15 = 100%` |
 | 语料 | `chunks=303`（业务 210 + ADR 93），dim 512 单一 |
 | 回放源 | 演示前需再清一次（本轮最后几问又写入了缓存与记忆）；命令：`kubectl exec -i $POD -- python - wipe_all < /tmp/r30db.py` |
 | 126 脚本 | `/tmp/r33.sh` `/tmp/r33.log`（验收编排与读数）、`/tmp/r30db.py` `/tmp/r30q.py`（复用件）、`/tmp/ap-r1.bundle`（源同步包，可删） |
