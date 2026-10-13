@@ -170,6 +170,15 @@ TracerProvider 换成自己那份，processors 只有 `['LangfuseSpanProcessor']
 
 ## 9. 我这台机器上的会话形状问题（与平台无关，但同样吃时间）
 
+- **本机 TCP connect 探针一律假阳性**（2026-10-13 实测）：python socket 与 `/dev/tcp` 对 126 的
+  22/16686/18000/**以及我随手编的 2222 和 80** 全部报"TCP已连"，而同一时刻应用层 curl 对 126 的三个口
+  都是 `HTTP 000`、对 241:3000 是 `HTTP 200` ⇒ **这台机器到内网的 connect 层被中间层接管，读数无意义**。
+  判"某个 UI 能不能打开"**只能用应用层**（HTTP 状态码 + `size_download` + `time_total`），并且**必须带对照组**
+  （编一个不存在的端口；它也"通"就说明探针废了）。我差点拿这组废读数去解释 Jaeger 为什么打不开。
+- **ssh 连续快速连接会把两台主机都关在 kex 之外**（`kex_exchange_identification: Connection closed by remote host`，
+  126 与 241 同症状，几分钟前还能通）⇒ 像是 sshd MaxStartups 限流。取证据时**一次连接里把要读的东西全读完**，
+  不要一个事实一次 ssh。
+
 - **ssh 里内联 python/awk 必炸**（本轮两次：嵌套 f-string 引号、三层 awk 引号）。可靠形状始终是
   `写本地文件 → scp → ssh 'bash -s' < 文件` 或 `… python - < 文件`；凭据经 env 传入，**不进 argv**。
 - **本机 Git Bash 无 `python3`**，Windows 版 `python` 看不见 bash 写的 `/tmp`。
