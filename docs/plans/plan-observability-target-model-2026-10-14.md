@@ -13,8 +13,22 @@
 
 行业正在收敛到 **OpenTelemetry GenAI 语义约定**。本文引用的这条标准**已于 2026-10 从 OTel 主站迁出**，
 现由独立仓库 `open-telemetry/semantic-conventions-genai` 维护（官网 `opentelemetry.io/docs/specs/semconv/gen-ai/`
-只剩 Moved 存根）。下面每一点都是 2026-10-14 用 `gh api` 直取仓库原文逐条核对的结果，锚定 **semconv v1.44.0**，
-复核命令见文末 §6；整套仍标 `Development`，**属性名与需求级别后续会漂移**。要点：
+只剩 Moved 存根）。下面每一点都是 2026-10-14 用 `gh api` 直取仓库原文逐条核对的结果，
+锚定 **semconv v1.44.0 + 该仓库 commit `4e8a2812139b2a999d959e3650e24dfc64e21943`（2026-10-13T17:42:20Z）**，
+复核命令见文末 §6。
+
+⚠️ **整套仍标 `Development`，所以"属性名会漂移"是设计意图，不是作者谨慎**——依据是官方自己的分级规则
+（`semantic-conventions/docs/general/semantic-convention-groups.md` §Group stability，v1.44.0 原文）：
+分级为 `development` / `alpha` / `beta` / `release_candidate` / `stable`，且"**未指定就按 `development` 处理**"；
+保护条款只给 stable（"Group stability **MUST NOT** change from `stable` to any other level"）与
+"任何级别的约定组都 **MUST NOT** be removed，改名或不再推荐只能标 deprecated"。
+⇒ `Development` 的名字与需求级别**没有不作破坏性变更的承诺**。活例（v1.44.0 注册表原文）：
+`gen_ai.system` 已标 **Deprecated**，理由写明 `Replaced by gen_ai.provider.name`（v1.36.0 里它还有 5 处正常用法）。
+**风险的形状要提前知道**：埋点把键名硬编码 + 后端按键聚合 ⇒ 上游改名后**查询静默返回空、不报错**
+（与本轮踩过的"猜错 Langfuse `fields` 名静默少一列""Jaeger 打错端点返回 HTML 被读成 0 条"同族）。
+另注意 `CONTRIBUTING.md` 明确要求"指向规范仓库的链接**必须指 tag，不得指 `main`**"，而该 GenAI 仓库
+**至今无 tag、无 release**（`gh api .../tags` 与 `.../releases` 均返回空数组）⇒ 只能锚 commit SHA。
+要点：
 
 - **span 树按"真实发生过的动作"建**，不许为"Agent 大概在思考/规划"虚构 span：
   ```
@@ -127,6 +141,15 @@ user opt-in, for example OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT.`，
   验收必须按 L2 末尾那条陷阱：**核对 observation 类型枚举，不看 UI 名字**。
 - **P2 语义标准化**：G2/G4/G11 —— 引入 `gen_ai.*` 属性层（自建映射即可，不引新框架），补 session/租户维度与
   `error.type`。这一步做完，"谁烧 token / 谁最慢"才是一条聚合查询。
+  **键名直接用标准的，不要自造私有键**：会话 `gen_ai.conversation.id`（或通用 `session.id`）、
+  prompt 版本 `gen_ai.prompt.name` + `gen_ai.prompt.version`、工具关联 `gen_ai.tool.call.id`、
+  错误类别 `error.type`；用户维度 `enduser.id` 官方挂了 PII 警告 ⇒ 本项目要用就用 `enduser.pseudo.id`；
+  **租户无标准键**（主仓 85 个属性命名空间里没有 `tenant.md`）⇒ 自定义键并把它写进界面口径。
+  **对冲版本漂移的三层写法**（对齐本仓库"全局优先"的架构原则，缺一层就退化成约定）：
+  ① 键名收敛到 `agent-core` 的一处常量表（不在各调用点写字面串）；② 装配走统一门面，由构造保证不漏接；
+  ③ 门禁 = `scripts/lint_architecture.py` 增一条"裸写 `gen_ai.` 字面串即失败" + `tests/observability` 加
+  **键存在性断言**（上游改名时让 CI 红，而不是让线上聚合查询静默返回空）。
+  版本锚（semconv v1.44.0 + commit SHA）写进那张常量表的注释里，**跟着 §6 的复核命令重跑一次才允许改**。
 - **P3 质量闭环**：G5/G6/G7 —— prompt registry + 版本回链、Score 通道（先把控制台的赞踩/人工判定落进去）、
   Dataset/Experiment 与 `eval/` 打通。
 - **P4 跨服务**：G10 —— 联邦网关→子服务的 propagation 实测（这本就是方案 D5.5 欠的那一半）。
@@ -166,16 +189,28 @@ for f in docs/gen-ai/client-inference.md docs/gen-ai/gen-ai-spans.md \
          docs/gen-ai/gen-ai-agent-spans.md docs/registry/attributes/gen-ai.md; do
   gh api "repos/$R/contents/$f" --jq .content | base64 -d > "/tmp/$(basename $f)"
 done
-grep -n "Span name\|Span kind\|Status:" /tmp/client-inference.md /tmp/gen-ai-spans.md /tmp/gen-ai-agent-spans.md
-# 18 个 well-known 操作名：反引号必须落在单引号的 sed 表达式里（双引号会触发 shell 命令替换）
+# 18 个 well-known 操作名。反引号必须落在单引号表达式里（双引号会被 shell 当命令替换）：
 sed -n '/^`gen_ai.operation.name` has the following/,/^---/p' /tmp/gen-ai.md | grep -c '^| `'
+# 取当前锚点 SHA（本文写作时 = 4e8a2812139b2a999d959e3650e24dfc64e21943，2026-10-13T17:42:20Z）：
+gh api "repos/$R/commits?per_page=1" --jq ".[0].sha + \" | \" + .[0].commit.committer.date"
 ```
 
-**踩过的两个坑（写在这里，防止下轮再犯）**：
+**踩过的三个坑（写在这里，防止下轮再犯）**：
 1. 推理 span 的完整约定**不在** `gen-ai-spans.md`，那里只做跳转（真身在 `client-inference.md`）⇒
    只读一个文件会得出"`output_tokens` 没在推理段定义"的假结论，本文上一版就中了这一枪。
-2. `git ls-tree` 列出的文件名里**没有** `genai` 目录（是 `gen-ai`），凭印象猜路径会得到 404，
-   再把 404 误读成"官方不可达"。**404 与不可达是两种读数**，必须分开报。
+2. 官网那一页早是 **Moved 存根**，我又**凭印象猜上游文件路径**（目录是 `gen-ai` 不是 `genai`）拿到 404，
+   两层错叠一起就写成了"官方不可达"。**404 与不可达是两种读数**，必须分开报。
+3. **本文自己的复核命令也错过**：第一版 sed 表达式漏了属性名后的反引号，实跑返回 **0 行**，
+   看起来像"文档里没有这个枚举"。⇒ 给出命令时必须**同时给出预期读数**（此处 `18`），并实跑一次。
+
+**分级与版本锚的依据**（同样是原文，不是转述）：
+`open-telemetry/semantic-conventions`（v1.44.0 tag）的 `docs/general/semantic-convention-groups.md`
+§Group stability —— 分级 `development`/`alpha`/`beta`/`release_candidate`/`stable`、
+"**未指定即 development**"、"MUST NOT change from `stable`"、"任何级别都 MUST NOT be removed，
+改名只能标 deprecated"；以及 `CONTRIBUTING.md` 的"指向规范仓库的链接**必须指 tag，不得指 `main`**"。
+`gen_ai.system → gen_ai.provider.name` 的改名实例取自
+`semantic-conventions@v1.44.0` 的 `docs/registry/attributes/gen-ai.md`（Deprecated 表），
+与 `v1.36.0` 同一文件对照（5 处正常用法 → 2 处 deprecated 残留）。
 
 **产品与实践来源**：Langfuse 官方数据模型文档（observation 类型枚举、`langfuse.observation.type`）；
 2026 年多篇中文工程实践（InfoQ《从 Demo 到生产》、微软 Foundry agent tracing 概念页、
