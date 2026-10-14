@@ -26,6 +26,7 @@
 | 15 | 「Jaeger 里没有 `POST /query`」 | **探针淹没**：`GET /health` 每 5s 一条把 `limit=40` 窗口刷满（`deploy/k8s/VERIFICATION.md` §C 第 4 条早已写明这条，我当天仍重犯） | 查询必须带 `operation=` 精查，不用大 `limit` 捞全量 |
 | 16 | 清库时漏删一行残留 | **肉眼列 id 而不是让谓词挑**（我的谓词命中 67，手写的集合是 68–73） | `WHERE id = ANY(谓词查出来的集合)` + `DELETE … RETURNING` 回读被删内容 |
 | 17 | 删 checkpoint 的脚本连撞两次，两次都在**删之前**失败 | **API/形状**：asyncpg 没有 `Connection.copy()`（那是 psycopg 的）；送进 `ssh 'bash -c'` 的 python 里 `"\x"` 被折叠成单反斜杠 ⇒ SyntaxError | 形状固定为 `本地文件 → ssh 'kubectl exec -i … python -' < 文件`；bytea 用 `chr(92)+"x"+hex` 拼；失败无损失正因为断言闸门在 DELETE 之前 |
+| 18 | Jaeger 按 `/api/search` 查"0 条 trace" | **端点形状错**：现网这个 all-in-one build 对 `/api/search` 返回的是 **SPA 首页 HTML**（不是 JSON），`json.loads` 之前不判形状就会被读成"没有数据"；同一次提问在 UI 上还是**两棵 trace**（不带 `traceparent` ⇒ 两路埋点各自起根），只点 1-span 那棵会误判"链路是空的" | 查询一律用 `/api/traces?service=&operation=&limit=`；先判响应是不是 JSON 再数条数；按 `otel.scope.name=agent-platform` 筛"有内容的那棵" |
 
 ## 1. 两个观测面互相顶掉（本轮最贵，D-LF-1）
 

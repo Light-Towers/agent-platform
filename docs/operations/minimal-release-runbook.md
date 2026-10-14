@@ -440,3 +440,35 @@ ssh root@192.168.100.126 'cd /opt/agent-platform && git fetch /tmp/ap-rollback.b
 | ⑳ | **checkpoints 里那 8 条取证残留句要不要清**（代价 = 控制台会话记录面板清空） | 整桶清空（备份后删）／保留不动 | ✅ **已拍板"整桶清空"并执行完毕**（2026-10-13 **10:27 UTC**，需求方选定"备份后删，不可选择性恢复"）。删前只读预检 = 清单真值（`checkpoints` 1 行 / `checkpoint_blobs` 16 行 / `checkpoint_writes` 0 行，`thread_id` 只有 `tenant-default`）；备份 `126:/tmp/ckpt-backup-host/*.csv`（0600，472/289052/79 B，md5 见坑档 §8，**宿主 /tmp 重启即失，且回灌恢复路径我没实跑验证过**）；删后三表该桶与全表均 **0**，`/history` → **HTTP 200 `count=0`**，`/health` 仍 200。**"只删那 8 句"这个选项不存在**：checkpointer 只留最新一条 checkpoint 行，消息序列化在 `checkpoint_blobs` 的 channel value 里，没有按句的删除锚点（详见坑档 §8）。⇒ **演示口径**：面板空是预期状态，第一轮真实问答就是第一条记录；但**删后没有复验写入路径**（复验=再发一次真问答就等于重新污染），所以底线 7 只能说"曾经证过 + 删后只验了空态"，写路径的当场证据由演示第一轮提供 |
 | ㉑ | **演示的浏览器入口不能压在 126 上** | ①在 241 起转发把两个口挪到已证可达的主机 ②演示只开 Langfuse + 平台事件面 ③先定成因再决定要不要动部署 | ✅ **已闭合（2026-10-14 开盘复测，读数见 `evidence/2026-10-14-morning-state/readings.md`）**：三口全部 200，**且"IP 绑定"这一猜测被容器实况排除**——`docker ps` 显示 `0.0.0.0:16686->16686/tcp`。昨天的失败是**两件不同的事叠在一起**：(i) `126:18000` 是 `port-forward` 进程，机器/会话一停就没（`12ms 被拒`=无人监听，与 `5.0s 无应答` 两种形状）；(ii) 需求方这台机器的流量被 TUN 模式代理客户端接管，connect 层对编造端口都报"通"。**⇒ 演示前必做两条**：① `bash deploy/k8s/scripts/portforward.sh start` 并把 `ss -tlnp \| grep :18000` 当检查项；② 开盘先用**时延形状**判可达性（毫秒级带字节数才算数，整齐 5.0s 无字节 = 本机路径问题，不要去查平台）。②"屏幕不压 126"作为备选口径保留 |
 | ㉒ | **`/health` 卡住会被 liveness 当场杀 Pod**（2026-10-14 开盘发现：`RESTARTS=1`，`exitCode=137`、`finishedAt=2026-10-13T10:37:56Z`，事件面先有 `Liveness probe failed: Get /health: context deadline exceeded` 再有 `Killing`） | ①演示前只加检查项（`kubectl get events --sort-by=.lastTimestamp \| grep -i unhealth`，有超时就不上台）②查 `/health` 的卡点（它在健康检查里同步探依赖，依赖一慢整条就慢）③放宽探针（`timeoutSeconds`/`failureThreshold`）或把 `/health` 改成不依赖外部探测的浅检查 | **建议①为演示口径 + ②另行方案**：这不是"重启过所以没事"——**演示当天一次 `/health` 卡住 = 屏幕上那台服务当场重启**，六环节全断。③属改清单/改代码，按"先方案后编码"走，不许临场改。**注意定性**：此处 137 是 liveness 杀的，`reason` 不是 `OOMKilled`，别当成内存超限（limits 仍是 2Gi） |
+
+## 10. 现网怎么看一条请求链路（三个面的分工 + Jaeger UI 逐步点法）
+
+**先记三句话的口径**：看**时延与拓扑**用 Jaeger；看**模型节点的输入输出原文**用 Langfuse；看**每个能力步骤做了什么**用平台自己的事件面（控制台页 / SSE）。三者用 **同一个 trace id** 对齐（实测：一次浏览器提问产生的 `da22e1ea…` 在 Jaeger 与 Langfuse 里都查得到）。**Jaeger 属性里刻意没有 prompt 与输出文本**，别在 Jaeger 里找内容。
+
+### Jaeger UI（`http://192.168.100.126:16686`）逐步
+
+1. 顶部 **Search** 标签（不是 Deep Search / Monitor / System Architecture）。
+2. **Service = `agent-platform`**（下拉里还有 `jaeger-all-in-one`，选错就"什么都没有"）。
+3. **Operation 先留 `(any)`**。⚠️ 这是"看不到链路"的头号原因：浏览器不带 `traceparent` 时，**一次提问产生两棵互不串联的 trace**——一棵只有 1 个 span（`otel.scope.name=fastapi`，FastAPI 自带埋点），另一棵才是有内容的（`otel.scope.name=agent-platform`，含 `ChatOpenAI` + `fastapi.endpoint/dependencies`）。点开 1-span 那棵就会误判"链路是空的"。
+4. **Lookback ≥ 1 hour**；**时间按浏览器本地时区显示**，取证记录里写的是 UTC（`01:45:41Z` = 北京 `09:45:41`），别按 Z 时间去下拉框里找。
+5. **Tags** 框（`key=value`，逗号分隔）可用的真键：`otel.scope.name=agent-platform`（**一条就筛出有内容的那棵**）· `thread_id=tenant-default` · `http.status_code=200` · `question_hash=<16位>`。
+6. **Find Traces** → 结果表按开始时间排，**看 "Spans" 那列挑大的点开**；勾选多条可 Compare。
+7. Trace 视图：上方甘特时间轴；点 span → 右侧 **Tags** 面板。业务属性在 `fastapi.endpoint` 这个 span 上（`request_id / question_hash / question_length / priority / thread_id`）；`ChatOpenAI` span 只有模型调用时延。右上角可 Download JSON。
+8. 最快的路径是**直接开 trace 链接**：`http://192.168.100.126:16686/trace/<traceID>`。
+
+**两个会让"查不到"变成长期坑的硬事实**：
+
+- **all-in-one 是内存存储**：进程一重启当天 trace 清零 ⇒ **"能回溯"这件事只有 Langfuse（ClickHouse）撑得住**，手册与演示话术里都不许把 Jaeger 说成留存证据面。
+- **脚本查 Jaeger 只能用 `/api/traces?service=&operation=&limit=`**：现网这个 build 对 `/api/search` 返回的是 **SPA 首页 HTML**，`json.loads` 不判形状就会得出"0 条"的假阴性（坑档表第 18 行，我自己今天踩了一次）。
+
+**2026-10-14 09:45/09:46（北京）需求方两次真提问的读数**（只读 API 取回，可当讲解样本）：
+
+```
+01:45:41Z  763eb51449d1d371389a242514f062a2  spans=1  [POST /query]                       ← fastapi 那棵
+01:45:41Z  4fbfdee5b9423d9b248d23038f123247  spans=4  [ChatOpenAI, POST /query, fastapi.*] ← 有内容那棵
+01:46:37Z  ddc62c1f81df13844619b186ab5c9977  spans=1  [POST /query]
+01:46:37Z  da22e1eadd926f7f3a6769a81073a957  spans=7  [ChatOpenAI, POST /query, fastapi.*]
+对应 Langfuse：4fbfdee5… → 1 条 GENERATION(in=7357/out=370)；da22e1ea… → 4 条 GENERATION
+```
+
+⚠️ **一条待定性的读数**：`da22e1ea…` 里有 **3 次 input 同为 1472 字符**的生成、输出各不同 ⇒ 像路由被重复调用/重试。定性需要一次带 `traceparent` 的对照请求（会往面板与语义缓存写数据），**未做，别在演示里说"路由只调一次"**。
