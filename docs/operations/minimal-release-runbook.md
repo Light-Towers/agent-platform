@@ -464,7 +464,20 @@ ssh root@<internal-ip> 'cd /opt/agent-platform && git fetch /tmp/ap-rollback.bun
 - **别把 Jaeger 当"给人看内容"的界面**（2026-10-14 需求方吐槽"UI 丑、看着费劲"）：① 大片蓝底往往是**文字被选中**的反色，不是主题——点空白取消选择即可；② 这个 build 的 UI 是上游 `jaegertracing/all-in-one` 自带前端（实测包体 4.3MB `static/index-B-RC4is8.js`，里面只有 `"dark"` 与一处 `prefers-color-scheme`，**没有 `uiTheme` 一类切换开关**）⇒ **没有明暗切换按钮，别在界面上找**；准确版本看右上角 About Jaeger。③ 投屏要看它就 **Ctrl 加号放大到 125–150%**（响应式布局，放大不乱）。**演示口径**：讲内容用 Langfuse，讲过程用我们自己的控制台"过程时间线"，**Jaeger 只在被追问时延/拓扑时亮一次**，且必须 `Min Duration=1s` + 直接开 `/trace/<id>` 深链，不要现场搜索。
 - **脚本查 Jaeger 只能用 `/api/traces?service=&operation=&limit=`**：现网这个 build 对 `/api/search` 返回的是 **SPA 首页 HTML**，`json.loads` 不判形状就会得出"0 条"的假阴性（坑档表第 18 行，我自己今天踩了一次）。
 
+**工具级可见性（2026-10-14 读码 + 实测，答"Langfuse 里能看到调用了哪些工具吗"）**：**看不到**。Langfuse 只有 `GENERATION`——callback 只挂在模型上（`applications/agent_server/agent/llm.py:30-36`），而本 app 的 rag/sql/search 是**普通函数调用**（`_invoke("rag", …)`），不是 LangChain tool，Langfuse 无从感知。各面实际粒度：
+
+| 面 | 有什么 | 缺什么 |
+|---|---|---|
+| 事件面 `status.steps[]`（控制台/SSE） | `name/latency_ms/tokens/failed/skill_name/skill_version/tool_name/tool_version` | **入参与返回刻意不含**（`planners/deterministic.py:246-257` 四条理由） |
+| `agent_core.monitor` 的 `tool_start/tool_outcome` | 工具名 + **args 摘要（单值 repr 截 512 字符）** + outcome + duration_ms | **只在 `agent_federation` 那条链上接了**（`agent/tool_registry.py:102-116` 的 `observe_tool`），本演示 app 不走它；且是摘要非全量、返回只有 outcome |
+| Langfuse | GENERATION 的完整 in/out（含拼进 prompt 的检索原文） | 无 `tool` 类型 observation |
+| Jaeger | `ChatOpenAI` span（带 `langfuse.observation.*` 属性）+ 框架内部三类 | 无 tool/节点 span |
+| DB 自观测 `StepForensic` | `tool_name/tool_version/model/model_version/external_call_receipt/effect_receipt` | **无 args/result 列**（字段清单 `agent-runtime/.../forensic.py:80-104`） |
+
+⇒ **"工具的入参与返回"现网任何面都没有全量记录，这是设计选择（基线 4），不是漏接。** 要看到有两条路，都属改代码、要先出方案：**(A)** 把 CallbackHandler 从"只挂模型"提到"挂在这次 run 上" ⇒ LangGraph 每个节点变成带 in/out 的 SPAN observation（代价：原文进观测面更多，与 ㉓ 同源）；**(B)** 把能力包成真 LangChain `@tool` + `observe_tool` ⇒ 有正式 Tool observation 与 args 摘要（动 graph 调用形态，演示前不动）。**演示口径**：说"步骤级可观测（名字/耗时/token/成败/技能与工具版本指纹），入参与返回刻意不进对外推送；模型节点的完整输入输出在 Langfuse"，**不要说"工具调用可观测"**。
+
 **2026-10-14 09:45/09:46（北京）需求方两次真提问的读数**（只读 API 取回，可当讲解样本）：
+
 
 ```
 01:45:41Z  763eb51449d1d371389a242514f062a2  spans=1  [POST /query]                       ← fastapi 那棵
