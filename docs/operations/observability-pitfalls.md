@@ -30,6 +30,7 @@
 | 19 | 我写下"Jaeger 属性里刻意没有 prompt 与输出文本" | **单样本过度概括**（同族第 9 次）：我只数了一条 3-span 的 `/query`（`POST /query` + `fastapi.dependencies/endpoint`，那条里**没有 `ChatOpenAI` span**），就把"我们 kernel 只写脱敏属性"推广成"Jaeger 里没有原文" | 结论要覆盖**每一条 scope 的 span**：`agent-platform` 那条确实只有脱敏位，但 `otel.scope.name=langfuse-sdk` 的 `ChatOpenAI` span 带 `langfuse.observation.input/output/model.name/usage_details` ⇒ **原文与模型名都在**（需求方一张截图逼出来的）。下这类"某面没有 X"的断言前，先把该 trace 全部 span 的 tag 键列一遍 |
 | 20 | 我写下"官方页抓取不可达，属性名待固定版本复核" | **把 404 读成不可达**：官网 `opentelemetry.io/docs/specs/semconv/gen-ai/` 早已是 **Moved 存根**（正文迁到 `open-telemetry/semantic-conventions-genai`），而我按印象猜路径（目录是 `gen-ai` 不是 `genai`）拿到 404，两层错叠在一起就写成了"不可达"。同族还有一个变体：推理 span 的正文在 `client-inference.md`，`gen-ai-spans.md` 里只做跳转 ⇒ 只读一个文件会误报"某属性没定义" | **404 与不可达是两种读数，必须分开报**。标准原文一律直取仓库：`gh api "repos/<org>/<repo>/contents/<path>" --jq .content \| base64 -d`（本机 `gh` 已登录即可，不依赖浏览器与官网）；结论落文档时同时记**锚定版本**（本次 v1.44.0）与复核命令。命令里反引号要落在单引号表达式内（双引号会被 shell 当命令替换） |
 | 21 | 「四类回放源已清零 ⇒ 屏上不会有取证残留」 | **把"清过库"当成"屏上干净"**：10-13 清空之后新发生的合法问答照样写进记忆面，其中一条元问题（"我之前问了哪些问题？"）的答案文本自带 `LFPROOF-*` / `e2e-*` 标记，10-14 浏览器实拍时**被当普通业务内容回放**到屏上 | 判据要换成"**当天会问什么**"而不是"清过没有"：演示当天避开元问题、开场先跑一遍业务问答把面板换掉（台账 ㉔）。清库对这一类无效 |
+| 22 | 我写下「KS 容器 `docker diff` 里**没有** .py 热改」 | **探针形状错**（同族第 4 次，与 18/20 一路）：过滤式写成 `grep -E "^C? M? A? .*\.py$"`，而 `docker diff` 的行形状是 `C /app/...`——第二个字面空格在 "C " 之后并不存在，整个式子恒不匹配 ⇒ 输出空，被我读成"没有热改" | 判"没有 X"之前先跑**不加过滤**的原始输出看形状（本次重跑：`docker diff` 共 68 项、`.py` 9 个）。`docker diff` 的行首只有一位字母（`A`/`C`/`D`），不要按"CMAS 可组合"去写正则 |
 
 ## 1. 两个观测面互相顶掉（本轮最贵，D-LF-1）
 
