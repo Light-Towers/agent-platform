@@ -4,6 +4,7 @@
 > 目标：把"每次上 126 都要重新发现一遍"的环境事实固化成基线，每个结论都能指到具体读数与可原地复现的命令。
 > 取证纪律：全程只读（不安装/不修改/不重启/不停止/不删除既有物）；脚本双端 MD5 一致 + `bash -n` 通过；输出落盘后全文取回阅读；结束即清理并宽口径复核零残留。
 > 与既有文档分工：本文 = **环境事实基线**；[deploy/k8s/VERIFICATION.md](../../deploy/k8s/VERIFICATION.md) = 部署演练报告；[deploy/k8s/README.md](../../deploy/k8s/README.md) = 搭建步骤与踩坑表；[testing-playbook.md](testing-playbook.md) = 测试实跑流程。
+> **2026-10-14 扩围**：标题里的"126"是历史成因（第一次盘点只连了 126）。**三台机（125/126/241）的当前部署态全貌只在 §9**，§1–§8 仍以 126 为主角；凡被 §9 复测订正过的旧读数，都在原处标了"订正/别引用"，不要拿它们做现状陈述。
 > 对应长期记忆：126 代码同步通道、126 双容器运行时形态、126 宿主 Python 与 .venv 可用性（project_environment_configuration）；判定同步方式的只读取证判据（tool_experience）。
 > **时区约定**：126 宿主为 +0800，docker/k8s 的 API 字段给 UTC（尾缀 `Z`）。本文所有换算已标注 +0800，读时勿混。
 
@@ -332,6 +333,10 @@ kubectl -n agent-platform get secret observability-keys -o jsonpath='{.data.LLM_
 | /opt/ap-iso（worktree of 主仓） | **d96799f** | 隔离实验区，**非运行源** | 5 项改动（M scripts/audit_tenant_access.py、M uv.lock、?? audit_err.txt、?? audit_report.md、?? audit_stdout.json） |
 | knowledge-service-web:latest 镜像内 /app | **不可考（镜像无 GIT_REV）** | **KS 在线服务的运行源** | 镜像 Created 09-22 18:32:59 +0800；236 个 .py 中 8 个 mtime 晚于构建（事后热改），详见 §5 末尾 |
 
+- ⚠️ **本表 2026-10-14 复测订正（"三份代码副本"其实是四份，且"宿主"必须先问是哪台）**：
+  `/opt/agent-platform` **不止 126 有** —— **241 也有一份**，HEAD=`6ac466af` dirty=0，**恰好等于线上镜像 rev**（⇒ 241 才是构建落点）；
+  **125 没有 checkout**（`NO_CHECKOUT`，构建入口根本不存在）；126 那份已从本表首行的 `6cebaa5` 前进到 **`c01e9cf7`**（dirty 仍=0）。
+  ⇒ 本表首行按 10-10 算数，**别再当现状引用**；复算命令见 §9.5。线上运行源仍是"镜像内 `/srv/agent-platform/GIT_REV`"这一枚，判据不变。
 - **宿主 HEAD 比运行 rev 领先 `git rev-list --count` = 548 个提交**（前轮"新 4 个提交"的说法作废）。改完代码若忘记重走 build/distribute，126 上"看到的代码"与"跑着的代码"必然不一致，且差距可以极大。
 - d96799f 与 626ec17 均为 HEAD 的**祖先**（`git merge-base --is-ancestor` 双重 YES）⇒ 不构成额外分支来源，只是落后快照。
 - **线上代码漂移逐项定量（G4，"17 项"读数作废）**：以 KS 容器 `/app` 为对象、与宿主 checkout @6cebaa5 做逐文件 md5 比对（e18）：容器内 **236 个 .py**（已排除 .venv/__pycache__/site-packages/models/data/output/logs）中 **SAME=162 / DIFF=74 / 仓库无对应文件=0**（⇒ 没有"只存在于线上、未入库的野文件"）。
@@ -617,11 +622,10 @@ kubectl -n $NS exec -i $POD -- python - probe '报馆图纸' < /tmp/r30db.py
 | port-forward | 126 `:18000 → svc/agent-platform:8000`；`portforward.sh` **无 restart 子命令**，换 Pod 要 stop+start。⚠️ 10-13 收盘前：**办公网侧 126:18000 与 126:16686 均无应答**（curl `HTTP 000`），而同刻 241:3000 → 200 ⇒ 观测/控制台入口别压在 126 上，两候选成因与判据见手册 §9 ㉑ |
 | 密钥落点 | `secret/observability-keys` 内 `API_KEY` / `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY`（+ `LLM_API_KEY`）——**只记键名与注入路径，值不落任何文件** |
 | 库内数据态（**10:27 UTC 复算**） | `chunks` 303 行 / 7 文档、`semantic_cache` 残留 0、**`checkpoints`/`checkpoint_blobs`/`checkpoint_writes` 三表 0 行**：演示前按拍板把取证残留句整桶清掉（备份在 `126:/tmp/ckpt-backup-host/*.csv`，0600，宿主 `/tmp` ⇒ 重启即失）。本节早前那句"今日 1 个 thread、33 个 blob"到此失效，别引用 |
-
-| 代码漂移复查（**2026-10-14 只读实测**） | ①**需同步回仓库的代码＝0 项**：`git -C /opt/agent-platform status --porcelain` 在 **241 与 126 都为空**；241 HEAD=`6ac466af…`（**等于线上镜像 `GIT_REV`**），126 HEAD=`c01e9cf…`（旧一档，若从 126 构建会被 `build.sh` 的 rev 门禁拦下）。②**本周无人热改容器代码**：`docker diff knowledge-service-web` 共 68 项、`.py` 9 个，mtime 全落在 **09-22 / 09-28**（无一在 10 月）。③KS 侧既有漂移的定性沿用 10-10 的 blob 判定（无一需救回），**真正的债仍是"KS 镜像重建+分发"**（线上 `import_router.py` 缺 3 项已入库修复）。④清桶备份**在位**且字节数与台账逐一对上：`126:/tmp/ckpt-backup-host/{checkpoints 472B, checkpoint_blobs 289052B, checkpoint_writes 79B}`，权限 `drw-------` root-only（⚠️ 内含会话原文，能上机读 root 的人读得到——与 ㉓ 同族，等级低）。⑤**残留待清**：126 `/tmp` 11 个探针脚本（10-13 的 `wipe.py`/`keys.py`/`r30db.py`/`r30q.py` + 9 月的 `ablation.py`/`probe.py`/`kgprobe.py`/`run_route_ablation.py`/`seed_synthetic_corpus.py`/`_patch_126.py`/`_dl_bgem3.py`）、241 `/tmp/ch_check.py`。`keys.py` 已确认**不含任何密钥值**（只打印 Secret 的键名，密钥特征计数 0） |
-
-| 库内数据态（**2026-10-14 收盘复算**，`psql -U agent -d agent_platform`） | `checkpoints` **1** / `checkpoint_blobs` **2** / `checkpoint_writes` **0** / `semantic_cache` **11** / `memories` **17** / `chunks` **303**（7 文档）。三条结论：①**写路径已回读证实**——10-13 整桶清空后三表是 0/0/0，现在长出 1+2，说明清桶之后确实有新的会话落库（补上了台账 ⑳ 与底线 7 那条"删后没有复验写入路径"的欠账）；②`chunks`/文档数与 10-13 完全一致 ⇒ 语料面稳定；③⚠️ **`semantic_cache` 已从 0 积到 11** ⇒ 当天再问语义相近的问题会**直接命中缓存、模型根本不调用**（坑档第 5 条），演示前要按台账 ㉕ 处置 |
+| 代码漂移复查（**2026-10-14 只读实测**） | ①**需同步回仓库的代码＝0 项**：`git -C /opt/agent-platform status --porcelain` 在 **241 与 126 都为空**；241 HEAD=`6ac466af…`（**等于线上镜像 `GIT_REV`**），126 HEAD=`c01e9cf…`（旧一档，若从 126 构建会被 `build.sh` 的 rev 门禁拦下）。②**本周无人热改容器代码**：`docker diff knowledge-service-web` 共 68 项、`.py` 9 个，mtime 全落在 **09-22 / 09-28**（无一在 10 月）。③KS 侧既有漂移的定性沿用 10-10 的 blob 判定（无一需救回），**真正的债仍是"KS 镜像重建+分发"**（线上 `import_router.py` 缺 3 项已入库修复）。④清桶备份**在位**且字节数与台账逐一对上：`126:/tmp/ckpt-backup-host/{checkpoints 472B, checkpoint_blobs 289052B, checkpoint_writes 79B}`，权限 `drw-------` root-only（⚠️ 内含会话原文，能上机读 root 的人读得到——与 ㉓ 同族，等级低）。⑤**残留待清**：见 §9.3（同日晚些时候复测，含三台各 453M 的 `agent-platform.tar.gz`；本行早前写的"126 /tmp 11 个探针脚本 + 241 `ch_check.py`"已按实测订正：那四件 10-13 的脚本与 `ch_check.py` 都在 `126:/tmp/qoder-probes-2026-10-14/`、241:`/tmp/qoder-probes-2026-10-14/` 归档位里，241 `/tmp` 还剩 `ch_check.sql`）。`keys.py` 已确认**不含任何密钥值**（只打印 Secret 的键名，密钥特征计数 0） |
+| 库内数据态（**2026-10-14 收盘复算**，`psql -U agent -d agent_platform`） | `checkpoints` **1** / `checkpoint_blobs` **2** / `checkpoint_writes` **0** / `semantic_cache` **11** / `memories` **17** / `chunks` **303**（7 文档）。三条结论：①**写路径已回读证实**——10-13 整桶清空后三表是 0/0/0，现在长出 1+2，说明清桶之后确实有新的会话落库（补上了台账 ⑳ 与底线 7 那条"删后没有复验写入路径"的欠账）；②`chunks`/文档数与 10-13 完全一致 ⇒ 语料面稳定；③⚠️ **`semantic_cache` 已从 0 积到 11** ⇒ 当天再问语义相近的问题会**直接命中缓存、模型根本不调用**（坑档第 5 条），演示前要按台账 ㉕ 处置。**10-14 晚间再复算，六个数字逐字未变**（§9 取证轮） |
 | 取数用的正确连接形状 | 用户名 **不是** `postgres`：`kubectl -n agent-platform exec deploy/postgres -- printenv POSTGRES_USER` ⇒ `agent`；库名 `agent_platform`（`psql -U agent -d postgres -tAc "select datname from pg_database"` 列出）。**只读用户名，不读口令**（`POSTGRES_PASSWORD` 未取、未打印） |
+| ↑ 以上各行 10-14 晚间复测的**三机部署态** | 见 **§9**（Pod 重启计数、观测口跨节点可达性、`/health` 键集、三台镜像/checkout/容器归属一张表） |
 
 **本轮在这套现场跑通的判据**（都是回读，不是推断）：
 
@@ -644,3 +648,87 @@ API_KEY=... LF_PK=... LF_SK=... LF_HOST=http://192.168.100.241:3000 \
 - "哪个模型/prompt 版本"在 Langfuse v4 的 `v2/observations` 投影里是 `modelId=null`，UI 与库内 `model` 列才可见 ⇒ 不得声称是 API 可读列。
 - 不声明逐次调用成本（per-query cost）。
 - 演示侧仍欠：D7 录播、D8 整场彩排 + 六环节留证、浏览器面实拍（需持键者）、`demo-questions.md` §7 判定列。
+
+## 9. 三台测试机部署态（2026-10-14 复测，线上 rev `6ac466af`）
+
+> 本文其余各节以 **126 一台**为主角；**三机全貌只在本节**。下次上台前先看这里，再决定要不要读 §4/§5 的历史读数。
+> 取证时刻 **2026-10-14 09:59:06–10:01:00 UTC**（= +0800 17:59–18:01；三节点 `date -u` 互差 ≤4s，已量）。
+> 全程只读：`hostname/uptime/df/lsblk/ls /proc/pressure/io/ss/docker ps/docker images/ctr images ls/git rev-parse/git status/md5sum`、`kubectl get -o wide|jsonpath`、`kubectl exec` 读 `GIT_REV` 与 `psql -tAc "select count(*)"`、Pod 内 `urllib` 读 `/health`。**未装、未改、未重启、未删除任何既有物**。
+> 原始读数留档 `docs/operations/evidence/2026-10-14-3node-deployment/raw.txt`（留档件不外引，要引用请按 §9.5 复算——这张表同样"滚动一次即失效"）。
+
+### 9.1 三台一览
+
+| 项 | **125 = ambari02** | **126 = ambari03** | **241 = ambari01** |
+|---|---|---|---|
+| k8s 角色（15d，v1.31.14，containerd 2.2.1） | worker | **control-plane**（在听 6443/2379/2380/2381） | worker |
+| 本项目 Pod 落点 | 无 | `postgres-6ff4688bb8-vn7v6`，15d，**restarts 0**，10.244.0.2 | **`agent-platform-85794678c-9hjg4`**，1/1 Running，25h，**restarts 1**，10.244.2.15 |
+| containerd-k8s 里的 `agent-platform:dev` | ✅ manifest `sha256:adf6a2bc3193…`（1.6 单位随列序截断，见 §9.6①） | ✅ 同一枚 | ✅ 同一枚 |
+| moby 里的 `agent-platform:dev` | ❌ 无 | ⚠️ `9d72645cbafc` = **中止构建残留，不是线上对象**（§4.11 已定口径；本轮想复取其 `GIT_REV` 失败，模板写坏了，见 §9.6③） | ✅ `c18dc76a93f8` —— **与 Pod `imageID` 同一枚 ⇒ 构建机就是 241** |
+| 宿主 `/opt/agent-platform` | ❌ **无 checkout**（`NO_CHECKOUT`） | HEAD **`c01e9cf7`** dirty=0（比线上一档旧 ⇒ 从 126 构建会被 `build.sh` rev 门禁 exit 2） | HEAD **`6ac466af`** dirty=0 = **线上镜像 rev** |
+| moby 上跑着谁的东西 | **全是别人的**（11 容器，Up 4 months）：maxkb·pgsql·dataease·apisix(+etcd+dashboard)·de-selenium·sync-task-actuator·mysql-de | **我们的 KS 栈 + Jaeger**（14 容器）：knowledge-service-web(healthy,3w)/-milvus(**Up 25h**)/-minio/-neo4j/-etcd/-mongo、rageval-eval、ap-iso-pg、jaeger(2w) | **我们的 Langfuse 栈**（6 个 `lf-*` 全 healthy，**Up 27h**）+ exhibition-dashboard(3w) |
+| `/` 容量（`/tmp` **不是 tmpfs**，同一块盘） | 40G avail / 58% used | **20G avail / 79% used**（最紧） | 25G avail / 75% used（**10 分钟内复测成 24G** ⇒ avail 会漂，别拿它当阈值） |
+| `/proc/pressure/io` some avg10 | 2.06% → 0.00% → 0.00% | 1.54% → 1.62% → 1.53% | 0.33% → 1.27% → 0.88% |
+| 块设备 ROTA | `vda=1` | `vda=1` | `vda=1` + `loop0..15=1` ⇒ **三台都是慢介质，126 不特殊**（§4.7 的因果链仍成立，但"只有 126 会抖"这句不成立） |
+| 本项目相关监听口 | 无（8000/18000/16686/3000 均未监听） | **:18000** port-forward（持有者 `kubectl` pid 3496802，**绑 `0.0.0.0`**）、**:16686** Jaeger UI（`docker-proxy`，`0.0.0.0`）、:4317/:4318 OTLP、:8000 KS web | **:3000** Langfuse（`docker-proxy`）、:8000（`docker-proxy`，疑为 exhibition-dashboard 发布口，**未指名**） |
+| `/tmp/agent-platform.tar.gz` | 474,462,482 B @ 10-13 16:42 | 同尺寸 @ 10-13 16:44（md5 前 8 = `827a086e`，**只量了 126**） | 同尺寸 @ 10-13 16:42 |
+| 宿主 uptime / 核数 | 20d 12:07 / 8 | 20d 11:52 / 8 | 20d 12:10 / 8 |
+
+**Pod 侧细节（241）**：`imageID=sha256:c18dc76a93f8…`、Pod 内 `GIT_REV=6ac466af2ebf…`（与 §4.11 同一枚，**今天没发新 rev**）；`nodeSelector` 为**空**（部署可落任意节点 ⇒ 每台都得有镜像）；`resources` = requests `250m/1Gi`、limits `1/2Gi`；`lastState.terminated` = `exitCode 137 reason Error startedAt 2026-10-13T08:52:02Z finishedAt 2026-10-13T10:37:56Z` ⇒ 手册 ㉒ 那次 liveness 杀的是**同一个 Pod 就地重启**，没有换名。
+**postgres 为什么能在 control-plane 上**：`nodeSelector={"kubernetes.io/hostname":"ambari03"}` + `tolerations=[{key: node-role.kubernetes.io/control-plane, effect: NoSchedule, operator: Exists}]`（本轮实测两字段，非推断）。
+
+### 9.2 与 §4.11（10-13 快照）不同的六处
+
+| 项 | 10-13 写的 | 10-14 实测 | 影响 |
+|---|---|---|---|
+| Pod restarts | **0** | **1**（137 @ 10-13T10:37:56Z） | §4.11 那行按日期算数，别当现状引用；手册 ㉒ 的处置项由此从"演示前查"变成"**已发生过一次**" |
+| `kubectl get events -A` 里 Unhealthy/Killing | 有（当时的取证依据） | 本轮 grep **无命中** | ⚠️ apiserver 参数里**没有** `--event-ttl`（未显式配置 ⇒ 走默认，默认值本轮未测）⇒ **"无命中"不能证 24h 内没有 liveness 失败**。该事实只能由 `restartCount` + `lastState` 证 |
+| 126:18000 / 126:16686 可达性 | 办公网侧 `HTTP 000`（㉑） | 机器侧**全 200**：126 自测 200、**241→126:16686=200、125→126:16686=200、241→126:18000=200**、241:3000=200、Pod 内连 126:4318 **YES** | ㉑ 的"不可达"**不是服务故障**，是我本机那条 TUN 链路。演示当天要用**机器侧**读数判活着，本机浏览器打不开先怀疑自己出口 |
+| `/health` 键集 | 无 `dependencies`/`coordination`/`mcp`/`revert`/`version` | 现含这五键（README 那版示例方向是对的） | 生效值**逐字未变**：`planner=deterministic`、`identity_mode=single`、`otel_status=ACTIVE`、`langfuse_ready=True`、`search/mcp/scheduler/control_plane/cost_governance/admission=False` |
+| 三节点镜像一致性口径 | "全部 = `c18dc76a93f8f`（1.68GB）" | `ctr images ls` 三台都给 **manifest** `sha256:adf6a2bc3193…`；`c18dc76a…` 是 **config/ID**（= Pod `imageID` = 241 moby 的镜像 ID） | 两个 digest **天然不相等**，不是漂移。以后写"三节点一致"要指明是哪一个 digest（§9.6①） |
+| 库内数据态 | 见 §4.11 收盘行 | **六个数字逐字未变**（1/2/0/11/17/303） | 台账 ㉕ 那条"`semantic_cache` 已积到 11"**仍然在积**，处置项没做 |
+
+### 9.3 我的残留与待清项（**删除属破坏性 ⇒ 需批准，本轮一律未动**）
+
+| 位置 | 内容 | 判性 |
+|---|---|---|
+| 三台 `/tmp/agent-platform.tar.gz` | **453M × 3 = 1.36G**，mtime 全在 10-13 16:42/16:44（= `distribute.sh` 产物） | 镜像早已 `ctr import` 完成，tarball 是纯废料；126 磁盘 79% 最紧，**清它优先** |
+| `126:/tmp/qoder-probes-2026-10-14/` | 本轮归档位（`mv` 进去的，非删除，可回取）：10-13 的 `keys.py` 146B、`r30db.py` 2710B、`r30q.py` 2661B、`wipe.py` 1416B + 本轮的 `inv-3node-2026-10-14.sh`、`inv2-2026-10-14.sh`、`verify95.sh`、`verify95-out.txt` | 只读探针，无密钥值（§4.11 已核）。要不要留由需求方定 |
+| `126:/tmp`（未归档，我的） | `inv-out.txt` 10,110B（**两轮原始读数**，已另存进仓库 `docs/operations/evidence/2026-10-14-3node-deployment/raw.txt`，机器上这份可清）；10-13 的 `verify.sh` 3306B、`verify.out` 1378B（**这两件本轮才数到，早前清单漏了**）；另有 09-28~10-10 一批：`ablation.py`/`probe.py`/`kgprobe.py`/`run_route_ablation.py`/`seed_synthetic_corpus.py`/`_patch_126.py`/`_dl_bgem3.py`/`_dep_probe*.sh`/`_ms_patch.sh`/`_obs_probe.sh`/`_probe.sh`/`probe_build.log`/`probe.Dockerfile`/`probe_h2.txt`/`r30.log`/`route_ablation_run/`/`route_ablation_artifacts.tgz` | 历史探针与评测产物。**订正**：§4.11 那条"126 /tmp 11 个探针脚本"里 10-13 的四件**已不在 `/tmp` 根**（在上面的归档位），且我漏列了 09-29 的 `_*.sh` 一批与 `verify.*` ⇒ 按本表为准 |
+| `241:/tmp` | 未归档剩 `ch_check.sql` 1703B @ 10-13 15:25；`ch_check.py` 2140B 已在 `241:/tmp/qoder-probes-2026-10-14/` | **订正**：§4.11 原写"241 `/tmp/ch_check.py`"——那是归档前的名字，它已进归档位，`/tmp` 根下现在剩的是 `.sql` |
+| `126:/tmp/corpus/` + `corpus-20261013.tgz`(49,538B) | ⚠️ **未公开业务语料副本**，目录 `drwxr-xr-x` 属主 uid **197609**（本机 scp 带过来的 Windows uid，不是 root）、tgz `-rw-r--r-- root:root`；`/tmp` 是**世界可读目录** ⇒ 同网段任何能登录 126 的账号读得到 | 与 ㉓ 同族（"内网可信人群"这条口径的又一条缝）。三个处置：留 / 收进 root-only 0700 / 清掉。决定权不在我，**本轮未动** |
+| `126:/tmp/ckpt-backup-host/` | `drw-------` root-only，472/289052/79B（§4.11 第④条） | 在位、权限对；`/tmp` **不是 tmpfs**（本轮 `df -h /tmp` 证实指向 `/dev/vda2`）⇒ 之前那句"重启即失"只对 tmpfs 成立，**这句要改口径**：宿主 20d 未重启，且它实际是磁盘文件，重启也不丢 |
+
+### 9.4 三机各自的"别在这儿干"（按今天读数复述，不新增约束）
+
+- **构建放 241**：依据是 AGENTS.md 第 7 条那轮实测（`docker build` 的 pip 层在 126 同一块 `ROTA=1` 盘上铺上万文件时 PSI `avg10=67%`，把同机 KS 的 etcd 打进 `slow fdatasync`、milvus 重启 30→31），**不是本节那一格 PSI**——`avg10` 是 10 秒级瞬时量，本轮三读（09:59 / 10:08 / 10:09 UTC）里 125 从 2.06% 掉到 0.00%、241 从 0.33% 升到 1.27% 再回 0.88%，两分钟就换序，承载不了"谁最闲"这种排期结论。本轮能佐证 241 是构建机的**硬读数**只有两条：moby 里有 `c18dc76a93f8`（= Pod `imageID`）而 125/126 的 moby 没有对应枚，且 241 的 `/opt/agent-platform` HEAD == 线上 rev。126 磁盘 79%（20G avail）且 KS 栈 + milvus + etcd + Jaeger 都在它上面；125 满载别人的 maxkb/dataease/apisix，**不要去那儿加 IO**（且 125 根本没有 checkout，无构建入口）。
+- **`distribute.sh` 从 241 跑必须显式列 `125 126`**：默认 `WORKERS=125 241` 是"在 126 构建"的历史形态；本部署**无 nodeSelector**，漏一台则 Pod 调度过去即 `ErrImagePull`（可变 tag + `IfNotPresent` 无本地层可退）。
+- **别拿 126 moby 的 `9d72645cbafc` 做线上证明**，也别 `docker run` 读镜像内容（两套库互不可见，AGENTS.md 硬规矩 4）。
+- **126 宿主不能跑项目测试**：无 uv、Python 3.10；补跑走容器（testing-playbook 第 4 层）。
+- **观测口都绑 `0.0.0.0`**（18000 由 `kubectl` 持有、16686 由 `docker-proxy` 持有）⇒ 整个 192.168.100.0/24 都进得来。这正是 ㉓ 拍板"接受"所依赖的物理事实，上台时要说出那句"观测面含原文，仅限可信内网人群"。
+
+### 9.5 复算命令（别引用上面的表，跑这几条）
+
+```bash
+# 三机一览（一条会话读三台：在 126 上跑，别从我本机连）
+BLOCK='echo "host=$(hostname) head=$(git -C /opt/agent-platform rev-parse --short HEAD 2>/dev/null || echo NO_CHECKOUT) dirty=$(git -C /opt/agent-platform status --porcelain 2>/dev/null|wc -l)";
+ echo "psi=[$(tr "\n" " " </proc/pressure/io)] df=$(df -h / | awk "NR==2{print \$4\"/\"\$5}")";
+ echo "ctr=$(ctr -a /run/containerd-k8s/containerd.sock -n k8s.io images ls 2>/dev/null | grep -c agent-platform) moby=$(docker images --format "{{.ID}} {{.Repository}}" | grep agent-platform)";
+ echo "pods=$(docker ps --format "{{.Names}}" | paste -sd" " -)"'
+for IP in 125 126 241; do printf '%s\n' "$BLOCK" | ssh -o BatchMode=yes root@192.168.100.$IP bash -s; done
+
+kubectl get nodes -o wide                                   # 角色 / IP / container runtime
+kubectl -n agent-platform get pod -o wide                  # 落点 + RESTARTS + AGE
+kubectl -n agent-platform get pod -o jsonpath='{.items[?(@.metadata.labels.app=="agent-platform")].status.containerStatuses[0].lastState}'   # 137 的 finishedAt
+kubectl -n agent-platform exec deploy/agent-platform -- cat /srv/agent-platform/GIT_REV
+kubectl -n agent-platform get deploy postgres -o jsonpath='{.spec.template.spec.nodeSelector} {.spec.template.spec.tolerations}'
+for T in checkpoints checkpoint_blobs checkpoint_writes semantic_cache memories chunks; do
+  kubectl -n agent-platform exec deploy/postgres -- psql -U agent -d agent_platform -tAc "select '$T='||count(*) from $T"; done
+# 跨节点判观测口活着（从我本机量不算数，见 §2.8 与记忆 workstation-tun-proxy）
+ssh root@192.168.100.241 "curl -s -o /dev/null -w '%{http_code}\n' --max-time 8 http://192.168.100.126:16686/"
+```
+
+### 9.6 本轮自己踩的三个读数形状（写下来防下轮再犯）
+
+1. **`ctr images ls` 的列序是 REF / TYPE / DIGEST / SIZE**，我第一次按 `$3=SIZE` 取，把 digest 读进了 size 字段。且它的 DIGEST 是 **manifest** digest，与 k8s `status.imageID`（**config** digest）**天然不等** ⇒ 拿两者对比会得出"三节点漂移"的假结论。
+2. **`pgrep -af 'port.forward agent-platform'` 经 ssh 执行会匹配到自己这条命令行**（远端 `bash -c` 的 argv 里就含该模式）——同一形状**第 5 次犯**。port-forward 在不在，唯一算数的读数是 `ss -ltnp` 里 `0.0.0.0:18000 users:(("kubectl",pid=…))`。
+3. **`mem_avail_mb=` 在三台都取到空**：awk 里 `printf \"%d\"` 的转义经"脚本→ssh→远端 bash→命令替换"多层后语法报错（`regexp escape sequence '\"' is not a known regexp operator` + `syntax error`）。⇒ 那一栏**没有读数，不是"内存不可读"**，本文不据此下任何容量结论（容量结论沿用 §4.8 第 5 条的 `free -g` 实测）。同一条脚本里 `df`/PSI/ROTA 都正常，说明是**该字段的取法**坏了，不是整轮失败——分开报，别因为一格空就把整表当废。
