@@ -27,6 +27,7 @@
 | 16 | 清库时漏删一行残留 | **肉眼列 id 而不是让谓词挑**（我的谓词命中 67，手写的集合是 68–73） | `WHERE id = ANY(谓词查出来的集合)` + `DELETE … RETURNING` 回读被删内容 |
 | 17 | 删 checkpoint 的脚本连撞两次，两次都在**删之前**失败 | **API/形状**：asyncpg 没有 `Connection.copy()`（那是 psycopg 的）；送进 `ssh 'bash -c'` 的 python 里 `"\x"` 被折叠成单反斜杠 ⇒ SyntaxError | 形状固定为 `本地文件 → ssh 'kubectl exec -i … python -' < 文件`；bytea 用 `chr(92)+"x"+hex` 拼；失败无损失正因为断言闸门在 DELETE 之前 |
 | 18 | Jaeger 按 `/api/search` 查"0 条 trace" | **端点形状错**：现网这个 all-in-one build 对 `/api/search` 返回的是 **SPA 首页 HTML**（不是 JSON），`json.loads` 之前不判形状就会被读成"没有数据"；同一次提问在 UI 上还是**两棵 trace**（不带 `traceparent` ⇒ 两路埋点各自起根），只点 1-span 那棵会误判"链路是空的" | 查询一律用 `/api/traces?service=&operation=&limit=`；先判响应是不是 JSON 再数条数；按 `otel.scope.name=agent-platform` 筛"有内容的那棵" |
+| 19 | 我写下"Jaeger 属性里刻意没有 prompt 与输出文本" | **单样本过度概括**（同族第 9 次）：我只数了一条 3-span 的 `/query`（`POST /query` + `fastapi.dependencies/endpoint`，那条里**没有 `ChatOpenAI` span**），就把"我们 kernel 只写脱敏属性"推广成"Jaeger 里没有原文" | 结论要覆盖**每一条 scope 的 span**：`agent-platform` 那条确实只有脱敏位，但 `otel.scope.name=langfuse-sdk` 的 `ChatOpenAI` span 带 `langfuse.observation.input/output/model.name/usage_details` ⇒ **原文与模型名都在**（需求方一张截图逼出来的）。下这类"某面没有 X"的断言前，先把该 trace 全部 span 的 tag 键列一遍 |
 
 ## 1. 两个观测面互相顶掉（本轮最贵，D-LF-1）
 
