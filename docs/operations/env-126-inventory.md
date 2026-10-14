@@ -618,6 +618,8 @@ kubectl -n $NS exec -i $POD -- python - probe '报馆图纸' < /tmp/r30db.py
 | 密钥落点 | `secret/observability-keys` 内 `API_KEY` / `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY`（+ `LLM_API_KEY`）——**只记键名与注入路径，值不落任何文件** |
 | 库内数据态（**10:27 UTC 复算**） | `chunks` 303 行 / 7 文档、`semantic_cache` 残留 0、**`checkpoints`/`checkpoint_blobs`/`checkpoint_writes` 三表 0 行**：演示前按拍板把取证残留句整桶清掉（备份在 `126:/tmp/ckpt-backup-host/*.csv`，0600，宿主 `/tmp` ⇒ 重启即失）。本节早前那句"今日 1 个 thread、33 个 blob"到此失效，别引用 |
 
+| 代码漂移复查（**2026-10-14 只读实测**） | ①**需同步回仓库的代码＝0 项**：`git -C /opt/agent-platform status --porcelain` 在 **241 与 126 都为空**；241 HEAD=`6ac466af…`（**等于线上镜像 `GIT_REV`**），126 HEAD=`c01e9cf…`（旧一档，若从 126 构建会被 `build.sh` 的 rev 门禁拦下）。②**本周无人热改容器代码**：`docker diff knowledge-service-web` 共 68 项、`.py` 9 个，mtime 全落在 **09-22 / 09-28**（无一在 10 月）。③KS 侧既有漂移的定性沿用 10-10 的 blob 判定（无一需救回），**真正的债仍是"KS 镜像重建+分发"**（线上 `import_router.py` 缺 3 项已入库修复）。④清桶备份**在位**且字节数与台账逐一对上：`126:/tmp/ckpt-backup-host/{checkpoints 472B, checkpoint_blobs 289052B, checkpoint_writes 79B}`，权限 `drw-------` root-only（⚠️ 内含会话原文，能上机读 root 的人读得到——与 ㉓ 同族，等级低）。⑤**残留待清**：126 `/tmp` 11 个探针脚本（10-13 的 `wipe.py`/`keys.py`/`r30db.py`/`r30q.py` + 9 月的 `ablation.py`/`probe.py`/`kgprobe.py`/`run_route_ablation.py`/`seed_synthetic_corpus.py`/`_patch_126.py`/`_dl_bgem3.py`）、241 `/tmp/ch_check.py`。`keys.py` 已确认**不含任何密钥值**（只打印 Secret 的键名，密钥特征计数 0） |
+
 **本轮在这套现场跑通的判据**（都是回读，不是推断）：
 
 ```bash
