@@ -21,7 +21,7 @@
 | 10 | `e2e_traceparent.sh` 只 `exit 1`，一行原因都没有 | **脚本形状**：`set -e pipefail` 下 `X=$(curl -sf … \| grep -c …)` 在 404 处直接终止 | 先落盘再判，把"404/连不通/服务名不符"分开报 |
 | 11 | `crictl images` 回读"缺失" | **假 flag**：`--no-trims` 不存在（是 `--no-trunc`） | 读数为空先判探针是否真跑到 |
 | 12 | 一次长命令输出整个丢失 | **工具超时**：默认 2 分钟，命令被移入后台且本轮结束 | 长命令显式设 tool timeout 或 run_in_background 并轮询读数 |
-| 13 | 三个 `pkill -f` 把自己 ssh 会话杀了（本轮之前两次） | **自匹配**：模式匹配到自己的命令行 | 用括号技巧 `pkill -f "[d]ocker build"`，杀完必须回读真实进程状态 |
+| 13 | 三个 `pkill -f` 把自己 ssh 会话杀了（本轮之前两次） | **自匹配**：模式匹配到自己的命令行 | 用括号技巧 `pkill -f "[d]ocker build"`，杀完必须回读真实进程状态（**只读版同族错法见 24**——`pgrep` 不杀进程，但会给你一条**假在场**证据） |
 | 14 | `git add -A docs` 把一份没审过的未跟踪文档扫进提交 | **暂存范围过宽** | 按文件名 `git add <path>`；提交前 `git status` 复核 included 内容 |
 | 15 | 「Jaeger 里没有 `POST /query`」 | **探针淹没**：`GET /health` 每 5s 一条把 `limit=40` 窗口刷满（`deploy/k8s/VERIFICATION.md` §C 第 4 条早已写明这条，我当天仍重犯） | 查询必须带 `operation=` 精查，不用大 `limit` 捞全量 |
 | 16 | 清库时漏删一行残留 | **肉眼列 id 而不是让谓词挑**（我的谓词命中 67，手写的集合是 68–73） | `WHERE id = ANY(谓词查出来的集合)` + `DELETE … RETURNING` 回读被删内容 |
@@ -31,6 +31,8 @@
 | 20 | 我写下"官方页抓取不可达，属性名待固定版本复核" | **把 404 读成不可达**：官网 `opentelemetry.io/docs/specs/semconv/gen-ai/` 早已是 **Moved 存根**（正文迁到 `open-telemetry/semantic-conventions-genai`），而我按印象猜路径（目录是 `gen-ai` 不是 `genai`）拿到 404，两层错叠在一起就写成了"不可达"。同族还有一个变体：推理 span 的正文在 `client-inference.md`，`gen-ai-spans.md` 里只做跳转 ⇒ 只读一个文件会误报"某属性没定义" | **404 与不可达是两种读数，必须分开报**。标准原文一律直取仓库：`gh api "repos/<org>/<repo>/contents/<path>" --jq .content \| base64 -d`（本机 `gh` 已登录即可，不依赖浏览器与官网）；结论落文档时同时记**锚定版本**（本次 v1.44.0）与复核命令。命令里反引号要落在单引号表达式内（双引号会被 shell 当命令替换） |
 | 21 | 「四类回放源已清零 ⇒ 屏上不会有取证残留」 | **把"清过库"当成"屏上干净"**：10-13 清空之后新发生的合法问答照样写进记忆面，其中一条元问题（"我之前问了哪些问题？"）的答案文本自带 `LFPROOF-*` / `e2e-*` 标记，10-14 浏览器实拍时**被当普通业务内容回放**到屏上 | 判据要换成"**当天会问什么**"而不是"清过没有"：演示当天避开元问题、开场先跑一遍业务问答把面板换掉（台账 ㉔）。清库对这一类无效 |
 | 22 | 我写下「KS 容器 `docker diff` 里**没有** .py 热改」 | **探针形状错**（同族第 4 次，与 18/20 一路）：过滤式写成 `grep -E "^C? M? A? .*\.py$"`，而 `docker diff` 的行形状是 `C /app/...`——第二个字面空格在 "C " 之后并不存在，整个式子恒不匹配 ⇒ 输出空，被我读成"没有热改" | 判"没有 X"之前先跑**不加过滤**的原始输出看形状（本次重跑：`docker diff` 共 68 项、`.py` 9 个）。`docker diff` 的行首只有一位字母（`A`/`C`/`D`），不要按"CMAS 可组合"去写正则 |
+| 23 | 我差点写下"三节点镜像 digest 与 Pod `imageID` 不一致 ⇒ 漂移" | **两种 digest 天然不相等**（2026-10-14 三机复测）：`ctr --address /run/containerd-k8s/containerd.sock -n k8s.io images ls` 给的是 **manifest** digest（本轮三台同为 `sha256:adf6a2bc3193…`，type=`application/vnd.oci.image.manifest.v1+json`），而 k8s `status.imageID` 与 `docker images` 给的是 **config/镜像 ID**（`c18dc76a93f8…`）。同一条命令里还把**列序读错**（实际 REF/TYPE/DIGEST/SIZE，我按 `$3=SIZE` 取），第一次输出的 size 栏是 digest 前缀 | 写"三节点一致"必须**指明是哪一个 digest**；跨工具比镜像只比"同一层语义"的字段。任何 awk 取列先原样 `head -1` 看一次列序（与 22 同一教训：**先读形状**） |
+| 24 | `pgrep -af 'port.forward agent-platform'` 经 ssh 执行**匹配到自己** | 只读版自匹配（13 那条的姊妹）：远端 `bash -c` 的 argv 里就含该模式，于是打印出我自己的 ssh/timeout/bash 三行，看着像"port-forward 进程还在" | 判"转发在不在"唯一算数的读数是 `ss -ltnp \| grep :18000`（本轮：`0.0.0.0:18000 users:(("kubectl",pid=3496802))`）。模式一律用括号技巧 `[p]ort-forward`，且**回读要用另一条命令** |
 
 ## 1. 两个观测面互相顶掉（本轮最贵，D-LF-1）
 
