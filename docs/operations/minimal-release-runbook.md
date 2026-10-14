@@ -13,7 +13,7 @@
 | 健康检查补灯 + lifespan 预热 / status 事件 / 只读控制台页 | ✅ 已构建、分发、**上线**：Pod 内 `GIT_REV=db1a8b8`（回读判据，非 apply 退出码） |
 | 语义检索依赖进镜像（Dockerfile CPU torch + agent-core extra） | ✅ **证毕**：Pod 内 `find_spec('sentence_transformers')=True`、`torch=True`；`/health` 报 `embedding_backend=LocalEmbedder` + `embedding_real=true` |
 | 拦截语料实测 | ✅ 集群侧真实请求复现：事件序列 `route(blocked)`→`answer`→`done`（无 evidence、无 status）；服务端留痕行 `[agent_core.guardrails.input_guard] Prompt injection 检测到: system\s*:\s*` |
-| 会话历史读回（底线 7） | ✅ **带 PG 已证**：`/history` 读回 4 条原话、`thread_id=tenant-default`（前端传的是乱填值，被服务端忽略）、PG 侧静默失败 0 行；"重启后仍在"见 §5 基线 7 行。⚠️ **该读数是 10-13 取证当时的**：当日按拍板整桶清空后 `/history` 报 `count=0`，且**删后没有复验写入路径**（复验要发一次真问答，等于重新污染面板）⇒ 底线 7 现在是"曾经证过 + 删后只验了空态"，**写路径的当场证据由演示第一轮真实问答提供**，讲这条时不要说"已复验" |
+| 会话历史读回（底线 7） | ✅ **带 PG 已证**：`/history` 读回 4 条原话、`thread_id=tenant-default`（前端传的是乱填值，被服务端忽略）、PG 侧静默失败 0 行；"重启后仍在"见 §5 基线 7 行。⚠️ **该读数是 10-13 取证当时的**：当日按拍板整桶清空后 `/history` 报 `count=0`，且**删后没有复验写入路径**（复验要发一次真问答，等于重新污染面板）⇒ 底线 7 现在是"曾经证过 + 删后只验了空态"，**写路径的当场证据由演示第一轮真实问答提供**，讲这条时不要说"已复验"。⇒ **10-14 收盘已补上这一半**：当天真实问答之后回读 `checkpoints=1 / checkpoint_blobs=2 / checkpoint_writes=0`（10-13 清桶后是 0/0/0）⇒ **写路径有库内回读证据**，这条现在是"曾经证过 + 删后复验过"。⚠️ 边界：`/history` 侧**未再复算**（要密钥，不在我手里），所以"面板上读得回来"这句仍要等演示当天第一轮问答后才能说 |
 | 意图路由是否真在算语义 | ❌ 旁路**未修**（待拍板）。本轮变化：镜像里 sentence-transformers 已在位 ⇒ 它不再必然走关键词降级，但**没有任何灯承载它**，`EMBEDDING_MODE`/`EMBEDDING_REQUIRE_REAL` 都管不到它。要讲"意图路由用了语义"必须单独证一次 |
 | **谁在决定"要不要检索"**（2026-10-13 定位，**当日已修复上线** rev `0425257`；留证 `evidence/2026-10-13-r1-release/readings.md`） | ✅ **曾经 100% 失败、现已修复**：修复前 `langchain-openai 1.7.0` 的 `with_structured_output` 默认 `method='json_schema'`，而**现网这颗** `deepseek-ai/DeepSeek-V4.1-Flash` 在魔搭上对该类型稳定 400（带不带 `strict` 都是 `This response_format type is unavailable now`）⇒ 我今天 16 次 `/query` 全部回退词表（单发因果核对：告警计数 +1）。⚠️ **不是"端点整体不支持"**——补测同端点的 `Qwen/Qwen3.8-Flash-Next` 时 `json_schema` 3/3 合规，是**按模型**（原判据说过头，已更正，见 plan §12）。同端点实测 **`tools`/function_calling（`tool_choice` 留默认 auto）是唯一两颗模型都合规的形态**，且都判对 `rag`、2.7–3.0s ⇒ 修法两行（`router.py:87` 加 `method="function_calling"` + `fallback.py:227` 透传 kwargs），**且不要传 `tool_choice="required"`**（Qwen 侧 400）。**换提供方/换模型都不能替代这次修改**：硅基流动 `json_schema` 5 次里 3 次 75s 超时；OpenRouter 按模型（两个 2/2 合规、一个 400、两个免费池被上游凭据失效与限流支配）；换到 Qwen 虽零代码可用 `json_schema`，但它 3/3 把"根据文档…"判成 `search`——本部署 `search` 未配置（`SEARCH_API_KEY` 为空），选中它要靠 replan 改道才拿到依据（实测多 2 跳、墙钟 27.76s；格式通了、判断未必对）。⇒ `route_hints.json` 里"词表仅兜底"**是假陈述**，词表就是主路由器。另：`LLM_MODEL == LLM_FALLBACK_MODEL`（同一个 DeepSeek-V4.1-Flash）⇒ "主备"在结构化路径上等于没有备；而**同端点两颗模型需要相反的方法**，这正是必须加 R2 能力灯的原因。方案⑦ **已落地**（R1；R2 能力灯仍未做），矩阵与失败分类见 `plan-router-keyword-gate-hides-corpus-2026-10-12.md` §8/§10/§11/§12。**上线后判据**：新 Pod 该告警 0 条、9 次问答增量仍 0；`route.reason` 变成模型写的话；无特征词的"报馆纸质文件打印几份？"从 `direct`+`count=0` 变 **`rag`+`count=4`**。**R1 之后新暴露、待拍板**：`router.py:84-86` 的能力清单**始终**广告 `search=联网搜索`，而未启用的 `mcp` 却是"不进清单"——同一形状的不一致，模型因此会去挑一条本部署走不通的链路。三个候选：①清单只广告已启用能力（建议）②真配 `SEARCH_API_KEY` ③接受 replan 的 2 跳开销 |
 | 演示前必须清的回放源（2026-10-13 补全） | ✅ **四类已全部清零**（checkpoints 桶：2026-10-13 **10:27 UTC**，宿主 +0800 显示 18:27）：`semantic_cache`（残留 0）、`memories`、`episodic_memories`/`procedural_memories`（本次恒 0 但要列），加 **LangGraph 会话状态 `checkpoints`/`checkpoint_blobs`/`checkpoint_writes`**。第四个是新发现的：`thread_id` 恒为 `tenant-default`，同会话历史会随 checkpoint 回来——2026-10-13 的 Q4 就是 `evidence count=0` 却答对了"4 份"。**清它等于清空控制台历史面板** ⇒ 已拍板执行整桶清空（备份后删，只能整桶还原、不能挑着还原），删后 `/history` → `count=0`、三表回读 0。**演示时面板空白是预期状态，第一轮真实问答即第一条记录**；执行记录与技术理由见 `observability-pitfalls.md` §8 |
@@ -447,6 +447,7 @@ ssh root@192.168.100.126 'cd /opt/agent-platform && git fetch /tmp/ap-rollback.b
 | ㉒ | **`/health` 卡住会被 liveness 当场杀 Pod**（2026-10-14 开盘发现：`RESTARTS=1`，`exitCode=137`、`finishedAt=2026-10-13T10:37:56Z`，事件面先有 `Liveness probe failed: Get /health: context deadline exceeded` 再有 `Killing`） | ①演示前只加检查项（`kubectl get events --sort-by=.lastTimestamp \| grep -i unhealth`，有超时就不上台）②查 `/health` 的卡点（它在健康检查里同步探依赖，依赖一慢整条就慢）③放宽探针（`timeoutSeconds`/`failureThreshold`）或把 `/health` 改成不依赖外部探测的浅检查 | **建议①为演示口径 + ②另行方案**：这不是"重启过所以没事"——**演示当天一次 `/health` 卡住 = 屏幕上那台服务当场重启**，六环节全断。③属改清单/改代码，按"先方案后编码"走，不许临场改。**注意定性**：此处 137 是 liveness 杀的，`reason` 不是 `OOMKilled`，别当成内存超限（limits 仍是 2Gi） |
 | ㉓ | **观测面里带着资料原文，而 Jaeger UI 没有鉴权**（2026-10-14 由需求方截图发现）：`ChatOpenAI` span 的属性含 `langfuse.observation.input`（**实测 6339 字符的完整提示词**，含 system 文案与检索到的资料片段）与 `.output`（316 字符完整回答）。这些属性经同一条 OTLP 链路进 Jaeger，而 Jaeger all-in-one **无认证**、`0.0.0.0:16686` 对办公网开放（㉑ 已实测可达）⇒ **内网任何能开这个端口的人都读得到语料内容与答案原文** | ①把 Jaeger 收回 `127.0.0.1` 或前面加反代认证 ②关掉 Langfuse SDK 往 OTel span 写 IO 属性（**先核实该开关在 v4.17.0 里真的存在，不许凭猜配**）③接受，并在手册/演示口径写明"观测面含原文，仅限可信内网人群" | ✅ **已拍板＝③接受（2026-10-14，需求方定："内部部门演示用，鉴权不鉴权的没事"）** ⇒ 不改动 Jaeger 发布口，但**演示口径必须主动说出口**（这是 ③ 的组成部分，不是可选项）："观测面含原文，仅限可信内网人群"。1.2 基线 4 守的是"对外推送面不带原文"（SSE 面确实守住了，见 `planners/deterministic.py:246-257` 的四条刻意不含），**观测面这条缝是今天才发现的**。②是根治但要读 SDK 与走发布通道，不赶在演示前动 |
 | ㉔ | **记忆回放会把内部取证标识摊到屏上**（2026-10-14 浏览器实拍发现）：屏上"召回记忆 3 条"里含一条历史元问题问答（Q「我之前问了哪些问题？」），其答案文本自带 `LFPROOF-5d36a438d8` / `e2e-1791878040` / "semantic_cache 可见 id 74–60 共 15 条"等字样 ⇒ 听众读到的不是业务内容，而是**我们取证过程的痕迹** | ①再清一次记忆/语义缓存面（破坏性、需批准）②当天不问元问题 + 开场先跑一遍业务问答把面板内容换掉 ③接受并主动说明"这是取证留痕" | **建议 ②**：零改动、零不可逆风险。⚠️ 定性要说准——**这不是"10-13 那次清空没清干净"**：清空之后新发生的合法问答也会写进记忆，问题在**记忆面会把"取证过程"当普通内容回放**，所以清库解决不了这一类，只有"当天问什么"能解决 |
+| ㉕ | **语义缓存已积到 11 条，重复问题会"秒回且模型根本不调"**（2026-10-14 收盘复算：`semantic_cache=11`，10-13 清完是 0） | ①演示当天每条问题都用**语义新颖**的问法 ②上台前清一次 `semantic_cache`（可清，非破坏业务数据）③接受，并主动说明"这条是缓存命中" | **建议 ①+② 并用**：命中缓存时 SSE 走 `cache_hit` 旁路 ⇒ **Langfuse/Jaeger 面当次没有新 trace**，若演示顺序是"提问 → 立刻切观测面看链路"，会当场看起来像"观测没接上"（坑档第 5 条与台账 ⑳ 都记过这一形状）。⚠️ 与 ㉓ 叠加：缓存里存的是**答案原文**，清它同时也减少一处暴露面 |
 
 ## 10. 现网怎么看一条请求链路（三个面的分工 + Jaeger UI 逐步点法）
 
@@ -499,3 +500,45 @@ ssh root@192.168.100.126 'cd /opt/agent-platform && git fetch /tmp/ap-rollback.b
 
 **目标态与差距**：本节只讲"现在怎么看"。"一个完整的可观测链路分析模型该长什么样"、现网差在哪 12 条（G1–G12）、
 以及分四期的迁移与验收标准，见 `docs/plans/plan-observability-target-model-2026-10-14.md`（方案文档，不含代码改动）。
+
+## 11. "这是多 agent 吗？"——被追问时的标准答法（2026-10-14 全部实测）
+
+需求方自己测出来的疑问是"只能一轮回答？没用到 multiagent / 子 agent？"。**答案是：现网跑的是单 planner，
+但"只有一轮"这个说法本身不准。** 三条可读的事实：
+
+1. **现网形状**：`planner=deterministic`（代码默认 `config.py:109`；`deploy/` 全目录 grep `PLANNER` **零命中**
+   ⇒ 清单根本没注入这一项）。形状 = 一次路由 → 一次能力调用 → 一次模型合成。
+2. **不是"只有一轮"**：证据为空时会重规划，上限 `max_iterations=2`（`config.py:67`、`planners/deterministic.py:196`）。
+   **屏上实证**：10-14 那次浏览器问答的时间线里出现**两条一模一样的** `推演前判: search → search evidence_insufficient`
+   与两次 `命中 1 条依据` ⇒ 那就是这个 2 跳循环（每跳调同一个能力，没有子 agent）。
+3. **多 agent 在本仓库有三套，都不在演示链路上**：
+
+| 东西 | 位置 | 演示看不到的原因（实测） |
+|---|---|---|
+| `graph` planner（多步 DAG） | `planners/graph.py:34` → `graph_compose.py:90`，上限 `max_steps=20/max_skill_depth=4` | 要 registry 命中 ≥2 个相关技能且 LLM 可用，否则退回 deterministic。这是**多步编排**，不是子 agent |
+| `agentic` planner（**真子 agent**） | `agent-runtime/agent_runtime/planner/agentic.py:106` → deepagents + 3 子 agent（`main_agent.py:118-131`，`recursion_limit=50`） | **执行器不在镜像里**：`Dockerfile:19-23` 只 COPY agent-core / shared-schemas / agent-runtime / agent_server ⇒ 现网设 `PLANNER=agentic` 会立刻 `RuntimeError`（`agentic.py:66-74` 提示 `uv sync --extra agentic`） |
+| `agent_federation` 独立应用 | 自带 `/api/task`、`/ws` | 与 agent_server 是**两条链路**：agent_server 内 grep `agent_federation\|federation\|gateway\|GATEWAY_URL` 只命中注释，无 import、无 HTTP 调用 |
+
+**两个必须点破的误区**（被追问时不说清就会显得像在找借口）：
+
+- **`PLANNER=auto` 也拿不到 agentic**：`ModeSelector` 的 `agentic_enabled` 默认 False（`mode_selector.py:67`），
+  全仓**没有任何生产代码传 True**（grep 空），且 `planners/unified.py:50` 构造 selector 时只传 `force_mode`
+  ⇒ 走启发式分支，永不进 AGENTIC。唯一能绕过这道闸的是 `force_mode` override（`:92-96`），也就是显式
+  `PLANNER=agentic` —— 然后撞上上一条的 RuntimeError。
+- **`subagents/` 不是子 agent**：`subagents/{search,rag,sql_agent,mcp}.py` 是 4 个纯函数，唯一消费方是
+  `capabilities.py:39-42` 把它们注册成 function Skill ⇒ 被 deterministic 当"能力"调一次。
+  没有任何 planner 把它们当子 agent 编排（唯一的复合技能是 `general_qa`）。
+- 顺带一条同名不同物：V3 的 `scheduler_enabled` 默认 False，开了之后 `/query` 的差别**只有排队/并发门控/503**，
+  **不改执行形状**，与"多 agent"无关（`query_router.py:81-101,378-389`）。
+
+**要看真多步/真子 agent，代价分两档**：
+
+- 多步 DAG：把 planner 换成 `graph`。⚠️ **别用 `kubectl set env`**——清单里没有 `PLANNER` 这一项，
+  set env 会留下字面值覆盖，正是 10-12 那次 `LLM_*` 漂移的成因（AGENTS.md 内网环境第 5 条）。
+  正确做法：改 ConfigMap/清单、走发布通道（一轮 ≈25 分钟）。
+- 真子 agent：必须重建镜像（COPY `applications/agent_federation` + `--extra agentic`）并配联邦依赖；
+  **或者**独立部署联邦、直接打它的 `/api/task` —— 后者不动演示镜像，是更便宜的验证路径。
+
+**上台口径（一句话）**：「单 Runtime + 多 Planner 的骨架在位，本次演示跑 deterministic，含证据不足时的 2 跳重规划；
+多 agent 编排在代码里有两套，一套需要 ≥2 个可组合技能才会触发，另一套的子 agent 执行器不在这个镜像里。」
+**不得说**"多 agent 编排已具备"，也**不得说**"只有一轮问答"。

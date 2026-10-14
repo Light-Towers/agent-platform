@@ -620,6 +620,9 @@ kubectl -n $NS exec -i $POD -- python - probe '报馆图纸' < /tmp/r30db.py
 
 | 代码漂移复查（**2026-10-14 只读实测**） | ①**需同步回仓库的代码＝0 项**：`git -C /opt/agent-platform status --porcelain` 在 **241 与 126 都为空**；241 HEAD=`6ac466af…`（**等于线上镜像 `GIT_REV`**），126 HEAD=`c01e9cf…`（旧一档，若从 126 构建会被 `build.sh` 的 rev 门禁拦下）。②**本周无人热改容器代码**：`docker diff knowledge-service-web` 共 68 项、`.py` 9 个，mtime 全落在 **09-22 / 09-28**（无一在 10 月）。③KS 侧既有漂移的定性沿用 10-10 的 blob 判定（无一需救回），**真正的债仍是"KS 镜像重建+分发"**（线上 `import_router.py` 缺 3 项已入库修复）。④清桶备份**在位**且字节数与台账逐一对上：`126:/tmp/ckpt-backup-host/{checkpoints 472B, checkpoint_blobs 289052B, checkpoint_writes 79B}`，权限 `drw-------` root-only（⚠️ 内含会话原文，能上机读 root 的人读得到——与 ㉓ 同族，等级低）。⑤**残留待清**：126 `/tmp` 11 个探针脚本（10-13 的 `wipe.py`/`keys.py`/`r30db.py`/`r30q.py` + 9 月的 `ablation.py`/`probe.py`/`kgprobe.py`/`run_route_ablation.py`/`seed_synthetic_corpus.py`/`_patch_126.py`/`_dl_bgem3.py`）、241 `/tmp/ch_check.py`。`keys.py` 已确认**不含任何密钥值**（只打印 Secret 的键名，密钥特征计数 0） |
 
+| 库内数据态（**2026-10-14 收盘复算**，`psql -U agent -d agent_platform`） | `checkpoints` **1** / `checkpoint_blobs` **2** / `checkpoint_writes` **0** / `semantic_cache` **11** / `memories` **17** / `chunks` **303**（7 文档）。三条结论：①**写路径已回读证实**——10-13 整桶清空后三表是 0/0/0，现在长出 1+2，说明清桶之后确实有新的会话落库（补上了台账 ⑳ 与底线 7 那条"删后没有复验写入路径"的欠账）；②`chunks`/文档数与 10-13 完全一致 ⇒ 语料面稳定；③⚠️ **`semantic_cache` 已从 0 积到 11** ⇒ 当天再问语义相近的问题会**直接命中缓存、模型根本不调用**（坑档第 5 条），演示前要按台账 ㉕ 处置 |
+| 取数用的正确连接形状 | 用户名 **不是** `postgres`：`kubectl -n agent-platform exec deploy/postgres -- printenv POSTGRES_USER` ⇒ `agent`；库名 `agent_platform`（`psql -U agent -d postgres -tAc "select datname from pg_database"` 列出）。**只读用户名，不读口令**（`POSTGRES_PASSWORD` 未取、未打印） |
+
 **本轮在这套现场跑通的判据**（都是回读，不是推断）：
 
 ```bash
