@@ -11,22 +11,36 @@
 
 ### L1 采集与语义（一次运行被拆成什么）
 
-行业正在收敛到 **OpenTelemetry GenAI 语义约定**（已从 OTel 主仓移到独立仓库维护）。要点：
+行业正在收敛到 **OpenTelemetry GenAI 语义约定**。本文引用的这条标准**已于 2026-10 从 OTel 主站迁出**，
+现由独立仓库 `open-telemetry/semantic-conventions-genai` 维护（官网 `opentelemetry.io/docs/specs/semconv/gen-ai/`
+只剩 Moved 存根）。下面每一点都是 2026-10-14 用 `gh api` 直取仓库原文逐条核对的结果，锚定 **semconv v1.44.0**，
+复核命令见文末 §6；整套仍标 `Development`，**属性名与需求级别后续会漂移**。要点：
 
 - **span 树按"真实发生过的动作"建**，不许为"Agent 大概在思考/规划"虚构 span：
   ```
-  POST /query                       (SERVER，请求根)
-  └─ invoke_agent {agent.name}      (INTERNAL，一次 agent 调用，≠ 整个会话)
-     ├─ {op} {model}  例 chat deepseek-ai/…   (CLIENT，一次模型推理)
-     ├─ execute_tool {tool.name}     (INTERNAL，一次工具/能力执行)
-     │   └─ 下游 HTTP/DB 子 span      (自动插桩继续挂)
-     ├─ retrieve / embedding / rerank 级 span
+  POST /query                       (SERVER，请求根，业务侧自建)
+  └─ invoke_agent {agent.name}      (INTERNAL：本进程框架 agent，如 LangGraph；远程 agent 则 CLIENT)
+     ├─ chat {model}  例 chat deepseek-ai/…   (CLIENT，一次模型推理；同进程内嵌模型 MAY INTERNAL)
+     ├─ plan {agent.name}           (INTERNAL，框架真有规划阶段才记)
+     ├─ execute_tool {tool.name}    (INTERNAL，一次工具/能力执行)
+     │   └─ 下游 HTTP/DB 子 span     (自动插桩继续挂在其下)
+     ├─ retrieval {data_source.id}  (CLIENT，op=retrieval)；embeddings {model} (CLIENT)
      └─ event：retry / guardrail 命中 / 决策分支
   ```
-- **命名与属性标准化**：`gen_ai.operation.name`、`gen_ai.provider.name`、`gen_ai.request.model`、
-  `gen_ai.response.model`、`gen_ai.usage.input_tokens` / `output_tokens`、`gen_ai.response.finish_reasons`、
-  `gen_ai.tool.name` / `gen_ai.tool.type` / **`gen_ai.tool.call.id`**（把"模型发出的工具调用"与"实际执行"对上，
-  这是"它到底调没调、调了几次"的唯一硬锚）；错误用通用约定 `error.type` + span status，而不是只有一枚布尔。
+  ⚠️ **同一个 `gen_ai.operation.name` 可以对应两种 kind**，官方按"被调用方在不在本进程"分小节各给一种
+  （`invoke_agent` 有 client 段与 internal 段两条）。⇒ 验收要按判据核 kind，不能按 span 名字核。
+- **命名与属性标准化**（按官方需求级别分档，别再混成一句"标准属性"）：
+  `Required` = `gen_ai.operation.name`、`gen_ai.provider.name`、`gen_ai.tool.name`；
+  `Conditionally Required` = `error.type`（出错时）、`gen_ai.request.model`（if available）、
+  **`gen_ai.conversation.id`**（会话/线程归组，官方注释"仅在库本身有该 id 时填"）、
+  **`gen_ai.prompt.name` + `gen_ai.prompt.version`**（具名模板 + 版本回链 ⇒ G6 想做的事标准里已有键，别自造 `prompt_version`）；
+  `Recommended` = `gen_ai.usage.input_tokens` / `output_tokens`、`gen_ai.response.model` / `finish_reasons` / `id` /
+  `time_to_first_chunk`、`gen_ai.tool.type` / `description` / **`gen_ai.tool.call.id`（"if available"，把"模型发起的那次调用"
+  与"实际执行那次"钉在一起，是"它到底调没调、调了几次"的唯一硬锚）**、`gen_ai.agent.name` / `id` / `version`；
+  `Opt-In` = 见 L3。错误用通用约定 `error.type` + span status，而不是只有一枚布尔。
+  操作名共 **18 个 well-known**（`chat`/`text_completion`/`generate_content`/`embeddings`/`fetch_response`/`execute_tool`/
+  `invoke_agent`/`create_agent`/`invoke_workflow`/`plan`/`retrieval` + memory 家族 7 个），命中就必须用，否则可自定义。
+  注：`fetch_response`（按 id 取回既有响应、不做推理）官方明确**不应上报 token 用量**。
 - **长 span 是反模式**：不要让一个 span 跨过等待用户输入的数小时（活跃耗时被稀释、采样失真）。
 - **插桩与后端解耦**：同一份 `gen_ai.*` 语义可以进 Langfuse / Phoenix / Datadog / Honeycomb，
   换后端不改埋点。
@@ -35,6 +49,12 @@
 
 trace id 只是骨架。目标态必须同时具备：**`session_id`（多轮归组）· `user_id`/租户 · `request_id` ·
 tags（环境/版本/特性开关）· prompt 名与版本 · `tool_call_id` · 跨服务 context propagation**。
+其中四样在 OTel 侧已有标准键，直接复用不要自造：会话归组 `gen_ai.conversation.id`（GenAI 段）或 `session.id`（通用段）、
+prompt 版本 `gen_ai.prompt.name` + `gen_ai.prompt.version`、工具关联 `gen_ai.tool.call.id`、错误类别 `error.type`。
+**用户维度有键但带 PII 告警**：`enduser.id`（官方原文 `This field contains sensitive (PII) information.`）
+或 `enduser.pseudo.id`（随机、不直接关联真实身份）⇒ 本项目要落用户维度就走 pseudo 口径，别把可识别身份写进观测面。
+**租户与用户是两件事，不能拿 `enduser.*` 顶替租户**：主仓 85 个属性命名空间里**没有 `tenant.md`** ⇒
+租户边界只能自定义键（如 `tenant.id`）并写进界面口径，这正是台账里"数据面租户边界"待拍板项的标准侧依据。
 Langfuse 把这些做成一等公民（Trace 带 `user_id`/`session_id`/`tags`/`metadata`，Observation 有语义类型
 `span`/`generation`/`event`/`tool`/`agent`/`retriever`/`embedding`/`guardrail`/`evaluator`，
 Score 直接挂在 trace/span/generation 上）。
@@ -45,10 +65,17 @@ Score 直接挂在 trace/span/generation 上）。
 
 ### L3 内容策略（原文进不进观测面，这是治理问题不是开关问题）
 
-标准的默认值很明确：**GenAI 内容默认不捕获**。完整 prompt、tool schema、arguments、results 属 **opt-in**，
-因为它们可能含口令、SQL、个人信息与大段文档；默认只留元数据（工具名、类型、call id、结果状态、大小）。
+标准的默认值很明确：**GenAI 内容默认不捕获**。官方把下列属性一律定级为 **`Opt-In`**：
+`gen_ai.input.messages`、`gen_ai.output.messages`、`gen_ai.system_instructions`、`gen_ai.tool.definitions`、
+**`gen_ai.tool.call.arguments`、`gen_ai.tool.call.result`**、`gen_ai.retrieval.query.text`、`gen_ai.retrieval.documents`、
+`gen_ai.memory.query.text`、`gen_ai.memory.records` —— 因为它们可能含口令、SQL、个人信息与大段文档。
+官方原话：`Instrumentations SHOULD NOT capture this attribute by default. Capture SHOULD be gated by an explicit
+user opt-in, for example OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT.`，并对内容类属性挂了
+`This attribute is likely to contain sensitive information including user/PII data.` 的告警。
+⇒ 默认只留元数据（工具名、类型、call id、结果状态、大小）。
 开启的前提是三条同时成立：**明确的调试环境 + 字段级脱敏 + 严格访问控制**，并且**短期保留**。
-（OTel 侧对应 `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT` 一类开关。）
+注意一个容易记反的分工：**"哪次调用"的关联符 `gen_ai.tool.call.id` 是 Recommended（if available），
+只有"入参/返回正文"才是 Opt-In** —— 台账 ㉓ 的处置方向与此一致（收口正文，不牺牲调用可见性）。
 
 ### L4 质量信号（可观测 ≠ 只有链路）
 
@@ -124,3 +151,34 @@ Score 直接挂在 trace/span/generation 上）。
 - 不在演示前动 P1 及之后任何一期（发布通道一轮 ≈25 分钟，且会新增演示残留）。
 - 不把"工具调用可观测"写进任何完成标志——**现网做不到**（G1），当前只能说"步骤级可观测"。
 - 不为了指标齐全而默认捕获全文（L3 的三件前提不齐就不开）。
+
+## 6. 来源与复核命令
+
+**标准（逐条核对原文，非二手转述）**：仓库 `open-telemetry/semantic-conventions-genai` 的
+`docs/gen-ai/gen-ai-spans.md`、`docs/gen-ai/client-inference.md`、`docs/gen-ai/gen-ai-agent-spans.md`、
+`docs/registry/attributes/gen-ai.md`；文内锚定 semconv **v1.44.0**、OTel 规范 v1.56.0。
+官网 `https://opentelemetry.io/docs/specs/semconv/gen-ai/` 现为 Moved 存根 ⇒ **抓取"官网不可达"不等于标准读不到**，
+按下面的命令直接取仓库原文即可（无需浏览器、无需外网 HTTP 出口，只要 `gh` 已登录）。
+
+```bash
+R=open-telemetry/semantic-conventions-genai
+for f in docs/gen-ai/client-inference.md docs/gen-ai/gen-ai-spans.md \
+         docs/gen-ai/gen-ai-agent-spans.md docs/registry/attributes/gen-ai.md; do
+  gh api "repos/$R/contents/$f" --jq .content | base64 -d > "/tmp/$(basename $f)"
+done
+grep -n "Span name\|Span kind\|Status:" /tmp/client-inference.md /tmp/gen-ai-spans.md /tmp/gen-ai-agent-spans.md
+# 18 个 well-known 操作名：反引号必须落在单引号的 sed 表达式里（双引号会触发 shell 命令替换）
+sed -n '/^`gen_ai.operation.name` has the following/,/^---/p' /tmp/gen-ai.md | grep -c '^| `'
+```
+
+**踩过的两个坑（写在这里，防止下轮再犯）**：
+1. 推理 span 的完整约定**不在** `gen-ai-spans.md`，那里只做跳转（真身在 `client-inference.md`）⇒
+   只读一个文件会得出"`output_tokens` 没在推理段定义"的假结论，本文上一版就中了这一枪。
+2. `git ls-tree` 列出的文件名里**没有** `genai` 目录（是 `gen-ai`），凭印象猜路径会得到 404，
+   再把 404 误读成"官方不可达"。**404 与不可达是两种读数**，必须分开报。
+
+**产品与实践来源**：Langfuse 官方数据模型文档（observation 类型枚举、`langfuse.observation.type`）；
+2026 年多篇中文工程实践（InfoQ《从 Demo 到生产》、微软 Foundry agent tracing 概念页、
+阿里云多 Agent 客服可观测样例）用于交叉印证"工具层可观测是普遍缺口"这一判断，**不作为属性名依据**——
+属性名只认上面的原文。
+
