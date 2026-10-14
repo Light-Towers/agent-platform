@@ -451,6 +451,7 @@ ssh root@<internal-ip> 'cd /opt/agent-platform && git fetch /tmp/ap-rollback.bun
 2. **Service = `agent-platform`**（下拉里还有 `jaeger-all-in-one`，选错就"什么都没有"）。
 3. **Operation 先留 `(any)`**。⚠️ 这是"看不到链路"的头号原因：浏览器不带 `traceparent` 时，**一次提问产生两棵互不串联的 trace**——一棵只有 1 个 span（`otel.scope.name=fastapi`，FastAPI 自带埋点），另一棵才是有内容的（`otel.scope.name=agent-platform`，含 `ChatOpenAI` + `fastapi.endpoint/dependencies`）。点开 1-span 那棵就会误判"链路是空的"。
 4. **Lookback ≥ 1 hour**；**时间按浏览器本地时区显示**，取证记录里写的是 UTC（`01:45:41Z` = 北京 `09:45:41`），别按 Z 时间去下拉框里找。
+4b. ⚠️ **默认视图必然全是 `GET /health`**：探针每 5s 一条，`Limit Results=20` 只装得下最近约 100 秒 ⇒ 真提问被挤出窗口，看着像"链路没记"（2026-10-14 需求方实踩）。**三种滤法**：① **`Min Duration=1s`**（实测 health 最长 **3.5ms**、真提问最短 **3.28s**，差三个数量级，一刀干净，Operation 可留 all）② `Operation=POST /query` + Limit 调大，但会看到成对的两棵、要挑 span 多的那棵 ③ `Tags=otel.scope.name=agent-platform` 只留我们埋点那棵。**演示时用①**。
 5. **Tags** 框（`key=value`，逗号分隔）可用的真键：`otel.scope.name=agent-platform`（**一条就筛出有内容的那棵**）· `thread_id=tenant-default` · `http.status_code=200` · `question_hash=<16位>`。
 6. **Find Traces** → 结果表按开始时间排，**看 "Spans" 那列挑大的点开**；勾选多条可 Compare。
 7. Trace 视图：上方甘特时间轴；点 span → 右侧 **Tags** 面板。业务属性在 `fastapi.endpoint` 这个 span 上（`request_id / question_hash / question_length / priority / thread_id`）；`ChatOpenAI` span 只有模型调用时延。右上角可 Download JSON。
