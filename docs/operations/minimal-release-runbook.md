@@ -461,6 +461,7 @@ ssh root@<internal-ip> 'cd /opt/agent-platform && git fetch /tmp/ap-rollback.bun
 **两个会让"查不到"变成长期坑的硬事实**：
 
 - **all-in-one 是内存存储**：进程一重启当天 trace 清零 ⇒ **"能回溯"这件事只有 Langfuse（ClickHouse）撑得住**，手册与演示话术里都不许把 Jaeger 说成留存证据面。
+- **别把 Jaeger 当"给人看内容"的界面**（2026-10-14 需求方吐槽"UI 丑、看着费劲"）：① 大片蓝底往往是**文字被选中**的反色，不是主题——点空白取消选择即可；② 这个 build 的 UI 是上游 `jaegertracing/all-in-one` 自带前端（实测包体 4.3MB `static/index-B-RC4is8.js`，里面只有 `"dark"` 与一处 `prefers-color-scheme`，**没有 `uiTheme` 一类切换开关**）⇒ **没有明暗切换按钮，别在界面上找**；准确版本看右上角 About Jaeger。③ 投屏要看它就 **Ctrl 加号放大到 125–150%**（响应式布局，放大不乱）。**演示口径**：讲内容用 Langfuse，讲过程用我们自己的控制台"过程时间线"，**Jaeger 只在被追问时延/拓扑时亮一次**，且必须 `Min Duration=1s` + 直接开 `/trace/<id>` 深链，不要现场搜索。
 - **脚本查 Jaeger 只能用 `/api/traces?service=&operation=&limit=`**：现网这个 build 对 `/api/search` 返回的是 **SPA 首页 HTML**，`json.loads` 不判形状就会得出"0 条"的假阴性（坑档表第 18 行，我自己今天踩了一次）。
 
 **2026-10-14 09:45/09:46（北京）需求方两次真提问的读数**（只读 API 取回，可当讲解样本）：
