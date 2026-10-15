@@ -1,5 +1,13 @@
 # 修复 `validate_config` 缺失（阻塞 agent-core 测试集收集）
 
+> 状态：**已落地**，但本文对成因的定性**不成立**（2026-10-15 逐 commit 复测）｜ 依据：`4b7bbb34`（2026-08-22，标题「fix(agent-core): 实现缺失的 validate_config…」）后 `resilience.py:232` 有 `def validate_config(`，`4b7bbb34^` 处该串计数为 **0** ｜ 回写：本文件不再更新。
+
+> ⚠️ **成因订正：这是回归，不是遗漏。** 下方「背景」原写"自提交 `426e251` 起从未实现（纯遗漏，非设计变更）"，与 git 实测冲突：
+> - `git show c45e1354^:packages/agent-core/agent_core/resilience.py` 第 **280** 行就有 `def validate_config(`，且 `__all__` 里导出该名；
+> - `c45e1354`（2026-08-21，「H2: CircuitBreaker Engine + Policy Strategy 统一完成」）在这次重构里**同时删掉了定义与 `__all__` 导出**（diff 中 `-def validate_config(`、`-    "validate_config",` 两处），而模块 docstring 第 10 行仍在宣称该对外能力；
+> - 次日 `4b7bbb34` 补回，补的时候按"缺失"叙事写的标题 ⇒ 账面就成了"从未实现"。
+> 两种定性导向的防法不同：按"遗漏"会去补函数，按"回归"要去堵**重构摘除公开名而 docstring 不同步**。本仓实际的防线是 `test_resilience.py` 顶部 import——它一失败就阻断**整个 agent-core 测试集收集**，所以门禁确实响过（代价是"一个名字丢、整片测试不跑"）。
+
 ## 背景
 - `packages/agent-core/tests/test_resilience.py` 顶部 `from agent_core.resilience import ... validate_config` 导入失败 → 整个 agent-core 测试集无法收集，`make ci` 的 `packages/*/tests` 门禁实际为红。
 - `agent_core/resilience.py` 模块 docstring（第 10 行）已将 `validate_config：轻量配置校验与默认值填充` 列为对外能力，但自提交 `426e251` 起从未实现（纯遗漏，非设计变更）。
