@@ -4,6 +4,8 @@
 > 评审日期：2026-09-23  
 > 评审人：Nox  
 > 状态：<span style="color:red">**不建议按当前方案执行**</span>
+>
+> **后续处置（2026-10-15 补）**：本评审结论**已被采纳** —— 被评审方案的作者在 `docs/plans/plan-enterprise-platform-skeleton-2026-09-23.md` 第 4 行自标「状态：**已被取代** — 见 `docs/architecture/agent-execution-platform.md`」，并在标题写入「（已被取代）」；第二轮对照评审见 `docs/reviews/review-v3-vs-skeleton-comparison-2026-09-23.md`。本件为**判据留档**，不是待执行项；引用"骨架方案"时一律以 `agent-execution-platform.md` 为准。
 
 ---
 

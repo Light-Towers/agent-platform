@@ -2,6 +2,7 @@
 
 > 创建日期：2026-09-23
 > 状态：**已被取代** — 见 `docs/architecture/agent-execution-platform.md`
+> 依据与去处（2026-10-15 补，按 `docs/README.md` §5 状态行规范）：判定原件为 `docs/reviews/review-plan-enterprise-platform-skeleton-2026-09-23.md`（结论「不建议按当前方案执行」）与 `docs/reviews/review-v3-vs-skeleton-comparison-2026-09-23.md`（结论「与 V3 正面冲突」）；现行架构真相源 = `docs/architecture/agent-execution-platform.md` + `docs/plans/plan-v3-execution-platform-final-architecture-2026-09-22.md`。**回写：本文件不再更新，也不得作为"平台该怎么建"的引用来源。** ⚠️ 已知矛盾：`AGENTS.md` 第 5 行「架构真相源」清单仍把本件列在第一位，与本行自述冲突，该句待维护者订正。
 > 取代原因：本方案提议 Application 互相 import，违反 ARCHITECTURE.md 红线 2；且"torch 已替代"判断不准确（knowledge-service 仍依赖 torch/transformers/flagembedding）；"有状态=Agent"边界定义不够准确（应为"谁决定下一步"）
 > 定位：企业级智能平台 — 单进程 + 插件式能力模块 + 外部基础设施
 
