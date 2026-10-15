@@ -69,7 +69,10 @@ def _build_pg_stores(pool):
     """
     if pool is None:
         return None, None, None, None
-    checkpoint_store = PgCheckpointStore(pool)
+    # V3-6 Layer B：不传 migrator 则 load() 的 schema 迁移分支恒不执行（默认 None）
+    from agent_runtime.state_migration import get_default_migrator
+
+    checkpoint_store = PgCheckpointStore(pool, migrator=get_default_migrator())
     idempotency_store = PgIdempotencyStore(pool)
     ownership_store = PgExecutionOwnershipStore(pool)
     trajectory_store = PgTrajectoryStore(pool)
@@ -455,23 +458,41 @@ async def lifespan(app: FastAPI):
         )
         app.state.scheduler = scheduler
         app.state.status_store = status_store
+        # V3-4B: 恢复编排器（缺口 4 的 reschedule）。默认关：开启后 retry 分支会向队列
+        # 新入一条 `:retry:N`，重试消耗队列容量（QueueFull 时静默失败）；
+        # 关闭时 Reaper 逐字保持旧行为（只标 FAILED + 释放 slot）。
+        recovery = None
+        if settings.scheduler_recovery_enabled:
+            from agent_runtime.execution_recovery import ReaperConfig, RecoveryOrchestrator
+
+            recovery = RecoveryOrchestrator(
+                scheduler,
+                config=ReaperConfig(max_retries=settings.scheduler_recovery_max_retries),
+            )
         # V3 Phase 3: Scheduler Reaper（lease-based 回收）
         if ownership_store is not None:
             from agent_runtime.execution_scheduler import SchedulerReaper
 
-            reaper = SchedulerReaper(scheduler, ownership_store)
+            reaper = SchedulerReaper(scheduler, ownership_store, recovery=recovery)
             reaper.start()
             app.state.scheduler_reaper = reaper
-            logger.info("V3 scheduler reaper started (lease-based)")
+            logger.info(
+                "V3 scheduler reaper started (lease-based, recovery=%s)",
+                "on" if recovery is not None else "off",
+            )
         else:
             app.state.scheduler_reaper = None
-        # V3 Phase 4: Control Plane（组合 scheduler + status_store + checkpoint_store）
+        # V3 Phase 4: Control Plane（组合 scheduler + status_store + checkpoint_store
+        # + awaitable_store + recovery）。awaitable_store 此前未传 ⇒ inspect 的
+        # external_tasks 段恒为空（能力在而装配漏接），本批补齐。
         from agent_runtime.control_plane import ControlPlane
 
         app.state.control_plane = ControlPlane(
             scheduler=scheduler,
             status_store=status_store,
             checkpoint_store=checkpoint_store,
+            awaitable_store=awaitable_task_store,
+            recovery=recovery,
         )
         logger.info(
             "V3 scheduler enabled: max_concurrent=%d per_tenant=%d queue=%d backend=%s",

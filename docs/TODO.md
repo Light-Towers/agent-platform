@@ -90,22 +90,22 @@
 | 1 | 严格 Fencing Generation：fencing 边界需覆盖 5 类 durable write（checkpoint / execution status / external task receipt / side effect receipt / scheduler ownership），当前仅防 checkpoint stale write | High | **部分 3/5**：checkpoint / execution status / scheduler ownership 已有；external task receipt 与 side effect receipt 无。另本轮新发现：`PgAwaitableTaskStore` 同名定义两份，生产接线的那份无保护 |
 | 2 | Effect Contract：`SideEffectStore` ≠ 语义契约，缺 delivery/retry/recover 分类 | High | **已完成**（本行记为缺口属过时）：三分类齐备且被 planner 调用。边界：按契约做恢复决策的执行层仍未接线 |
 | 3 | External Task + Receipt：未独立持久化，crash recovery 无法查询外部系统真实状态 | High | **部分**：已独立持久化并在服务启动时装配（「未独立持久化」已不成立）；后半句仍成立——恢复路径查不到，卡在 §3 未接线清单里的执行恢复模块 |
-| 4 | Execution Scheduler：仅有 Admission 容量门控，缺 priority / fairness / backpressure / stuck / reschedule | High | **部分**：priority / per-tenant fairness / backpressure / stuck 回收均已完成并接线（回收器在生产启动）；**仅 reschedule 未接**，且已接的回收动作只标 FAILED + 释放槽位，**不重新排队** |
+| 4 | Execution Scheduler：仅有 Admission 容量门控，缺 priority / fairness / backpressure / stuck / reschedule | High | **部分（reschedule 已接线，2026-10-15，默认关）**：priority / per-tenant fairness / backpressure / stuck 回收均已完成并接线；`SchedulerReaper` 现可注入 `RecoveryOrchestrator`，lease 失效后按 Effect Contract 决策，retry 分支重新入队 `:retry:N`（`SCHEDULER_RECOVERY_ENABLED` 默认 **False**，关闭时逐字保持「只标 FAILED + 释放槽位」）。**残差**：生产未接 `contract_resolver` ⇒ 契约恒 None，退化为「无契约默认可重试」，不等于已按契约恢复。方案 `docs/plans/plan-v3-unwired-landing-2026-10-15.md` |
 | 5 | Durable Execution Status State Machine | High | **已完成**（本行记为缺口属过时）：10 态状态机 + SQL 层原子拒绝旧 generation |
 | 6 | State Schema Version / Migration（V3-6 Layer B） | Medium | **未接线**（见 §3） |
 | 7 | Large Payload Externalization（V3-6 Layer B） | Medium | **未接线**（见 §3） |
-| 8 | Control Plane：底层数据/Replay 已有，缺 pause/resume/cancel/retry/requeue/recover/inspect/terminate 可操作面 | Medium | **部分**：8 项动作中 6 项已实现（inspect/pause/resume/cancel/retry/terminate），**缺 requeue 与 recover** ⇒ 本行不得整体计为已解决 |
+| 8 | Control Plane：底层数据/Replay 已有，缺 pause/resume/cancel/retry/requeue/recover/inspect/terminate 可操作面 | Medium | **已完成 8/8（2026-10-15）**：补 `requeue`（保留原 execution_id，源状态白名单 failed/cancelled/dispatched）与 `recover`（复用 `execution_recovery`，与 Reaper 同一决策口径）+ 各一个端点；同批补上 `main.py` 构造 `ControlPlane` 时**从未传** `awaitable_store` 的装配漏接（此前 `inspect()` 的 `external_tasks` 段在生产恒为空）。**待环境**：真集群端点复验。方案 `docs/plans/plan-v3-unwired-landing-2026-10-15.md` |
 | 9 | Replay Forensic / Reproducibility：Trajectory 未记录 model/prompt/skill/policy version | Medium | **已完成**（本行记为缺口属过时）：model/model_version/prompt_version/skill_version/input/tool/planner/policy_version 均已记录 |
 | 10 | Skill Version / Lifecycle / Compatibility：Skill 热更新会破坏 Runtime Replay / Checkpoint Recovery / Workflow | Medium | **已完成**（本行记为缺口属过时）：能力生命周期已管控，退役能力注册被直接拒绝 |
 
-逐条小结：**已完成 4（缺口 2/5/9/10）· 部分 4（1/3/4/8）· 未接线 2（6/7）**。⇒ 风险在「已完成」那 4 项：旧表把它们计为 High/Medium 缺口，照旧表排期会**重复建设已完成的代码**；本批把 4 项标为已完成、另有 4 项标为部分（需拆成「已接」与「未接」两截排期），未接线的 2 项保持原判。
+逐条小结（**2026-10-15 更新**：缺口 8 转已完成、缺口 4 的 reschedule 接线）：**已完成 5（缺口 2/5/8/9/10）· 部分 3（1/3/4）· 未接线 2（6/7）**。本批只改状态列文字，**未翻转任何复选框**（可用 `git diff docs/TODO.md` 判：diff 内无 `- [ ]` ↔ `- [x]` 变更）⇒ §0 的开/关计数不受影响。⇒ 风险在「已完成」那 4 项：旧表把它们计为 High/Medium 缺口，照旧表排期会**重复建设已完成的代码**；本批把 4 项标为已完成、另有 4 项标为部分（需拆成「已接」与「未接」两截排期），未接线的 2 项保持原判。
 
 - [ ] 端到端双实例物理故障转移验收：`scheduler_enabled` 默认 `False`（渐进式开启，见 `AGENTS.md` V3 口径），缺口 1~5 未闭合前不得翻转为已上线能力声明。**（2026-10-09 订正本句前提）**「缺口 1~5 未闭合」已过时：实测缺口 2/5 已完成，1/3/4 为部分（未闭合面收窄为：两类防覆盖缺失、恢复路径不查外部状态、reschedule 未接）。本条仍保持开项，但判据不是「1~5 全闭合」而是「双实例物理故障转移实测通过」。
 
 ## 3. 未接线半成品转正（P1-7 已标注，同「未接线≠死代码」教训，禁止直接删除）
 
-- [ ] `human_task` / `execution_recovery` / `state_migration` / `payload_externalization`（`agent-runtime`，代码完整但主链路未接线）
-- [ ] `skill_router`（exhibition-agent）：已实现 Skill→Tool 统一路由 + scope 校验 + readiness 拦截，但当前各 Skill 内部直连 `WarehouseClient` 绕过门禁链；接线方向：`run_skill → route(skill_name, ctx, **params) → 执行`
+- [ ] `human_task` / `execution_recovery` / `state_migration` / `payload_externalization`（`agent-runtime`，代码完整但主链路未接线）。**（2026-10-15 拆分状态，本条保持开项不翻勾）**：`execution_recovery` 与 `state_migration` **已接线**——前者由 `SchedulerReaper`（`SCHEDULER_RECOVERY_ENABLED`，默认关）与 `ControlPlane.recover` 消费，后者由两个 `PgCheckpointStore` 装配点注入 `get_default_migrator()`（默认无注册迁移步骤 ⇒ 行为零变更，只是能力接上）；`human_task` 与 `payload_externalization` **仍零生产调用**，接线点分别在 planner 中断语义与 context assembler 预算链，影响面大于本批，需独立方案。方案 `docs/plans/plan-v3-unwired-landing-2026-10-15.md`
+- [ ] `skill_router`（exhibition-agent）：已实现 Skill→Tool 统一路由 + scope 校验 + readiness 拦截，但当前各 Skill 内部直连 `WarehouseClient` 绕过门禁链；接线方向：`run_skill → route(skill_name, ctx, **params) → 执行`。**（2026-10-15 部分落地，按原句定义不得翻勾）**：`run_skill` 现已在 `skill.run` **之前**调 `route(...)`，scope 不符返回 `SCOPE_DENIED`、readiness SYNTHETIC 返回 `DATA_NOT_CONNECTED`，两种情况 `warehouse.get_rest` 零调用（4 条用例钉住，exhibition session 352 passed）。**未做的半截**：原句「→ 执行」中「用 `route` 返回的 endpoint 驱动实际 REST 调用」没有实现，执行仍走 skill 自己的 `WarehouseClient`；且门禁落在 dispatch 节点而非 `BaseSkill` 内，直接调 `skill.run(...)` 仍可绕过（既有用例属测试面，非生产调用方）。
 - [ ] `agent_server` `/health` 端点（`api/health_router.py`）未上报 V3 组件状态（scheduler / control_plane / cost_governance / forensic），现有字段仅覆盖 Phase 1/2；属小范围可读性补齐，非阻塞。**（2026-10-14 订正本句前提）**「未上报」已过时：`18b6954`（2026-10-10）已补四字段并同批新增契约测试 `applications/agent_server/tests/test_health_fields.py`（本机实跑 **14 passed**，响应实测 25 键 = 共享基类 13 + app 独有 12）。**本条仍保持开项**，但判据从「有没有报」收窄为两点残差：① `cost_governance` / `forensic` 无「拨开关返回值必须变」的断言（测试只钉了 `scheduler` / `control_plane`）；② `forensic` 位取的是 `trajectory_store` 非空的**代理语义**，不等于 ForensicContext 自身装配态。⇒ **本批只改本行文字，未翻转任何复选框**（`git diff docs/TODO.md` 内无 `- [ ]` ↔ `- [x]` 变更），§0 索引表「未接线半成品转正 = 3」的计数口径不受影响。
 
 ## 4. 会展 Agent 业务功能骨架 TODO

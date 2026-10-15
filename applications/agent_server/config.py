@@ -149,6 +149,11 @@ class Settings(BaseLLMSettings):
     scheduler_max_concurrent: int = 10
     scheduler_max_concurrent_per_tenant: int = 5
     scheduler_queue_capacity: int = 1000
+    # V3-4B: lease 失效执行的恢复决策（retry/query/fail/human）。默认关：开启后
+    # Rescheduler 会向队列新入 `:retry:N` 请求，重试消耗队列容量（QueueFull 时静默失败）。
+    # 关闭时 Reaper 逐字保持旧行为（只标 FAILED + 释放 slot）。
+    scheduler_recovery_enabled: bool = False
+    scheduler_recovery_max_retries: int = 3
 
     # V3 Phase 4: Cost Governance（opt-in，默认关）
     # 启用后请求路径加 budget check/record，超限返回 429
