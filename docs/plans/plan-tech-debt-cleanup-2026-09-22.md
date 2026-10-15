@@ -53,7 +53,7 @@
 
 **路径批量替换**：
 - [ ] `docs/plans/plan-f-single-runtime-multi-planner.md` 28 处 `app/`→`applications/agent_server/`、`agent_federation/`→`applications/agent_federation/`
-- [ ] `README.md:40,354` 引用 `docs/architecture-improvement-plan.md`→`docs/architecture/architecture-improvement-plan.md`
+- [x] `README.md:40,354` 引用 `docs/architecture-improvement-plan.md`→`docs/architecture/architecture-improvement-plan.md`。**2026-10-15 核销**：该两处已由 `cd5834cb`（2026-09-22，与本待办同一提交）改准，复选框当时未翻；实测依据 = `git show cd5834cb^:README.md` 第 40/354 行为旧路径、`git show cd5834cb:README.md` 两处均为新路径，现行 README 旧路径 0 命中、仅剩 `README.md:474` 一处且为新路径。**注：本块标题写「6 项」而块内实列 12 个复选框（3 路径替换 + 5 数字校正 + 1 命名校正 + 3 验收），该口径差未在本条解决，翻勾只对本条负责**
 - [ ] `CHANGELOG.md:57` 引用 `docs/runtime-governance-roadmap.md`→`docs/operations/runtime-governance-roadmap.md`
 
 **数字事实校正**：

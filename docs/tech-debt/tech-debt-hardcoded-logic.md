@@ -119,7 +119,7 @@ ADR-0004 阶段4 的候选B（`eval/memory_reuse_llm.py`）评审中，发现 `_
 ### TD-12 docs 旧 `run_deep_agent(session_id=)` 签名文本残留
 - 关联：PR#10 审核（2026-08-18）非阻塞残留项
 - 文件：`agent_federation/eval/PROPOSAL.md:157`（已修 F）→ 示例代码 `session_id=sid` 已改为 `workspace_id=sid`。
-- 其余文档（`docs/architecture-improvement-plan.md` 等）中的 `session_id` 属 `app/` 平台真实 API 参数名（如 `GET /history?session_id=`），与 agent_federation 隔离键无关，**不改动**。
+- 其余文档（`docs/architecture/architecture-improvement-plan.md` 等）中的 `session_id` 属 `app/` 平台真实 API 参数名（如 `GET /history?session_id=`），与 agent_federation 隔离键无关，**不改动**。（2026-10-15 仅把该举例文档的路径补上 `architecture/` 子目录；本条结论不变）
 - 结论：agent_federation 侧 docs 已同步；app 侧真实参数名保持。
 - 状态：✅ 已修复（仅 agent_federation 侧）
 
