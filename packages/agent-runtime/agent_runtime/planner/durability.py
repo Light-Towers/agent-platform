@@ -315,11 +315,18 @@ class SideEffectStore(abc.ABC):
         step_id: str,
         effect_type: str,
         owner: str,
+        generation: int | None = None,
     ) -> bool:
         """记录一次副作用。返回 True=新写入，False=已存在（幂等去重）。
 
         ``effect_key`` 由实现拼接（默认 ``execution_id:step_id:effect_type``），
         ``owner`` 为当前 lease owner（``replica_id:uuid``），用于审计证明。
+
+        ``generation``（V3 缺口 1）为写入方持有的 lease generation：PG 后端据此做
+        **跨表原子 fence**——当前 lease 的 generation 更新 ⇒ 写入方是 takeover 后的
+        zombie，拒绝落回执并抛 ``FencedWriteError``（否则新 owner 的 ``has()`` 会把
+        该副作用误判为"已落地"而跳过真实执行）。``None`` = 来源未知，不 fence。
+        进程内后端无 lease 概念 ⇒ 不做 fence，只记录，见 ``InMemorySideEffectStore``。
 
         调用方必须在 Skill 的**真实业务副作用成功之后**调用本方法；且不同业务副作用
         必须使用不同 ``effect_type``（见类文档 H3 契约）。
@@ -331,7 +338,13 @@ class SideEffectStore(abc.ABC):
 
 
 class InMemorySideEffectStore(SideEffectStore):
-    """进程内副作用存储（测试 / 单进程默认后端）。"""
+    """进程内副作用存储（测试 / 单进程默认后端）。
+
+    **不做 generation fencing**：单进程内不存在 lease takeover，也就没有 zombie writer；
+    fence 的权威来源是 ``execution_leases`` 表，进程内后端没有它。``generation`` 只被
+    收下以保持签名一致（PG 后端才真正用它），刻意不伪造一个进程内 fence —— 那会让
+    "两个后端语义对等"变成假象。
+    """
 
     def __init__(self) -> None:
         self._store: dict[tuple[str, str, str], str] = {}
@@ -342,6 +355,7 @@ class InMemorySideEffectStore(SideEffectStore):
         step_id: str,
         effect_type: str,
         owner: str,
+        generation: int | None = None,
     ) -> bool:
         key = (execution_id, step_id, effect_type)
         if key in self._store:

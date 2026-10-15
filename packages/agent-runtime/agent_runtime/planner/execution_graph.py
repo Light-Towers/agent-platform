@@ -362,6 +362,9 @@ async def _run_graph_in_place(
                             step_id=node_id,
                             effect_type=effect_type,
                             owner=exec_ctx.lease_owner or "",
+                            # V3 缺口 1：盖上本次 lease generation，takeover 后的 zombie
+                            # writer 写不进回执（PG 后端据此做跨表原子 fence）。
+                            generation=exec_ctx.lease_generation,
                         )
                     return node_id, result, None, False
                 except ExecutionSuspended:

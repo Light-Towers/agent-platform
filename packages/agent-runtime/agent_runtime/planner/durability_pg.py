@@ -409,9 +409,18 @@ class PgSideEffectStore(SideEffectStore):
     从而可在 resume 时判断哪些 step 的副作用已真正落地、避免重复执行。
     """
 
-    def __init__(self, pool: Any, *, table: str = "side_effects") -> None:
+    def __init__(
+        self,
+        pool: Any,
+        *,
+        table: str = "side_effects",
+        lease_table: str = "execution_leases",
+    ) -> None:
         self._pool = pool
         self._table = table
+        # generation fencing 的权威来源是 lease 表；表名可配是为了与
+        # PgExecutionOwnershipStore(table=...) 保持一致——两边不同名会让 fence 静默失效。
+        self._lease_table = lease_table
 
     async def record(
         self,
@@ -419,22 +428,56 @@ class PgSideEffectStore(SideEffectStore):
         step_id: str,
         effect_type: str,
         owner: str,
+        generation: int | None = None,
     ) -> bool:
         effect_key = f"{execution_id}:{step_id}:{effect_type}"
         # attempt_id 用 owner 派生（同一 lease 内的副作用视为同一 attempt 批次）
-        sql = (
-            f"INSERT INTO {self._table} "
-            "(effect_key, execution_id, attempt_id, step_id, effect_type, owner) "
-            "VALUES (%s, %s, %s, %s, %s, %s) "
-            "ON CONFLICT (effect_key) DO NOTHING "
-            "RETURNING effect_key"
-        )
-        async with self._pool.connection() as conn:
-            cur = await conn.execute(
-                sql, (effect_key, execution_id, owner, step_id, effect_type, owner)
+        #
+        # V3 缺口 1：generation fencing。副作用回执是 insert-only（ON CONFLICT DO NOTHING），
+        # 冲突时压根不写 ⇒ **行级 generation 比较无从下手**。真正的危害是 zombie writer
+        # 抢在新 owner 之前插入 effect_key，使新 owner 的 has() 判为"已落地"从而**跳过真实
+        # 副作用**。fence 的权威来源只能是 execution_leases 的当前 generation，故用跨表
+        # INSERT … SELECT … WHERE NOT EXISTS 在**一条语句内**原子完成：先查再插会与 takeover 竞态。
+        cols = "(effect_key, execution_id, attempt_id, step_id, effect_type, owner, generation) "
+        values = (effect_key, execution_id, owner, step_id, effect_type, owner)
+        if generation is None:
+            sql = (
+                f"INSERT INTO {self._table} "
+                + cols
+                + "VALUES (%s, %s, %s, %s, %s, %s, %s) "
+                "ON CONFLICT (effect_key) DO NOTHING "
+                "RETURNING effect_key"
             )
+            params: tuple = (*values, None)
+        else:
+            sql = (
+                f"INSERT INTO {self._table} "
+                + cols
+                + "SELECT %s, %s, %s, %s, %s, %s, %s "
+                f"WHERE NOT EXISTS (SELECT 1 FROM {self._lease_table} "
+                "WHERE execution_id = %s AND expires_at > now() AND generation > %s) "
+                "ON CONFLICT (effect_key) DO NOTHING "
+                "RETURNING effect_key"
+            )
+            params = (*values, generation, execution_id, generation)
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(sql, params)
             row = await cur.fetchone()
-        return row is not None
+        if row is not None:
+            return True
+        if generation is None:
+            return False  # 无 fence 路径：写不进去只可能是幂等去重（既有契约）
+        # 带 fence 时"没写进去"有两种成因，语义相反，必须分开：
+        #   已存在 → 幂等去重，返回 False（既有契约）；
+        #   不存在 → 被 fence 拒绝（zombie writer），必须抛错。静默返回 False 会让调用方
+        #            把"我被拒绝了"读成"副作用早已落地"，正好是最危险的那个误读。
+        if await self.has(execution_id, step_id, effect_type):
+            return False
+        raise FencedWriteError(
+            f"side effect 回执写入被拒绝（stale generation fencing）"
+            f"execution={execution_id} step={step_id} effect_type={effect_type} "
+            f"incoming_generation={generation}"
+        )
 
     async def has(self, execution_id: str, step_id: str, effect_type: str) -> bool:
         effect_key = f"{execution_id}:{step_id}:{effect_type}"
