@@ -149,7 +149,7 @@
 
 ## 4. 证据与历史层（留档，不外引、不改写）
 
-- `docs/operations/evidence/` — 7 个日期目录（6 份 `readings.md` + `2026-10-14-3node-deployment/raw.txt` 原始 stdout）。**每份的读数只绑定当时的 Pod `GIT_REV`**，换 rev 后须复跑，不得当现值引用。留档件是否入库由每次处置单独定（`raw.txt` 正按需清除，删后可用 `git show da96d870:` 回取）。
+- `docs/operations/evidence/` — 6 个日期目录、每份一个 `readings.md`。**每份的读数只绑定当时的 Pod `GIT_REV`**，换 rev 后须复跑，不得当现值引用。留档件是否入库由每次处置单独定：`2026-10-14-3node-deployment` 的原始 stdout（`raw.txt`）已于 2026-10-15 按需清除，回看用 `git show da96d870:docs/operations/evidence/2026-10-14-3node-deployment/raw.txt`，机侧另有一份在 `126:/tmp/inv-out.txt`（**清掉它就两处皆无**）。
 - `docs/architecture/overview.html`（11 KB，09-23）— `docs/` 里唯一非 md 的架构产物，无入站引用；它不会被 `check_doc_sync.py` 覆盖，改动架构文档时不会有人提醒你同步它。
 - `docs/analysis/2026-09-21/` — 9 份（`INDEX.md` / `PRIORS.md` / `PROMPT.md` / `00`~`05`）。该目录自带 `INDEX.md`，本索引不重复其内容；`02-debt-diagnosis.md` 提及 17 次，是这批里唯一仍被大量引用的。
 - `docs/reviews/` — 2 份评审件（09-23）。`docs/research/` — 4 份调研（08-22 ~ 09-25，其中 `deepseek-harness-discussions-analysis.md`、`code-agent-borrowable-features.md` 零提及）。
