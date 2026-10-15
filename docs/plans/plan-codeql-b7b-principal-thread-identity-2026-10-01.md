@@ -1,6 +1,6 @@
 # B7b 方案：会话身份 principal 化 —— 让 `#38`/`#39` 的 sink 真实消失
 
-> 状态：**上游取证完成（§1）、三项均已拍板（§8，2026-10-01 按推荐值接受）** ⇒ 可开工 B7b-1。本文件**未动任何代码**。
+> 状态：**上游取证完成（§1）、三项均已拍板（§8，2026-10-01 按推荐值接受）**。**2026-10-15 订正状态行漂移**：原「⇒ 可开工 B7b-1 / 本文件未动任何代码」已过期——按本文件 §6 实施表并经对码核实，**B7b-1（PR #45）、B7b-2（PR #46 → merge `76589c4f`，git 历史可查）已实施并合入**（证据：`_hash_api_key` 在 `packages/` 非测试代码零命中；`resolve_client_key(client_host, subject=None)` 已删 `headers`/`auth_enabled` 形参），B7b-3 已移出关键路径（随 A5 另批）。**真正未收口的是 B7b-4 / B7b-5**，但其现状**需专门重审后才能定**：§6 表标二者「未开工」，而 `guardrails/auth.py:56` 现已是 `resolve_thread_identity(principal)` 且该文件已无 `fingerprint`/`derive_thread_id`——与「链① 未拆」的表述不完全吻合，可能已有后续改动未回写本表。加之二者的 §7 验收依赖 CodeQL 对 `#38`/`#39` 的复扫（§7.7 逐 PR 中间态判据）与部署侧枚举核实 ⇒ **待环境（126/CI）**，且属身份派生 / 401 优先级的安全敏感变更，**不宜在无法跑验收复扫、且真实起点未重审清楚时盲改**。
 > 日期：2026-10-01　前置：`plan-v3-identity-merge-2026-10-01.md` §5 步骤 6（「合入后回到 B7b：在已断言主体上做 principal_id 化（另出方案）」）
 > 关联：`docs/plans/plan-codeql-batch7-no-dismiss-real-fixes-2026-10-01.md` §4 / §4.1（强制前置）、`docs/TODO.md` §8
 > 约束继承：用户主线要求「**不要用 dismiss 这种简单的处理方式**」——本方案不引入任何 `false_positive` / `wont_fix` 标记，验收只认 `state=fixed` 且 `dismissed_at=None`。
