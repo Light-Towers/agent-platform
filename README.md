@@ -33,19 +33,6 @@ Agent Platform 是一个基于 **LangGraph Supervisor 模式** 的统一智能�
 
 ---
 
-## 上游内核蓝本：`reliable-agent`
-
-本仓库的 `agent-core` 并非从零发明，而是受开源包 [Light-Towers/reliable-agent](https://github.com/Light-Towers/reliable-agent)（框架无关的 LLM/Agent 生产可靠性原语）启发/改写后的**本项目落地版**。两者组件一一映射、设计铁律一致：
-
-- **组件映射**：tracing / eval.metrics / guardrails / llm_client / memory / tool_registry 在 `reliable-agent` 与 `agent-core` 中均有对应。
-- **设计铁律同源**："框架无关、core 绝不 import langgraph/宿主应用、重依赖全部 extra + lazy import、仅 stdlib 可 import"原则与 `agent-core` 逐字对应（见 `packages/agent-core/README.md`）。
-- **不是 pip 依赖**：`packages/agent-core/pyproject.toml` 的 `dependencies=[]`，全仓库无任何 `reliable-agent` 引用 —— `agent-core` 是**自研实现等价内核**，而非直接 `pip install` 该包。
-- **本地是 superset**：`reliable-agent` 的 memory 仅指对话历史、eval.metrics 仅对给定 ID 列表算指标，**不含 embedding / vector store / 语义记忆**；本地 `agent-core` 额外提供了 `embedder.py` 与 `vector_backend.py`（pgvector 语义记忆），能力更全。
-
-更完整的上游对照与护栏清单见 [`docs/architecture/architecture-improvement-plan.md` §0.1](docs/architecture/architecture-improvement-plan.md)。
-
----
-
 ## 特性
 
 ### Phase 1 — 核心能力
@@ -182,6 +169,12 @@ flowchart LR
     style H fill:#fff3e0,stroke:#ff9800
 ```
 
+### 能力现状全景（四档交底）
+
+> 记忆 / 缓存 / 上下文 / 工具 / 安全 / 状态可靠性 / 可观测评测 / 知识数据 / 编排范式 / 平台产品面 —— **10 个能力域逐条给状态与文件证据**，并登记缺项优先级（P0–P2）、14 个默认关开关、13 个零生产调用模块：见 [`docs/architecture/agent-harness-capability-map.md`](docs/architecture/agent-harness-capability-map.md)。
+>
+> 状态口径：✅ 已实现·默认开 ｜ 🔽 已实现·**默认关（opt-in）** ｜ 🟡 半成品·零生产调用 ｜ 🧪 脚手架/仅 demo ｜ ❌ 不存在。**报「已就绪」前必须先说默认关**；该文档是绑定 rev 的快照，换 rev 后按文内 §1.3 的校验命令复跑。
+
 ---
 
 ## 快速开始
@@ -294,20 +287,39 @@ curl http://127.0.0.1:8000/health
 
 ```json
 {
-  "status": "ok",
-  "storage": "postgres",
-  "llm": true,
-  "search": true,
-  "sql_backend": "sqlite",
+  "status": "healthy",
+  "version": "0.1.0",
+  "dependencies": [],
+  "storage": "memory",
+  "llm": false,
+  "search": false,
+  "sql_backend": "none",
   "coordination": true,
   "admission": false,
   "revert": true,
   "otel": false,
-  "mcp": false
+  "otel_status": "UNINITIALIZED",
+  "mcp": false,
+  "scheduler": false,
+  "control_plane": false,
+  "cost_governance": false,
+  "forensic": false,
+  "embedding_backend": "MockEmbedder",
+  "embedding_real": false,
+  "planner": "deterministic",
+  "guard_enabled": false,
+  "langfuse_enabled": false,
+  "langfuse_ready": false,
+  "auth_enabled": false,
+  "identity_mode": "insecure"
 }
 ```
 
-> 当前 `/health` **不上报 V3 组件状态**（scheduler / control_plane / cost_governance / forensic），已登记为待办，见 [`docs/TODO.md`](docs/TODO.md)。
+> 上面是 2026-10-14 本机**实跑取到**的真实响应（未配 `DATABASE_URL` 的零依赖形态，故 `storage=memory`、`embedding_backend=MockEmbedder`、`llm=false`），共 **25 个键 = 共享基类 13 + 本 app 独有 12**。复现命令：`uv run python -c "from fastapi.testclient import TestClient; from agent_server.main import app; print(TestClient(app).get('/health').json())"`（注意 `get_settings` 有 `lru_cache`，改 env 后须清缓存）。
+>
+> 字段语义口径：值取自**运行态装配真值**而非 settings 意愿值（`scheduler`/`control_plane`/`cost_governance`/`forensic` 即 V3 四部件，`18b6954` 起上报）；`langfuse_enabled`（意愿）与 `langfuse_ready`（真装配）两盏灯必须分开看，差值即故障信号；`/health` 免鉴权，故 `auth_enabled` 与 `identity_mode` 只报布尔/模式名，**不回显任何密钥**。
+>
+> 两点残差（勿当成已完成）：① 契约测试只断言了 `SCHEDULER_ENABLED` 翻转 `scheduler`/`control_plane`，`cost_governance`/`forensic` **无开关跟随断言**；② `forensic` 位取的是 `trajectory_store` 非空的**代理语义**，不等于 ForensicContext 自身装配态。详见 [`docs/architecture/agent-harness-capability-map.md`](docs/architecture/agent-harness-capability-map.md) §2.8。
 
 ### V3 Control Plane API（`scheduler_enabled=True` 时生效）
 

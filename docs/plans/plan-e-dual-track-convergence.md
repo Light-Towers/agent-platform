@@ -1,9 +1,9 @@
 # 优化 E：双轨编排收敛 — 专项规划（已评审，实施中）
 
 > 状态：规划已按独立审核修订，P4.1~P4.3 全部实施完成（见顶部实施记录）
-> 关联：`docs/architecture-improvement-plan.md` §2 优化 E / §4 路线图 P4
-> 调研依据：`docs/architecture-boundary-app-vs-agent-federation.md` + 本轮 `app/` 与 `agent_federation/` 双轨代码调研
-> 上游约束：`agent-core` 是 `reliable-agent` 哲学落地，零依赖铁律不可逾越（护栏清单第 1 条）
+> 关联：`docs/architecture/architecture-improvement-plan.md` §2 优化 E / §4 路线图 P4
+> 调研依据：`docs/architecture/architecture-boundary-app-vs-agent-federation.md` + 本轮 `app/` 与 `agent_federation/` 双轨代码调研
+> 内核约束：`agent-core` 的零依赖内核铁律不可逾越（见 `docs/architecture/architecture-improvement-plan.md` §0.1 与 §3 护栏清单第 1 条）
 > 审核修订记录（2026-08-16）：依据独立源码核对，采纳 B-1 / M-1~M-5 / S-1~S-5，逐项修正如下。
 > 实施记录（2026-08-16）：P4.1~P4.3 已全部落地并通过单测门禁（agent_federation unit 44 passed；app 根 59 passed）。
 >   - P4.1：agent_federation/pyproject.toml 补 `shared-schemas` 依赖；`async_subagents._HttpSubAgent.ainvoke` 接入 `QueryResponse(**data)` 断言 + `E1_CONTRACT_ASSERT` 灰度开关；新增 `tests/unit/test_async_subagents_contract.py`(5)。

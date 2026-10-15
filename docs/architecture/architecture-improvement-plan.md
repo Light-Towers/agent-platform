@@ -3,30 +3,22 @@
 > 状态：提案（大部分已落地，WS-1~WS-8 全量完成后进入内核稳定期）
 > 关联文档：`docs/competitive-landscape.md`（对标调研）、`docs/architecture-boundary-app-vs-agent-federation.md`
 > 调研来源：LangChain(144k★)、Dify(152k★)、AutoGen(60k★)、CrewAI(57k★)、OpenAI Agents SDK(29k★)、DeepAgents(langchain-ai)
-> 上游内核蓝本：[Light-Towers/reliable-agent](https://github.com/Light-Towers/reliable-agent)
 
 ## 0. 背景与目标
 
 当前 `agent-platform` 已实现 LangChain/LangGraph 重度使用，并在 `agent_federation/` 视图直接站在 DeepAgent 库（`create_deep_agent`）之上。本轮调研确认：项目在**内核分层零耦合**（`agent-core`/`shared-schemas`）、**extras 隔离重依赖**（`sql`/`mcp`/`pdf`/`otel`）上已对齐开源最佳实践。
 
-### 0.1 上游内核蓝本：`reliable-agent`
+### 0.1 内核契约（任何优化的不可逾越边界）
 
-`agent-core` 并非从零发明，而是受 GitHub 开源包 [Light-Towers/reliable-agent](https://github.com/Light-Towers/reliable-agent)（MIT，框架无关的 LLM/Agent 生产可靠性原语）启发/改写后的**本项目落地版**。两者组件一一映射、设计铁律一致：
+`agent-core` 的定位是**框架无关的可靠性内核**。三条设计铁律（原文见 `packages/agent-core/README.md` §设计铁律）决定了后续所有优化的边界：
 
-| reliable-agent 组件 | agent-core 实现 | 重合度 |
-|---|---|---|
-| `tracing`（OTel 风格链路，零依赖可跑） | `agent_core.tracing` | 等价 |
-| `eval.metrics`（Recall@k/MRR/NDCG 纯函数） | `agent_core.metrics.retrieval` | 等价 |
-| `guardrails`（auth/ratelimit/web 中间件） | `agent_core.guardrails` | 等价 |
-| `llm_client`（多模型 Provider 注册表） | `agent_core.llm` | 等价 |
-| `memory`（Mongo+透传） | `agent_core.memory` | 等价 |
-| `tool_registry`（`guarded_invoke`+MCP 隔离降级） | `agent_core.tools` | 等价 |
-| `resilience`（CircuitBreaker/retry/timeout） | `agent_core.resilience` | 等价 |
+| # | 铁律 | 对本方案的含义 |
+|---|------|--------------|
+| 1 | 内核绝不 import 宿主应用配置、LangGraph 等宿主依赖 | 优化只能往内核**加原语**，不能把编排逻辑下沉进来 |
+| 2 | 重型/可选第三方依赖（OTel / langchain / pymongo / starlette / openai-agents）一律懒导入 + 标 extras，纯模块仅 stdlib 即可 import | 新增能力不得把重依赖变成硬依赖——否则破坏"零配置冒烟" |
+| 3 | 日志自包含（`from agent_core.logging import get_logger`） | 不在内核引宿主日志框架 |
 
-关键事实：
-- **不是 pip 依赖**：`agent-core/pyproject.toml` 的 `dependencies=[]`，全仓库 `.toml` 无任何 `reliable-agent` 引用 —— 项目是**自研实现等价内核**，而非直接 `pip install` 该包。
-- **设计铁律同源**：`reliable-agent` 的"框架无关、core 绝不 import langgraph/宿主应用、重依赖全部 extra+lazy import、仅 stdlib 可 import"原则，与 `agent-core/README.md` 的"设计铁律"逐字对应。
-- **对优化的含义**：`agent-core` 已是 `reliable-agent` 哲学的落地，护城河在**可靠性内核**而非编排框架；任何优化（含优化 E 双轨收敛）都必须保留 `reliable-agent` 式零依赖内核契约（见 §3 护栏清单第 1 条）。v2 新增的 `fallback_lc.py` 正是该哲学在 LangChain 侧的薄适配（保持 `BaseChatModel` 兼容 + 复用 `FallbackChatModel` 降级语义，不破坏内核零依赖）。
+护城河在**可靠性内核**而非编排框架，因此任何优化（含优化 E 双轨收敛）都必须保留这套契约（见 §3 护栏清单第 1 条）。v2 新增的 `fallback_lc.py` 正是该契约在 LangChain 侧的薄适配（保持 `BaseChatModel` 兼容 + 复用 `FallbackChatModel` 降级语义，不破坏内核零依赖）。
 
 但存在 5 处与高 star 项目共识的差距，且 `app/` 与 `agent_federation/` 双轨编排并存。本方案**不推翻重写**，而是提出**分阶段、低风险、可独立测试**的优化，每项均保留现有内部契约兼容，避免全局回归。
 
@@ -236,7 +228,7 @@
 
 以下为项目护城河，任何优化均不得触碰：
 
-1. **`agent-core` 内核契约**：`Tool` Protocol + `guarded_invoke` 超时隔离、`llm/providers` 注册表缓存、embedding 后端、tracing `_NoOpSpan` 降级铁律。刻意与 LangChain 解耦。该内核是 [reliable-agent](https://github.com/Light-Towers/reliable-agent) 哲学的落地版，零依赖铁律（core 绝不 import langgraph/宿主应用、重依赖全部 extra+lazy import）为不可逾越红线。
+1. **`agent-core` 内核契约**：`Tool` Protocol + `guarded_invoke` 超时隔离、`llm/providers` 注册表缓存、embedding 后端、tracing `_NoOpSpan` 降级铁律。刻意与 LangChain 解耦。零依赖铁律（core 绝不 import langgraph / 宿主应用配置、重依赖全部 extra + lazy import，见 §0.1 与 `packages/agent-core/README.md` §设计铁律）为不可逾越红线。
 2. **`sqlglot` SQL 守卫**（`agent_core/sql/guard.py`）：强制 LIMIT/禁 DDL，合规硬约束。
 3. **BGE-M3 双向量 + 本地稀疏向量生成器**（md5 稳定 id，`zhanggui-zhiku/lm/sparse_vectorizer.py:73`）：零依赖可复现硬约束。
 4. **动态 TopK 断崖截断 + 索引版本 registry + eval 回填**（`zhanggui-zhiku/node_rerank.py:208`）：检索治理闭环。
