@@ -6,6 +6,8 @@
 >
 > **执行状态（2026-09-24）**：✅ **M1 棘轮已落地并验证** —— 6 份配置全部启用 `BLE001/S110`、103 文件 legacy 入 `per-file-ignores` 基线、`ruff check .`（CI 命令）全绿；对 agent-core / agent-runtime / knowledge-service 三处非基线干净文件做防回归探针均报 `BLE001+S110`。
 > 🔁 **M2 策略修订（2026-09-24，经用户复核，取代下方“逐点烧除”原方案）**：**放弃「逐点 `# noqa: BLE001` + 删文件基线」的烧法**，改回**整包 `per-file-ignores` 基线豁免 + 源码零逐点 noqa**。理由：逐点 noqa 的存废完全依附于 `BLE001` 是否常驻 `select`——历史上该规则被 `3ccc90e`（加）→ 移出 select → `92ba46f`（当死注释清除）反复开关，逐点 noqa 是加-删-加 churn 的根源。现态：6 份配置均启用 `BLE001/S110`、legacy 全在整包基线、`ruff check .` 全绿；仅保留**无 noqa 的安全窄化**（纯导入守卫 `except Exception`→`except ImportError`、`json.loads`→`except (ValueError, TypeError)`）。agent-core `pytest 200 passed`、agent-runtime `539 passed`。
+>
+> **2026-10-15 复测（本文件的 262/103 已成历史读数）**：`uv run --with ruff ruff check --isolated --select BLE001,S110 --statistics .` = **263 处**（BLE001 **234** + S110 **29**），命中 **100** 个文件（其中 4 个是测试文件）。⇒ 与 M1 基线相比**净量未降（262→263），但构成变了：BLE001 −7、S110 +8**。注意两处口径不可直接相减：本文件的 262 来自 inventory.txt 逐行清单，复测数来自 ruff `--isolated`（不加载项目配置，故含 `--select` 到的一切 .py）。本文件角色 = **M1/M2 的过程记录**；降量执行方案见 `plan-p0-4-blind-except-real-reduction-2026-09-24.md`，桶 B 的定案见 `p2-bucket-b-reduction-findings-2026-09-24.md`，待办仍挂在 `docs/TODO.md` D7（未核销）。逐行清单 `p0-4-blind-except-inventory.txt`（262 行，绑定 2026-09-24 读数）据此**已过期，但不改它本体**——它是脚本可直接解析的数据件（每行 `file:line:col CODE msg`），加注释行会破坏解析；要现值请复跑上面那条命令，不要引用这份清单的条目数。
 
 ## 0. 结论先行
 
