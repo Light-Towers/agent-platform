@@ -1,8 +1,15 @@
 """Large Payload Externalization（V3-6 Layer B）。
 
-.. warning::
-   **STATUS: NOT WIRED** – 本模块有完整实现与单测，但 applications/ 层零调用。
-   属「设计就绪、待集成」状态，不得视为已上线能力。(P1-7 审计披露 2026-09-24)
+.. note::
+   **STATUS: WIRED（2026-10-15，默认关）** – 接线点是 ``PgCheckpointStore``：``save()``
+   落库前 ``externalize_completed()``、``load()`` 读回后 ``internalize_completed()``
+   （**先 internalize 再 schema migrate**，否则迁移函数会拿到 reference 而非真实 payload）。
+   由 ``PAYLOAD_EXTERNALIZATION_ENABLED`` 门控，**默认 False**；开启还须给
+   ``PAYLOAD_EXTERNALIZATION_DIR``，否则 agent_server 启动即 RuntimeError（不静默退回"没开"）。
+   边界：① 只接 PG 后端——缺口原文是「大 payload 塞 checkpoint **JSONB**」，进程内
+   checkpoint 再套一层进程内 blob store 是自我矛盾，刻意不接；② 联邦 planner 侧未接；
+   ③ blob 无 retention/GC、且与 PG 非同事务（详见方案 §6.4）。
+   （此前状态为 NOT WIRED，P1-7 审计披露 2026-09-24）
 
 现状（v3 之前）：工具返回 50MB JSON 直接塞 checkpoint JSONB，影响 compaction /
 retention / 查询性能。
@@ -107,8 +114,8 @@ class FileSystemPayloadStore(PayloadStore):
         return False
 
 
-def _is_reference(value: Any) -> bool:
-    """判断是否为外部化 reference。"""
+def is_reference(value: Any) -> bool:
+    """判断是否为外部化 reference（公开：接线层需要识别"没还原成功"的残值）。"""
     return (
         isinstance(value, dict)
         and value.get("__external__") is True
@@ -150,14 +157,13 @@ class PayloadExternalizer:
 
     async def internalize(self, value: Any) -> Any:
         """内部化单个值：reference → 从 blob store 读取还原；否则原样返回。"""
-        if not _is_reference(value):
+        if not is_reference(value):
             return value
 
         data = await self._store.get(value["key"])
         if data is None:
             return value  # blob 不存在，返回 reference 供调用方处理
         return json.loads(data.decode("utf-8"))
-
     async def externalize_completed(
         self, completed: dict[str, Any]
     ) -> dict[str, Any]:
@@ -178,7 +184,7 @@ class PayloadExternalizer:
 
     def _should_externalize(self, value: Any) -> bool:
         """判断是否需要外部化。"""
-        if _is_reference(value):
+        if is_reference(value):
             return False  # 已是 reference
         try:
             size = len(json.dumps(value, ensure_ascii=False).encode("utf-8"))
@@ -193,4 +199,5 @@ __all__ = [
     "InMemoryPayloadStore",
     "FileSystemPayloadStore",
     "PayloadExternalizer",
+    "is_reference",
 ]

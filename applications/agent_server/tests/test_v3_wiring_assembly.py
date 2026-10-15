@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 
+import pytest
 from agent_runtime.control_plane import ControlPlane
 from agent_runtime.execution_recovery import ReaperConfig, RecoveryOrchestrator
 from agent_runtime.execution_scheduler import (
@@ -20,6 +21,7 @@ from agent_runtime.execution_scheduler import (
     InMemorySchedulerStore,
     QueueStatus,
 )
+from agent_runtime.payload_externalization import PayloadExternalizer
 from agent_runtime.state_migration import StateSchemaMigrator, get_default_migrator
 from agent_server.api.control import router
 from agent_server.config import Settings
@@ -145,3 +147,51 @@ def test_endpoints_503_when_control_plane_absent():
     client = TestClient(app)
     assert client.post("/api/executions/e1/requeue").status_code == 503
     assert client.post("/api/executions/e1/recover").status_code == 503
+
+
+# ===== 缺口 7：payload_externalization 的装配面 =====
+
+
+@pytest.fixture
+def _settings_env(monkeypatch):
+    """get_settings 是 lru_cache：改 env 前后都必须清缓存，否则快照会漏到别的用例。"""
+    import agent_server.config as cfg
+
+    cfg.get_settings.cache_clear()
+    yield monkeypatch
+    cfg.get_settings.cache_clear()
+
+
+def test_payload_externalization_defaults_to_off():
+    """默认关 ⇒ checkpoint 路径逐字不变（externalizer 为 None，不是"配了个空壳"）。"""
+    from agent_server.main import _build_payload_externalizer
+
+    assert _build_payload_externalizer() is None
+    checkpoint_store, *_ = _build_pg_stores(_DummyPool())
+    assert checkpoint_store._externalizer is None
+    # 同批接线的 migrator 不受影响，仍在位
+    assert checkpoint_store._migrator is get_default_migrator()
+
+
+def test_payload_externalization_enabled_builds_externalizer(_settings_env, tmp_path):
+    from agent_server.main import _build_payload_externalizer
+
+    _settings_env.setenv("PAYLOAD_EXTERNALIZATION_ENABLED", "true")
+    _settings_env.setenv("PAYLOAD_EXTERNALIZATION_DIR", str(tmp_path / "blobs"))
+
+    ext = _build_payload_externalizer()
+    assert ext is not None
+    # _build_pg_stores 自己再建一个（不是同一个对象），故只断言"装配上了"而非同一性
+    checkpoint_store, *_ = _build_pg_stores(_DummyPool())
+    assert isinstance(checkpoint_store._externalizer, PayloadExternalizer)
+
+
+def test_payload_externalization_enabled_without_dir_fails_fast(_settings_env):
+    """开了开关却没给目录 ⇒ 启动即报错，不静默退回"没开"（那会让 JSONB 继续膨胀而无人知）。"""
+    from agent_server.main import _build_payload_externalizer
+
+    _settings_env.setenv("PAYLOAD_EXTERNALIZATION_ENABLED", "true")
+    _settings_env.delenv("PAYLOAD_EXTERNALIZATION_DIR", raising=False)
+
+    with pytest.raises(RuntimeError, match="PAYLOAD_EXTERNALIZATION_DIR"):
+        _build_payload_externalizer()

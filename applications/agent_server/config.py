@@ -155,6 +155,13 @@ class Settings(BaseLLMSettings):
     scheduler_recovery_enabled: bool = False
     scheduler_recovery_max_retries: int = 3
 
+    # V3-6 Layer B: 大 payload 外部化（opt-in，默认关）。开启后 checkpoint 的 completed 里
+    # 超阈值的节点结果落到 blob store，JSONB 只留 reference（缺口 7）。
+    # enabled=true 时必须同时给 dir，否则启动即 fail-fast（见 main._build_payload_externalizer）。
+    payload_externalization_enabled: bool = False
+    payload_externalization_dir: str = ""
+    payload_externalization_threshold_bytes: int = 1024 * 1024
+
     # V3 Phase 4: Cost Governance（opt-in，默认关）
     # 启用后请求路径加 budget check/record，超限返回 429
     cost_governance_enabled: bool = False
