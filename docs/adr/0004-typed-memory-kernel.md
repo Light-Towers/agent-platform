@@ -3,7 +3,7 @@
 - 状态：修订中（Revised，待复评）
 - 日期：2026-08-18（首版）；2026-08-18（v2 按评审返工）
 - 关联：ADR-0003（双数据库驱动并存）、TB-10（语义记忆接线）、优化 H（app 类型感知记忆）
-- 前置评估结论：`docs/architecture-improvement-plan.md` 方向 2 影响分析（不推荐直接搬 app 代码）
+- 前置评估结论：`docs/architecture/architecture-improvement-plan.md` §2 优化 H 状态行（该文第 123 行反向链接本 ADR v2.1）。**2026-10-15 订正两处**：① 原写旧路径 `docs/architecture-improvement-plan.md`，该文已迁入 `docs/architecture/`；② 原写的「方向 2」在该文当前版本无对应小节，且 `git log -S "方向 2"` 对其旧/新两个路径均 0 命中 ⇒ 它从来不是该文的可解析锚点（本 ADR 标题中的「方向 2」是同一旧称，作历史标识不改）。原括号「不推荐直接搬 app 代码」按本 ADR 自述保留，**但该文现文没有这句原文**——现文记的是「阶段 1~3 已下沉内核 `agent_core.memory.typed`」，与"不直接搬"是否等价我未能从文本证实，不得当成已核对的引用
 
 ## 背景
 

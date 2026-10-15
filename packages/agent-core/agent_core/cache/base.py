@@ -6,7 +6,7 @@
 存储引擎不一致，现状保留）。本模块只定义接口与 key 构造的单一来源，避免
 deepagents 与未来 app 重构各写一份 hash 逻辑导致漂移。
 
-参考：``docs/architecture-improvement-plan.md`` §6 TB-4（M5 语义缓存统一专项）。
+参考：``docs/architecture/architecture-improvement-plan.md`` §6 TB-4（M5 语义缓存统一专项）。
 """
 
 from __future__ import annotations

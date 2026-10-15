@@ -3,7 +3,7 @@
 默认只跑确定性启发式路由（无外部依赖，可进 CI 门禁）；
 配置 LLM_API_KEY 后加 --llm 可评测 LLM 结构化路由。
 
-CI / 门禁分层约定（见 docs/architecture-improvement-plan.md §6 TB-8）：
+CI / 门禁分层约定（见 docs/architecture/architecture-improvement-plan.md §6 TB-8）：
 - 确定性门禁（agent-platform-ci.yml → `make ci`）：默认（无 --llm）跑启发式评测，
   无 LLM 依赖、永远可达，--fail-below 默认 0.8。CI 只守这一层，不评 LLM 质量分。
 - LLM 质量雷达（eval-llm.yml，定时+手动，非阻塞）：用 --require-llm 跑真 LLM 评测，
