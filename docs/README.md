@@ -69,14 +69,18 @@
 | 文件 | 自述状态 | 末次 | 提及 |
 |---|---|---|---|
 | `plan-p0-1-scheduler-gating-option-b-2026-09-24.md` | 未标 | 09-24 | 2 |
-| `plan-p0-4-blind-except-ratchet-2026-09-24.md` | 未标（与下行同题，见 real-reduction 行） | 09-24 | 12 |
-| `plan-p0-4-blind-except-real-reduction-2026-09-24.md` | ✅ 已批准（2026-09-24 逐站实地核查后修订） | 09-24 | 7 |
+| `plan-p0-4-blind-except-ratchet-2026-09-24.md` | M1 棘轮已落地 + **M2 策略修订**（2026-10-15 补现值复测段，本件角色=过程记录） | 09-24 | 12 |
+| `plan-p0-4-blind-except-real-reduction-2026-09-24.md` | ✅ 已批准（2026-09-24 逐站实地核查后修订）；2026-10-15 补「现行执行方案」状态行 | 09-24 | 7 |
 | `plan-p0-ha-tenant-fixes-2026-09-25.md` | 未标 | 09-25 | 2 |
 | `plan-p1-4-lightweight-schema-migrations-2026-09-24.md` | 未标 | 09-24 | 0 |
 | `plan-p1-6-dual-vector-store-2026-09-24.md` | 未标 | 09-24 | 0 |
 | `plan-p2-unified-exception-handlers-2026-09-24.md` | 未标（AGENTS.md 以「P2 范例」引用其结论） | 09-24 | 4 ★ |
 | `p0-execution-retrospective-2026-09-24.md` | 未标（复盘件） | 09-24 | 3 |
-| `p2-bucket-b-reduction-findings-2026-09-24.md` | 未标（findings 件） | 09-24 | 0 |
+| `p2-bucket-b-reduction-findings-2026-09-24.md` | **已定案：桶 B 不做**（2026-10-15 补状态行，判据留档件，非待执行项） | 09-24 | 0 |
+
+> **2026-10-15 合并评估（B）——这组决定不合并**：blind-except 四件（`ratchet` / `real-reduction` / `p2-bucket-b-reduction-findings` + 数据件 `p0-4-blind-except-inventory.txt`）逐篇读过之后确认：它们是**有互指的三段链条**（M1 棘轮落地 → M2 放弃逐点 noqa → 第三条路三桶规则 → 桶 B 定案不做），`ratchet` 内部已自标"取代下方原方案"，`real-reduction` 前置行又指回它。合成一篇会把已经成立的指认关系拆成断链。
+> 改做的动作：四件各落「状态 / 去处」行，并补一次复测现值 —— `uv run --with ruff ruff check --isolated --select BLE001,S110 --statistics .` = **263 处（BLE001 234 + S110 29）/ 100 文件**，较 M1 基线 262 处 / 103 文件**净量未降（构成变了）**；同时标出 `docs/TODO.md` D7 里"M2 之前的逐文件烧除"这句过期措辞（D7 保持未核销）。
+> `p0-4-blind-except-inventory.txt` 是脚本可解析的数据件（每行 `file:line:col CODE msg`），**故意不加注释、不改写**，过期只在本索引声明。
 
 ### 3.4 观测 / 追踪 / Langfuse
 
