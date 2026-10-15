@@ -3,7 +3,8 @@
 启动时读取 SKILL.md，解析 48 个端点，提供聊天界面让 LLM 自动选 skill 调用 warehouse。
 
 环境变量：
-- WAREHOUSE_BASE_URL：warehouse 后端地址，默认 http://<internal-ip>:8000
+- WAREHOUSE_BASE_URL：warehouse 后端地址；未设时回退 EXHIBITION_API_BASE_URL，二者都未设则默认
+  http://127.0.0.1:8000（接真实 warehouse 用这两个环境变量之一覆盖，内网地址与示例见 README）
 - SKILL_MD_PATH：SKILL.md 文件路径，默认 skill_loader 目录下的副本
 - LLM_API_KEY：LLM API 密钥（必填才能用 /api/chat）
 - LLM_BASE_URL：LLM API 地址，默认 https://api.openai.com/v1
