@@ -1,6 +1,6 @@
 # Plan：全局技术债务治理（2026-09-22 扫描成果）
 
-> 状态：2026-09-22 制定。**2026-10-15 对码核实并订正**：原状态行与复选框自相矛盾（T2.4 全 `[x]` 却标「待实施」、T2.3 全 `[ ]` 却标「已完成」）。逐条对码结论——**绝大部分已落地**（P0/P1、T2.1、T2.4、T3.1 余者显式「跳过」并注明原因、T3.2 的 `check_doc_sync.py` 已常驻 CI、三方审核补充 1/2/3/5/6 均已修，补充 7/T1.7 于**本批 2026-10-15 落地**）；**真正仍未做仅 3 项**：① T2.2（6 处大函数拆分）纯风格重构、风险高，且与本 plan T3.1 把同类「routes.py 按业务域拆分」判为「跳过：大规模重构」自相矛盾 ⇒ 无功能收益不盲动，需独立评估；② T2.3（依赖配置统一）引用已改名/不存在的包（`dialogue-framework`/`zhanggui-zhiku`/`wenda`，当前 6 应用结构无此名）⇒ 须先重新对码再定范围；③ 补充 4（agentic bridge opt-in 默认开还是仅补测试）属**待拍板**设计决策。逐条证据见文末「## 2026-10-15 对码核实」。
+> 状态：2026-09-22 制定。**2026-10-15 对码核实并订正**：原状态行与复选框自相矛盾（T2.4 全 `[x]` 却标「待实施」、T2.3 全 `[ ]` 却标「已完成」）。逐条对码结论——**绝大部分已落地**（P0/P1、T2.1、T2.4、T3.1 余者显式「跳过」并注明原因、T3.2 的 `check_doc_sync.py` 已常驻 CI、三方审核补充 1/2/3/5/6 均已修，补充 7/T1.7 于**本批 2026-10-15 落地**）；**真正仍未做仅 3 项**：① T2.2 已**分项处置**（详见该节）——item5（`config.py` 三处改 `dataclasses.replace`）**本批落地**、item6（`agent.py` if-elif→dict 派发）核实后**判定不做**（if-elif 编码真实 body/no-body 区别，dict 派发反不清晰）、items1-4（4 处 ~200 行大函数拆分）**缓做**（纯风格高风险、行号已漂移、与本 plan T3.1 跳过同类项矛盾 ⇒ 需独立方案 + 分支 + 逐函数补测）；② T2.3（依赖配置统一）引用已改名/不存在的包（`dialogue-framework`/`zhanggui-zhiku`/`wenda`，当前 6 应用结构无此名）⇒ 须先重新对码再定范围；③ 补充 4（agentic bridge opt-in 默认开还是仅补测试）属**待拍板**设计决策。逐条证据见文末「## 2026-10-15 对码核实」。
 > 来源：6 维度并行扫描（代码质量 / 架构 / 依赖配置 / 测试覆盖 / 文档注释 / 重构遗留）
 > 范围：当前工作区快照（存在并发写入，实施前须冻结基线）
 > 总计：发现 97 项，去重后约 80 项实质债务，分 4 优先级 13 批次任务
@@ -221,18 +221,21 @@
 
 ### T2.2 代码质量改进（6 项）
 
-**改动**：
-- [ ] 拆分 `applications/agent_server/api/routes.py:65 query`（200 行）为 admission/coordination/cache/stream 各抽独立函数
-- [ ] 拆分 `applications/agent_server/agent/graph.py:46 build_graph`（200 行）
-- [ ] 拆分 `applications/agent_server/main.py:106 lifespan`（183 行）用 lifespan context manager 组合
-- [ ] 拆分 `agent_federation/agent/main_agent.py:543-652 _execute_agent_core`（122 行/嵌套 9）为 `_prepare_session`/`_inject_context`/`_consume_stream`/`_guard_output`
-- [ ] `agent_federation/agent/config.py:128-162` SubserviceConfig 三处用 `dataclasses.replace(old, healthy=...)`
-- [ ] `exhibition-agent/skill_loader/agent.py:226-239` HTTP 方法 if-elif 链改 dict 派发
+> **2026-10-15 分项处置**（不整节翻勾——6 项性质不同，逐项判定，避免"plan 列了就改"）：
 
-**验收**：
-- [ ] 无函数 >80 行（或显式标注例外）
-- [ ] 无嵌套深度 >5
-- [ ] 全量测试不回归
+**改动**：
+- [ ] 拆分 `applications/agent_server/api/routes.py:65 query`（200 行）为 admission/coordination/cache/stream 各抽独立函数 — **缓做**：纯风格大函数拆分、回归风险高、无功能收益；且**行号引用已漂移**（`query` 现在 `api/query_router.py`，非 `routes.py:65`）；与本 plan T3.1 把同类「`routes.py` 按业务域拆分」判为「跳过：大规模重构」自相矛盾 ⇒ 如需做应独立成方案 + 独立分支 + 逐函数补测后再拆
+- [ ] 拆分 `applications/agent_server/agent/graph.py:46 build_graph`（200 行） — **缓做**：同上（纯风格、高风险、需先对码确认函数仍在该位置）
+- [ ] 拆分 `applications/agent_server/main.py:106 lifespan`（183 行）用 lifespan context manager 组合 — **缓做**：同上；且 lifespan 本 session 刚被 human_task 装配改过，再叠大重构会混淆改动面
+- [ ] 拆分 `agent_federation/agent/main_agent.py:543-652 _execute_agent_core`（122 行/嵌套 9）为 `_prepare_session`/`_inject_context`/`_consume_stream`/`_guard_output` — **缓做**：同上（跨应用、嵌套深、拆分需逐段补测）
+- [x] `agent_federation/agent/config.py` SubserviceConfig 三处用 `dataclasses.replace(old, healthy=...)` — **2026-10-15 落地**：`SubserviceConfig` 是 `@dataclass(frozen=True)` 六字段（name/graph_id/url/endpoint/local_agent/healthy），三处（`_wire_local_fallbacks` 装 local_agent、`mark_unhealthy`、`mark_healthy`）原逐字段手抄六项只为改一项 ⇒ 改 `replace(old, ...)`，消除「frozen dataclass 将来加字段时手抄静默丢新字段」的 bug 类。自证：`replace` 保留全部 5 个非 healthy 字段、只翻 healthy；`get_all_subservices()` 不变；ruff rc=0、federation **176 passed**
+- [~] `exhibition-agent/skill_loader/agent.py` HTTP 方法 if-elif 链改 dict 派发 — **2026-10-15 核实后判定不做**：现 if-elif（`agent.py:230-243`）编码了**真实的 body/no-body 区别**（GET/DELETE 只带 `params`，POST 带 `json=body_params`）**+ else→400 错误分支**；改 dict 派发须给每个调用套 lambda 且错误分支另判，仅 3 个**非齐整**分支，属过度抽象、并不更清晰（先证伪自己的动机：不为"plan 列了"而改）
+
+**验收**（按实际处置范围）：
+- [x] item5（config.py）：behavior 自证 + ruff + federation 176 passed，零回归
+- [~] item6（agent.py）：判定不做（理由见上），非遗漏
+- [ ] 「无函数 >80 行 / 无嵌套 >5」：**未达**——该判据只适用于 items 1-4 的大函数拆分，四项均**缓做**（纯风格 + 高风险 + 与本 plan T3.1 跳过同类项矛盾）⇒ 本 plan 不追求此判据，留待独立重构方案
+- [x] 全量测试不回归（federation 176 passed；已改的 config.py 属 federation）
 
 ---
 
@@ -493,6 +496,6 @@
 
 ### 仍未做（3 项，附不做/待定的判据，不粉饰为已完成）
 
-- **T2.2（6 处大函数拆分）**：纯可读性重构、无功能收益，且拆分 `query_router.query` / `main.lifespan` 等 200 行函数回归风险高；**与本 plan 自身 T3.1 把同类「`routes.py` 按业务域拆分」判为「跳过：大规模重构」直接矛盾**。原 plan 的行号引用亦已漂移（`api/routes.py:65 query` 现已在 `api/query_router.py`）。⇒ 不在无功能收益下盲动，如需做应独立成方案 + 独立分支 + 逐函数补测后再拆。
+- **T2.2**：已**分项处置**（详见 T2.2 节）——item5（`config.py` 三处改 `dataclasses.replace`，消除 frozen dataclass 六字段手抄）**本批落地**并自证零回归（replace 保留全部非 healthy 字段、federation 176 passed）；item6（`agent.py` HTTP if-elif→dict 派发）核实后**判定不做**（if-elif 编码真实 body/no-body 区别 + else→400 错误分支，dict 派发须给每调用套 lambda 反不清晰，仅 3 个非齐整分支属过度抽象）；items1-4（4 处 ~200 行大函数拆分）**缓做**——纯可读性重构、无功能收益、回归风险高，**与本 plan T3.1 把同类「`routes.py` 按业务域拆分」判为「跳过：大规模重构」直接矛盾**，且行号引用已漂移（`api/routes.py:65 query` 现已在 `api/query_router.py`）⇒ 如需做应独立成方案 + 独立分支 + 逐函数补测后再拆。
 - **T2.3（依赖配置统一 8 项）**：引用 `applications/dialogue-framework/`、`zhanggui-zhiku/`、`wenda` 等**当前 6 应用结构里已不存在的包名**（AGENTS.md 目录表为 agent_server/agent_federation/kefu-service/nl2sql-service/knowledge-service/exhibition-agent）。⇒ 整节须先重新对码（哪些项对应到现存的哪个包）再定范围，不能照 2026-09-22 的包名直接改。
 - **补充 4（agentic bridge opt-in 策略）**：`_maybe_attach_bridged_tools` 默认关（`AGENTIC_RUNTIME_BRIDGE=true` 才开）是「渐进推广」的设计决策；T1.2 要求「改为默认开启」还是「保留 opt-in 但补开启路径测试」属**待拍板**，非纯执行项。
