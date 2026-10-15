@@ -4,7 +4,7 @@ updated: 2026-09-21
 
 # F-S1-05 修复方案：修订契约 v1.1 → 直接 REST
 
-> **状态**：已敲定，待实施
+> **状态**：**已实施落地**（2026-09-21 敲定，后续批次实施；**2026-10-15 对码核实并订正此状态行**——原「待实施」系实施后未回写的漂移）。证据：`client/warehouse_client.py` 已是 `get_rest`/`post_rest`（`warehouse_client.invoke` 全仓 **0** 命中）、`contract/envelope.py` 仅余 `Readiness`/`Source`/`Citation`（`SkillSuccessEnvelope`/`SkillRequest`/`SkillErrorEnvelope` 已按 §4.5 移除）、`skills/venue_schedule_query.py` 走 `routed_endpoint`+`get_rest`（fail-closed，另见 `plan-v3-unwired-landing-2026-10-15.md` §5 项 5）、`docs/analysis/2026-09-21/02-debt-diagnosis.md` F-S1-05 标 ✅已修复、`applications/exhibition-agent/README.md` 标「F-S1-05 已修复 / 闭环」。§5.2「`api/v1/skills` 零命中」判据按**字面 grep** 命中 10 处，但逐处核实全是**描述 v1.1→v1.2 迁移的注释/README 文字**（如 `warehouse_client.py:4`「v1.2 不再走 POST /api/v1/skills」）+ `.pyc` 缓存，**非存活代码路径** ⇒ 实质满足；该判据写「零命中」过于naive，订正为「无存活调用路径」。
 > **决策来源**：2026-09-21 用户显式决策——否决路径 1（让 warehouse 加 `POST /api/v1/skills/{name}` 适配路由），采路径 2（修订契约本身，exhibition-agent 改直接调 warehouse REST 端点）
 > **债务登记**：`docs/analysis/2026-09-21/02-debt-diagnosis.md` F-S1-05（P2，红线 4）
 
