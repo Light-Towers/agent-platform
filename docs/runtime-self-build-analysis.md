@@ -42,7 +42,7 @@
 | `intent` | L1 分类器（启发式 + LLM 兜底） | 纯 stdlib |
 | `sql` | `guard`（sqlglot 白名单 + 方言参数化） | extra（sqlglot） |
 
-**关键事实**：`agent-core` 并非从零发明，而是受开源包 `Light-Towers/reliable-agent` 启发后的**等价自研实现**（README §"上游内核蓝本"）。仓库内 `dependencies=[]`，无任何 `reliable-agent` pip 依赖；且本地是 superset（额外提供 `embedder` / `vector_backend` 语义记忆）。
+**关键事实**：`agent-core` 是**零依赖自研内核**——`pyproject.toml` 的 `dependencies=[]`，重依赖一律 extras + 懒导入（见 `packages/agent-core/README.md` §设计铁律）；并在原语之上另有 `embedder` / `vector_backend`（pgvector 语义记忆）等扩展模块。
 
 ### 1.2 `agent-runtime`：执行治理中间件 + Planner/Skill 协议
 
