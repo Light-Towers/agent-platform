@@ -62,6 +62,34 @@ async def _build_checkpointer():
     return saver
 
 
+def _build_payload_externalizer():
+    """V3-6 Layer B：大 payload 外部化（缺口 7，opt-in）。关闭时返回 None ⇒ checkpoint 路径逐字不变。
+
+    开了但没给目录 ⇒ **fail-fast**：静默退回"没开"会让运维以为大 payload 已经外置，
+    而 JSONB 仍在膨胀。与 ``_build_checkpointer`` 里「db_enabled 但 pool 未初始化即抛」
+    同一处置口径。
+    """
+    settings = get_settings()
+    if not settings.payload_externalization_enabled:
+        return None
+    if not settings.payload_externalization_dir:
+        raise RuntimeError(
+            "PAYLOAD_EXTERNALIZATION_ENABLED=true 但未配 PAYLOAD_EXTERNALIZATION_DIR"
+        )
+    from agent_runtime.payload_externalization import (
+        ExternalizationConfig,
+        FileSystemPayloadStore,
+        PayloadExternalizer,
+    )
+
+    return PayloadExternalizer(
+        FileSystemPayloadStore(settings.payload_externalization_dir),
+        config=ExternalizationConfig(
+            threshold_bytes=settings.payload_externalization_threshold_bytes
+        ),
+    )
+
+
 def _build_pg_stores(pool):
     """构建 PG 持久化后端（§20.1/20.2 + P3-1）。
 
@@ -72,7 +100,11 @@ def _build_pg_stores(pool):
     # V3-6 Layer B：不传 migrator 则 load() 的 schema 迁移分支恒不执行（默认 None）
     from agent_runtime.state_migration import get_default_migrator
 
-    checkpoint_store = PgCheckpointStore(pool, migrator=get_default_migrator())
+    checkpoint_store = PgCheckpointStore(
+        pool,
+        migrator=get_default_migrator(),
+        externalizer=_build_payload_externalizer(),
+    )
     idempotency_store = PgIdempotencyStore(pool)
     ownership_store = PgExecutionOwnershipStore(pool)
     trajectory_store = PgTrajectoryStore(pool)

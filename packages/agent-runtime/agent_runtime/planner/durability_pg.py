@@ -66,10 +66,13 @@ class PgCheckpointStore(CheckpointStore):
         *,
         table: str = "execution_checkpoints",
         migrator: Any = None,
+        externalizer: Any = None,
     ) -> None:
         self._pool = pool
         self._table = table
         self._migrator = migrator
+        # V3-6 Layer B：大 payload 外部化（opt-in，None = 关闭 ⇒ 行为与接线前逐字一致）
+        self._externalizer = externalizer
 
     async def load(self, execution_id: str) -> Checkpoint | None:
         sql = (
@@ -89,6 +92,23 @@ class PgCheckpointStore(CheckpointStore):
         else:
             updated_at_ts = updated_at.timestamp()
         completed_data = _loads(completed) if completed is not None else {}
+
+        # V3-6 Layer B：外部化 payload 还原。必须在 schema 迁移**之前**——迁移函数按真实
+        # payload 形状改写 completed，拿到 reference 会改错东西。
+        if self._externalizer is not None:
+            from agent_runtime.payload_externalization import is_reference
+
+            completed_data = await self._externalizer.internalize_completed(completed_data)
+            missing = [k for k, v in completed_data.items() if is_reference(v)]
+            if missing:
+                # blob 丢了不算"读成功"：internalize 对缺失 blob 原样返回 reference，
+                # 不告警就会把降级静默成"数据本来长这样"。刻意不抛——checkpoint 仍可用于
+                # 判断进度，抛错会让整条恢复路径失败，代价大于收益。
+                logger.warning(
+                    "checkpoint payload blob 缺失，返回 reference 而非原值 execution=%s nodes=%s",
+                    execution_id,
+                    missing,
+                )
 
         # V3-6: 自动迁移旧 schema 版本
         schema_ver = state_schema_version or 1
@@ -110,6 +130,14 @@ class PgCheckpointStore(CheckpointStore):
         # （completed 较少）的写入被原子拒绝，防止 zombie writer 降级覆盖新 owner 的
         # checkpoint。拒绝时抛 FencedWriteError，上层协作式中止。
         version = len(checkpoint.completed)
+        # V3-6 Layer B：大 payload 外部化（opt-in）。externalize_completed 保留 node_id 键
+        # ⇒ 上面按"已完成节点数"算的 version 不受影响，C3 monotonic CAS 与 generation
+        # fencing 的语义逐字不变（外部化只改 value 的存放位置，不改 completed 的形状）。
+        persisted_completed = checkpoint.completed
+        if self._externalizer is not None:
+            persisted_completed = await self._externalizer.externalize_completed(
+                checkpoint.completed
+            )
         # V3-1: generation fencing——checkpoint 带 generation 时，仅当 generation 匹配
         # 当前 lease 的 generation 才允许写。旧 owner（takeover 后 generation 过期）
         # 的写被原子拒绝。不带 generation（None）时仅按 version fencing（向后兼容）。
@@ -134,7 +162,7 @@ class PgCheckpointStore(CheckpointStore):
                 sql,
                 (
                     checkpoint.execution_id,
-                    _dumps(checkpoint.completed),
+                    _dumps(persisted_completed),
                     checkpoint.resumable,
                     version,
                     checkpoint.generation,

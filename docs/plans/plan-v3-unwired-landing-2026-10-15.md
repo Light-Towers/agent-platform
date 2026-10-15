@@ -78,3 +78,42 @@
   - **刻意选 fail-closed 而非硬编码兜底**：`routed_endpoint` 缺失时拒绝直连 warehouse（返回 `DATA_NOT_CONNECTED`，不发请求）。兜底会让门禁退化成"可绕过的建议"——直接调 `skill.run(...)` 就能跳过整条门禁链，这正是第一次提交时登记的残留漏洞；改成 fail-closed 后该路径结构性失效。代价是 6 处既有测试 fixture 必须补 `routed_endpoint=` 输入（**断言逐字未改**，只是补新契约要求的入参）。
   - **残留（不影响本项判定，但要写清）**：fail-closed 是**逐 skill 自觉取用** `routed_endpoint` 的结果，不是基类强制——新增 skill 若不读该字段，仍然可以直连 warehouse。要结构化就得把"取端点"收进 `BaseSkill`，属独立方案。
   - 一条测试自身的教训（记此防止复犯）：首版断言写 `"Skill Router" in result.answer` 而实跑为假——`_pending_result()` 把固定话术 `PENDING_ANSWER` 放 `answer`、把拒绝原因放 `warnings`。**产品行为是对的，错的是断言取错了字段**；改断言前先读被断言对象的构造，别按想象写。
+
+## 6. 续批（2026-10-15 晚）：`payload_externalization` 接线 = 缺口 7
+
+前 5 项落地后继续推 TODO 的未接线清单。选 `payload_externalization` 而非 `human_task` 的理由：它的两个入口 `externalize_completed()` / `internalize_completed()` 的签名就是 `dict[str, Any] -> dict[str, Any]`，**正好是 checkpoint `completed` 的形状**⇒ 接线点是唯一的、无需新抽象；而 `human_task` 需要一整套审批 API 面，属独立方案。
+
+### 6.1 目标与影响面
+
+| 项 | 内容 |
+|---|---|
+| 接线点 | `PgCheckpointStore.save()` 落库前 `externalize_completed()`；`load()` 读回后 `internalize_completed()` |
+| 顺序硬约束 | `load()` 里**先 internalize 再 migrate**：schema 迁移函数按真实 payload 形状改写 `completed`，拿到 reference 会改错东西 |
+| fencing 不受影响 | `externalize_completed` 保留 `node_id` 键 ⇒ `version = len(checkpoint.completed)` 不变，C3 monotonic CAS 与 generation fence 语义逐字不变 |
+| 开关 | `PAYLOAD_EXTERNALIZATION_ENABLED`（默认 **False**）+ `PAYLOAD_EXTERNALIZATION_DIR` + `PAYLOAD_EXTERNALIZATION_THRESHOLD_BYTES`（默认 1MB，沿用 `ExternalizationConfig`） |
+| 只接 PG 后端 | 缺口原文是「50MB JSON 直接塞 checkpoint **JSONB**」——问题只存在于 PG。无 DB 时走 `InMemoryCheckpointStore`，再套一层进程内 blob store 是自我矛盾，**刻意不接**（不是遗漏） |
+| 联邦侧 | `applications/agent_federation/planners/__init__.py` 的 checkpoint store **不接**外部化（它没有对应的 dir 配置面）；登记在 §6.3，不静默 |
+
+### 6.2 一个必须显式处理的降级面
+
+`internalize()` 对**丢失的 blob** 原样返回 reference（模块注释写「供调用方处理」）。接线层若不处理，就是把「payload 没了」静默成「数据长这样」——正是本仓反复登记的那类静默降级。故 `load()` 在 internalize 后检测残值并 `logger.warning` 指名 execution 与 node 列表；**不抛错**（checkpoint 仍可用于判断进度，抛错会让恢复路径整体失败，代价大于收益）。为让接线层能识别残值，把模块私有的 `_is_reference` 提为公开 `is_reference` 并进 `__all__`（不是新增第二套判定）。
+
+### 6.3 验收
+
+1. `PgCheckpointStore` 带 externalizer：大 payload 落库后持久化 JSON 里是 reference（`__external__`）而非原值，blob store 里有原值；`load()` 往返还原相等。
+2. 小 payload（低于阈值）**不**外部化。
+3. blob 缺失 ⇒ `load()` 返回 reference 且**有 warning**（用 caplog 钉住，不接受"没抛错就算过"）。
+4. `version` 等于原 `completed` 的键数（证明 fencing 未被外部化改变）；且既有 fencing 用例全绿。
+5. 默认关 ⇒ `_externalizer is None`，行为与接线前逐字一致（装配层用例钉住）。
+6. `PAYLOAD_EXTERNALIZATION_ENABLED=true` 但没给 dir ⇒ **启动即 RuntimeError**（沿用 `_build_pg_stores` 既有的 `db_enabled` fail-fast 先例），不静默降级成"没开"。
+7. 全量门禁 rc=0 + 五个 pytest session 全绿；既有用例零删改。
+
+**实跑结果（2026-10-15）**：判据 1–6 各有一条对应用例，落在 `tests/durability/test_payload_externalization_wiring.py`（9 条，用一个只模拟 `execution_checkpoints` 的替身池，断言对象是**真正落库的那份 JSON**）与 `applications/agent_server/tests/test_v3_wiring_assembly.py`（+3 条装配面）。全量：`ruff` / `check_doc_sync` / `lint_architecture` rc=0；pytest 根 **692 passed + 28 skipped**（683→692）、agent-runtime **631**、agent_server **105**（102→105）、联邦 **176**；`packages/agent-runtime/tests/test_payload_externalization.py` 原有 11 条未改未删仍全绿。判据 7 的"五个 session"里 exhibition 未受本批影响（357，上一批已跑）。
+过程中被自己的用例抓到两处**断言写错**（非产品缺陷）：① `_build_pg_stores` 会自建 externalizer，断言 `is` 同一对象必假 ⇒ 改为断言类型；② 见 §6.2 提到的 `_is_reference` 改名漏了一处调用点（`_should_externalize`），会 NameError——**改名类改动必须全仓 grep 旧名，不能只靠编辑器式的批量替换命中一种写法**。
+
+### 6.4 登记而不粉饰
+
+- `FileSystemPayloadStore` 在**构造期**就 `os.makedirs`，所以开关一开即建目录；生产要换 S3/MinIO 适配器（同一 `PayloadStore` 契约），本轮不做。
+- 外部化后的 blob **没有 retention/GC**：checkpoint 被覆盖或删除时旧 blob 变成孤儿，长期会堆积。属独立方案（需要 blob 侧的引用计数或按 execution 前缀清理）。
+- blob 与 PG **不是一个事务**：写 blob 成功而 checkpoint 写入被 fence 拒绝时，blob 泄漏（同 §HA H3 登记的 side-effect 原子性问题同族，无法靠一条 SQL 修）。
+- 联邦 planner 侧未接（见 §6.1 表末行）。
