@@ -654,7 +654,7 @@ API_KEY=... LF_PK=... LF_SK=... LF_HOST=http://192.168.100.241:3000 \
 > 本文其余各节以 **126 一台**为主角；**三机全貌只在本节**。下次上台前先看这里，再决定要不要读 §4/§5 的历史读数。
 > 取证时刻 **2026-10-14 09:59:06–10:01:00 UTC**（= +0800 17:59–18:01；三节点 `date -u` 互差 ≤4s，已量）。
 > 全程只读：`hostname/uptime/df/lsblk/ls /proc/pressure/io/ss/docker ps/docker images/ctr images ls/git rev-parse/git status/md5sum`、`kubectl get -o wide|jsonpath`、`kubectl exec` 读 `GIT_REV` 与 `psql -tAc "select count(*)"`、Pod 内 `urllib` 读 `/health`。**未装、未改、未重启、未删除任何既有物**。
-> 原始读数留档 `docs/operations/evidence/2026-10-14-3node-deployment/raw.txt`（留档件不外引，要引用请按 §9.5 复算——这张表同样"滚动一次即失效"）。
+> 原始读数曾以 `docs/operations/evidence/2026-10-14-3node-deployment/raw.txt` 入库（`da96d870`），**2026-10-15 按用户要求删除该文件**；需回看原始 stdout 用 `git show da96d870:docs/operations/evidence/2026-10-14-3node-deployment/raw.txt`。要引用本节结论仍按 §9.5 复算——这张表同样"滚动一次即失效"。
 
 ### 9.1 三台一览
 
@@ -693,7 +693,7 @@ API_KEY=... LF_PK=... LF_SK=... LF_HOST=http://192.168.100.241:3000 \
 |---|---|---|
 | 三台 `/tmp/agent-platform.tar.gz` | **453M × 3 = 1.36G**，mtime 全在 10-13 16:42/16:44（= `distribute.sh` 产物） | 镜像早已 `ctr import` 完成，tarball 是纯废料；126 磁盘 79% 最紧，**清它优先** |
 | `126:/tmp/qoder-probes-2026-10-14/` | 本轮归档位（`mv` 进去的，非删除，可回取）：10-13 的 `keys.py` 146B、`r30db.py` 2710B、`r30q.py` 2661B、`wipe.py` 1416B + 本轮的 `inv-3node-2026-10-14.sh`、`inv2-2026-10-14.sh`、`verify95.sh`、`verify95-out.txt` | 只读探针，无密钥值（§4.11 已核）。要不要留由需求方定 |
-| `126:/tmp`（未归档，我的） | `inv-out.txt` 10,110B（**两轮原始读数**，已另存进仓库 `docs/operations/evidence/2026-10-14-3node-deployment/raw.txt`，机器上这份可清）；10-13 的 `verify.sh` 3306B、`verify.out` 1378B（**这两件本轮才数到，早前清单漏了**）；另有 09-28~10-10 一批：`ablation.py`/`probe.py`/`kgprobe.py`/`run_route_ablation.py`/`seed_synthetic_corpus.py`/`_patch_126.py`/`_dl_bgem3.py`/`_dep_probe*.sh`/`_ms_patch.sh`/`_obs_probe.sh`/`_probe.sh`/`probe_build.log`/`probe.Dockerfile`/`probe_h2.txt`/`r30.log`/`route_ablation_run/`/`route_ablation_artifacts.tgz` | 历史探针与评测产物。**订正**：§4.11 那条"126 /tmp 11 个探针脚本"里 10-13 的四件**已不在 `/tmp` 根**（在上面的归档位），且我漏列了 09-29 的 `_*.sh` 一批与 `verify.*` ⇒ 按本表为准 |
+| `126:/tmp`（未归档，我的） | `inv-out.txt` 10,110B（**两轮原始读数**，仓库副本 `docs/operations/evidence/2026-10-14-3node-deployment/raw.txt` **已于 2026-10-15 删除**，见 §9 取证时刻下方注 ⇒ **机器上这份现在不能再清**，清了就两处皆无，只能回 `da96d870` 取）；10-13 的 `verify.sh` 3306B、`verify.out` 1378B（**这两件本轮才数到，早前清单漏了**）；另有 09-28~10-10 一批：`ablation.py`/`probe.py`/`kgprobe.py`/`run_route_ablation.py`/`seed_synthetic_corpus.py`/`_patch_126.py`/`_dl_bgem3.py`/`_dep_probe*.sh`/`_ms_patch.sh`/`_obs_probe.sh`/`_probe.sh`/`probe_build.log`/`probe.Dockerfile`/`probe_h2.txt`/`r30.log`/`route_ablation_run/`/`route_ablation_artifacts.tgz` | 历史探针与评测产物。**订正**：§4.11 那条"126 /tmp 11 个探针脚本"里 10-13 的四件**已不在 `/tmp` 根**（在上面的归档位），且我漏列了 09-29 的 `_*.sh` 一批与 `verify.*` ⇒ 按本表为准 |
 | `241:/tmp` | 未归档剩 `ch_check.sql` 1703B @ 10-13 15:25；`ch_check.py` 2140B 已在 `241:/tmp/qoder-probes-2026-10-14/` | **订正**：§4.11 原写"241 `/tmp/ch_check.py`"——那是归档前的名字，它已进归档位，`/tmp` 根下现在剩的是 `.sql` |
 | `126:/tmp/corpus/` + `corpus-20261013.tgz`(49,538B) | ⚠️ **未公开业务语料副本**，目录 `drwxr-xr-x` 属主 uid **197609**（本机 scp 带过来的 Windows uid，不是 root）、tgz `-rw-r--r-- root:root`；`/tmp` 是**世界可读目录** ⇒ 同网段任何能登录 126 的账号读得到 | 与 ㉓ 同族（"内网可信人群"这条口径的又一条缝）。三个处置：留 / 收进 root-only 0700 / 清掉。决定权不在我，**本轮未动** |
 | `126:/tmp/ckpt-backup-host/` | `drw-------` root-only，472/289052/79B（§4.11 第④条） | 在位、权限对；`/tmp` **不是 tmpfs**（本轮 `df -h /tmp` 证实指向 `/dev/vda2`）⇒ 之前那句"重启即失"只对 tmpfs 成立，**这句要改口径**：宿主 20d 未重启，且它实际是磁盘文件，重启也不丢 |
