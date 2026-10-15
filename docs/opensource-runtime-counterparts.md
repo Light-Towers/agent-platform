@@ -60,7 +60,7 @@
 | LightEvaluator（确定性回归用例） | `eval/run_eval.py` + `run_planner_eval.py` | 中 |
 | Trace（opt-in 结构化事件） | `agent_core.tracing` / events EventBus | 高 |
 
-**差异**：LightAgent 是**完整 Agent 框架**（含编排与多 Agent）；本项目 Plan-F 是"统一 Runtime、降级 LangGraph/DeepAgents 为执行实现"，不追求成为框架。且本地额外有 PG 持久化准入队列、跨用户回退禁止等受监管约束。
+**差异**：LightAgent 是**完整 Agent 框架**（含编排与多 Agent）；本项目 Plan-F 是"统一 Runtime、降级 LangGraph/DeepAgents 为执行实现"，不追求成为框架。且本地额外有 PG 持久化准入队列、准入不存问题全文等受监管约束（2026-10-15 订正：原写在此处的"跨用户回退禁止"**尚未实现**，`revert.py` 只有 docstring 声明，详见 `docs/project-introduction-2026-10-12.md` §6 第 13 行）。
 
 **可借鉴**：`HookDecision`（观察/替换/阻止载荷）的显式枚举比我们 middleware 的隐式返回值更清晰，可作 skill 中间件协议升级参考；`HumanApprovalHook` 失败封闭模式可对照审批节点。
 
@@ -87,7 +87,7 @@ POSIX 启发的原语：
 | agent-os 概念 | 本项目对应 | 启示 |
 |---|---|---|
 | Policy Engine 确定性拦截 | `agent-runtime` skill_guard + admission 策略 | 我们偏"治理+预算"，agent-os 偏"确定性拦截"，可借鉴其信号模型（SIGKILL/SIGSTOP）做 planner 中止/暂停 |
-| Flight Recorder 审计 | `agent_core.events` EventBus + OTel 仅记长度+哈希 | 我们已做脱敏审计；agent-os 的"审计可被篡改需外写"是该类的已知局限 |
+| Flight Recorder 审计 | `agent_core.events` EventBus + 自建链路属性仅记长度+哈希 | 我们已做脱敏审计（**范围要说准**：LangChain 埋点的模型节点 span 仍带完整输入输出，属已拍板接受的暴露面）；agent-os 的"审计可被篡改需外写"是该类的已知局限 |
 | StatelessKernel（零依赖、可审计小边界） | `agent_core` 零依赖内核 | 哲学一致 |
 
 **风险**：确定性策略对未知攻击可能穿透（已知架构限制），生产需配容器隔离/纵深防御；偏"治理基础设施"而非"运行时内核"，与 agent-core 互补而非替代。

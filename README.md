@@ -66,10 +66,10 @@ Agent Platform 是一个基于 **LangGraph Supervisor 模式** 的统一智能�
 
 ### Phase 2 — 运行时增强
 
-- **会话并发协调**（`packages/agent-runtime/agent_runtime/coordinator.py`）：per-session `asyncio.Lock` 互斥，同 session 串行 / 异 session 并发；支持 coalesce（合并）/ queue（排队）/ reject（拒绝）三策略
+- **会话并发协调**（`packages/agent-runtime/agent_runtime/coordinator.py`）：per-session `asyncio.Lock` 互斥，同 session 串行 / 异 session 并发；支持 queue（排队）/ reject（拒绝）二策略（原第三种 coalesce 已退化为 queue、名不副实，治理路线图工项 P4-3 于 2026-08-21 把它从策略枚举中移除——**是代码改动，不是 lint 规则**）
 - **Durable Admission**（`packages/agent-runtime/agent_runtime/admission.py`）：PG 持久化准入队列 + 三维滑动窗口限流（per-user / per-session / global）+ 优先级调度 + 崩溃恢复；不存储问题全文（脱敏约束）
-- **会话回退**（`packages/agent-runtime/agent_runtime/revert.py`）：Checkpoint 级原子回退，不删除历史 checkpoint（支持 redo），跨用户禁止，异步审计日志
-- **OTel 分布式追踪**（`packages/agent-core/agent_core/tracing.py` 内核状态机 + `tracing_middleware.py` 统一装配）：三态语义（DISABLED/DEGRADED/ACTIVE），W3C traceparent 透传，问题脱敏（仅记录长度 + 哈希），与 Langfuse 共存，exporter 可插拔（otlp/console/注入式）；原 `agent_runtime/otel.py` 过渡门面已退役（观测方案 §15，2026-09-30），消费方直调 kernel
+- **会话回退**（`packages/agent-runtime/agent_runtime/revert.py`）：Checkpoint 级原子回退，不删除历史 checkpoint（支持 redo），异步审计日志（`operator` 取服务端断言租户，不取入站密钥）。⚠️ **跨用户回退目前并未被禁止**：本模块 docstring 里那句"跨用户禁止"没有实现——`/session/revert` 不走 `resolve_thread_id`，客户端传来的会话号原样进 `revert()`，且从不与归属比对（路由里 `FORBIDDEN`→403 那条分支是死码）。修法见 `docs/plans/plan-memory-identity-workspace-2026-10-14.md` §1.6（2026-10-15 核码订正）
+- **OTel 分布式追踪**（`packages/agent-core/agent_core/tracing.py` 内核状态机 + `tracing_middleware.py` 统一装配）：三态语义（DISABLED/DEGRADED/ACTIVE），W3C traceparent 透传，**自建链路属性**脱敏（只记问题长度 + 哈希；⚠️ 范围限定——LangChain 自动埋点的模型节点 span 仍带完整提示词与回答，该暴露已拍板接受，见 `docs/operations/minimal-release-runbook.md` 台账 ㉓），与 Langfuse 共存，exporter 可插拔（otlp/console/注入式）；原 `agent_runtime/otel.py` 过渡门面已退役（观测方案 §15，2026-09-30），消费方直调 kernel
 - **MCP Client**（`packages/agent-runtime/agent_runtime/mcp_client.py` + `applications/agent_server/subagents/mcp.py`）：多 MCP server 连接管理（stdio + SSE transport），工具白名单校验，per-server 独立熔断器隔离故障域，调用审计
 - **MCP 工具自动注册**（`packages/agent-runtime/agent_runtime/skills/mcp.py`）：MCP server 工具自动编译为 `SkillKind.REMOTE` Skill 注册到 SkillRegistry，Planner 经统一 `discover()` / `delegate()` 入口调用
 - **沙箱代码执行**（`packages/agent-runtime/agent_runtime/sandbox.py` + `agent_runtime/skills/sandbox.py`）：Docker 容器隔离执行用户代码（`--network=none --read-only --memory=512m --user=nobody`），Docker 不可用时降级 subprocess。注册为 `code_execution` Skill，Planner 启发式路由自动识别代码执行意图
@@ -604,7 +604,7 @@ tests/                     # 单元测试（针对 agent_server 平台；含 pla
 - `.env` 不入库；真实密钥只填本地 `.env`，**切勿提交**
 - SQL 链路双保险：sqlglot 白名单守卫 + 连接级只读
 - 认证启用时会话按服务端断言租户派生（`tenant-<id>`，凭据不参与任何派生），忽略客户端 thread_id
-- OTel 追踪脱敏：仅记录问题长度 + SHA-256 哈希前 16 位，不含全文
+- 自建链路属性脱敏：仅记录问题长度 + SHA-256 哈希前 16 位，不含全文。**范围要说准**：LangChain 自动埋点的模型节点 span 里仍带完整提示词与回答（现网实测 6339 / 316 字符），这一面暂不加鉴权属**已拍板接受**（台账 ㉓）——被追问时不得说成"追踪不记录用户内容"
 - Admission 队列不存储问题全文（脱敏约束）
 
 ---
