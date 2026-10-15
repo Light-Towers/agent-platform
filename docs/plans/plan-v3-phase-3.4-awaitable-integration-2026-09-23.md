@@ -1,6 +1,6 @@
 # V3 Phase 3.4：AwaitableTask 接入执行路径
 
-> 状态：**设计文档 + 实现中**。
+> 状态：**已落地**（Phase 3.4a 挂起侧 + 3.4b 回调/恢复均实施并有验收测试）。**2026-10-15 对码核实订正**——原「设计文档 + 实现中」系实施后未回写。证据：§3.1/§3.2 所列文件均在位并接线（`planner/protocol.py` 的 `ExecutionSuspended` + `delegate()` 检测 `__awaitable__` + `awaitable_task_store` 字段 + `suspended` 事件；`planner/execution_graph.py` 的 `_run` 透传 + `_run_graph_in_place` 捕获 + checkpoint save；`agent_server/main.py` 装配 `awaitable_task_store`；`api/callback.py` 的 `POST /api/callback/{task_id}`；`api/routes.py` 注册 `callback_router`）；§4 六条验收由 `applications/agent_server/tests/test_callback.py` 覆盖（suspended 事件、checkpoint resumable、callback→COMPLETED→注入→恢复、重复 callback 幂等 `already_completed`、error→FAILED、无 checkpoint store 优雅跳过、完整 resume 经 graph re-run→SUCCEEDED）。**本 session 的 human_task 接线（`plan-v3-unwired-landing-2026-10-15.md` §7）正是在此 awaitable seam 上扩展出 `AwaitableKind.HUMAN` + `WAITING_HUMAN` 挂起态**，故本 plan 的能力面现已比成文时更完整。
 > 前置：V3 Phase 2-4 已完成（Scheduler/Status/Reaper/ControlPlane/CostGov/Forensic 已接入）。
 > 日期：2026-09-23。
 
