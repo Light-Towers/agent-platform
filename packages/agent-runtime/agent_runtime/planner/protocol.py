@@ -660,6 +660,9 @@ class PlannerRuntime:
                     provider_task_id=str(result.get("task_id", "")),
                     state=AwaitableState.SUBMITTED,
                     metadata={"skill_name": name, "submitted_result": result},
+                    # V3 缺口 1：盖上本次执行的 lease generation，使 takeover 后的
+                    # zombie writer 写不进回执（见 PgAwaitableTaskStore.save 的 fence）。
+                    generation=ctx.lease_generation,
                 )
                 await self.awaitable_task_store.save(task)
                 if ctx is not None:
