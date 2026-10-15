@@ -30,7 +30,8 @@
 | `docs/plans/skill-consolidation-inventory.md` | Skill 收敛盘点 | 3 ★ |
 | `docs/plans/tech-debt-multi-agent-2026-09-23.md` | 多 Agent 技术债 | 3 ★ |
 | `docs/project-introduction-2026-10-12.md` | **对外唯一交付稿**（讲解用，禁词见文内纪律） | 1 |
-| `docs/runtime-self-build-analysis.md` + `docs/runtime-analysis-overview.md` + `docs/opensource-runtime-counterparts.md` | 业界对照族（框架层 / 一页概览 / 内核原语层） | 4 / 0 / 0 |
+| `docs/runtime-self-build-analysis.md` + `docs/opensource-runtime-counterparts.md` | 业界对照族（框架层 / 内核原语层） | 4 / 0 |
+| `docs/runtime-analysis-overview.md` | **已并入** `runtime-self-build-analysis.md`（2026-10-15 合并 A），本页仅作旧链接寻址 | 0 |
 | `docs/adr/0003`~`0004` | 早期 ADR，`0004` 状态仍为「修订中」 | 0 / 3 |
 
 未入库、只在本机存在的一篇：docs/agno-agentos-comparison.md（平台层竞品对比，未提交，clone 后不存在，故按 AGENTS.md 防漂移规矩不以反引号路径书写）。
