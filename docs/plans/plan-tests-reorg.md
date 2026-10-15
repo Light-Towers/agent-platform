@@ -1,6 +1,7 @@
 # 方案：tests/ 根目录测试用例分门别类
 
-> 状态：**Proposed**
+> 状态：**已落地**（原自述 `Proposed` 已过期，2026-10-15 按代码复测订正）｜ 依据：`find tests -maxdepth 1 -name 'test_*.py' | wc -l` = **0**（扁平文件已清零），且 §二 目标分类表列的 10 个子目录 `planner / skills / runtime / durability / memory / governance / observability / api / llm / intent` **全部存在**；实际另有 `deploy/`、`nl2sql_service/` 两个目录未在原表内（后续新增，不是本方案产物）｜ 回写：本文件不再更新。
+> ⚠️ 一处偏离要留神：§二 末句写「已有子包保留 `dialogue_framework/`、`ha/`、`wenda_data_agent/`（不动）」，现测只有 `ha/` 还在 `tests/` 下，另两个子包**已不在**（`git ls-files` 里 `dialogue_framework`/`wenda` 仅剩 `eval/` 下的 golden 数据）。这两个子包是搬走了还是删了，本轮未查，别按本方案这句话去找文件。
 > 目标：根 `tests/` 下 ~45 个扁平测试文件按平台架构域归类到子目录，提升可发现性与与
 > `packages/*`、`applications/*` 分层一致的归属感；不增删测试、不改测试逻辑。
 

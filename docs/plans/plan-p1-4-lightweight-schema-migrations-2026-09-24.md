@@ -2,6 +2,9 @@
 
 > 目标：为 `agent_runtime` 引入**零新依赖的版追踪迁移系统**，替代当前 522 行巨型 `SCHEMA_TEMPLATE` + `try/except: pass` 幂等 ALTER 循环。
 > 关联：架构审计 P1-4（原标"Alembic 迁移"，勘察后判定 Alembic 不契合本仓 psycopg async 技术栈，收敛为轻量方案）。
+>
+> 状态：**已落地**（2026-10-15 复测）｜ 依据：落码提交 `753e5625`（2026-09-24，标题「feat(p1-4): 轻量版 schema 版本迁移系统（SQL 文件驱动，零新依赖）」）；产物在 `packages/agent-runtime/agent_runtime/migrations/`，**25 个文件**（`001_baseline.up.sql` 起，成对带 `.down.sql` ⇒ §1 痛点表里"无回滚"一项已解）；`migrations/runner.py:64` 建 `schema_migrations` 元表、`:73` 写入 `(version, name, checksum)` ⇒ "无法回答生产库跑到哪版"已解；本方案要替换的 522 行 `SCHEMA_TEMPLATE` 全仓 `grep` **0 命中** ｜ 回写：本文件不再更新。
+> ⚠️ 两条使用侧坑（本方案没写，但落地后真实存在）：① checksum 取的是**原始文件字节**（`migrations/base.py:57` 用 `up_path.read_bytes()` 做 sha256），而 `_validate_applied_checksums`（`runner.py:178-183`）判到漂移**立即失败**——Windows 工作区是 CRLF，本地算出的哈希与服务器以 LF 应用时记下的值不同，会造出"漂移⇒启动崩"的**假阳性**，比对须以 `git show` 取 blob 侧内容为准；② `runner.py:81-82` 对"库里已有但无 checksum 可比"的记录采取首启回填而非判死，`011_existing_db_column_gap.up.sql:4` 更自陈现网库是**被 stamp 过的存量库** ⇒ "迁移清单里有这一号"不等于"现网已跑到这一版"，判现网态要看库里 `schema_migrations` 的行。
 
 ## 1. 问题陈述
 

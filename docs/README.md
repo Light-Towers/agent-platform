@@ -1,7 +1,7 @@
 # docs 索引 · 哪篇作数、哪篇只是历史
 
 > 本文件由 2026-10-15 的文档治理生成：**未删除、未移动任何文档**，只做分层与状态登记。
-> 现状：`docs/` 141 个文件 / 约 2.6 MB；其中 `docs/plans/` 72 个文件 = 71 篇 md + 1 份配套盘点件 `p0-4-blind-except-inventory.txt`。71 篇 md 里 **29 篇文内有可辨状态行、42 篇没有**。
+> 现状：`docs/` 141 个文件 / 约 2.6 MB；其中 `docs/plans/` 72 个文件 = 71 篇 md + 1 份配套盘点件 `p0-4-blind-except-inventory.txt`。71 篇 md 里按 §6 的口径命令实测 **42 篇有可辨状态行、29 篇未命中**（名单见 §7；该口径有已知漏计，29 是上界）。
 
 ## 1. 三条判据（先读这个，别先翻目录）
 
@@ -72,8 +72,8 @@
 | `plan-p0-4-blind-except-ratchet-2026-09-24.md` | M1 棘轮已落地 + **M2 策略修订**（2026-10-15 补现值复测段，本件角色=过程记录） | 09-24 | 12 |
 | `plan-p0-4-blind-except-real-reduction-2026-09-24.md` | ✅ 已批准（2026-09-24 逐站实地核查后修订）；2026-10-15 补「现行执行方案」状态行 | 09-24 | 7 |
 | `plan-p0-ha-tenant-fixes-2026-09-25.md` | 未标 | 09-25 | 2 |
-| `plan-p1-4-lightweight-schema-migrations-2026-09-24.md` | 未标 | 09-24 | 0 |
-| `plan-p1-6-dual-vector-store-2026-09-24.md` | 未标 | 09-24 | 0 |
+| `plan-p1-4-lightweight-schema-migrations-2026-09-24.md` | **已落地**（`753e5625`，25 个迁移文件 + `schema_migrations` 元表；CRLF 假阳性坑已记在文内） | 09-24 | 0 |
+| `plan-p1-6-dual-vector-store-2026-09-24.md` | **短期 C 已落地 / 长期 A 未评估**（验收 3 条：1 成、2 未做、3 存疑不翻勾） | 09-24 | 0 |
 | `plan-p2-unified-exception-handlers-2026-09-24.md` | 未标（AGENTS.md 以「P2 范例」引用其结论） | 09-24 | 4 ★ |
 | `p0-execution-retrospective-2026-09-24.md` | 未标（复盘件） | 09-24 | 3 |
 | `p2-bucket-b-reduction-findings-2026-09-24.md` | **已定案：桶 B 不做**（2026-10-15 补状态行，判据留档件，非待执行项） | 09-24 | 0 |
@@ -127,7 +127,7 @@
 | `plan-structural-debt-cleanup.md` | 2026-09-22 制定并实施 | 09-23 | 1 |
 | `plan-duplicate-logic-inventory-2026-10-01.md` | 未标 | 10-01 | 1 |
 | `plan-e-dual-track-convergence.md` | P4.1~P4.3 全部实施完成 | 08-22 | 12 |
-| `plan-agentic-skill-convergence.md` | 未标 | 09-22 | 0 |
+| `plan-agentic-skill-convergence.md` | **已落地（契约层 3/3）**，但默认部署下该注册走 except 跳过——不得说成"agentic 现网可用" | 09-22 | 0 |
 | `skill-consolidation-inventory.md` | 未标（AGENTS.md 点名其为 Skill 收敛盘点） | 09-23 | 3 ★ |
 | `tool-mount-matrix-2026-09-25.md` | 未标 | 09-25 | 3 |
 
@@ -137,9 +137,9 @@
 |---|---|---|---|
 | `plan-m3-m5-logging-pool.md` | Approved with changes（M5）/ M3 已修订 | 08-22 | 2 |
 | `plan-m11-exception-classification.md` | Proposed | 08-22 | 1 |
-| `plan-tests-reorg.md` | Proposed | 08-22 | 0 |
-| `plan-fix-validate-config.md` | 未标 | 08-22 | 0 |
-| `plan-c2-audit-atomic-write-2026-09-23.md` | 未标 | 09-23 | 0 |
+| `plan-tests-reorg.md` | **已落地**（根 `tests/` 扁平文件实测 0、§二 十个子目录全在；`dialogue_framework/`+`wenda_data_agent/` 已不在 tests/ 下，去向未查） | 08-22 | 0 |
+| `plan-fix-validate-config.md` | **已落地**（`4b7bbb34`）；⚠️ **成因订正：是回归不是遗漏**——`c45e1354` 重构时删掉了定义与 `__all__` 导出 | 08-22 | 0 |
+| `plan-c2-audit-atomic-write-2026-09-23.md` | **已落地 5/5**（收敛到 `foundation/_audit_writer.py`，tmp+`os.replace`）；残差＝无 lint 防回潮 | 09-23 | 0 |
 | `plan-c2-cross-agreement-pivot-2026-09-29.md` | 未标 | 09-30 | 3 |
 | `plan-fix-f-s0-08-zhanggui-rename.md` | 已实施（2026-09-21） | 09-21 | 1 |
 | `plan-fix-f-s1-01-test-reverse-import.md` | 已实施（2026-09-21，方向 B 迁测试） | 09-21 | 1 |
@@ -174,6 +174,41 @@
 
 ## 6. 本轮没做的事
 
-- **未删除、未移动、未合并**任何文件（含 `docs/plans/` 零提及的 9 篇）。移动会改引用路径，`check_doc_sync.py` 只校验 AGENTS.md / ARCHITECTURE.md / README.md 三篇，它绿不代表其余 docs 的引用没断。
-- **「未标」不等于「已了结」**：上表 42 篇文内没有状态行，要补就得逐篇读正文并附依据，本轮未做。
+- **未移动、未删除任何文件**。2026-10-15 做过一次**内容合并**（合并 A：`runtime-analysis-overview.md` 的六块内容并入 `runtime-self-build-analysis.md`，源文件保留降级为寻址页）；`docs/plans/` 零提及的 9 篇一律保留。移动会改引用路径，`check_doc_sync.py` 只校验 AGENTS.md / ARCHITECTURE.md / README.md 三篇，它绿不代表其余 docs 的引用没断。
+- **「未标」不等于「已了结」**：判"有没有状态行"的口径 = `head -25 <文件> | grep -qE "状态[^。；]{0,14}[:：]"`，实测 **42 命中 / 29 未命中**（71 篇 md 中）。⚠️ 这个口径会漏掉「状态订正（2026-10-15 补）：」这类冒号前超过 14 字的写法，今天有两篇被它漏计（含 `p2-bucket-b-reduction-findings`），所以 **29 是上界不是精确值**；名单见 §7。
 - 本索引自身的状态列是**摘录**，不是我对每篇结论的重新核实。任何一篇的数字要拿去对外用，仍按原文件的取证口径复核。
+
+## 7. 待补状态行清单（②的剩余工作面，28 篇）
+
+按 §6 命令实测 29 篇未命中，其中 `p2-bucket-b-reduction-findings-2026-09-24.md` 是口径漏计（它写的是「状态订正（2026-10-15 补）：」，冒号前 18 字超出 14 字窗口，实际**已补**）⇒ 真待补 28 篇。
+
+- `arch-audit-2026-09-24.md`
+- `dep-security-accepted-risks-2026-09-25.md`
+- `m5-semantic-cache-plan.md`
+- `p0-execution-retrospective-2026-09-24.md`
+- `plan-branch-disposition-2026-10-01.md`
+- `plan-codeql-codescanning-remediation-2026-10-01.md`
+- `plan-dependabot-21-alerts-closure-2026-09-30.md`
+- `plan-doc-sync-tracked-scope-2026-10-04.md`
+- `plan-duplicate-logic-inventory-2026-10-01.md`
+- `plan-isolation-hardening-2026-09-27.md`
+- `plan-langfuse-wiring-2026-10-13.md`
+- `plan-memory-backend-stale-embed-signature-2026-10-10.md`
+- `plan-memory-identity-workspace-2026-10-14.md`
+- `plan-observability-target-model-2026-10-14.md`
+- `plan-p0-1-scheduler-gating-option-b-2026-09-24.md`
+- `plan-p0-ha-tenant-fixes-2026-09-25.md`
+- `plan-p2-unified-exception-handlers-2026-09-24.md`
+- `plan-production-delivery-roadmap-2026-10-09.md`
+- `plan-query-tenant-from-client-not-server-asserted-2026-10-10.md`
+- `plan-review-findings-closeout-2026-10-04.md`
+- `plan-schema-drift-existing-db-gap-2026-10-10.md`
+- `plan-tech-debt-followup-2026-09-22.md`
+- `plan-tenant-identity-2026-09-27.md`
+- `plan-tracing-shutdown-flush-timeout-2026-10-10.md`
+- `production-delivery-anchor-map-2026-10-09.md`
+- `skill-consolidation-inventory.md`
+- `tech-debt-multi-agent-2026-09-23.md`
+- `tool-mount-matrix-2026-09-25.md`
+
+补法固定三步：读正文定它自述要干什么 → 对代码 / 对 `docs/TODO.md` 判做没做 → 只写一行「状态｜依据｜回写」，**不改原结论、不翻别人的复选框**。批 1（10-15 已提交）的收获可作参照：6 篇里 **5 篇其实早已落地**、1 篇短期方案落地长期未评估，另有 1 篇的**成因定性被证伪**（`plan-fix-validate-config.md`：不是"从未实现"，是重构静默摘除后次日以"缺失"名义补回）。
