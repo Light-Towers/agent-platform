@@ -29,6 +29,7 @@ _SWITCHES = (
     "SCHEDULER_ENABLED", "API_KEY", "SINGLE_TENANT", "GUARD_ENABLED",
     "DEPLOY_ENFORCE_IDENTITY", "LLM_PUBLIC_KEY",
     "LLM_API_KEY", "LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY", "LANGFUSE_HOST",
+    "COST_GOVERNANCE_ENABLED",
 )
 
 
@@ -87,6 +88,43 @@ class TestHealthReflectsRuntimeState:
 
         assert (off["scheduler"], on["scheduler"]) == (False, True)
         assert (off["control_plane"], on["control_plane"]) == (False, True)
+
+    def test_cost_governance_follows_assembly(self, monkeypatch):
+        """补 TODO §3 残差①：cost_governance 此前只有"字段存在"的断言，没有"拨开关必须变"。"""
+        off = _health_with(monkeypatch)
+        on = _health_with(monkeypatch, COST_GOVERNANCE_ENABLED="true")
+
+        assert (off["cost_governance"], on["cost_governance"]) == (False, True)
+
+    def test_forensic_tracks_trajectory_store_in_both_directions(self, monkeypatch):
+        """补 TODO §3 残差①：forensic 同样缺"输入变则值变"的断言。
+
+        forensic 的真相源是 ``planner_runtime.trajectory_store``（`schemas.py` 的字段
+        description 已如此声明，控制台也按"过程档案 已装配/未装配"渲染），**不是**某个
+        ForensicContext 单例——agent_server 侧压根没有这样一个装配体（`ForensicContext`
+        是 agent_runtime 里逐步取证的数据载体，不是服务）。所以这里直接翻该字段的输入。
+
+        刻意不拨 DATABASE_URL：那会让 lifespan 真去连库（本机无 PG），测到的会是连接失败
+        而不是装配态。
+        """
+        for key in _SWITCHES:
+            monkeypatch.delenv(key, raising=False)
+        _clear_cache()
+        with TestClient(app) as client:
+            runtime = app.state.planner_runtime
+            original = runtime.trajectory_store
+            try:
+                # 无 DB 的默认形态：trajectory_store 未装配 ⇒ 灯必须是红的
+                assert original is None
+                assert client.get("/health").json()["forensic"] is False
+
+                runtime.trajectory_store = object()
+                assert client.get("/health").json()["forensic"] is True
+
+                runtime.trajectory_store = None
+                assert client.get("/health").json()["forensic"] is False
+            finally:
+                runtime.trajectory_store = original
 
     def test_auth_enabled_tracks_api_key_and_never_echoes_it(self, monkeypatch):
         off = _health_with(monkeypatch)
