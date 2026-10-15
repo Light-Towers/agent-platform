@@ -113,10 +113,11 @@ def _make_runtime(pool, registry, replica: str):
         PgSideEffectStore,
     )
     from agent_runtime.planner.protocol import PlannerRuntime
+    from agent_runtime.state_migration import get_default_migrator
     return PlannerRuntime(
         registry,
         ownership_store=PgExecutionOwnershipStore(pool),
-        checkpoint_store=PgCheckpointStore(pool),
+        checkpoint_store=PgCheckpointStore(pool, migrator=get_default_migrator()),
         side_effect_store=PgSideEffectStore(pool),
         replica_id=replica,
         max_duration_seconds=LEASE_TTL,

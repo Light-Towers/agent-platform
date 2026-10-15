@@ -180,6 +180,29 @@ class SchedulerStore(abc.ABC):
         - RUNNING 超 ``running_timeout``（执行超时）。
         """
 
+    async def requeue(self, execution_id: str) -> bool:
+        """把执行放回队列（**保留原 execution_id**，不新建身份）。
+
+        与 ``submit`` 新建请求、ControlPlane ``retry`` 生成 ``:retry:N`` 新 id 都不同：
+        requeue 用于「dispatch 丢了 / 误取消」这类不需要新执行历史的场合，把同一行改回
+        QUEUED 并清掉 worker / 派发痕迹。
+
+        仅 ``FAILED`` / ``CANCELLED`` / ``DISPATCHED`` 可 requeue；``COMPLETED``（成功
+        不该重跑）、``QUEUED``（已在队列）、``RUNNING``（仍在执行）一律拒绝。
+
+        刻意**非抽象**：后端可以不支持（只读取证用的替身、旧后端），此时抛
+        ``NotImplementedError``，由 ``ControlPlane.requeue`` 收窄成 False，
+        不让「后端不支持」升级成 500。
+        """
+        raise NotImplementedError(f"{type(self).__name__} 不支持 requeue")
+
+
+# requeue 允许的源状态：终态里的失败 / 取消 + 已派发但从未起跑（DISPATCHED）。
+# COMPLETED（成功不该重跑）/ QUEUED（已在队列）/ RUNNING（仍在执行）不在内。
+_REQUEUEABLE_STATUSES = frozenset(
+    {QueueStatus.FAILED, QueueStatus.CANCELLED, QueueStatus.DISPATCHED}
+)
+
 
 class InMemorySchedulerStore(SchedulerStore):
     """进程内调度队列（测试 / 单进程默认后端）。"""
@@ -301,6 +324,16 @@ class InMemorySchedulerStore(SchedulerStore):
                 if now - r.dispatched_at > running_timeout:
                     result.append(r)
         return result
+
+    async def requeue(self, execution_id: str) -> bool:
+        r = self._store.get(execution_id)
+        if r is None or r.status not in _REQUEUEABLE_STATUSES:
+            return False
+        r.status = QueueStatus.QUEUED
+        r.worker_id = None
+        r.dispatched_at = None
+        self._store[execution_id] = copy.deepcopy(r)
+        return True
 
 
 class PgSchedulerStore(SchedulerStore):
@@ -520,6 +553,22 @@ class PgSchedulerStore(SchedulerStore):
             )
             return (result.rowcount if hasattr(result, "rowcount") else 0) > 0
 
+    async def requeue(self, execution_id: str) -> bool:
+        async with self._pool.connection() as conn:
+            result = await conn.execute(
+                "UPDATE execution_queue "
+                "SET status = %s, worker_id = NULL, dispatched_at = NULL "
+                "WHERE execution_id = %s AND status IN (%s, %s, %s)",
+                (
+                    QueueStatus.QUEUED.value,
+                    execution_id,
+                    QueueStatus.FAILED.value,
+                    QueueStatus.CANCELLED.value,
+                    QueueStatus.DISPATCHED.value,
+                ),
+            )
+            return (result.rowcount if hasattr(result, "rowcount") else 0) > 0
+
     async def list_overdue(
         self, dispatch_timeout: float, running_timeout: float
     ) -> list[ExecutionRequest]:
@@ -593,6 +642,18 @@ class ExecutionScheduler:
         """取消排队中的执行。RUNNING 需走 control plane（V3-5B）。"""
         return await self._store.cancel(execution_id)
 
+    async def requeue(self, execution_id: str) -> bool:
+        """把执行放回队列（保留原 execution_id）。
+
+        状态白名单由各 store 实现把关（见 ``SchedulerStore.requeue``）；后端不支持
+        requeue 时在这里收窄成 False —— 这是可插拔后端的边界，不该让
+        ``NotImplementedError`` 冒到 HTTP 层变成 500。
+        """
+        try:
+            return await self._store.requeue(execution_id)
+        except NotImplementedError:
+            return False
+
     async def queue_depth(self) -> int:
         """队列深度（QUEUED 数，backpressure 监控）。"""
         return await self._store.count_queued()
@@ -613,7 +674,10 @@ class ExecutionScheduler:
 
 
 class SchedulerReaper:
-    """回收 lease 已失效的执行：标记 FAILED + 释放 slot（V3 Phase 3）。
+    """回收 lease 已失效的执行：默认标记 FAILED + 释放 slot（V3 Phase 3）。
+
+    注入 ``recovery``（``execution_recovery.RecoveryOrchestrator``）后改为按 Effect
+    Contract 决策，retry 分支会把执行**重新入队**（V3-4B，缺口 4 的 reschedule）。
 
     核心约束：**只回收 lease 已失效的执行，不依据 wall-clock timeout 判定执行已终止。**
 
@@ -633,12 +697,14 @@ class SchedulerReaper:
         interval_s: float = 30.0,
         dispatch_timeout: float = 60.0,
         running_timeout: float = 300.0,
+        recovery: Any = None,
     ) -> None:
         self._scheduler = scheduler
         self._ownership = ownership_store
         self._interval_s = interval_s
         self._dispatch_timeout = dispatch_timeout
         self._running_timeout = running_timeout
+        self._recovery = recovery
         self._stopped = False
         self._task: Any = None
 
@@ -657,7 +723,18 @@ class SchedulerReaper:
                     owner = await self._ownership.get_owner(req.execution_id)
                     if owner is not None:
                         continue  # lease 仍有效，Worker 可能还在跑，跳过
-                    # lease 已失效 → 安全标记 FAILED + 释放 slot
+                    if self._recovery is not None:
+                        # V3-4B：lease 已失效 → 交恢复决策（retry 分支会重新入队）。
+                        # 门控在上、决策在下：RecoveryOrchestrator.recover_one 自己不查
+                        # lease，必须由这里先过滤，否则会与活 Worker 抢 slot。
+                        action = await self._recovery.recover_one(req)
+                        logger.warning(
+                            "reaper: execution %s lease expired, recovery action=%s",
+                            req.execution_id,
+                            getattr(action, "value", action),
+                        )
+                        continue
+                    # 未注入 recovery（默认）→ 逐字保持旧行为：标记 FAILED + 释放 slot
                     await self._scheduler.complete(req.execution_id, QueueStatus.FAILED)
                     logger.warning(
                         "reaper: execution %s lease expired, marked FAILED",

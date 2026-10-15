@@ -5,7 +5,7 @@
 
 本模块把数据变成可操作的面：
 - ``ExecutionSnapshot``：一次执行的完整快照（status / owner / generation / checkpoint / external tasks / ...）；
-- ``ControlPlane``：inspect / pause / resume / cancel / retry / terminate 操作。
+- ``ControlPlane``：inspect / pause / resume / cancel / retry / requeue / recover / terminate 操作。
 
 底层基础已具备（Trajectory/Replay/Checkpoint/Status/Scheduler），这一步是组合而非从零建。
 """
@@ -88,11 +88,13 @@ class ControlPlane:
         status_store: ExecutionStatusStore | None = None,
         checkpoint_store: Any = None,
         awaitable_store: Any = None,
+        recovery: Any = None,
     ) -> None:
         self._scheduler = scheduler
         self._status_store = status_store
         self._checkpoint_store = checkpoint_store
         self._awaitable_store = awaitable_store
+        self._recovery = recovery
 
     async def inspect(self, execution_id: str) -> ExecutionSnapshot | None:
         """查看一次执行的完整快照。"""
@@ -268,6 +270,40 @@ class ControlPlane:
         except Exception:
             logger.warning("control plane retry failed execution=%s", execution_id, exc_info=True)
             return None
+
+    async def requeue(self, execution_id: str) -> bool:
+        """重新入队：把**同一** execution 放回 QUEUED，不新建 ``:retry:N`` 身份。
+
+        与 ``retry`` 的分工：retry 保留失败历史、开一条新执行；requeue 用于「派发丢了 /
+        误取消」这类不需要新执行历史的场合。可 requeue 的源状态白名单由 store 把关
+        （FAILED / CANCELLED / DISPATCHED），后端不支持时 ``ExecutionScheduler`` 收窄为 False。
+        """
+        req = await self._scheduler.get(execution_id)
+        if req is None:
+            return False
+        ok = await self._scheduler.requeue(execution_id)
+        if ok:
+            logger.info("control plane requeue execution=%s", execution_id)
+        return ok
+
+    async def recover(self, execution_id: str) -> str | None:
+        """按 Effect Contract 对单个执行跑一次恢复决策，返回动作名（V3-4B）。
+
+        复用 ``RecoveryOrchestrator.recover_one``，与 Reaper 同一决策口径
+        （retry / query_status / mark_failed / mark_human）。未注入 recovery
+        （``SCHEDULER_RECOVERY_ENABLED=false``，默认）时返回 None，由 API 层转 409，
+        不假装恢复成功。
+        """
+        if self._recovery is None:
+            return None
+        req = await self._scheduler.get(execution_id)
+        if req is None:
+            return None
+        action = await self._recovery.recover_one(req)
+        logger.info(
+            "control plane recover execution=%s action=%s", execution_id, action.value
+        )
+        return action.value
 
     async def terminate(self, execution_id: str) -> bool:
         """强制终止执行（无论状态，直接标记 FAILED/CANCELLED）。"""

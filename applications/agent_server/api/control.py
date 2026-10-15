@@ -1,6 +1,6 @@
 """Control Plane API（V3 Phase 4）：执行控制面 HTTP 端点。
 
-6 个操作：inspect / pause / resume / cancel / retry / terminate。
+8 个操作：inspect / pause / resume / cancel / retry / requeue / recover / terminate。
 状态转换矩阵校验：非法操作返回 409 Conflict。
 """
 
@@ -119,3 +119,43 @@ async def terminate_execution(execution_id: str, request: Request):
     if not success:
         raise HTTPException(status_code=409, detail="terminate failed")
     return {"execution_id": execution_id, "status": "failed"}
+
+
+@router.post("/{execution_id}/requeue")
+async def requeue_execution(execution_id: str, request: Request):
+    """重新入队（保留原 execution_id；仅 failed / cancelled / dispatched 可 requeue）。
+
+    与 retry 的区别：retry 开一条 ``:retry:N`` 新执行并保留失败历史，requeue 把同一条
+    放回队列。COMPLETED（成功不该重跑）/ QUEUED（已在队列）/ RUNNING（仍在执行）返回 409。
+    """
+    cp = _get_control_plane(request)
+    snapshot = await cp.inspect(execution_id)
+    if snapshot is None:
+        raise HTTPException(status_code=404, detail="execution not found")
+    success = await cp.requeue(execution_id)
+    if not success:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "cannot requeue: queue_status="
+                f"{snapshot.queue_status.value if snapshot.queue_status else 'unknown'} "
+                "(only failed / cancelled / dispatched can requeue)"
+            ),
+        )
+    return {"execution_id": execution_id, "status": "queued"}
+
+
+@router.post("/{execution_id}/recover")
+async def recover_execution(execution_id: str, request: Request):
+    """按 Effect Contract 跑一次恢复决策（retry / query_status / mark_failed / mark_human）。"""
+    cp = _get_control_plane(request)
+    snapshot = await cp.inspect(execution_id)
+    if snapshot is None:
+        raise HTTPException(status_code=404, detail="execution not found")
+    action = await cp.recover(execution_id)
+    if action is None:
+        raise HTTPException(
+            status_code=409,
+            detail="recover unavailable (SCHEDULER_RECOVERY_ENABLED is off)",
+        )
+    return {"execution_id": execution_id, "action": action}

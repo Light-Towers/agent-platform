@@ -1,8 +1,15 @@
 """Execution Recovery / Reaper / Reschedule（V3-4B）。
 
-.. warning::
-   **STATUS: NOT WIRED** – 本模块有完整实现与单测，但 applications/ 层零调用。
-   属「设计就绪、待集成」状态，不得视为已上线能力。(P1-7 审计披露 2026-09-24)
+.. note::
+   **STATUS: WIRED（2026-10-15，默认关）** – 两个生产消费方：
+   ``SchedulerReaper``（lease 失效后按契约决策而非无条件 FAILED）与
+   ``ControlPlane.recover``（人工触发单次恢复）。均由
+   ``SCHEDULER_RECOVERY_ENABLED`` 门控，**默认 False**；关闭时 Reaper 逐字保持
+   旧行为（只标 FAILED + 释放 slot）。
+   边界：生产尚未接 ``contract_resolver``，契约恒为 None ⇒ 决策退化为
+   「无契约默认可重试」（见 ``RecoveryManager.decide``），属**能力接上、语义待补**。
+   ``payload_externalization`` / ``human_task`` 仍未接线。
+   （此前状态为 NOT WIRED，P1-7 审计披露 2026-09-24）
 
 补 V3-4A 留的恢复侧：执行超时 / Worker 死亡 / lease 过期后，如何把 stuck execution
 拉回正轨。
@@ -79,6 +86,28 @@ class ReaperConfig:
     max_retries: int = 3  # 最大重试次数
 
 
+def stuck_from_request(req: ExecutionRequest) -> StuckExecution:
+    """从调度请求构造 ``StuckExecution``。
+
+    ``Reaper.scan``（自己扫）与 ``RecoveryOrchestrator.recover_one``（调用方已扫并已
+    做完安全门控）共用这一份口径，避免两处各写一遍 reason/attempt 推导而漂移。
+    """
+    return StuckExecution(
+        execution_id=req.execution_id,
+        tenant_id=req.tenant_id,
+        session_id=req.session_id,
+        user_id=req.user_id,
+        reason=(
+            "dispatch_timeout"
+            if req.status is QueueStatus.DISPATCHED
+            else "running_timeout"
+        ),
+        stuck_since=req.dispatched_at or req.created_at,
+        attempt=int(req.metadata.get("recovery_attempts", 0)),
+        original=req,
+    )
+
+
 class Reaper:
     """扫描超时 / stuck 的执行。"""
 
@@ -91,27 +120,7 @@ class Reaper:
         overdue = await self._store.list_overdue(
             self._config.dispatch_timeout, self._config.running_timeout
         )
-        result: list[StuckExecution] = []
-        for req in overdue:
-            reason = (
-                "dispatch_timeout"
-                if req.status is QueueStatus.DISPATCHED
-                else "running_timeout"
-            )
-            attempt = int(req.metadata.get("recovery_attempts", 0))
-            result.append(
-                StuckExecution(
-                    execution_id=req.execution_id,
-                    tenant_id=req.tenant_id,
-                    session_id=req.session_id,
-                    user_id=req.user_id,
-                    reason=reason,
-                    stuck_since=req.dispatched_at or req.created_at,
-                    attempt=attempt,
-                    original=req,
-                )
-            )
-        return result
+        return [stuck_from_request(req) for req in overdue]
 
 
 class RecoveryManager:
@@ -239,6 +248,24 @@ class RecoveryOrchestrator:
         # contract_resolver: (execution_id) -> EffectContract | None
         self._resolve_contract = contract_resolver or (lambda _eid: None)
 
+    async def recover_one(self, req: ExecutionRequest) -> RecoveryAction:
+        """对**单个**执行做决策 + 执行；不扫描、不做 lease 门控。
+
+        给「已自行完成安全门控」的调用方用：``SchedulerReaper`` 先确认 lease 失效再调它，
+        ``ControlPlane.recover`` 由人工触发。``run_cycle`` 才是自己扫 + 自己决策的定时形态。
+        """
+        stuck = stuck_from_request(req)
+        contract = None
+        try:
+            contract = self._resolve_contract(stuck.execution_id)
+        except Exception:
+            logger.warning(
+                "contract resolve failed execution=%s", stuck.execution_id, exc_info=True
+            )
+        action = self._recovery.decide(stuck, contract)
+        await self._rescheduler.execute(stuck, action)
+        return action
+
     async def run_cycle(self) -> list[tuple[StuckExecution, RecoveryAction]]:
         """执行一次恢复周期：扫描 → 决策 → 执行。返回决策记录（审计）。"""
         stuck_list = await self._reaper.scan()
@@ -260,6 +287,7 @@ class RecoveryOrchestrator:
 __all__ = [
     "RecoveryAction",
     "StuckExecution",
+    "stuck_from_request",
     "ReaperConfig",
     "Reaper",
     "RecoveryManager",
