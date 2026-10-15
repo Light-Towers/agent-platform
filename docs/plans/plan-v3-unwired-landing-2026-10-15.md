@@ -1,6 +1,6 @@
 # 方案：V3「未接线半成品」转正批（state_migration / execution_recovery / requeue+recover / receipt fencing / skill_router）
 
-> 状态：**5/5 项代码已落地**（分支 `feat/v3-unwired-modules-landing-2026-10-15`，**未部署**）｜ 依据：本机实跑 `ruff check .` / `scripts/check_doc_sync.py` / `scripts/lint_architecture.py` 全 rc=0；pytest = 根 683 passed+28 skipped、agent-runtime 631、agent_server 100、联邦 176、exhibition 352；本批新增用例 24+10+4+22，既有用例零删改；项 4 做过「剥掉 fence 必红」自证（把 `is_stale_generation` 短路成恒 False ⇒ 2 条用例转红）｜ 回写：**项 5（skill_router）只做了半截**（门禁能拦、endpoint 驱动执行未做），项 4 的真 PG 并发双写复验属「待环境」，均见 §5
+> 状态：**5/5 项已落地**（分支 `feat/v3-unwired-modules-landing-2026-10-15`，**未部署**）｜ 依据：本机实跑 `ruff check .` / `scripts/check_doc_sync.py` / `scripts/lint_architecture.py` 全 rc=0；pytest = 根 683 passed+28 skipped、agent-runtime 631、agent_server 100、联邦 176、exhibition 357；本批新增用例 24+10+4+22+5，既有用例零删改（`test_skill_venue_schedule.py` 的 6 处 fixture 只补 `routed_endpoint=` 输入，断言逐字未改）；项 4 做过「剥掉 fence 必红」自证（把 `is_stale_generation` 短路成恒 False ⇒ 2 条用例转红）｜ 回写：仅剩**待环境**判据（真 PG 并发双写被拒、双实例故障转移）与 §5 登记的 4 条残留；`docs/TODO.md` §3 的 `skill_router` 项已按判据翻勾（本批唯一翻转，计数口径见 §0 追记）
 
 分支：`feat/v3-unwired-modules-landing-2026-10-15`。本轮**只改代码 + 补测试，不部署**（126 夜间关机），凡需真集群/真 PG 的判据一律标为「待环境」，不得当成已验证。
 
@@ -72,4 +72,9 @@
 - `PgAwaitableTaskStore` 双份定义本轮不合并，重复事实留在本行；`execution_state_pg.py:114` 那份仍无 fence，但它无生产调用点。
 - 项 3 的 `recover` 复用 `execution_recovery`，因此它是「缺口 8」与「§3 execution_recovery 未接线」的共同收口点。
 - 项 3 顺带补了一处**装配漏接**：`main.py` 构造 `ControlPlane` 时从未传 `awaitable_store`（形参一直存在），⇒ `inspect()` 的 `external_tasks` 段在生产恒为空。已补传，属缺口 8「inspect 不完整」的一部分。
-- **项 5（exhibition skill_router）是部分落地**：门禁已能拦截（scope 不符 / readiness SYNTHETIC 均在 `skill.run` 之前返回 denied，`warehouse.get_rest` 零调用，有 4 条用例钉住），但 TODO 原句的「`route(...)` → 执行」中**「用 route 返回的 endpoint 驱动实际 REST 调用」未做**，执行仍走 skill 自己的 `WarehouseClient`。⇒ 该 TODO 项**不得翻勾**。另：门禁落在 dispatch 节点而非 `BaseSkill` 内，直接调 `skill.run(...)` 的既有用例仍绕过门禁（测试面，非生产调用方）。
+- **项 5（exhibition skill_router）两截都已接上，且顺带堵掉一个旧漏洞**：
+  - 门禁截（第一次提交）：`run_skill` 在 `skill.run` 之前调 `route()`，scope 不符 → `SCOPE_DENIED`、readiness SYNTHETIC → `DATA_NOT_CONNECTED`，两者 `warehouse.get_rest` 零调用。
+  - 执行截（本次）：`route()` 解析出的 catalog `endpoint` 注入 `SkillContext.routed_endpoint`，skill 据此发请求；模块内硬编码的 `_REST_PATH` **已删** ⇒ `tool_catalog.json` 成为端点的唯一真相源（此前 catalog 与 skill 各持一份，漂移无人发现）。
+  - **刻意选 fail-closed 而非硬编码兜底**：`routed_endpoint` 缺失时拒绝直连 warehouse（返回 `DATA_NOT_CONNECTED`，不发请求）。兜底会让门禁退化成"可绕过的建议"——直接调 `skill.run(...)` 就能跳过整条门禁链，这正是第一次提交时登记的残留漏洞；改成 fail-closed 后该路径结构性失效。代价是 6 处既有测试 fixture 必须补 `routed_endpoint=` 输入（**断言逐字未改**，只是补新契约要求的入参）。
+  - **残留（不影响本项判定，但要写清）**：fail-closed 是**逐 skill 自觉取用** `routed_endpoint` 的结果，不是基类强制——新增 skill 若不读该字段，仍然可以直连 warehouse。要结构化就得把"取端点"收进 `BaseSkill`，属独立方案。
+  - 一条测试自身的教训（记此防止复犯）：首版断言写 `"Skill Router" in result.answer` 而实跑为假——`_pending_result()` 把固定话术 `PENDING_ANSWER` 放 `answer`、把拒绝原因放 `warnings`。**产品行为是对的，错的是断言取错了字段**；改断言前先读被断言对象的构造，别按想象写。

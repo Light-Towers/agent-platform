@@ -133,6 +133,9 @@ async def run_skill(state: ExhibitionAgentState) -> dict[str, Any]:
                 "error": error_code,
                 "sql_statements": state.get("sql_statements", []),
             }
+        # 门禁放行后把 catalog 解析出的端点注入 ctx：catalog 是端点的唯一真相源，
+        # skill 不再各自硬编码 REST 路径（TODO §3「route(...) → 执行」的后半截）。
+        ctx.routed_endpoint = route_result.get("endpoint")
 
     try:
         with span(

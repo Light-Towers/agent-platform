@@ -32,7 +32,6 @@ from exhibition_agent.skills.base_skill import BaseSkill, SkillContext, SkillRes
 
 logger = get_logger(__name__)
 
-_REST_PATH = "/api/venue-schedule"
 _SOURCE_TABLE = "t_venue_schedule"
 
 _PENDING_LEVELS: frozenset[str] = frozenset({"pending", "sparse_sample", "incomplete"})
@@ -71,9 +70,22 @@ class VenueScheduleQuerySkill(BaseSkill):
     async def run(self, params: dict[str, Any], ctx: SkillContext) -> SkillResult:
         ec = ctx.execution_context
         query_params = self._build_query_params(params)
+        # 端点来自 Skill Router（tool_catalog.json 是唯一真相源），不再用本模块的硬编码常量。
+        # 缺失即 fail-closed：未经路由不得直连 warehouse，也**不退回**硬编码路径——
+        # 兜底会让门禁变成可绕过的建议（直接调 skill.run 即可跳过整条门禁链）。
+        rest_path = (ctx.routed_endpoint or {}).get("path")
+        if not rest_path:
+            logger.warning(
+                "skill=%s 无 routed_endpoint（未经 Skill Router 路由）→ 拒绝直连 warehouse",
+                self.name,
+            )
+            return _pending_result(
+                "DATA_NOT_CONNECTED",
+                "skill 未经 Skill Router 路由，拒绝直连 warehouse",
+            )
         try:
             data = await ctx.warehouse_client.get_rest(
-                _REST_PATH,
+                rest_path,
                 params=query_params,
                 execution_context_header=ctx.execution_context_header,
                 request_id=ec.request_id,
