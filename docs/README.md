@@ -57,7 +57,7 @@
 | 文件 | 自述状态 | 末次 | 提及 |
 |---|---|---|---|
 | `plan-v3-execution-platform-final-architecture-2026-09-22.md` | 规划文档（架构总纲，不实现代码） | 09-23 | 12 |
-| `plan-enterprise-platform-skeleton-2026-09-23.md` | **已被取代** — 见 `docs/architecture/agent-execution-platform.md` | 09-23 | 4 |
+| `plan-enterprise-platform-skeleton-2026-09-23.md` | **已被取代** — 见 `docs/architecture/agent-execution-platform.md`；2026-10-15 补「依据/去处」行（两份评审为判定原件），并标出 `AGENTS.md` 第 5 行仍列本件为真相源的冲突（待订正） | 09-23 | 4 |
 | `v3-roadmap-breakdown.md` | 规划文档（v3 评审稿），不实现代码 | 08-22 | 9 |
 | `plan-v3-phase-2-4-integration-2026-09-23.md` | 方案文档 v2，待确认后施工 | 09-23 | 0 |
 | `plan-v3-phase-3.4-awaitable-integration-2026-09-23.md` | 设计文档 + 实现中 | 09-23 | 0 |
@@ -157,7 +157,7 @@
 - `docs/operations/evidence/` — 6 个日期目录、每份一个 `readings.md`。**每份的读数只绑定当时的 Pod `GIT_REV`**，换 rev 后须复跑，不得当现值引用。留档件是否入库由每次处置单独定：`2026-10-14-3node-deployment` 的原始 stdout（`raw.txt`）已于 2026-10-15 按需清除，回看用 `git show da96d870:docs/operations/evidence/2026-10-14-3node-deployment/raw.txt`，机侧另有一份在 `126:/tmp/inv-out.txt`（**清掉它就两处皆无**）。
 - `docs/architecture/overview.html`（11 KB，09-23）— `docs/` 里唯一非 md 的架构产物，无入站引用；它不会被 `check_doc_sync.py` 覆盖，改动架构文档时不会有人提醒你同步它。
 - `docs/analysis/2026-09-21/` — 9 份（`INDEX.md` / `PRIORS.md` / `PROMPT.md` / `00`~`05`）。该目录自带 `INDEX.md`，本索引不重复其内容；`02-debt-diagnosis.md` 提及 17 次，是这批里唯一仍被大量引用的。
-- `docs/reviews/` — 2 份评审件（09-23）。`docs/research/` — 4 份调研（08-22 ~ 09-25，其中 `deepseek-harness-discussions-analysis.md`、`code-agent-borrowable-features.md` 零提及）。
+- `docs/reviews/` — 2 份评审件（09-23，均已在 2026-10-15 补「后续处置」行）：对骨架方案的否定**已被采纳**；`review-v3-vs-skeleton-comparison` 给 V3 的第一条待补强**已按原文落实**（`agent-execution-platform.md` 第 35 行「与 8 层总纲的映射」），第二条（§27 目录逐行核对）**未核**，不得当已闭环。`docs/research/` — 4 份调研（08-22 ~ 09-25，其中 `deepseek-harness-discussions-analysis.md`、`code-agent-borrowable-features.md` 零提及）。
 - `docs/tech-debt/` — 2 份：`tech-debt-audit-2026-09-22.md`（管「识别」）与 `tech-debt-hardcoded-logic.md`。与 `agent-harness-capability-map.md`（管现状）、`docs/TODO.md`（管排期）三套台账互不联动，判「会不会修」必须 grep TODO。
 - `docs/handoff-2026-08-21.md`、`docs/fix-exhibition-agent-review-issues.md` — 交接与专项修复件，日期即封存。
 - `docs/adr/0003`、`docs/ha/ha-durable-execution.md`、`docs/operations/deployment.md` 等 08-22 旧件：仍可能被现网事实推翻，引用前先在 §3 找有没有更晚的同主题 plan。
