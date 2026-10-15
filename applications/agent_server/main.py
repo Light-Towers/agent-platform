@@ -440,6 +440,12 @@ async def lifespan(app: FastAPI):
 
         awaitable_task_store = InMemoryAwaitableTaskStore()
     app.state.awaitable_task_store = awaitable_task_store
+    # V3 补-1: 人工审批（HumanTaskStore 复用同一个 awaitable store）。resolver 要等
+    # status_store 建好后再装（见下方 scheduler 块之后），此处先占位避免属性缺失。
+    from agent_runtime.human_task import HumanTaskStore
+
+    app.state.human_task_store = HumanTaskStore(awaitable_task_store)
+    app.state.human_task_resolver = None
     app.state.planner_runtime = PlannerRuntime(
         registry=registry,
         llm=llm,
@@ -456,6 +462,7 @@ async def lifespan(app: FastAPI):
         user_id="default",
         post_execution_hooks=post_execution_hooks,
         awaitable_task_store=awaitable_task_store,
+        human_task_store=app.state.human_task_store,
     )
     # 绑定 delegate：graph 节点的 _invoke 此后经 runtime.delegate 调用
     delegate_ref.delegate = app.state.planner_runtime.delegate
@@ -536,6 +543,15 @@ async def lifespan(app: FastAPI):
     else:
         app.state.scheduler = None
         app.state.status_store = None
+    # V3 补-1: 人工审批 resolver。status_store 仅在 scheduler 开启时存在，而 resolver 容忍
+    # None ⇒ 未开 scheduler 时审批仍能收敛任务状态，只是不做 WAITING_HUMAN → RUNNING 的
+    # 状态机推进（那条推进本来就依赖 ExecutionStatus 面）。
+    from agent_runtime.human_task import HumanTaskResolver
+
+    app.state.human_task_resolver = HumanTaskResolver(
+        app.state.human_task_store,
+        status_store=getattr(app.state, "status_store", None),
+    )
     # V3 Phase 4: Cost Governance（opt-in）
     if settings.cost_governance_enabled:
         from agent_runtime.cost_governance import (

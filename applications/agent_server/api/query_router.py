@@ -299,16 +299,20 @@ async def query(
                     elif event.type == "status" and event.payload.get("snapshot"):
                         round_snapshot = event.payload["snapshot"]
                     elif event.type == "suspended" and status_store is not None:
-                        # V3-3: 执行挂起 → ExecutionStatus → WAITING_EXTERNAL
-                        from agent_runtime.execution_status import ExecutionStatus, ExecutionStatusRecord
+                        # V3-3: 执行挂起 → ExecutionStatus。等人工审批必须写 WAITING_HUMAN：
+                        # HumanTaskResolver.resolve_and_resume 的条件是
+                        # `current.status is WAITING_HUMAN`，写成 WAITING_EXTERNAL 会让
+                        # 审批通过后的 resume 永不命中（该分支此前正是因此而是死代码）。
+                        from agent_runtime.execution_status import ExecutionStatusRecord
 
+                        suspend_status = _suspend_status(event.payload.get("kind"))
                         try:
                             await status_store.save(ExecutionStatusRecord(
                                 execution_id=request_id,
-                                status=ExecutionStatus.WAITING_EXTERNAL,
+                                status=suspend_status,
                             ))
                         except Exception:
-                            logger.warning("status save WAITING_EXTERNAL failed", exc_info=True)
+                            logger.warning("status save %s failed", suspend_status.value, exc_info=True)
             if final_answer and q_embedding is not None:
                 semantic_cache.cache_store(pool, req.query, final_answer, q_embedding, tenant_id=req.tenant_id or "")
             # Phase 3: 对话历史写回——Planner 协议中立（不持线程语义），由 app 层承担。
@@ -395,6 +399,23 @@ def _sse(payload: dict) -> str:
     """打包 SSE 帧：将 payload.type 提升为 event name，与 knowledge-service 对齐。"""
     event_name = payload.get("type", "")
     return sse_pack(event_name, payload)
+
+
+def _suspend_status(kind):
+    """挂起事件 → ExecutionStatus：HUMAN 类走 WAITING_HUMAN，其余走 WAITING_EXTERNAL。
+
+    判据是 execution_graph 从 ExecutionSuspended 带出的 awaitable kind（str）。
+    HumanTaskResolver.resolve_and_resume 仅在 status is WAITING_HUMAN 时恢复执行，
+    故人工审批挂起必须写 WAITING_HUMAN，否则审批通过后的 resume 分支永不命中。
+    """
+    from agent_runtime.awaitable_task import AwaitableKind
+    from agent_runtime.execution_status import ExecutionStatus
+
+    return (
+        ExecutionStatus.WAITING_HUMAN
+        if str(kind).lower() == AwaitableKind.HUMAN.value
+        else ExecutionStatus.WAITING_EXTERNAL
+    )
 
 
 def _node_event(node: str, payload: dict) -> dict | None:

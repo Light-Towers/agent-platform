@@ -422,6 +422,8 @@ async def _run_graph_in_place(
                         "task_id": exc.task_id,
                         "node_id": exc.node_id,
                         "execution_id": execution_id,
+                        # 上层据此选 WAITING_HUMAN / WAITING_EXTERNAL；缺省按 external
+                        "kind": getattr(exc.kind, "value", None) or "external",
                     },
                 )
                 return
