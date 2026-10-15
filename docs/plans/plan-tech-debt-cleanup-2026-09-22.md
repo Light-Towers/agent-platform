@@ -1,6 +1,6 @@
 # Plan：全局技术债务治理（2026-09-22 扫描成果）
 
-> 状态：2026-09-22 制定，P0+P1+P2(T2.1/T2.3) 已完成，P2(T2.2/T2.4)+P3 待实施
+> 状态：2026-09-22 制定。**2026-10-15 对码核实并订正**：原状态行与复选框自相矛盾（T2.4 全 `[x]` 却标「待实施」、T2.3 全 `[ ]` 却标「已完成」）。逐条对码结论——**绝大部分已落地**（P0/P1、T2.1、T2.4、T3.1 余者显式「跳过」并注明原因、T3.2 的 `check_doc_sync.py` 已常驻 CI、三方审核补充 1/2/3/5/6 均已修，补充 7/T1.7 于**本批 2026-10-15 落地**）；**真正仍未做仅 3 项**：① T2.2（6 处大函数拆分）纯风格重构、风险高，且与本 plan T3.1 把同类「routes.py 按业务域拆分」判为「跳过：大规模重构」自相矛盾 ⇒ 无功能收益不盲动，需独立评估；② T2.3（依赖配置统一）引用已改名/不存在的包（`dialogue-framework`/`zhanggui-zhiku`/`wenda`，当前 6 应用结构无此名）⇒ 须先重新对码再定范围；③ 补充 4（agentic bridge opt-in 默认开还是仅补测试）属**待拍板**设计决策。逐条证据见文末「## 2026-10-15 对码核实」。
 > 来源：6 维度并行扫描（代码质量 / 架构 / 依赖配置 / 测试覆盖 / 文档注释 / 重构遗留）
 > 范围：当前工作区快照（存在并发写入，实施前须冻结基线）
 > 总计：发现 97 项，去重后约 80 项实质债务，分 4 优先级 13 批次任务
@@ -428,13 +428,13 @@
 
 ### 对原 plan 任务的影响汇总
 
-| 原/新任务 | 调整 |
-|-----------|------|
-| T1.2 | 扩展：sandbox.py 两处 proc.kill（补充1）+ mcp_client.py 两处 stack.aclose（补充2）+ 明确 bridge opt-in 策略（补充4） |
-| C3 修复 | 扩展：同时统一 `/api/upload` thread_id 处理（补充3） |
-| T1.5 | 扩展：统一 ARCHITECTURE.md 与 AGENTS.md Skill 型口径（补充5） |
-| **T1.6 新增** | code_execution_tool.py 懒初始化（补充6） |
-| **T1.7 新增** | to_skill() 真实发现路径集成测试（补充7） |
+| 原/新任务 | 调整 | 2026-10-15 对码状态 |
+|-----------|------|------|
+| T1.2 | 扩展：sandbox.py 两处 proc.kill（补充1）+ mcp_client.py 两处 stack.aclose（补充2）+ 明确 bridge opt-in 策略（补充4） | 补充1/2 ✅已修（T1.2a）；补充4 **待拍板** |
+| C3 修复 | 扩展：同时统一 `/api/upload` thread_id 处理（补充3） | ✅已修（upload 与 task 同走 `_resolve_thread_id_or_401`） |
+| T1.5 | 扩展：统一 ARCHITECTURE.md 与 AGENTS.md Skill 型口径（补充5） | ✅已修（ARCHITECTURE.md:39 四型口径） |
+| **T1.6 新增** | code_execution_tool.py 懒初始化（补充6） | ✅已修（`_get_sandbox()` 懒初始化，T1.2a/T1.2b） |
+| **T1.7 新增** | to_skill() 真实发现路径集成测试（补充7） | ✅**本批落地**（`test_agentic_skill_discovery.py` 2 条，见文末对码核实节） |
 
 ---
 
@@ -463,3 +463,36 @@
 - CI 覆盖矩阵审计：来源 `2026-09-21-ci-gate-coverage-matrix-audit`
 - conftest 守卫识别：来源 `2026-09-21-gate-external-test-adoption-decision-flow`
 - 红线 1 反向依赖复查：来源 `2026-09-21-shared-pkg-test-reverse-dep-fix-direction`
+
+---
+
+## 2026-10-15 对码核实（订正状态行漂移 + 收口补充 7/T1.7）
+
+> 起因：状态行「P2(T2.2/T2.4)+P3 待实施」与复选框自相矛盾（T2.4 全 `[x]`、T3.1 多数 `[x]`/「跳过」、T3.2 全 `[x]`，而 T2.3 全 `[ ]` 却被状态行标「已完成」）。按「文档说的 ≠ 代码是的，下结论前对码」逐条实跑核实，不照旧标签重做、也不盲翻复选框。
+
+### 已落地（逐条对码确认，非据状态行）
+
+| 项 | 对码证据（2026-10-15） |
+|---|---|
+| 补充 1 sandbox proc.kill | `sandbox.py:132 _terminate()` 做 `proc.kill()`+`communicate()`；`_execute_docker:176` 与 `_execute_subprocess:214` 的 `except asyncio.TimeoutError` 均 `await self._terminate(...); raise`（T1.2a） |
+| 补充 2 mcp_client stack.aclose | `mcp_client.py:_connect_stdio:130-137` 与 `_connect_sse:144-152` 均 `try: ... except BaseException: await stack.aclose(); raise`；连接失败处 `:110-116` 亦回收 stack（T1.2a） |
+| 补充 3 /api/upload thread_id | `agent_federation/api/server.py:252-259` `/api/upload` 与 `/api/task:236` 同走 `_resolve_thread_id_or_401`，鉴权启用时忽略客户端 thread_id、按服务端断言主体派生 ⇒ 上传件与对话落同一会话目录 |
+| 补充 5 Skill 型口径 | `ARCHITECTURE.md:39` 已是「Function/Agent/Remote/Workflow 四型 SkillKind，MCP/Sandbox 经特化注册函数挂载」，与 AGENTS.md 口径一致（原「六型」矛盾已消） |
+| 补充 6 code_execution 懒初始化 | `agent_federation/tools/code_execution_tool.py:25 _sandbox=None` + `_get_sandbox()` 懒初始化（注释明标 T1.2a/T1.2b），import 期不再固化后端；默认 docker-only，`SANDBOX_ALLOW_SUBPROCESS` 未开不静默降级 |
+| W6 应用层静默吞 | `agent_server/main.py:417-427` to_skill 失败时：`planner in ("agentic","auto")` ⇒ `logger.warning(exc_info=True)`，否则 DEBUG（T1.2c/B2 评审结论）⇒ 需要时红灯如实亮，非一律静默 |
+| T2.4 / T3.1 / T3.2 | 复选框全 `[x]`（T3.1 余者为显式「跳过」并注明原因）；`scripts/check_doc_sync.py` 已存在并常驻 CI（本机 `make`-等价实跑 rc=0） |
+
+### 本批落地（2026-10-15）：补充 7 / T1.7
+
+- **做了什么**：新增 `packages/agent-runtime/tests/test_agentic_skill_discovery.py`（2 条），走**真实 entry_points 发现路径**（不显式注入 factory）：
+  - 正向 `test_to_skill_discovers_executor_via_entry_points_without_explicit_registration`：清掉模块级 `_executor_factory` 后，`AgenticPlanner().to_skill()` 经 `importlib.metadata.entry_points(group="agent_runtime.agentic_executor")` 发现 `agent_federation/pyproject.toml:68-69` 注册的工厂，产出合法 `SkillKind.AGENT`，并断言发现后 `_executor_factory` 被写回（证明真走了 EP 路径而非显式注入）。EP 不可发现属**环境条件**（未装 `--extra agentic`）⇒ skip（同仓 requires_pg/ZHIKU_INTEGRATION 守卫范式）。本机实跑 **PASSED（非 skip）**：EP 可发现。
+  - 负向 `test_discover_raises_runtimeerror_when_no_executor_available`：把 `entry_points` 打成空 ⇒ 断言 `_discover_executor_factory()` **抛 RuntimeError** 且消息含可操作解锁动作（装 extra / 显式注册）。**确定性**、不依赖真实安装，锁住 W6「发现失败必须 fail-loud，绝不静默返回」在发现层的契约。
+- **为什么有价值**：此前 `test_agentic_skill.py` 7 条用例**全部** `register_agentic_executor_factory(lambda: fake)` 显式注入 ⇒ `_discover_executor_factory` 第一分支短路，**从不走 entry_points**；而生产 `agent_server/main.py:413` 恰恰依赖 EP 发现。显式注入的测试全绿却掩盖了「真实安装下发现路径是否通」——本批补上这把锁，EP 注册若被破坏（pyproject 改动/包未装）正向用例即红。
+- **顺带**：给 `test_agentic_skill.py:98` 的 `reg.execute("agentic", ...)`（lint P4-2 白名单豁免）补注释，说明「仅测试内豁免、生产须走 delegate」，并指向本发现路径测试。
+- **实跑**：`ruff check` 该 2 文件 rc=0；`pytest packages/agent-runtime/tests` **638 passed**（636→638，+2），既有用例零删改（`test_agentic_skill.py` 仅加注释，7 条断言逐字未动）。
+
+### 仍未做（3 项，附不做/待定的判据，不粉饰为已完成）
+
+- **T2.2（6 处大函数拆分）**：纯可读性重构、无功能收益，且拆分 `query_router.query` / `main.lifespan` 等 200 行函数回归风险高；**与本 plan 自身 T3.1 把同类「`routes.py` 按业务域拆分」判为「跳过：大规模重构」直接矛盾**。原 plan 的行号引用亦已漂移（`api/routes.py:65 query` 现已在 `api/query_router.py`）。⇒ 不在无功能收益下盲动，如需做应独立成方案 + 独立分支 + 逐函数补测后再拆。
+- **T2.3（依赖配置统一 8 项）**：引用 `applications/dialogue-framework/`、`zhanggui-zhiku/`、`wenda` 等**当前 6 应用结构里已不存在的包名**（AGENTS.md 目录表为 agent_server/agent_federation/kefu-service/nl2sql-service/knowledge-service/exhibition-agent）。⇒ 整节须先重新对码（哪些项对应到现存的哪个包）再定范围，不能照 2026-09-22 的包名直接改。
+- **补充 4（agentic bridge opt-in 策略）**：`_maybe_attach_bridged_tools` 默认关（`AGENTIC_RUNTIME_BRIDGE=true` 才开）是「渐进推广」的设计决策；T1.2 要求「改为默认开启」还是「保留 opt-in 但补开启路径测试」属**待拍板**，非纯执行项。
