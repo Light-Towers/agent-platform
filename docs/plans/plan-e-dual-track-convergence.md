@@ -90,7 +90,7 @@
 
 **收益**：消除双轨外壳重复维护（TB-13）；B 侧获得持久化 checkpoint/回退能力（AR-2/TB-10）；为未来"确定性路由 vs 涌现委派"主线决策扫清外壳障碍。
 
-**风险**：抽离需保证 `app` 现有行为零回归（admission 崩溃恢复、coordinator 丢失唤醒竞态防护都需保留）；B 侧 `thread_id` 会话断裂**已于 2026-08-18 审查核销**（`api/auth.py:resolve_thread_id` 按密钥派生稳定 `thread_id`，见 improvement-plan TB-14 已落地）——此前登记的 `server.py:165` 重建 bug 已消解，以下顺序从 PG checkpoint 注入起步即可。
+**风险**：抽离需保证 `app` 现有行为零回归（admission 崩溃恢复、coordinator 丢失唤醒竞态防护都需保留）；B 侧 `thread_id` 会话断裂**已于 2026-08-18 审查核销**（`api/auth.py:resolve_thread_id` 按**服务端断言主体**派生稳定 `thread_id`（2026-10-15 订正措辞：B7b-4 起凭据不参与派生，原文写"按密钥派生"），见 improvement-plan TB-14 已落地）——此前登记的 `server.py:165` 重建 bug 已消解，以下顺序从 PG checkpoint 注入起步即可。
 
 **实施计划（建议顺序）**：
 1. ~~先修 `server.py:165` thread_id 会话断裂~~ ✅ 已修（见 TB-14 核销），无需重复投入。
