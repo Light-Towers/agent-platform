@@ -106,7 +106,7 @@
 
 - [ ] `human_task` / `execution_recovery` / `state_migration` / `payload_externalization`（`agent-runtime`，代码完整但主链路未接线）
 - [ ] `skill_router`（exhibition-agent）：已实现 Skill→Tool 统一路由 + scope 校验 + readiness 拦截，但当前各 Skill 内部直连 `WarehouseClient` 绕过门禁链；接线方向：`run_skill → route(skill_name, ctx, **params) → 执行`
-- [ ] `agent_server` `/health` 端点（`api/health_router.py`）未上报 V3 组件状态（scheduler / control_plane / cost_governance / forensic），现有字段仅覆盖 Phase 1/2；属小范围可读性补齐，非阻塞
+- [ ] `agent_server` `/health` 端点（`api/health_router.py`）未上报 V3 组件状态（scheduler / control_plane / cost_governance / forensic），现有字段仅覆盖 Phase 1/2；属小范围可读性补齐，非阻塞。**（2026-10-14 订正本句前提）**「未上报」已过时：`18b6954`（2026-10-10）已补四字段并同批新增契约测试 `applications/agent_server/tests/test_health_fields.py`（本机实跑 **14 passed**，响应实测 25 键 = 共享基类 13 + app 独有 12）。**本条仍保持开项**，但判据从「有没有报」收窄为两点残差：① `cost_governance` / `forensic` 无「拨开关返回值必须变」的断言（测试只钉了 `scheduler` / `control_plane`）；② `forensic` 位取的是 `trajectory_store` 非空的**代理语义**，不等于 ForensicContext 自身装配态。⇒ **本批只改本行文字，未翻转任何复选框**（`git diff docs/TODO.md` 内无 `- [ ]` ↔ `- [x]` 变更），§0 索引表「未接线半成品转正 = 3」的计数口径不受影响。
 
 ## 4. 会展 Agent 业务功能骨架 TODO
 
