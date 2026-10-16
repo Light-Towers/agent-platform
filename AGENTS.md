@@ -2,7 +2,7 @@
 
 > 统一生产级 Agent 平台，本仓库为 **monorepo**（根 + `packages/` 3 个共享包 + `applications/` 6 个应用工程）。**分层契约、依赖图、各包子模块完整清单见 `ARCHITECTURE.md`（按需读取）**；人类阅读指南见 `README.md`。本文件面向 AI agent，仅列每轮必守的行为约束 + 定向信息。
 > **演进方向（Plan-F）**：双轨收敛为「单 Runtime + 多 Planner」（`agent-runtime/` 承载运行时中间件，Planner 策略可插拔，不统一 Agent 只统一 Runtime）。详见 `docs/plans/plan-f-single-runtime-multi-planner.md`。
-> **V3 企业执行平台**：Phase 2-4 + 3.4 代码已接线（主链路 `Admission → Scheduler submit → Planner → Execute → Forensic/CostGov`，`scheduler_enabled` 默认 False 渐进开启）；**端到端双实例物理故障转移验收未达，不得当作已上线能力声明**。未接线半成品（P1-7 标注）：human_task / execution_recovery / state_migration / payload_externalization / skill_router(exhibition)。架构真相源：`plan-enterprise-platform-skeleton-2026-09-23.md` + `plan-v3-execution-platform-final-architecture-2026-09-22.md` + `arch-audit-2026-09-24.md`（均在 `docs/plans/`）。
+> **V3 企业执行平台**：Phase 2-4 + 3.4 代码已接线（主链路 `Admission → Scheduler submit → Planner → Execute → Forensic/CostGov`，`scheduler_enabled` 默认 False 渐进开启）；**端到端双实例物理故障转移验收未达，不得当作已上线能力声明**。**原「未接线半成品（P1-7 标注）」五项已全部接线（human_task / execution_recovery / state_migration / payload_externalization 见 `agent_server/main.py` 装配点，`skill_router`(exhibition) 见 `graph/nodes.py:run_skill` 执行前门禁）⇒ 该标注已于 2026-10-16 按 roadmap #5 判据「全仓未接线标注归零」撤除；接线 ≠ 默认启用，逐项依据见 `docs/plans/plan-unfinished-completion-schedule-2026-10-16.md` §10**。架构真相源：`plan-enterprise-platform-skeleton-2026-09-23.md` + `plan-v3-execution-platform-final-architecture-2026-09-22.md` + `arch-audit-2026-09-24.md`（均在 `docs/plans/`）。
 
 ## 目录结构
 
