@@ -55,8 +55,8 @@
 
 ## 3. 需要用户拍板（**请在 10/20 前给方向，否则将阻塞 §2 后半**）
 
-红线「所有代码优化/重构必须先制定方案」+ 我不替你做设计决策。以下 **20 行**（按本表条目计数，非按 plan 文件数）方案已就绪，卡在「选哪条路」而非「有没有路」：
-**其中真待拍板 = 19 行** —— 第 1 项经 2026-10-16 对码作废（代码早已合入，见该行注），作废行的编号保留不复用；第 17 行按行计 1、内含 5 问（三份 ADR 各 §5）；第 19、20 项由 §16/§17 对码新增。
+红线「所有代码优化/重构必须先制定方案」+ 我不替你做设计决策。以下 **21 行**（按本表条目计数，非按 plan 文件数）方案已就绪，卡在「选哪条路」而非「有没有路」：
+**其中真待拍板 = 20 行** —— 第 1 项经 2026-10-16 对码作废（代码早已合入，见该行注），作废行的编号保留不复用；第 17 行按行计 1、内含 5 问（三份 ADR 各 §5）；第 19–21 项由 §16/§17/§20 对码新增。
 
 1. ~~`plan-audit-operator-principal-2026-10-03.md` — 审计主体改造是否开工（现：方案已写、零代码）~~ **本项作废（2026-10-16 对码）**：
    代码早做完并合入了 —— `session_router.py:71` = `operator = server_tenant_id(settings.default_tenant_id)`、P12 门禁在 `lint_architecture.py`、
@@ -112,6 +112,12 @@
    b 起一条真实发布线（根包 + tag 对齐，如 `v0.2.0`），后续每次交付打 tag；
    c 只对齐 federation/KS 两个非 `0.1.0` 的（它们大概率是历史发布遗留，需先查这两值是谁在什么时候为什么改的——我没查到书面依据）。
    **我未改任何 `version` 值、未打 tag、未删 tag**：这三者都属对外可声称的发布事实，按「不在本窗口部署/发布」的约束由你定。
+21. **`make eval` 判分基准要不要跟着 F01 生产实现重取**（§20 查出，TODO §4 F01 的残差就在这里）。
+   `evaluation.py` 的 positive 路径仍调内联 `_mock_scope_filter`，而它与生产实现 `enforce_scope_filter` **不等宽**：
+   mock 对 `scope_type=PUBLIC` 的跨租户项**放行**，生产实现没有 PUBLIC 例外、且 `ctx.scopes` 非空时还要再收窄 ⇒ 换过去 golden 判分必然变（15 题基线要重取）。
+   跨租户负样本路径早已跑生产代码（审计 P1-9 那批），所以这不是"接线缺失"，而是**要不要改评测语义**的决策。
+   选项：a 换实现 + 重取基线（我先出方案，含逐题差分与新的 `--fail-below` 定值）/ b 保留 mock 但在评测输出里显式标"positive 路径为宽松替身，不代表生产隔离强度" / c 什么都不动，只在 §16 与 TODO 记为在册残差。
+   **我未动 `evaluation.py` 的过滤逻辑与 golden 判分**（本批只把那句已失效的 `TODO: … 落地后替换此函数` 注释订正成现状）。
 
 ## 4. 迁移策略（本排期如何推进，不破坏可回退性）
 
@@ -634,3 +640,26 @@ uv run pytest packages/agent-runtime/tests/test_receipt_generation_fencing.py ap
 保留现值的理由：`.md` 的 BOM 不属任何判据（§14 已写"不涉 PEP 263 加载语义"），且本仓 `.gitattributes` 是 `* text=auto eol=lf` + `*.md text eol=lf`，无 BOM 才是它的目标形态。
 后果与核对方式：本篇在 HEAD 里**从此为无 BOM**，`git diff` 的首个 hunk 就是第 1 行的 BOM 变化（不是内容改动）；其余 3 个非 `.py` BOM 文件本批未碰。
 教训同 §14 那条同源：**改文件要按字节约定改**——我这次是"顺手用了一次不带 BOM 的写回"，属可避免的偏离。
+
+## 20. TODO §4 的 F01 对码：判据由「未落地」订正为「只差一处、且差的是评测语义」（2026-10-16）
+
+**怎么挑到它的**：§19 之后继续找"本地可完成、不需拍板、不需环境"的开项，扫 `docs/TODO.md` §4（会展业务骨架 6 条）时，F01 那行写的是 `enforce_scope_filter` **落地**——但代码读起来不像没落地。
+
+**实取（三通道，不按字面判）**：
+
+| 事实 | 命令 | 读数 |
+|---|---|---|
+| 生产实现在位 | `sed -n '150,190p' applications/exhibition-agent/exhibition_agent/foundation/execution_context.py` | `enforce_scope_filter` 是完整实现（租户一致 + `ctx.scopes` 收窄），非桩 |
+| 评测是否真在跑它 | `git grep -n enforce_scope_filter` | `evaluation.py:128` 的 `_evaluate_cross_tenant_negative` **在生产代码上判越权**（审计 P1-9 那批改的：先用 mock 过滤再统计 ⇒ 恒 0 的自证式假绿） |
+| mock 还剩几处 | `git grep -n _mock_scope_filter` | **3 行 = 1 个 def + 1 处调用（positive 路径）+ 1 处 docstring 提及** ⇒ 残差就这一处 |
+| 用例覆盖 | `git grep -ln enforce_scope_filter -- 'tests/*.py'` | 2 个文件：`test_execution_context_foundation.py`、`test_evaluation_framework.py` |
+
+**为什么这一处不当场换掉（这是判据问题，不是难度问题）**：mock 对 `scope_type=PUBLIC` 的跨租户项**放行**，生产实现无 PUBLIC 例外、`scopes` 非空时还更严 ⇒ 换过去 `make eval` 的 golden 判分必变，等于**改评测基线**。红线是"测试红时不许收窄断言"，反过来"为了顺手统一而改动判分"同样不该由我在无方案下做 ⇒ 转 §3 第 21 项待拍板。
+
+**本批实际改的两处**：① `evaluation.py` 里那句 `TODO: F01 … 落地后替换此函数` 已成**失效陈述**，订正为现状（已落地 + 只剩一处 + 不换的依据），零逻辑改动；② `docs/TODO.md` §4 F01 行**保持开项**、判据从"落地"收窄为"positive 路径那处替换 + 重取基线"，并声明 §0 索引「会展骨架 = 6」不受影响（现取：该段开项 6 / 闭项 0）。
+
+**两处我自己写错又当场改掉的（写下来，别让它变成下一次的事实）**：
+- 注释里我引了 `:91` 这个行号，而**我这段注释本身变长就把调用点推到了 `:94`**——行号会被自己的编辑顶掉，已改为按语句文本引用；
+- TODO 行里我先写「与 §0.4『判据措辞欠账』同类」，`grep` 后确认那句话**只存在于本台账**（TODO §0.4 没有它）⇒ 死引用，提交前改成指向真实存在的 §3 第 21 项。这正好是 memory 里"修死引用要把路径与锚点分两层核"的又一次实证：**我这次是在写下的当下就错，不是文件后来漂移**。
+
+**读数**：exhibition session **371 passed**（与加注释前同数 ⇒ 零行为变更），`ruff check applications/exhibition-agent` 全绿。
