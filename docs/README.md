@@ -25,6 +25,7 @@
 | `docs/operations/env-126-inventory.md` | 内网三机部署态基线（读数绑 rev） | 14 ★ |
 | `docs/operations/minimal-release-runbook.md` | 上台手册（含「这是多 agent 吗」标准答法 §11） | 11 ★ |
 | `docs/operations/observability-pitfalls.md` | 观测面坑档 | 5 ★ |
+| `docs/operations/unconfirmed-items.md` | **无法确认清单**（活文档）：本窗口所有"我试了但证不了"的事按 待环境 / 待放行 / 待拍板 / 口径未定 / 他人负责 / 已撤回断言 六类集中，每条自带**解锁动作**与"证不了的原因"。规则：任何一条都不许被引成"已验证"；确认后改状态不删行 | 2（2026-10-16 新建；由台账 §30 与 CHANGELOG 未发布窗口节指向） |
 | `docs/operations/demo-questions.md` | 演示问答口径 | 5 |
 | `docs/plans/plan-f-single-runtime-multi-planner.md` | Plan-F 演进总纲（AGENTS.md 顶部指向） | 13 ★ |
 | `docs/plans/production-delivery-anchor-map-2026-10-09.md` | 交付锚点取证（带日期但被活文档点名，见 §4 注） | 7 ★ |
