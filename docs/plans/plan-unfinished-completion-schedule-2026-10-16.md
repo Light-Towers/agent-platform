@@ -77,7 +77,7 @@
 11. **WS 路径要不要接 admission 与背压**（§10 P2-3）：`/ws/{thread_id}` 被入口护栏**显式豁免**（`agent_federation/api/server.py:158` `exempt_paths=("/health", "/ws/")`），且逐条 `send_json` 无队列/水位（`:382-388`）。错误帧这一半已补（`:392-403`），但限流与背压要动的是**客户端能观察到的行为**（慢消费者会被暂停或断连），属对外语义决策。
 12. **`.env.example` 剩余补齐范围与要不要做门禁**（§10 P2-5；**2026-10-16 已推进一半，做法见 §11**）：实测原写"agent_server 整份缺失、约 60 个键代码读而文档缺"，另有**观测两键"文档有而代码无"且自诞生起无人读取**（KS `KNOWLEDGE_SERVICE_NAME` / `KNOWLEDGE_TRACE_ENABLED`，2026-10-16 对码定性：`37d93427` 空改名，14 处出现/8 个文件，含 dated 记录正文与单测 `delenv`；已改用内核 `AGENT_CORE_*` 并钉桩 `test_env_example_observability_keys_are_read_by_code`）。
     **已完成**：① 观测两键按上面那句处置；② agent_server 的 **43 个**"代码读而模板缺"键已补进**根** `.env.example`（判据：它实际加载的是 CWD 那份，不是应用目录那份），并加齐全用例 `tests/governance/test_agent_server_env_template.py`（3 项变异验证均转红）。
-    **待你定的只剩两件**：① 剩下 **61 项**（KS 13 / federation 47 / exhibition 1；口径与两个盲区见 §10 P2-5 ②）要不要补；② 要不要做**全仓双向门禁**（"模板键 ⇔ 代码读取"，需先解决共享层读取与 `env_prefix` 折算两个扫不到的面）。
+    **待你定的只剩两件**：① 剩下 **61 项**（KS 13 / federation 47 / exhibition 1；**2026-10-16 §24 订正：这条被我错分类过 —— "补模板"是机械活、不该等拍板，已按 AST 实测补录 federation 7 / KS 10，所谓 61 是按 active 口径虚高的数；真正还欠你定的只剩下面 ② 那一件**口径与两个盲区见 §10 P2-5 ②）要不要补；② 要不要做**全仓双向门禁**（"模板键 ⇔ 代码读取"，需先解决共享层读取与 `env_prefix` 折算两个扫不到的面）。
     选项：a 补 61 项 + 建双向门禁 / b 只补 61 项、不建门禁（agent_server 那 43 项就是按这个形状做的）/ c 停在现状。**注**：本轮已把 KS 观测两键从"杜撰键"改判为"**文档化但无人读取的开关**"——危害不是文档噪音，而是照文档设值后静默不开。
 
 13. **MinIO 初始化要不要翻成默认拒绝启动**（§10 P2-7）：上传路径已 fail-fast（`import_router.py:229-232`），但 `clients/minio_utils.py:12-51` 初始化仍是"记 error + 置 None"。翻了之后缺配置的部署从「能起但导入功能坏」变成「起不来」——这是**部署侧的可用性取舍**，且牵动 126 现网。顺带一条孤儿：`core/config.py:174-187` 的 `validate_credentials()` 全仓零调用方（要么接上要么删，我不擅自定）。
@@ -571,7 +571,7 @@ uv run pytest packages/agent-runtime/tests/test_receipt_generation_fencing.py ap
 
 | # | session | 读数 |
 |---|---|---|
-| 1 | 根（`tests/`，`-m 'not requires_pg'`） | **1067 passed / 8 skipped / 29 deselected**（607.78s） |
+| 1 | 根会话（CI 第 1 条 = `uv run pytest -q -m "not requires_pg"`，**无路径参数** ⇒ `testpaths` 同时含 `tests` 与 `packages/agent-core/tests`，不是只 `tests/`） | **1067 passed / 8 skipped / 29 deselected**（607.78s）**（2026-10-16 §24 订正：本行原标"根（tests/）"是错的标签——只跑 `tests` 实取 720 passed，差值 ~347 即 agent-core 会话被折进了第 1 条）** |
 | 2 | shared-schemas | 28 passed |
 | 3 | agent-runtime | 653 passed / 1 skipped |
 | 4 | agent_server | 122 passed |
@@ -729,3 +729,52 @@ uv run pytest packages/agent-runtime/tests/test_receipt_generation_fencing.py ap
 **本轮最该留下的一条教训（我自己踩的，而且是"看起来通过了"的那种）**：我先把复算写成一条 `uv run python -c "…"` 一行流贴进 TODO §0 的追记里，那串代码含 `'## 1. '` —— **它 split 到了自己所在的这段文字**，于是只读到文件前 921 字符，**输出空列表、exit 0**。如果我只看退出码，这条假通过就进仓库了。
 发现方式不是复核逻辑，而是我把"要发布的命令"原样跑了一遍 ⇒ `[]`。三条推论写进 §0 追记与本节：
 ① **空输出 ≠ 通过**；② 判据命令若引用自身所在文件，必须避免与被搜文本同形（本次改为独立脚本落盘，从根上消掉自指）；③ 贴进文档的命令必须当场实跑，不实跑的命令不写进文档。
+
+## 24. 阶段 2 再前移：把被我错分类的机械活捡回来（roadmap #21 / P2-5 收尾，2026-10-16）
+
+**触发是一次对自己分拣结果的复查**，不是新需求：§3 第 12 项把两件不同的事捆在同一条"待拍板"里——
+「要不要建**全仓双向门禁**」（是决策）与「把代码在读的键**补进模板**」（是机械活、零行为变更）。
+捆在一起的结果是三家应用的模板一直没人动。按 objective「将未完成的计划进行完成」，后半截该由我做，不该等你拍板。
+
+**扫描器两次返工（都是假阴性）**：
+第一版把 `os.getenv(...)` 的函数名拼成 `os.getenv` 却拿集合里的 `"getenv"` 比对 ⇒ 几乎全漏——
+实取 federation **read=5**、knowledge-service **read=0**（而 KS 树内 `git grep` 明有 93 个 `os.getenv` 站点）。
+第二版补上 `os.environ[...]` 下标读法与 `from os import` 形态处理，并加了"扫到 0 个键即判用例空转"的自守卫 ⇒
+实取 federation **75 键 / 3 动态名**、KS **75 键 / 2 动态名**、kefu **0 键**（kefu 确实不字面读 env，走 `.env`+配置文件装配）。
+**这是今天第 5 次"探针错被当成事实"**，且前四次都发生在**我写下结论之后**而不是之前 —— 所以本批所有否定性/齐全性读数都带上了第二条通道（AST vs `git grep` 计数互校）。
+
+**口径关键一条（决定缺口是 61 还是 17）**：这两家模板把可选开关一律写成**注释态** `# KEY=default`
+（federation 文件里还自述"默认值取自代码中 os.getenv 第二参数"），那是刻意范式：开关不该带着值被部署生效。
+所以判据必须是「**是否被提及**」，不是「是否为 active 键」：
+按 active 口径实取 = federation 52 / KS 11（**假缺口**），按提及口径真缺 = **federation 7 / KS 10 = 17**。
+我此前登记的「61 项（KS 13 / federation 47 / exhibition 1）」两头都不对：既用了 active 口径，又是人工清点。
+
+**交付**：
+1. `applications/agent_federation/.env.example` +7、`applications/knowledge-service/.env.example` +10，
+   每行默认值取自 AST 实读的 `os.getenv` 第二参数并带 `<- 文件:行` 溯源；密钥类一律留空（`EVAL_JUDGE_API_KEY` / `RAGFLOW_API_KEY` 等），
+   无默认值的显式标注"未注入即走未设置分支"；两文件字节约定（LF / 无 BOM）按原样保留，`git diff` 为 **25 added / 0 deleted**。
+2. 新增 `tests/governance/test_app_env_templates.py` 2 条：**齐全**（代码字面量读取的键必须在模板被提及）+ **密钥键不得带可直接使用的值**。
+   用例 docstring 里写死了上面的口径，并说明动态键名（5 处）不在覆盖范围、kefu 不入本表的原因（0 个字面量读取点，硬凑即空转）。
+
+**非空转反证（三条，含两次探针自我纠错）**：
+
+| # | 变异 | 结果 |
+|---|---|---|
+| 1 | 把 `MYSQL_CHARSET` 整条改名为未被提及 | `rc=1`，齐全用例报红 ✓ |
+| 2 | 首版"密钥填真值形状"变异 | `rc=0` —— **但那是替换没生效的空操作**：锚点串与文件实际字节不符，我没断言"文件真的变了"就读了退出码 |
+| 3 | 加 `assert 文件字节已变` 后重做 | 仍 `rc=0` ⇒ 暴露规则本身的洞：我用**子串**匹配占位词，测试值里恰好含 `xxxx` 被判成占位符放行 |
+| 4 | 规则改为"整值精确匹配占位白名单 或 含 `<`"，再用长随机串 `sk-proj-A1b2…` 复跑 | `rc=1` ✓ 密钥用例报红 |
+
+四步全部按"备份字节→改→跑→原字节写回"执行，末次校验 `restored: True`，`git status` 对两个模板只留 intended 改动。
+**规则返工的两处都不是放宽判据凑绿**：① 初版"必须留空或含 <>"把本仓既有的 `your-key-here` 占位写法误判为违规；
+② 子串版又对真实凭据形状失守。现版把"什么算占位符"写成显式白名单，并把两次误判的经过留在 docstring 里，供下次判同一件事。
+
+**读数与未测项（说清边界，不含糊）**：
+- `uv run pytest tests/governance/test_app_env_templates.py -q` ⇒ **2 passed**（本批新增）。
+- `uv run pytest tests -q -m "not requires_pg"` ⇒ **720 passed / 29 deselected**。这一条只覆盖 `tests/`，**不等于 CI 的第 1 个会话**——
+  由此发现并订正了 §18 会话 1 的标签错误（CI 用 `testpaths = tests + packages/agent-core/tests`，故 §18 记的 1067 里含 agent-core 的 ~347 条）。
+- **CI 等价的根会话本轮未重跑**（命令 `uv run pytest -q -m "not requires_pg"` 被用户中止）⇒ 「根会话 1067 → 1069」目前只是**推断**（只新增一个测试文件、零产品代码改动），不是实测。对外引用前需补跑这一条。
+- 其余 9 个会话本批未跑；`ruff check` 新文件全绿。
+
+**§3 第 12 项相应收窄**：剩下的只有「要不要建**全仓双向门禁**（模板键 ⇔ 代码读取，含动态键名与跨包共享层读取）」这一件决策，
+外加「kefu 这种 0 字面量读取点的应用要不要另设判据」；"补模板"这半截已从待拍板里拿走并完成。
