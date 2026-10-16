@@ -41,6 +41,9 @@
 
 「自述状态」= 文内状态行摘录；「未标」= 文内没有可辨状态行，**需读正文才能定**。提及数为全仓入库文件中该文件名的出现次数（含 CHANGELOG 历史条目与自身提及），只作相对热度，不作"仍在用"的证据。
 
+> **2026-10-16 追记（本层新增 4 行，其余行未动）**：本节写就时是 71 篇，现值为**顶层 `docs/plans/*.md` 入库 75 篇 / 文件系统 76 篇**（差的 1 篇是并行会话新建、此刻尚未入库的 plan-deep-research-app-2026-10-16.md——**按 AGENTS.md「不入库路径不用反引号」的纪律这里写成普通文本**，且**本索引不代登**，由它自己的会话登记）。复取命令：`git ls-files docs/plans | grep -cE '^docs/plans/[^/]+\.md$'`。新登记的四篇：`plan-v3-unwired-landing-2026-10-15`、`plan-unfinished-completion-schedule-2026-10-16`、`plan-identity-gate-6of6-2026-10-16`、`plan-forensic-provenance-wiring-2026-10-16`。
+> **两条没有重取、不得当现值引**：① 顶部第 4 行的「42 篇有状态行 / 29 篇未命中」与 §7 名单仍是 2026-10-15 快照（上面四篇都**有**可辨状态行，但按 §6 口径命令未重跑）；② 四行的「提及」数在本批合入后会各自 +1 以上（新行本身就是新增引用），复现请用 `git grep -c -o -- "<文件名>" | awk -F: '{s+=$NF} END{print s}'` 现取。
+
 ### 3.1 安全与依赖整改（CodeQL / Dependabot / 风险接受）
 
 | 文件 | 自述状态 | 末次 | 提及 |
@@ -64,6 +67,8 @@
 | `plan-v3-phase-3.4-awaitable-integration-2026-09-23.md` | 设计文档 + 实现中 | 09-23 | 0 |
 | `plan-v3-identity-merge-2026-10-01.md` | 已拍板并在执行中 | 10-01 | 2 |
 | `plan-production-delivery-roadmap-2026-10-09.md` | 未标（一期阶段 0–3；正文本轮有 2026-10-14 订正） | 10-09 | 4 |
+| `plan-v3-unwired-landing-2026-10-15.md` | **原批 5/5 + 续批 §6/§7 均已落地**（未部署；真 PG 并发双写与双实例故障转移判据仍「待环境」） | 10-15 | 12 |
+| `plan-unfinished-completion-schedule-2026-10-16.md` | **现行执行排期**（§0 截止日 / §2 排期 / §3 = 真待拍板 20 项 / §16 七条标准复取 / §25–§26 本批复跑留档） | 10-16 | 22 ★ |
 
 ### 3.3 P0 / P1 / P2 缺陷与门禁整改
 
@@ -92,6 +97,7 @@
 | `plan-observability-target-model-2026-10-14.md` | 未标 | 10-14 | 3 |
 | `plan-tracing-shutdown-flush-timeout-2026-10-10.md` | 未标 | 10-10 | 4 |
 | `plan-tool-instrumentation-choke-point-2026-09-25.md` | ✅ 已落地（v3.1 定板 + 批 0/1…） | 09-25 | 3 |
+| `plan-forensic-provenance-wiring-2026-10-16.md` | **Proposed（待拍板，不授权编码）**：roadmap §四 第 6 条缺口的方案，含 Q1–Q5 五问；§1.1 记有一条实测——记录级取证在 PG 侧不落库 ⇒ 缺口是两层（字段填充 + 持久化读回） | 10-16 | 5 |
 
 ### 3.5 记忆 / 身份 / 隔离 / 租户
 
@@ -99,6 +105,7 @@
 |---|---|---|---|
 | `plan-memory-hardening-2026-09-27.md` | 未标（正文含"已落地"字样，T2–T8 需逐条对） | 10-02 | 9 ★ |
 | `plan-memory-identity-workspace-2026-10-14.md` | 未标（现状事实卡 + 五阶段方案，不动代码） | 10-14 | 3 ★ |
+| `plan-identity-gate-6of6-2026-10-16.md` | **实施方案（只覆盖可独立执行的一半）**：6/6 装配点 + P13 归属门禁已落地；fork 收敛与 enforce 现网取证显式转待拍板/待环境 | 10-16 | 6 |
 | `plan-memory-backend-stale-embed-signature-2026-10-10.md` | 未标 | 10-10 | 1 |
 | `plan-tenant-identity-2026-09-27.md` | 未标（正文含"待执行"字样） | 09-27 | 3 |
 | `plan-isolation-hardening-2026-09-27.md` | 未标 | 09-27 | 8 ★ |
