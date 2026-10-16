@@ -576,6 +576,12 @@ uv run pytest packages/agent-runtime/tests/test_receipt_generation_fencing.py ap
 
 **rev 归属（这条必须写清，否则读数不可核对）**：本轮跑在 `f641ca5` 的**代码树**上，但 10 个 session 执行期间我正在写 §16/§17（三次未提交的文档编辑）⇒ 严格读数是「`f641ca5` 代码树 + 中途未入库的 docs」。
 可核对性靠两点，不靠断言：① 本批改动面只有 `CHANGELOG.md` + 两篇 `docs/plans/*`，**零 `.py`**；② 总数与 §12 那次在干净 tip 上的全量**逐 session 同值**（2912 / 16）⇒ 没有任何用例在数文档内容，中途编辑不构成读数影响。
-**消除歧义的处置**：提交后在当前 tip 上另起一轮 clean-tree 复跑，结果就地补在下行；两轮同值才对外用「本分支全量门禁绿」这句。（占位：`<待补>`）
+**消除歧义的处置**：提交后在当前 tip 上另起一轮 clean-tree 复跑，结果就地补在下行；两轮同值才对外用「本分支全量门禁绿」这句。
+
+**第二轮（clean-tree 复跑，2026-10-16 06:41–06:55，工作区 = `7a25583`，代码树与 `f641ca5` 逐字节相同）**：10 个 session 逐条同值 ——
+根 **1067 passed / 8 skipped / 29 deselected**、shared-schemas 28、agent-runtime **653 / 1 skipped**、agent_server **122**、agent_federation **176**、kefu **47**、exhibition **368**、knowledge-service **412 / 7 skipped**、nl2sql **21**、observability(--extra otel) **18** ⇒ **合计 2912 passed / 16 skipped，全部退出码 0**（脚本末行 `ALL SESSIONS DONE`）。
+**与 §12 那次的关系**：§12 记的也是 2912 / 16，三轮独立读数（`b76108f` 时点、`f641ca5` 代码树 + 中途 docs、`7a25583`）逐 session 同值 ⇒ 本轮之后的那批文档改动**没有改变测试面**（`.py` 自 `f641ca5` 起未再变动）。
+**仍未消除的残留（说清楚，别读成"零瑕疵证据"）**：本轮 20 分钟里我提交了两个 doc-only commit（`bd4a900`、`7a25583`），所以它也不是严格意义上的"零写入静态树"；要做到那一点必须 20 分钟内不动任何文件，本窗口做不到。判定这句对外可说的强度是「**`.py` 自 `f641ca5` 起逐字节未变 + 三轮同值**」，不是「一次 pristine checkout」。
+**耗时会漂**：root session 607s→140s、agent_server 46s→495s、otel 439s→24s（首轮含 `--extra otel` 依赖解析；并发会话抢 IO）。**耗时不可用作回归判据，只有 passed/skipped 计数与退出码可以**。
 
 **仍未覆盖的范围（不把 10 session 说成"全部验证"）**：`make ci` 还含 `ruff check .` + `scripts/lint_architecture.py` + 启发式 eval；前两者本批已单独跑过（§15 验收、§17 自查 `check_doc_sync.py`），eval 未在本窗口重跑。真库/双实例/现网类用例仍属 §2 的「待环境」，不随本节翻状态。
