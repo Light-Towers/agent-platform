@@ -120,3 +120,48 @@ async def test_singleflight_refcount_after_completion():
     assert result == 42
     # fn 完成后 refs 应已减到 0
     assert _refs.get(key, 0) == 0
+
+
+@pytest.mark.asyncio
+async def test_cleanup_reclaims_state_when_idle():
+    """反向守卫：refs==0 且 lock 身份相符时，`_cleanup` 必须**真的回收**。
+
+    上面两条 P2-2 回归只钉住「不该删时不删」。但守卫也可以被写得过严（永不删除）——
+    那种实现下这两条照样全绿，而 `_locks` / `_refs` / `_inflight_results` 会随 key 数
+    无界增长，变成内存泄漏。本用例钉住另一半，三个字典必须一起清空。
+
+    注：真实运行里 `_cleanup` 由 `loop.call_later(300, …)` 延迟调度（见 singleflight 的
+    finally 分支），这里直接调函数本身，是为了把「该删时删不删」与时钟解耦。
+    """
+    key = "idle_cleanup"
+
+    async def fn():
+        return "v"
+
+    assert await singleflight(key, fn) == "v"
+    assert _refs.get(key) == 0 and _inflight_results.get(key) == "v", "前置：结果应在窗口内保留"
+
+    _cleanup(key, _locks[key])
+    assert key not in _locks, "空闲且身份相符时未回收 ⇒ _locks 无界增长"
+    assert key not in _refs
+    assert key not in _inflight_results
+
+
+@pytest.mark.asyncio
+async def test_cleanup_is_idempotent_after_reclaim():
+    """重复投递的 cleanup（同一 key 的两次归零窗口）不得把后来重建的状态删掉。"""
+    key = "double_cleanup"
+
+    async def fn():
+        return 1
+
+    await singleflight(key, fn)
+    first_lock = _locks[key]
+    _cleanup(key, first_lock)
+    assert key not in _locks
+
+    # 新调用重建同名 key，旧的 first_lock 回调再来一次也必须无害
+    await singleflight(key, fn)
+    _cleanup(key, first_lock)
+    assert key in _locks, "过期 callback 把新建的 lock 删了"
+    _cleanup(key, _locks[key])
