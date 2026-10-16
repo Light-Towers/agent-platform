@@ -8,7 +8,12 @@
    旧行为（只标 FAILED + 释放 slot）。
    边界：生产尚未接 ``contract_resolver``，契约恒为 None ⇒ 决策退化为
    「无契约默认可重试」（见 ``RecoveryManager.decide``），属**能力接上、语义待补**。
-   ``payload_externalization`` / ``human_task`` 仍未接线。
+   兄弟模块 ``payload_externalization``（由 ``agent_server`` 的
+   ``_build_payload_externalizer`` 构造并注进 checkpoint 链路）与 ``human_task``
+   （``main`` 装 ``HumanTaskStore`` → ``protocol.delegate`` 按 ``kind="human"`` 分派）
+   已于 2026-10-15 接线，**接线 ≠ 默认启用**：payload 侧受
+   ``payload_externalization_enabled``（默认 False）门控，human_task 侧状态机推进
+   依赖 scheduler 开关。
    （此前状态为 NOT WIRED，P1-7 审计披露 2026-09-24）
 
 补 V3-4A 留的恢复侧：执行超时 / Worker 死亡 / lease 过期后，如何把 stuck execution

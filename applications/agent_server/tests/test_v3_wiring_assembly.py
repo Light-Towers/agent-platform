@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import asyncio
+import importlib
 
 import pytest
 from agent_runtime.control_plane import ControlPlane
@@ -195,3 +196,48 @@ def test_payload_externalization_enabled_without_dir_fails_fast(_settings_env):
 
     with pytest.raises(RuntimeError, match="PAYLOAD_EXTERNALIZATION_DIR"):
         _build_payload_externalizer()
+
+
+# ===== 护栏：4 个已转正模块不得再退化为孤岛（roadmap 阶段1 #5 判据的后半句）=====
+
+_WIRED_MODULES = (
+    "state_migration",
+    "execution_recovery",
+    "payload_externalization",
+    "human_task",
+)
+
+
+@pytest.mark.parametrize("module_name", _WIRED_MODULES)
+def test_wired_module_keeps_a_real_assembly_point_in_main(module_name):
+    """main.py 必须仍然引用 `agent_runtime.<module>`，否则该模块的「未接线」立刻复活。
+
+    本文件通篇的判据是装配产物而非「能 import」；但 lifespan 尚未拆成可单测的
+    builder（拆它属高风险大函数重构，另见 tech-debt T2.2 items1-4），所以这条
+    只能钉装配点的源码锚。它的价值不在证明接线正确，而在**证明接线没有消失**——
+    正是 `state_migration` 当年「实现+单测全绿、调用点没传 migrator」那一类失效。
+    """
+    import inspect
+
+    from agent_server import main
+
+    src = inspect.getsource(main)
+    assert f"agent_runtime.{module_name}" in src, (
+        f"agent_server/main.py 不再引用 agent_runtime.{module_name}："
+        f"该模块已退化为孤岛（能力仍在、装配点没了），请恢复接线而不是改本用例"
+    )
+
+
+def test_no_wired_module_still_claims_itself_unwired():
+    """文档护栏：已接线模块的源码不得再声称「仍未接线」。
+
+    实踩过：`execution_recovery.py` 的 docstring 在 payload_externalization /
+    human_task 接线后仍写着「仍未接线」，会误导下一个读代码的人（含 agent）
+    把已完成项重新列为缺口。
+    """
+    offenders = [
+        name
+        for name in _WIRED_MODULES
+        if "仍未接线" in (importlib.import_module(f"agent_runtime.{name}").__doc__ or "")
+    ]
+    assert not offenders, f"以下模块已接线但 docstring 仍声称未接线：{offenders}"
