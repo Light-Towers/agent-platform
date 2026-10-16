@@ -120,3 +120,45 @@ async def test_skill_egress_denied_uses_enum():
     result = await skill.run({"venue_id": "vn-001"}, sc)
     assert result.egress_decision == EgressDecision.DENY
     assert result.egress_decision.value == "DENY"
+
+
+# ===== roadmap 阶段1 #10：数据可信度缺标注 ⇒ 默认「待确认」，不再默认 READY =====
+
+
+async def test_missing_readiness_is_unconfirmed_not_ready(warehouse_client):
+    """判据原文「造一条无标注响应，输出必须显示待确认」——用 mock 场景 9。"""
+    context = ctx()
+    sc = SkillContext(
+        execution_context=context,
+        execution_context_header=ctx_header(context),
+        warehouse_client=warehouse_client,
+        routed_endpoint=VENUE_SCHEDULE_ENDPOINT,
+        extra_headers={"X-Mock-Scenario": "missing_readiness"},
+    )
+    skill = VenueScheduleQuerySkill()
+    result = await skill.run({"venue_id": "vn-001"}, sc)
+    # 关键：未标注 ≠ 可信
+    assert result.readiness == Readiness.UNCONFIRMED
+    assert result.readiness != Readiness.READY
+    assert any("待确认" in w for w in result.warnings), result.warnings
+
+
+@pytest.mark.parametrize(
+    ("level", "expected"),
+    [
+        (None, Readiness.UNCONFIRMED),           # 整个字段缺失
+        ("complete", Readiness.READY),           # 唯一显式可信的值
+        ("synthetic", Readiness.SYNTHETIC),
+        ("partial", Readiness.PARTIAL),
+        ("pending", Readiness.NOT_CONNECTED),
+        ("sparse_sample", Readiness.NOT_CONNECTED),
+        # 以下两例走旧代码的兜底 `return READY`（第二处 fail-open）：未知 level 与空串
+        ("we_new_level", Readiness.UNCONFIRMED),
+        ("", Readiness.UNCONFIRMED),
+    ],
+)
+def test_map_readiness_fails_closed(level, expected):
+    """`_map_readiness` 的两个 fail-open 出口（None / 未知 level）都必须判 UNCONFIRMED。"""
+    from exhibition_agent.skills.venue_schedule_query import _map_readiness
+
+    assert _map_readiness(level) is expected

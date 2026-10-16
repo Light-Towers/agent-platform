@@ -181,6 +181,28 @@ async def test_run_skill_readiness_blocks_in_production(monkeypatch):
     assert out["skill_result"].readiness == Readiness.NOT_CONNECTED
 
 
+# ===== roadmap 阶段1 #10 第二句「每条接口必须标注，缺标注则拒绝接入」=====
+# 旧行为是 fail-open：catalog 里没写 readiness 的接口落到 readiness_tag="UNKNOWN"，
+# 而门禁只拦 "SYNTHETIC" ⇒ 没标注 = 自动放行。实测这 4 个无标注接口恰是写操作
+# （create_lead / delete_lead / confirm_lead / reject_lead）。
+
+
+def test_unannotated_write_tool_denied_in_production(monkeypatch):
+    monkeypatch.setenv("AGENT_MODE", "PRODUCTION")
+    direct = route("create_lead", ctx())
+    assert direct["allowed"] is False, direct
+    assert direct["readiness_tag"] == "UNKNOWN"
+    assert "未标注" in direct["reason"]
+
+
+def test_unannotated_tool_still_routed_outside_production(monkeypatch):
+    """fail-closed 只作用于生产档；DEV/DEMO 不设新障碍（渐进开启，不误伤本地与 CI）。"""
+    monkeypatch.setenv("AGENT_MODE", "DEMO")
+    direct = route("create_lead", ctx())
+    assert direct["allowed"] is True, direct
+    assert direct["readiness_tag"] == "UNKNOWN"
+
+
 # 门禁只作用于命中 _CATALOG_ROUTE 的 skill：data_analysis.query 跳过 route 仍正常执行。
 async def test_run_skill_data_analysis_skips_catalog_route(monkeypatch, mock_nl2sql_success):
     monkeypatch.setattr(metric_registry, "get_metric_status", lambda mid: "VERIFIED")

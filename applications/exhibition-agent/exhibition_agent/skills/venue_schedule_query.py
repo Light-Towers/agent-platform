@@ -49,8 +49,16 @@ def _pending_result(code: str, message: str) -> SkillResult:
 
 
 def _map_readiness(level: str | None) -> Readiness:
-    """warehouse REST data_readiness.level → 平台侧 Readiness 枚举。"""
-    if level is None or level == "complete":
+    """warehouse REST data_readiness.level → 平台侧 Readiness 枚举。
+
+    fail-closed（roadmap 阶段1 #10）：**缺标注（None）与未知 level 一律判
+    UNCONFIRMED（待确认）**，不再默认 READY。此前两处都会落到 READY——
+    ①`level is None`，②函数末尾的兜底 return——等于把「业务系统没标注可信度」
+    当成「数据完整可信」，合成样本可能被当成经营结论输出。
+    """
+    if level is None:
+        return Readiness.UNCONFIRMED
+    if level == "complete":
         return Readiness.READY
     if level in _PENDING_LEVELS:
         return Readiness.NOT_CONNECTED
@@ -58,7 +66,8 @@ def _map_readiness(level: str | None) -> Readiness:
         return Readiness.SYNTHETIC
     if level == "partial":
         return Readiness.PARTIAL
-    return Readiness.READY
+    # 未知 level：不猜它是可信的，按待确认处理（未知即需人工确认）
+    return Readiness.UNCONFIRMED
 
 
 class VenueScheduleQuerySkill(BaseSkill):
@@ -176,6 +185,14 @@ class VenueScheduleQuerySkill(BaseSkill):
             warnings.append("合成数据，仅供链路演示，非真实经营结论")
         if readiness == Readiness.PARTIAL:
             warnings.append("部分数据为稀疏/样本，结论仅供参考")
+        if readiness == Readiness.UNCONFIRMED:
+            # roadmap #10 判据：无标注响应的输出必须显示「待确认」，不得按可信输出
+            logger.warning(
+                "数据可信度未标注：skill=%s level=%r → 判 UNCONFIRMED（待确认），不默认 READY",
+                self.name,
+                readiness_level,
+            )
+            warnings.append("数据可信度待确认：该接口未标注 data_readiness，结论不作经营依据")
 
         return SkillResult(
             answer=self._format_answer(data, citations),
