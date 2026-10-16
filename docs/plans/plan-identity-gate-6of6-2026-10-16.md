@@ -9,7 +9,15 @@
 ## 1. 目标
 
 1. 6 个服务**每一个都有身份装配点**（当前 2/6 用共享实现），使「启用强制隔离后未接入服务仍可被自报身份绕过」这一风险变成**可机检的事实**而非约定。
-2. 装配点默认**只观察不拦截**（observe 档），因此本批上线**响应体/状态码零变化**——隔离能力的引入与引入的副作用被解耦。
+2. 装配点默认**只观察不拦截**（observe 档）。**行为面准确的口径**（本轮实施时收窄过，写在
+   这里免得被当成"绝对零变化"）：
+   - 无凭据请求、不透明 Bearer（静态 API_KEY 形态）、`/health` 等 skip 路径 ⇒ **逐字不变**；
+     网关今日对 kefu/nl2sql **不发任何身份头**（`agent/async_subagents.py` 无 headers 构造），
+     所以现存流量整体不受影响，这两条有用例钉（observe 透传 + skip 面）。
+   - **一处有意的变化**：JWT 形态的 `Authorization` 凭据过去被这两个服务**完全忽略**，
+     接入后若无法验签会得到 401（`identity_middleware.py` 既有的 fail-closed 语义，与
+     agent_server/federation 同规则）。即"带着身份声明但验不了"从静默通过变成明确拒绝。
+     这不是漏项，是身份门卫的定义本身；写在这里是为了上台时能说清差异在哪。
 3. 加**存在性门禁**（漏装即在 CI 失败），与 #12 的 L-5 同族：禁止性规则（不许散落）与存在性规则（不许漏装）互补，缺一条即退化为口头约定。
 
 ## 2. 现状（本轮实读，逐条给锚点，不沿用文档口径）
@@ -45,6 +53,15 @@
 2. 翻 enforce 是**运维动作**（置 env），不是代码动作 ⇒ 回退 = 撤 env；代码回退 = revert 一个 commit。
 3. 灰度开关有记录（判据第 3 条）：`mount_identity_gate` 在启动时打印一行「service / mode(jwt|single|insecure) / enforce(bool) / 档位来源 env 名」，现网可据此核对当时生效的档，不靠猜。
 4. 两套 fork 门卫**保持现状运行**（它们在 126 上是活着的），收敛方案另出（§5 第 1 项）。
+5. **依赖面（本批唯一的构建侧影响）**：kefu-service 与 nl2sql-service 此前**不依赖 agent-runtime**，
+   接入共享实现 ⇒ 两家的 `pyproject.toml` 新增 `agent-runtime[identity]`（PyJWT[crypto] + cryptography）。
+   不选"把中间件挪进 agent-core"：`identity.py:20` 的注释记着 RS256 签/验刻意不进 core（红线 1 的
+   历史决策），造第四套实现更不符合本项的"单一实现"目标。PyJWT 在 `identity.py` 是**惰性导入**
+   （只有真收到令牌才 `import jwt`），故 observe 档不依赖该 extra 也不会启动失败。
+6. **本机操作注意（本轮实踩，写给下一个改 extra 的人）**：`uv sync --all-packages --extra dev`
+   会把此前装过但本次未请求的 extra **卸掉**（本批一次 `uv sync` 静默移除了 otel 全家），
+   而 `tests/observability` 的钉用例前置正是"装了真 SDK" ⇒ 改完依赖要按原 extra 集合复同步
+   （`--extra dev --extra otel`），否则会看到与改动无关的红/跳。
 
 ## 5. 本批明确不做（各给理由，不当作已完成）
 
@@ -62,3 +79,45 @@
 ## 7. 工时与截止
 
 roadmap 估 6 人/日。本批交付 §3 的三层 + §6 的 1/2/3 条，**截止 2026-10-17**；§5 三项不在本批承诺内（其中 1、2 需你先拍板方向）。
+
+## 8. 实施记录（2026-10-16，早于 §7 的 10-17 截止；提交 `a2bac21`）
+
+**落地的三层**：
+
+| 层 | 实际落点 |
+|---|---|
+| 单一实现 | `packages/agent-runtime/agent_runtime/identity_assembly.py`：`mount_identity_gate(app, service_name)`（启动守卫 → `add_middleware(IdentityMiddleware, verify_header=按请求判定的采信器)` → 档位留痕），返回档位快照供测试与运维核对 |
+| 全局装配 | `kefu_agent/__main__.py`、`nl2sql_service/api/server.py` 各一次（与 #12 的 `init_tracing` 同处，位置即顺序） |
+| 强制门禁 | `lint_architecture.py` **P13** + `_IDENTITY_ASSEMBLY` 归属表（4 shared / 2 fork）；顺带把 L-5 与 P13 的服务枚举合并为 `_enumerate_platform_apps()`（单一实现，避免两处判据各自漂移） |
+
+**门禁输出**：`P13 身份装配覆盖通过：6/6 服务均有身份门卫装配点（shared 4 / fork 2，归属与在册债见 _IDENTITY_ASSEMBLY）`。
+
+**§6 逐条结果**：
+
+| §6 判据 | 结果 |
+|---|---|
+| 1 P13 绿 + 注释掉即红 | ✅ 真树变异：注释 kefu 的调用 ⇒ `exit=1` 且点名 `applications/kefu-service: 无身份装配点` |
+| 2 两服务各≥2 条用例 | ✅ kefu 4 条 / nl2sql 3 条（真 FastAPI 上断言中间件在栈里 + 健康检查形状 + skip 面）；装配**行为** 13 条集中在 `packages/agent-runtime/tests/test_identity_assembly.py`（单一实现只测一次，不在各家复制矩阵） |
+| 3 全量门禁 | ✅ ruff 0；`lint_architecture` exit 0；`check_doc_sync` 0 警告；root **1064 passed / 8 skipped / 29 deselected**、agent-runtime+agent_server+federation **948**、kefu+exhibition+knowledge+nl2sql+shared-schemas **874 / 7**、`tests/observability`（真 OTel SDK）**18** |
+| 4 记账口径 | ✅ 本文与 roadmap #11 均按「存在性 6/6 达成、fork 未收敛、enforce 未取证」分项，**不整体宣布 #11 完成** |
+
+**反证中抓到的一处判据缺陷（值得留着当方法教训）**：P13 的正则最初写成裸名字 `mount_identity_gate`，
+于是"注释掉调用、留着 import"这个形状**照样全绿**——恰是本条要防的漏装。第一次真树变异因此
+没有变红，才暴露出来。现在正则取**调用形**（`(?<!def )\b名字\s*\(`），并由
+`tests/governance/test_identity_gate_coverage.py::test_import_without_call_counts_as_missing` 专门钉住。
+⇒ 教训：**门禁的判据必须用变异反证来定形**，"我写了一条检查"与"这条检查会因违规而报红"是两件事。
+
+**顺带修掉的两处（都是本轮读代码/跑测试撞见的，非本项范围但同一条链上）**：
+1. `IdentityMiddleware` 的验签器抛非 `IdentityError` 时原样冒泡 ⇒ 客户端可触发的 **500**
+   （`import jwt` 惰性 ⇒ 镜像缺 `[identity]` extra 只在收到令牌时才炸）。现 fail-closed 回 401
+   且**不回显异常文本**；用例 `test_verifier_crash_fails_closed_without_leaking` 反向验证
+   （撤掉加固即转红，R2）。
+2. kefu 三处文档（`README.md`、`.env.example`、模块 docstring）写的启动目标 `uvicorn kefu_agent:app`
+   **实测解析失败**：包 `__init__.py` 不导出 `app` ⇒ `Attribute "app" not found in module "kefu_agent"`。
+   已改为 `kefu_agent.__main__:app` 并加启动目标可解析用例，防再次漂移。
+
+**未完成（本行不闭合，判据仍开）**：
+- §5.1 两套 fork 门卫收敛到共享实现（待拍板）；
+- §5.2 路由侧自报租户改为服务端断言（含 nl2sql 的租户语义定义，待拍板）；
+- 「enforce 生效 + 灰度记录」的**现网取证**（待环境：置 `TENANT_JWT_ENFORCE` 后按启动留痕行核对档位，
+  并以真实令牌验一次 401/断言）。
