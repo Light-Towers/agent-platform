@@ -14,10 +14,15 @@
   - side_effects 中 :WRITE 类型每 step 恰好 1 条（HAProbe 桩幂等）
   - 任一 step 的 side effect 不重复 → 跨进程接管不引入重复副作用
 
-前置：本机 PostgreSQL 监听 5433，凭证 agent/agent_platform_dev，库 agent_platform。
+前置：**必须显式注入 ``AGENT_PLATFORM_PG_URL``**（真 PostgreSQL DSN）。本脚本不提供默认
+地址——静默回落到开发机 localhost:5433 会让「真库通过」这条取证结论对应到非预期环境
+（roadmap #16，2026-10-16 去掉默认值）。CI 由 ``.github/workflows/ha.yml`` 的 job env 注入。
 本脚本完全自包含（内联 HAProbe 注册表，不依赖 tests 包结构）。
 用法：
-  .venv/bin/python scripts/ha_real_kill_verify.py
+  AGENT_PLATFORM_PG_URL=postgresql://<user>:<password>@<host>:<port>/agent_platform \
+      .venv/bin/python scripts/ha_real_kill_verify.py
+
+退出码：0 通过 · 1 effectively-once 断言失败 · 2 A 未按时自杀 · 3 B 未按时接管 · 4 配置缺失
 """
 
 import asyncio
@@ -26,16 +31,41 @@ import os
 import signal
 import sys
 import time
+from urllib.parse import urlsplit
 
 # 让脚本可直接从仓库根运行，导入 packages/agent-runtime 下的包
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 sys.path.insert(0, os.path.join(ROOT, "packages", "agent-runtime"))
 
-PG_URL = os.environ.get(
-    "AGENT_PLATFORM_PG_URL",
-    "postgresql://agent:agent_platform_dev@localhost:5433/agent_platform",
-)
+_PG_URL_ENV = "AGENT_PLATFORM_PG_URL"
+EXIT_CONFIG = 4
+
+
+def _require_pg_url() -> str:
+    """真库 DSN 必须显式注入，缺失即拒跑（roadmap #16）。
+
+    刻意不提供默认值：本脚本的输出是 effectively-once 的取证结论，静默连到开发机本机端口
+    会拿非预期环境的库报 PASS。
+    """
+    url = os.environ.get(_PG_URL_ENV, "").strip()
+    if not url:
+        print(
+            f"配置缺失：未注入 {_PG_URL_ENV}，本脚本不提供默认 DSN，拒绝在未知库上产出取证结论。"
+            f"请显式注入 {_PG_URL_ENV}=postgresql://<user>:<password>@<host>:<port>/<db>",
+            file=sys.stderr,
+            flush=True,
+        )
+        raise SystemExit(EXIT_CONFIG)
+    return url
+
+
+def _pg_url_label(url: str) -> str:
+    """取证用：只报库的位置，绝不把 DSN 里的凭证写进日志。"""
+    parts = urlsplit(url)
+    return f"host={parts.hostname} port={parts.port or 5432} db={parts.path.strip('/')}"
+
+
 STEPS = 3
 STEP_SLEEP = 1.5          # 每步 sleep，留出故障注入窗（3×1.5=4.5s < LEASE_TTL，B 可从容续跑）
 LEASE_TTL = 8.0           # 副本 lease TTL，B 需等 A 的 lease 过期才能接管
@@ -126,13 +156,13 @@ def _make_runtime(pool, registry, replica: str):
     )
 
 
-def _proc_a(execution_id: str, ready_path: str):
+def _proc_a(execution_id: str, ready_path: str, pg_url: str):
     """进程 A：跑 execute_graph，步骤 1 完成后立刻 SIGKILL 自身（模拟副本崩溃）。"""
     async def _main():
         from agent_runtime import db as _db
         from agent_runtime.planner.execution_graph import execute_graph
 
-        pool = await _db.init_pool(PG_URL)
+        pool = await _db.init_pool(pg_url)
         await _clean_execution(pool, execution_id)
 
         step_count = {"n": 0}
@@ -156,13 +186,13 @@ def _proc_a(execution_id: str, ready_path: str):
     asyncio.run(_main())
 
 
-def _proc_b(execution_id: str):
+def _proc_b(execution_id: str, pg_url: str):
     """进程 B：A 死、lease 过期后接管同 execution_id。"""
     async def _main():
         from agent_runtime import db as _db
         from agent_runtime.planner.execution_graph import execute_graph
 
-        pool = await _db.init_pool(PG_URL)
+        pool = await _db.init_pool(pg_url)
         registry = HAProbeRegistry(pool, execution_id, sleep_s=STEP_SLEEP, replica="agent-b")
         runtime = _make_runtime(pool, registry, "agent-b")
         async for _ev in execute_graph(build_probe_graph(STEPS), runtime, execution_id=execution_id):
@@ -172,9 +202,9 @@ def _proc_b(execution_id: str):
     asyncio.run(_main())
 
 
-async def _assert_effectively_once(execution_id: str):
+async def _assert_effectively_once(execution_id: str, pg_url: str):
     from agent_runtime import db as _db
-    pool = await _db.init_pool(PG_URL)
+    pool = await _db.init_pool(pg_url)
     async with pool.connection() as conn:
         cur = await conn.execute(
             "SELECT effect_key FROM side_effects WHERE execution_id = %s", (execution_id,)
@@ -193,20 +223,22 @@ async def _assert_effectively_once(execution_id: str):
 
 
 def main():
+    pg_url = _require_pg_url()
     execution_id = os.environ.get("HA_EXEC_ID", f"HA-REAL-{int(time.time())}")
     ready_path = os.path.join("/tmp", f"ha_ready_{execution_id}.txt")
     if os.path.exists(ready_path):
         os.remove(ready_path)
 
     if MODE == "a":
-        _proc_a(execution_id, ready_path)
+        _proc_a(execution_id, ready_path, pg_url)
         return
     if MODE == "b":
-        _proc_b(execution_id)
+        _proc_b(execution_id, pg_url)
         return
 
+    print(f"[main] target PG: {_pg_url_label(pg_url)}", flush=True)
     print(f"[main] execution_id={execution_id}", flush=True)
-    pa = multiprocessing.Process(target=_proc_a, args=(execution_id, ready_path), name="agent-a")
+    pa = multiprocessing.Process(target=_proc_a, args=(execution_id, ready_path, pg_url), name="agent-a")
     pa.start()
     for _ in range(120):
         if os.path.exists(ready_path):
@@ -225,7 +257,7 @@ def main():
     print(f"[main] 等待 lease 过期 {wait}s 后启动 B 接管...", flush=True)
     time.sleep(wait)
 
-    pb = multiprocessing.Process(target=_proc_b, args=(execution_id,), name="agent-b")
+    pb = multiprocessing.Process(target=_proc_b, args=(execution_id, pg_url), name="agent-b")
     pb.start()
     pb.join(timeout=60)
     if pb.is_alive():
@@ -233,7 +265,7 @@ def main():
         pb.kill()
         sys.exit(3)
 
-    errors, detail = asyncio.run(_assert_effectively_once(execution_id))
+    errors, detail = asyncio.run(_assert_effectively_once(execution_id, pg_url))
     print("[main] side_effects 明细:", detail, flush=True)
     if errors:
         print("[main] FAIL:", file=sys.stderr, flush=True)
