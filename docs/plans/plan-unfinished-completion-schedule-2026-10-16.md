@@ -663,3 +663,28 @@ uv run pytest packages/agent-runtime/tests/test_receipt_generation_fencing.py ap
 - TODO 行里我先写「与 §0.4『判据措辞欠账』同类」，`grep` 后确认那句话**只存在于本台账**（TODO §0.4 没有它）⇒ 死引用，提交前改成指向真实存在的 §3 第 21 项。这正好是 memory 里"修死引用要把路径与锚点分两层核"的又一次实证：**我这次是在写下的当下就错，不是文件后来漂移**。
 
 **读数**：exhibition session **371 passed**（与加注释前同数 ⇒ 零行为变更），`ruff check applications/exhibition-agent` 全绿。
+
+## 21. nl2sql-service 的 env 模板补齐 + 门禁（roadmap #21 / P2-5 第三处，2026-10-16，截止=当日）
+
+**怎么找到的**：§19 里我为了划"能不能机械折算"的范围，全仓 `git grep BaseSettings` —— 命中第三个模型 `shared_schemas/settings.py::BaseLLMSettings`。
+它自己不装模板，由 **`agent_server`（已钉）与 `nl2sql-service` 两个子类**承载 ⇒ 顺着去比 nl2sql 的模板，**这里就有真缺口**：
+`Settings.model_fields` 折算出 **25** 个真实 env 名，模板只有 **13** 个 active 键 ⇒ **缺 12 个**，且成族：
+`RERANK_*` 整族 4 个（rerank 默认关所以从没人发现它读不到值）、`LLM_TIMEOUT`/`LLM_MAX_RETRIES`、`VECTOR_DIM`（本服务覆盖基类 512→1536）、
+`RETRIEVAL_TOP_K`/`RRF_K`、`SQL_MAX_ROWS`/`SQL_MAX_CORRECT_RETRIES`、`TABLE_PREFIX`。
+**后果形状**：照模板部署时这 12 项静默取代码默认值 —— 与 §19 会展侧"模板有而代码无"是**对偶面**（那面是死键，这面是漏键）。
+
+**交付**：① `.env.example` 末尾加 `# ===== nl2sql-service 模板补齐（2026-10-16）=====` 段，12 个键的默认值**逐条 1:1 取自 Field/类属性**（注释复用代码原话，含"为什么 top_k=10 而不是 agent_server 的 4"这类既有说明）；
+② 新增 `applications/nl2sql-service/tests/test_env_template.py` 3 条（正向齐全 / 补齐段值等 + 段内不悬空 / 前提守卫无前缀无 alias）。
+
+**两条口径要在用例里写死，否则会被误读成"覆盖比会展少"**：
+- **反向死键判据只做在补齐段内**，不扩到全文件：本服务 `env_prefix` 为空，若照搬会展那条"模板里每个键都必须是字段"，会把经 `os.getenv` 读的键全打成死键——那需要全仓 `os.getenv` 扫描，仍属 §3 第 12 项待拍板。
+- `PORT=8002` 与代码默认 `8000` **刻意不一致**（避开与 agent_server 抢端口，模板第 27-29 行已写明依据并引 `arch-audit-2026-09-24.md` P1-10），所以它留在 marker 段外、不参与等值比对。**这是设计不是漏检**；用例另有一条 `assert section` 防"补齐段被清空后用例空转"。
+
+**非空转反证（3 条变异，全 RED 于正确理由）**：`VECTOR_DIM 1536→512` 击中值等断言 / 删 `RRF_K` 行击中正向齐全 / 段内加 `NOT_READ_BY_SETTINGS_AT_ALL=1` 击中段内不悬空。
+模板文件按"备份字节→改→跑→写回"操作，`restore byte-identical: True`。
+
+**读数**：nl2sql session **21 → 24 passed**（+3，既有用例零删改）；`ruff check applications/nl2sql-service` 全绿；`scripts/lint_architecture.py` 全绿；根/其余 session 不受影响（只动了一个应用的模板与新用例文件）。
+
+**范围收口（这条线的终点在哪）**：全仓 pydantic-settings 模型现在**三处全覆盖**——`agent_server`（根模板 + 用例）、`exhibition-agent`（§19）、`nl2sql-service`（本批），
+`shared_schemas.BaseLLMSettings` 作为被继承的基类**不单独装模板**，其键由两个消费方各自的模板承载 ⇒ 判据落在消费方，不在基类。
+剩下 kefu / federation / knowledge-service 的配置面是 `os.getenv` + dataclass，**字段名推不出 env 名**，继续留 §3 第 12 项待拍板（人工枚举口径，不是门禁）。
