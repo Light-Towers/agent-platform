@@ -98,8 +98,9 @@ def _health_route_status_literals(src: str) -> set[str]:
     它们只是与 /health 同处一个文件，与健康约定无关。
     """
     out: set[str] = set()
-    # utf-8-sig：本仓个别源文件带 BOM（Windows 侧现实），`utf-8` 会把 U+FEFF 留给
-    # ast.parse 并抛 SyntaxError——那会让本测试以"环境噪声"失败而非以判据失败。
+    # 上游 `_read()` 用 utf-8-sig：读到 BOM 时不把 U+FEFF 留给 ast.parse（`utf-8` 会），
+    # 否则本测试会以"环境噪声"失败而不是以判据失败。全仓 `.py` 的 BOM 已于 2026-10-16 清零，
+    # 保留这个读取约定是防再混入，不是迁就现状。
     tree = ast.parse(src, filename="<health>")
     for node in ast.walk(tree):
         if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
