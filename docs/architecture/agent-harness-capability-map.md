@@ -9,6 +9,16 @@
 
 > **本文是快照，不是活文档。** 表内每一条状态判定绑定上面的 rev；换 rev 后若要对外引用，先按 §1.3 的命令复跑一遍。理由同 `AGENTS.md` 观测硬规矩第 3 条：**读数必须绑定当时的 rev**。
 
+> **2026-10-16 换 rev 提示（按上条规则加指针，不改写下方任何判定行）**：本表基线 `48c25fe` 之后，凡标 **P1-7 / `NOT WIRED` / 零生产调用** 的那 5 行判定**已失效**——
+> `state_migration` + `execution_recovery`（`c49ee2d`）、`payload_externalization`（`4a7c662e`）、`human_task`（`6bf15287`）、exhibition `skill_router` 门禁+执行两截（`5b75612`）**全部接线**；
+> 反漂回护栏在 `applications/agent_server/tests/test_v3_wiring_assembly.py`（装配锚点 + 已转正模块不得自称未接线）。
+> **接线 ≠ 默认启用**：4 者里 3 者生效面默认关，`SCHEDULER_ENABLED` 仍默认 `False`。
+> 同一窗口还对 roadmap §四 七条交付标准逐条对码复取过，其中**第 6 条「每次回答可追溯身份/调用/数据来源/成本」由「达标」下修为「部分达标」**
+> （`ForensicContext.external_inputs` / `external_task_receipts` / `effect_receipts` 三格生产零写入点）⇒ 本表若把取证面记成「已接线/达标」，同样以该复核为准。
+> 复核全文与复跑命令：`docs/plans/plan-unfinished-completion-schedule-2026-10-16.md` §16。另有两类判定同样已过时，读表时一并注意：
+> ① §2.8 的「`/health` 能力灯」行原记「两点边界」——① `cost_governance` / `forensic` 无开关跟随断言、② `forensic` 位是代理语义——两点已于 2026-10-15 分别**补上断言**（现 16 passed）与**定性为前提有误**（该字段语义早已被 `applications/agent_server/schemas.py` 的 description 声明为 trajectory_store 装配代理），`docs/TODO.md` §3 该行已翻勾；
+> ② §2.7 的「不可篡改审计日志」行（🟡）与 §2.8 的「漂移诊断 forensic」行（「✅ 部分」）给取证面打的档只到「载体 + 版本指纹」这一层，来源/回执三格仍无生产写入点（即上面第 6 条下修的原因）。
+
 ---
 
 ## 0. 本文覆盖什么 / 不覆盖什么
