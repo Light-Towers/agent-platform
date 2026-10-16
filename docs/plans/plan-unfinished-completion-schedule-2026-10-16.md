@@ -22,6 +22,7 @@
 | **§24 错分类的机械活回收（#21 收尾）** | **2026-10-16**（截止=当日） | 把「补模板」从「要不要建门禁」的待拍板捆綁里拆出来做完 | ✅ **已完成（10/16）**：federation +7 / KS +10（AST 实读取默认值 + `<- 文件:行` 溯源，密钥留空）+ `tests/governance/test_app_env_templates.py` 2 条；**口径订正**：真缺 17 而非登记的 61（active vs 提及 两种读法差出来的）；CI 合并跑被中止 ⇒ 改分段实测 720 + 349 = **1069**，恰为 §18 的 1067 + 本批 2 条 |
 | **§25 取证面持久化实测（撤回我写下的"无需 DB 迁移"）** | **2026-10-16**（截止=当日） | 提交前自查新方案的每条断言，把推断换成实跑读数 | ✅ **已完成（10/16）**：伪连接探针实取 ⇒ `PgTrajectoryStore` 从不发 `forensic` 列、读回 `record.forensic is None`、`steps` 读回是 `dict` 而非 `TrajectoryStep`（`AttributeError`）⇒ 第 6 条的缺口从「三格没填」扩为**两层**（字段填充 + 持久化读回），`plan-forensic-provenance-wiring-2026-10-16.md` 按此改写并新增 Q5 待拍板（**§3 行数不变，仍是 20 项**，Q5 属第 19 项内部） |
 | **§26 两件本地读数复跑（启发式评测门禁 + 门禁条数三口径）** | **2026-10-16**（截止=当日） | 把 §19 那批被权限层拦下的 `make eval` 半截捡回来，并独立复测门禁条数三口径 | ✅ **已完成（10/16）**：`eval/run_eval.py --fail-below 0.8` ⇒ **15/15 = 100.00%，rc=0**（rev `1953c5f`，启发式半截；`run_planner_eval.py` 需密钥 ⇒ 仍待放行）；三口径复测 **16 编号 / 17 表行 / 18 函数**与 `ARCHITECTURE.md` §4.1 现值**吻合、无新漂移** ⇒ 只在 CHANGELOG 的旧快照句下加"已被取代、不外引"指针，不就地改数 |
+| **§27 存储面覆盖率扫描（清出 `session_leases` 无 DDL）** | **2026-10-16**（截止=当日） | 把 §25 的"字段静默不落库"当症状往上追一类：全仓 DDL 声明列 vs 代码写入列 | 🔨 **扫描完成、结论已点验（10/16）**：假阳性两类已清（UPDATE 写的列被当成"没人写"、单类多表变量名交叉污染）；**真缺陷 1 条**——`session_leases` 表**全仓没有任何 CREATE TABLE**，而 `runtime-governance-roadmap.md:95` 写"DDL 见部署文档"⇒ 悬空指针，转 §3 第 22 项待拍板（**待拍板 20 → 21 项**） |
 | 阶段 2 / 阶段 3 | 11-13 / **12-04** | 归 roadmap，不由本排期重排 | 部分待环境 |
 | 一期交付判定 | **2026-12-04** | roadmap §四 七条标准逐条判定 | — |
 
@@ -59,8 +60,8 @@
 
 ## 3. 需要用户拍板（**请在 10/20 前给方向，否则将阻塞 §2 后半**）
 
-红线「所有代码优化/重构必须先制定方案」+ 我不替你做设计决策。以下 **21 行**（按本表条目计数，非按 plan 文件数）方案已就绪，卡在「选哪条路」而非「有没有路」：
-**其中真待拍板 = 20 行** —— 第 1 项经 2026-10-16 对码作废（代码早已合入，见该行注），作废行的编号保留不复用；第 17 行按行计 1、内含 5 问（三份 ADR 各 §5）；第 19–21 项由 §16/§17/§20 对码新增。
+红线「所有代码优化/重构必须先制定方案」+ 我不替你做设计决策。以下 **22 行**（按本表条目计数，非按 plan 文件数）方案已就绪，卡在「选哪条路」而非「有没有路」：
+**其中真待拍板 = 21 行** —— 第 1 项经 2026-10-16 对码作废（代码早已合入，见该行注），作废行的编号保留不复用；第 17 行按行计 1、内含 5 问（三份 ADR 各 §5）；第 19–22 项由 §16/§17/§20/§27 对码新增。
 
 1. ~~`plan-audit-operator-principal-2026-10-03.md` — 审计主体改造是否开工（现：方案已写、零代码）~~ **本项作废（2026-10-16 对码）**：
    代码早做完并合入了 —— `session_router.py:71` = `operator = server_tenant_id(settings.default_tenant_id)`、P12 门禁在 `lint_architecture.py`、
@@ -125,6 +126,10 @@
    跨租户负样本路径早已跑生产代码（审计 P1-9 那批），所以这不是"接线缺失"，而是**要不要改评测语义**的决策。
    选项：a 换实现 + 重取基线（我先出方案，含逐题差分与新的 `--fail-below` 定值）/ b 保留 mock 但在评测输出里显式标"positive 路径为宽松替身，不代表生产隔离强度" / c 什么都不动，只在 §16 与 TODO 记为在册残差。
    **我未动 `evaluation.py` 的过滤逻辑与 golden 判分**（本批只把那句已失效的 `TODO: … 落地后替换此函数` 注释订正成现状）。
+22. **`session_leases` 这张表的 DDL 归处**（§27 扫描 + 源码点验查出；`runtime-governance-roadmap.md:95` 现写「DDL 见部署文档」，而**仓内没有任何地方有这张表的建表语句**）。
+    现状是潜伏而非现网故障：默认 `InMemoryLeaseBackend`，`PgAdvisoryLeaseBackend` 只在 `tests/runtime/test_session_lease.py` 被构造（Fake 池），生产 `main.py` 未注入 `lease_backend`（能力图第 260 行已记「装配未注入 ⇒ 多副本语义未启用」）。
+    但一旦按那句文档启用多副本，第一条 SQL 即 `42P01 undefined_table`，而照做的人找不到 DDL 来源。选项：a **补一条迁移建表**（我倾向此，列形状 `coordinator.py:95` 已写死为 `session_id/owner/expires_at`，唯一真相源该在迁移里，且 `migrations/runner.py:45` 的表清单可顺带纳入）/ b 只在部署文档给 DDL 并把 roadmap 那句改成"手工建表，脚本在此" / c 显式标该后端**未达可启用状态**（与 roadmap #5「未接线标注」同族，需一并计入未接线口径）。
+    **真库验证属待环境**：这张表从未在真 PG 上被建过、也没跑过跨进程单飞。
 
 ## 4. 迁移策略（本排期如何推进，不破坏可回退性）
 
@@ -852,3 +857,25 @@ $ uv run python eval/run_eval.py --fail-below 0.8      # rev 1953c5f，2026-10-1
 ⇒ **没有发现新漂移**（三个数与 §4.1 计数口径段 2026-10-16 那条自述完全吻合），但顺带处理掉一处**规范性旧句**：
 CHANGELOG 2026-10-09 那节写着"对外陈述门禁强度一律用「14 条」"，那是当日快照，而现值是 16 条 ⇒ 按本文档既定纪律**不就地改数**，在该行下加一条"已被后续批次取代、保留为历史取证、不外引"的指针（同 §16 对 capability-map 的做法）。
 roadmap §四 第 5 条的判定引用的是「门禁在位 + 计入 `make ci`」，不是条数本身 ⇒ 本行不动第 5 条判定。
+
+## 27. 把 §25 当症状往上追一类：全仓「DDL 声明列 vs 代码写入列」扫描（2026-10-16）
+
+**动机**：§25 那条不是"取证面单独倒霉"，而是**模型字段到库列之间没有任何机械核对**这一族的第一个露头。所以扫一遍全仓，问两个问题：① 代码往表里写的列，DDL 里有没有（没有 ⇒ 真库上 42703）；② DDL 声明了却没人写的列有哪些（⇒ 静默走 DEFAULT/NULL，与 forensic 同族）。
+
+**扫描器自身两次假阳性（先把自己否掉，再报事实）**：
+- **v1 把 `INSERT INTO {self._table}` 整类丢掉** ⇒ 报"trajectories 无 INSERT 站点"，**与我上一节的探针直接矛盾**（探针明明抓到了 10 列的 INSERT）。这是第 9 次"探针错被当成事实"，且又是**写完结论才发现**——所以 v2 起每条否定性结论都要求"能指出该表的字面 INSERT 站点或明确标为变量表名"。
+- **只看 INSERT 不看 UPDATE** ⇒ 报"`admission_queue` 的 `completed_at`/`rejection_reason` 没人写"。实读为假：`admission.py:166`（`rejection_reason = %s`）、`:215`、`:237`（`UPDATE admission_queue SET status='completed', completed_at = now()`）三处都在写。⇒ **这一族的全部"没人写"读数都必须并 UPDATE 才算数**。
+- 附带一处结构性假阳性：`durability_pg.py` 一个类用**同一个变量表名**服务四张表（execution_checkpoints / execution_leases / idempotency_keys / side_effects），我的候选名解析把四张表的列互相泼到对方上 ⇒ 表 1) 里那一大串"代码写了 DDL 没有的列"**是交叉污染，不是缺陷**（点验后逐条排除）。
+
+**扫描清完之后的真读数（2 条，都已回源码确认）**：
+
+| # | 事实 | 双通道证据 |
+|---|---|---|
+| 1 | `session_leases` 表**全仓没有任何 CREATE TABLE**：不在 `packages/agent-runtime/agent_runtime/migrations/*.up.sql`（那套实测 **26 个 CREATE TABLE 站点 / 26 个去重表名**，`grep -rhoiE "CREATE\s+TABLE\s+(IF\s+NOT\s+EXISTS\s+)?[a-z_][a-z0-9_]*" ...up.sql \| sort -iu \| wc -l`）、不在 `deploy/`、不在任何文档 SQL 块 | ① 全仓字面 grep `session_leases` 命中 10 处，**全在代码/文档叙述里**，迁移与部署目录 **0 命中**（`grep -rl session_leases migrations deploy \| wc -l` = 0）；② 定向 grep `CREATE TABLE.*session_leases` **0 命中**；③ 扫描器的 DDL 解析给 25 张（少 1，正则漏一类写法）⇒ 以 grep 的 26 为准，这条本身就是"扫描 ≠ 读数"的实例 |
+| 2 | 而 `docs/operations/runtime-governance-roadmap.md:95` 写的是「多副本启用前需建 `session_leases` 表（**DDL 见部署文档**）」⇒ **这句指向一个仓内不存在的产物**（悬空指针，与 §四 第 1 条"文档与代码一致"同面） | 同上；另 `PgAdvisoryLeaseBackend` 的构造点**只在 `tests/runtime/test_session_lease.py`**（FakePgPool），生产 `main.py` 未注入 `lease_backend` ⇒ 能力图第 260 行早就记过"装配未注入 ⇒ 多副本语义未启用" |
+
+**定级（不夸大）**：这是**潜伏项，不是现网故障**——默认走 `InMemoryLeaseBackend`，注入 PG 后端才打这张表；一旦有人按 roadmap 那句"多副本启用"接上，第一条 SQL 就是 `42P01 undefined_table`，而他要照的那份"部署文档"里**没有这张表的 DDL**。测试用 Fake 池 ⇒ 这张表从未在真库上被验证过（属**待环境**）。
+
+**⇒ 新增 §3 第 22 项待拍板**（三选一）：a 补一条迁移建表（归属清晰：agent-runtime 拥有迁移，且 `runner.py:45` 的表清单顺带纳入）/ b 只在部署文档写出 DDL 并把 roadmap 那句改成"手工建表，脚本在此" / c 显式声明该后端**未达可启用状态**并加 `STATUS: NOT WIRED` 类自述（与 roadmap #5 判据同族，需一并计入"未接线"口径）。我倾向 **a**，理由：这张表的列形状 `coordinator.py:95` 已经写死（`session_id/owner/expires_at`），建表语句的唯一真相源本就该在迁移里，放文档里等于第二次要人手工同步。
+
+**本节的扫描器不入库**：两条判据都已被源码点验取代（扫描只用来缩小怀疑面，见 `docs/operations/evidence-format.md` 的"扫描 ≠ 读数"边界）；若日后要做成常驻门禁，前置是"把 UPDATE/UPSERT 的 SET 列并进来 + 变量表名按类实例化解析"，属新立项、不在本窗口。
