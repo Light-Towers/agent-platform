@@ -37,7 +37,7 @@
 | 10/17–10/18 | **#5 残口：订正 `execution_recovery.py:11` 陈旧 docstring**（仍写「payload_externalization / human_task 仍未接线」，与本批代码矛盾），并加「禁止再退化为孤岛」的装配面自动检查 | roadmap #5 判据「全仓未接线标注归零」 | 仅 docstring + 1 个门禁测试 | 该模块 docstring 不再声称未接线；`test_v3_wiring_assembly.py` 增断言且红→绿 | ✅ **提前完成（10/16）**：docstring 已订正为「已接线，接线 ≠ 默认启用」；新增 5 条护栏（4 模块装配锚点 parametrize + 1 条「已转正模块不得自称未接线」文档护栏），**并已反证护栏非空转**——43 个 agent_runtime 模块中 26 个被 main.py 引用（4/4 命中）、17 个正确报缺（`cache`/`circuit_breaker`/`effect_contract`/`forensic`…），⇒ 锚点消失即 fail。`agent_server` **122 passed**、ruff 绿 |
 | 10/18 | **#D7 桶 A 记账闭合 + 残余定性**：本批实测 `git grep 'noqa: BLE001'` = **37 处**（集中在 `knowledge-service/eval/*.py`、`agent_server/main.py:131`），与 P0-4 §5 硬判据「=0」不符 ⇒ 逐处判定「属 M2 已放弃的逐点 noqa（应迁入整包基线）」还是「桶 C 承重点（应保留）」并写结论 | P0-4 §5 / TODO D7 | 只动 pyproject 基线 + 注释 | `ruff check .` 全绿；§5 判据被逐处定性（不粉饰为 0） | ✅ **完成（10/16），结论与原判据相反**：**不迁基线**——实测两种豁免强度不同（新加 `except Exception` 在「仅逐点 noqa」文件里 **ruff 报错**；在「已入 per-file-ignores」文件里 **ruff 放行**）⇒ 逐点 noqa 是**行级精确棘轮**，整包基线是**全文件永久 blanket 豁免**。为凑 0 而迁移 = 把 13 个文件降级并丢掉每处理由注释，正是本方案桶 B 已否决的「为降指标动手」。改做**增防护**的两件事：① 补齐 9 处无理由 noqa ⇒ 裸标 **0/36**；② 删 1 处 **vestigial**（`identity.py:220` 捕的是具体类型 `jwt.PyJWTError`，BLE001 本就不触发，stdin 探针证明去掉仍全绿）⇒ **37→36 真实降量**。§5 判据建议改为「裸标=0 + 基线文件不得补逐点 noqa + 周期重扫 vestigial」，**此项待你认可**（改的是验收判据本身） |
 | 10/19–10/21 | **#10 数据可信度默认值改「待确认」**：无标注响应不得按「完整可信」输出；缺标注则拒绝接入 | roadmap #10 | exhibition 侧 `data_readiness` 消费链 | 造一条无标注响应 ⇒ 输出显示「待确认」（新增用例） | ✅ **提前完成（10/16，两句都做）**：① 运行侧 `_map_readiness` 有**两处** fail-open（`level is None` 与函数末尾兜底 `return READY`），现均判 `UNCONFIRMED`，`Readiness` 加 `UNCONFIRMED`，输出带「数据可信度待确认」warning；② 接入侧 `skill_router` 门禁只拦 `SYNTHETIC`，未标注者落 `UNKNOWN` ⇒ **自动放行**，现生产档 `UNKNOWN` 亦拒。行为差分实测：仅 `None`/未知 level/空串 3 项由 READY→UNCONFIRMED，`complete`/`synthetic`/`partial`/`pending` 4 项不变。新增 11 条断言，exhibition **368 passed**。**遗留（需业务侧标注，非我可判定）**：catalog 48 接口中 `create_lead`/`delete_lead`/`confirm_lead`/`reject_lead` **恰是 4 个写操作且无 readiness** ⇒ 生产档现被拒；上线前须由业务方补标注（我不替它们猜值）。DEMO/DEV 档不受影响 |
-| 10/22–10/27 | **#7 对外数据格式补健康检查字段与界面所需结构**（**先做消费方影响评估**，不得静默改下游解析形状） | roadmap #7 | shared-schemas / 下游前端与网关 | 跨服务一致性测试 + 打分测试均不破坏下游 | 我可独立执行（评估结论如需改契约⇒转拍板） |
+| 10/22–10/27 | **#7 对外数据格式补健康检查字段与界面所需结构**（**先做消费方影响评估**，不得静默改下游解析形状） | roadmap #7 | shared-schemas / 下游前端与网关 | 跨服务一致性测试 + 打分测试均不破坏下游 | 🔨 **拆两半交付（10/16）**：**「不破坏下游」的那半已做**——新增 `tests/test_health_contract_consistency.py` 8 条（钉共享契约服务不得退回裸 dict / 遗留约定逐项登记且**登记失实也报红** / **禁第 4 套 `status` 字面值**，用 AST 只取 `/health` 路由自身返回）。**「统一形状」的那半转 §3 第 6 项待拍板**：实测三套约定并存（`healthy` 枚举 / `"ok"` / `{"ok":true}`），统一要改 3 个服务的线上响应值并牵动 knowledge-service `/health/ready` 的 503 就绪探针语义 ⇒ 按 AGENTS.md「边界」条不擅动。评估全文见 §6 |
 | 10/22–10/27 | **#4 重复实现去重复核**：roadmap 记「同名任务回执存储有两份实现、接线用的是无保护那份」。本批 `git grep 'class .*Receipt.*Store'` **未命中**⇒ 疑已合并；须以实读确认「同名实现只剩一处」是否成立 | roadmap #4 判据 | 若仍在则删重复一份 | 判据「同名实现只剩一处」有实读证据 | ✅ **提前完成（10/16）**：**上排的「疑已合并」是错的**——错在用了猜名字的 grep（`Receipt.*Store`），而那两份实际叫 `PgAwaitableTaskStore`，模式不含 "Receipt" 故 0 命中（假阴性）。改用**跨包重复类名扫描**才定位到：`awaitable_task_pg.py:24`（已带 fence，生产接线，`main.py:435`）与 `execution_state_pg.py:114`（**无 fence**：`save` 的 INSERT 只写 15 列、`generation` 留空、无 WHERE 守卫）。后者**零 import**（全仓只从该模块取 `PgExecutionStatusStore`）⇒ 死副本，已删。**危险不在冗余而在 import 点**：`execution_state_pg` 是「Pg 存储」的自然取用处，从那儿 import 同名类会静默丢掉 ``68a44290`` 的 fence。唯一实现由新用例**双向**钉住（无第二份 + 留下那份必须带 fence，防删错方向），并反证删除前必红。⇒ **#4 判据「同名实现只剩一处」现已成立**；其余判据（真库两类拒绝用例）仍待环境。**方法教训**：判「是否还有重复实现」不能靠猜类名的 grep，要按「重复定义」这一结构事实扫描 |
 | 10/28–10/30 | **阶段 1 收口对账**：逐条按 roadmap「怎么算改好」列复核 + 全量门禁（`ruff check .` / `check_doc_sync.py` / 相关 pytest session） | roadmap 阶段1 | 文档 | 每行有代码或测试依据；待环境行明确标注「标准环境已验证 / 多物理机待环境」 | 我可独立执行 |
 | — | **待环境（只登记，不承诺日期）** | #4 真库两类拒绝用例、#8 KS 15 条报错根因 + 图谱重测、V3 双实例物理故障转移、CodeQL B7b-4/5 重扫、env-var 126 部署脚本同步 | 需 126/PR/CI | roadmap §四第 2 条规则 | 环境解锁后 |
@@ -51,6 +51,7 @@
 3. `plan-router-keyword-gate-hides-corpus-2026-10-12.md` — 修法三选一
 4. `plan-v3-phase-2-4-integration-2026-09-23.md` — v2 方案（含 6 项不变量）确认后施工
 5. tech-debt 补充 4 — agentic bridge 默认开 vs 保留 opt-in 但补开启路径测试
+6. **#7 对外 `/health` 三套约定是否统一**（评估结论见 §6）——统一到共享 `HealthStatus` 需改 exhibition/kefu/knowledge 的**线上响应值**，且 knowledge-service `/health/ready` 的 503 是就绪探针语义的一部分。本轮只交付不破坏下游的一致性测试 + 禁第 4 套护栏；统一与否请你定（选项：a 全统一到 `HealthResponse` / b 仅新增服务强制、存量保留并在看板侧做映射 / c 保留现状仅靠测试钉住不再扩散）。
 
 ## 4. 迁移策略（本排期如何推进，不破坏可回退性）
 
@@ -66,3 +67,26 @@
 - `ruff check .` 全绿、`check_doc_sync.py` 0 警告、受影响 pytest session 全绿。
 - roadmap 阶段 1 每行要么达标并附证据，要么明确标注「待环境 / 待拍板」；**不出现「已上线 / 已支持几十个业务系统接入」这类未达声明**。
 - §3 的 5 项拍板结果写入对应 plan；未拍板者保持开项，不强行闭合。
+
+## 6. #7 消费方影响评估结论（2026-10-16，roadmap 要求「先评估消费方影响」）
+
+**实测：平台对外 `/health` 有三套并存约定**（逐个实读，非推断）：
+
+| 约定 | 服务 | 现状 |
+|---|---|---|
+| 共享 `HealthResponse`，`status` ∈ `healthy/degraded/unhealthy` | agent_server · nl2sql-service | 已入契约 |
+| `{"status": "ok"}` | exhibition-agent · kefu-service（另 `opencode` gateway、warehouse mock） | 字面值**不在**枚举内 |
+| `{"ok": true}` | knowledge-service（`/health/live` `/health/ready`） | 布尔键；`ready` 依赖不可用返回 **503** = k8s 就绪探针语义 |
+
+**消费方清单（决定能不能统一）**：
+
+1. `applications/agent_federation/agent/health_check.py::_check_one` — **只看 `status_code==200`，完全不解析 body** ⇒ 对本仓路由决策无影响。
+2. `deploy/k8s/20-agent-platform.yaml:160/169/176` — liveness/readiness 走 `path: /health`，k8s 判据是 HTTP 码，不解析 body。
+3. **`deploy/k8s/scripts/verify.sh` 与 `portforward.sh` — 会解析字段**：要求 `/health` 含 `otel_status ∈ {ACTIVE,DEGRADED,DISABLED,UNINITIALIZED}`，缺失即判失败/告警。二者指向 **agent_server**（svc/agent-platform:18000→8000），该服务已在共享契约上 ⇒ **不得反向改 agent_server 的 status 语义**。
+4. knowledge-service 的 `/health/ready` 503 行为是探针契约的一部分，改成 `status:"healthy"` 会同时动 body 与语义。
+
+**结论与处置**：
+- 「统一三套」= 改 **3 个服务的线上响应值**，且 knowledge-service 一侧牵动就绪探针语义。按 AGENTS.md「边界」条（影响下游消费者的对外契约变更须先审计、另行决策），**不在本轮擅动**⇒ 转 §3 待拍板第 6 项。
+- 本轮交付**不破坏下游**的那半：新增 `tests/test_health_contract_consistency.py`（8 条）——钉住① 已入共享契约的服务不得退回裸 dict，② 遗留约定逐项登记且**登记失实也报红**（防台账腐坏），③ **禁止冒出第 4 套 `status` 字面值**。提取用 AST 只取 `/health` 路由自身的返回，避免同文件里 `{"status":"uploaded"}`（上传响应）/`{"status":"scheduled"}`（mock 场景数据）造成假阳性——该假阳性本轮已被实跑抓到并修正。
+- 附带查得：本仓个别源文件带 **UTF-8 BOM**，`ast.parse` 在 `utf-8` 下抛 `SyntaxError` ⇒ 测试统一用 `utf-8-sig` 读，避免以"环境噪声"失败。
+- 判据「跨服务一致性测试」已具备；「打分测试不破坏下游」= 未动任何对外 body，`eval/run_eval.py` 门禁不受影响。
