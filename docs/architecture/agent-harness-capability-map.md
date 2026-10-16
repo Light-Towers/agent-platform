@@ -323,7 +323,7 @@ uv run --with ruff ruff check . && python scripts/check_doc_sync.py
 | Embedding provider 统一选型（远程/本地 bge/Mock；维度 512↔1024 由 provider 派生；启动预热 + 真值灯 `embedding_real`） | ✅ | `packages/agent-core/agent_core/memory/embedder.py`（328 行）· `applications/agent_server/main.py:79-98,278` · `EMBEDDING_REQUIRE_REAL=true` 为调用期硬失败（刻意不升级为启动 crash-loop） |
 | SSE 统一契约（graph 路径与 Planner 路径事件同构，客户端无感） | ✅ | `packages/shared-schemas/shared_schemas/sse.py:13-30` · `packages/agent-runtime/agent_runtime/planner/protocol.py:738-780` |
 | 运行时模式 `local / single_node / distributed`（distributed 无 `DATABASE_URL` **启动即拒**） | ✅ | `applications/agent_server/config.py:140-144` · `applications/agent_server/main.py:205-210,178-183` |
-| **架构不变量 lint 14 条**（多数白名单为空 = fail-closed）+ 文档防漂移门禁 + 治理测试 26 + HA 测试 19 | ✅ 进 CI | `scripts/lint_architecture.py`（P2/P4/P5/P6/P7/P8/P9/P10/P11/P12 + L-1/L-2/L-3/L-4）· `scripts/check_doc_sync.py`（存在性基准 = `git ls-files`） |
+| **架构不变量 lint 15 条**（多数白名单为空 = fail-closed）+ 文档防漂移门禁 + 治理测试 27 + HA 测试 19 | ✅ 进 CI | `scripts/lint_architecture.py`（P2/P4/P5/P6/P7/P8/P9/P10/P11/P12 + L-1/L-2/L-3/L-4/**L-5**）· `scripts/check_doc_sync.py`（存在性基准 = `git ls-files`）｜ 计数口径（2026-10-16 更新，沿用 roadmap #9 定的三口径）：**门禁编号 15 条**（原 14，+L-5 观测装配存在性门禁，阶段2 #12）／**实现函数 `check_*` 16 个**／**治理·HA 用「测试文件数」口径**（27 与 19，非用例数；本轮 +`tests/governance/test_observability_assembly_gate.py`）。对外仍引用「门禁编号」这一口径 |
 | 控制台前端（会话/准入/控制面可视化） | ✅ | `applications/agent_server/api/console_router.py` + `applications/agent_server/static/` |
 | **Agent Registry / Agent 目录与市场**（登记、发现、owner、下线） | ❌ | |
 | **Tool Gateway**（统一 API 资产 + RBAC + 计量 + 限流熔断配额降级） | ❌ | MCP 客户端不算（那是消费侧） |
