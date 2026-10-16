@@ -65,7 +65,10 @@
 10. **路由侧「自报租户」是否换成服务端断言**（§9 / 同方案 §5.2）：这才是 #11 的真正收口动作，但它让调用方**能观察到行为变化**（自报 `tenant_id` 不再被采信）。牵动 agent_server `/query` 的 9 处与 kefu 的 2 处；且 **nl2sql-service 的「租户隔离」目前没有定义**——其源码零 `tenant` 引用，契约里有 `tenant_id` 字段但从不读，所以得先回答"按什么隔离"（数据源？元知识库？结果集？）才谈得上验收。选项：a 先只定义 nl2sql 的租户语义、存量自报暂不动 / b 一并翻断言（要先审计前端与网关的取值来源）/ c 停在 observe 档，等二期接口签字后再动。
 
 11. **WS 路径要不要接 admission 与背压**（§10 P2-3）：`/ws/{thread_id}` 被入口护栏**显式豁免**（`agent_federation/api/server.py:158` `exempt_paths=("/health", "/ws/")`），且逐条 `send_json` 无队列/水位（`:382-388`）。错误帧这一半已补（`:392-403`），但限流与背压要动的是**客户端能观察到的行为**（慢消费者会被暂停或断连），属对外语义决策。
-12. **`.env.example` 补齐范围与要不要做门禁**（§10 P2-5）：实测 agent_server **整份缺失**、约 60 个键"代码读而文档缺"，另有**观测两键"文档有而代码无"且自诞生起无人读取**（KS `KNOWLEDGE_SERVICE_NAME` / `KNOWLEDGE_TRACE_ENABLED`，2026-10-16 对码定性：`37d93427` 空改名，14 处出现/8 个文件，含 dated 记录正文与单测 `delenv`；已改用内核 `AGENT_CORE_*` 并钉桩 `test_env_example_observability_keys_are_read_by_code`）。选项：a 全量补齐 + 加一条"env 键必须双向对得上"的门禁（新 lint 或 check_doc_sync 扩展）/ b 只补 agent_server 那份 + 已修的观测两键 / c 只做本轮已登记的 exhibition/kefu 面。**注**：本轮已把 KS 观测两键从"杜撰键"改判为"**文档化但无人读取的开关**"——危害不是文档噪音，而是照文档设值后静默不开。
+12. **`.env.example` 剩余补齐范围与要不要做门禁**（§10 P2-5；**2026-10-16 已推进一半，做法见 §11**）：实测原写"agent_server 整份缺失、约 60 个键代码读而文档缺"，另有**观测两键"文档有而代码无"且自诞生起无人读取**（KS `KNOWLEDGE_SERVICE_NAME` / `KNOWLEDGE_TRACE_ENABLED`，2026-10-16 对码定性：`37d93427` 空改名，14 处出现/8 个文件，含 dated 记录正文与单测 `delenv`；已改用内核 `AGENT_CORE_*` 并钉桩 `test_env_example_observability_keys_are_read_by_code`）。
+    **已完成**：① 观测两键按上面那句处置；② agent_server 的 **43 个**"代码读而模板缺"键已补进**根** `.env.example`（判据：它实际加载的是 CWD 那份，不是应用目录那份），并加齐全用例 `tests/governance/test_agent_server_env_template.py`（3 项变异验证均转红）。
+    **待你定的只剩两件**：① 剩下 **61 项**（KS 13 / federation 47 / exhibition 1；口径与两个盲区见 §10 P2-5 ②）要不要补；② 要不要做**全仓双向门禁**（"模板键 ⇔ 代码读取"，需先解决共享层读取与 `env_prefix` 折算两个扫不到的面）。
+    选项：a 补 61 项 + 建双向门禁 / b 只补 61 项、不建门禁（agent_server 那 43 项就是按这个形状做的）/ c 停在现状。**注**：本轮已把 KS 观测两键从"杜撰键"改判为"**文档化但无人读取的开关**"——危害不是文档噪音，而是照文档设值后静默不开。
 
 13. **MinIO 初始化要不要翻成默认拒绝启动**（§10 P2-7）：上传路径已 fail-fast（`import_router.py:229-232`），但 `clients/minio_utils.py:12-51` 初始化仍是"记 error + 置 None"。翻了之后缺配置的部署从「能起但导入功能坏」变成「起不来」——这是**部署侧的可用性取舍**，且牵动 126 现网。顺带一条孤儿：`core/config.py:174-187` 的 `validate_credentials()` 全仓零调用方（要么接上要么删，我不擅自定）。
 14. **文档口径的自动兜底要不要建**（§10 P2-6 (a)/(c)）：`check_doc_sync.py` 只核路径存在性与 session 数，核不出"门禁条数/覆盖率/状态行"这类**数字漂移**——本轮我自己就把 14→16 的口径破了又补。选项：a 让 check_doc_sync 增核「lint 条数三处一致」（把现值算出来比对，破口即红）/ b 维持人工收尾 / c 改为文档里不再写死数字、只写口径定义。
@@ -231,7 +234,18 @@
 | P2-1 | skill_router 是死代码 | **已修（不再是死代码），覆盖面局部** | 生产调用点 `exhibition_agent/graph/nodes.py:95-103`（`run_skill` 执行前门禁）+ 拒绝分支 `:104-129`；自述已改 `STATUS: WIRED`（`foundation/skill_router.py:5-10`）；测试 3 处（`tests/test_skill_router_wiring.py:22`、`test_skill_routed_endpoint.py:17`、`test_skill_venue_schedule.py:11`） | 门禁表只含 `venue.schedule.query`（`nodes.py:42-44`），`data_analysis.query` 不在内（它走 HTTP 调 nl2sql，不直连 Warehouse）；`route()` 返回值只做判定、**不驱动实际请求形状** | ❌ 无。`lint_architecture.py` 17 个 `check_*` 与 `tests/governance/` 均无「未接线/死代码」类规则 ⇒ 接线被删不会报红（与 #5 判据同源风险） |
 | P2-2 | singleflight 竞态未结构性消除 | **原结论已不成立（实现 + 测试都在）** | `packages/agent-runtime/agent_runtime/singleflight.py:19-33`：`_refs` 引用计数 + `_cleanup` 双守卫（`:27-28` refs>0 不删、`:29-30` lock 身份不符不删），`:68-72` finally 递减；回归用例 5 条（`tests/test_singleflight.py:72/92/112/126/151`，本轮新增后两条） | 无（反向守卫「空闲必须真回收」本轮补齐；路径漂移已在审计原文订正） | ✅ 用例即门禁（9 passed，变异反证已验） |
 | P2-3 | WS 路径未接中间件/限流 | **部分：错误帧已补，护栏与背压仍未接** | 唯一 WS 路由 `agent_federation/api/server.py:337`（审计的 349/362-364 已漂移），异常分支 `:392-403` 现在**既记日志又向客户端发 error 帧**再断连；`:372` 非法 JSON 也发 error 帧 | 入口护栏**显式豁免 WS**：`server.py:158` `exempt_paths=("/health", "/ws/")`，且 `SecurityGuardsMiddleware` 对非 http scope 直接透传（`agent_core/guardrails/web.py:98`）⇒ 无 admission/coordinator；`:382-388` 逐条 `send_json` **无队列/水位/丢弃策略** = 无背压 | ❌ 无。`tests/unit/test_ws_stream.py` 只覆盖正常流，无 error 帧/限流用例 |
-| P2-5 | `.env.example` 与代码不同步 | **部分：exhibition 已补齐（本批 `af2f980`），其余仍有实测缺口** | 已按 `env_prefix` 折算逐应用比对（exhibition `config.py:11` 前缀 ⇒ 10 个 `EXHIBITION_AGENT_*` 均在 `:16-47` 有字段，非孤儿）；审计原句「exhibition 未声明 `NL2SQL_SERVICE_URL`」已不成立（键已在文档中，读点 `skills/data_analysis/skill.py:33`） | ① **agent_server 没有自己的 `.env.example`**（6 应用只有 5 份），根文件缺其 11 个无前缀字段（`agent_server/config.py:20-70`：`DB_POOL_MAX_SIZE`/`DEFAULT_TENANT_ID`/`MEMORY_EXTRACTION_ENABLED`/`MEMORY_FORGET_THRESHOLD`/`RERANK_*`×4/`MAX_ITERATIONS`/`COMPACTION_ENABLED`）；② 代码读而文档缺：KS `MINIO_PUBLIC_READ`（`clients/minio_utils.py:31`）等 8 项、exhibition `F01_SIGNING_SECRET`（`foundation/execution_context.py:70`）、federation 约 50 项；③ **文档有而代码无**：KS `.env.example` 的观测两键 `KNOWLEDGE_SERVICE_NAME` / `KNOWLEDGE_TRACE_ENABLED`（全包零命中 ⇒ **已定性为"文档化但无人读取的开关"**，不是杜撰噪音：`37d93427`（2026-09-23）把 `ZHANGUI_*` 纯文本替换成 `KNOWLEDGE_*`，而读取方早在 2026-08-21 就移到内核中性键，故新键名**自诞生起无人读**；共 14 处出现/8 个文件，含 dated 记录正文与单测 `delenv` ⇒ 照文档设值 = "以为开了、其实没开"。**本批已修**：14 处改用 `AGENT_CORE_*` + 正向对照用例 + 钉桩 `test_env_example_observability_keys_are_read_by_code`（变异验证：注入 `KNOWLEDGE_TRACE_ENABLED` 或把键名改掉一个字符均转红）；取证链见 `plan-tech-debt-env-var-rename.md` 表注①） | ❌ 无。`check_doc_sync.py` 只核路径与会话数，不核 `.env.example` ⇒ 这类漂移没有自动兜底 |
+| P2-5 | `.env.example` 与代码不同步 | **部分：exhibition 已补齐（本批 `af2f980`），其余仍有实测缺口** | 已按 `env_prefix` 折算逐应用比对（exhibition `config.py:11` 前缀 ⇒ 10 个 `EXHIBITION_AGENT_*` 均在 `:16-47` 有字段，非孤儿）；审计原句「exhibition 未声明 `NL2SQL_SERVICE_URL`」已不成立（键已在文档中，读点 `skills/data_analysis/skill.py:33`） | ① **agent_server 的 env 键在模板里大面积缺失**（**2026-10-16 重新测量并订正**：原先写"没有自己的 `.env.example`、根文件缺其 11 个无前缀字段"两处都不准 ——
+   (a) 数以代码为准：`Settings.model_fields` 共 **87** 个字段，根模板原有 active 键 58 个，**缺 43 个**（不是 11；我此前只读了 `config.py:20-70`）；
+   (b) 位置判错：agent_server 的 `.env` 解析基准是**进程 CWD**（AGENTS.md 从仓库根 `uvicorn agent_server.main:app`；根 `Dockerfile:3` `WORKDIR /srv/agent-platform`），
+   ⇒ 给它单独建一份**永远不会被读**。已按 §11 把 43 键补进根模板 + 钉桩 `tests/governance/test_agent_server_env_template.py`）；② 代码读而文档缺（**2026-10-16 按同法重测**，口径：对每个应用 `git ls-files` 的 `.py` 扫
+   `os.getenv("X")` / `os.environ["X"]` 取键名，与该应用自己那份 `.env.example` 的 active 键做差集）：
+   KS **13** 项（原写"等 8 项"是低估；含 `MINIO_PUBLIC_READ`（`clients/minio_utils.py:31`）、`KNOWLEDGE_DEFAULT_TENANT_ID`、
+   `CHUNKS_COLLECTION`、`IMG_SUMMARY_ENABLED`、`RAG_EVAL_MODEL`、两个 `ITEM_CONFIRM_*` 阈值等）、
+   federation **47** 项（原写"约 50"，接近）、exhibition **1** 项（`F01_SIGNING_SECRET`，`foundation/execution_context.py:70`）。
+   **本口径的两个盲区必须随数声明**：⑴ kefu / nl2sql 计数为 **0 不代表已齐全** —— 它们不在自己目录里读 env，
+   键由共享层读（`nl2sql_service/conf/settings.py` 等引 `BaseLLMSettings` / `agent_core.llm`），逐应用差集法看不见共享面；
+   ⑵ exhibition `config.py` 有 `env_prefix`，前缀拼出来的键名字面扫不到（此前 §5 反向陷阱同源）⇒ 1 项是**下限**。
+   因此这 61 项（13+47+1）**只能当"至少要补这么多"用，不能当精确台账**；③ **文档有而代码无**：KS `.env.example` 的观测两键 `KNOWLEDGE_SERVICE_NAME` / `KNOWLEDGE_TRACE_ENABLED`（全包零命中 ⇒ **已定性为"文档化但无人读取的开关"**，不是杜撰噪音：`37d93427`（2026-09-23）把 `ZHANGUI_*` 纯文本替换成 `KNOWLEDGE_*`，而读取方早在 2026-08-21 就移到内核中性键，故新键名**自诞生起无人读**；共 14 处出现/8 个文件，含 dated 记录正文与单测 `delenv` ⇒ 照文档设值 = "以为开了、其实没开"。**本批已修**：14 处改用 `AGENT_CORE_*` + 正向对照用例 + 钉桩 `test_env_example_observability_keys_are_read_by_code`（变异验证：注入 `KNOWLEDGE_TRACE_ENABLED` 或把键名改掉一个字符均转红）；取证链见 `plan-tech-debt-env-var-rename.md` 表注①） | ❌ 无。`check_doc_sync.py` 只核路径与会话数，不核 `.env.example` ⇒ 这类漂移没有自动兜底 |
 | P2-6 | 文档口径矛盾 | **大部分已对齐，本轮又清掉两处** | lint 条数已四处同步（`ARCHITECTURE.md` §4.1 / capability-map:326 / 讲解稿 / 锚点表）= 表 17 行·编号 16·函数 17，实数逐行核对；治理 28、HA 19 与实测一致 | 仍开的两处：**(b) 真相源冲突未解**——`AGENTS.md:5` 把 `plan-enterprise-platform-skeleton-2026-09-23.md` 列首位，而 `docs/README.md:60` 已明文标它「已被取代」并记录该冲突 ⇒ 属你拍板项，我不擅动；**(c) session 数口径靠注释维持**——Makefile `test:` 实为 10 行 pytest，但 `check_doc_sync.py:316` 只匹配 `uv run pytest ` 前缀 ⇒ 计到 9，`AGENTS.md:29/30` 用「9 session + 1 个 --extra otel session」这句话把两边对上（结论正确，但一致性靠人读注释） | 部分：条数一致性**无自动检查**（`check_doc_sync` 核不出数字漂移）；session 数有 `check_doc_sync` 半覆盖 |
 | P2-7 | MinIO 外部存储失败仅记 warning | **部分：请求路径已 fail-fast，初始化仍 fail-soft** | 上传路径 `knowledge_service/api/import_router.py:229-232` 客户端为 None ⇒ `HTTPException(500)`，`:236-257` 重试 2 次、末次 `logger.error(exc_info=True)` 后**拒绝本次导入**（`:224` 注释自标 P2-7） | `clients/minio_utils.py:12-51` 模块级 `except Exception` ⇒ 记 error 后 `minio_client = None`，不抛、不阻断启动，**且无 env 开关**；`core/config.py:174-187` 的 `validate_credentials()` 列了 `MINIO_ACCESS_KEY/SECRET_KEY` 但**全仓零调用方**（grep 仅命中定义）⇒ 它不构成启动 fail-fast，这本身是第二条待收的孤儿代码 | 部分：fail-open 的现状由「未配密钥 ⇒ 500」间接可测，但没有专门用例钉「初始化失败不得静默」；126 侧的启动 fail-fast 修复已入库（见 `docs/operations/env-126-inventory.md`），线上镜像是否已重建仍是待执行项 |
 
@@ -245,5 +259,52 @@
    这条是本轮 grep 复查时补的，属同一漂移面）。
 
 **仍未闭合、且需要你先定的**：P2-6 的 (b) 真相源归属；P2-3 的 WS 是否要接 admission/背压（改的是
-对外行为）；P2-5 的 `.env.example` 补齐范围（agent_server 一份 + 约 60 个键，是否值得做门禁）；
+对外行为）；P2-5 的 `.env.example` 剩余补齐范围（agent_server 那 43 项已于 §11 补进根模板；**剩 61 项**：KS 13 / federation 47 / exhibition 1，是否值得做双向门禁）；
 P2-7 的初始化 fail-fast 是否翻成默认拒绝启动（会让缺配置的部署从「能起但功能坏」变成「起不来」）。
+
+## 11. 阶段 2 再前移：roadmap #21 / P2-5 —— agent_server 的 env 键补进根模板（2026-10-16，截止 10-17）
+
+**目标**：把 agent_server 代码已读、但模板没有的环境变量补进**它实际加载的那份** `.env.example`，
+让"照模板填值"对 supervisor 平台成立。本批属 roadmap #21 改法「能接的接」，不改任何对外契约、不动运行时代码。
+
+**计数更正（先认账）**：§10 P2-5 与 §3 第 12 项原先写"11 个无前缀字段""约 60 个键"，前者是**低估**——
+我当时只读了 `applications/agent_server/config.py:20-70`。改用代码为准的测量：
+`Settings.model_fields` 共 **87** 个字段（含 `BaseLLMSettings` 继承 12 个），
+根 `.env.example` 现有 active 键 **58** 个，逐名比对后**缺失 43 个**（口径：键名大写精确匹配 `=` 左侧、
+只算非注释行；`git grep -w` 在全部 6 份 `.env.example` 中对这 43 个键**零命中**）。
+
+**影响面（= 零行为变更）**：只新增根 `.env.example` 的注释与默认值行 + 一条一致性用例。
+键名依据：`config.py` 与 `shared_schemas/settings.py` **均无 `env_prefix`、无 alias**
+（`Settings.model_config = SettingsConfigDict(env_file=".env", extra="ignore", ...)`），
+⇒ 环境变量名严格等于字段名大写。默认值一律按代码 Field 默认逐字抄（含 `RUNTIME_MODE=local`、
+`SCHEDULER_*` 等 opt-in 关的项），注释复用 `config.py` 自己的话，不自造语义。
+
+**为什么补在根模板而不是给 agent_server 建一份**（这是本轮新核到的事实，也是 §10 ① 那条"整份缺失"
+该怎么修的判据）：agent_server 的 `.env` 解析基准是**进程 CWD**——
+① AGENTS.md 的运行方式 `uvicorn agent_server.main:app`（从仓库根启动）；
+② 根 `Dockerfile:3` `WORKDIR /srv/agent-platform`（镜像内也是根）。
+⇒ 两条启动路径都让 `env_file=".env"` 指向**根** `.env`，所以"给 agent_server 建一份它从不读的
+`.env.example`"只会制造第二份会漂移的文档。其余 5 个应用各有自己那份，是因为它们从各自目录启动
+（`applications/knowledge-service/docker-compose.yml:47` 用 `env_file:` 显式注入）。
+**所以本项的"补齐"= 补根模板**；若日后要求 agent_server 能独立部署目录启动，那属另一件事。
+
+**不做（划界，避免越权）**：
+1. **不建"env 键必须双向对得上"的全仓门禁**——那是 §3 第 12 项待你拍板的方向（选项 a/b/c）。
+   本批只加一条**单向**一致性用例（字段 → 模板必须齐全），因为反向那一半要扫全仓 `os.getenv`
+   才能判"文档有而代码无"，范围与口径属拍板项。
+2. 不动 KS / exhibition / federation 各自那份（其"代码读而文档缺"的实测缺口仍在 §10 P2-5 登记）。
+3. 不改任何字段默认值、不加新字段、不碰 `.env`（已被 `.gitignore` 忽略）。
+
+**验收标准**：
+- 用例 `tests/governance/test_agent_server_env_template.py`：87 个字段名全部出现在根模板 active 键中；
+  变异验证须证明它非空转（漏一个键 ⇒ 红）。
+- `uv run python scripts/check_doc_sync.py` 与 `ruff check .`、`lint_architecture.py` 全绿；根套件 + KS 会话通过。
+- §10 P2-5 与 §3 第 12 项的计数按上面对码结果订正，不留"11 个"这个错数。
+
+**截止**：2026-10-17（当日交，含用例与订正回写）。
+
+**交付记录（2026-10-16，早于 10-17 截止）**：根 `.env.example` 追加 `# ===== agent_server（supervisor 平台）模板补齐（2026-10-16）=====` 段，
+43 键全部按 `Settings.model_fields` 的字段名与大小写规则生成、默认值逐字照代码（`PAYLOAD_EXTERNALIZATION_THRESHOLD_BYTES=1048576`
+即代码里的 `1024 * 1024`），注释复用 `config.py` 原话，未自造语义。复核：补齐后"字段 − 模板 active 键"差集 = **0**（87/87 齐全，脚本实测）；
+新用例 3 条 passed；变异验证 M1 删 `DB_POOL_MAX_SIZE` 行 / M2 把 `MAX_SKILL_DEPTH` 改成 9 / M3 段内加 `SCHEDULER_FOO=1`
+**三次都转红**（分别在齐全、值漂移、段内孤儿键三个断言上），三次后模板已还原（`git diff` 仅我这 87 行新增）。
