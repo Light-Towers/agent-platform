@@ -7,7 +7,13 @@ ASGI ``scope`` 的 headers，绝不消费请求体（避免 receive 缓冲问题
 
 挂载：
 - **网关 / agent_server**：验签 ``Authorization: Bearer <RS256 JWT>`` → 绑定 tenant/user。
-- **子服务（knowledge-service 等）**：验签 ``X-Internal-Tenant`` HMAC 头（软模式：缺→软/硬，伪造→拒）。
+- **子服务（经网关接入者，如 kefu-service / nl2sql-service）**：验签 ``X-Internal-Tenant``
+  HMAC 头（软模式：缺→软/硬，伪造→拒）。统一经 ``agent_runtime.identity_assembly.mount_identity_gate``
+  装配（含启动守卫与档位留痕）。
+  ⚠️ knowledge-service 与 exhibition-agent 目前各跑**自己那套**门卫
+  （``TenantHeaderMiddleware`` / ``X-Execution-Context``），**未复用本中间件**——原文此处写
+  「knowledge-service 等」是不成立的（它零依赖 agent-runtime），收敛方案与口径见
+  ``docs/plans/plan-identity-gate-6of6-2026-10-16.md`` §2/§5。
 
 行为（信任边界，observe 默认）：
 1. 有合法 Bearer → 绑定，放行。
@@ -22,6 +28,8 @@ from __future__ import annotations
 import json
 from typing import Any, Awaitable, Callable
 
+from agent_core.logging import get_logger
+
 from agent_runtime.identity import (
     IdentityError,
     apply_tenant_context,
@@ -32,6 +40,8 @@ from agent_runtime.identity import (
     verify_token,
 )
 from agent_runtime.workspace_registry import reset_tenant_context, reset_user_context
+
+logger = get_logger(__name__)
 
 __all__ = ["IdentityMiddleware"]
 
@@ -135,6 +145,14 @@ class IdentityMiddleware:
             except IdentityError as e:
                 await _send_json(send, 401, f"身份令牌无效: {e}")
                 return
+            except Exception:
+                # 验签器自身异常 ⇒ fail-closed。典型成因：镜像缺 PyJWT[crypto]，而
+                # `identity.py` 的 `import jwt` 是惰性的，只有客户端真发来 JWT 形令牌时才炸。
+                # 既不能降级成「没身份」放行（那是把伪造当匿名），也不能让它变成 500
+                # （攻击者可控输入触发未捕获异常）。异常文本不回显，只进服务端日志。
+                logger.exception("[identity] JWT 验签器异常，按 fail-closed 拒绝")
+                await _send_json(send, 401, "身份令牌无法验证（服务端验签不可用）")
+                return
             await self._run(claims.tenant_id, claims.user_id, scope, receive, send)
             return
 
@@ -145,6 +163,10 @@ class IdentityMiddleware:
                     result = self._verify_header(hdr)
                 except IdentityError as e:
                     await _send_json(send, 401, f"内部签名头无效: {e}")
+                    return
+                except Exception:
+                    logger.exception("[identity] 内部签名头验签器异常，按 fail-closed 拒绝")
+                    await _send_json(send, 401, "内部签名头无法验证（服务端验签不可用）")
                     return
                 if result is not None:
                     tenant, user = result

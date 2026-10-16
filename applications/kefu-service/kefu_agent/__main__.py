@@ -3,7 +3,10 @@
 Phase 7：9 种命令 → LangGraph 意图路由，3 个 Flow → LangGraph 子图，
 GraphRAG → 知识库检索子 Agent，legacy tracker → LangGraph State。
 
-运行：uvicorn kefu_agent:app --host 0.0.0.0 --port 8003
+运行：uvicorn kefu_agent.__main__:app --host 0.0.0.0 --port 8003
+（``kefu_agent:app`` 起不来——包 ``__init__`` 不导出 app，2026-10-16 实测为
+``Attribute "app" not found in module "kefu_agent"``，由
+``tests/test_identity_gate_assembly.py`` 的启动目标用例钉住）
 
 网关接入状态（已修复）：本服务已实现且 CI 通过，并已于 Phase 7 收尾补齐：
   - 接入 shared-schemas 统一契约，新增 `POST /invoke`（Agent Protocol 兼容，
@@ -21,6 +24,7 @@ import time
 
 from agent_core.guardrails.app_factory import build_api_app
 from agent_core.tracing import init_tracing
+from agent_runtime.identity_assembly import mount_identity_gate
 from langgraph.checkpoint.memory import InMemorySaver
 from shared_schemas import QueryRequest, QueryResponse
 from shared_schemas.query import QueryData
@@ -37,6 +41,12 @@ logger = logging.getLogger(__name__)
 init_tracing(service_name="kefu-service")
 
 app = build_api_app(title="kefu-service", version="0.1.0")
+
+# 身份门卫装配点（roadmap 阶段2 #11）：此前本服务**零门卫**，租户纯自报
+# （``req.tenant_id or "default"``，见 ``_run_kefu``），启用强制隔离后即可被自报身份绕过。
+# 默认 observe 档：无凭据 ⇒ 交下游既有逻辑，响应逐字不变；翻 enforce 由 env
+# ``TENANT_JWT_ENFORCE=true``（运维动作，不改代码，回退＝撤 env）。
+mount_identity_gate(app, "kefu-service")
 
 _kefu_graph = build_kefu_graph(checkpointer=InMemorySaver())
 

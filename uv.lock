@@ -2584,6 +2584,7 @@ version = "0.1.0"
 source = { editable = "applications/kefu-service" }
 dependencies = [
     { name = "agent-core", extra = ["memory-embed-local"] },
+    { name = "agent-runtime", extra = ["identity"] },
     { name = "fastapi" },
     { name = "httpx" },
     { name = "langgraph" },
@@ -2595,6 +2596,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "agent-core", extras = ["memory-embed-local"], editable = "packages/agent-core" },
+    { name = "agent-runtime", extras = ["identity"], editable = "packages/agent-runtime" },
     { name = "fastapi", specifier = ">=0.129.0" },
     { name = "httpx", specifier = ">=0.28.0" },
     { name = "langgraph", specifier = ">=1.2.10,<2" },
@@ -3628,6 +3630,7 @@ version = "0.1.0"
 source = { editable = "applications/nl2sql-service" }
 dependencies = [
     { name = "agent-core" },
+    { name = "agent-runtime", extra = ["identity"] },
     { name = "fastapi" },
     { name = "httpx" },
     { name = "langchain-core" },
@@ -3655,6 +3658,7 @@ huggingface = [
 [package.metadata]
 requires-dist = [
     { name = "agent-core", editable = "packages/agent-core" },
+    { name = "agent-runtime", extras = ["identity"], editable = "packages/agent-runtime" },
     { name = "fastapi", specifier = ">=0.115" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "langchain-core", specifier = ">=0.3" },

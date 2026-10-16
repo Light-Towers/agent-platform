@@ -2,6 +2,7 @@
 
 from agent_core.guardrails.app_factory import build_api_app
 from agent_core.tracing import init_tracing
+from agent_runtime.identity_assembly import mount_identity_gate
 from fastapi import FastAPI, Request
 from shared_schemas import HealthResponse, HealthStatus
 
@@ -19,6 +20,10 @@ def create_app() -> FastAPI:
     # 进程级全局单例，必须先于它们装配（同 agent_server/main.py 的顺序约束）。
     init_tracing(service_name="nl2sql-service")
     app = build_api_app(title="nl2sql-service", version="0.1.0", lifespan=lifespan)
+    # 身份门卫装配点（roadmap 阶段2 #11）：本服务此前**零门卫且零租户维度**——契约里有
+    # ``tenant_id`` 字段但源码从不读它。默认 observe 档只建立服务端断言上下文，不改响应；
+    # 真正的「按断言隔离数据」需要先定义本服务的租户作用域（见方案 §5.2，待拍板）。
+    mount_identity_gate(app, "nl2sql-service")
     app.include_router(router)
     app.get("/health", response_model=HealthResponse)(handle_health)
     return app
