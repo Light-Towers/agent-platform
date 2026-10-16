@@ -200,6 +200,16 @@ def route(skill_name: str, ctx=None, **discriminator) -> dict:
             "readiness_tag": "SYNTHETIC",
         }
 
+    # roadmap 阶段1 #10 第二句「缺标注则拒绝接入」：未标 readiness 的接口过去会
+    # 落到 "UNKNOWN"，而下面的门禁只拦 "SYNTHETIC" ⇒ 没标注 = 自动放行（fail-open）。
+    # 现按 fail-closed 处理：生产模式下未标注即拒，必须显式标注后才能接入。
+    if _is_production_mode() and readiness_tag == "UNKNOWN":
+        return {
+            "allowed": False,
+            "reason": "接口未标注数据可信度（readiness），生产模式 fail-closed 拒绝（roadmap #10）",
+            "readiness_tag": "UNKNOWN",
+        }
+
     return {
         "tool": tool_name,
         "allowed": True,
