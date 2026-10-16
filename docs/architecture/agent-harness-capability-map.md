@@ -197,7 +197,7 @@ uv run --with ruff ruff check . && python scripts/check_doc_sync.py
 | **MCP 服务端**（把本平台 Skill 暴露成 MCP server） | ❌ | 全仓无 `FastMCP` / `mcp.server`；`packages/agent-core/agent_core/tools/adapters/mcp.py` 是客户端适配器 |
 | MCP 企业授权面（OAuth 2.1 资源服务器 / RFC 9728 元数据发现 / RFC 8707 token 绑定 / CIMD / EMA） | ❌ | |
 | MCP Tasks / MCP Apps / elicitation / sampling | ❌ | |
-| Skill 渐进披露与路由（选错 Skill 的排查面） | 🟡 | `applications/exhibition-agent/exhibition_agent/foundation/skill_router.py:3-22` 自带 `STATUS: NOT WIRED`；`route()` 零调用 |
+| Skill 渐进披露与路由（选错 Skill 的排查面） | 🟡 | `foundation/skill_router.py:5-10` 自述 **`STATUS: WIRED（作为执行前门禁）`**，调用点 `graph/nodes.py:95-103`（原写 `NOT WIRED`／`route()` 零调用**已不成立**，2026-10-16 对码订正）。仍为 🟡 的原因：门禁表 `_CATALOG_ROUTE` 只覆盖 `venue.schedule.query`（`nodes.py:42-44`），且 `route()` 返回值只做判定、不驱动实际请求形状 ||
 | 工具级权限 ACL（`permissions: frozenset[str]` + `discover(caller_permissions=)` 过滤 + policy 第 5 项校验） | ✅ | `packages/agent-runtime/agent_runtime/skills/registry.py:78,306-337` · `packages/agent-runtime/agent_runtime/planner/policy.py:1-16` · workflow yaml 声明 `permissions` |
 | Workflow 最小权限 CI 门禁（缺顶层 `permissions:` 或 `write-all` 即红，目录不存在也 fail-closed） | ✅ | `scripts/lint_architecture.py` P11 |
 | 中间件洋葱（熔断 / 超时+失败降级真取消 / 重试 / 审计 redact / ToolObserved 最外层） | ✅ 部分 | `packages/agent-runtime/agent_runtime/skills/middleware.py:34-296` · 装配 `applications/agent_server/capabilities.py:176-191`；⚠️ `RateLimitMiddleware:198` 已实现但**未在装配链**（`:10-12` 自述「rate limit 待接入」） |

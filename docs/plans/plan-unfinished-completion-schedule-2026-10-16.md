@@ -1,4 +1,4 @@
-# 排期：未完成计划的收口计划与截止完成日期（2026-10-16）
+﻿# 排期：未完成计划的收口计划与截止完成日期（2026-10-16）
 
 > 状态：**现行执行排期**（本文件只做「排期 + 已核实进度 + 需拍板清单」，不重复各 plan 的技术方案；技术方案仍以各 plan 为准）。
 > 制定日期：2026-10-16 ｜ 分支：`chore/tech-debt-agentic-discovery-test-2026-10-15` ｜ **本批不部署**（夜间 126 关机）。
@@ -14,6 +14,7 @@
 | **阶段 2 提前开工（§7）** | **2026-10-19**（#12 观测装配门禁） → 后续行另排 | 把阶段 2 中**不依赖 126/密钥/真库**的行前移，避免 10/17–10/30 空转 | ✅ 可（#12 判据本地可验） |
 | **阶段 2 再前移（§8）** | **2026-10-16**（#16 脚本半，判据纯本地可验） | roadmap #16「未注入变量时脚本拒跑而非默连本机」 | ✅ **已完成（10/16）**；#16 另一半「新场景在真库通过」待环境，本行不闭合 |
 | **阶段 2 再前移（§9）** | **2026-10-17**（#11 存在性半，原排期首日） | roadmap #11「6/6 覆盖；门禁生效；灰度开关有记录」中本地可验的部分 | 🔨 **提前一天完成（10/16）**：共享装配 2/6→4/6 + P13 门禁；fork 收敛与 enforce 取证分别转 §3 第 9 项与待环境 |
+| **阶段 2 再前移（§10）** | **2026-10-16**（#21 判据=每项有书面结论，本地可交付） | roadmap #21 六项遗留逐项定性 + 据此清掉三处不实陈述 | ✅ **判据达成（10/16）**；四项剩余缺口转 §3 第 11–14 项待拍板，不随本行关闭 |
 | 阶段 2 / 阶段 3 | 11-13 / **12-04** | 归 roadmap，不由本排期重排 | 部分待环境 |
 | 一期交付判定 | **2026-12-04** | roadmap §四 七条标准逐条判定 | — |
 
@@ -49,7 +50,7 @@
 
 ## 3. 需要用户拍板（**请在 10/20 前给方向，否则将阻塞 §2 后半**）
 
-红线「所有代码优化/重构必须先制定方案」+ 我不替你做设计决策。以下 **10 项**（按本表条目计数，非按 plan 文件数）方案已就绪，卡在「选哪条路」而非「有没有路」：
+红线「所有代码优化/重构必须先制定方案」+ 我不替你做设计决策。以下 **14 项**（按本表条目计数，非按 plan 文件数）方案已就绪，卡在「选哪条路」而非「有没有路」：
 
 1. `plan-audit-operator-principal-2026-10-03.md` — 审计主体改造是否开工（现：方案已写、零代码）
 2. `plan-m11-exception-classification.md` — 状态 `Proposed`，接受 / 修改后再施工
@@ -62,6 +63,11 @@
 
 9. **两套自带身份门卫是否收敛到共享实现**（§9 / `plan-identity-gate-6of6-2026-10-16.md` §5.1）：knowledge-service 的 `TenantHeaderMiddleware` 与 exhibition-agent 的 `X-Execution-Context`（**逐端点调用**、DEV 档刻意不验签）都在 126 上活着。P13 的归属表已把两家显式记成在册债，所以「6/6 覆盖」现在是一句**可审计**的话，而不是"都装了个门卫"。收敛会改两家的部署开关名与响应形状（KS 的 `/health/ready` 503 就绪语义牵连其中）⇒ 按 AGENTS.md「边界」条不擅动。选项：a 先收敛 KS，exhibition 的端点级覆盖另行处理 / b 两个一起收敛 / c 三套并存但 P13 归属表长期挂着（现状）。
 10. **路由侧「自报租户」是否换成服务端断言**（§9 / 同方案 §5.2）：这才是 #11 的真正收口动作，但它让调用方**能观察到行为变化**（自报 `tenant_id` 不再被采信）。牵动 agent_server `/query` 的 9 处与 kefu 的 2 处；且 **nl2sql-service 的「租户隔离」目前没有定义**——其源码零 `tenant` 引用，契约里有 `tenant_id` 字段但从不读，所以得先回答"按什么隔离"（数据源？元知识库？结果集？）才谈得上验收。选项：a 先只定义 nl2sql 的租户语义、存量自报暂不动 / b 一并翻断言（要先审计前端与网关的取值来源）/ c 停在 observe 档，等二期接口签字后再动。
+
+11. **WS 路径要不要接 admission 与背压**（§10 P2-3）：`/ws/{thread_id}` 被入口护栏**显式豁免**（`agent_federation/api/server.py:158` `exempt_paths=("/health", "/ws/")`），且逐条 `send_json` 无队列/水位（`:382-388`）。错误帧这一半已补（`:392-403`），但限流与背压要动的是**客户端能观察到的行为**（慢消费者会被暂停或断连），属对外语义决策。
+12. **`.env.example` 补齐范围与要不要做门禁**（§10 P2-5）：实测 agent_server **整份缺失**、约 60 个键"代码读而文档缺"，另有 1 个**杜撰键**（KS `KNOWLEDGE_SERVICE_NAME`，全包零命中）。选项：a 全量补齐 + 加一条"env 键必须双向对得上"的门禁（新 lint 或 check_doc_sync 扩展）/ b 只补 agent_server 那份 + 删杜撰键 / c 只做本轮已登记的 exhibition/kefu 面。
+13. **MinIO 初始化要不要翻成默认拒绝启动**（§10 P2-7）：上传路径已 fail-fast（`import_router.py:229-232`），但 `clients/minio_utils.py:12-51` 初始化仍是"记 error + 置 None"。翻了之后缺配置的部署从「能起但导入功能坏」变成「起不来」——这是**部署侧的可用性取舍**，且牵动 126 现网。顺带一条孤儿：`core/config.py:174-187` 的 `validate_credentials()` 全仓零调用方（要么接上要么删，我不擅自定）。
+14. **文档口径的自动兜底要不要建**（§10 P2-6 (a)/(c)）：`check_doc_sync.py` 只核路径存在性与 session 数，核不出"门禁条数/覆盖率/状态行"这类**数字漂移**——本轮我自己就把 14→16 的口径破了又补。选项：a 让 check_doc_sync 增核「lint 条数三处一致」（把现值算出来比对，破口即红）/ b 维持人工收尾 / c 改为文档里不再写死数字、只写口径定义。
 
 ## 4. 迁移策略（本排期如何推进，不破坏可回退性）
 
@@ -213,3 +219,30 @@
   造第四套实现更背离"单一实现"。
 - **本行仍开的部分**：§3 第 9 项（两套 fork 收敛）、第 10 项（自报租户换服务端断言，含 nl2sql
   租户语义的定义）、以及「enforce 生效 + 灰度记录」的**现网取证**（待环境）。
+
+## 10. roadmap #21 判据交付：架构审计 6 项有效遗留的逐项书面结论（2026-10-16）
+
+> 判据原文是「**每项有书面结论**」，不是「每项都修完」。下表状态取**本轮实读的代码证据**，
+> 三条关键结论我另做了源码复核（不整段采信子代理读数）。审计出处 `arch-audit-2026-09-24.md` L19。
+
+| # | 审计原说法 | 现状态 | 依据（file:line，本轮实读） | 剩余缺口 | 有无防回归门禁 |
+|---|---|---|---|---|---|
+| P2-1 | skill_router 是死代码 | **已修（不再是死代码），覆盖面局部** | 生产调用点 `exhibition_agent/graph/nodes.py:95-103`（`run_skill` 执行前门禁）+ 拒绝分支 `:104-129`；自述已改 `STATUS: WIRED`（`foundation/skill_router.py:5-10`）；测试 3 处（`tests/test_skill_router_wiring.py:22`、`test_skill_routed_endpoint.py:17`、`test_skill_venue_schedule.py:11`） | 门禁表只含 `venue.schedule.query`（`nodes.py:42-44`），`data_analysis.query` 不在内（它走 HTTP 调 nl2sql，不直连 Warehouse）；`route()` 返回值只做判定、**不驱动实际请求形状** | ❌ 无。`lint_architecture.py` 17 个 `check_*` 与 `tests/governance/` 均无「未接线/死代码」类规则 ⇒ 接线被删不会报红（与 #5 判据同源风险） |
+| P2-2 | singleflight 竞态未结构性消除 | **原结论已不成立（实现 + 测试都在）** | `packages/agent-runtime/agent_runtime/singleflight.py:19-33`：`_refs` 引用计数 + `_cleanup` 双守卫（`:27-28` refs>0 不删、`:29-30` lock 身份不符不删），`:68-72` finally 递减；回归用例 5 条（`tests/test_singleflight.py:72/92/112/126/151`，本轮新增后两条） | 无（反向守卫「空闲必须真回收」本轮补齐；路径漂移已在审计原文订正） | ✅ 用例即门禁（9 passed，变异反证已验） |
+| P2-3 | WS 路径未接中间件/限流 | **部分：错误帧已补，护栏与背压仍未接** | 唯一 WS 路由 `agent_federation/api/server.py:337`（审计的 349/362-364 已漂移），异常分支 `:392-403` 现在**既记日志又向客户端发 error 帧**再断连；`:372` 非法 JSON 也发 error 帧 | 入口护栏**显式豁免 WS**：`server.py:158` `exempt_paths=("/health", "/ws/")`，且 `SecurityGuardsMiddleware` 对非 http scope 直接透传（`agent_core/guardrails/web.py:98`）⇒ 无 admission/coordinator；`:382-388` 逐条 `send_json` **无队列/水位/丢弃策略** = 无背压 | ❌ 无。`tests/unit/test_ws_stream.py` 只覆盖正常流，无 error 帧/限流用例 |
+| P2-5 | `.env.example` 与代码不同步 | **部分：exhibition 已补齐（本批 `af2f980`），其余仍有实测缺口** | 已按 `env_prefix` 折算逐应用比对（exhibition `config.py:11` 前缀 ⇒ 10 个 `EXHIBITION_AGENT_*` 均在 `:16-47` 有字段，非孤儿）；审计原句「exhibition 未声明 `NL2SQL_SERVICE_URL`」已不成立（键已在文档中，读点 `skills/data_analysis/skill.py:33`） | ① **agent_server 没有自己的 `.env.example`**（6 应用只有 5 份），根文件缺其 11 个无前缀字段（`agent_server/config.py:20-70`：`DB_POOL_MAX_SIZE`/`DEFAULT_TENANT_ID`/`MEMORY_EXTRACTION_ENABLED`/`MEMORY_FORGET_THRESHOLD`/`RERANK_*`×4/`MAX_ITERATIONS`/`COMPACTION_ENABLED`）；② 代码读而文档缺：KS `MINIO_PUBLIC_READ`（`clients/minio_utils.py:31`）等 8 项、exhibition `F01_SIGNING_SECRET`（`foundation/execution_context.py:70`）、federation 约 50 项；③ **文档有而代码无**：KS `.env.example:111` 的 `KNOWLEDGE_SERVICE_NAME`（全包零命中） | ❌ 无。`check_doc_sync.py` 只核路径与会话数，不核 `.env.example` ⇒ 这类漂移没有自动兜底 |
+| P2-6 | 文档口径矛盾 | **大部分已对齐，本轮又清掉两处** | lint 条数已四处同步（`ARCHITECTURE.md` §4.1 / capability-map:326 / 讲解稿 / 锚点表）= 表 17 行·编号 16·函数 17，实数逐行核对；治理 28、HA 19 与实测一致 | 仍开的两处：**(b) 真相源冲突未解**——`AGENTS.md:5` 把 `plan-enterprise-platform-skeleton-2026-09-23.md` 列首位，而 `docs/README.md:60` 已明文标它「已被取代」并记录该冲突 ⇒ 属你拍板项，我不擅动；**(c) session 数口径靠注释维持**——Makefile `test:` 实为 10 行 pytest，但 `check_doc_sync.py:316` 只匹配 `uv run pytest ` 前缀 ⇒ 计到 9，`AGENTS.md:29/30` 用「9 session + 1 个 --extra otel session」这句话把两边对上（结论正确，但一致性靠人读注释） | 部分：条数一致性**无自动检查**（`check_doc_sync` 核不出数字漂移）；session 数有 `check_doc_sync` 半覆盖 |
+| P2-7 | MinIO 外部存储失败仅记 warning | **部分：请求路径已 fail-fast，初始化仍 fail-soft** | 上传路径 `knowledge_service/api/import_router.py:229-232` 客户端为 None ⇒ `HTTPException(500)`，`:236-257` 重试 2 次、末次 `logger.error(exc_info=True)` 后**拒绝本次导入**（`:224` 注释自标 P2-7） | `clients/minio_utils.py:12-51` 模块级 `except Exception` ⇒ 记 error 后 `minio_client = None`，不抛、不阻断启动，**且无 env 开关**；`core/config.py:174-187` 的 `validate_credentials()` 列了 `MINIO_ACCESS_KEY/SECRET_KEY` 但**全仓零调用方**（grep 仅命中定义）⇒ 它不构成启动 fail-fast，这本身是第二条待收的孤儿代码 | 部分：fail-open 的现状由「未配密钥 ⇒ 500」间接可测，但没有专门用例钉「初始化失败不得静默」；126 侧的启动 fail-fast 修复已入库（见 `docs/operations/env-126-inventory.md`），线上镜像是否已重建仍是待执行项 |
+
+**本轮据上表顺手清掉的两处不实陈述**（都属于「账面说不、代码说已做」）：
+1. `AGENTS.md:5` 的「未接线半成品（P1-7 标注）：human_task / execution_recovery / state_migration /
+   payload_externalization / skill_router(exhibition)」——**五项现已全部接线**，
+   按 roadmap #5 判据「全仓未接线标注归零」撤除该句（改为「接线 ≠ 默认启用」的准确表述 + 指向本节）。
+   同一条还订正了 `docs/architecture/agent-harness-capability-map.md:200` —— 那份仍写 `STATUS: NOT WIRED`
+   且称 `route()` 零调用，与 `skill_router.py:5-10`、`nodes.py:95-103` 直接矛盾（同一漂移的第二处落点）。
+2. `docs/project-introduction-2026-10-12.md:496` 的「14 条自动检查」→ 16 条（我上一轮只改了三处，
+   这条是本轮 grep 复查时补的，属同一漂移面）。
+
+**仍未闭合、且需要你先定的**：P2-6 的 (b) 真相源归属；P2-3 的 WS 是否要接 admission/背压（改的是
+对外行为）；P2-5 的 `.env.example` 补齐范围（agent_server 一份 + 约 60 个键，是否值得做门禁）；
+P2-7 的初始化 fail-fast 是否翻成默认拒绝启动（会让缺配置的部署从「能起但功能坏」变成「起不来」）。
