@@ -293,3 +293,27 @@ def test_migration_012_checksum_is_stable():
     m = {x.version: x for x in discover()}[12]
     assert m.checksum() == m.checksum()
     assert len(m.checksum()) == 16
+
+
+def test_pg_awaitable_task_store_has_exactly_one_implementation():
+    """roadmap 阶段1 #4 判据「同名实现只剩一处」的可执行锁（两端都要钉）。
+
+    重复那份的危险不是冗余，而是 ``execution_state_pg`` 是 PG 存储的**自然 import 点**
+    （``PgExecutionStatusStore`` 就在那儿）：谁从那儿取 ``PgAwaitableTaskStore``，就拿到
+    无 generation fence 的那份，本文件的 fence 用例对它毫无约束力 ⇒ 防护静默退化。
+
+    第二条断言反向钉「留下的是带 fence 的那份」——去重若删错方向，判据同样会失守。
+    """
+    import importlib
+    import inspect
+
+    from agent_runtime.awaitable_task_pg import PgAwaitableTaskStore as live
+
+    execution_state_pg = importlib.import_module("agent_runtime.execution_state_pg")
+    assert not hasattr(execution_state_pg, "PgAwaitableTaskStore"), (
+        "execution_state_pg 又出现了第二份 PgAwaitableTaskStore；"
+        "那份无 generation fence，从它 import 会让 fencing 静默退化（roadmap #4）"
+    )
+    assert "generation" in inspect.getsource(live.save), (
+        "唯一留下的 PgAwaitableTaskStore.save 必须带 generation fence"
+    )
