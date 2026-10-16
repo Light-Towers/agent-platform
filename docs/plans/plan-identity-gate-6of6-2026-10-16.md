@@ -12,8 +12,11 @@
 2. 装配点默认**只观察不拦截**（observe 档）。**行为面准确的口径**（本轮实施时收窄过，写在
    这里免得被当成"绝对零变化"）：
    - 无凭据请求、不透明 Bearer（静态 API_KEY 形态）、`/health` 等 skip 路径 ⇒ **逐字不变**；
-     网关今日对 kefu/nl2sql **不发任何身份头**（`agent/async_subagents.py` 无 headers 构造），
-     所以现存流量整体不受影响，这两条有用例钉（observe 透传 + skip 面）。
+     网关对 kefu/nl2sql 的出站请求（`agent/async_subagents.py:113-125` 的 `_HttpSubAgent.ainvoke`）
+     只带 `Content-Type` + W3C `traceparent`，**不带任何身份凭据**，故现存流量整体不受影响
+     （两条用例钉住：observe 透传 + skip 面）。
+     ⚠️ 取证更正：本项初稿此处写的是"该文件无 headers 构造"，那条命令因 `&&` 短路**根本没有执行**
+     ——结论碰巧仍成立，但当时手上的证据是假的。已改为逐字读 `:113-125` 后的表述。
    - **一处有意的变化**：JWT 形态的 `Authorization` 凭据过去被这两个服务**完全忽略**，
      接入后若无法验签会得到 401（`identity_middleware.py` 既有的 fail-closed 语义，与
      agent_server/federation 同规则）。即"带着身份声明但验不了"从静默通过变成明确拒绝。
@@ -58,6 +61,13 @@
    不选"把中间件挪进 agent-core"：`identity.py:20` 的注释记着 RS256 签/验刻意不进 core（红线 1 的
    历史决策），造第四套实现更不符合本项的"单一实现"目标。PyJWT 在 `identity.py` 是**惰性导入**
    （只有真收到令牌才 `import jwt`），故 observe 档不依赖该 extra 也不会启动失败。
+   **部署侧核对（本轮实读，不是推定）**：仓库只有 3 个 Dockerfile（根 / `agent_federation` /
+   `knowledge-service`），**今日没有任何镜像构建 kefu-service 或 nl2sql-service** ⇒ 本批不打断任何现有构建。
+   但根 `Dockerfile:38` 的注释记着一颗已知的雷：pip 不认 `[tool.uv.sources] workspace=true`，装服务时必须
+   **把本地包路径在同一安装事务里一并传入**，且 extra 要挂在**声明它的那个包**上。⇒ 将来若给这两家出镜像，
+   命令形是 `pip install ./packages/agent-core ./packages/shared-schemas "./packages/agent-runtime[identity]" ./applications/kefu-service`；
+   只写最后一条会让 pip 去 PyPI 找 `agent-runtime`。漏 `[identity]` 的后果已由本批的 fail-closed 兜住
+   （收到令牌 ⇒ 401，不是 500、也不是静默放行）。
 6. **本机操作注意（本轮实踩，写给下一个改 extra 的人）**：`uv sync --all-packages --extra dev`
    会把此前装过但本次未请求的 extra **卸掉**（本批一次 `uv sync` 静默移除了 otel 全家），
    而 `tests/observability` 的钉用例前置正是"装了真 SDK" ⇒ 改完依赖要按原 extra 集合复同步
@@ -66,7 +76,12 @@
 ## 5. 本批明确不做（各给理由，不当作已完成）
 
 1. **knowledge-service / exhibition-agent 收敛到共享实现** —— 二者各自有在跑的对外行为（KS 的 `TENANT_HEADER_ENFORCE` 与 503 就绪探针、exhibition 的 `X-Execution-Context` 且 DEV 档刻意不验签），收敛会改**响应形状与部署开关名**，属契约变更：按 AGENTS.md「边界」条须先审计消费方并另行决策。
-2. **把路由里的自报租户换成服务端断言**（agent_server `/query` 9 处、kefu 2 处）—— 这是 #11 的真正收口动作，但它改变**调用方可观察的行为**（自报值不再被采信）。且 nl2sql 侧有个前置问题：**它的"租户隔离"到底隔离什么**（其数据访问今天完全没有 tenant 维度，契约里有字段但从不读）⇒ 没有定义就无法判「已隔离」，转待拍板。
+2. **把路由里的自报租户换成服务端断言**（agent_server `/query` 9 处、kefu 2 处）—— 这是 #11 的真正收口动作，但它改变**调用方可观察的行为**（自报值不再被采信）。
+   绕过的**具体形状**本轮已核实：kefu 今日的租户值是网关写在 **body** 里带过来的
+   （`async_subagents.py:118` 的 `payload["tenant_id"]` → `kefu_agent/__main__.py:63` 的 `req.tenant_id or "default"`），
+   全程没有任何凭据 ⇒ 服务端分不清"网关断言"与"直连客户端自报"。observe 档接入后断言**已经开始产生**，
+   但路由仍读 body 值——真正的封堵需要这一步，所以它单列而不是顺手做。
+   且 nl2sql 侧有个前置问题：**它的"租户隔离"到底隔离什么**（其数据访问今天完全没有 tenant 维度，契约里有字段但从不读）⇒ 没有定义就无法判「已隔离」，转待拍板。
 3. **exhibition `skill_loader/app.py` 的无校验端点** —— 属该服务内部端点收敛，与 §5.1 同批决策更稳。
 
 ## 6. 验收标准
