@@ -65,6 +65,11 @@
 - **正确性优先**：桶 A 每处窄化后 `pytest applications/knowledge-service`（含节点/检索/导入相关用例）全绿；窄化类型集合必须真覆盖 try 体抛出，禁止为「凑删基线」收窄到漏抛。
 - **降量自证**：处理完对已完全脱离基线的文件，`ruff check applications/knowledge-service --config 'lint.per-file-ignores={}'` 报出的残留站点数 = 仍留在基线的桶 C 站点数（单调递减，可核对）。
 - **门禁常驻**：`ruff check .` 全绿；源码 `grep 'noqa: BLE001'` = **0**（延续 M1-only 原则）。
+  - ⚠️ **2026-10-16 复核：本条判据自身有缺陷，建议修订而非达标**。实测两种豁免的**防护强度不同**：
+    - 在「只有逐点 noqa、未进 `per-file-ignores`」的文件里新加一个 `except Exception:` ⇒ `ruff --select BLE001` **报 `Found 1 error`**（棘轮仍然生效）；
+    - 同样一段代码放进「已列进 `per-file-ignores` 基线」的文件（探针用 `agent_core/tracing.py`）⇒ **`All checks passed!`**（整文件对新违规永久静默豁免）。
+    ⇒ 为把 `grep` 压到 0 而把逐点 noqa 迁进整包基线，等于**把 13 个文件从"行级精确豁免"降级为"全文件 blanket 豁免"，并丢掉每处的理由注释**（现 36 处**全部带理由**，如「单项审计检查隔离」「flush best-effort，最终以 query/canary 校验为准」）。这与本方案对桶 B 的定案「不为降指标动手」是同一判据。**建议改判据为**：① 每个 `noqa: BLE001` 必须带理由（可 grep `noqa: BLE001$` = 0 校验）；② 已入整包基线的文件不得再补逐点 noqa；③ 周期性重扫 **vestigial noqa**（捕获的已是具体异常类型、noqa 早已不适用）并删除。
+  - **本轮已按新判据做**：补齐 9 处无理由的 noqa ⇒ 裸标 0；删 1 处 vestigial（`identity.py:220` 捕获 `jwt.PyJWTError`，BLE001 本就不触发，经 stdin 探针证明去掉后仍 `All checks passed!`）⇒ **37 → 36，属真实降量而非迁移记账**。
 - **文档防漂移**：`check_doc_sync.py` 0 警告；plan/审计/D7 反映本轮实际降量（桶 A 已处置、桶 B 跳过、桶 C 仍豁免）。
 - **禁止**：删用例 / 放宽断言凑绿；为降量改变任何 happy-path 行为。
 

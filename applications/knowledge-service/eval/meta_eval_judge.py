@@ -175,7 +175,7 @@ def make_candidate_scorer(candidate: str, llm: Any = None):
             return False, None
         try:
             return _mk_ragas()
-        except Exception:  # noqa: BLE001
+        except Exception:  # noqa: BLE001 - 评分器构造失败 → 诚实不可用（available=False），不伪造分数
             return False, None
 
     pkg = CANDIDATE_PACKAGES.get(candidate)

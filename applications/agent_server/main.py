@@ -128,7 +128,7 @@ def _warm_embedding_backend() -> tuple[str, bool]:
 
         provider = resolve_provider()
         return type(provider).__name__, not isinstance(provider, MockEmbedder)
-    except Exception:  # noqa: BLE001
+    except Exception:  # noqa: BLE001 —— 后端预热失败不阻断启动：红灯如实亮 unknown/false，且必留日志
         logger.exception("embedding 后端预热失败：/health 报 embedding_backend=unknown / embedding_real=false")
         return "unknown", False
 
