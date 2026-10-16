@@ -217,7 +217,7 @@ def verify_token(
 
     try:
         header = jwt.get_unverified_header(token)
-    except jwt.PyJWTError as e:  # noqa: BLE001 - 转为域内错误，不外泄库细节
+    except jwt.PyJWTError as e:  # 转为域内错误，不外泄库细节
         raise IdentityError(f"令牌格式非法: {e}") from e
 
     kid = header.get("kid")
