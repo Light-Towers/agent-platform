@@ -8,7 +8,8 @@ test_tracing.py —— M4 OTel 全链路追踪单测（方案 §8）。
 2. **真实 span 路径**：init 时显式注入 ``InMemorySpanExporter``，能产生 span 且
    属性正确（config_hash / collection / request_id / user_query_hash 统一注入）；
 3. **request_id 格式**与 **user_query_hash 稳定性**；
-4. **幂等**：重复 init 不重复创建 provider / exporter。
+4. **幂等**：重复 init 不重复创建 provider / exporter；
+5. **文档面钉桩**：``.env.example`` 声明的观测键名必须等于 kernel 实际读取的 ``ENV_*``。
 
 【依赖策略】opentelemetry 为可选依赖（pyproject ``[project.optional-dependencies] tracing``）。
 本文件对真实 SDK 路径使用 ``skipif`` 守卫：OTel 未安装时 no-op 用例照常运行，
@@ -17,6 +18,7 @@ test_tracing.py —— M4 OTel 全链路追踪单测（方案 §8）。
 """
 
 import re
+from pathlib import Path
 
 # 私有状态断言用（_provider 不在 shim 重导出面内）：直取 kernel 模块本体
 import agent_core.tracing as _kernel  # noqa: E402
@@ -104,11 +106,34 @@ def test_init_empty_endpoint_is_noop():
 
 
 def test_init_disabled_by_default_env_is_noop(monkeypatch):
-    # 未设置 KNOWLEDGE_TRACE_ENABLED → 默认 false → no-op（即使 SDK 已装）
-    monkeypatch.delenv("KNOWLEDGE_TRACE_ENABLED", raising=False)
+    # 未设置**内核真正读取的**开关 → 默认 false → no-op（即使 SDK 已装）。
+    # endpoint 故意给非空值：让"no-op"的唯一成因是开关默认关，而不是"没配端点"。
+    # 键名取自 _kernel.ENV_TRACE_ENABLED 而非写死字符串 —— 它不在 kernel.__all__ 内，
+    # shim 的 ``import *`` 不会重导出；而写死字符串正是 2026-09-23 那次改名把本用例
+    # 跟着改成 KNOWLEDGE_TRACE_ENABLED（一个自诞生起就没有读取方的键）的成因。
+    monkeypatch.delenv(_kernel.ENV_TRACE_ENABLED, raising=False)
     monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317")
     tracing.init_tracing()
     assert tracing.is_tracing_enabled() is False
+
+
+@requires_sdk
+def test_env_trace_enabled_true_really_enables(monkeypatch):
+    """反向对照：同一个键置 true ⇒ 确实启用。
+
+    没有这条，上一条"默认关"可能只是在断言一个**根本不起作用**的键的默认值
+    （2026-09-23~2026-10-16 期间正是这种状态：文档让人去设 KNOWLEDGE_TRACE_ENABLED，
+    而它无人读取，所以"照文档开了"和"没开"读数完全一样）。
+    """
+    monkeypatch.setenv(_kernel.ENV_TRACE_ENABLED, "true")
+    exporter = InMemorySpanExporter()
+    # 显式传空 endpoint：只靠注入的 exporter 导出，避免继承本机真实 OTLP 端点
+    tracing.init_tracing(otel_endpoint="", exporter=exporter)
+    assert tracing.is_tracing_enabled() is True
+
+    with tracing.start_span("env.switch.span"):
+        pass
+    assert [s.name for s in exporter.get_finished_spans()] == ["env.switch.span"]
 
 
 # ===========================================================================
@@ -250,3 +275,34 @@ def test_init_is_idempotent():
     # span 只进入第一个 exporter
     assert len(exporter1.get_finished_spans()) == 1
     assert len(exporter2.get_finished_spans()) == 0
+
+
+# ===========================================================================
+# 5) 文档面钉桩：.env.example 里的观测两键必须就是代码实际读取的键名
+# ===========================================================================
+_ENV_EXAMPLE = Path(__file__).resolve().parents[2] / ".env.example"
+
+
+def _active_env_keys(text: str) -> list[str]:
+    """取"真正会生效"的键（跳过注释行）——注释里提旧键名是有意留痕，不算声明。"""
+    return [
+        line.split("=", 1)[0].strip() for line in text.splitlines() if "=" in line and not line.lstrip().startswith("#")
+    ]
+
+
+def test_env_example_observability_keys_are_read_by_code():
+    """钉住 `.env.example` 声明的服务名/开关键 == kernel 的 ``ENV_*`` 常量。
+
+    `37d93427`（2026-09-23）的 ZHANGUI_*→KNOWLEDGE_* 改名只动了文档面：当时 KS 的
+    ``core/tracing.py`` 已是纯 shim，读取方早在 2026-08-21 就换成 kernel 中性键
+    ⇒ 新键名自诞生起无人读取，照文档设值会"以为开了、其实没开"。
+    check_doc_sync 只核路径存在性，核不出这类漂移，故在此兜住这处已实证缺口。
+    """
+    keys = _active_env_keys(_ENV_EXAMPLE.read_text(encoding="utf-8-sig"))
+
+    assert _kernel.ENV_TRACE_ENABLED in keys, f"缺少开关键 {_kernel.ENV_TRACE_ENABLED}"
+    assert _kernel.ENV_SERVICE_NAME in keys, f"缺少服务名键 {_kernel.ENV_SERVICE_NAME}"
+
+    known = {_kernel.ENV_TRACE_ENABLED, _kernel.ENV_SERVICE_NAME}
+    stray = [k for k in keys if k.endswith(("TRACE_ENABLED", "SERVICE_NAME")) and k not in known]
+    assert not stray, f"以下键无任何读取方，删掉或换成 {sorted(known)}：{stray}"
