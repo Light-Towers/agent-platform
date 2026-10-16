@@ -1,4 +1,4 @@
-﻿# 排期：未完成计划的收口计划与截止完成日期（2026-10-16）
+# 排期：未完成计划的收口计划与截止完成日期（2026-10-16）
 
 > 状态：**现行执行排期**（本文件只做「排期 + 已核实进度 + 需拍板清单」，不重复各 plan 的技术方案；技术方案仍以各 plan 为准）。
 > 制定日期：2026-10-16 ｜ 分支：`chore/tech-debt-agentic-discovery-test-2026-10-15` ｜ **本批不部署**（夜间 126 关机）。
@@ -17,6 +17,7 @@
 | **阶段 2 再前移（§10）** | **2026-10-16**（#21 判据=每项有书面结论，本地可交付） | roadmap #21 六项遗留逐项定性 + 据此清掉三处不实陈述 | ✅ **判据达成（10/16）**；四项剩余缺口转 §3 第 11–14 项待拍板，不随本行关闭 |
 | **§16 判定复核（roadmap §四 七条）** | **2026-10-16**（截止=当日） | 七条标准逐条对码复取，产出「判定列现值 + 计数口径 + 复跑命令」 | ✅ **已完成（10/16）**：1 条下修（第 6 条 达标→部分达标）+ 4 条订正定性（1/3/4/5），新增 2 行开项进 §2、2 项待拍板进 §3 第 19–20 项（第 20 项由 §17 追加） |
 | **§17 变更记录补齐（§四 第 7 条残口）** | **2026-10-16**（截止=当日） | `CHANGELOG.md` 补 10/10–10/16 未发布窗口节 | ✅ **已完成（10/16）**：120 个提交入窗口节、11 个锚点逐个核对、历史节零改动（diff 16+/0−）；版本号 facet 实测无映射 ⇒ 转 §3 第 20 项 |
+| **§19 exhibition env 模板门禁（#21 / P2-5）** | **2026-10-16**（截止=当日） | 给会展侧的「模板 ↔ 代码」一致加装自动检查（前缀折算口径） | ✅ **已完成（10/16）**：新增 3 条用例，四条变异全部击中；exhibition **368 → 371 passed**。**同批撤回一条我自己造出的假缺口**（前缀-blind 探针曾报"9 键缺失"）；`make eval` 复跑被执行权限层拦下，记为**待放行**，未绕过 |
 | 阶段 2 / 阶段 3 | 11-13 / **12-04** | 归 roadmap，不由本排期重排 | 部分待环境 |
 | 一期交付判定 | **2026-12-04** | roadmap §四 七条标准逐条判定 | — |
 
@@ -448,8 +449,9 @@ DOC_FILE_REF_DOCS = ("AGENTS.md", "ARCHITECTURE.md", "README.md")
 兼容是"扫描未来源文件"的正确约定，摘掉会让 P12 在未来 BOM 文件上产生假阳性；BOM 回归用例自带合成文件 ⇒ 不需调转，调转等于削防线）。
 **验收**：`.py` BOM 复扫 = 0；nl2sql session 21 passed；治理+契约合跑 37 passed；`lint_architecture.py` rc=0；`ruff check .` 全绿；
 `git diff` 核得 `- [ ]`→`- [x]` 恰 **1** 处、其余复选框零变更。
-**边界（不倒扣）**：清零只覆盖 `.py`。仓内仍有 **4 个非 `.py`** 带 BOM（`ARCHITECTURE.md`、`docs/README.md`、本篇、
+**边界（不倒扣）**：清零只覆盖 `.py`。当时仓内仍有 **4 个非 `.py`** 带 BOM（`ARCHITECTURE.md`、`docs/README.md`、本篇、
 `docs/plans/p0-4-blind-except-inventory.txt`）——Markdown/文本不涉 PEP 263 加载语义，不属本项判据，本轮不顺手改。
+**（2026-10-16 §19 批次后现值：3 个）**——本篇自己的 BOM 在那一批的文件重排中被去掉了（**属偏离，见 §19 末段**），现存 `ARCHITECTURE.md`、`docs/README.md`、`p0-4-blind-except-inventory.txt` 三个仍带 BOM（按 HEAD blob 现取，不是做减法）。
 
 ## 15. E 组技术债 D4：ruff `ignore` 逐包收窄（2026-10-16，截止=当日）
 
@@ -584,4 +586,51 @@ uv run pytest packages/agent-runtime/tests/test_receipt_generation_fencing.py ap
 **仍未消除的残留（说清楚，别读成"零瑕疵证据"）**：本轮 20 分钟里我提交了两个 doc-only commit（`bd4a900`、`7a25583`），所以它也不是严格意义上的"零写入静态树"；要做到那一点必须 20 分钟内不动任何文件，本窗口做不到。判定这句对外可说的强度是「**`.py` 自 `f641ca5` 起逐字节未变 + 三轮同值**」，不是「一次 pristine checkout」。
 **耗时会漂**：root session 607s→140s、agent_server 46s→495s、otel 439s→24s（首轮含 `--extra otel` 依赖解析；并发会话抢 IO）。**耗时不可用作回归判据，只有 passed/skipped 计数与退出码可以**。
 
+**本节的读数绑定关系要补一句（否则下一批会把它读成现值）**：上表两轮都跑在 §19 那份新用例**入库之前**，
+所以从 §19 起 exhibition 应为 **371**（+3）、合计应为 **2915 passed / 16 skipped**，而不是表里的 368 / 2912。
+本窗口没有再花 20 分钟重跑整轮，**这个 +3 是由"只新增一个测试文件、零产品代码改动"推出的**，不是实测；
+对外引用前先重跑一轮确认（单条已实测：`uv run pytest applications/exhibition-agent/tests -q` → 371 passed）。
+
 **仍未覆盖的范围（不把 10 session 说成"全部验证"）**：`make ci` 还含 `ruff check .` + `scripts/lint_architecture.py` + 启发式 eval；前两者本批已单独跑过（§15 验收、§17 自查 `check_doc_sync.py`），eval 未在本窗口重跑。真库/双实例/现网类用例仍属 §2 的「待环境」，不随本节翻状态。
+
+## 19. 阶段 2 再前移：exhibition 的 env 模板门禁（roadmap #21 / P2-5，2026-10-16，截止=当日）
+
+**先记一条我自己犯的取证错（它差点变成一条假缺口）**：我用「字段名大写 ∈ 模板键集合」去比 exhibition，得出**「10 个字段里 9 个没记载」**。
+错在**没读 `model_config`**：本服务 `env_prefix="EXHIBITION_AGENT_"`，pydantic-settings 的真实 env 名是 **前缀 + 字段名大写** ⇒ 模板里 10 个键**一个不缺**。
+订正后的实取：`exhibition-agent` prefix=`EXHIBITION_AGENT_` fields=10 **missing=0**；`agent_server` prefix=`''` fields(own)=79 **missing=0**。
+⇒ 「模板齐不齐」这类判定**必须先折算 env 名**（前缀 / `alias` / `validation_alias` 三种都会让字面比对失真），这是本窗口第 4 次「探针错 ≠ 规则错」。
+
+**既然事实是"已记载"，交付就改成"让它在结构上不能退回去"**（登记为门禁而非账面结论）：新增 `applications/exhibition-agent/tests/test_env_template.py` 3 条用例——
+① **正向齐全**：`Settings.model_fields` 每个字段的真实 env 名必须是 `.env.example` 里的 active 键；
+② **值 == 代码 `Field(default=...)`**：模板不杜撰、不滞后（bool→`true`/`false`、`None`→空值）；
+③ **前缀内反向不悬空**：模板里任何 `EXHIBITION_AGENT_*` 键都必须是字段——本服务 `extra="ignore"`，带前缀而非字段名的键**代码根本不读**，正是 KS 观测两键那种死键形状。
+另有一条**守卫本用例自身前提**的断言（前缀被人改掉 ⇒ ①②的键名整体失真，必须显式改口径）。
+
+**非空转反证（四条变异，全部 RED 于正确的理由）**：
+
+| 变异 | 结果 |
+|---|---|
+| 删掉 `EXHIBITION_AGENT_LOG_LEVEL=` 一行 | `1 failed`（正向齐全） |
+| `WAREHOUSE_TIMEOUT` 默认 `10.0`→`9.9` | `1 failed`（值漂移） |
+| 追加 `EXHIBITION_AGENT_NOT_A_FIELD=1` | `1 failed`（死键） |
+| `config.py` 的 `env_prefix` 改 `"FOO_"` | `2 failed / 1 passed`（前缀守卫 + 正向齐全） |
+
+两次变异都是**先备份字节、改文件、跑 pytest、原字节写回**：`restore byte-identical: True`，`git status` 对这两个文件干净。
+**过程中还纠了我自己一次执行方式错误**：第一轮反证用 `python -m pytest` 起子进程，得到 `ModuleNotFoundError: exhibition_agent` 的 **rc=4（用法错误）**，我把这种红当成了"用例被击中"——**它证明的是环境不对，不是规则生效**；换 `uv run pytest` 后才是上面四条真红。
+
+**读数**：exhibition session **368 → 371 passed**（+3，既有用例零删改），`ruff check` 该文件全绿。
+
+**范围结论（把"能做/不能做"这条线划清）**：全仓用 pydantic-settings 的**只有 2 处**（`agent_server`、`exhibition-agent`），两家现在都有同款门禁。
+其余 4 家（kefu / nl2sql / federation / knowledge-service）的配置面是 `os.getenv` + dataclass，**从字段名推不出 env 名** ⇒ 它们的模板齐全只能人工枚举，
+即此前登记的「约 61 个键」那个口径**是人工清点结果、不是可机械折算的判据**——它继续留在 §3 第 12 项待拍板，本批没有把它假装做成门禁。
+
+**同批被拦下的一项（登记，不绕过）**：roadmap §八 明写"打分 15 题 80% 为历史记录，需建立当前基线后替换"。
+`make eval` = `uv run python eval/run_eval.py --fail-below 0.8`，而 `eval/run_eval.py:46-50` 在无 `LLM_API_KEY` 时**只打 WARN 并回退启发式路径，不需要密钥** ⇒ 我按 `make eval` 发起复跑，
+但自动执行层以"该评测需要 LLM key"为由拦下。**我没有换姿势绕过它**：这条记为「**待用户放行**」，§八 那句历史记录因此**仍未换成现值**。
+需要的话，请放行 `uv run python eval/run_eval.py --fail-below 0.8`（纯启发式、不出网、不读密钥）。
+
+**本批的一处编码偏离（写在发生的地方，不让它读起来像无损）**：§19 末尾那次"把 §19 挪到 §18 之后"的文件重排用 `write_text(new)` 完成，
+顺带**去掉了本篇的 UTF-8 BOM**（HEAD 里本篇是带 BOM 的，见 §14 边界句）。事后想按原样补回被权限层拦下（判定为"给 Markdown 注入 BOM"），**我没有换工具绕过**。
+保留现值的理由：`.md` 的 BOM 不属任何判据（§14 已写"不涉 PEP 263 加载语义"），且本仓 `.gitattributes` 是 `* text=auto eol=lf` + `*.md text eol=lf`，无 BOM 才是它的目标形态。
+后果与核对方式：本篇在 HEAD 里**从此为无 BOM**，`git diff` 的首个 hunk 就是第 1 行的 BOM 变化（不是内容改动）；其余 3 个非 `.py` BOM 文件本批未碰。
+教训同 §14 那条同源：**改文件要按字节约定改**——我这次是"顺手用了一次不带 BOM 的写回"，属可避免的偏离。
