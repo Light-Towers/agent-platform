@@ -20,6 +20,7 @@
 | **§19 exhibition env 模板门禁（#21 / P2-5）** | **2026-10-16**（截止=当日） | 给会展侧的「模板 ↔ 代码」一致加装自动检查（前缀折算口径） | ✅ **已完成（10/16）**：新增 3 条用例，四条变异全部击中；exhibition **368 → 371 passed**。**同批撤回一条我自己造出的假缺口**（前缀-blind 探针曾报"9 键缺失"）；`make eval` 复跑被执行权限层拦下，记为**待放行**，未绕过 |
 | **§22 阶段 0 #2 完成证据格式（roadmap 阶段0）** | **2026-10-16**（截止=当日） | 「无统一的完成证据格式」这条自 10-09 开着的阶段 0 行 | ✅ **已闭合（10/16）**：`docs/operations/evidence-format.md` 入库（五字段 / 三禁令 / 三档强度 / 变异反证表），§6 逐条对照六处既有用到的读数；入口挂 AGENTS.md + testing-playbook ⇒ **roadmap 阶段 0 小计 3 → 剩余 1**（#3 属外部条件，保持开项） |
 | **§24 错分类的机械活回收（#21 收尾）** | **2026-10-16**（截止=当日） | 把「补模板」从「要不要建门禁」的待拍板捆綁里拆出来做完 | ✅ **已完成（10/16）**：federation +7 / KS +10（AST 实读取默认值 + `<- 文件:行` 溯源，密钥留空）+ `tests/governance/test_app_env_templates.py` 2 条；**口径订正**：真缺 17 而非登记的 61（active vs 提及 两种读法差出来的）；CI 合并跑被中止 ⇒ 改分段实测 720 + 349 = **1069**，恰为 §18 的 1067 + 本批 2 条 |
+| **§25 取证面持久化实测（撤回我写下的"无需 DB 迁移"）** | **2026-10-16**（截止=当日） | 提交前自查新方案的每条断言，把推断换成实跑读数 | ✅ **已完成（10/16）**：伪连接探针实取 ⇒ `PgTrajectoryStore` 从不发 `forensic` 列、读回 `record.forensic is None`、`steps` 读回是 `dict` 而非 `TrajectoryStep`（`AttributeError`）⇒ 第 6 条的缺口从「三格没填」扩为**两层**（字段填充 + 持久化读回），`plan-forensic-provenance-wiring-2026-10-16.md` 按此改写并新增 Q5 待拍板（**§3 行数不变，仍是 20 项**，Q5 属第 19 项内部） |
 | 阶段 2 / 阶段 3 | 11-13 / **12-04** | 归 roadmap，不由本排期重排 | 部分待环境 |
 | 一期交付判定 | **2026-12-04** | roadmap §四 七条标准逐条判定 | — |
 
@@ -103,7 +104,10 @@
 19. **§16 下修标准 6 后引出的那一问：数据来源取证字段要不要在本窗口接线**（`ForensicContext.external_inputs` / `external_task_receipts` / `effect_receipts` 生产零写入点）。
    这三格不是"忘了填"：填什么要同时定 **① 取哪个粒度**（每次外部调用一条，还是每次回答一条汇总）、**② 哈希口径**（原文 sha256 / 引用 ID / 长度+前缀，涉及体积与"能否据哈希反查原文"）、
    **③ PII 与出域边界**（`external_inputs` 是"重要外部输入快照"，会展链路含客户线索，落哈希还是落引用直接牵动数据分级），**④ 回执是否单向从 `awaitable_task` 汇进取证记录**（现在两边都有落点、互不引用）。
-   这四条是**设计决策**而非工程残料，且改的是每次回答都会写的取证记录形状（下游 = Jaeger/Langfuse 面与事后 divergence 诊断）⇒ 按红线我先不出方案、等你给方向。
+   这四条是**设计决策**而非工程残料，且改的是每次回答都会写的取证记录形状（下游 = Jaeger/Langfuse 面与事后 divergence 诊断）⇒ 按红线我不擅自开工。
+   **②′ 2026-10-16 追加第五问（§25 实测带出的，不是猜的）**：**记录级 forensic 怎么进库**——`PgTrajectoryStore` 从不发 `forensic` 列、DDL 里也没有该列、读回的 `steps` 是 `dict`（属性访问即 `AttributeError`）。
+   ⇒ 本项现含**两层**：A 字段填充（上面四问）+ **B 持久化与读回**（落独立列 / 挤进 `snapshot` JSONB / 承认"只在进程内可见"并把标准 6 按未达标记）。**B 不做，A 填的字段进不了库 ⇒ 标准 6 在本窗口不可能翻绿。**
+   **方案件已就绪（原句"我先不出方案"作废）**：`docs/plans/plan-forensic-provenance-wiring-2026-10-16.md`（状态 Proposed，含五问选项与推荐、影响面、迁移策略、验收判据、工时 3 人/日；**该文件本身不授权编码**）。
    选项：a 本窗口做（我先出方案文档，你批了再编码，判据=三字段各有一个生产写入点 + 「输入变则 hash 变」断言）/ b 只登记为标准 6 的在册缺口、留到 11/14 阶段 3 / c 只接 `external_task_receipts`（回执已有现成落点、跨模块引用成本低），来源与副作用两格后置。
    **我未动 `forensic.py` 与任何 planner 执行链一行。**
 20. **§四 第 7 条的第三个 facet「版本号」要不要建立对应关系**（§17 实测：三处版本面互不对应）。
@@ -518,6 +522,11 @@ ruff **按最近 config 分层生效**。所以"只跑一次 `ruff check .` 看�
 | 7 | 版本号、变更记录、待办清单、决策记录与代码一致：「部分达标，变更记录与决策记录待 #1 收尾」 | 待办清单半边：§12 已逐行重取并改掉 4 处账面错数；决策记录半边：`docs/adr/` 现 **8 篇**（0003–0007 + 本轮补 0008 认证方式 / 0009 向量存储 / 0010 界面选型，三篇状态均「未决」，只登记已决边界·选项代价·重启条件，**不代用户拍板**）；变更记录半边**当时仍不成立**：`CHANGELOG.md` 最新一节停在 2026-10-09，本分支相对 main 的提交（`git rev-list --count main..HEAD`，写入时点 40→41）未回写；门禁计数已订正（`ARCHITECTURE.md:133-134` 表 17 行 / 打印 16 条 / 实现函数 18 个，含自我纠错句） | 决策记录由「无书面记录」推进到「**有记录、待拍板**」；变更记录半边**同日已闭合**（§17 补了未发布窗口节）。**但本节对不上的一处归因要登记**：§四 第 7 条把变更记录挂在「待 #1 收尾」下，而 #1 自己的判据列只写「每条结论附代码位置与可复现命令；清单与代码不矛盾」⇒ **变更记录在 roadmap 里从来没有对应整改行**，本窗口靠 §2 新增行才有一个有判据有截止日的落点。第三个 facet「版本号」实测三处互不对应（见 §17），亦无整改行 ⇒ 转 §3 第 20 项 |
 
 **汇总（口径：§四 表体的判定列，逐格读）**：部分达标 **5 → 6**（第 6 条下修进来）、未达标 **1**（第 4 条）、达标 **1 → 0**。
+**第 6 条的精度补充（2026-10-16 同批自查，防被过度读成"取证面整体没写"）**：逐步取证面**确实在写**——
+`planner/protocol.py:639` 有 `StepForensic(...)` 的生产构造点，并在 `:654/:717/:726` 把 `_forensic_dict` 挂到步骤上、`:354` 挂到记录上。
+本条缺口**限定在记录级 `ForensicContext` 的三格来源/回执字段**（`external_inputs` / `external_task_receipts` / `effect_receipts`），
+上表证据句里"唯一生产构造点"指的是 **`ForensicContext`** 这一个类（`grep "ForensicContext("` 实取 = `execution_graph.py:58` 一处 + tests），不含 `StepForensic`。
+⇒ 结论（达标 → 部分达标）不变，但"缺的是哪一层"按本段读。
 ⇒ **七条全达标的前置**里，本窗口内还能靠代码/文档推进的是第 1、3、5、7 条的指定残口；第 2 条与第 5 条强档、第 8 类真库/双实例场景**全部待环境**；第 4 条待 UI 选型拍板。
 
 **复跑命令**（本机 `uv run`，全部只读）：
@@ -784,3 +793,39 @@ uv run pytest packages/agent-runtime/tests/test_receipt_generation_fencing.py ap
 
 **§3 第 12 项相应收窄**：剩下的只有「要不要建**全仓双向门禁**（模板键 ⇔ 代码读取，含动态键名与跨包共享层读取）」这一件决策，
 外加「kefu 这种 0 字面量读取点的应用要不要另设判据」；"补模板"这半截已从待拍板里拿走并完成。
+
+## 25. 提交前自查撤回我自己写下的一句"无需 DB 迁移"：取证面在 PG 侧整片不落库（2026-10-16）
+
+**起因不是新需求，是"改完后再自己审核校验"这条要求**：`plan-forensic-provenance-wiring-2026-10-16.md` 的影响面里我写了一句
+「`TrajectoryRecord.forensic` 是 dict，`from_dict` 对三格用 `d.get(..., {})` ⇒ **老行读取天然兼容，无需 DB 迁移（`store_pg.py` 未变）」」。
+提交前逐条核这句话时 `grep forensic` 打 `store_pg.py` **零命中** ⇒ 那句既没核实存储面，也没核实读回面，**是错的**。
+
+**实跑读数**（探针入库 `scripts/evidence/forensic_pg_roundtrip_probe.py`，伪连接捕获 SQL + 合成行回放，本机可复现、**不需要真 PG**）：
+
+```
+$ uv run python scripts/evidence/forensic_pg_roundtrip_probe.py      # rev 20382f1
+A) store_pg.py 全文 'forensic' 命中次数 : 0
+B) 实际 INSERT 列清单 : execution_id, parent_execution_id, session_id, planner, plan, steps,
+                       total_tokens, total_cost, snapshot, created_at
+   列里是否含 forensic : False     绑定参数是否含 forensic dict : False
+C) 读回 record.forensic : None     读回 steps[0] 类型 : dict
+   属性访问 steps[0].name : AttributeError: 'dict' object has no attribute 'name'
+   内存里原始 record.forensic : 非 None（True）⇒ 差异只在存储往返
+```
+
+三条结论与**各自的边界**（防被过度读）：
+1. **记录级取证在 PG 部署下不落库**——`store_pg.py:48-79` 的 INSERT 不含该列，DDL `migrations/001_baseline.up.sql:173-184` 同样没有 ⇒ 填得再全也只活在进程里（`InMemoryTrajectoryStore` 存对象本身，所以内存路径看不出来）。
+2. **读回类型断裂**：`_row_to_record`（`store_pg.py:105-129`）把 `steps` 原样当 list[dict] 返回，没复用 `_coerce_record`；而 `_coerce_record`（`store.py:61-88`）自己也既不恢复记录级 `forensic`、也不给 step 传 `forensic=`。`replay.py:172/176-188` 按 `.name/.error/.result` 属性写 ⇒ 从库里读回的记录一进 replay 就 `AttributeError`。
+3. **但这不是现网故障，是潜伏缺陷**：`replay_trajectory` / `build_replay_registry` 经核**零生产调用方**（命中只在 `packages/agent-runtime/tests/test_replay.py` 与包 `__init__` 导出）。我不把"潜伏"写成"已坏"。
+
+**两条不是新缺口的，明确划掉，免得下一轮又有人当 bug 报**：
+- `tenant_id` 不在 `trajectories` 表里**是已登记的设计选择**：`tests/governance/test_isolation_dimension_contract.py:40` 把它列入无租户表白名单，`scripts/audit_tenant_access.py:233` 探测不到租户列即返回 `skip`。但那条白名单给的理由写的是"按 execution_id 定位（可观测/**回放**）"，读数 2 说明这个"回放"在 PG 读路径上不成立 ⇒ **理由句需要随本方案一起订正**，这是文档债不是代码债。
+- step 级取证**没丢**：它随 `s.to_dict()` 进了 `steps` JSONB，只是读回后只能 `["forensic"]` 取、不能 `.forensic` 取。
+
+**对口径的影响**：roadmap §四 第 6 条（每次回答可追溯数据来源）的缺口**由一层变两层**——A「三格没填」+ B「填了也落不进库、落进库也读不回来」。
+⇒ `minimal-release-runbook.md` §8 第 2 条"不能讲历史调用档案可查"原有的理由（默认路径不写档案表）之外，**再补一条独立理由**：即使写了表，记录级取证也会被丢。
+⇒ 排期硬约束：**第 6 条在 B 层完成前不可能翻绿**。方案已按此改写（新增 Q5 落点选择 a/b/c、B 层判据 4 条、工时 2 → 3 人/日，B 层先行）。
+**待拍板行数不变**：Q5 属 §3 第 19 项内部的新子问题，§3 仍是 20 项。
+
+**未跑与待环境**：真 PG 端到端往返（加列后 `save`→`get` 实测）本机无库，属**待环境**，本批未做；本批只做不需要库的探针层。
+其余 9 个 pytest 会话本批未跑（本批零产品代码改动，只动 docs + 一个 evidence 脚本）；`ruff check` 对新脚本全绿。
