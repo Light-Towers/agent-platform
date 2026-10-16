@@ -37,7 +37,7 @@ locust -f benchmark/locustfile.py --host http://localhost:8000 --web-port 8089 \
 ```
 
 > 建议先跑 `-u 20 -r 5 -t 10m` 冒烟，确认无 429/5xx 后再按容量模型（见 CAPACITY.md）
-> 逐档加压。压测期间保持 `KNOWLEDGE_TRACE_ENABLED=false`（或独立观测 Jaeger），
+> 逐档加压。压测期间保持 `AGENT_CORE_TRACE_ENABLED=false`（或独立观测 Jaeger），
 > 避免 OTel 导出对极短请求的延迟干扰（如实说明测量口径）。
 
 ## 2. 结果收集（locust 输出落 benchmark/runs/）

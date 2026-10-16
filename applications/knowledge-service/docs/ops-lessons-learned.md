@@ -126,7 +126,7 @@
 # 1) 起全栈 + 可观测
 docker compose --profile core --profile obs up -d web jaeger
 # 2) .env 关键项
-#    KNOWLEDGE_TRACE_ENABLED=true
+#    AGENT_CORE_TRACE_ENABLED=true
 #    OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318/v1/traces
 # 3) 发请求
 curl -X POST localhost:8000/query -H 'Content-Type: application/json' \
@@ -181,7 +181,7 @@ curl 'http://localhost:16686/api/traces?service=knowledge-service'
 | 验证 ④ 鉴权 | `POST /query` 带/不带头，看 401/200（`/query` 必须 POST） |
 | 验证 ⑦ 导出 | 发请求后 `curl 'localhost:16686/api/traces?service=knowledge-service'` |
 | 看 jaeger 服务列表 | `curl localhost:16686/api/services` |
-| 本地无 collector 不崩 | 删 `OTEL_EXPORTER_OTLP_ENDPOINT` / 关 `KNOWLEDGE_TRACE_ENABLED` → 自动 no-op |
+| 本地无 collector 不崩 | 删 `OTEL_EXPORTER_OTLP_ENDPOINT` / 关 `AGENT_CORE_TRACE_ENABLED` → 自动 no-op |
 
 ---
 
