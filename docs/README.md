@@ -20,6 +20,7 @@
 | `docs/adr/0005-execution-memory-kernel-contract.md` | 执行/记忆内核契约 | 5 ★ |
 | `docs/adr/0006-isolation-dimension-contract.md` | 隔离维度契约 | 5 ★ |
 | `docs/adr/0007-server-asserted-tenant-identity.md` | 服务端断言租户 | 7 ★ |
+| `docs/adr/0008-auth-mode-selection.md`、`docs/adr/0009-vector-store-selection.md`、`docs/adr/0010-ui-stack-selection.md` | **roadmap #24 三项悬置选型的决策记录**（认证方式 / 两套向量存储 / 界面）。三篇状态都是**未决**：内含已决边界、选项代价、否决理由、重启条件，以及各一行「待用户回答」⇒ 引用时不得当作已定选型 | 0（2026-10-16 新建；由 `docs/plans/plan-production-delivery-roadmap-2026-10-09.md` #24 与 `docs/plans/plan-unfinished-completion-schedule-2026-10-16.md` §13 指向） |
 | `docs/operations/testing-playbook.md` | 分层验证与实跑配方 | 29 ★ |
 | `docs/operations/env-126-inventory.md` | 内网三机部署态基线（读数绑 rev） | 14 ★ |
 | `docs/operations/minimal-release-runbook.md` | 上台手册（含「这是多 agent 吗」标准答法 §11） | 11 ★ |
