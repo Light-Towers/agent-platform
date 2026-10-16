@@ -21,6 +21,7 @@
 |---|---|---|
 | `verify_main_tip.py` | 判据 6：在给定 merge sha 上实取七项 fail-closed 复验 | 是（`gh api`） |
 | `normalize_dump.py` | PowerShell 重定向产物默认 UTF-16 LE ⇒ 按 BOM 嗅探转 UTF-8 | 否 |
+| `recount_todo_index.py` | 重算 `docs/TODO.md` §0 索引表的**声明值 vs 实算值**（含"一行一组 + 条数列求和"这种 0.3 形态）；不一致退出码 1 | 否 |
 
 ## 运行
 
