@@ -2,6 +2,22 @@
 
 本仓库为 uv workspace monorepo。**唯一受支持的安装/运行入口是根 `uv.lock` + `uv sync`**，子包不再维护独立 `uv.lock`（见 v2 修复 #14）。
 
+## 未发布窗口补记：2026-10-10 – 2026-10-16（阶段 0 收口 + 阶段 1/2 前移批）
+
+> **本节为什么存在**：上一节停在 2026-10-09，而本窗口有 **120 个提交**（`git rev-list --count --since=2026-10-09 HEAD`，其中 main 侧 79 + 当前分支 `chore/tech-debt-agentic-discovery-test-2026-10-15` 侧 41）从未进过变更记录 ⇒ roadmap §四 第 7 条「变更记录与代码一致」在此窗口不成立。
+> **本节刻意不是逐提交转写**：逐提交清单请用 `git log --oneline --since=2026-10-09 HEAD` 现取（本仓 commit subject 已按 conventional commits 标注，可机械枚举）。这里只登记**按 roadmap 判据聚合的批次**、每批的提交锚点与验收证据，且每条锚点均已 `git log -1` 核对过 subject 与描述一致。
+> **窗口口径**：以下测试通过数一律写「批次当时实跑的 tip」，不合并成单一数字；跨批次引用同一数字视为漂移。
+
+- **V3「未接线半成品」五项全部转正**（roadmap 阶段1 #5 / TODO §3）：`state_migration` / `execution_recovery` `c49ee2dd`、`payload_externalization` `4a7c662e`、`human_task` 三段链 `6bf15287`、exhibition `skill_router` 门禁+执行两截。**接线 ≠ 默认启用**：4 者中 3 者生效面默认关，`SCHEDULER_ENABLED` 仍默认 `False`。反漂回护栏 `applications/agent_server/tests/test_v3_wiring_assembly.py`（装配锚点 + 「已转正模块不得自称未接线」文档护栏）。
+- **防重复执行 fence 由 3/5 到代码面 5/5**（#4）：`68a44290` 两类回执补 generation fencing，断言在 `packages/agent-runtime/tests/test_receipt_generation_fencing.py`（5 条）。同批删掉一份**无 fence 的同名死副本** `PgAwaitableTaskStore`（`execution_state_pg.py`），并把「唯一实现 + 留下的那份必须带 fence」双向钉住。真库拒绝用例仍**待环境**。
+- **`/health` 上报真实装配态**（#6）：四部件字段由 `18b6954` 起在报；本窗口补的是「拨开关返回值必须变」两条断言（`d31f247e`）+ 跨服务契约一致性测试 `tests/test_health_contract_consistency.py`（8 条，含**禁第 4 套 `status` 字面值**）。三套约定是否统一 = 待拍板（牵动线上响应值与 KS `/health/ready` 的 503 就绪语义）。
+- **数据可信度默认值 fail-open 收口**（#10）：`_map_readiness` 两处兜底与 `skill_router` 的 `UNKNOWN` 放行均改为拒/「待确认」；行为差分实测仅 `None`/未知/空串 3 项变化。**遗留须业务方补标注**：catalog 48 接口里 4 个写操作无 readiness ⇒ 生产档现被拒。
+- **横切装配铺满 + 两条新门禁**（#11 / #12 / #16）：观测初始化在 kefu、nl2sql 补齐并与 `init_tracing` 同处；身份门卫由 2/6 → **6/6 装配点**，新增 **P13** 按服务登记实现归属（4 shared / 2 fork，fork 为在册债）；强杀脚本去掉内嵌凭证的本机默认 DSN，未注入即退出码 4（`tests/test_ha_kill_script_gate.py` 5 条 + 变异反证）。
+- **env 变量账实一致**（#21 / P2-5）：knowledge-service 侧 14 处 / 8 个文件的历史死键改用内核真读的 `AGENT_CORE_*`（`bd4fb0b`，含一条「模板键必须被代码读到」的判据用例）；根 `.env.example` 补进 agent_server 缺失的 **43 个键**（`be82e48`）+ 齐全用例 `tests/governance/test_agent_server_env_template.py`。**剩余残口**：全量键值的双向门禁（模板缺键即 CI 红）与另 61 个键待拍板。
+- **E 组技术债两项清零**：全仓 `.py` 的 UTF-8 BOM 清零（`a618e4b`，10 个 `nl2sql_service/**/__init__.py`，4→1 字节；4 个非 `.py` 的 BOM 按判据不属本项）；ruff `ignore` 逐包收窄 21 条 → **删 9 保 12**（`f641ca5`，A/B 两口径逐条实测 + 每条删除配探针）。
+- **治理与判定台账**：新增执行台账 `docs/plans/plan-unfinished-completion-schedule-2026-10-16.md`（§0 截止日 / §2 排期 / §3 待拍板 20 行）；§12 提前执行阶段 1 收口对账并改掉 4 处账面错数；三项悬置选型各出一篇决策记录 `docs/adr/0008`–`0010`（状态**未决**，不代拍板）；§16 逐条对码复核 roadmap §四 七条标准 ⇒ **第 6 条由「达标」下修为「部分达标」**（取证载体在位但三个来源字段生产零写入点）。
+- **诚实边界**：① 本节不含任何现网读数——窗口内未部署、未连 126/241/125，`待环境` 项一律未翻状态；② 全量 10-session 门禁在 §12 记录的一次为 2912 passed / 16 skipped（当时 tip），本分支最新 tip 的复跑见台账 §18（同值 2912 / 16，10 session 全退 0）——**该轮的 rev 归属与 clean-tree 复跑状态写在其节内，引用通过数必须连同 rev 一起引**，脱离 rev 的"全绿"不成立；③ `版本号` facet 仍未闭合（根 `pyproject.toml` = `0.1.0`、`agent_federation` = `2.0.0`、tag 有 `v2.0.0`/`v3.0.0`，三者无对应关系）⇒ 属发布决策，已登记待拍板，本窗口未动任何版本号。
+
 ## 生产交付推进计划入库 + 待办清单缺口状态列回写（2026-10-09）
 
 > 改动面：新增 `docs/plans/plan-production-delivery-roadmap-2026-10-09.md`（正文，八章 / 26 条整改项）与 `docs/plans/production-delivery-anchor-map-2026-10-09.md`（技术锚点表 + 附录 A 缺口 1–10 逐条对账）+ `docs/TODO.md` §2（缺口表加「实测状态」列）+ `ARCHITECTURE.md` §4.1（补 L 系列 4 条与计数口径段）+ 本段。**零代码、零测试判据变更、零复选框翻转**。
