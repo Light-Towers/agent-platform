@@ -3,6 +3,7 @@
 > 来源：2026-09-28 `feat/isolation-hardening` 分支深度盘点 + 本地/远程真实环境实跑的完整沉淀。
 > 目标：**又快又准**——用最小成本闭合测试盲区，结论只基于实跑证据。
 > 对应长期记忆条目：分层实跑流程（task_experience）、Linux 容器最小配方（project_build_configuration）、psycopg 审计脚本缺陷范式（common_pitfalls_experience）、Windows 远程 SSH 范式（tool_experience）。
+> 本手册管**怎么跑**；跑完之后"这条结论要怎么写才可核对"（五个必填字段、完成强度分档、新门禁的非空转反证表）见 `docs/operations/evidence-format.md`。两份配套用，别只引其中一份。
 
 ## 1. 测试目标与红线
 
