@@ -120,6 +120,22 @@ def test_snapshot_reports_enforce_tier(monkeypatch):
     assert result["snapshot"]["tier"] == "enforce", "档位必须如实反映 TENANT_JWT_ENFORCE"
 
 
+def test_assembly_leaves_a_tier_record(caplog):
+    """判据「灰度开关有记录」的落点：装配时必须把当时生效的档位与 env 名打进日志。
+
+    现网核对"这个 Pod 当时到底是 observe 还是 enforce"只能靠启动留痕；没有这一行，
+    灰度状态就只剩"猜"（同观测面那条老规矩：状态灯亮 ≠ 数据到）。
+    """
+    app = _RecordingApp()
+    with caplog.at_level("INFO", logger="agent_runtime.identity_assembly"):
+        mount_identity_gate(app, "under-test")
+    record = next((r.getMessage() for r in caplog.records if "门卫已装配" in r.getMessage()), None)
+    assert record is not None, f"装配未留下档位记录，实际日志={caplog.text}"
+    assert "under-test" in record and "档=observe" in record, record
+    for env_name in (ENFORCE_ENV, FAILFAST_ENV, HMAC_KEY_ENV):
+        assert env_name in record, f"留痕必须点名开关 env（缺 {env_name}）：{record}"
+
+
 def test_opaque_bearer_passes_through_unchanged(monkeypatch):
     """不透明 Bearer（静态 API_KEY 形态）不是本门卫的凭据 ⇒ 交下游，响应逐字不变。
 
