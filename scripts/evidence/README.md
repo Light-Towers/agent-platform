@@ -22,6 +22,7 @@
 | `verify_main_tip.py` | 判据 6：在给定 merge sha 上实取七项 fail-closed 复验 | 是（`gh api`） |
 | `normalize_dump.py` | PowerShell 重定向产物默认 UTF-16 LE ⇒ 按 BOM 嗅探转 UTF-8 | 否 |
 | `recount_todo_index.py` | 重算 `docs/TODO.md` §0 索引表的**声明值 vs 实算值**（含"一行一组 + 条数列求和"这种 0.3 形态）；不一致退出码 1 | 否 |
+| `forensic_pg_roundtrip_probe.py` | 取证面 PG 往返实取：伪连接捕获 `save` 的 SQL/参数 + 合成行回放 `get`，证「记录级 forensic 不落库 / 读回 steps 是 dict」。**B 层修完后必须复跑**——同一条命令的读数应从 `False/None/dict` 翻成 `True/dict/ForensicContext 可读`（见台账 §25 与 `plan-forensic-provenance-wiring-2026-10-16.md` §1.1） | 否（不需要真 PG） |
 
 ## 运行
 
