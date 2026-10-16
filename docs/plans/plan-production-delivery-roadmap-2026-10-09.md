@@ -150,6 +150,7 @@
 > ① **取证一格的产物在 PG 侧不落库**：`PgTrajectoryStore` 的 INSERT 无 `forensic` 列（`store_pg.py:48-79`、DDL `001_baseline.up.sql:173-184` 同缺），带指纹的记录读回 `forensic is None` ⇒ 第 6 条因此有**两层**缺口（字段没填 **+** 填了也落不进/读不回），**B 层不修则本条在任何窗口都翻不了绿**；
 > ② **"成本有写入点"仅指轨迹记录上的 `total_cost`/`total_tokens` 两个累计字段**，按次成本明细表 `cost_records`（`001_baseline.up.sql:256` + 三条索引 + ADR-0006 分类）**全仓 Python 零 SQL 触碰**，且按 runbook 在册说法 `cost` 恒 0（无定价表，本批未独立复算金额面）⇒ 对外仍按 `minimal-release-runbook.md` §8 第 2 条口径讲"统计用量、金额以账单为准"，**不得说成本可追溯已达成**。
 > 依据与探针见同台账 **§25 / §27 / §28**（§27 另清出一条：多副本 `session_leases` 表全仓无建表语句，而治理文档写"DDL 见部署文档"）。
+> **⑥ 第 3 条那句「错误率/超时率/降级率无基线可比」需按面收窄（同日 §29 取数）**：该判定只对**平台运行时聚合指标面**成立（能力图 `agent-harness-capability-map.md:299` 标 ⚠️ 待标定，无 Metric Registry）；**knowledge-service 侧有压测读数**（`docs/spec.md:33-34` / `CHANGELOG.md:460` / `docs/ops-lessons-learned.md:207`：`/retrieve` QPS 0.52 / P95 243s / 0 错误率，阈值见 `benchmark/CAPACITY.md:58` 错误率 < 1%），但 `benchmark/runs/*.csv` **未入库**（该目录只 3 个文件在版本控制里）⇒ 只能引文档、不可复算；`eval/baselines/planner_*.jsonl` 是**已入库基线但属路由正确性**，且停在 `09943d6c`（2026-08-19）、各 12 行 < 现行 golden 15 条。⇒ 判定第 3 条时请用"平台侧聚合基线缺失"这个限定口径，别把它读成"全仓没有任何基线数据"。
 
 ---
 
