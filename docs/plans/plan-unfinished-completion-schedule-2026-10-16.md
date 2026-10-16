@@ -180,7 +180,8 @@
 **结论与处置**：
 - 「统一三套」= 改 **3 个服务的线上响应值**，且 knowledge-service 一侧牵动就绪探针语义。按 AGENTS.md「边界」条（影响下游消费者的对外契约变更须先审计、另行决策），**不在本轮擅动**⇒ 转 §3 待拍板第 6 项。
 - 本轮交付**不破坏下游**的那半：新增 `tests/test_health_contract_consistency.py`（8 条）——钉住① 已入共享契约的服务不得退回裸 dict，② 遗留约定逐项登记且**登记失实也报红**（防台账腐坏），③ **禁止冒出第 4 套 `status` 字面值**。提取用 AST 只取 `/health` 路由自身的返回，避免同文件里 `{"status":"uploaded"}`（上传响应）/`{"status":"scheduled"}`（mock 场景数据）造成假阳性——该假阳性本轮已被实跑抓到并修正。
-- 附带查得：本仓个别源文件带 **UTF-8 BOM**，`ast.parse` 在 `utf-8` 下抛 `SyntaxError` ⇒ 测试统一用 `utf-8-sig` 读，避免以"环境噪声"失败。
+- 附带查得：**当时**本仓 `.py` 有 10 个带 UTF-8 BOM（`ast.parse` 在 `utf-8` 下抛 `SyntaxError` ⇒ 测试统一用 `utf-8-sig` 读，避免以"环境噪声"失败）。
+  该数已于同日 §14 清零（`.py` 面 BOM = 0），**读取约定保留**，因为它是"扫描任意未来源文件"的正确约定而非迁就现状。
 - 判据「跨服务一致性测试」已具备；「打分测试不破坏下游」= 未动任何对外 body，`eval/run_eval.py` 门禁不受影响。
 
 ## 8. 阶段 2 再前移：roadmap #16 强杀脚本 fail-closed（2026-10-16，截止=当日）
@@ -407,3 +408,20 @@ DOC_FILE_REF_DOCS = ("AGENTS.md", "ARCHITECTURE.md", "README.md")
 本轮因此改为**人工逐条核**这三条新路径确实在版本控制清单里（`git ls-files docs/adr` 命中 0008/0009/0010）。
 这不是"要不要修"的新决策，而是既有第 14 行（数字漂移要不要自动兜底）的**同族证据**：`check_doc_sync` 的覆盖面
 比直觉窄，只兜根三篇。要不要把 `docs/README.md` 也纳入，随第 14 行一并定。
+
+## 14. E 组技术债清零：`.py` 的 UTF-8 BOM（`docs/TODO.md` §0.4/§5，2026-10-16，截止=当日）
+
+**为什么这算"完成未完成的计划"**：TODO §5 那条开了 13 天，**处方已写在条目里**（"若要清零：改文件 + `git diff` 验证只丢 BOM、
+无其他字节变化"）⇒ 属"已敲定方案、有文档记录"的存量项，不是需要新拍板的方向。E 组其余 4 条（D1/D4/D5/D7）各有"为什么留着"的理由，
+本轮只动这一条判据可机械执行的。
+
+**目标**：全仓 `.py` 的 UTF-8 BOM 清零；不改任何行为、不动判定强度。
+**影响面**：10 个 `applications/nl2sql-service/nl2sql_service/**/__init__.py`（各删前 3 字节，文件剩 1 字节）
+＋ 3 处注释/docstring 的事实订正（`scripts/lint_architecture.py:1021-1025`、
+`tests/governance/test_audit_operator_principal.py:308-314`、`tests/test_health_contract_consistency.py:101-103`）。
+**迁移策略**：逐文件字节断言 `old == b'\xef\xbb\xbf' + new`；**保留** `utf-8-sig` 读取约定（偏离原处方两条，理由见 §5 闭合记录：
+兼容是"扫描未来源文件"的正确约定，摘掉会让 P12 在未来 BOM 文件上产生假阳性；BOM 回归用例自带合成文件 ⇒ 不需调转，调转等于削防线）。
+**验收**：`.py` BOM 复扫 = 0；nl2sql session 21 passed；治理+契约合跑 37 passed；`lint_architecture.py` rc=0；`ruff check .` 全绿；
+`git diff` 核得 `- [ ]`→`- [x]` 恰 **1** 处、其余复选框零变更。
+**边界（不倒扣）**：清零只覆盖 `.py`。仓内仍有 **4 个非 `.py`** 带 BOM（`ARCHITECTURE.md`、`docs/README.md`、本篇、
+`docs/plans/p0-4-blind-except-inventory.txt`）——Markdown/文本不涉 PEP 263 加载语义，不属本项判据，本轮不顺手改。

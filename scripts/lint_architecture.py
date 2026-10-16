@@ -1018,9 +1018,11 @@ def check_credential_param_escape() -> list[str]:
         if not rel.startswith(_CREDENTIAL_PARAM_SCOPE_PREFIX):
             continue
         try:
-            # utf-8-sig：Python 源码加载器本身会剥 UTF-8 BOM（PEP 263），本仓有 10 个
-            # 已入库的 BOM 文件（nl2sql_service/**/__init__.py）；用 utf-8 读会把 BOM
-            # 变成 U+FEFF 非法字符 ⇒ fail-closed 退化为「噪音必红」。语法真坏仍会报。
+            # utf-8-sig：Python 源码加载器本身会剥 UTF-8 BOM（PEP 263）；若这里用 utf-8 读，
+            # 一旦仓里混进 BOM 文件就会把它变成 U+FEFF 非法字符 ⇒ fail-closed 退化为「噪音必红」。
+            # 语法真坏仍会报（走同一个 except 分支）。全仓 `.py` 的 BOM 已于 2026-10-16 清零
+            # （原为 nl2sql_service/**/__init__.py 那 10 个，见 docs/TODO.md §5），此处保留
+            # utf-8-sig 是**防再混入**，不是迁就现状。
             tree = ast.parse(py_file.read_text(encoding="utf-8-sig"), filename=rel)
         except (OSError, SyntaxError, ValueError) as exc:
             # fail-closed：读不到/解析不了不等于通过（与 P11 同一口径）

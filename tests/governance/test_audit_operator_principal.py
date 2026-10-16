@@ -307,8 +307,10 @@ def test_p12_is_fail_closed_on_unparsable_file(tmp_path, monkeypatch):
 def test_p12_bom_file_still_scanned_and_still_bites(tmp_path, monkeypatch):
     """BOM 回归锁：utf-8-sig 读取既不能把 BOM 误判成「无法解析」，也不能因此漏判外流。
 
-    本仓有 10 个已入库的 BOM 文件（``nl2sql_service/**/__init__.py``），早期用
-    ``encoding="utf-8"`` 读会让 P12 在无违规时报出 10 条假阳性（fail-closed 退化为噪音）。
+    现场成因（历史）：全仓 `.py` 曾混有 10 个 BOM 文件（``nl2sql_service/**/__init__.py``，
+    2026-10-16 已清零），早期用 ``encoding="utf-8"`` 读会让 P12 在无违规时报出 10 条假阳性
+    （fail-closed 退化为噪音）。本用例**自带合成 BOM 文件**，因此它不依赖仓里现在有没有 BOM
+    ⇒ 清零之后它仍然有效，防的是「以后又混进来一个」。
     """
     app_dir = tmp_path / "applications" / "demo"
     app_dir.mkdir(parents=True)
