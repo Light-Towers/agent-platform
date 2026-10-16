@@ -12,6 +12,7 @@
 > **（2026-10-15 追记，V3 未接线批）**：本批翻转 **恰 2 处**复选框——§3 的 exhibition `skill_router` 接线项（判据 = catalog 端点真驱动 REST 调用 + 未经路由 fail-closed，证据 `applications/exhibition-agent/tests/test_skill_routed_endpoint.py`）与 §3 的 `/health` V3 组件上报项（判据 = 补上 `cost_governance` / `forensic` 两条「输入变则值必变」断言，且残差② 经对码定性为**前提有误**而非缺口，证据 `applications/agent_server/tests/test_health_fields.py` 16 passed）⇒ 按**相对口径** open 30→28、closed 8→10，D 组 16→14（§0.3 标题与「未接线半成品转正」行已同批改为 14 / 1）。可由 `git diff main -- docs/TODO.md` 核：内 `- [ ]` → `- [x]` 恰 **2** 处（`skill_router` 在 `5b75612`、`/health` 在本提交）。同批对 §2 缺口 1/3/4/6/8 与 §3 第 1 条**只做状态列订正、未涉及复选框**（缺口 6 的 state_migration 已接线；缺口 3 订正为「模块已接线但 `_mark_for_query` 仍是只记日志的桩」；§3 第 1 条是 4 个模块的复合项，只接线了 2 个 ⇒ 保持开项）。绝对值仍受上文登记的口径不一致影响 ⇒ 不重开对账、不倒推历史数。：本批是**真翻转**（§8 的 Dependabot 门禁条 `- [ ]` → `- [x]`），与上一批「零翻转」不矛盾——上批（PR #55 处置收口）只订正状态，本批是拍板后闭合开项。计数按**相对口径**更新（恰好 ±1，可由 `git diff docs/TODO.md` 逐条判）；绝对值仍受上条登记的口径不一致影响 ⇒ 仍以「先定义口径再引用」为准，**不重开对账、不倒推历史数**。
 > **（2026-10-15 追记二，V3 未接线续批二 `human_task`）**：本批翻转 **恰 1 处**复选框——§3 第 1 条（`human_task`/`execution_recovery`/`state_migration`/`payload_externalization` 四模块复合项）。此前该项「4 个模块接线 3 个」保持开项，本批接上最后一个 `human_task`（**三段链**：`protocol.py` 按 `kind="human"` 分派 + `query_router._suspend_status` 写 `WAITING_HUMAN` + `api/human_task.py` 审批面；判据 = approve 经**真实接线路径**驱动 `WAITING_HUMAN→RUNNING`（救活此前的死代码分支）、审批主体服务端断言不接受请求体自报，证据 `packages/agent-runtime/tests/test_human_task_wiring.py` 5 条 + `applications/agent_server/tests/test_human_task_api.py` 12 条）⇒ 四者全接，按**相对口径** open 28→27、closed 10→11、D 组 14→13、§0.3「未接线半成品转正」行 1→0。可由 `git diff main -- docs/TODO.md` 核：内 `- [ ]` → `- [x]` 恰 **1** 处（本提交）。**接线 ≠ 默认启用**（不粉饰）：4 者里 3 者生效面默认关、human_task 的状态机推进依赖 `SCHEDULER_ENABLED`，真 PG 并发双写被拒与双实例故障转移仍**待环境**（126 关机）⇒ 归 §0.3「V3 执行平台验收」行与 §2，**未**因本条翻勾而闭合。绝对值仍受上文登记的口径不一致影响 ⇒ 不重开对账、不倒推历史数。
 > **（2026-10-16 追记，E 组 BOM 清零批）**：本批翻转 **恰 1 处**复选框——§0.4/§5 的「10 个已入库 UTF-8 BOM `.py`」，判据 = 逐文件 `old == BOM + new` 字节断言 + 全仓 `.py` BOM 复扫归零 + nl2sql 21 passed / 治理与契约合跑 37 passed / lint rc=0 / ruff 全绿（细节与**有意偏离原处方的两条论证**见 §5 该项闭合记录）。按**相对口径** open 27→26、closed 12→13、E 组开项 6→5（§0.4 标题同批改写为「6 行在册 = 5 条开项 + 1 条已清零」）。可由 `git diff HEAD~1 -- docs/TODO.md` 核：`- [ ]` → `- [x]` 恰 **1** 处。本批另在同一文件追加一条**取证签名失效**追记（§5 的 15-errors 项：其"恰好 15 条用例"的定位数因 `bd4fb0b` 变成 17 ⇒ 下次不得再用 15 定位），**该项保持开项未翻勾**。绝对值仍受上文登记的口径不一致影响 ⇒ 不重开对账、不倒推历史数。
+> **（2026-10-16 追记二，D4 ruff 豁免逐包收窄批）**：本批翻转 **恰 1 处**复选框——§0.4/§5 的 D4。判据按本仓实际结构定为**两种口径分开读**（A=只摘该包 config 里这一条后跑 `ruff check <包目录>`，即 CI 等价；B=`--isolated --select <规则>`，即"这族若启用会报多少"），因为**本仓有 6 份 ruff config 且 ruff 按最近 config 分层生效**——只看根 config 会把嵌套包的存量误读成 0（实测 E402 根 A=25 而全仓 B=57，差 32 = federation 28 + agent-runtime 4）。结果：**21 条豁免删 9 保 12**（删的都是 A=B=0 的死豁免；保留 12 条各有实取存量或 `make type --select ALL` 作用面）。每条删除都放了探针反证非空转（E731/E402/E722/F403/F405/F811 各自报出），顺带查实两条注释陈旧：KS 的 `E722 存量 1 处（node_rrf.py:39）`已不成立、`F405 存量 18 处`实取 **17** ⇒ 已按实取订正。"B/PERF/RUF 四族要不要进 select"是规则集扩容决策 ⇒ 转排期 §3 第 18 行待拍板。按**相对口径** open 26→25、closed 13→14、E 组开项 5→4（§0.4 标题同批改为「6 行在册 = 4 条开项 + 2 条已清零」）。可由 `git diff HEAD~1 -- docs/TODO.md` 核 `- [ ]`→`- [x]` 恰 1 处。绝对值仍受上文口径不一致影响 ⇒ 不重开对账、不倒推历史数。
 > **（2026-10-05 追记，本批为 PR #55 处置收口）**：本批只做**状态订正**（§0.2 第 1 行 / §0.5 的 open PR、alerts、分支形态 / §8 的 Dependabot 门禁条），**未新增、未关闭任何开项**——diff 内零 `- [ ]` ↔ `- [x]` 状态变更（可用 `git diff docs/TODO.md` 判），故上行的计数口径与数值不变。**不在此处重述计数**：本机实测 `^- \[ \]` 与 `^\s*- \[ \]` 都得 31、`^- \[x\]` 得 8，与上行「顶格正则只取到 15 / closed 7」的既有口径不一致（成因未查，不做推定复现）⇒ 仍以「先定义口径再引用、不从文件外口头汇总」为规矩，本批不引入第二个数。
 
 ### 0.1 B 需外部条件（4 条）
@@ -42,12 +43,12 @@
 | 会展业务骨架 | 6 | F1-D Vault/KMS · F2 真实 LLM 连接（需产品决策输入）· F01 `enforce_scope_filter` · F02 READY 数据源 · F03 同具体性不同租户样本规则 · nl2sql-service 通用化后填具体端点 | §4 |
 | 检索 / 存储增强 | 3 | LightRAG 式图谱增强检索 · MySQL 业务库支持 · 多租户配额/隔离/计费 | §7 |
 
-### 0.4 E Low 技术债（6 行在册 = **5 条开项 + 1 条已于 2026-10-16 清零**；非阻塞，可随日常改动顺带处理）
+### 0.4 E Low 技术债（6 行在册 = **4 条开项 + 2 条已于 2026-10-16 清零**；非阻塞，可随日常改动顺带处理）
 
 | 事项 | 锚点 | 为什么留着（不是遗漏） |
 |------|------|------------------------|
 | D1 产品代码单字母变量改语义名 | §5 | 全仓散布、纯可读性，风险高于收益 |
-| D4 ruff `ignore` 存量基线逐包收窄 | §5 | 需逐条评估删除后是否仍违规 |
+| ~~D4 ruff `ignore` 存量基线逐包收窄~~ **已收窄（2026-10-16）** | §5 | 结论：删 9 条零违规豁免、保留 12 条（有真实存量或有 `make type` 作用面）；"四族要不要进 select"另立待拍板行 |
 | D5 `agent_core` 历史溯源注释泛化改写 | §5 | 81 处多数有档案价值，需人工逐条判断 |
 | D7 裸 `except Exception:` 存量按 ratchet 逐文件烧除 | §5 | 门禁已常驻防新增，不追求逐点清零 |
 | D8 `zhanggui-zhiku/core/config.py` 评估迁 pydantic-settings | §5 | 课程脚手架，非主线 |
@@ -126,7 +127,24 @@
 来源：`docs/plans/plan-tech-debt-followup-2026-09-22.md`（D2/D3/D6/D9/D10 已完成，不列此）：
 
 - [ ] D1：产品代码单字母变量改语义名（全仓散布，纯可读性，风险高于收益，仅随包内其它改动顺带）
-- [ ] D4：ruff `ignore` 存量基线逐包收窄（需逐条评估删除后是否仍违规）
+- [x] D4：ruff `ignore` 存量基线逐包收窄（需逐条评估删除后是否仍违规）**【已逐条实测并收窄，2026-10-16】**
+  - **口径先定义（同一规则两个数会差很大，必须分开读）**：
+    **A = CI 等价判据**——只从该包 config 的 `ignore` 摘掉这一条，跑 `ruff check <该包目录>`（ruff 对本仓是**分层取最近 config**，所以逐包跑才有意义）；
+    **B = 真实存量**——`ruff check <目录> --isolated --line-length 120 --select <规则>`（绕开所有 config，回答"这族规则若启用会报多少"）。
+    本仓有 **6 份 ruff config**（根 + federation + exhibition + knowledge-service + agent-core + agent-runtime），
+    逐包测才是"逐包收窄"的正解：只看根 config 会把嵌套包的存量误读成 0（实测 E402 根 A=25 而 B=57，差值 32 正是 federation 28 + runtime 4）。
+  - **收窄结果：删掉 9 条豁免**（A 与 B 均为 0，即"删了不会变红、留着只是给未来开后门"）——
+    根 `E731`（根子树 0）；`agent-core` 整块 `E722/F403/F405/F811`（4 条，含被 `extend-exclude` 排掉的 `tests` 也复扫过）；
+    `exhibition-agent` 整块 `B008/E402/E731`（3 条）；`knowledge-service` `E722`（1 条，**原注「存量 1 处 node_rrf.py:39」是陈旧说法**，该行现已不是 bare except）。
+  - **保留的 12 条各有实测理由，不是"没来得及删"**（21 条原始豁免 − 删 9 = 12，按 `tomllib` 逐 config 复算）：`E402` 根 A=25 / federation A=28 / agent-runtime A=4（真实存量，且 federation 的多为 `load_dotenv()`/`sys.path` 后再 import，属 deliberate）；
+    `knowledge-service` `F403` 6 / `F405` **17**（原注 18 已过时，已按实取订正）/ `F811` 1；
+    根 `B008`/`B017`/`PERF102`/`RUF059` 四条 **对 `ruff check .` 是死配置**（B/PERF/RUF 家族不在 `select` 里，A 恒 0），
+    唯一作用面是 `make type` 的 `--select ALL`（B 实取 7/8/4/37）⇒ 删掉它们会让 `make type` 一次报出 56 条，
+    而"要不要把这四族纳入 select"属**规则集扩容决策**（按 AGENTS.md 框架规则要逐族判"约束是减错还是碍事"），**不在本项判据内**，转 §3 待拍板新第 18 行。
+  - **非空转反证**（每条删除都探过一次）：临时探针文件在根子树写 `f = lambda: x` ⇒ **报 E731**；在 `agent_core/` 写 bare except / `from json import *` / 重复 `def a()` ⇒ **报 E722 / F403+F405 / F811**；
+    在 `exhibition_agent/` 写 `import sys` 后再 `from os import sep` ⇒ **报 E402**，写 lambda ⇒ **报 E731**；在 `knowledge_service/` 写 bare except ⇒ **报 E722**。探针已删除（`git status` 无残留）。
+  - **实跑**：`ruff check .` 全仓通过；`packages/agent-core/tests` + `applications/exhibition-agent/tests` + `applications/knowledge-service/tests` 合跑 **1129 passed / 15 skipped**（与收窄前同数 ⇒ 零回归）。
+  - 表格与取证细节：`docs/plans/plan-unfinished-completion-schedule-2026-10-16.md` §15。
 - [ ] D5：`agent_core` 历史溯源注释泛化改写（81 处中多数有档案价值，需人工逐条判断）
 - [ ] D7：裸 `except Exception:` 存量按 ratchet 基线逐文件烧除（门禁已常驻防新增，见 `docs/plans/plan-p0-4-blind-except-ratchet-2026-09-24.md`；不追求逐点清零）。**2026-10-15 补现值与去处**：本行「逐文件烧除」是 M2 之前的措辞，已被同文的状态修订取代（改为整包 `per-file-ignores` 基线豁免 + 源码零逐点 noqa）；降量的现行执行方案是 `plan-p0-4-blind-except-real-reduction-2026-09-24.md`（三桶规则，本轮范围=桶 A），桶 B 已定案不做（`p2-bucket-b-reduction-findings-2026-09-24.md`）。复测：`ruff --isolated --select BLE001,S110` = **263 处 / 100 文件**，较 M1 基线 262/103 净量未降 ⇒ **本条保持未核销**。
 - [ ] D8：`zhanggui-zhiku/core/config.py` 评估迁移 pydantic-settings

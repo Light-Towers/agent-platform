@@ -93,10 +93,17 @@ select = ["E4", "E7", "E9", "F", "I", "BLE001", "S110"]
 # 以下为既有风格/惯例类告警，非逻辑阻断；收敛以让 CI 门禁（ruff check .）转绿。
 # B008: FastAPI 在依赖注入（Depends(...)）中于函数默认参数位置调用是官方推荐写法，非真实 bug。
 # E402: 模块级 import 不在顶部（agent_federation 多因 load_dotenv()/sys.path 后再 import，deliberate）。
-# E731: lambda 赋值（风格）。B017: pytest.raises(Exception)。
-# PERF102: .items()→.values()。RUF059: 未使用解包变量。
+# B017: pytest.raises(Exception)。PERF102: .items()→.values()。RUF059: 未使用解包变量。
 # 注：BLE001/S110 已于 P0-4（2026-09-24）从 ignore 移除并纳入 select（根长尾的 legacy 入下方基线）。
-ignore = ["B008", "E402", "E731", "B017", "PERF102", "RUF059"]
+# D4 逐条实测（2026-10-16，两种口径都跑了）：
+#   · **E731 已从本表删除**——根管辖子树（agent_server / eval / scripts / tests）实取 0 违规，
+#     留着它只会让今后有人写 `f = lambda: ...` 时静默通过。
+#   · E402 有真实存量（根子树 25 处 / 全仓 57 处），保留。
+#   · B008 / B017 / PERF102 / RUF059 四条**对 `ruff check .` 是死配置**（B/PERF/RUF 家族不在上面的 select 里），
+#     它们的唯一作用面是 `make type` 的 `--select ALL`（实取存量 7 / 8 / 4 / 37）⇒ 删掉不会让 CI 变绿或变红，
+#     但会让 `make type` 一次性报出这 56 条 ⇒ **保留并挂在这里等一个"要不要把这四族纳入 select"的决策**，
+#     那属规则集扩容（需逐族判"约束是减错还是碍事"），不是本项的"删除后是否仍违规"。取证见 docs/TODO.md §5 D4 与排期 §15。
+ignore = ["B008", "E402", "B017", "PERF102", "RUF059"]
 
 # P0-4 盲捕获门禁棘轮基线（根配置仅覆盖无独立 [tool.ruff] 的子树：agent_server / kefu / nl2sql / eval / scripts / tests）。
 # 逐文件锁定 legacy 存量，新代码不得新增；烧净一个删一行。进度见 docs/plans/plan-p0-4-blind-except-ratchet-2026-09-24.md。
