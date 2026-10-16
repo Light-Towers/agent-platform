@@ -1,6 +1,13 @@
 # 方案：会话回退审计主体去凭据化（`revert_audit.operator` 取服务端断言主体）
 
-> 状态：**待拍板**（红线「所有代码优化/重构必须先制定方案」——本文档未动一行业务代码）。
+> 状态：**已实施并已合入主干**（2026-10-16 对码订正本状态行——原文写「待拍板…本文档未动一行业务代码」，与实际相反）。取证：`session_router.py:71` 现为
+> `operator = server_tenant_id(settings.default_tenant_id)`；P12 门禁在 `scripts/lint_architecture.py`
+> （`main()` 打印 16 条编号含 P12）；治理用例 `tests/governance/test_audit_operator_principal.py` 在册；
+> 提交 `116d51b1` → **PR #61** → merge `bb2b9a81`（详见 `docs/TODO.md` §5 该项的三段追记）。
+> **正文 §1.1 里「`session_router.py:57` 目前是 `api_key or "default"`」是施工前的现场快照，保留不改**
+> （它是问题定性的一部分，不是现状描述）。本方案真正未闭合的只剩一条**待环境**项：
+> 部署侧 `revert_audit.operator` 存量历史行取证（`docs/operations/audit-operator-principal-runbook.md`，
+> 本机 docker/kubectl/SSH 三通道均不通）。
 > 来源：`docs/TODO.md` §5 L73（B7b 收尾时登记，标注「属安全语义而非可读性」）。
 > 关联真相源：`docs/adr/0007-server-asserted-tenant-identity.md`、`docs/plans/plan-codeql-b7b-principal-thread-identity-2026-10-01.md`（B7b-4 已把**会话身份**主体化，本方案是同一语义在**审计主体**上的收尾）。
 
