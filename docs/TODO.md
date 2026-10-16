@@ -117,7 +117,7 @@
 
 - [ ] F1-D：Vault/KMS 凭证后端接入（`execution_context.py`）
 - [ ] F2：真实 LLM 连接接入（`model_router.py` / `data_egress.py`）——数据分级出域模型路由，需产品决策输入
-- [ ] F01：`enforce_scope_filter` 落地（`evaluation.py`）
+- [ ] F01：`enforce_scope_filter` 落地（`evaluation.py`）**（2026-10-16 订正本句前提，本行保持开项）**「落地」已完成大半：生产实现 `execution_context.py:156` 在位（租户一致 + `ctx.scopes` 收窄，两条用例文件覆盖 `test_execution_context_foundation.py` / `test_evaluation_framework.py`），且跨租户负样本评测路径已在跑生产代码而非 mock（审计 P1-9 那批改的，`evaluation.py` 的 `_evaluate_cross_tenant_negative`）。**残差收窄为一处**：positive 路径仍调 `_mock_scope_filter`。不顺手换的依据——两者语义不等宽（mock 对 `scope_type=PUBLIC` 的跨租户项放行，生产实现无 PUBLIC 例外且 scopes 非空时更严），换过去会改 `make eval` 门禁判分 ⇒ 属评测基线变更，须先出方案并连带重取基线（已登记 `docs/plans/plan-unfinished-completion-schedule-2026-10-16.md` §3 第 21 项待拍板）。⇒ 本行只改文字、未翻复选框，§0 索引「会展业务骨架 = 6」计数不受影响（判据=§4 那一段复选框逐行现取：开项 6 / 闭项 0）。
 - [ ] F02：READY 数据源连接（`production_readiness_gate.py`）
 - [ ] F03：同具体性不同租户样本规则
 - [ ] nl2sql-service 通用化后填充具体端点（`skills/data_analysis/skill.py`）

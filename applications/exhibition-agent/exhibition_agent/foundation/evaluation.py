@@ -55,9 +55,14 @@ def _now_iso() -> str:
 
 
 def _mock_scope_filter(candidates: list, tenant_id: str) -> list:
-    """
-    MVP 内联 mock scope 过滤：仅保留 tenant_id 匹配或 scope_type=PUBLIC 的候选。
-    TODO: F01 execution_context.enforce_scope_filter 落地后替换此函数。
+    """MVP 内联 mock scope 过滤：仅保留 tenant_id 匹配或 scope_type=PUBLIC 的候选。
+
+    F01 的生产实现 `execution_context.enforce_scope_filter` **已落地**，且跨租户负样本路径
+    （`_evaluate_cross_tenant_negative`）已在跑它——本函数只剩一处调用：positive 路径里的
+    `scoped = _mock_scope_filter(case.candidates, tenant_id)`。
+    把它换成生产实现会改变 `make eval` 门禁的判分结果（mock 对 `scope_type=PUBLIC` 的跨租户项放行，
+    生产实现没有 PUBLIC 例外、且 `ctx.scopes` 非空时还要再收窄 ⇒ mock 比生产宽），
+    属评测基线变更而非注释级修正 ⇒ 须先出方案并连带重取基线，不在此顺手改。
     """
     result = []
     for c in candidates:
