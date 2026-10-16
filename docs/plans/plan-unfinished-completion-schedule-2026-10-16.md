@@ -19,7 +19,7 @@
 | **§17 变更记录补齐（§四 第 7 条残口）** | **2026-10-16**（截止=当日） | `CHANGELOG.md` 补 10/10–10/16 未发布窗口节 | ✅ **已完成（10/16）**：120 个提交入窗口节、11 个锚点逐个核对、历史节零改动（diff 16+/0−）；版本号 facet 实测无映射 ⇒ 转 §3 第 20 项 |
 | **§19 exhibition env 模板门禁（#21 / P2-5）** | **2026-10-16**（截止=当日） | 给会展侧的「模板 ↔ 代码」一致加装自动检查（前缀折算口径） | ✅ **已完成（10/16）**：新增 3 条用例，四条变异全部击中；exhibition **368 → 371 passed**。**同批撤回一条我自己造出的假缺口**（前缀-blind 探针曾报"9 键缺失"）；`make eval` 复跑被执行权限层拦下，记为**待放行**，未绕过 |
 | **§22 阶段 0 #2 完成证据格式（roadmap 阶段0）** | **2026-10-16**（截止=当日） | 「无统一的完成证据格式」这条自 10-09 开着的阶段 0 行 | ✅ **已闭合（10/16）**：`docs/operations/evidence-format.md` 入库（五字段 / 三禁令 / 三档强度 / 变异反证表），§6 逐条对照六处既有用到的读数；入口挂 AGENTS.md + testing-playbook ⇒ **roadmap 阶段 0 小计 3 → 剩余 1**（#3 属外部条件，保持开项） |
-| **§24 错分类的机械活回收（#21 收尾）** | **2026-10-16**（截止=当日） | 把「补模板」从「要不要建门禁」的待拍板捆綁里拆出来做完 | ✅ **已完成（10/16）**：federation +7 / KS +10（AST 实读取默认值 + `<- 文件:行` 溯源，密钥留空）+ `tests/governance/test_app_env_templates.py` 2 条；**口径订正**：真缺 17 而非登记的 61（active vs 提及 两种读法差出来的）；CI 等价根会话未重跑 ⇒ +2 属推断，已标注 |
+| **§24 错分类的机械活回收（#21 收尾）** | **2026-10-16**（截止=当日） | 把「补模板」从「要不要建门禁」的待拍板捆綁里拆出来做完 | ✅ **已完成（10/16）**：federation +7 / KS +10（AST 实读取默认值 + `<- 文件:行` 溯源，密钥留空）+ `tests/governance/test_app_env_templates.py` 2 条；**口径订正**：真缺 17 而非登记的 61（active vs 提及 两种读法差出来的）；CI 合并跑被中止 ⇒ 改分段实测 720 + 349 = **1069**，恰为 §18 的 1067 + 本批 2 条 |
 | 阶段 2 / 阶段 3 | 11-13 / **12-04** | 归 roadmap，不由本排期重排 | 部分待环境 |
 | 一期交付判定 | **2026-12-04** | roadmap §四 七条标准逐条判定 | — |
 
@@ -774,7 +774,12 @@ uv run pytest packages/agent-runtime/tests/test_receipt_generation_fencing.py ap
 - `uv run pytest tests/governance/test_app_env_templates.py -q` ⇒ **2 passed**（本批新增）。
 - `uv run pytest tests -q -m "not requires_pg"` ⇒ **720 passed / 29 deselected**。这一条只覆盖 `tests/`，**不等于 CI 的第 1 个会话**——
   由此发现并订正了 §18 会话 1 的标签错误（CI 用 `testpaths = tests + packages/agent-core/tests`，故 §18 记的 1067 里含 agent-core 的 ~347 条）。
-- **CI 等价的根会话本轮未重跑**（命令 `uv run pytest -q -m "not requires_pg"` 被用户中止）⇒ 「根会话 1067 → 1069」目前只是**推断**（只新增一个测试文件、零产品代码改动），不是实测。对外引用前需补跑这一条。
+- **CI 等价的根会话本轮未做一次合并跑**（命令 `uv run pytest -q -m "not requires_pg"` 被用户中止，本批不再重试），改为**分段实测**：
+  `uv run pytest tests -q -m "not requires_pg"` ⇒ **720 passed / 29 deselected**；`uv run pytest packages/agent-core/tests -q` ⇒ **349 passed / 8 skipped**。
+  两段相加 = **1069 passed / 8 skipped / 29 deselected**，恰为 §18 的 1067 + 本批新增 2 条 ⇒ 「+2」由推断升为**分段实测**，
+  顺带定位了 §18 那 8 个 skip 的归属（**全在 agent-core**，根目录 `tests/` 一个都没有）。
+  **仍要保留的一条不确定性（不粉饰）**：分段跑与 CI 的单次合并跑在 conftest / 收集顺序上原则上可能有差异，
+  因此「1069」是强证据而非严格等价；要严格等价需在合并命令放行后跑一次。对外引用时按此措辞。
 - 其余 9 个会话本批未跑；`ruff check` 新文件全绿。
 
 **§3 第 12 项相应收窄**：剩下的只有「要不要建**全仓双向门禁**（模板键 ⇔ 代码读取，含动态键名与跨包共享层读取）」这一件决策，
