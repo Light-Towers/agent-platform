@@ -20,6 +20,7 @@ import logging
 import time
 
 from agent_core.guardrails.app_factory import build_api_app
+from agent_core.tracing import init_tracing
 from langgraph.checkpoint.memory import InMemorySaver
 from shared_schemas import QueryRequest, QueryResponse
 from shared_schemas.query import QueryData
@@ -28,6 +29,12 @@ from kefu_agent.graph import build_kefu_graph
 from kefu_agent.state import KefuState
 
 logger = logging.getLogger(__name__)
+
+# 观测装配点（roadmap 阶段2 #12）：**默认关闭**——`AGENT_CORE_TRACE_ENABLED` 未置真、
+# 或没有 `OTEL_EXPORTER_OTLP_ENDPOINT` 时，kernel 走 no-op（status=DEGRADED，绝不抛异常）。
+# 必须早于 `build_kefu_graph`：OTel provider 是进程级全局单例，装配顺序即正确性
+# （同 agent_server/main.py 的「别挪回去」约束）。此前本服务 0 装配点 ⇒ 漏装不可见。
+init_tracing(service_name="kefu-service")
 
 app = build_api_app(title="kefu-service", version="0.1.0")
 

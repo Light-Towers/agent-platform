@@ -53,6 +53,7 @@
 4. `plan-v3-phase-2-4-integration-2026-09-23.md` — v2 方案（含 6 项不变量）确认后施工
 5. tech-debt 补充 4 — agentic bridge 默认开 vs 保留 opt-in 但补开启路径测试
 6. **#7 对外 `/health` 三套约定是否统一**（评估结论见 §6）——统一到共享 `HealthStatus` 需改 exhibition/kefu/knowledge 的**线上响应值**，且 knowledge-service `/health/ready` 的 503 是就绪探针语义的一部分。本轮只交付不破坏下游的一致性测试 + 禁第 4 套护栏；统一与否请你定（选项：a 全统一到 `HealthResponse` / b 仅新增服务强制、存量保留并在看板侧做映射 / c 保留现状仅靠测试钉住不再扩散）。
+7. **#12 追加**：是否把 `init_tracing` 移进 `build_api_app` 成为"构造保证不可漏接"。本轮把「统一装配」实现为**统一工厂 + L-5 存在性门禁**已满足判据「漏装即 CI 失败」；但把 init 放进工厂会与 agent_server 现有顺序约束冲突（其源码有「别挪回去」注释：Langfuse 客户端构造会抢全局 TracerProvider ⇒ `init_tracing` 必须早于模型构造），且工厂在 import 期被调用会引入 import 副作用。属架构取舍，请你定。
 
 ## 4. 迁移策略（本排期如何推进，不破坏可回退性）
 
@@ -105,6 +106,27 @@
 **排期**：10/17 装配两应用 + 10/18 门禁 + 反证 → 10/19 收口回写 roadmap。
 其后阶段 2 本地可行项：#11（隔离门卫 2/6→6/6，6 人/日，需先审计各服务身份链，量大另出方案）、
 #16 脚本加固（小，本地可验：未注入变量即拒跑）、#13/#14/#17 的判据含"前后对比数据/基线读数"⇒ 依赖真库或 LLM 密钥，**待环境**。
+
+### 7.1 #12 实施结果（2026-10-16，提前于 10/19 完成）
+
+- **装配**：kefu-service（模块级装配点，早于 `build_kefu_graph`）、nl2sql-service（`create_app()` 内、
+  早于 lifespan 构造模型/连接）各加 `init_tracing(service_name=...)`。**未新增任何 env 变量**——
+  kernel `init_tracing` 自带中性 env 读取（`AGENT_CORE_TRACE_ENABLED` 默认 False、
+  `OTEL_EXPORTER_OTLP_ENDPOINT` 空 ⇒ no-op），自建配置面只会多一处漂移源。
+- **默认关已被实跑证明，不是推断**：清空两个 env 后 `enabled=False`、`status=DISABLED`、
+  tracer 类型 `_NoOpTracer` ⇒ 装配零行为变化。kefu **43 passed**、nl2sql **18 passed**。
+- **门禁 L-5**（存在性，与 L-3 禁止性互补）：`lint_architecture.py::check_observability_assembly_coverage`。
+  **两次反证都做了**：① 把 kefu 装配临时注释掉 ⇒ L-5 **exit=1 且点名** `applications/kefu-service: 无 init_tracing 装配点`
+  （随即还原，`git diff` 核实只剩本轮装配改动）；② 枚举自检按设计炸过一次——
+  我最初以 `applications/*/pyproject.toml` 作"一个 app"的判据，**漏掉 agent_server**
+  （它是根 workspace 成员 `packages = ["applications/agent_server"]`，自身无 pyproject.toml），
+  自检报"只枚举到 5 个"而非静默按 5 个通过。⇒ 判据改为与 `_PLATFORM_APPS` **逐个名字比对**，
+  目录改名/新增服务未登记都会红。这条自检是今天第二次证明"没有自检的门禁等于没有门禁"。
+- **覆盖率 4/6 → 6/6**；`L-3/L-5/L-1/L-2/L-4` 全通过、`ruff check .` 全绿。
+- **#12 判据中仍不闭合的部分**：判据原文「漏装即 CI 失败」已达成；
+  但「统一装配」我按现状实现为**统一工厂 + 存在性门禁**，未把 `init_tracing` 塞进
+  `build_api_app`——那会让 agent_server 精心排序的 provider 装配（其源码有「别挪回去」注释）
+  与 Langfuse 抢全局单例，属更大的架构决策。是否在工厂内直接 init，转 §3 拍板追加项。
 
 ## 6. #7 消费方影响评估结论（2026-10-16，roadmap 要求「先评估消费方影响」）
 

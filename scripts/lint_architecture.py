@@ -559,11 +559,28 @@ _INIT_WHITELIST = (
     # 门面 otel.py 已退役（观测方案 §12，2026-09-30）：kernel 直调后 init_tracing 仅剩装配点。
     # exhibition 装配薄封装：无本地状态、委托 kernel，由其 server.py:59 装配点调用。
     "applications/exhibition-agent/exhibition_agent/observability/otel.py",
+    # 阶段2 #12（2026-10-16）：补齐的两服务装配点。二者此前 0 装配 ⇒ 6/6 覆盖靠 L-5 存在性门禁兜住。
+    # nl2sql 放 create_app 而非 lifespan：provider 必须先于 lifespan 内的模型/连接构造。
+    "applications/kefu-service/kefu_agent/__main__.py",
+    "applications/nl2sql-service/nl2sql_service/api/server.py",
+)
+
+# L-5 的平台服务清单：枚举必须与此**逐个名字相符**（防目录改名/新增未登记导致门禁静默失效）。
+# 注意不能用 `applications/*/pyproject.toml` 当判据——agent_server 是根 workspace 成员
+# （根 pyproject `packages = ["applications/agent_server"]`），自身无 pyproject.toml。
+_PLATFORM_APPS = frozenset(
+    {
+        "agent_server",
+        "agent_federation",
+        "kefu-service",
+        "nl2sql-service",
+        "knowledge-service",
+        "exhibition-agent",
+    }
 )
 
 _MANUAL_CM_PATTERN = re.compile(r"\.__(?:enter|exit)__\s*\(")
 _MANUAL_CM_WHITELIST: tuple[str, ...] = ()
-
 # L-2（S2/S3）：禁止经 app.state 散点取用 tracer（R8/R12 土壤）——请求级 span 由
 # TracingMiddleware 创建，业务层经 agent_core.tracing.current_span/record_request_attributes
 # 取用；S2 迁移完成后白名单清零，新代码走散点即 CI 红。
@@ -606,6 +623,52 @@ def check_init_scatter() -> list[str]:
         except Exception:
             pass
     return violations
+
+
+def check_observability_assembly_coverage() -> list[str]:
+    """L-5：观测装配**存在性**门禁（阶段2 #12，与 L-3 的禁止性互补）。
+
+    L-3 只管「init 不许出现在装配点之外」，**没有任何规则管「每个服务都必须有 init」**
+    ⇒ 漏装在 CI 里完全不可见：2026-10-16 实测 kefu-service / nl2sql-service 各 0 个装配点，
+    而 roadmap #12 的判据原文正是「漏装即 CI 失败」。缺的这一半由本条补上。
+
+    「一个 app」= `applications/` 下含 py 文件的直接子目录，并与下表**逐个名字比对**：
+    只数数量会被"目录改名 / 新增服务未登记"骗过（2026-10-16 实跑即踩到：以
+    `applications/*/pyproject.toml` 为判据会漏掉 agent_server——它是根 workspace 成员
+    `packages = ["applications/agent_server"]`，自身无 pyproject.toml，枚举只得 5 个）。
+    比对失败即违规 ⇒ 枚举失效不可能静默永绿。
+    """
+    apps = {
+        p.name
+        for p in (ROOT / "applications").iterdir()
+        if p.is_dir() and any(py for py in p.rglob("*.py") if "tests" not in py.parts)
+    }
+    unknown = apps ^ _PLATFORM_APPS
+    if unknown:
+        return [
+            f"L-5 自检失败：applications/ 枚举到 {sorted(apps)}，与已知 6 服务不符"
+            f"（差集 {sorted(unknown)}）。目录改名/新增服务未登记/枚举失效都属此类 ⇒ "
+            f"请同步更新 _PLATFORM_APPS，而不是放宽本条。"
+        ]
+
+    assembled: set[str] = set()
+    for rel, py_file in _iter_prod_py():
+        if not rel.startswith("applications/"):
+            continue
+        try:
+            text = py_file.read_text(encoding="utf-8")
+        except Exception:  # pragma: no cover - 编码异常的文件不参与判定，交由 L-3 同面处理
+            continue
+        if any(_INIT_PATTERN.search(line) and _is_code_line(line) for line in text.splitlines()):
+            assembled.add(rel.split("/")[1])
+
+    return [
+        f"applications/{a}: 无 init_tracing 装配点。"
+        f"观测**默认关**也必须装——不装则 /health 无从上报、漏装不可见"
+        f"（roadmap #12 判据「漏装即 CI 失败」；装配点须同时加入 _INIT_WHITELIST 以过 L-3）"
+        for a in sorted(apps)
+        if a not in assembled
+    ]
 
 
 def check_manual_cm_lifecycle() -> list[str]:
@@ -983,6 +1046,17 @@ def main() -> int:
         rc = 1
     else:
         print("L-3 观测架构约束通过：观测 init 无业务模块私起")
+
+    v15 = check_observability_assembly_coverage()
+    if v15:
+        print("L-5 观测装配覆盖违反：每个 applications/* 服务都必须有 init_tracing 装配点（漏装即 CI 失败，roadmap #12）")
+        print("修复：在应用装配点（main.py / server.py 的 create_app，须早于 lifespan 内构造模型）调用 init_tracing(service_name=...)；"
+              "默认关闭由 AGENT_CORE_TRACE_ENABLED / OTEL_EXPORTER_OTLP_ENDPOINT 决定，装配不改变运行行为：")
+        for v in v15:
+            print(f"  {v}")
+        rc = 1
+    else:
+        print("L-5 观测装配覆盖通过：6/6 服务均有观测装配点")
 
     v11 = check_manual_cm_lifecycle()
     if v11:
