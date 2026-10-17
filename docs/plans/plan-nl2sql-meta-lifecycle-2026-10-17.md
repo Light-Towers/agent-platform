@@ -1,0 +1,845 @@
+# 问数（nl2sql-service）元数据生命周期与检索质量补全方案
+
+- 状态：**讨论稿**（本文不替使用者拍板）。§0 是当日已定裁定 8 条；§8 共 26 行——**已答 3 项（Q8 / Q9 / Q13）、待答 22 项、已拍并已执行 1 项（Q21，简历侧，二档）**（编号不连续，见 §8 说明）
+- **核验状态**：**§11 已做过一轮全量机械核验**（正文全部去重引用逐条回查原文——本轮测得 161 条，计数会随编辑漂移、复测办法见 §11 开头；否定式断言改用不受 `.gitignore` 影响的原始 grep；并按脚本普查了全文表格结构）。结果：撤回/更正 13 条（§11.1）、收紧 4 条（§11.2）、新增 7 条事实（§11.3，其中 N1/N2/N4/N6 改变方案前提）。**§12 是课程实现证据的冻结快照（该目录未跟踪、即将删除，删除后不可恢复）——课程侧引用一律改读 §12。** 读本文前先读 §11.1 的 R1/R2/R7/R11/R13——五条是同类错误（搜索范围来自假设、或结构被自己的编辑破坏），不是五个孤立笔误。**
+- 日期：2026-10-17
+- 范围：改造对象是 `applications/nl2sql-service`（平台侧）；**`courses/zhanggui-wenda/data-agent` 作为参照实现用于取证**（P0-6 / P0-8 的缺陷证据全部来自它，不是平台侧现状）。**不含** 2025 会展问数本体（SQLBot 深度改造，代码在公司内网，本地不可读）
+- 关联：ADR-0003（双驱动，已决）、ADR-0006（隔离维度契约）、ADR-0007（服务端断言租户身份）、ADR-0009（两套向量存储并存，未决）
+- 触发：§2 的四个空洞是审计中逐个实读定位的，不是推测；每条都给了 `file:line`
+
+## 0. 当日已定裁定（2026-10-17，用户口径；后续讨论不得重复推导）
+
+| # | 已定 | 来源 | 直接影响的章节 |
+|---|---|---|---|
+| D1 | 问数生成的 SQL **打到 Doris**；数仓清洗后 **4 亿+**，MySQL 承载不住、Hive 延迟与分区复杂度不可接受 | 用户口径 | §2、§5.4、P1-4 |
+| D2 | Doris 里是数仓**最新分区 T+1 同步**的数据，**供 DataEase BI 展示**；问数是**只读消费方，不拥有这些表** | 用户口径 | §5.5 定档、P1-5、§7 |
+| D3 | 内网 Doris 已从 2.x **升级到 4.0**（自定义分词、`score()` BM25、ANN 均可用） | 用户口径 | §5.5、§5.7；但“版本支持≠生产验证”，T1-T3 仍是前置 |
+| D4 | **元数据语义层留问数自己的 PG**，不下推 Doris ANN | 用户裁定 | §5.6、P0-5 |
+| D5 | 源由**用户在会话里显式选定**（现用 MySQL 与 Doris），不做静默路由 | 用户口径 | P1-3（原路由方案已撤回） |
+| D6 | **默认对源不建 DDL**：取值匹配＝只读探针 + 跟随版本的缓存；索引 DDL 降级为性能债备选 | 用户原则（“不改数据源”） | P0-9、§5.7 修订 |
+| D7 | “取值”二分：**定义出来的码表＝元数据（进 PG，带别名/旧名 alias/deprecated）**；**distinct 出来的自由文本＝数据（不复制）** | 本方案推论，用户采纳 | §5.7、P1-2 |
+| D8 | 业务库 **MySQL 8.0+** | 用户口径 | P1-4 能力矩阵 |
+
+## 1. 问题定义
+
+元数据侧目前**没有生命周期**。四个具体空洞：
+
+| # | 空洞 | 后果 |
+|---|---|---|
+| H1 | 生产侧元数据构建入口是 stub | 平台服务里"元知识库"这条路根本没有实现，只有 API 入参注入 |
+| H2 | 无刷新触发器（无 cron / CI / 管理端点） | 上游表加了列、改了类型、删了字段，系统不知道也不问 |
+| H3 | 重建不幂等、无差异计算 | 重跑一次就多一整套副本；被删的取值永远留在索引里 |
+| H4 | 无质量反馈回路（无 trace 落库、无 golden 回归） | 答错了无法定位是"召回错"还是"生成错"，准确率只能靠人工抽样认定 |
+
+⇒ 这四条合起来就是"像 demo"的技术根因：**不是 YAML 这个载体不好，是声明之后的链路没有闭环**。
+
+## 2. 现状事实（逐个实读，非模式猜测）
+
+| 实现 | 位置 | 向量/检索 | 元数据来源 | 刷新触发 | 幂等 | 漂移检测 |
+|---|---|---|---|---|---|---|
+| 生产服务 | `applications/nl2sql-service` | Postgres + **pgvector**（列/指标/取值三路召回同库，`agent/context.py:6-8`、`agent/nodes/recall_*.py`） | `config/metric_config.example.yaml` + API 入参注入 | **无**——全服务只有一个路由：`api/routers/query_router.py:15` 的 `POST /api/query`（`routers/` 目录仅此一个文件，`@router.*` 全服务命中 1） | n/a | 无 |
+| 生产构建脚本 | `nl2sql_service/scripts/build_meta_knowledge.py:20-24` | — | `MetaKnowledgeService(meta_repo=...)` 构造后即丢弃，print「use the service API」 | 人工 CLI | — | — |
+| 服务层 | `services/meta_knowledge_service.py:23` `build_from_tables` | — | — | **零调用方**（全仓 grep 只命中定义行） | — | — |
+| 课程实现 | `courses/zhanggui-wenda/data-agent` | **Qdrant**（dense）+ **ES**（全文）+ MySQL 元数据 | YAML 手填语义 + `show columns from {t}` 取类型（`dw_mysql_repository.py:9-11`）+ `select distinct {col} limit {limit}` 取样本；**两个 limit 不是一个数**：列的 `examples` 用 10（`meta_knowledge_service.py:56`），ES 取值字典用 **100000**（`:141-143`） | 人工 `python -m app.scripts.build_meta_knowledge` | **不幂等**：point id 用 `uuid.uuid4()`（`services/meta_knowledge_service.py:85/92/99`），`ensure_collection` 只"不存在才建"、从不 drop（`repositories/qdrant/column_qdrant_repository.py:16-20`）；ES 只 `index`、**课程侧 ES/Qdrant 检索层无 delete 路径**（订正：上一版写"全仓无 `delete_by_query`"，`delete_by_query` 确实命中 0，但"全仓检索层没有删除路径"过宽——knowledge-service 的 Milvus 路有 `client.delete`，见 `node_import_milvus.py:316`） | 无 |
+| 上游参照 | `github.com/dataease/SQLBot` `apps/data_training/` | 独立"数据训练"模块（`api/data_training.py`＝`page`/`create_or_update`/`delete`/`enable` CRUD） | 后台人工维护 | 人工 | — | — |
+
+**数据链路（2026-10-17 用户口径，此前本文未登记）**：数仓最新分区的值**同步进 Doris**（BI 层；`Resume/analysis/Phase3-简历打磨与开投清单-2026-08-23.md:27` 亦记「BI 当前主用 Doris + DataEase」）。两个直接后果：① 同一问题分两次查询不会跨快照 ⇒ 本文 §4 之前用“快照漂移”论证“必须一条 SQL”**理由过强**，一条 SQL 的真实理由见 §5.4；② 取值字典的变更时点因此是**确定且批量**的（每日同步完成之后），把“刷新触发”从“要设计定时扫描”降级为“挂在同步任务下游”。**已答（2026-10-17 用户口径，Q9）：生成的 SQL 实际打 Doris。** 且同日补口径定性——**Doris 里放的是数仓清洗后的最新分区数据，供 DataEase 做 BI 展示；问数是只读消费方，不拥有这些表。**这一句把本文两个前提改了写：P0-7 的“加内建索引”与 §5.5 的“元数据 ANN 下推”都要跨团队要 DDL 权限（Q10），并引入一个必做项 **P1-5 负载隔离**（问数的 ad-hoc SQL 不能拖垮 BI 大屏）。 排除项的理由也一并登记，因为它们是可对外陈述的设计依据：数仓清洗后数据量 **4 亿+**，放 MySQL 不合适；直连 Hive 太慢且要处理分区裁剪。业务库口径同日补充：**MySQL 8.0+**（⇒ CTE / 窗口函数 / ngram FULLTEXT / 函数索引 / 不可见索引 / `EXPLAIN ANALYZE` 均可用，细节见 P1-4 能力矩阵）。⇒ 本文一切“下推到查询引擎”的论证成立；下表课程实现连 MySQL 只是教学环境，不代表现网（见 §7 归属边界）。
+
+两点要正视：
+
+- 上游 SQLBot 本身就是**人工维护 + 离线训练**的形态。所以"平台侧没有自动同步"不是抄漏了，是沿用了同一个月球模型却没补上生产该有的那一环。
+- 简历/对外材料里"Qdrant + Elasticsearch + 自动抽取取值样本"这套，**本地只有课程实现撑着**。平台侧对应实现是 pgvector，且构建入口是 stub。这两件事必须分开陈述（见 §7）。
+
+## 3. 目标与非目标
+
+**目标**：把"元数据从声明到可被信任地检索"这条链路补成有生命周期的一块钱。
+**非目标**：不做多租户 SaaS 化；不改模型选型与节点链拓扑（但**要改生成上下文的注入契约**——P0-8① 的 examples → 结构化绑定、P0-6① 的 prompt 变量修复，均属此范围，原表述与 §4 冲突，已收紧）。
+
+**与 ADR-0009 的关系（本方案隐含做了一个决定，须点破）**：§5.6 定档“元数据语义层留 PG + pgvector”，等于**就 nl2sql-service 一侧**结束悬置；ADR-0009 里 knowledge-service（Milvus）那一侧本方案不触碰，故该 ADR 整体仍标未决。**但上一版“需回填一条 nl2sql 侧已选 pgvector”的措辞不成立**：`docs/adr/0009-vector-store-selection.md:10-13` 的现状表**只有两行**（knowledge-service = Milvus、agent_server = pgvector），**根本没有 nl2sql-service 这一行**，全篇 `grep nl2sql` 命中 0 ⇒ 动作是**新增一行**，不是回填既有条目。新增时还要顺手改一处：ADR-0009 `:25` 的理由写的是“pgvector 无等价的引擎侧稀疏向量”——方向对、理由要换（pgvector **有** `sparsevec` 类型与 HNSW 算子族，缺的是**引擎侧 DF/IDF/BM25**，见本文 §5.1 订正），否则下一个读者会拿这句去反驳实测结果。另注：两者都用 pgvector，但接法不同（agent_server 走 `agent_runtime.db`，nl2sql 走自己的 `pgvector_client_manager`），新增那行要写清是**第三套接法**而非复用。
+
+## 4. 分层方案
+
+### P0 让链路真的存在（缺了它，其余都是空谈）
+
+| 项 | 做什么 | 判据（可测） | 涉及 |
+|---|---|---|---|
+| P0-1 **实装构建入口** | `build_from_tables` 接上脚本与服务，或删掉 stub 换成明确的服务端点 | 跑一次能把 YAML 声明 + DDL 派生结果落到元数据库，并产出可查的构建报告 | `scripts/build_meta_knowledge.py`、`services/meta_knowledge_service.py` |
+| P0-2 **稳定 ID + 差异重建** | 向量点 ID 用 `hash(table.column)` 而非随机；重建走 upsert + 删除不在源里的旧点 | 同一份输入连跑两次，索引内点数与内容**完全一致**（当前是翻倍） | 向量仓库层 + ES 仓库层 |
+| P0-3 **漂移检测** | 定时或触发式比对 `information_schema`（或 `show columns`）与元数据库，输出新增/删除/类型变更三类差异；差异默认**报警不自动改语义**，只有类型与样本自动跟 | 造一次"加列 / 改名 / 删列"，检测能在下一周期报出且不误报 | 新增脚本或 `/metadata/diff` 端点 |
+| P0-4 **trace 落库 + golden 回归** | 每次问答记录：召回到的表/字段/取值、生成 SQL、EXPLAIN 结果、耗时、模型与 prompt 版本、所用**元数据 revision**；并攒 20–50 条 golden 题目做回归 | 任一线上错答可离线复现；回归可一键跑并出门禁读数 | agent 节点 + eval |
+| P0-5 **检索层契约重划**（原“PG 全文补洞”，范围已按 P0-7 收缩） | **字段名 / 指标名 / 别名层**：① 取值路从 PG 退役（转 P0-7），PG 不再承担中文长文本模糊匹配；② 这一层的主路是**别名精确匹配 + dense 向量**，`ts_*` 全文只作已登记短语别名的兜底；③ 兜底路查询侧从 `plainto_tsquery`（AND）改**显式 OR**（逐 lexeme 转义后拼 `\|`）；④ 阈值从绝对分改**相对截断**（top-k + 分差）；⑤ 短文本不需要中文分词器，**`zhparser` / `pg_search` 一类扩展不在本项范围**（那是副本索引路线的议题，见 §5.1 状态） | 一条含 3 个以上关键词的中文问法不再空召回；`EXPLAIN` 显示走索引而非全表扫；PG 里已无取值表残留 | `clients/pgvector_client_manager.py`、`repositories/pgvector/{column,metric}_repository.py`（`value_repository.py` 转 P0-7） |
+| P0-6 **自校验闭环与结果语义（复合问法暴露出来的三处断点）** | ① 校正节点的 PromptTemplate `input_variables` 与 prompt 占位符一致性测试；② 只读保障落到**语句白名单 + 只读账号**，不写在 EXPLAIN 名下；③ 区分"取值未匹配"与"计数为 0"，空召回必须显式拒答而非返回 0 | ① 造一条 EXPLAIN 必挂的 SQL（错表名），校正节点能跑通并产出新 SQL（**课程侧直接抛异常；平台侧已能跑通**，对平台侧本条只是加一致性测试）；② `EXPLAIN DELETE ...` 被执行前就被拦下；③ 问一个库里不存在的城市，返回"未匹配到该取值"而不是 0 | `app/agent/nodes/correct_sql.py:27`（课程）、`nodes/validate_sql.py` + `repositories/mysql/dw/dw_mysql_repository.py:27-28`（课程，`validate_sql` 方法体只有 `explain {sql}`；**订正**：上一版写 `:29-34`，那是 `execute_sql`，不是 EXPLAIN 证据）、平台侧对应层 |
+| P0-7 **取值匹配下推到查询引擎**（见 §5.4 / §5.7） | 默认形态＝**只读探针**：匹配动作以查询形式发到数据所在的源，**不在源上建任何 DDL**；索引 DDL 降级为性能债选项。PG 只存取值的**摘要与开关**（基数、码表、是否允许模糊），不存取值全集 | 取值召回与查询落在同一份数据上，“索引落后于数据”这一类故障无从发生；未声明 `linkable` 的列不会被探针查询（默认关）。⚠️ 注意：`sync` 是**课程实现**的 YAML 字段，平台侧 `conf/meta_config.yaml` 目前只有 `meta_db / dw_db / pgvector` 三段、**无该字段** ⇒ 白名单机制要随 P1-6 一起新建，不能当作已有能力 | `repositories/pgvector/value_repository.py:18-28`（副本退役）、取值召回节点、Doris DDL 仅在实测撑不住时按 Q10a 申请 |
+| P0-8 **值字面量五道闸**（见 §5.4） | ① 召回值改结构化绑定（不再塞 `examples`）② 执行前用 sqlglot 抽 `(列, 常量)` 回字典校验 ③ 零结果分诊探针 ④ 返回体带 `matched/unmatched` ⑤ 未命中字面量日报 | 问一个库里不存在的城市 → 返回“未识别取值”而非 `0`；类型不匹配（编码列写成字符串）在校验层被拦 | `merge_retrieved_info.py:38-46`、生成/校验节点、SSE 协议 |
+| P0-9 **只读取值探针 + 跟随版本的缓存**（本轮讨论的落点，见 §5.7 修订） | ① 取值匹配以参数化查询发到**该列所在的源**，问数对源只读、不建 DDL；候选列由 YAML 的 `linkable` 白名单控制（默认关），带 `LIMIT` 与探针超时；② 定义并落两个版本号——`meta_revision`（元数据构建批次，P0-4 trace 记它）与 `source_snapshot`（数据版本：Doris 取最新分区号 / MySQL 取水位，**缓存键用它**），二者不可混用；③ 缓存仅在 `source_snapshot` 变化时失效 ⇒ 不是定时刷新 | 同一版本内重复问同一取值只打源一次；分区/版本推进后新取值立刻可被召回；对源的连接账号无写权限 | 取值召回节点 + 缓存层 + `meta_config.yaml`（新增 `linkable` / 版本字段，联动 P1-6） |
+| P0-10 **标识符白名单**（把既有 S4 收进方案，不再只挂链） | 凡把表名 / 列名 / `filter_clause` / `tsvector_col` 拼进 SQL 字符串的位置一律加标识符校验，直接复用 `packages/agent-runtime/agent_runtime/db.py:164-169` 的 `_IDENT` 正则（`^[a-z_][a-z0-9_]*$`），不新造机制。覆盖面四处：`pgvector_client_manager.py:28-70`、`repositories/postgres/meta/meta_repository.py:18,25,32`、`models/postgres/postgres_model.py:16`、`packages/agent-core/agent_core/memory/vector_backend.py:313,320,341` | ① 传入含引号 / 空格 / 分号的表名或列名时**在校验层抛错，不落 SQL**；② 上述四处各有用例；③ P0-9 探针链路上跑一次，确认参数化查询与标识符校验两条防线同时生效 | 上述四文件 + `agent_runtime/db.py:164-169` 的既成正则（**本仓 `docs/tech-debt/tech-debt-audit-2026-09-22.md:228-237` 自 2026-09-22 登记为 S4，至今未修**） |
+
+**P0-7 的退让形态**（原写在表格里，会截断表格，故移到表后）：↳ **无 DDL 权限时的退让形态（问数是只读消费方，这条很可能触发）**：下推的价值主要来自“数据在同一处、口径天然一致”，**不主要靠倒排索引**。低基数枚举列（城市 / 状态 / 类型）用 `=` 与 `IN` 就能查对——**这是正确性层面成立，不等于性能层面成立**：Doris 的前缀索引只在 key 列生效，非 key、非分区列的等值过滤要扫该列的列存数据，4 亿行仍是秒级开销，官方对这类列的常规做法正是建一个**不分词倒排索引**（`parser` 留默认 `none`）。⇒ 措辞按此收紧：无 DDL 权限时**功能照样对，性能可能不够**；只有自由文本型取值（展会名、场馆名）的模糊匹配才真需要倒排——那部分若无 DDL 权限，**先按 P0-9 探针实测延迟、判定是否真的不够**，不够才谈外部索引（§5.7 修订里的备选序列）。⇒ **所以“ES 能否退役”取决于 Q10（权限），不取决于 Doris 版本。**
+
+**P0-6 ① 的代码证据**：`courses/.../app/agent/nodes/correct_sql.py:27` 声明 `input_variables=["query","metric_infos"]`，而 `prompts/correct_sql.prompt` 含 **7 个占位符**（`{table_infos} {metric_infos} {date_info} {db_info} {query} {sql} {error}`）。逐文件比对结果：其余 6 个 prompt 与各自声明**全部一致**，只有 correct_sql 不匹配 ⇒ LangChain 在构造 `PromptTemplate` 时即因缺变量报错。而 `graph.py` 把 `state["error"] is not None` 路由到 correct_sql ⇒ **一旦 EXPLAIN 失败，图必然在自修复这一步终止**，"生成→EXPLAIN 校验→校正→执行"的闭环当前不成立。
+
+**P0-6 ② 的事实基础**：MySQL 自 5.6 起 `EXPLAIN` 支持 INSERT/REPLACE/UPDATE/DELETE，因此 `explain {sql}` **不拦写操作**；上游 SQLBot 侧同样没搜到语句白名单（`grep -i 'only select|readonly' backend/apps/db backend/apps/datasource` 命中 0，执行路径 `llm.py:846-858` 直接 `exec_sql`）⇒ 只读保障的真实落点是**数据源账号权限 + 单语句执行**，纸面/口述都不得把它记在 EXPLAIN 名下（`generate_sql.prompt:20` / `correct_sql.prompt:35`（订正：上一版误写 `:7`，`:7` 是「可用数据表信息如下：」这行标题）的"只能查询"是提示词约束，不是强制）。
+
+**平台侧（2026）只读守卫的实况（2026-10-17 查证；本节上一版曾断言“白名单层不存在、guard.py 悬空”——**该断言错了**，错因是把 `find` 限定在 `applications/nl2sql-service/` 目录，而守卫实际在包里）**：
+
+- **白名单守卫存在且是完整的**：`packages/agent-core/agent_core/sql/guard.py:34-67`，规则四条——① 禁分号堆叠（`:39`）② 顶层必须是 `exp.Select`（`:50`，`WITH` 归一为 Select）③ `walk()` 拦藏在子查询里的写节点（`:52-54`，`FORBIDDEN_NODES :18-31` 含 Drop/Delete/Update/Insert/Create/Alter/Command/Transaction/Commit/Rollback/Set/Into）④ 缺 `LIMIT` 强制补 `max_rows`、超上限截到上限（`:56-65`）。`nl2sql_service/agent/nodes/validate_sql.py:6` 导入、`:15` 调用（dialect 硬编码 `"postgres"`，**订正**：上一版写 `:10-14`，那段是函数头 + `sql` 取值）。
+- **依赖已就位**：`sqlglot>=25.0` 在 `applications/nl2sql-service/pyproject.toml:24`（agent-core 侧是可选 extra `sql`）。⇒ 补白名单**不是新增能力，是接线与测试**。
+- **平台侧没有“修完不复核”的洞**：`graph.py:74` 是 `correct_sql → validate_sql` 回环；那个洞属**课程实现**（`courses/.../graph.py` 是 `correct_sql → execute_sql` 直连）。两条不得混述。
+- **真实缺陷只有一个（②已在本次全量核验中撤回）**：① **nl2sql-service 侧两个配置项没接线**——`sql_read_only_guard`（`settings.py:39/85`、`app_config.yaml:21`）与 `sql_max_rows`（`settings.py:40/86`）都只有定义与读取，**无执行路径消费**：`validate_sql.py:13` 从 `state` 取 `sql_max_rows`，而 state 由 `services/query_service.py:25` 组装、只塞 `query`/`context`/`llm` ⇒ 守卫恒定执行、LIMIT 恒为默认 1000，改配置无效。**范围必须写死为 nl2sql-service**：agent_server 侧是接线的（`applications/agent_server/sql/pipeline.py:111,121` 直接用 `settings.sql_max_rows`），federation 另有第三值（`applications/agent_federation/tools/sql_guard.py:25`）⇒ 这是**三个服务三套接法**，不是"平台没接线"。② ~~契约测试只锁开关值不锁行为、没有任何 guard 用例~~——**该断言错了**（2026-10-17 全量核验撤回）。守卫行为**有测试**：`tests/nl2sql_service/test_nodes_validate_sql.py:7-49` 六个用例覆盖 SELECT 放行 / DELETE 拒 / 多语句拒 / DROP 拒 / 缺 LIMIT 补齐 / 超上限截断 / 空 SQL 拒。错因＝只看了 `applications/nl2sql-service/tests/` 这一棵，漏了**仓库根的 `tests/nl2sql_service/`**（本仓有两棵测试树）。剩下的真实缺口比原表述窄：测试**手工在 state 里塞 `sql_max_rows`**，不经过 settings ⇒ ①那条配置链无人验证；`sql_read_only_guard` 这个开关也没有行为用例，因为守卫根本不受它控制（无条件执行）。另有一处文档与代码不一致：docstring `:7` 声称禁止 `GRANT`，但 `FORBIDDEN_NODES`（`:18-31`）里没有 `exp.Grant`——顶层 `isinstance(exp.Select)`（`:50`）已挡住，无实际漏洞，但一旦有人放宽顶层类型判定就会漏。
+- **守卫的存在不是本次发现**：`docs/tech-debt/tech-debt-audit-2026-09-22.md:430` 早就把 `agent_core/sql/guard.py:34-67` 列为正面案例（"用 sqlglot 解析，只放行单条只读 SELECT"）⇒ 本文上一版断言"白名单层不存在"不仅错，而且**与仓库既有文档相悖**，属可避免的错误。
+
+**全量核验新增四处平台侧实况（2026-10-17，此前本文未登记；前两条直接改写 P0-5 / Q18 的前提）**：
+
+- **① `meta_config.yaml` 的 `pgvector` 段是死配置**：`conf/settings.py:67` 确实加载了该 YAML，但只取 `meta_db.table_prefix`（`:90-91`），`dimension: 1536` / `index_type: ivfflat` / `metric: cosine`（`:11-13`）**无任何读取方**；实际相似度算子是 `clients/pgvector_client_manager.py:28` 里硬编码的 `<=>`（cosine distance）。⇒ **Q18 的"1536 vs 1024 之争"目前是纸面之争**：那个 1536 根本不参与运行。正确顺序是先接线、再定维度，否则改了 YAML 也不会重灌、也不会报错。
+- **② 字段/指标召回是单路，不是双路**：`repositories/pgvector/column_repository.py:15-17` 与 `metric_repository.py:15-17` 的 `recall(keywords, embedding, top_k)` **完全忽略 `keywords`**（`embedding is None` 直接返回 `[]`）；全文路 `fulltext_search` 只有 `value_repository.py:19` 一处调用。⇒ §2 那句"列/指标/取值三路召回同库"成立，但**每列内部**只有取值是"全文 + 向量补位"，字段/指标只有向量。P0-5 想要的"别名精确匹配优先于向量"当前**没有代码落点**，属新增而非改造。
+- **③ 检索层还没有源/租户过滤的入位**：`vector_search` 有 `filter_clause` 形参（`pgvector_client_manager.py:26,29-30`）但**所有调用方都不传**；`fulltext_search`（`:37-54`）**根本没有这个形参**。⇒ P1-1 权限下推与 P1-6 `datasource_id` 过滤在 PG 检索层的落点就是这两处，且取值路要先加参数。
+- **④ nl2sql-service 没有任何 DDL 进版本控制**：`find applications/nl2sql-service -name '*.sql'` 命中 0，全服务搜 `CREATE TABLE` / `CREATE INDEX` 也命中 0 ⇒ `nl2sql_*` 表与（若有）向量索引由库外手段创建，**存在性与是否建索引均不可知**。同仓先例：`tech-debt-audit-2026-09-22.md:125-131` 已为 `agent_runtime/db.py` 的 6 张 embedding 表登记过"全部缺 HNSW/IVFFlat 索引"，但**没覆盖 nl2sql 这几张表**。⇒ P0-5 的"`EXPLAIN` 走索引"判据要先补 DDL 脚本才有对象可验。
+- **⑤ 本文若干项属"已登记项的重述"，须挂链不得当新发现**：标识符拼接（`pgvector_client_manager.py:28-70` 的 `table`/`embedding_col`/`filter_clause`）是 **S4 已登记项**，同项还含 `repositories/postgres/meta/meta_repository.py:18-34`、`models/postgres/postgres_model.py:16-31`、`agent_core/memory/vector_backend.py:313-347`，正面案例是 `agent_runtime/db.py:164-169` 的 `_IDENT` 正则白名单（`tech-debt-audit:228-237`）；`build_from_tables` 的 N+1（逐条 embed + 逐条 INSERT）是 **P3 已登记项**（同文 `:139-143`）⇒ **P0-1 实装构建入口时必须合并 P3**，否则新入口一上线就带着一个已知性能缺陷。
+
+P0-4 是**唯一能把"准确率"从人工抽样认定升级成可复现读数**的路径，也是 H4 的正面解。
+
+### P1 边界与规模（ToB 场景必答题）
+
+| 项 | 做什么 | 判据 |
+|---|---|---|
+| P1-1 **权限下推**（**落点已存在，属照抄而非设计**） | 复用 ADR-0006/0007 的租户身份与服务端断言，把行级过滤条件注入生成的 SQL；敏感列（证件号/手机号）出脱敏投影。PG 检索层的插入点已核实：`clients/pgvector_client_manager.py:26,29-30` 的 `filter_clause` 形参**存在但所有调用方都不传**，`fulltext_search`（:37-54）**根本没有该形参需先加**；行级隔离的现成形状抄 `applications/agent_server/sql/schema_store.py:17-54`（`sql_ddl`/`sql_docs`/`sql_examples` 每张表都已带 `tenant_id` + `workspace_id`） | 越权问数返回空/拒答，且 SQL 文本里能看到下推条件；跨租户召回＝0 |
+| P1-2 **取值列的基数闸门（措辞已随 P0-9 改：不再问“灌不灌索引”，而问“开不开 `linkable`”）** | 按列基数与列类型决定该列是否允许被探针查询：枚举/城市/行业开，UUID/时间戳/手机号/长文本一律关；开着的列必须带 `LIMIT` 上限与探针超时；`distinct` 类扫描加超时保护 | 关列永不出现在候选里且**记录原因**；单列不再出现 `limit 100000` 级扫描；开列的探针 P95 在预算内 |
+| P1-3 **源分片与口径标注**（原“静默路由”已撤回） | 用户口径（2026-10-17）：**源是用户在问数时显式选定的**（现用 MySQL 与 Doris 两源）⇒ 不需要“数仓优先”这类猜测路由。仍必须做的三件事：① 元数据按 `datasource_id` 分片，**召回阶段就带源过滤**（不能等 EXPLAIN 报“表不存在”才发现串源）；② 返回体带口径标签（`数仓 T+1、已清洗` / `业务库、实时未清洗`）；③ 业务库侧强制只读账号 + 只读副本 + `MAX_EXECUTION_TIME` + 表白名单 | 选定 Doris 时，MySQL 的表不会进入候选；答案里能看出这个数字是哪个源、什么口径 |
+| P1-4 **方言分支**（业务库已确认 **MySQL 8.0+**，据此细化） | 见下方“两源能力矩阵”：谓词模板按源分支，`add_extra_context` 已注入 dialect 与 version（`dw_mysql_repository.py:19-23`）可直接作分支依据 | 同一条问法在两个源上都能命中；把 `MATCH_ANY` 发给 MySQL、把 `WITH PARSER ngram` 发给 Doris 都在**生成期**就被拦下，而不是运行时报错 |
+| P1-5 **与 BI 共享集群的负载隔离** | 问数是 LLM 生成的 ad-hoc SQL、BI 是固定已知查询，共用一个 Doris 集群 ⇒ 给问数单独 workload group：`max_concurrency` / `max_queue_size` / `queue_timeout` 限并发与排队，`max_cpu_percent` / `max_memory_percent`（4.0 统一命名；2.x 作 `cpu_hard_limit` / `memory_limit`）限资源，`GRANT USAGE_PRIV ON WORKLOAD GROUP` 绑到问数专用账号；会话侧再叠 `query_timeout` / `sql_select_limit` + EXPLAIN 代价阈值。⚠️ 官方明确：**排队参数只在单 FE 粒度生效、不感知 FE 个数**，实际并发≈`max_concurrency` × FE 数，配错等于没配。要完全隔离得用 Compute Group / 独立 BE（进程间隔离），Workload Group 只是进程内隔离 | 问数跑一条无 `WHERE` 的 4 亿行聚合时，DataEase 大屏不受影响；超限查询被排队或拒绝而非 OOM |
+| P1-6 **元数据的 datasource 维度** | 元数据表加 `datasource_id`，抽取 / 漂移检测 / 召回 / 指标模板全链路按源分支；`POST /api/query` 入参加源选择（Q17） | 选 Doris 时 MySQL 表不进候选；同一份 YAML 声明能描述两个源而不互相污染 |
+
+**P1-4 的两源能力矩阵（业务库 MySQL 8.0+ 为 2026-10-17 用户口径）**
+
+| 能力 | MySQL 8.0+ | Doris 4.0 | 对方案的影响 |
+|---|---|---|---|
+| CTE、窗口函数、`SUM(CASE WHEN ...)` 条件聚合 | ✔ | ✔ | §5.4 那条“强制一条 SQL”的写法**两源通用**，方言差异比预想小 |
+| 取值精确 / 前缀匹配 | `=`、`LIKE 'x%'`（需列上有索引才不走全表） | `=`、`IN`（非 key、非分区列仍可能扫该列全量） | 默认探针路线**在两源都能跑**，性能都要实测 |
+| 中文模糊匹配 | FULLTEXT `WITH PARSER ngram`；`ngram_token_size` **默认 2、非动态变量（改配置需重启，且改动后必须重建索引）**；短于 token size 的查询词命中不到 | `parser="chinese"`（3.1+ 支持自定义 analyzer） | ⚠️ 两者都是**服务端级配置**：内网托管实例改不动就直接退精确匹配。另注：ngram 是否支持 `IN BOOLEAN MODE`，两份资料结论相反 ⇒ **实测项，勿当结论** |
+| 归一化匹配（全角半角、去空格、大小写） | 8.0.13+ **函数索引 / 生成列 + 索引**；排序规则 `utf8mb4_0900_*_ci` 本身大小写不敏感 | 需在写入侧或视图侧预处理 | 取值“字面不匹配”有一类是**格式差异**而非词表差异，PG 别名层与源侧归一化各管一半 |
+| 验证索引到底有没有用 | **不可见索引**：`ALTER TABLE ... ALTER INDEX ... INVISIBLE` 低成本 A/B；`EXPLAIN ANALYZE`（8.0.18+）看真实行数与耗时 | 只能靠 `EXPLAIN` 谓词 + A/B 计时（§5.7 第 3 项） | MySQL 侧的验证比 Doris 干净，别用同一套验证方法照搬 |
+| 只读与资源护栏 | `MAX_EXECUTION_TIME`（**仅对只读 SELECT 生效**，正好匹配探针）、`sql_select_limit`、只读账号 + 复制账号 | `query_timeout`、workload group（P1-5） | 两源都要设，参数名不同 ⇒ 护栏配置也属于“按源分支”的一部分 |
+| 源专有、不可互发 | `WITH PARSER ngram`、`MATCH ... AGAINST` | `MATCH_ANY/ALL/PHRASE`、`score()`、`SHOW PARTITIONS` | 生成期按 dialect 白名单拦，别指望运行时报错兜底 |
+
+### P2 稳态运维（想到即可，不必先做）
+
+- **影子切换**：新 revision 灌到影子集合/别名，验证后原子切换，失败不影响线上（挡住"一次失败→线上一半新一半旧"）。
+- **双路径一致性**：同一问题走"指标直取"与走"生成 SQL"给出两个数时必须可比对，否则业务方会怀疑整个系统。
+- **成本护栏**：生成 SQL 强制 LIMIT、`statement_timeout`、只读账号 + 只读副本、EXPLAIN 之上加代价阈值。
+- **降级与拒答**：召回为空宁可不答；校正循环有上限与超时；模型不可用时退化到只走指标直取。
+
+## 5. 关键取舍（备选与代价）
+
+| 决策点 | 备选 | 代价 | 备注 |
+|---|---|---|---|
+| 元数据声明放哪 | A YAML 入 Git ／ B 存库 + 管理后台 ／ C 双向同步 | A 无 UI 就改不动、非技术同事参与不了；B 丢 diff/review/回滚；C 最贵且两套真源易漂移 | 选 A 就必须承认"口径评审靠 Git 流程"，并把 YAML lint/schema 校验做上（否则 H2 只解决一半） |
+| 静态/动态分界 | 语义人工写、类型与样本机器抽 | 机器抽的样本会随数据变，**样本本身也要有刷新频率** | 这条是本方案真正的承重设计，不是格式之争 |
+| 刷新触发 | 定时 diff ／ 数仓发布钩子 ／ 纯手动 | 定时=多一套 job 与告警；钩子=要数仓侧配合（跨团队）；纯手动=漂移靠人记得 | 低频变更场景下"手动 + 定时 diff 报警"是成本最低的组合，但**必须在文档里写明"手动"这件事本身** |
+| 向量存储 | 沿用 pgvector ／ 引入 Qdrant+ES | 引第三方引擎要付运维成本；且 ADR-0009 已记录 Milvus 现网稳定性账 | 本文默认**沿用 pgvector**，不动 ADR-0009 的悬置 |
+
+### 5.1 检索层选型（ES → PG 这条替换的准确边界）
+
+> **状态：备查手册。** 本节讨论的是“取值全文匹配落在 PG 还是 ES”，而默认路线已改为**取值不进任何副本索引**（P0-7 / P0-9 / §5.7 修订）。技术事实（PG 函数语义、扩展能力、`sparsevec` 订正）仍成立，保留作“Q10a 通过且实测证明探针撑不住”时的选型依据；**其中的路线结论已作废，以 §5.7 修订为准。**
+
+先纠三处容易写错的判断：
+
+- `plainto_tsquery` 是 **PostgreSQL** 的函数，不是 ES 的。PG 官方语义：裸词全部 AND（`'The Fat Rats'` → `'fat' & 'rat'`）。
+- `websearch_to_tsquery` 的裸词**也是 AND**，只有显式写 `or` 关键字才产生 `|`；不存在 `array_to_tsquery`（只有 `array_to_tsvector`，它拼的是 tsvector 不是查询）。要 OR 只能自己拼 tsquery 文本（逐 token 做 lexeme 转义后用 `|` 连）或把 token 拆成多个 `@@` 条件再 OR。
+- ES 的 `min_score=0.6` 本身不严谨：BM25 绝对分跨查询不可比，固定阈值对单词查询过松、多词查询过紧。正确做法是相对截断（top-k + 分差）或 rerank。
+
+当前 PG 实现是 `'simple'` 解析器 + `plainto_tsquery`（AND）+ `ts_rank`：**不分词、语义过刚、无 IDF 三项同时缺**（`ts_rank` 不计算 IDF，官方与 TigerData 发布公告均确认）。而"不分词"比"没有 BM25"严重得多。
+
+可选补口，按职责分（不是互斥选项）：
+
+| 补什么 | 工具 | 代价 |
+|---|---|---|
+| 只补分词（仍走原生 FTS 管线） | `zhparser`（基于 SCWS）／`pg_jieba` | 排序仍是 `ts_rank`，IDF 依旧缺 |
+| 分词 + 排序 + 索引一起换 | ParadeDB `pg_search`（Rust/pgrx + Tantivy，索引访问方法 `USING bm25`，v0.25.0 起改名推荐 `USING paradedb`、`bm25` 留作兼容别名；tokenizer 内置 `jieba` / `chinese_compatible` / `ngram` / `chinese_lindera`） | 要 `shared_preload_libraries = 'pgsearch'`（**库名无下划线，与扩展名 `pg_search` 不同**）+ 重启 + `CREATE EXTENSION`；内网/托管 PG 能否改此参数是前置门槛。⚠️ **许可 AGPL-3.0**（内网商用要过法务）；且其 bm25 访问方法与 `pg_textsearch`、`vchordbm25` **冲突** ⇒ 本表这两行是**互斥选项，不能同装** |
+| 要 true BM25 的另一实现 | TigerData（原 Timescale）`pg_textsearch`（PG 17/18） | **仍是 prerelease，官方明确不建议生产使用**；同样要 `shared_preload_libraries`；与上一行互斥 |
+| learned sparse 权重（BGE-M3 sparse / SPLADE） | pgvector `sparsevec`（0.7.0 起的**数据类型**，HNSW 有 `sparsevec_l2_ops` 等算子族）/ Qdrant sparse / Milvus `SPARSE_INVERTED_INDEX` | **pgvector 缺的不是索引，是引擎侧语料统计**：它是"带距离运算符的稀疏数组类型"，无倒排、无 DF/IDF、无 BM25，IDF 必须在写入前自己乘死 → 语料一变就全库重灌；索引还有硬门槛（每向量 ≤1,000 个非零元才能进 HNSW，存储上限 16,000） |
+| 零扩展兜底 | 应用层 jieba 分词 + `rank_bm25` 类库自算 | 语料要拉到应用侧，索引优势丧失，只适合小字典 |
+
+jieba 与 BM25 是流水线**相邻两环**：jieba 只分词（前缀词典 DAG + HMM 新词发现），不建索引、不打分。另有一处必须验证的冗余：课程实现查询侧先用 jieba 切词、再交给 ES `match`，而 ES `value` 字段配了 `search_analyzer = ik_max_word`——**ES 会把已切好的词再切一次**，jieba 与 IK 词表不一致时 token 粒度错位（「退款单」这类最容易）。
+
+**结论：这活的正确结构是四层降级，而不是选某个引擎。**
+
+1. **精确 / 前缀 + 别名词典**（主力）：枚举列取值有限（`city` 几十个、`status` 十几个），等值与别名表最准最便宜；高频口语说法（"退款单"→`退款`）应由别名解决，不该压给相关性打分。
+2. **模糊词匹配 + IDF**：说法不标准、错字、自由文本型取值（展会名、场馆名）——这才是 ES/IK、`pg_search`、或 learned sparse 的战场。
+3. **语义别名**：`销售额 → gmv`，走稠密向量。
+4. **兜底**：都不中就拒答或退指标直取，别让模型裸猜。
+
+每层记录命中来源。高基数列（UUID、时间戳、手机号）**一律不进全文索引**——这条比"哪个引擎相关性更好"更决定成败，见 P1-2。
+
+⚠️ **两处措辞订正（2026-10-17，已核 pgvector README master 与 CHANGELOG）**：本行上一版写过"pgvector 有 sparsevec 但没有稀疏索引、只能顺序扫描"——**错**。核实结果：`sparsevec` 是 pgvector **0.7.0（2024-04-29）加入的数据类型**（不是插件、不是字段修饰符），列定义 `embedding sparsevec(5)`，字面量格式 `{1:1,3:2}/5`；HNSW **支持**它（README 的 Supported types 明确列 `sparsevec`，并注明用 `sparsevec_l2_ops` 一类算子；IVFFlat 的示例未列该类型）。真正的限制是三条，与"有没有索引"无关：
+① 每向量 **≤1,000 个非零元**才可进 HNSW（存储侧上限 16,000）；
+② pgvector 只算距离，**不认识"词"**——没有倒排、没有实时 DF、没有 IDF/BM25，权重必须写入前算死；
+③ **服务端扩展版本本仓未固定**（只 pin 了 Python 客户端 `pgvector>=0.3`，compose/deploy 里搜不到 pgvector 镜像 tag），现网 PG 上 `sparsevec` 到底可不可用属未证项，见 Q7。
+2025/课程实现用的 Qdrant 原生支持稀疏向量，并有引擎侧动态 IDF（`modifier: "idf"`，源码注释原文 "weight modification, which will be applied to sparse vectors **at query time** … based on statistics of the collection"，`lib/segment/src/data_types/modifier.rs`），见 §5.2。
+
+### 5.2 检索链路两条不变量 + 零新依赖的升级路径（2026-10-17 追加）
+
+> **状态：两条不变量有效，末段的升级路径已作废。** 不变量一（分词职责唯一）在探针模式下照样约束——探针 SQL 只能有一套匹配语义（`LIKE` 前缀 / `MATCH_*` / FULLTEXT ngram，选一个写进契约）；不变量二（高基数不进模糊层）在探针模式下的落点就是 `linkable` 白名单。本节末尾“把取值召回迁 Qdrant、ES 退役”不再是默认答案。
+
+**不变量一：分词职责必须单一，禁止两套词表串联。** 用户明确判定课程实现「先用 jieba 切、再交给 ES 的 `ik_max_word` 切」是 **demo 方案，禁止采用**。它的实际缺陷有三层，一层比一层深：
+
+1. **词表不一致**：索引用 IK（`ik_max_word`，最细粒度），查询关键词来自 `jieba.analyse.extract_tags`（`app/agent/nodes/extract_keywords.py:31`）。两套词典切出来的 token 粒度不同，命中全靠运气；复合取值（「世博馆」「退款单」）被 IK 再切后，`min_score` 的行为不可预测。
+2. **职责重叠**：ES 本来就能分词，jieba 这一步对检索没有任何不可替代的作用——它的存在只是把"关键词抽取"和"分词"两件事混成一件。
+3. **N 次串行查询**：`recall_value` 对每个关键词单独 `await value_es_repository.search(keyword)`（`app/agent/nodes/recall_value.py` 里的 `for keyword in keywords`），关键词数量直接线性放大时延，且无并发、无批量。
+
+⇒ 合规做法只有两类，且必须选一类写进契约：**要么**引擎侧一套分词到底（Qdrant 稀疏 tokenizer / ES+IK / pg_search 的 jieba tokenizer，查询传原句），**要么**应用层一套分词到底（引擎侧用 `keyword`/`raw` 不再切）。混用即违约。
+
+**不变量二：高基数取值不进模糊层。** UUID/时间戳/手机号/长文本型字段直接跳过全文与稀疏索引（P1-2 的基数闸门），否则 §5.1 的四层降级会被噪声淹没。
+
+**零新依赖的升级路径（这条修正 §5.1 的结论）：** Qdrant 自 1.7 起原生支持稀疏向量（必须 named），v1.10 起 dense+sparse 同 collection + RRF 融合；更关键的是 sparse 索引可配 **`modifier: "idf"`，由引擎按实时集合统计动态维护 IDF**——新增/删除文档无需重索引。这是 ES/OpenSearch **没有**的等价能力（那边要把 IDF 在索引时乘进向量、语料一变就全量重算）。而课程实现的 Qdrant collection 只声明了 `VectorParams(size, COSINE)` 的稠密向量（`column_qdrant_repository.py:16-20`），**稀疏这条路一直摆在手里没用**。⚠️ 边界：Qdrant **不做服务端分词**，稀疏向量必须由调用方算好送进来（FastEmbed 的 BM25 / miniCOIL，或模型侧 BGE-M3 sparse 头）——"`modifier: idf` 让 IDF 不过期"说的是**引擎补的那一跳**，不是"引擎帮你出向量"。
+
+**（以下为备选路线结论，已非默认；默认见 P0-9 与 §5.7 修订）**⇒ 所以「补 IDF」的最小代价路径不是装 PG 扩展，而是：**在既有 Qdrant 上加 named sparse 向量 + `Modifier.IDF`，把取值召回从 ES 迁过去，ES 整个组件可以退役**；稀疏权重来源二选一——**词法侧**自己出 token 权重（分词器任选一个，但只能选一个：IK、jieba、或 `pg_search` 的 jieba tokenizer，见不变量一）或**模型侧** BGE-M3 sparse。后者词表偏英文多语言，对中文新专名命中不如字面分词。若要"引擎自带分词 + 现算 BM25"这条路，本仓唯一现成载体是 **Milvus 2.5+ 的 full-text search（BM25 function + analyzer）**——注意 knowledge-service 现在用的是 BGE-M3 sparse + IP（`milvus_utils.py:138-169`），**并没有走 Milvus 的原生分词**。因此 §5.1 的第 1 层（精确/别名）**仍然必须存在**。
+
+**同仓已有两条路的对照（可直接当证据）**：`agent_server/rag/store.py:1,17,142` = 应用侧 `rank_bm25.BM25Okapi`，查询时把语料拉进内存建索引；缓存签名是 `(count, max_id, tenant_id, workspace_id)`（`store.py:125`，**订正**：上一版只写"(行数, 最大 id)"，漏了租户与工作区两维，照那个描述去复刻会做出跨租户串缓存），新鲜度**主要不靠签名**、而是写入路径显式调 `_invalidate_bm25_cache()`（`:32` 定义，`:82` insert 后、`:98` delete 后调用）；上限 `_BM25_LOAD_LIMIT = 10000`（`:24`，在 `:135` 作 `LIMIT`）——**统计永远新鲜，代价是语料出库、且被 10,000 行截断**（超限静默丢弃，不报错）；`knowledge-service` 的 Milvus 稀疏路 = 权重在写入前由模型算死——**可 ANN、可扩容，代价是语料一变需重灌**。这两条正好是 §5.2 表格的左右两列，选型时按数据量与变更频率判，不要凭"哪个先进"判。
+
+### 5.3 检索层选型的判定策略（2026-10-17 追加，回答"按数据量与变更频率判"到底怎么判）
+
+> **状态：判据有效，默认结论已被 §5.7 修订改写一次。** 三个轴、变更动作分诊表、O1-O3 观测、反模式清单全部适用（观测项在默认路线下主要盯探针命中率与延迟）；但“默认路线”表里凡写“建副本索引”的格子，默认答案现在是探针 + 版本缓存。
+
+**轴 1：候选集规模 N——按"这一层要匹配的条目数"计，不是按库行数**
+
+| 层 | N 的口径 | 实测取数方式 |
+|---|---|---|
+| L1 别名词典 | 词条数 | 后台词典表 `count(*)` |
+| L2 取值字典 | Σ（通过基数闸门的列的 distinct 值） | 逐列 `select count(distinct col)` |
+| L3 schema 层 | 表数 + 字段数 + 指标数 | `information_schema` / YAML 目录 `count` |
+
+⚠️ **禁跨项目挪数**：`Resume/master.md` 的 ~1019 张表是**找客易数仓（mingyang-warehouse）**口径；问数侧的表/字段量级本仓未登记，必须实测后填（P0-1 的元数据扫描顺带就能出这个数）。
+
+**轴 2：变更类型——三种变更的代价完全不同，混为一谈是选型出错的根因**
+
+| 变更 | 影响什么 | 正确反应 | 是否要求"引擎现算统计" |
+|---|---|---|---|
+| (a) 取值增删（value churn） | DF / IDF 统计 | 入索引即可 | **量大时是** |
+| (b) 别名 / 口径修改 | L1 词典 | 热更新，秒级 | 否 |
+| (c) schema drift（表 / 字段 / 指标增删改） | L3 + 元数据抽取 | **走重建**（P0-1..P0-6） | 否 |
+
+推论（最容易搞混的一条）：**IDF 陈旧只在 (a) 上致命**。(c) 再频繁也不构成"必须动态 IDF"的理由——drift 本来就要重建。反过来，**只有 (a)、且没有重灌作业的系统，才是"索引时把权重写死"的禁区**。
+
+**轴 3：查询预算**（问数是 SSE 流式，用户在前台等首 token）
+
+**判定规则（一句话可背）**：变更**走不走重建** → 决定权重能不能写死；语料**出不出得了库** → 决定能不能用应用侧 BM25；两者都不允许 → 只能用引擎现算统计（ES 原生 BM25 / Milvus 2.5 BM25 function / Qdrant sparse + `modifier:"idf"`）。
+
+**两个必须先实测的数（不实测就没有策略）**
+
+- **M1 全库重灌耗时** = N ÷ batch 吞吐，预发跑一次记录。**若 > 夜间窗口（建议默认 1 h）→ 禁止选"索引时把 IDF 乘死"的路线**。
+- **M2 应用侧 BM25 建索引 P95**（直接压 `agent_server/rag/store.py` 那套 signature 缓存）。**若 > 首 token 预算（建议默认 800 ms）→ 禁止应用侧路线**，回到引擎。
+
+**四层落位的默认选择（阈值是建议默认值，不是实测结论）**
+
+| 层 | 默认路线 | 判据 |
+|---|---|---|
+| L1 精确 / 别名 | MySQL + 进程内字典；前缀走 `text_pattern_ops` 或 `LIKE 'x%'` | 词条 ≤2,000 时**别建向量/倒排**；等值与别名最准最便宜 |
+| L2 取值模糊 | **默认＝只读探针（P0-9），不建副本索引**。仅当实测证明探针撑不住延迟、且 Q10a 通过，才在备选里选：Doris 自有派生小表 ＞ Qdrant sparse + `modifier:"idf"` ＞ Milvus v2.5.10 BM25 function（本仓已在跑，见 §5.2 对照） | 三轴判据仍成立，但默认答案已变成“既不走重建、也不出库” |
+| L2 基数闸门 | 单列 distinct **>5,000** 降级为精确 + 前缀；**>50,000** 禁模糊 | value linking 的语义是"选一个存在的取值"，不是"找相似文本"；高基数进模糊层会把噪声灌进 SQL 的 `WHERE` |
+| L3 字段 / 指标语义 | 稠密向量 + 幂等全量重建（P0-2） | 变更走 (c) 重建 → 权重写死可接受；万级重灌是分钟级 |
+| L4 兜底 | 指标直取 / 拒答 | 前三层都不中就别让模型裸猜 |
+
+**陈旧性必须可观测（否则策略不可执行，且退化是静默的）**
+
+- **O1 新数据曝光比** = 近 7 天入库条目在 top-5 的占比 ÷ 其在集合中的占比。**< 0.5 判陈旧**——这条专门抓 §5.2 那个"新取值挤不进 top_k"的形状。
+- **O2 df 漂移**：对高频查询词记 df 周环比；单周 **>30%** 且该词出现在 >10% 查询里 → 触发重灌或确认动态 IDF 生效。
+- **O3 引擎一致性抽查**：同批 query 双跑（ES 与目标引擎）比 top-5 交集率；**<0.6 时先查分词器差异**，别急着调权重。
+
+**反模式（见到即否，不进入讨论）**
+
+1. 两套词表串联（不变量一）。
+2. 给 L1 词典上 ANN / 向量。
+3. 高基数列进模糊层（P1-2）。
+4. **在无重灌作业的前提下把 IDF 乘死**——最容易上线后静默坏掉的形状。
+5. 用 BM25 绝对分数设跨查询固定阈值：`value_es_repository.py:35` 的默认参数 `score_threshold=0.6` 在 `:42` 原样作为 `min_score` 传给 ES，就是这种误用（不同 query 分数不同尺度）。**订正两处**：上一版写 `:14`，而 `:14` 是 `ik_max_word` 的 mapping 行；参数名是 `score_threshold` 不是 `min_score`。⚠️ 同一个 0.6 也出现在 Qdrant 路（`column_qdrant_repository.py:31`、`metric_qdrant_repository.py:31`），但那里是 cosine 相似度、跨查询可比 ⇒ **同一数字在两个引擎上含义相反，只有 ES 那处算误用**，别一并否定掉。
+
+**环境前提（2026-10-17 核实，决定哪些格子真的可选）**
+
+- `applications/knowledge-service/docker-compose.yml:117` = `milvusdb/milvus:v2.5.10` → "引擎自分词 + 现算 BM25"在本仓**零新增组件**可用；但 knowledge-service 当前走 BGE-M3 sparse 头（`milvus_utils.py:138-169`），**未启用原生 analyzer**。
+- 课程只 pin 了 `qdrant-client>=1.16.2`（`data-agent/pyproject.toml:20`），`conf/app_config.yaml:26-29` 无 server 版本 → sparse 需 server **≥1.7**，属未证项。
+- 课程 ES 客户端 `>=8,<9`（`pyproject.toml:9`），而 2025 现网是公司既有 **7.x 定制版**（master §2.7）→ **课程环境 ≠ 现网**，别把课程结论当现网结论。
+- nl2sql 侧 PG 服务端 pgvector 版本未 pin（Q7）；`pg_textsearch` 明确只支 PG 17/18 且仍 prerelease，`pg_search` 要改 `shared_preload_libraries` + 重启 → 内网 / 托管实例上大概率不可行。
+
+**轴 2 细化：变更动作分诊表（2026-10-17 追加，回答"value churn 到底指什么"）**
+
+轴 2 那张表把 (a) 写成了"取值增删"，容易被读成"改了某个值"。这两件事在检索侧的处置完全不同，必须拆开：
+
+| 动作 | 例子 | 实际改了什么 | 检索侧必须做 | 与 DF/IDF 有关吗 |
+|---|---|---|---|---|
+| **增** | 每届新展会名入库、新企业名每日同步 | N↑，若干词 df↑ | append 即可 | **有关**——这是唯一需要"引擎现算统计"的一类 |
+| **删** | 展会取消、取值停用 | N↓，df↓ | 显式 delete by key | 有关，且**必须真删**，否则幽灵值 |
+| **改名** | 崇明县→崇明区（2016 撤县设区）、企业更名 | 同一实体的文本变了 | **delete 旧点 + insert 新点**，key 要稳定可寻址 | **无关**——这是删除语义问题，不是统计问题 |
+| **改码** | adcode / 枚举编码规则调整 | L1 的"编码↔名称"映射 | 更新映射表，热生效 | **无关** |
+| **改口径/别名** | "退款单"→"退款申请单" | 词典 | 词典热更新 | 无关 |
+| **指标语义变** | 销售额 → GMV 的映射调整 | 别名词典 / L3 稠密向量 | 重建该条 dense 向量 | 无关 |
+
+由此得两条硬结论：
+
+1. **低基数枚举列本来就不该谈 IDF**。北京 16 区这种集合里"每个词的 df 都接近 1、N=16"，df 分布均匀 ⇒ IDF 无区分度；用户说的"朝阳"是**精确名**，走 L1。IDF 起作用的前提是**集合大 + 词频分布不均**（自由文本型取值：展会名、场馆名、企业名、行业标签）。
+2. **改名要保旧名，不能抹掉**。数仓历史事实表里存的可能是旧名/旧码，所以旧文本不能从索引里消失——正确形状是**旧名降级为 alias，指向新编码，并打 deprecated 标记**（否则用户问"崇明县 2019 年的展会"直接失效）。
+
+**课程实现里这条链是断的（实测代码证据，对应 P0-2 与 §6 验收第 1 条）**
+
+- `app/services/meta_knowledge_service.py:145-149`：ES 文档 id = **`f"{column_info.id}.{value}"`，身份由值文本派生**。⇒ 改名必然是新文档，**结构上不存在"原地更新"**；而全仓检索层**没有任何 delete / delete_by_query 路径**（`app/repositories/es/value_es_repository.py` 只有 `ensure_index` / `index` / `search`）⇒ 旧值**永久残留并可被召回**，召回后生成的 `WHERE area='崇明县'` 在数仓里已不存在 → 查询返回空，且看起来像"模型生成的 SQL 有问题"，实际是索引脏。
+- 同文件 `:85 / :92 / :99 / :192 / :199 / :206`：Qdrant point id = **`uuid.uuid4()`**，而 `:119 / :222` 走 `upsert` ⇒ id 每次全新，**覆盖永不发生，重跑一次就追加一整套副本**（字段/指标候选里出现重复，直接挤占 top_k）。这就是 §6 第 1 条"同一输入重跑两次向量点数不变"当前必然不通过的根因。
+- 附带风险：id 内嵌值文本且以 `.` 连接，**值本身含 `.`**（版本号、"金额(元).含税"类）时身份可歧义。
+
+**修法（仅副本索引路线适用；默认路线取值不进索引，见 §5.7 修订）**：id 改由**稳定业务键**派生（`md5(f"{column_id}:{value}")` 或直接用维表的 code），删除走**按列覆盖**——ES `delete_by_query(term column_id=X)` + 重新 index 该列，Qdrant `delete(filter=MatchValue(column_id=X))` + upsert。这样 (a) 增删靠引擎现算统计自动新鲜，改名/停用有确定的删除语义，重建代价与单列基数成正比而非全库。
+
+### 5.4 取值匹配的正确位置：下推到查询引擎，而不是养一份独立副本（2026-10-17 追加）
+
+**这一节推翻 §5.1 / §5.2 的隐含前提。** 那两节都在争“取值索引放 ES、PG 还是 Qdrant”，即默认**取值字典必须是一份外部副本**。但取值本来就住在数仓同步出来的 Doris 表里——副本索引带来的一整族问题（幂等、幽灵值、陈旧统计、基数爆炸、`sync` 开关漏配）是**复制的代价**，不是问题本身。
+
+**Doris 能力矩阵（官方 docs 已核，版本门是关键）**
+
+| 能力 | 版本门 | 对本项目的意义 |
+|---|---|---|
+| 倒排索引 `INDEX ... USING INVERTED` | 2.x 起广泛可用 | 建在取值列上，取值匹配不再需要外部索引 |
+| `MATCH_ANY / MATCH_ALL / MATCH_PHRASE(_PREFIX/_EDGE) / MATCH_REGEXP` | 随倒排索引 | 存在性探针、前缀联想、短语匹配，一条 SQL 搞定 |
+| 中文与自定义分词 | `parser`（索引属性，取值 `none`/`english`/`chinese`/`unicode`）随倒排索引；自定义 `analyzer`（tokenizer `standard`/`chinese_compatible`/`icu`/`ngram`/`edge_ngram`/`keyword` + `token_filter`）为 **3.1+** | ⚠️ 上一版把 `parser` 与 `analyzer` 的取值列在同一格里，读起来像同一项参数的不同写法——**它们是两套机制**（前者是索引属性枚举，后者是 3.1+ 的自定义分析器）。中文取值分词质量仍须实测，别照搬课程侧 IK 的效果假设 |
+| BM25 相关性打分（`score()` / `SEARCH()` DSL） | **4.0+** | **只有到 4.0，Doris 才能承担“排 top-k 相关取值”**；否则它只做谓词过滤，排序要交给外部引擎或 LLM |
+
+⇒ ~~Q8 决定架构分叉~~（**已由 §5.7 修订取代**）：版本只决定“有索引时能做到多完整”。默认路线**压根不加索引**（问数对源只读），所以真正的分叉变量是 **Q10a/Q10b（权限）** 与 **探针实测是否撑得住延迟预算**，不是 Doris 版本。
+
+**“下推”确实省掉一半同步问题，但不是全部（本段已按 §5.7 核实的 `BUILD INDEX` 事实更正）**：Doris 内建倒排索引对**建好之后的新写入**随数据自然构建，因此不需要一条独立的索引同步链路，value churn 与陈旧统计这两项确实消失。但两点必须留着：① **存量数据不会自动获得索引**——`ADD INDEX` 只写定义，必须显式 `BUILD INDEX`（§5.7）；所以本文早先那句“不存在独立于数据的索引生命周期”**是错的**，准确表述是“新数据无生命周期、存量有一次性回填”。② 幽灵值与改名仍取决于**表模型**：明细表按分区整批替换时旧值随分区消失，派生字典表若走追加就不消失。另外的代价项：DDL 权限（Q10a/b）与高基数列的查询代价控制（P1-2）。
+
+**但 L3 不能下推**：schema linking 要的是语义泛化（“销售额”→`gmv`），不是文本匹配，仍是 dense 向量。收敛后的形态是 **一个 OLAP 引擎做取值 + 一个向量库做语义**，而不是三个引擎各存一份文本。
+
+**值字面不匹配的检测：五道闸（回答“链路里怎么检测出来”）**
+
+| 闸 | 位置 | 机制 | 失败时行为 |
+|---|---|---|---|
+| ① 确定性绑定 | 生成前 | 召回到的取值不再塞进列的 `examples`（课程做法 `merge_retrieved_info.py:38-46`），改为结构化 `value_bindings` 传入或由代码注入参数 | 模型没有“自由写字符串”的机会 |
+| ② 字面量校验 | 生成后、执行前 | 用 **sqlglot** 解析 AST，抽 `(列, 字符串常量)` 逐列回字典 / Doris 做存在性检查 | 不命中即拦截 → 走别名解析或直接拒答，**不允许执行** |
+| ③ 零结果分诊 | 执行后 | 空结果或全 0 且含维度过滤 → 探针 `select 1 from t where city match_any '廊坊 廊坊市' limit 1`，区分**“值不存在” vs “存在但计数 0”** | 前者答“未识别的取值”，后者才可答 0 |
+| ④ 返回体语义 | 服务层 | SSE `result` 增 `matched_values` / `unmatched_terms` / `dict_hit`，前端显示“未识别地点：廊坊”而非“0 个” | 把静默错答变成可见拒答 |
+| ⑤ 离线 + 线上闭环 | trace | golden 专放字面变体题（北京/北京市/京、廊坊/廊坊市）；线上每个未命中字面量落 trace，日报 top N | 未命中清单直接成为别名词典种子；empty-result rate 分层读数把“准确率”从人工认定升级为可复现（P0-4） |
+
+**附带一条类型陷阱**：编码列（int / bigint）被写成字符串 `'110100'` 触发隐式转换，MySQL / Doris 上**分区裁剪与索引失效**，表现是偶发慢查询而非错答。列类型元数据已有（`dw_mysql_repository.py:9-11` 的 `show columns`），生成与校验时按类型决定加引号或 cast。
+
+**一条 SQL 仍然必要，但换理由**：不是因为快照会漂（见 §2 数据链路），而是因为①一次执行 = 一次 EXPLAIN + 一次代价控制；②差值在库里算完，**不让 LLM 做算术**；③两个切片的口径（分区、状态过滤）写在同一语句里，可被同一条校验规则检查；④两次执行的延迟与成本翻倍，`< 500 ms` 更撑不住。可移植写法（Doris / MySQL / Hive 通用）：
+
+```sql
+select sum(case when city = '廊坊' then 1 else 0 end) as lf_cnt,
+       sum(case when city = '北京' then 1 else 0 end) as bj_cnt,
+       sum(case when city = '北京' then 1 else 0 end)
+     - sum(case when city = '廊坊' then 1 else 0 end) as diff
+from   dwd_exhibition
+where  dt = '${latest_partition}' and status in ('confirmed','ended');
+```
+
+### 5.5 组件收敛：Doris 已确认 4.0，Qdrant / ES 谁退役（2026-10-17 定档）
+
+先把"替换"拆开——**Doris 4.0 能承担三件事，但只有一件是它现在就该接的**：
+
+| 检索职责 | Doris 4.0 能力 | 已核实的约束 | 判定 |
+|---|---|---|---|
+| L2 取值匹配（数据在 Doris） | `USING INVERTED` + `MATCH_ANY/ALL/PHRASE…` + `score()` BM25（4.0+） | 要 DDL 权限（Q10a/b），存量还须 `BUILD INDEX`；中文 `parser` / 自定义分词 3.1+，效果须实测 | **能力上该接，但默认不接**（问数对源只读，走 P0-9 探针）；ES 退役与否取决于 Q10a 与实测，不取决于版本 |
+| L3 元数据语义（dense） | ANN 索引 4.0 起（Faiss 实现，`hnsw`；4.1 增 `ivf` / `ivf_on_disk`），`l2_distance_approximate()` | 表模型**只能 `DUPLICATE KEY`**；向量列 `ARRAY<FLOAT> NOT NULL` 且维度须等于索引 `dim`；`metric_type` 仅 `l2_distance` / `inner_product`（**余弦要先归一化**） | **可接，但属运维取舍**（Q13） |
+| L2 取值匹配（数据在 MySQL 业务库） | ✗ 数据不在 Doris 里 | — | **接不了** ⇒ 这才是外部索引的唯一正当理由 |
+
+⇒ **统一判据（比"哪个引擎先进"好用）：要匹配的东西在不在某个查询引擎里？在，就下推；不在，才允许它存在外部索引。**
+
+**回应"保留 Qdrant，因为我们还有业务库"：方向对，理由要换一个。** 需要保留的不是"Qdrant 这个向量库"，而是"**一个不属于 Doris 的检索位置**"。而业务库取值若是低基数枚举，这个需求由 **MySQL 自己**（`=` / `LIKE 'x%'` + 前缀索引，必要时 FULLTEXT `ngram`）就满足了，外部索引仍然不需要。所以选甲还是乙取决于 **Q11（业务库需模糊匹配的列的基数与文本长度实况）**，不取决于"我们有多个源"——**多源本身不构成保留向量库的理由：元数据（万级行）可以复制到任何引擎，业务数据不必**。
+
+**三种终态（按 Q11 / Q13 定档）**
+
+| 终态 | 组成 | 适用条件 | 代价 |
+|---|---|---|---|
+| **甲 单引擎** | Doris（取值倒排 + BM25 + 元数据 ANN）+ MySQL 只做元数据 CRUD 与低基数精确匹配 | 业务库需模糊匹配的列都是低基数 | 问数的检索可用性绑在 BI 集群；元数据"改一条"变 append + revision 裁剪 |
+| **乙 一内一外** | 甲去掉元数据 ANN，加 Qdrant（dense 元数据 + **只服务非 Doris 源**的 sparse + `modifier:"idf"`） | 业务库确有自由文本型取值，或不愿把元数据检索绑到 BI 集群 | 3 个引擎；**边界写死：Qdrant 不存 Doris 侧数据的任何副本** |
+| **丙 现状式** | ES + Qdrant + pgvector 并存 | — | 就是 §5.4 批判的形状：三个索引族各自有同步问题，pgvector 那条连分词器都没有 |
+
+**「版本支持 ≠ 生产可用」——刚从 2.x 升到 4.0，`score()` 与 ANN 都是本版新引入，必须先实测**
+
+- **T1 索引可见延迟与存量回填**：灌完一批新分区后，`MATCH_ANY` / `score()` 多久能查到？原措辞是"验证 §5.4 那条论断"——**该论断已按 §5.7 的 `BUILD INDEX` 事实撤回**，所以 T1 现在只测两件事：新分区数据的索引可见时延；一次性存量回填 `BUILD INDEX` 的耗时与对集群的冲击。
+- **T2 排序质量对照**：同批取值查询，Doris BM25 与现网 ES 的 top-5 交集率；< 0.6 先查 `parser` 分词设置，别调权重（§5.3 O3）。
+- **T3 ANN 语义核对**：元数据灌进 Doris ANN 后与 Qdrant COSINE 的结果交集率。Doris 无 cosine metric，**不归一化直接用 `inner_product` 会静默改变排序**。
+- 配套工程点：ANN 仅支持 `DUPLICATE KEY` ⇒ 元数据更新天然是"追加新版本"，于是 **revision 列 + 查询裁剪成为前置条件**——而它与 P0-4（trace 要记"所用元数据 revision"）、P2（影子切换）共用同一套机制，这正是甲方案划算的地方。
+
+**定档修正（同日，用户补“Doris 供 DataEase BI、问数只读消费”口径后）**
+
+- **甲方案基本出局**：问数不拥有 Doris 的表，把问数自己的元数据与向量表建进 BI 生产集群，既越界（要跨团队 DDL），又把 OLTP 形状的小更新塞进为 BI 设计的 OLAP 集群。**乙方案成为默认终态**：元数据语义层留在自己的存储（PG + pgvector 或 Qdrant，二选一，别两个都留），Doris 只承担它本该承担的——**被查询的数据 + 取值匹配的数据源**。
+- **上表第三行判定不变、第一行判定加权限前提**：取值匹配下推在无 DDL 权限时仍成立大半（低基数枚举不需要索引），自由文本取值那半段是否下推，等 Q10。
+- **新增必做项 P1-5（负载隔离），见 §4。**
+
+### 5.6 多源显式选定后的各层落位（2026-10-17，用户确认：元数据留 PG；源为 MySQL / Doris 二选一）
+
+终态定为 **乙-PG 变体**：PG 存元数据与 dense 语义索引，Doris / MySQL 各自承担自己那份取值匹配。落位如下——
+
+| 层 | 落在哪 | 相对现状要动的地方 |
+|---|---|---|
+| L3 字段 / 指标语义（dense） | **PG + pgvector**（不动，范围缩小） | 召回必须带 `datasource_id` 过滤；别名精确匹配优先于向量 |
+| L1 精确 / 别名词典 | PG 元数据库 | 词典按源分片；改名保留旧名 alias + deprecated（§5.3） |
+| **L2 取值匹配** | **下推到该取值所在的源，且默认只读**：Doris 用 `=` / `IN`（有索引才 `MATCH_*`），MySQL 用 `=` / `LIKE 'x%'` 必要时 FULLTEXT `ngram`；探针结果按 revision 缓存（§5.7 修订） | ⚠️ **平台侧 `repositories/pgvector/value_repository.py:18-28` 那份取值副本要退役**——它现在做“全文 + 向量补位”，而取值本来住在被问的源里，复制进 PG 就是 §5.4 批判的形状换了个引擎重演 |
+| 元数据抽取 / 漂移检测 | 按源分支两套 SQL | MySQL：`information_schema.columns`；Doris 亦兼容该视图，但**分区元数据要 `SHOW PARTITIONS` / `partitions_meta`**，不能同一套 SQL 跑两源 |
+| SQL 生成与执行 | 按选定源的方言（`db_info` 已有注入机制，见 P1-4） | 平台侧请求体尚无 `datasource_id`（Q17），是 schema 级前置项 |
+
+**这条落位顺带消解了 §5.1 整节的痛点。** 那一节花大篇幅讨论“PG 没有中文分词器、`ts_rank` 没有 IDF、要不要装 `zhparser` / `pg_search`”——那些前提都是**用 PG 承担取值全文匹配**。取值层一旦下推到源，PG 只剩字段名 / 指标名 / 别名这类**短文本、低基数、主要靠精确与语义**的召回，中文全文分词与 BM25 打分对它根本不是瓶颈。⇒ **回到最初那个问题“ES 能不能用 PG 替代”：正确答案是“两条替代路线都不用选，因为那一层被拆掉了”**——问题消失，而不是被解决。
+
+**归属边界（进 §7）**：“支持选择不同数据源问数”属 **2025 内网系统（SQLBot 深度改造，其 `apps/datasource/` 即多源模块）** 的能力；平台侧 `nl2sql-service` 当前无 datasource 维度。两者不得混述。
+
+### 5.7 “给 Doris 的取值列加索引 DDL”到底指什么（Q10 拆解 + 可执行清单）
+
+**它是一句建表/改表 SQL，不是一项运维动作。** Doris 的倒排索引是**表定义的一部分**（列级索引对象），写在 DDL 里：
+
+```sql
+-- 建表时声明
+CREATE TABLE nl2sql_value_dict (
+    datasource_id  VARCHAR(64)  NOT NULL,
+    column_id      VARCHAR(256) NOT NULL,
+    value          STRING       NOT NULL,
+    revision       BIGINT       NOT NULL,
+    INDEX idx_value (value)   USING INVERTED PROPERTIES ("parser" = "chinese", "support_phrase" = "true"),
+    INDEX idx_col   (column_id) USING INVERTED                       -- 不分词，等值过滤
+) ENGINE = OLAP
+DUPLICATE KEY (datasource_id, column_id)
+DISTRIBUTED BY HASH (column_id) BUCKETS 8;
+
+-- 已有表追加（两条语法皆可）
+ALTER TABLE t ADD INDEX idx_value (value) USING INVERTED PROPERTIES ("parser" = "chinese");
+CREATE INDEX idx_value ON t (value) USING INVERTED PROPERTIES ("parser" = "chinese");
+```
+
+⚠️ **最容易踩的坑**：`ADD INDEX` / `CREATE INDEX` **只写索引定义**，此后**新写入**的数据才带索引；**存量数据必须显式触发**：
+
+```sql
+BUILD INDEX idx_value ON t;   -- 默认全表所有分区，可指定分区
+SHOW BUILD INDEX;             -- 看进度
+```
+
+没跑 `BUILD INDEX` 就下结论“索引没用”，是最常见的一次误判。删索引同样异步，官方明确警告删除会降低查询性能——共享集群上属需报备的回滚操作。
+
+**三条路线（Q10a / Q10b 的答案决定选哪条）**
+
+| 路线 | 做法 | 需要的权限 | 判定 |
+|---|---|---|---|
+| **一 派生取值字典小表**（推荐） | 在问数自己的 Doris 库里建 `nl2sql_value_dict`，行数 = Σ distinct 取值（万~几十万，**不是 4 亿**），同步任务后 `INSERT OVERWRITE` 整表替换或小分区 + `ALTER TABLE REPLACE PARTITION` 原子切换 | 只需 Q10a，**不求 BI 团队** | “副本”在这里是可接受的：它是**派生聚合表**，每次全量覆盖 ⇒ §5.3 的幂等 / 幽灵值 / 陈旧统计三个问题**结构性不存在** |
+| **二 改 BI 生产表加索引** | `ALTER TABLE ADD INDEX` + `BUILD INDEX` 跑存量 | Q10b，且存量构建吃集群 IO/CPU，可能影响大屏 | 除非问数就是这些表的建设方，否则**不选** |
+| **三 不加索引** | 取值只走精确 / 别名，模糊匹配退回外部索引 | 无 | ES 保留，成本继续付 |
+
+**修订（同日，用户提出“问数对源只读，不改数据源”原则后）**：上面的路线一不该当默认。采纳用户原则后重排优先级：
+
+- **默认＝只读探针**：`value linking` 不发源于“预建的取值索引”，而是向候选维度列（YAML 里逐列显式声明 `linkable: true`，默认关）向**该源**发一次参数化查询（MySQL：`=?` / `LIKE 'x%' LIMIT k`；Doris：`= / IN /` 有界扫描，有索引才用 `MATCH_*`）。
+- **配套必须有的一条：跟随数据版本的缓存。** 数仓→Doris 是 T+1 批量 ⇒ 取值集合在同一个分区版本内**根本不会变** ⇒ 探针结果可按 `revision` / 最新分区号做键缓存：版本不变则永久有效，版本一变即失效。**这不是“定时刷新”，是“跟随数据版本”**——同步语义从“我要不要重建索引”降为“缓存失效条件”，复杂度大降，且天然按源隔离、零副本、无陈旧统计、无幽灵值。
+- 代价要说清：每次问数可能多打一次源 ⇒ 必须有候选列白名单、`LIMIT` 上限、探针超时，并与 P1-5 的 workload group 排队联动。
+- **索引 DDL（路线一/二）保留为性能债的备选**：只有当实测证明“探针在有界扫描下撑不住延迟预算”时才申请，申请的是**问数自有库里的派生小表**，不改 BI 生产表。
+
+**“取值”里混着两种东西，归属相反——这是本节最重要的一条判据**
+
+| 种类 | 来源 | 归属 | 用法 |
+|---|---|---|---|
+| **定义出来的**（码表：行业分类、展会等级、行政区划 adcode） | 人工维护的业务字典 | **元数据 ⇒ 进问数 PG**，带别名、旧名 alias、deprecated 标记 | 名称→编码的**解析**在 PG 完成，生成的 SQL 注入的是编码 |
+| **distinct 出来的**（展会名、场馆名、自由文本取值） | 从数据本身聚合 | **是数据不是元数据 ⇒ 不复制**，在源上做匹配 | 只读探针 + 版本缓存 |
+
+⇒ 这条二分同时解释了为什么“把别的数据源的元数据同步进 PG”是对的：**同步的应该是 schema、指标口径、码表，而不是 distinct 结果**。后者一旦进 PG 就变成一份要维护同步/幂等/删除/统计新鲜度的副本，也正是本文从 §5.3 起一路在拆的那个形状。
+
+**parser 怎么选（已核）**
+
+| parser | 行为 | 用于 |
+|---|---|---|
+| 默认 / `none` | 不分词，整体作为一个词 | 编码、枚举、标识符；**不计算 BM25 打分**（只支持精确匹配） |
+| `chinese` | 中文分词，性能低于 `english`；有 `parser_mode`（`fine_grained` 等） | 展会名、场馆名等中文取值——**要用 `score()` 排序必须是分词型** |
+| `english` | 按空格与标点、不分大小写 | 英文专名（HOTELEX 这类） |
+| `unicode` | 多语言混合，**中文按字符切**，能处理邮箱前后缀 / IP / 字母数字混合 | 中英混排、编码与文本混在同一列 |
+
+配套两个属性：`support_phrase="true"` 才支持 `MATCH_PHRASE`；`omit_term_freq_and_position="true"` 省空间但**放弃短语匹配**——取值字典文本短，这一项通常可以开。
+
+**做完必须验的三件事（否则等于没做）**
+
+1. 索引在不在：`SHOW INDEXES FROM db.tbl;`，以及 `SHOW CREATE TABLE` 里应出现 `INDEX idx_value (value) USING INVERTED PROPERTIES(...)`；
+2. 存量建好没：`SHOW BUILD INDEX;`；
+3. **查得到 vs 用得上**：先拿一个库里确实存在的取值做 `MATCH_ANY`，**返回 0 基本就是 parser 选错**（不是数据问题）；再判断是否走索引——`EXPLAIN` 看谓词，并以“同构两张表，一张有索引一张没有”做 A/B 计时为准（profile 里的计数器名与版本相关，**不要凭名字猜**）。
+
+**别把这条读成“什么都塞 Doris”**：路线一的表只放**取值字典**（派生、可全量覆盖、无需人编辑）；L1 的**别名词典与指标口径**是人工维护、要事务、要审核，仍然留在问数自己的 PG。分工判据还是 §5.5 那一句：要匹配的东西在不在某个查询引擎里——在就下推，不在才留外部。
+
+## 6. 验收标准
+
+1. **幂等**：同一输入重跑两次，元数据库与向量点数、内容完全一致（涵盖原第 7 条，合并以免重复计数）。
+2. 制造一次加列 / 改名 / 删列，漂移检测报出且**不误报其余列**。
+3. 一次线上错答，凭 trace 能定位到“召回阶段错”还是“生成阶段错”。
+4. golden 回归可一键跑，输出 Recall@K / **empty-result 分层** / 未命中字面量 top N，并接进门禁。
+5. P1-1 跨租户用例召回＝0。
+6. **改名不留幽灵**：某列取值改名后，用旧值查询 → 召回为 0（或仅经 alias 命中新值）；旧值字面量不得出现在生成的 SQL 里。⚠️ 默认路线下取值不进索引，本条的验收对象随之变成**探针**（旧值在源里已不存在 ⇒ 探针应判“未识别取值”）。
+7. **P0-9 探针与版本缓存**：同一 `source_snapshot` 内重复问同一取值，源侧只被查询一次（缓存命中）；分区 / 版本推进后，新取值在下一次请求即可召回，**无需人工触发刷新**。
+8. **P1-6 源分片**：选定 Doris 时，MySQL 的表与取值**不进入任何候选**（不是靠 EXPLAIN 报错发现）。
+9. **P1-4 方言分支**：把 `MATCH_ANY` 发给 MySQL、把 `WITH PARSER ngram` 发给 Doris，都在生成期被拦下并有明确报错。
+10. **P1-5 负载隔离**：构造一条超预算的问数查询，结果是**被排队或拒绝**（`SHOW WORKLOAD GROUP` / 审计可查），且问数账号无写权限；大屏侧影响由 BI 团队确认（本仓库不自行声明“大屏不受影响”）。
+11. **P0-8 五道闸逐条有测试**：字面不匹配 → 返回“未识别取值”而非 `0`；编码列写成字符串 → 校验层拦下。
+12. **P0-10 标识符白名单**：构造含非法字符的表名 / 列名分别打到全文路、向量路、upsert 路、元数据写入路，**四条都在校验层报错且不出 SQL**；用例进门禁（与 P0-6② 的语句白名单分属两层，都要有）。
+
+## 7. 归属与陈述边界（不得含糊）
+
+- 本方案落地后的完成度**只属于平台侧（2026）**。不得回填成 2025 会展问数的"当时就做了"。
+- 2025 会展问数（内网 SQLBot 深度改造）的元数据刷新**实际怎么触发、旧索引怎么处理、是否真踩过口径漂移**——**尚未取证**，见 §8-Q1~Q3。取证前，对外表述止于"YAML 声明 + 人工触发的全量重建灌入索引，无自动漂移检测"，**禁写**：定时增量同步、schema 变更自动感知、重跑幂等。
+- **（本次 review 兑现的活指针，§5.6 曾写“进 §7”但 §7 里没有）“支持选择不同数据源问数”只属 2025 内网那套**（SQLBot 自带 `apps/datasource/` 多源模块）；平台侧 `nl2sql-service` 当前**无 datasource 维度**（Q17 证据）。两者不得混述：说“多源”时指的是 2025 系统与现网，不是说平台版已具备。
+- **只读保证的归因要说对**：被问“怎么保证只读”时，答 **只读账号 + 语句白名单**（+ HITL），**不要答 EXPLAIN**——MySQL 5.6 起 `EXPLAIN` 支持 INSERT/UPDATE/DELETE，它不拦写（P0-6②）。纸面现状与锚的缺口见 Q21，未拍前不改纸面。
+- **禁写“已实现取值下推 / 只读探针 / 版本缓存”**：P0-7 / P0-9 是**目标态**，平台侧现在连取值副本都还在 pgvector 里（`value_repository.py:18-28`），一行都还没改。落地前只能说“这是我认为应该改的方向，具体三条…”。
+
+## 8. 待使用者回答
+
+**编号说明**：历史追加导致不连续——Q13x 已并入 Q13；Q14 曾拟用后弃用（不复用以免旧引用错位）；Q10 已拆为 Q10a/b/c。**待答 22 项：Q1-Q7（7）、Q10a/b/c（3）、Q11、Q12（2）、Q15-Q20（6）、Q22-Q25（4）**；另 **Q21 已于 2026-10-17 拍定二档并执行完毕**（见下方「Q21 详单」），不计入待答。Q18-Q21 由首轮 review 新增，**Q22-Q24 由 §11 全量核验新增**。前三优先级：**Q10a（决定取值层能否下推）→ Q23（表由谁建，决定 P0-1/P0-5 有没有落地对象）→ Q24（方言硬编码，决定 P1-4 是不是前置项）**。
+
+| # | 状态 | 问题 | 卡住什么 |
+|---|---|---|---|
+| Q8 | **已答** | 内网 Doris 版本 → 2.x **已升级到 4.0**（含自定义分词、`score()` BM25、ANN 向量索引） | 定档见 §0-D3；“版本支持≠生产验证”，T1-T3 仍待跑 |
+| Q9 | **已答** | 生成的 SQL 打到哪 → **Doris**；指标直取与生成 SQL 同引擎 | 见 §0-D1；P0-9 成立 |
+| Q13 | **已答** | 元数据 dense 是否下推 Doris ANN → **不下推，留 PG** | 见 §0-D4；原“Q13x”重复条目已并入此行（其约束记录：ANN 仅 `DUPLICATE KEY`、`ARRAY<FLOAT> NOT NULL` 维度须等于 `dim`、余弦需归一化——既然不下推，这些约束都不再是阻塞项） |
+| Q1 | 待答 | 2025 生产那套的元数据刷新，实际由谁触发、什么频率？ | §7 的表述上限 |
+| Q2 | 待答 | 刷新时旧向量 / 旧索引是清库重灌、追加、还是别名切换？ | H3 是否真在当年就存在 |
+| Q3 | 待答 | 有没有真踩过一次口径漂移？当时怎么发现的？ | P0-3 是“补齐”还是“新增” |
+| Q4 | 待答 | 元数据声明继续用 YAML，还是走管理后台？ | P0-1 的实现面 |
+| Q5 | 待答 | 本方案排在生产交付 roadmap 的哪一段？先做 P0 几项？ | 排期与工时（**注意 P0 现有 10 项，需要排序而不是全做**） |
+| Q6 | 待答 | 权限下推（P1-1）复用 ADR-0006/0007 的既有契约，还是问数侧另立一套？ | 是否与平台隔离模型分叉 |
+| Q7 | 待答 | 现网 / 内网 PG 的 pgvector **服务端扩展版本**？能否 ≥0.7 与装扩展（需改 `shared_preload_libraries` 并重启）？ | 原 §5.1 三条路线的可行性（默认路线已不依赖它，降级为备选问题） |
+| Q10a | 待答 | 问数账号在**自己的 Doris 库**里能否建表 / 建索引 / `BUILD INDEX` / `INSERT OVERWRITE`？ | §5.7 路线一能否成立（不求 BI 团队） |
+| Q10b | 待答 | 能否给 **BI 生产表**加索引 DDL？谁批、变更窗口怎么排？ | 路线二；**默认不选** |
+| Q10c | 待答 | 目标表是维表还是明细宽表、单列 distinct 量级、该列是否 key 列 / 分区列？ | 探针性能预算与 P1-2 阈值 |
+| Q11 | 待答 | 业务库侧需要**模糊取值匹配**的列，基数与文本长度实况？ | 决定要不要保留外部索引（P0-9 默认路线下多半不需要） |
+| Q12 | 待答 | 同一指标在数仓（T+1、已清洗）与业务库（实时、未清洗）给出两个数时，**默认答哪个源**、口径怎么标注呈现？ | P1-3 的标注形态与产品口径（源本身已由用户选，但默认值与提示文案仍未定） |
+| Q15 | 待答 | 能否为问数申请**独立 workload group**（甚至独立 BE / Compute Group）？谁批？ | P1-5 能否做，还是只能靠 `query_timeout` 硬扛 |
+| Q16 | 待答 | 数仓→Doris 的**分区切换方式**（`INSERT OVERWRITE` / `ALTER TABLE REPLACE PARTITION` / 双写）？切换期间查询看到什么？ | P0-9 缓存键 `source_snapshot` 的定义，以及 D1“两次查询不跨快照”的边界 |
+| Q17 | 待答 | 平台侧 `nl2sql-service` **完全没有 datasource 概念**（`grep -i 'datasource\|data_source\|db_type\|dialect'` 在 `nl2sql_service/` 原始 grep 命中 0；`SqlQueryRequest`（`api/schemas/query_schema.py:9-16`）继承 `shared_schemas/query.py:14-30`，字段为 `query`/`tenant_id`/`trace_id`/`session_id`/`context`/`priority`/`user_id`/`version` + `metric_config`，**其中没有任何源选择字段**。⚠️ 上一版把入参写成”只有 `query`/`metric_config`/`trace_id`”，**漏了 5 个继承字段**——结论（无源维度）不变，但描述失真，且 `tenant_id` 已在契约里、只是无人消费，这一点恰好是 P1-1 的现成落点）。多源要在平台侧新建，还是继续只在内网那套？ | P1-6 是”补齐”还是”新增”，以及 §7 的陈述边界 |
+| Q18 | 待答 | 平台侧实际调用**哪个 embedding 服务、多少维**？`conf/meta_config.yaml:11` 写的是 `dimension: 1536`（OpenAI 形状），而对外口径是 BGE（1024） | 二者只能有一个对。换维度=全库重灌；也是 P0-2 幂等与 ADR-0009 回填的前置 |
+| Q19 | 待答 | 业务库（MySQL 8.0+）里准备开 `linkable` 的列清单？内网 MySQL **能否设 `ngram_token_size`**（非动态变量，改配置需重启并重建索引）？ | P1-2 白名单落地面；MySQL 侧能否做中文模糊（P1-4 矩阵） |
+| Q20 | 待答 | 探针与缓存的**延迟预算**是多少（首 token）？`< 500 ms` 这条口径现在挂在“预定义指标直取”上，探针路线要不要单独预算？ | P0-9 的超时与 `LIMIT` 取值；纸面时限的可辩护性 |
+| Q21 | **已拍·已执行**（二档，2026-10-17） | 纸面上写“执行计划自校验 + 语句类型校验 + 只读账号”三层收敛，但**锚指向 2026 平台段（master §2.13），不指向 2025 问数段（§2.7）**。逐处清单与证据见下方“Q21 详单”与 §11.1-R6 | 改纸面必同批改口述稿。受影响面＝**11 处**：纸面正文 4（`v3-complete.md:108,113`、`v4:350`、`v3-online.md:102`）＋ frontmatter 变更说明 2（`v3.md:21,28`）＋ 口述 3（`一问一答面试话术稿-2026-10-03.md:55`、`自我介绍-三层结构版-2026-10-12.md:75`、`棘手问题与解决-STAR素材库-2026-10-11.md:38`）＋ 研究稿 1（`AI简历项目取舍研究报告.md:223`）＋ 个人项目材料 1（`项目与材料盘点报告-2026-08-23.md:107,138`——**这条才是『语句类型校验』的实测锚，但归属是个人项目**）。已执行 8 文件；历史登记块不动 |
+| Q22 | 待答（§11 新增） | 内网 MySQL 的 `ngram_token_size` 现值是多少、能否改？（该变量**非动态**：改配置要重启，且改完必须重建 ngram 索引） | P1-4 矩阵"中文模糊匹配"这格在 MySQL 侧到底可选还是不可选 |
+| Q23 | 待答（§11 新增） | `nl2sql_*` 元数据表与向量索引**当前由谁创建**？（仓内 `find -name '*.sql'` 命中 0、`CREATE TABLE`/`CREATE INDEX` 命中 0 ⇒ 只能靠库外手段，本文无法自证） | P0-1 / P0-2 / P0-5 有没有落地对象；P0-5 的"走索引"判据能否成立 |
+| Q24 | 待答（§11 新增，需实测不靠推理） | `guard.validate_sql` 末尾 `stmt.sql(dialect=dialect)` 会**重写** SQL 文本；dialect 目前硬编码 `postgres`，若 SQL 实际打 Doris/MySQL，重写会不会把合法语句改坏（分区语法、`MATCH_ANY`、反引号、`LIMIT` 位置）？ | N6 的连带风险；决定 P1-4 是"加谓词模板"还是"先停用规整重写" |
+| Q25 | 待答（§11.6 G1 新增） | **平台内已有第二条 Text2SQL 路，本方案未覆盖**：`applications/agent_server/sql/pipeline.py:1` 自述“Vanna 式 Text-to-SQL 管线：召回上下文 → LLM 生成 → 白名单守卫 → 只读执行”，`schema_store.py:17-54` 是完整的 `store_ddl`/`store_doc`/`store_example` 三件套，`guard.py:1-3` 复用同一内核守卫。它与 `nl2sql-service` 的 YAML 元知识库**是两条并存路，还是收敛成一条**？谁是谁的超集？ | 决定 P0-1/P0-2/P1-6 是“新建”还是“复用”；不对齐就直接撞 ADR-0009 与 §7 归属边界，且会把同一套语义层建两遍 |
+
+**Q21 详单（从表格里移出来——上一版把这段写进单元格，嵌套代码块吃掉一个列分隔符，整行塌成 3 列；已按 P0-7 同样办法移到表后）**
+
+本轮按原始 grep（不受 gitignore 影响）全量重跑 `只读账号` / `语句类型` / `白名单` 三个词，`Resume/` 命中 25 处。上一版三条断言均需更正：
+
+1. **锚的归属写错了**。`master:487` / `master:504` / `Resume/interview/evidence/证据锚_ai-platform.md:52` 这三处“只读账号受控执行”都在 **`master` §2.8 深度研究**，说的是深研的数据通道，不是问数的执行守卫。问数段 **`master` §2.7（437–467）里 `只读账号` 与 `语句类型` 各命中 0**，只有 `:464` 把只读保证记在 EXPLAIN 名下。
+2. **“语句类型校验无锚”不准确**。`Resume/` 内另有 4 处命中，但都不构成 2025 问数的实现锚：`AI简历项目取舍研究报告.md:223`（研究稿）、`一问一答面试话术稿-2026-10-03.md:55`（自注“补自《会展问数深度技术问答》C3”）、`自我介绍-三层结构版-2026-10-12.md:75`（口述）、`项目与材料盘点报告-2026-08-23.md:107,138`（**是个人项目 agent_server 的 sqlglot 白名单，实测过，但项目归属不同**）。
+3. **受影响纸面不止 `v4:350` 一处**（下面先列本轮新查出的；完整 11 处的分类计数见本表 Q21 行——其中 `v3-online.md:102` 是列完这条之后又查出的，它属『未从 v4 派生的旧版』）。另有 `versions/ai-platform-v3.md:21,28`（frontmatter 变更说明）、`versions/ai-platform-v3-complete.md:108,113`（“经…→ 语句类型校验 → 只读账号受控执行，三层收敛”＋“负责可靠执行三层收敛落地”，均为实然形）；口述侧另有 `qa/棘手问题与解决-STAR素材库-2026-10-11.md:38` 把“连接级只读——问数只接只读账号”写成已采取的行动。
+
+**关键事实变了**：语句白名单**确实存在且有 6 个行为用例**——`packages/agent-core/agent_core/sql/guard.py:34-67` 加 `tests/nl2sql_service/test_nodes_validate_sql.py:7-49`，本仓 `docs/tech-debt/tech-debt-audit-2026-09-22.md:430` 自 09-22 起就把它列为正面案例。所以 Q21 不是“有没有锚”，是**锚挂在哪个项目段**。两档：
+
+- **一档**：纸面全部收敛为两层（执行计划自校验 + 只读账号），三层说法撤下。省事，但把平台侧真实存在且有测试的能力从纸面上抹掉。
+- **二档（推荐＝一档的 2025 段 + 三层挂 2026 段）**：`master` §2.7 与 `v4` 问数段收敛为两层；三层口径改写到 **`master` §2.13 智能体平台段**，锚就是上面那两个 `file:line`。纸面与实现同段同锚，被追问时能当场打开文件。
+
+**已按二档执行（2026-10-17，用户拍定并授权）**：问数段（`master` §2.7 与各版本问数 bullet）收敛为两层，"语句类型白名单"改写进 `master` §2.13 平台段——锚就是上面那两个 `file:line`，被追问能当场打开。
+
+**两层的证据强度不同，口述时必须切开**：白名单＝代码＋6 个行为用例可自证（归属 2026 平台）；问数的"只读账号受控执行"在 §2.7 **没有代码锚**（原引三处经核实在 §2.8 深研段），依据是用户口头确认。⇒ 讲问数执行安全时按"账号权限层兜底、执行计划不拦写"说，不要说成自己实现的守卫。历史登记块（`ai-platform-v3.md:21,28`、研究稿 :223、盘点报告 :107,138）不动。
+
+## 9. 证据清单
+
+**路径写法约定（本次核验新增）**：以下一律写**可解析的相对仓库根路径**。**凡 `courses/...` 引用，删除该目录后改读 §12 取证快照**（§12 已冻结 13 个文件 63 行原文）。本文早先多处用基名（`graph.py:74`、`guard.py`、`llm.py:846`），而本仓有 5 个 `graph.py`、3 个 `guard.py`、6 个 `llm.py`——基名引用**不可唯一定位**，是上一版连续出错的直接助因。
+
+- `applications/nl2sql-service/nl2sql_service/agent/context.py:6-8`（Column/Metric/Value Repository 三个 pgvector 导入）；三路并行的**权威证据是** `agent/graph.py:52-58`（`extract_keywords` 分别指向三个 recall 节点），不是各文件 `:1` 的模块 docstring
+- `applications/nl2sql-service/nl2sql_service/api/routers/query_router.py:15`（`POST /api/query`，`routers/` 目录唯一文件、全服务 `@router.*` 命中 1）
+- `applications/nl2sql-service/nl2sql_service/services/query_service.py:25`（state 只塞 `query`/`context`/`llm` ⇒ 配置未接线的正面证据）
+- `applications/nl2sql-service/nl2sql_service/agent/nodes/validate_sql.py:6,13-16`（复用 guard、dialect 硬编码 `postgres`、`max_rows` 取自 state）
+- `applications/nl2sql-service/nl2sql_service/agent/graph.py:74`（`correct_sql → validate_sql` 回环）；`agent/nodes/correct_sql.py:31-40`（用 `str.format` 显式喂 7 个键 ⇒ 平台侧无课程那个变量缺陷）
+- `packages/agent-core/agent_core/sql/guard.py:18-31,34,39,46,50,52-54,56-65`（白名单四规则；`:7` docstring 提 GRANT 但 `:18-31` 无 `exp.Grant`）
+- `tests/nl2sql_service/test_nodes_validate_sql.py:7-49`（守卫行为 6 用例）⚠️ 本仓有**两棵测试树**：仓库根 `tests/` 与 `applications/*/tests/`
+- `applications/agent_server/sql/pipeline.py:111,121` + `applications/agent_server/config.py:41` + `applications/agent_federation/tools/sql_guard.py:18,25,34`（`sql_max_rows` 三服务三套值/接法；federation 侧 `_MYSQL_MAX_ROWS` 默认 100 且**已经用 `dialect="mysql"` 调同一个 guard** ⇒ N6/Q24 的"非 postgres 方言能否走通"在 federation 有现成参照实现，但问数侧仍要自己实测）
+- `applications/nl2sql-service/nl2sql_service/scripts/build_meta_knowledge.py:20-24`（stub）
+- `applications/nl2sql-service/nl2sql_service/services/meta_knowledge_service.py:23`（`build_from_tables` 零调用方，原始 grep 全仓只命中定义行 + 文档）
+- `applications/nl2sql-service/nl2sql_service/conf/meta_config.yaml:11-13`（`dimension/index_type/metric`）与 `conf/settings.py:67,90-91`（只读 `meta_db.table_prefix`）⇒ **pgvector 段死配置**
+- `applications/nl2sql-service/nl2sql_service/clients/pgvector_client_manager.py:26,28-30`（`filter_clause` 无人传、`<=>` 硬编码）、`:37-54`（`fulltext_search` 无过滤形参）、`:46,48`（`'simple'` + `plainto_tsquery` + `ts_rank`）
+- `applications/nl2sql-service/nl2sql_service/repositories/pgvector/{column,metric}_repository.py:15-17`（`keywords` 形参被忽略）；`value_repository.py:18-28`（唯一"全文 + 向量补位"路）
+- `courses/zhanggui-wenda/data-agent/pyproject.toml:9,20`（ES `>=8,<9`、qdrant-client `>=1.16.2`，仅课程侧）；`conf/app_config.yaml:26-29`（Qdrant 无 server 版本、`embedding_size: 1024`）
+- `courses/zhanggui-wenda/data-agent/app/services/meta_knowledge_service.py:85/92/99/192/199/206`（`uuid.uuid4` 作 point id）、`:119/:222`（`upsert`）、`:141-143`（取值字典 `limit 100000`）、`:56`（examples `limit 10`）、`:145-149`（ES 文档 id 由值文本派生）
+- `courses/zhanggui-wenda/data-agent/app/repositories/qdrant/column_qdrant_repository.py:16-20`（`ensure_collection` 从不 drop）、`app/repositories/es/value_es_repository.py`（**仅** `ensure_index`/`index`/`search` 三方法，`:14` ik_max_word、`:35` `score_threshold=0.6`、`:42` `min_score=score_threshold`）
+- `courses/zhanggui-wenda/data-agent/app/agent/nodes/{correct_sql.py:27, extract_keywords.py:31, recall_value.py:37-38, merge_retrieved_info.py:38-46}`；`app/agent/graph.py:61-65`（`error` 路由到 correct_sql、`correct_sql → execute_sql` 直连）；`app/repositories/mysql/dw/dw_mysql_repository.py:9-11/9-17/19-25/27-28/30-32`
+- `courses/zhanggui-wenda/data-agent/prompts/`：7 个 `.prompt`，占位符与 `input_variables` 逐一比对——**只有 correct_sql 不匹配**（7 个占位符 vs 2 个声明），其余 6 个一致
+- `applications/knowledge-service/docker-compose.yml:117`（`milvusdb/milvus:v2.5.10`）；`knowledge_service/clients/milvus_utils.py:152-169`（BGE-M3 dense+COSINE / sparse+IP，未启用原生 analyzer）
+- `applications/agent_server/rag/store.py:17,24,32,82,98,125,127-146`（应用侧 BM25Okapi、签名四维、写入路径显式失效、10,000 行上限）
+- 上游 `SQLBot/backend/apps/data_training/api/data_training.py:13,29,38,43`（`page`/`create_or_update`/`delete`/`enable` 四路由）；`SQLBot/backend/apps/chat/task/llm.py:846-858`（`execute_sql → exec_sql`，无语句白名单）
+- 本仓既有文档（**须引用，不得当新发现**）：`docs/tech-debt/tech-debt-audit-2026-09-22.md:430`（guard 正面案例）、`:125-131`（pgvector 缺 HNSW，仅覆盖 `agent_runtime/db.py` 6 张表）、`:139-143`（`build_from_tables` N+1）、`:228-237`（S4 标识符拼接 4 处 + 正面案例 `agent_runtime/db.py:164-169`）；`docs/plans/arch-audit-2026-09-24.md:300`（`sql_max_rows` 10 倍差）；`docs/adr/0009-vector-store-selection.md:10-13,25`
+- **既有审计的行号有失效项，本轮已重测**（转引他人文档不复核＝本文自己批评的那个毛病）：上面 S4 的正面案例，`tech-debt-audit:235,237` 原标注为 `agent_runtime/db.py:360-368`，**但该文件全文 178 行**⇒ `:360-368` 不存在，`_IDENT = re.compile(...)` 实际在 **`packages/agent-runtime/agent_runtime/db.py:164-169`**（本文已按实测行号引用，同一条订正也应回写进那份审计，但它是已入库文档、待使用者同意再动）。其余 S4 行号复核成立：`meta_repository.py:18,25,32`、`postgres_model.py:16`、`vector_backend.py:313,320,341`；`:125-131` 那条"缺 HNSW"复核＝`db.py` 全文无 `CREATE INDEX`/`USING hnsw`，**即 09-22 登记至今未修**；`vector_backend.py:282-283` 确有 `USING hnsw`（正面案例成立）
+- Doris 能力矩阵来源（官方文档，2026-10-17 核）：倒排索引 overview / 全文检索算子 / 相关性打分三页，版本门为「自定义分析器 3.1+」「BM25 `score()` 与 `SEARCH()` DSL 4.0+」；`ADD INDEX` 只登记定义、存量须 `BUILD INDEX`
+- pgvector / Qdrant / ParadeDB / TigerData 来源：pgvector README+CHANGELOG（`gh api` 直取，`sparsevec` 0.7.0、HNSW 支持、≤1,000 非零元可索引 / ≤16,000 存储）；Qdrant `lib/segment/src/data_types/modifier.rs`（IDF 为**查询时**按集合统计）；ParadeDB v0.25 访问方法改名与 AGPL-3.0 许可、`pg_textsearch` prerelease + PG 17/18（见 §11 外部核验行的出处说明）
+
+## 10. 目标架构图（修改版 / 生产级最终态）
+
+图上每个 `P0-x / P1-x` 标记对应 §4 条目。**本版已按 §0 裁定与 §5.7 修订重绘**：取值层不再是"副本索引"，而是**只读探针 + 跟随版本的缓存**；元数据语义层落 PG（不是 Qdrant）；L1 词典落 PG（不是 MySQL）。
+
+```mermaid
+flowchart TB
+  subgraph G0["① 数据与声明层"]
+    YAML["YAML 语义声明<br/>表 / 字段 / 指标 / 别名 / 口径<br/>新增 linkable / datasource_id（P1-6）"]
+    DWH["数仓 最新分区"]
+    DORIS[("Doris 4.0<br/>BI 与问数共用<br/>问数=只读消费方")]
+    MYSQL[("业务库 MySQL 8.0+<br/>实时、未清洗")]
+    DWH -->|"T+1 同步"| DORIS
+  end
+
+  subgraph G1["② 构建与漂移层（P0-1 / 2 / 3 / 9）"]
+    EVT["触发：同步完成事件<br/>（不是定时扫）"]
+    DRIFT["漂移检测<br/>MySQL: information_schema<br/>Doris: + SHOW PARTITIONS"]
+    BUILD["幂等差异重建<br/>稳定 ID + meta_revision 递增"]
+    SNAP["source_snapshot<br/>Doris 最新分区号 / MySQL 水位"]
+    EVT --> BUILD
+    DRIFT --> BUILD
+    SNAP --> CACHE
+  end
+
+  subgraph G2["③ 检索层：两处，取值不复制"]
+    LA["L1 精确 / 别名 / 码表<br/>PG · 热更新<br/>改名留旧名 alias + deprecated"]
+    LB["L2 取值匹配<br/>只读探针 P0-9：按源分支谓词<br/>= / IN / LIKE 前缀 / ngram"]
+    CACHE["版本缓存<br/>键=source_snapshot<br/>版本不变⇒只打源一次"]
+    LC["L3 字段 / 指标语义<br/>PG + pgvector dense<br/>+ 别名精确匹配（P0-5）"]
+  end
+
+  subgraph G3["④ Agent 图（四处改造）"]
+    SRC["源选择（用户显式，D5）"] --> K["关键词抽取"]
+    K --> R["多路召回 列 / 指标 / 取值<br/>带 datasource_id 过滤（P1-6）"]
+    R --> VB["改造① 取值确定性绑定（P0-8）"]
+    VB --> FIL["表 / 指标过滤<br/>+ 口径默认值：时间窗 · 状态"]
+    FIL --> GEN["SQL 生成（强制一条 · 条件聚合算差值）"]
+    GEN --> CHK["改造② 语句白名单 + 字面量校验 + 类型校验（P0-6 / P0-8）"]
+    CHK --> EXP["EXPLAIN + 代价阈值<br/>query_timeout / MAX_EXECUTION_TIME"]
+    EXP -->|通过| WG["workload group 限并发（P1-5）"]
+    EXP -->|失败| COR["改造③ 校正循环（上限 + 超时）"]
+    COR --> CHK
+    WG --> EXE["执行（只读账号，打 Doris 或 MySQL）"]
+    EXE --> TRI["改造④ 零结果分诊探针（P0-8）"]
+    TRI --> ANS["答案合成 + matched/unmatched + 口径标签（P1-3）"]
+  end
+
+  subgraph G4["⑤ 观测与闭环（P0-4）"]
+    TR["trace：召回 · 绑定 · SQL · 字典命中<br/>记 meta_revision 与 source_snapshot"]
+    GOLD["golden 回归 + empty-result 分层"]
+    SEED["未命中字面量日报 → 别名 / 码表种子"]
+  end
+
+  YAML --> BUILD
+  LA --> R
+  LC --> R
+  BUILD --> LC
+  R --> LB
+  LB --> CACHE
+  CACHE --> VB
+  LB -.->|"实测撑不住才申请索引 DDL（Q10a）"| DORIS
+  DORIS --> EXE
+  MYSQL --> EXE
+  ANS --> TR --> GOLD
+  TR --> SEED --> LA
+```
+
+**与现状的差集（这张图里唯一需要背的部分）**
+
+| 目标态部件 | 现状 | 差的是什么 |
+|---|---|---|
+| 触发＝同步完成事件 + `source_snapshot` | 人工 CLI / 无；无版本号 | P0-1 构建入口、P0-9② 两个版本号定义；**不是**"定时增量同步" |
+| 幂等差异重建 | point id `uuid.uuid4()`、ES 无 delete、PG 取值副本仍在 | P0-2 稳定 ID + 删除语义（仅元数据层，取值层不再进索引） |
+| 取值＝只读探针 + 版本缓存 | 取值被复制进 ES / pgvector 副本 | P0-7 副本退役 + P0-9；索引 DDL 降为性能债备选（Q10a） |
+| 元数据语义层落 PG + 别名精确 | 平台 pgvector（全文路误用于取值）；课程 Qdrant dense | P0-5 契约重划、P0-4 维度口径核对（Q18） |
+| 源分片与显式选择 | 平台侧**完全没有** datasource 概念 | P1-6 + Q17；"多源"现属 2025 内网系统（§7） |
+| 取值确定性绑定 + 字面量校验 | 取值只作为 `examples` 给模型看 | P0-8 五道闸①②（含 sqlglot 解析） |
+| 校正循环可用 | **平台侧回环已可用**（`graph.py:74` `correct_sql → validate_sql`，`correct_sql.py:31-40` 用 `str.format` 显式喂 7 键）；「变量不匹配、EXPLAIN 一挂即终止」是**课程侧**缺陷（`courses/.../correct_sql.py:27` 声明 2 个 vs prompt 7 个占位符）⇒ 本行对平台侧是**已具备**，缺的是重试上限的可配置性与方言覆盖 | P0-6① 对平台侧降级为"加一致性测试"，不是"修断链" |
+| 只读保障 | **平台侧已有白名单**（`guard.py:34-67` + `graph.py` 接线 + 6 个行为用例），但方言硬编码 `postgres`、`sql_read_only_guard`/`sql_max_rows` 未接线；2025 内网那套未取证 | P0-6② 的落点因此是**扩展到 Doris/MySQL 方言 + 把配置接上 + 叠只读账号**，不是"从零建白名单"；纸面与锚的归属问题见 Q21 |
+| 零结果分诊 / 拒答 | 返回 0 行即算成功 | P0-8③④ |
+| 负载隔离 | 无（问数 ad-hoc 与 BI 大屏同集群） | P1-5 + Q15 |
+| trace + golden | 无 | P0-4，准确率读数从人工认定升级为可复现的唯一路径 |
+
+## 11. 核验台账（2026-10-17 全量机械核验）
+
+**方法与范围**：不再按假设划定搜索目录。做法是先用文件系统索引枚举三个仓库（`agent-platform` / `SQLBot` / `noctilucent-lamp`，共 4,958 个可索引文件）的全部 `.py/.yaml/.toml/.prompt/.md`，再把本文的每条引用逐条回查原文行内容；所有否定式断言（"命中 0 / 不存在 / 从不 / 只有"）改用**不受 `.gitignore` 影响的原始 grep** 重跑。
+
+**引用普查计数（脚本机械统计，非估算）**：三仓共 4,958 个可索引文件；本文（剔除代码围栏后）引用出现 **222 次**、去重 **161 条**＝通配 5 ＋ 路径省略 3 ＋ 正则误抓 6 ＋ **真正"本地无此文件"1**（`lib/segment/src/data_types/modifier.rs`，上游 Qdrant 源码，经 `gh api` 取得，本地不存在属正常）＋ 唯一后缀匹配 79 ＋ **基名可匹配多个文件 67**。误抓那 6 条是：`.py/.yaml/…` 这类散文、`stmt.sql`/`settings.sql` 这类函数名、以及 `v3.md:21`/`v3-complete.md:108` 两条省了 `versions/` 前缀的**真引用**（已补全路径重数一次即归位）。⚠️ 本组数随本文继续编辑会漂移，**以复测为准**：重算办法＝枚举三仓文件建索引 → 用 `[\w./-]+\.(py|yaml|toml|prompt|md|sql|json|rs)(:\d+)?` 匹配剔除围栏后的正文 → 按基名后缀命中数分类。
+⚠️ **那 67 条"基名歧义"本身就是一条结论**：`graph.py` 在本仓有 5 份、`guard.py` 3 份、`llm.py` 6 份、`settings.py` 2 份、`meta_knowledge_service.py` 2 份、`pyproject.toml` 13 份。基名引用不可唯一定位，**上一轮两处假否定都长在这一点上**——所以 §9 已改为全路径写法，后续新增引用也必须全路径。
+- **逐条回查行内容**：所有承载事实断言的引用（即去掉"仅出现一次且不作为任何结论依据"的那些）已逐条打印原文比对；下表只登记**结果有变化**的条目。
+
+⚠️ **本轮最重要的一条不是某处错误，而是工具默认**：本仓 `.gitignore:100` = `courses/`，而全文证据最密集的就是 `courses/zhanggui-wenda/data-agent`。⇒ **任何用尊重 gitignore 的搜索器（含 ripgrep 默认）在本仓做否定式断言都偏向"不存在"**。上一轮"白名单层不存在"的错误与本轮"没有 guard 用例"的错误，同一根因：**搜索范围来自假设、且被工具默认再削一刀**。
+
+### 11.1 已撤回或更正（本文原表述为错）
+
+| # | 原断言 | 证据（实测行内容） | 处置 |
+|---|---|---|---|
+| R1 | "契约测试只锁开关值不锁行为，**没有任何 guard 用例**" | `tests/nl2sql_service/test_nodes_validate_sql.py:13-43` 六个行为用例：DELETE 拒 / 多语句拒 / DROP 拒 / 缺 LIMIT 补齐 / 超上限截到 100 / 空 SQL 拒 | **撤回**。错因＝只查 `applications/nl2sql-service/tests/`，漏了仓库根 `tests/`（本仓有两棵测试树）。真实缺口收窄为：用例手工塞 `sql_max_rows`、不经 settings ⇒ 配置链无验证；`sql_read_only_guard` 无行为用例（守卫无条件执行）。已改 §4 |
+| R2 | 守卫的存在是"本次查出" | `docs/tech-debt/tech-debt-audit-2026-09-22.md:430` 自 09-22 起就把 `agent_core/sql/guard.py:34-67` 列为正面案例 | 措辞改为"本仓既有、既有审计已登记"；新增一条"上一版断言与仓库既有文档相悖"的自省。**这是可避免的错误** |
+| R3 | "`correct_sql.prompt:7` 的'只能查询'" | `:7` = `可用数据表信息如下：`；该句实际在 **`:35`**（课程与平台两份文件行号相同） | 行号改 `:35` |
+| R4 | "`dw_mysql_repository.py:29-34` 是 EXPLAIN 证据" | `:27-28` 才是 `validate_sql`（`explain {sql}`）；`:30-32` 是 `execute_sql`，`:29` 是空行 | 改 `:27-28` |
+| R5 | "`validate_sql.py:10-14` 复用它、dialect 传 postgres" | `:6` 是 import，`:15` 才是 `_validate(sql, "postgres", max_rows)`；`:10-14` 是函数头与取 sql | 改 `:6,13-16` |
+| R6 | "Q21：只读账号锚在 master:487/504、证据锚:52；语句类型校验无锚" | 那三处全在 master §2.8 深度研究（讲的是深研的数据通道，不是问数的执行守卫）；问数段 master §2.7（437–467）里两个词各命中 0。"语句类型校验"在 Resume/ 另有 4 处命中，但分别指向研究稿、口述稿与**个人项目** | 逐条行号见 §8 末"Q21 详单"，本行不重复以免两处漂移。结论由"无锚"改为**锚挂在 §2.13 平台段、不挂 §2.7 的 2025 问数段**；受影响面由 1 处增至 **11 处**：纸面正文 3（`v3-complete.md:108,113`、`v4:350`）＋ frontmatter 变更说明 2（`v3.md:21,28`）＋ 口述 3（`一问一答面试话术稿-2026-10-03.md:55`、`自我介绍-三层结构版-2026-10-12.md:75`、`棘手问题与解决-STAR素材库-2026-10-11.md:38`）＋ 研究稿 1（`AI简历项目取舍研究报告.md:223`）＋ 个人项目材料 1（`项目与材料盘点报告-2026-08-23.md:107,138`——**这条才是『语句类型校验』的实测锚，但归属是个人项目**） |
+| R7 | "§9 全仓 grep：`delete_by_query` 命中 0" ⇒ 本文 §5.3 写"全仓检索层没有任何删除路径" | `delete_by_query` 确实 0；但 `client.delete(...)` 在平台侧存在：`applications/knowledge-service/knowledge_service/import_process/agent/nodes/node_import_milvus.py:316`、`eval/reindex_sparse_local.py:153,156,264` | 断言范围收窄为"**课程侧 ES/Qdrant 检索层**无删除路径"（`value_es_repository.py` 仅 3 方法，已逐行确认）。§2 表内已就地订正 |
+| R8 | "`POST /api/query` 入参只有 `query`/`metric_config`/`trace_id`" | `SqlQueryRequest`（`query_schema.py:9-16`）继承 `shared_schemas/query.py:14-30`，实际含 `query`/`tenant_id`/`trace_id`/`session_id`/`context`/`priority`/`user_id`/`version` + `metric_config` | 结论（无源维度）不变，描述补全；并记下一条正面发现：**`tenant_id` 已在契约里但无人消费** ⇒ P1-1 的现成落点 |
+| R9 | "课程侧 `select distinct {col} limit 10` 取样本" | 两个不同调用点：`:56` 用 10（列的 `examples`），`:141-143` 用 **100000**（ES 取值字典） | 分开写；P1-2 的 `limit 100000` 判据由此获得精确锚 |
+| R10 | "store.py 按 `(行数, 最大 id)` 签名缓存在语料变化时失效" | 签名是 `(count, max_id, tenant_id, workspace_id)`（`:125`）；新鲜度靠写入路径显式调 `_invalidate_bm25_cache()`（`:32`，`:82`/`:98` 调用），不是靠签名 | §5.2 对照段重写；照旧表述复刻会做出**跨租户串缓存** |
+| R11 | ADR-0009 需"回填一条 nl2sql 侧已选 pgvector" | `docs/adr/0009-vector-store-selection.md:10-13` 现状表只有 knowledge-service 与 agent_server 两行；全篇 `grep nl2sql` 命中 0 | 动作改为**新增一行**；并连带发现 ADR-0009 `:25`"pgvector 无等价的引擎侧稀疏向量"这句需与 §5.1 的 `sparsevec` 订正对齐 |
+| R12 | §5.3 反模式 5："`value_es_repository.py:14` 的 `min_score=0.6`" | `:14` 是 `ik_max_word` mapping；`0.6` 是 `:35` 的默认参数 `score_threshold`，`:42` 才作为 `min_score` 送出 | 行号与参数名双改；并补一条**别一并否定**的区分：同样的 0.6 用在 Qdrant 是 cosine 相似度、跨查询可比，只有 ES 那处属误用 |
+| R13 | **本轮我自己写坏的**：Q21 那行改写后，把一个带多层反引号与中文括号的长段落塞进表格单元格，**嵌套代码块吃掉了一个列分隔符**，整行从 4 列塌成 3 列（表格语法上仍"看起来像表"，只有数分隔符才暴露） | 结构普查脚本报 `block L481-L507 内一行列数不一致`；定位到 `:504` 顶层竖线只剩 4 个 | 已把该段**移出表格**（与 P0-7 退让形态同一办法），并给全文加了列数一致性普查。**教训升格为流程**：本轮 §4/§9/§11 共 17 处就地编辑，任何往表格单元格里加长内容改动都必须跑一次列数普查——上一轮同类事故已发生过两次，仍第三次踩中 |
+
+### 11.2 表述过宽，已收紧（结论方向不变）
+
+| # | 原表述 | 收紧后 |
+|---|---|---|
+| W1 | "`sql_read_only_guard`/`sql_max_rows` 无执行路径消费" | 范围限 **nl2sql-service**。agent_server 是接线的（`pipeline.py:111,121`），federation 有第三值（`applications/agent_federation/tools/sql_guard.py:25`）⇒ 实情是**三服务三套接法**，不是"平台没接线" |
+| W2 | 差集表"校正循环可用／现状＝一挂就终止" | 该缺陷属课程侧；平台侧回环已可用（`graph.py:74` + `correct_sql.py:31-40` 显式喂 7 键）⇒ P0-6① 对平台侧降级为"加一致性测试" |
+| W3 | 差集表"只读保障／现状＝靠 prompt 措辞 + EXPLAIN" | 平台侧已有白名单并接入图；缺的是**方言覆盖 + 配置接线**。⚠️ 注意方向不要说反：dialect 硬编码 `postgres` 意味着**解析与规整都按 postgres 走**，Doris/MySQL 专有语法能否被 postgres 解析器接受、`stmt.sql(dialect=)` 重写会不会改坏语句，**都未实测**（⇒ Q24），不能写成"白名单照样生效" |
+| W4 | §5.4 Doris 矩阵把 `parser` 与自定义 `analyzer` 的取值写在同一格 | 拆成两套机制（`parser` 是索引属性枚举；`analyzer` 是 3.1+ 的 tokenizer + token_filter），避免被读成同一参数的别名 |
+
+### 11.3 本轮新增事实（此前本文未登记，且改变方案前提）
+
+| # | 新事实 | 证据 | 影响 |
+|---|---|---|---|
+| N1 | `meta_config.yaml` 的 `pgvector` 段（`dimension: 1536` / `index_type` / `metric`）**无任何读取方** | `conf/settings.py:67` 载入 YAML 但 `:90-91` 只取 `meta_db.table_prefix`；算子在 `pgvector_client_manager.py:28` 硬编码 `<=>` | **Q18 的"1536 vs 1024"目前是纸面之争**——那个数不参与运行。正确顺序：先接线再定维度 |
+| N2 | 字段/指标召回**单路**：`recall(keywords, embedding, top_k)` 忽略 `keywords` | `column_repository.py:15-17`、`metric_repository.py:15-17`（`embedding is None` 直接返 `[]`）；`fulltext_search` 仅 `value_repository.py:19` 一处调用 | P0-5 想要的"别名精确匹配优先于向量"**没有代码落点**，属新增而非改造 |
+| N3 | 检索层**没有源/租户过滤入位** | `vector_search` 有 `filter_clause`（`:26,29-30`）但所有调用方都不传；`fulltext_search`（`:37-54`）**根本没这个形参** | P1-1 / P1-6 在 PG 层的落点即这两处，取值路要先加参数 |
+| N4 | nl2sql-service **无任何 DDL 进版本控制** | `find … -name '*.sql'` 命中 0；全服务 `CREATE TABLE`/`CREATE INDEX` 命中 0 | `nl2sql_*` 表与索引存在性不可知；P0-5 的"`EXPLAIN` 走索引"判据要先补 DDL 脚本才有对象可验。既有审计 `tech-debt:125-131` 只覆盖了 `agent_runtime/db.py` 的 6 张表，**没覆盖这几张** |
+| N5 | P0-1 有**必须先合并的既有项** | `tech-debt-audit-2026-09-22.md:139-143`（`build_from_tables` 逐条 embed + 逐条 INSERT 的 N+1）、`:228-237`（S4 标识符拼接 4 处，含 `pgvector_client_manager.py:28-70`，正面案例 `agent_runtime/db.py:164-169`） | 新构建入口若不合 P3、不接 S4 白名单，**一上线就带两个已知缺陷** |
+| N6 | 平台侧方言硬编码 | `applications/nl2sql-service/nl2sql_service/agent/nodes/validate_sql.py:15` 传 `"postgres"`；`applications/nl2sql-service/nl2sql_service/agent/nodes/correct_sql.py:37` 的 `db_info="postgresql"`。同仓**已有非 postgres 的调用参照**：`applications/agent_federation/tools/sql_guard.py:18,34` 用 `dialect="mysql"` 调同一个 guard | 与 D1"SQL 打 Doris"直接冲突 ⇒ P1-4 方言分支是**前置项而非增强项**，优先级要提到 P0 档；Q24 的实测有了可抄的调用形状，但"重写会不会改坏 Doris 语法"仍要自己跑 |
+| N7 | **既有审计自己也有一条失效行号** | `docs/tech-debt/tech-debt-audit-2026-09-22.md:235,237` 把 `_IDENT` 标识符白名单标为 `agent_runtime/db.py:360-368`，而该文件只有 178 行；实测在 `packages/agent-runtime/agent_runtime/db.py:164-169` | 本文已按实测行号引用。**推论要记牢**：引用既有文档的行号前必须重测——本文 §9 那批"转引自 tech-debt"的行号，本次复核 4 条成立、1 条失效。同一条订正应回写进那份审计，但它是已入库文档，**待使用者同意再动** |
+
+### 11.4 通过项与未证项
+
+- **通过（行内容逐条比对一致）**：`guard.py` 全部行号（`:18-31/34/39/46/50/52-54/56-65`）、`graph.py:74`、`build_meta_knowledge.py:20-24`、`meta_knowledge_service.py:23` 零调用方、课程侧 `:85/92/99/192/199/206/119/222/145-149/56`、`column_qdrant_repository.py:16-20`、`correct_sql.py:27` vs prompt 7 占位符、其余 6 个 prompt 一致、`extract_keywords.py:31`、`recall_value.py:37-38` 串行循环、`merge_retrieved_info.py:38-46`、`context.py:6-8`、`query_router.py:15` 唯一路由、`docker-compose.yml:117`、`milvus_utils.py:152-169`、`pyproject.toml:9/20/24`、`app_config.yaml:21`、`meta_config.yaml:11`、`dw_mysql_repository.py:9-11/19-25`、`'simple'`+`plainto_tsquery`+`ts_rank`、SQLBot `data_training.py:13/29/38/43` 四路由、SQLBot `llm.py:846-858` 无白名单、Q17 的 datasource 原始 grep 命中 0、ADR-0003/0006/0007/0009 文件均存在且标题相符。
+- **外部技术断言（已核）**：`ADD INDEX` 只登记定义、存量须 `BUILD INDEX`；Doris `parser` 四值与自定义 analyzer 版本门；ANN 仅 `DUPLICATE KEY` + `ARRAY<FLOAT> NOT NULL` + 两种 metric；Workload Group 排队单 FE 粒度；pgvector `sparsevec` 有 HNSW 算子族；Qdrant `modifier:"idf"` 为查询时统计且**引擎不分词**；MySQL `EXPLAIN` 支持 DML（5.6 起）、`ngram_token_size` 默认 2 且非动态、`MAX_EXECUTION_TIME` 仅只读 SELECT、函数索引 8.0.13+ / 不可见索引 / `EXPLAIN ANALYZE` 8.0.18+；ParadeDB v0.25 访问方法改名（`bm25` 留兼容别名）、**AGPL-3.0**、预加载库名 `pgsearch`、与 `pg_textsearch`/`vchordbm25` 访问方法互斥；`pg_textsearch` prerelease + PG 17/18。
+- **仍未证（不得当结论用）**：Q1-Q7、Q10a/b/c、Q11、Q12、Q15-Q20 全部待答；Q21 已拍已执行。另新增三项：**Q22** `ngram_token_size` 在内网 MySQL 现值与能否重启（原挂在 Q19，本轮确认它同时是 P1-4 矩阵的前提）；**Q23** nl2sql 的 `nl2sql_*` 元数据表当前**由谁创建**（N4 的直接后果，仓库内无 DDL）；**Q24** 平台侧 SQL 若打 Doris/MySQL，`guard` 的 `postgres` 方言规整是否会把合法语句改坏（`stmt.sql(dialect=...)` 会重写 SQL 文本，N6 的连带风险，需实测）。
+
+### 11.5 投递物陈旧度（2026-10-17 实测，时间戳取 `ls -l`，非推断）
+
+| 文件 | 最后修改 | 状态 |
+|---|---|---|
+| `ai-platform-v4.md` | 2026-10-17 19:26 | 源，最新 |
+| `ai-platform-v4.html` / `.pdf` | 2026-10-17 19:27 / 19:27 | **与 v4 源同步**（4 页；页数本轮由用户明确豁免，非常态） |
+| `ai-platform-v3-online.md` | 2026-10-17 19:40 | **口径已对齐现行裁定**（本轮派生 5 处，另 Q21 那处 :102 前批已改）；结构仍是 v3 形态，未从 v4 重生成 |
+| `ai-platform-v3-complete.md` | 2026-10-17 19:42 | 同上（本轮派生 6 处，另 Q21 那两处 :108/:113 前批已改） |
+| `ai-platform-v3.md` | 2026-10-17 19:46 | 裁定档案、不投递；正文 :105 已改两层、:104/108/114 节点计数已撤，frontmatter :21/:28 是变更登记块保持原样 |
+| 带真实姓名的投递 PDF（仅本地，`Resume/versions/`） | 2026-10-09 18:14 | 比 v4 早 **8 天**，仍在同目录、可被手动误发 |
+
+**本轮已执行的派生对齐**（v4 裁定 → online / complete / v3 正文）：
+
+1. Q21 二档：`v3-online.md:102`、`v3-complete.md:108,113`、`v3.md:105` 三层收敛 → 两层。
+2. ㉖② 撤回`一次解决率 68% → 92%`（`online:111`、`complete:136`）——这两个文件此前仍带已撤回的数，而在线简历是当前投递主通道。
+3. ㉕ 评级词→判定规则：`complete:129` 的`业务验收评估口径`改为带判据的表述、`complete:138` 的`业务验收迭代`→`业务反馈迭代`；83%+ 补"以返回结果与业务预期一致判定，基于真实问数流"（`online:104`、`complete:115`）；Top3 补`内含可回答文档`。
+4. ㉔ 节点计数**全部撤除**（2026-10-17 用户"撤掉这些节点"＝把 ㉔ 一并认到问数段，此前那条只是我的推广）：7 节点撤于 `online:19,109`、`complete:126`；12 节点撤于 `online:19,102`、`complete:103,107,112,117`；另 `v3.md:104,108,114` 正文同步撤（同文件 frontmatter 登记块不动）。`v4` 正文本来就 0，`master` §2.6 的「7 节点」与 §2.7 的「12 节点」**事实锚保留**、口述层照报数。
+5. ㉗ 栏目名：`complete:46`「核心项目」→「项目经历」。
+6. 指标全称与同锚重复：`complete:129,136`「复杂问法召回率」→「复杂问法召回准确率」；十余分钟→1 分钟按 v4 裁定只留一处（保留 `complete:121` 项目描述，删 `:136` 成果行）；`online:97`「召回率优先于精度」→「召回优先于精度」与 v4 同词。
+
+**本轮新查出的同类违规（不在 online / complete 里，尚未动）**：按同一套扫描器跑 `Resume/versions/` 全部文件后——
+
+| 文件 | 命中 | 性质 |
+|---|---|---|
+| `java-senior-v1.md` | :74/:75 节点计数、:74 "一次解决率 68%→92%"、:74/:122 "Top3 命中率" 缺判定规则 | **另一个岗位的现役投递版**，同样带已撤回口径 |
+| `big-data-v1.md` | :91/:103 "Top3 命中率" 缺判定规则 | 同上，违规最轻 |
+| `ai-platform-v2.md` | :23/:83/:84/:85 | **已被 v3/v4 取代的历史版本**，按"历史块不改"处理，不打算动 |
+
+**已裁定不动的两项（2026-10-17 用户口径）**：
+
+1. **派生件不做单源生成**："暂不动，online 的简历跟 v4 简历要求不太一样"——在线简历受平台字段限制，形状本就与 PDF 版不同，**结构差异是刻意的、不是债**。所以字符串级对齐＋口径扫描就是终态做法；上一条"两套真源会漂移"的风险**由扫描器兜，不靠生成器**：每次改完纸面，对 `versions/*.md` 正文跑一遍陈旧签名（节点计数 / 评级词 / 已撤数字 / 指标全称 / 栏目名），命中即报行号。
+2. **旧投递件由用户自删**："pdf 不入库，忽略，我会删掉的" ⇒ 本文只保留一条结构事实：`.gitignore:108-109` 已把 `Resume/versions/*.pdf` 与 `*.html` 成对排除（`git check-ignore -v` 实测命中），两个仓库外的产物目录不在保护范围内。
+
+**动作**：口径层已全部结。唯一剩下的可执行项是上面那张新表——`java-senior-v1` / `big-data-v1` 要不要按同一套裁定对齐（等一句话；`ai-platform-v2` 默认不动）。
+### 11.6 方案自身的结构性缺口（2026-10-17 由用户追问"生产级了嘛"引出，非核验发现）
+
+核验台账管的是"本文说的对不对"，本节管的是"**本文有没有漏掉整个议题**"。这类缺口不会被引用核验查出来，因为它缺的是**条目本身**。
+
+| # | 缺口 | 实测证据 | 处置 |
+|---|---|---|---|
+| G1 | **平台内第二条 Text2SQL 路，方案通篇未提** | `applications/agent_server/sql/{pipeline.py,schema_store.py,guard.py}` + `subagents/sql_agent.py`；`pipeline.py:1` 模块 docstring 自述"Vanna 式 Text-to-SQL 管线"；`schema_store.py:17-54` 为 DDL / 文档 / 范例三件套 | 已开 **Q25**。不答它，P0-1/P0-2/P1-6 会重复建一套语义层存储 |
+| G2 | **P0-4 打算自研 trace，但仓内已有可观测设施** | `packages/agent-core/agent_core/tracing.py`、`observability/summary.py`、`events.py`、`packages/agent-runtime/agent_runtime/tracing.py`；本文对 `tracing.py` / OTel / Langfuse **命中 0** | **本轮未写入方案**（用户只圈了 G1/G3/S4）。待办：P0-4 的 trace 字段改为对齐 OTel GenAI 语义约定，不自造 |
+| G3 | **P1-1 / P1-6 被写成"新建"，其实有现成形状可抄** | `sql_ddl`/`sql_docs`/`sql_examples` 每行已带 `tenant_id` + `workspace_id`；`agent_runtime/db.py:164-169` 已有 `_IDENT` 标识符白名单 | 已回写 P1-1 的落点与"照抄而非设计"定性；成本口径随之从"设计新机制"降为"复用既有契约" |
+| G4 | **S4 安全项在方案里只挂链、无归属** | 本文早先版本仅在 §9 / N5 备注里提 S4，**既无 P0/P1 编号也不在 §6 验收内** | 已提升为 **P0-10** 并加验收第 12 条 |
+
+**另有两条章节级缺失，本轮仍未补**（记在这里以免忘掉）：**① 没有迁移与回滚路径**——文档讲终态与"DDL 要进版本控制"，但没有"现状 → 终态"的中间态（现有 ES / pgvector 取值副本怎么停、服务若已上线如何灰度、失败怎么退）；**② 没有基线值与 owner**——§6 要求"golden 一键跑出门禁读数"，却没定义 20–50 条从哪来、谁标、口径冲突谁裁，也没留基线数字；21（现 22）个待答里零 owner。
+
+## 12. 取证快照（冻结于 2026-10-17，防 `courses/` 删除后失效）
+
+**为什么需要本节**：`courses/zhanggui-wenda/data-agent` **未被 git 跟踪**（`git ls-files courses/` = 0），且 `.gitignore:100` = `courses/`。用户 2026-10-17 表示该目录**后续会删除**——删除后不可恢复，而本文 P0-6① / P0-8① / §5.1 / §5.2 不变量一 / §5.3 反模式 4、5 / §5.3 修法段 / §2 课程实现行的证据全部指向它。
+
+**用法**：本文凡出现 `courses/...` 或 `app/...`（课程上下文）的行号引用，**一律改读本节**；本节是删除前的最终状态逐行抓取，行号即当时行号。抓取方式＝按 `(文件, 行号)` 直读原文，非人工誊抄，故与本文其余引用同源可信。覆盖 **13 个文件、63 行原文**（15 个文件头，其中 ES 与构建服务各出现两组）。
+
+⚠️ **删除后本文哪些断言会降级**：C1/C3（correct_sql 变量不匹配、校正后不复校）、A1/A2（双词表）、E1/E2（uuid4 不幂等、ES 文档 id 由值文本派生）——这些是**课程实现**的缺陷取证，删目录后仍可由本节复核，但**不能再新引课程侧任何未快照的行**。§2 表里"课程实现"那一行的整体描述因此只能引用本节已有的 9 组。
+
+```text
+**A1 分词职责双套串联 · 查询侧关键词来自 jieba** — `app/agent/nodes/extract_keywords.py`
+      31|     keywords = jieba.analyse.extract_tags(query, allowPOS=allow_pos)   <!-- 关键词由 jieba 抽取，而索引用 IK 分词 => 两套词表 -->
+
+**A2 ES 索引侧词表** — `app/repositories/es/value_es_repository.py`
+       9|     index_name = 'data-agent-value'   <!-- 索引名 -->
+      14|             "value": {"type": "text", "analyzer": "ik_max_word", "search_analyzer": "ik_max_word"},   <!-- value 字段 analyzer/search_analyzer 均为 ik_max_word -->
+      31|                 operations.append({"index": {"_index": self.index_name, "_id": value_info.id}})   <!-- bulk 的 _id 直接用 value_info.id（身份由值文本派生） -->
+      35|     async def search(self, keyword: str, score_threshold: float = 0.6, limit: int = 5) -> list[ValueInfo]:   <!-- search 默认 score_threshold=0.6 -->
+      42|                                           min_score=score_threshold,   <!-- min_score=score_threshold 原样送 ES -->
+
+**A3 检索层无删除路径** — `app/repositories/es/value_es_repository.py`
+      22|     async def ensure_index(self):   <!-- ensure_index 只 exists/create -->
+      26|     async def index(self, value_infos: list[ValueInfo], batch_size=20):   <!-- index 只 bulk index -->
+
+**B1 取值召回 N 次串行** — `app/agent/nodes/recall_value.py`
+      35|         keywords = list(set(keywords + result))   <!-- 关键词与 LLM 扩展词合并 -->
+      37|         for keyword in keywords:   <!-- for keyword in keywords -->
+      38|             values: list[ValueInfo] = await value_es_repository.search(keyword)   <!-- 逐个 await search(keyword) -->
+
+**C1 校正节点变量声明与 prompt 占位符不匹配** — `app/agent/nodes/correct_sql.py`
+      27|         prompt = PromptTemplate(template=load_prompt("correct_sql"), input_variables=["query", "metric_infos"])   <!-- input_variables 只声明 2 个 -->
+
+**C2 correct_sql.prompt 实际占位符** — `prompts/correct_sql.prompt`
+       8| {table_infos}   <!-- {table_infos} -->
+      11| {metric_infos}   <!-- {metric_infos} -->
+      14| {date_info}   <!-- {date_info} -->
+      17| {db_info}   <!-- {db_info} -->
+      20| {query}   <!-- {query} -->
+      23| {sql}   <!-- {sql} -->
+      26| {error}   <!-- {error} -->
+      35| 7. 生成的 SQL 只能用于查询，不得包含 INSERT、UPDATE、DELETE、CREATE 等任何写操作。   <!-- 『只能用于查询』这行（不是 :7） -->
+
+**C3 图：EXPLAIN 失败进校正，校正后直接执行** — `app/agent/graph.py`
+      61| graph_builder.add_conditional_edges("validate_sql",   <!-- 条件边 -->
+      62|                                     lambda state: "execute_sql" if state["error"] is None else "correct_sql",   <!-- error 非空则路由 correct_sql -->
+      65| graph_builder.add_edge("correct_sql", "execute_sql")   <!-- correct_sql -> execute_sql 直连（无复校） -->
+
+**D1 取值只作为 examples 喂模型** — `app/agent/nodes/merge_retrieved_info.py`
+      38|         for retrieved_value in retrieved_values:   <!-- 遍历 retrieved_values -->
+      45|             if column_value not in retrieved_columns_map[column_id].examples:   <!-- if column_value not in ...examples -->
+      46|                 retrieved_columns_map[column_id].examples.append(column_value)   <!-- append 进 examples -->
+
+**E1 向量点 ID 随机 => 重跑翻倍** — `app/services/meta_knowledge_service.py`
+      85|                     "id": uuid.uuid4(),   <!-- column name 点 id=uuid4 -->
+      92|                     "id": uuid.uuid4(),   <!-- column description 点 id=uuid4 -->
+      99|                     {"id": uuid.uuid4(), "embedding_text": alia, "payload": column_info}   <!-- alias 点 id=uuid4 -->
+     119|         await self.column_qdrant_repository.upsert(ids, embeddings, payloads)   <!-- column 走 upsert（id 全新故永不覆盖） -->
+     192|                     "id": uuid.uuid4(),   <!-- metric name 点 id=uuid4 -->
+     199|                     "id": uuid.uuid4(),   <!-- metric description 点 id=uuid4 -->
+     206|                     {"id": uuid.uuid4(), "embedding_text": alia, "payload": metric_info}   <!-- metric alias 点 id=uuid4 -->
+     222|         await self.metric_qdrant_repository.upsert(ids, embeddings, payloads)   <!-- metric 走 upsert -->
+
+**E2 取值字典的两个不同 limit** — `app/services/meta_knowledge_service.py`
+      56|                 column_values: list = await self.dw_mysql_repository.get_column_values(table.name, column.name, 10)   <!-- 列 examples 用 10 -->
+     131|                 column2sync[f"{table.name}.{column.name}"] = column.sync   <!-- column2sync 取 column.sync -->
+     136|             sync = column2sync[column_info.id]   <!-- sync 开关读取 -->
+     137|             if sync:   <!-- if sync 才继续 -->
+     141|                 values = await self.dw_mysql_repository.get_column_values(   <!-- get_column_values(...) -->
+     142|                     table_name, column_name, 100000   <!-- limit=100000 -->
+     146|                         id=f"{column_info.id}.{value}",   <!-- ES 文档 id=f"{column_info.id}.{value}" -->
+
+**F1 Qdrant collection 只声明稠密向量、从不 drop** — `app/repositories/qdrant/column_qdrant_repository.py`
+      16|     async def ensure_collection(self):   <!-- ensure_collection -->
+      17|         if not await self.client.collection_exists(self.collection_name):   <!-- 只判断 exists -->
+      19|                                                 vectors_config=VectorParams(size=app_config.qdrant.embedding_size,   <!-- VectorParams(size=embedding_size) -->
+      20|                                                                             distance=Distance.COSINE))   <!-- distance=COSINE -->
+      31|     async def search(self, embedding: list[float], score_threshold: float = 0.6, limit: int = 5) -> list[ColumnInfo]:   <!-- search 的 score_threshold=0.6 是 cosine -->
+
+**G1 元数据抽取的两条 SQL 与 explain 不拦写** — `app/repositories/mysql/dw/dw_mysql_repository.py`
+      10|         sql = f"show columns from {table_name}"   <!-- show columns from {table_name} -->
+      15|         sql = f"select distinct {column_name} from {table_name} limit {limit}"   <!-- select distinct {col} from {t} limit {limit} -->
+      20|         result = await self.session.execute(text("select version()"))   <!-- select version() -->
+      23|         dialect = self.session.get_bind().dialect.name   <!-- dialect 名 -->
+      25|         return {'version': version, 'dialect': dialect}   <!-- 返回 version+dialect -->
+      27|     async def validate_sql(self, sql):   <!-- async def validate_sql -->
+      28|         await self.session.execute(text(f"explain {sql}"))   <!-- explain {sql} -->
+      30|     async def execute_sql(self, sql):   <!-- async def execute_sql -->
+      31|         result = await self.session.execute(text(sql))   <!-- session.execute(text(sql)) -->
+
+**H1 依赖与环境（课程环境 != 现网）** — `pyproject.toml`
+       9|     "elasticsearch[async]>=8,<9",   <!-- elasticsearch[async]>=8,<9 -->
+      20|     "qdrant-client>=1.16.2",   <!-- qdrant-client>=1.16.2（只 pin 客户端） -->
+
+**H2 Qdrant 配置无 server 版本、embedding_size=1024** — `conf/app_config.yaml`
+      26| qdrant:   <!-- qdrant: -->
+      29|   embedding_size: 1024   <!-- embedding_size: 1024 -->
+
+**I2 `sync` 是课程侧 YAML 字段（平台侧 meta_config.yaml 无此字段）** — `conf/meta_config.yaml`
+       6| - name: region_id
+      10|         sync: false
+      12| - name: province
+      16|         sync: true
+```
