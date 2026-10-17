@@ -8,6 +8,9 @@
 >
 > **📝 变更记录**
 > - **v1.0**（2026-10-17）首版：合并 A/B 两轮。19 条现状实测（§2 A1–A6、§3 C1–C5）+ Q24 实跑结论（§4）+ 取值层合并解（§5）+ 五维评级（§6）+ 四批次工时（§7）+ 安全侧两处必改（§8）+ 待答项治理（§9）。
+> - **v1.1**（2026-10-17）**撤回本文自己的一条方向错误 + 登记一条被并行批次取代的现状陈述**。基线 rev = `88a4cdc`（本文提交点），代码树自 `v1.0` 起**无已提交改动**（`git diff --name-only 88a4cdc..HEAD` 的 `.py` 计数 = 0）；但工作区存在**另一会话的未提交连接池加固批**（6 modified + 3 新文件，均在 `applications/nl2sql-service/`），故本文凡引 `dependencies.py` / `settings.py` / `postgres_client_manager.py` 者，**基线是未提交工作区态，不可复现**，对方提交后须以那个 rev 重取。
+>   - ① **§11.3 瓶颈 2 的失效形状我写反了**：v1.0 记 B 轮"默认 `max_size` 下并发即排队"为成立，实则改造前 `AsyncConnectionPool(dsn)` 的默认是 `min_size=4 / max_size=None` ⇒ **无限新建后端连接**，天花板被推给 PG `max_connections`，超限以 `FATAL: too many clients` 形态冒出。**是无限扩张，不是排队**，两者排查方式相反。我当时由"共用一个池"直接推出失效形状，**没去读 psycopg_pool 的默认值**——与本文 §11.1 批评方案"凭模式猜"是同一类错，故在此自记。且这一半**已被对方本批修掉**（显式 min/max + `max_waiting=2*max_size` 快速失败 + `statement_timeout`），本文改判为「共用仍在（`dependencies.py:52` 与 `:64` 两行未变）、配额裸奔已由并行批次修复」，并**挂链其自述审计** `clients/pg_pool.py:4` 的「固化 2026-10-17 连接池审计的三个结论」⇒ 按本文 §11.3 给方案立的纪律（"须挂链不得当新发现"），瓶颈 2 的这一半是**重复发现一个已在修的问题**，不得自述为新发现。
+>   - ② **§3-C2 的"唯一路由"陈述正被并行批次取代**：新增 `api/routers/pools_router.py`（`GET /api/pools`，`prefix="/api"`）⇒ 方案 §2 表里"全服务只有一个路由 / `routers/` 目录仅此一个文件 / `@router.*` 全服务命中 1"这条**现状事实一旦对方提交即失效**。C2 的结论本身不受影响（判 SSE 用的是三个真签名，与路由数无关），但引用措辞须限定为"`/api/query` 仍是唯一**问数**路由"。已在 §3-C2 就地加注。
 >
 > **⚠️ 阅读顺序**：先读 §1 与 §2 的 A1/A6/A5，再读 §7 批次。§4 是本轮新增的实测证据（方案标为"需实测不靠推理"的 Q24 已跑完）。
 
@@ -132,7 +135,9 @@ P0-8③ 要新增零结果分诊探针、④ 要返回体语义、P1-3② 要口
 
 ### C2 §5.3 轴 3 用"SSE 流式、用户等首 token"论证检索选型，而该服务零 SSE
 
-精确重测：`StreamingResponse` / `text/event-stream` / `EventSourceResponse` 三个真签名在 `applications/nl2sql-service/` 命中 **0**；唯一路由 `api/routers/query_router.py:15` 是普通 `POST /api/query`，返回 `SqlQueryResponse` JSON。
+精确重测：`StreamingResponse` / `text/event-stream` / `EventSourceResponse` 三个真签名在 `applications/nl2sql-service/` 命中 **0**；`api/routers/query_router.py:15` 是普通 `POST /api/query`，返回 `SqlQueryResponse` JSON。
+
+⚠️ **措辞限定（v1.1）**：本文 v1.0 写的"唯一路由"已被并行批次取代——工作区新增 `api/routers/pools_router.py`（`GET /api/pools`，运维可观测）。准确表述是「`/api/query` 是唯一**问数**路由」。⇒ 连带地，方案 §2 现状表里"全服务只有一个路由 / `routers/` 目录仅此一个文件 / `@router.*` 全服务命中 1"这条**现状事实**在对方提交后即失效，须一并订正（该条不是本文结论的前提，C2 判的是 SSE 有无，与路由数无关，故撤回范围按纪律收窄到措辞）。
 
 ⚠️ 复测注意：不区分大小写地 grep `sse` 会命中 57 处**假阳性**（`assert` / `assembly` 的子串）。B 轮与本轮都先被这个骗过一次。
 
@@ -389,7 +394,17 @@ P0-1（**判据按 C5 收紧**；必须合并既有 P3 的 N+1 —— `meta_know
 
 ### 11.3 B 轮断言的逐条复核结果
 
-**10 条硬事实全部成立**：A1（`answer` 恒空）、A2（无 MySQL 驱动）、A3（召回结果被丢弃）、C2（零 SSE）、C3（四处死配置）、C4（`recall_value` 短路）、瓶颈 2（连接池共用：`dependencies.py` 同一个 `meta_pool` 给 `PgvectorClientManager` 与 `MetaRepository`，`dw_pool` 才独立）、P0-1 判据过软（`stats["values"]` 恒 0）、`filter_clause` 正则管不了、LOC 1690 / 测试 289（实测精确一致）。
+**9 条硬事实成立**：A1（`answer` 恒空）、A2（无 MySQL 驱动）、A3（召回结果被丢弃）、C2（零 SSE，措辞需限定见 §3）、C3（四处死配置）、C4（`recall_value` 短路）、P0-1 判据过软（`stats["values"]` 恒 0）、`filter_clause` 正则管不了、LOC 1690 / 测试 289（实测精确一致）。
+
+**1 条方向写反，本文 v1.0 误判为成立 → v1.1 撤回**：**瓶颈 2**。
+
+| 分句 | v1.0 判定 | v1.1 判定 | 依据 |
+|---|---|---|---|
+| 同一个 `meta_pool` 同时喂 `PgvectorClientManager` 与 `MetaRepository`（`dw_pool` 才独立） | 成立 | **仍成立** | `api/dependencies.py:52` 与 `:64`，对方本批未改这两行 |
+| 失效形状＝"默认 `max_size` 下并发即排队" | 成立 | **✗ 反了** | 改造前默认 `min_size=4 / max_size=None` ⇒ **无限新建后端**，天花板推给 PG `max_connections`，超限以 `FATAL: too many clients` 冒出。无限扩张与排队是两种排查路径 |
+| 该项属"评审新发现" | 成立 | **✗ 一半是重复发现** | 另一会话正在修同一处，且已有自述审计：`clients/pg_pool.py:4`「固化 2026-10-17 连接池审计的三个结论」（强制显式 min/max、`max_waiting = 2*max_size` 快速失败、连接级下发 `-c default_transaction_read_only=on`）⇒ 按本文 §11.3 替方案立的"须挂链不得当新发现"纪律，本条一半须挂链、不得自述 |
+
+⇒ 剩下的**不是配额问题**，而是**异构负载共享同一份配额**：元知识库写入（构建入口，要写）与向量召回（每查询都打、且方案 N4 已证无索引 ⇒ 可能全表扫）抢同一份 min/max。修复方向随之从"加配额"变为"**拆池或给召回单独配额**"，且 P0-0 源访问层落地时这个决策会被再次触发——现在不必动，但别再按"排队"表述它。
 
 **5 条判断题均同意**：C1、瓶颈 1 方向、瓶颈 3、瓶颈 4、Q25 排序。
 
@@ -402,7 +417,8 @@ P0-1（**判据按 C5 收紧**；必须合并既有 P3 的 N+1 —— `meta_know
 | 等级 | 条目 |
 |---|---|
 | **实跑确认** | §4 的方言矩阵（sqlglot 30.20.0 + `agent_core.sql.guard.validate_sql`，8 组语句 × 3 方言） |
-| **代码逐行确认** | A1–A6、C1–C5、F1–F3、五处死配置、连接池共用、LOC、golden 5 条与无 runner、未部署 |
+| **代码逐行确认** | A1–A6、C1–C5、F1–F3、五处死配置、LOC、golden 5 条与无 runner、未部署。连接池一项仅「同一 `meta_pool` 喂两消费者」这一句成立，失效形状见下一行 |
+| **v1.1 撤回（本文自己的错）** | 瓶颈 2 的失效形状「并发即排队」——改造前实为 `max_size=None` 无限新建；以及「唯一路由」措辞已被并行批次的新运维路由取代。两条均在 §11.3 与 §3 就地订正，其余判定不动 |
 | **静态判据 + 死码事实，待一次实跑** | `get_table_schema` 的 `column_comment` 在 PG 不存在（A6）——该方法零调用方零测试，从未执行 |
 | **判断题（非事实）** | 五维评级、批次划分、工时估算、§5.3 分层、§9 默认假设 |
 
