@@ -1,4 +1,12 @@
-"""依赖注入：lifespan 初始化 Postgres/pgvector 客户端 + DataAgentContext 单例。"""
+"""依赖注入：lifespan 初始化 Postgres/pgvector 客户端 + DataAgentContext 单例。
+
+连接池一律走 `agent_runtime.pool_factory.create_pool`（2026-10-18 上移的共享件，
+方案 §5.12.2）：显式 min/max/timeout/statement_timeout，不再用 psycopg_pool 默认值
+（`max_size=None` ⇒ 无限新建后端，天花板交给 PG `max_connections`）。
+业务数仓池额外开启连接级只读。
+池实例登记在 `app.state.pools`（name → pool），供 `GET /api/pools` 出可观测快照，
+关闭时按同一份登记逐个 close。
+"""
 
 from contextlib import asynccontextmanager
 
@@ -20,10 +28,10 @@ async def lifespan(app: FastAPI):
     llm = build_llm()
     graph = build_graph()
     ctx = DataAgentContext()
-    pools: list = []
+    registry: dict = {}
 
     if settings.meta_db_enabled:
-        from psycopg_pool import AsyncConnectionPool
+        from agent_runtime.pool_factory import create_pool
 
         from nl2sql_service.clients.embedding_client_manager import build_embedder
         from nl2sql_service.clients.pgvector_client_manager import PgvectorClientManager
@@ -32,9 +40,17 @@ async def lifespan(app: FastAPI):
         from nl2sql_service.repositories.pgvector.value_repository import ValueRepository
         from nl2sql_service.repositories.postgres.meta.meta_repository import MetaRepository
 
-        meta_pool = AsyncConnectionPool(settings.meta_db_dsn, open=False)
+        meta_pool = create_pool(
+            dsn=settings.meta_db_dsn,
+            name="meta",
+            min_size=settings.meta_db_pool_min_size,
+            max_size=settings.meta_db_pool_max_size,
+            timeout=settings.meta_db_pool_timeout,
+            statement_timeout_ms=settings.meta_db_statement_timeout_ms,
+            read_only=False,  # 元知识库有构建入口要写
+        )
         await meta_pool.open()
-        pools.append(meta_pool)
+        registry["meta"] = meta_pool
         pgvector_client = PgvectorClientManager(pool=meta_pool)
         embedder = build_embedder(
             settings.embedding_backend,
@@ -51,14 +67,26 @@ async def lifespan(app: FastAPI):
         )
 
     if settings.dw_db_enabled:
-        from psycopg_pool import AsyncConnectionPool
+        from agent_runtime.pool_factory import create_pool
 
         from nl2sql_service.repositories.postgres.dw.dw_repository import DwRepository
 
-        dw_pool = AsyncConnectionPool(settings.dw_db_dsn, open=False)
+        dw_pool = create_pool(
+            dsn=settings.dw_db_dsn,
+            name="dw",
+            min_size=settings.dw_db_pool_min_size,
+            max_size=settings.dw_db_pool_max_size,
+            timeout=settings.dw_db_pool_timeout,
+            statement_timeout_ms=settings.dw_db_statement_timeout_ms,
+            # 连接级只读：这个池上跑的是 LLM 生成的 SQL。DwRepository 里每次执行前
+            # 的 SET 是第三道防线，两道都在，任一被绕过都还有另一道。
+            read_only=settings.dw_db_connection_read_only,
+        )
         await dw_pool.open()
-        pools.append(dw_pool)
+        registry["dw"] = dw_pool
         ctx.dw_repository = DwRepository(pool=dw_pool)
+
+    app.state.pools = registry
 
     app.state.llm = llm
     app.state.graph = graph
@@ -66,13 +94,14 @@ async def lifespan(app: FastAPI):
     app.state.query_service = QueryService(graph=graph, context=ctx, llm=llm)
     app.state.settings = settings
     logger.info(
-        "nl2sql-service 就绪 host=%s port=%d llm=%s meta_db=%s dw_db=%s",
+        "nl2sql-service 就绪 host=%s port=%d llm=%s meta_db=%s dw_db=%s pools=%s",
         settings.host,
         settings.port,
         llm.enabled,
         settings.meta_db_enabled,
         settings.dw_db_enabled,
+        {name: f"{p.min_size}-{p.max_size}" for name, p in registry.items()},
     )
     yield
-    for pool in pools:
+    for pool in registry.values():
         await pool.close()
