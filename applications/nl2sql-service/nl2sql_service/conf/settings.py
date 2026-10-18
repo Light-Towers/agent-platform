@@ -5,8 +5,10 @@
 
 from functools import lru_cache
 from pathlib import Path
+from typing import List
 
 import yaml
+from pydantic import Field
 from shared_schemas.settings import BaseLLMSettings
 
 
@@ -70,6 +72,23 @@ class Settings(BaseLLMSettings):
 
     # 分词器：jieba | bigram（jieba 需装可选 extra `[tokenizer]`，缺包时告警降级 bigram）
     tokenizer: str = "bigram"
+
+    # 取值只读探针（P0-9/P0-7）：取值匹配的唯一源侧入口。默认全关的
+    # linkable 白名单 + 短超时 + 信号量 + 版本缓存；分区列配了就必须带
+    # 最新分区值（取不到就不探，不做全分区扫描）。
+    value_probe_enabled: bool = True
+    value_probe_limit: int = 50
+    value_probe_timeout_ms: int = 2000
+    value_probe_concurrency: int = 2
+    value_probe_cache_ttl_seconds: int = 900
+    # 源数据版本（Doris 最新分区号 / MySQL 水位）；空 = TTL 分桶兜底
+    source_snapshot_sql: str = ""
+    # 分区谓词（Doris 场景必配）：配了分区列但取不到最新值 ⇒ 不探
+    dw_partition_column: str = ""
+    dw_latest_partition_sql: str = ""
+    dw_partition_required: bool = True
+    # P1-2 linkable 白名单（"table.column" 全限定名；默认空 = 全关）
+    linkable_columns: List[str] = Field(default_factory=list)
 
     # 生成期日期上下文的口径说明（P0-11①，2026-10-18）：系统日期由代码注入，
     # 数据新鲜度由部署方声明（如"数据为 T+1 快照，按数据日期理解相对时间"）。
@@ -156,6 +175,18 @@ def get_settings() -> Settings:
         overrides["aggregation_row_threshold"] = app_yaml["sql"].get("aggregation_row_threshold", 1_000_000)
     if "tokenizer" in app_yaml:
         overrides["tokenizer"] = app_yaml["tokenizer"].get("type", "bigram")
+    probe_yaml = app_yaml.get("value_probe") or {}
+    if probe_yaml:
+        overrides["value_probe_enabled"] = probe_yaml.get("enabled", True)
+        overrides["value_probe_limit"] = probe_yaml.get("limit", 50)
+        overrides["value_probe_timeout_ms"] = probe_yaml.get("timeout_ms", 2000)
+        overrides["value_probe_concurrency"] = probe_yaml.get("concurrency", 2)
+        overrides["value_probe_cache_ttl_seconds"] = probe_yaml.get("cache_ttl_seconds", 900)
+        overrides["source_snapshot_sql"] = probe_yaml.get("snapshot_sql", "")
+        overrides["dw_partition_column"] = probe_yaml.get("partition_column", "")
+        overrides["dw_latest_partition_sql"] = probe_yaml.get("latest_partition_sql", "")
+        overrides["dw_partition_required"] = probe_yaml.get("partition_required", True)
+        overrides["linkable_columns"] = probe_yaml.get("linkable_columns", []) or []
     if "meta_db" in meta_yaml:
         overrides["table_prefix"] = meta_yaml["meta_db"].get("table_prefix", "nl2sql_")
     if "pool" in app_yaml:

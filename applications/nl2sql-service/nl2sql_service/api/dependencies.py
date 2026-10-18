@@ -84,7 +84,30 @@ async def lifespan(app: FastAPI):
         )
         await dw_pool.open()
         registry["dw"] = dw_pool
-        ctx.dw_repository = DwRepository(pool=dw_pool)
+        dw_repository = DwRepository(pool=dw_pool)
+        ctx.dw_repository = dw_repository
+        # 取值只读探针（P0-9 单入口）：只在 dw 池就绪时装配
+        from nl2sql_service.services.value_resolver import (
+            LinkablePolicy,
+            ValueResolver,
+            ValueResolverConfig,
+        )
+
+        ctx.value_resolver = ValueResolver(
+            dw_repository=dw_repository,
+            config=ValueResolverConfig(
+                enabled=settings.value_probe_enabled,
+                probe_limit=settings.value_probe_limit,
+                statement_timeout_ms=settings.value_probe_timeout_ms,
+                concurrency=settings.value_probe_concurrency,
+                cache_ttl_seconds=settings.value_probe_cache_ttl_seconds,
+                snapshot_sql=settings.source_snapshot_sql,
+                partition_column=settings.dw_partition_column,
+                latest_partition_sql=settings.dw_latest_partition_sql,
+                partition_required=settings.dw_partition_required,
+            ),
+            linkable=LinkablePolicy(allowlist=settings.linkable_columns),
+        )
 
     app.state.pools = registry
 
