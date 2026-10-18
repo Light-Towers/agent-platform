@@ -123,7 +123,10 @@ async def test_merge_derives_tables_from_columns():
             "values": [],
         }
     )
-    assert out["tables"] == [{"table_name": "orders"}, {"table_name": "venues"}]
+    assert out["tables"] == [
+        {"table_name": "orders", "table_comment": ""},
+        {"table_name": "venues", "table_comment": ""},
+    ]
 
 
 # --- 检索层：embedding 只算一次 ---------------------------------------------

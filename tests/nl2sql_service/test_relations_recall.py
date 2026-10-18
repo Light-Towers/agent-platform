@@ -171,14 +171,45 @@ async def test_relation_tables_join_filter_table_candidates():
             "relations": _RELATIONS,
         }
     )
-    assert out["tables"] == [{"table_name": "orders"}, {"table_name": "customers"}], "关系涉及表必须并入候选"
+    assert out["tables"] == [
+        {"table_name": "orders", "table_comment": ""},
+        {"table_name": "customers", "table_comment": ""},
+    ], "关系涉及表必须并入候选"
 
 
 async def test_no_relations_keeps_previous_behaviour():
     out = await merge_retrieved_info(
         {"columns": [{"table_name": "orders", "column_name": "amount"}], "metrics": [], "values": [], "relations": []}
     )
-    assert out["tables"] == [{"table_name": "orders"}]
+    assert out["tables"] == [{"table_name": "orders", "table_comment": ""}]
+
+
+# ---------------------------------------------------------------------------
+# ④b 表注释读路径（A 方案 Stage ②：docs→comment 迁移必须可见）
+# ---------------------------------------------------------------------------
+async def test_table_comment_flows_from_columns_to_tables_and_prompt():
+    """列行冗余的 table_comment（§5.14-R2）必须派生进表清单并到达生成 prompt。
+
+    否则 sql_docs 迁进 column_info.table_comment 是**只写不读**——迁移白做。
+    """
+    out = await merge_retrieved_info(
+        {
+            "columns": [
+                {"table_name": "orders", "column_name": "amount", "table_comment": "订单主表"},
+                {"table_name": "orders", "column_name": "id", "table_comment": "订单主表"},
+            ],
+            "metrics": [],
+            "values": [],
+        }
+    )
+    assert out["tables"] == [{"table_name": "orders", "table_comment": "订单主表"}], "同表多列行取首个非空注释"
+
+    llm = _StubLLM()
+    await generate_sql(
+        {"query": "销售额", "llm": llm, "tables": out["tables"], "columns": [], "metrics": [], "values": []}
+    )
+    assert llm.prompt is not None
+    assert "订单主表" in llm.prompt, "表注释必须进生成 prompt（docs 迁移的在线收益落点）"
 
 
 # ---------------------------------------------------------------------------

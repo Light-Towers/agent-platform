@@ -28,7 +28,9 @@ class ColumnRepository:
             embedding_col="embedding",
             query_embedding=embedding,
             top_k=top_k,
-            extra_cols="column_name, column_comment, table_name, data_type",
+            # table_comment 随列行冗余带回（§5.14-R2）：业务文档（A 方案 Stage ②
+            # 从 sql_docs 迁入）经 merge 派生进表清单，生成期 prompt 才看得到。
+            extra_cols="column_name, column_comment, table_name, data_type, table_comment",
             filters=filters,
         )
         # 相对截断：与最佳分的差超过 margin 即丢（绝对分跨查询不可比，P0-5④）

@@ -222,7 +222,7 @@ class MetaRepository:
         row_tpl = "(%s, %s)"
         values_sql = ", ".join([row_tpl] * len(keys))
         sql = (
-            f"SELECT table_name, column_name, column_comment, data_type "
+            f"SELECT table_name, column_name, column_comment, data_type, table_comment "
             f"FROM {self._prefix}column_info "
             f"WHERE tenant_id = %s AND workspace_id = %s AND datasource_id = %s "
             f"AND (table_name, column_name) IN (VALUES {values_sql})"
