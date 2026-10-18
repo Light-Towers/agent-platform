@@ -53,7 +53,7 @@ LLM + 可达 dw 库 + 人工标注轮次，本机/本次拿不到。基线数字
 | **golden 标注 owner** | 定 `expect_*` 正确答案、写 `notes` 口径、review golden PR | **待填**（问数产品/数据负责人） |
 | **口径冲突仲裁** | 两个标注者对同一题 `expect_*` 不一致时谁裁 | **待填**（建议：问数产品负责人，一次裁断写进 notes，不再反复） |
 | **门禁 owner** | 发版前跑 `run_golden --fail-on-regression`、读数偏离基线时放行/打回 | **待填**（建议：nl2sql 服务 owner） |
-| **nl2sql 服务 owner** | ADR-0011 的 C 选项里"哪类问数走哪条路"的边界归属 | **待填** |
+| **nl2sql 服务 owner** | ADR-0011 已决 **A**（2026-10-18）：agent_server/sql 退役、统一到 nl2sql-service。本角色负责 Stage ③（`subagents/sql_agent.py` 等消费方改端点 + 退役时序）与退役后唯一问数路的边界维护 | **待填** |
 
 > owner 待填是**有意的诚实**——§11.6 指出的病是"零 owner"，先立**角色位与职责**，
 > 具体人名由项目负责人指派后回填。立了位比空着更接近可运营。

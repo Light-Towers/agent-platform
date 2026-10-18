@@ -1,7 +1,7 @@
 # ADR-0011: 平台内两条 Text2SQL 路（nl2sql-service / agent_server/sql）——收敛决策记录
 
-- 状态：**未决（本文不替用户拍板；只把现状、选项与代价摆清，供 Q25 回答）**
-- 日期：2026-10-18
+- 状态：**已决：选项 A（2026-10-18 用户拍板）——agent_server/sql 退役，统一到 nl2sql-service。** 下文 §1-§6 为拍板前的现状与选项分析（原样保留，供追溯"为什么是 A"）；§7 起为 A 的执行记录。
+- 日期：2026-10-18（初稿）；2026-10-18（决策 + Stage ①/② 落地记录）
 - 来源：`docs/plans/plan-nl2sql-meta-lifecycle-2026-10-17.md` §11.6-G1（代码审计新发现）+ 待答 **Q25**
 - 关联：`ADR-0006`（隔离维度契约，agent_server/sql 的 `sql_*` 三表已按 tenant/workspace 隔离）、`ADR-0007`（服务端断言身份）、`ADR-0009`（向量存储选型，pgvector 侧）
 
@@ -52,3 +52,29 @@
 1. nl2sql 接入身份隔离（tenant/workspace + 身份门）⇒ A 的"倒退"顾虑消失，值得重算。
 2. 出现明确的"同一问数需求两条路都要答"的场景 ⇒ 并存的边界契约必须当场补细。
 3. 有**第三**个 Text2SQL 实现出现 ⇒ 必须当场定 C 的"禁止第三套"不变量。
+
+## 7. 执行记录（决策后追加，2026-10-18）
+
+**Q25 答案：A。** 判据：① §4.1 硬前置（nl2sql 租户维度）已落地——meta 五表出生即带 `tenant_id`/`workspace_id`，P1-1 隔离（三列恒过滤 + 租户漏传 fail-fast）已实装并有真库判据，A 的"净倒退"顾虑消失；② 两条路定位重叠度随 nl2sql 成熟持续上升（取值核验/多轮/追溯都是 agent_server/sql 没有的），并存维护成本大于收益。
+
+执行分三 Stage：
+
+| Stage | 内容 | 状态 |
+|---|---|---|
+| ① | nl2sql 租户/工作区隔离（A 的硬前置）：schema 作用域列 + 查询侧恒过滤 + 漏传 fail-fast | **已完成**（commit `707a29c`；`tests/governance/` 隔离判据 + 真库 `tests/ha/test_tenant_isolation_real_pg.py`） |
+| ② | `sql_*` 三表数据迁移 + 映射设计 | **已完成**（commit `e233d72`/`19bfe27`/`597ce56`/`0c65f76`，映射设计见 §7.1） |
+| ③ | 消费方改端点：`subagents/sql_agent.py` 等 agent_server 调用方改调 nl2sql-service，agent_server/sql 代码退役 | 未开始 |
+
+### 7.1 Stage ② 映射设计（关键决策）
+
+| 源（agent_server/sql） | 目标（nl2sql） | 落点 |
+|---|---|---|
+| `sql_ddl.content`（DDL 文本） | `nl2sql_column_info` | `ddl_parser.parse_ddl`（sqlglot：CREATE TABLE + `COMMENT ON`，表级约束不产列行） |
+| `sql_docs.content`（业务文档） | 同作用域表的 `table_comment` | `associate_docs_with_tables`（词边界匹配；未命中文档记账不静默）+ **表注释读路径**（`_derive_tables` 带注释、`ColumnRepository.recall` 取该列——否则 docs 迁移只写不读） |
+| `sql_examples`（问题→SQL 范例） | **新表 `nl2sql_example_info`（迁移 004）** | 见下 |
+
+**范例为什么不用 `session_state.confirmed_pairs`**：后者是按 `session_id` 隔离的**会话态**（M6：人不确认的错题不进范例库），全局训练语料塞进某个 session 行既无自然语义、又会被会话生命周期管理干扰。故新表承载：`question` 自然键（重训练 upsert 更新 SQL 不叠副本）、`source human/machine`（机提未确认不进召回，同 `alias_info` 语义）、按 question 相似度向量召回（`ExampleRepository` + `recall_example` 节点 + 生成期 few-shot 槽）。**这条同时补上了 nl2sql 缺的 few-shot 能力**——agent_server 退役不等于能力净损失。
+
+**铁律**：迁移只取文本、向量一律用目标侧 embedder 重算（源 embedder 可能不同模型/维度，拷贝 = 炸库或静默劣化）；作用域保真（源 tenant/workspace 原样带，`--tenant ''` 显式折叠单租户 legacy 库）；prune 只删范例（列有 MetricConfig + 迁移双写入源，误删会删掉配置构建的行）。
+
+**验证状态**：单测 26 条 + 真库用例（`test_migration_write_path_on_real_pg`，skipif 双 DSN：写入/维度/注释合并/租户不串味/幂等/prune/ANN 召回机械性全过）。⚠️ 语义质量待复核：siliconflow 余额耗尽（402）期间迁移数据用的是确定性假向量，余额恢复后重跑同一命令即自动更新（upsert 自然键不变）。
