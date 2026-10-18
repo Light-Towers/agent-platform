@@ -74,24 +74,42 @@ def test_metric_value_requires_column_and_value():
 
 
 def test_metric_config_to_recall_result_shape():
-    """召回节点消费的形状：四段齐全、字段名即运行契约（改名即红）。"""
+    """召回节点消费的形状：六段齐全、字段名即运行契约（改名即红）。"""
     config = MetricConfig(
         tables=[{"table_name": "orders", "table_comment": "订单表"}],
         columns=[{"table_name": "orders", "column_name": "amount", "column_comment": "金额", "data_type": "numeric"}],
         metrics=[{"metric_name": "销售额", "metric_desc": "订单金额合计", "metric_expr": "SUM(orders.amount)"}],
         values=[{"column_name": "order_status", "value": "已支付", "value_desc": ""}],
+        relations=[
+            {
+                "left_table": "orders",
+                "left_column": "customer_id",
+                "right_table": "customers",
+                "right_column": "customer_id",
+            }
+        ],
+        aliases=[{"target_kind": "metric", "target_name": "销售额", "alias": "GMV"}],
     )
     result = config.to_recall_result()
 
-    assert set(result) == {"tables", "columns", "metrics", "values"}
+    assert set(result) == {"tables", "columns", "metrics", "values", "relations", "aliases"}
     assert result["tables"][0] == {"table_name": "orders", "table_comment": "订单表"}
     assert result["metrics"][0]["metric_expr"] == "SUM(orders.amount)"
     assert result["values"][0]["value"] == "已支付"
+    assert result["relations"][0]["relation_type"] == "many_to_one", "关系默认类型漂移"
+    assert result["aliases"][0]["source"] == "human", "别名默认来源漂移"
 
 
 def test_metric_config_defaults_to_empty_sections():
     config = MetricConfig()
-    assert config.to_recall_result() == {"tables": [], "columns": [], "metrics": [], "values": []}
+    assert config.to_recall_result() == {
+        "tables": [],
+        "columns": [],
+        "metrics": [],
+        "values": [],
+        "relations": [],
+        "aliases": [],
+    }
 
 
 # ---------------------------------------------------------------------------

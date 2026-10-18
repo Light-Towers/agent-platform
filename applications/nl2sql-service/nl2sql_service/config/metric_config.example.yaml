@@ -50,3 +50,26 @@ values:
   - column_name: "customers.customer_name"
     value: "VIP"
     value_desc: "VIP 客户"
+
+# 表间关系声明（§5.14-R1，轻量、不造 DSL）：让 LLM 不再猜 JOIN。
+# relation_type: many_to_one | one_to_one | one_to_many
+# note 用于同名不同义消歧（如 exhibitor_id 在订单/日志/支付语义不同）
+relations:
+  - left_table: "orders"
+    left_column: "customer_id"
+    right_table: "customers"
+    right_column: "customer_id"
+    relation_type: "many_to_one"
+    note: "订单归属客户；同名列以本声明为准"
+
+# 别名/同义词声明（§5.14-R1）：GMV→销售额 这类口语变体。
+# source: human（人工确认，参与召回）| machine（机提未确认，不参与召回）
+aliases:
+  - target_kind: "metric"
+    target_name: "销售额"
+    alias: "GMV"
+    source: "human"
+  - target_kind: "column"
+    target_name: "orders.amount"
+    alias: "成交金额"
+    source: "human"
