@@ -592,6 +592,8 @@ SHOW BUILD INDEX;             -- 看进度
 
 **设计（核心原则：先机器分类，再决定喂不喂模型）**：
 
+**外部对标（2026-10-18 调研）**：开源最好水平是 Chat2DB"SQL ERROR 一键修复"（人工在环，用户点一下才回送模型）与宣传口径的生成期自检；**无一家实现机器三分类自动闭环**——本设计是自研增量，无外部基准可抄，验收判据必须自建（详见 `appendix-open-source-text2sql-benchmark-2026-10-18.md` §6）。
+
 | 异常类 | 判据 | 处置 | 为什么不都喂模型 |
 |---|---|---|---|
 | **可纠正** | 语法错、列/表名不存在、类型不匹配、函数不存在——DB 错误信息可机器识别且改 SQL 可能解决 | 进 correct 回路：错误原文 + 相关对象 schema 片段 + 已尝试历史 | 这类信号明确，模型纠正命中率高 |
@@ -630,7 +632,7 @@ feedback 契约（每轮进 prompt 的）：① 错误分类与截断后原文�
 | trace 落库/golden 回归 | nl2sql | 既有 otel 链；eval 后置 | ③ | B4 |
 | **answer 合成节点** + matched/unmatched/口径标签契约 | nl2sql 节点 | **nl2sql（领域）** | ③ "SQL→人话"是问数领域逻辑，runtime 不需要知道 | B1 |
 | 指标语义、别名/码表、linkable 白名单、prompt | nl2sql | **nl2sql（领域）** | ③ | B2 |
-| 语义层 store + 生命周期 | 依赖 **Q25** | 收敛路：nl2sql 退化为 `agent_server/sql/schema_store` 的 builder 之一 | ② 这是架构分叉不是实现细节 | B0 拍板后 |
+| 语义层 store + 生命周期 | 依赖 **Q25** | 收敛路：nl2sql 退化为 `agent_server/sql/schema_store` 的 builder 之一 | ② 这是架构分叉不是实现细节 | B0 拍板后；**外部参照 WrenAI MDL（附录 A1），可作收敛后形态的验收参照系** |
 
 #### 12.2 pg_pool 上移的具体设计（加法式，零行为风险）
 
@@ -705,7 +707,7 @@ feedback 契约（每轮进 prompt 的）：① 错误分类与截断后原文�
 | Q22 | 待答（§11 新增） | 内网 MySQL 的 `ngram_token_size` 现值是多少、能否改？（该变量**非动态**：改配置要重启，且改完必须重建 ngram 索引） | P1-4 矩阵"中文模糊匹配"这格在 MySQL 侧到底可选还是不可选 |
 | Q23 | 待答（§11 新增） | `nl2sql_*` 元数据表与向量索引**当前由谁创建**？（仓内 `find -name '*.sql'` 命中 0、`CREATE TABLE`/`CREATE INDEX` 命中 0 ⇒ 只能靠库外手段，本文无法自证） | P0-1 / P0-2 / P0-5 有没有落地对象；P0-5 的"走索引"判据能否成立 |
 | Q24 | 待答（§11 新增，需实测不靠推理） | `guard.validate_sql` 末尾 `stmt.sql(dialect=dialect)` 会**重写** SQL 文本；dialect 目前硬编码 `postgres`，若 SQL 实际打 Doris/MySQL，重写会不会把合法语句改坏（分区语法、`MATCH_ANY`、反引号、`LIMIT` 位置）？ | N6 的连带风险；决定 P1-4 是"加谓词模板"还是"先停用规整重写" |
-| Q25 | 待答（§11.6 G1 新增） | **平台内已有第二条 Text2SQL 路，本方案未覆盖**：`applications/agent_server/sql/pipeline.py:1` 自述“Vanna 式 Text-to-SQL 管线：召回上下文 → LLM 生成 → 白名单守卫 → 只读执行”，`schema_store.py:17-54` 是完整的 `store_ddl`/`store_doc`/`store_example` 三件套，`guard.py:1-3` 复用同一内核守卫。它与 `nl2sql-service` 的 YAML 元知识库**是两条并存路，还是收敛成一条**？谁是谁的超集？ | 决定 P0-1/P0-2/P1-6 是“新建”还是“复用”；不对齐就直接撞 ADR-0009 与 §7 归属边界，且会把同一套语义层建两遍 |
+| Q25 | 待答（§11.6 G1 新增） | **平台内已有第二条 Text2SQL 路，本方案未覆盖**：`applications/agent_server/sql/pipeline.py:1` 自述"Vanna 式 Text-to-SQL 管线：召回上下文 → LLM 生成 → 白名单守卫 → 只读执行"，`schema_store.py:17-54` 是完整的 `store_ddl`/`store_doc`/`store_example` 三件套，`guard.py:1-3` 复用同一内核守卫。它与 `nl2sql-service` 的 YAML 元知识库**是两条并存路，还是收敛成一条**？谁是谁的超集？ | 决定 P0-1/P0-2/P1-6 是"新建"还是"复用"；不对齐就直接撞 ADR-0009 与 §7 归属边界，且会把同一套语义层建两遍。**外部调研（2026-10-18，五项目许可证/权限盲区/MDL 参照）支撑收敛判断，见 `appendix-open-source-text2sql-benchmark-2026-10-18.md` §4** |
 
 **Q21 详单（从表格里移出来——上一版把这段写进单元格，嵌套代码块吃掉一个列分隔符，整行塌成 3 列；已按 P0-7 同样办法移到表后）**
 
