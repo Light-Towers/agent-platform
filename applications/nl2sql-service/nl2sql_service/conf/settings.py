@@ -25,6 +25,13 @@ class Settings(BaseLLMSettings):
     # 表前缀
     table_prefix: str = "nl2sql_"
 
+    # 数据源维度（P1-3/P1-4/P1-6）：问数只读消费方，源由用户在会话里显式选定。
+    # 单源部署（一个 dw DSN）时这三项描述默认源；datasource_dialect 留空则按
+    # dw_db_dsn 的 scheme 自动探测（mysql:// → mysql，其余 postgres）。
+    datasource_id: str = "dw"
+    datasource_label: str = ""  # 口径标签（P1-3②），随响应体返回，如"数仓 T+1、已清洗"
+    datasource_dialect: str = ""  # 空 = 按 dw_db_dsn scheme 探测；否则 postgres|mysql
+
     # LLM 补充字段
     llm_max_retries: int = 3
 
@@ -175,6 +182,11 @@ def get_settings() -> Settings:
         overrides["aggregation_row_threshold"] = app_yaml["sql"].get("aggregation_row_threshold", 1_000_000)
     if "tokenizer" in app_yaml:
         overrides["tokenizer"] = app_yaml["tokenizer"].get("type", "bigram")
+    datasource_yaml = app_yaml.get("datasource") or {}
+    if datasource_yaml:
+        overrides["datasource_id"] = datasource_yaml.get("id", "dw")
+        overrides["datasource_label"] = datasource_yaml.get("label", "") or ""
+        overrides["datasource_dialect"] = datasource_yaml.get("dialect", "") or ""
     probe_yaml = app_yaml.get("value_probe") or {}
     if probe_yaml:
         overrides["value_probe_enabled"] = probe_yaml.get("enabled", True)

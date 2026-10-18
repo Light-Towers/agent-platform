@@ -46,3 +46,10 @@ pool:
 
 tokenizer:
   type: "bigram"
+
+# 数据源（P1-3/P1-4/P1-6）：问数只读消费方，源由用户在会话里显式选定。
+# 单源部署（一个 dw DSN）时描述默认源；dialect 留空按 dw DSN scheme 自动探测。
+datasource:
+  id: "dw"
+  label: ""            # 口径标签（P1-3②），随响应体返回，如"数仓 T+1、已清洗"
+  dialect: ""          # 空 = 按 dw_db_dsn scheme 探测；否则 postgres | mysql

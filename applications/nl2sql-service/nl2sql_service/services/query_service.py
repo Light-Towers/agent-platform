@@ -46,10 +46,32 @@ class QueryService:
 
         settings = get_settings()
         metric_config = kwargs.get("metric_config")
+        datasource_id = kwargs.get("datasource_id")
+        # 数据源解析（P1-3/P1-4/P1-6）：请求显式选源；未知 id fail-fast，
+        # 不静默回落默认源（串源比报错更糟）。无注册表（老部署/测试）回落默认串。
+        registry = getattr(self._context, "datasources", None)
+        dialect = "postgres"
+        source_label = settings.datasource_label
+        resolved_ds = settings.datasource_id
+        if registry is not None:
+            try:
+                source = registry.resolve(datasource_id)
+            except KeyError:
+                return {
+                    "answer": "",
+                    "error": f"未知数据源: {datasource_id}",
+                    "fallback": True,
+                }
+            dialect = source.dialect
+            source_label = source.label
+            resolved_ds = source.id
         state: dict[str, Any] = {
             "query": question,
             "context": self._context,
             "llm": self._llm,
+            "datasource_id": resolved_ds,
+            "datasource_label": source_label,
+            "dialect": dialect,
             "sql_max_rows": settings.sql_max_rows,
             "sql_max_correct_retries": settings.sql_max_correct_retries,
             "retrieval_top_k": settings.retrieval_top_k,
@@ -95,6 +117,8 @@ class QueryService:
             "dict_hit": result.get("dict_hit", False),
             "empty_result_reason": result.get("empty_result_reason"),
             "path": result.get("path", "graph"),
+            # P1-3②：口径标签经 state 透传（graph 保留 datasource_label）
+            "datasource_label": result.get("datasource_label"),
         }
         if not response["sql"] and not response["error"]:
             response["answer"] = response["answer"] or (

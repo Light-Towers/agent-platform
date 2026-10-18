@@ -111,6 +111,18 @@ async def lifespan(app: FastAPI):
 
     app.state.pools = registry
 
+    # 数据源注册表（P1-3/P1-4/P1-6）：单源部署按 dw DSN 建默认源；方言按
+    # scheme 探测（mysql:// → mysql）。未配 dw 时不建（QueryService 回落默认）。
+    if settings.dw_db_enabled:
+        from nl2sql_service.services.datasource import build_default_registry, detect_dialect
+
+        dialect = settings.datasource_dialect or detect_dialect(settings.dw_db_dsn)
+        ctx.datasources = build_default_registry(
+            datasource_id=settings.datasource_id,
+            dialect=dialect,
+            label=settings.datasource_label,
+        )
+
     # 表统计（P0-3 副产物 → 生成期聚合引导）：002 未应用时静默跳过——
     # 缺表不是启动故障，只是没有聚合引导（不猜表大小）。
     if ctx.meta_repository is not None:

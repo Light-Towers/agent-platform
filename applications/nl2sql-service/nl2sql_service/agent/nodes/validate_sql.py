@@ -11,8 +11,11 @@ logger = get_logger(__name__)
 async def validate_sql(state: dict[str, Any]) -> dict[str, Any]:
     sql = state.get("sql", "")
     max_rows = state.get("sql_max_rows", 1000)
-
-    ok, reason, normalized = _validate(sql, "postgres", max_rows)
+    # 方言按数据源分支（P1-4）：sqlglot 解析 + LIMIT 规整都随 dialect——
+    # 同一句 SQL 在 MySQL / PG 上的解析边界不同，硬编码 postgres 会把
+    # MySQL 专有写法误判。缺省 postgres 保持老部署逐字节一致。
+    dialect = state.get("dialect") or "postgres"
+    ok, reason, normalized = _validate(sql, dialect, max_rows)
     if not ok:
         logger.warning("SQL validation failed: %s", reason)
         return {"sql_valid": False, "error": reason, "sql": sql}
