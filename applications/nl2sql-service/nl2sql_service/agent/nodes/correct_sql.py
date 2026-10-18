@@ -14,7 +14,7 @@ from typing import Any
 
 from nl2sql_service.agent.llm import LLMClient
 from nl2sql_service.agent.nodes._prompt import json_block, load_prompt, render
-from nl2sql_service.agent.nodes.generate_sql import build_relations_block, build_table_infos
+from nl2sql_service.agent.nodes.generate_sql import build_db_info, build_relations_block, build_table_infos
 
 _FALLBACK = "纠正以下 SQL：\n{sql}\n错误：{error}\n已尝试：\n{attempted_sql}"
 
@@ -48,7 +48,7 @@ async def correct_sql(state: dict[str, Any]) -> dict[str, Any]:
         table_infos=build_table_infos(state),
         metric_infos=json_block(state.get("metrics", [])),
         date_info=state.get("date_info", ""),
-        db_info=state.get("extra_context") or "PostgreSQL（方言 postgres；只输出单条只读 SELECT）",
+        db_info=build_db_info(state),
         sql=sql,
         # DB 原文才进 prompt（对外分类消息无修正信息量）；guard 拒绝轮没有
         # error_detail，回落 error。

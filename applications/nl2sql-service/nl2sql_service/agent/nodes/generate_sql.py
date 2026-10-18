@@ -85,6 +85,20 @@ def build_value_bindings(values: list[dict[str, Any]] | None) -> str:
     return json.dumps(bindings, ensure_ascii=False)
 
 
+def build_db_info(state: dict[str, Any]) -> str:
+    """数据源方言说明（P1-4）：生成期就让模型知道目标方言与源专有语法边界。
+
+    extra_context（add_extra_context 注入的 dialect+version）优先；缺省按
+    state.dialect 给一句方言约束——把 `WITH PARSER ngram`（MySQL）/ `MATCH_ANY`
+    （Doris）这类不可互发的语法在**生成期**就点明，而不是运行时报错兜底。
+    """
+    extra = state.get("extra_context") or ""
+    if extra:
+        return extra
+    dialect = state.get("dialect") or "postgres"
+    return f"{dialect}（方言 {dialect}；只输出单条只读 SELECT）"
+
+
 async def generate_sql(state: dict[str, Any]) -> dict[str, Any]:
     query = state.get("query", "")
     llm: LLMClient | None = state.get("llm")
@@ -98,7 +112,7 @@ async def generate_sql(state: dict[str, Any]) -> dict[str, Any]:
         table_infos=build_table_infos(state),
         metric_infos=json_block(state.get("metrics", [])),
         date_info=state.get("date_info", ""),
-        db_info=state.get("extra_context") or "PostgreSQL（方言 postgres；只输出单条只读 SELECT）",
+        db_info=build_db_info(state),
         aggregation_hint=build_aggregation_hint(state),
         relations=build_relations_block(state.get("relations")),
     )

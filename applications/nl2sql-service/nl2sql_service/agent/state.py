@@ -16,6 +16,8 @@ class DataAgentState(TypedDict, total=False):
     relations: list[dict[str, Any]]
     # 数据源维度（P1-6：召回过滤与 schema 作用域；缺省空串）
     datasource_id: str
+    # 数据源口径标签（P1-3②）：随响应体返回，让答案能看出数字来自哪个源
+    datasource_label: str
     retrieved_info: str
     extra_context: str
     # 生成期日期上下文（QueryService 注入；P0-11①）
