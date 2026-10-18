@@ -14,12 +14,13 @@ class ValueRepository:
 
     async def recall(self, keywords: list[str], embedding: list[float] | None = None, top_k: int = 10) -> list[dict[str, Any]]:
         results: list[dict[str, Any]] = []
-        query_text = " ".join(keywords)
-        if query_text:
+        # tokens 直接下传，由 fulltext_search 拼 OR 表达式（2026-10-18，B1 前半）：
+        # 此前 " ".join 后交给 plainto_tsquery，等于让 PG 再分一次词且按 AND 连——两层词表叠加。
+        if keywords:
             ft_results = await self._client.fulltext_search(
                 table=self._table,
                 tsvector_col="value_tsvector",
-                query=query_text,
+                tokens=keywords,
                 top_k=top_k,
                 extra_cols="column_name, value, value_desc",
             )
