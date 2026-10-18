@@ -33,6 +33,24 @@ def _route_after_validate(state: dict[str, Any]) -> str:
     return "correct_sql"
 
 
+def _route_after_execute(state: dict[str, Any]) -> str:
+    """执行后路由（方案 §5.11-E2 图修正：执行期异常进纠错回路）。
+
+    成功 → END；可纠正/可改写且 correct_count 未达上限 → correct_sql；
+    不可纠正（fatal）或达上限 → 错误终态（END）。
+
+    correct_count 与 validate 回路**共用同一个上限**（E4：总 LLM 调用数
+    = sql_max_correct_retries + 固定开销，两个回路各计 3 次就没了闸）。
+    """
+    if not state.get("error"):
+        return END
+    if state.get("error_class") in ("correctable", "rewritable") and state.get(
+        "correct_count", 0
+    ) < state.get("sql_max_correct_retries", 3):
+        return "correct_sql"
+    return END
+
+
 def build_graph():
     """构建并编译 12 节点 Text-to-SQL 管线图。"""
     graph = StateGraph(DataAgentState)
@@ -75,6 +93,13 @@ def build_graph():
         {"execute_sql": "execute_sql", "correct_sql": "correct_sql", END: END},
     )
     graph.add_edge("correct_sql", "validate_sql")
-    graph.add_edge("execute_sql", END)
+    # 2026-10-18（方案 §5.11-E2）：execute_sql 从无条件边改条件边——
+    # 执行期异常（correctable/rewritable）进 correct 回路，fatal/达上限
+    # 直接错误终态。此前模型永远不知道它的 SQL 在真实库上失败了。
+    graph.add_conditional_edges(
+        "execute_sql",
+        _route_after_execute,
+        {"correct_sql": "correct_sql", END: END},
+    )
 
     return graph.compile()

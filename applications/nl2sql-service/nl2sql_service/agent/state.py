@@ -21,6 +21,10 @@ class DataAgentState(TypedDict, total=False):
     # error 是对外分类消息；error_detail 是原始异常文本，只进日志/纠错回路（S-3）
     error: str
     error_detail: str
+    # 执行期异常三分类（§5.11-E2）：correctable/rewritable 进 correct，fatal 不喂模型
+    error_class: str
+    # 已尝试的 SQL + 错误序列（correct prompt 必须带它，否则同一处错改三遍）
+    attempted_sql: list[dict[str, Any]]
     result: Any
     answer: str
     correct_count: int
