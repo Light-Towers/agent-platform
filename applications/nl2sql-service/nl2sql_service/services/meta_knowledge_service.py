@@ -33,6 +33,7 @@ class MetaKnowledgeService:
         embedder: BaseEmbedder | None = None,
         tokenizer: str | None = None,
         vector_dim: int | None = None,
+        datasource_id: str = "",
     ) -> None:
         self._meta_repo = meta_repo
         self._embedder = embedder
@@ -40,6 +41,16 @@ class MetaKnowledgeService:
         settings = get_settings()
         self._tokenizer = tokenizer or settings.tokenizer
         self._vector_dim = vector_dim or settings.vector_dim
+        # P1-6：元知识按 datasource_id 分片。默认 '' = 不写作用域列（老行为，
+        # 与 DDL 的 scope 默认 '' 一致）；CLI 显式传 settings.datasource_id 时
+        # 写入，召回侧的 datasource 过滤才匹配得上（否则召回恒空）。
+        self._datasource_id = datasource_id
+
+    def _stamp(self, data: dict[str, Any]) -> dict[str, Any]:
+        """把 datasource_id 写进 data（_upsert 的 row.update(data) 会覆盖 scope 默认 ''）。"""
+        if self._datasource_id:
+            data["datasource_id"] = self._datasource_id
+        return data
 
     async def build_from_tables(self, tables: list[dict[str, Any]]) -> dict[str, int]:
         """列行写入：table_comment / data_type / embedding。
@@ -63,7 +74,7 @@ class MetaKnowledgeService:
                 }
                 if self._embedder is not None:
                     data["embedding"] = await self._embed(f"{table_name} {column_name} {column_comment}")
-                if await self._meta_repo.save_column(data):
+                if await self._meta_repo.save_column(self._stamp(data)):
                     stats["inserted"] += 1
                 else:
                     stats["updated"] += 1
@@ -83,7 +94,7 @@ class MetaKnowledgeService:
                 data["embedding"] = await self._embed(
                     f"{data['metric_name']} {data['metric_desc']} {data['metric_expr']}"
                 )
-            if await self._meta_repo.save_metric(data):
+            if await self._meta_repo.save_metric(self._stamp(data)):
                 stats["inserted"] += 1
             else:
                 stats["updated"] += 1
@@ -111,7 +122,7 @@ class MetaKnowledgeService:
             }
             if self._embedder is not None:
                 data["embedding"] = await self._embed(f"{column_name} {value} {value_desc}")
-            if await self._meta_repo.save_value(data):
+            if await self._meta_repo.save_value(self._stamp(data)):
                 stats["inserted"] += 1
             else:
                 stats["updated"] += 1
@@ -130,7 +141,7 @@ class MetaKnowledgeService:
                 "relation_type": rel.get("relation_type", "many_to_one"),
                 "note": rel.get("note", ""),
             }
-            if await self._meta_repo.save_relation(data):
+            if await self._meta_repo.save_relation(self._stamp(data)):
                 stats["inserted"] += 1
             else:
                 stats["updated"] += 1
@@ -147,7 +158,7 @@ class MetaKnowledgeService:
                 "alias": item.get("alias", ""),
                 "source": item.get("source", "human"),
             }
-            if await self._meta_repo.save_alias(data):
+            if await self._meta_repo.save_alias(self._stamp(data)):
                 stats["inserted"] += 1
             else:
                 stats["updated"] += 1

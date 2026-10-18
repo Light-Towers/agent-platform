@@ -19,18 +19,13 @@ from nl2sql_service.repositories.pgvector.metric_repository import MetricReposit
 from nl2sql_service.repositories.pgvector.value_repository import ValueRepository
 
 
-class _Row:
-    """psycopg 行替身：客户端消费 `row._mapping`。"""
-
-    def __init__(self, data: dict) -> None:
-        self._mapping = data
-
-
 class _Cursor:
-    def __init__(self, rows: list[dict]) -> None:
-        self._rows = [_Row(r) for r in rows]
+    """psycopg 行替身：连接配 row_factory=dict_row，fetchall() 直接返回 dict。"""
 
-    async def fetchall(self) -> list[_Row]:
+    def __init__(self, rows: list[dict]) -> None:
+        self._rows = [dict(r) for r in rows]
+
+    async def fetchall(self) -> list[dict]:
         return self._rows
 
 

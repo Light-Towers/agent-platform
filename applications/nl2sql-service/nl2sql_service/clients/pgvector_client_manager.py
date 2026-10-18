@@ -93,12 +93,19 @@ class PgvectorClientManager:
         if extra_cols != "*":
             validate_identifier_list(extra_cols, "返回列清单")
         where, params = _where_clause(filters)
-        sql = f"SELECT {extra_cols}, {embedding_col} <=> %s AS distance FROM {table}{where}"
+        # 参数顺序按 SQL 文本出现序：`<=> %s` 在 WHERE 之前 ⇒ embedding 是第一个
+        # 占位符，之后才是 filters 值、LIMIT。此前把 (*params, query_embedding, top_k)
+        # 顺序搞反，导致 datasource_id 绑定到 embedding 位（真 PG 报 text = double
+        # precision[]；假池不按位绑定故未暴露）。
+        # embedding 参数显式 `::vector`：`<=>` 运算符无列类型上下文可推断参数类型，
+        # psycopg 默认把 Python list 发成 double precision[]，`vector <=> float8[]`
+        # 无此算子。加 cast 后无论连接是否 register_vector 都可执行（实测可用）。
+        sql = f"SELECT {extra_cols}, {embedding_col} <=> %s::vector AS distance FROM {table}{where}"
         sql += " ORDER BY distance LIMIT %s"
         async with self._pool.connection() as conn:
-            cur = await conn.execute(sql, (*params, query_embedding, top_k))
+            cur = await conn.execute(sql, (query_embedding, *params, top_k))
             rows = await cur.fetchall()
-            return [dict(row._mapping) for row in rows]
+            return [dict(row) for row in rows]
 
     async def fulltext_search(
         self,
@@ -134,7 +141,7 @@ class PgvectorClientManager:
         async with self._pool.connection() as conn:
             cur = await conn.execute(sql, (tsquery, *params, tsquery, top_k))
             rows = await cur.fetchall()
-            return [dict(row._mapping) for row in rows]
+            return [dict(row) for row in rows]
 
     async def literal_search(
         self,
@@ -168,7 +175,7 @@ class PgvectorClientManager:
         async with self._pool.connection() as conn:
             cur = await conn.execute(sql, (*params, [t.lower() for t in cleaned], [f"{t}%" for t in cleaned], top_k))
             rows = await cur.fetchall()
-            return [dict(row._mapping) for row in rows]
+            return [dict(row) for row in rows]
 
     async def upsert_vector(
         self,
