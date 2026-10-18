@@ -90,37 +90,59 @@ class MetaRepository:
         """范例行 upsert（A 方案 Stage ②：question 自然键，重训练更新 SQL 不叠副本）。"""
         return await self._upsert(_EXAMPLE_TABLE, data)
 
-    async def prune_columns(self, keep: set[tuple[str, str]]) -> int:
+    async def prune_columns(
+        self, keep: set[tuple[str, str]], tenant_id: str = "", workspace_id: str = "", datasource_id: str = ""
+    ) -> int:
         """删除作用域内不在 keep 的列行（keep = {(table_name, column_name)}）。"""
-        return await self._prune(_COLUMN_TABLE[0], _COLUMN_NATURAL, keep)
+        return await self._prune(_COLUMN_TABLE[0], _COLUMN_NATURAL, keep, (tenant_id, workspace_id, datasource_id))
 
-    async def prune_metrics(self, keep: set[str]) -> int:
+    async def prune_metrics(
+        self, keep: set[str], tenant_id: str = "", workspace_id: str = "", datasource_id: str = ""
+    ) -> int:
         """删除作用域内不在 keep 的指标行（keep = {metric_name}）。
 
         str 必须包成 1-tuples 再下传：`_prune` 按"每个 key 展平成一个 VALUES 行"
         取参，直接传字符串会被逐字符拆开（fake 池与真 PG 都会在这里炸）。
         """
-        return await self._prune(_METRIC_TABLE[0], _METRIC_NATURAL, {(name,) for name in keep})
+        return await self._prune(
+            _METRIC_TABLE[0], _METRIC_NATURAL, {(name,) for name in keep}, (tenant_id, workspace_id, datasource_id)
+        )
 
-    async def prune_values(self, keep: set[tuple[str, str]]) -> int:
+    async def prune_values(
+        self, keep: set[tuple[str, str]], tenant_id: str = "", workspace_id: str = "", datasource_id: str = ""
+    ) -> int:
         """删除作用域内不在 keep 的取值行（keep = {(column_name, value)}）。"""
-        return await self._prune(_VALUE_TABLE[0], _VALUE_NATURAL, keep)
+        return await self._prune(_VALUE_TABLE[0], _VALUE_NATURAL, keep, (tenant_id, workspace_id, datasource_id))
 
-    async def prune_relations(self, keep: set[tuple[str, str, str, str]]) -> int:
+    async def prune_relations(
+        self,
+        keep: set[tuple[str, str, str, str]],
+        tenant_id: str = "",
+        workspace_id: str = "",
+        datasource_id: str = "",
+    ) -> int:
         """删除作用域内不在 keep 的关系行（keep = {(left_table, left_column, right_table, right_column)}）。"""
-        return await self._prune(_RELATION_TABLE[0], _RELATION_NATURAL, keep)
+        return await self._prune(
+            _RELATION_TABLE[0], _RELATION_NATURAL, keep, (tenant_id, workspace_id, datasource_id)
+        )
 
-    async def prune_aliases(self, keep: set[tuple[str, str, str]]) -> int:
+    async def prune_aliases(
+        self, keep: set[tuple[str, str, str]], tenant_id: str = "", workspace_id: str = "", datasource_id: str = ""
+    ) -> int:
         """删除作用域内不在 keep 的别名行（keep = {(target_kind, target_name, alias)}）。"""
-        return await self._prune(_ALIAS_TABLE[0], _ALIAS_NATURAL, keep)
+        return await self._prune(_ALIAS_TABLE[0], _ALIAS_NATURAL, keep, (tenant_id, workspace_id, datasource_id))
 
-    async def prune_examples(self, keep: set[str]) -> int:
+    async def prune_examples(
+        self, keep: set[str], tenant_id: str = "", workspace_id: str = "", datasource_id: str = ""
+    ) -> int:
         """删除作用域内不在 keep 的范例行（keep = {question}）。
 
         str 必须包成 1-tuples 再下传（同 prune_metrics：_prune 按每个 key 展平
         成一个 VALUES 行，直接传字符串会被逐字符拆开）。
         """
-        return await self._prune(_EXAMPLE_TABLE[0], _EXAMPLE_NATURAL, {(q,) for q in keep})
+        return await self._prune(
+            _EXAMPLE_TABLE[0], _EXAMPLE_NATURAL, {(q,) for q in keep}, (tenant_id, workspace_id, datasource_id)
+        )
 
     async def list_relations(self, datasource_id: str = "", tenant_id: str = "", workspace_id: str = "") -> list[dict[str, Any]]:
         """关系全集（R5：查询路径只读冻结集，服务期零人工）。"""
@@ -347,9 +369,20 @@ class MetaRepository:
         # （此前 row[0] 是 tuple 索引，dict_row 下会 KeyError）。
         return bool(row["inserted"]) if row is not None else False
 
-    async def _prune(self, table: str, natural_cols: tuple[str, ...], keep: set[tuple[str, ...]]) -> int:
-        """删除作用域内自然键不在 keep 的行；keep 为空 = 清空作用域（源已为空）。"""
-        scope_params = tuple("" for _ in _SCOPE_COLS)
+    async def _prune(
+        self,
+        table: str,
+        natural_cols: tuple[str, ...],
+        keep: set[tuple[str, ...]],
+        scope: tuple[str, str, str] = ("", "", ""),
+    ) -> int:
+        """删除**指定作用域内**自然键不在 keep 的行；keep 为空 = 清空该作用域（源已为空）。
+
+        scope 必须与写入时的作用域（`_upsert` 经 `_stamp` 盖的章）一致：此前硬编码
+        ('', '', '')——scoped 构建（多租户）的 prune 永远扫不到自己的行，"看着跑了
+        其实没生效"的暗断点（与 ON CONFLICT 打不中同源）。缺省 '' 保持老行为。
+        """
+        scope_params = tuple(scope)
         scope_sql = " AND ".join(f"{c} = %s" for c in _SCOPE_COLS)
         if not keep:
             sql = f"DELETE FROM {self._prefix}{table} WHERE {scope_sql}"
