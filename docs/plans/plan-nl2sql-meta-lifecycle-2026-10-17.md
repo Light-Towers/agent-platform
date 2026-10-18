@@ -554,7 +554,7 @@ SHOW BUILD INDEX;             -- 看进度
 | S-5 | **LLM 超时是死配置**：`llm_timeout` 解析入 settings 但 `LLMClient.invoke` 不消费——LLM 挂起会无限期持有 HTTP 请求。同族：`sql_max_rows`/`sql_max_correct_retries` 连 state 注入都没有（§5.11-V2，比"只断言默认值"更严重） | `conf/settings.py:125`；`agent/llm.py:31-42`；`services/query_service.py:25` | 中 | `invoke` 内 `asyncio.wait_for`；这是死配置家族第 5 个（第 6 个 rerank 见 S-9，第 7/8 个见 §5.11-V2；前四个：`rrf_k`/`retrieval_top_k`/`sql_max_correct_retries`/`sql_read_only_guard`，§11.1-R1 已登记同类：只有定义与读取，无行为用例） | I0 |
 | S-6 | **无限流 / 无并发闸**：单请求 LLM 调用最多 10 次（extract×1 + extend×3 + filter×2 + generate×1 + correct×≤3），全服务无 rate limit / semaphore | grep `rate/semaphore` 零命中；`agent/graph.py:52-54` 三路并行召回 | 中（成本放大 + DoS） | 应用侧信号量（并发问数上限）+ 每问 LLM 调用计数进 trace；Doris 侧 P1-5 workload group 管不到应用侧这条 | P1-5 扩展 |
 | S-7 | **`correct_sql` 把 DB 错误原文喂回 prompt**：错误文本（可含攻击者可控的列值）进 LLM 上下文，扩大注入面 | `agent/nodes/correct_sql.py:32-40` | 中 | 与 S-3 同一处修：进 prompt 前分类截断，不给原文 | 随 S-3 |
-| S-8 | **二阶 prompt 注入**：召回数据含源库列注释（构建脚本从 information_schema 写入 meta 库），注释含指令性文本时注入 LLM——这是数据驱动的注入，脱敏改造不覆盖它 | `services/meta_knowledge_service.py:41-48`；`generate_sql.py:27-33` | 中 | 注释进 prompt 前做指令特征过滤 / 长度截断；或改结构化（JSON 字段）而非自然语言拼块 | P1-1 |
+| S-8 | **二阶 prompt 注入**：召回数据含源库列注释（构建脚本从 information_schema 写入 meta 库），注释含指令性文本时注入 LLM——这是数据驱动的注入，脱敏改造不覆盖它 | `services/meta_knowledge_service.py:41-48`；`generate_sql.py:27-33` | 中 | 三选一或叠加：① 注释进 prompt 前做指令特征过滤 / 长度截断；② 改结构化（JSON 字段）而非自然语言拼块；③ **人工受控修订入口**（2026-10-18 调研新增，Chat2DB"自定义 AI 数据集"同构）——审核过的列注释替代自由文本，过滤对象从不可信自动收窄为可信人工输入，且列注释是 LLM 理解列语义的最强信号，效果与安全合流（附录 §3.1-D-D；落地即 P1-6 组件） | P1-1 |
 | S-9 | **rerank 配置面漂移**：`.env.example` 五个 `RERANK_*` 键，全服务无 rerank 代码——外部端点被文档化但不存在 | `.env.example`；grep `rerank` 在 `nl2sql_service/` 零命中 | 低（配置漂移，第六个死配置） | 删键或补实现，二选一；与 S-5 同族 | I0 |
 | S-10 | **响应体回显生成 SQL**：设计使然（透明度）；P1-1 注入行级谓词后，谓词文本对客户端可见 | `api/routers/query_router.py:26` | 低（备查） | 接受并登记：验收第 14 条要求"SQL 文本里能看到下推条件"，二者是同一事实的两面 | 备查 |
 
@@ -650,6 +650,44 @@ feedback 契约（每轮进 prompt 的）：① 错误分类与截断后原文�
 2. **不为统一而改现网行为**：`get_pool()` 的单例语义、agent_server 的池参数本轮不动。上移是加导出，不是重构用户。
 3. **不留双实现过渡期无限延长**：pg_pool 上移后 nl2sql 内不留转发 shim（一处 import 切换干净利落）；db.py 的 `init_pool` 可后续自愿迁到工厂，但要在计划里登记，不许无限期"两份并存"。
 
+### 5.13 多轮上下文继承（2026-10-18 新增；开源调研输入，现状四层全空）
+
+**触发**：开源调研发现 DB-GPT（指代消解/表别名延续/口语时间转 SQL）、SQLBot（历史对话检索）、Vanna（错题回流）三个独立项目把"多轮上下文"做成了核心能力，而我们的现状比预想更空。详见附录 §3.1-D-A。
+
+**现状（2026-10-18 逐个实读；四层全空，不是"没设计"是"整条链没接"）**：
+
+| 层 | 现状 | 证据 |
+|---|---|---|
+| 契约层 | `session_id` 字段**在**（"对话状态隔离"语义，兼容旧名 `thread_id`） | `packages/shared-schemas/shared_schemas/query.py:21-25` |
+| 消费层 | nl2sql `api/` + `services/` 全目录 grep `session_id` **零命中**——请求进来不读不注入 | 同上文件不在消费路径 |
+| 状态层 | `DataAgentState` 纯单轮字段，无 session / 历史 / previous 槽位 | `agent/state.py:6-24` |
+| 节点层 | `extract_keywords` 只 `state.get("query")` 处理当前轮，无继承/指代逻辑 | `agent/nodes/extract_keywords.py:22-38` |
+
+即：今天每轮 query 都是全新状态，"那上个月呢""上述三个城市"这类追问会被当作独立问题重新理解——**第二轮要把第一轮的发现重做一遍，且指代必然丢**。契约层反而先行（平台设计时预留了多轮位），是应用层没接。
+
+**契约 M1–M6（实现验收的组成部分）**：
+
+| # | 规则 | 违反的后果 |
+|---|---|---|
+| M1 | **入口接线**：`session_id` 从请求读入并注入 state；**不传 session_id 时行为与现状逐字节一致** | 无回归底线；契约有字段从不读是 G2 同款病 |
+| M2 | **继承四元组**：session 状态显式携带（时间窗 / 实体 / 候选表 / 已生成 SQL）四项；**不存整个 `retrieved_info` 大文本** | 存大文本会随 schema 漂移快速 stale，且每轮 prompt 膨胀 |
+| M3 | **指代与时间替换分型**，且都在 generate 前完成、**不改写用户原始 query**（trace 要能看到改写前后）："上述/那些/它们"→继承实体不动其余；"那上个月呢"→只替换时间窗 | 两类继承混作一团会把"换时间"错实现成"换实体"；改写原始 query 则 trace 失真、无法复盘 |
+| M4 | **继承不跨源**：换 datasource = 上下文清零重来 | §3"单问单源"的直接推论；跨源实体串味比不继承更糟 |
+| M5 | **correct 回路上下文不少于生成轮**：执行期纠错 prompt 必须带全继承四元组 | E3（`correct_sql.py:35` `metric_infos=""`）已犯过"纠正轮比生成轮信息少"——多轮场景再犯就是同一坑栽两次 |
+| M6 | **历史问答对双用**：session 内已确认的 NL→SQL 对既作继承源又作范例召回（P1-6 回流）；**人不确认的（错题）不进范例库**，只进 trace | 错题自动入库会把错误口径固化成范例（Vanna 回流的前提也是人工修正后 `vn.train`） |
+
+**存储归属**：短期 nl2sql 自持——meta 库 session 表（列含 `tenant_id`/`workspace_id`/`session_id`/`turn`/四元组 JSON/`created_at`），tenant fail-fast 纪律形状抄 `applications/agent_server/sql/schema_store.py:17-54`。中期判据同 §5.12：若平台出统一 session/checkpoint 服务（仓内已有 checkpointer 相关计划），按"各服务各存一份会让隔离语义有解释分歧吗"决定上移。TTL 与租户数据保留策略一致，具体值随平台计划 T0-D1 定。
+
+**关联登记（产品层，不占 P0/P1 资源）**：WrenAI 的"推荐问题 + 追问生成"（新对话从最相关表生成 3 个候选问题、每答生成追问）是问数产品的冷启动设计，同时是可回答域的自文档化。nl2sql 侧只需暴露"基于指标清单 / `linkable` 白名单生成候选问题"的能力，交互落上层（agent_server/前端）。此处登记为产品项（P2），与简历口径"内含可回答文档"同思想两种形态。
+
+**批次定位**：不依赖任何拍板项（T0-D* 均不涉及）；依赖 P0-1（schema 准确新鲜——继承的实体要落到真实表列）。建议随 P0-8 同批实施（同属"执行前后上下文"层），或作 P1 条目紧随。
+
+**给 P0-8 补的验收判据**（并入 §6，第 16–18 条）：
+
+1. 构造二轮追问（第二轮仅含指代"上述"或时间替换"那上个月呢"）：继承生效可从 trace 观测（改写前后 query + 四元组快照均在）；**不传 session_id 的请求行为与单轮现状逐字节一致**（M1 回归底线）。
+2. 二轮场景触发执行期纠错：prompt 含第一轮继承的四元组（M5，不断 E3 第二次）。
+3. 同 session 切换 datasource：第二轮不继承第一轮的实体/表候选（M4）。
+
 ## 6. 验收标准
 
 1. **幂等**：同一输入重跑两次，元数据库与向量点数、内容完全一致（涵盖原第 7 条，合并以免重复计数）。
@@ -667,6 +705,9 @@ feedback 契约（每轮进 prompt 的）：① 错误分类与截断后原文�
 13. **L2 敏感列拦截**（§5.9）：构造含敏感列（手机号 / 证件号）的生成 SQL，guard 在生成期拦下且返回原因可读；**L1 单独可证**——用问数账号直连 DW，视图 / 权限使其拿不到明文（两道互相独立，不靠彼此存在）。
 14. **行级权限注入**（§5.9）：给测试账号配"仅某区域"映射，问该区域外数据 → 返回空 / 拒答，且生成的 SQL 文本里能看到注入的**结构化谓词**（不是字符串拼接的 `filter_clause`）。
 15. **`metric_config` 注入无效化**（§5.10-S2）：入参表注释含指令性文本（"ignore previous instructions…"）时，不改变生成 SQL 的语义目标；入参声明未授权表名时按白名单拒。
+16. **多轮继承**（§5.13-M3）：构造二轮追问（第二轮仅含指代"上述"或时间替换"那上个月呢"），继承生效可从 trace 观测（改写前后 query + 四元组快照均在）；**不传 session_id 的请求行为与单轮现状逐字节一致**（M1 回归底线）。
+17. **correct 不少上下文**（§5.13-M5）：二轮场景触发执行期纠错，prompt 含第一轮继承的四元组——E3 不在多轮场景重犯。
+18. **换源清零**（§5.13-M4）：同 session 切换 datasource，第二轮不继承第一轮的实体/表候选。
 
 ## 7. 归属与陈述边界（不得含糊）
 
@@ -700,7 +741,7 @@ feedback 契约（每轮进 prompt 的）：① 错误分类与截断后原文�
 | Q15 | 待答 | 能否为问数申请**独立 workload group**（甚至独立 BE / Compute Group）？谁批？ | P1-5 能否做，还是只能靠 `query_timeout` 硬扛 |
 | Q16 | 待答 | 数仓→Doris 的**分区切换方式**（`INSERT OVERWRITE` / `ALTER TABLE REPLACE PARTITION` / 双写）？切换期间查询看到什么？ | P0-9 缓存键 `source_snapshot` 的定义，以及 D1“两次查询不跨快照”的边界 |
 | Q17 | 待答 | 平台侧 `nl2sql-service` **完全没有 datasource 概念**（`grep -i 'datasource\|data_source\|db_type\|dialect'` 在 `nl2sql_service/` 原始 grep 命中 0；`SqlQueryRequest`（`api/schemas/query_schema.py:9-16`）继承 `shared_schemas/query.py:14-30`，字段为 `query`/`tenant_id`/`trace_id`/`session_id`/`context`/`priority`/`user_id`/`version` + `metric_config`，**其中没有任何源选择字段**。⚠️ 上一版把入参写成”只有 `query`/`metric_config`/`trace_id`”，**漏了 5 个继承字段**——结论（无源维度）不变，但描述失真，且 `tenant_id` 已在契约里、只是无人消费，这一点恰好是 P1-1 的现成落点）。多源要在平台侧新建，还是继续只在内网那套？ | P1-6 是”补齐”还是”新增”，以及 §7 的陈述边界 |
-| Q18 | 待答 | 平台侧实际调用**哪个 embedding 服务、多少维**？`conf/meta_config.yaml:11` 写的是 `dimension: 1536`（OpenAI 形状），而对外口径是 BGE（1024） | 二者只能有一个对。换维度=全库重灌；也是 P0-2 幂等与 ADR-0009 回填的前置 |
+| Q18 | 待答 | 平台侧实际调用**哪个 embedding 服务、多少维**？`conf/meta_config.yaml:11` 写的是 `dimension: 1536`（OpenAI 形状），而对外口径是 BGE（1024） | 二者只能有一个对。换维度=全库重灌；也是 P0-2 幂等与 ADR-0009 回填的前置。**2026-10-18 调研补**：五项目共识指向分层解耦（Vanna"换 LLM 不丢 training"/DB-GPT SMMF），且换 embedding 必须重建向量是行业无解问题——答案方向＝**YAML 原文层为事实源（模型无关）+ 向量层可重建 + 灌库幂等**，附录 §3.1-D-B |
 | Q19 | 待答 | 业务库（MySQL 8.0+）里准备开 `linkable` 的列清单？内网 MySQL **能否设 `ngram_token_size`**（非动态变量，改配置需重启并重建索引）？ | P1-2 白名单落地面；MySQL 侧能否做中文模糊（P1-4 矩阵） |
 | Q20 | 待答 | 探针与缓存的**延迟预算**是多少（首 token）？`< 500 ms` 这条口径现在挂在“预定义指标直取”上，探针路线要不要单独预算？ | P0-9 的超时与 `LIMIT` 取值；纸面时限的可辩护性 |
 | Q21 | **已拍·已执行**（二档，2026-10-17） | 纸面上写“执行计划自校验 + 语句类型校验 + 只读账号”三层收敛，但**锚指向 2026 平台段（master §2.13），不指向 2025 问数段（§2.7）**。逐处清单与证据见下方“Q21 详单”与 §11.1-R6 | 改纸面必同批改口述稿。受影响面＝**11 处**：纸面正文 4（`v3-complete.md:108,113`、`v4:350`、`v3-online.md:102`）＋ frontmatter 变更说明 2（`v3.md:21,28`）＋ 口述 3（`一问一答面试话术稿-2026-10-03.md:55`、`自我介绍-三层结构版-2026-10-12.md:75`、`棘手问题与解决-STAR素材库-2026-10-11.md:38`）＋ 研究稿 1（`AI简历项目取舍研究报告.md:223`）＋ 个人项目材料 1（`项目与材料盘点报告-2026-08-23.md:107,138`——**这条才是『语句类型校验』的实测锚，但归属是个人项目**）。已执行 8 文件；历史登记块不动 |
