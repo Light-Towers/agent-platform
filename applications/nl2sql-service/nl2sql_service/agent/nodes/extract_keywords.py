@@ -11,28 +11,13 @@ from typing import Any
 from agent_core.logging import get_logger
 
 from nl2sql_service.agent.llm import LLMClient
+from nl2sql_service.tokenizer import bigram_tokenize, jieba_tokenize, tokenize
 
 logger = get_logger(__name__)
 
-_jieba_warned = False
-
-
-def _bigram_tokenize(text: str) -> list[str]:
-    return [text[i : i + 2] for i in range(len(text) - 1)] if len(text) > 1 else [text]
-
-
-def _jieba_tokenize(text: str) -> list[str]:
-    global _jieba_warned
-    try:
-        import jieba
-
-        return list(jieba.cut(text))
-    except ImportError:
-        if not _jieba_warned:
-            # 不再静默降级：jieba 是可选 extra，缺包时记一次告警
-            logger.warning("TOKENIZER=jieba 但未安装 jieba，已降级 bigram（pip install 'nl2sql-service[tokenizer]'）")
-            _jieba_warned = True
-        return _bigram_tokenize(text)
+# 兼容旧导入路径：分词实现已收敛到 nl2sql_service.tokenizer（写入侧同源）
+_bigram_tokenize = bigram_tokenize
+_jieba_tokenize = jieba_tokenize
 
 
 async def extract_keywords(state: dict[str, Any]) -> dict[str, Any]:
@@ -49,7 +34,7 @@ async def extract_keywords(state: dict[str, Any]) -> dict[str, Any]:
         except (json.JSONDecodeError, TypeError):
             keywords = []
 
-    tokens = _jieba_tokenize(query) if tokenizer == "jieba" else _bigram_tokenize(query)
+    tokens = tokenize(query, tokenizer)
     keywords = keywords or tokens
 
     # 单次 embedding：三路召回共享；失败时置 None，召回节点自行降级（不影响关键词）

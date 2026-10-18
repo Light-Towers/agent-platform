@@ -33,8 +33,12 @@ python -m nl2sql_service.scripts.init_meta_schema --status --dsn "$META_DB_DSN"
 # 只列出将执行的迁移，不连库
 python -m nl2sql_service.scripts.init_meta_schema --dry-run
 
-# 元知识构建（当前仍是 stub，见方案 P0-1）
-python -m nl2sql_service.scripts.build_meta_knowledge --dsn $META_DB_DSN
+# 元知识构建（幂等 upsert：同输入重跑不翻倍；--prune 删源中已不存在的行）
+python -m nl2sql_service.scripts.build_meta_knowledge --dsn "$META_DB_DSN" \
+  --config nl2sql_service/config/metric_config.example.yaml [--prune]
+# --config 只接受 MetricConfig 结构（nl2sql_service/config/metric_config_schema.py）；
+# 列/指标/值三类都会写 embedding（维度必须等于 VECTOR_DIM，不等直接报错）；
+# 取值的 search_text 必须由构建方写入（value_tsvector 生成列的唯一输入）
 
 # 启动 API server
 uvicorn nl2sql_service.api.server:app --host 0.0.0.0 --port 8000
