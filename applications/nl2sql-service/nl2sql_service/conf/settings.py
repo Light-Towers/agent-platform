@@ -111,6 +111,12 @@ class Settings(BaseLLMSettings):
     query_rate_limit_per_min: int = 0
     query_acquire_timeout: float = 5.0
 
+    # metric_config 入参守卫（S-2）：客户端注入的元知识必须过两道闸——
+    # allowed_tables 非空时，metric_config 声明的每个表都要在清单内（空 = 不校验，
+    # 老部署向后兼容）；metric_config_max_items 限总条目数防 prompt 被撑爆。
+    allowed_tables: List[str] = Field(default_factory=list)
+    metric_config_max_items: int = 200
+
     @property
     def meta_db_enabled(self) -> bool:
         return bool(self.meta_db_dsn)
@@ -196,6 +202,10 @@ def get_settings() -> Settings:
         overrides["query_max_concurrency"] = load_yaml.get("max_concurrency", 0)
         overrides["query_rate_limit_per_min"] = load_yaml.get("rate_limit_per_min", 0)
         overrides["query_acquire_timeout"] = load_yaml.get("acquire_timeout", 5.0)
+    guard_yaml = app_yaml.get("metric_config_guard") or {}
+    if guard_yaml:
+        overrides["allowed_tables"] = guard_yaml.get("allowed_tables", []) or []
+        overrides["metric_config_max_items"] = guard_yaml.get("max_items", 200)
     datasource_yaml = app_yaml.get("datasource") or {}
     if datasource_yaml:
         overrides["datasource_id"] = datasource_yaml.get("id", "dw")

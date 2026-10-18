@@ -11,6 +11,7 @@ from typing import Any
 from agent_core.logging import get_logger
 
 from nl2sql_service.services.load_guard import LoadRejected
+from nl2sql_service.services.metric_config_guard import MetricConfigRejected, check_metric_config
 
 logger = get_logger(__name__)
 
@@ -88,11 +89,19 @@ class QueryService:
             "table_stats": getattr(self._context, "table_stats", None) or [],
         }
         if metric_config is not None:
-            state["metric_config"] = (
+            recall = (
                 metric_config.to_recall_result()
                 if hasattr(metric_config, "to_recall_result")
                 else metric_config
             )
+            # S-2：入参守卫（表白名单 + 体量上限）在进 state/召回前拦——
+            # 未授权表 fail-fast，不静默丢弃（丢了会让"注入了"与"被丢了"无法区分）。
+            try:
+                check_metric_config(recall, settings.allowed_tables, settings.metric_config_max_items)
+            except MetricConfigRejected as exc:
+                logger.info("metric_config rejected: %s", exc.message)
+                return {"answer": "", "error": exc.message, "fallback": True}
+            state["metric_config"] = recall
         # 负载隔离（P1-5/S-6）：并发闸 + 限流包住整条图执行。限流/并发维度取
         # tenant_id → user_id → 匿名（按最细可用身份，防单租户打满）。
         load_guard = getattr(self._context, "load_guard", None)
