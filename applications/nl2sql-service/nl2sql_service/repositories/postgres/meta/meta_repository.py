@@ -13,6 +13,7 @@ upsert**；`prune_*` 删掉源里已不存在的行（差异重建的另一半�
 from typing import Any
 
 from agent_core.logging import get_logger
+from agent_core.sql.identifiers import validate_identifier
 
 logger = get_logger(__name__)
 
@@ -37,6 +38,9 @@ class MetaRepository:
     """元知识库仓储（幂等写入 + 作用域内差异删除）。"""
 
     def __init__(self, pool=None, table_prefix: str = "nl2sql_") -> None:
+        # 表前缀来自配置（meta_config.yaml），与表名一样是外部输入：构造期
+        # 校验，非法前缀在第一次查询前就炸，不等到 SQL 拼出来（P0-10）。
+        validate_identifier(table_prefix, "元知识表前缀")
         self._pool = pool
         self._prefix = table_prefix
 
