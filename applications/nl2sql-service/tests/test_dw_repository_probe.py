@@ -15,7 +15,6 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-
 from nl2sql_service.repositories.postgres.dw.dw_repository import DwRepository
 
 
