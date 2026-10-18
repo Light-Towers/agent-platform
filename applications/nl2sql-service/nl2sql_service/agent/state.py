@@ -59,3 +59,5 @@ class DataAgentState(TypedDict, total=False):
     sql_prompt_max_bytes: int
     # 漂移检测产出的表行数估值（P0-3 → 聚合引导；无估值则不引导）
     table_stats: list[dict[str, Any]]
+    # 每问 LLM 调用计数（P1-5/S-6 进 trace 的成本读数；节点侧累加）
+    llm_calls: int

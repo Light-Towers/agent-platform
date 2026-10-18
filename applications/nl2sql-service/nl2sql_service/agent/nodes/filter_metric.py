@@ -22,7 +22,7 @@ async def filter_metric(state: dict[str, Any]) -> dict[str, Any]:
             filtered_names = json.loads(result)
             if isinstance(filtered_names, list):
                 filtered = [m for m in metrics if (m.get("metric_name", "") if isinstance(m, dict) else str(m)) in filtered_names]
-                return {"metrics": filtered}
+                return {"metrics": filtered, "llm_calls": state.get("llm_calls", 0) + 1}
         except (json.JSONDecodeError, TypeError):
             pass
 

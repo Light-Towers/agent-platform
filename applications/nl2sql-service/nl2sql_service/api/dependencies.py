@@ -136,6 +136,17 @@ async def lifespan(app: FastAPI):
     app.state.context = ctx
     app.state.query_service = QueryService(graph=graph, context=ctx, llm=llm)
     app.state.settings = settings
+
+    # 负载隔离（P1-5/S-6）：全 0 配置 = 不建闸（LoadGuard 内部按 0 短路）。
+    from nl2sql_service.services.load_guard import LoadGuard, LoadGuardConfig
+
+    ctx.load_guard = LoadGuard(
+        LoadGuardConfig(
+            max_concurrency=settings.query_max_concurrency,
+            rate_limit_per_min=settings.query_rate_limit_per_min,
+            acquire_timeout=settings.query_acquire_timeout,
+        )
+    )
     logger.info(
         "nl2sql-service 就绪 host=%s port=%d llm=%s meta_db=%s dw_db=%s pools=%s",
         settings.host,

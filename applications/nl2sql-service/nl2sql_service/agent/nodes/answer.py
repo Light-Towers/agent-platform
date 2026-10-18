@@ -120,4 +120,4 @@ async def answer(state: dict[str, Any]) -> dict[str, Any]:
     if not text:
         # LLM 超时/异常降级为空串时，仍要给非空结论（断链时用户看到空回答 = 没答）
         text = f"查询成功，共 {stats['rows']} 行。\n{result_view}"
-    return {"answer": text}
+    return {"answer": text, "llm_calls": state.get("llm_calls", 0) + 1}

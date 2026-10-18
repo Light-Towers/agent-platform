@@ -59,4 +59,10 @@ async def correct_sql(state: dict[str, Any]) -> dict[str, Any]:
     )
     corrected = await llm.invoke(prompt)
     # error_detail 一并清空：它是"本轮执行的原始错误"，纠正后已过期
-    return {"sql": corrected, "error": "", "error_detail": "", "correct_count": correct_count + 1}
+    return {
+        "sql": corrected,
+        "error": "",
+        "error_detail": "",
+        "correct_count": correct_count + 1,
+        "llm_calls": state.get("llm_calls", 0) + 1,
+    }

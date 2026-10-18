@@ -117,4 +117,4 @@ async def generate_sql(state: dict[str, Any]) -> dict[str, Any]:
         relations=build_relations_block(state.get("relations")),
     )
     sql = await llm.invoke(prompt)
-    return {"sql": sql, "error": ""}
+    return {"sql": sql, "error": "", "llm_calls": state.get("llm_calls", 0) + 1}
