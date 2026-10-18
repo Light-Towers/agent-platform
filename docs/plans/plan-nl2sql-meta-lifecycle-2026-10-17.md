@@ -554,7 +554,7 @@ SHOW BUILD INDEX;             -- 看进度
 | S-5 | **LLM 超时是死配置**：`llm_timeout` 解析入 settings 但 `LLMClient.invoke` 不消费——LLM 挂起会无限期持有 HTTP 请求。同族：`sql_max_rows`/`sql_max_correct_retries` 连 state 注入都没有（§5.11-V2，比"只断言默认值"更严重） | `conf/settings.py:125`；`agent/llm.py:31-42`；`services/query_service.py:25` | 中 | `invoke` 内 `asyncio.wait_for`；这是死配置家族第 5 个（第 6 个 rerank 见 S-9，第 7/8 个见 §5.11-V2；前四个：`rrf_k`/`retrieval_top_k`/`sql_max_correct_retries`/`sql_read_only_guard`，§11.1-R1 已登记同类：只有定义与读取，无行为用例） | I0 |
 | S-6 | **无限流 / 无并发闸**：单请求 LLM 调用最多 10 次（extract×1 + extend×3 + filter×2 + generate×1 + correct×≤3），全服务无 rate limit / semaphore | grep `rate/semaphore` 零命中；`agent/graph.py:52-54` 三路并行召回 | 中（成本放大 + DoS） | 应用侧信号量（并发问数上限）+ 每问 LLM 调用计数进 trace；Doris 侧 P1-5 workload group 管不到应用侧这条 | P1-5 扩展 |
 | S-7 | **`correct_sql` 把 DB 错误原文喂回 prompt**：错误文本（可含攻击者可控的列值）进 LLM 上下文，扩大注入面 | `agent/nodes/correct_sql.py:32-40` | 中 | 与 S-3 同一处修：进 prompt 前分类截断，不给原文 | 随 S-3 |
-| S-8 | **二阶 prompt 注入**：召回数据含源库列注释（构建脚本从 information_schema 写入 meta 库），注释含指令性文本时注入 LLM——这是数据驱动的注入，脱敏改造不覆盖它 | `services/meta_knowledge_service.py:41-48`；`generate_sql.py:27-33` | 中 | 三选一或叠加：① 注释进 prompt 前做指令特征过滤 / 长度截断；② 改结构化（JSON 字段）而非自然语言拼块；③ **人工受控修订入口**（2026-10-18 调研新增，Chat2DB"自定义 AI 数据集"同构）——审核过的列注释替代自由文本，过滤对象从不可信自动收窄为可信人工输入，且列注释是 LLM 理解列语义的最强信号，效果与安全合流（附录 §3.1-D-D；落地即 P1-6 组件） | P1-1 |
+| S-8 | **二阶 prompt 注入**：召回数据含列注释自由文本，注释含指令性文本时注入 LLM——这是数据驱动的注入，脱敏改造不覆盖它。**锚点纠正（2026-10-18 实读）**：本文原表述"构建脚本从 information_schema 写入 meta 库"不成立——`scripts/build_meta_knowledge.py` 全文 38 行是无 catalog 读取的 CLI 空壳，元知识经 `meta_knowledge_service.py:23-30` `build_from_tables` 由**调用方喂 dict** 入库；注入面在喂方（外部 DDL/文档提供者），不在构建脚本。未来若接 catalog 自动抽取 feeder，同一注入面再现，需按下方选项治理 | `services/meta_knowledge_service.py:23-30,40-51`；`generate_sql.py:27-33` | 中 | 三选一或叠加：① 注释进 prompt 前做指令特征过滤 / 长度截断；② 改结构化（JSON 字段）而非自然语言拼块；③ **人工受控修订入口**（2026-10-18 调研新增，Chat2DB"自定义 AI 数据集"同构）——审核过的列注释替代自由文本，过滤对象从不可信自动收窄为可信人工输入，且列注释是 LLM 理解列语义的最强信号，效果与安全合流（附录 §3.1-D-D；落地即 P1-6 组件，与 §5.14-R2 的 table_comment 补库共用数据基础） | P1-1 |
 | S-9 | **rerank 配置面漂移**：`.env.example` 五个 `RERANK_*` 键，全服务无 rerank 代码——外部端点被文档化但不存在 | `.env.example`；grep `rerank` 在 `nl2sql_service/` 零命中 | 低（配置漂移，第六个死配置） | 删键或补实现，二选一；与 S-5 同族 | I0 |
 | S-10 | **响应体回显生成 SQL**：设计使然（透明度）；P1-1 注入行级谓词后，谓词文本对客户端可见 | `api/routers/query_router.py:26` | 低（备查） | 接受并登记：验收第 14 条要求"SQL 文本里能看到下推条件"，二者是同一事实的两面 | 备查 |
 
@@ -688,6 +688,79 @@ feedback 契约（每轮进 prompt 的）：① 错误分类与截断后原文�
 2. 二轮场景触发执行期纠错：prompt 含第一轮继承的四元组（M5，不断 E3 第二次）。
 3. 同 session 切换 datasource：第二轮不继承第一轮的实体/表候选（M4）。
 
+### 5.14 表间关系断裂与三个失效节点（2026-10-18 新增；由用户追问"表间关系是 LLM 猜的"引出，全链路逐行凿实）
+
+#### 5.14.1 现状：四层断裂 + 三个失效节点（全部有锚点）
+
+**存储层**：meta 库只有列/指标/值三张表的 CRUD（`repositories/postgres/meta/meta_repository.py:17-36`），无关系表；`services/meta_knowledge_service.py:40-51` 的 `_save_column` 只收 `table_name/column_name/column_comment/data_type`，**表注释被丢弃不存**（R2 顺手补）。
+
+**契约层**：`agent/state.py:6-24` 有 `tables`/`metrics` 槽、无 `relations` 槽；entities 五件套 + MetricConfig 四件套均无关系实体。
+
+**召回层**：`recall_column.py:30`、`recall_metric.py:29`、`recall_value.py` 三路召回均不返回表候选；`merge_retrieved_info.py:28-32` 仅在 `metric_config` 入参时透传 tables。
+
+**生成层**：`generate_sql.py:27-33` 的 `table_infos=retrieved_info`（列/指标/值融合 JSON），`metric_infos`/`date_info` **硬编码空**，且不读 `state.tables`、不读 `state.metrics`。
+
+由此确认三个失效节点。**注意成本形态只有一种**（2026-10-18 逐行复核，修正早前"两个都白烧 LLM"的不准确说法）：
+
+| 节点 | 失效形态 | 成本 | 锚点 |
+|---|---|---|---|
+| `filter_metric` | **真浪费**：`recall_metric.py:29` 使 metrics 通常非空 ⇒ `filter_metric.py:17-20` 发起 LLM 调用；过滤结果写回 `state.metrics`（:25）但**零消费方**（`add_extra_context.py:6-8` 纯透传不读；`generate_sql.py` 不读）。且 `merge_retrieved_info.py:24` 早已把**未过滤**三路融合进 `retrieved_info`——过滤发生在一条输出即死的分支上 | 每次请求约 1 次无效 LLM 调用（metrics 命中时） | filter_metric.py:14-27 |
+| `filter_table` | **空转**：默认路径下无任何节点写 `state.tables`（全目录 grep `"tables":` 仅 filter_table 自身三处），`filter_table.py:14-15` 提前返回——**此路径不产生 LLM 调用**（修正早前表述）；仅 `metric_config` 传 tables 时执行 LLM 过滤（:17-19），输出仍无人读 | 默认路径零成本；metric_config 路径 1 次无效调用 | filter_table.py:14-15 |
+| `add_extra_context` | **空实现**：8 行纯透传，零逻辑 | 零 | add_extra_context.py:6-8 |
+
+净效果：LLM 在"没有表注释、没有 JOIN 键、指标槽还空着"的情况下，于 `generate_sql` 单次调用里**一次性猜完三件事：选哪些表、怎么 JOIN、指标什么口径**。S-6 登记的"每请求最多 10 次 LLM 调用"里，有 1 次（filter_metric）结果被完全丢弃。
+
+#### 5.14.2 失败模式（会展场景，全部静默）
+
+- **同名错 JOIN**：`exhibitor_id` 在订单/日志/支付表语义不同（正是支付域 5 套标识不统一的既有痛点），LLM 同名推断静默连错；
+- **异名漏 JOIN**：`booth_id` vs `stand_id`（主场/运营两套命名），该连的不连，结果少数据；
+- **多跳断裂**：A→B→C 只连一跳；
+- **最危险的是静默**：SQL 合法、能执行、结果非空、数字看着合理——§5.11 的异常三分类管不了（无异常可捕），guard 管不了（合法 SELECT）。**这是全链路唯一无感知的错误类别**。
+
+#### 5.14.3 设计：轻量关系声明（R1–R7，不引入本体）
+
+**R1 契约**：entities + MetricConfig 加轻量 `relations` 声明：`left_table/left_column/right_table/right_column/type/note`，`type ∈ {many_to_one, one_to_one, one_to_many}`（MDL relationships 的最小子集，不造 DSL）。**演进兼容约束**：`type`/`note` 即未来类型化属性（类 + 属性）的种子槽位——本体方向挂起期间（R7）不建类型系统，但槽位不得写死成无类型扁平串，foreclose 升级路径。
+
+**R2 存储**：meta 库加 `nl2sql_relation_info` 表；`_save_column` 补 `table_comment` 入库（与 §5.10-S-8 选项③的人工修订台共用数据基础）。
+
+**R3 召回与生成接线**（一并救活失效节点）：
+
+- 新增关系召回：按问题相关表/列召回关系声明；
+- **关系涉及表的并集 = `filter_table` 的候选输入**——空转节点接上真管线，或按 §90 删掉（二选一，不留死代码）；
+- `generate_sql.py:30` 的 `metric_infos=""` 修掉：`filter_metric` 的过滤结果进它该进的槽——**浪费节点的输出首次有消费方**；
+- prompt 加"表间关系"槽位，相关 JOIN 条件显式注入。
+
+**R4 种子三档**（回答"能自动发现吗、人工在哪"）：
+
+| 档 | 内容 | 人工角色 |
+|---|---|---|
+| T1 全自动零人工 | PK/UK/FK 约束（`pg_constraint` contype p/u/f）+ 表/列注释（`information_schema.columns` + `pg_description`）——物理声明即设计意图，照单全收 | 无 |
+| T2 机器提名人工确认 | 跨表同名列候选 JOIN 对（按 `column_name` group by）——`exhibitor_id` 类同名不同义在会展数仓是现实，机器只能提名；右表有 PK/UK 时附基数暗示（many_to_one 候选） | 确认界面 = S-8 选项③的"元知识修订台"（列注释修订 + 关系确认合流一个台子，不另起炉灶） |
+| T3 纯人工声明 | 跨命名（`booth_id`/`stand_id`）、多跳、语义关系——来自 DBA/分析师 | 唯一纯人环节 |
+
+**前置核实（未测，设计两种都接住）**：dw 库的 FK 声明数——一条 `select count(*) from pg_constraint where contype='f'` 可定；本会话无活库连接未实测。Kimball 数仓无物理 FK 是常态，但设计不假定答案。自动发现的上限 = T1 全收 + T2 提名；**指望全自动发现关系，在无 FK 的数仓里不成立**。
+
+**R5 服务期封闭**：查询路径只读 meta 库冻结的关系集，零人工、无确认弹窗；缺关系的失败模式与今天相同（静默错 JOIN 或拒答），不升级为"问用户"。人工只出现在建库期——与 Chat2DB"一键修复"（人工在环）的路线分界，同 §5.11"验证责任在系统层"一条线。
+
+**R6 与 Q25 的关系**：关系是收敛后语义层的第四件套（DDL + 文档 + 范例 + 关系）；YAML 元知识库先加 relations 段，Q25 拍收敛时自然成为统一 store 的 builder 输入——与"YAML 是原文层事实源"定位一致，不另起炉灶。
+
+**R7 本体方向（2026-10-18 用户决定：暂不引入，挂起登记）**：本体思想能覆盖 5.14.2 全部失败模式——类型化属性消歧（同名不同义按类归属拆分）、路径声明消歧（多跳显式列出中间类）、SHACL 约束 + 数据抽样验证（声明 `many_to_one` 后验左表键在右表覆盖率，声明可疑机器可判）；且 Kimball"无物理 FK"困境在建模层被消解（关系以公理存在，不依赖物理约束）。但 OWL 开放世界假设（未知 ≠ 假）与 pipeline"未声明 ⇒ 不 JOIN"的封闭决策直接冲突，完整推理机对本场景是负资产。挂起期间登记两个未来决策点：
+
+- **D7 本体来源**：nl2sql 自带轻量本体 / 从 exhibition-warehouse TTL 导出 / 平台级共享本体服务。前置核实：nl2sql 的 dw 库与 warehouse ontology 是否同一套表（同域大概率，同表未验证，禁假定）；
+- **D8 表达力上限**：L1 类型化关系（推荐）/ L2 SHACL 验证（推荐）/ L3 完整 OWL + 推理机（不推荐：工具链重、OWA 冲突、场景用不到）。
+
+R1 的 relations 槽位按本体演进兼容设计（见 R1 约束）——本方向不 foreclose、也不预付实现。
+
+#### 5.14.4 验收判据（并入 §6，第 19–21 条）
+
+1. **JOIN 链与关系声明一致**：含多跳（A→B→C）的会展问题，生成 SQL 的 JOIN 链与关系声明一致（golden 回归）。
+2. **同名错连防御**：`exhibitor_id` 对照实验——有声明时按声明连/拒连，无声明时不静默错连。
+3. **失效节点清零**：trace 里 `filter_metric` 的无效 LLM 调用消失、`filter_table` 输出有真实消费方（或节点按 §90 删除）。
+
+#### 5.14.5 工作量与批次
+
+R1–R4 约 3–5 人日（nl2sql 域内）；R4 种子三档约 2–3 人日。依赖 P0-1（schema 准确）；建议挂 P1-6（语义层）或紧随 P0-8 同批（同属"生成期上下文"层）。不依赖任何 T0 拍板项；本体方向（R7）挂起，不影响本批次实施。
+
 ## 6. 验收标准
 
 1. **幂等**：同一输入重跑两次，元数据库与向量点数、内容完全一致（涵盖原第 7 条，合并以免重复计数）。
@@ -708,6 +781,9 @@ feedback 契约（每轮进 prompt 的）：① 错误分类与截断后原文�
 16. **多轮继承**（§5.13-M3）：构造二轮追问（第二轮仅含指代"上述"或时间替换"那上个月呢"），继承生效可从 trace 观测（改写前后 query + 四元组快照均在）；**不传 session_id 的请求行为与单轮现状逐字节一致**（M1 回归底线）。
 17. **correct 不少上下文**（§5.13-M5）：二轮场景触发执行期纠错，prompt 含第一轮继承的四元组——E3 不在多轮场景重犯。
 18. **换源清零**（§5.13-M4）：同 session 切换 datasource，第二轮不继承第一轮的实体/表候选。
+19. **JOIN 链与关系声明一致**（§5.14.4-1）：含多跳（A→B→C）的会展问题，生成 SQL 的 JOIN 链与关系声明一致（golden 回归）。
+20. **同名错连防御**（§5.14.4-2）：`exhibitor_id` 对照实验——有声明时按声明连/拒连，无声明时不静默错连。
+21. **失效节点清零**（§5.14.4-3）：trace 里 `filter_metric` 的无效 LLM 调用消失、`filter_table` 输出有真实消费方（或节点按 §90 删除）。
 
 ## 7. 归属与陈述边界（不得含糊）
 
