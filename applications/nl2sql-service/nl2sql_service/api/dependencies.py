@@ -36,6 +36,7 @@ async def lifespan(app: FastAPI):
         from nl2sql_service.clients.embedding_client_manager import build_embedder
         from nl2sql_service.clients.pgvector_client_manager import PgvectorClientManager
         from nl2sql_service.repositories.pgvector.column_repository import ColumnRepository
+        from nl2sql_service.repositories.pgvector.example_repository import ExampleRepository
         from nl2sql_service.repositories.pgvector.metric_repository import MetricRepository
         from nl2sql_service.repositories.pgvector.value_repository import ValueRepository
         from nl2sql_service.repositories.postgres.meta.meta_repository import MetaRepository
@@ -63,6 +64,9 @@ async def lifespan(app: FastAPI):
             column_repository=ColumnRepository(pgvector_client),
             metric_repository=MetricRepository(pgvector_client),
             value_repository=ValueRepository(pgvector_client),
+            # 范例库（A 方案 Stage ②）：004 未应用时向量查询会炸——与 table_stats
+            # 同构静默降级（缺表不是启动故障，只是没有 few-shot）。
+            example_repository=ExampleRepository(pgvector_client),
             meta_repository=MetaRepository(pool=meta_pool, table_prefix=settings.table_prefix),
         )
 

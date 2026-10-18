@@ -4,6 +4,7 @@ from typing import Any
 
 from nl2sql_service.clients.embedding_client_manager import BaseEmbedder
 from nl2sql_service.repositories.pgvector.column_repository import ColumnRepository
+from nl2sql_service.repositories.pgvector.example_repository import ExampleRepository
 from nl2sql_service.repositories.pgvector.metric_repository import MetricRepository
 from nl2sql_service.repositories.pgvector.value_repository import ValueRepository
 
@@ -17,6 +18,7 @@ class DataAgentContext:
         column_repository: ColumnRepository | None = None,
         metric_repository: MetricRepository | None = None,
         value_repository: ValueRepository | None = None,
+        example_repository: ExampleRepository | None = None,
         meta_repository: Any = None,
         dw_repository: Any = None,
         table_stats: list[dict[str, Any]] | None = None,
@@ -28,6 +30,9 @@ class DataAgentContext:
         self.column_repository = column_repository
         self.metric_repository = metric_repository
         self.value_repository = value_repository
+        # 范例库（A 方案 Stage ②）：None = 未装配（004 未应用/老部署），
+        # recall_example 静默返回空——缺 few-shot 不阻断查询。
+        self.example_repository = example_repository
         self.meta_repository = meta_repository
         self.dw_repository = dw_repository
         # 漂移检测（P0-3）产出的表行数估值，供生成期聚合引导；无则不引导

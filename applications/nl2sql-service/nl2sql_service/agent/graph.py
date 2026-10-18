@@ -19,6 +19,7 @@ from nl2sql_service.agent.nodes.generate_sql import generate_sql
 from nl2sql_service.agent.nodes.inherit_context import inherit_context
 from nl2sql_service.agent.nodes.merge_retrieved_info import merge_retrieved_info
 from nl2sql_service.agent.nodes.recall_column import recall_column
+from nl2sql_service.agent.nodes.recall_example import recall_example
 from nl2sql_service.agent.nodes.recall_metric import recall_metric
 from nl2sql_service.agent.nodes.recall_relation import recall_relation
 from nl2sql_service.agent.nodes.recall_value import recall_value
@@ -91,6 +92,7 @@ def build_graph():
     graph.add_node("recall_metric", recall_metric)
     graph.add_node("recall_value", recall_value)
     graph.add_node("recall_relation", recall_relation)
+    graph.add_node("recall_example", recall_example)
     graph.add_node("merge_retrieved_info", merge_retrieved_info)
     graph.add_node("filter_table", filter_table)
     graph.add_node("filter_metric", filter_metric)
@@ -111,11 +113,13 @@ def build_graph():
     graph.add_edge("extract_keywords", "recall_metric")
     graph.add_edge("extract_keywords", "recall_value")
     graph.add_edge("extract_keywords", "recall_relation")
+    graph.add_edge("extract_keywords", "recall_example")
 
     graph.add_edge("recall_column", "merge_retrieved_info")
     graph.add_edge("recall_metric", "merge_retrieved_info")
     graph.add_edge("recall_value", "merge_retrieved_info")
     graph.add_edge("recall_relation", "merge_retrieved_info")
+    graph.add_edge("recall_example", "merge_retrieved_info")
 
     graph.add_edge("merge_retrieved_info", "filter_table")
     graph.add_edge("merge_retrieved_info", "filter_metric")

@@ -25,7 +25,7 @@ logger = get_logger(__name__)
 
 
 class MetaKnowledgeService:
-    """元知识构建服务：列/指标/值三类写入（全部 upsert，可重复执行）。"""
+    """元知识构建服务：列/指标/值/关系/别名/范例写入（全部 upsert，可重复执行）。"""
 
     def __init__(
         self,
@@ -89,6 +89,32 @@ class MetaKnowledgeService:
                 else:
                     stats["updated"] += 1
         logger.info("column meta built: %s", stats)
+        return stats
+
+    async def build_from_examples(self, examples: list[dict[str, Any]]) -> dict[str, int]:
+        """范例行写入：question / sql / source + embedding（A 方案 Stage ②）。
+
+        embedding 文本 = **question 单源**（与 agent_server `store_example` 一致）：
+        召回是"问题↔问题"的相似度匹配，SQL 是命中后才注入 prompt 的 few-shot
+        参考文本——把 SQL 混进嵌入文本只会给向量添噪（SQL 关键词与问题语义弱相关）。
+        不进 `prune`：范例源是迁移/持续训练而非 MetricConfig，配置驱动的 prune
+        会把范例全集误删光；范例的差异删由迁移入口自己做。
+        """
+        stats = {"inserted": 0, "updated": 0}
+        for example in examples:
+            question = example.get("question", "")
+            data: dict[str, Any] = {
+                "question": question,
+                "sql": example.get("sql", ""),
+                "source": example.get("source", "human"),
+            }
+            if self._embedder is not None:
+                data["embedding"] = await self._embed(question)
+            if await self._meta_repo.save_example(self._stamp(data)):
+                stats["inserted"] += 1
+            else:
+                stats["updated"] += 1
+        logger.info("example meta built: %s", stats)
         return stats
 
     async def build_from_metrics(self, metrics: list[dict[str, Any]]) -> dict[str, int]:
