@@ -89,6 +89,12 @@ class QueryService:
             "result": result.get("result"),
             "error": result.get("error"),
             "fallback": False,
+            # P0-8④⑤：取值匹配语义与分诊结论上响应体（error_detail 刻意不上）
+            "matched_values": result.get("value_matched", []),
+            "unmatched_terms": result.get("value_unmatched", []),
+            "dict_hit": result.get("dict_hit", False),
+            "empty_result_reason": result.get("empty_result_reason"),
+            "path": result.get("path", "graph"),
         }
         if not response["sql"] and not response["error"]:
             response["answer"] = response["answer"] or (

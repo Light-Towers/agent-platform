@@ -92,7 +92,7 @@ def test_classify_error_message_stays_external_facing():
 @pytest.mark.parametrize(
     ("state", "expected"),
     [
-        ({"error": ""}, "answer"),
+        ({"error": ""}, "triage_empty"),
         ({"error": "查询失败", "error_class": "correctable", "correct_count": 0}, "correct_sql"),
         (
             {"error": "查询超时", "error_class": "rewritable", "correct_count": 1, "sql_max_correct_retries": 3},

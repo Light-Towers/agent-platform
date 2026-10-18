@@ -20,4 +20,11 @@ class SqlQueryResponse(QueryResponse):
     """Text-to-SQL 查询响应。"""
 
     sql: str | None = Field(None, description="生成的 SQL")
-    error: str | None = Field(None, description="错误信息")
+    error: str | None = Field(None, description="错误信息（对外分类消息；DB 原文只在 error_detail 内，不随响应返回）")
+    # P0-8④：取值匹配语义上响应体——调用方能区分"字面量命中字典/源"与
+    # "未命中"，未命中时按未识别取值处理，不要把 0 行当成答案。
+    matched_values: list[str] = Field(default_factory=list, description="已在字典/源侧确认存在的取值")
+    unmatched_terms: list[str] = Field(default_factory=list, description="确定性未匹配的取值（探不到的不在内）")
+    dict_hit: bool = Field(False, description="全部字面量都有确定结论（无 unknown）")
+    empty_result_reason: str | None = Field(None, description="零结果分诊结论：unrecognized_literal / genuinely_empty / no_dimension_filter")
+    path: str | None = Field(None, description="graph | metric_direct | refuse（P2 双路径一致性对比维度）")
