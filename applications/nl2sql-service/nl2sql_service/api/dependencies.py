@@ -88,6 +88,14 @@ async def lifespan(app: FastAPI):
 
     app.state.pools = registry
 
+    # 表统计（P0-3 副产物 → 生成期聚合引导）：002 未应用时静默跳过——
+    # 缺表不是启动故障，只是没有聚合引导（不猜表大小）。
+    if ctx.meta_repository is not None:
+        try:
+            ctx.table_stats = await ctx.meta_repository.list_table_stats()
+        except Exception:  # noqa: BLE001 - 表未建/库不可用都不该阻断启动
+            logger.info("table stats unavailable（002 未应用？），聚合引导关闭", exc_info=True)
+
     app.state.llm = llm
     app.state.graph = graph
     app.state.context = ctx
