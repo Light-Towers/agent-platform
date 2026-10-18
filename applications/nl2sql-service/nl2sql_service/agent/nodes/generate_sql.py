@@ -18,7 +18,7 @@ from nl2sql_service.services.prompt_sanitizer import (
     sanitize_meta,
 )
 
-_FALLBACK = "根据以下信息生成 SQL：\n{query}\n表信息：{table_infos}\n指标信息：{metric_infos}\n表间关系：{relations}\n{aggregation_hint}"
+_FALLBACK = "根据以下信息生成 SQL：\n{query}\n表信息：{table_infos}\n指标信息：{metric_infos}\n表间关系：{relations}\n历史范例：{examples}\n{aggregation_hint}"
 
 
 def build_relations_block(relations: list[dict[str, Any]] | None) -> str:
@@ -39,6 +39,23 @@ def build_relations_block(relations: list[dict[str, Any]] | None) -> str:
             f"{rel.get('relation_type', 'many_to_one')} → "
             f"{rel.get('right_table', '')}.{rel.get('right_column', '')}{note}"
         )
+    return "\n".join(lines)
+
+
+def build_examples_block(examples: list[dict[str, Any]] | None) -> str:
+    """历史 SQL 范例 → prompt 文本（A 方案 Stage ② few-shot 注入）。
+
+    没有范例时给显式占位——"无范例"与"忘了传"在 prompt 里必须可区分。
+    S-8：question/sql 都是自由文本（迁自 agent_server 的人工训练数据），
+    进 prompt 前统一过 sanitize_free_text（折叠换行防伪造分节、指令特征过滤）。
+    """
+    if not examples:
+        return "（无历史范例）"
+    lines = []
+    for ex in examples:
+        question = sanitize_free_text(ex.get("question", ""))
+        sql = sanitize_free_text(ex.get("sql", ""))
+        lines.append(f"问题: {question}\nSQL: {sql}")
     return "\n".join(lines)
 
 
@@ -134,6 +151,7 @@ async def generate_sql(state: dict[str, Any]) -> dict[str, Any]:
         db_info=build_db_info(state),
         aggregation_hint=build_aggregation_hint(state),
         relations=build_relations_block(state.get("relations")),
+        examples=build_examples_block(state.get("examples")),
     )
     sql = await llm.invoke(prompt)
     return {"sql": sql, "error": "", "llm_calls": state.get("llm_calls", 0) + 1}

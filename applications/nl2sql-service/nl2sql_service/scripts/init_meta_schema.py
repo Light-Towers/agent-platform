@@ -88,7 +88,10 @@ async def read_status(dsn: str) -> dict[str, str]:
             if await cur.fetchone() is None:
                 return {}
             cur = await conn.execute("SELECT key, value FROM nl2sql_schema_meta")
-            return {row[0]: row[1] for row in await cur.fetchall()}
+            # dict_row 下 row 是 dict：按列名取（row[0] 是 tuple 索引，dict 上 KeyError——
+            # 与此前 MetaRepository._upsert 的 RETURNING 行同源坑，池统一配 dict_row）
+            rows = await cur.fetchall()
+            return {row["key"]: row["value"] for row in rows}
     finally:
         await pool.close()
 

@@ -1,4 +1,4 @@
-"""元知识库 Postgres 仓储：列/指标/值信息 upsert + 差异删除。
+"""元知识库 Postgres 仓储：列/指标/值/关系/别名/范例 upsert + 差异删除。
 
 2026-10-18（方案 P0-1 / P0-2 实装）：此前三个 `save_*` 用 `data.keys()`
 动态拼列名 + 纯 INSERT——一是指名注入面（P0-10：data 来自 YAML/DDL 派生
@@ -39,6 +39,13 @@ _ALIAS_TABLE = (
     ("tenant_id", "workspace_id", "datasource_id", "target_kind", "target_name", "alias"),
     ("source",),
 )
+#: 范例库（A 方案 Stage ②）：004 DDL 的 uq_nl2sql_example 即冲突键。
+#: 自然键只取 question——同一问法对应一条规范 SQL，重训练 upsert 更新而非叠加副本。
+_EXAMPLE_TABLE = (
+    "example_info",
+    ("tenant_id", "workspace_id", "datasource_id", "question"),
+    ("sql", "source", "embedding"),
+)
 
 #: 各表的自然键（= 唯一键去掉作用域列）：prune 的 NOT IN 比较目标。
 _COLUMN_NATURAL = ("table_name", "column_name")
@@ -46,6 +53,7 @@ _METRIC_NATURAL = ("metric_name",)
 _VALUE_NATURAL = ("column_name", "value")
 _RELATION_NATURAL = ("left_table", "left_column", "right_table", "right_column")
 _ALIAS_NATURAL = ("target_kind", "target_name", "alias")
+_EXAMPLE_NATURAL = ("question",)
 
 
 class MetaRepository:
@@ -78,6 +86,10 @@ class MetaRepository:
         """别名行 upsert（§5.14-R2）。"""
         return await self._upsert(_ALIAS_TABLE, data)
 
+    async def save_example(self, data: dict[str, Any]) -> bool:
+        """范例行 upsert（A 方案 Stage ②：question 自然键，重训练更新 SQL 不叠副本）。"""
+        return await self._upsert(_EXAMPLE_TABLE, data)
+
     async def prune_columns(self, keep: set[tuple[str, str]]) -> int:
         """删除作用域内不在 keep 的列行（keep = {(table_name, column_name)}）。"""
         return await self._prune(_COLUMN_TABLE[0], _COLUMN_NATURAL, keep)
@@ -101,6 +113,14 @@ class MetaRepository:
     async def prune_aliases(self, keep: set[tuple[str, str, str]]) -> int:
         """删除作用域内不在 keep 的别名行（keep = {(target_kind, target_name, alias)}）。"""
         return await self._prune(_ALIAS_TABLE[0], _ALIAS_NATURAL, keep)
+
+    async def prune_examples(self, keep: set[str]) -> int:
+        """删除作用域内不在 keep 的范例行（keep = {question}）。
+
+        str 必须包成 1-tuples 再下传（同 prune_metrics：_prune 按每个 key 展平
+        成一个 VALUES 行，直接传字符串会被逐字符拆开）。
+        """
+        return await self._prune(_EXAMPLE_TABLE[0], _EXAMPLE_NATURAL, {(q,) for q in keep})
 
     async def list_relations(self, datasource_id: str = "", tenant_id: str = "", workspace_id: str = "") -> list[dict[str, Any]]:
         """关系全集（R5：查询路径只读冻结集，服务期零人工）。"""
@@ -132,6 +152,18 @@ class MetaRepository:
         sql = (
             f"SELECT table_name, column_name, column_comment, data_type "
             f"FROM {self._prefix}column_info "
+            f"WHERE tenant_id = %s AND workspace_id = %s AND datasource_id = %s"
+        )
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(sql, (tenant_id, workspace_id, datasource_id))
+            rows = await cur.fetchall()
+            return [dict(r) for r in rows]
+
+    async def list_examples(self, datasource_id: str = "", tenant_id: str = "", workspace_id: str = "") -> list[dict[str, Any]]:
+        """范例全集（迁移核对/漂移比对用；在线召回走 ExampleRepository 向量路）。"""
+        sql = (
+            f"SELECT question, sql, source "
+            f"FROM {self._prefix}example_info "
             f"WHERE tenant_id = %s AND workspace_id = %s AND datasource_id = %s"
         )
         async with self._pool.connection() as conn:
