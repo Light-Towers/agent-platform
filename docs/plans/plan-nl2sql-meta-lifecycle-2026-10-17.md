@@ -875,7 +875,24 @@ R1–R4 约 3–5 人日（nl2sql 域内）；R4 种子三档约 2–3 人日。
 
 未动（维持登记）：B1 索引侧（卡 Q23）、answer 合成节点（M0-4 其余）、漂移检测/trace（B2）。federation 单测 2 条存量环境失败（与 nl2sql 零引用关系，非本批引入）。
 
-### 5.17 元知识表清单（代码隐含 schema；Q23 的核对清单）
+**执行进度（2026-10-18 当日，批 3，分支 `feat/nl2sql-meta-build-recovery`，接 836b0c4 之后）**：review §E / 方案 §5.16 里"仍为空"的项已逐条落地，一项一 commit——
+
+| 项 | commit | 内容 | 状态 |
+|---|---|---|---|
+| P1-4 方言分支 | `0da1419` | `services/datasource.py`（`DataSource`/`DataSourceRegistry`/`detect_dialect` 按 DSN scheme 探测）；请求 `datasource_id` 显式选源，未知 fail-fast；方言进 validate_sql 的 sqlglot 解析 + generate/correct 的 db_info | 单测全绿；召回 datasource 过滤（C7 已建）自此端到端 |
+| P1-3/P1-6 datasource 维度 | `0da1419` | 响应体带 `datasource_label`（口径标签）；datasource_id/dialect 注入 state | 单测全绿 |
+| P1-5/S-6 负载隔离 | `6602008` | `services/load_guard.py`（asyncio 并发闸 + 复用 agent-core `SlidingWindowRateLimiter` 限流）；每问 LLM 调用计数（6 节点）进 state | 单测全绿；全 0 配置 = 不建闸（老部署逐字节一致） |
+| S-8 二阶注入 | `53dfeb7` | `services/prompt_sanitizer.py`（折叠换行/控制字符 + 指令特征过滤 + 长度截断）；接入表/列注释、value_desc、metrics、relations note | 单测全绿；纵深防御一层，根治靠 P1-6 结构化 |
+| S-2 metric_config 守卫 | `53dfeb7` | `services/metric_config_guard.py`（`allowed_tables` 白名单 + 体量上限）；进 state/召回前拦截 | 单测全绿 |
+| §5.9 L2/L3 权限 | `8a03c8d` | guard 加可选 `SqlPolicy`（表/列白名单，policy=None 与旧版逐字节一致，三服务共享件零影响）+ `result_masking.py`（L3 结果层按角色投影）；L1（账号+视图）在 DB 侧、应用不建 DDL，README 文档化 | guard 用例全绿（含 agent_federation 共享消费方）；masking 节点级用例 |
+| §5.13 M1-M6 多轮 | `e0f17ad` | `query_rewriter`（M3 指代/时间分型，原始 query 零改动）+ `inherit_context` 首节点 + `finalize` 终态（trace + 四元组）；meta_repository 加 session/trace 落库（002 表，Json 适配） | 单测全绿；confirmed_pairs 不自动增长（M6 留人工确认） |
+| H4 质量回路 | `e0f17ad`+`f1da27d` | trace 落 `nl2sql_query_trace`（字段对齐 OTel GenAI 语义，G2）；`scripts/run_golden.py` 一键 golden 门禁（复用 lifespan，与生产路径零偏差）+ 基线/owner 文档 | 单测全绿；**真 golden 内容与基线数字待首跑回填**（诚实留空） |
+| H2 刷新触发 | `3541ea7` | `POST /api/meta/refresh` 跑漂移检测返回 `rebuild_recommended`（默认只报警不自动改语义）；挂在同步任务下游 | 单测全绿 |
+| §11.6 G1/G2 | `f1da27d` | ADR-0011（两条 Text2SQL 路收敛决策，未决风格）；G2 trace 对齐成文；迁移回滚路径（§11.6-①）确认已由 001/002 `.down.sql` 闭环 | 文档 |
+
+**S-1（无认证 SQL 执行代理）维持登记**：架构性框架项，依赖平台租户计划 T2/T5 + ADR-0007 身份门落地；本批只在其上叠加 L2/L3 纵深，不替代身份隔离。**真库端到端未跑**（本机无 PG + 活 LLM）：以上均为单测/契约/图级 stub 验证；端到端判据（golden 读数、trace 落库、多轮跨请求继承）待 `META_DB_DSN`/`DW_DB_DSN` 真环境首跑。
+
+
 
 **这一节解决什么**：Q23 只问"表由谁建"，答不出"建什么"。仓内没有 DDL（§2-④），下表是**从读写代码反推**的最小 schema——不是设计提案，是"代码要求库长成这样"。2026-10-18 全仓复核（`grep` 表名，排除 docs）：三张表名只出现在三个 repository 的构造默认参数里，**没有任何建表语句、迁移脚本或 YAML 声明** ⇒ Q23 的一种答案是"从未建过"（`META_DB_DSN` 默认空，这条路径从未在真实库上跑过）。
 
