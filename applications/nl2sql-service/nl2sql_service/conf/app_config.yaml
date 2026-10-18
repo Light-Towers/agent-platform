@@ -60,3 +60,10 @@ load_guard:
   max_concurrency: 0
   rate_limit_per_min: 0
   acquire_timeout: 5.0
+
+# metric_config 入参守卫（S-2）：客户端注入的元知识必须过两道闸。
+# allowed_tables 非空 = 只允许这些表进 metric_config（空 = 不校验，向后兼容）；
+# max_items = 元知识条目总上限，防 prompt 被撑爆。
+metric_config_guard:
+  allowed_tables: []   # 例：["orders", "order_items", "users"]
+  max_items: 200

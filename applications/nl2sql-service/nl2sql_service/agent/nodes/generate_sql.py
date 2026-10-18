@@ -10,6 +10,13 @@ from typing import Any
 
 from nl2sql_service.agent.llm import LLMClient
 from nl2sql_service.agent.nodes._prompt import json_block, load_prompt, render
+from nl2sql_service.services.prompt_sanitizer import (
+    COLUMN_FREE_FIELDS,
+    METRIC_FREE_FIELDS,
+    TABLE_FREE_FIELDS,
+    sanitize_free_text,
+    sanitize_meta,
+)
 
 _FALLBACK = "根据以下信息生成 SQL：\n{query}\n表信息：{table_infos}\n指标信息：{metric_infos}\n表间关系：{relations}\n{aggregation_hint}"
 
@@ -24,7 +31,9 @@ def build_relations_block(relations: list[dict[str, Any]] | None) -> str:
         return "（无关系声明：不得凭同名列猜测 JOIN 关系）"
     lines = []
     for rel in relations:
-        note = f"（{rel['note']}）" if rel.get("note") else ""
+        # S-8：关系 note 是自由文本（消歧说明），同样过清洗
+        note_raw = sanitize_free_text(rel.get("note", ""))
+        note = f"（{note_raw}）" if note_raw else ""
         lines.append(
             f"- {rel.get('left_table', '')}.{rel.get('left_column', '')} "
             f"{rel.get('relation_type', 'many_to_one')} → "
@@ -62,6 +71,10 @@ def build_table_infos(state: dict[str, Any]) -> str:
     values = state.get("values", [])
     if not (tables or columns or values):
         return state.get("retrieved_info", "")
+    # S-8 二阶注入防御：自由文本（表/列注释）进 prompt 前统一清洗——
+    # 折叠换行防伪造分节、指令特征过滤、长度截断。标识符字段不动。
+    tables = sanitize_meta(tables, TABLE_FREE_FIELDS)
+    columns = sanitize_meta(columns, COLUMN_FREE_FIELDS)
     return (
         f"【表】{json_block(tables)}\n"
         f"【列】{json_block(columns)}\n"
@@ -77,8 +90,13 @@ def build_value_bindings(values: list[dict[str, Any]] | None) -> str:
     """
     if not values:
         return "（无已声明取值）"
+    # S-8：value_desc 是自由文本，同样过清洗（与表/列注释同源同威胁）
     bindings = [
-        {"column": v.get("column_name", ""), "value": v.get("value", ""), "desc": v.get("value_desc", "")}
+        {
+            "column": v.get("column_name", ""),
+            "value": v.get("value", ""),
+            "desc": sanitize_free_text(v.get("value_desc", "")),
+        }
         for v in values
         if isinstance(v, dict)
     ]
@@ -110,7 +128,7 @@ async def generate_sql(state: dict[str, Any]) -> dict[str, Any]:
         load_prompt("generate_sql.prompt", _FALLBACK),
         query=query,
         table_infos=build_table_infos(state),
-        metric_infos=json_block(state.get("metrics", [])),
+        metric_infos=json_block(sanitize_meta(state.get("metrics", []), METRIC_FREE_FIELDS)),
         date_info=state.get("date_info", ""),
         db_info=build_db_info(state),
         aggregation_hint=build_aggregation_hint(state),
