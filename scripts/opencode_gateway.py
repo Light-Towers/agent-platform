@@ -14,9 +14,20 @@ LLM_BASE_URL 指向本网关、LLM_API_KEY 填任意非空串即可离线跑真�
 
 用法：
     python scripts/opencode_gateway.py --port 8799 \
-        --model opencode/deepseek-v4-flash-free
+        --model opencode/deepseek-v4.1-flash-free
 
 环境变量 OPENCODE_GATEWAY_MODEL 可覆盖默认模型。
+
+**2026-10-18 现状（本开发机实测，三条路均不可用）**：
+- `opencode/*-free` 免费模型：`403 FreeTierError "Detect Abuse Traffic"`——数据中心
+  IP 被 opencode 反滥用网关封，非代码问题。
+- `github-copilot/*`：`400 Personal Access Tokens are not supported`——GITHUB_TOKEN
+  是 PAT，Copilot 端点只要 OAuth token。
+- 结论：本机跑 opencode 需先解决上面任一项；否则改用任意 OpenAI 兼容端点
+  （如同机 siliconflow， LangChain 直连即可，不必经本网关）。
+- 错误可见性（本次修）：此前 `stderr=DEVNULL` 且不解析 opencode 的 `type=="error"`
+  事件，上游真实错误被吞成 `[opencode error rc=1: ]` 空壳。现捕获 stderr + 解析
+  error 事件，把真实 message 透出到 content 并落网关日志。
 """
 from __future__ import annotations
 
@@ -25,6 +36,7 @@ import asyncio
 import json
 import os
 import subprocess
+import sys
 import time
 import uuid
 from typing import Any
@@ -34,7 +46,12 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from shared_schemas import sse_pack
 
-OPENAI_MODELS = {"opencode": "opencode/deepseek-v4-flash-free"}
+
+def _log(msg: str) -> None:
+    """网关自身日志走 stderr（uvicorn 的 stdout 是响应流，不能污染）。"""
+    print(f"[opencode-gateway] {msg}", file=sys.stderr, flush=True)
+
+OPENAI_MODELS = {"opencode": "opencode/deepseek-v4.1-flash-free"}
 
 app = FastAPI(title="opencode-gateway")
 
@@ -89,7 +106,7 @@ async def _opencode_events(prompt: str, model: str, req_id: str):
         *cmd,
         stdin=subprocess.DEVNULL,   # 非交互：避免 opencode 读 TTY 报 EBADF
         stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,  # TUI 噪声不进入响应流
+        stderr=subprocess.PIPE,     # 捕获 stderr：rc!=0 时它是唯一错误线索（此前 DEVNULL 全丢）
         env=env,
     )
     assert proc.stdout is not None
@@ -102,6 +119,7 @@ async def _opencode_events(prompt: str, model: str, req_id: str):
     }
 
     usage_total = usage_input = usage_output = 0
+    upstream_error = ""  # opencode 结构化错误事件的消息（type=="error"）
     async for raw in proc.stdout:
         line = raw.decode("utf-8", "replace").strip()
         if not line:
@@ -110,7 +128,8 @@ async def _opencode_events(prompt: str, model: str, req_id: str):
             evt = json.loads(line)
         except json.JSONDecodeError:
             continue
-        if evt.get("type") == "text" and "part" in evt:
+        etype = evt.get("type")
+        if etype == "text" and "part" in evt:
             text = evt["part"].get("text", "")
             if text:
                 yield {
@@ -119,23 +138,44 @@ async def _opencode_events(prompt: str, model: str, req_id: str):
                     "choices": [{"index": 0, "delta": {"content": text},
                                  "finish_reason": None}],
                 }
-        elif evt.get("type") == "step_finish" and "part" in evt:
+        elif etype == "error":
+            # opencode 把上游错误（如免费网关 403 反滥用 / 402 余额不足 / 400 token
+            # 类型不符）作为结构化 error 事件发在 stdout——此前完全不解析，真实原因
+            # 被吞成 "[opencode error rc=1: ]" 空壳。这里抽出 message 透出。
+            err = evt.get("error") or {}
+            data = err.get("data") or {}
+            upstream_error = (
+                data.get("message") or err.get("message")
+                or (err.get("name") + "" if err.get("name") else "")
+                or json.dumps(err, ensure_ascii=False)
+            )
+            _log(f"opencode upstream error: {upstream_error}")
+        elif etype == "step_finish" and "part" in evt:
             tok = evt["part"].get("tokens", {})
             usage_total = tok.get("total", usage_total)
             usage_input = tok.get("input", usage_input)
             usage_output = tok.get("output", usage_output)
 
     await proc.wait()
-    if proc.returncode != 0:
-        err = b""
-        if proc.stderr:
-            err = (await proc.stderr.read())[:500]
+    stderr_txt = ""
+    if proc.stderr is not None:
+        try:
+            stderr_txt = (await proc.stderr.read())[:500].decode("utf-8", "replace").strip()
+        except Exception:  # noqa: BLE001 - 读 stderr 失败不该盖过主流程
+            stderr_txt = ""
+
+    if upstream_error or proc.returncode != 0:
+        # 真实错误透出到 content（OpenAI 流里唯一能带错误的位置）+ 落网关日志。
+        # finish_reason=None：把它当作普通 content delta，让下面的收尾 chunk 正常
+        # 发 finish_reason=stop + usage，流式路径才能收到 [DONE]（否则客户端挂等）。
+        detail = upstream_error or stderr_txt or f"rc={proc.returncode}"
+        _log(f"opencode run failed rc={proc.returncode} stderr={stderr_txt!r}")
         yield {
             "id": req_id, "object": "chat.completion.chunk",
             "created": created, "model": model,
             "choices": [{"index": 0,
-                         "delta": {"content": f"\n[opencode error rc={proc.returncode}: {err.decode('utf-8','replace')}]"},
-                         "finish_reason": "stop"}],
+                         "delta": {"content": f"[opencode error: {detail}]"},
+                         "finish_reason": None}],
         }
 
     yield {
@@ -165,7 +205,7 @@ async def _opencode_stream(prompt: str, model: str, req_id: str):
 async def chat_completions(request: Request):
     body = await request.json()
     model = body.get("model") or os.environ.get("OPENCODE_GATEWAY_MODEL",
-                                                 "opencode/deepseek-v4-flash-free")
+                                                 "opencode/deepseek-v4.1-flash-free")
     messages = body.get("messages", [])
     stream = body.get("stream", True)
     req_id = f"chatcmpl-{uuid.uuid4().hex}"
@@ -210,7 +250,7 @@ def main() -> None:
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8799)
     parser.add_argument("--model", default=os.environ.get(
-        "OPENCODE_GATEWAY_MODEL", "opencode/deepseek-v4-flash-free"))
+        "OPENCODE_GATEWAY_MODEL", "opencode/deepseek-v4.1-flash-free"))
     args = parser.parse_args()
     os.environ["OPENCODE_GATEWAY_MODEL"] = args.model
     uvicorn.run(app, host=args.host, port=args.port, log_level="info")

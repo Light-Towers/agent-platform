@@ -4,6 +4,8 @@
 结论：**闭环通过（[PASS]）** —— 真实 LLM 通道打通，Postgres checkpoint 写读恢复验证成功，RAG 真实 embedding + rerank 重排主链路已闭环。
 剩余 1 个非阻塞缺陷：后台长期记忆写入线程的 event-loop 错配（见 §5）。
 
+> **2026-10-18 更新（opencode 通道复跑）**：① 模型 ID 已由下线的 `deepseek-v4-flash-free` 更正为 **`deepseek-v4.1-flash-free`**（本文所有命令/配置已同步）——用过期 ID 会得到无信息量的 `Unexpected server error`。② `Detect Abuse Traffic`(403) 是**免费层突发限流、非永久封禁**，降频即恢复，管线可容忍偶发单次限流。③ `opencode_gateway.py` 已修**错误吞掉**问题（此前真实上游错误被显示成空壳 `rc=1`），现在透出真实 message。详见 §2.3。④ nl2sql-service 已在真 PG+pgvector 下用真实 LLM 端到端跑通（正确 SQL + 正确答案）。
+
 ---
 
 ## 1. 环境准备
@@ -11,7 +13,7 @@
 | 组件 | 状态 | 说明 |
 |------|------|------|
 | `.venv` (fastapi 0.141 / uvicorn 0.52) | ✅ | 已就绪 |
-| `opencode` CLI | ✅ | `/root/.nvm/.../opencode`，`opencode models` 可列出含 `opencode/deepseek-v4-flash-free` 等的免费模型 |
+| `opencode` CLI | ✅ | `/root/.nvm/.../opencode`，`opencode models` 可列出含 `opencode/deepseek-v4.1-flash-free` 等的免费模型 |
 | pgvector 容器 | ✅ | `pgvector/pgvector:pg16` @ `localhost:5433`，扩展 `vector 0.8.6` 已装 |
 | opencode-gateway | ✅ | `scripts/opencode_gateway.py` @ `:8799`，`/health` → `{"status":"ok"}` |
 
@@ -28,7 +30,7 @@ docker exec agent-platform-pg psql -U agent -d agent_platform -c "CREATE EXTENSI
 # 2) opencode 网关（后台、脱离 shell 会话存活）
 cd /workspace/agent-platform
 setsid .venv/bin/python scripts/opencode_gateway.py \
-  --port 8799 --model opencode/deepseek-v4-flash-free > /tmp/opencode_gateway.log 2>&1 < /dev/null &
+  --port 8799 --model opencode/deepseek-v4.1-flash-free > /tmp/opencode_gateway.log 2>&1 < /dev/null &
 
 # 3) 验证
 curl -s http://127.0.0.1:8799/health          # {"status":"ok","gateway":"opencode"}
@@ -41,7 +43,7 @@ DATABASE_URL=postgresql://agent:agent_platform_dev@localhost:5433/agent_platform
 VECTOR_DIM=512
 LLM_API_KEY=<任意非空串>          # 任意非空串即可
 LLM_BASE_URL=http://127.0.0.1:8799/v1
-LLM_MODEL=opencode/deepseek-v4-flash-free
+LLM_MODEL=opencode/deepseek-v4.1-flash-free
 LLM_TIMEOUT=120                              # 免费模型冷启动慢，原 60 会超时
 ```
 
@@ -54,7 +56,7 @@ LLM_TIMEOUT=120                              # 免费模型冷启动慢，原 60
 ```bash
 curl -s -X POST http://127.0.0.1:8799/v1/chat/completions \
   -H 'Content-Type: application/json' \
-  -d '{"model":"opencode/deepseek-v4-flash-free","stream":false,
+  -d '{"model":"opencode/deepseek-v4.1-flash-free","stream":false,
        "messages":[{"role":"user","content":"用10字解释量子计算"}]}'
 # → {"choices":[{"message":{"content":"量子纠缠并行算。"}}],"usage":{...}}
 # http_code=200, elapsed≈7s
@@ -64,21 +66,23 @@ curl -s -X POST http://127.0.0.1:8799/v1/chat/completions \
 
 `smoke_query_real.py` 第一轮真实 LLM 返回：
 
-> 「证据表明知识库中未检索到任何相关内容……不过据我所知（非来自上述证据），**我是 deepseek-v4-flash-free（opencode/deepseek-v4-flash-free）**。」
+> 「证据表明知识库中未检索到任何相关内容……不过据我所知（非来自上述证据），**我是 deepseek-v4.1-flash-free（opencode/deepseek-v4.1-flash-free）**。」
 
 这是模型**真实自报身份**，启发式分支不可能产出此类内容 → **确认走真实 LLM，非启发式**。
 
-### 2.3 上游偶发故障（已踩坑）
+### 2.3 上游错误辨析（2026-10-18 深挖，纠正早期误判）
 
-`opencode run -m opencode/deepseek-v4-flash-free` 在验证过程中曾偶发：
+早期把 `Unexpected server error` 当成"瞬时服务端错误"是**误判**。实测（`opencode run --format json` 直接跑 + 经网关）辨明三类错误，根因各不相同：
 
-```json
-{"type":"error","error":{"name":"UnknownError","data":{"message":"Unexpected server error. Check server logs for details."}}}
-```
+| 现象 | 真实根因 | 处置 |
+|------|---------|------|
+| `Unexpected server error. Check server logs...` | **模型 ID 不存在**——配置的 `deepseek-v4-flash-free` 已下线，现为 `deepseek-v4.1-flash-free`（`opencode models` 可查）。过期 ID → 上游通用 500 | 改模型 ID（本文已全部更新为 `.1`） |
+| `403 FreeTierError: Detect Abuse Traffic` | **免费层突发限流**（`opencode.ai/inference` 反滥用），数据中心 IP + 短时间多次调用触发。**非永久封禁**——间隔一会儿复测即恢复 | 降调用频率；管线对单次限流**优雅容忍**（nl2sql 单查询 ~4-5 次 LLM 调用中偶发 1 次被限流，仍产出正确答案） |
+| `github-copilot/*` → `400 Personal Access Tokens are not supported` | `GITHUB_TOKEN` 是 PAT，Copilot 端点只要 OAuth token | 用 opencode 免费模型路即可；要用 Copilot 需 OAuth token |
 
-- 属 opencode 后端（zen）**瞬时服务端错误**，非本地配置问题。
-- 复测 `opencode/hy3-free`、`opencode/mimo-v2.5-free` 均稳定可用，可作为备选模型。
-- 网关侧无重试；若生产需要，可在 `opencode_gateway.py` 对 `UnknownError` 加一次重试 + 模型 fallback。
+**网关错误可见性（已修，commit 见仓库）**：`opencode_gateway.py` 此前 `stderr=DEVNULL` 且不解析 opencode 的 `type=="error"` 事件，上游真实错误被吞成 `[opencode error rc=1: ]` 空壳——这正是早期排查看不到真实原因的原因。现：捕获 stderr + 解析 error 事件，真实 message 透出到响应 content 并落网关日志（`[opencode-gateway] ...`）。
+
+**nl2sql 真实 LLM 端到端（2026-10-18，真 PG+pgvector）**：修模型 ID 后单查询全链跑通——LLM 生成 `SELECT COUNT(*), SUM(amount) FROM orders WHERE status='已支付'`，答案"已支付订单共 4 笔，总金额 388.50"（与种子数据验算一致）。证明 generate→guard→execute→answer 全腿在真实 LLM 下正确。
 
 ---
 
@@ -100,9 +104,9 @@ curl -s -X POST http://127.0.0.1:8799/v1/chat/completions \
 
 ```
 [config] db_enabled=True llm_enabled=True
-[config] LLM_BASE_URL=http://127.0.0.1:8799/v1 LLM_MODEL=opencode/deepseek-v4-flash-free
+[config] LLM_BASE_URL=http://127.0.0.1:8799/v1 LLM_MODEL=opencode/deepseek-v4.1-flash-free
 === 第一轮：写入 checkpoint + 真实 LLM 调用 ===
-[round1] chunks=9 answer='...我是 deepseek-v4-flash-free（opencode/deepseek-v4-flash-free）。'
+[round1] chunks=9 answer='...我是 deepseek-v4.1-flash-free（opencode/deepseek-v4.1-flash-free）。'
 [checkpoint] Postgres 中 thread=smoke-real-query-001 的 checkpoint 行数 = 11
 === 第二轮：同一 thread_id 读回 checkpoint 续跑（写读恢复） ===
 [round2] chunks=3 answer='作为这个 monorepo 的助手，我可以帮你：...'
