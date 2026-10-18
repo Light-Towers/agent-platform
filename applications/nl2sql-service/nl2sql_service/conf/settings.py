@@ -117,6 +117,19 @@ class Settings(BaseLLMSettings):
     allowed_tables: List[str] = Field(default_factory=list)
     metric_config_max_items: int = 200
 
+    # 数据权限（§5.9 L2/L3）：sensitive_columns 是"一份声明两处消费"的敏感列
+    # 清单（"table.column" 全限定，小写）——同时驱动 L2 guard 黑名单与 L3 结果
+    # 层脱敏。L1（账号 GRANT + 脱敏视图）在 DB 侧，应用不建 DDL，见 README。
+    sensitive_columns: List[str] = Field(default_factory=list)
+    # L3 结果层脱敏：非 admin 角色对敏感列投影掩码。掩码保留首尾各 keep 个字符，
+    # 其余打 *；keep=0 = 全掩码。admin_roles 里的角色看全量。
+    result_masking_enabled: bool = True
+    mask_keep_chars: int = 1
+    admin_roles: List[str] = Field(default_factory=lambda: ["admin"])
+    # L3 角色来源（服务端断言，非客户端请求体）：未接 ADR-0007 身份门前的
+    # 最小权限默认。接入身份门后改为从断言身份取。置 admin 需显式改配置。
+    default_query_role: str = "analyst"
+
     @property
     def meta_db_enabled(self) -> bool:
         return bool(self.meta_db_dsn)
@@ -206,6 +219,13 @@ def get_settings() -> Settings:
     if guard_yaml:
         overrides["allowed_tables"] = guard_yaml.get("allowed_tables", []) or []
         overrides["metric_config_max_items"] = guard_yaml.get("max_items", 200)
+    perm_yaml = app_yaml.get("data_permission") or {}
+    if perm_yaml:
+        overrides["sensitive_columns"] = perm_yaml.get("sensitive_columns", []) or []
+        overrides["result_masking_enabled"] = perm_yaml.get("result_masking_enabled", True)
+        overrides["mask_keep_chars"] = perm_yaml.get("mask_keep_chars", 1)
+        overrides["admin_roles"] = perm_yaml.get("admin_roles", ["admin"]) or ["admin"]
+        overrides["default_query_role"] = perm_yaml.get("default_query_role", "analyst")
     datasource_yaml = app_yaml.get("datasource") or {}
     if datasource_yaml:
         overrides["datasource_id"] = datasource_yaml.get("id", "dw")

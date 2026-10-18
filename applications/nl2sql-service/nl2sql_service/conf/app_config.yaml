@@ -67,3 +67,13 @@ load_guard:
 metric_config_guard:
   allowed_tables: []   # 例：["orders", "order_items", "users"]
   max_items: 200
+
+# 数据权限（§5.9 L2/L3）。L1（账号 GRANT + 脱敏视图）在 DB 侧、应用不建 DDL，
+# 见 README；这里是应用侧两层：L2 guard 表/列白名单 + L3 结果层脱敏。
+# sensitive_columns 一份声明两处消费（L2 黑名单 + L3 脱敏），形如 "table.column"。
+data_permission:
+  sensitive_columns: []   # 例：["users.phone", "users.id_card"]
+  result_masking_enabled: true
+  mask_keep_chars: 1      # 掩码保留首尾各 N 字符；0 = 全掩码
+  admin_roles: ["admin"]  # 这些角色看全量，其余脱敏（最小权限默认）
+  default_query_role: "analyst"  # 服务端断言角色（未接身份门前的最小权限默认）

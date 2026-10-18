@@ -77,3 +77,58 @@ def test_normal_functions_still_allowed():
     )
     assert ok, reason
     assert "LIMIT 100" in sql.upper()
+
+
+# ---------------------------------------------------------------------------
+# 表/列级白名单（§5.9 L2，2026-10-18）：policy=None 时老行为不变
+# ---------------------------------------------------------------------------
+from agent_core.sql.guard import SqlPolicy, validate_sql_with_policy
+
+
+def test_policy_none_matches_plain_validate():
+    """policy=None 与旧 validate_sql 逐结果一致（三服务共享件零影响）。"""
+    sql = "SELECT phone FROM users"
+    a = validate_sql(sql, "postgres", 100)
+    b = validate_sql_with_policy(sql, "postgres", 100, None)
+    assert a == b
+
+
+def test_policy_rejects_unauthorized_table():
+    pol = SqlPolicy(allowed_tables=frozenset({"orders"}))
+    ok, reason, _ = validate_sql_with_policy("SELECT * FROM users", "postgres", 100, pol)
+    assert not ok and "未授权表" in reason and "users" in reason
+
+
+def test_policy_allows_authorized_table():
+    pol = SqlPolicy(allowed_tables=frozenset({"orders", "users"}))
+    ok, reason, _ = validate_sql_with_policy("SELECT id FROM orders", "postgres", 100, pol)
+    assert ok, reason
+
+
+def test_policy_rejects_sensitive_qualified_column():
+    pol = SqlPolicy(sensitive_columns=frozenset({"users.phone"}))
+    ok, reason, _ = validate_sql_with_policy("SELECT users.phone FROM users", "postgres", 100, pol)
+    assert not ok and "敏感列" in reason and "users.phone" in reason
+
+
+def test_policy_resolves_unqualified_column_single_table():
+    """单表未限定列归属该表：SELECT phone FROM users 命中 users.phone。"""
+    pol = SqlPolicy(sensitive_columns=frozenset({"users.phone"}))
+    ok, reason, _ = validate_sql_with_policy("SELECT phone FROM users", "postgres", 100, pol)
+    assert not ok and "敏感列" in reason
+
+
+def test_policy_cte_name_not_treated_as_table():
+    """CTE 派生表名不算未授权表（WITH t AS (...) SELECT FROM t 放行）。"""
+    pol = SqlPolicy(allowed_tables=frozenset({"orders"}))
+    ok, reason, _ = validate_sql_with_policy(
+        "WITH t AS (SELECT id FROM orders) SELECT id FROM t", "postgres", 100, pol
+    )
+    assert ok, reason
+
+
+def test_policy_empty_lists_behave_as_no_policy():
+    """allowed/sensitive 都空 = 无策略（回退纯语句级）。"""
+    ok, reason, _ = validate_sql_with_policy("SELECT phone FROM users", "postgres", 100, SqlPolicy())
+    assert ok, reason
+
