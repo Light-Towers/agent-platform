@@ -3,6 +3,7 @@
 环境变量优先级 > YAML > 默认值。
 """
 
+import os
 from functools import lru_cache
 from pathlib import Path
 from typing import List
@@ -149,6 +150,29 @@ def _load_yaml(path: str | Path) -> dict:
         return yaml.safe_load(f) or {}
 
 
+def _env_provided_fields(env_file: str = ".env") -> set[str]:
+    """进程 env + .env 文件里**显式提供**的字段名（大写）。
+
+    `get_settings` 把 app_config.yaml 的值作为 init kwargs 传给 `Settings(**...)`——
+    pydantic-settings 里 init kwargs 优先级**最高**，会盖过 env / .env，违背本模块
+    docstring 承诺的"环境变量优先级 > YAML > 默认值"。后果：根 `.env` 里的
+    `EMBEDDING_*` / `VECTOR_DIM` 等对 nl2sql 全是**死配置**（被 app_config.yaml 的
+    陈旧值盖过），真部署维度/模型二义（Q18 在真库端到端里显形）。
+
+    这里算出 env/.env 已提供的字段集，`get_settings` 据此把 YAML override 里同名字段
+    **剔除**，让它们走 pydantic 的 env 源（优先级更高），YAML 只补 env 未提供的项。
+    `.env` 路径与 pydantic-settings 的 `env_file` 一致（CWD 相对），两者读同一份。
+    """
+    provided = {k.upper() for k in os.environ}
+    p = Path(env_file)
+    if p.is_file():
+        for line in p.read_text(encoding="utf-8-sig").splitlines():
+            s = line.strip()
+            if s and not s.startswith("#") and "=" in s:
+                provided.add(s.split("=", 1)[0].strip().upper())
+    return provided
+
+
 #: YAML `pool.<source>.<key>` → Settings 字段名。字段名不对称
 #: （statement_timeout_ms 没有 pool_ 中缀），显式映射不猜名。
 _POOL_KEY_TO_FIELD = {
@@ -252,5 +276,12 @@ def get_settings() -> Settings:
         overrides["dw_schema"] = dw_meta_yaml.get("schema", "public")
     if "pool" in app_yaml:
         overrides.update(_pool_overrides(app_yaml))
+
+    # env > YAML > 默认（docstring 契约）：剔除 env/.env 已提供的字段，让它们走
+    # pydantic 的 env 源（优先级高于 init kwargs）。YAML 只补 env 未提供的项——
+    # 否则 app_config.yaml 的值会盖过根 .env，使 .env 的 EMBEDDING_*/VECTOR_DIM 等
+    # 成为死配置（Q18：真部署 embedding 维度/模型二义的根因）。
+    provided = _env_provided_fields()
+    overrides = {k: v for k, v in overrides.items() if k.upper() not in provided}
 
     return Settings(**overrides)
