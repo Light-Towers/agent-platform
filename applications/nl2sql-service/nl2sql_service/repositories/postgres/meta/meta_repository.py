@@ -14,6 +14,7 @@ from typing import Any
 
 from agent_core.logging import get_logger
 from agent_core.sql.identifiers import validate_identifier
+from psycopg.types.json import Json
 
 logger = get_logger(__name__)
 
@@ -222,6 +223,64 @@ class MetaRepository:
             cur = await conn.execute(sql)
             rows = await cur.fetchall()
             return [dict(r._mapping) for r in rows]
+
+    # -----------------------------------------------------------------------
+    # 多轮会话状态（§5.13 M2/M6）与查询追溯（P0-4/H4）：002 表，参数化 + Json 适配
+    # -----------------------------------------------------------------------
+    async def get_session(self, session_id: str, datasource_id: str = "") -> dict[str, Any] | None:
+        """读会话四元组 + 已确认问答对（M2/M6）；无行返回 None。"""
+        sql = (
+            f"SELECT session_id, datasource_id, turn, quadruple, confirmed_pairs "
+            f"FROM {self._prefix}session_state "
+            f"WHERE tenant_id = %s AND workspace_id = %s AND session_id = %s AND datasource_id = %s"
+        )
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(sql, ("", "", session_id, datasource_id))
+            row = await cur.fetchone()
+        return dict(row._mapping) if row is not None else None
+
+    async def upsert_session(
+        self,
+        session_id: str,
+        datasource_id: str,
+        quadruple: dict[str, Any],
+        confirmed_pairs: list[dict[str, Any]],
+        turn: int,
+    ) -> None:
+        """写会话四元组 + 已确认问答对（M4：唯一键含 datasource_id，换源即另一行）。"""
+        sql = (
+            f"INSERT INTO {self._prefix}session_state "
+            f"(tenant_id, workspace_id, session_id, datasource_id, turn, quadruple, confirmed_pairs, updated_at) "
+            f"VALUES (%s, %s, %s, %s, %s, %s, %s, now()) "
+            f"ON CONFLICT (tenant_id, workspace_id, session_id, datasource_id) DO UPDATE SET "
+            f"turn = EXCLUDED.turn, quadruple = EXCLUDED.quadruple, "
+            f"confirmed_pairs = EXCLUDED.confirmed_pairs, updated_at = now()"
+        )
+        async with self._pool.connection() as conn:
+            await conn.execute(
+                sql,
+                ("", "", session_id, datasource_id, turn, Json(quadruple), Json(confirmed_pairs)),
+            )
+
+    async def insert_trace(self, trace: dict[str, Any]) -> None:
+        """写一条查询追溯（P0-4/H4）：golden 回归与未命中字面量日报的数据源。"""
+        cols = (
+            "tenant_id", "workspace_id", "session_id", "datasource_id", "turn", "query",
+            "rewritten_query", "sql", "error", "error_class", "error_detail",
+            "recalled_tables", "recalled_columns", "recalled_metrics", "recalled_values",
+            "matched_values", "unmatched_terms", "dict_hit", "llm_calls", "embedding_calls",
+            "latency_ms", "meta_revision", "source_snapshot", "model", "prompt_version",
+            "result_rows", "empty_result", "path",
+        )
+        json_cols = {
+            "recalled_tables", "recalled_columns", "recalled_metrics", "recalled_values",
+            "matched_values", "unmatched_terms",
+        }
+        placeholders = ", ".join(["%s"] * len(cols))
+        params = tuple(Json(trace.get(c, [])) if c in json_cols else trace.get(c, "") for c in cols)
+        sql = f"INSERT INTO {self._prefix}query_trace ({', '.join(cols)}) VALUES ({placeholders})"
+        async with self._pool.connection() as conn:
+            await conn.execute(sql, params)
 
     async def _upsert(
         self,

@@ -14,7 +14,9 @@ from nl2sql_service.agent.nodes.execute_sql import execute_sql
 from nl2sql_service.agent.nodes.extract_keywords import extract_keywords
 from nl2sql_service.agent.nodes.filter_metric import filter_metric
 from nl2sql_service.agent.nodes.filter_table import filter_table
+from nl2sql_service.agent.nodes.finalize import finalize
 from nl2sql_service.agent.nodes.generate_sql import generate_sql
+from nl2sql_service.agent.nodes.inherit_context import inherit_context
 from nl2sql_service.agent.nodes.merge_retrieved_info import merge_retrieved_info
 from nl2sql_service.agent.nodes.recall_column import recall_column
 from nl2sql_service.agent.nodes.recall_metric import recall_metric
@@ -83,6 +85,7 @@ def build_graph():
     """构建并编译 12 节点 Text-to-SQL 管线图。"""
     graph = StateGraph(DataAgentState)
 
+    graph.add_node("inherit_context", inherit_context)
     graph.add_node("extract_keywords", extract_keywords)
     graph.add_node("recall_column", recall_column)
     graph.add_node("recall_metric", recall_metric)
@@ -99,8 +102,10 @@ def build_graph():
     graph.add_node("correct_sql", correct_sql)
     graph.add_node("triage_empty", triage_empty)
     graph.add_node("answer", answer)
+    graph.add_node("finalize", finalize)
 
-    graph.add_edge(START, "extract_keywords")
+    graph.add_edge(START, "inherit_context")
+    graph.add_edge("inherit_context", "extract_keywords")
 
     graph.add_edge("extract_keywords", "recall_column")
     graph.add_edge("extract_keywords", "recall_metric")
@@ -146,6 +151,7 @@ def build_graph():
         _route_after_triage,
         {"answer": "answer", "correct_sql": "correct_sql", END: END},
     )
-    graph.add_edge("answer", END)
+    graph.add_edge("answer", "finalize")
+    graph.add_edge("finalize", END)
 
     return graph.compile()

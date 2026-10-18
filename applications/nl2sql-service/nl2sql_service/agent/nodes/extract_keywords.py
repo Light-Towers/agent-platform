@@ -21,7 +21,9 @@ _jieba_tokenize = jieba_tokenize
 
 
 async def extract_keywords(state: dict[str, Any]) -> dict[str, Any]:
-    query = state.get("query", "")
+    # 多轮（M3）：有改写则用 effective_query 抽词/算向量（召回承接上文意图），
+    # 无则回落原始 query（单轮逐字节一致）。
+    query = state.get("effective_query") or state.get("query", "")
     llm: LLMClient | None = state.get("llm")
     tokenizer: str = state.get("tokenizer", "bigram")
 

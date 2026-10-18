@@ -22,6 +22,8 @@ async def query(request: SqlQueryRequest, http_request: Request) -> SqlQueryResp
             request.query,
             metric_config=request.metric_config,
             datasource_id=request.datasource_id,
+            session_id=request.session_id,
+            tenant_id=request.tenant_id,
         )
         latency = (time.perf_counter() - start) * 1000
         return SqlQueryResponse(

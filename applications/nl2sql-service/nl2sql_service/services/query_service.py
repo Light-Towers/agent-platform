@@ -5,6 +5,7 @@
 都只有定义没有消费者，节点 `state.get(..., 默认)` 恒回落硬编码值——改配置不生效。
 """
 
+import time
 from datetime import datetime, timezone
 from typing import Any
 
@@ -50,6 +51,10 @@ class QueryService:
         settings = get_settings()
         metric_config = kwargs.get("metric_config")
         datasource_id = kwargs.get("datasource_id")
+        # 多轮（§5.13 M1）：session_id/tenant_id 从请求读入并注入 state；
+        # 不传 session_id 时 inherit_context 走单轮零变更分支（逐字节一致）。
+        session_id = (kwargs.get("session_id") or "").strip()
+        tenant_id = (kwargs.get("tenant_id") or "").strip()
         # 数据源解析（P1-3/P1-4/P1-6）：请求显式选源；未知 id fail-fast，
         # 不静默回落默认源（串源比报错更糟）。无注册表（老部署/测试）回落默认串。
         registry = getattr(self._context, "datasources", None)
@@ -72,6 +77,9 @@ class QueryService:
             "query": question,
             "context": self._context,
             "llm": self._llm,
+            "session_id": session_id,
+            "tenant_id": tenant_id,
+            "_start_perf": time.perf_counter(),
             "datasource_id": resolved_ds,
             "datasource_label": source_label,
             "dialect": dialect,
