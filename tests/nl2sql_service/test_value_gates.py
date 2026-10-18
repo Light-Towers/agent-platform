@@ -49,7 +49,7 @@ class _StubResolver:
         self.column_calls: list[tuple[str, str]] = []
 
     async def resolve(self, probes: list, data_types: dict | None = None) -> Any:
-        from nl2sql_service.services.value_resolver import ResolutionResult, LiteralVerdict
+        from nl2sql_service.services.value_resolver import LiteralVerdict, ResolutionResult
 
         self.resolve_calls += 1
         verdicts = []
