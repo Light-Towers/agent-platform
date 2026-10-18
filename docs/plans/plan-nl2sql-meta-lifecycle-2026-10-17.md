@@ -84,7 +84,7 @@
 | 项 | 做什么 | 判据（可测） | 涉及 |
 |---|---|---|---|
 | P0-1 **实装构建入口** | `build_from_tables` 接上脚本与服务，或删掉 stub 换成明确的服务端点 | 跑一次能把 YAML 声明 + DDL 派生结果落到元数据库，并产出可查的构建报告 | `scripts/build_meta_knowledge.py`、`services/meta_knowledge_service.py` |
-| P0-2 **稳定 ID + 差异重建** | 向量点 ID 用 `hash(table.column)` 而非随机；重建走 upsert + 删除不在源里的旧点 | 同一份输入连跑两次，索引内点数与内容**完全一致**（当前是翻倍） | 向量仓库层 + ES 仓库层 |
+| P0-2 **稳定 ID + 差异重建** | 向量点 ID 用 `hash(table.column)` 而非随机；重建走 upsert + 删除不在源里的旧点；灌库收尾 `REINDEX`（ivfflat 持续插入后召回质量衰减需定期重建；或改建库即 HNSW 免此维护，选型随 Q18） | 同一份输入连跑两次，索引内点数与内容**完全一致**（当前是翻倍） | 向量仓库层 + ES 仓库层 |
 | P0-3 **漂移检测** | 定时或触发式比对 `information_schema`（或 `show columns`）与元数据库，输出新增/删除/类型变更三类差异；差异默认**报警不自动改语义**，只有类型与样本自动跟 | 造一次"加列 / 改名 / 删列"，检测能在下一周期报出且不误报 | 新增脚本或 `/metadata/diff` 端点 |
 | P0-4 **trace 落库 + golden 回归** | 每次问答记录：召回到的表/字段/取值、生成 SQL、EXPLAIN 结果、耗时、模型与 prompt 版本、所用**元数据 revision**；并攒 20–50 条 golden 题目做回归 | 任一线上错答可离线复现；回归可一键跑并出门禁读数 | agent 节点 + eval |
 | P0-5 **检索层契约重划**（原“PG 全文补洞”，范围已按 P0-7 收缩） | **字段名 / 指标名 / 别名层**：① 取值路从 PG 退役（转 P0-7），PG 不再承担中文长文本模糊匹配；② 这一层的主路是**别名精确匹配 + dense 向量**，`ts_*` 全文只作已登记短语别名的兜底；③ 兜底路查询侧从 `plainto_tsquery`（AND）改**显式 OR**（逐 lexeme 转义后拼 `\|`）；④ 阈值从绝对分改**相对截断**（top-k + 分差）；⑤ 短文本不需要中文分词器，**`zhparser` / `pg_search` 一类扩展不在本项范围**（那是副本索引路线的议题，见 §5.1 状态） | 一条含 3 个以上关键词的中文问法不再空召回；`EXPLAIN` 显示走索引而非全表扫；PG 里已无取值表残留 | `clients/pgvector_client_manager.py`、`repositories/pgvector/{column,metric}_repository.py`（`value_repository.py` 转 P0-7） |
@@ -694,7 +694,7 @@ feedback 契约（每轮进 prompt 的）：① 错误分类与截断后原文�
 
 **存储层**：meta 库只有列/指标/值三张表的 CRUD（`repositories/postgres/meta/meta_repository.py:17-36`），无关系表；`services/meta_knowledge_service.py:40-51` 的 `_save_column` 只收 `table_name/column_name/column_comment/data_type`，**表注释被丢弃不存**（R2 顺手补）。
 
-**契约层**：`agent/state.py:6-24` 有 `tables`/`metrics` 槽、无 `relations` 槽；entities 五件套 + MetricConfig 四件套均无关系实体。
+**契约层**：`agent/state.py:6-24` 有 `tables`/`metrics` 槽、无 `relations` 槽；entities 五件套 + MetricConfig 四件套（`config/metric_config_schema.py:12-42`）无关系实体、**也无别名/同义词实体**——口语变体（"销售额"/"GMV"/"成交金额"）今天零声明载体，只能靠向量召回撞运气（§10 架构图 G0 的 YAML 节点早已列出"别名"，本方案的 aliases 契约是其落地）。
 
 **召回层**：`recall_column.py:30`、`recall_metric.py:29`、`recall_value.py` 三路召回均不返回表候选；`merge_retrieved_info.py:28-32` 仅在 `metric_config` 入参时透传 tables。
 
@@ -719,7 +719,12 @@ feedback 契约（每轮进 prompt 的）：① 错误分类与截断后原文�
 
 #### 5.14.3 设计：轻量关系声明（R1–R7，不引入本体）
 
-**R1 契约**：entities + MetricConfig 加轻量 `relations` 声明：`left_table/left_column/right_table/right_column/type/note`，`type ∈ {many_to_one, one_to_one, one_to_many}`（MDL relationships 的最小子集，不造 DSL）。**演进兼容约束**：`type`/`note` 即未来类型化属性（类 + 属性）的种子槽位——本体方向挂起期间（R7）不建类型系统，但槽位不得写死成无类型扁平串，foreclose 升级路径。
+**R1 契约**：entities + MetricConfig 加轻量 `relations` 与 `aliases` 两段声明：
+
+- `relations`：`left_table/left_column/right_table/right_column/type/note`，`type ∈ {many_to_one, one_to_one, one_to_many}`（MDL relationships 的最小子集，不造 DSL）；
+- `aliases`：`target_kind(表|列|指标)/target_name/alias/source(人工|机提)`——同义词显式化，补 5.14.1 契约层登记的零载体缺口；它同时是 **P0-5 别名检索层"已登记短语别名"的登记处**（P0-5 管怎么检索，本段管声明从哪来，两者是产销关系）。
+
+**演进兼容约束**：relations 的 `type`/`note` 即未来类型化属性（类 + 属性）的种子槽位——本体方向挂起期间（R7）不建类型系统，但槽位不得写死成无类型扁平串，foreclose 升级路径。
 
 **R2 存储**：meta 库加 `nl2sql_relation_info` 表；`_save_column` 补 `table_comment` 入库（与 §5.10-S-8 选项③的人工修订台共用数据基础）。
 
@@ -742,7 +747,7 @@ feedback 契约（每轮进 prompt 的）：① 错误分类与截断后原文�
 
 **R5 服务期封闭**：查询路径只读 meta 库冻结的关系集，零人工、无确认弹窗；缺关系的失败模式与今天相同（静默错 JOIN 或拒答），不升级为"问用户"。人工只出现在建库期——与 Chat2DB"一键修复"（人工在环）的路线分界，同 §5.11"验证责任在系统层"一条线。
 
-**R6 与 Q25 的关系**：关系是收敛后语义层的第四件套（DDL + 文档 + 范例 + 关系）；YAML 元知识库先加 relations 段，Q25 拍收敛时自然成为统一 store 的 builder 输入——与"YAML 是原文层事实源"定位一致，不另起炉灶。
+**R6 与 Q25 的关系**：关系是收敛后语义层的第四件套（DDL + 文档 + 范例 + 关系）。nl2sql 侧元知识按三态落地（§5.15 术语纪律）：作者格式改 YAML 模板（加 relations/aliases 段）、契约改 pydantic（R1）、服务层落 `nl2sql_relation_info` 表（R2）。Q25 拍收敛时它自然成为统一 store 的 builder 输入——与"元知识服务层为事实源"定位一致，不另起炉灶。
 
 **R7 本体方向（2026-10-18 用户决定：暂不引入，挂起登记）**：本体思想能覆盖 5.14.2 全部失败模式——类型化属性消歧（同名不同义按类归属拆分）、路径声明消歧（多跳显式列出中间类）、SHACL 约束 + 数据抽样验证（声明 `many_to_one` 后验左表键在右表覆盖率，声明可疑机器可判）；且 Kimball"无物理 FK"困境在建模层被消解（关系以公理存在，不依赖物理约束）。但 OWL 开放世界假设（未知 ≠ 假）与 pipeline"未声明 ⇒ 不 JOIN"的封闭决策直接冲突，完整推理机对本场景是负资产。挂起期间登记两个未来决策点：
 
@@ -751,15 +756,39 @@ feedback 契约（每轮进 prompt 的）：① 错误分类与截断后原文�
 
 R1 的 relations 槽位按本体演进兼容设计（见 R1 约束）——本方向不 foreclose、也不预付实现。
 
-#### 5.14.4 验收判据（并入 §6，第 19–21 条）
+#### 5.14.4 验收判据（并入 §6，第 19–22 条）
 
 1. **JOIN 链与关系声明一致**：含多跳（A→B→C）的会展问题，生成 SQL 的 JOIN 链与关系声明一致（golden 回归）。
 2. **同名错连防御**：`exhibitor_id` 对照实验——有声明时按声明连/拒连，无声明时不静默错连。
 3. **失效节点清零**：trace 里 `filter_metric` 的无效 LLM 调用消失、`filter_table` 输出有真实消费方（或节点按 §90 删除）。
+4. **别名召回生效**：声明 `GMV → 销售额` 后，问"上个月 GMV"能召回该指标定义并生成正确 SQL（无声明时维持撞运气现状，不退化）。
 
 #### 5.14.5 工作量与批次
 
 R1–R4 约 3–5 人日（nl2sql 域内）；R4 种子三档约 2–3 人日。依赖 P0-1（schema 准确）；建议挂 P1-6（语义层）或紧随 P0-8 同批（同属"生成期上下文"层）。不依赖任何 T0 拍板项；本体方向（R7）挂起，不影响本批次实施。
+
+### 5.15 配置与元知识的载体分层（2026-10-18 新增；回答"YAML 是静态的，动态配置怎么办/为什么不用表"）
+
+**判据：变更随什么变，就放哪层——"动态"不是给载体加热加载，是选对层。**
+
+| 层 | 实例 | 载体 | 动态性 | 锚点 |
+|---|---|---|---|---|
+| L-A 部署引导配置 | DSN、池大小/超时、pgvector 维度与索引类型、`sql_max_rows` | `app_config.yaml`/`meta_config.yaml` + env | 进程级：`get_settings()` `@lru_cache`（`settings.py:113-117`），变更 = 重启 | settings.py:113-117 |
+| L-B 租户配置 | 每租户 rows 上限、可用数据源、知识范围 | 表（meta 库，`tenant_id` 列） | 运行时 | 随平台计划 T0-D1 同批落地；本窗口（§0.1 PG-only 单源）不预设 |
+| L-C 元知识 | 表/列/指标/值 + relations/aliases | **表为服务层**（`nl2sql_*`），YAML 是作者格式之一 | 运行时：写库即生效，下条请求召回即见 | §5.14-R2 |
+| L-D 单请求上下文 | `metric_config` 入参 | API 入参 | 每请求 | `query_schema.py:16`；`recall_*.py:13-15` |
+
+**为什么 L-A 不整层入表**（曾议"用表支持动态配置"，结论：否）：
+
+1. **引导死锁**：配置表自身的地址（DSN/凭据）只能来自 env/YAML——先连上库才读得到配置；入表覆盖不了引导配置，而池大小/超时恰是最想热调的 L-A 主体。**最想热调的部分，恰恰是唯一进不了表的部分。**
+2. **故障域扩大**：配置表入 meta 库 ⇒ meta 库从"`metric_config` 注入路径的可选依赖"（`recall_*.py:13-15` 今天不碰 meta 库）升级为硬依赖——该路径今天在 meta 库故障时仍可服务。
+3. **静态是特性**：进程内配置不变，消灭"配置在请求飞行途中变了"的 race（如池 `resize()` 与在途查询并发）；`lru_cache` 在此是正确语义，不是懒。
+4. 附牌：YAML 变更走 PR review、按环境 diff、DSN 密码不入库（库破全泄）。
+**反转点**：表 + 审计/审批/灰度/回滚 = 配置中心（Apollo/Nacos 类）；对 6 个单体部署服务的判词是"现在不需要"，不是"永远不需要"。运维若确需热调池：psycopg_pool 原生 `resize()`，在已有 `/api/pools` 观测端点旁加受控 reconfigure 端点即可，比引配置中心轻一个量级——登记为可选项，现在不做。
+
+**术语纪律（清除"YAML 元知识库"混词，全文执行）**：元知识三态——**作者格式**（YAML 模板，Git 版本化、可 review、CI 可校验）/ **注入通道**（API 入参 JSON）/ **服务层**（meta 库，运行时唯一真相）。契约在代码（`metric_config_schema.py` pydantic），三态是同一契约的三种存在形态；YAML 不是服务层，只是写方之一（另一写方是人的零散修订，走 §5.14 修订台）。
+
+**对 §5"元数据声明放哪"决策行与 Q4 的输入**：该行 A/B/C 三选一在引入三态后**不再是互斥选项**——C（双向同步）的"两套真源易漂移"可通过"表是唯一服务层真相、YAML 只是灌入源（upsert 幂等，P0-2）"消除：漂移只可能在表内被观测，YAML 是变更提案而非真相。残留代价：接口/UI 直写绕过 Git review，需审计列补偿。**建议 Q4 答案方向 = A + C 合流**：YAML 管批量种子与 CI 治理，管理后台管零散人工修订（含 §5.14-T2 关系确认），表是唯一服务层。
 
 ## 6. 验收标准
 
@@ -784,6 +813,7 @@ R1–R4 约 3–5 人日（nl2sql 域内）；R4 种子三档约 2–3 人日。
 19. **JOIN 链与关系声明一致**（§5.14.4-1）：含多跳（A→B→C）的会展问题，生成 SQL 的 JOIN 链与关系声明一致（golden 回归）。
 20. **同名错连防御**（§5.14.4-2）：`exhibitor_id` 对照实验——有声明时按声明连/拒连，无声明时不静默错连。
 21. **失效节点清零**（§5.14.4-3）：trace 里 `filter_metric` 的无效 LLM 调用消失、`filter_table` 输出有真实消费方（或节点按 §90 删除）。
+22. **别名召回生效**（§5.14.4-4）：声明 `GMV → 销售额` 后，问"上个月 GMV"能召回该指标定义并生成正确 SQL。
 
 ## 7. 归属与陈述边界（不得含糊）
 
@@ -824,7 +854,7 @@ R1–R4 约 3–5 人日（nl2sql 域内）；R4 种子三档约 2–3 人日。
 | Q22 | 待答（§11 新增） | 内网 MySQL 的 `ngram_token_size` 现值是多少、能否改？（该变量**非动态**：改配置要重启，且改完必须重建 ngram 索引） | P1-4 矩阵"中文模糊匹配"这格在 MySQL 侧到底可选还是不可选 |
 | Q23 | 待答（§11 新增） | `nl2sql_*` 元数据表与向量索引**当前由谁创建**？（仓内 `find -name '*.sql'` 命中 0、`CREATE TABLE`/`CREATE INDEX` 命中 0 ⇒ 只能靠库外手段，本文无法自证） | P0-1 / P0-2 / P0-5 有没有落地对象；P0-5 的"走索引"判据能否成立 |
 | Q24 | 待答（§11 新增，需实测不靠推理） | `guard.validate_sql` 末尾 `stmt.sql(dialect=dialect)` 会**重写** SQL 文本；dialect 目前硬编码 `postgres`，若 SQL 实际打 Doris/MySQL，重写会不会把合法语句改坏（分区语法、`MATCH_ANY`、反引号、`LIMIT` 位置）？ | N6 的连带风险；决定 P1-4 是"加谓词模板"还是"先停用规整重写" |
-| Q25 | 待答（§11.6 G1 新增） | **平台内已有第二条 Text2SQL 路，本方案未覆盖**：`applications/agent_server/sql/pipeline.py:1` 自述"Vanna 式 Text-to-SQL 管线：召回上下文 → LLM 生成 → 白名单守卫 → 只读执行"，`schema_store.py:17-54` 是完整的 `store_ddl`/`store_doc`/`store_example` 三件套，`guard.py:1-3` 复用同一内核守卫。它与 `nl2sql-service` 的 YAML 元知识库**是两条并存路，还是收敛成一条**？谁是谁的超集？ | 决定 P0-1/P0-2/P1-6 是"新建"还是"复用"；不对齐就直接撞 ADR-0009 与 §7 归属边界，且会把同一套语义层建两遍。**外部调研（2026-10-18，五项目许可证/权限盲区/MDL 参照）支撑收敛判断，见 `appendix-open-source-text2sql-benchmark-2026-10-18.md` §4** |
+| Q25 | 待答（§11.6 G1 新增） | **平台内已有第二条 Text2SQL 路，本方案未覆盖**：`applications/agent_server/sql/pipeline.py:1` 自述"Vanna 式 Text-to-SQL 管线：召回上下文 → LLM 生成 → 白名单守卫 → 只读执行"，`schema_store.py:17-54` 是完整的 `store_ddl`/`store_doc`/`store_example` 三件套（**同样落 PG 表**：`sql_ddl`/`sql_docs`/`sql_examples`，:24-48）。它与 nl2sql-service 的元知识体系（契约四件套 表/列/指标/值 + 将加的 relations/aliases；三态：YAML 作者格式 / API 入参 / meta 库服务层，§5.15）**是两条并存路，还是收敛成一条**？谁是谁的超集？ | 决定 P0-1/P0-2/P1-6 是"新建"还是"复用"；不对齐就直接撞 ADR-0009 与 §7 归属边界，且会把同一套语义层建两遍。**外部调研（2026-10-18，五项目许可证/权限盲区/MDL 参照）支撑收敛判断，见 `appendix-open-source-text2sql-benchmark-2026-10-18.md` §4** |
 
 **Q21 详单（从表格里移出来——上一版把这段写进单元格，嵌套代码块吃掉一个列分隔符，整行塌成 3 列；已按 P0-7 同样办法移到表后）**
 
