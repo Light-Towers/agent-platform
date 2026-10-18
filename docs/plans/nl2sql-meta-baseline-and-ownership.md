@@ -81,10 +81,25 @@ python -m nl2sql_service.scripts.run_golden \
 
 | 读数 | 基线值 | 记录于 | LLM/数据版本 |
 |---|---|---|---|
-| passed/total | _待首跑_ | _commit sha_ | _model + 数据日期_ |
-| literal_unmatched | _待首跑_ | | |
-| empty | _待首跑_ | | |
-| llm_calls_avg | _待首跑_ | | |
+| passed/total | **2/3** | 2026-10-18，`golden_v3.json`（commit 见 CHANGELOG 当日段） | Qwen/Qwen3-8B（硅基免费 chat）+ BAAI/bge-m3（免费 embedding）；DW=orders(6 行)/users(3 行)，2026-10-18 |
+| literal_unmatched | **0** | 同上 | 同上 |
+| empty | 0 | 同上 | 同上 |
+| llm_calls_avg | 3 | 同上（trace 表逐行 llm_calls） | 同上 |
+
+**首跑明细（不粉饰）**：
+
+| 用例 | 结果 | 说明 |
+|------|------|------|
+| g01 上个月每个城市的订单数 | **FAIL**（errored，miss tables） | SQL 幻觉列 `orders.create_time`（真列 `created_at`）→ correct 循环修复途中**连续 LLM 超时**（免费档当日劣化，120s×3）→ 重试耗尽 errored。**失败归因是环境（免费 LLM 超时），不是代码缺陷**——同链路 g03 用同一批列生成出了正确 SQL |
+| g02 已退款的订单有多少 | PASS | 首跑曾 FAIL（membership 缓存缺陷把 `已退款` 误判不存在，见下）；修复后 matched=['已退款'] 首轮即过 |
+| g03 那上个月呢（多轮） | PASS | 承接 g02 同 session，M3 时间/实体继承生效（SQL 带 `created_at >= '2026-09-01'`） |
+
+**首跑逼出并修掉的两个真缺陷**（均在真库/在线路径复现，假池单测抓不到）：
+
+1. `dw_repository.execute_probe` 的 `SET LOCAL statement_timeout = %s` **带绑定参数**——PG 工具命令不接受参数（`syntax error at or near "$1"`）⇒ 配了 linkable 的部署里取值探针**从来没成功跑过**。修为 int 强转后内联（`test_dw_repository_probe.py` 3 条钉死）。
+2. `value_resolver` membership 缓存**键不含 literals、值只是本轮问到且存在的子集**——g01 问过 `已支付` 后 g02 问 `已退款` 命中同一键被直接判 missing（该值实际存在）⇒ 误拦进 correct 循环。修为缓存只当"已确认存在"正集合、新字面量必须真探（`test_value_resolver.py` 新增回归 1 条）。
+
+**基线口径提醒**：本基线是"Qwen3-8B + 免费档"下的快照。免费 LLM 的延迟/超时特性会显著影响 correct 循环的成败，**换 LLM（如恢复 opencode 通道）后必须重跑并更新本表**，不得拿本表评判另一个模型的回归。
 
 ## 6. 与其他缺口的关系
 

@@ -178,6 +178,43 @@ async def test_cache_hit_avoids_second_probe():
     assert calls_after_second == 1, "同 snapshot 同列重复问只打源一次（C6）"
 
 
+async def test_new_literal_after_cache_hit_must_be_probed():
+    """2026-10-18 golden 首跑缺陷回归：membership 缓存只是"已确认存在"正集合。
+
+    场景（g01→g02 复现）：先问 `已支付`（探到，进缓存），再问 `已退款`
+    （列里真实存在）。缺陷版把未覆盖的新字面量当缓存未命中直接判 **missing**
+    并拦截进 correct 循环；正确行为：新字面量必须真探，探到即 exists。
+    """
+
+    class _SeqDw:
+        """membership 按调用序返回不同值域（g01 探到已支付、g02 探到已退款）。"""
+
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, tuple, dict]] = []
+            self._domains = [["已支付"], ["已退款", "已支付"]]
+
+        async def execute_probe(self, sql: str, params: tuple | None = None, **kwargs: Any) -> list[dict]:
+            self.calls.append((sql, tuple(params or ()), kwargs))
+            nth = len([c for c in self.calls if "= ANY" in c[0]]) - 1
+            domain = self._domains[min(nth, len(self._domains) - 1)]
+            asked = (params or ([],))[0]
+            return [{"value": v} for v in domain if v in asked]
+
+    dw = _SeqDw()
+    resolver = ValueResolver(
+        dw_repository=dw,
+        config=ValueResolverConfig(snapshot_sql=""),
+        linkable=LinkablePolicy(allowlist=["orders.status"]),
+    )
+    first = await resolver.resolve([LiteralProbe("orders", "status", "已支付")])
+    assert first.matched == ["已支付"], "g01：已支付探到并进缓存"
+
+    second = await resolver.resolve([LiteralProbe("orders", "status", "已退款")])
+    probe_calls = [c for c in dw.calls if "= ANY" in c[0]]
+    assert len(probe_calls) == 2, "新字面量必须真探——不能吃缓存误判（缺陷版此处只有 1 次）"
+    assert second.matched == ["已退款"], f"g02：已退款真实存在必须判 exists，实际 {[v.status for v in second.verdicts]}"
+
+
 async def test_cache_invalidated_by_new_snapshot():
     cache = ProbeCache(ttl_seconds=900)
     key = ProbeCache.key("ds-1", "snap-a", "orders", "status", "membership")
