@@ -40,8 +40,8 @@ def build_migration_plan(
     example_rows: list[dict[str, Any]],
     *,
     dialect: str = "postgres",
-    tenant_override: str = "",
-    workspace_override: str = "",
+    tenant_override: str | None = None,
+    workspace_override: str | None = None,
 ) -> dict[str, Any]:
     """源三表行 → 按 (tenant, workspace) 分组的迁移计划（纯函数，零 IO）。
 
@@ -55,12 +55,16 @@ def build_migration_plan(
     - 文档只关联到**同作用域**的表（跨租户文档串味 = 隔离破裂）；
     - 空 question 的范例记录后跳过（自然键不能是空——upsert 会把它们互相覆盖）；
     - 解析失败的 DDL / 未命中的文档进两个记账列表，绝不静默。
+
+    override 语义（真库验证抓出的坑）：`None` = 不覆盖（保真源值）；**空串
+    `""` = 强制折叠进 '' 作用域**（单租户 legacy 库的标准用法）——若用
+    `override or source` 判断，显式空串会被当成"没传"，折叠静默失效。
     """
     from nl2sql_service.ddl_parser import associate_docs_with_tables, parse_ddl
 
     def _scope(row: dict[str, Any]) -> tuple[str, str]:
-        tenant = tenant_override or row.get("tenant_id") or ""
-        workspace = workspace_override or row.get("workspace_id") or ""
+        tenant = tenant_override if tenant_override is not None else (row.get("tenant_id") or "")
+        workspace = workspace_override if workspace_override is not None else (row.get("workspace_id") or "")
         return tenant, workspace
 
     # ① DDL → 每作用域的表集合（先解析全部，文档关联需要表名清单）
@@ -169,8 +173,8 @@ async def main_async(
     dsn: str,
     *,
     datasource: str = "",
-    tenant: str = "",
-    workspace: str = "",
+    tenant: str | None = None,
+    workspace: str | None = None,
     prune: bool = False,
     dry_run: bool = False,
     dialect: str = "postgres",
@@ -187,15 +191,16 @@ async def main_async(
 
     source = PostgresClientManager(source_dsn, name="migration-source", statement_timeout_ms=60_000)
     await source.connect()
-    target = PostgresClientManager(
-        dsn,
-        name="migration-target",
-        min_size=settings.meta_db_pool_min_size,
-        max_size=settings.meta_db_pool_max_size,
-        timeout=settings.meta_db_pool_timeout,
-        statement_timeout_ms=settings.meta_db_statement_timeout_ms,
-    )
-    await target.connect()
+    if not dry_run:
+        target = PostgresClientManager(
+            dsn,
+            name="migration-target",
+            min_size=settings.meta_db_pool_min_size,
+            max_size=settings.meta_db_pool_max_size,
+            timeout=settings.meta_db_pool_timeout,
+            statement_timeout_ms=settings.meta_db_statement_timeout_ms,
+        )
+        await target.connect()
     try:
         ddl_rows, doc_rows, example_rows = await _read_source(source.pool)
         plan = build_migration_plan(
@@ -297,7 +302,8 @@ async def main_async(
         return report
     finally:
         await source.close()
-        await target.close()
+        if not dry_run:
+            await target.close()
 
 
 def _print_report(report: dict[str, Any]) -> None:
@@ -333,8 +339,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--source-dsn", required=True, help="agent_server 源库 DSN（sql_ddl/sql_docs/sql_examples 所在）")
     parser.add_argument("--dsn", required=True, help="nl2sql 元知识库 DSN")
     parser.add_argument("--datasource", default="", help="datasource_id 作用域（缺省取 Settings.datasource_id）")
-    parser.add_argument("--tenant", default="", help="覆盖所有源行的 tenant_id（单租户 legacy 库折叠用；缺省保真源值）")
-    parser.add_argument("--workspace", default="", help="覆盖所有源行的 workspace_id（缺省保真源值）")
+    parser.add_argument("--tenant", default=None, help="覆盖所有源行的 tenant_id（单租户 legacy 库折叠用；显式传 '' 折叠进空作用域；缺省保真源值）")
+    parser.add_argument("--workspace", default=None, help="覆盖所有源行的 workspace_id（语义同 --tenant）")
     parser.add_argument("--prune", action="store_true", help="差异删范例（源里已不存在的 question）；列不删（双写入源）")
     parser.add_argument("--dry-run", action="store_true", help="只解析与报告，不连目标库写入、不算向量")
     parser.add_argument("--dialect", default="postgres", help="DDL 解析方言（sqlglot read；缺省 postgres）")
