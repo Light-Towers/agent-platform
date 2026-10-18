@@ -6,8 +6,8 @@ from agent_runtime.identity import resolve_startup_tenant_mode
 from fastapi import APIRouter, Request
 
 from agent_server.config import get_settings
+from agent_server.db_dialect import detect_dialect
 from agent_server.schemas import HealthResponse
-from agent_server.sql.guard import detect_dialect
 
 router = APIRouter()
 

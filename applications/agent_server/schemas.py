@@ -109,6 +109,10 @@ class SqlTrainResponse(BaseModel):
     ddl_stored: bool = False
     doc_stored: bool = False
     example_stored: bool = False
+    # A 方案 Stage ③：摄入改走 nl2sql /api/meta/ingest，明细（计数 + 三类
+    # 记账：坏 DDL/未命中文档/空 question）随响应回传——flag 只答"喂了没"，
+    # "喂进去多少、跳过了什么"看 report。历史调用方只读 flag，行为不变。
+    report: dict | None = None
 
 
 class HealthResponse(BaseHealthResponse):
