@@ -112,7 +112,7 @@ class MetaRepository:
         async with self._pool.connection() as conn:
             cur = await conn.execute(sql, ("", "", datasource_id))
             rows = await cur.fetchall()
-            return [dict(r._mapping) for r in rows]
+            return [dict(r) for r in rows]
 
     async def list_aliases(self, datasource_id: str = "") -> list[dict[str, Any]]:
         """别名全集（P0-5 别名精确匹配主路的查询对象；机提未确认不参与召回）。"""
@@ -125,7 +125,7 @@ class MetaRepository:
         async with self._pool.connection() as conn:
             cur = await conn.execute(sql, ("", "", datasource_id))
             rows = await cur.fetchall()
-            return [dict(r._mapping) for r in rows]
+            return [dict(r) for r in rows]
 
     async def list_columns(self, datasource_id: str = "") -> list[dict[str, Any]]:
         """库侧列指纹（P0-3 漂移检测的比对基线）。"""
@@ -137,7 +137,7 @@ class MetaRepository:
         async with self._pool.connection() as conn:
             cur = await conn.execute(sql, ("", "", datasource_id))
             rows = await cur.fetchall()
-            return [dict(r._mapping) for r in rows]
+            return [dict(r) for r in rows]
 
     async def update_column_type(self, table_name: str, column_name: str, data_type: str) -> None:
         """类型自动跟随（P0-3 的唯一自动写：语义不自动改，类型与样本才跟）。"""
@@ -179,7 +179,7 @@ class MetaRepository:
         async with self._pool.connection() as conn:
             cur = await conn.execute(sql, ("", "", datasource_id))
             rows = await cur.fetchall()
-            return [dict(r._mapping) for r in rows]
+            return [dict(r) for r in rows]
 
     async def find_columns_by_names(self, names: list[str], datasource_id: str = "") -> list[dict[str, Any]]:
         """按 `table.column` 全名精确取列（P0-5 别名精确匹配主路的落点）。"""
@@ -199,7 +199,7 @@ class MetaRepository:
         async with self._pool.connection() as conn:
             cur = await conn.execute(sql, params)
             rows = await cur.fetchall()
-            return [dict(r._mapping) for r in rows]
+            return [dict(r) for r in rows]
 
     async def find_metrics_by_names(self, names: list[str], datasource_id: str = "") -> list[dict[str, Any]]:
         """按指标名精确取指标（P0-5 别名精确匹配主路的落点）。"""
@@ -215,14 +215,14 @@ class MetaRepository:
         async with self._pool.connection() as conn:
             cur = await conn.execute(sql, ("", "", datasource_id, *names))
             rows = await cur.fetchall()
-            return [dict(r._mapping) for r in rows]
+            return [dict(r) for r in rows]
 
     async def list_metrics(self) -> list[dict[str, Any]]:
         sql = f"SELECT metric_name, metric_desc, metric_expr FROM {self._prefix}metric_info"
         async with self._pool.connection() as conn:
             cur = await conn.execute(sql)
             rows = await cur.fetchall()
-            return [dict(r._mapping) for r in rows]
+            return [dict(r) for r in rows]
 
     # -----------------------------------------------------------------------
     # 多轮会话状态（§5.13 M2/M6）与查询追溯（P0-4/H4）：002 表，参数化 + Json 适配
@@ -237,7 +237,7 @@ class MetaRepository:
         async with self._pool.connection() as conn:
             cur = await conn.execute(sql, ("", "", session_id, datasource_id))
             row = await cur.fetchone()
-        return dict(row._mapping) if row is not None else None
+        return dict(row) if row is not None else None
 
     async def upsert_session(
         self,
@@ -307,7 +307,9 @@ class MetaRepository:
         async with self._pool.connection() as conn:
             cur = await conn.execute(sql, params)
             row = await cur.fetchone()
-        return bool(row[0]) if row is not None else False
+        # RETURNING (xmax = 0) AS inserted；连接配 dict_row ⇒ row 是 dict，按列名取
+        # （此前 row[0] 是 tuple 索引，dict_row 下会 KeyError）。
+        return bool(row["inserted"]) if row is not None else False
 
     async def _prune(self, table: str, natural_cols: tuple[str, ...], keep: set[tuple[str, ...]]) -> int:
         """删除作用域内自然键不在 keep 的行；keep 为空 = 清空作用域（源已为空）。"""

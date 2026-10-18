@@ -32,7 +32,7 @@ class PostgresModel(BaseModel):
         async with self._pool.connection() as conn:
             cur = await conn.execute(sql, (key,))
             rows = await cur.fetchall()
-            return [dict(r._mapping) for r in rows]
+            return [dict(r) for r in rows]
 
     async def update(self, key: Any, data: dict[str, Any]) -> None:
         cols = [validate_identifier(c, "更新列名") for c in data]

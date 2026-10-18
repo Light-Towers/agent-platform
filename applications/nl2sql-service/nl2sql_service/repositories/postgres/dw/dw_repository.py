@@ -24,7 +24,7 @@ class DwRepository:
             await conn.execute("SET default_transaction_read_only = on")
             cur = await conn.execute(sql, params)
             rows = await cur.fetchall()
-            return [dict(r._mapping) for r in rows]
+            return [dict(r) for r in rows]
 
     async def execute_probe(
         self,
@@ -43,7 +43,7 @@ class DwRepository:
                 await conn.execute("SET LOCAL statement_timeout = %s", (int(statement_timeout_ms),))
                 cur = await conn.execute(sql, params)
                 rows = await cur.fetchall()
-                return [dict(r._mapping) for r in rows]
+                return [dict(r) for r in rows]
 
     async def get_table_schema(self, table_name: str) -> list[dict[str, Any]]:
         sql = (

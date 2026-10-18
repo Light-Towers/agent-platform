@@ -137,8 +137,8 @@ class _FakePool:
         key = tuple(row[c] for c in natural)
         inserted = key not in table_rows
         table_rows[key] = row
-        # RETURNING (xmax = 0)：xmax=0 ⇔ 未发生更新 ⇔ 新插入
-        return _FakeCursor(row=(inserted,))
+        # RETURNING (xmax = 0) AS inserted：连接配 dict_row ⇒ fetchone 返回 dict
+        return _FakeCursor(row={"inserted": inserted})
 
     def _delete(self, table: str, sql: str, params: tuple) -> _FakeCursor:
         rows = self.store.get(table, {})

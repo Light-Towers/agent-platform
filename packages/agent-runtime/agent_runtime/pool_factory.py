@@ -82,6 +82,7 @@ def create_pool(
         read_only: True 时连接级只读。**只给"执行 LLM 生成 SQL"的业务库用**；
             元知识库自己要有构建入口写数据，不能只读。
     """
+    from psycopg.rows import dict_row
     from psycopg_pool import AsyncConnectionPool
 
     if min_size < 0:
@@ -101,7 +102,10 @@ def create_pool(
         max_size=max_size,
         max_waiting=max_size * MAX_WAITING_FACTOR,
         timeout=timeout,
-        kwargs={"options": build_options(statement_timeout_ms, read_only)},
+        # row_factory=dict_row：psycopg 3 默认 tuple_row 返回纯 tuple，业务代码
+        # 按列名取值（dict(r)）会全线失败——这是真 PG 端到端才暴露的（假池模拟
+        # Row._mapping 故单测全绿）。dict_row 让 fetchall() 直接返回 dict。
+        kwargs={"options": build_options(statement_timeout_ms, read_only), "row_factory": dict_row},
         name=name,
         open=False,
     )
