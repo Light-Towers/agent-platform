@@ -87,6 +87,14 @@ class QueryService:
             "sql_prompt_max_bytes": settings.sql_prompt_max_bytes,
             # 漂移检测表统计（P0-3 → 聚合引导）；无则空，不猜表大小
             "table_stats": getattr(self._context, "table_stats", None) or [],
+            # 数据权限清单（§5.9 L2 guard）：服务端单源注入，客户端不可覆盖
+            "allowed_tables": list(settings.allowed_tables or []),
+            "sensitive_columns": list(settings.sensitive_columns or []),
+            # L3 结果层脱敏的角色与开关（§5.9）：角色来自服务端断言
+            "user_role": settings.default_query_role,
+            "result_masking_enabled": settings.result_masking_enabled,
+            "mask_keep_chars": settings.mask_keep_chars,
+            "admin_roles": list(settings.admin_roles or []),
         }
         if metric_config is not None:
             recall = (

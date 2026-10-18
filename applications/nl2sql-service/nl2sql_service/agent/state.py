@@ -61,3 +61,11 @@ class DataAgentState(TypedDict, total=False):
     table_stats: list[dict[str, Any]]
     # 每问 LLM 调用计数（P1-5/S-6 进 trace 的成本读数；节点侧累加）
     llm_calls: int
+    # 数据权限清单（§5.9 L2 guard；QueryService 从 settings 注入，服务端单源）
+    allowed_tables: list[str]
+    sensitive_columns: list[str]
+    # L3 结果层脱敏的角色与开关（§5.9；角色来自服务端断言，非客户端请求体）
+    user_role: str
+    result_masking_enabled: bool
+    mask_keep_chars: int
+    admin_roles: list[str]

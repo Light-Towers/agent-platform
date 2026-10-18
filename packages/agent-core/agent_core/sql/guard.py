@@ -17,6 +17,8 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import sqlglot
 from sqlglot import exp
 
@@ -116,4 +118,111 @@ def validate_sql(sql: str, dialect: str, max_rows: int) -> tuple[bool, str, str]
     return True, "ok", stmt.sql(dialect=dialect)
 
 
-__all__ = ["FORBIDDEN_FUNCTIONS", "FORBIDDEN_NODES", "validate_sql"]
+# ---------------------------------------------------------------------------
+# 生成期表/列级白名单（§5.9 L2 纵深防御，2026-10-18）
+#
+# 语句级白名单（上面那只）不看查了哪些表、SELECT 列表有哪些列。L2 在其上叠加
+# 可选的表/列策略：把 LLM 生成的 SQL 与授权表清单、敏感列清单比对，幻觉出的
+# 敏感表名 / 敏感列在**生成期**就被拒，而不是等到执行期报错或结果外泄。
+#
+# 定位是纵深防御的一层：LLM 生成的是自由文本，应用层拦截天然是黑名单对抗，
+# 漏一个模式就是全量泄露。第一道永远是 L1（账号 GRANT + 脱敏视图，DB 侧）；
+# L2 挡"模型幻觉"，L3 做结果层投影。三者叠加，任一被绕过都还有另一道。
+#
+# 向后兼容：policy=None（默认）时行为与旧版逐字节一致——三服务共享本组件，
+# 未配策略的调用方零影响。
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class SqlPolicy:
+    """表/列级授权策略。
+
+    - `allowed_tables`：授权表名集合（小写）。None/空 = 不校验表（老行为）。
+    - `sensitive_columns`：敏感列全限定名集合（小写，`table.column`）。
+      None/空 = 不校验列。
+    """
+
+    allowed_tables: frozenset[str] | None = None
+    sensitive_columns: frozenset[str] | None = None
+
+
+def _cte_names(stmt: exp.Select) -> set[str]:
+    """收集 WITH 子句里的 CTE 别名（小写）——它们是派生表，不是真实表，校验要排除。"""
+    names: set[str] = set()
+    for with_clause in stmt.find_all(exp.With):
+        for cte in with_clause.expressions:
+            alias = cte.alias
+            if alias:
+                names.add(alias.lower())
+    return names
+
+
+def _real_tables(stmt: exp.Select) -> set[str]:
+    """语句引用的真实表名（小写；排除 CTE 派生表）。"""
+    cte = _cte_names(stmt)
+    return {t.name.lower() for t in stmt.find_all(exp.Table) if t.name and t.name.lower() not in cte}
+
+
+def _referenced_columns(stmt: exp.Select) -> set[str]:
+    """语句显式引用的列，尽量补全为 `table.column`（小写）。
+
+    - 限定列直接用限定符；
+    - 未限定列：仅当只有一个真实表时归属该表（`SELECT phone FROM users`），
+      多表时不猜（歧义列跳过——猜错就是把 A 列当 B 列核）；
+    - `SELECT *` / 计算列不含可解析列名，自然不进集合（无 schema 不展开）。
+    """
+    tables = _real_tables(stmt)
+    single = next(iter(tables)) if len(tables) == 1 else ""
+    cols: set[str] = set()
+    for col in stmt.find_all(exp.Column):
+        qualifier = col.table
+        name = col.name
+        if not name:
+            continue
+        if qualifier:
+            cols.add(f"{str(qualifier).lower()}.{name.lower()}")
+        elif single:
+            cols.add(f"{single}.{name.lower()}")
+    return cols
+
+
+def check_policy(stmt: exp.Select, policy: SqlPolicy) -> str:
+    """表/列白名单校验；合规返回 ""，否则返回可读拒绝原因。"""
+    if policy.allowed_tables:
+        unauthorized = _real_tables(stmt) - policy.allowed_tables
+        if unauthorized:
+            return "查询涉及未授权表: " + ", ".join(sorted(unauthorized))
+    if policy.sensitive_columns:
+        hit = _referenced_columns(stmt) & policy.sensitive_columns
+        if hit:
+            return "查询涉及敏感列: " + ", ".join(sorted(hit))
+    return ""
+
+
+def validate_sql_with_policy(
+    sql: str, dialect: str, max_rows: int, policy: SqlPolicy | None = None
+) -> tuple[bool, str, str]:
+    """语句级白名单 + 表/列级策略（§5.9 L2）。policy=None 时等同 validate_sql。"""
+    ok, reason, normalized = validate_sql(sql, dialect, max_rows)
+    if not ok or policy is None:
+        return ok, reason, normalized
+    try:
+        statements = [s for s in sqlglot.parse(normalized, read=dialect) if s is not None]
+    except sqlglot.errors.ParseError:
+        return ok, reason, normalized
+    if len(statements) == 1 and isinstance(statements[0], exp.Select):
+        policy_reason = check_policy(statements[0], policy)
+        if policy_reason:
+            return False, policy_reason, sql
+    return ok, reason, normalized
+
+
+__all__ = [
+    "FORBIDDEN_FUNCTIONS",
+    "FORBIDDEN_NODES",
+    "SqlPolicy",
+    "check_policy",
+    "validate_sql",
+    "validate_sql_with_policy",
+]

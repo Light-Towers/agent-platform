@@ -20,6 +20,7 @@ from typing import Any
 from agent_core.logging import get_logger
 
 from nl2sql_service.agent.context import DataAgentContext
+from nl2sql_service.services.result_masking import is_masked_role, mask_sensitive_columns
 
 logger = get_logger(__name__)
 
@@ -86,6 +87,22 @@ def _classify(exc: BaseException) -> tuple[str, str]:
     return _GENERIC_ERROR, _GENERIC_CLASS
 
 
+def _apply_masking(state: dict[str, Any], result: Any) -> Any:
+    """L3 结果层脱敏（§5.9）：按角色对敏感列投影掩码；无需脱敏时零开销返回原值。
+
+    关条件（任一即不脱）：脱敏总开关关 / 无敏感列清单 / 角色在 admin 名单。
+    """
+    if not state.get("result_masking_enabled", True):
+        return result
+    sensitive = state.get("sensitive_columns") or []
+    if not sensitive:
+        return result
+    role = state.get("user_role", "analyst")
+    if not is_masked_role(role, state.get("admin_roles") or ["admin"]):
+        return result
+    return mask_sensitive_columns(result, set(sensitive), keep=state.get("mask_keep_chars", 1))
+
+
 async def execute_sql(state: dict[str, Any]) -> dict[str, Any]:
     sql = state.get("sql", "")
     error = state.get("error", "")
@@ -99,6 +116,10 @@ async def execute_sql(state: dict[str, Any]) -> dict[str, Any]:
 
     try:
         result = await ctx.dw_repository.execute_readonly(sql)
+        # L3 结果层脱敏（§5.9）：非 admin 角色对敏感列投影掩码。在答案合成与
+        # 响应返回**之前**做——answer 与响应体吃的是同一份 result，一处脱敏
+        # 两处生效。角色来自服务端断言（default_query_role），非客户端请求体。
+        result = _apply_masking(state, result)
         # 成功必须清空三类错误字段：state 跨轮累积，上一轮的失败痕迹
         # 留在 error_class 里会让路由又把成功轮送进 correct。
         return {"result": result, "error": "", "error_detail": "", "error_class": ""}
