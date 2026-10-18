@@ -8,7 +8,7 @@ import asyncio
 
 
 async def main_async(dsn: str, config_path: str = "") -> None:
-    from nl2sql_service.clients.postgres_client_manager import PostgresClientManager
+    from nl2sql_service.clients.postgres_client_manager import PostgresClientManager, redact_dsn
     from nl2sql_service.conf.settings import get_settings
     from nl2sql_service.repositories.postgres.meta.meta_repository import MetaRepository
     from nl2sql_service.services.meta_knowledge_service import MetaKnowledgeService
@@ -19,7 +19,7 @@ async def main_async(dsn: str, config_path: str = "") -> None:
     try:
         meta_repo = MetaRepository(pool=pg.pool, table_prefix=settings.table_prefix)
         MetaKnowledgeService(meta_repo=meta_repo)
-        print(f"meta knowledge service ready (dsn={dsn[:30]}...)")
+        print(f"meta knowledge service ready (dsn={redact_dsn(dsn)})")
         print("use the service API to build meta knowledge from DDL/documents")
     finally:
         await pg.close()
