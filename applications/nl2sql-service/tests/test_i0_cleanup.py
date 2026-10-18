@@ -31,7 +31,7 @@ def test_dead_prompt_files_removed():
     for name in _DEAD_PROMPTS:
         assert not (_PROMPTS_DIR / name).exists(), f"死 prompt 未删: {name}"
     live = sorted(p.name for p in _PROMPTS_DIR.glob("*.prompt"))
-    assert live == ["correct_sql.prompt", "generate_sql.prompt"], f"prompts 目录异常: {live}"
+    assert live == ["answer.prompt", "correct_sql.prompt", "generate_sql.prompt"], f"prompts 目录异常: {live}"
 
 
 def test_env_template_rerank_keys_are_marked_as_not_consumed():
