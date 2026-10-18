@@ -1,8 +1,9 @@
-"""列信息 pgvector 仓储：向量召回 embedding <=> %s。"""
+"""列信息 pgvector 仓储：向量召回 + 相对截断（P0-5④）。"""
 
+from collections.abc import Sequence
 from typing import Any
 
-from nl2sql_service.clients.pgvector_client_manager import PgvectorClientManager
+from nl2sql_service.clients.pgvector_client_manager import PgvectorClientManager, relative_truncate
 
 
 class ColumnRepository:
@@ -12,13 +13,23 @@ class ColumnRepository:
         self._client = pgvector_client
         self._table = table
 
-    async def recall(self, keywords: list[str], embedding: list[float] | None = None, top_k: int = 10) -> list[dict[str, Any]]:
+    async def recall(
+        self,
+        keywords: list[str],
+        embedding: list[float] | None = None,
+        top_k: int = 10,
+        score_margin: float = 0.0,
+        filters: Sequence[tuple[str, Any]] = (),
+    ) -> list[dict[str, Any]]:
         if embedding is None:
             return []
-        return await self._client.vector_search(
+        rows = await self._client.vector_search(
             table=self._table,
             embedding_col="embedding",
             query_embedding=embedding,
             top_k=top_k,
             extra_cols="column_name, column_comment, table_name, data_type",
+            filters=filters,
         )
+        # 相对截断：与最佳分的差超过 margin 即丢（绝对分跨查询不可比，P0-5④）
+        return relative_truncate(rows, score_margin)

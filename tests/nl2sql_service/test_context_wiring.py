@@ -50,7 +50,8 @@ class _ColumnRepo:
     def __init__(self) -> None:
         self.calls: list[tuple[Any, int]] = []
 
-    async def recall(self, keywords: list[str], embedding: Any = None, top_k: int = 10) -> list[dict]:
+    async def recall(self, keywords: list[str], embedding: Any = None, top_k: int = 10, **_: Any) -> list[dict]:
+        # **_: score_margin/filters 是 2026-10-18 P0-5 新增形参，本用例不关心
         self.calls.append((embedding, top_k))
         return []
 

@@ -126,7 +126,7 @@ async def test_recall_column_prefers_alias_over_vector():
 
 async def test_recall_falls_back_to_vector_when_no_alias_hit():
     class _VectorRepo:
-        async def recall(self, keywords: list[str], embedding: Any = None, top_k: int = 10) -> list[dict]:
+        async def recall(self, keywords: list[str], embedding: Any = None, top_k: int = 10, **_: Any) -> list[dict]:
             return [{"table_name": "orders", "column_name": "order_id"}]
 
     out = await recall_metric(
