@@ -10,7 +10,26 @@ from typing import Any
 from nl2sql_service.agent.llm import LLMClient
 from nl2sql_service.agent.nodes._prompt import json_block, load_prompt, render
 
-_FALLBACK = "根据以下信息生成 SQL：\n{query}\n表信息：{table_infos}\n指标信息：{metric_infos}\n{aggregation_hint}"
+_FALLBACK = "根据以下信息生成 SQL：\n{query}\n表信息：{table_infos}\n指标信息：{metric_infos}\n表间关系：{relations}\n{aggregation_hint}"
+
+
+def build_relations_block(relations: list[dict[str, Any]] | None) -> str:
+    """关系声明 → prompt 文本（§5.14-R3：相关 JOIN 条件显式注入）。
+
+    没有声明时给显式占位——"无声明"与"忘了传"在 prompt 里必须可区分，
+    否则 LLM 会把缺声明当成可以随便猜 JOIN 的许可。
+    """
+    if not relations:
+        return "（无关系声明：不得凭同名列猜测 JOIN 关系）"
+    lines = []
+    for rel in relations:
+        note = f"（{rel['note']}）" if rel.get("note") else ""
+        lines.append(
+            f"- {rel.get('left_table', '')}.{rel.get('left_column', '')} "
+            f"{rel.get('relation_type', 'many_to_one')} → "
+            f"{rel.get('right_table', '')}.{rel.get('right_column', '')}{note}"
+        )
+    return "\n".join(lines)
 
 
 def build_aggregation_hint(state: dict[str, Any], threshold: int = 1_000_000) -> str:
@@ -64,6 +83,7 @@ async def generate_sql(state: dict[str, Any]) -> dict[str, Any]:
         date_info=state.get("date_info", ""),
         db_info=state.get("extra_context") or "PostgreSQL（方言 postgres；只输出单条只读 SELECT）",
         aggregation_hint=build_aggregation_hint(state),
+        relations=build_relations_block(state.get("relations")),
     )
     sql = await llm.invoke(prompt)
     return {"sql": sql, "error": ""}

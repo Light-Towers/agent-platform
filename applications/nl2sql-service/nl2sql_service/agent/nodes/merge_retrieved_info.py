@@ -23,8 +23,12 @@ def _rrf_fuse(rankings: list[list[dict[str, Any]]], k: int = 60) -> list[dict[st
     return [items[key] for key in sorted_keys]
 
 
-def _derive_tables(columns: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """从列召回结果按 table_name 去重派生表清单（保序）。"""
+def _derive_tables(columns: list[dict[str, Any]], relations: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
+    """从列召回结果按 table_name 去重派生表清单，并并入关系涉及的表。
+
+    §5.14-R3：关系涉及表的并集 = `filter_table` 的候选输入——空转节点接上
+    真管线；保序（列召回序在前，关系表按出现序附后）。
+    """
     seen: list[str] = []
     for col in columns:
         if not isinstance(col, dict):
@@ -32,6 +36,13 @@ def _derive_tables(columns: list[dict[str, Any]]) -> list[dict[str, Any]]:
         name = col.get("table_name")
         if name and name not in seen:
             seen.append(name)
+    for rel in relations or []:
+        if not isinstance(rel, dict):
+            continue
+        for key in ("left_table", "right_table"):
+            name = rel.get(key)
+            if name and name not in seen:
+                seen.append(name)
     return [{"table_name": name} for name in seen]
 
 
@@ -39,6 +50,7 @@ async def merge_retrieved_info(state: dict[str, Any]) -> dict[str, Any]:
     columns = state.get("columns", [])
     metrics = state.get("metrics", [])
     values = state.get("values", [])
+    relations = state.get("relations", [])
 
     fused = _rrf_fuse([columns, metrics, values], k=state.get("rrf_k", 60))
     result: dict[str, Any] = {"retrieved_info": json.dumps(fused, ensure_ascii=False)}
@@ -48,7 +60,7 @@ async def merge_retrieved_info(state: dict[str, Any]) -> dict[str, Any]:
         if metric_config is not None:
             tables = list(metric_config.get("tables", []))
         else:
-            tables = _derive_tables(columns)
+            tables = _derive_tables(columns, relations)
         if tables:
             result["tables"] = tables
 

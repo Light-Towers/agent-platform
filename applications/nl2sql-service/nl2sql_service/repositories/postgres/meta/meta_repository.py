@@ -180,6 +180,42 @@ class MetaRepository:
             rows = await cur.fetchall()
             return [dict(r._mapping) for r in rows]
 
+    async def find_columns_by_names(self, names: list[str], datasource_id: str = "") -> list[dict[str, Any]]:
+        """按 `table.column` 全名精确取列（P0-5 别名精确匹配主路的落点）。"""
+        if not names:
+            return []
+        keys = [tuple(n.split(".", 1)) if "." in n else ("", n) for n in names]
+        # 行值 IN (VALUES ...)：全名整体比较，避免逐列 OR 的优先级坑
+        row_tpl = "(%s, %s)"
+        values_sql = ", ".join([row_tpl] * len(keys))
+        sql = (
+            f"SELECT table_name, column_name, column_comment, data_type "
+            f"FROM {self._prefix}column_info "
+            f"WHERE tenant_id = %s AND workspace_id = %s AND datasource_id = %s "
+            f"AND (table_name, column_name) IN (VALUES {values_sql})"
+        )
+        params = ("", "", datasource_id, *[v for k in keys for v in k])
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(sql, params)
+            rows = await cur.fetchall()
+            return [dict(r._mapping) for r in rows]
+
+    async def find_metrics_by_names(self, names: list[str], datasource_id: str = "") -> list[dict[str, Any]]:
+        """按指标名精确取指标（P0-5 别名精确匹配主路的落点）。"""
+        if not names:
+            return []
+        placeholders = ", ".join(["%s"] * len(names))
+        sql = (
+            f"SELECT metric_name, metric_desc, metric_expr "
+            f"FROM {self._prefix}metric_info "
+            f"WHERE tenant_id = %s AND workspace_id = %s AND datasource_id = %s "
+            f"AND metric_name IN ({placeholders})"
+        )
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(sql, ("", "", datasource_id, *names))
+            rows = await cur.fetchall()
+            return [dict(r._mapping) for r in rows]
+
     async def list_metrics(self) -> list[dict[str, Any]]:
         sql = f"SELECT metric_name, metric_desc, metric_expr FROM {self._prefix}metric_info"
         async with self._pool.connection() as conn:
