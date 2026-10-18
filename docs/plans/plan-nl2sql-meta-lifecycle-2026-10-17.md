@@ -11,7 +11,7 @@
 
 | # | 已定 | 来源 | 直接影响的章节 |
 |---|---|---|---|
-| D1 | 问数生成的 SQL **打到 Doris**；数仓清洗后 **4 亿+**，MySQL 承载不住、Hive 延迟与分区复杂度不可接受 | 用户口径 | §2、§5.4、P1-4 |
+| D1 | 问数生成的 SQL **打到 Doris**；数仓清洗后 **4 亿+**，MySQL 承载不住、Hive 延迟与分区复杂度不可接受 | 用户口径 | §2、§5.4、P1-4。**目标态**——本窗口不可达，见 §0.1 |
 | D2 | Doris 里是数仓**最新分区 T+1 同步**的数据，**供 DataEase BI 展示**；问数是**只读消费方，不拥有这些表** | 用户口径 | §5.5 定档、P1-5、§7 |
 | D3 | 内网 Doris 已从 2.x **升级到 4.0**（自定义分词、`score()` BM25、ANN 均可用） | 用户口径 | §5.5、§5.7；但“版本支持≠生产验证”，T1-T3 仍是前置 |
 | D4 | **元数据语义层留问数自己的 PG**，不下推 Doris ANN | 用户裁定 | §5.6、P0-5 |
@@ -19,6 +19,24 @@
 | D6 | **默认对源不建 DDL**：取值匹配＝只读探针 + 跟随版本的缓存；索引 DDL 降级为性能债备选 | 用户原则（“不改数据源”） | P0-9、§5.7 修订 |
 | D7 | “取值”二分：**定义出来的码表＝元数据（进 PG，带别名/旧名 alias/deprecated）**；**distinct 出来的自由文本＝数据（不复制）** | 本方案推论，用户采纳 | §5.7、P1-2 |
 | D8 | 业务库 **MySQL 8.0+** | 用户口径 | P1-4 能力矩阵 |
+
+### 0.1 源可达性三档（2026-10-18 追加；回答 D1 的"目标态"到底目标到哪一步）
+
+**触发**：使用者口径——内网 Doris / MySQL **本窗口完全连不上（网络与口令都没有）**；但**允许本地自建 Doris / MySQL 并造数据做测试**。这两句合起来不是"测不了"，而是把"能测的"从一格拆成三格。**没有这三档，本文后续所有"须实测"判据都无法判断自己是否可执行。**
+
+| 档 | 含义 | 覆盖项 | 不许越界之处 |
+|---|---|---|---|
+| **T-A 本地可测·结论可外推** | 与数据量、与内网实例配置无关的行为 | 驱动与方言（P0-0 的 `aiomysql` 选型、`detect_dialect` 按源传参）；**Q24 的执行侧**（sqlglot 规整后的语句在真 MySQL/Doris 上是否可执行）；每源只读机制（PG 会话 GUC／MySQL `SET SESSION TRANSACTION READ ONLY`／Doris `GRANT SELECT_PRIV`）；`information_schema` 与 `SHOW PARTITIONS` 的返回形状；**`ngram_token_size` 的行为**（默认 2、短于 token size 的查询词命中不到、改动后须重建索引）；**「ngram 是否支持 `IN BOOLEAN MODE`」这条 P1-4 矩阵里标了"实测项，勿当结论"的矛盾资料**——本地即可定；`BUILD INDEX` / `SHOW BUILD INDEX` / 倒排索引 `parser` 四值的**语义** | 测的是"这个能力存在且行为如文档"，**不是**"它在 4 亿行上够用" |
+| **T-B 本地可测·结论不外推** | 耗时/吞吐类，本机硬件与数据规模都不对 | T1 索引可见延迟与 `BUILD INDEX` 存量回填耗时；M1 全库重灌耗时；M2 应用侧 BM25 建索引 P95；T2 Doris BM25 的排序质量（且缺现网 ES 对照，交集率无从算起） | 只能给**量级直觉与机制会不会超时**，不得写进对外口径，不得当 §5.3 那条「M1 > 1 h ⇒ 禁止索引时把 IDF 乘死」的执行结果——本地跑出来的 M1 与现网 M1 不是同一个数 |
+| **T-C 只能现网·本窗口永久不可得** | 依赖真实数据分布、真实集群、跨团队授权 | Q10a/b（Doris DDL 权限，问 BI/DBA）；Q15（workload group 申请与多 FE 排队，验收第 10 条）；**BI 大屏影响确认**（D2，只能由 BI 团队说）；Q10c/Q11（真实 distinct 量级、列文本长度实况）；Q19/Q22 中**内网实例的配置现值**与能否重启（行为在 T-A，现值在 T-C）；P0-8⑤ 未命中字面量日报（服务未部署，无线上流量） | 这一档的待答项**不许再以"等一次实测"作结**——要么跨团队要授权，要么显式标为"待现网窗口" |
+
+**对本文其余章节的三条直接约束**：
+
+1. **D1 重定性（不改裁定内容，只改时态）**：「SQL 打 Doris」是**目标态**。本窗口问数的源**只有 PostgreSQL 可达**——这不是降级，是与既有代码对齐：`dw_db` 本来就是 PG（`repositories/postgres/dw/dw_repository.py` 用 psycopg + `SET default_transaction_read_only`），元数据在 PG、向量在 PG。⇒ 本窗口可端到端闭环的形状是「以 PG 为源出答案」，Doris/MySQL 族按 §0.1-T-C 走现网窗口。
+2. **§6 验收按档分口径，不再平铺**：T-A/T-本地可全绿的是第 1、4、9、12 条与第 11 条的①②④⑤；第 2、3、5、6、7、8 条在本地只能用 PG 扮演的"模拟源/模拟多源"验**机制**，其真源语义属 T-C，判据须写成"机制层通过 + 真源待现网"两段，不许合并成一句"已通过"；第 10 条**永久 T-C**。
+3. **取值层选型结论降档**：§5.3 的三轴判据、§5.5 的 T1–T3、§5.7 路线一的"实测撑不住才申请 DDL"这套因果，**其判据输入全在 T-B/T-C**。⇒ 在拿到现网窗口前，路线一 vs 探针的取舍只能是**纸面推荐**；`docs/reviews/review-plan-nl2sql-meta-lifecycle-2026-10-17.md` §5 已按此降级（其「路线一才是消除探针的正解」这一判断已被本文 §5.8-C9 采纳，但采纳的是**契约形状**，其**成本结论仍待 T-B/T-C**）。
+
+**与 §3、§5.8 的分工**（避免两处漂移）：跨源合并的拍板在 **§3 非目标**；探针的单一入口与超时/缓存/降级契约在 **§5.8 C1–C9**；本节只管**可达性分档**这一件事，不复述它们的结论。
 
 ## 1. 问题定义
 
@@ -53,7 +71,9 @@
 ## 3. 目标与非目标
 
 **目标**：把"元数据从声明到可被信任地检索"这条链路补成有生命周期的一块钱。
-**非目标**：不做多租户 SaaS 化；不改模型选型与节点链拓扑（但**要改生成上下文的注入契约**——P0-8① 的 examples → 结构化绑定、P0-6① 的 prompt 变量修复，均属此范围，原表述与 §4 冲突，已收紧）。
+**非目标**：不做多租户 SaaS 化；**不做问内跨源合并**（2026-10-18 追加拍板）；不改模型选型与节点链拓扑（但**要改生成上下文的注入契约**——P0-8① 的 examples → 结构化绑定、P0-6① 的 prompt 变量修复，均属此范围，原表述与 §4 冲突，已收紧）。
+
+**问内跨源合并非目标（D5 的下一层，2026-10-18 用户追问“跨源语义”后的拍板）**：D5 已定“源由用户在会话里显式选定”，但“**同一问题是否需要横跨多源合并**”未答——此处拍板：**单问单源，nl2sql 一次调用只面向一个显式选定的源；跨源合并是编排层职责**（联邦 main_agent 分子代理调用后合并），不在本服务内做 federated query。三条理由：① **代价不对称**——现在写一句非目标≈0 成本，事后补=口径标签+返回体契约+合并语义全套 retrofit（缓存键已由 §5.8-C6 的 `datasource_id` 维度先行覆盖，这是唯一已铺的一块）；② **技术未到**——平台侧 datasource 维度尚未新建（Q17：`grep datasource` 在 `nl2sql_service/` 命中 0）、Doris 执行目标物理不可接（依赖清单无 MySQL 协议驱动），在未建的能力上讨论合并语义是空中楼阁；③ **与平台既有形状一致**——`agent_federation` 的 text_to_sql 子代理模式已是“每源一次调用、上游合并”（AGENTS.md §90 横切统一/领域独立 + Plan-F 单 Runtime 多 Planner 的同款判据：把两套方言、两套快照语义、一套合并逻辑塞进单个 Text2SQL 服务即耦合）。**失效点**：若将来确需问内跨源（同一指标天然横跨 Doris+MySQL 且拆不开问），连同 Q17 一起复议，本非目标即失效——不是“永远不支持”，是“现在不支持 + 复议触发条件明确”。
 
 **与 ADR-0009 的关系（本方案隐含做了一个决定，须点破）**：§5.6 定档“元数据语义层留 PG + pgvector”，等于**就 nl2sql-service 一侧**结束悬置；ADR-0009 里 knowledge-service（Milvus）那一侧本方案不触碰，故该 ADR 整体仍标未决。**但上一版“需回填一条 nl2sql 侧已选 pgvector”的措辞不成立**：`docs/adr/0009-vector-store-selection.md:10-13` 的现状表**只有两行**（knowledge-service = Milvus、agent_server = pgvector），**根本没有 nl2sql-service 这一行**，全篇 `grep nl2sql` 命中 0 ⇒ 动作是**新增一行**，不是回填既有条目。新增时还要顺手改一处：ADR-0009 `:25` 的理由写的是“pgvector 无等价的引擎侧稀疏向量”——方向对、理由要换（pgvector **有** `sparsevec` 类型与 HNSW 算子族，缺的是**引擎侧 DF/IDF/BM25**，见本文 §5.1 订正），否则下一个读者会拿这句去反驳实测结果。另注：两者都用 pgvector，但接法不同（agent_server 走 `agent_runtime.db`，nl2sql 走自己的 `pgvector_client_manager`），新增那行要写清是**第三套接法**而非复用。
 
@@ -102,7 +122,7 @@ P0-4 是**唯一能把"准确率"从人工抽样认定升级成可复现读数**
 
 | 项 | 做什么 | 判据 |
 |---|---|---|
-| P1-1 **权限下推**（**落点已存在，属照抄而非设计**） | 复用 ADR-0006/0007 的租户身份与服务端断言，把行级过滤条件注入生成的 SQL；敏感列（证件号/手机号）出脱敏投影。PG 检索层的插入点已核实：`clients/pgvector_client_manager.py:26,29-30` 的 `filter_clause` 形参**存在但所有调用方都不传**，`fulltext_search`（:37-54）**根本没有该形参需先加**；行级隔离的现成形状抄 `applications/agent_server/sql/schema_store.py:17-54`（`sql_ddl`/`sql_docs`/`sql_examples` 每张表都已带 `tenant_id` + `workspace_id`） | 越权问数返回空/拒答，且 SQL 文本里能看到下推条件；跨租户召回＝0 |
+| P1-1 **权限下推**（**落点已存在，属照抄而非设计**） | 复用 ADR-0006/0007 的租户身份与服务端断言，把行级过滤条件注入生成的 SQL；敏感列（证件号/手机号）出脱敏投影。**脱敏与表/行级权限的完整三层设计（账号+视图 → 生成期 guard → 结果层投影）见 §5.9，安全问题清单见 §5.10**（2026-10-18 细化：此前"出脱敏投影"无实现形态）。PG 检索层的插入点已核实：`clients/pgvector_client_manager.py:26,29-30` 的 `filter_clause` 形参**存在但所有调用方都不传**，`fulltext_search`（:37-54）**根本没有该形参需先加**；行级隔离的现成形状抄 `applications/agent_server/sql/schema_store.py:17-54`（`sql_ddl`/`sql_docs`/`sql_examples` 每张表都已带 `tenant_id` + `workspace_id`） | 越权问数返回空/拒答，且 SQL 文本里能看到下推条件；跨租户召回＝0 |
 | P1-2 **取值列的基数闸门（措辞已随 P0-9 改：不再问“灌不灌索引”，而问“开不开 `linkable`”）** | 按列基数与列类型决定该列是否允许被探针查询：枚举/城市/行业开，UUID/时间戳/手机号/长文本一律关；开着的列必须带 `LIMIT` 上限与探针超时；`distinct` 类扫描加超时保护 | 关列永不出现在候选里且**记录原因**；单列不再出现 `limit 100000` 级扫描；开列的探针 P95 在预算内 |
 | P1-3 **源分片与口径标注**（原“静默路由”已撤回） | 用户口径（2026-10-17）：**源是用户在问数时显式选定的**（现用 MySQL 与 Doris 两源）⇒ 不需要“数仓优先”这类猜测路由。仍必须做的三件事：① 元数据按 `datasource_id` 分片，**召回阶段就带源过滤**（不能等 EXPLAIN 报“表不存在”才发现串源）；② 返回体带口径标签（`数仓 T+1、已清洗` / `业务库、实时未清洗`）；③ 业务库侧强制只读账号 + 只读副本 + `MAX_EXECUTION_TIME` + 表白名单 | 选定 Doris 时，MySQL 的表不会进入候选；答案里能看出这个数字是哪个源、什么口径 |
 | P1-4 **方言分支**（业务库已确认 **MySQL 8.0+**，据此细化） | 见下方“两源能力矩阵”：谓词模板按源分支，`add_extra_context` 已注入 dialect 与 version（`dw_mysql_repository.py:19-23`）可直接作分支依据 | 同一条问法在两个源上都能命中；把 `MATCH_ANY` 发给 MySQL、把 `WITH PARSER ngram` 发给 Doris 都在**生成期**就被拦下，而不是运行时报错 |
@@ -453,6 +473,181 @@ SHOW BUILD INDEX;             -- 看进度
 
 **别把这条读成“什么都塞 Doris”**：路线一的表只放**取值字典**（派生、可全量覆盖、无需人编辑）；L1 的**别名词典与指标口径**是人工维护、要事务、要审核，仍然留在问数自己的 PG。分工判据还是 §5.5 那一句：要匹配的东西在不在某个查询引擎里——在就下推，不在才留外部。
 
+### 5.8 探针单一入口契约（2026-10-18 追加；对 P0-8 / P0-9 的约束，实现时不得违背）
+
+**触发**：用户要求解决四瓶颈之首“探针双重触发”。本节先把问题形状讲精确（含一处对早前表述的更正），再把收敛方案钉成契约。
+
+**问题形状（精确化；早前“P0-8② 生成后按字面量探针”的表述不准，此处更正）**：
+
+- **②是字典校验，不打源**：P0-8② 的动作是 sqlglot 抽 `(列, 常量)` 回**问数 PG 里的字典**校验（§5.4 的 D7 二分：码表=元数据在 PG）——本地查询，零源成本。它不构成第二触发。
+- **真正的第二触发是 P0-8③ 零结果分诊探针**：执行后结果为空/全 0 且含维度过滤时，才对字面量发一次**成员校验**源查询（§5.4 零结果分诊行）。
+- 于是双重触发的准确形状是：**触发一（每问必付）** P0-9① 召回阶段对每个候选列（白名单默认关，开则上限 5）发一次源查询取**值集合**，冷缓存 = 5 RTT；**触发二（条件付）** 仅空结果时对 1–3 个字面量发成员校验。两处形状不同（集合 vs 成员）、缓存键不同 ⇒ 触发一取回的值集合**不被第二处复用**，且两处各自要实现超时/降级/熔断——实现量与故障面翻倍，这才是“双重”的代价，不是简单的 2× RTT。
+
+**契约 C1–C9（P0-8/P0-9 实现验收的组成部分）**：
+
+| # | 规则 | 违反的后果 |
+|---|---|---|
+| C1 | **单一入口**：全服务只有一个 `ValueResolver` 向源发查询；P0-9① 与 P0-8③ 都走它，不各建各的发送路径 | 双重触发的根源就是两个独立实现；分开写必然复发 |
+| C2 | **召回阶段零源查询**：召回只用本地能力（别名表、码表、`linkable` 配置）；候选列的值集合**不在召回阶段取** | 冷缓存 5 RTT 全额计入生成前预算，与 800ms 直接冲突 |
+| C3 | **生成后只验实际字面量**：每问 1–3 个，**批量 `IN` 一次查完**，不逐字面量一发 | 逐字面量查询把条件触发放大成每问 N 发 |
+| C4 | **集合复用**：触发一已取过且 `source_snapshot` 未变的列，成员校验优先在本地集合内做，不再打源 | 取了集合不用，等于白付触发一 |
+| C5 | **分区裁剪强制**：探针 SQL 必须带分区谓词（Doris `dt=<latest>`；MySQL 水位等价物随 Q16 定）；不带分区谓词的探针**不允许发** | 4 亿行非 key 列无分区过滤 = 扫整列列存，秒级起步 |
+| C6 | **缓存键** `(datasource_id, source_snapshot, column, query_shape)`；版本不变永久有效、版本一变即失效；**MySQL 无水位期间 `min(snapshot, 15min)` TTL 兜底**（Q16 答后按答案收紧） | Q16 未答时实时源等价于永久缓存，陈旧召回不报错 |
+| C7 | **超时与并发闸**：探针超时**不能靠池级 `statement_timeout`**（dw 池 30s 是给执行查询的，对探针太松）；resolver 内 `asyncio.wait_for` 取消 + 连接级 `SET LOCAL statement_timeout` 双保险；探针并发上限 2–4（信号量，超限排队不新建） | 探针与执行查询共用 dw 池（`dependencies.py` 两池拓扑），无闸则探针挤占执行、超时太松则探针长持有 |
+| C8 | **降级链是默认能力不是 P2**：resolve 超时 → 退别名表/码表 → 都不中 → 明确拒答/提示；**不允许静默用错值** | 源抖动时“取值链接整条断”且无话术，用户侧看到错答或空答 |
+| C9 | **派生字典兜底定位**（§5.7 路线一）：权限（Q10a）下来后**字典优先、探针兜底**；权限未下时探针是唯一形态，但按 C5–C7 约束 | 把路线一当“性能债备选”会长期停留在探针形态，而它才是消除探针的正解 |
+
+**与已完成工作的接口**：连接池改造（dw 池 `max_size=10`、池级 `statement_timeout=30s`、`GET /api/pools` 可观测）已铺底，探针落地只需在 resolver 内按 C7 加信号量与取消逻辑，不需要再改池。
+
+**顺序纪律（本节最重要的落地约束）**：探针契约（C1–C9）+ 池 + 索引可观测必须**先于 P0-5 召回质量修复**。现状两路取值召回实际是死分支——`recall_value.py:22` 硬编码 `embedding=None`，`value_repository.py:26` 向量分支 `if embedding and ...` 恒不执行；剩下那路 `plainto_tsquery('simple', ...)` 配 bigram 切分（`extract_keywords.py:70`）对中文问句近零命中 ⇒ **当前扫描成本被“召回为空”掩盖着**。等 P0-5 修好召回、开始返回结果，探针 + 全表顺序扫描（N4：无 DDL 无 HNSW）的成本会同时兑现——不先铺好 C1–C8，就是在故障形态上修功能。
+
+**给 P0-8/P0-9 补的验收判据**（原有判据未覆盖探针成本面）：
+
+1. 冷缓存单问源查询次数 ≤ 3（C3 批量合并后），且探针 SQL 文本 100% 带分区谓词（抓文本断言）；
+2. 同一 `(源, 快照, 列)` 的第二次成员校验不打源（缓存命中可从 trace 观测）；
+3. 模拟源挂起：走降级链（C8）且 dw 池 `in_use` 不涨（`/api/pools` 快照前后对比）；
+4. 源不可用时返回“未识别取值”类明确拒答，**不返回 `0`、不静默用错值**。
+
+### 5.9 敏感数据与数据权限：三层纵深（2026-10-18 追加；P1-1 的细化设计）
+
+**触发**：用户问"身份证号 / 手机号这类敏感数据怎么处理、有没有脱敏、数据权限（有些人只能看某些表）怎么做"。本节先给实测现状，再给设计。
+
+**现状（2026-10-18 逐个实读）：三层全部为零**
+
+| 层 | 实测 | 证据 |
+|---|---|---|
+| 脱敏 | 全服务 grep `脱敏/mask/敏感/sensitive/PII/身份证/手机号` **零命中**；meta 配置无敏感度标记；列模型是通用 CRUD | `conf/meta_config.yaml` 仅 dsn/table_prefix/pgvector 参数；`models/postgres/postgres_model.py` 无 sensitivity 字段 |
+| 表级权限 | 无。`filter_table` 是 LLM 按问题选表，没有权限概念；meta 配置无表清单，召回面向全库 | `agent/nodes/filter_table.py:17-19` |
+| 行级权限 | 无。`execute_readonly` 只 `SET default_transaction_read_only` 后直接执行，不注入任何 WHERE | `repositories/postgres/dw/dw_repository.py:16-21` |
+| SQL 守卫 | **语句级**白名单：单 SELECT、禁 DML、LIMIT 上限。不看查了哪些表、不看 SELECT 列表有哪些列 | `packages/agent-core/agent_core/sql/guard.py:34-67` |
+
+即：今天 LLM 生成 `SELECT id_card, phone FROM users LIMIT 100`，guard 放行、DW 执行、明文原样返回。**没有任何一层会拦。**
+
+**一个必须澄清的区分**：P1-2 的"手机号不进全文索引"**不是脱敏**——它只禁止手机号作为可模糊匹配的取值列参与召回，LLM 照样能生成 `SELECT phone ...`，结果照样明文返回。"不索引取值"与"查询结果脱敏"是两个层面，现方案只覆盖前者；后者的落点是 P1-1 里"出脱敏投影"那句话，而它此前没有实现形态。
+
+**设计：三层纵深，重心在数据库层**
+
+理由：LLM 生成的 SQL 是自由文本，应用层拦截永远是黑名单对抗，漏一个模式就是全量泄露。第一道必须放在 LLM 够不着的地方。
+
+| 层 | 做什么 | 落点 | 性质 |
+|---|---|---|---|
+| **L1 账号 + 视图** | 问数账号 `GRANT SELECT` 只到授权表；敏感表建视图，只暴露脱敏后列（PG 例：`'138' ‖ right(phone,4)` 或全掩码；Doris 侧同理：授权表 + 视图/列权限） | DW 库 | **第一道，最可靠**。LLM 连敏感表都 select 不到时，应用层漏什么都没有后果 |
+| **L2 生成期 guard 扩展** | guard 从语句级升级到表 + 列级：SELECT 列表出现未授权表 / 敏感列即拒，返回可读原因 | `agent_core/sql/guard.py`（平台共享件，nl2sql / agent_server / federation 三服务同时受益） | 纵深防御。拦不住全部，但挡掉 LLM 幻觉出的敏感表名 |
+| **L3 结果层投影脱敏** | 确需返回的敏感列按角色投影：管理员看全量、分析师看掩码 | nl2sql 出口（`execute_sql` 之后、答案合成之前） | 精细到人的可见度只能在这一层 |
+
+**敏感列清单：一份声明，两处消费**。进 meta 配置 `sensitive_columns: {table: [col, ...]}`，同时驱动 L2 黑名单与 P1-2 的 `linkable` 闸门（P1-2 已规定手机号 / UUID / 时间戳一律关 linkable）——同一份清单，不搞两套。
+
+**行级权限（某人只能看某区域 / 某门店）**：落点是"把过滤谓词注入生成的 SQL"，形态必须是结构化三元组 `(column, op, param)`，**不接受 `filter_clause` 整段 SQL 字符串**——后者正则校验不了（S4 已登记的最高危拼接点），且恰是权限谓词最该被校验的地方。谓词来源 = 服务端断言身份（ADR-0007）+ 用户角色→数据范围映射；形状抄 `applications/agent_server/sql/schema_store.py:17-54`（每表带 `tenant_id` + `workspace_id`、tenant 漏传 fail-fast、拒绝"空 workspace = 全库"旁路）。
+
+**与租户体系的关系（Q6 的回答方向）**：数据权限建在平台身份断言之上，不另立一套。nl2sql meta 语义层的租户维度按平台计划 T0-D1（schema 出生即带 `tenant_id`/`workspace_id`）落地；本层 L1–L3 是数据面隔离，与租户维度共用同一份断言身份。
+
+### 5.10 安全问题清单（2026-10-18 系统性排查；均为新发现，此前方案未登记）
+
+**顶层框架**：这个服务本质上是"一个只受语句级 guard 约束的 SQL 执行代理"，身份门 observe 档不拒绝（`identity_assembly.py`，`DEPLOY_ENFORCE_IDENTITY` 默认关）。以下每条按此框架定位。
+
+| # | 问题 | 证据 | 严重度 | 修法 | 归属 |
+|---|---|---|---|---|---|
+| S-1 | 服务整体是无认证 SQL 执行代理：guard 语句级（无表白名单 / 列黑名单 / 行级过滤）、身份门不拒绝、联邦出站不带签名头 | `guard.py:34-67`；`api/server.py:27`；`agent_federation/agent/async_subagents.py:114-119` | 高（架构性） | §5.9 的 L1–L3 + 平台租户计划 T2/T5；本条是框架不是单点 | P1-1 + 平台批次 |
+| S-2 | **`metric_config` 客户端任意注入且直进召回与 prompt**：可声明任意表 / 列 / 指标定义；注释自由文本 = prompt 注入面；同名表伪装（给真实敏感表配 benign 注释）可诱导 LLM 对真实表生成 SQL；入参无体量上限还可把 prompt 撑爆 | `api/schemas/query_schema.py:16`；`config/metric_config_schema.py:36-50`；`agent/nodes/generate_sql.py:27-33` | 高 | 二选一或叠加：① 入参配置按服务端白名单校验（表必须存在于授权清单）；② 定性为"仅可信内部调用方可传"——联邦路径已不传（payload 仅 query/session_id/tenant_id/trace_id），保持不传并写进入参契约文档 | P1-1 |
+| S-3 | **DB 错误原文回显客户端**：`execute_sql` 把 `str(exc)` 写进 state.error，`query_router` 原样进响应体——表 / 列存在性、权限拒绝、PG 版本信息可被枚举探测（information disclosure oracle） | `agent/nodes/execute_sql.py:29-31`；`api/routers/query_router.py:26` | 高 | 错误分类：对外只给分类消息（"查询执行失败"），详情进日志与 trace；`permission denied` / `does not exist` 归同一句话，不可区分 | I0（不依赖拍板） |
+| S-4 | **DSN 密码进日志**：`dsn[:30]` 的前 30 字符对 URL 格式 DSN 必含 `user:password@`；构建脚本 print 同样形状 | `clients/postgres_client_manager.py:48-53`；`scripts/build_meta_knowledge.py:22` | 高（凭据泄露） | 脱敏后打印，只留 `user@host:port/db`；加测试断言日志文本不含密码段 | I0 |
+| S-5 | **LLM 超时是死配置**：`llm_timeout` 解析入 settings 但 `LLMClient.invoke` 不消费——LLM 挂起会无限期持有 HTTP 请求。同族：`sql_max_rows`/`sql_max_correct_retries` 连 state 注入都没有（§5.11-V2，比"只断言默认值"更严重） | `conf/settings.py:125`；`agent/llm.py:31-42`；`services/query_service.py:25` | 中 | `invoke` 内 `asyncio.wait_for`；这是死配置家族第 5 个（第 6 个 rerank 见 S-9，第 7/8 个见 §5.11-V2；前四个：`rrf_k`/`retrieval_top_k`/`sql_max_correct_retries`/`sql_read_only_guard`，§11.1-R1 已登记同类：只有定义与读取，无行为用例） | I0 |
+| S-6 | **无限流 / 无并发闸**：单请求 LLM 调用最多 10 次（extract×1 + extend×3 + filter×2 + generate×1 + correct×≤3），全服务无 rate limit / semaphore | grep `rate/semaphore` 零命中；`agent/graph.py:52-54` 三路并行召回 | 中（成本放大 + DoS） | 应用侧信号量（并发问数上限）+ 每问 LLM 调用计数进 trace；Doris 侧 P1-5 workload group 管不到应用侧这条 | P1-5 扩展 |
+| S-7 | **`correct_sql` 把 DB 错误原文喂回 prompt**：错误文本（可含攻击者可控的列值）进 LLM 上下文，扩大注入面 | `agent/nodes/correct_sql.py:32-40` | 中 | 与 S-3 同一处修：进 prompt 前分类截断，不给原文 | 随 S-3 |
+| S-8 | **二阶 prompt 注入**：召回数据含源库列注释（构建脚本从 information_schema 写入 meta 库），注释含指令性文本时注入 LLM——这是数据驱动的注入，脱敏改造不覆盖它 | `services/meta_knowledge_service.py:41-48`；`generate_sql.py:27-33` | 中 | 注释进 prompt 前做指令特征过滤 / 长度截断；或改结构化（JSON 字段）而非自然语言拼块 | P1-1 |
+| S-9 | **rerank 配置面漂移**：`.env.example` 五个 `RERANK_*` 键，全服务无 rerank 代码——外部端点被文档化但不存在 | `.env.example`；grep `rerank` 在 `nl2sql_service/` 零命中 | 低（配置漂移，第六个死配置） | 删键或补实现，二选一；与 S-5 同族 | I0 |
+| S-10 | **响应体回显生成 SQL**：设计使然（透明度）；P1-1 注入行级谓词后，谓词文本对客户端可见 | `api/routers/query_router.py:26` | 低（备查） | 接受并登记：验收第 14 条要求"SQL 文本里能看到下推条件"，二者是同一事实的两面 | 备查 |
+
+**已登记项挂链（不当作新发现）**：标识符拼接（`pgvector_client_manager.py:28/46-49/68` 的 `table`/`embedding_col`/`tsvector_col`/`filter_clause`、`meta_repository.py:18-34`、`postgres_model.py:16-31`）= **S4 已登记**，正面范本 `agent_runtime/db.py:164-169` 的 `_IDENT`，修复项即 P0-10；`meta_config.yaml` 的 pgvector 段死配置 = §2-① 已登记。
+
+### 5.11 结果体量治理与异常反馈闭环（2026-10-18 新增；两个问题的现状都比预想差）
+
+用户问题原话："查出来的数据量如果很大怎么办？这期间异常怎么办？能不能给到模型，然后让模型来不断地反馈调整？"本节先给代码实证，再给设计。核心结论：**LIMIT 硬闸已存在但值没接线；correct 回路已存在但只覆盖"guard 拒绝"一类，执行期异常直接断链——模型永远不知道它的 SQL 在真实 DB 上失败了。**
+
+#### 11.1 结果体量：闸门在，但三个口子
+
+| # | 事实 | 证据 | 后果 |
+|---|---|---|---|
+| V1 | **LIMIT 硬闸已生效**：无 LIMIT 时 guard 注入 `max_rows`，超限改写为 `max_rows` | `agent_core/sql/guard.py:56-65` | 结果集不会无限大，这是唯一在线的防线 |
+| V2 | **闸门值是死配置**：`query_service.py:25` 的初始 state 只注入 `query/context/llm/metric_config`，**没有 `sql_max_rows`**；`validate_sql.py:13` 与 `correct_sql.py:28` 的 `state.get(..., 默认)` 永远回落默认 1000/3 | `services/query_service.py:25`；`agent/nodes/validate_sql.py:13` | settings 改 `sql_max_rows` 不生效——比 §11.1-R1 登记的"只断言默认值"更严重：**连 state 注入都没有**。死配置家族第 7/8 个（口径：S-5 第 5、S-9 第 6） |
+| V3 | **1000 行上限的设计前提正在失效**：`settings.py:58` 注释原话"结果由前端 UI 展示而非注入 LLM prompt"——这是 1000 行的合法性来源。但 answer 恒空（A1）意味着这个前提从未被兑现；一旦补 answer 合成节点，1000 行宽表（几十 MB）直接进 prompt 爆上下文 | `conf/settings.py:58`；`agent/graph.py:75` | 结果体量必须按**两个用途分两个上限**，一个数不够用 |
+
+**设计（三条，均为 P0-8 范围内的落地约束）**：
+
+1. **双上限分离**：`sql_max_rows`（返回 UI，维持 1000）与新增 `sql_max_rows_for_prompt`（进模型，默认 100 行或 50KB 双阈值取先达）。answer 合成节点只吃前者，明细全量走响应体给前端——`settings.py:58` 的注释假设随之改写。
+2. **中档结果带摘要进 prompt**：超过 `for_prompt` 上限但未超 UI 上限时，进模型的是"汇总统计（总行数/聚合值/分布）+ 前 N 行样例"，不是截断的原始行——模型要回答"总数多少"这类问题，截断行给了它也会答错。
+3. **聚合引导**：生成期检测到"无聚合函数的明细 SELECT"且候选表行数估值大时，prompt 内追加引导优先聚合。行数估值复用 P0-3 漂移检测本来就要算的表统计，**不新建估算机制**。
+
+**非目标**：异步导出、游标分页、结果集落盘（用户要"看更多"由前端分页 + 重查解决，不走服务端游标——游标跨 HTTP 请求持有连接，与池配额冲突）。
+
+#### 11.2 异常反馈：correct 回路存在，但执行期异常整段断链
+
+| # | 事实 | 证据 | 后果 |
+|---|---|---|---|
+| E1 | **correct 回路只挂一类异常**：图结构是 `validate_sql →(条件边) correct_sql → validate_sql`，即只纠正 **guard 拒绝**（语法/多语句/非 SELECT/LIMIT 非法） | `agent/graph.py:69-74` | 这一类恰恰是模型最擅长的 |
+| E2 | **执行期异常无回路**：`execute_sql → END` 是无条件边。DB 报错（列不存在、类型不匹配、权限拒绝、超时取消）只写进 `state.error`，图直接结束，错误原文回显客户端（=S-3） | `agent/graph.py:75`；`agent/nodes/execute_sql.py:29-31` | **模型永远不知道它的 SQL 在真实 DB 上失败了**——列名幻觉这类最高频的执行期错误没有任何自动纠正 |
+| E3 | **correct 的 prompt 也丢上下文**：`metric_infos=""`、`date_info=""` 硬编码空串，`table_infos` 只有 retrieved_info | `agent/nodes/correct_sql.py:32-40` | 与 generate_sql 同款缺陷（§4-A3）；纠正轮拿着比生成轮更少的信息改 SQL |
+| E4 | **两个回路计数不合并**：`correct_count` 单字段但 execute 回路当前不存在；新增后若各计 3 次，单问 LLM 调用最多 10+3 次 | `agent/nodes/correct_sql.py:28`；`agent/graph.py:28` | 无总闸 |
+| E5 | **超时与空结果无处理**：dw 池 `statement_timeout=30s`（已改造）到顶即异常断链；空结果与"查询成功但无数据"同形返回 | `clients/pg_pool.py`；`agent/nodes/execute_sql.py:28` | P0-8③ 零结果分诊未实施 |
+
+**设计（核心原则：先机器分类，再决定喂不喂模型）**：
+
+| 异常类 | 判据 | 处置 | 为什么不都喂模型 |
+|---|---|---|---|
+| **可纠正** | 语法错、列/表名不存在、类型不匹配、函数不存在——DB 错误信息可机器识别且改 SQL 可能解决 | 进 correct 回路：错误原文 + 相关对象 schema 片段 + 已尝试历史 | 这类信号明确，模型纠正命中率高 |
+| **可改写** | 超时取消、结果超限、扫描过大 | 进 correct 回路但带**改写目标**（"加分区条件 dt=latest"/"改聚合"），不是裸错误文本 | 模型需要知道"往哪个方向改"，否则 3 轮全试错 |
+| **不可纠正** | 权限拒绝、连接失败、源不可用、认证失败 | **不喂模型**：明确拒答 + 分类可读原因 | 喂 3 轮也改不出来，纯烧 LLM 成本还延长用户等待；且错误原文进 prompt 扩大注入面（S-7） |
+
+图结构修正（P0-8⑤，与 answer 节点同一处改动）：`execute_sql` 改条件边——成功 → answer 合成；失败且可纠正/可改写且 `correct_count < 上限` → `correct_sql`（state 带执行错误与分类）；失败且不可纠正或达上限 → 带"已尝试 SQL 序列 + 分类原因"结束。**`correct_count` 双回路共用**，`sql_max_correct_retries` 随双上限改造一并接进 state 注入（修 V2）。
+
+feedback 契约（每轮进 prompt 的）：① 错误分类与截断后原文（S-3/S-7 的分类截断在此复用）；② 出错对象的相关 schema（从 meta 库取，不是全量表）；③ 本次已尝试的 SQL 与错误序列——没有 ③，模型会把同一处错改三遍。
+
+空结果分诊挂接（P0-8③ 的实施约束）：结果为空且含维度过滤 → 走 §5.8 的 `ValueResolver` 探针校验字面量 → 未命中则给别名/前缀建议并允许重生成一次 → 探针命中但 SQL 无误则明确回答"该条件下无数据"，**不硬造答案**。
+
+**一个有效性前提必须写明**：这个闭环的命中率取决于 meta 库 schema 的准确与新鲜（列名/类型/注释）。拿着过期 schema 改 3 轮也改不对——P0-1（构建入口）+ P0-3（漂移检测）是这个闭环的地基，不是可选项。这也解释了为什么本节的批次必须排在 P0-1/P0-3 之后、与 P0-8 同批实施。
+
+#### 11.3 验收判据（并入 §6）
+
+- 构造返回 1000+ 行的查询：响应体全量 ≤ `sql_max_rows`；进 prompt 的行数 ≤ `sql_max_rows_for_prompt` 且带汇总统计；改 `sql_max_rows` 配置**实际生效**（断 V2 死配置）。
+- 构造"列名不存在"执行错误：触发 execute→correct 回路，≤3 轮内成功或带原因收尾；双回路合计 LLM 调用不超上限（E4）。
+- 构造"权限拒绝"：**不触发** correct，返回分类拒答且响应体不含 DB 原文（S-3 联动）。
+- 构造空结果 + 维度过滤：走探针分诊，链路可观测（trace 里能看到探针命中/未命中），终态不是裸空数组。
+
+### 5.12 归属与上移设计（2026-10-18 新增；回答"这些基础内容会不会放到 Agent runtime / Agent core 的合理位置"）
+
+会，且必须——但要有判据、有顺序、有反模式警告。先摆一个已经发生的事实：**本轮连接池改造的产物 `pg_pool.py` 现在落在 `applications/nl2sql-service/nl2sql_service/clients/`，这是 `agent_runtime/db.py:52-63` 池范式的第二个实现**。当时放在应用内是止血语境下的合理第一步（不动共享包、不影响其他服务、可独立验证），但按 AGENTS.md §90「单一实现：逻辑收敛 kernel，不在各 app 复制」，它的终局不在应用里。仓里已有这个隐患的现实案例：db.py 范式建好了 nl2sql 没抄（自建变体）、`agent_server/sql/pipeline.py:76` 每次新建连接不池化、`vector_backend.py:253` asyncpg 另建一池——连接层是平台里"范式在、复制品也在"的重灾区。
+
+#### 12.1 归属总表（方案各项 → 落点 → 判据）
+
+| 方案项 | 当前计划落点 | **应属** | 判据（§4 三条） | 时机 |
+|---|---|---|---|---|
+| 池工厂 `create_pool` + `pool_stats`（已完成，暂居 nl2sql） | `nl2sql_service/clients/pg_pool.py` | **agent-runtime**（db.py 同层新导出） | ① 连接配额/超时/只读的解释不能每服务一份——一家漏 `statement_timeout` 就是一家会挂死 | **立即上移**（加法式，见 12.2） |
+| SQL guard 表+列级扩展（§5.9-L2） | 方案已写 `agent_core/sql/guard.py` | **agent-core** | ① nl2sql/agent_server/federation 三服务共用同一语义，复制即三份漂移 | 随 P1-1 |
+| 取值解析 `ValueResolver`（§5.8） | 未定 | **agent-runtime 新中间件** | ① 探针/快照缓存/降级链是 Text2SQL 通用基建，第二个应用来时只能复制不能复用就是"单 Runtime 被架空" | 随 B3（依赖 Q16/Q10a） |
+| LLM 超时接线（S-5） | `nl2sql_service/agent/llm.py` | agent-core `llm/protocols` 若覆盖则修共享件；nl2sql 私有包装先本地修 | ②/③ 视 LLMClient 归属定，不强行上移 | I0 本地修 |
+| 限流/并发闸（S-6） | nl2sql | **agent-core `guardrails/ratelimit`**（`SlidingWindowRateLimiter` 已存在，复用不新建） | ① 现成件 | 随 P1-5 |
+| 池/召回可观测出口（`/api/pools`） | nl2sql 路由 | 格式定义上移 agent-runtime observability；端点形状留本地 | ③ 端点是领域装配 | 随 T3 |
+| trace 落库/golden 回归 | nl2sql | 既有 otel 链；eval 后置 | ③ | B4 |
+| **answer 合成节点** + matched/unmatched/口径标签契约 | nl2sql 节点 | **nl2sql（领域）** | ③ "SQL→人话"是问数领域逻辑，runtime 不需要知道 | B1 |
+| 指标语义、别名/码表、linkable 白名单、prompt | nl2sql | **nl2sql（领域）** | ③ | B2 |
+| 语义层 store + 生命周期 | 依赖 **Q25** | 收敛路：nl2sql 退化为 `agent_server/sql/schema_store` 的 builder 之一 | ② 这是架构分叉不是实现细节 | B0 拍板后 |
+
+#### 12.2 pg_pool 上移的具体设计（加法式，零行为风险）
+
+**原则：新增导出，不改现有行为**——`get_pool()`（agent_server 正在用）一行不动，新工厂以新名字导出，nl2sql 切换为 import，agent_server 后续自愿迁移。这样共享包的既有用户无感，上移不引入回归面。
+
+1. **上移内容**：`create_pool(dsn, *, min_size, max_size, timeout, statement_timeout_ms, read_only, name)` 与 `pool_stats(pool)` 原样搬入 agent-runtime（db.py 尾部或同层新模块 `pool_factory.py`），连同 `build_options()`（libpq `options` 串构造）与 17 条测试一并搬（测试落到 `packages/agent-runtime/tests/`）。
+2. **db.py 与工厂的关系**：db.py 的 `init_pool` 是"单例 + pgvector register + schema 迁移"的运行时装配（领域化），工厂是"配额/超时/只读/统计"的纯连接层原语。**工厂不依赖单例，单例可选用工厂建池**——但本轮不重构 `init_pool`（动了它就动了 agent_server 的现网行为，违反加法式原则），只把工厂导出。
+3. **nl2sql 侧**：`clients/pg_pool.py` 删除，`dependencies.py`/`postgres_client_manager.py` 改 `from agent_runtime.pool_factory import create_pool, pool_stats`；`test_pool_factory.py` 搬走后，nl2sql 测试目录留一条 import 级冒烟（防依赖面断裂）。
+4. **验收**：agent-runtime 侧测试（原 17 条）+ nl2sql 冒烟 + 两包各自 ruff；`test_env_template` 门禁不受影响（配置面仍在 nl2sql settings，属应用配置不是包配置）。
+5. **顺序**：此项**不依赖租户批次任何拍板**，可与 T1 并行；但它动共享包，按仓库惯例单独一个 commit，不混在 nl2sql 的批次里。
+
+#### 12.3 反模式警告（上移的三条禁令）
+
+1. **不把领域逻辑塞进 runtime**：取值字典的"哪些列算敏感""指标口径怎么算"是问数领域决策，上移的只有解析机制。把领域语义上移 = 把复杂功能耦合进共享包，正是"统一而不耦合"要避免的。
+2. **不为统一而改现网行为**：`get_pool()` 的单例语义、agent_server 的池参数本轮不动。上移是加导出，不是重构用户。
+3. **不留双实现过渡期无限延长**：pg_pool 上移后 nl2sql 内不留转发 shim（一处 import 切换干净利落）；db.py 的 `init_pool` 可后续自愿迁到工厂，但要在计划里登记，不许无限期"两份并存"。
+
 ## 6. 验收标准
 
 1. **幂等**：同一输入重跑两次，元数据库与向量点数、内容完全一致（涵盖原第 7 条，合并以免重复计数）。
@@ -467,6 +662,9 @@ SHOW BUILD INDEX;             -- 看进度
 10. **P1-5 负载隔离**：构造一条超预算的问数查询，结果是**被排队或拒绝**（`SHOW WORKLOAD GROUP` / 审计可查），且问数账号无写权限；大屏侧影响由 BI 团队确认（本仓库不自行声明“大屏不受影响”）。
 11. **P0-8 五道闸逐条有测试**：字面不匹配 → 返回“未识别取值”而非 `0`；编码列写成字符串 → 校验层拦下。
 12. **P0-10 标识符白名单**：构造含非法字符的表名 / 列名分别打到全文路、向量路、upsert 路、元数据写入路，**四条都在校验层报错且不出 SQL**；用例进门禁（与 P0-6② 的语句白名单分属两层，都要有）。
+13. **L2 敏感列拦截**（§5.9）：构造含敏感列（手机号 / 证件号）的生成 SQL，guard 在生成期拦下且返回原因可读；**L1 单独可证**——用问数账号直连 DW，视图 / 权限使其拿不到明文（两道互相独立，不靠彼此存在）。
+14. **行级权限注入**（§5.9）：给测试账号配"仅某区域"映射，问该区域外数据 → 返回空 / 拒答，且生成的 SQL 文本里能看到注入的**结构化谓词**（不是字符串拼接的 `filter_clause`）。
+15. **`metric_config` 注入无效化**（§5.10-S2）：入参表注释含指令性文本（"ignore previous instructions…"）时，不改变生成 SQL 的语义目标；入参声明未授权表名时按白名单拒。
 
 ## 7. 归属与陈述边界（不得含糊）
 
@@ -738,6 +936,7 @@ flowchart TB
 | G2 | **P0-4 打算自研 trace，但仓内已有可观测设施** | `packages/agent-core/agent_core/tracing.py`、`observability/summary.py`、`events.py`、`packages/agent-runtime/agent_runtime/tracing.py`；本文对 `tracing.py` / OTel / Langfuse **命中 0** | **本轮未写入方案**（用户只圈了 G1/G3/S4）。待办：P0-4 的 trace 字段改为对齐 OTel GenAI 语义约定，不自造 |
 | G3 | **P1-1 / P1-6 被写成"新建"，其实有现成形状可抄** | `sql_ddl`/`sql_docs`/`sql_examples` 每行已带 `tenant_id` + `workspace_id`；`agent_runtime/db.py:164-169` 已有 `_IDENT` 标识符白名单 | 已回写 P1-1 的落点与"照抄而非设计"定性；成本口径随之从"设计新机制"降为"复用既有契约" |
 | G4 | **S4 安全项在方案里只挂链、无归属** | 本文早先版本仅在 §9 / N5 备注里提 S4，**既无 P0/P1 编号也不在 §6 验收内** | 已提升为 **P0-10** 并加验收第 12 条 |
+| G5 | **安全与数据权限整个议题未登记**（2026-10-18 由用户问"敏感字段怎么处理、有没有脱敏"引出） | 三层全部为零：脱敏关键词全服务零命中、`filter_table` 无权限概念、`dw_repository` 不注入 WHERE、guard 只语句级；另有 DB 错误原文回显客户端、DSN 密码进日志、`metric_config` 客户端任意注入、LLM 超时死配置、无限流五条新发现 | 已补 **§5.9**（三层纵深设计，P1-1 细化）+ **§5.10**（S-1~S-10 清单含修法与归属）+ 验收第 13–15 条；其中 S-3/S-4/S-5/S-7/S-9 归 I0，不依赖任何拍板 |
 
 **另有两条章节级缺失，本轮仍未补**（记在这里以免忘掉）：**① 没有迁移与回滚路径**——文档讲终态与"DDL 要进版本控制"，但没有"现状 → 终态"的中间态（现有 ES / pgvector 取值副本怎么停、服务若已上线如何灰度、失败怎么退）；**② 没有基线值与 owner**——§6 要求"golden 一键跑出门禁读数"，却没定义 20–50 条从哪来、谁标、口径冲突谁裁，也没留基线数字；21（现 22）个待答里零 owner。
 
