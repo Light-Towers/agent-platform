@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pytest
-
 from nl2sql_service.services.datasource import (
     DataSource,
     DataSourceRegistry,

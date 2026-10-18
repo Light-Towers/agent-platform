@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-
 from nl2sql_service.services.load_guard import (
     LoadGuard,
     LoadGuardConfig,
