@@ -72,6 +72,60 @@ class MetaRepository:
         """删除作用域内不在 keep 的取值行（keep = {(column_name, value)}）。"""
         return await self._prune(_VALUE_TABLE[0], _VALUE_NATURAL, keep)
 
+    async def list_columns(self, datasource_id: str = "") -> list[dict[str, Any]]:
+        """库侧列指纹（P0-3 漂移检测的比对基线）。"""
+        sql = (
+            f"SELECT table_name, column_name, column_comment, data_type "
+            f"FROM {self._prefix}column_info "
+            f"WHERE tenant_id = %s AND workspace_id = %s AND datasource_id = %s"
+        )
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(sql, ("", "", datasource_id))
+            rows = await cur.fetchall()
+            return [dict(r._mapping) for r in rows]
+
+    async def update_column_type(self, table_name: str, column_name: str, data_type: str) -> None:
+        """类型自动跟随（P0-3 的唯一自动写：语义不自动改，类型与样本才跟）。"""
+        sql = (
+            f"UPDATE {self._prefix}column_info SET data_type = %s, updated_at = now() "
+            f"WHERE tenant_id = %s AND workspace_id = %s AND datasource_id = %s "
+            f"AND table_name = %s AND column_name = %s"
+        )
+        async with self._pool.connection() as conn:
+            await conn.execute(sql, (data_type, "", "", "", table_name, column_name))
+
+    async def upsert_table_stats(self, stats: list[dict[str, Any]]) -> int:
+        """表行数估值写入（P0-3 副产物 → 生成期聚合引导）。"""
+        count = 0
+        for s in stats:
+            sql = (
+                f"INSERT INTO {self._prefix}table_stats "
+                f"(tenant_id, workspace_id, datasource_id, table_name, row_estimate, column_count, sampled_at) "
+                f"VALUES (%s, %s, %s, %s, %s, %s, now()) "
+                f"ON CONFLICT (tenant_id, workspace_id, datasource_id, table_name) DO UPDATE SET "
+                f"row_estimate = EXCLUDED.row_estimate, column_count = EXCLUDED.column_count, "
+                f"sampled_at = now()"
+            )
+            async with self._pool.connection() as conn:
+                await conn.execute(
+                    sql,
+                    ("", "", s.get("datasource_id", ""), s["table_name"], s.get("row_estimate", 0), s.get("column_count", 0)),
+                )
+            count += 1
+        return count
+
+    async def list_table_stats(self, datasource_id: str = "") -> list[dict[str, Any]]:
+        """读表统计（QueryService 注入 state，驱动聚合引导）。"""
+        sql = (
+            f"SELECT table_name, row_estimate, column_count "
+            f"FROM {self._prefix}table_stats "
+            f"WHERE tenant_id = %s AND workspace_id = %s AND datasource_id = %s"
+        )
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(sql, ("", "", datasource_id))
+            rows = await cur.fetchall()
+            return [dict(r._mapping) for r in rows]
+
     async def list_metrics(self) -> list[dict[str, Any]]:
         sql = f"SELECT metric_name, metric_desc, metric_expr FROM {self._prefix}metric_info"
         async with self._pool.connection() as conn:
