@@ -22,7 +22,8 @@ sql:
   max_rows: 1000
   max_correct_retries: 3
 
-# 连接池配额与语句超时（psycopg_pool；取值依据见 clients/pg_pool.py）
+# 连接池配额与语句超时（psycopg_pool；2026-10-18 起建池走共享件 agent_runtime.pool_factory，
+# 配额口径见方案 §5.12.2）
 # meta：检索 + CRUD 共用，毫秒级画像；dw：执行 LLM 生成的 SQL，OLAP 长查询画像
 pool:
   meta:

@@ -58,8 +58,13 @@ class Settings(BaseLLMSettings):
     sql_max_rows: int = 1000  # 区别于 agent_server(100)：本服务为专职数据查询工具，结果由前端 UI 展示而非注入 LLM prompt
     sql_max_correct_retries: int = 3
 
-    # 分词器：jieba | bigram
+    # 分词器：jieba | bigram（jieba 需装可选 extra `[tokenizer]`，缺包时告警降级 bigram）
     tokenizer: str = "bigram"
+
+    # 生成期日期上下文的口径说明（P0-11①，2026-10-18）：系统日期由代码注入，
+    # 数据新鲜度由部署方声明（如"数据为 T+1 快照，按数据日期理解相对时间"）。
+    # 默认空 = 只注入系统日期。
+    date_context_note: str = ""
 
     @property
     def meta_db_enabled(self) -> bool:

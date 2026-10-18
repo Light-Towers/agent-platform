@@ -36,6 +36,10 @@ dev = [
 huggingface = [
     "langchain-huggingface>=0.1",
 ]
+# TOKENIZER=jieba 时才需要；缺包会告警并降级 bigram
+tokenizer = [
+    "jieba>=0.42",
+]
 
 [project.scripts]
 nl2sql-service = "nl2sql_service.scripts.build_meta_knowledge:main"
