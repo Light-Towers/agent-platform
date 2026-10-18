@@ -17,6 +17,12 @@ _EXPECTED_TABLES = (
     "nl2sql_alias_info",
     "nl2sql_schema_meta",
 )
+#: v2 增量（002_meta_lifecycle）：多轮 session / 查询追溯 / 表统计
+_EXPECTED_TABLES_V2 = (
+    "nl2sql_session_state",
+    "nl2sql_query_trace",
+    "nl2sql_table_stats",
+)
 
 
 def test_migrations_discovered_in_version_order():
@@ -25,6 +31,24 @@ def test_migrations_discovered_in_version_order():
     names = [name for name, _ in migrations]
     assert names == sorted(names), f"迁移未按文件名排序：{names}"
     assert names[0].startswith("001_")
+    assert "002_meta_lifecycle.up.sql" in names, f"缺 v2 迁移: {names}"
+
+
+def test_v2_migration_covers_lifecycle_tables():
+    sql = dict(load_migrations(1536))["002_meta_lifecycle.up.sql"]
+    for table in _EXPECTED_TABLES_V2:
+        assert f"CREATE TABLE IF NOT EXISTS {table}" in sql, f"缺 v2 建表语句：{table}"
+    # 四元组/追溯的关键列在位（§5.13-M2 / P0-4 判据的落库对象）
+    for column in ("quadruple", "confirmed_pairs", "meta_revision", "source_snapshot", "unmatched_terms", "row_estimate"):
+        assert column in sql, f"v2 缺关键列: {column}"
+
+
+def test_v2_migration_is_idempotent_and_has_no_drop():
+    sql = dict(load_migrations(1536))["002_meta_lifecycle.up.sql"]
+    assert "DROP " not in sql.upper(), "up 迁移不得包含 DROP"
+    assert sql.count("CREATE TABLE IF NOT EXISTS") == 3
+    assert sql.count("CREATE INDEX IF NOT EXISTS") == 3
+    assert "ON CONFLICT (key) DO UPDATE" in sql, "版本标记必须幂等"
 
 
 def test_vector_dim_placeholder_replaced():
