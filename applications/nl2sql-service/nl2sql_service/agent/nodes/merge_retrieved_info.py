@@ -28,7 +28,12 @@ def _derive_tables(columns: list[dict[str, Any]], relations: list[dict[str, Any]
 
     §5.14-R3：关系涉及表的并集 = `filter_table` 的候选输入——空转节点接上
     真管线；保序（列召回序在前，关系表按出现序附后）。
+
+    2026-10-18（A 方案 Stage ②）：表注释随列行冗余带回（§5.14-R2），同表
+    所有列行的 table_comment 相同，取首个非空——业务文档（sql_docs 迁入）
+    经此进生成期 prompt 的【表】块，否则 docs→comment 迁移是只写不读。
     """
+    comments: dict[str, str] = {}
     seen: list[str] = []
     for col in columns:
         if not isinstance(col, dict):
@@ -36,6 +41,9 @@ def _derive_tables(columns: list[dict[str, Any]], relations: list[dict[str, Any]
         name = col.get("table_name")
         if name and name not in seen:
             seen.append(name)
+        comment = col.get("table_comment") or ""
+        if name and comment and not comments.get(name):
+            comments[name] = comment
     for rel in relations or []:
         if not isinstance(rel, dict):
             continue
@@ -43,7 +51,7 @@ def _derive_tables(columns: list[dict[str, Any]], relations: list[dict[str, Any]
             name = rel.get(key)
             if name and name not in seen:
                 seen.append(name)
-    return [{"table_name": name} for name in seen]
+    return [{"table_name": name, "table_comment": comments.get(name, "")} for name in seen]
 
 
 async def merge_retrieved_info(state: dict[str, Any]) -> dict[str, Any]:
