@@ -1,7 +1,12 @@
-"""MetricConfig：元知识配置 schema（表/列/指标/值定义）。
+"""MetricConfig：元知识配置 schema（表/列/指标/值定义）——**运行契约单源**。
 
-经 API 入参注入或 YAML 配置加载，驱动召回节点，不硬编码特定业务表结构。
-与 entities/ 下 TableInfo/ColumnInfo/MetricInfo/ValueInfo 契约一致（dict 视图）。
+经 API 入参注入或 YAML 配置加载（`scripts/build_meta_knowledge` 的
+`--config` 也只认本模型），驱动召回节点与构建入口，不硬编码特定业务表结构。
+
+2026-10-18（方案 P2 / D1）：此前的 `entities/` 五件套（TableInfo/
+ColumnInfo/ColumnMetric/MetricInfo/ValueInfo）只被契约测试引用、零运行
+引用，与本模型形成双契约——测试给不参与的契约兜底，改运行契约不会红。
+entities/ 已删，契约测试（tests/test_nl2sql_contracts.py）整体指向本模块。
 """
 
 from __future__ import annotations

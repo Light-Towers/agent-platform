@@ -1,85 +1,97 @@
-"""nl2sql-service 契约测试：entities / LLM client / settings / state。
+"""nl2sql-service 契约测试：MetricConfig / LLM client / settings / state。
 
 无外部 DB/LLM 依赖，测 Pydantic 契约 + LLMClient 降级 + Settings 默认值。
+
+2026-10-18（方案 P2 / D1 双契约清理）：此前本节测 `entities/` 五件套，而
+运行契约是 `config/metric_config_schema.py` 的 MetricConfig——测试给不参与
+运行的契约兜底，真契约无测试（"改运行契约不会红"）。entities/ 已删，
+本节整体重定向到 MetricConfig。
 """
 
 from __future__ import annotations
 
-from nl2sql_service.entities.column_info import ColumnInfo
-from nl2sql_service.entities.column_metric import ColumnMetric
-from nl2sql_service.entities.metric_info import MetricInfo
-from nl2sql_service.entities.table_info import TableInfo
-from nl2sql_service.entities.value_info import ValueInfo
+import pytest
+from nl2sql_service.config.metric_config_schema import (
+    MetricColumn,
+    MetricConfig,
+    MetricDef,
+    MetricTable,
+    MetricValue,
+)
+from pydantic import ValidationError
 
 
 # ---------------------------------------------------------------------------
-# entities
+# MetricConfig（运行契约单源）
 # ---------------------------------------------------------------------------
-def test_column_metric_basic():
-    cm = ColumnMetric(column_name="col1", metric_name="metric1")
-    assert cm.column_name == "col1"
-    assert cm.metric_name == "metric1"
-    assert cm.metric_expr == ""
+def test_metric_table_defaults():
+    t = MetricTable(table_name="orders")
+    assert t.table_name == "orders"
+    assert t.table_comment == ""
 
 
-def test_column_info_with_metrics():
-    cm = ColumnMetric(column_name="col1", metric_name="m1", metric_expr="SUM(col1)")
-    ci = ColumnInfo(column_name="col1", column_comment="注释", data_type="int", metrics=[cm])
-    assert ci.column_name == "col1"
-    assert len(ci.metrics) == 1
-    assert ci.metrics[0].metric_expr == "SUM(col1)"
+def test_metric_table_requires_table_name():
+    with pytest.raises(ValidationError):
+        MetricTable()
 
 
-def test_column_info_defaults():
-    ci = ColumnInfo(column_name="col1")
-    assert ci.column_comment == ""
-    assert ci.data_type == ""
-    assert ci.metrics == []
+def test_metric_column_basic():
+    c = MetricColumn(table_name="orders", column_name="amount", column_comment="订单金额", data_type="numeric")
+    assert c.model_dump() == {
+        "table_name": "orders",
+        "column_name": "amount",
+        "column_comment": "订单金额",
+        "data_type": "numeric",
+    }
 
 
-def test_table_info_with_columns():
-    ci = ColumnInfo(column_name="col1")
-    ti = TableInfo(table_name="t1", table_comment="表注释", columns=[ci])
-    assert ti.table_name == "t1"
-    assert len(ti.columns) == 1
+def test_metric_column_requires_table_and_column():
+    with pytest.raises(ValidationError):
+        MetricColumn(column_name="amount")  # table_name 必填
+    with pytest.raises(ValidationError):
+        MetricColumn(table_name="orders")  # column_name 必填
 
 
-def test_table_info_defaults():
-    ti = TableInfo(table_name="t1")
-    assert ti.table_comment == ""
-    assert ti.columns == []
+def test_metric_def_basic_and_defaults():
+    m = MetricDef(metric_name="销售额", metric_desc="订单金额合计", metric_expr="SUM(orders.amount)")
+    assert m.metric_name == "销售额"
+    assert m.metric_expr == "SUM(orders.amount)"
+
+    bare = MetricDef(metric_name="订单数")
+    assert bare.metric_desc == ""
+    assert bare.metric_expr == ""
 
 
-def test_metric_info_basic():
-    mi = MetricInfo(metric_name="m1", metric_desc="描述", metric_expr="COUNT(*)")
-    assert mi.metric_name == "m1"
-    assert mi.metric_expr == "COUNT(*)"
+def test_metric_value_requires_column_and_value():
+    v = MetricValue(column_name="customers.customer_name", value="VIP", value_desc="VIP 客户")
+    assert v.model_dump() == {
+        "column_name": "customers.customer_name",
+        "value": "VIP",
+        "value_desc": "VIP 客户",
+    }
+    with pytest.raises(ValidationError):
+        MetricValue(column_name="city")  # value 必填
 
 
-def test_metric_info_defaults():
-    mi = MetricInfo(metric_name="m1")
-    assert mi.metric_desc == ""
-    assert mi.metric_expr == ""
+def test_metric_config_to_recall_result_shape():
+    """召回节点消费的形状：四段齐全、字段名即运行契约（改名即红）。"""
+    config = MetricConfig(
+        tables=[{"table_name": "orders", "table_comment": "订单表"}],
+        columns=[{"table_name": "orders", "column_name": "amount", "column_comment": "金额", "data_type": "numeric"}],
+        metrics=[{"metric_name": "销售额", "metric_desc": "订单金额合计", "metric_expr": "SUM(orders.amount)"}],
+        values=[{"column_name": "order_status", "value": "已支付", "value_desc": ""}],
+    )
+    result = config.to_recall_result()
+
+    assert set(result) == {"tables", "columns", "metrics", "values"}
+    assert result["tables"][0] == {"table_name": "orders", "table_comment": "订单表"}
+    assert result["metrics"][0]["metric_expr"] == "SUM(orders.amount)"
+    assert result["values"][0]["value"] == "已支付"
 
 
-def test_value_info_basic():
-    vi = ValueInfo(column_name="col1", value="v1", value_desc="值描述")
-    assert vi.column_name == "col1"
-    assert vi.value == "v1"
-
-
-def test_value_info_defaults():
-    vi = ValueInfo(column_name="col1", value="v1")
-    assert vi.value_desc == ""
-
-
-def test_table_info_serialization_roundtrip():
-    ci = ColumnInfo(column_name="col1", data_type="int")
-    ti = TableInfo(table_name="t1", columns=[ci])
-    data = ti.model_dump()
-    restored = TableInfo(**data)
-    assert restored.table_name == "t1"
-    assert restored.columns[0].column_name == "col1"
+def test_metric_config_defaults_to_empty_sections():
+    config = MetricConfig()
+    assert config.to_recall_result() == {"tables": [], "columns": [], "metrics": [], "values": []}
 
 
 # ---------------------------------------------------------------------------
