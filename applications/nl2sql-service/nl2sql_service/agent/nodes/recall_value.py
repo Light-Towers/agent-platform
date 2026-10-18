@@ -1,6 +1,8 @@
-"""recall_value 节点：pgvector 全文召回值信息。
+"""recall_value 节点：pgvector 全文 + 向量召回值信息。
 
 入参 metric_config 携带值定义时优先使用，不查预置元知识库。
+2026-10-18 审计：此前固定 `embedding=None` ⇒ 向量补位路永远是死的；
+现复用 extract_keywords 算好的 `state["query_embedding"]`（P0-11⑤）。
 """
 
 from typing import Any
@@ -19,5 +21,9 @@ async def recall_value(state: dict[str, Any]) -> dict[str, Any]:
     if ctx is None or ctx.value_repository is None:
         return {"values": []}
 
-    values = await ctx.value_repository.recall(keywords, embedding=None, top_k=10)
+    values = await ctx.value_repository.recall(
+        keywords,
+        embedding=state.get("query_embedding"),
+        top_k=state.get("retrieval_top_k", 10),
+    )
     return {"values": values}

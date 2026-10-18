@@ -1,6 +1,8 @@
 """recall_metric 节点：pgvector 向量召回指标信息。
 
 入参 metric_config 携带指标定义时优先使用，不查预置元知识库。
+embedding 由 extract_keywords 统一计算后经 `state["query_embedding"]` 传入
+（2026-10-18 审计 P0-11⑤）。
 """
 
 from typing import Any
@@ -19,12 +21,14 @@ async def recall_metric(state: dict[str, Any]) -> dict[str, Any]:
     if ctx is None or ctx.metric_repository is None:
         return {"metrics": []}
 
-    embedding: list[float] | None = None
-    if ctx.embedding_client is not None:
+    embedding: list[float] | None = state.get("query_embedding")
+    if embedding is None and ctx.embedding_client is not None:
         try:
             embedding = await ctx.embedding_client.embed_query(" ".join(keywords))
-        except Exception:
+        except Exception:  # noqa: BLE001 - 向量化失败降级为空召回，不阻断查询
             embedding = None
 
-    metrics = await ctx.metric_repository.recall(keywords, embedding=embedding, top_k=10)
+    metrics = await ctx.metric_repository.recall(
+        keywords, embedding=embedding, top_k=state.get("retrieval_top_k", 10)
+    )
     return {"metrics": metrics}

@@ -26,7 +26,10 @@ def _route_after_validate(state: dict[str, Any]) -> str:
     if state.get("sql_valid", False):
         return "execute_sql"
     if state.get("correct_count", 0) >= state.get("sql_max_correct_retries", 3):
-        return "execute_sql"
+        # 2026-10-18 审计（方案 §5.11-E2 补款）：达上限落错误终态，不再路由 execute_sql。
+        # 旧路由把"未校验 SQL 不执行"寄托在 execute_sql 的 error 非空提前返回上，
+        # 是隐式耦合——那边一旦改空就成真执行。
+        return END
     return "correct_sql"
 
 
@@ -69,7 +72,7 @@ def build_graph():
     graph.add_conditional_edges(
         "validate_sql",
         _route_after_validate,
-        {"execute_sql": "execute_sql", "correct_sql": "correct_sql"},
+        {"execute_sql": "execute_sql", "correct_sql": "correct_sql", END: END},
     )
     graph.add_edge("correct_sql", "validate_sql")
     graph.add_edge("execute_sql", END)
