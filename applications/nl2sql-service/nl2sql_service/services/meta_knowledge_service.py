@@ -66,7 +66,8 @@ class MetaKnowledgeService:
         """列行写入：table_comment / data_type / embedding。
 
         embedding 文本 = `{table_name} {column_name} {column_comment}`（与召回
-        查询侧同一拼法，写入/查询单源）。
+        查询侧同一拼法，写入/查询单源）。列 dict 预置 `embedding` 时直接采用
+        （迁移入口的批量向量化模式：逐条 embed = N 次 API 调用），否则自算。
         """
         stats = {"inserted": 0, "updated": 0}
         for table in tables:
@@ -82,7 +83,9 @@ class MetaKnowledgeService:
                     "column_comment": column_comment,
                     "data_type": col.get("data_type", ""),
                 }
-                if self._embedder is not None:
+                if col.get("embedding") is not None:
+                    data["embedding"] = col["embedding"]
+                elif self._embedder is not None:
                     data["embedding"] = await self._embed(f"{table_name} {column_name} {column_comment}")
                 if await self._meta_repo.save_column(self._stamp(data)):
                     stats["inserted"] += 1
@@ -97,6 +100,7 @@ class MetaKnowledgeService:
         embedding 文本 = **question 单源**（与 agent_server `store_example` 一致）：
         召回是"问题↔问题"的相似度匹配，SQL 是命中后才注入 prompt 的 few-shot
         参考文本——把 SQL 混进嵌入文本只会给向量添噪（SQL 关键词与问题语义弱相关）。
+        范例 dict 预置 `embedding` 时直接采用（迁移入口批量向量化模式）。
         不进 `prune`：范例源是迁移/持续训练而非 MetricConfig，配置驱动的 prune
         会把范例全集误删光；范例的差异删由迁移入口自己做。
         """
@@ -108,7 +112,9 @@ class MetaKnowledgeService:
                 "sql": example.get("sql", ""),
                 "source": example.get("source", "human"),
             }
-            if self._embedder is not None:
+            if example.get("embedding") is not None:
+                data["embedding"] = example["embedding"]
+            elif self._embedder is not None:
                 data["embedding"] = await self._embed(question)
             if await self._meta_repo.save_example(self._stamp(data)):
                 stats["inserted"] += 1
@@ -228,12 +234,16 @@ class MetaKnowledgeService:
             for r in relations
         }
         alias_keys = {(a.get("target_kind", ""), a.get("target_name", ""), a.get("alias", "")) for a in aliases}
+        # 作用域必须与 _stamp 写入时一致：此前 prune_* 不收 scope、仓储层硬编码 ''
+        # ——scoped 构建的 prune 扫不到自己的行（暗断点）。范例不在此列：其源是
+        # 迁移/持续训练而非本配置，配置 prune 会把范例全集误删（差异删由迁移入口做）。
+        scope = (self._tenant_id, self._workspace_id, self._datasource_id)
         stats = {
-            "columns_deleted": await self._meta_repo.prune_columns(column_keys),
-            "metrics_deleted": await self._meta_repo.prune_metrics(metric_keys),
-            "values_deleted": await self._meta_repo.prune_values(value_keys),
-            "relations_deleted": await self._meta_repo.prune_relations(relation_keys),
-            "aliases_deleted": await self._meta_repo.prune_aliases(alias_keys),
+            "columns_deleted": await self._meta_repo.prune_columns(column_keys, *scope),
+            "metrics_deleted": await self._meta_repo.prune_metrics(metric_keys, *scope),
+            "values_deleted": await self._meta_repo.prune_values(value_keys, *scope),
+            "relations_deleted": await self._meta_repo.prune_relations(relation_keys, *scope),
+            "aliases_deleted": await self._meta_repo.prune_aliases(alias_keys, *scope),
         }
         logger.info("stale meta pruned: %s", stats)
         return stats
