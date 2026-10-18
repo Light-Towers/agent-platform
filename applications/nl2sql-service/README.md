@@ -42,6 +42,12 @@ python -m nl2sql_service.scripts.build_meta_knowledge --dsn "$META_DB_DSN" \
 
 # 启动 API server
 uvicorn nl2sql_service.api.server:app --host 0.0.0.0 --port 8000
+# 或安装后用 console script（读 Settings.host/port）
+nl2sql-service
+
+# 就绪探针（k8s readinessProbe）：meta/dw 两池 SELECT 1，任一不可用 503
+curl http://localhost:8000/ready
+# /health 是共享契约（恒 healthy、不探池），两者用途不同不要合并
 
 # 查询（元知识走预置配置库）
 curl -X POST http://localhost:8000/api/query -H 'Content-Type: application/json' -d '{"query": "统计上个月销售额"}'
