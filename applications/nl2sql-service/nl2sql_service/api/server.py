@@ -7,6 +7,7 @@ from fastapi import FastAPI, Request
 from shared_schemas import HealthResponse, HealthStatus
 
 from nl2sql_service.api.dependencies import lifespan
+from nl2sql_service.api.routers.pools_router import router as pools_router
 from nl2sql_service.api.routers.query_router import router
 
 
@@ -25,6 +26,7 @@ def create_app() -> FastAPI:
     # 真正的「按断言隔离数据」需要先定义本服务的租户作用域（见方案 §5.2，待拍板）。
     mount_identity_gate(app, "nl2sql-service")
     app.include_router(router)
+    app.include_router(pools_router)
     app.get("/health", response_model=HealthResponse)(handle_health)
     return app
 
