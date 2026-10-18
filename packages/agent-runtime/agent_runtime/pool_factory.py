@@ -5,7 +5,8 @@
 默认值）。上移至此的理由是 AGENTS.md §90「单一实现：逻辑收敛 kernel，不在各 app
 复制」——连接配额 / 超时 / 只读的解释不能每个服务一份，一家漏 `statement_timeout`
 就是一家会挂死。此前平台内已有连接层复制品三例（nl2sql 自建池工厂、
-`agent_server/sql/pipeline.py:76` 每次新建连接、`vector_backend.py:253` asyncpg
+`agent_server/sql/pipeline.py:76` 每次新建连接（该模块已随 agent_server/sql
+退役删除，ADR-0011 §7）、`vector_backend.py:253` asyncpg
 另建一池），本件是收敛的第一步。
 
 固化审计三结论：
@@ -18,8 +19,8 @@
    排队到上限即 `TooManyRequests` 快速失败，比无限新建连接可排查得多。
 2. **连接级无防线**：只读若只靠会话级 `SET default_transaction_read_only = on`
    可被绕过重置。本工厂在建连参数里就下发 `-c default_transaction_read_only=on`
-   （与 `agent_server/sql/pipeline.py:78` 同款）——连接一出生就是只读，
-   不依赖任何后续 SET。注意真正的第一道防线永远是账号级 `GRANT SELECT ONLY`。
+   （与已退役的 `agent_server/sql/pipeline.py:78` 同款思路）——连接一出生就是
+   只读，不依赖任何后续 SET。注意真正的第一道防线永远是账号级 `GRANT SELECT ONLY`。
 3. **不可观测**：`pool.get_stats()` 的计数器此前没有任何出口。
    `pool_stats()` 派生 in_use / utilization，供各服务挂自己的观测端点。
 

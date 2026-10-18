@@ -8,8 +8,9 @@ app 不直接实现 embedding 逻辑（避免与子项目各自为政），仅�
   - ``embedding_mode=remote`` 或配了 ``embedding_api_key`` → 通用远程（OpenAI 兼容 /embeddings）
   - 否则 → 本地 sentence-transformers（BAAI/bge-small-zh-v1.5，512 维）
 
-公开 API 保持 ``embed_texts`` / ``embed_query``（async），供 store.py / schema_store.py /
-routes.py 直接 import，调用方零改动。
+公开 API 保持 ``embed_texts`` / ``embed_query``（async），供 store.py /
+routes.py 直接 import，调用方零改动。（sql 训练三件套的嵌入调用方已随
+agent_server/sql 退役移交 nl2sql-service，见 ADR-0011 §7。）
 """
 
 import os

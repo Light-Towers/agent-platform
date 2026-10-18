@@ -164,15 +164,18 @@ def test_whitelisted_system_tables_have_reason():
 # ---------------------------------------------------------------------------
 
 # 扫描范围：真正对 corpus / memories 发 SQL 的模块。
+# 2026-10-18（ADR-0011 §7）：agent_server/sql/schema_store.py 随该路退役删除，
+# 其隔离职责移交 nl2sql-service——扫描面改为 nl2sql 的 meta 仓储（三列作用域
+# 谓词在同一常量里成对出现，契约未断，只是换了承载文件）。
 SQL_SOURCE_SCAN = [
     "applications/agent_server/rag/store.py",
-    "applications/agent_server/sql/schema_store.py",
+    "applications/nl2sql-service/nl2sql_service/repositories/postgres/meta/meta_repository.py",
     "packages/agent-core/agent_core/memory/typed.py",
     "packages/agent-runtime/agent_runtime/workspace_registry.py",
 ]
 
 # 含归属/边界谓词特征的实际 SQL 关键字（排除文档/日志字符串误报）。
-_TABLE_TOKENS = ("chunks", "sql_ddl", "sql_docs", "sql_examples", "memories", "workspaces")
+_TABLE_TOKENS = ("chunks", "sql_ddl", "sql_docs", "sql_examples", "memories", "workspaces", "nl2sql_")
 _HAS_WS_PRED = re.compile(r"workspace_id\s*=")
 
 
