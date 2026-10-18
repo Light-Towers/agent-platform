@@ -42,7 +42,9 @@ tokenizer = [
 ]
 
 [project.scripts]
-nl2sql-service = "nl2sql_service.scripts.build_meta_knowledge:main"
+# Q26②：指向 API server 入口。此前指向空壳构建 CLI，装完包按命令名启动
+# 得到空转脚本；构建 CLI 仍走 python -m nl2sql_service.scripts.build_meta_knowledge。
+nl2sql-service = "nl2sql_service.api.server:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["nl2sql_service"]
