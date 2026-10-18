@@ -34,6 +34,8 @@ class MetaKnowledgeService:
         tokenizer: str | None = None,
         vector_dim: int | None = None,
         datasource_id: str = "",
+        tenant_id: str = "",
+        workspace_id: str = "",
     ) -> None:
         self._meta_repo = meta_repo
         self._embedder = embedder
@@ -45,11 +47,19 @@ class MetaKnowledgeService:
         # 与 DDL 的 scope 默认 '' 一致）；CLI 显式传 settings.datasource_id 时
         # 写入，召回侧的 datasource 过滤才匹配得上（否则召回恒空）。
         self._datasource_id = datasource_id
+        # P1-1 隔离：tenant/workspace 作用域（A 方案前置）。默认 '' = 单租户，
+        # 与 DDL scope 默认 '' 一致；多租户构建显式传入，召回侧才隔离到该租户。
+        self._tenant_id = tenant_id
+        self._workspace_id = workspace_id
 
     def _stamp(self, data: dict[str, Any]) -> dict[str, Any]:
-        """把 datasource_id 写进 data（_upsert 的 row.update(data) 会覆盖 scope 默认 ''）。"""
+        """把作用域列写进 data（_upsert 的 row.update(data) 会覆盖 scope 默认 ''）。"""
         if self._datasource_id:
             data["datasource_id"] = self._datasource_id
+        if self._tenant_id:
+            data["tenant_id"] = self._tenant_id
+        if self._workspace_id:
+            data["workspace_id"] = self._workspace_id
         return data
 
     async def build_from_tables(self, tables: list[dict[str, Any]]) -> dict[str, int]:

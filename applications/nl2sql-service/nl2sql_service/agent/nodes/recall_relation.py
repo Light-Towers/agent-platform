@@ -19,5 +19,9 @@ async def recall_relation(state: dict[str, Any]) -> dict[str, Any]:
         return {"relations": []}
 
     datasource_id = state.get("datasource_id", "")
-    relations = await ctx.meta_repository.list_relations(datasource_id)
+    tenant_id = state.get("tenant_id", "")
+    workspace_id = state.get("workspace_id", "")
+    relations = await ctx.meta_repository.list_relations(
+        datasource_id, tenant_id=tenant_id, workspace_id=workspace_id
+    )
     return {"relations": relations}

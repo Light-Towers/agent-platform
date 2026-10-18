@@ -24,7 +24,9 @@ async def recall_value(state: dict[str, Any]) -> dict[str, Any]:
     # 码表字面检索（P0-5①）：不再走 ANN / 中文全文模糊；自由文本型取值的
     # 模糊匹配由只读探针（P0-9）在源侧完成。embedding 不再下传。
     datasource_id = state.get("datasource_id", "")
-    filters = (("datasource_id", datasource_id),) if datasource_id else ()
+    tenant_id = state.get("tenant_id", "")
+    workspace_id = state.get("workspace_id", "")
+    filters = (("tenant_id", tenant_id), ("workspace_id", workspace_id), ("datasource_id", datasource_id))
     values = await ctx.value_repository.recall(
         keywords,
         top_k=state.get("retrieval_top_k", 10),
