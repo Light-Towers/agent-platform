@@ -69,6 +69,8 @@ async def main_async(dsn: str, config_path: str, prune: bool = False) -> dict[st
     tables = tables_from_config(config)
     metrics = [m.model_dump() for m in config.metrics]
     values = [v.model_dump() for v in config.values]
+    relations = [r.model_dump() for r in config.relations]
+    aliases = [a.model_dump() for a in config.aliases]
 
     pg = PostgresClientManager(
         dsn,
@@ -96,9 +98,11 @@ async def main_async(dsn: str, config_path: str, prune: bool = False) -> dict[st
             "columns": await service.build_from_tables(tables),
             "metrics": await service.build_from_metrics(metrics),
             "values": await service.build_from_values(values),
+            "relations": await service.build_from_relations(relations),
+            "aliases": await service.build_from_aliases(aliases),
         }
         if prune:
-            report["pruned"] = await service.prune(tables, metrics, values)
+            report["pruned"] = await service.prune(tables, metrics, values, relations, aliases)
     finally:
         await pg.close()
     report["dsn"] = redact_dsn(dsn)
@@ -107,14 +111,15 @@ async def main_async(dsn: str, config_path: str, prune: bool = False) -> dict[st
 
 def _print_report(report: dict[str, Any]) -> None:
     print(f"元知识构建报告（{report.get('dsn', '')}）：")
-    for name in ("columns", "metrics", "values"):
+    for name in ("columns", "metrics", "values", "relations", "aliases"):
         stats = report.get(name) or {}
         print(f"  {name}: inserted={stats.get('inserted', 0)} updated={stats.get('updated', 0)}")
     if "pruned" in report:
         p = report["pruned"]
         print(
-            f"  pruned: columns={p['columns_deleted']} "
-            f"metrics={p['metrics_deleted']} values={p['values_deleted']}"
+            f"  pruned: columns={p['columns_deleted']} metrics={p['metrics_deleted']} "
+            f"values={p['values_deleted']} relations={p['relations_deleted']} "
+            f"aliases={p['aliases_deleted']}"
         )
 
 

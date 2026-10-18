@@ -118,17 +118,57 @@ class MetaKnowledgeService:
         logger.info("value meta built: %s", stats)
         return stats
 
+    async def build_from_relations(self, relations: list[dict[str, Any]]) -> dict[str, int]:
+        """关系声明写入（§5.14-R2）。"""
+        stats = {"inserted": 0, "updated": 0}
+        for rel in relations:
+            data = {
+                "left_table": rel.get("left_table", ""),
+                "left_column": rel.get("left_column", ""),
+                "right_table": rel.get("right_table", ""),
+                "right_column": rel.get("right_column", ""),
+                "relation_type": rel.get("relation_type", "many_to_one"),
+                "note": rel.get("note", ""),
+            }
+            if await self._meta_repo.save_relation(data):
+                stats["inserted"] += 1
+            else:
+                stats["updated"] += 1
+        logger.info("relation meta built: %s", stats)
+        return stats
+
+    async def build_from_aliases(self, aliases: list[dict[str, Any]]) -> dict[str, int]:
+        """别名声明写入（§5.14-R2；P0-5 别名精确匹配的登记处）。"""
+        stats = {"inserted": 0, "updated": 0}
+        for item in aliases:
+            data = {
+                "target_kind": item.get("target_kind", ""),
+                "target_name": item.get("target_name", ""),
+                "alias": item.get("alias", ""),
+                "source": item.get("source", "human"),
+            }
+            if await self._meta_repo.save_alias(data):
+                stats["inserted"] += 1
+            else:
+                stats["updated"] += 1
+        logger.info("alias meta built: %s", stats)
+        return stats
+
     async def prune(
         self,
         tables: list[dict[str, Any]],
         metrics: list[dict[str, Any]],
         values: list[dict[str, Any]],
+        relations: list[dict[str, Any]] | None = None,
+        aliases: list[dict[str, Any]] | None = None,
     ) -> dict[str, int]:
         """删除源里已不存在的行（按 tenant/workspace/datasource 作用域）。
 
         与 upsert 合起来才是完整的幂等重建：只 upsert 不 prune，被删的取值
         永远留在索引里（H3 的另一半）。
         """
+        relations = relations or []
+        aliases = aliases or []
         column_keys = {
             (t.get("table_name", ""), c.get("column_name", ""))
             for t in tables
@@ -136,10 +176,17 @@ class MetaKnowledgeService:
         }
         metric_keys = {m.get("metric_name", "") for m in metrics}
         value_keys = {(v.get("column_name", ""), v.get("value", "")) for v in values}
+        relation_keys = {
+            (r.get("left_table", ""), r.get("left_column", ""), r.get("right_table", ""), r.get("right_column", ""))
+            for r in relations
+        }
+        alias_keys = {(a.get("target_kind", ""), a.get("target_name", ""), a.get("alias", "")) for a in aliases}
         stats = {
             "columns_deleted": await self._meta_repo.prune_columns(column_keys),
             "metrics_deleted": await self._meta_repo.prune_metrics(metric_keys),
             "values_deleted": await self._meta_repo.prune_values(value_keys),
+            "relations_deleted": await self._meta_repo.prune_relations(relation_keys),
+            "aliases_deleted": await self._meta_repo.prune_aliases(alias_keys),
         }
         logger.info("stale meta pruned: %s", stats)
         return stats

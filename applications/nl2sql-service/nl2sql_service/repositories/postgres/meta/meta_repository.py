@@ -27,11 +27,24 @@ _SCOPE_COLS = ("tenant_id", "workspace_id", "datasource_id")
 _COLUMN_TABLE = ("column_info", ("tenant_id", "workspace_id", "datasource_id", "table_name", "column_name"), ("table_comment", "column_comment", "data_type", "embedding"))
 _METRIC_TABLE = ("metric_info", ("tenant_id", "workspace_id", "datasource_id", "metric_name"), ("metric_desc", "metric_expr", "embedding"))
 _VALUE_TABLE = ("value_info", ("tenant_id", "workspace_id", "datasource_id", "column_name", "value"), ("value_desc", "search_text", "embedding"))
+#: 关系/别名（§5.14-R2）：001 DDL 的 uq_nl2sql_relation / uq_nl2sql_alias 即冲突键
+_RELATION_TABLE = (
+    "relation_info",
+    ("tenant_id", "workspace_id", "datasource_id", "left_table", "left_column", "right_table", "right_column"),
+    ("relation_type", "note"),
+)
+_ALIAS_TABLE = (
+    "alias_info",
+    ("tenant_id", "workspace_id", "datasource_id", "target_kind", "target_name", "alias"),
+    ("source",),
+)
 
 #: 各表的自然键（= 唯一键去掉作用域列）：prune 的 NOT IN 比较目标。
 _COLUMN_NATURAL = ("table_name", "column_name")
 _METRIC_NATURAL = ("metric_name",)
 _VALUE_NATURAL = ("column_name", "value")
+_RELATION_NATURAL = ("left_table", "left_column", "right_table", "right_column")
+_ALIAS_NATURAL = ("target_kind", "target_name", "alias")
 
 
 class MetaRepository:
@@ -56,6 +69,14 @@ class MetaRepository:
         """取值行 upsert（search_text 必须由构建方写入，见模块 docstring）；返回插入/更新。"""
         return await self._upsert(_VALUE_TABLE, data)
 
+    async def save_relation(self, data: dict[str, Any]) -> bool:
+        """关系行 upsert（§5.14-R2）。"""
+        return await self._upsert(_RELATION_TABLE, data)
+
+    async def save_alias(self, data: dict[str, Any]) -> bool:
+        """别名行 upsert（§5.14-R2）。"""
+        return await self._upsert(_ALIAS_TABLE, data)
+
     async def prune_columns(self, keep: set[tuple[str, str]]) -> int:
         """删除作用域内不在 keep 的列行（keep = {(table_name, column_name)}）。"""
         return await self._prune(_COLUMN_TABLE[0], _COLUMN_NATURAL, keep)
@@ -71,6 +92,39 @@ class MetaRepository:
     async def prune_values(self, keep: set[tuple[str, str]]) -> int:
         """删除作用域内不在 keep 的取值行（keep = {(column_name, value)}）。"""
         return await self._prune(_VALUE_TABLE[0], _VALUE_NATURAL, keep)
+
+    async def prune_relations(self, keep: set[tuple[str, str, str, str]]) -> int:
+        """删除作用域内不在 keep 的关系行（keep = {(left_table, left_column, right_table, right_column)}）。"""
+        return await self._prune(_RELATION_TABLE[0], _RELATION_NATURAL, keep)
+
+    async def prune_aliases(self, keep: set[tuple[str, str, str]]) -> int:
+        """删除作用域内不在 keep 的别名行（keep = {(target_kind, target_name, alias)}）。"""
+        return await self._prune(_ALIAS_TABLE[0], _ALIAS_NATURAL, keep)
+
+    async def list_relations(self, datasource_id: str = "") -> list[dict[str, Any]]:
+        """关系全集（R5：查询路径只读冻结集，服务期零人工）。"""
+        sql = (
+            f"SELECT left_table, left_column, right_table, right_column, relation_type, note "
+            f"FROM {self._prefix}relation_info "
+            f"WHERE tenant_id = %s AND workspace_id = %s AND datasource_id = %s"
+        )
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(sql, ("", "", datasource_id))
+            rows = await cur.fetchall()
+            return [dict(r._mapping) for r in rows]
+
+    async def list_aliases(self, datasource_id: str = "") -> list[dict[str, Any]]:
+        """别名全集（P0-5 别名精确匹配主路的查询对象；机提未确认不参与召回）。"""
+        sql = (
+            f"SELECT target_kind, target_name, alias, source "
+            f"FROM {self._prefix}alias_info "
+            f"WHERE tenant_id = %s AND workspace_id = %s AND datasource_id = %s "
+            f"AND source = 'human'"
+        )
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(sql, ("", "", datasource_id))
+            rows = await cur.fetchall()
+            return [dict(r._mapping) for r in rows]
 
     async def list_columns(self, datasource_id: str = "") -> list[dict[str, Any]]:
         """库侧列指纹（P0-3 漂移检测的比对基线）。"""

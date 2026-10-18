@@ -52,6 +52,21 @@ _VALUES = [
     {"column_name": "customers.customer_name", "value": "VIP", "value_desc": "VIP 客户"},
     {"column_name": "order_status", "value": "已支付", "value_desc": ""},
 ]
+#: §5.14-R1 轻量声明：关系（不造 DSL）+ 别名（P0-5 别名精确匹配的登记处）
+_RELATIONS = [
+    {
+        "left_table": "orders",
+        "left_column": "customer_id",
+        "right_table": "customers",
+        "right_column": "customer_id",
+        "relation_type": "many_to_one",
+        "note": "同名不同义时以声明为准",
+    }
+]
+_ALIASES = [
+    {"target_kind": "metric", "target_name": "销售额", "alias": "GMV", "source": "human"},
+    {"target_kind": "column", "target_name": "orders.amount", "alias": "成交金额", "source": "human"},
+]
 
 
 # ---------------------------------------------------------------------------
@@ -170,6 +185,8 @@ async def _build_all(service: MetaKnowledgeService) -> dict[str, dict[str, int]]
         "columns": await service.build_from_tables(copy.deepcopy(_TABLES)),
         "metrics": await service.build_from_metrics(copy.deepcopy(_METRICS)),
         "values": await service.build_from_values(copy.deepcopy(_VALUES)),
+        "relations": await service.build_from_relations(copy.deepcopy(_RELATIONS)),
+        "aliases": await service.build_from_aliases(copy.deepcopy(_ALIASES)),
     }
 
 
@@ -196,6 +213,10 @@ async def test_rebuild_twice_keeps_rows_and_content_identical():
     assert second["columns"] == {"inserted": 0, "updated": 3}
     assert second["metrics"] == {"inserted": 0, "updated": 1}
     assert second["values"] == {"inserted": 0, "updated": 2}
+    assert second["relations"] == {"inserted": 0, "updated": 1}
+    assert second["aliases"] == {"inserted": 0, "updated": 2}
+    assert len(pool.rows("nl2sql_relation_info")) == 1
+    assert len(pool.rows("nl2sql_alias_info")) == 2
 
 
 # ---------------------------------------------------------------------------
@@ -229,9 +250,17 @@ async def test_prune_removes_rows_absent_from_source():
 
     values = [_VALUES[0]]  # 源里删掉 order_status/已支付
     await service.build_from_values(values)
-    pruned = await service.prune(copy.deepcopy(_TABLES), copy.deepcopy(_METRICS), values)
+    pruned = await service.prune(
+        copy.deepcopy(_TABLES), copy.deepcopy(_METRICS), values, copy.deepcopy(_RELATIONS), copy.deepcopy(_ALIASES)
+    )
 
-    assert pruned == {"columns_deleted": 0, "metrics_deleted": 0, "values_deleted": 1}
+    assert pruned == {
+        "columns_deleted": 0,
+        "metrics_deleted": 0,
+        "values_deleted": 1,
+        "relations_deleted": 0,
+        "aliases_deleted": 0,
+    }
     assert [r["value"] for r in pool.rows("nl2sql_value_info")] == ["VIP"]
 
 
@@ -242,10 +271,18 @@ async def test_prune_with_empty_source_clears_scope():
 
     pruned = await service.prune([], [], [])
 
-    assert pruned == {"columns_deleted": 3, "metrics_deleted": 1, "values_deleted": 2}
+    assert pruned == {
+        "columns_deleted": 3,
+        "metrics_deleted": 1,
+        "values_deleted": 2,
+        "relations_deleted": 1,
+        "aliases_deleted": 2,
+    }
     assert pool.rows("nl2sql_column_info") == []
     assert pool.rows("nl2sql_metric_info") == []
     assert pool.rows("nl2sql_value_info") == []
+    assert pool.rows("nl2sql_relation_info") == []
+    assert pool.rows("nl2sql_alias_info") == []
 
 
 # ---------------------------------------------------------------------------
@@ -300,7 +337,8 @@ async def test_upsert_sql_uses_fixed_column_list_and_conflict_key():
     await _build_all(_service(pool))
 
     inserts = [s for s, _ in pool.history if s.startswith("INSERT INTO")]
-    assert len(inserts) == 6, f"三类共 6 行，实际 INSERT {len(inserts)} 次"
+    # 列 3 + 指标 1 + 值 2 + 关系 1 + 别名 2
+    assert len(inserts) == 9, f"五类共 9 行，实际 INSERT {len(inserts)} 次"
     for sql in inserts:
         assert "ON CONFLICT (" in sql and "RETURNING (xmax = 0)" in sql, f"upsert 形状不完整: {sql}"
         assert "updated_at = now()" in sql, f"DO UPDATE 缺 updated_at: {sql}"
@@ -319,6 +357,41 @@ async def test_upsert_sql_uses_fixed_column_list_and_conflict_key():
 
     value_insert = next(s for s in inserts if s.startswith("INSERT INTO nl2sql_value_info"))
     assert "search_text" in value_insert, "取值 upsert 必须写 search_text（value_tsvector 唯一输入）"
+
+    relation_insert = next(s for s in inserts if s.startswith("INSERT INTO nl2sql_relation_info"))
+    assert (
+        "ON CONFLICT (tenant_id, workspace_id, datasource_id, left_table, left_column, "
+        "right_table, right_column)" in relation_insert
+    ), "关系冲突键必须与 001 的 uq_nl2sql_relation 对齐"
+
+    alias_insert = next(s for s in inserts if s.startswith("INSERT INTO nl2sql_alias_info"))
+    assert (
+        "ON CONFLICT (tenant_id, workspace_id, datasource_id, target_kind, target_name, alias)" in alias_insert
+    ), "别名冲突键必须与 001 的 uq_nl2sql_alias 对齐"
+
+
+async def test_relations_and_aliases_write_without_embedding():
+    """关系/别名是精确匹配表（001 DDL 无 embedding 列）——不许画蛇添足加向量。"""
+    pool = _FakePool()
+    await _build_all(_service(pool, embedder=_StubEmbedder(8)))
+
+    for table in ("nl2sql_relation_info", "nl2sql_alias_info"):
+        rows = pool.rows(table)
+        assert rows, f"{table} 无写入"
+        for row in rows:
+            assert "embedding" not in row, f"{table} 不该有 embedding 列（001 DDL 没有）"
+
+
+async def test_relation_and_alias_prune_removes_absent_declarations():
+    pool = _FakePool()
+    service = _service(pool)
+    await _build_all(service)
+
+    # 源里删掉 GMV 别名
+    pruned = await service.prune([], [], [], copy.deepcopy(_RELATIONS), [_ALIASES[1]])
+    assert pruned["aliases_deleted"] == 1
+    assert [a["alias"] for a in pool.rows("nl2sql_alias_info")] == ["成交金额"]
+    assert len(pool.rows("nl2sql_relation_info")) == 1
 
 
 # ---------------------------------------------------------------------------
