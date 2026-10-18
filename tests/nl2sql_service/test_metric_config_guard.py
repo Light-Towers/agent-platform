@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pytest
-
 from nl2sql_service.services.metric_config_guard import (
     MetricConfigRejected,
     check_metric_config,
