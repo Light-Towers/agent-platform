@@ -57,6 +57,13 @@ class Settings(BaseLLMSettings):
     sql_read_only_guard: bool = True
     sql_max_rows: int = 1000  # 区别于 agent_server(100)：本服务为专职数据查询工具，结果由前端 UI 展示而非注入 LLM prompt
     sql_max_correct_retries: int = 3
+    # 进模型的结果体量上限（§5.11-V3 双上限分离）：与 sql_max_rows（返回 UI）分开——
+    # 1000 行宽表几十 MB 直接进 prompt 会爆上下文。行数/字节双阈值，先到先截。
+    sql_max_rows_for_prompt: int = 100
+    sql_prompt_max_bytes: int = 51200  # 50KB
+    # 聚合引导阈值（§5.11-V3-3）：候选表行数估值超过它时，生成 prompt 追加
+    # "优先聚合"引导。估值来自漂移检测的表统计（P0-3），无估值则不引导。
+    aggregation_row_threshold: int = 1_000_000
 
     # 分词器：jieba | bigram（jieba 需装可选 extra `[tokenizer]`，缺包时告警降级 bigram）
     tokenizer: str = "bigram"
@@ -140,6 +147,9 @@ def get_settings() -> Settings:
         overrides["sql_read_only_guard"] = app_yaml["sql"].get("read_only_guard", True)
         overrides["sql_max_rows"] = app_yaml["sql"].get("max_rows", 1000)
         overrides["sql_max_correct_retries"] = app_yaml["sql"].get("max_correct_retries", 3)
+        overrides["sql_max_rows_for_prompt"] = app_yaml["sql"].get("max_rows_for_prompt", 100)
+        overrides["sql_prompt_max_bytes"] = app_yaml["sql"].get("prompt_max_bytes", 51200)
+        overrides["aggregation_row_threshold"] = app_yaml["sql"].get("aggregation_row_threshold", 1_000_000)
     if "tokenizer" in app_yaml:
         overrides["tokenizer"] = app_yaml["tokenizer"].get("type", "bigram")
     if "meta_db" in meta_yaml:

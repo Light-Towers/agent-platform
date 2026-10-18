@@ -10,7 +10,25 @@ from typing import Any
 from nl2sql_service.agent.llm import LLMClient
 from nl2sql_service.agent.nodes._prompt import json_block, load_prompt, render
 
-_FALLBACK = "根据以下信息生成 SQL：\n{query}\n表信息：{table_infos}\n指标信息：{metric_infos}"
+_FALLBACK = "根据以下信息生成 SQL：\n{query}\n表信息：{table_infos}\n指标信息：{metric_infos}\n{aggregation_hint}"
+
+
+def build_aggregation_hint(state: dict[str, Any], threshold: int = 1_000_000) -> str:
+    """聚合引导（§5.11-V3-3）：候选表行数估值超阈值时提示优先聚合。
+
+    估值来自漂移检测的表统计（P0-3，QueryService 注入 `table_stats`）；
+    无估值返回空串——不猜、不硬编码"表很大"。
+    """
+    stats = state.get("table_stats") or []
+    big = [s.get("table_name", "") for s in stats if isinstance(s, dict) and (s.get("row_estimate") or 0) >= threshold]
+    if not big:
+        return ""
+    return (
+        "注意：以下候选表行数估值极大（"
+        + "、".join(big)
+        + "）。若问题关心的是总量/均值/计数等汇总语义，必须使用聚合函数（SUM/COUNT/AVG）"
+        "而非返回明细行；确需明细时必须带有效的过滤条件与 LIMIT。"
+    )
 
 
 def build_table_infos(state: dict[str, Any]) -> str:
@@ -45,6 +63,7 @@ async def generate_sql(state: dict[str, Any]) -> dict[str, Any]:
         metric_infos=json_block(state.get("metrics", [])),
         date_info=state.get("date_info", ""),
         db_info=state.get("extra_context") or "PostgreSQL（方言 postgres；只输出单条只读 SELECT）",
+        aggregation_hint=build_aggregation_hint(state),
     )
     sql = await llm.invoke(prompt)
     return {"sql": sql, "error": ""}

@@ -21,6 +21,11 @@ sql:
   read_only_guard: true
   max_rows: 1000
   max_correct_retries: 3
+  # 进模型的结果体量上限（§5.11-V3 双上限）：与 max_rows（返回 UI）分开
+  max_rows_for_prompt: 100
+  prompt_max_bytes: 51200
+  # 候选表行数估值超过该值时，生成 prompt 追加"优先聚合"引导（估值来自 P0-3 漂移检测）
+  aggregation_row_threshold: 1000000
 
 # 连接池配额与语句超时（psycopg_pool；2026-10-18 起建池走共享件 agent_runtime.pool_factory，
 # 配额口径见方案 §5.12.2）
