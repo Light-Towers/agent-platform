@@ -57,17 +57,21 @@ class _MetaRepo:
         self.column_queries: list[list[str]] = []
         self.metric_queries: list[list[str]] = []
 
-    async def list_aliases(self, datasource_id: str = "") -> list[dict]:
+    async def list_aliases(self, datasource_id: str = "", tenant_id: str = "", workspace_id: str = "") -> list[dict]:
         return self._aliases
 
-    async def list_relations(self, datasource_id: str = "") -> list[dict]:
+    async def list_relations(self, datasource_id: str = "", tenant_id: str = "", workspace_id: str = "") -> list[dict]:
         return self._relations
 
-    async def find_columns_by_names(self, names: list[str], datasource_id: str = "") -> list[dict]:
+    async def find_columns_by_names(
+        self, names: list[str], datasource_id: str = "", tenant_id: str = "", workspace_id: str = ""
+    ) -> list[dict]:
         self.column_queries.append(names)
         return [{"table_name": "orders", "column_name": "amount", "column_comment": "订单金额", "data_type": "numeric"}]
 
-    async def find_metrics_by_names(self, names: list[str], datasource_id: str = "") -> list[dict]:
+    async def find_metrics_by_names(
+        self, names: list[str], datasource_id: str = "", tenant_id: str = "", workspace_id: str = ""
+    ) -> list[dict]:
         self.metric_queries.append(names)
         return [{"metric_name": "销售额", "metric_desc": "订单金额合计", "metric_expr": "SUM(orders.amount)"}]
 

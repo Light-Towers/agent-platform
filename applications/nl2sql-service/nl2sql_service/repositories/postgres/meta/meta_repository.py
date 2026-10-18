@@ -102,7 +102,7 @@ class MetaRepository:
         """删除作用域内不在 keep 的别名行（keep = {(target_kind, target_name, alias)}）。"""
         return await self._prune(_ALIAS_TABLE[0], _ALIAS_NATURAL, keep)
 
-    async def list_relations(self, datasource_id: str = "") -> list[dict[str, Any]]:
+    async def list_relations(self, datasource_id: str = "", tenant_id: str = "", workspace_id: str = "") -> list[dict[str, Any]]:
         """关系全集（R5：查询路径只读冻结集，服务期零人工）。"""
         sql = (
             f"SELECT left_table, left_column, right_table, right_column, relation_type, note "
@@ -110,11 +110,11 @@ class MetaRepository:
             f"WHERE tenant_id = %s AND workspace_id = %s AND datasource_id = %s"
         )
         async with self._pool.connection() as conn:
-            cur = await conn.execute(sql, ("", "", datasource_id))
+            cur = await conn.execute(sql, (tenant_id, workspace_id, datasource_id))
             rows = await cur.fetchall()
             return [dict(r) for r in rows]
 
-    async def list_aliases(self, datasource_id: str = "") -> list[dict[str, Any]]:
+    async def list_aliases(self, datasource_id: str = "", tenant_id: str = "", workspace_id: str = "") -> list[dict[str, Any]]:
         """别名全集（P0-5 别名精确匹配主路的查询对象；机提未确认不参与召回）。"""
         sql = (
             f"SELECT target_kind, target_name, alias, source "
@@ -123,11 +123,11 @@ class MetaRepository:
             f"AND source = 'human'"
         )
         async with self._pool.connection() as conn:
-            cur = await conn.execute(sql, ("", "", datasource_id))
+            cur = await conn.execute(sql, (tenant_id, workspace_id, datasource_id))
             rows = await cur.fetchall()
             return [dict(r) for r in rows]
 
-    async def list_columns(self, datasource_id: str = "") -> list[dict[str, Any]]:
+    async def list_columns(self, datasource_id: str = "", tenant_id: str = "", workspace_id: str = "") -> list[dict[str, Any]]:
         """库侧列指纹（P0-3 漂移检测的比对基线）。"""
         sql = (
             f"SELECT table_name, column_name, column_comment, data_type "
@@ -135,7 +135,7 @@ class MetaRepository:
             f"WHERE tenant_id = %s AND workspace_id = %s AND datasource_id = %s"
         )
         async with self._pool.connection() as conn:
-            cur = await conn.execute(sql, ("", "", datasource_id))
+            cur = await conn.execute(sql, (tenant_id, workspace_id, datasource_id))
             rows = await cur.fetchall()
             return [dict(r) for r in rows]
 
@@ -169,7 +169,7 @@ class MetaRepository:
             count += 1
         return count
 
-    async def list_table_stats(self, datasource_id: str = "") -> list[dict[str, Any]]:
+    async def list_table_stats(self, datasource_id: str = "", tenant_id: str = "", workspace_id: str = "") -> list[dict[str, Any]]:
         """读表统计（QueryService 注入 state，驱动聚合引导）。"""
         sql = (
             f"SELECT table_name, row_estimate, column_count "
@@ -177,11 +177,11 @@ class MetaRepository:
             f"WHERE tenant_id = %s AND workspace_id = %s AND datasource_id = %s"
         )
         async with self._pool.connection() as conn:
-            cur = await conn.execute(sql, ("", "", datasource_id))
+            cur = await conn.execute(sql, (tenant_id, workspace_id, datasource_id))
             rows = await cur.fetchall()
             return [dict(r) for r in rows]
 
-    async def find_columns_by_names(self, names: list[str], datasource_id: str = "") -> list[dict[str, Any]]:
+    async def find_columns_by_names(self, names: list[str], datasource_id: str = "", tenant_id: str = "", workspace_id: str = "") -> list[dict[str, Any]]:
         """按 `table.column` 全名精确取列（P0-5 别名精确匹配主路的落点）。"""
         if not names:
             return []
@@ -195,13 +195,13 @@ class MetaRepository:
             f"WHERE tenant_id = %s AND workspace_id = %s AND datasource_id = %s "
             f"AND (table_name, column_name) IN (VALUES {values_sql})"
         )
-        params = ("", "", datasource_id, *[v for k in keys for v in k])
+        params = (tenant_id, workspace_id, datasource_id, *[v for k in keys for v in k])
         async with self._pool.connection() as conn:
             cur = await conn.execute(sql, params)
             rows = await cur.fetchall()
             return [dict(r) for r in rows]
 
-    async def find_metrics_by_names(self, names: list[str], datasource_id: str = "") -> list[dict[str, Any]]:
+    async def find_metrics_by_names(self, names: list[str], datasource_id: str = "", tenant_id: str = "", workspace_id: str = "") -> list[dict[str, Any]]:
         """按指标名精确取指标（P0-5 别名精确匹配主路的落点）。"""
         if not names:
             return []
@@ -213,7 +213,7 @@ class MetaRepository:
             f"AND metric_name IN ({placeholders})"
         )
         async with self._pool.connection() as conn:
-            cur = await conn.execute(sql, ("", "", datasource_id, *names))
+            cur = await conn.execute(sql, (tenant_id, workspace_id, datasource_id, *names))
             rows = await cur.fetchall()
             return [dict(r) for r in rows]
 
@@ -227,15 +227,17 @@ class MetaRepository:
     # -----------------------------------------------------------------------
     # 多轮会话状态（§5.13 M2/M6）与查询追溯（P0-4/H4）：002 表，参数化 + Json 适配
     # -----------------------------------------------------------------------
-    async def get_session(self, session_id: str, datasource_id: str = "") -> dict[str, Any] | None:
-        """读会话四元组 + 已确认问答对（M2/M6）；无行返回 None。"""
+    async def get_session(
+        self, session_id: str, datasource_id: str = "", tenant_id: str = "", workspace_id: str = ""
+    ) -> dict[str, Any] | None:
+        """读会话四元组 + 已确认问答对（M2/M6）；无行返回 None。按租户/工作区隔离。"""
         sql = (
             f"SELECT session_id, datasource_id, turn, quadruple, confirmed_pairs "
             f"FROM {self._prefix}session_state "
             f"WHERE tenant_id = %s AND workspace_id = %s AND session_id = %s AND datasource_id = %s"
         )
         async with self._pool.connection() as conn:
-            cur = await conn.execute(sql, ("", "", session_id, datasource_id))
+            cur = await conn.execute(sql, (tenant_id, workspace_id, session_id, datasource_id))
             row = await cur.fetchone()
         return dict(row) if row is not None else None
 
@@ -246,8 +248,10 @@ class MetaRepository:
         quadruple: dict[str, Any],
         confirmed_pairs: list[dict[str, Any]],
         turn: int,
+        tenant_id: str = "",
+        workspace_id: str = "",
     ) -> None:
-        """写会话四元组 + 已确认问答对（M4：唯一键含 datasource_id，换源即另一行）。"""
+        """写会话四元组 + 已确认问答对（M4：唯一键含 datasource_id，换源即另一行；租户/工作区隔离）。"""
         sql = (
             f"INSERT INTO {self._prefix}session_state "
             f"(tenant_id, workspace_id, session_id, datasource_id, turn, quadruple, confirmed_pairs, updated_at) "
@@ -259,7 +263,7 @@ class MetaRepository:
         async with self._pool.connection() as conn:
             await conn.execute(
                 sql,
-                ("", "", session_id, datasource_id, turn, Json(quadruple), Json(confirmed_pairs)),
+                (tenant_id, workspace_id, session_id, datasource_id, turn, Json(quadruple), Json(confirmed_pairs)),
             )
 
     async def insert_trace(self, trace: dict[str, Any]) -> None:

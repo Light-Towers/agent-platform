@@ -35,6 +35,13 @@ class Settings(BaseLLMSettings):
     # 业务数仓 schema 作用域（漂移检测 / 表统计按它扫；Doris 兼容 information_schema）
     dw_schema: str = "public"
 
+    # 租户/工作区默认作用域（P1-1 / A 方案前置）：无服务端断言、无请求体租户时
+    # 的兜底。默认 '' = 单租户 dev（匹配 DDL 的 tenant_id/workspace_id 默认 '' 行，
+    # 行为向后兼容）。多租户部署由身份门断言租户，此处留空即可；enforce 档下
+    # 不静默兜底（见 services/tenant_scope.resolve_scope）。
+    default_tenant: str = ""
+    default_workspace: str = ""
+
     # LLM 补充字段
     llm_max_retries: int = 3
 

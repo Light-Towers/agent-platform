@@ -39,12 +39,14 @@ async def inherit_context(state: dict[str, Any]) -> dict[str, Any]:
     ctx: DataAgentContext | None = state.get("context")
     meta = getattr(ctx, "meta_repository", None) if ctx is not None else None
     datasource_id = state.get("datasource_id", "")
+    tenant_id = state.get("tenant_id", "")
+    workspace_id = state.get("workspace_id", "")
 
     if meta is None:
         return {"turn": 1}
 
     try:
-        session = await meta.get_session(session_id, datasource_id)
+        session = await meta.get_session(session_id, datasource_id, tenant_id=tenant_id, workspace_id=workspace_id)
     except Exception:  # noqa: BLE001 - 002 未应用/库不可用都不该阻断查询
         logger.info("session load failed（002 未应用？），本轮按单轮处理", exc_info=True)
         return {"turn": 1}

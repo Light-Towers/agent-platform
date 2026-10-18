@@ -57,7 +57,14 @@ def tables_from_config(config: Any) -> list[dict[str, Any]]:
     return list(grouped.values())
 
 
-async def main_async(dsn: str, config_path: str, prune: bool = False, datasource_id: str = "") -> dict[str, Any]:
+async def main_async(
+    dsn: str,
+    config_path: str,
+    prune: bool = False,
+    datasource_id: str = "",
+    tenant_id: str = "",
+    workspace_id: str = "",
+) -> dict[str, Any]:
     from nl2sql_service.clients.embedding_client_manager import build_embedder
     from nl2sql_service.clients.postgres_client_manager import PostgresClientManager, redact_dsn
     from nl2sql_service.conf.settings import get_settings
@@ -68,6 +75,10 @@ async def main_async(dsn: str, config_path: str, prune: bool = False, datasource
     # P1-6：元知识按源分片。--datasource 缺省取 settings.datasource_id——与在线
     # 召回的 datasource 过滤同源，否则"建了一套、召回按另一个源过滤"恒空。
     ds_id = datasource_id or settings.datasource_id
+    # P1-1 隔离：tenant/workspace 作用域（A 方案前置）。缺省取 settings.default_*
+    # （单租户 dev = ''，与 DDL scope 默认一致）；多租户构建显式传，召回侧才隔离。
+    t_id = tenant_id or settings.default_tenant
+    w_id = workspace_id or settings.default_workspace
     config = load_metric_config(config_path)
     tables = tables_from_config(config)
     metrics = [m.model_dump() for m in config.metrics]
@@ -97,6 +108,8 @@ async def main_async(dsn: str, config_path: str, prune: bool = False, datasource
             tokenizer=settings.tokenizer,
             vector_dim=settings.vector_dim,
             datasource_id=ds_id,
+            tenant_id=t_id,
+            workspace_id=w_id,
         )
         report: dict[str, Any] = {
             "columns": await service.build_from_tables(tables),
@@ -147,8 +160,14 @@ def main(argv: list[str] | None = None) -> int:
         default="",
         help="datasource_id 作用域（P1-6；缺省取 Settings.datasource_id，与在线召回过滤同源）",
     )
+    parser.add_argument("--tenant", default="", help="tenant_id 作用域（P1-1 隔离；缺省取 Settings.default_tenant）")
+    parser.add_argument(
+        "--workspace", default="", help="workspace_id 作用域（P1-1；缺省取 Settings.default_workspace）"
+    )
     args = parser.parse_args(argv)
-    report = asyncio.run(main_async(args.dsn, args.config, args.prune, args.datasource))
+    report = asyncio.run(
+        main_async(args.dsn, args.config, args.prune, args.datasource, args.tenant, args.workspace)
+    )
     _print_report(report)
     return 0
 

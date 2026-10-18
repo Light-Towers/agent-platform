@@ -51,10 +51,21 @@ class QueryService:
         settings = get_settings()
         metric_config = kwargs.get("metric_config")
         datasource_id = kwargs.get("datasource_id")
-        # 多轮（§5.13 M1）：session_id/tenant_id 从请求读入并注入 state；
+        # 多轮（§5.13 M1）：session_id 从请求读入并注入 state；
         # 不传 session_id 时 inherit_context 走单轮零变更分支（逐字节一致）。
         session_id = (kwargs.get("session_id") or "").strip()
-        tenant_id = (kwargs.get("tenant_id") or "").strip()
+        # 隔离作用域（P1-1 / A 前置）：tenant 按 ADR-0007 服务端断言 > 请求体 >
+        # default_tenant 解析（不再裸信客户端 body）；workspace 同套优先级。
+        from nl2sql_service.services.tenant_scope import resolve_scope
+
+        scope = resolve_scope(
+            request_tenant=kwargs.get("tenant_id"),
+            request_workspace=kwargs.get("workspace_id"),
+            default_tenant=settings.default_tenant,
+            default_workspace=settings.default_workspace,
+        )
+        tenant_id = scope.tenant_id
+        workspace_id = scope.workspace_id
         # 数据源解析（P1-3/P1-4/P1-6）：请求显式选源；未知 id fail-fast，
         # 不静默回落默认源（串源比报错更糟）。无注册表（老部署/测试）回落默认串。
         registry = getattr(self._context, "datasources", None)
@@ -79,6 +90,7 @@ class QueryService:
             "llm": self._llm,
             "session_id": session_id,
             "tenant_id": tenant_id,
+            "workspace_id": workspace_id,
             "_start_perf": time.perf_counter(),
             "datasource_id": resolved_ds,
             "datasource_label": source_label,

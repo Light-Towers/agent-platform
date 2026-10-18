@@ -58,6 +58,8 @@ def build_trace(state: dict[str, Any], latency_ms: float) -> dict[str, Any]:
     result = state.get("result")
     rows = len(result) if isinstance(result, list) else 0
     return {
+        "tenant_id": state.get("tenant_id", ""),
+        "workspace_id": state.get("workspace_id", ""),
         "session_id": state.get("session_id", ""),
         "datasource_id": state.get("datasource_id", ""),
         "turn": int(state.get("turn") or 0),
@@ -114,6 +116,8 @@ async def finalize(state: dict[str, Any]) -> dict[str, Any]:
                 quadruple=build_quadruple(state),
                 confirmed_pairs=confirmed if isinstance(confirmed, list) else [],
                 turn=int(state.get("turn") or 1),
+                tenant_id=state.get("tenant_id", ""),
+                workspace_id=state.get("workspace_id", ""),
             )
         except Exception:  # noqa: BLE001 - 同上，旁路失败不fail请求
             logger.info("session upsert failed", exc_info=True)

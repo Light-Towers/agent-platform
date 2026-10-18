@@ -106,7 +106,7 @@ class TestInheritContextNode:
             {"query": "那上述呢", "session_id": "s1", "datasource_id": "other", "context": ctx}
         )
         assert out == {"turn": 1}
-        meta.get_session.assert_awaited_once_with("s1", "other")
+        meta.get_session.assert_awaited_once_with("s1", "other", tenant_id="", workspace_id="")
 
 
 class TestFinalizeNode:
