@@ -32,7 +32,8 @@ def build_attempted_block(attempted: list[dict[str, Any]] | None) -> str:
 async def correct_sql(state: dict[str, Any]) -> dict[str, Any]:
     sql = state.get("sql", "")
     error = state.get("error", "")
-    query = state.get("query", "")
+    # M5：纠正轮用 effective_query（与生成轮同一承接上下文），不少于生成轮
+    query = state.get("effective_query") or state.get("query", "")
     llm: LLMClient | None = state.get("llm")
     correct_count = state.get("correct_count", 0)
 

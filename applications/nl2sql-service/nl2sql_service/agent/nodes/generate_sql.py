@@ -118,7 +118,8 @@ def build_db_info(state: dict[str, Any]) -> str:
 
 
 async def generate_sql(state: dict[str, Any]) -> dict[str, Any]:
-    query = state.get("query", "")
+    # 多轮（M3）：生成用 effective_query（承接上文实体/时间），原始 query 不动
+    query = state.get("effective_query") or state.get("query", "")
     llm: LLMClient | None = state.get("llm")
 
     if llm is None or not llm.enabled:

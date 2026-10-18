@@ -7,7 +7,7 @@ from nl2sql_service.agent.llm import LLMClient
 
 
 async def filter_table(state: dict[str, Any]) -> dict[str, Any]:
-    query = state.get("query", "")
+    query = state.get("effective_query") or state.get("query", "")
     tables = state.get("tables", [])
     llm: LLMClient | None = state.get("llm")
 

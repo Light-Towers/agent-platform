@@ -5,6 +5,16 @@ from typing import Any, TypedDict
 
 class DataAgentState(TypedDict, total=False):
     query: str
+    # 多轮（§5.13）：session_id 不传 = 单轮（M1）；effective_query 是 M3 改写后的
+    # 承接查询（召回/生成用），原始 query 永不改写（trace 看前后）
+    session_id: str
+    tenant_id: str
+    turn: int
+    effective_query: str
+    inherit_quadruple: dict[str, Any]
+    substitutions: list[str]
+    # 请求起点（QueryService 注入，finalize 算 latency；非契约字段，下划线前缀）
+    _start_perf: float
     keywords: list[str]
     # 单次计算的查询向量（extract_keywords 写入，三路召回共享；P0-11⑤）
     query_embedding: list[float]
