@@ -1,4 +1,7 @@
-from agent_server.sql.guard import detect_dialect, validate_sql
+# guard 本体在 agent_core.sql.guard（平台共享件）；detect_dialect 随 agent_server/sql
+# 退役迁到 agent_server.db_dialect（2026-10-18，ADR-0011 §7）
+from agent_core.sql.guard import validate_sql
+from agent_server.db_dialect import detect_dialect
 
 
 def test_reject_non_select():

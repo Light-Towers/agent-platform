@@ -19,9 +19,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from fastapi import FastAPI
 from fastapi.testclient import TestClient
-
 from nl2sql_service.api.routers.ingest_router import ingest
 from nl2sql_service.api.schemas.ingest_schema import IngestExample, IngestRequest
 
@@ -214,10 +212,8 @@ async def test_ingest_endpoint_on_real_pg(patched_embedder):
         META_DB_DSN="..." uv run pytest applications/nl2sql-service/tests \\
             ::test_ingest_endpoint.py -k real_pg -q -s
     """
-    import nl2sql_service.clients.embedding_client_manager as ecm
 
     from nl2sql_service.api.server import create_app
-    from nl2sql_service.repositories.postgres.meta.meta_repository import MetaRepository
 
     settings_dsn = os.environ["META_DB_DSN"]
     app = create_app()

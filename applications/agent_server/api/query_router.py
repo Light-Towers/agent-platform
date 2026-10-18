@@ -46,7 +46,8 @@ async def query(
 
     # ADR-0006 T10/D4：使用 workspace_id 前解析其租户归属（首次引用自动注册，幂等）。
     # 读路径 best-effort：注册失败不阻断对话（数据召回仍由 (tenant_id, workspace_id)
-    # 谓词兜底隔离，见 rag/store.py / schema_store.py）；租户取 req.tenant_id 沿用现状。
+    # 谓词兜底隔离，见 rag/store.py；sql 训练三件套的同类隔离已随 agent_server/sql
+    # 退役移交 nl2sql-service，见 ADR-0011 §7）；租户取 req.tenant_id 沿用现状。
     if pool is not None:
         try:
             await resolve_workspace(pool, req.tenant_id or "default", req.workspace_id)
