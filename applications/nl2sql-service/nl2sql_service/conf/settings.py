@@ -102,6 +102,15 @@ class Settings(BaseLLMSettings):
     # 默认空 = 只注入系统日期。
     date_context_note: str = ""
 
+    # 负载隔离（P1-5 / S-6）：应用侧并发闸 + 每租户/用户限流。全 0 = 关闭
+    # （老部署逐字节一致）。Doris 侧 workload group 管不到应用层这条。
+    # query_max_concurrency：同时在跑的图执行上限，超出排队，排队超过
+    #   acquire_timeout 直接拒绝（快失败，连接池配额扛不住无限排队）。
+    # query_rate_limit_per_min：按 tenant_id/user_id 维度的每分钟请求上限。
+    query_max_concurrency: int = 0
+    query_rate_limit_per_min: int = 0
+    query_acquire_timeout: float = 5.0
+
     @property
     def meta_db_enabled(self) -> bool:
         return bool(self.meta_db_dsn)
@@ -182,6 +191,11 @@ def get_settings() -> Settings:
         overrides["aggregation_row_threshold"] = app_yaml["sql"].get("aggregation_row_threshold", 1_000_000)
     if "tokenizer" in app_yaml:
         overrides["tokenizer"] = app_yaml["tokenizer"].get("type", "bigram")
+    load_yaml = app_yaml.get("load_guard") or {}
+    if load_yaml:
+        overrides["query_max_concurrency"] = load_yaml.get("max_concurrency", 0)
+        overrides["query_rate_limit_per_min"] = load_yaml.get("rate_limit_per_min", 0)
+        overrides["query_acquire_timeout"] = load_yaml.get("acquire_timeout", 5.0)
     datasource_yaml = app_yaml.get("datasource") or {}
     if datasource_yaml:
         overrides["datasource_id"] = datasource_yaml.get("id", "dw")

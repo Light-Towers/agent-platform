@@ -22,6 +22,7 @@ class DataAgentContext:
         table_stats: list[dict[str, Any]] | None = None,
         value_resolver: Any = None,
         datasources: Any = None,
+        load_guard: Any = None,
     ) -> None:
         self.embedding_client = embedding_client
         self.column_repository = column_repository
@@ -36,3 +37,5 @@ class DataAgentContext:
         # 数据源注册表（P1-3/P1-4/P1-6）：请求 datasource_id → 方言/口径标签。
         # None = 未装配（老部署/测试），QueryService 回落单源默认。
         self.datasources = datasources
+        # 负载隔离（P1-5/S-6）：并发闸 + 限流。None = 关闭（全 0 配置）。
+        self.load_guard = load_guard

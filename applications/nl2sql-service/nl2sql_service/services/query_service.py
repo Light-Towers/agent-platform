@@ -10,6 +10,8 @@ from typing import Any
 
 from agent_core.logging import get_logger
 
+from nl2sql_service.services.load_guard import LoadRejected
+
 logger = get_logger(__name__)
 
 _WEEKDAYS = ("周一", "周二", "周三", "周四", "周五", "周六", "周日")
@@ -91,9 +93,21 @@ class QueryService:
                 if hasattr(metric_config, "to_recall_result")
                 else metric_config
             )
+        # 负载隔离（P1-5/S-6）：并发闸 + 限流包住整条图执行。限流/并发维度取
+        # tenant_id → user_id → 匿名（按最细可用身份，防单租户打满）。
+        load_guard = getattr(self._context, "load_guard", None)
+        rate_key = kwargs.get("tenant_id") or kwargs.get("user_id") or "anon"
         try:
-            result = await self._graph.ainvoke(state)
+            if load_guard is None:
+                result = await self._graph.ainvoke(state)
+            else:
+                async with load_guard.slot(rate_key):
+                    result = await self._graph.ainvoke(state)
             return self._build_response(result)
+        except LoadRejected as exc:
+            # 负载拒绝：对外可读、可重试，不算系统故障（不走 500）。
+            logger.info("query rejected by load guard: %s", exc.message)
+            return {"answer": "", "error": exc.message, "fallback": True}
         except Exception:
             logger.exception("query service failed")
             return {"answer": "", "error": "internal error", "fallback": True}

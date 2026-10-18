@@ -20,7 +20,7 @@ async def filter_table(state: dict[str, Any]) -> dict[str, Any]:
         try:
             filtered = json.loads(result)
             if isinstance(filtered, list):
-                return {"tables": filtered}
+                return {"tables": filtered, "llm_calls": state.get("llm_calls", 0) + 1}
         except (json.JSONDecodeError, TypeError):
             pass
 

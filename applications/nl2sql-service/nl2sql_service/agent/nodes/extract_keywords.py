@@ -26,9 +26,11 @@ async def extract_keywords(state: dict[str, Any]) -> dict[str, Any]:
     tokenizer: str = state.get("tokenizer", "bigram")
 
     keywords: list[str] = []
+    llm_calls = 0
     if llm is not None and llm.enabled:
         prompt = f"从以下问题中抽取关键词，输出 JSON 数组：\n{query}"
         result = await llm.invoke(prompt)
+        llm_calls = 1
         try:
             keywords = json.loads(result)
         except (json.JSONDecodeError, TypeError):
@@ -48,4 +50,4 @@ async def extract_keywords(state: dict[str, Any]) -> dict[str, Any]:
             logger.warning("query embedding failed, recall falls back to fulltext", exc_info=True)
             embedding = None
 
-    return {"keywords": keywords, "query_embedding": embedding}
+    return {"keywords": keywords, "query_embedding": embedding, "llm_calls": state.get("llm_calls", 0) + llm_calls}
