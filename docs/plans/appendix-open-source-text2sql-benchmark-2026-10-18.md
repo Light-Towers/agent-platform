@@ -36,7 +36,7 @@
 
 | # | 来源 | 设计 | 落到我们哪里 | 动作 |
 |---|---|---|---|---|
-| A1 | WrenAI | **MDL 语义层**：Models / Columns / Relationships / Calculated fields / Views / Cubes / Metrics，YAML 存放、Git 友好、可审查 | **P1-6 语义层终态参照**；§5.12.1 归属表"语义层 store"行 | P1-6 设计时以 MDL 三件套（模型-关系-指标）为验收参照系；我们的 YAML 元知识库补"关系与指标显式化"，**不另造 DSL** |
+| A1 | WrenAI | **MDL 语义层**：Models / Columns / Relationships / Calculated fields / Views / Cubes / Metrics，YAML 存放、Git 友好、可审查 | **P1-6 语义层终态参照**；§5.12.1 归属表"语义层 store"行 | P1-6 设计时以 MDL 三件套（模型-关系-指标）为验收参照系；我们的元知识作者层（YAML 模板）补"关系与指标显式化"，**不另造 DSL** |
 | A2 | WrenAI | **dry-plan**（展开 SQL 不执行）/ **dry-run**（连真实库校验但不返回数据） | §5.8 探针契约的零成本校验形态；Q24 方言重写风险的验证手段 | dry-run 原语登记为 P0-8 实施可选项（sqlglot 展开 + EXPLAIN 校验已有雏形，MDL 的"展开不执行"是产品化口径） |
 | A3 | WrenAI | **row limits + structured errors + 策略检查（严格模式/禁用函数）** | §5.11 双上限（已设计）+ `plan-m11-exception-classification.md` | 双上限与结构化错误码已有专项，**无需新增**；"禁用函数清单"可作 guard 扩展的候选输入 |
 | A4 | DB-GPT | **字段级脱敏**：自动识别身份证、手机号并掩码 | §5.9-L3 结果层投影；`sensitive_columns` 声明 | 脱敏"识别规则库"的行业口径参考：P1-2 的 `linkable` 闸门清单可直接作 L2 黑名单种子，一份声明两处消费的设计不变 |
@@ -44,7 +44,7 @@
 | A6 | Chat2DB | **schema-only 上下文**：只传表结构给 LLM，业务数据不出库 | §5.9 第二层（出站内容控制）的行业口径 | 作为对外叙事口径登记（"架构与数据隔离"已有实践同侪） |
 | A7 | Chat2DB / text2sql-skill | 结果集行数上限（Chat2DB"只读前 500 行"配置；Go 项目 `max_rows: 1000`） | `sql_max_rows = 1000`（§5.11） | **第三方交叉验证**：1000 行上限是行业常见保守值，维持不变有外部同侪支撑 |
 | A8 | Vanna | **训练闭环**：错题 → 修正 question-SQL 对入库，同类问题对全员修复 | P1-6 可回答文档/范例回流 | "错题入库"反馈环与 WrenAI"self-learning（ Coming Soon 状态）"同思路——登记为 P1-6 的可选项，不做承诺 |
-| A9 | SQLBot | 术语库 + SQL 示例 + 自定义提示词的知识库形态 | nl2sql YAML 元知识库 | **同构验证**：三项目收敛到同一知识形态，支持 Q25"收敛"判断（见 §4） |
+| A9 | SQLBot | 术语库 + SQL 示例 + 自定义提示词的知识库形态 | nl2sql 元知识服务层（meta 库；作者格式 YAML/API 入参） | **同构验证**：三项目收敛到同一知识形态，支持 Q25"收敛"判断（见 §4） |
 
 ### 3.1 深读：五个设计的根因 → 我们的差距 → 落地（2026-10-18 补充）
 
@@ -62,7 +62,7 @@
 - **根因**：语义知识（DDL/文档/范例）是长期资产，LLM 与 embedding 都会换代——绑死就等于换代=全库重灌。
 - **设计**：Vanna"换 LLM 不丢 training"（知识在向量库，LLM 只是读者）；DB-GPT SMMF 把模型管理层与知识层分离。
 - **没人说的细分（对我们要用的部分）**：换 **LLM** 不丢（prompt 是文本）；换 **embedding** 必须重建向量——五项目无一解决。唯一出路是分层：**原文层**（模型无关、永久）+ **向量层**（可重建派生）。
-- **我们的现状一半对一半错**：YAML 元知识库=原文层（✓）、meta 向量=派生层（✓）；但 Q18 的 1536 vs 1024 未定，选错一次=全库重灌。
+- **我们的现状一半对一半错**：元知识作者层（YAML 模板）=原文层（✓）、meta 向量=派生层（✓）；但 Q18 的 1536 vs 1024 未定，选错一次=全库重灌。
 - **落地**：Q18 答案方向=YAML 事实源 + 向量派生 + 灌库幂等可重跑（P0-2 接住）。
 
 #### D-C. 推荐问题与追问生成（WrenAI；产品层）
@@ -96,7 +96,7 @@
 
 外部证据进一步支持**收敛而非并存**：
 
-1. **同范式证据**：Vanna 三件套（DDL/documentation/question-SQL）、SQLBot 知识库（术语/示例/提示词）、WrenAI 上下文层（MDL/instructions.md/queries.yml）——三个独立项目收敛到同一形态。仓内 `agent_server/sql/schema_store.py` 的三件套正是 Vanna 形态，与 nl2sql YAML 元知识库**差异只在载体（PG 表 vs YAML 文件）与流水线长度**，不是两种架构。
+1. **同范式证据**：Vanna 三件套（DDL/documentation/question-SQL）、SQLBot 知识库（术语/示例/提示词）、WrenAI 上下文层（MDL/instructions.md/queries.yml）——三个独立项目收敛到同一形态。仓内 `agent_server/sql/schema_store.py` 的三件套正是 Vanna 形态且**同样落 PG 表**（`sql_ddl`/`sql_docs`/`sql_examples`，:24-48），与 nl2sql 元知识体系（四件套 + relations/aliases）**差异只在知识形状与流水线长度**，不是两种架构。（**2026-10-18 撤回**：本行原写"差异只在载体（PG 表 vs YAML 文件）"——实读两侧服务层都是 PG 表，载体对比不成立；术语已按 plan §5.15 三态改正。）
 2. **Vanna 的终局警示**：该范式的最流行开源实现已归档并转向"治理能力收费"——免费开源撑不到企业级，**平台不能把终态押在任一外部项目上**；反过来，自建收敛后的语义层是我们的资产而非负债。
 3. **WrenAI 给出的收敛后形态参照**：语义层（MDL，可审查可版本化）与执行层（治理原语 + 只读）分离——与我们 §5.12.1 归属表"语义层统一 store、执行层共用 guard + 只读账号"的划分同构。Q25 拍"收敛"时，可直接引用本节作为外部同构证据。
 
