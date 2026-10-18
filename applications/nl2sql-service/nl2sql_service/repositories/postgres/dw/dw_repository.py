@@ -37,10 +37,20 @@ class DwRepository:
 
         语句超时走**事务内 SET LOCAL**：会话级 `SET statement_timeout` 会
         留在池连接上污染后续查询（C7 的预算必须探针独享、退出即撤）。
+
+        2026-10-18 真库实测抓出的 bug（golden 首跑暴露）：`SET LOCAL` 是 PG
+        **工具命令，不接受绑定参数**——`SET LOCAL statement_timeout = %s` 带参
+        直接被服务端拒（`syntax error at or near "$1"`），配了 linkable 的部署
+        里探针从来没成功跑过（假池不校验 PG 的参数化规则，故单测全绿）。
+        修法：int 强转 + 非负校验后**内联进 SQL 文本**（值来自配置而非用户
+        输入，无注入面；%s 形式在这个位置根本不可能合法）。
         """
+        timeout_ms = int(statement_timeout_ms)
+        if timeout_ms < 0:
+            raise ValueError(f"statement_timeout_ms 必须非负: {statement_timeout_ms}")
         async with self._pool.connection(timeout=connect_timeout) as conn:
             async with conn.transaction():
-                await conn.execute("SET LOCAL statement_timeout = %s", (int(statement_timeout_ms),))
+                await conn.execute(f"SET LOCAL statement_timeout = {timeout_ms}")
                 cur = await conn.execute(sql, params)
                 rows = await cur.fetchall()
                 return [dict(r) for r in rows]

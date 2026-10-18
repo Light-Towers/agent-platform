@@ -234,12 +234,32 @@ class ValueResolver:
         return result
 
     async def _existing_values(self, table: str, column: str, literals: list[str], snapshot: str) -> list[str] | None:
-        """返回该列中**确实存在**的字面量子集；None = 探不到（降级，非不存在）。"""
-        cache_key = ProbeCache.key(self._datasource_id, snapshot, table, column, "membership")
-        cached = self._cache.get(cache_key)
-        if cached is not None:
-            return [lit for lit in literals if lit in cached]
+        """返回该列中**确实存在**的字面量子集；None = 探不到（降级，非不存在）。
 
+        2026-10-18 golden 首跑抓出的**设计缺陷**（真库 + 在线路径复现）：membership
+        缓存的键不含 literals，而值只是"本轮问到且存在的子集"——缓存命中时，
+        未覆盖的新字面量被直接判 **missing**（g01 问过 `已支付` ⇒ g02 问 `已退款`
+        命中同一键 ⇒ 误判不存在 ⇒ 拦截进 correct 循环，而该值实际存在）。
+        修法：缓存只当"已确认存在"的**正集合**；未覆盖的新字面量必须真探
+        （探不到 ⇒ 整体降级 unknown，保持 C8"探不到≠不存在"语义）。
+        """
+        cache_key = ProbeCache.key(self._datasource_id, snapshot, table, column, "membership")
+        confirmed = list(self._cache.get(cache_key) or [])
+        unanswered = [lit for lit in literals if lit not in confirmed]
+        if unanswered:
+            probed = await self._probe_membership(table, column, unanswered, snapshot)
+            if probed is None:
+                return None  # 探不到 ⇒ 整体降级（C8），不当成"不存在"
+            for value in probed:
+                if value not in confirmed:
+                    confirmed.append(value)
+            self._cache.set(cache_key, confirmed)
+        return [lit for lit in literals if lit in confirmed]
+
+    async def _probe_membership(
+        self, table: str, column: str, literals: list[str], snapshot: str
+    ) -> list[str] | None:
+        """真探一批字面量在该列的存在子集；None = 探不到（分区取不到/执行失败）。"""
         partition_sql, partition_params = await self._partition_predicate(table)
         if partition_sql is None:
             return None  # 分区必带但取不到 ⇒ 不探（C5）
@@ -261,9 +281,7 @@ class ValueResolver:
         except Exception:  # noqa: BLE001 - 探针失败一律降级 unknown，不当成"不存在"
             logger.warning("value probe failed (%s.%s), degrade to unknown", table, column, exc_info=True)
             return None
-        existing = [str(r["value"]) for r in rows]
-        self._cache.set(cache_key, existing)
-        return [lit for lit in literals if lit in existing]
+        return [str(r["value"]) for r in rows]
 
     # ------------------------------------------------------------------
     # 零结果分诊探针（P0-8③）

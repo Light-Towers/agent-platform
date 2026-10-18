@@ -65,6 +65,11 @@ async def _run_async(args: argparse.Namespace) -> tuple[int, dict]:
             payload = {"query": case["question"]}
             if case.get("datasource_id"):
                 payload["datasource_id"] = case["datasource_id"]
+            # 多轮用例（M3 时间/实体继承）：同 session_id 的用例按文件序串成一条
+            # 会话链——g03「那上个月呢」这类改写必须接着前一轮的 session 才有意义。
+            # 不带 session_id 的用例行为逐字节不变（单轮零变更分支）。
+            if case.get("session_id"):
+                payload["session_id"] = case["session_id"]
             resp = client.post("/api/query", json=payload)
             body = resp.json()
             row = {

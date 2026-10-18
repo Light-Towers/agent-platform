@@ -58,6 +58,13 @@ datasource:
   label: ""            # 口径标签（P1-3②），随响应体返回，如"数仓 T+1、已清洗"
   dialect: ""          # 空 = 按 dw_db_dsn scheme 探测；否则 postgres | mysql
 
+# 取值只读探针（P0-9/P1-2）：linkable 白名单 + 分区谓词策略。
+# dev 数仓是无分区 PG ⇒ partition_required=false（true 时取不到最新分区即不探，
+# 字面量全落 unknown）；生产 Doris 等分区库置 true 并配 partition_column。
+value_probe:
+  partition_required: false
+  linkable_columns: ["orders.status", "users.city"]
+
 # 负载隔离（P1-5/S-6）：应用侧并发闸 + 限流，全 0 = 关闭（Doris workload group
 # 管不到应用层这条）。max_concurrency 超限排队、acquire_timeout 超时拒绝。
 load_guard:

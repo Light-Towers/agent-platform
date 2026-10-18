@@ -1,7 +1,9 @@
 # nl2sql golden 集（§11.6-② / H4）。每行一个用例；# 开头为注释。
 # 真实条目来源见 docs/plans/nl2sql-meta-baseline-and-ownership.md §2：
 #   ① 线上未命中字面量日报 top N ② 高频 query 抽样 ③ 口径边界手搓（多轮/聚合/别名）
-# 下面是**格式模板**（expect_* 需标注 owner 按真实口径填，勿当结论用）：
-{"id":"g01","question":"上个月每个城市的订单数","expect_tables":["orders"],"expect_values":[],"expect_nonempty":true,"notes":"口径：按收货城市；数仓 T+1"}
-{"id":"g02","question":"已退款的订单有多少","expect_tables":["orders"],"expect_values":["已退款"],"expect_nonempty":false,"notes":"字面变体回归：已退款/退款/已退"}
-{"id":"g03","question":"那上个月呢","expect_tables":[],"expect_values":[],"notes":"多轮时间继承（M3 依赖前一轮 session_id）"}
+# 多轮用例：同 session_id 的用例按文件序串成会话链（run_golden 透传 session_id，
+#   nl2sql 侧走 M3 改写继承）；不带 session_id = 单轮。
+# 首跑基线（2026-10-18，Qwen3-8B 免费栈）登记于 baseline-and-ownership.md §5。
+{"id":"g01","question":"上个月每个城市的订单数","expect_tables":["orders"],"expect_values":[],"expect_nonempty":true,"notes":"口径：按收货城市（users.city）；数仓 T+1；需 orders JOIN users"}
+{"id":"g02","question":"已退款的订单有多少","expect_tables":["orders"],"expect_values":["已退款"],"expect_nonempty":false,"notes":"字面变体回归：已退款/退款/已退；期望 1 行","session_id":"golden-s1"}
+{"id":"g03","question":"那上个月呢","expect_tables":["orders"],"expect_values":[],"notes":"多轮时间继承（M3，承接 g02 同 session：已退款 + 上个月）","session_id":"golden-s1"}
