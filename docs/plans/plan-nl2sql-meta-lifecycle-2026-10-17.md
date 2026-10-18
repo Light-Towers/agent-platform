@@ -864,6 +864,17 @@ R1–R4 约 3–5 人日（nl2sql 域内）；R4 种子三档约 2–3 人日。
 
 **执行进度（2026-10-18 当日，批 1）**：P0-11 ⑤项、S-3、S-11、V2 死配置接线（含 `tokenizer`/`retrieval_top_k`/`rrf_k`）、D3/D4、**B1 查询侧（P0-5③ 的 OR 拼装 + 转移义 + 单源 tokens）** 已落地，验证见 review §4.1（guard 33 + 根测试 22 + app 43 + federation 135 全绿；**单测级，端到端待真实元知识库**）。未动：B1 索引侧（`value_tsvector` 生成方式，卡 Q23）、P0-1 构建入口（依赖 Q23）、D5/D6（Q26 待答）、D1（P2）。验收第 23/24/25 条有对应用例，第 26 条已有 guard 用例。
 
+**执行进度（2026-10-18 当日，批 2，分支 `feat/nl2sql-meta-build-recovery`，基线 836b0c4）**：四项已落地，一项一 commit——
+
+| 项 | commit | 内容 | 状态 |
+|---|---|---|---|
+| P0-1 + P0-2 | `e847eeb` | 构建入口实装 + 幂等重建：三类 upsert（001 唯一键、写死列清单、`updated_at=now()`）、`prune_*` 差异删除、metric/value 补 embedding 写入路径（修 D2）、`search_text` 按同一套分词写入、维度校验、CLI `--config`（只接受 MetricConfig）+ `--prune` + 构建报告 | 代码面完成；**真库端到端未跑**（本机无 PG：search_text/`value_tsvector` 判据是 `META_DB_DSN` 手动用例） |
+| §5.11-E2 | `23f0116` | 执行期异常三分类（correctable/rewritable/fatal）+ `execute_sql` 条件边（成功→END、可纠正/可改写且未达上限→correct、fatal/达上限→错误终态）+ `error_detail` 截断 500 只进 prompt/日志 + `attempted_sql` 进 correct prompt | 单测全绿（含图级 stub：纠正一次后成功 / attempted 跨轮累积 / permission denied 零纠正） |
+| Q26 | `4a4915e` | `GET /ready` 探 meta/dw 两池（3s 短超时，200/503，`/health` 未动）；console script 指向 `api.server:main` | 单测全绿 |
+| D1（P2） | `54f0b26` | 删 `entities/`，契约测试重定向 MetricConfig | 单测全绿；`grep entities` 零运行引用 |
+
+未动（维持登记）：B1 索引侧（卡 Q23）、answer 合成节点（M0-4 其余）、漂移检测/trace（B2）。federation 单测 2 条存量环境失败（与 nl2sql 零引用关系，非本批引入）。
+
 ### 5.17 元知识表清单（代码隐含 schema；Q23 的核对清单）
 
 **这一节解决什么**：Q23 只问"表由谁建"，答不出"建什么"。仓内没有 DDL（§2-④），下表是**从读写代码反推**的最小 schema——不是设计提案，是"代码要求库长成这样"。2026-10-18 全仓复核（`grep` 表名，排除 docs）：三张表名只出现在三个 repository 的构造默认参数里，**没有任何建表语句、迁移脚本或 YAML 声明** ⇒ Q23 的一种答案是"从未建过"（`META_DB_DSN` 默认空，这条路径从未在真实库上跑过）。
