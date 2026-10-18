@@ -91,7 +91,9 @@ async def test_pgvector_client_filters_are_structured_and_parameterized():
         filters=(("datasource_id", "ds-1"), ("tenant_id", "t-1")),
     )
     assert "WHERE datasource_id = %s AND tenant_id = %s" in recorded["sql"]
-    assert recorded["params"] == ("ds-1", "t-1", [0.1, 0.2], 3)
+    # 参数顺序按 SQL 文本出现序：`<=> %s` 在 WHERE 之前 ⇒ embedding 第一，
+    # 之后 filters 值、LIMIT（6e82ba2 修过顺序，本断言同步更新）
+    assert recorded["params"] == ([0.1, 0.2], "ds-1", "t-1", 3)
 
 
 async def test_fulltext_search_rejects_illegal_tsvector_column():
