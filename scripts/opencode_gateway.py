@@ -25,9 +25,13 @@ LLM_BASE_URL 指向本网关、LLM_API_KEY 填任意非空串即可离线跑真�
   是 PAT，Copilot 端点只要 OAuth token。
 - 结论：本机跑 opencode 需先解决上面任一项；否则改用任意 OpenAI 兼容端点
   （如同机 siliconflow， LangChain 直连即可，不必经本网关）。
-- 错误可见性（本次修）：此前 `stderr=DEVNULL` 且不解析 opencode 的 `type=="error"`
+- 错误可见性（已修）：此前 `stderr=DEVNULL` 且不解析 opencode 的 `type=="error"`
   事件，上游真实错误被吞成 `[opencode error rc=1: ]` 空壳。现捕获 stderr + 解析
   error 事件，把真实 message 透出到 content 并落网关日志。
+- 限流重试（已修）：`Detect Abuse Traffic`(403) 是**突发限流、非永久封禁**——对瞬时
+  限流指数退避重试（默认 3 次、2s→4s→8s，env `OPENCODE_GATEWAY_MAX_RETRIES`/`_BACKOFF_BASE`
+  可调）；确定性错误（400 token 类型/402 余额/模型不存在）不重试、直接透出。修掉"一次
+  限流的错误文本被下游当 SQL、废掉整查询"的脆弱性。
 """
 from __future__ import annotations
 
@@ -85,11 +89,36 @@ def _sse(data: dict) -> str:
     return sse_pack("", data)
 
 
-async def _opencode_events(prompt: str, model: str, req_id: str):
-    """调用 opencode run --format json，把 NDJSON 转成 OpenAI chunk 字典流。
+#: 限流重试配置（env 可调）：opencode 免费层 "Detect Abuse Traffic" 是**突发限流**
+# （非永久封禁），退避重试即可恢复——单查询 ~4-5 次 LLM 调用里偶发一次被限流，
+# 若不重试，那一次的错误文本会被下游当成"SQL"导致整查询失败。
+_RETRY_ENV = "OPENCODE_GATEWAY_MAX_RETRIES"
+_BACKOFF_ENV = "OPENCODE_GATEWAY_BACKOFF_BASE"
 
-    纯数据生成器：yield 的是 dict（OpenAI chat.completion.chunk 结构），
-    不负责 SSE 包装，供流式/非流式两条路径共用，避免重复解析。
+#: 瞬时可重试的上游错误特征（403 反滥用 / 429 限流 / 503）。其余——400 token
+# 类型不符、402 余额不足、模型不存在——是确定性错误，重试无益，直接透出。
+_RATE_LIMIT_MARKERS = (
+    "detect abuse traffic",
+    "freetiererror",
+    "rate limit",
+    "too many requests",
+    "429",
+    "503",
+)
+
+
+def _is_rate_limit(error: str) -> bool:
+    """上游错误是否属"瞬时限流、值得退避重试"。"""
+    low = (error or "").lower()
+    return any(marker in low for marker in _RATE_LIMIT_MARKERS)
+
+
+async def _run_opencode_once(prompt: str, model: str) -> tuple[list[str], dict, str, str, int]:
+    """跑一次 ``opencode run`` 并解析 NDJSON。
+
+    Returns:
+        ``(text_parts, usage, upstream_error, stderr_txt, returncode)``——
+        不 yield、不抛，把一次子进程执行的净结果交还给调用方（便于外层重试）。
     """
     cmd = [
         "opencode", "run",
@@ -110,16 +139,9 @@ async def _opencode_events(prompt: str, model: str, req_id: str):
         env=env,
     )
     assert proc.stdout is not None
-    created = int(time.time())
-    # 先发一个 role=assistant 的空 chunk（OpenAI 惯例）
-    yield {
-        "id": req_id, "object": "chat.completion.chunk",
-        "created": created, "model": model,
-        "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}],
-    }
-
-    usage_total = usage_input = usage_output = 0
-    upstream_error = ""  # opencode 结构化错误事件的消息（type=="error"）
+    text_parts: list[str] = []
+    usage = {"total": 0, "input": 0, "output": 0}
+    upstream_error = ""
     async for raw in proc.stdout:
         line = raw.decode("utf-8", "replace").strip()
         if not line:
@@ -132,16 +154,11 @@ async def _opencode_events(prompt: str, model: str, req_id: str):
         if etype == "text" and "part" in evt:
             text = evt["part"].get("text", "")
             if text:
-                yield {
-                    "id": req_id, "object": "chat.completion.chunk",
-                    "created": created, "model": model,
-                    "choices": [{"index": 0, "delta": {"content": text},
-                                 "finish_reason": None}],
-                }
+                text_parts.append(text)
         elif etype == "error":
-            # opencode 把上游错误（如免费网关 403 反滥用 / 402 余额不足 / 400 token
-            # 类型不符）作为结构化 error 事件发在 stdout——此前完全不解析，真实原因
-            # 被吞成 "[opencode error rc=1: ]" 空壳。这里抽出 message 透出。
+            # opencode 把上游错误（免费网关 403 反滥用 / 402 余额不足 / 400 token
+            # 类型不符 / 模型不存在）作为结构化 error 事件发在 stdout——此前完全不
+            # 解析，真实原因被吞成 "[opencode error rc=1: ]" 空壳。这里抽出 message。
             err = evt.get("error") or {}
             data = err.get("data") or {}
             upstream_error = (
@@ -149,12 +166,11 @@ async def _opencode_events(prompt: str, model: str, req_id: str):
                 or (err.get("name") + "" if err.get("name") else "")
                 or json.dumps(err, ensure_ascii=False)
             )
-            _log(f"opencode upstream error: {upstream_error}")
         elif etype == "step_finish" and "part" in evt:
             tok = evt["part"].get("tokens", {})
-            usage_total = tok.get("total", usage_total)
-            usage_input = tok.get("input", usage_input)
-            usage_output = tok.get("output", usage_output)
+            usage["total"] = tok.get("total", usage["total"])
+            usage["input"] = tok.get("input", usage["input"])
+            usage["output"] = tok.get("output", usage["output"])
 
     await proc.wait()
     stderr_txt = ""
@@ -163,13 +179,52 @@ async def _opencode_events(prompt: str, model: str, req_id: str):
             stderr_txt = (await proc.stderr.read())[:500].decode("utf-8", "replace").strip()
         except Exception:  # noqa: BLE001 - 读 stderr 失败不该盖过主流程
             stderr_txt = ""
+    return text_parts, usage, upstream_error, stderr_txt, proc.returncode
 
-    if upstream_error or proc.returncode != 0:
+
+async def _opencode_events(prompt: str, model: str, req_id: str):
+    """把 opencode 结果转成 OpenAI chunk 字典流；对瞬时限流退避重试。
+
+    纯数据生成器：yield dict（OpenAI chat.completion.chunk 结构），不负责 SSE 包装，
+    供流式/非流式两条路径共用。重试只针对**瞬时限流**（403 反滥用/429），确定性
+    错误（400/402/模型不存在）不重试、直接透出真实 message。
+    """
+    max_retries = int(os.environ.get(_RETRY_ENV, "3"))
+    backoff_base = float(os.environ.get(_BACKOFF_ENV, "2.0"))
+    created = int(time.time())
+    # 先发一个 role=assistant 的空 chunk（OpenAI 惯例）——只发一次，重试不重发
+    yield {
+        "id": req_id, "object": "chat.completion.chunk",
+        "created": created, "model": model,
+        "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}],
+    }
+
+    attempt = 0
+    while True:
+        text_parts, usage, upstream_error, stderr_txt, rc = await _run_opencode_once(prompt, model)
+        if upstream_error:
+            _log(f"opencode upstream error: {upstream_error}")
+        # 仅"限流 + 还有重试额度"才退避重试；其余（成功/确定性错误/额度用尽）退出循环
+        if not (upstream_error and _is_rate_limit(upstream_error)) or attempt >= max_retries:
+            break
+        attempt += 1
+        delay = backoff_base * (2 ** (attempt - 1))  # 2s → 4s → 8s …
+        _log(f"rate-limited ({upstream_error[:60]}); retry {attempt}/{max_retries} after {delay:.0f}s")
+        await asyncio.sleep(delay)
+
+    for text in text_parts:
+        yield {
+            "id": req_id, "object": "chat.completion.chunk",
+            "created": created, "model": model,
+            "choices": [{"index": 0, "delta": {"content": text}, "finish_reason": None}],
+        }
+
+    if upstream_error or rc != 0:
         # 真实错误透出到 content（OpenAI 流里唯一能带错误的位置）+ 落网关日志。
         # finish_reason=None：把它当作普通 content delta，让下面的收尾 chunk 正常
         # 发 finish_reason=stop + usage，流式路径才能收到 [DONE]（否则客户端挂等）。
-        detail = upstream_error or stderr_txt or f"rc={proc.returncode}"
-        _log(f"opencode run failed rc={proc.returncode} stderr={stderr_txt!r}")
+        detail = upstream_error or stderr_txt or f"rc={rc}"
+        _log(f"opencode run failed rc={rc} stderr={stderr_txt!r}")
         yield {
             "id": req_id, "object": "chat.completion.chunk",
             "created": created, "model": model,
@@ -183,9 +238,9 @@ async def _opencode_events(prompt: str, model: str, req_id: str):
         "created": created, "model": model,
         "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
         "usage": {
-            "prompt_tokens": usage_input,
-            "completion_tokens": usage_output,
-            "total_tokens": usage_total,
+            "prompt_tokens": usage["input"],
+            "completion_tokens": usage["output"],
+            "total_tokens": usage["total"],
         },
     }
 
