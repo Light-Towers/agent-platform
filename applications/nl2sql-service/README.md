@@ -23,10 +23,17 @@ LangGraph 异步 12 节点 Text-to-SQL 管线：自然语言 → 关键词抽取
 ## 运行方式
 
 ```bash
-# 安装
-pip install -e ./nl2sql-service
+# 安装（本仓是 uv workspace，在仓库根执行）
+uv sync --all-packages
 
-# 元知识构建
+# 初始化元知识库 schema（幂等；首次部署必跑）
+python -m nl2sql_service.scripts.init_meta_schema --dsn "$META_DB_DSN"
+# 查看当前 schema 版本
+python -m nl2sql_service.scripts.init_meta_schema --status --dsn "$META_DB_DSN"
+# 只列出将执行的迁移，不连库
+python -m nl2sql_service.scripts.init_meta_schema --dry-run
+
+# 元知识构建（当前仍是 stub，见方案 P0-1）
 python -m nl2sql_service.scripts.build_meta_knowledge --dsn $META_DB_DSN
 
 # 启动 API server
@@ -46,6 +53,16 @@ curl -X POST http://localhost:8000/api/query -H 'Content-Type: application/json'
   }
 }'
 ```
+
+## 元知识库 schema
+
+DDL 在 `nl2sql_service/migrations/001_meta_schema.up.sql`（回滚见同名 `.down.sql`），是元知识库结构的唯一真相源：
+
+- 表：`nl2sql_column_info` / `nl2sql_metric_info` / `nl2sql_value_info` / `nl2sql_relation_info` / `nl2sql_alias_info` + 版本标记 `nl2sql_schema_meta`
+- `vector(N)` 的维度由 `VECTOR_DIM` 决定，执行时替换；必须与 embedding 模型输出一致
+- `nl2sql_value_info.value_tsvector` 是从 `search_text` 生成的列，`search_text` 必须由构建方写入**同一套分词**后的空格拼接结果（写入/查询单源，中英文都走 `simple` 配置）
+- 改 schema 一律新增 `002_*.up.sql`，不回改 001；所有语句幂等，可重复执行
+- 服务启动**不自动建表**（生产库未必给 DDL 权限）；是否自动化待库权限确认后再定
 
 ## 元知识参数化
 
