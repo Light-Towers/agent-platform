@@ -63,7 +63,7 @@
 |---|---|---|
 | ① | nl2sql 租户/工作区隔离（A 的硬前置）：schema 作用域列 + 查询侧恒过滤 + 漏传 fail-fast | **已完成**（commit `707a29c`；`tests/governance/` 隔离判据 + 真库 `tests/ha/test_tenant_isolation_real_pg.py`） |
 | ② | `sql_*` 三表数据迁移 + 映射设计 | **已完成**（commit `e233d72`/`19bfe27`/`597ce56`/`0c65f76`，映射设计见 §7.1） |
-| ③ | 消费方改端点：`subagents/sql_agent.py` 等 agent_server 调用方改调 nl2sql-service，agent_server/sql 代码退役 | 未开始 |
+| ③ | 消费方改端点：`subagents/sql_agent.py` 等 agent_server 调用方改调 nl2sql-service，agent_server/sql 代码退役 | **已完成**（commit `e92a784`/`76f29eb`/`78b1beb`，明细见 §7.2） |
 
 ### 7.1 Stage ② 映射设计（关键决策）
 
@@ -78,3 +78,19 @@
 **铁律**：迁移只取文本、向量一律用目标侧 embedder 重算（源 embedder 可能不同模型/维度，拷贝 = 炸库或静默劣化）；作用域保真（源 tenant/workspace 原样带，`--tenant ''` 显式折叠单租户 legacy 库）；prune 只删范例（列有 MetricConfig + 迁移双写入源，误删会删掉配置构建的行）。
 
 **验证状态**：单测 26 条 + 真库用例（`test_migration_write_path_on_real_pg`，skipif 双 DSN：写入/维度/注释合并/租户不串味/幂等/prune/ANN 召回机械性全过）。⚠️ 语义质量待复核：siliconflow 余额耗尽（402）期间迁移数据用的是确定性假向量，余额恢复后重跑同一命令即自动更新（upsert 自然键不变）。
+
+### 7.2 Stage ③ 退役执行（2026-10-18）
+
+** federation 侧早已就绪**：`agent_federation` 的 `text_to_sql` 能力在本 Stage 前已路由到 nl2sql-service `/api/query`（adapter 更早退役），真正 import `agent_server.sql` 包的只有三个消费方：
+
+| 消费方 | 改法 | 契约变化 |
+|---|---|---|
+| `subagents/sql_agent.py`（图节点证据生产） | 改 nl2sql 瘦客户端（httpx POST `/api/query`） | 无（函数签名保留，llm 参数兼容保留但不再使用——LLM 归 nl2sql）；未配置 `NL2SQL_SERVICE_URL` 返回明确提示（同 search.py 降级契约）；HTTP 错误分类进证据 |
+| `api/sql_router.py` `/sql/train`（上线端点） | 对外契约不变（路径/鉴权/请求响应形状），内部改 POST `/api/meta/ingest` | 响应新增可选 `report` 字段（摄入计数 + 三类记账）；flag 语义为"已摄入"；上游不可达 502、上游状态码透传 |
+| `api/health_router.py`（`sql_backend` 标志） | `detect_dialect` 迁到 `agent_server/db_dialect.py` | 无（运维可见性不属于 Text2SQL 能力） |
+
+**`/api/meta/ingest`（nl2sql 侧新增，commit `e92a784`）**：与迁移 CLI 共用同一写入 core（`services/ingest_service.py` 的 `build_migration_plan` + `write_scope`，Stage ② 上移的共享件）——在线摄入与批量迁移两条路只有一份写入逻辑。分工：CLI 搬历史 + `--prune`；端点管在线增量、**不 prune**（范例差异删是显式运维动作）。请求形状对齐 `SqlTrainRequest`（ddl/docs/examples 单串或列表都收）；作用域走 `resolve_scope`（ADR-0007 断言 > 请求体 > default，同 `/api/query`）；响应带回实际落点 scope + 三类记账。未接身份门（S-1）下与 `/api/meta/refresh` 同級定位（内部/运维端点，文档明示）。
+
+**退役删除**：`applications/agent_server/sql/`（pipeline/schema_store/guard）+ `test_schema_store.py` + `test_sql_pipeline.py`；`test_sql_guard.py` 改导 `agent_core.sql.guard`（guard 是平台共享件，不随包退役）；`test_corpus_tenant_isolation.py` 删 3 条 sql_* 判据（留 skip 壳注明移交）；`test_isolation_dimension_contract.py` 的谓词配对扫描面改扫 nl2sql `meta_repository.py`（隔离契约未断，换承载文件）；README U-1 / query_router / rag.embed / pool_factory 的引用同步为史实。
+
+**净效果**：平台内 Text2SQL 只剩一条路（nl2sql-service）；退役方（agent_server/sql）的**能力无损失**——few-shot 范例（004 + recall_example）、业务文档（table_comment 读路径）、在线训练（/api/meta/ingest）、隔离（Stage ①）在 nl2sql 侧全部有着落且已验证。
