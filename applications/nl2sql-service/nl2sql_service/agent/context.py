@@ -20,6 +20,7 @@ class DataAgentContext:
         meta_repository: Any = None,
         dw_repository: Any = None,
         table_stats: list[dict[str, Any]] | None = None,
+        value_resolver: Any = None,
     ) -> None:
         self.embedding_client = embedding_client
         self.column_repository = column_repository
@@ -29,3 +30,5 @@ class DataAgentContext:
         self.dw_repository = dw_repository
         # 漂移检测（P0-3）产出的表行数估值，供生成期聚合引导；无则不引导
         self.table_stats = table_stats or []
+        # 取值只读探针单入口（P0-9）；None = 未配置 dw 池，不做源侧取值匹配
+        self.value_resolver = value_resolver
