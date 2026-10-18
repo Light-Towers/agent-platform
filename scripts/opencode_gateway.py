@@ -32,6 +32,11 @@ LLM_BASE_URL 指向本网关、LLM_API_KEY 填任意非空串即可离线跑真�
   限流指数退避重试（默认 3 次、2s→4s→8s，env `OPENCODE_GATEWAY_MAX_RETRIES`/`_BACKOFF_BASE`
   可调）；确定性错误（400 token 类型/402 余额/模型不存在）不重试、直接透出。修掉"一次
   限流的错误文本被下游当 SQL、废掉整查询"的脆弱性。
+- 全局串行闸 + 最小间隔（2026-10-18 补）：opencode 免费层是 **IP 级限额**（社区调研 +
+  全天实测：约 10 RPM / 1 RPS、每日约 50 次，**并发 1 串行才是安全点**，burst 即 403）。
+  故每次 `opencode run` 子进程前先过全局闸（默认容量 1）并保证与上次调用至少间隔
+  `OPENCODE_GATEWAY_MIN_INTERVAL`（默认 1.2s）——把"并发请求各自起子进程"的突发
+  形状压平再发。闸容量 env `OPENCODE_GATEWAY_MAX_CONCURRENCY` 可调（有付费额度时可放大）。
 """
 from __future__ import annotations
 
@@ -95,6 +100,29 @@ def _sse(data: dict) -> str:
 _RETRY_ENV = "OPENCODE_GATEWAY_MAX_RETRIES"
 _BACKOFF_ENV = "OPENCODE_GATEWAY_BACKOFF_BASE"
 
+#: 全局串行闸（免费层 IP 级限额：社区调研 + 全天实测 ≈ 10 RPM / 1 RPS、每日约
+#: 50 次，**并发 1 串行才是安全点**，burst 即 403）。容量 >1 时配合下面的最小
+#: 间隔仍把请求速率压在限额内；env 可调（有付费额度/自建端点时可放大）。
+_LLM_GATE = asyncio.Semaphore(int(os.environ.get("OPENCODE_GATEWAY_MAX_CONCURRENCY", "1")))
+#: 相邻两次 opencode 调用的最小间隔（秒）：单查询内 4-5 次顺序调用 + 跨查询并发
+#: 都过此闸，把 burst 形状压平再发（实测 1.2s 间隔下顺序调用零 403）。
+_MIN_INTERVAL = float(os.environ.get("OPENCODE_GATEWAY_MIN_INTERVAL", "1.2"))
+#: 上次放行的时间戳（monotonic；仅持闸方读写，无锁竞争）
+_LAST_CALL_TS = 0.0
+
+
+async def _acquire_llm_slot() -> None:
+    """过闸 + 限速：持闸期间保证与上次 opencode 调用至少间隔 _MIN_INTERVAL。
+
+    调用方必须 `async with _LLM_GATE:` 后调用本函数再起子进程——闸内改时间戳，
+    容量 >1 时也不会有两个调用读到同一个 _LAST_CALL_TS。
+    """
+    global _LAST_CALL_TS
+    elapsed = time.monotonic() - _LAST_CALL_TS
+    if _LAST_CALL_TS > 0 and elapsed < _MIN_INTERVAL:
+        await asyncio.sleep(_MIN_INTERVAL - elapsed)
+    _LAST_CALL_TS = time.monotonic()
+
 #: 瞬时可重试的上游错误特征（403 反滥用 / 429 限流 / 503）。其余——400 token
 # 类型不符、402 余额不足、模型不存在——是确定性错误，重试无益，直接透出。
 _RATE_LIMIT_MARKERS = (
@@ -116,10 +144,20 @@ def _is_rate_limit(error: str) -> bool:
 async def _run_opencode_once(prompt: str, model: str) -> tuple[list[str], dict, str, str, int]:
     """跑一次 ``opencode run`` 并解析 NDJSON。
 
+    全程持全局串行闸（免费层 IP 级限额：并发 1 是安全点），放行前保证与上次
+    调用至少间隔 _MIN_INTERVAL——跨请求并发与单查询内顺序调用都压平再发。
+
     Returns:
         ``(text_parts, usage, upstream_error, stderr_txt, returncode)``——
         不 yield、不抛，把一次子进程执行的净结果交还给调用方（便于外层重试）。
     """
+    async with _LLM_GATE:
+        await _acquire_llm_slot()
+        return await _run_opencode_locked(prompt, model)
+
+
+async def _run_opencode_locked(prompt: str, model: str) -> tuple[list[str], dict, str, str, int]:
+    """持闸后的真正执行（拆出来只为让 _run_opencode_once 的闸语义一眼可读）。"""
     cmd = [
         "opencode", "run",
         "-m", model,

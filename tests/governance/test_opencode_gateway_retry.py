@@ -138,3 +138,45 @@ class TestRetryBehaviour:
         content, _ = await _collect(gw._opencode_events("p", "m", "r"))
         assert calls["n"] == 1, "402 余额不足是确定性错误，不重试"
         assert "balance" in content
+
+
+# ---------------------------------------------------------------------------
+# 附：全局串行闸 + 最小间隔（免费层 IP 级限额：并发 1 才是安全点）
+# ---------------------------------------------------------------------------
+async def test_gate_serializes_concurrent_calls(gw, monkeypatch):
+    """并发 5 个 _run_opencode_once：持闸执行段同一时刻只有 1 个（闸容量 1）。"""
+
+    monkeypatch.setattr(gw, "_MIN_INTERVAL", 0.0)  # 本用例只验串行，不验间隔
+    state = {"in_flight": 0, "max_in_flight": 0}
+
+    async def fake_locked(prompt, model):
+        state["in_flight"] += 1
+        state["max_in_flight"] = max(state["max_in_flight"], state["in_flight"])
+        await asyncio.sleep(0.02)
+        state["in_flight"] -= 1
+        return (["ok"], {"total": 1, "input": 1, "output": 1}, "", "", 0)
+
+    monkeypatch.setattr(gw, "_run_opencode_locked", fake_locked)
+    await asyncio.gather(*[gw._run_opencode_once(f"p{i}", "m") for i in range(5)])
+    assert state["max_in_flight"] == 1, f"闸未串行化：同时在飞 {state['max_in_flight']} 个"
+
+
+async def test_gate_enforces_min_interval(gw, monkeypatch):
+    """相邻两次放行至少间隔 _MIN_INTERVAL（把 burst 形状压平再发）。"""
+    import time as _time  # noqa: PLC0415
+
+    monkeypatch.setattr(gw, "_MIN_INTERVAL", 0.05)
+    monkeypatch.setattr(gw, "_LAST_CALL_TS", 0.0)
+
+    stamps: list[float] = []
+
+    async def fake_locked(prompt, model):
+        stamps.append(_time.monotonic())
+        return (["ok"], {"total": 1, "input": 1, "output": 1}, "", "", 0)
+
+    monkeypatch.setattr(gw, "_run_opencode_locked", fake_locked)
+    await gw._run_opencode_once("a", "m")
+    await gw._run_opencode_once("b", "m")
+    await gw._run_opencode_once("c", "m")
+    gaps = [b - a for a, b in zip(stamps, stamps[1:])]
+    assert all(g >= 0.045 for g in gaps), f"间隔不足（含调度误差应 ≥0.045s）: {gaps}"

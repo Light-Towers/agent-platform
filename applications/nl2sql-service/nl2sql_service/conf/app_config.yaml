@@ -9,9 +9,13 @@ llm:
   max_retries: 3
 
 embedding:
+  # 2026-10-18 实测：账户余额归零时硅基的**免费** ID `BAAI/bge-m3` 也报 402
+  # "balance insufficient"（免费聊天模型仍可用，勿误判成模型被收回）——充值后恢复。
+  # ⚠️ 模型策略（用户 2026-10-18 定）：只用免费模型；换付费 ID（如 Pro/BAAI/bge-m3）
+  # 须用户显式批准。根 .env 提供同键时以 .env 为准（test_settings_precedence）。
   backend: "langchain_openai"
-  model: "text-embedding-3-small"
-  vector_dim: 1536
+  model: "BAAI/bge-m3"
+  vector_dim: 1024
 
 retrieval:
   top_k: 10
