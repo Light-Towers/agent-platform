@@ -48,3 +48,32 @@ def test_detect_dialect():
     assert detect_dialect("sqlite:///demo.db") == "sqlite"
     assert detect_dialect("postgresql://u:p@h/db") == "postgres"
     assert detect_dialect("mysql://u:p@h/db") == "mysql"
+
+
+def test_reject_postgres_blocking_or_privileged_functions():
+    """S-11：合法 SELECT 但能阻塞连接/读服务端文件/改会话参数的函数必须拦下。"""
+    for bad in [
+        "SELECT pg_sleep(30)",
+        "SELECT pg_catalog.pg_sleep(30)",
+        "SELECT dblink('host=x', 'select 1')",
+        "SELECT lo_import('/etc/passwd')",
+        "SELECT set_config('statement_timeout', '0', false)",
+    ]:
+        ok, reason, _ = validate_sql(bad, "postgres", 100)
+        assert not ok, bad
+        assert "函数" in reason
+
+
+def test_reject_mysql_blocking_functions():
+    for bad in ["SELECT SLEEP(30)", "SELECT BENCHMARK(100000000, MD5('x'))"]:
+        ok, _, _ = validate_sql(bad, "mysql", 100)
+        assert not ok, bad
+
+
+def test_normal_functions_still_allowed():
+    """黑名单不得误伤聚合/字符串/数值等正常函数。"""
+    ok, reason, sql = validate_sql(
+        "SELECT count(*), sum(amount), lower(name), round(avg(x), 2) FROM orders", "postgres", 100
+    )
+    assert ok, reason
+    assert "LIMIT 100" in sql.upper()
