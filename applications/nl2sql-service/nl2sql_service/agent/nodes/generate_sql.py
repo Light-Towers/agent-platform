@@ -5,6 +5,7 @@
 `table_infos` 只有 RRF 混合 JSON（没有表级视图）。
 """
 
+import json
 from typing import Any
 
 from nl2sql_service.agent.llm import LLMClient
@@ -64,8 +65,24 @@ def build_table_infos(state: dict[str, Any]) -> str:
     return (
         f"【表】{json_block(tables)}\n"
         f"【列】{json_block(columns)}\n"
-        f"【取值】{json_block(values)}"
+        f"【取值】{build_value_bindings(values)}"
     )
+
+
+def build_value_bindings(values: list[dict[str, Any]] | None) -> str:
+    """取值结构化绑定（P0-8①）：`[{column, value, desc}, ...]`。
+
+    不再是自由文本 `examples`——绑定是给模型"只能用这些字面量"的契约，
+    形状统一才能被下游（字面量核验、matched/unmatched 回传）复用。
+    """
+    if not values:
+        return "（无已声明取值）"
+    bindings = [
+        {"column": v.get("column_name", ""), "value": v.get("value", ""), "desc": v.get("value_desc", "")}
+        for v in values
+        if isinstance(v, dict)
+    ]
+    return json.dumps(bindings, ensure_ascii=False)
 
 
 async def generate_sql(state: dict[str, Any]) -> dict[str, Any]:

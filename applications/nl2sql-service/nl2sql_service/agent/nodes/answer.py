@@ -69,6 +69,20 @@ def _sample_block(sample: list[dict[str, Any]]) -> str:
     )
 
 
+def _empty_diagnosis(state: dict[str, Any]) -> str:
+    """零结果分诊结论 → prompt 文本（P0-8③：0 行要说明是哪种 0）。"""
+    if not state.get("empty_result"):
+        return "（结果非空）"
+    reason = state.get("empty_result_reason", "")
+    if reason == "unrecognized_literal":
+        return "取值未匹配：过滤条件里的取值在数据源不存在（不是'无数据'）。必须明确告诉用户未识别哪个取值。"
+    if reason == "genuinely_empty":
+        return "已确认该条件下确实没有数据（字面量在源侧存在）。如实说明'没有符合条件的数据'。"
+    if reason == "no_dimension_filter":
+        return "查询本身没有维度过滤，0 行即'无数据'。如实说明。"
+    return "未能分诊（取值探针不可用）。只能说明'没有符合条件的数据'，不得声称取值不存在。"
+
+
 async def answer(state: dict[str, Any]) -> dict[str, Any]:
     sql = state.get("sql", "")
     result = state.get("result")
@@ -100,6 +114,7 @@ async def answer(state: dict[str, Any]) -> dict[str, Any]:
         date_info=state.get("date_info", ""),
         db_info=state.get("extra_context") or "PostgreSQL（方言 postgres；只读单条 SELECT）",
         result_view=result_view,
+        empty_diagnosis=_empty_diagnosis(state),
     )
     text = (await llm.invoke(prompt)).strip()
     if not text:

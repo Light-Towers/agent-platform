@@ -155,7 +155,7 @@ async def test_execute_sql_hides_raw_error():
 @pytest.mark.parametrize(
     ("state", "expected"),
     [
-        ({"sql_valid": True}, "execute_sql"),
+        ({"sql_valid": True}, "validate_literals"),
         ({"sql_valid": False, "correct_count": 0}, "correct_sql"),
         ({"sql_valid": False, "correct_count": 3, "sql_max_correct_retries": 3}, END),
         ({"sql_valid": False, "correct_count": 1, "sql_max_correct_retries": 1}, END),

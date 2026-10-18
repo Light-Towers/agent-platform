@@ -27,6 +27,11 @@ async def query(request: SqlQueryRequest, http_request: Request) -> SqlQueryResp
             fallback=result.get("fallback", False),
             latency_ms=round(latency, 2),
             trace_id=request.trace_id,
+            matched_values=result.get("matched_values", []),
+            unmatched_terms=result.get("unmatched_terms", []),
+            dict_hit=result.get("dict_hit", False),
+            empty_result_reason=result.get("empty_result_reason"),
+            path=result.get("path", "graph"),
         )
     except Exception as exc:
         logger.exception("query handler failed")

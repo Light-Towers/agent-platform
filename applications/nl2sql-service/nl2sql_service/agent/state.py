@@ -29,6 +29,15 @@ class DataAgentState(TypedDict, total=False):
     error_class: str
     # 已尝试的 SQL + 错误序列（correct prompt 必须带它，否则同一处错改三遍）
     attempted_sql: list[dict[str, Any]]
+    # 取值核验与零结果分诊（P0-8②③）
+    value_matched: list[str]
+    value_unmatched: list[str]
+    dict_hit: bool
+    has_dimension_filter: bool
+    empty_result: bool
+    empty_result_reason: str
+    # 方言（P1-4：按数据源分支；缺省 postgres）
+    dialect: str
     result: Any
     answer: str
     correct_count: int
