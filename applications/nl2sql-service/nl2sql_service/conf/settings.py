@@ -34,6 +34,9 @@ class Settings(BaseLLMSettings):
     # 检索
     retrieval_top_k: int = 10  # 区别于 agent_server(4)/knowledge(5)：本服务为专用 Text-to-SQL，元知识召回需广泛覆盖表/列/指标
     rrf_k: int = 60
+    # 向量召回相对截断（P0-5④）：绝对余弦分跨查询不可比，改为 top-k 内
+    # "与最佳分的差超过 margin 即截断"。0 = 关闭（纯 top-k）。
+    retrieval_score_margin: float = 0.15
 
     # 连接池（psycopg_pool 显式配额；取值依据见 clients/pg_pool.py）
     # meta：检索 + CRUD 共用，毫秒级画像 ⇒ min 1（按需增长，不预占）、max 对齐
@@ -143,6 +146,7 @@ def get_settings() -> Settings:
     if "retrieval" in app_yaml:
         overrides["retrieval_top_k"] = app_yaml["retrieval"].get("top_k", 10)
         overrides["rrf_k"] = app_yaml["retrieval"].get("rrf_k", 60)
+        overrides["retrieval_score_margin"] = app_yaml["retrieval"].get("score_margin", 0.15)
     if "sql" in app_yaml:
         overrides["sql_read_only_guard"] = app_yaml["sql"].get("read_only_guard", True)
         overrides["sql_max_rows"] = app_yaml["sql"].get("max_rows", 1000)

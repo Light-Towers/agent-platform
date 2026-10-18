@@ -21,9 +21,13 @@ async def recall_value(state: dict[str, Any]) -> dict[str, Any]:
     if ctx is None or ctx.value_repository is None:
         return {"values": []}
 
+    # 码表字面检索（P0-5①）：不再走 ANN / 中文全文模糊；自由文本型取值的
+    # 模糊匹配由只读探针（P0-9）在源侧完成。embedding 不再下传。
+    datasource_id = state.get("datasource_id", "")
+    filters = (("datasource_id", datasource_id),) if datasource_id else ()
     values = await ctx.value_repository.recall(
         keywords,
-        embedding=state.get("query_embedding"),
         top_k=state.get("retrieval_top_k", 10),
+        filters=filters,
     )
     return {"values": values}

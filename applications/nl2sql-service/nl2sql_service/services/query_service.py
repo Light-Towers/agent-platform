@@ -55,6 +55,7 @@ class QueryService:
             "retrieval_top_k": settings.retrieval_top_k,
             "rrf_k": settings.rrf_k,
             "tokenizer": settings.tokenizer,
+            "retrieval_score_margin": settings.retrieval_score_margin,
             "date_info": build_date_info(settings),
             # 进模型的结果体量上限（§5.11-V3 双上限分离）
             "sql_max_rows_for_prompt": settings.sql_max_rows_for_prompt,

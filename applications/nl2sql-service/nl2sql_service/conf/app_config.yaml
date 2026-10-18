@@ -16,6 +16,8 @@ embedding:
 retrieval:
   top_k: 10
   rrf_k: 60
+  # 向量召回相对截断（P0-5④）：与最佳分的差超过 margin 即截断；0 = 关闭
+  score_margin: 0.15
 
 sql:
   read_only_guard: true

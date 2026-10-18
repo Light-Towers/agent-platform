@@ -58,6 +58,18 @@ def _where_clause(filters: Sequence[tuple[str, Any]]) -> tuple[str, list[Any]]:
     return " WHERE " + " AND ".join(clauses), [value for _, value in filters]
 
 
+def relative_truncate(rows: list[dict[str, Any]], margin: float, distance_key: str = "distance") -> list[dict[str, Any]]:
+    """相对截断（P0-5④）：top-k 内与最佳分的差超过 margin 即丢弃。
+
+    绝对余弦分跨查询不可比（ES 的 min_score 同款错误，见方案 §5.1）——
+    固定阈值对单词查询过松、多词查询过紧。margin<=0 关闭（纯 top-k）。
+    """
+    if margin <= 0 or not rows:
+        return rows
+    best = min(r.get(distance_key, 0.0) for r in rows)
+    return [r for r in rows if (r.get(distance_key, 0.0) - best) <= margin]
+
+
 class PgvectorClientManager:
     """pgvector 向量召回 + Postgres 全文检索。"""
 
@@ -121,6 +133,40 @@ class PgvectorClientManager:
         # 参数顺序按 SQL 文本出现序：rank 的 tsquery → filters 值 → @@ 的 tsquery → top_k
         async with self._pool.connection() as conn:
             cur = await conn.execute(sql, (tsquery, *params, tsquery, top_k))
+            rows = await cur.fetchall()
+            return [dict(row._mapping) for row in rows]
+
+    async def literal_search(
+        self,
+        table: str,
+        value_col: str,
+        tokens: Sequence[str],
+        top_k: int = 10,
+        extra_cols: str = "*",
+        filters: Sequence[tuple[str, Any]] = (),
+    ) -> list[dict[str, Any]]:
+        """码表字面检索（P0-5 取值路退役后的 L1 主路）。
+
+        取值副本**不再走 ANN、也不再走中文全文模糊**（§5.3 落位表：短文本
+        召回 = 等值 + 别名 + 前缀，别建向量/倒排）——自由文本型取值的模糊
+        匹配改由只读探针（P0-9）在源侧完成，PG 只存**定义出来的码表**。
+        口径：大小写不敏感等值 + 前缀匹配；两者都参数化。
+        """
+        validate_identifier(table, "检索表名")
+        validate_identifier(value_col, "取值列名")
+        if extra_cols != "*":
+            validate_identifier_list(extra_cols, "返回列清单")
+        cleaned = [str(t).strip() for t in tokens if str(t).strip()]
+        if not cleaned:
+            return []
+        where, params = _where_clause(filters)
+        literal_clause = f"(lower({value_col}) = ANY(%s) OR {value_col} LIKE ANY(%s))"
+        if where:
+            sql = f"SELECT {extra_cols} FROM {table}{where} AND {literal_clause} LIMIT %s"
+        else:
+            sql = f"SELECT {extra_cols} FROM {table} WHERE {literal_clause} LIMIT %s"
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(sql, (*params, [t.lower() for t in cleaned], [f"{t}%" for t in cleaned], top_k))
             rows = await cur.fetchall()
             return [dict(row._mapping) for row in rows]
 

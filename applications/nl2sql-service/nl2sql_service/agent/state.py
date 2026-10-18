@@ -41,6 +41,8 @@ class DataAgentState(TypedDict, total=False):
     retrieval_top_k: int
     rrf_k: int
     tokenizer: str
+    # 向量召回相对截断 margin（P0-5④；0 = 关闭）
+    retrieval_score_margin: float
     # 进模型的结果体量上限（§5.11-V3 双上限分离）
     sql_max_rows_for_prompt: int
     sql_prompt_max_bytes: int

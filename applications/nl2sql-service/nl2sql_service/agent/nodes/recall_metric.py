@@ -41,7 +41,12 @@ async def recall_metric(state: dict[str, Any]) -> dict[str, Any]:
         except Exception:  # noqa: BLE001 - 向量化失败降级为空召回，不阻断查询
             embedding = None
 
+    filters = (("datasource_id", datasource_id),) if datasource_id else ()
     metrics = await ctx.metric_repository.recall(
-        keywords, embedding=embedding, top_k=state.get("retrieval_top_k", 10)
+        keywords,
+        embedding=embedding,
+        top_k=state.get("retrieval_top_k", 10),
+        score_margin=state.get("retrieval_score_margin", 0.0),
+        filters=filters,
     )
     return {"metrics": metrics}
