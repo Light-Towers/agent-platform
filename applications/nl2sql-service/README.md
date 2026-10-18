@@ -68,10 +68,11 @@ curl -X POST http://localhost:8000/api/query -H 'Content-Type: application/json'
 
 DDL 在 `nl2sql_service/migrations/001_meta_schema.up.sql`（回滚见同名 `.down.sql`），是元知识库结构的唯一真相源：
 
-- 表：`nl2sql_column_info` / `nl2sql_metric_info` / `nl2sql_value_info` / `nl2sql_relation_info` / `nl2sql_alias_info` + 版本标记 `nl2sql_schema_meta`
+- 表：`nl2sql_column_info` / `nl2sql_metric_info` / `nl2sql_value_info` / `nl2sql_relation_info` / `nl2sql_alias_info` + 版本标记 `nl2sql_schema_meta`（v1）
+- v2（`002_meta_lifecycle.up.sql`）：`nl2sql_session_state`（多轮继承四元组 + 已确认 NL→SQL 对）、`nl2sql_query_trace`（P0-4 追溯：召回/绑定/字典命中/成本/双版本号）、`nl2sql_table_stats`（P0-3 行数估值 → 聚合引导）
 - `vector(N)` 的维度由 `VECTOR_DIM` 决定，执行时替换；必须与 embedding 模型输出一致
 - `nl2sql_value_info.value_tsvector` 是从 `search_text` 生成的列，`search_text` 必须由构建方写入**同一套分词**后的空格拼接结果（写入/查询单源，中英文都走 `simple` 配置）
-- 改 schema 一律新增 `002_*.up.sql`，不回改 001；所有语句幂等，可重复执行
+- 改 schema 一律新增 `00N_*.up.sql`，不回改已入库的旧迁移；所有语句幂等，可重复执行
 - 服务启动**不自动建表**（生产库未必给 DDL 权限）；是否自动化待库权限确认后再定
 
 ## 元知识参数化
