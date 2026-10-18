@@ -10,6 +10,7 @@ from fastapi import FastAPI, HTTPException, Request
 from shared_schemas import HealthResponse, HealthStatus
 
 from nl2sql_service.api.dependencies import lifespan
+from nl2sql_service.api.routers.meta_admin_router import router as meta_admin_router
 from nl2sql_service.api.routers.pools_router import router as pools_router
 from nl2sql_service.api.routers.query_router import router
 
@@ -72,6 +73,7 @@ def create_app() -> FastAPI:
     mount_identity_gate(app, "nl2sql-service")
     app.include_router(router)
     app.include_router(pools_router)
+    app.include_router(meta_admin_router)
     app.get("/health", response_model=HealthResponse)(handle_health)
     app.get("/ready")(handle_ready)
     return app

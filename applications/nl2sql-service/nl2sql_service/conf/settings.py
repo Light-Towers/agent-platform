@@ -31,6 +31,8 @@ class Settings(BaseLLMSettings):
     datasource_id: str = "dw"
     datasource_label: str = ""  # 口径标签（P1-3②），随响应体返回，如"数仓 T+1、已清洗"
     datasource_dialect: str = ""  # 空 = 按 dw_db_dsn scheme 探测；否则 postgres|mysql
+    # 业务数仓 schema 作用域（漂移检测 / 表统计按它扫；Doris 兼容 information_schema）
+    dw_schema: str = "public"
 
     # LLM 补充字段
     llm_max_retries: int = 3
@@ -245,6 +247,9 @@ def get_settings() -> Settings:
         overrides["linkable_columns"] = probe_yaml.get("linkable_columns", []) or []
     if "meta_db" in meta_yaml:
         overrides["table_prefix"] = meta_yaml["meta_db"].get("table_prefix", "nl2sql_")
+    dw_meta_yaml = meta_yaml.get("dw_db") or {}
+    if dw_meta_yaml:
+        overrides["dw_schema"] = dw_meta_yaml.get("schema", "public")
     if "pool" in app_yaml:
         overrides.update(_pool_overrides(app_yaml))
 
