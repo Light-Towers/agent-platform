@@ -14,7 +14,7 @@ from typing import Any
 
 from nl2sql_service.agent.llm import LLMClient
 from nl2sql_service.agent.nodes._prompt import json_block, load_prompt, render
-from nl2sql_service.agent.nodes.generate_sql import build_table_infos
+from nl2sql_service.agent.nodes.generate_sql import build_relations_block, build_table_infos
 
 _FALLBACK = "纠正以下 SQL：\n{sql}\n错误：{error}\n已尝试：\n{attempted_sql}"
 
@@ -54,6 +54,8 @@ async def correct_sql(state: dict[str, Any]) -> dict[str, Any]:
         # error_detail，回落 error。
         error=state.get("error_detail") or error,
         attempted_sql=build_attempted_block(state.get("attempted_sql")),
+        # 关系声明与生成轮同源（P0-11④：纠正轮上下文不少于生成轮）
+        relations=build_relations_block(state.get("relations")),
     )
     corrected = await llm.invoke(prompt)
     # error_detail 一并清空：它是"本轮执行的原始错误"，纠正后已过期

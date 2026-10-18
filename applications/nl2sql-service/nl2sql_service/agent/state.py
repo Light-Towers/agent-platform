@@ -12,6 +12,10 @@ class DataAgentState(TypedDict, total=False):
     columns: list[dict[str, Any]]
     metrics: list[dict[str, Any]]
     values: list[dict[str, Any]]
+    # 表间关系声明（§5.14-R3 召回；生成期 JOIN 条件显式注入）
+    relations: list[dict[str, Any]]
+    # 数据源维度（P1-6：召回过滤与 schema 作用域；缺省空串）
+    datasource_id: str
     retrieved_info: str
     extra_context: str
     # 生成期日期上下文（QueryService 注入；P0-11①）
