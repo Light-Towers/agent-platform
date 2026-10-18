@@ -37,3 +37,8 @@ class DataAgentState(TypedDict, total=False):
     retrieval_top_k: int
     rrf_k: int
     tokenizer: str
+    # 进模型的结果体量上限（§5.11-V3 双上限分离）
+    sql_max_rows_for_prompt: int
+    sql_prompt_max_bytes: int
+    # 漂移检测产出的表行数估值（P0-3 → 聚合引导；无估值则不引导）
+    table_stats: list[dict[str, Any]]

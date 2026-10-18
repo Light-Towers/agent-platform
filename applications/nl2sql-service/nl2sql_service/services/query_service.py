@@ -56,6 +56,11 @@ class QueryService:
             "rrf_k": settings.rrf_k,
             "tokenizer": settings.tokenizer,
             "date_info": build_date_info(settings),
+            # 进模型的结果体量上限（§5.11-V3 双上限分离）
+            "sql_max_rows_for_prompt": settings.sql_max_rows_for_prompt,
+            "sql_prompt_max_bytes": settings.sql_prompt_max_bytes,
+            # 漂移检测表统计（P0-3 → 聚合引导）；无则空，不猜表大小
+            "table_stats": getattr(self._context, "table_stats", None) or [],
         }
         if metric_config is not None:
             state["metric_config"] = (
@@ -65,13 +70,29 @@ class QueryService:
             )
         try:
             result = await self._graph.ainvoke(state)
-            return {
-                "answer": result.get("answer", ""),
-                "sql": result.get("sql", ""),
-                "result": result.get("result"),
-                "error": result.get("error"),
-                "fallback": False,
-            }
+            return self._build_response(result)
         except Exception:
             logger.exception("query service failed")
             return {"answer": "", "error": "internal error", "fallback": True}
+
+    @staticmethod
+    def _build_response(result: dict[str, Any]) -> dict[str, Any]:
+        """图结果 → 响应体。
+
+        降级拒答（P0-8③ 的配套、L4 兜底）：什么都没召回到、也没生成 SQL 时，
+        明确拒答而不是回空 answer——空回答对用户等于"系统坏了"，拒答至少可行动。
+        """
+        response = {
+            "answer": result.get("answer", ""),
+            "sql": result.get("sql", ""),
+            "result": result.get("result"),
+            "error": result.get("error"),
+            "fallback": False,
+        }
+        if not response["sql"] and not response["error"]:
+            response["answer"] = response["answer"] or (
+                "未召回到与问题相关的元知识（表/列/指标/取值均为空），已拒绝猜测。"
+                "请通过 metric_config 补充相关定义，或换一种问法。"
+            )
+            response["fallback"] = True
+        return response

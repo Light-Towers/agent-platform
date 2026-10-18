@@ -8,6 +8,7 @@ from typing import Any
 from langgraph.graph import END, START, StateGraph
 
 from nl2sql_service.agent.nodes.add_extra_context import add_extra_context
+from nl2sql_service.agent.nodes.answer import answer
 from nl2sql_service.agent.nodes.correct_sql import correct_sql
 from nl2sql_service.agent.nodes.execute_sql import execute_sql
 from nl2sql_service.agent.nodes.extract_keywords import extract_keywords
@@ -34,16 +35,17 @@ def _route_after_validate(state: dict[str, Any]) -> str:
 
 
 def _route_after_execute(state: dict[str, Any]) -> str:
-    """执行后路由（方案 §5.11-E2 图修正：执行期异常进纠错回路）。
+    """执行后路由（方案 §5.11-E2 图修正 + M0-4 answer 边）。
 
-    成功 → END；可纠正/可改写且 correct_count 未达上限 → correct_sql；
+    成功 → answer 合成（M0-4：此前直接 END，`answer` 恒空）；
+    可纠正/可改写且 correct_count 未达上限 → correct_sql；
     不可纠正（fatal）或达上限 → 错误终态（END）。
 
     correct_count 与 validate 回路**共用同一个上限**（E4：总 LLM 调用数
     = sql_max_correct_retries + 固定开销，两个回路各计 3 次就没了闸）。
     """
     if not state.get("error"):
-        return END
+        return "answer"
     if state.get("error_class") in ("correctable", "rewritable") and state.get(
         "correct_count", 0
     ) < state.get("sql_max_correct_retries", 3):
@@ -67,6 +69,7 @@ def build_graph():
     graph.add_node("validate_sql", validate_sql)
     graph.add_node("execute_sql", execute_sql)
     graph.add_node("correct_sql", correct_sql)
+    graph.add_node("answer", answer)
 
     graph.add_edge(START, "extract_keywords")
 
@@ -95,11 +98,12 @@ def build_graph():
     graph.add_edge("correct_sql", "validate_sql")
     # 2026-10-18（方案 §5.11-E2）：execute_sql 从无条件边改条件边——
     # 执行期异常（correctable/rewritable）进 correct 回路，fatal/达上限
-    # 直接错误终态。此前模型永远不知道它的 SQL 在真实库上失败了。
+    # 直接错误终态；成功走 answer 合成（M0-4）。
     graph.add_conditional_edges(
         "execute_sql",
         _route_after_execute,
-        {"correct_sql": "correct_sql", END: END},
+        {"answer": "answer", "correct_sql": "correct_sql", END: END},
     )
+    graph.add_edge("answer", END)
 
     return graph.compile()

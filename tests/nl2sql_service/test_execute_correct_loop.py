@@ -92,7 +92,7 @@ def test_classify_error_message_stays_external_facing():
 @pytest.mark.parametrize(
     ("state", "expected"),
     [
-        ({"error": ""}, END),
+        ({"error": ""}, "answer"),
         ({"error": "查询失败", "error_class": "correctable", "correct_count": 0}, "correct_sql"),
         (
             {"error": "查询超时", "error_class": "rewritable", "correct_count": 1, "sql_max_correct_retries": 3},
@@ -144,6 +144,7 @@ async def test_correctable_failure_triggers_one_correction_then_succeeds():
             "not-json",  # extract_keywords 的抽取结果（解析失败回落分词）
             "SELECT amount FROM orders LIMIT 1",  # generate_sql
             "SELECT amount AS n FROM orders LIMIT 1",  # correct_sql
+            "共 1 行。",  # answer 合成（M0-4）
         ]
     )
     dw = _ScriptedDw(1, RuntimeError('column "x" does not exist'))
@@ -156,8 +157,9 @@ async def test_correctable_failure_triggers_one_correction_then_succeeds():
     assert result["error"] == ""
     assert result["result"] == [{"n": 1}]
     assert result["error_class"] == "", "成功轮必须清空 error_class，否则路由会把成功轮送进 correct"
+    assert result["answer"] == "共 1 行。", "成功执行必须产出非空 answer（M0-4）"
     assert dw.calls == 2
-    assert len(llm.prompts) == 3, f"LLM 调用次数异常: {len(llm.prompts)}"
+    assert len(llm.prompts) == 4, f"LLM 调用次数异常: {len(llm.prompts)}"
 
     correct_prompt = llm.prompts[2]
     assert 'column "x" does not exist' in correct_prompt, "DB 原文必须进 correct prompt"
@@ -175,6 +177,7 @@ async def test_attempted_sql_accumulates_across_failures():
             "SELECT a FROM orders LIMIT 1",
             "SELECT b FROM orders LIMIT 1",
             "SELECT c AS n FROM orders LIMIT 1",
+            "共 1 行。",  # answer
         ]
     )
     dw = _ScriptedDw(2, RuntimeError('column "x" does not exist'))
@@ -186,7 +189,7 @@ async def test_attempted_sql_accumulates_across_failures():
 
     assert result["result"] == [{"n": 1}]
     assert dw.calls == 3
-    assert len(llm.prompts) == 4
+    assert len(llm.prompts) == 5
     # 第二次纠正时，prompt 里必须已有两次失败痕迹
     assert "SELECT a FROM orders LIMIT 1" in llm.prompts[3]
     assert "SELECT b FROM orders LIMIT 1" in llm.prompts[3]
