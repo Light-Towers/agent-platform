@@ -56,6 +56,8 @@ class QueryService:
             "rrf_k": settings.rrf_k,
             "tokenizer": settings.tokenizer,
             "date_info": build_date_info(settings),
+            # filter_table 的 LLM 过滤开关（#109）：服务端单源注入，客户端不可覆盖
+            "filter_table_enabled": settings.filter_table_enabled,
         }
         if metric_config is not None:
             state["metric_config"] = (

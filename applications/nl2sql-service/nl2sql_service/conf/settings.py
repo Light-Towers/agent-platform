@@ -61,6 +61,11 @@ class Settings(BaseLLMSettings):
     sql_max_rows: int = 1000  # 区别于 agent_server(100)：本服务为专职数据查询工具，结果由前端 UI 展示而非注入 LLM prompt
     sql_max_correct_retries: int = 3
 
+    # filter_table 节点的 LLM 表过滤开关（#109，默认关）：_derive_tables 救活该节点后
+    # 每请求会多一次 LLM 往返，且 LLM 输出只允许在派生清单内收窄（白名单交集）。
+    # 关 = 不过滤、不产生该调用（派生表级视图照常进生成期）；开 = 多一次调用换更准的表清单。
+    filter_table_enabled: bool = False
+
     # 分词器：jieba | bigram（jieba 需装可选 extra `[tokenizer]`，缺包时告警降级 bigram）
     tokenizer: str = "bigram"
 
