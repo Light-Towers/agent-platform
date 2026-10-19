@@ -8,7 +8,7 @@
 
 > **2026-10-16 索引表机械重算记录（不是目测）**：逐节重取表格 body 行数与「条数」列求和，本节各分级的声明值与实算值**全部一致**——
 > 0.1 = 4 / 0.2 = 4 / 0.3 = **5 组求和 13**（其中「未接线半成品转正」组记 **0**，即 §3 那三条已于 10-15 全部翻勾后归零，不是漏计）/ 0.4 = 6 行在册（4 开项 + 2 条 `~~删除线~~` 已清零：D4、10 个 BOM `.py`）/ 0.5 = 5 行非开项对账。
-> 全文复选框现值 **open 35 / closed 14**（2026-10-19 R 批分两批共登记 10 条后；追记是逐条累计的，取最后一条即现值）。
+> 全文复选框现值 **open 34 / closed 15**（2026-10-19 R 批两批登记 10 条 + R7 闭合 1 条后；追记是逐条累计的，取最后一条即现值）。
 > **登记一处口径重叠，未擅自重排**：0.3 标题写「全部『先方案后编码』，**无外部条件依赖**」，但其内嵌的会展 `F2 真实 LLM 连接` 标注了「需产品决策输入」——按 0.1/0.2 的分类那更像一条「需拍板」项。
 > 现在它同时出现在 0.3（作为 D 组功能存量）与台账 §3 第 5 项的语义邻域里。这属分级口径的划法问题（按"卡在哪"分 vs 按"是什么面"分），**改法要动多条行，等用户定，不在本批顺手搬**。
 > 复算脚本（入库可重跑，本文件为唯一数据源）：`uv run python scripts/evidence/recount_todo_index.py`（全部一致 ⇒ 退出码 0；任何分级不符 ⇒ 1）。
@@ -23,6 +23,7 @@
 > **（2026-10-16 追记，E 组 BOM 清零批）**：本批翻转 **恰 1 处**复选框——§0.4/§5 的「10 个已入库 UTF-8 BOM `.py`」，判据 = 逐文件 `old == BOM + new` 字节断言 + 全仓 `.py` BOM 复扫归零 + nl2sql 21 passed / 治理与契约合跑 37 passed / lint rc=0 / ruff 全绿（细节与**有意偏离原处方的两条论证**见 §5 该项闭合记录）。按**相对口径** open 27→26、closed 12→13、E 组开项 6→5（§0.4 标题同批改写为「6 行在册 = 5 条开项 + 1 条已清零」）。可由 `git diff HEAD~1 -- docs/TODO.md` 核：`- [ ]` → `- [x]` 恰 **1** 处。本批另在同一文件追加一条**取证签名失效**追记（§5 的 15-errors 项：其"恰好 15 条用例"的定位数因 `bd4fb0b` 变成 17 ⇒ 下次不得再用 15 定位），**该项保持开项未翻勾**。绝对值仍受上文登记的口径不一致影响 ⇒ 不重开对账、不倒推历史数。
 > **（2026-10-16 追记二，D4 ruff 豁免逐包收窄批）**：本批翻转 **恰 1 处**复选框——§0.4/§5 的 D4。判据按本仓实际结构定为**两种口径分开读**（A=只摘该包 config 里这一条后跑 `ruff check <包目录>`，即 CI 等价；B=`--isolated --select <规则>`，即"这族若启用会报多少"），因为**本仓有 6 份 ruff config 且 ruff 按最近 config 分层生效**——只看根 config 会把嵌套包的存量误读成 0（实测 E402 根 A=25 而全仓 B=57，差 32 = federation 28 + agent-runtime 4）。结果：**21 条豁免删 9 保 12**（删的都是 A=B=0 的死豁免；保留 12 条各有实取存量或 `make type --select ALL` 作用面）。每条删除都放了探针反证非空转（E731/E402/E722/F403/F405/F811 各自报出），顺带查实两条注释陈旧：KS 的 `E722 存量 1 处（node_rrf.py:39）`已不成立、`F405 存量 18 处`实取 **17** ⇒ 已按实取订正。"B/PERF/RUF 四族要不要进 select"是规则集扩容决策 ⇒ 转排期 §3 第 18 行待拍板。按**相对口径** open 26→25、closed 13→14、E 组开项 5→4（§0.4 标题同批改为「6 行在册 = 4 条开项 + 2 条已清零」）。可由 `git diff HEAD~1 -- docs/TODO.md` 核 `- [ ]`→`- [x]` 恰 1 处。绝对值仍受上文口径不一致影响 ⇒ 不重开对账、不倒推历史数。
 > **（2026-10-19 追记二，R 批续登记 R7-R10·零翻转）**：第一批评审（feat 合入前）的延优项 #3/#4/#6/#8 逐条 feat 复验有效后登记——R7（#119，dw 会话级 SET 无效+注释误导，E）、R8（#120，L2 多表/SELECT * fail-open，**D·先方案后编码**）、R9（#121，blob GC 不查引用+启用门槛未文档化，E；非同事务债已在 §3 第 7 行不重复）、R10（#122，workspace 无断言路径，**D·先方案后编码**）。diff 内 `- [ ]`→`- [x]` **零处** ⇒ 按相对口径 open 31→35、closed 14 不变、E 组开项 10→12（§0.4 标题改为「14 行在册 = 12 条开项 + 2 条已清零」）、D 组 13→15（§0.3 标题改为 15 条，新增"nl2sql 评审延优"组行计 2）。可由 `git diff HEAD~1 -- docs/TODO.md` 核：新增 `- [ ]` 恰 **4** 处、状态变更 **0** 处。
+> **（2026-10-19 追记三，R7 #119 闭合批）**：本批翻转 **恰 1 处**复选框——§5 的 R7。修法取登记时的第一选项"事务内 `SET LOCAL`"：`execute_readonly` 与 `execute_probe` 同构（事务内 `SET LOCAL default_transaction_read_only = on`，退出即撤、不污染池连接，不再依赖连接重置语义）；`dependencies.py`/`settings.py`/`.env.example` 的误导注释同批修正（"两道都在"的第三道防线错觉消除 + 关掉连接级只读的后果写明）；方案文档两处引用同步（"契约与状态卫生"③、行级权限证据行）。回归测试 `tests/test_dw_repository_readonly.py` 3 例（事务级 SET LOCAL 形态 / 禁会话级 SET / helper 同闸）。按**相对口径** open 35→34、closed 14→15、E 组开项 12→11（§0.4 标题同批改为「14 行在册 = 11 条开项 + 3 条已于 2026-10-16/10-19 清零」）。可由 `git diff HEAD~1 -- docs/TODO.md` 核：`- [ ]`→`- [x]` 恰 **1** 处。
 > **（2026-10-19 追记，R 批登记·零翻转）**：本批**只登记不翻转**——§0.4/§5 新增 R1-R6 六条（nl2sql 合入前评审 #12-#17 的"建议"级，逐条在 feat 线复验有效：黑名单放行 5 类函数为实测、classify_error 字符串优先、`str(raw)`、lru_cache、唯一键缺 table_name、段名静默忽略均实读确认；同批"严重/警告"级 #1-#11 已修复关闭）。diff 内 `- [ ]`→`- [x]` **零处** ⇒ 按相对口径 open 25→31、closed 14 不变、E 组开项 4→10（§0.4 标题同批改为「12 行在册 = 10 条开项 + 2 条已清零」）。可由 `git diff HEAD~1 -- docs/TODO.md` 核：新增 `- [ ]` 恰 **6** 处、状态变更 **0** 处。
 > **（2026-10-05 追记，本批为 PR #55 处置收口）**：本批只做**状态订正**（§0.2 第 1 行 / §0.5 的 open PR、alerts、分支形态 / §8 的 Dependabot 门禁条），**未新增、未关闭任何开项**——diff 内零 `- [ ]` ↔ `- [x]` 状态变更（可用 `git diff docs/TODO.md` 判），故上行的计数口径与数值不变。**不在此处重述计数**：本机实测 `^- \[ \]` 与 `^\s*- \[ \]` 都得 31、`^- \[x\]` 得 8，与上行「顶格正则只取到 15 / closed 7」的既有口径不一致（成因未查，不做推定复现）⇒ 仍以「先定义口径再引用、不从文件外口头汇总」为规矩，本批不引入第二个数。
 
@@ -55,7 +56,7 @@
 | 检索 / 存储增强 | 3 | LightRAG 式图谱增强检索 · MySQL 业务库支持 · 多租户配额/隔离/计费 | §7 |
 | nl2sql 评审延优 | 2 | L2 guard 多表未限定列 / SELECT * fail-open 策略（R8）· workspace_id 服务端断言路径（R10，随身份门 rollout） | §5 R 批 |
 
-### 0.4 E Low 技术债（14 行在册 = **12 条开项 + 2 条已于 2026-10-16 清零**；非阻塞，可随日常改动顺带处理）
+### 0.4 E Low 技术债（14 行在册 = **11 条开项 + 3 条已于 2026-10-16/10-19 清零**；非阻塞，可随日常改动顺带处理）
 
 | 事项 | 锚点 | 为什么留着（不是遗漏） |
 |------|------|------------------------|
@@ -222,7 +223,7 @@
 - [ ] R4（issue #116）：`load_prompt` 的 `lru_cache` 取消 prompt 热改能力（改 prompt 文件不重启不生效）。修法：按 `st_mtime` 做缓存键，或保留每请求读盘。
 - [ ] R5（issue #117）：`nl2sql_value_info` 唯一键 `(tenant, workspace, datasource, column_name, value)` 不含 `table_name`——同名列（`orders.status` vs `venues.status`）会撞约束且无法回溯所属表；`search_text` 无分词器版本标记（换 tokenizer 后既有 tsvector 静默失效）。修法：唯一键与查询谓词加 `table_name`；加 `tokenizer`/`search_text_ver` 列。**涉 DDL 迁移，先方案后动**。
 - [ ] R6（issue #118）：`app_config.yaml` 段名拼错被静默忽略（`pool.meta_db` 返回 `{}` 无提示；而同段内未知键会 raise）。修法：未知子段同样 raise；或明确"池配置只走 YAML、env 仅作覆盖"（与 #105 修法同属配置面，宜同批）。
-- [ ] R7（issue #119，E）：`dw execute_readonly` 的会话级 `SET default_transaction_read_only = on` **对当前事务无效**（psycopg3 autocommit=False 下与后续 SQL 同处 T1，该参数只作用于其后开启的事务；且残留污染池连接，与同文件 `execute_probe` 的 `SET LOCAL` 纪律自相矛盾）。默认配置非现网 fail-open（连接级已只读）；风险在关掉连接级只读时"两道都在"注释（`dependencies.py`）给出第三道防线的错觉。修法：事务内 `SET LOCAL`，或删该行+修正注释+README 写明后果。
+- [x] R7（issue #119，E，**2026-10-19 闭合**）：`dw execute_readonly` 的会话级 `SET default_transaction_read_only = on` **对当前事务无效**（psycopg3 autocommit=False 下与后续 SQL 同处 T1，该参数只作用于其后开启的事务；且残留污染池连接，与同文件 `execute_probe` 的 `SET LOCAL` 纪律自相矛盾）。默认配置非现网 fail-open（连接级已只读）；风险在关掉连接级只读时"两道都在"注释（`dependencies.py`）给出第三道防线的错觉。修法：事务内 `SET LOCAL`，或删该行+修正注释+README 写明后果。**已闭合（2026-10-19）**：取第一选项——`execute_readonly` 与 `execute_probe` 同构（事务内 `SET LOCAL default_transaction_read_only = on`，退出即撤、不污染池连接）；`dependencies.py`/`settings.py`/`.env.example` 误导注释同批修正（"两道都在"错觉消除 + 关掉连接级只读的后果写明）；回归测试 `tests/test_dw_repository_readonly.py` 3 例（事务级 SET LOCAL 形态 / 禁会话级 SET / helper 同闸）。
 - [ ] R8（issue #120，**D·先方案后编码**）：L2 列白名单在**多表未限定列**与 **SELECT *** 上跳过校验——`SELECT phone AS p FROM a JOIN b` 的结果键是别名 `p`，多表绕过 L2（`single=""` 不收未限定列）、别名绕过 L3（bare 名集合不含 p）⇒ 敏感列既不拒也不脱。缺口在 `agent_core.sql.guard`（Stage ③ 后全局共享）。修法方向：多表命中任一候选表敏感列即拒；SELECT * 直接拒；L3 匹配源列名。
 - [ ] R9（issue #121，E）：payload blob GC 不查引用即删（age ≥ 168h 即删，挂起超 7 天的 awaitable resume 后 internalize 返回 reference ⇒ 静默数据损坏）；`gc_min_age_hours` 无 env 透传（调大要改代码）；**启用门槛未文档化**。非同事务债（blob 与 PG）已在 §3 第 7 行登记不重复。修法：引用检查/索引表 + env 化 + 启用门槛写进 ADR-0011/TODO。
 - [ ] R10（issue #122，**D·先方案后编码**）：`workspace_id` 无服务端断言路径（`tenant_scope.py` docstring 自认；查询侧 `resolve_scope` 采信请求体）⇒ 多工作区部署下归属维可被伪造（tenant 维已被 #104 系列收口，workspace 维形同虚设；#104 已把 ingest 写侧收到服务端 default）。修法：与 tenant 同套接身份门 claim，或明确"enforce 前不作为隔离维"写进 ADR-0007。
