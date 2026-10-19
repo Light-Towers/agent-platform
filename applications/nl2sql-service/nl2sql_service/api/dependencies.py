@@ -82,8 +82,9 @@ async def lifespan(app: FastAPI):
             max_size=settings.dw_db_pool_max_size,
             timeout=settings.dw_db_pool_timeout,
             statement_timeout_ms=settings.dw_db_statement_timeout_ms,
-            # 连接级只读：这个池上跑的是 LLM 生成的 SQL。DwRepository 里每次执行前
-            # 的 SET 是第三道防线，两道都在，任一被绕过都还有另一道。
+            # 连接级只读（可关）：这个池上跑的是 LLM 生成的 SQL。DwRepository 每次
+            # 执行还有一道事务级 SET LOCAL（#119，退出即撤）——本开关置 false 时
+            # 语句级仍生效，但只剩它 + 账号 GRANT SELECT 兜底，勿轻易关。
             read_only=settings.dw_db_connection_read_only,
         )
         await dw_pool.open()
