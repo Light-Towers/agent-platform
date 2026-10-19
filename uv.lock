@@ -1622,6 +1622,7 @@ dependencies = [
     { name = "langgraph" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
+    { name = "pyjwt", extra = ["crypto"] },
     { name = "uvicorn", extra = ["standard"] },
 ]
 
@@ -1646,6 +1647,7 @@ requires-dist = [
     { name = "langgraph", specifier = ">=1.2.10,<2" },
     { name = "pydantic", specifier = ">=2.13.5" },
     { name = "pydantic-settings", specifier = ">=2.2" },
+    { name = "pyjwt", extras = ["crypto"], specifier = ">=2.14.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.54.0" },
