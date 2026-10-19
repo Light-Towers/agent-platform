@@ -21,11 +21,12 @@ class IngestRequest(BaseModel):
     ddl: str | list[str] = Field(default_factory=list, description="CREATE TABLE DDL 文本（可多条）")
     docs: str | list[str] = Field(default_factory=list, description="业务文档自由文本（可多条）")
     examples: list[IngestExample] = Field(default_factory=list, description="NL→SQL 范例")
-    # 作用域（P1-1 隔离）：tenant 按 ADR-0007 服务端断言 > 本字段 > default_tenant；
-    # workspace 取本字段 > default_workspace。datasource 缺省取服务端默认源。
-    tenant_id: str | None = Field(None, description="租户（服务端断言优先；缺省单租户 dev）")
-    workspace_id: str | None = Field(None, description="工作区（归属细维）")
-    datasource_id: str | None = Field(None, description="数据源 ID（缺省服务端默认源）")
+    # 作用域（#102）：tenant/workspace **不接受请求体归属**——携带非空值即 400；
+    # 落点一律服务端断言（tenant，无断言 401）/ 服务端 default（workspace，#8 在册）。
+    # 字段保留仅为 wire 兼容（/sql/train 历史形状），不再参与解析。
+    tenant_id: str | None = Field(None, description="已拒收：写端点不接受请求体租户（携带即 400）")
+    workspace_id: str | None = Field(None, description="已拒收：写端点不接受请求体工作区（携带即 400）")
+    datasource_id: str | None = Field(None, description="数据源 ID（缺省服务端默认源；目标选择，与查询同权）")
 
 
 class IngestReport(BaseModel):

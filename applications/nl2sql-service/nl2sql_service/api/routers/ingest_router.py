@@ -9,13 +9,19 @@
 本端点管在线增量（一次一个作用域、不 prune——范例的差异删是显式运维动作，
 不该被一次摄入顺带删掉）。
 
-**隔离**：tenant 按 ADR-0007 服务端断言 > 请求体 > default_tenant（同 /api/query
-的 `resolve_scope`）；datasource 缺省服务端默认源（与召回过滤同源，否则"摄入了
-但召回按另一个源过滤"恒不可见）。
+**隔离（#102 修订）**：本端点是**写面**，归属只认服务端断言——tenant 取自
+`server_tenant_id()`（身份门 JWT / 内部签名头 / 单租户装配），无断言即 401
+fail-fast，不落任何桶；**不接受请求体 tenant_id/workspace_id**（携带非空值
+400，宁拒勿默——写面的归属让给客户端 = 跨租户元数据投毒，投毒的注释/范例
+直进 generate_sql 的 prompt）。workspace 暂无断言路径（#8 在册），取服务端
+`default_workspace`。datasource 缺省服务端默认源（与召回过滤同源，否则"摄入了
+但召回按另一个源过滤"恒不可见）；请求显式选源与 /api/query 同权（P1-3）——
+它是目标选择，不是身份。
 
-**未接身份门（S-1）下的定位**：与 /api/meta/refresh 同級——登记为内部/运维端点，
-接入身份门后加 admin 断言。写操作的最坏后果是往元知识库加/改行（可 prune/重灌
-恢复），且三类记账全部回传（喂坏了看得见）。
+**网关转发**：agent_server `/sql/train` 改带 `X-Internal-Tenant` 签名头转发
+（信任边界 B）；未配 `INTERNAL_HMAC_KEY` 的部署由转发方 503 拒发，不放行
+未签名写请求。旧调用方直连本端点须自备身份断言（TENANT_JWT_ENFORCE + JWT，
+或内部签名头）。
 """
 
 from __future__ import annotations
@@ -23,12 +29,13 @@ from __future__ import annotations
 from typing import Any
 
 from agent_core.logging import get_logger
+from agent_runtime.workspace_registry import server_tenant_id
 from fastapi import APIRouter, HTTPException, Request
 
 from nl2sql_service.api.schemas.ingest_schema import IngestReport, IngestRequest
 from nl2sql_service.conf.settings import get_settings
 from nl2sql_service.services.ingest_service import build_migration_plan, write_scope
-from nl2sql_service.services.tenant_scope import resolve_scope
+from nl2sql_service.services.tenant_scope import TenantScope
 
 logger = get_logger(__name__)
 
@@ -55,13 +62,25 @@ async def ingest(request: IngestRequest, http_request: Request) -> IngestReport:
     if not (ddl_texts or doc_texts or request.examples):
         raise HTTPException(status_code=400, detail="ddl / docs / examples 至少提供一项")
 
-    # 隔离作用域（P1-1 / ADR-0007）：服务端断言 > 请求体 > default
-    scope = resolve_scope(
-        request_tenant=request.tenant_id,
-        request_workspace=request.workspace_id,
-        default_tenant=settings.default_tenant,
-        default_workspace=settings.default_workspace,
-    )
+    # 归属断言（#102）：写端点不接受请求体归属——先拒收显式携带的 scope 字段
+    # （宁拒勿默：静默忽略会让"以为写进了 A 租户"的调用方无声写错地方），再要
+    # 求服务端断言（无断言 401 fail-fast，不落任何桶）。
+    if request.tenant_id or request.workspace_id:
+        raise HTTPException(
+            status_code=400,
+            detail="写入端点不接受请求体归属字段（tenant_id/workspace_id）：作用域一律取服务端断言",
+        )
+    try:
+        tenant = server_tenant_id()
+    except ValueError as exc:
+        # 身份门未绑定且无部署级 default ⇒ 漏传即抛（_tenant_gate 纪律：不静默落共享桶）
+        raise HTTPException(
+            status_code=401,
+            detail="写入端点需要服务端身份断言（TENANT_JWT_ENFORCE + JWT，或经网关带 X-Internal-Tenant 签名头）",
+        ) from exc
+    # workspace 暂无断言路径（#8 在册债）：取服务端 default，不采信请求体
+    workspace = settings.default_workspace or ""
+    scope = TenantScope(tenant_id=tenant, workspace_id=workspace)
     ds_id = request.datasource_id or settings.datasource_id
 
     # 复用迁移计划（纯函数）：DDL 解析 + 文档关联 + 记账；override 传解析出的
