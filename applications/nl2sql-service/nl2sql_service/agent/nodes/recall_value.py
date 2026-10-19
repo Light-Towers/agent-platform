@@ -7,7 +7,11 @@
 
 from typing import Any
 
+from agent_core.logging import get_logger
+
 from nl2sql_service.agent.context import DataAgentContext
+
+logger = get_logger(__name__)
 
 
 async def recall_value(state: dict[str, Any]) -> dict[str, Any]:
@@ -21,9 +25,13 @@ async def recall_value(state: dict[str, Any]) -> dict[str, Any]:
     if ctx is None or ctx.value_repository is None:
         return {"values": []}
 
-    values = await ctx.value_repository.recall(
-        keywords,
-        embedding=state.get("query_embedding"),
-        top_k=state.get("retrieval_top_k", 10),
-    )
+    try:
+        values = await ctx.value_repository.recall(
+            keywords,
+            embedding=state.get("query_embedding"),
+            top_k=state.get("retrieval_top_k", 10),
+        )
+    except Exception:  # noqa: BLE001 - 召回路 DB 故障降级为空，不阻断查询（#106）
+        logger.warning("value recall failed, degraded to empty", exc_info=True)
+        values = []
     return {"values": values}

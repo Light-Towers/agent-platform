@@ -7,7 +7,11 @@ embedding 由 extract_keywords 统一计算后经 `state["query_embedding"]` 传
 
 from typing import Any
 
+from agent_core.logging import get_logger
+
 from nl2sql_service.agent.context import DataAgentContext
+
+logger = get_logger(__name__)
 
 
 async def recall_column(state: dict[str, Any]) -> dict[str, Any]:
@@ -28,7 +32,11 @@ async def recall_column(state: dict[str, Any]) -> dict[str, Any]:
         except Exception:  # noqa: BLE001 - 向量化失败降级为空召回，不阻断查询
             embedding = None
 
-    columns = await ctx.column_repository.recall(
-        keywords, embedding=embedding, top_k=state.get("retrieval_top_k", 10)
-    )
+    try:
+        columns = await ctx.column_repository.recall(
+            keywords, embedding=embedding, top_k=state.get("retrieval_top_k", 10)
+        )
+    except Exception:  # noqa: BLE001 - 召回路 DB 故障降级为空，不阻断查询（#106）
+        logger.warning("column recall failed, degraded to empty", exc_info=True)
+        columns = []
     return {"columns": columns}
