@@ -190,6 +190,9 @@ def _env_provided_fields(env_file: str = ".env") -> set[str]:
 
 #: YAML `pool.<source>.<key>` → Settings 字段名。字段名不对称
 #: （statement_timeout_ms 没有 pool_ 中缀），显式映射不猜名。
+_POOL_SOURCES = ("meta_db", "dw_db")
+#: 合法子段名（source 去 _db 后缀）：`pool.meta` / `pool.dw`。
+_POOL_SECTIONS = tuple(s.removesuffix("_db") for s in _POOL_SOURCES)
 _POOL_KEY_TO_FIELD = {
     ("meta_db", "min_size"): "meta_db_pool_min_size",
     ("meta_db", "max_size"): "meta_db_pool_max_size",
@@ -207,15 +210,34 @@ def _pool_overrides(app_yaml: dict) -> dict:
 
     只覆盖 YAML 里**显式出现**的键，缺项回落 Field 默认，不整段替换——
     否则"YAML 只写一个键"会把其余键打回代码默认，与环境变量优先级语义相悖。
+
+    #118：未知子段显式 raise。此前 `pool.meta_db`（照字段名的自然拼法）拼错
+    会被静默忽略——返回 {} 零提示，运维以为配额生效了其实没有；同段内未知键
+    早就 raise，子段侧补齐。段值非映射同样拒（否则 .items() 抛 AttributeError，
+    报错指不到配置行）。
     """
     pool_yaml = app_yaml.get("pool") or {}
+    if not isinstance(pool_yaml, dict):
+        raise ValueError("app_config.yaml pool 段必须是映射（meta:/dw: 两个子段）")
+    unknown_sections = set(pool_yaml) - set(_POOL_SECTIONS)
+    if unknown_sections:
+        raise ValueError(
+            f"app_config.yaml pool 段出现未知子段: {', '.join(sorted(unknown_sections))}"
+            f"（合法子段: {', '.join(_POOL_SECTIONS)}；段名拼错会被静默忽略，故显式拒）"
+        )
     out: dict = {}
-    for source in ("meta_db", "dw_db"):
-        section = pool_yaml.get(source.removesuffix("_db")) or {}
+    for source in _POOL_SOURCES:
+        section_name = source.removesuffix("_db")
+        section = pool_yaml.get(section_name) or {}
+        if not isinstance(section, dict):
+            raise ValueError(
+                f"app_config.yaml pool.{section_name} 必须是映射，"
+                f"得到 {type(section).__name__}"
+            )
         for key, value in section.items():
             field = _POOL_KEY_TO_FIELD.get((source, key))
             if field is None:
-                raise ValueError(f"app_config.yaml pool.{source.removesuffix('_db')} 出现未知键: {key}")
+                raise ValueError(f"app_config.yaml pool.{section_name} 出现未知键: {key}")
             out[field] = value
     return out
 

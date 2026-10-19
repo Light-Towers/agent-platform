@@ -187,6 +187,71 @@ def test_payload_externalization_enabled_builds_externalizer(_settings_env, tmp_
     assert isinstance(checkpoint_store._externalizer, PayloadExternalizer)
 
 
+def test_payload_externalization_gc_min_age_hours_env_passthrough(_settings_env, tmp_path):
+    """#121：GC 年龄下限 env 化——调大要改代码的时代结束。"""
+    from agent_server.main import _build_payload_externalizer
+
+    _settings_env.setenv("PAYLOAD_EXTERNALIZATION_ENABLED", "true")
+    _settings_env.setenv("PAYLOAD_EXTERNALIZATION_DIR", str(tmp_path / "blobs"))
+    _settings_env.setenv("PAYLOAD_EXTERNALIZATION_GC_MIN_AGE_HOURS", "720")
+
+    ext = _build_payload_externalizer()
+    assert ext._config.gc_min_age_hours == 720
+
+
+# ===== #121：GC 两段式回调（先候选后引用扫描） =====
+
+
+class _FakeExternalizer:
+    def __init__(self, candidates: list[str]):
+        self._candidates = candidates
+        self.sweep_calls: list[dict] = []
+
+    async def list_gc_candidates(self):
+        return list(self._candidates)
+
+    async def sweep(self, min_age_seconds=None, *, referenced_keys=None):
+        self.sweep_calls.append({"referenced_keys": set(referenced_keys or ())})
+        return {"deleted": len(self._candidates) - len(referenced_keys or ())}
+
+
+class _FakeCheckpointStore:
+    def __init__(self, referenced: set[str]):
+        self._referenced = referenced
+        self.collect_calls = 0
+
+    async def collect_externalized_keys(self) -> set[str]:
+        self.collect_calls += 1
+        return set(self._referenced)
+
+
+async def test_gc_sweep_skips_reference_scan_when_no_candidates():
+    """无删除候选 ⇒ 不查 PG（全表 jsonb_each 有成本，稳态不该每 30s 扫一次）。"""
+    from agent_server.main import _make_gc_sweep
+
+    ext = _FakeExternalizer(candidates=[])
+    store = _FakeCheckpointStore(referenced=set())
+    sweep = _make_gc_sweep(ext, store)
+
+    assert await sweep() is None
+    assert store.collect_calls == 0
+    assert ext.sweep_calls == []
+
+
+async def test_gc_sweep_consults_references_before_deleting():
+    """有候选 ⇒ 先查引用再删；仍在途的引用不被误删（awaitable resume 场景）。"""
+    from agent_server.main import _make_gc_sweep
+
+    ext = _FakeExternalizer(candidates=["payload/a", "payload/b"])
+    store = _FakeCheckpointStore(referenced={"payload/b"})
+    sweep = _make_gc_sweep(ext, store)
+
+    report = await sweep()
+    assert store.collect_calls == 1
+    assert ext.sweep_calls == [{"referenced_keys": {"payload/b"}}]
+    assert report["deleted"] == 1  # 只删不在引用集里的 payload/a
+
+
 def test_payload_externalization_enabled_without_dir_fails_fast(_settings_env):
     """开了开关却没给目录 ⇒ 启动即报错，不静默退回"没开"（那会让 JSONB 继续膨胀而无人知）。"""
     from agent_server.main import _build_payload_externalizer

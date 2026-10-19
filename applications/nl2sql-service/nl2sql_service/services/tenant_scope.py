@@ -15,6 +15,13 @@ agent_server/sql 已按 ADR-0006 做 tenant 隔离，nl2sql 不补就是净倒�
 与既有 meta 行的 tenant_id='' 匹配，行为逐字节不变。workspace 是归属细维
 （ADR-0006 W1），同套优先级；其注册表校验（resolve_workspace）属后续细化，
 本模块只做**作用域值的解析与透传**，不做 workspace 存在性断言。
+
+⚠️ **workspace 不是隔离维（2026-10-19，#122 / ADR-0007 §8）**：workspace 无
+服务端断言路径（身份门当前只签 tenant claim，见 #104），`resolve_scope` 的
+workspace 取请求体 > default ⇒ **客户端可伪造**。多工作区部署下任何按
+workspace 的隔离假设都不成立——这是知情降级而非待修缺陷：升级前置条件
+（claim 签发 + 存储分片 + 谓词过滤 + 存量迁移）见 ADR-0007 §8，满足前不得
+把 workspace 当隔离维宣传或依赖。
 """
 
 from __future__ import annotations

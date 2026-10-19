@@ -8,7 +8,7 @@
 
 > **2026-10-16 索引表机械重算记录（不是目测）**：逐节重取表格 body 行数与「条数」列求和，本节各分级的声明值与实算值**全部一致**——
 > 0.1 = 4 / 0.2 = 4 / 0.3 = **5 组求和 13**（其中「未接线半成品转正」组记 **0**，即 §3 那三条已于 10-15 全部翻勾后归零，不是漏计）/ 0.4 = 6 行在册（4 开项 + 2 条 `~~删除线~~` 已清零：D4、10 个 BOM `.py`）/ 0.5 = 5 行非开项对账。
-> 全文复选框现值 **open 34 / closed 15**（2026-10-19 R 批两批登记 10 条 + R7 闭合 1 条后；追记是逐条累计的，取最后一条即现值）。
+> 全文复选框现值 **open 25 / closed 24**（2026-10-19 R 批两批登记 10 条 + R7 闭合 1 条 + 本批清债翻 9 条后；追记是逐条累计的，取最后一条即现值）。
 > **登记一处口径重叠，未擅自重排**：0.3 标题写「全部『先方案后编码』，**无外部条件依赖**」，但其内嵌的会展 `F2 真实 LLM 连接` 标注了「需产品决策输入」——按 0.1/0.2 的分类那更像一条「需拍板」项。
 > 现在它同时出现在 0.3（作为 D 组功能存量）与台账 §3 第 5 项的语义邻域里。这属分级口径的划法问题（按"卡在哪"分 vs 按"是什么面"分），**改法要动多条行，等用户定，不在本批顺手搬**。
 > 复算脚本（入库可重跑，本文件为唯一数据源）：`uv run python scripts/evidence/recount_todo_index.py`（全部一致 ⇒ 退出码 0；任何分级不符 ⇒ 1）。
@@ -24,6 +24,7 @@
 > **（2026-10-16 追记二，D4 ruff 豁免逐包收窄批）**：本批翻转 **恰 1 处**复选框——§0.4/§5 的 D4。判据按本仓实际结构定为**两种口径分开读**（A=只摘该包 config 里这一条后跑 `ruff check <包目录>`，即 CI 等价；B=`--isolated --select <规则>`，即"这族若启用会报多少"），因为**本仓有 6 份 ruff config 且 ruff 按最近 config 分层生效**——只看根 config 会把嵌套包的存量误读成 0（实测 E402 根 A=25 而全仓 B=57，差 32 = federation 28 + agent-runtime 4）。结果：**21 条豁免删 9 保 12**（删的都是 A=B=0 的死豁免；保留 12 条各有实取存量或 `make type --select ALL` 作用面）。每条删除都放了探针反证非空转（E731/E402/E722/F403/F405/F811 各自报出），顺带查实两条注释陈旧：KS 的 `E722 存量 1 处（node_rrf.py:39）`已不成立、`F405 存量 18 处`实取 **17** ⇒ 已按实取订正。"B/PERF/RUF 四族要不要进 select"是规则集扩容决策 ⇒ 转排期 §3 第 18 行待拍板。按**相对口径** open 26→25、closed 13→14、E 组开项 5→4（§0.4 标题同批改为「6 行在册 = 4 条开项 + 2 条已清零」）。可由 `git diff HEAD~1 -- docs/TODO.md` 核 `- [ ]`→`- [x]` 恰 1 处。绝对值仍受上文口径不一致影响 ⇒ 不重开对账、不倒推历史数。
 > **（2026-10-19 追记二，R 批续登记 R7-R10·零翻转）**：第一批评审（feat 合入前）的延优项 #3/#4/#6/#8 逐条 feat 复验有效后登记——R7（#119，dw 会话级 SET 无效+注释误导，E）、R8（#120，L2 多表/SELECT * fail-open，**D·先方案后编码**）、R9（#121，blob GC 不查引用+启用门槛未文档化，E；非同事务债已在 §3 第 7 行不重复）、R10（#122，workspace 无断言路径，**D·先方案后编码**）。diff 内 `- [ ]`→`- [x]` **零处** ⇒ 按相对口径 open 31→35、closed 14 不变、E 组开项 10→12（§0.4 标题改为「14 行在册 = 12 条开项 + 2 条已清零」）、D 组 13→15（§0.3 标题改为 15 条，新增"nl2sql 评审延优"组行计 2）。可由 `git diff HEAD~1 -- docs/TODO.md` 核：新增 `- [ ]` 恰 **4** 处、状态变更 **0** 处。
 > **（2026-10-19 追记三，R7 #119 闭合批）**：本批翻转 **恰 1 处**复选框——§5 的 R7。修法取登记时的第一选项"事务内 `SET LOCAL`"：`execute_readonly` 与 `execute_probe` 同构（事务内 `SET LOCAL default_transaction_read_only = on`，退出即撤、不污染池连接，不再依赖连接重置语义）；`dependencies.py`/`settings.py`/`.env.example` 的误导注释同批修正（"两道都在"的第三道防线错觉消除 + 关掉连接级只读的后果写明）；方案文档两处引用同步（"契约与状态卫生"③、行级权限证据行）。回归测试 `tests/test_dw_repository_readonly.py` 3 例（事务级 SET LOCAL 形态 / 禁会话级 SET / helper 同闸）。按**相对口径** open 35→34、closed 14→15、E 组开项 12→11（§0.4 标题同批改为「14 行在册 = 11 条开项 + 3 条已于 2026-10-16/10-19 清零」）。可由 `git diff HEAD~1 -- docs/TODO.md` 核：`- [ ]`→`- [x]` 恰 **1** 处。
+> **（2026-10-19 追记四，R 批清债批·翻 9 处）**：本批翻转 **恰 9 处**复选框——§5 的 R1/R2/R3/R4/R5/R6/R8/R9/R10（R7 已随 PR #123 合入并翻勾，不在此批）。修法与判据见方案 `docs/plans/plan-review-debt-cleanup-2026-10-19.md`：R1+R8 同批落地（guard 家族前缀拒 `pg_advisory_`/`lo_`/`pg_ls_`/`dblink_` + L2 两条静默绕过路径：多表未限定列任一脸命中即拒、SELECT * 展开含敏感表即拒）；R2 SQLSTATE 优先（3D000/28P01 不再误归 correctable）；R3 非字符串 token 跳过 + 去重后截断；R4 缓存键 (mtime_ns, size) 恢复热改；R5 005 迁移 table_name+tokenizer 全链（DDL/仓储/构建/召回/配置面）；R6 pool 未知子段 raise；R9 blob GC 引用检查 + env 化 + 两段式接线 + 启用门槛；R10 定性声明"enforce 前 workspace 不作为隔离维"（ADR-0007 §8，零行为变更）。按**相对口径** open 34→25、closed 15→24、E 组开项 11→4（§0.4 标题同批改为「14 行在册 = 4 条开项 + 10 条已于 2026-10-16/10-19 清零」）、D 组 15→13（§0.3 标题同批改 13 条）。可由 `git diff HEAD~1 -- docs/TODO.md` 核：`- [ ]`→`- [x]` 恰 **9** 处。
 > **（2026-10-19 追记，R 批登记·零翻转）**：本批**只登记不翻转**——§0.4/§5 新增 R1-R6 六条（nl2sql 合入前评审 #12-#17 的"建议"级，逐条在 feat 线复验有效：黑名单放行 5 类函数为实测、classify_error 字符串优先、`str(raw)`、lru_cache、唯一键缺 table_name、段名静默忽略均实读确认；同批"严重/警告"级 #1-#11 已修复关闭）。diff 内 `- [ ]`→`- [x]` **零处** ⇒ 按相对口径 open 25→31、closed 14 不变、E 组开项 4→10（§0.4 标题同批改为「12 行在册 = 10 条开项 + 2 条已清零」）。可由 `git diff HEAD~1 -- docs/TODO.md` 核：新增 `- [ ]` 恰 **6** 处、状态变更 **0** 处。
 > **（2026-10-05 追记，本批为 PR #55 处置收口）**：本批只做**状态订正**（§0.2 第 1 行 / §0.5 的 open PR、alerts、分支形态 / §8 的 Dependabot 门禁条），**未新增、未关闭任何开项**——diff 内零 `- [ ]` ↔ `- [x]` 状态变更（可用 `git diff docs/TODO.md` 判），故上行的计数口径与数值不变。**不在此处重述计数**：本机实测 `^- \[ \]` 与 `^\s*- \[ \]` 都得 31、`^- \[x\]` 得 8，与上行「顶格正则只取到 15 / closed 7」的既有口径不一致（成因未查，不做推定复现）⇒ 仍以「先定义口径再引用、不从文件外口头汇总」为规矩，本批不引入第二个数。
 
@@ -45,7 +46,7 @@
 | U-1：`QueryRequest` 入站字段双写兼容层能否移除 | §6 | 兼容层的真实消费者是否存在**未取证** | 采集真实调用形态 ⇒ 无消费者则删，有则定弃用窗口 |
 | R19（GitHub issue #23）：FastAPI ≥ 0.142 原生 telemetry 与 kernel `TracingMiddleware` 双埋点 | §6 | 需确认框架无其它自配 provider 残留路径；端到端复验要真集群（通道问题归 B 组第 3 条） | 最小改动已定型：`build_api_app` 内关 telemetry + `scripts/lint_architecture.py` 加门禁；集群复验等有通道时再做 |
 
-### 0.3 D 功能面存量（15 条，全部「先方案后编码」，无外部条件依赖）
+### 0.3 D 功能面存量（13 条，全部「先方案后编码」，无外部条件依赖）
 
 | 组 | 条数 | 逐条事项 | 锚点 |
 |----|------|----------|------|
@@ -54,9 +55,9 @@
 | 未接线半成品转正 | 0 | `human_task` / `execution_recovery` / `state_migration` / `payload_externalization`（**2026-10-15 四者全部接线 ⇒ 已闭合**；接线 ≠ 默认启用，详见 §3 第 1 条） · exhibition `skill_router` 接线（**2026-10-15 已闭合**） · `agent_server` `/health` 上报 V3 组件状态（**2026-10-15 已闭合**） | §3（禁止直接删除：未接线 ≠ 死代码） |
 | 会展业务骨架 | 6 | F1-D Vault/KMS · F2 真实 LLM 连接（需产品决策输入）· F01 `enforce_scope_filter` · F02 READY 数据源 · F03 同具体性不同租户样本规则 · nl2sql-service 通用化后填具体端点 | §4 |
 | 检索 / 存储增强 | 3 | LightRAG 式图谱增强检索 · MySQL 业务库支持 · 多租户配额/隔离/计费 | §7 |
-| nl2sql 评审延优 | 2 | L2 guard 多表未限定列 / SELECT * fail-open 策略（R8）· workspace_id 服务端断言路径（R10，随身份门 rollout） | §5 R 批 |
+| nl2sql 评审延优 | 0 | ~~L2 guard 多表未限定列 / SELECT * fail-open 策略（R8）· workspace_id 服务端断言路径（R10，随身份门 rollout）~~ **2026-10-19 双双闭合**（R8：多表任一脸命中即拒 + SELECT * 含敏感表即拒；R10：定性声明"enforce 前不作为隔离维"，ADR-0007 §8） | §5 R 批 |
 
-### 0.4 E Low 技术债（14 行在册 = **11 条开项 + 3 条已于 2026-10-16/10-19 清零**；非阻塞，可随日常改动顺带处理）
+### 0.4 E Low 技术债（14 行在册 = **4 条开项 + 10 条已于 2026-10-16/10-19 清零**；非阻塞，可随日常改动顺带处理）
 
 | 事项 | 锚点 | 为什么留着（不是遗漏） |
 |------|------|------------------------|
@@ -217,16 +218,16 @@
 
 来源：`docs/nl2sql-meta-lifecycle-review-2026-10-17` 分支 6 功能 commit 的合入前评审（17 项发现中的"建议"级；同批"严重/警告"级 #1-#11 已全部修复关闭，见 #102-#110）。收敛时逐条在 feat 线复验：
 
-- [ ] R1（issue #114）：危险函数黑名单补条。实测（feat 线 guard）放行 `pg_advisory_lock(1)`/`lo_open`/`pg_ls_waldir()`/`dblink_send_query`/`pg_switch_wal()`（schema 限定/大小写/引号/CTE/FROM 位绕过路径均已拦，问题只在清单长度）；另登记既有行为：`UNION` 只读查询被"只允许 SELECT"误伤。修法：补 `pg_advisory_*`/`lo_*`/`pg_ls_*`/`dblink_*`/`pg_switch_wal`，或转函数白名单正向清单。
-- [ ] R2（issue #113）：`classify_error` 按异常类型/SQLSTATE 分类。现为字符串匹配优先（`FATAL: database/role does not exist` 被归为"表字段语法错误"）；feat 线规则已带 error_class 列但匹配顺序未变。修法：`isinstance(exc, psycopg.errors....)` 优先，字符串兜底。
-- [ ] R3（issue #115）：`build_tsquery` 对非字符串 token 会 stringify 出 `'None'` 词位（`str(raw).split()`）；超过 `max_terms` 截断只保头部（无去重/权重）。修法：非字符串跳过；截断改去重后按权重/长度取并记日志。
-- [ ] R4（issue #116）：`load_prompt` 的 `lru_cache` 取消 prompt 热改能力（改 prompt 文件不重启不生效）。修法：按 `st_mtime` 做缓存键，或保留每请求读盘。
-- [ ] R5（issue #117）：`nl2sql_value_info` 唯一键 `(tenant, workspace, datasource, column_name, value)` 不含 `table_name`——同名列（`orders.status` vs `venues.status`）会撞约束且无法回溯所属表；`search_text` 无分词器版本标记（换 tokenizer 后既有 tsvector 静默失效）。修法：唯一键与查询谓词加 `table_name`；加 `tokenizer`/`search_text_ver` 列。**涉 DDL 迁移，先方案后动**。
-- [ ] R6（issue #118）：`app_config.yaml` 段名拼错被静默忽略（`pool.meta_db` 返回 `{}` 无提示；而同段内未知键会 raise）。修法：未知子段同样 raise；或明确"池配置只走 YAML、env 仅作覆盖"（与 #105 修法同属配置面，宜同批）。
+- [x] R1（issue #114，E，**2026-10-19 闭合**）：危险函数黑名单补条。实测（feat 线 guard）放行 `pg_advisory_lock(1)`/`lo_open`/`pg_ls_waldir()`/`dblink_send_query`/`pg_switch_wal()`（schema 限定/大小写/引号/CTE/FROM 位绕过路径均已拦，问题只在清单长度）；另登记既有行为：`UNION` 只读查询被"只允许 SELECT"误伤。修法：补 `pg_advisory_*`/`lo_*`/`pg_ls_*`/`dblink_*`/`pg_switch_wal`，或转函数白名单正向清单。**已闭合（2026-10-19）**：取家族前缀拒——`FORBIDDEN_FUNCTION_PREFIXES`（pg_advisory_/lo_/pg_ls_/dblink_）+ 精确名补 `pg_switch_wal`（逐个补精确名是打地鼠：`dblink` 精确名拦不住 `dblink_send_query`）；五个实测放行函数回归全拒、正常函数不误伤；与 R8 同批落地（同文件，按本行自注"宜并入下一批 guard 改动"）。
+- [x] R2（issue #113，E，**2026-10-19 闭合**）：`classify_error` 按异常类型/SQLSTATE 分类。现为字符串匹配优先（`FATAL: database/role does not exist` 被归为"表字段语法错误"）；feat 线规则已带 error_class 列但匹配顺序未变。修法：`isinstance(exc, psycopg.errors....)` 优先，字符串兜底。**已闭合（2026-10-19）**：SQLSTATE 优先（精确码 → 08 类前缀）落于 `_classify`——psycopg Error 与 PG 异常的 `.sqlstate` 是服务端权威分类，字符串 needle 降级为"拿不到状态码"时的回落；3D000/28P01（连接级）不再被 "does not exist" 误归 correctable；回归 13 例 `tests/test_error_classification.py`（含真 psycopg 异常类与"状态码赢矛盾字符串"对拍）。
+- [x] R3（issue #115，E，**2026-10-19 闭合**）：`build_tsquery` 对非字符串 token 会 stringify 出 `'None'` 词位（`str(raw).split()`）；超过 `max_terms` 截断只保头部（无去重/权重）。修法：非字符串跳过；截断改去重后按权重/长度取并记日志。**已闭合（2026-10-19）**：非字符串 token 跳过（不 stringify 成 `'None'` 词位）+ 转义后去重再截断（重复词不白占 max_terms 额度，截断记 debug 日志）；回归 4 例并入 `tests/test_tsquery_builder.py`。
+- [x] R4（issue #116，E，**2026-10-19 闭合**）：`load_prompt` 的 `lru_cache` 取消 prompt 热改能力（改 prompt 文件不重启不生效）。修法：按 `st_mtime` 做缓存键，或保留每请求读盘。**已闭合（2026-10-19）**：缓存键从 lru_cache 的参数名改为 `(mtime_ns, size)`——内容变才重读（热改恢复）、不变不读（读盘仍是一次）；回归 6 例 `tests/test_prompt_loading.py`（含显式推 mtime 的热改用例与缓存命中对拍）。
+- [x] R5（issue #117，E，**2026-10-19 闭合**）：`nl2sql_value_info` 唯一键 `(tenant, workspace, datasource, column_name, value)` 不含 `table_name`——同名列（`orders.status` vs `venues.status`）会撞约束且无法回溯所属表；`search_text` 无分词器版本标记（换 tokenizer 后既有 tsvector 静默失效）。修法：唯一键与查询谓词加 `table_name`；加 `tokenizer`/`search_text_ver` 列。**涉 DDL 迁移，先方案后动**。**已闭合（2026-10-19，方案 §3）**：005 迁移加 `table_name` + `tokenizer` 列，唯一键按**实际键列集合**幂等换新（存在性判断会把旧键库误判为已迁移）；`meta_repository` 键/自然键/updatable 三处同构扩展；构建方写 table_name + tokenizer；recall `extra_cols` 带 table_name 可回溯；`MetricValue` 加 `table_name` 字段（缺省空兼容存量 YAML）；回归 3 例 + 契约 1 例。
+- [x] R6（issue #118，E）：`app_config.yaml` 段名拼错被静默忽略（`pool.meta_db` 返回 `{}` 无提示；而同段内未知键会 raise）。修法：未知子段同样 raise；或明确"池配置只走 YAML、env 仅作覆盖"（与 #105 修法同属配置面，宜同批）。**已闭合（2026-10-19）**：未知子段显式 raise——`pool.meta_db`（照字段名的自然拼法）拼错不再静默忽略，段值非映射同样拒（报错指配置行而非 AttributeError）；回归 2 例并入 `tests/test_pool_factory.py`。
 - [x] R7（issue #119，E，**2026-10-19 闭合**）：`dw execute_readonly` 的会话级 `SET default_transaction_read_only = on` **对当前事务无效**（psycopg3 autocommit=False 下与后续 SQL 同处 T1，该参数只作用于其后开启的事务；且残留污染池连接，与同文件 `execute_probe` 的 `SET LOCAL` 纪律自相矛盾）。默认配置非现网 fail-open（连接级已只读）；风险在关掉连接级只读时"两道都在"注释（`dependencies.py`）给出第三道防线的错觉。修法：事务内 `SET LOCAL`，或删该行+修正注释+README 写明后果。**已闭合（2026-10-19）**：取第一选项——`execute_readonly` 与 `execute_probe` 同构（事务内 `SET LOCAL default_transaction_read_only = on`，退出即撤、不污染池连接）；`dependencies.py`/`settings.py`/`.env.example` 误导注释同批修正（"两道都在"错觉消除 + 关掉连接级只读的后果写明）；回归测试 `tests/test_dw_repository_readonly.py` 3 例（事务级 SET LOCAL 形态 / 禁会话级 SET / helper 同闸）。
-- [ ] R8（issue #120，**D·先方案后编码**）：L2 列白名单在**多表未限定列**与 **SELECT *** 上跳过校验——`SELECT phone AS p FROM a JOIN b` 的结果键是别名 `p`，多表绕过 L2（`single=""` 不收未限定列）、别名绕过 L3（bare 名集合不含 p）⇒ 敏感列既不拒也不脱。缺口在 `agent_core.sql.guard`（Stage ③ 后全局共享）。修法方向：多表命中任一候选表敏感列即拒；SELECT * 直接拒；L3 匹配源列名。
-- [ ] R9（issue #121，E）：payload blob GC 不查引用即删（age ≥ 168h 即删，挂起超 7 天的 awaitable resume 后 internalize 返回 reference ⇒ 静默数据损坏）；`gc_min_age_hours` 无 env 透传（调大要改代码）；**启用门槛未文档化**。非同事务债（blob 与 PG）已在 §3 第 7 行登记不重复。修法：引用检查/索引表 + env 化 + 启用门槛写进 ADR-0011/TODO。
-- [ ] R10（issue #122，**D·先方案后编码**）：`workspace_id` 无服务端断言路径（`tenant_scope.py` docstring 自认；查询侧 `resolve_scope` 采信请求体）⇒ 多工作区部署下归属维可被伪造（tenant 维已被 #104 系列收口，workspace 维形同虚设；#104 已把 ingest 写侧收到服务端 default）。修法：与 tenant 同套接身份门 claim，或明确"enforce 前不作为隔离维"写进 ADR-0007。
+- [x] R8（issue #120，**D·先方案后编码 → 2026-10-19 闭合**）：L2 列白名单在**多表未限定列**与 **SELECT *** 上跳过校验——`SELECT phone AS p FROM a JOIN b` 的结果键是别名 `p`，多表绕过 L2（`single=""` 不收未限定列）、别名绕过 L3（bare 名集合不含 p）⇒ 敏感列既不拒也不脱。缺口在 `agent_core.sql.guard`（Stage ③ 后全局共享）。修法方向：多表命中任一候选表敏感列即拒；SELECT * 直接拒；L3 匹配源列名。**已闭合（2026-10-19，方案 §1）**：`_unqualified_sensitive_hits`（多表未限定列任一脸命中即拒，不猜归属）+ `_star_sensitive_hits`（SELECT * 展开含敏感表即拒，候选表全干净放行不误伤）；L3 不改（别名绕过随 L2 拒绝自然消失，L3 保留为漏网兜底）；回归 8 例 `tests/governance/test_sql_guard.py`。
+- [x] R9（issue #121，E，**2026-10-19 闭合**）：payload blob GC 不查引用即删（age ≥ 168h 即删，挂起超 7 天的 awaitable resume 后 internalize 返回 reference ⇒ 静默数据损坏）；`gc_min_age_hours` 无 env 透传（调大要改代码）；**启用门槛未文档化**。非同事务债（blob 与 PG）已在 §3 第 7 行登记不重复。修法：引用检查/索引表 + env 化 + 启用门槛写进 ADR-0011/TODO。**已闭合（2026-10-19）**：sweep 加 `referenced_keys`（PG 仍引用的 key 不删，报告新增 `skipped_referenced`）+ `PgCheckpointStore.collect_externalized_keys`（全表 jsonb_each 收集）+ 两段式接线（先 `list_gc_candidates` 有候选才扫描，稳态零 PG 开销）+ `PAYLOAD_EXTERNALIZATION_GC_MIN_AGE_HOURS` env 化 + 启用门槛写入模块 docstring 与根 `.env.example`（持久卷 / age>最长挂起 / 先候选后扫描）；索引表正解仍按 §3 第 7 行独立项跟踪。回归 7 例（payload + durability + 接线各层）。
+- [x] R10（issue #122，**D·先方案后编码 → 2026-10-19 定性闭合**）：`workspace_id` 无服务端断言路径（`tenant_scope.py` docstring 自认；查询侧 `resolve_scope` 采信请求体）⇒ 多工作区部署下归属维可被伪造（tenant 维已被 #104 系列收口，workspace 维形同虚设；#104 已把 ingest 写侧收到服务端 default）。修法：与 tenant 同套接身份门 claim，或明确"enforce 前不作为隔离维"写进 ADR-0007。**已闭合（2026-10-19，方案 §4，定性处置）**：取"显式声明非隔离维"——不补断言机制（claim 源不存在，补半套是无消费者的过度设计）；`tenant_scope.py` docstring + ADR-0007 §8 双处显式警告（可伪造面 + 升级前置条件四项：claim 签发/存储分片/谓词过滤/存量迁移）；零行为变更。
 
 ## 6. 待评估架构决策（未立项，动工前须先出方案，红线：禁止直接动手改代码）
 
