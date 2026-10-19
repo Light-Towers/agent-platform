@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from agent_core.logging import get_logger
+from agent_runtime.workspace_registry import server_tenant_id
 
 from nl2sql_service.services.load_guard import LoadRejected
 from nl2sql_service.services.metric_config_guard import MetricConfigRejected, check_metric_config
@@ -131,9 +132,12 @@ class QueryService:
                 return {"answer": "", "error": exc.message, "fallback": True}
             state["metric_config"] = recall
         # 负载隔离（P1-5/S-6）：并发闸 + 限流包住整条图执行。限流/并发维度取
-        # tenant_id → user_id → 匿名（按最细可用身份，防单租户打满）。
+        # **服务端断言**租户（#103）：请求体 tenant_id 是客户端可控值，拿它当键
+        # 等于"换个串就换个桶"，限流可被单向绕过——observe 档下 scope.tenant_id
+        # 本身就采信 body，故键不能从 scope 取；无断言且无部署 default 的单租户
+        # dev 落 "anon" 共享桶（与修复前 dev 行为逐位一致）。
         load_guard = getattr(self._context, "load_guard", None)
-        rate_key = kwargs.get("tenant_id") or kwargs.get("user_id") or "anon"
+        rate_key = server_tenant_id(settings.default_tenant) or "anon"
         try:
             if load_guard is None:
                 result = await self._graph.ainvoke(state)
