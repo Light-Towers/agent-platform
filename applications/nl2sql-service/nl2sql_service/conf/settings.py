@@ -115,36 +115,57 @@ def _pool_overrides(app_yaml: dict) -> dict:
     return out
 
 
+def _yaml_overrides(app_yaml: dict, meta_yaml: dict) -> dict:
+    """收集 YAML 配置层**显式声明**的键（段在键缺 ⇒ 不插手，交 env / Field 默认）。
+
+    不带行内默认值：旧写法 `.get(key, default)` 会让"段存在但键缺失"也产出值，
+    把 Field 默认与 env 一并压掉——与"YAML 只是中间层"的定位相悖（#105）。
+    """
+    out: dict = {}
+    if "server" in app_yaml:
+        out["host"] = app_yaml["server"].get("host")
+        out["port"] = app_yaml["server"].get("port")
+    if "llm" in app_yaml:
+        out["llm_model"] = app_yaml["llm"].get("model")
+        out["llm_timeout"] = app_yaml["llm"].get("timeout")
+        out["llm_max_retries"] = app_yaml["llm"].get("max_retries")
+    if "embedding" in app_yaml:
+        out["embedding_backend"] = app_yaml["embedding"].get("backend")
+        out["embedding_model"] = app_yaml["embedding"].get("model")
+        out["vector_dim"] = app_yaml["embedding"].get("vector_dim")
+    if "retrieval" in app_yaml:
+        out["retrieval_top_k"] = app_yaml["retrieval"].get("top_k")
+        out["rrf_k"] = app_yaml["retrieval"].get("rrf_k")
+    if "sql" in app_yaml:
+        out["sql_read_only_guard"] = app_yaml["sql"].get("read_only_guard")
+        out["sql_max_rows"] = app_yaml["sql"].get("max_rows")
+        out["sql_max_correct_retries"] = app_yaml["sql"].get("max_correct_retries")
+    if "tokenizer" in app_yaml:
+        out["tokenizer"] = app_yaml["tokenizer"].get("type")
+    if "meta_db" in meta_yaml:
+        out["table_prefix"] = meta_yaml["meta_db"].get("table_prefix")
+    if "pool" in app_yaml:
+        out.update(_pool_overrides(app_yaml))
+    return {k: v for k, v in out.items() if v is not None}
+
+
 @lru_cache
 def get_settings() -> Settings:
+    """构造 Settings：env/.env > YAML > Field 默认（docstring 三级优先级，#105 兑现）。
+
+    pydantic-settings 的 init kwargs 优先级**高于** env 与 .env 文件——把 YAML 值
+    直接塞进构造参数，会让运维在环境变量里的覆盖**静默失效**（配了不生效、无任何
+    提示；实测 `META_DB_POOL_MAX_SIZE=7` 被 app_config.yaml 的 20 压掉）。故先以
+    空构造探针取 `model_fields_set`（精确区分"env/.env 显式设置"与"代码默认"），
+    YAML 只补 env/.env 未覆盖的字段。一处机制覆盖全部配置段（pool 之外的
+    server/llm/embedding/retrieval/sql/tokenizer 同此压制，一并修复）。
+    """
     conf_dir = Path(__file__).parent
-    app_yaml = _load_yaml(conf_dir / "app_config.yaml")
-    meta_yaml = _load_yaml(conf_dir / "meta_config.yaml")
-
-    overrides: dict = {}
-    if "server" in app_yaml:
-        overrides["host"] = app_yaml["server"].get("host", "0.0.0.0")
-        overrides["port"] = app_yaml["server"].get("port", 8000)
-    if "llm" in app_yaml:
-        overrides["llm_model"] = app_yaml["llm"].get("model", "gpt-4o-mini")
-        overrides["llm_timeout"] = app_yaml["llm"].get("timeout", 60.0)
-        overrides["llm_max_retries"] = app_yaml["llm"].get("max_retries", 3)
-    if "embedding" in app_yaml:
-        overrides["embedding_backend"] = app_yaml["embedding"].get("backend", "langchain_openai")
-        overrides["embedding_model"] = app_yaml["embedding"].get("model", "text-embedding-3-small")
-        overrides["vector_dim"] = app_yaml["embedding"].get("vector_dim", 1536)
-    if "retrieval" in app_yaml:
-        overrides["retrieval_top_k"] = app_yaml["retrieval"].get("top_k", 10)
-        overrides["rrf_k"] = app_yaml["retrieval"].get("rrf_k", 60)
-    if "sql" in app_yaml:
-        overrides["sql_read_only_guard"] = app_yaml["sql"].get("read_only_guard", True)
-        overrides["sql_max_rows"] = app_yaml["sql"].get("max_rows", 1000)
-        overrides["sql_max_correct_retries"] = app_yaml["sql"].get("max_correct_retries", 3)
-    if "tokenizer" in app_yaml:
-        overrides["tokenizer"] = app_yaml["tokenizer"].get("type", "bigram")
-    if "meta_db" in meta_yaml:
-        overrides["table_prefix"] = meta_yaml["meta_db"].get("table_prefix", "nl2sql_")
-    if "pool" in app_yaml:
-        overrides.update(_pool_overrides(app_yaml))
-
-    return Settings(**overrides)
+    yaml_overrides = _yaml_overrides(
+        _load_yaml(conf_dir / "app_config.yaml"),
+        _load_yaml(conf_dir / "meta_config.yaml"),
+    )
+    if not yaml_overrides:
+        return Settings()
+    env_set = Settings().model_fields_set
+    return Settings(**{k: v for k, v in yaml_overrides.items() if k not in env_set})
