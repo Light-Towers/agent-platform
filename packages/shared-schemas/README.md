@@ -15,7 +15,7 @@
 
 ## 设计要点
 
-- `QueryRequest.session_id` 用 `AliasChoices("session_id", "thread_id")` 兼容旧字段名（2026-08-21 前契约）。
+- `QueryRequest` 入站字段名已于 2026-10-19 统一收敛：`query`/`session_id` 纯字段，旧名 `question`/`thread_id` 兼容 alias 全部删除（U-1 销项，方案 `docs/plans/plan-u1-query-request-alias-removal-2026-10-19.md`）。
 - `ThreadState` 两段式：`messages`（LangChain BaseMessage 序列化形态）+ `metadata`（编排状态），双 Planner 各自读写子集互不干扰。契约版本 `THREAD_STATE_VERSION = 1`。
 - `HealthResponse` 含 8 个能力标志位（storage/llm/search/sql_backend/coordination/admission/revert/otel/mcp），各服务按需贡献，默认 False/None 向后兼容。
 

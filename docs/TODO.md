@@ -11,6 +11,8 @@
 > 分级口径：**B** 需外部条件（本机与本仓都改不了）· **C** 需人拍板或需先出方案 · **D** 功能面存量（先方案后编码）· **E** Low 技术债（非阻塞，可随日常改动顺带）。**B4 + C4 + D16 + E6 = 30**（2026-10-05 更新：C 组第 1 条按用户拍板「**不新增** Dependabot alerts 门禁」闭合 ⇒ 恰 1 处复选框翻转，C 5→4；相对上行口径 open 31→30、closed 7→8）。
 > **（2026-10-05 再追记，Dependabot 门禁拍板）**：本批是**真翻转**（§8 的 Dependabot 门禁条 `- [ ]` → `- [x]`），与上一批「零翻转」不矛盾——上批（PR #55 处置收口）只订正状态，本批是拍板后闭合开项。计数按**相对口径**更新（恰好 ±1，可由 `git diff docs/TODO.md` 逐条判）；绝对值仍受上条登记的口径不一致影响 ⇒ 仍以「先定义口径再引用」为准，**不重开对账、不倒推历史数**。
 > **（2026-10-05 追记，本批为 PR #55 处置收口）**：本批只做**状态订正**（§0.2 第 1 行 / §0.5 的 open PR、alerts、分支形态 / §8 的 Dependabot 门禁条），**未新增、未关闭任何开项**——diff 内零 `- [ ]` ↔ `- [x]` 状态变更（可用 `git diff docs/TODO.md` 判），故上行的计数口径与数值不变。**不在此处重述计数**：本机实测 `^- \[ \]` 与 `^\s*- \[ \]` 都得 31、`^- \[x\]` 得 8，与上行「顶格正则只取到 15 / closed 7」的既有口径不一致（成因未查，不做推定复现）⇒ 仍以「先定义口径再引用、不从文件外口头汇总」为规矩，本批不引入第二个数。
+>
+> **（2026-10-19 追记，U-1 销项批）**：本批翻转 **恰 1 处**复选框——§0.2 第 3 行 / §6 清单第 3 项（U-1 双写兼容层）。判据 = `rg` 全仓取证无真实外部生产者（唯一消费者 = 2 个自家契约测试）+ 删除 alias + 测试改反义锁 + 5 处文档勘误，方案与命令计数见 `docs/plans/plan-u1-query-request-alias-removal-2026-10-19.md`。按**相对口径** open 25→24、closed 14→15、C 组开项 4→3（§0.2 标题同批改写为「4 行在册 = 3 条开项 + 1 条已销项」）。可由 `git diff HEAD~1 -- docs/TODO.md` 核：`- [ ]` → `- [x]` 恰 **1** 处。绝对值仍受上行登记的口径不一致影响 ⇒ 不重开对账、不倒推历史数。**同批登记的账面漂移（未改本节计数，属对账面）**：§0.5 的「open PR = 0 / 远端恰 1 条 main」是 2026-10-05 读数，**已过期**——2026-10-19 实取 open PR 4 条（dependabot #75/#77/#78/#79）、远端 dependabot 分支 4 条，处置见 §0.5 同批订正行。
 
 ### 0.1 B 需外部条件（4 条）
 
@@ -21,13 +23,13 @@
 | 部署侧存量取证 A/B（`checkpoints` 里存量 `user-*` thread_id · `revert_audit.operator` 历史行） | §8 + §5「审计主体」条 | 本机 `Meta Tunnel`（TUN）把整段 `192.168.100.0/24` 接管 ⇒ `TcpTestSucceeded=True` **不携带任何信息**；`docker` / `kubectl` / `psql` 全部 NOT FOUND、根无 `.env` | 二选一：同网段机器或 VPN 上代跑 `docs/operations/audit-operator-principal-runbook.md`；或本人把该段加进代理 bypass，且**先用「随机死端口对照法」复核劫持已解除**再取证 |
 | Copilot「Code scanning AI findings」工作流恒失败 | §8 | 平台侧月度配额（`SessionModelError … monthly quota` / `statusCode 402`），五个独立数据点里含**零代码 PR** ⇒ 与本仓 diff 无关 | 本仓改不了；要消噪只能在 GHAS 设置里关 AI findings。它未挂必需检查，不阻塞合并 |
 
-### 0.2 C 需拍板 / 需先出方案（4 条）
+### 0.2 C 需拍板 / 需先出方案（4 行在册 = **3 条开项 + 1 条已于 2026-10-19 销项**）
 
 | 事项 | 锚点 | 卡在哪 | 解锁动作 |
 |------|------|--------|----------|
 | `ExecutionContext` 是否迁移到 PyJWT + 标准 JWT | §6 | 契约变更，下游消费者未审计 | 先出消费者清单与兼容窗口/回滚路径，再决定动或不动 |
 | Milvus 与 pgvector 双向量库长期是否统一 | §6 | 两边各自可用，统一属架构取舍（运维一致性 vs 迁移风险） | 先写清收益判据；无判据不动 |
-| U-1：`QueryRequest` 入站字段双写兼容层能否移除 | §6 | 兼容层的真实消费者是否存在**未取证** | 采集真实调用形态 ⇒ 无消费者则删，有则定弃用窗口 |
+| ~~U-1：`QueryRequest` 入站字段双写兼容层能否移除~~ **已删（2026-10-19）** | §6 | 兼容层的真实消费者是否存在**未取证** | **已取证并删除**：`rg` 全仓实测无真实外部生产者（唯一消费者 = 2 个自家契约测试），方案 `docs/plans/plan-u1-query-request-alias-removal-2026-10-19.md`；`query`/`session_id` 纯字段 |
 | R19（GitHub issue #23）：FastAPI ≥ 0.142 原生 telemetry 与 kernel `TracingMiddleware` 双埋点 | §6 | 需确认框架无其它自配 provider 残留路径；端到端复验要真集群（通道问题归 B 组第 3 条） | 最小改动已定型：`build_api_app` 内关 telemetry + `scripts/lint_architecture.py` 加门禁；集群复验等有通道时再做 |
 
 ### 0.3 D 功能面存量（16 条，全部「先方案后编码」，无外部条件依赖）
@@ -170,7 +172,7 @@
 
 - [ ] `ExecutionContext` 是否迁移到 PyJWT + 标准 JWT（契约变更，需先审计下游消费者）
 - [ ] Milvus 与 pgvector 双向量库长期是否统一（当前 knowledge-service 用 Milvus，agent-core/agent-runtime 默认 pgvector，见 P1-6 双库现状说明）
-- [ ] U-1：`QueryRequest` 入站字段名（`query`/`question`、`session_id`/`thread_id`）双写兼容层能否移除（见 `README.md`「已知待拍板项（技术债）」）
+- [x] U-1：`QueryRequest` 入站字段名（`query`/`question`、`session_id`/`thread_id`）双写兼容层能否移除（见 `README.md`「已知待拍板项（技术债）」）。**（2026-10-19 已销项）**：取证（`rg` 全仓，命令与计数见方案 §2）——`query`/`question` 双写代码中已不存在（2026-08-16 收敛批删除，仅剩文档漂移，已勘误 5 处）；`session_id`/`thread_id` 唯一残留 `packages/shared-schemas/shared_schemas/query.py` 的 `AliasChoices`，其唯一消费者是 2 个自家契约测试（`test_contracts.py:50-65`），无真实外部生产者（`run-all.py`/`chat.html`/`e2e_traceparent.sh` 全部新名；静态 OpenAPI 零命中，schema 运行时生成）。**决策：直接删、不设弃用窗口**（判据见方案 §3——零外部生产者下兼容层只剩自指测试）。行为变化已登记：旧客户端发 `thread_id` 被 pydantic 默认 `extra=ignore` 静默忽略（`session_id=None`），请求不失败但 session 丢失。测试改反义锁（防 alias 加回）。方案 `docs/plans/plan-u1-query-request-alias-removal-2026-10-19.md`。
 - [x] CodeQL Batch 6（已执行，方案 `docs/plans/plan-codeql-batch6-kernel-sanitizer-models-2026-10-01.md` §9）：kernel `agent_core/guardrails/fs.py` 的 `safe_join`/`resolve_within`/`safe_filename` 不被 CodeQL 内建模型识别为 sanitizer，主干重扫报出 `#23`/`#40`/`#41`/`#42`。已新增仓内模型包 `.github/codeql/extensions/agent-platform-python/`（`barrierModel` + `barrierGuardModel`）。**两个原预设已被推翻**：（一）无需从 default setup 切 advanced setup——仓级包放 `.github/codeql/extensions/` 即被自动加载，“只接受已发布包”的限制只适用组织级扩展；（二）`#43`/`#44`（`py/clear-text-logging-sensitive-data`）**不在可自定义的 sink kind 清单内**，无 barrier 可写，“保留取证 + dismiss”是技术上唯一选项（非风格偏好）。待验：合入后主干重扫确认 `#23` 闭合。——**已验收（PR #36 合入 `0bc5175`，主干重扫 open 9 → 6）**：`#23`/`#40`/`#41` 均 `state=fixed` 自动闭合（反证模型包真被 default setup 加载）；`#42` 仍 open 且经分析为结构不可消除（`resolve()` 必须在 containment 检查之前，guard 建模无法覆盖），详见方案 §9.1。剩余待做：模型包非空转自证（删 barrier 行→重扫必复报 `#23`）。**（2026-10-03 已取证闭合，无需破坏性自证）**该自证已被历史自然实验完成，三条实取：① `git diff --name-status 0bc5175^1 0bc5175` ⇒ 该 merge **只**引入 `.github/codeql/extensions/agent-platform-python/{codeql-pack.yml,models/agent_core.guardrails.fs.model.yml}` + 4 个文档，**零产品代码**（故告警消失不能归因于代码改动）；② `#40`/`#41`/`#42` 的 sink 就在 `fs.py` 本身、`#23` 在 `applications/agent_federation/api/server.py:264`，两个文件在该 merge 中均未变 ⇒ **字节相同的前后两次扫描，唯一变量就是模型包**；③ 同一次扫描本身健康且仍在报结果（analysis `1872802593` @ `2026-10-01T09:20:29Z` on `0bc5175`，`/language:python` `results_count=6`、`rules_count=43`）⇒ 排除“扫描失败/空结果导致告警消失”。若模型包是空转（未被 default setup 加载），`#23`/`#40`/`#41` 必然仍在。**因此不再去主干上删 barrier 行做破坏性自证**——那会新开支告警号、破坏本段“open=0 / 最大号 48 不增”的记录，且信息量不高于上述三条。
 - [ ] R19（GitHub issue #23）：FastAPI ≥ 0.142 **原生 telemetry 默认开启**，与 kernel `TracingMiddleware` 对同一请求各建一个同名 SERVER span（互为兄弟），且框架自行 `trace.set_tracer_provider()`——属本仓「第二状态机/双实现」反模式在框架层重现。默认取最小改动：`build_api_app` 内 `FastAPI(telemetry={"tracing": False})` + `scripts/lint_architecture.py` 新增门禁（裸 `FastAPI(` 未关 telemetry 即 CI 失败）；动工前需确认框架无其它自配 provider 残留路径，并做真集群端到端复验（见 `docs/plans/plan-observability-global-remediation-2026-09-29.md` §18）
 

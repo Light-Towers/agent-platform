@@ -47,19 +47,24 @@ class TestQueryRequest:
         with pytest.raises(Exception):
             QueryRequest(query="q", priority="invalid")
 
-    def test_legacy_thread_id_alias(self):
-        """旧契约字段 thread_id 应映射到 session_id（T1.8/C3 兼容）。"""
+    def test_legacy_thread_id_no_longer_mapped(self):
+        """U-1 销项（2026-10-19）：旧字段名 thread_id 不再映射到 session_id。
+
+        兼容 alias 已删（无真实外部生产者，取证见 plan-u1-query-request-alias-removal）。
+        旧名发来即被 pydantic 默认 extra=ignore 静默忽略——请求不失败，但 session_id=None。
+        本断言是反义锁：防未来有人把 alias 加回来。
+        """
         r = QueryRequest.model_validate({"query": "q", "thread_id": "t-legacy"})
-        assert r.session_id == "t-legacy"
+        assert r.session_id is None
 
     def test_session_id_still_accepted(self):
-        """新字段名 session_id 正常工作（alias 不破坏现行为）。"""
+        """新字段名 session_id 正常工作。"""
         r = QueryRequest.model_validate({"query": "q", "session_id": "s-new"})
         assert r.session_id == "s-new"
 
-    def test_alias_serialization_uses_session_id(self):
-        """序列化输出用新字段名 session_id（不回吐旧名）。"""
-        r = QueryRequest.model_validate({"query": "q", "thread_id": "t1"})
+    def test_serialization_uses_session_id_field(self):
+        """序列化输出用字段名 session_id（无 alias，防未来再加回旧名）。"""
+        r = QueryRequest.model_validate({"query": "q", "session_id": "t1"})
         d = r.model_dump(by_alias=True)
         assert "session_id" in d
         assert "thread_id" not in d
