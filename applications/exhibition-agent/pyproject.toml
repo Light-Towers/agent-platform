@@ -33,7 +33,7 @@ dev = [
 # import 路径属 v3+/v4 代际契约（观测方案 §3.4，S4 已迁 langfuse.langchain）。
 # langchain 是 langfuse.langchain 的导入前置（只用于读 __version__），缺它则软降级
 # 成"配了但不报"。与 agent-runtime/federation 同下界，由 lint L-4 守。
-langfuse = ["langfuse>=4.0.0", "langchain>=1,<2"]
+langfuse = ["langfuse>=5.0.1", "langchain>=1,<2"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["exhibition_agent"]
