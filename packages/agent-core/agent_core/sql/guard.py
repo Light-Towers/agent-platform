@@ -10,7 +10,11 @@
    `pg_read_file` 家族、`pg_terminate_backend`、`set_config`、MySQL 的
    `sleep`/`benchmark`）——它们是合法 SELECT，语句类型白名单挡不住，
    但能在只读连接上制造阻塞或改会话参数。schema 限定名（`pg_catalog.pg_sleep`）
-   由 sqlglot 归一为裸函数名后同样命中。
+   由 sqlglot 归一为裸函数名后同样命中。**#114 起加家族前缀拒**
+   （`pg_advisory_`/`lo_`/`pg_ls_`/`dblink_`）——逐个补精确名是打地鼠；
+6. （#120）表/列级策略对**多表未限定列**与 **SELECT *** 补敏感判定——
+   二者曾是 L2 的静默绕过路径（见 `_unqualified_sensitive_hits` /
+   `_star_sensitive_hits`）。
 
 框架无关：sqlglot 为可选 extra ``sql``，未安装时 import 抛 ImportError。
 """
@@ -62,10 +66,21 @@ FORBIDDEN_FUNCTIONS = frozenset(
         "pg_cancel_backend",
         "pg_reload_conf",
         "set_config",  # 可把 statement_timeout 改回 0
+        "pg_switch_wal",  # WAL 切换（#114 实测放行，运维面）
         # MySQL：阻塞
         "sleep",
         "benchmark",
     }
+)
+
+#: 危险函数**家族前缀**（#114）：这些家族的全体成员都不该由 LLM 生成的 SQL
+#: 调用——逐个补精确名是打地鼠（实测 `dblink` 精确名拦不住 `dblink_send_query`：
+#: 函数名归一后是全名匹配）。schema 限定名由 `_function_name` 归一后同样受益。
+FORBIDDEN_FUNCTION_PREFIXES = (
+    "pg_advisory_",  # 咨询锁：会话级持有 ⇒ DoS（pg_advisory_lock 实测放行）
+    "lo_",  # 大对象读写（lo_open 实测放行）
+    "pg_ls_",  # 目录列举（pg_ls_waldir 实测放行）
+    "dblink_",  # 外部连接（可绕过只读语义）
 )
 
 
@@ -101,7 +116,7 @@ def validate_sql(sql: str, dialect: str, max_rows: int) -> tuple[bool, str, str]
             return False, f"包含禁止的 SQL 操作: {type(node).__name__}", sql
         if isinstance(node, exp.Func):
             name = _function_name(node)
-            if name in FORBIDDEN_FUNCTIONS:
+            if name in FORBIDDEN_FUNCTIONS or name.startswith(FORBIDDEN_FUNCTION_PREFIXES):
                 return False, f"包含禁止的函数调用: {name}", sql
 
     limit = stmt.args.get("limit")
@@ -169,8 +184,10 @@ def _referenced_columns(stmt: exp.Select) -> set[str]:
 
     - 限定列直接用限定符；
     - 未限定列：仅当只有一个真实表时归属该表（`SELECT phone FROM users`），
-      多表时不猜（歧义列跳过——猜错就是把 A 列当 B 列核）；
-    - `SELECT *` / 计算列不含可解析列名，自然不进集合（无 schema 不展开）。
+      多表时不猜（歧义列跳过——猜错就是把 A 列当 B 列核）；多表未限定列的
+      敏感判定走 `_unqualified_sensitive_hits`（#120）；
+    - `SELECT *` / 计算列不含可解析列名，自然不进集合（无 schema 不展开）；
+      星号的敏感判定走 `_star_sensitive_hits`（#120）。
     """
     tables = _real_tables(stmt)
     single = next(iter(tables)) if len(tables) == 1 else ""
@@ -187,6 +204,38 @@ def _referenced_columns(stmt: exp.Select) -> set[str]:
     return cols
 
 
+def _unqualified_sensitive_hits(stmt: exp.Select, sensitive: frozenset[str]) -> set[str]:
+    """多表未限定列：在**任一**候选表里是敏感列即命中（#120）。
+
+    单表未限定列已由 `_referenced_columns` 补全归属；多表时不猜归属（猜错就是
+    把 A 列当 B 列核），但敏感判定不能靠猜——A/B 都有 `phone` 时
+    `SELECT phone FROM a JOIN b` 放行即泄露 ⇒ 任一脸命中即拒。误杀面由
+    `sensitive_columns` 配置控制（策略面，不是代码面）。
+    """
+    tables = _real_tables(stmt)
+    if len(tables) < 2:
+        return set()
+    hits: set[str] = set()
+    for col in stmt.find_all(exp.Column):
+        if col.table:
+            continue  # 限定列由 _referenced_columns 主路径核
+        name = col.name.lower()
+        if name and any(f"{t}.{name}" in sensitive for t in tables):
+            hits.add(name)
+    return hits
+
+
+def _star_sensitive_hits(stmt: exp.Select, sensitive: frozenset[str]) -> set[str]:
+    """`SELECT *` 且任一候选表带敏感列 ⇒ 命中该表（#120）。
+
+    星号展开不可静态核（无 schema 不展开）⇒ 只要候选表里有敏感列就拒；
+    候选表全干净时放行（`SELECT * FROM orders` 无敏感列 ⇒ 不误伤）。
+    """
+    if not list(stmt.find_all(exp.Star)):
+        return set()
+    return {t for t in _real_tables(stmt) if any(c.startswith(f"{t}.") for c in sensitive)}
+
+
 def check_policy(stmt: exp.Select, policy: SqlPolicy) -> str:
     """表/列白名单校验；合规返回 ""，否则返回可读拒绝原因。"""
     if policy.allowed_tables:
@@ -197,6 +246,15 @@ def check_policy(stmt: exp.Select, policy: SqlPolicy) -> str:
         hit = _referenced_columns(stmt) & policy.sensitive_columns
         if hit:
             return "查询涉及敏感列: " + ", ".join(sorted(hit))
+        # #120：多表未限定列与 SELECT * 曾是 L2 的两条静默绕过路径
+        # （`SELECT phone AS p FROM a JOIN b` 既不拒也不脱——限定路径核不到
+        # 未限定列，L3 又只按结果键脱敏，别名 p 不在敏感集）。
+        unqualified = _unqualified_sensitive_hits(stmt, policy.sensitive_columns)
+        if unqualified:
+            return "查询涉及敏感列（多表未限定列，任一脸命中即拒）: " + ", ".join(sorted(unqualified))
+        star = _star_sensitive_hits(stmt, policy.sensitive_columns)
+        if star:
+            return "SELECT * 展开含敏感列的表: " + ", ".join(sorted(star))
     return ""
 
 
@@ -219,6 +277,7 @@ def validate_sql_with_policy(
 
 
 __all__ = [
+    "FORBIDDEN_FUNCTION_PREFIXES",
     "FORBIDDEN_FUNCTIONS",
     "FORBIDDEN_NODES",
     "SqlPolicy",

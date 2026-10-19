@@ -73,6 +73,23 @@ def test_reject_mysql_blocking_functions():
         assert not ok, bad
 
 
+def test_reject_dangerous_function_families():
+    """#114：家族前缀拒——逐个补精确名是打地鼠（`dblink` 精确名拦不住
+    `dblink_send_query`：函数名归一后是全名匹配）。五个实测放行函数全覆盖。"""
+    for bad in [
+        "SELECT pg_advisory_lock(1)",
+        "SELECT pg_advisory_xact_lock(2)",
+        "SELECT lo_open(1, 262144)",
+        "SELECT pg_ls_waldir()",
+        "SELECT dblink_send_query('c', 'select 1')",
+        "SELECT pg_switch_wal()",
+        "SELECT pg_catalog.lo_open(1, 262144)",  # schema 限定同样归一后命中
+    ]:
+        ok, reason, _ = validate_sql(bad, "postgres", 100)
+        assert not ok, bad
+        assert "函数" in reason
+
+
 def test_normal_functions_still_allowed():
     """黑名单不得误伤聚合/字符串/数值等正常函数。"""
     ok, reason, sql = validate_sql(
@@ -133,5 +150,86 @@ def test_policy_cte_name_not_treated_as_table():
 def test_policy_empty_lists_behave_as_no_policy():
     """allowed/sensitive 都空 = 无策略（回退纯语句级）。"""
     ok, reason, _ = validate_sql_with_policy("SELECT phone FROM users", "postgres", 100, SqlPolicy())
+    assert ok, reason
+
+
+# ---------------------------------------------------------------------------
+# #120：多表未限定列 / SELECT * / 别名——L2 的静默绕过路径回归
+# （`SELECT phone AS p FROM a JOIN b` 曾既不拒也不脱：限定路径核不到未限定列，
+#   L3 又只按结果键脱敏，别名 p 不在敏感集）
+# ---------------------------------------------------------------------------
+def test_policy_rejects_multi_table_unqualified_sensitive_column():
+    pol = SqlPolicy(sensitive_columns=frozenset({"users.phone"}))
+    ok, reason, _ = validate_sql_with_policy(
+        "SELECT phone FROM users JOIN orders ON users.id = orders.user_id",
+        "postgres",
+        100,
+        pol,
+    )
+    assert not ok and "多表未限定列" in reason
+
+
+def test_policy_rejects_aliased_multi_table_sensitive_column():
+    """#120 本体：别名不救场——`SELECT phone AS p FROM a JOIN b` 必须拒。"""
+    pol = SqlPolicy(sensitive_columns=frozenset({"users.phone"}))
+    ok, reason, _ = validate_sql_with_policy(
+        "SELECT users.phone AS p FROM users JOIN orders ON users.id = orders.user_id",
+        "postgres",
+        100,
+        pol,
+    )
+    assert not ok and "敏感列" in reason  # 限定列走主路径
+
+
+def test_policy_rejects_when_sensitive_on_any_join_side():
+    """任一脸命中即拒：敏感列在 JOIN 的另一侧也算。"""
+    pol = SqlPolicy(sensitive_columns=frozenset({"orders.phone"}))
+    ok, reason, _ = validate_sql_with_policy(
+        "SELECT phone FROM users JOIN orders ON users.id = orders.user_id",
+        "postgres",
+        100,
+        pol,
+    )
+    assert not ok and "多表未限定列" in reason
+
+
+def test_policy_allows_multi_table_unqualified_non_sensitive_column():
+    """多表未限定列但两侧都不敏感 ⇒ 放行（不误伤；猜归属的代价由配置面控制）。"""
+    pol = SqlPolicy(sensitive_columns=frozenset({"users.phone"}))
+    ok, reason, _ = validate_sql_with_policy(
+        "SELECT amount FROM users JOIN orders ON users.id = orders.user_id",
+        "postgres",
+        100,
+        pol,
+    )
+    assert ok, reason
+
+
+def test_policy_rejects_star_expanding_sensitive_table():
+    pol = SqlPolicy(sensitive_columns=frozenset({"users.phone"}))
+    ok, reason, _ = validate_sql_with_policy(
+        "SELECT * FROM users JOIN orders ON users.id = orders.user_id",
+        "postgres",
+        100,
+        pol,
+    )
+    assert not ok and "SELECT *" in reason
+
+
+def test_policy_allows_star_when_no_candidate_table_is_sensitive():
+    """`SELECT * FROM orders`（候选表无敏感列）不误伤。"""
+    pol = SqlPolicy(sensitive_columns=frozenset({"users.phone"}))
+    ok, reason, _ = validate_sql_with_policy("SELECT * FROM orders", "postgres", 100, pol)
+    assert ok, reason
+
+
+def test_policy_star_check_needs_sensitive_policy():
+    """未配敏感列时 SELECT * 逐字节老行为（policy 默认 None 的调用方零影响）。"""
+    ok, reason, _ = validate_sql_with_policy(
+        "SELECT * FROM users JOIN orders ON users.id = orders.user_id",
+        "postgres",
+        100,
+        SqlPolicy(allowed_tables=frozenset({"users", "orders"})),
+    )
     assert ok, reason
 
