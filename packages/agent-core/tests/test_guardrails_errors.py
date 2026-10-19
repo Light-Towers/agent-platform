@@ -179,3 +179,62 @@ def test_http_exception_4xx_detail_unchanged():
     resp = client.get("/bad")
     assert resp.status_code == 400
     assert resp.json() == {"detail": "bad input"}
+
+
+# ---------------------------------------------------------------------------
+# R19：build_api_app 默认关闭 FastAPI 原生 telemetry
+# （docs/plans/plan-r19-fastapi-native-telemetry-2026-10-19.md）
+# ---------------------------------------------------------------------------
+
+
+def test_build_api_app_defaults_native_telemetry_off(monkeypatch):
+    """工厂默认传 telemetry={"tracing": False}（spy 验证调用形状，版本无关）。
+
+    FastAPI <0.142 静默吞该 kwarg（无效果也无错），≥0.142 才真正消费 ⇒ 断言
+    「调用形状」而非 app 属性，任何已安装版本上都是同一判据。
+    """
+    import fastapi
+
+    from agent_core.guardrails.app_factory import build_api_app
+
+    seen: dict = {}
+
+    class _SpyFastAPI:
+        def __init__(self, **kwargs):
+            seen.update(kwargs)
+
+        def add_exception_handler(self, *args, **kwargs):
+            pass
+
+    monkeypatch.setattr(fastapi, "FastAPI", _SpyFastAPI)
+    build_api_app(title="t")
+    assert seen.get("telemetry") == {"tracing": False}
+
+
+def test_build_api_app_caller_can_override_telemetry(monkeypatch):
+    """setdefault 不剥夺覆盖权：调用方显式传 telemetry 时工厂不得改写。"""
+    import fastapi
+
+    from agent_core.guardrails.app_factory import build_api_app
+
+    seen: dict = {}
+
+    class _SpyFastAPI:
+        def __init__(self, **kwargs):
+            seen.update(kwargs)
+
+        def add_exception_handler(self, *args, **kwargs):
+            pass
+
+    monkeypatch.setattr(fastapi, "FastAPI", _SpyFastAPI)
+    build_api_app(title="t", telemetry={"tracing": True})
+    assert seen.get("telemetry") == {"tracing": True}
+
+
+@requires_web
+def test_build_api_app_real_construction_smoke():
+    """真实 fastapi 上构造不炸（telemetry kwarg 在当前版本被接受）。"""
+    from agent_core.guardrails.app_factory import build_api_app
+
+    app = build_api_app(title="t")
+    assert app.title == "t"
