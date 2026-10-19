@@ -14,6 +14,10 @@
     {"id":"g01","question":"上个月每个城市的订单数","expect_tables":["orders"],
      "expect_values":[],"expect_nonempty":true,"notes":"口径：按收货城市"}
 
+判轴（2026-10-19 起五轴）：`expect_tables` / `expect_values` / `expect_nonempty`
+（true 才判）/ `expect_empty`（期望 genuinely_empty——空极断言，幻觉列/错时间窗
+会给出非空错值，没这一轴时空结果无从断言）/ 隐式 `errored`（任何 error 终态即挂）。
+
 **读数口径**（与 nl2sql_query_trace 同源，H4）：
 - `executed`：跑完没进 error 终态（含空结果——空结果是合法答案，另算）；
 - `errored`：进 error 终态（fatal/达上限/内部错）；
@@ -93,6 +97,11 @@ async def _run_async(args: argparse.Namespace) -> tuple[int, dict]:
                     miss.append("values")
             if case.get("expect_nonempty") and row["empty"]:
                 miss.append("nonempty")
+            # expect_empty（2026-10-19 扩集新增轴）：期望 genuinely_empty 而结果非空 ⇒ miss。
+            # 补上「空结果」这一极——幻觉列/错时间窗会给出非空错值，旧的
+            # expect_nonempty=false 实为不判（仅 true 参与），空极无可断言轴。
+            if case.get("expect_empty") and not row["empty"]:
+                miss.append("empty")
             row["miss"] = miss
             row["pass"] = (not row["errored"]) and (not miss)
             results.append(row)
