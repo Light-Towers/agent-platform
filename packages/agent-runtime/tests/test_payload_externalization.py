@@ -148,3 +148,92 @@ async def test_threshold_boundary():
     big = "x" * 100
     result = await ext.externalize(big)
     assert isinstance(result, dict) and result.get("__external__") is True
+
+
+# ===== age-based GC sweep（2026-10-19，缺口 7 残留） =====
+
+
+async def test_sweep_deletes_old_keeps_young():
+    """删年龄 ≥ 下限的、留年轻的（在途 checkpoint 引用的安全边际）。"""
+    import time
+
+    from agent_runtime.payload_externalization import (
+        ExternalizationConfig,
+        InMemoryPayloadStore,
+        PayloadExternalizer,
+    )
+
+    store = InMemoryPayloadStore()
+    ext = PayloadExternalizer(store, config=ExternalizationConfig(gc_min_age_hours=1))
+    await store.put("payload/old", b"x" * 10)
+    await store.put("payload/young", b"y" * 10)
+    # 把 old 的年龄伪造到 2h 前（改插入时刻）
+    store._put_at["payload/old"] = time.time() - 7200
+
+    report = await ext.sweep()
+    assert report == {"scanned": 2, "deleted": 1, "skipped_young": 1, "errors": 0}
+    assert await store.get("payload/old") is None
+    assert await store.get("payload/young") == b"y" * 10
+
+
+async def test_sweep_default_min_age_from_config():
+    """不传参 ⇒ 用 config.gc_min_age_hours（默认 168h：年轻的一律不动）。"""
+    from agent_runtime.payload_externalization import (
+        InMemoryPayloadStore,
+        PayloadExternalizer,
+    )
+
+    store = InMemoryPayloadStore()
+    ext = PayloadExternalizer(store)  # 默认 168h
+    await store.put("payload/fresh", b"z")
+    report = await ext.sweep()
+    assert report["deleted"] == 0
+    assert report["skipped_young"] == 1
+
+
+async def test_sweep_tolerates_single_key_error():
+    """单 key 删除异常计入 errors 不中断（契约：sweep 不得半途崩）。"""
+    from agent_runtime.payload_externalization import PayloadExternalizer
+
+    class _FlakyStore:
+        def __init__(self):
+            self.deleted: list[str] = []
+
+        async def list_keys(self):
+            return ["a", "b", "c"]
+
+        async def key_age_s(self, key):
+            return 99999.0  # 全部够老
+
+        async def delete(self, key):
+            if key == "b":
+                raise OSError("disk")
+            self.deleted.append(key)
+            return True
+
+    store = _FlakyStore()
+    ext = PayloadExternalizer(store)
+    report = await ext.sweep(min_age_seconds=100)  # 显式下限，避开默认 168h
+    assert report == {"scanned": 3, "deleted": 2, "skipped_young": 0, "errors": 1}
+    assert store.deleted == ["a", "c"]
+
+
+async def test_filesystem_store_list_keys_and_age(tmp_path):
+    """FileSystem 适配器：list_keys 遍历 + key_age_s 用 mtime。"""
+    import os
+    import time
+
+    from agent_runtime.payload_externalization import FileSystemPayloadStore
+
+    store = FileSystemPayloadStore(str(tmp_path))
+    await store.put("payload/k1", b"data")
+    keys = await store.list_keys()
+    assert keys == ["payload/k1"]
+    age = await store.key_age_s("payload/k1")
+    assert age is not None and age >= 0.0
+    # 不存在 key ⇒ None
+    assert await store.key_age_s("payload/nope") is None
+    # 老化后年龄反映 mtime
+    old_time = time.time() - 10000
+    os.utime(tmp_path / "payload" / "k1", (old_time, old_time))
+    assert await store.key_age_s("payload/k1") >= 9999
