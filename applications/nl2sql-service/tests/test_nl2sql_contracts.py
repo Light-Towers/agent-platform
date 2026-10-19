@@ -68,7 +68,16 @@ def test_metric_value_requires_column_and_value():
         "column_name": "customers.customer_name",
         "value": "VIP",
         "value_desc": "VIP 客户",
+        "table_name": "",
     }
+
+
+def test_metric_value_table_name_defaults_empty_for_legacy_configs():
+    """#117：table_name 缺省空串——存量 YAML（无该键）逐字节兼容，不炸校验。"""
+    v = MetricValue(column_name="order_status", value="已支付")
+    assert v.table_name == ""
+    v2 = MetricValue(column_name="status", value="已支付", table_name="orders")
+    assert v2.table_name == "orders"
     with pytest.raises(ValidationError):
         MetricValue(column_name="city")  # value 必填
 

@@ -144,10 +144,13 @@ class MetaKnowledgeService:
         return stats
 
     async def build_from_values(self, values: list[dict[str, Any]]) -> dict[str, int]:
-        """取值行写入：column_name / value / value_desc + search_text + embedding。
+        """取值行写入：table_name / column_name / value / value_desc + search_text + tokenizer + embedding。
 
         search_text = 同一套分词后的单空格拼接 token（value_tsvector 的唯一
         输入）；embedding 文本 = `{column_name} {value} {value_desc}`。
+        table_name（#117）：同名列跨表共存的前提——缺省 '' 兼容存量配置（旧行
+        与旧键同形，迁移 005 不破坏存量）；tokenizer：search_text 的分词器
+        标识，换 tokenizer 后旧行可识别（空 = 未标记的旧数据）。
         """
         stats = {"inserted": 0, "updated": 0}
         for item in values:
@@ -155,9 +158,11 @@ class MetaKnowledgeService:
             value = item.get("value", "")
             value_desc = item.get("value_desc", "")
             data: dict[str, Any] = {
+                "table_name": item.get("table_name", ""),
                 "column_name": column_name,
                 "value": value,
                 "value_desc": value_desc,
+                "tokenizer": self._tokenizer,
                 "search_text": " ".join(
                     tokenize(f"{column_name} {value} {value_desc}", self._tokenizer)
                 ),
@@ -228,7 +233,9 @@ class MetaKnowledgeService:
             for c in t.get("columns", [])
         }
         metric_keys = {m.get("metric_name", "") for m in metrics}
-        value_keys = {(v.get("column_name", ""), v.get("value", "")) for v in values}
+        value_keys = {
+            (v.get("table_name", ""), v.get("column_name", ""), v.get("value", "")) for v in values
+        }
         relation_keys = {
             (r.get("left_table", ""), r.get("left_column", ""), r.get("right_table", ""), r.get("right_column", ""))
             for r in relations

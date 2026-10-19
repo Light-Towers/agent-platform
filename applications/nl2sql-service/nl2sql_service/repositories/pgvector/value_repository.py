@@ -33,7 +33,11 @@ class ValueRepository:
         top_k: int = 10,
         filters: Sequence[tuple[str, Any]] = (),
     ) -> list[dict[str, Any]]:
-        """码表召回：token 过字面检索（等值 + 前缀）。embedding 形参保留但不再消费。"""
+        """码表召回：token 过字面检索（等值 + 前缀）。embedding 形参保留但不再消费。
+
+        extra_cols 带 table_name（#117）：同名列（orders.status vs venues.status）
+        现在可跨表共存，结果必须能回溯所属表，否则召回端无法消歧。
+        """
         if not keywords:
             return []
         return await self._client.literal_search(
@@ -41,6 +45,6 @@ class ValueRepository:
             value_col="value",
             tokens=keywords,
             top_k=top_k,
-            extra_cols="column_name, value, value_desc",
+            extra_cols="table_name, column_name, value, value_desc",
             filters=filters,
         )

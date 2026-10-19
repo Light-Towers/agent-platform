@@ -36,6 +36,7 @@ class MetricValue(BaseModel):
     column_name: str = Field(..., description="所属列名")
     value: str = Field(..., description="值")
     value_desc: str = Field("", description="值描述")
+    table_name: str = Field("", description="所属表名（#117：同名列跨表共存与回溯；缺省空兼容存量配置）")
 
 
 class MetricRelation(BaseModel):
