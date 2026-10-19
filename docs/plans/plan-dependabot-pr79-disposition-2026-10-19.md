@@ -5,6 +5,14 @@
 - 先例：`docs/plans/plan-pr55-disposition-2026-10-04.md`（2026-10-04 用户拍板**甲档**：关 dependabot PR + 自建「lock-only + 仅可抬项」PR，#55→#71 流程）
 - 本文件只记**与先例的差异**，不重复先例论证。
 
+## 0. 复发与结构性修法（2026-10-19 追加，#84 同签名复发后）
+
+**#79 关掉后 dependabot 当周即重开 #84（17 项），ci 再次 L-4 红，签名逐字同病**：根因不是"哪一项该抬"，而是 **dependabot 的 uv workspace 组只抬根 manifest 的下界**——实测 #84 的 diff 覆盖全部 9 个 pyproject.toml，但 otel trio 的下界只在 `pyproject.toml [otel]` 被抬到 `>=1.45.1`，`packages/agent-core/pyproject.toml [tracing]` 仍是 `>=1.24` ⇒ L-4（多处下界必须一致）**每次刷新必红**，手工处置只是治症。
+
+**结构性修法（本批落地）**：`.github/dependabot.yml` 对 otel trio 设 `ignore`（minor+patch；major 仍单独出 PR 必然人工全审）。理由链：① 自动组无法做到"抬全部声明位"（这是 L-4 的存在前提）；② OTel 版本归一由 L-4 门禁 + 人工按方案抬（同一 PR 内抬全部声明位 + lock）管理，安全更新若重要走人工 lock-only PR；③ 与 2026-10-05「不新增 Dependabot alerts 门禁」的知情接受同族——**依赖告警的被动性已拍板接受，此处只是把同一取舍前移到更新提议面**。**改判入口**：若 dependabot 未来支持 workspace 级一致 bump（或改用一个 manifest 声明位），删 ignore 恢复自动流。
+
+**#84 处置（同甲档）**：关 #84；自建 lock-only PR 精确复刻其 14 项非 otel 更新（含 #79 之后新增的 pydantic-settings 2.16.0 与 langgraph-checkpoint-postgres 3.2.0 两个 minor），otel trio 保 1.45.0。
+
 ## 1. 失败根因（与 #55 同一条 L-4）
 
 `ci` 日志实取（run `38547229605`）：`'opentelemetry-api' 下界不一致（pyproject.toml[otel]: >=1.45.1 vs packages/agent-core/pyproject.toml[tracing]: >=1.24）`。
