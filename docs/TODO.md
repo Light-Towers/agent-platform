@@ -24,6 +24,8 @@
 
 > **（2026-10-19 追记四，ExecutionContext PyJWT 迁移批，closes #85）**：本批翻转 **恰 1 处**复选框——§0.2 第 1 行 / §6 清单第 1 项。判据 = 消费者取证（仅 exhibition-agent 内，构造 5/读字段 4/state 传递 2，其余 app 零命中）+ wire 逐位兼容（JWT 本就是目标形状）+ 既有 7 条断言逐字不改全绿 + 新增 4 条负样本（alg 混淆/畸形段数/非 object payload/DEV none token）+ `grep hmac|hashlib context_codec.py` = 0（手写密码学清零），issue #85 / 方案 `docs/plans/plan-execution-context-pyjwt-2026-10-19.md`。main 链相对口径 open 27→26、closed 12→13、C 组开项 2→1（§0.2 标题同批改为「4 行在册 = 1 条开项 + 3 条已销项」）。可由 `git diff HEAD~1 -- docs/TODO.md` 核：`- [ ]` → `- [x]` 恰 **1** 处。**同批更新 `scripts/evidence/recount_todo_index.py` 的 `DECLARED_TOTAL`（26/13）——按该脚本 docstring 的「每批翻转后同批更新」纪律**。**收敛数学时效订正**：追记三推得的「合入后 22/17」以其成文时 main 现值 27/12 为底；本批再翻 1 处 ⇒ **feat 合入时的收敛值更新为 21/18**（26/13 − 5 开 + 5 闭），对账以本句为准。**已知边界**：exp 过期语义未启用（契约空白，须先出 v1.2），短密钥告警刻意不 suppress。
 
+> **（2026-10-19 追记五，F01 残差归零批，closes #89）**：本批翻转 **恰 1 处**复选框——§4 会展骨架第 3 条（F01 positive 路径 mock→生产）。判据 = 切换中性证明（既有 positive 用例候选均同租户 PRIVATE 且无 scopes ⇒ 生产与 mock 输出逐位相同，断言不改全绿）+ `_mock_scope_filter` 删除（grep 仅剩 docstring 历史说明）+ 新增 2 条回归钉死生产语义（跨租户 PUBLIC 剔除 / scopes 收窄），issue #89 / 方案 `docs/plans/plan-f01-positive-eval-production-2026-10-19.md`。main 链相对口径 open 26→25、closed 13→14、会展骨架 6→5（§0.3 组行「会展业务骨架」条数同批 6→5；D 组合计 16→15）。可由 `git diff HEAD~1 -- docs/TODO.md` 核：`- [ ]` → `- [x]` 恰 **1** 处。**同批更新 `recount_todo_index.py` 的 `DECLARED_TOTAL`（25/14）**。**已知边界（不粉饰）**：生产无跨租户 PUBLIC 例外与模块 docstring「公开知识」一面的语义差是**契约级问题，须先出 ADR**——本项只让差距可见（评测跑生产代码），未改生产语义；防"顺手补例外"由新回归钉住。
+
 ### 0.1 B 需外部条件（4 条）
 
 | 事项 | 锚点 | 卡在哪（实测） | 解锁动作（最小可执行） |
@@ -42,14 +44,14 @@
 | ~~U-1：`QueryRequest` 入站字段双写兼容层能否移除~~ **已删（2026-10-19）** | §6 | 兼容层的真实消费者是否存在**未取证** | **已取证并删除**：`rg` 全仓实测无真实外部生产者（唯一消费者 = 2 个自家契约测试），方案 `docs/plans/plan-u1-query-request-alias-removal-2026-10-19.md`；`query`/`session_id` 纯字段 |
 | ~~R19（GitHub issue #23）：FastAPI ≥ 0.142 原生 telemetry 与 kernel `TracingMiddleware` 双埋点~~ **已落地（2026-10-19）** | §6 | 需确认框架无其它自配 provider 残留路径；端到端复验要真集群（通道问题归 B 组第 3 条） | **残留路径已取证为零**（`FastAPIInstrumentor`/`opentelemetry.instrumentation` 0 命中，provider 仅 kernel 单入口）；最小改动已落地：`build_api_app` setdefault 关 telemetry + AST 门禁（作用域扩至 scripts/，17 条治理用例）；集群端到端复验仍待网络通道，登记不粉饰 |
 
-### 0.3 D 功能面存量（16 条，全部「先方案后编码」，无外部条件依赖）
+### 0.3 D 功能面存量（15 条，全部「先方案后编码」，无外部条件依赖）
 
 | 组 | 条数 | 逐条事项 | 锚点 |
 |----|------|----------|------|
 | 前端 | 3 | 技术栈选型 · 前端↔后端错误契约对齐审计（须先于 P2 的 D-2/D-4 后端收敛决策）· 引入前端工程时同步补 CI 门禁 | §1（6 个应用各自的形态盘点在 §1 表内，**表行不计入开项**） |
 | V3 执行平台验收 | 1 | 端到端双实例物理故障转移验收（背后是 §2 的缺口 1–10，逐条需独立方案） | §2 |
 | 未接线半成品转正 | 3 | `human_task` / `execution_recovery` / `state_migration` / `payload_externalization` · exhibition `skill_router` 接线 · `agent_server` `/health` 上报 V3 组件状态 | §3（禁止直接删除：未接线 ≠ 死代码） |
-| 会展业务骨架 | 6 | F1-D Vault/KMS · F2 真实 LLM 连接（需产品决策输入）· F01 `enforce_scope_filter` · F02 READY 数据源 · F03 同具体性不同租户样本规则 · nl2sql-service 通用化后填具体端点 | §4 |
+| 会展业务骨架 | 5 | F1-D Vault/KMS · F2 真实 LLM 连接（需产品决策输入）· F02 READY 数据源 · F03 同具体性不同租户样本规则 · nl2sql-service 通用化后填具体端点（F01 已于 2026-10-19 闭合：positive/负样本评测均跑生产 `enforce_scope_filter`；其「公开知识跨租户可见」语义差转契约级 ADR 项，另录） | §4 |
 | 检索 / 存储增强 | 3 | LightRAG 式图谱增强检索 · MySQL 业务库支持 · 多租户配额/隔离/计费 | §7 |
 
 ### 0.4 E Low 技术债（6 行在册 = **5 条开项 + 1 条已于 2026-10-19 清零**（D8，指针失效）；非阻塞，可随日常改动顺带处理）
@@ -128,7 +130,7 @@
 
 - [ ] F1-D：Vault/KMS 凭证后端接入（`execution_context.py`）
 - [ ] F2：真实 LLM 连接接入（`model_router.py` / `data_egress.py`）——数据分级出域模型路由，需产品决策输入
-- [ ] F01：`enforce_scope_filter` 落地（`evaluation.py`）
+- [x] F01：`enforce_scope_filter` 落地（`evaluation.py`）。**（2026-10-19 残差归零，closes #89）**：生产实现 `foundation/execution_context.py`（租户一致 + `ctx.scopes` 收窄）在位，两条用例文件覆盖；负样本路径自审计 P1-9 跑生产代码；**positive 路径本批切换**——`_evaluate_positive` 从 MVP 内联 `_mock_scope_filter` 改调生产 `enforce_scope_filter`（ExecutionContext 构造与 scope_key 缺省口径与负样本路径对齐），`_mock_scope_filter` 删除（`grep` 全仓仅剩 docstring 里的历史说明）。**切换中性证明**：既有 positive 用例候选均为同租户 PRIVATE 且 tenant_context 无 scopes ⇒ 生产与 mock 输出逐位相同，断言不改全绿；新增 2 条回归钉死现行生产语义（跨租户 PUBLIC 项被剔除 + scopes 非空时收窄）。**已知边界（显式登记，不粉饰）**：生产实现**无跨租户 PUBLIC 例外**，而模块 docstring 所述 positive 的「公开知识」一面在生产语义下会被剔除——「公开知识是否跨租户可见」是**契约级问题，须先出 ADR**（不在本收敛项改生产语义，也不把 mock 加回来）；测试钉死现行语义防"顺手补例外"不走契约。方案 `docs/plans/plan-f01-positive-eval-production-2026-10-19.md`，exhibition session 353 passed / 1 skipped（基线 351 + 新 2）。
 - [ ] F02：READY 数据源连接（`production_readiness_gate.py`）
 - [ ] F03：同具体性不同租户样本规则
 - [ ] nl2sql-service 通用化后填充具体端点（`skills/data_analysis/skill.py`）
