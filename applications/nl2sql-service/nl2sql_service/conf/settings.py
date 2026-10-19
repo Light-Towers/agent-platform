@@ -58,12 +58,15 @@ class Settings(BaseLLMSettings):
     retrieval_score_margin: float = 0.15
 
     # 连接池（psycopg_pool 显式配额；取值依据见 clients/pg_pool.py）
-    # meta：检索 + CRUD 共用，毫秒级画像 ⇒ min 1（按需增长，不预占）、max 对齐
-    #      agent_runtime.db 的 db_pool_max_size 默认 20、语句 5s（超过即缺索引）
+    # meta：检索 + CRUD 共用 ⇒ min 1（按需增长，不预占）、max 对齐 agent_runtime.db
+    #      的 db_pool_max_size 默认 20。语句超时 15s（#106，原 5s）：DDL 承诺"ANN
+    #      索引创建失败退化为顺序扫描仍可工作"，5s 会把该降级路直接砍死；但仍须显著
+    #      低于 dw 的 30s——meta 是交互级毫秒画像、dw 是 OLAP，分层由
+    #       test_pool_factory 的 dw > meta 断言钉死，勿齐平。
     meta_db_pool_min_size: int = 1
     meta_db_pool_max_size: int = 20
     meta_db_pool_timeout: float = 5.0
-    meta_db_statement_timeout_ms: int = 5000
+    meta_db_statement_timeout_ms: int = 15000
     # dw：执行 LLM 生成的 SQL，OLAP 长查询画像 ⇒ max 10（连接更贵）、语句 30s
     #      （聚合扫描可合法跑数十秒，真正的护栏是 LIMIT + 连接级只读）
     dw_db_pool_min_size: int = 1
@@ -79,6 +82,10 @@ class Settings(BaseLLMSettings):
     sql_read_only_guard: bool = True
     sql_max_rows: int = 1000  # 区别于 agent_server(100)：本服务为专职数据查询工具，结果由前端 UI 展示而非注入 LLM prompt
     sql_max_correct_retries: int = 3
+    # filter_table 节点的 LLM 表过滤开关（#109，默认关）：_derive_tables 救活该节点后
+    # 每请求会多一次 LLM 往返，且 LLM 输出只允许在派生清单内收窄（白名单交集）。
+    # 关 = 不过滤、不产生该调用（派生表级视图照常进生成期）；开 = 多一次调用换更准的表清单。
+    filter_table_enabled: bool = False
     # 进模型的结果体量上限（§5.11-V3 双上限分离）：与 sql_max_rows（返回 UI）分开——
     # 1000 行宽表几十 MB 直接进 prompt 会爆上下文。行数/字节双阈值，先到先截。
     sql_max_rows_for_prompt: int = 100

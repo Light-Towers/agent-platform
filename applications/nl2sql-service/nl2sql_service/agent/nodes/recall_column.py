@@ -11,8 +11,12 @@ embedding 由 extract_keywords 统一计算后经 `state["query_embedding"]` 传
 
 from typing import Any
 
+from agent_core.logging import get_logger
+
 from nl2sql_service.agent.context import DataAgentContext
 from nl2sql_service.services.alias_matcher import match_aliases
+
+logger = get_logger(__name__)
 
 
 async def recall_column(state: dict[str, Any]) -> dict[str, Any]:
@@ -26,19 +30,23 @@ async def recall_column(state: dict[str, Any]) -> dict[str, Any]:
     if ctx is None or ctx.column_repository is None:
         return {"columns": []}
 
-    # 主路：别名精确匹配（meta 库有别名表时才走）
+    # 主路：别名精确匹配（meta 库有别名表时才走）。DB 故障一律降级（#106）：
+    # 别名路失败回落向量路，向量路再失败降级空召回——不阻断查询。
     datasource_id = state.get("datasource_id", "")
     tenant_id = state.get("tenant_id", "")
     workspace_id = state.get("workspace_id", "")
     if ctx.meta_repository is not None:
-        aliases = await ctx.meta_repository.list_aliases(datasource_id, tenant_id=tenant_id, workspace_id=workspace_id)
-        hits = match_aliases(state.get("query", ""), keywords, aliases, "column")
-        if hits:
-            rows = await ctx.meta_repository.find_columns_by_names(
-                hits, datasource_id, tenant_id=tenant_id, workspace_id=workspace_id
-            )
-            if rows:
-                return {"columns": rows}
+        try:
+            aliases = await ctx.meta_repository.list_aliases(datasource_id, tenant_id=tenant_id, workspace_id=workspace_id)
+            hits = match_aliases(state.get("query", ""), keywords, aliases, "column")
+            if hits:
+                rows = await ctx.meta_repository.find_columns_by_names(
+                    hits, datasource_id, tenant_id=tenant_id, workspace_id=workspace_id
+                )
+                if rows:
+                    return {"columns": rows}
+        except Exception:  # noqa: BLE001 - 别名路 DB 故障回落向量路，不阻断查询
+            logger.warning("column alias recall failed, falling back to vector", exc_info=True)
 
     embedding: list[float] | None = state.get("query_embedding")
     if embedding is None and ctx.embedding_client is not None:
@@ -50,11 +58,15 @@ async def recall_column(state: dict[str, Any]) -> dict[str, Any]:
     # 作用域过滤（P1-1 隔离）：tenant/workspace/datasource 三列恒过滤——空值匹配
     # DDL 默认 '' 行（单租户 dev 向后兼容），非空则隔离到该作用域（禁跨租户召回）。
     filters = (("tenant_id", tenant_id), ("workspace_id", workspace_id), ("datasource_id", datasource_id))
-    columns = await ctx.column_repository.recall(
-        keywords,
-        embedding=embedding,
-        top_k=state.get("retrieval_top_k", 10),
-        score_margin=state.get("retrieval_score_margin", 0.0),
-        filters=filters,
-    )
+    try:
+        columns = await ctx.column_repository.recall(
+            keywords,
+            embedding=embedding,
+            top_k=state.get("retrieval_top_k", 10),
+            score_margin=state.get("retrieval_score_margin", 0.0),
+            filters=filters,
+        )
+    except Exception:  # noqa: BLE001 - 向量路 DB 故障降级空召回，不阻断查询（#106）
+        logger.warning("column recall failed, degraded to empty", exc_info=True)
+        columns = []
     return {"columns": columns}

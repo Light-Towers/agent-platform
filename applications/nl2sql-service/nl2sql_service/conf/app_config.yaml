@@ -41,7 +41,9 @@ pool:
     min_size: 1
     max_size: 20
     timeout: 5.0
-    statement_timeout_ms: 5000
+    # 15s（#106，原 5s）：DDL 承诺 ANN 缺失时降级顺序扫描仍可工作；仍显著低于 dw 的
+    # 30s（meta 交互级 / dw OLAP 分层，test_pool_factory 钉死 dw > meta）
+    statement_timeout_ms: 15000
   dw:
     min_size: 1
     max_size: 10
