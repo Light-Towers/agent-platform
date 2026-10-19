@@ -28,8 +28,42 @@ logger = get_logger(__name__)
 #: error_detail 截断上限：原文只进 prompt/日志，防超长堆栈撑爆上下文
 _ERROR_DETAIL_MAX_CHARS = 500
 
+#: SQLSTATE → (对外消息, error_class)（#113）。PG 的五字符状态码是**服务端权威
+#: 分类**，先于字符串 needle 匹配——字符串匹配有两类实测误判：① `FATAL:
+#: database/role does not exist`（3D000/28P01，连接级）被 "does not exist"
+#: 命中归成"表字段语法错误"（correctable，会被喂给模型改 SQL，改 3 轮也改不出）；
+#: ② 驱动/包装层会改写异常文本，状态码不受影响。psycopg 的 Error 与 PG 侧
+#: 异常都带 .sqlstate；拿不到状态码的异常自然回落下面的字符串规则。
+_SQLSTATE_RULES: tuple[tuple[str, str, str], ...] = (
+    # 对象不存在 / 语法 / 类型——correctable（改 SQL 可能解决）
+    ("42P01", "查询失败：表、字段或语法不正确", "correctable"),  # undefined_table
+    ("42703", "查询失败：表、字段或语法不正确", "correctable"),  # undefined_column
+    ("42601", "查询失败：表、字段或语法不正确", "correctable"),  # syntax_error
+    ("42883", "查询失败：表、字段或语法不正确", "correctable"),  # undefined_function
+    ("42804", "查询失败：表、字段或语法不正确", "correctable"),  # datatype_mismatch
+    ("42846", "查询失败：表、字段或语法不正确", "correctable"),  # cannot_coerce
+    ("22P02", "查询失败：表、字段或语法不正确", "correctable"),  # invalid_text_representation
+    # 语句超时 / 取消——rewritable（带改写方向进 correct）
+    ("57014", "查询超时：数据量或计算量超出时限", "rewritable"),  # query_canceled
+    # 权限拒绝——fatal（喂模型也改不出来，还扩大注入面）
+    ("42501", "查询被拒绝：当前账号无权访问相关数据", "fatal"),  # insufficient_privilege
+    # 连接级失败——fatal（查询从未到达服务端）
+    ("3D000", "查询失败：数据源连接不可用", "fatal"),  # invalid_catalog_name
+    ("28P01", "查询失败：数据源连接不可用", "fatal"),  # invalid_password
+    ("08006", "查询失败：数据源连接不可用", "fatal"),  # connection_failure
+    ("08001", "查询失败：数据源连接不可用", "fatal"),  # sqlclient_unable_establish
+    ("08003", "查询失败：数据源连接不可用", "fatal"),  # connection_does_not_exist
+)
+
+#: 状态码**类**前缀规则（先精确码后类码；57 类不进——57P01 停机是 fatal，
+#: 57014 取消才是 rewritable，类级一刀切会误判）。
+_SQLSTATE_CLASS_RULES: tuple[tuple[str, str, str], ...] = (
+    ("08", "查询失败：数据源连接不可用", "fatal"),  # connection exception 类
+)
+
 #: 顺序敏感：先判可改写类（超时）、再判权限、最后判对象不存在。
-#: 三元组 = (错误文本 needle, 对外分类消息, error_class)。
+#: 三元组 = (错误文本 needle, 对外消息, error_class)。**仅作无 SQLSTATE 时的
+#: 回落**（#113 前的唯一机制；非 PG 驱动/丢类型的包装异常才走到这里）。
 _ERROR_RULES: tuple[tuple[tuple[str, ...], str, str], ...] = (
     (
         ("timeout", "canceling statement", "statement timeout", "query cancelled"),
@@ -81,6 +115,15 @@ def classify_error_class(exc: BaseException) -> str:
 
 
 def _classify(exc: BaseException) -> tuple[str, str]:
+    # #113：SQLSTATE 优先（精确码 → 类前缀），拿不到状态码才回落字符串 needle。
+    state = str(getattr(exc, "sqlstate", "") or "").strip().upper()
+    if state:
+        for code, message, error_class in _SQLSTATE_RULES:
+            if state == code:
+                return message, error_class
+        for prefix, message, error_class in _SQLSTATE_CLASS_RULES:
+            if state.startswith(prefix):
+                return message, error_class
     text = str(exc).lower()
     for needles, message, error_class in _ERROR_RULES:
         if any(needle in text for needle in needles):
