@@ -3,9 +3,11 @@
 
 钉七件事：
 1. DDL/文档/范例三路摄入，写入 core 与迁移 CLI 同一份（ingest_service.write_scope）；
-2. 全空请求 400；meta 未就绪 503（不静默）；
+2. 全空请求 400；meta 未就绪 503；无身份断言 401；body 携带归属字段 400（#102）；
 3. 坏 DDL / 未命中文档 / 空 question 全部进响应记账（喂坏了看得见）；
-4. 作用域：tenant 服务端断言 > 请求体 > default（resolve_scope 同 /api/query）；
+4. 作用域（#102）：tenant 只认服务端断言（身份门 JWT/内部签名头/single 装配），
+   无断言 fail-fast 不落桶；请求体 tenant_id/workspace_id 携带即 400；workspace
+   取服务端 default_workspace（''=单租户 dev）；
 5. 响应带回实际落点 scope（摄入方 vs 召回方作用域不一致 = 恒不可见，必须可见）；
 6. 单串 ddl/docs 归一为列表（对齐 SqlTrainRequest 的两种形状）；
 7. 端点已挂载（create_app 含 /api/meta/ingest 路由）。
@@ -85,29 +87,43 @@ def patched_embedder(monkeypatch):
     return ecm
 
 
+@pytest.fixture
+def asserted_tenant():
+    """#102：写端点只认服务端断言——用例经身份门等价物（ContextVar 绑定）供 tenant。"""
+    from agent_runtime.workspace_registry import bind_tenant_context, reset_tenant_context
+
+    token = bind_tenant_context("t-1")
+    try:
+        yield "t-1"
+    finally:
+        reset_tenant_context(token)
+
+
 # ---------------------------------------------------------------------------
 # ① 三路摄入 + 写入形状
 # ---------------------------------------------------------------------------
-async def test_ingest_ddl_docs_examples(patched_embedder):
+async def test_ingest_ddl_docs_examples(patched_embedder, asserted_tenant):
     repo = _FakeMetaRepo()
     report = await ingest(
         IngestRequest(
             ddl=_DDL,
             docs="orders 的状态机说明",
             examples=[IngestExample(question="上个月销售额", sql="SELECT SUM(amount) FROM orders")],
-            tenant_id="t-1",
-            workspace_id="w-1",
         ),
         _FakeHttpRequest(_FakeApp(repo)),
     )
     assert report.columns == {"inserted": 2, "updated": 0}
     assert report.examples == {"inserted": 1, "updated": 0}
-    assert (report.tenant_id, report.workspace_id) == ("t-1", "w-1"), "响应必须带回实际落点 scope"
+    # 落点 = 断言 tenant + 服务端 default_workspace（''=单租户 dev）；body 不再参与（#102）
+    assert (report.tenant_id, report.workspace_id) == ("t-1", ""), "响应必须带回实际落点 scope"
     assert report.datasource_id, "datasource 落点必须可见（摄入方 vs 召回方不一致=恒不可见）"
 
     col = repo.columns[0]
     assert col["table_name"] == "orders" and col["column_name"] == "id"
-    assert col["tenant_id"] == "t-1" and col["workspace_id"] == "w-1"
+    assert col["tenant_id"] == "t-1"
+    # 空 workspace 的落库约定：键省略 = ''（meta_knowledge_service 只写非空），
+    # 与 meta 行默认 '' 匹配——单租户 dev 行为逐位不变
+    assert col.get("workspace_id", "") == ""
     assert "订单主表" in col["table_comment"] and "状态机说明" in col["table_comment"]
     assert col["embedding"] and len(col["embedding"]) == 1024
     ex = repo.examples[0]
@@ -115,7 +131,7 @@ async def test_ingest_ddl_docs_examples(patched_embedder):
     assert ex["embedding"] and len(ex["embedding"]) == 1024
 
 
-async def test_ingest_examples_only(patched_embedder):
+async def test_ingest_examples_only(patched_embedder, asserted_tenant):
     repo = _FakeMetaRepo()
     report = await ingest(
         IngestRequest(examples=[IngestExample(question="q1", sql="SELECT 1")]),
@@ -150,7 +166,7 @@ async def test_ingest_without_meta_503(patched_embedder):
 # ---------------------------------------------------------------------------
 # ③ 记账：坏 DDL / 未命中文档 / 空 question
 # ---------------------------------------------------------------------------
-async def test_ingest_records_bad_inputs(patched_embedder):
+async def test_ingest_records_bad_inputs(patched_embedder, asserted_tenant):
     repo = _FakeMetaRepo()
     report = await ingest(
         IngestRequest(ddl=[_DDL, _DDL_BAD], docs="不提表名的运维手册", examples=[IngestExample(question="  ", sql="SELECT 1")]),
@@ -165,7 +181,7 @@ async def test_ingest_records_bad_inputs(patched_embedder):
 # ---------------------------------------------------------------------------
 # ④ 单串归一（对齐 SqlTrainRequest 两种形状）
 # ---------------------------------------------------------------------------
-async def test_ingest_accepts_string_or_list(patched_embedder):
+async def test_ingest_accepts_string_or_list(patched_embedder, asserted_tenant):
     repo_str = _FakeMetaRepo()
     await ingest(IngestRequest(ddl=_DDL), _FakeHttpRequest(_FakeApp(repo_str)))
     repo_list = _FakeMetaRepo()
@@ -176,7 +192,7 @@ async def test_ingest_accepts_string_or_list(patched_embedder):
 # ---------------------------------------------------------------------------
 # ⑥ 幂等：同内容两次摄入 = 第二次全 updated
 # ---------------------------------------------------------------------------
-async def test_ingest_is_idempotent(patched_embedder):
+async def test_ingest_is_idempotent(patched_embedder, asserted_tenant):
     repo = _FakeMetaRepo()
     req = IngestRequest(ddl=_DDL, examples=[IngestExample(question="q", sql="SELECT 1")])
     first = await ingest(req, _FakeHttpRequest(_FakeApp(repo)))
@@ -204,14 +220,19 @@ def test_ingest_route_mounted():
 # 确定性假向量，机械性验证）
 # ---------------------------------------------------------------------------
 @pytest.mark.skipif(not os.environ.get("META_DB_DSN"), reason="需真实 meta 库；手动设 META_DB_DSN 跑 -k real_pg")
-async def test_ingest_endpoint_on_real_pg(patched_embedder):
+async def test_ingest_endpoint_on_real_pg(patched_embedder, monkeypatch):
     """真库判据：假 repo 证不了 upsert 落库，必须真 PG。
 
     手动步骤：
         python -m nl2sql_service.scripts.init_meta_schema --dsn "$META_DB_DSN"
-        META_DB_DSN="..." uv run pytest applications/nl2sql-service/tests \\
-            ::test_ingest_endpoint.py -k real_pg -q -s
+        META_DB_DSN="..." SINGLE_TENANT=probe uv run pytest \\
+            applications/nl2sql-service/tests/test_ingest_endpoint.py -k real_pg -q -s
+
+    #102 后写端点只认服务端断言：本用例经 SINGLE_TENANT（单租户装配，真实生产
+    路径之一）供断言；注意若环境配了 TENANT_JWT_PUBLIC_KEYS_FILE 则走 jwt 模式、
+    single 不生效，需改用 JWT。body 不再携带 tenant_id（携带即 400）。
     """
+    monkeypatch.setenv("SINGLE_TENANT", "probe")
 
     from nl2sql_service.api.server import create_app
 
@@ -223,14 +244,13 @@ async def test_ingest_endpoint_on_real_pg(patched_embedder):
             json={
                 "ddl": "CREATE TABLE ingest_probe (id BIGINT, note TEXT);",
                 "examples": [{"question": "ingest 探针问题", "sql": "SELECT 1"}],
-                "tenant_id": "probe",
             },
         )
         assert resp.status_code == 200, resp.text
         body = resp.json()
         assert body["columns"]["inserted"] + body["columns"]["updated"] == 2
         assert body["examples"]["inserted"] + body["examples"]["updated"] == 1
-        assert body["tenant_id"] == "probe"
+        assert body["tenant_id"] == "probe", "落点 = single 装配断言（#102）"
 
         # 清理：删掉探针行（tenant_id='probe' 是专用作用域，不碰别的数据）
         from nl2sql_service.clients.postgres_client_manager import PostgresClientManager
