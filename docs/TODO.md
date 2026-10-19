@@ -26,6 +26,8 @@
 
 > **（2026-10-19 追记五，F01 残差归零批，closes #89）**：本批翻转 **恰 1 处**复选框——§4 会展骨架第 3 条（F01 positive 路径 mock→生产）。判据 = 切换中性证明（既有 positive 用例候选均同租户 PRIVATE 且无 scopes ⇒ 生产与 mock 输出逐位相同，断言不改全绿）+ `_mock_scope_filter` 删除（grep 仅剩 docstring 历史说明）+ 新增 2 条回归钉死生产语义（跨租户 PUBLIC 剔除 / scopes 收窄），issue #89 / 方案 `docs/plans/plan-f01-positive-eval-production-2026-10-19.md`。main 链相对口径 open 26→25、closed 13→14、会展骨架 6→5（§0.3 组行「会展业务骨架」条数同批 6→5；D 组合计 16→15）。可由 `git diff HEAD~1 -- docs/TODO.md` 核：`- [ ]` → `- [x]` 恰 **1** 处。**同批更新 `recount_todo_index.py` 的 `DECLARED_TOTAL`（25/14）**。**已知边界（不粉饰）**：生产无跨租户 PUBLIC 例外与模块 docstring「公开知识」一面的语义差是**契约级问题，须先出 ADR**——本项只让差距可见（评测跑生产代码），未改生产语义；防"顺手补例外"由新回归钉住。
 
+> **（2026-10-19 追记六，前端错误契约审计批，closes #94）**：本批翻转 **恰 1 处**复选框——§1 前端第 2 条（错误契约对齐审计）。判据 = 只读审计（零代码）+ 现状契约清单四层 HTTP 形状 / 四种流式帧 / C1 状态码语义逐项附证据与复跑命令 + 五处不一致点名 + D-2/D-4 拍板输入，issue #94 / 方案 `docs/plans/plan-frontend-error-contract-audit-2026-10-19.md`。main 链相对口径 open 25→24、closed 14→15、前端组 3→2（§0.3 组行「前端」条数同批 3→2；D 组合计 15→14）。可由 `git diff HEAD~1 -- docs/TODO.md` 核：`- [ ]` → `- [x]` 恰 **1** 处。**同批更新 `recount_todo_index.py` 的 `DECLARED_TOTAL`（24/15）**。**审计的关键事实（不粉饰）**：仓内无任何前端消费者 ⇒ 收敛窗口期代价≈0；倾向选项 A（4xx 统一 kernel 信封）但**倾向非拍板**，D-2/D-4 决策仍属 P2 方案。
+
 ### 0.1 B 需外部条件（4 条）
 
 | 事项 | 锚点 | 卡在哪（实测） | 解锁动作（最小可执行） |
@@ -44,11 +46,11 @@
 | ~~U-1：`QueryRequest` 入站字段双写兼容层能否移除~~ **已删（2026-10-19）** | §6 | 兼容层的真实消费者是否存在**未取证** | **已取证并删除**：`rg` 全仓实测无真实外部生产者（唯一消费者 = 2 个自家契约测试），方案 `docs/plans/plan-u1-query-request-alias-removal-2026-10-19.md`；`query`/`session_id` 纯字段 |
 | ~~R19（GitHub issue #23）：FastAPI ≥ 0.142 原生 telemetry 与 kernel `TracingMiddleware` 双埋点~~ **已落地（2026-10-19）** | §6 | 需确认框架无其它自配 provider 残留路径；端到端复验要真集群（通道问题归 B 组第 3 条） | **残留路径已取证为零**（`FastAPIInstrumentor`/`opentelemetry.instrumentation` 0 命中，provider 仅 kernel 单入口）；最小改动已落地：`build_api_app` setdefault 关 telemetry + AST 门禁（作用域扩至 scripts/，17 条治理用例）；集群端到端复验仍待网络通道，登记不粉饰 |
 
-### 0.3 D 功能面存量（15 条，全部「先方案后编码」，无外部条件依赖）
+### 0.3 D 功能面存量（14 条，全部「先方案后编码」，无外部条件依赖）
 
 | 组 | 条数 | 逐条事项 | 锚点 |
 |----|------|----------|------|
-| 前端 | 3 | 技术栈选型 · 前端↔后端错误契约对齐审计（须先于 P2 的 D-2/D-4 后端收敛决策）· 引入前端工程时同步补 CI 门禁 | §1（6 个应用各自的形态盘点在 §1 表内，**表行不计入开项**） |
+| 前端 | 2 | 技术栈选型 · 引入前端工程时同步补 CI 门禁（错误契约对齐审计已于 2026-10-19 完成：现状清单 + D-2/D-4 拍板输入见 plan-frontend-error-contract-audit；D-2/D-4 决策本身仍属 P2 方案，不在此行） | §1（6 个应用各自的形态盘点在 §1 表内，**表行不计入开项**） |
 | V3 执行平台验收 | 1 | 端到端双实例物理故障转移验收（背后是 §2 的缺口 1–10，逐条需独立方案） | §2 |
 | 未接线半成品转正 | 3 | `human_task` / `execution_recovery` / `state_migration` / `payload_externalization` · exhibition `skill_router` 接线 · `agent_server` `/health` 上报 V3 组件状态 | §3（禁止直接删除：未接线 ≠ 死代码） |
 | 会展业务骨架 | 5 | F1-D Vault/KMS · F2 真实 LLM 连接（需产品决策输入）· F02 READY 数据源 · F03 同具体性不同租户样本规则 · nl2sql-service 通用化后填具体端点（F01 已于 2026-10-19 闭合：positive/负样本评测均跑生产 `enforce_scope_filter`；其「公开知识跨租户可见」语义差转契约级 ADR 项，另录） | §4 |
@@ -92,7 +94,7 @@
 
 待办拆解（需独立方案）：
 - [ ] 前端技术栈选型（未定，需按 `AGENTS.md`「框架选型规则」评估成熟度，不预先绑定 Vue/React）
-- [ ] 各应用前端 ↔ 后端错误契约对齐审计：`{detail}` 语义码目前是前端要解析的形状，须先于 `docs/plans/plan-p2-unified-exception-handlers-2026-09-24.md` 的 D-2/D-4 后端收敛决策落地，避免后端改契约打破前端
+- [x] 各应用前端 ↔ 后端错误契约对齐审计：`{detail}` 语义码目前是前端要解析的形状，须先于 `docs/plans/plan-p2-unified-exception-handlers-2026-09-24.md` 的 D-2/D-4 后端收敛决策落地，避免后端改契约打破前端。**（2026-10-19 审计完成，closes #94；只读、零代码）**：产出 `docs/plans/plan-frontend-error-contract-audit-2026-10-19.md`——现状契约清单（HTTP 四层形状 + 流式四种帧 + exhibition C1 状态码语义，逐项附证据与复跑命令）+ 五处不一致（同语义三形状 / 4xx 缺机器可读 code / 流式帧信息量分裂 / `msg` vs `message` 用词分裂 / ks-kefu-federation 4xx 无文档承诺）+ D-2/D-4 拍板输入建议。**最关键事实：仓内无任何前端消费者**（6 app 全无在仓前端，README CORS 的 5173 是预留）⇒ 现在是收敛窗口期，代价≈0；审计倾向选项 A（4xx 统一到 kernel `{code,msg,request_id}` 信封，`msg` 用词以 kernel 为准，exhibition 的 dict detail 本就非标准随 D-2 换）——**倾向非拍板，D-2/D-4 决策仍属 P2 方案**。
 - [ ] 若引入前端工程，需同步补 CI 门禁（当前 `make lint`/pytest 仅覆盖 Python 侧，前端代码漂移将无人拦截）
 
 ## 2. V3 企业执行平台验收缺口
