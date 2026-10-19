@@ -171,7 +171,7 @@ async def test_sweep_deletes_old_keeps_young():
     store._put_at["payload/old"] = time.time() - 7200
 
     report = await ext.sweep()
-    assert report == {"scanned": 2, "deleted": 1, "skipped_young": 1, "errors": 0}
+    assert report == {"scanned": 2, "deleted": 1, "skipped_young": 1, "skipped_referenced": 0, "errors": 0}
     assert await store.get("payload/old") is None
     assert await store.get("payload/young") == b"y" * 10
 
@@ -214,8 +214,58 @@ async def test_sweep_tolerates_single_key_error():
     store = _FlakyStore()
     ext = PayloadExternalizer(store)
     report = await ext.sweep(min_age_seconds=100)  # 显式下限，避开默认 168h
-    assert report == {"scanned": 3, "deleted": 2, "skipped_young": 0, "errors": 1}
+    assert report == {"scanned": 3, "deleted": 2, "skipped_young": 0, "skipped_referenced": 0, "errors": 1}
     assert store.deleted == ["a", "c"]
+
+
+async def test_sweep_keeps_referenced_keys():
+    """#121：够老但仍在引用的 key 不删——awaitable resume 挂起超 age 下限后，
+    其 reference 被单靠年龄删掉 ⇒ resume 成功但 internalize 静默返回 reference。"""
+    import time
+
+    store = InMemoryPayloadStore()
+    ext = PayloadExternalizer(store, config=ExternalizationConfig(gc_min_age_hours=1))
+    await store.put("payload/referenced", b"x" * 10)
+    await store.put("payload/orphan", b"y" * 10)
+    old = time.time() - 7200
+    store._put_at["payload/referenced"] = old
+    store._put_at["payload/orphan"] = old
+
+    report = await ext.sweep(referenced_keys={"payload/referenced"})
+    assert report["skipped_referenced"] == 1
+    assert report["deleted"] == 1
+    assert await store.get("payload/referenced") == b"x" * 10
+    assert await store.get("payload/orphan") is None
+
+
+async def test_sweep_referenced_keys_accepts_any_collection():
+    """referenced_keys 收任意可迭代集合（set/frozenset/list 同语义）。"""
+    import time
+
+    store = InMemoryPayloadStore()
+    ext = PayloadExternalizer(store, config=ExternalizationConfig(gc_min_age_hours=1))
+    await store.put("k", b"x")
+    store._put_at["k"] = time.time() - 7200
+    report = await ext.sweep(referenced_keys=["k"])
+    assert report["skipped_referenced"] == 1 and report["deleted"] == 0
+
+
+async def test_list_gc_candidates_does_not_delete():
+    """#121 两段式第一段：列候选不删；候选口径与 sweep 的 age 判据一致。"""
+    import time
+
+    store = InMemoryPayloadStore()
+    ext = PayloadExternalizer(store, config=ExternalizationConfig(gc_min_age_hours=1))
+    await store.put("payload/old", b"x")
+    await store.put("payload/young", b"y")
+    store._put_at["payload/old"] = time.time() - 7200
+
+    candidates = await ext.list_gc_candidates()
+    assert candidates == ["payload/old"]
+    # 列候选不动存储
+    assert await store.get("payload/old") == b"x"
+    # 显式下限优先于 config
+    assert await ext.list_gc_candidates(min_age_seconds=99999) == []
 
 
 async def test_filesystem_store_list_keys_and_age(tmp_path):

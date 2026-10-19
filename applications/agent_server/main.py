@@ -85,9 +85,33 @@ def _build_payload_externalizer():
     return PayloadExternalizer(
         FileSystemPayloadStore(settings.payload_externalization_dir),
         config=ExternalizationConfig(
-            threshold_bytes=settings.payload_externalization_threshold_bytes
+            threshold_bytes=settings.payload_externalization_threshold_bytes,
+            gc_min_age_hours=settings.payload_externalization_gc_min_age_hours,
         ),
     )
+
+
+def _make_gc_sweep(externalizer, checkpoint_store):
+    """payload blob GC 回调（缺口 7 + #121 引用检查）：两段式删除。
+
+    第一段问"有没有该删的"（``list_gc_candidates``，纯 blob 存储遍历）；**有候选
+    才**第二段查 PG 引用（``collect_externalized_keys``，全表 jsonb_each 有成本，
+    稳态不该每 30s 扫一次）；最后按"够老 **且** 不被引用"删。
+
+    引用检查防的损坏场景：awaitable resume 挂起超过 age 下限后，其 checkpoint
+    里的 reference 被 sweep 单靠年龄删掉 ⇒ resume 成功但 internalize 静默返回
+    reference（数据没了且无告警）。
+
+    无删除候选时返回 None（本轮什么都没发生，不伪造扫描计数）。
+    """
+
+    async def _gc_sweep() -> dict[str, int] | None:
+        if not await externalizer.list_gc_candidates():
+            return None
+        referenced = await checkpoint_store.collect_externalized_keys()
+        return await externalizer.sweep(referenced_keys=referenced)
+
+    return _gc_sweep
 
 
 def _build_pg_stores(pool, externalizer=None):
@@ -543,9 +567,12 @@ async def lifespan(app: FastAPI):
             from agent_runtime.execution_scheduler import SchedulerReaper
 
             # 缺口 7（2026-10-19）：externalization 启用时才挂 GC sweep 回调
-            # （特性默认关 ⇒ 无回调，reaper 行为逐字不变）。
+            # （特性默认关 ⇒ 无回调，reaper 行为逐字不变）。#121：回调改两段式
+            # （先候选后引用扫描），仍在途的引用不被误删。
             sweep_callbacks = (
-                [payload_externalizer.sweep] if payload_externalizer is not None else None
+                [_make_gc_sweep(payload_externalizer, checkpoint_store)]
+                if payload_externalizer is not None
+                else None
             )
             reaper = SchedulerReaper(
                 scheduler,

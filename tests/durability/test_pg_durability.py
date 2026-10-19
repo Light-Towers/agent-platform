@@ -46,7 +46,20 @@ class _FakeCursor:
 
         # --- execution_checkpoints ---
         if "execution_checkpoints" in sql:
-            if "select completed" in sql:
+            if "jsonb_each" in sql:
+                # #121：collect_externalized_keys——模拟 PG 侧
+                # `SELECT DISTINCT entry.ref->>'key' ... jsonb_each(completed)`
+                keys: set[str] = set()
+                for row in p.checkpoints.values():
+                    for value in (row.get("completed") or {}).values():
+                        if (
+                            isinstance(value, dict)
+                            and value.get("__external__") is True
+                            and value.get("key")
+                        ):
+                            keys.add(value["key"])
+                self._results = [(k,) for k in sorted(keys)]
+            elif "select completed" in sql:
                 eid = params[0]
                 row = p.checkpoints.get(eid)
                 if row:
@@ -254,6 +267,33 @@ class TestPgCheckpointStore:
 
         # miss
         assert await store.load("nonexistent") is None
+
+    @pytest.mark.asyncio
+    async def test_collect_externalized_keys(self):
+        """#121：收集全表仍引用的外部化 key——GC 删除前的安全闸。
+
+        age-based sweep 单靠年龄会删掉挂起超 age 下限的 awaitable resume 的
+        reference ⇒ internalize 静默返回 reference（数据损坏）。本方法提供
+        sweep 的 referenced_keys 来源。
+        """
+        pool = _FakePgPool()
+        store = PgCheckpointStore(pool)
+
+        ref = {
+            "__external__": True,
+            "store": "blob",
+            "key": "payload/aaa",
+            "size": 10,
+            "checksum": "x",
+        }
+        await store.save(
+            Checkpoint(execution_id="e1", completed={"n1": ref}, resumable=False)
+        )
+        await store.save(
+            Checkpoint(execution_id="e2", completed={"n1": "plain"}, resumable=False)
+        )
+
+        assert await store.collect_externalized_keys() == {"payload/aaa"}
 
 
 class TestPgIdempotencyStore:

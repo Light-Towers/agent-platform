@@ -161,6 +161,11 @@ class Settings(BaseLLMSettings):
     payload_externalization_enabled: bool = False
     payload_externalization_dir: str = ""
     payload_externalization_threshold_bytes: int = 1024 * 1024
+    # GC 年龄下限（小时，#121 env 化）。只删年龄 ≥ 此值**且仍被 checkpoint 引用**的
+    # blob 才会被保留（引用检查见 PayloadExternalizer.sweep / PgCheckpointStore.
+    # collect_externalized_keys）。**必须大于最长合法挂起时长**（awaitable resume
+    # 天数上限）——age 下限是第二道边际，引用检查是第一道。
+    payload_externalization_gc_min_age_hours: int = 168
 
     # V3 Phase 4: Cost Governance（opt-in，默认关）
     # 启用后请求路径加 budget check/record，超限返回 429
