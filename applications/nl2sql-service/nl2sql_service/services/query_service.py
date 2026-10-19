@@ -103,6 +103,8 @@ class QueryService:
             "tokenizer": settings.tokenizer,
             "retrieval_score_margin": settings.retrieval_score_margin,
             "date_info": build_date_info(settings),
+            # filter_table 的 LLM 过滤开关（#109）：服务端单源注入，客户端不可覆盖
+            "filter_table_enabled": settings.filter_table_enabled,
             # 进模型的结果体量上限（§5.11-V3 双上限分离）
             "sql_max_rows_for_prompt": settings.sql_max_rows_for_prompt,
             "sql_prompt_max_bytes": settings.sql_prompt_max_bytes,
