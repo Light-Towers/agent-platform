@@ -1262,6 +1262,14 @@ flowchart TB
 
 **另有两条章节级缺失，本轮仍未补**（记在这里以免忘掉）：**① 没有迁移与回滚路径**——文档讲终态与"DDL 要进版本控制"，但没有"现状 → 终态"的中间态（现有 ES / pgvector 取值副本怎么停、服务若已上线如何灰度、失败怎么退）；**② 没有基线值与 owner**——§6 要求"golden 一键跑出门禁读数"，却没定义 20–50 条从哪来、谁标、口径冲突谁裁，也没留基线数字；21（现 22）个待答里零 owner。
 
+### 11.7 落地回写（2026-10-19，分支收敛后由 feat 线实读订正）
+
+本方案冻结于 2026-10-17；其 6 个功能 commit 后并入 feat 线并继续演化（收敛决策见 `docs/adr/0012-nl2sql-branch-consolidation.md`）。以下**行为变化**在此回写（代码注释与 `.env.example` 已同步，此处补文档账）：
+
+1. **meta 池 `statement_timeout_ms` 5000→15000**（#106）。原 5s 与"ANN 索引创建失败退化为顺序扫描仍可工作"的承诺矛盾——大表缺索引时 5s 直接砍死降级路；取 15s 而非与 dw 齐平的 30s，是为保住"meta 交互级 < dw OLAP"分层（`test_pool_factory` 的 dw > meta 断言钉死）。缺索引告警改由 DDL 的 `RAISE WARNING` 负责，查询超时不兼职。
+2. **`filter_table` 加白名单交集 + 配置开关，默认关**（#109）。`_derive_tables` 让 `state.tables` 有值、本节点被救活——§5.14.1 表中"空转"形态**已变**；但 LLM 输出不可直信（幻觉表名可直进生成 prompt）且每请求多一次往返 ⇒ 默认关（行为回到复活前：零 LLM 调用、派生表级视图照常进生成期），`FILTER_TABLE_ENABLED=true` 显式开启。这是**有意的行为回退**，不是半交付。
+3. 同批落地（不改变上述两条的行为面）：`render()` 改白名单槽位正则替换（#108，字面花括号不再抛 ValueError，槽位 7→13）；召回四节点补 DB 故障降级（#106）；init 补 advisory lock + apply 后对账（#110）；DDL 补 value_info 存量对账块、GIN 进 DO 块、schema_meta 记 vector_dim（#110）。
+
 ## 12. 取证快照（冻结于 2026-10-17，防 `courses/` 删除后失效）
 
 **为什么需要本节**：`courses/zhanggui-wenda/data-agent` **未被 git 跟踪**（`git ls-files courses/` = 0），且 `.gitignore:100` = `courses/`。用户 2026-10-17 表示该目录**后续会删除**——删除后不可恢复，而本文 P0-6① / P0-8① / §5.1 / §5.2 不变量一 / §5.3 反模式 4、5 / §5.3 修法段 / §2 课程实现行的证据全部指向它。
