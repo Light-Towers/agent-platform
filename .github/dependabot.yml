@@ -10,6 +10,21 @@ updates:
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 10
+    # OTel trio 不进自动更新（2026-10-19，断 L-4 复发根因）：
+    # 实测 dependabot 的 uv workspace 组只抬**根 manifest** 的下界
+    # （pyproject.toml [otel] >=1.24 → >=1.45.x），不动 packages/agent-core
+    # [tracing] 的 >=1.24 ⇒ lint L-4（多处下界必须一致，plan-observability
+    # §3.3）每次必红（#79 与 #84 同签名复现两次）。OTel 版本归一由该门禁 +
+    # 人工按方案抬（同一 PR 内抬全部声明位 + lock）管理；安全更新若重要，
+    # 走人工 lock-only PR（抬全部声明位），不信自动组。
+    # 仅忽略 minor/patch：major 仍会单独出 PR（必然人工全链路审）。
+    ignore:
+      - dependency-name: "opentelemetry-api"
+        update-types: ["version-update:semver-minor", "version-update:semver-patch"]
+      - dependency-name: "opentelemetry-sdk"
+        update-types: ["version-update:semver-minor", "version-update:semver-patch"]
+      - dependency-name: "opentelemetry-exporter-otlp"
+        update-types: ["version-update:semver-minor", "version-update:semver-patch"]
     groups:
       # minor/patch 低风险更新合并为单个 PR，major 单独出 PR 便于审阅
       minor-and-patch:
