@@ -522,6 +522,10 @@ async def lifespan(app: FastAPI):
                 scheduler,
                 config=ReaperConfig(max_retries=settings.scheduler_recovery_max_retries),
                 contract_resolver=contract_resolver,
+                # 缺口 3（2026-10-19）：QUERY_STATUS 执行体——查外部任务真实状态
+                # 并按态动作（completed→resume 续跑 / failed→FAILED / 在途→不动防
+                # 重复副作用）。store 已在同一 lifespan 装配（PG 或内存）。
+                awaitable_store=awaitable_task_store,
             )
         # V3 Phase 3: Scheduler Reaper（lease-based 回收）
         if ownership_store is not None:

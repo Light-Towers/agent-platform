@@ -419,3 +419,123 @@ async def test_orchestrator_consumes_async_resolver():
     action = await orch.recover_one(await store.get("e1"))
     assert seen == ["e1"], "async resolver 未被调用（awaitable 路径断）"
     assert action is RecoveryAction.QUERY_STATUS, "contract 语义未进入决策"
+
+
+# ===== QUERY_STATUS 执行体（2026-10-19，缺口 3：_mark_for_query 桩→真查） =====
+
+
+class _FakeTask:
+    def __init__(self, state, execution_id="e1"):
+        self.state = state
+        self.execution_id = execution_id
+
+
+class _FakeAwaitableStore:
+    def __init__(self, tasks_by_execution: dict | None = None, boom: bool = False):
+        self._tasks = tasks_by_execution or {}
+        self._boom = boom
+        self.calls: list[str] = []
+
+    async def list_by_execution(self, execution_id: str):
+        self.calls.append(execution_id)
+        if self._boom:
+            raise RuntimeError("pg down")
+        return self._tasks.get(execution_id, [])
+
+
+async def _park_and_stuck(store_scheduler, execution_id="e1"):
+    req = _req(execution_id)
+    await store_scheduler.submit(req)
+    await store_scheduler.complete(execution_id, QueueStatus.FAILED)
+    from agent_runtime.execution_recovery import stuck_from_request
+
+    return stuck_from_request(await store_scheduler._store.get(execution_id))
+
+
+async def test_query_status_no_store_degrades_to_log_only():
+    """store 缺席 ⇒ 仅日志、零状态变更、零入队（现值逐字保持）。"""
+    from agent_runtime.execution_recovery import Rescheduler
+
+    store = InMemorySchedulerStore()
+    sched = ExecutionScheduler(store)
+    rescheduler = Rescheduler(sched)  # 无 awaitable_store
+    stuck = await _park_and_stuck(sched)
+    await rescheduler.execute(stuck, RecoveryAction.QUERY_STATUS)
+    assert await store.get("e1:resume:1") is None, "store 缺席不得入队"
+
+
+async def test_query_status_no_tasks_no_action():
+    """无外部任务记录 ⇒ WARNING + 无动作（不从"缺席" fabrication retry/fail）。"""
+    from agent_runtime.execution_recovery import Rescheduler
+
+    store = InMemorySchedulerStore()
+    sched = ExecutionScheduler(store)
+    rescheduler = Rescheduler(sched, awaitable_store=_FakeAwaitableStore({}))
+    stuck = await _park_and_stuck(sched)
+    await rescheduler.execute(stuck, RecoveryAction.QUERY_STATUS)
+    assert await store.get("e1:resume:1") is None
+
+
+async def test_query_status_completed_resumes_not_retries():
+    """外部已完成 ⇒ 入队 :resume:N（续跑而非重跑——重跑=重复副作用）。"""
+    from agent_runtime.awaitable_task import AwaitableState
+    from agent_runtime.execution_recovery import Rescheduler
+
+    store = InMemorySchedulerStore()
+    sched = ExecutionScheduler(store)
+    rescheduler = Rescheduler(
+        sched, awaitable_store=_FakeAwaitableStore({"e1": [_FakeTask(AwaitableState.COMPLETED)]})
+    )
+    stuck = await _park_and_stuck(sched)
+    await rescheduler.execute(stuck, RecoveryAction.QUERY_STATUS)
+    resumed = await store.get("e1:resume:1")
+    assert resumed is not None, "外部已完成必须入队续跑请求"
+    assert resumed.metadata.get("recovery_action") == "resume"
+    assert resumed.metadata.get("recovered_from") == "e1"
+
+
+async def test_query_status_failed_marks_failed():
+    """外部已失败/超时 ⇒ complete(FAILED)（重试无意义）。"""
+    from agent_runtime.awaitable_task import AwaitableState
+    from agent_runtime.execution_recovery import Rescheduler
+
+    store = InMemorySchedulerStore()
+    sched = ExecutionScheduler(store)
+    rescheduler = Rescheduler(
+        sched,
+        awaitable_store=_FakeAwaitableStore({"e1": [_FakeTask(AwaitableState.TIMED_OUT)]}),
+    )
+    stuck = await _park_and_stuck(sched)
+    await rescheduler.execute(stuck, RecoveryAction.QUERY_STATUS)
+    assert await store.get("e1:resume:1") is None, "外部失败不得入队"
+    # 原执行已被 complete（stuck_from_request 的 original 已 FAILED；此处验证无新请求）
+
+
+async def test_query_status_in_flight_no_action():
+    """全部在途（SUBMITTED/RUNNING）⇒ 无动作——QUERY_BEFORE_RETRY 的反重复副作用核心。"""
+    from agent_runtime.awaitable_task import AwaitableState
+    from agent_runtime.execution_recovery import Rescheduler
+
+    store = InMemorySchedulerStore()
+    sched = ExecutionScheduler(store)
+    rescheduler = Rescheduler(
+        sched,
+        awaitable_store=_FakeAwaitableStore(
+            {"e1": [_FakeTask(AwaitableState.SUBMITTED), _FakeTask(AwaitableState.RUNNING)]}
+        ),
+    )
+    stuck = await _park_and_stuck(sched)
+    await rescheduler.execute(stuck, RecoveryAction.QUERY_STATUS)
+    assert await store.get("e1:resume:1") is None, "在途外部任务不得触发任何重试/入队"
+
+
+async def test_query_status_store_error_tolerated():
+    """store 抛错 ⇒ 容错记 WARNING，不崩恢复周期（与 resolve_contract 同款）。"""
+    from agent_runtime.execution_recovery import Rescheduler
+
+    store = InMemorySchedulerStore()
+    sched = ExecutionScheduler(store)
+    rescheduler = Rescheduler(sched, awaitable_store=_FakeAwaitableStore(boom=True))
+    stuck = await _park_and_stuck(sched)
+    await rescheduler.execute(stuck, RecoveryAction.QUERY_STATUS)  # 不得抛
+    assert await store.get("e1:resume:1") is None
