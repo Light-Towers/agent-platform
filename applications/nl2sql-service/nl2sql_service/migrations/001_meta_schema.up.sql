@@ -31,6 +31,10 @@ CREATE TABLE IF NOT EXISTS nl2sql_schema_meta (
 );
 INSERT INTO nl2sql_schema_meta (key, value) VALUES ('schema_version', '1')
 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now();
+-- vector_dim 同账（#110）：维度漂移（换 embedding 模型）必须可对账——只记 version
+-- 无法回答"这个库的 vector(N) 与当前配置一致吗"，而列宽不符本该在建库前就炸。
+INSERT INTO nl2sql_schema_meta (key, value) VALUES ('vector_dim', '{{vector_dim}}')
+ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now();
 
 -- ---------------------------------------------------------------------------
 -- 1. 列级元知识：ColumnRepository 向量召回 / MetaRepository.save_column 写入
@@ -111,6 +115,16 @@ CREATE TABLE IF NOT EXISTS nl2sql_value_info (
         UNIQUE (tenant_id, workspace_id, datasource_id, column_name, value)
 );
 COMMENT ON TABLE nl2sql_value_info IS '取值字典（码表/地名/状态值）；tsvector 只从 search_text 生成，构建方负责写入分词结果';
+
+-- ---------------------------------------------------------------------------
+-- 对账路径（#110）：存量库若在 DDL 入库前已**外部**建过 nl2sql_value_info（旧形状，
+-- 无 search_text / value_tsvector——本仓此前没有任何 CREATE TABLE，旧表只可能来自
+-- 手工/外部脚本），上面的 IF NOT EXISTS 会整表跳过 ⇒ 这里幂等补列，否则下方 GIN
+-- 索引因缺列直接失败（ANN 索引有三级降级，这两列不能没有对账路径）。
+-- ---------------------------------------------------------------------------
+ALTER TABLE nl2sql_value_info ADD COLUMN IF NOT EXISTS search_text TEXT NOT NULL DEFAULT '';
+ALTER TABLE nl2sql_value_info ADD COLUMN IF NOT EXISTS value_tsvector tsvector
+    GENERATED ALWAYS AS (to_tsvector('simple'::regconfig, coalesce(search_text, ''))) STORED;
 
 -- ---------------------------------------------------------------------------
 -- 4. 表间关系：§5.14-R2 规划中，代码当前零引用
@@ -202,9 +216,15 @@ EXCEPTION WHEN OTHERS THEN
     END;
 END $$;
 
--- 全文路（build_tsquery → to_tsquery('simple', ...)）
-CREATE INDEX IF NOT EXISTS idx_nl2sql_value_tsv
-    ON nl2sql_value_info USING gin (value_tsvector);
+-- 全文路（build_tsquery → to_tsquery('simple', ...)）。包在 DO 块里与 ANN 索引
+-- 同纪律（#110）：失败只告警不中止整批——对账差异由 init 脚本的自校验负责报告。
+DO $$
+BEGIN
+    CREATE INDEX IF NOT EXISTS idx_nl2sql_value_tsv
+        ON nl2sql_value_info USING gin (value_tsvector);
+EXCEPTION WHEN OTHERS THEN
+    RAISE WARNING 'value_info: GIN 索引创建失败（%），全文召回将不可用', SQLERRM;
+END $$;
 
 -- 别名精确匹配：lower(alias) 等值 / LIKE 前缀
 CREATE INDEX IF NOT EXISTS idx_nl2sql_alias_lower
