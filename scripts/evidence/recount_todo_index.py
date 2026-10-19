@@ -36,10 +36,10 @@ ROOT = Path(__file__).resolve().parents[2]
 TODO = ROOT / "docs" / "TODO.md"
 
 # 每批翻转复选框后同批更新；注释记录更新来处（追记批次）。
-# 现值 = 2026-10-19 追记四（main 链：ExecutionContext PyJWT 迁移销项后 26/13）。
+# 现值 = 2026-10-19 追记五（main 链：F01 残差归零后 25/14）。
 # 注意 feat/nl2sql-meta-build-recovery 分支另有 5 处翻转未合入（分叉登记见
-# TODO §0 追记三）；feat 合入后本常量应随合并结果更新为 21/18（26/13 − 5 开 + 5 闭）。
-DECLARED_TOTAL = {"open": 26, "closed": 13}
+# TODO §0 追记三）；feat 合入后本常量应随合并结果更新为 20/19（25/14 − 5 开 + 5 闭）。
+DECLARED_TOTAL = {"open": 25, "closed": 14}
 
 
 def _table_body_rows(section_text: str) -> list[str]:

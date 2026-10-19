@@ -42,11 +42,11 @@ def _isolate_audit_log(tmp_path, monkeypatch):
     return audit_path
 
 
-def _make_case(category, query="q", tenant_id="tenant_A", candidates=None, expected=None):
+def _make_case(category, query="q", tenant_id="tenant_A", candidates=None, expected=None, tenant_context=None):
     return GoldenCase(
         category=category,
         query=query,
-        tenant_context={"tenant_id": tenant_id},
+        tenant_context=tenant_context if tenant_context is not None else {"tenant_id": tenant_id},
         candidates=candidates or [],
         expected=expected or {},
     )
@@ -176,6 +176,40 @@ class TestEvaluators:
         report = run_evaluation([case])
         assert report["failed"] == 1
         assert report["results"][0]["passed"] is False
+
+    def test_positive_uses_production_filter_semantics(self):
+        """F01 残差收口（#89）：positive 路径跑**生产** enforce_scope_filter。
+
+        钉死现行生产语义——跨租户 PUBLIC 候选被剔除（mock 时代是放行的）：
+        「公开知识是否跨租户可见」是契约级问题（须先出 ADR），本断言防未来
+        有人顺手给生产补 PUBLIC 例外而不走契约。
+        """
+        cross_public = _published_candidate(kid="k-public", tenant_id="tenant_B", scope="PUBLIC")
+        case = _make_case(
+            GoldenCategory.POSITIVE,
+            candidates=[cross_public],
+            expected={"min_hits": 1},
+        )
+        report = run_evaluation([case])
+        result = report["results"][0]
+        assert result["scoped_count"] == 0, "生产语义：跨租户 PUBLIC 项不得进 positive 命中集"
+        assert result["passed"] is False
+
+    def test_positive_production_narrows_by_scope(self):
+        """生产语义：ctx.scopes 非空时按 scope_key 收窄（mock 时代忽略 scopes）。"""
+        in_scope = _published_candidate(kid="k-in")
+        out_of_scope = _published_candidate(kid="k-out")
+        out_of_scope["exhibition_id"] = "exp_999"
+        case = _make_case(
+            GoldenCategory.POSITIVE,
+            candidates=[in_scope, out_of_scope],
+            tenant_context={"tenant_id": "tenant_A", "scopes": ["exhibition:exp_001"]},
+            expected={"min_hits": 1, "scope_key": "exhibition_id"},
+        )
+        report = run_evaluation([case])
+        result = report["results"][0]
+        assert result["scoped_count"] == 1
+        assert result["passed"] is True
 
     def test_cross_tenant_negative_pass_no_leak(self):
         """租户 B 查询，候选全是 B 自己的 → 越权召回=0。"""
