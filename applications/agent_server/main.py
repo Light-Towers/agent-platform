@@ -90,9 +90,11 @@ def _build_payload_externalizer():
     )
 
 
-def _build_pg_stores(pool):
+def _build_pg_stores(pool, externalizer=None):
     """构建 PG 持久化后端（§20.1/20.2 + P3-1）。
 
+    ``externalizer`` 可注入（缺口 7：reaper 的 GC sweep 与 checkpoint 外部化
+    共用同一实例/同一 blob 目录）；缺省 None 时自建（禁用态返回 None）。
     仅在 pool 非 None 时创建；返回 (checkpoint_store, idempotency_store, ownership_store, trajectory_store)。
     """
     if pool is None:
@@ -100,10 +102,13 @@ def _build_pg_stores(pool):
     # V3-6 Layer B：不传 migrator 则 load() 的 schema 迁移分支恒不执行（默认 None）
     from agent_runtime.state_migration import get_default_migrator
 
+    if externalizer is None:
+        externalizer = _build_payload_externalizer()
+
     checkpoint_store = PgCheckpointStore(
         pool,
         migrator=get_default_migrator(),
-        externalizer=_build_payload_externalizer(),
+        externalizer=externalizer,
     )
     idempotency_store = PgIdempotencyStore(pool)
     ownership_store = PgExecutionOwnershipStore(pool)
@@ -256,7 +261,13 @@ async def lifespan(app: FastAPI):
     checkpointer = await _build_checkpointer()
 
     # §20.1/20.2 + P3-1: 构建 PG 持久化后端
-    checkpoint_store, idempotency_store, ownership_store, trajectory_store = _build_pg_stores(pool)
+    # 缺口 7（2026-10-19）：externalizer 提前构建——checkpoint 外部化与 reaper 的
+    # blob GC sweep 共用同一实例（同一 FileSystemPayloadStore 目录）。仅 pool 在场
+    # 时构建：保持「开了没配目录即 fail-fast」的原触发时序（pool 缺席不提前炸）。
+    payload_externalizer = _build_payload_externalizer() if pool is not None else None
+    checkpoint_store, idempotency_store, ownership_store, trajectory_store = _build_pg_stores(
+        pool, externalizer=payload_externalizer
+    )
 
     # Phase 2: OTel 接线（opt-in）；观测单状态机在 kernel（S1），请求级 span 由
     # build_api_app(enable_tracing=True) 装配的 TracingMiddleware 创建（S2），
@@ -531,7 +542,17 @@ async def lifespan(app: FastAPI):
         if ownership_store is not None:
             from agent_runtime.execution_scheduler import SchedulerReaper
 
-            reaper = SchedulerReaper(scheduler, ownership_store, recovery=recovery)
+            # 缺口 7（2026-10-19）：externalization 启用时才挂 GC sweep 回调
+            # （特性默认关 ⇒ 无回调，reaper 行为逐字不变）。
+            sweep_callbacks = (
+                [payload_externalizer.sweep] if payload_externalizer is not None else None
+            )
+            reaper = SchedulerReaper(
+                scheduler,
+                ownership_store,
+                recovery=recovery,
+                sweep_callbacks=sweep_callbacks,
+            )
             reaper.start()
             app.state.scheduler_reaper = reaper
             logger.info(

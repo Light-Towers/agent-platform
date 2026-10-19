@@ -8,7 +8,11 @@
    ``PAYLOAD_EXTERNALIZATION_DIR``，否则 agent_server 启动即 RuntimeError（不静默退回"没开"）。
    边界：① 只接 PG 后端——缺口原文是「大 payload 塞 checkpoint **JSONB**」，进程内
    checkpoint 再套一层进程内 blob store 是自我矛盾，刻意不接；② 联邦 planner 侧未接；
-   ③ blob 无 retention/GC、且与 PG 非同事务（详见方案 §6.4）。
+   ③ **retention/GC 已补（2026-10-19，缺口 7 残留）**：``PayloadExternalizer.sweep``
+   age-based 保守删除（默认 7 天下限，留年轻/删年老，单 key 异常不中断），由
+   ``SchedulerReaper(sweep_callbacks=...)`` 周期触发。**仍未修**：与 PG 非同事务
+   （fence 拒绝 ⇒ 泄漏单体）——正解是 blob 索引表（需迁移），属独立项；age  sweep
+   把泄漏面压平（不再无界）但不清零单体。
    （此前状态为 NOT WIRED，P1-7 审计披露 2026-09-24）
 
 现状（v3 之前）：工具返回 50MB JSON 直接塞 checkpoint JSONB，影响 compaction /
@@ -45,6 +49,10 @@ class ExternalizationConfig:
 
     threshold_bytes: int = 1024 * 1024  # 1MB：超此阈值外部化
     store_name: str = "blob"  # blob store 名称（reference 中记录）
+    # GC：age-based sweep 的年龄下限（小时）。只删年龄 ≥ 此值的 blob——在途
+    # checkpoint 的引用不会被打扫误伤（age 下限即安全边际；load 路径对缺失
+    # blob 本就优雅降级：返回 reference + 告警）。默认 7 天。
+    gc_min_age_hours: int = 168
 
 
 class PayloadStore(abc.ABC):
@@ -62,21 +70,47 @@ class PayloadStore(abc.ABC):
     async def delete(self, key: str) -> bool:
         """删除 payload。返回是否存在且已删。"""
 
+    @abc.abstractmethod
+    async def list_keys(self) -> list[str]:
+        """列出全部 key（sweep 用；InMemory=插入序，FS=目录遍历序）。"""
+
+    @abc.abstractmethod
+    async def key_age_s(self, key: str) -> float | None:
+        """key 的年龄（秒，wall-clock）；不存在返回 None。
+
+        InMemory 记 put 时刻；FileSystem 用 mtime。二者同口径（time.time()），
+        sweep 的 age 判据跨实现一致。
+        """
+
 
 class InMemoryPayloadStore(PayloadStore):
     """进程内 blob 存储（测试 / 单进程默认）。"""
 
     def __init__(self) -> None:
         self._store: dict[str, bytes] = {}
+        self._put_at: dict[str, float] = {}
 
     async def put(self, key: str, data: bytes) -> None:
+        import time
+
         self._store[key] = data
+        self._put_at[key] = time.time()
 
     async def get(self, key: str) -> bytes | None:
         return self._store.get(key)
 
     async def delete(self, key: str) -> bool:
+        self._put_at.pop(key, None)
         return self._store.pop(key, None) is not None
+
+    async def list_keys(self) -> list[str]:
+        return list(self._store)
+
+    async def key_age_s(self, key: str) -> float | None:
+        import time
+
+        put_at = self._put_at.get(key)
+        return None if put_at is None else max(0.0, time.time() - put_at)
 
 
 class FileSystemPayloadStore(PayloadStore):
@@ -112,6 +146,26 @@ class FileSystemPayloadStore(PayloadStore):
             os.remove(path)
             return True
         return False
+
+    async def list_keys(self) -> list[str]:
+        import os
+
+        keys: list[str] = []
+        for root, _dirs, files in os.walk(self._base):
+            for name in files:
+                abs_path = os.path.join(root, name)
+                rel = os.path.relpath(abs_path, self._base).replace(os.sep, "/")
+                keys.append(rel)
+        return keys
+
+    async def key_age_s(self, key: str) -> float | None:
+        import os
+        import time
+
+        path = os.path.join(self._base, key.replace("/", os.sep))
+        if not os.path.exists(path):
+            return None
+        return max(0.0, time.time() - os.path.getmtime(path))
 
 
 def is_reference(value: Any) -> bool:
@@ -191,6 +245,46 @@ class PayloadExternalizer:
         except (TypeError, ValueError):
             return False
         return size > self._config.threshold_bytes
+
+    async def sweep(self, min_age_seconds: float | None = None) -> dict[str, int]:
+        """age-based GC（2026-10-19，缺口 7 残留）：删除年龄 ≥ 下限的 blob。
+
+        返回报告 ``{scanned, deleted, skipped_young, errors}``：
+        - ``scanned``：store 内 key 总数；
+        - ``deleted``：实际删除数；
+        - ``skipped_young``：年龄 < 下限被跳过的（在途 checkpoint 引用的安全边际）；
+        - ``errors``：单 key 删除/取年龄异常数（不中断扫描）。
+
+        **保守删除**：age 判据不查引用（查引用需全 checkpoint 扫描，成本不当）
+        ⇒ 依赖「age 下限 + load 路径优雅降级（缺失 blob 返回 reference + 告警）」
+        双保险，不追求精确孤儿判定。事务性修复（blob 索引表）另属独立项。
+        """
+        min_age = (
+            min_age_seconds
+            if min_age_seconds is not None
+            else self._config.gc_min_age_hours * 3600
+        )
+        report = {"scanned": 0, "deleted": 0, "skipped_young": 0, "errors": 0}
+        try:
+            keys = await self._store.list_keys()
+        except OSError:
+            # store 列举失败（FS 层 IO）：整轮跳过而非崩——上报一次错误即可
+            report["errors"] += 1
+            return report
+        for key in keys:
+            report["scanned"] += 1
+            try:
+                age = await self._store.key_age_s(key)
+                if age is None or age < min_age:
+                    report["skipped_young"] += 1
+                    continue
+                if await self._store.delete(key):
+                    report["deleted"] += 1
+            except OSError:
+                # 单 key 的 IO 故障（取年龄/删除）：计入 errors 不中断扫描
+                # （D7 ratchet：只容 IO 类，其他异常属编程错误应暴露）
+                report["errors"] += 1
+        return report
 
 
 __all__ = [

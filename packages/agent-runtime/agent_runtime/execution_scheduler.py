@@ -698,6 +698,7 @@ class SchedulerReaper:
         dispatch_timeout: float = 60.0,
         running_timeout: float = 300.0,
         recovery: Any = None,
+        sweep_callbacks: list | None = None,
     ) -> None:
         self._scheduler = scheduler
         self._ownership = ownership_store
@@ -705,6 +706,10 @@ class SchedulerReaper:
         self._dispatch_timeout = dispatch_timeout
         self._running_timeout = running_timeout
         self._recovery = recovery
+        # 周期清扫钩子（2026-10-19，缺口 7）：每周期扫描后顺序执行，逐个容错——
+        # 一个 sweeper 抛错不得杀死 reaper（与扫描主循环同款容错口径）。
+        # 默认 None ⇒ 行为逐字不变。现有消费者：payload blob GC sweep。
+        self._sweep_callbacks = list(sweep_callbacks) if sweep_callbacks else []
         self._stopped = False
         self._task: Any = None
 
@@ -742,6 +747,12 @@ class SchedulerReaper:
                     )
             except Exception:
                 logger.debug("reaper scan failed", exc_info=True)
+            # 周期清扫钩子（缺口 7）：逐个容错，一个 sweeper 挂不影响其他与主循环
+            for cb in self._sweep_callbacks:
+                try:
+                    await cb()
+                except Exception:
+                    logger.debug("reaper sweep callback failed", exc_info=True)
             await asyncio.sleep(self._interval_s)
 
     def start(self) -> None:
