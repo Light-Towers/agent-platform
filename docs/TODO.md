@@ -40,7 +40,7 @@
 | 事项 | 锚点 | 卡在哪 | 解锁动作 |
 |------|------|--------|----------|
 | ~~`ExecutionContext` 是否迁移到 PyJWT + 标准 JWT~~ **已迁移（2026-10-19，closes #85）** | §6 | 契约变更，下游消费者未审计 | **已取证并实施**：消费者全在 exhibition-agent 内（构造 5/读字段 4/state 2；ks/kefu/nl2sql 零命中；跨进程仅 HTTP header），有 agent-runtime PyJWT 先例；HS256 保语义 + alg=none mock 用 PyJWT 原生表达，wire 逐位兼容；issue #85 / 方案 `docs/plans/plan-execution-context-pyjwt-2026-10-19.md`。**已知边界（登记不粉饰）**：exp 过期语义未启用（契约 v1.1 无规定，启用须先出契约 v1.2） |
-| Milvus 与 pgvector 双向量库长期是否统一 | §6 | 两边各自可用，统一属架构取舍（运维一致性 vs 迁移风险） | 先写清收益判据；无判据不动 |
+| Milvus 与 pgvector 双向量库长期是否统一 | §6 | 两边各自可用，统一属架构取舍（运维一致性 vs 迁移风险） | **判据已立（2026-10-19，issue #86）：`docs/plans/plan-dual-vector-store-criteria-2026-10-19.md`**（六面判据 + 三选项触发条件；现状事实表含 etcd 带死 Milvus 31 次实录、`VECTOR_BACKEND` 默认 milvus 但仓库 compose 不供 Milvus 的反讽、pgvector 侧无稀疏+RRF 对等物）⇒ **待用户拍板**（对触发条件打勾，勾不齐的选项不选） |
 | ~~U-1：`QueryRequest` 入站字段双写兼容层能否移除~~ **已删（2026-10-19）** | §6 | 兼容层的真实消费者是否存在**未取证** | **已取证并删除**：`rg` 全仓实测无真实外部生产者（唯一消费者 = 2 个自家契约测试），方案 `docs/plans/plan-u1-query-request-alias-removal-2026-10-19.md`；`query`/`session_id` 纯字段 |
 | ~~R19（GitHub issue #23）：FastAPI ≥ 0.142 原生 telemetry 与 kernel `TracingMiddleware` 双埋点~~ **已落地（2026-10-19）** | §6 | 需确认框架无其它自配 provider 残留路径；端到端复验要真集群（通道问题归 B 组第 3 条） | **残留路径已取证为零**（`FastAPIInstrumentor`/`opentelemetry.instrumentation` 0 命中，provider 仅 kernel 单入口）；最小改动已落地：`build_api_app` setdefault 关 telemetry + AST 门禁（作用域扩至 scripts/，17 条治理用例）；集群端到端复验仍待网络通道，登记不粉饰 |
 
