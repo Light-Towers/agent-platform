@@ -115,6 +115,72 @@ def check_fastapi_apps() -> list[str]:
 
 
 # ---------------------------------------------------------------------------
+# R19 架构不变量：生产 FastAPI app 必须显式关闭框架原生 telemetry（tracing）。
+# 背景：FastAPI ≥0.142 原生 telemetry 默认开启 ⇒ ① 与 kernel TracingMiddleware
+# 对同一请求各建一个同名 SERVER span（互为兄弟）；② 框架自行
+# set_tracer_provider() 覆盖 kernel init_tracing 装配的 provider（观测状态机被
+# 旁路）。默认取最小改动：build_api_app 内默认关（setdefault，调用方可显式覆盖），
+# 其余构造点显式传 telemetry={"tracing": False}。
+# 判定用 AST（非行级正则）：多行构造调用不得漏判。
+# 白名单同 P2 口径（warehouse_mock 是 dev fixture）+ app_factory（工厂本体：
+# 它在函数体内 setdefault 默认值，调用点无字面 keyword；其行为由 agent-core
+# spy 用例钉住——两层保险，缺一不可）。
+# 作用域扩到 packages/ 与 scripts/（P2 只扫 applications/，opencode_gateway
+# 曾是盲区；tests/ 排除同 P2）。
+# 方案：docs/plans/plan-r19-fastapi-native-telemetry-2026-10-19.md。
+# ---------------------------------------------------------------------------
+_R19_TELEMETRY_WHITELIST = (
+    "applications/exhibition-agent/exhibition_agent/mock_server/warehouse_mock.py",
+    "packages/agent-core/agent_core/guardrails/app_factory.py",
+)
+_R19_SCOPE_PREFIXES = ("applications/", "packages/", "scripts/")
+
+
+def _is_fastapi_call(node: ast.AST) -> bool:
+    if not isinstance(node, ast.Call):
+        return False
+    func = node.func
+    if isinstance(func, ast.Name):
+        return func.id == "FastAPI"
+    if isinstance(func, ast.Attribute):
+        return func.attr == "FastAPI"
+    return False
+
+
+def check_fastapi_telemetry() -> list[str]:
+    """R19：非白名单 FastAPI() 构造必须显式声明 telemetry keyword。"""
+    violations: list[str] = []
+    for py_file in ROOT.rglob("*.py"):
+        rel = py_file.relative_to(ROOT).as_posix()
+        if not rel.startswith(_R19_SCOPE_PREFIXES):
+            continue
+        if any(p in rel for p in (".venv", "__pycache__", ".ruff_cache", ".egg-info",
+                                   ".codeartsdoer", ".codebuddy")):
+            continue
+        if "/tests/" in rel:
+            continue
+        if any(rel == w or rel.startswith(w) for w in _R19_TELEMETRY_WHITELIST):
+            continue
+        try:
+            # utf-8-sig 同 P12：BOM 文件按加载器语义读，语法真坏仍报
+            tree = ast.parse(py_file.read_text(encoding="utf-8-sig"), filename=rel)
+        except (OSError, SyntaxError, ValueError) as exc:
+            violations.append(f"{rel}: 无法解析（{exc}）")
+            continue
+        for node in ast.walk(tree):
+            if not _is_fastapi_call(node):
+                continue
+            if not any(kw.arg == "telemetry" for kw in node.keywords):
+                violations.append(
+                    f"{rel}:{node.lineno}: FastAPI() 未声明 telemetry"
+                    "（R19：原生 telemetry 默认开启会与 kernel TracingMiddleware 双建 SERVER span"
+                    "并覆盖 kernel provider；显式传 telemetry={{\"tracing\": False}}，"
+                    "见 plan-r19-fastapi-native-telemetry-2026-10-19）"
+                )
+    return violations
+
+
+# ---------------------------------------------------------------------------
 # P5 架构不变量：workspace 成员间顶层包名不得重复。
 # 背景：uv/hatchling editable 安装以朴素 .pth 把成员源码根整体加入 sys.path，
 # 源码根下任何含 __init__.py 的子目录都会成为可全局 import 的顶层包；
@@ -901,6 +967,15 @@ def main() -> int:
         rc = 1
     else:
         print("P2 架构约束通过：无白名单外裸 FastAPI() 构造")
+    v2b = check_fastapi_telemetry()
+    if v2b:
+        print("R19 架构约束违反：非白名单 FastAPI() 必须显式声明 telemetry（防 ≥0.142 原生 telemetry 双 SERVER span / provider 覆盖）")
+        print("缺 telemetry keyword 的构造点：")
+        for v in v2b:
+            print(f"  {v}")
+        rc = 1
+    else:
+        print("R19 架构约束通过：所有 FastAPI() 构造点均显式声明 telemetry")
     v3 = check_toplevel_package_clashes()
     if v3:
         print("P5 架构约束违反：workspace 成员间顶层包名重复（editable .pth 全暴露，解析取决于安装顺序）")
