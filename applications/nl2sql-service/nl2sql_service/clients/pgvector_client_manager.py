@@ -33,19 +33,29 @@ def build_tsquery(tokens: Sequence[str], max_terms: int = _TSQUERY_MAX_TERMS) ->
     这里改为**显式 OR + 逐 token 单引号转义**，并保证：
     - token 来自同一个 Python 分词器（写入侧/查询侧单源，方案 B1 前半）；
     - `'` 双写转义，token 内的 `& | ! ( ) : *` 因被引号包住而按字面处理；
-    - 空 token / 纯标点 token 丢弃；超过 `max_terms` 截断。
+    - 空 token / 纯标点 token 丢弃；**非字符串 token 跳过**（#115：`str(None)`
+      会产出 `'None'` 词位污染查询）；**去重后再截断**（#115：重复词位曾白占
+      `max_terms` 额度，把靠后的 distinct 词挤掉）。
 
     ⚠️ 索引侧仍由 PG 的某个配置产出 tsvector（`nl2sql_value_info.value_tsvector`，
     生成方式仓内无 DDL，见方案 §2-④/Q23）。中文能否真正命中取决于索引侧分词，
     本函数只保证"查询表达式本身是对的"。
     """
     terms: list[str] = []
+    seen: set[str] = set()
     for raw in tokens:
-        for piece in str(raw).split():
+        if not isinstance(raw, str):
+            continue  # #115：非字符串 token 跳过，不 stringify 成 'None' 词位
+        for piece in raw.split():
             if not piece or not _WORD_RE.search(piece):
                 continue
-            terms.append("'" + piece.replace("'", "''") + "'")
+            lexeme = piece.replace("'", "''")
+            if lexeme in seen:
+                continue  # #115：去重后再截断，额度留给 distinct 词
+            seen.add(lexeme)
+            terms.append("'" + lexeme + "'")
             if len(terms) >= max_terms:
+                logger.debug("tsquery 词位达到上限 %d，其余 distinct 词位丢弃", max_terms)
                 return " | ".join(terms)
     return " | ".join(terms)
 
