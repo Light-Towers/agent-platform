@@ -6,7 +6,11 @@
 
 from typing import Any
 
+from agent_core.logging import get_logger
+
 from nl2sql_service.agent.context import DataAgentContext
+
+logger = get_logger(__name__)
 
 
 async def recall_relation(state: dict[str, Any]) -> dict[str, Any]:
@@ -21,7 +25,11 @@ async def recall_relation(state: dict[str, Any]) -> dict[str, Any]:
     datasource_id = state.get("datasource_id", "")
     tenant_id = state.get("tenant_id", "")
     workspace_id = state.get("workspace_id", "")
-    relations = await ctx.meta_repository.list_relations(
-        datasource_id, tenant_id=tenant_id, workspace_id=workspace_id
-    )
+    try:
+        relations = await ctx.meta_repository.list_relations(
+            datasource_id, tenant_id=tenant_id, workspace_id=workspace_id
+        )
+    except Exception:  # noqa: BLE001 - 关系路 DB 故障降级空召回，不阻断查询（#106）
+        logger.warning("relation recall failed, degraded to empty", exc_info=True)
+        relations = []
     return {"relations": relations}

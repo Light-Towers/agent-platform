@@ -10,8 +10,12 @@ embedding 由 extract_keywords 统一计算后经 `state["query_embedding"]` 传
 
 from typing import Any
 
+from agent_core.logging import get_logger
+
 from nl2sql_service.agent.context import DataAgentContext
 from nl2sql_service.services.alias_matcher import match_aliases
+
+logger = get_logger(__name__)
 
 
 async def recall_metric(state: dict[str, Any]) -> dict[str, Any]:
@@ -25,18 +29,23 @@ async def recall_metric(state: dict[str, Any]) -> dict[str, Any]:
     if ctx is None or ctx.metric_repository is None:
         return {"metrics": []}
 
+    # 主路：别名精确匹配。DB 故障一律降级（#106）：别名路回落向量路、
+    # 向量路降级空召回，不阻断查询。
     datasource_id = state.get("datasource_id", "")
     tenant_id = state.get("tenant_id", "")
     workspace_id = state.get("workspace_id", "")
     if ctx.meta_repository is not None:
-        aliases = await ctx.meta_repository.list_aliases(datasource_id, tenant_id=tenant_id, workspace_id=workspace_id)
-        hits = match_aliases(state.get("query", ""), keywords, aliases, "metric")
-        if hits:
-            rows = await ctx.meta_repository.find_metrics_by_names(
-                hits, datasource_id, tenant_id=tenant_id, workspace_id=workspace_id
-            )
-            if rows:
-                return {"metrics": rows}
+        try:
+            aliases = await ctx.meta_repository.list_aliases(datasource_id, tenant_id=tenant_id, workspace_id=workspace_id)
+            hits = match_aliases(state.get("query", ""), keywords, aliases, "metric")
+            if hits:
+                rows = await ctx.meta_repository.find_metrics_by_names(
+                    hits, datasource_id, tenant_id=tenant_id, workspace_id=workspace_id
+                )
+                if rows:
+                    return {"metrics": rows}
+        except Exception:  # noqa: BLE001 - 别名路 DB 故障回落向量路，不阻断查询
+            logger.warning("metric alias recall failed, falling back to vector", exc_info=True)
 
     embedding: list[float] | None = state.get("query_embedding")
     if embedding is None and ctx.embedding_client is not None:
@@ -46,11 +55,15 @@ async def recall_metric(state: dict[str, Any]) -> dict[str, Any]:
             embedding = None
 
     filters = (("tenant_id", tenant_id), ("workspace_id", workspace_id), ("datasource_id", datasource_id))
-    metrics = await ctx.metric_repository.recall(
-        keywords,
-        embedding=embedding,
-        top_k=state.get("retrieval_top_k", 10),
-        score_margin=state.get("retrieval_score_margin", 0.0),
-        filters=filters,
-    )
+    try:
+        metrics = await ctx.metric_repository.recall(
+            keywords,
+            embedding=embedding,
+            top_k=state.get("retrieval_top_k", 10),
+            score_margin=state.get("retrieval_score_margin", 0.0),
+            filters=filters,
+        )
+    except Exception:  # noqa: BLE001 - 向量路 DB 故障降级空召回，不阻断查询（#106）
+        logger.warning("metric recall failed, degraded to empty", exc_info=True)
+        metrics = []
     return {"metrics": metrics}
