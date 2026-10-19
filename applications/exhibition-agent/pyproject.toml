@@ -17,6 +17,10 @@ dependencies = [
     "langchain-openai>=0.2",
     "pydantic>=2.13.5",
     "pydantic-settings>=2.2",
+    # ExecutionContext JWT 编解码走标准库（2026-10-19，plan-execution-context-pyjwt-2026-10-19：
+    # 替下 context_codec 的手写 base64url+HMAC）。下界与根 / agent-runtime [identity] 一致；
+    # lint L-4 不跟踪 pyjwt（非 OTel/langfuse 面），保持一致是防解析分叉的惯例。
+    "pyjwt[crypto]>=2.14.0",
 ]
 
 [project.optional-dependencies]
