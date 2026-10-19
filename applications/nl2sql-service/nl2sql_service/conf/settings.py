@@ -82,6 +82,10 @@ class Settings(BaseLLMSettings):
     sql_read_only_guard: bool = True
     sql_max_rows: int = 1000  # 区别于 agent_server(100)：本服务为专职数据查询工具，结果由前端 UI 展示而非注入 LLM prompt
     sql_max_correct_retries: int = 3
+    # filter_table 节点的 LLM 表过滤开关（#109，默认关）：_derive_tables 救活该节点后
+    # 每请求会多一次 LLM 往返，且 LLM 输出只允许在派生清单内收窄（白名单交集）。
+    # 关 = 不过滤、不产生该调用（派生表级视图照常进生成期）；开 = 多一次调用换更准的表清单。
+    filter_table_enabled: bool = False
     # 进模型的结果体量上限（§5.11-V3 双上限分离）：与 sql_max_rows（返回 UI）分开——
     # 1000 行宽表几十 MB 直接进 prompt 会爆上下文。行数/字节双阈值，先到先截。
     sql_max_rows_for_prompt: int = 100
