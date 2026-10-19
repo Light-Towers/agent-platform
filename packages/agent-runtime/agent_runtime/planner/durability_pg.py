@@ -174,6 +174,28 @@ class PgCheckpointStore(CheckpointStore):
                     f"checkpoint 写入被拒绝（stale writer / version 降级 / generation fencing）execution={checkpoint.execution_id}"
                 )
 
+    async def collect_externalized_keys(self) -> set[str]:
+        """收集全表 checkpoint **仍引用**的外部化 blob key（#121 GC 安全性依据）。
+
+        age-based sweep 单靠年龄会删掉仍在途的引用（含挂起超 ``gc_min_age_hours``
+        的 awaitable resume：resume 后 ``internalize`` 静默返回 reference ⇒ 数据
+        损坏）。删除前必须过这一关——本方法是 sweep 的 ``referenced_keys`` 来源。
+
+        成本：全表 ``jsonb_each(completed)`` 扫描 ⇒ 调用方应"先有删除候选再查"
+        （agent_server 的 GC 接线：``list_gc_candidates`` 非空才调本方法），
+        稳态零开销。
+        """
+        sql = (
+            f"SELECT DISTINCT entry.ref->>'key' AS key FROM {self._table}, "
+            "jsonb_each(completed) AS entry(node_id, ref) "
+            "WHERE jsonb_typeof(entry.ref) = 'object' "
+            "AND entry.ref->>'__external__' = 'true'"
+        )
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(sql)
+            rows = await cur.fetchall()
+        return {str(r[0]) for r in rows if r[0]}
+
 
 class PgIdempotencyStore(IdempotencyStore):
     """PG 幂等存储：idempotency_keys 表。
