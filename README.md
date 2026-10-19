@@ -218,7 +218,7 @@ uv sync --all-packages --extra dev --extra otel --extra mcp --extra pdf
 curl -N -X POST http://127.0.0.1:8000/query \
   -H "Content-Type: application/json" \
   -H "X-Priority: high" \
-  -d '{"question": "什么是检索增强生成"}'
+  -d '{"query": "什么是检索增强生成"}'
 ```
 
 SSE 事件流：
@@ -234,9 +234,9 @@ data: {"type": "done", "thread_id": "...", "answer": "..."}        # 完成
 
 | 参数 | 位置 | 说明 |
 |------|------|------|
-| `question` | body | 问题文本（1–2000 字符） |
+| `query` | body | 查询文本（1–512 字符） |
 | `priority` | body / `X-Priority` header | `high` / `normal` / `low`，默认 `normal` |
-| `thread_id` | body | 会话 ID（启用 API_KEY 时忽略，按服务端断言租户派生 `tenant-<id>`） |
+| `session_id` | body | 会话 ID（启用 API_KEY 时忽略，按服务端断言租户派生 `tenant-<id>`） |
 | `traceparent` | header | W3C Trace Context 透传（Phase 2） |
 
 ### `POST /import` — 知识库文档导入
@@ -479,7 +479,7 @@ uv run python -m pytest tests/ -q          # 根 agent_server 包
 applications/agent_server/
 ├── main.py                # 应用工厂 + lifespan 预热（五项 Phase 2 资源初始化）
 ├── config.py              # pydantic-settings 集中配置
-├── schemas.py             # API Pydantic 契约（复用 shared-schemas，QueryRequest 经 AliasChoices 双写兼容 question/thread_id；HealthResponse 已对齐联邦契约，无需改动）
+├── schemas.py             # API Pydantic 契约（复用 shared-schemas 纯字段 query/session_id；HealthResponse 已对齐联邦契约，无需改动）
 ├── api/
 │   ├── auth.py            # 认证 + 会话防劫持
 │   ├── routes.py          # 聚合入口（挂载下列 router）
@@ -591,7 +591,7 @@ tests/                     # 单元测试（针对 agent_server 平台；含 pla
 
 > 下列项为架构决策 / 迁移工程，需在拍板后实施，**非文档层面的简单修复**。
 
-- **U-1 · QueryRequest 入站字段名不统一（待拍板）**：`applications/agent_server/schemas.py:41-54` 经 `AliasChoices("query","question")` / `AliasChoices("session_id","thread_id")` 双写兼容。内部 state 与 DB 列名均为 `question`（`applications/agent_server/agent/graph.py`、`applications/agent_server/sql/schema_store.py`）。移除兼容层前须确认全部入站/出站边界已统一。*注：旧评审称 `HealthResponse` 字段集完全不同属误判——`HealthResponse` 已 `class HealthResponse(BaseHealthResponse)` 对齐联邦契约（`packages/shared-schemas/shared_schemas/health.py:25-40`），无需处理。*
+- **U-1 · QueryRequest 入站字段名不统一（2026-10-19 已销项）**：`query`/`question` 双写已于 2026-08-16 收敛批删除；`session_id`/`thread_id` 兼容 alias 于 2026-10-19 删除（取证：无真实外部生产者、唯一消费者为自家契约测试；方案 `docs/plans/plan-u1-query-request-alias-removal-2026-10-19.md`）。旧客户端发 `thread_id` 现被 pydantic 默认 `extra=ignore` 静默忽略（`session_id=None`），不再映射。*注：旧评审称 `HealthResponse` 字段集完全不同属误判——`HealthResponse` 已 `class HealthResponse(BaseHealthResponse)` 对齐联邦契约（`packages/shared-schemas/shared_schemas/health.py:25-40`），无需处理。*
 - **U-2 · kefu 迁移（已完成）**：
   - ✅ `kefu-service` 已升级为 Agent Protocol 兼容 server：新增 `POST /invoke`（接受 `QueryRequest`，返回 `QueryResponse`，`kefu-service/main.py` + 依赖 `shared-schemas`）；旧 `/api/messages` 保留为 legacy 兼容入口。
   - ✅ 网关 `applications/agent_federation/agent/config.py` 新增 `KEFU_SERVICE_URL` + `KEFU_USE_ADAPTER` 开关（默认 `false`，直连 `kefu-service:8003`）；`async_subagents.py` 增加 httpx 远程回退（外部 `deepagents` 包未安装时直连 `/invoke`）。

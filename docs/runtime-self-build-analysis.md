@@ -205,7 +205,7 @@ Plan-F 已把 LangGraph/DeepAgents 设计为可替换的 `Planner`/`WORKFLOW` �
 1. **`resilience.py` 的 `CircuitBreaker.__init__` 存在重复字段赋值**（351–369 行把 `self._successes` / `self._failures_list` / `_window_size` 等重复赋值两次，且 `_half_open_probes` 映射逻辑含糊）。建议重构为单一初始化路径。
 2. **`_LegacyCircuitBreaker` + `DeprecationWarning` 兼容层**：按计划在一个小版本后删除（AGENTS.md 已登记 WS-1~8 兼容期）。
 3. **`Plan` / `PlannerContext` 字段重复与 `notes` 迁移债**：`Plan` 同时有 `question`（94 行）与 `notes`（deprecated）；`PlannerContext` 也有 `question` 重复定义（94 与 133 行）。应完成 `notes → ExecutionContext` 迁移并删除 deprecated 字段。
-4. **`applications/agent_server`（schemas 已随包迁移） 对运行时类型的 re-export 兼容层**、`QueryRequest` 的 `AliasChoices("query","question")` 双写——统一入站字段名后移除。
+4. **`applications/agent_server`（schemas 已随包迁移） 对运行时类型的 re-export 兼容层**、`QueryRequest` 的 `AliasChoices("query","question")` 双写——**已于 2026-10-19 移除并销项**（U-1，方案 `docs/plans/plan-u1-query-request-alias-removal-2026-10-19.md`）；re-export 兼容层部分另行评估。
 5. **uv workspace 环境脆弱**（TB-3）：`uv sync` 默认只装根包会卸载 member 包，导致跨包测试失败。建议固化 `uv sync --all-packages` 或文档化 CI 必跑命令。
 
 ### 6.4 可选：云原生托管作为旁路部署

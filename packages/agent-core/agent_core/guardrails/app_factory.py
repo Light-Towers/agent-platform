@@ -6,9 +6,10 @@ kernel 拥有入站装配：**所有生产 FastAPI app 必须经 ``build_api_app
 手写 / 漏接。配合 ``scripts/lint_architecture.py`` 的"裸 ``FastAPI(`` 即 CI 失败"
 门禁（§3.3），形成"工厂 + 门禁"双保险。
 
-工厂只强制**错误处理这一全局不变量**：CORS / SecurityGuards 等差异化中间件
-仍由调用方拿到返回值后自行 ``add_middleware``——不强推鉴权语义，避免改变各 app
-现有对外行为。
+工厂只强制两个全局不变量：**错误处理**（统一 500 脱敏 handler）与**原生
+telemetry 默认关闭**（R19：防 FastAPI ≥0.142 框架侧双 SERVER span 与 provider
+覆盖；调用方可显式覆盖）。CORS / SecurityGuards 等差异化中间件仍由调用方拿到
+返回值后自行 ``add_middleware``——不强推鉴权语义，避免改变各 app 现有对外行为。
 
 需 fastapi（``web`` extra）。
 """
@@ -41,6 +42,12 @@ def build_api_app(
     """
     from fastapi import FastAPI
 
+    # R19（docs/plans/plan-r19-fastapi-native-telemetry-2026-10-19.md）：FastAPI ≥0.142
+    # 原生 telemetry 默认开启，会 ① 与 kernel TracingMiddleware 对同一请求各建一个同名
+    # SERVER span（互为兄弟）、② 自行 set_tracer_provider() 覆盖 kernel init_tracing
+    # 装配的 provider（观测状态机被框架旁路）。工厂默认关原生 tracing；调用方确需开启
+    # 时可经 fastapi_kwargs 显式覆盖（setdefault 不剥夺覆盖权）。
+    fastapi_kwargs.setdefault("telemetry", {"tracing": False})
     app = FastAPI(**fastapi_kwargs)
     if install_handlers:
         install_error_handlers(app, get_request_id=get_request_id, logger=logger)
