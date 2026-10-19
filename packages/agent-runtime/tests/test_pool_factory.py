@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 
 import pytest
+from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
 
 from agent_runtime.pool_factory import (
@@ -81,7 +82,9 @@ def test_create_pool_sets_explicit_quota_and_options():
     # 排队上限 = 2 × max_size：超过即 TooManyRequests 快速失败，而不是无限新建后端
     assert pool.max_waiting == 14
     assert pool.name == "meta"
-    assert pool.kwargs == {"options": build_options(900, read_only=True)}
+    # row_factory=dict_row 是 create_pool 的刻意行为（psycopg3 默认 tuple_row 会让
+    # 业务代码 dict(r) 全线失败，见 pool_factory 内注释）——期望值须含它。
+    assert pool.kwargs == {"options": build_options(900, read_only=True), "row_factory": dict_row}
 
 
 def test_create_pool_defaults_are_conservative():
@@ -89,7 +92,10 @@ def test_create_pool_defaults_are_conservative():
     assert pool.min_size == 1  # 不预占（psycopg 默认 4）
     assert pool.max_size == 20  # 显式上限，不留给 PG max_connections
     assert pool.timeout == 5.0
-    assert pool.kwargs == {"options": build_options(DEFAULT_STATEMENT_TIMEOUT_MS, read_only=False)}
+    assert pool.kwargs == {
+        "options": build_options(DEFAULT_STATEMENT_TIMEOUT_MS, read_only=False),
+        "row_factory": dict_row,
+    }
 
 
 # ---------------------------------------------------------------------------
