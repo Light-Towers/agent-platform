@@ -88,6 +88,26 @@ def test_pool_overrides_rejects_unknown_key():
         _pool_overrides({"pool": {"meta": {"maxsize": 8}}})
 
 
+def test_pool_overrides_rejects_unknown_section():
+    """#118：段名拼错必须炸。`pool.meta_db`（照字段名的自然拼法）此前被静默
+    忽略——返回 {} 零提示，配额"配了不生效"且无人知晓。"""
+    from nl2sql_service.conf.settings import _pool_overrides
+
+    with pytest.raises(ValueError, match="未知子段.*meta_db"):
+        _pool_overrides({"pool": {"meta_db": {"max_size": 8}}})
+
+
+def test_pool_overrides_rejects_non_mapping_section():
+    """段值是标量时报配置行，而不是 .items() 的 AttributeError。"""
+    from nl2sql_service.conf.settings import _pool_overrides
+
+    with pytest.raises(ValueError, match="pool.meta 必须是映射"):
+        _pool_overrides({"pool": {"meta": 5}})
+
+    with pytest.raises(ValueError, match="pool 段必须是映射"):
+        _pool_overrides({"pool": ["meta"]})
+
+
 def test_pool_overrides_handles_empty_pool_section():
     from nl2sql_service.conf.settings import _pool_overrides
 
