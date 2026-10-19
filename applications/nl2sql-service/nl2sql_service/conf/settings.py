@@ -73,9 +73,10 @@ class Settings(BaseLLMSettings):
     dw_db_pool_max_size: int = 10
     dw_db_pool_timeout: float = 10.0
     dw_db_statement_timeout_ms: int = 30000
-    # 业务数仓池连接级只读（第二道防线）。默认 true；置 false 前必须确认业务库
-    # 账号本身已 `GRANT SELECT ONLY`——否则只剩 DwRepository 里那道会话级 SET，
-    # 而它是可被连接重置打穿的。真正第一道防线永远是账号权限，不是这个开关。
+    # 业务数仓池连接级只读（防线二，可关）。默认 true；置 false 前必须确认业务库
+    # 账号本身已 `GRANT SELECT ONLY`——真正第一道防线永远是账号权限，不是这个开关。
+    # 关掉后仍剩 DwRepository 的事务级 SET LOCAL（#119，语句级）兜底，但连接级
+    # 少一道；除排障/灰度外勿关（后果已写进 .env.example 该键注释）。
     dw_db_connection_read_only: bool = True
 
     # SQL 守卫（强制只读）

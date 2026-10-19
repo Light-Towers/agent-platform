@@ -185,7 +185,7 @@ P0-4 是**唯一能把"准确率"从人工抽样认定升级成可复现读数**
 - **双路径一致性**：同一问题走"指标直取"与走"生成 SQL"给出两个数时必须可比对，否则业务方会怀疑整个系统。
 - **成本护栏**：生成 SQL 强制 LIMIT、`statement_timeout`、只读账号 + 只读副本、EXPLAIN 之上加代价阈值。
 - **降级与拒答**：召回为空宁可不答；校正循环有上限与超时；模型不可用时退化到只走指标直取。
-- **契约与状态卫生**（2026-10-18 审计新增，三件小事）：① `entities/` 五件套与 `MetricConfig` 双契约分叉（§11.3-N13）——删 entities 或改为 MetricConfig 的 re-export，契约测试重定向到运行契约，消灭"改运行契约没有测试红"；② `state` 携连接池/llm 对象（§11.3-N10）——平台统一 checkpoint 上线前必须拆成可序列化引用，属 §5.13 存储批次前置约束；③ dw 池 `SET default_transaction_read_only` 与连接层 read_only 的重复往返——保留三道防线不动，只加一条测试钉住 autocommit 语义下 SET 的持久性。
+- **契约与状态卫生**（2026-10-18 审计新增，三件小事）：① `entities/` 五件套与 `MetricConfig` 双契约分叉（§11.3-N13）——删 entities 或改为 MetricConfig 的 re-export，契约测试重定向到运行契约，消灭"改运行契约没有测试红"；② `state` 携连接池/llm 对象（§11.3-N10）——平台统一 checkpoint 上线前必须拆成可序列化引用，属 §5.13 存储批次前置约束；③ dw 池 `SET default_transaction_read_only` 与连接层 read_only 的重复往返——**已闭合（#119，2026-10-19）**：`execute_readonly` 改为与 `execute_probe` 同构的事务内 `SET LOCAL`（对当前事务立即生效、退出即撤、不污染池连接），`dependencies.py`/`settings.py`/`.env.example` 的误导注释同批修正（"两道都在"错觉 + 关掉连接级只读的后果），回归测试 `tests/test_dw_repository_readonly.py`（3 例：事务级 SET LOCAL 形态 / 禁会话级 SET / helper 同闸）。
 
 ## 5. 关键取舍（备选与代价）
 
@@ -559,7 +559,7 @@ SHOW BUILD INDEX;             -- 看进度
 |---|---|---|
 | 脱敏 | 全服务 grep `脱敏/mask/敏感/sensitive/PII/身份证/手机号` **零命中**；meta 配置无敏感度标记；列模型是通用 CRUD | `conf/meta_config.yaml` 仅 dsn/table_prefix/pgvector 参数；`models/postgres/postgres_model.py` 无 sensitivity 字段 |
 | 表级权限 | 无。`filter_table` 是 LLM 按问题选表，没有权限概念；meta 配置无表清单，召回面向全库 | `agent/nodes/filter_table.py:17-19` |
-| 行级权限 | 无。`execute_readonly` 只 `SET default_transaction_read_only` 后直接执行，不注入任何 WHERE | `repositories/postgres/dw/dw_repository.py:16-21` |
+| 行级权限 | 无。`execute_readonly` 事务内 `SET LOCAL default_transaction_read_only` 后直接执行（#119，退出即撤），不注入任何 WHERE | `repositories/postgres/dw/dw_repository.py:22-38` |
 | SQL 守卫 | **语句级**白名单：单 SELECT、禁 DML、LIMIT 上限。不看查了哪些表、不看 SELECT 列表有哪些列 | `packages/agent-core/agent_core/sql/guard.py:34-67` |
 
 即：今天 LLM 生成 `SELECT id_card, phone FROM users LIMIT 100`，guard 放行、DW 执行、明文原样返回。**没有任何一层会拦。**

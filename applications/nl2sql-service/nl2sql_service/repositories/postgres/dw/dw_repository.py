@@ -20,11 +20,22 @@ class DwRepository:
         self._pool = pool
 
     async def execute_readonly(self, sql: str, params: tuple | None = None) -> list[dict[str, Any]]:
+        """只读执行：事务内 `SET LOCAL` 默认只读，退出即撤（#119）。
+
+        2026-10-19（#119）：原实现是**会话级** `SET default_transaction_read_only
+        = on`——psycopg3 autocommit=False 下它与后续 SQL 同处 T1，该 GUC 只作用于
+        其后开启的事务（对当次查询无效），且残留污染池连接、可被连接重置
+        （DISCARD ALL 一类）打穿，而依赖方注释仍宣称它是"第三道防线"。
+        改为与 `execute_probe` 同构的**事务内 SET LOCAL**：对当前事务立即生效、
+        随事务结束自动撤销，池连接不残留，不依赖任何连接重置语义。
+        真正第一道防线永远是账号 `GRANT SELECT ONLY`（见 settings 字段注释）。
+        """
         async with self._pool.connection() as conn:
-            await conn.execute("SET default_transaction_read_only = on")
-            cur = await conn.execute(sql, params)
-            rows = await cur.fetchall()
-            return [dict(r) for r in rows]
+            async with conn.transaction():
+                await conn.execute("SET LOCAL default_transaction_read_only = on")
+                cur = await conn.execute(sql, params)
+                rows = await cur.fetchall()
+                return [dict(r) for r in rows]
 
     async def execute_probe(
         self,
