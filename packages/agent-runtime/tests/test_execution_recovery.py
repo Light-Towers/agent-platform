@@ -9,7 +9,14 @@
 
 import time
 
-from agent_runtime.effect_contract import EffectContract
+from agent_runtime.effect_contract import (
+    DeliverySemantics,
+    EffectContract,
+    FailureRecovery,
+    IdempotencyStrategy,
+    ReceiptStrategy,
+    RetryPolicy,
+)
 from agent_runtime.execution_recovery import (
     Reaper,
     ReaperConfig,
@@ -258,3 +265,157 @@ async def test_orchestrator_max_retries_then_failed():
 
     r = await scheduler.get("e1")
     assert r.status is QueueStatus.FAILED
+
+
+# ===== contract_resolver 生产工厂（2026-10-19，#99 缺口 4 残差） =====
+
+
+class _FakeTrajectoryStore:
+    """按 execution_id 返回预置 TrajectoryRecord（或 None）。"""
+
+    def __init__(self, records: dict):
+        self._records = records
+
+    async def get(self, execution_id: str):
+        return self._records.get(execution_id)
+
+
+class _FakeRecord:
+    def __init__(self, plan: dict):
+        self.plan = plan
+
+
+class _FakeSkill:
+    def __init__(self, contract):
+        self.effect_contract = contract
+
+
+class _FakeRegistry:
+    def __init__(self, skills: dict):
+        self._skills = skills
+
+    def get(self, name: str):
+        if name not in self._skills:
+            raise KeyError(name)
+        return self._skills[name]
+
+
+_CONTRACT = EffectContract(
+    effect_key="order_id",
+    delivery_semantics=DeliverySemantics.EFFECTIVELY_ONCE,
+    idempotency_strategy=IdempotencyStrategy.BUSINESS_KEY,
+    receipt_strategy=ReceiptStrategy.EXTERNAL_ID,
+    retry_policy=RetryPolicy.SAFE,
+    failure_recovery=FailureRecovery.QUERY_BEFORE_RETRY,
+)
+
+
+async def test_resolver_happy_path_route_to_contract():
+    """deterministic 轨迹（plan.route）→ registry → contract。"""
+    from agent_runtime.execution_recovery import make_trajectory_contract_resolver
+
+    store = _FakeTrajectoryStore({"e1": _FakeRecord({"route": "venue.query"})})
+    registry = _FakeRegistry({"venue.query": _FakeSkill(_CONTRACT)})
+    resolve = make_trajectory_contract_resolver(store, registry)
+    assert await resolve("e1") is _CONTRACT
+
+
+async def test_resolver_route_hit_but_no_contract():
+    """skill 在册但无 contract → None（不猜）。"""
+    from agent_runtime.execution_recovery import make_trajectory_contract_resolver
+
+    store = _FakeTrajectoryStore({"e1": _FakeRecord({"route": "venue.query"})})
+    registry = _FakeRegistry({"venue.query": _FakeSkill(None)})
+    resolve = make_trajectory_contract_resolver(store, registry)
+    assert await resolve("e1") is None
+
+
+async def test_resolver_missing_record_degrades_none():
+    """轨迹记录不存在 → None（现状语义：无契约默认可重试）。"""
+    from agent_runtime.execution_recovery import make_trajectory_contract_resolver
+
+    resolve = make_trajectory_contract_resolver(_FakeTrajectoryStore({}), _FakeRegistry({}))
+    assert await resolve("nope") is None
+
+
+async def test_resolver_empty_route_degrades_none():
+    """graph/agentic 模式（route 空）→ None；逐 skill 契约恢复转新缺口，不猜。"""
+    from agent_runtime.execution_recovery import make_trajectory_contract_resolver
+
+    store = _FakeTrajectoryStore({"e1": _FakeRecord({"mode": "graph", "route": ""})})
+    registry = _FakeRegistry({"venue.query": _FakeSkill(_CONTRACT)})
+    resolve = make_trajectory_contract_resolver(store, registry)
+    assert await resolve("e1") is None
+
+
+async def test_resolver_unregistered_skill_degrades_none():
+    """skill 未注册（退役/改名）→ None 且不抛。"""
+    from agent_runtime.execution_recovery import make_trajectory_contract_resolver
+
+    store = _FakeTrajectoryStore({"e1": _FakeRecord({"route": "retired.skill"})})
+    registry = _FakeRegistry({})
+    resolve = make_trajectory_contract_resolver(store, registry)
+    assert await resolve("e1") is None
+
+
+async def test_resolver_store_get_raises_degrades_none_via_orchestrator():
+    """store.get 抛错 → orchestrator 的 try/except 兜住（contract=None，不崩恢复周期）。"""
+    from agent_runtime.execution_recovery import (
+        RecoveryOrchestrator,
+        make_trajectory_contract_resolver,
+    )
+
+    class _BoomStore:
+        async def get(self, execution_id: str):
+            raise RuntimeError("pg down")
+
+    resolve = make_trajectory_contract_resolver(_BoomStore(), _FakeRegistry({}))
+
+    class _FakeScheduler:
+        _store = None
+
+    orch = RecoveryOrchestrator.__new__(RecoveryOrchestrator)
+    orch._resolve_contract = resolve
+    stuck = StuckExecution(
+        execution_id="e1",
+        tenant_id="t1",
+        session_id="s1",
+        user_id="u1",
+        reason="running_timeout",
+        stuck_since=0.0,
+        attempt=0,
+        original=_req(),
+    )
+    # 复刻 recover_one 的调用点语义：awaitable + 异常兜底
+    resolved = None
+    try:
+        r = orch._resolve_contract(stuck.execution_id)
+        import inspect as _inspect
+
+        if _inspect.isawaitable(r):
+            r = await r
+        resolved = r
+    except RuntimeError:
+        resolved = None
+    assert resolved is None
+
+
+async def test_orchestrator_consumes_async_resolver():
+    """编排器级：传入的 async resolver 被 recover_one 真正消费（awaitable 路径）。"""
+    from agent_runtime.execution_recovery import RecoveryOrchestrator
+
+    store = InMemorySchedulerStore()
+    scheduler = ExecutionScheduler(store)
+    await scheduler.submit(_req("e1"))
+    await scheduler.complete("e1", QueueStatus.FAILED)
+
+    seen: list[str] = []
+
+    async def _resolve(execution_id: str):
+        seen.append(execution_id)
+        return _CONTRACT  # QUERY_BEFORE_RETRY ⇒ 决策应为 QUERY_STATUS
+
+    orch = RecoveryOrchestrator(scheduler, config=ReaperConfig(), contract_resolver=_resolve)
+    action = await orch.recover_one(await store.get("e1"))
+    assert seen == ["e1"], "async resolver 未被调用（awaitable 路径断）"
+    assert action is RecoveryAction.QUERY_STATUS, "contract 语义未进入决策"

@@ -502,11 +502,26 @@ async def lifespan(app: FastAPI):
         # 关闭时 Reaper 逐字保持旧行为（只标 FAILED + 释放 slot）。
         recovery = None
         if settings.scheduler_recovery_enabled:
-            from agent_runtime.execution_recovery import ReaperConfig, RecoveryOrchestrator
+            from agent_runtime.execution_recovery import (
+                ReaperConfig,
+                RecoveryOrchestrator,
+                make_trajectory_contract_resolver,
+            )
+
+            # 缺口 4 残差（2026-10-19，#99）：接生产 contract_resolver——读轨迹取
+            # plan.route 经 registry 查 Effect Contract，让四类 FailureRecovery
+            # 恢复语义真正生效（此前契约恒 None，决策恒退化为默认可重试）。
+            # trajectory_store 缺席（无 PG）时不接：保持现状语义，不造内存替身。
+            contract_resolver = None
+            if trajectory_store is not None:
+                contract_resolver = make_trajectory_contract_resolver(
+                    trajectory_store, registry
+                )
 
             recovery = RecoveryOrchestrator(
                 scheduler,
                 config=ReaperConfig(max_retries=settings.scheduler_recovery_max_retries),
+                contract_resolver=contract_resolver,
             )
         # V3 Phase 3: Scheduler Reaper（lease-based 回收）
         if ownership_store is not None:

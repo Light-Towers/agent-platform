@@ -6,8 +6,11 @@
    ``ControlPlane.recover``（人工触发单次恢复）。均由
    ``SCHEDULER_RECOVERY_ENABLED`` 门控，**默认 False**；关闭时 Reaper 逐字保持
    旧行为（只标 FAILED + 释放 slot）。
-   边界：生产尚未接 ``contract_resolver``，契约恒为 None ⇒ 决策退化为
-   「无契约默认可重试」（见 ``RecoveryManager.decide``），属**能力接上、语义待补**。
+   边界（2026-10-19 更新，#99）：``contract_resolver`` **已接生产**——
+   ``make_trajectory_contract_resolver`` 读轨迹取 ``plan.route`` 经 registry
+   查契约；四类落空（无记录 / route 空 / skill 未注册 / 无 contract）降级 None
+   ⇒ 决策退化为「无契约默认可重试」。graph/agentic 多 skill 模式的逐 skill
+   契约恢复决策**仍缺**（转新缺口，本模块不猜）。
    兄弟模块 ``payload_externalization``（由 ``agent_server`` 的
    ``_build_payload_externalizer`` 构造并注进 checkpoint 链路）与 ``human_task``
    （``main`` 装 ``HumanTaskStore`` → ``protocol.delegate`` 按 ``kind="human"`` 分派）
@@ -39,6 +42,7 @@ Rescheduler.execute(stuck, action) → 重新入队 / 标记失败 / 标记人�
 
 from __future__ import annotations
 
+import inspect
 import logging
 from dataclasses import dataclass
 from enum import Enum
@@ -262,7 +266,12 @@ class RecoveryOrchestrator:
         stuck = stuck_from_request(req)
         contract = None
         try:
-            contract = self._resolve_contract(stuck.execution_id)
+            resolved = self._resolve_contract(stuck.execution_id)
+            # 2026-10-19（#99）：生产 resolver 读 trajectory store（async）⇒ 调用点
+            # 兼awaitable；同步 resolver（测试/内存态）行为不变。
+            if inspect.isawaitable(resolved):
+                resolved = await resolved
+            contract = resolved
         except Exception:
             logger.warning(
                 "contract resolve failed execution=%s", stuck.execution_id, exc_info=True
@@ -289,6 +298,47 @@ class RecoveryOrchestrator:
         return results
 
 
+def make_trajectory_contract_resolver(trajectory_store: Any, registry: Any):
+    """生产 contract_resolver：execution_id → EffectContract（2026-10-19，#99）。
+
+    数据链（均为既有件，不新造）：``trajectory_store.get(execution_id)`` →
+    ``TrajectoryRecord.plan``（序列化 ``Plan``）→ deterministic 模式
+    ``plan["route"]`` = skill 名 → ``registry.get(route).effect_contract``。
+
+    **四类落空一律返回 None**——即保持「无契约默认可重试」的现状语义，
+    不静默改判：
+    1. 轨迹记录不存在（执行未落轨迹 / store 未装配）；
+    2. ``route`` 为空（graph / agentic 多 skill 模式——逐 skill 契约的恢复
+       决策需独立设计，转新缺口，本工厂不猜）；
+    3. skill 未注册（退役 / 改名）；
+    4. skill 无 contract（未声明）。
+
+    store / registry 经**参数**注入（不 import 具体实现）⇒ 可单测、不引新依赖边。
+    返回 async 函数（store.get 是 async）；``RecoveryOrchestrator.recover_one``
+    的调用点兼awaitable（同步 resolver 行为不变）。
+    """
+
+    async def _resolve(execution_id: str):
+        record = await trajectory_store.get(execution_id)
+        if record is None:
+            return None
+        route = (getattr(record, "plan", None) or {}).get("route") or ""
+        if not route:
+            return None
+        from agent_runtime.skills.registry import SkillNotFoundError
+
+        try:
+            skill = registry.get(route)
+        except (SkillNotFoundError, KeyError):
+            # SkillNotFoundError：真实 registry 的未注册口径；KeyError：内存 test
+            # double 的口径。二者都归「未注册」——降级 None，不静默改判。
+            logger.warning("contract resolve: skill not registered route=%s", route)
+            return None
+        return getattr(skill, "effect_contract", None)
+
+    return _resolve
+
+
 __all__ = [
     "RecoveryAction",
     "StuckExecution",
@@ -298,4 +348,5 @@ __all__ = [
     "RecoveryManager",
     "Rescheduler",
     "RecoveryOrchestrator",
+    "make_trajectory_contract_resolver",
 ]
