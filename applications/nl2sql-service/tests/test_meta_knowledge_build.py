@@ -49,8 +49,9 @@ _TABLES = [
 ]
 _METRICS = [{"metric_name": "销售额", "metric_desc": "订单金额合计", "metric_expr": "SUM(orders.amount)"}]
 _VALUES = [
-    {"column_name": "customers.customer_name", "value": "VIP", "value_desc": "VIP 客户"},
-    {"column_name": "order_status", "value": "已支付", "value_desc": ""},
+    # #117：table_name 是独立列（同名列跨表共存与回溯）；column_name 保持历史形状
+    {"table_name": "customers", "column_name": "customers.customer_name", "value": "VIP", "value_desc": "VIP 客户"},
+    {"table_name": "orders", "column_name": "order_status", "value": "已支付", "value_desc": ""},
 ]
 #: §5.14-R1 轻量声明：关系（不造 DSL）+ 别名（P0-5 别名精确匹配的登记处）
 _RELATIONS = [
@@ -171,11 +172,11 @@ class _StubEmbedder:
         return [0.1] * self.dim
 
 
-def _service(pool: _FakePool, embedder: Any = None, vector_dim: int = 8) -> MetaKnowledgeService:
+def _service(pool: _FakePool, embedder: Any = None, vector_dim: int = 8, tokenizer: str = "bigram") -> MetaKnowledgeService:
     return MetaKnowledgeService(
         meta_repo=MetaRepository(pool=pool),
         embedder=embedder,
-        tokenizer="bigram",
+        tokenizer=tokenizer,
         vector_dim=vector_dim,
     )
 
@@ -262,6 +263,58 @@ async def test_prune_removes_rows_absent_from_source():
         "aliases_deleted": 0,
     }
     assert [r["value"] for r in pool.rows("nl2sql_value_info")] == ["VIP"]
+
+
+# ---------------------------------------------------------------------------
+# ④ #117：table_name 进唯一键 + tokenizer 版本标记
+# ---------------------------------------------------------------------------
+async def test_same_column_name_across_tables_coexists():
+    """#117 本体：orders.status 与 venues.status 同值不再撞唯一键，且可回溯所属表。
+
+    修复前：唯一键 (scope..., column_name, value) 无 table_name ⇒ 第二个 insert
+    直接 ON CONFLICT 打中第一行（ venues.status 被 upsert 成 orders 的更新），
+    且行内无 table_name 连回溯都做不到。
+    """
+    pool = _FakePool()
+    service = _service(pool)
+    values = [
+        {"table_name": "orders", "column_name": "status", "value": "已支付"},
+        {"table_name": "venues", "column_name": "status", "value": "已支付"},
+    ]
+    stats = await service.build_from_values(values)
+    assert stats == {"inserted": 2, "updated": 0}
+
+    rows = pool.rows("nl2sql_value_info")
+    assert len(rows) == 2
+    assert {r["table_name"] for r in rows} == {"orders", "venues"}
+
+
+async def test_value_rows_stamp_tokenizer_version():
+    """#117 后半：tokenizer 列记录 search_text 的分词器——换分词器后旧行可识别
+    （旧 search_text/tsvector 静默失效的标记位）。"""
+    pool = _FakePool()
+    service = _service(pool, tokenizer="bigram")
+    await service.build_from_values([{"table_name": "orders", "column_name": "status", "value": "已支付"}])
+
+    row = pool.rows("nl2sql_value_info")[0]
+    assert row["tokenizer"] == "bigram"
+    assert row["table_name"] == "orders"
+
+
+async def test_prune_keep_set_includes_table_name():
+    """#117：prune 的 keep 集与唯一键同构（3 元组）——少一维会把另一表的同名行误删。"""
+    pool = _FakePool()
+    service = _service(pool)
+    values = [
+        {"table_name": "orders", "column_name": "status", "value": "已支付"},
+        {"table_name": "venues", "column_name": "status", "value": "已支付"},
+    ]
+    await service.build_from_values(values)
+    # 只保留 orders 的：venues 行应被删（同 column/value 不同 table_name 不再误保）
+    pruned = await service.prune([], [], [values[0]])
+    assert pruned["values_deleted"] == 1
+    remaining = pool.rows("nl2sql_value_info")
+    assert len(remaining) == 1 and remaining[0]["table_name"] == "orders"
 
 
 async def test_prune_with_empty_source_clears_scope():
