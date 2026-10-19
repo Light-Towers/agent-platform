@@ -14,7 +14,7 @@ F05 Evaluation & Golden Set — 脚手架版
 
 依赖：
   F03 knowledge_lifecycle.filter_published_for_retrieval（已落地 ✅）
-  F01 execution_context.enforce_scope_filter（跨租户负样本评测已接入**真实实现**，审计 P1-9；positive 路径仍用内联 mock）
+  F01 execution_context.enforce_scope_filter（positive + 跨租户负样本**均跑真实实现**：负样本自审计 P1-9，positive 自 2026-10-19 F01 残差收口 issue #89。已知边界：生产无跨租户 PUBLIC 例外，「公开知识」一面的语义须先出 ADR，见 _evaluate_positive docstring）
 
 迁移来源：exhibition-warehouse/ontology/web/backend/evaluation.py（2026-09-22）
 """
@@ -54,20 +54,6 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _mock_scope_filter(candidates: list, tenant_id: str) -> list:
-    """
-    MVP 内联 mock scope 过滤：仅保留 tenant_id 匹配或 scope_type=PUBLIC 的候选。
-    TODO: F01 execution_context.enforce_scope_filter 落地后替换此函数。
-    """
-    result = []
-    for c in candidates:
-        item_tenant = c.get("tenant_id", "")
-        item_scope = c.get("scope_type", "PRIVATE")
-        if item_scope == "PUBLIC" or item_tenant == tenant_id:
-            result.append(c)
-    return result
-
-
 def _has_citation(candidate: dict) -> bool:
     """检查候选是否带 citation（knowledge_id / authority / version / effective_date）。"""
     return bool(candidate.get("citation") or candidate.get("knowledge_id"))
@@ -86,9 +72,27 @@ def _is_non_published(candidate: dict) -> bool:
 
 
 def _evaluate_positive(case: GoldenCase) -> dict:
-    """Positive：命中正确 scope + 带 citation。"""
+    """Positive：命中正确 scope + 带 citation。
+
+    2026-10-19（F01 残差收口，issue #89）：过滤从 MVP 内联 mock 切换为**生产
+    ``enforce_scope_filter````（与负样本路径同一实现，评测跑生产代码）。切换对
+    既有 positive 用例中性（候选均为同租户 PRIVATE 且 tenant_context 无 scopes
+    ⇒ 生产与 mock 输出逐位相同，断言不改全绿即证）。
+
+    **已知边界（显式登记，不粉饰）**：生产实现**无跨租户 PUBLIC 例外**——module
+    docstring 所述 positive 的「公开知识」一面在生产语义下会被剔除。该差异是
+    契约级问题（"公开知识是否跨租户可见"须先出 ADR），不在本收敛项内悄咪咪改；
+    测试 ``test_positive_uses_production_filter_semantics`` 钉死现行语义。
+    """
     tenant_id = case.tenant_context.get("tenant_id", "")
-    scoped = _mock_scope_filter(case.candidates, tenant_id)
+    ctx = ExecutionContext(
+        user_id=case.tenant_context.get("user_id", "eval-positive"),
+        tenant_id=tenant_id,
+        tenant_type=case.tenant_context.get("tenant_type", "SPONSOR"),
+        scopes=case.tenant_context.get("scopes", []),
+    )
+    scope_key = case.expected.get("scope_key", "exhibition_id")
+    scoped = enforce_scope_filter(ctx, case.candidates, scope_key)
     expected_count = case.expected.get("min_hits", 1)
 
     hits_with_citation = [c for c in scoped if _has_citation(c)]
