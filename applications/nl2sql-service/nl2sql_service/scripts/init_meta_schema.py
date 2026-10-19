@@ -18,12 +18,27 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import re
+import zlib
 from pathlib import Path
 
 _MIGRATIONS_DIR = Path(__file__).resolve().parents[1] / "migrations"
 _PLACEHOLDER = "{{vector_dim}}"
 # DDL 与索引构建可能显著超过元知识库默认的 5s statement_timeout
 _DDL_STATEMENT_TIMEOUT_MS = 300_000
+
+#: 跨实例互斥锁键（#110）。与 agent_runtime.migrations.runner 的 0xCAFE0001 不冲突：
+# 由脚本名派生，避免两套 init 将来顺延数字时撞车。xact 级锁覆盖本连接整个隐式事务
+# （全部迁移在同一连接上顺序执行），退出即释放。
+_INIT_LOCK_KEY = zlib.crc32(b"nl2sql_meta_schema_init") & 0x7FFFFFFF
+
+#: 迁移 DDL 的建表块（本仓四空格缩进列行风格；列名 = 缩进行首词且第二词是类型）
+_TABLE_RE = re.compile(r"CREATE\s+TABLE\s+IF\s+NOT\s+EXISTS\s+(\w+)\s*\((.*?)\n\);", re.S | re.I)
+_COLUMN_RE = re.compile(
+    r"^(\w+)\s+(?:bigserial|serial|bigint|int|integer|text|boolean|bool|timestamptz|"
+    r"timestamp|date|numeric|decimal|real|vector|tsvector|jsonb|json|uuid|bytea)\b",
+    re.I,
+)
 
 
 def load_migrations(vector_dim: int) -> list[tuple[str, str]]:
@@ -41,8 +56,50 @@ def load_migrations(vector_dim: int) -> list[tuple[str, str]]:
     return migrations
 
 
-async def apply(dsn: str, vector_dim: int) -> list[str]:
-    """连接目标库并顺序执行全部迁移；返回已执行的文件名。"""
+def expected_schema(sql_texts: list[str]) -> dict[str, set[str]]:
+    """从迁移 SQL 抽取期望的 {表: 列集}（#110 对账的"应然"侧）。
+
+    只认本仓 DDL 的四空格缩进列行风格（列名 = 行首词、第二词是类型）；注释行、
+    CONSTRAINT 行、生成列的续行（GENERATED ALWAYS AS ...）天然不匹配类型白名单。
+    """
+    expected: dict[str, set[str]] = {}
+    for text in sql_texts:
+        for table, body in _TABLE_RE.findall(text):
+            columns = expected.setdefault(table, set())
+            for line in body.splitlines():
+                line = line.strip()
+                if not line or line.startswith("--"):
+                    continue
+                m = _COLUMN_RE.match(line)
+                if m:
+                    columns.add(m.group(1).lower())
+    return expected
+
+
+async def verify_applied(conn, expected: dict[str, set[str]]) -> list[str]:
+    """对账（#110）：期望表/列 vs information_schema 实况；返回人类可读差异列表。
+
+    连接走 pool_factory（row_factory=dict_row）⇒ 行是 dict，按列名取。
+    """
+    problems: list[str] = []
+    cur = await conn.execute(
+        "SELECT table_name, column_name FROM information_schema.columns WHERE table_schema = 'public'"
+    )
+    actual: dict[str, set[str]] = {}
+    for row in await cur.fetchall():
+        actual.setdefault(row["table_name"], set()).add(row["column_name"])
+    for table, columns in sorted(expected.items()):
+        if table not in actual:
+            problems.append(f"缺表: {table}")
+            continue
+        missing = sorted(columns - actual[table])
+        if missing:
+            problems.append(f"{table} 缺列: {', '.join(missing)}")
+    return problems
+
+
+async def apply(dsn: str, vector_dim: int) -> tuple[list[str], list[str]]:
+    """连接目标库并顺序执行全部迁移；返回 (已执行文件名, 对账差异列表)。"""
     from agent_runtime.pool_factory import create_pool
 
     migrations = load_migrations(vector_dim)
@@ -56,13 +113,18 @@ async def apply(dsn: str, vector_dim: int) -> list[str]:
         read_only=False,
     )
     await pool.open()
+    problems: list[str] = []
     try:
         async with pool.connection() as conn:
+            # 跨实例互斥（#110）：CREATE ... IF NOT EXISTS 并非并发安全——两个事务
+            # 可同判"不存在"后撞唯一约束；xact 锁覆盖本连接整个隐式事务。
+            await conn.execute("SELECT pg_advisory_xact_lock(%s)", (_INIT_LOCK_KEY,))
             for _name, sql in migrations:
                 await conn.execute(sql)
+            problems = await verify_applied(conn, expected_schema([sql for _, sql in migrations]))
     finally:
         await pool.close()
-    return [name for name, _ in migrations]
+    return [name for name, _ in migrations], problems
 
 
 async def read_status(dsn: str) -> dict[str, str]:
@@ -129,10 +191,17 @@ def main(argv: list[str] | None = None) -> int:
         print(f"schema 状态：{redact_dsn(dsn)} -> {status}")
         return 0
 
-    applied = asyncio.run(apply(dsn, vector_dim))
+    applied, problems = asyncio.run(apply(dsn, vector_dim))
     print(f"已应用 {len(applied)} 个迁移（vector_dim={vector_dim}）：{redact_dsn(dsn)}")
     for name in applied:
         print(f"  ✓ {name}")
+    if problems:
+        # 对账不齐（典型：存量旧形状库缺列，IF NOT EXISTS 整表跳过）⇒ 非零退出，
+        # 把差异打全，不让"已应用 N 个迁移"掩盖半初始化（#110）。
+        print("校验未通过（schema 与迁移声明不一致）：")
+        for problem in problems:
+            print(f"  ✗ {problem}")
+        return 2
     return 0
 
 
