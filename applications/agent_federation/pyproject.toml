@@ -63,7 +63,7 @@ excel = ["pandas>=3.0.1", "openpyxl>=3.1.5", "python-docx>=1.2.0"]
 # - pymongo: 会话历史持久化（MongoCheckpointer）
 # - pymilvus: 语义记忆默认后端
 # - asyncpg: PostgreSQL + pgvector 备选向量后端
-memory = ["pymongo>=4.6", "pymilvus>=2.4", "asyncpg>=0.29"]
+memory = ["pymongo>=4.19.0", "pymilvus>=2.4", "asyncpg>=0.29"]
 
 [project.entry-points."agent_runtime.agentic_executor"]
 factory = "agent_federation.planners.agentic:get_executor_factory"
