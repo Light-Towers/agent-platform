@@ -1,6 +1,7 @@
 """execute_sql 节点：只读执行 + 执行期异常三分类。
 
-连接级 default_transaction_read_only=on，与 app/sql/guard.py 语义一致。
+只读保障两道：连接级 default_transaction_read_only=on + DwRepository 事务级
+SET LOCAL（#119，退出即撤），与 app/sql/guard.py 语义一致。
 
 2026-10-18 审计（方案 S-3）：此前 `str(exc)` 原样回显客户端，表/列存在性、
 权限拒绝等可被当作探测 oracle。现改为**对外分类消息、详情只进日志与
