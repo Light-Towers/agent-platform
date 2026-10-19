@@ -27,7 +27,10 @@ _SCOPE_COLS = ("tenant_id", "workspace_id", "datasource_id")
 #: 列清单写死：值全部参数化，SQL 标识符只来自本模块常量。
 _COLUMN_TABLE = ("column_info", ("tenant_id", "workspace_id", "datasource_id", "table_name", "column_name"), ("table_comment", "column_comment", "data_type", "embedding"))
 _METRIC_TABLE = ("metric_info", ("tenant_id", "workspace_id", "datasource_id", "metric_name"), ("metric_desc", "metric_expr", "embedding"))
-_VALUE_TABLE = ("value_info", ("tenant_id", "workspace_id", "datasource_id", "column_name", "value"), ("value_desc", "search_text", "embedding"))
+#: value_info（#117：005 迁移起唯一键加 table_name——同名列 orders.status vs
+#: venues.status 曾撞 uq_nl2sql_value 且行内无 table_name 无法回溯；updatable 加
+#: tokenizer——search_text 的分词器版本标记，换 tokenizer 后旧行可识别）
+_VALUE_TABLE = ("value_info", ("tenant_id", "workspace_id", "datasource_id", "table_name", "column_name", "value"), ("value_desc", "search_text", "tokenizer", "embedding"))
 #: 关系/别名（§5.14-R2）：001 DDL 的 uq_nl2sql_relation / uq_nl2sql_alias 即冲突键
 _RELATION_TABLE = (
     "relation_info",
@@ -50,7 +53,7 @@ _EXAMPLE_TABLE = (
 #: 各表的自然键（= 唯一键去掉作用域列）：prune 的 NOT IN 比较目标。
 _COLUMN_NATURAL = ("table_name", "column_name")
 _METRIC_NATURAL = ("metric_name",)
-_VALUE_NATURAL = ("column_name", "value")
+_VALUE_NATURAL = ("table_name", "column_name", "value")
 _RELATION_NATURAL = ("left_table", "left_column", "right_table", "right_column")
 _ALIAS_NATURAL = ("target_kind", "target_name", "alias")
 _EXAMPLE_NATURAL = ("question",)
@@ -109,9 +112,9 @@ class MetaRepository:
         )
 
     async def prune_values(
-        self, keep: set[tuple[str, str]], tenant_id: str = "", workspace_id: str = "", datasource_id: str = ""
+        self, keep: set[tuple[str, str, str]], tenant_id: str = "", workspace_id: str = "", datasource_id: str = ""
     ) -> int:
-        """删除作用域内不在 keep 的取值行（keep = {(column_name, value)}）。"""
+        """删除作用域内不在 keep 的取值行（keep = {(table_name, column_name, value)}，#117）。"""
         return await self._prune(_VALUE_TABLE[0], _VALUE_NATURAL, keep, (tenant_id, workspace_id, datasource_id))
 
     async def prune_relations(

@@ -72,12 +72,12 @@ def test_relative_truncate_cuts_by_margin():
 # 取值：码表字面路
 # ---------------------------------------------------------------------------
 async def test_value_recall_uses_literal_search_not_ann():
-    pool = _Pool([{"column_name": "order_status", "value": "已支付", "value_desc": ""}])
+    pool = _Pool([{"table_name": "orders", "column_name": "order_status", "value": "已支付", "value_desc": ""}])
     repo = ValueRepository(PgvectorClientManager(pool=pool))
 
     rows = await repo.recall(["已支", "VIP"], embedding=[0.1, 0.2], top_k=5)
 
-    assert rows == [{"column_name": "order_status", "value": "已支付", "value_desc": ""}]
+    assert rows == [{"table_name": "orders", "column_name": "order_status", "value": "已支付", "value_desc": ""}]
     sql, params = pool.last or ("", ())
     assert "<=>" not in sql, "取值召回不得走 ANN（P0-5① 退役）"
     assert "value_tsvector" not in sql, "取值召回不得走中文全文模糊（B1 已证不可用）"
