@@ -39,7 +39,7 @@
 
 - 远端终态 **main + feat 两分支**；feat 领先 main 138 commits（含 v3 spec 与两批修复）；
 - #102-#110 全部关闭（#105/#107 的关闭评论注明 feat 早已修复的 commit 号）；
-- **删除前安全核查救下两个本地分支**（记录在此防未来误删）：`feat/level1-durable-execution` 的 `b4428bf`（Level 1 Durable Execution + 测试分层）为**全仓唯一副本**（不在 main/feat/v3/docs、无远端）；本地 `v2` 有 138 个无远端独有 commit。二者禁删，建议推远端备份；
+- **删除前安全核查救下两个本地分支（2026-10-19 登记）——2026-10-20 逐用例比对订正为"可退役"**：`feat/level1-durable-execution` 的 `b4428bf`（2026-08-21，Level 1 Durable Execution + 测试分层 level1/level2）当时为**全仓唯一副本**（不在 main/feat/v3/docs、无远端）⇒ 登记禁删、建议推远端备份。**订正（逐用例比对，非估计）**：其 7 个集成用例被 feat 现行套件**全覆盖**——lease 生命周期/release/stale → `tests/durability/test_pg_durability.py` 四测 + `tests/ha/test_lease_expiration`；checkpoint 落盘 + graph 字段 → 同文件 `test_crud`；G4 stale-owner fencing → `tests/ha/test_stale_writer`（断言更强：monotonic CAS + zombie 场景）；resume 跳过已完成节点 → `tests/ha/test_kill_after_checkpoint`（断言更强：副作用各 1 次）；并发接管唯一赢家 → `tests/ha/test_lease_contention`。其中 2 个用例依赖的 API（`PgExecutionOwnershipStore.claim_stale`、`PlannerRuntime.resume`）在 feat **已不存在**（分别被 V3 的 acquire-CAS + reaper、`ControlPlane.resume`/RecoveryOrchestrator 取代）——该测试文件拿到 feat 上直接 AttributeError ⇒ 血缘中间态，非缺失能力；其重写的 `test_pg_durability.py` 是 feat `tests/durability/` 版的**真子集**。⇒ **未推远端备份，本地分支退役删除**（内容零独有价值；commit 内唯一不在 feat 文档的信息——2026-08-21"Durable Execution 测试分 Level 1/2/3 层"决策——由本条目留痕：该决策实质已被 V3 HA 套件 + `requires_pg` marker 策略取代）。本地 `v2` 同步订正："138 个无远端独有 commit"为当时口径，现实测 `v2...feat` 独有 **0**（内容全在 feat）⇒ 一并删除；同批清理本地 `tb7/compose-e2e-smoke-closed`（独有 0）。**教训**："禁删/备份"类登记必须带复审触发条件（证据出现即主动复审），否则保守登记会供成死枝；
 - 规则沉淀：① feat 线代码的修复一律走 PR 进 feat，**不进祖先/衍生 doc 分支**；② 本地不建名为 `feat` 的分支（与 level1 分支构成 D/F ref 冲突，曾造成半失败 checkout 污染索引）。
 
 ## 5. 备选方案（为何不选）
