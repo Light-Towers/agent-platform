@@ -28,7 +28,7 @@ identity = ["PyJWT[crypto]>=2.9"]  # ADR-0007 A3：RS256 令牌签/验（不进 
 # ModuleNotFoundError ⇒ tracing.py 捕获后返回 []，配了凭据也静默不报
 #（2026-10-13 在镜像内实测到；镜像装 langfuse 但不装 langchain 时就是这个状态）。
 # 三处声明位（agent-runtime/federation/exhibition）必须一起带，见 lint L-4。
-langfuse = ["langfuse>=4.0.0", "langchain>=1.4.6,<2"]  # 2026-10-19：#98 处置——L-4 三处同下界归一至当前解析版本 1.4.6
+langfuse = ["langfuse>=5.0.2", "langchain>=1.4.6,<2"]  # 2026-10-19：#98 处置——L-4 三处同下界归一至当前解析版本 1.4.6
 
 [tool.hatch.build.targets.wheel]
 packages = ["agent_runtime"]
