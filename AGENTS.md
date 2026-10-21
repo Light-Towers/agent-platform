@@ -4,6 +4,47 @@
 > **演进方向（Plan-F）**：双轨收敛为「单 Runtime + 多 Planner」（`agent-runtime/` 承载运行时中间件，Planner 策略可插拔，不统一 Agent 只统一 Runtime）。详见 `docs/plans/plan-f-single-runtime-multi-planner.md`。
 > **V3 企业执行平台**：Phase 2-4 + 3.4 代码已接线（主链路 `Admission → Scheduler submit → Planner → Execute → Forensic/CostGov`，`scheduler_enabled` 默认 False 渐进开启）；**端到端双实例物理故障转移验收未达，不得当作已上线能力声明**。**原「未接线半成品（P1-7 标注）」五项已全部接线（human_task / execution_recovery / state_migration / payload_externalization 见 `agent_server/main.py` 装配点，`skill_router`(exhibition) 见 `graph/nodes.py:run_skill` 执行前门禁）⇒ 该标注已于 2026-10-16 按 roadmap #5 判据「全仓未接线标注归零」撤除；接线 ≠ 默认启用，逐项依据见 `docs/plans/plan-unfinished-completion-schedule-2026-10-16.md` §10**。架构真相源：`plan-enterprise-platform-skeleton-2026-09-23.md` + `plan-v3-execution-platform-final-architecture-2026-09-22.md` + `arch-audit-2026-09-24.md`（均在 `docs/plans/`）。
 
+## AI 开发范式（总纲）
+
+> 本节是总纲，回答"一个需求怎么从想法走到上线、AI 能自己决定到哪一步"。与下文《验证策略》《禁止行为》《分支卫生》《架构决策原则》冲突时，**以更严格者为准**；本节不替代它们。
+
+### 流程（九阶段，0–8）
+
+`0 受理分级 → 1 Spec → 2 Plan → 2.5 ADR(按需) → 3 Tasks → 4 实现(TBD) → 5 测试+评测 → 6 评审 → 7 发布 → 8 复盘`
+
+- **Spec / Plan / ADR / Tasks 不是一回事**：Spec=做什么/为什么/验收（问题空间）；Plan=怎么做（解空间）；ADR=为什么这么选、放弃什么（仅架构性/不可逆/有争议时写）；Tasks=可独立验证的工单。
+- **非 T0 改动先 Spec 后代码**；T0（文案/配置）走快速通道 `4→5→6→7`。
+- **按规模分级，不搞一刀切**：T0 0.5–2h · T1 0.5–1d · T2 2–4d · T3 1.5–3w · T4 4–8w。
+- **TBD 与小 PR**：分支短命（< 24h）、PR < 400 行、未完成功能用 flag 隐藏；分支模型细节以《分支卫生》为准。
+
+### 决策边界（D0–D3）
+
+| 级别 | 判据 | 谁定 |
+|---|---|---|
+| **D0** | 可逆 + 低影响 + 规则明确 | 可自动（AI/程序） |
+| **D1** | 可逆 + 中影响 | AI 提议，人批 |
+| **D2** | 难逆 + 大影响 | 人定，AI 给证据 |
+| **D3** | 不可逆 / 担责 | 禁止自动 |
+
+> AI 能自动决策"怎么做"（how），不能自动决策"要不要做 / 敢不敢发"（whether / commit）。目标不是"不出错"，而是"错得可逆、可发现、可追责"。
+
+### 测试与评测
+
+- 八种测试按"对象 / 风险 / 手段 / 时机"四维定位；**功能测"对不对（对需求）"，逻辑测"全不全（对路径）"**，两者不可互替。
+- 逻辑测试靠**变异杀死率**验证，覆盖率只是下限。
+- AI 输出评测四级：**E0 单元断言 → E1 黄金集（守回归）→ E2 基准（做选型）→ E3 线上**；**上线门禁用黄金集，不用公开基准**。
+- 门禁：G1(PR) LSP/typecheck + lint/SAST/SCA/secret + 单测/契约 → G2(合并) 集成/功能/变异/租户隔离/黄金集 → G3(发布) E2/红队/canary。详细版见 noctilucent-lamp `ai-dev-paradigm/agent-platform-dev-handbook.md` §3.4。
+
+### 错误闭环
+
+- 每个 bug → 回归测试；每个架构坑 → ADR；每个 prompt 失败 → 黄金集用例；每个事故 → runbook。
+- **禁止为过测试而改测试 / 硬编码 / 吞异常**（与《验证策略》红线同源：禁止删用例/收窄断言/放宽前置条件凑绿）。
+- 记录必须**可检索、自动注入、违反即红**；度量只看**同类错误重复率**。
+
+### 红线
+
+- 不跳过 Spec 直接大改；不自动合并高风险 PR；不用 AI 评审替代人；不追 6x/10x 数字；**不把"接线"当"启用"**。
+
 ## 目录结构
 
 | 目录 | 定位 | 入口 |
