@@ -500,3 +500,12 @@ agent_server `/query` 的"携带 tenant_id/user_id 且与断言不符 ⇒ 403"�
 - 验证：联邦全量 179 passed；`test_thread_identity_migration.py` 49 passed；ruff clean。
 
 **④ 下一步**：013/014a/015 迁移施工（T3 域，按 §9.14-⑤ 时序：014b 等待 T4 后半 A5 claim 绑定）。
+
+**⑤ 013/014a/015 施工（T3 域迁移批，同日晚）**：
+- **013**：organizations/users/conversations 三表（D9 org 直挂+is_admin；D11 旁置表，user_id 先可空）+ organizations 自 workspaces.tenant_id 回填。**同值域决策（D0 可逆）**：org_id=tenant_id 值域，现有 WHERE tenant_id 谓词零改动；将来一 org 多 tenant 另立迁移重映射。
+- **014a**：workspaces 加 org_id（backfill 自 tenant_id + NOT NULL）+ owner_user_id（NULL=存量无主过渡态，D18 的 user 绑定等 T4/A5）+ visibility（默认 private，D7）+ PK 换 (org_id, id)；**兼容性发现**：保留 UNIQUE (tenant_id, id) 使 register_workspace 的 ON CONFLICT 在 007-013 与 014a 后两阶段均合法（否则渐进窗口报 42P10）。
+- **015**：trajectories 补 tenant_id/org_id/user_id 三列——**施工实锤**：`TrajectoryRecord.tenant_id` 字段在 models.py 存在但 store_pg 列清单与 001 DDL 均无它 ⇒ 租户字段从未落库（G8 缺口的物理证据），本批一并补齐。
+- 代码接线：`conversations.py` 包装器（§9.6-5 单语句 upsert 判据：`ON CONFLICT ... WHERE 归属匹配 RETURNING 1`，0 行即拒；user_id NULL 行 org 级放行=中间态）；`workspace_registry.register_workspace` 写 org_id/visibility + **42703 精确降级**（014a 未应用时按 007 旧形态重写，真故障照抛）；`store_pg.save` 三列写入 + 42703 降级。
+- 隔离门禁：三表进 `SYSTEM_TABLE_WHITELIST` 登记理由（身份域本体，org_id 归属维在表内）——`test_isolation_dimension_contract` 由红转绿。
+- 测试：`test_conversations_ownership.py` 14 条（首认领/跨 org 拒/跨 user 拒/中间态放行/42703 降级×2/真故障照抛/三列写入）。核验：根 1314 / runtime 707 / agent_server 131 / ruff / lint_architecture / check_doc_sync 全绿。
+- **014b 未做**（按 §9.14-⑤ 时序，等 T4 后半 A5 claim 绑定）；requires_pg 级判据（真库并发双写/迁移回放）待环境。

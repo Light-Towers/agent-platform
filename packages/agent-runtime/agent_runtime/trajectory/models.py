@@ -55,6 +55,11 @@ class TrajectoryRecord:
     # 隔离域（plan T1）：服务端租户，供 post-execution 记忆 sink 按租户落库。
     # 由 _persist_trajectory 从 plan.tenant_id 填充；空 = 无租户上下文（sink 会 fail-fast）。
     tenant_id: str = ""
+    # 归属计量（G8 / migration 015，2026-10-23）：org_id 同值域 = tenant_id（013 决策），
+    # user_id 来自服务端断言（T4/A5 前多为 None）。三列落库由 store_pg.save 写入
+    # ——015 前该表无这三列，列缺失时写入侧按 42703 降级跳过（渐进窗口）。
+    org_id: str = ""
+    user_id: str | None = None
     planner: str | None = None
     plan: dict[str, Any] = field(default_factory=dict)
     steps: list[TrajectoryStep] = field(default_factory=list)

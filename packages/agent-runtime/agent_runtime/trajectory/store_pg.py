@@ -45,11 +45,35 @@ class PgTrajectoryStore(TrajectoryStore):
         self._table = table
 
     async def save(self, record: TrajectoryRecord) -> None:
-        sql = (
+        """写轨迹（migration 015 起带 tenant/org/user 三列，42703 渐进降级）。
+
+        015 未应用的库无这三列 ⇒ 精确捕获 undefined_column（42703）按旧列清单
+        重写——轨迹主体不丢，仅归属列暂缺；真故障照抛（fail-open 只限列缺失）。
+        """
+        steps_json = [s.to_dict() for s in record.steps]
+        async with self._pool.connection() as conn:
+            try:
+                await conn.execute(self._save_sql(with_scope=True), self._save_params(record, steps_json, True))
+            except Exception as e:
+                if getattr(e, "sqlstate", None) != "42703":
+                    raise
+                await conn.execute(self._save_sql(with_scope=False), self._save_params(record, steps_json, False))
+
+    def _save_sql(self, *, with_scope: bool) -> str:
+        scope_cols = ", tenant_id, org_id, user_id" if with_scope else ""
+        scope_vals = ", %s, %s, %s" if with_scope else ""
+        scope_sets = (
+            "    tenant_id = EXCLUDED.tenant_id, "
+            "    org_id = EXCLUDED.org_id, "
+            "    user_id = EXCLUDED.user_id, "
+            if with_scope
+            else ""
+        )
+        return (
             f"INSERT INTO {self._table} "
             "(execution_id, parent_execution_id, session_id, planner, plan, steps, "
-            " total_tokens, total_cost, snapshot, created_at) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, now()) "
+            f" total_tokens, total_cost, snapshot, created_at{scope_cols}) "
+            f"VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, now(){scope_vals}) "
             "ON CONFLICT (execution_id) DO UPDATE "
             "SET parent_execution_id = EXCLUDED.parent_execution_id, "
             "    session_id = EXCLUDED.session_id, "
@@ -59,24 +83,26 @@ class PgTrajectoryStore(TrajectoryStore):
             "    total_tokens = EXCLUDED.total_tokens, "
             "    total_cost = EXCLUDED.total_cost, "
             "    snapshot = EXCLUDED.snapshot, "
+            f"{scope_sets}"
             "    created_at = now()"
         )
-        steps_json = [s.to_dict() for s in record.steps]
-        async with self._pool.connection() as conn:
-            await conn.execute(
-                sql,
-                (
-                    record.execution_id,
-                    record.parent_execution_id,
-                    record.session_id,
-                    record.planner,
-                    _dumps(record.plan),
-                    _dumps(steps_json),
-                    record.total_tokens,
-                    record.total_cost,
-                    _dumps(record.snapshot),
-                ),
-            )
+
+    @staticmethod
+    def _save_params(record: TrajectoryRecord, steps_json: list, with_scope: bool) -> tuple:
+        base = (
+            record.execution_id,
+            record.parent_execution_id,
+            record.session_id,
+            record.planner,
+            _dumps(record.plan),
+            _dumps(steps_json),
+            record.total_tokens,
+            record.total_cost,
+            _dumps(record.snapshot),
+        )
+        if with_scope:
+            return base + (record.tenant_id, record.org_id, record.user_id)
+        return base
 
     async def get(self, execution_id: str) -> TrajectoryRecord | None:
         sql = (
