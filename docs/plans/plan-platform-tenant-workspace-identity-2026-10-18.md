@@ -419,4 +419,21 @@ T0 拍板 ──┬─→ T1 默认分支止血 ─→ T2 来源收口(+nl2sql �
 
 **它不牵动什么（避免下一个人重新升格）**：不影响 §9.8 不可逆②（那讲的是 `tenant-` 前缀生成器，与此符号无关）、不影响 §9.5 的迁移编号假设。⇒ 也不构成"重取全链来源"的取证任务。
 
+### 9.13 首批执行记录（T1.1/T1.2/T2.1/T2.2/T2.4，2026-10-23，分支 `feat/tenant-t1-cache-hardening`）
 
+> 台账纪律：本节为 dated 执行记录，防止"文档说未执行而代码已执行"的 staleness。跳过项与原因一并登记。
+
+| 批次 | 提交 | 内容与验收 | 状态 |
+|---|---|---|---|
+| T1.1 | `6381b70` | 读侧删 else 全表分支、写侧同步入口跳过+`skipped_no_tenant` 独立计数+WARNING（§9.11-② 落点 (i)/(ii) 均实现）；反证 3 条（零 SQL/零后台任务/计数可 reset） | ✅ |
+| T1.2 | `8886033` | `RevertHandler` 归属断言（`tenant-` 前缀异租户 ⇒ FORBIDDEN，死码激活）+ `session_router` 走 `resolve_thread_id` 归一化；handler 层 4 条 + router 层 3 条 | ✅ |
+| T2.1 | `edc4a7a` | `/query` 9 处收口到 `server_tenant_id()`，入口统一取值一次 + mismatch WARNING（软模式）；源码判据：`grep req.tenant_id` 仅剩比对+日志 2 处 | ✅ |
+| T2.2 | `77531bd` | kefu `_run_kefu` 同款收口（IdentityMiddleware ContextVar 断言源）；`/api/messages` 构造值随之无害化 | ✅ |
+| T2.4 | `b0b8dd0` | 联邦 httpx 回退路径出站附 `X-Internal-Tenant` 现签（每请求新鲜，TTL 300s）；**deepagents 主路径不注入**——其 headers 为构造期静态 dict，签名会过期，登记为上游能力缺口（当前 .venv 未装该包，生产走 httpx 回退） | ✅（含 1 登记局限） |
+| T2.3 | — | **跳过**：依赖 D1 被 D8 反转后的改写（§9.2），须"先改 D1 再施工" | ⏸ 按前置 |
+| T2.5 | — | **跳过**：D20=(b) 的"先审仓外调用方"是上线前置（§9.2 第四处），审计未做 | ⏸ 按前置 |
+
+**连带处置**（核验轮发现，非本批引入）：
+- `5b4416a`：两条 revert 治理用例断言对齐 T1.2 新契约（归一化线程值）；恢复被 cleaned history 误删的 `docs/operations/env-126-inventory.md`（734 行，自 `company-snapshot/fe22794` 原样恢复，消除 AGENTS.md:99/106/113 三处悬空引用——`test_doc_sync_file_refs` 基线红修复）。
+
+**统一核验读数（2026-10-23）**：根套件 1314 passed / shared-schemas 28 / agent-runtime 693 / agent_server 131 / 联邦 179 / kefu 49 / exhibition 377 / knowledge 412 / otel 18（全部 passed，skip 为环境条件项）；eval 门禁 15/15=100%；`lint_architecture` 通过；全仓 ruff 通过；`check_doc_sync` 通过。**唯一残留**：nl2sql 2 条（`test_cached_when_unchanged` NTFS 纳秒精度 / `test_cache_expires` TTL=0 时 `elapsed > ttl` 边界）——**预存在平台特异性失败**（基线 a0e7b8e 即红、本批对该服务零改动、与租户语义零交集），登记待 nl2sql 侧拍板（TTL 语义撞"exceeded 用 >"的既有偏好，不擅自改）。**requires_pg 级判据**（伪造反证数据面、A1 增量维度）按 §9.10 待放行，未跑。
