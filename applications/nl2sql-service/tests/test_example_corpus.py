@@ -96,8 +96,9 @@ async def test_recall_example_reuses_shared_embedding_and_scope_filters():
     assert call["embedding"] == [0.1, 0.2], "必须复用共享 query_embedding（不重复向量化）"
     assert call["top_k"] == 5
     assert ("tenant_id", "t-1") in call["filters"]
-    assert ("workspace_id", "w-1") in call["filters"]
-    assert ("datasource_id", "ds-1") in call["filters"], "作用域三列恒过滤（P1-1 隔离）"
+    assert ("datasource_id", "ds-1") in call["filters"], "作用域两列恒过滤（D8 摘键后）"
+    # D8 摘键（006）：workspace 不再参与召回过滤——元知识全企业共享
+    assert ("workspace_id", "w-1") not in call["filters"], "workspace 必须已摘出召回过滤"
 
 
 # ---------------------------------------------------------------------------
@@ -255,9 +256,9 @@ async def test_save_example_upsert_shape_matches_004_ddl():
     sql = pool.history[-1]
     assert sql.startswith(
         "INSERT INTO nl2sql_example_info "
-        "(tenant_id, workspace_id, datasource_id, question, sql, source, embedding) VALUES"
+        "(tenant_id, datasource_id, question, sql, source, embedding, workspace_id) VALUES"
     ), f"列清单写死契约漂移: {sql}"
-    assert "ON CONFLICT (tenant_id, workspace_id, datasource_id, question)" in sql, (
+    assert "ON CONFLICT (tenant_id, datasource_id, question)" in sql, (
         "冲突键必须与 004 的 uq_nl2sql_example 对齐"
     )
     assert "updated_at = now()" in sql and "RETURNING (xmax = 0)" in sql

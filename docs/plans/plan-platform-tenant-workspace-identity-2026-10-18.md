@@ -437,3 +437,33 @@ T0 拍板 ──┬─→ T1 默认分支止血 ─→ T2 来源收口(+nl2sql �
 - `5b4416a`：两条 revert 治理用例断言对齐 T1.2 新契约（归一化线程值）；恢复被 cleaned history 误删的 `docs/operations/env-126-inventory.md`（734 行，自 `company-snapshot/fe22794` 原样恢复，消除 AGENTS.md:99/106/113 三处悬空引用——`test_doc_sync_file_refs` 基线红修复）。
 
 **统一核验读数（2026-10-23）**：根套件 1314 passed / shared-schemas 28 / agent-runtime 693 / agent_server 131 / 联邦 179 / kefu 49 / exhibition 377 / knowledge 412 / otel 18（全部 passed，skip 为环境条件项）；eval 门禁 15/15=100%；`lint_architecture` 通过；全仓 ruff 通过；`check_doc_sync` 通过。**唯一残留**：nl2sql 2 条（`test_cached_when_unchanged` NTFS 纳秒精度 / `test_cache_expires` TTL=0 时 `elapsed > ttl` 边界）——**预存在平台特异性失败**（基线 a0e7b8e 即红、本批对该服务零改动、与租户语义零交集），登记待 nl2sql 侧拍板（TTL 语义撞"exceeded 用 >"的既有偏好，不擅自改）。**requires_pg 级判据**（伪造反证数据面、A1 增量维度）按 §9.10 待放行，未跑。
+
+### 9.14 R-3/R-4 细化（D8 读写语义 + 014b 时序拆分，2026-10-23 用户拍板一后、006 施工前置）
+
+> 取证基线 rev `d6d3014`（本分支）。本节解决第三轮评审 R-3/R-4：拍板定了方向（D8 摘键），施工前必须画清第一步。
+
+**① 范围修正（比 §9.5 更准）：8 处生效 UNIQUE 中只摘 7 处，`session_state`（002:33）不摘。**
+002 的 `UNIQUE (tenant_id, workspace_id, session_id, datasource_id)` 是**会话数据非元知识**——多轮四元组/已确认问答对属 D7 归属域（未来 conversations/014 域），与"元知识全企业共享"（D8）是两个语义层。§9.5 的"006 摘 8 处"系过度概括，照做会让会话状态从"每空间一份"变"全企业共享一份"（多轮状态互串，反向违反 D7）。006 实摘清单（按列集判等、沿用 005 DO 块配方）：
+| 表 | 现行键（含 ws） | 摘后键 |
+|---|---|---|
+| column_info（001:62） | t,ws,ds,table,column | t,ds,table,column |
+| metric_info（001:83） | t,ws,ds,metric | t,ds,metric |
+| value_info（005 重建键） | t,ws,ds,table,column,value | t,ds,table,column,value |
+| relation_info（001:148） | t,ws,ds,lt,lc,rt,rc | t,ds,lt,lc,rt,rc |
+| alias_info（001:167） | t,ws,ds,kind,name,alias | t,ds,kind,name,alias |
+| table_stats（002:96） | t,ws,ds,table | t,ds,table |
+| example_corpus（004:32） | t,ws,ds,question | t,ds,question |
+
+**② 写入侧语义：留列 = 首灌来源，零额外代码。**
+`_upsert`（meta_repository.py:347-367）的形态是 `ON CONFLICT (key_cols) DO UPDATE SET {updatable}`，且 updatable 恒不含键列。摘键后把 workspace_id 放在"键外、非 updatable"位置 ⇒ INSERT 首次写入当时的空间值，此后冲突更新永不覆盖 = 天然首灌溯源。`_SCOPE_COLS`（:24）从三元组改二元组 `(tenant_id, datasource_id)`（prune 扫描范围同步收窄，否则按 ws 清理会漏删共享行）。
+
+**③ 读取侧：元知识谓词全摘、方法签名不动。**
+list_* 7 处 WHERE、find_* 2 处、upsert_table_stats 的 ON CONFLICT、recall 节点 filters（recall_column.py:60 摘 workspace_id 项）——全部去 workspace_id。**方法签名保留 `workspace_id` 形参**（上游 6 个 recall 节点的传参成为无害透传，改动面从"9+14 处"收窄到"仓储层 SQL + 1 处 filters"）；pgvector `column_repository` 的 filters 序列摘 workspace 项。`get_session`/`upsert_session` 保留三列谓词不动（会话域，见 ①）。
+
+**④ 验收（无库可跑部分本批完成，requires_pg 部分待环境）**：
+- 单测级：仓储 SQL 形态断言（新键列集 / 无 workspace_id 谓词 / session 两方法保留）；"不同 workspace_id 请求召回同一行"的 mock 级用例。
+- requires_pg 级（待放行）：真库建两空间导入同元知识 ⇒ 一行；跨空间召回等值；session_state 仍按空间隔离。
+
+**⑤ R-4（014b 时序）**：§9.5 的 014 拆两行——**014a**（T3）：workspaces 改 PK + owner 列 + conversations 加列；**014b**（T4 后半）：`conversations.user_id SET NOT NULL`，前置 = A5 JWT claim 绑定落地 + 全写入点 user 可得性探测用例通过（挂 requires_pg）。否则 T3 末尾施工 014 会因取不到 user 值写炸或造哨兵债（9.7-① 禁令）。
+
+**⑥ 执行登记**：006 于 2026-10-23 在分支 `feat/nl2sql-ttl-and-006-slim` 施工（用户拍板一选 A：零冲突窗口内做）。线上真库执行与 requires_pg 判据按 §9.8.1/§9.10 待环境待授权。

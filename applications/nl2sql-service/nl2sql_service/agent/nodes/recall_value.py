@@ -29,8 +29,8 @@ async def recall_value(state: dict[str, Any]) -> dict[str, Any]:
     # 模糊匹配由只读探针（P0-9）在源侧完成。embedding 不再下传。
     datasource_id = state.get("datasource_id", "")
     tenant_id = state.get("tenant_id", "")
-    workspace_id = state.get("workspace_id", "")
-    filters = (("tenant_id", tenant_id), ("workspace_id", workspace_id), ("datasource_id", datasource_id))
+    # D8 摘键（006）：元知识全企业共享，workspace 不再参与召回过滤
+    filters = (("tenant_id", tenant_id), ("datasource_id", datasource_id))
     try:
         values = await ctx.value_repository.recall(
             keywords,

@@ -18,35 +18,38 @@ from psycopg.types.json import Json
 
 logger = get_logger(__name__)
 
-#: 三个作用域列是 P1-1 / P1-6 的前置槽位：当前无写入方，DDL 默认 ''。
+#: 作用域列（D8 摘键后二元组，2026-10-23 / 006 迁移）：元知识全企业共享，
+#: 唯一键与 prune 作用域只认 (tenant_id, datasource_id)；workspace_id 留列
+#: 仅作首灌来源溯源（_upsert 键外非 updatable，冲突更新永不覆盖）。
 #: upsert 与 prune 必须与之一致——ON CONFLICT 打不中、prune 扫不到行，
-#: 都是"看着跑了其实没生效"的暗断点。
-_SCOPE_COLS = ("tenant_id", "workspace_id", "datasource_id")
+#: 都是"看着跑了其实没生效"的暗断点。会话域（get/upsert_session）不受
+#: D8 约束，仍按三元组隔离（见 006 范围修正）。
+_SCOPE_COLS = ("tenant_id", "datasource_id")
 
 #: 各表（相对 table_prefix 的表名, 唯一键即 001 的 CONSTRAINT uq_*, 可更新列）。
 #: 列清单写死：值全部参数化，SQL 标识符只来自本模块常量。
-_COLUMN_TABLE = ("column_info", ("tenant_id", "workspace_id", "datasource_id", "table_name", "column_name"), ("table_comment", "column_comment", "data_type", "embedding"))
-_METRIC_TABLE = ("metric_info", ("tenant_id", "workspace_id", "datasource_id", "metric_name"), ("metric_desc", "metric_expr", "embedding"))
+_COLUMN_TABLE = ("column_info", ("tenant_id", "datasource_id", "table_name", "column_name"), ("table_comment", "column_comment", "data_type", "embedding"))
+_METRIC_TABLE = ("metric_info", ("tenant_id", "datasource_id", "metric_name"), ("metric_desc", "metric_expr", "embedding"))
 #: value_info（#117：005 迁移起唯一键加 table_name——同名列 orders.status vs
 #: venues.status 曾撞 uq_nl2sql_value 且行内无 table_name 无法回溯；updatable 加
 #: tokenizer——search_text 的分词器版本标记，换 tokenizer 后旧行可识别）
-_VALUE_TABLE = ("value_info", ("tenant_id", "workspace_id", "datasource_id", "table_name", "column_name", "value"), ("value_desc", "search_text", "tokenizer", "embedding"))
+_VALUE_TABLE = ("value_info", ("tenant_id", "datasource_id", "table_name", "column_name", "value"), ("value_desc", "search_text", "tokenizer", "embedding"))
 #: 关系/别名（§5.14-R2）：001 DDL 的 uq_nl2sql_relation / uq_nl2sql_alias 即冲突键
 _RELATION_TABLE = (
     "relation_info",
-    ("tenant_id", "workspace_id", "datasource_id", "left_table", "left_column", "right_table", "right_column"),
+    ("tenant_id", "datasource_id", "left_table", "left_column", "right_table", "right_column"),
     ("relation_type", "note"),
 )
 _ALIAS_TABLE = (
     "alias_info",
-    ("tenant_id", "workspace_id", "datasource_id", "target_kind", "target_name", "alias"),
+    ("tenant_id", "datasource_id", "target_kind", "target_name", "alias"),
     ("source",),
 )
 #: 范例库（A 方案 Stage ②）：004 DDL 的 uq_nl2sql_example 即冲突键。
 #: 自然键只取 question——同一问法对应一条规范 SQL，重训练 upsert 更新而非叠加副本。
 _EXAMPLE_TABLE = (
     "example_info",
-    ("tenant_id", "workspace_id", "datasource_id", "question"),
+    ("tenant_id", "datasource_id", "question"),
     ("sql", "source", "embedding"),
 )
 
@@ -97,7 +100,7 @@ class MetaRepository:
         self, keep: set[tuple[str, str]], tenant_id: str = "", workspace_id: str = "", datasource_id: str = ""
     ) -> int:
         """删除作用域内不在 keep 的列行（keep = {(table_name, column_name)}）。"""
-        return await self._prune(_COLUMN_TABLE[0], _COLUMN_NATURAL, keep, (tenant_id, workspace_id, datasource_id))
+        return await self._prune(_COLUMN_TABLE[0], _COLUMN_NATURAL, keep, (tenant_id, datasource_id))
 
     async def prune_metrics(
         self, keep: set[str], tenant_id: str = "", workspace_id: str = "", datasource_id: str = ""
@@ -108,14 +111,14 @@ class MetaRepository:
         取参，直接传字符串会被逐字符拆开（fake 池与真 PG 都会在这里炸）。
         """
         return await self._prune(
-            _METRIC_TABLE[0], _METRIC_NATURAL, {(name,) for name in keep}, (tenant_id, workspace_id, datasource_id)
+            _METRIC_TABLE[0], _METRIC_NATURAL, {(name,) for name in keep}, (tenant_id, datasource_id)
         )
 
     async def prune_values(
         self, keep: set[tuple[str, str, str]], tenant_id: str = "", workspace_id: str = "", datasource_id: str = ""
     ) -> int:
         """删除作用域内不在 keep 的取值行（keep = {(table_name, column_name, value)}，#117）。"""
-        return await self._prune(_VALUE_TABLE[0], _VALUE_NATURAL, keep, (tenant_id, workspace_id, datasource_id))
+        return await self._prune(_VALUE_TABLE[0], _VALUE_NATURAL, keep, (tenant_id, datasource_id))
 
     async def prune_relations(
         self,
@@ -126,14 +129,14 @@ class MetaRepository:
     ) -> int:
         """删除作用域内不在 keep 的关系行（keep = {(left_table, left_column, right_table, right_column)}）。"""
         return await self._prune(
-            _RELATION_TABLE[0], _RELATION_NATURAL, keep, (tenant_id, workspace_id, datasource_id)
+            _RELATION_TABLE[0], _RELATION_NATURAL, keep, (tenant_id, datasource_id)
         )
 
     async def prune_aliases(
         self, keep: set[tuple[str, str, str]], tenant_id: str = "", workspace_id: str = "", datasource_id: str = ""
     ) -> int:
         """删除作用域内不在 keep 的别名行（keep = {(target_kind, target_name, alias)}）。"""
-        return await self._prune(_ALIAS_TABLE[0], _ALIAS_NATURAL, keep, (tenant_id, workspace_id, datasource_id))
+        return await self._prune(_ALIAS_TABLE[0], _ALIAS_NATURAL, keep, (tenant_id, datasource_id))
 
     async def prune_examples(
         self, keep: set[str], tenant_id: str = "", workspace_id: str = "", datasource_id: str = ""
@@ -144,7 +147,7 @@ class MetaRepository:
         成一个 VALUES 行，直接传字符串会被逐字符拆开）。
         """
         return await self._prune(
-            _EXAMPLE_TABLE[0], _EXAMPLE_NATURAL, {(q,) for q in keep}, (tenant_id, workspace_id, datasource_id)
+            _EXAMPLE_TABLE[0], _EXAMPLE_NATURAL, {(q,) for q in keep}, (tenant_id, datasource_id)
         )
 
     async def list_relations(self, datasource_id: str = "", tenant_id: str = "", workspace_id: str = "") -> list[dict[str, Any]]:
@@ -152,10 +155,10 @@ class MetaRepository:
         sql = (
             f"SELECT left_table, left_column, right_table, right_column, relation_type, note "
             f"FROM {self._prefix}relation_info "
-            f"WHERE tenant_id = %s AND workspace_id = %s AND datasource_id = %s"
+            f"WHERE tenant_id = %s AND datasource_id = %s"
         )
         async with self._pool.connection() as conn:
-            cur = await conn.execute(sql, (tenant_id, workspace_id, datasource_id))
+            cur = await conn.execute(sql, (tenant_id, datasource_id))
             rows = await cur.fetchall()
             return [dict(r) for r in rows]
 
@@ -164,11 +167,11 @@ class MetaRepository:
         sql = (
             f"SELECT target_kind, target_name, alias, source "
             f"FROM {self._prefix}alias_info "
-            f"WHERE tenant_id = %s AND workspace_id = %s AND datasource_id = %s "
+            f"WHERE tenant_id = %s AND datasource_id = %s "
             f"AND source = 'human'"
         )
         async with self._pool.connection() as conn:
-            cur = await conn.execute(sql, (tenant_id, workspace_id, datasource_id))
+            cur = await conn.execute(sql, (tenant_id, datasource_id))
             rows = await cur.fetchall()
             return [dict(r) for r in rows]
 
@@ -177,10 +180,10 @@ class MetaRepository:
         sql = (
             f"SELECT table_name, column_name, column_comment, data_type "
             f"FROM {self._prefix}column_info "
-            f"WHERE tenant_id = %s AND workspace_id = %s AND datasource_id = %s"
+            f"WHERE tenant_id = %s AND datasource_id = %s"
         )
         async with self._pool.connection() as conn:
-            cur = await conn.execute(sql, (tenant_id, workspace_id, datasource_id))
+            cur = await conn.execute(sql, (tenant_id, datasource_id))
             rows = await cur.fetchall()
             return [dict(r) for r in rows]
 
@@ -189,10 +192,10 @@ class MetaRepository:
         sql = (
             f"SELECT question, sql, source "
             f"FROM {self._prefix}example_info "
-            f"WHERE tenant_id = %s AND workspace_id = %s AND datasource_id = %s"
+            f"WHERE tenant_id = %s AND datasource_id = %s"
         )
         async with self._pool.connection() as conn:
-            cur = await conn.execute(sql, (tenant_id, workspace_id, datasource_id))
+            cur = await conn.execute(sql, (tenant_id, datasource_id))
             rows = await cur.fetchall()
             return [dict(r) for r in rows]
 
@@ -200,11 +203,11 @@ class MetaRepository:
         """类型自动跟随（P0-3 的唯一自动写：语义不自动改，类型与样本才跟）。"""
         sql = (
             f"UPDATE {self._prefix}column_info SET data_type = %s, updated_at = now() "
-            f"WHERE tenant_id = %s AND workspace_id = %s AND datasource_id = %s "
+            f"WHERE tenant_id = %s AND datasource_id = %s "
             f"AND table_name = %s AND column_name = %s"
         )
         async with self._pool.connection() as conn:
-            await conn.execute(sql, (data_type, "", "", "", table_name, column_name))
+            await conn.execute(sql, (data_type, "", "", table_name, column_name))
 
     async def upsert_table_stats(self, stats: list[dict[str, Any]]) -> int:
         """表行数估值写入（P0-3 副产物 → 生成期聚合引导）。"""
@@ -212,16 +215,16 @@ class MetaRepository:
         for s in stats:
             sql = (
                 f"INSERT INTO {self._prefix}table_stats "
-                f"(tenant_id, workspace_id, datasource_id, table_name, row_estimate, column_count, sampled_at) "
-                f"VALUES (%s, %s, %s, %s, %s, %s, now()) "
-                f"ON CONFLICT (tenant_id, workspace_id, datasource_id, table_name) DO UPDATE SET "
+                f"(tenant_id, datasource_id, table_name, row_estimate, column_count, sampled_at) "
+                f"VALUES (%s, %s, %s, %s, %s, now()) "
+                f"ON CONFLICT (tenant_id, datasource_id, table_name) DO UPDATE SET "
                 f"row_estimate = EXCLUDED.row_estimate, column_count = EXCLUDED.column_count, "
                 f"sampled_at = now()"
             )
             async with self._pool.connection() as conn:
                 await conn.execute(
                     sql,
-                    ("", "", s.get("datasource_id", ""), s["table_name"], s.get("row_estimate", 0), s.get("column_count", 0)),
+                    ("", s.get("datasource_id", ""), s["table_name"], s.get("row_estimate", 0), s.get("column_count", 0)),
                 )
             count += 1
         return count
@@ -231,10 +234,10 @@ class MetaRepository:
         sql = (
             f"SELECT table_name, row_estimate, column_count "
             f"FROM {self._prefix}table_stats "
-            f"WHERE tenant_id = %s AND workspace_id = %s AND datasource_id = %s"
+            f"WHERE tenant_id = %s AND datasource_id = %s"
         )
         async with self._pool.connection() as conn:
-            cur = await conn.execute(sql, (tenant_id, workspace_id, datasource_id))
+            cur = await conn.execute(sql, (tenant_id, datasource_id))
             rows = await cur.fetchall()
             return [dict(r) for r in rows]
 
@@ -249,10 +252,10 @@ class MetaRepository:
         sql = (
             f"SELECT table_name, column_name, column_comment, data_type, table_comment "
             f"FROM {self._prefix}column_info "
-            f"WHERE tenant_id = %s AND workspace_id = %s AND datasource_id = %s "
+            f"WHERE tenant_id = %s AND datasource_id = %s "
             f"AND (table_name, column_name) IN (VALUES {values_sql})"
         )
-        params = (tenant_id, workspace_id, datasource_id, *[v for k in keys for v in k])
+        params = (tenant_id, datasource_id, *[v for k in keys for v in k])
         async with self._pool.connection() as conn:
             cur = await conn.execute(sql, params)
             rows = await cur.fetchall()
@@ -266,11 +269,11 @@ class MetaRepository:
         sql = (
             f"SELECT metric_name, metric_desc, metric_expr "
             f"FROM {self._prefix}metric_info "
-            f"WHERE tenant_id = %s AND workspace_id = %s AND datasource_id = %s "
+            f"WHERE tenant_id = %s AND datasource_id = %s "
             f"AND metric_name IN ({placeholders})"
         )
         async with self._pool.connection() as conn:
-            cur = await conn.execute(sql, (tenant_id, workspace_id, datasource_id, *names))
+            cur = await conn.execute(sql, (tenant_id, datasource_id, *names))
             rows = await cur.fetchall()
             return [dict(r) for r in rows]
 
@@ -355,6 +358,10 @@ class MetaRepository:
         """
         table, key_cols, updatable = table_spec
         insert_cols = list(key_cols) + [c for c in updatable if c not in key_cols]
+        # 首灌来源（D8）：workspace_id 键外、非 updatable ⇒ 仅 INSERT 时写入
+        # data 携带的当时空间值，冲突更新永不覆盖（溯源语义的唯一保证）。
+        if "workspace_id" not in insert_cols:
+            insert_cols.append("workspace_id")
         row = {c: "" for c in _SCOPE_COLS}
         row.update(data)
         params = tuple(row.get(c) for c in insert_cols)
@@ -377,7 +384,7 @@ class MetaRepository:
         table: str,
         natural_cols: tuple[str, ...],
         keep: set[tuple[str, ...]],
-        scope: tuple[str, str, str] = ("", "", ""),
+        scope: tuple[str, str] = ("", ""),
     ) -> int:
         """删除**指定作用域内**自然键不在 keep 的行；keep 为空 = 清空该作用域（源已为空）。
 

@@ -34,14 +34,13 @@ async def recall_column(state: dict[str, Any]) -> dict[str, Any]:
     # 别名路失败回落向量路，向量路再失败降级空召回——不阻断查询。
     datasource_id = state.get("datasource_id", "")
     tenant_id = state.get("tenant_id", "")
-    workspace_id = state.get("workspace_id", "")
     if ctx.meta_repository is not None:
         try:
-            aliases = await ctx.meta_repository.list_aliases(datasource_id, tenant_id=tenant_id, workspace_id=workspace_id)
+            aliases = await ctx.meta_repository.list_aliases(datasource_id, tenant_id=tenant_id, workspace_id=state.get("workspace_id", ""))
             hits = match_aliases(state.get("query", ""), keywords, aliases, "column")
             if hits:
                 rows = await ctx.meta_repository.find_columns_by_names(
-                    hits, datasource_id, tenant_id=tenant_id, workspace_id=workspace_id
+                    hits, datasource_id, tenant_id=tenant_id, workspace_id=state.get("workspace_id", "")
                 )
                 if rows:
                     return {"columns": rows}
@@ -57,7 +56,8 @@ async def recall_column(state: dict[str, Any]) -> dict[str, Any]:
 
     # 作用域过滤（P1-1 隔离）：tenant/workspace/datasource 三列恒过滤——空值匹配
     # DDL 默认 '' 行（单租户 dev 向后兼容），非空则隔离到该作用域（禁跨租户召回）。
-    filters = (("tenant_id", tenant_id), ("workspace_id", workspace_id), ("datasource_id", datasource_id))
+    # D8 摘键（006）：元知识全企业共享，workspace 不再参与召回过滤
+    filters = (("tenant_id", tenant_id), ("datasource_id", datasource_id))
     try:
         columns = await ctx.column_repository.recall(
             keywords,

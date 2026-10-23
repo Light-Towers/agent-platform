@@ -28,7 +28,9 @@ from nl2sql_service.repositories.postgres.meta.meta_repository import MetaReposi
 from nl2sql_service.services.meta_knowledge_service import MetaKnowledgeService
 from nl2sql_service.tokenizer import tokenize
 
-_SCOPE = ("tenant_id", "workspace_id", "datasource_id")
+# D8 摘键（006，2026-10-23）：唯一键与 prune 作用域只认二元组；workspace_id
+# 是键外普通列（首灌来源），fake 的行键计算须与真实 PG 新键一致。
+_SCOPE = ("tenant_id", "datasource_id")
 
 _TABLES = [
     {
@@ -131,13 +133,23 @@ class _FakePool:
         conflict = re.search(r"ON CONFLICT \(([^)]*)\) DO UPDATE", sql)
         assert conflict, f"upsert 缺 ON CONFLICT（唯一键）: {sql}"
         key_cols = [c.strip() for c in conflict.group(1).split(",")]
-        natural = [c for c in key_cols if c not in _SCOPE]
+        natural = [c for c in key_cols if c not in _SCOPE and c != "workspace_id"]
         assert len(params) == len(cols), f"参数个数与列清单不符: {len(params)} vs {len(cols)}"
         row = dict(zip(cols, params))
         table_rows = self.store.setdefault(table, {})
         key = tuple(row[c] for c in natural)
-        inserted = key not in table_rows
-        table_rows[key] = row
+        # 忠实模拟 DO UPDATE SET：冲突更新只动 SET 清单列（含 updated_at），
+        # 其余列保留旧行值——与真实 PG 一致（D8 首灌来源语义依赖此行为：
+        # workspace_id 键外非 updatable ⇒ 冲突更新永不覆盖）。
+        set_cols = [c for c in re.findall(r"(\w+) = EXCLUDED\.\w+", sql)]
+        if key in table_rows:
+            old = table_rows[key]
+            for c in set_cols:
+                old[c] = row[c]
+            inserted = False
+        else:
+            table_rows[key] = row
+            inserted = True
         # RETURNING (xmax = 0) AS inserted：连接配 dict_row ⇒ fetchone 返回 dict
         return _FakeCursor(row={"inserted": inserted})
 
@@ -149,8 +161,8 @@ class _FakePool:
             self.store[table] = {}
             return _FakeCursor(rowcount=deleted)
         natural = [c.strip() for c in keep_match.group(1).split(",")]
-        assert params[:3] == ("", "", ""), f"prune 必须按作用域删除，实际前三个参数={params[:3]}"
-        rest = params[3:]
+        assert params[:2] == ("", ""), f"prune 必须按作用域删除，实际前两个参数={params[:2]}"
+        rest = params[2:]
         assert len(rest) % len(natural) == 0, f"prune 参数个数与自然键宽度不符: {rest}"
         width = len(natural)
         keep = {rest[i * width : (i + 1) * width] for i in range(len(rest) // width)}
@@ -401,26 +413,26 @@ async def test_upsert_sql_uses_fixed_column_list_and_conflict_key():
     column_insert = next(s for s in inserts if s.startswith("INSERT INTO nl2sql_column_info"))
     assert column_insert.startswith(
         "INSERT INTO nl2sql_column_info "
-        "(tenant_id, workspace_id, datasource_id, table_name, column_name, "
-        "table_comment, column_comment, data_type, embedding) VALUES"
+        "(tenant_id, datasource_id, table_name, column_name, "
+        "table_comment, column_comment, data_type, embedding, workspace_id) VALUES"
     ), f"列清单写死契约漂移: {column_insert}"
     assert (
-        "ON CONFLICT (tenant_id, workspace_id, datasource_id, table_name, column_name)" in column_insert
-    ), "列冲突键必须与 001 的 uq_nl2sql_column 对齐"
+        "ON CONFLICT (tenant_id, datasource_id, table_name, column_name)" in column_insert
+    ), "列冲突键必须与 006 摘键后的 uq_nl2sql_column 对齐（D8）"
 
     value_insert = next(s for s in inserts if s.startswith("INSERT INTO nl2sql_value_info"))
     assert "search_text" in value_insert, "取值 upsert 必须写 search_text（value_tsvector 唯一输入）"
 
     relation_insert = next(s for s in inserts if s.startswith("INSERT INTO nl2sql_relation_info"))
     assert (
-        "ON CONFLICT (tenant_id, workspace_id, datasource_id, left_table, left_column, "
+        "ON CONFLICT (tenant_id, datasource_id, left_table, left_column, "
         "right_table, right_column)" in relation_insert
-    ), "关系冲突键必须与 001 的 uq_nl2sql_relation 对齐"
+    ), "关系冲突键必须与 006 摘键后的 uq_nl2sql_relation 对齐（D8）"
 
     alias_insert = next(s for s in inserts if s.startswith("INSERT INTO nl2sql_alias_info"))
     assert (
-        "ON CONFLICT (tenant_id, workspace_id, datasource_id, target_kind, target_name, alias)" in alias_insert
-    ), "别名冲突键必须与 001 的 uq_nl2sql_alias 对齐"
+        "ON CONFLICT (tenant_id, datasource_id, target_kind, target_name, alias)" in alias_insert
+    ), "别名冲突键必须与 006 摘键后的 uq_nl2sql_alias 对齐（D8）"
 
 
 async def test_relations_and_aliases_write_without_embedding():
@@ -536,3 +548,37 @@ async def test_value_search_text_and_tsvector_on_real_pg():
                 ("order_status", "已支付"),
             )
         await pg.close()
+
+# ---------------------------------------------------------------------------
+# D8 摘键（006，2026-10-23）：元知识全企业共享 + workspace 留列首灌来源
+# ---------------------------------------------------------------------------
+async def test_d8_cross_workspace_upserts_same_row_and_keeps_first_source():
+    """不同 workspace 写同键元知识 ⇒ 同一行（共享），workspace_id 停在首灌值。
+
+    判据来源 plan-platform-tenant-workspace-identity §9.14-②/④：
+    - 键外非 updatable ⇒ 冲突更新永不覆盖 workspace_id（首灌来源语义）
+    - 不同 workspace_id 的请求应召回同一行（全企业共享）
+    """
+    pool = _FakePool()
+    repo = MetaRepository(pool=pool)
+    base = {
+        "tenant_id": "t1",
+        "datasource_id": "ds1",
+        "table_name": "orders",
+        "column_name": "status",
+        "table_comment": "订单状态",
+        "column_comment": "",
+        "data_type": "text",
+        "embedding": None,
+    }
+    first = await repo.save_column({**base, "workspace_id": "w1"})
+    assert first is True, "首灌 w1 应为插入"
+    rows = pool.rows("nl2sql_column_info")
+    assert len(rows) == 1 and rows[0]["workspace_id"] == "w1"
+
+    second = await repo.save_column({**base, "workspace_id": "w2", "column_comment": "改注释"})
+    assert second is False, "w2 同键应为更新（共享一行，不是第二行）"
+    rows = pool.rows("nl2sql_column_info")
+    assert len(rows) == 1, "不同 workspace 的同键元知识必须共享同一行（D8）"
+    assert rows[0]["workspace_id"] == "w1", "首灌来源不随后续更新覆盖"
+    assert rows[0]["column_comment"] == "改注释", "非键列正常更新"

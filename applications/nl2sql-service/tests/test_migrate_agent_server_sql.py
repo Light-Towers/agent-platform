@@ -209,7 +209,8 @@ async def test_prune_examples_uses_given_scope():
     repo = MetaRepository(pool=pool)
     await repo.prune_examples({"q1"}, tenant_id="t1", workspace_id="w1", datasource_id="ds1")
     sql, params = pool.history[-1]
-    assert params[:3] == ("t1", "w1", "ds1"), f"prune 必须按调用方作用域删，实际 {params[:3]}"
+    # D8 摘键（006）：prune 作用域二元组（tenant, datasource）；workspace 形参保留但不再进作用域
+    assert params[:2] == ("t1", "ds1"), f"prune 必须按调用方作用域删，实际 {params[:2]}"
     assert "nl2sql_example_info" in sql and "NOT IN" in sql
 
 
@@ -218,7 +219,7 @@ async def test_prune_defaults_to_empty_scope():
     pool = _ScopePool()
     await MetaRepository(pool=pool).prune_examples({"q1"})
     _sql, params = pool.history[-1]
-    assert params[:3] == ("", "", "")
+    assert params[:2] == ("", "")
 
 
 # ---------------------------------------------------------------------------

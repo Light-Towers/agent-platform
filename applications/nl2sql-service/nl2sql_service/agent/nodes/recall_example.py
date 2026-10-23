@@ -27,10 +27,10 @@ async def recall_example(state: dict[str, Any]) -> dict[str, Any]:
     if embedding is None:
         return {"examples": []}
 
-    # 作用域过滤（P1-1 隔离）：tenant/workspace/datasource 三列恒过滤（空值匹配 '' 行）
+    # 作用域过滤（D8 摘键后）：tenant/datasource 两列恒过滤（空值匹配 '' 行）；
+    # workspace 不再参与召回过滤——元知识全企业共享（006，2026-10-23）
     filters = (
         ("tenant_id", state.get("tenant_id", "")),
-        ("workspace_id", state.get("workspace_id", "")),
         ("datasource_id", state.get("datasource_id", "")),
     )
     try:

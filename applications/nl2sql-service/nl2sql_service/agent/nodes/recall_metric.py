@@ -33,14 +33,13 @@ async def recall_metric(state: dict[str, Any]) -> dict[str, Any]:
     # 向量路降级空召回，不阻断查询。
     datasource_id = state.get("datasource_id", "")
     tenant_id = state.get("tenant_id", "")
-    workspace_id = state.get("workspace_id", "")
     if ctx.meta_repository is not None:
         try:
-            aliases = await ctx.meta_repository.list_aliases(datasource_id, tenant_id=tenant_id, workspace_id=workspace_id)
+            aliases = await ctx.meta_repository.list_aliases(datasource_id, tenant_id=tenant_id, workspace_id=state.get("workspace_id", ""))
             hits = match_aliases(state.get("query", ""), keywords, aliases, "metric")
             if hits:
                 rows = await ctx.meta_repository.find_metrics_by_names(
-                    hits, datasource_id, tenant_id=tenant_id, workspace_id=workspace_id
+                    hits, datasource_id, tenant_id=tenant_id, workspace_id=state.get("workspace_id", "")
                 )
                 if rows:
                     return {"metrics": rows}
@@ -54,7 +53,8 @@ async def recall_metric(state: dict[str, Any]) -> dict[str, Any]:
         except Exception:  # noqa: BLE001 - 向量化失败降级为空召回，不阻断查询
             embedding = None
 
-    filters = (("tenant_id", tenant_id), ("workspace_id", workspace_id), ("datasource_id", datasource_id))
+    # D8 摘键（006）：元知识全企业共享，workspace 不再参与召回过滤
+    filters = (("tenant_id", tenant_id), ("datasource_id", datasource_id))
     try:
         metrics = await ctx.metric_repository.recall(
             keywords,
