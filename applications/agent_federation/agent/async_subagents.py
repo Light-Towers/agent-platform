@@ -23,10 +23,10 @@ from agent_core.monitor import monitor
 
 from agent.circuit_breaker import get_breaker_sync
 from agent.config import TIMEOUT_SUBAGENT_HTTP, get_all_subservices
-from api.context import get_tenant_context
 from agent.metrics import record_delegation
 from agent.prompts import sub_agents_content
 from agent.tracing.langfuse_adapter import langfuse_observe as observe
+from api.context import get_tenant_context
 
 try:  # 外部 deepagents 包（Agent Protocol 原生支持）
     from deepagents import AsyncSubAgent
