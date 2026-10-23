@@ -167,3 +167,45 @@ def test_module_no_longer_references_the_phantom_api():
 
     src = inspect.getsource(recall_exact) + inspect.getsource(session_router)
     assert "alist_messages(" not in src
+
+class TestRevertOwnershipG3(TestHistoryEndpointOverHttp):
+    """T1.2/G3：/session/revert 归属断言（plan-platform-tenant-workspace-identity 批次表）。
+
+    继承 TestHistoryEndpointOverHttp 以复用其类内 make_client fixture（TestClient
+    + app 装配 + settings cache 清理）。
+    """
+
+    def test_authed_client_cannot_target_foreign_thread(self, make_client):
+        """认证启用：客户端指定的 session_id 不参与归属——归一化为断言租户线程。
+
+        与 test_real_turn_shows_up_in_history 同构：客户端传 "tenant-bob"（他人
+        命名空间）也被 resolve_thread_id 换成 tenant-default ⇒ 404 而非回退他人。
+        """
+        client = make_client(API_KEY="k-rev")
+        r = client.post(
+            "/session/revert",
+            json={"session_id": "tenant-bob", "checkpoint_id": "cp-x"},
+            headers={"X-API-Key": "k-rev"},
+        )
+        assert r.status_code == 404
+        assert r.json()["detail"] == "CHECKPOINT_NOT_FOUND"
+
+    def test_dev_mode_foreign_prefixed_thread_is_403(self, make_client):
+        """开发模式：无前缀归一化兜底，handler 归属断言拦截 ⇒ 403 FORBIDDEN（原死码）。"""
+        client = make_client()  # 无 API_KEY ⇒ 开发模式，信任客户端值
+        r = client.post(
+            "/session/revert",
+            json={"session_id": "tenant-bob", "checkpoint_id": "cp-x"},
+        )
+        assert r.status_code == 403
+        assert r.json()["detail"] == "FORBIDDEN"
+
+    def test_dev_mode_own_prefixed_thread_passes_gate(self, make_client):
+        """开发模式：归属匹配的 tenant- 前缀线程通过断言（走到 CHECKPOINT_NOT_FOUND）。"""
+        client = make_client()
+        r = client.post(
+            "/session/revert",
+            json={"session_id": "tenant-default", "checkpoint_id": "cp-x"},
+        )
+        assert r.status_code == 404
+        assert r.json()["detail"] == "CHECKPOINT_NOT_FOUND"
