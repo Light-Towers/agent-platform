@@ -32,13 +32,15 @@ def test_loads_file(prompt_dir):
 
 
 def test_cached_when_unchanged(prompt_dir):
-    (prompt_dir / "generate_sql").write_text("v1", encoding="utf-8")
-    assert load_prompt("generate_sql") == "v1"
-    # 同身份二次加载走缓存（不改文件 ⇒ 不重读；直接改缓存值验证命中）
-    _prompt._PROMPT_CACHE["generate_sql"] = ((1, 2), "来自缓存")
+    # 身份撞键的缓存语义钉住（#116 的"不变不重读"半边；"变才重读"见
+    # test_hot_reload_on_content_change）。不依赖 os.utime 的纳秒保真注入——
+    # NTFS 对 ns 取整，((1, 2)) 期望键在 Windows 上撞不上（预存在平台失败，
+    # 2026-10-23 修）。改法：先真实加载使身份入缓存，再用**真实 stat 身份**
+    # 回填缓存值——文件未动 ⇒ 身份必然一致 ⇒ 必命中缓存值而非盘上内容。
     (prompt_dir / "generate_sql").write_text("v2", encoding="utf-8")
-    # ns=(atime_ns, mtime_ns)——身份撞缓存键 ((1,2)) ⇒ 命中缓存不重读
-    os.utime(prompt_dir / "generate_sql", ns=(0, 1))
+    assert load_prompt("generate_sql") == "v2"
+    identity = _prompt._PROMPT_CACHE["generate_sql"][0]
+    _prompt._PROMPT_CACHE["generate_sql"] = (identity, "来自缓存")
     assert load_prompt("generate_sql") == "来自缓存"
 
 

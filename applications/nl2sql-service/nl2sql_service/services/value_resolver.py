@@ -160,7 +160,10 @@ class ProbeCache:
         if hit is None:
             return None
         expires_at, values = hit
-        if time.time() > expires_at:
+        # expires_at 是"过期时刻"语义：到达即过期（>=）。与预算超限判定的严格大于
+        # 偏好不冲突——那是"用量恰好等于限额=合法用满"；此处时间戳相等在
+        # Windows 时钟粒度（~15ms）下真实可发生，TTL=0 时 > 会漏判未过期。
+        if time.time() >= expires_at:
             self._store.pop(key, None)
             return None
         return values
