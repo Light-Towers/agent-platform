@@ -62,7 +62,7 @@ def _log(msg: str) -> None:
 
 OPENAI_MODELS = {"opencode": "opencode/deepseek-v4.1-flash-free"}
 
-app = FastAPI(title="opencode-gateway")
+app = FastAPI(title="opencode-gateway", telemetry={"tracing": False})
 
 
 def _build_prompt(messages: list[dict[str, Any]]) -> str:

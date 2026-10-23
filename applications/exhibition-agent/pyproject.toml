@@ -17,6 +17,10 @@ dependencies = [
     "langchain-openai>=0.2",
     "pydantic>=2.13.5",
     "pydantic-settings>=2.2",
+    # ExecutionContext JWT 编解码走标准库（2026-10-19，plan-execution-context-pyjwt-2026-10-19：
+    # 替下 context_codec 的手写 base64url+HMAC）。下界与根 / agent-runtime [identity] 一致；
+    # lint L-4 不跟踪 pyjwt（非 OTel/langfuse 面），保持一致是防解析分叉的惯例。
+    "pyjwt[crypto]>=2.14.0",
 ]
 
 [project.optional-dependencies]
@@ -29,7 +33,7 @@ dev = [
 # import 路径属 v3+/v4 代际契约（观测方案 §3.4，S4 已迁 langfuse.langchain）。
 # langchain 是 langfuse.langchain 的导入前置（只用于读 __version__），缺它则软降级
 # 成"配了但不报"。与 agent-runtime/federation 同下界，由 lint L-4 守。
-langfuse = ["langfuse>=4.0.0", "langchain>=1,<2"]
+langfuse = ["langfuse>=4.0.0", "langchain>=1.4.6,<2"]  # 2026-10-19：#98 处置——L-4 三处同下界归一至当前解析版本 1.4.6
 
 [tool.hatch.build.targets.wheel]
 packages = ["exhibition_agent"]
