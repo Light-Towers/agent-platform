@@ -124,3 +124,47 @@ async def test_content_assert_switch_off(monkeypatch, caplog):
         out = await agent.ainvoke({"query": "q"})
     assert out["answer"] == ""
     assert not any("answer 为空" in r.message for r in caplog.records)
+
+# ---------------------------------------------------------------------------
+# T2.4/G5：出站 X-Internal-Tenant 签名头（观测期软模式）
+# ---------------------------------------------------------------------------
+
+class TestInternalTenantHeaderT24:
+    """plan-platform-tenant-workspace-identity 批次表 T2.4。"""
+
+    def test_no_key_soft_skip(self, monkeypatch):
+        """未配密钥 ⇒ 不带签名头（软模式），且提示只发一次。"""
+        import agent.async_subagents as mod
+
+        monkeypatch.setenv("INTERNAL_HMAC_KEY_FILE", "")
+        monkeypatch.setattr(mod, "_WARNED_NO_KEY", False)
+        assert mod._internal_tenant_header() == {}
+
+    def test_with_key_signs_verifiable_header(self, monkeypatch, tmp_path):
+        """配了密钥 ⇒ 签发，且值能被 verify_internal_header 验回同一租户。"""
+        import agent.async_subagents as mod
+        from agent_core.internal_header import verify_internal_header
+
+        key_file = tmp_path / "hmac.key"
+        key_file.write_bytes(b"test-shared-secret")
+        monkeypatch.setenv("INTERNAL_HMAC_KEY_FILE", str(key_file))
+        header = mod._internal_tenant_header()
+        assert "X-Internal-Tenant" in header
+        parsed = verify_internal_header(header["X-Internal-Tenant"], key=b"test-shared-secret")
+        assert parsed is not None
+        tenant, user = parsed
+        assert tenant == "default"  # get_tenant_context() 未绑定回落 default
+        assert user is None
+
+    async def test_ainvoke_carries_header(self, monkeypatch, tmp_path):
+        """httpx 回退路径的出站请求携带签名头（每请求现签）。"""
+        key_file = tmp_path / "hmac.key"
+        key_file.write_bytes(b"k2")
+        monkeypatch.setenv("INTERNAL_HMAC_KEY_FILE", str(key_file))
+        agent = _make_agent(monkeypatch, {"answer": "ok", "fallback": False})
+        await agent.ainvoke({"query": "q", "tenant_id": "spoofed"})
+        import agent.async_subagents as mod
+
+        client = mod._shared_async_client
+        kwargs = client.post.await_args.kwargs
+        assert "X-Internal-Tenant" in kwargs["headers"]
