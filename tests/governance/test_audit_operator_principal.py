@@ -88,7 +88,9 @@ def test_revert_operator_is_asserted_tenant_not_credential(monkeypatch):
 
     result = asyncio.run(session_revert(req, _fake_request(handler), _auth=_INBOUND_KEY))
 
-    assert result.session_id == "s-1"
+    # T1.2（G3）后：客户端 session_id 经 resolve_thread_id 归一化为断言租户线程
+    # （认证启用时客户端值不参与归属）；operator 断言不变。
+    assert result.session_id == "tenant-single-tenant-x"
     assert handler.operators == ["single-tenant-x"]
     assert handler.operators[0] == server_tenant_id(get_settings().default_tenant_id)
     # 凭据既不以原文、也不以任何派生形态进入审计主体
@@ -335,8 +337,8 @@ def test_p12_the_real_session_router_goes_red_if_the_guard_is_stripped():
     assert "operator = server_tenant_id(settings.default_tenant_id)" in text
 
     stripped = text.replace(
-        "result = await revert_handler.revert(operator, req.session_id, req.checkpoint_id)",
-        "result = await revert_handler.revert(_auth, req.session_id, req.checkpoint_id)",
+        "result = await revert_handler.revert(operator, thread_id, req.checkpoint_id)",
+        "result = await revert_handler.revert(_auth, thread_id, req.checkpoint_id)",
     )
     assert stripped != text, "未剥掉任何内容，替换逻辑失效"
 
