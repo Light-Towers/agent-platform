@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 
 _background_tasks: set[asyncio.Task] = set()
 _stats = CacheStats()
+_skipped_no_tenant = 0
 
 
 def spawn_background(coro) -> asyncio.Task:
@@ -41,24 +42,23 @@ async def cache_lookup(pool, embedding: list[float], threshold: float, tenant_id
     纯向量相似度命中，不参与 cache_key 匹配——故改用 build_cache_key 仅影响
     写入落库 metadata，不影响命中逻辑。
 
-    tenant_id 非空时加 WHERE 过滤，防止跨租户命中（P1 安全修复）。
+    tenant_id 为空时直接计 miss 返回、不发 SQL（T1.1 / G1 fail-closed）：原
+    else 分支会退化为无 WHERE 全表匹配，构成跨租户命中面。D20 断言入口落地
+    后空租户在 HTTP 层即 401/403，本条为其纵深防御（plan-platform-tenant-
+    workspace-identity §9.11-②）。
     """
     if pool is None:
         _stats.record("miss")
         return None
-    if tenant_id:
-        sql = (
-            "SELECT answer, embedding <=> %s::vector AS distance FROM semantic_cache "
-            "WHERE tenant_id = %s "
-            "ORDER BY embedding <=> %s::vector LIMIT 1"
-        )
-        params = (embedding, tenant_id, embedding)
-    else:
-        sql = (
-            "SELECT answer, embedding <=> %s::vector AS distance FROM semantic_cache "
-            "ORDER BY embedding <=> %s::vector LIMIT 1"
-        )
-        params = (embedding, embedding)
+    if not tenant_id:
+        _stats.record("miss")
+        return None
+    sql = (
+        "SELECT answer, embedding <=> %s::vector AS distance FROM semantic_cache "
+        "WHERE tenant_id = %s "
+        "ORDER BY embedding <=> %s::vector LIMIT 1"
+    )
+    params = (embedding, tenant_id, embedding)
     try:
         async with pool.connection() as conn:
             row = await conn.execute(sql, params)
@@ -73,13 +73,17 @@ async def cache_lookup(pool, embedding: list[float], threshold: float, tenant_id
 
 
 def get_stats() -> dict[str, int | float]:
-    """返回缓存命中率统计快照。"""
-    return _stats.snapshot()
+    """返回缓存命中率统计快照（含写侧空租户跳过独立计数）。"""
+    snap = _stats.snapshot()
+    snap["skipped_no_tenant"] = _skipped_no_tenant
+    return snap
 
 
 def reset_stats() -> None:
     """清空统计。"""
+    global _skipped_no_tenant
     _stats.reset()
+    _skipped_no_tenant = 0
 
 
 async def _cache_write(pool, question: str, answer: str, embedding: list[float], tenant_id: str = "") -> None:
@@ -95,8 +99,19 @@ async def _cache_write(pool, question: str, answer: str, embedding: list[float],
 
 
 def cache_store(pool, question: str, answer: str, embedding: list[float], tenant_id: str = "") -> None:
-    """非阻塞写入；失败静默（缓存是优化不是正确性依赖）。"""
+    """非阻塞写入；失败静默（缓存是优化不是正确性依赖）。
+
+    空租户跳过写入并独立计数 + WARNING（T1.1 / D17，plan §9.11-②）：与
+    "写入失败静默"区分，防止 ``tenant_id=''`` 行入库成为读不到的死行。断言
+    必须留在同步入口（spawn_background 之前）——下沉到 _cache_write 会被
+    _guarded 吞掉且发生在后台任务里，测试测不到。
+    """
+    global _skipped_no_tenant
     if pool is None or not answer:
+        return
+    if not tenant_id:
+        _skipped_no_tenant += 1
+        logger.warning("语义缓存写入跳过：tenant_id 为空（T1.1 fail-closed，防跨租户污染）")
         return
 
     async def _guarded():
