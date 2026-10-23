@@ -63,7 +63,9 @@ class TestRecallScopeFilter:
                 "retrieval_top_k": 10,
             }
         )
-        assert captured["filters"] == (("tenant_id", "t1"), ("workspace_id", "w1"), ("datasource_id", "dw"))
+        # D8 摘键（006，2026-10-23）：workspace 摘出召回过滤——元知识全企业共享
+        assert captured["filters"] == (("tenant_id", "t1"), ("datasource_id", "dw"))
+        assert ("workspace_id", "w1") not in captured["filters"]
 
     async def test_recall_relation_passes_scope_to_meta(self):
         from unittest.mock import AsyncMock, MagicMock
