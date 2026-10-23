@@ -49,3 +49,35 @@ def test_documented_launch_target_resolves():
     from uvicorn.importer import import_from_string
 
     assert import_from_string("kefu_agent.__main__:app") is app
+
+class TestTenantAssertionT22:
+    """T2.2/G6：租户来源收口到 server_tenant_id()——body 自报值仅作比对（软模式）。"""
+
+    def test_body_tenant_mismatch_warns_and_uses_asserted(self, caplog):
+        """body 自报 spoofed 租户 ⇒ WARNING（含 body/asserted 双值），数据落断言租户。"""
+        import logging
+
+        client = TestClient(app)
+        with caplog.at_level(logging.WARNING):
+            r = client.post(
+                "/invoke",
+                json={"query": "你好", "tenant_id": "spoofed", "session_id": "s1"},
+            )
+        assert r.status_code == 200, r.text
+        warned = [rec for rec in caplog.records if "与服务端断言不一致" in rec.message]
+        assert warned, "body 与断言不一致必须留 WARNING（软模式观测面）"
+        assert "spoofed" in warned[0].getMessage()
+        assert "default" in warned[0].getMessage()
+
+    def test_body_tenant_absent_no_warning(self, caplog):
+        """body 未自报租户（正常情况）不刷 WARNING。"""
+        import logging
+
+        client = TestClient(app)
+        with caplog.at_level(logging.WARNING):
+            r = client.post(
+                "/invoke",
+                json={"query": "你好", "session_id": "s2"},
+            )
+        assert r.status_code == 200, r.text
+        assert not any("与服务端断言不一致" in rec.message for rec in caplog.records)

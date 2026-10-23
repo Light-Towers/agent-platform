@@ -25,6 +25,7 @@ import time
 from agent_core.guardrails.app_factory import build_api_app
 from agent_core.tracing import init_tracing
 from agent_runtime.identity_assembly import mount_identity_gate
+from agent_runtime.workspace_registry import server_tenant_id
 from langgraph.checkpoint.memory import InMemorySaver
 from shared_schemas import QueryRequest, QueryResponse
 from shared_schemas.query import QueryData
@@ -42,8 +43,9 @@ init_tracing(service_name="kefu-service")
 
 app = build_api_app(title="kefu-service", version="0.1.0")
 
-# 身份门卫装配点（roadmap 阶段2 #11）：此前本服务**零门卫**，租户纯自报
-# （``req.tenant_id or "default"``，见 ``_run_kefu``），启用强制隔离后即可被自报身份绕过。
+# 身份门卫装配点（roadmap 阶段2 #11）：此前本服务**零门卫**，租户纯自报，
+# 启用强制隔离后即可被自报身份绕过。T2.2/G6 后 ``_run_kefu`` 取值已收口到
+# ``server_tenant_id()``（见其内注释），本门卫提供 ContextVar 断言源。
 # 默认 observe 档：无凭据 ⇒ 交下游既有逻辑，响应逐字不变；翻 enforce 由 env
 # ``TENANT_JWT_ENFORCE=true``（运维动作，不改代码，回退＝撤 env）。
 mount_identity_gate(app, "kefu-service")
@@ -70,7 +72,16 @@ async def _run_kefu(req: QueryRequest) -> QueryResponse:
     """统一核心：QueryRequest → QueryResponse（U-1 契约统一）。"""
     t0 = time.perf_counter()
     session_id = req.session_id or "default"
-    tenant_id = req.tenant_id or "default"
+    # T2.2/G6：租户取服务端断言（IdentityMiddleware 采信后写 ContextVar，
+    # server_tenant_id 读取；未采信时回落 "default"），body 自报值仅作比对——
+    # 显式携带且不符记 WARNING（与 agent_server T2.1 同款软模式，403 属契约层）。
+    tenant_id = server_tenant_id("default")
+    if req.tenant_id and req.tenant_id != tenant_id:
+        logger.warning(
+            "body tenant_id 与服务端断言不一致，以断言为准（body=%r asserted=%r）",
+            req.tenant_id,
+            tenant_id,
+        )
 
     config = {"configurable": {"thread_id": session_id, "tenant_id": tenant_id}}
     initial_state: KefuState = {
