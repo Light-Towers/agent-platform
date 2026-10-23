@@ -473,3 +473,30 @@ list_* 7 处 WHERE、find_* 2 处、upsert_table_stats 的 ON CONFLICT、recall 
 - **拍板三（TTL/精度）**：`d6d3014`——ProbeCache 过期判定 `>`→`>=`（到期即过期，与预算超限的严格大于偏好不冲突）；prompt 缓存测试改真实 stat 身份回填（NTFS ns 取整平台失败）。nl2sql 由 187+2 红转 190 全绿。
 - **拍板一（006 摘键，选 A）**：§9.14 细化随批落档（R-3/R-4 闭合）；`311fd6b` 施工——范围修正 **8→7 处**（session_state 是会话数据非元知识，保留三元组隔离，防与 D7/conversations 撞车）；前置查重 DO 块（有重复即中止不许自选留存）+ 7 处换键（005 列集判等配方）+ 空 down 登记；代码侧读谓词全摘/签名不动/`_upsert` 补 workspace_id 进 insert_cols（键外非 updatable ⇒ 首灌来源不覆盖）；4 recall 节点 filters 摘 workspace；fake 升级忠实 `DO UPDATE SET` 语义；新增 D8 正证用例。`3a1cb4d` 根套件 scope 期望同步。**线上真库执行与 requires_pg 判据待环境待授权**（§9.10），当前窗口价值已锁定为"SQL+代码+单测备妥，环境一通即上线"。
 - 统一核验：根 1314 / nl2sql 190 / ruff / lint_architecture / check_doc_sync 全绿。
+
+### 9.15 第四轮执行（T2.3 关闭判定 + T2.5 前半审计 + G16 清理，2026-10-23，分支 `feat/nl2sql-ttl-and-006-slim`）
+
+**① T2.3 正式关闭**（此前标"⏸ 待 D1 改写"，经核对四个子项全部有着落）：
+| 子项 | 落点 |
+|---|---|
+| meta DDL（013 加列） | **作废**（§9.2 G4 更正：001 已存在）+ 被 **006 反向动作**取代（摘键，D8）✅ |
+| 三路召回 + CRUD 谓词 | 006 完成（保留 tenant 两列过滤，摘 workspace）✅ |
+| 契约消费来源 body→断言 | `query_service.py:59-68` 的 `resolve_scope` 三级优先级（**服务端断言 > 请求体 > default**，`tenant_scope.py:10-14` 注释明示）+ T2.4 出站签名头补完链路 ✅；`query_router.py:26` 传 body 值但被 resolve_scope 断言覆盖，属 observe 档知情降级（#102/#103 既定设计），mismatch WARNING 属 T2.5 域统一件非关闭条件 |
+| 验收判据 | tenantA 元知识 tenantB 召回=0：由保留的 tenant 谓词保证（requires_pg 级待环境实测）；漏传 fail-fast：enforce 档已实现（`_TENANT_UNSET` 触发）✅ |
+
+**② T2.5 前半（仓外调用方审计）结论：D20 翻 403 零破坏**。
+agent_server `/query` 的"携带 tenant_id/user_id 且与断言不符 ⇒ 403"规则，实跑审计全部直接调用方：
+- `console.html`：不传身份字段（grep 零命中）→ 不断；
+- `deploy/observability/langfuse_proof.py:107`：body 仅 query+session_id → 不断；
+- `scripts/audit_tenant_access.py`：直连 DB 不走 HTTP → 不受影响；
+- 仓内传播链（联邦→kefu `/invoke`、agent_server→nl2sql `/api/query`）：全为软模式（WARNING）+ T2.4 签名头，且 kefu/nl2sql 的 403 硬拒不在本批 D20 范围；
+- exhibition `/api/query` 的 `self_reported_tenant_id`（server.py:140）是 ExecutionContext 另一套显式设计（X-Execution-Context 头），非 D20 射程。
+⇒ **T2.5 的上线前置（先审仓外调用方）已满足**，403 硬拒可随契约批实施。审计基线 rev `b5fb61a`。
+
+**③ G16 死代码清理完成**（判据达成：代码引用零命中）：
+- 删 `monitor.py` 的 `build_thread_id` + `extract_thread_id_from_scope`（docstring/`__all__`/`Any` import 同步）；
+- `migrate_thread_identity.py:18` 与 runbook `:56` 的**判定逻辑保留**（数据面该形态仍可能出现，进人工核实名单），仅来源说明改为"该符号已于 2026-10-23 G16 删除"；
+- 遗留命中均为历史性说明文本（monitor docstring 清理备注、plan 登记、脚本/Runbook 来源行），符合判据"代码引用零命中"。
+- 验证：联邦全量 179 passed；`test_thread_identity_migration.py` 49 passed；ruff clean。
+
+**④ 下一步**：013/014a/015 迁移施工（T3 域，按 §9.14-⑤ 时序：014b 等待 T4 后半 A5 claim 绑定）。

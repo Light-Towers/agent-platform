@@ -53,7 +53,7 @@ kubectl -n agent-platform exec deploy/postgres -- psql -U agent -d agent_platfor
 |---|---|---|
 | 三表均 `0` | 无需迁移窗口 | 在 `docs/TODO.md` §8 把该项转 `[x]`，注明取证时刻 |
 | 命中且形态为 `user-<12hex>` / `user-<32hex>` | 凭据摘要形态 ⇒ 待重挂 | 把命中的 `thread_id` 逐个作为 `--source` 传给脚本，按其打印的 `UPDATE` 人工执行（脚本刻意**不代执行**写操作） |
-| 命中但形如 `user-x` / `user-<uid>-session-<sid>` | **非**摘要形态（dev 自填 / `monitor.build_thread_id()` 兼容符号） | 进"人工核实名单"，**不动**（迁移脚本对这类一律不改） |
+| 命中但形如 `user-x` / `user-<uid>-session-<sid>` | **非**摘要形态（dev 自填 / 历史兼容符号，该符号已于 2026-10-23 G16 删除） | 进"人工核实名单"，**不动**（迁移脚本对这类一律不改） |
 
 目录侧补充（federation 上传会话目录，`session_<thread_id>`）：
 
