@@ -467,3 +467,9 @@ list_* 7 处 WHERE、find_* 2 处、upsert_table_stats 的 ON CONFLICT、recall 
 **⑤ R-4（014b 时序）**：§9.5 的 014 拆两行——**014a**（T3）：workspaces 改 PK + owner 列 + conversations 加列；**014b**（T4 后半）：`conversations.user_id SET NOT NULL`，前置 = A5 JWT claim 绑定落地 + 全写入点 user 可得性探测用例通过（挂 requires_pg）。否则 T3 末尾施工 014 会因取不到 user 值写炸或造哨兵债（9.7-① 禁令）。
 
 **⑥ 执行登记**：006 于 2026-10-23 在分支 `feat/nl2sql-ttl-and-006-slim` 施工（用户拍板一选 A：零冲突窗口内做）。线上真库执行与 requires_pg 判据按 §9.8.1/§9.10 待环境待授权。
+
+**拍板执行追加（2026-10-23 晚，用户三项批示均按建议执行）**：
+- **拍板二（合入）**：首批 8 提交已 fast-forward 合入 `feat/nl2sql-meta-build-recovery`，短命分支已删。
+- **拍板三（TTL/精度）**：`d6d3014`——ProbeCache 过期判定 `>`→`>=`（到期即过期，与预算超限的严格大于偏好不冲突）；prompt 缓存测试改真实 stat 身份回填（NTFS ns 取整平台失败）。nl2sql 由 187+2 红转 190 全绿。
+- **拍板一（006 摘键，选 A）**：§9.14 细化随批落档（R-3/R-4 闭合）；`311fd6b` 施工——范围修正 **8→7 处**（session_state 是会话数据非元知识，保留三元组隔离，防与 D7/conversations 撞车）；前置查重 DO 块（有重复即中止不许自选留存）+ 7 处换键（005 列集判等配方）+ 空 down 登记；代码侧读谓词全摘/签名不动/`_upsert` 补 workspace_id 进 insert_cols（键外非 updatable ⇒ 首灌来源不覆盖）；4 recall 节点 filters 摘 workspace；fake 升级忠实 `DO UPDATE SET` 语义；新增 D8 正证用例。`3a1cb4d` 根套件 scope 期望同步。**线上真库执行与 requires_pg 判据待环境待授权**（§9.10），当前窗口价值已锁定为"SQL+代码+单测备妥，环境一通即上线"。
+- 统一核验：根 1314 / nl2sql 190 / ruff / lint_architecture / check_doc_sync 全绿。
