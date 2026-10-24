@@ -156,18 +156,14 @@ async def vector_search(
 
     SQL: SELECT {cols} FROM {table} WHERE {where} ORDER BY embedding <=> %s LIMIT %s
 
-    安全：table/cols 经标识符白名单校验（仅含 [a-z0-9_]，列名逗号分隔），
+    安全：table/cols 经标识符白名单校验（`agent_core.sql.identifiers`，
+    2026-10-18 由本函数内联正则上收为单一来源，语义逐字节不变），
     拒绝任意字符串注入，避免误用导致的 SQL 注入式表名/列名。
     """
-    import re
+    from agent_core.sql.identifiers import validate_identifier, validate_identifier_list
 
-    _IDENT = re.compile(r"^[a-z_][a-z0-9_]*$")
-    if not _IDENT.match(table or ""):
-        raise ValueError(f"vector_search: 非法表名 {table!r}（仅允许 [a-z0-9_]）")
-    for _col in cols.split(","):
-        _col = _col.strip()
-        if not _col or not _IDENT.match(_col):
-            raise ValueError(f"vector_search: 非法列名 {cols!r}（仅允许 [a-z0-9_]，逗号分隔）")
+    validate_identifier(table, "vector_search 表名")
+    validate_identifier_list(cols, "vector_search 列清单")
     sql = (
         f"SELECT {cols} FROM {table} WHERE {where} "
         f"ORDER BY embedding <=> %s::vector LIMIT %s"

@@ -2,12 +2,14 @@
 
 - 原子回退（单事务）
 - 不删除历史 checkpoint（支持 redo）
-- 跨用户禁止
+- 跨用户/跨租户禁止（G3/T1.2：operator 与 thread 归属比对，FORBIDDEN）
 - 内存模式仅对存活会话有效
 """
 
 import logging
 import uuid
+
+from agent_core.guardrails.auth import THREAD_ID_PREFIX
 
 from agent_runtime.cache import spawn_background
 from agent_runtime.schemas import RevertResult
@@ -29,7 +31,25 @@ class RevertHandler:
         session_id: str,
         checkpoint_id: str,
     ) -> RevertResult:
-        """执行回退。"""
+        """执行回退。
+
+        归属断言（G3/T1.2）：``tenant-`` 前缀是**身份命名空间**（``tenant-<principal>``
+        整串，见 ``agent_core.guardrails.auth.resolve_thread_identity``），占用该
+        前缀却不属于 operator 的 thread 一律 FORBIDDEN——此前 operator 只进审计、
+        从不参与判定，``session_router`` 的 FORBIDDEN 分支是死码。无前缀的自定义
+        值（开发模式客户端自由命名）放行，与 ``/query`` 在开发模式信任客户端值
+        的语义一致。主防线在路由层 ``resolve_thread_id``（认证启用即归一化为
+        operator 自身线程），本断言为其纵深防御。
+        """
+        expected_thread = f"{THREAD_ID_PREFIX}{operator}"
+        if session_id.startswith(THREAD_ID_PREFIX) and session_id != expected_thread:
+            return RevertResult(
+                success=False,
+                session_id=session_id,
+                checkpoint_id=checkpoint_id,
+                context_summary="",
+                error="FORBIDDEN",
+            )
         source_checkpoint_id = ""
         try:
             # 定位目标 checkpoint

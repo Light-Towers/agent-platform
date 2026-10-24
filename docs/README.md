@@ -1,7 +1,7 @@
-# docs 索引 · 哪篇作数、哪篇只是历史
+﻿# docs 索引 · 哪篇作数、哪篇只是历史
 
 > 本文件由 2026-10-15 的文档治理生成：**未删除、未移动任何文档**，只做分层与状态登记。
-> 现状：`docs/` 141 个文件 / 约 2.6 MB；其中 `docs/plans/` 72 个文件 = 71 篇 md + 1 份配套盘点件 `p0-4-blind-except-inventory.txt`。71 篇 md 里 **29 篇文内有可辨状态行、42 篇没有**。
+> 现状：`docs/` 141 个文件 / 约 2.6 MB；其中 `docs/plans/` 72 个文件 = 71 篇 md + 1 份配套盘点件 `p0-4-blind-except-inventory.txt`。71 篇 md 里按 §6 的口径命令实测 **42 篇有可辨状态行、29 篇未命中**（名单见 §7；该口径有已知漏计，29 是上界）。
 
 ## 1. 三条判据（先读这个，别先翻目录）
 
@@ -20,10 +20,12 @@
 | `docs/adr/0005-execution-memory-kernel-contract.md` | 执行/记忆内核契约 | 5 ★ |
 | `docs/adr/0006-isolation-dimension-contract.md` | 隔离维度契约 | 5 ★ |
 | `docs/adr/0007-server-asserted-tenant-identity.md` | 服务端断言租户 | 7 ★ |
+| `docs/adr/0008-auth-mode-selection.md`、`docs/adr/0009-vector-store-selection.md`、`docs/adr/0010-ui-stack-selection.md` | **roadmap #24 三项悬置选型的决策记录**（认证方式 / 两套向量存储 / 界面）。三篇状态都是**未决**：内含已决边界、选项代价、否决理由、重启条件，以及各一行「待用户回答」⇒ 引用时不得当作已定选型 | 0（2026-10-16 新建；由 `docs/plans/plan-production-delivery-roadmap-2026-10-09.md` #24 与 `docs/plans/plan-unfinished-completion-schedule-2026-10-16.md` §13 指向） |
 | `docs/operations/testing-playbook.md` | 分层验证与实跑配方 | 29 ★ |
 | `docs/operations/env-126-inventory.md` | 内网三机部署态基线（读数绑 rev） | 14 ★ |
 | `docs/operations/minimal-release-runbook.md` | 上台手册（含「这是多 agent 吗」标准答法 §11） | 11 ★ |
 | `docs/operations/observability-pitfalls.md` | 观测面坑档 | 5 ★ |
+| `docs/operations/unconfirmed-items.md` | **无法确认清单**（活文档）：本窗口所有"我试了但证不了"的事按 待环境 / 待放行 / 待拍板 / 口径未定 / 他人负责 / 已撤回断言 六类集中，每条自带**解锁动作**与"证不了的原因"。规则：任何一条都不许被引成"已验证"；确认后改状态不删行 | 2（2026-10-16 新建；由台账 §30 与 CHANGELOG 未发布窗口节指向） |
 | `docs/operations/demo-questions.md` | 演示问答口径 | 5 |
 | `docs/plans/plan-f-single-runtime-multi-planner.md` | Plan-F 演进总纲（AGENTS.md 顶部指向） | 13 ★ |
 | `docs/plans/production-delivery-anchor-map-2026-10-09.md` | 交付锚点取证（带日期但被活文档点名，见 §4 注） | 7 ★ |
@@ -39,6 +41,9 @@
 ## 3. `docs/plans/` 71 篇 md 分层（按主题簇）
 
 「自述状态」= 文内状态行摘录；「未标」= 文内没有可辨状态行，**需读正文才能定**。提及数为全仓入库文件中该文件名的出现次数（含 CHANGELOG 历史条目与自身提及），只作相对热度，不作"仍在用"的证据。
+
+> **2026-10-16 追记（本层新增 4 行，其余行未动）**：本节写就时是 71 篇，现值为**顶层 `docs/plans/*.md` 入库 75 篇 / 文件系统 76 篇**（差的 1 篇是并行会话新建、此刻尚未入库的 plan-deep-research-app-2026-10-16.md——**按 AGENTS.md「不入库路径不用反引号」的纪律这里写成普通文本**，且**本索引不代登**，由它自己的会话登记）。复取命令：`git ls-files docs/plans | grep -cE '^docs/plans/[^/]+\.md$'`。新登记的四篇：`plan-v3-unwired-landing-2026-10-15`、`plan-unfinished-completion-schedule-2026-10-16`、`plan-identity-gate-6of6-2026-10-16`、`plan-forensic-provenance-wiring-2026-10-16`。
+> **两条没有重取、不得当现值引**：① 顶部第 4 行的「42 篇有状态行 / 29 篇未命中」与 §7 名单仍是 2026-10-15 快照（上面四篇都**有**可辨状态行，但按 §6 口径命令未重跑）；② 四行的「提及」数在本批合入后会各自 +1 以上（新行本身就是新增引用），复现请用 `git grep -c -o -- "<文件名>" | awk -F: '{s+=$NF} END{print s}'` 现取。
 
 ### 3.1 安全与依赖整改（CodeQL / Dependabot / 风险接受）
 
@@ -63,6 +68,8 @@
 | `plan-v3-phase-3.4-awaitable-integration-2026-09-23.md` | 设计文档 + 实现中 | 09-23 | 0 |
 | `plan-v3-identity-merge-2026-10-01.md` | 已拍板并在执行中 | 10-01 | 2 |
 | `plan-production-delivery-roadmap-2026-10-09.md` | 未标（一期阶段 0–3；正文本轮有 2026-10-14 订正） | 10-09 | 4 |
+| `plan-v3-unwired-landing-2026-10-15.md` | **原批 5/5 + 续批 §6/§7 均已落地**（未部署；真 PG 并发双写与双实例故障转移判据仍「待环境」） | 10-15 | 12 |
+| `plan-unfinished-completion-schedule-2026-10-16.md` | **现行执行排期**（§0 截止日 / §2 排期 / §3 = 真待拍板 21 项 / §16 七条标准复取 / §25–§28 本批留档） | 10-16 | 22 ★ |
 
 ### 3.3 P0 / P1 / P2 缺陷与门禁整改
 
@@ -72,8 +79,8 @@
 | `plan-p0-4-blind-except-ratchet-2026-09-24.md` | M1 棘轮已落地 + **M2 策略修订**（2026-10-15 补现值复测段，本件角色=过程记录） | 09-24 | 12 |
 | `plan-p0-4-blind-except-real-reduction-2026-09-24.md` | ✅ 已批准（2026-09-24 逐站实地核查后修订）；2026-10-15 补「现行执行方案」状态行 | 09-24 | 7 |
 | `plan-p0-ha-tenant-fixes-2026-09-25.md` | 未标 | 09-25 | 2 |
-| `plan-p1-4-lightweight-schema-migrations-2026-09-24.md` | 未标 | 09-24 | 0 |
-| `plan-p1-6-dual-vector-store-2026-09-24.md` | 未标 | 09-24 | 0 |
+| `plan-p1-4-lightweight-schema-migrations-2026-09-24.md` | **已落地**（`753e5625`，25 个迁移文件 + `schema_migrations` 元表；CRLF 假阳性坑已记在文内） | 09-24 | 0 |
+| `plan-p1-6-dual-vector-store-2026-09-24.md` | **短期 C 已落地 / 长期 A 未评估**（验收 3 条：1 成、2 未做、3 存疑不翻勾） | 09-24 | 0 |
 | `plan-p2-unified-exception-handlers-2026-09-24.md` | 未标（AGENTS.md 以「P2 范例」引用其结论） | 09-24 | 4 ★ |
 | `p0-execution-retrospective-2026-09-24.md` | 未标（复盘件） | 09-24 | 3 |
 | `p2-bucket-b-reduction-findings-2026-09-24.md` | **已定案：桶 B 不做**（2026-10-15 补状态行，判据留档件，非待执行项） | 09-24 | 0 |
@@ -91,6 +98,7 @@
 | `plan-observability-target-model-2026-10-14.md` | 未标 | 10-14 | 3 |
 | `plan-tracing-shutdown-flush-timeout-2026-10-10.md` | 未标 | 10-10 | 4 |
 | `plan-tool-instrumentation-choke-point-2026-09-25.md` | ✅ 已落地（v3.1 定板 + 批 0/1…） | 09-25 | 3 |
+| `plan-forensic-provenance-wiring-2026-10-16.md` | **Proposed（待拍板，不授权编码）**：roadmap §四 第 6 条缺口的方案，含 Q1–Q5 五问；§1.1 记有一条实测——记录级取证在 PG 侧不落库 ⇒ 缺口是两层（字段填充 + 持久化读回） | 10-16 | 5 |
 
 ### 3.5 记忆 / 身份 / 隔离 / 租户
 
@@ -98,6 +106,7 @@
 |---|---|---|---|
 | `plan-memory-hardening-2026-09-27.md` | 未标（正文含"已落地"字样，T2–T8 需逐条对） | 10-02 | 9 ★ |
 | `plan-memory-identity-workspace-2026-10-14.md` | 未标（现状事实卡 + 五阶段方案，不动代码） | 10-14 | 3 ★ |
+| `plan-identity-gate-6of6-2026-10-16.md` | **实施方案（只覆盖可独立执行的一半）**：6/6 装配点 + P13 归属门禁已落地；fork 收敛与 enforce 现网取证显式转待拍板/待环境 | 10-16 | 6 |
 | `plan-memory-backend-stale-embed-signature-2026-10-10.md` | 未标 | 10-10 | 1 |
 | `plan-tenant-identity-2026-09-27.md` | 未标（正文含"待执行"字样） | 09-27 | 3 |
 | `plan-isolation-hardening-2026-09-27.md` | 未标 | 09-27 | 8 ★ |
@@ -127,7 +136,7 @@
 | `plan-structural-debt-cleanup.md` | 2026-09-22 制定并实施 | 09-23 | 1 |
 | `plan-duplicate-logic-inventory-2026-10-01.md` | 未标 | 10-01 | 1 |
 | `plan-e-dual-track-convergence.md` | P4.1~P4.3 全部实施完成 | 08-22 | 12 |
-| `plan-agentic-skill-convergence.md` | 未标 | 09-22 | 0 |
+| `plan-agentic-skill-convergence.md` | **已落地（契约层 3/3）**，但默认部署下该注册走 except 跳过——不得说成"agentic 现网可用" | 09-22 | 0 |
 | `skill-consolidation-inventory.md` | 未标（AGENTS.md 点名其为 Skill 收敛盘点） | 09-23 | 3 ★ |
 | `tool-mount-matrix-2026-09-25.md` | 未标 | 09-25 | 3 |
 
@@ -137,9 +146,9 @@
 |---|---|---|---|
 | `plan-m3-m5-logging-pool.md` | Approved with changes（M5）/ M3 已修订 | 08-22 | 2 |
 | `plan-m11-exception-classification.md` | Proposed | 08-22 | 1 |
-| `plan-tests-reorg.md` | Proposed | 08-22 | 0 |
-| `plan-fix-validate-config.md` | 未标 | 08-22 | 0 |
-| `plan-c2-audit-atomic-write-2026-09-23.md` | 未标 | 09-23 | 0 |
+| `plan-tests-reorg.md` | **已落地**（根 `tests/` 扁平文件实测 0、§二 十个子目录全在；`dialogue_framework/`+`wenda_data_agent/` 已不在 tests/ 下，去向未查） | 08-22 | 0 |
+| `plan-fix-validate-config.md` | **已落地**（`4b7bbb34`）；⚠️ **成因订正：是回归不是遗漏**——`c45e1354` 重构时删掉了定义与 `__all__` 导出 | 08-22 | 0 |
+| `plan-c2-audit-atomic-write-2026-09-23.md` | **已落地 5/5**（收敛到 `foundation/_audit_writer.py`，tmp+`os.replace`）；残差＝无 lint 防回潮 | 09-23 | 0 |
 | `plan-c2-cross-agreement-pivot-2026-09-29.md` | 未标 | 09-30 | 3 |
 | `plan-fix-f-s0-08-zhanggui-rename.md` | 已实施（2026-09-21） | 09-21 | 1 |
 | `plan-fix-f-s1-01-test-reverse-import.md` | 已实施（2026-09-21，方向 B 迁测试） | 09-21 | 1 |
@@ -174,6 +183,41 @@
 
 ## 6. 本轮没做的事
 
-- **未删除、未移动、未合并**任何文件（含 `docs/plans/` 零提及的 9 篇）。移动会改引用路径，`check_doc_sync.py` 只校验 AGENTS.md / ARCHITECTURE.md / README.md 三篇，它绿不代表其余 docs 的引用没断。
-- **「未标」不等于「已了结」**：上表 42 篇文内没有状态行，要补就得逐篇读正文并附依据，本轮未做。
+- **未移动、未删除任何文件**。2026-10-15 做过一次**内容合并**（合并 A：`runtime-analysis-overview.md` 的六块内容并入 `runtime-self-build-analysis.md`，源文件保留降级为寻址页）；`docs/plans/` 零提及的 9 篇一律保留。移动会改引用路径，`check_doc_sync.py` 只校验 AGENTS.md / ARCHITECTURE.md / README.md 三篇，它绿不代表其余 docs 的引用没断。
+- **「未标」不等于「已了结」**：判"有没有状态行"的口径 = `head -25 <文件> | grep -qE "状态[^。；]{0,14}[:：]"`，实测 **42 命中 / 29 未命中**（71 篇 md 中）。**2026-10-16 重测 = 82 篇 / 52 命中 / 30 未命中**（**这两次是手测，分母口径不稳**：71 → 82 的差来自有没有把 `docs/plans/README.md` 与嵌套目录算进去。同日已收敛为脚本口径，**现值 = 分母 76 / 命中 47 / 未命中 29 / 真待补 28**，判据与本节原文一致且把"排除 README"钉进代码：`uv run python scripts/evidence/recount_plan_status_lines.py`；（分母随新 plan 入库增长；§7 那份清单**依然成立**——原 29 篇仍全部缺状态行，新增的 1 篇是 `docs/plans/README.md`，属目录索引不是 plan，不计入待补工作面）。⚠️ 这个口径会漏掉「状态订正（2026-10-15 补）：」这类冒号前超过 14 字的写法，今天有两篇被它漏计（含 `p2-bucket-b-reduction-findings`），所以 **29 是上界不是精确值**；名单见 §7。
 - 本索引自身的状态列是**摘录**，不是我对每篇结论的重新核实。任何一篇的数字要拿去对外用，仍按原文件的取证口径复核。
+
+## 7. 待补状态行清单（②的剩余工作面，29 篇待补 ｜ 2026-10-16 复核：以下每一篇仍缺状态行）
+
+按 §6 命令实测 29 篇未命中，其中 `p2-bucket-b-reduction-findings-2026-09-24.md` 是口径漏计（它写的是「状态订正（2026-10-15 补）：」，冒号前 18 字超出 14 字窗口，实际**已补**）⇒ 真待补 28 篇。
+
+- `arch-audit-2026-09-24.md`
+- `dep-security-accepted-risks-2026-09-25.md`
+- `m5-semantic-cache-plan.md`
+- `p0-execution-retrospective-2026-09-24.md`
+- `plan-branch-disposition-2026-10-01.md`
+- `plan-codeql-codescanning-remediation-2026-10-01.md`
+- `plan-dependabot-21-alerts-closure-2026-09-30.md`
+- `plan-doc-sync-tracked-scope-2026-10-04.md`
+- `plan-duplicate-logic-inventory-2026-10-01.md`
+- `plan-isolation-hardening-2026-09-27.md`
+- `plan-langfuse-wiring-2026-10-13.md`
+- `plan-memory-backend-stale-embed-signature-2026-10-10.md`
+- `plan-memory-identity-workspace-2026-10-14.md`
+- `plan-observability-target-model-2026-10-14.md`
+- `plan-p0-1-scheduler-gating-option-b-2026-09-24.md`
+- `plan-p0-ha-tenant-fixes-2026-09-25.md`
+- `plan-p2-unified-exception-handlers-2026-09-24.md`
+- `plan-production-delivery-roadmap-2026-10-09.md`
+- `plan-query-tenant-from-client-not-server-asserted-2026-10-10.md`
+- `plan-review-findings-closeout-2026-10-04.md`
+- `plan-schema-drift-existing-db-gap-2026-10-10.md`
+- `plan-tech-debt-followup-2026-09-22.md`
+- `plan-tenant-identity-2026-09-27.md`
+- `plan-tracing-shutdown-flush-timeout-2026-10-10.md`
+- `production-delivery-anchor-map-2026-10-09.md`
+- `skill-consolidation-inventory.md`
+- `tech-debt-multi-agent-2026-09-23.md`
+- `tool-mount-matrix-2026-09-25.md`
+
+补法固定三步：读正文定它自述要干什么 → 对代码 / 对 `docs/TODO.md` 判做没做 → 只写一行「状态｜依据｜回写」，**不改原结论、不翻别人的复选框**。批 1（10-15 已提交）的收获可作参照：6 篇里 **5 篇其实早已落地**、1 篇短期方案落地长期未评估，另有 1 篇的**成因定性被证伪**（`plan-fix-validate-config.md`：不是"从未实现"，是重构静默摘除后次日以"缺失"名义补回）。

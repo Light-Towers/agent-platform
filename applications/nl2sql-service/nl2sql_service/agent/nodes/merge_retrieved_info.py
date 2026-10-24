@@ -1,4 +1,11 @@
-"""merge_retrieved_info 节点：RRF 融合多路召回结果。"""
+"""merge_retrieved_info 节点：RRF 融合多路召回结果 + 表清单派生。
+
+2026-10-18 审计（方案 P0-11③）：
+- `rrf_k` 此前硬编码 60，settings 里的 `rrf_k` 是死配置（方案 §5.16-7）；改读 state。
+- 库路径下 `state["tables"]` 此前恒空 ⇒ `filter_table` 空转、生成期没有表级视图。
+  列级召回本身带 `table_name`（`ColumnRepository.recall` 的 extra_cols），
+  这里按列去重派生表清单——不依赖尚不存在的 relations 表。
+"""
 
 import json
 from typing import Any
@@ -16,19 +23,53 @@ def _rrf_fuse(rankings: list[list[dict[str, Any]]], k: int = 60) -> list[dict[st
     return [items[key] for key in sorted_keys]
 
 
+def _derive_tables(columns: list[dict[str, Any]], relations: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
+    """从列召回结果按 table_name 去重派生表清单，并并入关系涉及的表。
+
+    §5.14-R3：关系涉及表的并集 = `filter_table` 的候选输入——空转节点接上
+    真管线；保序（列召回序在前，关系表按出现序附后）。
+
+    2026-10-18（A 方案 Stage ②）：表注释随列行冗余带回（§5.14-R2），同表
+    所有列行的 table_comment 相同，取首个非空——业务文档（sql_docs 迁入）
+    经此进生成期 prompt 的【表】块，否则 docs→comment 迁移是只写不读。
+    """
+    comments: dict[str, str] = {}
+    seen: list[str] = []
+    for col in columns:
+        if not isinstance(col, dict):
+            continue
+        name = col.get("table_name")
+        if name and name not in seen:
+            seen.append(name)
+        comment = col.get("table_comment") or ""
+        if name and comment and not comments.get(name):
+            comments[name] = comment
+    for rel in relations or []:
+        if not isinstance(rel, dict):
+            continue
+        for key in ("left_table", "right_table"):
+            name = rel.get(key)
+            if name and name not in seen:
+                seen.append(name)
+    return [{"table_name": name, "table_comment": comments.get(name, "")} for name in seen]
+
+
 async def merge_retrieved_info(state: dict[str, Any]) -> dict[str, Any]:
     columns = state.get("columns", [])
     metrics = state.get("metrics", [])
     values = state.get("values", [])
+    relations = state.get("relations", [])
 
-    fused = _rrf_fuse([columns, metrics, values], k=60)
-    retrieved_info = json.dumps(fused, ensure_ascii=False)
-    result: dict[str, Any] = {"retrieved_info": retrieved_info}
+    fused = _rrf_fuse([columns, metrics, values], k=state.get("rrf_k", 60))
+    result: dict[str, Any] = {"retrieved_info": json.dumps(fused, ensure_ascii=False)}
 
-    metric_config: dict[str, Any] | None = state.get("metric_config")
-    if metric_config is not None and not state.get("tables"):
-        tables = metric_config.get("tables", [])
+    if not state.get("tables"):
+        metric_config: dict[str, Any] | None = state.get("metric_config")
+        if metric_config is not None:
+            tables = list(metric_config.get("tables", []))
+        else:
+            tables = _derive_tables(columns, relations)
         if tables:
-            result["tables"] = list(tables)
+            result["tables"] = tables
 
     return result

@@ -1,8 +1,16 @@
 """Human Task / Approval（V3 补-1 应用层）。
 
-.. warning::
-   **STATUS: NOT WIRED** – 本模块有完整实现与单测，但 applications/ 层零调用。
-   属「设计就绪、待集成」状态，不得视为已上线能力。(P1-7 审计披露 2026-09-24)
+.. note::
+   **STATUS: WIRED（2026-10-15）** – 三段链一起接上了（缺任一段都等于没接）：
+   ① **创建**——`planner/protocol.py` 的 `__awaitable__` 分支按 `kind="human"` 走
+   `HumanTaskStore.create()`（复用既有挂起 seam，不新造第二套机制）；
+   ② **挂起态**——`ExecutionSuspended` 带 `kind`，`query_router` 据此写 `WAITING_HUMAN`
+   而非一律 `WAITING_EXTERNAL`（此前 `WAITING_HUMAN` 生产从不写入 ⇒
+   `resolve_and_resume` 的 resume 分支是**死代码**）；
+   ③ **审批面**——`applications/agent_server/api/human_task.py`（列待办 / 详情 / approve / reject）。
+   边界：`approver` 恒取**服务端断言主体**（同 `session_router.py` 的 `operator` 口径），
+   不接受请求体自报；真·逐审批人身份要等 ADR-0007 身份层实际启用。
+   （此前状态为 NOT WIRED，P1-7 审计披露 2026-09-24）
 
 V3-3 的 ``AwaitableTask`` 已支持 ``AwaitableKind.HUMAN``，``ExecutionStatus`` 已支持
 ``WAITING_HUMAN``。本模块是人工审批 / 介入的**应用层**：
@@ -87,8 +95,15 @@ class HumanTaskStore:
     def __init__(self, awaitable_store: AwaitableTaskStore) -> None:
         self._store = awaitable_store
 
-    async def create(self, task: HumanTask) -> AwaitableTask:
-        """创建人工审批任务（PENDING）。"""
+    async def create(
+        self, task: HumanTask, *, generation: int | None = None
+    ) -> AwaitableTask:
+        """创建人工审批任务（PENDING）。
+
+        ``generation`` = 调用方持有的 lease generation（V3 缺口 1 的 fencing 口径）：
+        人工任务的回执同样不该被 takeover 后的 zombie writer 覆盖，故与 EXTERNAL 路径
+        保持同一处置。None = 来源未知，不参与 fence。
+        """
         awaitable = AwaitableTask(
             execution_id=task.execution_id,
             step_id=task.step_id,
@@ -102,6 +117,7 @@ class HumanTaskStore:
                 "approver": task.approver,
                 "context": task.context,
             },
+            generation=generation,
         )
         await self._store.save(awaitable)
         task.task = awaitable

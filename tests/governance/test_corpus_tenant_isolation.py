@@ -1,10 +1,15 @@
 """隔离域加固行为测试（plan T9/T10，W1/W2）——不连真实 PG，fake psycopg 池可 CI。
 
 覆盖点（越权回归，ADR-0006 D1/D4）：
-- chunks / sql_* 读写谓词成对带 ``tenant_id``（workspace 归属不再单独承担隔离）；
+- chunks 读写谓词成对带 ``tenant_id``（workspace 归属不再单独承担隔离）；
 - tenant 漏传 fail-fast（复用 _tenant_gate 哨兵），绝不静默落 default 共享桶；
-- fetch_context 消除「空 workspace = 全库召回」旁路（tenant 谓词必经）；
 - workspaces 归属表：同 id 跨租户互不越权（register 命名空间化 + assert 拦截）。
+
+~~sql_*（fetch_context/store_*）的同类判据~~已随 agent_server/sql 退役
+（ADR-0011 §7，2026-10-18）移交 nl2sql-service：等价的租户隔离由
+`tests/governance/test_isolation_dimension_contract.py` +
+`tests/ha/test_tenant_isolation_real_pg.py` + nl2sql 的
+`services/tenant_scope.py` 判据承担（列/范例/取值三路召回恒带作用域谓词）。
 
 与既有 tests/governance/test_workspace_isolation.py（优化 G，workspace 单维）互补：
 本文件验证在其之上补齐的 tenant 安全边界。
@@ -172,45 +177,13 @@ async def test_retrieve_chunks_isolates_across_tenants():
 
 
 async def test_sql_fetch_context_always_scoped_by_tenant():
-    """fetch_context 消除空 workspace 全库旁路：tenant 谓词必经。"""
-    import agent_server.sql.schema_store as _ss
-    from agent_server.sql.schema_store import fetch_context
+    """（已退役，2026-10-18）sql_* 召回的 tenant 必经判据移交 nl2sql-service。
 
-    captured: list[tuple[str, tuple]] = []
-
-    async def _fake_vs(pool, table, cols, emb, k=1, where="", where_params=()):
-        captured.append((where, tuple(where_params or ())))
-        return []
-
-    orig = _ss.vector_search
-    _ss.vector_search = _fake_vs
-    try:
-        rec = _Recorder()
-        # 空 workspace：仍必须带 tenant 谓词（旧实现此处完全不过滤）
-        await fetch_context(rec, "问题", workspace_id="", tenant_id="tenantA")
-        assert captured, "fetch_context 应发起向量检索"
-        for where, params in captured:
-            assert "tenant_id" in where, f"sql_* 召回缺 tenant 谓词（全库旁路）: {where}"
-            assert "tenantA" in params
-    finally:
-        _ss.vector_search = orig
-
-
-async def test_sql_store_insert_requires_tenant():
-    from agent_server.sql.schema_store import store_ddl
-
-    rec = _Recorder()
-    with pytest.raises(ValueError, match="显式传入"):
-        await store_ddl(rec, "CREATE TABLE t(a int)", workspace_id="ws")
-
-
-async def test_sql_store_insert_carries_tenant():
-    from agent_server.sql.schema_store import store_example
-
-    rec = _Recorder()
-    await store_example(rec, "Q", "SELECT 1", workspace_id="wsA", tenant_id="tenantA")
-    inserts = [p for sql, p in rec.calls if "INSERT INTO sql_examples" in sql]
-    assert inserts and inserts[-1][0] == "tenantA", "列序首位应为 tenant_id"
+    原判据对象 `agent_server.sql.schema_store.fetch_context` 随 agent_server/sql
+    退役删除；等价隔离由 nl2sql 的 tenant_scope + 三路召回作用域过滤承担
+    （见模块 docstring 的移交说明与 tests/ha 真库判据）。保留壳以供追溯。
+    """
+    pytest.skip("agent_server/sql 已退役（ADR-0011 §7）；等价判据在 nl2sql 侧")
 
 
 # --- workspaces 归属表（T10 / D4 方案 A） -----------------------------------

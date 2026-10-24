@@ -181,14 +181,74 @@ async def test_mcp_query_exception():
 
 
 async def test_sql_query_basic():
-    """sql_query 返回格式化结果。"""
-    mock_pool = MagicMock()
-    mock_payload = {"sql": "SELECT 1", "rows": [{"a": 1}], "error": None}
+    """sql_query 改调 nl2sql /api/query 并格式化为证据（A 方案 Stage ③）。"""
+    resp_payload = {
+        "answer": "上月销售额 12345 元",
+        "sql": "SELECT SUM(amount) FROM orders",
+        "error": None,
+        "empty_result_reason": None,
+    }
 
-    with patch("agent_runtime.db.get_pool", return_value=mock_pool), \
-         patch("agent_server.subagents.sql_agent.text_to_sql", new_callable=AsyncMock, return_value=mock_payload), \
-         patch("agent_server.subagents.sql_agent.format_result", return_value="formatted result"):
+    class _Resp:
+        status_code = 200
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return resp_payload
+
+    class _Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def post(self, url, json=None, **kwargs):
+            assert url.endswith("/api/query"), f"应打 nl2sql /api/query，实际 {url}"
+            assert json["query"] == "test query"
+            return _Resp()
+
+    with patch("httpx.AsyncClient", return_value=_Client()), \
+         patch("agent_server.subagents.sql_agent.get_settings") as mock_settings:
+        mock_settings.return_value.nl2sql_service_url = "http://nl2sql:8000"
+        mock_settings.return_value.default_tenant_id = ""
         from agent_server.subagents.sql_agent import sql_query
 
         result = await sql_query("test query")
-    assert result == ["formatted result"]
+    assert result == ["执行的 SQL：SELECT SUM(amount) FROM orders\n上月销售额 12345 元"]
+
+
+async def test_sql_query_unconfigured_returns_explicit_notice():
+    """NL2SQL_SERVICE_URL 未配置：明确提示而非静默空结果（同 search.py 降级契约）。"""
+    with patch("agent_server.subagents.sql_agent.get_settings") as mock_settings:
+        mock_settings.return_value.nl2sql_service_url = ""
+        from agent_server.subagents.sql_agent import sql_query
+
+        result = await sql_query("test query")
+    assert result == ["问数服务未配置（NL2SQL_SERVICE_URL 为空）"]
+
+
+async def test_sql_query_http_error_is_classified():
+    """上游不可达：错误分类进证据，不把异常抛给图节点。"""
+    import httpx
+
+    class _Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def post(self, url, json=None, **kwargs):
+            raise httpx.ConnectError("connection refused")
+
+    with patch("httpx.AsyncClient", return_value=_Client()), \
+         patch("agent_server.subagents.sql_agent.get_settings") as mock_settings:
+        mock_settings.return_value.nl2sql_service_url = "http://nl2sql:8000"
+        mock_settings.return_value.default_tenant_id = ""
+        from agent_server.subagents.sql_agent import sql_query
+
+        result = await sql_query("test query")
+    assert "不可达" in result[0]

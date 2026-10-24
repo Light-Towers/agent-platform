@@ -2,7 +2,48 @@
 
 > 统一生产级 Agent 平台，本仓库为 **monorepo**（根 + `packages/` 3 个共享包 + `applications/` 6 个应用工程）。**分层契约、依赖图、各包子模块完整清单见 `ARCHITECTURE.md`（按需读取）**；人类阅读指南见 `README.md`。本文件面向 AI agent，仅列每轮必守的行为约束 + 定向信息。
 > **演进方向（Plan-F）**：双轨收敛为「单 Runtime + 多 Planner」（`agent-runtime/` 承载运行时中间件，Planner 策略可插拔，不统一 Agent 只统一 Runtime）。详见 `docs/plans/plan-f-single-runtime-multi-planner.md`。
-> **V3 企业执行平台**：Phase 2-4 + 3.4 代码已接线（主链路 `Admission → Scheduler submit → Planner → Execute → Forensic/CostGov`，`scheduler_enabled` 默认 False 渐进开启）；**端到端双实例物理故障转移验收未达，不得当作已上线能力声明**。未接线半成品（P1-7 标注）：human_task / execution_recovery / state_migration / payload_externalization / skill_router(exhibition)。架构真相源：`plan-enterprise-platform-skeleton-2026-09-23.md` + `plan-v3-execution-platform-final-architecture-2026-09-22.md` + `arch-audit-2026-09-24.md`（均在 `docs/plans/`）。
+> **V3 企业执行平台**：Phase 2-4 + 3.4 代码已接线（主链路 `Admission → Scheduler submit → Planner → Execute → Forensic/CostGov`，`scheduler_enabled` 默认 False 渐进开启）；**端到端双实例物理故障转移验收未达，不得当作已上线能力声明**。**原「未接线半成品（P1-7 标注）」五项已全部接线（human_task / execution_recovery / state_migration / payload_externalization 见 `agent_server/main.py` 装配点，`skill_router`(exhibition) 见 `graph/nodes.py:run_skill` 执行前门禁）⇒ 该标注已于 2026-10-16 按 roadmap #5 判据「全仓未接线标注归零」撤除；接线 ≠ 默认启用，逐项依据见 `docs/plans/plan-unfinished-completion-schedule-2026-10-16.md` §10**。架构真相源：`plan-enterprise-platform-skeleton-2026-09-23.md` + `plan-v3-execution-platform-final-architecture-2026-09-22.md` + `arch-audit-2026-09-24.md`（均在 `docs/plans/`）。
+
+## AI 开发范式（总纲）
+
+> 本节是总纲，回答"一个需求怎么从想法走到上线、AI 能自己决定到哪一步"。与下文《验证策略》《禁止行为》《分支卫生》《架构决策原则》冲突时，**以更严格者为准**；本节不替代它们。
+
+### 流程（九阶段，0–8）
+
+`0 受理分级 → 1 Spec → 2 Plan → 2.5 ADR(按需) → 3 Tasks → 4 实现(TBD) → 5 测试+评测 → 6 评审 → 7 发布 → 8 复盘`
+
+- **Spec / Plan / ADR / Tasks 不是一回事**：Spec=做什么/为什么/验收（问题空间）；Plan=怎么做（解空间）；ADR=为什么这么选、放弃什么（仅架构性/不可逆/有争议时写）；Tasks=可独立验证的工单。
+- **非 T0 改动先 Spec 后代码**；T0（文案/配置）走快速通道 `4→5→6→7`。
+- **按规模分级，不搞一刀切**：T0 0.5–2h · T1 0.5–1d · T2 2–4d · T3 1.5–3w · T4 4–8w。
+- **TBD 与小 PR**：分支短命（< 24h）、PR < 400 行、未完成功能用 flag 隐藏；分支模型细节以《分支卫生》为准。
+
+### 决策边界（D0–D3）
+
+| 级别 | 判据 | 谁定 |
+|---|---|---|
+| **D0** | 可逆 + 低影响 + 规则明确 | 可自动（AI/程序） |
+| **D1** | 可逆 + 中影响 | AI 提议，人批 |
+| **D2** | 难逆 + 大影响 | 人定，AI 给证据 |
+| **D3** | 不可逆 / 担责 | 禁止自动 |
+
+> AI 能自动决策"怎么做"（how），不能自动决策"要不要做 / 敢不敢发"（whether / commit）。目标不是"不出错"，而是"错得可逆、可发现、可追责"。
+
+### 测试与评测
+
+- 八种测试按"对象 / 风险 / 手段 / 时机"四维定位；**功能测"对不对（对需求）"，逻辑测"全不全（对路径）"**，两者不可互替。
+- 逻辑测试靠**变异杀死率**验证，覆盖率只是下限。
+- AI 输出评测四级：**E0 单元断言 → E1 黄金集（守回归）→ E2 基准（做选型）→ E3 线上**；**上线门禁用黄金集，不用公开基准**。
+- 门禁：G1(PR) LSP/typecheck + lint/SAST/SCA/secret + 单测/契约 → G2(合并) 集成/功能/变异/租户隔离/黄金集 → G3(发布) E2/红队/canary。详细版见 noctilucent-lamp `ai-dev-paradigm/agent-platform-dev-handbook.md` §3.4。
+
+### 错误闭环
+
+- 每个 bug → 回归测试；每个架构坑 → ADR；每个 prompt 失败 → 黄金集用例；每个事故 → runbook。
+- **禁止为过测试而改测试 / 硬编码 / 吞异常**（与《验证策略》红线同源：禁止删用例/收窄断言/放宽前置条件凑绿）。
+- 记录必须**可检索、自动注入、违反即红**；度量只看**同类错误重复率**。
+
+### 红线
+
+- 不跳过 Spec 直接大改；不自动合并高风险 PR；不用 AI 评审替代人；不追 6x/10x 数字；**不把"接线"当"启用"**。
 
 ## 目录结构
 
@@ -34,7 +75,7 @@ DATABASE_URL= uvicorn agent_server.main:app --port 8000  # 零依赖冒烟
 
 ## 验证策略（分层，避免每次跑全量 10 session）
 
-> `make test`（10 个 pytest session）是 **CI 门禁**，不是每次小改动的必跑项。按改动范围分层收敛，先 lint 快速拦截再决定是否跑测试。**完整实跑最佳操作（缺口盘点→最小依赖配方→环境盲区容器补跑→失败复跑定性）见 `docs/operations/testing-playbook.md`。**
+> `make test`（10 个 pytest session）是 **CI 门禁**，不是每次小改动的必跑项。按改动范围分层收敛，先 lint 快速拦截再决定是否跑测试。**完整实跑最佳操作（缺口盘点→最小依赖配方→环境盲区容器补跑→失败复跑定性）见 `docs/operations/testing-playbook.md`。一条完成陈述要怎么写才可核对（五个必填字段 + 三条禁令 + 完成强度分档 + 新门禁的非空转反证表）见 `docs/operations/evidence-format.md`（roadmap 阶段0 #2 的落地件）——本手册管"怎么跑"，那份管"怎么记"。**
 
 | 改动范围 | 验证步骤 |
 |---------|---------|
@@ -86,6 +127,18 @@ DATABASE_URL= uvicorn agent_server.main:app --port 8000  # 零依赖冒烟
 - **勿提交大二进制资产**：模型权重、数据集均未入库，需本地自备
 - **根测试/共享代码统一用 `agent_server.*`**：各应用子包已有独立 Python 包名（`knowledge_service` / `nl2sql_service` / `agent_server` 等），无遮蔽风险
 - **所有代码优化/重构必须先制定方案**：除非方案已敲定（有文档/issue 记录并经确认），**禁止直接动手改代码**；方案需包含目标、影响面、迁移策略、验收标准，并在文档/issue 中记录
+
+## 分支卫生（2026-10-20 立；实例：`docs/adr/0012-nl2sql-branch-consolidation.md` §42）
+
+> **分支数量不是健康指标，语义与生命周期才是。** 终态形态：远端恒 2 分支（`main` + 唯一集成分支）；工作分支短命（从集成分支切出 → PR 合回 → 本地/远端都删）；**合入 main 须用户显式批示**（用户规则）。五条纪律：
+
+1. **随清**：每个 PR 合入、每次分支比对结束后，当场删该死枝。死枝判据（任一条即中）：① 独有 commit = 0（内容全在集成分支）；② 内容经比对证实被全覆盖且无独有信息。删除用 `git branch -d`（自带"已合入"检查，删不动会拒绝）；仅当已有 ADR/文档登记的确证退役结论时才用 `-D`。
+2. **登记必须带复审触发条件**：任何"禁删 / 建议备份 / 保留待判"的登记，必须同时写清"出现什么证据就主动复审"；没有复审条件的登记不许写。反例：ADR-0012 §42 初版登记 `b4428bf`"禁删"未带条件 ⇒ 保守登记供成死枝两个月，靠手工逐用例比对才解锁（该用例的 7/7 覆盖证据已写回 ADR）。
+3. **月度体检**：每月跑 `git ls-remote --heads origin | wc -l`（远端 >2 报警）与 `git for-each-ref --format='%(refname:short)' refs/heads`（本地逐条查独有 commit 数，死枝 >1 当周处理）。死枝能躺两个月的根因不是策略失败，是没人定期看。
+4. **公开镜像只走 `publish` 模式，且必须先过门禁**：`github-legacy` 是公开脱敏镜像（见 `README.md` 顶部 `public-mirror-notice`），内网分支携带真实网段/主机名属正常工作产物，公开镜像一条都不许带。两种模式是前提决定的，不是两种口味：`uv run python scripts/lint_public_mirror.py`（registry 模式，进 `make lint`，登记制 + 失效分流，内网分支因此**不会永远红**——否则它会被人关掉）；`uv run python scripts/lint_public_mirror.py --mode publish --base <公开基线 sha> --ref <待推 ref>`（零容忍，只看"这次新公开了什么"，登记台账在此不生效）。推镜像前必须 publish 模式 rc=0；`--mask-plan` 给出占位符替换建议，词形沿用 `<internal-ip>` / `<internal-host>` / `<internal-gitlab>`。镜像与内网仓因此**内容不完全一致**，被遮文件文首要留一条脱敏注记，免得后人拿占位符去现网复现。
+5. **镜像分支必须是"树已遮好"的单提交，不许"先推未遮内容、再补一个脱敏提交"**：公开镜像的历史一旦落上去就改不回来，中间提交本身就是泄漏，跟 HEAD 干不干净无关。正确形状 = 在公开基线上一次成型（`git checkout -B mirror/<名> <公开基线>` → `git checkout <内网 tip> -- .` → 就地遮被检出的文件 → 一次 `git commit`），推之前用 publish 模式对**该分支的树**实测。镜像分支不住在"恒 2 分支"那条计数里（它是公开侧载体，与集成分支不同维度），但不累积 `mirror/*` 第二条：已推过之后新一批优先在既有分支上**追加**树已遮好的提交；若必须原地重建，那是改写公开历史（force-push），属用户拍板项，不许自作主张。
+
+**备份 ref 同理**：不会本地留的东西不推远端；防"比对漏看"靠文档里的文字结论（未来者可复核），不靠匿名 `backup/` ref——后者救不了漏看，只会制造新的死枝疑问。
 
 ## 架构决策原则（横切关注点全局优先）
 

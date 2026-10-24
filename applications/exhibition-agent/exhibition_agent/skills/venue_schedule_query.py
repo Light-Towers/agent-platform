@@ -32,7 +32,6 @@ from exhibition_agent.skills.base_skill import BaseSkill, SkillContext, SkillRes
 
 logger = get_logger(__name__)
 
-_REST_PATH = "/api/venue-schedule"
 _SOURCE_TABLE = "t_venue_schedule"
 
 _PENDING_LEVELS: frozenset[str] = frozenset({"pending", "sparse_sample", "incomplete"})
@@ -50,8 +49,16 @@ def _pending_result(code: str, message: str) -> SkillResult:
 
 
 def _map_readiness(level: str | None) -> Readiness:
-    """warehouse REST data_readiness.level → 平台侧 Readiness 枚举。"""
-    if level is None or level == "complete":
+    """warehouse REST data_readiness.level → 平台侧 Readiness 枚举。
+
+    fail-closed（roadmap 阶段1 #10）：**缺标注（None）与未知 level 一律判
+    UNCONFIRMED（待确认）**，不再默认 READY。此前两处都会落到 READY——
+    ①`level is None`，②函数末尾的兜底 return——等于把「业务系统没标注可信度」
+    当成「数据完整可信」，合成样本可能被当成经营结论输出。
+    """
+    if level is None:
+        return Readiness.UNCONFIRMED
+    if level == "complete":
         return Readiness.READY
     if level in _PENDING_LEVELS:
         return Readiness.NOT_CONNECTED
@@ -59,7 +66,8 @@ def _map_readiness(level: str | None) -> Readiness:
         return Readiness.SYNTHETIC
     if level == "partial":
         return Readiness.PARTIAL
-    return Readiness.READY
+    # 未知 level：不猜它是可信的，按待确认处理（未知即需人工确认）
+    return Readiness.UNCONFIRMED
 
 
 class VenueScheduleQuerySkill(BaseSkill):
@@ -71,9 +79,22 @@ class VenueScheduleQuerySkill(BaseSkill):
     async def run(self, params: dict[str, Any], ctx: SkillContext) -> SkillResult:
         ec = ctx.execution_context
         query_params = self._build_query_params(params)
+        # 端点来自 Skill Router（tool_catalog.json 是唯一真相源），不再用本模块的硬编码常量。
+        # 缺失即 fail-closed：未经路由不得直连 warehouse，也**不退回**硬编码路径——
+        # 兜底会让门禁变成可绕过的建议（直接调 skill.run 即可跳过整条门禁链）。
+        rest_path = (ctx.routed_endpoint or {}).get("path")
+        if not rest_path:
+            logger.warning(
+                "skill=%s 无 routed_endpoint（未经 Skill Router 路由）→ 拒绝直连 warehouse",
+                self.name,
+            )
+            return _pending_result(
+                "DATA_NOT_CONNECTED",
+                "skill 未经 Skill Router 路由，拒绝直连 warehouse",
+            )
         try:
             data = await ctx.warehouse_client.get_rest(
-                _REST_PATH,
+                rest_path,
                 params=query_params,
                 execution_context_header=ctx.execution_context_header,
                 request_id=ec.request_id,
@@ -164,6 +185,14 @@ class VenueScheduleQuerySkill(BaseSkill):
             warnings.append("合成数据，仅供链路演示，非真实经营结论")
         if readiness == Readiness.PARTIAL:
             warnings.append("部分数据为稀疏/样本，结论仅供参考")
+        if readiness == Readiness.UNCONFIRMED:
+            # roadmap #10 判据：无标注响应的输出必须显示「待确认」，不得按可信输出
+            logger.warning(
+                "数据可信度未标注：skill=%s level=%r → 判 UNCONFIRMED（待确认），不默认 READY",
+                self.name,
+                readiness_level,
+            )
+            warnings.append("数据可信度待确认：该接口未标注 data_readiness，结论不作经营依据")
 
         return SkillResult(
             answer=self._format_answer(data, citations),

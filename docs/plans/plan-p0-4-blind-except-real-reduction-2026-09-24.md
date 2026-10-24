@@ -5,6 +5,8 @@
 > 状态：**✅ 已批准（2026-09-24，经用户逐站实地核查后修订）——本轮执行范围 = 桶 A（只做安全窄化）**；桶 B 不做（删后丢 session_id 可观测性、收益边际）；桶 C 维持基线豁免。下表已修正初稿的 **1 处 P0 定性错误（`import_exhibition_corpus.py:217` 误判为文件读）+ 2 处行号/依据错误（`node_pdf_to_md` 156/239 对调、:134 漏计显式 `raise RuntimeError`）**。
 >
 > **状态（2026-10-15 补写）**：本文件是 P0-4 降量的**现行执行方案**（三桶规则）。链条与去处——M1 棘轮与 M2 放弃逐点 noqa 的经过记在 `plan-p0-4-blind-except-ratchet-2026-09-24.md`，桶 B 的定案（"可安全删点趋近 0，不为降指标动手"）记在 `p2-bucket-b-reduction-findings-2026-09-24.md`，待办挂在 `docs/TODO.md` D7（未核销）。**桶 A 是否已全部落进代码，本行不作结论**（需按 §3 站点逐个核对）；仓库级现值 = `ruff --isolated --select BLE001,S110` 复测 **263 处 / 100 文件**，较 M1 基线 262/103 **净量未降**（构成变了：BLE001 −7、S110 +8）。
+>
+> **状态（2026-10-16 逐站点核对完成，取代上行「不作结论」那一句）**：**桶 A 已 8/8 全部落进代码**（行号按实读定位，非沿用 §3 旧行号）——`clients/milvus_utils.py:68` = `(ValueError, TypeError)`、`node_pdf_to_md.py:134` = `(requests.RequestException, RuntimeError)`、`:156` = `requests.RequestException`、`:239` = `OSError`、`:339` = `(OSError, UnicodeDecodeError)`、`benchmark/locustfile.py:46` = `(OSError, ValueError)`、`tests/unit/test_tracing.py:35/41` 与 `tests/unit/test_security_guards.py:47` = `ImportError`。基线处置符合 §4：`locustfile`/`node_pdf_to_md`/`test_tracing` 已清零并移出 `per-file-ignores`；`milvus_utils.py`、`test_security_guards.py` **保留条目是正确的**（各自仍有桶 C 承重点 `milvus_utils.py:29/49/...`、`test_security_guards.py:141`）。**但 §5 硬判据「源码 grep `noqa: BLE001` = 0」实测未达**：`git grep 'noqa: BLE001' -- '*.py'` = **37 处**（集中于 `knowledge-service/eval/*.py` 与 `applications/agent_server/main.py:131`，多数带「诚实标注/批次降级」理由注释）。⇒ D7 **不因桶 A 完成而闭合**；残余定性排期见 `plan-unfinished-completion-schedule-2026-10-16.md` §2（10/18 行：逐处判「M2 已放弃的逐点 noqa ⇒ 迁入整包基线」vs「桶 C 承重点 ⇒ 保留」）。
 
 ## 1. 目标
 
@@ -63,6 +65,11 @@
 - **正确性优先**：桶 A 每处窄化后 `pytest applications/knowledge-service`（含节点/检索/导入相关用例）全绿；窄化类型集合必须真覆盖 try 体抛出，禁止为「凑删基线」收窄到漏抛。
 - **降量自证**：处理完对已完全脱离基线的文件，`ruff check applications/knowledge-service --config 'lint.per-file-ignores={}'` 报出的残留站点数 = 仍留在基线的桶 C 站点数（单调递减，可核对）。
 - **门禁常驻**：`ruff check .` 全绿；源码 `grep 'noqa: BLE001'` = **0**（延续 M1-only 原则）。
+  - ⚠️ **2026-10-16 复核：本条判据自身有缺陷，建议修订而非达标**。实测两种豁免的**防护强度不同**：
+    - 在「只有逐点 noqa、未进 `per-file-ignores`」的文件里新加一个 `except Exception:` ⇒ `ruff --select BLE001` **报 `Found 1 error`**（棘轮仍然生效）；
+    - 同样一段代码放进「已列进 `per-file-ignores` 基线」的文件（探针用 `agent_core/tracing.py`）⇒ **`All checks passed!`**（整文件对新违规永久静默豁免）。
+    ⇒ 为把 `grep` 压到 0 而把逐点 noqa 迁进整包基线，等于**把 13 个文件从"行级精确豁免"降级为"全文件 blanket 豁免"，并丢掉每处的理由注释**（现 36 处**全部带理由**，如「单项审计检查隔离」「flush best-effort，最终以 query/canary 校验为准」）。这与本方案对桶 B 的定案「不为降指标动手」是同一判据。**建议改判据为**：① 每个 `noqa: BLE001` 必须带理由（可 grep `noqa: BLE001$` = 0 校验）；② 已入整包基线的文件不得再补逐点 noqa；③ 周期性重扫 **vestigial noqa**（捕获的已是具体异常类型、noqa 早已不适用）并删除。
+  - **本轮已按新判据做**：补齐 9 处无理由的 noqa ⇒ 裸标 0；删 1 处 vestigial（`identity.py:220` 捕获 `jwt.PyJWTError`，BLE001 本就不触发，经 stdin 探针证明去掉后仍 `All checks passed!`）⇒ **37 → 36，属真实降量而非迁移记账**。
 - **文档防漂移**：`check_doc_sync.py` 0 警告；plan/审计/D7 反映本轮实际降量（桶 A 已处置、桶 B 跳过、桶 C 仍豁免）。
 - **禁止**：删用例 / 放宽断言凑绿；为降量改变任何 happy-path 行为。
 

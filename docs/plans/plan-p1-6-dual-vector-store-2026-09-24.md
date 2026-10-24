@@ -3,6 +3,8 @@
 > **状态**：方案待审批（AGENTS.md 红线：先方案后编码）  
 > **创建**：2026-09-24  
 > **审计来源**：`arch-audit-2026-09-24.md` P1-6
+>
+> **状态订正（2026-10-15 复测）**：本行上方原写「方案待审批」已过期 —— §4 定的**短期 C 方案已落地**：`applications/agent_server/rag/store.py:86 delete_document`，`:93` 用 `DELETE FROM chunks WHERE tenant_id = %s AND doc_id = %s AND workspace_id = %s`（租户+工作空间双谓词）⇒ §5 验收第 1 条成立。**长期 A 未评估**（无实现痕迹）。§5 另两条验收我核到的现状：第 2 条（AGENTS/ARCHITECTURE 补向量存储边界说明）**未做**——`AGENTS.md` 里 Milvus/pgvector 同现的一处是框架选型句，不是边界说明；第 3 条只在 `packages/agent-core/agent_core/config.py:21` 有一行表格式「`VECTOR_BACKEND milvus 向量后端（milvus|pg）`」，是否算"何时用哪个"的说明存疑，我不翻这条勾。长期议题仍挂在 `docs/TODO.md:172`（未核销）。
 
 ---
 

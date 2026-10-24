@@ -9,18 +9,84 @@ llm:
   max_retries: 3
 
 embedding:
+  # 2026-10-18 实测：账户余额归零时硅基的**免费** ID `BAAI/bge-m3` 也报 402
+  # "balance insufficient"（免费聊天模型仍可用，勿误判成模型被收回）——充值后恢复。
+  # ⚠️ 模型策略（用户 2026-10-18 定）：只用免费模型；换付费 ID（如 Pro/BAAI/bge-m3）
+  # 须用户显式批准。根 .env 提供同键时以 .env 为准（test_settings_precedence）。
   backend: "langchain_openai"
-  model: "text-embedding-3-small"
-  vector_dim: 1536
+  model: "BAAI/bge-m3"
+  vector_dim: 1024
 
 retrieval:
   top_k: 10
   rrf_k: 60
+  # 向量召回相对截断（P0-5④）：与最佳分的差超过 margin 即截断；0 = 关闭
+  score_margin: 0.15
 
 sql:
   read_only_guard: true
   max_rows: 1000
   max_correct_retries: 3
+  # 进模型的结果体量上限（§5.11-V3 双上限）：与 max_rows（返回 UI）分开
+  max_rows_for_prompt: 100
+  prompt_max_bytes: 51200
+  # 候选表行数估值超过该值时，生成 prompt 追加"优先聚合"引导（估值来自 P0-3 漂移检测）
+  aggregation_row_threshold: 1000000
+
+# 连接池配额与语句超时（psycopg_pool；2026-10-18 起建池走共享件 agent_runtime.pool_factory，
+# 配额口径见方案 §5.12.2）
+# meta：检索 + CRUD 共用，毫秒级画像；dw：执行 LLM 生成的 SQL，OLAP 长查询画像
+pool:
+  meta:
+    min_size: 1
+    max_size: 20
+    timeout: 5.0
+    # 15s（#106，原 5s）：DDL 承诺 ANN 缺失时降级顺序扫描仍可工作；仍显著低于 dw 的
+    # 30s（meta 交互级 / dw OLAP 分层，test_pool_factory 钉死 dw > meta）
+    statement_timeout_ms: 15000
+  dw:
+    min_size: 1
+    max_size: 10
+    timeout: 10.0
+    statement_timeout_ms: 30000
 
 tokenizer:
   type: "bigram"
+
+# 数据源（P1-3/P1-4/P1-6）：问数只读消费方，源由用户在会话里显式选定。
+# 单源部署（一个 dw DSN）时描述默认源；dialect 留空按 dw DSN scheme 自动探测。
+datasource:
+  id: "dw"
+  label: ""            # 口径标签（P1-3②），随响应体返回，如"数仓 T+1、已清洗"
+  dialect: ""          # 空 = 按 dw_db_dsn scheme 探测；否则 postgres | mysql
+
+# 取值只读探针（P0-9/P1-2）：linkable 白名单 + 分区谓词策略。
+# dev 数仓是无分区 PG ⇒ partition_required=false（true 时取不到最新分区即不探，
+# 字面量全落 unknown）；生产 Doris 等分区库置 true 并配 partition_column。
+value_probe:
+  partition_required: false
+  linkable_columns: ["orders.status", "users.city"]
+
+# 负载隔离（P1-5/S-6）：应用侧并发闸 + 限流，全 0 = 关闭（Doris workload group
+# 管不到应用层这条）。max_concurrency 超限排队、acquire_timeout 超时拒绝。
+load_guard:
+  max_concurrency: 0
+  rate_limit_per_min: 0
+  acquire_timeout: 5.0
+
+# metric_config 入参守卫（S-2）：客户端注入的元知识必须过两道闸。
+# allowed_tables 非空 = 只允许这些表进 metric_config（空 = 不校验，向后兼容）；
+# max_items = 元知识条目总上限，防 prompt 被撑爆。
+metric_config_guard:
+  allowed_tables: []   # 例：["orders", "order_items", "users"]
+  max_items: 200
+
+# 数据权限（§5.9 L2/L3）。L1（账号 GRANT + 脱敏视图）在 DB 侧、应用不建 DDL，
+# 见 README；这里是应用侧两层：L2 guard 表/列白名单 + L3 结果层脱敏。
+# sensitive_columns 一份声明两处消费（L2 黑名单 + L3 脱敏），形如 "table.column"。
+data_permission:
+  sensitive_columns: []   # 例：["users.phone", "users.id_card"]
+  result_masking_enabled: true
+  mask_keep_chars: 1      # 掩码保留首尾各 N 字符；0 = 全掩码
+  admin_roles: ["admin"]  # 这些角色看全量，其余脱敏（最小权限默认）
+  default_query_role: "analyst"  # 服务端断言角色（未接身份门前的最小权限默认）

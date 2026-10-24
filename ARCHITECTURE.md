@@ -1,4 +1,4 @@
-# Agent Platform 架构总图（Monorepo 分层契约）
+﻿# Agent Platform 架构总图（Monorepo 分层契约）
 
 > 本文是仓库顶层的**架构契约（Architecture Contract）**，定义目录分层、依赖方向与不可逾越的红线。
 > 具体的两两边界调研见 `docs/architecture-boundary-*.md`，本文是它们的上位汇总，不重复细节。
@@ -115,18 +115,25 @@ agent-core  agent-runtime  shared-schemas  agent-server  agent_federation  exhib
 | P10 | 禁 `from tools.*` 直引 `@tool` 绕过 `get_tool()` | 同上（v3 合流并入） | — |
 | P11 | 根 `.github/workflows/*.yml` 必须声明顶层 `permissions:` 块 | `actions/missing-workflow-permissions`（GITHUB_TOKEN 未限权） | `tests/governance/test_workflow_permissions_governance.py` |
 | P12 | 绑 `Depends(verify_api_key)` 的形参**值不得作为任何 `Call` 的实参外流**（仅扫 `applications/**`，无白名单） | 凭据被当审计主体/日志字段（**CodeQL 未报**，人工语义审计发现） | `tests/governance/test_audit_operator_principal.py` |
+| P13 | 每个 `applications/*` 服务都必须有**身份门卫装配点**，且 `_IDENTITY_ASSEMBLY` 逐服务登记它用的是哪一套实现（`shared` / `fork:<模块>`） | 「6/6 覆盖」被悄悄换成"都装了个东西"；漏装 ⇒ 启用强制隔离后该服务仍可被自报身份绕过（roadmap #11） | `tests/governance/test_identity_gate_coverage.py` |
 | L-3 | 观测 init（`init_tracing`/`init_otel`）只能出现在装配点（`main`/`server`/过渡门面/eval 入口） | 业务模块私起第二个 tracer 状态机（R6 根因） | — |
 | L-1 | 禁手动 `.__enter__()`/`.__exit__()`，上下文管理器生命周期必须 `with` 配对 | 真 OTel 下 CM 跨任务拆分配对 → 500（R4/R8；NoOp 替身的 `__getattr__` 兜底会让关闭态隐形） | — |
 | L-2 | 禁经 `app.state` 散点取用 tracer（请求级 span 由 `TracingMiddleware` 创建，业务属性经 `agent_core.tracing` 取用） | 散点取用是「第二实现」的土壤（R8/R12） | — |
 | L-4 | OTel / langfuse 可选依赖必须显式声明 extras，且多处下界一致 | extras 版本解析回溯（R1/R2）；曾据此连续拦下两次依赖升级 PR | — |
+| L-5 | 每个 `applications/*` 服务都必须有**观测装配点**（`init_tracing`），存在性检查，与 L-3 的禁止性互补 | 漏装无人发现：L-3 只管「init 不许出现在装配点之外」，没有任何规则管「每个服务都必须有 init」（roadmap #12） | `tests/governance/test_observability_assembly_gate.py` |
 
 P11 只认顶层块：未声明 `permissions` 的 job 会回落到组织/仓库默认（常为读写），job 级声明易漏且不可核。背景与判定口径见 `docs/plans/plan-codeql-batch7-no-dismiss-real-fixes-2026-10-01.md` §7。
 
+P13 只断言**存在性与归属登记**，不断言门卫的语义正确性：它判的是“这个服务有没有装配点、用的是哪一套实现”；装配之后行为对不对，由 `packages/agent-runtime/tests/test_identity_assembly.py`（13 条）负责。⇒「P13 绿」不等于「六家用同一个门卫」，`_IDENTITY_ASSEMBLY` 里的 2 个 `fork:` 项就是在册未收敛的自带实现。
+
 P12 是**名匹配粗筛**，不得当作「凭据不入审计」的全局完备门禁：抓不到「先赋给别名/属性再传」的间接流，也抓不到 `return` 等其它外流形状；kernel 侧对凭据的处理归 P6。行为面由上表用例与人工语义审计补齐。背景见 `docs/plans/plan-audit-operator-principal-2026-10-03.md` §4.3。
 
-L 系列（观测架构与依赖契约）由 `docs/plans/plan-observability-global-remediation-2026-09-29.md` §3.3 立项，**无独立治理用例**——判据就是 lint 自身，`make lint` / CI 常驻覆盖。这与 P 系列「每条配一组门禁用例」的形态不同，不得拿「有用例」与「无用例」当作重要性排序。
+L 系列（观测架构与依赖契约）由 `docs/plans/plan-observability-global-remediation-2026-09-29.md` §3.3 立项，L-1/L-2/L-3/L-4 **无独立治理用例**——判据就是 lint 自身，`make lint` / CI 常驻覆盖。这与 P 系列「每条配一组门禁用例」的形态不同，不得拿「有用例」与「无用例」当作重要性排序。**L-5 是例外**（2026-10-16 起配 `tests/governance/test_observability_assembly_gate.py`）：存在性门禁的判据本身可能被「枚举失效」架空，所以必须有用例能把它判红。
 
-> **计数口径（2026-10-09 实取，三个数字为何不同）**：本表 **15 行**（P 系列 11 + L 系列 4，其中 P6-3 单列）；`scripts/lint_architecture.py` 的 `main()` 打印 **14 条**门禁编号（P6-3 并入 P6、P7 的两个函数共用一个 P7 编号打印）；实现函数 **16 个**（`check()` 承接 P4-2，另有 15 个 `check_*`）。⇒ **对外陈述门禁强度一律用「14 条」**；表行数与函数数是不同计数对象，不得被引成「门禁条数」。历史文档里出现过的「7 条」无任何来源支撑，已作废（本轮对账记录：`docs/plans/production-delivery-anchor-map-2026-10-09.md`）。
+> **计数口径（2026-10-16 重取并订正本段自身的错数；2026-10-09 首取）**：本表 **17 行**（P 系列 12 + L 系列 5，其中 P6-3 单列）；`scripts/lint_architecture.py` 的 `main()` 打印 **16 条**门禁编号（P6-3 并入 P6、P7 的两个函数共用一个 P7 编号打印）；脚本内实现函数 **18 个**（`check_*` **17 个** + 承接 P4-2 的 `check()` 1 个）。
+> **本句先前写的是「实现函数 17 个（`check()` + 另有 16 个 `check_*`）」，两个数都少 1**——是我这一轮加 L-5/P13 时只重取了行数与编号数、函数数按旧值顺手写的；2026-10-16 收口对账用 `^def check_` 与 `main()` 实跑输出重取（17 / 18 / 16）。⇒ **对外陈述门禁强度一律用「16 条」**；表行数与函数数是不同计数对象，不得被引成「门禁条数」。
+>
+> **这三个数会随规则增减一起动 ⇒「三处数字一致」不是一次性结论，而是每次加规则的必做收尾**：2026-10-16 连加 L-5（#12）与 P13（#11）后，本段与 `docs/architecture/agent-harness-capability-map.md`、`docs/project-introduction-2026-10-12.md`、`docs/plans/production-delivery-anchor-map-2026-10-09.md` 都要同步；`check_doc_sync.py` 只核**路径存在性**，核不出这类数字漂移。历史文档里出现过的「7 条」无任何来源支撑，已作废（本轮对账记录：`docs/plans/production-delivery-anchor-map-2026-10-09.md`）。
 
 ### 4.2 合入后复验脚本（判据 6 形态，必须可原样重跑）
 
@@ -136,6 +143,8 @@ L 系列（观测架构与依赖契约）由 `docs/plans/plan-observability-glob
 |------|------|--------------|
 | `scripts/evidence/verify_main_tip.py` | 判据 6 七项 `[A]`–`[G]` 全 fail-closed 复验；门禁预期集按 `on.push.paths` × changed paths **派生**（不硬编码） | 是（`gh api`） |
 | `scripts/evidence/normalize_dump.py` | PowerShell 重定向产物默认 UTF-16 LE ⇒ 按 BOM 嗅探转 UTF-8，防「肉眼正常而计数全 0」 | 否 |
+| `scripts/evidence/nl2sql_real_pg_probe.py` | nl2sql 元知识真库往返（迁移链幂等 + 作用域写入 + 发布顺序 42P10 判据，11 项）；本机 PG 由 `pgserver` wheel 提供（含 pgvector），配方见 testing-playbook §3.4 | 否（本机进程内 PG） |
+| `scripts/evidence/migration_gate_mutation_probe.py` | `scripts/lint_migration_refs.py` 的非空转反证：原样副本零违规 + 注入 B-1 错表名报红 + 摘掉 006 报红（只在 tempfile 副本上动） | 否 |
 | `scripts/evidence/README.md` | 收录判据、可直接复制的运行命令、三条实踩过坑 | — |
 | `tests/governance/test_evidence_scripts.py` | 钉住派生式预期集的纯逻辑不变量（含 `jobs:` 位于文件末尾、YAML 1.1 `on:`→布尔 `True` 键、PyYAML 缺席必 exit 2） | 否（autouse 拦断子进程） |
 

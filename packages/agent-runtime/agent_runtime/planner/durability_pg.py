@@ -66,10 +66,13 @@ class PgCheckpointStore(CheckpointStore):
         *,
         table: str = "execution_checkpoints",
         migrator: Any = None,
+        externalizer: Any = None,
     ) -> None:
         self._pool = pool
         self._table = table
         self._migrator = migrator
+        # V3-6 Layer B：大 payload 外部化（opt-in，None = 关闭 ⇒ 行为与接线前逐字一致）
+        self._externalizer = externalizer
 
     async def load(self, execution_id: str) -> Checkpoint | None:
         sql = (
@@ -89,6 +92,23 @@ class PgCheckpointStore(CheckpointStore):
         else:
             updated_at_ts = updated_at.timestamp()
         completed_data = _loads(completed) if completed is not None else {}
+
+        # V3-6 Layer B：外部化 payload 还原。必须在 schema 迁移**之前**——迁移函数按真实
+        # payload 形状改写 completed，拿到 reference 会改错东西。
+        if self._externalizer is not None:
+            from agent_runtime.payload_externalization import is_reference
+
+            completed_data = await self._externalizer.internalize_completed(completed_data)
+            missing = [k for k, v in completed_data.items() if is_reference(v)]
+            if missing:
+                # blob 丢了不算"读成功"：internalize 对缺失 blob 原样返回 reference，
+                # 不告警就会把降级静默成"数据本来长这样"。刻意不抛——checkpoint 仍可用于
+                # 判断进度，抛错会让整条恢复路径失败，代价大于收益。
+                logger.warning(
+                    "checkpoint payload blob 缺失，返回 reference 而非原值 execution=%s nodes=%s",
+                    execution_id,
+                    missing,
+                )
 
         # V3-6: 自动迁移旧 schema 版本
         schema_ver = state_schema_version or 1
@@ -110,6 +130,14 @@ class PgCheckpointStore(CheckpointStore):
         # （completed 较少）的写入被原子拒绝，防止 zombie writer 降级覆盖新 owner 的
         # checkpoint。拒绝时抛 FencedWriteError，上层协作式中止。
         version = len(checkpoint.completed)
+        # V3-6 Layer B：大 payload 外部化（opt-in）。externalize_completed 保留 node_id 键
+        # ⇒ 上面按"已完成节点数"算的 version 不受影响，C3 monotonic CAS 与 generation
+        # fencing 的语义逐字不变（外部化只改 value 的存放位置，不改 completed 的形状）。
+        persisted_completed = checkpoint.completed
+        if self._externalizer is not None:
+            persisted_completed = await self._externalizer.externalize_completed(
+                checkpoint.completed
+            )
         # V3-1: generation fencing——checkpoint 带 generation 时，仅当 generation 匹配
         # 当前 lease 的 generation 才允许写。旧 owner（takeover 后 generation 过期）
         # 的写被原子拒绝。不带 generation（None）时仅按 version fencing（向后兼容）。
@@ -134,7 +162,7 @@ class PgCheckpointStore(CheckpointStore):
                 sql,
                 (
                     checkpoint.execution_id,
-                    _dumps(checkpoint.completed),
+                    _dumps(persisted_completed),
                     checkpoint.resumable,
                     version,
                     checkpoint.generation,
@@ -145,6 +173,28 @@ class PgCheckpointStore(CheckpointStore):
                 raise FencedWriteError(
                     f"checkpoint 写入被拒绝（stale writer / version 降级 / generation fencing）execution={checkpoint.execution_id}"
                 )
+
+    async def collect_externalized_keys(self) -> set[str]:
+        """收集全表 checkpoint **仍引用**的外部化 blob key（#121 GC 安全性依据）。
+
+        age-based sweep 单靠年龄会删掉仍在途的引用（含挂起超 ``gc_min_age_hours``
+        的 awaitable resume：resume 后 ``internalize`` 静默返回 reference ⇒ 数据
+        损坏）。删除前必须过这一关——本方法是 sweep 的 ``referenced_keys`` 来源。
+
+        成本：全表 ``jsonb_each(completed)`` 扫描 ⇒ 调用方应"先有删除候选再查"
+        （agent_server 的 GC 接线：``list_gc_candidates`` 非空才调本方法），
+        稳态零开销。
+        """
+        sql = (
+            f"SELECT DISTINCT entry.ref->>'key' AS key FROM {self._table}, "
+            "jsonb_each(completed) AS entry(node_id, ref) "
+            "WHERE jsonb_typeof(entry.ref) = 'object' "
+            "AND entry.ref->>'__external__' = 'true'"
+        )
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(sql)
+            rows = await cur.fetchall()
+        return {str(r[0]) for r in rows if r[0]}
 
 
 class PgIdempotencyStore(IdempotencyStore):
@@ -409,9 +459,18 @@ class PgSideEffectStore(SideEffectStore):
     从而可在 resume 时判断哪些 step 的副作用已真正落地、避免重复执行。
     """
 
-    def __init__(self, pool: Any, *, table: str = "side_effects") -> None:
+    def __init__(
+        self,
+        pool: Any,
+        *,
+        table: str = "side_effects",
+        lease_table: str = "execution_leases",
+    ) -> None:
         self._pool = pool
         self._table = table
+        # generation fencing 的权威来源是 lease 表；表名可配是为了与
+        # PgExecutionOwnershipStore(table=...) 保持一致——两边不同名会让 fence 静默失效。
+        self._lease_table = lease_table
 
     async def record(
         self,
@@ -419,22 +478,56 @@ class PgSideEffectStore(SideEffectStore):
         step_id: str,
         effect_type: str,
         owner: str,
+        generation: int | None = None,
     ) -> bool:
         effect_key = f"{execution_id}:{step_id}:{effect_type}"
         # attempt_id 用 owner 派生（同一 lease 内的副作用视为同一 attempt 批次）
-        sql = (
-            f"INSERT INTO {self._table} "
-            "(effect_key, execution_id, attempt_id, step_id, effect_type, owner) "
-            "VALUES (%s, %s, %s, %s, %s, %s) "
-            "ON CONFLICT (effect_key) DO NOTHING "
-            "RETURNING effect_key"
-        )
-        async with self._pool.connection() as conn:
-            cur = await conn.execute(
-                sql, (effect_key, execution_id, owner, step_id, effect_type, owner)
+        #
+        # V3 缺口 1：generation fencing。副作用回执是 insert-only（ON CONFLICT DO NOTHING），
+        # 冲突时压根不写 ⇒ **行级 generation 比较无从下手**。真正的危害是 zombie writer
+        # 抢在新 owner 之前插入 effect_key，使新 owner 的 has() 判为"已落地"从而**跳过真实
+        # 副作用**。fence 的权威来源只能是 execution_leases 的当前 generation，故用跨表
+        # INSERT … SELECT … WHERE NOT EXISTS 在**一条语句内**原子完成：先查再插会与 takeover 竞态。
+        cols = "(effect_key, execution_id, attempt_id, step_id, effect_type, owner, generation) "
+        values = (effect_key, execution_id, owner, step_id, effect_type, owner)
+        if generation is None:
+            sql = (
+                f"INSERT INTO {self._table} "
+                + cols
+                + "VALUES (%s, %s, %s, %s, %s, %s, %s) "
+                "ON CONFLICT (effect_key) DO NOTHING "
+                "RETURNING effect_key"
             )
+            params: tuple = (*values, None)
+        else:
+            sql = (
+                f"INSERT INTO {self._table} "
+                + cols
+                + "SELECT %s, %s, %s, %s, %s, %s, %s "
+                f"WHERE NOT EXISTS (SELECT 1 FROM {self._lease_table} "
+                "WHERE execution_id = %s AND expires_at > now() AND generation > %s) "
+                "ON CONFLICT (effect_key) DO NOTHING "
+                "RETURNING effect_key"
+            )
+            params = (*values, generation, execution_id, generation)
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(sql, params)
             row = await cur.fetchone()
-        return row is not None
+        if row is not None:
+            return True
+        if generation is None:
+            return False  # 无 fence 路径：写不进去只可能是幂等去重（既有契约）
+        # 带 fence 时"没写进去"有两种成因，语义相反，必须分开：
+        #   已存在 → 幂等去重，返回 False（既有契约）；
+        #   不存在 → 被 fence 拒绝（zombie writer），必须抛错。静默返回 False 会让调用方
+        #            把"我被拒绝了"读成"副作用早已落地"，正好是最危险的那个误读。
+        if await self.has(execution_id, step_id, effect_type):
+            return False
+        raise FencedWriteError(
+            f"side effect 回执写入被拒绝（stale generation fencing）"
+            f"execution={execution_id} step={step_id} effect_type={effect_type} "
+            f"incoming_generation={generation}"
+        )
 
     async def has(self, execution_id: str, step_id: str, effect_type: str) -> bool:
         effect_key = f"{execution_id}:{step_id}:{effect_type}"

@@ -21,12 +21,18 @@ from pydantic import BaseModel, Field
 
 
 class Readiness(str, Enum):
-    """数据就绪度（INV-3 / §7）。"""
+    """数据就绪度（INV-3 / §7）。
+
+    ``UNCONFIRMED`` 是**缺标注时的 fail-closed 默认值**（roadmap 阶段1 #10）：
+    v1.2 起 warehouse 直接返回 REST JSON、不再强制信封，「没有 data_readiness」
+    曾是默认 READY 的入口，导致合成/未核验样本可能被当成经营结论输出。
+    """
 
     READY = "READY"
     PARTIAL = "PARTIAL"
     SYNTHETIC = "SYNTHETIC"
     NOT_CONNECTED = "NOT_CONNECTED"
+    UNCONFIRMED = "UNCONFIRMED"
 
 
 class DataClassification(str, Enum):
