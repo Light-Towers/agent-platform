@@ -52,8 +52,8 @@ BEGIN
             SELECT 1 FROM nl2sql_table_stats
             GROUP BY tenant_id, datasource_id, table_name HAVING count(*) > 1) d
         UNION ALL
-        SELECT 'nl2sql_example_corpus', count(*) FROM (
-            SELECT 1 FROM nl2sql_example_corpus
+        SELECT 'nl2sql_example_info', count(*) FROM (
+            SELECT 1 FROM nl2sql_example_info
             GROUP BY tenant_id, datasource_id, question HAVING count(*) > 1) d
     ) t
     WHERE t.n > 0
@@ -142,15 +142,17 @@ BEGIN
                 'UNIQUE (tenant_id, datasource_id, table_name)';
     END IF;
 
-    -- ⑦ example_corpus
+    -- ⑦ example_info（⚠️ 004 的文件名是 `004_example_corpus.up.sql` 而表名是
+    -- `nl2sql_example_info`——本文件初版把文件名抄成了表名，真 PG 上 42P01 连带
+    -- 回滚 001-005。引用他包迁移时以 `CREATE TABLE` 原文为准，不信文件名）
     SELECT string_agg(a.attname, ',' ORDER BY a.attname) INTO key_cols
     FROM pg_constraint c
     JOIN pg_class r ON r.oid = c.conrelid
     JOIN pg_attribute a ON a.attrelid = r.oid AND a.attnum = ANY(c.conkey)
-    WHERE c.conrelid = 'nl2sql_example_corpus'::regclass AND c.contype = 'u';
+    WHERE c.conrelid = 'nl2sql_example_info'::regclass AND c.contype = 'u';
     IF key_cols IS DISTINCT FROM 'datasource_id,question,tenant_id' THEN
-        EXECUTE 'ALTER TABLE nl2sql_example_corpus DROP CONSTRAINT IF EXISTS uq_nl2sql_example';
-        EXECUTE 'ALTER TABLE nl2sql_example_corpus ADD CONSTRAINT uq_nl2sql_example '
+        EXECUTE 'ALTER TABLE nl2sql_example_info DROP CONSTRAINT IF EXISTS uq_nl2sql_example';
+        EXECUTE 'ALTER TABLE nl2sql_example_info ADD CONSTRAINT uq_nl2sql_example '
                 'UNIQUE (tenant_id, datasource_id, question)';
     END IF;
 END $$;
@@ -161,7 +163,7 @@ COMMENT ON COLUMN nl2sql_value_info.workspace_id IS '首灌来源空间（D8 摘
 COMMENT ON COLUMN nl2sql_relation_info.workspace_id IS '首灌来源空间（D8 摘键后仅溯源，不再参与唯一性）';
 COMMENT ON COLUMN nl2sql_alias_info.workspace_id IS '首灌来源空间（D8 摘键后仅溯源，不再参与唯一性）';
 COMMENT ON COLUMN nl2sql_table_stats.workspace_id IS '首灌来源空间（D8 摘键后仅溯源，不再参与唯一性）';
-COMMENT ON COLUMN nl2sql_example_corpus.workspace_id IS '首灌来源空间（D8 摘键后仅溯源，不再参与唯一性）';
+COMMENT ON COLUMN nl2sql_example_info.workspace_id IS '首灌来源空间（D8 摘键后仅溯源，不再参与唯一性）';
 
 INSERT INTO nl2sql_schema_meta (key, value) VALUES ('schema_version', '6')
 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now();

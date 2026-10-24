@@ -132,6 +132,13 @@ class _FakePool:
     def _upsert(self, table: str, cols: list[str], sql: str, params: tuple) -> _FakeCursor:
         conflict = re.search(r"ON CONFLICT \(([^)]*)\) DO UPDATE", sql)
         assert conflict, f"upsert 缺 ON CONFLICT（唯一键）: {sql}"
+        # DDL 契约（001/004）：这六张表除 `embedding`（vector，可空）外全是
+        # `NOT NULL [DEFAULT '']`，而列一旦进 INSERT 列表 DEFAULT 就不生效 ⇒ 显式
+        # None 在真 PG 上是 23502。替身必须像库一样拒它——B-2（workspace_id 键缺失
+        # 传 None）此前正是从这条缝里全绿活过去的（同 tests/ha 的"不让 L1 冒充 L3"）。
+        for col, val in zip(cols, params):
+            if val is None and col != "embedding":
+                raise AssertionError(f"{table} 的 NOT NULL 列 {col} 收到 None（真 PG 会 23502）")
         key_cols = [c.strip() for c in conflict.group(1).split(",")]
         natural = [c for c in key_cols if c not in _SCOPE and c != "workspace_id"]
         assert len(params) == len(cols), f"参数个数与列清单不符: {len(params)} vs {len(cols)}"
@@ -582,3 +589,38 @@ async def test_d8_cross_workspace_upserts_same_row_and_keeps_first_source():
     assert len(rows) == 1, "不同 workspace 的同键元知识必须共享同一行（D8）"
     assert rows[0]["workspace_id"] == "w1", "首灌来源不随后续更新覆盖"
     assert rows[0]["column_comment"] == "改注释", "非键列正常更新"
+
+
+async def test_default_scope_write_path_stamps_empty_string_not_null():
+    """B-2 回归（2026-10-24）：作用域值为空串时也必须写键，不许把 None 送进 NOT NULL 列。
+
+    现场：`_stamp` 原先只在值非空时写键，而 `_upsert` 恒把 `workspace_id` 列进
+    INSERT 列表 ⇒ `row.get()` 交出 None ⇒ 真 PG 23502（列进了列表，DDL 的
+    `DEFAULT ''` 就不生效）。生产默认路径正是空串——`MetaKnowledgeService` 三个
+    作用域参数默认 `''`，`scripts/discover_relations.py:135` 的构造点更是连参数
+    都不传——所以这不是边角料。真库往返判据见 `scripts/evidence/nl2sql_real_pg_probe.py`。
+    """
+    pool = _FakePool()
+    await _build_all(_service(pool))
+    rows = [r for table_rows in pool.store.values() for r in table_rows.values()]
+    assert rows, "六类构建路径一行都没写出，本用例就成了空跑"
+    for row in rows:
+        nulls = {c: v for c, v in row.items() if v is None and c != "embedding"}
+        assert not nulls, f"NOT NULL 列收到 None（真 PG 会 23502）: {nulls}"
+        assert "workspace_id" in row and row["workspace_id"] == "", "空作用域要落 ''，不是缺键"
+
+    # 绕过 _stamp 的直接仓储写入（discover_relations 的调用形状）同样不许漏
+    direct = MetaRepository(pool=pool)
+    stamped = await direct.save_relation(
+        {
+            "left_table": "tickets",
+            "left_column": "venue_id",
+            "right_table": "venues",
+            "right_column": "id",
+            "relation_type": "many_to_one",
+            "note": "",
+        }
+    )
+    assert stamped is True, "data 里没有 workspace_id 键时直接仓储写入应仍成功"
+    fresh = [r for r in pool.rows("nl2sql_relation_info") if r["left_table"] == "tickets"]
+    assert len(fresh) == 1 and fresh[0]["workspace_id"] == ""

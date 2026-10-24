@@ -53,13 +53,15 @@ class MetaKnowledgeService:
         self._workspace_id = workspace_id
 
     def _stamp(self, data: dict[str, Any]) -> dict[str, Any]:
-        """把作用域列写进 data（_upsert 的 row.update(data) 会覆盖 scope 默认 ''）。"""
-        if self._datasource_id:
-            data["datasource_id"] = self._datasource_id
-        if self._tenant_id:
-            data["tenant_id"] = self._tenant_id
-        if self._workspace_id:
-            data["workspace_id"] = self._workspace_id
+        """把作用域列写进 data（_upsert 的 row.update(data) 会覆盖 scope 默认 ''）。
+
+        空值也写键：条件写键让"键存在性"成了隐式契约——workspace_id='' 时键缺失，
+        `_upsert` 的 `row.get()` 交出 None 直落 TEXT NOT NULL 列（真 PG 23502；
+        fake 池不校验 DDL 约束，所以单测全绿）。
+        """
+        data["datasource_id"] = self._datasource_id
+        data["tenant_id"] = self._tenant_id
+        data["workspace_id"] = self._workspace_id
         return data
 
     async def build_from_tables(self, tables: list[dict[str, Any]]) -> dict[str, int]:

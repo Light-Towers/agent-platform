@@ -362,7 +362,10 @@ class MetaRepository:
         # data 携带的当时空间值，冲突更新永不覆盖（溯源语义的唯一保证）。
         if "workspace_id" not in insert_cols:
             insert_cols.append("workspace_id")
-        row = {c: "" for c in _SCOPE_COLS}
+        # 作用域三列恒有值：DDL 是 `TEXT NOT NULL DEFAULT ''`，而列一旦出现在
+        # INSERT 列表里 DEFAULT 就不生效——缺键 ⇒ 显式 NULL ⇒ 23502。不依赖调用方
+        # （MetaKnowledgeService._stamp）是否写了键。
+        row = {c: "" for c in (*_SCOPE_COLS, "workspace_id")}
         row.update(data)
         params = tuple(row.get(c) for c in insert_cols)
         sql = (
