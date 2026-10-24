@@ -17,7 +17,9 @@
   P-2 内网主机名/仓库路径：运维机主机名前缀、内网 GitLab 域名与组路径。
   P-3 密钥材料：私钥头、AWS AKIA、GitHub token（ghp_/gho_/ghu_/ghs_/ghr_/
       github_pat_）、Slack xox——这三类在任何范围都零容忍。
-  P-4 registry 双向对称差：命中而未登记 ⇒ 红；登记了却已无命中 ⇒ 红（过期）。
+  P-4 registry 双向对称差：命中而未登记 ⇒ 红；登记了却已无命中 ⇒ 分两种（见
+      `_stale_split`）：路径根本不在清单里（幽灵登记）红，文件在、内容已脱敏 ⇒ 警告。
+      后者必须是警告，否则公开镜像里那份遮过的文档会让公开仓自己的 CI 永远红。
   P-5 枚举口径 = `git ls-tree`（版本控制清单），不是本机文件系统；取不到即
       exit 2 fail-closed。测试目录（`**/tests/**`、`test_*.py`、`eval/`）不在
       P-1/P-2 范围内——那里的四段地址是合成 fixture，不构成基础设施情报；
@@ -127,12 +129,8 @@ def _is_test_scoped(rel: str) -> bool:
     return any(h in f"/{p}" for h in _SKIP_PATH_HINTS) or Path(p).name.startswith("test_")
 
 
-def _assert_ref_nonempty(ref: str) -> int:
-    """枚举前置检查：`git grep` 无命中时 rc=1，与"ref 是空的"不可区分。
-
-    不拦这一步，一个空 ref 会同时骗过 registry 与 publish 两种模式（本机踩过
-    "空目录冒充 rc=1" 的同型坑）⇒ 清单为空一律当失败，不当通过。
-    """
+def _tracked(ref: str) -> list[str]:
+    """版本控制清单（枚举口径不是本机 FS）。空清单 = 枚举失效，不当"无需检查"。"""
     try:
         out = subprocess.run(
             ["git", "-C", str(ROOT), "ls-tree", "-r", "--name-only", ref],
@@ -140,10 +138,34 @@ def _assert_ref_nonempty(ref: str) -> int:
         ).stdout
     except Exception as exc:
         raise RuntimeError(f"git ls-tree {ref} 失败 [{type(exc).__name__}]: {exc}") from exc
-    n = len([ln for ln in out.splitlines() if ln.strip()])
-    if n == 0:
+    paths = [ln.strip() for ln in out.splitlines() if ln.strip()]
+    if not paths:
         raise RuntimeError(f"ref {ref} 的文件清单为空——枚举失效不等于无需检查")
-    return n
+    return paths
+
+
+def _stale_split(registry: dict[str, str], active: set[str], tracked: set[str]) -> tuple[list[str], list[str]]:
+    """登记项零命中分两种，只有前者算违规：
+
+    - **幽灵登记**（路径根本不在清单里）= 给"以后要泄漏的那个位置"预先授权 ⇒ 硬红。
+    - **文件在、命中没了** = 该文件已被脱敏。公开镜像上跑 registry 模式必然落进
+      这一类（镜像里的 inventory 就是遮过的），判红会让公开仓自己的 CI 永远红
+      ⇒ 降级为警告，不放过但不假装失败。
+    """
+    hard: list[str] = []
+    warn: list[str] = []
+    for stale in sorted(set(registry) - active):
+        if stale not in tracked:
+            hard.append(
+                f"P-4 登记路径 `{stale}` 不在 {len(tracked)} 项文件清单里 ⇒ 幽灵登记"
+                f"（登记只能给**确实存在且确实在携带**的文件用）。原登记：{registry[stale]}"
+            )
+        else:
+            warn.append(
+                f"P-4 登记项 `{stale}` 现已零命中：该文件已被脱敏（公开镜像上正是这种形状）。"
+                f"内网分支上若也想清掉这条登记，先把门禁跑在待推分支上确认命中数为 0。"
+            )
+    return hard, warn
 
 
 def _mask_hint(line: str) -> str:
@@ -191,9 +213,9 @@ def _candidate_lines(ref: str) -> list[tuple[str, int, str]]:
     return out
 
 
-def mode_registry(ref: str, mask_plan: bool) -> tuple[list[str], int, int]:
-    """registry 模式：命中文件必须登记，登记项必须仍命中（P-4 双向对称差）。"""
-    _assert_ref_nonempty(ref)
+def mode_registry(ref: str, mask_plan: bool) -> tuple[list[str], list[str], int, int]:
+    """registry 模式：命中文件必须登记；登记项失效按幽灵/已脱敏分流（见 `_stale_split`）。"""
+    tracked = _tracked(ref)
     per_file: dict[str, list[tuple[str, int, str]]] = {}
     for path, lineno, content in _candidate_lines(ref):
         for name, pat in _PATTERNS:
@@ -210,8 +232,8 @@ def mode_registry(ref: str, mask_plan: bool) -> tuple[list[str], int, int]:
         if not scoped:
             continue
         hits_total += len(scoped)
-        active.add(rel)
-        if rel not in _REGISTRY:
+        active.add(rel.replace("\\", "/"))
+        if rel.replace("\\", "/") not in _REGISTRY:
             ids = sorted({h[0] for h in scoped})
             problems.append(
                 f"P-4 {rel} 携带内网/凭据标识（{ids}）但未登记。要么按 README 约定换成"
@@ -221,12 +243,9 @@ def mode_registry(ref: str, mask_plan: bool) -> tuple[list[str], int, int]:
         elif mask_plan:
             for name, lineno, line in scoped[:3]:
                 print(f"    [mask-plan] {rel}:L{lineno} ({name})\n        - {line[:110]}\n        + {_mask_hint(line)[:110]}")
-    for stale in sorted(set(_REGISTRY) - active):
-        problems.append(
-            f"P-4 登记项 `{stale}` 现已零命中：要么它已被脱敏（删掉登记并确认公开镜像里"
-            f"确实不再出现），要么判据漂了。原登记：{_REGISTRY[stale]}"
-        )
-    return problems, hits_total, len(active)
+    hard, warnings = _stale_split(_REGISTRY, active, {p.replace("\\", "/") for p in tracked})
+    problems += hard
+    return problems, warnings, hits_total, len(active)
 
 
 def mode_publish(base: str, ref: str) -> tuple[list[str], int]:
@@ -240,8 +259,14 @@ def mode_publish(base: str, ref: str) -> tuple[list[str], int]:
     problems: list[str] = []
     cur = ""
     counted = 0
-    _assert_ref_nonempty(ref)
-    _assert_ref_nonempty(base)  # 空基线会让 diff 退化成"全量新公开"，同样不可信
+    tracked_ref = _tracked(ref)
+    tracked_base = _tracked(base)  # 空基线会让 diff 退化成"全量新公开"，同样不可信
+    if not set(tracked_base) & set(tracked_ref):
+        problems.append(
+            f"P-5 --base {base} 与 --ref {ref} 的文件清单完全不相交（{len(tracked_base)} vs "
+            f"{len(tracked_ref)} 项）⇒ 基线选错，'新公开了什么'无从判定"
+        )
+        return problems, counted
     for line in diff.splitlines():
         if line.startswith("+++ b/"):
             cur = line[6:].strip()
@@ -310,6 +335,15 @@ def selftest() -> list[str]:
         problems.append("SELFTEST: 门禁源码拿到形状豁免 ⇒ 泄漏面从检测器自身打开")
     if _skip_hit("scripts/lint_public_mirror.py", "P-3 私钥头"):
         problems.append("SELFTEST: 豁免越界到凭据类（fixture/测试目录不得豁免 P-3）")
+    # 登记失效分流：幽灵登记必须红，"文件在但已脱敏"必须是警告（否则公开仓 CI 永远红）
+    reg = {"a.md": "在携带", "b.md": "已脱敏", "d.md": "路径不存在"}
+    hard, warn = _stale_split(reg, active={"a.md"}, tracked={"b.md"})
+    if len(hard) != 1 or "d.md" not in hard[0]:
+        problems.append(f"SELFTEST: 幽灵登记没判红（应为 d.md 不在清单）⇒ {hard}")
+    if len(warn) != 1 or "b.md" not in warn[0]:
+        problems.append(f"SELFTEST: 已脱敏项被判红 ⇒ 公开镜像自己的 CI 会永远红：{warn}")
+    if _stale_split({"a.md": "在携带", "b.md": "已脱敏"}, active={"a.md", "b.md"}, tracked={"b.md"}) != ([], []):
+        problems.append("SELFTEST: 登记项仍在命中时报了东西 ⇒ 对称差没闭上")
     dirty = _self_source_clean()
     if dirty:
         problems.append(
@@ -336,7 +370,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         if args.mode == "registry":
-            problems, hits, files = mode_registry(args.ref, args.mask_plan)
+            problems, warnings, hits, files = mode_registry(args.ref, args.mask_plan)
             summary = (
                 f"registry 模式 @ {args.ref}：携带内网标识的仓内文件 {files} 个，"
                 f"命中行 {hits} 处，登记台账 {len(_REGISTRY)} 项"
@@ -346,6 +380,7 @@ def main(argv: list[str] | None = None) -> int:
                 print("[FAIL] publish 模式必须给 --base（公开基线 sha），否则无从判定「新公开了什么」")
                 return 2
             problems, hits = mode_publish(args.base, args.ref)
+            warnings = []
             summary = f"publish 模式 {args.base}..{args.ref}：扫描到新增命中 {hits} 处（零容忍，无登记通道）"
     except RuntimeError as exc:
         print(f"[FAIL] 枚举/取数失效: {exc}")
@@ -353,9 +388,11 @@ def main(argv: list[str] | None = None) -> int:
 
     extra = selftest() if args.selftest else []
     problems += extra
+    for line in warnings:
+        print(f"[WARN] {line}")
     for line in problems:
         print(f"[FAIL] {line}")
-    print(f"公开镜像门禁：{summary}；违规 {len(problems)} 项")
+    print(f"公开镜像门禁：{summary}；违规 {len(problems)} 项，警告 {len(warnings)} 项")
     return 1 if problems else 0
 
 
