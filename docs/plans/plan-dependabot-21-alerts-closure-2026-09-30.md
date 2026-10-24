@@ -306,5 +306,100 @@ Dependabot 已自开 PR **#31**（bump urllib3 2.7.0→2.8.0，单文件 uv.lock
 - 本轮预期：#40-42 随 urllib3 PR 合并+重扫后翻 fixed；#37-39/43-49 dismiss 后不再出现在 open。
 - **结构性问题**：只要僵尸清单还挂在 Dependabot 图上，每次 urllib3/transformers 等基库出 CVE 就会重开一批 courses/* 告警，dismiss 成可循环劳动。候选长期方案（需另行方案+确认）：核 GitHub 能否从依赖图移除已删 manifest（或开 GitHub Support 工单）；评估是否可以归档/删除历史引入这些锁文件的旧分支。本轮先按用户决策完成取证与记录，不改 dependabot config、不动 #26-29。
 
+## 13. 第四轮：2026-10-24 全量重扫 151 项——「清过又出现」的归因与剩余路径
+
+### 13.1 归因：不是回归
+
+用户两次追问「明明刚修过为什么又出现」，本轮先做零回归证明再动手：
+
+| 判据 | 取证（2026-10-24） | 结论 |
+|---|---|---|
+| 已修项是否被回退 | (包, GHSA, manifest) 三元组：fixed(35) ∪ dismissed(24) 与 open(151) 的**交集 = 0** | 无一条修复被回退 |
+| 同 (包,GHSA) 跨 manifest 重叠 | 仅 2 组：langgraph-sdk `GHSA-fvww-7h3r-vfhp`、multidict `GHSA-54p9-h82j-f925` | 重叠的 6 条全在僵尸 manifest；根锁对应项已于 10-19 修复（#61/#62） |
+| 创建时间 | 151 条创建日：10-22 90 条 / 10-23 27 条 / 10-24 18 条；138 条晚于 10-19（#101 合并日） | 由外部新 advisory 驱动 |
+| 去重口径 | 151 条 = 72 个不同 (包, GHSA) 对 × manifest 数 | 同一 advisory 在多 manifest 重复计数 |
+| Pillow | 41 个 GHSA 发布于 10-20~10-23，命中 2 个 manifest ⇒ 82 条 | 单包占 open 总量 54%（severity：17 critical / 70 high / 49 medium / 15 low） |
+
+**结论：告警数 ≈ 锁内旧版本 × 新 advisory 发布速度 × manifest 数。** 治理指标不能是「归零」，否则每轮都会被外部发布节奏判红。
+
+### 13.2 manifest 切分与可修性
+
+| manifest | 告警数 | 是否在 main 树内 | 处置 |
+|---|---|---|---|
+| `uv.lock`（根） | 64 | 是 | 23 项本轮已修（§13.3）；41 项 Pillow 待摘边（§13.4） |
+| `zhanggui-zhiku/uv.lock` | 63 | 否 | 僵尸，只能 dismiss / 清依赖图（§13.5） |
+| `zhanggui-wenda/data-agent/uv.lock` | 12 | 否 | 同上 |
+| `courses/zhanggui-wenda/data-agent/uv.lock` | 12 | 否 | 同上 |
+
+僵尸 manifest 的四重否定证据（本轮复测）：两仓远端 3 条路径均不存在；7 个分支 tip 上 0 文件；tracked 文件对三路径引用 = 0；引入提交（981adbb8 / b546aa56 / e54aa628）不在任何分支上，删除提交（9e95c922 / 05a3cb12）在 main 上。
+
+### 13.3 本轮真修：PR #140（23 项，合并 5095a62f）
+
+| 包 | 旧 → 新 | 备注 |
+|---|---|---|
+| certifi | 2026.7.22 → 2026.10.23 | |
+| filelock | 3.32.3 → 4.2.4 | major |
+| aiohttp | 3.14.3 → 3.14.5 | 连带 yarl 1.24.5 → 1.25.1 |
+| pypdf | 6.20.1 → 6.21.2 | 根 base extra + `applications/agent_federation/pyproject.toml` docs extra 两处下界同步提到 >=6.21.2 |
+| setuptools | 84.0.0 → 84.2.1 | |
+| brotli | 1.2.0 → 1.2.1 | |
+| brotlicffi | 1.2.0.1 → 1.2.1.0 | |
+| opentelemetry-api / sdk / exporter-otlp | 1.45.0 → 1.45.1 | 三处 pyproject 下界统一 >=1.45.1（L-4）；同族 10 个 OTel 包随版本列车同步 |
+
+- **手法**：沿用 §12.3 的 `uv lock --upgrade-package` 最小改动，未合并 Dependabot 的 lock-only PR（它们会做全量 re-resolution 抖动）。
+- **L1**：`[[package]]` 块 301→301、唯一包名 296→296、**ADDED=0 / REMOVED=0**、changed=18。
+- **门禁**：`uv lock --check` rc=0 · ruff 全过 · lint_architecture rc=0（含 L-4）· CI 9 项检查全绿（含 `make install` 全新安装 + 10 个 pytest session）。
+- **配套**：8 个 Dependabot PR（#127/#131/#132/#135/#136/#137/#138/#139）逐条留证关为 superseded；#128/#129 是例行升级（非安全告警），按 §12.4 不动。
+- **顺带修复**：公开镜像 doc-sync 红灯——AGENTS.md 3 处内网专有文档引用改纯文本（镜像侧该文件不存在，doc-sync 以 `git ls-files` 为基准）。这也是上述 8 个 PR 长期 FAILURE 的真因。
+
+### 13.4 剩余 41 项 Pillow：摘边方案（待拍板，D2）
+
+**根因**：Pillow 12.3.0 → 13.0.0 被两条 `<13` 上限卡死——gradio 6.24.0 要求 `pillow<13.0`，streamlit 1.64.0 要求 `pillow<13`。二者唯一引入者均为 flashrag-dev（仅根 `eval` extra），仓库内 **0 处 import gradio/streamlit**（grep 实证）。
+
+**方案**：复用既有 `fschat/nltk` 同款假 marker 手法，在 `pyproject.toml` 的 `override-dependencies` 追加两条：`gradio ; python_version < '3.9'`、`streamlit ; python_version < '3.9'`（requires-python >= 3.11 ⇒ marker 恒假）。
+
+**dry-run 实测**（`uv lock --dry-run -P pillow`，2026-10-24）：
+
+- `Update pillow v12.3.0 -> v13.0.0`
+- `Remove` 16 个包（全部 webui-only）：gradio / gradio-client / streamlit / altair / pydeck / pydub / safehttpx / semantic-version / toml / tomlkit / watchdog / groovy / hf-gradio / itsdangerous / pytz / audioop-lts
+- `Add` 0 个；`Resolved 285 packages`
+
+**影响面与代价**：失去 FlashRAG webui（streamlit）与 gradio 相关入口。`make eval-rag` 的评测入口不受影响（只 import flashrag.config / dataset / evaluator，与 fschat/nltk 摘边时同一份源码核实）；该副作用已在 `pyproject.toml` 注释中登记（「要跑 webui 先摘 override」）。
+
+**实施时必跑验收**：
+
+1. `uv run --extra eval python -c "import flashrag.config, flashrag.dataset, flashrag.evaluator"` → rc=0
+2. `uv lock --check` rc=0；包集合只减不增；ruff + lint_architecture（L-4）
+3. `make test` 对齐 CI（重点 knowledge-service 的 torchvision 路径）
+4. `make eval` 启发式门禁
+
+**未验证项（如实登记）**：torchvision / weasyprint 对 Pillow 13 的**运行时**兼容——resolver 无上限只证明可解，不证明可跑，需靠第 3 条兜。
+
+**回退**：删掉两条 override 再 `uv lock` 即回到现状，无代码改动。
+
+### 13.5 剩余 87 项僵尸告警：仓库侧已无可做动作
+
+- 无文件可删、无引用可改、无分支可清（§13.2 四重否定）。
+- dismiss 只压当下；新 advisory 发布后仍会重开。
+- **`dependabot.yml` 对告警无效**：它只管版本更新 PR，告警由依赖图 + GHSA 匹配产生。
+- 唯一可能止损的路径是 GitHub Support 清依赖图条目——**行为未验证**，需用户拍板。
+
+### 13.6 新发现的结构性欠账：集成分支仍锁在修复前版本
+
+`feat/nl2sql-ttl-and-006-slim`（领先 main 182 个提交）上 8 个包全部仍为修复前版本，4 处 pyproject 下界也未同步：
+
+| 包 | 集成分支 | main（本轮后） |
+|---|---|---|
+| aiohttp | 3.14.3 | 3.14.5 |
+| certifi | 2026.7.22 | 2026.10.23 |
+| filelock | 3.32.3 | 4.2.4 |
+| pypdf | 6.20.1 | 6.21.2 |
+| setuptools | 84.0.0 | 84.2.1 |
+| brotli | 1.2.0 | 1.2.1 |
+| brotlicffi | 1.2.0.1 | 1.2.1.0 |
+| opentelemetry-api | 1.45.0 | 1.45.1 |
+
+该分支未来合入 main 时 `uv.lock` 必冲突；若按「取 ours」草率解决，本轮修复会被静默回退。**待办：在集成分支上重放同一批改动（4 处下界 + `uv lock --upgrade-package`），与 main 收敛后再集成。**
+
 
 
