@@ -9,6 +9,7 @@ install:
 lint:
 	uv run --with ruff ruff check .
 	uv run python scripts/lint_architecture.py
+	uv run python scripts/lint_migration_refs.py
 
 format:
 	uv run --with ruff ruff format .

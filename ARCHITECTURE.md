@@ -143,6 +143,8 @@ L 系列（观测架构与依赖契约）由 `docs/plans/plan-observability-glob
 |------|------|--------------|
 | `scripts/evidence/verify_main_tip.py` | 判据 6 七项 `[A]`–`[G]` 全 fail-closed 复验；门禁预期集按 `on.push.paths` × changed paths **派生**（不硬编码） | 是（`gh api`） |
 | `scripts/evidence/normalize_dump.py` | PowerShell 重定向产物默认 UTF-16 LE ⇒ 按 BOM 嗅探转 UTF-8，防「肉眼正常而计数全 0」 | 否 |
+| `scripts/evidence/nl2sql_real_pg_probe.py` | nl2sql 元知识真库往返（迁移链幂等 + 作用域写入 + 发布顺序 42P10 判据，11 项）；本机 PG 由 `pgserver` wheel 提供（含 pgvector），配方见 testing-playbook §3.4 | 否（本机进程内 PG） |
+| `scripts/evidence/migration_gate_mutation_probe.py` | `scripts/lint_migration_refs.py` 的非空转反证：原样副本零违规 + 注入 B-1 错表名报红 + 摘掉 006 报红（只在 tempfile 副本上动） | 否 |
 | `scripts/evidence/README.md` | 收录判据、可直接复制的运行命令、三条实踩过坑 | — |
 | `tests/governance/test_evidence_scripts.py` | 钉住派生式预期集的纯逻辑不变量（含 `jobs:` 位于文件末尾、YAML 1.1 `on:`→布尔 `True` 键、PyYAML 缺席必 exit 2） | 否（autouse 拦断子进程） |
 
