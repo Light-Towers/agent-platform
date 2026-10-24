@@ -452,7 +452,7 @@ T0 拍板 ──┬─→ T1 默认分支止血 ─→ T2 来源收口(+nl2sql �
 | relation_info（001:148） | t,ws,ds,lt,lc,rt,rc | t,ds,lt,lc,rt,rc |
 | alias_info（001:167） | t,ws,ds,kind,name,alias | t,ds,kind,name,alias |
 | table_stats（002:96） | t,ws,ds,table | t,ds,table |
-| example_corpus（004:32） | t,ws,ds,question | t,ds,question |
+| example_info（004:15 建表；**文件名 `004_example_corpus.up.sql` ≠ 表名**，本行初版正是照文件名写成 `example_corpus` ⇒ 006 抄它后真 PG 42P01，见 §9.16 B-1） | t,ws,ds,question | t,ds,question |
 
 **② 写入侧语义：留列 = 首灌来源，零额外代码。**
 `_upsert`（meta_repository.py:347-367）的形态是 `ON CONFLICT (key_cols) DO UPDATE SET {updatable}`，且 updatable 恒不含键列。摘键后把 workspace_id 放在"键外、非 updatable"位置 ⇒ INSERT 首次写入当时的空间值，此后冲突更新永不覆盖 = 天然首灌溯源。`_SCOPE_COLS`（:24）从三元组改二元组 `(tenant_id, datasource_id)`（prune 扫描范围同步收窄，否则按 ws 清理会漏删共享行）。
@@ -509,3 +509,97 @@ agent_server `/query` 的"携带 tenant_id/user_id 且与断言不符 ⇒ 403"�
 - 隔离门禁：三表进 `SYSTEM_TABLE_WHITELIST` 登记理由（身份域本体，org_id 归属维在表内）——`test_isolation_dimension_contract` 由红转绿。
 - 测试：`test_conversations_ownership.py` 14 条（首认领/跨 org 拒/跨 user 拒/中间态放行/42703 降级×2/真故障照抛/三列写入）。核验：根 1314 / runtime 707 / agent_server 131 / ruff / lint_architecture / check_doc_sync 全绿。
 - **014b 未做**（按 §9.14-⑤ 时序，等 T4 后半 A5 claim 绑定）；requires_pg 级判据（真库并发双写/迁移回放）待环境。
+
+### 9.16 分支返工批（2026-10-24）：三个阻塞项修复 + 盲区门禁
+
+**背景**：`feat/nl2sql-ttl-and-006-slim` 评审报出 B-1/B-2/B-3 三个"真 PG 上必炸"的阻塞项，
+全部在单测全绿下存活。本批按"先复现再修，修完当场验"的次序做，不复述评审结论。
+
+**① 前提订正：本机拿得到真 PG**（旧口径"Windows 开发机无 PG ⇒ requires_pg 只能等环境"作废）
+- 实测：`uv run --no-sync --with pgserver` 起 PostgreSQL 16.2 **且 wheel 自带 pgvector**，
+  配 `WindowsSelectorEventLoopPolicy` 后 `create_pool` 直连可用。配方已入
+  `docs/operations/testing-playbook.md` §3.4。`tests/ha/conftest.py` 在 win32 skip 的是**事件循环**，不是 PG 可达性。
+- 判据形状：探针脚本落 `.evidence-out/`（gitignored），不改工作树。
+
+**② 三阻塞项的真库读数**（取证脚本已入库：`scripts/evidence/nl2sql_real_pg_probe.py` +
+`scripts/evidence/migration_gate_mutation_probe.py`；修复前的复现形态是同一脚本在缺陷代码上的读数，见下表左列）
+
+| 项 | 修复前实跑 | 修复后实跑（`temp_pg_verify_fix.py`，走 `init_meta_schema.apply` 生产入口） |
+|---|---|---|
+| B-1 006 引用不存在的 `nl2sql_example_corpus` | `UndefinedTable`；回滚后 public 表数 **0**（连带吞掉 001-005） | 六份迁移全部应用 + 对账零差异 + **第二遍重跑仍零差异**（幂等） |
+| B-2 `workspace_id` 空值时交出 None | `NotNullViolation` 23502（`nl2sql_column_info.workspace_id`） | 作用域列落 `''` 而非 NULL；绕过 `_stamp` 的直接仓储写入同样通过 |
+| B-3 未应用 006 的库上跑新代码 | `InvalidColumnReference` 42P10 | 同形状复现（**发布顺序约束未被"修掉"，是被 B-1 解锁**：先迁移后发代码现在走得通） |
+
+D8 语义反证同批取到：跨空间同问法两次写入 ⇒ 第二次是更新（`inserted=0, updated=1`），
+库里仅一行且 `workspace_id` 停在首灌值 `w-a`；006 后唯一键实测 = `(datasource_id, question, tenant_id)`。
+
+**③ 评审报告两处证据要订正**（结论不变，证据链有错，记此防照抄）
+1. B-2 归因"ingest_service.py L172 构造点根本不传 `workspace_id`"**错**——该处传了。真正触发条件是
+   **值为空**：`_stamp` 非空才写键 + `_upsert` 恒把该列进 INSERT 列表。确实"不传参"的是
+   `scripts/discover_relations.py:135`（tenant/datasource/workspace 三个都不传）。
+   ⇒ 修法覆盖"值为空"，光补传参救不了 discover_relations 那条链。
+2. "CI 无 PG service"**不准**：`ha.yml` 起的就是 `pgvector/pgvector:pg16`，缺口是**覆盖面**——
+   该 job 只跑 `tests/ha`（agent-runtime），nl2sql 的迁移与写入从未进过任何自动真库门禁
+   （nl2sql 唯一真库用例是手挡 `DW_DB_DSN` 的 `test_golden_seed_real_pg.py`，Makefile 那条 session 不带 `-m requires_pg`）。
+
+**④ 改动清单**
+- `006_meta_unique_drop_workspace.up.sql`：6 处表名 → `nl2sql_example_info`，并在换键块注释"文件名≠表名"的来历。
+  改写已应用迁移的顾虑不适用：nl2sql 侧无 checksum 版本表（每次全量幂等重跑，见评审 C-8），
+  且 006 因 B-1 从未在任何库上成功应用过。
+- `meta_knowledge_service._stamp`：三个作用域列**无条件写键**。
+- `meta_repository._upsert`：作用域三列（含 `workspace_id`）恒以 `''` 兜底，**不依赖调用方是否写键**；
+  `embedding` 不兜底（vector 列，`None` 才是正确语义，`''` 会让 PG 转型失败）。
+- 新增 `scripts/lint_migration_refs.py`（进 `make lint` ⇒ 进 `make ci`），零基建：
+  - **M-1 引用闭包**：迁移 SQL 引用的关系名必须在"到该文件为止的累计建表集"内（B-1 类）；
+  - **M-2 冲突键命中**：生产代码的 `ON CONFLICT (cols)` 必须被迁移链最终态某唯一键覆盖
+    （PG 语义按 covered-by 允许子集）；动态表名走弱通道（只验"全链存在此键集"），`_upsert`
+    的常量键走 spec 通道——B-3 类因此静态可见；
+  - **M-3/M-4 登记表双向对称差**：外部关系登记表、抽取盲区登记表，条目未命中即红、
+    新盲区未登记即红（防白名单无声扩大，同 `lint_architecture.py` 的自检口径）；
+  - **枚举口径 = `git ls-files`**（本机 FS 不作数），取不到清单退出码 2 fail-closed，无旁路开关；
+  - **非空转证据**：`--selftest` 用合成违规样本逐条咬（空转即红）；另有临时副本变异反证
+    `scripts/evidence/migration_gate_mutation_probe.py`：注入 B-1 错表名 ⇒ M-1 报红；摘掉 006 ⇒ M-2 视角
+    目标键消失 ⇒ 报红；原样副本 ⇒ 两项零违规（阴性对照）。HEAD 正式跑读数：
+    迁移目录 2 个、M-2 校验 25 处、盲区文件 1（已登记理由）、违规 0。
+- `test_meta_knowledge_build.py`：fake 池 `_upsert` 增加 **NOT NULL 拒收**（除 `embedding` 外任何列为
+  None 即 AssertionError）——B-2 全绿活过去的直接原因就是替身不校验 DDL 约束；
+  并加 `test_default_scope_write_path_stamps_empty_string_not_null` 钉住默认路径与绕过 `_stamp` 的直接仓储写入。
+
+**⑤ 仍悬（本批未做，别当已做）**
+- 评审 H-1…H-7、C-1…C-8 **未动**（口径更正、runbook 前置检查、`organizations` 运行期回填排 016、
+  `X-Internal-Tenant` 软模式与出站 payload 等）；
+- nl2sql 真库冒烟进 `ha.yml`（路线 C）未接——本机已能自证，但自动门禁仍不覆盖 nl2sql；
+- `session_leases` 全仓无 CREATE TABLE 属**既有待拍板项**（`plan-unfinished-completion-schedule` §3 第 22 项），
+  本批 M-2 只是把它显式暴露成"未识别表名"，不另立登记。
+
+**⑥ 测试面读数（2026-10-24 实跑，用户放行范围=仅 nl2sql session）**
+
+| 命令 | 读数 |
+|---|---|
+| `uv run pytest applications/nl2sql-service/tests -q` | **191 passed, 4 skipped**（评审记录的基线是 190，本批 +1 = 新回归用例） |
+| `uv run --with ruff ruff check .` | All checks passed |
+| `uv run python scripts/lint_architecture.py` | 全条通过（P13 6/6 等，与本批无交集） |
+| `uv run python scripts/check_doc_sync.py` | 通过，1 警告（既有项 `.codeartsdoer\temp\wt-meta-review`，非本批引入） |
+| `uv run python scripts/lint_migration_refs.py --selftest` | 违规 0，M-2 校验 25 处，`rc=0` |
+
+**反证（判据不是装饰，四形各一）**：
+1. 变异反证·新用例：把 `_stamp` 与 `_upsert` 同时改回缺陷形态 ⇒
+   `test_default_scope_write_path_stamps_empty_string_not_null` **精确报红**
+   `AssertionError: nl2sql_column_info 的 NOT NULL 列 workspace_id 收到 None（真 PG 会 23502）`；
+   恢复后复跑 191 passed，工作树无 `MUTATION-PROBE` 残留（`grep -rn MUTATION-PROBE applications/ packages/` 零命中）。
+2. 变异反证·门禁：`scripts/evidence/migration_gate_mutation_probe.py` 三形——注入 B-1 错表名 ⇒ M-1 报红；
+   摘掉 006 ⇒ M-2 的目标键集退化成含 `workspace_id` 的旧键（会报红）；原样副本 ⇒ 两项零违规（阴性对照）。
+3. 门禁自检：`--selftest` 的合成违规样本若不被咬到即自行报红（含"登记表有项却判不出过期"这一形）。
+4. 真库反证：`scripts/evidence/nl2sql_real_pg_probe.py` 11 项断言全 PASS，其中第 6 项**故意**在未应用 006 的库上
+   跑当前代码，取到 42P10——即"发布顺序约束仍在，只是被 B-1 解锁"，不是被代码绕过。
+
+**未取的读数（不得当作已做）**：根 session / agent-runtime session 等其余 8 个 session 与 `make eval`
+未跑（放行范围只覆盖 nl2sql session）；本批改动面经判断不触及其断言，但该判断本身未取证据。
+
+**⑦ 证据件的入库位置与一次顺带取到的读数**
+- 两份取证脚本按 `scripts/evidence/README.md` 的收录判据（「会不会被下次必须重跑引用」）入库，
+  并在 `ARCHITECTURE.md` 登记；台账与用例里的引用一律改指这两个仓内路径（`.evidence-out/` 里的
+  一次性副本已删——那里的路径新克隆上不存在，判据等于不可复取）。
+- 顺带取到 **`check_doc_sync` fail-closed 的一次真报红**：登记 ARCHITECTURE 行后、脚本尚未入库时，
+  它精确报出 3 条「本机存在但未入库」⇒ 判定基准确实站在 `git ls-files` 而不是文件系统
+  （AGENTS.md 记的 2026-10-04 那次翻车不会再从这条缝里漏过去）。`git add` 三个新脚本后转绿。

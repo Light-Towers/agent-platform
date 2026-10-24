@@ -134,6 +134,39 @@ uv run pytest <identity 测试目录> -q   # 预期 40 passed
 - PowerShell 引号陷阱：单引号内 `\"` 会被当串结束、`$?` 是本机自动变量而非远端回传、多行 here-string 易触发终端守卫——复杂命令拆单行或先落盘脚本再 `-File` 执行；
 - 端口测绘用 `System.Net.Sockets.TcpClient.ConnectAsync(...).Wait(1500)`，勿用 `Test-NetConnection`（unreachable 端口约 21s/个）。
 
+### 3.4 本机零基建起真 PostgreSQL（2026-10-24 实测，Windows 无 docker/无 psql）
+
+**先记住这条推翻的旧前提**：本机曾按「Windows 开发机没有 PG ⇒ `requires_pg` 只能等环境」处理，
+实测口径是——`pgserver`（PyPI，约 12MB，有 `cp311-win_amd64` wheel）**自带 PostgreSQL 16.2
+且内置 pgvector**，免 docker、免管理员、免服务注册：
+
+```bash
+# 一次性探针（不进依赖树：--no-sync 且 --with 只装进临时环境）
+uv run --no-sync --with pgserver python your_probe.py
+```
+
+```python
+import asyncio, pgserver, psycopg
+asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())  # ← 少了这条 psycopg 异步必炸
+srv = pgserver.get_server(r"D:\Study\github\agent-platform\.pgserver-probe")  # 目录已 gitignored
+with psycopg.connect(srv.get_uri()) as c:  # 建 scratch 库、跑迁移、断言
+    ...
+```
+
+四条实测要点：
+1. **`WindowsSelectorEventLoopPolicy` 是必需项，不是可选项**。`tests/ha/conftest.py` 在 win32
+   直接 skip 的理由就是 Proactor 事件循环——它 skip 的是**事件循环**，从来不是"拿不到 PG"。
+   换 Selector 后 `agent_runtime.pool_factory.create_pool` 在本机直连 pgserver 正常跑。
+2. **别把它加进 `pyproject`**：探针用 `--with` 临时装，跑完即弃，避免把开发期工具固化成依赖面。
+3. **每次现起现删 scratch 库**（`DROP DATABASE IF EXISTS` + `CREATE DATABASE`），别复用带残留的库——
+   复用会让"迁移幂等"的结论被上一轮状态污染。
+4. **它的价值在能证伪 L1**：2026-10-24 就是用这条通道实跑证伪/证实了三个阻塞项
+   （42P01 连带回滚整链、23502 NULL 进 NOT NULL、42P10 ON CONFLICT 目标键不存在），
+   而这些在单测里全绿。台账见 `docs/plans/plan-platform-tenant-workspace-identity-2026-10-18.md` §9.16。
+
+**仍要用 Linux CI/126 的场景**：需要 pgvector 之外的扩展、或要验真实并发/故障转移时，
+本机进程内 PG 不够（单机单连接池），照 §3.1 容器与 `ha.yml` 的 PG service 走。
+
 ## 4. 已验证基线（2026-09-28 实跑快照）
 
 | 范围 | 结果 |
