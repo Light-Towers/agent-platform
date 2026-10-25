@@ -1,8 +1,28 @@
 """Execution Recovery / Reaper / Reschedule（V3-4B）。
 
-.. warning::
-   **STATUS: NOT WIRED** – 本模块有完整实现与单测，但 applications/ 层零调用。
-   属「设计就绪、待集成」状态，不得视为已上线能力。(P1-7 审计披露 2026-09-24)
+.. note::
+   **STATUS: WIRED（2026-10-15，默认关）** – 恢复链三件均已落地：
+   ``SchedulerReaper`` / ``ControlPlane.recover`` / ``contract_resolver``
+   （#99，2026-10-19）与 QUERY_STATUS 执行体（缺口 3，2026-10-19：查外部
+   任务真实状态并按态动作——completed→resume 续跑 / failed→FAILED /
+   在途→不动防重复副作用 / 无记录或无 store→降级不猜）。
+   两个生产消费方：
+   ``SchedulerReaper``（lease 失效后按契约决策而非无条件 FAILED）与
+   ``ControlPlane.recover``（人工触发单次恢复）。均由
+   ``SCHEDULER_RECOVERY_ENABLED`` 门控，**默认 False**；关闭时 Reaper 逐字保持
+   旧行为（只标 FAILED + 释放 slot）。
+   边界（2026-10-19 更新，#99）：``contract_resolver`` **已接生产**——
+   ``make_trajectory_contract_resolver`` 读轨迹取 ``plan.route`` 经 registry
+   查契约；四类落空（无记录 / route 空 / skill 未注册 / 无 contract）降级 None
+   ⇒ 决策退化为「无契约默认可重试」。graph/agentic 多 skill 模式的逐 skill
+   契约恢复决策**仍缺**（转新缺口，本模块不猜）。
+   兄弟模块 ``payload_externalization``（由 ``agent_server`` 的
+   ``_build_payload_externalizer`` 构造并注进 checkpoint 链路）与 ``human_task``
+   （``main`` 装 ``HumanTaskStore`` → ``protocol.delegate`` 按 ``kind="human"`` 分派）
+   已于 2026-10-15 接线，**接线 ≠ 默认启用**：payload 侧受
+   ``payload_externalization_enabled``（默认 False）门控，human_task 侧状态机推进
+   依赖 scheduler 开关。
+   （此前状态为 NOT WIRED，P1-7 审计披露 2026-09-24）
 
 补 V3-4A 留的恢复侧：执行超时 / Worker 死亡 / lease 过期后，如何把 stuck execution
 拉回正轨。
@@ -27,11 +47,13 @@ Rescheduler.execute(stuck, action) → 重新入队 / 标记失败 / 标记人�
 
 from __future__ import annotations
 
+import inspect
 import logging
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
+from agent_runtime.awaitable_task import AwaitableState
 from agent_runtime.effect_contract import (
     EffectContract,
     FailureRecovery,
@@ -45,6 +67,10 @@ from agent_runtime.execution_scheduler import (
 )
 
 logger = logging.getLogger(__name__)
+
+# QUERY_STATUS 四态映射的状态集（AwaitableState 是 str Enum，成员即可比较）。
+_AWAITABLE_DONE_STATES = frozenset({AwaitableState.COMPLETED})
+_AWAITABLE_FAILED_STATES = frozenset({AwaitableState.FAILED, AwaitableState.TIMED_OUT})
 
 
 class RecoveryAction(str, Enum):
@@ -79,6 +105,28 @@ class ReaperConfig:
     max_retries: int = 3  # 最大重试次数
 
 
+def stuck_from_request(req: ExecutionRequest) -> StuckExecution:
+    """从调度请求构造 ``StuckExecution``。
+
+    ``Reaper.scan``（自己扫）与 ``RecoveryOrchestrator.recover_one``（调用方已扫并已
+    做完安全门控）共用这一份口径，避免两处各写一遍 reason/attempt 推导而漂移。
+    """
+    return StuckExecution(
+        execution_id=req.execution_id,
+        tenant_id=req.tenant_id,
+        session_id=req.session_id,
+        user_id=req.user_id,
+        reason=(
+            "dispatch_timeout"
+            if req.status is QueueStatus.DISPATCHED
+            else "running_timeout"
+        ),
+        stuck_since=req.dispatched_at or req.created_at,
+        attempt=int(req.metadata.get("recovery_attempts", 0)),
+        original=req,
+    )
+
+
 class Reaper:
     """扫描超时 / stuck 的执行。"""
 
@@ -91,27 +139,7 @@ class Reaper:
         overdue = await self._store.list_overdue(
             self._config.dispatch_timeout, self._config.running_timeout
         )
-        result: list[StuckExecution] = []
-        for req in overdue:
-            reason = (
-                "dispatch_timeout"
-                if req.status is QueueStatus.DISPATCHED
-                else "running_timeout"
-            )
-            attempt = int(req.metadata.get("recovery_attempts", 0))
-            result.append(
-                StuckExecution(
-                    execution_id=req.execution_id,
-                    tenant_id=req.tenant_id,
-                    session_id=req.session_id,
-                    user_id=req.user_id,
-                    reason=reason,
-                    stuck_since=req.dispatched_at or req.created_at,
-                    attempt=attempt,
-                    original=req,
-                )
-            )
-        return result
+        return [stuck_from_request(req) for req in overdue]
 
 
 class RecoveryManager:
@@ -147,8 +175,15 @@ class RecoveryManager:
 class Rescheduler:
     """执行恢复动作。"""
 
-    def __init__(self, scheduler: ExecutionScheduler) -> None:
+    def __init__(
+        self,
+        scheduler: ExecutionScheduler,
+        awaitable_store: Any = None,
+    ) -> None:
         self._scheduler = scheduler
+        # awaitable_store: QUERY_STATUS 时查外部任务真实状态的源（AwaitableTaskStore
+        # 契约；PG 生产 / 内存测试）。缺席 ⇒ _mark_for_query 退化为仅日志（现值）。
+        self._awaitable_store = awaitable_store
 
     async def execute(
         self, stuck: StuckExecution, action: RecoveryAction
@@ -205,11 +240,92 @@ class Rescheduler:
             return None
 
     async def _mark_for_query(self, stuck: StuckExecution) -> None:
-        """标记需查询外部状态（不改队列状态，由外部 resolver 处理）。"""
+        """QUERY_STATUS 执行体（2026-10-19，缺口 3）：查外部任务真实状态并按态动作。
+
+        四态映射（方案 plan-v3-gap3-query-status-2026-10-19.md §2）：
+
+        - store 缺席 ⇒ 仅记日志（降级不猜，现值逐字保持）；
+        - 无任务记录 ⇒ WARNING + 无动作（无外部状态可查，不从"缺席" fabrication）；
+        - 任一 COMPLETED ⇒ 入队 ``:resume:N``（外部已落地，续跑而非重跑）；
+        - 任一 FAILED/TIMED_OUT ⇒ complete(FAILED)（外部侧已失败）；
+        - 全部在途（PENDING/SUBMITTED/RUNNING）⇒ 无动作（**反重复副作用**：
+          QUERY_BEFORE_RETRY 的核心价值——外部执行中时重试=重复提交）。
+
+        查询自身异常兜底记 WARNING，不崩恢复周期（与 resolve_contract 同款容错）。
+        """
+        if self._awaitable_store is None:
+            logger.info(
+                "recovery query_status (no awaitable store) execution=%s reason=%s",
+                stuck.execution_id, stuck.reason,
+            )
+            return
+        try:
+            tasks = await self._awaitable_store.list_by_execution(stuck.execution_id)
+        except Exception:
+            logger.warning(
+                "recovery query_status failed execution=%s", stuck.execution_id, exc_info=True
+            )
+            return
+
+        if not tasks:
+            logger.warning(
+                "recovery query_status: no external tasks to consult execution=%s "
+                "（契约要求先查后动，但无外部状态可查——不 fabrication retry/fail，留待下周期/人工）",
+                stuck.execution_id,
+            )
+            return
+
+        states = [getattr(t, "state", None) for t in tasks]
+        completed = [s for s in states if s in _AWAITABLE_DONE_STATES]
+        failed = [s for s in states if s in _AWAITABLE_FAILED_STATES]
+
+        if completed:
+            # 外部工作已落地 ⇒ 续跑（新 id + resume 标记，graph 从 checkpoint 恢复）
+            await self._resume(stuck)
+            return
+        if failed:
+            await self._scheduler.complete(stuck.execution_id, QueueStatus.FAILED)
+            logger.info(
+                "recovery query_status mark_failed (external failed) execution=%s states=%s",
+                stuck.execution_id, [getattr(s, "value", s) for s in states],
+            )
+            return
+        # 全部在途：无动作（反重复副作用）
         logger.info(
-            "recovery query_status execution=%s reason=%s",
-            stuck.execution_id, stuck.reason,
+            "recovery query_status: external in-flight, no action execution=%s states=%s",
+            stuck.execution_id, [getattr(s, "value", s) for s in states],
         )
+
+    async def _resume(self, stuck: StuckExecution) -> ExecutionRequest | None:
+        """外部已完成 ⇒ 入队 ``:resume:N`` 续跑请求（不重跑：重跑=重复副作用）。"""
+        orig = stuck.original
+        new_id = f"{stuck.execution_id}:resume:{stuck.attempt + 1}"
+        new_metadata = dict(orig.metadata) if orig else {}
+        new_metadata["recovery_attempts"] = stuck.attempt + 1
+        new_metadata["recovered_from"] = stuck.execution_id
+        new_metadata["recovery_reason"] = stuck.reason
+        new_metadata["recovery_action"] = "resume"
+        new_req = ExecutionRequest(
+            execution_id=new_id,
+            tenant_id=stuck.tenant_id,
+            session_id=stuck.session_id,
+            user_id=stuck.user_id,
+            priority=orig.priority if orig else ExecutionPriority.NORMAL,
+            resource_hints=dict(orig.resource_hints) if orig else {},
+            metadata=new_metadata,
+        )
+        try:
+            await self._scheduler.submit(new_req)
+            logger.info(
+                "recovery query_status resume execution=%s → %s (external completed)",
+                stuck.execution_id, new_id,
+            )
+            return new_req
+        except Exception:
+            logger.warning(
+                "recovery resume failed execution=%s", stuck.execution_id, exc_info=True
+            )
+            return None
 
     async def _mark_human(self, stuck: StuckExecution) -> None:
         """标记需人工介入（改 metadata，不改队列状态）。"""
@@ -230,14 +346,39 @@ class RecoveryOrchestrator:
         scheduler: ExecutionScheduler,
         config: ReaperConfig | None = None,
         contract_resolver: Any = None,
+        awaitable_store: Any = None,
     ) -> None:
         self._scheduler = scheduler
         self._config = config or ReaperConfig()
         self._reaper = Reaper(scheduler._store, self._config)
         self._recovery = RecoveryManager(self._config.max_retries)
-        self._rescheduler = Rescheduler(scheduler)
+        # awaitable_store：QUERY_STATUS 时查外部任务真实状态的源（缺口 3，2026-10-19）。
+        self._rescheduler = Rescheduler(scheduler, awaitable_store=awaitable_store)
         # contract_resolver: (execution_id) -> EffectContract | None
         self._resolve_contract = contract_resolver or (lambda _eid: None)
+
+    async def recover_one(self, req: ExecutionRequest) -> RecoveryAction:
+        """对**单个**执行做决策 + 执行；不扫描、不做 lease 门控。
+
+        给「已自行完成安全门控」的调用方用：``SchedulerReaper`` 先确认 lease 失效再调它，
+        ``ControlPlane.recover`` 由人工触发。``run_cycle`` 才是自己扫 + 自己决策的定时形态。
+        """
+        stuck = stuck_from_request(req)
+        contract = None
+        try:
+            resolved = self._resolve_contract(stuck.execution_id)
+            # 2026-10-19（#99）：生产 resolver 读 trajectory store（async）⇒ 调用点
+            # 兼awaitable；同步 resolver（测试/内存态）行为不变。
+            if inspect.isawaitable(resolved):
+                resolved = await resolved
+            contract = resolved
+        except Exception:
+            logger.warning(
+                "contract resolve failed execution=%s", stuck.execution_id, exc_info=True
+            )
+        action = self._recovery.decide(stuck, contract)
+        await self._rescheduler.execute(stuck, action)
+        return action
 
     async def run_cycle(self) -> list[tuple[StuckExecution, RecoveryAction]]:
         """执行一次恢复周期：扫描 → 决策 → 执行。返回决策记录（审计）。"""
@@ -257,12 +398,55 @@ class RecoveryOrchestrator:
         return results
 
 
+def make_trajectory_contract_resolver(trajectory_store: Any, registry: Any):
+    """生产 contract_resolver：execution_id → EffectContract（2026-10-19，#99）。
+
+    数据链（均为既有件，不新造）：``trajectory_store.get(execution_id)`` →
+    ``TrajectoryRecord.plan``（序列化 ``Plan``）→ deterministic 模式
+    ``plan["route"]`` = skill 名 → ``registry.get(route).effect_contract``。
+
+    **四类落空一律返回 None**——即保持「无契约默认可重试」的现状语义，
+    不静默改判：
+    1. 轨迹记录不存在（执行未落轨迹 / store 未装配）；
+    2. ``route`` 为空（graph / agentic 多 skill 模式——逐 skill 契约的恢复
+       决策需独立设计，转新缺口，本工厂不猜）；
+    3. skill 未注册（退役 / 改名）；
+    4. skill 无 contract（未声明）。
+
+    store / registry 经**参数**注入（不 import 具体实现）⇒ 可单测、不引新依赖边。
+    返回 async 函数（store.get 是 async）；``RecoveryOrchestrator.recover_one``
+    的调用点兼awaitable（同步 resolver 行为不变）。
+    """
+
+    async def _resolve(execution_id: str):
+        record = await trajectory_store.get(execution_id)
+        if record is None:
+            return None
+        route = (getattr(record, "plan", None) or {}).get("route") or ""
+        if not route:
+            return None
+        from agent_runtime.skills.registry import SkillNotFoundError
+
+        try:
+            skill = registry.get(route)
+        except (SkillNotFoundError, KeyError):
+            # SkillNotFoundError：真实 registry 的未注册口径；KeyError：内存 test
+            # double 的口径。二者都归「未注册」——降级 None，不静默改判。
+            logger.warning("contract resolve: skill not registered route=%s", route)
+            return None
+        return getattr(skill, "effect_contract", None)
+
+    return _resolve
+
+
 __all__ = [
     "RecoveryAction",
     "StuckExecution",
+    "stuck_from_request",
     "ReaperConfig",
     "Reaper",
     "RecoveryManager",
     "Rescheduler",
     "RecoveryOrchestrator",
+    "make_trajectory_contract_resolver",
 ]

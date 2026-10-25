@@ -9,6 +9,16 @@
 
 > **本文是快照，不是活文档。** 表内每一条状态判定绑定上面的 rev；换 rev 后若要对外引用，先按 §1.3 的命令复跑一遍。理由同 `AGENTS.md` 观测硬规矩第 3 条：**读数必须绑定当时的 rev**。
 
+> **2026-10-16 换 rev 提示（按上条规则加指针，不改写下方任何判定行）**：本表基线 `48c25fe` 之后，凡标 **P1-7 / `NOT WIRED` / 零生产调用** 的那 5 行判定**已失效**——
+> `state_migration` + `execution_recovery`（`c49ee2d`）、`payload_externalization`（`4a7c662e`）、`human_task`（`6bf15287`）、exhibition `skill_router` 门禁+执行两截（`5b75612`）**全部接线**；
+> 反漂回护栏在 `applications/agent_server/tests/test_v3_wiring_assembly.py`（装配锚点 + 已转正模块不得自称未接线）。
+> **接线 ≠ 默认启用**：4 者里 3 者生效面默认关，`SCHEDULER_ENABLED` 仍默认 `False`。
+> 同一窗口还对 roadmap §四 七条交付标准逐条对码复取过，其中**第 6 条「每次回答可追溯身份/调用/数据来源/成本」由「达标」下修为「部分达标」**
+> （`ForensicContext.external_inputs` / `external_task_receipts` / `effect_receipts` 三格生产零写入点）⇒ 本表若把取证面记成「已接线/达标」，同样以该复核为准。
+> 复核全文与复跑命令：`docs/plans/plan-unfinished-completion-schedule-2026-10-16.md` §16。另有两类判定同样已过时，读表时一并注意：
+> ① §2.8 的「`/health` 能力灯」行原记「两点边界」——① `cost_governance` / `forensic` 无开关跟随断言、② `forensic` 位是代理语义——两点已于 2026-10-15 分别**补上断言**（现 16 passed）与**定性为前提有误**（该字段语义早已被 `applications/agent_server/schemas.py` 的 description 声明为 trajectory_store 装配代理），`docs/TODO.md` §3 该行已翻勾；
+> ② §2.7 的「不可篡改审计日志」行（🟡）与 §2.8 的「漂移诊断 forensic」行（「✅ 部分」）给取证面打的档只到「载体 + 版本指纹」这一层，来源/回执三格仍无生产写入点（即上面第 6 条下修的原因）。
+
 ---
 
 ## 0. 本文覆盖什么 / 不覆盖什么
@@ -197,7 +207,7 @@ uv run --with ruff ruff check . && python scripts/check_doc_sync.py
 | **MCP 服务端**（把本平台 Skill 暴露成 MCP server） | ❌ | 全仓无 `FastMCP` / `mcp.server`；`packages/agent-core/agent_core/tools/adapters/mcp.py` 是客户端适配器 |
 | MCP 企业授权面（OAuth 2.1 资源服务器 / RFC 9728 元数据发现 / RFC 8707 token 绑定 / CIMD / EMA） | ❌ | |
 | MCP Tasks / MCP Apps / elicitation / sampling | ❌ | |
-| Skill 渐进披露与路由（选错 Skill 的排查面） | 🟡 | `applications/exhibition-agent/exhibition_agent/foundation/skill_router.py:3-22` 自带 `STATUS: NOT WIRED`；`route()` 零调用 |
+| Skill 渐进披露与路由（选错 Skill 的排查面） | 🟡 | `foundation/skill_router.py:5-10` 自述 **`STATUS: WIRED（作为执行前门禁）`**，调用点 `graph/nodes.py:95-103`（原写 `NOT WIRED`／`route()` 零调用**已不成立**，2026-10-16 对码订正）。仍为 🟡 的原因：门禁表 `_CATALOG_ROUTE` 只覆盖 `venue.schedule.query`（`nodes.py:42-44`），且 `route()` 返回值只做判定、不驱动实际请求形状 ||
 | 工具级权限 ACL（`permissions: frozenset[str]` + `discover(caller_permissions=)` 过滤 + policy 第 5 项校验） | ✅ | `packages/agent-runtime/agent_runtime/skills/registry.py:78,306-337` · `packages/agent-runtime/agent_runtime/planner/policy.py:1-16` · workflow yaml 声明 `permissions` |
 | Workflow 最小权限 CI 门禁（缺顶层 `permissions:` 或 `write-all` 即红，目录不存在也 fail-closed） | ✅ | `scripts/lint_architecture.py` P11 |
 | 中间件洋葱（熔断 / 超时+失败降级真取消 / 重试 / 审计 redact / ToolObserved 最外层） | ✅ 部分 | `packages/agent-runtime/agent_runtime/skills/middleware.py:34-296` · 装配 `applications/agent_server/capabilities.py:176-191`；⚠️ `RateLimitMiddleware:198` 已实现但**未在装配链**（`:10-12` 自述「rate limit 待接入」） |
@@ -323,7 +333,7 @@ uv run --with ruff ruff check . && python scripts/check_doc_sync.py
 | Embedding provider 统一选型（远程/本地 bge/Mock；维度 512↔1024 由 provider 派生；启动预热 + 真值灯 `embedding_real`） | ✅ | `packages/agent-core/agent_core/memory/embedder.py`（328 行）· `applications/agent_server/main.py:79-98,278` · `EMBEDDING_REQUIRE_REAL=true` 为调用期硬失败（刻意不升级为启动 crash-loop） |
 | SSE 统一契约（graph 路径与 Planner 路径事件同构，客户端无感） | ✅ | `packages/shared-schemas/shared_schemas/sse.py:13-30` · `packages/agent-runtime/agent_runtime/planner/protocol.py:738-780` |
 | 运行时模式 `local / single_node / distributed`（distributed 无 `DATABASE_URL` **启动即拒**） | ✅ | `applications/agent_server/config.py:140-144` · `applications/agent_server/main.py:205-210,178-183` |
-| **架构不变量 lint 14 条**（多数白名单为空 = fail-closed）+ 文档防漂移门禁 + 治理测试 26 + HA 测试 19 | ✅ 进 CI | `scripts/lint_architecture.py`（P2/P4/P5/P6/P7/P8/P9/P10/P11/P12 + L-1/L-2/L-3/L-4）· `scripts/check_doc_sync.py`（存在性基准 = `git ls-files`） |
+| **架构不变量 lint 16 条**（多数白名单为空 = fail-closed）+ 文档防漂移门禁 + 治理测试 28 + HA 测试 19 | ✅ 进 CI | `scripts/lint_architecture.py`（P2/P4/P5/P6/P7/P8/P9/P10/P11/P12/**P13** + L-1/L-2/L-3/L-4/**L-5**）· `scripts/check_doc_sync.py`（存在性基准 = `git ls-files`）｜ 计数口径（2026-10-16 更新，沿用 roadmap #9 定的三口径）：**门禁编号 16 条**（14→15 加 L-5 观测装配存在性，阶段2 #12；15→16 加 P13 身份装配存在性，阶段2 #11）／**实现函数 `check_*` 17 个**／**治理·HA 用「测试文件数」口径**（28 与 19，非用例数；本轮新增 `tests/governance/test_identity_gate_coverage.py`）。对外仍引用「门禁编号」这一口径 |
 | 控制台前端（会话/准入/控制面可视化） | ✅ | `applications/agent_server/api/console_router.py` + `applications/agent_server/static/` |
 | **Agent Registry / Agent 目录与市场**（登记、发现、owner、下线） | ❌ | |
 | **Tool Gateway**（统一 API 资产 + RBAC + 计量 + 限流熔断配额降级） | ❌ | MCP 客户端不算（那是消费侧） |

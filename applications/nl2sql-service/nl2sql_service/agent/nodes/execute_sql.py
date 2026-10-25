@@ -1,6 +1,19 @@
-"""execute_sql 节点：只读执行。
+"""execute_sql 节点：只读执行 + 执行期异常三分类。
 
-连接级 default_transaction_read_only=on，与 app/sql/guard.py 语义一致。
+只读保障两道：连接级 default_transaction_read_only=on + DwRepository 事务级
+SET LOCAL（#119，退出即撤），与 app/sql/guard.py 语义一致。
+
+2026-10-18 审计（方案 S-3）：此前 `str(exc)` 原样回显客户端，表/列存在性、
+权限拒绝等可被当作探测 oracle。现改为**对外分类消息、详情只进日志与
+`error_detail`**（后者供执行期纠错回路使用，不随响应体返回）。
+
+2026-10-18（方案 §5.11-E2 实装）：执行期异常此前直接 END，模型永远不知道
+SQL 在真实库上错了。现输出 `error_class` 三分类，由图决定是否进 correct：
+- correctable：列/表名不存在、语法错、类型不匹配——错误信息可机器识别，
+  改 SQL 可能解决；
+- rewritable：超时取消一类——进 correct 但带改写方向；
+- fatal：权限拒绝、连接失败——**不喂模型**（喂 3 轮也改不出来，还扩大
+  注入面），直接错误终态。
 """
 
 from typing import Any
@@ -8,8 +21,130 @@ from typing import Any
 from agent_core.logging import get_logger
 
 from nl2sql_service.agent.context import DataAgentContext
+from nl2sql_service.services.result_masking import is_masked_role, mask_sensitive_columns
 
 logger = get_logger(__name__)
+
+#: error_detail 截断上限：原文只进 prompt/日志，防超长堆栈撑爆上下文
+_ERROR_DETAIL_MAX_CHARS = 500
+
+#: SQLSTATE → (对外消息, error_class)（#113）。PG 的五字符状态码是**服务端权威
+#: 分类**，先于字符串 needle 匹配——字符串匹配有两类实测误判：① `FATAL:
+#: database/role does not exist`（3D000/28P01，连接级）被 "does not exist"
+#: 命中归成"表字段语法错误"（correctable，会被喂给模型改 SQL，改 3 轮也改不出）；
+#: ② 驱动/包装层会改写异常文本，状态码不受影响。psycopg 的 Error 与 PG 侧
+#: 异常都带 .sqlstate；拿不到状态码的异常自然回落下面的字符串规则。
+_SQLSTATE_RULES: tuple[tuple[str, str, str], ...] = (
+    # 对象不存在 / 语法 / 类型——correctable（改 SQL 可能解决）
+    ("42P01", "查询失败：表、字段或语法不正确", "correctable"),  # undefined_table
+    ("42703", "查询失败：表、字段或语法不正确", "correctable"),  # undefined_column
+    ("42601", "查询失败：表、字段或语法不正确", "correctable"),  # syntax_error
+    ("42883", "查询失败：表、字段或语法不正确", "correctable"),  # undefined_function
+    ("42804", "查询失败：表、字段或语法不正确", "correctable"),  # datatype_mismatch
+    ("42846", "查询失败：表、字段或语法不正确", "correctable"),  # cannot_coerce
+    ("22P02", "查询失败：表、字段或语法不正确", "correctable"),  # invalid_text_representation
+    # 语句超时 / 取消——rewritable（带改写方向进 correct）
+    ("57014", "查询超时：数据量或计算量超出时限", "rewritable"),  # query_canceled
+    # 权限拒绝——fatal（喂模型也改不出来，还扩大注入面）
+    ("42501", "查询被拒绝：当前账号无权访问相关数据", "fatal"),  # insufficient_privilege
+    # 连接级失败——fatal（查询从未到达服务端）
+    ("3D000", "查询失败：数据源连接不可用", "fatal"),  # invalid_catalog_name
+    ("28P01", "查询失败：数据源连接不可用", "fatal"),  # invalid_password
+    ("08006", "查询失败：数据源连接不可用", "fatal"),  # connection_failure
+    ("08001", "查询失败：数据源连接不可用", "fatal"),  # sqlclient_unable_establish
+    ("08003", "查询失败：数据源连接不可用", "fatal"),  # connection_does_not_exist
+)
+
+#: 状态码**类**前缀规则（先精确码后类码；57 类不进——57P01 停机是 fatal，
+#: 57014 取消才是 rewritable，类级一刀切会误判）。
+_SQLSTATE_CLASS_RULES: tuple[tuple[str, str, str], ...] = (
+    ("08", "查询失败：数据源连接不可用", "fatal"),  # connection exception 类
+)
+
+#: 顺序敏感：先判可改写类（超时）、再判权限、最后判对象不存在。
+#: 三元组 = (错误文本 needle, 对外消息, error_class)。**仅作无 SQLSTATE 时的
+#: 回落**（#113 前的唯一机制；非 PG 驱动/丢类型的包装异常才走到这里）。
+_ERROR_RULES: tuple[tuple[tuple[str, ...], str, str], ...] = (
+    (
+        ("timeout", "canceling statement", "statement timeout", "query cancelled"),
+        "查询超时：数据量或计算量超出时限",
+        "rewritable",
+    ),
+    (
+        ("permission denied", "insufficient privilege", "must be owner"),
+        "查询被拒绝：当前账号无权访问相关数据",
+        "fatal",
+    ),
+    (
+        (
+            "does not exist",
+            "undefined column",
+            "undefined table",
+            "syntax error",
+            # 类型不匹配（方案 §5.11-E2 归 correctable）：PG 的原话是
+            # invalid input syntax / invalid text representation 一族
+            "invalid input syntax",
+            "invalid text representation",
+            "datatype mismatch",
+            "cannot be cast",
+            "type mismatch",
+        ),
+        "查询失败：表、字段或语法不正确",
+        "correctable",
+    ),
+    (
+        ("could not connect", "connection refused", "server closed", "connection failed"),
+        "查询失败：数据源连接不可用",
+        "fatal",
+    ),
+)
+_GENERIC_ERROR = "查询执行失败"
+#: 未识别错误按 fatal：不可分类的原文进 prompt 只扩大注入面（S-7），
+#: 现网出现高频未知错时的正确动作是补 needle，不是放宽到"都喂模型"。
+_GENERIC_CLASS = "fatal"
+
+
+def classify_error(exc: BaseException) -> str:
+    """把 DB 异常映射成对外可读的分类消息（详情不外泄）。"""
+    return _classify(exc)[0]
+
+
+def classify_error_class(exc: BaseException) -> str:
+    """把 DB 异常映射到 {correctable, rewritable, fatal}（图路由用）。"""
+    return _classify(exc)[1]
+
+
+def _classify(exc: BaseException) -> tuple[str, str]:
+    # #113：SQLSTATE 优先（精确码 → 类前缀），拿不到状态码才回落字符串 needle。
+    state = str(getattr(exc, "sqlstate", "") or "").strip().upper()
+    if state:
+        for code, message, error_class in _SQLSTATE_RULES:
+            if state == code:
+                return message, error_class
+        for prefix, message, error_class in _SQLSTATE_CLASS_RULES:
+            if state.startswith(prefix):
+                return message, error_class
+    text = str(exc).lower()
+    for needles, message, error_class in _ERROR_RULES:
+        if any(needle in text for needle in needles):
+            return message, error_class
+    return _GENERIC_ERROR, _GENERIC_CLASS
+
+
+def _apply_masking(state: dict[str, Any], result: Any) -> Any:
+    """L3 结果层脱敏（§5.9）：按角色对敏感列投影掩码；无需脱敏时零开销返回原值。
+
+    关条件（任一即不脱）：脱敏总开关关 / 无敏感列清单 / 角色在 admin 名单。
+    """
+    if not state.get("result_masking_enabled", True):
+        return result
+    sensitive = state.get("sensitive_columns") or []
+    if not sensitive:
+        return result
+    role = state.get("user_role", "analyst")
+    if not is_masked_role(role, state.get("admin_roles") or ["admin"]):
+        return result
+    return mask_sensitive_columns(result, set(sensitive), keep=state.get("mask_keep_chars", 1))
 
 
 async def execute_sql(state: dict[str, Any]) -> dict[str, Any]:
@@ -25,7 +160,24 @@ async def execute_sql(state: dict[str, Any]) -> dict[str, Any]:
 
     try:
         result = await ctx.dw_repository.execute_readonly(sql)
-        return {"result": result, "error": ""}
-    except Exception as exc:
+        # L3 结果层脱敏（§5.9）：非 admin 角色对敏感列投影掩码。在答案合成与
+        # 响应返回**之前**做——answer 与响应体吃的是同一份 result，一处脱敏
+        # 两处生效。角色来自服务端断言（default_query_role），非客户端请求体。
+        result = _apply_masking(state, result)
+        # 成功必须清空三类错误字段：state 跨轮累积，上一轮的失败痕迹
+        # 留在 error_class 里会让路由又把成功轮送进 correct。
+        return {"result": result, "error": "", "error_detail": "", "error_class": ""}
+    except Exception as exc:  # noqa: BLE001 - 驱动异常类型不可穷举，按消息分类
         logger.exception("SQL execution failed")
-        return {"result": None, "error": str(exc)}
+        message, error_class = _classify(exc)
+        detail = str(exc)[:_ERROR_DETAIL_MAX_CHARS]
+        # 已尝试序列（§5.11 feedback 契约③）：没有它，模型会把同一处错改三遍
+        attempted = list(state.get("attempted_sql") or [])
+        attempted.append({"sql": sql, "error": detail})
+        return {
+            "result": None,
+            "error": message,
+            "error_detail": detail,
+            "error_class": error_class,
+            "attempted_sql": attempted,
+        }

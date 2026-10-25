@@ -14,7 +14,7 @@
 pip install -e ./packages/agent-core -e ./packages/shared-schemas -e ./applications/kefu-service
 
 # 启动（默认 :8003）
-uvicorn kefu_agent:app --host 0.0.0.0 --port 8003
+uvicorn kefu_agent.__main__:app --host 0.0.0.0 --port 8003
 ```
 
 ## 接口

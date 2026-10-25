@@ -10,8 +10,11 @@ requires-python = ">=3.11"
 license = { text = "Apache-2.0" }
 dependencies = [
     "agent-core",
+    # 身份门卫装配点（roadmap #11）：IdentityMiddleware 在 agent-runtime，
+    # PyJWT 走其 [identity] extra（惰性导入：只有真收到令牌才 import）。
+    "agent-runtime[identity]",
     "shared-schemas",
-    "fastapi>=0.115",
+    "fastapi>=0.159.1",
     "uvicorn[standard]>=0.54.0",
     "langgraph>=1.2.10,<2",
     "langchain-core>=0.3",
@@ -33,9 +36,15 @@ dev = [
 huggingface = [
     "langchain-huggingface>=0.1",
 ]
+# TOKENIZER=jieba 时才需要；缺包会告警并降级 bigram
+tokenizer = [
+    "jieba>=0.42",
+]
 
 [project.scripts]
-nl2sql-service = "nl2sql_service.scripts.build_meta_knowledge:main"
+# Q26②：指向 API server 入口。此前指向空壳构建 CLI，装完包按命令名启动
+# 得到空转脚本；构建 CLI 仍走 python -m nl2sql_service.scripts.build_meta_knowledge。
+nl2sql-service = "nl2sql_service.api.server:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["nl2sql_service"]

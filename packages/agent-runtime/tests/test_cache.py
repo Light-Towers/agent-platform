@@ -49,42 +49,42 @@ async def test_lookup_pool_none_returns_none():
 
 async def test_lookup_hit_within_threshold():
     pool, _ = _make_pool(("cached-answer", 0.1))
-    result = await cache.cache_lookup(pool, [0.1, 0.2], threshold=0.5)
+    result = await cache.cache_lookup(pool, [0.1, 0.2], threshold=0.5, tenant_id="t1")
     assert result == "cached-answer"
     assert cache.get_stats()["l2_hit"] == 1
 
 
 async def test_lookup_miss_distance_above_threshold():
     pool, _ = _make_pool(("cached-answer", 0.8))
-    result = await cache.cache_lookup(pool, [0.1], threshold=0.5)
+    result = await cache.cache_lookup(pool, [0.1], threshold=0.5, tenant_id="t1")
     assert result is None
     assert cache.get_stats()["miss"] == 1
 
 
 async def test_lookup_threshold_boundary_strict_less():
     pool, _ = _make_pool(("cached-answer", 0.5))
-    result = await cache.cache_lookup(pool, [0.1], threshold=0.5)
+    result = await cache.cache_lookup(pool, [0.1], threshold=0.5, tenant_id="t1")
     assert result is None
     assert cache.get_stats()["miss"] == 1
 
 
 async def test_lookup_empty_table():
     pool, _ = _make_pool(None)
-    result = await cache.cache_lookup(pool, [0.1], threshold=0.5)
+    result = await cache.cache_lookup(pool, [0.1], threshold=0.5, tenant_id="t1")
     assert result is None
     assert cache.get_stats()["miss"] == 1
 
 
 async def test_lookup_distance_none():
     pool, _ = _make_pool(("answer", None))
-    result = await cache.cache_lookup(pool, [0.1], threshold=0.5)
+    result = await cache.cache_lookup(pool, [0.1], threshold=0.5, tenant_id="t1")
     assert result is None
     assert cache.get_stats()["miss"] == 1
 
 
 async def test_lookup_exception_degrades_to_miss():
     pool, _ = _make_pool(execute_raises=True)
-    result = await cache.cache_lookup(pool, [0.1], threshold=0.5)
+    result = await cache.cache_lookup(pool, [0.1], threshold=0.5, tenant_id="t1")
     assert result is None
     assert cache.get_stats()["miss"] == 1
 
@@ -106,7 +106,7 @@ async def test_store_empty_answer_no_task():
 
 async def test_store_dispatches_background_task():
     pool, _ = _make_pool()
-    cache.cache_store(pool, "question", "answer", [0.1])
+    cache.cache_store(pool, "question", "answer", [0.1], tenant_id="t1")
     assert cache.pending_background_tasks() >= 1
     await asyncio.sleep(0.05)
     assert cache.pending_background_tasks() == 0
@@ -114,7 +114,7 @@ async def test_store_dispatches_background_task():
 
 async def test_store_write_failure_silent():
     pool, _ = _make_pool(execute_raises=True)
-    cache.cache_store(pool, "q", "a", [0.1])
+    cache.cache_store(pool, "q", "a", [0.1], tenant_id="t1")
     await asyncio.sleep(0.05)
     assert cache.pending_background_tasks() == 0
 
@@ -145,3 +145,36 @@ def test_reset_stats_clears():
     cache.reset_stats()
     s = cache.get_stats()
     assert s.get("total", 0) == 0
+
+async def test_lookup_empty_tenant_no_sql_fail_closed():
+    """T1.1/G1 反证：空租户不得命中任何行——一次 SQL 都不发、计 miss。
+
+    判据来源 plan-platform-tenant-workspace-identity §9.11-②：
+    pool.connection 调用计数 = 0，且 miss 增长。
+    """
+    pool, _ = _make_pool(("cached-answer", 0.1))
+    result = await cache.cache_lookup(pool, [0.1], threshold=0.5, tenant_id="")
+    assert result is None
+    assert cache.get_stats()["miss"] == 1
+    pool.connection.assert_not_called()
+
+
+def test_store_empty_tenant_skips_with_counter():
+    """T1.1/D17 反证：写侧空租户跳过——不发 SQL、不派后台任务、独立计数。
+
+    判据来源同上：表行数不变的单测代理 = pool.connection 不被调用；
+    计数进 get_stats()["skipped_no_tenant"]，与"写入失败静默"区分。
+    """
+    pool, _ = _make_pool()
+    before = cache.pending_background_tasks()
+    cache.cache_store(pool, "q", "a", [0.1], tenant_id="")
+    assert cache.pending_background_tasks() == before
+    pool.connection.assert_not_called()
+    assert cache.get_stats()["skipped_no_tenant"] == 1
+
+
+def test_reset_stats_clears_skip_counter():
+    cache.cache_store(_make_pool()[0], "q", "a", [0.1], tenant_id="")
+    assert cache.get_stats()["skipped_no_tenant"] == 1
+    cache.reset_stats()
+    assert cache.get_stats()["skipped_no_tenant"] == 0

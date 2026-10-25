@@ -18,6 +18,7 @@ from agent_runtime.awaitable_task import (
     InvalidTaskTransition,
     can_transition,
 )
+from agent_runtime.planner.durability import FencedWriteError
 
 
 class PgAwaitableTaskStore(AwaitableTaskStore):
@@ -33,28 +34,41 @@ class PgAwaitableTaskStore(AwaitableTaskStore):
                 f"非法任务状态转换: {cur.state.value} → {task.state.value} (task={task.task_id})"
             )
         task.updated_at = time.time()
+        # V3 缺口 1：generation fencing——本 WHERE 子句是 awaitable_task.is_stale_generation
+        # 的**原子等价物**（改一处必须同改另一处）。任一侧 NULL 即放行：NULL = 来源未知
+        # （v12 迁移前的存量行 / 未接线的调用方），与 execution_checkpoints 的处置同构。
+        # generation 用 COALESCE 而非直接覆盖：无 generation 的写入方不得把已知的
+        # generation 降级成 NULL，否则 fence 会被一次"来源未知"的写永久解除。
+        sql = (
+            "INSERT INTO awaitable_tasks "
+            "(task_id, execution_id, step_id, kind, provider, state, "
+            " provider_task_id, submission_receipt, completion_receipt, "
+            " submitted_at, completed_at, deadline, resume_payload, metadata, updated_at, "
+            " generation) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
+            "ON CONFLICT (task_id) DO UPDATE SET "
+            " execution_id = EXCLUDED.execution_id, "
+            " step_id = EXCLUDED.step_id, "
+            " kind = EXCLUDED.kind, "
+            " provider = EXCLUDED.provider, "
+            " state = EXCLUDED.state, "
+            " provider_task_id = EXCLUDED.provider_task_id, "
+            " submission_receipt = EXCLUDED.submission_receipt, "
+            " completion_receipt = EXCLUDED.completion_receipt, "
+            " submitted_at = EXCLUDED.submitted_at, "
+            " completed_at = EXCLUDED.completed_at, "
+            " deadline = EXCLUDED.deadline, "
+            " resume_payload = EXCLUDED.resume_payload, "
+            " metadata = EXCLUDED.metadata, "
+            " updated_at = EXCLUDED.updated_at, "
+            " generation = COALESCE(EXCLUDED.generation, awaitable_tasks.generation) "
+            "WHERE (awaitable_tasks.generation IS NULL OR EXCLUDED.generation IS NULL "
+            "       OR EXCLUDED.generation >= awaitable_tasks.generation) "
+            "RETURNING task_id"
+        )
         async with self._pool.connection() as conn:
-            await conn.execute(
-                "INSERT INTO awaitable_tasks "
-                "(task_id, execution_id, step_id, kind, provider, state, "
-                " provider_task_id, submission_receipt, completion_receipt, "
-                " submitted_at, completed_at, deadline, resume_payload, metadata, updated_at) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
-                "ON CONFLICT (task_id) DO UPDATE SET "
-                " execution_id = EXCLUDED.execution_id, "
-                " step_id = EXCLUDED.step_id, "
-                " kind = EXCLUDED.kind, "
-                " provider = EXCLUDED.provider, "
-                " state = EXCLUDED.state, "
-                " provider_task_id = EXCLUDED.provider_task_id, "
-                " submission_receipt = EXCLUDED.submission_receipt, "
-                " completion_receipt = EXCLUDED.completion_receipt, "
-                " submitted_at = EXCLUDED.submitted_at, "
-                " completed_at = EXCLUDED.completed_at, "
-                " deadline = EXCLUDED.deadline, "
-                " resume_payload = EXCLUDED.resume_payload, "
-                " metadata = EXCLUDED.metadata, "
-                " updated_at = EXCLUDED.updated_at",
+            db_cur = await conn.execute(
+                sql,
                 (
                     task.task_id,
                     task.execution_id,
@@ -71,15 +85,22 @@ class PgAwaitableTaskStore(AwaitableTaskStore):
                     json.dumps(task.resume_payload) if task.resume_payload else None,
                     json.dumps(task.metadata),
                     task.updated_at,
+                    task.generation,
                 ),
             )
+            if await db_cur.fetchone() is None:
+                raise FencedWriteError(
+                    f"awaitable task 回执写入被拒绝（stale generation fencing）"
+                    f"task={task.task_id} incoming_generation={task.generation}"
+                )
 
     async def load(self, task_id: str) -> AwaitableTask | None:
         async with self._pool.connection() as conn:
             row = await conn.execute(
                 "SELECT task_id, execution_id, step_id, kind, provider, state, "
                 "       provider_task_id, submission_receipt, completion_receipt, "
-                "       submitted_at, completed_at, deadline, resume_payload, metadata, updated_at "
+                "       submitted_at, completed_at, deadline, resume_payload, metadata, "
+                "       updated_at, generation "
                 "FROM awaitable_tasks WHERE task_id = %s",
                 (task_id,),
             )
@@ -93,7 +114,8 @@ class PgAwaitableTaskStore(AwaitableTaskStore):
             row = await conn.execute(
                 "SELECT task_id, execution_id, step_id, kind, provider, state, "
                 "       provider_task_id, submission_receipt, completion_receipt, "
-                "       submitted_at, completed_at, deadline, resume_payload, metadata, updated_at "
+                "       submitted_at, completed_at, deadline, resume_payload, metadata, "
+                "       updated_at, generation "
                 "FROM awaitable_tasks WHERE execution_id = %s",
                 (execution_id,),
             )
@@ -105,7 +127,8 @@ class PgAwaitableTaskStore(AwaitableTaskStore):
             row = await conn.execute(
                 "SELECT task_id, execution_id, step_id, kind, provider, state, "
                 "       provider_task_id, submission_receipt, completion_receipt, "
-                "       submitted_at, completed_at, deadline, resume_payload, metadata, updated_at "
+                "       submitted_at, completed_at, deadline, resume_payload, metadata, "
+                "       updated_at, generation "
                 "FROM awaitable_tasks WHERE state NOT IN (%s, %s, %s, %s)",
                 (
                     AwaitableState.COMPLETED.value,
@@ -135,6 +158,7 @@ class PgAwaitableTaskStore(AwaitableTaskStore):
             resume_payload=json.loads(r[12]) if r[12] else None,
             metadata=json.loads(r[13]) if r[13] else {},
             updated_at=r[14],
+            generation=r[15],
         )
 
 

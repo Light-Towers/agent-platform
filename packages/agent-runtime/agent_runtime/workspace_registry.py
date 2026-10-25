@@ -113,6 +113,15 @@ def _is_undefined_table(exc: BaseException) -> bool:
     return getattr(exc, "sqlstate", None) == "42P01"
 
 
+def _is_undefined_column(exc: BaseException) -> bool:
+    """仅判定 PG 错误码 42703（undefined_column）：013-015 与 014a 渐进窗口。
+
+    014a 应用前 workspaces 无 org_id/visibility 列——写入侧按旧形态降级，
+    不是 fail-open（归属校验语义不变，仅少记新列）。
+    """
+    return getattr(exc, "sqlstate", None) == "42703"
+
+
 # --- 归属校验（migration 007 workspaces 表） --------------------------------
 
 async def resolve_workspace(pool, tenant_id: object, workspace_id: str) -> bool:
@@ -155,11 +164,25 @@ async def register_workspace(pool, workspace_id: str, tenant_id: object) -> None
             )
             if await cur.fetchone():
                 return
-            await conn.execute(
-                "INSERT INTO workspaces (tenant_id, id) VALUES (%s, %s) "
-                "ON CONFLICT (tenant_id, id) DO NOTHING",
-                (tenant, ws),
-            )
+            # 014a（D7 三级归属）：org_id 同值域落列（= tenant 断言值）；owner_user_id
+            # 留 NULL——D18 的"自动注册绑服务端断言 user"须 user 断言可用（T4/A5 后
+            # 从 server_user_id() 取，observe 档无绑定不硬造属主）。
+            try:
+                await conn.execute(
+                    "INSERT INTO workspaces (tenant_id, id, org_id, visibility) "
+                    "VALUES (%s, %s, %s, 'private') "
+                    "ON CONFLICT (tenant_id, id) DO NOTHING",
+                    (tenant, ws, tenant),
+                )
+            except Exception as inner:
+                if not _is_undefined_column(inner):
+                    raise
+                # 渐进窗口：014a 未应用 ⇒ 无 org_id/visibility 列，按 007 旧形态写入
+                await conn.execute(
+                    "INSERT INTO workspaces (tenant_id, id) VALUES (%s, %s) "
+                    "ON CONFLICT (tenant_id, id) DO NOTHING",
+                    (tenant, ws),
+                )
     except Exception as e:
         if _is_undefined_table(e):
             logger.warning(

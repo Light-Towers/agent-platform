@@ -167,3 +167,96 @@ def test_module_no_longer_references_the_phantom_api():
 
     src = inspect.getsource(recall_exact) + inspect.getsource(session_router)
     assert "alist_messages(" not in src
+
+class TestRevertOwnershipG3(TestHistoryEndpointOverHttp):
+    """T1.2/G3：/session/revert 归属断言（plan-platform-tenant-workspace-identity 批次表）。
+
+    继承 TestHistoryEndpointOverHttp 以复用其类内 make_client fixture（TestClient
+    + app 装配 + settings cache 清理）。
+    """
+
+    def test_authed_client_cannot_target_foreign_thread(self, make_client):
+        """认证启用：客户端指定的 session_id 不参与归属——归一化为断言租户线程。
+
+        与 test_real_turn_shows_up_in_history 同构：客户端传 "tenant-bob"（他人
+        命名空间）也被 resolve_thread_id 换成 tenant-default ⇒ 404 而非回退他人。
+        """
+        client = make_client(API_KEY="k-rev")
+        r = client.post(
+            "/session/revert",
+            json={"session_id": "tenant-bob", "checkpoint_id": "cp-x"},
+            headers={"X-API-Key": "k-rev"},
+        )
+        assert r.status_code == 404
+        assert r.json()["detail"] == "CHECKPOINT_NOT_FOUND"
+
+    def test_dev_mode_foreign_prefixed_thread_is_403(self, make_client):
+        """开发模式：无前缀归一化兜底，handler 归属断言拦截 ⇒ 403 FORBIDDEN（原死码）。"""
+        client = make_client()  # 无 API_KEY ⇒ 开发模式，信任客户端值
+        r = client.post(
+            "/session/revert",
+            json={"session_id": "tenant-bob", "checkpoint_id": "cp-x"},
+        )
+        assert r.status_code == 403
+        assert r.json()["detail"] == "FORBIDDEN"
+
+    def test_dev_mode_own_prefixed_thread_passes_gate(self, make_client):
+        """开发模式：归属匹配的 tenant- 前缀线程通过断言（走到 CHECKPOINT_NOT_FOUND）。"""
+        client = make_client()
+        r = client.post(
+            "/session/revert",
+            json={"session_id": "tenant-default", "checkpoint_id": "cp-x"},
+        )
+        assert r.status_code == 404
+        assert r.json()["detail"] == "CHECKPOINT_NOT_FOUND"
+
+class TestQueryTenantAssertionT21(TestHistoryEndpointOverHttp):
+    """T2.1/G2：/query 租户来源收口——body 自报值不参与数据归属（软模式观测期）。
+
+    判据来源 plan-platform-tenant-workspace-identity 批次表 T2.1：
+    取值统一 server_tenant_id()；显式携带且与断言不符 ⇒ WARNING（10-10 选项 A）。
+    """
+
+    def test_body_tenant_mismatch_warns_and_uses_asserted(self, make_client, caplog):
+        """body 自报 spoofed 租户 ⇒ WARNING 记录（断言值与 body 值都在日志里，可复核）。
+
+        取值点收口本身由源码级判据保证（`grep req.tenant_id` 仅剩比对/日志 2 处）；
+        本用例钉软模式行为面：入口比对无环境守卫，必然执行。数据落断言租户的
+        强判据需 PG（requires_pg），属 T1/T2 集成验证批。
+        """
+        import logging as _logging
+
+        client = make_client(API_KEY="k-t21")
+        with caplog.at_level(_logging.WARNING):
+            r = client.post(
+                "/query",
+                json={"query": "你好", "tenant_id": "spoofed"},
+                headers={"X-API-Key": "k-t21"},
+            )
+        assert r.status_code == 200, r.text
+        warned = [rec for rec in caplog.records if "与服务端断言不一致" in rec.message]
+        assert warned, "body 与断言不一致必须留 WARNING（软模式观测面）"
+        assert "spoofed" in warned[0].getMessage()
+        assert "default" in warned[0].getMessage()
+
+    def test_body_tenant_absent_no_warning(self, make_client, monkeypatch, caplog):
+        """body 未自报租户（正常情况）不刷 WARNING。"""
+        import logging as _logging
+
+        from agent_server.api import query_router as _qr
+
+        async def _spy(pool, tenant_arg, workspace_id):
+            return None
+
+        monkeypatch.setattr(_qr, "resolve_workspace", _spy)
+        client = make_client(API_KEY="k-t21b")
+        with caplog.at_level(_logging.WARNING):
+            r = client.post(
+                "/query",
+                json={"query": "你好"},
+                headers={"X-API-Key": "k-t21b"},
+            )
+        assert r.status_code == 200, r.text
+        assert not any(
+            "与服务端断言不一致" in rec.message for rec in caplog.records
+        )

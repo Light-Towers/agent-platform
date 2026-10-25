@@ -9,8 +9,11 @@ dependencies = [
     # 安装该 extra 后 classify_intent 可走 sentence-transformers 主路径；
     # 未安装时 classify_intent 自动降级，intent_node 回退业务关键词分流（可达性底线，#1）。
     "agent-core[memory-embed-local]",
+    # 身份门卫装配点（roadmap #11）：IdentityMiddleware 在 agent-runtime，
+    # PyJWT 走其 [identity] extra（惰性导入：只有真收到令牌才 import）。
+    "agent-runtime[identity]",
     "shared-schemas",
-    "fastapi>=0.129.0",
+    "fastapi>=0.159.1",
     "uvicorn>=0.41.0",
     "langgraph>=1.2.10,<2",
     "pydantic>=2.13.5",

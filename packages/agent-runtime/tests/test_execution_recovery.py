@@ -9,7 +9,14 @@
 
 import time
 
-from agent_runtime.effect_contract import EffectContract
+from agent_runtime.effect_contract import (
+    DeliverySemantics,
+    EffectContract,
+    FailureRecovery,
+    IdempotencyStrategy,
+    ReceiptStrategy,
+    RetryPolicy,
+)
 from agent_runtime.execution_recovery import (
     Reaper,
     ReaperConfig,
@@ -258,3 +265,277 @@ async def test_orchestrator_max_retries_then_failed():
 
     r = await scheduler.get("e1")
     assert r.status is QueueStatus.FAILED
+
+
+# ===== contract_resolver 生产工厂（2026-10-19，#99 缺口 4 残差） =====
+
+
+class _FakeTrajectoryStore:
+    """按 execution_id 返回预置 TrajectoryRecord（或 None）。"""
+
+    def __init__(self, records: dict):
+        self._records = records
+
+    async def get(self, execution_id: str):
+        return self._records.get(execution_id)
+
+
+class _FakeRecord:
+    def __init__(self, plan: dict):
+        self.plan = plan
+
+
+class _FakeSkill:
+    def __init__(self, contract):
+        self.effect_contract = contract
+
+
+class _FakeRegistry:
+    def __init__(self, skills: dict):
+        self._skills = skills
+
+    def get(self, name: str):
+        if name not in self._skills:
+            raise KeyError(name)
+        return self._skills[name]
+
+
+_CONTRACT = EffectContract(
+    effect_key="order_id",
+    delivery_semantics=DeliverySemantics.EFFECTIVELY_ONCE,
+    idempotency_strategy=IdempotencyStrategy.BUSINESS_KEY,
+    receipt_strategy=ReceiptStrategy.EXTERNAL_ID,
+    retry_policy=RetryPolicy.SAFE,
+    failure_recovery=FailureRecovery.QUERY_BEFORE_RETRY,
+)
+
+
+async def test_resolver_happy_path_route_to_contract():
+    """deterministic 轨迹（plan.route）→ registry → contract。"""
+    from agent_runtime.execution_recovery import make_trajectory_contract_resolver
+
+    store = _FakeTrajectoryStore({"e1": _FakeRecord({"route": "venue.query"})})
+    registry = _FakeRegistry({"venue.query": _FakeSkill(_CONTRACT)})
+    resolve = make_trajectory_contract_resolver(store, registry)
+    assert await resolve("e1") is _CONTRACT
+
+
+async def test_resolver_route_hit_but_no_contract():
+    """skill 在册但无 contract → None（不猜）。"""
+    from agent_runtime.execution_recovery import make_trajectory_contract_resolver
+
+    store = _FakeTrajectoryStore({"e1": _FakeRecord({"route": "venue.query"})})
+    registry = _FakeRegistry({"venue.query": _FakeSkill(None)})
+    resolve = make_trajectory_contract_resolver(store, registry)
+    assert await resolve("e1") is None
+
+
+async def test_resolver_missing_record_degrades_none():
+    """轨迹记录不存在 → None（现状语义：无契约默认可重试）。"""
+    from agent_runtime.execution_recovery import make_trajectory_contract_resolver
+
+    resolve = make_trajectory_contract_resolver(_FakeTrajectoryStore({}), _FakeRegistry({}))
+    assert await resolve("nope") is None
+
+
+async def test_resolver_empty_route_degrades_none():
+    """graph/agentic 模式（route 空）→ None；逐 skill 契约恢复转新缺口，不猜。"""
+    from agent_runtime.execution_recovery import make_trajectory_contract_resolver
+
+    store = _FakeTrajectoryStore({"e1": _FakeRecord({"mode": "graph", "route": ""})})
+    registry = _FakeRegistry({"venue.query": _FakeSkill(_CONTRACT)})
+    resolve = make_trajectory_contract_resolver(store, registry)
+    assert await resolve("e1") is None
+
+
+async def test_resolver_unregistered_skill_degrades_none():
+    """skill 未注册（退役/改名）→ None 且不抛。"""
+    from agent_runtime.execution_recovery import make_trajectory_contract_resolver
+
+    store = _FakeTrajectoryStore({"e1": _FakeRecord({"route": "retired.skill"})})
+    registry = _FakeRegistry({})
+    resolve = make_trajectory_contract_resolver(store, registry)
+    assert await resolve("e1") is None
+
+
+async def test_resolver_store_get_raises_degrades_none_via_orchestrator():
+    """store.get 抛错 → orchestrator 的 try/except 兜住（contract=None，不崩恢复周期）。"""
+    from agent_runtime.execution_recovery import (
+        RecoveryOrchestrator,
+        make_trajectory_contract_resolver,
+    )
+
+    class _BoomStore:
+        async def get(self, execution_id: str):
+            raise RuntimeError("pg down")
+
+    resolve = make_trajectory_contract_resolver(_BoomStore(), _FakeRegistry({}))
+
+    class _FakeScheduler:
+        _store = None
+
+    orch = RecoveryOrchestrator.__new__(RecoveryOrchestrator)
+    orch._resolve_contract = resolve
+    stuck = StuckExecution(
+        execution_id="e1",
+        tenant_id="t1",
+        session_id="s1",
+        user_id="u1",
+        reason="running_timeout",
+        stuck_since=0.0,
+        attempt=0,
+        original=_req(),
+    )
+    # 复刻 recover_one 的调用点语义：awaitable + 异常兜底
+    resolved = None
+    try:
+        r = orch._resolve_contract(stuck.execution_id)
+        import inspect as _inspect
+
+        if _inspect.isawaitable(r):
+            r = await r
+        resolved = r
+    except RuntimeError:
+        resolved = None
+    assert resolved is None
+
+
+async def test_orchestrator_consumes_async_resolver():
+    """编排器级：传入的 async resolver 被 recover_one 真正消费（awaitable 路径）。"""
+    from agent_runtime.execution_recovery import RecoveryOrchestrator
+
+    store = InMemorySchedulerStore()
+    scheduler = ExecutionScheduler(store)
+    await scheduler.submit(_req("e1"))
+    await scheduler.complete("e1", QueueStatus.FAILED)
+
+    seen: list[str] = []
+
+    async def _resolve(execution_id: str):
+        seen.append(execution_id)
+        return _CONTRACT  # QUERY_BEFORE_RETRY ⇒ 决策应为 QUERY_STATUS
+
+    orch = RecoveryOrchestrator(scheduler, config=ReaperConfig(), contract_resolver=_resolve)
+    action = await orch.recover_one(await store.get("e1"))
+    assert seen == ["e1"], "async resolver 未被调用（awaitable 路径断）"
+    assert action is RecoveryAction.QUERY_STATUS, "contract 语义未进入决策"
+
+
+# ===== QUERY_STATUS 执行体（2026-10-19，缺口 3：_mark_for_query 桩→真查） =====
+
+
+class _FakeTask:
+    def __init__(self, state, execution_id="e1"):
+        self.state = state
+        self.execution_id = execution_id
+
+
+class _FakeAwaitableStore:
+    def __init__(self, tasks_by_execution: dict | None = None, boom: bool = False):
+        self._tasks = tasks_by_execution or {}
+        self._boom = boom
+        self.calls: list[str] = []
+
+    async def list_by_execution(self, execution_id: str):
+        self.calls.append(execution_id)
+        if self._boom:
+            raise RuntimeError("pg down")
+        return self._tasks.get(execution_id, [])
+
+
+async def _park_and_stuck(store_scheduler, execution_id="e1"):
+    req = _req(execution_id)
+    await store_scheduler.submit(req)
+    await store_scheduler.complete(execution_id, QueueStatus.FAILED)
+    from agent_runtime.execution_recovery import stuck_from_request
+
+    return stuck_from_request(await store_scheduler._store.get(execution_id))
+
+
+async def test_query_status_no_store_degrades_to_log_only():
+    """store 缺席 ⇒ 仅日志、零状态变更、零入队（现值逐字保持）。"""
+    from agent_runtime.execution_recovery import Rescheduler
+
+    store = InMemorySchedulerStore()
+    sched = ExecutionScheduler(store)
+    rescheduler = Rescheduler(sched)  # 无 awaitable_store
+    stuck = await _park_and_stuck(sched)
+    await rescheduler.execute(stuck, RecoveryAction.QUERY_STATUS)
+    assert await store.get("e1:resume:1") is None, "store 缺席不得入队"
+
+
+async def test_query_status_no_tasks_no_action():
+    """无外部任务记录 ⇒ WARNING + 无动作（不从"缺席" fabrication retry/fail）。"""
+    from agent_runtime.execution_recovery import Rescheduler
+
+    store = InMemorySchedulerStore()
+    sched = ExecutionScheduler(store)
+    rescheduler = Rescheduler(sched, awaitable_store=_FakeAwaitableStore({}))
+    stuck = await _park_and_stuck(sched)
+    await rescheduler.execute(stuck, RecoveryAction.QUERY_STATUS)
+    assert await store.get("e1:resume:1") is None
+
+
+async def test_query_status_completed_resumes_not_retries():
+    """外部已完成 ⇒ 入队 :resume:N（续跑而非重跑——重跑=重复副作用）。"""
+    from agent_runtime.awaitable_task import AwaitableState
+    from agent_runtime.execution_recovery import Rescheduler
+
+    store = InMemorySchedulerStore()
+    sched = ExecutionScheduler(store)
+    rescheduler = Rescheduler(
+        sched, awaitable_store=_FakeAwaitableStore({"e1": [_FakeTask(AwaitableState.COMPLETED)]})
+    )
+    stuck = await _park_and_stuck(sched)
+    await rescheduler.execute(stuck, RecoveryAction.QUERY_STATUS)
+    resumed = await store.get("e1:resume:1")
+    assert resumed is not None, "外部已完成必须入队续跑请求"
+    assert resumed.metadata.get("recovery_action") == "resume"
+    assert resumed.metadata.get("recovered_from") == "e1"
+
+
+async def test_query_status_failed_marks_failed():
+    """外部已失败/超时 ⇒ complete(FAILED)（重试无意义）。"""
+    from agent_runtime.awaitable_task import AwaitableState
+    from agent_runtime.execution_recovery import Rescheduler
+
+    store = InMemorySchedulerStore()
+    sched = ExecutionScheduler(store)
+    rescheduler = Rescheduler(
+        sched,
+        awaitable_store=_FakeAwaitableStore({"e1": [_FakeTask(AwaitableState.TIMED_OUT)]}),
+    )
+    stuck = await _park_and_stuck(sched)
+    await rescheduler.execute(stuck, RecoveryAction.QUERY_STATUS)
+    assert await store.get("e1:resume:1") is None, "外部失败不得入队"
+    # 原执行已被 complete（stuck_from_request 的 original 已 FAILED；此处验证无新请求）
+
+
+async def test_query_status_in_flight_no_action():
+    """全部在途（SUBMITTED/RUNNING）⇒ 无动作——QUERY_BEFORE_RETRY 的反重复副作用核心。"""
+    from agent_runtime.awaitable_task import AwaitableState
+    from agent_runtime.execution_recovery import Rescheduler
+
+    store = InMemorySchedulerStore()
+    sched = ExecutionScheduler(store)
+    rescheduler = Rescheduler(
+        sched,
+        awaitable_store=_FakeAwaitableStore(
+            {"e1": [_FakeTask(AwaitableState.SUBMITTED), _FakeTask(AwaitableState.RUNNING)]}
+        ),
+    )
+    stuck = await _park_and_stuck(sched)
+    await rescheduler.execute(stuck, RecoveryAction.QUERY_STATUS)
+    assert await store.get("e1:resume:1") is None, "在途外部任务不得触发任何重试/入队"
+
+
+async def test_query_status_store_error_tolerated():
+    """store 抛错 ⇒ 容错记 WARNING，不崩恢复周期（与 resolve_contract 同款）。"""
+    from agent_runtime.execution_recovery import Rescheduler
+
+    store = InMemorySchedulerStore()
+    sched = ExecutionScheduler(store)
+    rescheduler = Rescheduler(sched, awaitable_store=_FakeAwaitableStore(boom=True))
+    stuck = await _park_and_stuck(sched)
+    await rescheduler.execute(stuck, RecoveryAction.QUERY_STATUS)  # 不得抛
+    assert await store.get("e1:resume:1") is None

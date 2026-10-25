@@ -1,6 +1,6 @@
 # Plan：全局技术债务治理（2026-09-22 扫描成果）
 
-> 状态：2026-09-22 制定，P0+P1+P2(T2.1/T2.3) 已完成，P2(T2.2/T2.4)+P3 待实施
+> 状态：2026-09-22 制定。**2026-10-15 对码核实并订正**：原状态行与复选框自相矛盾（T2.4 全 `[x]` 却标「待实施」、T2.3 全 `[ ]` 却标「已完成」）。逐条对码结论——**绝大部分已落地**（P0/P1、T2.1、T2.4、T3.1 余者显式「跳过」并注明原因、T3.2 的 `check_doc_sync.py` 已常驻 CI、三方审核补充 1/2/3/5/6 均已修，补充 7/T1.7 于**本批 2026-10-15 落地**）；**真正仍未做仅 3 项**：① T2.2 已**分项处置**（详见该节）——item5（`config.py` 三处改 `dataclasses.replace`）**本批落地**、item6（`agent.py` if-elif→dict 派发）核实后**判定不做**（if-elif 编码真实 body/no-body 区别，dict 派发反不清晰）、items1-4（4 处 ~200 行大函数拆分）**缓做**（纯风格高风险、行号已漂移、与本 plan T3.1 跳过同类项矛盾 ⇒ 需独立方案 + 分支 + 逐函数补测）；② T2.3（依赖配置统一）已**重新对码 + 分项处置**（详见该节）——item5（exhibition `.env.example` 补 10 个 `EXHIBITION_AGENT_*` Settings 变量，1:1 取自 config.py 零杜撰）+ item6（kefu 悬空引用 repoint 到 `agent-core/README.md`「环境变量清单」，不新建重复清单）**本批落地**，items1/7 早已落地、items2/4/8 因 `dialogue-framework`/`zhanggui-zhiku`/`wenda` 三包已消失而 moot（意图已全仓满足），仅 item3 的 fastapi 根下界 `>=0.115` 低于旧目标 `0.129`——仅抬下界无驱动故**标注不盲改**；③ 补充 4（agentic bridge opt-in 默认开还是仅补测试）属**待拍板**设计决策。逐条证据见文末「## 2026-10-15 对码核实」。
 > 来源：6 维度并行扫描（代码质量 / 架构 / 依赖配置 / 测试覆盖 / 文档注释 / 重构遗留）
 > 范围：当前工作区快照（存在并发写入，实施前须冻结基线）
 > 总计：发现 97 项，去重后约 80 项实质债务，分 4 优先级 13 批次任务
@@ -221,37 +221,42 @@
 
 ### T2.2 代码质量改进（6 项）
 
-**改动**：
-- [ ] 拆分 `applications/agent_server/api/routes.py:65 query`（200 行）为 admission/coordination/cache/stream 各抽独立函数
-- [ ] 拆分 `applications/agent_server/agent/graph.py:46 build_graph`（200 行）
-- [ ] 拆分 `applications/agent_server/main.py:106 lifespan`（183 行）用 lifespan context manager 组合
-- [ ] 拆分 `agent_federation/agent/main_agent.py:543-652 _execute_agent_core`（122 行/嵌套 9）为 `_prepare_session`/`_inject_context`/`_consume_stream`/`_guard_output`
-- [ ] `agent_federation/agent/config.py:128-162` SubserviceConfig 三处用 `dataclasses.replace(old, healthy=...)`
-- [ ] `exhibition-agent/skill_loader/agent.py:226-239` HTTP 方法 if-elif 链改 dict 派发
+> **2026-10-15 分项处置**（不整节翻勾——6 项性质不同，逐项判定，避免"plan 列了就改"）：
 
-**验收**：
-- [ ] 无函数 >80 行（或显式标注例外）
-- [ ] 无嵌套深度 >5
-- [ ] 全量测试不回归
+**改动**：
+- [ ] 拆分 `applications/agent_server/api/routes.py:65 query`（200 行）为 admission/coordination/cache/stream 各抽独立函数 — **缓做**：纯风格大函数拆分、回归风险高、无功能收益；且**行号引用已漂移**（`query` 现在 `api/query_router.py`，非 `routes.py:65`）；与本 plan T3.1 把同类「`routes.py` 按业务域拆分」判为「跳过：大规模重构」自相矛盾 ⇒ 如需做应独立成方案 + 独立分支 + 逐函数补测后再拆
+- [ ] 拆分 `applications/agent_server/agent/graph.py:46 build_graph`（200 行） — **缓做**：同上（纯风格、高风险、需先对码确认函数仍在该位置）
+- [ ] 拆分 `applications/agent_server/main.py:106 lifespan`（183 行）用 lifespan context manager 组合 — **缓做**：同上；且 lifespan 本 session 刚被 human_task 装配改过，再叠大重构会混淆改动面
+- [ ] 拆分 `agent_federation/agent/main_agent.py:543-652 _execute_agent_core`（122 行/嵌套 9）为 `_prepare_session`/`_inject_context`/`_consume_stream`/`_guard_output` — **缓做**：同上（跨应用、嵌套深、拆分需逐段补测）
+- [x] `agent_federation/agent/config.py` SubserviceConfig 三处用 `dataclasses.replace(old, healthy=...)` — **2026-10-15 落地**：`SubserviceConfig` 是 `@dataclass(frozen=True)` 六字段（name/graph_id/url/endpoint/local_agent/healthy），三处（`_wire_local_fallbacks` 装 local_agent、`mark_unhealthy`、`mark_healthy`）原逐字段手抄六项只为改一项 ⇒ 改 `replace(old, ...)`，消除「frozen dataclass 将来加字段时手抄静默丢新字段」的 bug 类。自证：`replace` 保留全部 5 个非 healthy 字段、只翻 healthy；`get_all_subservices()` 不变；ruff rc=0、federation **176 passed**
+- [~] `exhibition-agent/skill_loader/agent.py` HTTP 方法 if-elif 链改 dict 派发 — **2026-10-15 核实后判定不做**：现 if-elif（`agent.py:230-243`）编码了**真实的 body/no-body 区别**（GET/DELETE 只带 `params`，POST 带 `json=body_params`）**+ else→400 错误分支**；改 dict 派发须给每个调用套 lambda 且错误分支另判，仅 3 个**非齐整**分支，属过度抽象、并不更清晰（先证伪自己的动机：不为"plan 列了"而改）
+
+**验收**（按实际处置范围）：
+- [x] item5（config.py）：behavior 自证 + ruff + federation 176 passed，零回归
+- [~] item6（agent.py）：判定不做（理由见上），非遗漏
+- [ ] 「无函数 >80 行 / 无嵌套 >5」：**未达**——该判据只适用于 items 1-4 的大函数拆分，四项均**缓做**（纯风格 + 高风险 + 与本 plan T3.1 跳过同类项矛盾）⇒ 本 plan 不追求此判据，留待独立重构方案
+- [x] 全量测试不回归（federation 176 passed；已改的 config.py 属 federation）
 
 ---
 
 ### T2.3 依赖配置统一（8 项 Medium）
 
-**改动**：
-- [ ] 根 `pyproject.toml:20-21` `langchain-core>=0.3`→`>=1.5.3`、`langchain-openai>=0.3`→`>=1.4`
-- [ ] `applications/dialogue-framework/pyproject.toml:24` `sqlglot>=23.0`→`>=25.0`
-- [ ] 统一 pydantic `>=2.13` / fastapi `>=0.129` / uvicorn `>=0.41` 下界
-- [ ] `applications/zhanggui-zhiku/pyproject.toml:83` ruff select 补 `"I"`，跑 `ruff check --fix` 收敛存量 I001
-- [ ] 新增 `applications/exhibition-agent/.env.example`（列 config.py 读取的所有 env）
-- [ ] 新增 `packages/agent-core/.env.example`（或删除 kefu-service/.env.example:6 对该文件的引用）
-- [ ] `agent_federation/requirements.txt` 补 agent-runtime 声明（与 T1.1 合并）
-- [ ] 4 个应用包（agent_federation/exhibition/wenda/dialogue）`[tool.pytest.ini_options]` 补 `addopts = "--import-mode=importlib"`
+> **2026-10-15 重新对码 + 分项处置**：原 8 项按 2026-09-22 包名（`dialogue-framework`/`zhanggui-zhiku`/`wenda`）书写，其中 3 个包在当前 6 应用结构里已不存在。逐项对当前工作区核实后——**2 项本批落地、3 项早已落地、3 项因包消失而 moot（但意图已在全仓满足）、1 项仅抬下界无驱动故标注不盲改**。不整节翻勾（8 项性质不同）。
 
-**验收**：
-- [ ] `uv sync --all-packages --extra dev` 成功
-- [ ] `make lint` 全绿
-- [ ] 各包 ruff/pytest 配置一致
+**改动**：
+- [x] 根 `pyproject.toml` `langchain-core`/`langchain-openai` 下界 — **早已落地并超越**：现值 `langchain-core>=1.6.5`、`langchain-openai>=1.6.6`，均高于原目标 `>=1.5.3`/`>=1.4`
+- [~] `dialogue-framework` `sqlglot>=23.0`→`>=25.0` — **moot（包不存在）**：`dialogue-framework` 已从树中消失；sqlglot 现声明于 agent_federation/nl2sql-service（`>=25.0`）与 agent-core/根（`>=30.20.0`），**意图（>=25.0）已在全仓满足**
+- [ ] 统一 pydantic `>=2.13` / fastapi `>=0.129` / uvicorn `>=0.41` 下界 — **部分达成**：根 pyproject `pydantic>=2.13.5` ✅、`uvicorn[standard]>=0.54.0` ✅ 均已超下界；唯 `fastapi>=0.115`（根）低于目标 `0.129`（agent_federation/requirements.txt 非 uv 备选清单已是 `>=0.129`）。**标注不盲改**：仅抬下界、无具体 feature/bugfix 驱动，盲目收紧会无谓约束依赖解析（依赖风险纪律）⇒ 如需对齐应先确认实际解析版本与 0.129 的必要性，属独立依赖评审
+- [~] `zhanggui-zhiku` ruff select 补 `"I"` — **moot（包不存在）**：`zhanggui-zhiku` 已改名；ruff `select` 现于根 + agent_federation + exhibition + knowledge-service 均含 `"I"`（其余包无独立 `[tool.ruff]` 段即继承根配置），**意图（isort `I` 全仓启用）已满足**，`ruff check .` 本批全绿
+- [x] 新增 `applications/exhibition-agent/.env.example`（列 config.py 读取的所有 env）— **本批补全**：文件早已存在，但原只覆盖 skill_loader 无前缀演示变量（`WAREHOUSE_BASE_URL`/`LLM_*`/`SKILL_MD_PATH` 等），**遗漏 `exhibition_agent/config.py` 的 pydantic Settings（`env_prefix=EXHIBITION_AGENT_`）10 个生产变量**。本批补入该 10 项（`WAREHOUSE_BASE_URL`/`CONTEXT_MODE`/`EXECUTION_MODE`/`CONTEXT_JWT_SECRET`/`WAREHOUSE_TIMEOUT`/`LOG_LEVEL`/`OTEL_ENDPOINT`/`OTEL_SERVICE_NAME`/`OTEL_ENABLED`/`LLM_OBS_BACKEND`），**每项默认值 1:1 取自 config.py `Field(default=...)`，零杜撰**（自证：config.py 10 字段 ↔ .env.example 10 变量一一对应）
+- [x] `packages/agent-core/.env.example`（或删除 kefu-service/.env.example:6 对该文件的引用）— **本批落地（改良选项 b）**：agent-core 是**库**（零依赖内核）非可部署服务，其 env 清单已在 `agent-core/README.md`「环境变量清单」+ `config.py` docstring **双处登记**；新建 `.env.example` 会成为第 3 份副本 → 漂移隐患、违反单一真相源。故不新建，改为**修正 kefu-service/.env.example:6 的悬空引用**：`agent-core/.env.example`（不存在）→ `agent-core/README.md「环境变量清单」`（真实登记处）。repoint 优于 delete——既消除悬空又保留"去哪查内核 env"的指引
+- [x] `agent_federation/requirements.txt` 补 agent-runtime 声明（与 T1.1 合并）— **早已落地（T1.1）**：requirements.txt 已含 `-e packages/agent-runtime`，且带注释 "2026-09-22 T1.1：monorepo 重组后 ../agent-core 旧路径失效，已改 packages/ 前缀并补 agent-runtime"
+- [~] 4 个应用包（agent_federation/exhibition/wenda/dialogue）补 `addopts = "--import-mode=importlib"` — **moot（wenda/dialogue 不存在）+ 现存包已落地**：`wenda`/`dialogue` 已消失；现存的 agent_federation ✅ / exhibition ✅ 均已有 `addopts = "--import-mode=importlib"`，nl2sql-service ✅ / 根 ✅ 亦有
+
+**验收**（按实际处置范围）：
+- [~] `uv sync --all-packages --extra dev` 成功 — **本批未跑**：本轮不部署、不改任何依赖版本约束（仅动 `.env.example` 模板 + 文档），故不触发依赖重解析；item3 的 fastapi 下界明确标注不盲改，无 sync 影响
+- [x] `make lint` 全绿 — `.env.example`/`.md` 改动不涉 lint；本批 `ruff check .` 全绿（见 T2.2）、`check_doc_sync.py` ✅ 0 警告
+- [x] 各包 ruff/pytest 配置一致 — item4（ruff `I`）/item8（pytest importlib）已对现存包逐项确认一致
 
 ---
 
@@ -428,13 +433,13 @@
 
 ### 对原 plan 任务的影响汇总
 
-| 原/新任务 | 调整 |
-|-----------|------|
-| T1.2 | 扩展：sandbox.py 两处 proc.kill（补充1）+ mcp_client.py 两处 stack.aclose（补充2）+ 明确 bridge opt-in 策略（补充4） |
-| C3 修复 | 扩展：同时统一 `/api/upload` thread_id 处理（补充3） |
-| T1.5 | 扩展：统一 ARCHITECTURE.md 与 AGENTS.md Skill 型口径（补充5） |
-| **T1.6 新增** | code_execution_tool.py 懒初始化（补充6） |
-| **T1.7 新增** | to_skill() 真实发现路径集成测试（补充7） |
+| 原/新任务 | 调整 | 2026-10-15 对码状态 |
+|-----------|------|------|
+| T1.2 | 扩展：sandbox.py 两处 proc.kill（补充1）+ mcp_client.py 两处 stack.aclose（补充2）+ 明确 bridge opt-in 策略（补充4） | 补充1/2 ✅已修（T1.2a）；补充4 **待拍板** |
+| C3 修复 | 扩展：同时统一 `/api/upload` thread_id 处理（补充3） | ✅已修（upload 与 task 同走 `_resolve_thread_id_or_401`） |
+| T1.5 | 扩展：统一 ARCHITECTURE.md 与 AGENTS.md Skill 型口径（补充5） | ✅已修（ARCHITECTURE.md:39 四型口径） |
+| **T1.6 新增** | code_execution_tool.py 懒初始化（补充6） | ✅已修（`_get_sandbox()` 懒初始化，T1.2a/T1.2b） |
+| **T1.7 新增** | to_skill() 真实发现路径集成测试（补充7） | ✅**本批落地**（`test_agentic_skill_discovery.py` 2 条，见文末对码核实节） |
 
 ---
 
@@ -463,3 +468,36 @@
 - CI 覆盖矩阵审计：来源 `2026-09-21-ci-gate-coverage-matrix-audit`
 - conftest 守卫识别：来源 `2026-09-21-gate-external-test-adoption-decision-flow`
 - 红线 1 反向依赖复查：来源 `2026-09-21-shared-pkg-test-reverse-dep-fix-direction`
+
+---
+
+## 2026-10-15 对码核实（订正状态行漂移 + 收口补充 7/T1.7）
+
+> 起因：状态行「P2(T2.2/T2.4)+P3 待实施」与复选框自相矛盾（T2.4 全 `[x]`、T3.1 多数 `[x]`/「跳过」、T3.2 全 `[x]`，而 T2.3 全 `[ ]` 却被状态行标「已完成」）。按「文档说的 ≠ 代码是的，下结论前对码」逐条实跑核实，不照旧标签重做、也不盲翻复选框。
+
+### 已落地（逐条对码确认，非据状态行）
+
+| 项 | 对码证据（2026-10-15） |
+|---|---|
+| 补充 1 sandbox proc.kill | `sandbox.py:132 _terminate()` 做 `proc.kill()`+`communicate()`；`_execute_docker:176` 与 `_execute_subprocess:214` 的 `except asyncio.TimeoutError` 均 `await self._terminate(...); raise`（T1.2a） |
+| 补充 2 mcp_client stack.aclose | `mcp_client.py:_connect_stdio:130-137` 与 `_connect_sse:144-152` 均 `try: ... except BaseException: await stack.aclose(); raise`；连接失败处 `:110-116` 亦回收 stack（T1.2a） |
+| 补充 3 /api/upload thread_id | `agent_federation/api/server.py:252-259` `/api/upload` 与 `/api/task:236` 同走 `_resolve_thread_id_or_401`，鉴权启用时忽略客户端 thread_id、按服务端断言主体派生 ⇒ 上传件与对话落同一会话目录 |
+| 补充 5 Skill 型口径 | `ARCHITECTURE.md:39` 已是「Function/Agent/Remote/Workflow 四型 SkillKind，MCP/Sandbox 经特化注册函数挂载」，与 AGENTS.md 口径一致（原「六型」矛盾已消） |
+| 补充 6 code_execution 懒初始化 | `agent_federation/tools/code_execution_tool.py:25 _sandbox=None` + `_get_sandbox()` 懒初始化（注释明标 T1.2a/T1.2b），import 期不再固化后端；默认 docker-only，`SANDBOX_ALLOW_SUBPROCESS` 未开不静默降级 |
+| W6 应用层静默吞 | `agent_server/main.py:417-427` to_skill 失败时：`planner in ("agentic","auto")` ⇒ `logger.warning(exc_info=True)`，否则 DEBUG（T1.2c/B2 评审结论）⇒ 需要时红灯如实亮，非一律静默 |
+| T2.4 / T3.1 / T3.2 | 复选框全 `[x]`（T3.1 余者为显式「跳过」并注明原因）；`scripts/check_doc_sync.py` 已存在并常驻 CI（本机 `make`-等价实跑 rc=0） |
+
+### 本批落地（2026-10-15）：补充 7 / T1.7
+
+- **做了什么**：新增 `packages/agent-runtime/tests/test_agentic_skill_discovery.py`（2 条），走**真实 entry_points 发现路径**（不显式注入 factory）：
+  - 正向 `test_to_skill_discovers_executor_via_entry_points_without_explicit_registration`：清掉模块级 `_executor_factory` 后，`AgenticPlanner().to_skill()` 经 `importlib.metadata.entry_points(group="agent_runtime.agentic_executor")` 发现 `agent_federation/pyproject.toml:68-69` 注册的工厂，产出合法 `SkillKind.AGENT`，并断言发现后 `_executor_factory` 被写回（证明真走了 EP 路径而非显式注入）。EP 不可发现属**环境条件**（未装 `--extra agentic`）⇒ skip（同仓 requires_pg/ZHIKU_INTEGRATION 守卫范式）。本机实跑 **PASSED（非 skip）**：EP 可发现。
+  - 负向 `test_discover_raises_runtimeerror_when_no_executor_available`：把 `entry_points` 打成空 ⇒ 断言 `_discover_executor_factory()` **抛 RuntimeError** 且消息含可操作解锁动作（装 extra / 显式注册）。**确定性**、不依赖真实安装，锁住 W6「发现失败必须 fail-loud，绝不静默返回」在发现层的契约。
+- **为什么有价值**：此前 `test_agentic_skill.py` 7 条用例**全部** `register_agentic_executor_factory(lambda: fake)` 显式注入 ⇒ `_discover_executor_factory` 第一分支短路，**从不走 entry_points**；而生产 `agent_server/main.py:413` 恰恰依赖 EP 发现。显式注入的测试全绿却掩盖了「真实安装下发现路径是否通」——本批补上这把锁，EP 注册若被破坏（pyproject 改动/包未装）正向用例即红。
+- **顺带**：给 `test_agentic_skill.py:98` 的 `reg.execute("agentic", ...)`（lint P4-2 白名单豁免）补注释，说明「仅测试内豁免、生产须走 delegate」，并指向本发现路径测试。
+- **实跑**：`ruff check` 该 2 文件 rc=0；`pytest packages/agent-runtime/tests` **638 passed**（636→638，+2），既有用例零删改（`test_agentic_skill.py` 仅加注释，7 条断言逐字未动）。
+
+### 残留与待定（附不做/待定的判据，不粉饰为已完成）
+
+- **T2.2**：已**分项处置**（详见 T2.2 节）——item5（`config.py` 三处改 `dataclasses.replace`，消除 frozen dataclass 六字段手抄）**本批落地**并自证零回归（replace 保留全部非 healthy 字段、federation 176 passed）；item6（`agent.py` HTTP if-elif→dict 派发）核实后**判定不做**（if-elif 编码真实 body/no-body 区别 + else→400 错误分支，dict 派发须给每调用套 lambda 反不清晰，仅 3 个非齐整分支属过度抽象）；items1-4（4 处 ~200 行大函数拆分）**缓做**——纯可读性重构、无功能收益、回归风险高，**与本 plan T3.1 把同类「`routes.py` 按业务域拆分」判为「跳过：大规模重构」直接矛盾**，且行号引用已漂移（`api/routes.py:65 query` 现已在 `api/query_router.py`）⇒ 如需做应独立成方案 + 独立分支 + 逐函数补测后再拆。
+- **T2.3**：已**重新对码 + 分项处置**（详见 T2.3 节）——item5（exhibition `.env.example` 补全 10 个 `EXHIBITION_AGENT_*` Settings 变量，1:1 取自 config.py 零杜撰）+ item6（kefu `.env.example:6` 悬空引用 repoint 到 `agent-core/README.md`「环境变量清单」，不新建重复清单）**本批落地**；items1/7（langchain 下界、requirements.txt agent-runtime）**早已落地**；items2/4/8（sqlglot、ruff `I`、pytest importlib）因 `dialogue-framework`/`zhanggui-zhiku`/`wenda` 三包已消失而 **moot，但意图已在全仓满足**；唯 **item3 的 fastapi 根下界 `>=0.115` 低于旧目标 `0.129`** —— 仅抬下界、无 feature/bugfix 驱动，盲抬会无谓收紧解析 ⇒ **标注不盲改**，留独立依赖评审。本节不再是「整节待重新对码」。
+- **补充 4（agentic bridge opt-in 策略）**：`_maybe_attach_bridged_tools` 默认关（`AGENTIC_RUNTIME_BRIDGE=true` 才开）是「渐进推广」的设计决策；T1.2 要求「改为默认开启」还是「保留 opt-in 但补开启路径测试」属**待拍板**，非纯执行项。

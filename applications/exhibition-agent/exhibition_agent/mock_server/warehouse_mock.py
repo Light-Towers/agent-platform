@@ -14,7 +14,7 @@ v1.2 不再实现 POST /api/v1/skills/{skill}；改为直接 mock warehouse REST
 6. metric_blocked          → 422 + {"error":{"code":"METRIC_BLOCKED"}}
 7. data_not_connected      → 200 + {"data_readiness":{"level":"pending"}}（INV-10 200 路径）
 8. data_not_connected_422  → 422 + {"error":{"code":"DATA_NOT_CONNECTED"}}（INV-10 422 路径）
-9. missing_readiness       → 200 + 无 data_readiness 字段（skill 层默认 READY）
+9. missing_readiness       → 200 + 无 data_readiness 字段（skill 层判 UNCONFIRMED/待确认，roadmap #10）
 
 mock 侧复用 exhibition-agent 的 C1 中间件校验 ExecutionContext（契约 C1 保留）。
 """

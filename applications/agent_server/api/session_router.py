@@ -59,6 +59,11 @@ async def session_revert(
     `verify_api_key` 返回入站头原文（不是摘要），若把它当 `operator` 写进
     `revert_audit` 与日志，等于把部署密钥持久化进审计痕迹。基数不变：同一
     部署只有一把 `API_KEY`，按密钥区分操作人本就区分不出两个调用方。
+
+    G3/T1.2：`req.session_id` 必须经 `resolve_thread_id` 归一化——与 `/query`、
+    `/history` 同一入口纪律。认证启用时客户端值被忽略（防指定他人线程回退），
+    开发模式信任客户端值但受 handler 层归属断言兜底（`tenant-` 前缀异租户 ⇒
+    FORBIDDEN）。
     """
     settings = get_settings()
     if not settings.revert_enabled:
@@ -69,7 +74,8 @@ async def session_revert(
         raise HTTPException(status_code=404, detail="REVERT_NOT_INITIALIZED")
 
     operator = server_tenant_id(settings.default_tenant_id)
-    result = await revert_handler.revert(operator, req.session_id, req.checkpoint_id)
+    thread_id = resolve_thread_id(req.session_id)
+    result = await revert_handler.revert(operator, thread_id, req.checkpoint_id)
 
     if not result.success:
         if result.error == "CHECKPOINT_NOT_FOUND":

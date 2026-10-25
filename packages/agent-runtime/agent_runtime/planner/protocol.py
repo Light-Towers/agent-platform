@@ -51,10 +51,22 @@ class ExecutionSuspended(Exception):
     并产出 ``suspended`` 事件。同步 Skill 路径不触发。
     """
 
-    def __init__(self, task_id: str, node_id: str | None = None) -> None:
+    def __init__(
+        self,
+        task_id: str,
+        node_id: str | None = None,
+        kind: Any = None,
+    ) -> None:
         self.task_id = task_id
         self.node_id = node_id
-        super().__init__(f"execution suspended: task_id={task_id} node_id={node_id}")
+        # 挂起在等谁：外部系统（EXTERNAL，默认 None）还是人工审批（HUMAN）。上层据此写
+        # 不同的 ExecutionStatus（WAITING_EXTERNAL / WAITING_HUMAN）——写错状态会让
+        # HumanTaskResolver.resolve_and_resume 的 `status is WAITING_HUMAN` 条件永不命中。
+        self.kind = kind
+        super().__init__(
+            f"execution suspended: task_id={task_id} node_id={node_id} "
+            f"kind={getattr(kind, 'value', kind)}"
+        )
 
 # 当前执行上下文绑定的 Runtime（在 ``execution()`` 边界内 set，边界外为 None）。
 # 供嵌套 Skill 执行器（如 Workflow Skill 内部执行子 Skill）获取 Runtime 并经
@@ -383,6 +395,7 @@ class PlannerRuntime:
         replica_id: str = "replica",
         post_execution_hooks: list[Any] | None = None,
         awaitable_task_store: Any = None,
+        human_task_store: Any = None,
     ):
         self.registry = registry
         self.llm = llm
@@ -423,6 +436,8 @@ class PlannerRuntime:
         self.post_execution_hooks: list[Any] = post_execution_hooks or []
         # V3-3: AwaitableTask 持久化（delegate 检测 __awaitable__ 时创建 AwaitableTask）
         self.awaitable_task_store = awaitable_task_store
+        # V3 补-1: 人工审批任务（__awaitable__ 且 kind="human" 时经它创建）
+        self.human_task_store = human_task_store
         # 执行期上下文（per-request，经 ContextVar 隔离）：execution() 入口创建
         # ExecutionContext 并 set，同 task 链内共享，跨 task 互不干扰。
         self._ctx_var: contextvars.ContextVar[ExecutionContext | None] = contextvars.ContextVar(
@@ -652,23 +667,58 @@ class PlannerRuntime:
                     AwaitableTask,
                 )
 
-                task = AwaitableTask(
-                    execution_id=ctx.execution_id,
-                    step_id=name,
-                    kind=AwaitableKind.EXTERNAL,
-                    provider=str(result.get("provider", "unknown")),
-                    provider_task_id=str(result.get("task_id", "")),
-                    state=AwaitableState.SUBMITTED,
-                    metadata={"skill_name": name, "submitted_result": result},
-                )
-                await self.awaitable_task_store.save(task)
+                # V3 补-1：kind="human" 走 HumanTaskStore（审批语义 + resume_payload 形状），
+                # 其余保持原 EXTERNAL 路径逐字不变。未注入 human_task_store 时**退回 EXTERNAL**
+                # 并留 warning：挂起仍可用（callback 能收敛），只是没有审批面——那是装配缺口，
+                # 不该升级成运行期失败。
+                suspend_kind = AwaitableKind.EXTERNAL
+                if str(result.get("kind", "")).lower() == "human":
+                    if self.human_task_store is not None:
+                        from agent_runtime.human_task import HumanTask
+
+                        human = HumanTask(
+                            execution_id=ctx.execution_id,
+                            step_id=name,
+                            prompt=str(result.get("prompt", "")),
+                            options=list(result.get("options") or ["approve", "reject"]),
+                            deadline=result.get("deadline"),
+                            approver=result.get("approver"),
+                            context={"skill_name": name, "request": result.get("context") or {}},
+                        )
+                        task = await self.human_task_store.create(
+                            human, generation=ctx.lease_generation
+                        )
+                        suspend_kind = AwaitableKind.HUMAN
+                    else:
+                        import logging
+
+                        logging.getLogger(__name__).warning(
+                            "skill=%s 请求人工审批但未装配 human_task_store，退回 EXTERNAL 挂起",
+                            name,
+                        )
+                if suspend_kind is AwaitableKind.EXTERNAL:
+                    task = AwaitableTask(
+                        execution_id=ctx.execution_id,
+                        step_id=name,
+                        kind=AwaitableKind.EXTERNAL,
+                        provider=str(result.get("provider", "unknown")),
+                        provider_task_id=str(result.get("task_id", "")),
+                        state=AwaitableState.SUBMITTED,
+                        metadata={"skill_name": name, "submitted_result": result},
+                        # V3 缺口 1：盖上本次执行的 lease generation，使 takeover 后的
+                        # zombie writer 写不进回执（见 PgAwaitableTaskStore.save 的 fence）。
+                        generation=ctx.lease_generation,
+                    )
+                    await self.awaitable_task_store.save(task)
                 if ctx is not None:
                     ctx.record_step(
                         name, kwargs, result, None,
                         time.monotonic() - t0, ctx.tokens_used - tokens_before,
                         forensic=_forensic_dict,
                     )
-                raise ExecutionSuspended(task_id=task.task_id, node_id=name)
+                raise ExecutionSuspended(
+                    task_id=task.task_id, node_id=name, kind=suspend_kind
+                )
             if ctx is not None:
                 ctx.record_step(
                     name, kwargs, result, None,

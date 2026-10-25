@@ -460,3 +460,51 @@ async def test_reaper_does_not_reclaim_live_lease(monkeypatch):
 
 async def _done():
     return None
+
+
+class _FakeOwnershipEmpty:
+    """无 owner 记录的空 ownership（list_overdue 也空 ⇒ 主循环空转）。"""
+
+    async def get_owner(self, execution_id):
+        return None
+
+
+async def test_reaper_runs_sweep_callbacks_and_tolerates_failure():
+    """周期钩子：顺序执行；一个抛错不得杀死 reaper（与主循环同款容错）。"""
+    import asyncio
+
+    from agent_runtime.execution_scheduler import SchedulerReaper
+
+    store = InMemorySchedulerStore()
+    scheduler = ExecutionScheduler(store)
+    calls: list[str] = []
+
+    async def _ok():
+        calls.append("ok")
+
+    async def _boom():
+        calls.append("boom")
+        raise RuntimeError("sweep failed")
+
+    reaper = SchedulerReaper(
+        scheduler, _FakeOwnershipEmpty(), interval_s=0.01, sweep_callbacks=[_ok, _boom]
+    )
+    reaper.start()
+    await asyncio.sleep(0.05)
+    await reaper.stop()
+    assert "ok" in calls and "boom" in calls, "两个回调都应被执行（容错不阻断后续）"
+
+
+async def test_reaper_without_callbacks_unchanged():
+    """不传 sweep_callbacks ⇒ 行为逐字不变（无钩子可跑）。"""
+    import asyncio
+
+    from agent_runtime.execution_scheduler import SchedulerReaper
+
+    store = InMemorySchedulerStore()
+    scheduler = ExecutionScheduler(store)
+    reaper = SchedulerReaper(scheduler, _FakeOwnershipEmpty(), interval_s=0.01)
+    assert reaper._sweep_callbacks == []
+    reaper.start()
+    await asyncio.sleep(0.03)
+    await reaper.stop()  # 不得抛

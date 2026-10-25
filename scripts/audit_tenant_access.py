@@ -168,7 +168,7 @@ def check_semantic_cache(conn, args) -> dict[str, Any]:
             "note": "人工判定：question 内容与其归属租户业务是否相符"
                     + ("；命中数跨租户偏高提示缓存串味" if hitcol else "（本表无命中计数列，仅按条目数分布）"),
         })
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:  # noqa: BLE001 —— 单项审计检查隔离：一项失败记 error 并继续出整份报告
         entry.update({"status": "error", "error": str(e)})
     return entry
 
@@ -204,7 +204,7 @@ def check_access_log(conn, args) -> dict[str, Any]:
             "single_key_multi_tenant": rows,
             "note": "同一来源自报多个 tenant = 越权信号（ADR-0007 触发点）；需结合时间窗判定",
         })
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:  # noqa: BLE001 —— 单项审计检查隔离：一项失败记 error 并继续出整份报告
         entry.update({"status": "error", "error": str(e)})
     return entry
 
@@ -221,7 +221,7 @@ def check_ks_default_audit(conn, args) -> dict[str, Any]:
             })
             return entry
         entry.update({"status": "ok", "table": table, "note": "探测到审计表，人工按 tenant/时间窗聚合"})
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:  # noqa: BLE001 —— 单项审计检查隔离：一项失败记 error 并继续出整份报告
         entry.update({"status": "error", "error": str(e)})
     return entry
 
@@ -234,7 +234,7 @@ def check_trajectory_tenant(conn, args) -> dict[str, Any]:
             entry.update({"status": "skip", "note": "未探测到含 tenant_id 的轨迹表（episodic 已并入检查 1）"})
             return entry
         entry.update({"status": "ok", "table": table, "distribution": _group_by_tenant(conn, table)})
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:  # noqa: BLE001 —— 单项审计检查隔离：一项失败记 error 并继续出整份报告
         entry.update({"status": "error", "error": str(e)})
     return entry
 
@@ -280,7 +280,7 @@ def main(argv: list[str] | None = None) -> int:
     started = datetime.now(timezone.utc).isoformat()
     try:
         conn = psycopg.connect(args.dsn)
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:  # noqa: BLE001 —— CLI 边界：连接失败即回显原因退出（psycopg 具体异常类型跨版本不一）
         print(f"连接失败：{e}", file=sys.stderr)
         return 1
     # 只读追溯扫描：逐条 SELECT 用 autocommit，任一检查项失败不污染事务、不连累后续

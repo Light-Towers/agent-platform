@@ -146,6 +146,7 @@ HA RESULT: PASS
 
 - H1 原始定义为「测试未真正双容器 kill」。当前 `run_replica_a` 用「手动 acquire 短 ttl 不 release」语义等价 SIGKILL（heartbeat 死亡 → PG lease 过期 → B 接管），在无头环境下已捕获 split-brain / 接管 / 重复副作用的全部语义。
 - 真双进程验证已由 `scripts/ha_real_kill_verify.py` 补强：起两个真实 OS 进程（agent-a/agent-b）共享真实 PG，A 在 step_1 后真 `SIGKILL`，B 从 checkpoint 接管；Linux 真实验证 PASS（side_effects 每 step 各 1 条 WRITE + 1 条 skill，无重复）。
+- **前置条件收紧（2026-10-16，roadmap #16）**：脚本**不再提供默认 DSN**。原先未注入 `AGENT_PLATFORM_PG_URL` 会静默回落到开发机的 `localhost:5433`（且默认值内嵌凭证），而脚本输出是 effectively-once 的**取证结论**——拿不可知的库报 PASS 等于证据失效。现行为：缺失（或 strip 后为空）⇒ 打印点名变量的文案并以**退出码 4（配置缺失）**退出，与断言失败=1、A 未按时自杀=2、B 未按时接管=3 分开；同时 stdout 打印 `_pg_url_label()` 生成的 `host/port/db`，**凭证不进日志**，读证据的人能知道打的是哪套库。CI 不受影响（`.github/workflows/ha.yml` 的 job env 已显式注入）；手工执行须自带该变量，见脚本 docstring。门禁 = `tests/test_ha_kill_script_gate.py`（子进程拒跑 + 纯函数反证 + 源码级 AST 禁非空默认值）。
 - **CI 门禁**：`tests/ha` 全部测试加 `requires_pg` marker（conftest 自动打标 + 连接失败/Windows 平台自动 skip，避免误报）；`.github/workflows/agent-platform-ci.yml` 新增 `ha` job，在 `ubuntu-latest` 起 PostgreSQL 服务容器，跑 `pytest tests/ha -m requires_pg` + 真双进程 kill 脚本。Windows CI 下 HA 测试干净 skip，由 Linux CI 覆盖。
 
 ---

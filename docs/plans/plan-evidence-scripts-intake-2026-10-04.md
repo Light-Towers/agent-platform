@@ -1,6 +1,6 @@
 # 方案：取证脚本入库（`scripts/evidence/`）——候选 ① 的实施口径
 
-> 状态：**已拍板候选 ①**（2026-10-04 用户选定），本文件即「先方案后编码」的方案本体。
+> 状态：**已落地**（候选 ①，2026-10-04 用户选定并实施；详见 §6 实施结果「已按 §5 逐条实取，7 条全达」）。**2026-10-15 对码核实订正状态行**：原行停在「已拍板 / 方案本体」，未反映 §6 已回填的实施结果。证据——`scripts/evidence/` 三件（`verify_main_tip.py` / `normalize_dump.py` / `README.md`）均已入库且 git-tracked（`git ls-files scripts/evidence/` 命中三者）；ARCHITECTURE.md 已登记路径并由 `scripts/check_doc_sync.py` 的存在性校验守护（本机实跑 rc=0）。
 > 来源遗留项：`docs/TODO.md` §5「取证脚本全住在 gitignored 目录里，而账面把它们当可重跑指针」。
 > 关联：`docs/operations/testing-playbook.md` §2.1（计数必须附 sha + extras 形态）、
 > `docs/plans/plan-doc-sync-file-ref-gate-2026-10-01.md`（文档内联文件引用存在性门禁）。

@@ -1,43 +1,414 @@
-"""元知识库 Postgres 仓储：列/指标/值信息 CRUD。"""
+"""元知识库 Postgres 仓储：列/指标/值/关系/别名/范例 upsert + 差异删除。
+
+2026-10-18（方案 P0-1 / P0-2 实装）：此前三个 `save_*` 用 `data.keys()`
+动态拼列名 + 纯 INSERT——一是指名注入面（P0-10：data 来自 YAML/DDL 派生
+文本），二是"重跑一次多一整套副本、被删的取值永远留在索引里"（H3）。
+现按 `migrations/001_meta_schema.up.sql` 的唯一键**写死列清单 + 参数化
+upsert**；`prune_*` 删掉源里已不存在的行（差异重建的另一半）。
+
+注意 001 是唯一真相源：这里每个表的列清单/冲突键必须与它逐字对齐，
+改 schema 时两处一起改（新增 002_*.up.sql，不回改 001）。
+"""
 
 from typing import Any
 
 from agent_core.logging import get_logger
+from agent_core.sql.identifiers import validate_identifier
+from psycopg.types.json import Json
 
 logger = get_logger(__name__)
 
+#: 作用域列（D8 摘键后二元组，2026-10-23 / 006 迁移）：元知识全企业共享，
+#: 唯一键与 prune 作用域只认 (tenant_id, datasource_id)；workspace_id 留列
+#: 仅作首灌来源溯源（_upsert 键外非 updatable，冲突更新永不覆盖）。
+#: upsert 与 prune 必须与之一致——ON CONFLICT 打不中、prune 扫不到行，
+#: 都是"看着跑了其实没生效"的暗断点。会话域（get/upsert_session）不受
+#: D8 约束，仍按三元组隔离（见 006 范围修正）。
+_SCOPE_COLS = ("tenant_id", "datasource_id")
+
+#: 各表（相对 table_prefix 的表名, 唯一键即 001 的 CONSTRAINT uq_*, 可更新列）。
+#: 列清单写死：值全部参数化，SQL 标识符只来自本模块常量。
+_COLUMN_TABLE = ("column_info", ("tenant_id", "datasource_id", "table_name", "column_name"), ("table_comment", "column_comment", "data_type", "embedding"))
+_METRIC_TABLE = ("metric_info", ("tenant_id", "datasource_id", "metric_name"), ("metric_desc", "metric_expr", "embedding"))
+#: value_info（#117：005 迁移起唯一键加 table_name——同名列 orders.status vs
+#: venues.status 曾撞 uq_nl2sql_value 且行内无 table_name 无法回溯；updatable 加
+#: tokenizer——search_text 的分词器版本标记，换 tokenizer 后旧行可识别）
+_VALUE_TABLE = ("value_info", ("tenant_id", "datasource_id", "table_name", "column_name", "value"), ("value_desc", "search_text", "tokenizer", "embedding"))
+#: 关系/别名（§5.14-R2）：001 DDL 的 uq_nl2sql_relation / uq_nl2sql_alias 即冲突键
+_RELATION_TABLE = (
+    "relation_info",
+    ("tenant_id", "datasource_id", "left_table", "left_column", "right_table", "right_column"),
+    ("relation_type", "note"),
+)
+_ALIAS_TABLE = (
+    "alias_info",
+    ("tenant_id", "datasource_id", "target_kind", "target_name", "alias"),
+    ("source",),
+)
+#: 范例库（A 方案 Stage ②）：004 DDL 的 uq_nl2sql_example 即冲突键。
+#: 自然键只取 question——同一问法对应一条规范 SQL，重训练 upsert 更新而非叠加副本。
+_EXAMPLE_TABLE = (
+    "example_info",
+    ("tenant_id", "datasource_id", "question"),
+    ("sql", "source", "embedding"),
+)
+
+#: 各表的自然键（= 唯一键去掉作用域列）：prune 的 NOT IN 比较目标。
+_COLUMN_NATURAL = ("table_name", "column_name")
+_METRIC_NATURAL = ("metric_name",)
+_VALUE_NATURAL = ("table_name", "column_name", "value")
+_RELATION_NATURAL = ("left_table", "left_column", "right_table", "right_column")
+_ALIAS_NATURAL = ("target_kind", "target_name", "alias")
+_EXAMPLE_NATURAL = ("question",)
+
 
 class MetaRepository:
-    """元知识库仓储。"""
+    """元知识库仓储（幂等写入 + 作用域内差异删除）。"""
 
     def __init__(self, pool=None, table_prefix: str = "nl2sql_") -> None:
+        # 表前缀来自配置（meta_config.yaml），与表名一样是外部输入：构造期
+        # 校验，非法前缀在第一次查询前就炸，不等到 SQL 拼出来（P0-10）。
+        validate_identifier(table_prefix, "元知识表前缀")
         self._pool = pool
         self._prefix = table_prefix
 
-    async def save_column(self, data: dict[str, Any]) -> None:
-        cols = ", ".join(data.keys())
-        placeholders = ", ".join(["%s"] * len(data))
-        sql = f"INSERT INTO {self._prefix}column_info ({cols}) VALUES ({placeholders})"
-        async with self._pool.connection() as conn:
-            await conn.execute(sql, tuple(data.values()))
+    async def save_column(self, data: dict[str, Any]) -> bool:
+        """列行 upsert；返回 True=新插入 / False=更新了已存在行。"""
+        return await self._upsert(_COLUMN_TABLE, data)
 
-    async def save_metric(self, data: dict[str, Any]) -> None:
-        cols = ", ".join(data.keys())
-        placeholders = ", ".join(["%s"] * len(data))
-        sql = f"INSERT INTO {self._prefix}metric_info ({cols}) VALUES ({placeholders})"
-        async with self._pool.connection() as conn:
-            await conn.execute(sql, tuple(data.values()))
+    async def save_metric(self, data: dict[str, Any]) -> bool:
+        """指标行 upsert；返回 True=新插入 / False=更新了已存在行。"""
+        return await self._upsert(_METRIC_TABLE, data)
 
-    async def save_value(self, data: dict[str, Any]) -> None:
-        cols = ", ".join(data.keys())
-        placeholders = ", ".join(["%s"] * len(data))
-        sql = f"INSERT INTO {self._prefix}value_info ({cols}) VALUES ({placeholders})"
+    async def save_value(self, data: dict[str, Any]) -> bool:
+        """取值行 upsert（search_text 必须由构建方写入，见模块 docstring）；返回插入/更新。"""
+        return await self._upsert(_VALUE_TABLE, data)
+
+    async def save_relation(self, data: dict[str, Any]) -> bool:
+        """关系行 upsert（§5.14-R2）。"""
+        return await self._upsert(_RELATION_TABLE, data)
+
+    async def save_alias(self, data: dict[str, Any]) -> bool:
+        """别名行 upsert（§5.14-R2）。"""
+        return await self._upsert(_ALIAS_TABLE, data)
+
+    async def save_example(self, data: dict[str, Any]) -> bool:
+        """范例行 upsert（A 方案 Stage ②：question 自然键，重训练更新 SQL 不叠副本）。"""
+        return await self._upsert(_EXAMPLE_TABLE, data)
+
+    async def prune_columns(
+        self, keep: set[tuple[str, str]], tenant_id: str = "", workspace_id: str = "", datasource_id: str = ""
+    ) -> int:
+        """删除作用域内不在 keep 的列行（keep = {(table_name, column_name)}）。"""
+        return await self._prune(_COLUMN_TABLE[0], _COLUMN_NATURAL, keep, (tenant_id, datasource_id))
+
+    async def prune_metrics(
+        self, keep: set[str], tenant_id: str = "", workspace_id: str = "", datasource_id: str = ""
+    ) -> int:
+        """删除作用域内不在 keep 的指标行（keep = {metric_name}）。
+
+        str 必须包成 1-tuples 再下传：`_prune` 按"每个 key 展平成一个 VALUES 行"
+        取参，直接传字符串会被逐字符拆开（fake 池与真 PG 都会在这里炸）。
+        """
+        return await self._prune(
+            _METRIC_TABLE[0], _METRIC_NATURAL, {(name,) for name in keep}, (tenant_id, datasource_id)
+        )
+
+    async def prune_values(
+        self, keep: set[tuple[str, str, str]], tenant_id: str = "", workspace_id: str = "", datasource_id: str = ""
+    ) -> int:
+        """删除作用域内不在 keep 的取值行（keep = {(table_name, column_name, value)}，#117）。"""
+        return await self._prune(_VALUE_TABLE[0], _VALUE_NATURAL, keep, (tenant_id, datasource_id))
+
+    async def prune_relations(
+        self,
+        keep: set[tuple[str, str, str, str]],
+        tenant_id: str = "",
+        workspace_id: str = "",
+        datasource_id: str = "",
+    ) -> int:
+        """删除作用域内不在 keep 的关系行（keep = {(left_table, left_column, right_table, right_column)}）。"""
+        return await self._prune(
+            _RELATION_TABLE[0], _RELATION_NATURAL, keep, (tenant_id, datasource_id)
+        )
+
+    async def prune_aliases(
+        self, keep: set[tuple[str, str, str]], tenant_id: str = "", workspace_id: str = "", datasource_id: str = ""
+    ) -> int:
+        """删除作用域内不在 keep 的别名行（keep = {(target_kind, target_name, alias)}）。"""
+        return await self._prune(_ALIAS_TABLE[0], _ALIAS_NATURAL, keep, (tenant_id, datasource_id))
+
+    async def prune_examples(
+        self, keep: set[str], tenant_id: str = "", workspace_id: str = "", datasource_id: str = ""
+    ) -> int:
+        """删除作用域内不在 keep 的范例行（keep = {question}）。
+
+        str 必须包成 1-tuples 再下传（同 prune_metrics：_prune 按每个 key 展平
+        成一个 VALUES 行，直接传字符串会被逐字符拆开）。
+        """
+        return await self._prune(
+            _EXAMPLE_TABLE[0], _EXAMPLE_NATURAL, {(q,) for q in keep}, (tenant_id, datasource_id)
+        )
+
+    async def list_relations(self, datasource_id: str = "", tenant_id: str = "", workspace_id: str = "") -> list[dict[str, Any]]:
+        """关系全集（R5：查询路径只读冻结集，服务期零人工）。"""
+        sql = (
+            f"SELECT left_table, left_column, right_table, right_column, relation_type, note "
+            f"FROM {self._prefix}relation_info "
+            f"WHERE tenant_id = %s AND datasource_id = %s"
+        )
         async with self._pool.connection() as conn:
-            await conn.execute(sql, tuple(data.values()))
+            cur = await conn.execute(sql, (tenant_id, datasource_id))
+            rows = await cur.fetchall()
+            return [dict(r) for r in rows]
+
+    async def list_aliases(self, datasource_id: str = "", tenant_id: str = "", workspace_id: str = "") -> list[dict[str, Any]]:
+        """别名全集（P0-5 别名精确匹配主路的查询对象；机提未确认不参与召回）。"""
+        sql = (
+            f"SELECT target_kind, target_name, alias, source "
+            f"FROM {self._prefix}alias_info "
+            f"WHERE tenant_id = %s AND datasource_id = %s "
+            f"AND source = 'human'"
+        )
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(sql, (tenant_id, datasource_id))
+            rows = await cur.fetchall()
+            return [dict(r) for r in rows]
+
+    async def list_columns(self, datasource_id: str = "", tenant_id: str = "", workspace_id: str = "") -> list[dict[str, Any]]:
+        """库侧列指纹（P0-3 漂移检测的比对基线）。"""
+        sql = (
+            f"SELECT table_name, column_name, column_comment, data_type "
+            f"FROM {self._prefix}column_info "
+            f"WHERE tenant_id = %s AND datasource_id = %s"
+        )
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(sql, (tenant_id, datasource_id))
+            rows = await cur.fetchall()
+            return [dict(r) for r in rows]
+
+    async def list_examples(self, datasource_id: str = "", tenant_id: str = "", workspace_id: str = "") -> list[dict[str, Any]]:
+        """范例全集（迁移核对/漂移比对用；在线召回走 ExampleRepository 向量路）。"""
+        sql = (
+            f"SELECT question, sql, source "
+            f"FROM {self._prefix}example_info "
+            f"WHERE tenant_id = %s AND datasource_id = %s"
+        )
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(sql, (tenant_id, datasource_id))
+            rows = await cur.fetchall()
+            return [dict(r) for r in rows]
+
+    async def update_column_type(self, table_name: str, column_name: str, data_type: str) -> None:
+        """类型自动跟随（P0-3 的唯一自动写：语义不自动改，类型与样本才跟）。"""
+        sql = (
+            f"UPDATE {self._prefix}column_info SET data_type = %s, updated_at = now() "
+            f"WHERE tenant_id = %s AND datasource_id = %s "
+            f"AND table_name = %s AND column_name = %s"
+        )
+        async with self._pool.connection() as conn:
+            await conn.execute(sql, (data_type, "", "", table_name, column_name))
+
+    async def upsert_table_stats(self, stats: list[dict[str, Any]]) -> int:
+        """表行数估值写入（P0-3 副产物 → 生成期聚合引导）。"""
+        count = 0
+        for s in stats:
+            sql = (
+                f"INSERT INTO {self._prefix}table_stats "
+                f"(tenant_id, datasource_id, table_name, row_estimate, column_count, sampled_at) "
+                f"VALUES (%s, %s, %s, %s, %s, now()) "
+                f"ON CONFLICT (tenant_id, datasource_id, table_name) DO UPDATE SET "
+                f"row_estimate = EXCLUDED.row_estimate, column_count = EXCLUDED.column_count, "
+                f"sampled_at = now()"
+            )
+            async with self._pool.connection() as conn:
+                await conn.execute(
+                    sql,
+                    ("", s.get("datasource_id", ""), s["table_name"], s.get("row_estimate", 0), s.get("column_count", 0)),
+                )
+            count += 1
+        return count
+
+    async def list_table_stats(self, datasource_id: str = "", tenant_id: str = "", workspace_id: str = "") -> list[dict[str, Any]]:
+        """读表统计（QueryService 注入 state，驱动聚合引导）。"""
+        sql = (
+            f"SELECT table_name, row_estimate, column_count "
+            f"FROM {self._prefix}table_stats "
+            f"WHERE tenant_id = %s AND datasource_id = %s"
+        )
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(sql, (tenant_id, datasource_id))
+            rows = await cur.fetchall()
+            return [dict(r) for r in rows]
+
+    async def find_columns_by_names(self, names: list[str], datasource_id: str = "", tenant_id: str = "", workspace_id: str = "") -> list[dict[str, Any]]:
+        """按 `table.column` 全名精确取列（P0-5 别名精确匹配主路的落点）。"""
+        if not names:
+            return []
+        keys = [tuple(n.split(".", 1)) if "." in n else ("", n) for n in names]
+        # 行值 IN (VALUES ...)：全名整体比较，避免逐列 OR 的优先级坑
+        row_tpl = "(%s, %s)"
+        values_sql = ", ".join([row_tpl] * len(keys))
+        sql = (
+            f"SELECT table_name, column_name, column_comment, data_type, table_comment "
+            f"FROM {self._prefix}column_info "
+            f"WHERE tenant_id = %s AND datasource_id = %s "
+            f"AND (table_name, column_name) IN (VALUES {values_sql})"
+        )
+        params = (tenant_id, datasource_id, *[v for k in keys for v in k])
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(sql, params)
+            rows = await cur.fetchall()
+            return [dict(r) for r in rows]
+
+    async def find_metrics_by_names(self, names: list[str], datasource_id: str = "", tenant_id: str = "", workspace_id: str = "") -> list[dict[str, Any]]:
+        """按指标名精确取指标（P0-5 别名精确匹配主路的落点）。"""
+        if not names:
+            return []
+        placeholders = ", ".join(["%s"] * len(names))
+        sql = (
+            f"SELECT metric_name, metric_desc, metric_expr "
+            f"FROM {self._prefix}metric_info "
+            f"WHERE tenant_id = %s AND datasource_id = %s "
+            f"AND metric_name IN ({placeholders})"
+        )
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(sql, (tenant_id, datasource_id, *names))
+            rows = await cur.fetchall()
+            return [dict(r) for r in rows]
 
     async def list_metrics(self) -> list[dict[str, Any]]:
         sql = f"SELECT metric_name, metric_desc, metric_expr FROM {self._prefix}metric_info"
         async with self._pool.connection() as conn:
             cur = await conn.execute(sql)
             rows = await cur.fetchall()
-            return [dict(r._mapping) for r in rows]
+            return [dict(r) for r in rows]
+
+    # -----------------------------------------------------------------------
+    # 多轮会话状态（§5.13 M2/M6）与查询追溯（P0-4/H4）：002 表，参数化 + Json 适配
+    # -----------------------------------------------------------------------
+    async def get_session(
+        self, session_id: str, datasource_id: str = "", tenant_id: str = "", workspace_id: str = ""
+    ) -> dict[str, Any] | None:
+        """读会话四元组 + 已确认问答对（M2/M6）；无行返回 None。按租户/工作区隔离。"""
+        sql = (
+            f"SELECT session_id, datasource_id, turn, quadruple, confirmed_pairs "
+            f"FROM {self._prefix}session_state "
+            f"WHERE tenant_id = %s AND workspace_id = %s AND session_id = %s AND datasource_id = %s"
+        )
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(sql, (tenant_id, workspace_id, session_id, datasource_id))
+            row = await cur.fetchone()
+        return dict(row) if row is not None else None
+
+    async def upsert_session(
+        self,
+        session_id: str,
+        datasource_id: str,
+        quadruple: dict[str, Any],
+        confirmed_pairs: list[dict[str, Any]],
+        turn: int,
+        tenant_id: str = "",
+        workspace_id: str = "",
+    ) -> None:
+        """写会话四元组 + 已确认问答对（M4：唯一键含 datasource_id，换源即另一行；租户/工作区隔离）。"""
+        sql = (
+            f"INSERT INTO {self._prefix}session_state "
+            f"(tenant_id, workspace_id, session_id, datasource_id, turn, quadruple, confirmed_pairs, updated_at) "
+            f"VALUES (%s, %s, %s, %s, %s, %s, %s, now()) "
+            f"ON CONFLICT (tenant_id, workspace_id, session_id, datasource_id) DO UPDATE SET "
+            f"turn = EXCLUDED.turn, quadruple = EXCLUDED.quadruple, "
+            f"confirmed_pairs = EXCLUDED.confirmed_pairs, updated_at = now()"
+        )
+        async with self._pool.connection() as conn:
+            await conn.execute(
+                sql,
+                (tenant_id, workspace_id, session_id, datasource_id, turn, Json(quadruple), Json(confirmed_pairs)),
+            )
+
+    async def insert_trace(self, trace: dict[str, Any]) -> None:
+        """写一条查询追溯（P0-4/H4）：golden 回归与未命中字面量日报的数据源。"""
+        cols = (
+            "tenant_id", "workspace_id", "session_id", "datasource_id", "turn", "query",
+            "rewritten_query", "sql", "error", "error_class", "error_detail",
+            "recalled_tables", "recalled_columns", "recalled_metrics", "recalled_values",
+            "matched_values", "unmatched_terms", "dict_hit", "llm_calls", "embedding_calls",
+            "latency_ms", "meta_revision", "source_snapshot", "model", "prompt_version",
+            "result_rows", "empty_result", "path",
+        )
+        json_cols = {
+            "recalled_tables", "recalled_columns", "recalled_metrics", "recalled_values",
+            "matched_values", "unmatched_terms",
+        }
+        placeholders = ", ".join(["%s"] * len(cols))
+        params = tuple(Json(trace.get(c, [])) if c in json_cols else trace.get(c, "") for c in cols)
+        sql = f"INSERT INTO {self._prefix}query_trace ({', '.join(cols)}) VALUES ({placeholders})"
+        async with self._pool.connection() as conn:
+            await conn.execute(sql, params)
+
+    async def _upsert(
+        self,
+        table_spec: tuple[str, tuple[str, ...], tuple[str, ...]],
+        data: dict[str, Any],
+    ) -> bool:
+        """按写死列清单 upsert，返回 True=插入（PG 惯例 `xmax = 0` 判新行）。
+
+        禁 `data.keys()` 动态列名：列清单来自常量，入参只做值——构建入口的
+        注释/表达式是自由文本，不能进 SQL 标识符位。
+        """
+        table, key_cols, updatable = table_spec
+        insert_cols = list(key_cols) + [c for c in updatable if c not in key_cols]
+        # 首灌来源（D8）：workspace_id 键外、非 updatable ⇒ 仅 INSERT 时写入
+        # data 携带的当时空间值，冲突更新永不覆盖（溯源语义的唯一保证）。
+        if "workspace_id" not in insert_cols:
+            insert_cols.append("workspace_id")
+        # 作用域三列恒有值：DDL 是 `TEXT NOT NULL DEFAULT ''`，而列一旦出现在
+        # INSERT 列表里 DEFAULT 就不生效——缺键 ⇒ 显式 NULL ⇒ 23502。不依赖调用方
+        # （MetaKnowledgeService._stamp）是否写了键。
+        row = {c: "" for c in (*_SCOPE_COLS, "workspace_id")}
+        row.update(data)
+        params = tuple(row.get(c) for c in insert_cols)
+        sql = (
+            f"INSERT INTO {self._prefix}{table} ({', '.join(insert_cols)}) "
+            f"VALUES ({', '.join(['%s'] * len(insert_cols))}) "
+            f"ON CONFLICT ({', '.join(key_cols)}) DO UPDATE SET "
+            + ", ".join(f"{c} = EXCLUDED.{c}" for c in updatable)
+            + ", updated_at = now() RETURNING (xmax = 0) AS inserted"
+        )
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(sql, params)
+            row = await cur.fetchone()
+        # RETURNING (xmax = 0) AS inserted；连接配 dict_row ⇒ row 是 dict，按列名取
+        # （此前 row[0] 是 tuple 索引，dict_row 下会 KeyError）。
+        return bool(row["inserted"]) if row is not None else False
+
+    async def _prune(
+        self,
+        table: str,
+        natural_cols: tuple[str, ...],
+        keep: set[tuple[str, ...]],
+        scope: tuple[str, str] = ("", ""),
+    ) -> int:
+        """删除**指定作用域内**自然键不在 keep 的行；keep 为空 = 清空该作用域（源已为空）。
+
+        scope 必须与写入时的作用域（`_upsert` 经 `_stamp` 盖的章）一致：此前硬编码
+        ('', '', '')——scoped 构建（多租户）的 prune 永远扫不到自己的行，"看着跑了
+        其实没生效"的暗断点（与 ON CONFLICT 打不中同源）。缺省 '' 保持老行为。
+        """
+        scope_params = tuple(scope)
+        scope_sql = " AND ".join(f"{c} = %s" for c in _SCOPE_COLS)
+        if not keep:
+            sql = f"DELETE FROM {self._prefix}{table} WHERE {scope_sql}"
+            params = scope_params
+        else:
+            # 行值 NOT IN (VALUES ...)：自然键整体比较，避免逐列 OR 的优先级坑
+            row_tpl = "(" + ", ".join(["%s"] * len(natural_cols)) + ")"
+            values_sql = ", ".join([row_tpl] * len(keep))
+            sql = (
+                f"DELETE FROM {self._prefix}{table} WHERE {scope_sql} "
+                f"AND ({', '.join(natural_cols)}) NOT IN (VALUES {values_sql})"
+            )
+            params = scope_params + tuple(v for key in keep for v in key)
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(sql, params)
+            return cur.rowcount or 0

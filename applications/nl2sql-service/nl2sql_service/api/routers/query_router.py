@@ -18,7 +18,13 @@ async def query(request: SqlQueryRequest, http_request: Request) -> SqlQueryResp
     query_service = http_request.app.state.query_service
 
     try:
-        result = await query_service.query(request.query, metric_config=request.metric_config)
+        result = await query_service.query(
+            request.query,
+            metric_config=request.metric_config,
+            datasource_id=request.datasource_id,
+            session_id=request.session_id,
+            tenant_id=request.tenant_id,
+        )
         latency = (time.perf_counter() - start) * 1000
         return SqlQueryResponse(
             answer=result.get("answer", ""),
@@ -27,6 +33,12 @@ async def query(request: SqlQueryRequest, http_request: Request) -> SqlQueryResp
             fallback=result.get("fallback", False),
             latency_ms=round(latency, 2),
             trace_id=request.trace_id,
+            matched_values=result.get("matched_values", []),
+            unmatched_terms=result.get("unmatched_terms", []),
+            dict_hit=result.get("dict_hit", False),
+            empty_result_reason=result.get("empty_result_reason"),
+            path=result.get("path", "graph"),
+            datasource_label=result.get("datasource_label"),
         )
     except Exception as exc:
         logger.exception("query handler failed")

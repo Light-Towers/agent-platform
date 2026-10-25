@@ -625,11 +625,69 @@ _INIT_WHITELIST = (
     # 门面 otel.py 已退役（观测方案 §12，2026-09-30）：kernel 直调后 init_tracing 仅剩装配点。
     # exhibition 装配薄封装：无本地状态、委托 kernel，由其 server.py:59 装配点调用。
     "applications/exhibition-agent/exhibition_agent/observability/otel.py",
+    # 阶段2 #12（2026-10-16）：补齐的两服务装配点。二者此前 0 装配 ⇒ 6/6 覆盖靠 L-5 存在性门禁兜住。
+    # nl2sql 放 create_app 而非 lifespan：provider 必须先于 lifespan 内的模型/连接构造。
+    "applications/kefu-service/kefu_agent/__main__.py",
+    "applications/nl2sql-service/nl2sql_service/api/server.py",
 )
+
+# L-5 的平台服务清单：枚举必须与此**逐个名字相符**（防目录改名/新增未登记导致门禁静默失效）。
+# 注意不能用 `applications/*/pyproject.toml` 当判据——agent_server 是根 workspace 成员
+# （根 pyproject `packages = ["applications/agent_server"]`），自身无 pyproject.toml。
+_PLATFORM_APPS = frozenset(
+    {
+        "agent_server",
+        "agent_federation",
+        "kefu-service",
+        "nl2sql-service",
+        "knowledge-service",
+        "exhibition-agent",
+    }
+)
+
+# P13（阶段2 #11，2026-10-16）：身份门卫**按服务登记它用的是哪一套实现**。
+# 结构 = {服务名: (归属, 说明, 命中正则)}。按名字逐个比对而非全局扫模式：
+# 某服务换实现 ⇒ 本条报红，必须**有意识地改这张表**（收敛 fork 时就是一次显式记账），
+# 避免出现「门禁绿着但 6/6 其实是三套互不相干的实现」这种无法审计的口径。
+# 归属取值：``shared`` = agent-runtime 的共享实现；``fork:<模块>`` = 该服务自带实现（在册债）。
+# 正则一律取**调用形**（`名字(`，与 _INIT_PATTERN 同写法）：2026-10-16 的变异反证抓到，
+# 只匹配裸名字会被「import 了但没调用」蒙过——而那正是本条要防的漏装形状。
+_IDENTITY_ASSEMBLY: dict[str, tuple[str, str, re.Pattern]] = {
+    "agent_server": (
+        "shared",
+        "main.py 直接 add_middleware(IdentityMiddleware)（比 #11 早，工厂无法承载：core ↛ runtime）",
+        re.compile(r"(?<!def )\badd_middleware\s*\(\s*IdentityMiddleware\b"),
+    ),
+    "agent_federation": (
+        "shared",
+        "经 api/identity_bridge.mount_identity_middleware 挂共享中间件（独立头 X-Tenant-JWT）",
+        re.compile(r"(?<!def )\bmount_identity_middleware\s*\("),
+    ),
+    "kefu-service": (
+        "shared",
+        "mount_identity_gate（2026-10-16 接入，observe 档）",
+        re.compile(r"(?<!def )\bmount_identity_gate\s*\("),
+    ),
+    "nl2sql-service": (
+        "shared",
+        "mount_identity_gate（2026-10-16 接入，observe 档）",
+        re.compile(r"(?<!def )\bmount_identity_gate\s*\("),
+    ),
+    "knowledge-service": (
+        "fork:tenant_identity",
+        "自带 TenantHeaderMiddleware（零依赖 agent-runtime）⇒ 收敛待拍板，见 plan-identity-gate-6of6 §5.1",
+        re.compile(r"(?<!def )\badd_middleware\s*\(\s*TenantHeaderMiddleware\b"),
+    ),
+    "exhibition-agent": (
+        "fork:execution_context_middleware",
+        "自带 X-Execution-Context 解析，且是**逐端点调用**而非全局装配（DEV 档刻意不验签）"
+        "⇒ 收敛与端点覆盖度均待拍板，见 plan-identity-gate-6of6 §5.1/§5.3",
+        re.compile(r"(?<!def )\bresolve_execution_context\s*\("),
+    ),
+}
 
 _MANUAL_CM_PATTERN = re.compile(r"\.__(?:enter|exit)__\s*\(")
 _MANUAL_CM_WHITELIST: tuple[str, ...] = ()
-
 # L-2（S2/S3）：禁止经 app.state 散点取用 tracer（R8/R12 土壤）——请求级 span 由
 # TracingMiddleware 创建，业务层经 agent_core.tracing.current_span/record_request_attributes
 # 取用；S2 迁移完成后白名单清零，新代码走散点即 CI 红。
@@ -654,6 +712,20 @@ def _is_code_line(line: str) -> bool:
     return not (s.startswith("#") or "``" in s)
 
 
+def _enumerate_platform_apps() -> set[str]:
+    """枚举 `applications/` 下的平台服务目录名（L-5 与 P13 共用，单一实现）。
+
+    判据是「含非测试 py 文件的直接子目录」，**不能用 `applications/*/pyproject.toml`**
+    ——agent_server 是根 workspace 成员（根 pyproject `packages = ["applications/agent_server"]`），
+    自身无 pyproject.toml，那样枚举只得 5 个（2026-10-16 实跑踩到）。
+    """
+    return {
+        p.name
+        for p in (ROOT / "applications").iterdir()
+        if p.is_dir() and any(py for py in p.rglob("*.py") if "tests" not in py.parts)
+    }
+
+
 def check_init_scatter() -> list[str]:
     """L-3：观测 init 只允许在装配点/过渡门面出现（业务模块私起 init 即违规）。"""
     violations: list[str] = []
@@ -672,6 +744,92 @@ def check_init_scatter() -> list[str]:
         except Exception:
             pass
     return violations
+
+
+def check_observability_assembly_coverage() -> list[str]:
+    """L-5：观测装配**存在性**门禁（阶段2 #12，与 L-3 的禁止性互补）。
+
+    L-3 只管「init 不许出现在装配点之外」，**没有任何规则管「每个服务都必须有 init」**
+    ⇒ 漏装在 CI 里完全不可见：2026-10-16 实测 kefu-service / nl2sql-service 各 0 个装配点，
+    而 roadmap #12 的判据原文正是「漏装即 CI 失败」。缺的这一半由本条补上。
+
+    「一个 app」= `applications/` 下含 py 文件的直接子目录，并与下表**逐个名字比对**：
+    只数数量会被"目录改名 / 新增服务未登记"骗过（2026-10-16 实跑即踩到：以
+    `applications/*/pyproject.toml` 为判据会漏掉 agent_server——它是根 workspace 成员
+    `packages = ["applications/agent_server"]`，自身无 pyproject.toml，枚举只得 5 个）。
+    比对失败即违规 ⇒ 枚举失效不可能静默永绿。
+    """
+    apps = _enumerate_platform_apps()
+    unknown = apps ^ _PLATFORM_APPS
+    if unknown:
+        return [
+            f"L-5 自检失败：applications/ 枚举到 {sorted(apps)}，与已知 6 服务不符"
+            f"（差集 {sorted(unknown)}）。目录改名/新增服务未登记/枚举失效都属此类 ⇒ "
+            f"请同步更新 _PLATFORM_APPS，而不是放宽本条。"
+        ]
+
+    assembled: set[str] = set()
+    for rel, py_file in _iter_prod_py():
+        if not rel.startswith("applications/"):
+            continue
+        try:
+            text = py_file.read_text(encoding="utf-8")
+        except Exception:  # pragma: no cover - 编码异常的文件不参与判定，交由 L-3 同面处理
+            continue
+        if any(_INIT_PATTERN.search(line) and _is_code_line(line) for line in text.splitlines()):
+            assembled.add(rel.split("/")[1])
+
+    return [
+        f"applications/{a}: 无 init_tracing 装配点。"
+        f"观测**默认关**也必须装——不装则 /health 无从上报、漏装不可见"
+        f"（roadmap #12 判据「漏装即 CI 失败」；装配点须同时加入 _INIT_WHITELIST 以过 L-3）"
+        for a in sorted(apps)
+        if a not in assembled
+    ]
+
+
+def check_identity_assembly_coverage() -> list[str]:
+    """P13：身份门卫装配**存在性 + 归属**门禁（阶段2 #11，2026-10-16；与 L-5 同族）。
+
+    此前全仓**没有任何规则**管「每个服务是否装了身份门卫」——P12 管凭据外流、
+    `check_retired_identity_helpers` 管退役函数名，都不是覆盖度 ⇒ 漏装在 CI 里完全不可见，
+    而 roadmap #11 的判据原文正是「6/6 覆盖；门禁生效」。
+
+    本条刻意**按服务查登记表取它自己的模式**，而不是拿一串模式全局扫：换实现 ⇒ 命不中 ⇒
+    报红，于是「knowledge-service / exhibition-agent 从自带实现收敛到共享实现」必须
+    经过一次有意识的改表（= 记账），不能静默发生。
+    """
+    apps = _enumerate_platform_apps()
+    mismatch = apps ^ set(_IDENTITY_ASSEMBLY)
+    if mismatch:
+        return [
+            f"P13 自检失败：applications/ 枚举到 {sorted(apps)}，与 _IDENTITY_ASSEMBLY 登记不符"
+            f"（差集 {sorted(mismatch)}）。目录改名/新增服务未登记/枚举失效都属此类 ⇒ "
+            f"请同步更新登记表并写清归属，而不是放宽本条。"
+        ]
+
+    assembled: set[str] = set()
+    for rel, py_file in _iter_prod_py():
+        if not rel.startswith("applications/"):
+            continue
+        app = rel.split("/")[1]
+        _owner, _desc, pattern = _IDENTITY_ASSEMBLY[app]
+        try:
+            text = py_file.read_text(encoding="utf-8")
+        except Exception:  # pragma: no cover - 编码异常的文件不参与判定（与 L-5 同面）
+            continue
+        if any(pattern.search(line) and _is_code_line(line) for line in text.splitlines()):
+            assembled.add(app)
+
+    return [
+        f"applications/{app}: 无身份装配点。登记实现={_IDENTITY_ASSEMBLY[app][0]}"
+        f"（{_IDENTITY_ASSEMBLY[app][1]}）⇒ 共享实现经 "
+        f"agent_runtime.identity_assembly.mount_identity_gate(app, \"<服务名>\") 装配"
+        f"（默认 observe 档，无凭据不改响应）；自带实现须在 _IDENTITY_ASSEMBLY 写清归属与理由"
+        f"（roadmap #11 判据「6/6 覆盖；门禁生效」）"
+        for app in sorted(apps)
+        if app not in assembled
+    ]
 
 
 def check_manual_cm_lifecycle() -> list[str]:
@@ -926,9 +1084,11 @@ def check_credential_param_escape() -> list[str]:
         if not rel.startswith(_CREDENTIAL_PARAM_SCOPE_PREFIX):
             continue
         try:
-            # utf-8-sig：Python 源码加载器本身会剥 UTF-8 BOM（PEP 263），本仓有 10 个
-            # 已入库的 BOM 文件（nl2sql_service/**/__init__.py）；用 utf-8 读会把 BOM
-            # 变成 U+FEFF 非法字符 ⇒ fail-closed 退化为「噪音必红」。语法真坏仍会报。
+            # utf-8-sig：Python 源码加载器本身会剥 UTF-8 BOM（PEP 263）；若这里用 utf-8 读，
+            # 一旦仓里混进 BOM 文件就会把它变成 U+FEFF 非法字符 ⇒ fail-closed 退化为「噪音必红」。
+            # 语法真坏仍会报（走同一个 except 分支）。全仓 `.py` 的 BOM 已于 2026-10-16 清零
+            # （原为 nl2sql_service/**/__init__.py 那 10 个，见 docs/TODO.md §5），此处保留
+            # utf-8-sig 是**防再混入**，不是迁就现状。
             tree = ast.parse(py_file.read_text(encoding="utf-8-sig"), filename=rel)
         except (OSError, SyntaxError, ValueError) as exc:
             # fail-closed：读不到/解析不了不等于通过（与 P11 同一口径）
@@ -1058,6 +1218,34 @@ def main() -> int:
         rc = 1
     else:
         print("L-3 观测架构约束通过：观测 init 无业务模块私起")
+
+    v15 = check_observability_assembly_coverage()
+    if v15:
+        print("L-5 观测装配覆盖违反：每个 applications/* 服务都必须有 init_tracing 装配点（漏装即 CI 失败，roadmap #12）")
+        print("修复：在应用装配点（main.py / server.py 的 create_app，须早于 lifespan 内构造模型）调用 init_tracing(service_name=...)；"
+              "默认关闭由 AGENT_CORE_TRACE_ENABLED / OTEL_EXPORTER_OTLP_ENDPOINT 决定，装配不改变运行行为：")
+        for v in v15:
+            print(f"  {v}")
+        rc = 1
+    else:
+        print("L-5 观测装配覆盖通过：6/6 服务均有观测装配点")
+
+    v16 = check_identity_assembly_coverage()
+    if v16:
+        print("P13 身份装配覆盖违反：每个 applications/* 服务都必须有身份门卫装配点（roadmap #11 判据「6/6 覆盖；门禁生效」）")
+        print("修复：默认 observe 档不改变响应——在应用装配点调用 "
+              "agent_runtime.identity_assembly.mount_identity_gate(app, \"<服务名>\")；"
+              "自带实现的服务须在 _IDENTITY_ASSEMBLY 登记归属与理由（不得静默换实现）：")
+        for v in v16:
+            print(f"  {v}")
+        rc = 1
+    else:
+        _owners = [v[0] for v in _IDENTITY_ASSEMBLY.values()]
+        print(
+            "P13 身份装配覆盖通过：6/6 服务均有身份门卫装配点"
+            f"（shared {sum(o == 'shared' for o in _owners)} / "
+            f"fork {sum(o != 'shared' for o in _owners)}，归属与在册债见 _IDENTITY_ASSEMBLY）"
+        )
 
     v11 = check_manual_cm_lifecycle()
     if v11:

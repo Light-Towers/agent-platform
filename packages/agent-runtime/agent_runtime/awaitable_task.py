@@ -35,6 +35,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
+from agent_runtime.planner.durability import FencedWriteError
+
 
 class AwaitableKind(str, Enum):
     """可等待任务的类别（统一抽象）。"""
@@ -127,6 +129,19 @@ def can_transition(current: AwaitableState, target: AwaitableState) -> bool:
     return target in _TASK_TRANSITIONS.get(current, frozenset())
 
 
+def is_stale_generation(current: int | None, incoming: int | None) -> bool:
+    """回执 generation fencing 判据（V3 缺口 1）。
+
+    任一侧为 ``None`` 即**不 fence**：``None`` 表示"来源未知"——存量行（v12 迁移前写入）
+    与未接线的调用方（如 ``human_task``）都没有 generation，按旧语义放行，
+    与 ``execution_checkpoints.generation`` 的处置同构。
+    ``PgAwaitableTaskStore.save`` 的 SQL WHERE 子句是本函数的原子等价物，改这里必须同改那里。
+    """
+    if current is None or incoming is None:
+        return False
+    return incoming < current
+
+
 @dataclass
 class AwaitableTask:
     """长时 / 可等待任务的统一持久化载体。"""
@@ -149,6 +164,9 @@ class AwaitableTask:
     resume_payload: dict[str, Any] | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
     updated_at: float = field(default_factory=time.time)
+    # V3 缺口 1：写入方持有的 lease generation（takeover 后旧 owner 的值会落后）。
+    # None = 来源未知，不参与 fence（见 is_stale_generation）。
+    generation: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -167,6 +185,7 @@ class AwaitableTask:
             "resume_payload": self.resume_payload,
             "metadata": self.metadata,
             "updated_at": self.updated_at,
+            "generation": self.generation,
         }
 
 
@@ -202,9 +221,19 @@ class InMemoryAwaitableTaskStore(AwaitableTaskStore):
             raise InvalidTaskTransition(
                 f"非法任务状态转换: {cur.state.value} → {task.state.value} (task={task.task_id})"
             )
+        if cur is not None and is_stale_generation(cur.generation, task.generation):
+            raise FencedWriteError(
+                f"awaitable task 回执写入被拒绝（stale generation）task={task.task_id} "
+                f"current={cur.generation} incoming={task.generation}"
+            )
         task.updated_at = time.time()
         # 存副本：与调用方对象解耦，避免调用方后续修改同一对象绕过状态转换校验
-        self._store[task.task_id] = copy.deepcopy(task)
+        stored = copy.deepcopy(task)
+        # 与 PG 侧的 COALESCE 对齐：来源未知（generation=None）的写入不得把已知 generation
+        # 降级成未知，否则 fence 会被一次无 generation 的写永久解除。
+        if cur is not None and stored.generation is None:
+            stored.generation = cur.generation
+        self._store[task.task_id] = stored
 
     async def load(self, task_id: str) -> AwaitableTask | None:
         return self._store.get(task_id)
@@ -224,4 +253,5 @@ __all__ = [
     "InMemoryAwaitableTaskStore",
     "InvalidTaskTransition",
     "can_transition",
+    "is_stale_generation",
 ]

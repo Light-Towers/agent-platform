@@ -95,5 +95,8 @@ async def test_to_skill_registered_in_registry():
     reg = SkillRegistry()
     reg.register(skill)
     assert "agentic" in reg
+    # lint P4-2 禁止生产代码直接 registry.execute()（须走 runtime.delegate 受组合护栏治理）；
+    # 本行在 tests/ 白名单内豁免，仅为验证「注册后的 skill 可被 registry 取到并执行」这一契约，
+    # 不是生产调用范式。真实发现路径（entry_points，不显式注入）由 test_agentic_skill_discovery.py 覆盖。
     result = await reg.execute("agentic", question="test", workspace_id="ws")
     assert result == "registered"

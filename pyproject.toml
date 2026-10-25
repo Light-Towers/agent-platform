@@ -10,21 +10,21 @@ dependencies = [
     "agent-core",
     "shared-schemas",
     "agent-runtime",
-    "fastapi>=0.115",
+    "fastapi>=0.159.1",
     "uvicorn[standard]>=0.54.0",
     "python-multipart>=0.0.9",
     "pydantic>=2.13.5",
-    "pydantic-settings>=2.2",
+    "pydantic-settings>=2.16.1",
     "httpx>=0.27",
-    "langgraph>=1.2.12,<2",
-    "langchain-core>=1.6.5",
+    "langgraph>=1.2.16,<2",
+    "langchain-core>=1.6.13",
     "langchain-openai>=1.6.6",
     "langgraph-checkpoint-postgres>=2.0",
     "psycopg[binary,pool]>=3.3.6",
     "pgvector>=0.3",
     "asyncpg>=0.29",
     "rank-bm25>=0.2.2",
-    "sqlglot>=30.20.0",
+    "sqlglot>=30.24.0",
     "anyio>=4.15.1",  # Dependabot: AnyIO TLSStream IDNA 2003 / process-pool 阻塞（critical+medium，first_patched 4.14.2；现下界已高于修复版）
 ]
 
@@ -56,7 +56,7 @@ dev = [
 eval = [
     "flashrag-dev",
     "faiss-cpu",
-    "transformers>=5.17.0",  # Dependabot: transformers 多条 RCE/路径遍历（high×3+medium×1，first_patched 5.10.0；现下界已高于修复版），强制下界覆盖 flashrag-dev 传递边
+    "transformers>=5.20.2",  # Dependabot: transformers 多条 RCE/路径遍历（high×3+medium×1，first_patched 5.10.0；现下界已高于修复版），强制下界覆盖 flashrag-dev 传递边
 ]
 
 [build-system]
@@ -93,10 +93,17 @@ select = ["E4", "E7", "E9", "F", "I", "BLE001", "S110"]
 # 以下为既有风格/惯例类告警，非逻辑阻断；收敛以让 CI 门禁（ruff check .）转绿。
 # B008: FastAPI 在依赖注入（Depends(...)）中于函数默认参数位置调用是官方推荐写法，非真实 bug。
 # E402: 模块级 import 不在顶部（agent_federation 多因 load_dotenv()/sys.path 后再 import，deliberate）。
-# E731: lambda 赋值（风格）。B017: pytest.raises(Exception)。
-# PERF102: .items()→.values()。RUF059: 未使用解包变量。
+# B017: pytest.raises(Exception)。PERF102: .items()→.values()。RUF059: 未使用解包变量。
 # 注：BLE001/S110 已于 P0-4（2026-09-24）从 ignore 移除并纳入 select（根长尾的 legacy 入下方基线）。
-ignore = ["B008", "E402", "E731", "B017", "PERF102", "RUF059"]
+# D4 逐条实测（2026-10-16，两种口径都跑了）：
+#   · **E731 已从本表删除**——根管辖子树（agent_server / eval / scripts / tests）实取 0 违规，
+#     留着它只会让今后有人写 `f = lambda: ...` 时静默通过。
+#   · E402 有真实存量（根子树 25 处 / 全仓 57 处），保留。
+#   · B008 / B017 / PERF102 / RUF059 四条**对 `ruff check .` 是死配置**（B/PERF/RUF 家族不在上面的 select 里），
+#     它们的唯一作用面是 `make type` 的 `--select ALL`（实取存量 7 / 8 / 4 / 37）⇒ 删掉不会让 CI 变绿或变红，
+#     但会让 `make type` 一次性报出这 56 条 ⇒ **保留并挂在这里等一个"要不要把这四族纳入 select"的决策**，
+#     那属规则集扩容（需逐族判"约束是减错还是碍事"），不是本项的"删除后是否仍违规"。取证见 docs/TODO.md §5 D4 与排期 §15。
+ignore = ["B008", "E402", "B017", "PERF102", "RUF059"]
 
 # P0-4 盲捕获门禁棘轮基线（根配置仅覆盖无独立 [tool.ruff] 的子树：agent_server / kefu / nl2sql / eval / scripts / tests）。
 # 逐文件锁定 legacy 存量，新代码不得新增；烧净一个删一行。进度见 docs/plans/plan-p0-4-blind-except-ratchet-2026-09-24.md。
@@ -157,4 +164,14 @@ constraint-dependencies = ["pyarrow>=25.0.1", "pyjwt>=2.14.0"]
 # rouge / rouge-chinese 仅依赖 six，spacy/bm25s/chonkie 均不依赖 nltk —— 故摘除两条边不破坏其它已锁包。
 # 手法：uv 官方的「假 marker 移除传递依赖」——本仓 requires-python >= 3.11，该 marker 恒假，解析器丢弃该边。
 # 副作用：若后续要跑 FlashRAG webui（streamlit）或 refiner（LLMLingua），需先移除本 override。
-override-dependencies = ["fschat ; python_version < '3.9'", "nltk ; python_version < '3.9'"]
+# Dependabot 第四轮（2026-10-25，方案 §13.4）：Pillow 12.3.0 → 13.0.0 被两条 `<13` 上界卡死——
+# gradio 6.24.0 要求 pillow<13.0、streamlit 1.64.0 要求 pillow<13，两者唯一引入者同样是 flashrag-dev
+# （仅根 eval extra）。沿用上面的假 marker 手法摘除这两条边：uv lock 实测 pillow 升到 13.0.0，
+# 连带移除 16 个 webui-only 包（gradio/gradio-client/streamlit/altair/pydeck/pydub/safehttpx/
+# semantic-version/toml/tomlkit/watchdog/groovy/hf-gradio/itsdangerous/pytz/audioop-lts）。
+override-dependencies = [
+    "fschat ; python_version < '3.9'",
+    "nltk ; python_version < '3.9'",
+    "gradio ; python_version < '3.9'",
+    "streamlit ; python_version < '3.9'",
+]

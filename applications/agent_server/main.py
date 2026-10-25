@@ -62,14 +62,78 @@ async def _build_checkpointer():
     return saver
 
 
-def _build_pg_stores(pool):
+def _build_payload_externalizer():
+    """V3-6 Layer B：大 payload 外部化（缺口 7，opt-in）。关闭时返回 None ⇒ checkpoint 路径逐字不变。
+
+    开了但没给目录 ⇒ **fail-fast**：静默退回"没开"会让运维以为大 payload 已经外置，
+    而 JSONB 仍在膨胀。与 ``_build_checkpointer`` 里「db_enabled 但 pool 未初始化即抛」
+    同一处置口径。
+    """
+    settings = get_settings()
+    if not settings.payload_externalization_enabled:
+        return None
+    if not settings.payload_externalization_dir:
+        raise RuntimeError(
+            "PAYLOAD_EXTERNALIZATION_ENABLED=true 但未配 PAYLOAD_EXTERNALIZATION_DIR"
+        )
+    from agent_runtime.payload_externalization import (
+        ExternalizationConfig,
+        FileSystemPayloadStore,
+        PayloadExternalizer,
+    )
+
+    return PayloadExternalizer(
+        FileSystemPayloadStore(settings.payload_externalization_dir),
+        config=ExternalizationConfig(
+            threshold_bytes=settings.payload_externalization_threshold_bytes,
+            gc_min_age_hours=settings.payload_externalization_gc_min_age_hours,
+        ),
+    )
+
+
+def _make_gc_sweep(externalizer, checkpoint_store):
+    """payload blob GC 回调（缺口 7 + #121 引用检查）：两段式删除。
+
+    第一段问"有没有该删的"（``list_gc_candidates``，纯 blob 存储遍历）；**有候选
+    才**第二段查 PG 引用（``collect_externalized_keys``，全表 jsonb_each 有成本，
+    稳态不该每 30s 扫一次）；最后按"够老 **且** 不被引用"删。
+
+    引用检查防的损坏场景：awaitable resume 挂起超过 age 下限后，其 checkpoint
+    里的 reference 被 sweep 单靠年龄删掉 ⇒ resume 成功但 internalize 静默返回
+    reference（数据没了且无告警）。
+
+    无删除候选时返回 None（本轮什么都没发生，不伪造扫描计数）。
+    """
+
+    async def _gc_sweep() -> dict[str, int] | None:
+        if not await externalizer.list_gc_candidates():
+            return None
+        referenced = await checkpoint_store.collect_externalized_keys()
+        return await externalizer.sweep(referenced_keys=referenced)
+
+    return _gc_sweep
+
+
+def _build_pg_stores(pool, externalizer=None):
     """构建 PG 持久化后端（§20.1/20.2 + P3-1）。
 
+    ``externalizer`` 可注入（缺口 7：reaper 的 GC sweep 与 checkpoint 外部化
+    共用同一实例/同一 blob 目录）；缺省 None 时自建（禁用态返回 None）。
     仅在 pool 非 None 时创建；返回 (checkpoint_store, idempotency_store, ownership_store, trajectory_store)。
     """
     if pool is None:
         return None, None, None, None
-    checkpoint_store = PgCheckpointStore(pool)
+    # V3-6 Layer B：不传 migrator 则 load() 的 schema 迁移分支恒不执行（默认 None）
+    from agent_runtime.state_migration import get_default_migrator
+
+    if externalizer is None:
+        externalizer = _build_payload_externalizer()
+
+    checkpoint_store = PgCheckpointStore(
+        pool,
+        migrator=get_default_migrator(),
+        externalizer=externalizer,
+    )
     idempotency_store = PgIdempotencyStore(pool)
     ownership_store = PgExecutionOwnershipStore(pool)
     trajectory_store = PgTrajectoryStore(pool)
@@ -93,7 +157,7 @@ def _warm_embedding_backend() -> tuple[str, bool]:
 
         provider = resolve_provider()
         return type(provider).__name__, not isinstance(provider, MockEmbedder)
-    except Exception:  # noqa: BLE001
+    except Exception:  # noqa: BLE001 —— 后端预热失败不阻断启动：红灯如实亮 unknown/false，且必留日志
         logger.exception("embedding 后端预热失败：/health 报 embedding_backend=unknown / embedding_real=false")
         return "unknown", False
 
@@ -221,7 +285,13 @@ async def lifespan(app: FastAPI):
     checkpointer = await _build_checkpointer()
 
     # §20.1/20.2 + P3-1: 构建 PG 持久化后端
-    checkpoint_store, idempotency_store, ownership_store, trajectory_store = _build_pg_stores(pool)
+    # 缺口 7（2026-10-19）：externalizer 提前构建——checkpoint 外部化与 reaper 的
+    # blob GC sweep 共用同一实例（同一 FileSystemPayloadStore 目录）。仅 pool 在场
+    # 时构建：保持「开了没配目录即 fail-fast」的原触发时序（pool 缺席不提前炸）。
+    payload_externalizer = _build_payload_externalizer() if pool is not None else None
+    checkpoint_store, idempotency_store, ownership_store, trajectory_store = _build_pg_stores(
+        pool, externalizer=payload_externalizer
+    )
 
     # Phase 2: OTel 接线（opt-in）；观测单状态机在 kernel（S1），请求级 span 由
     # build_api_app(enable_tracing=True) 装配的 TracingMiddleware 创建（S2），
@@ -405,6 +475,12 @@ async def lifespan(app: FastAPI):
 
         awaitable_task_store = InMemoryAwaitableTaskStore()
     app.state.awaitable_task_store = awaitable_task_store
+    # V3 补-1: 人工审批（HumanTaskStore 复用同一个 awaitable store）。resolver 要等
+    # status_store 建好后再装（见下方 scheduler 块之后），此处先占位避免属性缺失。
+    from agent_runtime.human_task import HumanTaskStore
+
+    app.state.human_task_store = HumanTaskStore(awaitable_task_store)
+    app.state.human_task_resolver = None
     app.state.planner_runtime = PlannerRuntime(
         registry=registry,
         llm=llm,
@@ -421,6 +497,7 @@ async def lifespan(app: FastAPI):
         user_id="default",
         post_execution_hooks=post_execution_hooks,
         awaitable_task_store=awaitable_task_store,
+        human_task_store=app.state.human_task_store,
     )
     # 绑定 delegate：graph 节点的 _invoke 此后经 runtime.delegate 调用
     delegate_ref.delegate = app.state.planner_runtime.delegate
@@ -455,23 +532,73 @@ async def lifespan(app: FastAPI):
         )
         app.state.scheduler = scheduler
         app.state.status_store = status_store
+        # V3-4B: 恢复编排器（缺口 4 的 reschedule）。默认关：开启后 retry 分支会向队列
+        # 新入一条 `:retry:N`，重试消耗队列容量（QueueFull 时静默失败）；
+        # 关闭时 Reaper 逐字保持旧行为（只标 FAILED + 释放 slot）。
+        recovery = None
+        if settings.scheduler_recovery_enabled:
+            from agent_runtime.execution_recovery import (
+                ReaperConfig,
+                RecoveryOrchestrator,
+                make_trajectory_contract_resolver,
+            )
+
+            # 缺口 4 残差（2026-10-19，#99）：接生产 contract_resolver——读轨迹取
+            # plan.route 经 registry 查 Effect Contract，让四类 FailureRecovery
+            # 恢复语义真正生效（此前契约恒 None，决策恒退化为默认可重试）。
+            # trajectory_store 缺席（无 PG）时不接：保持现状语义，不造内存替身。
+            contract_resolver = None
+            if trajectory_store is not None:
+                contract_resolver = make_trajectory_contract_resolver(
+                    trajectory_store, registry
+                )
+
+            recovery = RecoveryOrchestrator(
+                scheduler,
+                config=ReaperConfig(max_retries=settings.scheduler_recovery_max_retries),
+                contract_resolver=contract_resolver,
+                # 缺口 3（2026-10-19）：QUERY_STATUS 执行体——查外部任务真实状态
+                # 并按态动作（completed→resume 续跑 / failed→FAILED / 在途→不动防
+                # 重复副作用）。store 已在同一 lifespan 装配（PG 或内存）。
+                awaitable_store=awaitable_task_store,
+            )
         # V3 Phase 3: Scheduler Reaper（lease-based 回收）
         if ownership_store is not None:
             from agent_runtime.execution_scheduler import SchedulerReaper
 
-            reaper = SchedulerReaper(scheduler, ownership_store)
+            # 缺口 7（2026-10-19）：externalization 启用时才挂 GC sweep 回调
+            # （特性默认关 ⇒ 无回调，reaper 行为逐字不变）。#121：回调改两段式
+            # （先候选后引用扫描），仍在途的引用不被误删。
+            sweep_callbacks = (
+                [_make_gc_sweep(payload_externalizer, checkpoint_store)]
+                if payload_externalizer is not None
+                else None
+            )
+            reaper = SchedulerReaper(
+                scheduler,
+                ownership_store,
+                recovery=recovery,
+                sweep_callbacks=sweep_callbacks,
+            )
             reaper.start()
             app.state.scheduler_reaper = reaper
-            logger.info("V3 scheduler reaper started (lease-based)")
+            logger.info(
+                "V3 scheduler reaper started (lease-based, recovery=%s)",
+                "on" if recovery is not None else "off",
+            )
         else:
             app.state.scheduler_reaper = None
-        # V3 Phase 4: Control Plane（组合 scheduler + status_store + checkpoint_store）
+        # V3 Phase 4: Control Plane（组合 scheduler + status_store + checkpoint_store
+        # + awaitable_store + recovery）。awaitable_store 此前未传 ⇒ inspect 的
+        # external_tasks 段恒为空（能力在而装配漏接），本批补齐。
         from agent_runtime.control_plane import ControlPlane
 
         app.state.control_plane = ControlPlane(
             scheduler=scheduler,
             status_store=status_store,
             checkpoint_store=checkpoint_store,
+            awaitable_store=awaitable_task_store,
+            recovery=recovery,
         )
         logger.info(
             "V3 scheduler enabled: max_concurrent=%d per_tenant=%d queue=%d backend=%s",
@@ -483,6 +610,15 @@ async def lifespan(app: FastAPI):
     else:
         app.state.scheduler = None
         app.state.status_store = None
+    # V3 补-1: 人工审批 resolver。status_store 仅在 scheduler 开启时存在，而 resolver 容忍
+    # None ⇒ 未开 scheduler 时审批仍能收敛任务状态，只是不做 WAITING_HUMAN → RUNNING 的
+    # 状态机推进（那条推进本来就依赖 ExecutionStatus 面）。
+    from agent_runtime.human_task import HumanTaskResolver
+
+    app.state.human_task_resolver = HumanTaskResolver(
+        app.state.human_task_store,
+        status_store=getattr(app.state, "status_store", None),
+    )
     # V3 Phase 4: Cost Governance（opt-in）
     if settings.cost_governance_enabled:
         from agent_runtime.cost_governance import (

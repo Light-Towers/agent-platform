@@ -10,7 +10,7 @@ from agent_runtime import cache as semantic_cache
 from agent_runtime.db import get_pool
 from agent_runtime.planner.protocol import PlannerContext
 from agent_runtime.schemas import ADMISSION_ADMITTED, ADMISSION_QUEUED, ADMISSION_REJECTED
-from agent_runtime.workspace_registry import resolve_workspace
+from agent_runtime.workspace_registry import resolve_workspace, server_tenant_id
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from shared_schemas import sse_pack
@@ -35,6 +35,16 @@ async def query(
 ):
     settings = get_settings()
     thread_id = resolve_thread_id(req.session_id)
+    # T2.1/G2：租户取服务端断言（ContextVar 优先，其次部署级 default），body
+    # 自报值仅作比对——显式携带且与断言不符记 WARNING（10-10 选项 A 观测期软
+    # 模式；403 硬拒属 T2.5 契约层，与本批正交）。下方全部取值点统一用 tenant。
+    tenant = server_tenant_id(settings.default_tenant_id)
+    if req.tenant_id and req.tenant_id != tenant:
+        logger.warning(
+            "body tenant_id 与服务端断言不一致，以断言为准（body=%r asserted=%r）",
+            req.tenant_id,
+            tenant,
+        )
     graph = request.app.state.graph
     planner = getattr(request.app.state, "planner", None)
     planner_runtime = getattr(request.app.state, "planner_runtime", None)
@@ -46,10 +56,11 @@ async def query(
 
     # ADR-0006 T10/D4：使用 workspace_id 前解析其租户归属（首次引用自动注册，幂等）。
     # 读路径 best-effort：注册失败不阻断对话（数据召回仍由 (tenant_id, workspace_id)
-    # 谓词兜底隔离，见 rag/store.py / schema_store.py）；租户取 req.tenant_id 沿用现状。
+    # 谓词兜底隔离，见 rag/store.py；sql 训练三件套的同类隔离已随 agent_server/sql
+    # 退役移交 nl2sql-service，见 ADR-0011 §7）；租户取服务端断言（T2.1，见上方 tenant 取值）。
     if pool is not None:
         try:
-            await resolve_workspace(pool, req.tenant_id or "default", req.workspace_id)
+            await resolve_workspace(pool, tenant, req.workspace_id)
         except Exception:
             logger.warning("workspace 归属解析失败（降级继续，读侧仍按租户谓词）", exc_info=True)
 
@@ -91,7 +102,7 @@ async def query(
         try:
             await scheduler.submit(ExecutionRequest(
                 execution_id=request_id,
-                tenant_id=req.tenant_id or "default",
+                tenant_id=tenant,
                 session_id=thread_id,
                 user_id=req.user_id,
                 priority=sched_priority,
@@ -105,7 +116,7 @@ async def query(
     if cost_governance is not None:
         from agent_runtime.cost_governance import BudgetDimension, BudgetExceeded
 
-        _tenant = req.tenant_id or "default"
+        _tenant = tenant
         try:
             await cost_governance.check(_tenant, BudgetDimension.REQUESTS, estimated_amount=1)
         except BudgetExceeded:
@@ -159,7 +170,7 @@ async def query(
     q_embedding: list[float] | None = None
     if settings.cache_enabled and pool is not None:
         q_embedding = await embed_query(req.query)
-        cached = await semantic_cache.cache_lookup(pool, q_embedding, settings.cache_threshold, tenant_id=req.tenant_id or "")
+        cached = await semantic_cache.cache_lookup(pool, q_embedding, settings.cache_threshold, tenant_id=tenant)
         if cached:
             await lease.release()
             # P0-1（方案 B）：cache-hit 从未经 try_start 认领，但 submit 已留下 QUEUED 行——
@@ -234,7 +245,7 @@ async def query(
                 async for update in graph.astream(
                     {"messages": [("user", req.query)], "question": req.query,
                      "user_id": req.user_id, "workspace_id": req.workspace_id,
-                     "tenant_id": req.tenant_id or "default",
+                     "tenant_id": tenant,
                      "iterations": 0},
                     config=config,
                     stream_mode="updates",
@@ -261,7 +272,7 @@ async def query(
                         governed_memories, _gov_report = await governor.govern_memories(
                             query=req.query,
                             state=last_snapshot,
-                            tenant_id=req.tenant_id or "default",
+                            tenant_id=tenant,
                             user_id=req.user_id,
                         )
                     except Exception:
@@ -270,7 +281,7 @@ async def query(
                     question=req.query,
                     workspace_id=req.workspace_id,
                     user_id=req.user_id,
-                    tenant_id=req.tenant_id or "default",
+                    tenant_id=tenant,
                     messages=await _thread_persist.read_thread_messages(checkpointer, thread_id),
                     llm=planner_runtime.llm,
                     last_snapshot=last_snapshot,
@@ -299,18 +310,22 @@ async def query(
                     elif event.type == "status" and event.payload.get("snapshot"):
                         round_snapshot = event.payload["snapshot"]
                     elif event.type == "suspended" and status_store is not None:
-                        # V3-3: 执行挂起 → ExecutionStatus → WAITING_EXTERNAL
-                        from agent_runtime.execution_status import ExecutionStatus, ExecutionStatusRecord
+                        # V3-3: 执行挂起 → ExecutionStatus。等人工审批必须写 WAITING_HUMAN：
+                        # HumanTaskResolver.resolve_and_resume 的条件是
+                        # `current.status is WAITING_HUMAN`，写成 WAITING_EXTERNAL 会让
+                        # 审批通过后的 resume 永不命中（该分支此前正是因此而是死代码）。
+                        from agent_runtime.execution_status import ExecutionStatusRecord
 
+                        suspend_status = _suspend_status(event.payload.get("kind"))
                         try:
                             await status_store.save(ExecutionStatusRecord(
                                 execution_id=request_id,
-                                status=ExecutionStatus.WAITING_EXTERNAL,
+                                status=suspend_status,
                             ))
                         except Exception:
-                            logger.warning("status save WAITING_EXTERNAL failed", exc_info=True)
+                            logger.warning("status save %s failed", suspend_status.value, exc_info=True)
             if final_answer and q_embedding is not None:
-                semantic_cache.cache_store(pool, req.query, final_answer, q_embedding, tenant_id=req.tenant_id or "")
+                semantic_cache.cache_store(pool, req.query, final_answer, q_embedding, tenant_id=tenant)
             # Phase 3: 对话历史写回——Planner 协议中立（不持线程语义），由 app 层承担。
             # 与 graph 路径的 checkpoint 持久化行为等价，/history 与 revert 不回退。
             if final_answer and checkpointer is not None:
@@ -356,7 +371,7 @@ async def query(
             if cost_governance is not None:
                 from agent_runtime.cost_governance import BudgetDimension
 
-                _tenant = req.tenant_id or "default"
+                _tenant = tenant
                 try:
                     await cost_governance.record(_tenant, BudgetDimension.REQUESTS, 1)
                     traj = getattr(planner_runtime, "last_trajectory", None)
@@ -395,6 +410,23 @@ def _sse(payload: dict) -> str:
     """打包 SSE 帧：将 payload.type 提升为 event name，与 knowledge-service 对齐。"""
     event_name = payload.get("type", "")
     return sse_pack(event_name, payload)
+
+
+def _suspend_status(kind):
+    """挂起事件 → ExecutionStatus：HUMAN 类走 WAITING_HUMAN，其余走 WAITING_EXTERNAL。
+
+    判据是 execution_graph 从 ExecutionSuspended 带出的 awaitable kind（str）。
+    HumanTaskResolver.resolve_and_resume 仅在 status is WAITING_HUMAN 时恢复执行，
+    故人工审批挂起必须写 WAITING_HUMAN，否则审批通过后的 resume 分支永不命中。
+    """
+    from agent_runtime.awaitable_task import AwaitableKind
+    from agent_runtime.execution_status import ExecutionStatus
+
+    return (
+        ExecutionStatus.WAITING_HUMAN
+        if str(kind).lower() == AwaitableKind.HUMAN.value
+        else ExecutionStatus.WAITING_EXTERNAL
+    )
 
 
 def _node_event(node: str, payload: dict) -> dict | None:
