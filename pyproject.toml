@@ -29,14 +29,14 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-pdf = ["pypdf>=6.19.0"]
+pdf = ["pypdf>=6.21.2"]
 otel = [
     # 下界与 agent-core [tracing] 归一（lint L-4 防漂移，方案 §3.3；agent-runtime [otel]
     # 声明位已随 2026-09-30 门面退役摘除）；
     # api 显式声明：propagator/attach 属 API 层能力，不应依赖 sdk 传递边隐性带入。
-    "opentelemetry-api>=1.24",
-    "opentelemetry-sdk>=1.24",
-    "opentelemetry-exporter-otlp>=1.24",
+    "opentelemetry-api>=1.45.1",
+    "opentelemetry-sdk>=1.45.1",
+    "opentelemetry-exporter-otlp>=1.45.1",
 ]
 mcp = ["mcp>=2.2.0"]  # Dependabot: MCP SDK DNS 重绑定/WebSocket/HTTP session（high×3，first_patched 1.28.1；现下界已高于修复版）
 # Agentic Planner 模式（PLANNER=agentic）需要联邦侧 AgenticPlanner；
@@ -164,4 +164,14 @@ constraint-dependencies = ["pyarrow>=25.0.1", "pyjwt>=2.14.0"]
 # rouge / rouge-chinese 仅依赖 six，spacy/bm25s/chonkie 均不依赖 nltk —— 故摘除两条边不破坏其它已锁包。
 # 手法：uv 官方的「假 marker 移除传递依赖」——本仓 requires-python >= 3.11，该 marker 恒假，解析器丢弃该边。
 # 副作用：若后续要跑 FlashRAG webui（streamlit）或 refiner（LLMLingua），需先移除本 override。
-override-dependencies = ["fschat ; python_version < '3.9'", "nltk ; python_version < '3.9'"]
+# Dependabot 第四轮（2026-10-25，方案 §13.4）：Pillow 12.3.0 → 13.0.0 被两条 `<13` 上界卡死——
+# gradio 6.24.0 要求 pillow<13.0、streamlit 1.64.0 要求 pillow<13，两者唯一引入者同样是 flashrag-dev
+# （仅根 eval extra）。沿用上面的假 marker 手法摘除这两条边：uv lock 实测 pillow 升到 13.0.0，
+# 连带移除 16 个 webui-only 包（gradio/gradio-client/streamlit/altair/pydeck/pydub/safehttpx/
+# semantic-version/toml/tomlkit/watchdog/groovy/hf-gradio/itsdangerous/pytz/audioop-lts）。
+override-dependencies = [
+    "fschat ; python_version < '3.9'",
+    "nltk ; python_version < '3.9'",
+    "gradio ; python_version < '3.9'",
+    "streamlit ; python_version < '3.9'",
+]
