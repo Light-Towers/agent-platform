@@ -157,4 +157,15 @@ constraint-dependencies = ["pyarrow>=25.0.1", "pyjwt>=2.14.0"]
 # rouge / rouge-chinese 仅依赖 six，spacy/bm25s/chonkie 均不依赖 nltk —— 故摘除两条边不破坏其它已锁包。
 # 手法：uv 官方的「假 marker 移除传递依赖」——本仓 requires-python >= 3.11，该 marker 恒假，解析器丢弃该边。
 # 副作用：若后续要跑 FlashRAG webui（streamlit）或 refiner（LLMLingua），需先移除本 override。
-override-dependencies = ["fschat ; python_version < '3.9'", "nltk ; python_version < '3.9'"]
+# Dependabot 第四轮（2026-10-24，方案 §13.4）：Pillow 12.3.0 → 13.0.0 被两条 `<13` 上界卡死——
+# gradio 6.24.0 要求 pillow<13.0、streamlit 1.64.0 要求 pillow<13，两者唯一引入者同样是 flashrag-dev
+# （仅根 eval extra，仓库内 0 处 import gradio/streamlit）。沿用上面的假 marker 手法摘除这两条边：
+# uv lock --dry-run 实测 pillow 升到 13.0.0，连带移除 16 个 webui-only 包（gradio/gradio-client/
+# streamlit/altair/pydeck/pydub/safehttpx/semantic-version/toml/tomlkit/watchdog/groovy/hf-gradio/
+# itsdangerous/pytz/audioop-lts），评测入口的 import 闭包不变（依据同上）。
+override-dependencies = [
+    "fschat ; python_version < '3.9'",
+    "nltk ; python_version < '3.9'",
+    "gradio ; python_version < '3.9'",
+    "streamlit ; python_version < '3.9'",
+]

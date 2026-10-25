@@ -352,28 +352,30 @@ Dependabot 已自开 PR **#31**（bump urllib3 2.7.0→2.8.0，单文件 uv.lock
 - **配套**：8 个 Dependabot PR（#127/#131/#132/#135/#136/#137/#138/#139）逐条留证关为 superseded；#128/#129 是例行升级（非安全告警），按 §12.4 不动。
 - **顺带修复**：公开镜像 doc-sync 红灯——AGENTS.md 3 处内网专有文档引用改纯文本（镜像侧该文件不存在，doc-sync 以 `git ls-files` 为基准）。这也是上述 8 个 PR 长期 FAILURE 的真因。
 
-### 13.4 剩余 41 项 Pillow：摘边方案（待拍板，D2）
+### 13.4 剩余 41 项 Pillow：摘边（已实施，2026-10-25）
 
-**根因**：Pillow 12.3.0 → 13.0.0 被两条 `<13` 上限卡死——gradio 6.24.0 要求 `pillow<13.0`，streamlit 1.64.0 要求 `pillow<13`。二者唯一引入者均为 flashrag-dev（仅根 `eval` extra），仓库内 **0 处 import gradio/streamlit**（grep 实证）。
+**根因**：Pillow 12.3.0 → 13.0.0 被两条 `<13` 上限卡死——gradio 6.24.0 要求 `pillow<13.0`，streamlit 1.64.0 要求 `pillow<13`。二者唯一引入者均为 flashrag-dev（仅根 `eval` extra）。
 
-**方案**：复用既有 `fschat/nltk` 同款假 marker 手法，在 `pyproject.toml` 的 `override-dependencies` 追加两条：`gradio ; python_version < '3.9'`、`streamlit ; python_version < '3.9'`（requires-python >= 3.11 ⇒ marker 恒假）。
+**方案**：复用既有 `fschat/nltk` 同款假 marker 手法，`override-dependencies` 追加 `gradio ; python_version < '3.9'`、`streamlit ; python_version < '3.9'`（requires-python >= 3.11 ⇒ marker 恒假）。
 
-**dry-run 实测**（`uv lock --dry-run -P pillow`，2026-10-24）：
+**实施结果**（`uv lock --upgrade-package pillow`，2026-10-25）：
 
-- `Update pillow v12.3.0 -> v13.0.0`
-- `Remove` 16 个包（全部 webui-only）：gradio / gradio-client / streamlit / altair / pydeck / pydub / safehttpx / semantic-version / toml / tomlkit / watchdog / groovy / hf-gradio / itsdangerous / pytz / audioop-lts
-- `Add` 0 个；`Resolved 285 packages`
+- `pillow 12.3.0 → 13.0.0`（changed=1，无其它版本漂移）
+- `[[package]]` 301 → 285；唯一包名 296 → 280；**removed=16 / added=0**
+- 移除清单：gradio / gradio-client / streamlit / altair / pydeck / pydub / safehttpx / semantic-version / toml / tomlkit / watchdog / groovy / hf-gradio / itsdangerous / pytz / audioop-lts
+- `uv lock --check` rc=0；ruff 全过；lint_architecture rc=0（含 L-4）；check_doc_sync 通过
 
-**影响面与代价**：失去 FlashRAG webui（streamlit）与 gradio 相关入口。`make eval-rag` 的评测入口不受影响（只 import flashrag.config / dataset / evaluator，与 fschat/nltk 摘边时同一份源码核实）；该副作用已在 `pyproject.toml` 注释中登记（「要跑 webui 先摘 override」）。
+**源码级闭包核实**（在锁定 commit `d3feb7279b17297d9781df214cd52919cc1d4722` 上做，不靠推断）：
 
-**实施时必跑验收**：
+- 评测入口 `scripts/flashrag_eval/run_eval.py` + `agent_retriever.py` 的实际 import 起点是 `flashrag.config / dataset / evaluator / retriever`（方案初稿漏记 retriever，此处据源码更正）；
+- 这四个起点的 intra-package import 闭包 = **18 个文件，0 处 streamlit/gradio**；
+- streamlit/gradio 只出现在 `webui/`、`examples/quick_start/` 和 `requirements.txt`；`setup.py` 用 `find_packages()`，这两目录**没有 `__init__.py`、不会被打进安装包**（实测 `find_packages()` 顶层只有 `flashrag`）。
 
-1. `uv run --extra eval python -c "import flashrag.config, flashrag.dataset, flashrag.evaluator"` → rc=0
-2. `uv lock --check` rc=0；包集合只减不增；ruff + lint_architecture（L-4）
-3. `make test` 对齐 CI（重点 knowledge-service 的 torchvision 路径）
-4. `make eval` 启发式门禁
+**影响面与代价**：失去 FlashRAG webui（streamlit）与 gradio 入口——但它们本来就不在安装产物里，丢的只是 lock 里的死重量。副作用已在 `pyproject.toml` 注释登记（「要跑 webui 先摘 override」）。
 
-**未验证项（如实登记）**：torchvision / weasyprint 对 Pillow 13 的**运行时**兼容——resolver 无上限只证明可解，不证明可跑，需靠第 3 条兜。
+**CI 门禁**：`make install` 全新安装 + 10 个 pytest session + `make eval`（由本 PR 的 CI 实跑）。
+
+**未验证项（如实登记）**：torchvision / weasyprint 对 Pillow 13 的**运行时**兼容——resolver 无上限只证明可解，不证明可跑，靠 CI 的 knowledge-service session 兜底。
 
 **回退**：删掉两条 override 再 `uv lock` 即回到现状，无代码改动。
 
