@@ -48,6 +48,11 @@ class SkillContext:
     warehouse_client: WarehouseClient
     context_mode: str = "jwt"
     extra_headers: dict[str, str] | None = None
+    # Skill Router 从 tool_catalog.json 解析出的端点（{"method","path"}），由 dispatch 节点
+    # 在门禁放行后注入。None = 本次调用**未经路由** ⇒ 需要直连 warehouse 的 skill 必须
+    # fail-closed（见 venue_schedule_query）。刻意不给默认路径：硬编码兜底会让门禁
+    # 退化成"可绕过的建议"，并让 catalog 与 skill 各持一份端点真相。
+    routed_endpoint: dict[str, Any] | None = None
 
 
 class BaseSkill(ABC):

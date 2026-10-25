@@ -11,6 +11,7 @@ from typing import Any
 from agent_core.logging import get_logger
 
 from exhibition_agent.contract.envelope import DataClassification, EgressDecision, Readiness
+from exhibition_agent.foundation.skill_router import route
 from exhibition_agent.graph.state import ExhibitionAgentState
 from exhibition_agent.model_router import route_model
 from exhibition_agent.observability.metrics import get_default_registry
@@ -32,6 +33,15 @@ _SKILLS: dict[str, BaseSkill] = {
     _DATA_ANALYSIS_SKILL.name: _DATA_ANALYSIS_SKILL,
 }
 _DEFAULT_SKILL: BaseSkill = _VENUE_SKILL
+
+# 平台 skill 名 → P1 Skill Router catalog skill 名 + 默认 discriminator。
+# venue.schedule.query 命中 catalog tool venue_schedule（endpoint /api/venue-schedule，
+# 隶属 skill get_venue_operation 的 card=schedule 分支）。data_analysis.query 经 HTTP
+# 调 nl2sql-service、不直连 WarehouseClient，无对应 catalog Tool，故不在本表——run_skill
+# 只对命中本表的 skill 走 route() 门禁（门禁目标是 warehouse Tool 的 scope/readiness）。
+_CATALOG_ROUTE: dict[str, tuple[str, dict[str, str]]] = {
+    _VENUE_SKILL.name: ("get_venue_operation", {"card": "schedule"}),
+}
 
 
 def select_skill(state: ExhibitionAgentState) -> dict[str, Any]:
@@ -77,6 +87,56 @@ async def run_skill(state: ExhibitionAgentState) -> dict[str, Any]:
     params = state.get("params", {})
 
     start_ms = now_ms()
+
+    # P1 Skill Router 门禁链（docs/TODO §3 接线方向：run_skill → route → 执行）：
+    # 执行 skill 前先过 route()，让 scope 校验（INV-4 整体拒绝）与 readiness 拦截
+    # （F06 SYNTHETIC 禁入生产）能真正阻断调用，而非事后由 warehouse 兜底。
+    # 仅命中 _CATALOG_ROUTE 的 skill 走此门禁（见映射表注释）。
+    catalog_route = _CATALOG_ROUTE.get(skill_name)
+    if catalog_route is not None:
+        catalog_skill, disc_defaults = catalog_route
+        # params 客户端可控，剔除 route() 的位置参数名，避免 kwarg 冲突（TypeError）。
+        discriminator = {
+            **disc_defaults,
+            **{k: v for k, v in params.items() if k not in ("skill_name", "ctx")},
+        }
+        route_result = route(catalog_skill, ec, **discriminator)
+        if not route_result.get("allowed"):
+            reason = route_result.get("reason", "skill_router 拒绝")
+            # 带 readiness_tag → F06 readiness 拦截；否则 → INV-4 scope 整体拒绝。
+            is_readiness_block = "readiness_tag" in route_result
+            error_code = "DATA_NOT_CONNECTED" if is_readiness_block else "SCOPE_DENIED"
+            logger.warning(
+                "Skill Router 门禁拦截：skill=%s catalog_skill=%s error=%s reason=%s",
+                skill_name,
+                catalog_skill,
+                error_code,
+                reason,
+            )
+            registry.record_latency(skill_name, now_ms() - start_ms)
+            registry.record_error_code(error_code)
+            denied_result = SkillResult(
+                answer=reason,
+                readiness=Readiness.NOT_CONNECTED,
+                classification=DataClassification.INTERNAL,
+                error_code=error_code,
+                warnings=[reason],
+                data={
+                    "route_denied": True,
+                    "reason": reason,
+                    "readiness_tag": route_result.get("readiness_tag"),
+                },
+            )
+            return {
+                "skill_result": denied_result,
+                "answer": denied_result.answer,
+                "error": error_code,
+                "sql_statements": state.get("sql_statements", []),
+            }
+        # 门禁放行后把 catalog 解析出的端点注入 ctx：catalog 是端点的唯一真相源，
+        # skill 不再各自硬编码 REST 路径（TODO §3「route(...) → 执行」的后半截）。
+        ctx.routed_endpoint = route_result.get("endpoint")
+
     try:
         with span(
             f"exhibition_agent.skill.{skill_name}",

@@ -2,9 +2,11 @@
 P1 Skill Router — discriminator→Tool 映射 + INV-4 整体拒绝 + F06 SYNTHETIC 拦截
 
 .. note::
-   **STATUS: NOT WIRED** – 本模块已完整实现但尚未接入 `graph/nodes.py:run_skill`。
-   当前各 Skill 实现内部直接调用 WarehouseClient，未走本路由的统一门禁链。
-   接线方向：`run_skill` → `route(skill_name, ctx, **params)` → 得到 tool/endpoint → 执行。
+   **STATUS: WIRED（作为执行前门禁）** – `graph/nodes.py:run_skill` 在执行 skill 前，
+   对命中 `_CATALOG_ROUTE` 的 skill 调 `route(catalog_skill, ec, **params)`：scope 不符
+   （INV-4）或生产模式 SYNTHETIC（F06）→ 整体拒绝，不再触达 WarehouseClient。放行时
+   skill 仍自行构造 REST 调用（route 的 tool/endpoint 目前用于门禁判定，未驱动实际请求）。
+   data_analysis.query 经 HTTP 调 nl2sql-service、不直连 WarehouseClient，不在门禁映射表内。
    不得删除：包含已设计的 Tool 映射表 + scope 校验 + readiness 拦截逻辑。(2026-09-24)
 
 route(skill_name, ctx, **discriminator) -> dict
@@ -196,6 +198,16 @@ def route(skill_name: str, ctx=None, **discriminator) -> dict:
             "allowed": False,
             "reason": "SYNTHETIC 禁入生产（INV-3）",
             "readiness_tag": "SYNTHETIC",
+        }
+
+    # roadmap 阶段1 #10 第二句「缺标注则拒绝接入」：未标 readiness 的接口过去会
+    # 落到 "UNKNOWN"，而下面的门禁只拦 "SYNTHETIC" ⇒ 没标注 = 自动放行（fail-open）。
+    # 现按 fail-closed 处理：生产模式下未标注即拒，必须显式标注后才能接入。
+    if _is_production_mode() and readiness_tag == "UNKNOWN":
+        return {
+            "allowed": False,
+            "reason": "接口未标注数据可信度（readiness），生产模式 fail-closed 拒绝（roadmap #10）",
+            "readiness_tag": "UNKNOWN",
         }
 
     return {

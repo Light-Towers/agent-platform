@@ -21,6 +21,11 @@
 |---|---|---|
 | `verify_main_tip.py` | 判据 6：在给定 merge sha 上实取七项 fail-closed 复验 | 是（`gh api`） |
 | `normalize_dump.py` | PowerShell 重定向产物默认 UTF-16 LE ⇒ 按 BOM 嗅探转 UTF-8 | 否 |
+| `recount_todo_index.py` | 重算 `docs/TODO.md` §0 索引表的**声明值 vs 实算值**（含"一行一组 + 条数列求和"这种 0.3 形态）；不一致退出码 1 | 否 |
+| `forensic_pg_roundtrip_probe.py` | 取证面 PG 往返实取：伪连接捕获 `save` 的 SQL/参数 + 合成行回放 `get`，证「记录级 forensic 不落库 / 读回 steps 是 dict」。**B 层修完后必须复跑**——同一条命令的读数应从 `False/None/dict` 翻成 `True/dict/ForensicContext 可读`（见台账 §25 与 `plan-forensic-provenance-wiring-2026-10-16.md` §1.1） | 否（不需要真 PG） |
+| `recount_plan_status_lines.py` | 重算 `docs/plans/` 顶层 plan 的**状态行有无**（钉死口径：顶层 `.md`、排除同目录 `README.md`、前 25 行匹配 `状态[^。；]{0,14}[:：]`），并把已知口径漏计显式登记 ⇒ 输出「未命中」与「真待补」两个数。`rc=1` = 例外清单与现实不符；`rc=2` = 找不到 plan 目录（复制到仓库外运行即触发，**防止空目录冒充读数**）| 否 |
+| `nl2sql_real_pg_probe.py` | nl2sql 元知识**真库往返**：走 `init_meta_schema.apply` 生产入口建全链 001-006 + 幂等第二遍 + `workspace_id=''` 写入路径 + 绕过 `_stamp` 的直接仓储写入 + D8 摘键语义反证 + 「库停在 005 时当前代码必须 42P10」发布顺序判据（11 项）。**改到 nl2sql 迁移或 `_upsert`/`_stamp` 后必须重跑**；`rc=2` 是 pgserver 起不来（前置不可用），不是通过 | 否（本机进程内 PG） |
+| `migration_gate_mutation_probe.py` | `scripts/lint_migration_refs.py` 的**非空转反证**：三形——原样副本零违规（阴性对照）/ 注入 B-1 错表名 ⇒ M-1 报红 / 摘掉 006 ⇒ M-2 目标键消失。只在 `tempfile` 副本上动，不碰工作树。改过门禁判据后必须重跑 | 否 |
 
 ## 运行
 
@@ -33,6 +38,12 @@ uv run --no-sync python scripts/evidence/verify_main_tip.py \
 
 # 读任何 `>` / Out-File 产物之前先转码
 uv run --no-sync python scripts/evidence/normalize_dump.py <dump 文件>
+
+# 迁移/写入路径的真库往返（pgserver = 本机进程内 PG 16.2 + pgvector，免 docker）
+uv run --no-sync --with pgserver python scripts/evidence/nl2sql_real_pg_probe.py
+
+# 迁移静态门禁的非空转反证
+uv run --no-sync python scripts/evidence/migration_gate_mutation_probe.py
 ```
 
 `mergedAt` 取自：`gh pr view <n> --json mergedAt,mergeCommit`。

@@ -3,6 +3,9 @@
 > 日期：2026-09-23
 > 优先级：高（审计数据丢失风险）
 > 来源：深度代码审查报告 C2 条目
+>
+> 状态：**已落地（5/5，且收敛为单一实现）**（2026-10-15 复测）｜ 依据：新增 `applications/exhibition-agent/exhibition_agent/foundation/_audit_writer.py` —— `:66-69` 走 `tmp_path = f"{path}.tmp.{uuid4().hex}"` + `os.replace` 原子写，`:100` 对损坏文件做 `os.replace(path, corrupt_path)` 隔离而非静默清空；本方案的 5 个现场 `data_egress.py` / `evaluation.py` / `execution_context.py` / `knowledge_lifecycle.py` / `production_readiness_gate.py` **全部改用该 writer**（`grep -l "_audit_writer\|append_audit"` 命中即这 5 个）；回归用例 `applications/exhibition-agent/tests/test_audit_writer.py`（`:75` 断言 `.tmp` 不残留）｜ 回写：本文件不再更新。
+> ⚠️ 残差一项：**三层齐备缺第三层**。这套原子写只有"单一实现 + 全局装配（各审计点复用）"，没有 lint 拦未来新写审计点走回 `open("w")` 老路——`scripts/lint_architecture.py` 的 16 个 `check_*` 里没有对应规则。要防回潮得补一条（属代码改动，需先出方案）。
 
 ## 1. 问题
 

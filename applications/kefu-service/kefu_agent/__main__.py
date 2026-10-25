@@ -3,7 +3,10 @@
 Phase 7：9 种命令 → LangGraph 意图路由，3 个 Flow → LangGraph 子图，
 GraphRAG → 知识库检索子 Agent，legacy tracker → LangGraph State。
 
-运行：uvicorn kefu_agent:app --host 0.0.0.0 --port 8003
+运行：uvicorn kefu_agent.__main__:app --host 0.0.0.0 --port 8003
+（``kefu_agent:app`` 起不来——包 ``__init__`` 不导出 app，2026-10-16 实测为
+``Attribute "app" not found in module "kefu_agent"``，由
+``tests/test_identity_gate_assembly.py`` 的启动目标用例钉住）
 
 网关接入状态（已修复）：本服务已实现且 CI 通过，并已于 Phase 7 收尾补齐：
   - 接入 shared-schemas 统一契约，新增 `POST /invoke`（Agent Protocol 兼容，
@@ -20,6 +23,9 @@ import logging
 import time
 
 from agent_core.guardrails.app_factory import build_api_app
+from agent_core.tracing import init_tracing
+from agent_runtime.identity_assembly import mount_identity_gate
+from agent_runtime.workspace_registry import server_tenant_id
 from langgraph.checkpoint.memory import InMemorySaver
 from shared_schemas import QueryRequest, QueryResponse
 from shared_schemas.query import QueryData
@@ -29,7 +35,20 @@ from kefu_agent.state import KefuState
 
 logger = logging.getLogger(__name__)
 
+# 观测装配点（roadmap 阶段2 #12）：**默认关闭**——`AGENT_CORE_TRACE_ENABLED` 未置真、
+# 或没有 `OTEL_EXPORTER_OTLP_ENDPOINT` 时，kernel 走 no-op（status=DEGRADED，绝不抛异常）。
+# 必须早于 `build_kefu_graph`：OTel provider 是进程级全局单例，装配顺序即正确性
+# （同 agent_server/main.py 的「别挪回去」约束）。此前本服务 0 装配点 ⇒ 漏装不可见。
+init_tracing(service_name="kefu-service")
+
 app = build_api_app(title="kefu-service", version="0.1.0")
+
+# 身份门卫装配点（roadmap 阶段2 #11）：此前本服务**零门卫**，租户纯自报，
+# 启用强制隔离后即可被自报身份绕过。T2.2/G6 后 ``_run_kefu`` 取值已收口到
+# ``server_tenant_id()``（见其内注释），本门卫提供 ContextVar 断言源。
+# 默认 observe 档：无凭据 ⇒ 交下游既有逻辑，响应逐字不变；翻 enforce 由 env
+# ``TENANT_JWT_ENFORCE=true``（运维动作，不改代码，回退＝撤 env）。
+mount_identity_gate(app, "kefu-service")
 
 _kefu_graph = build_kefu_graph(checkpointer=InMemorySaver())
 
@@ -53,7 +72,16 @@ async def _run_kefu(req: QueryRequest) -> QueryResponse:
     """统一核心：QueryRequest → QueryResponse（U-1 契约统一）。"""
     t0 = time.perf_counter()
     session_id = req.session_id or "default"
-    tenant_id = req.tenant_id or "default"
+    # T2.2/G6：租户取服务端断言（IdentityMiddleware 采信后写 ContextVar，
+    # server_tenant_id 读取；未采信时回落 "default"），body 自报值仅作比对——
+    # 显式携带且不符记 WARNING（与 agent_server T2.1 同款软模式，403 属契约层）。
+    tenant_id = server_tenant_id("default")
+    if req.tenant_id and req.tenant_id != tenant_id:
+        logger.warning(
+            "body tenant_id 与服务端断言不一致，以断言为准（body=%r asserted=%r）",
+            req.tenant_id,
+            tenant_id,
+        )
 
     config = {"configurable": {"thread_id": session_id, "tenant_id": tenant_id}}
     initial_state: KefuState = {

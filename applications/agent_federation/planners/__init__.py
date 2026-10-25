@@ -45,10 +45,12 @@ def _build_pg_stores() -> dict:
             PgExecutionOwnershipStore,
             PgSideEffectStore,
         )
+        from agent_runtime.state_migration import get_default_migrator
         from agent_runtime.trajectory.store_pg import PgTrajectoryStore
 
         stores["pool"] = pool
-        stores["checkpoint_store"] = PgCheckpointStore(pool)
+        # V3-6 Layer B：不传 migrator 则 load() 的 schema 迁移分支恒不执行（默认 None）
+        stores["checkpoint_store"] = PgCheckpointStore(pool, migrator=get_default_migrator())
         stores["trajectory_store"] = PgTrajectoryStore(pool)
         stores["ownership_store"] = PgExecutionOwnershipStore(pool)
         stores["side_effect_store"] = PgSideEffectStore(pool)

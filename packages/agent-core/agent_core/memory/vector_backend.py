@@ -231,6 +231,11 @@ class PgVectorMemoryBackend(MemoryBackend):
         embedder: Any | None = None,
     ) -> None:
         self._dsn = database_url
+        # 表名来自配置（collection），与 nl2sql 侧同一纪律：构造期过标识符
+        # 白名单（2026-10-18 P0-10，S4 登记的第四处拼接点）。
+        from agent_core.sql.identifiers import validate_identifier
+
+        validate_identifier(collection, "记忆表名")
         self._table = collection
         self._tenant_id = tenant_id
         # 允许宿主注入自有 embedder（如 app 复用其 RAG 的 embedding，保证 dim/CI 一致）；

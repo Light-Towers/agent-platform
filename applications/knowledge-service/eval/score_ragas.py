@@ -112,7 +112,7 @@ async def _score_one(
         f_val = None
     try:
         c_val = await c_task
-    except Exception:  # noqa: BLE001
+    except Exception:  # noqa: BLE001 - 单维隔离：correctness 失败不带走 faithfulness 出分
         c_val = None
     return {"faithfulness": f_val, "correctness": c_val}
 

@@ -18,6 +18,7 @@ AGENT_MODE=local 时仍用本地 subagent。
 
 from __future__ import annotations
 
+from agent_core.internal_header import load_hmac_key, sign_internal_header
 from agent_core.monitor import monitor
 
 from agent.circuit_breaker import get_breaker_sync
@@ -25,6 +26,7 @@ from agent.config import TIMEOUT_SUBAGENT_HTTP, get_all_subservices
 from agent.metrics import record_delegation
 from agent.prompts import sub_agents_content
 from agent.tracing.langfuse_adapter import langfuse_observe as observe
+from api.context import get_tenant_context
 
 try:  # 外部 deepagents 包（Agent Protocol 原生支持）
     from deepagents import AsyncSubAgent
@@ -45,6 +47,48 @@ logger = get_logger(__name__)
 
 # C-3: 进程级共享 httpx.AsyncClient（连接池复用）
 _shared_async_client: httpx.AsyncClient | None = None
+
+
+_INTERNAL_HEADER_NAME = "X-Internal-Tenant"
+_WARNED_NO_KEY = False
+
+
+def _internal_tenant_header() -> dict[str, str]:
+    """T2.4/G5：出站附 ``X-Internal-Tenant`` 签名头（观测期软模式）。
+
+    配了 ``INTERNAL_HMAC_KEY_FILE`` 才签发：HMAC 对称密钥由网关与子服务双方
+    持有（密钥走挂载/密钥库，不进仓库）。未配 ⇒ 不带该头且只提示一次（下游
+    ``IdentityMiddleware`` observe 档对缺头不拒，与"缺头审计不拒"的软模式
+    口径一致——翻 enforce 前必须先配密钥，否则子服务全量 401）。
+
+    签名带时间戳、TTL 300s（verify max_age），故**每请求现签**——这也是
+    deepagents ``AsyncSubAgent`` 主路径不注入的原因：其 ``headers`` 是构造期
+    静态 dict，启动期签名 5 分钟后过期。当前 .venv 未装 deepagents、生产
+    走 httpx 回退路径（见模块 docstring），故本批覆盖真实链路；deepagents
+    路径的动态头注入属上游能力缺口，装包前须先解决（届时在构造处改传
+    per-request 可调用头或包一层）。
+
+    tenant 值取 ``get_tenant_context()``（ContextVar 优先，未绑定回落
+    "default"）——联邦一部署一租户（silo）语义下的进程级断言。
+    """
+    global _WARNED_NO_KEY
+    key = load_hmac_key()
+    if not key:
+        if not _WARNED_NO_KEY:
+            logger.warning(
+                "[identity] 未配置 INTERNAL_HMAC_KEY_FILE ⇒ 出站请求不带 %s"
+                "（观测期软模式；翻 enforce 前必须先配密钥）",
+                _INTERNAL_HEADER_NAME,
+            )
+            _WARNED_NO_KEY = True
+        return {}
+    tenant = get_tenant_context()
+    try:
+        value = sign_internal_header(tenant, None, key=key)
+    except Exception:
+        logger.warning("[identity] 内部头签发失败（跳过本头，不阻断请求）", exc_info=True)
+        return {}
+    return {_INTERNAL_HEADER_NAME: value}
 
 
 def _get_shared_async_client() -> httpx.AsyncClient:
@@ -120,7 +164,9 @@ class _HttpSubAgent:
         }
         from agent_core.tracing_propagation import inject_traceparent
 
-        headers = inject_traceparent({"Content-Type": "application/json"})
+        headers = inject_traceparent(
+            {"Content-Type": "application/json", **_internal_tenant_header()}
+        )
         client = _get_shared_async_client()
         resp = await client.post(self.url.rstrip("/") + endpoint, json=payload, headers=headers)
         resp.raise_for_status()

@@ -44,6 +44,13 @@ SYSTEM_TABLE_WHITELIST: dict[str, str] = {
     "mcp_call_audit": "MCP 调用审计，按 caller/server 定位（治理审计）",
     # —— 待判定 / 归属其他计划（登记为已知技术债，非本计划处置）——
     "admission_queue": "准入队列，仅 user_id；租户维度 ADR §4 W 表登记待另行判定",
+    # —— 三级归属实体（migration 013，D7/D9/D11，plan-platform-tenant-workspace-identity）：——
+    # 这三张表是身份域本身：organizations.id 的值域=租户断言值（013 同值域决策），
+    # users 经 org_id 归企业、conversations 含 org_id 列——归属维已在表内，tenant_id
+    # 列是同值冗余，不加。
+    "organizations": "企业实体，id=租户断言值（013 同值域）；身份域本体非租户业务数据",
+    "users": "用户实体，org_id 直挂企业（D9）；身份域本体，含 org_id 归属维",
+    "conversations": "会话归属表（D11 旁置表），含 org_id 列；user_id 014b 后 NOT NULL",
     "episodic_memories": "执行记忆，隔离列由 plan-memory-hardening T1 处置（本计划不重复）",
     "procedural_memories": "技能记忆，租户内共享由 plan-memory-hardening T1 处置（本计划不重复）",
 }
@@ -164,15 +171,18 @@ def test_whitelisted_system_tables_have_reason():
 # ---------------------------------------------------------------------------
 
 # 扫描范围：真正对 corpus / memories 发 SQL 的模块。
+# 2026-10-18（ADR-0011 §7）：agent_server/sql/schema_store.py 随该路退役删除，
+# 其隔离职责移交 nl2sql-service——扫描面改为 nl2sql 的 meta 仓储（三列作用域
+# 谓词在同一常量里成对出现，契约未断，只是换了承载文件）。
 SQL_SOURCE_SCAN = [
     "applications/agent_server/rag/store.py",
-    "applications/agent_server/sql/schema_store.py",
+    "applications/nl2sql-service/nl2sql_service/repositories/postgres/meta/meta_repository.py",
     "packages/agent-core/agent_core/memory/typed.py",
     "packages/agent-runtime/agent_runtime/workspace_registry.py",
 ]
 
 # 含归属/边界谓词特征的实际 SQL 关键字（排除文档/日志字符串误报）。
-_TABLE_TOKENS = ("chunks", "sql_ddl", "sql_docs", "sql_examples", "memories", "workspaces")
+_TABLE_TOKENS = ("chunks", "sql_ddl", "sql_docs", "sql_examples", "memories", "workspaces", "nl2sql_")
 _HAS_WS_PRED = re.compile(r"workspace_id\s*=")
 
 

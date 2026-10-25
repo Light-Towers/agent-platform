@@ -1,6 +1,6 @@
 # 方案：M5 连接池关闭竞态 + M3 日志框架统一（v2 修订）
 
-> 状态：**Approved with changes（M5）/ Needs revision→已修订（M3）**
+> 状态：**已落地（M5 + M3 均实施并有验收测试）**。**2026-10-15 对码核实订正**：原状态行停在评审态（Approved with changes / 已修订），未回写实施结果。证据——**M5**：`agent_runtime/db.py` 的 `close_pool()`（`:107`）已按 §1.3 实现竞态安全（`_closing` 标记 `:18`、锁内幂等早退 `:121`、先摘 `_pool=None`（`:125`）再 `pool.close(timeout=30)`（`:127`）、异常记录 + `_closing` 复位 `:131`），`init_pool()` 关闭中早退（`:39`）；验收测试 `tests/runtime/test_db_pool_close.py` 存在且本机实跑 **6 passed**（§1.4 Case A–E）；`agent_server/main.py:620` lifespan 退出调 `close_pool()`。**M3**：`agent_core/logging.py` 已提供 `configure_logging()` / `get_logger()`（首次调用惰性幂等配置）/ `set_level()`，即 §2.3「agent_core.logging 作为配置入口」的设计。
 > 关联：§20 生产部署就绪的中优先级架构债（可靠性基础设施修复，不做大规模架构重构）
 > 约束：遵循 `AGENTS.md` —— 重构/优化先出方案，确认后再动手；本方案已按评审意见修订。
 

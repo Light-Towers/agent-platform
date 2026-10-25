@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from agent_core.logging import get_logger
 from dotenv import find_dotenv, load_dotenv
@@ -127,10 +127,9 @@ def _wire_local_fallbacks() -> None:
                 )
             if local_agent:
                 old = _subservices[key]
-                _subservices[key] = SubserviceConfig(
-                    name=old.name, graph_id=old.graph_id, url=old.url,
-                    endpoint=old.endpoint, local_agent=local_agent, healthy=old.healthy,
-                )
+                # replace() 保留全部字段（含将来新增的），只改 local_agent——
+                # 逐字段手抄会在 dataclass 加字段时静默丢掉新字段（T2.2 item5）
+                _subservices[key] = replace(old, local_agent=local_agent)
                 logger.info("[config] %s 本地 fallback 已装配（%s）", key, mod_path)
         except Exception as exc:  # pragma: no cover - 装配失败不阻断启动
             logger.warning("[config] %s 本地 fallback 装配失败: %s", key, exc)
@@ -148,16 +147,10 @@ def is_remote_mode() -> bool:
 def mark_unhealthy(key: str) -> None:
     """标记子服务不可用（健康探活失败时调用）。"""
     old = _subservices[key]
-    _subservices[key] = SubserviceConfig(
-        name=old.name, graph_id=old.graph_id, url=old.url,
-        endpoint=old.endpoint, local_agent=old.local_agent, healthy=False,
-    )
+    _subservices[key] = replace(old, healthy=False)
 
 
 def mark_healthy(key: str) -> None:
     """标记子服务可用。"""
     old = _subservices[key]
-    _subservices[key] = SubserviceConfig(
-        name=old.name, graph_id=old.graph_id, url=old.url,
-        endpoint=old.endpoint, local_agent=old.local_agent, healthy=True,
-    )
+    _subservices[key] = replace(old, healthy=True)

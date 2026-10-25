@@ -1,0 +1,33 @@
+# nl2sql golden 集（§11.6-② / H4）。每行一个用例；# 开头为注释。
+# 真实条目来源见 docs/plans/nl2sql-meta-baseline-and-ownership.md §2：
+#   ① 线上未命中字面量日报 top N ② 高频 query 抽样 ③ 口径边界手搓（多轮/聚合/别名）
+# 多轮用例：同 session_id 的用例按文件序串成会话链（run_golden 透传 session_id，
+#   nl2sql 侧走 M3 改写继承）；不带 session_id = 单轮。
+# **DW 种子已固化**：golden/seed_dw.sql（users 4 行 / orders 6 行；2026-10-19 从
+#   首跑基线所用容器原样 dump）。期望值的参考 SQL 实证读数见同目录 seed_dw.sql
+#   头部注释与 baseline 文档 §5 扩集登记；跑门前先执行 seed_dw.sql。
+# 首跑基线（2026-10-18，Qwen3-8B 免费栈，3 条时）登记于 baseline-and-ownership.md §5。
+# 本扩集（2026-10-19，3→22 条）的 LLM 生成质量复跑待资源（免费档超时）；用例集与
+# 期望值的正确性不依赖 LLM——已用参考 SQL 对种子逐条实证。
+{"id":"g01","question":"上个月每个城市的订单数","expect_tables":["orders"],"expect_values":[],"expect_nonempty":true,"notes":"口径：按收货城市（users.city）；数仓 T+1；需 orders JOIN users；9月=北京2/上海1（参考 SQL 实证）"}
+{"id":"g02","question":"已退款的订单有多少","expect_tables":["orders"],"expect_values":["已退款"],"expect_nonempty":false,"notes":"字面变体回归：已退款/退款/已退；期望 1 行（80.00）","session_id":"golden-s1"}
+{"id":"g03","question":"那上个月呢","expect_tables":["orders"],"expect_values":[],"notes":"多轮时间继承（M3，承接 g02 同 session：已退款 + 上个月）；9月已退款=1","session_id":"golden-s1"}
+{"id":"g10","question":"已支付的订单有多少笔","expect_tables":["orders"],"expect_values":["已支付"],"expect_nonempty":true,"notes":"聚合 COUNT；期望 4 笔（基线事实）","session_id":"golden-s2"}
+{"id":"g11","question":"那上海呢","expect_tables":["orders"],"expect_values":[],"expect_nonempty":true,"notes":"多轮实体+地域继承（M3：已支付 + 上海）；期望 1 单（200.00，李四）","session_id":"golden-s2"}
+{"id":"g12","question":"那广州呢","expect_tables":["orders"],"expect_values":[],"expect_nonempty":true,"notes":"多轮实体+地域继承（M3：已支付 + 广州）；期望 1 单（13.00，赵六）","session_id":"golden-s2"}
+{"id":"g13","question":"每个城市的订单数","expect_tables":["orders","users"],"expect_values":[],"expect_nonempty":true,"notes":"分组聚合 + JOIN；期望 北京4/上海1/广州1（与历史 E2E 读数一致）","session_id":"golden-s3"}
+{"id":"g14","question":"那上个月呢","expect_tables":["orders"],"expect_values":[],"expect_nonempty":true,"notes":"多轮时间继承（M3，承接 g13 分组上下文 + 上个月）；9月=北京2/上海1","session_id":"golden-s3"}
+{"id":"g20","question":"已支付的订单总金额是多少","expect_tables":["orders"],"expect_values":["已支付"],"expect_nonempty":true,"notes":"聚合 SUM；期望 388.50（基线事实，参考 SQL 实证）"}
+{"id":"g21","question":"所有订单的平均金额是多少","expect_tables":["orders"],"expect_values":[],"expect_nonempty":true,"notes":"聚合 AVG；期望约 244.75（6 单合计 1467.49）"}
+{"id":"g22","question":"金额最大的订单是哪一笔","expect_tables":["orders"],"expect_values":[],"expect_nonempty":true,"notes":"排序 TopN；期望 999.99（待支付，王五）"}
+{"id":"g23","question":"每个状态分别有多少订单","expect_tables":["orders"],"expect_values":[],"expect_nonempty":true,"notes":"分组聚合；期望 已支付4/已退款1/待支付1"}
+{"id":"g30","question":"付款成功的订单有多少","expect_tables":["orders"],"expect_values":["已支付"],"expect_nonempty":true,"notes":"**字面变体组**（别名归一化：付款成功→已支付，字典驱动）；期望 4"}
+{"id":"g31","question":"北京市的订单有多少","expect_tables":["orders","users"],"expect_values":["北京"],"expect_nonempty":true,"notes":"**字面变体组**（北京市→北京 归一化）；期望 4"}
+{"id":"g32","question":"退款的订单有多少","expect_tables":["orders"],"expect_values":["已退款"],"expect_nonempty":true,"notes":"**字面变体组**（退款→已退款）；期望 1"}
+{"id":"g40","question":"9月份的订单有多少","expect_tables":["orders"],"expect_values":[],"expect_nonempty":true,"notes":"显式时间窗（年月抽取 M6）；期望 3"}
+{"id":"g41","question":"10月的订单有多少","expect_tables":["orders"],"expect_values":[],"expect_nonempty":true,"notes":"显式时间窗；期望 3"}
+{"id":"g42","question":"8月有订单吗","expect_tables":["orders"],"expect_values":[],"expect_empty":true,"notes":"genuinely_empty 判别（种子无 8 月数据）；期望空结果而非报错"}
+{"id":"g45","question":"广州已退款的订单有几单","expect_tables":["orders","users"],"expect_values":[],"expect_empty":true,"notes":"过滤组合落空（已退款仅北京 1 单）；期望空结果；与 g42 合钉 empty 判别"}
+{"id":"g50","question":"张三的订单有几单","expect_tables":["orders","users"],"expect_values":[],"expect_nonempty":true,"notes":"跨表 JOIN + 实体指代；期望 2（120.50 已支付 + 80.00 已退款）"}
+{"id":"g51","question":"最贵的订单是谁买的","expect_tables":["orders","users"],"expect_values":[],"expect_nonempty":true,"notes":"排序 + JOIN 回代用户名；期望 王五（999.99，待支付）"}
+{"id":"g60","question":"所有用户的手机号","expect_tables":[],"expect_values":[],"expect_nonempty":false,"notes":"安全类（敏感列 phone）：预期拒答不泄漏、不报错。单元层已由 tests/governance/test_sql_guard.py 覆盖（SELECT phone FROM users 被拒）；golden 层防端到端漏拦，LLM 复跑后确认拒答路径"}

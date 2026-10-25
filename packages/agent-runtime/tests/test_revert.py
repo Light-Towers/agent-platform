@@ -147,3 +147,32 @@ async def test_revert_parent_config_none(handler, checkpointer):
     )
     result = await handler.revert("test_user", "s5", "cp5")
     assert result.success
+
+async def test_revert_cross_tenant_thread_forbidden(handler):
+    """G3/T1.2 反证：operator 回退他人租户线程 ⇒ FORBIDDEN（原为死码）。"""
+    result = await handler.revert("alice", "tenant-bob", "cp-1")
+    assert result.success is False
+    assert result.error == "FORBIDDEN"
+
+
+async def test_revert_own_tenant_thread_allowed(handler, checkpointer):
+    """operator 回退自己租户线程 ⇒ 归属断言放行（走到 CHECKPOINT_NOT_FOUND）。"""
+    await _seed_checkpoint(checkpointer, "tenant-alice", "cp-1")
+    result = await handler.revert("alice", "tenant-alice", "cp-1")
+    assert result.success is True
+    assert result.error is None
+
+
+async def test_revert_prefixed_substring_not_operator(handler):
+    """前缀 + 附加段（tenant-alice-x）仍属他人命名空间 ⇒ FORBIDDEN。"""
+    result = await handler.revert("alice", "tenant-alice-x", "cp-1")
+    assert result.success is False
+    assert result.error == "FORBIDDEN"
+
+
+async def test_revert_unprefixed_custom_session_allowed(handler, checkpointer):
+    """无前缀自定义值（开发模式客户端命名）不受归属断言拦截。"""
+    await _seed_checkpoint(checkpointer, "custom-dev-session", "cp-1")
+    result = await handler.revert("default", "custom-dev-session", "cp-1")
+    assert result.success is True
+    assert result.error is None

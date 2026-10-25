@@ -1,5 +1,9 @@
 # Plan: AgenticPlanner → SkillKind.AGENT 收敛
 
+> 状态：**已落地（契约层 3/3）**，但**默认部署下这条注册不生效** ｜ 依据：落码提交 `11d313a6`（2026-09-22，标题即「AgenticPlanner → SkillKind.AGENT 收敛」）；`planner/agentic.py:180` 有 `to_skill()`、`:208` 置 `kind=SkillKind.AGENT`；`applications/agent_server/main.py:374-381` 在 lifespan 里 `AgenticPlanner().to_skill()` → `registry.register(...)`；测试面除本方案要求的 `test_agentic_skill.py`，后补 `test_agentic_entry_point.py` ｜ 回写：本文件不再更新。
+>
+> ⚠️ 边界要说准，不得写成"agentic 已在现网可用"：`main.py:383` 的注释自己写明 entry_points 不可用是**常见预期（非 agentic 部署）**，且我实测 `pyproject.toml` 三处（根 / agent-runtime / agent_server）**没有任何 entry-points 声明** ⇒ 现网默认 `planner=deterministic` 时这段走的是 except 跳过分支。收敛的是**调用契约**（可被 `SkillRegistry.execute()` 与 ExecutionGraph 引用），不是部署形态。
+
 ## 目标
 
 将 AgenticPlanner 的执行包装为 `SkillKind.AGENT` 型 Skill，使其可通过 `SkillRegistry.execute()` 统一调用。当前旁路治理 gap 已消除（`runtime.execution()` + `skill_guard("agentic")` 已就位），本阶段完成契约层收敛。
