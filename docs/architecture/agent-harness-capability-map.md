@@ -409,7 +409,7 @@ uv run --with ruff ruff check . && python scripts/check_doc_sync.py
 | `planner` | `"deterministic"` | `auto`(Mode Selector) 为 opt-in；`graph`/`agentic` 需显式设 |
 | `database_url` / `runtime_mode` | `""` / `"local"` | 无 PG ⇒ 内存模式，跨会话记忆恒空 |
 | `api_key` | `""` | 空即不鉴权；⚠️「限流与载荷护栏照常」只对已装配内核中间件的 2 个应用成立——agent_server 的 HTTP 层两者都没有（§2.6 装配面实测） |
-| 5 个 `*_service_url` / `search_api_key` / `sql_dsn` / `langfuse_*` 三键 | `""` | 空即**不注册该能力**，`/health` 能力灯如实熄灭 |
+| 4 个 `*_service_url`（knowledge / nl2sql / kefu / exhibition）/ `search_api_key` / `sql_dsn` / `langfuse_*` 三键 | `""` | 空即**不注册该能力**，`/health` 能力灯如实熄灭 |
 
 **内核 / 身份 / 联邦（env 直读）**
 
