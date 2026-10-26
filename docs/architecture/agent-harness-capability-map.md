@@ -401,7 +401,7 @@ uv run --with ruff ruff check . && python scripts/check_doc_sync.py
 | `enable_loop_fingerprint` | False | 注释理由：「避免误伤合法重放/重规划」 |
 | `planner` | `"deterministic"` | `auto`(Mode Selector) 为 opt-in；`graph`/`agentic` 需显式设 |
 | `database_url` / `runtime_mode` | `""` / `"local"` | 无 PG ⇒ 内存模式，跨会话记忆恒空 |
-| `api_key` | `""` | 空即不鉴权（限流与载荷护栏照常） |
+| `api_key` | `""` | 空即不鉴权；⚠️「限流与载荷护栏照常」只对已装配内核中间件的 2 个应用成立——agent_server 的 HTTP 层两者都没有（§2.6 装配面实测） |
 | 5 个 `*_service_url` / `search_api_key` / `sql_dsn` / `langfuse_*` 三键 | `""` | 空即**不注册该能力**，`/health` 能力灯如实熄灭 |
 
 **内核 / 身份 / 联邦（env 直读）**
@@ -409,6 +409,7 @@ uv run --with ruff ruff check . && python scripts/check_doc_sync.py
 `DEPLOY_ENFORCE_IDENTITY=false` · `TENANT_JWT_ENFORCE=false` · `TENANT_HEADER_ENFORCE=false` · `SINGLE_TENANT` 未设 ⇒ `insecure` 态 · `SEMANTIC_MEMORY_ENABLED=false` · `MEMORY_DUAL_SCOPE=false` · `AGENT_CORE_TRACE_ENABLED=false` · `GUARD_ENABLED=false` · `INTENT_ENABLED=false` · `PLANNER_ENABLED=false` · `REFLEXION_ENABLED=false` · `DYNAMIC_AGENT_ENABLED=false` · `AGENT_MODE=local` · `GRAY_PCT=0.0` · `IMG_SUMMARY_ENABLED=""` · `DISABLE_AUTH=false`（注意这是「关鉴权」的旁路开关）
 
 缓存不在默认关清单：`CACHE_ENABLED=true` + `CACHE_BACKEND=valkey`（生产与开发/测试均为 Valkey；PG 语义缓存已退役，见 ADR-0013 C）。
+⚠️ **`AGENT_MODE` 同名三种语义，且会展侧默认 fail-open**（2026-10-26 实读）：联邦 `applications/agent_federation/agent/config.py:40` 是 `_env("AGENT_MODE", "local")`（local/remote 委派，默认 local）；会展 `applications/exhibition-agent/exhibition_agent/foundation/execution_context.py:203` 只用 `== "DEMO"`（大小写敏感）决定 `production_ready_label()`；会展 `applications/exhibition-agent/exhibition_agent/foundation/skill_router.py:116` **默认值是 `"DEMO"`** 且只认 `upper() == "PRODUCTION"` ⇒ **未设该变量时生产就绪门不拦** SYNTHETIC / UNKNOWN 标签（`:196,206` 的拒绝分支要求 `_is_production_mode()` 为真），即本「默认关清单」漏记了一条安全相关的 fail-open 开关。更细的错位：`AGENT_MODE=demo`（小写）时两个函数都不认为自己在演示环境——`_is_production_mode()` 假（不拦）、`is_demo_mode()` 假（`production_ready_label()` 返回 `production`），**两个错误同向**，不会互相抵消。
 
 ---
 
