@@ -277,11 +277,11 @@ uv run --with ruff ruff check . && python scripts/check_doc_sync.py
 
 | 能力 | 状态 | 证据 / 开关 |
 |---|---|---|
-| OTel tracing（懒导入 + no-op 铁律、幂等 init、统一属性 `config_hash/request_id/user_query_hash`、OTLP gRPC/HTTP/console） | 🔽 `otel_enabled=False` | `packages/agent-core/agent_core/tracing.py` · 装配 `applications/agent_server/main.py:238-260` · `AGENT_CORE_TRACE_ENABLED=false` |
+| OTel tracing（懒导入 + no-op 铁律、幂等 init、统一属性 `config_hash/request_id/user_query_hash`、OTLP gRPC/HTTP/console） | 🔽 `otel_enabled=False` | `packages/agent-core/agent_core/tracing.py` · 装配 `applications/agent_server/main.py:301-332`（两处 `init_tracing`：console `:317` / otlp `:326`） · `AGENT_CORE_TRACE_ENABLED=false` |
 | **tracing 三态可诊断**（UNINITIALIZED / DISABLED / DEGRADED(记真因) / ACTIVE） | ✅ | `packages/agent-core/agent_core/tracing.py:49-56` · `/health` `otel_status`；设计目的=让「显式关」与「坏了」可区分 |
-| 装配顺序硬约束（`init_tracing` **必须早于** `build_chat_model()`） | ✅ | `applications/agent_server/main.py:226-237` 注释；反序 ⇒ Langfuse 抢全局 provider、Jaeger 面静默而 `/health` 仍报 ACTIVE（D-LF-1，2026-10-13 现网实测） |
+| 装配顺序硬约束（`init_tracing` **必须早于** `build_chat_model()`） | ✅ | `applications/agent_server/main.py:303-306` 注释（「顺序是硬约束，别挪到下面去」）；`:317/:326` 的 init_tracing 早于 `:333` 的 `llm = build_chat_model()`；反序 ⇒ Langfuse 抢全局 provider、Jaeger 面静默而 `/health` 仍报 ACTIVE（D-LF-1，2026-10-13 现网实测） |
 | W3C traceparent 跨服务传播 / 请求级 span 中间件（旁路不失明，覆盖 429/409/cache_hit/断连） | ✅ | `packages/agent-core/agent_core/tracing_propagation.py` · `packages/agent-core/agent_core/tracing_middleware.py` · lint L-1/L-2/L-3 |
-| Jaeger | 仅 OTLP 接收端 | thrift exporter 已归档（`applications/agent_server/main.py:229-231`） |
+| Jaeger | 仅 OTLP 接收端 | thrift exporter 已归档（`applications/agent_server/main.py:301`） |
 | Langfuse（意愿灯 `langfuse_enabled` vs 运行态灯 `langfuse_ready` 分离；判据在启动期算，绝不在探针里构造客户端） | 🔽 三键齐才启 | `applications/agent_server/config.py:53-55,166-167` · 装配单点 `applications/agent_server/agent/llm.py:12-18`（primary+fallback 全路径）· 联邦 `applications/agent_federation/agent/tracing/langfuse_adapter.py` |
 | 统一事件面 `EventBus`（多 sink 扇出 + 逐 sink 异常隔离）+ 4 通道 monitor | ✅ | `packages/agent-core/agent_core/events.py` · `packages/agent-core/agent_core/monitor.py`（WebSocket/LegacyStream/Callback/**OTelSpan**）· `request_id` uuid4 |
 | `/health` 能力灯（实测响应 **28 键 = 共享基类 13 + 本 app 独有 15**；报运行态真值 = 装配与否，不报 settings 意愿值） | ✅ | 由 `18b6954`（2026-10-10）落地并同批新增契约测试；`applications/agent_server/api/health_router.py:32-71` · `applications/agent_server/schemas.py` · `applications/agent_server/tests/test_health_fields.py`（2026-10-25 实跑 **19 passed**）；四个 V3 部件均有「拨输入返回值必须变」断言，`forensic` 读其已声明的装配体 `trajectory_store`；缓存另有 `cache_backend`/`cache_ready`/`cache_degraded_reason`（ADR-0013 C） |
@@ -294,7 +294,7 @@ uv run --with ruff ruff check . && python scripts/check_doc_sync.py
 | 检索指标库（recall@k / hit_rate@k / mrr / ndcg@k）+ 统计判定原语（配对 bootstrap CI、spearman/kendall、cohen κ，全接受 seed；退化输入返回中性值而非抛错，**防「把无法判定伪装成判定为显著」**） | ✅ | `packages/agent-core/agent_core/metrics/{retrieval,compare}.py` |
 | KS 评测体系（RAGAS `applications/knowledge-service/eval/score_ragas.py`、路由消融、e2e、`applications/knowledge-service/eval/meta_eval_judge.py` 自述「打分 API 未接线 ⇒ 不计一致性、**不伪造**」、基线快照） | ✅ 成熟 | `applications/knowledge-service/eval/` · 六个 eval-rag 目标由**根 Makefile:69-120** 驱动（KS 自身无 Makefile，勿写成 KS 的 Makefile） |
 | LLM-as-Judge 换 provider 去偏（缺配置则降级同主模型并告警） | ✅ | `applications/agent_federation/evaluation/judge.py` |
-| Trajectory 持久化（plan/steps/latency/tokens/cost/snapshot） | ✅ | `packages/agent-runtime/agent_runtime/trajectory/{models,store,store_pg}.py` · 装配 `applications/agent_server/main.py:75` |
+| Trajectory 持久化（plan/steps/latency/tokens/cost/snapshot） | ✅ | `packages/agent-runtime/agent_runtime/trajectory/{models,store,store_pg}.py` · 构造 `applications/agent_server/main.py:140`（`PgTrajectoryStore`）、注入 `:500-502` |
 | Trajectory Replay（5 类 divergence：order / extra_call / missing_call / result_change / error_change，复用 `execute_plan` 真链） | 🟡 | `packages/agent-runtime/agent_runtime/trajectory/replay.py` 仅 `packages/agent-runtime/tests/test_replay.py` 使用，**无 HTTP 端点、无脚本入口** |
 | 漂移诊断 forensic（model/prompt/skill/planner/policy 版本 + external receipt → `divergence_diagnosis` 定位漂移源） | ✅ 部分 | `packages/agent-runtime/agent_runtime/forensic.py` · 被 `packages/agent-runtime/agent_runtime/planner/execution_graph.py`/`packages/agent-runtime/agent_runtime/planner/protocol.py` 真实引用；⚠️ `/health` 的 `forensic` 字段被简化为「trajectory_store 非空」 |
 | pass^k（k 次独立试验**全部**成功，与 pass@k 方向相反）/ flakiness（N=5~10 取 pass rate） | ❌ | |
@@ -333,10 +333,10 @@ uv run --with ruff ruff check . && python scripts/check_doc_sync.py
 |---|---|---|
 | 多模型 provider 抽象 + registry（LRU、key 含不透明 `api_key_slot` 不再摘要密钥）+ fallback | ✅ | `packages/agent-core/agent_core/llm/{protocols,providers,registry,fallback,fallback_lc}.py`；`profile["max_input_tokens"]` 驱动摘要阈值自适应 |
 | 结构化输出（**显式 `method="function_calling"`**，因三家 `json_schema` 行为互不相同；差异已实测记录） | ✅ | `applications/agent_server/agent/router.py:88-91` · `packages/agent-runtime/agent_runtime/planner/graph_compose.py:146-156` · `packages/agent-core/agent_core/llm/providers.py:78-80` · `.env.example:54-74` |
-| Embedding provider 统一选型（远程/本地 bge/Mock；维度 512↔1024 由 provider 派生；启动预热 + 真值灯 `embedding_real`） | ✅ | `packages/agent-core/agent_core/memory/embedder.py`（328 行）· `applications/agent_server/main.py:79-98,278` · `EMBEDDING_REQUIRE_REAL=true` 为调用期硬失败（刻意不升级为启动 crash-loop） |
+| Embedding provider 统一选型（远程/本地 bge/Mock；维度 512↔1024 由 provider 派生；启动预热 + 真值灯 `embedding_real`） | ✅ | `packages/agent-core/agent_core/memory/embedder.py` · `_warm_embedding_backend` 定义 `applications/agent_server/main.py:144`、调用 `:349` · `EMBEDDING_REQUIRE_REAL=true` 为调用期硬失败（刻意不升级为启动 crash-loop） |
 | SSE 统一契约（graph 路径与 Planner 路径事件同构，客户端无感） | ✅ | `packages/shared-schemas/shared_schemas/sse.py:13-30` · `packages/agent-runtime/agent_runtime/planner/protocol.py:738-780` |
-| 运行时模式 `local / single_node / distributed`（distributed 无 `DATABASE_URL` **启动即拒**） | ✅ | `applications/agent_server/config.py:140-144` · `applications/agent_server/main.py:205-210,178-183` |
-| **架构不变量 lint 16 条**（多数白名单为空 = fail-closed）+ 文档防漂移门禁 + 治理测试 28 + HA 测试 19 | ✅ 进 CI | `scripts/lint_architecture.py`（P2/P4/P5/P6/P7/P8/P9/P10/P11/P12/**P13** + L-1/L-2/L-3/L-4/**L-5**）· `scripts/check_doc_sync.py`（存在性基准 = `git ls-files`）｜ 计数口径（2026-10-16 更新，沿用 roadmap #9 定的三口径）：**门禁编号 16 条**（14→15 加 L-5 观测装配存在性，阶段2 #12；15→16 加 P13 身份装配存在性，阶段2 #11）／**实现函数 `check_*` 17 个**／**治理·HA 用「测试文件数」口径**（28 与 19，非用例数；本轮新增 `tests/governance/test_identity_gate_coverage.py`）。对外仍引用「门禁编号」这一口径 |
+| 运行时模式 `local / single_node / distributed`（distributed 无 `DATABASE_URL` **启动即拒**） | ✅ | 默认 `applications/agent_server/config.py:142`；distributed 分支 `applications/agent_server/main.py:243`，无 PG 即 raise `:270-275` |
+| **架构不变量 lint 18 条**（多数白名单为空 = fail-closed）+ 文档防漂移门禁 + 治理/HA 测试 | ✅ 进 CI | `scripts/lint_architecture.py`（2026-10-26 按 `main()` 打印标签实取 18 个：P2/P4-2/R19/P5/P6/P7/P8/P9/P10/P11/P12/P13/P14 + L-1/L-2/L-3/L-4/L-5；**无 P3 标签**，顶层包名冲突检查打印为 P5）· `check_*` 实现函数 19 个 · `scripts/check_doc_sync.py`（存在性基准 = `git ls-files`）｜ 计数口径（2026-10-16 定三口径、2026-10-26 更新读数）：**门禁编号**对外引用；用例读数按实测命令而非固定数——`uv run pytest tests/governance --collect-only -q` = **442**、`tests/ha` = **29**（旧记「28 与 19 测试文件数」与任何时点的文件数/用例数都对不上，作废） |
 | 控制台前端（会话/准入/控制面可视化） | ✅ | `applications/agent_server/api/console_router.py` + `applications/agent_server/static/` |
 | **Agent Registry / Agent 目录与市场**（登记、发现、owner、下线） | ❌ | |
 | **Tool Gateway**（统一 API 资产 + RBAC + 计量 + 限流熔断配额降级） | ❌ | MCP 客户端不算（那是消费侧） |
