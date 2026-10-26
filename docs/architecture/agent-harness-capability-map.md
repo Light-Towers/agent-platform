@@ -18,6 +18,8 @@
 > 复核全文与复跑命令：`docs/plans/plan-unfinished-completion-schedule-2026-10-16.md` §16。另有两类判定同样已过时，读表时一并注意：
 > ① §2.8 的「`/health` 能力灯」行原记「两点边界」——① `cost_governance` / `forensic` 无开关跟随断言、② `forensic` 位是代理语义——两点已于 2026-10-15 分别**补上断言**（现 16 passed）与**定性为前提有误**（该字段语义早已被 `applications/agent_server/schemas.py` 的 description 声明为 trajectory_store 装配代理），`docs/TODO.md` §3 该行已翻勾；
 > ② §2.7 的「不可篡改审计日志」行（🟡）与 §2.8 的「漂移诊断 forensic」行（「✅ 部分」）给取证面打的档只到「载体 + 版本指纹」这一层，来源/回执三格仍无生产写入点（即上面第 6 条下修的原因）。
+>
+> **2026-10-26 审计续批（feat 线，提交 df57582…cf89391）**：本轮把「接线 / 装配」再向下核一层——**执行点与消费点**，据此改写了 10 行的判定而不是只加指针（透明起见在此登记）：沙箱生产实为 subprocess 降级、Docker 安全 flag 一条不生效（行 216）· Skill permissions 与工具级 ACL 在装配层恒短路（行 211 / 214 / 216）· Self-evolution 的使用效果→升降级零生产构造点（行 122）· Context Governance 结果无消费者、authorizer 不在线上召回路径（行 144 / 146）· delegate、精确回忆、程序性沉淀、decay、MCP 注册与若干锚点漂移的订正（行 125 / 162 / 167 / 168 / 206 / 142 / 143）。判定基于 feat 线当前树，`scripts/check_doc_sync.py` 0 警告；对外引用前仍按 §1.3 复跑。
 
 ---
 
