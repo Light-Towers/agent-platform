@@ -15,7 +15,7 @@
 |---|---|---|
 | `docs/TODO.md` | 排期台账（判「会不会修」的唯一面） | 98 |
 | `docs/architecture/agent-harness-capability-map.md` | 能力现状地图（管「现在有没有」） | 4 ★ |
-| `docs/architecture/architecture-improvement-plan.md` | 优化项 A~H + 技术债登记 TB-* + §0.1 内核契约 | 20 ★ |
+| `docs/architecture/architecture-improvement-plan.md` | 优化项 A~I（原文含独立的优化 I，原记 A~H 漏计） + 技术债登记 TB-1~TB-14 + §0.1 内核契约 | 20 ★ |
 | `docs/architecture/architecture-boundary-app-vs-agent-federation.md` | 双轨职责边界 | 12 ★ |
 | `docs/adr/0005-execution-memory-kernel-contract.md` | 执行/记忆内核契约 | 5 ★ |
 | `docs/adr/0006-isolation-dimension-contract.md` | 隔离维度契约 | 5 ★ |
