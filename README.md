@@ -465,7 +465,7 @@ curl -X POST http://127.0.0.1:8000/api/callback/{task_id} \
 ## 测试与评测
 
 ```bash
-make test                            # 9 session pytest（根 / shared-schemas / agent-runtime / agent-server / 联邦 / kefu / exhibition / knowledge-service / nl2sql-service）
+make test                            # 9 个标准 session + 1 个 --extra otel session（`Makefile:54-64`；根 / shared-schemas / agent-runtime / agent-server / 联邦 / kefu / exhibition / knowledge-service / nl2sql-service，外加 tests/observability）
 python eval/run_eval.py              # 启发式路由准确率基线（15 条 golden）
 python eval/run_eval.py --llm        # 配置 LLM 后评测结构化路由
 python eval/run_eval.py --fail-below 0.8   # CI 门禁用法
