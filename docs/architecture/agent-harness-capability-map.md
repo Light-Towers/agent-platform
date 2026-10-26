@@ -383,7 +383,7 @@ uv run --with ruff ruff check . && python scripts/check_doc_sync.py
 
 ---
 
-## 5. 默认关开关台账（14 条）
+## 5. 默认关开关台账（agent_server 14 行 + 内核/身份/联邦 env 直读 16 项）
 
 **agent_server（`applications/agent_server/config.py`，pydantic-settings，env 大写同名覆盖）**
 
