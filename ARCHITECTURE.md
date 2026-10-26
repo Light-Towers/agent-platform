@@ -116,6 +116,7 @@ agent-core  agent-runtime  shared-schemas  agent-server  agent_federation  exhib
 | P11 | 根 `.github/workflows/*.yml` 必须声明顶层 `permissions:` 块 | `actions/missing-workflow-permissions`（GITHUB_TOKEN 未限权） | `tests/governance/test_workflow_permissions_governance.py` |
 | P12 | 绑 `Depends(verify_api_key)` 的形参**值不得作为任何 `Call` 的实参外流**（仅扫 `applications/**`，无白名单） | 凭据被当审计主体/日志字段（**CodeQL 未报**，人工语义审计发现） | `tests/governance/test_audit_operator_principal.py` |
 | P13 | 每个 `applications/*` 服务都必须有**身份门卫装配点**，且 `_IDENTITY_ASSEMBLY` 逐服务登记它用的是哪一套实现（`shared` / `fork:<模块>`） | 「6/6 覆盖」被悄悄换成"都装了个东西"；漏装 ⇒ 启用强制隔离后该服务仍可被自报身份绕过（roadmap #11） | `tests/governance/test_identity_gate_coverage.py` |
+| P14 | 语义缓存单轨（ADR-0013 C）：valkey 客户端只在适配器内导入、`CACHE_*` 只经 `cache/config.py` 读取、PG 旧表 SQL 零再现、生产清单显式 `CACHE_BACKEND=valkey`、bundle 镜像坐标一致 | 第二轨（PG 语义缓存 / 直连 valkey / 裸读配置）复生 ⇒ 双后端语义与隔离口径再次分叉 | `tests/governance/test_cache_single_track_governance.py` |
 | L-3 | 观测 init（`init_tracing`/`init_otel`）只能出现在装配点（`main`/`server`/过渡门面/eval 入口） | 业务模块私起第二个 tracer 状态机（R6 根因） | — |
 | L-1 | 禁手动 `.__enter__()`/`.__exit__()`，上下文管理器生命周期必须 `with` 配对 | 真 OTel 下 CM 跨任务拆分配对 → 500（R4/R8；NoOp 替身的 `__getattr__` 兜底会让关闭态隐形） | — |
 | L-2 | 禁经 `app.state` 散点取用 tracer（请求级 span 由 `TracingMiddleware` 创建，业务属性经 `agent_core.tracing` 取用） | 散点取用是「第二实现」的土壤（R8/R12） | — |
@@ -130,8 +131,8 @@ P12 是**名匹配粗筛**，不得当作「凭据不入审计」的全局完备
 
 L 系列（观测架构与依赖契约）由 `docs/plans/plan-observability-global-remediation-2026-09-29.md` §3.3 立项，L-1/L-2/L-3/L-4 **无独立治理用例**——判据就是 lint 自身，`make lint` / CI 常驻覆盖。这与 P 系列「每条配一组门禁用例」的形态不同，不得拿「有用例」与「无用例」当作重要性排序。**L-5 是例外**（2026-10-16 起配 `tests/governance/test_observability_assembly_gate.py`）：存在性门禁的判据本身可能被「枚举失效」架空，所以必须有用例能把它判红。
 
-> **计数口径（2026-10-16 重取并订正本段自身的错数；2026-10-09 首取）**：本表 **17 行**（P 系列 12 + L 系列 5，其中 P6-3 单列）；`scripts/lint_architecture.py` 的 `main()` 打印 **16 条**门禁编号（P6-3 并入 P6、P7 的两个函数共用一个 P7 编号打印）；脚本内实现函数 **18 个**（`check_*` **17 个** + 承接 P4-2 的 `check()` 1 个）。
-> **本句先前写的是「实现函数 17 个（`check()` + 另有 16 个 `check_*`）」，两个数都少 1**——是我这一轮加 L-5/P13 时只重取了行数与编号数、函数数按旧值顺手写的；2026-10-16 收口对账用 `^def check_` 与 `main()` 实跑输出重取（17 / 18 / 16）。⇒ **对外陈述门禁强度一律用「16 条」**；表行数与函数数是不同计数对象，不得被引成「门禁条数」。
+> **计数口径（2026-10-26 重取；2026-10-16 首对齐）**：本表 **18 行**（P 系列 13 + L 系列 5，其中 P6-3 单列）；`scripts/lint_architecture.py` 的 `main()` 打印 **17 条** P/L 门禁编号（P6-3 并入 P6、P7 的两个函数共用一个 P7 编号打印；R19 另有一条独立打印，不计入这 17 条，计入则共 18 个标签）；脚本内实现函数 **20 个**（`check_*` **19 个** + 承接 P4-2 的 `check()` 1 个；19 个 `check_*` 中含 R19 的 `check_fastapi_telemetry`）。
+> **历史订正**：2026-10-16 记为 17 行 / 16 条 / 18 个函数；2026-10-25 ADR-0013 C 新增 P14（`check_cache_single_track`）后应为 18 / 17 / 20。原函数计数把 R19 的 `check_fastapi_telemetry` 排除在外（只数 P/L 系列），本轮按「脚本内全部实现函数」重取。⇒ **对外陈述门禁强度一律用「17 条」**（P/L 口径；含 R19 标签为 18）；表行数与函数数是不同计数对象，不得被引成「门禁条数」。
 >
 > **这三个数会随规则增减一起动 ⇒「三处数字一致」不是一次性结论，而是每次加规则的必做收尾**：2026-10-16 连加 L-5（#12）与 P13（#11）后，本段与 `docs/architecture/agent-harness-capability-map.md`、`docs/project-introduction-2026-10-12.md`、`docs/plans/production-delivery-anchor-map-2026-10-09.md` 都要同步；`check_doc_sync.py` 只核**路径存在性**，核不出这类数字漂移。历史文档里出现过的「7 条」无任何来源支撑，已作废（本轮对账记录：`docs/plans/production-delivery-anchor-map-2026-10-09.md`）。
 
