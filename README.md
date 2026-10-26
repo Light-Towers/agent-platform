@@ -327,7 +327,21 @@ curl http://127.0.0.1:8000/health
 }
 ```
 
-> 上面是 2026-10-25 本机**实跑取到**的真实响应（未配 `DATABASE_URL` 的零依赖形态，故 `storage=memory`、`embedding_backend=MockEmbedder`、`llm=false`；未起 Valkey，故 `CACHE_BACKEND=disabled`），共 **28 个键 = 共享基类 13 + 本 app 独有 15**。复现命令：`CACHE_BACKEND=disabled uv run python -c "from fastapi.testclient import TestClient; from agent_server.main import app; print(TestClient(app).get('/health').json())"`（注意 `get_settings` 有 `lru_cache`，改 env 后须清缓存）。
+> 上面是 2026-10-25 本机**实跑取到**的真实响应（未配 `DATABASE_URL` 的零依赖形态，故 `storage=memory`、`embedding_backend=MockEmbedder`、`llm=false`；未起 Valkey，故 `CACHE_BACKEND=disabled`），共 **28 个键 = 共享基类 13 + 本 app 独有 15**。**2026-10-27 复核**：按下述命令重跑，28 个键与逐项取值均与上表一致。
+>
+> 复现命令（**必须进 lifespan**：`embedding_backend` / `langfuse_ready` 是启动期算一次、存进 `app.state` 的值，`TestClient(app)` 不进 `with` 就不触发启动钩子，`/health` 会把 `embedding_backend` 报成 `unknown`——2026-10-27 实测两种写法分别得 `unknown` 与 `MockEmbedder`）：
+>
+> ```bash
+> CACHE_BACKEND=disabled uv run python - <<'PY'
+> from fastapi.testclient import TestClient
+> from agent_server.main import app
+>
+> with TestClient(app) as client:
+>     print(client.get('/health').json())
+> PY
+> ```
+>
+> 注意 `get_settings` 有 `lru_cache`，改 env 后须清缓存。
 >
 > 字段语义口径：值取自**运行态装配真值**而非 settings 意愿值（`scheduler`/`control_plane`/`cost_governance`/`forensic` 即 V3 四部件，`18b6954` 起上报）；`langfuse_enabled`（意愿）与 `langfuse_ready`（真装配）两盏灯必须分开看，差值即故障信号；缓存三字段同理——`cache_backend=valkey` 且 `cache_ready=false` 时看 `cache_degraded_reason`（已脱敏）；`/health` 免鉴权，故 `auth_enabled` 与 `identity_mode` 只报布尔/模式名，**不回显任何密钥**。
 >
