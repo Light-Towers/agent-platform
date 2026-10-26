@@ -79,7 +79,7 @@
 | A2A / Agent Card / `.well-known` 不存在 | `grep -i 'a2a\|agent_card\|agent-card\|\.well-known'` on `**/*.py` → **0 命中** |
 | MCP 客户端走 stdio + **SSE** | `packages/agent-runtime/agent_runtime/mcp_client.py:146` `sse_client(url=...)` |
 | `ReflectionEngine` / `slice_skill_context` / `run_admitted` 零生产调用 | 全仓检索仅命中 `tests/**` 与 `docs/plans/archive/**` |
-| `NOT WIRED (P1-7)` 自述现状 | 2026-10-26 复核：原 5 个 P1-7 模块（human_task / execution_recovery / state_migration / payload_externalization / 会展 `skill_router`）的模块头均已改为 **WIRED**，只剩历史括注「此前状态为 NOT WIRED」 |
+| `NOT WIRED (P1-7)` 自述现状 | 2026-10-26 复核：原 5 个 P1-7 模块（`packages/agent-runtime/agent_runtime/human_task.py` / `packages/agent-runtime/agent_runtime/execution_recovery.py` / `packages/agent-runtime/agent_runtime/state_migration.py` / `packages/agent-runtime/agent_runtime/payload_externalization.py` / 会展 `applications/exhibition-agent/exhibition_agent/foundation/skill_router.py`）的模块头均已改为 **WIRED**；2026-10-27 订正：四个 agent-runtime 模块另存历史括注「此前状态为 NOT WIRED」（human_task `:13` / execution_recovery `:25` / state_migration `:11` / payload_externalization `:25`），会展 `skill_router.py:5` 只有 WIRED、**无该括注** |
 
 **复跑验证命令**（在本仓根执行，可复现 §5/§6 两张台账；注释里的「应 N 行」是自检锚，对不上即台账或代码已漂移）：
 
