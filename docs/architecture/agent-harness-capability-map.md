@@ -382,6 +382,7 @@ uv run --with ruff ruff check . && python scripts/check_doc_sync.py
 | **P2** | tool explosion（分组 / 懒加载 + 约束解码）+ Tool Contract Test | 工具 >20 后选择准确率显著下降；注意**别动态增删工具定义**（破 KV-Cache） | §2.5 |
 | **P2** | NHI Agent 独立身份 + kill switch + 不可篡改审计 + ASI01–10 映射文档 | 治理从事后审查到内置控制 | §2.6 |
 | **P2** | 影子流量 / 金丝雀斜坡 / 红队集 / 反馈信号闭环 | 上线后四层监控中目前只覆盖第二层（可观测） | §2.8 |
+> **§3 复核（2026-10-26）**：P0 循环预防锚点实测 `packages/agent-runtime/agent_runtime/planner/protocol.py:248-250`（指纹字段/开关）与 `:296-301`（重复指纹拒绝继续）；P0 输出护栏确为「仅告警」——`applications/agent_federation/agent/main_agent.py:652-659` 调 `guard_output` 后仅 `logger.warning`，不替换答案；P1 prompt caching 仍无 `cache_control`（`packages/agent-core/agent_core/cache/` 仅 base/stats）；P1 MCP 仍绑 HTTP+SSE（`packages/agent-runtime/agent_runtime/mcp_client.py:146`）；P1 四装配缺口与 §6 的 2026-10-26 复核一致；其余 P1/P2 行以 §2/§6 指针为准，对应行已带同日标注。
 
 ---
 
