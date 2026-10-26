@@ -72,7 +72,7 @@
 
 证据由三路合成：**① 本仓库全仓 import/符号扫描（主）**、② `noctilucent-lamp` wiki 的既有术语体系（决定用词）、③ 业界 2026 口径（决定「缺项」判据）。
 
-成文会话逐条复核的原始 4 条列于下表；**2026-10-26 复核轮另实读/实测了 §2 的 23 个能力行、本表第 4 行与 §4.2**（全表按「2026-10-26」计数共 25 个表格行，由脚本点算）。**未带日期标注的行仍属原扫描转述**，对外引用前建议抽验：
+成文会话逐条复核的原始 4 条列于下表；**2026-10-26 复核轮另实读/实测了 §2 的 27 个能力行、本表第 4 行与 §4.2**（全表按「2026-10-26」计数共 29 个表格行，由脚本点算）。**未带日期标注的行仍属原扫描转述**，对外引用前建议抽验：
 
 | 结论 | 复核方式与结果 |
 |---|---|
@@ -173,19 +173,19 @@ uv run --with ruff ruff check . && python scripts/check_doc_sync.py
 | 能力 | 状态 | 证据 / 开关 |
 |---|---|---|
 | 四类契约 WORKING/EPISODIC/SEMANTIC/PROCEDURAL + `ContextSelector` 按 task_type 选类 | ✅ | `packages/agent-runtime/agent_runtime/memory_types.py:24-31,206-251` |
-| 会话历史 thread state + Checkpointer 三后端降级链（PG → Mongo（按 tenant 隔离）→ InMemory） | ✅ | `packages/agent-core/agent_core/memory/__init__.py:67-117` · `packages/shared-schemas/shared_schemas/thread.py` · 装配 `applications/agent_server/main.py:46-62` |
+| 会话历史 thread state + Checkpointer 三后端降级链（PG → Mongo（按 tenant 隔离）→ InMemory） | ✅ | `packages/agent-core/agent_core/memory/__init__.py:67-117` · `packages/shared-schemas/shared_schemas/thread.py` · 装配 `applications/agent_server/main.py:47-63`（`_build_checkpointer`；Mongo 侧按租户过滤见 `packages/agent-core/agent_core/memory/mongo_checkpointer.py:163`，2026-10-26 实读） |
 | 精确回忆（按 `thread_id` 回溯原文，与语义回忆正交） | ✅ 租户级（**非用户级**） | `applications/agent_server/memory/recall_exact.py` → `/history`；⚠️ **粒度只到租户**：鉴权启用时 `/history` 与 `/query` 的 `session_id` 均被忽略，`resolve_thread_id` 恒返回 `tenant-<服务端断言租户>`（`applications/agent_server/api/auth.py:32-44`、kernel `packages/agent-core/agent_core/guardrails/auth.py:56-68`），未验签身份时回退部署级 `default_tenant_id` ⇒ 同租户所有调用方共用一条会话记录与历史原文（`applications/agent_server/api/session_router.py:33` 直接把入参丢弃），未验签部署下即所有调用方共享；已作为已知代价登记在 `docs/operations/minimal-release-runbook.md:390`，拆到用户粒度需服务端验签的会话令牌（独立方案）。另 `/session/revert` 同样作用于该共享 thread（`applications/agent_server/api/session_router.py:76-78`） |
 | 长期语义记忆（PG + pgvector；评分 `type_weight × importance × time_decay`） | ✅ 依赖 `DATABASE_URL` | `packages/agent-core/agent_core/memory/typed.py`（`remember_typed:235` / `recall_typed:328` / `consolidate` / `forget`）· `applications/agent_server/memory/longterm.py:89-110` · migration 见 `packages/agent-runtime/agent_runtime/migrations/`（003_memory / 004_memory_tenant_id / 005_memory_tenant_enforcement / 008_memories_dual_scope 的 .up.sql） |
 | **用户画像（跨 workspace 双 scope）** | 🔽 `MEMORY_DUAL_SCOPE=false` | `packages/agent-core/agent_core/memory/typed.py:138-149` · `recall_user_profile:355-377` · 融合点 `applications/agent_server/memory/memory_backend.py:176`；关时画像召回返回空（「宁可画像暂不可用」） |
-| LLM 结构化事实抽取（写入质量） | 🔽 `memory_extraction_enabled=False` | `applications/agent_server/config.py:47` · 退化分支 `applications/agent_server/memory/longterm.py:123,148`（存整条原文、importance 硬编码 0.5） |
-| 遗忘 / 淘汰（语义层：低 importance + 超龄才删） | ✅ | `applications/agent_server/memory/longterm.py:163-182`（`memory_forget_threshold=0.1`）· `packages/agent-core/agent_core/config.py:144 MEMORY_FORGET_AGE_DAYS=30` |
+| LLM 结构化事实抽取（写入质量） | 🔽 `memory_extraction_enabled=False` | `applications/agent_server/config.py:45`（2026-10-26 实读；原记 :47 是 breaker_failure_threshold） · 退化分支 `applications/agent_server/memory/longterm.py:123,148`（存整条原文、importance 硬编码 0.5） |
+| 遗忘 / 淘汰（语义层：低 importance + 超龄才删） | ✅ | `applications/agent_server/memory/longterm.py:163-185`（2026-10-26 实读：`maybe_consolidate` 于 :181 读 `settings.memory_forget_threshold`；默认 0.1 在 `applications/agent_server/config.py:46`）· `packages/agent-core/agent_core/config.py:144 MEMORY_FORGET_AGE_DAYS=30` |
 | 衰减 / 容量淘汰（情景层：TTL 30d + 10000 条按 importance LRU） | ✅ 无 flag | `packages/agent-runtime/agent_runtime/memory_decay.py` · 作为 post-execution hook 装配 `applications/agent_server/main.py:190`（builder `:166-191`，注入 runtime `:474,506`；原记 `:125` 已漂移，现为 `_build_pg_stores` docstring） |
 | 情景 → 程序性自动沉淀（trajectory → episode → 候选 Skill） | ✅ 无 flag | `packages/agent-runtime/agent_runtime/memory_sink.py`（`EpisodicSink`/`ProceduralSink`, `trigger_interval=10`）· 持久化 `packages/agent-runtime/agent_runtime/memory_pg.py`；⚠️ 候选只落 `lifecycle="draft"`、不回注 registry，使用效果→升降级未接线（见 §2.1 Self-evolution 行） |
 | WorkingMemory 快照门面（Checkpoint+Status+Awaitable 三 store 统一） | 🟡 | `packages/agent-runtime/agent_runtime/working_memory.py` 零调用（**底层三 store 本身是接线的**，缺的只是门面消费方） |
 | 语义召回相似度 | ⚠️ **降级形态** | `packages/agent-runtime/agent_runtime/memory_recall.py:1-13` 用**字符 bigram Jaccard**（自述「生产可替换为 embedding+pgvector」）；替换件 `packages/agent-runtime/agent_runtime/embedding_recall.py` 🟡 零调用 |
 | Episode 模糊去重 | 🟡 | `packages/agent-runtime/agent_runtime/episode_dedup.py:7-8`（2026-10-26 实读：docstring 自述「当前用精确匹配，模糊去重需 embedding，预留 `similarity_threshold` 参数」；类体 `:21`） |
 | 冷启动种子记忆 | 🟡 | `packages/agent-runtime/agent_runtime/memory_seed.py` 零调用 |
-| 租户漏传 fail-fast 门（绝不静默落 `default`） | ✅ | `packages/agent-core/agent_core/memory/_tenant_gate.py:14-27` + 治理测试 `tests/governance/test_tenant_default_forbidden.py` |
+| 租户漏传 fail-fast 门（绝不静默落 `default`） | ✅ | `packages/agent-core/agent_core/memory/_tenant_gate.py:19-27`（2026-10-26 实读：`resolve_tenant` 本体；:14-18 是 future import 与哨兵定义） + 治理测试 `tests/governance/test_tenant_default_forbidden.py` |
 | 内核语义记忆总开关与 app 路径**不同源** | ⚠️ 语义裂缝 | `SEMANTIC_MEMORY_ENABLED=false`（`packages/agent-core/agent_core/config.py:135`）只门 `recall_memories`/`remember_memory` 旧门面；`agent_server` typed PG 路径只看连接池（`applications/agent_server/memory/longterm.py:8-13` 自述） |
 | 记忆能力探测（防「配了但没记忆」） | ✅ | `packages/agent-core/agent_core/memory/store.py` `CapabilityReport.probe()`（永不抛异常，供 `/health` 序列化） |
 | 记忆写入防投毒（外部内容不得借「写入记忆」指令入库） | ❌ | 仅读侧 `authorizer`，无写侧来源可信度门禁（OWASP ASI06） |
