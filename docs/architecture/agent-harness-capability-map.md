@@ -72,7 +72,7 @@
 
 证据由三路合成：**① 本仓库全仓 import/符号扫描（主）**、② `noctilucent-lamp` wiki 的既有术语体系（决定用词）、③ 业界 2026 口径（决定「缺项」判据）。
 
-成文会话逐条复核的原始 4 条列于下表；**2026-10-26 复核轮另实读/实测了 §2 的 17 个能力行、本表第 4 行与 §4.2**（全表按「2026-10-26」计数共 19 个表格行，由脚本点算）。**未带日期标注的行仍属原扫描转述**，对外引用前建议抽验：
+成文会话逐条复核的原始 4 条列于下表；**2026-10-26 复核轮另实读/实测了 §2 的 19 个能力行、本表第 4 行与 §4.2**（全表按「2026-10-26」计数共 21 个表格行，由脚本点算）。**未带日期标注的行仍属原扫描转述**，对外引用前建议抽验：
 
 | 结论 | 复核方式与结果 |
 |---|---|
@@ -128,10 +128,10 @@ uv run --with ruff ruff check . && python scripts/check_doc_sync.py
 
 | 能力 | 状态 | 证据 / 开关 |
 |---|---|---|
-| Agent Loop（TAO 循环） | ✅ | 四套并存：`applications/agent_federation/agent/main_agent.py`（`FED_RECURSION_LIMIT=50` 注入 `recursion_limit`、`FED_MAX_STEPS=20` 超限主动中止；按符号锚定，行窗已随 2026-10 瘦身失效）· `applications/agent_server/planners/deterministic.py:187-224`（`max_iterations=2`）· `applications/exhibition-agent/exhibition_agent/skill_loader/agent.py`（`MAX_TOOL_ROUNDS=6`）· `applications/nl2sql-service/nl2sql_service/agent/graph.py:23-28`（校验-纠错回环） |
+| Agent Loop（TAO 循环） | ✅ | 四套并存：`applications/agent_federation/agent/main_agent.py`（`FED_RECURSION_LIMIT=50` 注入 `recursion_limit`、`FED_MAX_STEPS=20` 超限主动中止；按符号锚定，行窗已随 2026-10 瘦身失效）· `applications/agent_server/planners/deterministic.py:187-224`（循环内用 `settings.max_iterations`；默认 2 在 `applications/agent_server/config.py:65`，2026-10-26 实读）· `applications/exhibition-agent/exhibition_agent/skill_loader/agent.py`（`MAX_TOOL_ROUNDS=6`）· `applications/nl2sql-service/nl2sql_service/agent/graph.py:23-28`（校验-纠错回环） |
 | ReAct / agentic | 🔽 `PLANNER=agentic` | `packages/agent-runtime/agent_runtime/planner/agentic.py` · `applications/agent_federation/planners/agentic_runtime_bridge.py` |
 | Plan-and-Execute | 🔽 `PLANNER=graph` | `applications/agent_server/planners/graph.py` · `packages/agent-runtime/agent_runtime/planner/graph_compose.py:1-22`（LLM 只从 `registry.discover` 候选选，**禁止生成任意 Python/执行器**） |
-| Re-plan（执行期重规划） | ✅ | `packages/agent-runtime/agent_runtime/planner/protocol.py:44`（`StreamEventType` 含 `replan`）· `applications/agent_server/planners/graph.py:150-172`（`max_execution_replans=1`）· `packages/agent-runtime/agent_runtime/planner/protocol.py:200`（`TOOL_RESULT_SUGGESTS_REPLAN`） |
+| Re-plan（执行期重规划） | ✅ | `packages/agent-runtime/agent_runtime/planner/protocol.py:44`（`StreamEventType` 含 `replan`）· `applications/agent_server/planners/graph.py:44`（默认 `max_execution_replans=1`）+ `:151-157`（重规划循环；2026-10-26 实读）· `packages/agent-runtime/agent_runtime/planner/protocol.py:212`（`TOOL_RESULT_SUGGESTS_REPLAN`） |
 | Reflexion（单任务自评估） | 🔽 `REFLEXION_ENABLED=false` | `applications/agent_federation/agent/main_agent.py:167-184` → deepagents `RubricMiddleware(max_iterations=3)` |
 | Reflection（洞察生成 / Generative-Agents 式） | 🟡 | `packages/agent-runtime/agent_runtime/reflection.py`（取最近 N 条 Episode → LLM 生成问题 → 回答 → 存 Insight）**零生产调用，且未自述 P1-7** |
 | Self-evolution（反思 + 记忆 + **固化**） | ✅ 部分（沉淀接线 / 升降级未接线） | `memory_sink.py` 的 `EpisodicSink` + `ProceduralSink`（默认持 `ProceduralExtractor`，`packages/agent-runtime/agent_runtime/memory_sink.py:79`）；**已接线**：`_build_memory_hooks`（`applications/agent_server/main.py:166-191`）注入 runtime（`:474,506`），每次执行后由 `packages/agent-runtime/agent_runtime/planner/execution_graph.py:84` 调用，每 10 次执行落一批 `lifecycle="draft"` 候选（`packages/agent-runtime/agent_runtime/memory_sink.py:83-144`；只校验 `pattern_steps` 在 registry 中已注册，**不回注 registry**）；**未接线**：`SkillUsageTracker` 的 draft→stable / stable→deprecated 升降级全仓无生产构造点（仅 `packages/agent-runtime/agent_runtime/memory_sink.py:157` 用法示例与 `packages/agent-runtime/tests/test_memory_sink.py`、`packages/agent-runtime/tests/test_memory_e2e.py`），`Skill.lifecycle` 生产侧也无人写（`packages/agent-runtime/agent_runtime/skills/registry.py:241` 只读）⇒ 「固化」目前止于 draft 落库；`ProceduralMemory` 仅作 ContextGovernor 的召回源（`applications/agent_server/main.py:223-224`）；原记装配锚 `applications/agent_server/main.py:122-126,396` 已漂移（那两处分别是 `_build_pg_stores` docstring 与 MCP 装配）；2026-10-26 实读复核：原引 `tests/test_memory_*.py` 实为包内 `packages/agent-runtime/tests/`（已改），memory_sink/main/registry 六处锚点核对无漂移 |
