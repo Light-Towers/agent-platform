@@ -374,8 +374,8 @@ uv run --with ruff ruff check . && python scripts/check_doc_sync.py
 
 | # | 现象 | 位置 | 影响 |
 |---|---|---|---|
-| 4.1 | 压缩触发 `ratio=0.8`，而外部既有最佳实践建议 **60–70% 窗口**（留余量，避免触发时已来不及） | `applications/agent_server/config.py:70-75` | 128K 窗口下 102K 才压，长轨迹任务可能一轮 tool result 就溢出 |
-| 4.2 | `ContextBudget(model_window=32_000)` 在 governor 装配处**硬编码**，与 `model_context_window=128000` 不同源 | `applications/agent_server/main.py:129-171` | 预算尺子与实际模型窗口不一致：governor 路径偏保守，`applications/agent_server/context.py` 路径偏激进 |
+| 4.1 | 压缩触发 `ratio=0.8`，而外部既有最佳实践建议 **60–70% 窗口**（留余量，避免触发时已来不及） | `applications/agent_server/config.py:69`（`compaction_threshold_ratio`；原记 `:70-75` 已漂移） | 128K 窗口下 102K 才压，长轨迹任务可能一轮 tool result 就溢出 |
+| 4.2 | `ContextBudget(model_window=32_000)` 在 governor 装配处**硬编码**，与 `model_context_window=128000` 不同源 | `applications/agent_server/main.py:202,226`（原记 `:129-171` 已漂移）；2026-10-26 复核实证：**`main.py` 对 `model_context_window` 零引用**，读该设置的是 `applications/agent_server/context.py:35` ⇒ 改配置只影响 context.py 路径，governor 恒 32K | 预算尺子与实际模型窗口不一致：governor 路径偏保守，`applications/agent_server/context.py` 路径偏激进 |
 | 4.3 | workflow 文件名 `packages/agent-runtime/workflows/qa_pipeline.yaml` 与内部 `name: "search_pipeline"` 不一致 | `packages/agent-runtime/workflows/qa_pipeline.yaml` | `discover_workflows` 按文件注册，按名排查/引用时出现两个标识 |
 | 4.4 | ~~**文档↔代码漂移**：README 与 TODO 仍声称 `/health` 不上报 V3 四组件~~ **已于 2026-10-14 回写完毕** | `README.md`（§`GET /health` 样例与说明）、`docs/TODO.md` §3、`docs/plans/plan-production-delivery-roadmap-2026-10-09.md` 阶段1 #6 + 阶段小计 + §四 #3、`docs/plans/production-delivery-anchor-map-2026-10-09.md` 健康检查行 | 原状：四处同源旧话由 `9921f203`（2026-09-24）写入，被 `18b6954`（2026-10-10）取代后未回写；README 样例还少列 15 个键并把 `status` 写成 `ok`（实测枚举为 `healthy`）。处置：全部按「只订正状态、不翻转复选框」处理（`git diff` 内无 `- [ ]` ↔ `- [x]`），§0 计数口径不受影响；#6 工时以「20 → 剩余 19」双口径写明。教训登记：`scripts/check_doc_sync.py` 只验路径存在性，**抓不到语义漂移** |
 
