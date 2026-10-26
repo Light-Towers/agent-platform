@@ -204,7 +204,7 @@ uv run --with ruff ruff check . && python scripts/check_doc_sync.py
 | 能力 | 状态 | 证据 / 开关 |
 |---|---|---|
 | Capability Registry 四执行器（Function / Agent / Remote / Workflow） | ✅ | `packages/agent-runtime/agent_runtime/skills/registry.py:1-15` · `execute()` 边界 `:361-367`（入参 schema 校验 → 中间件洋葱 → 执行器统一超时 → 产出校验）· 装配 `applications/agent_server/capabilities.py:167-239` |
-| MCP **客户端**（stdio + SSE、per-server CircuitBreaker、工具白名单、超时、PG 审计） | 🔽 `mcp_enabled=False` | `packages/agent-runtime/agent_runtime/mcp_client.py`（`:146` 用 `mcp.client.sse`）⚠️ 见 §3 缺项 P1：SSE 属 MCP 2026-07-28 已弃用传输 |
+| MCP **客户端**（stdio + SSE、per-server CircuitBreaker、工具白名单、超时、PG 审计） | 🔽 `mcp_enabled=False` | `packages/agent-runtime/agent_runtime/mcp_client.py`（`:146` 用 `mcp.client.sse`）⚠️ 见 §3 缺项 P1：HTTP+SSE 自 MCP 2025-03-26 起被 Streamable HTTP 取代；2026-07-28 版 transports 页只定义 stdio + Streamable HTTP，已不含该传输 |
 | MCP 工具自动注册为 Skill（`mcp.{server_id}.{tool_name}` 三段式防跨 server 冲突） | 🔽 随 `mcp_enabled` | `packages/agent-runtime/agent_runtime/skills/mcp.py` · 装配 `applications/agent_server/main.py:438-441`（`register_mcp_skills`；原记 `:359-364` 实为 SessionCoordinator） |
 | **MCP 服务端**（把本平台 Skill 暴露成 MCP server） | ❌ | 全仓无 `FastMCP` / `mcp.server`；`packages/agent-core/agent_core/tools/adapters/mcp.py` 是客户端适配器 |
 | MCP 企业授权面（OAuth 2.1 资源服务器 / RFC 9728 元数据发现 / RFC 8707 token 绑定 / CIMD / EMA） | ❌ | |
@@ -359,7 +359,7 @@ uv run --with ruff ruff check . && python scripts/check_doc_sync.py
 | **P0** | **一个真实使用者** | 既有定性判定原话：「缺的不是程度，是一个真实使用者。这是质变点，不是量变点」 | `docs/TODO.md` §0 · `docs/plans/arch-audit-2026-09-24.md` |
 | **P1** | provider prompt caching + 成本归因出数面 | 语义缓存 agentic 场景命中率仅 5–15%；真大头在输入输出 100:1 下的 prompt 缓存 | `packages/agent-core/agent_core/cache/`（无 `cache_control`）· `packages/agent-runtime/agent_runtime/trajectory/`（有数无面） |
 | **P1** | 幻觉三层：citation → claim-level NLI → abstention | 第 1 层都不在代码里 | 全域无 |
-| **P1** | MCP 传输换 Streamable HTTP + 规范级授权（OAuth2.1 RS / RFC 9728 / RFC 8707 / CIMD / EMA） | 现在绑的是**已弃用的 HTTP+SSE**，规范进入 12 个月弃用窗口 | `packages/agent-runtime/agent_runtime/mcp_client.py:146` · §5 参考来源 |
+| **P1** | MCP 传输换 Streamable HTTP + 规范级授权（OAuth2.1 RS / RFC 9728 / RFC 8707 / CIMD / EMA） | 现在绑的是**已被 Streamable HTTP 取代的 HTTP+SSE**（2025-03-26 起替代；2026-07-28 版 transports 页已不含该传输，见 §5 官方规范链接） | `packages/agent-runtime/agent_runtime/mcp_client.py:146` · §5 参考来源 |
 | **P1** | MCP **服务端** + Agent Registry + Tool Gateway | 平台要从「自己的运行时」变「别人的运行时」，这三件是入口面 | §2.5/§2.10 全 ❌ |
 | **P1** | 补齐 4 个装配缺口：幂等注入 · `side_effect_store`（app 侧） · `lease_backend`（多副本） · checkpoint 保留清理（app 侧） | 都是「写了没注入」，且直接决定双轨 HA 语义是否对等 | §6 |
 | **P1** | 评测治理机制：golden 三区分 + rebase + pass^k + 指标基线看板 | 评测是自评「已站对位置」的最高杠杆项，机制尚未落成代码 | §2.8 |
@@ -447,6 +447,7 @@ uv run --with ruff ruff check . && python scripts/check_doc_sync.py
 - Harness 分层与护栏引擎（网关/压缩/持久化/沙箱/验证）：https://m.blog.csdn.net/fitbit/article/details/165334536
 - DeepSeek Harness（dsh）能力构成清单：https://blog.csdn.net/m0_58426858/article/details/164174651
 - MCP 2026-07-28 规范拆解（无状态核心 / Tasks 扩展 / OAuth 六 SEP）：https://blog.csdn.net/deepseek23/article/details/167274978
+- MCP 官方规范（2026-07-28 Current）：https://modelcontextprotocol.io/specification/2026-07-28/basic/transports · 版本与弃用政策：https://modelcontextprotocol.io/specification/versioning
 - MCP 收缩协议边界（`Mcp-Method`/`Mcp-Name` 头、`ttlMs`/`cacheScope`、`tools/list` 确定性排序、12 个月弃用窗口）：https://developer.aliyun.com/article/1755212
 - MCP Apps / Tasks / Roots·Sampling·Logging 弃用清单：https://blakecrosley.com/zh-Hans/guides/obsidian
 - MCP 2026 路线图（Agent 身份：DPoP / Workload Identity Federation / WIMSE）：https://m.toutiao.com/article/7682238954141139471/
