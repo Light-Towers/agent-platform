@@ -164,7 +164,7 @@ uv run --with ruff ruff check . && python scripts/check_doc_sync.py
 | 工具结果压缩 + Artifact 外置（`read_tool_result(ref)` 按需取回，刻意不用 LLM 摘要） | 🔽 `tool_result_compression_enabled=False` | `packages/agent-runtime/agent_runtime/context/tool_result.py` · 中间件 `packages/agent-runtime/agent_runtime/skills/middleware.py:122` · 装配 `applications/agent_server/capabilities.py:184-191`（2026-10-26 实读：中间件类 :122、装配门 :184-191 在位；开关默认关见 §5） |
 | Skill-local context 切片（Isolate，嵌套 token 加法化） | 🟡 | `packages/agent-runtime/agent_runtime/context/skill_context.py` 零调用 ⇒ 子上下文仍全量传（2026-10-26 复核：全仓无 agent_runtime.context.skill_context 的 import，exhibition 测试里的同名 fixture 无关） |
 | token 单一尺子（tiktoken 精确 + 启发式降级） | ✅ | `packages/agent-core/agent_core/tokenizer.py`（2026-10-26 实读，模块在位） |
-| KV-Cache 守护 / prompt cache 稳定性（工具定义不动态增删、`tools/list` 确定性排序） | ❌ | （2026-10-26 实取：cache_control / prompt cache 代码零命中；工具集合稳定性无门禁） |
+| KV-Cache 守护 / prompt cache 稳定性（工具定义不动态增删、`tools/list` 确定性排序） | ❌ | （2026-10-26 实取：cache_control / prompt cache 代码零命中；工具定义动态增删与 tools/list 排序未见守护实现） |
 | 上下文利用率（55% 经验阈值）/ context rot 监控 | ❌ | （2026-10-26 实取：context rot / 55% 阈值代码零命中（utilization 命中均为连接池/成本口径）） |
 | 四类上下文失败模式防护 | 🟡 仅覆盖冲突与过期 | `packages/agent-runtime/agent_runtime/context/validator.py` 管 stale/conflict/invalid；**投毒面（不可信工具返回 → 上下文/记忆）无隔离**（2026-10-26 实读，模块在位；投毒面仍无隔离） |
 
