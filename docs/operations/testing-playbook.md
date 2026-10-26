@@ -96,6 +96,17 @@ git worktree remove --force $env:TEMP\wt<sha>         # 验完回收，`git work
 rc=0 且 17 passed（基线对照）⇒ 「绿」是在 CI 同构树上取到的，不依赖本机脏工作树。
 方案与验收：`docs/plans/plan-doc-sync-tracked-scope-2026-10-04.md`。
 
+### 2.5 「0 collected」可能是整模块跳过，不是「没有用例」（2026-10-27 实取）
+
+`packages/agent-runtime/tests/test_cache_contract.py`（真 Valkey 契约：L1/L2 命中、阈值拒绝、租户/scope/KB/灰度隔离、空租户 fail-closed、写侧 PII 门禁）在 Valkey 不可达时不会显示为 skip，而是**整模块收集为空**——文件里用的是 `pytest.skip(..., allow_module_level=True)`（`:56-60`）：
+
+```bash
+uv run pytest packages/agent-runtime/tests/test_cache_contract.py --collect-only -q
+# => no tests collected in 1.16s（2026-10-27 本机实测；同机 test_valkey_backend_wire.py 可收集 86 条）
+```
+
+⇒ 判「这组用例不存在 / 被删了」之前，先看文件里有没有 `allow_module_level=True`；`no tests collected` 不进任何 passed/skipped 分母，**既不能写成「本机全绿」，也不能据此判「无覆盖」**（前者假绿、后者误报缺口）。条数要用 AST 点算，或按 §2 第 4 步到 Linux 容器/测试机实跑。本机无 docker/podman，`wsl.exe -l -q` 虽 rc=0 但无发行版输出（2026-10-27 复核；`tests/ha` 另有 `sys.platform=="win32"` 硬跳过），跳过提示里的 `docker compose up -d valkey` 在本机不可执行；`CACHE_CONTRACT_REQUIRED=1` 能让它收进 19 条，但本机没有 Valkey，跑起来必红——那是 CI 的 fail-closed 判据，不是本地通过路径。同目录 `test_valkey_backend_wire.py`（86 条）用进程内 `_FakeClient`，证明的是协议形状，不能代替真 Valkey 的 L2 行为。
+
 ## 3. 本仓特定配方
 
 ### 3.1 Linux 容器跑 tests/ha + identity（最小安装）
