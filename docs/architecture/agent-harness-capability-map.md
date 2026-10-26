@@ -311,7 +311,7 @@ uv run --with ruff ruff check . && python scripts/check_doc_sync.py
 
 | 能力 | 状态 | 证据 |
 |---|---|---|
-| 导入链路（MinerU pdf→md → 图片 VL 摘要 → 分段 → 商品名识别 → bge embedding → 入 Milvus） | ✅ / 🔽 `IMG_SUMMARY_ENABLED` 默认空=关 | KS `applications/knowledge-service/knowledge_service/import_process/agent/main_graph.py:39-109` 与 6 个节点文件 |
+| 导入链路（MinerU pdf→md → 图片 VL 摘要 → 分段 → 商品名识别 → bge embedding → 入 Milvus） | ✅ / 🔽 `IMG_SUMMARY_ENABLED` 默认空=关 | KS `applications/knowledge-service/knowledge_service/import_process/agent/main_graph.py:39-109` 与 7 个节点文件（含入口 `node_entry`；2026-10-26 实读目录） |
 | 四路并行检索（embedding / **HyDE** / KG / web-MCP）+ 虚拟分叉合并 + 逐路超时降级为「该路未召回」**绝不向上抛** | ✅ | KS `applications/knowledge-service/knowledge_service/query_process/agent/main_graph.py:24-33,71-78` · `applications/knowledge-service/knowledge_service/query_process/agent/fanout.py`（桥 `agent_core/tools/guarded.guarded_invoke`） |
 | RRF（k=60、per-channel weights）+ 混合 dense 0.8 / sparse 0.2（bge-m3 稀疏向量） | ✅ | KS `applications/knowledge-service/knowledge_service/query_process/agent/nodes/node_rrf.py`（span 注入 k/weights/in_n/out_n）· `applications/knowledge-service/knowledge_service/conf/retrieval.yaml:7-18` |
 | Rerank（bge-reranker-v2-m3、`Semaphore(8)` 防显存放大、异常 passthrough 保原序）+ **断崖式动态 TopK**（gap_ratio 0.25 / gap_abs 0.5 / min 1 / max 10） | ✅（KS）/ 🔽 `rerank_enabled=False`（agent_server） | KS `applications/knowledge-service/knowledge_service/query_process/agent/nodes/node_rerank.py:1-25` + `applications/knowledge-service/knowledge_service/conf/rerank.yaml` · `applications/agent_server/rag/rerank.py` |
