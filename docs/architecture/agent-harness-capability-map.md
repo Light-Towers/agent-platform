@@ -421,6 +421,8 @@ uv run --with ruff ruff check . && python scripts/check_doc_sync.py
 | `api_key` | `""` | 空即不鉴权；⚠️「限流与载荷护栏照常」只对已装配内核中间件的 2 个应用成立——agent_server 的 HTTP 层两者都没有（§2.6 装配面实测） |
 | 4 个 `*_service_url`（knowledge / nl2sql / kefu / exhibition）/ `search_api_key` / `sql_dsn` / `langfuse_*` 三键 | `""` | 空即**不注册该能力**，`/health` 能力灯如实熄灭 |
 
+> **§5 表体复核（2026-10-26）**：上表 16 行默认值逐项实读 `applications/agent_server/config.py` 无误（`api_key` :19 / `database_url` :22 / `memory_extraction_enabled` :45 / `rerank_enabled` :58 / `admission_enabled` :80 / `otel_enabled` :91 / `mcp_enabled` :98 / `guard_enabled` :102 / `planner` :107 / `enable_loop_fingerprint` :114 / `tool_result_compression_enabled` :126 / `runtime_mode` :142 / `scheduler_enabled` :146 / `scheduler_recovery_enabled` :153 / `payload_externalization_enabled` :159 / `cost_governance_enabled` :170）。连带声明抽验三处：三个 `budget_limit_*` 默认 0（`:171-173`）；开 `payload_externalization` 而缺目录则启动即 raise（`applications/agent_server/main.py:76-80`）；recovery 重试上限 3（`RecoveryManager(max_retries=3)` `packages/agent-runtime/agent_runtime/execution_recovery.py:148`，配置项 `applications/agent_server/config.py:154`）且入队失败（含 `QueueFull`）被 `except Exception` 吞成 warning 后 `return None`（同文件 `:236-240`，不向调用方报错）。
+
 **内核 / 身份 / 联邦（env 直读）**
 
 `DEPLOY_ENFORCE_IDENTITY=false` · `TENANT_JWT_ENFORCE=false` · `TENANT_HEADER_ENFORCE=false` · `SINGLE_TENANT` 未设 ⇒ `insecure` 态 · `SEMANTIC_MEMORY_ENABLED=false` · `MEMORY_DUAL_SCOPE=false` · `AGENT_CORE_TRACE_ENABLED=false` · `GUARD_ENABLED=false` · `INTENT_ENABLED=false` · `PLANNER_ENABLED=false` · `REFLEXION_ENABLED=false` · `DYNAMIC_AGENT_ENABLED=false` · `AGENT_MODE=local` · `GRAY_PCT=0.0` · `IMG_SUMMARY_ENABLED=""` · `DISABLE_AUTH=false`（注意这是「关鉴权」的旁路开关）
