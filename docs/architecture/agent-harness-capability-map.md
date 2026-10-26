@@ -229,7 +229,7 @@ uv run --with ruff ruff check . && python scripts/check_doc_sync.py
 | HITL 人工审批应用层（谁批 / 批什么 / 批完怎么继续） | 🟡 **P1-7** | `packages/agent-runtime/agent_runtime/human_task.py:1-27` 自带 NOT WIRED；`HumanTaskStore`/`Resolver` 零调用 ⇒ **能挂起能被唤醒，但「人」这一类没有任何产出入口** |
 | 软 HITL（澄清反问）/ 高风险二次确认 | ✅ | `packages/agent-core/agent_core/intent/models.py:73`（`need_clarify`）· `applications/agent_federation/agent/main_agent.py:461-466` · KS `applications/knowledge-service/knowledge_service/query_process/agent/nodes/node_item_name_confirm.py` |
 | 输入护栏（PII 五类 + injection，**先脱敏再查缓存**） | 🔽 双 app 都关 | `packages/agent-core/agent_core/guardrails/input_guard.py` · `_PII_PATTERNS` 实为 phone/email/id_card/bank_card/ip_address 五类，**全是 ASCII/数字模式 ⇒ 中文姓名/地址不在检测面**（写侧缓存门禁复用同一函数，同样检不出）· `guard_enabled` 默认 False（`applications/agent_server/config.py` 同名字段）/ `GUARD_ENABLED=false`（`applications/agent_federation/agent/main_agent.py` 三处读该变量）· `GUARD_BLOCK_INJECTION` 默认 true |
-| 输出护栏（PII + 幻觉标记词） | ⚠️ **仅告警不拦截** | `applications/agent_federation/gateway/output_guard.py:15-27` → `applications/agent_federation/agent/main_agent.py:658-665` 命中后 `logger.warning`，答案照发（与输入侧不对称） |
+| 输出护栏（PII + 幻觉标记词） | ⚠️ **仅告警不拦截；且自有模式在中文邻接漏检** | `applications/agent_federation/gateway/output_guard.py` 自持 phone/id_card/bank_card 三条模式（与 kernel 五类实现重复，缺 email/ip）→ `applications/agent_federation/agent/main_agent.py:652-659` 的 `GUARD_ENABLED` 分支命中后仅 `logger.warning`、答案照发（与输入侧不对称）。**检测面本身也漏**（2026-10-26 探针）：`id_card` / `bank_card` 仍用 `\b` 定界，CJK 紧邻时无词边界 ⇒ `银行卡6222020200112233445` → `[]`、`客户银行卡6222020200112233445已扣款` → `[]`、`身份证110101199001011234` → 只报 `phone`（类型错且 18 位号码未被识别）；kernel 已于 `477c2fb` 改 lookaround 修同类缺陷，本文件未跟进 ⇒ 中文答案里最可能出现的形状恰好不告警 |
 | 纵深防御四层（指令-数据分离 / prompt 加固 / 随机哨兵令牌） | ❌ | |
 | 致命三要素（私有数据 + 不可信内容 + 对外通信）一票否决门禁 | ❌ | |
 | SQL 守卫（sqlglot AST、单条必须 SELECT、13 类禁止节点含子查询、缺 LIMIT 强制补、非整数字面量 LIMIT 直接拒） | ✅ | `packages/agent-core/agent_core/sql/guard.py` · 执行层只读双保险（sqlite `mode=ro` / PG `default_transaction_read_only`）· 治理测试 `tests/governance/test_sql_guard.py` |
@@ -352,7 +352,7 @@ uv run --with ruff ruff check . && python scripts/check_doc_sync.py
 |---|---|---|---|
 | **P0** | 循环**预防**三层指纹（精确 → 状态 → 语义余弦 >0.95） | 现状是「只有恢复、没有预防」，且 `enable_loop_fingerprint=False` 只做了第一层的一半 | `applications/agent_server/config.py:116` · `packages/agent-runtime/agent_runtime/planner/protocol.py:349-432` |
 | **已关闭** | ~~语义缓存空租户串跨租户读~~ | ADR-0013 C 后空租户 fail-closed，L2 查询恒带 tenant filter；回归用例见 `packages/agent-runtime/tests/test_cache_contract.py` 与 `test_valkey_backend_wire.py` | `packages/agent-runtime/agent_runtime/cache/valkey_backend.py` |
-| **P0** | 输出护栏从「仅告警」改为可拦截（与输入侧对称） | 输入拦、输出放，被追问「防得住泄露吗」答不硬 | `applications/agent_federation/gateway/output_guard.py` + `applications/agent_federation/agent/main_agent.py:658-665` |
+| **P0** | 输出护栏从「仅告警」改为可拦截（与输入侧对称） | 输入拦、输出放，被追问「防得住泄露吗」答不硬 | `applications/agent_federation/gateway/output_guard.py` + `applications/agent_federation/agent/main_agent.py:652-659`（实现时改用 kernel 五类检测：其自有三条模式在 CJK 紧邻时漏检，见上表「输出护栏」行） |
 | **P0** | **一个真实使用者** | 既有定性判定原话：「缺的不是程度，是一个真实使用者。这是质变点，不是量变点」 | `docs/TODO.md` §0 · `docs/plans/arch-audit-2026-09-24.md` |
 | **P1** | provider prompt caching + 成本归因出数面 | 语义缓存 agentic 场景命中率仅 5–15%；真大头在输入输出 100:1 下的 prompt 缓存 | `packages/agent-core/agent_core/cache/`（无 `cache_control`）· `packages/agent-runtime/agent_runtime/trajectory/`（有数无面） |
 | **P1** | 幻觉三层：citation → claim-level NLI → abstention | 第 1 层都不在代码里 | 全域无 |
