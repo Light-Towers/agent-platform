@@ -120,7 +120,7 @@ TracerProvider 换成自己那份，processors 只有 `['LangfuseSpanProcessor']
 
 ## 6. 语义缓存会把取证短路成"查不到"
 
-`query_router.py:159-179` 命中 `semantic_cache` 就直接 return，图不跑 ⇒ 没有任何模型调用 ⇒ 观测后端
+`applications/agent_server/api/query_router.py:167-201`（缓存查询块 `:167-186`、命中分支 `if cached:` 在 `:187`、旁路 SSE `:197-199`；原记 `query_router.py:159-179` 已漂移，该窗口现在是 coordinator 占位与缓存查询）命中 `semantic_cache` 就直接 return，图不跑 ⇒ 没有任何模型调用 ⇒ 观测后端
 本来就该是空的。此时按"查不到=没接上"报 FAIL 是**拿探针的形状冒充平台的缺陷**。
 三条纪律：
 1. 取证问题必须**语义新颖**——加 marker 后缀不改变语义（查重按向量相似度），改几个字没用；
