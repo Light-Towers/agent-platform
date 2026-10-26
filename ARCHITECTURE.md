@@ -36,11 +36,12 @@ agent-core  agent-runtime  shared-schemas  agent-server  agent_federation  exhib
 | 目录 | 定位 | 职责 | 稳定性 |
 |------|------|------|--------|
 | `agent-core` | **基础 Agent 能力内核** | logging / tracing / metrics / llm / memory（含 MemoryStore 统一门面） / tools / guardrails / resilience / events（EventBus 多 sink 扇出） / config（KernelConfig + 类型化 env 解析） / intent（L1 分类器） | 稳定、底层、框架无关（不得 import 任何宿主） |
-| `agent-runtime` | **Agent 执行 / 组合运行时** | Planner / Plan / Skill（Function/Agent/Remote/Workflow 四型 SkillKind，MCP/Sandbox 经特化注册函数挂载） / SkillRegistry / Workflow / ExecutionContext / ExecutionRuntime / Sandbox | 重点建设，架构收口完成 |
+| `agent-runtime` | **Agent 执行 / 组合运行时** | Planner / Plan（`packages/agent-runtime/agent_runtime/planner/protocol.py:98`） / Skill（Function/Agent/Remote/Workflow 四型 SkillKind，MCP/Sandbox 经特化注册函数挂载） / SkillRegistry / Workflow（`WorkflowSpec` / `WorkflowExecutor`，`packages/agent-runtime/agent_runtime/skills/workflow.py:79,108`） / ExecutionContext（`packages/agent-runtime/agent_runtime/planner/protocol.py:216`） / PlannerRuntime（同文件 :359） / Sandbox（`SandboxExecutor`，`packages/agent-runtime/agent_runtime/sandbox.py:70`） | 重点建设，架构收口完成 |
 | `shared-schemas` | **跨边界数据 / 协议契约** | Request / Response / Event / Error / Protocol DTO | 稳定，跨进程通信单一事实来源 |
 
 > `agent-core` 提供**零件**，`agent-runtime` 把零件**组装成执行引擎**。二者不可反向依赖。
 > `shared-schemas` 与 `agent-core` 并列：前者是「数据/协议基础设施」，后者是「行为/能力基础设施」。
+> **2026-10-27 订正**：本表 `agent-runtime` 行原列的 `ExecutionRuntime` 在全仓生产代码中**零定义**（`git grep` 只命中本文件与 `docs/adr/0005`；该名随 `56a782fc` 引入本表，从未在代码中出现），现按实际实现列 `PlannerRuntime`（执行期依赖句柄）；原列的 `Workflow` / `Sandbox` 亦无同名类，实际为 `WorkflowSpec` / `WorkflowExecutor` 与 `SandboxExecutor`。`docs/adr/0005-execution-memory-kernel-contract.md` F2 引用的是订正前原文，按 ADR 不改写原则保留。
 
 ### 2.2 Applications（应用，独立部署）
 
