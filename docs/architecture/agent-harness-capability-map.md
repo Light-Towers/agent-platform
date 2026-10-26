@@ -72,7 +72,7 @@
 
 证据由三路合成：**① 本仓库全仓 import/符号扫描（主）**、② `noctilucent-lamp` wiki 的既有术语体系（决定用词）、③ 业界 2026 口径（决定「缺项」判据）。
 
-成文会话逐条复核的原始 4 条列于下表；**2026-10-26 复核轮另实读/实测了 §2 的 36 个能力行、本表第 4 行与 §4.2**（全表按「2026-10-26」计数共 38 个表格行，由脚本点算）。**未带日期标注的行仍属原扫描转述**，对外引用前建议抽验：
+成文会话逐条复核的原始 4 条列于下表；**2026-10-26 复核轮另实读/实测了 §2 的 37 个能力行、本表第 4 行与 §4.2**（全表按「2026-10-26」计数共 39 个表格行，由脚本点算）。**未带日期标注的行仍属原扫描转述**，对外引用前建议抽验：
 
 | 结论 | 复核方式与结果 |
 |---|---|
@@ -216,7 +216,7 @@ uv run --with ruff ruff check . && python scripts/check_doc_sync.py
 
 | 能力 | 状态 | 证据 / 开关 |
 |---|---|---|
-| Capability Registry 四执行器（Function / Agent / Remote / Workflow） | ✅ | `packages/agent-runtime/agent_runtime/skills/registry.py:1-15` · `execute()` 边界 `:361-367`（入参 schema 校验 → 中间件洋葱 → 执行器统一超时 → 产出校验）· 装配 `applications/agent_server/capabilities.py:167-239` |
+| Capability Registry 四执行器（Function / Agent / Remote / Workflow） | ✅ | 执行器实现散在工厂函数：`packages/agent-runtime/agent_runtime/skills/function.py:13`（`as_function_skill`）/ `agent.py:15`（`as_agent_skill`）/ `remote.py:14`（`as_remote_skill`）/ `workflow.py:108`（`WorkflowExecutor`）/ `dag.py:15`（`as_dag_skill`）· 注册与执行入口 `packages/agent-runtime/agent_runtime/skills/registry.py:224`（`SkillRegistry`）/ `:235`（`register`）/ `:361-381`（`execute()`：入参校验 → 中间件洋葱 → 统一超时 → 产出校验；2026-10-26 实读，原记 `:1-15` 只是模块 docstring、原终点 `:367` 未覆盖中间件洋葱段）· 装配 `applications/agent_server/capabilities.py:167-239` |
 | MCP **客户端**（stdio + SSE、per-server CircuitBreaker、工具白名单、超时、PG 审计） | 🔽 `mcp_enabled=False` | `packages/agent-runtime/agent_runtime/mcp_client.py`（`:146` 用 `mcp.client.sse`）⚠️ 见 §3 缺项 P1：HTTP+SSE 自 MCP 2025-03-26 起被 Streamable HTTP 取代；2026-07-28 版 transports 页只定义 stdio + Streamable HTTP，已不含该传输 |
 | MCP 工具自动注册为 Skill（`mcp.{server_id}.{tool_name}` 三段式防跨 server 冲突） | 🔽 随 `mcp_enabled` | `packages/agent-runtime/agent_runtime/skills/mcp.py` · 装配 `applications/agent_server/main.py:438-441`（`register_mcp_skills`；原记 `:359-364` 实为 SessionCoordinator） |
 | **MCP 服务端**（把本平台 Skill 暴露成 MCP server） | ❌ | 全仓无 `FastMCP` / `mcp.server`；`packages/agent-core/agent_core/tools/adapters/mcp.py` 是客户端适配器 |
