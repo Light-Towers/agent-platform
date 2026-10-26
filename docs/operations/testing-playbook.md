@@ -23,7 +23,7 @@
 | 2 | **快速门禁**：`py_compile` + `ruff` + `scripts/lint_architecture.py` + `scripts/check_doc_sync.py`（docsync 自 2026-10-04 二批起以 `git ls-files` 为判定基准，路径存在性类问题**本机即可复现**；其余仍以本机 FS/环境为依据的校验正式证据按 §2.4 在干净检出上取） | 秒级，先行拦截 |
 | 3 | **最窄子集**：`uv run pytest <改动目录>/tests -q`；迭代用 `--lf`/`--ff`，收窄用 `-k`/`-m` | 十秒~分钟 |
 | 4 | **环境盲区补跑**：本机跑不了的（如 `tests/ha` 真实 PG，Windows 被 conftest 以 `sys.platform=="win32"` 硬跳过）在 Linux 容器/远程机实跑 | 视环境 |
-| 5 | **CI 等价全量**：`make test` 9 session + eval + `uv lock --check` 收口 | 十分钟级 |
+| 5 | **CI 等价全量**：`make test` 9 个标准 session + 1 个 `--extra otel` session（`Makefile:54-64`，别只数前 9 行）+ eval + `uv lock --check` 收口 | 十分钟级 |
 | 6 | **失败定性复跑**：单跑复验 1-2 次；不可复现的计时类失败记为环境 flake 并如实汇报，不改代码 | 分钟 |
 | 7 | **报告**：按"门禁项 / 命令 / 结果"分层表格输出，明确区分 passed / skip / 未跑 | — |
 | 8 | **合入后主干复验**（判据 6 形态）：`uv run --no-sync python scripts/evidence/verify_main_tip.py --merge-sha <merge sha> --merged-at <gh 的 mergedAt> --baseline-max-number <基线>` ⇒ 七项 `[A]`–`[G]` 全 fail-closed。**PR 绿 ≠ 主干绿**，不得拿 PR checks 代替本步 | 分钟 |
