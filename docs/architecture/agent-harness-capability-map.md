@@ -72,7 +72,7 @@
 
 证据由三路合成：**① 本仓库全仓 import/符号扫描（主）**、② `noctilucent-lamp` wiki 的既有术语体系（决定用词）、③ 业界 2026 口径（决定「缺项」判据）。
 
-成文会话逐条复核的原始 4 条列于下表；**2026-10-26 复核轮另实读/实测了 §2 的 20 个能力行、本表第 4 行与 §4.2**（全表按「2026-10-26」计数共 22 个表格行，由脚本点算）。**未带日期标注的行仍属原扫描转述**，对外引用前建议抽验：
+成文会话逐条复核的原始 4 条列于下表；**2026-10-26 复核轮另实读/实测了 §2 的 21 个能力行、本表第 4 行与 §4.2**（全表按「2026-10-26」计数共 23 个表格行，由脚本点算）。**未带日期标注的行仍属原扫描转述**，对外引用前建议抽验：
 
 | 结论 | 复核方式与结果 |
 |---|---|
@@ -151,7 +151,7 @@ uv run --with ruff ruff check . && python scripts/check_doc_sync.py
 
 | 能力 | 状态 | 证据 / 开关 |
 |---|---|---|
-| 分层 token 预算（7 层 + 未用余量按优先级回流） | ✅ | `packages/agent-runtime/agent_runtime/context/budget.py:17-31`（system 5% / tool_defs 8% / task 6% / conversation 20% / memory 8% / tool_results 35% / execution 18%） |
+| 分层 token 预算（7 层 + 未用余量按优先级回流） | ✅ | `packages/agent-runtime/agent_runtime/context/budget.py:18-39`（2026-10-26 实读：Layer 七层 :18-27；默认占比 :31-39——system 5% / tool_defs 8% / task 6% / conversation 20% / memory 8% / tool_results 35% / execution 18%；余量回流接收层 :41-42） |
 | 摘要压缩 compaction | ✅ | `packages/agent-runtime/agent_runtime/context/compact.py`（LLM 摘要为一条 system，保留最近 4 条原文，≤500 字）· 开关 `applications/agent_server/config.py:68-69`（`compaction_enabled=True`, `ratio=0.8`；原记 `:70-75` 已漂移）⚠️ 见 §4.1 |
 | 窗口滑动（与旧阈值语义兼容） | ✅ | `applications/agent_server/context.py:53-59` |
 | Context Manager 三段分离 + snapshot 跨轮 | ✅ | `packages/agent-runtime/agent_runtime/planner/context_manager.py`（`ConversationContext` / `TaskState` / `ExecutionState`；Skill Definition 不遗忘）· 读写链 `applications/agent_server/api/query_router.py:282`（`read_thread_snapshot`；原记 `:258` 是 planner 为 None 时的 graph 兜底）→ `applications/agent_server/planners/deterministic.py:234`（`snapshot=plan.last_snapshot`）→ `packages/agent-runtime/agent_runtime/planner/protocol.py:430-431`（`runtime.last_snapshot`；原记 `:426-428` 是 usage 计量注释） |
