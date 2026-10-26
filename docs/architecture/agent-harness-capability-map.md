@@ -396,6 +396,8 @@ uv run --with ruff ruff check . && python scripts/check_doc_sync.py
 
 > 4.1–4.3 属代码内不一致，4.4 属文档与代码不一致；四条均**未改代码**，只登记事实。闭合 TODO 开项会改动该文件的计数口径，须按 `docs/TODO.md` 自己的规矩（先定义计数口径、逐条从文件生成）另行处理，本表不代作决定。
 
+> **§4 复核（2026-10-26）**：4.1–4.3 与当前树一致，无需订正——`compaction_threshold_ratio` 仍为 0.8（`applications/agent_server/config.py:69`）；`ContextBudget(model_window=32_000)` 仍在 `applications/agent_server/main.py:226`（import :202），且 main.py 全文对 `model_context_window` 零引用（唯一读点是 `applications/agent_server/context.py:35`）；`packages/agent-runtime/workflows/qa_pipeline.yaml` 的 `name:` 仍为 `search_pipeline`。4.4 已于 2026-10-14 关闭。
+
 ---
 
 ## 5. 默认关开关台账（agent_server 16 行 + 内核/身份/联邦 env 直读 16 项）
