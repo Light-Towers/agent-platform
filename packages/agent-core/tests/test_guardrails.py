@@ -147,6 +147,19 @@ def test_redact_pii_catches_digits_adjacent_to_cjk():
     assert "bank_card" in types
 
 
+def test_redact_pii_leaves_no_partial_id_digits():
+    # phone 若先匹配会吃掉身份证中间 11 位，脱敏后残留 "身份证110101[PHONE]4"
+    redacted, types = redact_pii("身份证110101199001011234")
+    assert redacted == "身份证[ID_CARD]"
+    assert "id_card" in types
+
+
+def test_redact_pii_redacts_plus86_phone_whole():
+    redacted, types = redact_pii("+8613800138000")
+    assert redacted == "[PHONE]"
+    assert types == ["phone"]
+
+
 def test_detect_pii_ignores_short_digit_runs():
     assert detect_pii("订单号12345678901234") == []
 
