@@ -16,12 +16,14 @@ from agent_core.logging import get_logger
 
 logger = get_logger(__name__)
 
+# Python 的 `\b` 把 CJK 字符也当词字符 ⇒ 中文紧邻数字时不存在边界
+# （"银行卡6222…"曾整体漏检）。数字串一律用前后 lookaround 定界，不用 `\b`。
 _PII_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("phone", re.compile(r"1[3-9]\d{9}")),
     ("email", re.compile(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}")),
-    ("id_card", re.compile(r"\b\d{15}(\d{2}[\dXx])?\b")),
-    ("bank_card", re.compile(r"\b\d{16,19}\b")),
-    ("ip_address", re.compile(r"\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b")),
+    ("id_card", re.compile(r"(?<!\d)\d{15}(?:\d{2}[\dXx])?(?!\d)")),
+    ("bank_card", re.compile(r"(?<!\d)\d{16,19}(?!\d)")),
+    ("ip_address", re.compile(r"(?<![\d.])\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(?![\d.])")),
 ]
 
 _INJECTION_PATTERNS: list[re.Pattern[str]] = [
