@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 """语义缓存共享工具：命中率统计。
 
-框架无关内核，仅依赖 stdlib。各后端（PostgreSQL / Valkey）各自实例化使用。
+框架无关内核，仅依赖 stdlib。由缓存后端在装配时各自实例化（当前唯一实现：Valkey，
+PG 实现已随 ADR-0013 C 退役）。
 """
 
 from __future__ import annotations
@@ -9,6 +10,9 @@ from __future__ import annotations
 
 class CacheStats:
     """命中率统计（asyncio 单线程语义，无需加锁）。
+
+    ``hit_rate`` 把 ``null_hit``（负缓存命中）也算作命中：它同样省掉一次后端查询。
+    要区分「答对率」与「穿透率」时读分项计数，不要只看这个比值。
 
     用法::
 

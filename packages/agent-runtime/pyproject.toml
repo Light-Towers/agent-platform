@@ -13,6 +13,9 @@ dependencies = [
     "shared-schemas",
     "pydantic>=2.13.5",
     "pydantic-settings>=2.16.1",
+    # 语义缓存唯一实现（ADR-0013 C）：Valkey 客户端进主依赖而非 optional——
+    # 缓存生产与开发测试同一条轨，缺客户端即启动期显式失败，不允许静默降级成无缓存。
+    "valkey>=6.2.0",
 ]
 
 [project.optional-dependencies]

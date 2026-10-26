@@ -20,7 +20,7 @@
 | 步骤 | 动作 | 耗时量级 |
 |---|---|---|
 | 1 | **缺口盘点先行**：列出"未实跑项"（仅 mock 覆盖、本机硬跳过、需真实 DB 的脚本），它们才是验证重点 | 分钟级 |
-| 2 | **快速门禁**：`py_compile` + `ruff` + `lint_architecture.py` + `check_doc_sync.py`（docsync 自 2026-10-04 二批起以 `git ls-files` 为判定基准，路径存在性类问题**本机即可复现**；其余仍以本机 FS/环境为依据的校验正式证据按 §2.4 在干净检出上取） | 秒级，先行拦截 |
+| 2 | **快速门禁**：`py_compile` + `ruff` + `scripts/lint_architecture.py` + `scripts/check_doc_sync.py`（docsync 自 2026-10-04 二批起以 `git ls-files` 为判定基准，路径存在性类问题**本机即可复现**；其余仍以本机 FS/环境为依据的校验正式证据按 §2.4 在干净检出上取） | 秒级，先行拦截 |
 | 3 | **最窄子集**：`uv run pytest <改动目录>/tests -q`；迭代用 `--lf`/`--ff`，收窄用 `-k`/`-m` | 十秒~分钟 |
 | 4 | **环境盲区补跑**：本机跑不了的（如 `tests/ha` 真实 PG，Windows 被 conftest 以 `sys.platform=="win32"` 硬跳过）在 Linux 容器/远程机实跑 | 视环境 |
 | 5 | **CI 等价全量**：`make test` 9 session + eval + `uv lock --check` 收口 | 十分钟级 |
@@ -65,7 +65,7 @@
 
 ### 2.4 存在性类校验的「绿」必须在干净检出上取（2026-10-04 实踩，第十条假阳性）
 
-`check_doc_sync.py` 这类门禁拿**本机文件系统**做存在性基准，而工作区里有一堆 gitignored 的脏目录
+`scripts/check_doc_sync.py` 这类门禁拿**本机文件系统**做存在性基准，而工作区里有一堆 gitignored 的脏目录
 （.codeartsdoer/、.venv/、.pytest_cache/、output/…）。文档里引用一个**只在本机存在**的目录时，
 本机 rc=0 而 CI 红（本批实踩：`ARCHITECTURE.md` 写了 .codeartsdoer/temp 的目录形，PR #65 的 `ci` 在
 `Doc sync check` 步报 `路径不存在`，而本地同命令一直绿）。⇒ **本机绿不构成证据**。
@@ -80,10 +80,10 @@ git worktree remove --force $env:TEMP\wt<sha>         # 验完回收，`git work
 
 两条约束：① **双向都要实取**——旧内容在干净树上能复现出与 CI 逐字相同的红（排除「CI 环境问题」），新内容在同一
 树上转绿（排除「改得不够」）；② 把改动文件拷进干净树时用 `Copy-Item`（按字节拷，不被编辑器改写行尾）。
-同理适用于**任何**以仓内路径存在性为依据的校验（`lint_architecture.py` 的全仓扫描、`uv lock --check` 等）：
+同理适用于**任何**以仓内路径存在性为依据的校验（`scripts/lint_architecture.py` 的全仓扫描、`uv lock --check` 等）：
 它们的本地绿都默认工作区无脏目录，而本仓不满足该默认。
 
-**2026-10-04 二批：该门的判定基准已改，取证姿势不变但结论更强**。`check_doc_sync.py` 的存在性判定从
+**2026-10-04 二批：该门的判定基准已改，取证姿势不变但结论更强**。`scripts/check_doc_sync.py` 的存在性判定从
 「本机 FS 有没有」改为「版本控制清单（`git ls-files`）里有没有」⇒ 本机脏工作树现在**与 CI 同样会红**。
 差分实取（同一脏工作树 + 同一探针行）：旧实现 rc=0 放行，新实现 rc=1 并报
 「路径未纳入版本控制 '.codeartsdoer/temp/'（本机存在但未入库：CI / 新克隆上不存在）」；
@@ -153,7 +153,7 @@ with psycopg.connect(srv.get_uri()) as c:  # 建 scratch 库、跑迁移、断�
     ...
 ```
 
-四条实测要点：
+五条实测要点：
 1. **`WindowsSelectorEventLoopPolicy` 是必需项，不是可选项**。`tests/ha/conftest.py` 在 win32
    直接 skip 的理由就是 Proactor 事件循环——它 skip 的是**事件循环**，从来不是"拿不到 PG"。
    换 Selector 后 `agent_runtime.pool_factory.create_pool` 在本机直连 pgserver 正常跑。
@@ -163,9 +163,67 @@ with psycopg.connect(srv.get_uri()) as c:  # 建 scratch 库、跑迁移、断�
 4. **它的价值在能证伪 L1**：2026-10-24 就是用这条通道实跑证伪/证实了三个阻塞项
    （42P01 连带回滚整链、23502 NULL 进 NOT NULL、42P10 ON CONFLICT 目标键不存在），
    而这些在单测里全绿。台账见 `docs/plans/plan-platform-tenant-workspace-identity-2026-10-18.md` §9.16。
+5. **也能验"配置真的接上了"**：2026-10-25 用同通道验 issue #146——
+   设 `AGENT_PLATFORM_DATABASE_URL` 后联邦 `init_pool()` 返回非 None、迁移到 v15、
+   `memories.embedding` 为 `vector(512)`、`remember_fact` → `recall_typed` 命中刚写入的事实；
+   修复前同一调用恒返回 None（配了 DSN 等于没配）。该结论已固化为
+   `applications/agent_federation/tests/test_db_integration.py`：缺 `AGENT_PLATFORM_PG_URL`
+   即 skip；本机先起 pgserver 再把其 URI 设进该变量即可跑该文件（接线回归会红，不会 skip）。
 
 **仍要用 Linux CI/126 的场景**：需要 pgvector 之外的扩展、或要验真实并发/故障转移时，
-本机进程内 PG 不够（单机单连接池），照 §3.1 容器与 `ha.yml` 的 PG service 走。
+本机进程内 PG 不够（单机单连接池），照 §3.1 容器与 `.github/workflows/ha.yml` 的 PG service 走。
+
+### 3.5 变异战役：命令、耗时、读数定性口径（2026-10-26 首跑）
+
+两件仪表，**别混**（AGENTS.md「逻辑测试靠变异杀死率」的落地件）：
+
+- `make mutation-cache` = **门禁**：手挑一批性质（条数以脚本 `MUTANTS` 为准，散文里不抄数）+ 声明式存活集合 `ENGINE_OWNED`，判据是"存活集合
+  等于声明"，可拦红绿。漂移只有两种解释（用例退化 / 用例获得了假层不具备的解释能力），都要人定性。
+- `make mutation` = **战役**：AST 算子自动展开，**分母来自代码**——手挑清单的盲区恰恰是"谁挑的、挑了什么"。
+
+自定义目标与套件的完整命令（`{python}` 由引擎换成当前解释器，省掉 uv 启动开销）：
+
+```bash
+uv run python -u scripts/mutation_engine.py \
+    --target packages/agent-runtime/agent_runtime/cache \
+    --timeout 120 \
+    --command "{python} -m pytest packages/agent-runtime/tests/test_valkey_backend_wire.py \
+        packages/agent-runtime/tests/test_cache_config.py tests/test_bench_cache_write_budget.py \
+        -q -x --no-header -p no:cacheprovider" \
+    --report .tmp-scratch/mutation-report.json
+```
+
+**战役期间工作区是"半改写"状态**，三条纪律（2026-10-26 首跑实测，读数与定性见 ADR-0013 §11 第 37–41 行）：
+
+1. **别在战役跑着时编辑或提交被检目录**——引擎就地改写源文件，而变异体是 `ast.unparse` 出来的：注释全无、行号漂移。
+   本仓是共享工作区，并行会话会把这种半成品直接提交走。
+2. **进程被硬杀时用快照还原**：开跑前引擎把原始字节抄一份到 `.tmp-scratch/mutation-snap/<target>/` 并打印 sha256；
+   正常退出 / Ctrl-C / 信号走 `atexit` + handler 还原，`Stop-Process` 这类硬杀谁都不跑。本轮实测：中途硬杀确实
+   留下了一个无注释的 `config.py`，按字节 `cp` 快照回去 + 核 sha256 即可。
+3. **`--timeout`（默认 180s）兜住单刀挂死**：超时**计为被杀**，但报告里标 `timed_out=true`——"跑挂"不等于"暴露缺陷"，
+   分诊时单独一档看。要边跑边看读数就加 `-u` 启动：stdout 重定向到文件是块缓冲，进程活着而日志 0 字节是常态。
+4. **只复跑改动过的那一个文件用 `--only <文件子串>`**：本轮实测 `--only valkey_backend` = 226 刀 ≈ 8 分钟，整目录 341 刀 ≈ 22 分钟。
+   但**两次战役之间只有 digest（变异后源码哈希）能逐刀对齐**——实现一改，分母就会漂（补 4 个计数器键就让 `disabled_backend.py`
+   从 12 刀变 20 刀），所以"几刀翻红、几刀倒退"必须由 digest 差得出，不能拿两轮的条数相减。
+5. **战役跑着时也不要改用例**（不只是别改被检目录）：引擎每下一刀都重新起一次 pytest，基线自检只在开工时跑一次。
+   中途改用例会**污染后半轮**——新加的用例让后面的刀更容易记成"被杀"，而它没参与开工时那次基线；
+   改坏了更糟：套件一红，之后每一刀都被判"被杀"，杀死率会变成纯噪声。⇒ 一轮战役是一个不可变测量，
+   要改用例就等它跑完再开新一轮（读数按 digest 对齐，两轮之间可逐刀比较）。
+
+**开工前的三道自检**（任一不过就中止，不产出杀死率）：基线套件必须绿；探针模块（`value > 3` + 四条边界
+断言）展开的变异必须**全被杀**——引擎整条是空的也会报出"杀死率 40%"，那会被误读成套件弱；
+"只 unparse、不变异"的往返对照必须绿，否则红可能是仪表造的。结束时按 sha256 核对还原（异常路径也还原）。
+
+耗时口径：每个变异重跑一遍套件。被杀通常 ~0.6s（`-x` 首个失败即停），存活要等全套跑完 ~3.5s，
+所以**一个文件几百刀 = 十几到几十分钟**，别挂进 PR 门禁；改动被测模块后或定期跑。
+
+存活体（survived）三类定性，都要人分，**不许把"套件仍绿"当"没问题"**：
+
+| 类别 | 怎么认 | 处置 |
+|---|---|---|
+| 等价/噪声 | 改完语义不变（如日志截断长度 `200→201`、平台分支 `sys.byteorder != 'little'`） | 记一句理由，不补用例 |
+| 引擎独占 | 判据依赖被调用方的解释规则（TAG 过滤串、负缓存对后续读的影响），假客户端层看不懂 | 归到真机契约层，写进 `ENGINE_OWNED` 并留契约用例（`make test-cache-contract`） |
+| 真缺口 | 该分支的行为**没有任何断言**（例：`disabled_backend` 的 stats 字典里 `0→±1` 全存活） | 补用例，然后复跑确认这一刀变 KILLED |
 
 ## 4. 已验证基线（2026-09-28 实跑快照）
 

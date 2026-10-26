@@ -20,6 +20,7 @@ from agent_runtime.identity_middleware import IdentityMiddleware
 configure_logging(fmt="%(asctime)s %(levelname)s %(name)s: %(message)s")
 from agent_runtime.admission import AdmissionQueue, RateLimiter
 from agent_runtime.admission_gateway import PgAdmissionController
+from agent_runtime.cache import close_cache, get_cache
 from agent_runtime.coordinator import SessionCoordinator
 from agent_runtime.db import close_pool, get_pool, init_pool
 from agent_runtime.mcp_client import MCPClientManager
@@ -346,6 +347,13 @@ async def lifespan(app: FastAPI):
     # liveness 连错 3 次即杀容器，而本地 embedder 的构造是同步加载模型——在探针路径里
     # 装模型等于自己造一次「探针连错三次 → 被 SIGKILL」。
     app.state.embedding_backend, app.state.embedding_real = _warm_embedding_backend()
+
+    # 语义缓存（ADR-0013 C：唯一 Valkey 实现）：启动期解析 embedder 模型/维度、探测
+    # Valkey、按需建 Search 索引。两类失败刻意分开：配置不一致（CACHE_BACKEND=pg /
+    # VALKEY_URL 非法 / CACHE_VECTOR_DIM 与 embedder.dim 冲突）抛 CacheConfigError，
+    # 启动即失败；连接不可达只 degraded + fail-open，不阻断平台启动。
+    app.state.semantic_cache = get_cache("agent_server")
+    await app.state.semantic_cache.startup()
 
     # Phase 2: 会话并发协调
     if settings.coordination_enabled:
@@ -682,6 +690,8 @@ async def lifespan(app: FastAPI):
     mcp_mgr = getattr(app.state, "mcp_manager", None)
     if mcp_mgr is not None:
         await mcp_mgr.close_all()
+    # 语义缓存：排空写队列并关闭 Valkey 连接（不持久化，退出前尽力 flush）
+    await close_cache()
     # checkpointer 复用 init_pool 的连接池（db_enabled 时 conn 即 _pool），
     # 生命周期归 close_pool() 统一管理，此处不再单独关闭连接。
     await close_pool()

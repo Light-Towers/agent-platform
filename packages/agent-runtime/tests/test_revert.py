@@ -9,7 +9,7 @@ import asyncio
 
 import pytest
 
-from agent_runtime.cache import _background_tasks
+from agent_runtime.background import _background_tasks
 from agent_runtime.revert import RevertHandler
 
 

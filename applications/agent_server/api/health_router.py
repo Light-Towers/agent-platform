@@ -29,6 +29,12 @@ async def health(request: Request) -> HealthResponse:
     # liveness 连错 3 次即杀容器 —— 在探针路径加载模型等于自己再造一次
     # 「探针连错三次 → 被 SIGKILL」。预热失败时这里降级为 unknown，仍是一条真值。
     embedding_backend = getattr(state, "embedding_backend", None) or "unknown"
+    # 语义缓存健康态：探针路径只做一次有界 ping（connect/command 超时 50/100ms），
+    # 不解析 URL、不加载 embedder（与上面同一条红线）。get_cache 返回 lifespan 已装配
+    # 的单例；若后端为 disabled，health() 直接返回 ready=true 的配置意图态。
+    from agent_runtime.cache import get_cache
+
+    cache_health = await get_cache("agent_server").health()
     return HealthResponse(
         status=status,
         version="0.1.0",
@@ -56,6 +62,9 @@ async def health(request: Request) -> HealthResponse:
         # enabled=意愿（三键非空），ready=运行态（回调真挂上了）；两者的差值就是故障信号。
         langfuse_enabled=bool(getattr(state, "langfuse_enabled", False)),
         langfuse_ready=bool(getattr(state, "langfuse_ready", False)),
+        cache_backend=cache_health.backend,
+        cache_ready=cache_health.ready,
+        cache_degraded_reason=cache_health.degraded_reason,
         auth_enabled=bool(settings.api_key),
         # 与 lifespan 的 require_identity_startup_guard 同一个函数，不另建一套判定。
         identity_mode=resolve_startup_tenant_mode()[0],

@@ -24,17 +24,50 @@ P12：禁止把 ``Depends(verify_api_key)`` 绑定的形参值当实参外流（
 L-1：禁止手动 .__enter__()/.__exit__()；L-2：禁止经 app.state 散点取用 tracer；
 L-3：观测 init 仅限装配点（三条见 plan-observability-global-remediation-2026-09-29.md §3.3）。
 L-4：OTel/langfuse 可选依赖多处声明下界必须归一（同方案，防组合解析回溯）。
+P14：语义缓存单轨（ADR-0013 C）：valkey 客户端只在适配器内导入、CACHE_* 只在
+     config.py 读取、Python 不再读写 PG semantic_cache 表、生产清单禁 pg 且必须显式 valkey。
 """
 
 from __future__ import annotations
 
 import ast
 import re
+import subprocess
 import sys
 import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+
+
+def _repo_file_listing() -> list[str] | None:
+    """门禁"被检对象"的统一枚举口径：入库 ∪ 未跟踪未忽略，取不到清单返回 None。
+
+    为什么需要单一实现：本轮之前有两处门禁各自手写"要检查哪些文件"。valkey-bundle 的
+    那一份（`_VALKEY_PIN_SITES`）漏掉了三处真实引用位而**一直绿着**——手写清单等于"我只
+    检查我已知的那些"，它绿的时候恰恰是最危险的时候（同族第二次：L-5 曾漏 agent_server）。
+    所以凡"对每个 X 断言 Y"的门禁，X 都由这里派生，显式清单只作为**下限**保留（删掉必检项
+    仍要报红），不作为上限。
+
+    `--cached --others --exclude-standard` 而不是只 `--cached`：未提交的交付件（含生产
+    Valkey 清单本身）也要被查到；gitignored 的 scratch 副本被 `--exclude-standard` 挡住，
+    否则门禁恒红 ⇒ 早晚被人关掉。取不到（无 git 的源码树）返回 None 由调用方退回显式清单。
+    """
+    try:
+        p = subprocess.run(
+            ["git", "-C", str(ROOT), "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+            capture_output=True,
+            check=False,
+        )
+    except OSError:
+        return None
+    if p.returncode != 0:
+        return None
+    return [
+        rel.strip().replace("\\", "/")
+        for rel in p.stdout.decode("utf-8", "replace").split("\0")
+        if rel.strip()
+    ]
 
 # 模式：匹配 registry.execute( 和 get_registry().execute(
 _PATTERN = re.compile(r"(?:get_registry\(\)|registry)\.execute\s*\(")
@@ -63,9 +96,9 @@ def check() -> list[str]:
     violations: list[str] = []
     for py_file in ROOT.rglob("*.py"):
         rel = py_file.relative_to(ROOT).as_posix()
-        # 跳过 .venv / __pycache__ / .ruff_cache / IDE 临时文件
-        if any(p in rel for p in (".venv", "__pycache__", ".ruff_cache", ".egg-info",
-                                   ".codeartsdoer", ".codebuddy")):
+        # 统一排除面（含 gitignored 的 .tmp-scratch / .evidence-out 台账目录）：
+        # 本机临时工作副本不是仓库内容，扫进来只会制造与提交无关的红。
+        if _skipped_rel(rel):
             continue
         if any(rel.startswith(w) or rel == w for w in _WHITELIST):
             continue
@@ -363,7 +396,8 @@ _FS_IO_WHITELIST = (
 def _skipped_rel(rel: str) -> bool:
     """扫描排除面：依赖/缓存/IDE 产物/课件示例/测试代码（与 P6 保持一致）。"""
     if any(p in rel for p in (".venv", "__pycache__", ".ruff_cache", ".egg-info",
-                              ".codeartsdoer", ".codebuddy", "courses/")):
+                              ".codeartsdoer", ".codebuddy", ".tmp-scratch", ".evidence-out",
+                              "courses/")):
         return True
     return "/tests/" in rel or rel.startswith("tests/")
 
@@ -907,11 +941,49 @@ def _normalize_dep_name(name: str) -> str:
     return re.sub(r"[-_.]+", "-", name).lower()
 
 
+def _otel_extras_candidate_sites() -> list[tuple[str, str]]:
+    """派生"声明了被跟踪观测依赖的 extras 位"，补足 `_OTEL_EXTRAS_SITES` 手写表漏掉的包。
+
+    实测漏掉的是 `applications/knowledge-service/pyproject.toml` 的 `[tracing]`：它声明
+    `opentelemetry-api>=1.45.1` / `opentelemetry-sdk>=1.45.1`，与根 `[otel]`、agent-core
+    `[tracing]` 是同一族软依赖，但 L-4 从不看它 ⇒ 那两处一旦改下界与其余三处回溯不兼容，
+    门禁仍绿。判据按**内容**（该 extra 是否声明了 `_OTEL_TRACKED_PKGS` 里的包）而不是 extra
+    名字：新起一个叫 `metrics` 的观测 extra 也该被查到。`_normalize_dep_name` 保证
+    `langchain-core` 不会被当成 `langchain`（否则 nl2sql 的 `langchain-core>=0.3` 会误入）。
+    手写表仍保留作**下限**：派生集合会随"声明消失"而缩小，光靠派生则删掉整个 `[observability]`
+    反而变绿——那是 L-4 明确要报的红，必须由显式清单守住。
+    """
+    listing = _repo_file_listing()
+    if listing is None:
+        return []
+    tracked = set(_OTEL_TRACKED_PKGS)
+    sites: list[tuple[str, str]] = []
+    for rel in listing:
+        if not rel.endswith("pyproject.toml"):
+            continue
+        path = ROOT / rel
+        try:
+            data = tomllib.loads(path.read_text(encoding="utf-8-sig"))
+        except (OSError, ValueError, tomllib.TOMLDecodeError):
+            continue  # 解析失败由 check_otel_extras_alignment 对必检位报红，这里不重复
+        extras = (data.get("project") or {}).get("optional-dependencies") or {}
+        for extra, reqs in extras.items():
+            names = {
+                _normalize_dep_name(re.split(r"[<>=!~;\[ ]", str(req), 1)[0])
+                for req in (reqs or [])
+            }
+            if names & tracked:
+                sites.append((rel, extra))
+    return sites
+
+
 def check_otel_extras_alignment() -> list[str]:
     """L-4：校验 OTel/langfuse extras 声明存在且多处下界一致。"""
     violations: list[str] = []
     declared: dict[str, list[tuple[str, str]]] = {}  # pkg -> [(site, lower)]
-    for rel, extra in _OTEL_EXTRAS_SITES:
+    required = set(_OTEL_EXTRAS_SITES)
+    sites = sorted(required | set(_otel_extras_candidate_sites()))
+    for rel, extra in sites:
         path = ROOT / rel
         try:
             with path.open("rb") as f:
@@ -1075,6 +1147,233 @@ def _credential_escape_lines(node, names: set[str]) -> list[tuple[int, str]]:
                 if isinstance(value, ast.Name) and value.id in names:
                     hits.add((sub.lineno, value.id))
     return sorted(hits)
+
+
+# ---------------------------------------------------------------------------
+# P14 语义缓存单轨门禁（ADR-0013 C）：
+#   ① valkey 客户端只能在 agent-runtime/cache/ 适配器内导入（禁止 app 层自建客户端，
+#      否则又会出现两套 TTL/隔离/失效语义）；
+#   ② CACHE_* 环境变量只允许 config.py 读取（禁止散点 os.getenv，历史缺陷正是
+#      同一开关两套默认值 + 三处裸读）；
+#   ③ Python 代码不得再读写 PG semantic_cache 表（迁移文件保留到 Stage 5 删表）；
+#   ④ 生产清单禁止 CACHE_BACKEND=pg；agent-platform 清单必须显式 valkey + Secret 注入
+#      VALKEY_URL（避免"清单没写、运行期回落"的静默分叉）。
+#   ⑤ valkey-bundle 镜像坐标：**全部**引用位必须同一个 tag，且等于 _VALKEY_BUNDLE_PIN。
+#      被检对象 = 手写三处（下限，删掉必检位的引用仍报红）∪ 按 git 清单派生的所有引用位；
+#      初版只写死三处，实测漏掉三处真实引用（含本地栈与 Langfuse 栈，两处都会 ErrImagePull），
+#      见 `_valkey_pin_candidate_sites` 的注记。
+#   ⑥ 缓存后端只能在工厂构造：应用层出现 `ValkeySemanticCache(`/`DisabledSemanticCache(`
+#      调用形即红。这条守的是"全局装配"那一层——AGENTS.md 要求横切关注点三层齐备
+#      （单一实现 + 全局装配 + 强制门禁），① 只保证单一实现存在，并不保证大家用它。
+# ---------------------------------------------------------------------------
+# ⑤ 的 pin = valkey/valkey-bundle:9.1.2。**取证来源是真机，不是 git 标签列表。**
+# 反例（我自己踩的，2026-10-26）：我曾用 GitHub 的 release/tag 列表（只到 9.0.1）推断
+# "bundle 没发过 9.1.x ⇒ 现网上线即 ErrImagePull"，据此把六处坐标改成 9.0.1。该结论已被
+# 测试机 <internal-node-01> 推翻：`lf-valkey` 容器用 `valkey/valkey-bundle:9.1.2` **健康运行 12 天**，
+# 实例 `valkey_version:9.1.1`，`MODULE LIST` 里 `search ver=66049` ⇒ 按 (major<<16)|(minor<<8)|patch
+# 解出 **1.2.1**。git 标签与 Docker 镜像标签是两个独立命名空间，前者不构成后者存在的证据。
+# ⇒ 判"某镜像坐标在不在"只有两种合法取证：`docker images`/`docker inspect`（现场）或
+#   registry API（本机房与本机都连不上 Docker Hub，curl 空返回，所以现场取证是唯一通路）。
+# 该坐标的 L2 特性面已按真机逐项验到（CASESENSITIVE / DIALECT 2 / FT.INFO 的 state、
+# hash_indexing_failures、num_docs / KNN `AS distance` / 键空间订阅），读数与出处记在
+# ADR-0013 §9「真机取证」条；另按 1.0.2 源码核对过一版，两代措辞都进了自愈谓词与参数化用例。
+# 升 pin 时这张清单要按新 ref 重取：特性可能在但**行号与报错措辞会漂移**，且分支文档
+# 沉默不等于特性缺失（1.0 分支文档就没写 CASESENSITIVE，真去 grep 源码是有的）。
+_VALKEY_BUNDLE_PIN = "valkey/valkey-bundle:9.1.2"
+_VALKEY_IMAGE_REF = re.compile(r"valkey/valkey-bundle:[A-Za-z0-9._-]+")
+# 派生扫描只收这些后缀（"可执行"= 会被容器/CI 真读的配置面）；*.md 故意排除。
+_VALKEY_PIN_SCAN_SUFFIXES = frozenset({"yml", "yaml", "toml", "ini", "env", "sh", "py"})
+_VALKEY_PIN_SITES = (
+    ".github/workflows/agent-platform-ci.yml",
+    "applications/agent_federation/docker-compose.yml",
+    "deploy/k8s/15-valkey.yaml",
+)
+_CACHE_ADAPTER_PREFIX = "packages/agent-runtime/agent_runtime/cache/"
+_CACHE_ENV_ALLOWED = f"{_CACHE_ADAPTER_PREFIX}config.py"
+_CACHE_MIGRATIONS_PREFIX = "packages/agent-runtime/agent_runtime/migrations/"
+_CACHE_VALKEY_IMPORT = re.compile(r"^\s*(?:import\s+valkey\b|from\s+valkey\b)", re.MULTILINE)
+# ⑥ 后端构造位只允许在工厂（`factory.get_cache`）。判据只认**调用形** `名字(`：
+# 只 import 类名不算违规（测试与类型标注需要它）。docstring 里写成调用形会误报——
+# 那是本仓 P 系列文本判据的既有代价，把说明写成"ValkeySemanticCache 类"即可。
+_CACHE_BACKEND_CONSTRUCTION = re.compile(r"\b(?:ValkeySemanticCache|DisabledSemanticCache)\s*\(")
+_CACHE_APP_PREFIX = "applications/"
+_CACHE_BARE_ENV = re.compile(
+    r"(?:os\.getenv|os\.environ\.get)\(\s*[\"']CACHE_[A-Z0-9_]*[\"']"
+)
+_CACHE_PG_SQL = re.compile(
+    r"\b(?:FROM|INTO|UPDATE|TABLE(?:\s+IF\s+(?:NOT\s+)?EXISTS)?)\s+semantic_cache\b",
+    re.IGNORECASE,
+)
+_CACHE_MANIFEST_PG = re.compile(r"CACHE_BACKEND\s*[:=]\s*[\"']?pg\b", re.IGNORECASE)
+# k8s env 条目形状：- name: CACHE_BACKEND 换行 value: "pg"（前导 ``-`` 允许缺省，
+# 兼容缩进列表里的裸 name: 片段，避免只认一种书写形状而漏判）
+_CACHE_MANIFEST_PG_ENV = re.compile(
+    r"(?:-\s*)?name:\s*CACHE_BACKEND\s*\n\s*value:\s*[\"']?pg[\"']?\s*$",
+    re.MULTILINE | re.IGNORECASE,
+)
+
+
+def _cache_py_violation(rel: str, text: str) -> list[str]:
+    """单文件判定（抽出以便正反例单测）。"""
+    violations: list[str] = []
+    if _CACHE_VALKEY_IMPORT.search(text) and not rel.startswith(_CACHE_ADAPTER_PREFIX):
+        violations.append(
+            f"{rel}: valkey 客户端只能在 {_CACHE_ADAPTER_PREFIX} 内导入"
+            "（ADR-0013 C 单一实现；app 层自建客户端会复制隔离/TTL/失效语义）"
+        )
+    if _CACHE_BARE_ENV.search(text) and rel != _CACHE_ENV_ALLOWED:
+        violations.append(
+            f"{rel}: 裸读 CACHE_* 环境变量（统一经 agent_runtime.cache.config，"
+            "禁止第二套默认值）"
+        )
+    if _CACHE_PG_SQL.search(text) and not rel.startswith(_CACHE_MIGRATIONS_PREFIX):
+        violations.append(
+            f"{rel}: 出现 PG semantic_cache 表 SQL（ADR-0013 C 已退役；"
+            "迁移文件保留至 Stage 5 删表）"
+        )
+    if rel.startswith(_CACHE_APP_PREFIX) and _CACHE_BACKEND_CONSTRUCTION.search(text):
+        violations.append(
+            f"{rel}: 应用层直接构造缓存后端（必须经 agent_runtime.cache.get_cache）"
+            "——工厂是唯一装配点：绕过它就拿不到 _BACKENDS 单例、close_cache 退出钩子"
+            "与 /health 的 backend 读数，PII 写侧门禁虽在，但那份后端不在任何观测面上"
+        )
+    return violations
+
+
+def _cache_manifest_violation(rel: str, text: str) -> list[str]:
+    """生产清单判定：禁 pg + 关键清单必须显式 valkey 与 Secret 注入。
+
+    只看非注释行：清单正文常写"禁止 CACHE_BACKEND=pg"这类说明，注释不是生效配置。
+    """
+    code = "\n".join(line for line in text.splitlines() if not line.lstrip().startswith("#"))
+    violations: list[str] = []
+    if _CACHE_MANIFEST_PG.search(code) or _CACHE_MANIFEST_PG_ENV.search(code):
+        violations.append(f"{rel}: CACHE_BACKEND=pg 已退役（ADR-0013 C 只允许 valkey/disabled）")
+    if rel == "deploy/k8s/20-agent-platform.yaml":
+        if not re.search(
+            r"-\s*name:\s*CACHE_BACKEND\s*\n\s*value:\s*[\"']valkey[\"']", code
+        ):
+            violations.append(
+                f"{rel}: 生产清单必须显式 CACHE_BACKEND: \"valkey\"（不得依赖默认值）"
+            )
+        if not re.search(r"-\s*name:\s*VALKEY_URL\s*\n\s*valueFrom:", code):
+            violations.append(
+                f"{rel}: VALKEY_URL 必须从 Secret 注入（valueFrom.secretKeyRef）"
+            )
+    if rel == "docker-compose.yml" and not re.search(
+        r"CACHE_BACKEND:\s*[\"']?valkey[\"']?\s*$", code, re.MULTILINE
+    ):
+        violations.append(f"{rel}: 开发/测试 compose 也必须 CACHE_BACKEND: valkey（单一轨道）")
+    return violations
+
+
+def check_cache_single_track() -> list[str]:
+    """扫全仓 Python + 生产清单，落实 ADR-0013 C 的单轨不变量。"""
+    violations: list[str] = []
+    for rel, py_file in _iter_scanned_py_files():
+        try:
+            text = py_file.read_text(encoding="utf-8-sig")
+        except (OSError, ValueError) as exc:
+            violations.append(f"{rel}: 无法读取（{exc}）")
+            continue
+        violations.extend(_cache_py_violation(rel, text))
+
+    manifests = [ROOT / "docker-compose.yml"]
+    manifests.extend(sorted((ROOT / "deploy").rglob("*.y*ml")))
+    for path in manifests:
+        if not path.is_file():
+            continue
+        rel = path.relative_to(ROOT).as_posix()
+        try:
+            text = path.read_text(encoding="utf-8-sig")
+        except (OSError, ValueError) as exc:
+            violations.append(f"{rel}: 无法读取（{exc}）")
+            continue
+        violations.extend(_cache_manifest_violation(rel, text))
+
+    valkey_manifest = ROOT / "deploy" / "k8s" / "15-valkey.yaml"
+    if not valkey_manifest.is_file():
+        violations.append("deploy/k8s/15-valkey.yaml 缺失（生产清单必须包含专用 Valkey）")
+    else:
+        text = valkey_manifest.read_text(encoding="utf-8-sig")
+        if "valkey/valkey-bundle" not in text:
+            violations.append(
+                "deploy/k8s/15-valkey.yaml: 必须使用 valkey-bundle 镜像（L2 依赖 Search 模块）"
+            )
+    violations.extend(_cache_bundle_pin_violations())
+    return violations
+
+
+def _valkey_pin_candidate_sites() -> list[str]:
+    """从**版本控制清单**派生"可能承载镜像坐标"的入库文件，补足手写表覆盖不到的位。
+
+    为什么必须派生而不是列举：`_VALKEY_PIN_SITES` 初版只列了三处，改 pin 时我以为"三处"就是
+    全部，结果派生一跑就多捞出两处表外的镜像坐标位——
+    `docker-compose.yml`（本地/开发栈，valkey 的 healthcheck 是 agent-platform 的 depends_on
+    前置 ⇒ 镜像拉不到整套栈起不来）与 `deploy/observability/docker-compose.langfuse.yml`
+    （valkey 是 langfuse 的 service_healthy 前置 ⇒ 整条观测链起不来）。
+    "门禁自己数错了被检对象"是本仓反复复发的形状，所以这里不靠人记得加行。
+
+    口径统一走 `_repo_file_listing()`（入库 ∪ 未跟踪未忽略；只取 `--cached` 会连"生产 Valkey
+    清单本身还没入库"这一处都扫不到）。
+    只收"可执行"后缀，`*.md` 一律排除：文档里的版本号是叙述，混进来门禁就变成措辞警察。
+    取不到清单返回 []（调用方退回手写表）——这一票不 fail-closed 报红，因为脱离 git 的环境
+    （容器里只有源码树）会把 P14 变成恒红；生产路径已由手写表覆盖，派生是"多加一层网"。
+    """
+    listing = _repo_file_listing()
+    if listing is None:
+        return []
+    sites: list[str] = []
+    for rel in listing:
+        if not rel:
+            continue
+        name = rel.rsplit("/", 1)[-1]
+        if "." not in name:
+            continue
+        if name.rsplit(".", 1)[-1].lower() not in _VALKEY_PIN_SCAN_SUFFIXES:
+            continue
+        if rel == "scripts/lint_architecture.py":
+            # 本文件是 pin 的**定义处**不是使用处：把它扫进来等于"改一条注释会改变门禁行为"，
+            # 自指没必要冒这个险。
+            continue
+        path = ROOT / rel
+        if not path.is_file():
+            continue
+        if _VALKEY_IMAGE_REF.search(path.read_text(encoding="utf-8-sig", errors="replace")):
+            sites.append(rel)
+    return sites
+
+
+def _cache_bundle_pin_violations(extra_sites: list[str] | None = None) -> list[str]:
+    """⑤ valkey-bundle 坐标一致且等于实取过的 pin。
+
+    扫描集合 = 三处必检位（CI service / 联邦 compose / 生产清单，缺一即红）
+    ∪ 由 git 清单派生的全部"引用了 bundle 的可执行入库文件"（见 `_valkey_pin_candidate_sites`）。
+    `extra_sites` 只为测试注入派生结果（临时目录里没有 git，派生恒空）；生产路径不传。
+    不扫文档。真实缺陷是"从规划文档抄了个没发布过的 tag，多处一起错"，一致性本身防不住那次，
+    所以 pin 旁边写死来源，改动时必须重新实取（见 _VALKEY_BUNDLE_PIN 上方注记）。
+    """
+    violations: list[str] = []
+    required = set(_VALKEY_PIN_SITES)
+    derived = set(extra_sites) if extra_sites is not None else set(_valkey_pin_candidate_sites())
+    scanned = sorted(required | derived)
+    for rel in scanned:
+        path = ROOT / rel
+        if not path.is_file():
+            violations.append(f"{rel}: P14 要求的 bundle 引用位缺失")
+            continue
+        found = _VALKEY_IMAGE_REF.findall(path.read_text(encoding="utf-8-sig"))
+        if not found:
+            if rel in required:
+                violations.append(f"{rel}: 未出现 {_VALKEY_BUNDLE_PIN.split(':')[0]} 引用")
+            continue
+        for ref in dict.fromkeys(found):
+            if ref != _VALKEY_BUNDLE_PIN:
+                violations.append(
+                    f"{rel}: 镜像坐标 {ref} != 已实取的 {_VALKEY_BUNDLE_PIN}"
+                    "（升 pin 需先按新 ref 重取 ADR-0013 §9「pin 的模块兼容性实取」那张清单）"
+                )
+    return violations
 
 
 def check_credential_param_escape() -> list[str]:
@@ -1276,6 +1575,19 @@ def main() -> int:
         rc = 1
     else:
         print("L-4 依赖契约通过：OTel/langfuse extras 声明齐备且下界一致")
+
+    v17 = check_cache_single_track()
+    if v17:
+        print("P14 语义缓存单轨违反（ADR-0013 C）：valkey 客户端/配置读取/PG 旧表/生产清单出现第二轨")
+        print("修复：实现只在 agent_runtime/cache/，配置只经 cache/config.py，生产清单显式 CACHE_BACKEND=valkey：")
+        for v in v17:
+            print(f"  {v}")
+        rc = 1
+    else:
+        print(
+            "P14 语义缓存单轨通过：单一 Valkey 实现 + 配置单点 + PG 旧 SQL 零再现 + "
+            "清单显式 valkey + bundle 镜像坐标一致（" + _VALKEY_BUNDLE_PIN + "）"
+        )
     return rc
 
 

@@ -51,6 +51,23 @@ permissions:
 jobs:
   ci:
     runs-on: ubuntu-latest
+    # 语义缓存契约（ADR-0013 C）必须对真 Valkey 跑：bundle 镜像含 Search 模块。
+    # 仅当服务可达时契约用例才执行；CACHE_CONTRACT_REQUIRED=1 保证"没跑"不会静默变绿。
+    # tag 真值取自测试机现场读数，不是 git 标签列表：内网主机上跑着的 lf-valkey 就是
+    # valkey/valkey-bundle:9.1.2（valkey_version:9.1.1 + search 模块 1.2.1），
+    # 且同 tag 在另一台上有 repo digest ⇒ Docker Hub 上确实拉得到。
+    # 取证过程与坐标来源见 docs/adr/0013-semantic-cache-single-track.md §9；
+    # 三处 pin 由 lint_architecture P14 强制一致。
+    services:
+      valkey:
+        image: valkey/valkey-bundle:9.1.2
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "valkey-cli ping"
+          --health-interval 3s
+          --health-timeout 2s
+          --health-retries 20
     steps:
       - uses: actions/checkout@v7
       - name: Install uv
@@ -63,5 +80,10 @@ jobs:
         run: make install
       - name: CI gate (lint + unit tests + heuristic eval)
         run: make ci
+      - name: Semantic cache contract (real Valkey + Search)
+        env:
+          VALKEY_URL: redis://127.0.0.1:6379/0
+          CACHE_CONTRACT_REQUIRED: "1"
+        run: make test-cache-contract
       - name: Doc sync check
         run: uv run python scripts/check_doc_sync.py

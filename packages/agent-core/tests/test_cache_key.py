@@ -1,9 +1,9 @@
-"""BaseSemanticCache 契约与 build_cache_key 单一真相测试（TB-4）。"""
+"""SemanticCacheBackend 契约与 build_cache_key 单一真相测试（TB-4 / ADR-0013 C）。"""
 
 import hashlib
 import json
 
-from agent_core.cache import BaseSemanticCache, build_cache_key
+from agent_core.cache import SemanticCacheBackend, build_cache_key
 
 
 class TestBuildCacheKey:
@@ -44,20 +44,74 @@ class TestBuildCacheKey:
         k = build_cache_key("refund", "q")
         assert isinstance(k, str) and len(k) == 64
 
+    def test_scope_model_dim_partition_the_key(self):
+        """ADR-0013 C：key 命名空间含 scope/模型/维度，换模型即换 key（旧值自然不可达）。"""
+        base = build_cache_key("refund", "q", {}, "t1", 0.0, scope="agent_server")
+        other_scope = build_cache_key("refund", "q", {}, "t1", 0.0, scope="federation")
+        model_a = build_cache_key(
+            "refund", "q", {}, "t1", 0.0, scope="agent_server", embedding_model="bge-m3", dim=1024
+        )
+        model_b = build_cache_key(
+            "refund", "q", {}, "t1", 0.0, scope="agent_server", embedding_model="bge-small", dim=512
+        )
+        assert len({base, other_scope, model_a, model_b}) == 4
+        assert base == build_cache_key("refund", "q", {}, "t1", 0.0, scope="agent_server")
 
-class TestBaseSemanticCacheProtocol:
+
+class _ConformingBackend:
+    enabled = True
+
+    async def get(self, **_kwargs):
+        return None
+
+    async def set(self, **_kwargs):
+        return None
+
+    async def set_negative(self, **_kwargs):
+        return None
+
+    async def invalidate(self, **_kwargs):
+        return None
+
+    async def invalidate_namespace(self, **_kwargs):
+        return None
+
+    async def flush(self):
+        return None
+
+    async def health(self):
+        from agent_core.cache import CacheHealth
+
+        return CacheHealth(backend="x", ready=True)
+
+    async def aclose(self):
+        return None
+
+    def get_stats(self):
+        return {}
+
+    def reset_stats(self) -> None:
+        return None
+
+
+class TestSemanticCacheBackendProtocol:
     def test_runtime_checkable_on_conforming_class(self):
-        class Impl:
+        assert isinstance(_ConformingBackend(), SemanticCacheBackend)
+
+    def test_runtime_checkable_rejects_non_conforming(self):
+        class Bad:
+            pass
+
+        assert not isinstance(Bad(), SemanticCacheBackend)
+
+    def test_partial_implementation_is_rejected(self):
+        """只实现统计接口的旧式对象不再满足契约（缺少 get/set/health 等能力）。"""
+
+        class StatsOnly:
             def get_stats(self):
                 return {}
 
             def reset_stats(self) -> None:
                 return None
 
-        assert isinstance(Impl(), BaseSemanticCache)
-
-    def test_runtime_checkable_rejects_non_conforming(self):
-        class Bad:
-            pass
-
-        assert not isinstance(Bad(), BaseSemanticCache)
+        assert not isinstance(StatsOnly(), SemanticCacheBackend)

@@ -96,6 +96,14 @@ _REGISTRY: dict[str, str] = {
         "126/241/125 内网环境事实基线（真实网段、主机名、运维机出口 IP）——"
         "内网侧工作产物；**推公开镜像前必须按 --mask-plan 脱敏并在文首留注记**"
     ),
+    "deploy/k8s/15-valkey.yaml": (
+        "生产 Valkey 清单的 pin 取证注释：记录真机镜像与模块版本读数（含测试机名/网段），"
+        "属内网侧证据链；**推公开镜像前必须按 --mask-plan 脱敏**，不得带真实坐标"
+    ),
+    "docs/adr/0013-semantic-cache-single-track.md": (
+        "ADR 的一手真机取证记录：坐标就是证据来源，改成占位符会让「读数在哪台机器上取得」不可复核——"
+        "**推公开镜像前必须按 --mask-plan 脱敏并在文首留注记**"
+    ),
 }
 
 _SKIP_PATH_HINTS = ("/tests/", "/eval/", "tests/")

@@ -65,6 +65,18 @@ spec:
               value: "default"
             - name: DEPLOY_ENFORCE_IDENTITY
               value: "true"
+            # ---- 语义缓存（ADR-0013 C）：唯一后端 Valkey，禁止 CACHE_BACKEND=pg ----
+            # VALKEY_URL 从 Secret 注入（可能含口令）；日志/health 统一脱敏。
+            # 连接不可达时 fail-open（请求照常、health 报 degraded），不阻断平台启动。
+            - name: CACHE_ENABLED
+              value: "true"
+            - name: CACHE_BACKEND
+              value: "valkey"
+            - name: VALKEY_URL
+              valueFrom:
+                secretKeyRef:
+                  name: agent-platform-secrets
+                  key: VALKEY_URL
             - name: LLM_BASE_URL
               valueFrom:
                 configMapKeyRef:

@@ -23,6 +23,8 @@ NEW_FIELDS = (
     "guard_enabled", "auth_enabled", "identity_mode",
     # Langfuse 两盏灯（方案 plan-langfuse-wiring §2.2）：enabled=配置意愿，ready=真装配。
     "langfuse_enabled", "langfuse_ready",
+    # 语义缓存（ADR-0013 C）：backend=实际后端，ready=连得上，reason=降级原因（已脱敏）。
+    "cache_backend", "cache_ready", "cache_degraded_reason",
 )
 
 _SWITCHES = (
@@ -31,20 +33,36 @@ _SWITCHES = (
     "LLM_API_KEY", "LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY", "LANGFUSE_HOST",
     "COST_GOVERNANCE_ENABLED",
 )
+_CACHE_ENV = ("CACHE_ENABLED", "CACHE_BACKEND", "VALKEY_URL",
+              "CACHE_CONNECT_TIMEOUT_MS", "CACHE_COMMAND_TIMEOUT_MS")
 
 
 @pytest.fixture(autouse=True)
 def _clean_switch_env():
-    """用例前后都清 env + 清 settings 缓存，避免 lru_cache 与 env 跨用例泄漏。"""
+    """用例前后都清 env + 清 settings/缓存配置单例，避免跨用例泄漏。
+
+    缓存默认 ``disabled``：这些用例验的是装配态，不应依赖本机有没有 Valkey。
+    需要真后端行为的用例自行覆盖 ``CACHE_BACKEND``/``VALKEY_URL``。
+    """
     import os
 
-    for key in _SWITCHES:
+    for key in (*_SWITCHES, *_CACHE_ENV):
         os.environ.pop(key, None)
+    os.environ["CACHE_BACKEND"] = "disabled"
     _clear_cache()
+    _reset_cache()
     yield
-    for key in _SWITCHES:
+    for key in (*_SWITCHES, *_CACHE_ENV):
         os.environ.pop(key, None)
     _clear_cache()
+    _reset_cache()
+
+
+def _reset_cache() -> None:
+    from agent_runtime.cache import reset_cache_config, reset_cache_for_tests
+
+    reset_cache_config()
+    reset_cache_for_tests()
 
 
 def _clear_cache() -> None:
@@ -54,12 +72,19 @@ def _clear_cache() -> None:
 
 
 def _health_with(monkeypatch, **env) -> dict:
-    """设 env → 清缓存 → 起一遍 lifespan → 取 /health。"""
+    """设 env → 清缓存 → 起一遍 lifespan → 取 /health。
+
+    本文件的缓存用例默认以 ``CACHE_BACKEND=disabled`` 运行（不依赖本机 Valkey）；
+    要验 valkey 形态就在 ``env`` 里显式传 ``CACHE_BACKEND="valkey"`` 与不可达的
+    ``VALKEY_URL``。
+    """
     for key in _SWITCHES:
         monkeypatch.delenv(key, raising=False)
+    env.setdefault("CACHE_BACKEND", "disabled")
     for key, value in env.items():
         monkeypatch.setenv(key, value)
     _clear_cache()
+    _reset_cache()
     with TestClient(app) as client:
         return client.get("/health").json()
 
@@ -78,6 +103,37 @@ class TestHealthFieldShape:
             data = client.get("/health").json()
         for key in NEW_FIELDS:
             assert key in data, f"/health 缺字段 {key}"
+
+
+class TestCacheHealth:
+    """ADR-0013 C：/health 必须如实报缓存后端与降级原因，且不泄漏凭据。"""
+
+    def test_disabled_backend_is_ready_without_reason(self, monkeypatch):
+        data = _health_with(monkeypatch, CACHE_BACKEND="disabled")
+        assert data["cache_backend"] == "disabled"
+        assert data["cache_ready"] is True
+        assert data["cache_degraded_reason"] is None
+
+    def test_enabled_false_wins_over_valkey(self, monkeypatch):
+        data = _health_with(
+            monkeypatch, CACHE_ENABLED="false", CACHE_BACKEND="valkey"
+        )
+        assert data["cache_backend"] == "disabled"
+        assert data["cache_ready"] is True
+
+    def test_unreachable_valkey_reports_degraded_without_password(self, monkeypatch):
+        password = "probe-cache-password-must-not-appear"
+        data = _health_with(
+            monkeypatch,
+            CACHE_BACKEND="valkey",
+            VALKEY_URL=f"redis://:{password}@127.0.0.1:1/0",
+            CACHE_CONNECT_TIMEOUT_MS="20",
+            CACHE_COMMAND_TIMEOUT_MS="20",
+        )
+        assert data["cache_backend"] == "valkey"
+        assert data["cache_ready"] is False
+        assert data["cache_degraded_reason"], "降级必须有原因"
+        assert password not in data["cache_degraded_reason"]
 
 
 class TestHealthReflectsRuntimeState:

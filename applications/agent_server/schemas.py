@@ -157,6 +157,13 @@ class HealthResponse(BaseHealthResponse):
     langfuse_ready: bool = Field(
         False, description="启动期 LLM 回调是否真装配成功（false 且 enabled=true ⇒ 配了但没接上，多为镜像未装客户端包）"
     )
+    # 语义缓存（ADR-0013 C）：backend 是实际后端名（valkey/disabled），ready 是运行态真值。
+    # degraded_reason 已脱敏（不含 VALKEY_URL）；三者分开报，避免把"关了"与"坏了"合成一盏灯。
+    cache_backend: str | None = Field(None, description="语义缓存实际后端：valkey / disabled")
+    cache_ready: bool = Field(False, description="缓存后端当前是否可用（backend=valkey 且 false ⇒ 降级运行）")
+    cache_degraded_reason: str | None = Field(
+        None, description="缓存降级原因（已脱敏，不含连接串口令）；ready=true 时为 null"
+    )
     auth_enabled: bool = Field(False, description="接口是否要求 X-API-Key（不回显密钥）")
     identity_mode: str | None = Field(
         None, description="租户身份模式：jwt / single / insecure（与启动守卫同一判定）"

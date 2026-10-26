@@ -25,7 +25,6 @@ def _make_settings():
     s = Settings()
     s.coordination_enabled = False
     s.admission_enabled = False
-    s.cache_enabled = False
     s.scheduler_enabled = False
     return s
 

@@ -51,7 +51,7 @@ Agent Platform 是一个基于 **LangGraph Supervisor 模式** 的统一智能�
 - **混合检索 RAG**（`applications/agent_server/subagents/rag.py` + `applications/agent_server/rag/`）：文档导入 → 语义切分 → pgvector 向量检索 + BM25 关键词检索 → RRF 融合排序
 - **Text-to-SQL**（`applications/agent_server/subagents/sql_agent.py` + `applications/agent_server/sql/`）：训练三件套（DDL + 业务文档 + 问题-SQL 范例）→ sqlglot 白名单守卫 → 连接级只读执行
 - **长期记忆**（`applications/agent_server/memory/longterm.py`）：pgvector 语义召回历史对话，跨会话上下文关联
-- **语义缓存**（`packages/agent-runtime/agent_runtime/cache.py`）：余弦距离阈值判定同义命中，命中时跳过编排直接返回
+- **语义缓存**（`packages/agent-runtime/agent_runtime/cache/`）：Valkey L1 精确 + L2 向量（HNSW/COSINE，按余弦距离阈值判定）+ 负缓存；开发/测试与生产同一实现（ADR-0013 C），后端不可达时 fail-open（按未命中处理）并在 `/health` 报 degraded
 - **上下文压缩**（`applications/agent_server/agent/compact.py`）：多轮会话 token 超阈值时自动摘要旧消息，参考 Claude Code / Codex / OpenCode
 - **熔断器**（`packages/agent-runtime/agent_runtime/circuit_breaker.py`）：closed → open → half-open 状态机，连续失败达阈值后熔断，冷却窗口到期放行试探
 - **LLM 主备降级**（`applications/agent_server/agent/llm.py`）：主模型超时/错误时自动切换 fallback 模型
@@ -65,7 +65,7 @@ Agent Platform 是一个基于 **LangGraph Supervisor 模式** 的统一智能�
 - **会话并发协调**（`packages/agent-runtime/agent_runtime/coordinator.py`）：per-session `asyncio.Lock` 互斥，同 session 串行 / 异 session 并发；支持 queue（排队）/ reject（拒绝）二策略（原第三种 coalesce 已退化为 queue、名不副实，治理路线图工项 P4-3 于 2026-08-21 把它从策略枚举中移除——**是代码改动，不是 lint 规则**）
 - **Durable Admission**（`packages/agent-runtime/agent_runtime/admission.py`）：PG 持久化准入队列 + 三维滑动窗口限流（per-user / per-session / global）+ 优先级调度 + 崩溃恢复；不存储问题全文（脱敏约束）
 - **会话回退**（`packages/agent-runtime/agent_runtime/revert.py`）：Checkpoint 级原子回退，不删除历史 checkpoint（支持 redo），异步审计日志（`operator` 取服务端断言租户，不取入站密钥）。⚠️ **跨用户回退目前并未被禁止**：本模块 docstring 里那句"跨用户禁止"没有实现——`/session/revert` 不走 `resolve_thread_id`，客户端传来的会话号原样进 `revert()`，且从不与归属比对（路由里 `FORBIDDEN`→403 那条分支是死码）。修法见 `docs/plans/plan-memory-identity-workspace-2026-10-14.md` §1.6（2026-10-15 核码订正）
-- **OTel 分布式追踪**（`packages/agent-core/agent_core/tracing.py` 内核状态机 + `tracing_middleware.py` 统一装配）：三态语义（DISABLED/DEGRADED/ACTIVE），W3C traceparent 透传，**自建链路属性**脱敏（只记问题长度 + 哈希；⚠️ 范围限定——LangChain 自动埋点的模型节点 span 仍带完整提示词与回答，该暴露已拍板接受，见 `docs/operations/minimal-release-runbook.md` 台账 ㉓），与 Langfuse 共存，exporter 可插拔（otlp/console/注入式）；原 `agent_runtime/otel.py` 过渡门面已退役（观测方案 §15，2026-09-30），消费方直调 kernel
+- **OTel 分布式追踪**（`packages/agent-core/agent_core/tracing.py` 内核状态机 + `packages/agent-core/agent_core/tracing_middleware.py` 统一装配）：三态语义（DISABLED/DEGRADED/ACTIVE），W3C traceparent 透传，**自建链路属性**脱敏（只记问题长度 + 哈希；⚠️ 范围限定——LangChain 自动埋点的模型节点 span 仍带完整提示词与回答，该暴露已拍板接受，见 `docs/operations/minimal-release-runbook.md` 台账 ㉓），与 Langfuse 共存，exporter 可插拔（otlp/console/注入式）；原 `agent_runtime/otel.py` 过渡门面已退役（观测方案 §15，2026-09-30），消费方直调 kernel
 - **MCP Client**（`packages/agent-runtime/agent_runtime/mcp_client.py` + `applications/agent_server/subagents/mcp.py`）：多 MCP server 连接管理（stdio + SSE transport），工具白名单校验，per-server 独立熔断器隔离故障域，调用审计
 - **MCP 工具自动注册**（`packages/agent-runtime/agent_runtime/skills/mcp.py`）：MCP server 工具自动编译为 `SkillKind.REMOTE` Skill 注册到 SkillRegistry，Planner 经统一 `discover()` / `delegate()` 入口调用
 - **沙箱代码执行**（`packages/agent-runtime/agent_runtime/sandbox.py` + `agent_runtime/skills/sandbox.py`）：Docker 容器隔离执行用户代码（`--network=none --read-only --memory=512m --user=nobody`），Docker 不可用时降级 subprocess。注册为 `code_execution` Skill，Planner 启发式路由自动识别代码执行意图
@@ -82,11 +82,11 @@ Agent Platform 是一个基于 **LangGraph Supervisor 模式** 的统一智能�
 > 本区块能力均已实现并可经配置开启，但 **`scheduler_enabled` 默认 `False`**（见「配置」章节）；端到端双实例物理故障转移验收未完成，具体缺口清单见 [`docs/TODO.md`](docs/TODO.md) 第 2 节，不得当作已上线能力对外声明。
 
 - **ExecutionScheduler**（`packages/agent-runtime/agent_runtime/execution_scheduler.py`）：PG 队列 + `FOR UPDATE SKIP LOCKED` 实现跨实例并发不重不丢；`submit` 实际入队 + `claim_token` fencing（P0-1 并发门控已修）
-- **ExecutionStatus 状态机**（`execution_status.py`）：PENDING / RUNNING / WAITING / WAITING_EXTERNAL / WAITING_HUMAN / PAUSED / CANCEL_REQUESTED / CANCELLED / SUCCEEDED / FAILED 十态与合法转换矩阵，非法转换拒绝
-- **AwaitableTask 挂起 + 回调恢复**（`awaitable_task.py` + `awaitable_task_pg.py` + `applications/agent_server/api/callback.py`）：执行链在外部异步任务处可挂起，外部系统回调 `POST /api/callback/{task_id}` 后从 checkpoint 恢复注入结果继续执行（幂等，重复回调 no-op）
-- **Control Plane HTTP API**（`control_plane.py` + `applications/agent_server/api/control.py`）：`/api/executions/{id}` 提供 inspect/pause/resume/cancel/retry/terminate 六个操作，非法状态转换返 409
-- **Cost Governance**（`cost_governance.py`）：按 `budget_limit_requests/tokens/cost` + `budget_window_seconds` 滑动窗口计量，超限返回 429（`cost_governance_enabled` 默认 `False`）
-- **ForensicContext + SchedulerReaper**（`forensic.py` + lease-based 回收）：执行现场取证快照 + 本地任务租约过期后的孤儿回收
+- **ExecutionStatus 状态机**（`packages/agent-runtime/agent_runtime/execution_status.py`）：PENDING / RUNNING / WAITING / WAITING_EXTERNAL / WAITING_HUMAN / PAUSED / CANCEL_REQUESTED / CANCELLED / SUCCEEDED / FAILED 十态与合法转换矩阵，非法转换拒绝
+- **AwaitableTask 挂起 + 回调恢复**（`packages/agent-runtime/agent_runtime/awaitable_task.py` + `packages/agent-runtime/agent_runtime/awaitable_task_pg.py` + `applications/agent_server/api/callback.py`）：执行链在外部异步任务处可挂起，外部系统回调 `POST /api/callback/{task_id}` 后从 checkpoint 恢复注入结果继续执行（幂等，重复回调 no-op）
+- **Control Plane HTTP API**（`packages/agent-runtime/agent_runtime/control_plane.py` + `applications/agent_server/api/control.py`）：`/api/executions/{id}` 提供 inspect/pause/resume/cancel/retry/terminate 六个操作，非法状态转换返 409
+- **Cost Governance**（`packages/agent-runtime/agent_runtime/cost_governance.py`）：按 `budget_limit_requests/tokens/cost` + `budget_window_seconds` 滑动窗口计量，超限返回 429（`cost_governance_enabled` 默认 `False`）
+- **ForensicContext + SchedulerReaper**（`packages/agent-runtime/agent_runtime/forensic.py` + lease-based 回收）：执行现场取证快照 + 本地任务租约过期后的孤儿回收
 
 ---
 
@@ -133,7 +133,7 @@ Agent Platform 是一个基于 **LangGraph Supervisor 模式** 的统一智能�
                 ╭─────────────────────────────────────────────────────╮
                 │                  CROSS-CUTTING                      │
                 │                                                     │
-                │  PostgreSQL/pgvector    Semantic Cache              │
+                │  PostgreSQL/pgvector    Valkey Semantic Cache       │
                 │  Circuit Breaker        OpenTelemetry               │
                 │  Langfuse               Checkpoint / Memory         │
                 ╰─────────────────────────────────────────────────────╯
@@ -319,16 +319,19 @@ curl http://127.0.0.1:8000/health
   "guard_enabled": false,
   "langfuse_enabled": false,
   "langfuse_ready": false,
+  "cache_backend": "disabled",
+  "cache_ready": true,
+  "cache_degraded_reason": null,
   "auth_enabled": false,
   "identity_mode": "insecure"
 }
 ```
 
-> 上面是 2026-10-14 本机**实跑取到**的真实响应（未配 `DATABASE_URL` 的零依赖形态，故 `storage=memory`、`embedding_backend=MockEmbedder`、`llm=false`），共 **25 个键 = 共享基类 13 + 本 app 独有 12**。复现命令：`uv run python -c "from fastapi.testclient import TestClient; from agent_server.main import app; print(TestClient(app).get('/health').json())"`（注意 `get_settings` 有 `lru_cache`，改 env 后须清缓存）。
+> 上面是 2026-10-25 本机**实跑取到**的真实响应（未配 `DATABASE_URL` 的零依赖形态，故 `storage=memory`、`embedding_backend=MockEmbedder`、`llm=false`；未起 Valkey，故 `CACHE_BACKEND=disabled`），共 **28 个键 = 共享基类 13 + 本 app 独有 15**。复现命令：`CACHE_BACKEND=disabled uv run python -c "from fastapi.testclient import TestClient; from agent_server.main import app; print(TestClient(app).get('/health').json())"`（注意 `get_settings` 有 `lru_cache`，改 env 后须清缓存）。
 >
-> 字段语义口径：值取自**运行态装配真值**而非 settings 意愿值（`scheduler`/`control_plane`/`cost_governance`/`forensic` 即 V3 四部件，`18b6954` 起上报）；`langfuse_enabled`（意愿）与 `langfuse_ready`（真装配）两盏灯必须分开看，差值即故障信号；`/health` 免鉴权，故 `auth_enabled` 与 `identity_mode` 只报布尔/模式名，**不回显任何密钥**。
+> 字段语义口径：值取自**运行态装配真值**而非 settings 意愿值（`scheduler`/`control_plane`/`cost_governance`/`forensic` 即 V3 四部件，`18b6954` 起上报）；`langfuse_enabled`（意愿）与 `langfuse_ready`（真装配）两盏灯必须分开看，差值即故障信号；缓存三字段同理——`cache_backend=valkey` 且 `cache_ready=false` 时看 `cache_degraded_reason`（已脱敏）；`/health` 免鉴权，故 `auth_enabled` 与 `identity_mode` 只报布尔/模式名，**不回显任何密钥**。
 >
-> 两点残差（勿当成已完成）：① 契约测试只断言了 `SCHEDULER_ENABLED` 翻转 `scheduler`/`control_plane`，`cost_governance`/`forensic` **无开关跟随断言**；② `forensic` 位取的是 `trajectory_store` 非空的**代理语义**，不等于 ForensicContext 自身装配态。详见 [`docs/architecture/agent-harness-capability-map.md`](docs/architecture/agent-harness-capability-map.md) §2.8。
+> 契约测试已覆盖四个 V3 部件的「拨输入返回值必须变」，`forensic` 读的是其已声明的装配体 `planner_runtime.trajectory_store`（不是代理缺口）。详见 [`docs/architecture/agent-harness-capability-map.md`](docs/architecture/agent-harness-capability-map.md) §2.8。
 
 ### V3 Control Plane API（`scheduler_enabled=True` 时生效）
 
@@ -405,8 +408,10 @@ curl -X POST http://127.0.0.1:8000/api/callback/{task_id} \
 | `OTEL_SAMPLING_RATE` | `1.0` | 采样率（0.0–1.0） |
 | `MCP_ENABLED` | `false` | MCP client 开关（opt-in） |
 | `MCP_SERVERS` | `""` | JSON 编码的 server 配置列表 |
-| `CACHE_ENABLED` | `true` | 语义缓存开关 |
-| `CACHE_THRESHOLD` | `0.05` | 语义缓存命中相似度阈值 |
+| `CACHE_ENABLED` | `true` | 语义缓存开关（与 `CACHE_BACKEND=disabled` 任一即可关闭） |
+| `CACHE_BACKEND` | `valkey` | 缓存后端：`valkey` / `disabled`（`pg` 已退役，出现即启动失败） |
+| `VALKEY_URL` | `redis://localhost:6379/0` | Valkey 连接串（生产由 Secret 注入，日志/健康态脱敏） |
+| `CACHE_THRESHOLD` | `0.05` | 语义缓存命中**余弦距离**阈值（越小越严；联邦默认 `0.08`） |
 | `MEMORY_ENABLED` | `true` | 长期记忆（pgvector）开关 |
 | `BREAKER_FAILURE_THRESHOLD` | `3` | 熔断器连续失败阈值（触发熔断） |
 | `BREAKER_RECOVERY_SECONDS` | `30` | 熔断器半开恢复等待（秒） |
@@ -603,7 +608,7 @@ tests/                     # 单元测试（针对 agent_server 平台；含 pla
 - **U-1 · QueryRequest 入站字段名不统一（2026-10-19 已销项）**：`query`/`question` 双写已于 2026-08-16 收敛批删除；`session_id`/`thread_id` 兼容 alias 于 2026-10-19 删除（取证：无真实外部生产者、唯一消费者为自家契约测试；方案 `docs/plans/plan-u1-query-request-alias-removal-2026-10-19.md`）。旧客户端发 `thread_id` 现被 pydantic 默认 `extra=ignore` 静默忽略（`session_id=None`），不再映射。*注：旧评审称 `HealthResponse` 字段集完全不同属误判——`HealthResponse` 已 `class HealthResponse(BaseHealthResponse)` 对齐联邦契约（`packages/shared-schemas/shared_schemas/health.py:25-40`），无需处理。*
 - **U-2 · kefu 迁移（已完成）**：
   - ✅ `kefu-service` 已升级为 Agent Protocol 兼容 server：新增 `POST /invoke`（接受 `QueryRequest`，返回 `QueryResponse`，`kefu-service/main.py` + 依赖 `shared-schemas`）；旧 `/api/messages` 保留为 legacy 兼容入口。
-  - ✅ 网关 `applications/agent_federation/agent/config.py` 新增 `KEFU_SERVICE_URL` + `KEFU_USE_ADAPTER` 开关（默认 `false`，直连 `kefu-service:8003`）；`async_subagents.py` 增加 httpx 远程回退（外部 `deepagents` 包未安装时直连 `/invoke`）。
+  - ✅ 网关 `applications/agent_federation/agent/config.py` 新增 `KEFU_SERVICE_URL` + `KEFU_USE_ADAPTER` 开关（默认 `false`，直连 `kefu-service:8003`）；`applications/agent_federation/agent/async_subagents.py` 增加 httpx 远程回退（外部 `deepagents` 包未安装时直连 `/invoke`）。
   - ✅ `kefu-adapter` 包已于 2026-08 移除（无调用方，默认直连 `kefu-service` 生效）。`applications/agent_federation/evaluation/run-all.py` 的 kefu 项目已改默认指向 `KEFU_SERVICE_URL`（`KEFU_ADAPTER_URL` 仍可覆盖）。*注：原评审称「非简单改 URL 可接入」属实，但根因（缺 Agent Protocol + QueryResponse）已在本轮修复。*
 - **TB-1 / TB-2 · dialogue-framework 与内核协议对齐（已完成，后随 DF 移除而归档）**：dialogue-framework 已于 2026-09-23 作为孤儿框架移除（能力已被 agent_server 吸收），TB-1/TB-2 桥接代码随之删除。历史记录见 `CHANGELOG.md`。
 

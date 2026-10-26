@@ -1,7 +1,7 @@
 ﻿# docs 索引 · 哪篇作数、哪篇只是历史
 
 > 本文件由 2026-10-15 的文档治理生成：**未删除、未移动任何文档**，只做分层与状态登记。
-> 现状：`docs/` 141 个文件 / 约 2.6 MB；其中 `docs/plans/` 72 个文件 = 71 篇 md + 1 份配套盘点件 `p0-4-blind-except-inventory.txt`。71 篇 md 里按 §6 的口径命令实测 **42 篇有可辨状态行、29 篇未命中**（名单见 §7；该口径有已知漏计，29 是上界）。
+> 现状（**2026-10-26 重取，以下每个数都带口径与复现命令**）：`docs/` **172 个入库文件 / 173 个工作区文件**（差的 1 个是本批新建、此刻尚未入库的 ADR，见 §2 追记；`git ls-files docs | wc -l` 对 `find docs -type f | wc -l`）；体积 **3.7 MB**（`du -sh docs`，工作区含未入库件）。其中 `docs/plans/` **103 个入库文件**，顶层 md **94 篇**（入库数与工作区数已一致，复现 `git ls-files docs/plans | grep -cE '^docs/plans/[^/]+\.md$'`）。94 篇按 §6 口径重跑 `uv run python -B scripts/evidence/recount_plan_status_lines.py`：**51 篇有可辨状态行 / 43 篇未命中**，其中 1 篇是该口径的已知漏计（`p2-bucket-b-reduction-findings-2026-09-24.md` 实已有状态行）⇒ **真待补 42 篇**。（旧数「141 个文件 / 约 2.6 MB / 72 个文件 = 71 篇 md / 42 有状态行 · 29 未命中」是 2026-10-15 的快照，保留在此只为让后来人看得见它涨了多少，**不得当现值引**。）
 
 ## 1. 三条判据（先读这个，别先翻目录）
 
@@ -37,6 +37,10 @@
 | `docs/adr/0003`~`0004` | 早期 ADR，`0004` 状态仍为「修订中」 | 0 / 3 |
 
 未入库、只在本机存在的一篇：docs/agno-agentos-comparison.md（平台层竞品对比，未提交，clone 后不存在，故按 AGENTS.md 防漂移规矩不以反引号路径书写）。
+
+**2026-10-26 追记 · 本表此前漏点两篇 ADR**（改前本索引正文里 `docs/adr/0012`、`docs/adr/0013` 命中数为 0）：
+- `docs/adr/0012-nl2sql-branch-consolidation.md` —— 分支收敛与删除死枝的依据登记（AGENTS.md《分支卫生》第 4 条指向它）。
+- docs/adr/0013-semantic-cache-single-track.md —— 语义缓存单轨拍板（Accepted C：Valkey 唯一实现，生产与开发测试都用它；PG 缓存退役、无自动回退）。**该件是本批新建、此刻尚未入库**，故按 AGENTS.md「不入库路径不用反引号」的规矩写成普通文本；入库后请就地补反引号并复跑 `scripts/check_doc_sync.py`。§9 是变异战役读数、§11 是逐条变更台账（现至第 55 行）。
 
 ## 3. `docs/plans/` 71 篇 md 分层（按主题簇）
 

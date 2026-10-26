@@ -6,7 +6,7 @@ import uuid
 from agent_core.guardrails.errors import mask_exception_for_client
 from agent_core.runtime.lease import AsyncLease
 from agent_core.tracing import record_request_attributes, user_query_hash
-from agent_runtime import cache as semantic_cache
+from agent_runtime.cache import get_cache
 from agent_runtime.db import get_pool
 from agent_runtime.planner.protocol import PlannerContext
 from agent_runtime.schemas import ADMISSION_ADMITTED, ADMISSION_QUEUED, ADMISSION_REJECTED
@@ -166,28 +166,41 @@ async def query(
 
     # 语义缓存：命中直接返回。命中是正常路径，但 coordinator.acquire 已占用槽位、
     # admission 已可能 admitted —— 必须在返回前统一清理，否则同 session 后续请求
-    # 会永久排队（P0: cache-hit leak）。
+    # 会永久排队（P0: cache-hit leak）。缓存是优化不是正确性依赖：任何异常都按未命中继续。
     q_embedding: list[float] | None = None
-    if settings.cache_enabled and pool is not None:
-        q_embedding = await embed_query(req.query)
-        cached = await semantic_cache.cache_lookup(pool, q_embedding, settings.cache_threshold, tenant_id=tenant)
-        if cached:
-            await lease.release()
-            # P0-1（方案 B）：cache-hit 从未经 try_start 认领，但 submit 已留下 QUEUED 行——
-            # 若不撤销会永久虚增 queue_depth、误导 backpressure（记错账）。撤销自己那行。
-            if scheduler is not None and scheduler_enqueued:
-                try:
-                    await scheduler.cancel(request_id)
-                except Exception:
-                    logger.warning("scheduler cancel on cache-hit failed", exc_info=True)
+    cache_backend = get_cache("agent_server")
+    cached = ""
+    if cache_backend.enabled:
+        try:
+            q_embedding = await embed_query(req.query)
+            cache_hit = await cache_backend.get(
+                tenant_id=tenant,
+                intent="",
+                rewritten_query=req.query,
+                embedding=q_embedding,
+            )
+            # null 是负缓存标记：agent_server 不写负缓存，看到它按未命中继续执行。
+            if cache_hit is not None and cache_hit.layer != "null":
+                cached = str(cache_hit.value.get("answer") or "")
+        except Exception:
+            logger.warning("semantic cache lookup failed; continue without cache", exc_info=True)
+    if cached:
+        await lease.release()
+        # P0-1（方案 B）：cache-hit 从未经 try_start 认领，但 submit 已留下 QUEUED 行——
+        # 若不撤销会永久虚增 queue_depth、误导 backpressure（记错账）。撤销自己那行。
+        if scheduler is not None and scheduler_enqueued:
+            try:
+                await scheduler.cancel(request_id)
+            except Exception:
+                logger.warning("scheduler cancel on cache-hit failed", exc_info=True)
 
-            async def _cached_stream():
-                yield _sse({"type": "cache_hit", "text": cached})
-                yield _sse({"type": "done", "thread_id": thread_id})
+        async def _cached_stream():
+            yield _sse({"type": "cache_hit", "text": cached})
+            yield _sse({"type": "done", "thread_id": thread_id})
 
-            # R10：cache_hit 旁路同样落 span 属性（请求级 span 由中间件创建，此处补业务语义）
-            record_request_attributes({"cache_hit": True})
-            return StreamingResponse(_cached_stream(), media_type="text/event-stream")
+        # R10：cache_hit 旁路同样落 span 属性（请求级 span 由中间件创建，此处补业务语义）
+        record_request_attributes({"cache_hit": True})
+        return StreamingResponse(_cached_stream(), media_type="text/event-stream")
 
     config = {"configurable": {"thread_id": thread_id}}
 
@@ -324,8 +337,17 @@ async def query(
                             ))
                         except Exception:
                             logger.warning("status save %s failed", suspend_status.value, exc_info=True)
-            if final_answer and q_embedding is not None:
-                semantic_cache.cache_store(pool, req.query, final_answer, q_embedding, tenant_id=tenant)
+            if final_answer and q_embedding is not None and cache_backend.enabled:
+                try:
+                    await cache_backend.set(
+                        tenant_id=tenant,
+                        intent="",
+                        rewritten_query=req.query,
+                        value={"answer": final_answer},
+                        embedding=q_embedding,
+                    )
+                except Exception:
+                    logger.warning("semantic cache write failed; continue", exc_info=True)
             # Phase 3: 对话历史写回——Planner 协议中立（不持线程语义），由 app 层承担。
             # 与 graph 路径的 checkpoint 持久化行为等价，/history 与 revert 不回退。
             if final_answer and checkpointer is not None:

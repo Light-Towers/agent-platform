@@ -113,7 +113,7 @@ uv run --with ruff ruff check . && python scripts/check_doc_sync.py
 
 | 能力 | 状态 | 证据 / 开关 |
 |---|---|---|
-| Agent Loop（TAO 循环） | ✅ | 四套并存：`applications/agent_federation/agent/main_agent.py:542-673`（`FED_RECURSION_LIMIT=50`、`FED_MAX_STEPS=20` 超限主动中止）· `applications/agent_server/planners/deterministic.py:187-224`（`max_iterations=2`）· `applications/exhibition-agent/exhibition_agent/skill_loader/agent.py`（`MAX_TOOL_ROUNDS=6`）· `applications/nl2sql-service/nl2sql_service/agent/graph.py:23-28`（校验-纠错回环） |
+| Agent Loop（TAO 循环） | ✅ | 四套并存：`applications/agent_federation/agent/main_agent.py`（`FED_RECURSION_LIMIT=50` 注入 `recursion_limit`、`FED_MAX_STEPS=20` 超限主动中止；按符号锚定，行窗已随 2026-10 瘦身失效）· `applications/agent_server/planners/deterministic.py:187-224`（`max_iterations=2`）· `applications/exhibition-agent/exhibition_agent/skill_loader/agent.py`（`MAX_TOOL_ROUNDS=6`）· `applications/nl2sql-service/nl2sql_service/agent/graph.py:23-28`（校验-纠错回环） |
 | ReAct / agentic | 🔽 `PLANNER=agentic` | `packages/agent-runtime/agent_runtime/planner/agentic.py` · `applications/agent_federation/planners/agentic_runtime_bridge.py` |
 | Plan-and-Execute | 🔽 `PLANNER=graph` | `applications/agent_server/planners/graph.py` · `packages/agent-runtime/agent_runtime/planner/graph_compose.py:1-22`（LLM 只从 `registry.discover` 候选选，**禁止生成任意 Python/执行器**） |
 | Re-plan（执行期重规划） | ✅ | `packages/agent-runtime/agent_runtime/planner/protocol.py:44`（`StreamEventType` 含 `replan`）· `applications/agent_server/planners/graph.py:150-172`（`max_execution_replans=1`）· `packages/agent-runtime/agent_runtime/planner/protocol.py:200`（`TOOL_RESULT_SUGGESTS_REPLAN`） |
@@ -180,17 +180,17 @@ uv run --with ruff ruff check . && python scripts/check_doc_sync.py
 
 ### 2.4 缓存与成本 Cache & Cost
 
-> ⚠️ 存在**两套互不共享数据**的语义缓存（内核只统一接口与 key 构造，`packages/agent-core/agent_core/cache/base.py:5-9` 明示）。
+> 2026-10-25 起只有**一套**语义缓存：Valkey 单一实现（ADR-0013 C，生产与开发/测试同一后端）；PG 缓存已停止读写，表待生产观察期后删除。
 
 | 能力 | 状态 | 证据 / 开关 |
 |---|---|---|
-| 语义缓存（命中判定 = **纯 embedding 余弦距离**，`<-> < 0.05`；距离不是相似度） | ✅ 默认开 | `packages/agent-runtime/agent_runtime/cache.py:38-72` · `cache_enabled=True` · 门控 `applications/agent_server/api/query_router.py:160-179` |
-| key 构造（`sha256(intent\|rewritten\|kb_versions\|tenant\|gray)`）**故意不参与命中** | ✅ | `packages/agent-core/agent_core/cache/base.py:41-62`；app 侧 intent/kb 缺省 ⇒ 退化为 `sha256("\|query\|{}\|\|0.0)` |
-| ⚠️ 空租户串 → 全局无过滤命中（跨租户可读） | 风险 | `packages/agent-runtime/agent_runtime/cache.py:49-55` 仅 `tenant_id` 非空加 WHERE；`applications/agent_server/api/query_router.py:162` 传 `req.tenant_id or ""` |
-| **缓存失效 / TTL / 淘汰（agent_server 轨）** | ❌ | `packages/agent-runtime/agent_runtime/cache.py` 只有 lookup/write，无 delete ⇒ `semantic_cache` 表只增不减 |
-| 分层 L1 精确 hash / L2 向量（Valkey HNSW, COSINE > 0.92）/ L3 检索 + NullCache 负缓存 + `invalidate_by_kb_version` | 🔽 `CACHE_ENABLED=false` | 联邦 `applications/agent_federation/agent/cache/layers.py:57-259` · `applications/agent_server/config.py:16,23`；⚠️ valkey 缺失/ping 失败 ⇒ 整层静默 no-op（`applications/agent_federation/agent/cache/layers.py:27-52`） |
+| 语义缓存（命中判定 = **纯 embedding 余弦距离**，默认 ≤0.05；距离不是相似度） | ✅ 默认开 | `packages/agent-runtime/agent_runtime/cache/valkey_backend.py` · `CACHE_ENABLED=true` / `CACHE_BACKEND=valkey` · 门控 `applications/agent_server/api/query_router.py:171-186` |
+| key 构造（`sha256(intent\|rewritten\|kb_versions\|tenant\|gray)` + `scope\|embedding_model\|dim`） | ✅ | `packages/agent-core/agent_core/cache/base.py:build_cache_key`；L1 精确命中用 key，L2 向量命中用 TAG filter（`tenant`/`scope`/`kb_version`/`gray_pct`/`epoch`） |
+| 空租户 → fail-closed（不查任何缓存） | ✅ | `ValkeySemanticCache.get` 在空租户/含分隔符租户上直接返回 miss，零搜索（`packages/agent-runtime/tests/test_valkey_backend_wire.py`） |
+| **缓存失效 / TTL / 淘汰** | ✅ | 精确失效删除 L1/L2/负缓存；命名空间失效递增 `tenant+scope` epoch；L1/L2/负缓存均有 TTL |
+| L1 精确 hash / L2 向量（Valkey HNSW, COSINE 距离）/ 负缓存 + `invalidate_by_kb_version` | ✅ 默认开（同一实现） | `packages/agent-runtime/agent_runtime/cache/valkey_backend.py` · 联邦门面 `applications/agent_federation/agent/cache/semantic_cache.py`；L3 已退役。后端不可达 ⇒ fail-open + `/health` degraded（不是静默 no-op） |
 | 缓存击穿防护 singleflight（同 key 并发只真跑一次 LLM） | ✅ | `packages/agent-runtime/agent_runtime/singleflight.py`（引用计数锁，P2-2 修竞态） |
-| 命中率统计上报事件面 | ✅ | `packages/agent-core/agent_core/cache/stats.py` · `applications/agent_federation/agent/main_agent.py:488,490` |
+| 命中率统计上报事件面 | ✅ | `packages/agent-core/agent_core/cache/stats.py` · `applications/agent_federation/agent/main_agent.py:486,488` |
 | **provider prompt caching / 响应级 LLM 缓存** | ❌ | 全仓无 `cache_control`；只有语义问答缓存 + LLM 客户端对象 LRU（`packages/agent-core/agent_core/llm/registry.py:114-165`，缓存的是连接对象非响应） |
 | 成本治理（requests/tokens/cost 三维 + window，超限 429） | 🔽 `cost_governance_enabled=False` | `packages/agent-runtime/agent_runtime/cost_governance.py` + `packages/agent-runtime/agent_runtime/cost_governance_pg.py` · 装配 `applications/agent_server/main.py:486-524` ⚠️ 三个 `budget_limit_*` **默认 0=不限制**（`applications/agent_server/config.py:156-159`），开了也不限；`PlannerRuntime.max_tokens/max_cost` 参数在位但 app 未传 |
 | 模型主备降级（可复位熔断 + **流式契约：未产出 chunk 才切换重放**） | ✅ | `packages/agent-core/agent_core/llm/fallback.py`（组合 `resilience.CircuitBreaker`）· ⚠️ 同名 = 没有备，且结构化出参恒绑 primary（`.env.example:76`） |
@@ -207,7 +207,7 @@ uv run --with ruff ruff check . && python scripts/check_doc_sync.py
 | **MCP 服务端**（把本平台 Skill 暴露成 MCP server） | ❌ | 全仓无 `FastMCP` / `mcp.server`；`packages/agent-core/agent_core/tools/adapters/mcp.py` 是客户端适配器 |
 | MCP 企业授权面（OAuth 2.1 资源服务器 / RFC 9728 元数据发现 / RFC 8707 token 绑定 / CIMD / EMA） | ❌ | |
 | MCP Tasks / MCP Apps / elicitation / sampling | ❌ | |
-| Skill 渐进披露与路由（选错 Skill 的排查面） | 🟡 | `foundation/skill_router.py:5-10` 自述 **`STATUS: WIRED（作为执行前门禁）`**，调用点 `graph/nodes.py:95-103`（原写 `NOT WIRED`／`route()` 零调用**已不成立**，2026-10-16 对码订正）。仍为 🟡 的原因：门禁表 `_CATALOG_ROUTE` 只覆盖 `venue.schedule.query`（`nodes.py:42-44`），且 `route()` 返回值只做判定、不驱动实际请求形状 ||
+| Skill 渐进披露与路由（选错 Skill 的排查面） | 🟡 | `foundation/skill_router.py:5-10` 自述 **`STATUS: WIRED（作为执行前门禁）`**，调用点 `graph/nodes.py:95-103`（原写 `NOT WIRED`／`route()` 零调用**已不成立**，2026-10-16 对码订正）。仍为 🟡 的原因：门禁表 `_CATALOG_ROUTE` 只覆盖 `venue.schedule.query`（`applications/exhibition-agent/exhibition_agent/graph/nodes.py:42-44`），且 `route()` 返回值只做判定、不驱动实际请求形状 ||
 | 工具级权限 ACL（`permissions: frozenset[str]` + `discover(caller_permissions=)` 过滤 + policy 第 5 项校验） | ✅ | `packages/agent-runtime/agent_runtime/skills/registry.py:78,306-337` · `packages/agent-runtime/agent_runtime/planner/policy.py:1-16` · workflow yaml 声明 `permissions` |
 | Workflow 最小权限 CI 门禁（缺顶层 `permissions:` 或 `write-all` 即红，目录不存在也 fail-closed） | ✅ | `scripts/lint_architecture.py` P11 |
 | 中间件洋葱（熔断 / 超时+失败降级真取消 / 重试 / 审计 redact / ToolObserved 最外层） | ✅ 部分 | `packages/agent-runtime/agent_runtime/skills/middleware.py:34-296` · 装配 `applications/agent_server/capabilities.py:176-191`；⚠️ `RateLimitMiddleware:198` 已实现但**未在装配链**（`:10-12` 自述「rate limit 待接入」） |
@@ -228,7 +228,7 @@ uv run --with ruff ruff check . && python scripts/check_doc_sync.py
 | HITL 底座（Skill 返 `__awaitable__` → 建 AwaitableTask → 抛 `ExecutionSuspended`；外部回调幂等唤醒） | ✅ 部分 | `packages/agent-runtime/agent_runtime/planner/protocol.py:642-671` · `applications/agent_server/api/callback.py:31-40`（重复回调不重复 resume）· `packages/agent-runtime/agent_runtime/execution_status.py`（`WAITING_HUMAN` 合法态 + 转换矩阵）⚠️ **`AwaitableKind` 四类中只有 `EXTERNAL` 真被创建** |
 | HITL 人工审批应用层（谁批 / 批什么 / 批完怎么继续） | 🟡 **P1-7** | `packages/agent-runtime/agent_runtime/human_task.py:1-27` 自带 NOT WIRED；`HumanTaskStore`/`Resolver` 零调用 ⇒ **能挂起能被唤醒，但「人」这一类没有任何产出入口** |
 | 软 HITL（澄清反问）/ 高风险二次确认 | ✅ | `packages/agent-core/agent_core/intent/models.py:73`（`need_clarify`）· `applications/agent_federation/agent/main_agent.py:461-466` · KS `applications/knowledge-service/knowledge_service/query_process/agent/nodes/node_item_name_confirm.py` |
-| 输入护栏（PII 四类 + injection，**先脱敏再查缓存**） | 🔽 双 app 都关 | `packages/agent-core/agent_core/guardrails/input_guard.py` · `guard_enabled=False`（`applications/agent_server/config.py:104`）/ `GUARD_ENABLED=false`（`applications/agent_federation/agent/main_agent.py:145,426,658`）· `GUARD_BLOCK_INJECTION` 默认 true |
+| 输入护栏（PII 五类 + injection，**先脱敏再查缓存**） | 🔽 双 app 都关 | `packages/agent-core/agent_core/guardrails/input_guard.py` · `_PII_PATTERNS` 实为 phone/email/id_card/bank_card/ip_address 五类，**全是 ASCII/数字模式 ⇒ 中文姓名/地址不在检测面**（写侧缓存门禁复用同一函数，同样检不出）· `guard_enabled` 默认 False（`applications/agent_server/config.py` 同名字段）/ `GUARD_ENABLED=false`（`applications/agent_federation/agent/main_agent.py` 三处读该变量）· `GUARD_BLOCK_INJECTION` 默认 true |
 | 输出护栏（PII + 幻觉标记词） | ⚠️ **仅告警不拦截** | `applications/agent_federation/gateway/output_guard.py:15-27` → `applications/agent_federation/agent/main_agent.py:658-665` 命中后 `logger.warning`，答案照发（与输入侧不对称） |
 | 纵深防御四层（指令-数据分离 / prompt 加固 / 随机哨兵令牌） | ❌ | |
 | 致命三要素（私有数据 + 不可信内容 + 对外通信）一票否决门禁 | ❌ | |
@@ -251,7 +251,7 @@ uv run --with ruff ruff check . && python scripts/check_doc_sync.py
 |---|---|---|
 | 十态 Execution 状态机 + `can_transition` 转换矩阵（含 `WAITING_EXTERNAL/WAITING_HUMAN/PAUSED/CANCEL_REQUESTED`） | ✅ 代码 / 🔽 落库随 scheduler | `packages/agent-runtime/agent_runtime/execution_status.py:29-95` · ⚠️ 未开 scheduler 时 `status_store=None` ⇒ **执行状态不落库**（`applications/agent_server/main.py:484-485`） |
 | 双轨 checkpoint（**会话轨** LangGraph checkpointer / **执行轨** `execution_checkpoints`） | ✅ | `packages/agent-runtime/agent_runtime/planner/durability.py`（Durability 属 Runtime 而非 Planner 业务；按节点落 checkpoint，同 `execution_id` resume，复用已完成节点、尊重依赖边）· `packages/agent-runtime/agent_runtime/planner/durability_pg.py` |
-| Lease + `generation` fencing（异 owner 抢过期租约 +1、同 owner 续租不变；`WHERE EXCLUDED.generation >= table.generation` 原子守卫；`ExecutionNotOwned`/`FencedWriteError` fail-closed） | ✅ | `packages/agent-runtime/agent_runtime/planner/durability_pg.py`（`execution_leases`）· `packages/agent-core/agent_core/runtime/lease.py`（`AsyncLease` 幂等 release）· 消费 `applications/agent_server/api/query_router.py:131-146,153,164,211,373`；⚠️ **fencing 覆盖 3/5 类 durable write**（2026-10-14 逐个实读复核）：有守卫 = `PgCheckpointStore`（`packages/agent-runtime/agent_runtime/planner/durability_pg.py:113-146`）、`PgExecutionOwnershipStore`（同文件 `:215-274`，takeover 时 generation+1）、`PgExecutionStatusStore`（`packages/agent-runtime/agent_runtime/execution_state_pg.py:85-110`，SQL 层原子拒绝）；**无守卫 = `packages/agent-runtime/agent_runtime/awaitable_task_pg.py`（全文 `generation` 0 命中）与 `PgSideEffectStore`（`packages/agent-runtime/agent_runtime/planner/durability_pg.py:400` 起）**。~~旧口径「2/5」把 scheduler ownership 记成缺项，来自 2026-09-24 笔记，已被 `docs/plans/production-delivery-anchor-map-2026-10-09.md`「防覆盖保护」行与本轮复核取代~~ |
+| Lease + `generation` fencing（异 owner 抢过期租约 +1、同 owner 续租不变；`WHERE EXCLUDED.generation >= table.generation` 原子守卫；`ExecutionNotOwned`/`FencedWriteError` fail-closed） | ✅ | `packages/agent-runtime/agent_runtime/planner/durability_pg.py`（`execution_leases`）· `packages/agent-core/agent_core/runtime/lease.py`（`AsyncLease` 幂等 release）· 消费 `applications/agent_server/api/query_router.py:131-146,153,164,211,373`；⚠️ **fencing 覆盖 3/5 类 durable write**（2026-10-14 逐个实读复核）：有守卫 = `PgCheckpointStore`（`packages/agent-runtime/agent_runtime/planner/durability_pg.py:113-146`）、`PgExecutionOwnershipStore`（同文件 `:215-274`，takeover 时 generation+1）、`PgExecutionStatusStore`（`packages/agent-runtime/agent_runtime/execution_state_pg.py:70-105`（`save`，含 `WHERE ... EXCLUDED.generation >= table.generation` 与拒绝分支），SQL 层原子拒绝）；**无守卫 = `packages/agent-runtime/agent_runtime/awaitable_task_pg.py`（全文 `generation` 0 命中）与 `PgSideEffectStore`（`packages/agent-runtime/agent_runtime/planner/durability_pg.py:400` 起）**。~~旧口径「2/5」把 scheduler ownership 记成缺项，来自 2026-09-24 笔记，已被 `docs/plans/production-delivery-anchor-map-2026-10-09.md`「防覆盖保护」行与本轮复核取代~~ |
 | Durable Admission / AwaitableTask（crash recovery：据 `provider_task_id` **先 query 外部真实状态**而非盲目重调） | ✅ | `packages/agent-runtime/agent_runtime/awaitable_task.py:1-22` · `packages/agent-runtime/agent_runtime/awaitable_task_pg.py` · 装配 `applications/agent_server/main.py:398-407` |
 | 失败决策矩阵（异常分类 × 副作用语义 → `RETRY_SAFE` / `QUERY_BEFORE_RETRY` / `NO_RETRY` / `ABORT`） | ✅ | `packages/agent-runtime/agent_runtime/effect_contract.py:77-192` · 消费 `packages/agent-runtime/agent_runtime/planner/execution_graph.py:23,372`；⚠️ 同文件 `:6-8` 明确**平台不承诺 effectively-once** |
 | 重试 / 退避 / 异常分类 / 熔断（Engine+Policy 分离：`ConsecutiveFailurePolicy` + `SlidingWindowPolicy`） | ✅ | `packages/agent-core/agent_core/resilience.py`（585 行）· `packages/agent-runtime/agent_runtime/circuit_breaker.py`（带 fallback、半开试探、兼容 `"half-open"`）· 阈值 `applications/agent_server/config.py:49-50` |
@@ -281,7 +281,7 @@ uv run --with ruff ruff check . && python scripts/check_doc_sync.py
 | Jaeger | 仅 OTLP 接收端 | thrift exporter 已归档（`applications/agent_server/main.py:229-231`） |
 | Langfuse（意愿灯 `langfuse_enabled` vs 运行态灯 `langfuse_ready` 分离；判据在启动期算，绝不在探针里构造客户端） | 🔽 三键齐才启 | `applications/agent_server/config.py:53-55,166-167` · 装配单点 `applications/agent_server/agent/llm.py:12-18`（primary+fallback 全路径）· 联邦 `applications/agent_federation/agent/tracing/langfuse_adapter.py` |
 | 统一事件面 `EventBus`（多 sink 扇出 + 逐 sink 异常隔离）+ 4 通道 monitor | ✅ | `packages/agent-core/agent_core/events.py` · `packages/agent-core/agent_core/monitor.py`（WebSocket/LegacyStream/Callback/**OTelSpan**）· `request_id` uuid4 |
-| `/health` 能力灯（实测响应 **25 键 = 共享基类 13 + 本 app 独有 12**；报运行态真值 = 装配与否，不报 settings 意愿值） | ✅ | 由 `18b6954`（2026-10-10）落地并同批新增契约测试；`applications/agent_server/api/health_router.py:32-62` · `applications/agent_server/schemas.py:114-154` · `applications/agent_server/tests/test_health_fields.py`（2026-10-14 实跑 **14 passed**）；⚠️ 两点边界：①仅 `scheduler`/`control_plane` 有「拨 `SCHEDULER_ENABLED` 返回值必须变」的断言，`cost_governance`/`forensic` 无开关跟随断言；②`forensic` 位是 `trajectory_store` 非空的**代理语义**（`:50`），不等于 ForensicContext 装配态 |
+| `/health` 能力灯（实测响应 **28 键 = 共享基类 13 + 本 app 独有 15**；报运行态真值 = 装配与否，不报 settings 意愿值） | ✅ | 由 `18b6954`（2026-10-10）落地并同批新增契约测试；`applications/agent_server/api/health_router.py:32-71` · `applications/agent_server/schemas.py` · `applications/agent_server/tests/test_health_fields.py`（2026-10-25 实跑 **19 passed**）；四个 V3 部件均有「拨输入返回值必须变」断言，`forensic` 读其已声明的装配体 `trajectory_store`；缓存另有 `cache_backend`/`cache_ready`/`cache_degraded_reason`（ADR-0013 C） |
 | 配置指纹 `config_hash` 注入 span（生产与评测同源，防「生产反向 import eval」倒挂） | ✅ | KS `applications/knowledge-service/knowledge_service/conf/config_hash.py` + `packages/agent-core/agent_core/tracing.py` |
 | OTel **GenAI 语义约定**对齐（`gen_ai.*` 键名常量表 + 键存在性断言 + lint；18 个 well-known 操作名；content capture 是 Opt-In） | 🟡 | 现用自研属性名，无 `gen_ai.*` 键表 ⇒ 上游改键名后**查询静默返回空、不报错**的风险形状未被对冲 |
 | 评测集 golden | ✅ | `eval/golden.jsonl` **15** · `eval/wenda_data_agent_golden.jsonl` 5 · `eval/dialogue_framework_golden.jsonl` 8 · KS `applications/knowledge-service/eval/golden_queries.jsonl` **73** · exhibition `applications/exhibition-agent/exhibition_agent/foundation/golden_cases/sample_golden.json` + `applications/exhibition-agent/skills/exhibition-readonly/tests/golden_cases.json` |
@@ -351,7 +351,7 @@ uv run --with ruff ruff check . && python scripts/check_doc_sync.py
 | 级 | 缺项 | 为什么现在就该动 | 锚点 |
 |---|---|---|---|
 | **P0** | 循环**预防**三层指纹（精确 → 状态 → 语义余弦 >0.95） | 现状是「只有恢复、没有预防」，且 `enable_loop_fingerprint=False` 只做了第一层的一半 | `applications/agent_server/config.py:116` · `packages/agent-runtime/agent_runtime/planner/protocol.py:349-432` |
-| **P0** | 语义缓存空租户串跨租户读 | 唯一一条「已实现代码里带安全语义的洞」，不是缺功能而是缺把关 | `packages/agent-runtime/agent_runtime/cache.py:49-55` + `applications/agent_server/api/query_router.py:162` |
+| **已关闭** | ~~语义缓存空租户串跨租户读~~ | ADR-0013 C 后空租户 fail-closed，L2 查询恒带 tenant filter；回归用例见 `packages/agent-runtime/tests/test_cache_contract.py` 与 `test_valkey_backend_wire.py` | `packages/agent-runtime/agent_runtime/cache/valkey_backend.py` |
 | **P0** | 输出护栏从「仅告警」改为可拦截（与输入侧对称） | 输入拦、输出放，被追问「防得住泄露吗」答不硬 | `applications/agent_federation/gateway/output_guard.py` + `applications/agent_federation/agent/main_agent.py:658-665` |
 | **P0** | **一个真实使用者** | 既有定性判定原话：「缺的不是程度，是一个真实使用者。这是质变点，不是量变点」 | `docs/TODO.md` §0 · `docs/plans/arch-audit-2026-09-24.md` |
 | **P1** | provider prompt caching + 成本归因出数面 | 语义缓存 agentic 场景命中率仅 5–15%；真大头在输入输出 100:1 下的 prompt 缓存 | `packages/agent-core/agent_core/cache/`（无 `cache_control`）· `packages/agent-runtime/agent_runtime/trajectory/`（有数无面） |
@@ -405,7 +405,9 @@ uv run --with ruff ruff check . && python scripts/check_doc_sync.py
 
 **内核 / 身份 / 联邦（env 直读）**
 
-`DEPLOY_ENFORCE_IDENTITY=false` · `TENANT_JWT_ENFORCE=false` · `TENANT_HEADER_ENFORCE=false` · `SINGLE_TENANT` 未设 ⇒ `insecure` 态 · `SEMANTIC_MEMORY_ENABLED=false` · `MEMORY_DUAL_SCOPE=false` · `AGENT_CORE_TRACE_ENABLED=false` · `CACHE_ENABLED=false` · `GUARD_ENABLED=false` · `INTENT_ENABLED=false` · `PLANNER_ENABLED=false` · `REFLEXION_ENABLED=false` · `DYNAMIC_AGENT_ENABLED=false` · `AGENT_MODE=local` · `GRAY_PCT=0.0` · `IMG_SUMMARY_ENABLED=""` · `DISABLE_AUTH=false`（注意这是「关鉴权」的旁路开关）
+`DEPLOY_ENFORCE_IDENTITY=false` · `TENANT_JWT_ENFORCE=false` · `TENANT_HEADER_ENFORCE=false` · `SINGLE_TENANT` 未设 ⇒ `insecure` 态 · `SEMANTIC_MEMORY_ENABLED=false` · `MEMORY_DUAL_SCOPE=false` · `AGENT_CORE_TRACE_ENABLED=false` · `GUARD_ENABLED=false` · `INTENT_ENABLED=false` · `PLANNER_ENABLED=false` · `REFLEXION_ENABLED=false` · `DYNAMIC_AGENT_ENABLED=false` · `AGENT_MODE=local` · `GRAY_PCT=0.0` · `IMG_SUMMARY_ENABLED=""` · `DISABLE_AUTH=false`（注意这是「关鉴权」的旁路开关）
+
+缓存不在默认关清单：`CACHE_ENABLED=true` + `CACHE_BACKEND=valkey`（生产与开发/测试均为 Valkey；PG 语义缓存已退役，见 ADR-0013 C）。
 
 ---
 

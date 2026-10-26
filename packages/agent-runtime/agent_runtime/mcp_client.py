@@ -16,7 +16,7 @@ import time
 import uuid
 from contextlib import AsyncExitStack
 
-from agent_runtime.cache import spawn_background
+from agent_runtime.background import spawn_background
 from agent_runtime.circuit_breaker import CircuitBreaker
 from agent_runtime.schemas import McpServerConfig, McpToolResult
 

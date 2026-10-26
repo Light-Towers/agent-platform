@@ -40,9 +40,7 @@ class Settings(BaseLLMSettings):
     sql_dsn: str = ""
     sql_max_rows: int = 100  # LLM 上下文窗口约束，区别于 nl2sql-service(1000)：本服务将结果注入 prompt，需严格控制 token 数
 
-    # 健壮性
-    cache_enabled: bool = True
-    cache_threshold: float = 0.05  # 余弦距离阈值，小于该值视为同义命中
+    # 健壮性（语义缓存配置统一由 agent_runtime.cache 读取，见 ADR-0013 C）
     memory_enabled: bool = True
     memory_extraction_enabled: bool = False  # 优化 H：LLM 抽取结构化事实（默认关，无 LLM 时退化存原文）
     memory_forget_threshold: float = 0.1  # 优化 H：低价值记忆惰性淘汰阈值（importance）

@@ -3,14 +3,15 @@
 > 状态：问题登记（基于 `docs/plan-e-dual-track-convergence.md` 与两轨源码调研）
 > 调研日期：2026-08-16
 > 关联：架构边界 `docs/architecture-boundary-app-vs-agent-federation.md`、收敛规划 `docs/plan-e-dual-track-convergence.md`
-> 说明：本文聚焦"双轨并存暴露的架构问题"，不重复收敛方案（见 `plan-e-dual-track-convergence.md`）。技术债登记见 `architecture-improvement-plan.md` §6（TB-9 ~ TB-13）。
+> 说明：本文聚焦"双轨并存暴露的架构问题"，不重复收敛方案（见 `docs/plans/plan-e-dual-track-convergence.md`）。技术债登记见 `docs/architecture/architecture-improvement-plan.md` §6（TB-9 ~ TB-13）。
+> **2026-10-25 补记**：本文的缓存双轨结论（AR-1 "两套语义缓存"）已由 ADR-0013 C 收敛为 Valkey 单实现；其余分析保留为 2026-08-16 调研快照。
 
 ## 0. 背景
 
 `agent-platform` 同时存在两套 Agent 编排架构：
 
 - **轨道 A `app/`**：自研 LangGraph `StateGraph` Supervisor（`app/agent/graph.py:154` `build_graph()`）。
-- **轨道 B `agent_federation/`**：`agent_federation.create_deep_agent(subagents=[...])` 联邦网关（`agent_federation/agent/main_agent.py:128`），其 checkpointer 仍是 LangGraph 的 `InMemorySaver`（`main_agent.py:37`）——即 **DeepAgents 包是 LangGraph 之上的封装**，而非替代。
+- **轨道 B `agent_federation/`**：`agent_federation.create_deep_agent(subagents=[...])` 联邦网关（`agent_federation/agent/main_agent.py:128`），其 checkpointer 仍是 LangGraph 的 `InMemorySaver`（`applications/agent_federation/agent/main_agent.py:37`）——即 **DeepAgents 包是 LangGraph 之上的封装**，而非替代。
 
 两轨**零代码耦合**（互不包含 import，边界文档 §2 已确认），部署独立（各自 `docker-compose.yml`）。本文记录这种并存关系下**已暴露但尚未全部收敛的架构问题**。
 
@@ -34,11 +35,11 @@
 **现象**：
 
 - `app`：`app/memory/longterm.py` 的 pgvector 长期语义记忆（`recall`/`remember`），并有 `app/main.py` 的 `AsyncPostgresSaver` checkpoint + `app/infra/revert.py` 会话回退。
-- `agent_federation`：`InMemorySaver`/`AsyncSqliteSaver`（`main_agent.py:37-43`）+ pgvector 长期语义记忆（`agent/memory/semantic_memory.py` + `main_agent_memory.py`，2026-08-19 挂载，TB-10 已核销）。
+- `agent_federation`：`InMemorySaver`/`AsyncSqliteSaver`（`applications/agent_federation/agent/main_agent.py:37-43`）+ pgvector 长期语义记忆（`agent/memory/semantic_memory.py` + `applications/agent_federation/agent/memory/main_agent_memory.py`，2026-08-19 挂载，TB-10 已核销）。
 
 **影响**：同一用户跨两轨无法共享长期上下文；agent_federation 重启/多实例下会话状态丢失，而 `app` 可回放。两套"会话记忆"语义不等价，是隐性一致性缺陷。
 
-**趋势**：E-3 已将 `MemoryBackend` Protocol 下沉 `agent_core.memory/backend.py`（仅协议）。**agent_federation 侧已挂载 pgvector 后端**（`main_agent.py:532,599` 调用 `remember_episodic`/`recall_typed_context`，`agent/db.py` 建 pgvector `memories` 表，ADR-0003 定案），TB-10 已核销。
+**趋势**：E-3 已将 `MemoryBackend` Protocol 下沉 `agent_core.memory/backend.py`（仅协议）。**agent_federation 侧已挂载 pgvector 后端**（`applications/agent_federation/agent/main_agent.py:532,599` 调用 `remember_episodic`/`recall_typed_context`，`agent/db.py` 建 pgvector `memories` 表，ADR-0003 定案），TB-10 已核销。
 
 **建议**：agent_federation `create_deep_agent` 的 memory 挂载点接入内核 `MemoryBackend`，使双轨记忆后端可插拔、语义一致；短期至少在文档固化"agent_federation 无长期记忆"的边界声明。
 
@@ -47,7 +48,7 @@
 **现象**：
 
 - `app`：`app/config.py` 用 pydantic-settings `Settings` 单一配置对象。
-- `agent_federation`：`agent_federation/agent/config.py` 用 dataclass + dotenv，外加 `prompt/prompts.yml` YAML；能力开关（GUARD/PLANNER/REFLEXION/INTENT/CACHE/AGENT_MODE）散落 env（`main_agent.py:73-214`）。
+- `agent_federation`：`agent_federation/agent/config.py` 用 dataclass + dotenv，外加 `prompt/prompts.yml` YAML；能力开关（GUARD/PLANNER/REFLEXION/INTENT/CACHE/AGENT_MODE）散落 env（`applications/agent_federation/agent/main_agent.py:73-214`）。
 
 **影响**：新人需同时理解两套配置范式与两套开关语义；env 变量命名空间可能碰撞，排查成本翻倍。
 
@@ -70,7 +71,7 @@
 **现象**：
 
 - 9 个 `pyproject.toml` monorepo + 两套编排哲学（StateGraph 的「边思维」vs DeepAgents 的「委派思维」）+ 两套网关（SSE vs WebSocket）。
-- `agent_federation` 的 middleware 全开关驱动（`main_agent.py:63-114`）虽便于实验，但也意味着能力是否生效依赖运行时 env，文档与代码易漂移。
+- `agent_federation` 的 middleware 全开关驱动（`applications/agent_federation/agent/main_agent.py:63-114`）虽便于实验，但也意味着能力是否生效依赖运行时 env，文档与代码易漂移。
 
 **影响**：新人要同时建立两套心智模型；排障时需先判断"请求走的是哪条轨"，再定位对应范式，平均定位成本显著上升。
 
@@ -97,7 +98,7 @@
 
 ## 3. 一句话结论
 
-双轨并存本身合理（迁移验证、模块隔离、实验对比），但其**职责重叠、记忆语义不等价、配置分裂、内核采用不对称**是真实且未完全收敛的架构债。收敛的正确边界已在 `plan-e-dual-track-convergence.md` 明确：**只在共享内核/契约层补齐，绝不在编排层合并代码**。本文登记的问题即为该边界内仍需补齐的剩余项。
+双轨并存本身合理（迁移验证、模块隔离、实验对比），但其**职责重叠、记忆语义不等价、配置分裂、内核采用不对称**是真实且未完全收敛的架构债。收敛的正确边界已在 `docs/plans/plan-e-dual-track-convergence.md` 明确：**只在共享内核/契约层补齐，绝不在编排层合并代码**。本文登记的问题即为该边界内仍需补齐的剩余项。
 
 ---
 

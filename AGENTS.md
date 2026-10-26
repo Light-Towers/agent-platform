@@ -2,7 +2,7 @@
 
 > 统一生产级 Agent 平台，本仓库为 **monorepo**（根 + `packages/` 3 个共享包 + `applications/` 6 个应用工程）。**分层契约、依赖图、各包子模块完整清单见 `ARCHITECTURE.md`（按需读取）**；人类阅读指南见 `README.md`。本文件面向 AI agent，仅列每轮必守的行为约束 + 定向信息。
 > **演进方向（Plan-F）**：双轨收敛为「单 Runtime + 多 Planner」（`agent-runtime/` 承载运行时中间件，Planner 策略可插拔，不统一 Agent 只统一 Runtime）。详见 `docs/plans/plan-f-single-runtime-multi-planner.md`。
-> **V3 企业执行平台**：Phase 2-4 + 3.4 代码已接线（主链路 `Admission → Scheduler submit → Planner → Execute → Forensic/CostGov`，`scheduler_enabled` 默认 False 渐进开启）；**端到端双实例物理故障转移验收未达，不得当作已上线能力声明**。**原「未接线半成品（P1-7 标注）」五项已全部接线（human_task / execution_recovery / state_migration / payload_externalization 见 `agent_server/main.py` 装配点，`skill_router`(exhibition) 见 `graph/nodes.py:run_skill` 执行前门禁）⇒ 该标注已于 2026-10-16 按 roadmap #5 判据「全仓未接线标注归零」撤除；接线 ≠ 默认启用，逐项依据见 `docs/plans/plan-unfinished-completion-schedule-2026-10-16.md` §10**。架构真相源：`plan-enterprise-platform-skeleton-2026-09-23.md` + `plan-v3-execution-platform-final-architecture-2026-09-22.md` + `arch-audit-2026-09-24.md`（均在 `docs/plans/`）。
+> **V3 企业执行平台**：Phase 2-4 + 3.4 代码已接线（主链路 `Admission → Scheduler submit → Planner → Execute → Forensic/CostGov`，`scheduler_enabled` 默认 False 渐进开启）；**端到端双实例物理故障转移验收未达，不得当作已上线能力声明**。**原「未接线半成品（P1-7 标注）」五项已全部接线（human_task / execution_recovery / state_migration / payload_externalization 见 `agent_server/main.py` 装配点，`skill_router`(exhibition) 见 `graph/nodes.py:run_skill` 执行前门禁）⇒ 该标注已于 2026-10-16 按 roadmap #5 判据「全仓未接线标注归零」撤除；接线 ≠ 默认启用，逐项依据见 `docs/plans/plan-unfinished-completion-schedule-2026-10-16.md` §10**。架构真相源：`docs/plans/plan-enterprise-platform-skeleton-2026-09-23.md` + `docs/plans/plan-v3-execution-platform-final-architecture-2026-09-22.md` + `docs/plans/arch-audit-2026-09-24.md`（均在 `docs/plans/`）。
 
 ## AI 开发范式（总纲）
 
@@ -31,7 +31,7 @@
 ### 测试与评测
 
 - 八种测试按"对象 / 风险 / 手段 / 时机"四维定位；**功能测"对不对（对需求）"，逻辑测"全不全（对路径）"**，两者不可互替。
-- 逻辑测试靠**变异杀死率**验证，覆盖率只是下限。
+- 逻辑测试靠**变异杀死率**验证，覆盖率只是下限。两套仪表都在 `Makefile`（两件别混）：`make mutation-cache` = 门禁，手挑一批性质（条数以脚本 `MUTANTS` 为准，别在散文里抄数）+ 声明式存活集合，判据是"集合不许漂移"；`make mutation` = 战役，AST 算子自动展开，**分母来自代码**，存活体是**待定性清单**（等价 / 引擎独占 / 真缺口）不是分数。战役开工前必跑引擎自带的探针自证"能杀"（4/4 全杀才继续）——否则"引擎整条是空的却报出 40% 杀死率"会被读成套件弱。
 - AI 输出评测四级：**E0 单元断言 → E1 黄金集（守回归）→ E2 基准（做选型）→ E3 线上**；**上线门禁用黄金集，不用公开基准**。
 - 门禁：G1(PR) LSP/typecheck + lint/SAST/SCA/secret + 单测/契约 → G2(合并) 集成/功能/变异/租户隔离/黄金集 → G3(发布) E2/红队/canary。详细版见 noctilucent-lamp `ai-dev-paradigm/agent-platform-dev-handbook.md` §3.4。
 
@@ -49,7 +49,7 @@
 
 | 目录 | 定位 | 入口 |
 |------|------|------|
-| `applications/agent_server/` | 单进程 Supervisor 平台（统一 Agent 平台；V3 Phase 2-4 已接入 Scheduler/ControlPlane/CostGov/Forensic，`api/` 含 `callback.py` + `control.py`；2026-08-19 由根 `app/` 改名迁入） | `agent_server.main:app`（uvicorn） |
+| `applications/agent_server/` | 单进程 Supervisor 平台（统一 Agent 平台；V3 Phase 2-4 已接入 Scheduler/ControlPlane/CostGov/Forensic，`api/` 含 `applications/agent_server/api/callback.py` + `applications/agent_server/api/control.py`；2026-08-19 由根 `app/` 改名迁入） | `agent_server.main:app`（uvicorn） |
 | `applications/agent_federation/` | 联邦网关 + 3 子服务编排中枢（与 agent_server 并行，详见其 README；原名 `deepagents/`，为消除与 PyPI 依赖包 `deepagents` 同名冲突而改名） | `python -m api.server` |
 | `packages/agent-core/` | 零依赖运行时内核：tracing / guardrails / sql 守卫 / llm / memory / events / config / intent / resilience（子模块职责清单见 `ARCHITECTURE.md` §2.1） | — |
 | `packages/agent-runtime/` | Plan-F 运行时中间件 + V3 执行平台：admission / scheduler / coordinator / checkpoint / cache / tracing / planner/ / skills/ / memory 体系 / sandbox / forensic / cost_governance / identity（服务端断言租户，ADR-0007；`DEPLOY_ENFORCE_IDENTITY` 默认关）等（各包职责与分层定位见 `ARCHITECTURE.md` §2.1，身份层见 §2.3） | — |
@@ -60,7 +60,7 @@
 | `applications/exhibition-agent/` | 会展行业 AI Agent（skill_loader + warehouse REST 集成） | `uvicorn exhibition_agent.skill_loader.app:app` |
 | `tests/` | agent_server 单元测试（根套件） | `pytest -q` |
 | `applications/agent_server/tests/` | agent_server 应用层集成测试（GraphPlanner × runtime，2026-09-21 F-S1-01 迁入） | `pytest applications/agent_server/tests -q` |
-| `eval/` | agent_server 评测门禁（15 条 golden；`run_eval.py` 启发式 + `run_planner_eval.py` 双 Planner 基线） | `python eval/run_eval.py` |
+| `eval/` | agent_server 评测门禁（15 条 golden；`run_eval.py` 启发式 + `eval/run_planner_eval.py` 双 Planner 基线） | `python eval/run_eval.py` |
 | `docs/` | 设计文档 | — |
 
 ## 运行方式
@@ -149,7 +149,7 @@ DATABASE_URL= uvicorn agent_server.main:app --port 8000  # 零依赖冒烟
   2. **全局装配**：由构造保证不可漏接（统一 app 工厂 / 统一门面 / 中间件），而非靠每个调用点"记得调一次"——**接线散落 = 反模式**，即便逻辑已共享也不算全局；
   3. **强制门禁**：用不变量 lint（`scripts/lint_architecture.py`：全仓扫描 + 白名单，计入 `make ci`）拦截未来漂移，让违规在 CI 失败而非靠自觉。
 - **先实测再动手**：判断"是否已有全局兜底"靠读代码/跑验证，不凭模式猜（例：FastAPI 未捕获异常已被 Starlette 全局兜底为裸 500，堆栈不外泄，真正缺的只是统一信封）。
-- **范例（P2）**：入站错误脱敏 handler 从"仅 1/6 应用手写"收敛为 `build_api_app`（工厂）+ `agent_core.guardrails.errors`（单一实现）+ `lint_architecture.py` "裸 `FastAPI(` 即失败"（门禁）。方案见 `docs/plans/plan-p2-unified-exception-handlers-2026-09-24.md`。
+- **范例（P2）**：入站错误脱敏 handler 从"仅 1/6 应用手写"收敛为 `build_api_app`（工厂）+ `agent_core.guardrails.errors`（单一实现）+ `scripts/lint_architecture.py` "裸 `FastAPI(` 即失败"（门禁）。方案见 `docs/plans/plan-p2-unified-exception-handlers-2026-09-24.md`。
 - **边界**：全局优先不等于强行统一对外契约——若改写会影响下游消费者（前端/网关解析的错误体形状），须先审计消费者、按"先方案后编码"另行决策，不得为求统一而静默破坏兼容。
 
 ## 框架选型规则
