@@ -90,8 +90,8 @@
 rg -n '^\s+[a-z_]*(enabled|fingerprint)\s*:\s*bool\s*=\s*False' applications/agent_server/config.py
 #    1b 非布尔行 4 条：应 13 行（planner / runtime_mode / api_key / URL+密钥组，组行含多字段）
 rg -n '^\s+(planner|runtime_mode|database_url|api_key|search_api_key|sql_dsn|langfuse_\w+|(knowledge|nl2sql|kefu|exhibition)_service_url)\s*:' applications/agent_server/config.py
-# 1c) §5 下段（env 直读 16 项）：按名逐项查默认值；接 -o --no-filename | sort -u 应恰好 16 个（行数含读取点，噪声为预期）
-rg -n -e 'DEPLOY_ENFORCE_IDENTITY' -e 'TENANT_JWT_ENFORCE' -e 'TENANT_HEADER_ENFORCE' -e 'SINGLE_TENANT' \
+# 1c) §5 下段（env 直读 16 项）：按名逐项查默认值；本段用 -o --no-filename | sort -u 应恰好 16 个（2026-10-26 实测；若保留 -n，输出是「行号:匹配」⇒ sort -u 得 96 条，不是 16；不去重时行数含读取点，噪声为预期）
+rg -o --no-filename -e 'DEPLOY_ENFORCE_IDENTITY' -e 'TENANT_JWT_ENFORCE' -e 'TENANT_HEADER_ENFORCE' -e 'SINGLE_TENANT' \
    -e 'SEMANTIC_MEMORY_ENABLED' -e 'MEMORY_DUAL_SCOPE' -e 'AGENT_CORE_TRACE_ENABLED' -e 'GUARD_ENABLED' \
    -e 'INTENT_ENABLED' -e 'PLANNER_ENABLED' -e 'REFLEXION_ENABLED' -e 'DYNAMIC_AGENT_ENABLED' \
    -e 'AGENT_MODE' -e 'GRAY_PCT' -e 'IMG_SUMMARY_ENABLED' -e 'DISABLE_AUTH' \
