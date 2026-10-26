@@ -366,7 +366,7 @@ uv run --with ruff ruff check . && python scripts/check_doc_sync.py
 
 | 级 | 缺项 | 为什么现在就该动 | 锚点 |
 |---|---|---|---|
-| **P0** | 循环**预防**三层指纹（精确 → 状态 → 语义余弦 >0.95） | 现状是「只有恢复、没有预防」，且 `enable_loop_fingerprint=False` 只做了第一层的一半 | `applications/agent_server/config.py:114` · `packages/agent-runtime/agent_runtime/planner/protocol.py:349-432` |
+| **P0** | 循环**预防**三层指纹（精确 → 状态 → 语义余弦 >0.95） | 现状是「只有恢复、没有预防」，且 `enable_loop_fingerprint=False` 只做了第一层的一半 | `applications/agent_server/config.py:114` · 指纹字段与执行期拒绝点 `packages/agent-runtime/agent_runtime/planner/protocol.py:248-250,296-301`（`loop_fingerprint` 开关 / 重复指纹拒绝继续；原记 `:349-432` 只到构造函数参数，未覆盖判定逻辑）· 构造参数 `:391-419` |
 | **已关闭** | ~~语义缓存空租户串跨租户读~~ | ADR-0013 C 后空租户 fail-closed，L2 查询恒带 tenant filter；回归用例见 `packages/agent-runtime/tests/test_cache_contract.py` 与 `test_valkey_backend_wire.py` | `packages/agent-runtime/agent_runtime/cache/valkey_backend.py` |
 | **P0** | 输出护栏从「仅告警」改为可拦截（与输入侧对称） | 输入拦、输出放，被追问「防得住泄露吗」答不硬 | `applications/agent_federation/gateway/output_guard.py` + `applications/agent_federation/agent/main_agent.py:652-659`（实现时改用 kernel 五类检测：其自有三条模式在 CJK 紧邻时漏检，见上表「输出护栏」行） |
 | **P0** | **一个真实使用者** | 既有定性判定原话：「缺的不是程度，是一个真实使用者。这是质变点，不是量变点」 | `docs/TODO.md` §0 · `docs/plans/arch-audit-2026-09-24.md` |
