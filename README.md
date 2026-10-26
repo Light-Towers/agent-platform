@@ -180,7 +180,7 @@ flowchart LR
 
 ### 能力现状全景（四档交底）
 
-> 记忆 / 缓存 / 上下文 / 工具 / 安全 / 状态可靠性 / 可观测评测 / 知识数据 / 编排范式 / 平台产品面 —— **10 个能力域逐条给状态与文件证据**，并登记缺项优先级（P0–P2）、14 个 agent_server 默认关开关 + 16 项内核/身份/联邦 env 直读、13 个零生产调用模块：见 [`docs/architecture/agent-harness-capability-map.md`](docs/architecture/agent-harness-capability-map.md)。
+> 记忆 / 缓存 / 上下文 / 工具 / 安全 / 状态可靠性 / 可观测评测 / 知识数据 / 编排范式 / 平台产品面 —— **10 个能力域逐条给状态与文件证据**，并登记缺项优先级（P0–P2）、16 行 agent_server 默认关/默认空配置 + 16 项内核/身份/联邦 env 直读、13 个零生产调用模块：见 [`docs/architecture/agent-harness-capability-map.md`](docs/architecture/agent-harness-capability-map.md)。
 >
 > 状态口径：✅ 已实现·默认开 ｜ 🔽 已实现·**默认关（opt-in）** ｜ 🟡 半成品（零生产调用 / 装配缺口 / 无出数面 / 部分路径） ｜ 🧪 脚手架/仅 demo ｜ ❌ 不存在。**报「已就绪」前必须先说默认关**；该文档是绑定 rev 的快照，换 rev 后按文内 §1.3 的校验命令复跑。
 

@@ -65,7 +65,7 @@
 ### 1.2 三个不可混用的维度
 
 1. **代码在位 ≠ 已接线**：§6 单列 13 个**符号级零生产调用**的模块；§2 里标 🟡 的行范围更宽（装配缺口 / 无出数面 / 仅覆盖部分路径也算半成品），**两者不是同一集合，别把 13 当作 🟡 的行数**。
-2. **已接线 ≠ 默认生效**：§5 台账按**开关**列（agent_server 14 行 + 内核/身份/联邦 env 直读 16 项）；§2 的 🔽 行按**能力**计，同一开关可连带多个能力行，**两者不是 1:1，别把 14 当作 🔽 的行数**。
+2. **已接线 ≠ 默认生效**：§5 台账按**开关**列（agent_server 16 行 + 内核/身份/联邦 env 直读 16 项）；§2 的 🔽 行按**能力**计，同一开关可连带多个能力行，**两者不是 1:1，别把 16 当作 🔽 的行数**。
 3. **默认生效 ≠ 现网已验收**：现网 `DATABASE_URL`/`scheduler_enabled` 等实际取值见 `docs/operations/env-126-inventory.md`，与本文的仓库默认值不是同一件事。
 
 ### 1.3 证据来源与已复核范围（不粉饰）
@@ -81,13 +81,21 @@
 | `ReflectionEngine` / `slice_skill_context` / `run_admitted` 零生产调用 | 全仓检索仅命中 `tests/**` 与 `docs/plans/archive/**` |
 | `NOT WIRED (P1-7)` 自述现状 | 2026-10-26 复核：原 5 个 P1-7 模块（human_task / execution_recovery / state_migration / payload_externalization / 会展 `skill_router`）的模块头均已改为 **WIRED**，只剩历史括注「此前状态为 NOT WIRED」 |
 
-**复跑验证命令**（在本仓根执行，可复现 §5/§6 两张台账）：
+**复跑验证命令**（在本仓根执行，可复现 §5/§6 两张台账；注释里的「应 N 行」是自检锚，对不上即台账或代码已漂移）：
 
 ```bash
-# 1) 默认关开关台账：逐个确认默认值未被改动
-rg -n 'enabled\s*[:=]\s*(bool\s*=\s*)?False|env_bool\("[A-Z_]+",\s*False\)' \
-   applications/agent_server/config.py packages/agent-core/agent_core/config.py \
-   packages/agent-runtime/agent_runtime/identity.py applications/agent_federation/agent
+# 1) §5 上段（agent_server 16 行）
+#    1a 布尔行 12 条：应 12 行；enable_loop_fingerprint 字段名无 "enabled" 后缀，
+#       只 grep enabled 会漏它（2026-10-26 实测旧配方即漏此项）
+rg -n '^\s+[a-z_]*(enabled|fingerprint)\s*:\s*bool\s*=\s*False' applications/agent_server/config.py
+#    1b 非布尔行 4 条：应 13 行（planner / runtime_mode / api_key / URL+密钥组，组行含多字段）
+rg -n '^\s+(planner|runtime_mode|database_url|api_key|search_api_key|sql_dsn|langfuse_\w+|(knowledge|nl2sql|kefu|exhibition)_service_url)\s*:' applications/agent_server/config.py
+# 1c) §5 下段（env 直读 16 项）：按名逐项查默认值；接 -o --no-filename | sort -u 应恰好 16 个（行数含读取点，噪声为预期）
+rg -n -e 'DEPLOY_ENFORCE_IDENTITY' -e 'TENANT_JWT_ENFORCE' -e 'TENANT_HEADER_ENFORCE' -e 'SINGLE_TENANT' \
+   -e 'SEMANTIC_MEMORY_ENABLED' -e 'MEMORY_DUAL_SCOPE' -e 'AGENT_CORE_TRACE_ENABLED' -e 'GUARD_ENABLED' \
+   -e 'INTENT_ENABLED' -e 'PLANNER_ENABLED' -e 'REFLEXION_ENABLED' -e 'DYNAMIC_AGENT_ENABLED' \
+   -e 'AGENT_MODE' -e 'GRAY_PCT' -e 'IMG_SUMMARY_ENABLED' -e 'DISABLE_AUTH' \
+   --type py --glob '!**/tests/**'
 
 # 2) 零生产调用：§6 的 13 条按「模块零 import / 符号零引用」分别取证
 #    模块级 7 条（前 5 个循环抽样；后 2 个应只命中包内重导出）
@@ -390,7 +398,7 @@ uv run --with ruff ruff check . && python scripts/check_doc_sync.py
 
 ---
 
-## 5. 默认关开关台账（agent_server 14 行 + 内核/身份/联邦 env 直读 16 项）
+## 5. 默认关开关台账（agent_server 16 行 + 内核/身份/联邦 env 直读 16 项）
 
 **agent_server（`applications/agent_server/config.py`，pydantic-settings，env 大写同名覆盖）**
 
@@ -401,10 +409,12 @@ uv run --with ruff ruff check . && python scripts/check_doc_sync.py
 | `mcp_enabled` | False | 且 `mcp_servers` 非空才装配 |
 | `guard_enabled` | False | 输入护栏（PII + injection）整体关 |
 | `scheduler_enabled` | False | **连带 control_plane / status_store / reaper 全部不装配**，执行状态不落库 |
+| `scheduler_recovery_enabled` | False | lease 失效只标 FAILED + 释放 slot；开启后 Rescheduler 向队列入 `:retry:N`（最多 3 次，`QueueFull` 时静默失败） |
 | `cost_governance_enabled` | False | 且三个 `budget_limit_*` 默认 0 = 开了也不限 |
 | `rerank_enabled` | False | agent_server 轨（KS 轨默认开） |
 | `memory_extraction_enabled` | False | 记忆写入退化存原文 |
 | `tool_result_compression_enabled` | False | 注释理由：「避免改变现有返回结构」 |
+| `payload_externalization_enabled` | False | 大 payload 不落 blob store（checkpoint JSONB 全量存）；开时缺 `payload_externalization_dir` 启动即 fail-fast |
 | `enable_loop_fingerprint` | False | 注释理由：「避免误伤合法重放/重规划」 |
 | `planner` | `"deterministic"` | `auto`(Mode Selector) 为 opt-in；`graph`/`agentic` 需显式设 |
 | `database_url` / `runtime_mode` | `""` / `"local"` | 无 PG ⇒ 内存模式，跨会话记忆恒空 |
