@@ -72,7 +72,7 @@
 
 证据由三路合成：**① 本仓库全仓 import/符号扫描（主）**、② `noctilucent-lamp` wiki 的既有术语体系（决定用词）、③ 业界 2026 口径（决定「缺项」判据）。
 
-成文会话逐条复核的原始 4 条列于下表；**2026-10-26 复核轮另实读/实测了 §2 的 144 个能力行、本表第 4 行与 §4.2**（全表按「2026-10-26」计数共 146 个表格行，由脚本点算）。**未带日期标注的行仍属原扫描转述**，对外引用前建议抽验：
+成文会话逐条复核的原始 4 条列于下表；**2026-10-26 复核轮另实读/实测了 §2 的 157 个能力行、本表第 4 行与 §4.2**（全表按「2026-10-26」计数共 159 个表格行，由脚本点算）。**未带日期标注的行仍属原扫描转述**，对外引用前建议抽验：
 
 | 结论 | 复核方式与结果 |
 |---|---|
@@ -344,21 +344,21 @@ uv run --with ruff ruff check . && python scripts/check_doc_sync.py
 
 | 能力 | 状态 | 证据 / 开关 |
 |---|---|---|
-| 多模型 provider 抽象 + registry（LRU、key 含不透明 `api_key_slot` 不再摘要密钥）+ fallback | ✅ | `packages/agent-core/agent_core/llm/{protocols,providers,registry,fallback,fallback_lc}.py`；`profile["max_input_tokens"]` 驱动摘要阈值自适应 |
-| 结构化输出（agent_server 路由**显式 `method="function_calling"`**，因三家 `json_schema` 行为互不相同；差异已实测记录。⚠️ **非全局**：planner `graph_compose` 调 `with_structured_output(dict)` 未传 method ⇒ 走默认 `json_schema`，不支持该型的提供方在这条路径会静默回退解析 content） | ✅ | `applications/agent_server/agent/router.py:91`（全仓唯一显式点，`grep -rn with_structured_output` 实证）· `packages/agent-runtime/agent_runtime/planner/graph_compose.py:153-156`（未传 method）· `packages/agent-core/agent_core/llm/providers.py:78-80`（客户端工厂的 `json_mode` 开关）· `.env.example:59-78`（三家 11/11 组合实测矩阵） |
-| Embedding provider 统一选型（远程/本地 bge/Mock；维度 512↔1024 由 provider 派生；启动预热 + 真值灯 `embedding_real`） | ✅ | `packages/agent-core/agent_core/memory/embedder.py` · `_warm_embedding_backend` 定义 `applications/agent_server/main.py:144`、调用 `:349` · `EMBEDDING_REQUIRE_REAL=true` 为调用期硬失败（刻意不升级为启动 crash-loop） |
+| 多模型 provider 抽象 + registry（LRU、key 含不透明 `api_key_slot` 不再摘要密钥）+ fallback | ✅ | `packages/agent-core/agent_core/llm/{protocols,providers,registry,fallback,fallback_lc}.py`；`profile["max_input_tokens"]` 驱动摘要阈值自适应（2026-10-26 实读：五文件在位；registry :34 的 LRU 与 :147 的 api_key_slot 在位） |
+| 结构化输出（agent_server 路由**显式 `method="function_calling"`**，因三家 `json_schema` 行为互不相同；差异已实测记录。⚠️ **非全局**：planner `graph_compose` 调 `with_structured_output(dict)` 未传 method ⇒ 走默认 `json_schema`，不支持该型的提供方在这条路径会静默回退解析 content） | ✅ | `applications/agent_server/agent/router.py:91`（全仓唯一显式点，`grep -rn with_structured_output` 实证）· `packages/agent-runtime/agent_runtime/planner/graph_compose.py:153-156`（未传 method）· `packages/agent-core/agent_core/llm/providers.py:78-80`（客户端工厂的 `json_mode` 开关）· `.env.example:59-78`（三家 11/11 组合实测矩阵）（2026-10-26 实读：router.py:91 为唯一显式 method；graph_compose :156 未传；providers :78-80 json_mode 在位） |
+| Embedding provider 统一选型（远程/本地 bge/Mock；维度 512↔1024 由 provider 派生；启动预热 + 真值灯 `embedding_real`） | ✅ | `packages/agent-core/agent_core/memory/embedder.py` · `_warm_embedding_backend` 定义 `applications/agent_server/main.py:144`、调用 `:349` · `EMBEDDING_REQUIRE_REAL=true` 为调用期硬失败（刻意不升级为启动 crash-loop）（2026-10-26 实读：embedder.py 与 _warm_embedding_backend :144 / 调用 :349 在位；EMBEDDING_REQUIRE_REAL 护栏在位） |
 | SSE 统一契约（graph 路径与 Planner 路径事件同构，客户端无感） | ✅ | `packages/shared-schemas/shared_schemas/sse.py:13-30` · `packages/agent-runtime/agent_runtime/planner/protocol.py:88-95`（`StreamEvent` 唯一定义）· 两条路径同产该模型：`applications/agent_server/planners/graph.py:136-171`、`applications/agent_server/planners/deterministic.py:159-243`（原锚 `:738-780` 实为 Planner 协议文档区，2026-10-26 实读改正） |
-| 运行时模式 `local / single_node / distributed`（distributed 无 `DATABASE_URL` **启动即拒**） | ✅ | 默认 `applications/agent_server/config.py:142`；distributed 分支 `applications/agent_server/main.py:243`，无 PG 即 raise `:270-275` |
+| 运行时模式 `local / single_node / distributed`（distributed 无 `DATABASE_URL` **启动即拒**） | ✅ | 默认 `applications/agent_server/config.py:142`；distributed 分支 `applications/agent_server/main.py:243`，无 PG 即 raise `:270-275`（2026-10-26 实读：config.py:142 缺省 local；distributed 分支 :243、无 PG raise :270-275） |
 | **架构不变量 lint 18 条**（多数白名单为空 = fail-closed）+ 文档防漂移门禁 + 治理/HA 测试 | ✅ 进 CI | `scripts/lint_architecture.py`（2026-10-26 按 `main()` 打印标签实取 18 个：P2/P4-2/R19/P5/P6/P7/P8/P9/P10/P11/P12/P13/P14 + L-1/L-2/L-3/L-4/L-5；**无 P3 标签**，顶层包名冲突检查打印为 P5）· `check_*` 实现函数 19 个 · `scripts/check_doc_sync.py`（存在性基准 = `git ls-files`）｜ 计数口径（2026-10-16 定三口径、2026-10-26 更新读数）：**门禁编号**对外引用；用例读数按实测命令而非固定数——`uv run pytest tests/governance --collect-only -q` = **442**、`tests/ha` = **29**（旧记「28 与 19 测试文件数」与任何时点的文件数/用例数都对不上，作废） |
-| 控制台前端（会话/准入/控制面可视化） | ✅ | `applications/agent_server/api/console_router.py` + `applications/agent_server/static/` |
-| **Agent Registry / Agent 目录与市场**（登记、发现、owner、下线） | ❌ | |
-| **Tool Gateway**（统一 API 资产 + RBAC + 计量 + 限流熔断配额降级） | ❌ | MCP 客户端不算（那是消费侧） |
-| **触发器：Cron / 事件 / 主动式长时运行** | ❌ | 只有被动 `POST /api/callback/{task_id}` |
-| 渠道接入（企微 / 钉钉 / Slack / 邮件 / Web / Voice） | 🟡 | KS `applications/knowledge-service/knowledge_service/query_process/page/`、`applications/knowledge-service/knowledge_service/import_process/page/` 内嵌 HTML 控制台；无 IM 渠道 SDK |
-| 租户资源配额池（LLM 额度 / 向量库 / GPU / 日志存储） | 🟡 | `cost_governance` 默认关且 limit=0；资源级配额 ❌ |
-| 微调 / 蒸馏 / SFT 数据飞轮 | ❌ | 与既有对外口径一致（本项目不声称训练侧动手深度） |
-| 多模态（图像输入解析） | 🟡 | KS pdf→md + 图片 VL 摘要在位；端到端多模态对话 ❌ |
-| 部署与分发（K8s manifests、rev 门禁 build/distribute、双运行时两套镜像库） | ✅ 运维面 | `deploy/k8s/` · `AGENTS.md` §内网测试环境 126 |
+| 控制台前端（会话/准入/控制面可视化） | ✅ | `applications/agent_server/api/console_router.py` + `applications/agent_server/static/`（2026-10-26 实读：console_router.py 与 static/ 在位） |
+| **Agent Registry / Agent 目录与市场**（登记、发现、owner、下线） | ❌ | （2026-10-26 实取：Agent Registry / Registry 代码零命中） |
+| **Tool Gateway**（统一 API 资产 + RBAC + 计量 + 限流熔断配额降级） | ❌ | MCP 客户端不算（那是消费侧）（2026-10-26 实复核：无统一 Tool Gateway 实现；MCP 仅有消费侧客户端） |
+| **触发器：Cron / 事件 / 主动式长时运行** | ❌ | 只有被动 `POST /api/callback/{task_id}`（2026-10-26 实取：代码无 cron / 事件触发实现；回调仅 POST /api/callback 被动入口） |
+| 渠道接入（企微 / 钉钉 / Slack / 邮件 / Web / Voice） | 🟡 | KS `applications/knowledge-service/knowledge_service/query_process/page/`、`applications/knowledge-service/knowledge_service/import_process/page/` 内嵌 HTML 控制台；无 IM 渠道 SDK（2026-10-26 实读：两个 page/ 内嵌控制台在位；IM SDK 代码零命中（仅镜像 lint 含 Slack token 模式）） |
+| 租户资源配额池（LLM 额度 / 向量库 / GPU / 日志存储） | 🟡 | `cost_governance` 默认关且 limit=0；资源级配额 ❌（2026-10-26 实读：cost_governance_enabled 缺省 False（config.py:170），三项 budget_limit 均 0（:171-173）；资源级配额无实现） |
+| 微调 / 蒸馏 / SFT 数据飞轮 | ❌ | 与既有对外口径一致（本项目不声称训练侧动手深度）（2026-10-26 实取：SFT / fine-tune / distill 代码零命中） |
+| 多模态（图像输入解析） | 🟡 | KS pdf→md + 图片 VL 摘要在位；端到端多模态对话 ❌（2026-10-26 实读：pdf→md / md_img / item_name_recognition 节点在位；无端到端多模态对话） |
+| 部署与分发（K8s manifests、rev 门禁 build/distribute、双运行时两套镜像库） | ✅ 运维面 | `deploy/k8s/` · `AGENTS.md` §内网测试环境 126（2026-10-26 实读：deploy/k8s/ 清单与 scripts 在位） |
 
 ---
 
