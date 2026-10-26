@@ -72,7 +72,7 @@
 
 证据由三路合成：**① 本仓库全仓 import/符号扫描（主）**、② `noctilucent-lamp` wiki 的既有术语体系（决定用词）、③ 业界 2026 口径（决定「缺项」判据）。
 
-成文会话逐条复核的原始 4 条列于下表；**2026-10-26 复核轮另实读/实测了 §2 的 28 个能力行、本表第 4 行与 §4.2**（全表按「2026-10-26」计数共 30 个表格行，由脚本点算）。**未带日期标注的行仍属原扫描转述**，对外引用前建议抽验：
+成文会话逐条复核的原始 4 条列于下表；**2026-10-26 复核轮另实读/实测了 §2 的 29 个能力行、本表第 4 行与 §4.2**（全表按「2026-10-26」计数共 31 个表格行，由脚本点算）。**未带日期标注的行仍属原扫描转述**，对外引用前建议抽验：
 
 | 结论 | 复核方式与结果 |
 |---|---|
@@ -155,7 +155,7 @@ uv run --with ruff ruff check . && python scripts/check_doc_sync.py
 | 摘要压缩 compaction | ✅ | `packages/agent-runtime/agent_runtime/context/compact.py`（LLM 摘要为一条 system，保留最近 4 条原文，≤500 字）· 开关 `applications/agent_server/config.py:68-69`（`compaction_enabled=True`, `ratio=0.8`；原记 `:70-75` 已漂移）⚠️ 见 §4.1 |
 | 窗口滑动（与旧阈值语义兼容） | ✅ | `applications/agent_server/context.py:53-59` |
 | Context Manager 三段分离 + snapshot 跨轮 | ✅ | `packages/agent-runtime/agent_runtime/planner/context_manager.py`（`ConversationContext` / `TaskState` / `ExecutionState`；Skill Definition 不遗忘）· 读写链 `applications/agent_server/api/query_router.py:282`（`read_thread_snapshot`；原记 `:258` 是 planner 为 None 时的 graph 兜底）→ `applications/agent_server/planners/deterministic.py:234`（`snapshot=plan.last_snapshot`）→ `packages/agent-runtime/agent_runtime/planner/protocol.py:430-431`（`runtime.last_snapshot`；原记 `:426-428` 是 usage 计量注释） |
-| Assembler 五段管线 + 固定注入顺序 | ✅ | `packages/agent-runtime/agent_runtime/context/assembler.py:1-19`（collect→rank→budget→compress→trim+assemble）· 不可裁顺序在 `:7-8`（原记 `:10-12` 实为 compress/trim 段） |
+| Assembler 五段管线 + 固定注入顺序 | ✅ | `packages/agent-runtime/agent_runtime/context/assembler.py:121`（类 docstring 自述 collect→rank→budget→compress→assemble）· 实现段 `:158-160`（collect）/ `:273`（budget）/ `:281-324`（compress）/ `:382`（assemble）（2026-10-26 实读；原记 `:1-19` 是模块 docstring）· 不可裁顺序在 `:7-8`（原记 `:10-12` 实为 compress/trim 段） |
 | Context Governance 管道 Select→Recall→**Authorize→Validate→QualityScore**→Assemble | ✅ 部分（管线执行、返回值无消费者） | `packages/agent-runtime/agent_runtime/context/governor.py:206`（`govern_memories` 做 Select→Recall→Authorize→Validate→Score，**不调 Assembler**）；装配 `_build_context_governor`（`applications/agent_server/main.py:194-236`，挂载 `:475`）；请求链确实调用（`applications/agent_server/api/query_router.py:280-292`，异常降级为 `[]`）并把结果写进 `PlannerContext.governed_memories`（`:301`），但**该字段全仓无读取点**（唯一赋值 query_router、唯一定义 `packages/agent-runtime/agent_runtime/planner/protocol.py:174`）⇒ Authorize/Validate/QualityScore 的过滤结果不影响回答；真正进 prompt 的记忆走 deterministic 自己的 `recall()` + `MemoryGate`（`applications/agent_server/planners/deterministic.py:164-180`），**绕过 authorizer/validator/scorer**；`ContextBudget(model_window=32_000)` 硬编码（`applications/agent_server/main.py:226`），见 §4.2；原记装配锚 `applications/agent_server/main.py:129-171,397` 已漂移 |
 | 记忆门控（top-k → 归一化哈希去重 → 同类取最新消解冲突 → 预算内取 N） | ✅ | 2026-10-26 实读（原记把应用设置挂在 kernel 名下）：实现在 `packages/agent-runtime/agent_runtime/context/memory_gate.py`（top_k 默认 5 见 :50）；注入条数由应用设置 `memory_gate_top_k`（默认 5，`applications/agent_server/config.py:125`）经 `applications/agent_server/context.py:52` 与 `applications/agent_server/planners/deterministic.py:168-171`（>0 才装配）下发；kernel 侧默认 `packages/agent-runtime/agent_runtime/context/assembler.py:153` |
 | Memory 权限过滤（tenant/user/workspace × visibility） | ✅ 实现存在 / 🔽 **生产未生效** | `packages/agent-runtime/agent_runtime/context/authorizer.py`；只在 `govern_memories` 内被调用，而该结果无消费者（见本表 Context Governance 行）⇒ 线上召回实际只按 (tenant, workspace) 过滤（`applications/agent_server/memory/longterm.py:89-102`），无 visibility 层 |
