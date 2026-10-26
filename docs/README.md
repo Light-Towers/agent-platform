@@ -40,7 +40,7 @@
 
 **2026-10-26 追记 · 本表此前漏点两篇 ADR**（改前本索引正文里 `docs/adr/0012`、`docs/adr/0013` 命中数为 0）：
 - `docs/adr/0012-nl2sql-branch-consolidation.md` —— 分支收敛与删除死枝的依据登记（AGENTS.md《分支卫生》第 4 条指向它）。
-- `docs/adr/0013-semantic-cache-single-track.md` —— 语义缓存单轨拍板（Accepted C：Valkey 唯一实现，生产与开发测试都用它；PG 缓存退役、无自动回退）。**2026-10-27 补记：该件已入库**（`git ls-files` 命中），按纪律补回反引号并已复跑 `scripts/check_doc_sync.py`；§9 是变异战役读数、§11 是逐条变更台账（本行追加后至第 57 行）。
+- `docs/adr/0013-semantic-cache-single-track.md` —— 语义缓存单轨拍板（Accepted C：Valkey 唯一实现，生产与开发测试都用它；PG 缓存退役、无自动回退）。**2026-10-27 补记：该件已入库**（`git ls-files` 命中），按纪律补回反引号并已复跑 `scripts/check_doc_sync.py`；§9 是变异战役读数、§11 是逐条变更台账（本行追加后至第 58 行）。
 
 ## 3. `docs/plans/` 71 篇 md 分层（按主题簇）
 
