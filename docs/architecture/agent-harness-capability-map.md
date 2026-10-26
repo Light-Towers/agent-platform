@@ -103,7 +103,7 @@ uv run --with ruff ruff check . && python scripts/check_doc_sync.py
 
 - 表内证据一律写成可从仓库根直接定位的完整路径（如 `packages/agent-core/agent_core/tracing.py`），**不使用裸文件名或相对包名**——main.py / config.py / query_router.py / Makefile 在本仓各有 2–6 个同名文件，缩写即歧义。
 - 校验基准 = **版本控制清单**（`git ls-files`），与 `scripts/check_doc_sync.py` 同口径；本机才有、不入库的文件（例：§2.8 登记的 KS 65 条 real golden 集）**故意不用反引号**，防止别人 clone 后成死链。
-- 本次成文已按此规则跑过一轮全量路径校验，**改掉 4 条不实/歧义引用**：KS 无自有 Makefile（eval-rag 六目标在根 `Makefile:69-120`）；golden_queries.real.jsonl 被 `.gitignore:129` 忽略；exhibition 的只读 golden 在 `applications/exhibition-agent/skills/...` 而非包内；`agent/subagents`、`clients`、`repositories/pgvector` 等缩写目录已补全归属。
+- 本次成文已按此规则跑过一轮全量路径校验，**改掉 4 条不实/歧义引用**：KS 无自有 Makefile（eval-rag 七目标在根 `Makefile:104-154`，2026-10-26 复核）；golden_queries.real.jsonl 被 `.gitignore:129` 忽略；exhibition 的只读 golden 在 `applications/exhibition-agent/skills/...` 而非包内；`agent/subagents`、`clients`、`repositories/pgvector` 等缩写目录已补全归属。
 
 ---
 
@@ -292,7 +292,7 @@ uv run --with ruff ruff check . && python scripts/check_doc_sync.py
 | `eval/run_eval.py` **进 CI 唯一门禁**（`--fail-below 0.8`；`--require-llm` 缺 key 退出码 2 **不假装通过**） | ✅ | `eval/run_eval.py` · `Makefile:122 ci: lint test eval` |
 | 双 Planner 同 golden 基线 | ✅ | `eval/run_planner_eval.py` · `eval/baselines/planner_{deterministic,agentic}_latest.jsonl`（各 12 条）；agentic 轨**只评协议结构不评能力匹配** |
 | 检索指标库（recall@k / hit_rate@k / mrr / ndcg@k）+ 统计判定原语（配对 bootstrap CI、spearman/kendall、cohen κ，全接受 seed；退化输入返回中性值而非抛错，**防「把无法判定伪装成判定为显著」**） | ✅ | `packages/agent-core/agent_core/metrics/{retrieval,compare}.py` |
-| KS 评测体系（RAGAS `applications/knowledge-service/eval/score_ragas.py`、路由消融、e2e、`applications/knowledge-service/eval/meta_eval_judge.py` 自述「打分 API 未接线 ⇒ 不计一致性、**不伪造**」、基线快照） | ✅ 成熟 | `applications/knowledge-service/eval/` · 六个 eval-rag 目标由**根 Makefile:69-120** 驱动（KS 自身无 Makefile，勿写成 KS 的 Makefile） |
+| KS 评测体系（RAGAS `applications/knowledge-service/eval/score_ragas.py`、路由消融、e2e、`applications/knowledge-service/eval/meta_eval_judge.py` 自述「打分 API 未接线 ⇒ 不计一致性、**不伪造**」、基线快照） | ✅ 成熟 | `applications/knowledge-service/eval/` · 七个 eval-rag 目标（`eval-rag` / `-routes` / `-retrieval` / `-e2e` / `-gate` / `-baseline` / `-meta-ui`）由**根 Makefile:104-154** 驱动（KS 自身无 Makefile，勿写成 KS 的 Makefile） |
 | LLM-as-Judge 换 provider 去偏（缺配置则降级同主模型并告警） | ✅ | `applications/agent_federation/evaluation/judge.py` |
 | Trajectory 持久化（plan/steps/latency/tokens/cost/snapshot） | ✅ | `packages/agent-runtime/agent_runtime/trajectory/{models,store,store_pg}.py` · 构造 `applications/agent_server/main.py:140`（`PgTrajectoryStore`）、注入 `:500-502` |
 | Trajectory Replay（5 类 divergence：order / extra_call / missing_call / result_change / error_change，复用 `execute_plan` 真链） | 🟡 | `packages/agent-runtime/agent_runtime/trajectory/replay.py` 仅 `packages/agent-runtime/tests/test_replay.py` 使用，**无 HTTP 端点、无脚本入口** |
@@ -317,7 +317,7 @@ uv run --with ruff ruff check . && python scripts/check_doc_sync.py
 | Rerank（bge-reranker-v2-m3、`Semaphore(8)` 防显存放大、异常 passthrough 保原序）+ **断崖式动态 TopK**（gap_ratio 0.25 / gap_abs 0.5 / min 1 / max 10） | ✅（KS）/ 🔽 `rerank_enabled=False`（agent_server） | KS `applications/knowledge-service/knowledge_service/query_process/agent/nodes/node_rerank.py:1-25` + `applications/knowledge-service/knowledge_service/conf/rerank.yaml` · `applications/agent_server/rag/rerank.py` |
 | 知识生命周期 6 态 + 5 条合法边 + `REQUIRED_METADATA_FIELDS`；**只有 PUBLISHED 能进生产检索** | ✅ | `packages/shared-schemas/shared_schemas/knowledge_lifecycle.py:26-40` · KS `applications/knowledge-service/knowledge_service/core/knowledge_lifecycle_integration.py:44-62` |
 | 多租户 ACL **检索入参下推**（`item_name + tenant_id + scope_type` 复合过滤，非召回后过滤，INV-8） | ✅ | KS `applications/knowledge-service/knowledge_service/query_process/agent/nodes/node_search_embedding.py:71-78` · 每端点 `resolve_server_tenant` |
-| NL2SQL 12 节点（关键词抽取 → 并行召回 column/metric/value → 合并 → 并行过滤 table/metric → 生成 → 校验 → 执行/纠错回环 ≤3 次）+ 元知识 + 双库分离（meta + 只读 dw） | ✅ | `applications/nl2sql-service/nl2sql_service/agent/graph.py:37-48`（12 个 add_node） · `applications/nl2sql-service/nl2sql_service/services/meta_knowledge_service.py` · `applications/nl2sql-service/nl2sql_service/repositories/pgvector/` |
+| NL2SQL 19 节点（继承上下文 → 关键词抽取 → 并行召回 column/metric/value/relation/example → 合并 → 并行过滤 table/metric → 补上下文 → 生成 → SQL 校验 → 字面量核验 → 执行/纠错回环 ≤3 次（与校验回路共用同一上限）→ 零结果分诊 → 回答 → 收尾）+ 元知识 + 双库分离（meta + 只读 dw） | ✅ | `applications/nl2sql-service/nl2sql_service/agent/graph.py:89-107`（实测 19 个 add_node；同文件 `:1` 与 `:87` docstring 仍写「12 节点」，以注册数为准） · `applications/nl2sql-service/nl2sql_service/services/meta_knowledge_service.py` · `applications/nl2sql-service/nl2sql_service/repositories/pgvector/` |
 | agent_server 自有 RAG（pgvector + BM25 索引签名缓存 + RRF(60)；隔离 `(tenant 安全边界, workspace 归属维)` 成对出现） | ✅ | `applications/agent_server/rag/store.py:26-31,59-95`（ADR-0006 T9/W1）· `rag_top_k=4` 理由见 `applications/agent_server/config.py:58` |
 | 存储栈（Milvus 4 集合 / **Neo4j** KG / MinIO / MongoDB 历史 / 硅基流动 embedding+rerank） | ✅ | KS `applications/knowledge-service/knowledge_service/core/config.py:79-89` · `applications/knowledge-service/knowledge_service/clients/` |
 | SSE 流式检索 + 会话历史读写清 + 任务状态 | ✅ | KS `applications/knowledge-service/knowledge_service/api/query_router.py:313-325` · `applications/knowledge-service/knowledge_service/utils/sse_utils.py` |
