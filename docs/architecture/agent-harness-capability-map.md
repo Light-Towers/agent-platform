@@ -72,7 +72,7 @@
 
 证据由三路合成：**① 本仓库全仓 import/符号扫描（主）**、② `noctilucent-lamp` wiki 的既有术语体系（决定用词）、③ 业界 2026 口径（决定「缺项」判据）。
 
-成文会话逐条复核的原始 4 条列于下表；**2026-10-26 复核轮另实读/实测了 §2 的 33 个能力行、本表第 4 行与 §4.2**（全表按「2026-10-26」计数共 35 个表格行，由脚本点算）。**未带日期标注的行仍属原扫描转述**，对外引用前建议抽验：
+成文会话逐条复核的原始 4 条列于下表；**2026-10-26 复核轮另实读/实测了 §2 的 36 个能力行、本表第 4 行与 §4.2**（全表按「2026-10-26」计数共 38 个表格行，由脚本点算）。**未带日期标注的行仍属原扫描转述**，对外引用前建议抽验：
 
 | 结论 | 复核方式与结果 |
 |---|---|
@@ -144,8 +144,8 @@ uv run --with ruff ruff check . && python scripts/check_doc_sync.py
 | 动态 map-reduce（LangGraph `Send`） | 🟡 有替代物 | 自建分层并行 `packages/agent-runtime/agent_runtime/planner/execution_graph.py:199`（`topological_layers`）/ `:270`（按层执行）/ `:400`（同层 `asyncio.gather`）/ `:285-290`（层间 deadline 检查）/ `:512`（`execute_graph`）（2026-10-26 实读；原记 `:1-16` 是模块 docstring） |
 | 意图路由 L1/L2 + 澄清反问 | ✅（app）/ 🔽 `INTENT_ENABLED=false`（联邦） | `packages/agent-core/agent_core/intent/models.py:25,27`（`L1_THRESHOLD=0.8` / `CLARIFY_THRESHOLD=0.5`，2026-10-26 实读）· `applications/agent_server/agent/router.py:1-8,91` |
 | 查询改写 / 子问题分解 | 🔽 随 `INTENT_ENABLED` | `applications/agent_federation/agent/rewrite/rewrite_node.py` · `applications/agent_federation/agent/rewrite/subquery_decompose.py` |
-| 声明式 Workflow（YAML → Skill） | ✅ 语料仅 1 条 | `packages/agent-runtime/agent_runtime/skills/workflow.py`（`$input.<key>` / `$node.<id>` 映射）· `packages/agent-runtime/workflows/qa_pipeline.yaml` |
-| 静态 DAG 包装为能力 | ✅ | `packages/agent-runtime/agent_runtime/skills/dag.py` → 注册 `general_qa`（`applications/agent_server/capabilities.py:226-235`） |
+| 声明式 Workflow（YAML → Skill） | ✅ 语料仅 1 条 | `packages/agent-runtime/agent_runtime/skills/workflow.py`（`$input.<key>` / `$node.<id>` 映射）· `packages/agent-runtime/workflows/qa_pipeline.yaml`（2026-10-26 实读：workflows/ 下仅此 1 个 YAML） |
+| 静态 DAG 包装为能力 | ✅ | `packages/agent-runtime/agent_runtime/skills/dag.py` → 注册 `general_qa`（`applications/agent_server/capabilities.py:226-235`，2026-10-26 实读：`register(as_dag_skill(...))` 块） |
 
 ### 2.2 上下文工程 Context Engineering
 
@@ -172,7 +172,7 @@ uv run --with ruff ruff check . && python scripts/check_doc_sync.py
 
 | 能力 | 状态 | 证据 / 开关 |
 |---|---|---|
-| 四类契约 WORKING/EPISODIC/SEMANTIC/PROCEDURAL + `ContextSelector` 按 task_type 选类 | ✅ | `packages/agent-runtime/agent_runtime/memory_types.py:24-31,206-251` |
+| 四类契约 WORKING/EPISODIC/SEMANTIC/PROCEDURAL + `ContextSelector` 按 task_type 选类 | ✅ | `packages/agent-runtime/agent_runtime/memory_types.py:24,27-30`（`MemoryCategory` 四类成员）/ `:206-251`（`ContextSelector`，`select` :228）（2026-10-26 实读；原记 `:24-31` 尾行为空行） |
 | 会话历史 thread state + Checkpointer 三后端降级链（PG → Mongo（按 tenant 隔离）→ InMemory） | ✅ | `packages/agent-core/agent_core/memory/__init__.py:67-117` · `packages/shared-schemas/shared_schemas/thread.py` · 装配 `applications/agent_server/main.py:47-63`（`_build_checkpointer`；Mongo 侧按租户过滤见 `packages/agent-core/agent_core/memory/mongo_checkpointer.py:163`，2026-10-26 实读） |
 | 精确回忆（按 `thread_id` 回溯原文，与语义回忆正交） | ✅ 租户级（**非用户级**） | `applications/agent_server/memory/recall_exact.py` → `/history`；⚠️ **粒度只到租户**：鉴权启用时 `/history` 与 `/query` 的 `session_id` 均被忽略，`resolve_thread_id` 恒返回 `tenant-<服务端断言租户>`（`applications/agent_server/api/auth.py:32-44`、kernel `packages/agent-core/agent_core/guardrails/auth.py:56-68`），未验签身份时回退部署级 `default_tenant_id` ⇒ 同租户所有调用方共用一条会话记录与历史原文（`applications/agent_server/api/session_router.py:33` 直接把入参丢弃），未验签部署下即所有调用方共享；已作为已知代价登记在 `docs/operations/minimal-release-runbook.md:390`，拆到用户粒度需服务端验签的会话令牌（独立方案）。另 `/session/revert` 同样作用于该共享 thread（`applications/agent_server/api/session_router.py:76-78`） |
 | 长期语义记忆（PG + pgvector；评分 `type_weight × importance × time_decay`） | ✅ 依赖 `DATABASE_URL` | `packages/agent-core/agent_core/memory/typed.py`（`remember_typed:235` / `recall_typed:328` / `consolidate` / `forget`）· `applications/agent_server/memory/longterm.py:89-110` · migration 见 `packages/agent-runtime/agent_runtime/migrations/`（003_memory / 004_memory_tenant_id / 005_memory_tenant_enforcement / 008_memories_dual_scope 的 .up.sql） |
