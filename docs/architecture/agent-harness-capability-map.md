@@ -72,7 +72,7 @@
 
 证据由三路合成：**① 本仓库全仓 import/符号扫描（主）**、② `noctilucent-lamp` wiki 的既有术语体系（决定用词）、③ 业界 2026 口径（决定「缺项」判据）。
 
-成文会话逐条复核的原始 4 条列于下表；**2026-10-26 复核轮另实读/实测了 §2 的 31 个能力行、本表第 4 行与 §4.2**（全表按「2026-10-26」计数共 33 个表格行，由脚本点算）。**未带日期标注的行仍属原扫描转述**，对外引用前建议抽验：
+成文会话逐条复核的原始 4 条列于下表；**2026-10-26 复核轮另实读/实测了 §2 的 33 个能力行、本表第 4 行与 §4.2**（全表按「2026-10-26」计数共 35 个表格行，由脚本点算）。**未带日期标注的行仍属原扫描转述**，对外引用前建议抽验：
 
 | 结论 | 复核方式与结果 |
 |---|---|
@@ -141,8 +141,8 @@ uv run --with ruff ruff check . && python scripts/check_doc_sync.py
 | **A2A / Agent Card / 跨组织互操作** | ❌ | 全仓零命中。实际互操作走 LangGraph Agent Protocol + 自有 REST：`applications/agent_federation/agent/async_subagents.py`、`applications/agent_federation/agent/config.py:31-77` |
 | Commander（目标对齐 + 结构编排）/ Handoff 控制权移交 | ❌ | 仅 supervisor 图 + `delegate`；无 Commander 角色层、无移交语义 |
 | debate / voting / blackboard | ❌ | |
-| 动态 map-reduce（LangGraph `Send`） | 🟡 有替代物 | 自建分层并行 `packages/agent-runtime/agent_runtime/planner/execution_graph.py:1-16`（同层 `asyncio.gather` + 层间顺序 + deadline 检查） |
-| 意图路由 L1/L2 + 澄清反问 | ✅（app）/ 🔽 `INTENT_ENABLED=false`（联邦） | `packages/agent-core/agent_core/intent/`（`L1_THRESHOLD=0.8`、`CLARIFY_THRESHOLD=0.5`）· `applications/agent_server/agent/router.py:1-8,91` |
+| 动态 map-reduce（LangGraph `Send`） | 🟡 有替代物 | 自建分层并行 `packages/agent-runtime/agent_runtime/planner/execution_graph.py:199`（`topological_layers`）/ `:270`（按层执行）/ `:400`（同层 `asyncio.gather`）/ `:285-290`（层间 deadline 检查）/ `:512`（`execute_graph`）（2026-10-26 实读；原记 `:1-16` 是模块 docstring） |
+| 意图路由 L1/L2 + 澄清反问 | ✅（app）/ 🔽 `INTENT_ENABLED=false`（联邦） | `packages/agent-core/agent_core/intent/models.py:25,27`（`L1_THRESHOLD=0.8` / `CLARIFY_THRESHOLD=0.5`，2026-10-26 实读）· `applications/agent_server/agent/router.py:1-8,91` |
 | 查询改写 / 子问题分解 | 🔽 随 `INTENT_ENABLED` | `applications/agent_federation/agent/rewrite/rewrite_node.py` · `applications/agent_federation/agent/rewrite/subquery_decompose.py` |
 | 声明式 Workflow（YAML → Skill） | ✅ 语料仅 1 条 | `packages/agent-runtime/agent_runtime/skills/workflow.py`（`$input.<key>` / `$node.<id>` 映射）· `packages/agent-runtime/workflows/qa_pipeline.yaml` |
 | 静态 DAG 包装为能力 | ✅ | `packages/agent-runtime/agent_runtime/skills/dag.py` → 注册 `general_qa`（`applications/agent_server/capabilities.py:226-235`） |
