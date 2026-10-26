@@ -35,6 +35,7 @@
 | `docs/runtime-self-build-analysis.md` + `docs/opensource-runtime-counterparts.md` | 业界对照族（框架层 / 内核原语层） | 4 / 0 |
 | `docs/runtime-analysis-overview.md` | **已并入** `runtime-self-build-analysis.md`（2026-10-15 合并 A），本页仅作旧链接寻址 | 0 |
 | `docs/adr/0003`~`0004` | 早期 ADR，`0004` 状态仍为「修订中」 | 0 / 3 |
+| `docs/adr/0011-two-text2sql-paths-convergence.md` | **两条 Text2SQL 路收敛**（2026-10-18 拍板选项 A：`agent_server/sql` 退役、统一到 nl2sql-service）；§1–§6 是拍板前分析，§7 起是执行记录 | 0（2026-10-27 取，不含本行；此前从本表漏登，文件名在全仓入库内容中零出现） |
 
 未入库、只在本机存在的一篇：docs/agno-agentos-comparison.md（平台层竞品对比，未提交，clone 后不存在，故按 AGENTS.md 防漂移规矩不以反引号路径书写）。
 
@@ -48,6 +49,7 @@
 
 > **2026-10-16 追记（本层新增 4 行，其余行未动）**：本节写就时是 71 篇，现值为**顶层 `docs/plans/*.md` 入库 75 篇 / 文件系统 76 篇**（差的 1 篇是并行会话新建、此刻尚未入库的 plan-deep-research-app-2026-10-16.md——**按 AGENTS.md「不入库路径不用反引号」的纪律这里写成普通文本**，且**本索引不代登**，由它自己的会话登记）。复取命令：`git ls-files docs/plans | grep -cE '^docs/plans/[^/]+\.md$'`。新登记的四篇：`plan-v3-unwired-landing-2026-10-15`、`plan-unfinished-completion-schedule-2026-10-16`、`plan-identity-gate-6of6-2026-10-16`、`plan-forensic-provenance-wiring-2026-10-16`。
 > **两条没有重取、不得当现值引**：① 顶部第 4 行的「42 篇有状态行 / 29 篇未命中」与 §7 名单仍是 2026-10-15 快照（上面四篇都**有**可辨状态行，但按 §6 口径命令未重跑）；② 四行的「提及」数在本批合入后会各自 +1 以上（新行本身就是新增引用），复现请用 `git grep -c -o -- "<文件名>" | awk -F: '{s+=$NF} END{print s}'` 现取。
+> **2026-10-27 复核**：上上行的「75 / 76」是 2026-10-16 时点值，**不得当现值引**；顶层 `docs/plans/*.md` 入库现为 **94 篇**（与顶部现状行同源，复现 `git ls-files docs/plans | grep -cE '^docs/plans/[^/]+\.md$'`；若写成 `git ls-files 'docs/plans/*.md'` 会因 git pathspec 的 `*` 跨目录而多算 8 个 `docs/plans/archive/` 文件、得 102，两个数都成立但口径不同）。本节标题的「71 篇」同样是写就时的快照，未改。
 
 ### 3.1 安全与依赖整改（CodeQL / Dependabot / 风险接受）
 
