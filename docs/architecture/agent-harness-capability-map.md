@@ -72,7 +72,7 @@
 
 证据由三路合成：**① 本仓库全仓 import/符号扫描（主）**、② `noctilucent-lamp` wiki 的既有术语体系（决定用词）、③ 业界 2026 口径（决定「缺项」判据）。
 
-成文会话逐条复核的原始 4 条列于下表；**2026-10-26 复核轮另实读/实测了 §2 的 22 个能力行、本表第 4 行与 §4.2**（全表按「2026-10-26」计数共 24 个表格行，由脚本点算）。**未带日期标注的行仍属原扫描转述**，对外引用前建议抽验：
+成文会话逐条复核的原始 4 条列于下表；**2026-10-26 复核轮另实读/实测了 §2 的 23 个能力行、本表第 4 行与 §4.2**（全表按「2026-10-26」计数共 25 个表格行，由脚本点算）。**未带日期标注的行仍属原扫描转述**，对外引用前建议抽验：
 
 | 结论 | 复核方式与结果 |
 |---|---|
@@ -183,7 +183,7 @@ uv run --with ruff ruff check . && python scripts/check_doc_sync.py
 | 情景 → 程序性自动沉淀（trajectory → episode → 候选 Skill） | ✅ 无 flag | `packages/agent-runtime/agent_runtime/memory_sink.py`（`EpisodicSink`/`ProceduralSink`, `trigger_interval=10`）· 持久化 `packages/agent-runtime/agent_runtime/memory_pg.py`；⚠️ 候选只落 `lifecycle="draft"`、不回注 registry，使用效果→升降级未接线（见 §2.1 Self-evolution 行） |
 | WorkingMemory 快照门面（Checkpoint+Status+Awaitable 三 store 统一） | 🟡 | `packages/agent-runtime/agent_runtime/working_memory.py` 零调用（**底层三 store 本身是接线的**，缺的只是门面消费方） |
 | 语义召回相似度 | ⚠️ **降级形态** | `packages/agent-runtime/agent_runtime/memory_recall.py:1-13` 用**字符 bigram Jaccard**（自述「生产可替换为 embedding+pgvector」）；替换件 `packages/agent-runtime/agent_runtime/embedding_recall.py` 🟡 零调用 |
-| Episode 模糊去重 | 🟡 | `packages/agent-runtime/agent_runtime/episode_dedup.py:11-14`（自述当前不支持，`similarity_threshold` 预留） |
+| Episode 模糊去重 | 🟡 | `packages/agent-runtime/agent_runtime/episode_dedup.py:7-8`（2026-10-26 实读：docstring 自述「当前用精确匹配，模糊去重需 embedding，预留 `similarity_threshold` 参数」；类体 `:21`） |
 | 冷启动种子记忆 | 🟡 | `packages/agent-runtime/agent_runtime/memory_seed.py` 零调用 |
 | 租户漏传 fail-fast 门（绝不静默落 `default`） | ✅ | `packages/agent-core/agent_core/memory/_tenant_gate.py:14-27` + 治理测试 `tests/governance/test_tenant_default_forbidden.py` |
 | 内核语义记忆总开关与 app 路径**不同源** | ⚠️ 语义裂缝 | `SEMANTIC_MEMORY_ENABLED=false`（`packages/agent-core/agent_core/config.py:135`）只门 `recall_memories`/`remember_memory` 旧门面；`agent_server` typed PG 路径只看连接池（`applications/agent_server/memory/longterm.py:8-13` 自述） |
