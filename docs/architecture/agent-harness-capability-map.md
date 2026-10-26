@@ -152,7 +152,7 @@ uv run --with ruff ruff check . && python scripts/check_doc_sync.py
 | 能力 | 状态 | 证据 / 开关 |
 |---|---|---|
 | 分层 token 预算（7 层 + 未用余量按优先级回流） | ✅ | `packages/agent-runtime/agent_runtime/context/budget.py:17-31`（system 5% / tool_defs 8% / task 6% / conversation 20% / memory 8% / tool_results 35% / execution 18%） |
-| 摘要压缩 compaction | ✅ | `packages/agent-runtime/agent_runtime/context/compact.py`（LLM 摘要为一条 system，保留最近 4 条原文，≤500 字）· 开关 `applications/agent_server/config.py:70-75`（`compaction_enabled=True`, `ratio=0.8`）⚠️ 见 §4.1 |
+| 摘要压缩 compaction | ✅ | `packages/agent-runtime/agent_runtime/context/compact.py`（LLM 摘要为一条 system，保留最近 4 条原文，≤500 字）· 开关 `applications/agent_server/config.py:68-69`（`compaction_enabled=True`, `ratio=0.8`；原记 `:70-75` 已漂移）⚠️ 见 §4.1 |
 | 窗口滑动（与旧阈值语义兼容） | ✅ | `applications/agent_server/context.py:53-59` |
 | Context Manager 三段分离 + snapshot 跨轮 | ✅ | `packages/agent-runtime/agent_runtime/planner/context_manager.py`（`ConversationContext` / `TaskState` / `ExecutionState`；Skill Definition 不遗忘）· 读写链 `applications/agent_server/api/query_router.py:282`（`read_thread_snapshot`；原记 `:258` 是 planner 为 None 时的 graph 兜底）→ `applications/agent_server/planners/deterministic.py:234`（`snapshot=plan.last_snapshot`）→ `packages/agent-runtime/agent_runtime/planner/protocol.py:430-431`（`runtime.last_snapshot`；原记 `:426-428` 是 usage 计量注释） |
 | Assembler 五段管线 + 固定注入顺序 | ✅ | `packages/agent-runtime/agent_runtime/context/assembler.py:1-19`（collect→rank→budget→compress→trim+assemble）· 不可裁顺序在 `:7-8`（原记 `:10-12` 实为 compress/trim 段） |
