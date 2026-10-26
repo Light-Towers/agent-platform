@@ -89,11 +89,16 @@ rg -n 'enabled\s*[:=]\s*(bool\s*=\s*)?False|env_bool\("[A-Z_]+",\s*False\)' \
    applications/agent_server/config.py packages/agent-core/agent_core/config.py \
    packages/agent-runtime/agent_runtime/identity.py applications/agent_federation/agent
 
-# 2) 零生产调用模块：模块名在全仓出现处是否只有 tests/ 与自身
-for m in reflection working_memory memory_seed episode_dedup embedding_recall \
-         state_migration payload_externalization human_task execution_recovery skill_router; do
-  echo "== $m"; rg -l "$m" --glob '!**/tests/**' --glob '!docs/**'
+# 2) 零生产调用：§6 的 13 条按「模块零 import / 符号零引用」分别取证
+#    模块级 7 条（前 5 个循环抽样；后 2 个应只命中包内重导出）
+for m in reflection working_memory memory_seed episode_dedup embedding_recall; do
+  echo "== $m"; rg -l "$m" --type py --glob '!**/tests/**'
 done
+rg -n "skill_context|replay_trajectory" --type py --glob '!**/tests/**'
+#    符号级 2 条（命中应只剩定义/docstring）
+rg -n "run_admitted|RateLimitMiddleware" --type py --glob '!**/tests/**'
+#    已接线·默认关 4 条不适用本命令：human_task / execution_recovery /
+#    state_migration / payload_externalization（装配点见 §6 判定方法）
 
 # 3) 文档-代码同步门禁（路径存在性以 git 清单为准）
 uv run --with ruff ruff check . && python scripts/check_doc_sync.py
