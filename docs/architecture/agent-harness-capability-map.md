@@ -64,7 +64,7 @@
 
 ### 1.2 三个不可混用的维度
 
-1. **代码在位 ≠ 已接线**：§6 单列 13 个**符号级零生产调用**的模块；§2 里标 🟡 的行范围更宽（装配缺口 / 无出数面 / 仅覆盖部分路径也算半成品），**两者不是同一集合，别把 13 当作 🟡 的行数**。
+1. **代码在位 ≠ 已接线**：§6 单列 13 条（9 条符号级零生产调用/仅重导出 + 4 条已接线·默认关）；§2 里标 🟡 的行范围更宽（装配缺口 / 无出数面 / 仅覆盖部分路径也算半成品），**两者不是同一集合，别把 13 当作 🟡 的行数**。
 2. **已接线 ≠ 默认生效**：§5 台账按**开关**列（agent_server 16 行 + 内核/身份/联邦 env 直读 16 项）；§2 的 🔽 行按**能力**计，同一开关可连带多个能力行，**两者不是 1:1，别把 16 当作 🔽 的行数**。
 3. **默认生效 ≠ 现网已验收**：现网 `DATABASE_URL`/`scheduler_enabled` 等实际取值见 `docs/operations/env-126-inventory.md`，与本文的仓库默认值不是同一件事。
 
@@ -97,7 +97,7 @@ rg -n -e 'DEPLOY_ENFORCE_IDENTITY' -e 'TENANT_JWT_ENFORCE' -e 'TENANT_HEADER_ENF
    -e 'AGENT_MODE' -e 'GRAY_PCT' -e 'IMG_SUMMARY_ENABLED' -e 'DISABLE_AUTH' \
    --type py --glob '!**/tests/**'
 
-# 2) 零生产调用：§6 的 13 条按「模块零 import / 符号零引用」分别取证
+# 2) 零生产调用：§6 前 9 条按「模块零 import / 符号零引用」分别取证（后 4 条已接线·默认关，见文末）
 #    模块级 7 条（前 5 个循环抽样；后 2 个应只命中包内重导出）
 for m in reflection working_memory memory_seed episode_dedup embedding_recall; do
   echo "== $m"; rg -l "$m" --type py --glob '!**/tests/**'
@@ -430,15 +430,15 @@ uv run --with ruff ruff check . && python scripts/check_doc_sync.py
 
 ---
 
-## 6. 零生产调用模块清单（13 条）
+## 6. 零生产调用与已接线默认关清单（13 条 = 9 + 4）
 
-> **先定义口径，别与本仓其它计数混读**：本表判据是「**全仓生产代码零 import**（排除 `**/tests/**` 与 `docs/**`）」，共 13 条；而 `docs/plans/production-delivery-anchor-map-2026-10-09.md` 的「未接线 = **5 处**」判据是「**带 `STATUS: NOT WIRED` 自述标注**」，且该文件明确把 `forensic` / `effect_contract` / `skill_lifecycle` **排除**在未接线之外（它们在运行时生产链内部被调用，不是孤岛）。两个数都成立，回答的是不同问题：前者问「没人用」（含未自述的 9 条），后者问「账面声明过没接线」（5 条）。本表第 10–13 项（标注 `（P1-7）` 的四条）即那 5 处中的 4 个 `agent-runtime` 模块（第 5 处是 exhibition `skill_router`，另见 §2.5）；**原写「前 4 条」是错位**，列表前 4 项是记忆类模块，与 P1-7 无关。
+> **先定义口径，别与本仓其它计数混读**：本表 13 条分两段判据：**前 9 条**是「**全仓生产代码零 import / 符号零引用**（排除 `**/tests/**` 与 `docs/**`）」，**后 4 条**（标 `（P1-7）`）是「已接线、随开关默认关」；而 `docs/plans/production-delivery-anchor-map-2026-10-09.md` 的「未接线 = **5 处**」判据是「**带 `STATUS: NOT WIRED` 自述标注**」，且该文件明确把 `forensic` / `effect_contract` / `skill_lifecycle` **排除**在未接线之外（它们在运行时生产链内部被调用，不是孤岛）。两个数都成立，回答的是不同问题：前者问「生产链上没有真实消费方或默认不生效」（9 条零调用 + 4 条已接线默认关），后者问「账面声明过没接线」（5 条）。本表第 10–13 项（标注 `（P1-7）` 的四条）即那 5 处中的 4 个 `agent-runtime` 模块（第 5 处是 exhibition `skill_router`，另见 §2.5）；**原写「前 4 条」是错位**，列表前 4 项是记忆类模块，与 P1-7 无关。
 
 `packages/agent-runtime/agent_runtime/reflection.py`（ReflectionEngine）· `packages/agent-runtime/agent_runtime/working_memory.py` · `packages/agent-runtime/agent_runtime/memory_seed.py` · `packages/agent-runtime/agent_runtime/episode_dedup.py` · `packages/agent-runtime/agent_runtime/embedding_recall.py` · `packages/agent-runtime/agent_runtime/context/skill_context.py` · `packages/agent-runtime/agent_runtime/admission_gateway.py:56 run_admitted` · `packages/agent-runtime/agent_runtime/trajectory/replay.py` · `packages/agent-runtime/agent_runtime/skills/middleware.py:198 RateLimitMiddleware` · `packages/agent-runtime/agent_runtime/human_task.py`（P1-7，已接线·默认关）· `packages/agent-runtime/agent_runtime/execution_recovery.py`（P1-7，已接线·默认关）· `packages/agent-runtime/agent_runtime/state_migration.py`（P1-7，已接线·默认关）· `packages/agent-runtime/agent_runtime/payload_externalization.py`（P1-7，已接线·默认关）
 
 外加 4 处「构建但未注入 / 装配缺项」（2026-10-26 按当前树复核：三处旧锚全部漂移，其中一处判断反转）：`applications/agent_server/main.py:138` 构造 `PgIdempotencyStore`、`:293` 解包后**零消费者**（同函数返回的 checkpoint/ownership/trajectory 都在 `:500-502` 注入，唯它对不上消费方）· agent_server **未注入** `side_effect_store`（旧记 `applications/agent_server/main.py:408-424` 实为 graph/planner 装配，当前文件无该符号）：联邦侧已构建并注入（`applications/agent_federation/planners/__init__.py:56,116`），agent_server 侧 `PlannerRuntime` 默认 None（`packages/agent-runtime/agent_runtime/planner/protocol.py:390,413`）⇒ `packages/agent-runtime/agent_runtime/planner/execution_graph.py:351-360` 的副作用记录分支在主平台恒假 · `applications/agent_server/main.py:360-363` 的 `SessionCoordinator` 未传 `lease_backend`（旧记 `:282-285` 实为 `init_pool`）⇒ 恒用 `InMemoryLeaseBackend`（`packages/agent-runtime/agent_runtime/coordinator.py:143`），`PgAdvisoryLeaseBackend(` 全仓生产代码零构造 · `applications/exhibition-agent/exhibition_agent/foundation/skill_router.py`
 
-**判定方法（2026-10-26 按本规则复跑并订正）**：本表真实判据是**符号级零调用或仅重导出**，不是「模块 import 命中数 = 0」——按 import 实取，13 条里有 7 条已有生产 import：`context/skill_context.py` 与 `trajectory/replay.py` 只被各自包的 `__init__.py` 重导出（无消费者）；`skills/middleware.py` 模块被联邦 `applications/agent_federation/planners/agentic_runtime_bridge.py:38` 使用，但 `RateLimitMiddleware` 符号零引用；`admission_gateway.py` 被 `applications/agent_server/main.py:22` import、`applications/agent_server/main.py:239-261` 构造（`PgAdmissionController`），但 `run_admitted` 符号零引用；`human_task.py` / `execution_recovery.py` / `state_migration.py` / `payload_externalization.py` 四条均已在 `applications/agent_server/main.py` 构造（`:490`、`:547-548`、`:128,135`、`:80-90`），属「已接线、随开关默认关」而非「零调用」——与 AGENTS.md 2026-10-16 撤除「未接线」标注一致。故「13 条」的准确读法是「13 个符号级零调用或仅重导出的模块」；P1-7 四条另有模块头 `STATUS: NOT WIRED` 自述作为第二证据。
+**判定方法（2026-10-26 按本规则复跑并订正）**：前 9 条的真实判据是**符号级零调用或仅重导出**，不是「模块 import 命中数 = 0」；后 4 条不适用此判据（已接线，只是默认关）——按 import 实取，13 条里有 7 条已有生产 import：`context/skill_context.py` 与 `trajectory/replay.py` 只被各自包的 `__init__.py` 重导出（无消费者）；`skills/middleware.py` 模块被联邦 `applications/agent_federation/planners/agentic_runtime_bridge.py:38` 使用，但 `RateLimitMiddleware` 符号零引用；`admission_gateway.py` 被 `applications/agent_server/main.py:22` import、`applications/agent_server/main.py:239-261` 构造（`PgAdmissionController`），但 `run_admitted` 符号零引用；`human_task.py` / `execution_recovery.py` / `state_migration.py` / `payload_externalization.py` 四条均已在 `applications/agent_server/main.py` 构造（`:490`、`:547-548`、`:128,135`、`:80-90`），属「已接线、随开关默认关」而非「零调用」——与 AGENTS.md 2026-10-16 撤除「未接线」标注一致。故「13 条」的准确读法是「9 条符号级零调用或仅重导出 + 4 条已接线·随开关默认关」；P1-7 四条模块头已于 2026-10-15 改为 `STATUS: WIRED`（2026-10-26 实读四文件 `:4`），**原句「另有 NOT WIRED 自述作为第二证据」已作废**。
 
 ---
 
