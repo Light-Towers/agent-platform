@@ -266,11 +266,15 @@ uv run python -u scripts/mutation_engine.py \
 当日实况（先读再动手，别按本机假设）：126 有 `ap-test-base:2`（Python 3.11.16，**系统解释器无 pytest**）、`pgvector/pgvector:pg16` 以容器 `ap-iso-pg` 跑在 `127.0.0.1:5433`、`valkey/valkey-bundle:9.1.2` 镜像在库；`/opt/agent-platform/.venv` 依赖树完整但**不含 `valkey` 客户端**。宿主 `0.0.0.0:6379` 是 apt 装的 `/usr/bin/redis-server`——**不是 Valkey、没有 search 模块**，拿它跑契约用例会得到与代码无关的红。
 
 ```bash
-# 1) 取代码只能走 git archive（入库后的 LF），不要 tar 工作区：
-#    tar 工作区带 CRLF ⇒ "migration checksum mismatch for v1 ('baseline')" ⇒ 真 PG 用例整片 skip
-git archive --format=tar -o envrun.tar HEAD packages/agent-core packages/agent-runtime \
-    packages/shared-schemas tests/ha tests/conftest.py pyproject.toml applications/agent_server
-gzip -f envrun.tar && scp envrun.tar.gz <126>:/tmp/
+# 1) 全套补跑只能走 git bundle + clone（AGENTS.md 第 1 条的既定通道），两个坑一起避开：
+#    - tar 工作区带 CRLF ⇒ "migration checksum mismatch for v1 ('baseline')" ⇒ 真 PG 用例整片 skip
+#    - git archive / tar 出来的副本没有 .git ⇒ 一切以 git ls-files 为存在性基准的门禁
+#      报 "仓内路径清单不可用 ⇒ 门禁 fail-closed"（本轮实测：根套件因此多 6 条红，
+#      断言原文带 120 项）。那 6 条红是**交付形状**造成的，门禁红得对，不许为它放宽
+git bundle create full.bundle <分支名>          # 13.7MB 量级，比 tar 全树还小
+scp full.bundle <126>:/tmp/ && ssh <126> 'git clone -q -b <分支名> /tmp/full.bundle /tmp/qoder-git/tree'
+#    只跑 tests/ 之外、且不读 git 清单的 session 时 git archive 够用；全套不要用。
+#    clone 完先自证：git rev-parse --short HEAD 与 git ls-files | wc -l 都要有数
 
 # 2) tests/ha 对真 pgvector：用新建库，别复用 ap-iso 的旧 schema
 #    （它的 v6 在 6cb1c639 被就地改过——legacy DB 崩的修复——checksum 必与 HEAD 不符）
