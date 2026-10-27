@@ -322,12 +322,30 @@ curl http://127.0.0.1:8000/health
   "cache_backend": "disabled",
   "cache_ready": true,
   "cache_degraded_reason": null,
+  "cache_stats": {
+    "backend": "disabled",
+    "scope": "agent_server",
+    "total": 0,
+    "hit_rate": 0.0,
+    "l1_hit": 0,
+    "l2_hit": 0,
+    "null_hit": 0,
+    "miss": 0,
+    "error": 0,
+    "skipped_no_tenant": 0,
+    "skipped_unsafe_tag": 0,
+    "skipped_pii": 0,
+    "dropped_writes": 0,
+    "embedding_error": 0,
+    "l2_unavailable": 0,
+    "index_missing": 0
+  },
   "auth_enabled": false,
   "identity_mode": "insecure"
 }
 ```
 
-> 上面是 2026-10-25 本机**实跑取到**的真实响应（未配 `DATABASE_URL` 的零依赖形态，故 `storage=memory`、`embedding_backend=MockEmbedder`、`llm=false`；未起 Valkey，故 `CACHE_BACKEND=disabled`），共 **28 个键 = 共享基类 13 + 本 app 独有 15**。**2026-10-27 复核**：按下述命令重跑，28 个键与逐项取值均与上表一致。
+> 上面是 2026-10-25 本机**实跑取到**的真实响应（未配 `DATABASE_URL` 的零依赖形态，故 `storage=memory`、`embedding_backend=MockEmbedder`、`llm=false`；未起 Valkey，故 `CACHE_BACKEND=disabled`），共 **29 个键 = 共享基类 13 + 本 app 独有 16**。**2026-10-27 复核**：按下述命令重跑，29 个键与逐项取值均与上表一致（`cache_stats` 同日新增，是缓存命中率与分账计数的出口；键集合恒定，未发生的计数渲成 0）。
 >
 > 复现命令（**必须进 lifespan**：`embedding_backend` / `langfuse_ready` 是启动期算一次、存进 `app.state` 的值，`TestClient(app)` 不进 `with` 就不触发启动钩子，`/health` 会把 `embedding_backend` 报成 `unknown`——2026-10-27 实测两种写法分别得 `unknown` 与 `MockEmbedder`）：
 >
@@ -427,8 +445,10 @@ curl -X POST http://127.0.0.1:8000/api/callback/{task_id} \
 | `VALKEY_URL` | `redis://localhost:6379/0` | Valkey 连接串（生产由 Secret 注入，日志/健康态脱敏） |
 | `CACHE_THRESHOLD` | `0.05` | 语义缓存命中**余弦距离**阈值（越小越严；联邦默认 `0.08`） |
 | `MEMORY_ENABLED` | `true` | 长期记忆（pgvector）开关 |
-| `BREAKER_FAILURE_THRESHOLD` | `3` | 熔断器连续失败阈值（触发熔断） |
-| `BREAKER_RECOVERY_SECONDS` | `30` | 熔断器半开恢复等待（秒） |
+| `BREAKER_FAILURE_THRESHOLD` | `3` | 平台侧熔断连续失败阈值（capability/MCP 链路，`agent_server` Settings 字段派生的 env 名） |
+| `BREAKER_RECOVERY_SECONDS` | `30` | 平台侧熔断半开恢复等待（秒） |
+| `CACHE_BREAKER_FAILURES` | `3` | 语义缓存熔断的连续失败阈值——与上面那两个**不同源**，只作用于缓存后端 |
+| `CACHE_BREAKER_RECOVERY_SECONDS` | `15.0` | 语义缓存熔断半开恢复等待（秒） |
 
 ### Plan-F 配置
 
