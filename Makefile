@@ -11,6 +11,7 @@ lint:
 	uv run python scripts/lint_architecture.py
 	uv run python scripts/lint_migration_refs.py
 	uv run python scripts/lint_public_mirror.py
+	uv run python scripts/lint_graph_state_boundary.py
 
 format:
 	uv run --with ruff ruff format .
