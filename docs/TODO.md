@@ -37,7 +37,7 @@
 | 部署侧存量取证 A/B（`checkpoints` 里存量 `user-*` thread_id · `revert_audit.operator` 历史行） | §8 + §5「审计主体」条 | 本机 `Meta Tunnel`（TUN）把整段 `<internal-ip>/24` 接管 ⇒ `TcpTestSucceeded=True` **不携带任何信息**；`docker` / `kubectl` / `psql` 全部 NOT FOUND、根无 `.env` | 二选一：同网段机器或 VPN 上代跑 `docs/operations/audit-operator-principal-runbook.md`；或本人把该段加进代理 bypass，且**先用「随机死端口对照法」复核劫持已解除**再取证 |
 | Copilot「Code scanning AI findings」工作流恒失败 | §8 | 平台侧月度配额（`SessionModelError … monthly quota` / `statusCode 402`），五个独立数据点里含**零代码 PR** ⇒ 与本仓 diff 无关 | 本仓改不了；要消噪只能在 GHAS 设置里关 AI findings。它未挂必需检查，不阻塞合并 |
 
-### 0.2 C 需拍板 / 需先出方案（4 条）
+### 0.2 C 需拍板 / 需先出方案（4 行在册 = **4 条开项**，无销项）
 
 | 事项 | 锚点 | 卡在哪 | 解锁动作 |
 |------|------|--------|----------|
@@ -57,7 +57,7 @@
 | 检索 / 存储增强 | 3 | LightRAG 式图谱增强检索 · MySQL 业务库支持 · 多租户配额/隔离/计费 | §7 |
 | nl2sql 评审延优 | 0 | ~~L2 guard 多表未限定列 / SELECT * fail-open 策略（R8）· workspace_id 服务端断言路径（R10，随身份门 rollout）~~ **2026-10-19 双双闭合**（R8：多表任一脸命中即拒 + SELECT * 含敏感表即拒；R10：定性声明"enforce 前不作为隔离维"，ADR-0007 §8） | §5 R 批 |
 
-### 0.4 E Low 技术债（14 行在册 = **4 条开项 + 10 条已于 2026-10-16/10-19 清零**；非阻塞，可随日常改动顺带处理）
+### 0.4 E Low 技术债（14 行在册 = **4 条开项 + 10 条已于 2026-10-16/10-19 清零**；2026-10-27 补记：R1~R7/R9 八行此前漏加删除线，本次按 §5 复选框 `- [x]` 状态补齐，行数与开项数不变；非阻塞，可随日常改动顺带处理）
 
 | 事项 | 锚点 | 为什么留着（不是遗漏） |
 |------|------|------------------------|
@@ -66,14 +66,14 @@
 | D5 `agent_core` 历史溯源注释泛化改写 | §5 | 81 处多数有档案价值，需人工逐条判断 |
 | D7 裸 `except Exception:` 存量按 ratchet 逐文件烧除 | §5 | 门禁已常驻防新增，不追求逐点清零 |
 | D8 `zhanggui-zhiku/core/config.py` 评估迁 pydantic-settings | §5 | 课程脚手架，非主线 |
-| R1 危险函数黑名单补条（`pg_advisory_*`/`lo_open`/`pg_ls_*`/`dblink_send_query`/`pg_switch_wal` 实测放行） | §5 | 2026-10-19 nl2sql 合入前评审 #12；绕过路径已全拦，问题只在清单长度；宜并入下一批 guard 改动不单开分支 |
-| R2 `classify_error` 按异常类型/SQLSTATE 分类（现为字符串匹配优先） | §5 | 2026-10-19 评审 #13；feat 现行规则已带 error_class 但匹配仍字符串优先 |
-| R3 `build_tsquery` 非字符串 token 被 stringify 成 `'None'` 词位；截断只保头部 | §5 | 2026-10-19 评审 #14 |
-| R4 `load_prompt` 的 `lru_cache` 取消 prompt 热改能力 | §5 | 2026-10-19 评审 #15；可按 `st_mtime` 做缓存键 |
-| R5 `nl2sql_value_info` 唯一键缺 `table_name`（同名列跨表撞约束）；`search_text` 无分词器版本标记 | §5 | 2026-10-19 评审 #16；改唯一键涉 DDL 迁移，先方案后动 |
-| R6 YAML 段名拼错被静默忽略（键有校验、段无校验） | §5 | 2026-10-19 评审 #17；与 #105 的 env>YAML 修法同属配置面 |
-| R7 `dw execute_readonly` 会话级 `SET default_transaction_read_only` 对当前事务无效 + "两道都在"注释误导 | §5 | 2026-10-19 第一批评审 #3；默认配置非现网 fail-open（连接级已只读），风险在关掉连接级只读时的错觉与池残留 |
-| R9 payload blob GC 不查引用即删 + 启用门槛未文档化 + `gc_min_age_hours` 无 env 透传 | §5 | 2026-10-19 第一批评审 #6；非同事务债已在 §3 第 7 行登记，不重复 |
+| ~~R1 危险函数黑名单补条（`pg_advisory_*`/`lo_open`/`pg_ls_*`/`dblink_send_query`/`pg_switch_wal` 实测放行）~~ **已闭合（2026-10-19）** | §5 | 2026-10-19 nl2sql 合入前评审 #12；绕过路径已全拦，问题只在清单长度；宜并入下一批 guard 改动不单开分支 |
+| ~~R2 `classify_error` 按异常类型/SQLSTATE 分类（现为字符串匹配优先）~~ **已闭合（2026-10-19）** | §5 | 2026-10-19 评审 #13；feat 现行规则已带 error_class 但匹配仍字符串优先 |
+| ~~R3 `build_tsquery` 非字符串 token 被 stringify 成 `'None'` 词位；截断只保头部~~ **已闭合（2026-10-19）** | §5 | 2026-10-19 评审 #14 |
+| ~~R4 `load_prompt` 的 `lru_cache` 取消 prompt 热改能力~~ **已闭合（2026-10-19）** | §5 | 2026-10-19 评审 #15；可按 `st_mtime` 做缓存键 |
+| ~~R5 `nl2sql_value_info` 唯一键缺 `table_name`（同名列跨表撞约束）；`search_text` 无分词器版本标记~~ **已闭合（2026-10-19）** | §5 | 2026-10-19 评审 #16；改唯一键涉 DDL 迁移，先方案后动 |
+| ~~R6 YAML 段名拼错被静默忽略（键有校验、段无校验）~~ **已闭合（2026-10-19）** | §5 | 2026-10-19 评审 #17；与 #105 的 env>YAML 修法同属配置面 |
+| ~~R7 `dw execute_readonly` 会话级 `SET default_transaction_read_only` 对当前事务无效 + "两道都在"注释误导~~ **已闭合（2026-10-19）** | §5 | 2026-10-19 第一批评审 #3；默认配置非现网 fail-open（连接级已只读），风险在关掉连接级只读时的错觉与池残留 |
+| ~~R9 payload blob GC 不查引用即删 + 启用门槛未文档化 + `gc_min_age_hours` 无 env 透传~~ **已闭合（2026-10-19）** | §5 | 2026-10-19 第一批评审 #6；非同事务债已在 §3 第 7 行登记，不重复 |
 | ~~10 个已入库的 UTF-8 BOM `.py`~~ **已清零（2026-10-16）** | §5 | 见 §5 该项闭合记录：**未按原处方摘除 `utf-8-sig`**（那是扫描任意源文件时的正确读取约定，摘掉会让 P12 在未来任一 BOM 文件上退化成假阳性噪音），回归用例因**自带合成 BOM** 故无需调转、清零后仍有效 |
 
 ### 0.5 非开项对账（防止「TODO 里没有 = 不存在」）

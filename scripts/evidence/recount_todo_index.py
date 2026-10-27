@@ -36,10 +36,10 @@ ROOT = Path(__file__).resolve().parents[2]
 TODO = ROOT / "docs" / "TODO.md"
 
 # 每批翻转复选框后同批更新；注释记录更新来处（追记批次）。
-# 现值 = 2026-10-19 追记六（main 链：前端错误契约审计完成后 24/15）。
-# 注意 feat/nl2sql-meta-build-recovery 分支另有 5 处翻转未合入（分叉登记见
-# TODO §0 追记三）；feat 合入后本常量应随合并结果更新为 19/20（24/15 − 5 开 + 5 闭）。
-DECLARED_TOTAL = {"open": 24, "closed": 15}
+# 现值 = 2026-10-27 复算（25/24）：上一批 24/15 为 2026-10-19 追记六；R 批 #113~#122
+# 翻转（419535c1）把 closed 15→24、open 34→25，未同批更新本常量，现按 TODO.md 实测算补齐。
+# 历史推算「feat 分支合入后应为 19/20」作废（其基数未覆盖 R 批新增项）。
+DECLARED_TOTAL = {"open": 25, "closed": 24}
 
 
 def _table_body_rows(section_text: str) -> list[str]:
