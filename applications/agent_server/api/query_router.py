@@ -171,8 +171,16 @@ async def query(
     cache_backend = get_cache("agent_server")
     cached = ""
     if cache_backend.enabled:
+        # 向量只是 L2 的前提，不是缓存的前提：L1 精确命中与负缓存都不需要向量，
+        # 后端在 embedding=None 时会自行派生、失败则只跳过 L2（valkey_backend
+        # `_resolve_embedding`）。所以这里**不许**让嵌入器异常连带跳过整块 get()——
+        # 那会让嵌入器故障期间连 L1 都不查、写侧条件 `q_embedding is not None` 永假，
+        # 缓存整片失效而 `/health` 依旧 ready（"装了但没接上"，ADR-0013 §2.3 同族）。
         try:
             q_embedding = await embed_query(req.query)
+        except Exception:
+            logger.warning("query embedding failed; semantic cache degrades to L1-only", exc_info=True)
+        try:
             cache_hit = await cache_backend.get(
                 tenant_id=tenant,
                 intent="",
@@ -337,7 +345,10 @@ async def query(
                             ))
                         except Exception:
                             logger.warning("status save %s failed", suspend_status.value, exc_info=True)
-            if final_answer and q_embedding is not None and cache_backend.enabled:
+            # 写侧同样不许把"嵌入器可用"当写入前提：q_embedding=None 时后端会自行派生，
+            # 派生不成也只是退成"写 L1、不写 L2"。留在条件里会让嵌入器故障期间
+            # 一个键都不写，恢复后缓存永远是冷的。
+            if final_answer and cache_backend.enabled:
                 try:
                     await cache_backend.set(
                         tenant_id=tenant,

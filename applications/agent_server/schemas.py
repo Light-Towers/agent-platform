@@ -30,6 +30,9 @@ from agent_runtime.schemas import (
 )
 from pydantic import BaseModel, ConfigDict, Field
 from shared_schemas import (
+    CacheStatsReport as CacheStatsReport,
+)
+from shared_schemas import (
     HealthResponse as BaseHealthResponse,
 )
 from shared_schemas import (
@@ -163,6 +166,12 @@ class HealthResponse(BaseHealthResponse):
     cache_ready: bool = Field(False, description="缓存后端当前是否可用（backend=valkey 且 false ⇒ 降级运行）")
     cache_degraded_reason: str | None = Field(
         None, description="缓存降级原因（已脱敏，不含连接串口令）；ready=true 时为 null"
+    )
+    # 命中率与分账计数（ADR-0013 Stage 4 判据「命中率/延迟可在指标或 health 读到」的下半段）。
+    # 刻意用固定形状模型而不是裸 dict：裸 dict 会让"这个计数没发生"与"这个计数没上报"同形。
+    # 取数是纯内存读（get_stats() 不打 Valkey），不违反探针路径的有界红线。
+    cache_stats: CacheStatsReport | None = Field(
+        None, description="语义缓存命中率与分项计数（total=0 时 hit_rate=0.0，键集合恒定）"
     )
     auth_enabled: bool = Field(False, description="接口是否要求 X-API-Key（不回显密钥）")
     identity_mode: str | None = Field(

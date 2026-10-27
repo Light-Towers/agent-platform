@@ -245,13 +245,18 @@ async def health() -> dict:
 
     from agent.db import get_pool
 
-    cache_health = await get_cache("federation").health()
+    cache_backend_obj = get_cache("federation")
+    cache_health = await cache_backend_obj.health()
+    from shared_schemas import CacheStatsReport
+
     return {
         "status": "ok",
         "storage": "postgres" if get_pool() is not None else "memory",
         "cache_backend": cache_health.backend,
         "cache_ready": cache_health.ready,
         "cache_degraded_reason": cache_health.degraded_reason,
+        # 与 agent_server 同一个契约模型出数（单一实现），键集合恒定不随后端/冷热变化。
+        "cache_stats": CacheStatsReport.from_counts(cache_backend_obj.get_stats()).model_dump(),
     }
 
 

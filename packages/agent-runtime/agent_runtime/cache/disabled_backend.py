@@ -47,7 +47,9 @@ class DisabledSemanticCache:
         return None
 
     def get_stats(self) -> dict[str, Any]:
-        # 计数器键集合必须与 Valkey 后端逐项对齐（parity 用例在 test_valkey_backend_wire.py）。
+        # 计数器键集合必须与 Valkey 后端逐项对齐（parity 用例在 test_valkey_backend_wire.py:859；
+        # 契约模型侧的双向判据在 tests/governance/test_cache_stats_contract.py，两件事不重叠：
+        # 前者管"两个后端互相齐"，后者管"产出的计数都有字段、字段都有生产者"）。
         # 消费方是 `**get_stats()` 摊进监控事件 / `/health`，少一个键不会报错，只会在
         # CACHE_BACKEND 从 valkey 切成 disabled 时**静默换掉事件形状**——这属于"装了但没接上"
         # 同族，本仓的教训是它最难查。全为 0 是语义正确的：这个后端从不计数。

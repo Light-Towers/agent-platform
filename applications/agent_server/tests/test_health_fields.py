@@ -24,7 +24,9 @@ NEW_FIELDS = (
     # Langfuse 两盏灯（方案 plan-langfuse-wiring §2.2）：enabled=配置意愿，ready=真装配。
     "langfuse_enabled", "langfuse_ready",
     # 语义缓存（ADR-0013 C）：backend=实际后端，ready=连得上，reason=降级原因（已脱敏）。
-    "cache_backend", "cache_ready", "cache_degraded_reason",
+    # stats=命中率与分账计数（Stage 4 判据「命中率可在 health 读到」；契约模型固定形状，
+    # 取数是纯内存读，不在探针路径发命令）。
+    "cache_backend", "cache_ready", "cache_degraded_reason", "cache_stats",
 )
 
 _SWITCHES = (

@@ -4,6 +4,7 @@ from agent_core.tracing import get_tracing_status
 from agent_runtime.db import ping
 from agent_runtime.identity import resolve_startup_tenant_mode
 from fastapi import APIRouter, Request
+from shared_schemas import CacheStatsReport
 
 from agent_server.config import get_settings
 from agent_server.db_dialect import detect_dialect
@@ -34,7 +35,8 @@ async def health(request: Request) -> HealthResponse:
     # 的单例；若后端为 disabled，health() 直接返回 ready=true 的配置意图态。
     from agent_runtime.cache import get_cache
 
-    cache_health = await get_cache("agent_server").health()
+    cache_backend_obj = get_cache("agent_server")
+    cache_health = await cache_backend_obj.health()
     return HealthResponse(
         status=status,
         version="0.1.0",
@@ -65,6 +67,9 @@ async def health(request: Request) -> HealthResponse:
         cache_backend=cache_health.backend,
         cache_ready=cache_health.ready,
         cache_degraded_reason=cache_health.degraded_reason,
+        # 命中率出口（ADR-0013 Stage 4 判据的下半段）：此前 get_stats() 在本 app 零消费方，
+        # 纯 miss 负载下命中率没有任何可读面。固定形状由契约模型补默认值，两个后端同形。
+        cache_stats=CacheStatsReport.from_counts(cache_backend_obj.get_stats()),
         auth_enabled=bool(settings.api_key),
         # 与 lifespan 的 require_identity_startup_guard 同一个函数，不另建一套判定。
         identity_mode=resolve_startup_tenant_mode()[0],
