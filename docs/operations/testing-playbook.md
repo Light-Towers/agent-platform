@@ -107,6 +107,31 @@ uv run pytest packages/agent-runtime/tests/test_cache_contract.py --collect-only
 
 ⇒ 判「这组用例不存在 / 被删了」之前，先看文件里有没有 `allow_module_level=True`；`no tests collected` 不进任何 passed/skipped 分母，**既不能写成「本机全绿」，也不能据此判「无覆盖」**（前者假绿、后者误报缺口）。条数要用 AST 点算，或按 §2 第 4 步到 Linux 容器/测试机实跑。本机无 docker/podman，`wsl.exe -l -q` 虽 rc=0 但无发行版输出（2026-10-27 复核；`tests/ha` 另有 `sys.platform=="win32"` 硬跳过），跳过提示里的 `docker compose up -d valkey` 在本机不可执行；`CACHE_CONTRACT_REQUIRED=1` 能让它收进 19 条，但本机没有 Valkey，跑起来必红——那是 CI 的 fail-closed 判据，不是本地通过路径。同目录 `test_valkey_backend_wire.py`（86 条）用进程内 `_FakeClient`，证明的是协议形状，不能代替真 Valkey 的 L2 行为。
 
+### 2.6 「漏 await」这一族**两条自动化路都不可用**——别再试（2026-10-27 实测）
+
+历史缺陷（`memory_backend` 漏 await ⇒ 类型化记忆恒空，被 4 处 monkeypatch 盖住）看起来很像能自动拦，两条路都实跑过，都拦不住：
+
+**路 A：静态扫「裸调用 async def」** → 515 文件 / 825 个 `async def`，主判据 21 条候选，**21/21 是假阳性**。根因是 AST 只有名字没有类型：`task.cancel()`、`cursor.execute(sql)`、`client.flush(...)`、`random.seed(42)`、`self._guard._sem.release()` 这些**第三方同步方法**与仓内同名 `async def`（`planner/protocol.py:570 async def cancel`）撞名。按名字匹配不构成证据； receiver 类型静态推不出来，除非只认 `self.<本类定义的 async 方法>` 这种可解析形状（覆盖面因此极窄）。复现方法：遍历 applications/ 与 packages/（跳过 tests/ 与 eval/），收集全仓 `async def` 名单，再把 AST 里 `ast.Expr(value=ast.Call)` 的裸调用按函数名对上那份名单——就得到上面那 21 条。
+
+**路 B：把解释器的 `coroutine 'X' was never awaited` 升成 CI 红** → **不可行**。先拿正控自证：
+
+```bash
+printf 'import gc
+async def _noop():
+    return 1
+def test_probe():
+    _noop()
+    gc.collect()
+' > tests/test_zz_probe.py
+uv run pytest tests/test_zz_probe.py -q -W "error:coroutine .* was never awaited:RuntimeWarning"
+# 实测：1 passed, 1 warning（2026-10-27 本机）⇒ 升级判据不成立，门禁是空的
+rm tests/test_zz_probe.py
+```
+
+原因：警告在协程对象被 GC 回收时发出，那已不在用例执行上下文里，pytest 归不到用例、`-W error` 也就不会让它红。**所以「9 个 session 加了这个 `-W` 之后 0 命中」不能当作「本仓没有漏 await」的证据**——它只证明这条过滤条件不产生任何判定（与 §3.5 变异战役开工前「先跑引擎自带探针自证能杀」是同一条规矩：判据不自证能红，就等于没有判据）。
+
+⇒ 这一族目前只有两条真路：① 用例侧断言（如 `packages/agent-runtime/tests` 对记忆写读端到端断言"类型化记忆非空"，漏 await 时用例自然拿不到数据）；② 评审时盯 `async def` 调用点的 `await`。要新增自动化拦法，先写正控证明"注入漏 await 会让它红"，再谈接线。
+
 ## 3. 本仓特定配方
 
 ### 3.1 Linux 容器跑 tests/ha + identity（最小安装）
