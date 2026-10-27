@@ -291,7 +291,7 @@ done   # 期望：apply=线上现状(10) / create=清单真值(21)
    (a) **临场对策照旧有效**——问句带"文档/知识库/什么是/解释/原理"任一特征词，能让兜底词表在模型侧异常时也判到 `rag`；
    (b) 两个未闭合的相邻缺陷见 §9 ⑮（清单广告了本部署未配置的 `search`）与 ⑰（换模型/换提供方仍需 R2 能力灯，否则静默回退）。
 9. **抽验①有四个回放源会掩盖真实结果**（2026-10-13 由 2 个补全为 4 个）：`semantic_cache`（相似度 0.05 内直接回放）、
-   `memories`（`graph.py:192` 每轮把 `Q:…\nA:…` 写进记忆并被召回）、`episodic_memories`/`procedural_memories`（本次恒 0，仍列入清单），
+   `memories`（`applications/agent_server/agent/graph.py:192` 每轮把 `Q:…\nA:…` 写进记忆并被召回；`planners/deterministic.py:240` 有同形写入，`main.py` 同时装配 `build_graph` 与 planner，实际走哪条取决于运行配置）、`episodic_memories`/`procedural_memories`（本次恒 0，仍列入清单），
    以及**第三类：LangGraph 会话状态 `checkpoints`/`checkpoint_blobs`/`checkpoint_writes`**——`thread_id` 恒为
    `tenant-default`，同一会话的历史会随 checkpoint 回来。2026-10-13 的 Q4 就是 `evidence count=0` 却答对了"4 份"，
    来源正是这一路（前两个当天已清）。而 2026-10-12 的 r19 只清了缓存，于是看到"删了文档回答却没变"，
