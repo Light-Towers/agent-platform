@@ -1,6 +1,17 @@
 """测试夹具：清理环境变量与 settings 缓存，保证用例隔离。"""
 
-import pytest
+import os
+
+# 根套件的语义是「无外部依赖」，但 huggingface_hub 在 import 期之后会在调用路径里
+# **同步**抓它的 agent harness registry（utils/_detect_agent.py 的 _fetch_registry，
+# httpx 无超时）：本机有缓存文件所以不发请求，离线/无缓存的机器（如 126 容器）会
+# 卡在 SYN_SENT 直到 TCP 放弃——表现是「套件挂死」而不是「用例失败」。
+# 该开关是 import 期求值的常量，所以必须在任何被测模块被导入之前落定：放在 conftest
+# 顶部（pytest 先导入 conftest，再导入测试模块）。
+os.environ["HF_HUB_OFFLINE"] = "1"
+os.environ["TRANSFORMERS_OFFLINE"] = "1"
+
+import pytest  # noqa: E402
 
 _CLEARED_VARS = [
     "DATABASE_URL",
