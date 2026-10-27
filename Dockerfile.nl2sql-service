@@ -1,0 +1,57 @@
+FROM python:3.11-slim
+
+# 独立镜像，不塞进根 Dockerfile：两者失败域与资源画像不同——nl2sql 的 dw 池是 OLAP 画像
+# （语句超时 30s、结果可达 sql_max_rows=1000），平台是交互级毫秒画像；且根镜像 CMD 已绑
+# agent_server.main:app，同镜像双入口只会让"跑的是哪个进程"变成新的取证问题。
+# 与根镜像一致的取证通道：WORKDIR、/srv/agent-platform/GIT_REV、uid 10001 全部同规约，
+# 于是 `kubectl exec <pod> -- cat /srv/agent-platform/GIT_REV` 在两侧形状一致。
+WORKDIR /srv/agent-platform
+
+# 依赖装配面（每条都是踩过的坑，改前先读）：
+# - agent-core / shared-schemas / agent-runtime 是 nl2sql-service 的 workspace 本地依赖
+#   （[tool.uv.sources] workspace=true 只有 uv 认；普通 pip 会当 PyPI 包去下载）。故必须
+#   COPY 进来并在同一安装事务里显式传本地路径——与根镜像同一手法。
+# - 本地 torch 依赖：langchain_huggingface 的 HuggingFaceEmbeddings 默认走 SentenceTransformer
+#   后端，故 embedding 那条路隐性需要 sentence-transformers（声明位 = agent-core
+#   [memory-embed-local]）。EMBEDDING_BACKEND=langchain_huggingface + 本地 bge-small-zh-v1.5
+#   = 512 维，与 nl2sql_meta 里 vector 列的 vector_dim 口径一致（该服务 VECTOR_DIM 默认 1536
+#   是 OpenAI 口径，部署时必须显式压到 512，见 deploy/k8s/30-nl2sql-service.yaml）。
+# - torch 先从 CPU 索引装：否则 sentence-transformers 拉 CUDA 轮，白背 ~2G 且 Pod 内无 GPU。
+# - extras 必须挂在**声明它的那个包**上（根镜像 2026-10-10 那颗雷的原样）：写成 `.[otel]`
+#   而该 extra 不在根包时，pip 只对未知 extra 告警并继续，构建照样绿、镜像里没有包。
+# - [otel] 声明在本包（opentelemetry-exporter-otlp 的消费方是这里的 api/server.py：
+#   init_tracing 自建 provider 时要 OTLP exporter）。缺它则观测状态机落 DEGRADED，
+#   而服务照常 healthy——正是"关了与坏了分不清"那一类。
+# - 不带 [langfuse]：本服务的 LLM 构造走 agent_core.llm.OpenAICompatibleProvider，
+#   全仓只有 agent_server/agent/llm.py 调 get_langfuse_callbacks，此处没有调用点。
+#   注 LANGFUSE_* 三键会是**死键**（配了不生效比不配更难查），故清单里不注；
+#   nl2sql 的 LLM 调用进 Langfuse 属另一件事（要在本包接回调），登记为已知观测缺口。
+# - 不带 [tokenizer]（jieba）：TOKENIZER=bigram 时才需要，缺包只告警并降级 bigram。
+COPY packages/agent-core ./packages/agent-core
+COPY packages/shared-schemas ./packages/shared-schemas
+COPY packages/agent-runtime ./packages/agent-runtime
+COPY applications/nl2sql-service ./applications/nl2sql-service
+
+RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
+RUN pip install --no-cache-dir \
+    "./packages/agent-core[memory-embed-local,tracing]" \
+    ./packages/shared-schemas \
+    "./packages/agent-runtime[identity]" \
+    "./applications/nl2sql-service[otel,huggingface]"
+
+# 构建源 git rev 绑定（同根镜像，观测方案 §3.5 / R14「验证对象与提交不一致」的根治门禁）：
+# build.sh 传 --build-arg GIT_REV=$(git rev-parse HEAD)，写入 OCI label + 容器内文件。
+ARG GIT_REV=unknown
+LABEL org.opencontainers.image.revision=${GIT_REV}
+RUN echo "${GIT_REV}" > /srv/agent-platform/GIT_REV
+
+RUN useradd -m -u 10001 appuser
+USER appuser
+
+EXPOSE 8000
+
+# 显式 uvicorn 形式而非 console script `nl2sql-service`：后者 host/port 取 Settings，
+# 一旦默认值与 Service 的 targetPort 不同步，探针就打在另一个端口上（配置面漂移不该
+# 由镜像来猜）。元知识库建表不在启动路径（init_meta_schema 是显式一次性 Job，
+# 生产未必给 DDL 权限），本 CMD 只起 API 进程。
+CMD ["uvicorn", "nl2sql_service.api.server:app", "--host", "0.0.0.0", "--port", "8000"]

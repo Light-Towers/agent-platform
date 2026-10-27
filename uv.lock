@@ -3641,6 +3641,11 @@ dev = [
 huggingface = [
     { name = "langchain-huggingface" },
 ]
+otel = [
+    { name = "opentelemetry-api" },
+    { name = "opentelemetry-exporter-otlp" },
+    { name = "opentelemetry-sdk" },
+]
 tokenizer = [
     { name = "jieba" },
 ]
@@ -3656,6 +3661,9 @@ requires-dist = [
     { name = "langchain-huggingface", marker = "extra == 'huggingface'", specifier = ">=0.1" },
     { name = "langchain-openai", specifier = ">=0.3" },
     { name = "langgraph", specifier = ">=1.2.10,<2" },
+    { name = "opentelemetry-api", marker = "extra == 'otel'", specifier = ">=1.45.1" },
+    { name = "opentelemetry-exporter-otlp", marker = "extra == 'otel'", specifier = ">=1.45.1" },
+    { name = "opentelemetry-sdk", marker = "extra == 'otel'", specifier = ">=1.45.1" },
     { name = "pgvector", specifier = ">=0.3" },
     { name = "psycopg", extras = ["binary", "pool"], specifier = ">=3.3.6" },
     { name = "pydantic", specifier = ">=2.13.5" },
@@ -3667,7 +3675,7 @@ requires-dist = [
     { name = "sqlglot", specifier = ">=25.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.54.0" },
 ]
-provides-extras = ["dev", "huggingface", "tokenizer"]
+provides-extras = ["dev", "huggingface", "otel", "tokenizer"]
 
 [[package]]
 name = "numba"
