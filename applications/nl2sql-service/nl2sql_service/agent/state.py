@@ -4,6 +4,14 @@ from typing import Any, TypedDict
 
 
 class DataAgentState(TypedDict, total=False):
+    """管线状态 schema，同时是**状态键的唯一真相源**。
+
+    LangGraph 的 StateGraph 只保留这里声明过的键：节点 return 的键和 `ainvoke` 传入的键，
+    只要没在本类声明，就在图边界上被**静默丢弃**——不报错、不打日志，读侧永远拿到缺省值。
+    ⇒ 新增配置注入或新增节点输出时，必须先在这里声明。判据常驻在
+    `tests/nl2sql_service/test_state_schema_wiring.py`（含机制正控与真图回归）。
+    """
+
     query: str
     # 多轮（§5.13）：session_id 不传 = 单轮（M1）；effective_query 是 M3 改写后的
     # 承接查询（召回/生成用），原始 query 永不改写（trace 看前后）
@@ -25,6 +33,8 @@ class DataAgentState(TypedDict, total=False):
     values: list[dict[str, Any]]
     # 表间关系声明（§5.14-R3 召回；生成期 JOIN 条件显式注入）
     relations: list[dict[str, Any]]
+    # 历史问答范例（recall_example 写入，generate_sql 的 few-shot 槽消费）
+    examples: list[dict[str, Any]]
     # 数据源维度（P1-6：召回过滤与 schema 作用域；缺省空串）
     datasource_id: str
     # 数据源口径标签（P1-3②）：随响应体返回，让答案能看出数字来自哪个源
@@ -63,6 +73,8 @@ class DataAgentState(TypedDict, total=False):
     retrieval_top_k: int
     rrf_k: int
     tokenizer: str
+    # filter_table 的 LLM 过滤开关（#109；QueryService 从 settings 注入，客户端不可覆盖）
+    filter_table_enabled: bool
     # 向量召回相对截断 margin（P0-5④；0 = 关闭）
     retrieval_score_margin: float
     # 进模型的结果体量上限（§5.11-V3 双上限分离）
