@@ -14,10 +14,17 @@ metadata:
 # LLM_* 三键 2026-10-10 按「清单与线上一致化」回填为 126 在跑容器 env 的实测值。
 # 此前此处是 api.openai.com/v1 + gpt-4o-mini（死键）：线上被 kubectl set env 改成字面值后
 # 无人回写，任何人一次 kubectl apply 就会把国外模型地址注回线上、模型当场不可用。
+# 模型 id 2026-10-27 换 `-1017` 修订版：`deepseek-ai/DeepSeek-V4.1-Flash` 已被提供方下线，
+# 现网每一次调用稳定 400 `{"message":"Model id : ... , has no provider supported"}` ⇒ 整条问答必败。
+# ⚠️ 该 id 仍出现在端点自报的 `/models` 清单里（实测 37 项中含它）⇒ **清单在册 ≠ 有 provider**，
+#   换模型只能靠真调用判定，不能查清单。同批实测可调用：`-1017`/`Qwen/Qwen3.8-Flash-Next`/
+#   `Qwen/Qwen3.5-27B`（plain 与 tools+auto 两种形态都 200）；`-V4-Flash-0731`、`-V4-Pro` 同为 400。
+#   同族修订版沿用既有结论（json_schema 稳定 400、只能走 tools+auto），但按「换 rev 必复跑」
+#   这条，路由判定质量与端到端链路都要重取一次真读数（见 VERIFICATION.md 的复跑记录）。
 data:
   LLM_BASE_URL: "https://api-inference.modelscope.cn/v1"
-  LLM_MODEL: "deepseek-ai/DeepSeek-V4.1-Flash"
-  LLM_FALLBACK_MODEL: "deepseek-ai/DeepSeek-V4.1-Flash"
+  LLM_MODEL: "deepseek-ai/DeepSeek-V4.1-Flash-1017"
+  LLM_FALLBACK_MODEL: "deepseek-ai/DeepSeek-V4.1-Flash-1017"
   EMBEDDING_MODEL: "bge-small-zh"
   # OTEL_* 是本应用自定义的键名（非 OTel 官方 OTEL_* 语义），线上已在跑但清单从未声明。
   OTEL_ENABLED: "true"
