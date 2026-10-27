@@ -506,9 +506,9 @@ ssh root@<internal-ip> 'cd /opt/agent-platform && git fetch /tmp/ap-rollback.bun
 需求方自己测出来的疑问是"只能一轮回答？没用到 multiagent / 子 agent？"。**答案是：现网跑的是单 planner，
 但"只有一轮"这个说法本身不准。** 三条可读的事实：
 
-1. **现网形状**：`planner=deterministic`（代码默认 `config.py:109`；`deploy/` 全目录 grep `PLANNER` **零命中**
+1. **现网形状**：`planner=deterministic`（代码默认 `config.py:107`（原记 `:109` 已漂移）；`deploy/` 全目录 grep `PLANNER` **零命中**
    ⇒ 清单根本没注入这一项）。形状 = 一次路由 → 一次能力调用 → 一次模型合成。
-2. **不是"只有一轮"**：证据为空时会重规划，上限 `max_iterations=2`（`config.py:67`、`planners/deterministic.py:196`）。
+2. **不是"只有一轮"**：证据为空时会重规划，上限 `max_iterations=2`（`config.py:65`（原记 `:67` 已漂移）、`planners/deterministic.py:196`）。
    **屏上实证**：10-14 那次浏览器问答的时间线里出现**两条一模一样的** `推演前判: search → search evidence_insufficient`
    与两次 `命中 1 条依据` ⇒ 那就是这个 2 跳循环（每跳调同一个能力，没有子 agent）。
 3. **多 agent 在本仓库有三套，都不在演示链路上**：
