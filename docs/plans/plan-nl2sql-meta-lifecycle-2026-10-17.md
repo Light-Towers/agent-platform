@@ -857,6 +857,8 @@ R1–R4 约 3–5 人日（nl2sql 域内）；R4 种子三档约 2–3 人日。
 | 13 | `.env.example` 的 `EMBEDDING_MODEL=bge-small-zh` 与 `VECTOR_DIM=1536` 矛盾 | I0 一行修；同时是 **Q18 的第三处证据**（YAML 1536、口径 1024、模板 bge-small-zh 三处互斥） | 配置矛盾 |
 | 14 | 文档漂移 ×2（`app_config.yaml:25`/`.env.example:59` 引用已删的 `pg_pool.py`）+ console script 指向空壳 CLI + `/health` 恒 HEALTHTY 不探池 | I0（前两个）+ Q26（第三个） | 运维入口 |
 | 15 | `state` 携不可序列化对象（连接池/llm）进 TypedDict，checkpointer 上线即炸 | §5.13 存储批次的前置约束（新增 P2 项） | 潜在炸点 |
+| 16 | `examples` 未在 `DataAgentState` 声明 ⇒ `recall_example` 的产出在图边界被 **LangGraph 静默丢弃**，生成 prompt 的 few-shot 槽恒渲染「（无历史范例）」（范例召回跑完就蒸发，且无报错） | §5.16 新增（A 方案 Stage ② 的接线下半段） | 生成期断链 |
+| 17 | `filter_table_enabled` 由 `query_service.py:107` 注入却未声明 ⇒ #109 的表过滤开关**无论怎么配都是关**（`filter_table.py:47` 恒读到缺省）；现值默认 False 巧合无症状，置 true 即静默失效 | §5.16 新增（与第 7 条「死配置」同族，但差值发生在图边界而非读取侧） | 死配置 |
 
 **对既有条的五处修订已就地完成**（防同一件事两处漂移）：P0-1 判据补 metric/value embedding；P0-5③ 词典层优先；S-6 次数 10→7（§11.1-R14）；§5.11-E2 图修正补"达上限落错误终态"；V2 死配置家族 +1。
 
@@ -874,6 +876,7 @@ R1–R4 约 3–5 人日（nl2sql 域内）；R4 种子三档约 2–3 人日。
 | D1（P2） | `54f0b26` | 删 `entities/`，契约测试重定向 MetricConfig | 单测全绿；`grep entities` 零运行引用 |
 
 未动（维持登记）：B1 索引侧（卡 Q23）、answer 合成节点（M0-4 其余）、漂移检测/trace（B2）。federation 单测 2 条存量环境失败（与 nl2sql 零引用关系，非本批引入）。
+> **2026-10-27 就地订正**：这句里的"answer 合成节点（M0-4）"按 HEAD 实读**已落地**（`nodes/answer.py` + `graph.py:106/156/158` + 真图用例 `tests/nl2sql_service/test_execute_correct_loop.py:160`）；仍开的是"该判据无门禁"与 B1/B2 两半。全文见本节末「状态行订正」条。**别把这条订正当豁免**：B1/B2 未动是原样维持的。
 
 **执行进度（2026-10-18 当日，批 3，分支 `feat/nl2sql-meta-build-recovery`，接 836b0c4 之后）**：review §E / 方案 §5.16 里"仍为空"的项已逐条落地，一项一 commit——
 
@@ -942,6 +945,23 @@ where table_name = 'nl2sql_value_info' and column_name = 'value_tsvector';
 
 ⇒ **N4 的"无 DDL 进版本控制"这一半关闭**；Q23 收窄为三个仍需现网确认的事实：① 生产库是否已有同名表（若有，列/约束是否与 001 冲突）；② 账号是否有 `CREATE EXTENSION`/`CREATE TABLE`/`CREATE INDEX` 权限；③ 现网 `value_tsvector` 若已由触发器按原文生成，需迁移到 `search_text` 契约。
 ⚠️ 本窗口**无可用 PG 实例**（无 docker/psql），该 DDL 只做了静态校验（文件发现、占位符替换、幂等/无 DROP、`$$` 成对、唯一约束齐全），**未在真实库执行过**；首次落地先 `--dry-run` 核对文件名与维度，再实跑。
+
+**执行进度（2026-10-27，映射表 16/17 两条落地 + 一处状态行订正）**：
+
+| 项 | 内容 | 状态与判据 |
+|---|---|---|
+| 16 + 17 | `DataAgentState` 补声明 `examples`（`recall_example` 写、`generate_sql` 读）与 `filter_table_enabled`（`QueryService` 注入、`filter_table` 读）；类 docstring 写明"未声明即在图边界被静默丢弃"这条约束 | 真图回归 2 条（`tests/nl2sql_service/test_state_schema_wiring.py`）：范例穿过 `build_graph()` 出现在生成 prompt 里；开关 true 时节点确实发起表过滤调用、false 时一条也不多调 |
+| 机制正控 | 未声明键被丢弃这一前提做成常驻用例（前提失效时它先红，后面两条不会被误读成"本来就不会丢"） | 同上文件第 1 条 |
+| 常驻门禁 | 写侧（节点 return + 图输入）与读侧（`state.get`/`state[]`，按整模块扫）都必须命中 schema；派生口径从 `graph.py:87` 的 `add_node` 名单和 AST 取，不手写清单 | `test_every_key_crossing_the_graph_boundary_is_declared` |
+| 在册残留（**不是豁免通道**） | `example_top_k` / `example_score_margin` / `path` 三个键**有读无写**：节点带缺省值读它们，全仓没有任何注入点或节点写入点 ⇒ 旋钮不可达。清单与现实不符即红，谁补写入点却不声明，那条用例立刻翻红 | `test_undeclared_reads_are_exactly_the_documented_no_writer_set`；把它降级成"能跑就行"需要用户先定这三个旋钮的归属（`path` 的语义、范例 top-k 是否进 Settings） |
+
+**变异反证**（各只杀自己那批）：摘掉 `examples` 与 `filter_table_enabled` 两行声明 ⇒ 4 红 2 绿（两条真图回归 + 两条门禁红；机制正控与 docstring 守卫**正确地不受影响**），rc=1；`state.py` 按备份回原并 `cmp` 证实字节一致（备份 sha256 前缀 `ec3f1122`）。
+
+**方法教训（记在这里因为它会复发）**：这两条缺陷的直接成因是**替身不镜像真实协作者**——`applications/nl2sql-service/tests/test_example_corpus.py:91` 直调节点函数、手递普通 dict，所以它断言的 `top_k == 5` 在真图上根本不成立，绿着掩盖了丢弃；而判"某键有没有写入点"必须按 schema 对码，字面 grep 与直调单测都判不出图边界上的丢失。
+
+**状态行订正（不改结论，只改时态）**：上表批 2 之后那句"未动（维持登记）：… answer 合成节点（M0-4 其余）…"按 HEAD 实读已不成立——M0-4 的 answer 节点与 `execute_sql → answer` 边均已落地（`nl2sql_service/agent/nodes/answer.py`、`graph.py:106/156/158`），且有一条真图用例断言"成功执行 ⇒ `answer` 非空"（`tests/nl2sql_service/test_execute_correct_loop.py:160`）。仍开的不是"节点没做"，是**该判据没有门禁**：`scripts/run_golden.py:85` 记了 `answer_present` 却不参与 pass 判定，且 run_golden 不在 `make ci`/`make eval` 里。
+
+**2026-10-27 闭合（同上，就地记）**：判定已从需要活 LLM+dw 的 `_run_async` 里抽成纯函数 `_judge`（`scripts/run_golden.py:71`），于是门禁逻辑进了 `make ci` 的 nl2sql session（`applications/nl2sql-service/tests/test_golden_judge.py`，25 条）。抽出来之后立刻露出第二条更重的缺陷，实测量级（HEAD 版与工作区版跑同一组响应）：**HTTP 状态也只记不判**，而 handler 崩溃（500）与请求被拒（422）的响应体是 `{"detail": ...}`、没有 `error` 键 ⇒ HEAD 报 `passed: 2/2` 且 `--fail-on-regression` 返回 0（放行），修复后报 `passed: 0/2`、rc=2 并归因为 `http_422` / `no_answer`；另有非 JSON 的 500（反代文本页）在 HEAD 直接 `JSONDecodeError` **打断整轮、零读数**，现按 `no_json` 记一行继续跑。三刀变异各有用例接住（M1 `no_answer` ⇒ 1 红、M2 HTTP 判定 ⇒ 3 红、M3 `matched_values` 不做 str 化 ⇒ 1 红，`str(m).lower()` 那处是响应体取值可能是数字，旧的 `m.lower()` 会抛在门禁自己身上）。防复发门禁两条：读数键**要么参与判定要么显式登记只读**（键集由 AST 从 `row = {...}` 派生），以及 **docstring 的读数清单必须与代码产出的行键集逐字相等**——后者针对本轮查到的既有事实：旧清单里的 `executed` / `table_miss` / `value_miss` / `llm_calls_total` / `llm_calls_avg` 五个键从未被产出过，而 `--json` 标注"供 CI 消费"。**边界**：闭合的是判定逻辑的覆盖率，`run_golden` 的**执行**仍需活 LLM+dw，按设计不入 CI（口径见 `docs/plans/nl2sql-meta-baseline-and-ownership.md` §4）。
 
 ## 6. 验收标准
 
