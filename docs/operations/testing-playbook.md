@@ -261,6 +261,44 @@ uv run python -u scripts/mutation_engine.py \
 | 引擎独占 | 判据依赖被调用方的解释规则（TAG 过滤串、负缓存对后续读的影响），假客户端层看不懂 | 归到真机契约层，写进 `ENGINE_OWNED` 并留契约用例（`make test-cache-contract`） |
 | 真缺口 | 该分支的行为**没有任何断言**（例：`disabled_backend` 的 stats 字典里 `0→±1` 全存活） | 补用例，然后复跑确认这一刀变 KILLED |
 
+### 3.6 126 上补跑两条真依赖 session（2026-10-27 实测配方，可直接抄）
+
+当日实况（先读再动手，别按本机假设）：126 有 `ap-test-base:2`（Python 3.11.16，**系统解释器无 pytest**）、`pgvector/pgvector:pg16` 以容器 `ap-iso-pg` 跑在 `127.0.0.1:5433`、`valkey/valkey-bundle:9.1.2` 镜像在库；`/opt/agent-platform/.venv` 依赖树完整但**不含 `valkey` 客户端**。宿主 `0.0.0.0:6379` 是 apt 装的 `/usr/bin/redis-server`——**不是 Valkey、没有 search 模块**，拿它跑契约用例会得到与代码无关的红。
+
+```bash
+# 1) 取代码只能走 git archive（入库后的 LF），不要 tar 工作区：
+#    tar 工作区带 CRLF ⇒ "migration checksum mismatch for v1 ('baseline')" ⇒ 真 PG 用例整片 skip
+git archive --format=tar -o envrun.tar HEAD packages/agent-core packages/agent-runtime \
+    packages/shared-schemas tests/ha tests/conftest.py pyproject.toml applications/agent_server
+gzip -f envrun.tar && scp envrun.tar.gz <126>:/tmp/
+
+# 2) tests/ha 对真 pgvector：用新建库，别复用 ap-iso 的旧 schema
+#    （它的 v6 在 6cb1c639 被就地改过——legacy DB 崩的修复——checksum 必与 HEAD 不符）
+ssh <126> 'docker exec ap-iso-pg psql -U agent -d postgres -c "CREATE DATABASE agent_platform_ha_<date>"'
+ssh <126> 'docker run --rm --network host -v /tmp/envrun-<date>:/srv/agent-platform \
+    -v /opt/agent-platform/.venv:/srv/agent-platform/.venv -w /srv/agent-platform \
+    -e AGENT_PLATFORM_PG_URL=postgresql://agent:agent_platform_dev@localhost:5433/agent_platform_ha_<date> \
+    ap-test-base:2 /srv/agent-platform/.venv/bin/python -m pytest tests/ha -q'
+#    实测 29 passed in 12.40s（本机同套件只有 1 passed / 28 skipped；.venv 的 bin/python
+#    在宿主是断链，进容器解析到 /usr/local/bin/python3 即可直接用，别重装依赖）
+
+# 3) 缓存契约对真 Valkey：起一个用完即删的 bundle，端口避开 6379 上那个 redis
+ssh <126> 'docker run -d --name qoder-valkey-<date> --network host valkey/valkey-bundle:9.1.2 \
+    valkey-server --port 6380 --save "" --appendonly no'
+#    客户端 126 全 estate 都没有 ⇒ 从本机 venv 原样搬（不装、不联网）：
+#    tar czf valkeydep.tar.gz -C .venv/Lib/site-packages valkey valkey-6.2.0.dist-info
+ssh <126> 'docker run --rm --network host -v /tmp/envrun-<date>:/srv/agent-platform \
+    -v /opt/agent-platform/.venv:/srv/agent-platform/.venv -v /tmp/valkeydep-<date>:/extra:ro \
+    -w /srv/agent-platform -e PYTHONPATH=/extra -e VALKEY_URL=redis://127.0.0.1:6380/0 \
+    -e CACHE_CONTRACT_REQUIRED=1 ap-test-base:2 /srv/agent-platform/.venv/bin/python \
+    -m pytest packages/agent-runtime/tests/test_cache_contract.py -q'
+#    实测 19 passed in 3.73s；起服务后先 `valkey-cli -p 6380 module list` 确认 search 已加载
+#    正控，否则"19 passed"可能是 L2 被静默跳过的假绿。`make test-cache-contract` 是同一判据
+#    的 CI/本机形状，126 宿主无 uv ⇒ 只能抄上面的等价容器命令。
+```
+
+顺手查出来的**现网事实**（不是本轮改动引入，但决定语义缓存在现网能不能开）：跑着的 Pod `agent-platform-85794678c-vktrc`（`GIT_REV=6ac466af`）里 `import valkey` → ModuleNotFoundError，而 `valkey>=6.2.0` 是 `packages/agent-runtime/pyproject.toml:18` 的**硬依赖**；同 Pod 的 `CACHE_ENABLED` / `CACHE_BACKEND` / `VALKEY_URL` 三个 env 全为空。⇒ 现网既没注入缓存配置，镜像也没带客户端；只把 `CACHE_BACKEND` 改成 valkey 会在 `agent_runtime/cache/factory.py:34` 启动期 fail-closed（不静默降级，这一层设计是对的）。要启用必须先重建并分发镜像，属 D2 动作。
+
 ## 4. 已验证基线（2026-09-28 实跑快照）
 
 | 范围 | 结果 |
