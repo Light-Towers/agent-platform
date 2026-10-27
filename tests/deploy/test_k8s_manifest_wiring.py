@@ -18,9 +18,14 @@ import pytest
 import yaml
 
 _ROOT = Path(__file__).resolve().parents[2]
-_CONFIG = _ROOT / "deploy" / "k8s" / "00-config.yaml"
-_SECRETS = _ROOT / "deploy" / "k8s" / "05-secrets.yaml"
-_DEPLOY = _ROOT / "deploy" / "k8s" / "20-agent-platform.yaml"
+_K8S = _ROOT / "deploy" / "k8s"
+_CONFIG = _K8S / "00-config.yaml"
+_SECRETS = _K8S / "05-secrets.yaml"
+_DEPLOY = _K8S / "20-agent-platform.yaml"
+#: 会被 apply 的全部工作负载清单。ConfigMap 的“有没有死键”要按**消费方全集**算：
+#: 00-config 现在同时服务平台（20）、问数服务（30）与两个一次性 Job（35/36），
+#: 只拿 20 的容器做分母，就会把 30/36 的真引用误判成死键（并反过来鼓励大家拆成两份 CM）。
+_WORKLOADS = (_DEPLOY, _K8S / "30-nl2sql-service.yaml", _K8S / "35-nl2sql-dbsql-job.yaml", _K8S / "36-nl2sql-meta-init-job.yaml")
 
 # 由第三方库直接消费、仓库内不出现读取点的标准 env（实测：设这三个可离线加载权重）
 _THIRD_PARTY_ENV = {"HF_HOME", "HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE", "OMP_NUM_THREADS"}
@@ -165,14 +170,47 @@ def test_local_mode_model_id_is_the_one_kernel_falls_back_to(container):
 # ---------------------------------------------------------------------------
 
 
-def test_configmap_has_no_dead_keys(configmap, container):
+def _cm_key_refs(node: object) -> set[tuple[str, str]]:
+    """递归收集 (configMap 名, 键名) 引用。
+
+    不按 `env[].valueFrom.configMapKeyRef` 的固定路径取：envFrom / volume / projected
+    都是同一份 CM 的合法消费方，只扫 env 会把它们当成死键。
+    """
+    if isinstance(node, dict):
+        ref = node.get("configMapKeyRef")
+        out: set[tuple[str, str]] = set()
+        if isinstance(ref, dict) and "name" in ref and "key" in ref:
+            out.add((ref["name"], ref["key"]))
+        for value in node.values():
+            out |= _cm_key_refs(value)
+        return out
+    if isinstance(node, list):
+        acc: set[tuple[str, str]] = set()
+        for item in node:
+            acc |= _cm_key_refs(item)
+        return acc
+    return set()
+
+
+def _cm_refs_across_workloads() -> set[tuple[str, str]]:
+    refs: set[tuple[str, str]] = set()
+    for path in _WORKLOADS:
+        for doc in _load(path):
+            refs |= _cm_key_refs(doc)
+    return refs
+
+
+def test_configmap_has_no_dead_keys(configmap):
     consumed = {
-        e["name"]
-        for e in container["env"]
-        if "valueFrom" in e and "configMapKeyRef" in e["valueFrom"]
+        key
+        for name, key in _cm_refs_across_workloads()
+        if name == configmap["metadata"]["name"]
     }
     dead = sorted(set(configmap["data"]) - consumed)
-    assert not dead, f"ConfigMap 存在未被 deployment 引用的键：{dead}（死键会让清单与线上口径分叉）"
+    assert not dead, (
+        f"ConfigMap 存在未被任何工作负载引用的键：{dead}"
+        "（死键会让清单与线上口径分叉：改它的人得不到任何反馈）"
+    )
 
 
 def test_configmap_llm_values_are_not_the_retired_foreign_defaults(configmap):
@@ -293,8 +331,8 @@ def test_gate_bites_on_the_four_defect_shapes(secret, pod_spec, container, confi
     with pytest.raises(AssertionError, match="api.openai.com"):
         test_configmap_llm_values_are_not_the_retired_foreign_defaults(bad_cm)
     bad_cm["data"]["SOME_UNUSED_KEY"] = "x"
-    with pytest.raises(AssertionError, match="未被 deployment 引用的键"):
-        test_configmap_has_no_dead_keys(bad_cm, container)
+    with pytest.raises(AssertionError, match="未被任何工作负载引用的键"):
+        test_configmap_has_no_dead_keys(bad_cm)
 
     # (c) 字段缩进错一层（terminationGracePeriodSeconds 落进容器）→ k8s 静默丢弃
     bad_pod = copy.deepcopy(pod_spec)

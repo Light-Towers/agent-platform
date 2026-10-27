@@ -10,7 +10,10 @@
 #   1. 35 Job 已 Complete（两库两角色到位、dw 表已灌、vector 扩展已在位）；
 #   2. ConfigMap nl2sql-data 已含 nl2sql_meta_config.yaml（命令见 35 头部，同一份 --from-file）；
 #   3. Secret agent-platform-secrets 有 META_DB_DSN；
-#   4. Pod 落到的节点上同时有 nl2sql-service:dev 镜像与 /opt/ap-models/hf-cache 权重缓存
+#   4. 00-config.yaml 已 apply 且含 NL2SQL_* 四键（向量口径的唯一真相源，与 30 共用）；
+#      缺键不静默：configMapKeyRef 指到不存在的键 ⇒ Pod 停在 ContainerCreating + 明确事件，
+#      而不是拿着空串去把元库列宽建成另一种口径；
+#   5. Pod 落到的节点上同时有 nl2sql-service:dev 镜像与 /opt/ap-models/hf-cache 权重缓存
 #      （三节点各自独立盘，先按 README §6 的前置检查逐节点跑过）。缺缓存 ⇒ hostPath
 #      type: Directory 让 Pod 直接 Pending（响的失败），缺镜像 ⇒ ErrImagePull，都不是静默错。
 #
@@ -75,27 +78,45 @@ spec:
             - name: AP_DATA_DIR
               value: /mnt/nl2sql-data
             # ---- 作用域：与在线召回侧（SINGLE_TENANT=default / datasource_id=dw）逐字相同 ----
+            # DEFAULT_TENANT 留字面值是有意的：它要等于 30 的 SINGLE_TENANT（写入作用域 vs 断言作用域），
+            # 而不是等于本 Job 的任意一个旋钮；这条一致性由 tests/deploy/ 的两个用例钉住。
             - name: DEFAULT_TENANT
               value: "default"
-            - name: DATASOURCE_ID
-              value: "dw"
-            # ---- 向量口径：本地 bge-small-zh-v1.5 = 512 维 ----
+            # ---- 向量口径四键 + 数据源 id：引 00-config 的 NL2SQL_* 键（与 30 同一份值）----
+            # 不在这里另抄一份字面值：元库的 vector 列宽由本 Job 的 init_meta_schema 按
+            # VECTOR_DIM 定死，在线召回（30）读另一个维度就是"写进 512 的列、拿 1024 的向量去查"
+            # ——两边各自持有字面值时，只改一侧的 commit 在 review 里看上去完全自洽。
             # settings.vector_dim 的代码默认 1536 是 OpenAI 口径；app_config.yaml 的
-            # embedding.vector_dim 也是 1024 那一路。env 显式压到 512 才与
-            # 本地权重实际输出维度一致——build 侧有维度校验（不等直接抛），
-            # 但列宽已在 001 迁移里按 vector_dim 定死，错了要重建库。
+            # embedding.vector_dim 也是 1024 那一路。env 显式压到 512 才与本地权重实际
+            # 输出维度一致——build 侧有维度校验（不等直接抛），但列宽已在 001 迁移里按
+            # vector_dim 定死，错了要重建库。
+            - name: DATASOURCE_ID
+              valueFrom:
+                configMapKeyRef:
+                  name: agent-platform-config
+                  key: NL2SQL_DATASOURCE_ID
             - name: VECTOR_DIM
-              value: "512"
+              valueFrom:
+                configMapKeyRef:
+                  name: agent-platform-config
+                  key: NL2SQL_VECTOR_DIM
             - name: EMBEDDING_BACKEND
-              value: "langchain_huggingface"
+              valueFrom:
+                configMapKeyRef:
+                  name: agent-platform-config
+                  key: NL2SQL_EMBEDDING_BACKEND
             - name: EMBEDDING_MODEL
-              value: "BAAI/bge-small-zh-v1.5"
+              valueFrom:
+                configMapKeyRef:
+                  name: agent-platform-config
+                  key: NL2SQL_EMBEDDING_MODEL
             - name: TOKENIZER
-              value: "bigram"
-            # ⚠ 上面四条与批次 3 的 30-nl2sql-service.yaml 必须同值：元库列宽/向量口径由本 Job
-            #   定，在线召回用另一个维度就是"写进 512 列、查用 1024 向量"。批次 3 落地时
-            #   把这四项连同 30 一起改为从 CM 的 NL2SQL_* 键取（单源），不在两侧各留一份字面值。
+              valueFrom:
+                configMapKeyRef:
+                  name: agent-platform-config
+                  key: NL2SQL_TOKENIZER
             # 离线加载：权重只在节点 hostPath 缓存里，禁止回连 huggingface.co（集群无外网）
+            # 路径与 20/30 三处字面值同值由门禁比对钉住（改一处即红）。
             - name: HF_HOME
               value: "/opt/ap-models/hf-cache"
             - name: HF_HUB_OFFLINE
