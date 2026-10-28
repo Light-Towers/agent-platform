@@ -36,9 +36,9 @@ class Settings(BaseLLMSettings):
     # 联网搜索
     search_api_key: str = ""
 
-    # Text-to-SQL
-    sql_dsn: str = ""
-    sql_max_rows: int = 100  # LLM 上下文窗口约束，区别于 nl2sql-service(1000)：本服务将结果注入 prompt，需严格控制 token 数
+    # Text-to-SQL 数据面已移交 nl2sql-service（ADR-0011 选项 A）：平台侧刻意不留
+    # sql_dsn / sql_max_rows——它们在 2026-10-28 批次 5 随 `/health` 的 sql_backend 假灯一并
+    # 退役（全仓零消费点）。要重新注入请先证明平台自己会读它，而不是为了「让某盏灯亮着」。
 
     # 健壮性（语义缓存配置统一由 agent_runtime.cache 读取，见 ADR-0013 C）
     memory_enabled: bool = True

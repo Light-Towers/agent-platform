@@ -129,10 +129,11 @@ class HealthResponse(BaseHealthResponse):
     共享基类被另外三个服务直接返回，把 agent_server 独有的部件加到基类上，等于让
     它们报出一堆默认 false 的误导性字段（它们根本没有这些部件）。
 
-    两个字段刻意只报布尔/模式名而不回显任何值——/health 是免鉴权的探针路径
+    三个字段刻意只报布尔/模式名而不回显任何值——/health 是免鉴权的探针路径
     （见 agent_core.guardrails.auth.DEFAULT_EXEMPT_PATHS）：
     - auth_enabled：仅 bool(settings.api_key)，不含密钥；
-    - identity_mode：仅 jwt/single/insecure 三态名。
+    - identity_mode：仅 jwt/single/insecure 三态名；
+    - nl2sql：仅问数服务是否已注册，不回显 NL2SQL_SERVICE_URL（2026-10-28 补）。
     """
 
     # V3 执行平台装配态：由 main.py lifespan 按开关条件写入，None 即"未装配"。
@@ -152,6 +153,9 @@ class HealthResponse(BaseHealthResponse):
     embedding_real: bool = Field(False, description="RAG/记忆检索是否真在算语义（False=MockEmbedder 字面比对）")
     planner: str | None = Field(None, description="当前执行路径（默认 deterministic）")
     guard_enabled: bool = Field(False, description="输入护栏（PII/injection）是否打开")
+    # 问数面（ADR-0011 选项 A）：本服务不连业务库，这一位只说 nl2sql skill 是否因
+    # NL2SQL_SERVICE_URL 非空而注册（意愿位，不是探活）。“问数能不能答”看 nl2sql-service 的 /ready。
+    nl2sql: bool = Field(False, description="问数子代理是否已注册（NL2SQL_SERVICE_URL 非空；不证明服务可用）")
     # Langfuse 观测面（方案 plan-langfuse-wiring §2.2）：两盏灯必须分开报，合成一盏就退回
     # "配置项非空 = 可用"那个已被证伪的读法（llm 位在账号 403 时照样 true）。
     langfuse_enabled: bool = Field(

@@ -353,17 +353,17 @@ def test_nl2sql_service_url_matches_the_service_object(container):
 
 
 def test_platform_does_not_inject_sql_dsn(container):
-    """平台不再注入 SQL_DSN（问数数据面已换到 nl2sql-service，ADR-0011 选项 A）。
+    """平台不注入 SQL_DSN（问数数据面已换到 nl2sql-service，ADR-0011 选项 A）。
 
-    SQL_DSN 在 Settings 有字段，所以通用死键门禁验不出它——它“有效”，但 HEAD
-    唯一读点是 `api/health_router.py` 的 `sql_backend=detect_dialect(settings.sql_dsn)`：
-    注了它，/health 就拿**平台库**的方言报 sql_backend=postgres，而问数真正用的是
-    nl2sql_dw（dw_reader 只读角色）⇒ 这盏灯把“平台库能连”说成“问数数据面就绪”。
-    摘掉它不是清杂项，是拆假灯；字段与灯本体在批次 5 一并退役。
+    批次 4 摘掉注入时 `sql_dsn` 仍是 Settings 字段 ⇒ 通用死键门禁（①）验不出它：它“有效”，
+    但当时的唯一读点是 /health 的 `sql_backend=detect_dialect(settings.sql_dsn)`，注它只会让
+    那盏灯拿**平台库**的方言冒充问数读数（问数真正用的是 nl2sql_dw）。批次 5（2026-10-28）
+    把字段与灯一并退役后，①已经能咬住这个名字；本用例仍要点名的理由是：若有人为了让①过关
+    而把 `sql_dsn` 加回 Settings，①会再度沉默，而这里会直接说清“为什么这个名字不许回来”。
     """
     assert "SQL_DSN" not in _manifest_env(container), (
-        "平台清单注入了 SQL_DSN：平台侧已无问数执行链路消费它，"
-        "但它会让 /health 的 sql_backend 灯拿平台库方言充当问数数据面读数"
+        "平台清单注入了 SQL_DSN：平台侧已无任何代码读它（字段随批次 5 退役），"
+        "业务库连接串属于 nl2sql-service 的 DW_DB_DSN"
     )
 
 

@@ -78,7 +78,9 @@ services:
       EMBEDDING_API_KEY: ${EMBEDDING_API_KEY:-}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-bge-small-zh}
       SEARCH_API_KEY: ${SEARCH_API_KEY:-}
-      SQL_DSN: ${SQL_DSN:-}
+      # 问数不再走平台直连（原 SQL_DSN，ADR-0011 选项 A 已退役）：该路径需要
+      # nl2sql-service 在位，而本 compose 只起 postgres/valkey/agent-platform ⇒ 本形态下
+      # nl2sql 子代理不注册（/health 报 nl2sql=false）。集群形态见 deploy/k8s/20+30。
       LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
       LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
       LANGFUSE_HOST: ${LANGFUSE_HOST:-}
