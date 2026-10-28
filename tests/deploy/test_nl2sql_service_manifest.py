@@ -40,6 +40,11 @@ _PLATFORM_ONLY_OTEL = {"OTEL_ENABLED", "OTEL_ENDPOINT", "OTEL_EXPORTER", "OTEL_S
 #: 第三方库直接读的标准 env（仓内无读取点是正常的，实测设这三个可离线加载权重）
 _THIRD_PARTY_ENV = {"HF_HOME", "HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE", "OMP_NUM_THREADS"}
 
+#: 不许被 Secret 卷占用的挂载路径。2026-10-28 在 126 用本镜像实跑探针：**只读 tmpfs 先占住
+#: /run/secrets 后，runc 再为 SA token 建 /var/run/secrets/kubernetes.io 子目录就是 EROFS**，
+#: 容器创建失败、Pod 永远起不来（apply 不报错、清单看起来完全合法）。镜像里 /var/run 就是 /run。
+_SA_TOKEN_SHADOW_PATHS = ("/run/secrets", "/var/run/secrets")
+
 #: 集群自有 Secret 对象与其键（真实值永不入库，见 05-secrets.yaml 头部）
 _CLUSTER_OWNED_SECRET_OBJECTS = {"observability-keys"}
 _CLUSTER_OWNED_SECRET_KEYS = {
@@ -120,6 +125,51 @@ def _cm_ref(name: str, ctr: dict) -> tuple[str, str]:
 
 def _secret_volumes(pod: dict) -> dict[str, dict]:
     return {v["name"]: v["secret"] for v in pod.get("volumes", []) if "secret" in v}
+
+
+def _workload_pod_and_container(path: Path) -> tuple[dict, dict]:
+    """按文件取（PodSpec, 单容器）。20/30 两份清单的密钥形状要拿同一套判据跑，
+    不在第二份文件里抄一套简化版——简化版就是“签发侧没被同样的门禁看住”。"""
+    workload = next(d for d in _docs(path) if d["kind"] in ("Deployment", "Job"))
+    pod = workload["spec"]["template"]["spec"]
+    ctrs = pod["containers"]
+    assert len(ctrs) == 1, f"{path.name} 期望单容器：{len(ctrs)}"
+    return pod, ctrs[0]
+
+
+def _secret_mount_for(pod: dict, ctr: dict, key_path: str) -> tuple[dict, dict] | None:
+    """按密钥文件路径找出（挂载项, Secret 卷定义）；路径不在任何 Secret 卷下则 None。
+
+    单侧判据与跨清单比对共用这一份实现：否则“挂载点怎么算”会有两套口径，
+    而两边都错得很自洽时，门禁会一起绿。
+    """
+    secret_volumes = _secret_volumes(pod)
+    for m in ctr.get("volumeMounts", []):
+        vol = secret_volumes.get(m["name"])
+        if vol is not None and key_path.startswith(str(m["mountPath"]).rstrip("/") + "/"):
+            return m, vol
+    return None
+
+
+def _hmac_shape(pod: dict, ctr: dict) -> dict[str, object]:
+    """密钥挂载的六件事实（路径/来源对象/键/投影文件名/模式/fsGroup）。
+
+    两侧任一项分叉，表现都是“/sql/train 全线 401 而两侧探针全绿”：签出去的头验不过，
+    不是“哪里报错”而是“哪里都不报错”。逐字段列出值，比在散文里写一句“要一致”更能指认“哪一件不同”。
+    """
+    env = {e["name"]: e.get("value") for e in _env_items(ctr)}
+    key_path = str(env.get("INTERNAL_HMAC_KEY_FILE") or "")
+    mount, vol = _secret_mount_for(pod, ctr, key_path) or ({}, {})
+    items = vol.get("items") or []
+    return {
+        "key_file": key_path,
+        "mount_path": mount.get("mountPath"),
+        "secret_name": vol.get("secretName"),
+        "secret_key": items[0]["key"] if items else None,
+        "projected": items[0]["path"] if items else None,
+        "mode": vol.get("defaultMode"),
+        "fs_group": (pod.get("securityContext") or {}).get("fsGroup"),
+    }
 
 
 def _secret_objects_in_repo() -> tuple[str, dict[str, str]]:
@@ -396,20 +446,41 @@ def test_single_tenant_matches_the_meta_job_write_scope():
     )
 
 
-def test_hmac_key_is_a_projected_secret_file_not_an_env_value():
-    """nl2sql 是**验签侧**，密钥只认文件（load_hmac_key 读 INTERNAL_HMAC_KEY_FILE）。
+@pytest.mark.parametrize("path", (_PLATFORM, _SERVICE), ids=("20 签发侧", "30 验签侧"))
+def test_hmac_key_is_a_projected_secret_file_not_an_env_value(path):
+    """两侧都是**文件**型密钥（load_hmac_key 只读 INTERNAL_HMAC_KEY_FILE，不读 env 值）。
 
-    判据按五件事逐个查，缺一件就是"看着挂了、其实读不到/读多了"：
+    20（agent_server）是签发侧、30（nl2sql-service）是验签侧，两侧靠同一套判据跑：
+    只在问数服务那边把门禁钉好，等于平台那边“改坏没人拦”。
+
+    判据按六件事逐个查，缺一件就是"看着挂了、其实读不到/读多了"：
     env 指向的路径 = 挂载点 + 投影出的文件名；卷只投一个键；来源是集群自有对象；
-    模式 0440 + fsGroup；密钥不落在入库的 demo Secret 里
+    模式 0440 + fsGroup；挂载路径不遮 SA token；密钥不落在入库的 demo Secret 里
     （一把能签"合法租户"的对称键进仓库 = 人人可跨租户写元知识）。
     """
-    ctr = _container()
-    _assert_hmac_volume(_pod_spec(), ctr)
-    items = _secret_volumes(_pod_spec())
+    pod, ctr = _workload_pod_and_container(path)
+    _assert_hmac_volume(pod, ctr)
     repo_object, repo_keys = _secret_objects_in_repo()
-    key = next(iter(items.values()))["items"][0]["key"]
+    key = _hmac_shape(pod, ctr)["secret_key"]
     assert key not in repo_keys, f"{key} 出现在入库 Secret {repo_object} 里：真实签名密钥永不入库"
+
+
+def _assert_same_hmac_shape(sign: dict[str, object], verify: dict[str, object]) -> None:
+    diff = {k: (sign.get(k), verify.get(k)) for k in sign if sign.get(k) != verify.get(k)}
+    assert not diff, (
+        f"签发侧(20) 与验签侧(30) 的密钥形状分叉 {diff}：表现是 /sql/train 全线 401 "
+        "而两侧探针全绿（验不过不会让任何一边报错）"
+    )
+    assert sign["fs_group"], (
+        "0440 必须搭 Pod fsGroup（实测：无 fsGroup 时卷内文件 root:root，uid 10001 读不到）"
+    )
+
+
+def test_signing_and_verifying_sides_share_one_key_shape():
+    """20 签的头由 30 验：六件事实逐件对齐，分叉任一件都是“401 但处处全绿”。"""
+    plat_pod, plat_ctr = _workload_pod_and_container(_PLATFORM)
+    svc_pod, svc_ctr = _workload_pod_and_container(_SERVICE)
+    _assert_same_hmac_shape(_hmac_shape(plat_pod, plat_ctr), _hmac_shape(svc_pod, svc_ctr))
 
 
 # ---------------------------------------------------------------------------
@@ -607,6 +678,31 @@ def test_gates_bite_on_the_shapes_they_reject():
     with pytest.raises(AssertionError, match="装配"):
         _assert_ready_is_not_skipped(assembly_src="app.add_middleware(IdentityMiddleware, skip_paths=())")
 
+    # (j) 密钥卷改挂 /run/secrets（连带把 env 路径改对，绕过“路径要等于挂载点”那条）：
+    #     清单看起来完全合法，但 Pod 永远起不来（SA token EROFS）
+    bad6 = copy.deepcopy(_pod_spec())
+    ctr6 = bad6["containers"][0]
+    for m in ctr6["volumeMounts"]:
+        if m["name"] in _secret_volumes(bad6):
+            m["mountPath"] = "/run/secrets"
+    for e in ctr6["env"]:
+        if e["name"] == "INTERNAL_HMAC_KEY_FILE":
+            e["value"] = "/run/secrets/internal_hmac.key"
+    with pytest.raises(AssertionError, match="EROFS"):
+        _assert_hmac_volume(bad6, ctr6)
+
+    # (k) 只写了 0440 而删掉 Pod fsGroup：密钥在位但进程读不到 ⇒ 401 而处处全绿
+    bad7 = copy.deepcopy(_pod_spec())
+    bad7["securityContext"].pop("fsGroup")
+    with pytest.raises(AssertionError, match="fsGroup"):
+        _assert_hmac_volume(bad7, bad7["containers"][0])
+
+    # (l) 只改一侧的密钥路径（“发了 PR 但两侧不一致”的形态）⇒ 跨清单比对要红
+    plat_pod, plat_ctr = _workload_pod_and_container(_PLATFORM)
+    shape = _hmac_shape(plat_pod, plat_ctr)
+    with pytest.raises(AssertionError, match="分叉"):
+        _assert_same_hmac_shape(shape, {**shape, "key_file": "/run/app-secrets/other"})
+
 
 # --- 判据本体（用例与上面的反证共用同一份实现，避免"反证跑的是另一套代码"）---
 
@@ -668,17 +764,11 @@ def _assert_hmac_volume(pod: dict, ctr: dict) -> None:
     env = {e["name"]: e.get("value") for e in _env_items(ctr)}
     key_path = env.get("INTERNAL_HMAC_KEY_FILE")
     assert key_path, "未声明 INTERNAL_HMAC_KEY_FILE ⇒ /sql/train 的签名头永远验不过（401），而 /ready 全绿"
-    secret_volumes = _secret_volumes(pod)
-    assert secret_volumes, "Pod 没有任何 Secret 卷，INTERNAL_HMAC_KEY_FILE 指向的是不存在的路径"
-    mounts = {m["name"]: m for m in ctr.get("volumeMounts", [])}
-    hit = [
-        (name, vol)
-        for name, vol in secret_volumes.items()
-        if name in mounts and key_path.startswith(mounts[name]["mountPath"].rstrip("/") + "/")
-    ]
+    assert _secret_volumes(pod), "Pod 没有任何 Secret 卷，INTERNAL_HMAC_KEY_FILE 指向的是不存在的路径"
+    hit = _secret_mount_for(pod, ctr, str(key_path))
     assert hit, f"{key_path} 不在任何 Secret 卷的挂载点下"
-    name, vol = hit[0]
-    assert mounts[name].get("readOnly"), "密钥卷必须只读"
+    mount, vol = hit
+    assert mount.get("readOnly"), "密钥卷必须只读"
     assert vol["secretName"] in _CLUSTER_OWNED_SECRET_OBJECTS, (
         f"密钥来自 {vol['secretName']!r}：真实密钥应在集群自有的 observability-keys，不在入库的 demo Secret"
     )
@@ -690,6 +780,19 @@ def _assert_hmac_volume(pod: dict, ctr: dict) -> None:
     assert vol.get("defaultMode") in (0o440, 440), (
         "defaultMode 需 0440：0400 是 root 独占（uid 10001 读不到），0644 是任何进程可读"
     )
+    # 0440 能成立的前提是 fsGroup 把卷内文件的组改成 10001（本集群实跑：有 fsGroup → 0:10001 可读，
+    # 无 fsGroup → 0:0 且 0440 不可读）。两件只写一件 = 密钥在位而进程读不到：/ready 全绿、
+    # /sql/train 401（无密钥 ⇒ 拒发），运维只会去看服务日志。所以成对检查，不放行“只改了 mode”。
+    assert (pod.get("securityContext") or {}).get("fsGroup") == 10001, (
+        f"密钥卷依赖 Pod fsGroup=10001，实际 {pod.get('securityContext')!r}：0440 + 无 fsGroup 读不到"
+    )
+    # 挂载路径遮不遮 SA token：不遮不报错，遮了直接起不来（见 _SA_TOKEN_SHADOW_PATHS 的实测注录）。
+    shadowed = sorted({p for p in _SA_TOKEN_SHADOW_PATHS if Path(mount["mountPath"]) == Path(p)})
+    assert not shadowed, (
+        f"Secret 卷挂在 {shadowed}：那是 kubelet 挂 SA token 的目录，只读 tmpfs 先占住后"
+        " runc 建 kubernetes.io 子目录就是 EROFS ⇒ 容器永远创建不成功"
+        "（2026-10-28 在 126 实跑重现，改用 /run/app-secrets）"
+    )
 
 
 def _assert_ready_is_not_skipped(
@@ -698,7 +801,7 @@ def _assert_ready_is_not_skipped(
 ) -> None:
     """TENANT_JWT_ENFORCE 留 observe 的前提：/ready 现在是要凭据的。
 
-    skip 面从代码取（中间件形参默认值），不在用例里拄第二份名单；同时要求装配点
+    skip 面从代码取（中间件形参默认值），不在用例里抄第二份名单；同时要求装配点
     **没有**传自定义 skip_paths——否则默认值就不是生效的那一份，判据得改成读装配实参。
     """
     import inspect

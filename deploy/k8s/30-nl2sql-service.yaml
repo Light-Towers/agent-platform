@@ -50,12 +50,16 @@ spec:
       # SIGTERM 时刚好跑到第 25 秒，而 kubelet 第 30 秒就 SIGKILL——表现是“发布期间偶发空结果”，
       # 而发布完成、探针全绿，事后查不到任何错（同 20 头部那条 60s 的理由，只是这里靠的是语句超时）。
       terminationGracePeriodSeconds: 60
-      # ⚠ Secret volume 的属主：runAsUser 10001 读不到 root:root 0400 的密钥文件，
-      # fsGroup 让 kubelet 把卷内文件 chown 成 root:10001（配合 defaultMode 0440 才是"只对本服务可读"）。
-      # secret/configMap 这类卷属于"支持 ownership and mode management"的类别，fsGroup 会生效——
-      # 但这条是读文档定的、不是现网测的 ⇒ 批次 6 取证首项是在容器身份下读一次（只输出字节数，
-      # 不输出内容）：`kubectl -n agent-platform exec deploy/nl2sql-service -- sh -c 'wc -c < /run/secrets/internal_hmac.key'`
-      # 不报 Permission denied 才算成立（报了就是 fsGroup 没落到这个卷上，改 0444 是掩盖而不是解决）。
+      # 密钥卷的属主与挂载路径（2026-10-28 在 126 用本镜像实跑三个探针 Pod 量出来的，不是文档转述）：
+      #   · fsGroup 10001 + defaultMode 0440 ⇒ 卷内文件是 root:10001，uid 10001 读得到（探针里 wc -c 出了字节数）。
+      #     去掉 fsGroup 后同一份文件是 root:root ⇒ 0440 读不到，所以这两件事必须成对出现。
+      #   · fsGroup **不会**改 hostPath 的宿主目录：探针把 root:root 755、内含 644 文件与子目录的宿主目录挂进来，
+      #     前后逐节点 stat 一字不变 ⇒ “给挂权重缓存的 Pod 设 fsGroup 会把 /opt/ap-models 递归 chown、
+      #     在 126 那块 ROTA=1 盘上制造 IO stall”这个担心实测不成立，fsGroup 在这里可以放心用。
+      #   · 挂载路径**不许写 /run/secrets**：镜像里 /var/run 就是 /run，那里是 kubelet 挂 SA token 的位置；
+      #     只读 tmpfs 先占住 /run/secrets 后，runc 再建 kubernetes.io 子目录就是 EROFS ⇒ 容器起不来
+      #     （探针原话：mkdirat …/rootfs/run/secrets/kubernetes.io: read-only file system）。
+      #     本清单与 20 因此都用 /run/app-secrets；改回 /run/secrets 会被批次 4 的门禁咬。
       securityContext:
         fsGroup: 10001
       containers:
@@ -179,7 +183,7 @@ spec:
             # 两侧不同值时的表现是"伪造头通过不了/合法头也通过不了"⇒ /sql/train 全线 401，
             # 而 /ready 全绿（探针不碰鉴权）：故一致性由批次 4 的清单门禁与批次 6 的写路径取证一起管。
             - name: INTERNAL_HMAC_KEY_FILE
-              value: /run/secrets/internal_hmac.key
+              value: /run/app-secrets/internal_hmac.key
             # ---- 离线加载：与平台同一份 hostPath 权重缓存（三节点各自独立盘 ⇒ 逐节点前置检查） ----
             # 路径与 20/36 三处字面值同值由门禁比对钉住（改一处即红）：HF_HOME 指到没缓存的目录时，
             # 服务不是报错而是回连 huggingface.co，集群无外网 ⇒ 挂在首次加载里。
@@ -277,8 +281,9 @@ spec:
               # 别把这条删了"省得报错"：删了它，一次误写就污染三节点共用的权重缓存。
               readOnly: true
             - name: internal-hmac
-              mountPath: /run/secrets
+              mountPath: /run/app-secrets
               # 密钥文件只读：进程不需要写它，可写挂载等于给进程一条改自己信任根的路。
+              # 路径别改成 /run/secrets——那个位置已被本 Pod 的 SA token 占用（见 Pod securityContext 段实测）。
               readOnly: true
       volumes:
         - name: ap-models
@@ -300,7 +305,9 @@ spec:
             items:
               - key: INTERNAL_HMAC_KEY
                 path: internal_hmac.key
-            # 0440 + Pod fsGroup 10001：owner root、group 10001、其他进程不可读。
+            # 0440 + Pod fsGroup 10001：owner root、group 10001、其他进程不可读（本集群实跑量过，见头部）。
+            # 上线后在真 Pod 里再读一次（只输出字节数、不输出内容）：
+            #   kubectl -n agent-platform exec deploy/nl2sql-service -- sh -c 'wc -c < /run/app-secrets/internal_hmac.key'
             defaultMode: 0440
 ---
 apiVersion: v1
