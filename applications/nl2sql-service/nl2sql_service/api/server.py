@@ -23,7 +23,29 @@ _READY_POOLS = ("meta", "dw")
 
 
 async def handle_health(http_request: Request) -> HealthResponse:
-    return HealthResponse(status=HealthStatus.HEALTHY, version="0.1.0", dependencies=[])
+    """共享契约健康位（livenessProbe 打这里：只算字符串，不发网络、不连库）。
+
+    `sql_backend` 自 2026-10-28（批次 5）起由**本服务**上报。此前它住在 agent_server，
+    而那边那份 DSN 指**平台库** ⇒ 报出来的 postgres 只证明“平台能连自己的库”，
+    与问数能不能答无关（假灯，见 ADR-0011 的后续修订）。方言只按 DSN scheme 推断；
+    **没配数据面时报 null**——`detect_dialect("")` 回落 postgres，拿它当读数会把
+    “没有 dw”读成“有个 pg 可问”。运行态真值（池能不能用）在 `/ready`。
+    """
+    from nl2sql_service.conf.settings import get_settings
+    from nl2sql_service.services.datasource import detect_dialect
+
+    settings = get_settings()
+    sql_backend = (
+        settings.datasource_dialect or detect_dialect(settings.dw_db_dsn)
+        if settings.dw_db_enabled and settings.dw_db_dsn
+        else None
+    )
+    return HealthResponse(
+        status=HealthStatus.HEALTHY,
+        version="0.1.0",
+        dependencies=[],
+        sql_backend=sql_backend,
+    )
 
 
 async def _probe_pool(pool: Any) -> None:

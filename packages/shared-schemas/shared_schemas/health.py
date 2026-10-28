@@ -74,7 +74,10 @@ class HealthResponse(BaseModel):
     storage: str | None = Field(None, description="存储后端（postgres/memory 等）")
     llm: bool = Field(False, description="LLM 可用")
     search: bool = Field(False, description="联网搜索可用")
-    sql_backend: str | None = Field(None, description="Text-to-SQL 后端标识")
+    # 归属说明（2026-10-28 批次 5）：这一位只该由**持有业务库连接**的服务上报（现：
+    # nl2sql-service 报它的 dw 方言）。agent_server 此前也在报，但它读的那份 DSN 指**平台库**，
+    # 等于拿“平台能连自己的库”充当问数读数（假灯）⇒ 已退役，见 ADR-0011 的后续修订。
+    sql_backend: str | None = Field(None, description="Text-to-SQL 数据面方言（由持有业务库的服务上报；无该面为 null）")
     coordination: bool = Field(False, description="会话并发协调（coordinator）启用")
     admission: bool = Field(False, description="准入限流（admission）启用")
     revert: bool = Field(False, description="对话回退（revert）启用")
