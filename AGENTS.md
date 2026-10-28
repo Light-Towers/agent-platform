@@ -96,7 +96,7 @@ DATABASE_URL= uvicorn agent_server.main:app --port 8000  # 零依赖冒烟
 
 ## 内网测试环境 126（<internal-host>）
 
-> 环境事实基线 + 可复核取证命令见 `docs/operations/env-126-inventory.md`。上 126 前先记住六条容易踩死的差异：
+> 环境事实基线 + 可复核取证命令见 `docs/operations/env-126-inventory.md`；**问数（Text-to-SQL）上线专用的现网落差清单 + 逐条判据**（含“哪六个键缺、哪两个镜像没构建、每步 apply 后期望读到什么”）见 `docs/operations/nl2sql-release-checklist.md`——两份都是“读数必绑 rev、引用前先复跑”。上 126 前先记住六条容易踩死的差异：
 > 1. **代码进来的通道是 `git bundle` + `scp`，不是 git push**（126 从未被推送过、无 hook、恒为 detached HEAD）。改完代码若未走 `deploy/k8s/scripts/build.sh`（rev 门禁）+ `distribute.sh`，**跑着的仍是旧 rev**——宿主 checkout 的 rev ≠ 镜像内 `/srv/agent-platform/GIT_REV`。
 > 2. **宿主 Python 3.10 + 无 uv** ⇒ 126 上 `uv run ...` 与项目测试**在宿主均不可执行**；宿主只能用 /usr/bin/python3 -B 跑单文件/只读脚本。两份项目 .venv（6.4G）的 bin/python 是指向 /usr/local/bin/python3 的断链——**因为 venv 建在容器内**：依赖树 454 包完整在位，用 ap-test-base / python:3.11-slim 容器 bind 该目录即可直接跑，**不要重装依赖**（补跑路径见 `docs/operations/testing-playbook.md` 第 4 层）。
 > 3. **双运行时两套镜像库**（docker moby 与 k8s 专用 containerd-k8s）互不可见、节点间不共享，导入须显式 `--address`。

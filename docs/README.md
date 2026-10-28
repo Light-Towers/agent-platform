@@ -23,7 +23,8 @@
 | `docs/adr/0008-auth-mode-selection.md`、`docs/adr/0009-vector-store-selection.md`、`docs/adr/0010-ui-stack-selection.md` | **roadmap #24 三项悬置选型的决策记录**（认证方式 / 两套向量存储 / 界面）。三篇状态并不相同：`0009` / `0010` **未决**，`0008` 为 **部分已决 + 三项未决**（内部租户身份=RS256 JWT + 内部 HMAC 头已实施，对外入口凭据等三项待拍板）；三篇均内含已决边界、选项代价、否决理由、重启条件，以及各一行「待用户回答」⇒ 引用时不得当作已定选型 | 0（2026-10-16 新建；由 `docs/plans/plan-production-delivery-roadmap-2026-10-09.md` #24 与 `docs/plans/plan-unfinished-completion-schedule-2026-10-16.md` §13 指向） |
 | `docs/operations/testing-playbook.md` | 分层验证与实跑配方 | 29 ★ |
 | `docs/operations/env-126-inventory.md` | 内网三机部署态基线（读数绑 rev） | 14 ★ |
-| `docs/operations/minimal-release-runbook.md` | 上台手册（含「这是多 agent 吗」标准答法 §11） | 11 ★ |
+| `docs/operations/minimal-release-runbook.md` | 上台手册（含「这是多 agent 吗」标准答法 §11）。⚠️ 本文里的 `SQL_DSN` / `sql_backend` 描述是 2026-10-28 前的史实，头注已标 | 11 ★ |
+| `docs/operations/nl2sql-release-checklist.md` | **问数上线（批次 6）的现网落差清单 + 逐条判据**：6 项“清单声明 vs 集群实况”落差（带只读取数命令）+ 10 步上线序列（每步写清期望读到什么、读不到说明什么）+ 取证/回滚/卡住的两个 D2 输入。落档那一轮集群零写操作，**落差读数必须复跑 §2 再引** | 4（2026-10-28 新建；由 `AGENTS.md` 内网环境段、`minimal-release-runbook.md` 头注与 `CHANGELOG.md` 批次 5 节两处指向，不含本行） |
 | `docs/operations/observability-pitfalls.md` | 观测面坑档 | 5 ★ |
 | `docs/operations/unconfirmed-items.md` | **无法确认清单**（活文档）：本窗口所有"我试了但证不了"的事按 待环境 / 待放行 / 待拍板 / 口径未定 / 他人负责 / 已撤回断言 六类集中，每条自带**解锁动作**与"证不了的原因"。规则：任何一条都不许被引成"已验证"；确认后改状态不删行 | 2（2026-10-16 新建；由台账 §30 与 CHANGELOG 未发布窗口节指向） |
 | `docs/operations/demo-questions.md` | 演示问答口径 | 5 |
@@ -35,7 +36,7 @@
 | `docs/runtime-self-build-analysis.md` + `docs/opensource-runtime-counterparts.md` | 业界对照族（框架层 / 内核原语层） | 4 / 0 |
 | `docs/runtime-analysis-overview.md` | **已并入** `runtime-self-build-analysis.md`（2026-10-15 合并 A），本页仅作旧链接寻址 | 0 |
 | `docs/adr/0003`~`0004` | 早期 ADR，`0004` 状态仍为「修订中」 | 0 / 3 |
-| `docs/adr/0011-two-text2sql-paths-convergence.md` | **两条 Text2SQL 路收敛**（2026-10-18 拍板选项 A：`agent_server/sql` 退役、统一到 nl2sql-service）；§1–§6 是拍板前分析，§7 起是执行记录 | 0（2026-10-27 取，不含本行；此前从本表漏登，文件名在全仓入库内容中零出现） |
+| `docs/adr/0011-two-text2sql-paths-convergence.md` | **两条 Text2SQL 路收敛**（2026-10-18 拍板选项 A：`agent_server/sql` 退役、统一到 nl2sql-service）；§1–§6 是拍板前分析，§7 起是执行记录（§7.3 = 2026-10-28 批次 5 拆 `/health` 的 `sql_backend` 假灯并推翻 §7.2 第 3 行） | 2（2026-10-28 取，不含本行；2026-10-27 那次为 0 ⇒ 本轮新增两处指向：runbook 头注与上线清单） |
 
 未入库、只在本机存在的一篇：docs/agno-agentos-comparison.md（平台层竞品对比，未提交，clone 后不存在，故按 AGENTS.md 防漂移规矩不以反引号路径书写）。
 

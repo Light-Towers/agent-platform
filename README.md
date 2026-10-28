@@ -49,7 +49,7 @@ Agent Platform 是一个基于 **LangGraph Supervisor 模式** 的统一智能�
 - **Supervisor 编排**（`applications/agent_server/agent/graph.py`）：意图路由 → 子能力执行 → 证据汇总 → 反思重试，LLM 结构化路由失败时回退确定性启发式
 - **联网搜索**（`applications/agent_server/subagents/search.py`）：Tavily API + 熔断器保护，超时/错误自动降级
 - **混合检索 RAG**（`applications/agent_server/subagents/rag.py` + `applications/agent_server/rag/`）：文档导入 → 语义切分 → pgvector 向量检索 + BM25 关键词检索 → RRF 融合排序
-- **Text-to-SQL**（`applications/agent_server/subagents/sql_agent.py` + `applications/agent_server/sql/`）：训练三件套（DDL + 业务文档 + 问题-SQL 范例）→ sqlglot 白名单守卫 → 连接级只读执行
+- **Text-to-SQL / 问数**（`applications/agent_server/subagents/sql_agent.py` → `applications/nl2sql-service/`）：平台侧是**瘦客户端**（POST `/api/query`），生成 / 取值核验 / 多轮继承 / 查询追溯均在 nl2sql-service；平台自有管线已退役（ADR-0011 选项 A）。`NL2SQL_SERVICE_URL` 为空时该子代理不注册，返回「问数服务未配置」而不是静默空结果。
 - **长期记忆**（`applications/agent_server/memory/longterm.py`）：pgvector 语义召回历史对话，跨会话上下文关联
 - **语义缓存**（`packages/agent-runtime/agent_runtime/cache/`）：Valkey L1 精确 + L2 向量（HNSW/COSINE，按余弦距离阈值判定）+ 负缓存；开发/测试与生产同一实现（ADR-0013 C），后端不可达时 fail-open（按未命中处理）并在 `/health` 报 degraded
 - **上下文压缩**（`applications/agent_server/agent/compact.py`）：多轮会话 token 超阈值时自动摘要旧消息，参考 Claude Code / Codex / OpenCode
@@ -302,7 +302,7 @@ curl http://127.0.0.1:8000/health
   "storage": "memory",
   "llm": false,
   "search": false,
-  "sql_backend": "none",
+  "sql_backend": null,
   "coordination": true,
   "admission": false,
   "revert": true,
@@ -317,6 +317,7 @@ curl http://127.0.0.1:8000/health
   "embedding_real": false,
   "planner": "deterministic",
   "guard_enabled": false,
+  "nl2sql": false,
   "langfuse_enabled": false,
   "langfuse_ready": false,
   "cache_backend": "disabled",
@@ -407,7 +408,6 @@ curl -X POST http://127.0.0.1:8000/api/callback/{task_id} \
 | `LLM_MODEL` | `gpt-4o-mini` | 主模型 |
 | `LLM_FALLBACK_MODEL` | `gpt-4o-mini` | 降级模型 |
 | `SEARCH_API_KEY` | `""` | Tavily 搜索 API Key |
-| `SQL_DSN` | `""` | 业务库连接串（sqlite / postgresql） |
 | `HOST` | `0.0.0.0` | 服务监听地址 |
 | `PORT` | `8000` | 服务监听端口 |
 | `VECTOR_DIM` | `512` | pgvector 向量维度（与 Embedding 模型匹配） |
@@ -420,8 +420,12 @@ curl -X POST http://127.0.0.1:8000/api/callback/{task_id} \
 | `LANGFUSE_PUBLIC_KEY` | `""` | Langfuse 公钥（与 secret/host 均填才启用 trace） |
 | `LANGFUSE_SECRET_KEY` | `""` | Langfuse 私钥 |
 | `LANGFUSE_HOST` | `https://cloud.langfuse.com` | Langfuse 服务端地址（compose 注入） |
-| `SQL_MAX_ROWS` | `100` | Text-to-SQL 业务库只读返回行数上限 |
 | `RAG_TOP_K` | `4` | RAG 检索召回条数 |
+
+> **问数的旋钮不在本表里**（2026-10-28 批次 5）：原 `SQL_DSN` / `SQL_MAX_ROWS` 已随平台侧
+> Text-to-SQL 直连路径退役（ADR-0011 选项 A）。业务库连接串与行数上限看
+> [`applications/nl2sql-service/.env.example`](applications/nl2sql-service/.env.example)（`DW_DB_DSN` /
+> `SQL_MAX_ROWS`）；平台侧只需 `NL2SQL_SERVICE_URL`（非空才注册子代理，见下表）。
 
 ### Phase 2 配置
 
@@ -547,16 +551,13 @@ applications/agent_server/
 ├── subagents/
 │   ├── search.py          # 联网搜索节点
 │   ├── rag.py             # RAG 检索节点
-│   ├── sql_agent.py       # Text-to-SQL 节点
+│   ├── sql_agent.py       # 问数瘦客户端（改调 nl2sql-service `/api/query`）
+│   ├── degradation.py     # 降级文案与空证据判据的单一来源
 │   └── mcp.py             # MCP 工具调用节点
 ├── rag/
 │   ├── chunker.py         # 语义切分
 │   ├── embed.py           # Embedding（auto/mock/remote）
 │   └── store.py           # pgvector + BM25 混合检索 + RRF 融合
-├── sql/
-│   ├── guard.py           # sqlglot 白名单守卫
-│   ├── pipeline.py        # Text-to-SQL 管线
-│   └── schema_store.py    # 训练三件套存储
 ├── memory/
 │   ├── longterm.py        # pgvector 长期记忆
 │   └── thread_persist.py  # 对话历史写回 checkpointer（Planner 协议中立）

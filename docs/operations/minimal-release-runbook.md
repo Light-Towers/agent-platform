@@ -22,6 +22,13 @@
 | 问数环节 | ✅ **已接**：清单补 `SQL_DSN`（复用 `agent-platform-secrets/DATABASE_URL` 同一个键）⇒ `/health` 报 `sql_backend=postgres`；`/sql/train` 喂真实 DDL+说明后，"统计每个文档入库多少块"路由到 `sql`，执行的 SQL 返回 35/30/28，**与库里真值逐行对账一致**。MySQL 那颗雷不存在（本版用的就是 postgres） |
 | 只读挂载离线加载权重 | ✅ **证毕**（原先的唯一未验证假设）：`uid=10001` + `:ro` bind + `HF_HUB_OFFLINE=1` 下加载成功 `dim=512`，`readOnly: true` 保留。读数与那条良性 `Permission denied` 见 §6.1 |
 
+> ⚠️ **本文里所有 `SQL_DSN` / `sql_backend` 的描述都是 2026-10-28 之前的史实**（上表「问数环节」行、§4 底线 4、
+> §6.1 第 8 条、§8 第 5 条、§9 的 ②/③）。当时平台确实自己拿 `SQL_DSN` 连库执行 SQL，那根灯是真读数；Stage ③ 把执行权
+> 交给 nl2sql-service 后灯没跟着搬家，`settings.sql_dsn` 指的是**平台库** ⇒ 2026-10-28 批次 5 把字段与灯一并
+> 退役（现由 nl2sql-service 上报它自己的 dw 方言）。本文作为历史快照**不改写**，但**不许照它去现网注 `SQL_DSN`**
+> ——现在注回来会被 env 死键门禁判红。现行机制与上线判据：`docs/adr/0011-two-text2sql-paths-convergence.md` §7.3 +
+> `docs/operations/nl2sql-release-checklist.md`。
+
 **线上 rev 与仓库 rev 的差集必须现查，别在本文里钉 HEAD 短哈希**（我 2026-10-12 就把自己写的
 `7d00ab3` 熬过期了：写完那句又提交了一次文档）。集群跑 `db1a8b8`，判"差的是什么"用命令而不是记忆：
 

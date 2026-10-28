@@ -88,8 +88,9 @@
 #    1a 布尔行 12 条：应 12 行；enable_loop_fingerprint 字段名无 "enabled" 后缀，
 #       只 grep enabled 会漏它（2026-10-26 实测旧配方即漏此项）
 rg -n '^\s+[a-z_]*(enabled|fingerprint)\s*:\s*bool\s*=\s*False' applications/agent_server/config.py
-#    1b 非布尔行 4 条：应 13 行（planner / runtime_mode / api_key / URL+密钥组，组行含多字段）
-rg -n '^\s+(planner|runtime_mode|database_url|api_key|search_api_key|sql_dsn|langfuse_\w+|(knowledge|nl2sql|kefu|exhibition)_service_url)\s*:' applications/agent_server/config.py
+#    1b 非布尔行 4 条：应 12 行（planner / runtime_mode / api_key / URL+密钥组，组行含多字段）
+#       2026-10-28 批次 5 从 13 降到 12：`sql_dsn` 字段连同 `/health` 的 sql_backend 假灯退役（ADR-0011）
+rg -n '^\s+(planner|runtime_mode|database_url|api_key|search_api_key|langfuse_\w+|(knowledge|nl2sql|kefu|exhibition)_service_url)\s*:' applications/agent_server/config.py
 # 1c) §5 下段（env 直读 16 项）：按名逐项查默认值；本段用 -o --no-filename | sort -u 应恰好 16 个（2026-10-26 实测；若保留 -n，输出是「行号:匹配」⇒ sort -u 得 96 条，不是 16；不去重时行数含读取点，噪声为预期）
 rg -o --no-filename -e 'DEPLOY_ENFORCE_IDENTITY' -e 'TENANT_JWT_ENFORCE' -e 'TENANT_HEADER_ENFORCE' -e 'SINGLE_TENANT' \
    -e 'SEMANTIC_MEMORY_ENABLED' -e 'MEMORY_DUAL_SCOPE' -e 'AGENT_CORE_TRACE_ENABLED' -e 'GUARD_ENABLED' \
@@ -422,7 +423,7 @@ uv run --with ruff ruff check . && python scripts/check_doc_sync.py
 | `planner` | `"deterministic"` | `auto`(Mode Selector) 为 opt-in；`graph`/`agentic` 需显式设 |
 | `database_url` / `runtime_mode` | `""` / `"local"` | 无 PG ⇒ 内存模式，跨会话记忆恒空 |
 | `api_key` | `""` | 空即不鉴权；⚠️「限流与载荷护栏照常」只对已装配内核中间件的 2 个应用成立——agent_server 的 HTTP 层两者都没有（§2.6 装配面实测） |
-| 4 个 `*_service_url`（knowledge / nl2sql / kefu / exhibition）/ `search_api_key` / `sql_dsn` / `langfuse_*` 三键 | `""` | 空即**不注册该能力**，`/health` 能力灯如实熄灭 |
+| 4 个 `*_service_url`（knowledge / nl2sql / kefu / exhibition）/ `search_api_key` / `langfuse_*` 三键 | `""` | 空即**不注册该能力**，`/health` 能力灯如实熄灭（问数位在 2026-10-28 批次 5 后叫 `nl2sql`，它只说子代理注册了没） |
 
 > **§5 表体复核（2026-10-26）**：上表 16 行默认值逐项实读 `applications/agent_server/config.py` 无误（`api_key` :19 / `database_url` :22 / `memory_extraction_enabled` :45 / `rerank_enabled` :58 / `admission_enabled` :80 / `otel_enabled` :91 / `mcp_enabled` :98 / `guard_enabled` :102 / `planner` :107 / `enable_loop_fingerprint` :114 / `tool_result_compression_enabled` :126 / `runtime_mode` :142 / `scheduler_enabled` :146 / `scheduler_recovery_enabled` :153 / `payload_externalization_enabled` :159 / `cost_governance_enabled` :170）。连带声明抽验三处：三个 `budget_limit_*` 默认 0（`:171-173`）；开 `payload_externalization` 而缺目录则启动即 raise（`applications/agent_server/main.py:76-80`）；recovery 重试上限 3（`RecoveryManager(max_retries=3)` `packages/agent-runtime/agent_runtime/execution_recovery.py:148`，配置项 `applications/agent_server/config.py:154`）且入队失败（含 `QueueFull`）被 `except Exception` 吞成 warning 后 `return None`（同文件 `:236-240`，不向调用方报错）。
 
