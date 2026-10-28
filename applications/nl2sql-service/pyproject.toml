@@ -14,7 +14,7 @@ dependencies = [
     # PyJWT 走其 [identity] extra（惰性导入：只有真收到令牌才 import）。
     "agent-runtime[identity]",
     "shared-schemas",
-    "fastapi>=0.159.1",
+    "fastapi>=0.162.0",
     "uvicorn[standard]>=0.54.0",
     "langgraph>=1.2.10,<2",
     "langchain-core>=0.3",
