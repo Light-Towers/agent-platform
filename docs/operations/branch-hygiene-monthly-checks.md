@@ -180,3 +180,34 @@ git for-each-ref --format='%(refname:short) %(objectname:short)' refs/remotes
 
 另外一条工具链事实（本轮当场实取，非脚本内容）：`git branch -r` 默认把符号 HEAD 显示成带 ` -> ` 的行（本仓实取前两行即 `company/HEAD -> company/main`、`github-legacy/HEAD -> github-legacy/main`），故“过滤 ` -> `”得到的 10 与 `for-each-ref` 扣除符号项得到的 10 **同值**（两套取法互校）。本节只新增登记，**不动 AGENTS.md 条款**（“公开镜像 >2 是否计入报警”的口径变更仍挂在待拍板，见 6.5 末句）。
 
+---
+
+## 2026-10-30 节（同月换 rev 原地复跑；读数绑 HEAD `89f0103a`，工作线不变）
+
+> 本节不是新一轮体检，是一次**换 rev 复跑**：上一节（2026-10-29，绑 `896f966e`）登记的每个数在今天的树上还成立吗。
+> 命令面 = 本文开头《命令面》那五条（均为入库可重放）。本机另有一份等价探针 `.tmp-scratch/c-mask/branch_health.py`（第四版），
+> ⚠ 它住在 gitignored 目录（`git check-ignore -v` 命中 `.gitignore:61:.*/`，`git ls-files -- .tmp-scratch` = 0 行）
+> ⇒ **不当核对路径**，只当效率工具；表里每个数都能用《命令面》那五条逐条重取。
+
+| 项 | 2026-10-29 登记 | 本轮读数（rev `89f0103a`） | 判定 |
+|---|---|---|---|
+| 远端名 | `company` + `github-legacy`（无 `origin`） | `git remote` 同值 | 未漂移 |
+| `company` heads | 1 | 1（`ls-remote` rc=0） | 未漂移，不报警 |
+| `github-legacy` heads | 8（计入“恒 2”口径 **7**）⇒ 报警成立 | 8 / 7 | 未漂移，报警仍成立 |
+| 本地分支条数 | 8 | 8 | 未漂移（本 7 批全提交在当前线，未新建分支） |
+| 死枝候选 | 0（另有 1 条判据不适用 = `company-snapshot` 异宗） | 0（同样 1 条不适用） | 未漂移 |
+| 逐条 `cherry+` | 2 / 2 / 3 / 2 / 2 / 6 / 5 | 逐项相同 | 未漂移 |
+| `company-snapshot` 复审条件 | 未触发（两侧 tip 均 `fe22794c5a`） | 未触发（仍相等） | 仍是可删候选，本轮**未删**（删除需单独批示） |
+| 跟踪面 | 分支口径 10；`github-legacy` 本地 9 / 远端 8 ⇒ 陈旧 2 + 未取 1 | 同值（陈旧合计 2） | 未漂移；`git fetch --prune` 本轮**仍未做**（D2） |
+| worktree | 2 条（detached 1） | 2 条（detached 1） | 未漂移 |
+
+**本轮真正变化的两项**（都是“自己动了线”的直接后果，不是新发现）：
+- 当前线相对 `main` 的独有提交 **339 → 346**（`git rev-list --count main..89f0103a`）；差值 = 本轮批次
+  （`git rev-list --count 896f966e..89f0103a` = **7**）⇒ 算术自洽。两个数都写成显式 rev 而不是 `HEAD`，
+  否则后人复跑得 347 / 8，再把它们误读成“登记值漂移”。
+- 分支年龄：工作线最早独有提交仍是 `af19b5cf`（author date 2026-10-15），tip 现为 `89f0103a`（2026-10-30）
+  ⇒ **跨 15 天**。“分支短命 < 24h”那条违规在扩大，不是新增违规。
+
+**本节不执行任何删除 / 推送 / fetch（含 `--prune`）**。上一节登记的三条 D2（公开侧镜像分支处置、`company` 无集成分支的拓扑、
+Dependabot 在公开仓活跃）本轮**一条未解**，表中读数只是复述。
+
