@@ -65,7 +65,10 @@ _GITLAB_GROUP = _asm("techng/", "aimode")  # 内网组路径
 _PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("P-1 私有网段-192.168", re.compile(r"(?<![\d.])192\.168\.\d{1,3}\.\d{1,3}(?![\d.])")),
     ("P-1 私有网段-172.16-31", re.compile(r"(?<![\d.])172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}(?![\d.])")),
-    # 10/8 里放过 flannel pod CIDR（README/VERIFICATION 已公开，且无主机名时不定位）
+    # 10/8 里放过 flannel pod CIDR：该段已在 deploy/k8s/VERIFICATION.md 里在册（现值 5 处），
+    # 而那份文件本来就随镜像出站 ⇒ 在别处拦它不减少暴露；且无主机名时不定位。
+    # （注释旧版还并列了 README，2026-10-30 实测为假：`git log -S` 与 `git grep HEAD -- README.md`
+    # 对 10.244 均 0 命中，故来源只留 VERIFICATION.md 一条。行为不变，正则未动。）
     ("P-1 私有网段-10/8", re.compile(r"(?<![\d.])10\.(?!244\.)\d{1,3}\.\d{1,3}\.\d{1,3}(?![\d.])")),
     ("P-2 内网主机名", re.compile(rf"\b{_OPS_HOST_PREFIX}\d+\b", re.I)),
     ("P-2 内网 GitLab 与组路径", re.compile(_asm(_GITLAB_HOST, "|", _GITLAB_GROUP, r"|code\.mingyan", "g"), re.I)),
