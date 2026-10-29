@@ -211,3 +211,25 @@ git ls-files 计数（两目录）→ 0
 ⇒ 上表的 `44 passed in 3.55s` 与本轮 `1.17s` 是**同一条命令的两次独立实跑**（耗时随机器负载变，不是两个结论）；两者都与本文读数同树。
 
 **本批未跑（不得读成已验）**：`make ci` 全链（本机无 make）、其余 8 个 pytest session、`publish` 模式、`git fetch --prune` 与公开仓分支处置（均属待拍板/待授权）。
+
+## 10. 落地后复跑（2026-10-30，rev `cfc7bf19` = 形状 C 相关的六批落库之后）
+
+> 本节是**追加**，§9 那张表保持原样——它是 `896f966e` + 未提交工作区那棵树的历史快照（历史正文不改写，订正只加注）。
+
+- §9 门禁自检行末尾那句“**提交后应转 0 违规**”是当时下的**预测**，本轮已把它跑成读数：
+  `uv run python scripts/lint_public_mirror.py --selftest` → `registry 模式 @ HEAD：携带内网标识的仓内文件 1 个，命中行 1 处，登记台账 1 项；违规 0 项，警告 0 项`，**rc=0**
+  （§9 当时：rc=**1** / 3 个文件 / 30 行 / 台账 1 / 违规 **2**）。⇒ 混合态红不是规则失效，而是“台账按磁盘 import / 命中行按 HEAD 取”这个提交切面的必然产物；
+  **rc 1→0 由提交动作自己触发**，所以它同时是形状 C 门禁的非空转反证（落库批 = `efe938c1`，它的 message 里逐字记了这两个 rc）。
+- 同树复跑其余四项（均 rev `cfc7bf19`）：`uv run python scripts/check_doc_sync.py` rc=**0**（“校验通过（0 警告）”）、`uv run --with ruff ruff check .` rc=**0**、
+  `uv run python .tmp-scratch/c-mask/precheck.py` rc=**0** 且未登记违规 **0** / 幽灵登记 **0** / 形状豁免 **6 文件 17 处**（与 §9 逐项同值）、
+  `uv run pytest tests/governance/test_doc_sync_file_refs.py -q` **44 passed in 1.17s**。
+- 本批新覆盖（§9 当时没跑）：根 session `uv run pytest -q` = **1487 passed / 38 skipped in 170.64s**（rev `cfc7bf19`）；
+  `uv run pytest tests/governance -q` = **464 passed / 1 skipped in 102.86s**（同一棵）。skip 项本轮**没逐项复算归属**（按《conftest 守卫识别》口径它们多半是缺外部依赖的自动跳过，
+  但那是待核对项，不拿它当本轮读数的一部分）。
+- 仍未跑（不得读成已验）：`make ci` 全链、其余 8 个 pytest session（联邦 / kefu / exhibition / knowledge-service / nl2sql-service / shared-schemas / agent-runtime / agent-server）、
+  `publish` 模式、以及 126/241 现网侧命令（六批零产品代码，但零代码不等于零验证——只是说明剩下的缺口不在代码侧）。
+- ⚠ **可核对性的一个口子（顺手把 §9 也管上）**：上面两条里的 `precheck.py` 路径住在 `.tmp-scratch/`，
+  `git check-ignore -v` 实取命中的是 `.gitignore:61:.*/`，且 `git ls-files -- .tmp-scratch` = **0 行**
+  ⇒ 那两条命令**只在本机可复跑**，不是外人能重放的核对路径（§9 表格的“脱敏预检”行早就如此，本批只是把它说出来）。
+  真正入库可重放的只有前三条：`check_doc_sync.py`、`lint_public_mirror.py`（含 `--selftest`）、`ruff check .`，
+  以及两个 pytest 调用。要把它固化成可重放，得把 `precheck.py` 的等价能力收进 `scripts/`——那是 D2（待拍板），不属本批。
