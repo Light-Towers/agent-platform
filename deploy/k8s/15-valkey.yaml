@@ -20,7 +20,9 @@
 #   在换 rev 后可能静默跑旧镜像（见 docs/operations/env-126-inventory.md 的镜像分发纪律）。
 #
 # tag 为什么是 9.1.2（**坐标必须从现场或 registry 实取，不许从 git 标签列表推断**）：
-#   取证通路是测试机 ambari01(192.168.100.241) 上的实体镜像——`lf-valkey` 容器用
+#   内网标识脱敏口径（2026-10-29）：本段的机名/IP 为 <internal-*> 占位符，真值住运维机本机的
+#   .intranet/keymap.json（不入库）；占位符保留编号⇒取证层级仍可区分，但不得拿占位符去现网复现。
+#   取证通路是测试机 <internal-node-01>(<internal-host-241>) 上的实体镜像——`lf-valkey` 容器用
 #   valkey/valkey-bundle:9.1.2 已健康运行 12 天，实例报 valkey_version:9.1.1，
 #   `MODULE LIST` 报 name=search ver=66049 ⇒ 按 (major<<16)|(minor<<8)|patch 解出 search **1.2.1**。
 #   历史教训（2026-10-26，本轮亲犯并已回改）：我曾按 valkey-io/valkey-bundle 的 git release

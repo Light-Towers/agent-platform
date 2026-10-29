@@ -1,6 +1,14 @@
 # 126 环境事实基线（env-126-inventory）
 
-> 来源：2026-10-10 对 192.168.100.126（hostname ambari03）的**只读**盘点，含代码同步通道专轮、三次读数校准（e12/e13/e14/e16）与 §7 待查项逐条验证（e17–e25）。
+> **内网标识脱敏口径（2026-10-29 起）**：本文的真机 IP、主机名、内网域名与运维机出口 IP 已换成
+> `<internal-host-126>` / `<internal-host-241>` / `<internal-node-01..03>` / `<internal-ip>` /
+> `<internal-net-100>` / `<operator-lan-ip>` / `<internal-git-url>` / `<pod-ip>` 占位符；
+> **真值不在仓内**，住在运维机本机的 .intranet/keymap.json（普通文本不加反引号：该路径不入库，
+> 按 AGENTS.md《文档防漂移》口径避开 check_doc_sync 的存在性校验；它被 .gitignore 的 `.*/` 整体忽略，构造上不可提交）。
+> 占位符保留拓扑可区分性（谁是构建机、谁是运维机仍可读），去掉的只是网段与字面名。
+> ⇒ **不得拿占位符去现网复现命令**：执行前先从键表取回真值。推公开镜像时本文无需再遮（已与镜像版对齐）。
+
+> 来源：2026-10-10 对 <internal-host-126>（hostname <internal-node-03>）的**只读**盘点，含代码同步通道专轮、三次读数校准（e12/e13/e14/e16）与 §7 待查项逐条验证（e17–e25）。
 > 目标：把"每次上 126 都要重新发现一遍"的环境事实固化成基线，每个结论都能指到具体读数与可原地复现的命令。
 > 取证纪律：全程只读（不安装/不修改/不重启/不停止/不删除既有物）；脚本双端 MD5 一致 + `bash -n` 通过；输出落盘后全文取回阅读；结束即清理并宽口径复核零残留。
 > 与既有文档分工：本文 = **环境事实基线**；[deploy/k8s/VERIFICATION.md](../../deploy/k8s/VERIFICATION.md) = 部署演练报告；[deploy/k8s/README.md](../../deploy/k8s/README.md) = 搭建步骤与踩坑表；[testing-playbook.md](testing-playbook.md) = 测试实跑流程。
@@ -75,7 +83,7 @@
 | 1791536173 | 10-09 16:56:13 | （仅 fetch，无 checkout） | — | 68628483 (3,566,286) @ 10-09 16:56 |
 | 1791537113 | 10-09 17:11:53 | checkout: 626ec17 → **6cebaa5** | 6cebaa5 | 9e3d675b (2,664,065) @ 10-09 17:11 |
 
-10-09 17:11:35 与 17:11:52 两次 `Accepted publickey … from 192.168.102.222` 与 checkout 时刻 17:11:53 逐秒对应；16:56:04/05 两次登录对应 16:56 的 pack。
+10-09 17:11:35 与 17:11:52 两次 `Accepted publickey … from <operator-lan-ip>` 与 checkout 时刻 17:11:53 逐秒对应；16:56:04/05 两次登录对应 16:56 的 pack。
 
 **10-09 17:11 这轮同步只落代码、未产出运行制品**：pod 内 `/srv/agent-platform/GIT_REV` 实测仍是 `626ec1798354d42030ba8a4f6fdd04c1c1b37f86`（e13 [3]），即 09-30 那轮的 rev。⇒ 10-09 17:11 之后没有再走 build.sh/distribute.sh/rollout。
 
@@ -87,7 +95,7 @@
 
 | 维度 | 实测 |
 |---|---|
-| 本机出口 IP | 物理网卡 以太网 2 = 192.168.102.222；126 auth.log **所有** publickey 登录来源均为该 IP（窗口内 98 次） |
+| 本机出口 IP | 物理网卡 以太网 2 = <operator-lan-ip>；126 auth.log **所有** publickey 登录来源均为该 IP（窗口内 98 次） |
 | 密钥 | 单一 RSA 公钥指纹 SHA256:SNluMwP3KVGO9xZZ2tCSJKA2U+nvihCsTU1K8VyJXgA |
 | 认证方式 | pubkey 为主；窗口内两次 password 登录（10-09 16:39:10、10-10 09:12:10，对应 pts 交互会话） |
 | 失败/暴破 | btmp 自 10-08 08:45 起为空；auth.log 中 Failed 计数 0 |
@@ -98,7 +106,7 @@
 
 ### 2.6 为什么只能走 bundle
 
-本机 HEAD 6cebaa5 相对 origin/main 为 **ahead 1**，且 `git branch -r --contains 6cebaa5` 为空 ⇒ 该提交**未推送**到 GitHub，也未推送到 company remote（ssh://git@code.mingyang100.com:30001/techng/aimode/agent-platform.git，内网解析 192.168.100.132、30001 TCP 可达）。而 126 的 remote **只有 origin=GitHub**、无 company。**远端没有这个对象，126 无法 fetch ⇒ bundle 是物理上唯一可行通道**（与"126 有外网、curl github 得 200"并列，说明瓶颈不在网络）。
+本机 HEAD 6cebaa5 相对 origin/main 为 **ahead 1**，且 `git branch -r --contains 6cebaa5` 为空 ⇒ 该提交**未推送**到 GitHub，也未推送到 company remote（<internal-git-url>，内网解析 <internal-ip>、30001 TCP 可达）。而 126 的 remote **只有 origin=GitHub**、无 company。**远端没有这个对象，126 无法 fetch ⇒ bundle 是物理上唯一可行通道**（与"126 有外网、curl github 得 200"并列，说明瓶颈不在网络）。
 
 ### 2.7 构建与分发的防错设计
 
@@ -107,14 +115,14 @@
 
 ### 2.8 本机侧通道可达性判据（2026-10-10 实踩，写下来是为了下次别当成"126 宕机"）
 
-本机与 `192.168.100.0/24` **不同网段**（本机在 192.168.102.0/24），去 126 靠内网隧道；隧道一断，症状与"126 挂了"完全一样，所以按下面这套读，别凭一条命令下结论：
+本机与 `<internal-ip>/24` **不同网段**（本机在 <internal-ip>/24），去 126 靠内网隧道；隧道一断，症状与"126 挂了"完全一样，所以按下面这套读，别凭一条命令下结论：
 
 | 读数 | 含义 |
 |---|---|
-| `ssh root@192.168.100.126 hostname` → `connect … port 22: Connection timed out` | 唯一有决定性的"通道不可用"信号（这才是排期前置，见 AGENTS.md 六条差异第 1 条相关纪律） |
+| `ssh root@<internal-host-126> hostname` → `connect … port 22: Connection timed out` | 唯一有决定性的"通道不可用"信号（这才是排期前置，见 AGENTS.md 六条差异第 1 条相关纪律） |
 | `ipconfig` 里 `OpenVPN TAP-Windows6` / `OpenVPN Data Channel Offload` = **Media disconnected** | 本机侧隧道未连 ⇒ 断点大概率在我这边 |
-| `tracert -h 6 192.168.100.126`：hop1 = 192.168.102.1 通，hop2 起全 `Request timed out` | 报文出不了本机所在 LAN 的路由器，**没有进入 100 网段** |
-| `ping 192.168.100.1` 有回复（TTL=255、<1ms）而 `.125/.126` 100% loss | **红鲱鱼**：ARP 表无该条目、本机也无 100.x 接口 ⇒ 应答者是 LAN 路由器的另一侧地址，不代表 100 网段可达 |
+| `tracert -h 6 <internal-host-126>`：hop1 = <internal-ip> 通，hop2 起全 `Request timed out` | 报文出不了本机所在 LAN 的路由器，**没有进入 100 网段** |
+| `ping <internal-ip>` 有回复（TTL=255、<1ms）而 `.125/.126` 100% loss | **红鲱鱼**：ARP 表无该条目、本机也无 100.x 接口 ⇒ 应答者是 LAN 路由器的另一侧地址，不代表 100 网段可达 |
 | `Test-NetConnection -Port 22` = False | 只在你已经知道其它读数时才有意义；单独一条 False 与单独一条 True 都不含信息 |
 
 **严谨边界**：从本机**无法区分**"我的路由/隧道断了"与"126 或整个集群真的停了"——两者的报文表现相同。要判开必须换一条不依赖该隧道的观察面（另一台已在 100 网段的机器、或集群侧带外）。恢复隧道属改用户本机网络，**不自动执行，先征询**。
@@ -171,8 +179,8 @@ k8s：三节点均 Ready（v1.31.14，CONTAINER-RUNTIME containerd://2.2.1），
 
 | Pod | 节点 | 关键读数 |
 |---|---|---|
-| agent-platform-5cd47d7c9b-ldhqn | ambari02 | IP 10.244.1.13，AGE 9d，**RESTARTS 3**：第 3 次容器 started=2026-10-09T11:04:15Z（=19:04 +0800），lastReason=Error，lastFinished=2026-10-09T10:59:14Z（=18:59），**exitCode=137**；spec image = agent-platform:dev |
-| postgres-6ff4688bb8-vn7v6 | ambari03 | IP 10.244.0.2，AGE 10d，RESTARTS 0（VERIFICATION.md 里的 `postgres-574484c8c6-j7f5m` 是旧 ReplicaSet 名，已失效） |
+| agent-platform-5cd47d7c9b-ldhqn | <internal-node-02> | IP <pod-ip>，AGE 9d，**RESTARTS 3**：第 3 次容器 started=2026-10-09T11:04:15Z（=19:04 +0800），lastReason=Error，lastFinished=2026-10-09T10:59:14Z（=18:59），**exitCode=137**；spec image = agent-platform:dev |
+| postgres-6ff4688bb8-vn7v6 | <internal-node-03> | IP <pod-ip>，AGE 10d，RESTARTS 0（VERIFICATION.md 里的 `postgres-574484c8c6-j7f5m` 是旧 ReplicaSet 名，已失效） |
 
 docker 侧 **running 9 个 / 含停止共 14 个**：
 
@@ -215,7 +223,7 @@ Exited 未清理 5 个：ap-id2 / ap-iso-lean / ap-iso-test(1) / ap-iso-test2(13
 
 | 层 | 来源 | 实测生效值（白名单变量） |
 |---|---|---|
-| k8s agent-platform pod | Deployment env：`EMBEDDING_MODEL`←ConfigMap，`DATABASE_URL`←secret，**LLM_* 为字面值** | `EMBEDDING_MODEL=bge-small-zh`；`LLM_BASE_URL=https://api-inference.modelscope.cn/v1`；`LLM_MODEL`/`LLM_FALLBACK_MODEL=deepseek-ai/DeepSeek-V4.1-Flash`；`OTEL_ENDPOINT=http://192.168.100.126:4318/v1/traces`。**无 `EMBEDDING_MODE`** |
+| k8s agent-platform pod | Deployment env：`EMBEDDING_MODEL`←ConfigMap，`DATABASE_URL`←secret，**LLM_* 为字面值** | `EMBEDDING_MODEL=bge-small-zh`；`LLM_BASE_URL=https://api-inference.modelscope.cn/v1`；`LLM_MODEL`/`LLM_FALLBACK_MODEL=deepseek-ai/DeepSeek-V4.1-Flash`；`OTEL_ENDPOINT=http://<internal-host-126>:4318/v1/traces`。**无 `EMBEDDING_MODE`** |
 | ConfigMap `agent-platform-config` | 4 个键：`EMBEDDING_MODEL` / `LLM_BASE_URL` / `LLM_MODEL` / `LLM_FALLBACK_MODEL` | 只有 `EMBEDDING_MODEL=bge-small-zh` **被引用**；其余三个是**死键**（值停留在 `api.openai.com` / `gpt-4o-mini`） |
 | Secret | `agent-platform-secrets`={DATABASE_URL, POSTGRES_PASSWORD}、`observability-keys`={LLM_API_KEY} | **无 EMBEDDING_API_KEY** |
 | 宿主 .env | /opt/agent-platform/.env **不存在**；KS 侧 .env 存在 | KS：`EMBEDDING_MODE=api`、`RERANK_MODE=api`、`MODELS_DIR=./models` |
@@ -248,9 +256,9 @@ Exited 未清理 5 个：ap-id2 / ap-iso-lean / ap-iso-test(1) / ap-iso-test2(13
 
 **链二：pod 那次 137 = 外部依赖断连 + 优雅关闭超时被 SIGKILL（非应用崩溃）**
 
-- `kubectl logs --previous`（e17）尾部：`/health` 连续 200 → `10:58:29Z` OTLP export timeout → `10:58:43Z` **`failed to resolve host 'postgres'` (Temporary failure in name resolution)** → `INFO: Shutting down` → `Waiting for background tasks to complete` → `10:59:07Z` **`No route to host` 到 192.168.100.126:4318** → `10:59:13Z` failed。
+- `kubectl logs --previous`（e17）尾部：`/health` 连续 200 → `10:58:29Z` OTLP export timeout → `10:58:43Z` **`failed to resolve host 'postgres'` (Temporary failure in name resolution)** → `INFO: Shutting down` → `Waiting for background tasks to complete` → `10:59:07Z` **`No route to host` 到 <internal-host-126>:4318** → `10:59:13Z` failed。
 - ⇒ 137 = 128+9（SIGKILL）：进程在等后台任务收尾时被 kubelet 的 terminationGracePeriod 到点杀掉。**上游是集群网络/DNS 扰动**（postgres Service 解不了 + 126 的 OTLP 端口不可达），不是代码异常。
-- pod 在 **ambari02**，126 上的 dmesg/OOM 记录与该 pod 无关（不要拿 control-plane 节点的 OOM 日志归因 worker 上的 pod）。
+- pod 在 **<internal-node-02>**，126 上的 dmesg/OOM 记录与该 pod 无关（不要拿 control-plane 节点的 OOM 日志归因 worker 上的 pod）。
 
 **可回收面（G8 的决策依据，本轮只列不删）**
 
@@ -271,7 +279,7 @@ Exited 未清理 5 个：ap-id2 / ap-iso-lean / ap-iso-test(1) / ap-iso-test2(13
 | 1 | 用 Pod 内既有密钥真打 `POST /v1/chat/completions` → **HTTP 200**，`content` 有正常中文回答，`usage` 有 token 计量 | 2026-10-10 的 Gate 1 失败（403 要求邮箱验证）已解除 |
 | 2 | 响应 `message` 的键是 `['content','function_calls','reasoning_content','role','tool_calls']`，其中 **`reasoning_content` 长 219 字、`content` 长 52 字** ⇒ 这是推理型模型。**小预算下 `content` 会是空串**：`max_tokens=16` 时 HTTP 200、`completion_tokens=16`、`content=''`（16 个 token 全被推理吃掉） | 平台侧**没有**设 `max_tokens`（`agent/llm.py` 只设 `timeout`），所以链路本身不会撞上；但任何人给它加 token 上限都会静默得到空回答 ⇒ 记进运维手册 |
 | 3 | **exitCode 137 会复发**：Pod `Restart Count=1`，`Last State: Terminated 18:29:21 +0800`，`--previous` 尾部又是同一序列 —— `Failed to export spans batch due to timeout` → `failed to resolve host 'postgres'` → `Waiting for background tasks to complete` → 再次 export timeout | §4.7/G6 那条"已定性"从**一次性现象**升级为**周期性复发**（诱因是集群 DNS/网络抖动）。直接支撑 `plan-tracing-shutdown-flush-timeout-2026-10-10.md` 的选项 A：上界必须由代码给 |
-| 4 | 权重缓存分布：ambari03(126) `/opt/ap-models` = 184M 在位；**ambari02(125) 与 ambari01(241) 原为 CACHE_MISSING**，本轮已铺（同 184M、`chmod a+rX`） | 印证"本地语义模型的前提是缓存存在于 Pod 实际落到的节点"——Pod 当时在 ambari01 |
+| 4 | 权重缓存分布：<internal-node-03>(126) `/opt/ap-models` = 184M 在位；**<internal-node-02>(125) 与 <internal-node-01>(241) 原为 CACHE_MISSING**，本轮已铺（同 184M、`chmod a+rX`） | 印证"本地语义模型的前提是缓存存在于 Pod 实际落到的节点"——Pod 当时在 <internal-node-01> |
 | 5 | 三节点 `allocatable.memory` 均约 16Gi / 8 CPU ⇒ 新 `requests 1Gi / limits 2Gi` 放得下 | 消掉"上调到 2Gi 可能调度不开"的疑虑 |
 | 6 | `observability-keys` 现有两键：`LLM_API_KEY`(len=39) 与新增 `API_KEY`(len=32)；用 `kubectl patch --type merge --patch-file /dev/stdin` 补的单个键，**merge 后 LLM_API_KEY 完好** | 实证 `00-config.yaml` 里那条警告：整对象 apply 是覆盖，补键必须走 merge patch / 单键 apply |
 | 7 | `semantic_cache` 已有 2 行（v11 之前写的，`tenant_id` 由默认值补成 `''`）、`chunks=0`、`memories=0` | 资料尚未入库（底线 4 未达），缓存里是历史试跑留下的行 |
@@ -295,7 +303,7 @@ kubectl -n agent-platform get secret observability-keys -o jsonpath='{.data.LLM_
 
 | # | 读数 | 这条改变了什么判断 |
 |---|---|---|
-| 1 | Pod 落点在两次重启间移动：`ambari01` → `ambari02` → `ambari01` | "**三节点都要有权重缓存 + 都要导入镜像**"是承载性前提，不是保险。少铺一个节点，`hostPath type: Directory` 会让 Pod 在该节点 Pending（这是好事：失败在调度期而不是首次推理） |
+| 1 | Pod 落点在两次重启间移动：`<internal-node-01>` → `<internal-node-02>` → `<internal-node-01>` | "**三节点都要有权重缓存 + 都要导入镜像**"是承载性前提，不是保险。少铺一个节点，`hostPath type: Directory` 会让 Pod 在该节点 Pending（这是好事：失败在调度期而不是首次推理） |
 | 2 | 本轮删除 Pod 后 Warning 级 `Killing/OOMKilling/Evicted` 事件 **0 条**，自愈 15s；`otel_status=ACTIVE` 且 Jaeger 查到 8 span | §4.8 第 3 条的 137 复发诱因（OTLP 不可达 + DNS 断连拖住优雅关闭）在"Jaeger 在位 + 宽限期 60s"下**本轮未复现**。⚠️ 这是**一次观测**，不是"已修"——真修是给出网时的 flush 上界（`plan-tracing-shutdown-flush-timeout-2026-10-10.md`，待拍板）。旧 Pod 的 `lastState` 没抓到（对象随删除消失），下次须在删除前抓 |
 | 3 | `allocatable.memory = 16232772Ki`（**大写 K**），三节点约 15.9Gi / 8 CPU | 解析 k8s 资源量时 `[kMGT]` 字符类漏 `K` 会直接抛错；我本轮的容量预检就这么失败过一次。`Ki` 与 `k` 是两个不同单位（1024 vs 1000） |
 | 4 | LocalEmbedder 常驻、无并发时 `memory.current=442Mi`、`kubectl top=441Mi`、`pid1 VmRSS=553Mi`；`cgroup memory.max=2147483648` | `requests 1Gi / limits 2Gi` 有实测依据（此前只有 CUDA 轮经验值），且限额真落到 cgroup |
@@ -550,8 +558,8 @@ python3 -c 'print(len(open("/tmp/body.txt").read()))'  # 空体上任何计数�
 | G3 | mock 相关取值各环境取何值 | ✅ **已闭合**：平台侧确定跑 **MockEmbedder**；`local` 不可用仅限于 `agent-platform:dev` 镜像，**KS 镜像支持 local** | e18[1] Secret 键集无 EMBEDDING_API_KEY；e17[5] pod 内 `find_spec` 四件全 False；e18[3] KS 镜像内四件 + FlagEmbedding 全 True；e18[6] KS 容器 EMBEDDING_MODE（web=api / rageval=local） | 无 |
 | G4 | 17 项线上代码漂移如何处置 | ✅ **已闭合（语义 diff 已取，结论与原假设相反）**：8 个热改文件 = **5 个容器内容即已入库 commit** + **3 个从未入库的 eval 草稿但 HEAD 已含全部关键概念** ⇒ **无需手工救回任何代码**；真实债务是**线上 `import_router.py` 缺 3 项已入库修复**（租户注入 / `asyncio.to_thread` / MinIO fail-fast），处置 = 重新构建并分发 KS 镜像 | e24[1] `docker diff` 可写层 9 个 .py、D=0；e24[2] 逐文件 blob OID + `cat-file -t` + `--find-object`（A 类命中 `34f68ed`/`04b08cf`，3 个 `vs HEAD hunks=0`）；e25[3] 容器独有行抽样 + 本机 HEAD grep（`ROUTE_CONFIGS`/`EVAL_COLLECTION_NAME`/五档权重均在）；e25[4] 可写层仅 444K | **是否重新构建镜像并分发 = 待拍板**（属运行环境变更，本轮未动）；`B_rev` 仅为"构建时点最佳估计"而非硬证（KS 镜像无 `GIT_REV`），但不影响结论——A 类靠对象库命中、B 类靠 HEAD 内容包含 |
 | G5 | milvus 10-09 17:38 重启是否人为 | ❌ **非人为（上游也已闭合）**：etcd lease 丢失触发的应用**自主退出**；再上游 = **vda ROTA=1 的慢 fdatasync（953 条且每天都有）+ Ubuntu 维护定时器放大 + etcd 无 IO 隔离** | e19[1] 停机前链；e20[1] 16 次拉起；e21[1] 114/882 条；e19[1] 全栈 rc 普查；**e23[1] lsblk ROTA=1 + dmesg 无 IO 错误、e23[2] PSI avg10=46 + wa=25、e23[3] blkio=0/Mem=0、e23[4] 953 条按日分布（最后一条距脚本自打时刻仅 1 秒 = 执行当下）、e23[6] 08:44:30 apt-daily 群 + e2scrub_all 与 8 次重启吻合** | 后端存储真实形态（网络盘/云盘）126 上不可见，`smartctl`/`iostat`/`mpstat` 未装 ⇒ 无法区分"介质慢"与"后端抖动"；**处置（错峰 timer / 独占盘 / PSI 监控）= 待拍板** |
-| G6 | pod exitCode=137 根因 | ✅ **定性完成**：非应用崩溃——外部依赖断连（postgres DNS + OTLP no route）+ 优雅关闭未完成的 terminationGracePeriod 被 SIGKILL | e17[8] `kubectl logs --previous` 尾部序列（含 `failed to resolve host 'postgres'`、`No route to host` 192.168.100.126:4318） | 上游网络扰动的诱因属集群层，126 上无更详细记录；pod 在 ambari02，需该节点侧日志才能双向印证 |
-| G7 | distribute.sh 是否真把镜像送到了 worker | ✅ **逻辑闭合，无需连 125**：pod 正在 ambari02 跑该 imageID，而集群无 registry 且 `IfNotPresent` ⇒ 镜像必然是导入到该节点的 | e19[2] pod `imageID=sha256:f37bcdb1ed7a…`与 moby/k8s.io 侧 `f37bcdb1ed7a` 咬合；manifest `image: agent-platform:dev` 无 registry 前缀；126 本机 k8s.io 也有同镜像 | "由 distribute.sh 还是手工命令执行"指名不了（bash_history 零命中）；若需硬证据仍需连 125 |
+| G6 | pod exitCode=137 根因 | ✅ **定性完成**：非应用崩溃——外部依赖断连（postgres DNS + OTLP no route）+ 优雅关闭未完成的 terminationGracePeriod 被 SIGKILL | e17[8] `kubectl logs --previous` 尾部序列（含 `failed to resolve host 'postgres'`、`No route to host` <internal-host-126>:4318） | 上游网络扰动的诱因属集群层，126 上无更详细记录；pod 在 <internal-node-02>，需该节点侧日志才能双向印证 |
+| G7 | distribute.sh 是否真把镜像送到了 worker | ✅ **逻辑闭合，无需连 125**：pod 正在 <internal-node-02> 跑该 imageID，而集群无 registry 且 `IfNotPresent` ⇒ 镜像必然是导入到该节点的 | e19[2] pod `imageID=sha256:f37bcdb1ed7a…`与 moby/k8s.io 侧 `f37bcdb1ed7a` 咬合；manifest `image: agent-platform:dev` 无 registry 前缀；126 本机 k8s.io 也有同镜像 | "由 distribute.sh 还是手工命令执行"指名不了（bash_history 零命中）；若需硬证据仍需连 125 |
 | G8 | 磁盘 avail 32G 是否需清理 | ✅ **有数可依**：真正可回收 ≈ **13.75GB**（两个 dangling KS 镜像各 unique 6.879GB），且二者与现役镜像同日相隔 30 分钟构建 ⇒ **删了不损失回滚能力**；Build Cache 20.66GB 实测不可回收（仅 3MB） | e17[10] `docker system df`；e18[9] `df -v` 镜像明细；e21[2] 三个 KS 镜像 Created/labels；e20[2] build cache 单项 6.88GB 与 `/data/docker/buildkit` 仅 2.7M；**e25[4] 热改证据在容器可写层（444K）而不在这两个镜像里 ⇒ 清理不影响 §5 取证** | **是否执行清理 = 待拍板**（本轮只列不改）；清理与 G5 磁盘抖动相关，不只是容量问题 |
 
 ## 8. 本基线的可靠性边界
@@ -610,15 +618,15 @@ kubectl -n $NS exec -i $POD -- python - probe '报馆图纸' < /tmp/r30db.py
 | 项 | 值 |
 |---|---|
 | namespace / 工作负载 | `agent-platform` / `deploy/agent-platform`，`replicas=1` |
-| Pod | `agent-platform-85794678c-9hjg4`，node **ambari01(241)**，Pod IP 10.244.2.15，restarts **0**，Ready 1/1 |
+| Pod | `agent-platform-85794678c-9hjg4`，node **<internal-node-01>(241)**，Pod IP <pod-ip>，restarts **0**，Ready 1/1 |
 | 镜像 | tag `agent-platform:dev`（可变），Pod `imageID=sha256:c18dc76a93f8fb55fbd5297f1a642d8f116894230b647beb32d401ff34819736` |
 | Pod 内 `GIT_REV` | `6ac466af2ebf2d6d9f09b1fb181525a72268bdc3`（`verify.sh` 回读，rc=0） |
 | 三节点 containerd-k8s | 125 / 126 / 241 全部 = **`c18dc76a93f8f`**（1.68GB）。241 是**补了一次本地导入**才齐的（见坑档 §4） |
 | 宿主 moby 库（126） | `agent-platform:dev` = `9d72645cbafc`，内含 `GIT_REV=3cd5580` —— **中止构建的残留，不是线上对象**，别拿它做证明 |
 | `/health` 生效值 | `storage=postgres` `sql_backend=postgres` `embedding_backend=LocalEmbedder` `embedding_real=true` `llm=true` `otel=true/otel_status=ACTIVE` `langfuse_enabled=true` `langfuse_ready=true` `forensic=true` `guard_enabled=true` `auth_enabled=true` `identity_mode=single` `planner=deterministic`；`search/mcp/scheduler/control_plane/cost_governance/admission=false` |
-| 依赖 Pod | `postgres-6ff4688bb8-vn7v6` @ ambari03(126)（被 `nodeSelector` 钉住），14d，restarts 0 |
-| Jaeger（观测面 A） | **126 的 moby 容器** `jaeger`，Up 13 days，`4317/4318→host`、`16686→host`；OTLP 端点由 CM 注入 `OTEL_ENDPOINT=http://192.168.100.126:4318/v1/traces`。**服务本身活着**：10-13 从 Pod 内查 `/api/services`、`/api/traces?operation=POST /query` 全部正常应答（所以"收得到 span"与"UI 打不开"是两件事，别混着讲）。UI 从办公网**当前不可达**，见手册 §9 ㉑ |
-| Langfuse（观测面 B） | **241 的 moby 栈** `lf-langfuse`/`lf-langfuse-worker`/`lf-clickhouse`/`lf-langfuse-db`/`lf-valkey`/`lf-minio`（6 个，均 healthy），只有 web 发布 `3000`；`LANGFUSE_HOST=http://192.168.100.241:3000`。**演示期暂常驻**（实测 PSI `avg10=3.59%`、241 磁盘余 25G、内存 avail 11G；冷启动需等 ~300s，故不停） |
+| 依赖 Pod | `postgres-6ff4688bb8-vn7v6` @ <internal-node-03>(126)（被 `nodeSelector` 钉住），14d，restarts 0 |
+| Jaeger（观测面 A） | **126 的 moby 容器** `jaeger`，Up 13 days，`4317/4318→host`、`16686→host`；OTLP 端点由 CM 注入 `OTEL_ENDPOINT=http://<internal-host-126>:4318/v1/traces`。**服务本身活着**：10-13 从 Pod 内查 `/api/services`、`/api/traces?operation=POST /query` 全部正常应答（所以"收得到 span"与"UI 打不开"是两件事，别混着讲）。UI 从办公网**当前不可达**，见手册 §9 ㉑ |
+| Langfuse（观测面 B） | **241 的 moby 栈** `lf-langfuse`/`lf-langfuse-worker`/`lf-clickhouse`/`lf-langfuse-db`/`lf-valkey`/`lf-minio`（6 个，均 healthy），只有 web 发布 `3000`；`LANGFUSE_HOST=http://<internal-host-241>:3000`。**演示期暂常驻**（实测 PSI `avg10=3.59%`、241 磁盘余 25G、内存 avail 11G；冷启动需等 ~300s，故不停） |
 | port-forward | 126 `:18000 → svc/agent-platform:8000`；`portforward.sh` **无 restart 子命令**，换 Pod 要 stop+start。⚠️ 10-13 收盘前：**办公网侧 126:18000 与 126:16686 均无应答**（curl `HTTP 000`），而同刻 241:3000 → 200 ⇒ 观测/控制台入口别压在 126 上，两候选成因与判据见手册 §9 ㉑ |
 | 密钥落点 | `secret/observability-keys` 内 `API_KEY` / `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY`（+ `LLM_API_KEY`）——**只记键名与注入路径，值不落任何文件** |
 | 库内数据态（**10:27 UTC 复算**） | `chunks` 303 行 / 7 文档、`semantic_cache` 残留 0、**`checkpoints`/`checkpoint_blobs`/`checkpoint_writes` 三表 0 行**：演示前按拍板把取证残留句整桶清掉（备份在 `126:/tmp/ckpt-backup-host/*.csv`，0600，宿主 `/tmp` ⇒ 重启即失）。本节早前那句"今日 1 个 thread、33 个 blob"到此失效，别引用 |
@@ -637,7 +645,7 @@ bash deploy/k8s/scripts/verify.sh <expected-rev>          # rc=0：L0 三节点 
 API_KEY=... bash deploy/k8s/scripts/e2e_traceparent.sh     # rc=0：span 数=8、含 "POST /query"
                                                           #       trace id == 注入的 W3C id
 # 3) Langfuse 面（唯一算数判据 A3）
-API_KEY=... LF_PK=... LF_SK=... LF_HOST=http://192.168.100.241:3000 \
+API_KEY=... LF_PK=... LF_SK=... LF_HOST=http://<internal-host-241>:3000 \
   python deploy/observability/langfuse_proof.py            # exit 0：2 条 GENERATION，
   #  答案生成 in=1403/out=1547、input 摊平后含 "[来源: …]"；路由决策 in=475/out=164；
   #  trace id == 注入 id。exit 4 = 取证不成立但平台没错（全部命中语义缓存）
@@ -658,10 +666,10 @@ API_KEY=... LF_PK=... LF_SK=... LF_HOST=http://192.168.100.241:3000 \
 
 ### 9.1 三台一览
 
-| 项 | **125 = ambari02** | **126 = ambari03** | **241 = ambari01** |
+| 项 | **125 = <internal-node-02>** | **126 = <internal-node-03>** | **241 = <internal-node-01>** |
 |---|---|---|---|
 | k8s 角色（15d，v1.31.14，containerd 2.2.1） | worker | **control-plane**（在听 6443/2379/2380/2381） | worker |
-| 本项目 Pod 落点 | 无 | `postgres-6ff4688bb8-vn7v6`，15d，**restarts 0**，10.244.0.2 | **`agent-platform-85794678c-9hjg4`**，1/1 Running，25h，**restarts 1**，10.244.2.15 |
+| 本项目 Pod 落点 | 无 | `postgres-6ff4688bb8-vn7v6`，15d，**restarts 0**，<pod-ip> | **`agent-platform-85794678c-9hjg4`**，1/1 Running，25h，**restarts 1**，<pod-ip> |
 | containerd-k8s 里的 `agent-platform:dev` | ✅ manifest `sha256:adf6a2bc3193…`（1.6 单位随列序截断，见 §9.6①） | ✅ 同一枚 | ✅ 同一枚 |
 | moby 里的 `agent-platform:dev` | ❌ 无 | ⚠️ `9d72645cbafc` = **中止构建残留，不是线上对象**（§4.11 已定口径；本轮想复取其 `GIT_REV` 失败，模板写坏了，见 §9.6③） | ✅ `c18dc76a93f8` —— **与 Pod `imageID` 同一枚 ⇒ 构建机就是 241** |
 | 宿主 `/opt/agent-platform` | ❌ **无 checkout**（`NO_CHECKOUT`） | HEAD **`c01e9cf7`** dirty=0（比线上一档旧 ⇒ 从 126 构建会被 `build.sh` rev 门禁 exit 2） | HEAD **`6ac466af`** dirty=0 = **线上镜像 rev** |
@@ -674,7 +682,7 @@ API_KEY=... LF_PK=... LF_SK=... LF_HOST=http://192.168.100.241:3000 \
 | 宿主 uptime / 核数 | 20d 12:07 / 8 | 20d 11:52 / 8 | 20d 12:10 / 8 |
 
 **Pod 侧细节（241）**：`imageID=sha256:c18dc76a93f8…`、Pod 内 `GIT_REV=6ac466af2ebf…`（与 §4.11 同一枚，**今天没发新 rev**）；`nodeSelector` 为**空**（部署可落任意节点 ⇒ 每台都得有镜像）；`resources` = requests `250m/1Gi`、limits `1/2Gi`；`lastState.terminated` = `exitCode 137 reason Error startedAt 2026-10-13T08:52:02Z finishedAt 2026-10-13T10:37:56Z` ⇒ 手册 ㉒ 那次 liveness 杀的是**同一个 Pod 就地重启**，没有换名。
-**postgres 为什么能在 control-plane 上**：`nodeSelector={"kubernetes.io/hostname":"ambari03"}` + `tolerations=[{key: node-role.kubernetes.io/control-plane, effect: NoSchedule, operator: Exists}]`（本轮实测两字段，非推断）。
+**postgres 为什么能在 control-plane 上**：`nodeSelector={"kubernetes.io/hostname":"<internal-node-03>"}` + `tolerations=[{key: node-role.kubernetes.io/control-plane, effect: NoSchedule, operator: Exists}]`（本轮实测两字段，非推断）。
 
 ### 9.2 与 §4.11（10-13 快照）不同的六处
 
@@ -704,7 +712,7 @@ API_KEY=... LF_PK=... LF_SK=... LF_HOST=http://192.168.100.241:3000 \
 - **`distribute.sh` 从 241 跑必须显式列 `125 126`**：默认 `WORKERS=125 241` 是"在 126 构建"的历史形态；本部署**无 nodeSelector**，漏一台则 Pod 调度过去即 `ErrImagePull`（可变 tag + `IfNotPresent` 无本地层可退）。
 - **别拿 126 moby 的 `9d72645cbafc` 做线上证明**，也别 `docker run` 读镜像内容（两套库互不可见，AGENTS.md 硬规矩 4）。
 - **126 宿主不能跑项目测试**：无 uv、Python 3.10；补跑走容器（testing-playbook 第 4 层）。
-- **观测口都绑 `0.0.0.0`**（18000 由 `kubectl` 持有、16686 由 `docker-proxy` 持有）⇒ 整个 192.168.100.0/24 都进得来。这正是 ㉓ 拍板"接受"所依赖的物理事实，上台时要说出那句"观测面含原文，仅限可信内网人群"。
+- **观测口都绑 `0.0.0.0`**（18000 由 `kubectl` 持有、16686 由 `docker-proxy` 持有）⇒ 整个 <internal-ip>/24 都进得来。这正是 ㉓ 拍板"接受"所依赖的物理事实，上台时要说出那句"观测面含原文，仅限可信内网人群"。
 
 ### 9.5 复算命令（别引用上面的表，跑这几条）
 
@@ -714,7 +722,7 @@ BLOCK='echo "host=$(hostname) head=$(git -C /opt/agent-platform rev-parse --shor
  echo "psi=[$(tr "\n" " " </proc/pressure/io)] df=$(df -h / | awk "NR==2{print \$4\"/\"\$5}")";
  echo "ctr=$(ctr -a /run/containerd-k8s/containerd.sock -n k8s.io images ls 2>/dev/null | grep -c agent-platform) moby=$(docker images --format "{{.ID}} {{.Repository}}" | grep agent-platform)";
  echo "pods=$(docker ps --format "{{.Names}}" | paste -sd" " -)"'
-for IP in 125 126 241; do printf '%s\n' "$BLOCK" | ssh -o BatchMode=yes root@192.168.100.$IP bash -s; done
+for IP in 125 126 241; do printf '%s\n' "$BLOCK" | ssh -o BatchMode=yes root@<internal-net-100>$IP bash -s; done
 
 kubectl get nodes -o wide                                   # 角色 / IP / container runtime
 kubectl -n agent-platform get pod -o wide                  # 落点 + RESTARTS + AGE
@@ -724,7 +732,7 @@ kubectl -n agent-platform get deploy postgres -o jsonpath='{.spec.template.spec.
 for T in checkpoints checkpoint_blobs checkpoint_writes semantic_cache memories chunks; do
   kubectl -n agent-platform exec deploy/postgres -- psql -U agent -d agent_platform -tAc "select '$T='||count(*) from $T"; done
 # 跨节点判观测口活着（从我本机量不算数，见 §2.8 与记忆 workstation-tun-proxy）
-ssh root@192.168.100.241 "curl -s -o /dev/null -w '%{http_code}\n' --max-time 8 http://192.168.100.126:16686/"
+ssh root@<internal-host-241> "curl -s -o /dev/null -w '%{http_code}\n' --max-time 8 http://<internal-host-126>:16686/"
 ```
 
 ### 9.6 本轮自己踩的三个读数形状（写下来防下轮再犯）

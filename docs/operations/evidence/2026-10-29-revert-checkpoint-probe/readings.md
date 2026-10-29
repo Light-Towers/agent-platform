@@ -221,4 +221,9 @@ checkpoint_cleaner.py（本仓）注释自陈：「checkpoint_id 为 uuid.hex，
 | 零产码改动 | `git diff --stat -- applications packages` | **输出为空** | 本批全部是文档与探针 ⇒ 上一行那条“方案阶段不动产品代码”的约束可核对 |
 | 在册测试无退化 | `uv run pytest applications/agent_server/tests/{test_console_router,test_history_real_checkpointer}.py -q`（33 passed）· `packages/agent-runtime/tests/test_revert.py`（11）· `packages/agent-core/tests/test_checkpointer.py`（6）· `tests/memory/test_thread_persist.py`（10）| **合计 60 passed / 0 failed**（分四次跑，避开 conftest 重名）| 证明探针结论所在的那四条链的用例仍绿。**不等于全量门禁**：未跑 `make test`（10 session）⇒ 提交前需按验证策略对齐 CI |
 
+> **入库注记（2026-10-30，只记不改上表正文）**
+> - 本件随批次 B2 提交（`git commit db4fea6c`，用户显式批示、逐路径 `git add`、**未 push**）⇒ 下面「诚实边界」里的**未提交**一条已被取代。
+> - 同表「公开镜像面」那行是**台账收紧前**的真实读数：批次 B3 把 `_REGISTRY` 从 3 项收到 1 项（`docs/operations/env-126-inventory.md` 与 `deploy/k8s/15-valkey.yaml` 就地脱敏后不再需要登记），换 rev 后该命令的预期读数为 `1 文件 / 命中若干 / 台账 1 项 / 违规 0`（ADR-0013 余下那一处是 PII 正则的**合成示例值**，见该文文首脱敏口径注记）。
+> - ⚠ **反向提醒**：在 B3 落地之前的任意时刻复跑该行命令，会读到 **rc=1 / 违规 2**（两条 P-4「携带内网标识但未登记」）。那是「磁盘上的新台账 + HEAD 上的旧真值」混合态的形状C 机制性红，**既不说明上表那行读错，也不是新缺口**；台账收缩与被遮内容必须同批提交，否则两向都红。
+
 诚实边界（本批未做项）：**未提交**（用户规则：提交需显式批示、逐路径 `git add`）；未跑全量 `make test`；未做 E2/现网取证（本批不改运行链路）。
