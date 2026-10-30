@@ -39,7 +39,7 @@
 **输出里没有任何 `SELFTEST:` 前缀行** ⇒ `selftest()` 返回空 ⇒ 判据自身（正例被咬、豁免有边界、登记失效分流、mask-plan 换净）全部有牙。
 
 **④ 工作区预检（模拟"提交之后"的 registry 口径）**
-命令：`uv run python .tmp-scratch/c-mask/precheck.py`（判据 import 自门禁本体，不复制规则）
+命令：`uv run python .tmp-scratch/c-mask/precheck.py`（判据 import 自门禁本体，不复制规则；该脚本不入库，换机器需自建）
 读数：rc=**0**；`携带标识的文件 1 个，命中行 1 处，台账 1 项；未登记违规 0 项，幽灵登记 0 项，警告 0 项`；
 形状豁免面 6 个文件共 17 处（5 个测试文件 + `uv.lock`），全部走形状豁免而非语义旁路。
 
@@ -82,6 +82,8 @@ mirror/nl2sql-ttl-and-006-slim live 2011fe6a = local 2011fe6a  equal=True
 uv run python .tmp-scratch/c-mask/mirror_disclosure.py
 ```
 
+> 代码块末行那个 `mirror_disclosure.py` **不入库**（`.tmp-scratch/` 在 `.gitignore` 内）⇒ 只作取证出处，不当可复跑命令；要在他机复现得按本节的输出形状自行重建探针。
+
 读数（两个 ref 逐项相同）：
 - **A) 形状盲区**：`192.168.<n>.$IP` 这类"网段前缀 + shell 变量"在公开侧 **1 处**（`docs/operations/env-126-inventory.md` L719），现行 P-1 四段正则匹不到。
 - **B) 门禁自披露**：碎片行 **5 行**（L58/L59/L61/L62/L356），而对 `_asm(...)` **实际求值**得到常量 **5 个**（L58/L59/L60/L61/L62）。
@@ -116,7 +118,7 @@ git ls-files 计数（两目录）→ 0
 
 ## 6. `evidence-format.md` §7 三条自查（扫本批新增行）
 
-命令：`uv run python .tmp-scratch/c-mask/evselfcheck.py`（作用域 = `git diff -U0 -- '*.md'` 的 `+` 行 ∪ 未跟踪新 `.md` 全文）
+命令：`uv run python .tmp-scratch/c-mask/evselfcheck.py`（作用域 = `git diff -U0 -- '*.md'` 的 `+` 行 ∪ 未跟踪新 `.md` 全文；脚本不入库）
 读数：**三跑**。① 本证据件未写时：受检 2621 行（未跟踪新 `.md` 11 个）/ A=1 / B=15（8 有界 + 7 候选）。② 写完本件后：2771 / A=3 / B=18。③ 按下面 A/B 行修正后：**2771 / A=1 / B=19（9 有界 + 10 候选）**。
 **一个必须登记的口径发现**：B 类计数对"本件自身文面"**不是不动点**——写一行描述该检查的话，就多一行命中（③ 里本件占 3 行）。
 ⇒ 稳定口径 = **排除本证据件自身**，此时 B 回到与①逐项相同的 **15（8 + 7）**。本表以下采用该口径。
@@ -144,7 +146,7 @@ git ls-files 计数（两目录）→ 0
 口径先说清：§6 表里的“候选 7 行”用的是 v1 分类器（只看同行）；v2 把“命令在±3 行邻域”归入可核对档后，候选降到 **6 行**（那 1 行差量属分类口径变更，不是新增取证）。本 §8 闭合的就是这 6 行，下表 5 个探针其中一行同时证两行文档（同一取证）。
 
 工具：`.tmp-scratch/c-mask/evselfcheck2.py`（口径 = 排除本证据件自身；新增“邻域 ±3 行”与“`path:123` 指针也算证据”两条判据）
-+ `.tmp-scratch/c-mask/vague_probe2.py`（每条断言一个**正例锚点** + 一个取数，锚点不中即探针失效）。
++ `.tmp-scratch/c-mask/vague_probe2.py`（每条断言一个**正例锚点** + 一个取数，锚点不中即探针失效）。两枚均不入库 ⇒ 本节留下的就是上面这两条判据本身，换机器照判据重建。
 
 | 断言行 | 目标 | 命令 | 读数 | 结论 |
 |---|---|---|---|---|
@@ -162,7 +164,7 @@ git ls-files 计数（两目录）→ 0
 
 ### 8.2 闭合后的复跑读数
 
-命令：`uv run python .tmp-scratch/c-mask/evselfcheck2.py`（rev `896f966e`，口径 = 排除本证据件自身）
+命令：`uv run python .tmp-scratch/c-mask/evselfcheck2.py`（rev `896f966e`，口径 = 排除本证据件自身；脚本不入库）
 读数：受检 **2639 行**（全量 2779）/ A = **0 行** / B = **12 行**（同行有证据 **9** + 邻域 **3** + 全无 **0**）；不动点对照：那一次 B 含自身 **16**、本件贡献 **4**。
 ⇒ §6 遗留的 A=1 也已闭合（那一行补了行内 rev 指向同文档 §1 字段 ①）。B 从 15 降到 **12** 不是“扫得松了”，而是三条改写把“全仓”换成了真实作用域（去词而不是加词）。
 **写完本节后的再跑（同一命令，rev `896f966e`）**：受检 **2663 行**（全量 2831）/ A 仍 **0** / B 仍 **12**（9 + 3 + 0 不变），但**本件贡献从 4 涨到 9**（含自身口径 16 → 21）——§8 写了九行描述这些检查的话，自身就多九行命中。
@@ -171,7 +173,7 @@ git ls-files 计数（两目录）→ 0
 
 ### 8.3 邻域档那 3 行的逐条闭合（rev `896f966e`，本轮实取）
 
-取数件：`.tmp-scratch/c-mask/nb3_close.py`（两口径对照）+ `.tmp-scratch/c-mask/nb307_recount.py`（按清单真实目标重取）。**三行全部判完，但结论方向不同：两个“成立但只在一个口径下成立”，一个直接反噬到我自己写的更正文面。**
+取数件：`.tmp-scratch/c-mask/nb3_close.py`（两口径对照）+ `.tmp-scratch/c-mask/nb307_recount.py`（按清单真实目标重取）；两枚均不入库，可复跑的是下面表里逐行写出的 `git grep` 那类命令。**三行全部判完，但结论方向不同：两个“成立但只在一个口径下成立”，一个直接反噬到我自己写的更正文面。**
 
 | 行 | 原断言 | 实取（命令 → 读数） | 判定 |
 |---|---|---|---|
@@ -221,7 +223,7 @@ git ls-files 计数（两目录）→ 0
   （§9 当时：rc=**1** / 3 个文件 / 30 行 / 台账 1 / 违规 **2**）。⇒ 混合态红不是规则失效，而是“台账按磁盘 import / 命中行按 HEAD 取”这个提交切面的必然产物；
   **rc 1→0 由提交动作自己触发**，所以它同时是形状 C 门禁的非空转反证（落库批 = `efe938c1`，它的 message 里逐字记了这两个 rc）。
 - 同树复跑其余四项（均 rev `cfc7bf19`）：`uv run python scripts/check_doc_sync.py` rc=**0**（“校验通过（0 警告）”）、`uv run --with ruff ruff check .` rc=**0**、
-  `uv run python .tmp-scratch/c-mask/precheck.py` rc=**0** 且未登记违规 **0** / 幽灵登记 **0** / 形状豁免 **6 文件 17 处**（与 §9 逐项同值）、
+  `uv run python .tmp-scratch/c-mask/precheck.py`（不入库）rc=**0** 且未登记违规 **0** / 幽灵登记 **0** / 形状豁免 **6 文件 17 处**（与 §9 逐项同值）、
   `uv run pytest tests/governance/test_doc_sync_file_refs.py -q` **44 passed in 1.17s**。
 - 本批新覆盖（§9 当时没跑）：根 session `uv run pytest -q` = **1487 passed / 38 skipped in 170.64s**（rev `cfc7bf19`）；
   `uv run pytest tests/governance -q` = **464 passed / 1 skipped in 102.86s**（同一棵）。skip 项本轮**没逐项复算归属**（按《conftest 守卫识别》口径它们多半是缺外部依赖的自动跳过，

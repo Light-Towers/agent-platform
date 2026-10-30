@@ -101,7 +101,7 @@ git for-each-ref --format='%(refname:short) %(objectname:short)' refs/remotes
 
 ---
 
-## 2026-10-29 补测节（同日 pass3；读数绑 HEAD `896f966e`，命令 `uv run python .tmp-scratch/c-mask/branch_health_pass3.py`）
+## 2026-10-29 补测节（同日 pass3；读数绑 HEAD `896f966e`，命令 `uv run python .tmp-scratch/c-mask/branch_health_pass3.py`，该脚本不入库 ⇒ 只作取证出处）
 
 本节在上一节基础上只做了三件事：**① 把 `github-legacy` 从「未取证」变「实测」；② 订正上一节一处不是读数的读数；③ 新增一条报警**。拓扑其余结论未变（本地仍 8 条，逐条 `cherry+`/独有文件与上一节一致）。
 
@@ -147,7 +147,7 @@ git for-each-ref --format='%(refname:short) %(objectname:short)' refs/remotes
 
 ### 6.7 同日收尾复跑（与登记值逐项相同）与两条当场校准
 
-命令：`uv run python .tmp-scratch/c-mask/branch_health_pass3.py`（rev `896f966e`，与 6.1–6.6 同树）
+命令：`uv run python .tmp-scratch/c-mask/branch_health_pass3.py`（rev `896f966e`，与 6.1–6.6 同树；脚本不入库，换机器须照本节判据自建）
 读数：远端名 `company` + `github-legacy`（无 `origin`）；company heads = **1**；github-legacy heads = **8**（计入“恒 2”口径 **7** ⇒ 报警仍成立）。
 本地 8 条逐条与 §3 表**按分支逐项相同**：`cherry+` 为 company-snapshot 2 / docs-round4 2 / pillow-13 3 / security-int 2 / security-oct 2 / main 6 / mirror 5；
 独有文件为 `<无数字>`（异宗，见 6.3）/ 7 / 7 / 6 / 6 / 352 / 350；两个镜像 ref 本地=远端仍 True。
@@ -159,7 +159,7 @@ git for-each-ref --format='%(refname:short) %(objectname:short)' refs/remotes
 
 ### 6.8 把体检脚本化（第四版），并记下脚本自己踩的四坑
 
-命令：`uv run python .tmp-scratch/c-mask/branch_health.py`（rev `896f966e`，与 6.1–6.7 同树；只读，不 `branch -d`、不 `fetch --prune`）
+命令：`uv run python .tmp-scratch/c-mask/branch_health.py`（rev `896f966e`，与 6.1–6.7 同树；只读，不 `branch -d`、不 `fetch --prune`；脚本不入库）
 读数（`目标 | 命令 | 读数 | 结论` 四列已在脚本输出里成形，此处只摘判据行）：
 
 | 项 | 读数 | 与登记的差异 |

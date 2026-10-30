@@ -27,6 +27,7 @@ git grep -In -E "192\.168\.[0-9]{1,3}\.[\$]" github-legacy/main --
 
 # 2. 自披露：门禁源码里的 _asm 碎片可被人行拼装
 uv run python .tmp-scratch/c-mask/mirror_disclosure.py
+#   （该探针不入库：`.tmp-scratch/` 在 `.gitignore` 内 ⇒ 只作取证出处，换机器须照上面两条命令的判据自建）
 #   读数（两个 ref 各一份，完全相同）：碎片行 5 处 ⇒ 求值得到 5 条内网标识常量
 #     _HOST_NET / _HOST_NET_241      → <internal-host-126> / <internal-host-241>
 #     _OPS_HOST_PREFIX               → <internal-node-*> 的主机名前缀本体
@@ -116,7 +117,7 @@ git remote 名单不含 `company`    ⇒ 公开镜像仓：键表缺失 = 正常
 
 ## 8. P-1b 误报面实取（本件唯一已跑成的验证；rev `896f966e` + 本批未提交工作区）
 
-**命令**：`uv run python .tmp-scratch/c-mask/p1b_falsescan.py`（只读，判据 import 自门禁本体）
+**命令**：`uv run python .tmp-scratch/c-mask/p1b_falsescan.py`（只读，判据 import 自门禁本体；该脚本不入库 ⇒ 换机器须按本节口径重建，下面两条口径是本体）
 **粗筛候选行 = 19**，两种口径：
 
 | 口径 | 命中 | 落在哪些文件 | 定性 |
