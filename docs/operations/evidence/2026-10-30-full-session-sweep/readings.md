@@ -43,15 +43,16 @@ Makefile 的门禁命令带 `-m "not requires_pg"`，本轮实测为 `1486 passe
 
 - 不带 marker：1487 + 38 = **1525**
 - 带 marker：1486 + 10 + 29 = **1525** ⇒ 收集总数一致，**差在分类不在套件**。
-- **下面的分解不是实量，是上面两组实测数逼出来的算术结果**（前提：“marker 只能把用例从集合里拿走，不能把 pass 变成 skip”）。
+- **下面的分解当时不是实量，是上面两组实测数逼出来的算术结果**（前提：“marker 只能把用例从集合里拿走，不能把 pass 变成 skip”）；§7 已直接坐实。
   设 x = 在无 marker 时“通过”但带 `requires_pg` 的用例数，y = 同样带标记但当时已 skip 的数：
   x + y = 29（deselected 数），且 1487 − x = 1486、38 − y = 10 ⇒ **x = 1 / y = 28**。
-  也就是说：有**一个带 `requires_pg` 标记的用例在无 PG 时是“通过”而不是“跳过”**——这个结论只能从计数推出来，本轮没直接抓到它。
+  也就是说：有**一个带 `requires_pg` 标记的用例在无 PG 时是“通过”而不是“跳过”**——这句当时只能从计数推出来，
+  §7 把它实量到了具体用例名。
 
 ⇒ 判定：我此前引用的 1487/38 形状本身没错，但**它不是 CI 命令的形状**；对外说"对齐 `make test`"必须用 1486/10/29。
-未闭合的两半：① 上面那个推论的前提“两次收集的是同一套件”本身未校——两数取自**不同 rev**（`cfc7bf19` vs `27fb1e41`，
-中间 5 个提交只动过 4 个文件，其中唯一的脚本件 `scripts/lint_public_mirror.py` 是纯注释变更），应用 `--collect-only -q` 计数对比才能坐实；② 那 1 个“标了 requires_pg 却无需 PG 就通过”的用例
-是谁、是标记错还是断言空转，**本轮未查**（`-m "requires_pg"` 单跑会让它们去连库，与 §4 的挂起形状撞车，我没在同一轮里混做）。
+**本节的 x=1 / y=28 已在 §7 直接实量坐实**（成文顺序是先写推论后补实测，不是先实测后写数）。
+当年未校的那半（“两次是否同一套件”）也已校：`git diff --name-only cfc7bf19..f6cc8a31` = **5 个文件**
+（4 份文档 + `scripts/lint_public_mirror.py`，后者是纯注释）⇒ 测试树逐字相同，两个分母可比。
 
 ## 3. skip 归属：10 项逐条（`-rs` 实取，不是文档转述）
 
@@ -75,7 +76,7 @@ Makefile 的门禁命令带 `-m "not requires_pg"`，本轮实测为 `1486 passe
 
 | 起法 | 额外旗标 | 读数 |
 |---|---|---|
-| `powershell -NoProfile -File run_sessions.ps1` | `-rs` | **1908.73s**（rc=0，跑完了） |
+| `powershell -NoProfile -File run_sessions.ps1`（本机 `.tmp-scratch/c-mask/` 下的 for 循环包装器，**不入库**） | `-rs` | **1908.73s**（rc=0，跑完了） |
 | 直接在工具 shell 里跑 | `--durations=15` | **154.91s**（rc=0） |
 
 本轮还出现过第三种形状——同一个 `-File` 包装器下，根 session 与 agent-runtime session **直接冻住**：
@@ -97,8 +98,8 @@ CPU 停在 48s / 5.7s 不再增长（每 20–25s 采样一次 Δ=0.0s），且 
 我先下的“后台起必冻”这个结论被后面的读数推翻了——直起 + 后台转发的根 session 是 154.91s 正常跑完的，
 所以变量不是“前/后台”，是“有没有经过这层包装器”。
 
-**可执行约束（建议归 `testing-playbook.md`，本轮没动手改它）**：长跑 session 一律直接起命令，别过 `-File` 包装器；
-**墙钟耗时不得跨调用形状比较**（否则拿两种环境比），跨形状时只能引用 rc 与计数。
+**可执行约束**：长跑 session 一律直接起命令，别过 `-File` 包装器；**墙钟耗时不得跨调用形状比较**（否则拿两种环境比），
+跨形状时只能引用 rc 与计数。⇒ 已归 `docs/operations/testing-playbook.md` §2.7（本取证成文时未改手册，下一批才入库）。
 
 **它直接推掉台账 P3**：`unconfirmed-items.md` P3 记的是“`tests/governance` 整目录超 9 分钟未完，原因未查明”。
 本轮实测：`uv run pytest tests/governance -q` = **464 passed / 1 skipped in 102.58s**（与今早同目录的 102.86s 同值）。
@@ -150,9 +151,35 @@ Top-15 合计 **113.17s**（逐项相加，不是仪表给的聚合值），剩�
 ## 6. 本轮未跑 / 不得读成已验
 
 - `make ci` / `make test` 的**原名命令**（本机无 make，P4 仍开放）——本轮是逐条等价命令，不是同一个可执行体。
-- 29 项 `requires_pg` 被 deselect ⇒ **真库用例本轮零覆盖**（不是“通过”，是未跑）。
-- 其余四 session 的 28 项 skip 未逐条定性（§3）；§2 那个 x=1 推论未直接抓到实体。
+- 29 项 `requires_pg` 被 deselect ⇒ **真库用例本轮零覆盖**（不是"通过"，是未跑）。§7 补了直跑形状，
+  但结果是 **1 passed / 28 skipped 且 skip 发生在尝试连库之前** ⇒ 真库覆盖仍为 **0**，且本机没有路径能把它变成非 0。
+- 其余四个 session 的 18 项 skip 未逐条定性（§3 只列了根 session 的 10 项）。~~§2 那个 x=1 推论未直接抓到实体~~
+  ⇒ 已闭合，见 §7。
 - 变异杀死率（`make mutation-cache`）、黄金集以外的 E2/E3、红队、canary：本轮未碰。
 - 126/241 现网侧：本轮未碰（零产品代码变更 ⇒ 不改变现网态，也不拿它当本轮读数的一部分）。
 - §4 的机制归因：未归因。要定它需要拿包装器与非包装器各跑一次同旗标（本轮 `-rs` 与 `--durations=15` 旗标不同，
   严格说 §4 那张表里两行不同旗标，只能支撑“差 12 倍”这个事实，不能支撑“旗标无关”这个推论）。
+
+## 7. `requires_pg` 那 29 项：直跑形状，把 §2 的推论坐实（rev `f6cc8a31`）
+
+命令（`--no-sync` 按 playbook §2.2 纪律：诊断性复跑不碰 venv）：
+`uv run --no-sync pytest -q -m "requires_pg" -rs` → **1 passed / 28 skipped / 1496 deselected in 2.64s**，rc=**0**。
+
+⇒ §2 的 **x=1 / y=28 从算术推论升级为实量**：28 条 skip = y，1 条 pass = x，逐项对得上。
+那 1 个 pass 是谁：`uv run --no-sync pytest -q tests/ha/test_migrations_real_pg.py::test_scratch_url_of_handles_real_world_shapes -v`
+→ **1 passed in 0.07s**（单跑，不经任何 fixture 链）。它是纯 URL 形状断言，不碰库。
+
+它为什么会带 `requires_pg`：`tests/ha/conftest.py:48-50` 的 `pytest_collection_modifyitems` 给**整个目录**无条件打标记。
+⇒ **口径纠正**：“29 项 requires_pg” ≠ “29 项需要真库”，是 **28 项要库 + 1 项被目录级连带标注**；以后引用这个数不得当“真库用例数”。
+
+**为什么本机永远补不上这块覆盖**：skip 发生在尝试连库**之前**——`conftest.py:67-70` 在
+`await _db.init_pool(PG_URL)`（L72）前面就有 `if sys.platform == "win32": pytest.skip(...)`，
+所以 playbook §3.4 那条“本机零基建起真 PG（pgserver）”的通道对本套件**无效**（起了也不会跑）。
+**两个位置、同一个结论**（照 `-rs` 文案分开，不是全部出自 conftest）：24 条走 `conftest.py:67-70`，
+另 **4 条**走 `test_migrations_real_pg.py:71-74` 自己的 `pg_gate`（文案不同：「Windows 本地默认跳过…由 Linux CI 覆盖」），
+两处都在连库前判 win32 ⇒ 结论不变。
+要覆盖只能 Linux：playbook §3.6 有容器配方，那一节记的“实测 29 passed in 12.40s”是 126 那轮的**历史读数**
+（绑定当时的 rev，不属本轮）⇒ 不得当本轮已达的覆盖引用。台账据此新增 E17（待环境）。
+
+**本节里哪半是新的**：`testing-playbook.md` §2.5 早已写过「`tests/ha` 另有 `sys.platform=="win32"` 硬跳过」⇒ 本节的增量只是那两点：
+① 硬跳过在连库**前**，所以 §3.4 的 pgserver 通道对它无效（“有本机 PG 路线”不等于“本套件能跑”）；② 29 ≠ 需要真库的项数。

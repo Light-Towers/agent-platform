@@ -34,6 +34,7 @@
 | E14 | 目标列的真实 `distinct` 量级、列文本长度实况、该列是否 key 列 / 分区列（Q10c、Q11） | 本地能造任意分布，但**造不出业务真实分布**；而 P1-2 基数闸门的阈值（>5,000 降级、>50,000 禁模糊）与"要不要保留外部索引"的判定全靠这个数 | 现网只读取数：逐列 `select count(distinct col)`（带超时保护）。⇒ 这一项决定了方案 §5.3 轴 1 那张 N 表能否填上 |
 | E15 | 内网 MySQL 的 `ngram_token_size` **现值**与能否重启改（Q19、Q22） | 注意别与行为混登记：**行为在 T-A 本地可测**（默认 2、短于 token size 命中不到、改动后须重建索引，以及方案标为"两份资料结论相反、属实测项"的那条——`ngram` 是否支持 `IN BOOLEAN MODE`）；**现值与能否重启只在现网** | 现网 `select @@ngram_token_size` + DBA 确认重启窗口 |
 | E16 | P0-8⑤「线上每个未命中字面量落 trace、日报 top N」能否兑现 | 服务**未部署**（`deploy/` 全目录 grep `nl2sql` 命中 0、`.env.example:217` 写"空 = 不注册 nl2sql skill"；原记 `:204` 已漂移）⇒ 没有线上流量可落 | 先做部署与注册决策，再把该判据分两段写：上线前=人工 golden 门禁读数，上线后=未命中日报（方案 §6 目前把它当既定能力混写在一格里） |
+| E17 | `tests/ha` 那 **28 项真库用例**（lease / 双副本故障转移 / 迁移链 / 租户隔离）能否在真 PG 上跑绿 | 本机恒 skip，且 **skip 发生在尝试连库之前**（`tests/ha/conftest.py:67-70` 负责 24 条 + `tests/ha/test_migrations_real_pg.py:71-74` 的 `pg_gate` 负责 4 条，两处都在连库前判 `sys.platform == "win32"`）⇒ playbook §3.4 那条“本机零基建起真 PG（pgserver）”的通道对本套件**无效**（起了也不会跑）。实取（rev `f6cc8a31`，`uv run --no-sync pytest -q -m "requires_pg" -rs`）= **1 passed / 28 skipped / 1496 deselected** rc=0；那 1 passed 是纯 URL 形状断言 `test_scratch_url_of_handles_real_world_shapes`（单跑 0.07s，不碰库，因 `conftest.py:48-50` 给整目录无条件打标记而被连带）⇒ **真库覆盖 = 0**，且“29 项 requires_pg”这个数不得当“29 项需要真库”引 | 在 Linux（容器或 126，playbook §3.6 配方）跑 `-m requires_pg`。注意 §3.6 里那句“实测 29 passed in 12.40s”是 126 那轮的**历史读数**（绑定当时的 rev）⇒ 只能当“这条路走得通”的存证，不能当已达覆盖。取证见 `docs/operations/evidence/2026-10-30-full-session-sweep/readings.md` §7 |
 
 ## 2. 待放行（命令被中止过 / 缺密钥，不该由我绕）
 
