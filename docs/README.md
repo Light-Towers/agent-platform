@@ -145,6 +145,7 @@
 | `plan-e-dual-track-convergence.md` | P4.1~P4.3 全部实施完成 | 08-22 | 12 |
 | `plan-agentic-skill-convergence.md` | **已落地（契约层 3/3）**，但默认部署下该注册走 except 跳过——不得说成"agentic 现网可用" | 09-22 | 0 |
 | `skill-consolidation-inventory.md` | 未标（AGENTS.md 点名其为 Skill 收敛盘点） | 09-23 | 3 ★ |
+| `plan-mongo-probe-timeout-single-impl-2026-10-30.md` | **已拍板方向（D27=b），待施工**：只出方案，未动一行产品代码；欠一个默认值 2000ms 的确认 + S1 开工授权 | 10-30 | 1 |
 | `tool-mount-matrix-2026-09-25.md` | 未标 | 09-25 | 3 |
 
 ### 3.8 早期（08 月）与零散件：多数无状态行、且零提及
