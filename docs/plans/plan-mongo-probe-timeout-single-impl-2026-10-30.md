@@ -1,8 +1,9 @@
 # 可选外部依赖的探活超时收敛（D27 = b）：mongo 客户端小工厂 + 门禁 P15
 
 **版本：** V1
-**状态：** **已拍板方向（D27 = b），待施工**——本文只做定夺与排期，未改一行产品代码。
+**状态：** **已拍板方向（D27 = b），待施工**——本文只做定夺与排期，未改一行产品代码。**2026-10-30 答复批随动**：本文原有的两个待答已由用户答完（默认值 `2000` **已确认**；排期 = **前端之后**）⇒ 文中已无欠答项，但 **S1 仍未获开工授权**，一行代码未动。
 **依据：** 全部坐标于 rev `9e9ce198` 本轮重取；代价读数引 `docs/operations/evidence/2026-10-30-full-session-sweep/readings.md` §5 / §5.1（rev `27fb1e41`，换 rev 须复跑）。
+**坐标免检入口（2026-10-30 补）**：判「要不要重取」不能用「非 `docs/` 文件清单」那种口径——它会把与本方案无关的 `scripts/evidence/*.py`（账面随动脚本）也算成警报；必须按**被引路径** scoped 现取：`git diff --name-only 9e9ce198..HEAD -- packages/ scripts/lint_architecture.py tests/governance/ applications/ ARCHITECTURE.md CHANGELOG.md` ⇒ 当前输出 **0 行**。另实读复核三处关键坐标：`packages/agent-core/agent_core/memory/mongo.py:40` 与 `mongo_checkpointer.py:95` 两处裸 `MongoClient(mongo_url)` 仍在、`packages/agent-core/tests/test_checkpointer.py:62` 的 `_mongo_reachable` 副本仍在。**清单非空 ⇒ 重跑取证件，不得引用本行。**
 **回写：** 落地后必须回来把本行改为「已落地(<commit>)」，并同步台账 D27 状态行与 §5 那张计数表。
 **判据对象：** `docs/operations/unconfirmed-items.md` §3 **D27**（用户 2026-10-30 选 b）。
 
@@ -93,7 +94,8 @@ def is_reachable(mongo_url: str, timeout_ms: int | None = None) -> bool: ...  # 
 **默认值取 2000ms 的理由**：F5 证明 1500ms 已能在"完全无 mongo"时判出不可用（那是拒绝连接，不是慢）；
 2000ms 给"实例活着但跨 WAN 慢"留余量，同时把 F6/F7 的 30s 压掉一个量级。
 ⚠ 这条余量**本机无法验证**（本机没有 mongo）——所以 §7 A4 与 §8 第 1 条把它挂到现网取证；
-数值本身属 D1（可逆 + 中影响：env 随时可覆盖），**S1 提交前需你确认 2000 这个数**。
+数值本身属 D1（可逆 + 中影响：env 随时可覆盖），S1 提交前需确认 2000 这个数 —— **已确认（2026-10-30 用户答复批）**。
+余量那一侧仍本机验不了：判据落在 §8 第 2 条与 S5，现网取到真实 server selection 时延后若 >2s，改的是本文这个数**并重跑 A1–A3**，不是给某一处单独开例外。
 
 ---
 
@@ -134,7 +136,7 @@ def is_reachable(mongo_url: str, timeout_ms: int | None = None) -> bool: ...  # 
 | `packages/agent-core/README.md` | :18 模块表、:25-41 env 清单（:40 是 `MONGO_URL / MONGO_DB` 行） | 加 `agent_core.memory.mongo_client` 一行 + 加 `MONGO_SERVER_SELECTION_TIMEOUT_MS` 一行 | 表头就写着「新增 env 必须登记」，不登记即违反在册约定 |
 | `packages/agent-core/agent_core/config.py` | :13-28 env 表、:8 家法句 | 表里加该 env；把「主链路 fail-fast / 可选面 warn+回退」写成 docstring 一条约定 | 不改 `env_int` 行为 |
 | `ARCHITECTURE.md` | §4.1 表（现 **18 行**）+ 计数口径段 :135 | 加 P15 一行；口径段三个数随动（见下表） | 口径段是"对外陈述门禁强度"的唯一权威，不随动它就是说谎 |
-| `docs/operations/unconfirmed-items.md` | C5 :76、D27 :66 | C5 计数随动；D27 状态改「已拍板 b，方案件 = 本文件，施工中/已落地」 | 台账是活文档，就地改 |
+| `docs/operations/unconfirmed-items.md` | **C5 :78、D27 :68**（2026-10-30 重取） | C5 计数随动；D27 状态改「已拍板 b，方案件 = 本文件，施工中/已落地」 | 台账是活文档，就地改。**本行坐标曾写 `:76`/`:66`**（rev `9e9ce198` 的快照），而 §3 那段计数订正块自己长了 2 行就把它们推走了 ⇒ 活文档的行号不许照抄，动手前现取：`(Select-String -Path docs/operations/unconfirmed-items.md -Pattern '^\| (C5|D27)').LineNumber` |
 | `docs/architecture/agent-harness-capability-map.md` :353、`docs/project-introduction-2026-10-12.md` :16 | 都写了门禁条数 | 随动 | 这两处是**散引**。本轮实查 `tests/` 下 `lint_architecture` 的 12 处引用，全部是「`_load_script` + 单条规则正反例」形状（P7/P8/P12/P14/R19/L-4/身份门 …），**无一处断言门禁总条数** ⇒ 总数错了不会有人报红，只能靠本表逐条改 |
 
 **计数随动的权威口径**（本轮实取，rev `9e9ce198`；落地后一律重跑再写）：
@@ -159,7 +161,7 @@ uv run python scripts/lint_architecture.py | Select-String -Pattern "^(P|L-|R19)
 
 | 步 | 内容 | 提交面 | 回滚方式 | 开工前是否需再拍板 |
 |---|---|---|---|---|
-| **S1** | 建 `mongo_client.py` + `test_mongo_client_factory.py`（A2/A3）。**不接线**，生产文件一行不动 | 2 文件 | revert 该提交，无消费者受影响 | 需你确认默认值 `2000`（D1） |
+| **S1** | 建 `mongo_client.py` + `test_mongo_client_factory.py`（A2/A3）。**不接线**，生产文件一行不动 | 2 文件 | revert 该提交，无消费者受影响 | 默认值 `2000` 已确认（2026-10-30）；**开工授权仍缺**，且用户定排期 = 前端 PR-0 之后 |
 | **S2** | 两处生产构造改调工厂 + 删测试侧 `_mongo_reachable` 副本 + 两个 docstring/README 登记 | 6 文件 | revert 即回 30s 行为（F4 降级链未动，故无数据面风险） | 否 |
 | **S3** | 加 P15（①②③）+ `test_mongo_probe_governance.py` | 2 文件 | 单独 revert：S2 的收敛仍在，只是失去防回潮 | 否 |
 | **S4** | 计数随动（§5 那 4 处 + 台账 D27 状态行 + 本文状态行） | 5 文件 | 文档批，可与 S3 并行准备但**必须晚于 S3**（否则口径段先于规则改，中间态说谎） | 否 |
@@ -212,7 +214,7 @@ uv run python scripts/lint_architecture.py | Select-String -Pattern "^(P|L-|R19)
 
 | 排除 | 理由 | 复审触发条件 |
 |---|---|---|
-| `/health` 上报 checkpointer/mongo 真实装配态（F12：降级现在不可见） | 它是**可观测面**问题，不是超时问题；且 `health_router.py:66-72` 已有 `enabled/ready` 成对先例，而「三套 status 约定是否统一」在 `CHANGELOG.md:28` 里仍是待拍板项 ⇒ 塞进本批会把一个 D2 混进 D1 | 本批落地后需登记它。本文**不代登**：台账 §3 那句「只留卡住判定的八项」是一条计数，加一行就得连带改它；而本项**不卡住 D27 施工**，按该表的收录口径它更适合进 `docs/TODO.md` 排期 ⇒ 放哪儿由你定 |
+| `/health` 上报 checkpointer/mongo 真实装配态（F12：降级现在不可见） | 它是**可观测面**问题，不是超时问题；且 `health_router.py:66-72` 已有 `enabled/ready` 成对先例，而「三套 status 约定是否统一」在 `CHANGELOG.md:28` 里仍是待拍板项 ⇒ 塞进本批会把一个 D2 混进 D1 | 本批落地后需登记它。本文**不代登**：台账 §3 那句「只留卡住判定的八项」是一条计数，加一行就得连带改它；而本项**不卡住 D27 施工**，按该表的收录口径它更适合进 `docs/TODO.md` 排期 —— **已定（2026-10-30 用户答复批）：进 `docs/TODO.md` §6（末条）+ 配套 §0.2 第 5 行，不入本台账 §3**（同批把 `scripts/evidence/recount_todo_index.py` 的 `DECLARED_TOTAL` 随动为 open 26 / closed 24，实跑 PASS）。⇒ 本行不再是「待登记」，复审触发条件改：**要动 `/health` 契约时**（前置仍是「三套 `status` 约定是否统一」，`CHANGELOG.md:28`） |
 | `socketTimeoutMS` / `connectTimeoutMS` | 改它们等于改"已在跑的读写何时被杀"，语义风险远大于 F5 那条已定位的 30s；本批只收 server selection 这一笔 | 现网出现请求挂死 / 无响应超 connect 超时；或有人立项统一三类超时 |
 | `MONGO_*` 全族裸读收敛（`memory/__init__.py:94/103/104-106/107` 四处都是裸读 `MONGO_URL` / `MONGO_DB` / `MONGO_CHECKPOINT_COLLECTION` / `TENANT_ID`） | P14 ② 的口径是**按命名空间**禁（`CACHE_*`），照搬到 `MONGO_*` 会连带 6 个应用与 KS 的 pydantic-settings 家法（两套配置形状不同）⇒ 影响面从 1 个文件涨到跨包重构 | 下一次做 WS-5（`agent_core.config` env 集中化）续批时；或 P15 ② 出现第一处真实违规时 |
 | KS 的 `Minio(`（`clients/minio_utils.py:14`）与 `MilvusClient(uri=...)`（`clients/milvus_utils.py:26`）同族形状 | **本轮未测它们的探活代价**，没有读数就没有默认值；把它们写进"顺手一起改"是拿未验证事实排期 | 任一同类出现"无该依赖时门禁墙钟/首请求被拖住"的实测；届时工厂可扩为 `is_reachable` 的同族第二实现 |
@@ -224,6 +226,7 @@ uv run python scripts/lint_architecture.py | Select-String -Pattern "^(P|L-|R19)
 ## 10. 拍板与施工授权是两件事
 
 - 本文**已定的**：收敛层级（共享包）、模块形状、三条 lint 判据、warn+回退 vs 抛错的家法取舍、5 步顺序、排除面。实现者不需要再做选择。
-- 本文**欠你一个答复的**：默认值 `2000`（§3 末，D1——可逆但属对外承诺）。
+- 本文**曾欠你一个答复的**：默认值 `2000`（§3 末，D1——可逆但属对外承诺）⇒ **2026-10-30 已确认**，本文不再有欠答项。
 - 本文**没有做的**：没动任何产品代码、没建 lint 规则、没改 README/ARCHITECTURE 的计数。
   S1 之前一行代码不写；你说"开工"我才按 S1→S2→S3→S4 逐批提交，S5 另等环境放行。
+- **排期已定 ≠ 授权已定**（2026-10-30 答复批）：用户把 D27 排在**前端之后**——这是顺序指示，不是 S1 的开工许可。到窗口后仍需一次显式"开工"，我才会新建 `mongo_client.py`。
