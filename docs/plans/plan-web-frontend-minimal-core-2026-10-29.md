@@ -5,6 +5,7 @@
 - 来源：`docs/TODO.md` §1（agent_server 前端待办原文）+ `docs/plans/plan-frontend-stack-selection-2026-10-27.md`（三轮判据与锁栈边界）+ `docs/adr/0010-ui-stack-selection.md`（2026-10-29 由「未决」落为「已决 C」，其 §6 是本文取数与订正的依据之一）
 - 前置：本文 §5 所列**三件事必须与 PR-0 同批**，缺一则该批不合（另见 §11.3——三项待用户表态的偏离不得默认放过）
 - 执行入口：新会话从本文 §7 工单表 + §9 文件清单开始，不依赖任何对话历史
+- 开工前置核查（2026-10-30，rev `3868023c`）：本文 **41 条行号坐标复验全命中**（rc=0），但查出 **6 处文面要订正** —— ① 事件类数 **13 写错，实取 12**；② `/health` 字段集本文只列 13 个，契约实取 **30**（权威源是两层模型，不是 `console.html`）；③ CI 的两处 `paths:` **不含 `web/**`** ⇒ §5 那条「必含 CI 的 JS 段」会被路径过滤器架空；④ `.dockerignore` 缺 `**/node_modules` 与 `web/dist` 两条；⑤ §11.5/§11.6 的坐标写的是**裸文件名**（仓内有两个同名 `schemas.py`）；⑥ `README.md:643` 一条过期行号（引 `health.py:25-40`，那里已不是 `HealthResponse`）。订正已就地落在 §1/§3/§5/§7/§9/§10.5/§11.5/§11.6 与 README，逐条读数见 `docs/operations/evidence/2026-10-30-frontend-preflight/readings.md`。⇒ §0 那句「实现者不再做选择」现在只剩**一个**真选择未答：JS 门禁落点是并进 `make ci` 还是新增 `ci-web` 目标（§12）
 
 ## 0. 结论（决策完备，实现者不再做选择）
 
@@ -52,7 +53,20 @@
 
 **事件类型的权威定义在 `serialize_stream_event` + `_node_event`，不在 `console.html`**——PR-1 的 TS 联合类型须对齐前者（符合 AGENTS.md「单一实现」原则），否则前端跟着一个有盲区的参照物走。
 
-**`/health` 字段集**（同上）：`embedding_backend` `embedding_real` `auth_enabled` `identity_mode`(jwt/single/insecure) `guard_enabled` `llm` `langfuse_enabled` `langfuse_ready` `storage` `nl2sql` `otel_status` `planner` `scheduler` `forensic`。
+**并集是 12 类，不是 13 类**（2026-10-30 复取，rev `3868023c`）：上表两行都列了 `error`（planner 路 8 + router 直发 5，`error` 同名单形），去重 = **12**：`route evidence memory status replan answer error suspended cache_hit done admission coordination`。上一版工单文面里那个「13」是按表行数加出来的，不是从源里数出来的 —— 见 §12 第 1 条，`check-events.mjs` 的期望集因此**不得写死数字**。
+
+**还有第三个权威点，本文上一版漏了**：`packages/agent-runtime/agent_runtime/planner/protocol.py:44` 的
+`StreamEventType = Literal["route", "evidence", "memory", "answer", "error", "status", "replan", "suspended"]`
+与 `serialize_stream_event` 的 8 个分支**逐字等值**（实取 True）。这条不是装饰：`serialize_stream_event` 对未定义 type **返回 `None` 静默忽略**（`:792` docstring 自陈），所以「Literal 加一项而分支没加」在运行期**零症状**——事件直接消失，前端连「未处理的事件类型」都不会报。⇒ §2.2 那条纪律在**后端自己这半**也需要一道门禁（§12 第 2 条）。
+
+**`/health` 字段集**（2026-10-30 按契约复取 = **30 个**，本文上一版只列了 13 个且出处挂的是 `console.html` `loadLights()` —— 那是参照物，不是契约）：
+
+| 层 | 字段 | 出处 |
+|---|---|---|
+| 共享基类 13 个 | `status` `version` `dependencies` `storage` `llm` `search` `sql_backend` `coordination` `admission` `revert` `otel` `otel_status` `mcp` | `packages/shared-schemas/shared_schemas/health.py:67` `class HealthResponse(BaseModel)` |
+| agent_server 子类另 17 个 | `scheduler` `control_plane` `cost_governance` `forensic` `embedding_backend` `embedding_real` `planner` `guard_enabled` `nl2sql` `langfuse_enabled` `langfuse_ready` `cache_backend` `cache_ready` `cache_degraded_reason` `cache_stats` `auth_enabled` `identity_mode`(jwt/single/insecure) | `applications/agent_server/schemas.py:121` `class HealthResponse(BaseHealthResponse)` |
+
+⇒ **PR-4 按这 30 个做**（判据原文是「每盏灯的文本可追溯到字段值」，漏 17 个就漏了 `revert`/`admission`/`cache_ready` 这些最能说明「接线 ≠ 启用」的灯）；`console.html` 只用来对文案与灯语义。子类 docstring（`:128-130`）另给一条硬约束：**新增字段只加在本 app 子类，不许加到基类**（基类被另外三个服务直接返回）⇒ 前端要新读数时提后端需求要提对地方。
 
 ## 2. 三条必须继承的工程纪律（都是已踩过的坑，不许重新发现）
 
@@ -96,6 +110,8 @@ Vite 产物给 JS/CSS 带内容 hash，但 `index.html` 本身不带；滚动升
 
 处置（写死，不再讨论）：前端所有错误解析收敛到**单一函数** `describeError(resp: Response): Promise<string>` + **单一函数** `describeStreamError(payload: unknown): string`，三条口径分别对应一个分支点。后端未来若真收敛为信封制，改动面 = 这两个函数 + 两组单测。
 
+**这三条通道的作用域 = 「只连 `agent_server` 的前端」，不是「全仓」**（2026-10-30 复跑审计件后补）：`docs/plans/plan-frontend-error-contract-audit-2026-10-19.md` §1.1 另记两种形状——exhibition-agent 的 **dict detail**（`applications/exhibition-agent/exhibition_agent/server.py:144/:146/:148/:150` 四处 `raise HTTPException(..., detail={"code": …, "message": …})`，本批逐行复跑确认）与 nl2sql-service `/ready` 的自定义 dict（**本批未复跑**，仍按转述读）。`web/` 第一批不连这两个服务，所以 §3 的三分支设计**不因此改动**；但若第二批把 nl2sql 面板并进来（§6 明列它属第二批），`describeError` 要加第 4/5 分支，届时按「先方案后编码」另开，不许顺手在 `web/` 里加特例。
+
 ## 4. 验收标准
 
 按 `AGENTS.md` 指向的 `docs/operations/evidence-format.md` 口径写完成陈述，本文额外要求：
@@ -117,9 +133,10 @@ Vite 产物给 JS/CSS 带内容 hash，但 `index.html` 本身不带；滚动升
 
 选型文档一句话版纪律：**引入前端工程、补 CI 门禁、收敛错误契约三件事必须同批**。落到工单上：
 
-- PR-0 必含 `web/` 骨架 + CI 的 JS 段（lint + typecheck + build），否则前端代码漂移无人拦截（`make lint`/pytest 目前仅覆盖 Python 侧）。
+- PR-0 必含 `web/` 骨架 + CI 的 JS 段（lint + typecheck + build），否则前端代码漂移无人拦截（`make lint`/pytest 目前仅覆盖 Python 侧）。**但光加 step 不够**：`.github/workflows/agent-platform-ci.yml` 的 `on.push.paths`（`:7-22`）与 `on.pull_request.paths`（`:24-39`）**两处都不含 `web/**`** ⇒ 只改前端的 PR 根本不触发 CI（§12 第 3 条）。
 - PR-0 必含 §3 的 `describeError` / `describeStreamError` 两个收敛点。
-- PR-0 同步关掉 `docs/TODO.md` §1 第 104 行那条 P0（等的前提 D-2 已定案为 A，见 §3）。
+- PR-0 必含 `.dockerignore` 两条补充（`**/node_modules`、`web/dist`），理由见 §12 第 4 条。
+- PR-0 同步关掉 `docs/TODO.md` §1 第 104 行那条 P0（等的前提 D-2 已定案为 A，见 §3）。**另两条同批该动**（2026-10-30 复取行号未漂）：`:103`「前端技术栈选型（未定，…不预先绑定 Vue/React）」已被 ADR-0010（已决 C）推翻，`:104` 的审计件 `docs/plans/plan-frontend-error-contract-audit-2026-10-19.md` 已入库⇒ 两条是**账面未跟**；`docs/TODO.md:53` 那行「前端 | 3」的开项数随之变。属账面拍板（§12 第 6 条）。
 - `check_doc_sync.py` 只校 AGENTS/ARCHITECTURE/README 中**版本控制清单内**的路径；新增 `web/` 后须同步更新 `ARCHITECTURE.md` 的目录表与 `AGENTS.md` 的目录结构表，否则文档与现实漂移。
 
 ## 6. 范围边界
@@ -136,7 +153,7 @@ Vite 产物给 JS/CSS 带内容 hash，但 `index.html` 本身不带；滚动升
 |---|---|---|
 | **PR-00**（**零代码**） | **纯取证批**：用**现状未改动**的 `console.html` 跑通 #18 四步链路 → 留截图 + 日志 ⇒ **关 roadmap #18**。不写一行代码（实测依据见 §11.5：曾试补 revert，被基线 6 测试拦停并已全量回退）。**状态（2026-10-29）：已执行完毕**，读数与档位见 `docs/operations/evidence/2026-10-29-roadmap-18-console/readings.md`——四步形状已证、零代码改动已核（`git diff` 对 `applications/`+`packages/` 为空），但本机无模型密钥 ⇒ "真跑通"未达 ⇒ **#18 保持开项，不翻已完成** | A9 |
 | PR-0 | `web/` 骨架：pnpm + Vite + TS + Pinia、`describeError`/`describeStreamError` 收敛点、CI JS 段、FastAPI 托管 `dist`（多阶段 Dockerfile，Node 只活在构建期）、`index.html` 的 `no-store`——**具体做法见 §9，已定死** | A1、A5、A6 |
-| PR-1 | SSE 客户端：`fetch` + **`eventsource-parser`** 解帧（不自写循环，选型理由见 §10.3 第 2 条）、事件类型 TS 联合（对齐 §1 全 13 类，以 `serialize_stream_event`+`_node_event` 为源）、`done` 终止语义、未知事件不吞、**§3 第 4 条的 `error`→`done` 抑制规则** | A2 的前半、A3、A7、`check-events.mjs` 断言绿（§10.5） |
+| PR-1 | SSE 客户端：`fetch` + **`eventsource-parser`** 解帧（不自写循环，选型理由见 §10.3 第 2 条）、事件类型 TS 联合（对齐 §1 全 **12** 类（2026-10-30 按源复取，上一版写 13），以 `serialize_stream_event` + `_node_event` + router 直发字面量为源，见 §12 第 1 条）、`done` 终止语义、未知事件不吞、**§3 第 4 条的 `error`→`done` 抑制规则** | A2 的前半、A3、A7、`check-events.mjs` 断言绿（§10.5） |
 | PR-2 | 对话页：输入框 + 过程时间线（按类型分色）+ 答案区 + 依据列表 | A2、A4、A8 |
 | PR-3 | 会话历史 + `/session/revert` 交互。**开工前置已出方案（2026-10-29，见 §11.6）**：原写的"`checkpoint_id` 取不到"只是三层缺口的表层——实测另两层为「主路径每线程无历史点」与「revert 新行 uuid4 撞字典序⇒抽样 8%–13% 静默失效 / 其余遮蔽后续写入」。方案与待拍板项存 `docs/plans/plan-revert-checkpoint-integrity-2026-10-29.md` | `/history` 渲染真数据；revert 分支形状**由该方案 §7-#1 定夺后才能定**（命中/404 两分支不成立，因为有"无历史点"第三态）；A10 |
 | PR-4 | `/health` 状态灯页（逐字段直读接口，不做本地推断） | 每盏灯的文本可追溯到字段值 |
@@ -187,13 +204,15 @@ web/
   src/api/client.ts        # fetch + X-API-Key，待命令
   src/api/errors.ts        # describeError / describeStreamError 两个收敛点（§3）
   src/api/sse.ts           # fetch + eventsource-parser 解帧（§2.1、§10.3）
-  src/api/events.ts        # 13 类事件的 TS 联合（§1，对齐 serialize_stream_event）
-  scripts/check-events.mjs # 存在性断言：13 类事件在 TS 联合与 handler 分支一一对应，缺则红（§10.5 采纳项）
+  src/api/events.ts        # 12 类事件的 TS 联合（§1，期望集从 serialize_stream_event / _node_event / router 直发三处派生，不写死数）
+  scripts/check-events.mjs # 存在性断言：事件全集在 TS 联合与 handler 分支一一对应，缺则红（§10.5 采纳项）；另加一条后端侧断言 `StreamEventType` Literal ⊆ `serialize_stream_event` 分支集（§12 第 2 条）
   src/stores/session.ts    # Pinia：对话态与事件时间线
   src/components/Timeline.vue  Answer.vue  ApiKeyBox.vue
 applications/agent_server/main.py        # + 条件 mount + NoStoreStaticFiles
 Dockerfile                                # 改多阶段：node:24-alpine 构建 → python:3.11-slim 运行
-.github/workflows/agent-platform-ci.yml   # + JS 段：pnpm install --frozen-lockfile / lint / typecheck / check-events / build
+.dockerignore                             # + 两条：`**/node_modules`、`web/dist`（§12 第 4 条）
+.github/workflows/agent-platform-ci.yml   # + JS 段：pnpm install --frozen-lockfile / lint / typecheck / check-events / build；**且两处 `paths:` 都要补 `web/**`**（§12 第 3 条）
+Makefile                                  # JS 段落点：新增 `ci-web` 目标（推荐）或并进 `ci`—— 待拍板，见 §12 第 5 条
 ARCHITECTURE.md  AGENTS.md                 # 目录表新增 web/ 行（§5 防漂移要求）
 ```
 
@@ -268,7 +287,7 @@ Dockerfile 现为**单阶段**（`FROM python:3.11-slim`，只 `COPY application
 - **结构同构度最高**：`yak-ops-ui/apps/web`（产品应用）+ `yak-ops-ui/packages/yak-ui`（领域无关控件，公共 API 收在 `src/index.ts`）—— 与本仓 `web/` + `src/components/` 一一对应。它用 npm（`package-lock.json`）而非 pnpm，与本仓 §9.2 是口味差异，不影响。
 - **依赖面极克制，且比 n8n 更贴本仓规模**：`apps/web` 仅 7 个 deps（`react` `react-dom` `react-router-dom` `@tanstack/react-query` `echarts` `lucide-react`），`yak-ui` 仅 2 个（`@base-ui/react` `class-variance-authority`）——**无 MUI / antd / element**，组件层自建。这是 §10.3 第 3 条"先封一层"的实例，并给 §0"第一批不装组件库"提供了比 tailwind 计数更硬的证据：**不装库也能把管理台做完**。
 - **分层规则与本仓 §9.3 几乎重合**：`app/<domain> → service/<domain> → service/http`、"HTTP transport 集中（含一致的响应与鉴权错误处理）"即本仓 `src/api/client.ts` + `errors.ts`；"domain service 不得依赖 App 代码"即本仓 `events.ts` 不得 import 组件。
-- **门禁可搬，本仓已采纳一项**：`yak-ops-ui/scripts/check-architecture.mjs`（232 行）做三类存在性断言——`forbiddenDirectories`（遗留目录不得复活）、`requiredAppShellFiles`（**硬编码 21 个具体路径必须在位**，防功能被静默删除）、`forbiddenFeatureForwarders`（已删的兼容转发层不得悄悄回来）。本仓采纳**中间那类**，落成 §9.3 的 `scripts/check-events.mjs`：断言 §1 的 13 类事件在 TS 联合与 handler 分支中一一对应，缺则 CI 红。这把 §2.2"未知事件不吞"从**人工核对变成机器判**。
+- **门禁可搬，本仓已采纳一项**：`yak-ops-ui/scripts/check-architecture.mjs`（232 行）做三类存在性断言——`forbiddenDirectories`（遗留目录不得复活）、`requiredAppShellFiles`（**硬编码 21 个具体路径必须在位**，防功能被静默删除）、`forbiddenFeatureForwarders`（已删的兼容转发层不得悄悄回来）。本仓采纳**中间那类**，落成 §9.3 的 `scripts/check-events.mjs`：断言 §1 的**事件全集（2026-10-30 按源复取 = 12 类，上一版此处错写 13）**在 TS 联合与 handler 分支中一一对应，缺则 CI 红；**期望集从三个出口源派生，不写死数字**（§12 第 1/2 条）。这把 §2.2"未知事件不吞"从**人工核对变成机器判**。
 - **测试可搬，但必须定性**：20 个 `scripts/verify-*.mjs` 是两层混合——① `import` 被测 `.ts` 纯函数做 `assert.deepEqual`（样：`getExecutionProgress("RUNNING", 37)` 的 9 个枚举分支逐一断言）；② `readFileSync` **读 `.tsx` 源码文本**做字符串断言。`engines: node >=22.13` 正是为 Node 原生 type-stripping 服务，**因此全程没有 vitest/jest/Playwright**。本仓 §9.2/§9.3 原本也未引测试框架，与此一致，不新增依赖。但第 ② 层是**脆断言**（改个变量名即红），**只适合锁结构不变量（事件分支齐备），不得用来锁行为**——否则与本仓 AGENTS.md「禁止收窄断言凑绿」红线相互缠绕。
 - **一条纪律已上升为本文 §3 第 4 条**：`FRONTEND_RULES.md` 的 "Components must not parse HTTP envelope details or **turn API failures into successful empty results**"，正中本仓 error→`done(answer:"")` 的形状；同文 "Do not create speculative `common` or `shared` layers" 比 §10.3 第 3 条更硬，本仓 `src/` 划分按此执行。
 - **不照抄的三件**：多页路由 + workspace 切换 + 历史 URL 重定向（本仓最小核心无前端路由，§9.1 已定不做 SPA fallback）；**前端产物经 Maven assembly 进 tar.gz 再解包**（本仓无 Java 构建链，走 §9.3 的 Dockerfile 多阶段 `COPY --from=builder`）；上表的形态 D。
@@ -366,7 +385,9 @@ Dockerfile 现为**单阶段**（`FROM python:3.11-slim`，只 `COPY application
 
 **教训（可复用的那一条）**：给人推荐"守原顺序 vs 跳过"这类权衡前，除了查"缺什么"，必须同时查**两件事**：① 判据**原文**到底要求什么（不要拿自己上轮写的二手描述当判据）；② 要补的东西有没有被**在册测试/架构边界禁掉**。两项都是分钟级实测，我当时都跳过了，代价是白写 76 行 + 三处文档返工。
 
-**顺带查实的硬缺口（本轮真正的产出，已写进 PR-3 开工前置）**：`checkpoint_id` 从现有对外接口**取不到**——`RevertRequest.checkpoint_id` 必填（`schemas.py:188`），而 `/history` 的 `HistoryItem`（`schemas.py:199-204`，字段只有 `index/role/content/id/created_at`）无此字段，SSE 全部出口帧也不带（`query_router.py:207,372,379` 的 `done` 只有 `type/thread_id/answer`；全仓 `checkpoint_id` grep 排除测试后无一处在出口侧）。⇒ `web/` 的 revert 交互在现有接口下**做不出可用形态**（否则只能让人手抛一个 uuid），必须先出方案定夺。
+**顺带查实的硬缺口（本轮真正的产出，已写进 PR-3 开工前置）**：`checkpoint_id` 从现有对外接口**取不到**——`RevertRequest.checkpoint_id` 必填（`applications/agent_server/schemas.py:188`），而 `/history` 的 `HistoryItem`（`applications/agent_server/schemas.py:199-204`，字段只有 `index/role/content/id/created_at`）无此字段，SSE 全部出口帧也不带（`query_router.py:207,372,379` 的 `done` 只有 `type/thread_id/answer`；全仓 `checkpoint_id` grep 排除测试后无一处在出口侧）。⇒ `web/` 的 revert 交互在现有接口下**做不出可用形态**（否则只能让人手抛一个 uuid），必须先出方案定夺。
+
+> **坐标补全（2026-10-30 前置核查）**：本段上一版写的是**裸文件名** `schemas.py:188` / `:199-204`，而仓内 `git ls-files` 有两个 `schemas.py`（`applications/agent_server/schemas.py` 与 `packages/agent-runtime/agent_runtime/schemas.py`）⇒ 内容逐条对得上，但坐标不可唯一解析，已补全路径。
 
 ### 11.6 PR-3 前置已出方案：三层缺口，不是"只是取不到 id"（2026-10-29）
 
@@ -375,7 +396,7 @@ Dockerfile 现为**单阶段**（`FROM python:3.11-slim`，只 `COPY application
 | 层 | 一句话 | 与 PR-3 原描述的关系 |
 |---|---|---|
 | **A** | Planner 主路径每线程恒只有一条 checkpoint（原地覆写）⇒ **根本没有历史点可退** | 原描述未涉及：即使把 id 曝出去，退的目标也只能是自己 |
-| **B** | `revert.py:77` 用随机 uuid4 作新行 id，读侧按字典序判最新 ⇒ **抽样 8%–13% 静默失效**；赢了的那条又**永久遮蔽**此后写入 | 原描述未涉及，且它是 A 的**硬前置** |
+| **B** | `packages/agent-runtime/agent_runtime/revert.py:77`（2026-10-30 补全路径：该文件不在 `applications/agent_server/api/`，那里叫 `session_router.py`）用随机 uuid4 作新行 id，读侧按字典序判最新 ⇒ **抽样 8%–13% 静默失效**；赢了的那条又**永久遮蔽**此后写入 | 原描述未涉及，且它是 A 的**硬前置** |
 | **C** | 新行 id 不对外 + `/history` 不列举 checkpoint ⇒ 无任何接口可取 id | 就是原描述那一条（它是最表层、也最易发现） |
 
 关键一条：**A 正在用它的"无害"掩盖 B**——今天 `append_thread` 继承遮蔽行自己的 id 继续原地覆写，所以 B 不发作；
@@ -407,3 +428,37 @@ Dockerfile 现为**单阶段**（`FROM python:3.11-slim`，只 `COPY application
 **体检件的引用边**（入库时必须与本文同批）：它只被本文本节按路径引用，自身不指向任何未入库路径（自检实取：路径/行号/锚点/条目四类均 0 失败）。
 
 ⇒ 本小节另带一件已入库文档的改动，**必须与体检件同批 add**：`docs/adr/0012-nl2sql-branch-consolidation.md`（M，§4 新增 2026-10-29 退役登记）。它与上面 §11.4 / §11.6 两批都不同属（那两批是前端与 revert 完整性），若分拆会再造一次“已入库 ADR 指向尚未入库的体检件”。
+
+## 12. 开工前置核查（2026-10-30，rev `3868023c`）：六条订正 + 两条待拍板
+
+**取证件**：`docs/operations/evidence/2026-10-30-frontend-preflight/readings.md`（41 条坐标逐条命中、事件全集与 `/health` 字段集的直读输出都在那里）。
+本文本节只写“改了哪六条、还差哪两条”（#1 事件数与 #5 字段数同属一类：**散文里的数不等于源里的数**），§5 前置三件事、§7 工单表、§9.3 文件清单、§10.5 门禁那一段均随之同步。坐标复验能全命中不是巧合：`git diff --name-only 896f966e..HEAD` = 30 个文件，
+其中 28 个是文档，**未触碰任何被本文引用的后端实现**。
+
+| # | 订正 | 为什么这不是抠字（不订的后果） |
+|---|---|---|
+| 1 | 事件类数 **13 → 12**（§1 / §7 PR-1 / §9.3 / §10.5 四处同改） | `check-events.mjs` 是本文采纳的**机器判**（§10.5）：它一入库就带着一个源码里凑不出来的常数，实现者只能二选一——把门禁写成永不可满足（红到被人关掉）或硬凑第 13 类（假绿）。两者都是把「非空转」判据直接破坏掉 |
+| 2 | 事件期望集改**派生式**，并加一条后端侧断言 `StreamEventType` Literal ⊆ `serialize_stream_event` 分支集（§1 / §9.3） | Literal 加一项而分支没加 ⇒ `serialize_stream_event` 返回 `None` **静默丢事件**（`:792` 自陈），运行期零症状；前端连「未处理的事件类型」都报不出来，因为它根本支不到。§2.2 管的是客户端那半，后端这半以前没人管 |
+| 3 | CI 两处 `paths:` 补 `web/**`（§5 / §9.3） | 只改前端的 PR **不触发 CI**；A5 那条反证会拿到一个「门禁没跑」当成「门禁放行」的假绿——这两种绿在账面上长得一模一样 |
+| 4 | `.dockerignore` 补 `**/node_modules` 与 `web/dist`（§5 / §9.3） | 该文件自己就是证据：`**/__pycache__` 带 `**/` 而 `node_modules` 不带 ⇒ 不带斜杠只命中根。后果是宿主几百 MB `node_modules` 进上下文，以及本机预建的 `dist` 进镜像遮蔽 builder 产物（与本仓记过的「可变 tag + IfNotPresent ⇒ 静默跑旧代码」同族） |
+| 5 | `/health` 字段集 **13 → 30**，并把权威源从 `console.html` 改为两层模型（§1） | PR-4 的判据是「每盏灯的文本可追溯到字段值」。漏 17 个里包括 `revert` / `admission` / `cache_ready` / `langfuse_ready` —— 恰好最能区分「接线」与「启用」的那几盏 |
+| 6 | 坐标补全路径（§11.5 / §11.6）+ 顺手修 `README.md:643` 一条过期行号 | 仓内两个 `schemas.py`，`revert.py` 不在 `api/`；README 那行引 `health.py:25-40`（实际是 `DependencyHealth` 区间，`HealthResponse` 在 `:67`）。`check_doc_sync.py` 只校路径存在性不校行号⇒ 这类错锚不会被任何门禁抓到，只能靠引前复跑（本文 §11.4 记的同族） |
+
+**两条待拍板（本批只登记不代拍）**
+
+| # | 事项 | 候选与推荐 | 不拍的后果 |
+|---|---|---|---|
+| A | JS 门禁落点（§9.3 新增的 `Makefile` 行） | 形状一：并进 `make ci`（忠于 workflow `:45` 那句「复用 `make ci` 单一真相」，但 `Makefile:158` 的 `ci = lint test eval` 从此要求 Node 在场，无 Node 的机器跑不动 `make ci`）；**形状二（推荐）**：新增 `make ci-web` 目标 + workflow 加一步 `run: make ci-web`（与已有的 `make test-cache-contract`（`:87`）同形态，命令仍在 Makefile 里，不违 `:45`，Python-only 环境不受影响） | PR-0 开工时实现者只能替本文选一个，而选完就写进了 CI——这是本文 §0「决策完备」那句话目前**唯一真破了的地方** |
+| B | `docs/TODO.md:103` / `:104` 两条勾沉（§5 新增那条） | 三条都该动：`:103` 选型已被 ADR-0010 定为 Vue3（本文行仍写「未定…不预先绑定 Vue/React」），`:104` 审计件已入库且 D-2 已定案，`:105` 仍是开项（它的交付物就是 PR-0 的 CI 段）。⇒ `:53` 那行「前端 | 3」随之变 1 | 账面与现实不符。危险方向只有一个：**下一个人拿 `:103` 那句「未定」当活的重新评一轮选型**，而不是把已定的当未定 |
+
+**新增门禁的非空转反证表**（按 `docs/operations/evidence-format.md` §4 要求，PR-0/PR-1 交付时逐项实取，本批先定形状）：
+
+| 变异 | 期望 |
+|---|---|
+| 从 `events.ts` 的 TS 联合删一个成员（不动 handler） | `check-events.mjs` 报红（存在性判据击中） |
+| 从 handler 删对应分支（不动 TS 联合） | `check-events.mjs` 报红（双向都对得上才算一一对应） |
+| `StreamEventType` Literal 添一项、`serialize_stream_event` 不加分支 | 新增那条后端侧断言报红（§12-#2 那招不是装饰） |
+| 把事件全集写回一个硬常数（如 12）后删一个出口字面量 | 仍须报红——派生式的价值就在这里：写死数的版本这一格会“凑巧绿” |
+| 把一个只改 `web/` 的提交推上去 | CI **必须跑**（`paths:` 补了 `web/**` 才绿；没补就是本表唯一能抓到第 3 条订正的手段） |
+
+**本批未做**（不得当已验证）：零产品代码与 `web/` 文件；未跑 `pnpm install`；A1–A10 一条读数未取；PR-3 仍受 `docs/plans/plan-revert-checkpoint-integrity-2026-10-29.md`（状态仍为 **Proposed（待拍板）**，§7 六项未答）阻塞——**PR-0/1/2/4 不受该阻塞影响，可先走**。

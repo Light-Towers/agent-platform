@@ -640,7 +640,7 @@ tests/                     # 单元测试（针对 agent_server 平台；含 pla
 
 > 下列项为架构决策 / 迁移工程，需在拍板后实施，**非文档层面的简单修复**。
 
-- **U-1 · QueryRequest 入站字段名不统一（2026-10-19 已销项）**：`query`/`question` 双写已于 2026-08-16 收敛批删除；`session_id`/`thread_id` 兼容 alias 于 2026-10-19 删除（取证：无真实外部生产者、唯一消费者为自家契约测试；方案 `docs/plans/plan-u1-query-request-alias-removal-2026-10-19.md`）。旧客户端发 `thread_id` 现被 pydantic 默认 `extra=ignore` 静默忽略（`session_id=None`），不再映射。*注：旧评审称 `HealthResponse` 字段集完全不同属误判——`HealthResponse` 已 `class HealthResponse(BaseHealthResponse)` 对齐联邦契约（`packages/shared-schemas/shared_schemas/health.py:25-40`），无需处理。*
+- **U-1 · QueryRequest 入站字段名不统一（2026-10-19 已销项）**：`query`/`question` 双写已于 2026-08-16 收敛批删除；`session_id`/`thread_id` 兼容 alias 于 2026-10-19 删除（取证：无真实外部生产者、唯一消费者为自家契约测试；方案 `docs/plans/plan-u1-query-request-alias-removal-2026-10-19.md`）。旧客户端发 `thread_id` 现被 pydantic 默认 `extra=ignore` 静默忽略（`session_id=None`），不再映射。*注：旧评审称 `HealthResponse` 字段集完全不同属误判——`HealthResponse` 已 `class HealthResponse(BaseHealthResponse)` 对齐联邦契约（基类 `packages/shared-schemas/shared_schemas/health.py:67`，子类 `applications/agent_server/schemas.py:121`），无需处理。*（行号 2026-10-30 复跑订正：本处原引 `health.py:25-40`，那段现在是 `DependencyHealth`；该文件长到 92 行，`HealthResponse` 在 `:67`。字段集与坐标的逐条读数见 `docs/operations/evidence/2026-10-30-frontend-preflight/readings.md` §4。）
 - **U-2 · kefu 迁移（已完成）**：
   - ✅ `kefu-service` 已升级为 Agent Protocol 兼容 server：新增 `POST /invoke`（接受 `QueryRequest`，返回 `QueryResponse`，`kefu-service/main.py` + 依赖 `shared-schemas`）；旧 `/api/messages` 保留为 legacy 兼容入口。
   - ✅ 网关 `applications/agent_federation/agent/config.py` 新增 `KEFU_SERVICE_URL` + `KEFU_USE_ADAPTER` 开关（默认 `false`，直连 `kefu-service:8003`）；`applications/agent_federation/agent/async_subagents.py` 增加 httpx 远程回退（外部 `deepagents` 包未安装时直连 `/invoke`）。
