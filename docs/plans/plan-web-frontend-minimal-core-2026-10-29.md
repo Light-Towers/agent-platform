@@ -461,4 +461,6 @@ Dockerfile 现为**单阶段**（`FROM python:3.11-slim`，只 `COPY application
 | 把事件全集写回一个硬常数（如 12）后删一个出口字面量 | 仍须报红——派生式的价值就在这里：写死数的版本这一格会“凑巧绿” |
 | 把一个只改 `web/` 的提交推上去 | CI **必须跑**（`paths:` 补了 `web/**` 才绿；没补就是本表唯一能抓到第 3 条订正的手段） |
 
+**2026-10-30 二次核查（rev `f659c02f`，本批只做一件事：确认 §1–§10 的后端坐标不需重取）**：`git diff --name-only 3868023c..HEAD` = **12 个文件**，其中 11 个在 `docs/` 下；唯一非 `docs/` 的根 `README.md` 那一行就是本节 #6 自己的订正（hunk 头 `@@ -640,7 +640,7 @@`，改前改后各 1 行）。⇒ 判据不是“我没看见改动”，是**这些路径在两棵树里内容逐字相同**：`applications/`、`packages/`、`scripts/`、`Makefile`、`.github/workflows/`、`Dockerfile`、`.dockerignore`、`docs/TODO.md` **零文件出现在清单里** ⇒ 41 条行号坐标与「12 类事件 / 30 个 `/health` 字段」两组直读数在本 rev 仍成立。**换 rev 仍须复跑**：上面那条 diff 清单就是复跑入口，不必重取 41 条坐标，但只要清单里出现非 `docs/` 文件就得重跑取证件。
+
 **本批未做**（不得当已验证）：零产品代码与 `web/` 文件；未跑 `pnpm install`；A1–A10 一条读数未取；PR-3 仍受 `docs/plans/plan-revert-checkpoint-integrity-2026-10-29.md`（状态仍为 **Proposed（待拍板）**，§7 六项未答）阻塞——**PR-0/1/2/4 不受该阻塞影响，可先走**。

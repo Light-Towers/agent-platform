@@ -1,7 +1,7 @@
 ﻿# docs 索引 · 哪篇作数、哪篇只是历史
 
 > 本文件由 2026-10-15 的文档治理生成：**未删除、未移动任何文档**，只做分层与状态登记。
-> 现状（**2026-10-27 重取，以下每个数都带口径与复现命令**；2026-10-26 旧读数「172 入库 / 173 工作区 / 3.7 MB」随 ADR-0013 入库而作废）：`docs/` **173 个入库文件 / 173 个工作区文件**（已一致；`git ls-files docs | wc -l` 对 `find docs -type f | wc -l`）；体积 **3.8 MB**（`du -sh docs`）。其中 `docs/plans/` **103 个入库文件**，顶层 md **94 篇**（入库数与工作区数已一致，复现 `git ls-files docs/plans | grep -cE '^docs/plans/[^/]+\.md$'`）。94 篇按 §6 口径重跑 `uv run python -B scripts/evidence/recount_plan_status_lines.py`：**51 篇有可辨状态行 / 43 篇未命中**，其中 1 篇是该口径的已知漏计（`p2-bucket-b-reduction-findings-2026-09-24.md` 实已有状态行）⇒ **真待补 42 篇**。（旧数「141 个文件 / 约 2.6 MB / 72 个文件 = 71 篇 md / 42 有状态行 · 29 未命中」是 2026-10-15 的快照，保留在此只为让后来人看得见它涨了多少，**不得当现值引**。）
+> 现状（**2026-10-30 重取，以下每个数都带口径与复现命令**；2026-10-27 那组「173 / 173 / 3.8 MB / 103 入库 / 94 篇 / 51 命中」只在同口径下可比，现值见下）：`docs/` **196 个入库文件 / 196 个工作区文件**（已一致；`git ls-files docs | wc -l` 对 `find docs -type f | wc -l`）；体积 **3.9 MB**（`du -sh docs`）。其中 `docs/plans/` **108 个入库文件**，顶层 md **99 篇**（入库数与工作区数已一致，复现 `git ls-files docs/plans | grep -cE '^docs/plans/[^/]+\.md$'`）。99 篇按 §6 口径重跑 `uv run python -B scripts/evidence/recount_plan_status_lines.py`：**56 篇有可辨状态行 / 43 篇未命中**，其中 1 篇是该口径的已知漏计（`p2-bucket-b-reduction-findings-2026-09-24.md` 实已有状态行）⇒ **真待补 42 篇**。两条值得单独看一眼的读数：未命中数与 2026-10-27 那次**相同**（都是 43），涨的 5 篇全落在命中侧 ⇒ 近三周新写的 plan 一条没漏状态行，这是 §5 那条纪律的现场效果，不是巧合。**本机是 Windows**：上面 `wc -l` / `find` / `du` / `grep -c` 四条本机无对应，实跑用等价 PowerShell 式 `(git ls-files docs).Count`、`(Get-ChildItem -Recurse -File docs).Count`、`(Get-ChildItem -Recurse -File docs | Measure-Object -Sum Length).Sum`、`(git ls-files docs/plans | Where-Object { $_ -match '^docs/plans/[^/]+\.md$' }).Count`，两套命令给出同一组数。（旧数「141 个文件 / 约 2.6 MB / 72 个文件 = 71 篇 md / 42 有状态行 · 29 未命中」是 2026-10-15 的快照，保留在此只为让后来人看得见它涨了多少，**不得当现值引**。）
 
 ## 1. 三条判据（先读这个，别先翻目录）
 
@@ -50,7 +50,7 @@
 
 > **2026-10-16 追记（本层新增 4 行，其余行未动）**：本节写就时是 71 篇，现值为**顶层 `docs/plans/*.md` 入库 75 篇 / 文件系统 76 篇**（差的 1 篇是并行会话新建、此刻尚未入库的 plan-deep-research-app-2026-10-16.md——**按 AGENTS.md「不入库路径不用反引号」的纪律这里写成普通文本**，且**本索引不代登**，由它自己的会话登记）。复取命令：`git ls-files docs/plans | grep -cE '^docs/plans/[^/]+\.md$'`。新登记的四篇：`plan-v3-unwired-landing-2026-10-15`、`plan-unfinished-completion-schedule-2026-10-16`、`plan-identity-gate-6of6-2026-10-16`、`plan-forensic-provenance-wiring-2026-10-16`。
 > **两条没有重取、不得当现值引**：① 顶部第 4 行的「42 篇有状态行 / 29 篇未命中」与 §7 名单仍是 2026-10-15 快照（上面四篇都**有**可辨状态行，但按 §6 口径命令未重跑）；② 四行的「提及」数在本批合入后会各自 +1 以上（新行本身就是新增引用），复现请用 `git grep -c -o -- "<文件名>" | awk -F: '{s+=$NF} END{print s}'` 现取。
-> **2026-10-27 复核**：上上行的「75 / 76」是 2026-10-16 时点值，**不得当现值引**；顶层 `docs/plans/*.md` 入库现为 **94 篇**（与顶部现状行同源，复现 `git ls-files docs/plans | grep -cE '^docs/plans/[^/]+\.md$'`；若写成 `git ls-files 'docs/plans/*.md'` 会因 git pathspec 的 `*` 跨目录而多算 8 个 `docs/plans/archive/` 文件、得 102，两个数都成立但口径不同）。本节标题的「71 篇」同样是写就时的快照，未改。
+> **2026-10-27 复核**：上上行的「75 / 76」是 2026-10-16 时点值，**不得当现值引**；顶层 `docs/plans/*.md` 入库现为 **94 篇**（与顶部现状行同源，复现 `git ls-files docs/plans | grep -cE '^docs/plans/[^/]+\.md$'`；若写成 `git ls-files 'docs/plans/*.md'` 会因 git pathspec 的 `*` 跨目录而多算 8 个 `docs/plans/archive/` 文件、得 102，两个数都成立但口径不同）。本节标题的「71 篇」同样是写就时的快照，未改。**2026-10-30 再取 = 99 篇**（以顶部现状行为准）；本轮重取时发现四个已入库的活件一直未登记（前端三件 + 脱敏门禁自披露一件），已在 §3.6 / 新增 §3.9 补齐——它们被 AGENTS.md 不点名、只在彼此文内互引，按 §1 判据 ② 它们活着，但按本索引的可发现性它们等于隐形的。
 
 ### 3.1 安全与依赖整改（CodeQL / Dependabot / 风险接受）
 
@@ -127,6 +127,7 @@
 |---|---|---|---|
 | `plan-doc-sync-file-ref-gate-2026-10-01.md` | 未标 | 10-01 | 5 |
 | `plan-doc-sync-tracked-scope-2026-10-04.md` | 未标（结论已入 AGENTS.md 防漂移段） | 10-04 | 9 ★ |
+| `plan-public-mirror-gate-selfdisclosure-2026-10-29.md` | 原文自述 **Proposal（待拍板，未动代码）**；读数绑定 rev `896f966e` ⇒ 换 rev 须复跑。同族的 D26（scratch 脚本引用不入库声明）已于 2026-10-30 处置并回写 evidence-format，**本件的待拍板项不因此自动解除** | 10-29 | 7 |
 | `plan-evidence-scripts-intake-2026-10-04.md` | 已拍板候选 ①（本文件即方案本体） | 10-04 | 7 ★ |
 | `plan-review-findings-closeout-2026-10-04.md` | 未标 | 10-04 | 2 |
 | `plan-multi-expert-adjudication-2026-09-30.md` | 未标 | 10-02 | 4 |
@@ -145,7 +146,7 @@
 | `plan-e-dual-track-convergence.md` | P4.1~P4.3 全部实施完成 | 08-22 | 12 |
 | `plan-agentic-skill-convergence.md` | **已落地（契约层 3/3）**，但默认部署下该注册走 except 跳过——不得说成"agentic 现网可用" | 09-22 | 0 |
 | `skill-consolidation-inventory.md` | 未标（AGENTS.md 点名其为 Skill 收敛盘点） | 09-23 | 3 ★ |
-| `plan-mongo-probe-timeout-single-impl-2026-10-30.md` | **已拍板方向（D27=b），待施工**：只出方案，未动一行产品代码；欠一个默认值 2000ms 的确认 + S1 开工授权 | 10-30 | 1 |
+| `plan-mongo-probe-timeout-single-impl-2026-10-30.md` | **已拍板方向（D27=b），待施工**：只出方案，未动一行产品代码；欠一个默认值 2000ms 的确认 + S1 开工授权 | 10-30 | 3 |
 | `tool-mount-matrix-2026-09-25.md` | 未标 | 09-25 | 3 |
 
 ### 3.8 早期（08 月）与零散件：多数无状态行、且零提及
@@ -168,6 +169,16 @@
 | `plan-history-read-uses-nonexistent-checkpointer-api-2026-10-10.md` | 已随本方案落地修复 | 10-10 | 2 |
 | `plan-rag-sparse-encoding-consistency-2026-09-29.md` | 已确认并在 126 容器实跑完成 | 09-29 | 4 |
 | `plan-workspace-toplevel-eval-disambiguation-2026-09-25.md` | 已确认执行 | 09-25 | 3 |
+
+### 3.9 前端与界面（ADR-0010 由「未决」落为已决 C 之后新长出来的一簇）
+
+> 三件彼此互指：选型件定栈、工程件定怎么做（§7 工单表 + §9 文件清单是 PR-0 的唯一入口）、完整性件只阻塞 PR-3。**拿 PR-0 开工时不得只读其中一件**：只读选型件会重评一轮栈（§11.2 那个同名异义坑就是这么来的），只读工程件会拿 PR-3 的未定形状当已定做。
+
+| 文件 | 自述状态 | 末次 | 提及 |
+|---|---|---|---|
+| `plan-web-frontend-minimal-core-2026-10-29.md` | 用户已拍板 = **Vue3**（2026-10-29），同日采纳 §11.3 三项；§12 六条订正已改入正文、两条待拍板同日已答 ⇒ **PR-0 已无待拍板项，开工仍等用户点头**（本索引不代认“开工”） | 10-30 | 8 |
+| `plan-frontend-stack-selection-2026-10-27.md` | **已拍板（2026-10-29）——终态栈 = Vue3**；拍板范围**仅栈一项**；§8 三轮判据与决策日志不得因已拍板而删 | 10-29 | 12 |
+| `plan-revert-checkpoint-integrity-2026-10-29.md` | **Proposed（待拍板）**，§7 六项未答 ⇒ 只阻塞 **PR-3**；PR-0/1/2/4 不受该阻塞影响 | 10-29 | 9 |
 
 ## 4. 证据与历史层（留档，不外引、不改写）
 
