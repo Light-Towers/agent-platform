@@ -3,9 +3,9 @@
 - 状态：**用户已拍板 = Vue3**（2026-10-29 原话"行，那就最终定Vue"）；**同日追加采纳§11.3 三项**（原话"按推荐的方案继续"）—— ① **改守原顺序、不偏离选型文档**（ADR-0010 里一度记的"取消 A 步骤"已撤销），② 目录名 `web/`，③ `eventsource-parser`。执行入口相应新增 **PR-00**（零工具链取证批，见 §7）。**但 ① 的执行内容同日开工即被实测推翻**：#18 判据四步**不含"回退"**，且给 `console.html` 加 revert 会被该页在册测试拦下（基线 6，实跑 2 failed）⇒ **PR-00 缩为零代码纯取证**，因果链与教训见 §11.5。栈的真相源不在本文——是 `docs/plans/plan-frontend-stack-selection-2026-10-27.md`（**该文档的 4.1 小节**，本文无此编号）+ `docs/adr/0010-ui-stack-selection.md`（A/B/C）；本文只引用，**换栈必须三处同批改**（本轮曾把"改本文一行"当代价，已修正）
 - 日期：2026-10-29
 - 来源：`docs/TODO.md` §1（agent_server 前端待办原文）+ `docs/plans/plan-frontend-stack-selection-2026-10-27.md`（三轮判据与锁栈边界）+ `docs/adr/0010-ui-stack-selection.md`（2026-10-29 由「未决」落为「已决 C」，其 §6 是本文取数与订正的依据之一）
-- 前置：本文 §5 所列**三件事必须与 PR-0 同批**，缺一则该批不合（另见 §11.3——三项待用户表态的偏离不得默认放过）
+- 前置：本文 §5 所列**三件事必须与 PR-0 同批**，缺一则该批不合（另见 §11.3——那三项偏离已于 2026-10-29 采纳，保留指针只为一条纪律：**偏离不得默认放过**）
 - 执行入口：新会话从本文 §7 工单表 + §9 文件清单开始，不依赖任何对话历史
-- 开工前置核查（2026-10-30，rev `3868023c`）：本文 **41 条行号坐标复验全命中**（rc=0），但查出 **6 处文面要订正** —— ① 事件类数 **13 写错，实取 12**；② `/health` 字段集本文只列 13 个，契约实取 **30**（权威源是两层模型，不是 `console.html`）；③ CI 的两处 `paths:` **不含 `web/**`** ⇒ §5 那条「必含 CI 的 JS 段」会被路径过滤器架空；④ `.dockerignore` 缺 `**/node_modules` 与 `web/dist` 两条；⑤ §11.5/§11.6 的坐标写的是**裸文件名**（仓内有两个同名 `schemas.py`）；⑥ `README.md:643` 一条过期行号（引 `health.py:25-40`，那里已不是 `HealthResponse`）。订正已就地落在 §1/§3/§5/§7/§9/§10.5/§11.5/§11.6 与 README，逐条读数见 `docs/operations/evidence/2026-10-30-frontend-preflight/readings.md`。⇒ §0 那句「实现者不再做选择」现在只剩**一个**真选择未答：JS 门禁落点是并进 `make ci` 还是新增 `ci-web` 目标（§12）
+- 开工前置核查（2026-10-30，rev `3868023c`）：本文 **41 条行号坐标复验全命中**（rc=0），但查出 **6 处文面要订正** —— ① 事件类数 **13 写错，实取 12**；② `/health` 字段集本文只列 13 个，契约实取 **30**（权威源是两层模型，不是 `console.html`）；③ CI 的两处 `paths:` **不含 `web/**`** ⇒ §5 那条「必含 CI 的 JS 段」会被路径过滤器架空；④ `.dockerignore` 缺 `**/node_modules` 与 `web/dist` 两条；⑤ §11.5/§11.6 的坐标写的是**裸文件名**（仓内有两个同名 `schemas.py`）；⑥ `README.md:643` 一条过期行号（引 `health.py:25-40`，那里已不是 `HealthResponse`）。订正已就地落在 §1/§3/§5/§7/§9/§10.5/§11.5/§11.6 与 README，逐条读数见 `docs/operations/evidence/2026-10-30-frontend-preflight/readings.md`。**同日（2026-10-30）两个待拍板已答**（§12）：A = 新增 `make ci-web` 目标 + workflow 加一步（并不进 `make ci`），B = `docs/TODO.md` 三条随 **PR-0 落地那一批**改（本轮不动账面）⇒ §0 那句「实现者不再做选择」重新成立，PR-0 无待拍板项
 
 ## 0. 结论（决策完备，实现者不再做选择）
 
@@ -133,10 +133,10 @@ Vite 产物给 JS/CSS 带内容 hash，但 `index.html` 本身不带；滚动升
 
 选型文档一句话版纪律：**引入前端工程、补 CI 门禁、收敛错误契约三件事必须同批**。落到工单上：
 
-- PR-0 必含 `web/` 骨架 + CI 的 JS 段（lint + typecheck + build），否则前端代码漂移无人拦截（`make lint`/pytest 目前仅覆盖 Python 侧）。**但光加 step 不够**：`.github/workflows/agent-platform-ci.yml` 的 `on.push.paths`（`:7-22`）与 `on.pull_request.paths`（`:24-39`）**两处都不含 `web/**`** ⇒ 只改前端的 PR 根本不触发 CI（§12 第 3 条）。
+- PR-0 必含 `web/` 骨架 + CI 的 JS 段（lint + typecheck + build），否则前端代码漂移无人拦截（`make lint`/pytest 目前仅覆盖 Python 侧）。**落点已拍板（2026-10-30，§12-A = 形状二）**：`Makefile` 新增 `ci-web:` 目标（`pnpm install --frozen-lockfile` → lint → typecheck → `check-events.mjs` → build），workflow 加一步 `run: make ci-web`（与已有的 `make test-cache-contract`（目标在 `Makefile:77`、步在 workflow `:87`）同形态，记得同步 `Makefile:4` 的 `.PHONY` 列表）；`make ci` 保持 `lint test eval` 不加 JS 段 ⇒ Python-only 机器（含 126 宿主）仍跑得动 `make ci`。**但光加 step 不够**：`.github/workflows/agent-platform-ci.yml` 的 `on.push.paths`（`:7-22`）与 `on.pull_request.paths`（`:24-39`）**两处都不含 `web/**`** ⇒ 只改前端的 PR 根本不触发 CI（§12 第 3 条）。
 - PR-0 必含 §3 的 `describeError` / `describeStreamError` 两个收敛点。
 - PR-0 必含 `.dockerignore` 两条补充（`**/node_modules`、`web/dist`），理由见 §12 第 4 条。
-- PR-0 同步关掉 `docs/TODO.md` §1 第 104 行那条 P0（等的前提 D-2 已定案为 A，见 §3）。**另两条同批该动**（2026-10-30 复取行号未漂）：`:103`「前端技术栈选型（未定，…不预先绑定 Vue/React）」已被 ADR-0010（已决 C）推翻，`:104` 的审计件 `docs/plans/plan-frontend-error-contract-audit-2026-10-19.md` 已入库⇒ 两条是**账面未跟**；`docs/TODO.md:53` 那行「前端 | 3」的开项数随之变。属账面拍板（§12 第 6 条）。
+- PR-0 同步关掉 `docs/TODO.md` §1 第 104 行那条 P0（等的前提 D-2 已定案为 A，见 §3）。**另两条同批该动**（2026-10-30 复取行号未漂）：`:103`「前端技术栈选型（未定，…不预先绑定 Vue/React）」已被 ADR-0010（已决 C）推翻，`:104` 的审计件 `docs/plans/plan-frontend-error-contract-audit-2026-10-19.md` 已入库⇒ 两条是**账面未跟**；`docs/TODO.md:53` 那行「前端 | 3」的开项数随之变。属账面拍板（**§12-B**，已答：随 PR-0 落地那一批改）。“另两条”指 `:103` 与 `:105`（`:104` 就是上一句那条 P0），逐条理由见 §12-B。
 - `check_doc_sync.py` 只校 AGENTS/ARCHITECTURE/README 中**版本控制清单内**的路径；新增 `web/` 后须同步更新 `ARCHITECTURE.md` 的目录表与 `AGENTS.md` 的目录结构表，否则文档与现实漂移。
 
 ## 6. 范围边界
@@ -211,8 +211,8 @@ web/
 applications/agent_server/main.py        # + 条件 mount + NoStoreStaticFiles
 Dockerfile                                # 改多阶段：node:24-alpine 构建 → python:3.11-slim 运行
 .dockerignore                             # + 两条：`**/node_modules`、`web/dist`（§12 第 4 条）
-.github/workflows/agent-platform-ci.yml   # + JS 段：pnpm install --frozen-lockfile / lint / typecheck / check-events / build；**且两处 `paths:` 都要补 `web/**`**（§12 第 3 条）
-Makefile                                  # JS 段落点：新增 `ci-web` 目标（推荐）或并进 `ci`—— 待拍板，见 §12 第 5 条
+.github/workflows/agent-platform-ci.yml   # + JS 段一步 `run: make ci-web`（目标内容见 §5）；**且两处 `paths:` 都要补 `web/**`**（§12 第 3 条）
+Makefile                                  # 已拍板（§12-A = 形状二）：新增 `ci-web:` 目标，`ci:` 不动
 ARCHITECTURE.md  AGENTS.md                 # 目录表新增 web/ 行（§5 防漂移要求）
 ```
 
@@ -429,10 +429,10 @@ Dockerfile 现为**单阶段**（`FROM python:3.11-slim`，只 `COPY application
 
 ⇒ 本小节另带一件已入库文档的改动，**必须与体检件同批 add**：`docs/adr/0012-nl2sql-branch-consolidation.md`（M，§4 新增 2026-10-29 退役登记）。它与上面 §11.4 / §11.6 两批都不同属（那两批是前端与 revert 完整性），若分拆会再造一次“已入库 ADR 指向尚未入库的体检件”。
 
-## 12. 开工前置核查（2026-10-30，rev `3868023c`）：六条订正 + 两条待拍板
+## 12. 开工前置核查（2026-10-30，rev `3868023c`）：六条订正 + 两条待拍板（同日已答，见本节末表）
 
 **取证件**：`docs/operations/evidence/2026-10-30-frontend-preflight/readings.md`（41 条坐标逐条命中、事件全集与 `/health` 字段集的直读输出都在那里）。
-本文本节只写“改了哪六条、还差哪两条”（#1 事件数与 #5 字段数同属一类：**散文里的数不等于源里的数**），§5 前置三件事、§7 工单表、§9.3 文件清单、§10.5 门禁那一段均随之同步。坐标复验能全命中不是巧合：`git diff --name-only 896f966e..HEAD` = 30 个文件，
+本文本节只写“改了哪六条、拍板了哪两条”（两条的答案在本节末表第五列，含落在本文哪一节；#1 事件数与 #5 字段数同属一类：**散文里的数不等于源里的数**），§5 前置三件事、§7 工单表、§9.3 文件清单、§10.5 门禁那一段均随之同步。坐标复验能全命中不是巧合：`git diff --name-only 896f966e..HEAD` = 30 个文件，
 其中 28 个是文档，**未触碰任何被本文引用的后端实现**。
 
 | # | 订正 | 为什么这不是抠字（不订的后果） |
@@ -444,12 +444,12 @@ Dockerfile 现为**单阶段**（`FROM python:3.11-slim`，只 `COPY application
 | 5 | `/health` 字段集 **13 → 30**，并把权威源从 `console.html` 改为两层模型（§1） | PR-4 的判据是「每盏灯的文本可追溯到字段值」。漏 17 个里包括 `revert` / `admission` / `cache_ready` / `langfuse_ready` —— 恰好最能区分「接线」与「启用」的那几盏 |
 | 6 | 坐标补全路径（§11.5 / §11.6）+ 顺手修 `README.md:643` 一条过期行号 | 仓内两个 `schemas.py`，`revert.py` 不在 `api/`；README 那行引 `health.py:25-40`（实际是 `DependencyHealth` 区间，`HealthResponse` 在 `:67`）。`check_doc_sync.py` 只校路径存在性不校行号⇒ 这类错锚不会被任何门禁抓到，只能靠引前复跑（本文 §11.4 记的同族） |
 
-**两条待拍板（本批只登记不代拍）**
+**两条待拍板 → 同日已答（2026-10-30，用户拍板）**
 
-| # | 事项 | 候选与推荐 | 不拍的后果 |
-|---|---|---|---|
-| A | JS 门禁落点（§9.3 新增的 `Makefile` 行） | 形状一：并进 `make ci`（忠于 workflow `:45` 那句「复用 `make ci` 单一真相」，但 `Makefile:158` 的 `ci = lint test eval` 从此要求 Node 在场，无 Node 的机器跑不动 `make ci`）；**形状二（推荐）**：新增 `make ci-web` 目标 + workflow 加一步 `run: make ci-web`（与已有的 `make test-cache-contract`（`:87`）同形态，命令仍在 Makefile 里，不违 `:45`，Python-only 环境不受影响） | PR-0 开工时实现者只能替本文选一个，而选完就写进了 CI——这是本文 §0「决策完备」那句话目前**唯一真破了的地方** |
-| B | `docs/TODO.md:103` / `:104` 两条勾沉（§5 新增那条） | 三条都该动：`:103` 选型已被 ADR-0010 定为 Vue3（本文行仍写「未定…不预先绑定 Vue/React」），`:104` 审计件已入库且 D-2 已定案，`:105` 仍是开项（它的交付物就是 PR-0 的 CI 段）。⇒ `:53` 那行「前端 | 3」随之变 1 | 账面与现实不符。危险方向只有一个：**下一个人拿 `:103` 那句「未定」当活的重新评一轮选型**，而不是把已定的当未定 |
+| # | 事项 | 候选与推荐 | 不拍的后果 | 拍板结果与落在本文哪一节 |
+|---|---|---|---|---|
+| A | JS 门禁落点（§9.3 新增的 `Makefile` 行） | 形状一：并进 `make ci`（忠于 workflow `:45` 那句「复用 `make ci` 单一真相」，但 `Makefile:158` 的 `ci = lint test eval` 从此要求 Node 在场，无 Node 的机器跑不动 `make ci`）；**形状二（推荐）**：新增 `make ci-web` 目标 + workflow 加一步 `run: make ci-web`（与已有的 `make test-cache-contract`（目标在 `Makefile:77`、步在 workflow `:87`）同形态，命令仍在 Makefile 里，不违 `:45`，Python-only 环境不受影响） | PR-0 开工时实现者只能替本文选一个，而选完就写进了 CI——拍板前这是本文 §0「决策完备」那句唯一真破了的地方（已闭合，见末列） | **形状二已采纳** ⇒ §5 首条与 §9.3 的 `Makefile` / workflow 两行已改写为定死形（`ci-web:` 目标 + `.PHONY` 同步 + `ci:` 不动）。这一格从此不再是选择 |
+| B | `docs/TODO.md:103` / `:104` 两条勾沉（§5 新增那条） | 三条都该动：`:103` 选型已被 ADR-0010 定为 Vue3（本文行仍写「未定…不预先绑定 Vue/React」），`:104` 审计件已入库且 D-2 已定案，`:105` 仍是开项（它的交付物就是 PR-0 的 CI 段）。⇒ `:53` 那行「前端 | 3」随之变 1 | 账面与现实不符。危险方向只有一个：**下一个人拿 `:103` 那句「未定」当活的重新评一轮选型**，而不是把已定的当未定 | **本轮不动，随 PR-0 落地那一批改**（已采纳）——与 §5 那条「PR-0 同批」的原约束一致，不是额外偏离。**复审触发条件**：PR-0 提交时若 `docs/TODO.md:103` 仍写「未定」则该批不得合（账面未跟项堆到 3 条以上就会重现今天这个“文档与 ADR 冲突”的形状）|
 
 **新增门禁的非空转反证表**（按 `docs/operations/evidence-format.md` §4 要求，PR-0/PR-1 交付时逐项实取，本批先定形状）：
 
