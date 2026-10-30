@@ -1,4 +1,4 @@
-# 全量 session 清扫读数：十 session 逐个 rc=0 + 两处口径落差（2026-10-30）
+# 全量 session 清扫读数：十 session 逐个 rc=0 + 口径对账全部收到仪表级（2026-10-30）
 
 **定位：** 证据记录（不是方案）。格式遵循 `docs/operations/evidence-format.md` §1 五字段 + §3 强度分档。
 **对象：** 把 `make test` 的 10 个 pytest session 在**当前 tip** 逐个实跑到 rc 级读数，并顺带核掉
@@ -53,6 +53,7 @@ Makefile 的门禁命令带 `-m "not requires_pg"`，本轮实测为 `1486 passe
 **本节的 x=1 / y=28 已在 §7 直接实量坐实**（成文顺序是先写推论后补实测，不是先实测后写数）。
 当年未校的那半（“两次是否同一套件”）也已校：`git diff --name-only cfc7bf19..f6cc8a31` = **5 个文件**
 （4 份文档 + `scripts/lint_public_mirror.py`，后者是纯注释）⇒ 测试树逐字相同，两个分母可比。
+这一半现在多了一个**不依赖文件差异推理**的直读口径，见 §8。
 
 ## 3. skip 归属：10 项逐条（`-rs` 实取，不是文档转述）
 
@@ -67,8 +68,33 @@ Makefile 的门禁命令带 `-m "not requires_pg"`，本轮实测为 `1486 passe
 
 ⇒ **判定：10 项全是"缺环境/前提不成立"的自动跳过，无一项是掩盖失败**（AGENTS.md《conftest 守卫识别》口径）。
 这条现在可核对：`-rs` 的 short test summary 原样落 `.tmp-scratch/c-mask/sessions-2026-10-30-fg.log`（本机，不入库）。
-其余四个 session 的 skip 数（agent-runtime 2 / federation 1 / KS 7 / nl2sql 8）**本轮只取了总数未逐条列**——
-不得由 §3 这 10 项外推成"全部 skip 都已定性"。
+
+### 3.1 其余四个 session 的 18 项 skip（补取，直接起命令不过包装器）
+
+命令：`uv run --no-sync pytest packages/agent-runtime/tests applications/agent_federation/tests
+applications/knowledge-service/tests applications/nl2sql-service/tests -q -rs`
+→ **1670 passed / 18 skipped in 31.87s**，rc=**0**（rev `9c57c159`）。
+
+两个交叉校验都对得上：1670 = 827+192+416+235（四个 session 单独跑的和）⇒ **合并没有改变任何计数**；
+18 = 2+1+7+8。skip 逐条按守卫类型定性：
+
+| 来源 | 条数 | 守卫理由（原文关键词） | 判定 |
+|---|---|---|---|
+| `agent-runtime/tests/test_cache_contract.py:57` | 1 | Valkey `127.0.0.1:6379` 不可达（timed out）；CI 需 `CACHE_CONTRACT_REQUIRED=1` | 环境守卫（模块级 skip，详见手册 §2.5） |
+| `agent-runtime/tests/test_tracing.py:92` | 1 | `langfuse extras 未安装（默认 session 设计内 skip）` | 依赖形态守卫（与手册 §2.2 同源） |
+| `agent_federation/tests/test_db_integration.py:57` | 1 | 未设 `AGENT_PLATFORM_PG_URL` | 真库守卫（§3.4 通道可跑，本轮未起） |
+| `knowledge-service/tests/integration/test_cuda.py:28/36/53`、`test_env_priority.py:61`、`test_graph_flow.py:31/56`、`test_main_graph.py:32` | 7 | 均需 `ZHIKU_INTEGRATION=1`（torch/CUDA、真 `.env`、Milvus/MinIO/Mongo/Neo4j 全栈 + PDF 素材） | 手动/Nightly 守卫 |
+| `nl2sql-service/tests/test_golden_seed_real_pg.py:137/144/164/188/214` | 5 | 需真实 `dw` 库，手动设 `DW_DB_DSN` | 真库守卫 |
+| `nl2sql-service/tests/{test_ingest_endpoint.py:222,test_meta_knowledge_build.py:512,test_migrate_agent_server_sql.py:241}` | 3 | 需真实 meta 库 / 预 seed 源库，手动设 `META_DB_DSN` | 真库守卫 |
+
+⇒ **判定：28 项 skip（根 10 + 四 session 18）已逐条定性，无一是掩盖失败**；AGENTS.md 验证策略里
+「后者本地缺环境跳过属设计意图」这一条在本轮全量上成立。六个守卫旋钮（`ZHIKU_INTEGRATION` /
+`CACHE_CONTRACT_REQUIRED` / `AGENT_PLATFORM_PG_URL` / `DW_DB_DSN` / `META_DB_DSN` / langfuse extras）
+**全部已在册**（`git grep -l -F <旋钮> -- docs` 逐个取数：4 / 2 / 4 / 4 / 4 / 2 个文档）⇒ 不新增台账条目，本小节只把它们指到已有文档。
+
+⚠ **三个数字都叫 28，但不是三个集合**（这是本轮差点自己混用的地方）：
+① §1 合计 `28 skipped` = 带 marker 的套件里全部 skip（= 10 + 18）；② §2/§7 的 `y = 28` = `tests/ha` 在**无 marker** 跑里贡献的
+win32 skip（它只属于那 38 项，不在这 28 项里）；③ §2 的 `x + y = 29` 里的 29 = deselected 数。引用时必须带集定语。
 
 ## 4. 调用形状会把墙钟时间抽掉一个量级（本轮现场复现，含对自己假设的证伪）
 
@@ -153,8 +179,8 @@ Top-15 合计 **113.17s**（逐项相加，不是仪表给的聚合值），剩�
 - `make ci` / `make test` 的**原名命令**（本机无 make，P4 仍开放）——本轮是逐条等价命令，不是同一个可执行体。
 - 29 项 `requires_pg` 被 deselect ⇒ **真库用例本轮零覆盖**（不是"通过"，是未跑）。§7 补了直跑形状，
   但结果是 **1 passed / 28 skipped 且 skip 发生在尝试连库之前** ⇒ 真库覆盖仍为 **0**，且本机没有路径能把它变成非 0。
-- 其余四个 session 的 18 项 skip 未逐条定性（§3 只列了根 session 的 10 项）。~~§2 那个 x=1 推论未直接抓到实体~~
-  ⇒ 已闭合，见 §7。
+- 其余四个 session 的 18 项 skip ⇒ **已逐条定性，见 §3.1**；~~§2 那个 x=1 推论未直接抓到实体~~ ⇒ 已闭合，见 §7；
+  §2 的分母口径也已由仪表直读，见 §8。
 - 变异杀死率（`make mutation-cache`）、黄金集以外的 E2/E3、红队、canary：本轮未碰。
 - 126/241 现网侧：本轮未碰（零产品代码变更 ⇒ 不改变现网态，也不拿它当本轮读数的一部分）。
 - §4 的机制归因：未归因。要定它需要拿包装器与非包装器各跑一次同旗标（本轮 `-rs` 与 `--durations=15` 旗标不同，
@@ -183,3 +209,18 @@ Top-15 合计 **113.17s**（逐项相加，不是仪表给的聚合值），剩�
 
 **本节里哪半是新的**：`testing-playbook.md` §2.5 早已写过「`tests/ha` 另有 `sys.platform=="win32"` 硬跳过」⇒ 本节的增量只是那两点：
 ① 硬跳过在连库**前**，所以 §3.4 的 pgserver 通道对它无效（“有本机 PG 路线”不等于“本套件能跑”）；② 29 ≠ 需要真库的项数。
+
+## 8. 分母口径改为仪表直读（三条 `--collect-only`，rev `9c57c159`）
+
+§2 原来靠“两侧相加都是 1525”推同一套件，那是**算术**；现在直接拿收集器计数（不跑用例，只数收集到多少）：
+
+| 命令 | 读数 |
+|---|---|
+| `uv run --no-sync pytest -q --collect-only` | **1525 tests collected in 2.65s** |
+| `uv run --no-sync pytest -q -m "not requires_pg" --collect-only` | **1496/1525 tests collected (29 deselected) in 2.65s** |
+| `uv run --no-sync pytest -q -m "requires_pg" --collect-only` | **29/1525 tests collected (1496 deselected) in 2.75s** |
+
+⇒ 判定：分母只有一个（1525），marker 分流是**双向对称**的 1496 / 29——不靠“相加相等”反推。
+再把三段串起来看，整个分类已无未知量：
+**1525 = 1496（带 marker 收进）+ 29（requires_pg）**；而 1496 = **1486 passed + 10 skipped**（§1 第 1 行）；
+29 = **1 passed + 28 skipped**（§7）。§2 里那个 x/y 推论至此不再是推理链上的一环，只是历史备注。
