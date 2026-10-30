@@ -8,7 +8,7 @@
 
 > **2026-10-16 索引表机械重算记录（不是目测）**：逐节重取表格 body 行数与「条数」列求和，本节各分级的声明值与实算值**全部一致**——
 > 0.1 = 4 / 0.2 = 4 / 0.3 = **5 组求和 13**（其中「未接线半成品转正」组记 **0**，即 §3 那三条已于 10-15 全部翻勾后归零，不是漏计）/ 0.4 = 6 行在册（4 开项 + 2 条 `~~删除线~~` 已清零：D4、10 个 BOM `.py`）/ 0.5 = 5 行非开项对账。
-> 全文复选框现值 **open 25 / closed 24**（2026-10-19 R 批两批登记 10 条 + R7 闭合 1 条 + 本批清债翻 9 条后；追记是逐条累计的，取最后一条即现值）。
+> 全文复选框现值 **open 25 / closed 24**（2026-10-19 R 批两批登记 10 条 + R7 闭合 1 条 + 本批清债翻 9 条后；追记是逐条累计的，取最后一条即现值 —— **2026-10-30 起本行已不是现值**，现值看本节末条追记与 `recount_todo_index.py` 的 `DECLARED_TOTAL`）。
 > **登记一处口径重叠，未擅自重排**：0.3 标题写「全部『先方案后编码』，**无外部条件依赖**」，但其内嵌的会展 `F2 真实 LLM 连接` 标注了「需产品决策输入」——按 0.1/0.2 的分类那更像一条「需拍板」项。
 > 现在它同时出现在 0.3（作为 D 组功能存量）与台账 §3 第 5 项的语义邻域里。这属分级口径的划法问题（按"卡在哪"分 vs 按"是什么面"分），**改法要动多条行，等用户定，不在本批顺手搬**。
 > 复算脚本（入库可重跑，本文件为唯一数据源）：`uv run python scripts/evidence/recount_todo_index.py`（全部一致 ⇒ 退出码 0；任何分级不符 ⇒ 1）。
@@ -28,6 +28,8 @@
 > **（2026-10-19 追记，R 批登记·零翻转）**：本批**只登记不翻转**——§0.4/§5 新增 R1-R6 六条（nl2sql 合入前评审 #12-#17 的"建议"级，逐条在 feat 线复验有效：黑名单放行 5 类函数为实测、classify_error 字符串优先、`str(raw)`、lru_cache、唯一键缺 table_name、段名静默忽略均实读确认；同批"严重/警告"级 #1-#11 已修复关闭）。diff 内 `- [ ]`→`- [x]` **零处** ⇒ 按相对口径 open 25→31、closed 14 不变、E 组开项 4→10（§0.4 标题同批改为「12 行在册 = 10 条开项 + 2 条已清零」）。可由 `git diff HEAD~1 -- docs/TODO.md` 核：新增 `- [ ]` 恰 **6** 处、状态变更 **0** 处。
 > **（2026-10-05 追记，本批为 PR #55 处置收口）**：本批只做**状态订正**（§0.2 第 1 行 / §0.5 的 open PR、alerts、分支形态 / §8 的 Dependabot 门禁条），**未新增、未关闭任何开项**——diff 内零 `- [ ]` ↔ `- [x]` 状态变更（可用 `git diff docs/TODO.md` 判），故上行的计数口径与数值不变。**不在此处重述计数**：本机实测 `^- \[ \]` 与 `^\s*- \[ \]` 都得 31、`^- \[x\]` 得 8，与上行「顶格正则只取到 15 / closed 7」的既有口径不一致（成因未查，不做推定复现）⇒ 仍以「先定义口径再引用、不从文件外口头汇总」为规矩，本批不引入第二个数。
 
+> **（2026-10-30 追记，`/health` 记忆后端可见性登记·零翻转）**：本批**只登记不翻转** —— §0.2/§6 新增一条「`/health` 上报记忆后端真实装配态」（来源：`docs/plans/plan-mongo-probe-timeout-single-impl-2026-10-30.md` §9 首行的排除项；用户 2026-10-30 定「进 TODO 排期、不入台账 §3 待拍板」）。diff 内 `- [ ]` → `- [x]` **零处** ⇒ 按相对口径 open 25→26、closed 24 不变、§0.2 由 4 行/4 条开项变 **5 行/5 条**（§0.3 前端那组 3 条**未动**：本项是后端契约面，不混进前端的三条勾沉里）。可由 `git diff HEAD~1 -- docs/TODO.md` 核：新增 `- [ ]` 恰 **1** 处、状态变更 **0** 处。——但**计数命令必须锚定行首**：`git diff -U0 -- docs/TODO.md | Select-String -Pattern '^\+- \[ \]'` = **1**、`'^\+- \[x\]'` = **0**；不锚的 `'^\+.*- \[ \]'` 会得到 **2/1**，多出的两条就是**本段自己写的 `- [ ]` / `- [x]` 字样**（追记在描述判据时不可避免把 token 写进了 `+` 行）⇒ 又一例「判据的散文与判据的对象共用形状」：计数靠行首锚区分，不靠人目测哪条是散文。`recount_todo_index.py` 的 `DECLARED_TOTAL` 同批更新（脚本口径 5：每批追记后必须同批更新）。绝对值仍受上条登记的口径不一致影响 ⇒ 不重开对账、不倒推历史数。
+
 ### 0.1 B 需外部条件（4 条）
 
 | 事项 | 锚点 | 卡在哪（实测） | 解锁动作（最小可执行） |
@@ -37,7 +39,7 @@
 | 部署侧存量取证 A/B（`checkpoints` 里存量 `user-*` thread_id · `revert_audit.operator` 历史行） | §8 + §5「审计主体」条 | 本机 `Meta Tunnel`（TUN）把整段 `<internal-ip>/24` 接管 ⇒ `TcpTestSucceeded=True` **不携带任何信息**；`docker` / `kubectl` / `psql` 全部 NOT FOUND、根无 `.env` | 二选一：同网段机器或 VPN 上代跑 `docs/operations/audit-operator-principal-runbook.md`；或本人把该段加进代理 bypass，且**先用「随机死端口对照法」复核劫持已解除**再取证 |
 | Copilot「Code scanning AI findings」工作流恒失败 | §8 | 平台侧月度配额（`SessionModelError … monthly quota` / `statusCode 402`），五个独立数据点里含**零代码 PR** ⇒ 与本仓 diff 无关 | 本仓改不了；要消噪只能在 GHAS 设置里关 AI findings。它未挂必需检查，不阻塞合并 |
 
-### 0.2 C 需拍板 / 需先出方案（4 行在册 = **4 条开项**，无销项）
+### 0.2 C 需拍板 / 需先出方案（5 行在册 = **5 条开项**，无销项）
 
 | 事项 | 锚点 | 卡在哪 | 解锁动作 |
 |------|------|--------|----------|
@@ -45,6 +47,7 @@
 | Milvus 与 pgvector 双向量库长期是否统一 | §6 | 两边各自可用，统一属架构取舍（运维一致性 vs 迁移风险） | 先写清收益判据；无判据不动 |
 | U-1：`QueryRequest` 入站字段双写兼容层能否移除 | §6 | 兼容层的真实消费者是否存在**未取证** | 采集真实调用形态 ⇒ 无消费者则删，有则定弃用窗口 |
 | R19（GitHub issue #23）：FastAPI ≥ 0.142 原生 telemetry 与 kernel `TracingMiddleware` 双埋点 | §6 | 需确认框架无其它自配 provider 残留路径；端到端复验要真集群（通道问题归 B 组第 3 条） | 最小改动已定型：`build_api_app` 内关 telemetry + `scripts/lint_architecture.py` 加门禁；集群复验等有通道时再做 |
+| `/health` 上报**记忆后端真实装配态**（降级可见性） | §6 | 要动 `/health` 响应契约，而「三套 `status` 约定是否统一」在 `CHANGELOG.md:28` 仍是待拍板项 ⇒ 形状未定前加字段 = 再添一套字面值 | 先出方案：形状照既有三件套 `cache_backend` / `cache_ready` / `cache_degraded_reason`（`applications/agent_server/api/health_router.py:70-72`），且必须过 `tests/test_health_contract_consistency.py`（该件含「禁第 4 套 `status` 字面值」断言）；无判据不动 |
 
 ### 0.3 D 功能面存量（13 条，全部「先方案后编码」，无外部条件依赖）
 
@@ -236,6 +239,7 @@
 - [ ] U-1：`QueryRequest` 入站字段名（`query`/`question`、`session_id`/`thread_id`）双写兼容层能否移除（见 `README.md`「已知待拍板项（技术债）」）
 - [x] CodeQL Batch 6（已执行，方案 `docs/plans/plan-codeql-batch6-kernel-sanitizer-models-2026-10-01.md` §9）：kernel `agent_core/guardrails/fs.py` 的 `safe_join`/`resolve_within`/`safe_filename` 不被 CodeQL 内建模型识别为 sanitizer，主干重扫报出 `#23`/`#40`/`#41`/`#42`。已新增仓内模型包 `.github/codeql/extensions/agent-platform-python/`（`barrierModel` + `barrierGuardModel`）。**两个原预设已被推翻**：（一）无需从 default setup 切 advanced setup——仓级包放 `.github/codeql/extensions/` 即被自动加载，"只接受已发布包"的限制只适用组织级扩展；（二）`#43`/`#44`（`py/clear-text-logging-sensitive-data`）**不在可自定义的 sink kind 清单内**，无 barrier 可写，"保留取证 + dismiss"是技术上唯一选项（非风格偏好）。待验：合入后主干重扫确认 `#23` 闭合。——**已验收（PR #36 合入 `0bc5175`，主干重扫 open 9 → 6）**：`#23`/`#40`/`#41` 均 `state=fixed` 自动闭合（反证模型包真被 default setup 加载）；`#42` 仍 open 且经分析为结构不可消除（`resolve()` 必须在 containment 检查之前，guard 建模无法覆盖），详见方案 §9.1。剩余待做：模型包非空转自证（删 barrier 行→重扫必复报 `#23`）。**（2026-10-03 已取证闭合，无需破坏性自证）**该自证已被历史自然实验完成，三条实取：① `git diff --name-status 0bc5175^1 0bc5175` ⇒ 该 merge **只**引入 `.github/codeql/extensions/agent-platform-python/{codeql-pack.yml,models/agent_core.guardrails.fs.model.yml}` + 4 个文档，**零产品代码**（故告警消失不能归因于代码改动）；② `#40`/`#41`/`#42` 的 sink 就在 `fs.py` 本身、`#23` 在 `applications/agent_federation/api/server.py:264`，两个文件在该 merge 中均未变 ⇒ **字节相同的前后两次扫描，唯一变量就是模型包**；③ 同一次扫描本身健康且仍在报结果（analysis `1872802593` @ `2026-10-01T09:20:29Z` on `0bc5175`，`/language:python` `results_count=6`、`rules_count=43`）⇒ 排除"扫描失败/空结果导致告警消失"。若模型包是空转（未被 default setup 加载），`#23`/`#40`/`#41` 必然仍在。**因此不再去主干上删 barrier 行做破坏性自证**——那会新开支告警号、破坏本段"open=0 / 最大号 48 不增"的记录，且信息量不高于上述三条。
 - [ ] R19（GitHub issue #23）：FastAPI ≥ 0.142 **原生 telemetry 默认开启**，与 kernel `TracingMiddleware` 对同一请求各建一个同名 SERVER span（互为兄弟），且框架自行 `trace.set_tracer_provider()`——属本仓「第二状态机/双实现」反模式在框架层重现。默认取最小改动：`build_api_app` 内 `FastAPI(telemetry={"tracing": False})` + `scripts/lint_architecture.py` 新增门禁（裸 `FastAPI(` 未关 telemetry 即 CI 失败）；动工前需确认框架无其它自配 provider 残留路径，并做真集群端到端复验（见 `docs/plans/plan-observability-global-remediation-2026-09-29.md` §18）
+- [ ] `/health` 上报**记忆后端的真实装配态**（降级可见性）：`MONGO_URL` 配错或 mongo 宕时 `get_checkpointer()` 会静默降级 `InMemorySaver`（`packages/agent-core/agent_core/memory/__init__.py:94-117` 的 `except` + `logger.warning` 链，降级本身是对的），但健康面读不到这一态：本轮实读 `applications/agent_server/api/health_router.py:39-76` 逐字段 + `git grep -nE "mongo|checkpoint|history_backend|memory_backend" -- packages/shared-schemas/shared_schemas/health.py` = **0 命中**（2026-10-30 实取）。注意它**不是** `CHANGELOG.md:28` 那一条「`/health` 上报真实装配态」的重复：那一项已在报的是 V3 四部件（`cost_governance` / `forensic` / `admission` / `revert` 等），记忆后端三态（`pg_pool` / `MongoCheckpointer` / `InMemorySaver`）始终不在字段集里。前端侧的后果：`plan-web-frontend` PR-4 状态灯页的判据是「每盏灯的文本可追溯到字段值」⇒ 它无法把「现在跑的是内存档」告诉使用者。**动工前须先出方案**：要动的是两层契约模型（`HealthResponse` / `DependencyHealth`），而「三套 `status` 约定是否统一」本身仍待拍板（`CHANGELOG.md:28`）⇒ 不得为补这一格发明第 4 套字面值（`tests/test_health_contract_consistency.py` 有禁止断言）。来源：`docs/plans/plan-mongo-probe-timeout-single-impl-2026-10-30.md` §9 首行的排除项，用户 2026-10-30 定「进 TODO 排期、不入台账 §3 待拍板」（它不卡 D27 施工，按台账自己的收录口径属排期而非决策）
 
 ## 7. 检索 / 存储增强
 
