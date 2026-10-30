@@ -40,17 +40,17 @@
 | # | 我不能确认的事 | 原因 | 需要谁放行什么 |
 |---|---|---|---|
 | P1 | 双 Planner 的当前判分基线 | `eval/run_planner_eval.py` 需 LLM 密钥；仓内 `eval/baselines/planner_*.jsonl` 停在 `09943d6c`（2026-08-19）、各 **12 行** < 现行 golden **15 条** | 给密钥并同意重跑（重跑会顶掉那两份 8/19 的 jsonl ⇒ 同时决定 D4 第 21 项） |
-| P2 | CI 等价的**单次合并**根会话读数 | 命令 `uv run pytest -q -m "not requires_pg"` 本窗口被用户中止过 ⇒ 不再重试（换"逐文件/bisect"变体也不行） | 明确允许后跑一次；当前 1069 = **分段实测**（720 + 349），与合并跑在 conftest/收集顺序上原则上可能不等价 |
-| P3 | `tests/governance` 整目录为何超 9 分钟未完 | 观察到的现象真实存在，但原因未查明。已排除一条假设：该目录 `requires_pg` 命中 **0** ⇒ 不是"PG 用例在等库" | 允许逐文件计时 bisect 才能定位（该类跑被执行策略拦下过） |
+| P2 | CI 等价的**单次合并**根会话读数 | **读数已取得（2026-10-30）**：rev `27fb1e41` 上 `uv run pytest -q -m "not requires_pg"` → **1486 passed / 10 skipped / 29 deselected**，rc=0（取证 `docs/operations/evidence/2026-10-30-full-session-sweep/readings.md` §1）。“与分段跑不等价”那句悬待项同时结掉：分段读数 720+349=1069 是旧 tip 的子集口径，与本轮 1486 不是同一分母，**不得互相校订**。**但本行不转“已确认”**：它的阻塞项是“需明确允许后跑一次”，而本轮指令是“继续”、未点名撤销此前对该命令的中止 ⇒ 读数入账，“这条算不算已放行”仍由你定 | 确认该次跑是否视作已授权；认可则本行改“已确认 + 上面的命令/读数/rev” |
+| P3 | `tests/governance` 整目录为何超 9 分钟未完 | **已确认（2026-10-30）：不是该目录的成本**。`uv run pytest tests/governance -q` = **464 passed / 1 skipped in 102.58s**（与同日上午 102.86s 同值，rc=0）。已排除两条：`requires_pg` 命中 **0**（不是等库）、单跑与全量同值（不是机器变慢）。真正形状是**调用包装器导致的墙钟退化**（同一根 session 命令经 `-File` 包装器 1908.73s / 直接起 154.91s，含 0 CPU 冻死两例）——取证同文件 §4 | 无需放行；残余一项：“包装器为何退化”机制未归因，处置是约定“长跑不过包装器”，要挖到根需另开（不是本轮能自动定的） |
 | P4 | `make ci` / `make test` 的原样通过 | 本机无 `make`，我只跑了等价单命令 | 有 make 的环境（或容器）跑一次原名命令 |
-| P5 | 启发式评测在**当前** tip 的通过数 | **已确认（2026-10-27 重跑）**：rev `d41a57f` 上 `uv run python eval/run_eval.py` → 「启发式路由准确率: 15/15 = 100.00%」，rc=0；与旧读数 rev `1953c5f` 同值（两 rev 间只有文档提交）。写回本行的文档提交在其后，eval 代码未变 | 引用仍须连 rev 一起引；换 rev 后再重跑 |
+| P5 | 启发式评测在**当前** tip 的通过数 | **已确认（2026-10-30 再重跑）**：rev `27fb1e41` 上 `uv run python eval/run_eval.py` → 「启发式路由准确率: 15/15 = 100.00%」rc=0；与旧读数 rev `d41a57f`（10-27）、`1953c5f` 三值同。中间全为文档提交 ⇒ eval 代码未变 | 引用仍须连 rev 一起引；换 rev 后再重跑 |
 
 ## 3. 待拍板（不是"没路"，是我不替你选路）
 
-完整 21 项在台账 §3；这里只留**卡住判定**的七项与"没答案我就动不了什么"：
+完整 21 项在台账 §3；这里只留**卡住判定**的八项与"没答案我就动不了什么"：
 
 > 计数订正（2026-10-30）：本行原先写“五项”，而 `f4b13e75` 落地那一步表内就已是 **6 行**（D19/D17/D22/D23/D24/D25，
-> 即新增三条时把 3→5 当成了“+2”）；本批又登记了 D26 ⇒ 现按 **7 行** 写。取数口径：按行首 `| D` 数，
+> 即新增三条时把 3→5 当成了“+2”）；当日先登记 D26 成 **7 行**，本轮又登记 D27 ⇒ 现按 **8 行** 写。取数口径：按行首 `| D` 数，
 > 不靠目测。本文件是活文档（不是历史快照），故就地订正而不加注。
 
 | # | 未决问题 | 没答案的后果 |
@@ -62,6 +62,7 @@
 | D24 | 构建链路两个已实测缺陷要不要修仓库脚本：① `build_with_io_guard.sh:65/99` 的 `timeout 1800` 在当前 PyPI 国际链路下不够（实取：单流 45–60 kB/s、一个 RUN 层 171 项 / 290MB+ 未完）；② `distribute.sh:34` 的 tarball 名由 `${IMAGE%:*}` 派生，多段镜像名（`valkey/valkey-bundle`）含 `/` ⇒ 写进不存在的目录后 `set -e` 当场断。以及：要不要为构建接**内网 PyPI 镜像** | 本轮用 `/tmp` 副本（只改 timeout 一个数字，`diff` 证明只差两行）+ 一次性分发脚本绕过 ⇒ **绕过不是修复**：下一轮换人照清单执行会原地再撞一次。接内网镜像能省约两小时/轮（241 宿主直连实测 2.9 MB/s，而构建内同一个文件 ~50 kB/s ⇒ 慢在 PyPI 国际链路而非出口带宽），但它是**依赖供给源变更**（`pip install` 默认不校哈希，换源即换信任面）⇒ 我不替你选 |
 | D25 | 上线前的**引用预检**要不要固化成仓库脚本（`deploy/k8s/scripts/preflight_release.sh`）：查三份清单的每个 `configMapKeyRef`/`secretKeyRef` 键在 LIVE 对象里存在、挂成卷的 `ConfigMap`/`Secret` 在位、三台 hostPath `/opt/ap-models` 形状对、现有 Pod 落点 | 10-28 本轮只落在 `.tmp-scratch/b6_preflight_3630.sh`（未入库）。它的价值有实测支撑：env 引用缺失 **server-side dry-run 不报**，要到 kubelet 起容器才显形（`CreateContainerConfigError` / `Pending`），每轮白等 5–10 分钟 ⇒ 不固化则下一个照清单执行的人只能手工重做四类检查；固化要新添一个部署期脚本，按“先方案后编码”另开（口径已写进 `nl2sql-release-checklist.md` §3 步 6.5，脚本只是它的其中一个实现） |
 | D26 | 取证类文档把 **gitignored 的 scratch 脚本当“复跑命令”引用**要不要收敛：本轮 8 批新增行里含 `.tmp-scratch` 的 = **37 行**，其中同行或 ±3 行内已就地声明“不入库 / 只在本机可复跑”= **23 行**，**未声明 14 行**（`docs/operations/branch-hygiene-monthly-checks.md` 4 / `docs/operations/evidence/2026-10-29-public-mirror-shape-c/readings.md` 8 / `docs/plans/plan-public-mirror-gate-selfdisclosure-2026-10-29.md` 2）；全仓现态 = `git grep -n -F ".tmp-scratch" HEAD` **57 行**（`-- docs` 口径 50 行 / 16 个文件）。三条处置路：a 把三个常用探针（`precheck` / `branch_health` / `evselfcheck`）固化进 `scripts/`（真门禁化，按“先方案后编码”另开）；b 逐行补一句就地声明（成本 = 14 行）；c 维持现状，承认取证件自带“本机侧”属性 | `evidence-format.md` §1 字段 2 要的是“原样可复制的命令”，而这些命令在别人机器上指向**不存在的文件** ⇒ 形同“有命令、无脚本”，读数不可复核（比无命令强一点，但不够）。本轮已对**自己新写的**三类引用补了声明（见 `2026-10-29-public-mirror-shape-c/readings.md` §10 末条与月度体检 2026-10-30 节引言）；剩下 14 行的文面写于 2026-10-29 那几轮取证（本轮随批入库），本行只登记不动它们 —— 逐行加声明是一批独立的文面变更，得先由你选 a/b/c。**⇒ 复审触发条件**：任何一条要被引成对外陈述时；或 `scripts/` 里出现同名等价脚本时。附一条仪器自纠：分类器初版把 `scratch` 写进判据，会被 `.tmp-scratch` 自身命中而报“37/37 已披露”的空转结果；去掉后才是 23/14，并一正一负两条控各自报对值才用（`evidence-format.md` §4“正控必须能被判据命中”的反面）。本行那两个 57/50 可用入库可重放的 `git grep` 复算；37/23/14 来自本机探针 |
+| D27 | 两处裸 `MongoClient(mongo_url)`（`packages/agent-core/agent_core/memory/mongo_checkpointer.py:95` 检查点、`packages/agent-core/agent_core/memory/mongo.py:40` 会话历史）**没带任何超时参数** ⇒ “外部依赖探活超时”这条横切策略要不要由共享包收敛，收敛成哪种：a 两处各加 `serverSelectionTimeoutMS` 并从 env 读（默认值要定数）；b 先在共享包收敛“可选外部依赖的探活默认值”一个单一实现（常量/小工厂），两处都调它，再由不变量 lint 拦第三处裸构造；c 维持现状，承认降级语义对、只是慢 | 代价已实量（rev `27fb1e41`，取证 `docs/operations/evidence/2026-10-30-full-session-sweep/readings.md` §5.1）：无 mongo 时首个 I/O 要等 **30.44s** 才抛 `ServerSelectionTimeoutError`（`admin.ping` 同形 **30.45s** ⇒ 成本在 server selection、不在 `create_index`；仅构造 **0.00s** ⇒ 构造惰性），同一个 URL 加 `serverSelectionTimeoutMS=1500` 后 **1.52s** ⇒ 一行参数就能压。两个下游：① 门禁墙钟——根 session 最慢用例 **31.69s**（= 30s + 探测 1.5s）占总墙钟 **20.5%**；② 请求路径——mongo 挂掉或 `MONGO_URL` 配错时 `get_checkpointer()` 要阻塞 30s 才降级 `InMemorySaver` ⇒ 冷启动/首请求白等 30s。**我为什么不自动定**：选 a/b/c 是“要不要统一横切策略”（D2）；默认值本身是对外承诺（无 mongo 环境从“慢但能用”变成“1.5s 就判不可用”，可能把真·慢速 mongo 误判为宕机）；且按 AGENTS.md《架构决策原则》，横切关注点要三层齐备（单一实现 + 全局装配 + 不变量 lint）才算全局解，只补两处参数 = 又添一层散点。一并记下一条**排除掉的解**（免得后人误用）：`agent_core/resilience.py:200` 已有 `timeout` 装饰器，但它是线程池包装 + `shutdown(wait=False)`（L222）**不取消底层调用**，且 pymongo 构造是惰性的 ⇒ 装饰构造无效（D 探量 0.00s）、装饰首个操作只是把等待方换成 `TimeoutError` 而驱动仍在跑；真正的旋钮在驱动参数。复跑形状指向 `.tmp-scratch/c-mask/probe_mongo_timeout.py`（**本机文件，不入库** ⇒ 受 D26 同一风险，换机器只能照 §5.1 表中描述自建探针）。**⇒ 复审触发条件**：现网出现 checkpointer 构造 >5s；或有人开始改 `agent_core.resilience` 的超时原语（那是要一并把本行拉进去的时机）；或再要缩减门禁墙钟（它是当前单条最大项） |
 
 ## 4. 口径未定（判据本身没定义 ⇒ 结论无从真假）
 
