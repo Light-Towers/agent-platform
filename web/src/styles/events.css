@@ -1,0 +1,192 @@
+/* ============================================================================
+ * events.css — 12 类事件的 class → token 映射 + 图例 + 灯阵卡
+ * **只引用 var(--*)，一个值都不写**（视觉件 §2.2/§1.1）。
+ * 三通道原则：3px 左边框 accent + 类型徽标（mono 原文常显）+ 图标 ⇒ 色彩不是唯一通道。
+ * ==========================================================================*/
+
+.timeline { display: grid; gap: var(--sp-2); }
+
+.ev {
+  display: grid;
+  grid-template-columns: 16px auto 1fr;
+  align-items: baseline;
+  gap: var(--sp-2);
+  border-left: 3px solid var(--border-decor);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  background: var(--bg-raised);
+  padding: var(--sp-2) var(--sp-3);
+  line-height: var(--lh-body);
+}
+
+.ev__ico { color: var(--text-2); width: 16px; height: 16px; }
+
+.ev__name {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  letter-spacing: var(--ls-wide);
+  color: var(--text-1);
+  background: var(--tint-gate);
+  border-radius: var(--radius-pill);
+  padding: 0 var(--sp-2);
+}
+
+.ev__body { min-width: 0; }
+.ev__meta { font-size: var(--fs-xs); color: var(--text-2); }
+
+/* ---- 12 类事件（视觉件 §2.2 表逐行对应；族数 = 8，两类复用一族） ---- */
+.ev--route       { border-left-color: var(--cat-decision); }
+.ev--evidence    { border-left-color: var(--cat-source); }
+.ev--memory      { border-left-color: var(--cat-memory); }
+.ev--status      { border-left-color: var(--cat-progress); }
+.ev--replan      { border-left-color: var(--cat-watch); }
+.ev--error       { border-left-color: var(--cat-failure); }
+.ev--suspended   { border-left-color: var(--cat-watch); }
+.ev--coordination{ border-left-color: var(--cat-progress); }
+.ev--admission   { border-left-color: var(--cat-gate); }
+.ev--cache_hit   { border-left-color: var(--cat-source); }
+.ev--answer      { border-left-color: var(--cat-answer); }
+.ev--done        { border-left-color: var(--cat-terminal); }
+
+/* 族色只走**图形通道**（3px 竖条 + 图标），不走文字通道。
+ * POC 实测依据：12px 的 mono 徽标着族色时，light 侧最弱一组 = 3.25:1、
+ * dark 侧最弱一组 = 4.25:1，均低于正文 AA 的 4.5:1（hex 明细记在取证档，
+ * **本件不写色值** —— 门禁断言 1 扫的是全文含注释，举证时只能引比值不能引 hex）。
+ * 徽标承担的是“读出类型名”，不是装饰 ⇒ 文字回到中性 --text-1（两侧均 ≥ 12:1），
+ * 族色由竖条与图标表达 —— 三通道原则本来就不需要第三条通道也上色。 */
+.ev--route .ev__ico        { color: var(--cat-decision); }
+.ev--evidence .ev__ico     { color: var(--cat-source); }
+.ev--memory .ev__ico       { color: var(--cat-memory); }
+.ev--status .ev__ico       { color: var(--cat-progress); }
+.ev--replan .ev__ico       { color: var(--cat-watch); }
+.ev--error .ev__ico        { color: var(--cat-failure); }
+.ev--suspended .ev__ico    { color: var(--cat-watch); }
+.ev--coordination .ev__ico { color: var(--cat-progress); }
+.ev--admission .ev__ico    { color: var(--cat-gate); }
+.ev--cache_hit .ev__ico    { color: var(--cat-source); }
+.ev--answer .ev__ico       { color: var(--cat-answer); }
+.ev--done .ev__ico         { color: var(--cat-terminal); }
+
+/* done 是终止定稿：一条分隔线 + ✓，**不得覆盖已渲染内容** ⇒ 只加顶边框，不改已存在行 */
+.ev--done { border-top: 1px solid var(--border-decor); padding-top: var(--sp-3); }
+
+/* 未识别事件：虚线边框 + 失败图标 + 原文可见，**不渲染载荷**（§2.2 末条） */
+.ev--unknown {
+  border-left: 3px dashed var(--border-control);
+  background: transparent;
+}
+.ev--unknown .ev__ico { color: var(--cat-failure); }
+.ev--unknown .ev__body { color: var(--text-2); }
+
+/* ---- 图例：屏上 12 行，数据源是 events.css + 事件字典，不另写一份文案 ---- */
+.legend { display: grid; gap: var(--sp-1); }
+
+.lg-row {
+  display: grid;
+  grid-template-columns: 12px 9ch 1fr;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-sm);
+}
+
+.lg-swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-control);
+}
+
+.lg-name { font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--text-1); }
+.lg-fam { color: var(--text-2); }
+
+.sw--decision { background: var(--tint-decision); border-left: 3px solid var(--cat-decision); }
+.sw--progress { background: var(--tint-progress); border-left: 3px solid var(--cat-progress); }
+.sw--source   { background: var(--tint-source);   border-left: 3px solid var(--cat-source); }
+.sw--memory   { background: var(--tint-memory);   border-left: 3px solid var(--cat-memory); }
+.sw--answer   { background: var(--tint-answer);   border-left: 3px solid var(--cat-answer); }
+.sw--watch    { background: var(--tint-watch);    border-left: 3px solid var(--cat-watch); }
+.sw--failure  { background: var(--tint-failure);  border-left: 3px solid var(--cat-failure); }
+.sw--gate     { background: var(--tint-gate);     border-left: 3px solid var(--cat-gate); }
+.sw--terminal { background: var(--bg-raised);     border-left: 3px solid var(--cat-terminal); }
+
+/* ---- 灯阵（/health 五组 30 字段；一段就是可追溯性本身） ---- */
+.lamp-group + .lamp-group { margin-top: var(--sp-3); }
+
+/* 灯阵的列数交给**自身容器宽度**（auto-fill），不交给视口宽度。
+ * POC 两轮实测连踩：
+ *   ① 把断点写在 base.css 里 ⇒ 被本件的后加载覆盖，两档规则从未生效；
+ *   ② 住在对话页 372.8px 的第三栏里 ⇒ 每列只得到 110.4px，装不下
+ *      `embedding_backend` 这种 17 字符的 mono 灯名。
+ * 分层纪律保留：同一个选择器的默认值与覆盖必须同件、且覆盖在后。 */
+.lamps {
+  display: grid;
+  /* 260px 地板 = 视觉件 §2.1 那句「3 列 minmax(260px, 1fr)，一屏读完 30 盏」的原值；
+   * 该句后半已由第八批 ② 按拍板改措辞为「一页内读完、允许滚动」，**地板这个值未动**。
+   * 本轮实测结论：那一句**不是错的，是放错了页面** —— 在 372.8px 的第三栏里它物理不
+   * 成立，在拆页后的独立视图里它成立。所以这里把地板从 POC 临时降到过的 180px 恢复回
+   * 260px，不删那条判据、也不为了让它过而改成小值；列数仍交给 auto-fill 由容器宽度定。 */
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: var(--sp-2);
+}
+
+.lamp {
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+  padding: var(--sp-2);
+  display: grid;
+  gap: var(--sp-1);
+}
+
+.lamp__head { display: flex; align-items: center; gap: var(--sp-2); }
+
+/* 灯名用 --ls-wide（≤13px 小字给正字距，视觉件 §1.5） */
+.lamp__key {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  letter-spacing: var(--ls-wide);
+  color: var(--text-1);
+  /* 灯名就是后端字段名原文，不得截断也不得撑破卡片 ⇒ 允许可处断行 */
+  overflow-wrap: anywhere;
+}
+
+.lamp__val { font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--text-2); word-break: break-word; }
+.lamp__why { font-size: var(--fs-xs); color: var(--text-2); line-height: var(--lh-body); }
+
+/* 状态点四档形状：true 实心圆 / false 空心圆 / null 实心警示圆 / 非布尔 实心方。
+ * ⚠ false（未启用）与 null（未装配）**必须是不同形状**，否则「接线 ≠ 启用」在界面上被抹平。
+ * POC 实测补第四档：muted 原本只把描边从 --text-2 改成 --text-3，dark 下亮度 139 vs 110
+ * 与空心圆不可分 —— 颜色/亮度微差不算通道，形状才算。
+ * ⚠ 上一轮把 muted 写成 `--radius-sm` 是**不够的**（本轮实测推翻）：10×10 盒子上
+ * 999px 被钳制成 5px 正圆，而 --radius-sm 算出 4px ⇒ 有效半径差只 1px（边长的 10%），
+ * 屏上几乎不可辨。图例把它描述成「方块」，就必须真的方 ⇒ radius 归 0，形状差拉满。 */
+.dot { width: 10px; height: 10px; border-radius: var(--radius-pill); flex: 0 0 auto; }
+.dot--on     { background: var(--status-ok); border: 1px solid var(--status-ok); }
+.dot--off    { background: transparent;      border: 2px solid var(--text-2); }
+.dot--null   { background: var(--status-warn); border: 1px solid var(--status-warn); }
+.dot--muted  { background: transparent;      border: 2px solid var(--text-2); border-radius: 0; }
+
+/* 四档形状判读面板（只在健康灯页常驻）：形状是「接线 ≠ 启用」的唯一区分通道，
+ * 所以图例不能靠 hover 才能读到，得和灯同屏。 */
+.shapekey { display: grid; gap: var(--sp-1); }
+.sk-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+/* 字符串值的着色口径（视觉件 §2.3 第 3 段） */
+.v--active { color: var(--status-ok); }
+.v--degraded { color: var(--status-warn); }
+.v--muted { color: var(--text-2); }
+
+/* ---- 计数徽标（窄栏时间线折叠后的形态） ---- */
+.count-badge {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--text-1);
+  background: var(--tint-gate);
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-pill);
+  padding: 0 var(--sp-2);
+}

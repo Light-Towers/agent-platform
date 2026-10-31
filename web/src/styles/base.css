@@ -1,0 +1,299 @@
+/* ============================================================================
+ * base.css — reset + 字体 + 全局排版 + 骨架与断点 + 焦点环 + reduced-motion
+ * 组件不得自行 import 本文件之外的样式片段；唯一入口按 tokens → base → events 顺序引（视觉件 §1.1）。
+ * 本文件**不允许任何色值字面量、裸间距、裸行高/字距**（门禁断言 1/4）。注意：门禁扫的是
+ * 全文含注释，所以这句里不能拿十六进制或函数式色当反例写 —— 写了会被自己的门禁判红
+ * （POC 首跑实踩）。要举反例就引断言编号，不要写出色值形状。
+ * ==========================================================================*/
+
+/* ---- 字体资产 ----
+ * ⚠ POC 批：六件 Latin1 woff2 **不在本机也不在仓库**（视觉件 §1.4 定的入库清单，需人从官方仓库取）。
+ *   下面 @font-face 整块**注释保留**，接入时解注释并按 §1.4 的六个文件名落盘。
+ *   ⇒ POC 屏幕上看到的是**系统回落脚本**（Windows = Segoe UI + 微软雅黑），不是 Plex。
+ *   这不是疏忽：拿假 404 的 @font-face 冒充"字体已接"会让截图判据 V1/V4 失真。
+ *
+ * @font-face {
+ *   font-family: "IBM Plex Sans";
+ *   src: url("../assets/fonts/IBMPlexSans-Regular-Latin1.woff2") format("woff2");
+ *   font-weight: 400; font-style: normal; unicode-range: U+0000-00FF;
+ * }
+ * （Medium 500 / SemiBold 600 同形；IBMPlexMono 三支同形）
+ */
+
+*, *::before, *::after { box-sizing: border-box; }
+
+/* 三态切换靠 hidden 属性（不写内联样式）；`.ev` 这类 display 规则会赢过 UA 样式，故此处必须兜住 */
+[hidden] { display: none !important; }
+
+/* ---- 图标系统（视觉件 §1.4）：描边四属性**只在此写一次**，不逐图标各写 ----
+ * 1.5px 描边在 16px 网格上混用 butt / round 会直接看出长短不齐，而这恰是「微观不一致」最常见的泄露位。 */
+.ico {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+  color: var(--text-1);
+  background: var(--bg-page);
+}
+
+h1, h2, h3, p, ul, ol, figure { margin: 0; }
+
+h1 {
+  font-size: var(--fs-lg);
+  line-height: var(--lh-tight);
+  font-weight: 600;
+  letter-spacing: var(--ls-head);
+}
+
+h2 {
+  font-size: var(--fs-md);
+  line-height: var(--lh-tight);
+  font-weight: 600;
+  letter-spacing: var(--ls-tight);
+}
+
+/* 小字号才给正字距；正文一律不设 letter-spacing（CJK 回落脚本上正值会拉开汉字间距，视觉件 §1.5） */
+.o-head-sm {
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  letter-spacing: var(--ls-wide);
+  line-height: var(--lh-tight);
+}
+
+code, .t-name, .f-name, .num {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+}
+
+/* ---- 焦点环：禁 outline:none 无替代（视觉件 §3） ---- */
+:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+/* ---- 骨架：≥1280 三栏，768–1279 两栏，<768 单栏（视觉件 §2.1） ---- */
+.app {
+  max-width: var(--page-max);
+  margin-inline: auto;
+  padding: var(--sp-4);
+}
+
+.topbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--sp-3);
+  padding-block: var(--sp-3);
+  border-bottom: 1px solid var(--border-decor);
+}
+
+.topbar .spacer { flex: 1 1 auto; }
+
+.grid {
+  display: grid;
+  /* 对话页 = 两栏（会话 1.1 : 时间线 1.4）。原第三栏（灯阵）已于 2026-10-30
+     按用户拍板移出成独立视图 ⇒ 三栏比例 1.1:1.4:1 不再适用于本页。
+     但 `minmax(0, …)` 这一条**原样保留**：裸 `1fr` 的轨道最小值 = auto = min-content，
+     POC 实测第三栏被顶到 822px、第一栏压到 219px（内容宽只剩 194px，会话按钮被迫换行）。
+     那是轨道算法问题，与栏数无关，换回两栏也一样会顶破。 */
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1.4fr);
+  gap: var(--sp-3);
+  align-items: start;
+  margin-top: var(--sp-4);
+}
+
+.panel {
+  /* grid item 默认 min-width:auto ⇒ 内容再宽也不收缩，配合上面的 minmax(0,…) 才落地 */
+  min-width: 0;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-control);   /* 分层靠 border，不靠底色差也不靠投影（§1.3/§1.5） */
+  border-radius: var(--radius-md);
+  padding: var(--sp-3);
+  box-shadow: var(--shadow-1);
+  /* 主题切换时整屏重染，这一档走 --t-slow（hover/active 反馈走 --t-fast） */
+  transition: background-color var(--t-slow) var(--ease-out), border-color var(--t-slow) var(--ease-out);
+}
+
+.panel + .panel { margin-top: var(--sp-3); }
+
+.panel > h2, .panel > .o-head-sm { margin-bottom: var(--sp-2); }
+
+.stack { display: grid; gap: var(--sp-2); }
+.stack > .panel + .panel { margin-top: 0; }
+
+/* ---- 控件 ---- */
+button, input, select {
+  font: inherit;
+  color: inherit;
+}
+
+/* ---- 链接 ---- */
+/* 两条纪律同时落到这里：
+ *   ① 颜色不走文字通道 —— 与视觉件 §2.2 给事件徽标定下的「accent 只上色到边框与图标」
+ *     同源；可点性靠**下划线**这个非色彩通道保证，不靠链接蓝。
+ *   ② `a.btn`（两页互链）去掉下划线，选中态走 aria-current。 */
+a { color: var(--text-1); text-decoration: underline; text-underline-offset: 2px; }
+a:hover { color: var(--text-2); }
+a.btn { text-decoration: none; }
+
+.btn {
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+  padding: var(--sp-1) var(--sp-3);
+  cursor: pointer;
+  transition: background var(--t-fast) var(--ease-out), border-color var(--t-fast) var(--ease-out);
+}
+
+.btn:hover { background: var(--bg-raised); }
+
+.btn-primary {
+  background: var(--cat-decision);
+  border-color: var(--cat-decision);
+  color: var(--on-primary);
+  font-weight: 500;
+}
+
+.btn-primary:hover { background: var(--cat-decision); }
+
+.btn[disabled] {
+  color: var(--text-3);
+  border-color: var(--border-decor);
+  cursor: progress;
+}
+
+.seg { display: inline-flex; border: 1px solid var(--border-control); border-radius: var(--radius-sm); overflow: hidden; }
+.seg .btn { border: 0; border-radius: 0; }
+.seg .btn + .btn { border-left: 1px solid var(--border-control); }
+.seg .btn[aria-pressed="true"] { background: var(--tint-decision); font-weight: 500; }
+/* 页面选中态用 aria-current、不用 aria-pressed：它是链接不是开关，
+ * 读屏里 aria-pressed 会把导航报成「可按下的按钮」。 */
+.seg .btn[aria-current="page"] { background: var(--tint-decision); font-weight: 500; }
+
+.field {
+  width: 100%;
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+  padding: var(--sp-2) var(--sp-3);
+}
+
+.field::placeholder { color: var(--text-3); }
+
+.composer { display: grid; gap: var(--sp-2); margin-top: var(--sp-3); }
+
+.hint { font-size: var(--fs-xs); color: var(--text-2); }
+
+/* 密钥框：值只在内存，不落 localStorage（工单件 §2.3；主题键不属凭据，边界见视觉件 §1.6） */
+.keybox { display: grid; grid-template-columns: 1fr auto; gap: var(--sp-2); }
+
+/* ---- 三态（视觉件 §3） ---- */
+.banner {
+  border: 1px solid var(--border-control);
+  border-left: 3px solid var(--cat-failure);
+  border-radius: var(--radius-sm);
+  background: var(--tint-failure);
+  padding: var(--sp-2) var(--sp-3);
+  margin-bottom: var(--sp-3);
+}
+
+/* 失败 tint 底色上的说明文字回到 --text-1。
+ * POC 实测：走 --text-2 时该处只有 4.14:1，低于正文 AA 的 4.5:1（hex 明细在取证档）；
+ * “彩色底版上沿用中性次级色”不自动安全 —— tint 会把中性色的对比度拉下来。 */
+.banner .ev__meta, .banner .hint { color: var(--text-1); }
+
+.empty {
+  border: 1px dashed var(--border-control);
+  border-radius: var(--radius-md);
+  padding: var(--sp-5) var(--sp-3);
+  text-align: center;
+}
+
+/* loading 骨架条 */
+.skel {
+  height: 12px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-raised);
+}
+
+.spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--border-control);
+  border-top-color: var(--status-running);
+  border-radius: var(--radius-pill);
+  animation: rotate 1s linear infinite;
+}
+
+@keyframes rotate { to { transform: rotate(1turn); } }
+
+.dot-live {
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  background: var(--cat-answer);
+  vertical-align: -0.15em;
+  animation: blink 1s steps(2, start) infinite;
+}
+
+@keyframes blink { 50% { opacity: 0; } }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0ms !important;
+  }
+  .spinner { border-top-color: var(--border-control); }
+}
+
+/* ---- 断点 ---- */
+/* ≥1280 的宽栏留白：这是 --sp-6 / --sp-7 当前唯一的消费者（断言 3 不允许无消费者的令牌） */
+@media (min-width: 1280px) {
+  .app { padding: var(--sp-6) var(--sp-7); }
+}
+
+@media (max-width: 1279px) {
+  /* 不再覆盖 .grid：拆页后默认就是两栏，而视觉件 §2.1 的 768–1279 那一档本就读作
+     「两栏（对话 + 时间线）」⇒ 同值覆盖是同批拆页的遗留，删。 */
+  /* ⚠ 这里不写 .lamps 的断点：events.css 在本件之后加载，同特异度下这里的覆盖
+     永远不会生效（POC 实测确认）。灯阵已改用 auto-fill —— 列数由它自身容器宽度决定，
+     本来就不属于视口断点该管的事。
+     ⚠ 原 `.col-lamps { grid-column: 1 / -1 }` 已删：灯阵不再是对话页的 grid item，
+     留着就是一条无消费者的死规则（断言 3 管令牌、管不到选择器，只能靠人删）。 */
+  details.fold { display: block; }
+}
+
+@media (max-width: 767px) {
+  .app { padding: var(--sp-3); }
+  .grid { grid-template-columns: 1fr; }
+  .composer { position: sticky; bottom: 0; }
+  /* tap 目标 ≥44×44 */
+  .btn { padding: var(--sp-2) var(--sp-3); min-height: 44px; }
+  /* 时间线折叠为计数徽标，点开看全量 */
+  .timeline > .ev { display: none; }
+  .timeline.open > .ev { display: grid; }
+  .col-hint { display: none; }
+}
+
+@media (max-width: 375px) {
+  .f-name, .num { word-break: break-word; }
+}
+
+/* 只在窄栏出现的折叠提示 */
+.only-narrow { display: none; }
+@media (max-width: 1279px) { .only-narrow { display: block; } }
