@@ -185,9 +185,12 @@ agent-platform/
 │   ├── nl2sql-service/
 │   └── knowledge-service/
 ├── tests/                   # 根项目测试（测 agent_server）
+├── web/                     # 前端视觉层 POC（未批开工，见本节末注）
 ├── docs/  scripts/  eval/   # 仓库级
 └── pyproject.toml / Dockerfile / Makefile / docker-compose.yml
 ```
 
 > 注：`agent_server`（原 `app`）是**根项目本体**，不是独立 workspace 成员（无自身 `pyproject.toml`），由根 `pyproject.toml` 的 `[tool.hatch.build.targets.wheel] packages=["applications/agent_server"]` 管理；其余 5 个 applications 是独立成员。
 > 物理分层 + `app`→`agent_server` 改名已于 2026-08-19 完成，`uv sync --all-packages --extra dev` 通过、`uvicorn agent_server.main:app` 可导入。
+
+> **上面树里 `web/` 那一行的射程（2026-11-01 第十四批补，只登形状不登分层）**：它是**未批开工的视觉层 POC**（样式三件 + 两个静态宿主页 + 一个零依赖 Node 门禁），所以本节只把它列进**物理结构**，**不进 §2 的分层表与依赖图**（它不属于 application → agent-runtime → agent-core 任何一层，也不被它们依赖）。开工授权 = 工单件 §7 的 PR-0；在那之前本目录不引入构建链、不进 `make ci`。⚠ 两条口径：① 本节的目录引用靠 `check_doc_sync.py` 的目录面校，而该档的**文件引用面 `DOC_FILE_REF_ROOTS` 不含 `web/`** ⇒ 本文里写 `web/` 下的具体文件路径**不红但也校不到**（能校到 `web/` 自身存在性的面是 AGENTS.md 目录表首列）；② 上方两张包表与依赖图的**完整清单以 §2/§3 为准**，本注不复述（复述就会两处漂）。
