@@ -1,3 +1,35 @@
+# ============================================================================
+# 阶段 1/2 web-builder —— Node 只活在这一层（工单件 §9.3 / §10.2 形态 A″）
+#
+# 为什么在镜像里构建，而不是 COPY 本机已建好的 dist：后者让镜像内容取决于
+# 「构建机碰巧有什么」——本机 dist 可能是旧 rev 的产物，而症状与本仓记过的
+# 「可变 tag + IfNotPresent ⇒ 静默跑旧代码」完全同族（都是绿着跑的旧东西）。
+#
+# 2026-11-02 在 241 实取（不是推断）：node:24-alpine = node v24.22.2、corepack 0.36.0
+# 在位、**pnpm 不在位** ⇒ 必须 `corepack enable`；corepack 读 web/package.json 的
+# `packageManager: pnpm@10.33.0` 取版本，故 pnpm 版本号在本仓只有那一处真相，
+# Dockerfile 与 workflow 都不双写（同 ADR-0013「三处 pin 必须一致」的反面做法）。
+FROM node:24-alpine AS web-builder
+
+WORKDIR /web
+
+# 默认走官方 registry（仓库默认值必须中性，不能把内网镜像烤进 Dockerfile）。
+# 内网构建时显式传 --build-arg NPM_REGISTRY=https://registry.npmmirror.com/：
+# 241 实测两条都 200（npmjs 1.84s / npmmirror 0.19s），国际链路慢时换快的那条，
+# 换的是下载路径而不是锁文件内容。
+ARG NPM_REGISTRY=https://registry.npmjs.org/
+ENV NPM_CONFIG_REGISTRY=${NPM_REGISTRY}
+RUN corepack enable
+
+# 清单先 COPY、源码后 COPY：改一行 .vue 不应重装依赖（层缓存的最小前提）。
+# --frozen-lockfile 是判据不是优化项：pnpm-lock.yaml 与 package.json 对不上时必须红，
+# 而不是"悄悄装成别的版本然后构建绿"——锁文件因此是必入库件（工单件 §9.2）。
+COPY web/package.json web/pnpm-lock.yaml ./
+COPY web/ ./
+RUN pnpm install --frozen-lockfile && pnpm run build
+
+# ============================================================================
+# 阶段 2/2 运行镜像：python:3.11-slim，**里面没有 node、没有 node_modules**
 FROM python:3.11-slim
 
 WORKDIR /srv/agent-platform
@@ -36,6 +68,16 @@ RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/wh
 # （根包没有这个 extra）。写成 `.[langfuse]` 时 pip 只对未知 extra 告警并继续，
 # 构建照样绿、镜像里却没有包——与 memory-embed-local 那颗雷完全同形（2026-10-10 实测）。
 RUN pip install --no-cache-dir "./packages/agent-core[memory-embed-local]" ./packages/shared-schemas "./packages/agent-runtime[langfuse]" ".[otel]"
+
+# 前端产物落点 = /srv/agent-platform/web/dist。这条对不是约定，是被机器钉住的契约：
+# applications/agent_server/main.py 的默认探测点是**进程 CWD** 拼 `web/dist`，而本镜像的
+# WORKDIR `/srv/agent-platform` 既是仓库根也是运行时 CWD ⇒ 两条算出同一个路径。
+# ⚠ 基准不是从 `__file__` 往上数：镜像里 `pip install .` 那份 site-packages 才是被 import
+# 的模块，往上数两层数到解释器目录 ⇒ 2026-11-02 在 241 真容器 `GET /ui/` 404（同一条构建链上
+# /health 是 200，所以这不是“服务没起”而是“探测基准算错地方”）。全案与失效形状在工单件 §9.4，
+# 钉子（含“函数体里不得出现 `parents[`”那一格）在 applications/agent_server/tests/test_web_ui_mount.py。
+# 放在两条 pip 之后（不是之前）：改一行 .vue 只重建本层，不把 ~2G 的 pip 层缓存打掉。
+COPY --from=web-builder /web/dist ./web/dist
 
 # 构建源 git rev 绑定（观测方案 §3.5，解 R14「验证对象与提交不一致」/126 假同步事故）：
 # 构建脚本传 --build-arg GIT_REV=$(git rev-parse HEAD)，写入 OCI label + 容器内文件，

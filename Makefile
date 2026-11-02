@@ -1,7 +1,7 @@
 # Agent Platform 本地/CI 工程门禁
 # 统一任务入口，避免各脚本分散调用；所有目标零业务副作用。
 
-.PHONY: install lint format mutation-cache mutation type test test-cache-contract valkey-up valkey-down bench-cache eval eval-llm-required eval-llm-memory eval-rag eval-rag-routes eval-rag-retrieval eval-rag-e2e eval-rag-gate eval-rag-baseline eval-rag-meta-ui ci compose-smoke
+.PHONY: install lint format mutation-cache mutation type test test-cache-contract valkey-up valkey-down bench-cache eval eval-llm-required eval-llm-memory eval-rag eval-rag-routes eval-rag-retrieval eval-rag-e2e eval-rag-gate eval-rag-baseline eval-rag-meta-ui ci ci-web compose-smoke
 
 install:
 	uv sync --all-packages --extra dev
@@ -157,6 +157,24 @@ eval-rag-meta-ui:
 # CI 串联：lock 校验 + lint + 单测 + 评测门禁；任一失败即中断。
 ci: lint test eval
 	uv lock --check
+
+# 前端面门禁（刀⑲，工单件 §12-A = 形状二）。为什么不并进 ci：`ci = lint test eval` 从此
+# 要求 Node 在场，而 126 宿主无 node/npm/pnpm（AGENTS.md 内网段第 2 条实测）⇒ Python-only
+# 机器连 `make ci` 都跑不动，这是把一面工具的缺勤传染给另一面。
+# 形态照搬已有的 test-cache-contract：目标住在 Makefile、步住在 workflow，workflow 仍只调
+# make（不违它自己那句「复用 make ci 单一真相避免与本地漂移」）。
+# 顺序是导出的：先对账 tokens（纯文本断言，秒级）→ 静态（eslint / vue-tsc）→ 产物（build）；
+# 便宜且高信息量的放前面，失败时不要先花 30s 打包。
+# pnpm 版本不在此写死：corepack 读 web/package.json 的 packageManager（本仓唯一真相）。
+# TODO（PR-1）：本目标还缺一条 `pnpm run check:events`（web/scripts/check-events.mjs，
+#   事件全集双向对账）—— 该件属 PR-1 交付物，现在建一条指向不存在文件的命令会让本目标
+#   整条红，那不是门禁而是拦路；届时与 web/package.json 的 scripts 同批改。
+ci-web:
+	cd web && pnpm install --frozen-lockfile
+	cd web && pnpm run check:tokens
+	cd web && pnpm run lint
+	cd web && pnpm run typecheck
+	cd web && pnpm run build
 
 # TB-7 端到端冒烟：需本机 Docker 守护进程可用。启动 pgvector + agent-platform，
 # 等待两服务 healthcheck 变 healthy，再探测 /health 返回，最后清理。

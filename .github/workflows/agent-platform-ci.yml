@@ -2,11 +2,15 @@ name: agent-platform-ci
 
 # 触发：仅当影响运行/测试/契约/编排的代码变更时跑。
 # 布局：packages/（agent-core/agent-runtime/shared-schemas）+ applications/（agent_server 等）
+# `web/**` 必须**两个 paths 列表都有**（工单件 §12 第 3 条）：少一处则只改前端的提交
+# 不触发 CI，而反证表里「一个只改 web/ 的提交 ⇒ CI 必须跑」那一格会拿到一个
+# 「门禁没跑」被当成「门禁放行」的绿——两种绿在账面上长得一模一样。
 on:
   push:
     paths:
       - "packages/**"
       - "applications/**"
+      - "web/**"
       - "tests/**"
       - "eval/**"
       - "docs/**"
@@ -24,6 +28,7 @@ on:
     paths:
       - "packages/**"
       - "applications/**"
+      - "web/**"
       - "tests/**"
       - "eval/**"
       - "docs/**"
@@ -78,6 +83,18 @@ jobs:
           python-version: "3.11"
       - name: Install (all workspace packages + dev tools)
         run: make install
+      - name: Web gate (pnpm frozen install + tokens 对账 + eslint + vue-tsc + vite build)
+        # 故意不用第三方 setup-node/pnpm action：本仓环境取不到 GitHub（公开镜像闸门
+        # 关闭，实测 connection refused），拿不到最新主版本号就不能写 `@vN`——凭记忆写
+        # 一个版本号入仓是比少一个步骤更贵的东西。runner 自带 node + corepack，
+        # corepack 读 web/package.json 的 packageManager 取 pnpm 版本（不在此双写），
+        # 机制已于 2026-11-02 在 node:24-alpine 里实跑验证（corepack 0.36.0 → pnpm 10.33.0）。
+        # ⚠ 本步在真 runner 上未跑过（本机与内网均不可达 GitHub）——属登记的未验证项，
+        #   不是已验证能力；node 版本不够时 engines 那行会在 pnpm install 处报出来。
+        run: |
+          node --version
+          corepack enable
+          make ci-web
       - name: CI gate (lint + unit tests + heuristic eval)
         run: make ci
       - name: Semantic cache contract (real Valkey + Search)
