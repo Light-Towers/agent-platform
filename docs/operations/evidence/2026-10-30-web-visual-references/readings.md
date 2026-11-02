@@ -2501,6 +2501,81 @@ bash .tmp-scratch/ap-visual/e19-241-ciweb-gate.sh
 powershell -NoProfile -ExecutionPolicy Bypass -File .tmp-scratch/ap-visual/e15-postcommit.ps1 -ExpectParent <full-rev> -ExpectAdd <n> -ExpectDel <n>
 ```
 
+---
+
+## 24. 第十七批（2026-11-02 收盘：刀㉑ 账面订正 + 周一门三条 + 推送件判据换形 + feat 那条 ref 真推上去了）
+
+### 24.1 坐标与本批刀次
+
+本批两刀，**都只动文档**（产品代码零改动）：**刀㉑** = 账面订正刀（把一条从未被执行过的判据按实取改掉 + 钉死复跑端点 + §23.4 补行 11 / 行 12），commit `4d34e656`，父 `6bf38b61e5907ea664f89c353180417969679d7b`，形状 files 2 / add 5 / del 3（`docs/TODO.md` 1/1、本件 4/2）；**刀㉒** = 本节本体 + 工单件 §13.4 随动行。开工坐标 = 刀⑳ 之后（本地领先远端 feat 六刀），收盘坐标 = 远端 `company/feat/web-visual-poc` 与本地 HEAD 同 sha（逐值见 24.5）。
+
+本批形状数的**登记位 = 各刀的提交信息 + e15-postcommit 产出件**，不回填进 §23.5 —— 那一段是刀⑳ 的台账，把后一刀的数塞进前一刀的读数里，正是行 11 那条口径要避免的事。
+
+### 24.2 刀㉑ 的实物面（三件事都可复跑）
+
+| 事项 | 原判据（没被执行过） | 实取 | 独立见证 |
+|---|---|---|---|
+| TODO 翻勾净数 | `^\+- \[ \]` = 0 | 四个数 = `+[x]` 1 / `-[x]` 0 / `+[ ]` **2** / `-[ ]` **3** ⇒ 净额 1 | 文件级 open=25 / closed=25 + `recount_todo_index.py` PASS rc=0 |
+| 复跑端点 | `1960d7a6..HEAD` | 钉成 `1960d7a6..6bf38b61` | 门件 D 段的 endpoint-drift 探针（刀㉑ 后 `6bf38b61..HEAD` 会读出非空区间） |
+| 自犯表行数 | 刀⑳ 提交信息按当时实数写 | 本刀补行 11 / 12 后 = 12 行 | 提交信息已入库不可改，订正落在 §23.4 行 11 末尾 |
+
+门件 `e21-gate-fill.ps1` 三轮迭代到绿：首轮仓库根少算一层 `Split-Path` ⇒ 落盘路径断 + check_doc_sync rc=2；二轮自建形检格报 68 条反引号失配（量具坏了，§23.4 行 12）；三轮同格又报 2 条表格行未闭合（行末空格，同一行登记）。绿件两份：`e21-00-20261102-170143` 与补写「已入库不可改」那句之后复取的 `e21-00-20261102-170824`。六格 rc=0：check_doc_sync / ruff / recount_todo_index（25/25）/ node check-tokens（定义 91 引用 91）/ 形检 anomalies=0 / 分面 FORBIDDEN=0 + UNTRACKED=0。
+
+⚠ 负控制的读数要如实分写：关掉围栏跳过后 `readings.md` 的 naive anomalies = **66** 而 fence-aware = 0（本格有牙）；`docs/TODO.md` 两边都读 **0** —— 它本来就没有代码围栏，**不得被读成「两处都该非零」**。
+
+提交后复取（e15-postcommit）：parent OK、files=2 / add=5（matched）/ del=3（matched）、non-docs-paths=0、unallowed-non-docs=0、`HEAD..worktree` 后端=0、lineage 仍锚定、当时 remote refs 含 HEAD = 空（= 未发布，推送前的事实）、DayOfWeek=Monday。两条旧期望只登记不修（§23.5 已写）：`d140f91f..HEAD` 后端面读 5、status-all 读 3。
+
+### 24.3 周一门三条（绑当天最终 rev `4d34e656`）
+
+1. **L3 深度安全审查**：`findings_count = 0`。判据口径沿用 m-1 / f-1 —— 以命中数为绿，不以状态字段为绿。
+2. **两条通道复取**（`e14-push-channel.ps1`，推送前那次）：company **READ-OK**、heads = 3（feat `ddae7f59` / lineage `12f03c8f` / main `fe22794c`）；github-legacy 的 pushurl 仍是禁用串；`HEAD..company/main` = 2 且 merge-base 为空 ⇒ 异宗历史，非 force 推 main 会被服务端按 non-fast-forward 拒。
+3. **推送件 PROBE**（`e14-monday-push.ps1`，默认 PROBE-ONLY）：`e14-11-push-kit-20261102-173637-probe.txt` 那轮 **blockers = 2** —— ① 工作树非净 0 行（实为 3 条 vue 的 CRLF stat 噪声，内容 diff 为空）；② 后端对 `d140f91f` 的 diff = 3 文件（刀⑱ 与修复刀按 PR-0 开工授权本体要动的那三件）。⇒ 两条 POC 期不变量都会把 `-Execute` 拦死，这就是当时报给用户的「判据换形属拍板项」。
+
+### 24.4 推送件的判据换形（用户 2026-11-02 拍板「换判据并立即推送」）
+
+| 格 | 旧判据（POC 期形状） | 新判据（内容派生 + 申报制） | 有牙的证据 |
+|---|---|---|---|
+| 工作树 | `git status --short --untracked-files=all` 必须 0 行 | 真脏 = status 行 ∩ `git diff --name-only` 路径，必须 0；**未跟踪文件仍算脏**；CRLF-only 噪声单列成可读格（本轮 3 条逐条列名），不是消失 | 分类器两支自测：合成的脏线必须命中 1；**此刻坐在噪声列里的那条路径**在有内容 diff 时也须命中 1 ⇒ 「REAL-DIRTY=0」是基准选的功劳，不是模式写宽 |
+| 后端面 | `d140f91f..HEAD` 在四个后端目录必须 0 文件 | 后端面 ⊆ 申报三件（`applications/agent_server/config.py`、`main.py`、`tests/test_web_ui_mount.py`），OUTSIDE-DECLARED 必须 0 | 注入自测：塞一条 `applications/evil-undeclared.py` ⇒ OUTSIDE=1；正控制 = 同区间去过滤面 all-files = **38**（非 0，证明过滤在做事） |
+
+**覆盖率注记（不得读成「后端面已被全面申报」）**：这一格的目录集只有四项（applications / packages / tests / eval），`Makefile`、`Dockerfile`、`.github/` 根本不经这一格。所以「推送前的后端不变量」在本件里的真实射程 = 那四个目录，如实写明，免得后人拿它当全后端的通行证。
+
+自测格首跑自己空转了一次（24.6 行 1）：`@($x = '…' | Where-Object { … })` 这种「在 `@()` 里做赋值再走管道」的写法会把管道输出吞进赋值、计数恒 0，于是 expect 1 那一侧读出 0，`CLASSIFIER-VACUOUS` 当场被抓、`-Execute` 走不到。**处置是修自测的写法（先赋变量、再对 `@(@($line) | Where …)` 计数），不是把期望从 1 改成 0**。修完 PROBE 轮 `e14-11-push-kit-20261102-175212-probe.txt`：**blockers = 0**、两支 dry-run 均被服务端接受（feat 为 `ddae7f59..4d34e656` 快进、lineage 为 Everything up-to-date）。
+
+### 24.5 推送已发生（逐值，不概括）
+
+`-Execute` 轮 `e14-11-push-kit-20261102-175236-execute.txt`（DayOfWeek = Monday，门全绿才走）：
+
+- `feat/web-visual-poc` push **rc=0**，`ddae7f59..4d34e656` ⇒ 快进、**非 force**（件内推送路径无 `-f` / `--force` / `--force-with-lease`；唯一的 `-Force` 是 `Remove-Job` 清任务；且 target 列表含 main 会直接 REFUSE，dry-run 里出现 `forced update|rejected` 会 abort）；
+- `lineage/intranet-v3-until-2026-10-19` push **rc=0**，Everything up-to-date；
+- 件内 post-read：feat = `4d34e656`、lineage = `12f03c8f`、**main 仍是 `fe22794c`**。
+
+**换一具量具独立复取**（`e14-push-channel.ps1`，推送后）：`remote refs literally containing 4d34e656 = [company/feat/web-visual-poc]`；ls-remote heads = 3 且三个 sha 与件内 post-read 逐字相同；`HEAD..company/main` = 2 / merge-base 空 这两条**未因推送改变** ⇒ 「不动 main」是被两侧同 sha 证住的，不是口头承诺。
+
+远端 heads 2 → 3 的张力**仍在**（《分支卫生》终态形式 = main + 唯一集成分支恒 2 条），复审触发条件不变 = **分支模型 (b) 拍板后当场回收**。本轮用户答复「不动 main」是 main 那一问的答案，**(b)（内网集成分支终态）仍未收**。
+
+### 24.6 本批自犯 / 坑表
+
+| # | 自犯或坑 | 怎么发现的 | 处置 |
+|---|---|---|---|
+| 1 | **自我见证格自己写成空转**：`@($x = '…' \| Where-Object …)` 恒计数 0，「必须命中 1」那一侧读 0 | 换形后的第一轮 PROBE 自报 `CLASSIFIER-VACUOUS`，blockers 里多出一条 | 改成先赋变量再对管道计数，并把单侧自测改成双侧（脏线命中 1 + 噪声列里那条路径在有内容 diff 时也命中 1）。⇒ 与 §23.4 行 10（结论格必须能自证非空）同族、本批**第四次**；这次多一条可写的口径：**自测的期望要写成「必须为 1」而不是「必须为 0」**，写成 0 的空转永远抓不住 |
+| 2 | 换形判据有「放宽」的外观 | 落笔时逐条对着《验证策略》红线自检：新判据会不会让真脏树过关 | 未跟踪仍算脏、内容脏仍阻断、噪声只是换列；且两支自测 + 一条正控制同时成立才 `blockers = 0`。仍如实登记它的**目录集只有四项**（24.4 注记），不把射程外的事写成本格已管 |
+| 3 | 刀㉒ 自己写的一行把表格打列了（工单件 §13.4 新行里反引号内的管道符未转义 ⇒ 该行列数 4 ≠ 3），而**本刀自建的形检格没抓住它** | 仓内量具 typo-scan 的 **T4 hits=1** 报出 `COLS …:649 got=4 expect=3`，而同轮本格 anomalies=0 —— 与行 12 同一句口诀「两具量具不一致先查量具」，但**结论相反**：这次是本格盲区、T4 是对的（本格只校「行尾竖线在位」+「反引号成对」，**不校列数**） | 就地改成转义写法后 T4 回 0。⇒ 口径：**自建格要在件里写清它不校什么**，否则 anomalies=0 会被读成「表格全好」。**同轮另一条换面读数要一起记**：T2 从 12 → 14 不是新缺陷，是分面从「TODO + 取证件」换成「取证件 + 工单件」后，把工单件里两条**已在册的假路径**（`packages/ui/package.json` = 竞品对照表里别人的路径、`scripts/check-events.mjs` = PR-1 待建门禁）扫了进来 —— 换面读数必须写明成因，否则会被读成「本批新增了 2 条 MISSING」。⚠ 再加一重：本行自己把这两条路径写进了反引号，于是同面复取读到 **16** —— 三个数（12 / 14 / 16）的成因分别是**面内原有 / 换面带入 / 本刀自引**，不是一个在变的缺陷数 |
+
+### 24.7 未做 / 不得读成已批（逐条点名）
+
+**未碰远端 `main`**（两侧同 sha 可证）・**未 force**・**未删任何分支**・**未建内网集成分支 / 未收分支模型 (b)**・**未动 github-legacy 的 pushurl 禁用位**（用户对此问的答复是反问「这个指的是什么」⇒ 按**未拍板**处理，本轮零动作）・publish 模式那道闸门没跑也不许跑在这两条线上・**V4 实拍观感判读未做**（用户拍「本轮跳过，随 PR-1 再判」）・`make test` 全量 10 session 未跑（本批只跑 lint 级四门 + 文档面形检）・**CI runner 那一步仍未实跑**，且本批现取一条支持它继续挂着：`git ls-files` 实取 = 仓内 CI 定义**全在 `.github/workflows/`**（根四份 + `applications/knowledge-service/` 一份，共 5 份），**没 `.gitlab-ci.yml`** ⇒ 内网 GitLab 侧没有入口会执行这些 workflow，所以 TODO 108「CI 门禁」保持开项是**现取事实**而不是保守（本仓不可见的剩余可能性：项目级 CI/CD 设置或外部 runner，未取）・PR-1 未开工・`web/` 内错误体消费面未做。
+
+三道门槛原样有效：**决策完备 ≠ 规范已批 ≠ 开工授权**。「接线 ≠ 启用」在本批多了一个新形状：**分支已推到远端，但那条 runner 仍未接单** —— 推送改变的是代码可见性，不是门禁的执行状态。
+
+```powershell
+git diff -U0 1960d7a6..6bf38b61 -- docs/TODO.md
+powershell -NoProfile -ExecutionPolicy Bypass -File .tmp-scratch/ap-visual/e21-gate-fill.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .tmp-scratch/ap-visual/e15-postcommit.ps1 -ExpectParent 6bf38b61 -ExpectAdd 5 -ExpectDel 3
+powershell -NoProfile -ExecutionPolicy Bypass -File .tmp-scratch/ap-visual/e14-monday-push.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .tmp-scratch/ap-visual/e14-push-channel.ps1
+```
+
 
 
 
