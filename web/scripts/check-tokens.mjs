@@ -19,8 +19,8 @@
  * 不收窄正则”处置 —— 把它收窄到“仅 CSS 声明上下文”会连带放过内联 style 里的硬编色，
  * 代价大于收益。本件不在扫描面内，所以下面举的色值形状只当说明、不会被判红。
  * ==========================================================================*/
-import { readFileSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { readdirSync, readFileSync } from 'node:fs';
+import { dirname, extname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 /* 行尾归一：**所有**文本读取走这里。POC 首跑实踩：Windows checkout 是 CRLF，
@@ -34,11 +34,31 @@ const STYLE_DIR = join(WEB, 'src/styles');
 const fail = [];
 const note = [];
 
-/* ---- 扫描面：样式三件 + 两个 POC 宿主页（PR-0 交付后此处换成 src 下 .vue 文件递归）。
- * 两页都在扫描面内：断言 1/2/4 是全文扫的，灯阵页新加的一条色值字面量不能逸出门禁。---- */
-const targets = ['tokens.css', 'base.css', 'events.css']
-  .map((f) => join(STYLE_DIR, f))
-  .concat([join(WEB, 'poc.html'), join(WEB, 'poc-health.html')]);
+/* ---- 扫描面：PR-0 交付后按文件内原先那句 TODO 落地 = `web/` 下 `.css`/`.ts`/`.vue`/`.html`
+ * 全量递归（含两个 POC 宿主页 —— 断言 1/2/4 是全文扫的，宿主页新加的一条色值字面量
+ * 不能逸出门禁）。
+ * 三个目录故意排除：`node_modules`/`dist` 是第三方与产物（扫它们=把别人的硬编色记在本仓账上，
+ * 且 dist 里的 CSS 是 tokens 的展开态、必然满屏 hex）；`scripts` 排除的是本门禁自己 ——
+ * 它身上就带着 hex 正则与 `rgba(` 字样，L16–20 那段说明已在扫描面内时会被自己判红。
+ * ⚠ 排除靠目录名而不是路径深度 ⇒ 只要这两个名字不出现在 src 下就安全；真出现在
+ *   src 下（例如新加 `src/scripts/`）会静默缩面，那属于要改这里的情形。*/
+const SCAN_EXT = new Set(['.css', '.ts', '.vue', '.html']);
+const SKIP_DIRS = new Set(['node_modules', 'dist', 'scripts']);
+const walk = (dir, out = []) => {
+  for (const e of readdirSync(dir, { withFileTypes: true })) {
+    if (e.isDirectory()) {
+      if (!SKIP_DIRS.has(e.name)) walk(join(dir, e.name), out);
+    } else if (SCAN_EXT.has(extname(e.name).toLowerCase())) {
+      out.push(join(dir, e.name));
+    }
+  }
+  return out;
+};
+const targets = walk(WEB).sort();
+if (targets.length === 0) {
+  // 空扫描面不可能是“全绿”：一个文件也没读到就当通过，等于门禁自己故了。
+  fail.push(`扫描面为空（${WEB.replace(ROOT, '')} 下没找到任何 ${[...SCAN_EXT].join('/')} 文件）`);
+}
 const src = Object.fromEntries(targets.map((p) => [p, readText(p)]));
 const tokensPath = join(STYLE_DIR, 'tokens.css');
 const tokens = src[tokensPath];
@@ -49,7 +69,7 @@ const defined = new Set(
 );
 /* 引用集：全部目标文件里的 `var(--x)` */
 const referenced = new Set();
-for (const [p, text] of Object.entries(src)) {
+for (const text of Object.values(src)) {
   for (const m of text.matchAll(/var\((--[A-Za-z0-9-]+)\)/g)) referenced.add(m[1]);
 }
 
@@ -98,7 +118,9 @@ const normDecls = (body) =>
     .split('\n')
     .map((l) => l.replace(/\/\*[\s\S]*?\*\//g, '').trim())
     .filter((l) => l && l.includes(':'));
-const copyA = tokens.match(/@media \(prefers-color-scheme: dark\) \{\s*:root:not\(\[data-theme\]\) \{([\s\S]*?)\n  \}\n\}/);
+/* 末段的 `\n {2}\}` 是字面意义：它匹的是 tokens.css 里 dark 副本 A 的两空格缩进收括号。
+ * 写成两个裸空格会被 no-regex-spaces 判红（肉眼数不清空格），`{2}` 是同一件事的读法。*/
+const copyA = tokens.match(/@media \(prefers-color-scheme: dark\) \{\s*:root:not\(\[data-theme\]\) \{([\s\S]*?)\n {2}\}\n\}/);
 const copyB = tokens.match(/:root\[data-theme="dark"\] \{([\s\S]*?)\n\}/);
 if (!copyA || !copyB) {
   fail.push('断言5 找不到 dark 副本 A 或 B（主题机制双写缺失）');
@@ -176,13 +198,19 @@ const FIELD_SET = baseF && subF ? [...new Set([...baseF, ...subF])].sort() : nul
  * 这是一条写进代码的耦合，不是隐形假设：两页的字典都按此形状排。 */
 const talk = src[join(WEB, 'poc.html')];
 const lampPage = src[join(WEB, 'poc-health.html')];
-const dictKeys = (text, name, where) => {
+/* 屏上字典的块体抽取单独成一个函数：key 集与 fam/sw 同值校验要读同一个块体，
+ * 写两遍匹配串就是两个会各自漂的坐标（本仓已实踩过一次“同一件事三处陈述”）。 */
+const dictBody = (text, name, where) => {
   const block = text.match(new RegExp(`const ${name} = \\{([\\s\\S]*?)\\n\\};`));
   if (!block) {
     fail.push(`断言6 ${where} 里找不到 const ${name}（屏上字典坐标变了，先核对再改门禁；该项双向比较已跳过）`);
     return null;
   }
-  return [...block[1].matchAll(/^[ \t]+([a-z_][a-z0-9_]*)[ \t]*:/gm)].map((m) => m[1]).sort();
+  return block[1];
+};
+const dictKeys = (text, name, where) => {
+  const body = dictBody(text, name, where);
+  return body === null ? null : [...body.matchAll(/^[ \t]+([a-z_][a-z0-9_]*)[ \t]*:/gm)].map((m) => m[1]).sort();
 };
 const groupsBlock = lampPage.match(/const LAMP_GROUPS = \{([\s\S]*?)\n\};/);
 if (!groupsBlock) fail.push('断言6 poc-health.html 里读不到 const LAMP_GROUPS（灯阵字典坐标变了，先核对再改门禁；分组项双向比较已跳过）');
@@ -193,6 +221,98 @@ const lampKeys = groupsBlock
 const EVENT_KEYS = dictKeys(talk, 'EVENTS', 'poc.html');
 const LAMP_KEYS = lampKeys ? [...new Set(lampKeys)].sort() : null;
 const WHY_KEYS = dictKeys(lampPage, 'LAMP_WHY', 'poc-health.html');
+
+/* ---- 断言 6 在 PR-0 新增的两件（TS 侧）----
+ * 为什么要新增而不是等 check-events.mjs：那个脚本的输入是 PR-1 才存在的 handler 分支与
+ * sse.ts，先建就是空转门禁。但 PR-0 已经交了 `src/api/events.ts`，它身上有三件可校的
+ * 事实，不校就是“两份图例只校了宿主页那一份”：
+ *   ① TS 联合成员 == 后端派生全集（否则前端会声称支持一个后端不产出的事件）；
+ *   ② EVENT_LEGEND 的 key 集 == 派生全集（①的控件面副本）；
+ *   ③ 两副本的 fam / sw **逐字同值** —— 这条是“两份图例只能有一个真相”的机器判，
+ *      只校 key 集校不到它（文案改了 key 集仍相等，而屏上描述就漂了）。
+ * ②与 Record<StreamEventType, LegendRow> 是两套独立机制：typecheck 只保“联合里的每个成员
+ * 都有项”，保不了“项与后端源一致” —— 所以两者不是同一条查两遍。*/
+const TS_EVENTS_REL = 'src/api/events.ts';
+const tsEvents = readText(join(WEB, TS_EVENTS_REL));
+
+/* ① 联合成员：`export type StreamEventType =` 后续的 `| 'x'` 行，读到第一行不是项就停。 */
+const tsUnionNames = (() => {
+  const lines = tsEvents.split('\n');
+  const start = lines.findIndex((l) => /^export type StreamEventType\s*=/.test(l));
+  if (start < 0) {
+    fail.push(`断言6 ${TS_EVENTS_REL} 里找不到 export type StreamEventType（TS 联合坐标变了，先核对再改门禁；联合项双向比较已跳过）`);
+    return null;
+  }
+  const out = [];
+  for (let i = start + 1; i < lines.length; i++) {
+    const m = lines[i].match(/^[ \t]*\|[ \t]*'([a-z_]+)'[ \t]*$/);
+    if (!m) {
+      if (out.length === 0) {
+        fail.push(`断言6 ${TS_EVENTS_REL} 的 StreamEventType 下一行不是「| 'x'」形状（联合项读不到，双向比较已跳过）`);
+        return null;
+      }
+      break;
+    }
+    out.push(m[1]);
+  }
+  return out.sort();
+})();
+
+/* ②③ 图例字典：块体按“一行一键、值对象在同一行”读（与两页的字典同形）。
+ * 只按行首纯空白后的第一个标识符取 key —— 嵌套的 fam/sw 前是 `{ ` 不是纯空白，不会误收。 */
+const tsLegendBlock = tsEvents.match(/const EVENT_LEGEND[^{]*\{([\s\S]*?)\n\}/);
+if (!tsLegendBlock) {
+  fail.push(`断言6 ${TS_EVENTS_REL} 里找不到 const EVENT_LEGEND（TS 图例字典坐标变了，先核对再改门禁；该项双向比较已跳过）`);
+}
+const TS_EVENT_KEYS = tsLegendBlock
+  ? [...tsLegendBlock[1].matchAll(/^[ \t]+([a-z_][a-z0-9_]*)[ \t]*:/gm)].map((m) => m[1]).sort()
+  : null;
+
+/* fam / sw 逐字抽取（不归一空白：两边写法也得同值，否则“同值”这个判据会被自己放宽）。
+ * ⚠ 取值得用**具名分组**，不用位置索引：上一版写的是 `m[2] / m[3]`，而下面那条正则只有两
+ * 个捕获组 —— m[2] 实为 sw、m[3] 恒 undefined ⇒ fam 整列从来没被比过，两边都拿同一个 sw
+ * 对读、 undefined 对 undefined，门禁照打「12 键逐字同值 ✅」。本批反证件 G3（只改一句 fam
+ * 文案）读出 rc=0 时才把它抬出来 —— 这是一条假绿，不是「文案真的同值所以没报」。*/
+const legendRows = (body, where) => {
+  const rows = new Map();
+  let sawAnyKey = false;
+  for (const line of body.split('\n')) {
+    const k = line.match(/^[ \t]+([a-z_][a-z0-9_]*)[ \t]*:/);
+    if (!k) continue;
+    sawAnyKey = true;
+    const m = line.match(new RegExp(
+      `^[ \\t]+${k[1]}[ \\t]*:[ \\t]*\\{[ \\t]*fam:[ \\t]*'(?<fam>[^']*)'[ \\t]*,[ \\t]*sw:[ \\t]*'(?<sw>[^']*)'[ \\t]*\\}`
+    ));
+    if (!m || m.groups.fam === undefined || m.groups.sw === undefined) {
+      fail.push(`断言6 ${where} 的 ${k[1]} 行不是「fam 与 sw 同一行」形状（两副本同值校验读不到该行，本项已跳过）`);
+      return null;
+    }
+    rows.set(k[1], { fam: m.groups.fam, sw: m.groups.sw });
+  }
+  if (!sawAnyKey) {
+    fail.push(`断言6 ${where} 的字典块体里一行都没读到（形状整体变了，本项已跳过）`);
+    return null;
+  }
+  return rows;
+};
+const talkRows = (() => {
+  const body = dictBody(talk, 'EVENTS', 'poc.html');
+  return body === null ? null : legendRows(body, 'poc.html EVENTS');
+})();
+const tsRows = tsLegendBlock ? legendRows(tsLegendBlock[1], `${TS_EVENTS_REL} EVENT_LEGEND`) : null;
+if (talkRows && tsRows) {
+  const both = [...new Set([...talkRows.keys(), ...tsRows.keys()])].sort();
+  const drift = [];
+  for (const key of both) {
+    const a = talkRows.get(key);
+    const b = tsRows.get(key);
+    if (!a || !b) { drift.push(`${key}：只在${a ? 'poc.html' : 'events.ts'}`); continue; }
+    if (a.fam !== b.fam) drift.push(`${key}.fam：poc.html='${a.fam}' vs events.ts='${b.fam}'`);
+    if (a.sw !== b.sw) drift.push(`${key}.sw：poc.html='${a.sw}' vs events.ts='${b.sw}'`);
+  }
+  if (drift.length) fail.push(`断言6 两副本图例漂了（${drift.length} 处）：\n  ${drift.join('\n  ')}`);
+  else note.push(`断言6 图例两副本 fam/sw：${both.length} 键逐字同值 ✅`);
+}
 
 const diff = (a, b) => a.filter((x) => !b.includes(x));
 const cmp = (label, dict, derived) => {
@@ -208,6 +328,8 @@ const cmp = (label, dict, derived) => {
   note.push(`${label}：字典 ${dict.length} / 派生 ${derived.length} ${miss.length + extra.length === 0 ? '✅' : '❌'}`);
 };
 cmp('断言6 事件图例字典', EVENT_KEYS, EVENT_SET);
+cmp('断言6 TS 事件联合', tsUnionNames, EVENT_SET);
+cmp('断言6 TS 图例字典', TS_EVENT_KEYS, EVENT_SET);
 cmp('断言6 /health 分组字典', LAMP_KEYS, FIELD_SET);
 cmp('断言6 /health 说明字典', WHY_KEYS, FIELD_SET);
 
