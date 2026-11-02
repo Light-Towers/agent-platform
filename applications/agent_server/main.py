@@ -34,6 +34,7 @@ from agent_runtime.skills.workflow import discover_workflows
 from agent_runtime.trajectory import PgTrajectoryStore
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from agent_server.agent.graph import DelegateRef, build_graph
 from agent_server.agent.llm import build_chat_model
@@ -697,6 +698,46 @@ async def lifespan(app: FastAPI):
     await close_pool()
 
 
+# --- 前端视觉层静态托管（PR-0 刀⑱）---
+# 方案 docs/plans/plan-web-frontend-minimal-core-2026-10-29.md §9.1 定下的三处改动在本节落地，
+# 三条硬约束各自的成因：
+#   1. 条件挂载。全仓此前零 ``StaticFiles`` 用法（grep 实测 0 命中），本批是第一次。AGENTS.md
+#      明文的零依赖冒烟路径（``DATABASE_URL= uvicorn agent_server.main:app``）在无 web/dist 的
+#      机器上必须照常启动 ⇒ dist 不存在时**不挂载**，而不是挂上去后一路 404。
+#   2. 挂 app、不挂 console_router。test_console_router.py 钉死该子路由的路径集恒等于
+#      ``{("/console.html", ("GET",))}``（恒等性约束）⇒ dist 挂进去会直接弄红它；StaticFiles 本身
+#      是 ASGI app，不需经 api/routes.py 聚合。
+#   3. no-store。与 /console.html 的 ``Cache-Control: no-store`` 同源纪律（滚动升级后不把旧事件
+#      契约的缓存壳发给使用者），而 StaticFiles 默认**不给**这个头。带内容 hash 的 JS/CSS 本不
+#      需 no-store，但 index.html 需要；按最小实现一律 no-store，不引入分文件类型的复杂度。
+_REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
+
+
+class NoStoreStaticFiles(StaticFiles):
+    """静态响应一律带 ``Cache-Control: no-store``（覆写点＝Starlette 给每个文件响应的位置）。"""
+
+    def file_response(self, full_path, stat_result, scope, status_code: int = 200):
+        response = super().file_response(full_path, stat_result, scope, status_code=status_code)
+        response.headers["Cache-Control"] = "no-store"
+        return response
+
+
+def _resolve_web_ui_dist() -> pathlib.Path | None:
+    """返回可挂载的 dist 目录；None = 不挂载。
+
+    配了 ``WEB_UI_DIST`` 却指到不存在的目录 ⇒ WARNING 而非静默跳过：“未构建”（合法状态）与
+    “配了却没有”（部署被改坏）必须能分开读，否则运维只能靠猜（与 Dockerfile 里 langfuse
+    包不装时「关了与坏了分不清」同一条雷的对偶面）。
+    """
+    raw = get_settings().web_ui_dist.strip()
+    cand = pathlib.Path(raw) if raw else _REPO_ROOT / "web" / "dist"
+    if cand.is_dir():
+        return cand
+    if raw:
+        logger.warning("WEB_UI_DIST=%s 已配置但目录不存在，跳过 /ui 挂载（部署被改坏，非未构建）", raw)
+    return None
+
+
 def create_app() -> FastAPI:
     app = build_api_app(title="agent-platform", version="0.1.0", lifespan=lifespan, enable_tracing=True)
     # CORS：允许前端跨域调用 /query 等接口；allow_origins 应从环境变量注入，
@@ -716,6 +757,13 @@ def create_app() -> FastAPI:
     # 无凭据交下游既有 provided>default 语义 → 零行为变更；配 TENANT_JWT_PUBLIC_KEYS_FILE/SINGLE_TENANT 后激活）。
     app.add_middleware(IdentityMiddleware)
     app.include_router(router)
+    # 前端产物只发页面壳与静态资源：鉴权仍由各数据接口的 verify_api_key 依赖把守（与
+    # /console.html 同惯例：壳免鉴权、数据要密钥）——本仓鉴权是每路由依赖而非中间件，
+    # 所以挂一个新 mount 不需要同步改免鉴权路径集（这一点已实取，不是推定）。
+    dist = _resolve_web_ui_dist()
+    if dist is not None:
+        app.mount("/ui", NoStoreStaticFiles(directory=str(dist), html=True), name="web_ui")
+        logger.info("web UI mounted at /ui dist=%s", dist)
     return app
 
 

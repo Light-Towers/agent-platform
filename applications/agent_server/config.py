@@ -128,6 +128,11 @@ class Settings(BaseLLMSettings):
     # CORS：允许的前端来源（逗号分隔），为空时默认回环 127.0.0.1:5173
     cors_allow_origins: str = ""
 
+    # 前端视觉层构建产物目录（PR-0 刀⑱）：空 = 自动探仓库根下 web/dist。
+    # 目录不存在则不挂 /ui（保住 AGENTS.md 明文的零依赖冒烟路径）；显式配了却指到空处
+    # ⇒ 启动记 WARNING，不静默跳过 —— 与 Dockerfile 里 langfuse 那段「关了与坏了分不清」同族。
+    web_ui_dist: str = ""
+
     # Remote Skill 端点（P1：重服务 HTTP 调用）
     knowledge_service_url: str = ""  # 空 = 不注册 knowledge skill
     knowledge_service_key: str = ""
