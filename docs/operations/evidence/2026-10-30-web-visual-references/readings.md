@@ -2420,6 +2420,85 @@ git ls-remote --heads company
 powershell -NoProfile -ExecutionPolicy Bypass -File .tmp-scratch/ap-visual/e15-postcommit.ps1 -ExpectParent <full-rev> -ExpectAdd <n> -ExpectDel <n>
 ```
 
+## 23. 第十六批下半场（2026-11-02 周一）：PR-0 后三刀 + 一刀修复入库 —— 一次真容器 404 把探测基准订正，一条「量具崩溃被读成变异杀死」的假 OK 被抬出
+
+> 读数绑 rev `bd8898a1`（修复刀）与 `1960d7a6`（刀⑲）；刀⑳（本刀：`web/README.md` + 本件 + 工单件 + `docs/TODO.md` + `scripts/evidence/recount_todo_index.py`）**写不了自己的 rev**（§17.8 那条自指边界一字未改地再适用一次）。本节是 §22 之后同一天的第二段账面：上午推两条 ref，下午把 PR-0 剩下的刀次收完。本节的形状类读数在**全部增行之后**用一次独立编辑填，填格那次编辑不得增行（19.4 行 5 / 21.4 行 10 / 22 头注同规）。
+
+### 23.1 开工坐标与本批射程
+
+| 项 | 现取 | 定性 |
+|---|---|---|
+| 开工基线 | HEAD `395bf306`（刀⑱）、branch `feat/web-visual-poc`；工作树内容派生脏 7 件 + 3 条 CRLF stat 噪声 | 接 §22（那条 ref 已推、远端 feat 在 `ddae7f59`） |
+| 本批做的事 | 修复刀（`applications/agent_server/main.py` 三件）→ 刀⑲（构建面四件）→ 刀⑳（账面随动） | 三刀全部**本地提交**，一支未推 |
+| 本批没做的事 | 未 push・未合 main・未 force・未解禁公开镜像・未 distribute 镜像・未改任何 Deployment・CI runner 那一步未实跑・V4 实拍观感未判读 | 逐条见 23.5 末段 |
+| 射程来源 | 用户 2026-11-02 那句「今天就是周一，能将这些问题全都解决，处理完吗？速度一些」 | ⚠ 这句给的是**把在册刀次收完**的授权，**不含**推送 / 合入 / 镜像解禁（那三项在句子里没出现过，仍按未批准处理）。时间压力只改变**顺序与并行度**，不改变任何一条门的判据 —— 本批一条前置条件都没放宽 |
+| 并行时怎么不串味 | 刀⑲ 开工前把 `web/README.md` 那一件 stash 走（提交后 pop），使构建面的分面读数为 4 件而非 5 件 | ⚠ 这是**为了量具读得准**，不是为了少写东西；stash 前先落了一份草稿副本，pop 后逐字回到工作树 |
+
+### 23.2 判据 D：同一条构建链上 /health 200 而 /ui/ 404 —— 根因是探测基准，不是「服务没起」
+
+| 读数 | 旧基准（`__file__` 上溯） | 新基准（进程 CWD） | 取证件 |
+|---|---|---|---|
+| 真容器 GET /ui/ | **404** | **200** + `cache-control: no-store` | e19-23-20261102-151758-241-ab.txt |
+| 启动日志 | 无挂载行（不挂载） | `web UI mounted at /ui dist=/srv/agent-platform/web/dist` | e19-23-20261102-151601-241-build.txt |
+| served 与镜像内 index.html 的 sha256 | 无从比 | **逐字相等**（95e73c05aa42…） | 同上 |
+| 对照格 /ui/not-built-here | — | **404 在位**（这一格专防 SPA fallback 把「没构建」照成 200） | 同上 |
+| 因果 | 两个镜像**同一构建链**、dist 内三文件 sha256 清单**逐字相同** ⇒ 唯一变量是 payload 里那份 main.py ⇒ A 404 / B 200 这一对读数就是因果证据，不是「新的一面绿了」 | | A/B 件 verdict rc=0・5 OK / 0 FAIL |
+
+根因一句话：镜像里 `agent_server` 有两份，被 import 的是 `site-packages` 那份，`parents[2]` 因此数到解释器目录。改法取仓内**早已成立的另一条基准** —— `applications/agent_server/config.py` 的 `env_file=".env"` 就按 CWD 解析，镜像 WORKDIR `/srv/agent-platform` 既是仓库根也是运行时 CWD，两条算出同一个路径。而且取**调用时** CWD 而非 import 时常量（探测基准属运行时事实，冻进 import 顺序＝把「谁启动我」写在导入时刻，与本文件开头那条「装配顺序就是正确性」同源）。
+
+- **失效形状**：从非仓库根启动 ⇒ **不挂载**（不是挂上去一路 404）。「没构建」与「跑错目录」同为不挂载，能分的只有日志 ⇒ 补一行 INFO 报出默认探测点探了哪里，与「配了却不存在」的 WARNING 分面（与 Dockerfile 里 langfuse 包不装时「关了与坏了分不清」同一条雷的对偶面）。
+- **404 有两种语义、必须分开读**（这条在量具里落了注释）：`/ui/` 的 404 = 缺陷本身（期望 0 次）；`/ui/not-built-here` 的 404 = 健康对照格（期望**在位**）。照「日志里零 404」判会把对照格读成红 —— 又一例「判据的散文与判据的对象共用形状」。
+- 基准那一面另有 3 枚变异（退回 `__file__` 上溯 / 混用两基准 / 冻在 import 时），与接线 8 枚同批当场再咬：全红（变异格 11 / 拒绝 0 / 不符期望 0 / 还原失败 0）。
+
+### 23.3 容器里的 ci-web 门禁：八格读数，以及「量具没输入」为什么不算断言红
+
+首轮 e19-23-20261102-151844-241-ciweb-gate.txt：**不符期望的格数 = 1** —— G0-tokens rc=1。它把 `make ci-web` 五步里的四格（install / lint / typecheck / build）跑绿了，tokens 那一格当场崩在 readFileSync ENOENT。
+
+- **定性**：`web/scripts/check-tokens.mjs` 不是纯 `web/` 门禁 —— 它的 `ROOT = join(WEB, '..')`，要读 `web/` **外**四个仓内文件（`packages/agent-runtime/agent_runtime/planner/protocol.py`、`applications/agent_server/api/query_router.py`、`packages/shared-schemas/shared_schemas/health.py`、`applications/agent_server/schemas.py`）。多阶段 builder 只 COPY `web/` ⇒ 容器里没有那些输入。**ENOENT 是「量具没输入」，不是「断言红」**。
+- **处置三条都不做**：不改 Dockerfile 往 builder 阶段塞 Python 文件（那等于为了让取证件变绿而改产品形状）、不把这一格从门禁里删掉、不放宽判据。只把**这一格与它的反证 X2**换到完整 checkout 上跑（本机件 e19-tokens-local.ps1）。CI runner 是完整 checkout ⇒ 那条门在 CI 上照跑，**没被搬走也没被关掉**。
+- 二轮 e19-23-20261102-152247-241-ciweb-gate.txt：G0-install / lint / typecheck / build 四格 rc=0 全 OK，X1 / X3 / X4 / X5 四枚反证全红 OK，**不符期望的格数 = 0**。
+- 本机那一格的三步：基线 rc=0（定义 91 / 引用 91）→ 裸 hex 变异 rc=1 且**点名断言 1**（尾里不得出现 ENOENT / readFileSync 栈，两条同判据）→ 还原后 rc=0 且 `git hash-object` 与 `HEAD:` blob 同 OID（8daaf8c71725…）⇒ 字节无损。
+
+### 23.4 本批自犯 / 坑表
+
+| # | 自犯或坑 | 怎么发现的 | 处置与可复跑证据 |
+|---|---|---|---|
+| 1 | **反证格只校「rc ≠ 0」，把量具自己的崩溃读成「变异被杀死」**（本批最实质的一条） | 同一轮里 G0-tokens 与 X2 都 rc=1，两格尾文本**逐字相同**（Node.js v24.22.2 / ELIFECYCLE）⇒ X2 那个 OK 是假的：它没把裸 hex 断言打红，是 node 读文件时崩了 | 不是改 Dockerfile 凑绿（见 23.3）。搬到本机后给新格加**两条同判据**：命中原因须点名断言文字，且尾里不得出现崩溃特征。⇒ 口径：**反证格的期望不能只是「非零」，必须「非零 + 报的是那件事」**（与 22.4 行 2 同族：那次是关键词过宽把成功读成失败，这次是判据过宽把崩溃读成杀死 —— 两个方向都算同类重复） |
+| 2 | **变异还原件把目标文件写坏了，而且是自己报出来的** | 首轮 e19-50-20261102-152029：sha before AA3ACE4E081F ≠ restored 32A876A4B05E ⇒「byte-identical after restore」格红。成因：PS 5.1 的 Get-Content -Raw 按 ANSI 读 UTF-8-without-BOM，`web/src/styles/base.css` 里的中文注释被读坏，写回就是静默改文件 | `git checkout --` 恢复 + `git hash-object` 与 `HEAD:` blob 比 OID 证逐字。随后 IO 改 `[IO.File]` + UTF8NoBOM、加「目标文件开场必须 git 干净」前置条件、加 blob == HEAD **第二重见证**。复跑 e19-50-20261102-152111：三格 OK、汇总不符 0。⇒ 口径：**自我见证要两把尺**（文件与自己比 sha 比不出「读时已损」；与工作区之外的 HEAD blob 比才抓得住默认编码这类静默改写） |
+| 3 | **中间证据只在会话里读过、没落盘 ⇒ 门禁 fail-closed 读成 NO-BUILD-EVIDENCE**（老坑第二次） | 刀⑲ 面禁件第一轮 e19-14-20261102-142932 的 H 段：上一轮 241 构建的日志只在我眼里绿过，盘上没有 | 建即时拉回件（用 pgrep 判完成，不用中文针 —— 避开 PS→ssh 编码坑），此后 H 段读到实物。§20.4 那条在册口径本批**又踩一次** ⇒ 计入同类重复率 |
+| 4 | **面禁件的分面基准用 git status，把 CRLF stat 噪声读成 forbidden=3 的假红** | 两份件（刀⑲ 与修复刀）第一轮都报 forbidden>0，而内容 diff 里根本没有那三条 | 基准换 `git diff --name-only`（内容派生），未跟踪新文件另用 `??` 单独钉（否则新增文件从分面隐身）；噪声列成可读格 + 一条 basis control（vue 路径确实命中 forbiddenPat ⇒ 「不在分面里」是基准选的功劳，不是模式写宽了） |
+| 5 | **A/B 件首版两处自伤** | loop 变量外泄做存在性检查；no-store 头在容器删除后重 curl ⇒ 永远读 0 的「假严格」 | 逐个判 + exit 2；取头挪进 probe() 并在容器存活时落盘计数。二轮 verdict rc=0、5 OK / 0 FAIL |
+| 6 | **PS 5.1 两处解析坑** | `if (@(([regex]::Matches(...))))` 深嵌套触发 Missing statement block after if；内联 awk 的 `$2` 经 ssh 被拆坏 | 先算变量再用；复杂远端命令一律 scp 脚本文件。本批量具全部过 `[Parser]::ParseFile` 0 错误 |
+| 7 | **Dockerfile 那句注释会把后人引回算错的基准** | 修复刀改了 `applications/agent_server/main.py`，而 Dockerfile 里「产物落点为什么对」仍写 `__file__` 的 parents[2] —— 靠读代码发现，不是靠门禁 | 刀⑲ 同批改注释为 CWD 基准并写明 404 成因与钉子位置（单测里那格「函数体不得出现 parents[ 」）。⇒ 口径：**改基准要顺着引用面找一圈，注释也是引用** |
+| 8 | **提交信息里的形状数写错了两个** | 落笔后拿 `git diff --numstat` 对回：刀⑲ 我写成 add 158 / del 6，实取 **83 / 2**（Dockerfile 那 42 行里含被改的注释段） | 提交前改掉，postcommit 复取与之一致（e15-postcommit 那轮的 add/del 逐值）。⇒ 这一型本批**第三次**踩（21.4 / 22.4 已各登一次），口径不变：形状数只能从当轮命令输出抄，不从上刀散文抄 |
+| 9 | **提交时多打了一个 `--no-verify`** | 当场回查 `.git/hooks` 与 `core.hooksPath` | 实取：除 `.sample` 外无钩子、无 hooksPath ⇒ 本次**没有跳过任何东西**，但这是运气不是纪律。后续两刀不再带该开关（《分支卫生》与 git 安全：跳钩子须用户明示） |
+| 10 | **刀⑳ 新建的分面门 e20-gate-fill.ps1 首跑自伤两格：标记扫描器把「forbidden = 0」读成违规；`Say "…" + $(…)` 把拼接结果丢了，于是 GATE_RC 那一格是空的** | 第一格的征状是「全绿却报 3 条红」；第二格的征状是结论行没值（`GATE_RC=` 就断了）——一个报不出结论的格子既不是绿也不是红，**不得读成任何一侧** | ① `Select-String` **默认不区分大小写** ⇒ 描述行里的小写 forbidden 撞了大写标记。改法不是删描述：标记集改成**带冒号的专用前缀**（FORBIDDEN: / UNTRACKED: / MISS-DECL:）+ `-CaseSensitive`，并给扫描器自己补**两支合成自测**（红串须命中 1、干净串须命中 0）才算这条判据有牙。② 拼接改成 `Say ("…" + $(…))`（裸 `Say "a" + "b"` 在 PS 5.1 里把 `+ …` 吞掉）。⇒ 口径：**自我见证类量具的「结论格」必须能自证非空**，空值不等于 False；与 §17.5 行 1、§22.5 同族**第三次** |
+
+### 23.5 形状类读数（全部增行之后单独填）与本批未做清单
+
+本批新增文字后的形状类读数（判据本体是同轮的 gates / typo 两档文件，本节只抄核对所需的数）：gates4 G6 = total 146 / unique 69 / unresolved_unique 5（五条 BAD 逐条为历史在册项，本批既未新增也未消除：三条 ADR 引用写成目录短名、一条是故意的负控制后缀 mX、一条 docs/plans/README.md）；G7 = 9 / 11 / 14；G8 = 四档破表 hits 全 0。typo：T1 hits=9（码点 forbidden=0 / review=12）、T2 hits=12、T3 hits=0、T4 hits=0、T5 hits=0（脚本标签数 16）。⇒ 与刀⑰ 那一档比对的口径要写准：**不是 diff lines=0，是 2**，两条都是同一条 REVIEW-CP 的行号从 481 挪到 503（工单件本批长了 5 行 ⇒ 坐标随动，不是新条目），而 T1/T2 的 hits 数与逐条清单两边一致。刀⑳ 自身的形状 = files 5 / add 140 / del 25，取自 commit 前 git diff --numstat 的五行输出（readings 79/0、TODO 9/7、工单件 6/1、recount 10/5、web/README 36/12）；commit 后由 e15-postcommit 的 commit face 逐项复核，**两值不等即分面被污染**（本行不增行正是为了让 79/0 这个数在回填前后都成立 —— 回填若增行，它就成了被自己改坏的读数）。
+
+`docs/TODO.md` §0.3「前端」那一组三条的处置（工单件 §12-B 拍板「随 PR-0 落地那一批改」的本批执行）：**106 技术栈选型 → 闭合**（Vue 3 + Vite + TS 已入库并有门禁，判据 = `web/package.json` + `web/pnpm-lock.yaml` + `make ci-web`）；**107 错误契约审计 → 保持开项**（`web/src/api/errors.ts` 只是收敛点本体，第一个消费者属 PR-1，审计未做）；**108 CI 门禁 → 保持开项**（门已接线但未在 CI runner 上实跑过 ⇒ 翻勾就是把「接线」当「启用」）。⇒ 本批复选框**净翻转恰 1 处**（可由 `git diff -U0 1960d7a6..HEAD -- docs/TODO.md` 逐条判：`'^\+- \[x\]'` = 1、`'^\+- \[ \]'` = 0），§0.3 标题「（13 条」→「（12 条」、「前端」行条数 3 → 2、`scripts/evidence/recount_todo_index.py` 的 `DECLARED_TOTAL` 同批从 open 26 / closed 24 改为 **open 25 / closed 25**（脚本口径 5：每批翻转后必须同批更新），复跑该脚本 = PASS rc=0。
+
+**两条旧期望读在新刀型上（本批只登记、不修期望）**：① gates4 的 G2「status 非 docs 应为空」在刀⑳ 上读 **5** = `web/README.md` + `scripts/evidence/recount_todo_index.py` + 三条 CRLF stat 噪声，而那条期望是 POC 阶段（文档只在 docs/ 里动）写的；② e15-postcommit 第 4 项「纯文档刀不得碰后端」在 `d140f91f..HEAD` 上读 `backend=3 <<< BACKEND TOUCHED`，而刀⑱ 与修复刀**按开工授权本体就要动** `applications/agent_server/main.py`。两格同族：**写死的期望是一个随刀次与批次形态变化的函数**，处置不是修量具也不是删格，而是把分面判据换到**内容派生**的口径上（刀⑳ 的分面判据 = e20 的 A 段：基准取 `git diff --name-only` + 五条申报集 + 一条注入式自测）。后端面现取 = **4 文件**（Makefile 19/1・`applications/agent_server/config.py` 5/0・`applications/agent_server/main.py` 66/0・`applications/agent_server/tests/test_web_ui_mount.py` 218/0），逐值已写进工单件 §13.4 本批那一行。本批**未动 e15-postcommit 也未动 gates4**（修法属后端批 / 量具批，不跟在本刀里）。
+
+**未做 / 不得读成已批（逐条点名）**：未 push・未合 `company/main`・未 force・未删分支・未解禁公开镜像（publish 模式那道闸门本批没跑也不许跑在这两条线上）・未 distribute 镜像也未改任何 Deployment・CI runner 那一步未实跑・V4 实拍观感判读未做・`web/` 内错误体的消费面（PR-1）。**两条边界照旧**：241 那一轮构建用的是刀⑲ 提交前的 Dockerfile（提交前又改了它四行旧口径注释，指令行未变 ⇒ 判据 A/B/C/D 仍对应当前形状，但严格说注释改后的文件本体未在 241 重跑）；镜像内跑的是当时的 `web/dist` 产物，dist 本身不入库。三道门槛原样有效：**决策完备 ≠ 规范已批 ≠ 开工授权**；「接线 ≠ 启用」在本批多了一个具体形状：**门已接、runner 未跑**。
+
+### 23.6 附行：本批新建 / 换用的 harness（按用途列名，不写总数）
+
+全部住 gitignored 目录、不入库也不计刀：**e19-package.ps1**（上 241 的 overlay 打包件，本批把 overlay 从写死四件改成 **`git diff --name-only` 派生** + 必填件断言 + stage 内 main.py 基准自证 + 派生计数）、**e19-241-fetch.ps1**（构建完成自动拉回日志，判据用 pgrep 不用中文针）、**e19-241-ab.sh**（A/B 单变量对照件，两版）、**e19-241-ciweb-gate.sh**（容器内 ci-web 门禁，本批把 G0 五格改四格 + 删 X2，**不是删门禁而是换取证面**，理由与指针写在件内）、**e19-tokens-local.ps1**（tokens 三格在完整 checkout 上跑，两版；首版写坏 base.css 见 23.4 行 2）、**e19-fix-gate-fill.ps1**（修复刀专属面禁件，A–F 六段）、**e19-gate-fill.ps1**（刀⑲ 面禁件，A–I 九段，本批改过分面基准）、**e19-61-local-serve.py**（刀⑳ 前用**真实 web/dist** 现取自证 README 那句本机就能读到）。换用（改判据不是改产品）：e19-fix-probe.py・e19-wiring-check.py（G5 改 CWD 派生）・e19-wiring-probe.py（新增 M9/M10/M11）。未改：gates4.ps1 / typo-scan.ps1 / check_doc_sync.py / check-tokens.mjs / e15-postcommit.ps1。
+
+```powershell
+uv run pytest applications/agent_server/tests -q
+uv run python .tmp-scratch/ap-visual/e19-wiring-check.py
+powershell -NoProfile -ExecutionPolicy Bypass -File .tmp-scratch/ap-visual/e19-fix-gate-fill.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .tmp-scratch/ap-visual/e19-gate-fill.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .tmp-scratch/ap-visual/e19-tokens-local.ps1
+uv run python scripts/evidence/recount_todo_index.py
+bash .tmp-scratch/ap-visual/e19-241-ciweb-gate.sh
+powershell -NoProfile -ExecutionPolicy Bypass -File .tmp-scratch/ap-visual/e15-postcommit.ps1 -ExpectParent <full-rev> -ExpectAdd <n> -ExpectDel <n>
+```
+
 
 
 

@@ -1,16 +1,16 @@
-# web/ — 前端视觉层（POC 已入库 · **PR-0 骨架已交，托管与 CI 未交**）
+# web/ — 前端视觉层（POC 已入库 · **PR-0 三段已交：骨架 / 后端托管 / 构建与 CI 接线**）
 
-> 状态：POC。授权范围 = 用户 2026-10-30 的「先出个最小 poc，我看看效果」。**末次随动 2026-11-02（第十六批刀⑰）**：
+> 状态：POC。授权范围 = 用户 2026-10-30 的「先出个最小 poc，我看看效果」。**末次随动 2026-11-02（第十六批刀⑰⑱⑲ + 一刀修复，本文件那一刀是刀⑳）**：
 > 该批**动了门禁代码，也动了样式以外的整个 `src/` 面** —— 与下面那两行历史陈述正相反，那两行不能当现值读。
 > 历史陈述（保留只为不让后人拿它们当现值）：第七批「只改了四份文档与本目录这份 README，**未动本目录里任何一个样式值、
 > 一行门禁代码**」（六件现取与上一版逐字相同，逐口读数在取证件 §14）；更早那句「第六批只改了取证脚本与四份文档」同属历史。
 > 这一句在本批之前是「**POC 授权 ≠ PR-0 开工授权**」，本目录里只有样式层与静态宿主页。⇒ 从本批起它**是历史陈述**（保留只为不让后人拿它当现值）：
 > 开工授权已于 2026-11-02 由用户在选项里点选取得，该选项描述明写「这会终结在册那句『零 POC 代码』」。
 > 三道门槛在这一天分开走完，不是被一次点选合并掉：设计方案已批 → 开工授权 → 本批只交 PR-0 的**第一段**。
-> **PR-0 仍未交付完**：本批 = 刀⑰（骨架八件 + 门禁扩面 + 本机四道门实取）。剩下两段各有刀次：刀⑱ = FastAPI 条件挂载 +
-> `NoStoreStaticFiles`（§9.1 那条「不得挂 console_router」的约束落点）、刀⑲ = `make ci-web` + workflow `paths:` +
-> 多阶段 Dockerfile + `.dockerignore`。⇒ 本目录**不得读成「PR-0 已完成」**；A5 那条「一个故意引入的前端漂移能让 CI 红」
-> 现在只在**本机门禁**上反证成立，CI 面那一半要等刀⑲。判据与规范本体见 docs/plans/ 下的视觉件与工单件（本文件不复述）。
+> **PR-0 的代码面已交完**（刀⑰ 骨架八件 + 刀⑱ 后端托管 + 刀⑲ 构建与 CI 接线 + 一刀探测基准修复，2026-11-02 全部本地入库），
+> 但**交付 ≠ 验收**：三条未验证项照旧在册（§二 第三条），所以本目录仍**不得读成「PR-0 已验收」**。A5 那条「一个故意
+> 引入的前端漂移能让 CI 红」现在在**本机与容器两处门禁**上反证成立（逐格清单以反证件为准，本文件不抄格数），
+> CI runner 那一半仍未实跑。判据与规范本体见 docs/plans/ 下的视觉件与工单件（本文件不复述）。
 
 ## 一、本目录有什么（**两个视图，不是一个页面**）
 
@@ -51,13 +51,24 @@
 - ~~无 Vue / 无构建链 / 无 package.json / 无 TypeScript~~ ⇒ **第十六批刀⑰ 已交**（本目录不再处于“只有两条 `node` 命令”的状态）。
   现在的命令面是**两套独立的工具链**（§9.2 那条定案）：`pnpm` 一面（install / lint / typecheck / build，需 Node ≥ 22.12）、
   `node` 一面（门禁与两个静态宿主页的无构建预览，仍可用）。两套互不依赖，共用一个仓库但**不共用 lockfile**。
-  ⚠ 本批**只在本机**实取过这四道门，CI runner 上跑不跑得住属刀⑱ 之后的刀⑲（本机 Node 版本与镜像里的 Node 版本不是同一个事实）。
+  ⚠ 本段那句「只在本机实取」自刀⑲ 起不完整：五条门已在 **node:24-alpine 容器里实跑**（G0 基线 + 四枚反证，
+  逐格读数在取证件 §23），而**CI runner 那一半仍未实跑** —— 本机 Node 版本、容器 Node 版本、runner Node
+  版本是三个事实，前两个已取、第三个未取。check:tokens 那一格是例外：它要读 `web/` 外的四个仓内文件，
+  builder 阶段没那些输入 ⇒ 它只能在完整 checkout 上跑（定性与读数同在 §23）。
 - 无 api 客户端、无 SSE 消费、无 `/health` 拉取：**两个页面上每一个数字都是手写的假数据**（包括灯页那 30 行的值）。
   新增的 `src/` 骨架**同样没有数据面**，而且它不沿用那套假数据：`web/src/App.vue` 在屏上直写「PR-1/PR-2 未交」。
   本批只交了 `describeError` / `describeStreamError` 两个**收敛点本体**与事件字典 —— 它们的第一个消费者（`client.ts` / `sse.ts`）属 PR-1，
   所以本批的反证格只能拿**静态形状**做对象（见 §五），不能拿“一个真请求失败后屏上怎么写”做对象。
-- 无 Dockerfile、无 CI 接线、无 FastAPI 托管。门禁挂在 `make ci-web`（**尚未创建该目标**），不进 `make ci`。
-  ⇒ `dist/` 现在只能在本机 `pnpm build` 后拿到，**生产面上还没有任何东西能读到它**：挂载（刀⑱）与构建接线（刀⑲）都未交。
+- ~~无 Dockerfile、无 CI 接线、无 FastAPI 托管~~ ⇒ **第十六批刀⑱ + 刀⑲ 已交**（本目录不再处于"产物无人读"的状态）：
+  托管 = `applications/agent_server/main.py` 的条件挂载（`/ui`，`NoStoreStaticFiles`）；构建接线 = Dockerfile **多阶段**
+  （`node:24-alpine AS web-builder` → `python:3.11-slim`，形态 A″：运行时零 Node）+ `make ci-web` 五步 + workflow 两处 `paths:` 含 `web/**`。
+  ⚠ **三条未验证项照旧在册**，不得读成已上线能力：① CI runner 上那一步未实跑过（本机与内网均不可达 GitHub）；
+  ② 镜像只在 241 的 scratch 里做过**验收构建**，未走 `build.sh`/`distribute.sh` 分发链，也未推任何节点；
+  ③ 这批刀尚住在集成分支上，**未合 `company/main`**。⇒ "接线 ≠ 启用"，挂载也只到"构建产物被读得到"这一层。
+  ⚠ **托管的探测基准 = 进程 CWD 下的 `web/dist`**（没有 `WEB_UI_DIST` 时）：与 `config.py` 的 `env_file=".env"` 同一条基准。
+  它不是从 `__file__` 往上数 —— 镜像里真正被 import 的包在 `site-packages/`，往上数会算到解释器目录，
+  于是 `/health` 200 而 `/ui/` 404（2026-11-02 241 实跑抬出并当场修掉，全案见工单件 §9.4）。
+  从非仓库根启动 ⇒ **不挂载**（不是挂上去一路 404），这类部署显式给 `WEB_UI_DIST`；两种成因靠日志分开读（缺目录是 INFO，配了却不存在是 WARNING）。
 - 无字体资产：IBM Plex 六件 woff2 不在本机也不在仓库，base.css 的 @font-face 整块是注释状态。
   ⇒ **屏幕上看到的是系统回落脚本，不是 Plex**。这是刻意选择：
   拿会 404 的 @font-face 冒充「字体已接」会让截图判据失真。
@@ -81,7 +92,7 @@ pnpm install --frozen-lockfile   # 装依赖（与 uv 那套完全独立；lock 
 pnpm check:tokens                # 视觉门禁（就是上面那一条，挂成脚本名以便 CI 直接调）
 pnpm lint                        # eslint（flat config 三面：类型感知 / vue / 纯语法）
 pnpm typecheck                   # vue-tsc --noEmit（.vue 的 props 校验只有它做）
-pnpm build                       # vite build → web/dist/（base=/ui/；托管未接 ⇒ 产物现在无人读）
+pnpm build                       # vite build → web/dist（base=/ui/；托管已接：从仓库根起服务就读得到它）
 ```
 
 ⚠ `pnpm dev` / `pnpm preview` **不属本机取证通道**：dev 面向 :5173 并代理五个后端前缀（CORS 只放行 5173 那条事实写在
@@ -97,6 +108,18 @@ node .tmp-scratch/ap-visual/probe-throw2.mjs    # 三口 throw 逐口实测（�
 ```
 
 ⇒ 这四条的读数全部在取证件 **§14**（含取数时刻与逐条命令）。实拍 PNG 落 `.tmp-scratch/ap-visual/shots/`，**不入库**（沿用「截图与日志不入库」那条在册口径）。
+
+**构建与托管面（自第十六批刀⑱⑲存在）**：
+
+```bash
+make ci-web                     # 五步：frozen install → check:tokens → lint → typecheck → build（故意不并进 make ci）
+docker build -t ap-web-probe:local .     # 两阶段；builder 只产 dist，final 里无 node/npm/pnpm/corepack
+uvicorn agent_server.main:app --port 8000  # 从仓库根起 ⇒ 读到 web/dist ⇒ GET /ui/ 200 + Cache-Control: no-store
+```
+
+⇒ 三条实测口径现在就能自证（不必等人）：① 响应体 sha256 与镜像内 `web/dist/index.html` 逐字相同；
+② 两个 hash 资源（`.css`/`.js`）也带 `no-store`；③ `/ui/<不存在的路径>` 必须 **404** —— 这一格是专门用来
+防"SPA fallback 把没构建照成 200"那种假绿的。逐条读数在取证件 **§23**。
 
 预览起来后两个页各一个地址：`http://localhost:8123/poc.html`（对话页）与
 `http://localhost:8123/poc-health.html`（灯阵页）。预览服务器已改过 CSS 的话，浏览器要**硬刷新**（旧标签页会用内存里那份）。
@@ -198,5 +221,6 @@ G4 字典坐标改名），再加 eslint 类型感知面两格（G5 未使用变
 - **本目录已按方案 A 本地入库**（2026-10-31）：刀① = 本文件 + `web/src/styles/` 三件（**本提交即刀①**）、刀② = `web/poc.html` / `web/poc-health.html` / `web/scripts/check-tokens.mjs`、刀③ = 四份文档（视觉件 / 取证件 / 工单件 / 顶层 docs 索引）；**当时的自限是不 push、不碰 main、不 force、不解禁公开镜像**，合 main 仍须用户显式批示。逐刀 rev 与每刀的 G1（后端目录 diff = 0 行）以取证件 **§15.12** 为凭；那一节已填完 ⇒ 本行读成「已入库」。
   ⚠ **但「仅指本地」那一半自 2026-11-02 起不再是事实**：第十六批刀⑯ 已把 `feat/web-visual-poc` 与
   `lineage/intranet-v3-until-2026-10-19` 两条 ref 推到内网远端（rc=0・new branch・main 未动・非 force・公开镜像未推）。
-  刀①–③ 那句「不 push」已被上面那段推翻；**未合 main 仍成立**（合 main 须用户显式批示，它在人拍板位）。在册欠项两项的当前状态：① 根 README 目录表补 `web/` 行 —— **已完成（第九批，逐面读数见取证件 §16）**；② `make ci-web` 仍未建（它是 PR-0 交付物，形已定死在工单件 §9.3）。⚠ 上一版这一句后面的理由是「POC 授权不等于 PR-0 开工授权」——
-  那道门 2026-11-02 已走开（开工授权已点选取得），所以现在的理由是**刀次未到（属刀⑲），不是授权未到**。
+  刀①–③ 那句「不 push」已被上面那段推翻；**未合 main 仍成立**（合 main 须用户显式批示，它在人拍板位）。在册欠项两项的当前状态：① 根 README 目录表补 `web/` 行 —— **已完成（第九批，逐面读数见取证件 §16）**；② `make ci-web` —— **已建（刀⑲，五步独立、不并进 `make ci`）**，形定死在工单件 §9.3，同批落 workflow 两处 `paths:` 含 `web/**` 与多阶段 Dockerfile。
+  ⚠ 上一版这一句的理由链（「POC 授权 ≠ PR-0 开工授权」⇒「刀次未到」）到刀⑲ 为止闭合；**现在这条欠项只剩未验证的那半截**：
+  CI runner 上那一步仍未实跑（就是 §二 第三条的未验证项 ①），所以它读成「门已接线、未在远端跑过」，不读成「CI 已拦过东西」。
