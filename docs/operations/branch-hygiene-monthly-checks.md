@@ -226,3 +226,49 @@ Dependabot 在公开仓活跃）本轮**一条未解**，表中读数只是复�
 
 **本轮未做的动作（诚实边界）**：未跑第 3 步逐枝独有提交与第 4 步 worktree 面・未 `git fetch`（含 `--prune`）・**未删任何分支**（含那条可删候选 `company-snapshot`，它仍需单独批示）・未动 `github-legacy` 的 pushurl 禁用位。`main` 与上一节同 sha `fe22794c` ⇒ 「不动 main」在本节仍是可复取的读数而不是口头承诺。
 
+## 2026-11-02 步 3 补跑节（第十九批，同日；**首次真正跑逐枝三列**；读数绑 `c9622fdc`）
+
+上一节自己点名的欠项是「第 3 步未跑 ⇒ 本行只是计数，不能读成本地无死枝」。本节就是把那一步补上，并且它当场抬出了**一条三列全命中的本地死枝**——这正是「计数不能当判定」那句话的实物形式：补跑前本地 10 条分支里 1 条是死枝，只跑计数的那一节读不出来。
+
+**base 的取法（口径随 ADR-0014 改）**：`docs/adr/0014-web-poc-integration-branch-exception.md` §2 第 1 条已把 `feat/web-visual-poc` 认定为唯一集成分支，所以本轮 base 取它（@ `c9622fdc`），不再取上一节用的那条旧工作线。base 换形的后果要如实写：**换 base 会改变「独有 commit」的分母**，因此本表与 §3 那张表**不同基**，禁止跨表比数值。
+
+三列口径与守卫（件 `.tmp-scratch/ap-visual/e24-00-<时刻>-monthly-step3.txt`，只读、不动任何 ref、不 fetch）：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .tmp-scratch/ap-visual/e24-monthly-step3.ps1
+```
+
+| 分支 | cherry `+` | 独有文件 | 是 base 祖先 | 分类 / 本轮处置 |
+|---|---|---|---|---|
+| `company-snapshot` | 2 | `<无数字>`（异宗，无 merge-base） | 否 | 冗余本地副本（tip == `company/main` 均 `fe22794c`）⇒ **仍是可删候选，本轮未删**（需单独批示） |
+| `docs/dependabot-round4-2026-10-24` | 2 | 7 | 否 | 非死枝 |
+| `feat/nl2sql-ttl-and-006-slim` | **0** | **0** | **是** | **死枝（三列同时命中 AGENTS.md 分支卫生 #1 的判据①）⇒ 本轮当场 `git branch -d` 退役** |
+| `feat/web-visual-poc` | —（base） | — | — | 集成分支本体 |
+| `fix/dependabot-pillow-13-2026-10-24` | 3 | 7 | 否 | 非死枝 |
+| `fix/dependabot-security-int` | 2 | 6 | 否 | 非死枝（与 §3 那轮的「6 个独有文件」同值，未漂） |
+| `fix/dependabot-security-oct-2026-10-24` | 2 | 6 | 否 | 非死枝 |
+| `lineage/intranet-v3-until-2026-10-19` | 99 | `<无数字>`（异宗） | 否 | 历史锚 ref ⇒ 按 ADR-0014 §2 第 2 条**不计入**「工作分支」维度 |
+| `main` | 6 | 352 | 否 | 长期分叉线；每次「合入 main」动作后必须重跑本节 |
+| `mirror/nl2sql-ttl-and-006-slim` | 5 | 350 | 否 | 公开镜像侧载体，按分支卫生 #5 单独算，不混入内网计数 |
+
+⚠ 两个 `<无数字>` 不是「读不出来的 0」：§6.3 那条纪律（异宗分支的三点差量**没有值**，写 0 就会把一条不该删的分支判成可删）在本轮是**被执行**的而不是被引用的——脚本对每条分支先跑 `git merge-base` 判有无公共祖先，无则记 `<无数字>`。
+
+**死枝计数 = 1，且本轮当场处理** ⇒ AGENTS.md #3 的「死枝 >1 当周处理」未触发（1 条不需要等当周）。
+
+### 退役执行读数（唯一一条被动的 ref 删除）
+
+| 动作 | 实取 |
+|---|---|
+| `git branch -d feat/nl2sql-ttl-and-006-slim` | stdout `Deleted branch feat/nl2sql-ttl-and-006-slim (was d140f91f).`，rc=**0**。用的是 `-d`（自带「已合入」检查，删不动会当场拒绝），**不是 `-D`** |
+| 本地 heads 条数 | 10 → **9**（`for-each-ref refs/heads` 复取） |
+| 有没有丢 commit | `git cat-file -t d140f91f` = commit・`git merge-base --is-ancestor d140f91f HEAD` rc=**0**・`896f966e` 同法 rc=**0** ⇒ 台账曾绑定的两个 rev 都仍在 HEAD 祖先链上，删的只是 ref 名 |
+| 远端面 | `company` 从未有过该分支（本轮 ls-remote heads=3 内无它）⇒ 本轮**零远端动作**；`mirror/nl2sql-ttl-and-006-slim` 那份公开载体仍在（独有文件 350） |
+| 代价（必须登记，不能只报收益） | 该**分支名从此不再解析**：`git rev-parse --verify feat/nl2sql-ttl-and-006-slim` rc=**128**；`git grep -c` 实取全仓 `docs/` 下有 **38 处**引用（分布在 10 个文件，单份取证件里 20 处）以它为坐标。⇒ 口径：**历史取证台账里的分支名不回填**（那是当时的实物，改了就是篡改快照），复跑旧命令时以当时登记的 sha 取代名；**不得为了让旧命令能跑而重立同名 ref** |
+
+**复审触发条件（分支卫生 #2：没这条不许登记）**：
+1. 若发现任何 commit 只存在于已删的那条线上（判据 = `git log --all --not HEAD` 非空，或某 sha 只在 `mirror/nl2sql-ttl-and-006-slim` 的树里）⇒ 从镜像侧 fetch 回来**重立**该 ref 并推翻本轮结论；本轮删枝的正当性完全建立在上面那行「三列全 0 / 是祖先」的可复跑读数上，不建立在记忆里。
+2. 若 `docs/` 里出现**必须按分支名**才能复跑、且 sha 形式无法替代的取证命令 ⇒ 说明「不回填、按 sha 复跑」这条口径在该处不成立，回到本节重写处置。
+3. `company-snapshot` 的复审条件沿用 §3 那行原话（`refs/remotes/company/main` 仍在 ⇒ 本地这条无唯一持有 ⇒ 可删；远端那条被重写/删除 ⇒ 升为唯一持有，禁删）。本轮两侧仍同 sha，**未删**。
+
+**本轮仍未做的动作（诚实边界）**：第 4 步只顺手取了 `git worktree list`（2 条，detached 1，与上一节同值）⇒ **worktree 逐项清理判定仍未跑**・未 `git fetch --prune`（跟踪面陈旧项仍在）・未删 `company-snapshot`・**远端一条分支也未动**（未推、未删、未 force）・未动 `github-legacy` 禁用位・未推 `mirror/*`。另需说明：本节的删枝动作**只发生在本地**，所以上一节「远端 heads = 3」的读数在本轮复取后仍是 3，未因删枝而变。
+

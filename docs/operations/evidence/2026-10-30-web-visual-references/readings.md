@@ -2634,6 +2634,67 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .tmp-scratch/ap-visual/e14-p
 uv run python scripts/lint_public_mirror.py --mode publish --base 88515cab --ref HEAD
 ```
 
+## 26. 第十九批（2026-11-02 更夜：刀㉓ 补推 + 月度体检第 3 步首次补跑 + 第一条本地死枝退役）
+
+### 26.1 坐标与本批刀次
+
+开工时 HEAD = `c9622fdc`（刀㉓，本件 §25 那一刀）、`company/feat/web-visual-poc` = `0b4c1f37` ⇒ 本地领先 1（`rev-list --count` 实取）。本节先回答一个插入项：用户对 `docs/adr/0014-web-poc-integration-branch-exception.md` 提示「做了改动」，实取 `git diff` 与 `git diff --ignore-cr-at-eol` 对 HEAD **均为空行** ⇒ 磁盘内容 = 已入库内容，**没有待收 delta**；诚实边界是：本量具**区分不了**「你的改动已随刀㉓ 入库」与「那次保存是空操作」，两者在 git 面上同形。工作树脏项 = 3 条 `web/src/**.vue` 的 CRLF 噪声（已登记形状，本批未修）。
+
+本批 = **刀㉔**（只动文档：月度体检新增一节・ADR-0014 两处随动・本件新开本节・工单件 §13.4 一行），以三条批示为开工依据（用户逐条点选，非我推断）：① 刀㉓ 补推（先 L3）② 死枝当场 `git branch -d` 并入账 ③ 下一刀选「读数入账」而不是 PR-1。
+
+### 26.2 刀㉓ 补推（三通道，逐格实取）
+
+| 通道 | 读数 | 判读 |
+|---|---|---|
+| L3 深度安全审查（在当天最终 rev `c9622fdc` 上） | `findings_count = 0` | 以命中数为绿，不以状态字段为绿 |
+| PROBE（`e14-11-push-kit-20261102-210750-probe.txt`） | `status-all=3 content-diff=0 REAL-DIRTY: 0 UNTRACKED: 0`・两支 SELFTEST-OK・后端面 `touched vs d140f91f = 3 / declared = 3 / OUTSIDE-DECLARED: 0`・正控制（去过滤）= **40**・ls-remote `lines=6 heads=3 verdict=READ-OK`（三条 post-quantum advisory 被分类器判为**非读失败**，同一轮自测把 timed-out 行判 NO-READ）・dry-run `0b4c1f37..c9622fdc` rc=0・lineage `Everything up-to-date` | **blockers = 0**；dry-run 就是服务端的预期回显，与之后 EXECUTE 的实际回显逐字同值 |
+| EXECUTE（`e14-11-push-kit-20261102-210811-execute.txt`） | feat push **rc=0**，服务端回显 `0b4c1f37..c9622fdc`（**两点、无 `+`、无 forced update / rejected**）・lineage rc=0・post-read `refs/heads/main` = `fe22794c5a36e855114e2bbf99c0df341b3f695f` 与推送前逐字同值・blockers = 0 | 快进、非 force；件内推送路径无 `-f` / `--force` / `--force-with-lease`，target 列表含 `main` 直接 REFUSE |
+| 独立复取（`e14-push-channel.ps1` 写入 `e14-08-push-channel.txt`） | `remote refs literally containing c9622fdc0c31 : [company/feat/web-visual-poc]`・`lines=6 heads=3`・`HEAD..company/main` = 2 且 common ancestor = `[]`（两条未因推送改变）・`github-legacy pushurl=DISABLED-no-push` 原样 | 换一具量具得到同值 ⇒ 「main 未动 / 禁用位未动」是被证住的 |
+
+本轮新读到一条此前没记的事实：EXECUTE 的服务端回显里有 GitLab 的 **merge request 创建链接**。它的判读只能到「内网仓有 MR 评审载体」这一层，**不能读成门禁执行**——仓内仍无 `.gitlab-ci.yml`，所以 ADR-0014 §2 第 1 条那句「PR-1 起工作分支从集成分支切出、PR 合回」在**评审这一半**有服务端入口，在**检查这一半**没有（「推到远端 ≠ 门禁执行」原样成立）。
+
+### 26.3 月度体检第 3 步首次补跑（取数面）
+
+命令 = `powershell -NoProfile -ExecutionPolicy Bypass -File .tmp-scratch/ap-visual/e24-monthly-step3.ps1`（只读，不动任何 ref、不 fetch），件 `e24-00-20261102-205531-monthly-step3.txt`。base 按 ADR-0014 §2 第 1 条取 `feat/web-visual-poc` @ `c9622fdc`（与 §3 那轮**不同基**，禁止跨表比数值）。三列逐值（cherry `+` / 独有文件 / 是否祖先）：`feat/nl2sql-ttl-and-006-slim` **0 / 0 / 是**；`company-snapshot` 2 / 无值（异宗）/ 否；`lineage/…` 99 / 无值（异宗）/ 否；`main` 6 / 352 / 否；`mirror/…` 5 / 350 / 否；三条 dependabot 线 2/7、2/6、3/7、2/6。**死枝计数 = 1**。
+
+两个异宗分支的独有文件列记的是 `<无数字>` 而不是 0——§6.3 那条纪律（曾把失败哨兵字符串读成一个文件名、从而把不删的分支判成可删）本轮是**被执行**的：脚本先跑 `git merge-base` 判有无公共祖先。⇒ 本轮也反向证明上一节那句「本行只是计数，不能读成本地无死枝」不是谨慎修辞：只跑计数就读不出那 1 条。
+
+### 26.4 退役执行（本批唯一的 ref 动作，全在本地）
+
+| 读数 | 值 |
+|---|---|
+| `git branch -d feat/nl2sql-ttl-and-006-slim` | stdout `Deleted branch feat/nl2sql-ttl-and-006-slim (was d140f91f).`，rc=**0**（用 `-d` 不用 `-D`） |
+| 本地 heads | 10 → **9** |
+| 是否丢 commit | `git cat-file -t d140f91f` = commit・`git merge-base --is-ancestor d140f91f HEAD` rc=**0**・`896f966e` 同法 rc=**0** ⇒ 两个曾被台账绑定的 rev 仍在 HEAD 祖先链上 |
+| 代价（不只报收益） | `git rev-parse --verify feat/nl2sql-ttl-and-006-slim` rc=**128**（分支名不再解析）；`git grep -c 'feat/nl2sql-ttl-and-006-slim' -- docs` 实取 **10 个文件共 38 处**引用（本件单件 20 处）。⚠ 38 这数随文档增长而变，引用前重取该命令 |
+| 远端 | **零动作**（`company` 从未有过该分支；未推未删未 force；`mirror/nl2sql-ttl-and-006-slim` 仍在） |
+
+由此定下两条口径（全文写进 ADR-0014 §5 第 6 条）：**历史取证台账里的分支名不回填**（本件 §10–§15 那批 `d140f91f` 时期的行一条未改，那是当时实物），复跑时按 sha 取代名；**不得为了让旧命令能跑而重立同名 ref**。⚠ 下面那个复跑块故意**不写 `git branch -d`**：它是一个只能执行一次的破坏性动作，进了「照抄就能复现」的块里就是把删枝命令交给后人（写本行时发现并改拍为只读的 `git branch --list`，期望输出为空）。
+
+### 26.5 本批自犯 / 坑表
+
+| # | 情 | 实取证据 | 处置 |
+|---|---|---|---|
+| 1 | 头一次拿 `git rev-list --count <base>..<branch>` 当死枝判据时报的是「独有 commit 数」，而月度体检 §3 那张表的口径是「cherry `+` / 独有文件 / 是否祖先」三列 | 两条读数在同一枝上不同形（两点计数看不见内容级差异） | 另写探针补齐三列（带 §6.3 的 merge-base 守卫），**不把旧口径的读数当作新口径的证据**；两点计数只当旁证 |
+| 2 | 删枝后旧命令会报 `Needed a single revision`，后人复跑会误判为「环境坏了」 | `git rev-parse --verify` rc=128 当场实取，并用 `git grep -c` 量出受影响坐标规模 | 在 ADR-0014 §5 第 6 条与本件同时写下「按 sha 复跑」的替代形式 + 触发复审条件；不回填历史台账 |
+| 3 | 外层包装码依旧不可信（本批 `git branch -d` 经 PowerShell 包装时 stderr 的 warning 仍会混进输出流） | 一律改为**直接测 `$LASTEXITCODE`** + 读落盘件（§24.6 / §25.5 行 3 同一坑，本批未再误判） | 口径沿用，不改文档形状 |
+| 4 | 门件那一格的**期望被写成了刀次的函数**：刀㉓ 把 `new-file witness` 的期望写成「absent-in-HEAD 必须 ≥ 1」，而本刀申报的四件文档全在 HEAD 里 ⇒ 真实计数恒 0，照抄旧期望会把一条**正确形状**读成假红（报 `<<< BASIS-BLIND-TO-NEW-FILES`） | ⚠ **本行不得写成「我跑到了那一版」**：旧期望从未在本刀实跑（我在复制 e23 后、跑之前就改了它）。可证的形式是**算术**：本轮实测 `absent-in-HEAD=0`，而旧判决式是 `absent >= 1 AND blind == 0` ⇒ 前件已假，那一版必然走到 `<<<` 分支。⇒ 这是**由本轮读数推演出的假红**，不是实测过的红；与 §24.2 那条红线（写进文档的判据必须已被实跑过一次）**同型而方向相反**：那里是「未跑就写成期望」，这里是「未跑就写成我撞过」。要问的不是「期望该改成 0 吗」，而是「这一格要证的**命题**是什么」 | **不删格、也不把期望改成 0 凑绿**：真实计数保留但**取消它的判决权**（无新文件时不印判决，只写本轮形状），另加一格**每轮注入的合成项**（一个不存在的申报路径，期望 absent=1 / not-seen=1）⇒ 这一格从此**与刀次无关**，每轮都必须读出 `WITNESS-TEETH-OK`（本轮实读 1/1）。⚠ 与工单件 §13.4 那条「纯文档刀那一格读数是刀次的函数（backend 文件数）」是**同族第二例**：上例把写死的 0 换成了申报集，本例把「树该长成什么样」换成了「量具自己能不能咬」 |
+
+### 26.6 未做 / 不得读成已批（逐条点名）
+
+§25.6 那句「未删任何分支」是**第十八批的批次快照**，本批只删了那**一条**（本地・`-d`・三列全命中）；它不适用于 `company-snapshot`——那条仍是可删候选且**本批未删**（需单独批示）。其余在册未动项原样：**未碰远端 `main`**（三具量具同值 `fe22794c`）・未 force・未动 `github-legacy` pushurl 禁用位（公开镜像那一问仍按**未拍板**处理，本批零动作）・未推 `mirror/*` 任何分支・未 `git fetch --prune`・worktree 逐项清理判定仍未跑（只顺手取了 `git worktree list`：2 条、detached 1、与上一节同值）・**V4 实拍未做**（用户已拍「随 PR-1」）・`make test` 全量 10 session 未跑（本批只跑 lint 级四门 + 文档面形检）・**CI runner 仍未实跑**（本批新增一条可核事实：内网 GitLab 有 MR 入口但无 CI 入口）・**PR-1 未开工**（用户本批点的是「读数入账」，不是开工授权）。三道门槛原样：决策完备 ✅ → 规范已批 ✅ → 开工授权 ✅（PR-0 本体），**第十九批未扩张授权面**。
+
+```powershell
+git ls-remote --heads company
+git branch --list feat/nl2sql-ttl-and-006-slim
+git merge-base --is-ancestor d140f91f HEAD
+git rev-parse --verify feat/nl2sql-ttl-and-006-slim
+git grep -c 'feat/nl2sql-ttl-and-006-slim' -- docs
+powershell -NoProfile -ExecutionPolicy Bypass -File .tmp-scratch/ap-visual/e24-monthly-step3.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .tmp-scratch/ap-visual/e14-monday-push.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .tmp-scratch/ap-visual/e14-push-channel.ps1
+```
+
 
 
 
