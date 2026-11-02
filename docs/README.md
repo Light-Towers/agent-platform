@@ -43,6 +43,7 @@
 **2026-10-26 追记 · 本表此前漏点两篇 ADR**（改前本索引正文里 `docs/adr/0012`、`docs/adr/0013` 命中数为 0）：
 - `docs/adr/0012-nl2sql-branch-consolidation.md` —— 分支收敛与删除死枝的依据登记（AGENTS.md《分支卫生》第 4 条指向它）。
 - `docs/adr/0013-semantic-cache-single-track.md` —— 语义缓存单轨拍板（Accepted C：Valkey 唯一实现，生产与开发测试都用它；PG 缓存退役、无自动回退）。**2026-10-27 补记：该件已入库**（`git ls-files` 命中），按纪律补回反引号并已复跑 `scripts/check_doc_sync.py`；§9 是变异战役读数、§11 是逐条变更台账（本行追加后至第 58 行）。
+- `docs/adr/0014-web-poc-integration-branch-exception.md`（2026-11-02 新增）—— **`feat/web-visual-poc` 转正为唯一集成分支**，并把 `company` 远端 heads 按 3 条登记为知情例外（计数口径改为「不含历史锚 ref 与公开镜像侧载体」）；§5 是五条复审触发条件。`AGENTS.md`《分支卫生》那句「远端恒 2 分支」在本仓的读法以该件为准，`docs/operations/branch-hygiene-monthly-checks.md` 的 2026-11-02 节指向它。
 
 ## 3. `docs/plans/` 71 篇 md 分层（按主题簇）
 

@@ -211,3 +211,18 @@ git for-each-ref --format='%(refname:short) %(objectname:short)' refs/remotes
 **本节不执行任何删除 / 推送 / fetch（含 `--prune`）**。上一节登记的三条 D2（公开侧镜像分支处置、`company` 无集成分支的拓扑、
 Dependabot 在公开仓活跃）本轮**一条未解**，表中读数只是复述。
 
+## 2026-11-02 节（换月复跑；**只跑命令面第 1/2/5 步，第 3 步逐枝与第 4 步 worktree 面本轮未跑**；读数绑当日最终 rev `0b4c1f37`）
+
+本节不是新增一轮完整体检，而是把「远端 heads 从 2 变 3」这件已经发生的事按命令面重新取一次，
+并把拓扑那条 D2 的结论从「挂着」改成「已拍板为例外登记」。
+
+| 项 | 本轮现取（2026-11-02，UTC 日） | 与 2026-10-30 节对比 |
+|---|---|---|
+| 远端名（第 1 步，`git remote`） | 2 条：`company` + `github-legacy`（仍无 `origin`） | 未漂移 |
+| `company` heads（第 2 步） | **3 条** = `feat/web-visual-poc` @ `0b4c1f37` / `lineage/intranet-v3-until-2026-10-19` @ `12f03c8f` / `main` @ `fe22794c` | 1 → 3（第十七批推上两条 ref 后第一次换月复取） |
+| 「>2 报警」判定 | **命中 3 ⇒ 报警位触发**，但读数不解释为违规：解释口径见 `docs/adr/0014-web-poc-integration-branch-exception.md` §2 第 2 条（锚 ref 不计入「工作分支」维度） | 上一节的「不报警」是因为当时只有 1 条 |
+| 本地分支（`for-each-ref refs/heads` 计数） | 10 条 | **未做逐枝死枝判定**（第 3 步未跑 ⇒ 本行只是计数，不能读成「本地无死枝」） |
+| `company/*` remote-tracking | 4 条（3 heads + 1 HEAD 符号引用） | 与远端实况同值，本轮无陈旧项 |
+
+**本轮未做的动作（诚实边界）**：未跑第 3 步逐枝独有提交与第 4 步 worktree 面・未 `git fetch`（含 `--prune`）・**未删任何分支**（含那条可删候选 `company-snapshot`，它仍需单独批示）・未动 `github-legacy` 的 pushurl 禁用位。`main` 与上一节同 sha `fe22794c` ⇒ 「不动 main」在本节仍是可复取的读数而不是口头承诺。
+

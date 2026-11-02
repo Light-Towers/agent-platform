@@ -2576,6 +2576,64 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .tmp-scratch/ap-visual/e14-m
 powershell -NoProfile -ExecutionPolicy Bypass -File .tmp-scratch/ap-visual/e14-push-channel.ps1
 ```
 
+---
+
+## 25. 第十八批（2026-11-02 夜间收盘：刀㉒ 补推 + 分支模型 (b) 真的收了 + 公开镜像那一问拿闸门报数）
+
+### 25.1 坐标与本批刀次
+
+开工时 HEAD = `0b4c1f37`（刀㉒ 已入库，本件 §24 那一刀的 rev），`company/feat/web-visual-poc` 当时停在 `4d34e656` ⇒ 本地领先 1。本批 = **刀㉓**（拍板入账 + 第二笔推送的取证），只动文档：新 `docs/adr/0014-web-poc-integration-branch-exception.md`・本件新开本节・工单件 §8.1 定案行与 §13.4 两行・`docs/README.md` 索引一行・`docs/operations/branch-hygiene-monthly-checks.md` 新一节。
+
+四项拍板本轮一次性收（用户逐条点选）：**刀㉒ 补推**（先 L3 再推）・**feat 转正为唯一集成分支 + 登记例外**・**不合 main 继续挂账**・**V4 本轮跳过随 PR-1**。公开镜像那一问的答复是**反问**（「为什么不往公开 git HUB 上去提交呢？」）⇒ 按**未拍板**处理，本批对该远端零动作（§25.4）。
+
+### 25.2 第二笔推送（刀㉒）的逐值
+
+推送前在**当天最终 rev `0b4c1f37`** 上重跑 L3 深度安全审查：`findings_count: 0`（以命中数为绿，不以状态字段为绿）。然后才跑推送件：
+
+| 步 | 读数 | 定性 |
+|---|---|---|
+| PROBE（`.tmp-scratch/ap-visual/e14-11-push-kit-20261102-200242-probe.txt`） | `mode=PROBE-ONLY`・`HEAD=0b4c1f37…`・`status-all=3 content-diff=0 REAL-DIRTY: 0 UNTRACKED: 0`・噪声单列 3 条（三支 vue）・`SELFTEST-OK`（两侧各 1）・`OUTSIDE-DECLARED: 0` 且正控制 = **38**・`heads=3 verdict=READ-OK`・dry-run 两支均 rc=0 且给出 `4d34e656..0b4c1f37` / `Everything up-to-date`・**blockers = 0** | 换形后的判据在第二笔上仍然成立，没靠「今天已是周一」绕过 |
+| EXECUTE（`…-200408-execute.txt`） | `feat/web-visual-poc` push **rc=0**，服务端回显 `4d34e656..0b4c1f37`（**两点形式 = 快进，无 `+` / 无 `forced update` / 无 rejected**）・`lineage/…` rc=0 Everything up-to-date・post-read 三条 heads 里 `refs/heads/main` = `fe22794c5a36e855114e2bbf99c0df341b3f695f`（**与推送前逐字同值**）・blockers = 0 | 未 force（件内推送路径无 `-f` / `--force` / `--force-with-lease`，唯一 `-Force` 是 `Remove-Job`；target 列表含 `main` 直接 REFUSE） |
+| 独立复取（`.tmp-scratch/ap-visual/e14-08-push-channel.txt`） | `remote refs literally containing 0b4c1f379a01 : [company/feat/web-visual-poc]`・`lines=6 heads=3` 逐条同值・`HEAD..company/main` = 2 且 common ancestor = `[]`（两条未因推送改变） | 换一具量具得到同值 ⇒ 「main 未动」是被证住的，不是口头承诺 |
+
+### 25.3 分支模型 (b)：从挂了 17 批的挂账变成有角色定义的常态
+
+现取（本批共三通道：`git remote` / `git ls-remote --heads company` / `for-each-ref`）：远端 2 条且**无 `origin`**；`company` heads = **3** = `feat/web-visual-poc` @ `0b4c1f37` / `lineage/intranet-v3-until-2026-10-19` @ `12f03c8f` / `main` @ `fe22794c`；本地分支 10 条（**只取计数，第 3 步逐枝死枝判定本轮未跑 ⇒ 不能读成「本地无死枝」**）；`company/*` remote-tracking 4 条（3 heads + 1 HEAD 符号引用）。
+
+另两条本批现取的关键事实：本地 `main` = `88515cab` **与 `github-legacy/main` 同一个 sha**（⇒ 本地 main 是公开遮敏树，不可当集成目标）；`merge-base --is-ancestor github-legacy/main HEAD` **rc=1**（⇒ 公开基线与本工作线异宗）。
+
+拍板后的语义写进 `docs/adr/0014-web-poc-integration-branch-exception.md`：`feat/web-visual-poc` = 唯一集成分支；「恒 2 分支」的计数维度不含历史锚 ref 与公开镜像侧载体，所以本仓合规形态 = **3 条 heads**；月度体检的「>2 报警」命中 3 时指向该件而不自动算违规；五条复审触发条件在该件 §5（含「heads > 3 当周处理」与「例外过一个季度未复审则重拍」）。⚠ **本节不能写「例外已收口为恒 2」**：收口的只是**口径与角色认定**，物理 heads 仍是 3，且本轮零删枝。
+
+### 25.4 公开镜像那一问：不拿口味作答，拿闸门报数
+
+用户反问「为什么不往公开 GitHub 提交」⇒ 本批执行的是**只读**取证（不改 pushurl、不推任何 ref）：`uv run python scripts/lint_public_mirror.py --mode publish --base 88515cab --ref HEAD` 的尾部输出为「publish 模式 `88515cab..HEAD`：扫描到新增命中 **1 处**（零容忍，无登记通道）；违规 1 项」，进程 **rc=1**；命中在 `docs/adr/0013-semantic-cache-single-track.md`（一条真值形态的私有网段）。`github-legacy/main` = `88515cab` = 本地 `main`，与本工作线异宗（`merge-base --is-ancestor` rc=1）⇒ **即使遮好了也不能快进推上去**，只能按《分支卫生》第 5 条在公开基线上做「树已遮好」的单提交。
+
+⇒ 回答那一问的可核对形式是三条：① **现在推会把内网 IP 公开**（闸门自己报的，不是我的判断）；② **公开历史落上去改不回来**（所以 publish 模式零容忍、不许登记台账护着）；③ 要推的最小代价路径 = 先把那一处换成占位符 → 在 `88515cab` 上 `checkout <内网 tip> -- .` 就地遮 → 一次 commit → publish 模式 rc=0 才推。本批**一条也未做**，禁用位原样保留。
+
+### 25.5 本批自犯 / 坑表
+
+| # | 自犯或坑 | 怎么发现的 | 处置 |
+|---|---|---|---|
+| 1 | 写新行前先上了反引号包 `mirror/*` 与 `int/`，直觉上「这两个会被 T2 拉成 MISSING」 | 没直接猜，**先读了量具自己的筛选正则**（`.tmp-scratch/ap-visual/typo-scan.ps1` L80）：只抓以 `web\|packages\|applications\|scripts\|docs\|eval\|tests/` 开头的反引号串，且 `-notmatch '\*$'` 把带结尾星号的排掉 | 两个写法都在射程外 ⇒ 不改文档而是把**判据的口径**记在本行：反引号书写纪律的可执行边界是「前缀集合 + 非 glob」，不是「所有反引号串」；拿前缀集当全量会误改自己正确的文字。⚠ 本格同样要反过来读：**写了带星号的路径就自动逃出检测**，那是一处量具盲区（不是本轮要修的格，因为修它要动 T2 本体） |
+| 2 | T2 的量具基准是 `Test-Path`（文件系统），而 `scripts/check_doc_sync.py` 的基准是版本控制清单 | 本刀带一件新文件，两个基准在这一格上**故意不一致**；而本行初稿把那个文件名写成「docs/adr/0014- 加省略号再加 md」的形式，**T2 全程没报它** —— 因为那条筛选正则的字符类只收 ASCII，含省略号的路径直接逃出检测（这就是行 1 同一口诀的第二个变体：不只是星号，**非 ASCII 字符也会让一个反引号串逃出门禁**）。改回全名后本行里那句拆成两段的写法（把截断前缀单独包进反引号）又被 T2 拉成一条 MISSING，同面读数因此是 **16 → 17 → 16**：17 那一轮就是本行自己造成的 | 写回全名 `docs/adr/0014-web-poc-integration-branch-exception.md`（它在 `git add` 后两个基准同时成立），并把本刀流程改为**先 `git add` 再跑门件**（顺序写进 25.6 的复跑块，免得后人拿「先跑门再 add」复现出一个假红）。⇒ 口径：**引用一个不存在的路径不会变绿，把它写成一个量具读不懂的形状才会** |
+| 3 | 外层管道包装报 rc 与件内 verdict 不一致（本批 PROBE 轮经 `Select-String` 包装时外层报 1，而件内 blockers=0） | §24.6 已登记过同一坑，本批当场又踩一次 | 本批一律以**直接测进程退出码**或**读落盘件**为准（外层码不入库作判据） |
+| 4 | **分面基准对新建文件是盲的**：旧写法 `git diff --name-only`（工作树 vs index）永远不会列出一个尚未进 index 的新文件，所以 FORBIDDEN 那一格**拦不住本刀误建一个产品文件**（它会落在面上之外） | 动手前自问「本刀有一件新文件，旧基准看得见吗」—— 没猜，直接拿两件基准各取一次：HEAD 基 = 5 行（含新 ADR），unstaged 基 = **0 行** | 门件改为 `git diff --name-only HEAD` + 新增一格 `new-file witness`（申报项里凡不在 HEAD 的必须出现在面上，否则报 `BASIS-BLIND-TO-NEW-FILES`）。本格**用同一轮的 contrast 行自证有齿**：旧基在本刀上会报 `MISS-DECL=1` ⇒ 这不是口头改名，是可证伪的换形 |
+| 5 | 门件首轮即 GREEN（`e23-00-20261102-204619-gate-fill.txt`，进程 **rc=0**、`GATE_RC=GREEN`）—— 首轮绿在本仓一贯可疑，所以逐格读了回文件 | 逐值：`face lines=5`・`FORBIDDEN: 0`・`MISS-DECL: 0`・`BASIS-HAS-TEETH`・`UNTRACKED: 0`・两支 SELFTEST 均 expect 1 命中・四门 rc=0・**T1=9 / T2=16 / T3=T4=T5=0**（T2 与刀㉒ 终轮同值 ⇒ 本刀首轮**未新增假路径**）、五件文档 fence-aware anomalies=0（负控制 70 / 4 / 0 / 2 / 4；新 ADR 那一档 naive=0 是**该文件本就没有代码围栏**，不是本格空转）、E 段 `backend dirty now = 0`・`ahead = 0` | 首轮绿可以接受，但只能以**逐格读数 + 齿 witness 都已落盘**的形式接受，不能以「rc=0」三个字的形式接受。⚠ **但「首轮逐格都干净」不等于「修完仍干净」**：本行写下后因行 2 那处写法读到过 **T2=17**，改写后回到 16（那一轮件 `e23-00-20261102-204904-gate-fill.txt`，进程 rc 直接测得 **0**）。⚠ 本行写下后提交前又复跑了一次（件名按 `e23-00-<时刻>` 递增，取最新那件），判据不是「某个件名」而是**同面 T2 仍 = 16 且 `GATE_RC=GREEN`**⇒ 口径：**回填后的复跑才是提交前的最后一道，首轮那份只能算基线** |
+
+### 25.6 未做 / 不得读成已批（逐条点名）
+
+**未碰远端 `main`**（推送前后两具量具同值 `fe22794c`）・**未 force**・**未删任何分支**（含月度体检里那条可删候选 `company-snapshot`，它仍需单独批示）・**未建 `int/` 第二条集成分支**（拍板选的是认定现有分支而非新建）・**未动 `github-legacy` 的 pushurl 禁用位**（那一问按未拍板处理，本批只跑了只读闸门）・**未推 `mirror/*` 任何分支**・未 `git fetch --prune`・**V4 实拍观感判读未做**（用户拍「本轮跳过，随 PR-1 再判」）・`make test` 全量 10 session 未跑（本批只跑 lint 级四门 + 文档面形检）・**CI runner 仍未实跑**（在册事实未变：无 `.gitlab-ci.yml`，仓内 CI 定义全在 `.github/workflows/`）・PR-1 未开工。
+
+三道门槛原样有效，且本批**未扩张授权面**：拍板收的是「分支角色 / main 处置 / 推送窗 / V4 推迟」四条，没有一条是「可以合 main」或「可以推公开镜像」。本批新形状一句话：**一个未拍板的反问，可以用可复跑的读数回答，但不得替它拍板**。
+
+```powershell
+git add -- docs/adr/0014-web-poc-integration-branch-exception.md docs/README.md docs/operations/branch-hygiene-monthly-checks.md docs/plans/plan-web-frontend-minimal-core-2026-10-29.md docs/operations/evidence/2026-10-30-web-visual-references/readings.md
+powershell -NoProfile -ExecutionPolicy Bypass -File .tmp-scratch/ap-visual/e23-gate-fill.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .tmp-scratch/ap-visual/e14-monday-push.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .tmp-scratch/ap-visual/e14-push-channel.ps1
+uv run python scripts/lint_public_mirror.py --mode publish --base 88515cab --ref HEAD
+```
+
 
 
 
