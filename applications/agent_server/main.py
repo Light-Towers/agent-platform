@@ -710,7 +710,12 @@ async def lifespan(app: FastAPI):
 #   3. no-store。与 /console.html 的 ``Cache-Control: no-store`` 同源纪律（滚动升级后不把旧事件
 #      契约的缓存壳发给使用者），而 StaticFiles 默认**不给**这个头。带内容 hash 的 JS/CSS 本不
 #      需 no-store，但 index.html 需要；按最小实现一律 no-store，不引入分文件类型的复杂度。
-_REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
+#   4. 默认探测基准 = **进程 CWD**，不是从 ``__file__`` 往上数（方案 §9.4 全案）。刀⑲ 在 241 实跑
+#      多阶段构建时真容器 ``GET /ui/`` 404：镜像里 ``pip install .`` 把 agent_server 装进了
+#      site-packages，被 import 的那份 ``__file__`` 在解释器目录下，往上数两层就数到了
+#      ``/usr/local/lib/python3.11``。而「仓库根 = 进程 CWD」这条基准仓内早有且成立（`config.py`
+#      的 ``env_file=".env"`` 按 CWD 解析，镜像 WORKDIR 也是 `/srv/agent-platform`）⇒ 用同一条。
+#      失效形状：从非仓库根启动 ⇒ 不挂载（不是挂上去一路 404），这类部署显式给 ``WEB_UI_DIST``。
 
 
 class NoStoreStaticFiles(StaticFiles):
@@ -722,19 +727,32 @@ class NoStoreStaticFiles(StaticFiles):
         return response
 
 
+def _default_web_ui_dist() -> pathlib.Path:
+    """默认探测点 = 进程 CWD 下的 ``web/dist``（与 ``config.py`` 的 ``env_file=".env"`` 同一条基准）。
+
+    取的是**调用时**的 CWD 而不是 import 时算好的常量：探测基准属于运行时事实，冻结在模块
+    导入那一刻就把「谁启动我」这件事写死在了 import 顺序里（与本文件开头那条「装配顺序就是
+    正确性」同源）。
+    """
+    return pathlib.Path.cwd() / "web" / "dist"
+
+
 def _resolve_web_ui_dist() -> pathlib.Path | None:
     """返回可挂载的 dist 目录；None = 不挂载。
 
     配了 ``WEB_UI_DIST`` 却指到不存在的目录 ⇒ WARNING 而非静默跳过：“未构建”（合法状态）与
     “配了却没有”（部署被改坏）必须能分开读，否则运维只能靠猜（与 Dockerfile 里 langfuse
-    包不装时「关了与坏了分不清」同一条雷的对偶面）。
+    包不装时「关了与坏了分不清」同一条雷的对偶面）。默认探测点没命中也留一行 INFO 报出它探了
+    哪里：“没构建”与“从非仓库根启动”同为不挂载，能分的只有这行日志。
     """
     raw = get_settings().web_ui_dist.strip()
-    cand = pathlib.Path(raw) if raw else _REPO_ROOT / "web" / "dist"
+    cand = pathlib.Path(raw) if raw else _default_web_ui_dist()
     if cand.is_dir():
         return cand
     if raw:
         logger.warning("WEB_UI_DIST=%s 已配置但目录不存在，跳过 /ui 挂载（部署被改坏，非未构建）", raw)
+    else:
+        logger.info("默认探测点 %s 不存在，跳过 /ui 挂载（未构建，或从非仓库根启动⇒配 WEB_UI_DIST）", cand)
     return None
 
 

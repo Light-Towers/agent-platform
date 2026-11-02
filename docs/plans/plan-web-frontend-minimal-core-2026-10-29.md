@@ -275,6 +275,28 @@ ARCHITECTURE.md  AGENTS.md                 # 目录表新增 web/ 行（§5 防�
 
 Dockerfile 现为**单阶段**（`FROM python:3.11-slim`，只 `COPY applications/agent_server`）⇒ 需新增 builder 阶段与 `COPY --from=builder` 的 `web/` 源码层。Node 只活在构建期，产物进镜像，**不在 126 上构建**（§6）。
 
+### 9.4 挂载探测点的**基准**（2026-11-02 刀⑲ 实跑订正：`__file__` 上溯 ⇒ 进程 CWD）
+
+**缘起不是推演，是 241 上真容器读出来的**：刀⑲ 多阶段构建在 241 实跑 `build rc=0`，四条判据 A/B/C 全过（镜像内 `web/dist` 在位、final 无 node/npm/pnpm/corepack、A1 import 仍 OK），**判据 D 红**：同一个容器 `GET /health` 200 而 `GET /ui/` **404**。三条物证把范围收干：
+
+- 镜像里 `agent_server` **存在两份** —— `/usr/local/lib/python3.11/site-packages/agent_server`（`pip install .` 装的，实际被 import）与 `/srv/agent-platform/applications/agent_server`（只是构建上下文，不在 sys.path 上）。探针实取 `main.__file__` 指向 site-packages 那份 ⇒ `parents[2]` = `/usr/local/lib/python3.11` ⇒ 默认探测点算成 `/usr/local/lib/python3.11/web/dist`（不存在）。
+- 权限解释被排除：dist 目录 `drwxr-xr-x root` 对 `uid=10001 appuser` 可读。
+- **只换环境变量、镜像不动**：`WEB_UI_DIST=/srv/agent-platform/web/dist` ⇒ 日志出现 `web UI mounted at /ui dist=...`、`GET /ui/` **200 + text/html + cache-control: no-store**；不设 ⇒ 无挂载日志、404。⇒ 缺陷在**默认探测点**，不在挂载逻辑、不在 `COPY`、不在权限。
+
+k8s `20-agent-platform.yaml` 用镜像默认 CMD（无 `command` 覆盖）⇒ 这条 404 是生产会呈现的形状，不是取证探错了形态。
+
+**定案：默认探测基准 = 进程 CWD**，`WEB_UI_DIST` 显式覆盖不变。三条理由：
+
+1. 仓内早有同一条基准且成立：`config.py` 的 `env_file=".env"` 就是**相对 CWD** 解析，`tests/governance/test_agent_server_env_template.py` 头注已把这件事写死过一遍（「本地 `uvicorn agent_server.main:app` 与镜像内 `Dockerfile WORKDIR /srv/agent-platform` 都落在仓库根」）。
+2. 刀⑱ 自己钉的契约文字指的就是 CWD 那个根：`test_web_ui_mount.py` 的 `TestDefaultPathContract` docstring 写的是「镜像 WORKDIR `/srv/agent-platform` ⇒ `/srv/agent-platform/web/dist`」。实现选了从 `__file__` 往上数，装包态必然错位 ⇒ **本刀是兑现契约，不是改契约**。
+3. 影响面实测很小：整个 `agent_server` 运行时里只有那一处用「仓库根式上溯」（全仓 `parents[N]` grep 的其余命中都在 `tests/` 与 `scripts/`）；`console_router` 的 `static/`、`router.py` 的 `data/` 是包内相邻资源，装进 site-packages 照样命中 ⇒ 这是**点状缺陷**，不是一片。
+
+**拒绝的两条收口方式**（写下成因，供复审）：① 在 Dockerfile / k8s 注入 `WEB_UI_DIST` —— 把一个装配缺陷转嫁成部署件，镜像与清单两处要一起对，漏掉的那一面是静默 404；② 把 dist `COPY` 进 site-packages —— 产物落点随包版本与安装布局走，人读不出来。
+
+**新基准的失效形状（不一起写就只是换个坑）**：从**非仓库根**目录启动（例：`cd applications/agent_server && uvicorn agent_server.main:app`）⇒ 默认探测不命中 ⇒ **不挂载**（不是挂上去一路 404），这类部署的正解是显式 `WEB_UI_DIST`。「没构建」与「跑错目录」同为不挂载，但日志给的探测路径不同，可分读。
+
+**判据（三条，缺一不算修完）**：① 241 重建后真容器 `GET /ui/` = 200 且带 `Cache-Control: no-store`（原判据 D 转绿）；② 两格新单测钉住基准 —— CWD 下有 dist ⇒ 挂 CWD 那个；CWD 下无 dist 而包所在仓库根有 ⇒ **不挂**（这一格专门拒绝「两种基准混用」，探测点回退 `__file__` 上溯时它当场红）；③ 静态接线件 G5 的派生口径随动为「final 阶段 `WORKDIR`（= 运行时 CWD）+ `web/dist`」，并新增变异「main.py 探测点改回 `__file__` 上溯」必须报红。
+
 ## 10. 开源 agent 项目前端实测参照
 
 > 取证方式：`raw.githubusercontent.com` 直取 `package.json` / `Dockerfile` / `next.config`，配合 `gh api .../git/trees?recursive=1` 定位真实文件。**不引二手博客**。默认分支逐一实测，路径为返回值。

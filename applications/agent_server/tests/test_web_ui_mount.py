@@ -16,9 +16,14 @@
 
 两个方向都由 ``WEB_UI_DIST`` 显式给定：本机 ``web/dist`` 恰好存在（跑过 build）、CI 的
 Python-only 机器恰好不存在，任何"按本机现状断言"的写法都会在另一类机器上自证失败。
+唯一不靠 ``WEB_UI_DIST`` 的一组（``TestDefaultPathContract``）因此全部把 CWD 与
+``__file__`` 一起 monkeypatch 到 tmp 树里造出的**装包态形状**上，不读本机仓库根。
 """
 
 from __future__ import annotations
+
+import inspect
+from pathlib import Path
 
 import pytest
 from agent_core.guardrails.app_factory import build_api_app
@@ -142,27 +147,72 @@ class TestNoStoreServing:
 
 
 class TestDefaultPathContract:
-    """``WEB_UI_DIST`` 留空时的默认探测点 = 仓库根下 ``web/dist``。
+    """``WEB_UI_DIST`` 留空时的默认探测基准 = **进程 CWD** 下的 ``web/dist``（方案 §9.4）。
 
     这条是刀⑲ 多阶段 Dockerfile 的对接契约：镜像里 ``COPY --from=web-builder`` 的目标必须落在
-    这条路径上（镜像 WORKDIR ``/srv/agent-platform`` ⇒ ``/srv/agent-platform/web/dist``），否则
-    构建绿、镜像里前端静默不挂载。挪默认点等于挪镜像装配契约，两处必须一起改。
+    这条路径上（镜像 WORKDIR ``/srv/agent-platform`` 既是运行时 CWD ⇒ ``/srv/agent-platform/web/dist``），
+    否则构建绿、镜像里前端静默不挂载。挪默认点等于挪镜像装配契约，两处必须一起改。
+
+    基准为什么从 ``__file__`` 上溯改成 CWD（2026-11-02 241 实跑，全案在方案 §9.4）：镜像里
+    ``pip install .`` 那份 site-packages 才是被 import 的模块，往上数两层数到解释器目录 ⇒
+    真容器 ``GET /ui/`` 404。下面每一格各钉一个方向，且都把 CWD 与 ``__file__`` 一起搬到 tmp 树，
+    所以本机有没有 ``web/dist`` 不影响判据成立。
     """
 
-    def test_default_probe_is_repo_root_web_dist(self, monkeypatch):
+    @staticmethod
+    def _installed_shape(tmp_path):
+        """造出镜像里那个几何：包在 ``<root>/usr/local/lib/python3.11/site-packages/agent_server/``，
+        dist 在 ``<root>/srv/agent-platform/web/dist``（= WORKDIR/CWD 那份）。旧基准的
+        ``parents[2]`` 会算到 ``<root>/usr/local/lib/python3.11``，那里永远没有 dist。"""
+        pkg = tmp_path / "usr/local/lib/python3.11/site-packages/agent_server"
+        pkg.mkdir(parents=True)
+        fake_main = pkg / "main.py"
+        fake_main.write_text("# 只为拿一个装包态的 __file__，不会被执行\n", encoding="utf-8")
+        workdir = tmp_path / "srv/agent-platform"
+        (workdir / "web" / "dist").mkdir(parents=True)
+        return fake_main, workdir
+
+    def test_default_probe_follows_process_cwd(self, monkeypatch, tmp_path):
+        """装包态下：探测点必须是 CWD 那个 ``web/dist``，不是从 ``__file__`` 数出来的那个。"""
+        fake_main, workdir = self._installed_shape(tmp_path)
+        monkeypatch.setattr(main_mod, "__file__", str(fake_main))
         monkeypatch.delenv("WEB_UI_DIST", raising=False)
+        monkeypatch.chdir(workdir)
         get_settings.cache_clear()
-        expected = main_mod._REPO_ROOT / "web" / "dist"
-        got = main_mod._resolve_web_ui_dist()
-        # 本机可能跑过 build（目录存在）也可能没跑过：两种读数都只证明"探的是这个位置"，
-        # 所以断言写成"None 或恰为该目录"，不硬写绝对路径（绝对路径换机器就过期）。
-        assert got is None or got == expected, got
+        assert main_mod._resolve_web_ui_dist() == workdir / "web" / "dist"
 
-    def test_repo_root_is_two_levels_above_the_package(self):
-        """``parents[2]`` 的算术单独钉一格：applications/agent_server/main.py → 仓库根。
+    def test_default_probe_is_a_function_of_cwd_not_of_the_filesystem_of_this_machine(
+        self, monkeypatch, tmp_path
+    ):
+        """无条件格：不碰磁盘，直接钉“默认探测点就是 CWD 拼 web/dist”这条算术。
 
-        上一格不写绝对路径，所以"根算错一层"这个缺陷只能靠本格的层数断言抓住：写成
-        ``parents[1]`` 时这里当场红（``applications/`` 下没有 pyproject.toml）。
+        上一格得靠 tmp 树里目录存在与否才能报红；本格不需要任何文件系统状态，所以换机器、
+        换 ``web/dist`` 是否构建过都同样有牙（写成两格而不是合一格，是为了让“存在性”与
+        “算术”两个失效方向各自对应一个读数）。
         """
-        assert (main_mod._REPO_ROOT / "applications" / "agent_server" / "main.py").is_file()
-        assert (main_mod._REPO_ROOT / "pyproject.toml").is_file()
+        other = tmp_path / "somewhere"
+        other.mkdir()
+        monkeypatch.chdir(other)
+        assert main_mod._default_web_ui_dist() == other / "web" / "dist"
+
+    def test_no_upward_walk_from_the_module_file(self):
+        """``_default_web_ui_dist`` 的函数体里不得出现 ``__file__`` / ``parents[``。
+
+        这一格专为回退而设：往探测点里加一条 ``__file__`` 上溯的兼容兜底，在装包态下不是
+        “修好了”，而是把 404 变成“静默挂上另一棵树”—— 那种绿比红难归因得多（方案 §9.4
+        “拒绝混用两个基准”那句）。断言限定在函数体而不是整文件：main.py 里以后可以有
+        别的上溯用法，不该被本契约误伤。
+        """
+        body = inspect.getsource(main_mod._default_web_ui_dist)
+        assert "__file__" not in body, body
+        assert "parents[" not in body, body
+
+    def test_installed_shape_without_cwd_dist_means_no_mount(self, monkeypatch, tmp_path):
+        """同一几何下 CWD 里没有 dist ⇒ 不挂，**不去看 ``__file__`` 那棵树**。"""
+        fake_main, workdir = self._installed_shape(tmp_path)
+        monkeypatch.setattr(main_mod, "__file__", str(fake_main))
+        monkeypatch.delenv("WEB_UI_DIST", raising=False)
+        monkeypatch.chdir(tmp_path)  # 有 srv/，但 CWD 本身下面没 web/dist
+        get_settings.cache_clear()
+        assert main_mod._resolve_web_ui_dist() is None
+        assert Path.cwd() == tmp_path
