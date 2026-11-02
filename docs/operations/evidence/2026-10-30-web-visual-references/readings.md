@@ -2355,6 +2355,71 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .tmp-scratch/ap-visual/e15-g
 powershell -NoProfile -ExecutionPolicy Bypass -File .tmp-scratch/ap-visual/e15-postcommit.ps1 -ExpectParent <full-rev> -ExpectAdd <n> -ExpectDel <n>
 ```
 
+## 22. 第十五批（2026-11-02 周一）：推送窗执行 —— 内网通道第一次读到东西，两条 ref 第一次发布，一条误红判据被订正
+
+> 读数绑 rev 46fc3ae9（刀⑮，本批开工基线）。本节是这条 POC 线**第一次把内容交到远端**的账面：推送前两道门按**当天**重跑（不沿用 20.1 / 20.7 那条绑 23bdc920 的旧射程），推送后的形状单独独立复取。本节的活数绑刀⑯**提交前**那一刻；提交后的读数只落 gitignored 档与本批汇报（终态判据沿用「提交后工作树 = 0」）。形状类四格在**全部增行之后**用一次独立编辑填（19.4 行 5 / 21.4 行 10）。
+
+### 22.1 推送前的两道门：都按当天重跑，一条从推定升为实测
+
+| 门 | 现取读数（FRESH，命令与产出同名落盘） | 与历史比 | 定性 |
+|---|---|---|---|
+| 推送前深度安全审查（当天 rev 46fc3ae9） | 未发现安全问题（命中数 0） | 上一次跑在周日、射程绑 23bdc920；其后入了四刀 ⇒ 旧条**已失效**（§21.5 那句预报今天兑现） | ⚠ 射程只能写成**边界声明**而不是实测：产出里没有逐 rev 清单，我拿不到「它确实读到这四刀」的证据；口径同 20.1 第一行 |
+| 内网通道复取 | 总行 4・heads=**1**・硬失败诊断行 **0**・告警行 **3**・verdict=**READ-OK** | 上一批两次都是 Connection timed out ⇒ **NO-READ** | 本会话**第一次**读到远端真实形状；唯一那条 head 是 main（sha 以 fe22794c 开头，subject「2026-10-20 快照，源 on-disk tip 3e23b7b」） |
+| dry-run 逐目标 | 两目标各 rc=**0**、都是 new branch、无 rejected / 无 forced update | 上一批两目标各 rc=128 被计入 blocker（成因是网络不通，不是策略拒绝） | ⚠ 本批**最有分量的一条升级**：在册那句「服务端从未接受过 dry-run ⇒ 能推只是推定」从今天起是**实测** |
+| day-guard・blockers 总数 | DayOfWeek=Monday・blockers=**0** | 上一批 PROBE 轮 3、带执行开关轮 4 | 门与执行态第一次同时为空 —— 20.3 那张非空转反证表第一次走到「全绿」那一支 |
+
+### 22.2 一条判据把「成功的读取」判成「拒推」：告警行里带 connection 字样
+
+现取（产出 e14-11-push-kit-20261102-100502-probe.txt，**报红的原件不删**）：ls-remote 明明读到 1 条 head，verdict 仍是 NO-READ，blockers 因此 = 1。成因：OpenSSH 对这台服务器**每次连接**都打三行后量子告警，其中一行的措辞里含 connection 这个字，而 NO-READ 的关键词表里有它 ⇒ 一条**伴随成功读取**的告警被当成了读取失败。
+
+- **怎么发现的**：不是我读档读出来的——是判据与同档另一行自相矛盾（heads=1 与 NO-READ 同时成立）。按 18.6 行 11 / 19.4 行 3 那条口径「一条消息与同档其它行矛盾时以复量裁决」，我用一条**不经量具**的 ls-remote 直接复取（同一形状：总行 4 / heads 1），两侧同值才敢判为假红。
+- **修法不是删关键词**：把诊断行分成**硬失败**（fatal: / timed out / Connection refused / Connection closed / Connection reset / kex_exchange / Could not resolve hostname 等）与**告警**（以星号对开头的三行）两类，两类**分别计数并打印**，NO-READ 只由硬失败或 heads=0 触发；同时给新判据补**三支合成自测**并落档：advisory+head ⇒ READ-OK（证明不再误红）・timed-out 行 ⇒ NO-READ（证明没被改宽）・无 heads ⇒ NO-READ（证明空读仍拒）。三支全中才允许「分类不是放宽」那句出口。
+- **错的方向**：错在 fail-closed 一侧（安全但把合法推送挡住了），不是 fail-open。这一型（关键词过宽）与本台账 20.4 行 3 / 20.3 那行同族 ⇒ 按《错误闭环》计入**同类重复率**，不当新缺陷凑数。
+- 可复跑：该件先过 AST 解析门（parse-errors=0）再跑，修后产出 e14-11-push-kit-20261102-100648-probe.txt：blockers 由 1 变 **0**，其余逐项读数与报红那轮**逐项相等**（两档并排可比）。
+
+### 22.3 推送实际发生之后的形状（终态读数，全部不经量具独立复取）
+
+| 项 | 现取 | 与推送前比・定性 |
+|---|---|---|
+| 远端 heads | **3** 条（两条新 ref + main） | 1 → 3。⚠ §20.5 那句「必须知道的张力」从推定变**实测**：与《分支卫生》「远端恒 2 分支」的终态形式不一致。**本行只登记不处置**；复审触发条件 = 分支模型 (b) 拍板后当场回收 feat/ 那支 |
+| 远端 main | 推送前后同为 fe22794c（**未动**） | 用户批示的硬边界成立且有两侧读数；非 force（dry-run 与实推都只报 new branch，从未出现 forced update） |
+| 两条线与远端 main 的关系 | `git merge-base` 对两条均为**空**（rc=1） | HEAD 线有 1053 条提交不在远端 main、lineage 线 797 条同样不在 ⇒ 推上去是**两条互不相连的独立历史线**。这一层是**批复当时不知道的新事实**，推送前已写进选项描述并取用户点定 |
+| 本地 main vs 远端 main | 两 sha 不等且 merge-base **空** | 远端那条 main 不是本地那条（本地是公开脱敏镜像树）——不写清会被后人读成「远端 main 落后于本地」，那是错的 |
+| 发布状态 | 包含 HEAD 的远端跟踪 ref = **1** 条 | §20.1 那句「八刀内容一支未推」与 20.3 里「branch -r --contains 出 0 行」在本批**过期**（当时是真的）。按 16.6 行 14 的口径：改掉引用方式（指本节），而不是把旧数改回去 |
+| ref 普查 | 本地分支 **10** 支·远端跟踪 **14** 条·refs（除去 symref）**25 → 27** | 增量算式自证：27 − 25 = 2 = 本次新建的两条远端跟踪 ref；本地分支数未变（没新建、没删） |
+| 工作树 | status-all **0** 行 | 终态判据 |
+
+### 22.4 本批自犯 / 坑表
+
+| # | 自犯或坑 | 怎么发现的 | 处置与可复跑证据 |
+|---|---|---|---|
+| 1 | **差点拿旧射程的门当今天的门**：L3 审查在周日跑过一次并已入库（§20.1 / §20.7），如果今天直接推，就是用一条绑 23bdc920 的门去保四刀之后的内容 | 不是今日撞出来的：是上一批写 §21.5 时就把这句预报存了下来，今天照着做 | 按当天 rev 重跑（命中 0）。⚠ 这一行是**已拦截、不是已踩**，但它证明上一批写下的那句「门的射程是刀次的函数」不是散文而是可执行约束 |
+| 2 | **告警行里的一个子串把成功读成失败**（本批最实质的量具缺陷） | 同档自相矛盾（heads=1 vs NO-READ）+ 不经量具复取裁决 | 分类修法 + 三支合成自测（详 22.2）；报红原档不删。同型第二次，计入同类重复率 |
+| 3 | **新建探针件里留了一条半截想法行**：一行把正则变量拿去 replace 同一个字再包 Out-Null——语义为空，语法能过。上一批刚登记过「首稿里的半截想法行要在解析门之前删净」 | 落笔后逐项对回 diff（不是 AST 门报的，parse-errors=0） | 删除该行；同时把「正则只写一处」改进件里：自测函数直接读脚本域的硬失败串，不再抄两份（两份必然漂）。⇒ 上一批定的口径本批**又踩一次**，同样按同类重复率计 |
+| 4 | **给 git 的格式串没加引号，被外层 shell 拆成管道**：pretty 串里的竖线当成管道、括号形式被当命令，当场两条 CommandNotFoundException，三条读数（远端 main 的 subject、包含它的本地 ref、分歧条数）第一轮全部没取到 | 当场报错，不是事后 | 加双引号后复跑取全。⇒ 口径：**内联命令报错时缺失的读数必须复跑，不得凭报错前的半行下结论**（与 19.4 行 3「兜底文案不许替现场下结论」同族） |
+| 5 | **量具把自己的读数与标签粘在一起**：提交后形状件报出 add=79add matched（分隔空格缺失），读档时这个数会被看成一串 | 本批读刀⑮ 那一轮的产出档时看出（不是它自己报的） | 补两个分隔空格后复跑。可复跑证据：刀⑯ 那一轮的该行。⇒ 口径：**量具产出的每一行都要假定会被机器再解析一遍**，粘连不是排版问题，是新形状的错值风险 |
+
+### 22.5 形状类读数（全部增行之后单独填）与本批未做清单
+
+本批新增文字后的形状类读数（现取，产出于 e16-04-\*-gate-fill.txt 与同刻的 gates / typo 两档）：G6 total **144** / unique **69** / unresolved_unique **5**（BAD 集合应与 21.1 那张表同类）・G7 **9 / 10 / 12**・G8 四份 hits **全 0**・G4 与 G5 均 rc=**0**・typo-scan T1 hits **9**（词串 **24**）・码点 forbidden **0**・review **12**・T2 **17**・T3 **0**・T4 **0**・T5 **0**（脚本标签数 **16**）。⚠ 与上一批同名的读数里**预期只动两类**：T1/review 与本节文字直接相关的格，以及本节写了仓根可解路径时才会动的 T2；其余任何一格动了都要逐项定性，定不了就重取。
+
+刀⑯ 提交前的活数：**以上各项的数值全住在产出档里、不在本节抄写**（上一批立的口径本批直接沿用：它们从落笔起就会被自己那几行推漂，只以 e16-04 轮次的档为准）。恒等式两式同行给算式，不只给 OK。
+
+**未做 / 不得读成已批（逐条点名）**：**未碰远端 main**（两侧同 sha 可证）・未 force・未删任何分支・未动本地 main・**未解禁公开镜像的 pushurl 禁用位**，且 publish 模式那道闸门本批**没跑也不许跑在这两条线上**（内网分支带真实网段属正常工作产物）・未动 scripts/・未建 make ci-web（= PR-0 开工授权，POC 授权 ≠ 开工授权）・未合入 main（仍等人拍板）・未收分支模型 (b) / V4 实拍验收。**本批新增加一条必须记住的**：推送已发生 ⇒ 「远端恒 2 分支」与实取 3 条 heads 的不一致从张力变成**事实**，而回收它的条件（分支模型 (b) 拍板）仍在人拍板位。三道门槛原样有效：**决策完备 ≠ 规范已批 ≠ 开工授权**。
+
+### 22.6 附行：本批新建 / 换用的 harness（按用途列名，不写总数）
+
+全部住 gitignored 目录、不入库也不计刀：**e16-parse-one.ps1**（单件 AST 解析门：无 -Path 与路径不存在两支都 REFUSE，不猜目标；本批把「新建件/副本跑前先过解析门」从口径变工具）、**e16-gate-fill.ps1**（本批待填标记门 + 形状复取 + 后端不变量 + 顶层三件文档行数，needle 是本批专用 ASCII 串，落笔前先对全文计数确认零位）、**e16-knife16-commit-msg.txt**（提交信息件）。换用（本批改过判据，不是换件）：e14-monday-push.ps1（NO-READ 分成硬失败/告警两类 + 三支自测 + 告警行逐条打印）・e15-postcommit.ps1（仅修标签粘连）・e15-gate-fill.ps1（本批改为分叉件 e16-gate-fill，理由同 21.6：needle 是批次常数）。未改：gates4.ps1 / typo-scan.ps1 / check_doc_sync.py / check-tokens.mjs。
+
+```powershell
+uv run python scripts/check_doc_sync.py
+powershell -NoProfile -ExecutionPolicy Bypass -File .tmp-scratch/ap-visual/e16-parse-one.ps1 -Path .tmp-scratch/ap-visual/e14-monday-push.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .tmp-scratch/ap-visual/e16-gate-fill.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .tmp-scratch/ap-visual/e14-monday-push.ps1
+git ls-remote --heads company
+powershell -NoProfile -ExecutionPolicy Bypass -File .tmp-scratch/ap-visual/e15-postcommit.ps1 -ExpectParent <full-rev> -ExpectAdd <n> -ExpectDel <n>
+```
+
 
 
 
