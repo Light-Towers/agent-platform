@@ -2813,6 +2813,72 @@ git rev-list --count company/feat/web-visual-poc..HEAD
 
 那 16 条债的去向（**不删、不藏、不就地改历史段**）：它们是 A3 口径下的书写遗留，四类形状各不同——「ADR 编号当路径写」（docs/adr/0003 这种省略文件名的写法）、「省略 web/ 前缀的简写」（把 web/scripts/check-tokens.mjs 写成 scripts/check-tokens.mjs）、「按设计不入库的目录」（web/src/assets/fonts/）、「反证用的合成路径」（applications/evil-undeclared.py 这种只存在于探针语境里的名字）。本段故意**不带反引号**书写这四个名字：它们正是被登记的那四个形状，拿反引号引它们等于自己新增两条 MISSING（readings.md 这一件本来就带着一串存量项，再插两个新的就是往棘轮上撞）。⚠ 证据分级要写清：这一条是**写入前比对基线集自查抬出的，不是被棘轮格跑红的**（那格从未见过这个形状），所以它只能算口径提示级证据，不能当作「新增即红」的反证——那个反证要等下一批真踩一次才算。**每类都有一种确定的改写动作**，但那是**另一刀（纯书写口径刀）的活**，不混进本批这份方案；已逐类登在工单件第二十批行里并带复审触发条件。
 
+---
+
+## 第二十一批（刀㉖）：一条挂了五批的「待修量具」欠项被真的补上
+
+### 28.1 坐标与本批刀次
+
+本地刀㉖，父 commit = `3e1eeae3`（刀㉔）之上的刀㉕ `e1ff9dd1` ⇒ 本刀父 = 刀㉕。本批**零产品代码**：改的是两具量具中的一具（gitignored 目录里的提交后取证件），账面随动 = 本件新开本节 + 工单件第二十一批两行。
+
+### 28.2 发现：同一族不变量在**两具量具上换形不同步**（§27.4 那个形状的第二次发生）
+
+第十六批 §23.5 那句「本批**未动 e15-postcommit 也未动 gates4**（修法属后端批 / 量具批，不跟在本刀里）」是一笔**登了但没带触发条件的欠项**，它一躺就是五批（刀⑳ → 刀㉖）。本轮把它拖出来的不是自觉，是例行复取：e15 的第 4 格在刀㉒ / ㉓ / ㉔ / ㉕ **四轮复取里读的都是同一行** `d140f91f..HEAD backend=5  <<< BACKEND TOUCHED`（件 e15-02-postcommit-20261102-205110 / 211738 / 225028 三份可复跑），而每轮结论都照旧写「其余项 matched」。
+
+根因逐行实取：那一格把**两个不同的量**写成了一个——
+
+| 它声称在测 | 它实际在算 | 开工授权后的真值 |
+|---|---|---|
+| 「本刀不得碰后端」（batch-14 的文档刀型） | `d140f91f..HEAD` 的**累计**后端面（`d140f91f` 是当时的分支 fork 点） | 累计 = **5 非 0 且应当非 0**（刀⑱ `applications/agent_server/main.py` 与 `applications/agent_server/config.py` + 测试、刀⑲ `Makefile`、刀⑳ `scripts/evidence/recount_todo_index.py`，逐个 `git log --oneline d140f91f..HEAD -- <路径>` 已归刀） |
+
+⇒ 一个对任何文档刀**必红**的格，和 §27.7 那族「未被判决的格会漂」同族但方向相反：**判据过期后它不报事实，它教人删格**（也教人在结论里写「其余项 matched」把红读成背景噪声）。另注：推送件 e14-monday-push.ps1 的同族不变量**第十七批就换过形**（申报三件 + OUTSIDE-DECLARED 必须 0），而提交后取证件没换 ⇒ 两扇门对同一个后端面口径不一致，这是 §27.4 那个形状（推送门 vs 提交门）的**第二次实例**，只是这次差的是「推送件已修 / 取证件未修」。
+
+### 28.3 处置：按仓内先例 **fork 而不是就地改**，两格各带注入自测
+
+不修 e15-postcommit.ps1 本体（它产过的读数已被 §22–§27 按件号引用，改它等于把历史证据换到另一具量具上——这条规矩就写在该件自己的头部注释里，本批照它自己的规矩办），新建 e26-postcommit.ps1：
+
+- **4a) 本刀自己的后端面** = `git diff --name-only HEAD~1 HEAD` 对后端目录集计数，期望由参数声明（文档刀传 0）。这才是 batch-14 那句话真正想测的东西。
+- **4b) 自 fork 基线起的累计后端面** 改走**申报制**（沿用推送件那格的形状）：累计集 ⊆ 逐刀登记 ⇒ OUTSIDE-DECLARED 必须 0；申报集腐坏（登记的路径已不在累计面）另报 `<<< CUM-BACKEND-STALE`；基线 rev 也参数化（默认 `d140f91f`）。
+- 两格各带**注入式自测**（合成违规必须读 1，期望写成「必须为 1」那族口径，承接刀㉓）：4a 的后端目录过滤器命中 1、4b 的合成未申报路径命中 1。
+
+下面这份读数验的是**刀㉕**（e26 的首次实跑，它把刀㉕ 重取一遍；本刀自己的复取在提交后另出一份件，不拿上一刀的数当本刀的数）：
+
+```
+1) HEAD=e1ff9dd1 parent=3e1eeae3...  OK（这一行验的是刀㉕，父 = 刀㉔。件 e26-00-postcommit-20261102-225245.txt）
+3) files=4 add=231 add matched  del=2 del matched  non-docs-paths=0
+4a) knife backend=0 (declared=0)  worktree backend=0  INJECTED SELFTEST filter hits=1 (expect 1) => matched
+4b) cumulative=5 declared=5 OUTSIDE-DECLARED=0 STALE-DECLARED=0  POSITIVE CONTROL all-files=41  SELFTEST outside=1 (expect 1) => attributed
+2) status-all lines=3  <<< still dirty（三条 web/src CRLF stat 噪声，git diff --numstat 为空 ⇒ 内容 0 行，沿用推送件已登记的 stat-only 定性）
+6) remote refs containing HEAD: []  (empty = not published)
+```
+
+⚠ **第 4 格里没算的那一条也要说清**：e15 的第 2 格「status 必须 0 行」同样是 POC 期写死的期望，本批**未动它**（它的正确形式已在推送件里实现为「真脏 = status 行 ∩ diff --name-only 路径」，把同一套内容派生判据搬进取证件是下一件量具刀的活，本刀只搬后端面那一格，免得一次换两格抬不清归因）。⇒ 口径：**换形一次只搬一格，且搬完必须能说出剩下哪几格还是旧的**。
+
+**同一刀换了第二具量具的形状（面禁件 e25 → e26-gate-fill，fork 理由同上）**：申报集「这一刀动了哪几件」是**刀次写进来的审计线索**，不该写死在量具里 —— 写死了，量具就成了刀次的函数（下一刀要么改量具、要么误报，而改量具这件事本身没人会想起来）。于是把它做成参数 `-AllowCsv`。这一步踩出一个够得上「一道门变成旁路」级别的坑，读它与处置记在本节下面表格的行 5（**它是参数化动作自己造的新坑，不是 §27.4 那个形状的第三次**——前两次的形状是「两扇门口径不一致」，这一次的形是「一门之内判据被静默清空」）。
+
+### 28.4 本批自犯 / 坑表
+
+| # | 情况 | 实取证据 | 处置 |
+|---|---|---|---|
+| 1 | 写 §28.3 那段复跑块时，第一版把「本刀父」与「刀㉕ 的父」混为一句（读数是后者） | 抄读数时对比件内首行：HEAD=e1ff9dd1・parent=3e1eeae3 ⇒ 那是刀㉕ 的复取，不是本刀的 | 当场改成「这份读数验的是刀㉕」并补上件号。**没跑过的形状不写成期望**那条口径本批以另一种形式重犯：**引读数时必须同时引它所属的那把刀与那个件号** |
+| 2 | 本刀是**被复取抬出来的**，不是被红抬出来的：那格连续四轮报红而每轮结论都照旧写完 | 三份落盘件同值 `backend=5  <<< BACKEND TOUCHED`（上节已列件号） | 新口径：**一格连续 N 轮报同一个红而无人定性 ⇒ 它就不是在报事实，是在报判据过期**；这与 §27.7「连续 N 轮打印却从未被判决」是同一件事的两个方向（一个是默默绿，一个是默默红） |
+| 3 | 登记「待修」时只写了归属（属量具批）而未写触发条件 | §23.5 原文可复跑（本件 L2485），躺五批 | 承接《分支卫生》第 2 条的同一口径并**扩到欠项登记**：**任何「本批不修」的登记必须同时写「出现什么证据就主动复审」**，本批补的条件 = 「同一格连续两轮读数为同一个非 0 ⇒ 复审」 |
+| 4 | 工单件加第二十一批两行时，SearchReplace 的锚点**只截到上一行的前半截**（只到「另门件换形在 gitignored 目录）。」为止），返工后那一行的**尾巴被粘到了新行后面**，而第二十批那条射程行整行被顶掉 | 改完只读 diff 回显就看到了（尾巴接在新行末、原行不见了）。修分两步：先把粘着的尾巴拆回一条独立的第二十批行，再把该行换行序到两行之前。修完的硬证 = `git diff --numstat` 对该件读 **+2/-0**（= 只新增两行，原行逐字节未损） | ⚠ 口径：**改表格行时，锚点要么覆盖到行尾，要么改完立即用净增删行数反证**（只看 diff 回显能看见粘行，但“没别的地方被顶掉”这个结论要靠 +N/-0 这个数），换行序这种“内容不变只改位置”的动作也算一次写操作，同样要反证 |
+| 5 | 把门件申报集参数化时，`param([string]$Allow)` 与函数体内既有的局部量 `$allow` **是同一个变量**（PowerShell 变量名大小写不敏感），体内那句 `$allow = @()`（无 CSV 时的初始化）当场把传进来的申报集清空 ⇒ 门从「比对申报集」退化成「无东西可比对」 | 反证第一轮（件 e26-gate-00-20261102-230036）的读数**自相矛盾**：`face lines=2` 却 `allowed-hit=0 FORBIDDEN: 2`、`MISS-DECL: 1 <<< DECLARED-BUT-UNTOUCHED` 而下面跟着**空项**、`A-selftest-1 inject evil path => forbidden=2 (expect 1) <<< SELFTEST-FAIL`，而同一件里 `allow-count` 那格却读 **1**（空字符串装进数组后 `.Count` 是 1 —— 它掩盖了空值）。先用字节级探针（e26-probe-arg.ps1：raw-len=69 / face0-len=69 / contains-test=True）证明**参数传进去是干净的**，才把根因定到变量名而不是传参 | 两道修：① 参数改名 `-AllowCsv` / `-OverrideCsv`，与体内任何局部量不重名；② 新增 **A-selftest-0** 验申报项自身形状（空项 / 不含斜杠的项 ⇒ `<<< DECLARATION-MALFORMED`）。修后同一窄 allow 反证（件 e26-gate-00-20261102-230310）读 `A-selftest-0 DECLARATION-SHAPE-OK / allowed-hit=1 FORBIDDEN: 1 <<< FACE-FORBIDDEN / MISS-DECL: 0 OK / A-selftest-1 forbidden=1 SELFTEST-OK / GATE_RC=RED`——**语义归位**：少申报一件就当场红，而不是把两件全当未申报。⇒ 口径：**参数化一道门时，必须先证明「把申报集清空会让门报红而不是报绿」**；空集合在比对型判据里通常等于「全部通过」而不是「全部失败」，所以申报集自身需要一格判决，不能只靠下游的 FORBIDDEN/MISS 计数（本批它连下游计数一起写坏，正是「一格坏、三格跟着说谎」的形状） |
+| 6 | ⚠ **一条边界交代，不是新坑**：fork 规矩说「产过被引用证据的量具不改本体」，而 e25-gate-fill 在刀㉕ **内就被改过本体**（件名按轮次分名 + C-selftest-7），改前它产出的 e25-00-20261102-224513 已被 §27.7 按件号引用（T1=13 那个数） | 复跑件 e25-00-20261102-224843：改动后同一格仍读 `T1 hits=13`、且 `C-selftest-7 ... ARTIFACTS-DISTINCT-OK` ⇒ 被引用的那个数在新本体上**可复现**，且那处改动是**加齿**（新增判决格 + 落盘件分名）不是**换判据** | 记下这条差异的判据：**加齿可就地，换判据必须 fork**（fork 规矩要的是「历史读数可复现且判据未换」，不是「脚本字节永不许动」）。⚠ 本批故意**不把它升为通用口径**：样本只有一个，要等第二次在「加齿还是换判据」上真的分歧时再定 |
+
+### 28.5 未做 / 不得读成已批（逐条点名）
+
+本批改的是**两具取证量具的形状**（提交后取证件 e26-postcommit + 面禁件 e26-gate-fill 的申报集参数化），两者都走 **fork**：**未动 e15-postcommit.ps1 本体也未动 e25-gate-fill.ps1 本体在先**（e25 在刀㉕ 内被改过一次本体，属「加齿」不是「换判据」，边界交代见上面表格行 6）、未动 e15 的第 2 格（status=0 那条旧期望，见 §28.3 末）・未动 gates4・**未推任何 ref**（刀㉔ `3e1eeae3`、刀㉕ `e1ff9dd1` 与本刀都保持未推，用户拍「别动它们，暂不推」）・未碰远端 main・未 force・未动 github-legacy 禁用位・未删 `company-snapshot`・16 条 T2 债未清（那是纯书写口径刀）・B 路三条前置读数一条未取・C 路常态化未落地（需 D1）・反证表 N4 服务端 pipeline 拦截力待取证・make test 全量 10 session 未跑・V4 实拍未做・PR-1 未开工。
+
+```powershell
+git log --oneline d140f91f..HEAD -- Makefile applications/agent_server/config.py applications/agent_server/main.py applications/agent_server/tests/test_web_ui_mount.py scripts/evidence/recount_todo_index.py
+git diff --name-only d140f91f HEAD -- applications packages scripts tests eval deploy Makefile pyproject.toml
+git diff --name-only HEAD~1 HEAD -- applications packages scripts tests eval deploy Makefile pyproject.toml
+git diff --numstat
+```
+
+
 
 
 
