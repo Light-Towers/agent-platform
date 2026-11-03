@@ -3855,6 +3855,120 @@ remote:   https://github.com/Light-Towers/agent-platform/security/dependabot/211
 
 ⚠ 本节自己抬出的一条取数瑕疵（入库前改掉）：上面那句里的件号初稿写的是 `k36-173133-…`，实物是 `k36-173153-…`。件名里的时刻由 `Get-Date` 现取，但把它拄进散文时是手抄的 ⇒ 口径补下半句：**在册「件名必须带 HHmmss」只保证不撞名，不保证拄进文档的那串数字对；引用件名前必须跑一次列目录对名。**
 
+## 39. 第三十二批（2026-11-03，刀㊲）：PR-2 对话页交付 · 屏上格第一次跑在判据绑的通道上 · 两条缺陷是实拍量出来的而不是想出来的
+
+### 39.1 本刀的单，以及「今晚做得完的部分」与「只有白天能做的部分」怎么切
+
+上一刀末尾拿到的拍板是 PR-2 开工（判据 = 工单件 A2、A4、A8 + 视觉件 V3、V4、V6）。用户本轮追加的约束改变了**排期形状**：内网现网（241 / 126）只有白天可达 ⇒ 凡是「不需要现网就能定案」的动作一律今晚做完，凡「只有现网能答」的问题一律**写成带命令的清单**交出去，不留在推测里。于是本刀分成两面：
+
+- **今晚能定案的**：实现面 + 门禁 + 变异反证 + 屏上实拍 + 两条实拍抬出的缺陷修复 + 现网取证前的**按源复取**（读后端源码验客户端的线格式假设，这一步不需要环境）。
+- **只有白天能答的**：真后端发不发那 12 类帧、`x-trace-id` 在现网 `/query` 响应上到底有没有、web 产物进镜像后 `/ui/` 的三判据、A9（需模型密钥）。这些今晚**只能写成探针件 + 步骤清单**（§39.6 / §39.7），不能写成像已达成。
+
+### 39.2 实现面（本节点名四件改 + 六件新；本刀入库总面见下面订正段）
+
+⚠ **标题订正（追了两轮，两轮都错在同一个地方）**：初稿标题写的是「入库五件改 + 六件新」，第一次订正改成「六件改 + 六件新」 —— 两个数**都没被逐件点过名**。本节的正文实际只点名**四件改**（`web/src/api/sse.ts`、`web/src/App.vue`、`web/src/styles/base.css`、`web/src/styles/events.css`），而本刀**入库总面**按 `git diff --cached --numstat` 现取 = **13 件（7 改 + 6 新）**，比本节多出三件改：`web/scripts/check-events.mjs` 与 `web/scripts/verify-sse.mjs`（门禁面，读数在 §39.5）、`web/README.md`（文档面，活陈述随动）。⇒ 标题里的计数词必须能被本节或相邻节逐件点名对上，对不上就改成「只写本节自己点名的那几件」的形状。web/ 侧体量 = **+1240 / −63**（新文件占 510；两个加总数由 `git diff --cached --numstat -- web` 逐行 `Measure-Object -Sum` 现取，不手加。本句初稿写的 `+786 / −59` 是手抄的错数，见 §39.8 行 5）。
+
+`web/src/api/sse.ts` 的 evidence 分支改为写**结构化三字段**（node / count / preview）而不是把预览塞进一句文案 —— PR-1 那样写是因为那时没有消费者，PR-2 交了依据列表，同一段 200 字同屏出现两处就是重复。新增 `web/src/components/icons.ts`（`rowClassOf` / `iconPathOf` 两个纯函数）与 `web/src/stores/session.ts`（会话层单点状态）；四个组件 `web/src/components/Timeline.vue`、`Answer.vue`、`EvidenceList.vue`、`ApiKeyBox.vue` 落地；`web/src/App.vue` 换成两栏视图 + `<details>` 折叠的窄栏副本；样式增量落在 `web/src/styles/events.css`（`.ev--transport` / `.term--*`）与 `web/src/styles/base.css`（`.answer` / `.evidence` / `.tl-toggle`）。**本刀没有新增一个后端字段、没有改一行后端实现**（逐刀口径：`git diff --name-only HEAD -- applications/ packages/ scripts/ Makefile Dockerfile .github/workflows/` 现取 **0 行**）。⚠ **累计口径不是 0 行**：对 `d140f91f` 现取 **7 件**，逐件绑到引入它的提交，定性与由此抬出的一条**判据原文与实物不同步** 在 **§39.10**（该格待人拍板，本刀不改判据）。
+
+### 39.3 屏上实拍：通道是判据绑的那一条，而响应帧是 mock —— 这条边界写在件内而不是写在结论里
+
+通道 = `pnpm build` 的 dist 由 `pnpm preview --host 127.0.0.1 --port 4175` 托管 + headless Chrome / CDP（沿第二十三批刀㉘ 立的那条，只是这一回页面上有数据渲染了）。取证件件 k37-shot-c1fix.txt：**rc=0・13 张 PNG・`/query` 被拦截 17 次・拦截应答事故 0・页面异常 0・console.error 0**。
+
+⚠ **本机没有可用后端**，所有 `/query` 的响应都是实拍件在 CDP `Fetch` 域里 fulfill 的 **mock 帧**（工单件 §4 A7 那条反证方式原文允许「临时用本地 mock 只开流不发 done」）。⇒ 本刀交得出的是「**客户端把这些帧渲染成了什么**」，交不出「真后端确实发这些帧」。为了让这句不是空口声明，件末留了一格 **通道齿**：`Fetch.disable` 撤掉拦截后同一动作读到的是 preview 自己的回退响应（屏上那句 `服务返回 HTTP 502，响应体不是可解析的错误信封` 与任何 mock 文本都不同形）⇒ 读数 `CHANNEL-TEETH-OK`。
+
+逐格判词（全部来自那一轮实跑，不是设计意图）：`A8-SCREEN-TEXTS-DISTINCT`（屏上 5 条 banner 两两互异，含 A8 那四支）、`NO-ECHO`（422 的 `input` 原文不上屏）、`A7-NO-DONE-NOT-COMPLETED`（`term--open` + 「未完成（没收到 done 帧）」）、`EV0-CELL-HAS-TEETH`（badge `0` + 「这一轮服务端没有给出可展示的依据片段。」）、`HSCROLL-CELL-HAS-TEETH`、`MEDIA-DARK-CELL-HAS-TEETH`、`RING-CELL-HAS-TEETH`（未聚焦读不到环 / 键盘聚焦 2px solid rgb(37, 99, 235) / 鼠标点击 `focusVisible=false`）、`CHANNEL-TEETH-OK`。V4 那一组是 **六格矩阵全部 `hScroll:false` 且 `rows:6`** —— 「有数据渲染」这件事第一次进了构建通道。
+
+⚠ 一条**判据原文自己规定的反证方式本刀未走**，必须写在这里而不是被屏上判词盖掉：视觉件 §7 的 V3 行「反证方式」那一列写的是「用未配 LLM 的部署制造真实 error；empty 用无 `DATABASE_URL` 的 503」。本刀用的是 mock。⇒ V3 的达成度是「屏上互异已证、真部署造错未证」，后者是 §39.7 的第 6 步。
+
+### 39.4 实拍量出来的两条真缺陷（都不是预防性的好愿望，是读数）
+
+**C1 键盘提交后焦点被抽走**（判据 V6 那一格）：修前实拍读到 `focusOnSubmit: {tag:"BODY"}` —— 原生 `disabled` 把控件从 tab 序里抽掉，按下 Enter 的那一瞬间浏览器把焦点收回 `body`，于是「每问一次就要从头 Tab 一遍」，「键盘一遍走通」在实物上不成文。改法 = `web/src/App.vue` 提交钮 `:disabled` → `:aria-disabled`（「不能提交」仍由 `ask()` 的两道早退自守），CSS 选择器扩成 `.btn[disabled], .btn[aria-disabled="true"]` 让两种写法落到同一形状。修后实拍新增**两枚齿**并各取到读数：`focusVerdict = V6-FOCUS-RETAINED`（`tag:"button"`）、`shapeVerdict = ARIA-DISABLED-SHAPE-HAS-TEETH`（`aria:"true"`・`native:false`・文字色从可用态 `rgb(255,255,255)` 翻成 `rgb(145,153,163)`）。两枚齿分开是有必要的：**只翻属性不翻 CSS = 假控件；翻 CSS 不看属性 = 形状永远对**。这一型与在册「一格连续报同一个红」不同族，它属于「判据写了但实物不成文」，能抓住它的只有把判据变成一次真按键流。
+
+**C2 窄档 sticky 输入区与内容叠字**：`<768` 那档 `.composer` 是 `position: sticky; bottom: 0`，修前它**没有自带底**，与下方 h2 的矩形重叠 **3575 px²** 且底色透明 ⇒ 肉眼看像破版。处置 = 补 `--bg-surface` 底 + `--border-decor` 上分隔线 + `padding-block: var(--sp-2)`（三值全走令牌，`check:tokens` 仍 91/91）。修后探针读 `background: rgb(255, 255, 255)`・`transparentBg: false`・verdict 翻成 `NO-OVERLAP-OR-HAS-BACKGROUND`。
+
+⚠ **这一格「修好了」要说清楚修的是什么**：重叠面积**没有归零**（现取 `overlapWithH2 = 3900`，比修前还大 325 px²，因为多了 padding）。修掉的是**叠字**（两层都有文字、彼此糊在一起），修不掉的 sticky 输入区盖住滚动内容的一部分**是这条定位方式的固有行为**。⇒ 「可接受 vs 要改成非 sticky」属**人判**（观感那一格从第八批起就写在视觉件 §7 V4 行的理由 ③ 里），本刀不替人拍。留在这里的数就是给人看的那一个。
+
+### 39.5 门禁与反证（修 C1 之后全套复跑，一次没跳）
+
+`check:tokens` rc=**0**（定义/引用各 91・事件 12 / 字段 30 全为派生值）・`lint` rc=**0・`typecheck` rc=0**・`build` rc=**0**（`index.html` 1.72 kB / `index-qQg6U5Lb.css` 14.27 kB / `index-DzyYPB3A.js` 86.23 kB —— ⚠ **CSS hash 随 C2/C1 两次改动换过两次**，引用产物名必须按当轮构建取，不能引上一批的）。`check-events` rc=**0**（Literal 8 ∪ 实现下发 12 ⇒ 全集 12・图标表键集 14/14・`events.css` 的 `.ev--` 集 14/14）、`verify-sse` rc=**0**（**106 条断言・失败 0**，含 §G 快照不回改与 §H 会话层）。变异反证件 k37-pr2-mutation.mjs：**13/13 MATCHED**（N1–N7 走结构件、N8–N13 走行为件，每格 `rc` 符合期望 + `BYTE-EXACT`）。
+
+⚠ **13 枚变异全红 ≠ C1 修复有齿**：那批格子锁的是事件契约与 handler 表，aria-disabled 的齿在 §39.4 那两枚（实拍里的 `focusVerdict` / `shapeVerdict`）。两套量具别混 —— 这也是本仓反复登记过的那族「拿相邻一具量具的绿当这一格的绿」。
+
+### 39.6 现网取证前的**按源复取**：今晚不做，明天就会用「mock 里对的形状」骗过自己
+
+客户端对线格式做了五条假设，逐条读后端源码核（全在今晚，不需要环境）：
+
+| 假设 | 后端实物 | 定性 |
+|---|---|---|
+| 帧有 `event:` 行 | `shared_schemas.sse.sse_pack`：event 非空 ⇒ `event: {e}\ndata: {json}\n\n`；`query_router._sse` 把 `payload.type` 提升为 event 名 | ✅ 成立，但 `type` 缺席时后端**只发 data 行** ⇒ 客户端按「`payload.type \|\| 帧 event 名`」两路读（与 `console.html` 同形），这条已经写在 `web/src/api/sse.ts` 头注 |
+| 请求体用 `session_id` | `QueryRequest.session_id`（旧 `thread_id` 的 alias 于 2026-10-19 删除，**发了会被 pydantic 静默忽略**） | ✅ 客户端发的就是 `session_id`；响应回来的仍叫 `thread_id` |
+| 鉴权头 `X-API-Key` | `api/auth.verify_api_key(x_api_key = Header(alias="X-API-Key"))` | ✅ |
+| 401 是 `detail` 字符串 | `HTTPException(401, detail="API Key 无效")`；`install_error_handlers` **只注册 `Exception`**（不接管 HTTPException / RequestValidationError）⇒ 401/422 保持 FastAPI 原生形状 | ✅ A8 四支的形状对得上；本刀的 mock 文案写成英文 `Invalid API key` 而现网是中文那句 —— **不影响分支，影响明天比对时要不要按原文** |
+| 500 是信封 `{code,msg,request_id}` | `errors.error_body` 就是这三键，并在响应头补 `X-Trace-Id` | ✅ |
+
+两条**只有现网能答**的，今晚写成待取而不写成结论：
+
+1. **`x-trace-id` 在 `/query` 的成功响应上有没有**：全仓 `git grep` 实取 —— 给**所有**响应统一注入该头的是 `agent_core.guardrails.web` 里那套 ASGI 包装（knowledge-service 用），而 agent_server 走 `build_api_app`，工厂只装 `install_error_handlers` + `TracingMiddleware`；后者在 `http.response.start` 上量的是 span/状态码，**grep 不到该头的注入**。`errors.py` 只在造错误响应时补它。⇒ 现网 `/query`（200 流）与非信封的 401/422 **很可能没有这个头**，屏上「请求号」那一格会诚实说没有。这一格属**横切关注点**（《架构决策原则》：单一实现 + 全局装配 + 门禁），补齐 = 后端改动，**本刀一行后端代码未动、也不动**；明天的探针件把它当成一条读数取（C5/C6 两格都打印 `x-trace-id`），取到「没有」再决定动不动它。
+2. **多轮会不会接得住**：`resolve_thread_id` 在 `API_KEY` 非空时**忽略客户端值**、会话归到 `tenant-<服务端断言租户>`（清单里那行注释自己就写着这句）。⇒ 现网形状下「第二轮问上一轮的事」应当天然连续，与客户端传不传 `session_id` 无关；dev 模式（无 `API_KEY`）才由客户端决定。**这条今晚不写进任何「已达」里**，它是 §39.7 第 5 步的 C7 那一格。
+
+### 39.7 白天窗口清单（探针件已建好并做过非空转反证）
+
+新探针 k38-daytime-verify.py（住 gitignored 目录，**单文件 stdlib、在 Pod 内执行**）：运行镜像是 python:3.11-slim，**里面没有 curl**，而 Pod 内必然有 python3 ⇒ 走 `kubectl -n agent-platform exec -i <pod> -- env AP_API_KEY=… python3 -B - < 探针` 而不是宿主 curl，也不依赖 port-forward 起着。凭据只从环境变量进，件内不写不存不打印密钥本身。七格：C1 rev 绑定 / C2 `/ui/` 200+no-store+体与镜像内文件同 sha / C3 HTML 里那个 `index-*.css` 真发的 asset 同 sha / C4 **对照格**：不存在的产物路径必须真 404（在册判据 D，防 SPA fallback 假绿）/ C5 错误体形状 + 头 / C6 真提问的 SSE 帧序列与 `done` / C7 多轮连续性。
+
+**这个探针件先被反证过再用**（否则它就是「写了命令就算能推」那一族）：配套替身 k38-stub.py 两跑 —— 好面 `ALL-CELLS-OK`・rc=**0**；坏面（撤 `/ui/` 的 no-store + 流不发 `done`）rc=**1**・`fails = [C2-ui-index, C3-asset-css, C6-real-stream]`，**恰好是那两件事的连锁**（不多不少、也没把正控制记成失败）。白天动作的顺序：
+
+1. **先推内网再动镜像**（在册规矩：每轮推送前按当天最终 rev 重跑 L3 深度安全审查；本刀 commit 是下一趟推送的对象）。
+2. 代码上 241 走 git bundle + scp（126 恒 detached HEAD），确认 241 那份 checkout 的 rev == 待验 rev；构建**放 241**（126 那块 `ROTA=1` 单盘会把同机 KS 的 etcd 打进 `slow fdatasync`）。
+3. `deploy/k8s/scripts/build_with_io_guard.sh`（守卫**不得关**：241 的 moby 上整套观测后端与它同盘；熔断口径需要时放宽 `IO_LIMIT/IO_STRIKES` 而不是关）→ `distribute.sh` 从 241 跑必须显式 `WORKERS="125 126"`（默认那两条是从 126 构建的历史形态，漏一台即 `ErrImagePull`）。
+4. `deploy/k8s/scripts/verify.sh <期望 rev>` —— ⚠ 它只到 `/health` 与 Pod 内 `GIT_REV` 那一层，**`/ui/` 与 `/query` 两格由 §39.7 的探针件补**（这就是为什么探针件不能等 verify.sh 绿了就算完）。
+5. 跑探针件（上面那条命令），逐格读 C1–C7。C6 若 `frames` 里出现 §39.6 表第一行以外的 event 名 ⇒ 客户端会落 `kind='unknown'` 那一条并**在屏上报事件名**（工单件 §2.2「未识别事件不得静默吞掉」），那一格属读数不属红。
+6. 补 V3 那半句**判据原文规定的反证方式**：用未配 LLM 的部署造真实 error 帧、用无 `DATABASE_URL` 的 503 造 empty（浏览器侧真键流，不是 mock）。
+7. 取 A9 需要模型密钥；roadmap #18 在那之前保持开项。
+
+### 39.8 本刀自犯（六条，前四条是取数机制、第五、六条是拄数机制）
+
+1. **探针件自己的正控制格制造了一条永远红**：`sha12()` 对「故意读不到的路径」也调 `note("<<< …")` 计入 FAILS ⇒ 好面 rc=**1**（`fails: [sha:…index.html.bogus]`）。这条如果不被本地替身跑一遍，白天窗口里它会**以「现网有问题」的样子**出现。修 = 拆成静默 `_sha()` + 会记失败的 `sha12()`，正控制格自己判。⇒ 口径：**故意制造的失败不能走「意外失败」那条记账路径**（与 §17.5 行 8「落盘了但被覆盖的读数同样不算取证」同族，方向相反：那次是漏记，这次是多记）。
+2. **在册那枚 `Select-Object -First N` 把 rc 打成 -1 复犯**（§37.8 立的型，**第二次**）。这次是探针坏面跑第一版时被它骗了一下：`rc=-1` 不是「探针崩了」，是 PowerShell 提前断管。改 = 先整档落盘、再读 rc。按《错误闭环》计入同类错误重复率（同型两次的判据在 AGENTS.md 与坑表，这里只记第二次）。
+3. **首跑读数串位**（上一批已登记、本刀再踩一次的那个族）：被拦的请求永不应答时页面卡 loading，下一轮 Enter 被按钮吃掉，表观是「下一轮读数不对」而根因在本轮。这一族的**最终修法**不是加 sleep 而是本刀写进件里的三件事：合法枚举值 `Failed`（不是 `ERR_CONNECTION_REFUSED` / `INTERNET_DISCONNECTED`，那两个 CDP 直接报 `Unknown errorReason`）、应答循环兜底 `continueRequest` + 事故计数（`responderErrors > 0` ⇒ 整件 rc=1）、`round()` 的**硬前置守卫**读「在不在流里」而不是「按钮能不能按」（空态里 `canSubmit` 本来就 false，读错会把合法空态误报成串位）。
+4. **一句散文里列了六件却写了「七件」**（本刀账面收尾时自犯，与在册「判据文字与被检物不同步」同型，只是这次错在计数词不在判据里）。错因：把 `events.css`（它是**改**不是新）当成新增件数进了那个总数。处置 = 逐处改计数词 + **把总数改成一串可逐一点名的枚举**，并补一句机械复取（`git ls-files --others -uall` 恰 6 条 / `git diff --cached --numstat` 新文件行恰 6 行）。⇒ 口径：**文件数与行数一律由 numstat / ls-files 现取派生，散文里的计数词必须能在同一轮取到同形的枚举**；⚠ **本条的第一次处置自己也踩了同一个坑**（同一轮内追改两轮）：我把 §39.2 的标题从「五件改」改成「六件改」，理由是「README 是账面收尾才多改的一件」—— 但那**两个数当时都没被逐件点过名**（本节正文只点名四件改），所以那次「订正」只是给同一个裸计数词换了个值，错没走。现处置 = 标题只写本节自己点名的那几件，总数交给绑定 numstat 的订正段。⇒ 追加口径：**订正计数词的方式是把它换成「可点名枚举」或「不抄数的形状」，不是再猜一个数**；同一错在一轮内追两次，按《错误闭环》计入同类重复率。
+5. **入库体量那个加总是手抄的，而且抄错了**（账面收尾时自己复核发现的，不是门件抬的）：三处散文（本节标题订正段 + 工单件 PR-2 行 + 工单件 §13.4 射程行）都写的是 `+786 / −59`，而 `git diff --cached --numstat -- web` 逐行相加的真实值是 **`+1240 / −63`** —— 差了 **454 行加 / 4 行删**。错因不是算错，是**根本没算**：那个数是从一个未完成的子集（新文件 510 + 部分改面）口头估出来的，估完就当读数拄进了三处。**⚠ 这一条比行 4 严**：行 4 是计数词（六/七），当场能靠枚举个数发现；本条是**提交体量**，它是「本刀多大」这个判断的输入（工单件 §8.1 那条「400 行是代理指标」的知情超限判据就吃这个数），拿估数入账等于把判据的输入也估了 —— 真实值 1240 比错数 786 大 58%，而本刀当时止是「带理由的知情超限」，理由必须建在真数上。修 = 三处一起改 + 每处后面追加一句「由 numstat `Measure-Object -Sum` 现取」。⇒ 口径：**加总数必须是一行命令的输出，不是心算**；凡散文里出现 `+N/−M` 这种形状，旁边就要有那条能现取它的命令（与 §38.6「件名里的时刻是手抄的」同型，只是那次错在串数字、这次错在量）。
+6. **拿逐刀口径当累计口径写，而且那条命令根本没跑**（本刀第三条抄数错，也是三条里唯一会**骗到白天窗口**的一族）：三处散文写的是「V7 那格按 `git diff --name-only d140f91f..<rev>` 复取仍为 0」，而实物是：逐刀面（对 HEAD）**0 行**，累计面（对 `d140f91f`）**7 件**（逐件来源见 §39.10）。两个口径都是真的，**只是名字不同**：「本刀未动后端」为真，「对基线仍 0 行」自 PR-0（刀⑱ 后端托管）起就**不再为真** —— 而那句 V7 陈述从第五批一路传到本刀都没重跑（视觉件 §7 V7 行那句「仍为 0 行」已失效四批，本刀是抄它而不是量它）。⇒ 口径：**凡引用「仍为 N」这种延续型读数，必须在当轮重跑那条命令**（与《观测评定》第 3 条「现网读数必须绑定当时的 rev」同族，只是这里绑的是基线 rev）；一个失效的延续型主张比一个未写的主张坏，因为它带着「已经核过」的外观。处置不在本条而在 **§39.10**（那条抬出了判据原文与实物的不同步，需人拍板）。
+
+### 39.9 本刀未做 / 不得读成已批
+
+未合 `company/main`（用户已拍不合）・本刀 commit 不在上一趟推送里（同一把尺子）・**真后端一帧未取**（§39.3 那条诚实边界）・V3 的判据原文反证方式（真部署造错）未走・V4 的子判据二（`false` vs `null` 不同形状）在 PR-2 页**无载体**，它属 PR-4 灯阵，不因此读成「PR-2 缺功能」・C2 的「遮挡 vs 破版」人判未收・`make test` 全量十 session 本批未重跑（改动面 = `web/` + 两份文档，后端零改动）・CI runner 未实跑・B 路三条前置读数未取・公开镜像本轮未动（`mirror/…` 现 tip `a6753c9c`，下一轮同步要按 §34.7(b) 重新选源 + live 复取父）・PR-3/PR-4 未开工。
+
+三道门槛：**决策完备 ✅ → 规范已批 ✅ → 开工授权 = PR-0 本体 + PR-1 + PR-2（本批已交付到「客户端 + 屏上 + 构建通道」这一层）**。⚠ 本批**不得**被读成「PR-2 已验收」：验收里那一半只有现网能答的东西，全列在 §39.7，而现在时间是晚上。
+
+### 39.10 V7 那一格：两个口径都是真的，但判据原文与 PR-0 后的实物不同步（待人拍，本刀不改判据）
+
+视觉件 §7 的 V7 反证方式列写的是（原文）：`git diff --name-only d140f91f..<交付批 rev> -- applications/ packages/ scripts/ Makefile Dockerfile .github/workflows/` **除工单件 §9.1 明写的 `main.py` 挂载点外不得出现后端实现文件**。本刀现取两面：
+
+| 口径 | 命令 | 读数 |
+|---|---|---|
+| **逐刀（本刀动了后端吗）** | `git diff --name-only HEAD -- applications/ packages/ scripts/ Makefile Dockerfile .github/workflows/` | **0 行**（`Measure-Object -Line` 现取）⇒ 「本刀未动后端」成立 |
+| **累计（判据原文绑的那一条）** | `git diff --name-only d140f91f -- （同上面那六个路径栏）` | **7 件**，逐件绑首次引入它的提交（↓） |
+
+七件逐件与来源（`git log --diff-filter=AM -1 d140f91f..HEAD -- <file>` 现取，不是记忆）：
+
+| 件 | 引入它的提交 | 按 V7 原文字面的定性 |
+|---|---|---|
+| `applications/agent_server/main.py` | `bd8898a1`（PR-0 修复刀） | **豁免项**（§9.1 明写的挂载点，判据原文自带这一句） |
+| `applications/agent_server/config.py` | `395bf306`（PR-0 刀⑱，提交信息自写「后端四处改动」） | ⚠ **不在那句豁免的字面里**（豁免只点了 `main.py`） |
+| `applications/agent_server/tests/test_web_ui_mount.py` | `bd8898a1` | 测试件，不是「后端实现文件」——但它是 `applications/` 下的新文件 |
+| `Dockerfile` / `.github/workflows/agent-platform-ci.yml` | `1960d7a6`（PR-0 刀⑲，241 真构建那一刀） | 构建/CI 面，在 V7 的路径栏里，但不是「实现文件」 |
+| `Makefile` | `92e0bd65`（PR-1 刀㉚ `ci-web` 扩到七步） | 同上 |
+| `scripts/evidence/recount_todo_index.py` | `6bf38b61`（PR-0 刀⑳取证链） | 取证脚本，不是产品后端 |
+
+**读出来的结论（不是拍板）**：七件里**只有一件是 V7 原文能直接用豁免接住的**（`main.py`）；其余六件全住在 PR-0/PR-1 那几个**已按工单件 A6 逐刀申报过、并过了后端测试 session 的**交付批里，不在「视觉改动」这个射程内。⇒ **V7 的判据原文写于 PR-0 开工之前**（第五批前后），当时后端面真是 0 行；PR-0 交付后那句「除 `main.py` 外」已经罩不住实物了 —— 这一型与在册的 V1「六格」、V4「= 6 张」同族：**判据文字与被检物不同步**，而那两处的收法都走了人拍板（V1/V4 改成不抄数形状），**本刀不自作主张改 V7**。
+
+两个候选处置（待拍，不本刀执行）：
+
+- **A（改口径为逐刀判）**：把 V7 的反证方式改成「**本刀面**对后端路径栏必须 0 行，累计面只作参考并逐件绑提交」。贴合 V7 本意（「A1–A8 不因**视觉改动**回归」，射程本来就是单刀的视觉改动），且不放松任何一次实际回归（每刀仍必取 0 行）。**推荐**。代价：累计面不再能一句「全仓未动后端」读完（得逐件绑提交）。
+- **B（保持字面）**：则 PR-0 那四刀的后端改动都算 V7 违例 —— 而它们是独立拍过开工授权、过了 `make ci-web` 与后端测试的交付。把已批的交付登成未修的红格，比改口径更坏。
+
+**复审触发条件**（没有这一条就不算登记）：命中任一条即重开本格 —— ① 下一刀要往 `applications/` 或 `packages/` 落产品代码（那 A/B 的差就会变成实物差，不只是措辞差）；② 白天窗口 §39.7 第 1–3 步把本批产物推到 241/126 后，V7 要跟着 A1/A6 一起在现网重取一次（那一轮必须用**逐刀口径**，否则会得到一个永久非 0 的读数并把它当成回归）；③ V4 的灯阵（PR-4）开工时若需后端新字段，本格的豁免清单随之重算。
+
 
 
 

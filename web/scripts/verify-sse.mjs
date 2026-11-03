@@ -19,6 +19,14 @@
  * 载荷泄漏用 canary 判：每个喂进去的帧都带一个 `secret: CANARY` 键，断言「快照里任何
  * 一条文本都不含 CANARY」。canary 检测器自己带正对照（故意含毒的串必须被判定为泄漏），
  * 否则「检测不到泄漏」与「检测器是空的」读数同形。
+ *
+ * PR-2（刀㊲）在本件加了两组：§G 消费面（快照不回改 / 依据进表三组合 / class 与图标
+ * 两个纯映射），F14–F16 请求号（响应头 → 快照，且错误通道同样有号可指），以及
+ * §H 会话层（`stores/session.ts` 直接在 Node 里驱动：banner 跨轮累积/去重/溢出、
+ * 跳轮不混行、非 ASCII 密钥那条必接）。加 §H 的时机：本件头注那句「可测性持平甚至
+ * 更好：本件的导出可以直接被 `verify-sse.mjs` 在 Node 里驱动」——能驱动却不驱动，那句
+ * 就只是一句能力声明而不是读数（本轮实取：`import('vue')` 与 `import('./session.ts')`
+ * 皆 OK，exports=20）。
  * ==========================================================================*/
 
 const CANARY = 'CANARY-载荷不得上屏-8f2c'
@@ -38,22 +46,47 @@ function check(label, ok, detail = '') {
   }
 }
 
-/** 泄漏判据：快照的**全部**上屏文本里不得出现 canary。 */
+/**
+ * 泄漏判据：快照的**全部**上屏文本里不得出现 canary。
+ * 第三个数组是 PR-2 扩的：`evidence.preview` 与 answer/时间线一样会直接渲到屏上。
+ * 参数按完整快照形状要（不写 `?? []` 兜缺省）—— 少传一个数组就该炸，而不是被判成"干净"。
+ */
 function leaks(snap) {
-  const hay = [snap.answer, ...snap.timeline.map((t) => t.text)].join('\n')
+  const hay = [
+    snap.answer,
+    ...snap.timeline.map((t) => t.text),
+    ...snap.evidence.map((e) => e.preview),
+  ].join('\n')
   return hay.includes(CANARY)
 }
 
 const framesOf = (snap, event) => snap.timeline.filter((t) => t.event === event)
 
+/** 拼一帧 SSE 文本（§F 与 §G 共用，不写两份 —— 两份会漂）。 */
+const frame = (name, obj) => `event: ${name}\ndata: ${JSON.stringify(obj)}\n\n`
+
+/** 把若干帧包成一个 200 的 SSE Response（不发网络，只让 streamQuery 真解）。 */
+const sseResponse = (chunks, head = {}) => {
+  const enc = new TextEncoder()
+  const body = new ReadableStream({
+    start(controller) {
+      for (const c of chunks) controller.enqueue(enc.encode(c))
+      controller.close()
+    },
+  })
+  return new Response(body, { status: 200, headers: { 'content-type': 'text/event-stream', ...head } })
+}
+
 /* ---- 载入被测模块 ---- */
 let sse
 let errors
 let events
+let icons
 try {
   sse = await import('../src/api/sse.ts')
   errors = await import('../src/api/errors.ts')
   events = await import('../src/api/events.ts')
+  icons = await import('../src/components/icons.ts')
 } catch (e) {
   console.error(`❌ 无法加载被测 .ts（需 Node ≥22.18 的原生类型擦除，当前 ${process.version}）：${e.message}`)
   process.exit(1)
@@ -61,12 +94,20 @@ try {
 
 const { applyFrame, initialState, streamQuery } = sse
 const { describeError, describeStreamError } = errors
+const { ICON_PATHS, iconKeyOf, iconPathOf, rowClassOf } = icons
 const NAMES = events.EVENT_NAMES
 
 /* canary 检测器正对照（先证检测器不是空的，再拿它做判据） */
 console.log('§0 断言器与 canary 的正对照')
-check('canary 检测器对含毒串必须报泄漏', leaks({ answer: `前缀${CANARY}后缀`, timeline: [] }))
-check('canary 检测器对干净串必须不报', !leaks({ answer: '正常答案', timeline: [{ text: '正常一行' }] }))
+const clean = (answer, texts, previews = []) => ({
+  answer,
+  timeline: texts.map((t) => ({ event: 'x', kind: 'event', text: t })),
+  evidence: previews.map((p, i) => ({ node: `n${i}`, count: 1, preview: p })),
+})
+check('canary 检测器对含毒串必须报泄漏', leaks(clean(`前缀${CANARY}后缀`, [])))
+check('canary 检测器对干净串必须不报', !leaks(clean('正常答案', ['正常一行'])))
+check('canary 检测器对依据片段含毒必须报泄漏（哨程扩到 evidence 的那一枚正对照）',
+  leaks(clean('', [], [CANARY])))
 
 /* ---- §A 三条错误通道（工单件 §3 末句「两组单测」的第一组：HTTP 侧）---- */
 console.log('§A describeError：三条 HTTP 通道 + 两种 4xx 形状')
@@ -162,18 +203,6 @@ console.log('§E done 定稿 / error→done 抑制 / cache-hit 旁路形状')
 /* ---- §F streamQuery：真读流（注入 fetch，不发网络）---- */
 console.log('§F streamQuery：A7 未完成判定 / 401 通道 / 网络失败可读性')
 {
-  const sseResponse = (chunks) => {
-    const enc = new TextEncoder()
-    const body = new ReadableStream({
-      start(controller) {
-        for (const c of chunks) controller.enqueue(enc.encode(c))
-        controller.close()
-      },
-    })
-    return new Response(body, { status: 200, headers: { 'content-type': 'text/event-stream' } })
-  }
-  const frame = (name, obj) => `event: ${name}\ndata: ${JSON.stringify(obj)}\n\n`
-
   const seen = []
   const noDone = await streamQuery({
     query: 'q', apiKey: '',
@@ -219,6 +248,212 @@ console.log('§F streamQuery：A7 未完成判定 / 401 通道 / 网络失败可
 
   const noBody = await streamQuery({ query: 'q', apiKey: '', fetchImpl: async () => new Response(null, { status: 200 }) })
   check('F13 200 但没有体流 ⇒ 明说读不到事件，不静默成功', noBody.terminal === 'failed' && noBody.timeline[0].text.includes('没有响应体流'))
+
+  /* F14–F16 请求号（PR-2）：错误文案里那句「请凭本页的 request_id」必须有个实物可指。 */
+  const traced = await streamQuery({
+    query: 'q', apiKey: '',
+    fetchImpl: async () => sseResponse([frame('done', { type: 'done', thread_id: 't11', answer: ' ok' })], { 'x-trace-id': 'req-77' }),
+  })
+  check('F14 响应头 x-trace-id 传到快照 requestId（不自己造号）', traced.requestId === 'req-77', traced.requestId)
+
+  const untraced = await streamQuery({
+    query: 'q', apiKey: '',
+    fetchImpl: async () => sseResponse([frame('done', { type: 'done', thread_id: 't12', answer: 'ok' })]),
+  })
+  check('F15 没这个头 ⇒ requestId 是空串而不是 undefined/占位符（页面据此不显示该行）',
+    untraced.requestId === '', JSON.stringify(untraced.requestId))
+
+  const denied401 = await streamQuery({
+    query: 'q', apiKey: 'wrong',
+    fetchImpl: async () => new Response(JSON.stringify({ detail: 'INVALID_API_KEY' }), { status: 401, headers: { 'x-trace-id': 'req-88' } }),
+  })
+  check('F16 流未开的错误通道同样拿到请求号（取头发生在 !resp.ok 分支之前）',
+    denied401.requestId === 'req-88' && denied401.terminal === 'failed', denied401.requestId)
+}
+
+/* ---- §G PR-2 消费面：快照不回改 / 依据进表门 / 两个纯映射 ---- */
+console.log('§G 消费面：快照契约、依据列表、class 与图标映射')
+{
+  // G1 快照不回改：`onUpdate` 交出去的每一帧必须停在那一帧的形状上。
+  // ⚠ 判法必须是“**持住快照引用，流跑完再回读**”：只记回调当时的长度，那么
+  // “后面的帧往同一个数组 push”这种回归会读不出差别（当时与事后同数）。
+  // 杀掉它的变异体是把 `applyFrame` 里 `timeline/evidence` 的逐帧复制改回共享引用 ——
+  // 那时帧 2 的 push 会直接长到帧 1 手里那个数组上，这里的事后回读当场报红。
+  const shots = []
+  await streamQuery({
+    query: 'q', apiKey: '',
+    onUpdate: (s) => { shots.push({ s, tl: s.timeline.length, ev: s.evidence.length, ans: s.answer }) },
+    fetchImpl: async () => sseResponse([
+      frame('evidence', { type: 'evidence', node: 'kb', count: 2, preview: '片段一' }),
+      frame('answer', { type: 'answer', text: '正文' }),
+      frame('evidence', { type: 'evidence', node: 'kb', count: 1, preview: '片段二' }),
+      frame('done', { type: 'done', thread_id: 'g1', answer: '定稿' }),
+    ]),
+  })
+  check('G1a 逐帧快照如期交出来（四个事件帧 + 收尾一次）', shots.length === 5, `次数=${shots.length}`)
+  check('G1b 已发出的快照不被后续帧回改（事后回读个数与当时一致）',
+    shots.every((h) => h.s.timeline.length === h.tl && h.s.evidence.length === h.ev),
+    JSON.stringify(shots.map((h) => [h.tl, h.ev, h.s.timeline.length, h.s.evidence.length])))
+  check('G1c 逐帧计数形状（依据列表与时间线各自长）',
+    shots[0].tl === 1 && shots[0].ev === 1 &&
+    shots[1].tl === 2 && shots[1].ev === 1 &&
+    shots[2].tl === 3 && shots[2].ev === 2 &&
+    shots[3].tl === 4 && shots[3].ev === 2 &&
+    shots[4].ans === '定稿',
+    JSON.stringify(shots.map((h) => [h.tl, h.ev])))
+
+  // G2 进表门三组合（与参照物 `console.html:230` 的 `count > 0 && preview` 同形）。
+  const g2a = applyFrame(initialState(), 'evidence', JSON.stringify({ type: 'evidence', node: 'kb', count: 3, preview: '有片段' }))
+  check('G2a count>0 且有片段 ⇒ 进列表一条，字段逐一对应',
+    g2a.evidence.length === 1 && g2a.evidence[0].node === 'kb' && g2a.evidence[0].count === 3 && g2a.evidence[0].preview === '有片段',
+    JSON.stringify(g2a.evidence))
+
+  const g2b = applyFrame(initialState(), 'evidence', JSON.stringify({ type: 'evidence', node: 'kb', count: 0, preview: '不该出现的片段' }))
+  check('G2b count=0 ⇒ 不进列表（服务端那句就是没命中）', g2b.evidence.length === 0, JSON.stringify(g2b.evidence))
+
+  const g2c = applyFrame(initialState(), 'evidence', JSON.stringify({ type: 'evidence', node: 'kb', count: 5 }))
+  check('G2c count>0 但无片段 ⇒ 不进列表，时间线明说「无片段可展示」',
+    g2c.evidence.length === 0 && g2c.timeline[0].text.includes('无片段可展示'), g2c.timeline[0].text)
+
+  // G3 片段只住在列表里：同一段预览不得在时间线再出现一遍（拆字段就是为了这条）。
+  const g3 = applyFrame(initialState(), 'evidence', JSON.stringify({ type: 'evidence', node: 'kb', count: 1, preview: CANARY }))
+  check('G3 片段进了依据列表（它是合法上屏面）', g3.evidence[0].preview === CANARY)
+  check('G3b 同一段预览不得在时间线文案里重复出现',
+    !g3.timeline.some((t) => t.text.includes(CANARY)) && g3.timeline[0].text.includes('片段见依据列表'),
+    g3.timeline[0].text)
+
+  // G4–G6 两个纯映射：class 与图标不得拼出 CSS/表里不存在的名字。
+  check('G4 kind=transport ⇒ ev--transport / transport 图标（客户端侧行，不伪装成后端事件）',
+    rowClassOf({ event: 'transport', kind: 'transport', text: 'x' }) === 'ev--transport' &&
+    iconKeyOf({ event: 'transport', kind: 'transport', text: 'x' }) === 'transport')
+  check('G5 kind=unknown ⇒ ev--unknown，图标也为 unknown',
+    rowClassOf({ event: 'mystery', kind: 'unknown', text: 'x' }) === 'ev--unknown' &&
+    iconKeyOf({ event: 'mystery', kind: 'unknown', text: 'x' }) === 'unknown')
+
+  // G6 原型键 / 未入表的名字：必须收敛到 ev--unknown，而不是拼出 `ev--constructor`。
+  // 这类行在运行态是“后端加了类型而这层没跟上”的形状，拼不存在的 class = 静默降级。
+  for (const name of ['constructor', 'toString', 'hasOwnProperty', 'brand_new_event']) {
+    const row = { event: name, kind: 'event', text: 'x' }
+    check(`G6 ${name} 不拼成事件类 class（收敛为 ev--unknown）`,
+      rowClassOf(row) === 'ev--unknown' && iconKeyOf(row) === 'unknown' && iconPathOf(row) === ICON_PATHS.unknown)
+  }
+
+  // G7 逐类派生：每个后端事件名都要拿到自己的 class 与非空 path（条数来自 NAMES）。
+  for (const name of NAMES) {
+    const row = { event: name, kind: 'event', text: 'x' }
+    check(`G7 ${name} ⇒ ev--${name} 且图标 path 非空`,
+      rowClassOf(row) === `ev--${name}` && iconKeyOf(row) === name && ICON_PATHS[name] !== undefined && ICON_PATHS[name] !== '')
+  }
+}
+
+/* ---- §H 会话层：stores/session.ts 在 Node 里真驱动（不发网络）---- */
+console.log('§H 会话层：banner 累积/去重/溢出、跳轮不混行、非 ASCII 密钥接住')
+{
+  let store
+  try {
+    store = await import('../src/stores/session.ts')
+  } catch (e) {
+    check('H0 会话层可被 Node 驱动（头注那句能力声明的实物）', false, String(e && e.message))
+    store = null
+  }
+  if (store !== null) {
+    check('H0 会话层可被 Node 驱动（不靠浏览器、不靠 vitest）', typeof store.ask === 'function')
+    const { ask, apiKey, banners, busy, canSubmit, clearBanners, dropped, hasRound, question, timeline, traceNote, useExample, answerText, terminal, requestId } = store
+    /* ⚠ 本件是 **.mjs**：Node 的原生类型擦除只对 `.ts` 生效，在这里写 `: void` 这类
+     * 注解会当场 SyntaxError（本批实踩：首版 §H 就是被这一条拦住的，不是“测试红了”）。
+     * 被擦除的类型属于被测的 `.ts` 那一侧；harness 自己保持纯 JS。 */
+    const reset = () => { clearBanners(); question.value = ''; apiKey.value = '' }
+    const okStream = (chunks, head = {}) => async () => sseResponse(chunks, head)
+
+    check('H1 初始态：不忙 / 不可提交 / 无提示 / 未跑过',
+      busy.value === false && canSubmit.value === false && banners.value.length === 0 && hasRound.value === false)
+
+    // H2 空输入不得产生“跑过一轮”的假象（也不得发出请求）
+    let calls = 0
+    await ask(async () => { calls++; return sseResponse([]) })
+    check('H2 输入为空 ⇒ 一问没发、也没记成“本轮已发起”', calls === 0 && hasRound.value === false, `calls=${calls}`)
+
+    // H3 非 ASCII 密钥：sse.ts 明写它是唯一仍会抛的一条，到这一层必须接住（A2 不白屏）
+    reset()
+    question.value = 'q'
+    apiKey.value = '密钥含中文'
+    await ask()
+    check('H3 非 ASCII 密钥被接住成一句屏上可读的提示（不冒未处理 rejection）',
+      banners.value.length === 1 && banners.value[0].includes('接口密钥含非 ASCII'), banners.value.join(' | '))
+    check('H3b 那一轮终态是 failed、提示已接住 ⇒ busy 必须回 false（不得卡在转圈）',
+      busy.value === false && terminal.value === 'failed')
+
+    // H4 正常流：跳次拿到定稿与会话号，请求号从注入的响应头进快照
+    reset()
+    question.value = '平台能查什么'
+    apiKey.value = 'ascii-key'
+    await ask(okStream([frame('evidence', { type: 'evidence', node: 'kb', count: 2, preview: '片段' }), frame('done', { type: 'done', thread_id: 'h4', answer: '定稿文本' })], { 'x-trace-id': 'req-h4' }))
+    check('H4 正常跳：定稿答案 / 会话号 / 终态三件都对',
+      answerText.value === '定稿文本' && terminal.value === 'completed' && timeline.value.length === 2)
+    check('H4b 请求号进到会话层并可读（traceNote 与 requestId 同一件事的两面）',
+      requestId.value === 'req-h4' && traceNote.value.includes('req-h4'), traceNote.value)
+    check('H4c 依据进了会话层的只读视图（不只是快照里）',
+      store.evidence.value.length === 1 && store.evidence.value[0].preview === '片段')
+
+    // H5 跳轮不混行：上一轮的时间线不得渗进本轮
+    reset()
+    question.value = '第二问'
+    await ask(okStream([frame('route', { type: 'route', capability: 'rag' }), frame('done', { type: 'done', thread_id: 'h5', answer: '第二答' })]))
+    check('H5 新一轮从空快照起（上一轮的行不渗进来）',
+      timeline.value.length === 2 && timeline.value.every((r) => r.event !== 'evidence'),
+      timeline.value.map((r) => r.event).join(','))
+
+    // H6 banner 跳轮累积 + 文本互异（A8 的单屏对比靠这条）。同样给足 done：
+    // 缺 done 会额外进一条 transport 行，那会把“两轮各命中一条分支”这个前置读成三条。
+    reset()
+    question.value = '问 A'
+    await ask(async () => new Response(JSON.stringify({ detail: 'INVALID_API_KEY' }), { status: 401 }))
+    question.value = '问 B'
+    await ask(okStream([
+      frame('error', { type: 'error', msg: 'Planner 侧文案' }),
+      frame('done', { type: 'done', thread_id: 'h6', answer: '' }),
+    ]))
+    check('H6 两轮各命中一条分支 ⇒ 屏上同时留两条且互异（A8）',
+      banners.value.length === 2 && banners.value[0] !== banners.value[1], banners.value.join(' | '))
+    check('H6b 流内 error 帧那一轮的诊断行确实进了屏上提示',
+      banners.value.some((b) => b.includes('Planner 侧文案')))
+
+    // H7 去重：同一句再来一次不增
+    question.value = '问 C'
+    await ask(async () => new Response(JSON.stringify({ detail: 'INVALID_API_KEY' }), { status: 401 }))
+    check('H7 重复文案不堆屏（includes 去重，否则 8 上限会被同一句填满）',
+      banners.value.length === 2, banners.value.join(' | '))
+
+    // H8 溢出：连跑九轮各不同的诊断 ⇒ 上限 8 + 如实报折叠条数（不静默丢）。
+    // 每轮都补一个 done 帧，不是随手写的：没 done 会额外进一条**同文**的 transport 行，
+    // 它虽然被去重、但会让“每轮恰好推一条”这个前置不再成立，于是 dropped 的期望值
+    // 变成要靠手算序列才能得到的数——那是“把当时的手算当成判据”的形状（本仓 §12 同族）。
+    reset()
+    for (let i = 0; i < 9; i++) {
+      question.value = `第 ${i} 问`
+      await ask(okStream([
+        frame('error', { type: 'error', msg: `文案序号 ${i}` }),
+        frame('done', { type: 'done', thread_id: `h8-${i}`, answer: '' }),
+      ]))
+    }
+    check('H8 超上限时丢最旧且把折叠条数读出来（不静默丢）',
+      banners.value.length === 8 && dropped.value === 1
+      && banners.value[0].includes('文案序号 1') && banners.value[7].includes('文案序号 8')
+      && !banners.value.some((b) => b.includes('文案序号 0')),
+      `len=${banners.value.length} dropped=${dropped.value} first=${banners.value[0]}`)
+    check('H8b clearBanners 只清提示不动时间线（事件行是本轮事实）',
+      timeline.value.length > 0 && (() => { clearBanners(); return banners.value.length === 0 })() && timeline.value.length > 0)
+
+    // H9 示例按钮：只填输入、不发请求（“发不发由人按提交决定”）
+    reset()
+    const beforeCalls = calls
+    useExample()
+    await ask(async () => { calls++; return sseResponse([frame('done', { type: 'done', thread_id: 'h9', answer: 'x' })]) })
+    check('H9 useExample 只填句子；随后的 ask 才发请求（两件事不绑在一起）',
+      question.value === store.EXAMPLE_QUESTION && calls === beforeCalls + 1, `calls Δ=${calls - beforeCalls}`)
+    check('H9b 无请求号时 traceNote 明说没有，不给空占位式的引导',
+      requestId.value === '' && traceNote.value.includes('未带请求号'), traceNote.value)
+  }
 }
 
 /* ---- 断言器自身的反证（必须在最后跑，撤掉它自己那一条计数） ---- */

@@ -1,4 +1,4 @@
-# web/ — 前端视觉层（POC 已入库 · **PR-0 三段已交：骨架 / 后端托管 / 构建与 CI 接线**）
+# web/ — 前端视觉层（POC 已入库 · **PR-0 三段 + PR-1 客户端 + PR-2 对话页已交**）
 
 > 状态：POC。授权范围 = 用户 2026-10-30 的「先出个最小 poc，我看看效果」。**末次随动 2026-11-02（第十六批刀⑰⑱⑲ + 一刀修复，本文件那一刀是刀⑳）**：
 > 该批**动了门禁代码，也动了样式以外的整个 `src/` 面** —— 与下面那两行历史陈述正相反，那两行不能当现值读。
@@ -16,6 +16,11 @@
 > `web/scripts/verify-sse.mjs` 锁行为），`make ci-web` 同步扩面。⚠ **交付 ≠ 消费**：`streamQuery` 现在**没有任何页面调用点**
 > （对话页属 PR-2），它目前只被行为件驱动 ⇒ **A2 / A3 / A7 的屏上格仍未达**，本批只在**喂帧层**取数（逐格读数在取证件 §32）。
 > 本文件因此**不写 `make ci-web` 的步数**：那个数字住在 Makefile 的 `ci-web:` 目标里，写进散文就会变成第三个事实源。
+>
+> **PR-2 的代码面已交（2026-11-03 刀㊲）**：对话页（两栏）+ 四件组件 + `web/src/stores/session.ts`（全仓唯一调 `streamQuery` 的地方）
+> ⇒ 上面那句「`streamQuery` 现在**没有任何页面调用点**」**自本批起不再成立**（它是刀㉚ 当时的账面态，保留只为不让后人拿它当现值）。
+> ⚠ **交付 ≠ 验收**：屏上那几格的响应帧是实拍件在 CDP `Fetch` 域里 fulfill 的 **mock**（本机无可用后端）⇒ 本目录能读成
+> 「客户端把这些帧渲染成了什么」，**不能**读成「真后端确实发这些帧」；真后端取证清单在取证件 **§39.7**（只有白天窗口能跑）。
 
 ## 一、本目录有什么（**两个视图，不是一个页面**）
 
@@ -24,31 +29,39 @@
 | 文件 | 职责 | 实测行数 |
 |---|---|---|
 | `web/src/styles/tokens.css` | **唯一允许写色值的文件**。L0 原语 / L1 语义 / L2 别名三层 + dark 双副本 | 217 |
-| `web/src/styles/base.css` | reset、字体（注释保留未启用）、全局排版、**两栏骨架**与断点、链接与 `aria-current` 选中态、焦点环、reduced-motion | 299 |
-| `web/src/styles/events.css` | 12 类事件的 class→token 映射、图例、`/health` 灯阵卡（**只在独立页用**）、四档形状图例 | 192 |
+| `web/src/styles/base.css` | reset、字体（注释保留未启用）、全局排版、**两栏骨架**与断点、链接与 `aria-current` 选中态、焦点环、reduced-motion；窄栏 sticky 提交区**来由刀㊲ 带上令牌底 + 上分隔线**（实拍量出它透明底与内容叠字，修的是叠字不是 sticky 本身的遮挡） | 395 |
+| `web/src/styles/events.css` | 12 类事件的 class→token 映射、图例、`/health` 灯阵卡（**只在独立页用**）、四档形状图例；**刀㊲ 新增 `.ev--transport` 与 `.term--*`**（未识别事件与「没收到 done」那两条形状走同一令牌通道） | 214 |
 | `web/poc.html` | **对话页**宿主页：主题三态 + 三态演示 + 12+1 行时间线 + 图例。**已不含灯阵**（JS 与 DOM 已整批搬走） | 267 |
 | `web/poc-health.html` | **灯阵独立页**宿主页：5 组 30 盏灯（`auto-fill` × `minmax(260px, 1fr)`）+ 四档形状图例 | 180 |
 | `web/scripts/check-tokens.mjs` | 视觉门禁六条断言，零依赖（只用 Node 内置模块）；**扫描面 = `web/` 下 `.css`/`.ts`/`.vue`/`.html` 全量递归**（排除 `node_modules`/`dist`/`scripts`，空面即红） | 344 |
-| `web/scripts/check-events.mjs` | 事件契约门禁（工单件 §9.3 登记件）：后端 `StreamEventType` Literal ⊆ `serialize_stream_event` 分支集（§12-#2）+ 派生全集 ↔ TS 联合 ↔ `EVENT_HANDLERS` 键集三段双向；**只锁结构、不锁行为**；期望集只从源派生，件内不出现事件条数 | 206 |
-| `web/scripts/verify-sse.mjs` | SSE 客户端与三条错误通道的**行为**断言（工单件 §10.5 的第 ① 层）：真 import 被测 `.ts` 后喂帧，带 canary 泄漏判 + 正对照 + 断言器自证；**需 Node ≥ 22.18 的原生类型擦除**，加载失败时报 rc=1 而不吞成 skip | 239 |
+| `web/scripts/check-events.mjs` | 事件契约门禁（工单件 §9.3 登记件）：后端 `StreamEventType` Literal ⊆ `serialize_stream_event` 分支集（§12-#2）+ 派生全集 ↔ TS 联合 ↔ `EVENT_HANDLERS` 键集三段双向；**只锁结构、不锁行为**；期望集只从源派生，件内不出现事件条数。**刀㊲ 扩三枚消费面齿**：图标表键集 == 事件全集、`.ev--` 集 == 事件全集、两栏骨架的必须件在位 | 315 |
+| `web/scripts/verify-sse.mjs` | SSE 客户端与三条错误通道的**行为**断言（工单件 §10.5 的第 ① 层）：真 import 被测 `.ts` 后喂帧，带 canary 泄漏判 + 正对照 + 断言器自证；**需 Node ≥ 22.18 的原生类型擦除**，加载失败时报 rc=1 而不吞成 skip。**刀㊲ 扩面**：快照不回改一节 + 会话层一节（后者是消费点侧的行为，不再是「只被行为件驱动」） | 474 |
 | `web/index.html` | Vue 应用的构建入口（Vite 的 root html）。与 `web/poc.html` 是**两条通道**：前者走构建与托管，后者是无构建静态预览，不共用 | 26 |
 | `web/package.json` | pnpm 面清单：运行时依赖两件 `vue` + `eventsource-parser`（PR-1 引入、精确钉版），devDependencies 十件（lint / typecheck / build）；`packageManager` 与 `engines.node` 定死 | 37 |
 | `web/vite.config.ts` | `base: '/ui/'`（§9.2 托管前缀）+ plugin-vue + 开发期代理五个前缀（其中一条未验证风险写在文件内注释，不预先给解法） | 35 |
 | `web/tsconfig.json` | 应用面 TS 配置（只包 `src/` 与 `vite.config.ts`；门禁脚本 `.mjs` 故意不在内）；`allowImportingTsExtensions` 属 PR-1：行为件要在 Node 里按 `.ts` 说明符直接 import 被测源，不开这个键 Node 解析不到 | 24 |
 | `web/eslint.config.js` | flat config 三面：`src/**` 与 `vite.config.ts` 走**类型感知**、`.vue` 走 vue-eslint-parser、`scripts/**/*.mjs` 走纯语法 | 59 |
 | `web/src/main.ts` | **样式与主题的唯一入口**：三条 CSS 导入 + `initTheme()` 前置于 `createApp`（顺序即正确性，与 agent_server 那条 provider 装配顺序同族） | 22 |
-| `web/src/App.vue` | 骨架壳：顶栏 + 主题切换 + 图例。**不放假数据** —— PR-1/PR-2 未交，界面上就明写未交 | 47 |
+| `web/src/App.vue` | **对话页主视图**（刀㊲）：两栏骨架 + 提交区 + 三态 + 窄栏 `<details>` 折叠副本。**不放假数据**；提交钮用 `aria-disabled` 而**不用原生 `disabled`**（实拍量出原生属性把控件从 tab 序抽走、键盘提交后焦点收回 `body`，理由与读数写在文件注里，别挪回去） | 196 |
 | `web/src/theme.ts` | 主题三档单一落点；「跟随系统」= **移除** `data-theme` 而不是写 `'auto'`（写了会让整条媒体查询失配） | 56 |
 | `web/src/env.d.ts` | ambient 类型入口，两条声明各解一个**实跑报出来的**错；第二条带三档变异实测的注记 | 31 |
 | `web/src/api/errors.ts` | `describeError` + `describeStreamError` 两收敛点（工单件 §3 那两条；读不到字段名时写诚实文案，不上屏 `[object Object]`） | 120 |
 | `web/src/api/events.ts` | `StreamEventType` 联合 + `EVENT_LEGEND` 屏上图例字典；与 `web/poc.html` 的 `EVENTS` 是**两副本、只许一个真相**（断言 6 逐字校 fam/sw） | 65 |
-| `web/src/api/sse.ts` | `/query` 的 SSE 客户端：`fetch` + `eventsource-parser` 解帧、`applyFrame` 是纯函数（可被 Node 直接断言）、`done` 定稿与 **`error`→`done` 抑制**、未识别事件只报名不 dump 载荷；⚠ **无页面消费点**（PR-2 未接） | 310 |
+| `web/src/api/sse.ts` | `/query` 的 SSE 客户端：`fetch` + `eventsource-parser` 解帧、`applyFrame` 是纯函数（可被 Node 直接断言）、`done` 定稿与 **`error`→`done` 抑制**、未识别事件只报名不 dump 载荷；evidence 分支写**结构化三字段**（node/count/preview，刀㊲ 随消费端落地）。⚠ 事件名按「`payload.type` 优先、缺则退到帧的 event 名」两路读 —— 这条不是兼容姿态，是按源复取的结果（`sse_pack` 在 `type` 缺席时只发 data 行） | 349 |
+| `web/src/stores/session.ts` | 会话层单点（刀㊲）：全仓**唯一**调 `streamQuery` 的地方。banner 跟轮累积、`thread_id` 只从 `done` 拿、快照不回改（三条各自对应一个已登记的误读风险） | 169 |
+| `web/src/components/icons.ts` | `rowClassOf` / `iconPathOf` 两个纯函数（事件类型 → class / SVG path），**不持有状态**；键集与事件全集由 `check-events.mjs` 双向校（不写死条数） | 85 |
+| `web/src/components/Timeline.vue` | 过程时间线（刀㊲）：按类型分色、loading 尾部骨架条、空态直写「还没有事件」 | 78 |
+| `web/src/components/Answer.vue` | 答案区（刀㊲）：含 empty 引导；未收到 `done` 时**不得**读成完成 | 80 |
+| `web/src/components/EvidenceList.vue` | 依据列表（刀㊲）：消费 `sse.ts` 那三字段；badge 为 `0` 时有**单独文案**（不拿空列表冒充「没这一节」） | 56 |
+| `web/src/components/ApiKeyBox.vue` | 密钥输入框（刀㊲）：只存会话内存、不落 `localStorage` | 42 |
 | `web/src/components/ThemeToggle.vue` | 三档 `.seg` 控件；`aria-pressed` 绑**布尔**（那句「false 会被 removeAttribute」的错话如何被两道门各自抓回，写在文件头注） | 48 |
 | `web/src/components/Legend.vue` | 图例：事件数与族色相数**现算**，不把 12 / 8 抄进模板 | 44 |
 
 行数口径：本表是 `Get-Content <file>.Count` 实取值，不是估。**第十六批重取：六件 = 217 / 299 / 192 / 267 / 180 / 344**（本批只动第六件：222 → **344** = 扫描面递归化 + 断言 6 新增三口；前五件逐项未动。第十四批那一串 217 / 299 / 192 / 267 / 180 / 222 与下面那句「首次追到第八批之后」自本行起都是历史读数）（第十四批原句，保留为历史：四件同上一版逐项未动；改动的两件是样式 `web/src/styles/events.css` 191 → **192** 与门禁 `web/scripts/check-tokens.mjs` 197 → **222**，都跟第八批那两刀。上一版这一列整体停在第七批那次重取上 ⇒ 本行是**首次把它追到第八批之后**，不是本批改坏了什么）。改完样式或宿主页后本列随之漂移，下一批要重取；引用本列前先拿它当**待验值**而不是常量。
 
 **第二十五批（刀㉚）重取，只取本批碰过的五件**：`web/src/api/sse.ts` **310**（新建）/ `web/scripts/check-events.mjs` **206**（新建）/ `web/scripts/verify-sse.mjs` **239**（新建）/ `web/package.json` 34 → **37**（加两条 scripts 与一条依赖）/ `web/tsconfig.json` 23 → **24**（加 `allowImportingTsExtensions`）。同批 `web/pnpm-lock.yaml` 1653 → **1662**（`pnpm add --save-exact` 的机器随动，不手工改）。本表其余行逐项未动。
+
+**第三十二批（刀㊲）重取，只取本批碰过的六件 + 本批新增的六件**：`web/src/App.vue` 47 → **196**（骨架壳换成对话页）/ `web/src/api/sse.ts` 310 → **349** / `web/scripts/check-events.mjs` 206 → **315** / `web/scripts/verify-sse.mjs` 239 → **474** / `web/src/styles/base.css` 299 → **395** / `web/src/styles/events.css` 192 → **214**；新建六件 = `web/src/stores/session.ts` **169** / `web/src/components/icons.ts` **85** / `Timeline.vue` **78** / `Answer.vue` **80** / `EvidenceList.vue` **56** / `ApiKeyBox.vue` **42**（六件合计 510 行，`git ls-files --others -uall` 口径复取 = 恰 6 条）。⚠ **本列口径 = `Get-Content <file>.Count`，与入库时的 `git diff --numstat` 加数不是同一把尺**（前者数本机文件系统行、后者数 git 的行终端）：引用本列时用本列的数，引用提交体量时用 numstat，不混用。本批 `web/package.json` 与 `web/pnpm-lock.yaml` **逐项未动**（未新增依赖；`pnpm-lock.yaml` 仍 **1662**）。⚠ 两件旧陈述本批被推翻：`App.vue` 那行原写「骨架壳…PR-1/PR-2 未交」、`sse.ts` 那行原写「无页面消费点」——两者都不回填（它们是刀㉚ 当时的账面态），但**不得再当现值引**。
 
 ⚠ **本目录的路径书写口径（第十四批定，A3 那笔在册欠项的落地）**：**反引号内的路径一律写仓库根相对**（`web/src/styles/tokens.css`），不写目录相对（src/styles/tokens.css 那种形态）。理由不是美观：反引号 + 根相对正好落在取证量具 `typo-scan.ps1` 的 T2 存在性校验面上（它的匹配前缀含 `web/`），于是那一格**从人读约定升成被校到的引用**；而目录相对 + 反引号是**承诺一个解析不了的东西** —— 按仓库根解就报 MISSING（本目录末节那条旧写法就是这么被 T2 抓出来的：它以 scripts/ 开头、又不带 `web/` 前缀，恰好落进校验面却不落进存在的事实；实物与当时「不改」的理由在台账 §15.10 行 19，本批按本口径改写它）。⚠ **两条边界，缺一条就会误用**：① 本口径只管**叙述文字**，HTML 里的 `href="src/styles/tokens.css"` 是浏览器按文档解的**功能路径**，改成根相对会当场断样式（第七批实拍通道会直接拍到裸 HTML）；② `check_doc_sync.py` 的文件引用面 `DOC_FILE_REF_ROOTS` 里**没有 `web/`** ⇒ 顶层三份文档里的 `web/...` 反引号引用**不红但也校不到**，不得读成「已通过顶层门禁校验」（该缺口已就地登记，扩面属改 `scripts/`，本批未动）。
 
@@ -69,6 +82,10 @@
   + SSE 解帧与消费逻辑，但它**没有任何页面调用点**（对话页属 PR-2）⇒ 「屏上没有 SSE 消费」那一半仍然成立，`/health` 拉取仍无（PR-4）。
   两个静态宿主页上每一个数字仍都是手写的假数据（包括灯页那 30 行的值），`web/src/App.vue` 在屏上仍直写「PR-1/PR-2 未交」——
   那句从本批起要读成「**PR-1 的消费方未交**」，不能读成「PR-1 一行未写」。
+  ⚠ **上面那三句自第三十二批（刀㊲）起不再是现值**（保留只为不让后人拿它当现值）：`web/src/App.vue` 已换成对话页（两栏、三态、
+  真数据驱动），消费点在 `web/src/stores/session.ts` ⇒ 「屏上没有 SSE 消费」与「PR-1 的消费方未交」两句同时解除。
+  但这一推翻**只到屏上层**：那些屏上帧是实拍件在 CDP `Fetch` 域 fulfill 的 **mock**（本机无可用后端），而两个静态宿主页上
+  每一个数字仍都是手写的假数据（包括灯页那 30 行的值）—— 那两句**仍成立**，`/health` 拉取仍无（PR-4）。
   本条末句（第十六批原句：反证格只能拿**静态形状**做对象，见 §五）的原因随本批消失：当时它没有第一消费者（`client.ts` / `sse.ts`），
   现在 `sse.ts` 到位 ⇒ 反证对象多出一类**喂帧行为**（`web/scripts/verify-sse.mjs` 是常驻件，另有一枚一次性变异件住在 gitignored 目录，
   格数一律以脚本自身为准、本文件不抄）。

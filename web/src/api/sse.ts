@@ -25,6 +25,10 @@
  * ⚠ 路径基准：本文件服务的是挂在 `/ui/` 下的页面，**不能用相对 `"query"`** ——
  *   相对路径会拼成 `/ui/query`（`web/vite.config.ts` 的 `base: '/ui/'`）。`console.html` 能写
  *   相对是因为它自己就挂在根。这一条是照抄参照物时会当场踩中的形状，所以写进注释。
+ *
+ * PR-2（刀㊲）给本件加了两个**消费面**字段：`evidence`（结构化依据，从时间线文本里拆出）
+ * 与 `requestId`（响应头 `X-Trace-Id`）。拆与取的理由各写在字段自己的注释里，两条都有行为
+ * 断言接住（§G 管快照不回改与依据进表条件，F14 管请求号从响应头传到快照）。
  * ==========================================================================*/
 import { createParser } from 'eventsource-parser'
 import type { EventSourceMessage } from 'eventsource-parser'
@@ -35,29 +39,47 @@ import { describeError, describeStreamError } from './errors.ts'
 /** 会话终态三值。`open` = 尚未收到 `done` ⇒ **不得**读成完成（A7 判据）。 */
 export type Terminal = 'open' | 'completed' | 'failed'
 
-/** 时间线一项。`kind` 只三值，页面按它选色（分色渲染属 PR-2 的 Timeline 件）。 */
+/** 时间线一项。`kind` 只三值，页面按它选色（`PR-2` 的 Timeline 件消费它）。 */
 export interface TimelineEntry {
   readonly event: string
   readonly kind: 'event' | 'unknown' | 'transport'
   readonly text: string
 }
 
+/**
+ * 一条依据的结构形态。字段集**逐个对应** `serialize_stream_event` 的 evidence 分支
+ * （`{type,node,count,preview}`），不新增、不推断后端没给的字段（工单件 §12 第 1 条同源）。
+ * 之所以从时间线文本里**拆出来**：PR-1 交客户端时没有消费者，片段只能塞进一句文案；
+ * PR-2 交了依据列表，片段的家就在列表里 ⇒ 同一段 200 字预览在同屏出现两处是重复。
+ */
+export interface EvidenceEntry {
+  readonly node: string
+  readonly count: number
+  readonly preview: string
+}
+
 /** 每次事件到达都会回调这个快照；页面不需要自己维护流状态。 */
 export interface StreamSnapshot {
   readonly timeline: readonly TimelineEntry[]
+  readonly evidence: readonly EvidenceEntry[]
   readonly answer: string
   readonly terminal: Terminal
   readonly threadId: string
+  /** 响应头 `X-Trace-Id`（有则读，没有就是空串）。`describeStreamError` 那句
+   * 「请凭本页的 request_id」在页面上必须有实物可指，否则是一句空指针式的引导。 */
+  readonly requestId: string
   readonly sawError: boolean
   readonly doneReceived: boolean
 }
 
-/** `StreamSnapshot` 的可变孪生（内部用）。写成显式六行而不是映射类型：读得出来是谁。 */
+/** `StreamSnapshot` 的可变孪生（内部用）。写成显式七行而不是映射类型：读得出来是谁。 */
 interface Working {
   timeline: TimelineEntry[]
+  evidence: EvidenceEntry[]
   answer: string
   terminal: Terminal
   threadId: string
+  requestId: string
   sawError: boolean
   doneReceived: boolean
 }
@@ -77,17 +99,25 @@ export interface StreamQueryOptions {
 type Payload = Record<string, unknown>
 type Handler = (s: Working, p: Payload) => void
 
+/**
+ * 两条数组都要逐帧复制 —— 快照的契约是「发出去之后不再变」：`onUpdate` 的消费者对
+ * 每帧持有同一个 `StreamSnapshot`，若 `evidence` 沿用引用，后面帧的 `push` 会**回改**
+ * 已经发出去的快照（`verify-sse.mjs` §G1 判的就是这条）。写成两行而不是映射类型同理。
+ */
 function snapshot(w: Working): StreamSnapshot {
-  return { ...w, timeline: [...w.timeline] }
+  return { ...w, timeline: [...w.timeline], evidence: [...w.evidence] }
 }
 
 /** 独立跑一帧的起点（测试与页面首轮渲染用）。 */
 export function initialState(): StreamSnapshot {
-  return snapshot({ timeline: [], answer: '', terminal: 'open', threadId: '', sawError: false, doneReceived: false })
+  return snapshot({
+    timeline: [], evidence: [], answer: '', terminal: 'open',
+    threadId: '', requestId: '', sawError: false, doneReceived: false,
+  })
 }
 
 function withPush(s: StreamSnapshot, event: string, kind: TimelineEntry['kind'], text: string): StreamSnapshot {
-  const w: Working = { ...s, timeline: [...s.timeline] }
+  const w: Working = { ...s, timeline: [...s.timeline], evidence: [...s.evidence] }
   w.timeline.push({ event, kind, text })
   return snapshot(w)
 }
@@ -117,10 +147,14 @@ const EVENT_HANDLERS = {
   },
   evidence: (s, p) => {
     const preview = typeof p.preview === 'string' ? p.preview : ''
+    const cnt = count(p, 'count')
+    // 进依据列表的条件与参照物 `console.html:230` 同形（`count > 0 && preview`）：
+    // `count: 0` 的帧在服务端就是「没命中」，塞进列表会得到一条空片段行。
+    if (cnt > 0 && preview !== '') s.evidence.push({ node: orNone(p, 'node'), count: cnt, preview })
     s.timeline.push({
       event: 'evidence',
       kind: 'event',
-      text: `命中 ${count(p, 'count')} 条依据（${orNone(p, 'node')}）${preview === '' ? '（无依据）' : '\n首条片段：' + preview}`,
+      text: `命中 ${cnt} 条依据（${orNone(p, 'node')}）${preview === '' ? '，无片段可展示' : '，片段见依据列表'}`,
     })
   },
   memory: (s, p) => {
@@ -212,7 +246,7 @@ export function applyFrame(state: StreamSnapshot, name: string, data: string): S
   if (handler === undefined) {
     return withPush(state, type, 'unknown', `未处理的事件类型：${type}`)
   }
-  const w: Working = { ...state, timeline: [...state.timeline] }
+  const w: Working = { ...state, timeline: [...state.timeline], evidence: [...state.evidence] }
   handler(w, payload)
   return snapshot(w)
 }
@@ -261,6 +295,11 @@ export async function streamQuery(opts: StreamQueryOptions): Promise<StreamSnaps
     emit()
     return cur
   }
+
+  // 请求号从响应头取，**不自己造**：`build_api_app` 那套管道的 request_id 只有服务端知道。
+  // 这里不额外 `emit()`：赋完值后面必然还有一次 emit（要么下一帧、要么收尾那次），
+  // 加一次就只是把「逐帧回调」的读数抬高（`verify-sse.mjs` F3 数的就是它）。
+  cur = { ...cur, requestId: resp.headers.get('x-trace-id') ?? '' }
 
   if (!resp.ok) {
     // 流未开、状态码在 ⇒ 通道一/二走 describeError。§3 明写：鉴权失败不受抑制规则约束。
