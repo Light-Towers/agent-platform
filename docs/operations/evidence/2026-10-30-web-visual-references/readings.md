@@ -3568,6 +3568,22 @@ git grep -n --untracked streamQuery -- web applications
 - 其余 7 条本地分支未逐条判・PR-2/3/4 未开工（PR-2 需单独拍板）・CI runner 那一步仍未实跑・`make test` 全量十 session 本批未重跑（后端面零改动）・V1–V7 与 A2/A3/A7 屏上格一条未动。
 - ⚠ 本批**不得读成「公开侧已拿到 PR-0/PR-1」** —— 已推到 `company`（内网远端）不等于公开镜像已拿到；两者差一次 D3 批示。
 
+### 35.7 「不能直接推吗？」—— 把这件事拆成三层取读数（刀㉝ 第四件，由人一句提问触发）
+
+先说结论：**现在推不了，且不是规矩拦着 —— 是通道物理不通**（规矩那条也还在，但两者不同型，不能混为一句「推不了」）。
+
+| 层 | 现取读数 | 因此 |
+|---|---|---|
+| **通道层** | `Test-NetConnection github.com -Port 443` ⇒ `RemoteAddress=140.82.121.3`、**`TcpTestSucceeded=False`**；同一 URL 两次 `git ls-remote`（`GIT_TERMINAL_PROMPT=0` 排除交互挂起）均 **rc=128** —— 第一次 `Recv failure: Connection was reset`，第二次 `Failed to connect to github.com:443 after 21125 ms` | 失败在 **TCP/路由层**，不是认证层（不是 403 / 不是要密码）。无代理环境变量，`~/.ssh/config` 里**没有 github 条目**（只有内网五台；`known_hosts_443` 是个 **0 字节空文件** ⇒ 有人试过 443 那条路，没配成） |
+| **授权层** | `remote.github-legacy.pushurl = DISABLED-no-push (见 sanitize.py 闸门；恢复见 .git/config 备份)`，fetch URL 是 `https://github.com/Light-Towers/agent-platform.git` | `git push github-legacy` 会因 URL 非法当场失败 ⇒ 真要推必须用**显式 URL**，那是绕守卫（需人授权，且本代理不改 git config）。这一层与通道层无关：网络通了它仍然红 |
+| **凭证层** | `credential.helper = manager`，公开侧身份由 `includeIf remote.*.url:https://github.com/Light-Towers/**` 引入 `~/.gitconfig-public`（只带 `[user]`，不带凭证） | 本仓**从未成功推送过** `github-legacy`（本地那些 `refs/remotes/github-legacy/*` 是 fetch 来的历史状态）⇒ 写权限这一格**现在无法验**（要通道），不得当成「已验可用」 |
+
+**因此推前判据加一条（关键，不是补足叙事）**：§34.2 那条 `git ls-remote --heads github-legacy`（公开侧现 tip = `2011fe6a`）是**今天早些时候**取的，通道随后掉了 ⇒ 「父 = `2011fe6a` ⇒ 快进、不需要 force」这个结论现在是**陈旧读数**。任何一次真实推送前必须复取：live `ls-remote` 取现 tip ⇒ 若已移动则重算 publish 的 `--base` 并重造提交；未移动才按现状推。这是观测硬规矩 #3（读数必绑当时时刻）在公开侧的同型适用。
+
+⇒ 口径入册：**「能不能推」要分成通道层 / 授权层 / 凭证层各自取读数**。混成一句「推不了」，下一轮人就会把「今天网络不通」读成「这事被规矩禁止」（两个完全不同的处置：等通道 vs 要批示）。
+
+**本件未做**：一次也没推。镜像提交 `b08009d0` 仍在本地 ref，判据（publish rc=0 / registry 全树 0 违规 / 快进）全部已取且可复跑，**不因为通道掉了而失效**。
+
 
 
 
