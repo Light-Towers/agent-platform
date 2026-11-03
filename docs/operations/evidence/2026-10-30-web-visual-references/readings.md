@@ -2946,6 +2946,140 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .tmp-scratch/ap-visual/e26-g
 powershell -NoProfile -ExecutionPolicy Bypass -File .tmp-scratch/ap-visual/k27-witness-empty-baseline.ps1 -Restore
 ```
 
+---
+
+## 30. 第二十三批（2026-11-03，刀㉘）：V4 换到判据绑的构建通道 · 全量十 session 首跑 · 取证件第 2 格换形 · B 路前置取证
+
+### 30.1 本批射程
+
+用户指令「继续，全部完成」。上一轮交付的菜单里，**不需批示的四项全做**（V4 实拍 / 全量测试 / 旧期望搬迁 / B 路前置读数），**需拍板的四项一律不动**（推送、PR-1 开工、公开镜像处置、删分支）。本批**零产品代码、零判据扩面**：入库面 = 三份文档（本件新开本节・工单件 §13.4 两行・视觉件 V4 那三处随动），其余全住 gitignored 目录（三支新量具 + 一份 harness + 八枚落盘件）。
+
+### 30.2 V4：先给失败分型，再改通道（不拿改选择器当修 bug）
+
+主脚本 v4-spa.mjs 首跑抛「主题按钮没找到（页面文案变了？浅色）」。这句话有两种完全不同的成因（页面白屏 / 我猜错文案），处置也不同，所以先落一支单帧探针 v4-probe.mjs 分型，**不直接改选择器**。
+
+| 序 | 现取读数 | 定性 |
+|---|---|---|
+| 1 | 探针读 `url = chrome-error://chromewebdata/`、bodyHead「无法访问此网站 … 127.0.0.1 拒绝了我们的连接请求」、`lgRows=0`、`resources=[]`、`exceptions=0` | **通道级失败**，与选择器无关（若是我猜错文案，页面应当挂着、`lgRows` 应当是 12） |
+| 2 | 同一条 URL 两种写法：`http://127.0.0.1:4173/ui/` 拒绝连接；`http://localhost:4173/ui/` **200 len=1727** | 服务活着，只是不接受字面 IPv4 |
+| 3 | 监听表：`::1:4173 pid=…`（旧）与 `127.0.0.1:4174 pid=…`（重起后） | 根因 = **本机 `pnpm preview` 默认只 bind IPv6 回环**。vite 自己打印的那行 `Local: http://localhost:4173/ui/` 用的是**主机名而不是绑定地址** ⇒ 状态行亮不等于我连的那条地址能通（与在册「状态灯亮 ≠ 数据到」同族） |
+| 4 | 处置：`pnpm preview --host 127.0.0.1 --port 4174 --strictPort`，**不杀 4173 那一轮**（那是别的动作起的进程，动它超出本批射程） | 通道改为显式 IPv4 绑定，去掉对主机名解析顺序的依赖。判据两条都取：GET /ui/ 200 **且** 监听表读到 `127.0.0.1:4174` |
+| 5 | 复跑探针：`appHostChildren=1`、`segBtnCount=3`、`buttonTexts` 逐字 =「跟随系统 / 浅色 / 深色」、`lgRows=12`、js 与 css 均 200、`exceptions=0` | 页面挂载成立，且**上一版的 LABEL 映射本来就是对的**——那条「按钮没找到」从来不是选择器问题 |
+
+唯一一条 404 是 `favicon.ico`（浏览器自动发请，不是页面请求也不是构建产物），记为通道噪声，不进任何判据。
+
+### 30.3 V4 实拍终值（构建通道・7 张）与两枚齿
+
+| 判据面 | 读数 |
+|---|---|
+| 通道 | `pnpm build` 的 dist 由 **vite preview** 托管，页面 = PR-0 交付的那一页 SPA（`web/vite.config.ts` 的 `base` 为 `/ui/` ⇒ 前缀写错就是 404 白屏）。这正是判据原文绑的那条通道，不再是第七批那个静态宿主页 |
+| 张数与形状 | light 与 dark 各 ×1280/768/375 = 6 张，加 auto×媒体dark 1280 一张 = **7 张**，落 gitignored 的 shots-spa 目录（**截图不入库**，沿用在册口径）。张数**不是判据**（第八批 ⑤ 起判据不抄数），这里逐张列是为了「每一张都有读数」可核 |
+| 子判据一「375 那张能判无横向滚动」 | 375 两张 `hScroll=false` 且 `docScrollWidth=375=innerW`；768 与 1280 的六格同样 false。**齿**：375 档注入一个 2000px 元素必须读到 `hScroll=true` ⇒ `verdict=HSCROLL-CELL-HAS-TEETH`（没这枚齿，这一格是空判据） |
+| 子判据二「dark 那张能判 false 与 null 是不同形状」 | **构建通道上无载体**：`web/src/App.vue` 交付的就是骨架（图例 + 空态，无事件行、无灯阵），七张 `emptyTextShown` 全为 true。⇒ 该半句在构建通道上**未达成**；第七批那句「已达成」的达成面是静态宿主页 `web/poc-health.html` 的灯阵，**这不是回退，是尚未在同一通道复取**，要等 PR-2/PR-4 把数据渲染接上 |
+| 档位是不是真按的 | 逐张 `aria-pressed` 恰一真（`pressedCount=1`）：light 张亮在「浅色」、dark 张亮在「深色」、auto 张亮在「跟随系统」⇒ 主题走页面自己的控件，不是脚本伪造 class |
+| V2 那半在构建通道复取 | `legendHeader` =「图例：12 类事件 → 9 族色相」与 `legendRows=12`、`legendFamComputed=9` 七张全一致（屏上行数与代码字典同源，在**构建产物**里成立，不再只在宿主页上成立） |
+| 页面异常 | `Runtime.exceptionThrown` **0 条**（七张 + 两次齿证全程） |
+
+**auto 副本的第一版是脏的（自犯见 §30.7 行 1）**：首版 `goto` 只在导航**之后**抹 `localStorage` 与 `data-theme`，而 `web/src/theme.ts` 的 `initTheme()` 在 `createApp` 之前同步读 storage ⇒ 上一张点击的 dark 跨导航携带进来、`aria-pressed` 亮在「深色」。那一版 auto 张与显式 dark 张 **sha 逐字节相同**，看着像「两条通道等价」，其实是**同一个污染态被拍了两遍**。改成隔离形状（先导航 → 擦干净 storage → **再导航一次**，让 `initTheme` 从空存储启动）后：auto 张读到 `themeAttr=(auto)`、`hasThemeAttr=false`、`mediaDarkMatches=true`、跟随系统那档 pressed，且 sha **不再等于** dark 张（差别恰好落在被按下按钮的 tint 上）。
+
+**副本 A 的门控齿**（不引 sha 相等当等价证据——那条处置 §14.3 早就写下）：在 auto×媒体dark 真态里做双向切换，`base`（无属性 + 媒体 dark）= rgb(22,25,29) 黑 → 写 `data-theme=light` = rgb(246,247,249) **翻白** → 撤属性 = 回黑，三段齐全才判 `MEDIA-DARK-CELL-HAS-TEETH`。这条读数是 `web/src/styles/tokens.css` 里那条 `:root:not([data-theme])` 媒体查询**真的在门控**的机械证明（若 `:not()` 门控失效，中间那段不会翻白）。
+
+⚠ 一行防误读：harness 输出里仍带着 `plexInstalled`（`document.fonts.check`），而 §14.4 已证**该 API 在无 @font-face 的页面上没有判别力**（对编造的字体名也返回 true）。它留在输出里只是未清理，**本批所有陈述一律不引它**，后人也不得引它当「屏上是 Plex」的证据。
+
+### 30.4 全量十 session 实跑终值，与 28 条 skip 的逐族定性
+
+`k28-full-test.ps1` 的十条命令是从 `Makefile` 的 test 目标**逐字抄**（本机无 make）；另起一支 `k28-skip-reasons.ps1` 只复跑「本轮有 skip」的五个 session 并加 `-rs` —— 因为 `-q` 只答得了「跳了几条」，答不了「为什么跳」，而在册口径要求区分「缺环境自动 skip（设计意图）」与「真红被跳掉」。
+
+| session | rc | 通过数 / skip数 / deselect数 |
+|---|---|---|
+| root | 0 | 1486 / 10 / 29（425s） |
+| shared-schemas | 0 | 28 / 0 / 0 |
+| agent-runtime | 0 | 827 / 2 / 0 |
+| agent-server | 0 | 154 / 0 / 0 |
+| federation | 0 | 192 / 1 / 0 |
+| kefu | 0 | 49 / 0 / 0 |
+| exhibition | 0 | 381 / 0 / 0（11 warnings） |
+| knowledge | 0 | 416 / 7 / 0 |
+| nl2sql | 0 | 235 / 8 / 0 |
+| observability-otel（带 `--extra otel`） | 0 | 18 / 0 / 0 |
+
+合计 **3786 passed / 28 skipped / 29 deselected，十条 rc 全 0**。28 条 skip 逐族（原因逐条原文在复跑件 `k28-13` 里）：
+
+| 族 | 条数 | 成因（原文摘） | 定性 |
+|---|---|---|---|
+| Windows 平台特权与 POSIX 语义 | 5 | 建符号链接需特权或开发者模式 ×3、反斜杠二次解释只在 POSIX 宿主有意义、本用例断言 POSIX 宿主特有入参语义 | **设计内 skip**：宿主平台不满足前置条件，不是失败 |
+| 缺真库 / 真服务 / 真模型 | 19 | Valkey 127.0.0.1:6379 不可达（原因里自带启动指引与「CI 中必须设置 `CACHE_CONTRACT_REQUIRED=1`」）、未设 `AGENT_PLATFORM_PG_URL`、`ZHIKU_INTEGRATION=1` 未设 ×7（torch / Milvus / MinIO / Mongo / Neo4j / 真 PDF）、`DW_DB_DSN` 与 `META_DB_DSN` 真库 ×8、根 `.env` 未提供 `EMBEDDING_MODEL` | **设计内 skip**：conftest 守卫明示，属 Nightly 或手动面 |
+| 已装真 SDK ⇒ 降级前提不成立 | 3 | 三条各写明「ACTIVE 路径成立，降级前提不成立（见 `tests/observability`）」一类 | **判据转移且有载体**：同一轮里 observability-otel session **18 passed** ⇒ 这三条不是掉地上，是搬到另一格钉着 |
+| ADR 退役后判据转移 | 1 | 「agent_server/sql 已退役（ADR-0011 §7）；等价判据在 nl2sql 侧」 | 同上：判据有去处且那一格有读数（nl2sql session 235 passed） |
+
+⇒ 一条都不能读成「全绿 = 全都验过」：deselect 29 是 marker 摘除的**设计后果**，skip 28 是环境前置，逐族都有指名到文件的成因。**真跑的**是后端契约面（root 1486）与观测面（真 SDK 18 条）这两块。
+
+### 30.5 取证件第 2 格换形（e27 是 e26 的 fork，一次只搬一格）
+
+为什么搬：e26 第 2 格的期望是「porcelain 必须 0 行」，而本机工作树恒有 3 条 `web/src/*.vue`。**现取的机械量**：`git diff --numstat` 对这三个路径**一行都不输出**（只有三条 CRLF 警告走 stderr）⇒ 内容与索引逐字节相同，纯 stat-only。一个对任何刀都必红、且红得与内容无关的格，落点只有两个：删格，或每轮忍一条假红——这正是 §27.7 那族「判据过期后它会教人删格」的前半段（刀㉖ 点名、刀㉗ 实取复证、本刀搬）。
+
+换形（**方向是加严不是放宽**，四条一起读）：2a 实质差异参与判决（`??` 未跟踪天然算实质，它不是元数据抖动而是账面上没有的东西）；2b stat-only 噪声**逐条指名**但不判决；分型靠机械量（同侧 numstat 取不到增删行才算噪声）；**判决面比原来多一条守恒判据**（2a + 2b 必须等于 porcelain 原始行数，不等即 `<<< LINES-LOST-IN-SPLIT`，防「分着分着把行弄丢」）。
+
+注入自测沿用 4a/4b 那套形状：**实跑与合成分过同一份分类代码**（合成一条实质 + 一条噪声 + 一条未跟踪，必须 subst=2 / statOnly=1，否则 `<<< SPLIT-SELFTEST-BROKEN`）。这一枚是必需的：分类器整条是空的时候，真面读数也会是 0/0 且全绿——那一型正是「格还在、判决永远绿」。
+
+同 commit 对拍（HEAD `608b3dcb`，与 e26 的 080935 轮同一枚刀、同一组参数）：
+
+| 格 | e26（件 …080935） | e27（件 …103529） |
+|---|---|---|
+| 1 parent | OK | OK（逐字同） |
+| 2 | `lines=3` 且 `<<< still dirty` 三条 | `2a lines=0 => clean content` + `2b lines=3`（三条逐条指名）+ SELFTEST OK + partition exact |
+| 3 | add=84 matched / del=13 matched / non-docs=0 | 同 |
+| 4a | knife backend=0 matched | 同 |
+| 4b | cumulative=5 declared=5 OUTSIDE=0 STALE=0，正对照 41 | 同 |
+| 5 | anchored，local branch=9 | 同 |
+| 6 | remote refs containing HEAD 为空，DayOfWeek=Tuesday | 同 |
+
+⇒ 六格里只有第 2 格变形，其余逐字复现 ⇒ 「搬一格」的 blast radius 被对拍钉住而不是嘴上说说。e26 **原样留着不改**（它三轮读数已被 §28、§29 与刀㉗ 提交信息按件号引用）。⚠ 在册那条读数可误性照旧有效：e27 与 e26 一样**不产出判决 rc**，`$LASTEXITCODE=0` 只代表脚本跑完，判决只在门件。
+
+### 30.6 B 路三条前置读数：**没取到**，但成因精确到认证层
+
+方案件 §5 步 2 要三条：① 有无可用 shared runner ② 能否注册（谁有权限）③ executor 类型。本批一支只读探针 `k28-ci-prereq.ps1`（不注册、不写任何服务端状态；**不打印 URL 也不打印凭证**，只报形状、长度与状态码）：
+
+| 读数 | 值 |
+|---|---|
+| git 通道 | `git ls-remote --heads company` **rc=0 / 6 行 refs**（scheme=ssh，URL 内含凭证段——只报真假，不报内容） |
+| API 面 TCP 与 DNS | 80 与 443 **都通**，主机名解析到 1 个地址 |
+| API 面 HTTP | `GET /api/v4/version` 在 http 与 https 上均 **401** |
+| 本机能问服务端的东西 | 六个令牌环境变量**全 ABSENT**；`glab` 不在 PATH（`curl` 与 `ssh` 在） |
+| 仓内形状 | `.gitlab-ci.yml`、`ci/.gitlab-ci.yml`、`.gitlab/` 三者 exists=false 且 tracked=false（步 3 未启动，与方案一致） |
+
+**定性**：401 而不是 404、也不是拒连 ⇒ GitLab API 面**真实存在并要求认证**。三条前置读数**仍未取到**，卡点是**一个只读 PAT（或由人直接开项目设置页看）**，不是网络、不是服务端缺这个 API。这跟「内网不可达」是两种性质完全不同的陈述：前者可被一个凭证解除，后者会把 B 路误判成基础设施不存在。**N4（服务端拦截力）本批同样未取**，不得记成已过。机器放置约束照旧引用（runner 不放 126，125 满载不加 IO）。
+
+### 30.7 本批自犯表
+
+| 序 | 踩了什么 | 怎么被发现、怎么处置 |
+|---|---|---|
+| 1 | **已登记的坑因未检索而复犯**：`goto` 在导航后才抹 `localStorage`，auto 副本被上一张点击的 dark 污染；更险的是首跑那两张 sha 相同，**差点被当「两条通道字节等价」的正面证据写进账面** | 不是我看出来的，是 §14.3 早就登记过这一型并写明处置（「改用隔离探针，不引 sha 相等」）。处置：改隔离形状 + 补门控齿 + 把「首跑那枚 sha 相等是污染而非等价」写在账面里。⇒ 口径：**动手前先 grep 台账有没有登记过同一形状**；这种复犯比新坑更该记，因为它证明「登记」没有自动变成「开工前置动作」 |
+| 2 | **`-First` 杀管道复犯（同型第二次，且就在登记它的下一批）**：跑 e27 时用 `Tee-Object` 接 `Select-Object -First 16`，上游被提前终止 ⇒ 落盘件截断、shell 读到 rc=1，而件内各格其实全正常 | 屏幕上那行 `ExitCode: 1` 与件内「一切 OK」互相打脸，逼我去查管道而不是查产品。处置：重跑用 `-Last`（件 `k28-16` 全件），**截断那件 `k28-15` 留着不删**（它是「红得没道理」的物证）。⇒ §29.6 行 3 上一批刚写下「只允许 `-Last`」，本批又踩：说明**「登记了」不等于「遵守了」**，这一型要靠机械门禁收而不是靠记性收；本批只在台账点名，**不改门件**（门件不扫复跑命令文本，扩面属单独定案，不在本批射程） |
+
+（不算自犯但同栏记一笔：若我把判据立成「浏览器控制台零条」，就会被那条 `favicon.ico` 的 404 冤枉红一次。判据立在 `Runtime.exceptionThrown`（实取 0 条）是对的，立在「console 干净」上是错的——两者不等价。）
+
+### 30.8 未做 / 不得读成已批
+
+本批**未推任何 ref**（刀㉔–㉗ 与本刀都保持未推，用户拍「别动它们，暂不推」）・未碰远端 main・未 force・未动 github-legacy 禁用位・未删 `company-snapshot`・**V4 仍不得读成已过**（理由从两条减到一条半：通道那条已收，剩「观感判读属人」＋「第二子判据在构建通道无载体」）・**B 路三条前置读数未取**（卡在认证层）・N4 未取・未新增 `.gitlab-ci.yml`・未动一行产品代码与测试・未扩 T2 扫描面・**PR-1 未开工**・`make test` 的 make 本体未跑（Windows 无 make，跑的是十条逐字等价命令）。
+
+```powershell
+# —— V4 构建通道实拍（先起服务，两条可达性读数都要）——
+cd web; pnpm build
+pnpm preview --host 127.0.0.1 --port 4174 --strictPort      # 另开终端；默认端口会只 bind ::1
+Invoke-WebRequest -UseBasicParsing http://127.0.0.1:4174/ui/   # 期望 200，并与监听表同读
+node .tmp-scratch/ap-visual/v4-probe.mjs                        # 期望 segBtnCount=3 且 lgRows=12
+node .tmp-scratch/ap-visual/v4-spa.mjs                          # 期望 7 张 + 两枚齿 + 异常 0
+# —— 全量十 session 与 skip 原因（前者约 11 分钟）——
+powershell -NoProfile -ExecutionPolicy Bypass -File .tmp-scratch/ap-visual/k28-full-test.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .tmp-scratch/ap-visual/k28-skip-reasons.ps1
+# —— B 路前置取证（只读，不注册）——
+powershell -NoProfile -ExecutionPolicy Bypass -File .tmp-scratch/ap-visual/k28-ci-prereq.ps1
+# —— 取证件换形对拍（同 commit 同参数，期望只有第 2 格变形；复跑只许 -Last 不许 -First）——
+powershell -NoProfile -ExecutionPolicy Bypass -File .tmp-scratch/ap-visual/e27-postcommit.ps1 -ExpectParent <父 rev> -ExpectAdd <n> -ExpectDel <n> -AllowNonDocs <逗号串> -ExpectBackend <n> -BackendDeclaredCum <逗号串>
+```
+
+
 
 
 
