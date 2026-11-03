@@ -621,10 +621,10 @@ foreach ($f in $files) {
 
 两者都在 `docs/README.md`，都是本批**没动过**的行（历史账面），且修它超出 §0 射程（那四个动作之外的第五个文件改动）：
 
-1. **ADR 无扩展名短写**（共 3 条）：`docs/adr/0003`、`docs/adr/0012`、`docs/adr/0013` ⇒ 真名是 `docs/adr/0003-dual-db-driver.md` 这类带后缀的全名（`git ls-files docs/adr` 实取）。不算断链，但任何按「路径存在性」扫的脚本会误报（包括上面那段自查）。
-2. `docs/plans/README.md` **不存在**：实取 `Get-ChildItem docs/plans -Filter 'README*' -Recurse` 只有 `docs/plans/archive/README.md`，而 `docs/README.md` 里有一句（写于 2026-10-16）把它说成「新增的 1 篇」⇒ 账面未跟。按台账 §4 **C8** 的纪律，定位这句靠**内容**不靠行号：`git grep -n --untracked -F 'docs/plans/README.md' -- docs`（本轮命中的是 `docs/README.md:212`，**行号只作 `d140f91f` 快照用**，下一批往该文件开头加行就会漂）。
+1. **ADR 无扩展名短写**（共 3 条）：docs/adr/0003、docs/adr/0012、docs/adr/0013 ⇒（本行自刀㉗ 起不带反引号：反引号 = 承诺按仓库根能解到，而这三个短名解不到；本行的内容就是「这个形状本身」，所以保留字面、拆掉反引号）真名是 `docs/adr/0003-dual-db-driver.md` 这类带后缀的全名（`git ls-files docs/adr` 实取）。不算断链，但任何按「路径存在性」扫的脚本会误报（包括上面那段自查）。
+2. docs/plans/README.md **不存在**：实取 `Get-ChildItem docs/plans -Filter 'README*' -Recurse` 只有 `docs/plans/archive/README.md`，而 `docs/README.md` 里有一句（写于 2026-10-16）把它说成「新增的 1 篇」⇒ 账面未跟。按台账 §4 **C8** 的纪律，定位这句靠**内容**不靠行号：`git grep -n --untracked -F 'docs/plans/README.md' -- docs`（本轮命中的是 `docs/README.md:212`，**行号只作 `d140f91f` 快照用**，下一批往该文件开头加行就会漂）。
 
-> 这两条的处置 = **待你拍板**：要不要另开一个账面小批修「新增的 1 篇是 `docs/plans/README.md`」那句（它同时影响 §3 那串分母计数口径的可复核性）。本批不自行放宽射程。
+> 这两条的处置 = **待你拍板**：要不要另开一个账面小批修「新增的 1 篇是 docs/plans/README.md」那句（它同时影响 §3 那串分母计数口径的可复核性）。本批不自行放宽射程。**⇒ 本项已于刀㉗ 带证据关闭**（不是新拍板，是复取到它已被执行）：docs/README.md §6「本轮没做的事」那条已含 2026-11-01 订正，现文自陈「只拆掉那对会让人误读成真实路径的反引号」并给了三条 git 读数（`git ls-files` 限定该路径 0 行 / `git log --all` 新增・删除・总历史全 0）；**定位靠这段内容不靠行号**（行号会随加行漂）。本刀因此拆掉本条两处反引号。**同名的另一处假路径住在 `scripts/evidence/recount_plan_status_lines.py` 的 docstring 里**（属后端目录，文档刀不得碰），该订正里已登记为在册欠项，本刀同样只续登不处理。
 
 ---
 
@@ -2536,7 +2536,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .tmp-scratch/ap-visual/e15-p
 | 格 | 旧判据（POC 期形状） | 新判据（内容派生 + 申报制） | 有牙的证据 |
 |---|---|---|---|
 | 工作树 | `git status --short --untracked-files=all` 必须 0 行 | 真脏 = status 行 ∩ `git diff --name-only` 路径，必须 0；**未跟踪文件仍算脏**；CRLF-only 噪声单列成可读格（本轮 3 条逐条列名），不是消失 | 分类器两支自测：合成的脏线必须命中 1；**此刻坐在噪声列里的那条路径**在有内容 diff 时也须命中 1 ⇒ 「REAL-DIRTY=0」是基准选的功劳，不是模式写宽 |
-| 后端面 | `d140f91f..HEAD` 在四个后端目录必须 0 文件 | 后端面 ⊆ 申报三件（`applications/agent_server/config.py`、`main.py`、`tests/test_web_ui_mount.py`），OUTSIDE-DECLARED 必须 0 | 注入自测：塞一条 `applications/evil-undeclared.py` ⇒ OUTSIDE=1；正控制 = 同区间去过滤面 all-files = **38**（非 0，证明过滤在做事） |
+| 后端面 | `d140f91f..HEAD` 在四个后端目录必须 0 文件 | 后端面 ⊆ 申报三件（`applications/agent_server/config.py`、`main.py`、`applications/agent_server/tests/test_web_ui_mount.py`），OUTSIDE-DECLARED 必须 0 | 注入自测：塞一条 applications/evil-undeclared.py（合成路径，不入库 ⇒ 自刀㉗ 起不带反引号，反引号 = 承诺按仓库根能解到）⇒ OUTSIDE=1；正控制 = 同区间去过滤面 all-files = **38**（非 0，证明过滤在做事） |
 
 **覆盖率注记（不得读成「后端面已被全面申报」）**：这一格的目录集只有四项（applications / packages / tests / eval），`Makefile`、`Dockerfile`、`.github/` 根本不经这一格。所以「推送前的后端不变量」在本件里的真实射程 = 那四个目录，如实写明，免得后人拿它当全后端的通行证。
 
@@ -2560,7 +2560,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .tmp-scratch/ap-visual/e15-p
 |---|---|---|---|
 | 1 | **自我见证格自己写成空转**：`@($x = '…' \| Where-Object …)` 恒计数 0，「必须命中 1」那一侧读 0 | 换形后的第一轮 PROBE 自报 `CLASSIFIER-VACUOUS`，blockers 里多出一条 | 改成先赋变量再对管道计数，并把单侧自测改成双侧（脏线命中 1 + 噪声列里那条路径在有内容 diff 时也命中 1）。⇒ 与 §23.4 行 10（结论格必须能自证非空）同族、本批**第四次**；这次多一条可写的口径：**自测的期望要写成「必须为 1」而不是「必须为 0」**，写成 0 的空转永远抓不住 |
 | 2 | 换形判据有「放宽」的外观 | 落笔时逐条对着《验证策略》红线自检：新判据会不会让真脏树过关 | 未跟踪仍算脏、内容脏仍阻断、噪声只是换列；且两支自测 + 一条正控制同时成立才 `blockers = 0`。仍如实登记它的**目录集只有四项**（24.4 注记），不把射程外的事写成本格已管 |
-| 3 | 刀㉒ 自己写的一行把表格打列了（工单件 §13.4 新行里反引号内的管道符未转义 ⇒ 该行列数 4 ≠ 3），而**本刀自建的形检格没抓住它** | 仓内量具 typo-scan 的 **T4 hits=1** 报出 `COLS …:649 got=4 expect=3`，而同轮本格 anomalies=0 —— 与行 12 同一句口诀「两具量具不一致先查量具」，但**结论相反**：这次是本格盲区、T4 是对的（本格只校「行尾竖线在位」+「反引号成对」，**不校列数**） | 就地改成转义写法后 T4 回 0。⇒ 口径：**自建格要在件里写清它不校什么**，否则 anomalies=0 会被读成「表格全好」。**同轮另一条换面读数要一起记**：T2 从 12 → 14 不是新缺陷，是分面从「TODO + 取证件」换成「取证件 + 工单件」后，把工单件里两条**已在册的假路径**（`packages/ui/package.json` = 竞品对照表里别人的路径、`scripts/check-events.mjs` = PR-1 待建门禁）扫了进来 —— 换面读数必须写明成因，否则会被读成「本批新增了 2 条 MISSING」。⚠ 再加一重：本行自己把这两条路径写进了反引号，于是同面复取读到 **16** —— 三个数（12 / 14 / 16）的成因分别是**面内原有 / 换面带入 / 本刀自引**，不是一个在变的缺陷数 |
+| 3 | 刀㉒ 自己写的一行把表格打列了（工单件 §13.4 新行里反引号内的管道符未转义 ⇒ 该行列数 4 ≠ 3），而**本刀自建的形检格没抓住它** | 仓内量具 typo-scan 的 **T4 hits=1** 报出 `COLS …:649 got=4 expect=3`，而同轮本格 anomalies=0 —— 与行 12 同一句口诀「两具量具不一致先查量具」，但**结论相反**：这次是本格盲区、T4 是对的（本格只校「行尾竖线在位」+「反引号成对」，**不校列数**） | 就地改成转义写法后 T4 回 0。⇒ 口径：**自建格要在件里写清它不校什么**，否则 anomalies=0 会被读成「表格全好」。**同轮另一条换面读数要一起记**：T2 从 12 → 14 不是新缺陷，是分面从「TODO + 取证件」换成「取证件 + 工单件」后，把工单件里两条**已在册的假路径**（packages/ui/package.json = 竞品对照表里别人的路径、scripts/check-events.mjs = PR-1 待建门禁）扫了进来 —— 换面读数必须写明成因，否则会被读成「本批新增了 2 条 MISSING」。⚠ 再加一重：本行自己把这两条路径写进了反引号，于是同面复取读到 **16** —— 三个数（12 / 14 / 16）的成因分别是**面内原有 / 换面带入 / 本刀自引**，不是一个在变的缺陷数。（⚠ 本行那两处反引号已于刀㉗ 拆掉（见 §29），本句是历史成因陈述，不是当前形状读数） |
 
 ### 24.7 未做 / 不得读成已批（逐条点名）
 
@@ -2877,6 +2877,75 @@ git diff --name-only d140f91f HEAD -- applications packages scripts tests eval d
 git diff --name-only HEAD~1 HEAD -- applications packages scripts tests eval deploy Makefile pyproject.toml
 git diff --numstat
 ```
+
+---
+
+## 第二十二批（刀㉗）：T2 棘轮从 16 降到 0——一次**纯书写口径刀**
+
+### 29.1 坐标与本批刀次
+
+本地刀㉗，父 = 刀㉖ `5aaf7e02`。本批**零产品代码**，面 = 四件文档（取证件本节 + `docs/README.md` + 视觉件 §1.4 一行 + 工单件四行）；门件基线随动住在 gitignored 目录。
+
+### 29.2 开工前先取的实物面：为什么不拿 §27.7 那 16 条当清单直接改
+
+§27.7 登记的基线是「文件|路径」**对** 16 条，而 typo-scan 的 MISSING 行**每文件去重**（件内正则 `Sort-Object -Unique`）⇒ 一个对可以对应多处出现。只按 16 行动手必然漏。本轮新量具 **k27-t2-locate.ps1**（正则与 typo-scan L79–L80 **逐字同口径**，含那两个排除项，否则量出来的不是同一件事）逐处报行号：件 k27-00-t2-locate.txt = **TOTAL occurrences=18 / 16 对**。
+
+⇒ 口径：**对是判决单位，处是工作量单位**；降基线按「对」核，动手按「处」扫。两者差（本批 18−16=2）就是同一路径在同文件里出现两次的那两处（取证件本件 L625+L627 的 docs/plans/README.md、`docs/README.md` L38+L199 的 docs/adr/0003）。
+
+### 29.3 逐类处置（每类一种确定的改写动作，不逐条抄数）
+
+| 类 | 本批落点 | 改写动作 | 为什么是这个动作而不是另一个 |
+|---|---|---|---|
+| 1 ADR 编号当路径写 | 5 对（`docs/README.md` L38/L43/L199 + 本件 L624） | **分两支**：指向真文件的（L38/L199）补全为 `docs/adr/0003-dual-db-driver.md` 这种带后缀全名；描述短写形状**本身**的（L43 那句「命中数为 0」/ 本件 L624 那条自犯登记）保留字面、拆掉反引号 | 同一条债有两种正确改法；选择判据 = **这句话是在指向一个文件，还是在描述一个形状**。把后者也“补全”会把历史陈述改成它没说过的事 |
+| 2 省略顶层前缀的简写 | 2 对（本件 L2539 / 工单件 L591） | 补全真实路径：`applications/agent_server/tests/test_web_ui_mount.py`、`web/scripts/check-tokens.mjs`（两条均 `git ls-files` 命中） | 真文件存在，补全后反引号从“假承诺”变成“真指针”，信息只增不减 |
+| 3 按设计不入库的资产/目录 | 3 对（工单件 L162 / 视觉件 L87 / 工单件 L591 行内的 `assets/fonts/` 不带前缀未计入） | 去反引号 + **就地补一句现取事实**（该路径 `git ls-files` 0 行且 `Test-Path` = False）+ 带分发前触发条件 | 只去反引号会把一句“将来要入库”的义务读成已完成；许可义务（OFL 条件 2）**必须在任何一批把 woff2 入库或对外分发前先落许可文本**，所以触发条件写在行内而不只在本台账 |
+| 4 反证用合成路径 / 外部仓库路径 / 待建门禁 | 4 对（本件 L2539 合成 + L2563 两条 + 工单件 L316/L371） | 去反引号 + 行内标明身份（「合成，不入库」/「**外部仓库的路径**，不是本仓路径」/「**待建门禁，尚未落地**」） | 这三类都不该被反引号承诺为仓内可解路径，但它们都是**有效信息**，所以拆反引号时必须加身份注，否则读者不知道它为什么不带反引号 |
+| 5 账面未跟的假路径 | 1 对 2 处（本件 L625/L627） | 去反引号 + **关闭那条挂着的「待你拍板」** | 关闭不是替人拍板：复取到它已被执行——`docs/README.md` §6「本轮没做的事」那条已含 2026-11-01 订正，现文自陈「只拆掉那对会让人误读成真实路径的反引号」并给了三条 git 读数（定位靠这段内容不靠行号）。**同名假路径在 `scripts/evidence/recount_plan_status_lines.py` 的 docstring 里还有一处**，属后端目录 ⇒ 本刀只续登不处理（同那条订正自己的处置） |
+
+### 29.4 门件换形：基线 16 → 空集，并新增 C-selftest-8
+
+降基线是本刀的**主结论，不是副产物**，而空基线带来一个新的不可区分：“把清单清空”与“真修完了”在 `baseline=0 live=0 NEW=0 FIXED=0` 这读数上**同形**。⇒ 补一道机械反证：**C-selftest-8** 拿一个合成对过**真基线**筛，必须 NEW=1（读 `EMPTY-BASELINE-STILL-BITES`），否则报 `<<< RATCHET-BYPASSED-BY-EMPTY-BASELINE`。
+
+⇒ 新口径：**把一格降到空集时，必须同时给“空集仍然咬得住”的反证**（与《分支卫生》第 2 条“登记必须带复审触发条件”、刀㉕ “落盘件必须按轮次分名”同族：都是“读数同形”型风险，靠机械齿而不是靠自觉区分）。另两条：**本格仍是棘轮不是硬阈值**（判据 `live ⊆ baseline`，基线 0 时它自然等价于新增即红），故意不把文案改成「必须为 0」——那会把刀㉕ 立的“不拿从未成立过的数当硬门”反过来踩碎。
+
+**真面反证（本批补跑，件 `e26-gate-00-20261103-080309-gate-fill.txt`）**：C-selftest-8 只在门件体内拿合成对筛真基线，它证的是**比较器没被掏空**，证不了“面上一条真违规会被照出来”。⇒ 新量具 k27-witness-empty-baseline.ps1（种植 / -Restore 两段）往本件末尾追加一行，内含一个反引号包住的不存在的 docs/plans 下的假路径 docs/plans/__k27-witness-nonexistent.md（该路径名在本节**故意不带反引号**书写：本台账就在 T2 扫描面上，带反引号等于自己再造一条债），再跑门件 ⇒ 实读 T2 hits=1、“T2 ratchet: baseline=0 live=1 NEW=1 FIXED=0 <<< T2-UNDECLARED-MISSING”、red-marker lines=1、**GATE_RC=RED / 进程 rc=1**；同轮其余格全 OK（B 段四道 rc=0・T3/T4=0・FORBIDDEN=0・MISS-DECL=0・backend dirty=0），也就是那一枚红**只**由种植行产生（种植位选本件正是因为：它同时在本刀申报集与默认五件面里，既不顺带触发申报面两格，也不在 check_doc_sync 的扫描对象内）。随后 -Restore：SHA256 与种植前**逐位相同**（读 BYTE-EXACT）、git 该文件未暂存差异 = 0（CLEAN (working tree == index)）⇒ 种植行不入库。⇒ §27.7 挂的那句“『新增即红』那个反证要等下一批真踩一次才算”**本批收掉**（合成面 + 真面两枚齿齐了才算）。
+
+### 29.5 读数与不得读成的三件事
+
+改写前后各一份实取：**件 k27-00-t2-locate.txt**（TOTAL occurrences=18）→ **件 k27-01-t2-locate-after.txt**（TOTAL occurrences=0）→ **件 k27-02-typo-after.txt**（默认五件面：T1 hits=13 不变 / **T2 hits=0** / T3 hits=0 / T4 hits=0 / T5 hits=0）。门件终跑件号与逐格读数见提交信息与下面复跑块。
+
+⚠ **不得读成**：① **T2=0 不等于“全仓书写已规范”**——它只扫默认五件面，且正则只认以 `web|packages|applications|scripts|docs|eval|tests` 开头的顶层前缀；同一行里不带前缀的短写（如工单件 L591 的 `styles/tokens.css`、`assets/fonts/`、`main.ts`）**根本不进这一格**。这是**量具覆盖面**，不是本刀的债；本刀不扩面（扩面会把 gitignored 取证件名喂成 MISSING，与 §27.5 行 3 同一处置）。② T1 仍 13，不绑、逐条已定性（§27.7）。③ “16 条债清了”只意味着**反引号不再对这些路径作可解析承诺**，不意味着那些路径变成真文件；第 3/4 类那六条仍然不存在。
+
+### 29.6 本批自犯 / 坑表
+
+| # | 情况 | 实取证据 | 处置 |
+|---|---|---|---|
+| 1 | 开工前的在册说法是「16 条 = 逐类各有确定改写动作」，但**没登“每类具体落哪几行”**，而上批 §27.7 那句“逐条来自件 e25-33”只给了对清单不给处清单 | k27-00 量到 18 处（不是 16）；两处“同路径同文件”如果按 16 行动手就会漏拆 ⇒ T2 下不到 0 | 当场先做量具再动手（口径：**债的「对」与工作量「处」必须分开取，不能拿判决面的条数当工单行数**）；写完的 §29.2 就是这条口径的存放处 |
+| 2 | 在工单件本批结论行里写「文件\|路径」时先打了**裸竖线**，把那张三列表的该行撑成四列 ⇒ 门件终跑被自己咬住 | 件 `e26-gate-21-20261103-075833-typo-default.txt`：COLS docs/plans/plan-web-frontend-minimal-core-2026-10-29.md:663 got=4 expect=3 ⇒ T4 hits=1 ⇒ “<<< SHAPE BROKEN” ⇒ GATE_RC=RED（**不是靠眼看 diff 接住的**，这一型在 diff 里读不出来） | 就地在该处竖线前补反斜杠（转义形），复跑 T4=0。⚠ **同型第三次**：§14.7 附行 B 的 T4 第①处（工单件 §13.4 反引号内未转义管道，也是“本批自己引入”）→ §24.6 行 3（刀㉒，COLS …:649 got=4 expect=3）→ 本刀（:663）；而“自己写破表”这一大类（含漏收尾竖线、多开一格）已是第 5 次。⇒ 口径：**在册坑表的型别在写作时会复犯，判据是 T4 而不是自觉**；同一句也说明为何 T4=0 只能当“本轮读数”引，不能当历史合格证 |
+| 3 | 终跑第一趟被**自己的复跑命令**杀在半路：`… \| Tee-Object … \| Select-Object -First 30` 会提前终止上游管道，门件进程当场中断，shell 读到的是 rc=-1 | 屏幕上那一行是 `GATE_RC=-1`（**不是** GREEN 也不是 RED），而目录里**没有**对应时刻的门件与 typo 落盘件（写档在脚本末尾，中途被杀 ⇒ 不留半截档，无脏证据）。第二趟改用 `-Last 42` 后读 GATE_RC=GREEN / rc=0 | 口径：**复跑门件时只允许 `-Last`，不许用 `-First`**（-First 把被评件提前杀掉，得到一个不属于任何判决的 rc）；而“无落盘件”本身就是那一趟没跑完的物证，不需要另找解释。本行不属本批的书写债，但它是一枚**读数可误性**坑（rc=-1 长得像个判决），所以进坑表 |
+
+### 29.7 未做 / 不得读成已批（逐条点名）
+
+本批**未推任何 ref**（刀㉔ `3e1eeae3`、刀㉕ `e1ff9dd1`、刀㉖ `5aaf7e02` 与本刀都保持未推，用户拍「别动它们，暂不推」）・未碰远端 main・未 force・未动 github-legacy 禁用位・未删 `company-snapshot`・**未扩 T2 的扫描面**（只改存量不改量具覆盖面）・未动 `scripts/evidence/recount_plan_status_lines.py` docstring 里那处同名假路径（后端目录，续登不处理）・未新增也未修改 .gitlab-ci.yml・未动任何产品代码与测试・B 路三条前置读数一条未取・C 路常态化未落地（需 D1）・反证表 N4 服务端 pipeline 拦截力待取证・e15/e26 第 2 格旧期望未搬・`make test` 全量 10 session 未跑・V4 实拍未做・PR-1 未开工。
+
+```powershell
+uv run python scripts/check_doc_sync.py
+powershell -NoProfile -ExecutionPolicy Bypass -File .tmp-scratch/ap-visual/k27-t2-locate.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .tmp-scratch/ap-visual/typo-scan.ps1
+git ls-files docs/adr
+git ls-files web/scripts
+git ls-files applications/agent_server/tests/test_web_ui_mount.py
+git ls-files docs/plans/README.md   # 期望 0 行（该路径从未入库）
+git ls-files web/src/assets/fonts   # 期望 0 行（字体资产不入库）
+git diff --numstat
+# 下面三道是「空基线仍然咬得住」的**真面**反证（§29.4）：种植 → 跑门件（期望 GATE_RC=RED / rc=1
+# 且唯一红源是 T2-UNDECLARED-MISSING）→ 字节还原（期望 BYTE-EXACT + unstaged=0）。中间那步会改工作树，
+# 所以它**不得入提交前那轮门件的复跑块**——只在本节手工按顺序跑，跑完立即还原。
+powershell -NoProfile -ExecutionPolicy Bypass -File .tmp-scratch/ap-visual/k27-witness-empty-baseline.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .tmp-scratch/ap-visual/e26-gate-fill.ps1 -AllowCsv 'docs/README.md,docs/plans/plan-web-visual-design-2026-10-30.md,docs/plans/plan-web-frontend-minimal-core-2026-10-29.md,docs/operations/evidence/2026-10-30-web-visual-references/readings.md' -Label 'witness planted'
+powershell -NoProfile -ExecutionPolicy Bypass -File .tmp-scratch/ap-visual/k27-witness-empty-baseline.ps1 -Restore
+```
+
 
 
 

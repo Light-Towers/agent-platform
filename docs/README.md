@@ -35,12 +35,12 @@
 | `docs/project-introduction-2026-10-12.md` | **对外唯一交付稿**（讲解用，禁词见文内纪律） | 1 |
 | `docs/runtime-self-build-analysis.md` + `docs/opensource-runtime-counterparts.md` | 业界对照族（框架层 / 内核原语层） | 4 / 0 |
 | `docs/runtime-analysis-overview.md` | **已并入** `runtime-self-build-analysis.md`（2026-10-15 合并 A），本页仅作旧链接寻址 | 0 |
-| `docs/adr/0003`~`0004` | 早期 ADR，`0004` 状态仍为「修订中」 | 0 / 3 |
+| `docs/adr/0003-dual-db-driver.md` ~ `docs/adr/0004-typed-memory-kernel.md` | 早期 ADR，`0004` 状态仍为「修订中」 | 0 / 3 |
 | `docs/adr/0011-two-text2sql-paths-convergence.md` | **两条 Text2SQL 路收敛**（2026-10-18 拍板选项 A：`agent_server/sql` 退役、统一到 nl2sql-service）；§1–§6 是拍板前分析，§7 起是执行记录（§7.3 = 2026-10-28 批次 5 拆 `/health` 的 `sql_backend` 假灯并推翻 §7.2 第 3 行） | 2（2026-10-28 取，不含本行；2026-10-27 那次为 0 ⇒ 本轮新增两处指向：runbook 头注与上线清单） |
 
 未入库、只在本机存在的一篇：docs/agno-agentos-comparison.md（平台层竞品对比，未提交，clone 后不存在，故按 AGENTS.md 防漂移规矩不以反引号路径书写）。
 
-**2026-10-26 追记 · 本表此前漏点两篇 ADR**（改前本索引正文里 `docs/adr/0012`、`docs/adr/0013` 命中数为 0）：
+**2026-10-26 追记 · 本表此前漏点两篇 ADR**（改前本索引正文里 docs/adr/0012、docs/adr/0013 命中数为 0；⚠ 这两个短名自刀㉗ 起不带反引号 —— 本句说的就是「当时正文里没出现过这两个字面串」，反引号会把它读成真实路径）：
 - `docs/adr/0012-nl2sql-branch-consolidation.md` —— 分支收敛与删除死枝的依据登记（AGENTS.md《分支卫生》第 4 条指向它）。
 - `docs/adr/0013-semantic-cache-single-track.md` —— 语义缓存单轨拍板（Accepted C：Valkey 唯一实现，生产与开发测试都用它；PG 缓存退役、无自动回退）。**2026-10-27 补记：该件已入库**（`git ls-files` 命中），按纪律补回反引号并已复跑 `scripts/check_doc_sync.py`；§9 是变异战役读数、§11 是逐条变更台账（本行追加后至第 58 行）。
 - `docs/adr/0014-web-poc-integration-branch-exception.md`（2026-11-02 新增）—— **`feat/web-visual-poc` 转正为唯一集成分支**，并把 `company` 远端 heads 按 3 条登记为知情例外（计数口径改为「不含历史锚 ref 与公开镜像侧载体」）；§5 是五条复审触发条件。`AGENTS.md`《分支卫生》那句「远端恒 2 分支」在本仓的读法以该件为准，`docs/operations/branch-hygiene-monthly-checks.md` 的 2026-11-02 节指向它。
@@ -196,7 +196,7 @@
 - `docs/reviews/` — 2 份评审件（09-23，均已在 2026-10-15 补「后续处置」行）：对骨架方案的否定**已被采纳**；`review-v3-vs-skeleton-comparison` 给 V3 的第一条待补强**已按原文落实**（`agent-execution-platform.md` 第 35 行「与 8 层总纲的映射」），第二条（§27 目录逐行核对）**未核**，不得当已闭环。`docs/research/` — 4 份调研（08-22 ~ 09-25，其中 `deepseek-harness-discussions-analysis.md`、`code-agent-borrowable-features.md` 零提及）。
 - `docs/tech-debt/` — 2 份：`tech-debt-audit-2026-09-22.md`（管「识别」）与 `tech-debt-hardcoded-logic.md`。与 `agent-harness-capability-map.md`（管现状）、`docs/TODO.md`（管排期）三套台账互不联动，判「会不会修」必须 grep TODO。
 - `docs/handoff-2026-08-21.md`、`docs/fix-exhibition-agent-review-issues.md` — 交接与专项修复件，日期即封存。
-- `docs/adr/0003`、`docs/ha/ha-durable-execution.md`、`docs/operations/deployment.md` 等 08-22 旧件：仍可能被现网事实推翻，引用前先在 §3 找有没有更晚的同主题 plan。
+- `docs/adr/0003-dual-db-driver.md`、`docs/ha/ha-durable-execution.md`、`docs/operations/deployment.md` 等 08-22 旧件：仍可能被现网事实推翻，引用前先在 §3 找有没有更晚的同主题 plan。
 
 ## 5. 新文档必须带的状态行（这次问题的根因）
 
