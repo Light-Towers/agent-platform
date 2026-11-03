@@ -3527,7 +3527,7 @@ git grep -n --untracked streamQuery -- web applications
 
 **仍未做**：推 `github-legacy`（D3，需人明确批示）・推 company（`e089f69f`、`e8485874`、`4eff0421` 三棵都未推）⇒ 镜像树的来源 rev 尚未入远端，先推镜像会出现「公开侧已有而内网远端未有」的短暂倒挂（同一句登记在 §34.6，随下一趟推送一并消）。
 
-## 35 刀㉝（第二十八批）：本批三件的推前校验 + 本仓第二次「交付批当日推送」
+## 35. 刀㉝（第二十八批）：本批三件的推前校验 + 本仓第二次「交付批当日推送」
 
 ### 35.1 推前校验（在册口径：按当天最终 rev 重跑 L3）
 
@@ -3601,6 +3601,47 @@ git grep -n --untracked streamQuery -- web applications
 
 - **授权层**：`pushurl = DISABLED-no-push` 原位未动（本代理不改 git config）。用显式 URL 推送 = 绕守卫 = **D3（禁止自动）**，需人一句明确批示。
 - **凭证层**：写权限**仍未验**。验它只有两条路 —— 对该远端一次 `--dry-run`（不写 ref，但仍需拿显式 URL 过认证）或真推。**`--dry-run` 也算拿显式 URL 过守卫取数**，所以本刀不自动做，登记待人定；不得把「没试过」读成「试过会成」。
+
+## 36. 第二十九批（2026-11-03，刀㉞）：§35.8 之后的三笔内网 commit 一趟带走・`main` 那个差值第一次**逐侧**定性
+
+本节只记推送。§35.7 / §35.8 已把「能不能推 github-legacy」拆成三层，本刀**一层也没动它**（仍零写入公开侧）。
+
+### 36.1 推前校验（同一把尺子，跑在当天最终 rev 上）
+
+L3 深度审查跑在 **`fe4d4e07`**（本件入库前它已是当天最终 rev）⇒ **findings_count = 0**。这一句仍必须在推送之前取：推完再跑，审的就是已出站的代码。
+
+### 36.2 PROBE（工作日窗口件，不写远端）
+
+件 `.tmp-scratch/ap-visual/e29-push-kit-20261103-153532-probe.txt`：六格全跑、**`blockers = 0`**、`status-all=0 content-diff=0 REAL-DIRTY=0 UNTRACKED=0`（分类器自测两例均 OK）、后端面 `3/3 declared OUTSIDE-DECLARED=0`（正对照 44）、现取 `ls-remote` **`verdict=READ-OK`**（三条 advisory 不是读失败，判据自测三例 `READ-OK/NO-READ/NO-READ`）、`--dry-run` 被服务端接受（`3afea7cd..fe4d4e07`）、窗口 `Tuesday 15` → **IN-WINDOW**（六例注入自测 mismatches=0）。
+
+### 36.3 EXECUTE（同一件加 `-Execute`，非 force）
+
+件 `.tmp-scratch/ap-visual/e29-push-kit-20261103-153555-execute.txt`：两条 ref `push rc=0`——`feat/web-visual-poc` 是 **`3afea7cd..fe4d4e07` 的 fast-forward**（不是 force），`lineage/intranet-v3-until-2026-10-19` 是 `Everything up-to-date`；件内 pre/post 两栏现读均显示 `refs/heads/main = fe22794c` **逐字未动**。
+
+### 36.4 换具独立复取・**一个新读数口径：一个差值要逐侧定性**
+
+不用推送件自己，用裸命令（`ls-remote --heads company` + `fetch` + `rev-list --left-right --count`）：
+
+| ref | 裸 ls-remote 实读（rc=0） | fetch 后 `远端<->本地` |
+|---|---|---|
+| `feat/web-visual-poc` | `fe4d4e07` | `0 / 0` |
+| `lineage/intranet-v3-until-2026-10-19` | `12f03c8f` | `0 / 0` |
+| `main` | `fe22794c`（未动） | **`2 / 677`** |
+
+第三行是本轮真正新增的东西。**以前几批只记 `ahead = 677`（本地领先那一侧）**，而 `--left-right` 取到两侧后才发现一个歧义：`2` 会被下一轮人读成「我们落后两条，该 rebase」。逐条定性（只读）：`git rev-list main..company/main` = **`fe22794c` + `70ced8ef`**，两条均 **NOT reachable from 本刀 tip**，且 `fe22794c` 就是每次取证里那个「main 逐字未动」的值 ⇒ 它是公开脱敏镜像侧的历史快照（2026-10-20），与内网 lineage 两套历史 ⇒ **两侧都不是本趟造成的**，本刀对 `main` 零写入。
+
+⇒ 口径入册：**一个两侧差值只记一侧，等于邀请下轮人把历史分叉读成本趟造成的落后**；要么不记，要么逐侧各自定性（沿用 §35 那条「一个数必须同时说它是不是本动作造成的」）。
+
+### 36.5 顺手一格纯书写口径订正
+
+§35 的二级标题缺了节号后的句点（`## 35 刀㉝…` vs 其余各节的 `## 34. …`），本件一并补齐。属于刀㉗ 那型的最小处置（只改书写、不改任何读数），且引用它的人用的是节号不是标题串，不影响可核性。
+
+### 36.6 本批未做 / 不得读成已批
+
+- 未合 `company/main`（用户已拍不合）・未动公开 main・未推 `github-legacy`（三层里通道层已绿、授权层与凭证层仍挡着，见 §35.8）・未建第二条 `mirror/*`・没 force・没改 git config。
+- 其余 7 条本地分支未逐条判・PR-2/3/4 未开工（PR-2 需单独拍板）・CI runner 那一步仍未实跑・`make test` 全量十 session 本批未重跑・V1–V7 与 A2/A3/A7 屏上格一条未动。
+- 镜像提交 `b08009d0` 仍在本地 ref；它的**内容来源是 `4eff0421`**，而本刀之后内网已多出三笔（`ad334c97`/`d9340879`/`fe4d4e07`）⇒ 公开时仍按 §34.7(b) 的口径重新选源（＝同步开工前最后一个入库 commit），不是在旧树上追加。本刀不提前造那棵树（造了也不会被推，只会多一笔要重新比对的账面）。
+
 
 
 
