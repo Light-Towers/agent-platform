@@ -11,6 +11,11 @@
 > 但**交付 ≠ 验收**：三条未验证项照旧在册（§二 第三条），所以本目录仍**不得读成「PR-0 已验收」**。A5 那条「一个故意
 > 引入的前端漂移能让 CI 红」现在在**本机与容器两处门禁**上反证成立（逐格清单以反证件为准，本文件不抄格数），
 > CI runner 那一半仍未实跑。判据与规范本体见 docs/plans/ 下的视觉件与工单件（本文件不复述）。
+>
+> **PR-1 的代码面已交（2026-11-03 刀㉚）**：`web/src/api/sse.ts`（SSE 客户端本体）+ 两件门禁（`web/scripts/check-events.mjs` 锁结构、
+> `web/scripts/verify-sse.mjs` 锁行为），`make ci-web` 同步扩面。⚠ **交付 ≠ 消费**：`streamQuery` 现在**没有任何页面调用点**
+> （对话页属 PR-2），它目前只被行为件驱动 ⇒ **A2 / A3 / A7 的屏上格仍未达**，本批只在**喂帧层**取数（逐格读数在取证件 §32）。
+> 本文件因此**不写 `make ci-web` 的步数**：那个数字住在 Makefile 的 `ci-web:` 目标里，写进散文就会变成第三个事实源。
 
 ## 一、本目录有什么（**两个视图，不是一个页面**）
 
@@ -24,10 +29,12 @@
 | `web/poc.html` | **对话页**宿主页：主题三态 + 三态演示 + 12+1 行时间线 + 图例。**已不含灯阵**（JS 与 DOM 已整批搬走） | 267 |
 | `web/poc-health.html` | **灯阵独立页**宿主页：5 组 30 盏灯（`auto-fill` × `minmax(260px, 1fr)`）+ 四档形状图例 | 180 |
 | `web/scripts/check-tokens.mjs` | 视觉门禁六条断言，零依赖（只用 Node 内置模块）；**扫描面 = `web/` 下 `.css`/`.ts`/`.vue`/`.html` 全量递归**（排除 `node_modules`/`dist`/`scripts`，空面即红） | 344 |
+| `web/scripts/check-events.mjs` | 事件契约门禁（工单件 §9.3 登记件）：后端 `StreamEventType` Literal ⊆ `serialize_stream_event` 分支集（§12-#2）+ 派生全集 ↔ TS 联合 ↔ `EVENT_HANDLERS` 键集三段双向；**只锁结构、不锁行为**；期望集只从源派生，件内不出现事件条数 | 206 |
+| `web/scripts/verify-sse.mjs` | SSE 客户端与三条错误通道的**行为**断言（工单件 §10.5 的第 ① 层）：真 import 被测 `.ts` 后喂帧，带 canary 泄漏判 + 正对照 + 断言器自证；**需 Node ≥ 22.18 的原生类型擦除**，加载失败时报 rc=1 而不吞成 skip | 239 |
 | `web/index.html` | Vue 应用的构建入口（Vite 的 root html）。与 `web/poc.html` 是**两条通道**：前者走构建与托管，后者是无构建静态预览，不共用 | 26 |
-| `web/package.json` | pnpm 面清单：运行时依赖只有 `vue`，devDependencies 十件（lint / typecheck / build）；`packageManager` 与 `engines.node` 定死 | 34 |
+| `web/package.json` | pnpm 面清单：运行时依赖两件 `vue` + `eventsource-parser`（PR-1 引入、精确钉版），devDependencies 十件（lint / typecheck / build）；`packageManager` 与 `engines.node` 定死 | 37 |
 | `web/vite.config.ts` | `base: '/ui/'`（§9.2 托管前缀）+ plugin-vue + 开发期代理五个前缀（其中一条未验证风险写在文件内注释，不预先给解法） | 35 |
-| `web/tsconfig.json` | 应用面 TS 配置（只包 `src/` 与 `vite.config.ts`；门禁脚本 `.mjs` 故意不在内） | 23 |
+| `web/tsconfig.json` | 应用面 TS 配置（只包 `src/` 与 `vite.config.ts`；门禁脚本 `.mjs` 故意不在内）；`allowImportingTsExtensions` 属 PR-1：行为件要在 Node 里按 `.ts` 说明符直接 import 被测源，不开这个键 Node 解析不到 | 24 |
 | `web/eslint.config.js` | flat config 三面：`src/**` 与 `vite.config.ts` 走**类型感知**、`.vue` 走 vue-eslint-parser、`scripts/**/*.mjs` 走纯语法 | 59 |
 | `web/src/main.ts` | **样式与主题的唯一入口**：三条 CSS 导入 + `initTheme()` 前置于 `createApp`（顺序即正确性，与 agent_server 那条 provider 装配顺序同族） | 22 |
 | `web/src/App.vue` | 骨架壳：顶栏 + 主题切换 + 图例。**不放假数据** —— PR-1/PR-2 未交，界面上就明写未交 | 47 |
@@ -35,15 +42,18 @@
 | `web/src/env.d.ts` | ambient 类型入口，两条声明各解一个**实跑报出来的**错；第二条带三档变异实测的注记 | 31 |
 | `web/src/api/errors.ts` | `describeError` + `describeStreamError` 两收敛点（工单件 §3 那两条；读不到字段名时写诚实文案，不上屏 `[object Object]`） | 120 |
 | `web/src/api/events.ts` | `StreamEventType` 联合 + `EVENT_LEGEND` 屏上图例字典；与 `web/poc.html` 的 `EVENTS` 是**两副本、只许一个真相**（断言 6 逐字校 fam/sw） | 65 |
+| `web/src/api/sse.ts` | `/query` 的 SSE 客户端：`fetch` + `eventsource-parser` 解帧、`applyFrame` 是纯函数（可被 Node 直接断言）、`done` 定稿与 **`error`→`done` 抑制**、未识别事件只报名不 dump 载荷；⚠ **无页面消费点**（PR-2 未接） | 310 |
 | `web/src/components/ThemeToggle.vue` | 三档 `.seg` 控件；`aria-pressed` 绑**布尔**（那句「false 会被 removeAttribute」的错话如何被两道门各自抓回，写在文件头注） | 48 |
 | `web/src/components/Legend.vue` | 图例：事件数与族色相数**现算**，不把 12 / 8 抄进模板 | 44 |
 
 行数口径：本表是 `Get-Content <file>.Count` 实取值，不是估。**第十六批重取：六件 = 217 / 299 / 192 / 267 / 180 / 344**（本批只动第六件：222 → **344** = 扫描面递归化 + 断言 6 新增三口；前五件逐项未动。第十四批那一串 217 / 299 / 192 / 267 / 180 / 222 与下面那句「首次追到第八批之后」自本行起都是历史读数）（第十四批原句，保留为历史：四件同上一版逐项未动；改动的两件是样式 `web/src/styles/events.css` 191 → **192** 与门禁 `web/scripts/check-tokens.mjs` 197 → **222**，都跟第八批那两刀。上一版这一列整体停在第七批那次重取上 ⇒ 本行是**首次把它追到第八批之后**，不是本批改坏了什么）。改完样式或宿主页后本列随之漂移，下一批要重取；引用本列前先拿它当**待验值**而不是常量。
 
+**第二十五批（刀㉚）重取，只取本批碰过的五件**：`web/src/api/sse.ts` **310**（新建）/ `web/scripts/check-events.mjs` **206**（新建）/ `web/scripts/verify-sse.mjs` **239**（新建）/ `web/package.json` 34 → **37**（加两条 scripts 与一条依赖）/ `web/tsconfig.json` 23 → **24**（加 `allowImportingTsExtensions`）。同批 `web/pnpm-lock.yaml` 1653 → **1662**（`pnpm add --save-exact` 的机器随动，不手工改）。本表其余行逐项未动。
+
 ⚠ **本目录的路径书写口径（第十四批定，A3 那笔在册欠项的落地）**：**反引号内的路径一律写仓库根相对**（`web/src/styles/tokens.css`），不写目录相对（src/styles/tokens.css 那种形态）。理由不是美观：反引号 + 根相对正好落在取证量具 `typo-scan.ps1` 的 T2 存在性校验面上（它的匹配前缀含 `web/`），于是那一格**从人读约定升成被校到的引用**；而目录相对 + 反引号是**承诺一个解析不了的东西** —— 按仓库根解就报 MISSING（本目录末节那条旧写法就是这么被 T2 抓出来的：它以 scripts/ 开头、又不带 `web/` 前缀，恰好落进校验面却不落进存在的事实；实物与当时「不改」的理由在台账 §15.10 行 19，本批按本口径改写它）。⚠ **两条边界，缺一条就会误用**：① 本口径只管**叙述文字**，HTML 里的 `href="src/styles/tokens.css"` 是浏览器按文档解的**功能路径**，改成根相对会当场断样式（第七批实拍通道会直接拍到裸 HTML）；② `check_doc_sync.py` 的文件引用面 `DOC_FILE_REF_ROOTS` 里**没有 `web/`** ⇒ 顶层三份文档里的 `web/...` 反引号引用**不红但也校不到**，不得读成「已通过顶层门禁校验」（该缺口已就地登记，扩面属改 `scripts/`，本批未动）。
 
 > 本表**第十六批新增 13 行**（Vue 骨架八件 + 四个配置件 + 入口 html），行数均为同批 `Get-Content` 实取。
-> 另一件 `web/pnpm-lock.yaml`（1653 行）是机器生成的锁文件：它**必须入库**（§9.2：没有它，CI 上的 `pnpm install --frozen-lockfile`
+> 另一件 `web/pnpm-lock.yaml`（第二十五批现值 1662 行）是机器生成的锁文件：它**必须入库**（§9.2：没有它，CI 上的 `pnpm install --frozen-lockfile`
 > 无法复现本机那套版本），但**故意不入上面的表** —— 把生成物与手写件记在同一列会让后人拿 1653 当本批的改动量。
 
 ## 二、**尚未**做的（PR-0 剩下两段 + 后续 PR 的射程）
@@ -55,13 +65,16 @@
   逐格读数在取证件 §23），而**CI runner 那一半仍未实跑** —— 本机 Node 版本、容器 Node 版本、runner Node
   版本是三个事实，前两个已取、第三个未取。check:tokens 那一格是例外：它要读 `web/` 外的四个仓内文件，
   builder 阶段没那些输入 ⇒ 它只能在完整 checkout 上跑（定性与读数同在 §23）。
-- 无 api 客户端、无 SSE 消费、无 `/health` 拉取：**两个页面上每一个数字都是手写的假数据**（包括灯页那 30 行的值）。
-  新增的 `src/` 骨架**同样没有数据面**，而且它不沿用那套假数据：`web/src/App.vue` 在屏上直写「PR-1/PR-2 未交」。
-  本批只交了 `describeError` / `describeStreamError` 两个**收敛点本体**与事件字典 —— 它们的第一个消费者（`client.ts` / `sse.ts`）属 PR-1，
-  所以本批的反证格只能拿**静态形状**做对象（见 §五），不能拿“一个真请求失败后屏上怎么写”做对象。
+- ~~无 api 客户端、无 SSE 消费、无 `/health` 拉取~~ ⇒ **第二十五批（刀㉚）只推翻前半的一条**：`web/src/api/sse.ts` = api 客户端本体
+  + SSE 解帧与消费逻辑，但它**没有任何页面调用点**（对话页属 PR-2）⇒ 「屏上没有 SSE 消费」那一半仍然成立，`/health` 拉取仍无（PR-4）。
+  两个静态宿主页上每一个数字仍都是手写的假数据（包括灯页那 30 行的值），`web/src/App.vue` 在屏上仍直写「PR-1/PR-2 未交」——
+  那句从本批起要读成「**PR-1 的消费方未交**」，不能读成「PR-1 一行未写」。
+  本条末句（第十六批原句：反证格只能拿**静态形状**做对象，见 §五）的原因随本批消失：当时它没有第一消费者（`client.ts` / `sse.ts`），
+  现在 `sse.ts` 到位 ⇒ 反证对象多出一类**喂帧行为**（`web/scripts/verify-sse.mjs` 是常驻件，另有一枚一次性变异件住在 gitignored 目录，
+  格数一律以脚本自身为准、本文件不抄）。
 - ~~无 Dockerfile、无 CI 接线、无 FastAPI 托管~~ ⇒ **第十六批刀⑱ + 刀⑲ 已交**（本目录不再处于"产物无人读"的状态）：
   托管 = `applications/agent_server/main.py` 的条件挂载（`/ui`，`NoStoreStaticFiles`）；构建接线 = Dockerfile **多阶段**
-  （`node:24-alpine AS web-builder` → `python:3.11-slim`，形态 A″：运行时零 Node）+ `make ci-web` 五步 + workflow 两处 `paths:` 含 `web/**`。
+  （`node:24-alpine AS web-builder` → `python:3.11-slim`，形态 A″：运行时零 Node）+ `make ci-web` 独立目标（刀⑲ 建，步数不以本行为准）+ workflow 两处 `paths:` 含 `web/**`。
   ⚠ **三条未验证项照旧在册**，不得读成已上线能力：① CI runner 上那一步未实跑过（本机与内网均不可达 GitHub）；
   ② 镜像只在 241 的 scratch 里做过**验收构建**，未走 `build.sh`/`distribute.sh` 分发链，也未推任何节点；
   ③ 这批刀尚住在集成分支上，**未合 `company/main`**。⇒ "接线 ≠ 启用"，挂载也只到"构建产物被读得到"这一层。
@@ -81,24 +94,28 @@
 
 ```bash
 node web/scripts/check-tokens.mjs          # 视觉门禁（扫描面 = `web/` 全量递归，不只是两个宿主页），rc=0 为过
+node web/scripts/check-events.mjs          # 事件契约**结构**门禁（只锁结构、不锁行为；它要读 `web/` 外的两个后端源）
+node web/scripts/verify-sse.mjs            # SSE 客户端**行为**断言（真 import 被测 .ts 喂帧）：需 Node ≥ 22.18 + 先装依赖
 node .tmp-scratch/ap-visual/mutate-v1.mjs  # 非空转反证（一次性工具，不入库），逐格报有效性
 node .tmp-scratch/ap-visual/serve-poc.mjs  # 静态预览（一次性工具，不入库），然后开 :8123
 ```
 
-**Vue 应用面（自第十六批存在）**：下面五条命令都在 `web/` 目录内跑，需 Node ≥ 22.12 + pnpm 10（`packageManager` 已钉）：
+**Vue 应用面（自第十六批存在）**：下面这些命令都在 `web/` 目录内跑，需 Node ≥ 22.12 + pnpm 10（`packageManager` 已钉）。**本段不抄命令条数** —— 条数住在 `web/package.json` 的 `scripts` 键里，抄进散文就会变成第二个事实源：
 
 ```bash
 pnpm install --frozen-lockfile   # 装依赖（与 uv 那套完全独立；lock 内 registry 域名 0 处 ⇒ 换源可复现）
 pnpm check:tokens                # 视觉门禁（就是上面那一条，挂成脚本名以便 CI 直接调）
+pnpm check:events                # 事件契约结构门禁（同上挂法；它读后端源 ⇒ 只能在完整 checkout 上跑）
 pnpm lint                        # eslint（flat config 三面：类型感知 / vue / 纯语法）
 pnpm typecheck                   # vue-tsc --noEmit（.vue 的 props 校验只有它做）
+pnpm verify:sse                  # SSE 行为断言（要 Node ≥ 22.18 的原生类型擦除，**下限比本段其余命令高**，故它单独记）
 pnpm build                       # vite build → web/dist（base=/ui/；托管已接：从仓库根起服务就读得到它）
 ```
 
 ⚠ `pnpm dev` / `pnpm preview` **不属本机取证通道**：dev 面向 :5173 并代理五个后端前缀（CORS 只放行 5173 那条事实写在
 `web/vite.config.ts` 头注），而开发期 SSE 是否逐帧到达**未实测**（同一个文件里登记了那条风险与它的复审条件）。
 
-本节第一段那三条（node 面）是常驻的、不装依赖也能跑。第七批新增的四条取证 harness（全住 gitignored 目录、**不入库**、跑前要先起预览服务器）：
+本节第一段那几条（node 面）是常驻的；前两条不装依赖也能跑，`verify-sse.mjs` 是**唯一的例外**（被测源 import 了运行期依赖，不装就跑不动；它报的是 rc=1 而不是静默 skip）。第七批新增的四条取证 harness（全住 gitignored 目录、**不入库**、跑前要先起预览服务器）：
 
 ```bash
 node .tmp-scratch/ap-visual/shot-v4.mjs         # V4 实拍（headless Chrome + CDP，零依赖）+ 几何/CJK/what-if 读数
@@ -112,7 +129,7 @@ node .tmp-scratch/ap-visual/probe-throw2.mjs    # 三口 throw 逐口实测（�
 **构建与托管面（自第十六批刀⑱⑲存在）**：
 
 ```bash
-make ci-web                     # 五步：frozen install → check:tokens → lint → typecheck → build（故意不并进 make ci）
+make ci-web                     # 步数与顺序以 Makefile 的 `ci-web:` 目标为准（本文件不抄数）；故意不并进 make ci
 docker build -t ap-web-probe:local .     # 两阶段；builder 只产 dist，final 里无 node/npm/pnpm/corepack
 uvicorn agent_server.main:app --port 8000  # 从仓库根起 ⇒ 读到 web/dist ⇒ GET /ui/ 200 + Cache-Control: no-store
 ```
@@ -125,6 +142,10 @@ uvicorn agent_server.main:app --port 8000  # 从仓库根起 ⇒ 读到 web/dist
 `http://localhost:8123/poc-health.html`（灯阵页）。预览服务器已改过 CSS 的话，浏览器要**硬刷新**（旧标签页会用内存里那份）。
 
 ## 四、门禁的四条定性（读代码前先看这段，否则会误用它的读数）
+
+> ⚠ **适用范围（第二十五批补，不补就会被当成全部门禁的定性）**：下面四条说的是**文本形状类门禁**（`check-tokens.mjs` 与同族的 `check-events.mjs`）。
+> 本批新增的 `verify-sse.mjs` 故意不在这四条里 —— 它就是「没有一条锁行为」那句话所指的那一层（工单件 §10.5 的第 ① 层），
+> 两层互替不了；拿本节四条去读行为件会得出相反结论。
 
 1. **全部是脆断言**：`readFileSync` + 正则的文本形状断言，只锁结构不变量（令牌登记、双向覆盖、
    dark 双写同值、字典 key 集 == 从源派生集），**没有一条锁行为**。不断言「route 事件渲染出来是蓝的」。
@@ -221,6 +242,6 @@ G4 字典坐标改名），再加 eslint 类型感知面两格（G5 未使用变
 - **本目录已按方案 A 本地入库**（2026-10-31）：刀① = 本文件 + `web/src/styles/` 三件（**本提交即刀①**）、刀② = `web/poc.html` / `web/poc-health.html` / `web/scripts/check-tokens.mjs`、刀③ = 四份文档（视觉件 / 取证件 / 工单件 / 顶层 docs 索引）；**当时的自限是不 push、不碰 main、不 force、不解禁公开镜像**，合 main 仍须用户显式批示。逐刀 rev 与每刀的 G1（后端目录 diff = 0 行）以取证件 **§15.12** 为凭；那一节已填完 ⇒ 本行读成「已入库」。
   ⚠ **但「仅指本地」那一半自 2026-11-02 起不再是事实**：第十六批刀⑯ 已把 `feat/web-visual-poc` 与
   `lineage/intranet-v3-until-2026-10-19` 两条 ref 推到内网远端（rc=0・new branch・main 未动・非 force・公开镜像未推）。
-  刀①–③ 那句「不 push」已被上面那段推翻；**未合 main 仍成立**（合 main 须用户显式批示，它在人拍板位）。在册欠项两项的当前状态：① 根 README 目录表补 `web/` 行 —— **已完成（第九批，逐面读数见取证件 §16）**；② `make ci-web` —— **已建（刀⑲，五步独立、不并进 `make ci`）**，形定死在工单件 §9.3，同批落 workflow 两处 `paths:` 含 `web/**` 与多阶段 Dockerfile。
+  刀①–③ 那句「不 push」已被上面那段推翻；**未合 main 仍成立**（合 main 须用户显式批示，它在人拍板位）。在册欠项两项的当前状态：① 根 README 目录表补 `web/` 行 —— **已完成（第九批，逐面读数见取证件 §16）**；② `make ci-web` —— **已建（刀⑲ 建为独立目标、不并进 `make ci`；刀㉚ 扩面，步数与顺序一律以 Makefile 的 `ci-web:` 为准）**，形定死在工单件 §9.3，同批落 workflow 两处 `paths:` 含 `web/**` 与多阶段 Dockerfile。
   ⚠ 上一版这一句的理由链（「POC 授权 ≠ PR-0 开工授权」⇒「刀次未到」）到刀⑲ 为止闭合；**现在这条欠项只剩未验证的那半截**：
   CI runner 上那一步仍未实跑（就是 §二 第三条的未验证项 ①），所以它读成「门已接线、未在远端跑过」，不读成「CI 已拦过东西」。

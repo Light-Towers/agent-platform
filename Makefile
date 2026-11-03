@@ -163,17 +163,18 @@ ci: lint test eval
 # 机器连 `make ci` 都跑不动，这是把一面工具的缺勤传染给另一面。
 # 形态照搬已有的 test-cache-contract：目标住在 Makefile、步住在 workflow，workflow 仍只调
 # make（不违它自己那句「复用 make ci 单一真相避免与本地漂移」）。
-# 顺序是导出的：先对账 tokens（纯文本断言，秒级）→ 静态（eslint / vue-tsc）→ 产物（build）；
+# 顺序是导出的：先对账（tokens / 事件契约，都是纯文本断言、秒级）→ 静态（eslint / vue-tsc）
+# → 行为（verify:sse 真 import .ts 喂帧，放在 typecheck 之后：类型不过时先报类型，
+# 而不是让擦除加载失败盖住真正的第一个错）→ 产物（build）；
 # 便宜且高信息量的放前面，失败时不要先花 30s 打包。
 # pnpm 版本不在此写死：corepack 读 web/package.json 的 packageManager（本仓唯一真相）。
-# TODO（PR-1）：本目标还缺一条 `pnpm run check:events`（web/scripts/check-events.mjs，
-#   事件全集双向对账）—— 该件属 PR-1 交付物，现在建一条指向不存在文件的命令会让本目标
-#   整条红，那不是门禁而是拦路；届时与 web/package.json 的 scripts 同批改。
 ci-web:
 	cd web && pnpm install --frozen-lockfile
 	cd web && pnpm run check:tokens
+	cd web && pnpm run check:events
 	cd web && pnpm run lint
 	cd web && pnpm run typecheck
+	cd web && pnpm run verify:sse
 	cd web && pnpm run build
 
 # TB-7 端到端冒烟：需本机 Docker 守护进程可用。启动 pgvector + agent-platform，
