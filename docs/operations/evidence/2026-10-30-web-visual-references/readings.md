@@ -3079,6 +3079,111 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .tmp-scratch/ap-visual/k28-c
 powershell -NoProfile -ExecutionPolicy Bypass -File .tmp-scratch/ap-visual/e27-postcommit.ps1 -ExpectParent <父 rev> -ExpectAdd <n> -ExpectDel <n> -AllowNonDocs <逗号串> -ExpectBackend <n> -BackendDeclaredCum <逗号串>
 ```
 
+---
+
+## 31. 第二十四批（2026-11-03，刀㉙）：推送窗口前提订正 · 首次工作日推送 · 公开镜像两条 rc=1 的明细交付 · 第一条本地死枝删除
+
+### 31.1 本批射程（四条拍板一次收，其中一条是订正我写错的判据）
+
+用户指令「继续，全部完成」之后，上一批菜单里**需拍板的四项**本轮全部拿到答复，逐条按答复执行、不越界：
+
+| 拍板 | 用户答复 | 本批动作 |
+|---|---|---|
+| 推送 | 「现在修复，校验成功后，完成推送，不要等周一，我的意思是（周一到周五）白天是可以推送 company 分支的」 | **先修判据再推**：那条「仅周一」是我写错的（§31.2），fork 出工作日窗口件、跑校验、完成推送（§31.3） |
+| PR-1 | 正式开工 | 本刀只接单，**未落一行代码**（实施随刀㉚） |
+| 公开镜像 | 先交读数明细给我看 | **零动作**：只跑只读命令，把两条 rc=1 逐条拆开交清楚（§31.4），三档处置待人选 |
+| company-snapshot | 直接授权删除 | 三条判据齐备才删，删后计数与远端未动一起取（§31.5） |
+
+入库面 = 两份文档（本件新开本节 + 工单件 §13.4 两行），**产品代码零改动**。量具面：新件 e29-weekday-push.ps1（e14 的 fork，gitignored）+ e27-postcommit.ps1 就地文案两处。
+
+### 31.2 那条「仅周一」是怎么进判据的：错形、成因、改法为什么必须 fork
+
+| 面 | 读数与定性 |
+|---|---|
+| 错形 | e14-monday-push.ps1 第 5 格：`DayOfWeek -eq 'Monday'` 才许 `-Execute`，否则加一条 blocker「the agreed company window is Monday」。它不是注释，是**真拦过执行**的判据（第十七批那趟周二就是被它挡下来的） |
+| 成因 | 我把用户 2026-10-31 那句「周一再推」的**一次性批示**读成了**常驻窗口规则**，还把它抄进三具取证件第 6 格的括号文案（e15 / e26 / e27）。⇒ 这是在册「拿历史状态当现值」那一族的**另一支**：那条说的是文档里的旧读数，这一支说的是**把一句临时批示升格成判据** |
+| 现值 | 周一至周五白天可推 `company`（2026-11-03 用户订正）。远端名实测仍是 `company` 与禁推的 `github-legacy`，**无 `origin`** |
+| 为什么 fork 不就地改 | §28.4 行 6 立的边界：**加齿可就地、换判据必须 fork**。e14 的读数已被 §22（首次 READ-OK）、§23（补推）、§27.2（推送件按 untracked 真拦停）按件号引用 ⇒ 原地换判据 = 把历史证据搬到另一具量具上。新件 e29-weekday-push.ps1 **只搬第 5 格**，1–4 格逐字沿用（含两条 fail-closed：ls-remote 失败读 NO-READ 并阻断执行、未跟踪文件拒推） |
+| 订正方向 = 放宽日子、收紧时段 | 旧形状只有**一个轴**（日），新形状是**两轴 AND**：日 ∈ Mon..Fri **且** 时 ∈ [WindowStartHour, WindowEndHour)，默认 9–19 且**是参数不是常量**。⇒ 把它读成单纯放宽会丢一格：旧规则下「周一凌晨三点」也算窗口内，新规则下不算 |
+| 齿 | 窗口分类器带 **6 条合成注入**（Mon 11 IN / Fri 18 IN / Sat OUT(day) / Sun OUT(day) / Tue 3 OUT(hour) / Wed 19 OUT(hour)），mismatch 必须为 0 ⇒ `WINDOW-TEETH-OK`；不为 0 直接加 blocker「REFUSING to judge the day」。没有这枚齿，「整条窗口判据是空的」与「真的在拦」在真面读数上同形 |
+| 越窗开关的边界 | `-OverrideWindow` 是**显式越窗**：进读数、进文件名，不可能被漏看。**不可越的两条**照旧：目标列表含 `main` 即拒、永不 force |
+| 就地文案两处（e27 第 6 格） | ① 括号里那句「company/main push window is Monday」改为订正值并写明「pushing belongs to e29」；② 该格标题原文「nothing published」是**把结论写进标签**——推送后它会与自己的读数打脸，改成中性的「publication state」并把空/非空的读法写进标签。两处都是**非判决文案** ⇒ 按 §28.4 行 6 就地，不换具 |
+| e15 / e26 里的同一句错文案 | **不改**。两件是历史快照具，其括号文案随其历史读数一起被账面按件号引用；改它们只会让归档件与重跑输出对不上。错在账面由本节钉死，后人以本节为准 |
+
+### 31.3 首次工作日推送：PROBE 认证 → 校验 → EXECUTE → 换一具量具独立复取
+
+| 序 | 读数 |
+|---|---|
+| PROBE（只读 + dry-run，件 e29-push-kit-20261103-113510-probe） | **blockers=0**。第 1 格 REAL-DIRTY=0 / UNTRACKED=0 / 噪声 3 条逐条指名 / 分类器自测 1/1；第 2 格后端面 3 文件**全在申报集**、OUTSIDE=0、正对照 41；第 3 格 `ls-remote company` **READ-OK** heads=3（feat `c9622fdc` / lineage `12f03c8f` / main `fe22794c`）、advisory 3 条不算失败、三合成输入 verdict=READ-OK/NO-READ/NO-READ；第 4 格两目标 `--dry-run` rc=0，feat 那行是 `c9622fdc..44fb7e05`（**fast-forward**），lineage 那条 Everything up-to-date；第 5 格 live Tuesday 11 → **IN-WINDOW**，注入 6 条 mismatch=0 |
+| 校验（推送前那道门） | 按**当天最终 rev `44fb7e05`** 跑 L3 深度安全审查：**未发现安全问题**（0 命中）。开关实取 l3_enabled=true。⇒ 用户那句「校验成功后，完成推送」在这里落地：校验对象是要推的那个 rev，不是上一个 |
+| EXECUTE（件 e29-push-kit-20261103-113855-execute） | `feat/web-visual-poc` push **rc=0**：`c9622fdc..44fb7e05`；`lineage/…` push rc=0（up-to-date，零写入）；post-ls-remote 读到远端 feat tip = `44fb7e0578f9…`、**main 仍 `fe22794c`** ⇒ 未碰 main；服务端回的是范围记号 `..` 而不是 forced update ⇒ 非 force 由服务端措辞佐证 |
+| 独立复取（换一具量具，件 e27-00-postcommit-20261103-113936） | 第 6 格 remote refs containing HEAD = **[ company/feat/web-visual-poc ]**，而推送前那一轮（件 …105720）同格为 **[ ]** ⇒ 「已发布 / 未发布」的翻转由**另一具量具**证住，不是推送件自说自话；其余五格与 105720 轮逐字同（parent `608b3dcb` OK・2a=0/2b=3・files=3 add=139 del=3・knife backend=0・cum 5=5 OUTSIDE=0 STALE=0・lineage anchored） |
+| ⚠ shell rc 仍不是判据（对 e29 同样有效） | e29 两趟的 shell rc 都读到 1：脚本不产判决 rc，而管道里混进了 git 的 CRLF 警告（stderr）。**推送成败只看件内 push rc 与 post-ls-remote 两条**，与在册那条「读数可误性」同族，本批把它延伸到新件 |
+| 本轮没推的 | 本刀（刀㉙）这个 commit 以及后续 PR-1 的提交都不在上面那一轮里。规则不变：**每轮推送前按当天最终 rev 重跑校验** |
+
+### 31.4 公开镜像两条 rc=1 的逐条明细（本批零动作，只交付明细）
+
+⚠ 先纠一件事：**两条 rc=1 不是同一道闸门跑了两遍**，是两件不同的事——一条是**内容闸门报红**，一条是**历史异宗**。把它们并成「镜像有两处问题」就丢了处置路径的区别。
+
+| 序 | 现取读数 | 定性 |
+|---|---|---|
+| 1 | `uv run python scripts/lint_public_mirror.py --mode publish --base 88515cab --ref HEAD` → **rc=1**：新增命中 **1 处**、违规 1 项、警告 0 项（本批 2026-11-03 复取，与第十九批那趟同值） | 唯一命中坐标 = `docs/adr/0013-semantic-cache-single-track.md` **L284**，规则 = `P-1 私有网段-192.168`，被匹配的字面量是该行里那条 PII 测试输入用的**四段示例地址**（真值不在本件落：本件同样在 P-1 的零容忍面上，写进来就等于自己造一条新命中） |
+| 2 | 值的性质：它**不是基建坐标**。`docs/adr/0013-semantic-cache-single-track.md` L7 的脱敏注记自己写着——该 ADR 的真机坐标 2026-10-29 已全换占位符，**唯独 L284 这一处不遮**，因为遮成 `<internal-ip>` 会把合成示例谎报成内网地址。同源那处在本仓测试里：`packages/agent-core/tests/test_guardrails.py` L141 | ⇒ **台账与闸门不矛盾**：`scripts/lint_public_mirror.py` 里那条 `_REGISTRY` 登记（全仓唯一一条）管的正是这个文件，条文末句写着「推镜像时这一处仍需遮（公开侧零容忍 P-1，不看语义）；或改写示例为 RFC 5737 文档段」。registry 模式看台账，publish 模式按设计**不看** |
+| 3 | 为什么 L141 那处**不报**：脚本里有 `_SKIP_PATH_HINTS`（tests/ 与 eval/ 两类路径豁免 P-1/P-2，P-3 密钥类不豁免） | ⇒ 「1 处」是**覆盖面读数**，不是「全仓只剩 1 处真值」。这句必须跟明细一起交，否则会被读成「遮掉这一处就干净了」：镜像提交是**整树替换**，tests/ 那一行也会跟着公开出去，届时它要么被同一套豁免放过，要么就得改语义 |
+| 4 | `git merge-base --is-ancestor 88515cab HEAD` → **rc=1**（本批复取） | 公开基线与本工作线**异宗** ⇒ 即使遮好也**不能快进推**，只能按《分支卫生》第 5 条在 `88515cab` 上开分支 → `git checkout <内网 tip> -- .` → 就地遮 → **单次 commit** → 对该树跑 publish rc=0 才推 |
+| 5 | `refs/remotes/github-legacy/main` = `88515cab` = 本地 `main`（两条单 rev 命令各得一值，见 §31.6 行 1） | 本地 `main` 是公开遮敏树 ⇒ **不可当集成目标**，与在册一致，本轮复证 |
+| 6 | `git remote -v` 面：`github-legacy` 的 push URL 仍是 `DISABLED-no-push` 串，本批未动 | 禁用位原样；本批零写入远端 |
+
+三条候选处置（**待人拍板**，本批一条未选、一条未做）：
+
+| 档 | 动作 | 代价与风险 |
+|---|---|---|
+| A | 就地改写 `docs/adr/0013-semantic-cache-single-track.md` 那一处示例为 RFC 5737 文档段地址（192.0.2.x / 198.51.100.x / 203.0.113.x 三段之一），内网版与公开版逐行一致，闸门自然 rc=0 | 要**同步收 `_REGISTRY` 那条登记**（登记条目失效会由 P-4 报红，这是它设计的失效分流）；且该行描述的是**当年实测输入**，改写会让「历史读数」与「示例值」两条陈述分叉——那是文档语义改动，动它要连 T1/T2 面与台账一起随动，不是一行替换 |
+| B | 不动内网文件，只在镜像提交里遮那一行（整树替换后就地替换） | 内网版与公开版从此**差一行**。必须账面登记差异点，否则后人拿公开版对内网版做逐行比对会误判成漂移——这正是《分支卫生》第 4 条要求「被遮文件首要留脱敏注记」的原因 |
+| C | 维持现状：不推、不改，禁用位原样 | 公开侧继续拿不到 PR-0 之后的任何内容；「内网仓与公开镜像内容不同步」保持为事实。代价最小但什么都没推进 |
+
+### 31.5 第一条本地死枝删除：company-snapshot（判据三条齐备才动）
+
+| 判据 | 现取读数 |
+|---|---|
+| ① 独有 commit = 0（《分支卫生》第 1 条的第一判据） | `git rev-list --count company-snapshot --not <其余 25 个 ref>`（refs/heads + refs/remotes + refs/tags，去 symref）= **0** |
+| ② 它就是远端 main 的位置 | `git rev-parse company-snapshot` = `fe22794c5a36…`；`git branch -r --contains company-snapshot` 只回 **`company/main`**（外加它的 symref）；推送趟的 post-ls-remote 从**服务端**读到 `refs/heads/main` = 同一 sha ⇒ 内容在远端服务器上，删的只是本地一个标签 |
+| ③ 无上游、无独有信息、不挂 worktree | `for-each-ref` 读 upstream=（空）；不在 `lineage/` 也不在 `mirror/` 名下 |
+| `-d` 为什么删不动（如实记，不当作反对证据） | `git branch -d company-snapshot` → **rc=1**，「not fully merged」。它的「合入」是相对 **HEAD / 上游**判的，而本地 HEAD 这条工作线与它**异宗** ⇒ 判据②已证内容在远端 main 上，**`-d` 的口径比真实判据窄**，不是「还有独有内容」 |
+| 用 `-D` 的依据 | 用户 2026-11-03 明示「直接授权删除」+ 上面三条读数。《分支卫生》第 1 条要的是「已有 ADR/文档登记的确证退役结论」——本批的确证由**本节**承载，批示由会话承载，两条都在，才敢走 `-D` |
+| 删后复取 | `Deleted branch company-snapshot (was fe22794c)`；本地分支 **9 → 8**；服务端 `refs/heads/main` 仍 `fe22794c…`（未动）；`company` 远端恒 3 heads，未新增未删除 |
+
+⇒ 月度体检里那条挂了五批的「可删候选」在此收掉**一条**。其余七条本地分支的逐项判定**仍未跑**——只有这一条拿到了批示，不顺手扩面。
+
+### 31.6 本批自犯表
+
+| 序 | 踩了什么 | 怎么被发现、怎么处置 |
+|---|---|---|
+| 1 | **把三个 rev 塞进一条 `git rev-parse --short`**：`git rev-parse --short 88515cab github-legacy/main main` 直接 `fatal: Needed a single revision`（rc=128），而我把它和「三值同」的结论写在同一趟命令里 ⇒ 屏幕上只剩一条 fatal，**差点把「三值同值」读成「这一条没取到」** | 不是我看出来的，是把同一件事拆成三条单 rev 命令各跑一次（`refs/remotes/github-legacy/main` 与 `refs/heads/main` 都得 `88515cab`）才对上形状。处置：**一 rev 一调**；结论只引单 rev 读数。⇒ 口径：**组合命令失败时，它的「无输出」不得当任何一侧的证据**——这与在册那条「`ls-remote` 失败要读成 UNMEASURED 而不是 0 支」是同族，只是这次失败的是我自己的取数命令，比远端不可达更隐蔽 |
+
+（同栏记一笔不算自犯的：e29 两趟 shell rc=1 与 L141 那处「不报」都不是故障也不是干净，都是**量具形状**——前者见 §31.3 末行，后者见 §31.4 行 3。两者若不写进账面，下一个读账面的人会把它们各自读反。）
+
+### 31.7 未做 / 不得读成已批
+
+本批**已推** = `feat/web-visual-poc` 一条 ref（`c9622fdc..44fb7e05`，非 force）+ `lineage/…` 一条 up-to-date 的空推 ⇒ **未碰远端 `main`**（推送前后同 sha `fe22794c`，PROBE / EXECUTE / 单条 ls-remote 三处同读）・未 force・**未动 `github-legacy` 的 pushurl 禁用位**・未推任何 `mirror/` 分支・**未建镜像提交**（A/B/C 三档待人拍，本批只交明细）・已删 `company-snapshot` **仅此一条**，其余七条本地分支未判・未 `git fetch --prune`・**PR-1 只拿到开工授权，本刀未落一行代码**（实施随刀㉚）・V4 第二子判据仍无载体・B 路三条前置读数未取（卡认证层）・N4 服务端拦截力未取・未新增也未修改 `.gitlab-ci.yml`・未扩 T2 扫描面・e15 第 2 格旧期望未搬（历史快照不追改）・`make test` 的 make 本体未跑（Windows 无 make）。
+
+三道门槛：**决策完备 ✅ → 规范已批 ✅ → 开工授权 ✅（PR-0 本体 + 本批新授 PR-1）**。本批扩张的授权面**只有一项**：PR-1（`web/` 消费后端错误体）的实施。**不含**合入 main、不含公开镜像推送、不含任何远端历史改写。
+
+### 31.8 复跑本批读数的命令
+
+```powershell
+# —— 工作日窗口推送认证（只读 + dry-run；真推加 -Execute，越窗加 -OverrideWindow）——
+powershell -NoProfile -ExecutionPolicy Bypass -File .tmp-scratch/ap-visual/e29-weekday-push.ps1
+# —— 独立复取（一 rev 一调：把三个 rev 塞进一条 --short 会 rc=128）——
+git rev-parse --short refs/remotes/github-legacy/main
+git merge-base --is-ancestor 88515cab HEAD          # rc=1 = 异宗，不能快进推
+uv run python scripts/lint_public_mirror.py --mode publish --base 88515cab --ref HEAD   # rc=1 = 那一处合成示例
+# —— 死枝判据（删前删后都可跑；删后该分支名不再解析）——
+$others = @(git for-each-ref --format='%(refname)' refs/heads refs/remotes refs/tags | Where-Object { $_ -notmatch '/HEAD$' })
+git rev-list --count <branch> --not $others         # 判据：0 = 独有 commit 为零
+git branch -r --contains <branch>                   # 看它是否就是某个远端分支的位置
+```
+
 
 
 
