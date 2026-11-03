@@ -3361,6 +3361,43 @@ git grep -n --untracked streamQuery -- web applications
 4. 公开镜像处置（待人）、其余死枝（待逐条证）、`make test` 全量重跑（改动面扩大到后端时）。
 5. **纯书写口径刀（无代码）**：把 docs/TODO.md 纳入 typo 面并清掉那 7 条 —— 这一刀的前置是**先决定那七条该怎么写**（六个测试文件名查无此物 ⇒ 要么删引用、要么补文件、要么改成真实路径，三者语义不同，不能由量具替人判）。
 
+## 33. 第二十六批（2026-11-03，刀㉛）：刀㉚ 的提交后面禁 · 当天最终 rev 的 L3 · 首次「交付批当日推送」
+
+### 33.1 本批射程
+
+本刀不写产品代码，只做三件事：把刀㉚ 的**提交后读数**入帐、跑完用户已拍的**当天最终 rev 的门**（L3 → 工作日窗口推送 → 独立复取）、登记本批新踩的一条**申报面漏报**。入库面 = 两份文档（本件新开本节 + 工单件 §13.4 两行）。
+
+### 33.2 刀㉚ 的提交与取证件读数
+
+| 项 | 读数 |
+|---|---|
+| 提交 | `92e0bd65`（parent `7cf7d54f`），11 files / **+1001 / −23**；三个新件以 `create mode 100644` 入库 |
+| 提交门终跑 | 件 `e26-gate-00-20261103-124140-gate-fill.txt` ⇒ **GATE_RC=GREEN**（换判据后首绿件为 `-124043`，台账回填后复跑仍绿） |
+| 取证件首跑 | 件 `e27-00-postcommit-20261103-124303.txt` ⇒ **红一格**：`unallowed-non-docs=1 <<< UNDECLARED PATH`，指名的是 `web/README.md` |
+| 取证件终跑 | 件 `e27-00-postcommit-20261103-124317.txt` ⇒ 全项 matched（1/2a/2b 分拆自测 OK、3 格 files/add/del 全对、4a 后端=1 已申报、4b 累计 5/5、5 锚定未动、6 未推） |
+
+⚠ **本批自犯一条（登记于此；§32.8 那张表已随刀㉚ 提交，不往回追加）**：那次 UNDECLARED PATH 不是量具错，是我**漏报了一个非文档路径** —— 取证件的分类器只把 `docs/` 前缀当文档，`web/README.md` 仍算非文档项（刀㉙ 那批就把它列在申报面里）。这一格因此是**真的在咬**：它在两批里各报过一次红，不是装饰。
+
+### 33.3 当天最终 rev 的 L3 深度安全审查
+
+按在册口径「每轮推送前按**当天最终 rev** 重跑校验」：L3 深度审查跑在 `92e0bd65` 上（不是 `7cf7d54f`，也不是工作树）⇒ **findings_count = 0**。一句话补登：L3 审的是「自上次审查基线以来未审过的 commit」，所以它只有在 commit 之后才有意义 —— 先推后审或先审一个不存在的 rev 都是空转。
+
+### 33.4 推送（工作日窗口件首次在本仓真的推开一条新形状）
+
+工具 = `e29-weekday-push.ps1`（刀㉙ fork 出的工作日窗口件；本批是它 fork 后的**第一次真执行**）。
+
+| 阶段 | 件 | 关键读数 |
+|---|---|---|
+| PROBE | `e29-push-kit-20261103-124719-probe.txt` | `mode=PROBE-ONLY`・REAL-DIRTY=0・UNTRACKED=0・backend OUTSIDE-DECLARED=0・ls-remote **READ-OK**（heads=3）・dry-run `44fb7e05..92e0bd65`（服务端接受）・窗口分类 `Tuesday 12 → IN-WINDOW`・注入自测 6 例 0 失配・**blockers=0** |
+| EXECUTE | `e29-push-kit-20261103-124742-execute.txt` | `[feat/web-visual-poc] push rc=0`（`44fb7e05..92e0bd65`，fast-forward 而非 force）・`[lineage/...] push rc=0`（Everything up-to-date）・post 面 `refs/heads/main = fe22794c` 与 pre 逐字相同 ⇒ **main 未动**・blockers=0 |
+| 独立复取 | 换具：裸 `git ls-remote --heads company`（不用推送件自己） | 三条 ref 实读：`feat/web-visual-poc = 92e0bd65`、`lineage/intranet-v3-until-2026-10-19 = 12f03c8f`、`main = fe22794c`；本地 `company/feat/web-visual-poc` 已等于 HEAD，`git rev-list --count company/feat/web-visual-poc..HEAD` = **0** |
+
+为何复取必须换具：推送件报的 rc=0 只说明它那条 git 命令返回成功，不说明服务端已按预期落定（观测面那条老口径同源：状态灯亮 ≠ 数据到）。裸 ls-remote 不带任何判据，只给事实。
+
+### 33.5 本批未做 / 不得读成已批
+
+未合 `company/main`（用户已拍不合）・公开镜像 A/B/C 三档**仍待人选**（本批零动作）・其余 7 条本地分支未逐条判・PR-2/3/4 未开工・CI runner 上那一步仍未实跑・`make test` 全量十 session 本批未重跑（后端面零改动）。另记：**推送已完成不等于本批已闭环** —— 本刀（刀㉛）的 commit 本身不在刚推的 `92e0bd65` 里，它是下一趟推送的对象（同一把尺子：推前按当天最终 rev 重跑 L3）。
+
 
 
 
