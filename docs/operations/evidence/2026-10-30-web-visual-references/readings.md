@@ -3527,6 +3527,47 @@ git grep -n --untracked streamQuery -- web applications
 
 **仍未做**：推 `github-legacy`（D3，需人明确批示）・推 company（`e089f69f`、`e8485874`、`4eff0421` 三棵都未推）⇒ 镜像树的来源 rev 尚未入远端，先推镜像会出现「公开侧已有而内网远端未有」的短暂倒挂（同一句登记在 §34.6，随下一趟推送一并消）。
 
+## 35 刀㉝（第二十八批）：本批三件的推前校验 + 本仓第二次「交付批当日推送」
+
+### 35.1 推前校验（在册口径：按当天最终 rev 重跑 L3）
+
+当天最终 rev = `3afea7cd`（刀㉜ 第三件）。L3 深度安全审查跑在该 rev 上 ⇒ **findings_count = 0**。这一句必须在推送之前取：推完再跑，L3 审的就是已经出站的代码，校验失去了可拦截性。
+
+### 35.2 PROBE（工作日窗口件 `.tmp-scratch/ap-visual/e29-weekday-push.ps1`，不写远端）
+
+件 `e29-push-kit-20261103-143024-probe.txt`，逐格读数：
+
+| 格 | 读数 |
+|---|---|
+| 1) 本地态 | `HEAD=3afea7cd`・`status-all=0 content-diff=0 REAL-DIRTY=0 UNTRACKED=0`（未跟踪 = 拒推，本行是 §27.2 那次真拦停后补的齿）・分类器自测 `SELFTEST-OK` |
+| 2) 后端面 | `touched vs d140f91f = 3 declared = 3 OUTSIDE-DECLARED = 0`・正控（去掉 filter）`all-files = 44`・申报集自测 `SELFTEST-OK` |
+| 3) 现取 ls-remote | `lines=6 heads=3 hard-fail-diag=0 advisory-diag=3 verdict=READ-OK`（三条 advisory 是 SSH 后量子算法提示，不是读失败）・判据自测三例 `READ-OK/NO-READ/NO-READ` ⇒ 分流是真分类不是放宽 |
+| 4) `--dry-run` | 两条 ref 均 `rc=0`：`92e0bd65..3afea7cd`（服务端接受，写下任何变更前）+ lineage `Everything up-to-date` |
+| 5) 窗口 | `day=Tuesday hour=14 -> IN-WINDOW`・注入六例 `mismatches=0 WINDOW-TEETH-OK` |
+| 6) 执行门 | `NOT EXECUTING: -Execute absent`・`blockers collected = 0` |
+
+### 35.3 EXECUTE（同一件加 `-Execute`，非 force）
+
+件 `e29-push-kit-20261103-143426-execute.txt`：`mode=EXECUTE`・六格全绿后执行・`[feat/web-visual-poc] push rc=0`（`92e0bd65..3afea7cd`，**fast-forward 而不是 force**）・`[lineage/…] push rc=0`（`Everything up-to-date`）・`refs/heads/main` 在 post 回读里逐字未动（`fe22794c5a36e855114e2bbf99c0df341b3f695f`）。窗口不可越过的那三条（远端自标 / 非 force / main 不推）不由参数开启。
+
+### 35.4 换具独立复取（不用推送件自己，用裸命令）
+
+`git ls-remote --heads company`（现取，不带本地 ref）实读三条：`3afea7cd refs/heads/feat/web-visual-poc`・`12f03c8f… refs/heads/lineage/…`・`fe22794c… refs/heads/main`。再 `git fetch company` 后逐条比本地对远端跟踪位的领先数：两条已推 ref 均 **ahead = 0**。
+
+另记一条不得读错的数：`main ahead of company/main = 677` —— 本地 `main` 从不在推送目标里（用户已拍不合），这 677 是本仓既有形状，不是本趟新开的口子；把它当「本批推了 677 个提交」就是读错。（口径：**一个数出现在取证里时必须同时说它是不是本动作造成的**，否则同一条读数会被下一轮人当证据用。）
+
+### 35.5 §34.6 / §34.8 登记的倒挂随本趟推送消除
+
+§34.6 与 §34.8 都记着「镜像树的来源 rev 尚未推到 company ⇒ 先推镜像会短暂倒挂」。本趟推完，`4eff0421`（镜像树的来源）与 `e089f69f`/`e8485874`/`3afea7cd` 全部在 `company/feat/web-visual-poc` 上可取 ⇒ **该倒挂已消**，不再是待处置项。但镜像提交本身仍未公开（§34.8 的 `b08009d0` 只在本地 ref）——两个方向不同：内网远端已有而公开侧未有，不是登记里那一条。
+
+### 35.6 本批未做 / 不得读成已批
+
+- **推 `github-legacy` 未做**（刀㉜ 造的镜像树仍在本地 ref）。依据两条不变：① 该远端 push URL 是 `DISABLED-no-push` 禁用位（在册守卫），走显式 URL 绕过 = **拆守卫而不是用守卫**；② 公开历史推上去改不回来 ⇒ 按《决策边界》属 **D3（禁止自动）**，需人一句明确批示。
+- 本件（§35）自己的 commit **不在本趟推送里** —— 它是下一趟推送的对象（同一把尺子：推前按当天最终 rev 重跑 L3）。本仓两次做到「交付批当日推送」，都不是把自己那一次推进去。
+- 没合 `company/main`（用户已拍不合）、没动公开 main、没建第二条 `mirror/*`、没 force、没改 git config。
+- 其余 7 条本地分支未逐条判・PR-2/3/4 未开工（PR-2 需单独拍板）・CI runner 那一步仍未实跑・`make test` 全量十 session 本批未重跑（后端面零改动）・V1–V7 与 A2/A3/A7 屏上格一条未动。
+- ⚠ 本批**不得读成「公开侧已拿到 PR-0/PR-1」** —— 已推到 `company`（内网远端）不等于公开镜像已拿到；两者差一次 D3 批示。
+
 
 
 
