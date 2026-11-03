@@ -41,3 +41,45 @@ def test_health_route_ignores_unverifiable_credential():
     client = TestClient(create_app())
     r = client.get("/health", headers={"Authorization": "***"})
     assert r.status_code == 200, r.text
+
+
+class TestHealthReportsItsOwnDataPlane:
+    """`sql_backend` 自 2026-10-28（批次 5）由本服务上报。
+
+    本组的成因：那一位原先住在 agent_server，而它读的 DSN 指**平台库**——报出来的
+    postgres 只证明“平台能连自己的库”，与问数能不能答无关（ADR-0011 后续修订）。
+    本服务的 dw DSN 才是这个位的真读点，所以灯跟数据面住在一起。
+    """
+
+    @staticmethod
+    def _health(settings) -> dict:
+        from unittest.mock import patch
+
+        from nl2sql_service.api import server
+
+        with patch("nl2sql_service.conf.settings.get_settings", return_value=settings):
+            return TestClient(server.create_app()).get("/health").json()
+
+    def test_scheme_decides_the_dialect(self):
+        from unittest.mock import MagicMock
+
+        s = MagicMock(dw_db_enabled=True, dw_db_dsn="mysql://u:p@dw:3306/reporting", datasource_dialect="")
+        assert self._health(s)["sql_backend"] == "mysql"
+
+    def test_explicit_dialect_wins_over_scheme(self):
+        """与建默认源时同一口径（dependencies.py 的 `datasource_dialect or detect_dialect`）。"""
+        from unittest.mock import MagicMock
+
+        s = MagicMock(dw_db_enabled=True, dw_db_dsn="mysql://u:p@dw:3306/reporting", datasource_dialect="doris")
+        assert self._health(s)["sql_backend"] == "doris"
+
+    def test_null_when_no_data_plane_configured(self):
+        """没配 dw 必须报 null，不能报回落值：`detect_dialect("")` 给的是 postgres，
+        把它当读数就是把“没有数据面”说成“有个 pg 可问”。"""
+        from unittest.mock import MagicMock
+
+        for settings in (
+            MagicMock(dw_db_enabled=False, dw_db_dsn="", datasource_dialect=""),
+            MagicMock(dw_db_enabled=True, dw_db_dsn="", datasource_dialect=""),
+        ):
+            assert self._health(settings)["sql_backend"] is None, settings.dw_db_dsn

@@ -33,6 +33,16 @@
 | 22 | 我写下「KS 容器 `docker diff` 里**没有** .py 热改」 | **探针形状错**（同族第 4 次，与 18/20 一路）：过滤式写成 `grep -E "^C? M? A? .*\.py$"`，而 `docker diff` 的行形状是 `C /app/...`——第二个字面空格在 "C " 之后并不存在，整个式子恒不匹配 ⇒ 输出空，被我读成"没有热改" | 判"没有 X"之前先跑**不加过滤**的原始输出看形状（本次重跑：`docker diff` 共 68 项、`.py` 9 个）。`docker diff` 的行首只有一位字母（`A`/`C`/`D`），不要按"CMAS 可组合"去写正则 |
 | 23 | 我差点写下"三节点镜像 digest 与 Pod `imageID` 不一致 ⇒ 漂移" | **两种 digest 天然不相等**（2026-10-14 三机复测）：`ctr --address /run/containerd-k8s/containerd.sock -n k8s.io images ls` 给的是 **manifest** digest（本轮三台同为 `sha256:adf6a2bc3193…`，type=`application/vnd.oci.image.manifest.v1+json`），而 k8s `status.imageID` 与 `docker images` 给的是 **config/镜像 ID**（`c18dc76a93f8…`）。同一条命令里还把**列序读错**（实际 REF/TYPE/DIGEST/SIZE，我按 `$3=SIZE` 取），第一次输出的 size 栏是 digest 前缀 | 写"三节点一致"必须**指明是哪一个 digest**；跨工具比镜像只比"同一层语义"的字段。任何 awk 取列先原样 `head -1` 看一次列序（与 22 同一教训：**先读形状**） |
 | 24 | `pgrep -af 'port.forward agent-platform'` 经 ssh 执行**匹配到自己** | 只读版自匹配（13 那条的姊妹）：远端 `bash -c` 的 argv 里就含该模式，于是打印出我自己的 ssh/timeout/bash 三行，看着像"port-forward 进程还在" | 判"转发在不在"唯一算数的读数是 `ss -ltnp \| grep :18000`（本轮：`0.0.0.0:18000 users:(("kubectl",pid=3496802))`）。模式一律用括号技巧 `[p]ort-forward`，且**回读要用另一条命令** |
+| 25 | 语义缓存 L2「看着是对的」：`VectorField` 平铺传参、`Query.add_param`、`RETURN 2 value_json distance` 三处都先按印象写过 | **未证实的第三方形状**。前两条已被打回，第三条是本轮查上游才发现：`distance` 是 KNN 结果别名而不是文档字段，而 valkey-search 的 RETURN 解析器（`src/commands/ft_search_parser.cc`）对查不到的名字**原样保留、不报错**，"带了 RETURN 还取不取得到距离"未证实。根子上是这套代码**从未在真 Valkey 上跑过**（工作区未提交 ⇒ CI 契约作业没执行），所以"印象"没有对手 | 断言只写在两样东西上：上游原文（`gh api repos/valkey-io/valkey-search/contents/docs/commands/ft.search.md`（**main**）—— dialect 只支持 2（pin 那版源码实际接受 2..4，见第 26 行）；官方向量示例不带 RETURN，回复里距离与哈希字段同时在场）与**库自己的组装器**（测试用 `_ArgvCapture` 调 `SearchCommands._mk_query_args` 生成真 argv，不抄它的输出形状）。未证实的形状一律不用。同一份文档还给了 `@tag:{x*}` 是**前缀匹配** ⇒ 租户名以 `*` 结尾且漏转义就是跨租户读，与 AGENTS.md「先读形状」同一课，只是对象换成了客户端库和模块 |
+| 26 | 查完"上游支不支持 CASESENSITIVE / dialect 2 / FT.INFO 的 `state`"，得出的结论是**部署 pin 的那个版本不支持**，准备换镜像 | **读了另一个版本的文档**：核对用的是 `main` 分支的 docs，而 pin（**当时**是 valkey-bundle 9.0.1，该坐标后来按真机读数改回 9.1.2，见第 27 行）内含的是 valkey-search **1.0.2**；1.0 分支的 `ft.create.md` 里 CASESENSITIVE **出现 0 次**、`ft.search.md` 缺 dialect 那句 ⇒ 文档沉默被当成了特性缺失。真去 grep 1.0.2 的源码，特性全在（`ft_create_parser.cc:77/:231`、`ft_search_parser.cc:218` 接受 2..4、`index_schema.cc:744` + `:667-672`）。**同批还有第二种版本错位**：ADR 与生产清单里写的 `notify.c:125`/`attribute_data_type.h:67-69`/`index_schema.h:63` 这些行号只有 main 对得上，pin 上是 `:124`/`:76-77`/`schema_manager.cc:121`——行号是随 ref 漂移的量，不标 ref 就是给后人埋死锚（我这轮自己就被自己的注记挡了一次） | 两条纪律：① **特性存在性查源码 tarball，不查分支文档**；② 引用上游代码位置一律写成「数字 + 所属 ref」，换 pin 必须重取。唯一真按版本变的是**报错措辞**（1.0.2 是 `Index with name 'X' not found`，main 多个 ` in database N` 后缀），所以自愈谓词的两组形状各自都有参数化用例，正反双向都在（§4 反证见 ADR-0013 §11 第 19 行） |
+| 27 | 我写下"valkey-io/valkey-bundle 的 release 列表只到 9.0.1 ⇒ bundle **没发过** 9.1.x ⇒ 现网照 9.1.2 上线即 `ErrImagePull`"，并据此把**六处执行件**的镜像坐标改掉 | **拿错证据源**：git 的 tag/release 列表与 Docker Hub 的镜像 tag 是**两个命名空间**——镜像可以不对应任何 git 标签发布。本机与测试机都取不到 Docker Hub（curl 空返回），我却在"取不到"的情况下把推断写成了事实。真机读数（241）：`valkey/valkey-bundle:9.1.2` 实体存在、`lf-valkey` 用它健康跑了 **12 天**、实例 `valkey_version:9.1.1`、`MODULE LIST` 的 `search ver=66049` 按 `(major<<16)\|(minor<<8)\|patch` 解出 **1.2.1**；另一台同 tag 有 `RepoDigests`（`sha256:1c39295c…`）⇒ registry 确实发布过。**反向的坑**：241 那份 `RepoDigests` 是空数组，因为它是 `docker load` 进去的——空数组不等于没发布，别拿它当反证 | 判"某镜像坐标存不存在"只有两种取证：`docker pull`/`docker images`（现场）或 registry API；**仓库 git 标签不是证据**。取不到证据时的正确动作是把判据标为"未证实"并**保留原值**，不是反过来改执行件。坐标一致性由 `lint_architecture` P14 ⑤ 强制，且注记必须写"读数来源"而不是只写版本号（否则下一个人又会拿列表来推） |
+| 28 | 一条断言"`*` 已被转义 ⇒ 星号租户不会前缀匹配到别人"的用例长期绿，我以为隔离面堵住了 | **测具不解释语义**：wire 用例用的是 fake client，它只记录"发出去的 argv 里有没有反斜杠"，**不解释查询串**——所以这类"我们发了转义"的断言在 fake 上恒真，永远挡不住转义本身无效。真机（9.1.2/search 1.2.1）判别集 `{acme, acmeX, "acme*"}`：`@tenant:{acme*}` 命中 3 条（前缀匹配成立，隐患为真），`@tenant:{acme\*}` **同样命中 3 条** ⇒ 反斜杠被引擎忽略、星号仍是通配符，`_escape_tag()` 对 `*` 无效。对照组证明这不是测具问题：TAG 分隔符那根竖线**加反斜杠**时转义有效（命中 1 条=字面那个值），**不加反斜杠**时被当 OR 解析（命中 0 条） | 转义不掉就**拒绝**：隔离维度以 `*` 结尾一律 fail-closed（`_tag_reject_reason` 单一判据点，读写两路共用），并单独计 `skipped_unsafe_tag`（"配置里有非法隔离值" ≠ "没带租户"）。用例改成**断言引擎行为本身**：同一份数据发两种查询串比命中数（转义若真生效必须不同），实现被拒的断言写在"根本没发出查询 + 计数"上。通用一条：**fake 测具上的"形状断言"不能替代真机语义断言**，凡判据依赖被调用方的解释规则，就要有一条打到真引擎的用例（本机 skip / CI 必跑的那个边界要显式声明） |
+| 29 | 语义缓存契约用例首跑四条红，报错是 `UnicodeDecodeError: 'utf-8' codec can't decode byte 0x80 in position 2`，第一眼像"中文/编码问题" | **线格式，不是编码**：客户端建在 `decode_responses=True`，而 L2 哈希里存着原始 float32 的 `query_vec`；实现此前刻意**不发 RETURN**（理由是"KNN 别名能不能进 RETURN 未证实"）⇒ 引擎把向量一起回传，valkey-py 逐字段解码即崩，再被 fail-open 吞成永久 miss。`distance` 别名实测**能**进 RETURN，所以那个"少依赖一个未证实前提"的决定本身就站不住 | 读路径显式 `.return_fields("value_json","distance")`，只回真正要用的文本字段；wire 用例钉"必发 RETURN 且向量不许在里面"。通用一条：**声明式客户端 + decode_responses=True 遇上任何二进制字段就是地雷**，凡是"回全部字段"的读法都要先问一句里面有没有 bytes。（第 25 行那条"未证实的形状一律不用"在这里反过来咬了一口：删依赖的代价是把崩溃换成静默） |
+| 30 | 我差点把"变异后十条红"记成"隔离用例有牙" | **红得多 ≠ 红得对**：我改查询串做反证（换成通配、换成负向谓词、整段删子句），改出来的串真机根本不接受 ⇒ 谁都命中不了，连不相关的用例都红；另一轮的红其实是专用实例 **maxmemory 打满**（`volatile-lru` 不淘汰索引/HNSW 结构，多轮各建索引把 256mb 吃光，SET 直接被拒） | 反证只认"恰好红目标那几条 + 断言原文就是那个性质"（本轮达标的一刀：整段删租户子句、其余保持有效语法、`py_compile` 核对 ⇒ 恰好 3 条红且原文是 `assert CacheHit(layer='l2') is None`）；跨轮复用同一台实例时**每轮先 FLUSHALL**，并先读 `E` 行原文再数条数。同族教训：`docs/operations/evidence-format.md` §4 的空转反证 |
+| 31 | 契约里"运维摘掉索引后自愈"那条一上来就红在**清理动作**上：`wrong number of arguments for 'FT.DROPINDEX' command` | **客户端缺陷**：valkey-py 6.2.0 的 `ft().dropindex()` 在 `delete_documents=False` 分支把空串当第三个参数发出（`FT.DROPINDEX <idx> ""`）；只有带 `DD` 的那条路径走得通。`bench_cache.py` 的清理同样静默失败，只留一句 warning | 运维与用例一律发裸命令 `execute_command("FT.DROPINDEX", idx)`；判"某个便捷方法可用"要按分支判（同一函数两条分支一边能用一边不能用是常见的）。另记：真机取证时的依赖闭包要**从包顶层 `__init__` 起走**，只扫实现文件的 import 会漏掉 `agent_runtime/__init__` → `schemas` → pydantic/shared_schemas 这条链 |
+| 32 | 我把六条隔离用例"改强了"（读侧统一换措辞，强制走 L2），然后 m09 变异——**把租户从 L1 精确键里摘掉**——在本地和真机都不红（真机 19 passed） | **改一条断言的路径 ≠ 整体覆盖不变**：那六条用例原来还兼着一条我没意识到的路径——"同一句话换个租户也必须读不到"（L1 面）。我把读侧措辞全换成"另一种说法"以后，L1 的跨租户那格再没人守，而 L2 的 TAG 过滤、CASESENSITIVE、索引分区都还在，缺陷只在最快、最容易被当成已覆盖的那一层暴露 | ① 换判据路径时当场问"**这条断言原来还兼着哪条路径**"，被让出的路径要显式补一条；② 判缺口用**变异**而不是直觉或覆盖率——本轮就是把 17 个变异逐个下刀才发现的（仪表：`make mutation-cache`，`scripts/mutation_cache_branches.py`）；③ 假客户端层与真机层的杀死集合要**分开声明**（`ENGINE_OWNED`），声明比"杀得越多越好"更可核对：集合漂移只有"用例退化"或"用例依赖了假层没有的解释能力"两种解释，都得人定性 |
+| 33 | 全量战役跑到某个变异体后 10 分钟不动，最后一行仍是 `bool:Or→And L701 KILLED`，我第一反应是**引擎死了** | **不是死，是挂**：那一刀让套件卡在真实等待上，而 `_run()` 当时**没有超时** ⇒ 引擎在等子进程，被检目录 meanwhile 一直停在 `ast.unparse` 出来的无注释版本上——共享工作区里这正是"下一条提交把我的半成品带走"的入口 | 四条一起补：单刀 `--timeout`（默认 180s，超时**计为被杀但另标 `timed_out`**，因为"跑挂"不等于"暴露缺陷"）；不再走 shell（`shell=True` 下 kill 只落在 cmd.exe，pytest 变孤儿继续占着文件）；`atexit` + SIGINT/SIGTERM/SIGBREAK 都按字节还原；开跑前把原始字节快照到 `.tmp-scratch/mutation-snap/`。**判"卡住 vs 在跑"用进程表 + 被检文件 sha256 漂移，不用日志** |
+| 34 | 后台起的战役"一条输出都没有"，日志文件 0 字节，我按"没启动成功"去查进程 | **重定向后 stdout 是块缓冲**（≈8KB 才刷一次盘），进程活得好好的；反向也成立：**日志在动不代表在推进**（同一行被反复读会误判成卡住，本轮就是这么误判了一次） | 要边跑边看就 `python -u` 启动（或 `PYTHONUNBUFFERED=1`）；否则按上一条的判活手段来，别拿日志当心跳 |
 
 ## 1. 两个观测面互相顶掉（本轮最贵，D-LF-1）
 
@@ -71,7 +81,7 @@ TracerProvider 换成自己那份，processors 只有 `['LangfuseSpanProcessor']
 
 我在 §6.2 写下的"Jaeger ✅ `e2e_traceparent.sh` 实跑通过"是在**接 Langfuse 之前**那个 Pod 上量的。
 换 rev 滚动后没复跑 ⇒ 这句话在现网为假而文档为真。修法不是改措辞，是改纪律：
-**每条现网读数旁边记上它属于哪个 `GIT_REV` / 哪个 Pod 名 / 什么时刻**（见 `env-126-inventory.md` §4.11 的表头）。
+**每条现网读数旁边记上它属于哪个 `GIT_REV` / 哪个 Pod 名 / 什么时刻**（见 `docs/operations/env-126-inventory.md` §4.11 的表头）。
 
 ## 3. `verify.sh` 用 `docker run` 读镜像内容 = 读错了库
 
@@ -110,7 +120,7 @@ TracerProvider 换成自己那份，processors 只有 `['LangfuseSpanProcessor']
 
 ## 6. 语义缓存会把取证短路成"查不到"
 
-`query_router.py:159-179` 命中 `semantic_cache` 就直接 return，图不跑 ⇒ 没有任何模型调用 ⇒ 观测后端
+`applications/agent_server/api/query_router.py:167-201`（缓存查询块 `:167-186`、命中分支 `if cached:` 在 `:187`、旁路 SSE `:197-199`；原记 `query_router.py:159-179` 已漂移，该窗口现在是 coordinator 占位与缓存查询）命中 `semantic_cache` 就直接 return，图不跑 ⇒ 没有任何模型调用 ⇒ 观测后端
 本来就该是空的。此时按"查不到=没接上"报 FAIL 是**拿探针的形状冒充平台的缺陷**。
 三条纪律：
 1. 取证问题必须**语义新颖**——加 marker 后缀不改变语义（查重按向量相似度），改几个字没用；
@@ -172,7 +182,7 @@ TracerProvider 换成自己那份，processors 只有 `['LangfuseSpanProcessor']
   不带（浏览器真实点击）⇒ 两路各自起根，屏幕上变成**两棵独立 trace**（成对的 1-span + 5|6-span）。
   ⇒ 演示前若不改，口径必须按"两条独立 trace"讲；这一条决定现场怎么解释，也决定改动值不值。
 - **状态灯/附录不是台账**：R19 早在 `deploy/k8s/VERIFICATION.md` §C 定性并转了 issue #23，但因为写在附录里，
-  演示前没人会翻 ⇒ 已提升到 `minimal-release-runbook.md` §9 作为第 **⑲** 条待拍板项。**凡是"当场会被观众
+  演示前没人会翻 ⇒ 已提升到 `docs/operations/minimal-release-runbook.md` §9 作为第 **⑲** 条待拍板项。**凡是"当场会被观众
   看到"的既存缺陷，都要进那张带责任人与时点的台账，而不是留在技术附录。**
 
 ## 9. 我这台机器上的会话形状问题（与平台无关，但同样吃时间）
@@ -210,3 +220,16 @@ TracerProvider 换成自己那份，processors 只有 `['LangfuseSpanProcessor']
 - `git commit -m "$(cat <<'EOF' …)"` 在长中文+全角引号下会让**整条命令解析失败**（一个命令都没执行）
   ⇒ 长消息一律 `git commit -F <文件>`。
 - 暂存按文件名，不用 `git add -A <目录>`（本轮把一份未审的未跟踪文档扫进了 `f45b8a5`）。
+- **`git checkout HEAD -- <文件>` 不是"撤销我刚才那一处编辑"**（2026-10-25 我自己踩）：
+  现象——想回退我在联邦 `agent/cache/semantic_cache.py` 里新加的一处门禁，跑完这条命令后文件变回 HEAD 的
+  **双轨旧版**，还 import 本工作流早已删掉的 `agent/cache/layers.py`。
+  假因——我把它当成定向回退（"只退我这几行"）。
+  真因——该文件是**已跟踪**文件，HEAD 里根本没有 ADR-0013 C Stage 2 的那次重写；`checkout HEAD --` 恢复到最近
+  一次提交，等于把本工作流里**不是我写的未提交改动**一起抹掉。我按行编辑时只看自己那几行，看不见同一文件里
+  别人的未提交工作，于是"看起来只退了我一处"。
+  修法——**撤回自己的编辑一律用反向 Edit（old/new 互换），不对已跟踪文件用 git 定向回退**；确实要用 git 时，
+  先 `git diff -- <文件>` 看清相对 HEAD 这份文件里还混着谁的改动，并先把整份文件 `cp` 进 `.tmp-scratch/` 再动。
+  本次恢复靠会话里此前完整 Read 到的原文重写，重写后 `uv run pytest applications/agent_federation/tests -q`
+  = **192 passed, 1 skipped**（rev 口径：`62ef617` + 本工作流未提交改动，同 §1 字段 1）才算完。
+  代价——一个往返；更贵的是"旧版被 import 已删模块"这种**看起来只是多几行红**、实际会把整条 Stage 2 结论
+  改写成假象的回归。判据：**`git status` 里的 `M` 只代表"与 HEAD 不同"，不代表"只有我的改动"。**

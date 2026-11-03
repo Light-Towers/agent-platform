@@ -6,7 +6,7 @@
 """
 
 from shared_schemas.error import ErrorResponse
-from shared_schemas.health import DependencyHealth, HealthResponse, HealthStatus
+from shared_schemas.health import CacheStatsReport, DependencyHealth, HealthResponse, HealthStatus
 from shared_schemas.intent import IntentCandidate, IntentResult
 from shared_schemas.knowledge_lifecycle import KNOWLEDGE_STATUS, VALID_TRANSITIONS, validate_metadata
 from shared_schemas.query import CONTRACT_VERSION, Priority, QueryData, QueryRequest, QueryResponse
@@ -16,6 +16,7 @@ from shared_schemas.thread import THREAD_STATE_VERSION, ThreadState, empty_threa
 
 __all__ = [
     "CONTRACT_VERSION",
+    "CacheStatsReport",
     "DependencyHealth",
     "ErrorResponse",
     "HealthResponse",

@@ -1,0 +1,174 @@
+# 语义缓存专用 Valkey（ADR-0013 C：唯一后端，生产与开发/测试同一实现）。
+#
+# 为什么是独立实例：不复用 Langfuse 的 lf-valkey，也不复用联邦 compose 里同时供
+# web/Langfuse 的共享实例——缓存故障与观测/业务状态必须隔离，maxmemory 策略
+# （volatile-lru）也不能施加到别人的数据上。
+#
+# 为什么必须 bundle 镜像：L2 语义命中依赖 Search 模块（FT.CREATE/FT.SEARCH），
+# 基础 valkey 镜像没有该模块；缺模块时 L2 会降级为不可用（L1 仍工作），
+# 这正是"装了但没接上"的静默形态，故镜像类型是契约的一部分。
+#
+# 为什么不持久化：缓存是可重建的优化数据，重启冷缓存可接受；一旦开 RDB/AOF，
+# 它就会变成需要备份与迁移的状态型数据库，与 ADR-0013 的定位相反。
+#
+# 镜像坐标：tag 已回读到 repo digest（2026-10-26 在 126 上 `docker inspect` 取到
+#   valkey/valkey-bundle@sha256:1c39295cd8e3a34fc33fb46de235cf5e7bad530525b1a697eaf9f49e1c42747c）。
+#   这条读数的作用不只是"上线更稳"——它同时**证伪了我原先的 ErrImagePull 推断**：
+#   有 digest 说明该 tag 是真在 registry 发布过的镜像，CI 与任意节点都拉得到。
+#   （241 上那一份 `RepoDigests` 是空数组，因为它是 `docker load` 进去的，不代表没发布。）
+#   生产上线仍建议把下面 `image:` 换成 `...@sha256:<digest>` 固定：可变 tag + `IfNotPresent`
+#   在换 rev 后可能静默跑旧镜像（见 docs/operations/env-126-inventory.md 的镜像分发纪律）。
+#
+# tag 为什么是 9.1.2（**坐标必须从现场或 registry 实取，不许从 git 标签列表推断**）：
+#   内网标识脱敏口径（2026-10-29）：本段的机名/IP 为 <internal-*> 占位符，真值住运维机本机的
+#   .intranet/keymap.json（不入库）；占位符保留编号⇒取证层级仍可区分，但不得拿占位符去现网复现。
+#   取证通路是测试机 <internal-node-01>(<internal-host-241>) 上的实体镜像——`lf-valkey` 容器用
+#   valkey/valkey-bundle:9.1.2 已健康运行 12 天，实例报 valkey_version:9.1.1，
+#   `MODULE LIST` 报 name=search ver=66049 ⇒ 按 (major<<16)|(minor<<8)|patch 解出 search **1.2.1**。
+#   历史教训（2026-10-26，本轮亲犯并已回改）：我曾按 valkey-io/valkey-bundle 的 git release
+#   列表（只到 9.0.1）断言"bundle 没发过 9.1.x ⇒ 上线即 ErrImagePull"，并把六处坐标改成 9.0.1。
+#   那个推断无效——**git 标签与镜像标签是两个命名空间**，镜像可以无对应 git 标签发布。
+#   所有引用位（本文件 / CI service / 联邦 compose / 根 compose / Langfuse compose / bench
+#   文档）由 lint_architecture P14 的 _VALKEY_BUNDLE_PIN 强制同一个坐标。
+#
+# 该镜像的 L2 依赖面**已在真机上逐项读到**（下面这些不是文档转述，也不是按别的 ref 猜的）：
+#   - FT.CREATE ... TAG ... CASESENSITIVE + VECTOR HNSW/COSINE → OK
+#   - KNN 查询 `@tenant:{t1}=>[KNN 1 @query_vec $vec AS distance] RETURN 2 value_json distance
+#     PARAMS 2 vec <bytes> DIALECT 2` → distance=0（同向量，COSINE 口径成立），且**别名 distance
+#     能进 RETURN**（此前"未证实"的顾虑已消除）。反向读数是决定性的：**不发 RETURN 时引擎把
+#     `query_vec` 的原始 float32 一起回传**，而客户端建在 decode_responses=True 上 ⇒ 解码即抛
+#     UnicodeDecodeError(0x80 in position 2)，被 fail-open 吞成永久 miss ⇒ 实现必须发 RETURN，
+#     只回读路径真正要用的两个文本字段（2026-10-26 契约首跑四条红的确切原因）
+#   - 先写哈希、后建索引：首次扫描会收编存量数据（num_docs 0→1，state backfill_in_progress→ready
+#     约 0.5s，KNN 可检索到）⇒ "改索引名不丢数据"这条前提有读数了，不再是推断
+#   - ⚠ 索引名必须含 CACHE_KEY_PREFIX 的 token：不含时两个同 scope/model/dim、不同前缀的实例
+#     会复用同一个索引（建索引前只判同名在不在），后来者的写入永远进不了索引，而
+#     `num_docs=0 / hash_indexing_failures=0 / state=ready` **一条错误都不报**（真机复现）
+#   - FT.INFO → num_docs / hash_indexing_failures / backfill_in_progress /
+#     backfill_complete_percent / state=ready 五键齐全（bench_cache 的 `_backfill_verdict` 成立）
+#   - FT.DROPINDEX 后再 FT.SEARCH → "Index with name 'X' not found in database 0"（**带**库号，
+#     与 search 1.0.2 源码里的无后缀形状不同）⇒ 自愈谓词必须覆盖两代措辞，已覆盖并有参数化用例
+#   - ⚠ valkey-py 6.2.0 的 `ft().dropindex()`（delete_documents=False）会把空串当第三个参数发出
+#     （`FT.DROPINDEX <idx> ""`）⇒ 服务器报 wrong number of arguments；运维与用例一律走裸命令
+#   - ⚠ TAG 的 `*` **转义不掉**：`{acme*}` 与 `{acme\*}` 同样前缀命中 acme/acmeX/字面 acme*
+#     ⇒ 隔离维度以 `*` 结尾一律 fail-closed（`_tag_reject_reason`），不靠转义；`|` 的转义实测有效
+#   - ⚠ maxmemory 打满时 SET 直接被拒（`OutOfMemoryError: command not allowed when used memory
+#     > 'maxmemory'`）：索引/HNSW 结构不是可淘汰键，volatile-lru 只能淘汰带 TTL 的数据键。
+#     多轮测试各自建索引会把 256mb 吃满——不是产品缺陷，但**"每个索引名都占永久内存、
+#     换名必须有人删旧索引"这条在这里有实数**（与本文件下方 args 注释同一条纪律）
+# 另按 search 1.0.2 源码核对过一版（ft_create_parser.cc:77/:231、ft_search_parser.cc:218 接受
+# 2..4、index_schema.cc:723/:729/:744 与 :667-672、tag.cc:103/:327-328 前缀匹配、
+# schema_manager.cc:121/:133）——留作升/降 pin 时的对照，行号按 ref 漂移，别当恒定值。
+apiVersion: v1
+kind: Service
+metadata:
+  name: valkey
+  namespace: agent-platform
+  labels:
+    app: valkey
+spec:
+  type: ClusterIP
+  selector:
+    app: valkey
+  ports:
+    - name: valkey
+      port: 6379
+      targetPort: 6379
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: valkey
+  namespace: agent-platform
+  labels:
+    app: valkey
+spec:
+  replicas: 1
+  # 单副本 + 本地内存数据：滚动更新会短暂双实例并各自持有一半缓存，
+  # 语义上只是冷缓存，但 Recreate 更符合"唯一实例"的运维直觉。
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: valkey
+  template:
+    metadata:
+      labels:
+        app: valkey
+    spec:
+      containers:
+        - name: valkey
+          image: valkey/valkey-bundle:9.1.2
+          imagePullPolicy: IfNotPresent
+          args:
+            - valkey-server
+            - --save
+            - ""
+            - --appendonly
+            - "no"
+            # 容量口径：100k 条 × 512 维（float32，2KB/条）+ HNSW 图 + 键开销 ≈ 300–400MB；
+            # 512mb 留出余量，volatile-lru 只会淘汰带 TTL 的数据（本缓存的全部数据都有 TTL）。
+            - --maxmemory
+            - 512mb
+            - --maxmemory-policy
+            - volatile-lru
+            # 这里**不需要** --notify-keyspace-events：Search 模块靠模块级订阅维护索引，
+            # valkey core 先派发给模块再检查该配置，且模块订阅了 GENERIC|EXPIRED|EVICTED
+            # ⇒ TTL 到期与精确失效会把条目从索引摘掉。
+            # 锚点按**本 pin 的两个 ref** 实取（不是 main）：core 9.0.3 src/notify.c:121
+            # 注释 "This bypasses the notifications configuration"、:124 moduleNotifyKeyspaceEvent()
+            # 早于 :131 的 `if (!(server.notify_keyspace_events & type)) return;`；派发点
+            # src/db.c:890（DEL）/:1926/:1948（expired）；valkey-search 1.0.2
+            # src/attribute_data_type.h:76-77（REDISMODULE_NOTIFY_GENERIC|EXPIRED|EVICTED）。
+            # 换 pin 须重取这些行号：同一段代码在 main 上是 notify.c:125/:132、
+            # attribute_data_type.h:67-69，直接照抄会让注记指向错行。
+            # volatile-lru 只淘汰带 TTL 的键，而 epoch 键刻意常驻（PERSIST），失效水位不会被掀掉。
+            # 契约用例：packages/agent-runtime/tests/test_cache_contract.py::test_delete_and_expiry_shrink_the_index
+          ports:
+            - name: valkey
+              containerPort: 6379
+          readinessProbe:
+            exec:
+              command: ["valkey-cli", "ping"]
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 3
+          livenessProbe:
+            exec:
+              command: ["valkey-cli", "ping"]
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 4
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 768Mi
+          securityContext:
+            # 官方镜像默认提供 valkey 用户（uid 999）；无持久化写入，无需可写卷。
+            runAsNonRoot: true
+            runAsUser: 999
+---
+# 只允许同命名空间的 agent-platform 访问缓存端口。CNI 不支持 NetworkPolicy 时
+# 该对象被忽略（不产生更宽松的放行），支持时把可达面收敛到应用 Pod。
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: valkey-ingress
+  namespace: agent-platform
+spec:
+  podSelector:
+    matchLabels:
+      app: valkey
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: agent-platform
+      ports:
+        - protocol: TCP
+          port: 6379

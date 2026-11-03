@@ -16,11 +16,44 @@ services:
     # 默认不对外发布 5432；本地调试可取消下一行注释（仅回环）
     # ports: ["127.0.0.1:5432:5432"]
 
+  # 语义缓存（ADR-0013 C）：开发/测试与生产同一实现，唯一后端 Valkey。
+  # 必须用 bundle 镜像——Search 模块（FT.CREATE/FT.SEARCH）不在基础镜像里。
+  # 不持久化：缓存是可重建的优化数据，不应变成需要备份的状态型数据库。
+  # tag 真值 = 真机读数，不是 release 记录：241 上跑着的 lf-valkey 就是
+  # valkey/valkey-bundle:9.1.2（healthy 12 天，INFO 报 valkey_version:9.1.1，
+  # MODULE LIST 的 search ver=66049 按 (major<<16)|(minor<<8)|patch 解出 1.2.1）。
+  # 别再拿 git tag 列表推"bundle 没发过 9.1.x"——git tag 与镜像 tag 是两套命名，
+  # 前一次就是这么把正确坐标改错的（判据见 scripts/lint_architecture.py P14 ⑤ 注）。
+  # 坐标一致性由 scripts/lint_architecture.py P14 ⑤ 强制（按 git 清单派生扫描位）。
+  valkey:
+    image: valkey/valkey-bundle:9.1.2
+    restart: unless-stopped
+    command:
+      - valkey-server
+      - --save
+      - ""
+      - --appendonly
+      - "no"
+      - --maxmemory
+      - 256mb
+      - --maxmemory-policy
+      - volatile-lru
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 3s
+      timeout: 2s
+      retries: 10
+    ports:
+      # 只绑回环：本地契约测试连 127.0.0.1，不对外暴露；生产走 k8s 内网 Service
+      - "127.0.0.1:${VALKEY_PORT:-6379}:6379"
+
   agent-platform:
     build: .
     restart: unless-stopped
     depends_on:
       postgres:
+        condition: service_healthy
+      valkey:
         condition: service_healthy
     # TB-7：容器就绪探针。lifespan 内 init_pool(wait=True) 若连不上 pg 会阻塞 ~30s，
     # 仅靠 depends_on 无法判断 api 自身是否真 ready，故加 healthcheck 让 compose 冒烟可判定。
@@ -32,6 +65,10 @@ services:
       start_period: 40s
     environment:
       DATABASE_URL: postgresql://agent:${POSTGRES_PASSWORD:-agent_platform_dev}@postgres:5432/agent_platform
+      # 缓存：唯一 Valkey 实现；开发/测试不启用口令，生产清单必须从 Secret 注入
+      CACHE_ENABLED: ${CACHE_ENABLED:-true}
+      CACHE_BACKEND: valkey
+      VALKEY_URL: redis://valkey:6379/0
       API_KEY: ${API_KEY:-}
       LLM_API_KEY: ${LLM_API_KEY:-}
       LLM_BASE_URL: ${LLM_BASE_URL:-https://api.openai.com/v1}
@@ -41,7 +78,9 @@ services:
       EMBEDDING_API_KEY: ${EMBEDDING_API_KEY:-}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-bge-small-zh}
       SEARCH_API_KEY: ${SEARCH_API_KEY:-}
-      SQL_DSN: ${SQL_DSN:-}
+      # 问数不再走平台直连（原 SQL_DSN，ADR-0011 选项 A 已退役）：该路径需要
+      # nl2sql-service 在位，而本 compose 只起 postgres/valkey/agent-platform ⇒ 本形态下
+      # nl2sql 子代理不注册（/health 报 nl2sql=false）。集群形态见 deploy/k8s/20+30。
       LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
       LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
       LANGFUSE_HOST: ${LANGFUSE_HOST:-}

@@ -282,3 +282,64 @@ def test_load_tracked_index_returns_none_on_failure(tmp_path, monkeypatch, outco
 
     monkeypatch.setattr(_doc_sync.subprocess, "run", _f)
     assert _doc_sync.load_tracked_index(tmp_path) is None
+
+
+# ---------------------------------------------------------------------------
+# pyproject 包名校验的枚举面（#38：改以 git 清单为基准，不走本机 FS）
+# ---------------------------------------------------------------------------
+def test_iter_pyproject_paths_keeps_only_pyprojects(tmp_path, monkeypatch):
+    def _ok(*args, **kwargs):
+        return subprocess.CompletedProcess(
+            list(args[0]), 0,
+            b"packages/agent-core/pyproject.toml\x00docs/a.md\x00applications/x/pyproject.toml\x00",
+            b"",
+        )
+
+    monkeypatch.setattr(_doc_sync.subprocess, "run", _ok)
+    paths = _doc_sync.iter_pyproject_paths(tmp_path)
+    assert paths == [
+        tmp_path / "packages/agent-core/pyproject.toml",
+        tmp_path / "applications/x/pyproject.toml",
+    ]
+
+
+@pytest.mark.parametrize("outcome", ["git_rc_nonzero", "git_missing", "undecodable_output"])
+def test_iter_pyproject_paths_returns_none_on_failure(tmp_path, monkeypatch, outcome):
+    if outcome == "git_rc_nonzero":
+        def _f(*a, **k):
+            return subprocess.CompletedProcess([], 128, b"", b"fatal: not a git repository")
+    elif outcome == "git_missing":
+        def _f(*a, **k):
+            raise OSError("git not found")
+    else:
+        def _f(*a, **k):
+            return subprocess.CompletedProcess([], 0, b"ok/pyproject.toml\x00\xc3\x28.py\x00", b"")
+
+    monkeypatch.setattr(_doc_sync.subprocess, "run", _f)
+    assert _doc_sync.iter_pyproject_paths(tmp_path) is None
+
+
+def test_pyproject_check_fails_closed_when_index_unavailable(errors, tmp_path, monkeypatch):
+    monkeypatch.setattr(_doc_sync, "iter_pyproject_paths", lambda base=tmp_path: None)
+    _doc_sync.check_pyproject_package_names(tmp_path)
+    assert any("fail-closed" in e for e in errors)
+
+
+def test_real_tree_pyproject_enumeration_covers_all_tracked():
+    """自检：gitignored 暂存/worktree 副本被排除，且不得漏掉任何入库件。"""
+    proc = subprocess.run(
+        ["git", "-C", str(REPO_ROOT), "ls-files", "-z"],
+        capture_output=True,
+        check=False,
+    )
+    assert proc.returncode == 0
+    tracked = {
+        REPO_ROOT / rel
+        for rel in proc.stdout.decode("utf-8").split("\x00")
+        if rel.rsplit("/", 1)[-1] == "pyproject.toml"
+    }
+    enumerated = set(_doc_sync.iter_pyproject_paths(REPO_ROOT) or [])
+    assert tracked and tracked <= enumerated
+    assert not any(
+        ".tmp-scratch" in p.parts or ".codeartsdoer" in p.parts for p in enumerated
+    )

@@ -18,9 +18,15 @@ import pytest
 import yaml
 
 _ROOT = Path(__file__).resolve().parents[2]
-_CONFIG = _ROOT / "deploy" / "k8s" / "00-config.yaml"
-_SECRETS = _ROOT / "deploy" / "k8s" / "05-secrets.yaml"
-_DEPLOY = _ROOT / "deploy" / "k8s" / "20-agent-platform.yaml"
+_K8S = _ROOT / "deploy" / "k8s"
+_CONFIG = _K8S / "00-config.yaml"
+_SECRETS = _K8S / "05-secrets.yaml"
+_DEPLOY = _K8S / "20-agent-platform.yaml"
+_NL2SQL = _K8S / "30-nl2sql-service.yaml"  # 平台要调它，地址与它的 Service 对象必须能算出同一个值
+#: 会被 apply 的全部工作负载清单。ConfigMap 的“有没有死键”要按**消费方全集**算：
+#: 00-config 现在同时服务平台（20）、问数服务（30）与两个一次性 Job（35/36），
+#: 只拿 20 的容器做分母，就会把 30/36 的真引用误判成死键（并反过来鼓励大家拆成两份 CM）。
+_WORKLOADS = (_DEPLOY, _NL2SQL, _K8S / "35-nl2sql-dbsql-job.yaml", _K8S / "36-nl2sql-meta-init-job.yaml")
 
 # 由第三方库直接消费、仓库内不出现读取点的标准 env（实测：设这三个可离线加载权重）
 _THIRD_PARTY_ENV = {"HF_HOME", "HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE", "OMP_NUM_THREADS"}
@@ -29,7 +35,15 @@ _THIRD_PARTY_ENV = {"HF_HOME", "HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE", "OMP_NU
 # LANGFUSE_* 两把是 Langfuse 项目 API key（2026-10-13 无头初始化生成，
 # 经 stdin 写入该对象；见 deploy/observability/langfuse.env.example 的注入去向表）
 _CLUSTER_OWNED_SECRET_OBJECTS = {"observability-keys"}
-_CLUSTER_OWNED_SECRET_KEYS = {"LLM_API_KEY", "API_KEY", "LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY"}
+# INTERNAL_HMAC_KEY（2026-10-28 补）：20 是签发侧、自己也要从卷里读这把键。这里少列一个键 =
+# 入库 demo Secret 可以添一把"能签合法租户"的对称密钥而不被拦，而在 30 那侧的同名门禁会红。
+_CLUSTER_OWNED_SECRET_KEYS = {
+    "LLM_API_KEY",
+    "API_KEY",
+    "LANGFUSE_PUBLIC_KEY",
+    "LANGFUSE_SECRET_KEY",
+    "INTERNAL_HMAC_KEY",
+}
 
 # k8s 对未知字段不报错、直接丢（非 strict validate）⇒ 用白名单把它变成用例失败
 _CONTAINER_FIELDS = {
@@ -165,14 +179,47 @@ def test_local_mode_model_id_is_the_one_kernel_falls_back_to(container):
 # ---------------------------------------------------------------------------
 
 
-def test_configmap_has_no_dead_keys(configmap, container):
+def _cm_key_refs(node: object) -> set[tuple[str, str]]:
+    """递归收集 (configMap 名, 键名) 引用。
+
+    不按 `env[].valueFrom.configMapKeyRef` 的固定路径取：envFrom / volume / projected
+    都是同一份 CM 的合法消费方，只扫 env 会把它们当成死键。
+    """
+    if isinstance(node, dict):
+        ref = node.get("configMapKeyRef")
+        out: set[tuple[str, str]] = set()
+        if isinstance(ref, dict) and "name" in ref and "key" in ref:
+            out.add((ref["name"], ref["key"]))
+        for value in node.values():
+            out |= _cm_key_refs(value)
+        return out
+    if isinstance(node, list):
+        acc: set[tuple[str, str]] = set()
+        for item in node:
+            acc |= _cm_key_refs(item)
+        return acc
+    return set()
+
+
+def _cm_refs_across_workloads() -> set[tuple[str, str]]:
+    refs: set[tuple[str, str]] = set()
+    for path in _WORKLOADS:
+        for doc in _load(path):
+            refs |= _cm_key_refs(doc)
+    return refs
+
+
+def test_configmap_has_no_dead_keys(configmap):
     consumed = {
-        e["name"]
-        for e in container["env"]
-        if "valueFrom" in e and "configMapKeyRef" in e["valueFrom"]
+        key
+        for name, key in _cm_refs_across_workloads()
+        if name == configmap["metadata"]["name"]
     }
     dead = sorted(set(configmap["data"]) - consumed)
-    assert not dead, f"ConfigMap 存在未被 deployment 引用的键：{dead}（死键会让清单与线上口径分叉）"
+    assert not dead, (
+        f"ConfigMap 存在未被任何工作负载引用的键：{dead}"
+        "（死键会让清单与线上口径分叉：改它的人得不到任何反馈）"
+    )
 
 
 def test_configmap_llm_values_are_not_the_retired_foreign_defaults(configmap):
@@ -274,6 +321,53 @@ def test_local_embedding_requires_mounted_weight_cache(pod_spec, container, conf
 
 
 # ---------------------------------------------------------------------------
+# ⑥b 跨服务调用地址：必须与对方 Service 对象算得出同一个值
+# ---------------------------------------------------------------------------
+
+
+def _nl2sql_service() -> dict:
+    return next(d for d in _load(_NL2SQL) if d["kind"] == "Service")
+
+
+def test_nl2sql_service_url_matches_the_service_object(container):
+    """平台调问数服务的地址，必须能从 30 的 Service 对象算出来。
+
+    之前这里写的是 localhost:8001——集群内根本不通（localhost 是 Pod 自己），
+    而平台侧探针全绿：坏掉的只有“学习反馈”这一条用户路径。地址、端口、namespace
+    三件都得跟 Service 对象比，而不是在测试里抄第 N 份字面值。
+    """
+    svc = _nl2sql_service()
+    ports = svc["spec"]["ports"]
+    assert len(ports) == 1, f"30 的 Service 期望单端口：{ports}"
+    expected = f"http://{svc['metadata']['name']}:{ports[0]['port']}"
+    items = [e for e in container["env"] if e["name"] == "NL2SQL_SERVICE_URL"]
+    assert items, "平台未注入 NL2SQL_SERVICE_URL ⇒ /sql/train 无法转发到问数服务"
+    assert "value" in items[0], "跨服务地址不是字面值，去查它引用了哪份 CM 键（两消费方同值就分叉了）"
+    assert items[0]["value"] == expected, (
+        f"平台里的 NL2SQL_SERVICE_URL={items[0]['value']!r}，而 30 的 Service 算出来是 {expected!r}"
+    )
+    dep_ns = next(d for d in _load(_DEPLOY) if d["kind"] == "Deployment")["metadata"]["namespace"]
+    assert svc["metadata"]["namespace"] == dep_ns, (
+        "短名 DNS 只在同 namespace 解得出；两边不同 ns 就要写全限定名"
+    )
+
+
+def test_platform_does_not_inject_sql_dsn(container):
+    """平台不注入 SQL_DSN（问数数据面已换到 nl2sql-service，ADR-0011 选项 A）。
+
+    批次 4 摘掉注入时 `sql_dsn` 仍是 Settings 字段 ⇒ 通用死键门禁（①）验不出它：它“有效”，
+    但当时的唯一读点是 /health 的 `sql_backend=detect_dialect(settings.sql_dsn)`，注它只会让
+    那盏灯拿**平台库**的方言冒充问数读数（问数真正用的是 nl2sql_dw）。批次 5（2026-10-28）
+    把字段与灯一并退役后，①已经能咬住这个名字；本用例仍要点名的理由是：若有人为了让①过关
+    而把 `sql_dsn` 加回 Settings，①会再度沉默，而这里会直接说清“为什么这个名字不许回来”。
+    """
+    assert "SQL_DSN" not in _manifest_env(container), (
+        "平台清单注入了 SQL_DSN：平台侧已无任何代码读它（字段随批次 5 退役），"
+        "业务库连接串属于 nl2sql-service 的 DW_DB_DSN"
+    )
+
+
+# ---------------------------------------------------------------------------
 # ⑦ 非空洞性：把当年四类真实缺陷形状注回去，逐条确认门禁会咬
 # ---------------------------------------------------------------------------
 
@@ -293,8 +387,8 @@ def test_gate_bites_on_the_four_defect_shapes(secret, pod_spec, container, confi
     with pytest.raises(AssertionError, match="api.openai.com"):
         test_configmap_llm_values_are_not_the_retired_foreign_defaults(bad_cm)
     bad_cm["data"]["SOME_UNUSED_KEY"] = "x"
-    with pytest.raises(AssertionError, match="未被 deployment 引用的键"):
-        test_configmap_has_no_dead_keys(bad_cm, container)
+    with pytest.raises(AssertionError, match="未被任何工作负载引用的键"):
+        test_configmap_has_no_dead_keys(bad_cm)
 
     # (c) 字段缩进错一层（terminationGracePeriodSeconds 落进容器）→ k8s 静默丢弃
     bad_pod = copy.deepcopy(pod_spec)
@@ -333,4 +427,18 @@ def test_gate_bites_on_the_four_defect_shapes(secret, pod_spec, container, confi
     bad_secret["stringData"]["LLM_API_KEY"] = "sk-not-a-real-key"
     with pytest.raises(AssertionError, match="不应出现在入库清单"):
         test_no_real_secret_values_in_repo_manifest(bad_secret)
+
+    # (f) 把已退役的 SQL_DSN 注回平台（假灯形状）⇒ 专属门禁要红
+    bad_ctr5 = copy.deepcopy(container)
+    bad_ctr5["env"].append({"name": "SQL_DSN", "value": "postgresql://x/y"})
+    with pytest.raises(AssertionError, match="SQL_DSN"):
+        test_platform_does_not_inject_sql_dsn(bad_ctr5)
+
+    # (g) 地址改回 localhost 或 Service 改名后没同步 ⇒ 与 Service 对象的比对要红
+    bad_ctr6 = copy.deepcopy(container)
+    for e in bad_ctr6["env"]:
+        if e["name"] == "NL2SQL_SERVICE_URL":
+            e["value"] = "http://localhost:8001"
+    with pytest.raises(AssertionError, match="NL2SQL_SERVICE_URL"):
+        test_nl2sql_service_url_matches_the_service_object(bad_ctr6)
 

@@ -87,10 +87,36 @@
 |---|---|---|
 | `subagents/sql_agent.py`（图节点证据生产） | 改 nl2sql 瘦客户端（httpx POST `/api/query`） | 无（函数签名保留，llm 参数兼容保留但不再使用——LLM 归 nl2sql）；未配置 `NL2SQL_SERVICE_URL` 返回明确提示（同 search.py 降级契约）；HTTP 错误分类进证据 |
 | `api/sql_router.py` `/sql/train`（上线端点） | 对外契约不变（路径/鉴权/请求响应形状），内部改 POST `/api/meta/ingest` | 响应新增可选 `report` 字段（摄入计数 + 三类记账）；flag 语义为"已摄入"；上游不可达 502、上游状态码透传 |
-| `api/health_router.py`（`sql_backend` 标志） | `detect_dialect` 迁到 `agent_server/db_dialect.py` | 无（运维可见性不属于 Text2SQL 能力） |
+| `api/health_router.py`（`sql_backend` 标志） | `detect_dialect` 迁到 `agent_server/db_dialect.py` | 无（运维可见性不属于 Text2SQL 能力）〔⚠️ 本行的处置已由 §7.3 推翻：2026-10-28 灯与字段一并退役〕 |
 
 **`/api/meta/ingest`（nl2sql 侧新增，commit `e92a784`）**：与迁移 CLI 共用同一写入 core（`services/ingest_service.py` 的 `build_migration_plan` + `write_scope`，Stage ② 上移的共享件）——在线摄入与批量迁移两条路只有一份写入逻辑。分工：CLI 搬历史 + `--prune`；端点管在线增量、**不 prune**（范例差异删是显式运维动作）。请求形状对齐 `SqlTrainRequest`（ddl/docs/examples 单串或列表都收）；作用域走 `resolve_scope`（ADR-0007 断言 > 请求体 > default，同 `/api/query`）；响应带回实际落点 scope + 三类记账。未接身份门（S-1）下与 `/api/meta/refresh` 同級定位（内部/运维端点，文档明示）。
 
 **退役删除**：`applications/agent_server/sql/`（pipeline/schema_store/guard）+ `test_schema_store.py` + `test_sql_pipeline.py`；`test_sql_guard.py` 改导 `agent_core.sql.guard`（guard 是平台共享件，不随包退役）；`test_corpus_tenant_isolation.py` 删 3 条 sql_* 判据（留 skip 壳注明移交）；`test_isolation_dimension_contract.py` 的谓词配对扫描面改扫 nl2sql `meta_repository.py`（隔离契约未断，换承载文件）；README U-1 / query_router / rag.embed / pool_factory 的引用同步为史实。
 
 **净效果**：平台内 Text2SQL 只剩一条路（nl2sql-service）；退役方（agent_server/sql）的**能力无损失**——few-shot 范例（004 + recall_example）、业务文档（table_comment 读路径）、在线训练（/api/meta/ingest）、隔离（Stage ①）在 nl2sql 侧全部有着落且已验证。
+
+> ⚠️ **2026-10-26 状态订正（不改本 ADR 的决策结论）**：上文两处描述已被后续改动取代，按当时记录保留、在此标注现状——① 「作用域走 `resolve_scope`（ADR-0007 断言 > 请求体 > default，同 `/api/query`）」现为**拒收请求体归属**：`applications/nl2sql-service/nl2sql_service/api/routers/ingest_router.py:67-84` 对非空 `tenant_id` / `workspace_id` 直接 400，再以 `server_tenant_id()` **无实参**（无部署 default）取断言；② 「已验证」在**网关签名头**这条链上不成立：nl2sql 服务对 `X-Internal-Tenant` / `verify_internal_header` / `IdentityMiddleware` 实取零命中，应用由 `build_api_app` 构建且无 `add_middleware`；本机探针（fresh process，ContextVar 未绑定）实测 `server_tenant_id()` 抛 `ValueError`（`agent_core/memory/_tenant_gate.py:18-26` 无 env 回退），故 `/api/meta/ingest` 当前恒 401，`applications/agent_server/api/sql_router.py:61` 的签发对这条链是无效动作。收敛决策（Text2SQL 单路）不受影响；缺口已登记 `docs/architecture/agent-harness-capability-map.md` 行 238，修法（给 nl2sql 装同一实现的验签中间件）待方案批准。
+
+### 7.3 后续修订（2026-10-28，问数终态落地批次 5）
+
+推翻 §7.2 消费方表里第 3 行：`sql_backend` 不该留在平台侧。当时判为「无契约变化，运维可见性不属于
+Text2SQL 能力」，但它其实是**一盏住错地方的灯**。
+
+- **它不是一开头就假的**：Stage ③ 之前平台确实自己连业务库执行 SQL，`sql_backend` 是真读数。Stage ③
+  把执行权交给 nl2sql-service 后灯没跟着搬家 ⇒ `settings.sql_dsn` 指的是**平台库**（与 `DATABASE_URL` 同源），
+  `/health` 报的 `sql_backend=postgres` 只证明“平台能连自己的库”。这个漂移被当过上线证据记录
+ （`docs/operations/minimal-release-runbook.md` 的问数行、`docs/operations/evidence/2026-10-12-release/readings.md`），
+  所以本轮不止删字段，还要把“谁该报这个位”写清。
+- **改法**：`sql_dsn` / `sql_max_rows` 两个字段、`agent_server/db_dialect.py`、根 `.env.example` 与
+  `docker-compose.yml` 的对应键一并退役（实测消费点为 0）；平台 `/health` 改报 `nl2sql`（子代理注册位，
+  与 `search`/`llm` 同类且**不回显 URL**）；共享契约 `HealthResponse.sql_backend` **字段保留**（零破坏），
+  改由真正持有业务库连接的 nl2sql-service 上报它的 dw 方言；没配数据面报 null（`detect_dialect("")` 回落
+  postgres，拿它当读数就是把“没有 dw”说成“有个 pg 可问”）。
+- **同批发现并修的真缺陷**：graph 与 deterministic 两处空证据判据里还钉着退役前的「SQL_DSN 未配置」，
+  而子能力早在 Stage ③ 就改口为「问数服务未配置…」⇒ 一条“根本没配服务”的提示被当成**真证据**送进合成步
+ （不触发重试、也不给“证据不足”）。判据与文案收敛到单一来源 `applications/agent_server/subagents/degradation.py`。
+- **门禁**：`test_health_fields.py::TestNl2sqlBit`（含“即使注着 SQL_DSN 也必须报 null”的假灯回归）、
+  `test_empty_evidence_markers.py`（含反证：换回退役前的判据则缺陷重现）、nl2sql 侧
+  `test_identity_gate_assembly.py::TestHealthReportsItsOwnDataPlane`、清单侧
+  `tests/deploy/test_k8s_manifest_wiring.py::test_platform_does_not_inject_sql_dsn`。
+- **依赖方向不变**：不新增跨层 import（`application → agent-runtime → agent-core` 单向）。

@@ -49,9 +49,9 @@ Agent Platform 是一个基于 **LangGraph Supervisor 模式** 的统一智能�
 - **Supervisor 编排**（`applications/agent_server/agent/graph.py`）：意图路由 → 子能力执行 → 证据汇总 → 反思重试，LLM 结构化路由失败时回退确定性启发式
 - **联网搜索**（`applications/agent_server/subagents/search.py`）：Tavily API + 熔断器保护，超时/错误自动降级
 - **混合检索 RAG**（`applications/agent_server/subagents/rag.py` + `applications/agent_server/rag/`）：文档导入 → 语义切分 → pgvector 向量检索 + BM25 关键词检索 → RRF 融合排序
-- **Text-to-SQL**（`applications/agent_server/subagents/sql_agent.py` + `applications/agent_server/sql/`）：训练三件套（DDL + 业务文档 + 问题-SQL 范例）→ sqlglot 白名单守卫 → 连接级只读执行
+- **Text-to-SQL / 问数**（`applications/agent_server/subagents/sql_agent.py` → `applications/nl2sql-service/`）：平台侧是**瘦客户端**（POST `/api/query`），生成 / 取值核验 / 多轮继承 / 查询追溯均在 nl2sql-service；平台自有管线已退役（ADR-0011 选项 A）。`NL2SQL_SERVICE_URL` 为空时该子代理不注册，返回「问数服务未配置」而不是静默空结果。
 - **长期记忆**（`applications/agent_server/memory/longterm.py`）：pgvector 语义召回历史对话，跨会话上下文关联
-- **语义缓存**（`packages/agent-runtime/agent_runtime/cache.py`）：余弦距离阈值判定同义命中，命中时跳过编排直接返回
+- **语义缓存**（`packages/agent-runtime/agent_runtime/cache/`）：Valkey L1 精确 + L2 向量（HNSW/COSINE，按余弦距离阈值判定）+ 负缓存；开发/测试与生产同一实现（ADR-0013 C），后端不可达时 fail-open（按未命中处理）并在 `/health` 报 degraded
 - **上下文压缩**（`applications/agent_server/agent/compact.py`）：多轮会话 token 超阈值时自动摘要旧消息，参考 Claude Code / Codex / OpenCode
 - **熔断器**（`packages/agent-runtime/agent_runtime/circuit_breaker.py`）：closed → open → half-open 状态机，连续失败达阈值后熔断，冷却窗口到期放行试探
 - **LLM 主备降级**（`applications/agent_server/agent/llm.py`）：主模型超时/错误时自动切换 fallback 模型
@@ -65,7 +65,7 @@ Agent Platform 是一个基于 **LangGraph Supervisor 模式** 的统一智能�
 - **会话并发协调**（`packages/agent-runtime/agent_runtime/coordinator.py`）：per-session `asyncio.Lock` 互斥，同 session 串行 / 异 session 并发；支持 queue（排队）/ reject（拒绝）二策略（原第三种 coalesce 已退化为 queue、名不副实，治理路线图工项 P4-3 于 2026-08-21 把它从策略枚举中移除——**是代码改动，不是 lint 规则**）
 - **Durable Admission**（`packages/agent-runtime/agent_runtime/admission.py`）：PG 持久化准入队列 + 三维滑动窗口限流（per-user / per-session / global）+ 优先级调度 + 崩溃恢复；不存储问题全文（脱敏约束）
 - **会话回退**（`packages/agent-runtime/agent_runtime/revert.py`）：Checkpoint 级原子回退，不删除历史 checkpoint（支持 redo），异步审计日志（`operator` 取服务端断言租户，不取入站密钥）。⚠️ **跨用户回退目前并未被禁止**：本模块 docstring 里那句"跨用户禁止"没有实现——`/session/revert` 不走 `resolve_thread_id`，客户端传来的会话号原样进 `revert()`，且从不与归属比对（路由里 `FORBIDDEN`→403 那条分支是死码）。修法见 `docs/plans/plan-memory-identity-workspace-2026-10-14.md` §1.6（2026-10-15 核码订正）
-- **OTel 分布式追踪**（`packages/agent-core/agent_core/tracing.py` 内核状态机 + `tracing_middleware.py` 统一装配）：三态语义（DISABLED/DEGRADED/ACTIVE），W3C traceparent 透传，**自建链路属性**脱敏（只记问题长度 + 哈希；⚠️ 范围限定——LangChain 自动埋点的模型节点 span 仍带完整提示词与回答，该暴露已拍板接受，见 `docs/operations/minimal-release-runbook.md` 台账 ㉓），与 Langfuse 共存，exporter 可插拔（otlp/console/注入式）；原 `agent_runtime/otel.py` 过渡门面已退役（观测方案 §15，2026-09-30），消费方直调 kernel
+- **OTel 分布式追踪**（`packages/agent-core/agent_core/tracing.py` 内核状态机 + `packages/agent-core/agent_core/tracing_middleware.py` 统一装配）：三态语义（DISABLED/DEGRADED/ACTIVE），W3C traceparent 透传，**自建链路属性**脱敏（只记问题长度 + 哈希；⚠️ 范围限定——LangChain 自动埋点的模型节点 span 仍带完整提示词与回答，该暴露已拍板接受，见 `docs/operations/minimal-release-runbook.md` 台账 ㉓），与 Langfuse 共存，exporter 可插拔（otlp/console/注入式）；原 `agent_runtime/otel.py` 过渡门面已退役（观测方案 §15，2026-09-30），消费方直调 kernel
 - **MCP Client**（`packages/agent-runtime/agent_runtime/mcp_client.py` + `applications/agent_server/subagents/mcp.py`）：多 MCP server 连接管理（stdio + SSE transport），工具白名单校验，per-server 独立熔断器隔离故障域，调用审计
 - **MCP 工具自动注册**（`packages/agent-runtime/agent_runtime/skills/mcp.py`）：MCP server 工具自动编译为 `SkillKind.REMOTE` Skill 注册到 SkillRegistry，Planner 经统一 `discover()` / `delegate()` 入口调用
 - **沙箱代码执行**（`packages/agent-runtime/agent_runtime/sandbox.py` + `agent_runtime/skills/sandbox.py`）：Docker 容器隔离执行用户代码（`--network=none --read-only --memory=512m --user=nobody`），Docker 不可用时降级 subprocess。注册为 `code_execution` Skill，Planner 启发式路由自动识别代码执行意图
@@ -82,11 +82,11 @@ Agent Platform 是一个基于 **LangGraph Supervisor 模式** 的统一智能�
 > 本区块能力均已实现并可经配置开启，但 **`scheduler_enabled` 默认 `False`**（见「配置」章节）；端到端双实例物理故障转移验收未完成，具体缺口清单见 [`docs/TODO.md`](docs/TODO.md) 第 2 节，不得当作已上线能力对外声明。
 
 - **ExecutionScheduler**（`packages/agent-runtime/agent_runtime/execution_scheduler.py`）：PG 队列 + `FOR UPDATE SKIP LOCKED` 实现跨实例并发不重不丢；`submit` 实际入队 + `claim_token` fencing（P0-1 并发门控已修）
-- **ExecutionStatus 状态机**（`execution_status.py`）：PENDING / RUNNING / WAITING / WAITING_EXTERNAL / WAITING_HUMAN / PAUSED / CANCEL_REQUESTED / CANCELLED / SUCCEEDED / FAILED 十态与合法转换矩阵，非法转换拒绝
-- **AwaitableTask 挂起 + 回调恢复**（`awaitable_task.py` + `awaitable_task_pg.py` + `applications/agent_server/api/callback.py`）：执行链在外部异步任务处可挂起，外部系统回调 `POST /api/callback/{task_id}` 后从 checkpoint 恢复注入结果继续执行（幂等，重复回调 no-op）
-- **Control Plane HTTP API**（`control_plane.py` + `applications/agent_server/api/control.py`）：`/api/executions/{id}` 提供 inspect/pause/resume/cancel/retry/terminate 六个操作，非法状态转换返 409
-- **Cost Governance**（`cost_governance.py`）：按 `budget_limit_requests/tokens/cost` + `budget_window_seconds` 滑动窗口计量，超限返回 429（`cost_governance_enabled` 默认 `False`）
-- **ForensicContext + SchedulerReaper**（`forensic.py` + lease-based 回收）：执行现场取证快照 + 本地任务租约过期后的孤儿回收
+- **ExecutionStatus 状态机**（`packages/agent-runtime/agent_runtime/execution_status.py`）：PENDING / RUNNING / WAITING / WAITING_EXTERNAL / WAITING_HUMAN / PAUSED / CANCEL_REQUESTED / CANCELLED / SUCCEEDED / FAILED 十态与合法转换矩阵，非法转换拒绝
+- **AwaitableTask 挂起 + 回调恢复**（`packages/agent-runtime/agent_runtime/awaitable_task.py` + `packages/agent-runtime/agent_runtime/awaitable_task_pg.py` + `applications/agent_server/api/callback.py`）：执行链在外部异步任务处可挂起，外部系统回调 `POST /api/callback/{task_id}` 后从 checkpoint 恢复注入结果继续执行（幂等，重复回调 no-op）
+- **Control Plane HTTP API**（`packages/agent-runtime/agent_runtime/control_plane.py` + `applications/agent_server/api/control.py`）：`/api/executions/{id}` 提供 inspect/pause/resume/cancel/retry/terminate 六个操作，非法状态转换返 409
+- **Cost Governance**（`packages/agent-runtime/agent_runtime/cost_governance.py`）：按 `budget_limit_requests/tokens/cost` + `budget_window_seconds` 滑动窗口计量，超限返回 429（`cost_governance_enabled` 默认 `False`）
+- **ForensicContext + SchedulerReaper**（`packages/agent-runtime/agent_runtime/forensic.py` + lease-based 回收）：执行现场取证快照 + 本地任务租约过期后的孤儿回收
 
 ---
 
@@ -133,7 +133,7 @@ Agent Platform 是一个基于 **LangGraph Supervisor 模式** 的统一智能�
                 ╭─────────────────────────────────────────────────────╮
                 │                  CROSS-CUTTING                      │
                 │                                                     │
-                │  PostgreSQL/pgvector    Semantic Cache              │
+                │  PostgreSQL/pgvector    Valkey Semantic Cache       │
                 │  Circuit Breaker        OpenTelemetry               │
                 │  Langfuse               Checkpoint / Memory         │
                 ╰─────────────────────────────────────────────────────╯
@@ -180,9 +180,9 @@ flowchart LR
 
 ### 能力现状全景（四档交底）
 
-> 记忆 / 缓存 / 上下文 / 工具 / 安全 / 状态可靠性 / 可观测评测 / 知识数据 / 编排范式 / 平台产品面 —— **10 个能力域逐条给状态与文件证据**，并登记缺项优先级（P0–P2）、14 个默认关开关、13 个零生产调用模块：见 [`docs/architecture/agent-harness-capability-map.md`](docs/architecture/agent-harness-capability-map.md)。
+> 记忆 / 缓存 / 上下文 / 工具 / 安全 / 状态可靠性 / 可观测评测 / 知识数据 / 编排范式 / 平台产品面 —— **10 个能力域逐条给状态与文件证据**，并登记缺项优先级（P0–P2）、16 行 agent_server 默认关/默认空配置 + 16 项内核/身份/联邦 env 直读、13 条零调用/仅重导出与已接线默认关清单：见 [`docs/architecture/agent-harness-capability-map.md`](docs/architecture/agent-harness-capability-map.md)。
 >
-> 状态口径：✅ 已实现·默认开 ｜ 🔽 已实现·**默认关（opt-in）** ｜ 🟡 半成品·零生产调用 ｜ 🧪 脚手架/仅 demo ｜ ❌ 不存在。**报「已就绪」前必须先说默认关**；该文档是绑定 rev 的快照，换 rev 后按文内 §1.3 的校验命令复跑。
+> 状态口径：✅ 已实现·默认开 ｜ 🔽 已实现·**默认关（opt-in）** ｜ 🟡 半成品（零生产调用 / 装配缺口 / 无出数面 / 部分路径） ｜ 🧪 脚手架/仅 demo ｜ ❌ 不存在。**报「已就绪」前必须先说默认关**；该文档是绑定 rev 的快照，换 rev 后按文内 §1.3 的校验命令复跑。
 
 ---
 
@@ -302,7 +302,7 @@ curl http://127.0.0.1:8000/health
   "storage": "memory",
   "llm": false,
   "search": false,
-  "sql_backend": "none",
+  "sql_backend": null,
   "coordination": true,
   "admission": false,
   "revert": true,
@@ -317,18 +317,54 @@ curl http://127.0.0.1:8000/health
   "embedding_real": false,
   "planner": "deterministic",
   "guard_enabled": false,
+  "nl2sql": false,
   "langfuse_enabled": false,
   "langfuse_ready": false,
+  "cache_backend": "disabled",
+  "cache_ready": true,
+  "cache_degraded_reason": null,
+  "cache_stats": {
+    "backend": "disabled",
+    "scope": "agent_server",
+    "total": 0,
+    "hit_rate": 0.0,
+    "l1_hit": 0,
+    "l2_hit": 0,
+    "null_hit": 0,
+    "miss": 0,
+    "error": 0,
+    "skipped_no_tenant": 0,
+    "skipped_unsafe_tag": 0,
+    "skipped_pii": 0,
+    "dropped_writes": 0,
+    "embedding_error": 0,
+    "l2_unavailable": 0,
+    "index_missing": 0
+  },
   "auth_enabled": false,
   "identity_mode": "insecure"
 }
 ```
 
-> 上面是 2026-10-14 本机**实跑取到**的真实响应（未配 `DATABASE_URL` 的零依赖形态，故 `storage=memory`、`embedding_backend=MockEmbedder`、`llm=false`），共 **25 个键 = 共享基类 13 + 本 app 独有 12**。复现命令：`uv run python -c "from fastapi.testclient import TestClient; from agent_server.main import app; print(TestClient(app).get('/health').json())"`（注意 `get_settings` 有 `lru_cache`，改 env 后须清缓存）。
+> 上面是 2026-10-25 本机**实跑取到**的真实响应（未配 `DATABASE_URL` 的零依赖形态，故 `storage=memory`、`embedding_backend=MockEmbedder`、`llm=false`；未起 Valkey，故 `CACHE_BACKEND=disabled`），共 **29 个键 = 共享基类 13 + 本 app 独有 16**。**2026-10-27 复核**：按下述命令重跑，29 个键与逐项取值均与上表一致（`cache_stats` 同日新增，是缓存命中率与分账计数的出口；键集合恒定，未发生的计数渲成 0）。
 >
-> 字段语义口径：值取自**运行态装配真值**而非 settings 意愿值（`scheduler`/`control_plane`/`cost_governance`/`forensic` 即 V3 四部件，`18b6954` 起上报）；`langfuse_enabled`（意愿）与 `langfuse_ready`（真装配）两盏灯必须分开看，差值即故障信号；`/health` 免鉴权，故 `auth_enabled` 与 `identity_mode` 只报布尔/模式名，**不回显任何密钥**。
+> 复现命令（**必须进 lifespan**：`embedding_backend` / `langfuse_ready` 是启动期算一次、存进 `app.state` 的值，`TestClient(app)` 不进 `with` 就不触发启动钩子，`/health` 会把 `embedding_backend` 报成 `unknown`——2026-10-27 实测两种写法分别得 `unknown` 与 `MockEmbedder`）：
 >
-> 两点残差（勿当成已完成）：① 契约测试只断言了 `SCHEDULER_ENABLED` 翻转 `scheduler`/`control_plane`，`cost_governance`/`forensic` **无开关跟随断言**；② `forensic` 位取的是 `trajectory_store` 非空的**代理语义**，不等于 ForensicContext 自身装配态。详见 [`docs/architecture/agent-harness-capability-map.md`](docs/architecture/agent-harness-capability-map.md) §2.8。
+> ```bash
+> CACHE_BACKEND=disabled uv run python - <<'PY'
+> from fastapi.testclient import TestClient
+> from agent_server.main import app
+>
+> with TestClient(app) as client:
+>     print(client.get('/health').json())
+> PY
+> ```
+>
+> 注意 `get_settings` 有 `lru_cache`，改 env 后须清缓存。
+>
+> 字段语义口径：值取自**运行态装配真值**而非 settings 意愿值（`scheduler`/`control_plane`/`cost_governance`/`forensic` 即 V3 四部件，`18b6954` 起上报）；`langfuse_enabled`（意愿）与 `langfuse_ready`（真装配）两盏灯必须分开看，差值即故障信号；缓存三字段同理——`cache_backend=valkey` 且 `cache_ready=false` 时看 `cache_degraded_reason`（已脱敏）；`/health` 免鉴权，故 `auth_enabled` 与 `identity_mode` 只报布尔/模式名，**不回显任何密钥**。
+>
+> 契约测试已覆盖四个 V3 部件的「拨输入返回值必须变」，`forensic` 读的是其已声明的装配体 `planner_runtime.trajectory_store`（不是代理缺口）。详见 [`docs/architecture/agent-harness-capability-map.md`](docs/architecture/agent-harness-capability-map.md) §2.8。
 
 ### V3 Control Plane API（`scheduler_enabled=True` 时生效）
 
@@ -372,7 +408,6 @@ curl -X POST http://127.0.0.1:8000/api/callback/{task_id} \
 | `LLM_MODEL` | `gpt-4o-mini` | 主模型 |
 | `LLM_FALLBACK_MODEL` | `gpt-4o-mini` | 降级模型 |
 | `SEARCH_API_KEY` | `""` | Tavily 搜索 API Key |
-| `SQL_DSN` | `""` | 业务库连接串（sqlite / postgresql） |
 | `HOST` | `0.0.0.0` | 服务监听地址 |
 | `PORT` | `8000` | 服务监听端口 |
 | `VECTOR_DIM` | `512` | pgvector 向量维度（与 Embedding 模型匹配） |
@@ -385,8 +420,12 @@ curl -X POST http://127.0.0.1:8000/api/callback/{task_id} \
 | `LANGFUSE_PUBLIC_KEY` | `""` | Langfuse 公钥（与 secret/host 均填才启用 trace） |
 | `LANGFUSE_SECRET_KEY` | `""` | Langfuse 私钥 |
 | `LANGFUSE_HOST` | `https://cloud.langfuse.com` | Langfuse 服务端地址（compose 注入） |
-| `SQL_MAX_ROWS` | `100` | Text-to-SQL 业务库只读返回行数上限 |
 | `RAG_TOP_K` | `4` | RAG 检索召回条数 |
+
+> **问数的旋钮不在本表里**（2026-10-28 批次 5）：原 `SQL_DSN` / `SQL_MAX_ROWS` 已随平台侧
+> Text-to-SQL 直连路径退役（ADR-0011 选项 A）。业务库连接串与行数上限看
+> [`applications/nl2sql-service/.env.example`](applications/nl2sql-service/.env.example)（`DW_DB_DSN` /
+> `SQL_MAX_ROWS`）；平台侧只需 `NL2SQL_SERVICE_URL`（非空才注册子代理，见下表）。
 
 ### Phase 2 配置
 
@@ -405,11 +444,15 @@ curl -X POST http://127.0.0.1:8000/api/callback/{task_id} \
 | `OTEL_SAMPLING_RATE` | `1.0` | 采样率（0.0–1.0） |
 | `MCP_ENABLED` | `false` | MCP client 开关（opt-in） |
 | `MCP_SERVERS` | `""` | JSON 编码的 server 配置列表 |
-| `CACHE_ENABLED` | `true` | 语义缓存开关 |
-| `CACHE_THRESHOLD` | `0.05` | 语义缓存命中相似度阈值 |
+| `CACHE_ENABLED` | `true` | 语义缓存开关（与 `CACHE_BACKEND=disabled` 任一即可关闭） |
+| `CACHE_BACKEND` | `valkey` | 缓存后端：`valkey` / `disabled`（`pg` 已退役，出现即启动失败） |
+| `VALKEY_URL` | `redis://localhost:6379/0` | Valkey 连接串（生产由 Secret 注入，日志/健康态脱敏） |
+| `CACHE_THRESHOLD` | `0.05` | 语义缓存命中**余弦距离**阈值（越小越严；联邦默认 `0.08`） |
 | `MEMORY_ENABLED` | `true` | 长期记忆（pgvector）开关 |
-| `BREAKER_FAILURE_THRESHOLD` | `3` | 熔断器连续失败阈值（触发熔断） |
-| `BREAKER_RECOVERY_SECONDS` | `30` | 熔断器半开恢复等待（秒） |
+| `BREAKER_FAILURE_THRESHOLD` | `3` | 平台侧熔断连续失败阈值（capability/MCP 链路，`agent_server` Settings 字段派生的 env 名） |
+| `BREAKER_RECOVERY_SECONDS` | `30` | 平台侧熔断半开恢复等待（秒） |
+| `CACHE_BREAKER_FAILURES` | `3` | 语义缓存熔断的连续失败阈值——与上面那两个**不同源**，只作用于缓存后端 |
+| `CACHE_BREAKER_RECOVERY_SECONDS` | `15.0` | 语义缓存熔断半开恢复等待（秒） |
 
 ### Plan-F 配置
 
@@ -446,7 +489,7 @@ curl -X POST http://127.0.0.1:8000/api/callback/{task_id} \
 ## 测试与评测
 
 ```bash
-make test                            # 9 session pytest（根 / shared-schemas / agent-runtime / agent-server / 联邦 / kefu / exhibition / knowledge-service / nl2sql-service）
+make test                            # 9 个标准 session + 1 个 --extra otel session（`Makefile:54-64`；根 / shared-schemas / agent-runtime / agent-server / 联邦 / kefu / exhibition / knowledge-service / nl2sql-service，外加 tests/observability）
 python eval/run_eval.py              # 启发式路由准确率基线（15 条 golden）
 python eval/run_eval.py --llm        # 配置 LLM 后评测结构化路由
 python eval/run_eval.py --fail-below 0.8   # CI 门禁用法
@@ -462,6 +505,7 @@ CI（`.github/workflows/agent-platform-ci.yml`）在每次推送时执行 pytest
 > 另有 `applications/agent_federation/` 联邦网关编排系统（与 agent_server 并行，二者不构成上下级关系），
 > 以及若干 sibling 业务包与共享内核包。各包均为独立 `pyproject.toml` 工程，
 > 通过 `packages/agent-core` / `packages/shared-schemas` 共享内核与契约，以 `uv` workspace 互联。
+> 另有 `web/`：视觉层 POC 的两个静态宿主页与样式门禁（零构建、不进运行链路、非 uv workspace 成员），逐条说明见 `web/README.md`。
 
 ### uv workspace 环境约定（重要）
 
@@ -508,16 +552,13 @@ applications/agent_server/
 ├── subagents/
 │   ├── search.py          # 联网搜索节点
 │   ├── rag.py             # RAG 检索节点
-│   ├── sql_agent.py       # Text-to-SQL 节点
+│   ├── sql_agent.py       # 问数瘦客户端（改调 nl2sql-service `/api/query`）
+│   ├── degradation.py     # 降级文案与空证据判据的单一来源
 │   └── mcp.py             # MCP 工具调用节点
 ├── rag/
 │   ├── chunker.py         # 语义切分
 │   ├── embed.py           # Embedding（auto/mock/remote）
 │   └── store.py           # pgvector + BM25 混合检索 + RRF 融合
-├── sql/
-│   ├── guard.py           # sqlglot 白名单守卫
-│   ├── pipeline.py        # Text-to-SQL 管线
-│   └── schema_store.py    # 训练三件套存储
 ├── memory/
 │   ├── longterm.py        # pgvector 长期记忆
 │   └── thread_persist.py  # 对话历史写回 checkpointer（Planner 协议中立）
@@ -600,10 +641,10 @@ tests/                     # 单元测试（针对 agent_server 平台；含 pla
 
 > 下列项为架构决策 / 迁移工程，需在拍板后实施，**非文档层面的简单修复**。
 
-- **U-1 · QueryRequest 入站字段名不统一（2026-10-19 已销项）**：`query`/`question` 双写已于 2026-08-16 收敛批删除；`session_id`/`thread_id` 兼容 alias 于 2026-10-19 删除（取证：无真实外部生产者、唯一消费者为自家契约测试；方案 `docs/plans/plan-u1-query-request-alias-removal-2026-10-19.md`）。旧客户端发 `thread_id` 现被 pydantic 默认 `extra=ignore` 静默忽略（`session_id=None`），不再映射。*注：旧评审称 `HealthResponse` 字段集完全不同属误判——`HealthResponse` 已 `class HealthResponse(BaseHealthResponse)` 对齐联邦契约（`packages/shared-schemas/shared_schemas/health.py:25-40`），无需处理。*
+- **U-1 · QueryRequest 入站字段名不统一（2026-10-19 已销项）**：`query`/`question` 双写已于 2026-08-16 收敛批删除；`session_id`/`thread_id` 兼容 alias 于 2026-10-19 删除（取证：无真实外部生产者、唯一消费者为自家契约测试；方案 `docs/plans/plan-u1-query-request-alias-removal-2026-10-19.md`）。旧客户端发 `thread_id` 现被 pydantic 默认 `extra=ignore` 静默忽略（`session_id=None`），不再映射。*注：旧评审称 `HealthResponse` 字段集完全不同属误判——`HealthResponse` 已 `class HealthResponse(BaseHealthResponse)` 对齐联邦契约（基类 `packages/shared-schemas/shared_schemas/health.py:67`，子类 `applications/agent_server/schemas.py:121`），无需处理。*（行号 2026-10-30 复跑订正：本处原引 `health.py:25-40`，那段现在是 `DependencyHealth`；该文件长到 92 行，`HealthResponse` 在 `:67`。字段集与坐标的逐条读数见 `docs/operations/evidence/2026-10-30-frontend-preflight/readings.md` §4。）
 - **U-2 · kefu 迁移（已完成）**：
   - ✅ `kefu-service` 已升级为 Agent Protocol 兼容 server：新增 `POST /invoke`（接受 `QueryRequest`，返回 `QueryResponse`，`kefu-service/main.py` + 依赖 `shared-schemas`）；旧 `/api/messages` 保留为 legacy 兼容入口。
-  - ✅ 网关 `applications/agent_federation/agent/config.py` 新增 `KEFU_SERVICE_URL` + `KEFU_USE_ADAPTER` 开关（默认 `false`，直连 `kefu-service:8003`）；`async_subagents.py` 增加 httpx 远程回退（外部 `deepagents` 包未安装时直连 `/invoke`）。
+  - ✅ 网关 `applications/agent_federation/agent/config.py` 新增 `KEFU_SERVICE_URL` + `KEFU_USE_ADAPTER` 开关（默认 `false`，直连 `kefu-service:8003`）；`applications/agent_federation/agent/async_subagents.py` 增加 httpx 远程回退（外部 `deepagents` 包未安装时直连 `/invoke`）。
   - ✅ `kefu-adapter` 包已于 2026-08 移除（无调用方，默认直连 `kefu-service` 生效）。`applications/agent_federation/evaluation/run-all.py` 的 kefu 项目已改默认指向 `KEFU_SERVICE_URL`（`KEFU_ADAPTER_URL` 仍可覆盖）。*注：原评审称「非简单改 URL 可接入」属实，但根因（缺 Agent Protocol + QueryResponse）已在本轮修复。*
 - **TB-1 / TB-2 · dialogue-framework 与内核协议对齐（已完成，后随 DF 移除而归档）**：dialogue-framework 已于 2026-09-23 作为孤儿框架移除（能力已被 agent_server 吸收），TB-1/TB-2 桥接代码随之删除。历史记录见 `CHANGELOG.md`。
 

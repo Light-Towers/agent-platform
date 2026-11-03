@@ -299,7 +299,10 @@ async function loadLights() {
       d.langfuse_ready ? "回调已装配（trace 是否落库以观测平台为准）"
         : (d.langfuse_enabled ? "配了但没接上：客户端包缺失或初始化失败" : "未配置（本部署不开该面）"));
     L("存储", d.storage === "postgres", false, d.storage);
-    L("问数数据源", d.sql_backend !== "none", false, d.sql_backend);
+    // 问数：平台仍不连业务库（ADR-0011 选项 A），本灯只说“子代理注册了没”。
+    // 原来读 sql_backend 的那盏拿**平台库**方言充当问数读数（假灯），2026-10-28 已退役。
+    L("问数子代理", d.nl2sql, false,
+      d.nl2sql ? "已注册（能不能答看 nl2sql-service 自己的 /ready）" : "未注册（NL2SQL_SERVICE_URL 为空）");
     L("追踪", d.otel_status === "ACTIVE", d.otel_status === "DEGRADED", d.otel_status);
     L("执行路径", true, false, d.planner);
     L("调度器", d.scheduler, false, d.scheduler ? "已装配" : "未装配（渐进开启项）");

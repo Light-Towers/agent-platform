@@ -1,0 +1,306 @@
+# 业务语料入库留证 — 2026-10-13（agent-platform @ db1a8b8，126 k8s，未发新 rev）
+
+> 本文件是**事后证据**，每节带产生时间（+08:00）。判定口径沿用 `docs/operations/minimal-release-runbook.md` §1 纪律 1。
+> 全文不含任何密钥值（只出现键名）；抓取命令均可复跑。
+> **今天没有上线动作**：Pod 内 `GIT_REV` 仍是 `db1a8b8477539af2af00e104e36317c159f19c39`（09:26 读回），
+> 与昨天发布的对象同一个。今天只动数据（语料入库）与文档。
+>
+> **回捞注记（2026-10-28）**：本件曾在两条无共同祖先的历史搬迁中丢了——`docs/operations/minimal-release-runbook.md`（三处）与
+> `docs/plans/plan-router-keyword-gate-hides-corpus-2026-10-12.md`（一处）都点名引它而文件不在，今从旧线 rev `6ac466af`
+> 逐字回捞（blob OID `874e4cad`），**除本注记外正文未改**。文中的 rev `db1a8b8` 属于旧线，与现行分支 tip 无可达关系；
+> 那些读数只作当时的历史快照引用，要拿它当现网现状必须先重跑对应命令（观测硬规矩第 3 条）。
+>
+> **入库前订正记账（2026-10-30，只记不改正文）**：§9「提供方对照」正文里那句写的 `eval/run_e2e_eval.py` 是**路径漏前缀**——真实位置是
+> `applications/knowledge-service/eval/run_e2e_eval.py`（`--llm-timeout` 在其 `:79`，本轮实取）。根 `eval/` 下**从来没有**这个文件：
+> `git log --all --oneline -- eval/run_e2e_eval.py` → **0 行**，`git ls-tree --name-only -r 6ac466af -- eval` 的 8 项里也无该项
+> （⇒ 旧线与现线都不存在，不是“后来被删”）。⇒ 上面“逐字回捞”只对**回捞那一刻**成立：入库前拿
+> `git cat-file blob 874e4cad` 与当前文件做 opcode 分类复算，得 `equal×3 / insert×1 / replace×1`——
+> 那 1 处 replace 是 **§5** 以 `| 影响面 |` 开头的那一行（旧线 blob 的 L133；正文位置在本注记定稿前就因注记本身长了 1 行而从 L150 漂到 L151，
+> ⇒ 故意只给行首键名与 blob 行号两个不变锚，不给当前行号），它自己带着“**订正（2026-10-29 复取）**：原文写
+> `router.py:87`，现 HEAD 侧 :87-90 是调用上方的注释块、调用在 **:91**”的标记（同批还有另一处行内改写：
+> “全仓唯一”限定为“在跑的调用点唯一”）。本行不是删改历史结论，是拿新取证重写了一行⇒ 保留，但**不能
+> 再被读成“正文一行没动”**（上一句“除本注记外正文未改”仅指 2026-10-28 那次插入）。所引取证本轮复跑：
+> `git grep -I -n -F -e with_structured_output -- "*.py"` = **12 行 / 6 文件**（产品 7：`agent/router.py:91`
+> + `graph_compose.py:146/153/156` + `fallback.py:227/233` + `protocols.py:21`；测试替身 5），与该行写的数一致。
+
+## 1. 语料从哪来、哪些被排除（09:22）
+
+来源：用户指定 `D:\0-mingyang\文档`（404 个文件，2.7G，会展/博物馆域正式材料）。
+处理方式：**本机 pypdf 抽取 → 本机脱敏 → scp 到 126 → `/import`**。没有走任何云端解析器（内网业务文档不出本机）。
+
+选中 4 份（全部为正式文本类，可直接喂检索）：
+
+| 文件 | 抽取后字节 | 页 | 脱敏 |
+|---|---|---|---|
+| `GBT33490-2025-展览展示工程服务基本要求.md` | 18,327 | 11 | 无命中 |
+| `GBT45704-2025-线上展览会服务指南.md` | 14,519 | 15 | 无命中 |
+| `2024中国进口博览会搭建商手册.md` | 19,425 | — | 手机 19 处 / 邮箱 19 处 |
+| `国家会议中心-展览搭建服务手册2.0.md` | 93,471 | — | 手机 12 处 / 邮箱 4 处 |
+
+**排除项与理由**（这部分比选中更重要——它是"什么没进库"的凭证）：
+
+| 排除 | 理由 |
+|---|---|
+| `环境地址.md` | 内容是禅道/蓝湖等内部系统链接，与业务问答无关，且属凭据线索面 |
+| `生产服务参数配置.md` | CDH 节点/角色拓扑 ⇒ 基础设施信息，不是语料 |
+| `会刊/*.xlsx`（356 份名片） | 人员姓名 + 电话 + 单位，**整批 PII**，不是文档 |
+| 场馆统计报表 `*.xls` | 财务口径数据，未拍板可外发给推理服务 |
+| `AI数智化应用案例/…华南国际印刷展.md` | 正文内嵌 `authorization=bce-auth-v1%2FALTAK…` 签名 URL ⇒ **含活凭据**，一律排除 |
+
+脱敏为什么要在入库前做：平台的输入侧 PII 脱敏只覆盖**提问**与检索片段进入 prompt 前的环节，
+而检索到的原文会被送给外部推理服务；联系方式一旦进了向量库，就再没有"事后撤回"这条路。
+⇒ 4 份文件的手机/邮箱在本机替换为 `[已脱敏-手机]` / `[已脱敏-邮箱]`，并在文件头写入来源与处理说明。
+
+**入库位置的版本控制口径**：`data/corpus/` 已加入 `.gitignore`（规则 `data/corpus/`）。
+理由：脱敏只处理了手机/邮箱，正文仍是未公开的业务口径 ⇒ 整个目录不入库，而不是只挡原件 `.pdf`。
+
+## 2. 入库读数（09:27–09:33）
+
+`/import` 逐份返回（只给计数与 doc_id，正文不进本文档）：
+
+| 文件 | HTTP | 墙钟 | 返回 chunks |
+|---|---|---|---|
+| 2024中国进口博览会搭建商手册 | 200 | 8.53s | 29 |
+| GBT33490-2025-展览展示工程服务基本要求 | 200 | 6.82s | 26 |
+| GBT45704-2025-线上展览会服务指南 | 200 | 5.89s | 22 |
+| 国家会议中心-展览搭建服务手册2.0 | 200 | 31.79s | 133 |
+
+小计 **210 块**；库里总数 **303**（= 昨天 3 份 ADR 的 93 + 210）。
+
+真值核对（SQL 直查，autocommit 逐条独立）：
+
+| 判据 | 读数 | 结论 |
+|---|---|---|
+| 总块数 | 303 | 与逐份返回之和一致 |
+| 维度分布 | `(512, 303)` 单一维度 | 没有混进旧维度 ⇒ 索引不会静默降级 |
+| 向量范数 | min=max=`1.0000` | LocalEmbedder 输出已归一化，非零、非 NaN |
+| 近零向量数 | `0` | 没有"退化成零向量"的假入库 |
+| 唯一向量数 | `301 / 303` | 见下条，已定性 |
+| 301 与 303 的差 | 3 块内容都是 `'---'`（markdown 分隔线）共享 1 个向量 | **不是缺陷复现，是切块器把分隔线当正文留了下来**；3→1 让 distinct 少 2 |
+| 租户/workspace | 全部 `(default, default)` 303 | 与 `/import` 用服务端断言租户一致 |
+| 块长分布 | min 3 / max 400 / avg 303.3 字符 | 5 个 <30 字符的短块，其中 1 个来自业务文档（`21 \n \n（三）特装展台施工报馆流程`，是页码+目录行） |
+| 含 `[已脱敏` 标记的块 | **13** | 脱敏后的文本**确实**是进库的那一份，不是只改了原件 |
+
+> ⚠️ 诚实口径：`切块器留下 '---'` 是本次读数暴露的**语料质量**问题，不是检索缺陷。
+> 它每块都会占一个召回位，且内容无信息量。修法在切块阶段过滤纯标点块，属独立小改动，今天**未动**。
+
+## 3. 业务域问答读数（09:34–09:36，5 问）
+
+| # | 提问（含/不含 rag 特征词） | route | reason | evidence | 答案要点 |
+|---|---|---|---|---|---|
+| Q1 | 含 `文档` | `rag` | 命中知识库特征词 | count=4，起于 GBT33490 第 5 页 | 答出"删除'承建商/主场承建商/特装承建商'，增加'展览展示工程企业'" |
+| Q2 | 含 `什么是` | `rag` | 命中知识库特征词 | count=4，起于 GBT45704 第 7 页 | 给出线上展览会定义 + 指南定位；**并主动声明定义原文在证据里被截断、完整表述无法确认** |
+| Q3 | 含 `解释` | `rag` | 命中知识库特征词 | count=4，起于国家会议中心手册第 22 页 | 三个文件包 + 纸质 4 份，全对 |
+| **Q4** | **不含任何特征词** | **`direct`** | **无明确能力特征** | **count=0** | **仍答对"4 份"**——来源是历史回放，不是检索；对没被问过的"截止日期"则答"无法确认" |
+| Q5 | 含 `统计`/`表里` | `sql` | 命中数据查询特征词 | count=1，回显生成的 SQL | 按来源列出块数，与库内真值逐项一致 |
+
+墙钟：Q1 11.14s、Q2 29.60s、Q3 5.50s、Q4 4.71s、Q5 8.87s。
+
+**Q4 是今天最贵的一条读数**，它同时说明两件事：
+1. 路由闸门真实存在（详见 §6）；
+2. **"答案看起来对" ≠ "检索发生了"**。Q4 在 `evidence count=0` 的情况下把"4 份"答对了，因为
+   `memory` 事件回放了 Q3 那一轮的 Q+A。演示现场如果只看答案，会把一次完全没检索的问答当成检索成功。
+
+## 4. 抽验① 在真实业务内容上复证（09:42–09:46，r31）
+
+消融对象：`国家会议中心-展览搭建服务手册2.0.md` 中**唯一**承载这三个事实的一块
+（`报馆图纸` / `防疫文件` / `打印 4 份` / `截止日期:2021 年 8 月 15 日` 四个短语 `probe` 后都只命中 id=622 这一块）。
+
+先 `probe` 再删，是为了避免"删了一块但事实还在别处"的假消融——`截止日期` 这个词本身命中 **11 块**，
+如果拿它当谓词就删不干净；换成 `报馆图纸` 才锁到唯一一块。
+
+清回放源的清单比昨天多两项（这是今天的方法学修正）：
+
+| 回放源 | 为什么必须清 |
+|---|---|
+| `semantic_cache` | 命中就直接返回缓存答案，根本不进检索 |
+| `memories` | `graph.py` 每轮把 `Q:…\nA:…` 写进来，会被当"历史记忆"注入 |
+| `episodic_memories` / `procedural_memories` | 本次实测恒 0，纳入清单是为了不再漏 |
+| **`checkpoints` / `checkpoint_blobs` / `checkpoint_writes`** | **LangGraph 会话状态，第三个回放源**。昨天只清了前两类，Q4 那轮暴露了它：`thread_id` 恒为 `tenant-default`，同一会话的历史会随 checkpoint 回来。清它 = 同时清空控制台的历史面板（演示前需要知道这一点） |
+
+三次同问（原文一字不改）：
+
+| 阶段 | route | evidence 起于 | 答案 |
+|---|---|---|---|
+| 消融前 | `rag` | 第 22 页（就是被删那块） | 3 个文件包 / 4 份 / **2021 年 8 月 15 日**，全对 |
+| **消融后** | `rag` | 第 46 页（别的内容，检索链路没坏） | **三项全部答"无法确定"**；并且拒绝把第 25 页的"表单回传截止日期：2021.8.15"当成报馆截止日期——**没有把相近数字拼成答案** |
+| 还原后 | `rag` | 第 22 页 | 重新全对 |
+
+对照组（消融态下问同文档另一条没被动过的事实）：`rag`、count=4、答出附表四《特装展台安全责任书》第 26 页
+与附表六《施工布展期消防安全承诺书》第 34 页，并跨文档引到《2024 中国进口博览会搭建商手册》第 4 页
+⇒ **删一块没有把整篇检索打坏**，消融是外科手术式的。
+
+还原：`DELETE source` rowcount=132 → 重新 `/import` 原文件返回 133 块（新 doc_id）→ 总 303 → `probe` 短语回到唯一 1 块。
+库状态与消融前一致（唯一差异是这块的新 id 与 doc_id，因为重新入库必然换 doc_id）。
+
+## 5. 今天新抓到的缺陷：结构化路由在本部署 100% 失败（09:36 读日志，09:47 因果核对）
+
+pod 日志里每次问答都留同一条 WARNING：
+
+```
+WARNING [agent_server.agent.router] LLM 路由决策异常，回退启发式路由:
+Error code: 400 - {'error': {'message': '<400> InternalError.Algo.InvalidParameter:
+This response_format type is unavailable now', 'code': 'invalid_parameter_error'}}
+```
+
+| 判据 | 读数 |
+|---|---|
+| 本 pod 保留窗口内 `/query` 请求 | 17 条（窗口已截断，pod 启动于 2026-10-12 03:47:50Z） |
+| 同窗口内该 WARNING | 16 条 → 我发起的问答 **次次命中** |
+| **因果核对**（09:47） | 单发一问（带唯一标记 `xyzzy-0947` 防缓存），告警计数 **16 → 17，增量 =1** |
+| 影响面 | 非测试代码里**在跑的** `with_structured_output` 调用点只有 `router.py:91` 一处（取证 rev `896f966e`：`git grep -I -n -F -e with_structured_output -- "*.py"` = **12 行 / 6 文件** ⇒ 测试替身 5 行；产品代码 7 行 = `router.py:91` 调用 + `graph_compose.py:146/153/156`（同一条降级路，`planner=deterministic` 未启用）+ `fallback.py:227/233`（**转发器**，不是调用点）+ `protocols.py:21`（协议注释））；`graph_compose.py:153-156` 有 `except → 普通 ainvoke + JSON 解析` 的真降级。**订正（2026-10-29 复取）**：原文写 `router.py:87`，现 HEAD 侧 :87-90 是该调用上方的注释块、调用在 **:91**；“全仓唯一”限定为“在跑的调用点唯一”才与上述 12 行读数相容 |
+| `/health` 说的 `llm: true` | 仍然成立——它探的是**普通补全**。⇒ "模型可用"与"模型能做结构化输出"是两件事，现在只有前者有灯 |
+
+**结论要说到它的实际后果**：`route_hints.json` 的注释写着"LLM 路由为主路径，本词表仅作 LLM 不可用时的兜底"——
+在本部署这句话**是假的**，词表不是兜底，是**唯一在跑的路由器**。所以 §3 的 Q4 和 §6 的闸门不是"降级路径偶尔表现差"，
+而是主路径本身。同时每一问都在为这个必然失败的结构化调用付一次往返（Q1 墙钟 11.14s 里就含它）。
+
+同族第 5 次：代码照着一个提供方不支持的契约写（`response_format`），宽 `except` + 能跑的启发式把读数盖成"正常"。
+前四次是 `embed_texts(dim=)`、`alist_messages`、空响应体数出的假绿灯、`asyncio.to_thread` 包 async 函数。
+
+### 5.1 根因探针矩阵（09:58–10:04，对同一端点直发四种形态）
+
+线上配置：`LLM_BASE_URL=https://api-inference.modelscope.cn/v1`、`LLM_MODEL=LLM_FALLBACK_MODEL=deepseek-ai/DeepSeek-V4.1-Flash`
+（`LLM_API_KEY` 只报口径：`ms-` 前缀、39 字符；值未打印、未落盘）。
+
+| # | 形态 | 结果 |
+|---|---|---|
+| 1 | 纯补全 | **200**（`/health` 的 `llm=true` 探的就是这个） |
+| 2 | `json_object`，prompt 不含 "json" | 400 `'messages' must contain the word 'json' in some form…` |
+| 3 | `json_schema` + `strict:true` | **400 `This response_format type is unavailable now`** |
+| 4 | `json_schema` 不带 strict | **400 同一句** ⇒ 与 `strict` 无关（这颗模型对该类型整体拒绝）。⚠️ 当时我由此写成"端点整体不支持"，**以偏概全，10:55 补测 Qwen 后更正**：同端点 `Qwen/Qwen3.8-Flash-Next` 的 `json_schema` 3/3 合规 ⇒ 是**按模型**，见 §11 |
+| 5 | `tools` + `tool_choice:"required"` | **200**，`finish_reason=tool_calls`，arguments 逐字符合 `RouteDecision`（`capability=rag` / `sub_query` / `reason`） |
+| A | `json_object` + prompt 含"以 JSON 返回" | 200，但模型自造字段名（`{"判断结果":{"应走链路":…}}`）⇒ 不保证贴 schema |
+
+SDK 侧（Pod 内实测）：`langchain-openai==1.7.0` / `langchain-core==1.6.9` / `openai==3.29.0`，
+`ChatOpenAI.with_structured_output(schema, *, method: Literal['function_calling','json_mode','json_schema'] = 'json_schema', …)`。
+
+⇒ **因果链闭合**：`router.py:87` 没传 `method` ⇒ 默认 `json_schema` ⇒ 端点不支持 ⇒ 每问必 400 ⇒ 被 `except → heuristic_route` 吞成正常。
+⇒ **修法只有两行**（且第 2 步不可省，否则被静默丢掉）：`router.py:87` 传 `method="function_calling"`；
+`packages/agent-core/agent_core/llm/fallback.py:227` 的 `with_structured_output(self, schema)` 改成收并透传 `**kwargs`
+——因为 `agent/llm.py:39` 给 router 的是 `FallbackChatModel` 包装，它现在的签名根本不收 `method`。
+方案与四条验收见 `docs/plans/plan-router-keyword-gate-hides-corpus-2026-10-12.md` §8/§9，**属改代码，待拍板未动手**。
+
+## 6. 路由关键词闸门：从"一次观察"升级为"可稳定复现的演示级风险"
+
+方案文件：`docs/plans/plan-router-keyword-gate-hides-corpus-2026-10-12.md`（今天追加 §5 读数）。
+
+今天两种形态都拿到了：
+
+1. **单问形态（Q4）**：`特装展台报馆的纸质文件要打印几份？…` 不含特征词 ⇒ `direct` ⇒ `evidence count=0`，
+   但答案靠回放看起来全对。
+2. **三轮同问形态（r30，09:39–09:40）**：我第一次写消融脚本时，提问正好**不含任何特征词**，
+   于是消融前/后/还原后三次**全部 `route=direct`、`count=0`、答案全部"无法确定"**——三次读数一模一样，
+   但一次检索都没发生。那轮作为消融是**无效的**（详见 §7 第 2 条），作为闸门复现是**完美的 3/3**。
+
+风险口径：闸门的方向不是"答案变差"，而是**"答案看起来一样，实际没查库"**。演示现场这一点无法从答案面察觉，
+只能看 `route` 与 `evidence count` 两个事件——这正是控制台左块存在的原因。
+
+## 7. 我自己今天犯的三个方法错误（不藏，都可直接复现）
+
+| # | 错误 | 怎么暴露的 | 修法 |
+|---|---|---|---|
+| 1 | DB 读数脚本 `cat > /tmp/x.py <<PY … PY` 写完文件，却用 `python -` 跑而**没把文件喂进 stdin** ⇒ 空 stdin，脚本什么都没做，输出里连标题都没有 | 输出缺了我预期必打的 `===== DB 读数 =====` 标题行 | `kubectl exec -i POD -- python - < /tmp/x.py`（r23 那次入库的"前置基线"读数因此**根本没产生**，本文档里没有它的任何数值） |
+| 2 | **消融实验的自变量没生效**：r30 的问题不含 rag 特征词 ⇒ 三轮都没进检索，删没删那块对结果毫无影响 | 步骤 3 `probe` 打印"命中 0 块"——因为我写了 `LIKE '截止日期%'`（前缀匹配）而不是 `LIKE '%截止日期%'`（包含）；改正后才发现更要命的是路由 | 消融前置三查：(a) 谓词能命中且**唯一**；(b) 提问确实带特征词、`route=rag`；(c) 回放源（含 checkpoint）清零。r30 整轮作废重跑为 r31 |
+| 3 | 一条 SQL 失败后，psycopg 默认事务里后续查询全变 `InFailedSqlTransaction`，看起来像"数据有问题" | 7 项读数里 5 项报同一个错 | 逐条 `autocommit=True`；`l2_norm()` 在本库有重名歧义，改用 `sqrt(-(embedding <#> embedding))`（pgvector 的 `<#>` 是**负**内积，第一次还把它开根号开了个负数） |
+
+三条同一形状：**"空/报错"要先证明探针真的到达了被测面，才能读成结论**。已并入记忆
+`test-double-must-mirror-real-collaborator.md`（同族第 5 次）。
+
+## 8. 环境收尾状态（09:48）
+
+| 项 | 值 |
+|---|---|
+| Pod / rev | `agent-platform-56db955b8b-bgqk5`，`GIT_REV=db1a8b8`（今天未发新 rev） |
+| `/health` | `storage=postgres`、`sql_backend=postgres`、`embedding_backend=LocalEmbedder`、`embedding_real=true`、`auth_enabled=true`、`otel_status=ACTIVE` |
+| chunks | 303（业务 210 + ADR 93），dim 512，唯一向量 301（差值已定性为 `'---'`） |
+| 126 侧语料 | `/tmp/corpus/*.md` 4 份（脱敏版），tar 包 `/tmp/corpus-20261013.tgz` |
+| 回放源 | **全部清零**（09:52 收束：`semantic_cache`/`memories`/`episodic`/`procedural`/`checkpoint_*` 均 0）⇒ 演示第一问不会命中缓存、也不会被会话历史顶上。代价：控制台历史面板是空的，这是预期 |
+| 126 侧保留脚本 | `/tmp/r30db.py`（counts/wipe_all/probe/ablate/del_source）、`/tmp/r30q.py`（单发问答探针）、`/tmp/r31.sh`（有效消融配方，可整轮复跑）+ 日志 `/tmp/r30.log`（作废那轮）`/tmp/r31.log`。被取代的 r23/r24/r25/r26/r27/r28/r29 已删 |
+| 密钥 | 全程只用键名；`API_KEY` 从 `observability-keys` 读入 shell 变量并以 **env**（非 argv，`ps aux` 全机可见）传给探针进程，未打印、未落盘 |
+
+## 9. 提供方对照与密钥处置（10:05–10:25，需求方要求实测硅基流动）
+
+| 判据 | 魔搭 `deepseek-ai/DeepSeek-V4.1-Flash`（现网） | 硅基流动 `Qwen/Qwen3-8B`（免费小模型） |
+|---|---|---|
+| 纯补全 | 200 | 200 |
+| `json_schema`+strict | **400 稳定拒绝**（不带 strict 同样 400） | 200 **但 5 次里 3 次 75s 读超时**；成功那 2 次字段合规、判断错 |
+| `json_object` | 400 要求 prompt 含 "json"；含了能返 200 但自造字段名 | 200 但**三个必填字段全缺**（56.6s） |
+| `tools`+`tool_choice=required` | **5/5 合规，2.2–3.7s，`capability=rag`（判断也对）** | **5/5 合规，8.6–14.4s，但 5/5 判成 `search`** |
+
+判据从"HTTP 200"收紧成"**能否解析成 `RouteDecision`**"（三必填字段齐 + `capability` 在枚举内）之后，
+`json_object` 那条假绿灯才现形——两家都能返 200，都**不贴 schema**。
+
+⇒ 两家的最大公约数是 `function_calling`，**不是** `json_schema` ⇒ "换个提供方就不用改代码"这条路被实测否掉：
+现网传的正是默认 `json_schema`，换到硅基流动照样得改 `router.py`。
+⇒ 演示期**不切**硅基流动：延迟是魔搭的 3–4 倍、`json_schema` 60% 超时、路由质量更差（"根据文档"被判去联网）。
+这与仓库既有教训一致（`knowledge-service` 的 benchmark 早记过"SiliconFlow API 偶发无响应挂起 / 排队 P95 243s"，
+`eval/run_e2e_eval.py` 为此专门加了 `--llm-timeout`）。它在本案里的既定位置是 **embedding/rerank 的可选提供方**。
+
+**密钥处置（如实记）**：需求方本轮在对话里**明文**给了这把硅基流动 key。用法是——经 ssh stdin 交给远端 shell 变量，
+再 `env SF_KEY=… python -` 注入 Pod 内探针；**未写入仓库任何文件、未写入 126 任何文件、未 echo、不进 argv**
+（`ps aux` 全主机可见 argv）。⚠️ 但它已出现在对话记录里 ⇒ **建议测完轮换**。126 上留下的 `/tmp/sf*.py` 只是探针代码，不含密钥。
+
+文档面佐证：魔搭 API-Inference 官方文档承诺的调用面只有 Chat Completions、Responses API（并明说"只支持 Qwen3.5 系列模型"）、
+Anthropic 兼容（beta），**没有 `response_format` 结构化输出**；我们吃到的 400 前缀 `InternalError.Algo.InvalidParameter`
+与 `chatcmpl-*` 响应 id 是 DashScope 系兼容层签名 ⇒ **是端点能力面的缺口，不是模型选错**，换魔搭上别的模型不改变结论。
+完整矩阵见 `plan-router-keyword-gate-hides-corpus-2026-10-12.md` §10。
+
+### 9.1 第三家：OpenRouter（10:30–10:40，需求方又给一把 key 后实测）
+
+`https://openrouter.ai/api/v1` 从 Pod 内可达（DNS 104.18.3.115 / TCP443 通），共 459 个模型、`:free` 15 个、
+**没有免费的 deepseek**。判据仍是"能否解析成 `RouteDecision`"，并把失败分三类记——**混在一起就会把配额问题误读成能力问题**：
+
+| 模型 | `json_schema`+strict | `tools` |
+|---|---|---|
+| `nvidia/nemotron-3.5-lightning:free` | 2/2 合规（9.4s、12.8s） | 2/2 合规（2.3–2.9s） |
+| `liquid/lfm-2.5-2.6b:free` | 2/2 合规（11.1–17.7s） | 2/2 合规（4.1–4.2s）且**判对 `rag`** |
+| `apodex/apodex-1.1-mini:free` | **400** `INVALID_REQUEST`（该模型不支持） | 2/2 合规（2.2–2.5s） |
+| `google/gemma-4-26b-a4b-it:free` | 8/8 失败：`Provider returned error … "API key not valid"` ⇒ **OpenRouter 自己的上游 Google 凭据失效** | 同左 |
+| `poolside/laguna-xs-2.1:free` | 6/8 `429 temporarily rate-limited upstream` | 没被限流的那次 200 且合规 |
+
+**三家合起来（本轮真正的结论）**：`tools` 是 11/11 个模型-提供方组合里唯一全绿的形态；
+`json_schema` 三家行为各不相同（魔搭**按模型**：DeepSeek 稳定 400 / Qwen3.8-Flash-Next 3/3 合规 / 硅基流动 60% 超时 / OpenRouter 按模型且受免费池支配）。
+⇒ R1 不只是修当前 bug，它让路由层**跨提供方可移植**——以后换任何一家都不用再动 `router.py`。
+⇒ 演示期仍不换提供方：OpenRouter 免费池的可用性不由我们控制，而现网魔搭的 tools 路线 5/5、2–4s、判对。
+
+附带一条产品观察：同一问题同一 schema，小模型普遍把"根据文档…"判成 `search`（硅基流动 5/5、OpenRouter 两个模型），
+只有魔搭 DeepSeek 和 `lfm-2.5-2.6b` 的 tools 路径判成 `rag` ⇒ **路由质量取决于模型能力，不取决于 `response_format` 形态**；
+改了 method 不等于路由变准，所以方案 §4 的验收第 4 条（"因果问法能命中 rag"要有用例钉住）不能省。
+
+**这把 key 同样按 §9 的口径处置**：只经 ssh stdin → shell 变量 → `env` 注入 Pod 内探针，不落任何文件、不进 argv、未 echo；
+探针脚本 `/tmp/or*.py` 测完已删，`grep -rl 'sk-or-' /tmp` 返回 0。⚠️ 它也已出现在对话记录里 ⇒ **建议一并轮换**。
+
+### 9.2 需求方追问逼出的一次自我纠正：魔搭上 Qwen 支持 `json_schema`（10:50–11:00）
+
+问"魔搭的 Qwen 不是兼容 OpenAI 协议吗"——是的，而且它推翻了我 §5.1 的措辞。
+用**同一端点、同一把 key、同一问题**补测（现网 35 个可用模型，Qwen 7 个）：
+
+| 形态 | `deepseek-ai/DeepSeek-V4.1-Flash`（现网） | `Qwen/Qwen3.8-Flash-Next` |
+|---|---|---|
+| `json_schema`+strict | **3/3 全 400** | **3/3 合规**（5.0s）但 3/3 判成 `search` |
+| `tools` + `tool_choice=required` | **2/2 合规**，`rag`，2.7–3.0s | **2/2 全 400**：`tool_choice … does not support being set to required or object in thinking…` |
+| `tools` 不带 `tool_choice`（auto） | 200 合规，`rag` | 200 合规，**`rag`** |
+
+另两颗：`Qwen/Qwen3.5-27B` 的 `json_schema` 返 200 但**出参不是 JSON 对象**（"支持字段"≠"照 schema 出"）；
+文档里"Responses API 仅支持 Qwen3.5 系列"也试了——`text.format=json_schema` 对两颗 Qwen 都返回纯文本，
+DeepSeek 走 `/responses` 直接 400 `This text.format type is unavailable` ⇒ **Responses API 不是出路**。
+
+⇒ 三条更正后的结论（详见 `plan-router-keyword-gate-hides-corpus-2026-10-12.md` §12）：
+1. `json_schema` 在魔搭**按模型**，不是端点整体不支持（我前面说过头了）；
+2. **同一端点上两颗模型需要相反的方法** ⇒ 换模型随时可能把系统推回静默回退，R2 那盏灯的必要性上升；
+3. 唯一对两颗都成立的是 `tools` + `tool_choice` 留默认 auto（且都判对 `rag`）⇒ 落 R1 时**不要**传 `required`。
+
+## 10. 今天仍然没证的事
+
+1. **`/health` 仍没有"结构化输出可用"这盏灯**——根因虽然定位了（§5.1），但**没有灯**这件事本身没变：换一个提供方/模型时，
+   同一条静默回退还会再发生一次，除非落 §5.1 的修法或启动期能力探针。
+2. **浏览器端仍未实拍**（任务 #13）：入站 `API_KEY` 轮换后需持键者现场输入。
+   今天日志窗口里有 1 条非我发起的 `/query`，但没有页面侧证据，**不能**读成"页面已跑通"。
+   ⚠️ 且今天新定的口径要一并告知持键者：**业务文档出境到外部推理服务已由需求方点头（2026-10-13）**，
+   排除清单不因此放开。
+3. **并发/性能基线未测**：Q2 29.60s 是单发，没有并发对照。
+4. **检索质量指标未测**：命中率/召回排序没有量化（RAGAS/DeepEval 仍是选型未落地）。
+5. **真 5xx 异常信封**未在现场制造过（沿用昨天的未证条目）。
+6. 切块器把 `'---'` 与页码行留成独立块（§2）——**只定性，未修**。
+7. 结构化路由失败的**修复方案未拍板**（三个候选见 plan 文件），今天只把问题从"词表兜底"改写成"词表即主路径"。

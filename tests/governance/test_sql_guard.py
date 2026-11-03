@@ -1,7 +1,7 @@
-# guard 本体在 agent_core.sql.guard（平台共享件）；detect_dialect 随 agent_server/sql
-# 退役迁到 agent_server.db_dialect（2026-10-18，ADR-0011 §7）
+# guard 本体在 agent_core.sql.guard（平台共享件）。曾随 agent_server/sql 退役而留在
+# agent_server.db_dialect 的 detect_dialect（2026-10-18，ADR-0011 §7）已于 2026-10-28 批次 5
+# 连同 `/health` 的 sql_backend 假灯一并退役——它在平台侧只剩那一个读点，灯拆了就归零。
 from agent_core.sql.guard import validate_sql
-from agent_server.db_dialect import detect_dialect
 
 
 def test_reject_non_select():
@@ -45,12 +45,6 @@ def test_cte_allowed():
 def test_reject_non_literal_limit():
     ok, reason, _ = validate_sql("SELECT * FROM orders LIMIT ?", "sqlite", 100)
     assert not ok
-
-
-def test_detect_dialect():
-    assert detect_dialect("sqlite:///demo.db") == "sqlite"
-    assert detect_dialect("postgresql://u:p@h/db") == "postgres"
-    assert detect_dialect("mysql://u:p@h/db") == "mysql"
 
 
 def test_reject_postgres_blocking_or_privileged_functions():

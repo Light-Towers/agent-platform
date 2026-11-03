@@ -2,7 +2,7 @@
 
 > 状态：**现行执行排期**（本文件只做「排期 + 已核实进度 + 需拍板清单」，不重复各 plan 的技术方案；技术方案仍以各 plan 为准）。
 > 制定日期：2026-10-16 ｜ 分支：`chore/tech-debt-agentic-discovery-test-2026-10-15` ｜ **本批不部署**（夜间 126 关机）。
-> 上游锚点：`plan-production-delivery-roadmap-2026-10-09.md`（计划窗口 **2026-10-09 ~ 2026-12-04**，合计 84 人/日，其中 **8 人/日「待环境」，按 roadmap 自身规则不可承诺日期**）。
+> 上游锚点：`docs/plans/plan-production-delivery-roadmap-2026-10-09.md`（计划窗口 **2026-10-09 ~ 2026-12-04**，合计 84 人/日，其中 **8 人/日「待环境」，按 roadmap 自身规则不可承诺日期**）。
 > 口径纪律：本文所有「已完成」均以**代码 + 测试实跑**为据（逐条附提交号），不以文档状态行、不以复选框、不以口头汇总为据。
 
 ## 0. 截止完成日期（先给结论）
@@ -20,10 +20,10 @@
 | **§19 exhibition env 模板门禁（#21 / P2-5）** | **2026-10-16**（截止=当日） | 给会展侧的「模板 ↔ 代码」一致加装自动检查（前缀折算口径） | ✅ **已完成（10/16）**：新增 3 条用例，四条变异全部击中；exhibition **368 → 371 passed**。**同批撤回一条我自己造出的假缺口**（前缀-blind 探针曾报"9 键缺失"）；`make eval` 复跑被执行权限层拦下，记为**待放行**，未绕过 |
 | **§22 阶段 0 #2 完成证据格式（roadmap 阶段0）** | **2026-10-16**（截止=当日） | 「无统一的完成证据格式」这条自 10-09 开着的阶段 0 行 | ✅ **已闭合（10/16）**：`docs/operations/evidence-format.md` 入库（五字段 / 三禁令 / 三档强度 / 变异反证表），§6 逐条对照六处既有用到的读数；入口挂 AGENTS.md + testing-playbook ⇒ **roadmap 阶段 0 小计 3 → 剩余 1**（#3 属外部条件，保持开项） |
 | **§24 错分类的机械活回收（#21 收尾）** | **2026-10-16**（截止=当日） | 把「补模板」从「要不要建门禁」的待拍板捆綁里拆出来做完 | ✅ **已完成（10/16）**：federation +7 / KS +10（AST 实读取默认值 + `<- 文件:行` 溯源，密钥留空）+ `tests/governance/test_app_env_templates.py` 2 条；**口径订正**：真缺 17 而非登记的 61（active vs 提及 两种读法差出来的）；CI 合并跑被中止 ⇒ 改分段实测 720 + 349 = **1069**，恰为 §18 的 1067 + 本批 2 条 |
-| **§25 取证面持久化实测（撤回我写下的"无需 DB 迁移"）** | **2026-10-16**（截止=当日） | 提交前自查新方案的每条断言，把推断换成实跑读数 | ✅ **已完成（10/16）**：伪连接探针实取 ⇒ `PgTrajectoryStore` 从不发 `forensic` 列、读回 `record.forensic is None`、`steps` 读回是 `dict` 而非 `TrajectoryStep`（`AttributeError`）⇒ 第 6 条的缺口从「三格没填」扩为**两层**（字段填充 + 持久化读回），`plan-forensic-provenance-wiring-2026-10-16.md` 按此改写并新增 Q5 待拍板（**§3 行数不变，仍是 20 项**，Q5 属第 19 项内部） |
-| **§26 两件本地读数复跑（启发式评测门禁 + 门禁条数三口径）** | **2026-10-16**（截止=当日） | 把 §19 那批被权限层拦下的 `make eval` 半截捡回来，并独立复测门禁条数三口径 | ✅ **已完成（10/16）**：`eval/run_eval.py --fail-below 0.8` ⇒ **15/15 = 100.00%，rc=0**（rev `1953c5f`，启发式半截；`run_planner_eval.py` 需密钥 ⇒ 仍待放行）；三口径复测 **16 编号 / 17 表行 / 18 函数**与 `ARCHITECTURE.md` §4.1 现值**吻合、无新漂移** ⇒ 只在 CHANGELOG 的旧快照句下加"已被取代、不外引"指针，不就地改数 |
-| **§27 存储面覆盖率扫描（清出 `session_leases` 无 DDL）** | **2026-10-16**（截止=当日） | 把 §25 的"字段静默不落库"当症状往上追一类：全仓 DDL 声明列 vs 代码写入列 | 🔨 **扫描完成、结论已点验（10/16）**：假阳性两类已清（UPDATE 写的列被当成"没人写"、单类多表变量名交叉污染）；**真缺陷 1 条**——`session_leases` 表**全仓没有任何 CREATE TABLE**，而 `runtime-governance-roadmap.md:95` 写"DDL 见部署文档"⇒ 悬空指针，转 §3 第 22 项待拍板（**待拍板 20 → 21 项**） |
-| **§28 成本面零写入点取证（闭合 §16 的"未取证边界②"）** | **2026-10-16**（截止=当日） | `cost_records` / `budget_limits` 到底有没有人用 | ✅ **已取，结论为否（10/16）**：两表在 Python 侧 **0 条 SQL**（`(FROM\|INTO\|UPDATE)` 定向 grep 0 命中），成本治理只写 `budget_usage` ⇒ 第 6 条"成本"格与"数据来源"同源缺口，**并入 §3 第 19 项**（不另开行，真待拍板仍 21 项）；另清出一处悬空指针 `cost_governance_pg.py:4`（称 DDL 在 `db.py`，实际在迁移里）。现网库存量未取证 ⇒ 待环境 |
+| **§25 取证面持久化实测（撤回我写下的"无需 DB 迁移"）** | **2026-10-16**（截止=当日） | 提交前自查新方案的每条断言，把推断换成实跑读数 | ✅ **已完成（10/16）**：伪连接探针实取 ⇒ `PgTrajectoryStore` 从不发 `forensic` 列、读回 `record.forensic is None`、`steps` 读回是 `dict` 而非 `TrajectoryStep`（`AttributeError`）⇒ 第 6 条的缺口从「三格没填」扩为**两层**（字段填充 + 持久化读回），`docs/plans/plan-forensic-provenance-wiring-2026-10-16.md` 按此改写并新增 Q5 待拍板（**§3 行数不变，仍是 20 项**，Q5 属第 19 项内部） |
+| **§26 两件本地读数复跑（启发式评测门禁 + 门禁条数三口径）** | **2026-10-16**（截止=当日） | 把 §19 那批被权限层拦下的 `make eval` 半截捡回来，并独立复测门禁条数三口径 | ✅ **已完成（10/16）**：`eval/run_eval.py --fail-below 0.8` ⇒ **15/15 = 100.00%，rc=0**（rev `1953c5f`，启发式半截；`eval/run_planner_eval.py` 需密钥 ⇒ 仍待放行）；三口径复测 **16 编号 / 17 表行 / 18 函数**与 `ARCHITECTURE.md` §4.1 现值**吻合、无新漂移** ⇒ 只在 CHANGELOG 的旧快照句下加"已被取代、不外引"指针，不就地改数 |
+| **§27 存储面覆盖率扫描（清出 `session_leases` 无 DDL）** | **2026-10-16**（截止=当日） | 把 §25 的"字段静默不落库"当症状往上追一类：全仓 DDL 声明列 vs 代码写入列 | 🔨 **扫描完成、结论已点验（10/16）**：假阳性两类已清（UPDATE 写的列被当成"没人写"、单类多表变量名交叉污染）；**真缺陷 1 条**——`session_leases` 表**全仓没有任何 CREATE TABLE**，而 `docs/operations/runtime-governance-roadmap.md:95` 写"DDL 见部署文档"⇒ 悬空指针，转 §3 第 22 项待拍板（**待拍板 20 → 21 项**） |
+| **§28 成本面零写入点取证（闭合 §16 的"未取证边界②"）** | **2026-10-16**（截止=当日） | `cost_records` / `budget_limits` 到底有没有人用 | ✅ **已取，结论为否（10/16）**：两表在 Python 侧 **0 条 SQL**（`(FROM\|INTO\|UPDATE)` 定向 grep 0 命中），成本治理只写 `budget_usage` ⇒ 第 6 条"成本"格与"数据来源"同源缺口，**并入 §3 第 19 项**（不另开行，真待拍板仍 21 项）；另清出一处悬空指针 `packages/agent-runtime/agent_runtime/cost_governance_pg.py:4`（称 DDL 在 `db.py`，实际在迁移里）。现网库存量未取证 ⇒ 待环境 |
 | 阶段 2 / 阶段 3 | 11-13 / **12-04** | 归 roadmap，不由本排期重排 | 部分待环境 |
 | 一期交付判定 | **2026-12-04** | roadmap §四 七条标准逐条判定 | — |
 
@@ -36,7 +36,7 @@
 | 阶段1 #5「4 个模块主流程未调用」 | 每模块有测试与独立提交 | **4/4 已接线**（state_migration / execution_recovery / payload_externalization / human_task） | `c49ee2dd` `4a7c662e` `6bf15287`；`packages/agent-runtime/tests/test_human_task_wiring.py`(5) + `applications/agent_server/tests/test_human_task_api.py`(12) |
 | 阶段1 #4（代码面子项）防覆盖 fence | 保护覆盖 5/5 | **代码面 5/5**；真库拒绝用例仍待环境 | `68a44290`；`packages/agent-runtime/tests/test_receipt_generation_fencing.py` |
 | 阶段1 #6 健康检查报四部件 | 开关跟随断言 | 已完成（`18b6954`）+ 残差补强已做 | `d31f247e`（`cost_governance`/`forensic`「输入变则值必变」） |
-| P0-4 桶 A（盲捕获安全窄化） | §3 逐站点核对 | **8 站点全部已落地**（此前该 plan 自记「不作结论，需逐个核对」，本批已核对） | `milvus_utils.py:68` `(ValueError, TypeError)`；`node_pdf_to_md.py:134/156/239/339`；`benchmark/locustfile.py:46` `(OSError, ValueError)`；`tests/unit/test_tracing.py:35/41` + `test_security_guards.py:47` `ImportError` |
+| P0-4 桶 A（盲捕获安全窄化） | §3 逐站点核对 | **8 站点全部已落地**（此前该 plan 自记「不作结论，需逐个核对」，本批已核对） | `applications/knowledge-service/knowledge_service/clients/milvus_utils.py:68` `(ValueError, TypeError)`；`node_pdf_to_md.py:134/156/239/339`；`benchmark/locustfile.py:46` `(OSError, ValueError)`；`tests/unit/test_tracing.py:35/41` + `applications/knowledge-service/tests/unit/test_security_guards.py:47` `ImportError` |
 | T2.2 item5 | 行为等价 + 零回归 | 已落地 | `b35f35a`；federation **176 passed** |
 | T2.3（8 项依赖配置） | 逐项对码 | 已重新对码 + 2 项本批落地 | `af2f980`；exhibition **357 passed** |
 | 阶段0 文档状态行 | 每条状态有代码/测试依据 | 7 篇漂移状态行已订正 | `06c1b1b` `c05ba0a` `1640f38` `d08a751` `a5eacd4` `75fdabe` |
@@ -47,15 +47,15 @@
 
 | 日期 | 项 | 来源 | 影响面 | 验收判据 | 归属 |
 |---|---|---|---|---|---|
-| 10/17–10/18 | **#5 残口：订正 `execution_recovery.py:11` 陈旧 docstring**（仍写「payload_externalization / human_task 仍未接线」，与本批代码矛盾），并加「禁止再退化为孤岛」的装配面自动检查 | roadmap #5 判据「全仓未接线标注归零」 | 仅 docstring + 1 个门禁测试 | 该模块 docstring 不再声称未接线；`test_v3_wiring_assembly.py` 增断言且红→绿 | ✅ **提前完成（10/16）**：docstring 已订正为「已接线，接线 ≠ 默认启用」；新增 5 条护栏（4 模块装配锚点 parametrize + 1 条「已转正模块不得自称未接线」文档护栏），**并已反证护栏非空转**——43 个 agent_runtime 模块中 26 个被 main.py 引用（4/4 命中）、17 个正确报缺（`cache`/`circuit_breaker`/`effect_contract`/`forensic`…），⇒ 锚点消失即 fail。`agent_server` **122 passed**、ruff 绿 |
-| 10/18 | **#D7 桶 A 记账闭合 + 残余定性**：本批实测 `git grep 'noqa: BLE001'` = **37 处**（集中在 `knowledge-service/eval/*.py`、`agent_server/main.py:131`），与 P0-4 §5 硬判据「=0」不符 ⇒ 逐处判定「属 M2 已放弃的逐点 noqa（应迁入整包基线）」还是「桶 C 承重点（应保留）」并写结论 | P0-4 §5 / TODO D7 | 只动 pyproject 基线 + 注释 | `ruff check .` 全绿；§5 判据被逐处定性（不粉饰为 0） | ✅ **完成（10/16），结论与原判据相反**：**不迁基线**——实测两种豁免强度不同（新加 `except Exception` 在「仅逐点 noqa」文件里 **ruff 报错**；在「已入 per-file-ignores」文件里 **ruff 放行**）⇒ 逐点 noqa 是**行级精确棘轮**，整包基线是**全文件永久 blanket 豁免**。为凑 0 而迁移 = 把 13 个文件降级并丢掉每处理由注释，正是本方案桶 B 已否决的「为降指标动手」。改做**增防护**的两件事：① 补齐 9 处无理由 noqa ⇒ 裸标 **0/36**；② 删 1 处 **vestigial**（`identity.py:220` 捕的是具体类型 `jwt.PyJWTError`，BLE001 本就不触发，stdin 探针证明去掉仍全绿）⇒ **37→36 真实降量**。§5 判据建议改为「裸标=0 + 基线文件不得补逐点 noqa + 周期重扫 vestigial」，**此项待你认可**（改的是验收判据本身） |
+| 10/17–10/18 | **#5 残口：订正 `packages/agent-runtime/agent_runtime/execution_recovery.py:11` 陈旧 docstring**（仍写「payload_externalization / human_task 仍未接线」，与本批代码矛盾），并加「禁止再退化为孤岛」的装配面自动检查 | roadmap #5 判据「全仓未接线标注归零」 | 仅 docstring + 1 个门禁测试 | 该模块 docstring 不再声称未接线；`applications/agent_server/tests/test_v3_wiring_assembly.py` 增断言且红→绿 | ✅ **提前完成（10/16）**：docstring 已订正为「已接线，接线 ≠ 默认启用」；新增 5 条护栏（4 模块装配锚点 parametrize + 1 条「已转正模块不得自称未接线」文档护栏），**并已反证护栏非空转**——43 个 agent_runtime 模块中 26 个被 main.py 引用（4/4 命中）、17 个正确报缺（`cache`/`circuit_breaker`/`effect_contract`/`forensic`…），⇒ 锚点消失即 fail。`agent_server` **122 passed**、ruff 绿 |
+| 10/18 | **#D7 桶 A 记账闭合 + 残余定性**：本批实测 `git grep 'noqa: BLE001'` = **37 处**（集中在 `knowledge-service/eval/*.py`、`agent_server/main.py:131`），与 P0-4 §5 硬判据「=0」不符 ⇒ 逐处判定「属 M2 已放弃的逐点 noqa（应迁入整包基线）」还是「桶 C 承重点（应保留）」并写结论 | P0-4 §5 / TODO D7 | 只动 pyproject 基线 + 注释 | `ruff check .` 全绿；§5 判据被逐处定性（不粉饰为 0） | ✅ **完成（10/16），结论与原判据相反**：**不迁基线**——实测两种豁免强度不同（新加 `except Exception` 在「仅逐点 noqa」文件里 **ruff 报错**；在「已入 per-file-ignores」文件里 **ruff 放行**）⇒ 逐点 noqa 是**行级精确棘轮**，整包基线是**全文件永久 blanket 豁免**。为凑 0 而迁移 = 把 13 个文件降级并丢掉每处理由注释，正是本方案桶 B 已否决的「为降指标动手」。改做**增防护**的两件事：① 补齐 9 处无理由 noqa ⇒ 裸标 **0/36**；② 删 1 处 **vestigial**（`packages/agent-runtime/agent_runtime/identity.py:220` 捕的是具体类型 `jwt.PyJWTError`，BLE001 本就不触发，stdin 探针证明去掉仍全绿）⇒ **37→36 真实降量**。§5 判据建议改为「裸标=0 + 基线文件不得补逐点 noqa + 周期重扫 vestigial」，**此项待你认可**（改的是验收判据本身） |
 | 10/19–10/21 | **#10 数据可信度默认值改「待确认」**：无标注响应不得按「完整可信」输出；缺标注则拒绝接入 | roadmap #10 | exhibition 侧 `data_readiness` 消费链 | 造一条无标注响应 ⇒ 输出显示「待确认」（新增用例） | ✅ **提前完成（10/16，两句都做）**：① 运行侧 `_map_readiness` 有**两处** fail-open（`level is None` 与函数末尾兜底 `return READY`），现均判 `UNCONFIRMED`，`Readiness` 加 `UNCONFIRMED`，输出带「数据可信度待确认」warning；② 接入侧 `skill_router` 门禁只拦 `SYNTHETIC`，未标注者落 `UNKNOWN` ⇒ **自动放行**，现生产档 `UNKNOWN` 亦拒。行为差分实测：仅 `None`/未知 level/空串 3 项由 READY→UNCONFIRMED，`complete`/`synthetic`/`partial`/`pending` 4 项不变。新增 11 条断言，exhibition **368 passed**。**遗留（需业务侧标注，非我可判定）**：catalog 48 接口中 `create_lead`/`delete_lead`/`confirm_lead`/`reject_lead` **恰是 4 个写操作且无 readiness** ⇒ 生产档现被拒；上线前须由业务方补标注（我不替它们猜值）。DEMO/DEV 档不受影响 |
 | 10/22–10/27 | **#7 对外数据格式补健康检查字段与界面所需结构**（**先做消费方影响评估**，不得静默改下游解析形状） | roadmap #7 | shared-schemas / 下游前端与网关 | 跨服务一致性测试 + 打分测试均不破坏下游 | 🔨 **拆两半交付（10/16）**：**「不破坏下游」的那半已做**——新增 `tests/test_health_contract_consistency.py` 8 条（钉共享契约服务不得退回裸 dict / 遗留约定逐项登记且**登记失实也报红** / **禁第 4 套 `status` 字面值**，用 AST 只取 `/health` 路由自身返回）。**「统一形状」的那半转 §3 第 6 项待拍板**：实测三套约定并存（`healthy` 枚举 / `"ok"` / `{"ok":true}`），统一要改 3 个服务的线上响应值并牵动 knowledge-service `/health/ready` 的 503 就绪探针语义 ⇒ 按 AGENTS.md「边界」条不擅动。评估全文见 §6 |
-| 10/22–10/27 | **#4 重复实现去重复核**：roadmap 记「同名任务回执存储有两份实现、接线用的是无保护那份」。本批 `git grep 'class .*Receipt.*Store'` **未命中**⇒ 疑已合并；须以实读确认「同名实现只剩一处」是否成立 | roadmap #4 判据 | 若仍在则删重复一份 | 判据「同名实现只剩一处」有实读证据 | ✅ **提前完成（10/16）**：**上排的「疑已合并」是错的**——错在用了猜名字的 grep（`Receipt.*Store`），而那两份实际叫 `PgAwaitableTaskStore`，模式不含 "Receipt" 故 0 命中（假阴性）。改用**跨包重复类名扫描**才定位到：`awaitable_task_pg.py:24`（已带 fence，生产接线，`main.py:435`）与 `execution_state_pg.py:114`（**无 fence**：`save` 的 INSERT 只写 15 列、`generation` 留空、无 WHERE 守卫）。后者**零 import**（全仓只从该模块取 `PgExecutionStatusStore`）⇒ 死副本，已删。**危险不在冗余而在 import 点**：`execution_state_pg` 是「Pg 存储」的自然取用处，从那儿 import 同名类会静默丢掉 ``68a44290`` 的 fence。唯一实现由新用例**双向**钉住（无第二份 + 留下那份必须带 fence，防删错方向），并反证删除前必红。⇒ **#4 判据「同名实现只剩一处」现已成立**；其余判据（真库两类拒绝用例）仍待环境。**方法教训**：判「是否还有重复实现」不能靠猜类名的 grep，要按「重复定义」这一结构事实扫描 |
-| 10/16（再前移，见 §8） | **#16 第一半：强杀脚本去掉本机默认 DSN**（判据「未注入变量时脚本拒跑而非默连本机」） | roadmap #16 | 仅 `scripts/ha_real_kill_verify.py` + 1 个新门禁测试，不改任何产品链路 | 未注入即非零退出且点名变量；连接前即拒跑；6 处变异反证 | ✅ **完成（10/16）**：默认值（含内嵌凭证）删除，缺失 ⇒ 退出码 4；目标库以脱敏形式进日志；`tests/test_ha_kill_script_gate.py` 5 条 + 变异反证；CI 不受影响（`ha.yml` 已注入该变量）。**第二半待环境** |
+| 10/22–10/27 | **#4 重复实现去重复核**：roadmap 记「同名任务回执存储有两份实现、接线用的是无保护那份」。本批 `git grep 'class .*Receipt.*Store'` **未命中**⇒ 疑已合并；须以实读确认「同名实现只剩一处」是否成立 | roadmap #4 判据 | 若仍在则删重复一份 | 判据「同名实现只剩一处」有实读证据 | ✅ **提前完成（10/16）**：**上排的「疑已合并」是错的**——错在用了猜名字的 grep（`Receipt.*Store`），而那两份实际叫 `PgAwaitableTaskStore`，模式不含 "Receipt" 故 0 命中（假阴性）。改用**跨包重复类名扫描**才定位到：`packages/agent-runtime/agent_runtime/awaitable_task_pg.py:24`（已带 fence，生产接线，`main.py:435`）与 `execution_state_pg.py:114`（**无 fence**：`save` 的 INSERT 只写 15 列、`generation` 留空、无 WHERE 守卫）。后者**零 import**（全仓只从该模块取 `PgExecutionStatusStore`）⇒ 死副本，已删。**危险不在冗余而在 import 点**：`execution_state_pg` 是「Pg 存储」的自然取用处，从那儿 import 同名类会静默丢掉 ``68a44290`` 的 fence。唯一实现由新用例**双向**钉住（无第二份 + 留下那份必须带 fence，防删错方向），并反证删除前必红。⇒ **#4 判据「同名实现只剩一处」现已成立**；其余判据（真库两类拒绝用例）仍待环境。**方法教训**：判「是否还有重复实现」不能靠猜类名的 grep，要按「重复定义」这一结构事实扫描 |
+| 10/16（再前移，见 §8） | **#16 第一半：强杀脚本去掉本机默认 DSN**（判据「未注入变量时脚本拒跑而非默连本机」） | roadmap #16 | 仅 `scripts/ha_real_kill_verify.py` + 1 个新门禁测试，不改任何产品链路 | 未注入即非零退出且点名变量；连接前即拒跑；6 处变异反证 | ✅ **完成（10/16）**：默认值（含内嵌凭证）删除，缺失 ⇒ 退出码 4；目标库以脱敏形式进日志；`tests/test_ha_kill_script_gate.py` 5 条 + 变异反证；CI 不受影响（`.github/workflows/ha.yml` 已注入该变量）。**第二半待环境** |
 | 10/17（再前移，见 §9） | **#11 第一半：身份门卫装配覆盖 + P13 存在性门禁**（判据「6/6 覆盖；门禁生效；灰度开关有记录」中本地可验的部分） | roadmap #11 | 新模块 1 + 两服务装配点与各 1 处依赖声明 + lint 新规则（含 L-5/P13 枚举合并） | 6/6 有装配点且归属可审计；注释掉即报红；两服务响应不变 | ✅ **提前完成（10/16）**：共享装配 2/6 → **4/6**（kefu、nl2sql 从零门卫接入 observe 档）；P13 归属表把另外 2 家**自带实现**记成在册债（收敛待拍板 §3 第 9 项）；顺带修掉验签器异常会变 500 的问题。门禁 5 条反证 + 真树变异两次。**enforce 生效待环境**，本行不闭合 |
-| 10/28–10/30 | **阶段 1 收口对账**：逐条按 roadmap「怎么算改好」列复核 + 全量门禁（`ruff check .` / `check_doc_sync.py` / 相关 pytest session） | roadmap 阶段1 | 文档 | 每行有代码或测试依据；待环境行明确标注「标准环境已验证 / 多物理机待环境」 | ✅ **提前完成（10/16，见 §12）**：11 行逐条以命令重取证据（含 10 session 全量门禁 2912 passed / 16 skipped）；**并抓出我自己 4 处账面错数**（实现函数 17→18、agent_server 11→43 键、KS 8→13 项、以及一条已撤回的污染假设），其中「判据措辞欠账」一项等你定 |
-| 10/17 | **§16 新登记：变更记录半边补齐**——为「未发布窗口」补一节 CHANGELOG（覆盖 2026-10-09 之后进入本分支祖先链的全部提交，rev 数见 §17 表），使 roadmap §四 第 7 条「变更记录与代码一致」有判据可依 | roadmap §四 第 7 条 / #1 收尾 | 仅 `CHANGELOG.md`，不改代码、不动历史条目 | 新节覆盖到本分支 tip（逐条可指回提交号）；历史节零改动；`check_doc_sync.py` 仍绿 | ✅ **完成（10/16，见 §17）**：新增「未发布窗口补记：2026-10-10 – 2026-10-16」一节，覆盖 120 个提交（main 79 + 本分支 41）、8 个批次、11 个提交锚点逐一 `git log -1` 核对；历史节零改动。**判据按 §17 的口径声明**：本节是「按批次聚合 + 可机械枚举的 rev 范围」，不声称逐提交转写 |
+| 10/28–10/30 | **阶段 1 收口对账**：逐条按 roadmap「怎么算改好」列复核 + 全量门禁（`ruff check .` / `scripts/check_doc_sync.py` / 相关 pytest session） | roadmap 阶段1 | 文档 | 每行有代码或测试依据；待环境行明确标注「标准环境已验证 / 多物理机待环境」 | ✅ **提前完成（10/16，见 §12）**：11 行逐条以命令重取证据（含 10 session 全量门禁 2912 passed / 16 skipped）；**并抓出我自己 4 处账面错数**（实现函数 17→18、agent_server 11→43 键、KS 8→13 项、以及一条已撤回的污染假设），其中「判据措辞欠账」一项等你定 |
+| 10/17 | **§16 新登记：变更记录半边补齐**——为「未发布窗口」补一节 CHANGELOG（覆盖 2026-10-09 之后进入本分支祖先链的全部提交，rev 数见 §17 表），使 roadmap §四 第 7 条「变更记录与代码一致」有判据可依 | roadmap §四 第 7 条 / #1 收尾 | 仅 `CHANGELOG.md`，不改代码、不动历史条目 | 新节覆盖到本分支 tip（逐条可指回提交号）；历史节零改动；`scripts/check_doc_sync.py` 仍绿 | ✅ **完成（10/16，见 §17）**：新增「未发布窗口补记：2026-10-10 – 2026-10-16」一节，覆盖 120 个提交（main 79 + 本分支 41）、8 个批次、11 个提交锚点逐一 `git log -1` 核对；历史节零改动。**判据按 §17 的口径声明**：本节是「按批次聚合 + 可机械枚举的 rev 范围」，不声称逐提交转写 |
 | 10/17 前出方案，实施待拍板 | **§16 新发现：标准 6 由「达标」下修**——`ForensicContext` 的 `external_inputs` / `external_task_receipts` / `effect_receipts` 三格生产零写入点，全仓唯一生产构造点只填 `model` + `planner_version` ⇒ 「每次回答可追溯数据来源」不成立 | roadmap §四 第 6 条 | agent-runtime 取证装配点 + planner 执行链 + 下游观测面 | 判据本身要先定（粒度/哈希口径/PII 边界/回执汇流方向四问，见 §3 第 19 项）；实施后 = 三格各有一处生产写入点 + 「输入变则值变」断言 | ⚠️ **转 §3 第 19 项待拍板**：设计决策 + 改的是每次回答都写的取证记录形状，按红线不擅自开工 |
 | — | **待环境（只登记，不承诺日期）** | #4 真库两类拒绝用例、#8 KS 15 条报错根因 + 图谱重测、#16 第二半（双机接管+防覆盖+过载保护场景在真库通过）、V3 双实例物理故障转移、CodeQL B7b-4/5 重扫、env-var 126 部署脚本同步 | 需 126/PR/CI | roadmap §四第 2 条规则 | 环境解锁后 |
 
@@ -64,19 +64,19 @@
 红线「所有代码优化/重构必须先制定方案」+ 我不替你做设计决策。以下 **22 行**（按本表条目计数，非按 plan 文件数）方案已就绪，卡在「选哪条路」而非「有没有路」：
 **其中真待拍板 = 21 行** —— 第 1 项经 2026-10-16 对码作废（代码早已合入，见该行注），作废行的编号保留不复用；第 17 行按行计 1、内含 5 问（三份 ADR 各 §5）；第 19–22 项由 §16/§17/§20/§27 对码新增。
 
-1. ~~`plan-audit-operator-principal-2026-10-03.md` — 审计主体改造是否开工（现：方案已写、零代码）~~ **本项作废（2026-10-16 对码）**：
-   代码早做完并合入了 —— `session_router.py:71` = `operator = server_tenant_id(settings.default_tenant_id)`、P12 门禁在 `lint_architecture.py`、
+1. ~~`docs/plans/plan-audit-operator-principal-2026-10-03.md` — 审计主体改造是否开工（现：方案已写、零代码）~~ **本项作废（2026-10-16 对码）**：
+   代码早做完并合入了 —— `applications/agent_server/api/session_router.py:71` = `operator = server_tenant_id(settings.default_tenant_id)`、P12 门禁在 `scripts/lint_architecture.py`、
    治理用例在册、提交 `116d51b1` → PR #61 → merge `bb2b9a81`。**是我把 `docs/TODO.md` 的三段已完成追记漏读、照 plan 陈旧状态行登记成了待拍板**
    （plan 状态行已按证据订正）。真正未闭合的那条是**部署侧 `revert_audit.operator` 存量历史行取证**，属**待环境**（三通道不通），不是决策项 ⇒ 从本表移出、编号保留不复用（防 §3 他处「第 9/12 项」这类交叉引用错位）。
-2. `plan-m11-exception-classification.md` — 状态 `Proposed`，接受 / 修改后再施工
-3. `plan-router-keyword-gate-hides-corpus-2026-10-12.md` — 修法三选一
-4. `plan-v3-phase-2-4-integration-2026-09-23.md` — v2 方案（含 6 项不变量）确认后施工
+2. `docs/plans/plan-m11-exception-classification.md` — 状态 `Proposed`，接受 / 修改后再施工
+3. `docs/plans/plan-router-keyword-gate-hides-corpus-2026-10-12.md` — 修法三选一
+4. `docs/plans/plan-v3-phase-2-4-integration-2026-09-23.md` — v2 方案（含 6 项不变量）确认后施工
 5. tech-debt 补充 4 — agentic bridge 默认开 vs 保留 opt-in 但补开启路径测试
 6. **#7 对外 `/health` 三套约定是否统一**（评估结论见 §6）——统一到共享 `HealthStatus` 需改 exhibition/kefu/knowledge 的**线上响应值**，且 knowledge-service `/health/ready` 的 503 是就绪探针语义的一部分。本轮只交付不破坏下游的一致性测试 + 禁第 4 套护栏；统一与否请你定（选项：a 全统一到 `HealthResponse` / b 仅新增服务强制、存量保留并在看板侧做映射 / c 保留现状仅靠测试钉住不再扩散）。
 7. **#12 追加**：是否把 `init_tracing` 移进 `build_api_app` 成为"构造保证不可漏接"。本轮把「统一装配」实现为**统一工厂 + L-5 存在性门禁**已满足判据「漏装即 CI 失败」；但把 init 放进工厂会与 agent_server 现有顺序约束冲突（其源码有「别挪回去」注释：Langfuse 客户端构造会抢全局 TracerProvider ⇒ `init_tracing` 必须早于模型构造），且工厂在 import 期被调用会引入 import 副作用。属架构取舍，请你定。
 8. **取证脚本的 `127.0.0.1:18000` 默认值是否同样 fail-closed**（详见 §8 末段）：`deploy/observability/langfuse_proof.py`、`deploy/k8s/scripts/e2e_traceparent.sh` 与已修的强杀脚本同属「输出被当作现网证据」的一类，但它们的本机默认值是**运维本机 port-forward 的既定用法**，改动要连带重写 `docs/operations/env-126-inventory.md` / `deploy/k8s/VERIFICATION.md` 里的在册命令。选项：a 两个都改（一致性优先，附命令文档同步）/ b 只改 langfuse_proof 的提问模式（只读复核模式不需要 TARGET）/ c 都不改，靠手册声明。我倾向 a，但它改的是**你正在用来取证的命令的形状**，所以由你定。
 
-9. **两套自带身份门卫是否收敛到共享实现**（§9 / `plan-identity-gate-6of6-2026-10-16.md` §5.1）：knowledge-service 的 `TenantHeaderMiddleware` 与 exhibition-agent 的 `X-Execution-Context`（**逐端点调用**、DEV 档刻意不验签）都在 126 上活着。P13 的归属表已把两家显式记成在册债，所以「6/6 覆盖」现在是一句**可审计**的话，而不是"都装了个门卫"。收敛会改两家的部署开关名与响应形状（KS 的 `/health/ready` 503 就绪语义牵连其中）⇒ 按 AGENTS.md「边界」条不擅动。选项：a 先收敛 KS，exhibition 的端点级覆盖另行处理 / b 两个一起收敛 / c 三套并存但 P13 归属表长期挂着（现状）。
+9. **两套自带身份门卫是否收敛到共享实现**（§9 / `docs/plans/plan-identity-gate-6of6-2026-10-16.md` §5.1）：knowledge-service 的 `TenantHeaderMiddleware` 与 exhibition-agent 的 `X-Execution-Context`（**逐端点调用**、DEV 档刻意不验签）都在 126 上活着。P13 的归属表已把两家显式记成在册债，所以「6/6 覆盖」现在是一句**可审计**的话，而不是"都装了个门卫"。收敛会改两家的部署开关名与响应形状（KS 的 `/health/ready` 503 就绪语义牵连其中）⇒ 按 AGENTS.md「边界」条不擅动。选项：a 先收敛 KS，exhibition 的端点级覆盖另行处理 / b 两个一起收敛 / c 三套并存但 P13 归属表长期挂着（现状）。
 10. **路由侧「自报租户」是否换成服务端断言**（§9 / 同方案 §5.2）：这才是 #11 的真正收口动作，但它让调用方**能观察到行为变化**（自报 `tenant_id` 不再被采信）。牵动 agent_server `/query` 的 9 处与 kefu 的 2 处；且 **nl2sql-service 的「租户隔离」目前没有定义**——其源码零 `tenant` 引用，契约里有 `tenant_id` 字段但从不读，所以得先回答"按什么隔离"（数据源？元知识库？结果集？）才谈得上验收。选项：a 先只定义 nl2sql 的租户语义、存量自报暂不动 / b 一并翻断言（要先审计前端与网关的取值来源）/ c 停在 observe 档，等二期接口签字后再动。
 
 11. **WS 路径要不要接 admission 与背压**（§10 P2-3）：`/ws/{thread_id}` 被入口护栏**显式豁免**（`agent_federation/api/server.py:158` `exempt_paths=("/health", "/ws/")`），且逐条 `send_json` 无队列/水位（`:382-388`）。错误帧这一半已补（`:392-403`），但限流与背压要动的是**客户端能观察到的行为**（慢消费者会被暂停或断连），属对外语义决策。
@@ -86,9 +86,9 @@
     选项：a 补 61 项 + 建双向门禁 / b 只补 61 项、不建门禁（agent_server 那 43 项就是按这个形状做的）/ c 停在现状。**注**：本轮已把 KS 观测两键从"杜撰键"改判为"**文档化但无人读取的开关**"——危害不是文档噪音，而是照文档设值后静默不开。
 
 13. **MinIO 初始化要不要翻成默认拒绝启动**（§10 P2-7）：上传路径已 fail-fast（`import_router.py:229-232`），但 `clients/minio_utils.py:12-51` 初始化仍是"记 error + 置 None"。翻了之后缺配置的部署从「能起但导入功能坏」变成「起不来」——这是**部署侧的可用性取舍**，且牵动 126 现网。顺带一条孤儿：`core/config.py:174-187` 的 `validate_credentials()` 全仓零调用方（要么接上要么删，我不擅自定）。
-14. **文档口径的自动兜底要不要建**（§10 P2-6 (a)/(c)）：`check_doc_sync.py` 只核路径存在性与 session 数，核不出"门禁条数/覆盖率/状态行"这类**数字漂移**——本轮我自己就把 14→16 的口径破了又补。选项：a 让 check_doc_sync 增核「lint 条数三处一致」（把现值算出来比对，破口即红）/ b 维持人工收尾 / c 改为文档里不再写死数字、只写口径定义。 **本轮实测补充**：`check_doc_sync` 的判定面只有根三篇（`DOC_FILE_REF_DOCS`，`scripts/check_doc_sync.py:41`），`docs/README.md` 那份索引插了假路径也照样 0 警告 ⇒ 覆盖面比直觉窄，详见 §13.1。**§12 又添一例支持选 a/c**：收口对账重取时发现我写的"实现函数 17 个"其实应是 **18**（`check_*` 17 + `check()`），这种数只有跑一遍脚本才抓得住，人工收尾已连续两次漏。
-15. **roadmap #5 的判据措辞要不要改写**（§12）：原文「全仓"未接线"标注数归零」**无法机械复核** —— 字面 `git grep "未接线"` 在当前树命中 **20 个文件**（CHANGELOG/plan 历史留档、`README.md:562` 讲的是另一个未接线面、eval spike 自述），而该行的真实意图是「已转正模块的 docstring 自述归零」（这半已达成并有 `test_v3_wiring_assembly.py` 18 条护栏）。选项：a 判据改写为「`agent_runtime/*` 已接线模块的头 docstring 无『未接线』自述」（可被那条文档护栏直接执行）/ b 保留原句并加口径注 / c 不动，留作人工解释。
-16. **意图路由绕过统一 embedding 提供方**（`plan-intent-embedder-bypasses-provider-2026-10-10.md` §6）：本项**此前漏登记**——我按 §3 台账清点时没扫这份 plan，直到本轮清扫全部 plan 状态行才看到（属台账自己的缺口，不是这份 plan 的问题）。该 plan 明写「全部等拍板」，且带**现场运行证据**而非静态推断：§5 r12 在 `EMBEDDING_MODE=mock` 下 `POST /query` **260s 零字节**、服务端日志显示仍去 `huggingface.co` 取权重并重试 5 次；r13 设了 `HF_HUB_OFFLINE=1` 后同一请求 12.8s 完成 ⇒ 代价完全取决于那个开关，而 `/health` 的 `embedding_real` 读不到这条旁路。待你答两问：① 选 **A**（`classifier._embedder()` 改走内核 `get_embedder()`，与 RAG/记忆共用选型与 `EMBEDDING_REQUIRE_REAL` 护栏）/ **B**（只改 `/health` 描述并加 `intent_router_backend` 读数）/ **C**（本版明确宣告意图语义层未生效）；② 若选 A，mock 提供方下是「允许降级但必须报状态」还是「直接拒绝启动」。**这条决定的是要不要动请求路径，我按红线未动一行。**
+14. **文档口径的自动兜底要不要建**（§10 P2-6 (a)/(c)）：`scripts/check_doc_sync.py` 只核路径存在性与 session 数，核不出"门禁条数/覆盖率/状态行"这类**数字漂移**——本轮我自己就把 14→16 的口径破了又补。选项：a 让 check_doc_sync 增核「lint 条数三处一致」（把现值算出来比对，破口即红）/ b 维持人工收尾 / c 改为文档里不再写死数字、只写口径定义。 **本轮实测补充**：`check_doc_sync` 的判定面只有根三篇（`DOC_FILE_REF_DOCS`，`scripts/check_doc_sync.py:41`），`docs/README.md` 那份索引插了假路径也照样 0 警告 ⇒ 覆盖面比直觉窄，详见 §13.1。**§12 又添一例支持选 a/c**：收口对账重取时发现我写的"实现函数 17 个"其实应是 **18**（`check_*` 17 + `check()`），这种数只有跑一遍脚本才抓得住，人工收尾已连续两次漏。
+15. **roadmap #5 的判据措辞要不要改写**（§12）：原文「全仓"未接线"标注数归零」**无法机械复核** —— 字面 `git grep "未接线"` 在当前树命中 **20 个文件**（CHANGELOG/plan 历史留档、`README.md:562` 讲的是另一个未接线面、eval spike 自述），而该行的真实意图是「已转正模块的 docstring 自述归零」（这半已达成并有 `applications/agent_server/tests/test_v3_wiring_assembly.py` 18 条护栏）。选项：a 判据改写为「`agent_runtime/*` 已接线模块的头 docstring 无『未接线』自述」（可被那条文档护栏直接执行）/ b 保留原句并加口径注 / c 不动，留作人工解释。
+16. **意图路由绕过统一 embedding 提供方**（`docs/plans/plan-intent-embedder-bypasses-provider-2026-10-10.md` §6）：本项**此前漏登记**——我按 §3 台账清点时没扫这份 plan，直到本轮清扫全部 plan 状态行才看到（属台账自己的缺口，不是这份 plan 的问题）。该 plan 明写「全部等拍板」，且带**现场运行证据**而非静态推断：§5 r12 在 `EMBEDDING_MODE=mock` 下 `POST /query` **260s 零字节**、服务端日志显示仍去 `huggingface.co` 取权重并重试 5 次；r13 设了 `HF_HUB_OFFLINE=1` 后同一请求 12.8s 完成 ⇒ 代价完全取决于那个开关，而 `/health` 的 `embedding_real` 读不到这条旁路。待你答两问：① 选 **A**（`classifier._embedder()` 改走内核 `get_embedder()`，与 RAG/记忆共用选型与 `EMBEDDING_REQUIRE_REAL` 护栏）/ **B**（只改 `/health` 描述并加 `intent_router_backend` 读数）/ **C**（本版明确宣告意图语义层未生效）；② 若选 A，mock 提供方下是「允许降级但必须报状态」还是「直接拒绝启动」。**这条决定的是要不要动请求路径，我按红线未动一行。**
 17. **roadmap #24 三项悬置选型（本行按 §3 条目计数记 1 行，内含 5 问）**（§13 已交付三份决策记录，问题各写在其 §5）：
    `docs/adr/0008-auth-mode-selection.md` —— U1 入口静态 `API_KEY` 与"未配 key 即不校验"旁路要不要结构性关闭
    （A 把 `DEPLOY_ENFORCE_IDENTITY` 默认改 True / B 靠部署清单 + CI 校 / C 不动）、
@@ -113,7 +113,7 @@
    ⇒ 本项现含**两层**：A 字段填充（上面四问）+ **B 持久化与读回**（落独立列 / 挤进 `snapshot` JSONB / 承认"只在进程内可见"并把标准 6 按未达标记）。**B 不做，A 填的字段进不了库 ⇒ 标准 6 在本窗口不可能翻绿。**
    **方案件已就绪（原句"我先不出方案"作废）**：`docs/plans/plan-forensic-provenance-wiring-2026-10-16.md`（状态 Proposed，含五问选项与推荐、影响面、迁移策略、验收判据、工时 3 人/日；**该文件本身不授权编码**）。
    选项：a 本窗口做（我先出方案文档，你批了再编码，判据=三字段各有一个生产写入点 + 「输入变则 hash 变」断言）/ b 只登记为标准 6 的在册缺口、留到 11/14 阶段 3 / c 只接 `external_task_receipts`（回执已有现成落点、跨模块引用成本低），来源与副作用两格后置。
-   **我未动 `forensic.py` 与任何 planner 执行链一行。**
+   **我未动 `packages/agent-runtime/agent_runtime/forensic.py` 与任何 planner 执行链一行。**
 20. **§四 第 7 条的第三个 facet「版本号」要不要建立对应关系**（§17 实测：三处版本面互不对应）。
    现值：根 `pyproject.toml:3` = `0.1.0`，`agent_federation` = `2.0.0`、`knowledge-service` = `1.1.0`，其余 6 处均 `0.1.0`；
    而仓内**存在** `v2.0.0` / `v3.0.0` 两个版本 tag（另有 3 个 `archive/*` ref），**没有任何书面文档说明 tag、包版本、现网 `GIT_REV` 三者怎么对应**。
@@ -123,14 +123,14 @@
    c 只对齐 federation/KS 两个非 `0.1.0` 的（它们大概率是历史发布遗留，需先查这两值是谁在什么时候为什么改的——我没查到书面依据）。
    **我未改任何 `version` 值、未打 tag、未删 tag**：这三者都属对外可声称的发布事实，按「不在本窗口部署/发布」的约束由你定。
 21. **`make eval` 判分基准要不要跟着 F01 生产实现重取**（§20 查出，TODO §4 F01 的残差就在这里）。
-   `evaluation.py` 的 positive 路径仍调内联 `_mock_scope_filter`，而它与生产实现 `enforce_scope_filter` **不等宽**：
+   `applications/exhibition-agent/exhibition_agent/foundation/evaluation.py` 的 positive 路径仍调内联 `_mock_scope_filter`，而它与生产实现 `enforce_scope_filter` **不等宽**：
    mock 对 `scope_type=PUBLIC` 的跨租户项**放行**，生产实现没有 PUBLIC 例外、且 `ctx.scopes` 非空时还要再收窄 ⇒ 换过去 golden 判分必然变（15 题基线要重取）。
    跨租户负样本路径早已跑生产代码（审计 P1-9 那批），所以这不是"接线缺失"，而是**要不要改评测语义**的决策。
    选项：a 换实现 + 重取基线（我先出方案，含逐题差分与新的 `--fail-below` 定值）/ b 保留 mock 但在评测输出里显式标"positive 路径为宽松替身，不代表生产隔离强度" / c 什么都不动，只在 §16 与 TODO 记为在册残差。
-   **我未动 `evaluation.py` 的过滤逻辑与 golden 判分**（本批只把那句已失效的 `TODO: … 落地后替换此函数` 注释订正成现状）。
-22. **`session_leases` 这张表的 DDL 归处**（§27 扫描 + 源码点验查出；`runtime-governance-roadmap.md:95` 现写「DDL 见部署文档」，而**仓内没有任何地方有这张表的建表语句**）。
+   **我未动 `applications/exhibition-agent/exhibition_agent/foundation/evaluation.py` 的过滤逻辑与 golden 判分**（本批只把那句已失效的 `TODO: … 落地后替换此函数` 注释订正成现状）。
+22. **`session_leases` 这张表的 DDL 归处**（§27 扫描 + 源码点验查出；`docs/operations/runtime-governance-roadmap.md:95` 现写「DDL 见部署文档」，而**仓内没有任何地方有这张表的建表语句**）。
     现状是潜伏而非现网故障：默认 `InMemoryLeaseBackend`，`PgAdvisoryLeaseBackend` 只在 `tests/runtime/test_session_lease.py` 被构造（Fake 池），生产 `main.py` 未注入 `lease_backend`（能力图第 260 行已记「装配未注入 ⇒ 多副本语义未启用」）。
-    但一旦按那句文档启用多副本，第一条 SQL 即 `42P01 undefined_table`，而照做的人找不到 DDL 来源。选项：a **补一条迁移建表**（我倾向此，列形状 `coordinator.py:95` 已写死为 `session_id/owner/expires_at`，唯一真相源该在迁移里，且 `migrations/runner.py:45` 的表清单可顺带纳入）/ b 只在部署文档给 DDL 并把 roadmap 那句改成"手工建表，脚本在此" / c 显式标该后端**未达可启用状态**（与 roadmap #5「未接线标注」同族，需一并计入未接线口径）。
+    但一旦按那句文档启用多副本，第一条 SQL 即 `42P01 undefined_table`，而照做的人找不到 DDL 来源。选项：a **补一条迁移建表**（我倾向此，列形状 `packages/agent-runtime/agent_runtime/coordinator.py:95` 已写死为 `session_id/owner/expires_at`，唯一真相源该在迁移里，且 `migrations/runner.py:45` 的表清单可顺带纳入）/ b 只在部署文档给 DDL 并把 roadmap 那句改成"手工建表，脚本在此" / c 显式标该后端**未达可启用状态**（与 roadmap #5「未接线标注」同族，需一并计入未接线口径）。
     **真库验证属待环境**：这张表从未在真 PG 上被建过、也没跑过跨进程单飞。
 
 ## 4. 迁移策略（本排期如何推进，不破坏可回退性）
@@ -144,7 +144,7 @@
 ## 5. 验收标准（本排期何时算「做完」）
 
 - §2 各行按其「验收判据」列逐条有**实跑证据**（提交号 + 测试通过数），而非状态行自称完成。
-- `ruff check .` 全绿、`check_doc_sync.py` 0 警告、受影响 pytest session 全绿。
+- `ruff check .` 全绿、`scripts/check_doc_sync.py` 0 警告、受影响 pytest session 全绿。
 - roadmap 阶段 1 每行要么达标并附证据，要么明确标注「待环境 / 待拍板」；**不出现「已上线 / 已支持几十个业务系统接入」这类未达声明**。
 - §3 的 5 项拍板结果写入对应 plan；未拍板者保持开项，不强行闭合。
 
@@ -159,7 +159,7 @@
 **实测现状（2026-10-16 逐个核，不推定）**：
 - 单一实现与全局装配**已存在**：`agent_core.guardrails.app_factory.build_api_app(enable_tracing=…)`
   装配 kernel `TracingMiddleware`，**默认 False**（正是 #12 要的「统一装配、默认关闭」）；6 个 app 全部经该工厂。
-- 缺的是**门禁**：`lint_architecture.py` 的 L-3 只做**禁止**（`_INIT_WHITELIST`＝init 不得出现在装配点之外），
+- 缺的是**门禁**：`scripts/lint_architecture.py` 的 L-3 只做**禁止**（`_INIT_WHITELIST`＝init 不得出现在装配点之外），
   **没有任何规则要求每个 app 都有 init** ⇒ 「漏装」在 CI 里不可见。这正是判据未达成的那半。
 - 覆盖缺口实测：`init_tracing` 调用点 agent_server 1 / agent_federation 2 / knowledge-service 9 / exhibition 1；
   **kefu-service 0、nl2sql-service 0**（两应用的 OTEL 配置面也为 0，非"接了没开"）。⇒ 覆盖率 **4/6**。
@@ -176,9 +176,9 @@
 4. 不改 `build_api_app` 的默认值（保持 False）：默认开属"渐进推广"决策，与 §3 第 4 项 agentic bridge 同类，**不擅动**。
 
 **验收标准**：
-- `lint_architecture.py` 新规则在 HEAD 上**先红后绿**（实施前跑一次证明它能抓漏装，实施后跑绿）；
+- `scripts/lint_architecture.py` 新规则在 HEAD 上**先红后绿**（实施前跑一次证明它能抓漏装，实施后跑绿）；
 - 6/6 app 有装配点或显式豁免理由；
-- kefu/nl2sql 各自 session 不回归、`ruff check .` 绿、`check_doc_sync.py` 0 警告；
+- kefu/nl2sql 各自 session 不回归、`ruff check .` 绿、`scripts/check_doc_sync.py` 0 警告；
 - roadmap #12 行按「分项进度」写明"哪半已做、哪半仍开"，不整体翻勾。
 
 **排期**：10/17 装配两应用 + 10/18 门禁 + 反证 → 10/19 收口回写 roadmap。
@@ -234,7 +234,7 @@
 
 **为什么前移**：#16 判据两半，其中「未注入变量时脚本拒跑而非默连本机」是纯本地可验的，不等环境；留在原窗口只会让 10/17–10/30 空转。
 
-**动手前先核事实**：`production-delivery-anchor-map-2026-10-09.md` 已把这条钉到 `scripts/ha_real_kill_verify.py`，并订正过口径——「已可环境变量覆盖，本机 localhost:5433 **仅为默认值** ⇒ "硬依赖本机库"说法不准，真实问题是未注入时会静默默连本机」。本批按后半个判断动手。
+**动手前先核事实**：`docs/plans/production-delivery-anchor-map-2026-10-09.md` 已把这条钉到 `scripts/ha_real_kill_verify.py`，并订正过口径——「已可环境变量覆盖，本机 localhost:5433 **仅为默认值** ⇒ "硬依赖本机库"说法不准，真实问题是未注入时会静默默连本机」。本批按后半个判断动手。
 
 **危险定级**：原默认值不只是一个地址，而是**带凭证的完整 DSN**（`postgresql://agent:agent_platform_dev@localhost:5433/…`）。脚本输出是 effectively-once 的取证结论，静默回落等于「真库通过」这句话对应的库不可知。
 
@@ -259,7 +259,7 @@
 | 文案去掉变量名（**两处都去**） | 变量点名断言 | 🔴 红 |
 | 文案只去掉一处变量名 | 变量点名断言 | 🟢 绿 ⇒ **探针无效，不是测试弱**：文案本有两处点名，首版变异只替换了一处。订正探针后重跑为红 |
 
-**实跑**：`env -u AGENT_PLATFORM_PG_URL uv run python scripts/ha_real_kill_verify.py` ⇒ `rc=4` + 点名变量、无 traceback（连接前即退出）。CI 不受影响：`ha.yml:56` 已在 job env 显式注入，`ha.yml:70` 是唯一 `run:` 站点（其余对该文件的引用均为 `paths` 触发过滤）。
+**实跑**：`env -u AGENT_PLATFORM_PG_URL uv run python scripts/ha_real_kill_verify.py` ⇒ `rc=4` + 点名变量、无 traceback（连接前即退出）。CI 不受影响：`.github/workflows/ha.yml:56` 已在 job env 显式注入，`.github/workflows/ha.yml:70` 是唯一 `run:` 站点（其余对该文件的引用均为 `paths` 触发过滤）。
 
 **本行未闭合**：判据另一半「补双机接管+防覆盖+过载保护场景 / 新场景在真库通过」需真实 PG + 双实例 ⇒ **待环境，不承诺日期**。
 
@@ -268,7 +268,7 @@
 
 ## 9. 阶段 2 再前移：roadmap #11 身份门卫装配覆盖（2026-10-16，截止 10-17）
 
-技术方案与逐条验收记录在 `plan-identity-gate-6of6-2026-10-16.md`（§3 设计、§5 本批不做、§8 实施记录），
+技术方案与逐条验收记录在 `docs/plans/plan-identity-gate-6of6-2026-10-16.md`（§3 设计、§5 本批不做、§8 实施记录），
 此处只记排期侧要点：
 
 - **动手前先把「2/6」的定义钉住**：实读结果是**按共享实现算 2/6**（agent_server、agent_federation），
@@ -288,11 +288,11 @@
 ## 10. roadmap #21 判据交付：架构审计 6 项有效遗留的逐项书面结论（2026-10-16）
 
 > 判据原文是「**每项有书面结论**」，不是「每项都修完」。下表状态取**本轮实读的代码证据**，
-> 三条关键结论我另做了源码复核（不整段采信子代理读数）。审计出处 `arch-audit-2026-09-24.md` L19。
+> 三条关键结论我另做了源码复核（不整段采信子代理读数）。审计出处 `docs/plans/arch-audit-2026-09-24.md` L19。
 
 | # | 审计原说法 | 现状态 | 依据（file:line，本轮实读） | 剩余缺口 | 有无防回归门禁 |
 |---|---|---|---|---|---|
-| P2-1 | skill_router 是死代码 | **已修（不再是死代码），覆盖面局部** | 生产调用点 `exhibition_agent/graph/nodes.py:95-103`（`run_skill` 执行前门禁）+ 拒绝分支 `:104-129`；自述已改 `STATUS: WIRED`（`foundation/skill_router.py:5-10`）；测试 3 处（`tests/test_skill_router_wiring.py:22`、`test_skill_routed_endpoint.py:17`、`test_skill_venue_schedule.py:11`） | 门禁表只含 `venue.schedule.query`（`nodes.py:42-44`），`data_analysis.query` 不在内（它走 HTTP 调 nl2sql，不直连 Warehouse）；`route()` 返回值只做判定、**不驱动实际请求形状** | ❌ 无。`lint_architecture.py` 17 个 `check_*` 与 `tests/governance/` 均无「未接线/死代码」类规则 ⇒ 接线被删不会报红（与 #5 判据同源风险） |
+| P2-1 | skill_router 是死代码 | **已修（不再是死代码），覆盖面局部** | 生产调用点 `exhibition_agent/graph/nodes.py:95-103`（`run_skill` 执行前门禁）+ 拒绝分支 `:104-129`；自述已改 `STATUS: WIRED`（`foundation/skill_router.py:5-10`）；测试 3 处（`tests/test_skill_router_wiring.py:22`、`applications/exhibition-agent/tests/test_skill_routed_endpoint.py:17`、`applications/exhibition-agent/tests/test_skill_venue_schedule.py:11`） | 门禁表只含 `venue.schedule.query`（`applications/exhibition-agent/exhibition_agent/graph/nodes.py:42-44`），`data_analysis.query` 不在内（它走 HTTP 调 nl2sql，不直连 Warehouse）；`route()` 返回值只做判定、**不驱动实际请求形状** | ❌ 无。`scripts/lint_architecture.py` 17 个 `check_*` 与 `tests/governance/` 均无「未接线/死代码」类规则 ⇒ 接线被删不会报红（与 #5 判据同源风险） |
 | P2-2 | singleflight 竞态未结构性消除 | **原结论已不成立（实现 + 测试都在）** | `packages/agent-runtime/agent_runtime/singleflight.py:19-33`：`_refs` 引用计数 + `_cleanup` 双守卫（`:27-28` refs>0 不删、`:29-30` lock 身份不符不删），`:68-72` finally 递减；回归用例 5 条（`tests/test_singleflight.py:72/92/112/126/151`，本轮新增后两条） | 无（反向守卫「空闲必须真回收」本轮补齐；路径漂移已在审计原文订正） | ✅ 用例即门禁（9 passed，变异反证已验） |
 | P2-3 | WS 路径未接中间件/限流 | **部分：错误帧已补，护栏与背压仍未接** | 唯一 WS 路由 `agent_federation/api/server.py:337`（审计的 349/362-364 已漂移），异常分支 `:392-403` 现在**既记日志又向客户端发 error 帧**再断连；`:372` 非法 JSON 也发 error 帧 | 入口护栏**显式豁免 WS**：`server.py:158` `exempt_paths=("/health", "/ws/")`，且 `SecurityGuardsMiddleware` 对非 http scope 直接透传（`agent_core/guardrails/web.py:98`）⇒ 无 admission/coordinator；`:382-388` 逐条 `send_json` **无队列/水位/丢弃策略** = 无背压 | ❌ 无。`tests/unit/test_ws_stream.py` 只覆盖正常流，无 error 帧/限流用例 |
 | P2-5 | `.env.example` 与代码不同步 | **部分：exhibition 已补齐（本批 `af2f980`），其余仍有实测缺口** | 已按 `env_prefix` 折算逐应用比对（exhibition `config.py:11` 前缀 ⇒ 10 个 `EXHIBITION_AGENT_*` 均在 `:16-47` 有字段，非孤儿）；审计原句「exhibition 未声明 `NL2SQL_SERVICE_URL`」已不成立（键已在文档中，读点 `skills/data_analysis/skill.py:33`） | ① **agent_server 的 env 键在模板里大面积缺失**（**2026-10-16 重新测量并订正**：原先写"没有自己的 `.env.example`、根文件缺其 11 个无前缀字段"两处都不准 ——
@@ -306,8 +306,8 @@
    **本口径的两个盲区必须随数声明**：⑴ kefu / nl2sql 计数为 **0 不代表已齐全** —— 它们不在自己目录里读 env，
    键由共享层读（`nl2sql_service/conf/settings.py` 等引 `BaseLLMSettings` / `agent_core.llm`），逐应用差集法看不见共享面；
    ⑵ exhibition `config.py` 有 `env_prefix`，前缀拼出来的键名字面扫不到（此前 §5 反向陷阱同源）⇒ 1 项是**下限**。
-   因此这 61 项（13+47+1）**只能当"至少要补这么多"用，不能当精确台账**；③ **文档有而代码无**：KS `.env.example` 的观测两键 `KNOWLEDGE_SERVICE_NAME` / `KNOWLEDGE_TRACE_ENABLED`（全包零命中 ⇒ **已定性为"文档化但无人读取的开关"**，不是杜撰噪音：`37d93427`（2026-09-23）把 `ZHANGUI_*` 纯文本替换成 `KNOWLEDGE_*`，而读取方早在 2026-08-21 就移到内核中性键，故新键名**自诞生起无人读**；共 14 处出现/8 个文件，含 dated 记录正文与单测 `delenv` ⇒ 照文档设值 = "以为开了、其实没开"。**本批已修**：14 处改用 `AGENT_CORE_*` + 正向对照用例 + 钉桩 `test_env_example_observability_keys_are_read_by_code`（变异验证：注入 `KNOWLEDGE_TRACE_ENABLED` 或把键名改掉一个字符均转红）；取证链见 `plan-tech-debt-env-var-rename.md` 表注①） | ❌ 无。`check_doc_sync.py` 只核路径与会话数，不核 `.env.example` ⇒ 这类漂移没有自动兜底 |
-| P2-6 | 文档口径矛盾 | **大部分已对齐，本轮又清掉两处** | lint 条数已四处同步（`ARCHITECTURE.md` §4.1 / capability-map:326 / 讲解稿 / 锚点表）= 表 17 行·编号 16·函数 17，实数逐行核对；治理 28、HA 19 与实测一致 | 仍开的两处：**(b) 真相源冲突未解**——`AGENTS.md:5` 把 `plan-enterprise-platform-skeleton-2026-09-23.md` 列首位，而 `docs/README.md:60` 已明文标它「已被取代」并记录该冲突 ⇒ 属你拍板项，我不擅动；**(c) session 数口径靠注释维持**——Makefile `test:` 实为 10 行 pytest，但 `check_doc_sync.py:316` 只匹配 `uv run pytest ` 前缀 ⇒ 计到 9，`AGENTS.md:29/30` 用「9 session + 1 个 --extra otel session」这句话把两边对上（结论正确，但一致性靠人读注释） | 部分：条数一致性**无自动检查**（`check_doc_sync` 核不出数字漂移）；session 数有 `check_doc_sync` 半覆盖 |
+   因此这 61 项（13+47+1）**只能当"至少要补这么多"用，不能当精确台账**；③ **文档有而代码无**：KS `.env.example` 的观测两键 `KNOWLEDGE_SERVICE_NAME` / `KNOWLEDGE_TRACE_ENABLED`（全包零命中 ⇒ **已定性为"文档化但无人读取的开关"**，不是杜撰噪音：`37d93427`（2026-09-23）把 `ZHANGUI_*` 纯文本替换成 `KNOWLEDGE_*`，而读取方早在 2026-08-21 就移到内核中性键，故新键名**自诞生起无人读**；共 14 处出现/8 个文件，含 dated 记录正文与单测 `delenv` ⇒ 照文档设值 = "以为开了、其实没开"。**本批已修**：14 处改用 `AGENT_CORE_*` + 正向对照用例 + 钉桩 `test_env_example_observability_keys_are_read_by_code`（变异验证：注入 `KNOWLEDGE_TRACE_ENABLED` 或把键名改掉一个字符均转红）；取证链见 `docs/plans/plan-tech-debt-env-var-rename.md` 表注①） | ❌ 无。`scripts/check_doc_sync.py` 只核路径与会话数，不核 `.env.example` ⇒ 这类漂移没有自动兜底 |
+| P2-6 | 文档口径矛盾 | **大部分已对齐，本轮又清掉两处** | lint 条数已四处同步（`ARCHITECTURE.md` §4.1 / capability-map:326 / 讲解稿 / 锚点表）= 表 17 行·编号 16·函数 17，实数逐行核对；治理 28、HA 19 与实测一致 | 仍开的两处：**(b) 真相源冲突未解**——`AGENTS.md:5` 把 `docs/plans/plan-enterprise-platform-skeleton-2026-09-23.md` 列首位，而 `docs/README.md:60` 已明文标它「已被取代」并记录该冲突 ⇒ 属你拍板项，我不擅动；**(c) session 数口径靠注释维持**——Makefile `test:` 实为 10 行 pytest，但 `scripts/check_doc_sync.py:316` 只匹配 `uv run pytest ` 前缀 ⇒ 计到 9，`AGENTS.md:29/30` 用「9 session + 1 个 --extra otel session」这句话把两边对上（结论正确，但一致性靠人读注释） | 部分：条数一致性**无自动检查**（`check_doc_sync` 核不出数字漂移）；session 数有 `check_doc_sync` 半覆盖 |
 | P2-7 | MinIO 外部存储失败仅记 warning | **部分：请求路径已 fail-fast，初始化仍 fail-soft** | 上传路径 `knowledge_service/api/import_router.py:229-232` 客户端为 None ⇒ `HTTPException(500)`，`:236-257` 重试 2 次、末次 `logger.error(exc_info=True)` 后**拒绝本次导入**（`:224` 注释自标 P2-7） | `clients/minio_utils.py:12-51` 模块级 `except Exception` ⇒ 记 error 后 `minio_client = None`，不抛、不阻断启动，**且无 env 开关**；`core/config.py:174-187` 的 `validate_credentials()` 列了 `MINIO_ACCESS_KEY/SECRET_KEY` 但**全仓零调用方**（grep 仅命中定义）⇒ 它不构成启动 fail-fast，这本身是第二条待收的孤儿代码 | 部分：fail-open 的现状由「未配密钥 ⇒ 500」间接可测，但没有专门用例钉「初始化失败不得静默」；126 侧的启动 fail-fast 修复已入库（见 `docs/operations/env-126-inventory.md`），线上镜像是否已重建仍是待执行项 |
 
 **本轮据上表顺手清掉的两处不实陈述**（都属于「账面说不、代码说已做」）：
@@ -315,7 +315,7 @@
    payload_externalization / skill_router(exhibition)」——**五项现已全部接线**，
    按 roadmap #5 判据「全仓未接线标注归零」撤除该句（改为「接线 ≠ 默认启用」的准确表述 + 指向本节）。
    同一条还订正了 `docs/architecture/agent-harness-capability-map.md:200` —— 那份仍写 `STATUS: NOT WIRED`
-   且称 `route()` 零调用，与 `skill_router.py:5-10`、`nodes.py:95-103` 直接矛盾（同一漂移的第二处落点）。
+   且称 `route()` 零调用，与 `applications/exhibition-agent/exhibition_agent/foundation/skill_router.py:5-10`、`applications/exhibition-agent/exhibition_agent/graph/nodes.py:95-103` 直接矛盾（同一漂移的第二处落点）。
 2. `docs/project-introduction-2026-10-12.md:496` 的「14 条自动检查」→ 16 条（我上一轮只改了三处，
    这条是本轮 grep 复查时补的，属同一漂移面）。
 
@@ -359,7 +359,7 @@ P2-7 的初始化 fail-fast 是否翻成默认拒绝启动（会让缺配置的�
 **验收标准**：
 - 用例 `tests/governance/test_agent_server_env_template.py`：87 个字段名全部出现在根模板 active 键中；
   变异验证须证明它非空转（漏一个键 ⇒ 红）。
-- `uv run python scripts/check_doc_sync.py` 与 `ruff check .`、`lint_architecture.py` 全绿；根套件 + KS 会话通过。
+- `uv run python scripts/check_doc_sync.py` 与 `ruff check .`、`scripts/lint_architecture.py` 全绿；根套件 + KS 会话通过。
 - §10 P2-5 与 §3 第 12 项的计数按上面对码结果订正，不留"11 个"这个错数。
 
 **截止**：2026-10-17（当日交，含用例与订正回写）。
@@ -378,7 +378,7 @@ P2-7 的初始化 fail-fast 是否翻成默认拒绝启动（会让缺配置的�
 **全量门禁实跑（本机，`be82e48` 之后的工作树）**：10 个 session 全绿，合计 **2912 passed / 16 skipped**
 （root 1067/8（29 deselected=`requires_pg`）、shared-schemas 28、agent-runtime 653/1、agent_server 122、
 federation 176、kefu 47、exhibition 368、knowledge-service 412/7、nl2sql 21、observability `--extra otel` 18）；
-`ruff check .` 通过、`lint_architecture.py` 通过（打印 16 条编号）、`check_doc_sync.py` 0 警告。
+`ruff check .` 通过、`scripts/lint_architecture.py` 通过（打印 16 条编号）、`scripts/check_doc_sync.py` 0 警告。
 
 | roadmap 行 | 判据原文（关键句） | 本轮实测证据 | 结论 |
 |---|---|---|---|
@@ -386,7 +386,7 @@ federation 176、kefu 47、exhibition 368、knowledge-service 412/7、nl2sql 21�
 | #2 阶段0 | 规范入库并用于后续所有条目 | `docs/operations/testing-playbook.md` 在册，本节计数即按其 §2.1/§2.2（sha + extras 形态双标注）执行 | ✅ 达 |
 | #3 阶段0 | 能连通取到一次读数，或给不可解阻的书面结论 | 126 侧读数不可得（关机）；书面结论已在 `docs/operations/env-126-inventory.md` | ✅ 以"书面结论"分支达成 |
 | #4 | 保护覆盖 5/5；真库两类拒绝用例；同名实现只剩一处 | `packages/agent-runtime/tests/test_receipt_generation_fencing.py` **23 条 collected 全过**（含"唯一实现 + 必须带 fence"双向钉） | 🟡 代码面 2/3 达；**真库拒绝用例待环境** ⇒ 本行不闭合 |
-| #5 | 全仓"未接线"标注数归零；每模块有测试与独立提交 | **按判据定义达成**：4 个模块 docstring 已改述（`execution_recovery.py:17` 等为"此前状态为 NOT WIRED"历史句），护栏 `test_v3_wiring_assembly.py` **18 条**含"已接线模块不得自称未接线"文档护栏；提交 `c49ee2dd`/`4a7c662e`/`6bf15287` | ✅ 达，**但判据措辞需加口径**：字面 `git grep "未接线"` 仍命中 20 个文件（CHANGELOG/plan 留档、`README.md:562` 另一模块、eval spike 自述），"归零"只能按"模块头自述"读，否则任何人重跑该 grep 都会判红 |
+| #5 | 全仓"未接线"标注数归零；每模块有测试与独立提交 | **按判据定义达成**：4 个模块 docstring 已改述（`packages/agent-runtime/agent_runtime/execution_recovery.py:17` 等为"此前状态为 NOT WIRED"历史句），护栏 `applications/agent_server/tests/test_v3_wiring_assembly.py` **18 条**含"已接线模块不得自称未接线"文档护栏；提交 `c49ee2dd`/`4a7c662e`/`6bf15287` | ✅ 达，**但判据措辞需加口径**：字面 `git grep "未接线"` 仍命中 20 个文件（CHANGELOG/plan 留档、`README.md:562` 另一模块、eval spike 自述），"归零"只能按"模块头自述"读，否则任何人重跑该 grep 都会判红 |
 | #6 | 切一次开关，返回值随之变化 | `applications/agent_server/tests/test_health_fields.py` 本轮实取 **16 collected 全过**（roadmap 原记 2026-10-14 的 14 条 ⇒ 已增长，那条属 dated 读数不回写） | ✅ 达 |
 | #7 | 跨服务一致性测试 + 打分测试均不破坏下游 | `tests/test_health_contract_consistency.py` **8 条**全过；root session 1067 全过（下游解析形状未动，本轮只做"不破坏"的那半） | 🟡 一致性半达；**「统一形状」转 §3 第 6 项待拍板**；"打分测试"半见下行备注 |
 | #8 | 该笔报错有书面结论；图谱重测有实测数据 | `docs/TODO.md:133` 有完整书面结论（已收窄到唯一站点 + 8 条守卫用例已入库），**根因定案仍待一次带 traceback 的再现**；图谱重测需 126 | 🔴 **本行两项均未闭合**（待环境/待再现）。另本轮在该行追加：**站点计数 15 → 17 已失效**（`bd4fb0b` 加了 2 条用例），后续不得再用"恰好 15"定位 |
@@ -403,11 +403,11 @@ federation 176、kefu 47、exhibition 368、knowledge-service 412/7、nl2sql 21�
 4. 上一轮我曾把"KS `test_tracing.py` 断言被跨用例 init 污染"写进计划 —— **实读后撤回**：该文件早有 autouse
    `_reset_tracing` fixture（`test_tracing.py:46-52`）前后各重置一次，污染假设不成立；真实缺陷只是 delenv 删了无读取方的键。
 5. **台账错项（不是数字）**：§3 第 1 项把 `plan-audit-operator-principal` 登记成"待拍板、零代码"，
-   而它**早已实施并合入**（`session_router.py:71` = `server_tenant_id(...)`、P12 门禁在位、
+   而它**早已实施并合入**（`applications/agent_server/api/session_router.py:71` = `server_tenant_id(...)`、P12 门禁在位、
    `116d51b1` → PR #61 → merge `bb2b9a81`）。成因：我照该 plan 的状态行登记，没读 `docs/TODO.md` 里同项的三段已完成追记。
    ⇒ 已作废该行（编号保留，避免打断"§3 第 9/12 项"这类交叉引用），并把 plan 状态行按证据订正。
    真未闭合的那条是**部署侧存量取证**，属待环境。
-6. **台账漏项**：`plan-intent-embedder-bypasses-provider-2026-10-10.md` 通篇写"全部等拍板"，却从未进 §3。
+6. **台账漏项**：`docs/plans/plan-intent-embedder-bypasses-provider-2026-10-10.md` 通篇写"全部等拍板"，却从未进 §3。
    本轮为了"还有哪些未完成计划"而**全量扫 plan 状态行**才发现 ⇒ 补为 §3 第 16 行（现真待拍板 15 项）。
    它的现场证据比我此前任何一条都硬：`EMBEDDING_MODE=mock` 下 `POST /query` **260s 零字节**、
    日志显示仍去 `huggingface.co` 取权重（r12），设 `HF_HUB_OFFLINE=1` 后同一请求 12.8s 完成（r13）。
@@ -425,10 +425,10 @@ federation 176、kefu 47、exhibition 368、knowledge-service 412/7、nl2sql 21�
 每篇的形状一致：**已决边界（防止把旧问题再问一遍）→ 未决项 → 选项代价 → 否决理由 → 重启条件 → 待回答的那一行**。
 
 **三处把话说正了（都因本轮实测，不是改写口径）**
-1. `ADR-0007` 的租户身份选型是 **Accepted 且已实施**（`identity.py:160-232` RS256 `mint_token`/`verify_token`、`:318` 拒启文案）
+1. `ADR-0007` 的租户身份选型是 **Accepted 且已实施**（`packages/agent-runtime/agent_runtime/identity.py:160-232` RS256 `mint_token`/`verify_token`、`:318` 拒启文案）
    ⇒ ADR-0008 不再讨论"要不要 JWT"，只留入口静态 key（`auth.py:23-29`，`:25-26` 未配 key 即不校验的旁路）、
    key→主体映射、`ExecutionContext` 迁 JWT 三问。
-2. 「两套向量存储是疏漏」这一判断被证据否掉：KS 要**引擎侧稀疏向量**（`milvus_utils.py:139-157` dense+sparse 双路），
+2. 「两套向量存储是疏漏」这一判断被证据否掉：KS 要**引擎侧稀疏向量**（`applications/knowledge-service/knowledge_service/clients/milvus_utils.py:139-157` dense+sparse 双路），
    agent_server 要**向量列与业务表同库**（`rag/store.py:1` pgvector + 自实现 BM25 + RRF）⇒ 两个统一方向各有硬缺口，
    且 `ADR-0003` 当年定的是**驱动**（asyncpg/psycopg）不是存储引擎，不能拿它当"已决"。
 3. 「无用户界面」不准确：只读控制台已在仓内（`api/console_router.py` 39 行 + `static/console.html` 343 行 + 用例在册），
@@ -443,7 +443,7 @@ verification-checklist ⑦ 左列、env-var-rename 表注①、audit-operator �
 ### 13.1 顺手实测出一条门禁覆盖面事实（对本仓文档纪律有影响）
 
 为验证"三篇 ADR 的路径会被存在性门禁兜住"，我在 `docs/README.md` 的索引行里临时插了一条不存在的路径
-`docs/adr/9999-does-not-exist.md` 再跑 `check_doc_sync.py` —— **结果仍是「✅ 0 警告」**。
+`docs/adr/9999-does-not-exist.md` 再跑 `scripts/check_doc_sync.py` —— **结果仍是「✅ 0 警告」**。
 成因（读 `scripts/check_doc_sync.py:41`）：判定面只有根三篇
 
 ```python
@@ -467,7 +467,7 @@ DOC_FILE_REF_DOCS = ("AGENTS.md", "ARCHITECTURE.md", "README.md")
 `tests/governance/test_audit_operator_principal.py:308-314`、`tests/test_health_contract_consistency.py:101-103`）。
 **迁移策略**：逐文件字节断言 `old == b'\xef\xbb\xbf' + new`；**保留** `utf-8-sig` 读取约定（偏离原处方两条，理由见 §5 闭合记录：
 兼容是"扫描未来源文件"的正确约定，摘掉会让 P12 在未来 BOM 文件上产生假阳性；BOM 回归用例自带合成文件 ⇒ 不需调转，调转等于削防线）。
-**验收**：`.py` BOM 复扫 = 0；nl2sql session 21 passed；治理+契约合跑 37 passed；`lint_architecture.py` rc=0；`ruff check .` 全绿；
+**验收**：`.py` BOM 复扫 = 0；nl2sql session 21 passed；治理+契约合跑 37 passed；`scripts/lint_architecture.py` rc=0；`ruff check .` 全绿；
 `git diff` 核得 `- [ ]`→`- [x]` 恰 **1** 处、其余复选框零变更。
 **边界（不倒扣）**：清零只覆盖 `.py`。当时仓内仍有 **4 个非 `.py`** 带 BOM（`ARCHITECTURE.md`、`docs/README.md`、本篇、
 `docs/plans/p0-4-blind-except-inventory.txt`）——Markdown/文本不涉 PEP 263 加载语义，不属本项判据，本轮不顺手改。
@@ -496,7 +496,7 @@ ruff **按最近 config 分层生效**。所以"只跑一次 `ruff check .` 看�
 | 根 | B008 / B017 / PERF102 / RUF059 | 0 | 7 / 8 / 4 / 37 | 保留但**登记为死配置**：这四族不在 `select`，对 `ruff check .` 恒 0，唯一作用面是 `make type --select ALL` ⇒ "要不要纳入 select"转 §3 第 18 行 |
 | federation | E402 / E731 | 28 / 4 | 同 | 保留（deliberate：`load_dotenv()`/`sys.path` 后再 import） |
 | exhibition | B008 / E402 / E731 | 0 / 0 / 0 | 0 / 0 / 0 | **整块删**（3 条） |
-| knowledge-service | E722 | 0 | 0 | **删**；原注「存量 1 处 `node_rrf.py:39`」**已不成立**（该行现在不是 bare except） |
+| knowledge-service | E722 | 0 | 0 | **删**；原注「存量 1 处 `applications/knowledge-service/knowledge_service/query_process/agent/nodes/node_rrf.py:39`」**已不成立**（该行现在不是 bare except） |
 | knowledge-service | F403 / F405 / F811 | 6 / 17 / 1 | 同 | 保留；F405 原注 18 ⇒ **按实取订正为 17** |
 | agent-core | E722 / F403 / F405 / F811 | 0 / 0 / 0 / 0 | 0 / 0 / 0 / 0 | **整块删**（4 条；连被 `extend-exclude` 排掉的 `tests` 也复扫过） |
 | agent-runtime | E402 / E731 | 4 / 1 | 同 | 保留 |
@@ -523,17 +523,17 @@ ruff **按最近 config 分层生效**。所以"只跑一次 `ruff check .` 看�
 |---|---|---|---|
 | 1 | 全链路真实执行、无未接线模块：「部分达标：4 处未接线」 | 5 处（4 模块 + exhibition `skill_router`）接线已落（TODO §3 三行已翻勾）；`.py` 内**活跃** `NOT WIRED` 标注 **0**——4 处命中全为「**此前**状态为 NOT WIRED，P1-7 审计披露 2026-09-24」的过去时描述；反漂回有门禁：`applications/agent_server/tests/test_v3_wiring_assembly.py:213`（main.py 必须仍引用这 4 个模块，否则「未接线」立刻复活）+ `:232-243`（已接线模块的 docstring 不得再声称「仍未接线」） | 「无未接线模块」半边**达成**；「全链路真实执行」仍受 `SCHEDULER_ENABLED` 默认 `False` 限制 ⇒ 不得读成「已上线」 |
 | 2 | 不丢状态、不重复执行：「部分达标：防覆盖 3/5」 | 代码面 **5/5**（`68a44290`，§12 已登记）；`packages/agent-runtime/tests/test_receipt_generation_fencing.py` 实数 **5** 条断言；执行层双实例故障转移与真库拒绝用例**待环境**（126 关机） | 3/5 → **代码面 5/5**；标准整体仍未达标（缺环境半边），按 §四 规则句只能写「标准环境已验证、多物理机待环境」 |
-| 3 | 可重复部署路径 + 真实部件状态监控 + 可执行升级与回退手册：「部分达标，缺聚合监控与升级手册」 | `/health` 25 键 + `test_health_fields.py` **16 passed**（部件状态半边达成）；**手册半边原句不成立**：`docs/operations/minimal-release-runbook.md` §2「唯一上线通道（六步）」+ §7「故障与回滚预案」（7.1 代码回滚 / 7.2 配置回滚 / 7.3 schema·数据）与 `ha-runbook.md`（Incident Checklist / Recovery Decision Tree）**早已在库**；指标面须分两层读：`agent_server` 全仓 grep `metrics` **0 命中**，而 `agent_federation/agent/metrics.py`、`exhibition_agent/observability/metrics.py` 各有一份**自建轻量 registry**（两处 docstring 明写「不引入 prometheus/otel meter 重依赖」）⇒ 「无 Metric Registry」过宽 | **达成 2/3**（部署路径 + 部件状态 + 手册均在位）；真缺口 = **跨请求聚合指标/仪表盘**与错误率·超时率·降级率基线，且手册需绑定现网 rev 复核后才可作对外结论 |
+| 3 | 可重复部署路径 + 真实部件状态监控 + 可执行升级与回退手册：「部分达标，缺聚合监控与升级手册」 | `/health` 25 键 + `applications/agent_server/tests/test_health_fields.py` **16 passed**（部件状态半边达成）；**手册半边原句不成立**：`docs/operations/minimal-release-runbook.md` §2「唯一上线通道（六步）」+ §7「故障与回滚预案」（7.1 代码回滚 / 7.2 配置回滚 / 7.3 schema·数据）与 `docs/operations/ha-runbook.md`（Incident Checklist / Recovery Decision Tree）**早已在库**；指标面须分两层读：`agent_server` 全仓 grep `metrics` **0 命中**，而 `agent_federation/agent/metrics.py`、`exhibition_agent/observability/metrics.py` 各有一份**自建轻量 registry**（两处 docstring 明写「不引入 prometheus/otel meter 重依赖」）⇒ 「无 Metric Registry」过宽 | **达成 2/3**（部署路径 + 部件状态 + 手册均在位）；真缺口 = **跨请求聚合指标/仪表盘**与错误率·超时率·降级率基线，且手册需绑定现网 rev 复核后才可作对外结论 |
 | 4 | 存在可操作的用户入口：「未达标（仅 3 个内部调试页）」 | 入库 `.html` 共 **5** = 应用页 4（`agent_server/static/console.html`、`exhibition_agent/static/index.html`、KS `import_process/page/import.html`、KS `query_process/page/chat.html`）+ 文档页 1（`docs/architecture/overview.html`）⇒ 「3 个」漏数了 KS 两个**面向操作的功能页**；但 KS 属子服务，平台主进程仍只有 1 个调试控制台 | **判定不变（未达标）**，只订正页数与「都是调试页」这句定性；界面选型是 §3 待拍板项（ADR-0010），不代拍 |
 | 5 | 任一客户数据在所有路径下不跨客户可见：「部分达标：机制完整，覆盖 2/6」 | 装配覆盖 **6/6** 且有**归属记账**：`scripts/lint_architecture.py:589-621` `_IDENTITY_ASSEMBLY` 逐服务登记「用哪一套实现」，**P13** 门禁按调用形正则校验存在性（`:1170` 打印「6/6 服务均有身份门卫装配点」，漏装/换实现即 CI 红）；构成为 4 个 `shared` + 2 个 `fork:`（KS `TenantHeaderMiddleware` 零依赖 runtime、exhibition `resolve_execution_context` **逐端点**且 DEV 档刻意不验签）⇒ 2/6 → 6/6 装配；强档仍受 `DEPLOY_ENFORCE_IDENTITY` 默认 `False` 与 2 处 fork 待收敛限制 | **两层口径不得混说**：装配覆盖 **6/6 达成**；「所有路径下不跨客户可见」的**强档未验证**（fork 收敛待拍板，见 `docs/plans/plan-identity-gate-6of6-2026-10-16.md` §5 第 1 项与第 3 项；真库双租户外溢待环境） |
-| 6 | 每次回答可追溯身份、调用、数据来源、成本：「**达标**」 | 拆四问取数：①**调用** ✅ `planner/execution_graph.py:66-79` 落 `TrajectoryRecord`（plan / steps / planner / tenant_id / snapshot）；②**成本** ✅ 同记录带 `total_tokens` / `total_cost`；③**身份** ⚠️ 落的是**租户**（`tenant_id` per-request），自然人主体当前恒为服务端单一主体 `server_tenant_id(default_tenant_id)`，逐审批人身份待 ADR-0007 强档；④**数据来源** ❌ `ForensicContext.external_inputs` / `external_task_receipts` / `effect_receipts` 三个取证字段**生产零写入点**（双通道复核：全仓 `.py` 命中仅 `forensic.py` 自身定义/序列化/diff + `tests/`；唯一生产构造点 `execution_graph.py:58` 只填 `model` + `planner_version` 两维），外部回执另有落点（`awaitable_task.py:158-159` `submission_receipt` / `completion_receipt` 在任务行上）但**未汇入每次回答的取证记录**；exhibition 的 `citations` 属 skill 返回体（`capabilities.py:371`），不是平台通用取证面 | **本轮唯一被下修的判定：达标 → 部分达标**。依据是「载体在位 ≠ 字段被填」——前三问里两问成立、一问降级为租户级，第四问（数据来源）结构性缺写入点。**教训**：多面标准（"身份+调用+来源+成本"）必须逐面各取一次写入点证据，任一面拿"有这个 dataclass"当达标就会高估整条 |
+| 6 | 每次回答可追溯身份、调用、数据来源、成本：「**达标**」 | 拆四问取数：①**调用** ✅ `planner/execution_graph.py:66-79` 落 `TrajectoryRecord`（plan / steps / planner / tenant_id / snapshot）；②**成本** ✅ 同记录带 `total_tokens` / `total_cost`；③**身份** ⚠️ 落的是**租户**（`tenant_id` per-request），自然人主体当前恒为服务端单一主体 `server_tenant_id(default_tenant_id)`，逐审批人身份待 ADR-0007 强档；④**数据来源** ❌ `ForensicContext.external_inputs` / `external_task_receipts` / `effect_receipts` 三个取证字段**生产零写入点**（双通道复核：全仓 `.py` 命中仅 `packages/agent-runtime/agent_runtime/forensic.py` 自身定义/序列化/diff + `tests/`；唯一生产构造点 `packages/agent-runtime/agent_runtime/planner/execution_graph.py:58` 只填 `model` + `planner_version` 两维），外部回执另有落点（`packages/agent-runtime/agent_runtime/awaitable_task.py:158-159` `submission_receipt` / `completion_receipt` 在任务行上）但**未汇入每次回答的取证记录**；exhibition 的 `citations` 属 skill 返回体（`applications/agent_server/capabilities.py:371`），不是平台通用取证面 | **本轮唯一被下修的判定：达标 → 部分达标**。依据是「载体在位 ≠ 字段被填」——前三问里两问成立、一问降级为租户级，第四问（数据来源）结构性缺写入点。**教训**：多面标准（"身份+调用+来源+成本"）必须逐面各取一次写入点证据，任一面拿"有这个 dataclass"当达标就会高估整条 |
 | 7 | 版本号、变更记录、待办清单、决策记录与代码一致：「部分达标，变更记录与决策记录待 #1 收尾」 | 待办清单半边：§12 已逐行重取并改掉 4 处账面错数；决策记录半边：`docs/adr/` 现 **8 篇**（0003–0007 + 本轮补 0008 认证方式 / 0009 向量存储 / 0010 界面选型，三篇状态均「未决」，只登记已决边界·选项代价·重启条件，**不代用户拍板**）；变更记录半边**当时仍不成立**：`CHANGELOG.md` 最新一节停在 2026-10-09，本分支相对 main 的提交（`git rev-list --count main..HEAD`，写入时点 40→41）未回写；门禁计数已订正（`ARCHITECTURE.md:133-134` 表 17 行 / 打印 16 条 / 实现函数 18 个，含自我纠错句） | 决策记录由「无书面记录」推进到「**有记录、待拍板**」；变更记录半边**同日已闭合**（§17 补了未发布窗口节）。**但本节对不上的一处归因要登记**：§四 第 7 条把变更记录挂在「待 #1 收尾」下，而 #1 自己的判据列只写「每条结论附代码位置与可复现命令；清单与代码不矛盾」⇒ **变更记录在 roadmap 里从来没有对应整改行**，本窗口靠 §2 新增行才有一个有判据有截止日的落点。第三个 facet「版本号」实测三处互不对应（见 §17），亦无整改行 ⇒ 转 §3 第 20 项 |
 
 **汇总（口径：§四 表体的判定列，逐格读）**：部分达标 **5 → 6**（第 6 条下修进来）、未达标 **1**（第 4 条）、达标 **1 → 0**。
 **第 6 条的精度补充（2026-10-16 同批自查，防被过度读成"取证面整体没写"）**：逐步取证面**确实在写**——
 `planner/protocol.py:639` 有 `StepForensic(...)` 的生产构造点，并在 `:654/:717/:726` 把 `_forensic_dict` 挂到步骤上、`:354` 挂到记录上。
 本条缺口**限定在记录级 `ForensicContext` 的三格来源/回执字段**（`external_inputs` / `external_task_receipts` / `effect_receipts`），
-上表证据句里"唯一生产构造点"指的是 **`ForensicContext`** 这一个类（`grep "ForensicContext("` 实取 = `execution_graph.py:58` 一处 + tests），不含 `StepForensic`。
+上表证据句里"唯一生产构造点"指的是 **`ForensicContext`** 这一个类（`grep "ForensicContext("` 实取 = `packages/agent-runtime/agent_runtime/planner/execution_graph.py:58` 一处 + tests），不含 `StepForensic`。
 ⇒ 结论（达标 → 部分达标）不变，但"缺的是哪一层"按本段读。
 ⇒ **七条全达标的前置**里，本窗口内还能靠代码/文档推进的是第 1、3、5、7 条的指定残口；第 2 条与第 5 条强档、第 8 类真库/双实例场景**全部待环境**；第 4 条待 UI 选型拍板。
 
@@ -617,7 +617,7 @@ uv run pytest packages/agent-runtime/tests/test_receipt_generation_fencing.py ap
 本窗口没有再花 20 分钟重跑整轮，**这个 +3 是由"只新增一个测试文件、零产品代码改动"推出的**，不是实测；
 对外引用前先重跑一轮确认（单条已实测：`uv run pytest applications/exhibition-agent/tests -q` → 371 passed）。
 
-**仍未覆盖的范围（不把 10 session 说成"全部验证"）**：`make ci` 还含 `ruff check .` + `scripts/lint_architecture.py` + 启发式 eval；前两者本批已单独跑过（§15 验收、§17 自查 `check_doc_sync.py`），eval 未在本窗口重跑。真库/双实例/现网类用例仍属 §2 的「待环境」，不随本节翻状态。
+**仍未覆盖的范围（不把 10 session 说成"全部验证"）**：`make ci` 还含 `ruff check .` + `scripts/lint_architecture.py` + 启发式 eval；前两者本批已单独跑过（§15 验收、§17 自查 `scripts/check_doc_sync.py`），eval 未在本窗口重跑。真库/双实例/现网类用例仍属 §2 的「待环境」，不随本节翻状态。
 
 ## 19. 阶段 2 再前移：exhibition 的 env 模板门禁（roadmap #21 / P2-5，2026-10-16，截止=当日）
 
@@ -670,13 +670,13 @@ uv run pytest packages/agent-runtime/tests/test_receipt_generation_fencing.py ap
 | 事实 | 命令 | 读数 |
 |---|---|---|
 | 生产实现在位 | `sed -n '150,190p' applications/exhibition-agent/exhibition_agent/foundation/execution_context.py` | `enforce_scope_filter` 是完整实现（租户一致 + `ctx.scopes` 收窄），非桩 |
-| 评测是否真在跑它 | `git grep -n enforce_scope_filter` | `evaluation.py:128` 的 `_evaluate_cross_tenant_negative` **在生产代码上判越权**（审计 P1-9 那批改的：先用 mock 过滤再统计 ⇒ 恒 0 的自证式假绿） |
+| 评测是否真在跑它 | `git grep -n enforce_scope_filter` | `applications/exhibition-agent/exhibition_agent/foundation/evaluation.py:128` 的 `_evaluate_cross_tenant_negative` **在生产代码上判越权**（审计 P1-9 那批改的：先用 mock 过滤再统计 ⇒ 恒 0 的自证式假绿） |
 | mock 还剩几处 | `git grep -n _mock_scope_filter` | **3 行 = 1 个 def + 1 处调用（positive 路径）+ 1 处 docstring 提及** ⇒ 残差就这一处 |
-| 用例覆盖 | `git grep -ln enforce_scope_filter -- 'tests/*.py'` | 2 个文件：`test_execution_context_foundation.py`、`test_evaluation_framework.py` |
+| 用例覆盖 | `git grep -ln enforce_scope_filter -- 'tests/*.py'` | 2 个文件：`applications/exhibition-agent/tests/test_execution_context_foundation.py`、`applications/exhibition-agent/tests/test_evaluation_framework.py` |
 
 **为什么这一处不当场换掉（这是判据问题，不是难度问题）**：mock 对 `scope_type=PUBLIC` 的跨租户项**放行**，生产实现无 PUBLIC 例外、`scopes` 非空时还更严 ⇒ 换过去 `make eval` 的 golden 判分必变，等于**改评测基线**。红线是"测试红时不许收窄断言"，反过来"为了顺手统一而改动判分"同样不该由我在无方案下做 ⇒ 转 §3 第 21 项待拍板。
 
-**本批实际改的两处**：① `evaluation.py` 里那句 `TODO: F01 … 落地后替换此函数` 已成**失效陈述**，订正为现状（已落地 + 只剩一处 + 不换的依据），零逻辑改动；② `docs/TODO.md` §4 F01 行**保持开项**、判据从"落地"收窄为"positive 路径那处替换 + 重取基线"，并声明 §0 索引「会展骨架 = 6」不受影响（现取：该段开项 6 / 闭项 0）。
+**本批实际改的两处**：① `applications/exhibition-agent/exhibition_agent/foundation/evaluation.py` 里那句 `TODO: F01 … 落地后替换此函数` 已成**失效陈述**，订正为现状（已落地 + 只剩一处 + 不换的依据），零逻辑改动；② `docs/TODO.md` §4 F01 行**保持开项**、判据从"落地"收窄为"positive 路径那处替换 + 重取基线"，并声明 §0 索引「会展骨架 = 6」不受影响（现取：该段开项 6 / 闭项 0）。
 
 **两处我自己写错又当场改掉的（写下来，别让它变成下一次的事实）**：
 - 注释里我引了 `:91` 这个行号，而**我这段注释本身变长就把调用点推到了 `:94`**——行号会被自己的编辑顶掉，已改为按语句文本引用；
@@ -698,7 +698,7 @@ uv run pytest packages/agent-runtime/tests/test_receipt_generation_fencing.py ap
 
 **两条口径要在用例里写死，否则会被误读成"覆盖比会展少"**：
 - **反向死键判据只做在补齐段内**，不扩到全文件：本服务 `env_prefix` 为空，若照搬会展那条"模板里每个键都必须是字段"，会把经 `os.getenv` 读的键全打成死键——那需要全仓 `os.getenv` 扫描，仍属 §3 第 12 项待拍板。
-- `PORT=8002` 与代码默认 `8000` **刻意不一致**（避开与 agent_server 抢端口，模板第 27-29 行已写明依据并引 `arch-audit-2026-09-24.md` P1-10），所以它留在 marker 段外、不参与等值比对。**这是设计不是漏检**；用例另有一条 `assert section` 防"补齐段被清空后用例空转"。
+- `PORT=8002` 与代码默认 `8000` **刻意不一致**（避开与 agent_server 抢端口，模板第 27-29 行已写明依据并引 `docs/plans/arch-audit-2026-09-24.md` P1-10），所以它留在 marker 段外、不参与等值比对。**这是设计不是漏检**；用例另有一条 `assert section` 防"补齐段被清空后用例空转"。
 
 **非空转反证（3 条变异，全 RED 于正确理由）**：`VECTOR_DIM 1536→512` 击中值等断言 / 删 `RRF_K` 行击中正向齐全 / 段内加 `NOT_READ_BY_SETTINGS_AT_ALL=1` 击中段内不悬空。
 模板文件按"备份字节→改→跑→写回"操作，`restore byte-identical: True`。
@@ -720,7 +720,7 @@ uv run pytest packages/agent-runtime/tests/test_receipt_generation_fencing.py ap
 
 **入口**：`AGENTS.md` 验证策略段 + `docs/operations/testing-playbook.md` 段首各加一句指针（本手册管"怎么跑"，那份管"怎么记"）——按 memory 里"坑要落到仓库文档而非只落记忆"的既有分工，高频入口进 AGENTS.md，细节留在 operations。
 
-**故意不做成 CI 门禁的那条（§7）与理由**：给了两条近似扫描命令（无 rev 的通过数、整体性名词），实测命中 184 / 182 行 —— 这个量级正说明它**需要语义判断**，机械报红只会训练人去措辞规避（AGENTS.md 框架规则条：约束应是减少犯错而非阻碍绕过）。要硬约束的地方已经硬了（`lint_architecture.py` 的 P/L 系列）。
+**故意不做成 CI 门禁的那条（§7）与理由**：给了两条近似扫描命令（无 rev 的通过数、整体性名词），实测命中 184 / 182 行 —— 这个量级正说明它**需要语义判断**，机械报红只会训练人去措辞规避（AGENTS.md 框架规则条：约束应是减少犯错而非阻碍绕过）。要硬约束的地方已经硬了（`scripts/lint_architecture.py` 的 P/L 系列）。
 
 **自查（本批我自己写错又当场改掉的三处）**：
 ① §7 的示例命令里我把 `[0-9a-f]{7,}` 用反引号包起来 —— 在 shell 里那是**命令替换**，命令会直接坏；改为无反引号写法并实跑通过。
@@ -743,7 +743,7 @@ uv run pytest packages/agent-runtime/tests/test_receipt_generation_fencing.py ap
 **登记一条口径重叠、但不擅自重排**：TODO 0.3 标题写「全部『先方案后编码』、无外部条件依赖」，可它内嵌的会展 `F2 真实 LLM 连接` 自己标着「需产品决策输入」——按 0.1/0.2 的划法那更像一条「需拍板」项。重划要动多行且属分类口径决策 ⇒ 写进 §0 追记等方向，不在本批顺手搬（memory 里"提清理建议前先证伪自己的动机"同条）。
 
 **复算做成可重跑的脚本**：`scripts/evidence/recount_todo_index.py`（收录判据=「会不会被下次必须重跑引用」，与本目录既有两份同族）。它必须处理两种表形态：一行一事项 vs **一行一组 + 「条数」列求和**（0.3 是后者，只数行会得到 5，声明是 13）。非空转反证：把 0.3 的声明从 13 改成 12 ⇒ 判 MISMATCH；一致时退出码 0、不符时 1。
-**同样不做成 CI**：声明值写在标题里，改措辞就报红属噪声（`evidence-format.md` §7 的同类取舍）。
+**同样不做成 CI**：声明值写在标题里，改措辞就报红属噪声（`docs/operations/evidence-format.md` §7 的同类取舍）。
 
 **本轮最该留下的一条教训（我自己踩的，而且是"看起来通过了"的那种）**：我先把复算写成一条 `uv run python -c "…"` 一行流贴进 TODO §0 的追记里，那串代码含 `'## 1. '` —— **它 split 到了自己所在的这段文字**，于是只读到文件前 921 字符，**输出空列表、exit 0**。如果我只看退出码，这条假通过就进仓库了。
 发现方式不是复核逻辑，而是我把"要发布的命令"原样跑了一遍 ⇒ `[]`。三条推论写进 §0 追记与本节：
@@ -805,9 +805,9 @@ uv run pytest packages/agent-runtime/tests/test_receipt_generation_fencing.py ap
 
 ## 25. 提交前自查撤回我自己写下的一句"无需 DB 迁移"：取证面在 PG 侧整片不落库（2026-10-16）
 
-**起因不是新需求，是"改完后再自己审核校验"这条要求**：`plan-forensic-provenance-wiring-2026-10-16.md` 的影响面里我写了一句
-「`TrajectoryRecord.forensic` 是 dict，`from_dict` 对三格用 `d.get(..., {})` ⇒ **老行读取天然兼容，无需 DB 迁移（`store_pg.py` 未变）」」。
-提交前逐条核这句话时 `grep forensic` 打 `store_pg.py` **零命中** ⇒ 那句既没核实存储面，也没核实读回面，**是错的**。
+**起因不是新需求，是"改完后再自己审核校验"这条要求**：`docs/plans/plan-forensic-provenance-wiring-2026-10-16.md` 的影响面里我写了一句
+「`TrajectoryRecord.forensic` 是 dict，`from_dict` 对三格用 `d.get(..., {})` ⇒ **老行读取天然兼容，无需 DB 迁移（`packages/agent-runtime/agent_runtime/trajectory/store_pg.py` 未变）」」。
+提交前逐条核这句话时 `grep forensic` 打 `packages/agent-runtime/agent_runtime/trajectory/store_pg.py` **零命中** ⇒ 那句既没核实存储面，也没核实读回面，**是错的**。
 
 **实跑读数**（探针入库 `scripts/evidence/forensic_pg_roundtrip_probe.py`，伪连接捕获 SQL + 合成行回放，本机可复现、**不需要真 PG**）：
 
@@ -823,8 +823,8 @@ C) 读回 record.forensic : None     读回 steps[0] 类型 : dict
 ```
 
 三条结论与**各自的边界**（防被过度读）：
-1. **记录级取证在 PG 部署下不落库**——`store_pg.py:48-79` 的 INSERT 不含该列，DDL `migrations/001_baseline.up.sql:173-184` 同样没有 ⇒ 填得再全也只活在进程里（`InMemoryTrajectoryStore` 存对象本身，所以内存路径看不出来）。
-2. **读回类型断裂**：`_row_to_record`（`store_pg.py:105-129`）把 `steps` 原样当 list[dict] 返回，没复用 `_coerce_record`；而 `_coerce_record`（`store.py:61-88`）自己也既不恢复记录级 `forensic`、也不给 step 传 `forensic=`。`replay.py:172/176-188` 按 `.name/.error/.result` 属性写 ⇒ 从库里读回的记录一进 replay 就 `AttributeError`。
+1. **记录级取证在 PG 部署下不落库**——`packages/agent-runtime/agent_runtime/trajectory/store_pg.py:48-79` 的 INSERT 不含该列，DDL `migrations/001_baseline.up.sql:173-184` 同样没有 ⇒ 填得再全也只活在进程里（`InMemoryTrajectoryStore` 存对象本身，所以内存路径看不出来）。
+2. **读回类型断裂**：`_row_to_record`（`packages/agent-runtime/agent_runtime/trajectory/store_pg.py:105-129`）把 `steps` 原样当 list[dict] 返回，没复用 `_coerce_record`；而 `_coerce_record`（`store.py:61-88`）自己也既不恢复记录级 `forensic`、也不给 step 传 `forensic=`。`replay.py:172/176-188` 按 `.name/.error/.result` 属性写 ⇒ 从库里读回的记录一进 replay 就 `AttributeError`。
 3. **但这不是现网故障，是潜伏缺陷**：`replay_trajectory` / `build_replay_registry` 经核**零生产调用方**（命中只在 `packages/agent-runtime/tests/test_replay.py` 与包 `__init__` 导出）。我不把"潜伏"写成"已坏"。
 
 **两条不是新缺口的，明确划掉，免得下一轮又有人当 bug 报**：
@@ -832,7 +832,7 @@ C) 读回 record.forensic : None     读回 steps[0] 类型 : dict
 - step 级取证**没丢**：它随 `s.to_dict()` 进了 `steps` JSONB，只是读回后只能 `["forensic"]` 取、不能 `.forensic` 取。
 
 **对口径的影响**：roadmap §四 第 6 条（每次回答可追溯数据来源）的缺口**由一层变两层**——A「三格没填」+ B「填了也落不进库、落进库也读不回来」。
-⇒ `minimal-release-runbook.md` §8 第 2 条"不能讲历史调用档案可查"原有的理由（默认路径不写档案表）之外，**再补一条独立理由**：即使写了表，记录级取证也会被丢。
+⇒ `docs/operations/minimal-release-runbook.md` §8 第 2 条"不能讲历史调用档案可查"原有的理由（默认路径不写档案表）之外，**再补一条独立理由**：即使写了表，记录级取证也会被丢。
 ⇒ 排期硬约束：**第 6 条在 B 层完成前不可能翻绿**。方案已按此改写（新增 Q5 落点选择 a/b/c、B 层判据 4 条、工时 2 → 3 人/日，B 层先行）。
 **待拍板行数不变**：Q5 属 §3 第 19 项内部的新子问题，§3 仍是 20 项。
 
@@ -847,7 +847,7 @@ $ uv run python eval/run_eval.py --fail-below 0.8      # rev 1953c5f，2026-10-1
 启发式路由准确率: 15/15 = 100.00%   → rc=0
 ```
 分母口径 = `eval/` 的 **15 条 golden**（本命令走启发式路由，不调 LLM、不需要密钥）。
-⇒ 台账 §2 里"打分基线"这条的**启发式半截已达成**；`run_planner_eval.py`（双 Planner 基线）仍需 LLM 密钥 ⇒ 那条仍是**待放行**，不得与本读数混引。
+⇒ 台账 §2 里"打分基线"这条的**启发式半截已达成**；`eval/run_planner_eval.py`（双 Planner 基线）仍需 LLM 密钥 ⇒ 那条仍是**待放行**，不得与本读数混引。
 
 **② 门禁条数三口径独立复测（与 `ARCHITECTURE.md` §4.1 现值互校一致）**
 
@@ -867,8 +867,8 @@ roadmap §四 第 5 条的判定引用的是「门禁在位 + 计入 `make ci`�
 
 **扫描器自身两次假阳性（先把自己否掉，再报事实）**：
 - **v1 把 `INSERT INTO {self._table}` 整类丢掉** ⇒ 报"trajectories 无 INSERT 站点"，**与我上一节的探针直接矛盾**（探针明明抓到了 10 列的 INSERT）。这是第 9 次"探针错被当成事实"，且又是**写完结论才发现**——所以 v2 起每条否定性结论都要求"能指出该表的字面 INSERT 站点或明确标为变量表名"。
-- **只看 INSERT 不看 UPDATE** ⇒ 报"`admission_queue` 的 `completed_at`/`rejection_reason` 没人写"。实读为假：`admission.py:166`（`rejection_reason = %s`）、`:215`、`:237`（`UPDATE admission_queue SET status='completed', completed_at = now()`）三处都在写。⇒ **这一族的全部"没人写"读数都必须并 UPDATE 才算数**。
-- 附带一处结构性假阳性：`durability_pg.py` 一个类用**同一个变量表名**服务四张表（execution_checkpoints / execution_leases / idempotency_keys / side_effects），我的候选名解析把四张表的列互相泼到对方上 ⇒ 表 1) 里那一大串"代码写了 DDL 没有的列"**是交叉污染，不是缺陷**（点验后逐条排除）。
+- **只看 INSERT 不看 UPDATE** ⇒ 报"`admission_queue` 的 `completed_at`/`rejection_reason` 没人写"。实读为假：`packages/agent-runtime/agent_runtime/admission.py:166`（`rejection_reason = %s`）、`:215`、`:237`（`UPDATE admission_queue SET status='completed', completed_at = now()`）三处都在写。⇒ **这一族的全部"没人写"读数都必须并 UPDATE 才算数**。
+- 附带一处结构性假阳性：`packages/agent-runtime/agent_runtime/planner/durability_pg.py` 一个类用**同一个变量表名**服务四张表（execution_checkpoints / execution_leases / idempotency_keys / side_effects），我的候选名解析把四张表的列互相泼到对方上 ⇒ 表 1) 里那一大串"代码写了 DDL 没有的列"**是交叉污染，不是缺陷**（点验后逐条排除）。
 
 **扫描清完之后的真读数（2 条，都已回源码确认）**：
 
@@ -879,7 +879,7 @@ roadmap §四 第 5 条的判定引用的是「门禁在位 + 计入 `make ci`�
 
 **定级（不夸大）**：这是**潜伏项，不是现网故障**——默认走 `InMemoryLeaseBackend`，注入 PG 后端才打这张表；一旦有人按 roadmap 那句"多副本启用"接上，第一条 SQL 就是 `42P01 undefined_table`，而他要照的那份"部署文档"里**没有这张表的 DDL**。测试用 Fake 池 ⇒ 这张表从未在真库上被验证过（属**待环境**）。
 
-**⇒ 新增 §3 第 22 项待拍板**（三选一）：a 补一条迁移建表（归属清晰：agent-runtime 拥有迁移，且 `runner.py:45` 的表清单顺带纳入）/ b 只在部署文档写出 DDL 并把 roadmap 那句改成"手工建表，脚本在此" / c 显式声明该后端**未达可启用状态**并加 `STATUS: NOT WIRED` 类自述（与 roadmap #5 判据同族，需一并计入"未接线"口径）。我倾向 **a**，理由：这张表的列形状 `coordinator.py:95` 已经写死（`session_id/owner/expires_at`），建表语句的唯一真相源本就该在迁移里，放文档里等于第二次要人手工同步。
+**⇒ 新增 §3 第 22 项待拍板**（三选一）：a 补一条迁移建表（归属清晰：agent-runtime 拥有迁移，且 `packages/agent-runtime/agent_runtime/migrations/runner.py:45` 的表清单顺带纳入）/ b 只在部署文档写出 DDL 并把 roadmap 那句改成"手工建表，脚本在此" / c 显式声明该后端**未达可启用状态**并加 `STATUS: NOT WIRED` 类自述（与 roadmap #5 判据同族，需一并计入"未接线"口径）。我倾向 **a**，理由：这张表的列形状 `packages/agent-runtime/agent_runtime/coordinator.py:95` 已经写死（`session_id/owner/expires_at`），建表语句的唯一真相源本就该在迁移里，放文档里等于第二次要人手工同步。
 
 **本节的扫描器不入库**：两条判据都已被源码点验取代（扫描只用来缩小怀疑面，见 `docs/operations/evidence-format.md` 的"扫描 ≠ 读数"边界）；若日后要做成常驻门禁，前置是"把 UPDATE/UPSERT 的 SET 列并进来 + 变量表名按类实例化解析"，属新立项、不在本窗口。
 
@@ -889,14 +889,14 @@ roadmap §四 第 5 条的判定引用的是「门禁在位 + 计入 `make ci`�
 
 | 判据 | 实取读数 | 通道 |
 |---|---|---|
-| 有没有代码往 `cost_records` 写/读 | **0** | 定向 grep `(FROM\|INTO\|UPDATE)\s+(cost_records\|budget_limits)` 在 `--type py` 下 **0 命中**；字面 grep 的全部命中都落在**迁移 SQL、`runner.py:50-51` 的 V3 表清单、ADR-0006 与 ARCHITECTURE 的隔离维度分类、部署演练记录与若干 plan 叙述**里，**无一处是 Python SQL** |
-| 成本治理实际落在哪 | 只有 `budget_usage` 累计用量 | `cost_governance_pg.py:31`（`INSERT INTO budget_usage … ON CONFLICT DO UPDATE`）、`:39`/`:52`（`SELECT used FROM budget_usage`）——该文件里**没有** `cost_records` 的任何语句 |
-| 限额从哪来 | **不来自库里那张 `budget_limits`** | 同上：`budget_limits` 在 Python 侧只有 `cost_governance_pg.py:4` 的一句 docstring 提到它 |
+| 有没有代码往 `cost_records` 写/读 | **0** | 定向 grep `(FROM\|INTO\|UPDATE)\s+(cost_records\|budget_limits)` 在 `--type py` 下 **0 命中**；字面 grep 的全部命中都落在**迁移 SQL、`packages/agent-runtime/agent_runtime/migrations/runner.py:50-51` 的 V3 表清单、ADR-0006 与 ARCHITECTURE 的隔离维度分类、部署演练记录与若干 plan 叙述**里，**无一处是 Python SQL** |
+| 成本治理实际落在哪 | 只有 `budget_usage` 累计用量 | `packages/agent-runtime/agent_runtime/cost_governance_pg.py:31`（`INSERT INTO budget_usage … ON CONFLICT DO UPDATE`）、`:39`/`:52`（`SELECT used FROM budget_usage`）——该文件里**没有** `cost_records` 的任何语句 |
+| 限额从哪来 | **不来自库里那张 `budget_limits`** | 同上：`budget_limits` 在 Python 侧只有 `packages/agent-runtime/agent_runtime/cost_governance_pg.py:4` 的一句 docstring 提到它 |
 
 **形状与 §25 完全同族**：载体在位（`001_baseline.up.sql:256` 建表 + `:272-274` 三条索引 + ADR-0006 把它归入"租户级治理数据"），**没人写** ⇒ 一旦有人按 ADR/架构图的口径去查"每次执行花了多少"，库里是空的。
-另有一处**悬空指针**（与 §27 那条同类）：`cost_governance_pg.py:4` 写「DDL 见 `db.py` 的 `budget_usage` / `budget_limits` 表」，而这两张表的 DDL 实际在 `migrations/001_baseline.up.sql`；`agent_runtime/db.py` 里**没有**这两张表的建表语句。
+另有一处**悬空指针**（与 §27 那条同类）：`packages/agent-runtime/agent_runtime/cost_governance_pg.py:4` 写「DDL 见 `db.py` 的 `budget_usage` / `budget_limits` 表」，而这两张表的 DDL 实际在 `migrations/001_baseline.up.sql`；`agent_runtime/db.py` 里**没有**这两张表的建表语句。
 
-**与既有诚实声明的关系（不新造口径，只补机制）**：`minimal-release-runbook.md` §8 第 2 条早就写了"**平台统计不出单次查询金额**（无定价表，`cost` 恒 0）⇒ 口径是『本系统统计用量，金额以模型平台账单为准』"。本批读数为那句**提供了机制解释**：不是"忘了算"，而是**按次成本明细表零写入点**。上台讲成本时仍按手册那句说，不得说成"成本可追溯已达成"。
+**与既有诚实声明的关系（不新造口径，只补机制）**：`docs/operations/minimal-release-runbook.md` §8 第 2 条早就写了"**平台统计不出单次查询金额**（无定价表，`cost` 恒 0）⇒ 口径是『本系统统计用量，金额以模型平台账单为准』"。本批读数为那句**提供了机制解释**：不是"忘了算"，而是**按次成本明细表零写入点**。上台讲成本时仍按手册那句说，不得说成"成本可追溯已达成"。
 
 **⇒ 并入 §3 第 19 项一起定，不另开行**（第 6 条的四格里"成本"与"数据来源"是同一面的两个子问题，拆两行会诱导两批不同决定）。第 19 项因此多一条待答：
 `cost_records` 要不要接写入点（a 接，成本明细与取证同源落库 / b 不接，把表与 ADR 分类改成"预留未启用"并从 §四 第 6 条的判定里显式摘掉"成本"这一格 / c 只接 `execution_id + tokens`，金额仍按账单口径）。我倾向 **b 的表述修正 + 择期做 a**：先让账面不再暗示"成本已可追溯"，再按窗口接写入点——理由是 b 零风险、且它决定 a 的验收判据长什么样。
@@ -909,15 +909,15 @@ roadmap §四 第 5 条的判定引用的是「门禁在位 + 计入 `make ci`�
 
 | 面 | 有没有基线 | 实据（都是仓内可核对） |
 |---|---|---|
-| **平台运行时**（agent_server / federation 的跨请求聚合） | **无** | `docs/architecture/agent-harness-capability-map.md:299` 该标 "⚠️ **待标定**：无 Metric Registry、无仪表盘；纪律：无基线数字标待标定、禁止自证"；`plan-observability-target-model-2026-10-14.md:105` 把错误率/工具成功率/每请求成本列为**目标**而非现值 |
-| **knowledge-service 单服务压测** | **有读数，但没有可复算产物** | 读数在文档里三处互证：`docs/spec.md:33-34`、`CHANGELOG.md:460`、`docs/ops-lessons-learned.md:207`（`/retrieve` QPS 0.52 / P95 243s / **0 错误率**；`/query` 0.13 / 233s / 0）；阈值与表结构在 `benchmark/CAPACITY.md:58`（错误率 < 1%）与 `benchmark/README.md:47/57`。**但 `benchmark/runs/*.csv` 未入库**：`git ls-files applications/knowledge-service/benchmark` 只有 `CAPACITY.md` / `README.md` / `locustfile.py` 三个文件 ⇒ 只能**引文档**，不能重算 |
+| **平台运行时**（agent_server / federation 的跨请求聚合） | **无** | `docs/architecture/agent-harness-capability-map.md:299` 该标 "⚠️ **待标定**：无 Metric Registry、无仪表盘；纪律：无基线数字标待标定、禁止自证"；`docs/plans/plan-observability-target-model-2026-10-14.md:105` 把错误率/工具成功率/每请求成本列为**目标**而非现值 |
+| **knowledge-service 单服务压测** | **有读数，但没有可复算产物** | 读数在文档里三处互证：`applications/knowledge-service/docs/spec.md:33-34`、`applications/knowledge-service/CHANGELOG.md:460`、`applications/knowledge-service/docs/ops-lessons-learned.md:207`（`/retrieve` QPS 0.52 / P95 243s / **0 错误率**；`/query` 0.13 / 233s / 0）；阈值与表结构在 `benchmark/CAPACITY.md:58`（错误率 < 1%）与 `benchmark/README.md:47/57`。**但 `benchmark/runs/*.csv` 未入库**：`git ls-files applications/knowledge-service/benchmark` 只有 `applications/knowledge-service/benchmark/CAPACITY.md` / `README.md` / `applications/knowledge-service/benchmark/locustfile.py` 三个文件 ⇒ 只能**引文档**，不能重算 |
 | **评测面 `eval/`** | **有已入库基线，但不是这一族指标** | `eval/baselines/planner_agentic_latest.jsonl` 与 `planner_deterministic_latest.jsonl`（均入库，最后提交 `09943d6c`，2026-08-19），字段为 `expected/route/ok/protocol_ok/reason` ⇒ 量的是**路由正确性与协议合规**，不是错误率/超时率/降级率；阈值侧只有 `run_eval.py:88` 的 `--fail-below` 默认 0.8 |
 
 **顺带取出一处账面不一致（可核对、与 §3 第 21 项直接相关）**：两份 planner 基线各 **12 行**（`wc -l < eval/baselines/planner_deterministic_latest.jsonl` = 12），而现行 golden 是 **15 条**（§26 刚跑的 15/15）⇒ 双 Planner 基线**自 2026-08-19 起没重跑过**，缺的正是后 3 题那一族。所以任何人拿 `eval/baselines/*.jsonl` 当"当前基线"引用的都是**两个月前的 rev**；这条给 §3 第 21 项（判分基线要不要随 F01 生产实现重取）加了一票实际权重，也是它该优先拍板的原因。
 
 **⇒ 对 roadmap §四 第 3 条判定的影响**：那句"错误率/超时率/降级率**无基线**"要收窄成**平台侧限定**，否则会连带否掉 KS 已有的压测读数（那是另一回事，不该被同一句话吞掉）。收窄已在 §四 追记块里补一行指针，**未改 10/09 快照表体任何一格**。
 
-**仍未取证的两项**：① 现网侧任何比率读数（本窗口不部署 ⇒ 待环境）；② `run_planner_eval.py` 重跑需要 LLM 密钥（⇒ 待放行，且它一旦重跑就会顶掉上面那两份 8/19 的 jsonl，这正是第 21 项要定的事）。
+**仍未取证的两项**：① 现网侧任何比率读数（本窗口不部署 ⇒ 待环境）；② `eval/run_planner_eval.py` 重跑需要 LLM 密钥（⇒ 待放行，且它一旦重跑就会顶掉上面那两份 8/19 的 jsonl，这正是第 21 项要定的事）。
 
 ## 30. 本窗口收尾（2026-10-16）：停在哪、下一批第一件事、以及不要重复做的部分
 
@@ -934,4 +934,23 @@ roadmap §四 第 5 条的判定引用的是「门禁在位 + 计入 `make ci`�
 2. **待环境**：真 PG 上加列往返与并发拒绝用例、V3 双实例物理故障转移、现网 `cost_records` 存量、CodeQL 重扫、126 镜像重建分发。**这些一律不得写成已验证**。
 3. **待放行**：`uv run python eval/run_planner_eval.py`（需密钥）；`uv run pytest -q -m "not requires_pg"`（CI 等价合并跑，本窗口被中止过 ⇒ 未重试）；另有一条**未查明的观察**：`uv run pytest tests/governance -q`（不加 marker 过滤）整目录跑超 9 分钟未完，原因未知——已排除"`requires_pg` 用例在等库"这一假设（`grep -c requires_pg tests/governance/*.py` 无任何命中，该目录没有这类标记），续接时可用逐文件计时 bisect，但要先确认允许跑。
 
-**不要在下一批重复做的**（本窗口已交付并留证，避免按旧表重复建设）：V3 五项接线、receipt fence 5/5、`PgAwaitableTaskStore` 死副本删除、身份门卫 6/6 装配 + P13、强杀脚本 fail-closed、四家应用 env 模板齐全性与密钥门禁、`evidence-format.md` 规范件、roadmap §四 七条逐条复取（含第 6 条下修与两次再收窄）、CHANGELOG 未发布窗口节、docs 索引登记与状态行口径脚本。逐项依据见 §25–§29 与本文件 §12/§16/§17/§19/§21/§22/§24。
+**不要在下一批重复做的**（本窗口已交付并留证，避免按旧表重复建设）：V3 五项接线、receipt fence 5/5、`PgAwaitableTaskStore` 死副本删除、身份门卫 6/6 装配 + P13、强杀脚本 fail-closed、四家应用 env 模板齐全性与密钥门禁、`docs/operations/evidence-format.md` 规范件、roadmap §四 七条逐条复取（含第 6 条下修与两次再收窄）、CHANGELOG 未发布窗口节、docs 索引登记与状态行口径脚本。逐项依据见 §25–§29 与本文件 §12/§16/§17/§19/§21/§22/§24。
+
+## 31. 把「门禁用手写清单数被检对象」当成一类来扫：L-4 又中一次，且它此前零测试（2026-10-26）
+
+**起因**：§（ADR-0013 §9「补漏」条）改 valkey 镜像 pin 时，我按 P14 的手写表 `_VALKEY_PIN_SITES` 认定"引用位三处"，改成派生枚举后一次捞出三处漏网。那件事的正确收尾不是"这一处修好了"，而是**把同一个失效形状拿去扫其余门禁**——`scripts/lint_architecture.py` 里凡是"对每个 X 断言 Y"的 X 都可能是手写数出来的。
+
+**做法**：脚本抽出所有路径型集合常量，逐个与独立派生结果（`git ls-files --cached --others --exclude-standard`）双向比对。结论分三种：
+- `_PLATFORM_APPS`（6 个 app）**当前无漂移**——但没有代码级自检，所以它只是"此刻对"。新增 `applications/<新服务>` 会静默脱离 P13/P12 的覆盖，与本节起因同形状。已把枚举口径收进单一实现 `_repo_file_listing()`，供后续门禁复用（这一票本次未改成派生：app 清单的语义是"平台有哪几个应用"，属**命名事实**而非"扫出来的文件"，派生化反而会把只放了 README 的目录算成一个 app。记在此处是留下"它需要自检"这件事，不是顺手改）。
+- `_OTEL_EXTRAS_SITES`（L-4）**中枪**：漏了 `applications/knowledge-service/pyproject.toml` 的 `[tracing]`，它声明 `opentelemetry-api>=1.45.1` / `sdk>=1.45.1`，与根 `[otel]`、agent-core `[tracing]` 同族。实测现值一致 ⇒ **不是线上故障，是盲区**：KS 那一侧以后改成任何下界，门禁都不会响。
+- `check_otel_extras_alignment` **全仓零测试**（`grep -rln` 只命中 `scripts/lint_architecture.py` 自己）。与 `tests/governance/` 既有范式（每条 lint 规则都有正反例）不符，也因此从未被证明"非空转"。
+
+**改了什么**：L-4 的被检集合改为 `手写表 ∪ 派生位`。派生判据按**内容**（该 extra 是否声明了 `_OTEL_TRACKED_PKGS` 中的包）而非 extra 名字，所以新起名叫 `[metrics]` 的观测 extra 也会被查到；手写表保留作**下限**——纯派生会在"整段删除 extra"时反而变绿（派生集合自己缩小），而那正是 L-4 要拦的形状。两处共用 `_repo_file_listing()`，枚举口径不再有第二份实现。
+
+**新增交付件**：`tests/governance/test_otel_extras_gate.py` 6 条（现网绿 / 派生含 KS 且**钉住它不在手写表里** / 完整树正向控制 / 表外位离群值单独红 / 摘掉必检 extra 报"extras 缺失" / `langchain-core` 不得被当成 `langchain`）。后一条不是假想敌：我自己第一版审计脚本用子串匹配，就把 nl2sql 的 `langchain-core>=0.3` 误报成漏检位——若门禁这么写，它会因无关包恒红，然后被人关掉。
+
+**变异反证**（两条，各只杀自己那条）：① `sites = sorted(required)`（丢掉派生）⇒ `test_outlier_floor_on_a_derived_site_is_flagged` 红，rc=1 / 1 failed / 5 passed；② 派生改回子串匹配 ⇒ `test_langchain_core_is_not_mistaken_for_langchain` 红，rc=1 / 1 failed / 5 passed。两次都按备份路径原地还原并核 sha256（`f3dc93d5…` 与备份一致）。
+
+**踩到并已修的取证错**：临时树只铺"要测的那两处"，导致其余必检位在 tmp 里根本不存在，得到的是"无法解析"而不是我要测的"extras 缺失"分支——两个分支都没测到却看起来在测。改为**铺完整基线树、只扰动一个对象**（`tests/governance/` 早写过的同一条纪律，我又犯了一次，故在此留字）。
+
+**仍未验**：本节的派生改动只在**本机有 git** 的路径上验过；无 git 环境（容器里只放源码树）走 `return []` 退回手写表，这一票的行为等价性没有读数。`_PLATFORM_APPS` 的自检、以及"把同样的双向比对推广到 P12/P13 的其它手写表"尚未做。

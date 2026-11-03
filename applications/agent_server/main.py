@@ -20,6 +20,7 @@ from agent_runtime.identity_middleware import IdentityMiddleware
 configure_logging(fmt="%(asctime)s %(levelname)s %(name)s: %(message)s")
 from agent_runtime.admission import AdmissionQueue, RateLimiter
 from agent_runtime.admission_gateway import PgAdmissionController
+from agent_runtime.cache import close_cache, get_cache
 from agent_runtime.coordinator import SessionCoordinator
 from agent_runtime.db import close_pool, get_pool, init_pool
 from agent_runtime.mcp_client import MCPClientManager
@@ -33,6 +34,7 @@ from agent_runtime.skills.workflow import discover_workflows
 from agent_runtime.trajectory import PgTrajectoryStore
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from agent_server.agent.graph import DelegateRef, build_graph
 from agent_server.agent.llm import build_chat_model
@@ -346,6 +348,13 @@ async def lifespan(app: FastAPI):
     # liveness 连错 3 次即杀容器，而本地 embedder 的构造是同步加载模型——在探针路径里
     # 装模型等于自己造一次「探针连错三次 → 被 SIGKILL」。
     app.state.embedding_backend, app.state.embedding_real = _warm_embedding_backend()
+
+    # 语义缓存（ADR-0013 C：唯一 Valkey 实现）：启动期解析 embedder 模型/维度、探测
+    # Valkey、按需建 Search 索引。两类失败刻意分开：配置不一致（CACHE_BACKEND=pg /
+    # VALKEY_URL 非法 / CACHE_VECTOR_DIM 与 embedder.dim 冲突）抛 CacheConfigError，
+    # 启动即失败；连接不可达只 degraded + fail-open，不阻断平台启动。
+    app.state.semantic_cache = get_cache("agent_server")
+    await app.state.semantic_cache.startup()
 
     # Phase 2: 会话并发协调
     if settings.coordination_enabled:
@@ -682,9 +691,69 @@ async def lifespan(app: FastAPI):
     mcp_mgr = getattr(app.state, "mcp_manager", None)
     if mcp_mgr is not None:
         await mcp_mgr.close_all()
+    # 语义缓存：排空写队列并关闭 Valkey 连接（不持久化，退出前尽力 flush）
+    await close_cache()
     # checkpointer 复用 init_pool 的连接池（db_enabled 时 conn 即 _pool），
     # 生命周期归 close_pool() 统一管理，此处不再单独关闭连接。
     await close_pool()
+
+
+# --- 前端视觉层静态托管（PR-0 刀⑱）---
+# 方案 docs/plans/plan-web-frontend-minimal-core-2026-10-29.md §9.1 定下的三处改动在本节落地，
+# 三条硬约束各自的成因：
+#   1. 条件挂载。全仓此前零 ``StaticFiles`` 用法（grep 实测 0 命中），本批是第一次。AGENTS.md
+#      明文的零依赖冒烟路径（``DATABASE_URL= uvicorn agent_server.main:app``）在无 web/dist 的
+#      机器上必须照常启动 ⇒ dist 不存在时**不挂载**，而不是挂上去后一路 404。
+#   2. 挂 app、不挂 console_router。test_console_router.py 钉死该子路由的路径集恒等于
+#      ``{("/console.html", ("GET",))}``（恒等性约束）⇒ dist 挂进去会直接弄红它；StaticFiles 本身
+#      是 ASGI app，不需经 api/routes.py 聚合。
+#   3. no-store。与 /console.html 的 ``Cache-Control: no-store`` 同源纪律（滚动升级后不把旧事件
+#      契约的缓存壳发给使用者），而 StaticFiles 默认**不给**这个头。带内容 hash 的 JS/CSS 本不
+#      需 no-store，但 index.html 需要；按最小实现一律 no-store，不引入分文件类型的复杂度。
+#   4. 默认探测基准 = **进程 CWD**，不是从 ``__file__`` 往上数（方案 §9.4 全案）。刀⑲ 在 241 实跑
+#      多阶段构建时真容器 ``GET /ui/`` 404：镜像里 ``pip install .`` 把 agent_server 装进了
+#      site-packages，被 import 的那份 ``__file__`` 在解释器目录下，往上数两层就数到了
+#      ``/usr/local/lib/python3.11``。而「仓库根 = 进程 CWD」这条基准仓内早有且成立（`config.py`
+#      的 ``env_file=".env"`` 按 CWD 解析，镜像 WORKDIR 也是 `/srv/agent-platform`）⇒ 用同一条。
+#      失效形状：从非仓库根启动 ⇒ 不挂载（不是挂上去一路 404），这类部署显式给 ``WEB_UI_DIST``。
+
+
+class NoStoreStaticFiles(StaticFiles):
+    """静态响应一律带 ``Cache-Control: no-store``（覆写点＝Starlette 给每个文件响应的位置）。"""
+
+    def file_response(self, full_path, stat_result, scope, status_code: int = 200):
+        response = super().file_response(full_path, stat_result, scope, status_code=status_code)
+        response.headers["Cache-Control"] = "no-store"
+        return response
+
+
+def _default_web_ui_dist() -> pathlib.Path:
+    """默认探测点 = 进程 CWD 下的 ``web/dist``（与 ``config.py`` 的 ``env_file=".env"`` 同一条基准）。
+
+    取的是**调用时**的 CWD 而不是 import 时算好的常量：探测基准属于运行时事实，冻结在模块
+    导入那一刻就把「谁启动我」这件事写死在了 import 顺序里（与本文件开头那条「装配顺序就是
+    正确性」同源）。
+    """
+    return pathlib.Path.cwd() / "web" / "dist"
+
+
+def _resolve_web_ui_dist() -> pathlib.Path | None:
+    """返回可挂载的 dist 目录；None = 不挂载。
+
+    配了 ``WEB_UI_DIST`` 却指到不存在的目录 ⇒ WARNING 而非静默跳过：“未构建”（合法状态）与
+    “配了却没有”（部署被改坏）必须能分开读，否则运维只能靠猜（与 Dockerfile 里 langfuse
+    包不装时「关了与坏了分不清」同一条雷的对偶面）。默认探测点没命中也留一行 INFO 报出它探了
+    哪里：“没构建”与“从非仓库根启动”同为不挂载，能分的只有这行日志。
+    """
+    raw = get_settings().web_ui_dist.strip()
+    cand = pathlib.Path(raw) if raw else _default_web_ui_dist()
+    if cand.is_dir():
+        return cand
+    if raw:
+        logger.warning("WEB_UI_DIST=%s 已配置但目录不存在，跳过 /ui 挂载（部署被改坏，非未构建）", raw)
+    else:
+        logger.info("默认探测点 %s 不存在，跳过 /ui 挂载（未构建，或从非仓库根启动⇒配 WEB_UI_DIST）", cand)
+    return None
 
 
 def create_app() -> FastAPI:
@@ -706,6 +775,13 @@ def create_app() -> FastAPI:
     # 无凭据交下游既有 provided>default 语义 → 零行为变更；配 TENANT_JWT_PUBLIC_KEYS_FILE/SINGLE_TENANT 后激活）。
     app.add_middleware(IdentityMiddleware)
     app.include_router(router)
+    # 前端产物只发页面壳与静态资源：鉴权仍由各数据接口的 verify_api_key 依赖把守（与
+    # /console.html 同惯例：壳免鉴权、数据要密钥）——本仓鉴权是每路由依赖而非中间件，
+    # 所以挂一个新 mount 不需要同步改免鉴权路径集（这一点已实取，不是推定）。
+    dist = _resolve_web_ui_dist()
+    if dist is not None:
+        app.mount("/ui", NoStoreStaticFiles(directory=str(dist), html=True), name="web_ui")
+        logger.info("web UI mounted at /ui dist=%s", dist)
     return app
 
 

@@ -1,0 +1,217 @@
+/* ============================================================================
+ * tokens.css — 全工程唯一允许出现 hex / rgb() / rgba() 的文件（视觉件 §1.1/§1.2）
+ * 三层：L0 primitive → L1 semantic → L2 alias。组件只消费 L1/L2。
+ * 状态：**PR-0 的 POC 批**。值全部抄自视觉件 §1.3/§1.5，本文件不新增任何色值判断。
+ * ==========================================================================*/
+
+:root {
+  /* ---- L0 中性 ramp（light）档号按明度排序，允许断档 ----
+   * ⚠ 发现 F1（待订正视觉件 §1.2）：该句写「中性 9 档 / 050–900 分六段」，但 §1.3
+   *   实际登记的 light 中性值只有 8 个，且 `--text-3`（#9199a3）在它那六段里没有落位
+   *   （既不是"分隔"也不是"控件边界"）。本件按 §1.3 的值建 ramp、档号按明度排，
+   *   断档不补（门禁断言 3 会把无人引用的令牌判红 ⇒ 不能为了凑十档而造空槽）。 */
+  --n-050: #ffffff;   /* surface 底 */
+  --n-100: #fafbfc;   /* raised 底 */
+  --n-200: #f6f7f9;   /* page 底 */
+  --n-300: #d8dee9;   /* 分隔线 */
+  --n-400: #9199a3;   /* disabled / placeholder 文本 */
+  --n-500: #7d8794;   /* 控件边界 */
+  --n-600: #6b7280;   /* 次要正文 */
+  --n-900: #1f2937;   /* 主要正文 */
+
+  /* ---- L0 色相档（light 取 -600，dark 取 -300；视觉件 §1.2）---- */
+  --blue-600:  #2563eb;
+  --cyan-600:  #0891b1;
+  --green-600: #0a7d33;
+  --violet-600:#7c3aed;
+  --teal-600:  #0f766e;
+  --amber-600: #8a6100;
+  --red-600:   #b00020;
+  --slate-600: #475569;
+
+  /* ---- L0 alpha 变体单列成令牌（借 Radix 的形状，视觉件 §1.2）---- */
+  --blue-tint:  #e8f0fe;
+  --cyan-tint:  #e0f5f8;
+  --green-tint: #e6f4ea;
+  --violet-tint:#f1ebfd;
+  --teal-tint:  #e5f2f1;
+  --amber-tint: #fbf1de;
+  --red-tint:   #fbe9ec;
+  --slate-tint: #eef1f5;
+
+  /* ---- L1 文本 / 底 / 边框（视觉件 §1.3）---- */
+  --text-1: var(--n-900);
+  --text-2: var(--n-600);
+  --text-3: var(--n-400);           /* 仅 disabled/placeholder，不得承载信息 */
+  --bg-page: var(--n-200);
+  --bg-surface: var(--n-050);
+  --bg-raised: var(--n-100);        /* 与 --bg-page 差 1.03 ⇒ 分层靠 border 不靠底色 */
+  --border-decor: var(--n-300);     /* 只作分隔线，不勾控件 */
+  --border-control: var(--n-500);   /* 3.64:1 ≥ 3:1（SC 1.4.11） */
+
+  /* ---- L1 状态色 ---- */
+  --status-ok: var(--green-600);
+  --status-warn: var(--amber-600);
+  --status-danger: var(--red-600);
+  --status-running: var(--cyan-600);
+  --on-primary: var(--n-050);       /* primary 按钮前景（落在 --blue-600 上，5.17:1） */
+
+  /* ---- L1 事件族 accent（视觉件 §2.2 的 8 族预算）。警示/失败两族不在此：
+   *   §1.3 写明它们是 --status-warn / --status-danger 的**同值别名** ⇒ 降到 L2 ---- */
+  --cat-decision: var(--blue-600);
+  --cat-progress: var(--cyan-600);
+  --cat-source: var(--green-600);
+  --cat-memory: var(--violet-600);
+  --cat-answer: var(--teal-600);
+  --cat-gate: var(--slate-600);
+
+  /* ---- L1 tint（徽标/图例色卡底）---- */
+  --tint-decision: var(--blue-tint);
+  --tint-progress: var(--cyan-tint);
+  --tint-source: var(--green-tint);
+  --tint-memory: var(--violet-tint);
+  --tint-answer: var(--teal-tint);
+  --tint-watch: var(--amber-tint);
+  --tint-failure: var(--red-tint);
+  --tint-gate: var(--slate-tint);
+
+  /* ---- L1 其他 ---- */
+  --focus-ring: var(--cat-decision);   /* 视觉件 §3；引 L1 不引 L0 ⇒ dark 侧自动跟到 --blue-300 */
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, .04), 0 1px 2px rgba(0, 0, 0, .06);   /* 双层叠加 */
+  /* ⚠ POC 批：`--shadow-2`（浮层档）**已撤销登记** —— 本页没有浮层消费者，门禁断言 3
+   *   把它判成孤儿令牌并 fail。视觉件 §1.5 写的是「≤2 档」上限，不是「必须两档」；
+   *   等 PR-2 真出现菜单/抽屉时再登记。孤儿不是删设计，是**不在无消费者时预留可调用的值**。 */
+  --page-max: 1440px;
+
+  /* ---- L1 排版（视觉件 §1.5；行高与字距是令牌，组件不得写字面值）---- */
+  --font-sans: "IBM Plex Sans", "Noto Sans CJK SC", "Microsoft YaHei", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+  --fs-xs: 12px;
+  --fs-sm: 13px;
+  --fs-body: 14px;
+  --fs-md: 16px;
+  --fs-lg: 20px;
+  --lh-tight: 1.5;
+  --lh-body: 1.7;
+  --ls-wide: .02em;      /* ≤13px 的小标题与灯名 */
+  --ls-tight: -0.01em;   /* --fs-md 级标题 */
+  --ls-head: -0.02em;    /* --fs-lg 级标题 */
+
+  /* ---- L1 间距 / 圆角 / 动效 ---- */
+  --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px;
+  --sp-5: 24px; --sp-6: 32px; --sp-7: 48px;   /* -6/-7 的消费者是 ≥1280 的 .app 内边距，见 base.css 断点段 */
+  --radius-sm: 4px;      /* 控件 */
+  --radius-md: 8px;      /* 卡片 */
+  --radius-pill: 999px;  /* 徽标 */
+  --t-fast: 120ms;
+  --t-slow: 200ms;
+  --ease-out: cubic-bezier(.2, 0, 0, 1);
+}
+
+/* dark 副本 A：系统偏好驱动（未手动选择时） */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    --n-050: #1c2128;
+    --n-100: #22262d;
+    --n-200: #16191d;
+    --n-300: #30363d;
+    --n-400: #6e7681;
+    --n-500: #6e7681;   /* dark 侧 text-3 与 border-control 同值（视觉件 §1.3 就是这两个 hex） */
+    --n-600: #8b949e;
+    --n-900: #e6edf3;
+    --n-975: #0d1117;   /* dark 的 primary 按钮前景（7.49:1 落在 --blue-300 上） */
+
+    --blue-300:  #58a6ff;
+    --cyan-300:  #3fc6d6;
+    --green-300: #3fb950;
+    --violet-300:#a371f7;
+    --teal-300:  #3fb9b0;
+    --amber-300: #d29922;
+    --red-300:   #ff5c5c;
+    --slate-300: #a8b1bc;
+
+    --blue-tint:  #1f2b3d;
+    --cyan-tint:  #12303a;
+    --green-tint: #1c2e21;
+    --violet-tint:#2a2140;
+    --teal-tint:  #15302f;
+    --amber-tint: #332914;
+    --red-tint:   #3a1c1f;
+    --slate-tint: #262b32;
+
+    --status-ok: var(--green-300);
+    --status-warn: var(--amber-300);
+    --status-danger: var(--red-300);
+    --status-running: var(--cyan-300);
+    --on-primary: var(--n-975);
+
+    --cat-decision: var(--blue-300);
+    --cat-progress: var(--cyan-300);
+    --cat-source: var(--green-300);
+    --cat-memory: var(--violet-300);
+    --cat-answer: var(--teal-300);
+    --cat-gate: var(--slate-300);
+
+    /* 暗底下投影几乎不可见 ⇒ dark 不靠投影分层（视觉件 §1.5） */
+    --shadow-1: none;
+  }
+}
+
+/* dark 副本 B：手动选择驱动。⚠ 与副本 A **逐字同值**（门禁断言 5） */
+:root[data-theme="dark"] {
+  --n-050: #1c2128;
+  --n-100: #22262d;
+  --n-200: #16191d;
+  --n-300: #30363d;
+  --n-400: #6e7681;
+  --n-500: #6e7681;   /* dark 侧 text-3 与 border-control 同值（视觉件 §1.3 就是这两个 hex） */
+  --n-600: #8b949e;
+  --n-900: #e6edf3;
+  --n-975: #0d1117;   /* dark 的 primary 按钮前景（7.49:1 落在 --blue-300 上） */
+
+  --blue-300:  #58a6ff;
+  --cyan-300:  #3fc6d6;
+  --green-300: #3fb950;
+  --violet-300:#a371f7;
+  --teal-300:  #3fb9b0;
+  --amber-300: #d29922;
+  --red-300:   #ff5c5c;
+  --slate-300: #a8b1bc;
+
+  --blue-tint:  #1f2b3d;
+  --cyan-tint:  #12303a;
+  --green-tint: #1c2e21;
+  --violet-tint:#2a2140;
+  --teal-tint:  #15302f;
+  --amber-tint: #332914;
+  --red-tint:   #3a1c1f;
+  --slate-tint: #262b32;
+
+  --status-ok: var(--green-300);
+  --status-warn: var(--amber-300);
+  --status-danger: var(--red-300);
+  --status-running: var(--cyan-300);
+  --on-primary: var(--n-975);
+
+  --cat-decision: var(--blue-300);
+  --cat-progress: var(--cyan-300);
+  --cat-source: var(--green-300);
+  --cat-memory: var(--violet-300);
+  --cat-answer: var(--teal-300);
+  --cat-gate: var(--slate-300);
+
+  /* 暗底下投影几乎不可见 ⇒ dark 不靠投影分层（视觉件 §1.5） */
+  --shadow-1: none;
+}
+
+/* 手动切回 light：`:root` 已是 light 全量，本块**故意留空**（写一份副本 = 多一处会漂的双写） */
+:root[data-theme="light"] {}
+
+/* ---- L2 alias：同值别名必须显式命名，让图例读得出「这一族共用一个值」。
+ *   只写一份：alias 指向 L1，L1 已按主题重定义 ⇒ 这里的间接层会动态解析，
+ *   不需要在 dark 两个副本里重复（重复 = 多两处会漂的双写）。 ---- */
+:root {
+  --cat-terminal: var(--status-ok);     /* done：终止定稿 */
+  --cat-watch: var(--status-warn);      /* replan / suspended：需关注 */
+  --cat-failure: var(--status-danger);  /* error：失败 */
+}

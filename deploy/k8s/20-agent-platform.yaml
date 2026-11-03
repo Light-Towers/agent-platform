@@ -20,6 +20,11 @@ spec:
       # 137 定性：外部依赖断连（postgres DNS + OTLP no route）让优雅关闭卡在「等后台任务」，
       # 超过默认 30s 宽限期被 SIGKILL。放宽只买到时间，根因在集群网络，别当成修复。
       terminationGracePeriodSeconds: 60
+      # 密钥卷要 group 可读（与 30 同一档）：本 Pod 的两个卷里只有 secret 那个受 fsGroup 管，
+      # hostPath 权重缓存不受影响（2026-10-28 在 126 实跑探针量过：宿主目录前后 stat 不变）。
+      # 完整的实测读数写在 30 头部，不在这里抄第二份数字。
+      securityContext:
+        fsGroup: 10001
       containers:
         - name: agent-platform
           image: agent-platform:dev
@@ -32,18 +37,16 @@ spec:
                 secretKeyRef:
                   name: agent-platform-secrets
                   key: DATABASE_URL
-            # 问数（Text-to-SQL）的数据面。缺 SQL_DSN 时 /health 如实报 sql_backend=none。
-            # **复用上面那个键的值**：不新增任何密钥材料，也就不多一处需要轮换的东西。
-            # 复用 owner 口令是安全的前提：执行层连接级强制 `default_transaction_read_only=on`
-            # （sql/pipeline.py）+ sqlglot 白名单守卫（agent_core.sql.guard.validate_sql），双保险。
-            # ⚠ 残余边界要如实说：只读≠只读自己的行——同一角色能 SELECT 到全部租户的数据。
-            #   本版单租户（SINGLE_TENANT=default）不暴露该问题，多租户共用时必须先在库侧建只读角色 +
-            #   行级过滤，属独立方案，别在这里打开。
-            - name: SQL_DSN
-              valueFrom:
-                secretKeyRef:
-                  name: agent-platform-secrets
-                  key: DATABASE_URL
+            # ---- 问数（Text-to-SQL）的数据面：从「连接串」换成「服务地址」----
+            # 这里此前注的是 SQL_DSN（复用上面 DATABASE_URL 的值）。那条路已退役（ADR-0011 选项 A），
+            # 平台侧只剩瘦客户端：经集群内 HTTP 调 nl2sql-service（生成+执行+取值核验都在那边）。
+            # 摘它不是「清理无用变量」，是**拆掉一盏假灯**：SQL_DSN 还在注入的那几轮里，/health 拿
+            # detect_dialect(settings.sql_dsn) 报 sql_backend=postgres，而那个 postgres 指的是**平台库**，
+            # 与问数真正用的业务库（nl2sql_dw，dw_reader 只读角色）不是一个东西 ⇒ 灯亮不等于问数能用。
+            # 批次 5（2026-10-28）已把灯与字段一并退役：config.py 不再有 sql_dsn/sql_max_rows，根
+            # .env.example 与 compose 的对应键同批删除 ⇒ 现在注回来只会被 env 死键门禁判红。
+            - name: NL2SQL_SERVICE_URL
+              value: "http://nl2sql-service:8000"
             # ---- 模型凭据 + 入站凭据：只引用键名，真实值永不入库 ----
             # 这两个键在 126 上属集群单独持有的 `observability-keys`（对象名早于鉴权用途，
             # 见 VERIFICATION.md §C 的 create secret 记录）；缺键时 Pod 以
@@ -65,6 +68,25 @@ spec:
               value: "default"
             - name: DEPLOY_ENFORCE_IDENTITY
               value: "true"
+            # 内部签名头的**签发侧**：/sql/train 转发 nl2sql /api/meta/ingest 时用它签 X-Internal-Tenant。
+            # 只认文件不认 env（agent_core/internal_header.py:load_hmac_key 读 INTERNAL_HMAC_KEY_FILE 指向的文件），
+            # 所以这里给的是挂载路径，不是密钥值。密钥与 30（验签侧）同源：observability-keys/INTERNAL_HMAC_KEY。
+            # 两侧不同值的当场表现是 /sql/train 全线 401 而 /health 全绿（探针不碰鉴权）⇒ 形状一致性
+            # 由 tests/deploy 钉住，能不能真读到由批次 6 的写路径取证钉。
+            - name: INTERNAL_HMAC_KEY_FILE
+              value: /run/app-secrets/internal_hmac.key
+            # ---- 语义缓存（ADR-0013 C）：唯一后端 Valkey，禁止 CACHE_BACKEND=pg ----
+            # VALKEY_URL 从 Secret 注入（可能含口令）；日志/health 统一脱敏。
+            # 连接不可达时 fail-open（请求照常、health 报 degraded），不阻断平台启动。
+            - name: CACHE_ENABLED
+              value: "true"
+            - name: CACHE_BACKEND
+              value: "valkey"
+            - name: VALKEY_URL
+              valueFrom:
+                secretKeyRef:
+                  name: agent-platform-secrets
+                  key: VALKEY_URL
             - name: LLM_BASE_URL
               valueFrom:
                 configMapKeyRef:
@@ -202,6 +224,11 @@ spec:
             - name: ap-models
               mountPath: /opt/ap-models
               readOnly: true
+            - name: internal-hmac
+              # 别把这里改成 /run/secrets：那个位置已被 kubelet 挂的 SA token 占用，只读 tmpfs 先占住后
+              # runc 建子目录就是 EROFS，容器直接起不来（2026-10-28 在 126 实跑探针重现，理由详见 30 头部）。
+              mountPath: /run/app-secrets
+              readOnly: true
       volumes:
         # type: Directory = 节点上没这个目录就调度失败（Pod Pending + 明确事件），
         # 而不是静默起来、首次推理时才发现缓存不在本机、回连 huggingface.co 又不通。
@@ -210,6 +237,19 @@ spec:
           hostPath:
             path: /opt/ap-models
             type: Directory
+        - name: internal-hmac
+          secret:
+            # 与 LLM_API_KEY/API_KEY/LANGFUSE_* 同住集群自有的 observability-keys（真实密钥永不入库，
+            # 05-secrets.yaml 那份是 demo 值）。线上该对象当前没有这个键 ⇒ 上线前用
+            # `kubectl patch secret observability-keys -p '{"stringData":{"INTERNAL_HMAC_KEY":"…"}}'`
+            # **合并写**补键，不要用 apply（apply 是整对象替换，会抹掉已有键）。
+            secretName: observability-keys
+            # 只投这一个键：整对象挂进去会把 API_KEY/LANGFUSE_* 这些本进程不消费的凭据一起塞进 Pod。
+            items:
+              - key: INTERNAL_HMAC_KEY
+                path: internal_hmac.key
+            # 0440 + Pod fsGroup 10001：owner root、group 10001、其他进程不可读。
+            defaultMode: 0440
 ---
 apiVersion: v1
 kind: Service

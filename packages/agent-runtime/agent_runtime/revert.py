@@ -11,7 +11,7 @@ import uuid
 
 from agent_core.guardrails.auth import THREAD_ID_PREFIX
 
-from agent_runtime.cache import spawn_background
+from agent_runtime.background import spawn_background
 from agent_runtime.schemas import RevertResult
 
 logger = logging.getLogger(__name__)

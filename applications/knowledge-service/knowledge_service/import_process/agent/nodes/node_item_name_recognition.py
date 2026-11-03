@@ -54,13 +54,16 @@ def step_1_get_inputs(state: ImportGraphState) -> Tuple[str, List[Dict]]:
         3. 基础数据类型校验，保证下游流程输入有效性
     依赖的状态数据（上游节点产出）：
         - state["file_title"]: 上游提取的文件标题（优先使用）
-        - state["file_name"]: 原始文件名（file_title为空时兜底）
+        - state["local_file_path"]: 原始文件路径（file_title 为空时取其 basename 兜底）
         - state["chunks"]: 文本切片列表（每个切片为字典，含title/content等字段）
     返回值：
         Tuple[str, List[Dict]]: (处理后的文件标题, 校验后的文本切片列表)
     """
-    # 多层兜底获取文件标题：优先file_title → 其次file_name → 空字符串
-    file_title = state.get("file_title", "") or state.get("file_name", "")
+    # 多层兜底获取文件标题：优先file_title → 其次原始文件名 → 空字符串
+    # （2026-10-27：原先兜底读 state["file_name"]，但该键从未进过 ImportGraphState，
+    # 也不在任何节点的出参里——node_entry 只把它当局部变量用，所以这条兜底恒取空串。
+    # 改读已声明的 local_file_path，兜底才真的可达。）
+    file_title = state.get("file_title", "") or os.path.basename(state.get("local_file_path", ""))
     # 获取文本切片列表：空值时返回空列表，避免后续遍历报错
     chunks = state.get("chunks") or []
 
@@ -72,7 +75,7 @@ def step_1_get_inputs(state: ImportGraphState) -> Tuple[str, List[Dict]]:
 
     # 空值日志提示：文件标题为空时不中断流程，仅记录警告
     if not file_title:
-        logger.warning("state中缺少file_title和file_name，后续大模型识别可能精度下降")
+        logger.warning("state中缺少file_title与local_file_path，后续大模型识别可能精度下降")
 
     # 数据类型校验：确保chunks为有效非空列表，否则返回空列表
     if not isinstance(chunks, list) or not chunks:

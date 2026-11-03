@@ -14,10 +14,17 @@ metadata:
 # LLM_* 三键 2026-10-10 按「清单与线上一致化」回填为 126 在跑容器 env 的实测值。
 # 此前此处是 api.openai.com/v1 + gpt-4o-mini（死键）：线上被 kubectl set env 改成字面值后
 # 无人回写，任何人一次 kubectl apply 就会把国外模型地址注回线上、模型当场不可用。
+# 模型 id 2026-10-27 换 `-1017` 修订版：`deepseek-ai/DeepSeek-V4.1-Flash` 已被提供方下线，
+# 现网每一次调用稳定 400 `{"message":"Model id : ... , has no provider supported"}` ⇒ 整条问答必败。
+# ⚠️ 该 id 仍出现在端点自报的 `/models` 清单里（实测 37 项中含它）⇒ **清单在册 ≠ 有 provider**，
+#   换模型只能靠真调用判定，不能查清单。同批实测可调用：`-1017`/`Qwen/Qwen3.8-Flash-Next`/
+#   `Qwen/Qwen3.5-27B`（plain 与 tools+auto 两种形态都 200）；`-V4-Flash-0731`、`-V4-Pro` 同为 400。
+#   同族修订版沿用既有结论（json_schema 稳定 400、只能走 tools+auto），但按「换 rev 必复跑」
+#   这条，路由判定质量与端到端链路都要重取一次真读数（见 VERIFICATION.md 的复跑记录）。
 data:
   LLM_BASE_URL: "https://api-inference.modelscope.cn/v1"
-  LLM_MODEL: "deepseek-ai/DeepSeek-V4.1-Flash"
-  LLM_FALLBACK_MODEL: "deepseek-ai/DeepSeek-V4.1-Flash"
+  LLM_MODEL: "deepseek-ai/DeepSeek-V4.1-Flash-1017"
+  LLM_FALLBACK_MODEL: "deepseek-ai/DeepSeek-V4.1-Flash-1017"
   EMBEDDING_MODEL: "bge-small-zh"
   # OTEL_* 是本应用自定义的键名（非 OTel 官方 OTEL_* 语义），线上已在跑但清单从未声明。
   OTEL_ENABLED: "true"
@@ -34,3 +41,38 @@ data:
   # 栈没起时这三键仍算"已配置"，但回调发送失败 ⇒ /health 的 langfuse_ready 只反映装配态，
   # 真判据是"Langfuse 里查得到这条 trace"（方案 §4 A3）。
   LANGFUSE_HOST: "http://<internal-ip>:3000"
+  # ---------------------------------------------------------------------------
+  # nl2sql-service（批次 3）：键名带 NL2SQL_ 前缀，env 名不带（前缀映射在清单里做）。
+  # 为什么要前缀：上面那些不带前缀的键是平台在读的同一一份 CM，同名不同值（EMBEDDING_MODEL
+  # 在这份 CM 里是 bge-small-zh，只作用于平台的 RemoteEmbedder 分支）会被下一次“顺手改一下
+  # 那个键”误伤；前缀把两个消费方分开，而引用侧各自映射回应用读的 env 名。
+  # 为什么住这份 CM而不是另建一份：两个工作负载（30 在线召回与 36 元库构建）必须读到同一值——
+  # 元库的 vector 列宽由 36 按 VECTOR_DIM 定死，两侧各留字面值时“改一处”的 commit 看着自洽，
+  # 红要等到第一次真召回才显形。住 00-config 还避开一个顺序陷阱：它是第一份 apply 的清单。
+  # ---------------------------------------------------------------------------
+  # 本地 bge-small-zh-v1.5 = 512 维。不是推导值：1536（代码默认）是 OpenAI 口径、1024
+  # （app_config.yaml 里那份）是 bge-m3 那一路，两者都不是集群能跑的（无外网 embedding API）。
+  NL2SQL_VECTOR_DIM: "512"
+  NL2SQL_EMBEDDING_BACKEND: "langchain_huggingface"
+  NL2SQL_EMBEDDING_MODEL: "BAAI/bge-small-zh-v1.5"
+  # bigram：[tokenizer]（jieba）不在镜像里（Dockerfile.nl2sql-service 不带该 extra），
+  # 配 jieba 只会在启动时告警并降级 bigram——显式写 bigram 是为了“写了的就是生效的那个”。
+  NL2SQL_TOKENIZER: "bigram"
+  NL2SQL_DATASOURCE_ID: "dw"
+  # ⚠ 两个 List[str] 字段的值必须是 **JSON 字面量**。逗号串不是“按逗号切”：
+  # pydantic-settings 对复杂类型走 json.loads，失败即
+  # `SettingsError: error parsing value for field "allowed_tables" from source "EnvSettingsSource"`
+  # ——本机实测；写成人读起来更自然的 `users,orders` 会得到一个 CrashLoop 的 Pod。
+  # 值跟 dw fixture 逐字对得上（deploy/data/nl2sql_dw_fixture.sql 只建 users/orders），
+  # 对不上就是“白名单把真表也拒了”或“白名单外多一个可查的表”，两者都是门禁可查的（批次 2/3 的用例）。
+  NL2SQL_ALLOWED_TABLES: '["users", "orders"]'
+  # 敏感列："一份声明两处消费"（L2 guard 投影黑名单 + L3 结果掩码）。值要写成小写的
+  # table.column 全限定名（settings.py 的字段注录就是这个口径）：L2 侧按全限定名比对，
+  # L3 侧取末段裸列名（services/result_masking.py）——裸写 `phone` 只会中一处，黑名单那侧对不上。
+  # 非空是“真值可演”的前提：空清单 = L2/L3 两层从配置面上不存在，而服务照绿。
+  NL2SQL_SENSITIVE_COLUMNS: '["users.phone"]'
+  # L3 开关：默认已是 true，显式声明的理由与平台侧 GUARD_BLOCK_INJECTION 同一条——
+  # 防被环境漂移改掉（masks 静默关掉的表观是“数据泄露了”，不是“配置丢了”）。
+  NL2SQL_RESULT_MASKING_ENABLED: "true"
+  # 角色：服务端断言的最小权限默认（admin_roles 里才看全量）。置 admin 需显式改这里。
+  NL2SQL_DEFAULT_QUERY_ROLE: "analyst"

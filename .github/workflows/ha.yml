@@ -1,8 +1,9 @@
 name: agent-platform-ha
 
 # TB-8 分层门禁 · HA 重型基础设施验证。
-# 验证真实 PostgreSQL lease/checkpoint/side_effects 持久化，以及双进程 kill -9 接管。
-# 默认仅在 HA/Runtime 相关代码变更时触发；也支持 workflow_dispatch 手工执行。
+# 验证真实 PostgreSQL lease/checkpoint/side_effects 持久化、双进程 kill -9 接管，
+# 以及联邦 PG DSN 接线（#146 判据②，这条只有本 workflow 有 PG service 可跑）。
+# 默认仅在 HA/Runtime/联邦 DB 相关代码变更时触发；也支持 workflow_dispatch 手工执行。
 on:
   push:
     paths:
@@ -10,6 +11,8 @@ on:
       - "packages/agent-core/**"
       - "packages/shared-schemas/**"
       - "tests/ha/**"
+      - "applications/agent_federation/agent/db.py"
+      - "applications/agent_federation/tests/test_db_integration.py"
       - "scripts/ha_real_kill_verify.py"
       - "docker-compose.ha.yml"
       - "pyproject.toml"
@@ -22,6 +25,8 @@ on:
       - "packages/agent-core/**"
       - "packages/shared-schemas/**"
       - "tests/ha/**"
+      - "applications/agent_federation/agent/db.py"
+      - "applications/agent_federation/tests/test_db_integration.py"
       - "scripts/ha_real_kill_verify.py"
       - "docker-compose.ha.yml"
       - "pyproject.toml"
@@ -66,5 +71,9 @@ jobs:
         run: make install
       - name: HA tests (requires_pg marker, real PostgreSQL)
         run: uv run pytest tests/ha -m requires_pg -q
+      # #146 判据②：DSN 接线不是"传了参数"，要真的建池并跑通 typed memory。
+      # 放在本 workflow 而非普通 CI：只有这里有 PG service 与 AGENT_PLATFORM_PG_URL。
+      - name: Federation PG DSN wiring (#146, real PostgreSQL)
+        run: uv run pytest applications/agent_federation/tests/test_db_integration.py -q
       - name: HA real kill -9 takeover (dual-process, real PG)
         run: uv run python scripts/ha_real_kill_verify.py

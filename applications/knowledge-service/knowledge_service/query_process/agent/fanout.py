@@ -6,7 +6,10 @@
 ``agent_core.tools.guarded``；本模块保留 zhiku 专属的 ``retrieval_cfg`` 读取与
 公共 API（``guarded_call`` / ``wrap_channel_node``），供 main_graph / tests 零改动使用。
 
-说明：``retrieval_cfg`` 改为**函数内局部导入**，避免顶层硬依赖（与 agent_core 框架无关原则一致）。
+说明：``retrieval_cfg`` 是**顶层模块级导入**（本模块 :17），测试要替换它须 patch
+``fanout.retrieval_cfg`` 这个绑定本身，patch 源模块不会生效；另注意
+``wrap_channel_node`` 在图构建期（``main_graph`` 被 import 时）就读取 enabled/timeout_s
+并据此选择包装结果，运行期改配置不会重新装配节点。
 """
 
 from typing import Any, Callable, Dict

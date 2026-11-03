@@ -14,4 +14,8 @@ docs
 tests
 eval
 scripts
-node_modules
+# 前端两条（工单件 §12 第 4 条）。不带斜杠的 `node_modules` 只命中根——该文件自己就是证据
+# （`**/__pycache__` 带了 `**/`），所以原来那行根本拦不住 web/node_modules（几百 MB 进上下文）。
+**/node_modules
+# 本机预建的 dist 若进镜像，会遮蔽 builder 阶段的产物——与本仓「可变 tag ⇒ 静默跑旧代码」同族。
+web/dist

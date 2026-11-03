@@ -1,7 +1,7 @@
 # Agent Platform 本地/CI 工程门禁
 # 统一任务入口，避免各脚本分散调用；所有目标零业务副作用。
 
-.PHONY: install lint format type test eval eval-llm-required eval-llm-memory eval-rag eval-rag-routes eval-rag-retrieval eval-rag-e2e eval-rag-gate eval-rag-baseline eval-rag-meta-ui ci compose-smoke
+.PHONY: install lint format mutation-cache mutation type test test-cache-contract valkey-up valkey-down bench-cache eval eval-llm-required eval-llm-memory eval-rag eval-rag-routes eval-rag-retrieval eval-rag-e2e eval-rag-gate eval-rag-baseline eval-rag-meta-ui ci ci-web compose-smoke
 
 install:
 	uv sync --all-packages --extra dev
@@ -11,9 +11,25 @@ lint:
 	uv run python scripts/lint_architecture.py
 	uv run python scripts/lint_migration_refs.py
 	uv run python scripts/lint_public_mirror.py
+	uv run python scripts/lint_graph_state_boundary.py
 
 format:
 	uv run --with ruff ruff format .
+
+# 逻辑层门禁（AGENTS.md「逻辑测全不全靠变异杀死率，覆盖率只是下限」的落地件）。
+# 为什么单独一个目标而不并进 ci：它对每个变异都要重跑一遍套件（条数以脚本 `MUTANTS` 为准），
+# 且判据是"杀死集合不许漂移"——漂移要人定性（是用例退化还是用例获得了新能力），
+# 不适合在 PR 上自动拦。合并前（G2）与改动 cache 分支判据后必跑。
+mutation-cache:
+	uv run python scripts/mutation_cache_branches.py
+
+# 仪表与门禁是两件不同的东西，别混：
+#   mutation-cache = 门禁：**手挑**性质（条数以脚本 `MUTANTS` 为准）+ 声明式存活集合，红/绿可拦。
+#   mutation       = 战役：AST 算子自动展开，**分母来自代码**——手挑清单的盲区恰恰是
+#     "谁挑的、挑了什么"（本仓 §11 前 32 行就是这么来的）。产物是待定性清单
+#     （等价变异 / 引擎独占 / 真缺口），刻意**不**做成"存活就拦"，因为存活体本身不是失败。
+mutation:
+	uv run python -u scripts/mutation_engine.py --target packages/agent-runtime/agent_runtime/cache --timeout 120 --command "{python} -m pytest packages/agent-runtime/tests/test_valkey_backend_wire.py packages/agent-runtime/tests/test_cache_config.py tests/test_bench_cache_write_budget.py -q -x --no-header -p no:cacheprovider"
 
 type:
 	uv run --with ruff ruff check . --select ALL 2>/dev/null || uv run --with ruff ruff check .
@@ -47,6 +63,24 @@ test:
 	uv run pytest applications/knowledge-service/tests -q
 	uv run pytest applications/nl2sql-service/tests -q
 	uv run --extra otel pytest tests/observability -q
+
+# 语义缓存开发/测试底座（ADR-0013 C）：开发/测试与生产同一 Valkey 实现。
+# bundle 镜像含 Search 模块，缺它则 L2 向量检索不可用。
+valkey-up:
+	docker compose up -d --wait valkey
+
+valkey-down:
+	docker compose stop valkey
+
+# 真 Valkey 契约测试：CI 必须设置 CACHE_CONTRACT_REQUIRED=1（服务不可达即红）；
+# 本地未启动 Valkey 时整模块 skip（先 make valkey-up）。
+test-cache-contract:
+	VALKEY_URL=$${VALKEY_URL:-redis://127.0.0.1:6379/0} CACHE_CONTRACT_REQUIRED=1 uv run pytest packages/agent-runtime/tests/test_cache_contract.py -q
+
+# 容量基准（ADR-0013 C Stage 3）：4 租户 / 10 万条 / 512 维 / 200 QPS。
+# 必须对**专用** Valkey 跑（compose 的 256MB 实例装不下 10 万条），预算见脚本头部。
+bench-cache:
+	VALKEY_URL=$${VALKEY_URL:-redis://127.0.0.1:6379/0} uv run python scripts/bench_cache.py
 
 # 评测门禁：默认启发式（确定性，CI 可达），阈值 0.8；LLM_API_KEY 缺失时回退启发式并 WARN。
 # 注：历史上 agent_federation 曾有同名顶层 eval 包（workspace 命名冲突，已于
@@ -123,6 +157,25 @@ eval-rag-meta-ui:
 # CI 串联：lock 校验 + lint + 单测 + 评测门禁；任一失败即中断。
 ci: lint test eval
 	uv lock --check
+
+# 前端面门禁（刀⑲，工单件 §12-A = 形状二）。为什么不并进 ci：`ci = lint test eval` 从此
+# 要求 Node 在场，而 126 宿主无 node/npm/pnpm（AGENTS.md 内网段第 2 条实测）⇒ Python-only
+# 机器连 `make ci` 都跑不动，这是把一面工具的缺勤传染给另一面。
+# 形态照搬已有的 test-cache-contract：目标住在 Makefile、步住在 workflow，workflow 仍只调
+# make（不违它自己那句「复用 make ci 单一真相避免与本地漂移」）。
+# 顺序是导出的：先对账（tokens / 事件契约，都是纯文本断言、秒级）→ 静态（eslint / vue-tsc）
+# → 行为（verify:sse 真 import .ts 喂帧，放在 typecheck 之后：类型不过时先报类型，
+# 而不是让擦除加载失败盖住真正的第一个错）→ 产物（build）；
+# 便宜且高信息量的放前面，失败时不要先花 30s 打包。
+# pnpm 版本不在此写死：corepack 读 web/package.json 的 packageManager（本仓唯一真相）。
+ci-web:
+	cd web && pnpm install --frozen-lockfile
+	cd web && pnpm run check:tokens
+	cd web && pnpm run check:events
+	cd web && pnpm run lint
+	cd web && pnpm run typecheck
+	cd web && pnpm run verify:sse
+	cd web && pnpm run build
 
 # TB-7 端到端冒烟：需本机 Docker 守护进程可用。启动 pgvector + agent-platform，
 # 等待两服务 healthcheck 变 healthy，再探测 /health 返回，最后清理。

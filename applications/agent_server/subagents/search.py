@@ -7,6 +7,7 @@
 import httpx
 
 from agent_server.config import get_settings
+from agent_server.subagents.degradation import SEARCH_UNCONFIGURED
 
 
 async def _tavily_search(query: str) -> list[str]:
@@ -24,7 +25,7 @@ async def _tavily_search(query: str) -> list[str]:
 async def search_web(query: str) -> list[str]:
     settings = get_settings()
     if not settings.search_api_key:
-        return ["联网搜索未配置（SEARCH_API_KEY 为空）"]
+        return [f"{SEARCH_UNCONFIGURED}（SEARCH_API_KEY 为空）"]
     results = await _tavily_search(query)
     if not results:
         return ["联网搜索无结果"]

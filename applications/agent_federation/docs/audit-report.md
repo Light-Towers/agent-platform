@@ -1,7 +1,7 @@
 # deepagents 生产化改造实现审核报告
 
 > 日期：2026-08-11
-> 审核：对照 `refactor-plan.md` v3.6 验收标准，逐 Phase 检查实现完整性/正确性/一致性
+> 审核：对照 `applications/agent_federation/docs/refactor-plan.md` v3.6 验收标准，逐 Phase 检查实现完整性/正确性/一致性
 > 范围：工作区未提交改动（50 文件，3776 行新增）+ kefu-service/（未跟踪）
 > 结论：**7 个 Phase 全部实现，核心逻辑完整，发现 1 个已修复问题 + 3 个可接受偏差**
 >
@@ -65,7 +65,7 @@ adapter 已集成：wenda-adapter/kefu-adapter 调用上游时注入 traceparent
 |--------|------|------|
 | 3 个 AsyncSubAgent 定义 | ✅ | `agent/async_subagents.py`：text_to_sql/rag_query/customer_service |
 | AGENT_MODE 切换 | ✅ | `agent/config.py`：local/remote 模式，子服务地址配置 |
-| 路由入口 get_main_agent() 48-57 行 | ✅ | `main_agent.py` _build_subagents() 根据 AGENT_MODE 切换 |
+| 路由入口 get_main_agent() 48-57 行 | ✅ | `applications/agent_federation/agent/main_agent.py` _build_subagents() 根据 AGENT_MODE 切换 |
 | 子服务健康探活 | ✅ | `agent/health_check.py`：daemon 线程 30s 间隔探活 |
 | fallback 机制 | ✅ | remote 模式下子服务 unhealthy 时降级到本地 |
 | subservice_route 事件推送 | ✅ | main_agent.py 推送 remote/local 模式标记 |
@@ -86,25 +86,25 @@ adapter 已集成：wenda-adapter/kefu-adapter 调用上游时注入 traceparent
 
 | 验收项 | 状态 | 证据 |
 |--------|------|------|
-| TodoListMiddleware 显式传入 | ✅ | `main_agent.py` _build_middleware()：PLANNER_ENABLED 开关，根据 spike 报告显式传入 |
+| TodoListMiddleware 显式传入 | ✅ | `applications/agent_federation/agent/main_agent.py` _build_middleware()：PLANNER_ENABLED 开关，根据 spike 报告显式传入 |
 | RubricMiddleware 内置 Reflexion | ✅ | REFLEXION_ENABLED 开关，用 deepagents.middleware.RubricMiddleware（非自写） |
 | planner prompt 注入 | ✅ | `prompt/planner.yaml` + system_prompt 拼接 |
 | 不替换 create_deep_agent | ✅ | 扩展非重写，通过 middleware=[...] 参数传入 |
 | 失败降级 | ✅ | middleware 启用失败时降级为空列表，不影响现有栈 |
 
-### Phase 5：语义缓存 ✅
+### Phase 5：语义缓存 ✅（2026-10-25 按 ADR-0013 C 复核）
 
 | 验收项 | 状态 | 证据 |
 |--------|------|------|
-| L1 精确缓存 | ✅ | `agent/cache/layers.py` L1Cache：hash key→JSON，TTL 1h |
-| L2 语义缓存 | ✅ | L2Cache：HNSW+COSINE，相似度 >0.92，TTL 30min |
-| L3 检索结果缓存 | ✅ | L3Cache：TTL 10min |
-| NullCache 防穿透 | ✅ | NullCache：空值短 TTL |
+| L1 精确缓存 | ✅ | `agent_runtime.cache.valkey_backend.ValkeySemanticCache`：逻辑 key→JSON，TTL 由 `CACHE_L1_TTL` 控制 |
+| L2 语义缓存 | ✅ | 同一实现：Valkey Search HNSW+COSINE，按**余弦距离**阈值判定，查询恒带 tenant/scope/kb_version/gray/epoch 过滤 |
+| L3 检索结果缓存 | 已退役 | ADR-0013 C 取消 L3，统一为 L1 + L2 + 负缓存 |
+| 负缓存防穿透 | ✅ | `set_negative`：空答案短 TTL，并清同 key 正向条目 |
 | singleflight 防击穿 | ✅ | `agent/cache/singleflight.py`：asyncio.Lock per key |
-| 缓存 key 含 kb_versions + gray_pct | ✅ | `config.py`：hash(intent+query+kb_versions+tenant_id+gray_pct) |
-| Valkey 降级 no-op | ✅ | 无 valkey 包/连接失败时降级 |
-| 异步写入 | ✅ | `semantic_cache.set_async()`：fire-and-forget |
-| KB 更新自动失效 | ✅ | `invalidate_by_kb_version()` |
+| 缓存 key 含 kb_versions + gray_pct | ✅ | `agent_core.cache.build_cache_key`（联邦门面 `SemanticCache.build_key` 注入租户/KB/灰度） |
+| 后端不可达 | ✅ | fail-open（按未命中处理）+ `/health` 报 degraded；不再有「静默 no-op」的独立适配器 |
+| 异步写入 | ✅ | `ValKeySemanticCache` 有界写队列；队列满丢弃并计入 `dropped_writes` |
+| KB 更新自动失效 | ✅ | `invalidate_by_kb_version()` 递增 `tenant+scope` 命名空间 epoch，旧 key 不可达 |
 
 ### Phase 6：横切能力 ✅
 

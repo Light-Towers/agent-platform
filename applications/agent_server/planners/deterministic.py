@@ -29,6 +29,7 @@ from agent_server.agent.state import AgentState
 from agent_server.config import get_settings
 from agent_server.context import build_context_assembler, conversation_cap
 from agent_server.memory.longterm import extract_memory_facts, maybe_consolidate, recall, remember
+from agent_server.subagents.degradation import has_real_evidence
 
 logger = logging.getLogger(__name__)
 
@@ -36,8 +37,6 @@ _SYNTHESIZE_PROMPT = (
     "你是严谨的助手。只根据下面的证据回答问题；证据不足时明确说明，不要编造。\n"
     "回答用中文，简明扼要，必要时列出来源。"
 )
-
-_EMPTY_EVIDENCE_MARKERS = ("知识库未启用", "知识库中未检索到", "联网搜索未配置", "SQL_DSN 未配置")
 
 
 def _extract_code(text: str) -> str:
@@ -192,7 +191,7 @@ class DeterministicPlanner(Planner):
                     type="evidence",
                     payload={"node": plan.route, "count": len(evidence), "preview": evidence[0][:200] if evidence else ""},
                 )
-                has_real = evidence and not any(e.startswith(_EMPTY_EVIDENCE_MARKERS) for e in evidence)
+                has_real = has_real_evidence(evidence)  # 判据单一来源，见 subagents/degradation.py
                 if not has_real and plan.route != "direct" and iterations < settings.max_iterations:
                     iterations += 1
                     plan.iterations = iterations

@@ -1,0 +1,149 @@
+# 问数数据面的一次性初始化 Job（批次 2）：建两库、建角色、GRANT 只读、灌 fixture。
+#
+# 幂等可重跑：四步脚本各自 idempotent（IF NOT EXISTS / GRANT / TRUNCATE 重插），
+# 且角色口令每轮都从 DSN 同步一次。重跑不累积副作用——这是"数据面可重放"的含义，
+# 也是它敢在生产集群上第二次 apply 的前提。
+#
+# 前置（必须先有，本 Job 不代做）：
+#   1. 10-postgres.yaml 的 postgres 已 Ready；
+#   2. Secret `agent-platform-secrets` 里有三个键：DATABASE_URL（集群超级用户，
+#      用于建库建角色）、META_DB_DSN、DW_DB_DSN（服务将来连的两个 DSN，口令的唯一来源）；
+#   3. 数据文件已进 ConfigMap（内容取自仓根 deploy/data，别让清单内联一份副本）：
+#        kubectl -n agent-platform create configmap nl2sql-data \
+#          --from-file=deploy/data --dry-run=client -o yaml | kubectl apply -f -
+#      ⚠ 改过 deploy/data 里任何一个文件都要重跑这条命令再重跑本 Job，
+#      否则 Pod 里挂的还是旧的 sql——ConfigMap 更新不会自动进已挂载的文件内容以外的缓存路径，
+#      而 Job 是一次性 Pod，重跑就是新内容。
+#
+# 顺序（写进 README §6.3，两文件分开是因为依赖的客户端不同：本 Job 要 psql，
+# 36-nl2sql-meta-init-job.yaml 要 nl2sql 镜像里的 python 包，都不为了"一个 Job 搞定"
+# 往对方镜像里塞工具）：
+#   35（本文件，建库+建表+只读授权） → 36（元库 schema + 元知识） → 30（服务）
+#
+# 镜像选 pgvector/pgvector:pg16 而不是 postgres:16：与 10-postgres.yaml 同一镜像 ⇒
+# 客户端与服务端大版本天然对齐，且这个 tag 已经在节点上（postgres Pod 就在用它），
+# 无需外网拉取（三节点都没有 registry）。
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: nl2sql-dbsql
+  namespace: agent-platform
+  labels:
+    app: nl2sql-dbsql
+spec:
+  # 失败留一次重试，再失败就停（重跑 = kubectl delete job 后重新 apply，见 README）
+  backoffLimit: 2
+  # 完成 24h 后自动清理 Pod：Job 日志是取证材料（尤其 L1 负例那条读数），别当场消失
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app: nl2sql-dbsql
+    spec:
+      restartPolicy: Never
+      # 与 postgres 同一个节点：那里一定有 pgvector/pgvector:pg16 这个镜像
+      # （imagePullPolicy 是 IfNotPresent，漏节点的形态是 ErrImagePull 而不是拉一半超时）
+      nodeSelector:
+        kubernetes.io/hostname: <internal-host>   # 与 10-postgres.yaml 同值（kubectl get nodes 实测）
+      tolerations:
+        - key: node-role.kubernetes.io/control-plane
+          operator: Exists
+          effect: NoSchedule
+      containers:
+        - name: psql
+          image: pgvector/pgvector:pg16
+          imagePullPolicy: IfNotPresent
+          # 脚本只读挂载的 sql + 三个 DSN，不做任何交互式动作
+          command: ["/bin/bash", "-euo", "pipefail", "-c"]
+          args:
+            - |
+              # 连接目标只有一个参数位：`psql "<URL>" -d <db>` 不是“从 URL 取 host、从 -d 取库”，
+              # psql 16 实测会把整条 URL 当成用户名 ⇒ `FATAL: role "postgresql://…" does not exist`。
+              # 要连别的库就只换 URL 的库名段：${DATABASE_URL%/*}/<db> —— 凭据仍是 Secret 里那一条
+              # （口令单源），不在本文件拆 host/port/user、不另造第二份连接材料。
+              # 代价是不能带查询参数：`?sslmode=…` 会被这个字串操作静默丢掉（变成不加密也不报错），
+              # 所以先 fail-closed 拦住；不回显 DATABASE_URL，口令就在同一行里。
+              if [[ "$DATABASE_URL" == *\?* ]]; then
+                echo "FATAL: DATABASE_URL 含查询参数，本 Job 换库名时会静默丢掉连接参数；请去掉 ? 段后重跑" >&2
+                exit 1
+              fi
+              META_ADMIN_URL="${DATABASE_URL%/*}/nl2sql_meta"
+              DW_ADMIN_URL="${DATABASE_URL%/*}/nl2sql_dw"
+
+              echo "== 1/4 实例级：建角色 + 建两库（口令从 DSN 取，库名与清单固定值对账）"
+              psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$AP_DATA_DIR/nl2sql_dbsql.sql"
+
+              echo "== 2/4 元库：先以超级用户建 vector 扩展，再以元库角色收敛库内权限"
+              # 顺序不能反：pgvector 的 vector.control 没有 trusted = true（pg16 镜像实测），
+              # 建扩展只超级用户能干；nl2sql_meta 虽是 db owner 也建不动。
+              # 于是：超级用户建扩展（$META_ADMIN_URL）→ 元库角色 GRANT（$META_DB_DSN，
+              # 用 CURRENT_USER 让 Secret 里的 user 成为唯一真相）→ 该文件末尾会 fail-closed
+              # 校验扩展在位，不在位就 RAISE EXCEPTION 中止（退出码 3），不把权限问题留给迁移文件去报。
+              psql "$META_ADMIN_URL" -v ON_ERROR_STOP=1 -c "CREATE EXTENSION IF NOT EXISTS vector"
+              psql "$META_DB_DSN" -v ON_ERROR_STOP=1 -f "$AP_DATA_DIR/nl2sql_meta_grants.sql"
+
+              echo "== 3/4 dw 库：以 nl2sql_dw_owner 身份建表 + 灌 fixture"
+              # PGOPTIONS="-c role=..." 把会话身份切成那个 NOLOGIN 组角色：建出来的对象
+              # 属主就是 dw_owner，服务侧的 reader 永远只是被授权者——两种角色混不起来，
+              # 才谈得上"服务不建 DDL"（ADR-0011 Q10a）。超级用户才能 SET ROLE，这正是用 admin URL 的原因。
+              PGOPTIONS="-c role=nl2sql_dw_owner" \
+                psql "$DW_ADMIN_URL" -v ON_ERROR_STOP=1 -f "$AP_DATA_DIR/nl2sql_dw_fixture.sql"
+
+              echo "== 4/4 dw 库：L1 只读授权（GRANT SELECT only）+ 权限读数"
+              psql "$DW_ADMIN_URL" -v ON_ERROR_STOP=1 -f "$AP_DATA_DIR/nl2sql_dw_grants.sql"
+
+              echo "== 负例：dw_reader 写入必须被库侧拒绝（L1 的真判据，不看 GRANT 语句看行为）"
+              if psql "$DW_DB_DSN" -c "INSERT INTO users (name) VALUES ('_l1_probe')" >/dev/null 2>&1; then
+                echo "FATAL: nl2sql_dw_reader 竟然写得动——L1 没生效，别继续部署服务"
+                exit 1
+              fi
+              echo "OK: 写路径被库侧拒绝（L1 成立）"
+
+              echo "== 读数：两库存在、三角色到位、dw 行数与 fixture 一致"
+              psql "$DATABASE_URL" -c "SELECT datname FROM pg_database WHERE datname IN ('nl2sql_meta','nl2sql_dw') ORDER BY 1"
+              psql "$DATABASE_URL" -c "SELECT rolname, rolcanlogin FROM pg_roles WHERE rolname LIKE 'nl2sql%' ORDER BY 1"
+              psql "$DW_DB_DSN" -c "SELECT (SELECT count(*) FROM users) AS users, (SELECT count(*) FROM orders) AS orders, (SELECT sum(amount) FROM orders WHERE status='已支付') AS paid_amount"
+              # 列类型读数：deploy/data/nl2sql_meta_config.yaml 的 data_type 必须与这里逐字一致
+              # （库侧真值用例 test_golden_seed_real_pg.py 对的就是这张表）
+              psql "$DW_ADMIN_URL" -c "SELECT table_name, column_name, data_type FROM information_schema.columns WHERE table_schema='public' AND table_name IN ('users','orders') ORDER BY table_name, ordinal_position"
+          env:
+            # 建库建角色要超级用户：复用平台既有键，不新增密钥材料
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: agent-platform-secrets
+                  key: DATABASE_URL
+            # \getenv 读的就是这两个变量名（nl2sql_dbsql.sql 里断言过它们的形态与库名）
+            - name: META_DB_DSN
+              valueFrom:
+                secretKeyRef:
+                  name: agent-platform-secrets
+                  key: META_DB_DSN
+            - name: DW_DB_DSN
+              valueFrom:
+                secretKeyRef:
+                  name: agent-platform-secrets
+                  key: DW_DB_DSN
+            - name: AP_DATA_DIR
+              value: /mnt/nl2sql-data
+          volumeMounts:
+            - name: nl2sql-data
+              mountPath: /mnt/nl2sql-data
+              readOnly: true
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          securityContext:
+            # postgres 镜像里的系统用户是 uid 999（postgres）；psql 只读挂载文件，不需要写任何路径
+            runAsNonRoot: true
+            runAsUser: 999
+      volumes:
+        - name: nl2sql-data
+          # ConfigMap 而非 hostPath：内容来自仓根 deploy/data（单一真相源），
+          # 由上面的 create configmap --from-file 命令生成，清单里不内联第二份。
+          configMap:
+            name: nl2sql-data

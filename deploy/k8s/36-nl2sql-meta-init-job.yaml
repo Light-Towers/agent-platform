@@ -1,0 +1,154 @@
+# 元知识库初始化 Job（批次 2 第二步）：建 nl2sql_meta 的 schema + 灌元知识。
+#
+# 顺序（与 35 头部同一条契约，不可反）：
+#   35（建库/建角色/建表/只读授权） → 36（本文件：元库 schema + 元知识） → 30（服务）
+# 为什么与 35 分成两个文件：依赖的客户端不同——35 要 psql（postgres 镜像里有），
+# 本文件要 nl2sql 镜像里的 python 包（migrations/*.up.sql 与 MetricConfig schema 都住包里）。
+# 不为了"一个 Job 搞定"往对方镜像里塞工具。
+#
+# 前置：
+#   1. 35 Job 已 Complete（两库两角色到位、dw 表已灌、vector 扩展已在位）；
+#   2. ConfigMap nl2sql-data 已含 nl2sql_meta_config.yaml（命令见 35 头部，同一份 --from-file）；
+#   3. Secret agent-platform-secrets 有 META_DB_DSN；
+#   4. 00-config.yaml 已 apply 且含 NL2SQL_* 四键（向量口径的唯一真相源，与 30 共用）；
+#      缺键不静默：configMapKeyRef 指到不存在的键 ⇒ Pod 停在 ContainerCreating + 明确事件，
+#      而不是拿着空串去把元库列宽建成另一种口径；
+#   5. Pod 落到的节点上同时有 nl2sql-service:dev 镜像与 /opt/ap-models/hf-cache 权重缓存
+#      （三节点各自独立盘，先按 README §6 的前置检查逐节点跑过）。缺缓存 ⇒ hostPath
+#      type: Directory 让 Pod 直接 Pending（响的失败），缺镜像 ⇒ ErrImagePull，都不是静默错。
+#
+# 幂等：init_meta_schema 的 DDL 全 IF NOT EXISTS + 跨实例 advisory 锁，并对账 information_schema
+# （对不齐 return 2）；build_meta_knowledge 是 upsert，--prune 删源里已不存在的行
+# ⇒ 重跑不累积、配置删掉的指标不残留。
+#
+# ⚠ DEFAULT_TENANT 是这个 Job 最重要的一行 env（不是可有可无的装饰）：
+#   build 侧的作用域取 Settings.default_tenant（代码默认 ''），在线召回侧取
+#   resolve_tenant_context（SINGLE_TENANT=default ⇒ 'default'）。两侧缺省不同 ⇒
+#   不写这个 env 就灌出一批 tenant_id='' 的元知识，服务按 'default' 过滤，
+#   元知识恒空召回，而 /ready、/health、SQL 生成都照常"成功"（只是召不回东西）。
+#   这条坑写在 nl2sql_meta_config.yaml 头部，也必须在这里落地。
+#
+# 建模型不注 LANGFUSE_*：本镜像没装 [langfuse] extra，agent_core.llm 在本包不挂回调，
+# 注进去是死键（配了不生效比不配更难查）。观测走 OTel 一条路，见批次 3 的 30 清单。
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: nl2sql-meta-init
+  namespace: agent-platform
+  labels:
+    app: nl2sql-meta-init
+spec:
+  backoffLimit: 2
+  # 构建报告（inserted/updated/pruned 计数）是元知识是否真灌进去的唯一取证，留 24h
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app: nl2sql-meta-init
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: meta-init
+          # 批次 1 的第二个 tag（Dockerfile.nl2sql-service）；python:3.11-slim 里有 /bin/sh
+          image: nl2sql-service:dev
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "-eu", "-c"]
+          args:
+            - |
+              echo "== 1/3 元库 schema：幂等迁移 + information_schema 对账（不齐即退出码 2）"
+              python -u -m nl2sql_service.scripts.init_meta_schema --dsn "$META_DB_DSN"
+
+              echo "== 2/3 schema 状态读数（vector_dim 记账就是这里核对，列宽由它决定）"
+              python -u -m nl2sql_service.scripts.init_meta_schema --dsn "$META_DB_DSN" --status
+
+              echo "== 3/3 元知识构建（配置 = ConfigMap 里那份与 dw fixture 对齐的 MetricConfig）"
+              # --prune：源里删掉的表/列/指标同步删掉，否则旧行继续参与召回（"改了配置没生效"的形状）
+              python -u -m nl2sql_service.scripts.build_meta_knowledge \
+                --dsn "$META_DB_DSN" \
+                --config "$AP_DATA_DIR/nl2sql_meta_config.yaml" \
+                --prune
+          env:
+            # 只注入元库 DSN：init/build 两步都不读业务库，DW_DB_DSN 给了也用不上——
+            # 一次性 Job 也按最小权限装配，多一个凭据就多一处泄露面。
+            - name: META_DB_DSN
+              valueFrom:
+                secretKeyRef:
+                  name: agent-platform-secrets
+                  key: META_DB_DSN
+            - name: AP_DATA_DIR
+              value: /mnt/nl2sql-data
+            # ---- 作用域：与在线召回侧（SINGLE_TENANT=default / datasource_id=dw）逐字相同 ----
+            # DEFAULT_TENANT 留字面值是有意的：它要等于 30 的 SINGLE_TENANT（写入作用域 vs 断言作用域），
+            # 而不是等于本 Job 的任意一个旋钮；这条一致性由 tests/deploy/ 的两个用例钉住。
+            - name: DEFAULT_TENANT
+              value: "default"
+            # ---- 向量口径四键 + 数据源 id：引 00-config 的 NL2SQL_* 键（与 30 同一份值）----
+            # 不在这里另抄一份字面值：元库的 vector 列宽由本 Job 的 init_meta_schema 按
+            # VECTOR_DIM 定死，在线召回（30）读另一个维度就是"写进 512 的列、拿 1024 的向量去查"
+            # ——两边各自持有字面值时，只改一侧的 commit 在 review 里看上去完全自洽。
+            # settings.vector_dim 的代码默认 1536 是 OpenAI 口径；app_config.yaml 的
+            # embedding.vector_dim 也是 1024 那一路。env 显式压到 512 才与本地权重实际
+            # 输出维度一致——build 侧有维度校验（不等直接抛），但列宽已在 001 迁移里按
+            # vector_dim 定死，错了要重建库。
+            - name: DATASOURCE_ID
+              valueFrom:
+                configMapKeyRef:
+                  name: agent-platform-config
+                  key: NL2SQL_DATASOURCE_ID
+            - name: VECTOR_DIM
+              valueFrom:
+                configMapKeyRef:
+                  name: agent-platform-config
+                  key: NL2SQL_VECTOR_DIM
+            - name: EMBEDDING_BACKEND
+              valueFrom:
+                configMapKeyRef:
+                  name: agent-platform-config
+                  key: NL2SQL_EMBEDDING_BACKEND
+            - name: EMBEDDING_MODEL
+              valueFrom:
+                configMapKeyRef:
+                  name: agent-platform-config
+                  key: NL2SQL_EMBEDDING_MODEL
+            - name: TOKENIZER
+              valueFrom:
+                configMapKeyRef:
+                  name: agent-platform-config
+                  key: NL2SQL_TOKENIZER
+            # 离线加载：权重只在节点 hostPath 缓存里，禁止回连 huggingface.co（集群无外网）
+            # 路径与 20/30 三处字面值同值由门禁比对钉住（改一处即红）。
+            - name: HF_HOME
+              value: "/opt/ap-models/hf-cache"
+            - name: HF_HUB_OFFLINE
+              value: "1"
+            - name: TRANSFORMERS_OFFLINE
+              value: "1"
+          volumeMounts:
+            - name: nl2sql-data
+              mountPath: /mnt/nl2sql-data
+              readOnly: true
+            - name: ap-models
+              mountPath: /opt/ap-models
+              readOnly: true
+          resources:
+            requests:
+              # torch + 本地 bge 冷加载是本 Job 的全部画像：CPU 密集、~1Gi 常驻
+              cpu: 250m
+              memory: 1Gi
+            limits:
+              cpu: "1"
+              memory: 2Gi
+          securityContext:
+            # 镜像里的 appuser（Dockerfile.nl2sql-service: useradd -u 10001）；
+            # 与 35 的 999（postgres 镜像系统用户）不同——两个镜像的两个 uid，各自对各自。
+            runAsNonRoot: true
+            runAsUser: 10001
+      volumes:
+        - name: nl2sql-data
+          configMap:
+            name: nl2sql-data
+        - name: ap-models
+          # type: Directory：本机没这份权重缓存就调度失败，而不是起来后回连外网拉模型
+          hostPath:
+            path: /opt/ap-models
+            type: Directory

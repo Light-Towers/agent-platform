@@ -77,12 +77,18 @@ def test_singleflight_propagates_exception():
 def test_cache_key_consistency_with_semantic_cache():
     """P4：singleflight key 构造须与 SemanticCache 一致，否则去重失效。
 
-    验证 _build_cache_key 在相同参数下产出稳定 key，且含 kb_versions/tenant_id。
+    验证 build_key 在相同参数下产出稳定 key，且含 kb_versions/tenant_id。
     """
-    from agent.cache.layers import _build_cache_key
+    from agent.cache.config import reset_cache_context, set_kb_version
+    from agent.cache.semantic_cache import SemanticCache
 
-    key1 = _build_cache_key("sql", "查销售额", {"wenda": "v1"}, "t1", 0.0)
-    key2 = _build_cache_key("sql", "查销售额", {"wenda": "v1"}, "t1", 0.0)
-    assert key1 == key2  # 同参数稳定
-    key3 = _build_cache_key("sql", "查销售额", {"wenda": "v2"}, "t1", 0.0)
-    assert key3 != key1  # KB 版本变化 → 不同 key（旧缓存自动失效语义）
+    reset_cache_context()
+    try:
+        key1 = SemanticCache.build_key("sql", "查销售额")
+        key2 = SemanticCache.build_key("sql", "查销售额")
+        assert key1 == key2  # 同参数稳定
+        set_kb_version("wenda", "v2")
+        key3 = SemanticCache.build_key("sql", "查销售额")
+        assert key3 != key1  # KB 版本变化 → 不同 key（旧缓存自动失效语义）
+    finally:
+        reset_cache_context()

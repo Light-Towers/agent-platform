@@ -22,6 +22,13 @@
 | 问数环节 | ✅ **已接**：清单补 `SQL_DSN`（复用 `agent-platform-secrets/DATABASE_URL` 同一个键）⇒ `/health` 报 `sql_backend=postgres`；`/sql/train` 喂真实 DDL+说明后，"统计每个文档入库多少块"路由到 `sql`，执行的 SQL 返回 35/30/28，**与库里真值逐行对账一致**。MySQL 那颗雷不存在（本版用的就是 postgres） |
 | 只读挂载离线加载权重 | ✅ **证毕**（原先的唯一未验证假设）：`uid=10001` + `:ro` bind + `HF_HUB_OFFLINE=1` 下加载成功 `dim=512`，`readOnly: true` 保留。读数与那条良性 `Permission denied` 见 §6.1 |
 
+> ⚠️ **本文里所有 `SQL_DSN` / `sql_backend` 的描述都是 2026-10-28 之前的史实**（上表「问数环节」行、§4 底线 4、
+> §6.1 第 8 条、§8 第 5 条、§9 的 ②/③）。当时平台确实自己拿 `SQL_DSN` 连库执行 SQL，那根灯是真读数；Stage ③ 把执行权
+> 交给 nl2sql-service 后灯没跟着搬家，`settings.sql_dsn` 指的是**平台库** ⇒ 2026-10-28 批次 5 把字段与灯一并
+> 退役（现由 nl2sql-service 上报它自己的 dw 方言）。本文作为历史快照**不改写**，但**不许照它去现网注 `SQL_DSN`**
+> ——现在注回来会被 env 死键门禁判红。现行机制与上线判据：`docs/adr/0011-two-text2sql-paths-convergence.md` §7.3 +
+> `docs/operations/nl2sql-release-checklist.md`。
+
 **线上 rev 与仓库 rev 的差集必须现查，别在本文里钉 HEAD 短哈希**（我 2026-10-12 就把自己写的
 `7d00ab3` 熬过期了：写完那句又提交了一次文档）。集群跑 `db1a8b8`，判"差的是什么"用命令而不是记忆：
 
@@ -291,7 +298,7 @@ done   # 期望：apply=线上现状(10) / create=清单真值(21)
    (a) **临场对策照旧有效**——问句带"文档/知识库/什么是/解释/原理"任一特征词，能让兜底词表在模型侧异常时也判到 `rag`；
    (b) 两个未闭合的相邻缺陷见 §9 ⑮（清单广告了本部署未配置的 `search`）与 ⑰（换模型/换提供方仍需 R2 能力灯，否则静默回退）。
 9. **抽验①有四个回放源会掩盖真实结果**（2026-10-13 由 2 个补全为 4 个）：`semantic_cache`（相似度 0.05 内直接回放）、
-   `memories`（`graph.py:192` 每轮把 `Q:…\nA:…` 写进记忆并被召回）、`episodic_memories`/`procedural_memories`（本次恒 0，仍列入清单），
+   `memories`（`applications/agent_server/agent/graph.py:192` 每轮把 `Q:…\nA:…` 写进记忆并被召回；`planners/deterministic.py:240` 有同形写入，`main.py` 同时装配 `build_graph` 与 planner，实际走哪条取决于运行配置）、`episodic_memories`/`procedural_memories`（本次恒 0，仍列入清单），
    以及**第三类：LangGraph 会话状态 `checkpoints`/`checkpoint_blobs`/`checkpoint_writes`**——`thread_id` 恒为
    `tenant-default`，同一会话的历史会随 checkpoint 回来。2026-10-13 的 Q4 就是 `evidence count=0` 却答对了"4 份"，
    来源正是这一路（前两个当天已清）。而 2026-10-12 的 r19 只清了缓存，于是看到"删了文档回答却没变"，
@@ -506,9 +513,9 @@ ssh root@<internal-ip> 'cd /opt/agent-platform && git fetch /tmp/ap-rollback.bun
 需求方自己测出来的疑问是"只能一轮回答？没用到 multiagent / 子 agent？"。**答案是：现网跑的是单 planner，
 但"只有一轮"这个说法本身不准。** 三条可读的事实：
 
-1. **现网形状**：`planner=deterministic`（代码默认 `config.py:109`；`deploy/` 全目录 grep `PLANNER` **零命中**
+1. **现网形状**：`planner=deterministic`（代码默认 `config.py:107`（原记 `:109` 已漂移）；`deploy/` 全目录 grep `PLANNER` **零命中**
    ⇒ 清单根本没注入这一项）。形状 = 一次路由 → 一次能力调用 → 一次模型合成。
-2. **不是"只有一轮"**：证据为空时会重规划，上限 `max_iterations=2`（`config.py:67`、`planners/deterministic.py:196`）。
+2. **不是"只有一轮"**：证据为空时会重规划，上限 `max_iterations=2`（`config.py:65`（原记 `:67` 已漂移）、`planners/deterministic.py:196`）。
    **屏上实证**：10-14 那次浏览器问答的时间线里出现**两条一模一样的** `推演前判: search → search evidence_insufficient`
    与两次 `命中 1 条依据` ⇒ 那就是这个 2 跳循环（每跳调同一个能力，没有子 agent）。
 3. **多 agent 在本仓库有三套，都不在演示链路上**：

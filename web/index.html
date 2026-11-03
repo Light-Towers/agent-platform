@@ -1,0 +1,26 @@
+<!doctype html>
+<!-- ==========================================================================
+ * index.html — Vite 入口壳（构建后由 agent_server 挂在 /ui 下）
+ * 三条刻意的"不做"，都是已定案而不是遗漏：
+ *   ① 不写内联脚本，也不写 SSR 预置主题。主题偏好要在挂载前落到 <html>，但内联脚本
+ *      会让这份壳变成"页面自己带逻辑"，与 §1.5 定的「无内联脚本、无 SSR」冲突；
+ *      改由 main.ts 在 createApp 之前同步写属性 —— 代价是首帧可能闪一次主题，
+ *      这与"壳内不藏逻辑"之间选了后者（视觉件 §1.5）。
+ *   ② 不在这里放 no-store 的 meta。§2.3 要的 `Cache-Control: no-store` 是**响应头**，
+ *      由服务端 NoStoreStaticFiles 覆写（工单件 §9.1 第 3 条）；meta 等价物既不被
+ *      所有浏览器遵守，也会让"谁负责这个头"变得看不出来。
+ *   ③ `<html>` 上不带 data-theme 默认值。视觉件 §1.5 的主题机制是「:root = light，
+ *      系统深色经 prefers-color-scheme 生效，手动切换才写 data-theme」——默认写死
+ *      一个值会让"跟随系统"这条档在物理上不存在。
+ * ========================================================================-->
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Agent Platform 控制台</title>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

@@ -1,0 +1,37 @@
+{
+  "name": "agent-platform-web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "agent_server 的托管前端（挂在 /ui，产物进镜像）。工程约束见 docs/plans/plan-web-frontend-minimal-core-2026-10-29.md 与 web/README.md。",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "packageManager": "pnpm@10.33.0",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "typecheck": "vue-tsc --noEmit",
+    "lint": "eslint .",
+    "check:tokens": "node scripts/check-tokens.mjs",
+    "check:events": "node scripts/check-events.mjs",
+    "verify:sse": "node scripts/verify-sse.mjs"
+  },
+  "dependencies": {
+    "eventsource-parser": "4.1.3",
+    "vue": "3.5.44"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@typescript-eslint/parser": "8.72.1",
+    "@vitejs/plugin-vue": "6.0.10",
+    "eslint": "10.14.0",
+    "eslint-plugin-vue": "10.12.0",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.72.1",
+    "vite": "8.3.5",
+    "vue-eslint-parser": "10.4.1",
+    "vue-tsc": "3.3.14"
+  }
+}

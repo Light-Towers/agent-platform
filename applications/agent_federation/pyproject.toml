@@ -21,7 +21,7 @@ dependencies = [
     "langchain-openai>=1.4",
     "langgraph>=1.2.10,<2",
     "langgraph-checkpoint>=4.2.0",
-    "fastapi>=0.129",
+    "fastapi>=0.159.1",
     "uvicorn>=0.41",
     "python-dotenv>=1.2",
     "pyyaml>=6.0",
@@ -42,7 +42,7 @@ dependencies = [
 
 [project.optional-dependencies]
 # 以下为代码内 try/except ImportError 软降级的「可选能力」，按需安装：
-# pip install -e "./agent_federation[observability,cache,docs,excel]"
+# pip install -e "./agent_federation[observability,docs,excel]"
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.24",
@@ -51,9 +51,7 @@ dev = [
 # 链路追踪（langfuse_adapter 软降级，无 SDK 时 no-op）
 # langchain 是 langfuse.langchain 的导入前置（只用于读 __version__），缺它则软降级
 # 成"配了但不报"。与 agent-runtime/exhibition 的 [langfuse] 同下界，由 lint L-4 守。
-observability = ["langfuse>=4.0.0", "langchain>=1.4.6,<2"]  # 2026-10-19：#98 处置——L-4 要求三处同下界（agent-runtime/exhibition 经 dependabot 已至 >=1.4.6，本处原 >=1 是离群值）；归一到当前解析版本
-# 语义缓存（layers 软降级，无 valkey 时 no-op）
-cache = ["valkey>=0.1.0"]
+observability = ["langfuse>=5.0.4", "langchain>=1.4.6,<2"]  # 2026-10-19：#98 处置——L-4 要求三处同下界（agent-runtime/exhibition 经 dependabot 已至 >=1.4.6，本处原 >=1 是离群值）；归一到当前解析版本
 # Markdown→PDF 文档生成（word_converter 软降级）
 docs = ["markdown>=3.10.2", "weasyprint>=70.0", "pypdf>=6.21.2"]
 # Excel/Word 文件读取（upload_file_read_tool 软降级）
@@ -87,8 +85,6 @@ ignore = ["E402", "E731"]
 # BLE001/S110 已上方 select 启用；进度见 docs/plans/plan-p0-4-blind-except-ratchet-2026-09-24.md。
 [tool.ruff.lint.per-file-ignores]
 "agent/async_subagents.py" = ["BLE001"]
-"agent/cache/layers.py" = ["BLE001"]
-"agent/cache/semantic_cache.py" = ["BLE001"]
 "agent/checkpoint_cleaner.py" = ["BLE001"]
 "agent/circuit_breaker.py" = ["BLE001"]
 "agent/config.py" = ["BLE001"]

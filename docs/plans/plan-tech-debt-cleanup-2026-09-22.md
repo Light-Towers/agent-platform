@@ -1,6 +1,6 @@
 # Plan：全局技术债务治理（2026-09-22 扫描成果）
 
-> 状态：2026-09-22 制定。**2026-10-15 对码核实并订正**：原状态行与复选框自相矛盾（T2.4 全 `[x]` 却标「待实施」、T2.3 全 `[ ]` 却标「已完成」）。逐条对码结论——**绝大部分已落地**（P0/P1、T2.1、T2.4、T3.1 余者显式「跳过」并注明原因、T3.2 的 `check_doc_sync.py` 已常驻 CI、三方审核补充 1/2/3/5/6 均已修，补充 7/T1.7 于**本批 2026-10-15 落地**）；**真正仍未做仅 3 项**：① T2.2 已**分项处置**（详见该节）——item5（`config.py` 三处改 `dataclasses.replace`）**本批落地**、item6（`agent.py` if-elif→dict 派发）核实后**判定不做**（if-elif 编码真实 body/no-body 区别，dict 派发反不清晰）、items1-4（4 处 ~200 行大函数拆分）**缓做**（纯风格高风险、行号已漂移、与本 plan T3.1 跳过同类项矛盾 ⇒ 需独立方案 + 分支 + 逐函数补测）；② T2.3（依赖配置统一）已**重新对码 + 分项处置**（详见该节）——item5（exhibition `.env.example` 补 10 个 `EXHIBITION_AGENT_*` Settings 变量，1:1 取自 config.py 零杜撰）+ item6（kefu 悬空引用 repoint 到 `agent-core/README.md`「环境变量清单」，不新建重复清单）**本批落地**，items1/7 早已落地、items2/4/8 因 `dialogue-framework`/`zhanggui-zhiku`/`wenda` 三包已消失而 moot（意图已全仓满足），仅 item3 的 fastapi 根下界 `>=0.115` 低于旧目标 `0.129`——仅抬下界无驱动故**标注不盲改**；③ 补充 4（agentic bridge opt-in 默认开还是仅补测试）属**待拍板**设计决策。逐条证据见文末「## 2026-10-15 对码核实」。
+> 状态：2026-09-22 制定。**2026-10-15 对码核实并订正**：原状态行与复选框自相矛盾（T2.4 全 `[x]` 却标「待实施」、T2.3 全 `[ ]` 却标「已完成」）。逐条对码结论——**绝大部分已落地**（P0/P1、T2.1、T2.4、T3.1 余者显式「跳过」并注明原因、T3.2 的 `scripts/check_doc_sync.py` 已常驻 CI、三方审核补充 1/2/3/5/6 均已修，补充 7/T1.7 于**本批 2026-10-15 落地**）；**真正仍未做仅 3 项**：① T2.2 已**分项处置**（详见该节）——item5（`config.py` 三处改 `dataclasses.replace`）**本批落地**、item6（`agent.py` if-elif→dict 派发）核实后**判定不做**（if-elif 编码真实 body/no-body 区别，dict 派发反不清晰）、items1-4（4 处 ~200 行大函数拆分）**缓做**（纯风格高风险、行号已漂移、与本 plan T3.1 跳过同类项矛盾 ⇒ 需独立方案 + 分支 + 逐函数补测）；② T2.3（依赖配置统一）已**重新对码 + 分项处置**（详见该节）——item5（exhibition `.env.example` 补 10 个 `EXHIBITION_AGENT_*` Settings 变量，1:1 取自 config.py 零杜撰）+ item6（kefu 悬空引用 repoint 到 `agent-core/README.md`「环境变量清单」，不新建重复清单）**本批落地**，items1/7 早已落地、items2/4/8 因 `dialogue-framework`/`zhanggui-zhiku`/`wenda` 三包已消失而 moot（意图已全仓满足），仅 item3 的 fastapi 根下界 `>=0.115` 低于旧目标 `0.129`——仅抬下界无驱动故**标注不盲改**；③ 补充 4（agentic bridge opt-in 默认开还是仅补测试）属**待拍板**设计决策。逐条证据见文末「## 2026-10-15 对码核实」。
 > 来源：6 维度并行扫描（代码质量 / 架构 / 依赖配置 / 测试覆盖 / 文档注释 / 重构遗留）
 > 范围：当前工作区快照（存在并发写入，实施前须冻结基线）
 > 总计：发现 97 项，去重后约 80 项实质债务，分 4 优先级 13 批次任务
@@ -125,7 +125,7 @@
 
 ### T1.2 修 AgenticPlanner 沙箱可达性 gap（架构 High，已知 gap）
 
-**问题**：`AgenticPlanner.execute()` 直接调 executor 未经 `runtime.delegate`，绕过 skill_guard/circuit_breaker/trajectory 治理；`agentic_bridge.py` 桥已建但联邦侧未接入；`code_execution` 无角色映射。
+**问题**：`AgenticPlanner.execute()` 直接调 executor 未经 `runtime.delegate`，绕过 skill_guard/circuit_breaker/trajectory 治理；`packages/agent-runtime/agent_runtime/planner/agentic_bridge.py` 桥已建但联邦侧未接入；`code_execution` 无角色映射。
 
 **改动**（与 Plan-F 收敛路径一致，记忆 `project_agentic-planner-sandbox-routing-gap` / `project_f-s1-02-04-blocked-on-plan-f`）：
 - [ ] 联邦侧 deep_agent 接入 `AgenticRuntimeBridge`：tool discovery 用 `bridge.discover`，tool call 用 `bridge.call_tool`
@@ -164,7 +164,7 @@
 - [ ] `applications/exhibition-agent/exhibition_agent/skill_loader/llm_client.py`：改为薄壳注册 `OpenAICompatibleProvider` 到 `agent_core.llm.registry`，经 `get_llm_client()` 取实例
 - [ ] `applications/wenda-data-agent/wenda_data_agent/agent/llm.py`：同上，移除直接 `ChatOpenAI` 调用
 - [ ] `ApiReranker` 收口到 `agent_core`（与 `SiliconFlowEmbedder` 同位置）：`zhanggui-zhiku/lm/siliconflow_client.py:143-217` + `agent_server/rag/rerank.py:25-103` 经内核调用 `agent_core.resilience.retry_async`
-- [ ] `agent_core/config.py` 新增统一 `env_bool/env_int/env_float`，替换 4 处重复定义（`agent_federation/agent/cache/config.py:12` / `planners/__init__.py:22` / `zhanggui-zhiku/core/config.py:26` / `agent_core/tracing.py:171`）+ `main_agent.py` 12 处 inline
+- [ ] `agent_core/config.py` 新增统一 `env_bool/env_int/env_float`，替换 4 处重复定义（`agent_federation/agent/cache/config.py:12` / `planners/__init__.py:22` / `zhanggui-zhiku/core/config.py:26` / `agent_core/tracing.py:171`）+ `applications/agent_federation/agent/main_agent.py` 12 处 inline
 - [ ] `shared-schemas` 新增统一 `sse_pack(event, data)` 契约函数，替换 3 处不一致实现（`agent_server/api/routes.py:267` / `zhanggui-zhiku/utils/sse_utils.py:42` / `scripts/opencode_gateway.py:66`）
 
 **验收**：
@@ -204,7 +204,7 @@
 ### T2.1 补 Medium 8 项测试缺失 + 覆盖不足
 
 **改动**：
-- [ ] `packages/agent-runtime/tests/test_cache.py`：覆盖 cache_lookup 命中/未命中/threshold 边界 + cache_store
+- [x] `packages/agent-runtime/tests/test_cache.py`（本批 ADR-0013 退役件，工作区已删）：覆盖 cache_lookup 命中/未命中/threshold 边界 + cache_store。**2026-10-26 核销**：该文件与它测的 PG 缓存轨已随 ADR-0013 C 一并退役（`agent_runtime/cache.py`、`tests/test_cache.py` 均已删），本条的覆盖对象不复存在，**不是漏做**。等价覆盖落在 Valkey 三套件：`packages/agent-runtime/tests/test_valkey_backend_wire.py`（32 条，含 threshold/距离与线格式断言）、`test_cache_config.py`（32 条，含阈值边界与静默失效值）、`test_cache_contract.py`（18 条，真 Valkey；本机无容器运行时 ⇒ 收集为 0，要到 CI 才取得第一次读数）。原"threshold 边界"这一项在本批被加强为上界判据（余弦距离 0..2，见 ADR-0013 §9「配置面补上界」条与 §11 第 26–27 行反证）。
 - [ ] `packages/agent-runtime/tests/test_tracing.py`：覆盖 Langfuse 三态降级（凭据空/全/导入失败）
 - [ ] `applications/agent_server/tests/test_schema_store.py`：覆盖 schema_store 存取/方言/错误分支
 - [ ] `applications/agent_server/tests/test_embed_rerank.py`：覆盖 embed/rerank 真实调用 + 错误降级（非 monkeypatch）
@@ -224,7 +224,7 @@
 > **2026-10-15 分项处置**（不整节翻勾——6 项性质不同，逐项判定，避免"plan 列了就改"）：
 
 **改动**：
-- [ ] 拆分 `applications/agent_server/api/routes.py:65 query`（200 行）为 admission/coordination/cache/stream 各抽独立函数 — **缓做**：纯风格大函数拆分、回归风险高、无功能收益；且**行号引用已漂移**（`query` 现在 `api/query_router.py`，非 `routes.py:65`）；与本 plan T3.1 把同类「`routes.py` 按业务域拆分」判为「跳过：大规模重构」自相矛盾 ⇒ 如需做应独立成方案 + 独立分支 + 逐函数补测后再拆
+- [ ] 拆分 `applications/agent_server/api/routes.py:65 query`（200 行）为 admission/coordination/cache/stream 各抽独立函数 — **缓做**：纯风格大函数拆分、回归风险高、无功能收益；且**行号引用已漂移**（`query` 现在 `api/query_router.py`，非 `routes.py:65`）；与本 plan T3.1 把同类「`applications/agent_server/api/routes.py` 按业务域拆分」判为「跳过：大规模重构」自相矛盾 ⇒ 如需做应独立成方案 + 独立分支 + 逐函数补测后再拆
 - [ ] 拆分 `applications/agent_server/agent/graph.py:46 build_graph`（200 行） — **缓做**：同上（纯风格、高风险、需先对码确认函数仍在该位置）
 - [ ] 拆分 `applications/agent_server/main.py:106 lifespan`（183 行）用 lifespan context manager 组合 — **缓做**：同上；且 lifespan 本 session 刚被 human_task 装配改过，再叠大重构会混淆改动面
 - [ ] 拆分 `agent_federation/agent/main_agent.py:543-652 _execute_agent_core`（122 行/嵌套 9）为 `_prepare_session`/`_inject_context`/`_consume_stream`/`_guard_output` — **缓做**：同上（跨应用、嵌套深、拆分需逐段补测）
@@ -255,7 +255,7 @@
 
 **验收**（按实际处置范围）：
 - [~] `uv sync --all-packages --extra dev` 成功 — **本批未跑**：本轮不部署、不改任何依赖版本约束（仅动 `.env.example` 模板 + 文档），故不触发依赖重解析；item3 的 fastapi 下界明确标注不盲改，无 sync 影响
-- [x] `make lint` 全绿 — `.env.example`/`.md` 改动不涉 lint；本批 `ruff check .` 全绿（见 T2.2）、`check_doc_sync.py` ✅ 0 警告
+- [x] `make lint` 全绿 — `.env.example`/`.md` 改动不涉 lint；本批 `ruff check .` 全绿（见 T2.2）、`scripts/check_doc_sync.py` ✅ 0 警告
 - [x] 各包 ruff/pytest 配置一致 — item4（ruff `I`）/item8（pytest importlib）已对现存包逐项确认一致
 
 ---
@@ -363,28 +363,28 @@
 ## 三方审核核验（2026-09-22）
 
 > 来源：外部审核报告针对 `bf1f44c..11d313a`（8 个技术债清理提交）vs 本 plan 的一致性核验
-> 方法：逐条实跑取证（非转述），含 `lint_architecture.py` 实跑、`AgenticPlanner().to_skill()` 实跑、`ls`/`grep` 逐项验证
+> 方法：逐条实跑取证（非转述），含 `scripts/lint_architecture.py` 实跑、`AgenticPlanner().to_skill()` 实跑、`ls`/`grep` 逐项验证
 > 结论：16 条中 **14 条完全属实、1 条大部分属实、1 项数字指控不实**；补充 7 项遗漏
 
 ### 核验结论表
 
 | # | 报告条目 | 结论 | 实跑证据 |
 |---|---------|------|---------|
-| C1 | lint P4-2 exit 1 | ✅ 属实 | `lint_architecture.py` exit=1，`agentic.py:188` docstring 含 `registry.execute("agentic", ...)`，该文件不在白名单 |
-| C2 | mcp 测试无守卫 | ✅ 属实 | `pyproject.toml:19` mcp 在 optional；`test_mcp_client_real.py:39` 函数内 import 无 `importorskip` |
-| C3 | /api/task thread_id 丢弃 | ✅ 属实 | `query.py:18` session_id 无 alias；`auth.py:29` 未开 API_KEY 时返回 `"dev-default-thread"` |
-| C4 | execute_python_code 无条件挂载 + 无 kill | ✅ 属实 | `main_agent.py:267` 无条件挂载；`sandbox.py:152,184` 两处 wait_for 无 proc.kill；ROLE_TOOLS 无 code 映射 |
+| C1 | lint P4-2 exit 1 | ✅ 属实 | `scripts/lint_architecture.py` exit=1，`agentic.py:188` docstring 含 `registry.execute("agentic", ...)`，该文件不在白名单 |
+| C2 | mcp 测试无守卫 | ✅ 属实 | `pyproject.toml:19` mcp 在 optional；`packages/agent-runtime/tests/test_mcp_client_real.py:39` 函数内 import 无 `importorskip` |
+| C3 | /api/task thread_id 丢弃 | ✅ 属实 | `packages/shared-schemas/shared_schemas/query.py:18` session_id 无 alias；`auth.py:29` 未开 API_KEY 时返回 `"dev-default-thread"` |
+| C4 | execute_python_code 无条件挂载 + 无 kill | ✅ 属实 | `applications/agent_federation/agent/main_agent.py:267` 无条件挂载；`sandbox.py:152,184` 两处 wait_for 无 proc.kill；ROLE_TOOLS 无 code 映射 |
 | C5 | T0.3/T0.4 零交付 | ✅ 属实 | conftest 仍 ignore；shared-schemas 无 tests；Makefile 仍 8 session |
 | W1 | 9 目录未真删 | ✅ 属实 | 9 个根目录全部 ls 命中，仅 .gitignore 兜底 |
-| W2 | plan 自称 ✅ 但未落地 | ✅ 属实 | `plan-structural-debt-cleanup.md:55` 标 ✅ 但 241 仍在 exhibition README；sandbox.py:10 新写 126:2375 |
+| W2 | plan 自称 ✅ 但未落地 | ✅ 属实 | `docs/plans/plan-structural-debt-cleanup.md:55` 标 ✅ 但 241 仍在 exhibition README；sandbox.py:10 新写 126:2375 |
 | W3 | T1.3/T2.1 测试缺失 | ✅ 属实 | 无 test_otel/revert/cache/tracing.py |
 | W4 | T1.4 代码重复未收敛 | ✅ 属实 | ApiReranker 双份；wenda 仍 ChatOpenAI；shared_schemas 无 sse_pack |
-| W5 | mcp stack 泄漏 | ✅ 属实 | `mcp_client.py:102` except 未 aclose stack；`_connect_stdio:115-118` 局部 stack 泄漏 |
+| W5 | mcp stack 泄漏 | ✅ 属实 | `packages/agent-runtime/agent_runtime/mcp_client.py:102` except 未 aclose stack；`_connect_stdio:115-118` 局部 stack 泄漏 |
 | W6 | to_skill DEBUG 吞 | ✅ 属实 | 实跑 to_skill() → RuntimeError；`main.py:240` logger.debug 静默；测试全走显式注入绕开发现路径 |
 | W7 | T1.1 构建配置未修 | ✅ 属实 | requirements.txt 旧路径；zhanggui Dockerfile 旧路径 + CMD app.main:app |
 | S1 | 文档数字漂移 | ⚠️ 大部分属实，1 项不实 | "三套件"/"24 tests"/"六型" 属实；"AGENTS.md 7 应用实为 6" 不实（见下） |
-| S2 | 测试全局污染 | ✅ 属实 | `test_agentic_skill.py` 7 处覆盖全局 `_executor_factory` 无还原 |
-| S3 | 恒真断言 | ✅ 属实 | `test_observability.py:73` 恒真；:97-98 幂等只断言非空 |
+| S2 | 测试全局污染 | ✅ 属实 | `packages/agent-runtime/tests/test_agentic_skill.py` 7 处覆盖全局 `_executor_factory` 无还原 |
+| S3 | 恒真断言 | ✅ 属实 | `applications/exhibition-agent/tests/test_observability.py:73` 恒真；:97-98 幂等只断言非空 |
 | S4 | plan 未入库 | ✅ 属实 | `git status` 显示 `?? plan-tech-debt-cleanup-2026-09-22.md` |
 
 ### 不实指控澄清
@@ -421,12 +421,12 @@
 - **问题**：报告 S1 提了 ARCHITECTURE "六型"，但没提 AGENTS.md 与之矛盾。**两份顶层文档对 Skill 型数口径相反**，读者不知信哪个。
 - **任务影响**：T1.5 修复须统一两文档口径（建议"四型 SkillKind + MCP/Sandbox 特化注册"）。
 
-#### 补充 6：`code_execution_tool.py:21` 模块级 SandboxExecutor 初始化副作用（新增 T1.6）
+#### 补充 6：`applications/agent_federation/tools/code_execution_tool.py:21` 模块级 SandboxExecutor 初始化副作用（新增 T1.6）
 - **位置**：`applications/agent_federation/tools/code_execution_tool.py:21` `_sandbox = SandboxExecutor()`
 - **问题**：模块 import 时就执行 Docker 可用性探测，降级决定在 import 期固化，后续 Docker 可用也无法切换。任何 import 该模块的代码都触发 Docker 探测副作用。
 - **任务影响**：新增 T1.6：改为懒初始化（首次调用时检测后端），或在 SandboxExecutor 构造时不做探测。
 
-#### 补充 7：`test_agentic_skill.py:91` 在白名单内演示被禁模式（新增 T1.7）
+#### 补充 7：`packages/agent-runtime/tests/test_agentic_skill.py:91` 在白名单内演示被禁模式（新增 T1.7）
 - **位置**：`packages/agent-runtime/tests/test_agentic_skill.py:91` `result = await reg.execute("agentic", ...)`
 - **问题**：该行正是 lint P4-2 禁止的 `registry.execute()` 模式，但因白名单 :36 含 `packages/agent-runtime/tests/` 而豁免。**测试演示的正是契约禁止的用法**，且该测试是 to_skill() 收敛的唯一"行为验证"，却绕开了真实发现路径（W6）。白名单让测试绿但掩盖了发现路径的 RuntimeError。
 - **任务影响**：新增 T1.7：补一个走真实 entry_points 发现路径的集成测试（不显式注入 factory），验证 to_skill() 在真实安装下的行为；现有测试的 `reg.execute` 调用加注释说明"仅测试内豁免，生产须走 delegate"。
@@ -439,7 +439,7 @@
 | C3 修复 | 扩展：同时统一 `/api/upload` thread_id 处理（补充3） | ✅已修（upload 与 task 同走 `_resolve_thread_id_or_401`） |
 | T1.5 | 扩展：统一 ARCHITECTURE.md 与 AGENTS.md Skill 型口径（补充5） | ✅已修（ARCHITECTURE.md:39 四型口径） |
 | **T1.6 新增** | code_execution_tool.py 懒初始化（补充6） | ✅已修（`_get_sandbox()` 懒初始化，T1.2a/T1.2b） |
-| **T1.7 新增** | to_skill() 真实发现路径集成测试（补充7） | ✅**本批落地**（`test_agentic_skill_discovery.py` 2 条，见文末对码核实节） |
+| **T1.7 新增** | to_skill() 真实发现路径集成测试（补充7） | ✅**本批落地**（`packages/agent-runtime/tests/test_agentic_skill_discovery.py` 2 条，见文末对码核实节） |
 
 ---
 
@@ -492,12 +492,12 @@
 - **做了什么**：新增 `packages/agent-runtime/tests/test_agentic_skill_discovery.py`（2 条），走**真实 entry_points 发现路径**（不显式注入 factory）：
   - 正向 `test_to_skill_discovers_executor_via_entry_points_without_explicit_registration`：清掉模块级 `_executor_factory` 后，`AgenticPlanner().to_skill()` 经 `importlib.metadata.entry_points(group="agent_runtime.agentic_executor")` 发现 `agent_federation/pyproject.toml:68-69` 注册的工厂，产出合法 `SkillKind.AGENT`，并断言发现后 `_executor_factory` 被写回（证明真走了 EP 路径而非显式注入）。EP 不可发现属**环境条件**（未装 `--extra agentic`）⇒ skip（同仓 requires_pg/ZHIKU_INTEGRATION 守卫范式）。本机实跑 **PASSED（非 skip）**：EP 可发现。
   - 负向 `test_discover_raises_runtimeerror_when_no_executor_available`：把 `entry_points` 打成空 ⇒ 断言 `_discover_executor_factory()` **抛 RuntimeError** 且消息含可操作解锁动作（装 extra / 显式注册）。**确定性**、不依赖真实安装，锁住 W6「发现失败必须 fail-loud，绝不静默返回」在发现层的契约。
-- **为什么有价值**：此前 `test_agentic_skill.py` 7 条用例**全部** `register_agentic_executor_factory(lambda: fake)` 显式注入 ⇒ `_discover_executor_factory` 第一分支短路，**从不走 entry_points**；而生产 `agent_server/main.py:413` 恰恰依赖 EP 发现。显式注入的测试全绿却掩盖了「真实安装下发现路径是否通」——本批补上这把锁，EP 注册若被破坏（pyproject 改动/包未装）正向用例即红。
-- **顺带**：给 `test_agentic_skill.py:98` 的 `reg.execute("agentic", ...)`（lint P4-2 白名单豁免）补注释，说明「仅测试内豁免、生产须走 delegate」，并指向本发现路径测试。
-- **实跑**：`ruff check` 该 2 文件 rc=0；`pytest packages/agent-runtime/tests` **638 passed**（636→638，+2），既有用例零删改（`test_agentic_skill.py` 仅加注释，7 条断言逐字未动）。
+- **为什么有价值**：此前 `packages/agent-runtime/tests/test_agentic_skill.py` 7 条用例**全部** `register_agentic_executor_factory(lambda: fake)` 显式注入 ⇒ `_discover_executor_factory` 第一分支短路，**从不走 entry_points**；而生产 `agent_server/main.py:413` 恰恰依赖 EP 发现。显式注入的测试全绿却掩盖了「真实安装下发现路径是否通」——本批补上这把锁，EP 注册若被破坏（pyproject 改动/包未装）正向用例即红。
+- **顺带**：给 `packages/agent-runtime/tests/test_agentic_skill.py:98` 的 `reg.execute("agentic", ...)`（lint P4-2 白名单豁免）补注释，说明「仅测试内豁免、生产须走 delegate」，并指向本发现路径测试。
+- **实跑**：`ruff check` 该 2 文件 rc=0；`pytest packages/agent-runtime/tests` **638 passed**（636→638，+2），既有用例零删改（`packages/agent-runtime/tests/test_agentic_skill.py` 仅加注释，7 条断言逐字未动）。
 
 ### 残留与待定（附不做/待定的判据，不粉饰为已完成）
 
-- **T2.2**：已**分项处置**（详见 T2.2 节）——item5（`config.py` 三处改 `dataclasses.replace`，消除 frozen dataclass 六字段手抄）**本批落地**并自证零回归（replace 保留全部非 healthy 字段、federation 176 passed）；item6（`agent.py` HTTP if-elif→dict 派发）核实后**判定不做**（if-elif 编码真实 body/no-body 区别 + else→400 错误分支，dict 派发须给每调用套 lambda 反不清晰，仅 3 个非齐整分支属过度抽象）；items1-4（4 处 ~200 行大函数拆分）**缓做**——纯可读性重构、无功能收益、回归风险高，**与本 plan T3.1 把同类「`routes.py` 按业务域拆分」判为「跳过：大规模重构」直接矛盾**，且行号引用已漂移（`api/routes.py:65 query` 现已在 `api/query_router.py`）⇒ 如需做应独立成方案 + 独立分支 + 逐函数补测后再拆。
+- **T2.2**：已**分项处置**（详见 T2.2 节）——item5（`config.py` 三处改 `dataclasses.replace`，消除 frozen dataclass 六字段手抄）**本批落地**并自证零回归（replace 保留全部非 healthy 字段、federation 176 passed）；item6（`agent.py` HTTP if-elif→dict 派发）核实后**判定不做**（if-elif 编码真实 body/no-body 区别 + else→400 错误分支，dict 派发须给每调用套 lambda 反不清晰，仅 3 个非齐整分支属过度抽象）；items1-4（4 处 ~200 行大函数拆分）**缓做**——纯可读性重构、无功能收益、回归风险高，**与本 plan T3.1 把同类「`applications/agent_server/api/routes.py` 按业务域拆分」判为「跳过：大规模重构」直接矛盾**，且行号引用已漂移（`api/routes.py:65 query` 现已在 `api/query_router.py`）⇒ 如需做应独立成方案 + 独立分支 + 逐函数补测后再拆。
 - **T2.3**：已**重新对码 + 分项处置**（详见 T2.3 节）——item5（exhibition `.env.example` 补全 10 个 `EXHIBITION_AGENT_*` Settings 变量，1:1 取自 config.py 零杜撰）+ item6（kefu `.env.example:6` 悬空引用 repoint 到 `agent-core/README.md`「环境变量清单」，不新建重复清单）**本批落地**；items1/7（langchain 下界、requirements.txt agent-runtime）**早已落地**；items2/4/8（sqlglot、ruff `I`、pytest importlib）因 `dialogue-framework`/`zhanggui-zhiku`/`wenda` 三包已消失而 **moot，但意图已在全仓满足**；唯 **item3 的 fastapi 根下界 `>=0.115` 低于旧目标 `0.129`** —— 仅抬下界、无 feature/bugfix 驱动，盲抬会无谓收紧解析 ⇒ **标注不盲改**，留独立依赖评审。本节不再是「整节待重新对码」。
 - **补充 4（agentic bridge opt-in 策略）**：`_maybe_attach_bridged_tools` 默认关（`AGENTIC_RUNTIME_BRIDGE=true` 才开）是「渐进推广」的设计决策；T1.2 要求「改为默认开启」还是「保留 opt-in 但补开启路径测试」属**待拍板**，非纯执行项。

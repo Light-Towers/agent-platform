@@ -1,8 +1,7 @@
-"""语义缓存统一入口：L1 精确 → L2 语义 → 未命中 → 异步写入。
+"""联邦语义缓存入口：委托统一 Valkey 实现（ADR-0013 C）。
 
-查询流程：NullCache → L1 → L2 → None
-写入流程（异步）：L1 + L2 + NullCache（空值）
-命中率统计：get / hit / miss 上报 Langfuse
+保留原公开签名，内部只做上下文注入（scope=federation、租户/KB/灰度）；
+L1/L2/负缓存/TTL/失效/fail-open 均在 ``agent_runtime.cache`` 单一实现里。
 """
 
 from __future__ import annotations
@@ -11,163 +10,134 @@ import asyncio
 import time
 from typing import Any
 
-import numpy as np
-from agent_core.cache import CacheStats
+from agent_core.cache import build_cache_key
 from agent_core.logging import get_logger
+from agent_runtime.cache import get_cache
 
-from agent.cache.config import get_cache_config
-from agent.cache.layers import (
-    L1Cache,
-    L2Cache,
-    NullCache,
-    _build_cache_key,
-)
+from agent.cache.config import get_cache_context, set_kb_version
 
 logger = get_logger(__name__)
 
-_stats = CacheStats()
-_pending_writes: set = set()
-
-
-def _get_embedding(text: str) -> np.ndarray | None:
-    """获取 query 的 embedding 向量（用于 L2 语义缓存）。
-
-    直接复用 agent-core 统一 embedding 单例（get_embedder），消除
-    对 L1 分类器私有 _embedder 的耦合，向量空间独立且全局一致。
-    """
-    try:
-        from agent_core.memory.embedder import get_embedder
-
-        provider = get_embedder()
-        vec = provider.embed([text])[0]
-        return np.array(vec, dtype=np.float32)
-    except Exception:
-        return None
+_pending_writes: set[asyncio.Task] = set()
 
 
 class SemanticCache:
-    """语义缓存统一入口。"""
+    """联邦语义缓存门面。"""
+
+    @staticmethod
+    def _backend():
+        return get_cache("federation")
+
+    @classmethod
+    def is_enabled(cls) -> bool:
+        return cls._backend().enabled
+
+    @staticmethod
+    def build_key(intent: str, rewritten_query: str) -> str:
+        """singleflight 去重 key（含租户/KB/灰度，跨租户不共享在途结果）。"""
+        ctx = get_cache_context()
+        return build_cache_key(
+            intent,
+            rewritten_query,
+            ctx.kb_versions,
+            ctx.tenant_id,
+            ctx.gray_pct,
+        )
 
     @staticmethod
     async def get(
         intent: str,
         rewritten_query: str,
-        query_vec: np.ndarray | None = None,
+        query_vec: list[float] | None = None,
     ) -> dict[str, Any] | None:
-        """查询缓存。
-
-        Args:
-            intent: 意图标签
-            rewritten_query: 改写后的 query
-            query_vec: query 的 embedding 向量（可选，用于 L2）
-
-        Returns:
-            缓存值（含 _layer 字段）或 None（未命中）
-        """
-        cfg = get_cache_config()
-        if not cfg.cache_enabled:
+        ctx = get_cache_context()
+        backend = get_cache("federation")
+        if not backend.enabled:
             return None
-
-        cache_key = _build_cache_key(
-            intent, rewritten_query, cfg.kb_versions, cfg.tenant_id, cfg.gray_pct
+        hit = await backend.get(
+            tenant_id=ctx.tenant_id,
+            intent=intent,
+            rewritten_query=rewritten_query,
+            kb_versions=ctx.kb_versions,
+            gray_pct=ctx.gray_pct,
+            embedding=query_vec,
         )
-
-        if await NullCache.get(cache_key):
-            _stats.record("null_hit")
-            logger.debug("NullCache 命中（防穿透）: %s", cache_key[:16])
-            return {"_layer": "null", "answer": "", "trace_id": ""}
-
-        result = await L1Cache.get(cache_key)
-        if result is not None:
-            _stats.record("l1_hit")
-            return result
-
-        if query_vec is None:
-            query_vec = _get_embedding(rewritten_query)
-
-        if query_vec is not None:
-            result = await L2Cache.get(query_vec)
-            if result is not None:
-                _stats.record("l2_hit")
-                return result
-
-        _stats.record("miss")
-        return None
+        if hit is None:
+            return None
+        value = dict(hit.value)
+        value.setdefault("_layer", hit.layer)
+        if hit.distance is not None:
+            value.setdefault("_distance", hit.distance)
+        if hit.similarity is not None:
+            value.setdefault("_similarity", hit.similarity)
+        return value
 
     @staticmethod
     async def set(
         intent: str,
         rewritten_query: str,
         value: dict[str, Any],
-        query_vec: np.ndarray | None = None,
+        query_vec: list[float] | None = None,
     ) -> None:
-        """异步写入缓存（不阻塞响应）。
-
-        Args:
-            intent: 意图标签
-            rewritten_query: 改写后的 query
-            value: 缓存值（answer, trace_id, ...）
-            query_vec: query 的 embedding 向量（可选，用于 L2）
-        """
-        cfg = get_cache_config()
-        if not cfg.cache_enabled:
+        ctx = get_cache_context()
+        backend = get_cache("federation")
+        if not backend.enabled:
             return
-
-        cache_key = _build_cache_key(
-            intent, rewritten_query, cfg.kb_versions, cfg.tenant_id, cfg.gray_pct
-        )
-
         answer = value.get("answer", "")
         if not answer:
-            await NullCache.set(cache_key)
+            await backend.set_negative(
+                tenant_id=ctx.tenant_id,
+                intent=intent,
+                rewritten_query=rewritten_query,
+                kb_versions=ctx.kb_versions,
+                gray_pct=ctx.gray_pct,
+            )
             return
-
         clean_value = {k: v for k, v in value.items() if not k.startswith("_")}
         clean_value["cached_at"] = time.time()
-
-        await L1Cache.set(cache_key, clean_value, ttl=cfg.l1_ttl_seconds)
-
-        if query_vec is None:
-            query_vec = _get_embedding(rewritten_query)
-
-        if query_vec is not None:
-            await L2Cache.set(
-                query_vec, rewritten_query, intent, clean_value, ttl=cfg.l2_ttl_seconds
-            )
+        await backend.set(
+            tenant_id=ctx.tenant_id,
+            intent=intent,
+            rewritten_query=rewritten_query,
+            value=clean_value,
+            kb_versions=ctx.kb_versions,
+            gray_pct=ctx.gray_pct,
+            embedding=query_vec,
+        )
 
     @staticmethod
     async def set_async(*args: Any, **kwargs: Any) -> None:
-        """fire-and-forget 异步写入（不阻塞调用方）。"""
+        """fire-and-forget 写入（后端内部还有有界队列，双保险不阻塞调用方）。"""
         try:
             task = asyncio.create_task(SemanticCache.set(*args, **kwargs))
             _pending_writes.add(task)
             task.add_done_callback(_pending_writes.discard)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - 缓存写入失败不得影响主链路
             logger.warning("缓存异步写入失败: %s", e)
 
     @staticmethod
-    def get_stats() -> dict[str, int | float]:
-        """返回命中率统计。"""
-        return _stats.snapshot()
+    def get_stats() -> dict[str, Any]:
+        return get_cache("federation").get_stats()
 
     @staticmethod
     def reset_stats() -> None:
-        """重置统计。"""
-        _stats.reset()
+        get_cache("federation").reset_stats()
 
     @staticmethod
     async def invalidate(intent: str, rewritten_query: str) -> None:
-        """手动失效指定缓存。"""
-        cfg = get_cache_config()
-        cache_key = _build_cache_key(
-            intent, rewritten_query, cfg.kb_versions, cfg.tenant_id, cfg.gray_pct
+        ctx = get_cache_context()
+        await get_cache("federation").invalidate(
+            tenant_id=ctx.tenant_id,
+            intent=intent,
+            rewritten_query=rewritten_query,
+            kb_versions=ctx.kb_versions,
+            gray_pct=ctx.gray_pct,
         )
-        await L1Cache.invalidate(cache_key)
 
     @staticmethod
     async def invalidate_by_kb_version(subservice: str, new_version: str) -> None:
-        """KB 版本更新时失效对应子服务缓存。
-
-        更新 config 中的 kb_versions，旧缓存因 key 不匹配自动失效。
-        """
-        logger.info("KB 版本更新: %s → %s, 旧缓存自动失效", subservice, new_version)
+        """KB 版本更新：改上下文（新 key 天然不命中旧值）+ 递增租户 epoch。"""
+        set_kb_version(subservice, new_version)
+        ctx = get_cache_context()
+        await get_cache("federation").invalidate_namespace(tenant_id=ctx.tenant_id)
+        logger.info("KB 版本更新: %s → %s，联邦缓存命名空间已失效", subservice, new_version)

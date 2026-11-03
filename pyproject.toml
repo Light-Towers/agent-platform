@@ -10,21 +10,21 @@ dependencies = [
     "agent-core",
     "shared-schemas",
     "agent-runtime",
-    "fastapi>=0.115",
+    "fastapi>=0.159.1",
     "uvicorn[standard]>=0.54.0",
     "python-multipart>=0.0.9",
     "pydantic>=2.13.5",
-    "pydantic-settings>=2.2",
+    "pydantic-settings>=2.16.1",
     "httpx>=0.27",
-    "langgraph>=1.2.12,<2",
-    "langchain-core>=1.6.5",
+    "langgraph>=1.2.16,<2",
+    "langchain-core>=1.6.13",
     "langchain-openai>=1.6.6",
     "langgraph-checkpoint-postgres>=2.0",
     "psycopg[binary,pool]>=3.3.6",
     "pgvector>=0.3",
     "asyncpg>=0.29",
     "rank-bm25>=0.2.2",
-    "sqlglot>=30.20.0",
+    "sqlglot>=30.24.0",
     "anyio>=4.15.1",  # Dependabot: AnyIO TLSStream IDNA 2003 / process-pool 阻塞（critical+medium，first_patched 4.14.2；现下界已高于修复版）
 ]
 
@@ -56,7 +56,7 @@ dev = [
 eval = [
     "flashrag-dev",
     "faiss-cpu",
-    "transformers>=5.17.0",  # Dependabot: transformers 多条 RCE/路径遍历（high×3+medium×1，first_patched 5.10.0；现下界已高于修复版），强制下界覆盖 flashrag-dev 传递边
+    "transformers>=5.20.2",  # Dependabot: transformers 多条 RCE/路径遍历（high×3+medium×1，first_patched 5.10.0；现下界已高于修复版），强制下界覆盖 flashrag-dev 传递边
 ]
 
 [build-system]

@@ -1,0 +1,328 @@
+# nl2sql-service：API 服务（Deployment + Service）——ADR-0011 选项 A 收敛后，
+# 平台里唯一一条 Text2SQL 路。此前它只有代码和镜像、没有任何可部署形态。
+#
+# 镜像：nl2sql-service:dev（Dockerfile.nl2sql-service，批次 1）。不放进根镜像的理由写在
+#   那份 Dockerfile 头部（失败域/资源画像不同 + 同镜像双入口会让"跑的是哪个进程"变成取证问题）。
+#
+# 上线顺序（与 36 头部同一条契约，不可反）：
+#   00-config（本清单与 36 读的 NL2SQL_* 键住这儿，先 apply）
+#   → 35（建库/建角色/灌 dw fixture）→ 36（元库 schema + 元知识）
+#   → 30（本文件：服务起来、探针过）→ 20（批次 4 摘 SQL_DSN、注 NL2SQL_SERVICE_URL）
+#   服务先 Ready 再动平台，中途才不会出现"旧路已退役、新路没起来"的问数空窗。
+#
+# 探针证明的是"库连得上"，不是"元知识在位"：/ready 只 SELECT 1 探两池（见
+# api/server.py:handle_ready）。36 没跑或灌错租户时，三个探针全绿、召回恒空、
+# SQL 照样生成——空召回没有任何探针会红（同 36 头部 DEFAULT_TENANT 那段）。
+# ⇒ 问数是否真在做事，判据是批次 6 的 /api/query 三条对账 + 黄金集，不是 Pod Ready。
+#
+# apply 之前先查两个 Secret 对象的**键名**是否在位（缺键的失败是 CreateContainerConfigError，
+# Pod 停在 ContainerCreating 并报明确的缺键事件 —— 这是对的方向，但要提前知道会有这一步）：
+#   kubectl -n agent-platform get secret -o go-template=\
+#     '{{range .items}}{{.metadata.name}}:{{range $k, $v := .data}} {{$k}}{{end}}{{"\n"}}{{end}}'
+#   agent-platform-secrets 需 META_DB_DSN / DW_DB_DSN（批次 2 引入；线上现只有 DATABASE_URL /
+#     POSTGRES_PASSWORD，2026-10-27 实测回读 ⇒ 上线前须按 05-secrets.yaml 头部的方式补键，
+#     并且**先跑 35** 把这两个角色与库建出来，否则 DSN 补了也连不上）；
+#   observability-keys 需 INTERNAL_HMAC_KEY（本清单的验签侧与批次 4 的签发侧共用一把，
+#     补键用 kubectl patch secret 合并写，不要用 apply —— 见 volumes 段注释）。
+# 这两处都不在仓库里（真实凭据永不入库，05-secrets.yaml 那份是 demo 值、真实环境勿 apply）。
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nl2sql-service
+  namespace: agent-platform
+  labels:
+    app: nl2sql-service
+spec:
+  # 单副本是刻意的，不是没配 HPA：本服务的 embedding 走本地 bge（集群无外网 embedding API），
+  # 每个 Pod 各自常驻一份 torch 权重（平台侧实测 cgroup memory.current 442Mi 那一档画像）。
+  # 加副本 = 加一份权重常驻 + 多一处要核对 VECTOR_DIM 的地方，扩容属另一决策（先看实测）。
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nl2sql-service
+  template:
+    metadata:
+      labels:
+        app: nl2sql-service
+    spec:
+      # 滚动升级/停 Pod 时给 in-flight 请求留的排水窗口。默认 30s 不够：dw 池的语句超时是
+      # 30s 档（settings.dw_db_statement_timeout_ms=30000，代码默认），一个合法请求可能在
+      # SIGTERM 时刚好跑到第 25 秒，而 kubelet 第 30 秒就 SIGKILL——表现是“发布期间偶发空结果”，
+      # 而发布完成、探针全绿，事后查不到任何错（同 20 头部那条 60s 的理由，只是这里靠的是语句超时）。
+      terminationGracePeriodSeconds: 60
+      # 密钥卷的属主与挂载路径（2026-10-28 在 126 用本镜像实跑三个探针 Pod 量出来的，不是文档转述）：
+      #   · fsGroup 10001 + defaultMode 0440 ⇒ 卷内文件是 root:10001，uid 10001 读得到（探针里 wc -c 出了字节数）。
+      #     去掉 fsGroup 后同一份文件是 root:root ⇒ 0440 读不到，所以这两件事必须成对出现。
+      #   · fsGroup **不会**改 hostPath 的宿主目录：探针把 root:root 755、内含 644 文件与子目录的宿主目录挂进来，
+      #     前后逐节点 stat 一字不变 ⇒ “给挂权重缓存的 Pod 设 fsGroup 会把 /opt/ap-models 递归 chown、
+      #     在 126 那块 ROTA=1 盘上制造 IO stall”这个担心实测不成立，fsGroup 在这里可以放心用。
+      #   · 挂载路径**不许写 /run/secrets**：镜像里 /var/run 就是 /run，那里是 kubelet 挂 SA token 的位置；
+      #     只读 tmpfs 先占住 /run/secrets 后，runc 再建 kubernetes.io 子目录就是 EROFS ⇒ 容器起不来
+      #     （探针原话：mkdirat …/rootfs/run/secrets/kubernetes.io: read-only file system）。
+      #     本清单与 20 因此都用 /run/app-secrets；改回 /run/secrets 会被批次 4 的门禁咬。
+      securityContext:
+        fsGroup: 10001
+      containers:
+        - name: nl2sql-service
+          # 与平台同一手法：本地构建的 tag 只存在于各节点的 containerd-k8s 库里（宿主 moby 与
+          # 它是两套镜像库、互不可见），所以只认 IfNotPresent + 预先 distribute
+          # （见 scripts/distribute.sh 的三节点显式列举；漏一台 = ErrImagePull）。
+          image: nl2sql-service:dev
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8000
+          env:
+            # ---- 数据面（批次 2 的三库三角色）：两个 DSN 都在 Secret 里 ----
+            # META 是可写的元知识库（在线 ingest 要落它）；DW 是**只有 GRANT SELECT** 的
+            # 业务样例库（L1 纵深）。口令唯一来源就是这两条 DSN，改口令须重跑 35（见 05-secrets.yaml）。
+            - name: META_DB_DSN
+              valueFrom:
+                secretKeyRef:
+                  name: agent-platform-secrets
+                  key: META_DB_DSN
+            - name: DW_DB_DSN
+              valueFrom:
+                secretKeyRef:
+                  name: agent-platform-secrets
+                  key: DW_DB_DSN
+            # ---- LLM：SQL 生成的真凭据，缺键即 CreateContainerConfigError（fail-closed） ----
+            # 地址与模型 id 一律引平台那份 CM 键，不在这里再抄一份：现网的模型可用性证据
+            # （旧 id 被提供方下线、"清单在册 ≠ 有 provider"）只记在 00-config.yaml 一处，
+            # 两个工作负载各自持有 id 字面值时，换模型必然只改一个（另一个当场 400，
+            # 而表现是"问数失败"，不是"模型地址过期"——最难归因的那类分叉）。
+            - name: LLM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: observability-keys
+                  key: LLM_API_KEY
+            - name: LLM_BASE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: agent-platform-config
+                  key: LLM_BASE_URL
+            - name: LLM_MODEL
+              valueFrom:
+                configMapKeyRef:
+                  name: agent-platform-config
+                  key: LLM_MODEL
+            # ---- 向量口径四键 + 作用域：CM 里 NL2SQL_* 前缀的同一份值，36 也引它 ----
+            # 为什么必须同源：元库的 vector 列宽由 36 的 init_meta_schema 按 VECTOR_DIM 定死，
+            # 在线召回用另一个维度就是"写进 512 的列、拿 1024 的向量去查"。两侧各留字面值时，
+            # 改一处的 commit 看上去完全自洽，红要到第一次真召回才显形。
+            # env 名不带前缀（VECTOR_DIM 等）是应用读的字段名（Settings 无 env_prefix）；
+            # CM 键带 NL2SQL_ 前缀是不与平台同名词（EMBEDDING_MODEL=bge-small-zh 走远程分支）混用。
+            - name: VECTOR_DIM
+              valueFrom:
+                configMapKeyRef:
+                  name: agent-platform-config
+                  key: NL2SQL_VECTOR_DIM
+            - name: EMBEDDING_BACKEND
+              valueFrom:
+                configMapKeyRef:
+                  name: agent-platform-config
+                  key: NL2SQL_EMBEDDING_BACKEND
+            - name: EMBEDDING_MODEL
+              valueFrom:
+                configMapKeyRef:
+                  name: agent-platform-config
+                  key: NL2SQL_EMBEDDING_MODEL
+            - name: TOKENIZER
+              valueFrom:
+                configMapKeyRef:
+                  name: agent-platform-config
+                  key: NL2SQL_TOKENIZER
+            - name: DATASOURCE_ID
+              valueFrom:
+                configMapKeyRef:
+                  name: agent-platform-config
+                  key: NL2SQL_DATASOURCE_ID
+            # ---- 数据权限（L2/L3）：写成真值才演得出纵深，空清单 = 这两层不存在 ----
+            # ALLOWED_TABLES 是 L2 SqlPolicy 的表白名单（validate_sql 拒外表）兼 S-2 的
+            # metric_config 入参闸；SENSITIVE_COLUMNS 一份声明两处消费（L2 黑名单 + L3 结果掩码）。
+            # ⚠ 两个 List[str] 字段的 env 值必须是 **JSON 字面量**：`users,orders` 这种逗号串
+            #   不是"按逗号切开"，pydantic-settings 解 JSON 失败直接抛
+            #   `SettingsError: error parsing value for field "allowed_tables" from source
+            #   "EnvSettingsSource"`（本机实测）⇒ 容器起不来。写清单时看着像便利写法，落到线上是 CrashLoop。
+            # 与"静默忽略"相比这算好失败，但仍要在门禁里钉住形状（见 tests/deploy/test_nl2sql_service_manifest.py）。
+            - name: ALLOWED_TABLES
+              valueFrom:
+                configMapKeyRef:
+                  name: agent-platform-config
+                  key: NL2SQL_ALLOWED_TABLES
+            - name: SENSITIVE_COLUMNS
+              valueFrom:
+                configMapKeyRef:
+                  name: agent-platform-config
+                  key: NL2SQL_SENSITIVE_COLUMNS
+            - name: RESULT_MASKING_ENABLED
+              valueFrom:
+                configMapKeyRef:
+                  name: agent-platform-config
+                  key: NL2SQL_RESULT_MASKING_ENABLED
+            - name: DEFAULT_QUERY_ROLE
+              valueFrom:
+                configMapKeyRef:
+                  name: agent-platform-config
+                  key: NL2SQL_DEFAULT_QUERY_ROLE
+            # ---- 身份档（与平台同档，fail-closed）----
+            # DEPLOY_ENFORCE_IDENTITY=true：既无验签公钥又无 SINGLE_TENANT 时启动即拒（不是告警）。
+            # TENANT_JWT_ENFORCE 显式留 false（observe）：翻 enforce 是另一条决策，不在这里顺带打开。
+            # ⚠ 打开它之前必须先安排探针：/ready **不在** IdentityMiddleware 的 skip_paths 里
+            #   （skip 只有 /health、/metrics、/docs 等）⇒ enforce 下 kubelet 的 GET /ready 不带任何
+            #   凭据 → 401 → Pod 永远 NotReady。这不是"再配一下"能绕的，属该档的接线前置。
+            - name: SINGLE_TENANT
+              value: "default"
+            - name: DEPLOY_ENFORCE_IDENTITY
+              value: "true"
+            - name: TENANT_JWT_ENFORCE
+              value: "false"
+            # 内部签名头密钥：nl2sql 是**验签侧**（agent_server /sql/train 是签发侧，批次 4 挂同一把）。
+            # 只认文件不认 env（agent_core/internal_header.py:load_hmac_key 读 INTERNAL_HMAC_KEY_FILE），
+            # 所以这里给的是挂载路径，不是密钥值。
+            # 两侧不同值时的表现是"伪造头通过不了/合法头也通过不了"⇒ /sql/train 全线 401，
+            # 而 /ready 全绿（探针不碰鉴权）：故一致性由批次 4 的清单门禁与批次 6 的写路径取证一起管。
+            - name: INTERNAL_HMAC_KEY_FILE
+              value: /run/app-secrets/internal_hmac.key
+            # ---- 离线加载：与平台同一份 hostPath 权重缓存（三节点各自独立盘 ⇒ 逐节点前置检查） ----
+            # 路径与 20/36 三处字面值同值由门禁比对钉住（改一处即红）：HF_HOME 指到没缓存的目录时，
+            # 服务不是报错而是回连 huggingface.co，集群无外网 ⇒ 挂在首次加载里。
+            - name: HF_HOME
+              value: "/opt/ap-models/hf-cache"
+            - name: HF_HUB_OFFLINE
+              value: "1"
+            - name: TRANSFORMERS_OFFLINE
+              value: "1"
+            # ---- 观测：只注 OTel 两键，且键名用**内核读的那个** ----
+            # 本服务的装配点是 api/server.py:69 init_tracing(service_name="nl2sql-service")，
+            # 它读的是 agent_core.tracing 的 ENV_TRACE_ENABLED / ENV_OTEL_ENDPOINT，
+            # 即 AGENT_CORE_TRACE_ENABLED / OTEL_EXPORTER_OTLP_ENDPOINT ——
+            # **不是**平台清单里那套自定义名 OTEL_ENABLED/OTEL_ENDPOINT/OTEL_SERVICE_NAME/OTEL_EXPORTER。
+            # 照平台的样子注 OTEL_* 会全绿地什么也不发生（Settings 里没有这些字段，
+            # pydantic extra="ignore" 吞掉，kernel 读到空 ⇒ status=DISABLED，"关了"与"坏了"分不清）。
+            # 值仍引平台 CM 的 OTEL_ENABLED/OTEL_ENDPOINT 两个键：端点只能写宿主 IP（Jaeger 跑在
+            # 126 的 moby 上、不在集群内），两处各写一份就是第二个待漏的端点。
+            # service.name 由代码传（"nl2sql-service"），故不注 AGENT_CORE_SERVICE_NAME。
+            - name: AGENT_CORE_TRACE_ENABLED
+              valueFrom:
+                configMapKeyRef:
+                  name: agent-platform-config
+                  key: OTEL_ENABLED
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              valueFrom:
+                configMapKeyRef:
+                  name: agent-platform-config
+                  key: OTEL_ENDPOINT
+            # 注 LANGFUSE_* = 死键，故不注：本镜像没装 [langfuse] extra，且全仓只有
+            # agent_server/agent/llm.py 调 get_langfuse_callbacks，本包没有调用点（批次 1 查实并写进
+            # Dockerfile.nl2sql-service）。"配了但不生效"比"没配"更难查；nl2sql 的 LLM 调用进
+            # Langfuse 属另一件事（先在本包接回调），登记为已知观测缺口，不在这里假装已接。
+            # ---- 并发/限流：刻意不注入 ----
+            # QUERY_MAX_CONCURRENCY / QUERY_RATE_LIMIT_PER_MIN 留代码默认 0（= 关闭），
+            # 与"以生产为标准但先不测并发"的口径一致：行为与老部署逐字节可比，
+            # 少一个"清单写了 0、代码默认 0、其实没接线"的空声明。
+          # ---- 探针：三条各自探各自该探的东西 ----
+          # /ready 冷启动窗口要给足：lifespan 里做三件慢事——meta 池 open、本地 bge 权重加载
+          # （CPU torch 镜像实测 0.3s 页缓存热 ~10.2s 冷）、dw 池 open。5s*24=120s 远大于实测，
+          # 多给的不是保险而是噪声预算：真起不来时事件里看到的是失败原因，不是探针阈值。
+          startupProbe:
+            httpGet:
+              path: /ready
+              port: 8000
+            periodSeconds: 5
+            failureThreshold: 24
+            timeoutSeconds: 5
+          # timeoutSeconds=5 **必须**大于服务侧 _READY_PROBE_TIMEOUT_S=3.0（api/server.py:20）：
+          # 那个 3s 是"取连接 + SELECT 1"的总预算，探针 1s（API 默认）会在服务还在等池的时候
+          # 就先判失败——dw 池的语句超时是 30s 档、OLAP 画像，慢是设计内的慢。
+          # failureThreshold=3 ⇒ 库侧抖动 15s 内不摘流量，持续不可用才摘（切流量的判据是真失败）。
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8000
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 3
+          # liveness 走 /health，**故意不并进 /ready**：/health 是跨服务的共享契约
+          # （shared_schemas.HealthResponse，恒 healthy 且不碰连接池），拿它当存活判据意味着
+          # "库断了"不会重启 Pod——库断了重启多少次都不会好，只会把可观测面（span/日志）
+          # 和 in-flight 请求一起陪葬。反之 /ready 失败只摘 Service 端点，进程保持活着可查。
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 4
+          # ⚠ 下面四项是**沿用平台档位**，不是本服务的实测值（写清楚免得被当成取证）。
+          # 沿用成立的部分：同一份 CPU torch + 同一个 bge-small-zh-v1.5 常驻画像，
+          # 平台侧实测 cgroup memory.current=442Mi、limits 2Gi 生效（memory.max 回读 2147483648）。
+          # 不成立的部分：本服务另有 dw 池（结果上限 sql_max_rows=1000，平台是 100）与
+          # 每请求的元知识召回向量批次，峰值更高还是更低没有读数。
+          # ⇒ 上线后按 Pod 的 cgroup memory.current / memory.peak 回填真实档位（批次 6/7 的取证项），
+          #   回填时把这段注释改成读数，别留"沿用平台"的说法继续充当实测。
+          resources:
+            requests:
+              cpu: 250m
+              memory: 1Gi
+            limits:
+              cpu: "1"
+              memory: 2Gi
+          securityContext:
+            runAsNonRoot: true
+            # 本镜像里的 appuser（Dockerfile.nl2sql-service: useradd -m -u 10001），
+            # 与 35 的 999（postgres 镜像系统用户）是两个镜像的两个 uid，各自对各自。
+            runAsUser: 10001
+          volumeMounts:
+            - name: ap-models
+              mountPath: /opt/ap-models
+              # 只读：平台侧已按 Pod 真实条件验过（uid 10001 + :ro bind + HF_HUB_OFFLINE=1 加载成功
+              # dim=512；huggingface_hub 写 trees/*.json 的 Permission denied 是它自己降级的噪声日志）。
+              # 别把这条删了"省得报错"：删了它，一次误写就污染三节点共用的权重缓存。
+              readOnly: true
+            - name: internal-hmac
+              mountPath: /run/app-secrets
+              # 密钥文件只读：进程不需要写它，可写挂载等于给进程一条改自己信任根的路。
+              # 路径别改成 /run/secrets——那个位置已被本 Pod 的 SA token 占用（见 Pod securityContext 段实测）。
+              readOnly: true
+      volumes:
+        - name: ap-models
+          # type: Directory：本机没这份缓存就调度失败（Pending + 明确事件），而不是起来后
+          # 首次加载时回连外网——集群无外网时那会表现成"Pod 活着但一直不 Ready"。
+          hostPath:
+            path: /opt/ap-models
+            type: Directory
+        - name: internal-hmac
+          secret:
+            # 与 LLM_API_KEY/API_KEY 同住集群自有的 observability-keys：真实密钥永不入库
+            # （05-secrets.yaml 那份 demo Secret 里不放它——一把能签出"合法租户"的对称密钥
+            # 进了仓库，就等于每个 clone 的人都能跨租户写元知识）。
+            # 补键用 `kubectl patch secret ... -p '{"stringData":{...}}'` 合并写，
+            # 不要用 `create secret --dry-run | kubectl apply -f -`（apply 是整对象替换，会抹掉已有键）。
+            secretName: observability-keys
+            # 只投这一个键进 Pod：不挂整个 Secret 对象，就不会把 LANGFUSE_*/API_KEY 这些
+            # 本进程永不消费的凭据一起塞进可读写层。
+            items:
+              - key: INTERNAL_HMAC_KEY
+                path: internal_hmac.key
+            # 0440 + Pod fsGroup 10001：owner root、group 10001、其他进程不可读（本集群实跑量过，见头部）。
+            # 上线后在真 Pod 里再读一次（只输出字节数、不输出内容）：
+            #   kubectl -n agent-platform exec deploy/nl2sql-service -- sh -c 'wc -c < /run/app-secrets/internal_hmac.key'
+            defaultMode: 0440
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nl2sql-service
+  namespace: agent-platform
+spec:
+  # ClusterIP：与既有清单同规约，不直接暴露。平台侧经集群内 DNS
+  # http://nl2sql-service:8000 调用（批次 4 的 NL2SQL_SERVICE_URL）；
+  # 取证要从集群外打，用 scripts/portforward.sh（SVC=nl2sql-service LOCAL_PORT=18010）。
+  type: ClusterIP
+  selector:
+    app: nl2sql-service
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000

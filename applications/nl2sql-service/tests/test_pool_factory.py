@@ -43,9 +43,9 @@ def test_cli_build_entry_is_importable():
 # ---------------------------------------------------------------------------
 def test_redact_dsn_strips_password_from_url_form():
     """URL 格式 DSN 的密码就在前 30 字符内——`dsn[:30]` 那种截断等于明文泄露。"""
-    out = redact_dsn("postgres://appuser:sup3rsecret@203.0.113.9:5432/nl2sql_meta")
+    out = redact_dsn("postgres://appuser:sup3rsecret@10.0.0.9:5432/nl2sql_meta")
     assert "sup3rsecret" not in out
-    assert out == "appuser@203.0.113.9:5432/nl2sql_meta"
+    assert out == "appuser@10.0.0.9:5432/nl2sql_meta"
 
 
 def test_redact_dsn_handles_keyword_form():

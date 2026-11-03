@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>agent-platform · 对话控制台 POC</title>
+<!-- 样式唯一入口，顺序 tokens → base → events（视觉件 §1.1）。POC 用 <link> 代替 main.ts 的 import。 -->
+<link rel="stylesheet" href="src/styles/tokens.css">
+<link rel="stylesheet" href="src/styles/base.css">
+<link rel="stylesheet" href="src/styles/events.css">
+</head>
+<body data-state="normal">
+<div class="app">
+
+  <header class="topbar">
+    <h1>对话控制台 <span class="hint">视觉层 POC</span></h1>
+    <span class="spacer"></span>
+    <nav class="seg" aria-label="页面">
+      <!-- 相对链接，不引路由库：POC 阶段两页足以说明形态，Vue Router 属 PR-0 -->
+      <a class="btn" href="./poc.html" aria-current="page">对话控制台</a>
+      <a class="btn" href="./poc-health.html">健康灯</a>
+    </nav>
+    <div class="seg" role="group" aria-label="主题">
+      <button class="btn" data-theme-set="auto" aria-pressed="true">自动</button>
+      <button class="btn" data-theme-set="light" aria-pressed="false">浅色</button>
+      <button class="btn" data-theme-set="dark" aria-pressed="false">深色</button>
+    </div>
+    <div class="seg" role="group" aria-label="三态演示">
+      <button class="btn" data-state-set="normal" aria-pressed="true">正常</button>
+      <button class="btn" data-state-set="loading" aria-pressed="false">加载中</button>
+      <button class="btn" data-state-set="empty" aria-pressed="false">空态</button>
+      <button class="btn" data-state-set="error" aria-pressed="false">错误</button>
+    </div>
+  </header>
+
+  <p class="hint">
+    ⚠ 本页所有数值都是<strong>手写假数据</strong>，未连后端、未发一个请求。它只证两件事：令牌层能否撑起界面、
+    视觉件里的判据在屏上长什么样。字体也不是 Plex —— 六件 woff2 未入库，本机走系统回落（见 <code>base.css</code> 头部）。
+  </p>
+
+  <div class="banner" id="errBanner" hidden>
+    <strong>422 · 请求字段不合法</strong>
+    <div class="ev__meta">字段 <code>question</code>：字符串长度需 ≥ 1。<span class="hint">（按 §3 硬约束：<strong>不回显</strong>用户输入原文）</span></div>
+  </div>
+  <div class="banner" id="errStream" hidden>
+    <strong>服务器内部错误，请稍后重试</strong>
+    <div class="ev__meta">流内 <code>error</code> 帧只说这一句 —— 工单件 §3 已定它无信息量，故<strong>不做「错误详情」区</strong>。</div>
+  </div>
+
+  <main class="grid">
+
+    <!-- 栏一：会话 + 密钥 -->
+    <section class="panel" aria-labelledby="hSess">
+      <h2 id="hSess">会话</h2>
+      <div class="stack">
+        <button class="btn">上季度退票率的口径是什么 <span class="num">今天</span></button>
+        <button class="btn">2026 版服务协议的免责条款 <span class="num">昨天</span></button>
+        <button class="btn">工单 2311 处理到哪一步了 <span class="num">3 天前</span></button>
+      </div>
+      <details class="only-narrow fold"><summary class="hint">依据列表（窄栏折叠）</summary>
+        <p class="hint">768–1279 断点下并到原生 <code>&lt;details&gt;</code>，不另造抽屉。</p>
+      </details>
+
+      <div class="panel">
+        <div class="o-head-sm">API 密钥</div>
+        <div class="keybox">
+          <input class="field" type="password" placeholder="粘贴密钥" aria-label="API 密钥">
+          <button class="btn btn-primary">应用</button>
+        </div>
+        <p class="hint">密钥<strong>只存内存，不落 localStorage</strong>。主题偏好键 <code>ap.ui.theme</code> 不属凭据，与这条纪律不冲突（视觉件 §1.6）。</p>
+      </div>
+    </section>
+
+    <!-- 栏二：时间线 -->
+    <section class="panel" aria-labelledby="hTl">
+      <h2 id="hTl">事件时间线 <span class="count-badge" id="tlCount"></span></h2>
+
+      <div class="empty" id="emptyNormal" hidden>
+        <p>还没有会话。</p>
+        <p class="hint"><button class="btn">试试：上季度退票率的口径是什么？</button></p>
+      </div>
+      <div class="empty" id="empty503" hidden>
+        <p>历史读不到（<code>HISTORY_READ_FAILED</code>）。</p>
+        <p class="hint">这一句与「没有历史」那句<strong>必须不同</strong>：503 那句要带错误码原文。</p>
+      </div>
+
+      <div class="timeline" id="timeline"></div>
+
+      <div id="loadingBlock" hidden>
+        <div class="stack">
+          <div class="skel"></div><div class="skel"></div><div class="skel"></div>
+        </div>
+      </div>
+
+      <div class="composer">
+        <input class="field" id="q" placeholder="输入问题…" aria-label="问题">
+        <button class="btn btn-primary" id="submit">提问</button>
+        <span class="hint" id="submitHint"></span>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- 图例常驻页面底部折叠区（视觉件 §2.1） -->
+  <details class="panel" id="legendBox">
+    <summary><span class="o-head-sm">图例：12 类事件 → 8 族色相</span></summary>
+    <div class="legend" id="legend"></div>
+    <p class="hint">图例与 <code>events.css</code> 同源，由门禁断言 6 校验「key 集 == 派生事件全集」，不写死 12。</p>
+  </details>
+</div>
+
+<script>
+/* ===== 图标：内联 SVG，16×16，描边属性由 CSS 统一给（不逐图标写） ===== */
+const P = (d) => `<svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><path d="${d}"/></svg>`;
+const ICONS = {
+  route: P('M5 3l6 5-6 5z'),
+  evidence: P('M2 4h12M2 8h12M2 12h12'),
+  memory: P('M8 2l6 6-6 6-6-6z'),
+  status: P('M13 8a5 5 0 11-10 0 5 5 0 0110 0'),
+  replan: P('M13 8a5 5 0 11-1.5-3.6M13 2.5V5h-2.5'),
+  suspended: P('M6 3v10M10 3v10'),
+  coordination: P('M13 8a5 5 0 11-10 0 5 5 0 0110 0'),
+  admission: P('M3 8l5-5 5 5M4.5 7.5V13h7V7.5'),
+  cache_hit: P('M2 4h12M2 8h12M2 12h12'),
+  answer: P('M3 13l1-3 6-6 2 2-6 6zM10 4l2 2'),
+  done: P('M3 9l3 3 7-7'),
+  error: P('M4 4l8 8M12 4l-8 8'),
+  unknown: P('M4 4l8 8M12 4l-8 8'),
+};
+
+/* ===== 事件字典：key 集必须 == 从源派生的事件全集（门禁断言 6） ===== */
+const EVENTS = {
+  route:        { fam: '决策 · 判给哪个能力', sw: 'decision' },
+  evidence:     { fam: '来源 · 命中依据',     sw: 'source' },
+  memory:       { fam: '记忆读写',            sw: 'memory' },
+  status:       { fam: '进度',                sw: 'progress' },
+  replan:       { fam: '需关注 · 推翻前判',   sw: 'watch' },
+  error:        { fam: '失败',                sw: 'failure' },
+  suspended:    { fam: '需关注 · 挂起等待',   sw: 'watch' },
+  coordination: { fam: '进度 · 调度排队',     sw: 'progress' },
+  admission:    { fam: '平台闸门 · 准入判定', sw: 'gate' },
+  cache_hit:    { fam: '来源 · 缓存命中',     sw: 'source' },
+  answer:       { fam: '输出流（正文流式）',  sw: 'answer' },
+  done:         { fam: '终止定稿',            sw: 'terminal' },
+};
+
+/* 灯阵三套字典（LAMP_GROUPS / LAMP_WHY / FAKE）与 dotClass / valClass / renderLamps
+ * 已整体搬往 poc-health.html —— 用户 2026-10-30 拍板：灯阵是独立视图，不占对话页第三栏。
+ * 本页因此不再引用 `#lamps`；两个展示面的字段口径由门禁同批校验（见 check-tokens.mjs）。 */
+
+/* ===== 渲染 ===== */
+const el = (tag, cls, html) => {
+  const n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (html !== undefined) n.innerHTML = html;
+  return n;
+};
+
+/* 样例载荷对应栏一那条会话（退票率口径）。刻意**不做成问数专属文案** —— 真相源三处
+ * 一致写的是通用对话入口（docs/TODO.md:98「需新建 SSE 流式对话控制台」）。
+ * route→replan 的叙事保留：先判给 knowledge，再因依据不足追加检索。 */
+const SAMPLE = {
+  route: '判给 <code>knowledge</code> · 依据：问题问的是定义，不需取数',
+  evidence: '命中 <span class="num">3</span> 条 · 预览：退票处理办法 <code>ART-14</code> …',
+  memory: '读 <span class="num">1</span> 条既有口径 · 写 <span class="num">1</span> 条',
+  status: '整理答复中…',
+  cache_hit: '语义缓存命中 · 层 <code>intent</code>（⇒ 本轮没调模型）',
+  answer: '退票率按<strong>已出票中实际退票的比例</strong>计，分母取上季度末有效票量…',
+  admission: '准入判定 <code>allow</code> · 配额余 <span class="num">73%</span>（中性，不表成功/失败）',
+  coordination: '排队 <span class="num">1</span> 位 · 预计 <span class="num">2s</span>',
+  replan: '推翻前判 → 追加 <span class="num">2</span> 轮检索 · 原因 <code>evidence_insufficient</code>',
+  suspended: '挂起等待人工确认口径 · <code>task_id</code> 已写 checkpoint',
+  error: '知识库读取失败（载荷不外泄，只报类型）',
+  done: '定稿 · 一条分隔线，<strong>不覆盖已渲染内容</strong>',
+};
+
+function renderTimeline() {
+  const box = document.getElementById('timeline');
+  box.innerHTML = '';
+  const order = ['route', 'coordination', 'admission', 'status', 'evidence', 'cache_hit',
+                 'memory', 'replan', 'suspended', 'answer', 'error', 'done'];
+  for (const t of order) {
+    const row = el('div', `ev ev--${t}`);
+    row.appendChild(el('span', 'ev__ico', ICONS[t] || ICONS.unknown));
+    row.appendChild(el('span', 'ev__name', t));
+    row.appendChild(el('span', 'ev__body', SAMPLE[t] + (t === 'answer' ? ' <span class="dot-live"></span>' : '')));
+    box.appendChild(row);
+  }
+  // 未识别事件：原文可见、不渲染载荷
+  const unk = el('div', 'ev ev--unknown');
+  unk.appendChild(el('span', 'ev__ico', ICONS.unknown));
+  unk.appendChild(el('span', 'ev__name', 'token_usage'));
+  unk.appendChild(el('span', 'ev__body', '未处理的事件类型：<code>token_usage</code>（载荷不渲染）'));
+  box.appendChild(unk);
+  document.getElementById('tlCount').textContent = `${box.children.length} 条`;
+}
+
+function renderLegend() {
+  const box = document.getElementById('legend');
+  box.innerHTML = '';
+  for (const [t, meta] of Object.entries(EVENTS)) {
+    const row = el('div', 'lg-row');
+    row.appendChild(el('span', `lg-swatch sw--${meta.sw}`));
+    row.appendChild(el('span', 'lg-name', t));
+    row.appendChild(el('span', 'lg-fam', meta.fam));
+    box.appendChild(row);
+  }
+}
+
+/* ===== 主题：偏好写 data-theme + localStorage，不是凭据 ===== */
+const THEME_KEY = 'ap.ui.theme';
+function applyTheme(pref) {
+  if (pref === 'auto') delete document.documentElement.dataset.theme;
+  else document.documentElement.dataset.theme = pref;
+  document.querySelectorAll('[data-theme-set]').forEach((b) => {
+    b.setAttribute('aria-pressed', String(b.dataset.themeSet === pref));
+  });
+}
+document.querySelectorAll('[data-theme-set]').forEach((b) => {
+  b.addEventListener('click', () => {
+    const pref = b.dataset.themeSet;
+    if (pref === 'auto') localStorage.removeItem(THEME_KEY);
+    else localStorage.setItem(THEME_KEY, pref);
+    applyTheme(pref);
+  });
+});
+
+/* ===== 三态演示 ===== */
+/* 字段语义：tl = 时间线**是否显示**（不是“是否隐藏”）。POC 实踩：本表初版把 normal 写成
+   tl:false，而 applyState 用的是 `hidden = !v.tl` ⇒ 取反一次，正常态下 12 行全消失，
+   而计数徽标仍写“13 条”——屏面自相矛盾。改名语义不帮忙，故在这里把方向写死。 */
+const VIEWS = {
+  normal:  { tl: true,  load: false, emptyN: false, empty5: false, errB: false, errS: false, hint: '' },
+  loading: { tl: true,  load: true,  emptyN: false, empty5: false, errB: false, errS: false, hint: '等待 done…（spinner 不是完成信号，A7 只看 done）' },
+  empty:   { tl: false, load: false, emptyN: true,  empty5: false, errB: false, errS: false, hint: '' },
+  error:   { tl: true,  load: false, emptyN: false, empty5: false, errB: true,  errS: true,  hint: '' },
+};
+function applyState(name) {
+  const v = VIEWS[name];
+  document.body.dataset.state = name;
+  document.getElementById('timeline').hidden = !v.tl;
+  document.getElementById('loadingBlock').hidden = !v.load;
+  document.getElementById('emptyNormal').hidden = !v.emptyN;
+  document.getElementById('empty503').hidden = !v.empty5;
+  document.getElementById('errBanner').hidden = !v.errB;
+  document.getElementById('errStream').hidden = !v.errS;
+  /* 计数徽标必须跟时间线同进退：否则空态下会报“13 条”而屏上一条都没有 */
+  document.getElementById('tlCount').hidden = !v.tl;
+  document.getElementById('submitHint').textContent = v.hint;
+  const submit = document.getElementById('submit');
+  submit.disabled = name === 'loading';
+  document.querySelectorAll('[data-state-set]').forEach((b) => {
+    b.setAttribute('aria-pressed', String(b.dataset.stateSet === name));
+  });
+}
+document.querySelectorAll('[data-state-set]').forEach((b) => {
+  b.addEventListener('click', () => applyState(b.dataset.stateSet));
+});
+document.getElementById('submit').addEventListener('click', () => applyState('loading'));
+
+renderTimeline();
+renderLegend();
+applyTheme(localStorage.getItem(THEME_KEY) || 'auto');
+applyState('normal');
+</script>
+</body>
+</html>

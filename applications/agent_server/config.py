@@ -36,13 +36,11 @@ class Settings(BaseLLMSettings):
     # 联网搜索
     search_api_key: str = ""
 
-    # Text-to-SQL
-    sql_dsn: str = ""
-    sql_max_rows: int = 100  # LLM 上下文窗口约束，区别于 nl2sql-service(1000)：本服务将结果注入 prompt，需严格控制 token 数
+    # Text-to-SQL 数据面已移交 nl2sql-service（ADR-0011 选项 A）：平台侧刻意不留
+    # sql_dsn / sql_max_rows——它们在 2026-10-28 批次 5 随 `/health` 的 sql_backend 假灯一并
+    # 退役（全仓零消费点）。要重新注入请先证明平台自己会读它，而不是为了「让某盏灯亮着」。
 
-    # 健壮性
-    cache_enabled: bool = True
-    cache_threshold: float = 0.05  # 余弦距离阈值，小于该值视为同义命中
+    # 健壮性（语义缓存配置统一由 agent_runtime.cache 读取，见 ADR-0013 C）
     memory_enabled: bool = True
     memory_extraction_enabled: bool = False  # 优化 H：LLM 抽取结构化事实（默认关，无 LLM 时退化存原文）
     memory_forget_threshold: float = 0.1  # 优化 H：低价值记忆惰性淘汰阈值（importance）
@@ -129,6 +127,11 @@ class Settings(BaseLLMSettings):
 
     # CORS：允许的前端来源（逗号分隔），为空时默认回环 127.0.0.1:5173
     cors_allow_origins: str = ""
+
+    # 前端视觉层构建产物目录（PR-0 刀⑱）：空 = 自动探仓库根下 web/dist。
+    # 目录不存在则不挂 /ui（保住 AGENTS.md 明文的零依赖冒烟路径）；显式配了却指到空处
+    # ⇒ 启动记 WARNING，不静默跳过 —— 与 Dockerfile 里 langfuse 那段「关了与坏了分不清」同族。
+    web_ui_dist: str = ""
 
     # Remote Skill 端点（P1：重服务 HTTP 调用）
     knowledge_service_url: str = ""  # 空 = 不注册 knowledge skill

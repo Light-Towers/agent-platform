@@ -14,7 +14,7 @@ dependencies = [
     # PyJWT 走其 [identity] extra（惰性导入：只有真收到令牌才 import）。
     "agent-runtime[identity]",
     "shared-schemas",
-    "fastapi>=0.115",
+    "fastapi>=0.159.1",
     "uvicorn[standard]>=0.54.0",
     "langgraph>=1.2.10,<2",
     "langchain-core>=0.3",
@@ -35,6 +35,16 @@ dev = [
 ]
 huggingface = [
     "langchain-huggingface>=0.1",
+]
+# OTLP 导出软依赖（镜像装配点见 Dockerfile.nl2sql-service）：本包 api/server.py 直调
+# agent_core.tracing.init_tracing，自建 provider 时需 OTLPSpanExporter；缺它则观测状态机
+# 落 DEGRADED 而服务照常 healthy（“配了但不报”那一类）。
+# 下界与根 [otel]、agent-core [tracing] 归一（lint L-4 防组合解析回溯）；
+# 不声明 langfuse：本包无 get_langfuse_callbacks 调用点，注上就是死键。
+otel = [
+    "opentelemetry-api>=1.45.1",
+    "opentelemetry-sdk>=1.45.1",
+    "opentelemetry-exporter-otlp>=1.45.1",
 ]
 # TOKENIZER=jieba 时才需要；缺包会告警并降级 bigram
 tokenizer = [

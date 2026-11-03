@@ -14,6 +14,7 @@ from agent_core.guardrails.auth import (
 )
 from agent_core.guardrails.input_guard import (
     detect_injection,
+    detect_pii,
     guard_input,
     redact_pii,
 )
@@ -131,6 +132,36 @@ def test_detect_pii_redacts_phone_and_email():
     assert "13800138000" not in redacted
     assert "a@b.com" not in redacted
     assert "phone" in types and "email" in types
+
+
+def test_detect_pii_catches_digits_adjacent_to_cjk():
+    # CJK 是 `\w`，`\b` 在"卡"与"6"之间不成立；这组用例钉住中文紧邻场景
+    assert "bank_card" in {f["type"] for f in detect_pii("银行卡6222020200112233445")}
+    assert "id_card" in {f["type"] for f in detect_pii("身份证110101199001011234")}
+    assert "ip_address" in {f["type"] for f in detect_pii("IP是192.168.1.1")}
+
+
+def test_redact_pii_catches_digits_adjacent_to_cjk():
+    redacted, types = redact_pii("银行卡6222020200112233445")
+    assert "6222020200112233445" not in redacted
+    assert "bank_card" in types
+
+
+def test_redact_pii_leaves_no_partial_id_digits():
+    # phone 若先匹配会吃掉身份证中间 11 位，脱敏后残留 "身份证110101[PHONE]4"
+    redacted, types = redact_pii("身份证110101199001011234")
+    assert redacted == "身份证[ID_CARD]"
+    assert "id_card" in types
+
+
+def test_redact_pii_redacts_plus86_phone_whole():
+    redacted, types = redact_pii("+8613800138000")
+    assert redacted == "[PHONE]"
+    assert types == ["phone"]
+
+
+def test_detect_pii_ignores_short_digit_runs():
+    assert detect_pii("订单号12345678901234") == []
 
 
 def test_detect_injection_matches_ignore_instructions(monkeypatch):
