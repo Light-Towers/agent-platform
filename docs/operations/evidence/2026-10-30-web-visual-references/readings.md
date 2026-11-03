@@ -3812,6 +3812,49 @@ remote:   https://github.com/Light-Towers/agent-platform/security/dependabot/211
 
 挂项三条：① 公开侧 Dependabot 告警（§38.4）待人定性；② 镜像下一轮同步得重新选源（现源 = 本刀 commit，同步开工前最后一个入库 commit），且公开侧现 tip 已动 ⇒ `--base` 必须随 live 读数换；③ 本刀 commit 本身也不在 16:26 那一趟里（同一把尺子），它是下一趟内网推送的对象。
 
+⇒ 挂项③ 已在同日内被 **§38.7** 消费（人拍「现在推」）；那句原文不回填，它是当时真写的账面状态。
+
+### 38.7 内网第五趟（收尾同一刀，不开新一刀）：本刀 commit 当日推出
+
+三条批示同时拿到（现在推 / 告警只要定位与建议 / 下一刀 = PR-2），所以本节补上 §38.6 挂项③ 的执行读数。**推前按当天最终 rev 重校**：L3 深度安全审查跑在 `b7104e90` 上 ⇒ **findings_count = 0**（本节下面所有读数都在这一句之后）。
+
+- PROBE（件 e29-push-kit-20261103-173005-probe.txt）：`blockers = 0`・`REAL-DIRTY=0 / UNTRACKED=0`・后端面 declared-set `3/3`、`OUTSIDE-DECLARED: 0`・现取 `verdict=READ-OK`（lines=6 / heads=3 / advisory=3）、判据自测三例 READ-OK/NO-READ/NO-READ・`--dry-run` 被服务端接受（`2a67e5d4..b7104e90`）・`Tuesday 17 IN-WINDOW`（六例注入 mismatches=0）。
+- EXECUTE（件 e29-push-kit-20261103-173028-execute.txt）：`feat/web-visual-poc` **push rc=0**・`2a67e5d4..b7104e90` 快进（无 `+` 无 forced update）・`lineage/…` 是 `Everything up-to-date`（零写入）・件内 post 读 `refs/heads/main = fe22794c` 逐字未动。
+- **换具独立复取**（件 k36-173052-retake-indep.txt，不读推送件自己的结论）：裸 `ls-remote --heads company` rc=0・3 条 head + 3 条 advisory；`rev-list --left-right --count` 逐条 `feat = 0/0`、`lineage = 0/0`、`main = 2/677`（后者仍沿用 §36.4 的逐侧定性，不重取）。
+
+按 §38.3 新立的那条口径，本趟 `remote:` 那几行也逐条定性了：内网侧那行是 GitLab 提示可以开 MR（`<internal-gitlab>` 端点），**它不是本批要的对象**（用户已拍不合 `company/main`，MR 未创建）、也不是噪声（它说的是服务端真的在等一条 MR）。另三行 `** WARNING: … post-quantum …` 是 OpenSSH 10.x 客户端对 `<internal-host>:30001` 的服务端版本提示，与推送结果无关，已在 READ-OK 那格里当 advisory 计数而不是读失败。
+
+⚠ 一条连带坑（本节自己写的时候抬出的）：**台账本身在镜像整树同步的射程内**，所以把 `remote:` 那几行原文拄进这里就是把内网坐标写进公开树。写法必须按在册词形替（`<internal-gitlab>` / `<internal-host>`）。
+
+但真正贵的一条不在这里，而在**验它的量具看不到它**：`lint_public_mirror.py` registry 模式的枚举口径是 `git ls-tree <ref>` + `git grep <ref>`（文件头 P-5 就写着“版本控制清单而不是本机文件系统”），而 `--ref` 默认 `HEAD` ⇒ **本刀新写的散文根不在被扫的树里**，先跑一次 `@ HEAD` 拿到的 rc=0 等于没扫（与在册「自证格会不会永远绿」同族，只是这次绿的是门禁自己的覆盖面）。处置 = 用 **`git stash create`** 造一个待提交态的 commit 对象（只造对象，不写 ref、不动工作树、不进 stash 栈），再拿它的 sha 去跑同一具量具。实取：pending 树 = `cdd70c10`，registry 模式 `--ref cdd70c10` ⇒ 携带内网标识的仓内文件 **1 个** / 命中 **1 行** / 登记 **1 项** / **违规 0 警告 0**・**rc=0**；同时 `git stash list` 返 **0 行**、`git status` 仍为两条 `M` ⇒ “不动任何东西”是复取到的而不是假设。另记：`stash create` 不收未跟踪文件，而本刀面正好全在已跟踪件上，所以那棵 pending 树等于待提交态（若本刀带新文件，这一格会少扫那些件，必须改成先入库后复跑）。
+
+口径：**逐条定性与词形替换不冲突 —— 要的是「那行报了什么」，不是「那行原文长什么样」；而“验新内容的门禁”必须先进证它看得到新内容（拿 pending 树跑，不拿 HEAD 跑）。**另记一句：上面的 `cdd70c10` 是写到一半时的 pending 树；提交前最后一跑重新取了一次（pending = `95eba755`，同一组读数 1/1/1・违规 0 警告 0・rc=0・`stash list` 仍 0 行）—— pending 树是个**会随下一笔编辑作废的临时量**，引用它就得重取。
+
+### 38.8 公开侧 Dependabot #211 的定位（人拍「我给依赖定位与建议」，GitHub 面的动作不由本代理做）
+
+读数通道：本机 `gh` 已登录该公开仓的账号，走了一次**只读** API（`gh api repos/<公开仓主>/agent-platform/dependabot/alerts/211`，件 k36-173153-dependabot-211.txt；本代理未做任何写调用）。告警实物：
+
+| 字段 | 实读 |
+|---|---|
+| 包 | `dnspython`（ecosystem `pip`，manifest `uv.lock`，`version_requirement = "= 2.8.0"`，scope runtime） |
+| advisory | `GHSA-45c3-73f7-pv4m` / `CVE-2026-114605`・**high**・`dns.name.from_wire_parser()` 对恶意构造 DNS 报文解压时 CPU 失控（DoS） |
+| 修复版 | 2.9.0（advisory 原文「fixed in dnspython 2.9.0」，无已知规避） |
+| state | `open`・住在 **default 分支**（公开 `main` = `88515cab`） |
+
+依赖链（全在仓库内实取，不推论）：`dnspython` 在**任何** pyproject（根 + 3 包 + 6 应）里的**直接声明 = 0 处**；`uv.lock` 里指向它的 `requires-dist` 边也只有 **1 条**，来自 `pymongo 4.19.0`；而 `pymongo` 在 `agent-core` 只在 `memory` / `memory-mongo` 两个 extra 下（lock L118/119）、在 `agent-runtime` 是无条件 `>=4.17.0`（lock L2617）。另两格可核读数：全仓 `import dns` / `from dns` **0 处**；`mongodb+srv` 在 pyproject / uv.lock / deploy **0 处**（`.env.example` 里那行是注释形态的 `mongodb://localhost:27017`）。
+
+⇒ 三档建议（拍哪档由人定，本代理不动代码也不动 GitHub）：
+
+1. **升 `dnspython` 到 2.9.0（代价最低的真修复）**：`uv lock --upgrade-package dnspython` 应当只动一个版本行（上界由 pymongo 给的 `<3.0.0` 类约束容纳）；验证按在册分层 = `uv sync` + 受影响 session（memory/milvus 那几条）+ `make lint`（不碰 OTel trio，L-4 不触发）。**但这一档单独并不能消 #211**：告警住在 default 分支，而本仓往公开侧推的是 `mirror/…` 分支。
+2. **GitHub 面 dismiss（零代码）**：理由可选 “Not reachable / Never used”，证据就是上面那四格读数（0 直接声明・1 条边来自 pymongo・0 import dns・0 srv URI）。**代价要说清**：dismiss 消除的是这条告警不是这个版本；若日后引入 `mongodb+srv://` 连接串（pymongo 拿 dnspython 只为解 SR 记录），暴露面就从“不可达”变成“可达”，而彼时不会再有告警提醒。
+3. **切掉 `pymongo`**（最彻底但属架构动作）：它是 Mongo checkpointer 那条链（`MONGO_URL` 未配则降级 `InMemorySaver`），不在本刀射程，需另开方案。
+
+⚠ 一条结构读数入册（这一格最容易被读错）：**告警住在哪条分支，就决定谁能消它** ——§38.3 那一趟把 `a6753c9c` 推上了 `mirror/…` 分支，而 #211 说的是 default 分支 ⇒ 推镜像**不会**动这条告警的计数。读 §38.3 那句「PR-0/PR-1 骨架至此真的到公开侧」时不得顺手读成「公开侧安全面也前进了」——两者不同轴；真要在公开 `main` 上升 dnspython，那是**动公开默认分支**（同时把后续 `--base` 基线从 `88515cab` 抬走），属 D3 且需单独拍。
+
+⇒ 下一刀对象已拿到：**PR-2**（页面/组件消费 `sse.ts`，能收 A2 前半 / A3 / A7 那几条屏上格）。本刀一行产品代码未动。
+
+⚠ 本节自己抬出的一条取数瑕疵（入库前改掉）：上面那句里的件号初稿写的是 `k36-173133-…`，实物是 `k36-173153-…`。件名里的时刻由 `Get-Date` 现取，但把它拄进散文时是手抄的 ⇒ 口径补下半句：**在册「件名必须带 HHmmss」只保证不撞名，不保证拄进文档的那串数字对；引用件名前必须跑一次列目录对名。**
+
 
 
 
