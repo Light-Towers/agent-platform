@@ -3459,6 +3459,38 @@ git grep -n --untracked streamQuery -- web applications
 - 一条本批顺手清掉的干扰：造完提交后 `git status --short` 抬出 `web/src/` 三个 .vue 为 M，现取 `git diff --quiet HEAD -- <那三件>` = **rc=0** ⇒ 纯行尾待归一（与 §五第 3 条、刀⑰ 断言 5、§32.8 行 3 同一型：行尾伪装成内容改动），已 `git checkout --` 还原为干净态，内容零风险。门件量到的 `$face`（`git diff --name-only HEAD`）本就是 0，所以它没进过任何一格判决。
 - V 判据、PR-2/3/4、其余 7 条本地分支逐条判定、`make test` 全量十 session：本批一条未动。
 
+### 34.7 两个后续：取证件的「数为 0」那一格，与镜像树的内容来源必须是本批最终 tip
+
+**(a) e27 取证件的非文档格把「零」报成拒判，本批是第一把走到那支的刀。**
+
+提交 `e8485874` 的取证件跑完六格，其余全 matched，只那一格读：`non-docs-paths=0 allowed-list=[] unallowed-non-docs=0 <<< REFUSE: no allow-list passed, cannot judge`。本刀确实没动任何非文档路径，**但拒判不是判定**：操作者「真的没什么可申报」与「忘了传 `-AllowNonDocs`」两种输入在这一格里给出同一个读数 ⇒ 它是 §32.4 那条在册口径（「新增一个数东西的格必须同时回答数为 0 时它报什么」）在自家取证件上的实例，也与 §32.4b（门件把合法申报集读成腐坏）同族。
+
+换形只动 0 那一支：`($allowRaw -eq '') -and ($ndCount -eq 0)` ⇒ 判为 `NOTHING-TO-DECLARE`；**有非文档项而未申报 ⇒ 照旧 REFUSE**（一支没放宽，所以这不是把门拆了）。当场自证：新增 `ND-VERDICT SELFTEST`（四例：零申报 / 有项未申报 / 全申报 / 漏一个），实取 `mismatches=0`。
+⚠ 自证本身也踩过一次：四例里「全申报」那例原先拿 `want='declared'` 做子串匹配，而 **PowerShell 的 `-match` 大小写不敏感**，`declared` 是 `UNDECLARED PATH` 的子串 ⇒ 错分支也能过关（自测自己先漏齿）。改 `want='was declared'` 后才有牙。
+
+**(a2) 顺着这一格往下查，抬出更重的一条：陈旧申报被当成已申报连报了五轮。**
+
+把本件此前的落盘件逐轮拉回看（`non-docs-paths=` 那一行），五轮都是同一个形状：`non-docs-paths=0 allowed-list=[web/README.md AGENTS.md ARCHITECTURE.md] unallowed-non-docs=0 => every non-docs path was declared`。但 `git show --name-only` 逐把核实：那几把刀**全是 docs-only**，面里根本没有这三个路径 ⇒ 那句「every non-docs path was declared」当时描述的是**一串已经不存在的申报**。危害不是读数难看，而是它可以被当免检牌带着走：下一轮真改了 `AGENTS.md`，这一格会直接判它「已申报」而不再问一句「这轮真的动了它吗」。
+
+同一件事在 4b（后端累计面）是有齿的（`STALE-DECLARED` + 一句「update it this round」），两格同族不同形 ⇒ **一具量具里同类判据必须同形**，否则人只会记住「那格报过红」而不知道这格不报。补法：新增 `stale-declared=N`（申报项在本刀非文档面里找不到 ⇒ `<<< STALE-DECLARED`），分支顺序上放在 UNDECLARED 之后（漏报比陈旧报更先响）；自测扩到五例（加一例陈旧申报）。
+
+| 格 | 跑法 | 读数 |
+|---|---|---|
+| 真面 | docs-only 刀不传清单 | `non-docs-paths=0 … stale-declared=0 => NOTHING-TO-DECLARE`・`ND-VERDICT SELFTEST (in-memory, 5 shapes) => mismatches=0`・件 `-133356` |
+| 真面反证 | 把历史上那串陈旧申报原样喂回 | `stale-declared=3 [web/README.md AGENTS.md ARCHITECTURE.md] <<< STALE-DECLARED`・件 `-134137` ⇒ **新齿在真数据上咬到了五轮前那个错报** |
+
+⇒ 一句口径：**申报制的价另一半在「申报项必须存在」**。只拦「动了未申报的面」而不拦「申报了没动的面」，台账就只能靠人不靠件地长胖，胖到最后那串申报就是一座没人住但还交着税的房子。
+
+那五轮的错报**不回头改**（它们的落盘件在 gitignored 目录里，本身就是取证线索）；只在登记里定性：那几轮的 2a/2b/3/4a/4b/5/6 七格读数均有效，只有那一格的「已申报」措词当时不成立。
+
+**(b) 镜像树的内容来源必须是本批最终 tip —— 否则公开侧会拿到一句指向前向引用的注记。**
+
+遮罩后那份 ADR 的 L7 注记写着「差异登记见内网仓 `docs/operations/evidence/2026-10-30-web-visual-references/readings.md` §34」。而 §34 是本批才新建的节 ⇒ 若镜像树取自 `e089f69f`（§34 不存在的那棵树），公开读者顺着这句去查会撞一个空。**排序因此只能是：先把台账写完并入库 ⇒ 再以那个最终 tip 为源重建镜像提交。**本节先入库，重建与三格复跑在它之后执行，读数随本批下一件入库（本节不预判它的内容，也不以节号前向引用——否则镜像树里那份 readings.md 会含着一句指向不存在之节的注记，正是本条要修的同一型错）。**取代成本 = 0：被取代的那一棵从未离开本地 ref，公开侧零写入。**
+
+同时记一条恒真的限制：**提交不能包含自己的 sha** ⇒ 台账里不印镜像提交的 sha（印了就为它再造一个需要被记录的 sha，这是无限追）。公开侧要现取：`git rev-parse mirror/nl2sql-ttl-and-006-slim`；而本件 §34.5 那轮读数里出现的 `6154c910` 是**已被取代的中间产物**（它只存在于当时那个本地 ref，公开侧不会有它），这句就是它的定性处，不必回去改已入库的那一行。
+
+⇒ 可复用的口径（下一批同步镜像时直接适用）：**镜像同步的源 = 本批最后一个入库 commit；台账只引用「可现取的坐标」（分支名 + 命令），不引用未入库的 sha。**
+
 
 
 
