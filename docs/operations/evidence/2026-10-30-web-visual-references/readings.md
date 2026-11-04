@@ -4052,6 +4052,61 @@ remote:   https://github.com/Light-Towers/agent-platform/security/dependabot/211
 
 **门件首跑被我自己抬红一次，成因不在内容**：本轮跑门件时我**没传 `-AllowCsv`**（申报集为空），于是 `GATE_RC=`**RED**、`red-marker lines = 4`，四格同时抬出：`DECLARATION-MALFORMED`（allow-count=0）、`FACE-FORBIDDEN`（两件文档被算成未申报面）、`NO-DECLARATION`、以及 `A-selftest-1` 的 `forbidden=2 (expect 1)`。逐格定性：这是**量具的 fail-closed 正确行为**，不是产品面红 —— 申报制一旦为空，FORBIDDEN 就成立不住，那正是 §28.4 那一族（读数目起来像在报事实，实际不参与结论）的反面：它**参与了**结论。RED 件保留不删（件名 `e26-gate-00-20261104-010311-gate-fill.txt`），它比 GREEN 件多证一件事：那道门确实拦得住不申报的跑法。补上传申报集后的那轮才是 of record，它的件名只进本刀提交信息（上面刚立的口径）。⇒ 追加一条操作面：**门件不是“跑一下就会绿”的脚本，申报集是它的输入；每刀得把本轮实际入库面递进去**（递空 = 自拒，递错 = 假绿，两个方向都不得当成内容读数）。
 
+## 40. 第三十三批（2026-11-04，刀㊵）：白天窗口把九步链条第一次在现网实跑通・七格全绿・把「上线」拆到第三层才发现没到
+
+本批**零代码改动**（除账面），产出全是现网读数；所有读数绑同一对象 = `d4d3d329`（既是推送 tip，也是 Pod 内 `GIT_REV`，也是镜像 label）。序号 ㊵ 是按码点 `U+32B5` 现取确认的，不是把上一刀的 ㊴ 手加一——§39.14 那条字形纪律第一次用在自己身上。
+
+### 40.1 九步逐格（每格绑件，件都在 .tmp-scratch/ap-visual/，gitignored 故不写反引号）
+
+| 步 | 字面命令（形状） | 现取值 | 判据 |
+|---|---|---|---|
+| 0 基线 | `git rev-parse HEAD` / `git status --porcelain` / `Get-Date` | 09:02:46 星期三・HEAD = `d4d3d329`・0 行・ahead = **5** | 窗口内、干净、待推 5 件 ✅ |
+| 1 校验 | L3 深度安全审查 @ 当天最终 rev | findings = **0** | 允推 ✅ |
+| 2 推送 | e29-weekday-push.ps1 -Execute（件 e29-push-kit-20261104-091556-execute.txt） | blockers = **0**・feat push rc = **0**・`b7104e90..d4d3d329`（无 `+`，非 force）・lineage `Everything up-to-date`・`main` = `fe22794c` 未动 | 换具独立复取：`git ls-remote company` → feat tip `d4d3d329`・`rev-list --count company/feat..HEAD` = **0** ✅ |
+| 3 代码上 241 | ssh 现取 base → 派生命名 → create → verify → scp → fetch + checkout | 241 现读 HEAD = `896f966e`・dirty = **0**・count = **74**・create rc = **0**・`is okay`・**1,285,505 B**・scp rc = **0**（两侧字节数同串）・241 checkout 后 HEAD = `d4d3d329`・dirty = **0** | §39.14 那条「运行时派生」今天第一次真跑，base 是 ssh 现取值而不是账面值 ✅ |
+| 4 构建 | build_with_io_guard.sh（`IO_LIMIT=80 IO_STRIKES=6 IMAGES=agent-platform:dev`，目标显式列 125/126/241；件 k41-build-d4d3d329.log） | build rc = **0**・A1 OK（镜像内 import 真成、langfuse 5.1.0、label = `d4d3d329`）・三台各 `OK`・**回读**三台 containerd-k8s 同一 ID `4bbdebd996a72`（1.78 GB）・越线计数 = **1**（未连续到 6）・结束前 PSI avg10 = **46.21** | 放宽口径没把守卫变成摆设：那一次 85% 被记下而没误杀整轮 ✅ |
+| 4b 同盘代价 | docker inspect 七容器（件 k41-241-postbuild.txt） | `lf-langfuse`/`-worker`/`-clickhouse`/`-minio`/`-db`/`-valkey`/`exhibition-dashboard` 全 **restarts = 0**、有健康检查的四个仍 **healthy**、`started` 仍是 **2026-10-13T07:14** | 与 AGENTS.md 那条 10-28 在册基线**逐字一致** ⇒ 这轮构建没打死观测栈 ✅ |
+| 5 rollout | `rollout restart` + `rollout status --timeout=420s` | `successfully rolled out`・新 Pod = `agent-platform-c7bcffcbc-znwcz` 落 **ambari02（125）**・restartCount = **0** | D2 已批的那一步；落点见 §40.2 第 1 条 |
+| 6 verify.sh | `verify.sh d4d3d329…`（件 k41-verify-sh-126.txt + k41-close-126.txt 第 1 格） | **VERIFY_RC = 1**；红在唯一一格：`image rev: 3cd5580f…` ≠ 期望；L0 三节点 Ready / L1 workload / L2 `/health` 三格过 | 那一格为什么必然红见 §40.4 第 1 条 |
+| 6b 权威 rev | Pod 内 `cat /srv/agent-platform/GIT_REV`（件 k41-pod-pre-126.txt） | `d4d3d3290e237ba080288ef77b6b76c7536d038b`・`web/dist/` 在位（index.html **1,701 B**，mtime 01:19 = 构建时刻） | 对象绑定成立，后面所有现网读数才许引用 ✅ |
+| 7 探针 | 七格探针送进跑着的 Pod（件 k41-probe-126.txt；送件 md5 自检 local = pod = `9903b317…`） | 逐格 verdict：`C1 REV-BOUND`・`C2 UI-200-NOSTORE-SHA-MATCH`（`d4a4297e0847`）・`C2-positive-control CTRL-DIFFERS`・`C3 ASSET-200-SHA-MATCH`（`a4dc4f089157`）・`C4 CONTROL-404`・`C5 SHAPE-READ`（422・`detail-array`）・`C6 STREAM-OK`（200・**6 帧**・`answer/done/evidence/memory/route/status`）・`C7 CONTINUITY-READ`（200・`tenant-default`） | **fails = []**・`PROBE_RC = 0`・`ALL-CELLS-OK` ✅ |
+| 7b 外部字节 | 本机走 126:18000 取 HTML 引用的每一跳（件 k41-ui-bytes.ps1 输出） | `/ui/` 200・**1,701 B**・`d4a4297e0847`；`.js` 200・**86,234 B**・`7ea974192672`；`.css` 200・**14,275 B**・`a4dc4f089157`；三者 `cache-control` 均 `no-store` | 三个 sha12 与 Pod 内 `sha256sum` 前 12 位**逐字相同** ⇒ 浏览器那一跳拿到的就是产物本身 ✅ |
+| 8 收口 | 件 k41-close-126.txt | 三方 `date -u` 01:47:36 / 37 / 37・svc 全 ClusterIP・namespace 内 Ingress = **0**・新 Pod 事件 5 条（含 `Unhealthy count=3`）・`/health` 17 键逐项 | 见 §40.2 与 §40.4 第 4/5 条 |
+
+### 40.2 这轮第一次量到的三格现网事实
+
+1. **Pod 换节点了**：此前恒落 ambari01（241），这轮滚动后落在 **ambari02（125）**。这正面验证了在册那条硬规矩——从 241 跑分发必须显式列 `125 126 241`，漏一台则该台没有镜像层，而部署无 nodeSelector ⇒ 调度过去就是 `ErrImagePull`。本轮三台都有同一 ID，所以这次调度是自由的而不是撞运气。
+2. **语义缓存在现网是降级运行**：`cache_backend = valkey` 而 `cache_ready = false`，降级成因是 `Error 111 connecting to localhost:6379`（连接被拒）。这不是本轮引入（`/health` 早已这么报），本轮做的只是把它与 `embedding_real = true`、`langfuse_ready = true` 分开登记，免得下轮把三条混成「观测/缓存/嵌入全好」。**未列为本轮上线门**（判断：它不属 `web/` 交付面），但登记在此，处置待拍。
+3. **冷启动窗口内 liveness 失败 3 次**：新 Pod 事件里 `Unhealthy count = 3`，绝对时间 `01:43:14 → 01:43:24`，随后转 Ready、`restartCount = 0`。它与旧 Pod 那 **5 次 `Killing`**（liveness probe 超时）是同一机制的两端：盘慢时探测窗口不够用就重启。⇒ 这是**脆弱点登记**，不是本轮故障；旧 Pod 5 次重启的归因见 §40.4 第 4 条，结论不变。
+
+### 40.3 「能交付上线一版嘛」拆三层之后的现值
+
+- **代码层：已到**。五件推送（非 force、`main` 未动）→ bundle → 241 checkout → 构建（rev label 绑定）→ A1 → 三台分发 → rollout → Pod 内 `GIT_REV` = `d4d3d329`。
+- **服务层：已到**。`/ui/` 与它引用的两条 asset 在现网 200 + `no-store` + 逐字节同产物；对照格真 404（SPA fallback 没把不存在的路径喂成 200）；SSE 真流 6 帧且含 `done`；错误分支读到真实形状 422 + `detail-array`。
+- **用户层：未达**。Service 只有 ClusterIP、namespace 内 Ingress 数 = **0**、无 nodePort ⇒ 现在唯一的进入路径是 port-forward（本轮就是走 126:18000 这条 ops 通道）。所以「上线一版」这句话**在用户可达这一层还不能说**；要说，得先拍 §40.5 第 1 项。
+
+### 40.4 六条量具面事实（全是本轮自犯，逐条给处置）
+
+1. **`deploy/k8s/scripts/verify.sh` 的 `GIT_REV` 格读的是错的库**：它用 `docker run --rm agent-platform:dev cat /srv/agent-platform/GIT_REV`，而 126 上 moby 那套库里这个 tag 指向 `9d72645cbafc`（旧内容，`GIT_REV = 3cd5580f…`），跑着的 Pod 用的是 containerd-k8s 那套（`4bbdebd996a72`）。⇒ 同 tag 两套内容时这一格**必然假红**，而真对象（Pod 内）本轮已单独读到 `d4d3d329`。这正是 AGENTS.md 126 §4「读镜像内容要从跑着的 Pod 读，不要 `docker run`」第一次在部署件里被照出来。处置 = 把那一格换成 `kubectl exec` 读 Pod，属代码改动，**本批不动**，列 §40.5。
+2. **PowerShell 5.1 的 `$w.Content` 不能用来算 sha**：它按内容类型解码成字符串，对**没带 charset** 的 `application/javascript` 会用默认码页，再 UTF-8 编回去时字节就变了 ⇒ 我第一次量到「外部 `.js` sha12 与 Pod 内不一致」，而带 `charset=utf-8` 的 `.css` 却对上了。换 `RawContentStream.ToArray()` 后三件全逐字相同。**这是量具错，不是部署错**，顺序很重要：先把自己那把尺子排掉，才有资格说现网不一致。
+3. **`pgrep -f 'build_with_io_guard|distribute.sh'` 会匹配到自己**：我那条 ssh 的 argv 里就含这两个词，于是「还在跑」被自我证实了一次。处置 = `pgrep -af` 打印全命令行核对，或用 `[b]uild` 那种括号形断开匹配。
+4. **126 的钟在两轮之间被 step 回来了**：09:08 那轮三方 `date -u` = 241 `01:08:34Z` / 125 `01:08:36Z` / **126 `2026-11-03T10:28:55Z`**（慢 14 h 39 m）；09:47 这轮三台为 01:47:36 / 37 / 37，差 ≤ 1 s（`chronyd inactive` 而 `NTPSynchronized=yes` ⇒ 走的是 systemd-timesyncd 那一路）。⇒ 两条口径：① 在 126 上取的一切**相对**读数（`AGE`、`Xm ago`、`--since`）用前必须先与 241 对表；② **不同组件盖章的绝对时间戳不可直接互比**——`NodeNotReady` 由 control-plane 上的 node-controller 盖，`Killing` 与 `startedAt` 由 Pod 所在节点的 kubelet 盖。本轮旧 Pod 的归因不受影响：两套章在同一场事件上只差 6 秒（`10:20:19` 与 `10:20:25`），说明盖章时 126 的钟还没偏，「昨晚 18:20–18:22 那一场、今天无新故障」这个结论保持；被推翻的只是「3–6 分钟前刚发生」那个由慢钟折出来的表龄。
+5. **数资源不能数文本行**：`ingress_count = $(kubectl get ingress --no-headers | wc -l)` 读出 **1**，而那 1 行是 `No resources found in agent-platform namespace.`。真实值 = **0**。处置 = 数 `-o json` 的 items 长度。这与 §39 那族「猜列 / 猜字段」同型（本轮又同型犯了一次，见第 6 条），共同根因是**先给判据后读形状**。
+6. **`docker ps --format` 没有 `RestartCount` 这个字段**：该 docker 版本报 `can't evaluate field RestartCount in type *formatter.ContainerContext`，读空会被误读成「容器不在位」。处置 = `docker inspect --format` 取 `.State.RestartCount` / `.State.Health.Status` / `.State.StartedAt`（§40.1 的 4b 就是这么读的）。
+
+### 40.5 待人拍（本批一条代码都没动，正是因为这几项不由我定）
+
+1. **用户可达那一层开不开、怎么开**（Ingress / nodePort / 复用现有网关三选一）。口径要先定：开了这一层，「可对用户交付」这句话才有载体。
+2. **`x-trace-id`**：`C5` 与 `C6` 两格都读到「响应头里没有 `x-trace-id`」。它是横切关注点，按《架构决策原则》要走全局单一实现 + 统一装配 + 门禁三件套，**不许每处加一个头**；另刀先出方案再动。
+3. **`verify.sh` 那一格换形**（读 Pod 而非宿主 moby），见 §40.4 第 1 条。不改的话每次部署都会白抬一次红，而白抬的红会被当成真红处理。
+4. **`cache_ready = false`（valkey 拒连）是否进上线门**：我的判断是不进（既有降级、非本批引入），但这条判断属口径变更，得人点头。
+
+### 40.6 本批诚实边界
+
+- **浏览器级交互没做**：要往表单里递 `API_KEY`，密钥不进转写也不落账，所以这一格空着。它由 C6/C7（Pod 内同一条 HTTP 链路）+ 本机 V4 实拍通道共同覆盖，但**这不等于「浏览器实测通过」**，那句话本批不说。
+- **单副本不构成故障转移证据**：探针只跑在 ambari02 那一个 Pod 上，deployment 本就 1 份。V3 那条「双实例物理故障转移」验收**仍未达，不改口**。
+- **所有现网读数绑 `d4d3d329`**：下一次滚动之后必须复跑才能引用（在册 R14）。件名随本轮最后一次文字编辑而变，门件 of record 只引最后一次编辑之后那一轮。
+
 
 
 
