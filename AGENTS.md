@@ -108,12 +108,15 @@ DATABASE_URL= uvicorn agent_server.main:app --port 8000  # 零依赖冒烟
 
 ## 观测面与现网取证的硬规矩（2026-10-13 起；全部坑档见 `docs/operations/observability-pitfalls.md`）
 
-> 本轮接 Langfuse 时踩出来的五条，最常重复犯：
+> 本节头部五条是本轮接 Langfuse 时踩出来的，后续三条（6–8）是取证量具本身形状带来的同类盲点，最常重复犯：
 > 1. **状态灯亮 ≠ 数据到**：`/health` 报 `otel_status=ACTIVE` 的同时 Jaeger 面可以整体静默瞎掉。观测类验收判据必须是"**后端里查得到本次原文**"，不是状态字段。
 > 2. **共用进程级全局单例时，装配顺序就是正确性**：Langfuse 客户端构造会抢全局 TracerProvider ⇒ `init_tracing` 必须**早于**模型构造（`applications/agent_server/main.py` 里有"别挪回去"的顺序注释）。OTel provider / 事件循环 / 连接池 同族。
 > 3. **现网读数必须绑定当时的 Pod `GIT_REV`**：换 rev 滚动后要复跑。"Jaeger ✅"写在手册里而现网为假，就是漏了这条（部署快照见 `docs/operations/env-126-inventory.md` §4.11）。
 > 4. **读镜像内容要从跑着的 Pod 读**（`kubectl exec`），不要 `docker run`——moby 与 containerd-k8s 两套库互不可见，`docker run` 可能读到中止构建的残留；且**构建机自身的 containerd-k8s 要补一次本地导入**，否则可变 tag + `IfNotPresent` 下是"静默跑旧代码"而不是报错。
 > 5. **读"另一个系统"的数据前，先读它的形状**，别照文档猜：SSE 事件帧是**平铺**的（`d["payload"]` 恒空）；Langfuse v4 `events_only` 撤了 `/api/public/traces`，读径是 `v2/observations?fields=io,usage`（猜错的 fields 名**静默返回不含该键的行**）；载荷是**多层 JSON 编码**的 `\uXXXX`（中文 needle 恒 miss 而 ASCII 命中）；异步后端**先命中≠全到**；命中语义缓存时模型根本没调用（取证问题要**语义新颖**）。
+> 6. **凡基准绑 HEAD 的量具，提交前回答不了「遮好了吗」**：`scripts/lint_public_mirror.py` 的 registry 模式枚举口径是 `git ls-tree HEAD` + blob，不是工作区文件系统 ⇒ 工作区遮完再跑仍报旧内容（与《验证策略》里"存在性判定基准 = 版本控制清单"同根）。合法答案只有两个：**(a) 把基准换成索引树**（`git write-tree`，问「这个提交将造成的那棵树」干净吗）、**(b) 提交后复取**（问「已经发生的那件事」）—— 拿 (a) 冒充 (b) 就是假绿。同一个 CRLF 警告也是这一族：**"git 看到的"与"我看到的"不是同一个东西**。
+> 7. **量具 rc≠0 而它自己 stdout 里一条判决都没有 = 量具瞎，不是账面被抓**：两者必须在读数上分开（否则"本格偶尔盲"会被读成"本轮没问题"）。同族两个坑：PowerShell 下 native 命令的 stderr（如 git 的 CRLF advice）在 `$ErrorActionPreference='Stop'` + 重定向会**终止整把工具**（rc 才是判据，stderr 文本不是）；而**判决自己的日志不是证据源**（反证 stdout 落盘后被下一轮当 corpus grep ⇒ 假读数自我坐实），要按内容排除而不是按临时件名排除。
+> 8. **不投票的读数不是门禁**：一条只被 `Write-Output` 打印、既不进取件 rc 也不进 `GATE_RC` 的判据，与"没有这一格"同形——它只会让下一轮的人把它当成已过（本仓实踩：码点错字 forbidden 面被称作「齿」而从未参与判决）。⇒ **新加（或新换）判据必须同批带两件事**：① 当场自证能咬（合成违规 / 真面种植，期望非零），② 真面必须参与判决（否则报 `<<< *-UNPARSED` 一类 fail-closed，而不是默默报绿）；而基线/棘轮型读数还要说清"为什么不绑 0"，不然下一轮没人记得这个不对称。
 
 ## 技术栈
 
