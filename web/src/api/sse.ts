@@ -29,10 +29,17 @@
  * PR-2（刀㊲）给本件加了两个**消费面**字段：`evidence`（结构化依据，从时间线文本里拆出）
  * 与 `requestId`（响应头 `X-Trace-Id`）。拆与取的理由各写在字段自己的注释里，两条都有行为
  * 断言接住（§G 管快照不回改与依据进表条件，F14 管请求号从响应头传到快照）。
+ *
+ * PR-2b（登录面）给本件加了两条，都在下面各自的声明处注释：
+ *   · `StreamQueryOptions.token` —— 入口凭据从「只有 `X-API-Key`」变成两条通道二选一，
+ *     装配规则**不在本件**（在 `auth.ts` 的 `applyCredentialHeaders`，理由见那里的注释）；
+ *   · `StreamSnapshot.httpStatus` —— 会话层需要一个能区分「401 = 凭据不可用」与其它失败的
+ *     读数，才能把 A8 那条「401 跳回登录页」落到实处而不是靠猜文案。
  * ==========================================================================*/
 import { createParser } from 'eventsource-parser'
 import type { EventSourceMessage } from 'eventsource-parser'
 
+import { applyCredentialHeaders, isCredentialPreflightError } from './auth.ts'
 import type { StreamEventType } from './events.ts'
 import { describeError, describeStreamError } from './errors.ts'
 
@@ -68,11 +75,18 @@ export interface StreamSnapshot {
   /** 响应头 `X-Trace-Id`（有则读，没有就是空串）。`describeStreamError` 那句
    * 「请凭本页的 request_id」在页面上必须有实物可指，否则是一句空指针式的引导。 */
   readonly requestId: string
+  /**
+   * 本轮 HTTP 入口的状态码；**0 = 没有 HTTP 层失败**（流开起来了，或请求根本没发出去）。
+   * 这个字段只为一个消费者存在：会话层要在 401 时把登录态丢掉（A8）。为什么不把
+   * `describeError` 的文案给它判：文案是给**人**看的一句话，按它做分支就等于让界面
+   * 跟着服务端文案漂（改一个字就换一条路径）；状态码是 HTTP 契约，不会漂。
+   */
+  readonly httpStatus: number
   readonly sawError: boolean
   readonly doneReceived: boolean
 }
 
-/** `StreamSnapshot` 的可变孪生（内部用）。写成显式七行而不是映射类型：读得出来是谁。 */
+/** `StreamSnapshot` 的可变孪生（内部用）。写成显式九行而不是映射类型：读得出来是谁。 */
 interface Working {
   timeline: TimelineEntry[]
   evidence: EvidenceEntry[]
@@ -80,16 +94,23 @@ interface Working {
   terminal: Terminal
   threadId: string
   requestId: string
+  httpStatus: number
   sawError: boolean
   doneReceived: boolean
 }
 
-/** 传输与鉴权参数。`apiKey` 只活在这次调用的闭包里（§2.3：不落 storage）。 */
+/** 传输与鉴权参数。`apiKey` 只活在这次调用的闭包里（工单件 §2.3：不落 storage）。 */
 export interface StreamQueryOptions {
   readonly query: string
   readonly sessionId?: string
   readonly tenantId?: string
   readonly apiKey: string
+  /**
+   * 登录令牌（PR-2b，方案 D-a/D-i）。非空 ⇒ 本请求只带 `Authorization: Bearer`；
+   * 空 ⇒ 只带 `X-API-Key`（现状逐字不变，本机未启用登录面时问答仍可用）。
+   * 两条通道**二选一**的规则不在这里写，在 `auth.ts` 的 `applyCredentialHeaders`。
+   */
+  readonly token?: string
   readonly signal?: AbortSignal
   /** 测试注入位；生产走全局 fetch。缺省即 `globalThis.fetch`，不藏第二套实现。 */
   readonly fetchImpl?: typeof fetch
@@ -112,7 +133,7 @@ function snapshot(w: Working): StreamSnapshot {
 export function initialState(): StreamSnapshot {
   return snapshot({
     timeline: [], evidence: [], answer: '', terminal: 'open',
-    threadId: '', requestId: '', sawError: false, doneReceived: false,
+    threadId: '', requestId: '', httpStatus: 0, sawError: false, doneReceived: false,
   })
 }
 
@@ -251,16 +272,15 @@ export function applyFrame(state: StreamSnapshot, name: string, data: string): S
   return snapshot(w)
 }
 
-function buildHeaders(apiKey: string): Headers {
+function buildHeaders(apiKey: string, token: string): Headers {
   const h = new Headers({ 'Content-Type': 'application/json' })
-  if (apiKey !== '') {
-    // HTTP 头只接 ASCII；把这条前置成一句可读提示，而不是让运行时抛裸的 fetch 参数错误
-    //（`console.html` 同形，属实踩过的形状：粘贴时把中文说明一起带进来）。
-    if (!/^[\x20-\x7E]*$/.test(apiKey)) {
-      throw new Error('接口密钥含非 ASCII 字符（HTTP 请求头不允许），请确认粘贴的是密钥本身而不是中文说明')
-    }
-    h.set('X-API-Key', apiKey)
-  }
+  // 装配规则住在 `auth.ts`（与 `/auth/*` 四个端点同一个实现位）：这里只交两个值。
+  // 为什么不在这件里重写一份：两条通道的互斥关系是入口凭据面的知识，写两处就会各漂一份；
+  // 而漂的那一型是「两把都发」——后端 `verify_api_key` 先看断言身份，密钥错了也不会红，
+  // 于是读数分不清是哪把起效（看着绿，其实测的是另一条路）。
+  // 非 ASCII 那两条前置校验也一并在那边（抛出的两句文案以「接口密钥/登录令牌含非 ASCII」
+  // 开头，`streamQuery` 靠 `isCredentialPreflightError` 把它们与后端失败分开）。
+  applyCredentialHeaders(h, { apiKey, token })
   return h
 }
 
@@ -268,7 +288,7 @@ function buildHeaders(apiKey: string): Headers {
  * 发一次 /query 并把流读完，返回最终快照；过程量走 `onUpdate`。
  * **不抛业务异常**：HTTP 错误、网络错误、无体流都折成时间线里的一条 + 终态，
  * 页面因此不必为了"不白屏"（A2）再包一层 try/catch 去猜原因。
- * 唯一仍会抛的是密钥含非 ASCII 这一条前置校验 —— 那是调用方写错了，不是服务端的状态。
+ * 仍会抛的只有两条前置校验（密钥 / 令牌含非 ASCII）—— 那是调用方写错了，不是服务端的状态。
  */
 export async function streamQuery(opts: StreamQueryOptions): Promise<StreamSnapshot> {
   let cur = initialState()
@@ -284,11 +304,15 @@ export async function streamQuery(opts: StreamQueryOptions): Promise<StreamSnaps
     const doFetch = opts.fetchImpl ?? globalThis.fetch
     // `signal` 单独条件赋值：`RequestInit.signal` 在 exactOptionalPropertyTypes 下接
     // `AbortSignal | null`，把 `AbortSignal | undefined` 直接摊进对象字面量会当场红。
-    const init: RequestInit = { method: 'POST', headers: buildHeaders(opts.apiKey), body: JSON.stringify(body) }
+    const init: RequestInit = {
+      method: 'POST',
+      headers: buildHeaders(opts.apiKey, opts.token ?? ''),
+      body: JSON.stringify(body),
+    }
     if (opts.signal !== undefined) init.signal = opts.signal
     resp = await doFetch('/query', init)
   } catch (err) {
-    if (err instanceof Error && err.message.startsWith('接口密钥含非 ASCII')) throw err
+    if (isCredentialPreflightError(err)) throw err
     // 「请求根本没发出去」这一支：给可读原因，不给 `TypeError: Failed to fetch`（A4）。
     cur = withPush(cur, 'transport', 'transport', `请求未能发出（服务端不可达或地址错误）：${String(err)}`)
     cur = { ...cur, terminal: 'failed' }
@@ -303,6 +327,8 @@ export async function streamQuery(opts: StreamQueryOptions): Promise<StreamSnaps
 
   if (!resp.ok) {
     // 流未开、状态码在 ⇒ 通道一/二走 describeError。§3 明写：鉴权失败不受抑制规则约束。
+    // `httpStatus` 与文案同时给：文案给人看，状态码给会话层做那条 401 分支（A8）。
+    cur = { ...cur, httpStatus: resp.status }
     cur = withPush(cur, 'transport', 'transport', await describeError(resp))
     cur = { ...cur, terminal: 'failed' }
     emit()

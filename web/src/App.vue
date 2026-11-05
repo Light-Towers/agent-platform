@@ -20,27 +20,37 @@
  *   （键盘不碰鼠标完成一次提问）不受影响。
  * ==========================================================================-->
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted } from 'vue'
 
 import Answer from './components/Answer.vue'
 import ApiKeyBox from './components/ApiKeyBox.vue'
 import EvidenceList from './components/EvidenceList.vue'
 import Legend from './components/Legend.vue'
+import LoginView from './components/LoginView.vue'
 import ThemeToggle from './components/ThemeToggle.vue'
 import Timeline from './components/Timeline.vue'
 import {
   ask,
   banners,
   busy,
+  canChat,
   canSubmit,
   clearBanners,
   dropped,
   evidence,
   eventCount,
+  identityNote,
+  loggedIn,
   question,
+  resumeSession,
+  signOut,
   traceNote,
   waiting,
 } from './stores/session'
+
+/* 挂载时确认一次登录态（A8「刷新仍在登录」那一格的调用点）。本件不自己决定何时确认：
+ * 会话层故意不在模块加载时自发请求，否则行为件在 Node 里 import 会话层就会多一个 fetch。 */
+onMounted(() => { void resumeSession() })
 
 /* 提交那一行的第二通道：不可用态只说明"现在不能按"，说不清**为什么**不能按（A4 的
  * 同一条要求在控件上也成立）。两句互斥，所以只可能同时出现一句。 */
@@ -49,11 +59,15 @@ const submitHint = computed(() =>
     ? '等待 done…（判定完成只看 done 帧，转圈不是完成信号）'
     : canSubmit.value ? '' : '输入为空时不能提交')
 
-/** 提问。`ask()` 内部全 catch（唯一会抛的那条也在 `session.ts` 接住了），这里仍
+/** 提问。`ask()` 内部全 catch（两条凭据前置校验也在 `session.ts` 接住了），这里仍
  *  显式 `void` 掉 Promise：模板里的处理器不该有未处理的 promise（lint 的
  *  `no-floating-promises` 只看得到这一层，看不到组件里）。 */
 function submit(): void {
   void ask()
+}
+
+function onSignOut(): void {
+  void signOut()
 }
 </script>
 
@@ -62,9 +76,23 @@ function submit(): void {
     <header class="topbar">
       <h1>
         Agent Platform 控制台
-        <span class="hint">对话页（PR-2）</span>
+        <span class="hint">{{ canChat ? '对话页（PR-2）' : '登录面（PR-2b）' }}</span>
       </h1>
       <span class="spacer" />
+      <!-- 身份那一行只在页眉出现一次，文案由会话层的 `identityNote` 给（四种读法各自一句，
+           其中两种是「未确认」与「走的是密钥」—— 把它们合并成「未登录」就是把 503 读成凭据问题）。 -->
+      <span
+        class="hint"
+        role="status"
+      >{{ identityNote }}</span>
+      <button
+        v-if="loggedIn"
+        type="button"
+        class="btn"
+        @click="onSignOut"
+      >
+        退出
+      </button>
       <ThemeToggle />
     </header>
 
@@ -96,7 +124,14 @@ function submit(): void {
       </button>
     </section>
 
-    <main class="grid">
+    <!-- 视图闸门（PR-2b）：未确认到登录态时屏上只有登录面，没有空对话框。
+         两个 `<main>` 是 v-if / v-else 关系 ⇒ 任一时刻 DOM 里只有一个，语义上仍是一文档一主区。 -->
+    <LoginView v-if="!canChat" />
+
+    <main
+      v-else
+      class="grid"
+    >
       <!-- 栏一（1.1fr）：答案 / 依据 / 密钥 -->
       <div class="col">
         <section
@@ -191,6 +226,8 @@ function submit(): void {
       </div>
     </main>
 
-    <Legend />
+    <!-- 事件图例只在对话页出现：登录页一行事件都没得对，把图例放上去就是拿不相干的
+         读数占位置（与文件头那句「不给指不到东西的引导」同一条纪律）。 -->
+    <Legend v-if="canChat" />
   </div>
 </template>

@@ -348,8 +348,11 @@ console.log('§G 消费面：快照契约、依据列表、class 与图标映射
 
 /* ---- §H 会话层：stores/session.ts 在 Node 里真驱动（不发网络）---- */
 console.log('§H 会话层：banner 累积/去重/溢出、跳轮不混行、非 ASCII 密钥接住')
+/* `store` 必须在模块层：§I 还要拿它驱动登录态机（写在 §H 的花括号里 ⇒ §I 读到的是
+ * ReferenceError，症状是“门禁挂掉”而不是“判据没跑”）。不写初值：下一行就要给它接上的
+ * 模块或 null，一个“没被读过的 null 初值”是 lint 的 useless-assignment。 */
+let store
 {
-  let store
   try {
     store = await import('../src/stores/session.ts')
   } catch (e) {
@@ -453,6 +456,292 @@ console.log('§H 会话层：banner 累积/去重/溢出、跳轮不混行、非
       question.value === store.EXAMPLE_QUESTION && calls === beforeCalls + 1, `calls Δ=${calls - beforeCalls}`)
     check('H9b 无请求号时 traceNote 明说没有，不给空占位式的引导',
       requestId.value === '' && traceNote.value.includes('未带请求号'), traceNote.value)
+  }
+}
+
+/* ---- §I 登录面：凭据面与会话层登录态机在 Node 里真跑（不发网络）---- */
+console.log('§I 登录面：存储档位/键名、头装配二选一、409 一次提交内补发登录、/auth/me 三支分读、401 掉线与退出')
+{
+  /* 假存储两份都装（session + local）。只装 sessionStorage 时，“没落 localStorage”与
+   * “那个名字根本不存在、写了也不报错”读数同形 —— 前者是判据，后者是空转。
+   * 装在 `globalThis` 上而不是交给被测件：`auth.ts` 本来就是按全局名字读的，
+   * 那一句 `typeof sessionStorage === 'undefined'` 的早退支在浏览器里走不到，本件要跑的是
+   * 写入支而不是早退支。 */
+  const mem = { session: new Map(), local: new Map() }
+  const stubOf = (m) => ({
+    getItem: (k) => (m.has(k) ? m.get(k) : null),
+    setItem: (k, v) => { m.set(k, String(v)) },
+    removeItem: (k) => { m.delete(k) },
+    clear: () => m.clear(),
+  })
+  globalThis.sessionStorage = stubOf(mem.session)
+  globalThis.localStorage = stubOf(mem.local)
+
+  let auth
+  try {
+    auth = await import('../src/api/auth.ts')
+  } catch (e) {
+    check('I0 凭据面可被 Node 驱动', false, String(e && e.message))
+    auth = null
+  }
+  if (auth !== null && store !== null) {
+    const { readStoredToken, storeToken, applyCredentialHeaders, isCredentialPreflightError } = auth
+    const {
+      apiKey, ask, authMode, authNotice, banners, canChat, clearBanners,
+      enterWithApiKey, hasStoredToken, loggedIn, question, resumeSession, signOut,
+      submitCredentials,
+    } = store
+    const PW = 'CANARY-口令不得落存储-3d71'
+    /* 假后端：按**调用次序**依次回 steps 里的 (status, body)，并把每一发的 path/头/体记下来。
+     * `path`/`headers`/`body` 是「最后一发」的读数（既有断言读的就是这三个名字，不换口径），
+     * `calls`/`paths`/`bodies` 是给「一次提交该发几发」这类判据用的 —— 一键化改的正是发数，
+     * 单值版表达不了「先 409 再 200」这种两步形状（它会把第二发也回成 409，两种读数同形）。
+     * 为什么不直接 stub 全局 fetch：被测面四个入口都收了 `fetchImpl` 注入位，
+     * 不拿全局名字做隐形前提（§G 同一条口径）。 */
+    const mkSteps = (steps) => {
+      const seen = { path: '', headers: null, body: null, calls: 0, paths: [], bodies: [] }
+      seen.call = async (url, init) => {
+        seen.calls += 1
+        seen.path = String(url)
+        seen.paths.push(String(url))
+        seen.headers = init?.headers instanceof Headers ? init.headers : new Headers(init?.headers ?? {})
+        try { seen.body = JSON.parse(String(init?.body ?? 'null')) } catch { seen.body = null }
+        seen.bodies.push(seen.body)
+        const step = steps[Math.min(seen.calls - 1, steps.length - 1)]
+        return new Response(JSON.stringify(step.body), {
+          status: step.status,
+          headers: { 'content-type': 'application/json' },
+        })
+      }
+      return seen
+    }
+    const mkBackend = (status, body) => mkSteps([{ status, body }])
+    const authOk = { access_token: 'tk-1', tenant_id: 't-a', user_id: 'u-1', is_admin: true }
+    /* 复位必须同时清**内存与存储**两处。只清存储会留下一个屏上还写着「已登录」而手里没凭据的
+     * 态（那正是 dropSession 存在的理由），后面的断言会测到一个生造不存的前置。 */
+    const authReset = async () => {
+      await signOut(async () => new Response('{"revoked":"false"}', { status: 200 }))
+      clearBanners()
+    }
+
+    check('I0b 起始态：存储里没有令牌 ⇒ readStoredToken 给空串（不报 undefined、不抛）',
+      readStoredToken() === '')
+
+    // I1 没有用户 → 在同一屏建号，建完就是已登录（用户原话第一句，后端 201 直接回令牌）
+    await authReset()
+    authMode.value = 'register'
+    const be1 = mkBackend(201, authOk)
+    const ok1 = await submitCredentials({ login: 'alice', password: PW, displayName: '爱丽丝' }, be1.call)
+    check('I1 建号成功即已登录（同一次往返，没有第二次点击）',
+      ok1 === true && loggedIn.value === true && canChat.value === true)
+    check('I1b 走的是绝对路径 /auth/register（写成相对会被拼成 /ui/auth/…而后端没那条路由）',
+      be1.path === '/auth/register', be1.path)
+    check('I1c 令牌落 sessionStorage 且键名就是那个在册键',
+      mem.session.get('ap.auth.token') === 'tk-1' && readStoredToken() === 'tk-1')
+    check('I1d 注册体带上 display_name（登录体不该带 ⇒ 两条请求体分形）',
+      be1.body?.display_name === '爱丽丝' && be1.body?.login === 'alice')
+    /* 两条纪律在“手里正有一把可用令牌”时才有牙：放到末尾跑时存储已被退出清空，
+     * 那时这两句恒真（那就是把空转当判据）。 */
+    check('I1e 口令 canary 不在存储的任何一个值里（它只进了请求体）',
+      ![...mem.session.values(), ...mem.local.values()].some((v) => v.includes(PW)))
+    check('I1f 存储里只可能出现令牌那一个键（不顺手存登录名/显示名）',
+      [...mem.session.keys()].every((k) => k === 'ap.auth.token'), [...mem.session.keys()].join(','))
+
+    /* I2 已有账号 → **一次提交**就登进去：/auth/register 撞 409 ⇒ 会话层当场用同一份凭据
+     * 改走 /auth/login。用户原话第二句「有账号，直接登录就行」的实物是**发数**而不是屏上兑面：
+     * 只切态不补发 = 要人再点一次，那一句就没成立（2026-11-05 由「只切态」改判为「切态+补发」）。 */
+    await authReset()
+    authMode.value = 'register'
+    const be2 = mkSteps([
+      { status: 409, body: { code: 'AUTH_LOGIN_TAKEN', msg: '登录名已被占用' } },
+      { status: 200, body: authOk },
+    ])
+    const ok2 = await submitCredentials({ login: 'alice', password: PW, displayName: '' }, be2.call)
+    check('I2 409 ⇒ 同屏当场改走登录并登录成功（一次提交、两发请求，没有第二次点击）',
+      ok2 === true && loggedIn.value === true && be2.calls === 2, `calls=${be2.calls}`)
+    check('I2b 两步的路径依次是 /auth/register → /auth/login（不往反方向递，多一步就是造号）',
+      be2.paths.join(',') === '/auth/register,/auth/login', be2.paths.join(','))
+    check('I2c 第二发的体不带 display_name（那是注册端点的键，登录体多一个就是两条请求同形）',
+      be2.bodies[1]?.display_name === undefined)
+    check('I2d 两发的体是同一份凭据（没有把人重新问一遍）',
+      be2.bodies[0]?.login === 'alice' && be2.bodies[1]?.password === PW)
+    check('I2e 自动改走后屏停在「登录」态（不留在建号态）', authMode.value === 'login')
+    check('I2f 一次提交不得往存储留半成品：只那一把可用的令牌',
+      mem.session.size === 1 && mem.session.get('ap.auth.token') === 'tk-1',
+      [...mem.session.keys()].join(','))
+
+    /* I2g 409 之后口令也不对 ⇒ 不假装登录，屏上是**第二发**那句（不拼第三份文案）。
+     * 这一格是「补发后的 result 不得被丢了不查」的唯一读数。 */
+    await authReset()
+    authMode.value = 'register'
+    const be2g = mkSteps([
+      { status: 409, body: { code: 'AUTH_LOGIN_TAKEN', msg: '登录名已被占用' } },
+      { status: 401, body: { code: 'AUTH_BAD_CREDENTIALS', msg: '登录名或口令不对' } },
+    ])
+    const ok2g = await submitCredentials({ login: 'alice', password: PW, displayName: '' }, be2g.call)
+    check('I2g 409→401 ⇒ 不假装登录、不落盘、上屏的是第二发那句',
+      ok2g === false && loggedIn.value === false && mem.session.size === 0
+      && authNotice.value.includes('登录名或口令不对'), authNotice.value)
+
+    /* I2h 非 409 一律不自动补发：403 是「本部署未开放注册」，而第二发故意给 200 ——
+     * 条件被放宽成「任何失败都重试」时这里会登录成功并把一条真实配置读数洗成假登录。 */
+    await authReset()
+    authMode.value = 'register'
+    const be2h = mkSteps([
+      { status: 403, body: { code: 'AUTH_SIGNUP_DISABLED', msg: '本部署未开放自助注册' } },
+      { status: 200, body: authOk },
+    ])
+    const ok2h = await submitCredentials({ login: 'alice', password: PW, displayName: '' }, be2h.call)
+    check('I2h 403 ⇒ 只发一发、不自动改走登录（配置读数不得被洗成登录成功）',
+      ok2h === false && be2h.calls === 1 && loggedIn.value === false, `calls=${be2h.calls}`)
+
+    // I3 口令错（401）不自动切去建号：后端不分「账号不存在/口令错」，前端切了就等于重建存在性 oracle
+    await authReset()
+    authMode.value = 'login'
+    const be3 = mkBackend(401, { code: 'AUTH_BAD_CREDENTIALS', msg: '登录名或口令不对' })
+    const ok3 = await submitCredentials({ login: 'alice', password: PW, displayName: '' }, be3.call)
+    check('I3 401 ⇒ 不切到建号态（登录体也不带 display_name）',
+      ok3 === false && authMode.value === 'login' && be3.body?.display_name === undefined)
+    check('I3b 登录走的是 /auth/login 且不发凭据头（入口凭据还没拿到）',
+      be3.path === '/auth/login' && be3.headers.get('Authorization') === null && be3.headers.get('X-API-Key') === null)
+    check('I3c 失败文案里不含口令（上屏那一句来自服务端信封，不是本地表单）',
+      authNotice.value !== '' && !authNotice.value.includes(PW), authNotice.value)
+    /* 方向不能反过来：登录态下失败只发一发。少这一句，「失败就先去建个号」这种写法
+     * 在这里仍会是绿（假后端把两发都回 401）⇒ 症状是口令打错就静默多出一个人。 */
+    check('I3d 登录态失败不反向补发建号（只发了一发）', be3.calls === 1, `calls=${be3.calls}`)
+
+    // I4 2xx 但缺身份字段 ⇒ 不读成登录成功（那正是本仓最反对的「看起来绿」）
+    await authReset()
+    authMode.value = 'login'
+    const be4 = mkBackend(200, { access_token: 'tk-half' })
+    const ok4 = await submitCredentials({ login: 'alice', password: PW, displayName: '' }, be4.call)
+    check('I4 200 但缺 tenant_id/user_id ⇒ 不当登录成功、不落盘',
+      ok4 === false && loggedIn.value === false && mem.session.size === 0)
+    check('I4b 那句屏上文案把“为什么不算成功”写出来（不是只说“登录失败”）',
+      authNotice.value.includes('缺少可断言的身份字段'), authNotice.value)
+    check('I4c 一发登录不得因为“体不对”而自己重试（补发只住 409 那一条支）',
+      be4.calls === 1, `calls=${be4.calls}`)
+
+    // I5 头装配二选一（直接调装配函数三组合）+ 前置校验可归类
+    const h5 = new Headers()
+    applyCredentialHeaders(h5, { apiKey: 'key-9', token: 'tk-9' })
+    check('I5 两把都有 ⇒ 只发 Bearer、不发 X-API-Key（“并存”不等于“同时发”）',
+      h5.get('Authorization') === 'Bearer tk-9' && h5.get('X-API-Key') === null)
+    const h5b = new Headers()
+    applyCredentialHeaders(h5b, { apiKey: 'key-9', token: '' })
+    check('I5b 只有密钥 ⇒ 只发 X-API-Key、不发 Authorization',
+      h5b.get('X-API-Key') === 'key-9' && h5b.get('Authorization') === null)
+    const h5c = new Headers()
+    applyCredentialHeaders(h5c, { apiKey: '', token: '' })
+    check('I5c 两把都空 ⇒ 两个头都不发（observe 档/开发模式现状，不是本件新增行为）',
+      h5c.get('Authorization') === null && h5c.get('X-API-Key') === null)
+    let thrown5 = null
+    try {
+      applyCredentialHeaders(new Headers(), { apiKey: '', token: '令牌含中文' })
+    } catch (e) { thrown5 = e }
+    check('I5d 非 ASCII 令牌 ⇒ 发出前就拦下，且能被归成“凭据写错了”这一型（不是服务端回的错）',
+      thrown5 instanceof Error && isCredentialPreflightError(thrown5) === true)
+    check('I5e 非 ASCII 密钥那一型同样可归类（sse.ts 靠它决定“原样抛给页面”还是“折成时间线一条”）',
+      isCredentialPreflightError(new Error('接口密钥含非 ASCII 字符')) === true
+      && isCredentialPreflightError(new Error('服务端返回 HTTP 500')) === false)
+
+    /* I6 已登录时 /query 的头装配从凭据面取（传输层不再自拼）。
+     * 令牌只能由**登录**产生：直接往存储写一把而内存里没那一份，测到的是会话层的一个
+     * 不存在的状态（`ask()` 读内存位，存储只是刷新后能捡回来的副本）。 */
+    await authReset()
+    authMode.value = 'login'
+    await submitCredentials({ login: 'alice', password: PW, displayName: '' }, mkBackend(200, authOk).call)
+    question.value = '平台能查什么'
+    apiKey.value = 'key-q'
+    let seen6 = null
+    await ask(async (_u, init) => {
+      seen6 = init.headers instanceof Headers ? init.headers : new Headers(init?.headers ?? {})
+      return sseResponse([frame('done', { type: 'done', thread_id: 'i6', answer: 'ok' })])
+    })
+    check('I6 已登录时 /query 只带 Bearer（密钥不并发 ⇒ 读数不会混）',
+      seen6 !== null && seen6.get('Authorization') === 'Bearer tk-1' && seen6.get('X-API-Key') === null,
+      seen6 === null ? '未拿到请求头' : `auth=${seen6.get('Authorization')} key=${seen6.get('X-API-Key')}`)
+
+    // I7 /auth/me 三支分读：asserted / expired / unreachable（第三支是本件存在的理由）
+    const be7a = mkBackend(200, { tenant_id: 't-a', user_id: 'u-1' })
+    const p7a = await auth.fetchAuthenticatedIdentity(be7a.call)
+    check('I7a 200 + 身份字段 ⇒ asserted，且回读用的是手里那把令牌',
+      p7a.kind === 'asserted' && p7a.tenantId === 't-a' && be7a.headers.get('Authorization') === 'Bearer tk-1')
+    const p7b = await auth.fetchAuthenticatedIdentity(mkBackend(401, { code: 'AUTH_TOKEN_EXPIRED', msg: '令牌过期' }).call)
+    check('I7b 401 ⇒ expired（这一支才是“该重新登录”）', p7b.kind === 'expired' && p7b.status === 401)
+    const p7c = await auth.fetchAuthenticatedIdentity(mkBackend(503, { code: 'AUTH_NOT_CONFIGURED', msg: '登录面未启用' }).call)
+    check('I7c 503 ⇒ unreachable 而不是 expired（把它们合一句就是“把 503 读成未登录”）',
+      p7c.kind === 'unreachable' && p7c.status === 503)
+    const p7d = await auth.fetchAuthenticatedIdentity(mkBackend(200, {}).call)
+    check('I7d 200 但无身份字段 ⇒ unreachable，不读成已断言', p7d.kind === 'unreachable')
+
+    // I8 刷新后恢复：令牌还在 + 后端 503 ⇒ 屏上必须明说“这不等于未登录”且令牌不丢
+    await authReset()
+    storeToken('tk-r')
+    const be8 = mkBackend(503, { code: 'AUTH_NOT_CONFIGURED', msg: '登录面未启用（无库或无私钥）' })
+    await resumeSession(be8.call)
+    check('I8 503 不把人登出：令牌仍在 sessionStorage、hasStoredToken 仍真',
+      hasStoredToken.value === true && mem.session.get('ap.auth.token') === 'tk-r')
+    check('I8b 屏上那句带“这不等于未登录”（不是一句「未登录」把人回退到零）',
+      authNotice.value.includes('这不等于未登录'), authNotice.value)
+    check('I8c 但对话页不能就此打开（canChat 仍假）——“不能确定”不伪装成“已确定”',
+      canChat.value === false && loggedIn.value === false)
+
+    // I9 刷新后恢复：令牌过期 ⇒ 真的掉线，屏上给下一步
+    await authReset()
+    storeToken('tk-x')
+    await resumeSession(mkBackend(401, { code: 'AUTH_TOKEN_EXPIRED', msg: '令牌已过期' }).call)
+    check('I9 401 ⇒ 令牌两处都清（内存与存储只清一个会出现“刷新又回到 checking”的矛盾）',
+      loggedIn.value === false && hasStoredToken.value === false && !mem.session.has('ap.auth.token'))
+
+    // I10 对话中途 401 才掉线；keyMode 下的 401 是密钥错，不能把人踢下页面
+    await authReset()
+    authMode.value = 'login'
+    await submitCredentials({ login: 'bob', password: PW, displayName: '' }, mkBackend(200, { ...authOk, access_token: 'tk-c', tenant_id: 't-c', user_id: 'u-c' }).call)
+    question.value = '第二问'
+    apiKey.value = ''
+    await ask(async () => new Response(JSON.stringify({ detail: 'INVALID_API_KEY' }), { status: 401 }))
+    check('I10 已登录时流前 401 ⇒ 掉登录态并给出可执行的下一步',
+      loggedIn.value === false && authNotice.value.includes('重新登录'), authNotice.value)
+    enterWithApiKey()
+    clearBanners()
+    question.value = '第三问'
+    apiKey.value = 'key-m'
+    await ask(async () => new Response(JSON.stringify({ detail: 'INVALID_API_KEY' }), { status: 401 }))
+    check('I10b keyMode 下的 401 只报提示不掉线（那一档本来就没有登录态可登）',
+      canChat.value === true && loggedIn.value === false)
+    /* I10c 直接打传输层取那个读数：会话层不导出整个快照（导了组件就能写它），
+     * 所以这一格只能从 `streamQuery` 的定稿快照里读 `httpStatus`。它是 I10 那条分支的
+     * 前置：没有这个字段，会话层只能猜文案（文案改一个字就换一条路径）。 */
+    const s10c = await streamQuery({
+      query: 'q',
+      apiKey: 'k-e',
+      token: '',
+      fetchImpl: async () => new Response(JSON.stringify({ detail: 'INVALID_API_KEY' }), { status: 401 }),
+    })
+    check('I10c 状态码进了快照（会话层那条 401 分支靠的是它，不是猜文案）',
+      s10c.httpStatus === 401 && s10c.terminal === 'failed', `httpStatus=${s10c.httpStatus}`)
+
+    // I11 退出：两处都清，屏上那句必须带上“服务端不撤销”的读
+    await authReset()
+    authMode.value = 'login'
+    await submitCredentials({ login: 'carol', password: PW, displayName: '' }, mkBackend(200, { ...authOk, access_token: 'tk-d', tenant_id: 't-d', user_id: 'u-d' }).call)
+    const be11 = mkBackend(200, { revoked: 'false' })
+    await signOut(be11.call)
+    check('I11 退出清掉内存与存储两处、回到未登录',
+      loggedIn.value === false && canChat.value === false && !mem.session.has('ap.auth.token'))
+    check('I11b 退出走的是 /auth/logout 且带了令牌（服务端才能认出是谁在退）',
+      be11.path === '/auth/logout' && be11.headers.get('Authorization') === 'Bearer tk-d')
+    check('I11c 屏上那句明说“不撤销已签发令牌”（不能把 200 读成已撤销）',
+      banners.value.length === 1 && banners.value[0].includes('不撤销已签发令牌'), banners.value.join(' | '))
+
+    // I12 累计面：本轮跑过十二个入口之后，localStorage 仍然一个键都没写过
+    check('I12 全程零写 localStorage（ApiKeyBox 与 LoginView 屏上那句承诺的行为面）',
+      mem.local.size === 0, [...mem.local.keys()].join(','))
+    check('I12b 退出的 banner 里也不含口令（上屏文案只来自服务端信封）',
+      banners.value.every((b) => !b.includes(PW)), banners.value.join(' | '))
+  } else if (auth !== null) {
+    check('I0c 会话层与凭据面同时可驱动（§H 已把会话层装了）', false, 'store 为空')
   }
 }
 

@@ -334,6 +334,9 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+auth = [
+    { name = "argon2-cffi" },
+]
 identity = [
     { name = "pyjwt", extra = ["crypto"] },
 ]
@@ -348,6 +351,7 @@ mcp = [
 [package.metadata]
 requires-dist = [
     { name = "agent-core", editable = "packages/agent-core" },
+    { name = "argon2-cffi", marker = "extra == 'auth'", specifier = ">=23.1" },
     { name = "langchain", marker = "extra == 'langfuse'", specifier = ">=1.4.6,<2" },
     { name = "langfuse", marker = "extra == 'langfuse'", specifier = ">=5.0.4" },
     { name = "mcp", marker = "extra == 'mcp'", specifier = ">=2.0.0" },
@@ -357,7 +361,7 @@ requires-dist = [
     { name = "shared-schemas", editable = "packages/shared-schemas" },
     { name = "valkey", specifier = ">=6.2.0" },
 ]
-provides-extras = ["mcp", "identity", "langfuse"]
+provides-extras = ["mcp", "identity", "auth", "langfuse"]
 
 [[package]]
 name = "aiohappyeyeballs"

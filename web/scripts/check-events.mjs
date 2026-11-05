@@ -59,6 +59,9 @@ const TS_EVENTS = 'src/api/events.ts';
 const TS_SSE = 'src/api/sse.ts';
 const TS_ICONS = 'src/components/icons.ts';
 const CSS_EVENTS = 'src/styles/events.css';
+const TS_AUTH = 'src/api/auth.ts';
+const TS_LOGIN_VIEW = 'src/components/LoginView.vue';
+const VUE_APP = 'src/App.vue';
 const VUE_TIMELINE = 'src/components/Timeline.vue';
 
 /* ---- 派生源 1：后端 `StreamEventType` Literal ---- */
@@ -167,7 +170,7 @@ const cmp = (label, mine, derived) => {
 cmp('TS 事件联合 ↔ 派生全集', tsUnion, EVENT_SET);
 cmp('handler 分支 ↔ TS 事件联合', handlerKeys, tsUnion);
 
-/* ================= 消费面三枚齿（PR-2 刀㊲）=================
+/* ================= 消费面齿阵（PR-2 刀㊲ 建 A/B/C 三枚，PR-2b 登录面加 C2/C3/C4）=================
  * 为什么要在这里加：后端加一类事件时，上面两条会让 handler 表与 TS 联合报红，但**渲染面**
  * 是第三种失败形状 —— `icons.ts` 的 `rowClassOf` 对没跟上的事件名**收敛到 `ev--unknown`**，
  * 症状是「这一行变成了未识别样式」而不是门禁红（静默降级，与 §12-#2 那一族同形）。
@@ -175,7 +178,11 @@ cmp('handler 分支 ↔ TS 事件联合', handlerKeys, tsUnion);
  *   齿 A 图标表键集（缺 = 那一类没有图标）
  *   齿 B events.css 的 accent 规则（缺 = 拼出一个 CSS 里不存在的 class，那一行无声地没色）
  *   齿 C 凭据存储面（PR-2 新写了两个组件，工单件 §2.3 那条纪律自此才真的有人可违反）
- * 三者都是**双向**比较：只查缺项会漏掉「前端自己多接一类」（那是一枚无消费者的死 class/死图标）。 */
+ * 三者都是**双向**比较：只查缺项会漏掉「前端自己多接一类」（那是一枚无消费者的死 class/死图标）。
+ * PR-2b 又加了三枚，各自拦登录面的第三种漂移（读法同上，一枚一种失败形状）：
+ *   齿 C2 存储**档位**与屏上键名同源（白名单管不到“写的是哪一档”）
+ *   齿 C3 凭据头装配的**单一实现位**（两份装配规则 = 各漂一份）
+ *   齿 C4 登录面**消费链**（App → LoginView → 会话层 → 凭据面，断一环报哪一环） */
 
 /* ---- 齿 0（前置）：客户端侧行种类从 `sse.ts` 的 kind 联合派生，不抄数 ----
  * `TimelineEntry.kind` 的三个值里，`'event'` 是**后端事件行**（它的 class 由事件名决定，
@@ -239,10 +246,14 @@ for (const fn of ['rowClassOf', 'iconPathOf']) {
  * 白名单**双向**：列了却不用也算漂移（与公开镜像 lint 的登记制同一条纪律：台账不能只进不出）。
  * 写这一格的时机是 PR-2：`session.ts`/`ApiKeyBox.vue` 开始真的往界面上接密钥，
  * 「只存内存」自此才有可违反面 —— 在那之前它只是一句注释。
+ * PR-2b 把 `auth.ts` 加进名单（方案 D-k：登录令牌落 sessionStorage，关标签即失效）。
+ * ⚠ 这一格从此管的是「谁可以写存储」，不再能管「写进去的是哪一档」—— 后者由下面
+ *   齿 C2 校（只准 sessionStorage，且键名与屏上承诺同源）。只加白名单不加那一格，
+ *   等于把「不落 localStorage」这句纪律换成一句注释。
  * ⚠ 判的是**调用形状**而不是词形：`localStorage\.(getItem|setItem|removeItem|clear)`。
  *   只匹字面词会把“不落 localStorage”这句屏上承诺也算成越界（那句是纪律的一部分，
  *   不是违反）——而把误报当代价接受就会有人开始写 `local` + `Storage` 拼串来绕过门禁。 */
-const STORAGE_WL = ['theme.ts'];
+const STORAGE_WL = ['auth.ts', 'theme.ts'];
 const srcFiles = [];
 (() => {
   const walk = (dir) => {
@@ -269,6 +280,69 @@ if (wlStale.length) {
   fail.push(`存储白名单陈旧：${wlStale.join(', ')} 已在名单里却不再写存储 API（台账只进不出 ⇒ 把它从白名单删掉）`);
 }
 note.push(`凭据面：写存储的文件 ${storageUsers.length ? storageUsers.join(', ') : '（无）'} / 白名单 ${STORAGE_WL.join(', ')} ${storageUnexpected.length + wlStale.length === 0 ? '✅' : '❌'}`);
+
+/* ---- 齿 C2（PR-2b）：白名单件内部的档位与键名同源 ----
+ * 白名单只说“这个文件可以写存储”，不说“写进去的是哪一档”。D-k 那句承诺是「关标签即失效」，
+ * 它的实物就是这一格：唯一凭据写者一旦漂到 localStorage，凭据活期从一次会话拉长到整台
+ * 浏览器（含重启后），而屏上那句“关掉标签即失效”会变成假陈述 —— 症状要等到有人用共用机器
+ * 才看得见，所以必须在此刻红。
+ * 键名那一格是**件间对拍**：LoginView 屏上写的键名与 auth.ts 代码里的键名必须同源 ——
+ * 人在屏上读到的那个名字是取证入口（照着它去 devtools 里找），写错等于指不到东西。 */
+const authText = rdWeb(TS_AUTH);
+if (/localStorage\s*\.\s*(?:getItem|setItem|removeItem|clear)/.test(authText)) {
+  fail.push(`${TS_AUTH} 写了 localStorage（方案 D-k 定的是 sessionStorage 档：关标签即失效）`);
+}
+if (!/sessionStorage\s*\.\s*setItem\b/.test(authText)) {
+  fail.push(`${TS_AUTH} 里没有 sessionStorage.setItem 的调用形状（白名单列了它却不写 ⇒ 要么档位漂了，要么这一格在守死代码）`);
+}
+const tokenKeyLine = authText.match(/^const TOKEN_KEY\s*=\s*'([^']+)'/m);
+if (!tokenKeyLine) {
+  fail.push(`读不到 ${TS_AUTH} 的 const TOKEN_KEY = '…'（令牌键名的唯一事实源坐标变了，键名同源比较已跳过）`);
+} else {
+  const loginText = rdWeb(TS_LOGIN_VIEW);
+  if (!loginText.includes(tokenKeyLine[1])) {
+    fail.push(`${TS_LOGIN_VIEW} 屏上没有写出令牌键名 ${tokenKeyLine[1]}（“关掉标签即失效”那句承诺靠它才可核对；改了键名而屏上没跟 = 给人的取证入口指不到东西）`);
+  }
+}
+
+/* ---- 齿 C3（PR-2b）：凭据装配只有一个实现位 ----
+ * 为什么需要一枚专门的齿（而不是靠 C2 那格顺手做到）：D-i“两条通道并存”最容易被读错的
+ * 一处是一个请求同时发两把 —— 后端 `verify_api_key` 的分支是“已断言到人 ⇒ 直接放行”，
+ * 两把都发时密钥错也不会红，于是读数分不清是哪把起效的（看着绿，其实测的是另一条路）。
+ * 只要装配规则存在第二份，这份“各漂一份”就没有东西挡着。匹的是 **调用形状**
+ * （`.set('Authorization'` / `.set('X-API-Key'`），不是词形 —— 屏上文案里本来就要写
+ * `X-API-Key` 这个名字（ApiKeyBox / LoginView 那两处），把它们算成越界就是拿误报换自觉。 */
+const headerSetterRe = /\.(?:set|append)\(\s*['"](?:Authorization|X-API-Key)['"]/;
+const headerSetters = srcFiles
+  .filter((p) => headerSetterRe.test(readText(p)))
+  .map((p) => p.split(/[\\/]/).pop())
+  .sort();
+const headerOutsiders = headerSetters.filter((f) => f !== 'auth.ts');
+if (headerOutsiders.length) {
+  fail.push(`凭据装配出现第二个实现位（应只在 ${TS_AUTH}）：${headerOutsiders.join(', ')} 自己 set 了入口凭据头`);
+}
+if (!headerSetters.includes('auth.ts')) {
+  fail.push(`${TS_AUTH} 里没有 set 入口凭据头的形状（装配面被搬走了 ⇒ 本齿在守死代码）`);
+}
+if (!/applyCredentialHeaders/.test(rdWeb(TS_SSE))) {
+  fail.push(`${TS_SSE} 不再引用 applyCredentialHeaders（/query 的头装配回到传输层自拼 ⇒ 与凭据面各漂一份）`);
+}
+note.push(`装配面：set 入口凭据头的文件 ${headerSetters.join(', ') || '（无）'} ${headerOutsiders.length === 0 ? '✅' : '❌'}`);
+
+/* ---- 齿 C4（PR-2b）：登录面消费链（断一环报哪一环）----
+ * 与上面 rowClassOf/iconPathOf 那格同一条理由：只校实现不校消费，守的就是死代码。
+ * 四环都是文本存在性断言（脆断言，同本件口径）：行为层面的登录面判据在
+ * `verify-sse.mjs` §I，那件真跑凭据面与会话层的登录态机。 */
+const loginChain = [
+  [VUE_APP, /<LoginView/, `${VUE_APP} 没有渲染 <LoginView（视图闸门拆掉了：未登录也会看到一个空对话框）`],
+  [VUE_APP, /\bcanChat\b/, `${VUE_APP} 不再读 canChat（闸门失去了判据 ⇒ 与登录态机解链）`],
+  [TS_LOGIN_VIEW, /\bsubmitCredentials\(/, `${TS_LOGIN_VIEW} 不调 submitCredentials(（登录页接不上会话层，提交钮是个空控件）`],
+  [TS_LOGIN_VIEW, /\benterWithApiKey\b/, `${TS_LOGIN_VIEW} 没有密钥兜底入口（后端未启用登录面时那一档就没路可走了）`],
+  ['src/stores/session.ts', /from '\.\.\/api\/auth\.ts'/, `会话层未从 ${TS_AUTH} 取凭据面（存取与装配又回到两处写）`],
+];
+for (const [file, re, msg] of loginChain) {
+  if (!re.test(rdWeb(file))) fail.push(`登录面消费链断裂（齿 C4）：${msg}`);
+}
 
 /* ---- 接线断言：本件的调用链在不在 ---- */
 /* 诚实边界（必须带着读）：这一格能抓的是「链上某被拆了一环」（Makefile 行被删、scripts 键被改名），

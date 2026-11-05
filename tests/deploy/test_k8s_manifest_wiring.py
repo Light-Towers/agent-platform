@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 
@@ -34,7 +35,10 @@ _THIRD_PARTY_ENV = {"HF_HOME", "HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE", "OMP_NU
 # 真实密钥永不入库。126 上它们住在集群单独建的 observability-keys（对象名早于鉴权用途）
 # LANGFUSE_* 两把是 Langfuse 项目 API key（2026-10-13 无头初始化生成，
 # 经 stdin 写入该对象；见 deploy/observability/langfuse.env.example 的注入去向表）
-_CLUSTER_OWNED_SECRET_OBJECTS = {"observability-keys"}
+# agent-platform-jwt（PR-2c）：登录面签名密钥另开一个对象 —— 与观测凭据不同轮换轨，
+# 补键走 kubectl patch 合并写（apply 是整对象替换）；分对象后“patch 错对象”的影响面
+# 从「观测面与登录面一起挂」缩到只挂一边。生成与写入命令见 deploy/k8s/README.md §6.3。
+_CLUSTER_OWNED_SECRET_OBJECTS = {"observability-keys", "agent-platform-jwt"}
 # INTERNAL_HMAC_KEY（2026-10-28 补）：20 是签发侧、自己也要从卷里读这把键。这里少列一个键 =
 # 入库 demo Secret 可以添一把"能签合法租户"的对称密钥而不被拦，而在 30 那侧的同名门禁会红。
 _CLUSTER_OWNED_SECRET_KEYS = {
@@ -43,6 +47,11 @@ _CLUSTER_OWNED_SECRET_KEYS = {
     "LANGFUSE_PUBLIC_KEY",
     "LANGFUSE_SECRET_KEY",
     "INTERNAL_HMAC_KEY",
+    # 登录面两把（私钥 + {kid: PEM} 公钥集）。列进这份清单的含意是：它们只可能来
+    # 自集群自有对象 ⇒ 一旦有人把它们写进 05-secrets.yaml 的 demo 值，
+    # test_no_real_secret_values_in_repo_manifest 当场红（这一格靠的就是本行的存在）。
+    "TENANT_JWT_PRIVATE_KEY",
+    "TENANT_JWT_PUBLIC_KEYS",
 }
 
 # k8s 对未知字段不报错、直接丢（非 strict validate）⇒ 用白名单把它变成用例失败
@@ -128,6 +137,24 @@ def _manifest_env(container: dict) -> dict[str, str]:
             )
         else:  # pragma: no cover - 清单里不该出现第三种写法
             raise AssertionError(f"env {item['name']} 既无 value 也无 valueFrom")
+    return out
+
+
+def _manifest_effective_env(container: dict, configmap: dict) -> dict[str, str]:
+    """env 名 → **从清单能读到的生效值**：literal 直取、configMapKeyRef 从 CM 取值；
+    secretKeyRef 跳过（真实值永不入库，能拿到的只有键名）。登录面的四把参数全靠它合成。"""
+    data = configmap.get("data") or {}
+    out: dict[str, str] = {}
+    for e in container["env"]:
+        if "value" in e:
+            out[e["name"]] = str(e["value"])
+        else:
+            ref = (e.get("valueFrom") or {}).get("configMapKeyRef")
+            if ref:
+                assert ref["name"] == configmap["metadata"]["name"], (
+                    f"{e['name']} 引用了另一份 CM（{ref['name']}），本函数不跟它跨对象"
+                )
+                out[e["name"]] = str(data[ref["key"]])
     return out
 
 
@@ -260,6 +287,112 @@ def test_secret_refs_point_at_an_existing_object(secret, container):
             assert key in _CLUSTER_OWNED_SECRET_KEYS, f"{name}/{key} 不在集群自有键清单内"
             assert key not in in_repo, f"{key} 同时出现在入库对象与集群自有对象里，来源分叉"
         assert ref.get("optional") is not True, f"{key} 被标 optional 即允许静默缺凭据"
+
+
+# ---------------------------------------------------------------------------
+# ③b 登录面密钥（PR-2c）：卷侧来源、挂载路径同源、按清单值真签真验
+# ---------------------------------------------------------------------------
+
+
+def _secret_file_paths(pod_spec: dict) -> set[str]:
+    """清单自己算得出的「容器内密钥文件路径」全集：secret 卷的 items[].path ×
+    该卷在容器上的 mountPath。不从 env 里读路径（那正是被测的那一条边）。"""
+    mounts = {
+        m["name"]: str(m["mountPath"]).rstrip("/")
+        for m in pod_spec["containers"][0].get("volumeMounts", [])
+    }
+    out: set[str] = set()
+    for vol in pod_spec.get("volumes", []):
+        sec = vol.get("secret") or {}
+        base = mounts.get(vol.get("name", ""))
+        if not base or not sec:
+            continue
+        out |= {f"{base}/{item['path']}" for item in sec.get("items", [])}
+    return out
+
+
+def test_volume_secret_sources_are_explained_objects(pod_spec):
+    """卷侧的 Secret 引用以前没有任何一格查（③ 只看 env 里的 secretKeyRef）。
+    secretName 漂了 = Pod 起不来（读数明显）；**items[].path 写错是另一种形状**：Pod 起来了、
+    /health 全绿，登录面当场 503 —— 后者才是本格要防的假灯。"""
+    for vol in pod_spec.get("volumes", []):
+        sec = vol.get("secret")
+        if not sec:
+            continue
+        obj = sec["secretName"]
+        assert obj in _CLUSTER_OWNED_SECRET_OBJECTS, (
+            f"卷 {vol['name']} 引用了未交代来源的 Secret 对象 {obj}"
+        )
+        for item in sec.get("items", []):
+            assert item["key"] in _CLUSTER_OWNED_SECRET_KEYS, (
+                f"{obj}/{item['key']} 不在集群自有键清单内"
+            )
+        assert sec.get("defaultMode"), (
+            f"卷 {vol['name']} 未声明 defaultMode（密钥要 0440 + fsGroup 才不被同 Pod 其他进程读到）"
+        )
+
+
+def test_login_face_key_paths_are_mounted_shapes(container, pod_spec):
+    """两个 *_FILE 的值必须能在清单里算出来（不是“看着像一条路径”）。
+    改了挂载层级而 env 没跟，现场是“签不出令牌”的 503，而不是启动失败。"""
+    env = {e["name"]: e.get("value") for e in container["env"]}
+    paths = _secret_file_paths(pod_spec)
+    for name in ("TENANT_JWT_PRIVATE_KEY_FILE", "TENANT_JWT_PUBLIC_KEYS_FILE"):
+        value = env.get(name)
+        assert value, (
+            f"{name} 未注入 ⇒ identity.load_* 按空串早退，登录面整体 503（而 /health 全绿）"
+        )
+        assert value in paths, (
+            f"{name}={value} 不在 secret 卷算出的路径集 {sorted(paths)} 里（挂载与 env 分叉）"
+        )
+
+
+def test_login_signing_params_from_manifest_are_self_consistent(container, configmap, tmp_path, monkeypatch):
+    """把清单声明的那组值拿去**真签一枚、再走真 verify_token 验回来**。
+
+    为什么不只比数字：kid 与公钥 JSON 顶层键、TTL 与上限、iss/aud 默认值是四把互相顶的参数，
+    在清单里全长得像字符串，对着看只会漏（本轮实测过一次：ttl=28800 超上限 3600，症状是
+    “登录 200、下一个请求 401”）。跑一次真实通路 = 四把一起钉。
+    密钥是本用例现造的随机 RSA，只活在 tmp_path：仓里连一枚可用的演示私钥都不该有。
+    """
+    pytest.importorskip("jwt", reason="验签要 agent-runtime[identity]（PyJWT[crypto]）")
+    from agent_runtime.identity import mint_token, verify_token
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+
+    env = _manifest_effective_env(container, configmap)
+    # 先清 CI/本机残留的同名 env，再按清单值设：否则测的不是清单而是一台机器的环境。
+    for k in ("TENANT_JWT_ISSUER", "TENANT_JWT_AUDIENCE", "TENANT_JWT_MAX_TTL_S", "TENANT_JWT_CLOCK_SKEW"):
+        monkeypatch.delenv(k, raising=False)
+        if k in env:
+            monkeypatch.setenv(k, env[k])
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    priv = key.private_bytes(
+        serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()
+    ).decode()
+    pub = key.public_key().public_bytes(
+        serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo
+    ).decode()
+    monkeypatch.setenv("TENANT_JWT_PRIVATE_KEY_FILE", str(tmp_path / "jwt.key"))
+    (tmp_path / "jwt.key").write_text(priv, encoding="utf-8")
+    # 公钥集按清单的 kid 命名（这一句就是“两边必须逐字相同”那条约束的可执行形）
+    (tmp_path / "jwt-pubs.json").write_text(
+        json.dumps({env["TENANT_JWT_KID"]: pub}), encoding="utf-8"
+    )
+    monkeypatch.setenv("TENANT_JWT_PUBLIC_KEYS_FILE", str(tmp_path / "jwt-pubs.json"))
+
+    ttl = int(env["AUTH_TOKEN_TTL"])
+    token = mint_token(
+        env.get("SINGLE_TENANT", "default"),
+        user_id="manifest-selftest",
+        private_key_pem=priv,
+        kid=env["TENANT_JWT_KID"],
+        ttl=ttl,
+    )
+    claims = verify_token(token)  # kid 对不上 / TTL 超上限 / iss-aud 分叉都在这跑里抛
+    assert claims.user_id == "manifest-selftest", claims
+    assert claims.exp is not None and claims.iat is not None
+    assert int(claims.exp) - int(claims.iat) == ttl, f"清单声明 ttl={ttl}，实际签出的不是这个数"
 
 
 # ---------------------------------------------------------------------------

@@ -4161,9 +4161,10 @@ remote:   https://github.com/Light-Towers/agent-platform/security/dependabot/211
 - §40.5 四条仍待人拍（用户可达层 / `x-trace-id` 的全局装配 / `verify.sh` 换形 / `cache_ready=false` 是否进上线门）。
 - 验收 #4 的回绿读数属**提交后复取**，本刀入库时它是未达状态。【已闭（第三件）】两个基准各复取一次且 rc 落在件上：`LPM_RC=0`・违规 0 项（件 k46-lpm-20261104-145229-at-721ad27b.txt 与 k46-lpm-20261104-145229-at-head.txt，逐字读数在 §41.1 行 4 末）。
 - `8458651e` 那枚期外产品代码提交**未过本刀门件、未在任何一把刀的申报里出现**：事实、可核对后果与一条账面漂移在 §41.7；本刀不替它申报，也不替它声明已过门。
-- 未 push、未合 `company/main`、未动公开镜像 `github-legacy`、没 force。
+- 未 push（第四件实取：e29 推送件 PROBE 报 blockers=3 ⇒ 未执行，逐格读数在 §41.8）、未合 `company/main`、未动公开镜像 `github-legacy`、没 force。
+- 第四件（§41.8 那段）**未提交**：提交前门件被并行线那 10+1 条**在写**的文件拦在 A 格（不放宽基准、不代登，见 §41.8 复取条）。「不提交」这一侧挂着一条真实风险：那条线若用 `git add -A` 一类的动作提交，会把这份未提交的台账一起卷进它的产品代码提交（§41.7 记的同形状已经发生过一次）。处置只能是等它落地后立刻复跑门件再提，不是提前把门放开。
 - 「已达」句式（已装配／已在批内换形／已完成）在入库面上**没有机械判据**，本轮那一处是靠 `git grep` 自查照出来的；判据形状与复审触发条件写在 §41.3 第 6 条末，不是备用开关。
-- 下一刀候选（按本刀留下的顺序）：① 已闭（第三件：提交后复取 `lint_public_mirror` rc=0，读数已回填 §41.1 行 4 末）；② 层 1 与 U-1 两项 D2 请示；③ §40.5 四条待人拍；④ §41.3 第 11 条那条无齿项（`KEY=VALUE（件 X）` ⇒ X 内必含 `KEY=`），再犯一次就上齿；⑤ `8458651e` 的归属要么由作者补一行工单件申报、要么由下一刀重跑门件把它计入（§41.7）。
+- 下一刀候选（按本刀留下的顺序）：① 已闭（第三件：提交后复取 `lint_public_mirror` rc=0，读数已回填 §41.1 行 4 末）；② 层 1 与 U-1 两项 D2 请示；③ §40.5 四条待人拍；④ §41.3 第 11 条那条无齿项（`KEY=VALUE（件 X）` ⇒ X 内必含 `KEY=`），再犯一次就上齿；⑤ `8458651e` 的归属要么由作者补一行工单件申报、要么由下一刀重跑门件把它计入（§41.7）。⑥ 今日推送：等那条错误体并行线落地**且它自己的 lint 面转绿**后，按当时最终 rev 重跑 L3 再推（门件 B 格的 ruff 跑的是工作区，逐格读数在 §41.8 末三条）。
 
 ### 41.7 本刀期外发生的一枚产品代码提交（只登记事实，不替它声明已过门）
 
@@ -4171,6 +4172,321 @@ remote:   https://github.com/Light-Towers/agent-platform/security/dependabot/211
 - **它没有过本刀的门件**，也没出现在任何一把刀的申报集里 ⇒ 可核对的后果：e27 提交后复取第 4a 格（累计 backend 路径归属）会把这两条路径读成 `OUTSIDE-DECLARED`，除非有刀申报它们。**我不替它申报** —— 申报等于声称「这一刀的面就是它」，而那一刀的审计线索不是我写的。
 - 一条账面漂移（引用前须现取）：这枚提交使仓内两处陈述变旧 —— `docs/plans/plan-codeql-b7b-principal-thread-identity-2026-10-01.md` §3.3 约束 A「`server_user_id` 零生产消费者」与 `docs/plans/plan-platform-tenant-workspace-identity-2026-10-18.md` 表 ⑦「管道在、无生产绑定」（CHANGELOG.md 里的同一句是历史快照，按在册口径故意不校）。复跑口径 = `git grep` 现取生产侧命中数，不引本节这条。
 - 一条待拍（只登记、不属本刀）：那处回落语义让 observe 档（默认部署无凭据 ⇒ 不绑 ContextVar）仍由调用方传入的 `user_id` 决定。它与在册「A5 未做／无 user 断言」不冲突（接的是管道不是断言），但「未绑定时回落 kwargs 算兼容还是算 fail-open」要按 ADR-0007 §4.3 拍一次；`5 passed` 里那条 keeps_explicit_user_when_not_asserted 钉的正是这个形状。
+
+### 41.8 第四件：提交后复取的三格 + 推送被三枚 blocker 拦停（本刀不推）
+
+- **e27 提交后复取**（件 e27-00-postcommit-20261104-150403.txt、基准 HEAD `55396828`）：第 1 格 parent OK；第 3 格 `files=1 add=14 del=4 => del matched` 且 `non-docs-paths=0 allowed-list=[] => NOTHING-TO-DECLARE (docs-only knife; the zero is JUDGED, not refused)` —— 这正是 §41.3 第 10 条写下的那一句期望，它不是修辞，量具原样判出来了；第 4a 格读 `knife backend=0 (declared=0)`，同一行的末尾串是 `=> knife backend matched`（两个串都按件内逐字引，上一版把两者合并成一句转述、被新齿判为过形，已按件订正）。
+- **两格因期外活动而红**（都不改判据、不替别人申报）：第 2a 格 `SUBSTANTIVE-DIRTY lines=1`，那条未跟踪行是 §41.7 之后新长出来的另一条并行线（docs/plans/plan-error-contract-alignment-2026-11-04.md，本刀不读不写不代登）；第 4b 格 `cumulative=7 declared=5 OUTSIDE-DECLARED=2 <<< CUM-BACKEND-UNDECLARED`，两条未申报路径就是 `applications/agent_server/capabilities.py` 与 `applications/agent_server/tests/test_capabilities_identity.py` —— §41.7 第 2 条那条可核对后果至此落地：那一型不靠人记住，靠量具报红。
+- **推送没执行**（件 e29-push-kit-20261104-150946-probe.txt、`mode=PROBE-ONLY`）：窗口格 live 读 `day=Wednesday hour=15 -> IN-WINDOW`、注入自测 6 例 mismatches=0；ls-remote `verdict=READ-OK`（三条 post-quantum advisory 不算读失败）；`--dry-run` 两目标 rc=0，`d4d3d329..55396828`（fast-forward·非 force·`main` 仍在 fe22794c 未动）、lineage 那一条 `Everything up-to-date`。**`blockers collected this run = 3`**：content-dirty 1 行、untracked 1 行、backend 面 OUTSIDE-DECLARED 2 ⇒ 未加 `-Execute`，什么也没推。
+- 15:1x 现场再看，那条并行线已从 1 件扩到 4 件（`packages/agent-core/agent_core/guardrails/errors.py`、`packages/agent-core/agent_core/guardrails/app_factory.py`、`packages/agent-core/tests/test_guardrails_errors.py` 三件已改 + 那件未跟踪方案件）⇒ **当天的最终 rev 尚未定下来**，而推送的前提是「按当天最终 rev 过 L3」，不是「按我手边这个 rev 过了就行」。本刀不拿 15:09 那一轮冒充推送前提。
+- 一条深度安全审查读数（口径见 §41.3 与在册那条诚实声明规矩）：15:0x 对 `55396828` 跑了一轮 L3 深度审查，0 findings。⚠ 射程只能写成**推定**：产出里没有逐 rev 清单，无法从读数上证明它读到了哪几枚提交；且这一条自本刀入库后的下一枚提交起即失效 —— 而上面那行已经告诉你要来的不止一枚，所以它**不构成今日推送的前提读数**，推送前必须按当时最终 rev 重跑。
+- **复取（件 k46-foreign-face-20261104-151529.txt）**：同一条线到 15:15 已读 `tracked-modified-foreign=10`、`untracked-foreign=1`、本刀面 `tracked-modified-mine=1`，最新那枚 mtime 是 15:15:09（距当轮探测 20 秒）⇒ **它此刻仍在被写**，判决行 `gate-face-verdict=CONTAMINATED-PRE-COMMIT-GATE`。后果不是数字变大，是**本刀的提交前门件跑不起来**：门件 A 格的基准 = `git diff --name-only HEAD`（staged + unstaged 都算），那 10 条会被计进本刀面 ⇒ `<<< FACE-FORBIDDEN` 判红。两条绕法在此写清，免得后人再试一遍：① 把 A 格基准换成「只看 staged」让它变绿 —— 那是给一把 docs-only 刀放宽前置条件，而且门件从此看不见「提交时顺手被 `-a`／`-A` 卷进来的别人文件」；② 把它们塞进 `-AllowCsv` —— §41.7 第 2 条刚立过「不替别人申报」。⇒ **第四件的账面文字写完，未提交**：要等那 10+1 条落成一枚它自己的提交，本刀面才与读数同形。
+- 一条自犯（处置只动书写，不动判据）：§41.8 首次写入时插到了 §41.5 与 §41.6 之间，而**小节号就是引用锚点**（本节里 `§41.7 第 2 条`、`§41.3 第 10 条` 都按号引用，顺序一乱，读者按号找到的就不是那段）。搬到 §41.7 之后，用件 k46-move-418-20261104-151652.txt 自证是**纯搬运**：`file-len-delta=0`、`heading-order` 单调、`block-sha-stable=YES`。最后一枚才是自证的要害：哈希比的是**从新文本里重新抽出的那块**，不是手里那个旧变量（拿旧变量再算一次恒真，测不到搬运 —— 与 §41.3 第 9 条那型「自测构造式恒真」同形状）。**无齿项**：门件不判小节号顺序，这一处靠人读目录才发现；判据形状登记在此，第 11 条那条「同型再犯一次就上齿」同样适用于它。
+- **门件在并行线未落地时判红，而这不是本刀的失守**（件 e26-gate-00-20261104-152017-gate-fill.txt、`GATE_RC=RED`、`red-marker lines = 4`）：四枚红分别是 `FORBIDDEN: 10`、`UNTRACKED total=1  FOREIGN(not declared): 1`、`ruff :: rc=1 expect=0 <<< NOT GREEN`、`backend/workbench dirty now (must be 0) = 10 <<< BACKEND TOUCHED`。“我看一眼觉得是别人的”不算判定，所以拿**同把门件的上一轮对拍**钉住：件 e26-gate-00-20261104-145902-gate-fill.txt 逐字读到 `face lines   = 1`、`allowed-hit  = 1  FORBIDDEN: 0 OK`、`UNTRACKED total=0  FOREIGN(not declared): 0 OK`、`ruff :: rc=0 expect=0 OK`、`backend/workbench dirty now (must be 0) = 0 OK`、`red-marker lines = 0`、`GATE_RC=GREEN`。两读之间本刀没落一行，差的 21 分钟里只有那条线在写。
+- **一条新的工具面事实（它直接改变“等什么”）**：门件 B 格那把 ruff 跑的是**工作区**（`uv run ruff check .`），不是索引也不是 HEAD ⇒ 并行线的半写状态会直接染红本刀的 B 格。15:2x 单跑逐条定位（件 k46-ruff-foreign-20261104-152329.txt，末行 `Found 13 errors.`）：九枚落在 applications/agent_federation/api/server.py 的 import 层（I001 + F401）、一枚 `applications/agent_server/api/query_router.py:14:49: F401`、三枚落在 packages/agent-core/agent_core/guardrails/errors.py（`S110` 一处、`BLE001` 两处）。⇒ 对本刀而言「等它落成一枚提交」是**必要不充分**，还须它自己的 lint 面转绿。那三枚形状（吞异常 + 裸捕 Exception）按在册的 except 收窄规范属那条线自己的活儿，本刀只定位不修、不代登。
+- 一笔把账算清（免得下一轮重新推）：第四件之后本刀还剩三件事 —— 提交、按当天最终 rev 跑深度安全审查、推送；三件的前提是同一个：工作区面回到只含台账那一行（`face lines   = 1`）。14:59 那一轮已经把这扇门能绿拍过一次，它不是恒红装饰。
+- **同型第二次被照出（§41.3 第 11 条那条复审条件当场成立 ⇒ 上齿义务已产生）**：动工单件行前先逐把核「件里有没有那个数」，发现本节上面那句「blockers collected = 3」是**我改写过的形式**，件 e29-push-kit-20261104-150946-probe.txt 里的原行是 `--- blockers collected this run = 3 ---` ⇒ 已就地换成逐字串。这不是新缺陷，是那一型**第二次**出现（第一次靠 `git grep` 自查、这次靠引用前先开件核），所以按在册的复审触发条件它不再是文字自律：**下一件上齿（本轮已落地，齿与读数见 §42）** —— 判据形状 = 账面把某个读数绑到某个件时，该件内必须能取到那条键与它的值，取不到就报 `KEY-NOT-IN-CITED-ARTIFACT`；射程与盲区（同一行多个件名、跳行引用、非反引号形式）随齿同批登记。本刀不硬塞这枚齿：那条线正在写同一份工作区，量具换形要等一个干净的门件窗口。
+
+## 42. 第三十五批（2026-11-04，刀㊷）：把两枚齿从合成自测搬到真面，而齿自己那三处形状先被同一批自测照出来
+
+> 本刀**零产品代码**。入库面 = 取证件新开本节 + 工单件 §13.4 本批一行。量具面全部住在 gitignored 目录（按在册口径：脚本名与件名一律普通文本，反引号只用于「按仓库根可解析」的路径）。§41.8 末条那条义务在本刀落地成两枚齿，所以本节的顺序是：先记齿怎么装的、再记它怎么被自己照出缺陷、最后记射程。
+
+### 42.1 四处量具换形（每处给实物，不给意图）
+
+- ① **抽取器抽成单一实现处**（k46-keypair-lib.ps1，量具与透视件 dot-source 同一份）。起因不是审美：透视件第一轮就在**真台账**上把主路径的输出形状照了出来，件 k46-r6-diag-20261104-161041.txt 逐字读到 `extracted-pairs=1 raw-return-type=Object[]`，同一行另有 `key-array-count=3` 与 `key=[files knife backend non-docs-paths]` ⇒ 函数 `return ,@(...)` 再被调用方 `@(...)` 包裹会**多套一层**，元素从 hashtable 变成 Object[]，`$pr.key` 走成员枚举拼出伪键去比对。这一型的账面后果最坏：三个 span 拼成一个键，而 TALLY 报出的 keys 数看上去完全正常 —— **它不会变红，只会变钝**。处置是 lib 改普通返回 + 逐字引用带 span + form 分派，并由 selftest-9d 当场自证形状。
+  - 那一枚自证的实物读数**不在上面那件里**（本轮写完之后被自己的新齿判出来的：前面引的那件 k46-r6-diag-20261104-161041.txt 是透视件，它只报抽取器吐了什么，不跑自测）。它在还原后的干净复跑里：件 k47-ts-clean-20261104-164652.txt 逐字读到 `9d-pairs=3 hashTables=3`，同一行的期望串是 `expect True x5`。这一条留在账面是因为它正是本齿要防的那一型：**件名绑对了、数不在那个件里** —— 上一轮我是拿两个件的文字当成一件写的。
+- ② **编码面改为按字节读 + 按 BOM/NUL 分布解码**（tag 集：utf8-bom / utf8-noBOM / utf16le-bom / utf16be-bom / utf16le-noBOM / SPLIT-utf8bom+utf16le / NUL-UNDETERMINED）。成因与普查读数在 §42.5 第 1 条，这一处的判据是「读 surface 必须匹配写 surface」。
+- ③ **R-6 按 form 分派**：token 判「键在不在」、phrase 判「整串逐字在不在」（报 `QUOTE-NOT-VERBATIM-IN-CITED-ARTIFACT`）、bare-phrase-tail 不判只计数。为什么必须分派：上一版把短语也按「短语末词当键」判，当场咬到**登记这一型自身的那句账面文字**（同一型在 §41.4 已发生过两次：新齿上线第一轮总是先咬自己的登记句，所以这是预期动作而不是意外）。
+- ④ **loose（仅末词命中）收紧**：要求末词长度 >=5 且非纯数字。它是被 selftest-9a 抬出来的：编造的键 `FAKEKEY-9` 的末词是 `9`，而归一化后的件文本里真读数 `REALKEY-9=42` 含 `9=` ⇒ 假键被判成「弱命中」，那枚齿对 9a **永不响**。loose 仍单独计数、不混进 strict（弱命中是可见数字，不是默认放过）。
+
+### 42.2 两枚齿的真面反证（合成自测证明不了射程）
+
+- 形状：字节快照 → 台账末尾追加两枚 planted 行（一枚编造的键、一枚自称逐字但改写过形状的引用）→ 跑量具（必须双咬）→ 按字节还原并比 SHA256。实取（件 k46-r6-realface-proof-20261104-164531.txt）：`planted-elements=2 planted-bytes-expected=277 after-plant-bytes=742293 delta-match=True`、`two-plants-on-distinct-lines=True`、`byte-restore=BYTE-EXACT`、`PROOF_RC=0`；被判的那一轮逐字读到 `key="ZZZPLANT-16" form=token` 与 `span="knife backend=1 (undeclared=9)"` 各一枚（件 k46-r6-proof-run-20261104-164531.txt，同轮的汇总行是 `R-6 TALLY keys=18 strict=16 loose=0 KEY-NOT-IN-CITED-ARTIFACT=1 QUOTE-NOT-VERBATIM=1`）。
+- **反证件自己被照出两处缺陷（都不改变上一轮的结论方向，但改变它到底证了什么）**：
+  - 局部变量 `$nl` 用在它自己的赋值之前 —— PowerShell 不报错、静默取 `$null` ⇒ `-join $null` 把两枚种植**粘成一行**。上一轮（件 k46-r6-realface-proof-20261104-162521.txt）的铁证就是两条判决都报同一个行号 4201，而这一轮是 4201 与 4202。反证照样「双咬」，射程却被悄悄砍半（一行里两个件名走的是 multi-name 跳过分支）。处置不只是把赋值挪上去，而是**当场验两枚判决落在两个不同行号上**（同形即红）+ 比字节差，不靠读代码自证。
+  - 还原原先写在主干上：一旦中途抛异常，种植就永久留在台账里（那是反证把自己变成事故）⇒ 移进 `finally`，并以 `plantWritten` 为门。
+- 还原后的干净复跑（件 k47-ts-clean-20261104-164652.txt）：`ts-selftests) n=10 passed=10`，同一轮的 R-6 汇总行是 `R-6 TALLY keys=16 strict=16 loose=0 KEY-NOT-IN-CITED-ARTIFACT=0 QUOTE-NOT-VERBATIM=0` —— 反证留下的不是「种植没洗掉」，也不该是「种植洗不掉」。
+
+### 42.3 C 格那一枚红咬的是本刀的书写（工单件表格行漏了收尾竖线）
+
+- 16:49 那轮门件除并行线所致四枚红外**多一枚，而它不是别人的**（件 e26-gate-00-20261104-164953-gate-fill.txt 逐字读到 `fence-aware shape anomalies=1 <<< line 699 unterminated table row`，同轮 `red-marker lines = 5 (case-sensitive)`）。成因是我上一轮写 §13.4 那一行时漏了行末那根竖线 —— 这一格的判据只看「行首是竖线而行末不是」，所以单元格中间写什么都不会红、少这一根就红。
+- ⚠ 处置只补那一个字符：不动判据、不给这一格加白名单、不把行拆成两行绕开列数（在册那一型 —— 为了让表格行过去而放宽形状判据，等于把同批刚装上那枚齿自己磨钝）。
+- 修后复跑同格读 `plan-web-frontend-minimal-core-2026-10-29.md :: fence-aware shape anomalies=0 OK`（件 e26-gate-00-20261104-165940-gate-fill.txt），同一件里本刀那几格是绿的：`T2 ratchet: baseline=0 live=0 NEW=0 FIXED=0 OK (net flat against the registered baseline)` 与 `forbidden shapes => 0 TYPO-FORBIDDEN-ZERO-OK`（后者是硬 0 绑定，词形沿用在册的二字形状口径）。
+
+### 42.4 门件四轮对拍：本批那 4 枚红逐格同形，而窗口到 18:53 仍未开
+
+- 16:59 那轮（件 e26-gate-00-20261104-165940-gate-fill.txt）`red-marker lines = 4 (case-sensitive)`、`GATE_RC=RED`，四枚逐字是：`allowed-hit  = 2  FORBIDDEN: 10 <<< FACE-FORBIDDEN (touched a path this knife did not declare)`、`UNTRACKED total=1`、`ruff :: rc=1 expect=0 <<< NOT GREEN`、`backend/workbench dirty now (must be 0) = 10 <<< BACKEND TOUCHED`。同一件里本刀要的那几格读 `check_doc_sync :: rc=0 expect=0 OK`、`lint_public_mirror :: rc=0 expect=0 OK`、`write-tree rc=0 tree=4a2d2fd1dc5f532b0911e768ca3aab817853ad65 objType=tree COMMIT-BASIS-OK`。
+- 与 15:20 那轮对拍（件 e26-gate-00-20261104-152017-gate-fill.txt）：同一把门件、同样 `red-marker lines = 4`、同样 `GATE_RC=RED` ⇒ 三小时里本刀没落一行，差的只有那条并行线。归因靠**同把工具两轮逐格对拍**，不靠眼看（§41.8 已立这一格）。
+- 窗口复取（件 k46-foreign-face-20261104-185315.txt）：`tracked-modified-foreign=10`、`untracked-foreign=1`、`head-vs-company-ahead=4`、`foreign-last-write-age-sec=13086`，判决行 `gate-face-verdict=CONTAMINATED-PRE-COMMIT-GATE (A-cell FORBIDDEN would bind, not a docs-only knife fault)`。同日三轮的静置秒数是 4889（16:36）→ 6453（17:02）→ 13086（18:53），**单调变久而未出现任何一枚它自己的提交** ⇒ 用户拍的那两个前置（落地 + 它自己的 lint 面转绿）都还没满足。
+
+### 42.5 工具面事实（三条，本批最可复用的部分）
+
+- **读 surface 必须匹配写 surface**（普查件 k46-artifact-encoding-scan-20261104-154630.txt）：`scanned-files=1274`、`nul-without-utf8-bom=150`，其中一枚是「前半按 UTF-8 声明写、后半按 UTF-16LE 续写」的分裂件（`nul=8463/16986`），探针逐字读 `probe-hit-as-UTF8=False probe-hit-as-UTF16=True`、判决 `VERDICT: ENCODING-SPLIT-CONFIRMED`、`SCAN_RC=1`。危害方向要写准：它只造**假红**（件里的数按 BOM 声明读不到），造不出假绿 —— 但它会让「按内容排除判决日志」那道闸门在 UTF-16 件上**从不生效**，而这正是本批 selftest-7 双向自证要盯的位置。
+- **一条被我写之前否掉的推定**（这是 §41.8 那型第一次在落笔前被量具拦下）：我原打算把「门件自己的日志也属分裂面」写进上面那条。现取三件的字节结构后不成立 —— 两件门件日志 NUL 总数为 0（纯 UTF-8 带 BOM），分裂只发生在混用 `Out-File` 与 `Tee-Object -Append` 的那一条链上。登记它是因为**同一型前两次都是写完才发现的**，而这次差别只在先跑了工具。
+- **names 抽取的错锚**（件 e26-gate-00-20261104-164953-gate-fill.txt）：上一版拿全件**第一枚** `names=` 当自测名单，而本刀新增的「二进制件按射程排除」计数行恰好排在它之前，那一轮于是把三个二进制件名当成十个自测名报了出来 —— 逐字读 `n=10 passed=10 names=000003.log`。难处不在红，而在它**大部分是对的**（n 与 passed 仍正确，因为那两个数锚在 `ts-selftests)` 上，错的只有名单）。
+- 修法是只从指定的那一行抽。16:59 复跑（件 e26-gate-00-20261104-165940-gate-fill.txt）读 `n=10 passed=10 names-count=10`，同轮还落了两枚自证：`R6-TALLY-TEETH-OK` 与 `NAMES-ANCHOR-OK`（后者要求「锚对的」与「锚错的」两条路径**给出不同答案** —— 相同即探针恒真，测不出漂移）。
+- **PS 5.1 三处静默失效**（本批全部实踩，都不报错）：① 局部变量用在它自己的赋值之前 ⇒ 取 `$null`，于是 `-join $null` 把两枚种植粘成一行；② `return ,@(...)` 再被调用方 `@(...)` 包一层 ⇒ 元素由 hashtable 变 Object[]，`.key` 走成员枚举拼出伪键；③ 把 `\]` 写进字符类而它是类里唯一的 `]` ⇒ 类永不闭合。①与②的处置不是「挪一下就好」，而是各自换成一枚当场判据（两枚判决必须落在两个不同行号；pairs 的元素类型由 selftest-9d 自证）。
+
+### 42.6 R-6 两枚齿的射程与盲区（登记在册，不装作已防）
+
+- 干净面那一轮逐字（件 k47-ts-clean-20261104-164652.txt）：`R-6 TALLY keys=16 strict=16 loose=0 KEY-NOT-IN-CITED-ARTIFACT=0 QUOTE-NOT-VERBATIM=0 | skipped: multi-name-lines=2 no-cite-readings=7 bare-phrase-tails=1 absent-artifact=0 unreadable=0`，同轮 `TS_RC=0`。
+- **`multi-name-lines=2` 是本刀最大的已知旁路**：一行里出现两个件名 ⇒ 归属不明就整行跳过，而工单件 §13.4 那种超长单行恰好全是这一型 ⇒ 不放宽也不硬判，改为登记复审触发条件：**下一次真面反证若在多件名行里种出「没被咬的假读数」，就把「一行只引一个件名」抬成 C 格判据**。当场不抬的理由与 §41.8 那条同形 —— 抬了会误伤全部在册历史写法，而未反证的判据拿来绑红等于造一枚不知道会不会空转的齿。
+- 另两条边界：`no-cite-readings=7` = 行里有键但没件名 ⇒ 不判（否则会把普通叙述当引用）；`bare-phrase-tails=1` = 裸键前是「ASCII 词 + 空格」，它是短语尾巴不是键 ⇒ 不判只计数（上一版把它当键判，于是咬到了登记这一型自身的那句账面文字）。
+- **VALUE 级本轮只量不绑**：同轮的 `VALUE-level(本轮只量不绑): checked=8 mismatch=0` 是计数不是判据。不升的理由写清楚 —— 本轮真面反证种的两枚是「键不在」与「整串被改写」，**没有种「值被改写」**，所以值这一级今天仍属于「量具有输出但不知道自己会不会空转」那一格。反证补上之前，把它的数抄进结论就是越权。
+
+### 42.7 未做 / 不得读成已批 / 待人拍
+
+- 本刀**未提交**：并行线那 10+1 条从 15:15 到 18:53 一行未动也未落地（§42.4 三轮读数），A 格基准不放宽 ⇒ 门件这四枚红与刀㊶第四件同因、同批等窗口。刀㊶第四件与本刀届时**一起提还是分两刀**，等窗口开了当场定：分两刀更贴「一刀一语义」，代价是要把同一份台账面再切一次（切不开就合，不为了切而放宽申报）。
+- 未 push、未合 `company/main`、未动公开镜像 `github-legacy`、没 force、没改 git config（在册守卫原位）。
+- 门件那两枚新齿**都不带阈值**：绑的是「汇总行在不在、能不能解析」与「锚对与锚错必须给出不同答案」，不是把 keys 写死成下限。写死会在「这一刀只引件名、不引数」的合法轮次造出一枚永久红，而永久红的格跟没有格同形（在册那一型，本轮不为了抬齿先造一个红）。
+- 诚实项（未做）：VALUE 级反证未做（见 §42.6 末条）；我自己造的那一枚分裂件尚未以单一写者重造 —— 现在的状态是**账面不引它的内容**，不是「它被修好了」；那十枚 NUL 分布不定的属真二进制，按射程排除、不报红，也不当作已防。
+- 待人拍：`x-trace-id` 的后端装配（读数已到「没有」，动它属横切关注点，另刀）・§40.5 四条・层 1 时钟 drop-in 与 U-1 实验（同属 D2）。
+- 下一刀候选：① 窗口开后一次性收三件事（提交 → 按当天最终 rev 跑 L3 → 推送）；② VALUE 级真面反证，反证不成立就把值那一级降为纯计数并删掉本节这条；③ 多件名行那一格按 §42.6 的触发条件处置。
+
+## 43. 第三十六批（2026-11-05，刀㊸）："发布一版"先落在差集上而不是落在构建意愿上；打通「用户可达」那一层，并给上一批只报了形状没报归因的那一格补上实物
+
+> 本批起因是用户那句「继续，完成后发布一版，我想看下效果」。**零产品代码**。入库面 = 台账新开本节 + 工单件 §13.4 一行。取证件全部住在 gitignored 目录（按在册口径：件名与脚本名一律普通文本，反引号只用于「按仓库根可解析」的路径与逐字读数）。本轮三台 `date -u` 极差 5 秒 > 2 秒 ⇒ **CLOCK-BASE-SPLIT 成立**，所以本节所有时间戳只引「绑各台自己 `date -u` 的绝对戳」，不引任何相对时间结论。
+
+### 43.1 判"要不要重建镜像"用的是命令，不是 §40 那批账面
+
+- 复算 runbook §0 那条命令（件 k49-gitgap-localreach-20261105.txt）：`git diff --name-only d4d3d329..HEAD` 读 8 条路径，同件的子集计数行是 `WEB-COUNT: 0` ⇒ **web/ 面在线上的 rev 与本机 HEAD 之间零差**。这句不是新写：它就是 §40.3 那三层拆法里「代码层已到」的同一条；之所以今天再取一遍：本刀面至今未提交，HEAD 仍是昨日那枚 55396828（同件的 `AHEAD-vs-company:` 格读 4，与 §41.8 那个数同值 ⇒ 今天没有任何新提交）。所以这一格复算的作用不是发现变化，而是**不把昨天的数当成今天的读数用**（在册：读数必绑当轮 rev）；而这条判据的有效期只到下一次提交为止。
+- 同一件的 `NONDOC-COMMITS:` 格读 4 行。**这 4 行不许读成「4 枚非文档提交」** —— 那个格是按**提交信息**筛的，不是按**被改文件**筛的；差集里真正动了产品代码的只有 `8458651e` 那一枚（改的是 `applications/agent_server/capabilities.py` 与 `applications/agent_server/tests/test_capabilities_identity.py`，即 §41.7 登记的期外提交，同件的 `AHEAD-vs-company:` 格读 `4`）。
+- 于是「不重建」的射程必须写准：**只对 web/ 这一层成立**。那一枚后端改动的效果确实不在跑着的实例里 —— 这是如实陈述，不是漏项，也不构成「差集只有文档所以可以长期跳过构建」的那个例外（runbook §0 明确禁读成例外）。
+- 本批不做构建/分发的两个理由同向：① 会把一枚未过门的后端提交带进镜像（门件那把 ruff 现在仍红，见 §43.6）；② 241 那台的重 IO 构建压在同盘观测栈上（在册那条：守卫不得关）。
+
+### 43.2 入口通道是死着的，而"监听在"这件事以前也骗过一次
+
+- 本批第一格读到 `A: not listening`，同件的探活行是 `A-health code=000 bytes=0`（件 k49-rel-entry-20261105.txt）⇒ port-forward 已经掉了。
+- 处置走固化脚本（同件读 `B: script rc=0 (tail below)`，尾行是 `OK: port-forward :18000 就绪`，件 k49-pflog-20261105.txt），拉起步序里同一条链复取，不给「我 restart 过了」这一步单独发证。当前监听行的属主是 `users:(("kubectl",pid=2639372,fd=7))`，绑地址 `0.0.0.0:18000`。
+- 一条诚实边界 + 一条新发现的"处置动作自己销证据"：今晨更早那一轮（同一批、同一台）我见过同一格位「`ss` 报 LISTEN 而 curl 给 000」的形状，那一轮是**内联取的、没落件** ⇒ 本节把它记在 no-cite 类里，不绑件名、不充数；本批落件的只有 `A: not listening` 与 `A-health code=000 bytes=0` 这两条。而当初那条断连字面现在**在旧日志里也取不到了**：固化脚本 `deploy/k8s/scripts/portforward.sh` 起 kubectl 时用的是 `> /tmp/portforward.log`（**截断**）⇒「重新拉起」这个动作自己销毁了上一轮的死因，同件现在只剩新进程写的 `Handling connection for 18000`。⇒ 教训与在册那条「宽限期判据必须在删除之前抓 lastState」同型，只是这次被销毁的载体是日志文件：**取证必须早于处置**；登记它是因为它可复用于一切截断式重启的通道（那样的链上，事后无法复原断连原因）。
+
+### 43.3 入口面逐格：每一格要真字节，200 本身不算数
+
+- `/health`（件 k49-rel-entry-20261105.txt）：`D: code=200 bytes=956 t=0.006221`，同件 `D: total-keys = 30`。逐键里三格要点名：`D: cache_ready        = False`、`D: git_rev` 那一格的取值是 `<absent>`（⇒ `/health` **没有**这枚键，判「跑的是哪一版」只能走 Pod 内 GIT_REV，见下面 G 格）、以及 `otel_status` 为 ACTIVE 同件在。
+- `/ui/`：`E: code=200 bytes=1701`，响应头格读到 `E-h: cache-control: no-store` 与 `E-h: etag: "ca8503a8efed3d61322a288a1010c6fc"`，本侧摘要行是 `E-sha: local-index-html = d4a4297e0847 bytes=1701`。
+- 两条被引用的 asset 各自一跳：`F: assets/index-DzyYPB3A.js code=200 bytes=86234 t=0.009722 sha=7ea974192672` 与 `F: assets/index-qQg6U5Lb.css code=200 bytes=14275 t=0.005416 sha=a4dc4f089157`。
+- 同一件的 G 格把这三个 sha 与 **Pod 内** `sha256sum` 对成逐字相同：`G-pod: index.html sha=d4a4297e0847`、`G-pod: assets/index-DzyYPB3A.js sha=7ea974192672`、`G-pod: assets/index-qQg6U5Lb.css sha=a4dc4f089157`；对象绑定行是 `G: POD=agent-platform-c7bcffcbc-znwcz` 与 `G-rev: d4d3d3290e237ba080288ef77b6b76c7536d038b`。⇒ 经这条通道看到的字节 = d4d3d329 那份 dist，不是别的 rev，也不是构建残留（读产物从跑着的 Pod 读，沿用在册那条 `docker run` 禁例）。
+- 本机侧独立一跳（件 k49-gitgap-localreach-20261105.txt）：`LOCAL-UI code=200 bytes=1701 ms=640 cache-control=no-store` 与 `LOCAL-HEALTH code=200 bytes=956 ms=280`。按 ㉑ 那条时延形状判据：毫秒级往返 + 字节数与远端逐字相同，才算真可达，不是本机缓存冒充。
+- 为什么这一层仍然**没有**改变 §40.3：同件 `I-ingress-count = 0`，svc 行是 `agent-platform   ClusterIP   8000   <none>   <none>`（type=ClusterIP、nodePort 与 externalIPs 都是 `<none>`）⇒ 「用户层未达」这一句今天仍然成立，本批只把 ops 通道恢复并证明了它通；要把它说成「发布给用户」，得先拍 §40.5 第 1 项那三选一。
+
+### 43.4 「打开看到的是新版」用类名在托管字节里的存在性来判，不用"应该已经生效"
+
+- 件 k49-marker-nodecond-20261105.txt 在**已下载的托管字节**上计数：`CSS-ev--transport:` 下是 `2`、`CSS-term--:` 下是 `3`、`CSS-tl-toggle:` 下是 `2`、`JS-ev--transport:` 下是 `1`、`JS-tl-toggle:` 下是 `1`；尺寸格 `SIZE-CSS-BYTES:` = `14275`、`SIZE-JS-BYTES:` = `86234`，与 §43.3 那两条 F 格逐字同值。⇒ 刀㊲ 那批的 CSS/组件类名确实存在于线上产物里，不是旧壳。
+- ⚠ 射程写清：类名在只证明**产物是新的**，不证明**运行时渲染正确**（后者属 V 类浏览器面实拍，本批没重跑，也不许拿这一条冒充）。
+
+### 43.5 restartCount 0→1 的实物（上一批只报了"昨日 0 今日 1"这个形状，没给归因）
+
+- **取证件自己先崩了一轮**：件 k49-restart-audit-20261105.txt 逐字读到 `KeyError: 'startedAt'`，崩在第 5 行 ⇒ 本轮最想要的那格（`lastState`）没取到。成因不是线上缺字段：这条 API 版本不在 containerStatuses 顶层放 `startedAt`（同批 G 格独立 jsonpath 读 `startedAt=` 空值），而 §40 那批探针的 custom-columns 里 STARTED 列一直报 `<none>` ——**那是一列永远读不出值的量具缺陷**，它不会变红、只会变钝。处置：读脚本全字段改 `.get()` 并把缺失显式标 `<KEY-ABSENT>`，另补一格不经解析器的 jsonpath。
+- 实物（件 k49-restart-audit-b-20261105.txt）：`restartCount = 1 | ready = True`；`lastState` 里 terminated 的三枚键是 `"exitCode": 137`、`"reason": "Error"`、`"finishedAt": "2026-11-04T11:38:04Z"`；`state` 里 running 的是 `"startedAt": "2026-11-04T11:44:06Z"`。
+- 三条同窗实物之一（件 k49-restart-audit-b-20261105.txt）：`C gracePeriod     = 60`，liveness 实值里含 `"failureThreshold": 4` 与 `"timeoutSeconds": 5`，而 httpGet 路径就是 `/health`。
+- 三条同窗实物之二（件 k49-restart-audit-20261105.txt）：前容器日志尾先打 `Shutting down`、再打 `Waiting for connections to close. (CTRL+C to force quit)`，同窗还有 `failed to resolve host 'postgres'` 与 `Failed to establish a new connection`（OTLP 导出目标那一行含主机名字面，本台账按在册口径不落它）。
+- 排除项 A（件 k49-marker-nodecond-20261105.txt）：节点 `<internal-node-02>` 的 `Ready` / `MemoryPressure` / `DiskPressure` / `PIDPressure` 四行 `LastTransitionTime` 全是 `Tue, 03 Nov 2026 18:20:58 +0800` ⇒ 11-04 11:38Z 那一格没有翻转，**节点重启/驱逐不成立**。
+- 排除项 B 与「死的是容器不是 Pod」（件 k49-restart-audit-b-20261105.txt）：`"reason": "Error"` 而不是 OOMKilled，同件 `C resources       = {"limits": {"cpu": "1", "memory": "2Gi"}, "requests": {"cpu": "250m", "memory": "1Gi"}}` ⇒ 内存触顶也排除。同一件另两格给出形态判据：RS 历史里当前只有 `agent-platform-c7bcffcbc             desired=1 ready=1 avail=1`，而 `C restartedAt     = 2026-11-04T09:42:13+08:00`（= 11-04 01:42:13Z）比该 RS 的创建戳 `2026-11-04T01:43:08Z` 早 55 秒 ⇒ 昨天那轮 rollout restart 造的是**新 Pod**，而 11:38Z 死的是**同一 Pod 里的容器**（kubelet 就地重启，不是滚动）。
+- 落下来的结论与**未定性**：形状是「kubelet 就地重启容器：SIGTERM → 优雅关闭卡在等待连接关闭（长连接/SSE 正是这一类）→ 60 秒宽限期到 → SIGKILL 137 → restartCount +1」。两处没取到，不许顺嘴补上：**什么让 `/health` 连续 4 次超 5 秒**没证（DNS/路由同窗失败是相关项，不是证明）；`11:38:04Z` 被杀到 `11:44:06Z` 新容器启动之间那 **6 分 02 秒**没有解释（单枚重启的回退上限是 10 秒量级，对不上）。事件面已过 TTL：件 k49-rel-entry-20261105.txt 的 H 格逐字读到 `H: no matching events`。同型第二处独立证据在另一件里（k49-restart-audit-20261105.txt 的 F 格），那一格读的是 No resources found 开头那句 ⇒ 两格都不是「没有发生」，是「已经取不到」。⇒ 登记为未定性，并给复审触发条件：**下一次 restartCount 变化时当场读节点侧 kubelet 日志窗口**，别再造「事后翻日志」这种取不到的取证。
+- 一条对「能不能演示」有直接后果的架构面事实：liveness 与 readiness 都打在 `/health`，而 `/health` 会去 ping 缓存（件 k49-rel-entry-20261105.txt 读 `D: cache_ready        = False`，同件 degraded 原因串里有 `Error 111 connecting to localhost:6379`）⇒ 外部依赖一断，探针与业务健康被同一把慢查询绑在一起。本批**不动它**（改探针属横切关注点，另刀，且要先出方案）。
+- **本批自己的书写被 R-6 咬了五次，而五次都是同一型**：初稿跑出的判决（件 k49-ts-20261105.txt）逐字读 `R-6 TALLY keys=55 strict=50 loose=0 KEY-NOT-IN-CITED-ARTIFACT=1 QUOTE-NOT-VERBATIM=4`——四条 quote 全是「把 -b 那件的读数绑到了崩掉的第一件 / 把 audit 件的读数绑到了 nodecond 件」，那一枚 key 是 desired 在被错绑的件里查不到 ⇒ **数全对，绑错了件**。这一型很阴：两个件名都在盘上、都存在、都是本批真取的，所以「件名在不在盘」那一格完全不会响（missing=0 两轮都是）——只有内容级比对能报。处置只拆行重绑（一行只引一个件名），不动判据、不加白名单。复跑（件 k49-ts2-20261105.txt）读 `keys=54 strict=54 loose=0 KEY-NOT-IN-CITED-ARTIFACT=0 QUOTE-NOT-VERBATIM=0`、同轮 `n=10 passed=10`。⚠ 两轮的 keys 差 1（55→54）而 multi-name-lines 与 no-cite-readings 两格**都没变**⇒ 这一枚差额本批**没有逐条对齐到具体键**，不口头宣布「等价」；它是 §42.6 那条「值那一轮只量不绑」同侧的一个未解释项，复审触发条件 = 下一次两把同件复跑出现 keys 而各计数格不动时，把差值逐键列出。
+
+### 43.6 提交/推送窗口仍未开（读数都不放宽），面禁件按「追加之后」复跑
+
+- 并行线最近一次写入是 `packages/agent-runtime/agent_runtime/schemas.py` 的 10:12:53；到 11:14 复取时静置约 61 分钟，其余脏文件停在 11-04 19:12。工作区 14 条 porcelain 行（含未跟踪 1 条）。⇒ **静置不等于落地**，这条边界在 §42.4 已经写过，本轮不把它改读成「它应该完了」。
+- 判据仍用它自己那一条：11:14 现取 `uv run ruff check . --output-format=concise` 得 13 枚（F401×9 / BLE001×2 / I001×1 / S110×1），与 §41.8 末条定位的那 13 枚 **delta=0** ⇒ 用户拍的两个前置里「它自己的 lint 面转绿」这一条未满足。
+- 因此：刀㊶ 第四件、刀㊷、刀㊸（本批）三批账面**一起等同一扇门**；不代登、不 stash、不放宽 A 格基准（§41.8 已把两条绕法当场写成不可取）。本批同样未 push、未跑 L3 —— 「当天最终 rev」还没定下来，拿 05:0x 那轮 L3 冒充推送前提就是 §41.8 第 5 条禁的那种读法。
+- 书写面复跑（件 k49-typo3-20261105.txt）：逐字读到 `T1 hits=13`、`T2 hits=0`、`T3 hits=0`、`T4 hits=0`，同一件的探测行是 `T1 probes: 词串=24 码点 forbidden=0 review=17` ⇒ T2 棘轮保持 0、forbidden 保持硬 0。
+- 时间戳可证性复跑（件 k49-ts3-20261105.txt）：读 `R-6 TALLY keys=54 strict=54 loose=0 KEY-NOT-IN-CITED-ARTIFACT=0 QUOTE-NOT-VERBATIM=0`，同轮的自测行是 `ts-selftests) n=10 passed=10`。
+- 与上一轮（件 k49-ts2-20261105.txt）逐格对账，四格差额都能归到具体一行：added-lines-total 132→133、multi-name-lines 4→5、artifact-refs 47→49、keys 一格未动 ⇒ 三处增量同源于 §43.5 末条那一行（它一行里含两枚件名，走的是跳过分支）。这一轮**不触发** §43.5 末条立的复审条件：那一型是 keys 动而计数格不动，本轮反过来且每格可归因；但那枚旧差额（55→54）仍是未解释项，不许读成「本轮对账成功所以旧账也清了」。
+- ⚠ 跳过分支的反面必须写全：正因为走跳过，**§43.5 末条那条自证文字里的引用没有被 R-6 判过**，它只被「件名在不在盘」那一格判到（missing=0）。那条内容的对错靠当场逐字开件，不靠齿 —— 账面不许把它读成「过了齿」。
+- 文档防漂移复跑（件 k49-docsync3-20261105.txt）：读 `✅ 文档同步校验通过（0 警告）`。
+- 一条递归形状（它决定「本批账面合格」这六个字能说到什么程度）：上面三把都是**在本节还在长的时候**跑的，而每条读数入盘都会让「行文本已定」这个前提再失效一次 ⇒ §43 的最终判据只能由提交时刻的门件终跑给出，而那一轮在本批窗口里跑不了（就是本节第 2 条那枚 ruff）。本轮只主张「三把面禁件各自 rc=0 且逐格绑件」，不主张「已过关」。
+
+### 43.7 交付口径 / 未做 / 待人拍
+
+- 交付给用户看效果的那一句只许说到这个程度：入口 `http://<internal-host>:18000/ui/`，线上对象 = Pod 内那枚 `d4d3d329`（**不是**本机 HEAD 55396828；两者 web/ 面等价，但差集含一枚未过门的后端提交，所以不能说成「已发布 HEAD」）。页面内需用户自己粘贴 API Key，密钥不经本机、不入账。
+- 11:2x 交付时刻的复探（件 k49-entry-live2-20261105.txt）：读 `ENTRY code=200 bytes=1701 t=0.012934`，同件的响应头行是 `HDR: cache-control: no-store`，etag 与 §43.3 那一格同值（`HDR: etag: "ca8503a8efed3d61322a288a1010c6fc"`）⇒ 本批账面收笔时通道是活的，而「收笔时活」不等于「用户点击时活」（它已经死过一轮，见 §43.2）。
+- 一处我自己踩的探测错径，必须当场写下来（它差点变成一条假结论）：上一格第一次探的是 127.0.0.1:18000，读回 `ENTRY code=000 bytes=0`（件 k49-entry-live-20261105.txt）。那不是通道死了 —— **隧道在远端宿主上，本机没有本地端口转发**，把 127.0.0.1 当入口就是量具指错了对象。差点把「我探错了」读成「它又死了」并据此去重启一条本来好着的通道 —— 那条动作本身会截断日志（§43.2 的销毁证据那一型）。
+- 先取后处置的实形：动手重启前先到宿主上读进程与监听两格（件 k49-pf-death-20261105.txt），pid 行与 `LISTEN 0      4096           0.0.0.0:18000` 两行都在，而日志尾只到 `Handling connection for 18000` 那一串 ⇒ 通道本来就是活的，**根本不需要处置**（上一格那个 000 是探测目标错）。
+- 同族另一枚小坑（它在这一批又应验一次）：在册那条「内联 ssh 的变量会被 PowerShell 本地求值」 —— 件 k49-pf-death-20261105.txt 里逐字读到 `rc-of-pgrep=True`，而 True 是本机布尔、不是远端 rc。处置：该格不参与任何判决，判决只走未经本地展开的那三格（pid 行、stat 行、ss 行）。
+- 未做（不得读成已批/已完成）：未提交、未 push、未重建镜像、未 rollout、未动公开镜像 github-legacy、没 force、没改 git config（在册守卫原位）；L3 深度安全审查本批**没跑**；V 类浏览器面实拍本批**没跑**（§43.4 那条不替代它）。
+- 待人拍（D2/D3，AI 不自定）：① §40.5 第 1 项「用户可达正式开放」三选一（NodePort / Ingress / 固定 ops 通道）—— 不拍，「发布一版给用户看」就永远只能靠这条 port-forward，而它已经死过一次；② `AHEAD-vs-company` 那 4 枚里含未过门的期外后端提交，要不要照现状推 company（推 = 把它带上集成分支；不推 = 本批账面继续压）；③ `/health` 把探针与缓存依赖同轨要不要拆开（另刀，先出方案）；④ `x-trace-id` 后端全局装配（读数已到「没有」）。
+- 一条量具缺陷登记（按在册「有齿才写」的形状，本条**无齿**）：§40 那批 custom-columns 的 STARTED 列恒 `<none>` 而门件面**没有**任何一格判「探针列能不能读出值」。登记复审触发条件：下一次因字段面缺失而丢掉承重读数时，就上「声明的列必须至少一次读到非空」这枚齿 —— 本轮已在 §43.5 丢过一次（`lastState`），所以这条从「候选」升为「下一次必上」。
+
+## 44. 第三十七批（2026-11-05，刀㊹）：PR-2a/2b 登录面把两把量具都跑到红过一次才算交；一条 env 模板的真空被治理用例当场拦住，而索引是两条线共享的
+
+> 本批**动了产品代码**（方案 docs/plans/plan-web-auth-user-minimal-2026-11-05.md 的 PR-2a + PR-2b，授权来自用户那句需求原文与下面 §44.1 的拍板）。入库面 = 产品/测试件 + `.env.example` + 工单件 docs/plans/plan-web-frontend-minimal-core-2026-10-29.md 一行 + 本台账新开本节。量具面全部住 gitignored 目录（按在册口径：件名用普通文本，反引号只用于「按仓库根可解析且已入库」的路径）。本轮所有时刻绑本机时钟；三台 `date -u` 的极差本轮**未复取**，所以本节不出现任何跨台相对时间结论。
+
+### 44.1 用户那句需求与「保持现状」这一拍
+
+- 需求原文是「如果没有用户，那登录界面创建用户，如果有账号，直接登录就行」。本轮先做的不是写代码，是把这句对着实物读：该形态在 PR-2b 已落地（同屏两态，默认落「创建账号」，建号成功即已登录，提交撞 409 自动切回「登录」态）。逐条核到三处实物：后端 register 端点 201 直接回令牌（注册即登录，没有第二次点击）；`web/src/App.vue` 的视图闸门在未确认登录态时只渲登录面；`web/src/stores/session.ts` 那行 409 切态就是「有账号就直接登录」的实物。
+- 我在报实物之后抬出**另一种可读法**（去掉切态控件、单按钮先试登录、401 即自动建号）并写明它的代价：登录名打错一个字母会当场默默建出一个新账号，而表内零用户时首账号就是管理员；且后端 A3 故意不区分「账号不存在」与「口令错」，自动分派等于在前端重建一个存在性 oracle。用户在 AskUserQuestion 里选 **「保持现状」**（选项之一，不是「按推荐继续」那种笼统答复）⇒ 本刀**零登录面代码改动**，后续只做门禁实跑与账面随动。
+- 一条纪律因此有值：这句话本批已第二次出现（第一次是 auth_router 的文档串与 LoginView 的头注）。同一句需求在三处载体上必须读成同一个形状，而钉住它的是 24 条 router 用例里那条「注册成功即等于已登录」与行为门 §I 的 I1/I2 —— 不是任何一处注释。
+
+### 44.2 交付面按归属分栏（本轮实测出来的归属，不是推定）
+
+- **本刀面**（PR-2a 后端）：新增 auth_users.py（用户目录单一实现：argon2 散列 + 归一化 + org upsert）、auth_router.py（四端点薄封装）、migrations 016 的 up/down 两枚、三组测试（test_auth_users.py / test_auth_router.py / test_login_no_secret_leakage.py），改 `applications/agent_server/config.py`（四枚新 Settings 字段）、`applications/agent_server/main.py`（登录端点进 skip_paths）、`applications/agent_server/api/routes.py`（聚合入口挂 auth_router）、`packages/agent-runtime/agent_runtime/workspace_registry.py`（asserted_* 三枚导出，D-l 按人分桶的读取位）、`packages/agent-runtime/pyproject.toml` 与 `Dockerfile`（identity/auth 两个 extra 显式挂在声明它的包上）。
+- **本刀面**（PR-2b 前端）：新增 auth.ts（凭据面客户端）与 LoginView.vue（同屏两态），改 `web/src/api/sse.ts`、`web/src/stores/session.ts`（登录态机）、`web/src/App.vue`、`web/src/components/ApiKeyBox.vue`、`web/vite.config.ts`（dev 代理加 /auth）、两把量具 `web/scripts/check-events.mjs`（新齿 C2/C3/C4）与 `web/scripts/verify-sse.mjs`（新 §I）。
+- **并行线面（错误契约对齐，本刀不代登、不修）**：`applications/agent_federation/api/server.py`、`applications/agent_server/api/query_router.py`、`packages/agent-core/agent_core/guardrails/errors.py`、`packages/agent-core/agent_core/guardrails/app_factory.py`、`packages/agent-core/tests/test_guardrails_errors.py`、`packages/agent-runtime/agent_runtime/identity_middleware.py`、`packages/agent-runtime/agent_runtime/schemas.py`、`packages/shared-schemas/shared_schemas/error.py` 与它的 `__init__.py`/测试、`web/src/api/errors.ts`（文案已改成统一信封口径，与信封那两枚键同源），以及未入库的方案件 plan-error-contract-alignment-2026-11-04.md。**归属是按 diff 内容读的**（那批 diff 全在换 HTTPException → AppError 与信封形状），不是按 mtime 猜的。
+- 一处必须写清的交叉依赖：新增的 auth.ts 从 `web/src/api/errors.ts` 取 `describeError`（工单件 §3 那条「唯一收敛点」）。所以「两条线各自能独立提交」这句话**不成立** —— 我的登录面失败文案依赖那条线正在重写的收敛点。本轮的实物证据是 §I 与 §A 两族断言在同一份工作区里同时绿（143 条，见 §44.3），也就是当前内容能共存，但共存不等于任一侧可单独回退。
+
+### 44.3 前端六步门禁：每步绑 rc，绿之外还要读得出它扫了什么
+
+- 件 k48-ciweb-20261105-144424.txt（基准 HEAD=`55396828`，与 Makefile ci-web 同步骤同顺序，本机无 make ⇒ 逐条 pnpm 等价直调）：`check:tokens rc=0`（派生集 事件 12 类 / 字段 30 个，末行「视觉门禁通过（定义 91 / 引用 91）」）、`check:events rc=0`（八格全 ✅，其中新加的两行是「凭据面：写存储的文件 auth.ts, theme.ts / 白名单 auth.ts, theme.ts」与「装配面：set 入口凭据头的文件 auth.ts」）、`lint rc=0`、`typecheck rc=0`、`verify:sse rc=0`、`build rc=0`。
+- 行为门的总数那一格是本轮唯一能核对「不是空跑」的数：**合计 143 条断言（不含自测），失败 0 条**（上一批在册数是 90 ⇒ §I 那一族把增量钉在 53 条上；而件里仍有一行 `✗ __selftest__ 断言器必须能把 false 记成失败` 与紧随的「已撤销，不计入结论」—— 那是断言器自证，不是失败）。
+- 一条顺带的部署面读数：`build` 产出 `dist/index.html 1.72 kB` / `dist/assets/index-qQg6U5Lb.css 14.27 kB` / `dist/assets/index-Ba2Z8zKz.js 96.95 kB`。CSS 那枚文件名与 §43.3 线上正在托管的**逐字同名**，JS 那枚从 `index-DzyYPB3A.js` 变成 `index-Ba2Z8zKz.js` ⇒ 本轮 web/ 改动只进 JS 一侧，而线上跑的仍是 `d4d3d329` 那份 dist。**这不构成「已部署」的任何一格式声明**（本批未构建、未 rollout）。
+
+### 44.4 后端四组里有一条真红，而且红的是我的面
+
+- 件 k48-begate-20261105-144529.txt：`lint_architecture rc=0`（132 秒全仓扫描，含「裸 `FastAPI(` 即失败」与 add_middleware 那两族不变量）；`test_auth_users.py` **61 passed**；`test_auth_router.py` **24 passed**；`ruff check .` **rc=1，Found 13 errors** —— 逐条落在并行线那三件（server.py 9 枚 I001/F401、query_router.py 1 枚 F401 `HTTPException`、errors.py 3 枚 S110/BLE001），本刀面 0 枚，归属见 §44.2 末栏；`tests/governance` **1 failed / 488 passed / 1 skipped**。
+- 钉住 §44.1 那句需求的两条用例名要**逐字**才核得动，而本批第一版把它们的语义绑在了一件只印计数的件上（被自己的齿抓，逐条见 §44.9）⇒ 补一具逐用例行的单跑件 k49-router-v-20261105-151347.txt，末行 `24 passed in 81.94s`，两条用例名逐字取自该件：test_register_is_login_in_one_round_trip（注册即登录，没有第二次点击）与 test_signup_disabled_returns_403（关注册不关登录）。同一件里另有三条本轮要用到的形状：test_wrong_password_and_unknown_user_return_identical_body（A3 不区分「账号不存在」与「口令错」两支）、test_tenant_only_token_is_not_a_person（§44.6 第 ④ 条的机械版）、test_overlong_ttl_is_rejected_at_login_not_next_request（它照出了 §44.6 的一处症状写反）。
+- 那一条红是本刀的：`tests/governance/test_agent_server_env_template.py` 报「agent_server 读而根 .env.example 未记载的键 4 个：`['AUTH_TOKEN_TTL', 'SIGNUP_ENABLED', 'SIGNUP_ORG_ID', 'TENANT_JWT_KID']`」。这正是那条用例存在的理由（代码加了字段、模板没加 ⇒ 运维照模板部署后该能力静默保持默认值），而且是**本轮唯一一条被机械齿拦下的自身漏项**：PR-2a 落 config.py 那四个字段时我没同步根模板，靠跑治理面才发现。
+- 处置只有一侧可动：补 `.env.example`（新增一组四键，值逐条照代码 Field 默认：3600 / true / 空 / platform），**不放宽用例**。补的位置刻意落在补齐段**之后**，因此同时被两格判：正向齐全（键名必须出现）+ 补齐段值对账（值必须等于代码默认）—— 后一格是白捡的：它从此会盯着 `AUTH_TOKEN_TTL` 与代码默认漂移。
+- 复跑两件（件 k48-governance-rerun.txt）：单文件 **3 passed**；整个 `tests/governance` **489 passed / 1 skipped**（与首跑同总数、失败归零 ⇒ 不是靠少跑一条换来的绿）。
+
+### 44.5 变异反证：六枚全咬，其中两枚只有行为门能咬
+
+- 反证件 k48-mutcheck-20261105-145608.txt（一次性件，住 gitignored 目录，不在 eslint 面内）。每枚都同时取「门的 rc」与「咬住它的那一条文案」，只报 rc=1 不够 —— 那是「有个东西红了」，不是「这一枚齿咬住了」：
+  - M1 把令牌写进 `localStorage` ⇒ check:events rc=1，文案「src/api/auth.ts 写了 localStorage（方案 D-k 定的是 sessionStorage 档）」，且行为门同时红（I1c）；
+  - M2 改令牌键名 ⇒ check:events rc=1「LoginView.vue 屏上没有写出令牌键名 ap.auth.jwt」，行为门同时红（键名写死在册件里那格）；
+  - M3 在 `web/src/api/sse.ts` 里把装配换成自拼名（全量改名，让引用面真的断开）⇒ check:events rc=1「src/api/sse.ts 不再引用 applyCredentialHeaders」；
+  - M4 把 `canChat` 改名 ⇒ check:events rc=1「登录面消费链断裂（齿 C4）：src/App.vue 不再读 canChat」；
+  - M5 删掉 session.ts 那行 409 切态 ⇒ **check:events 不跑**（结构齿看不见语义），verify:sse rc=1「✗ I2 409 ⇒ 同屏切回登录态且不假装登录成功」；
+  - M6 把注册路径写成相对 ⇒ **同样只有行为门红**：「✗ I1b 走的是绝对路径 /auth/register … —— auth/register」。
+- 六枚的还原格逐枚取 sha256 前后对（同一对值 ⇒ BYTE-EXACT），末行合计「存活 0 枚」，件本身 rc=0。**M5/M6 是本节最该留下的一条**：若只当批跑结构门（check:events 绿），这两型漂移是零症状的 —— 而这正是两件互替不了的实物读数。
+
+### 44.6 把 config.py 注释里那条「读代码推定」换成实测
+
+- 起因：`applications/agent_server/config.py` 那段 D-j 的注释写着 28800 会被上限拒，写它时手里只有一条探针脚本（.tmp-scratch 目录里的 k48-ttl-probe.py），**没有落盘件** —— 那句「实取见本轮取证件」当时是无载体的引用。本轮跑真一次并落件 k48-ttl-probe-20261105-145916.txt：`RESULT ttl=28800 VERIFY-REJECT 令牌 TTL 28800s 超上限 3600s`、`RESULT ttl=3600 VERIFY-OK tenant=acme user=alice`、`RESULT kid-mismatch VERIFY-REJECT 令牌 kid 缺失或无匹配公钥: 'other'`、`RESULT tenant-only-token tenant=acme user=acme same=True`。
+- 四条读数各管一件在册事：① 探针量的是 **identity 那一层** —— verify_token 对 exp-iat 有安全上限，超了就在验签时拒；但**产品面读到的症状不是「登录 200、下一个请求 401」**：auth_router 签发后用与中间件同一条通路自验一把，只抬一边时登录**当场 503**（走签名器不可用那枚固定 code，机械版是那条名为 test_overlong_ttl_is_rejected_at_login_not_next_request 的用例——件名在 §44.4 那一格，它同时验了「两把键同抬到 7200 才许登录成功」）。本批第一版 .env.example 的注释把「没有自验时才会出现的形状」当成了实物症状，而同一段落里已经写着「另有一道签发后自验」⇒ 两句自相矛盾，本轮按实物订正（载体与发现方式见 §44.9 第 3 条）；② 3600 这一档可用 ⇒ 默认值成立；③ kid 对不上是当场拒而非逐把试 ⇒ 部署清单里两枚键必须同值；④ 租户级令牌（无 user claim）解出来 `user == tenant` —— 这就是 asserted_person_id 需要 None 分支的实物成因，不是假设。
+- ⚠ 口径：这格用的是本机临时密钥对（tempdir），**不是现网任何一把**；它证明的是签发/验签这条链的形状，不证明任何部署态。
+
+### 44.7 窗口：门件实跑 RED 七枚红・其中只有两枚是并行线造成的・同时抬出一条「索引是两条线共享的」
+
+- 本轮完整重定向实跑（件 e26-gate-00-20261105-150541-gate-fill.txt，申报面 29 条路径・`face lines   = 30`・`red-marker lines = 7`・`GATE_RC=RED`）。三格面判据读数：`allowed-hit  = 19  FORBIDDEN: 11`、`MISS-DECL: 10`、`UNTRACKED total=11  FOREIGN(not declared): 11`，另加一格 NOT-SEEN-IN-FACE: 10（判据行 BASIS-BLIND-TO-NEW-FILES）。11 条 FORBIDDEN 逐条就是 §44.2 并行线那一栏（含 `web/src/api/errors.ts`）⇒ 归因不靠眼看，靠门件报的路径集。
+- **两格同时报红的那 10 件是本刀自己的新文件**，成因不是申报错：门件 A 段的基准是 `git diff --name-only HEAD`，**未入库的文件不在这条命令的差集里** ⇒ 申报它 = DECLARED-BUT-UNTOUCHED（MISS-DECL），不申报它 = UNTRACKED-FOREIGN，两条判据把同一件事各判一次红。唯一能同时满足两格的形状是 `git add`（在册 k30-b 那批做过）。
+- 但本轮**故意不 add**：git 的 index 是两条线共享的，而那条并行线正在这份工作区里 unfinished（它自己一旦 `git commit -a` 或批量 add，会把本刀未过门的文件一起带走）。⇒ 新立一条口径：**并行线占面期间不得 stage 本刀面**；要提交必须先拿到「它落地或人另行拍板」这一句。这一型与在册「不代登、不 stash、不放宽 A 格基准」同族，只是这次危险的载体是索引而不是工作区。
+- 一次新踩的工具面坑（它差点造出一条假引用）：用 `Select-String ... | Select-Object -First 30` 截门件输出时，**-First 会提前终止上游进程** ⇒ 门件自己的落盘那一步从未执行 ⇒ 盘上最新件还是昨日 19:12 那一轮。我在引用「本轮门件件名」前先去列了目录才发现件不存在（如果直接按惯例抄一个件名，就是一枚「件在、数不在」的同型假绿）。⇒ 口径：**取门件读数用完整重定向再事后筛，不在流上加 -First**。
+- 七枚红的**逐格归属**（只写「门件红了」等于没写，而只写「卡在并行线上」就等于把余下五枚红一起算给别人）：并行线 = 2 枚（`FORBIDDEN: 11` 那一枚 + 件 e26-gate-00-20261105-150541-gate-fill.txt 里那枚 `rc=1 expect=0`）；本刀新文件未入索引 = 3 枚（`MISS-DECL: 10` 与 NOT-SEEN-IN-FACE: 10 是同一件事被两把基准各判一次，加上 `UNTRACKED-UNDECLARED`）；**本刀自己的账面 = 1 枚**（`<<< TS-PROVABILITY-RED`，`tool-red-lines=4`，三格逐条见 §44.9）；**本刀动了后端 = 1 枚**（`backend/workbench dirty now (must be 0) = 25`）。
+- 其中两枚**不是违规而是判据前提与本刀面不符**，且本轮都不动它们（上一版预期「红只在并行线那 11 条 + ruff 那 13 枚上」被实物否掉）：① 门件 E 格那句 `this knife must not touch it` 的 `must be 0` 是给 docs-only 刀立的前提，而 PR-2a 按方案就是后端登录面 ⇒ 本格对本刀恒红；把它改成「声明式范围」属量具换形，按在册规矩得先出方案 + 让新齿自证能咬，本轮不顺手改（抬进 §44.8 待人拍）；② 那 10 枚新文件在 `git diff --name-only HEAD` 的差集之外，申报它 = MISS-DECL、不申报它 = UNTRACKED-FOREIGN，两条判据把同一件事各判一次红，唯一能同时满足两格的形状是 `git add`。上一版那句预期被实物否掉 ⇒ **本行就是对该预期的订正**。
+- 并行线的占面时长本轮现取并落件 k49-probe-20261105-152105.txt（P1 段）：12 件里 11 件 mtime 仍是 11-04 15:02:06 → 15:15:09（`age_min` 1445.9 → 1459），只有 `packages/agent-runtime/agent_runtime/schemas.py` 在 11-05 10:12:53 被碰过（age_min 308.2）；ruff 计数从门件子件里直接取（同件 P2 段 `RUFF line: Found 13 errors.`）与昨日**同为 13 枚（枚数无变化）** ⇒ 静置不等于落地，窗口仍未开。
+- 因此本节不写任何 `GATE_RC=GREEN` 的陈述；of-record 的门件件名按在册口径只写进**本刀提交信息**（件名随最后一次文字编辑而变），而本轮根本没有提交 ⇒ 那格留空。上面那个件是**为取真读数而跑的一轮**，不是提交门——把它当作提交门读数就是「拿不跑自测的件绑一个自测数」那一型。
+
+### 44.8 交付口径 / 未做 / 待人拍
+
+- 已交付到「代码 + 测试 + 两把量具」这一层，**没有交付到任何环境**：未提交、未 push、未合 `company/main`（用户已拍不合）、未动公开镜像 `github-legacy`、没 force、没改 git config、未重建镜像、未 rollout、未跑 L3 深度安全审查（在册规矩：L3 只能按当天最终 rev 跑，而本轮 rev 未定）、V 类浏览器面实拍本批未跑。
+- 未做且不得读成已完成：PR-2c（部署与现网取证：Secret/env 清单 + 探针 C8–C10 + runbook 加一步）一行未动 ⇒ §44.4 那四枚新键在现网清单里**还没有注入点**，登录面在跑着的实例上仍是 503 那一档；口令重置/忘记密码不在本轮（方案 §2 非目标）；真正的令牌撤销属 PR-3；会话历史列表属 PR-3。
+- 面禁件的本轮读数改绑门件自己的干净件（第一版绑在本刀自产的 encoding 分裂件上，被抓，逐格见 §44.9）：主件 e26-gate-00-20261105-150541-gate-fill.txt 的 C 段逐字印有 `T1 hits=13`（存量，逐条已在前批定性）、**T2 hits=0（棘轮守住）**、`T3 hits=0`、`T4 hits=0`、`T5 hits=0`、`forbidden shapes => 0`、`T2 ratchet: baseline=0 live=0 NEW=0 FIXED=0 OK`、`check_doc_sync :: rc=0 expect=0 OK`；默认 8 件面的码点人格（forbidden=0 review=17）在同轮子件 e26-gate-21-20261105-150541-typo-default.txt。本批唯一新改的入库文档 .env.example 在主件 C 段的形状扫描里有自己一行 `.env.example :: fence-aware shape anomalies=0 OK`。
+- 待人拍（D2，AI 不自定）：① 并行线那条 11 路径 + 13 枚 ruff 的处置 —— 它自 11-04 15:15 起 24 小时一行未动也未落地（本轮现取 mtime 与 ruff 计数为据），而本刀的提交门因此开不了。可选形状只有三种：等它自己落地、由人明确授权本刀只提交流程上先行的子集（那要同时回答 errors.ts 那条交叉依赖）、或人另行拆面。**不选「放宽 A 格基准」，也不选 stash**；② 是否现在就把 PR-2c 排进下一刀（不做它，登录面只能在本机跑，现网仍是 503）；③ §43.7 那四条待人拍仍挂着（用户可达三选一、ahead 里含未过门提交、/health 同轨、x-trace-id 后端装配）；④ 门件 E 格「后端面必须为 0」那把前提能不能从 docs-only 改成**声明式范围**（本轮实跑报 `backend/workbench dirty now (must be 0) = 25`）——它是量具换形，需先出方案 + 新齿自证能咬，不在本刀顺手改；不选的形状是「把本格静默关掉」或「拿一个 docs-only 的前提去遮后端刀」。
+
+### 44.9 门件那把齿这一轮咬到的是本刀的账面（三格），同时抬出两条工具面事实
+
+- 齿的汇总行（件 e26-gate-30-20261105-150541-ts-provability.txt）：`TALLY iso-tokens-scanned=4 provable=4 UNPROVABLE=0 | artifact-refs=63 missing=0` 而 R-6 那行是 `keys=77 strict=74 loose=0 KEY-NOT-IN-CITED-ARTIFACT=3 QUOTE-NOT-VERBATIM=0` ⇒ 时间戳与件名两格全过、三个键绑不上、零条自称逐字的串被改写。
+- **格 1 用例语义绑在只印计数的件上**：齿报 `readings.md:4337 key="SIGNUP_ENABLED"` 绑到 k48-begate-20261105-144529.txt，文案正是「件在盘，但件里从没打印过这个键：数绑的是件名不是内容」（那个 4337 是齿那一轮拍的坐标，本批后续编辑已让它位移 ⇒ 只当定位提示，不当判据）。处置 = 补一具逐用例行的单跑件并把用例名逐字写（已落 §44.4），不删那格读数、也不把件名换一个看起来更对的。
+- **格 2 面上件的编码分裂**：齿报 `<<< TS-CITED-ARTIFACT-ENCODING-SPLIT n=1 [k48-typo-20261105-145741.txt]`（件 e26-gate-30-20261105-150541-ts-provability.txt），那件就是本刀自产的面上件。那格报「这两个键在件里从没打印过」不是齿瞎：它的正文在人眼里是乱码、在判据里读不出键。处置 = §44.8 那格改绑门件自己的干净件（原分裂件留在盘上不删，它是这一型的载体）。
+- 格 2 的字节头复取（件 k49-probe-20261105-152105.txt 的 P3 段）：bytes=8030・first3=239,187,191・nul-count=3453，而同段另三件（门件 typo 子件、-v 件、begate 件）都是 nul-count=0。
+- ⚠ 上面两行故意不合并：门件 R-6 的 skipped 段里有一格叫 multi-name-lines（一行里出现多个件名就不判），那是 §42.6 已登记的**最大旁路** —— 把两个基准的读数挤进同一句，就等于是自己把自己的读数放进那个旁路里。本轮实跑的 skipped 行里这一格从 5 涨到 6（逐轮读数引 §44.9 首行的两件）。
+- **格 3 没有齿、靠读实物抓到的一格**：补 -v 件时读到用例名 test_overlong_ttl_is_rejected_at_login_not_next_request，回头对照 .env.example 本批新写的那组注释，发现**症状写反**（写成「登录 200、下一个请求当场 401」，实物是登录当场 503，成因是 auth_router 签发后自验）。已改注释并同步 §44.6 ①。⚠ 这一格**无机械判据** ⇒ 登记复审触发条件 = 再次出现「账面写的症状与用例名/代码注释不同步」。同型历史是「拿读代码的推定当实测」（§44.6 起因那条），区别在本轮连推定的方向都错了。
+- **工具面事实 1（执行策略与 rc 同形）**：直接调用未签名 .ps1 被拦下时报 UnauthorizedAccess，而同一条命令行的 `$LASTEXITCODE` 仍是 0 ⇒ 「工具根本没跑」与「门件绿」在 rc 这一格同形；本轮是靠「列目录发现盘上最新件还是昨日那一轮」才没写成假绿。⇒ 口径：**门件的判据 = 件在盘 + 件内有 `GATE_RC=` 行**，不是启动命令的 rc（启动器 k49-run-gate.ps1 末尾就是把这两问一起断言，不满足则 rc=2）。
+- **工具面事实 2（落件只许一次编码决策）**：Windows PowerShell 的 `>` 默认写 UTF-16LE，把已有重定向件再喂进第二次 `Out-File -Encoding utf8` 就会写出「BOM 声明 + UTF-16 正文」的分裂件（本轮 nul-count=3453 那件就是这么来的）。⇒ 口径：**一次外部命令 → 一步 `| Out-File -Encoding utf8`**；引件前先读它的字节头（首三字节 + NUL 计数），不只看文件在不在。这一格现有判据只在**账面引用了该件**时才响 ⇒ 不引用的分裂件无人管，属已知盲区（登记，不抬成判据）。
+- **本轮自犯一枚（登记不遮）**：写格 2 那句时我把「瞎」的码点递错了（正字 U+778E，递进去的是 U+77D5，同旁不同码），发现方式是读编辑回显而不是任何量具；改后复跑面禁件为 forbidden=0 / T2=0（读数在 §44.10）。⚠ 这一型在册已记五回（§39.8 行 7–9 与 §39.14 行 3），而**齿能不能咬住这一枚本轮未测**（上面那一枚已被我改掉才扫，所以不能拿「扫过就绿」当「齿无效」也不能当「齿有效」）⇒ 不抬成判据，只登记复审触发条件 = 下一枚同型被量具照出或再犯一次。
+
+## 45. 第三十八批（2026-11-05，刀㊺）：把「有账号，直接登录就行」从“切个态等再点一次”改成“一次提交走完”，并把 PR-2c 的三处清单落地与两枚真面反证取到
+
+> ⚠ 书写口径：本批涉及的四件产品面文件（web/src/api/auth.ts、web/src/components/LoginView.vue、web/src/stores/session.ts、web/scripts/verify-sse.mjs）里前两件**仍未入版本控制清单**（同一轮现取：git status --short 给 ??，git ls-files 对它们零命中）⇒ 按在册口径**不带反引号**书写；带反引号 = 声明“按仓库根解析得到”。
+
+### 45.1 本批为什么动产品面（不是改口味，是上一轮的实物不满足那句话）
+
+用户那句需求原文第三次被说出。本轮先取实物再判：上一批交的是「建号态撞 409 ⇒ 会话层只把两态切到登录、返回 false」，屏上于是要求**再按一次提交**。那句话的字面是「直接登录就行」，实物与字面的差格就在“发数”这一格，不在文案、不在布局。⇒ 本批改判为：同一次提交内，409 之后紧跟着用同一份凭据补发一发登录。边界四条与不反方向的三条理由写进 session.ts 的 submitCredentials 头注（不在这里抄第二份）。方案件 §8 拍板项同步追记第五项。
+
+本轮另读到一条**账面与实际相反**的旧句：LoginView 右栏原写「这一屏不会告诉你这个登录名有没有人用过」。实物不是这样 —— 自助注册端点必然用 409 回答“这个名字占没占”（A3 只管 /auth/login 不分账号不存在/口令错，管不到 /auth/register）。这一句在本批改为如实写法（屏上承诺那一段只许写已成立的事实，写反了就是假灯）。
+
+### 45.2 一键化的判据：发数、路径次序、不洗白（绑件 e50-mutation-20261105-181533.txt）
+
+| 格 | 判据 | 读数 | 强度 |
+|---|---|---|---|
+| 基线 | 行为件全绿且新齿非空转 | 合计 150 条断言（上一批 143，本批 +7）・失败 0・rc=0 | 实跑 |
+| M1 | 把 409 闸门放宽成“任何失败都补发” ⇒ I2h 必须红 | rc=1・I2h 红（calls=2，403 被洗成假登录） | 实跑 |
+| M2 | 补发走错端点（回到 register） ⇒ I2b 必须红 | rc=1・I2b 红（路径次序 /auth/register,/auth/register） | 实跑 |
+| M3 | 丢掉补发后的失败检查 ⇒ 必须红 | rc=1・**形式是抛错终止**（在失败对象上读 result.session），不是断言行红 | 实跑（形式如实记） |
+| M4 | 第一发选错分支 ⇒ I1b/I1d/I2b/I3b 全红 | rc=1・四枚同时红 | 实跑 |
+| 还原 | 四枚变异逐枚字节还原 | BYTE-EXACT-RESTORED・基线 SHA 前 12 位 7A02A2911821 | 实跑 |
+
+新增七枚断言的名字与各自那一句判据：I2（一次提交两发且登录成功）、I2b（路径次序）、I2c（第二发不带 display_name）、I2d（两发同一份凭据）、I2e（屏停登录态）、I2f（存储只那一把令牌）、I2g（409→401 不假装登录、上屏第二发那句）、I2h（403 只发一发）、I3d（登录态失败不反向补发）、I4c（体不对不自重试）。⇒ 计数上 I2 族 +6、I3/I4 各 +1，与 150−143=7 的差由“I2 原三枚换为七枚”解释：净增七、换形三。
+
+量具自身的一处形状改动也在此记：假后端从单值版 mkBackend 换为按调用次序回值的 mkSteps（mkBackend 降为它的单步特例）。**理由不是好看**：单值版表达不了“先 409 再 200”，而本批的判据正是发数与次序 —— 旧形状下“自动补发”与“只切态”两码事读数同形（都回 409、都 ok=false），那就是把空转当判据。
+
+### 45.3 PR-2c：三处清单落地 + 三枚新齿的真面反证（绑件 e50-manifest-20261105-181533.txt）
+
+入库面三件（均未提交）：deploy/k8s/00-config.yaml（+21：登录面三键与“不注入 SIGNUP_ORG_ID”的理由）、deploy/k8s/20-agent-platform.yaml（+52：五枚 env + tenant-jwt 卷与挂载，子目录 /run/app-secrets/jwt）、tests/deploy/test_k8s_manifest_wiring.py（+135：登记 agent-platform-jwt 与两把键、三枚新齿、两个派生式 helper）。
+
+| 格 | 判据 | 读数 |
+|---|---|---|
+| N0 | 未种假：三枚新齿必须**跑起来**而不是 skip | 3 passed, 69 deselected・rc=0 |
+| N1 | 把 mountPath 改深一层 ⇒ 路径同源自检齿必须红 | rc=1・FAILED test_login_face_key_paths_are_mounted_shapes（断言点 test_k8s_manifest_wiring.py:345） |
+| N2 | 把 CM 的 AUTH_TOKEN_TTL 单边抬到 28800 ⇒ 按清单真签真验那枚必须红 | rc=1・FAILED test_login_signing_params_from_manifest_are_self_consistent・抛点 identity.py:244 IdentityError（超上限） |
+| 还原 | 两件字节还原 | BYTE-EXACT-RESTORED・基线 SHA 前 12 位 812921DF98EC / CFF281FB0758 |
+| 全量 | tests/deploy 整目录 | 72 passed・`DEPLOY_RC=0`（件 e50-gates-20261105-181533.txt 末行） |
+
+⚠ **射程边界（不得读成“kid 漂移也有齿”）**：公钥 JSON 住集群 Secret、永不入库 ⇒ 本 gate 用同一个 CM 的 kid 同时造 mint 与 pubs，两边一起漂不会红。“TENANT_JWT_KID 与公钥顶层键逐字相同”这一格**在本批的量具里测不到**，只能靠现网探针 C8 的真读（签得出且验得过）兜。同理 TENANT_JWT_MAX_TTL_S 不被 env 死键门的正则识别（identity.py 用的是 _int_env( 而非 env_int(），所以该键**刻意不注入**，N2 那一枚就是从这条盲区里长出的可测形状。
+
+### 45.4 未做 / 不得读成已达（逐条）
+
+- **未提交**：本批六件改动全在工作区。提交门仍由并行线挡着：uv run ruff check . 现取 13 errors・归属逐文件为 agent_federation/api/server.py 9 枚、agent-core/guardrails/errors.py 3 枚、agent_server/api/query_router.py 1 枚 ⇒ **零枚在本刀文件里**（口径：只到“本轮扫到这个形状”）。
+- **未 push・未合 main・未动公开镜像**（在册：合 main 须用户显式批示，本轮无批示）。
+- **未 rollout、Secret agent-platform-jwt 在任何集群都还不存在** ⇒ 现网 /auth/* 仍读 503；而 /ui/ 托管对象仍是 rev d4d3d329 那批的产物，**屏上根本没有登录屏**。⇒ “一键化已上线”这句不成立，本批只到“代码 + 行为件 + 清单 + 齿”。
+- **浏览器屏上实拍未做**：V4 那批七张拍的是对话页；登录屏在真浏览器里跑一次（含 409 自动补发那一跑）仍挂项。
+- **PR-2c 还缺两件**：deploy/k8s/README.md 的密钥生成与写入条目（§6.3）、runbook 的密钥装配步 + 探针 C8–C10。未写它们的原因是本轮先把“判据成立”与“齿不空转”取齐；无这些条目时任何人 apply 本清单只会得到 CreateContainerConfigError（那是有意的 fail-closed，但过不了“操作面可达”）。
+
+### 45.5 面禁件与工具面读数（绑件）
+
+- uv run python scripts/check_doc_sync.py：✅ 0 警告・rc=0（同件 e50-gates 同一轮次，件名同一时间戳）。
+- .tmp-scratch 内 typo-scan.ps1：forbidden=0・T2=0・T3=0・T4=0・T5=0・rc=0（T1 probes 词串 24 / review 17 为信息项，本批未动基线）。
+- web 面：npm run lint rc=0・npm run typecheck rc=0・npm run build rc=0（产物 97.27 kB JS / 14.27 kB CSS）、verify-sse rc=0・check-events rc=0。全部同件 e50-gates-20261105-181533.txt。
+- 字节头自检（在册规矩：引件前先读字节头）：三件均 NUL=0・首三字节 239,187,191（UTF-8 BOM、单步编码），不是“BOM 声明 + UTF-16 正文”的分裂件。
+- 本批自犯一枚（登记不遮）：一次多 replacement 的编辑把一行拆坏了（mkBackend 与 ok3 两句话拼到同一行，形状是 JS 语法错），发现方式=紧接着读回该区间而不是任何量具（当时门禁还没跑）；下一枚单点编辑顺手修回，修后 lint rc=0 才算这一格清。⇒ 可抬的口径：**多替换项的批量编辑后必须读回受影响区间**，不能拿“工具报失败”当“未落盘”、也不能拿“工具报成功”当“已落对”。
+
+### 45.6 账面随动三件（含两格自引兑现）+ 本批门件的**真实件名** + 齿咬到的又是本刀账面（这次是两格）
+
+**一、账面随动补齐三件**：
+1. web/README.md 的行数那一段追加「第三十八批重取」（只取本批碰过的三件 372 / 257 / 763，并逐项声明其余未动）。
+2. 方案件 §8 追加**第五项**（一键化改判）。这一格是**自引兑现**：session.ts 头注、web/README.md、本件 §45.1 三处都已写「方案件 §8 第五项」，而写下那三句时 §8 本体只有四条 —— 与在册那一型同族（“已在批内换形”在写下的当时并不成立）。同时把 §8 标题从「四条均为人的决定」改为「第 1–4 条是人逐项点头、第 5 条是形态改判」：档位不同不能装成同一档。
+3. 工单件 §13.4 追加第三十八批行（守表格竖线形状：行末单根、格内不写裸竖线）。
+
+**二、门件本批完整重定向实跑（§44.7 那一格在本批的真实读数）**：件 e26-gate-00-20261105-184207-gate-fill.txt。逐字读数：`face lines = 34`・`allowed-hit = 23`・`FORBIDDEN: 11`・`MISS-DECL: 10`・`red-marker lines = 7`・`GATE_RC=RED`。
+
+同一件里另两格：`check_doc_sync :: rc=0` 那道在本批这一轮是 **OK**（判决行逐字是 check_doc_sync :: rc=0 expect=0 OK），而 B 格那把 ruff 判 `rc=1 expect=0`（Found 13 errors）。
+
+与上一轮（15:05:41 那次）的**差值只有一格**：face 从 30 条长到 34 条，新增的四件就是本批动的 `web/README.md`、`deploy/k8s/00-config.yaml`、`deploy/k8s/20-agent-platform.yaml`、`tests/deploy/test_k8s_manifest_wiring.py` ⇒ 申报面同步从 29 条扩到 33 条（否则这四件会被 A 格判成 FORBIDDEN，而把它们算到并行线头上就是归因错）。FORBIDDEN 仍恰为 11 条，逐字就是那条线的路径集（含 web/src/api/errors.ts）⇒ 11 条里零枚是本刀的。
+
+**三、申报面为何同时扩四件而不遮其他**：那四件是“本刀真改了它们”，不是给谁开方便；而“本刀 10 枚新文件仍未入索引 → MISS-DECL: 10 与 NOT-SEEN-IN-FACE: 10”那一格**一个字没动**（§44.7 立的口径：并行线占面期间不得 stage 本刀面）。
+
+**四、齿这一轮咬到的是本刀账面两格**（逐字判决行在件 e26-gate-30-20261105-184207-ts-provability.txt，该轮 TS_RC=1）：
+- 格 1・本件 §45.3 的「全量」那一格：把部署门的读数写成了裸的 rc=0，而被绑的那件里只有 `DEPLOY_RC=0`、`LINT_RC=0`、`TC_RC=0`、`BUILD_RC=0`、`SSE_RC=0`、`EVENTS_RC=0` 六个键（大写、带前缀）—— 小写 rc 那一串它一个都没打印过。处置：那一格换成件里真印的键名，不删读数。
+- 格 2・工单件第三十七批射程行：把门件 B 格的判决（rc=1）绑到了只报枚数不报判决的探测件上（那件逐字只有 RUFF line: Found 13 errors.，没有 rc 这个键）。处置：判决换绑回真打印它的那轮门件（已写回 §44.7 逐格归属那行），射程行只留枚数与指向。
+- ⚠ **两格都没走“多件名一行”那条旁路**：同一行里放两个件名会被键审计记为 multi-name-lines 直接不判（§42.6 登记的**最大已知旁路**）。本批宁可把一句话拆两行，也不把两个件名挤进同一句 —— 那就是自己把自己的读数放进免检区。
+- 与上一轮对照：§44.9 是三格，本批两格，且**两格都不是产品读数而是引用形状**（“件在、数不在”那一型的两个新样本）。
+
+**五、本批不跑整轮门件重跑的理由（写在账面而不是默）**：自 18:42 那轮之后本批只动了文档面，门件 A 格（面集与申报）与 B 格（八道 lint）的输入一个没变 ⇒ 能变的只有 C 格那三把扫文档的量具，本批就只复跑那三把（逐值绑件见 §45.7）；拿整轮门件再跑一遍只会在同一批红上再抄一次数，不新增判据。
+
+### 45.7 面禁件三把的逐值复跑（上一段那句“见下”在这里兑现）+ 两格齿账的复证 + skipped 面那一格落到具体行 + 窗口读数
+
+**一、三把独立复跑跑了两回，而第一回不单独作数**：18:53:54 那一回三把件在盘、但启动器没把自己的 rc 与件名落件 ⇒ 按在册那一型（读数不绑件）只算“跑过”。第二回把启动器自己的日志一步 Out-File 落盘（件 e52-console-20261105-185756.txt），逐字读数：`FACE-COUNT=34`・`TYPO_RC=0`・`TS_RC=0`・`DOCSYNC_RC=0`，末尾三行 HEADCHECK 报三件均 bytes>0、first3=239,187,191、nul=0（不是“BOM 声明 + UTF-16 正文”的分裂件）。
+
+**二、逐值绑件（一行一件名，不挤成 multi-name 那一格）**：
+- typo 面（件 e52-typo-default-20261105-185756.txt）：`forbidden=0`・`T2 hits=0`・`T3 hits=0`・`T4 hits=0`・`T5 hits=0`；T1 那一格报 `T1 hits=13`（存量，本批未动基线）、词串行逐字是 `词串=24`。
+- 可证性面（件 e52-ts-provability-20261105-185756.txt）：`keys=90`・`strict=90`・`loose=0`・`KEY-NOT-IN-CITED-ARTIFACT=0`・`QUOTE-NOT-VERBATIM=0`・`VALUE-level(本轮只量不绑): checked=30 mismatch=0`；自测那行 `n=10 passed=10`；见证行 `added-lines-total=2134`。
+- 文档防漂移面（件 e52-doc-sync-20261105-185756.txt）：正文只有一行逐字是「✅ 文档同步校验通过（0 警告）」——它不打印 rc，所以 rc 好在上段启动器件里看。
+
+**三、两格齿账的复证**：§45.6 第四段那两格都是只改处置后的独立复跑报绿（该轮 `KEY-NOT-IN-CITED-ARTIFACT=0`），而不是拿“我以为改了”当数；未删读数、未加白名单、未把两句拼成一行以逃过多件名免检。
+
+**四、skipped 面那一格从“涨了”落到具体行**（一次性只读扫描件 k54，口径与 lib 里同一条正则）：multi-name-lines = 7 的分布是 readings.md 5 行・工单件 2 行・web/README.md 0 行。⇒ 本批新写的三段（§45.6、README 行数那行、工单件第三十八批行）**一行都不在这 7 行里**（README 那文件实测 0）；与 §42.6 记的 6 相比涨的那一枚只能定性为“§43/§44 书写期加进来的”，当轮没留 per-file 明细 ⇒ **无法唯一定位到行，这条登记为已知不确定而不写成结论**。另：no-cite-readings 从 431 到 444（+13）是本批故意不带件名的转述句（不判也不假装判过），这一格不是旁路。
+
+**五、窗口读数（本批“等什么”的最新一格）**：件 k53-window-probe-20261105-185646.txt 逐字报 `PROBE-NOW = 2026-11-05T18:56:46`；并行线 12 件里 11 件 mtime 仍在 11-04 那一批（age_min 1661.6–1674.7）、只有 identity/schemas 那一件 523.9；`PORCELAIN-NOW = 45`・`COMMITS-SINCE-1104-1500 = 1`（那枚是本线 15:03 的 55396828）；ruff 那一格从本轮门件子件逐字复取 `Found 13 errors`。⇒ **窗口仍未开，静置不等于落地**：本批依旧不提交、不 stage、不推、不跑 L3、不重建。
+
+**五-b、窗口在写完结账后又现取了一次**（因为它改变“窗口开没开”这句话的时点）：全仓 ruff 复跑仍报 `Found 13 errors`（件 e54-ruff-20261105-191128.txt），逐条报位置的行落在三个文件：9 / 3 / 1 ⇒ 仍全部在并行线那三件里，本刀面 0 枚。
+
+**六、本节写完即自踏一次在册口径**：面禁件三把的末轮复跑件名不回写账面（件名随最后一次文字编辑而变；门件 of record 的件名只写进本刀提交信息）。末轮复跑只作为“本节自己没把面禁件写红”的自证，不拿它充成第二组读数。
+
+
+
+
 
 
 
