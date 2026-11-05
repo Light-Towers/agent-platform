@@ -4671,4 +4671,18 @@ typo 同轮都绿：件 e52-typo-default-20261106-014715.txt 读 `forbidden=0`�
 - 未 push（本轮跑在 02:05–02:12，工作日窗口 [9,19) 之外）・未合 `company/main`・未动公开镜像 `github-legacy`・没 force；推送前还需按当天最终 rev 跑 L3 深度安全审查。
 - 现网半条链仍等 Linux 通道；`x-trace-id` 后端装配仍待人拍。
 
+### 48.6 提交与提交后复取（事后追加，不是预告）
+
+先把上一节那条写早了的承诺订正：那句「本刀的提交与提交后复取读数只写进本刀提交信息」落笔时还没提交，而提交信息里放不下**提交之后才产生的读数** —— 实物按上一批那两处同族的形状办：事后追加进本节，随下一刀的 own 入库（历史陈述不回填，就地被本节覆盖）。批号那一格核过：工单件表末行的序号与 §48 标题同号，提交信息首行用的就是它，不是接着上一枚自报的。
+
+提交前末轮门件（件 e26-gate-00-20261106-022030-gate-fill.txt）：`candidate tree=098d80e20d9ddd2123fdccb54630c3d84194790a`、`red-marker lines = 0`、自测 `n=24 passed=24`、末行 `GATE_RC=GREEN`；同轮的 `HEAD = be8fd4f8` 与 `ahead = 6` 是那一刻的值，本刀随后落了一枚提交，这两个数只能连件名引。
+
+提交那一轮（件 k59-commit-20261106-022301.txt）逐字：`own paths=2`・`blob-mismatch=0`・`leaked-into-tree=0`，树差 `files=2 add=106 del=0 backend=0`，`staged=0`・`index-equals-HEAD=True`，`face now=19`・`untracked now=1`・`held still dirty=7/7`・`ext still dirty=13/13`，末格 COMMIT-SHAPE-OK，new-commit 是 `new-commit=9f68c594ee25693c97ef3de7e198878413a07de8`。
+
+这一轮的树 sha 与门件报的候选树逐字相同（同件里那行 `equals-candidate=True`），父是被同一轮门件判过的 be8fd4f8 —— 上一批接上的那两格（父链对账、numstat-对-树差）这次是第二次真面通过，四枚合成反例与实跑走的是同一个函数。
+
+提交后复取（件 e28-00-postcommit-20261106-022314.txt）：`cumulative=15`・`declared=15`・`OUTSIDE-DECLARED=0`・`STALE-DECLARED=0`，归属那格 `UNATTRIBUTED=0`，docs 那一格报 `non-docs-paths=0 allowed-list=[] unallowed-non-docs=0 stale-declared=0` ⇒ NOTHING-TO-DECLARE（这一刀的账里确实没有非文档路径，零是判出来的，不是拒判）。
+
+启动器那轮（件 e60-e28-invoke-20261106-022314.txt）：`ARTIFACT-FRESH = True`、对账那格 `SAME-BASIS-OK`、三枚反例 `pass=True diverge=True zero-basis=True`，以及 stderr 分件为空 `bytes=0`（空 = 什么都没吞）。
+
 
