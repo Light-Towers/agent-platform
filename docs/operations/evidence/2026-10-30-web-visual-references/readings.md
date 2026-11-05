@@ -4555,16 +4555,120 @@ e27 的读数已被按件号引用，所以不动它，另 fork 一件 e28，只
 - `make test` 全量十 session 本批未重跑（本刀零产品代码）、CI runner 未实跑、浏览器登录屏实拍仍挂项。
 - 时间基分裂那一格：runbook 第 0b 步的 `CLOCK-BASE-SPLIT` 已在册，但层 1 的 drop-in apply 与 U-1 实验同属 D2，未批。
 
+## 47. 第四十批（2026-11-06，刀㊼）：账面入库把两处书写缺陷与一处调用层口径缺陷一起照出来
 
+本刀零产品代码，own 只有三件文档。它值得单独入账的不是“又记了一轮”，而是这一轮三把量具**第一次全部咬在我自己刚写的东西上**：R-6 键审计咬两处、提交后复取的调用件咬一处。逐格如下。
 
+### 47.1 面禁件首跑是红的，红在两处引用形状
 
+件 e52-ts-provability-20261106-014435.txt 的 R-6 行逐字：`keys=45`・`strict=43`・`loose=0`・`KEY-NOT-IN-CITED-ARTIFACT=1`・`QUOTE-NOT-VERBATIM=1`，同件末行 `TS_RC=1`，面基准 `face-files=22`。
 
+两处缺陷都是我自己写进方案件 §9 那张表的：
 
+1. **拿省略号当逐字引用**：行 1 把门件 B1a2 那行写成“键=省略号 键=值”的形状，而件里没有这一整串 ⇒ QUOTE-NOT-VERBATIM。处置是把引用补全成件里的完整 40 位 sha 与逐字键，不改判据也不删引用。
+2. **一行里两个口径的键绑到了不含该键的件上**：行 3 既写门件 E-1 的读数键、又只点名了清单件 k59-ext-final.txt ⇒ 那个裸键被绑到一份纯路径清单上（清单里当然没有它）。处置是把门件逐格读数的绑定收回取证件 §46.2，那一行只留“条数由清单件自己数得出”这句不带键值的主张。
 
+复跑绿：件 e52-ts-provability-20261106-014715.txt 同一行变成 `keys=45`・`strict=45`・`KEY-NOT-IN-CITED-ARTIFACT=0`・`QUOTE-NOT-VERBATIM=0`，末行 `TS_RC=0`。
 
+两格**没动**，因而也不能被读成“都清了”：`multi-name-lines=2`（在册未做项，见 §47.6）与 `no-cite-readings=401`（有键但行内无件名的免检区，本轮只报数不判）。
 
+typo 同轮都绿：件 e52-typo-default-20261106-014715.txt 读 `forbidden=0`・`T2 hits=0`・`T3 hits=0`・`T4 hits=0`・`T5 hits=0`（表格竖线形状那一格因此证明 §9 行 3 的拆格改对了）。
 
+三把的 rc 与各自件名落在启动器自己的件 e52-console-20261106-014715.txt：`FACE-COUNT=22`・`TYPO_RC=0`・`TS_RC=0`・`DOCSYNC_RC=0`。
 
+另一格口径要分清楚：同一把量具在门件内跑的那一轮报的是 `face-files=3`・`added-lines-total=92`（因为门件喂的是本刀 own），而面禁件那轮喂的是整条共享工作区 ⇒ 两个数都是真的，引用时必连件名一起。读数在件 e26-gate-30-20261106-014816-ts-provability.txt。
 
+### 47.2 门件 of record（own 只剩三件文档时，归属判据仍然咬得住）
+
+件 e26-gate-00-20261106-014816-gate-fill.txt：`face lines = 22`・`allowed-hit=3`・`HELD-DECLARED=7`・`red-marker lines = 0`・`n=24 passed=24`・`tool-rc=0`・`scanned=3`・`violations=0`・`tree-index=766`・`cited-new=0`、候选树 `candidate tree=d4a445a5f11a3873fe533369362dbe37449b93e7`、末行 `GATE_RC=GREEN`。
+
+⚠ 同件里的 `HEAD = d71c21e0` 与 `ahead = 5` 是门件跑的那一刻的值；本刀随后落了一枚提交，现在领先 6 枚 ⇒ 这两个数只能连件名引，不能搬进“现在的状态”。
+
+三条边界照旧：
+- 外债格照打不消音：同一轮读 `errors=13`・`offending-files=3`・`not-in-ext=0`，它不进 rc，也没被删掉或划成“看不见”。
+- 基准真的换了：`tree-ruff-rc=0` 与 `worktree-ruff-rc=1` 必须不同，相等就说明换形只是标签。
+- 闭包仍然点名 held：四轮 cited-new 是 2→4→1→0，点名全部来自 held 之间的 import（main.py 指 routes.py、test_auth.py 指 auth.py、routes.py 指树外的 auth_router.py）。⇒ 这一格是本批最想留的一条：**申报集从 26 件缩到 3 件文档，T-e/T-f/T-h1/T-h2 没有跟着变空**。
+
+### 47.3 提交件：一次成型，且把自己的旧读数从文字里拿掉了
+
+真提交那一轮（件 k59-commit-20261106-015110.txt）逐字：`own paths=3`・`blob-mismatch=0`・`leaked-into-tree=0`・`files=3`・`add=92`・`del=2`・`backend=0`・`crlf=9`・`hits=1`・`staged=0`・`index-equals-HEAD=True`・`face now=19`・`untracked now=1`，末行 COMMIT-SHAPE-OK，new-commit 是 `new-commit=be8fd4f8d278e6afada48e9035c0635ff91ad231`。
+
+这一轮没有重演 §46.4 那三处（换行形状归一、`-ceq`、verify-only 差基准都是上一批已经接上判决的），所以它同时是那三枚齿的第二次真面通过：树差对拍三个比值全等，父链那格拿到门件报的 HEAD 与本次提交的父逐字对上。
+
+一处自犯（不光彩但必须记）：git reset 那行原来把条数写死成“only my 26 paths”（沿用上批 own=26 的字面），own 换成 3 之后它就成了**工具把自己的旧读数印进新件** —— 与“件在、数不在”同型。改成从清单条数现取后，本轮件里那行逐字是 “only my 3 paths”。
+
+### 47.4 e28 复取：调用件抄歪了量具的口径，被 4b 的 STALE 齿当场拦住
+
+首跑红：件 e28-00-postcommit-20261106-015245.txt 读 `cumulative=15`・`declared=32`・`STALE-DECLARED=17`・`OUTSIDE-DECLARED=0`，判决行是 CUM-BACKEND-STALE。
+
+定性要说清，否则下一个人会去改账面：**不是有 17 条陈旧申报**。是调用件把 4b 的命令重抄了一遍并漏掉 HEAD 端点 —— 它递的是「baseline → 工作树」（含故意留在面上的 held+ext），而量的是「baseline → HEAD」。错在调用层，不在账也不在量具；量具那一格反倒因此证明它会咬。
+
+处置两件：① 调用件的申报命令改成与 4b 同一条（八个路径栏逐字照抄量具，不自己拼）；② 新加一枚齿把“申报数 == 4b 自己量到的 cumulative 且非空”钉成判决，判决抽进函数、实跑与三枚合成反例（15/15 过、32/15 咬、0/0 咬）走同一个函数。
+
+终跑：件 e28-00-postcommit-20261106-015722.txt 读 `knife backend=0`・`worktree backend=18`・`held-decl=7`・`ext-decl=13`・`dirty attributed=18`・`UNATTRIBUTED=0`・`cumulative=15`・`declared=15`・`STALE-DECLARED=0`・`unallowed-non-docs=0`・`stale-declared=0`・`all-files=67`；docs-only 那一格报的是 NOTHING-TO-DECLARE（零是判出来的，不是拒判）。
+
+启动器自己的回显也必须落件（与 k52 那一格同型）：件 e60-e28-invoke-20261106-015721.txt 里有 `SAME-BASIS-OK`、三枚反例行 `zero-basis=True`，以及 stderr 分件的 `bytes=0`（空 = 什么都没吞）。
+
+同一条命令的旧写法在上一批的调用件里也有一份（本轮不去考古它当时为何没报红）：已按同一口径订正并补上同一枚对账齿。结论不是“那两个数相等”，而是**一个可跑的调用件不该依赖“申报面与工作树面恰好同集”**。
+
+### 47.5 交付三层（哪一层到了、哪一层没到）
+
+本表只作状态陈述，取证全在上面四节：
+
+| 层 | 这一批到了哪儿 |
+|---|---|
+| 代码已交 | 本刀零产品代码；PR-2b 登录面与两把 mjs 门禁在上一批已入库，本刀只补账面与量具 |
+| 已入库 | 本刀 = be8fd4f8（父 d71c21e0，树 d4a445a5），分支 feat/web-visual-poc，比远端 tip d4d3d329 领先 6 枚 |
+| 现网生效 | ❌ 一行都没上现网：未 push、未构建、未 rollout；现网仍是 d4d3d329 那批的产物，所以 §46.6 里“Secret 不存在、/auth/* 503”那三格本批没有新取证，也不构成“已经能看到登录屏” |
+
+### 47.6 未做 / 不得读成已达（逐条）
+
+- multi-name-lines 仍是 2（本轮面），历史基线 7 的清理仍未做 —— 本刀的书写纪律是“新增的行不许抬高它”，不是“它已归零”。
+- PR-2c 的操作面两件一行未动：deploy/k8s/README.md 的密钥生成与写入条目、`docs/operations/minimal-release-runbook.md` 的密钥装配步与探针 C8–C10 ⇒ apply 那两份清单仍只会得到 CreateContainerConfigError（有意的 fail-closed，但过不了“操作面可达”）。
+- held 那 7 件与 ext 那 13 件都未入库，也没替它们提交或申报。
+- 未 push（本轮跑在 01:44–01:58，工作日窗口 [9,19) 之外）・未合 `company/main`・未动公开镜像 `github-legacy`・没 force；推送前还需按当天最终 rev 跑 L3 深度安全审查。
+- `make test` 全量十 session 本批未重跑（零产品代码）、CI runner 未实跑、浏览器登录屏实拍仍挂项。
+- 现网半条链（bundle → 传输 → 构建 → 分发 → rollout → 探针）仍等 Linux 通道，按在册登记为挂起项，不每轮重议。
+
+## 48. 第四十一批（2026-11-06，刀㊽）：候选集换成现取派生后，树把 held 的真实成因说出来了
+
+本刀零产品代码，own 仍是两件文档。它买到的东西不在账面行数上，而在一条**新的树读数**：上一批只能笼统写「held 是被自己的 import 判住的」，这一批树逐条点名了它们卡在谁的哪个符号上。逐格如下。
+
+### 48.1 候选集腐坏是被门件抬出来的，不是被我看见的
+
+上一批那份候选集是手抄的 33 条（k59-mine-candidate.txt）。本批重取面基准时读到的事实是：那 33 条里有 24 条已随上一枚提交入库、不再脏 ⇒ 若直接拿它当输入，own 申报集里就会出现「申报了却没动」的路径，门件 MISS-DECL 那一格会当场判红（它的判决行就写着「申报集必须等于面，不是面的超集」）。那是**清单腐坏**，与 e27/e28 的 STALE-DECLARED 齿、untracked 申报集那次真实腐坏同型：**任何申报集都会腐坏，区别只在于有没有一件东西每轮重算它**。
+
+处置是一件新量具 k61-candidate-derive.ps1，派生规则只有一条：候选 = 当轮面基准（含未跟踪）− 已申报的 ext 清单。故意**不**减 held：上一轮的判决不是本轮的输入（拿结论当事实就没人在重测了）。实取（件 k61-candidate-derive-20261106-020934.txt）：`face-paths=22`・`on-face-hit=13`・`derived = 9`・CONSERVATION-OK・末行 `WROTE) k59-mine-candidate.txt lines=9`。守恒那格的形状是「候选 + ext 命中 = 整张面」，两半加起来必须是同一张面，没第三条腿。
+
+新齿自带三枚合成反例（同一个函数：平衡过 / 漏项咬 / 空候选咬）。⚠ **第一版自测例自己造错了**：空候选那一例我把两半之和当成了候选数（`0 + 5` vs `5`），那一例根本不含被检的那一支，自测当场报 empty=False 拦下整件（件里那行逐字含 `empty-bite=True` 是修正后的值）。这就是“齿没咬到东西时它自己先响”要的形状。
+
+### 48.2 树重判：own 2 / held 7 同上一轮，但这一轮的点名理由更强
+
+重跑分区（件 k59-partition-out.txt）：`candidate=9`・`wt-files=1376`・四轮 cited-new 是 2→4→1→0・去重后 `CLOSURE-VIOLATIONS-TOTAL=10`，定点结果 own 2 件文档 / held 7 件代码。
+
+真正的新东西在逐条证据里：held 的点名不全是「held 之间互指」，**有七枚违规的 target 落在并行线尚未入库的文件上**——`kind=SYMBOL-NOT-DEFINED` 那几行逐条读出 `AppError`（target 是 packages/agent-core/agent_core/guardrails/errors.py）、`asserted_person_id` 与 `asserted_tenant_id`（target 是 packages/agent-runtime/agent_runtime/workspace_registry.py）。⇒ 口径订正：**held 的真实成因是“它们依赖那条线尚未入库的符号”，不是“我主动推迟”**；上一节 §47.2 那句「点名全部来自 held 之间的 import」描述的是 01:48 那一轮的子集，不成立为全部（历史陈述不回填，就地被本节覆盖）。这也让 §44/§45 那句「两条线不能各自独立回退」从人写的推定变成了树给出的机械证据：把我的代码从候选集里拿掉很简单，把它的符号从 HEAD 里拿掉才是问题。
+
+### 48.3 门件 of record 与本刀面的逐格读数
+
+件 e26-gate-00-20261106-021038-gate-fill.txt：`face lines   = 21`・`allowed-hit=2`・`HELD-DECLARED=7`・`HELD-MISS-FACE: 0`・`HELD-COLLIDE: 0`・`MISS-DECL: 0`・`unclaimed=0`・`red-marker lines = 0`・自测 `n=24 passed=24`・B5 `tool-rc=0`、候选树 `candidate tree=e17af1c419f2a6f531648867c923333fb295c91a`、末行 `GATE_RC=GREEN`。外债两格照旧：`errors=13`・`offending-files=3`・`not-in-ext=0`，以及 `tree-ruff-rc=0` 与 `worktree-ruff-rc=1` 两值不同（BASIS-IS-TREE-PROVEN）。
+
+⚠ 同件里的 `HEAD = be8fd4f8` 与 `ahead = 6` 是门件跑的那一刻的值，本刀随后落一枚提交 ⇒ 这两个数只能连件名引。
+
+本轮同时改了一处工具自己的文字缺陷：入口件的标签（label）把上一批的刀号与批名写死在字符串里 —— 与 §47.3 那行“only my 26 paths”同一型（工具把自己上一轮的标签印进这一轮的件）。换成现取 HEAD 短号，批名只住在提交信息里（人写的那个才是账）。
+
+⚠ 上面那一轮不是提交前最后一轮：本刀账面在那之后又动了一次，而候选树的内容包含文档本身 ⇒ 文字一动树 sha 就动（同把量件两轮的 own/held/ext 完全相同、候选树不同 sha 是正常形状，不是判据飘）。末轮的件名与它的候选树只写进**本刀提交信息**，本行不预告。
+
+### 48.4 multi-name-lines 那一格换到本刀面读到 0
+
+同一把键审计件在 02:05 那一轮读 `multi-name-lines=0`（件 e52-ts-provability-20261106-020527.txt，同轮 `strict=66`・`KEY-NOT-IN-CITED-ARTIFACT=0`・`QUOTE-NOT-VERBATIM=0`）。⇒ 这不推翻 §47.6 那句「仍是 2」：那是 01:44 那一轮在当时那张面上的真值，两个数都是真的，差别在面基准与本轮新增行。**不得读成“历史基线 7 已清”**：它只说明本刀新增的行没抬高它，在册的清理项仍是开项。同轮免检区 `no-cite-readings=378` 只报数不判。
+
+### 48.5 未做 / 不得读成已达（逐条）
+
+- 本刀的提交与提交后复取读数按在册口径只写进**本刀提交信息**，本节不预告它（件名随最后一次文字编辑而变）。
+- held 那 7 件仍未入库，而它们**现在多了一条入库前置**：并行线的那三个符号得先落到 HEAD（本节那条机械证据的含义就是：我的提交不依赖它们能单独绿）。
+- ext 那 13 件未入库、未代登、未动；那条线自己的 13 枚 lint 仍未绿（本刀零枚）。
+- multi-name-lines 历史基线的清理、PR-2c 操作面两件、`make test` 全量十 session、CI runner 实跑、浏览器登录屏实拍 —— 与本批前面几节同列，未动。
+- 未 push（本轮跑在 02:05–02:12，工作日窗口 [9,19) 之外）・未合 `company/main`・未动公开镜像 `github-legacy`・没 force；推送前还需按当天最终 rev 跑 L3 深度安全审查。
+- 现网半条链仍等 Linux 通道；`x-trace-id` 后端装配仍待人拍。
 
 
