@@ -21,6 +21,8 @@ R-2 + R-3 合起来是个**死锁**：门要绿需要提交，提交需要暂存
 
 ### M1 单一实现：候选树先行，提交在后
 
+> ⚠ **本节载体已被实测推翻，正确载体见 §9 行 1**。保留原文是为了不让后人以为「临时索引」这条路没被走过：它走不通的原因可复核，不是偏好。
+
 - 用一次性临时索引（`GIT_INDEX_FILE` 指向 gitignored 目录里的一份临时索引）从 HEAD 起树，只加本刀路径，`git write-tree` 得到候选 tree OID。
 - **先拿这棵树过门，后才 `git commit-tree` + `update-ref`**：避免"先提交再补验证"这种把顺序倒过来的做法。
 - 真索引全程零改动（开工前实测 `staged = 0`，收工后必须仍是 0，这一格是硬判据）。
@@ -74,6 +76,22 @@ R-2 + R-3 合起来是个**死锁**：门要绿需要提交，提交需要暂存
 ## 8. 明确不做（免得"治本"变成新一轮范围蔓延）
 
 - 不删那 8 枚未用导入，不"顺手"替那条线补使用点。
-- 不在本批引入 git worktree 隔离（备选，代价：`.venv` 与 node_modules 需重建、账面出现两套 rev 归属；M1–M3 已能解开死锁，先不上重手段）。
+- 不在本批引入 git worktree 隔离（备选，代价：`.venv` 与 node_modules 需重建、账面出现两套 rev 归属；M1–M3 已能解开死锁，先不上重手段）。 ⇒ **本条已推翻，见 §9 行 1**：不是选择问题，是六把 lint 工具的定根方式让「实体导出树 / 临时索引」两种轻载体必然 fail-closed 或空转绿。
 - 不碰 126/241：通道实测 TCP 22 超时（网络层），Linux 侧半条链固定为挂起项，见 `docs/operations/nl2sql-release-checklist.md` 同级的发布 runbook，不再每轮重议。
-- 不改 T2/T4 书写判据；但本批顺手把**键审计最大已知免检区**（一行多件名）从 7 降到 0，并给门件加棘轮下限——它属于同一型"别再发现新问题"的收口，不是新战场。
+- 不改 T2/T4 书写判据；但本批顺手把**键审计最大已知免检区**（一行多件名）从 7 降到 0，并给门件加棘轮下限——它属于同一型"别再发现新问题"的收口，不是新战场。 ⇒ **本项属未做**（登记在 §9 行 6，不充成本批交付）。
+
+## 9. 实测订正（落地批：刀㊻ 提交 d71c21e0；逐格绑件见取证件 §46）
+
+本节只写"方案与实物哪里不一样、依据是哪把读数"，不改写上面任何一节的原始判断。两套口径都留在件里，后人能看出哪一条是被证据改的、哪一条是原样。
+
+| # | 方案原写 | 实测 | 依据（可复跑） |
+|---|---|---|---|
+| 1 | M1 用临时索引 / 实体导出树；§8 声明本批不引入 worktree | 候选树载体换成 **`git worktree add --detach` + 两段建树 + `write-tree`**。成因：六把 lint 工具都以 `Path(__file__).parent.parent` 定仓根，且要靠 `git -C <root> ls-files` 取版本控制清单 ⇒ 导出树里要么没有 `.git`（清单取不到，按 fail-closed 报红），要么根算错（清单为空，报成绿）。worktree 带真 `.git` 链接，工具能算对根 | 门件件 e26-gate-00-20261106-011044-gate-fill.txt 的 A3-selftest-1（未触碰的 worktree 必须逐字节等于 HEAD 树）+ B1a2（`candidate tree=b5b90976cfb92f23e5857b25529c4d98ef5967da` 与 `objType=tree`） |
+| 2 | M2 只有 own / ext 两类 | 加第三类 **held**：我的活，但它 import 的符号在树上取不到（那条线未落地的文件），进树必 ImportError、留面又不能让门替它背书。held 不进候选树，但必须被闭包量具逐条点名 + 自身 lint 干净（T-h 齿）。判决是**定点迭代**：测量树 = HEAD + own ∪ held → 闭包点名 → 摘出 → 再测，直到 cited-new=0（实物四轮 2→4→1→0） | 同件的 fixpoint 行 `own-in-tree=26 held=7` 与 B5 行 `tool-rc=0 scanned=26 tree-index=766 violations=0` |
+| 3 | §7 条 3 的 ext 计数口径 | **两个口径并存且都要报**：产品面（后端六目录 + Makefile + pyproject）11 条，全量 ext 清单 13 条（多两条：一条未入库的方案件草稿、一条 `web/src/api/errors.ts`） | E-1 对账跑在产品面，它的逐格读数绑在取证件 §46.2 引门件的那一段；全量清单的条数由清单件 k59-ext-final.txt 自己数得出 |
+| 4 | §M3 / §7 条 4：自测下限 10→12、n=12 | 门件自测段名从 `[A-C]` 扩到 `[A-F]`（E 格换形带出 E-selftest-1，A3 段带出 4/5），下限实为 **20→24**，实物 `n=24 passed=24` | 同件 GATE-SELFTESTS 段末行；两枚自测在首版曾**不进 n**（名字前带三个空格，机械计数认行首 `^`），已登记为 §46 的自犯缺陷 |
+| 5 | §7 条 5 只要求"种缺陷 ⇒ RED ⇒ 还原" | 多做了一步：反证轮门件的逐字读数也进了账（`kind=MODULE-NOT-IN-TREE=2 OWN-HAS-UNRESOLVED-IMPORT=3 HELD-UNDECLARED=3 BACKEND-DECL-TREE-MISMATCH=1`），且还原后必须 BYTE-EXACT（sha256 前 8 位 71000969） | 反证件 k59-mutate-20261106-010754.txt + 该轮门件件 e26-gate-00-20261106-010756-gate-fill.txt（exit=1） |
+| 6 | §8 末条：本批顺手把"一行多件名"从 7 降到 0 | **未做**，保持 PENDING。它需要拆 7 行账面文本 + 给门件加棘轮下限，与 M1–M3 不同批做才不会把"机制换形"和"书写清理"混成一枚提交 | 分布读数见 §45（readings 5 行・工单件 2 行・web/README.md 0 行） |
+| 7 | 提交方式：M1 说 `commit-tree` + `update-ref`，未规定复跑语义 | 补 **verify-only 分支**：`HEAD^{tree}` 已等于判过的候选树时，本件只复取不建提交（否则复跑会拿同一棵树造一枚内容相同、父链没被判过的重复提交）。同时把三处"算了不判"的数接上判决：差基准换成父树（否则 verify-only 下 leak/树差恒读 0）、numstat 与树差对账、父链与门件件对账 | 件 k59-commit-20261106-012541.txt：`parent-vs-gate-artifact … MATCH`、`numstat-vs-tree-delta committed: files=26/26 add=2798/2798 del=49/49 backend=9/9 MATCH`、`PARENT + DELTA SELFTEST … OK` |
+| 8 | 未预见 | 提交件的"字节判据"用 `-eq` 写成，PowerShell 的 `-eq` 对字符串**大小写不敏感** ⇒ 名叫 BYTE-MATCH、实为"大小写不同也算等"。注入自测当场把它抬出来（一枚假红 + 一枚真松弛），改 `-ceq` 并加第三例专门量出这层松弛 | 同件 `MSG-NORM SELFTEST … eq=True ne=True -eq-calls-case-equal=True -ceq-calls-case-different=True OK` |
+| 9 | §5 影响面只写"门件 + 一次性取证件" | 实际还多了两件常驻：提交件与**归属感知的提交后复取件 e28**（fork 自 e27，只搬 4a 格：旧判据"提交后工作树后端必须为 0"在三集合模型下是恒红格，换成"每条脏后端文件必须被 held∪ext 逐条指名"）。e27 的读数已被账面按件号引用 ⇒ 不原地改形，另立新件 | e28 件 e28-00-postcommit-20261106-012812.txt：`worktree backend=18 … attributed=18 UNATTRIBUTED=0`、`stderr warning lines filtered out=1; they are counted, not swallowed`；反证件 k59-mutate-attr-20261106-012920.txt 三形状全中 |

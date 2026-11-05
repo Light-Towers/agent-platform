@@ -4484,6 +4484,77 @@ remote:   https://github.com/Light-Towers/agent-platform/security/dependabot/211
 
 **六、本节写完即自踏一次在册口径**：面禁件三把的末轮复跑件名不回写账面（件名随最后一次文字编辑而变；门件 of record 的件名只写进本刀提交信息）。末轮复跑只作为“本节自己没把面禁件写红”的自证，不拿它充成第二组读数。
 
+## 46. 第三十九批（2026-11-06，刀㊻）：提交门从「整条工作线此刻的未完成」换到「这个提交将造成的那棵树」
+
+> ⚠ 书写口径：本批的量具件全部住在 gitignored 目录 ⇒ 按在册口径**不带反引号**书写（带反引号 = 声明“按仓库根解析得到”）。方案件 §9 那张订正表里对 §46 的前向引用在本节兑现。
+
+### 46.1 本批动的不是产品，是「我这一刀能不能提交」这句问句的载体
+
+三条根因（都是实测，逐条在方案件 §2 的表里）合起来是死锁：门要绿需要提交，提交需要暂存，而 git 的索引是两条线共享的。本批不再“再等一轮”，把基准换成**候选树**：一次性 worktree 铺出 `HEAD + own ∪ held`，跑 stdlib-only 的跨模块 import 闭包做定点迭代，被树点名的文件移入 held 并从树上摘掉，直到某一轮不再有新点名；剩下的 own 才 `write-tree` 成候选树，八道 lint 与结构门全部跑在这棵树上，绿了才 `commit-tree` + `update-ref`（CAS），末尾用 path-scoped `git reset -- own` 把索引收回。真实提交链里零 `git add`：只有 `git add -N`（intent-to-add）让未跟踪文件出现在面基准上，而提交基准不动。
+
+定点迭代不是“我判断这七件进不去”，是树每轮自己收走一批。件 k59-partition-out.txt 逐轮打印：`cited-new=2` → `cited-new=4` → `cited-new=1` → `cited-new=0`，同轮 `violations` 从 4 → 5 → 1 → 0，末轮报 `FIXPOINT-REACHED`。
+
+### 46.2 门件 of record（GREEN 轮逐格）
+
+件 e26-gate-00-20261106-011044-gate-fill.txt 的逐字读数：`face lines = 45`・A 格 `allowed-hit=26`・`MISS-DECL: 0 OK`・`NOT-SEEN-IN-FACE: 0 OK`・自测行 `n=24 passed=24`・末行 `GATE_RC=GREEN`。自测下限随之从 20 抬到 24（新齿进的是同一批，不是一边加齿一边降下限）。
+
+三条边界不能少：
+- 外债格照打不消音：`errors=13`・`offending-files=3`・`not-in-ext=0` ⇒ 那 13 枚逐条都落在申报的 ext 集里（`not-in-ext=0` 就是这句话的机械形式），它不进 rc，但也没被删掉、没被划成“看不见”。
+- 「基准真的换了」由 B4-selftest 自证：同一把工具在树上 `tree-ruff-rc=0`、在工作区 `worktree-ruff-rc=1` —— 两个数必须**不同**，相等就说明换形只是个标签，该格判决行逐字是 BASIS-IS-TREE-PROVEN。
+- 归属那一格在提交当轮是 `total=27`・`own=9`・`held=7`・`ext=11`・`unclaimed=0` ⇒ `unclaimed=0` 是“没有一条脏面是无主的”，而它由门的 E 段派生，不靠人眼看 diff。
+
+⚠ 同一件里的 `HEAD = 55396828` 与 `ahead = 4` 是**门件跑的时候**面基准上的值。本批随后落了一枚提交，ahead 已不是 4 ⇒ 引用这两个数必须连件名一起引，不能搬进“现在的状态”。
+
+### 46.3 真面反证：种一条树上不存在的 import，门件必须当场红
+
+合成自测只能证明分类器会分类，证明不了它咬得到**这一轮的面**。反证载体是 own 里的一枚真实文件（packages/agent-runtime/agent_runtime/auth_users.py），种一个树上不存在的顶层 import。件 k59-mutate-20261106-010754.txt：`orig-bytes=14283`・种后 `planted bytes=14369`・门件 `exit=1`。
+
+抬出来的不是一枚判决而是一串：`kind=MODULE-NOT-IN-TREE=2 OWN-HAS-UNRESOLVED-IMPORT=3 HELD-UNDECLARED=3 BACKEND-DECL-TREE-MISMATCH=1 cited-file-hits=2`。⇒ 一条未解析 import 同时把 T-e/T-h1/B5 三族判据叫起来，主判据是 OWN-HAS-UNRESOLVED-IMPORT，而“点名的就是那一枚文件”由 `cited-file-hits=2` 给。还原走按字节回写：`sha256=71000969EFDDA144DD7BB2AE8CFF2BA9EB0D3FBDD0EF68DECDA28C438E1D1727` 报 BYTE-EXACT，随后门件复跑才拿到 §46.2 那轮 GREEN（反证轮件名尾缀 010756、GREEN 轮尾缀 011044 —— 两轮差 16 秒，是同一批的先后，不是两次并行结论）。
+
+### 46.4 提交件：三处“算了不判”接上判决，其中一处是自犯
+
+**先记一件不光彩的事**：真提交那一轮（件 k59-commit-20261106-011815.txt）末尾**不是绿的**，逐字两行是 `<<< MSG-MISMATCH-ON-STORE` 与 `<<< COMMIT-SHAPE-UNEXPECTED`；同件里提交本身已经成立（`commit-tree rc=0 new-commit=d71c21e044f584466f058a46e8671f96bb02c78e`・`update-ref rc=0`・`staged=0`・`index-equals-HEAD=True`）。⇒ 口径：**“提交成功”与“提交件报绿”是两件事**，把后者写成前者就是拿结论覆盖读数；本行不回填那条红。
+
+追下去是三件事，都落在同一件工具里：
+
+1. **换行形状差被当成了内容差**：件里 msg 的字节是 `crlf=10`・`cr=10`・`lf=10`，而 `git log` 读回经管道后是 `cr=0`。处置不是放宽比较，而是两侧先归一到 LF 再比，并把形状单独打印（下一轮件里那行 `msg file newline shape` 就是它）。同轮另一格：`blob-mismatch=0` 与 `leaked-into-tree=0` 一个没变、一个仍是 0。
+2. **归一之后仍比不出的那一格才是真缺陷**：给比较函数补的注入自测当场报 `ne=False`（件 k59-commit-20261106-012154.txt，同轮判决行逐字 `<<< MSG-NORM-SELFTEST-BROKEN`），抬出 `-eq` 对字符串**大小写不敏感** —— 也就是说原名 BYTE-MATCH 那一格从来没真按字节判过（与在册那条 `-match` 同族）。处置：改 `-ceq`，并补一枚**专门量这层松弛**的对照例（同一对串在 `-eq` 下判等、在 `-ceq` 下判不等），否则后人把 `-ceq` 改回 `-eq` 时自测仍然全绿 —— 那才是“齿磨钝而读数正常”那一型（修后的四值自测行在 §46.4 末段那轮件里）。
+3. **verify-only 形态下两格恒读 0**：当 HEAD 的树已等于判过的候选树时工具只复取不建提交，此时“ext 有没有漏进树”与“树差”两格拿 HEAD 比自己是空转。处置：差基准换成被判过的那一轮的父树（件 k59-commit-20261106-012449.txt 逐字 `diff base=4a2d2fd1dc5f532b0911e768ca3aab817853ad65 commit=55396828a94adc7879b1d647da95005976a32efb`），并新增两格对账 —— 父链与门件申报的 HEAD 逐字对上（`hits=1` 且 MATCH）、numstat 与树差逐值对上（`files=26/26 add=2798/2798 del=49/49 backend=9/9`）。两格判决都抽成函数并各带合成反例（父链四例、差值四例），因为“把判决写在主干上、自测走另一份拷贝”在册已登过多次。
+
+换形后终跑（件 k59-commit-20261106-012541.txt）逐字：`own paths=26`・`files=26`・`add=2798`・`del=49`・`backend=9`・`face now=19 untracked now=1`・`held still dirty=7/7 ext still dirty=13/13`，修后那枚自测行逐字是 `eq=True ne=True -eq-calls-case-equal=True -ceq-calls-case-different=True OK`，末行判决 COMMIT-SHAPE-OK。
+
+### 46.5 提交后复取换形（e28）+ 归属三形状的真面反证
+
+e27 的读数已被按件号引用，所以不动它，另 fork 一件 e28，只搬 4a 一格：旧判据「worktree 后端面必须为 0」在三集合模型下**恒红**（held 与 ext 故意留在面上），换成逐路径归属判决。件 e28-00-postcommit-20261106-012812.txt：`knife backend=9`・`worktree backend=18`・`held-decl=7`・`ext-decl=13`・`dirty attributed=18`・`UNATTRIBUTED=0`・累计格 `cumulative=15 declared=15 OUTSIDE-DECLARED=0 STALE-DECLARED=0`・申报外非文档路径 `unallowed-non-docs=0`・`stale-declared=0`。
+
+同一件里两处“报数不判”的形状要写清，否则后人会以为它什么都防住了：其一，CRLF warning 被过滤但**计数**（`filtered out=1`），因为上一型就是“把一行 warning 当成一个脏后端文件”；其二，清单里已申报但当前不再脏的路径只报数不判红（处置 = 更新清单，不是改判据）。
+
+新齿必须走真面（合成自测只证明分类器会分类）。件 k59-mutate-attr-20261106-012920.txt 三形状：R1 把 held 清单删掉一条真脏路径 ⇒ `held lines=6` 而 `real=7`，判决必须红且逐字点名 `X unattributed backend: applications/agent_server/main.py`（`named-by-path lines=1`）；R3 往 ext 清单加一条根本不存在的路径 ⇒ 必须**报数不判且点名**（同件那行 `face=1 (of 19 declared backend paths) [packages/synthetic-ghost.py]`）；R2 两枚真清单对照必须零红：`red-marker lines=0`，那才说明 R1 是真咬而不是工具坏。收尾复证两枚真清单未被改写：`held=A4E9E26638FB83B1AD2A84F241EDE1454C72D79CE8E6B834742A0D0D9F189167`・`ext=44E874252843F3BD42F909ADB0CA1BDFC9B60D10F76908F35ACC989DB75CEC74`，同件 held/ext 两个 True 行证明盘上真清单未变。⇒ 终判 ALL-THREE-SHAPES-AS-DECLARED。
+
+### 46.6 交付三层（哪一层到了、哪一层没到）
+
+| 层 | 本批读数 | 强度 |
+|---|---|---|
+| 代码已交 | PR-2a/2b/2c 的产品面（后端凭据层 + 前端登录面 + 两份 K8s 清单 + 三组测试）全在 own 里 | 实取（树差 26 路径） |
+| 已入库 | 一枚提交 `new-commit=d71c21e044f584466f058a46e8671f96bb02c78e`，树逐字等于被判过的候选树 | 实取（终跑 COMMIT-SHAPE-OK） |
+| 现网生效 | **没到**：跑着的实例仍是 rev d4d3d329 那批产物（屏上没有登录屏）、Secret agent-platform-jwt 在任何集群还不存在、/auth/* 仍读 503、本批零 rollout | 实取（在册部署快照 + 本批未动通道） |
+
+⇒ “登录面已上线”这句不成立，本批只到“机制 + 代码入库”两层。推送面也未动：第 6 格读数是 `DayOfWeek=Friday` 且远端含 HEAD 的 ref 列表为空（未发布）。
+
+### 46.7 一条编号偏差（登记，不改写历史）
+
+`new-commit=d71c21e044f584466f058a46e8671f96bb02c78e` 的提交信息第一行自报「刀㊻（第四十批）」，而工单件 §13.4 表尾上一行是第三十八批、方案件自报第三十九批 ⇒ 本批真实编号 = **第三十九批**，提交信息里的批号写错了。已入库的信息不回改（改写历史属 D3，本批无这个授权），处置两条：① 在此留一个对账锚点 —— 按批号检索本批时**以工单件表行为准**，提交信息里的批号只当载体名不当序号；② 这条偏差说明“批号也是账面量，需要一个可核对的派生处”，下一刀起批号由工单件 §13.4 表尾序号现取 +1，不手抄。
+
+### 46.8 未做 / 不得读成已达（逐条）
+
+- **multi-name-lines 仍是 7**（方案件 §8 曾把它列成本批顺手项，已订正为未做，见 §9 行 6）。本节每一行都守“一行最多一个件名”，但“没涨”这句话要到本刀门件终跑才有值 —— 按 §45.7 六那条在册口径，末轮件名只写进本刀提交信息，本节不预告它。
+- **PR-2c 的操作面两件一行未动**：deploy/k8s/README.md 的密钥生成与写入条目（§6.3）、runbook 的密钥装配步 + 探针 C8–C10 ⇒ 现在 apply 那两份清单只会得到 CreateContainerConfigError（有意的 fail-closed，但过不了“操作面可达”）。
+- **held 那 7 件仍未入库**：本批的树里没有它们，也没替它们提交或申报；它们为什么进不去的证据链在 k59-partition-out.txt 的 VIOLATION 行里（kind=IMPORTS-HELD-FILE），不在本节的叙述里。
+- 未合 `company/main`（用户已拍不合）・未 push・未动公开镜像 `github-legacy`・没 force・没改 git config。
+- 现网半条链（bundle → 传输 → 构建 → 分发 → rollout → 探针）仍等 Linux 通道：本批实测 TCP 22 超时，按在册登记为挂起项，不每轮重议。
+- `make test` 全量十 session 本批未重跑（本刀零产品代码）、CI runner 未实跑、浏览器登录屏实拍仍挂项。
+- 时间基分裂那一格：runbook 第 0b 步的 `CLOCK-BASE-SPLIT` 已在册，但层 1 的 drop-in apply 与 U-1 实验同属 D2，未批。
+
 
 
 
