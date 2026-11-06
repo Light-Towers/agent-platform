@@ -4685,4 +4685,373 @@ typo 同轮都绿：件 e52-typo-default-20261106-014715.txt 读 `forbidden=0`�
 
 启动器那轮（件 e60-e28-invoke-20261106-022314.txt）：`ARTIFACT-FRESH = True`、对账那格 `SAME-BASIS-OK`、三枚反例 `pass=True diverge=True zero-basis=True`，以及 stderr 分件为空 `bytes=0`（空 = 什么都没吞）。
 
+## §49 第四十二批（刀㊾ 2026-11-06）：工作区里堆着三批未入库的工作，和一枚改变部署前提的读数
 
+本批的起点不是「下一刀做什么」，而是把整片工作区重新看了一遍。两条读数把部署这件事的前提直接改写了，所以本节的顺序按「先说会让人改动作的，再说本刀正题」。
+
+### 49.1 工作区分簇：三批已完成开发、零入库的工作叠在同一片盘上
+
+以改动面为准取数（HEAD 2d5bb0ff，git status 28 条 tracked + 1 条 untracked，共 +2296/−88），再按文件 mtime 排序 —— 分簇是靠 mtime 的**三段时间带**做的，不是靠记忆：
+
+- 11-04 15:09–15:15 十件：跨服务错误体那一簇（`packages/agent-core/agent_core/guardrails/errors.py` 与其测试、`packages/shared-schemas/shared_schemas/error.py`、`web/src/api/errors.ts`、`applications/agent_federation/api/server.py` 等）。
+- 11-05 10:12 与 13:24–13:44 九件：登录面那一簇（`applications/agent_server/api/auth_router.py` 新建 314 行、其测试 425 行、`applications/agent_server/api/auth.py`、`applications/agent_server/main.py`、`tests/governance/test_auth.py`、`tests/governance/test_login_no_secret_leakage.py` 新建）。
+- 11-06 07:06–07:55 九件：本刀（deploy/ 下六件注释、`tests/deploy/test_k8s_manifest_wiring.py` 的新齿、`deploy/k8s/README.md`、`docs/operations/minimal-release-runbook.md`）。
+
+⚠ 这条分簇只回答「最后一次写入在什么时候」，**回答不了同一文件里两簇改动各占多少** —— 与 126 那条「mtime 只能分离镜像自带 vs 事后热改、答不了内容丢了没」是同一型限制。所以 §49.2 的结论不建立在这条分簇上。
+
+### 49.2 改变部署前提的读数：前端登录面已入库，后端登录路由没有
+
+两条命令，两条都是当场取的：
+
+- `git ls-tree -r --name-only HEAD web/src` ⇒ 21 条路径里含 web/src/components/LoginView.vue、web/src/api/auth.ts、web/src/stores/session.ts —— **前端登录面在 HEAD 里**。
+- `git cat-file -t HEAD:applications/agent_server/api/auth_router.py` ⇒ 逐字：`fatal: path 'applications/agent_server/api/auth_router.py' exists on disk, but not in 'HEAD'` —— **后端 `/auth` 路由不在 HEAD 里**。
+
+结论（这条决定了这一趟推不推）：若按 HEAD 部署到现网，用户拿到的将是「登录框在、但每一次登录都必然失败」的界面。这与前三批反复遇到的「登录屏在哪」是同一件事的另一半 —— 那次补的是前端入库，这次查出来缺的是后端。
+
+所以本批把口径改成：**先把后端登录面入库并验证，再走部署链**，不为了赶通道窗口把一个自相矛盾的现网推上去。「接线 ≠ 启用」在这里的形状是「入库 ≠ 成对」：一个功能的两侧分别落在不同的载体上时，任何一侧单独生效都是坏状态。
+
+### 49.3 跨服务错误体那一簇：越过了它自己写下的前置门
+
+- `docs/plans/plan-error-contract-alignment-2026-11-04.md` 第 3 行状态写着 **Proposed（审计已完成；D-2/D-4 待拍板；零代码改动）**，第 279 行明写「**拍板前不写代码**；拍板后按 §5.1 / §6.1 分阶段落地」。
+- 同一片盘上那十件已改动、约七百行实现已经在里面（新增 `ErrorEnvelope`、旧 `ErrorResponse` 标注仅兼容、前端把 `msg` 提为唯一上屏来源、`STREAM_TEXT_KEYS` 顺序改掉）。
+- 拍板痕迹取数：在 `docs/` 全库对 `D-2-3`、`D-4-3`、`ErrorEnvelope` 三个词形检索 ⇒ **0 命中**（既没进台账，也没进任何工单件）。
+
+⇒ 这是一项 **待拍的 D2/D3**（改错误体形状会影响下游消费者，按《架构决策原则》边界条款须先清点消费者再决策）。处置保持可逆：**不提交、不删除、不回滚**，留在工作区并在此登记；方案件 §9 那七项（D-2 / D-4 / D-2.1 校验状态码 / D-2.2 校验结构 / D-2.3 兼容窗口退出条件 / D-3 边界 / shared schema 走新增还是原地改）就是待拍清单，逐条都有推荐项，但推荐项没被批准过，不能当作批准读。
+
+### 49.4 本机承担不了验证这件事：三处卡点是同一个形状
+
+这一批第一次把「本机跑测试」当成被测对象看：
+
+- 九 session 逐 session 跑（件 k64-fullsessions-20261106-080519.txt）：`SESSION=root rc=-1 wall=149.9s`、`SESSION=shared-schemas rc=0 wall=32.8s :: 31 passed in 0.09s`。root 那一行是被我叫停的（rc=-1 不是测试判的），停时它的输出件（k64-root-20261106-080519.txt）只推进到 **4%** 且那一行里已经有一枚 F。
+- 登录面那簇单独跑（件 k64-own-governance-20261106-081629.txt）：`tests/governance` 只打了 72 个点、停在 **14%**，第 15 格再没动过。
+- `tests/deploy` 整目录干净态（件 k63d-clean-full-20261106-075814.txt）：`76 passed in 4.84s`，`--durations` 表里最慢的 setup 只有 0.10s。
+
+三处放一起看，卡点的形状是一致的：**测试会去构造真实的 LLM / DB / OTLP 客户端，本机没有那条网络链路，于是每次都等满超时**（45–60 秒量级，和 126 那条「postgres DNS + OTLP no route 导致优雅关闭超时」同一族）。这正是用户判「本机是 WINDOWS、不适合做调试」的实物依据，也是「验证要挪到现网去做」这条改口径的来源：现网探针（入口 200 + no-store + sha、对照 404、真流帧、多轮、登录真流程）比本机 session 更接近事实。
+
+⚠ 本节没有把这三处钉到具体某一行代码 —— 那是另开一刀的活，且需要一条带堆栈转储的量具（本批试过 `--faulthandler-timeout`，它不是 pytest 内置参数，当场报 `unrecognized arguments`，件 k63d-stack-20261106-080300.txt 里 `rc=4`）。登记的判据是「三处卡点同形状 + 本机无链路」，不是「已定位到行」。
+
+### 49.5 本刀正题：小节引用必须自带可解析全路径（③d 齿）
+
+起因是一条反向查出来的悬空引用。`git grep` 显示 deploy/ 下有三处在引 README §6.3，但 `git show HEAD:deploy/k8s/README.md` 里那一节**从未存在过**（HEAD 只有 §6 与 §6.1）；而本会话刚在这份 README 里新建了 §6.3「登录面签名密钥」—— 于是那三处从「查无此节」**劣化成「解析成功、主题全错」**：号被占上了，下一个照号去找的人会读到一段与数据库口令无关的内容。同族又查出四处：一处裸形、一处引 §6.2、一处引 §6 但真实落点是 §6.1 的第 ③ 项、一处引了一个全库不存在的标题「数据权限三层」。
+
+处置是 8 行 / 6 文件，全部是注释行：能指准的补全可解析全路径；指不准的（手工建角色这一条操作全库没成文）**如实写「本仓没有成文这一条」**，不新建一节去接住它。另外两处旧写法引用过一个从未写成的节号，注释里直接写清「那个号现在已被登录面签名密钥占用，别再照它找」。
+
+齿落在 `tests/deploy/test_k8s_manifest_wiring.py`：射程 = deploy/ 下会被 kubectl / psql 读的那几类文件，两条判据 —— 裸形 `README §` 一律红（R-a），带路径的小节号必须在被引文件的真实标题里命中（R-b，fence-aware，跳过代码围栏）。边界在 docstring 里写明：存在性按文件系统判，与 `scripts/check_doc_sync.py` 的版本控制清单基准不是同一条链；被引文件只在本机存在而没入库，不在本齿射程。
+
+复跑（件 k66-pytest-deploy-20261106-091443.txt）：`76 passed in 5.10s`，同一件里带 PYTEST-RC=0。上一版这里引的是件 k63-pytest-deploy-20261106-073200.txt 并声称了退出码 —— 那个件只落 pytest 汇总行、**从没打印过退出码那个键**，被门件的键审计当场判红（KEY-NOT-IN-CITED-ARTIFACT，逐格读数见 §49.12），本轮重跑并把退出码写进件才算绑上。deploy/ 下裸形小节引用现值 = 0（`git grep` 复证），九处引用全部带可解析全路径。
+
+### 49.6 真面反证：半口牙是这一轮抬出来的第二个缺陷
+
+反证件第一版跑出 **RC=2 = HALF-BITE**（件 k63d-facebite-20261106-072958.txt）：逐字 `BITE-P1(裸形@00-config:47)=True  BITE-P2(§1.1@36)=False`、`<<< HALF-BITE: 红是红了，但两枚里有一枚没被点名（判定语没绑到坐标就等于没判）`。
+
+成因在我自己写的判据里：两半判决是**顺序 assert**，第一条当场退出，第二类根本没被判过 —— 「1 failed」看起来满口牙，实际半口。改成先收集 `verdicts` 再一次性断言后复跑（件 k63d-facebite-20261106-073230.txt）：`TARGETED-RC=1`、`BITE-P1=True`、`BITE-P2=True`、`SESSION-RC=1`、`VERDICT=BITE-CONFIRMED：两枚各自被点名，session 也红`，两件 `BYTE-EXACT=True`。第三轮（件 k63d-facebite-20261106-073605.txt）同判据复跑一致。
+
+反证件自身还有一枚当场修的缺陷：`sha = (Sha $j.file)` 原本写在种完之后 —— 那样 BYTE-EXACT 会恒假。改成种前取 `$shaBefore`。
+
+### 49.7 T1 那一格：RC=0 不等于零命中（口径订正）
+
+面禁件三把（件 k63-facecheck-20261106-071824.txt，分件 k63-typo-20261106-071824.txt / k63-docsync-20261106-071824.txt / k63-ruff-20261106-071824.txt）：`TYPO-RC=0`、扫描面 12 files、`T1 hits=13`、T2/T3/T4/T5 = 0、forbidden = 0；doc-sync `0 警告`；ruff `All checks passed`。
+
+`T1 hits=13` 这个数一度被我读成回退。定性靠两条实测，不靠回忆：一是上一轮只有两份新进面文档时（件 k63-twoface-after-20261106-070651.txt，该件首行是 scan face (2 files)，尾读数是 `T1 hits=0`）扫描面与本轮不是同一张面；二是回捞近两天全部 typo 件，主面（件 k63-typo-20261106-071824.txt，12 files）报的是 `T1 hits=13`，与它之前的 k40 / k41 / k46 / k49 / k50 几轮同值 ⇒ 既有自指基线，扩面两件贡献 0。这 13 条是台账把上面那两个型名**引出来当案记录**造成的命中（型名不在本节复述：把错字再写一遍就是给计数自己添项，而这一格的判据是「不升」），L2806 已在册决定不绑。⚠ 上一版这里把 13 绑到了那件 2-files 的扫描件上，而它报的是 0 —— 本轮被门件的引语逐性格当场判红（QUOTE-NOT-VERBATIM-IN-CITED-ARTIFACT，那一格本来就是为了拦「数是手抄来的」而建的），逐格读数见 §49.12。
+
+更要紧的一条口径：读脚本尾段（`typo-scan.ps1` 第 160–179 行）确认它**只在 face 文件缺失时 exit 1**，T1..T5 命中不影响 rc ⇒ **「RC=0」从来不代表零命中**。本轮能写的判据是「扩面后 T1 不升、T2..T5 保持 0、forbidden 保持 0」，不是「T1=0」。
+
+### 49.8 那笔慢 setup：五轮证伪后的边界
+
+现象：同一格 `test_login_signing_params_from_manifest_are_self_consistent`，`--durations` 报 setup **62.76s**（单独选它时）vs **0.10s**（跑整目录时）。五轮切下来的结论全是否定式，逐件：
+
+- 件 k63d-slowprobe-20261106-074030.txt：`-p no:langsmith` 三跑对照 99.56 / 98.39 / 98.74s ⇒ 与 langsmith 插件无关。
+- 件 k63d-slowprobe2-20261106-074614.txt：把会红那格 deselect 后 `rc=0` 全绿仍 99.24s ⇒ 与「有没有失败」无关。
+- 件 k63d-slowprobe3-20261106-075050.txt：盘面未动 / 同字节重写 / 种上裸形 三档全部 setup 恒 62.55 / 62.61 / 62.61s ⇒ 与文件内容、与是否被改动过都无关。
+- 件 k63d-importtime-identity+crypto-20261106-080331.txt 与 k63d-importtime-nl2sql-settings-20261106-080331.txt：两条 import 各 wall 1.3s / 1.2s ⇒ **62s 不花在 import**。
+- 件 k63d-slowprobe4-20261106-075939.txt：只选其中一格 63.16s / 62.86s；排除这两格跑其余 74 格 `74 passed in 4.10s`；整目录 76 格 `76 passed in 4.84s`。
+
+能如实写出的边界只有一句：**用 `-k` 选中这两格中任一格，该格 setup 就要 62s；不带 `-k` 跑整个目录，同一格 setup 0.1s**。它和 §49.4 那个「本机无链路 ⇒ 客户端构造等满超时」的形状相同，但这一轮没有把它钉到行，也不拿相关性冒充因果。留作待判，复现命令就是上面那五件里的脚本。
+
+另外抬出一枚量具坑（须进坑表）：PowerShell 函数里 `$lines +=` 写的是**局部变量**，脚本级累加器全丢 —— 件 k63d-slowprobe3-20261106-075050.txt 里 CASE 行一条都没落，三档真实读数只能从三枚分件回捞。修法是累加器统一 `$script:lines`，本节之后新写的件（k63d-slowprobe4、k64-ownset）都按这个写法。
+
+### 49.10 归属三集换成现取派生（手抄那一版当场作废）
+
+本刀的止损点不是代码，是“谁能进提交”。上一段我写了一枚手抄三个 CSV 的启动件（k65-gate-run.ps1），**已删**；它自己先演了两型坑：① 手抄的申报集与实物脱钩（它把 schemas.py 写进 own，而那 +14 行自陈“reason 的对外域会进入 canonical 错误信封的 code”，属并行线）；② 经 `-File` 递 `-ExtCsv ''` 时 PowerShell 5.1 把空串抽掉，门件当场报 Missing an argument for parameter 'ExtCsv' 而死（件 k65-gate-run.txt.err）—— 那是**工具死**不是判决，跟在册“工具死了不许读成无违规”同族。
+
+换成在册那条链重跑，逐格绑件（件名一律不带反引号，那些路径只在本机、不入库）：
+
+- 归属表（k59-attribution.ps1 补两族符号后重跑，件 k66-attribution2.txt）：第 2 行表头 `file ... added mine theirs kind`，第 4–34 行共 31 条数据行，按 kind 列分 MINE 9 / NEUTRAL 6 / THEIRS 11 / COLLIDE 5。行数在该件里可逐行数，账面不另造一个键去冒充它的打印读数（R-6 咬的正是这一型：数绑件名不绑内容）。补的两族是实测盲区不是审美：asserted 前缀不补则 workspace_registry.py 那 +65 行落 NEUTRAL；AdmissionReason 不补则 schemas.py 也落 NEUTRAL。
+- 计数行改绑到真正打印它的件（件 k66-ext-derive-20261106-090130.txt）：第 1 行 TABLE) 之后逐字 `kind-rows=31`。
+- ext 清单换派生（件 k66-ext-derive-20261106-090130.txt）：THEIRS-derived=11 + COLLIDE 登记=1 = 12，on-face-hit=12 stale=0。**DELTA：REMOVED workspace_registry.py**（13→12）。把它划出去是把自己的活划出去，三条实物：归属表 MINE 列 9 行、asserted 前缀那三个函数的消费者只有 auth.py 与 auth_router.py、错误契约那簇对它零引用。分不出两半的 COLLIDE 单独登记在 k66-ext-collide.txt 并逐条写判据，不混进自动派生冒充机械判决。
+- 候选集（件 k61-candidate-derive-20261106-090132.txt）：CANDIDATE derived=19，CONSERVATION-OK（19 + ext-on-face 12 = face 31），三枚自测全中。
+- 树的定点迭代（件 k59-partition-out.txt）：ROUND 1 点名 auth_router.py → ROUND 2 点名 routes.py / test_auth_router.py / test_login_no_secret_leakage.py → ROUND 3 点名 main.py → ROUND 4 violations=0 收敛。上一刀历史读数 OWN 14 / HELD 5 / CLOSURE-VIOLATIONS-TOTAL 5 属另一轮面，不作本轮依据；本件重跑的逐字形状是 `OWN (28):` / `HELD (0):` / `CLOSURE-VIOLATIONS-TOTAL=0` / `WRITE-BACK) own declared=28 on-disk=28 | held declared=0 on-disk=0 EXACT`。
+- 门件第一轮（件 e26-gate-00-20261106-090431-gate-fill.txt）：red-marker lines=4、GATE_RC=RED；逐格见 §49.12。同轮 HELD-DECLARED=5 逐条带证据、MISS-DECL: 0（件里是冒号形，不是等号形）、UNATTRIBUTED 无报红、held-lint rc=0。
+
+### 49.11 登录面为什么分不出来：AppError 的三处实物
+
+不是“我觉得”，是三把命令能复跑的三个读数：
+
+1. `applications/agent_server/api/auth_router.py` 第 28 行就是 `from agent_core.guardrails.errors import AppError`，而 `git show HEAD:packages/agent-core/agent_core/guardrails/errors.py` 对 AppError **0 命中** —— HEAD 那份只有 error_body / error_code_for_status / make_error_response / install_error_handlers，而且它文件头自陈 D-2=A：仅注册 Exception→500 兜底，**4xx 不改**（零破坏）。⇒ 单独把登录面入库 = 应用启动即 ImportError，不是“功能没开”而是“起不来”。
+2. `applications/agent_server/tests/test_auth_router.py` 里十一处断言读的是响应体的 code / msg 键（如 `assert resp.json()["code"] == auth_router.CODE_LOGIN_TAKEN`）⇒ 需要 AppError handler 在位才可能绿，不是只要 import 能过。
+3. 反向也核了，免把别簇的事记到我头上：identity_middleware.py 那 +20 行的实体是信封面（新增 一个把 JSON 错误体发回去的 helper + 引入 error_body），登录面不 import 它；workspace_registry.py 新增的三个函数只读 HEAD 已有的两个 ContextVar，不依赖未入库符号。
+
+连回 §49.2 那条改变部署前提的读数，两层合起来是一句：**按 HEAD 部署 = 登录框在、后端 /auth 不存在（必 404）；把后端登录面单独入库 = ImportError 起不来**。“入库 ≠ 成对”这一型在部署面上第二次显形。能拆开的只有两条路：要么错误契约那一簇拍板后与登录面同批入库（影响六个服务的 4xx 体形状，D2），要么登录面改回 HEAD 已有的 4xx 出口（只动那几行 raise 与对应断言，可逆，D1）。两者都属于“要不要发 / 敢不敢发”，不自决。
+
+### 49.12 门件那一轮 RED：四枚红逐格与三处书写返工
+
+件 e26-gate-00-20261106-090431-gate-fill.txt 报 red-marker lines=4（分件 e26-gate-30-20261106-090431-ts-provability.txt 与 e26-gate-00-…-gate-fill.txt 里的形状格）：
+
+| 那一格报的 | 实物 | 处置 |
+|---|---|---|
+| KEY-NOT-IN-CITED-ARTIFACT 台账 L4741 | 件 k63-pytest-deploy-20261106-073200.txt 只落 pytest 汇总行、从没打印过退出码那个键 | 重跑并把退出码写进件（新件 k66-pytest-deploy-20261106-091443.txt，末两行 76 passed in 5.10s 与 PYTEST-RC=0），账面改绑新件 |
+| KEY-NOT-IN-CITED-ARTIFACT 台账 L4755 | 键形状写错了：件里是 `T1 hits` 而账面写 `T1 = 13` | 改成件自己的键形状；第二轮又抬出 QUOTE-NOT-VERBATIM（13 绑到了那件报 0 的 2-files 件上）⇒ 改绑到真报 13 的主面件 |
+| odd backticks 于 deploy/k8s/05-secrets.yaml 行 8/9 | 一个跨行的行内码（命令与 patch 体拆两行） | 改书写：两枚各自闭合，不动判据、不加白名单 |
+| unterminated table row 于 docs/operations/minimal-release-runbook.md 行 552 | **该行在 HEAD 就坏了**（对它 `git diff` 零命中，四列表只有三根分隔竖线），T4 没报它而形状格报了 —— 两把量具口径不同的实录 | 补行尾闭合，并登记为 pre-existing（不是本刀引入） |
+| odd backticks 于 tests/deploy/test_k8s_manifest_wiring.py 行 430/610 | 那是 Python 里合法的「以三枚反引号开头的字面量」判断，拿 Markdown 行内码规则判 .py 源码是**范畴错误** | **换射程而不是放宽**：反引号奇偶只判 .md；表格行闭合不跟着豁免；新增 C-selftest-10 三向自证（md 必咬 / py 必不咬 / py 破行必仍咬）+ 自测下限 24→25 |
+
+同轮还登记一枚工具面事实：上一批那枚手抄启动件的 `-ExtCsv ''` 不是“参数没传进去”，而是空串被抽掉后下一位参数错位 ⇒ 门件根本未起跑。判据：先看件在不在盘，再看 err 分件字节数（那轮 err=1536 / out=0）。
+
+### 49.9 本批未做
+
+- 后端登录面入库与它的验证（本批把它排在部署之前，验证按 §49.4 改口径挪到现网）。
+- 跨服务错误体那一簇的七项拍板（§49.3），拍完才谈分阶段落地。
+- §49.4 三处卡点钉到行 + 一条带堆栈转储的量具。
+- 三处卡点的统一解释未经代码级证据确认，不得写成「已查明」。
+- fx-3 拆行（表格行内多件名怎么拆而不破 T4 形状）仍无方案件。
+
+
+## §50 第四十三批（刀㊿ 2026-11-06）：入口从「某台宿主上有个前台进程」换成清单里一个钉住的口，归属链在新面上重跑一遍
+
+本批的动作只有一行 type 变更，但它牵出三件要写清的事：一个与在册读数差两个量级的数是怎么来的、held 这次为什么是零、以及「用户现在点得到什么」这句话在三个层面上分别成不成立。
+
+### 50.1 起点：一条 `ahead` 差了两个量级，成因不是面变了而是基准拿错
+
+现取（件 k73-baseline.txt，十行逐键）：`HEAD=2d5bb0ff294423731c4c4d075baa856f1ddeade1`、`COMPANY_MAIN=fe22794c5a36e855114e2bbf99c0df341b3f695f`、`COUNT_vs_main=1092`，而 `MERGE_BASE_vs_main=EMPTY` —— `git merge-base HEAD company/main` **什么都不返回**。同件里本分支自己的上游 `OWN_UPSTREAM=d4d3d3290e237ba080288ef77b6b76c7536d038b`、`MERGE_BASE_vs_own` 与它逐字相同、`AHEAD=8`、`BEHIND=0`。
+
+两条历史线**无公共祖先**（`MAIN_MSG` 那一行说明它的身份：2026-10-20 的快照单提交）。所以 1092 不是"我们的债"，是拿错分母后把别人整条历史数了进来；在册那句 ahead=8 用的是 `company/feat/web-visual-poc..HEAD`。
+
+⇒ 登记一条规矩，进 AGENTS.md 的取证面：**「领先/落后」这类数必须写明相对哪条 ref，而那条 ref 只能当轮 `git rev-parse` 取**。同一仓里并存两条无公共祖先的线时，不带基准的 ahead 是一个不可判的数。这与 §49.10「手抄三个 CSV」同族 —— 都是把账面输入与实物解耦，只是这次解耦的是分母。
+
+### 50.2 归属四把在 face=43 上重跑
+
+face 从 42 涨到 43 的唯一原因是本批新动的实物 `deploy/k8s/20-agent-platform.yaml`（另两件 tests/deploy/test_k8s_manifest_wiring.py 与 docs/operations/minimal-release-runbook.md 早就在面里）。逐件：
+
+- 归因（件 k70-attribution-20261106-175030.txt）：`TABLE) rows=43 unreadable-blob=0`，kind 分布里 COLLIDE=11。
+- 外债（件 k70-ext-derive-20261106-175101.txt）：`TABLE) rows=43`、`EXT) declared=8 on-face-hit=8 stale=0`、`DELTA vs 在册清单 old=8 new=8 removed=0 added=0` ⇒ 并行线那八件一条没动。
+- 候选（件 k70-candidate-derive-20261106-175106.txt）：`CANDIDATE) derived = 35`，守恒行 `BASIS) candidate 35 + ext-on-face 8 = 43 vs face 43 CONSERVATION-OK`。
+- 树的判决（件 k59-partition-out.txt）：`PARTITION) head=2d5bb0ff294423731c4c4d075baa856f1ddeade1 addRc=0 wt-files=1376 head-tree-files=1376 candidate=35`、`ROUND 1) cand=35 delta=35 smuggled=0 violations=0 cited-new=0`、`ROUND 1 FIXPOINT-REACHED`、`OWN (35)` / `HELD (0)`、`CLOSURE-VIOLATIONS-TOTAL=0`、`WRITE-BACK) own declared=35 on-disk=35 | held declared=0 on-disk=0 EXACT`。
+
+⚠ held=0 这次是**第一轮就成立**，不是迭代出来的。与 §49.10 那一轮（ROUND 1 点名 auth_router.py → ROUND 4 才收敛、OWN 14 / HELD 5）的形状差别有一个具体来源：本轮候选集里同时带着 packages/agent-core/agent_core/guardrails/errors.py（AppError 已在那份候选字节里），闭包因此无话可说。于是 §49.11 那句「登录面单独入库 = ImportError 起不来」在本批变成了**树给的读数**：两侧同批进候选，就同批自洽。
+
+但这条读数的射程必须同时写清，否则它会被念成"登录面已经验过"：闭包只判 import 可达性，**不判** §49.11 第 2 条那种"运行时才需要 handler 在位"的断言。后者要靠 test_auth_router.py 那十一处断言，而那需要一次真跑 —— 按 §49.4 的改口径，这类真跑在现网做。
+
+### 50.3 门件按派生值复跑：只换输入，一枚齿都没加
+
+件 e26-gate-00-20261106-175305-gate-fill.txt（调用件 k73-run-gate.log，`RUNGATE_RC=0`）：`face lines   = 43`、`allowed-hit  = 35  FORBIDDEN(own or unclaimed): 0 OK`、`MISS-DECL: 0 OK`、`EXT-DECLARED=8 on-face-hit=8`、`UNTRACKED total=0  FOREIGN(not declared): 0 OK`、`fixpoint => own-in-tree (measured)=35 held (measured)=0 | declared own=35 declared held=0`、`candidate tree=34555e63c98eb37ff09599bf49fbb5ec8d0dca86`。B 段九把逐条 rc=0 basis=candidate-tree：check_doc_sync、ruff、recount_todo_index、check_tokens_node、check_events_parity、lint_architecture、lint_migration_refs、lint_public_mirror、lint_graph_state_boundary。另两格：`B5) tool-rc=0 files-declared=35 scanned=35 tree-index=768 violations=0 cited-files=0`、`B4-selftest) basis discriminator => tree-ruff-rc=0 worktree-ruff-rc=1 … BASIS-IS-TREE-PROVEN`（两值必须不等 —— 相等就说明那些绿格子从来没读过候选工作区，"换基准"只是个标签）。收尾 `GATE-SELFTESTS) n=26 passed=26`、`red-marker lines = 0 (case-sensitive)`、`GATE_RC=GREEN`。
+
+同一件里那两枚工作区整片 ruff 的红是 `WORKTREE-RED-FILE(ext)` 形状（applications\agent_federation\api\server.py 与 applications\agent_server\api\query_router.py），按件里那行原文不计入 GATE_RC —— 它们是外债，逐条进账、逐轮计数，这正是刀㊻ 换形的全部依据。
+
+### 50.4 A 档落地：一行 type 背后的三层
+
+用户批准的是"入口常驻"的 A 档（另两档 = 在某台宿主上常驻转发 / 装 Ingress controller）。按 AGENTS.md《架构决策原则》，三层齐备才算全局解，缺第三层就退化成约定：
+
+- **单一实现** = deploy/k8s/20-agent-platform.yaml 的 Service 段：`type: NodePort` 加钉 `nodePort: 30080`，而"为什么改、一起暴露了什么、当时的鉴权实测、为什么不钉某台节点"逐字写在该段注释里 ⇒ 入口地址只有一个来源，不在手册里存第二份。
+- **全局装配** = docs/operations/minimal-release-runbook.md §5 基线 3 那一格换形：期望值从「nodePort 全空」翻成「nodePort=30080、externalIPs/loadBalancerIP 仍全空」，口径从"只有 ops 通道到得了"改成"任一节点内网 IP:30080 到得了"，并如实写上**面从 1 台宿主扩大到 3 台节点**。同文件 §3.2 那句「Service 上的 18000 是 nodePort」是与 LIVE 矛盾的旧陈述，本批一并订正（18000 是宿主上 port-forward 自己监的本地口，当时 svc 是 ClusterIP、nodePort 为 `<none>`）。
+- **强制门禁** = tests/deploy/test_k8s_manifest_wiring.py 新增 ⑥c 三格：入口 Service 三条不变量（换回 ClusterIP / 不钉 nodePort / port 与 targetPort 分叉 各自当场红）、手册里那个口必须等于清单算出的 nodePort（与 ⑥b 同一条纪律，消费方从代码换成文档）、以及四枚非空转反证把形状注回去逐条确认会咬。
+
+实跑（件 k73-pytest-deploy.txt）：`79 passed in 13.03s`、`PYTEST_RC=0`。上一轮同目录 76 格，+3 正是本批新增的三格。
+
+### 50.5 apply：只 apply 一个对象，前后各一组现取
+
+`kubectl apply -f` 整份 20 会把 Deployment 面一起拖进现网 —— 内网清单第 5 条那段历史（LLM_* 从字面值恢复成 configMapKeyRef）就是"apply 整份"与"只改一处"混在一起的代价。所以本批从仓内文件**派生**出 Service 那一段（按 `\n---\n` 切块，断言含 kind: Service 的块恰好一段，派生脚本与产物都只在本机）再 apply。
+
+- apply 前（现取）：LIVE 是 `ClusterIP [{"port":8000,"protocol":"TCP","targetPort":8000}]`；集群内 `NO_NODEPORT_SVC_IN_CLUSTER`；三台宿主 `ss -ltn` 上 :30080 命中数 0 / 0 / 0；`kubectl get ingressclass` = `No resources found` ⇒ 撞口风险与"本集群第一个用 NodePort 的 Service"两条都是实测，不是推定。
+- apply：`service/agent-platform configured`，`APPLY_RC=0`。
+- apply 后（件 k73-entry-probe.out，PROBE_RC=0，同轮）：`REV-BIND) pod=agent-platform-c7bcffcbc-znwcz rev=d4d3d3290e237ba080288ef77b6b76c7536d038b`、`SVC) agent-platform   NodePort   <internal-ip>   <none>   8000:30080/TCP`；三台节点 IP 各取三格，全部 `path=/health code=200 bytes=957`、`path=/ui/ code=200 bytes=1701`、`ui-header=[cache-control: no-store]`；对照格 `control-missing-asset code=404`；`query-no-key code=401`；两枚产物 `served-sha16` 与 Pod 内 `pod-sha16` 逐格相等（js 7ea974192672bb5d、css a4dc4f0891576e61，match=YES，读径 = 从跑着的 Pod 里 sha256sum，不 docker run）。
+
+第一次取这组读数时我把探针内联在 ssh 命令里，`printf` 的 `\n` 被 PowerShell 与 ssh 两层引号吞成字面 n，同一格同时打印出 code=000 与 code=200 —— 读数形状不可判。按在册那条"内联起不来就固化成脚本"重写成件 k73-entry-probe.sh 后才拿到上面这组。**这条属工具面事实，不是环境现象**，进坑表。
+
+### 50.6 「用户现在点得到什么」必须分成三层说
+
+- **代码已交**（工作区实物，已过门件）：登录面成对两侧、错误契约 G1 六条、NodePort 这一行。
+- **已入库**：还没有。本批的提交在 50.8 之后，写这一节时 HEAD 仍是 2d5bb0ff。
+- **现网生效**：只有 11-04 那一版（rev d4d3d329）加一个新的常驻入口。
+
+三把命令钉住第三层（当场现取，不引 §49 的旧账）：`git ls-tree -r --name-only d4d3d329` 对 web/src/components/LoginView.vue、web/src/api/auth.ts、applications/agent_server/api/auth_router.py 三条**各自 0 命中**，而同名 LoginView.vue 在本地 HEAD 的 ls-tree 里 = 1。⇒ 现在打开任一节点的 :30080/ui/ 看到的是 API-key 那一版（贴 key、提问、看事件时间线），**没有登录框**。登录框要等 提交 → 推送 → bundle → 241 构建 → distribute → rollout 那条链走完。「入口常驻」与「功能是新的」是两件事，不能合并成一句"上线了"。
+
+### 50.7 顺带抬出的一条现网事实：缓存这条路从来没通过，但它是 fail-open 的
+
+同件 k73-entry-probe.out 里那行 /health 响应体带着 `cache_backend":"valkey","cache_ready":false`、`cache_degraded_reason":"valkey_unavailable: ConnectionError: Error 111 connecting to localhost:6379. Connection refused."`、`cache_stats` 里 `error":1769`。两条命令把它从"接了没好"钉成"没接线"（逐条当场取；读数逐字落在下面两条，不绑本机一次性件名 —— 上一版引了一个既不在盘也不入库的件名，被 R-2 当场咬出）：
+
+- `kubectl -n agent-platform get svc,pod | grep -i valkey` ⇒ `NO_VALKEY_OBJECTS_IN_NS`，deploy/k8s/15-valkey.yaml 从未 apply 到这个 namespace；
+- Pod 内 `env | cut -d= -f1 | grep -iE "valkey|cache"` ⇒ 空输出，清单一个缓存相关键都不注入。
+
+⇒ 线上一直吃的是代码默认值 redis://localhost:6379/0（packages/agent-runtime/agent_runtime/cache/config.py 第 65 行），而 Pod 里没有 localhost:6379 这个东西，累计 1769 次连接错误。**"接线 ≠ 启用"在缓存这一面第二次显形**（第一次是 §49.11 那个错误契约默认值）。处置不在本批：往这套集群加一个 valkey 实例是有 IO 代价的决定（内网清单第 6 条那块 ROTA=1 单盘与 etcd slow fdatasync 的在册历史就是代价的账本），属另拍；本批只把读数与两条复现命令入账。
+
+### 50.8 本批未做 / 待走
+
+- 现网那条链（推送 → bundle → 241 构建 → distribute → rollout → verify → Pod 内 C1–C7 在新 rev 上复跑）本批未走：通道窗口 19:00 收，剩余时间装不下"构建 + 分发"这两段，按规矩不半途起构建。
+- 登录框出现在现网 = 上面那条链走完；走完前不得对外说"登录版已上线"。
+- 50.7 那条缓存接线的处置（apply 15-valkey + 注入 VALKEY_URL + 复跑读到 cache_ready=true）待拍。
+
+## §51 第四十四批（2026-11-06 收口）：六枚红归四个根因、派生链在新面上全环自证、量具入册
+
+本节是入库件；新增读数一律绑本节路径与本批提交的 sha（sha 在提交信息里现取，不预告），本机一次性件名不带反引号。判决基准 = 门件跑那一刻 HEAD 短号 2d5bb0ff、ahead 8；face 逐轮现取 36 → 42 → 43，**不许拿上一轮的 face 当下轮输入**。
+
+### 51.1 六枚红 = 四个根因，量具判据一条未改、齿一枚未加
+
+- 起点（件 e26-gate-00-20261106-142716-gate-fill.txt）：末段逐字 `GATE_RC=RED`、`red-marker lines = 6 (case-sensitive)`，R-6 计数 `keyMiss=5`。
+- 根因一（件 e26-gate-10-20261106-142716-ruff.txt）：唯一一条 F541 落在 tests/governance/test_face_basis_gate.py 第 177 行。一行去掉多余的 f 前缀，同时熄灭三枚红（候选树 ruff 106、WORKTREE-RED-IN-UNCLAIMED-SCOPE 137、BASIS-NOT-ISOLATED 138）。外债那 10 条 F401/I001 登记在册，不动。
+- 根因二（件 e26-gate-10-20261106-142716-lint_public_mirror.txt）：P-4 咬的是测试件里三个完整的私钥头字面量。处置 = 改成运行时拼接（与 scripts/lint_public_mirror.py 的 _asm 同形），断言强度不变、registry 与 publish 两种模式天然绿，**不新开登记口子、不给 P-3 加测试目录豁免**。
+- 根因三（件 k71-typo-posttarget-20261106-153015.txt）：进面后 T4 与 T2 均零命中（件里逐字印的是 T4 hits=0，不是等号形）。四份新入面文档一律「先单量、清债、再扩面」；ARCHITECTURE.md 单量那条 T2 命中 1 条，成因是第 44 行把 ADR 路径写成不带后缀的形状，就地补全后单量全 0 才加面，不把别人的债静默计到本刀头上。
+- 根因四（件 e26-gate-30-20261106-142716-ts-provability.txt）：五条 `KEY-NOT-IN-CITED-ARTIFACT` 全是「数绑件名不绑内容」—— kind-rows 实际印在 k66-ext-derive 件第 1 行、MISS-DECL 在门件里是冒号形。处置 = 键按件的打印形状书写、改绑到真正打印该键的件；**不放宽量具、不硬造键名凑绿**。
+
+### 51.2 派生链在 face 43 上全环自证
+
+- 归属（件 k70-attribution-20261106-174911.txt）：`TABLE) rows=43`，与本轮 face 43 相等，不读上一轮旧表。
+- 外债（件 k70-ext-derive-20261106-174925.txt）：`EXT) declared=8 on-face-hit=8 stale=0`，与在册清单零差。
+- 候选（件 k70-candidate-derive-20261106-174928.txt）：守恒行 `BASIS) candidate 35 + ext-on-face 8 = 43 vs face 43 CONSERVATION-OK`，三枚自测全过。
+- 树的判决（件 k59-partition-out.txt）：`ROUND 1 FIXPOINT-REACHED`、`HELD (0):`、`CLOSURE-VIOLATIONS-TOTAL=0`、`OWN (35)`；写回行 own 35 / held 0 与盘上逐字 EXACT（空集 no-op 那处不许回退）。
+- 门件判决留痕（件 e26-gate-00-20261106-184745-gate-fill.txt）：`HELD-DECLARED=0`、`not-covered=0 TYPO-FACE-COVERED-OK`、`keyMiss=0 quoteMiss=0`、`BASIS-IS-TREE-PROVEN`；末段逐字 `GATE_RC=GREEN`、`red-marker lines = 0 (case-sensitive)`、26 枚自测全过，runner 退出 0。三集合由在册 runner 从 k59-own-final / k59-held-final / k59-ext-final 现取派生，无手抄 CSV。
+
+- 终轮在 face 45 上另取一遍（P4 文档落地使面再涨两个文件）：归因 45 行等于 face 45，候选 37 + ext 8 = 45 守恒，写回 own 37 / held 0 EXACT；读数落在 k70-attribution-20261106-190036.txt、k70-candidate-derive-20261106-190048.txt、k59-partition-out.txt。上面 §51.2 那组 face 43 的读数是上一轮，**两轮都真但面不同，必须连件名区分**，不得搬来当本轮数。
+
+### 51.3 量具入册（本轮只登记，不重构 gate / postcommit）
+
+现取 git ls-files 的 ps1 计数由 0 升到 4：typo-scan.ps1、ts-provability.ps1、k46-keypair-lib.ps1、k71-basis.ps1 进 scripts/evidence/，四件与运行时镜像 sha256 逐件相等；face_basis.py 补登记进 scripts/evidence/README.md 与 ARCHITECTURE.md，调用边两端都能在 tracked 面解析。一次性件盘点落在 p3-onetime-inventory-20261106.csv：150 件、其中 97 件无台账引用；**只删绝对安全的 0 字节件**，其余留到链静默期删并同批复跑门件自证 —— 盲删会让 ts-provability 的 corpus 少掉被引读数，制造「件不在 ⇒ 不判」的假绿。
+
+### 51.4 本轮新坑（都要进坑表）
+
+1. **工具死不是判决**：held 空集时在册 runner 经 -File 递空串，PowerShell 5.1 把参数值抽掉，门件报 Missing an argument for parameter 'HeldCsv' 而死（件 k59-run-gate-p2-20261106-170304.txt）。处置 = 空集省略该参数，三集合仍从载体读入。
+2. **量具入库后自己成了账面新增行**：合成夹具里的假时间戳与假件名被 R-1 / R-2 当事实陈述（件 e26-gate-30-20261106-171627-ts-provability.txt）。处置 = 夹具字面改运行时拼接，样本值与十枚自测期望逐字不变、独立复跑十枚全过；不是给量具开豁免。
+3. **账面自身抬高判据**：§50 新写的两行分别踩中 P-1 真 IP 与 R-2 不存在的件名（件 e26-gate-00-20261106-182036-gate-fill.txt）。处置 = 占位符化 + 读数改为本节自持；证据形状没丢，丢的是不可复核的引用。
+4. **末节号量具瞎**：起手用 `^## (\d+)\.` 取末节，而本节与上一节写作 `## §50` / `## §49`（带 § 前缀）⇒ 一次都没匹配，末节被读成 §47。这与在册「rc≠0 而 stdout 一条判决都没有」同型：**0 命中不是「没有」，是尺子没看到**。现取末节必须同时覆盖 `## N.` 与 `## §N` 两种形状。
+
+### 51.5 三层（不得混）
+
+- 代码已改（工作区）：P-4 拼接字面、R-6 五条键形状订正、四把量具入库与登记、typo 扫描面扩面、AGENTS.md 9–11 条、三份方案件自洽与本批行、本节；门件终跑 GREEN。
+- 已入库：**未达**，本轮未提交、未推（工作区同时有并行执行体在写 §50，不抢提交）。
+- 现网生效：**未达**，跑着的 Pod 仍是旧 rev；通道窗口按 §50.8 已收，不半途起构建。账密登录不再 404 这条判据要在新 rev 的 Pod 里重取，不能用旧 rev 的 /ui/ 200 顶替。
+- 50.2 那条"闭包不判运行时 handler"的补验（把 test_auth_router.py 那十一处断言跑到）按 §49.4 的口径挪到现网。
+- PowerShell 量具债按已拍的 A 档 = 止损收口：本批只登记不重构（scripts/evidence/README.md 那一节记着），门件 99 KB / 13 代 fork 的拆分另开一刀。
+- §49.9 那五项本批仍未做，逐条随附在那一节里，不搬到这里冒充进度。
+
+## §52 第四十五批（2026-11-06）：一句提问暴露的决策缺位——ADR 那句「已决」只覆盖四维里的一维
+
+判决基准 = 本批提交前 HEAD 短号 2d5bb0ff；face 逐轮现取 45 → 46（`docs/adr/0010-ui-stack-selection.md` 本批第一次进面）。批号由上一节标题里的汉字数字现取派生（44 → 45），不手抄。本批**不带刀号圈码**：圈码数字区段到「五十」为止，㊿ 是最后一枚 —— 这是量具到顶，不是忘了写（§51 同形，那一节也没带）。
+
+### 52.1 触发源：我把形态问题答成了可达性问题
+
+用户问「前端为什么不用一个 Pod 独立部署」。我答的是「入口怎么才能常驻可访问」，并给了 NodePort。这是**答错对象**，不是措辞不准。定位到的账面源头有三条，第 1 条才是根因：
+
+1. **决策缺位被状态行冒充**：`docs/adr/0010-ui-stack-selection.md` 标题写「只读控制台扩展 / 独立前端工程」，状态行写「已决」。两句合起来给读者的印象是"前端的事定了"，而 §6 实际只决策了**工程独立性**这一维。**部署单元独立性那一维从来没被决策过** —— 它既不是"在册否决"也不是"待拍"，而是账面盲区。
+2. **盲区里长出了一条假锚**：`deploy/k8s/20-agent-platform.yaml` Service 段注释第 3) 条原写「拆独立前端 Pod 改变不了『可达性由 Service 类型支配』这件事（同一读数的推导见台账 §43）」。前半句是**形态判断被写在可达性的依据列表里**（维度串门），后半句是假锚 —— 见 §52.3 的检索读数。
+3. **我引用了它，所以错了**：上一轮给用户的回答里就带着这条"推导"。清单注释不是决策载体；它一旦承载判断，就会被下游（包括我）当成依据读。
+
+### 52.2 清单实物：独立前端 Pod 从来没有实物，但"没有实物"不等于"决策过"
+
+现取 deploy/k8s 的资源面：`kind: Deployment` 与 `kind: Service` **各 4 个**，逐条是 postgres、valkey、nl2sql-service、agent-platform ⇒ 零前端独立 Deployment、零独立 Service、零 Ingress。这条读数与 §52.1 第 1 条不冲突：它回答"实物有没有"，不回答"要不要"。
+
+### 52.3 假锚的取数：对该节全文检索三把，零命中
+
+台账 §43 的实际内容（本轮逐把检索，不是回忆）：`支配` 零命中；port-forward 与 NodePort 两个词的命中行全部落在别的主题上——L3916 是白天窗口探针设计、L4084–4086 是用户可达三层读数、L4259 是入口通道断连取证、L4309 是「待人拍 ①：用户可达正式开放三选一」。**没有任何一条关于拆分部署单元的推导**（上一轮引用时未逐行核对，这本身就是错锚能长期存活的原因）。⇒ 那条注释的括号是空的，而它看起来像有出处，所以比"没出处"更危险。本节只给行号不给节号：行号本轮可逐行复核，节号当时未核对。
+
+### 52.4 治本落点：把一维已决拆成四维各有决策位
+
+ADR 新开 §7（历史 §1–§6 照旧不改写，沿用 §6 那次的手法）：
+
+| 维 | 当前态 | 决策出处 |
+|---|---|---|
+| ① 工程独立性 | 有工程（web/ + Vue3 + Vite） | ADR §6（2026-10-29 拍板） |
+| ② 构建期 Node | 只在 build 期 | `Dockerfile` 阶段 1；实施件 §10.2 形态 A″ |
+| ③ 部署单元独立性 | 同镜像同 Pod | **ADR §7.1 —— 本批补齐，此前缺位** |
+| ④ 可达性 | NodePort 30080 | Service 段（本批换形后不再自称形态依据） |
+
+**② 与 ③ 正交、③ 与 ④ 正交**，两对都是原表述容易合流的地方。手法有在册先例，不是新造：实施件 §10.3 第 1 条已经拆过一次同一种病 —— 那句"开源自部署多一个 Node 运行时面"把 Next 这个名字当成了成本来源，而实测 Khoj 是纯静态导出、运行时无 Node。本批是同一套手法的第二次应用。
+
+③ 维决策 = **维持同 Pod，不拆**。三条依据（形态 A″ 有三个跨框架生产先例／拆出去会新引入 SSE 代理缓冲风险，而该风险当前清单面与集群面读数都是零／拆不拆都不改 ④ 维结论），收益只剩「独立发布与回滚」，在 3 节点单盘、无专职前端、单页无路由的现状下兑现不了。**这是决策不是否决**，ADR §7.3 预先写了三条重启条件（沿用本文 §4 的手法）。
+
+### 52.5 反证面：这一刀自己又犯一次同型错，并被自己的核对抬出来
+
+- 初稿自犯（上一轮已说明）：§7.3 第 2 条原把「不做 SPA history fallback」那条边界归给实施件 **§9.2**。实取小节边界：§9.1 起 L224、**§9.2 起 L243**，而原句在 **L241** ⇒ 它属 §9.1。订正后记为 ADR §7.2 那一族的**第三例**。本节初稿又犯一次同型（引用台账未核对的节号），已换形为行号——见 §52.3 末句。
+- **虚报计数**：初稿写「本族已累计三次：本文 §6 末、实施件 §11.4、本 §7.2」。核对 §11.4（L405 起）讲的是「已入库文档指向仓内**不存在的路径**」——属路径缺失那一族，不是错锚那一族。把它算进来是因为**沿用了本文 §6 末那句类比而没有本身核对** ⇒ 计数被读涨。真实三例改为：§6 末（节号越界）、§7.2（锚在而结论不在）、本 §52.5（同一刀里重犯）。
+
+这两条合起来决定了 §7.4 那枚候选齿（引用某节时，被引节必须含引用行里的一个关键 token）的处境：**本批不装**（范围纪律），但"该齿值得上"从推定变成了实测 —— 它刚在本刀初稿里应验一次，而发现它靠的是人工去取小节边界。
+
+### 52.6 面禁件读数（逐值绑件，件 k76-face-ban.txt 与 k76-deploy-wiring.txt 均在本机）
+
+- 覆盖面（本刀两文件，走 typo-scan 自带的 `-FilesOverrideCsv` 入口，**不是扩面**）：词串 24、forbidden=0、T1..T5 全 0、RC_OVERRIDE=0。
+- 默认面 16 件：T1 hits=13（在册恒值）、**T2=0 / T3=0 / T4=0 / T5=0** 棘轮未动、RC_DEFAULT=0。
+- `scripts/check_doc_sync.py`：RC_DOCSYNC=0。
+- `uv run pytest tests/deploy -q`：**79 passed in 6.64s、RC=0** —— 与 §50 记录的 79 同数。本批改的是那份清单的注释，而 ⑥c 三格会从清单里读 Service 不变量，所以这 79 格必须实跑，不能推断"注释不影响"。
+
+### 52.7 本批射程与未做
+
+- 入库面 = ADR 一件（新开 §7 + 状态行补维度口径）+ 清单注释一件 + 本件 + 工单件一行。**零产品代码、零运行态变更** ⇒ 现网不需要重新构建或 rollout（注释不进镜像判定路径，`/ui` 挂载由代码与 dist 决定）。这句不等价于"现网已按 §7 决策跑着"：现网 rev 仍是 d4d3d329。
+- 未做：§7.4 候选齿不装（带复审触发条件在册）；未提交、未推送；L3 深度安全审查本批未跑（它是推送前置，按窗口规矩次日按当轮最终 rev 现取再跑）；通道窗口 [9,19) 已于 19:00 收。
+- 待人拍（D2）：③ 维若用户不采纳"维持同 Pod"，则走 ADR §7.3 的重启条件并另立实施件。本批只补决策缺位，不替用户改判。
+
+### 52.8 事后追加：门件那枚红把根因从「忘了进面」改成「入库 ≠ 被读」
+
+本节是 §52.7 写完之后才发生的一段，编号追加在后面（不重排既有小节号，理由与 §41.7 / §48.6 同：那一轮的账面要能按当时形状复取）。
+
+**一、门件首跑报红，我的第一版处置落错了实物。** 门件首跑（件 e26-gate-00-20261106-205559-gate-fill.txt）
+GATE_RC=RED，红标记行只有一条，逐字为：
+
+```text
+need (tracked .md on face)=11 | not-covered=1 <<< TYPO-FACE-UNCOVERED: docs/adr/0010-ui-stack-selection.md
+```
+
+按在册「先量旧债再进面」处置：先单量该件（件 k76-adr-facetarget.txt：T1 hits=0 / T2 hits=0 / T3 hits=0 /
+T4 hits=0 / T5 hits=0、forbidden=0、RC=0 ⇒ 无旧债），再把这一件加进 scripts/evidence/typo-scan.ps1 的面表，
+然后复跑门件（件 e26-gate-00-20261106-210223-gate-fill.txt）——**同一枚红、同一个数**。
+到这里处置本身没错，但它不是根因。
+
+**二、根因：同一把量具有两份同名实物，我改了入库那把，门件跑的是副本。** 实取三组数（行数以
+Get-Content 计，件数按门件 B2b 那个正则从源码面表里解析）：
+
+| 实物 | 行数 | 面表解析出的件数 | 含 ADR-0010 |
+|---|---|---|---|
+| scripts/evidence/typo-scan.ps1（入库，git ls-files 可解析） | 194 | 17 | 是 |
+| .tmp-scratch/ap-visual/typo-scan.ps1（未入库副本） | 188 | 16 | 否 |
+
+两份的行差 = 8 行，且这 8 行**全是我本刀进面那一处**（7 行新增注释与条目 + 1 行末尾逗号变化）⇒
+不存在"两份长期漂移"，只存在"改了一份、跑的是另一份"。门件 B2b 那格本身是真齿：它从源码**派生**扫描面
+（不手抄件数），与 C 段执行用的是同一个路径 ⇒ 门件体内自洽，只是自洽地读错了实物。
+
+这一型不在第 10 条（基准同源）也不在第 11 条（量具必入库）的射程里：入库那把确实在清单里，
+第 11 条已被满足；缺的是**「入库 ≠ 被读」**——已登记为 AGENTS.md《观测面与现网取证的硬规矩》第 12 条。
+
+**三、泛化审问，不只修咬人的那一处。** 把门件里所有外部量具调用点逐个查"有没有入库同名单份"，
+命中两把：typo-scan.ps1（已漂）与 ts-provability.ps1（今天两份 sha256 前缀都是 3C48F3D35D2A、44,624 字节 /
+480 行 ⇒ **还没漂**，但形状完全一致：一份交付、一份在跑）。只修前者就等于等后者哪天也漂一次。
+其余量具（tree-import-closure.py 那一族）没有入库同名单份，属第 11 条在册的 PS 量具债，本批不动
+（q-5 已拍 A=止损收口）。
+
+**四、处置：只换输入，不加齿。** 门件 e26 的五个消费点统一到两个变量（tsTool / tsProvTool，指入库路径）：
+B2b 派生一处、C 段默认面与 override 面各一处、C-selftest-9 样件一处、ts-provability 一处。
+同时加一行**读数**（不是判据，不产红标记、不进 GATE_RC）：
+
+```text
+basis (reading only, not a criterion): tool=scripts/evidence/typo-scan.ps1 tracked=1/1
+```
+
+为什么不顺手把 tracked 做成红：本轮范围纪律（rc-3 / rc-4 已作废的那几项就是"顺手加齿"）。候选齿
+TOOL-BASIS-NOT-TRACKED 已带复审触发条件登记进 AGENTS.md 第 12 条，不在本批装。
+副本不删 —— e20 到 e25 那几代历史门件仍指向它，删了会让历史读数不可复跑；但它不再是判据来源。
+
+**五、我自己在本段另犯的一次程序错（必须记，因为它差点被读成实物红）。** 图快而直接以 -File 方式裸跑
+e26-gate-fill.ps1，没经 k59-run-gate.ps1 递三集合 ⇒ 门件报 TS-NO-FACE-INPUT、own-files=0、
+WORKTREE-RED-IN-UNCLAIMED-SCOPE（n=2）（件 e26-gate-00-20261106-210956-gate-fill.txt）。
+这组红是**门件 fail-closed 成功**而不是现物坏：空申报没有变成绿，A 段那句 DECLARED-BUT-UNTOUCHED
+期望的正是 allow-count 大于一。教训与第 9 条同族：门件的输入是树的判决产物，裸跑等于自己造了一个不存在的场景。
+
+**六、换基准后的复跑读数（逐值绑件，门件件 e26-gate-00-20261106-211253-gate-fill.txt）。** 派生链四把
+rc=0（件 k76-chain3-20261106-2130.log）：candidate 38 + ext-on-face 8 = 46 vs face 46 CONSERVATION-OK，
+RUNNER) own=38 held=0 ext=8。B2b 那格换到入库那把后 not-covered=0 判给 TYPO-FACE-COVERED-OK，
+同格派生出的面表件数为十七（上面那行 basis 读数 tracked=1/1 就在它下面）。其余参与判决的末值：
+T1 hits=13（在册恒值未涨）、R-6 tally keys=30 strict=30 loose=0 keyMiss=0 quoteMiss=0、
+ts-provability 自测 n=10 passed=10、门件自测 n=26 passed=26、GATE_RC=GREEN、红标记行为零。
+本小节入库后还要再过一轮门件（账面入库会改面与引用面），那一轮的件名随提交信息登记。
+
+**七、本轮治本的实物只有两件，第三件不住在版本控制里（要说清，否则等于宣称已根治）。**
+① scripts/evidence/typo-scan.ps1 的面表与进面依据注释（入库）；② AGENTS.md 第 12 条（入库，泛化文字）；
+③ 门件调用点换形住在未入库的 e26-gate-fill.ps1 里 ⇒ **在新克隆上这一型仍会复发**。
+差别只在于：复发时第 12 条会把它接住（一句话判据 + 复审触发条件），不再需要重新发现一遍。
+把 ③ 变成入库件属 PS 量具债重构（q-5 已拍 A 档 = 本轮不重构），不在本批射程。

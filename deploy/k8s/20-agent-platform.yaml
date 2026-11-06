@@ -309,12 +309,31 @@ metadata:
   name: agent-platform
   namespace: agent-platform
 spec:
-  type: ClusterIP   # 访问用 port-forward 或 minikube service，不直接暴露
+  # 2026-11-06 拍板：ClusterIP → NodePort（用户批准 A 档；属 D2 暴露面变更，依据写在下面）。
+  # 为什么要改（两条实测 + 一条边界澄清，不是推定；2026-11-06 本段第 3) 条换形，成因见下面订正留痕）：
+  #   1) ClusterIP 下唯一进入路径是 kubectl port-forward，而它是一条会断的流 —— 取证面两次记到
+  #      它死掉（/tmp/portforward.log 末行 error: lost connection to pod）。于是「入口活不活」
+  #      取决于某台宿主上有没有一个前台进程，而不是取决于服务本身。
+  #   2) 集群底子：kubectl get ingressclass = No resources found、ingress/traefik/nginx controller
+  #      pod = 0、全集群 NodePort svc = 0 ⇒ 要常驻，NodePort 是本集群代价最小的一项，本 Service 是头一个。
+  #   3) 边界澄清（它不是本段改型的依据）：可达性由 Service 类型支配，与 dist 住在哪个容器无关 ⇒ 前端拆不拆
+  #      独立 Pod 都不改变本段结论。那个形态决策的真相源在 docs/adr/0010-ui-stack-selection.md §7.1
+  #      （现态：同镜像同 Pod，由 NoStoreStaticFiles 挂 /ui），清单注释不承载形态决策。
+  #      订正留痕：本条原写「拆独立前端 Pod 改变不了...（同一读数的推导见台账 §43）」—— 那个锚是假的，
+  #      台账 §43 不含任何拆分推导（2026-11-06 对该节全文检索零命中）；维度拆分与错锚定性见 ADR §7.2。
+  # 暴露了什么：同一次 apply 一起可达的还有 /docs、/openapi.json、/health —— 那不是新东西，
+  # 它们在 ClusterIP 期已经经 ops 通道可达；真正变的是「节点 IP 也能到」这一层。
+  # 鉴权实测（改前现取，非引用旧快照）：DEPLOY_ENFORCE_IDENTITY=true、SINGLE_TENANT=default、
+  # API_KEY_len=32；POST /query 无 key → 401、带假 key → 401 ⇒ 开放的是需要凭据的入口，不是匿名读写。
+  # 为什么钉 30080 而不让集群分配：入口地址要能写进手册给人点，随机端口等于没有地址。
+  # 为什么不指某台节点：Pod 会随调度飘（实测落在 <internal-host>），NodePort 三台都通 ⇒ 用任一 <internal-ip>:30080。
+  type: NodePort
   selector:
     app: agent-platform
   ports:
     - port: 8000
       targetPort: 8000
+      nodePort: 30080   # 固定值：apply 前须现取「该口三台宿主均未监听」+「集群内无同名 nodePort 冲突」
 ---
 # （可选加分项）HPA：先 minikube addons enable metrics-server 再启用本块
 # apiVersion: autoscaling/v2
