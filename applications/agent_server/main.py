@@ -756,6 +756,28 @@ def _resolve_web_ui_dist() -> pathlib.Path | None:
     return None
 
 
+# 身份门卫的免鉴权路径集 = ``IdentityMiddleware`` 构造默认集 + 两个登录端点（方案 D-h/A5）。
+# 为什么登录端点必在这里：口令换令牌这一步本身就是「拿身份」，在 ``TENANT_JWT_ENFORCE=true``
+# 下若仍被门卫拦下，症状是「登录接口自己 401，永远登不进去」。
+# 为什么不改进 identity_middleware.py 的默认集：``skip_paths`` 本就是构造入参
+# （``identity_middleware.py:113`` 实取），改默认集会同时波及另外五个服务的同形契约，
+# 而那个文件此刻正被并行线修改（D-h）。
+# ⚠ 匹配是**精确相等**（``scope["path"] in self._skip``）而非前缀 ⇒ 本集盖不住带子路径的
+# 挂载面（/ui 的 assets），enforce 档下的静态资源面是已知缺口，登记在方案 §9。
+# 两处默认集不一致时不会报错、只会“登录页在 observe 档能用、enforce 档登不进”⇒ 靠 A5 用例钉。
+_IDENTITY_SKIP_PATHS: tuple[str, ...] = (
+    "/health",
+    "/healthz",
+    "/metrics",
+    "/docs",
+    "/openapi.json",
+    "/redoc",
+    "/ws",
+    "/auth/login",
+    "/auth/register",
+)
+
+
 def create_app() -> FastAPI:
     app = build_api_app(title="agent-platform", version="0.1.0", lifespan=lifespan, enable_tracing=True)
     # CORS：允许前端跨域调用 /query 等接口；allow_origins 应从环境变量注入，
@@ -773,7 +795,11 @@ def create_app() -> FastAPI:
     )
     # ADR-0007 A3: 入站租户身份断言中间件（observe 默认：有 Bearer 则验签绑定 tenant，
     # 无凭据交下游既有 provided>default 语义 → 零行为变更；配 TENANT_JWT_PUBLIC_KEYS_FILE/SINGLE_TENANT 后激活）。
-    app.add_middleware(IdentityMiddleware)
+    # ⚠ 本行必须是**单行调用形**，不许拆成多行：P13 门禁是逐行正则
+    # （``add_middleware\s*\(\s*IdentityMiddleware``，lint_architecture.py:855 取 splitlines 逐行比）
+    # ⇒ 拆行会把 “装了门卫” 的服务判成漏装（本轮实踩：改 skip_paths 时拆成多行，P13 当场报红）。
+    # skip_paths 显式列写 = 中间件构造默认集 + 两个登录端点（方案 D-h/A5），理由见常量注释。
+    app.add_middleware(IdentityMiddleware, skip_paths=_IDENTITY_SKIP_PATHS)
     app.include_router(router)
     # 前端产物只发页面壳与静态资源：鉴权仍由各数据接口的 verify_api_key 依赖把守（与
     # /console.html 同惯例：壳免鉴权、数据要密钥）——本仓鉴权是每路由依赖而非中间件，
