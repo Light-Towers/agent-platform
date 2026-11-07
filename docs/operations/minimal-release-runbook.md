@@ -93,6 +93,11 @@ kubectl -n $NS get secret observability-keys -o json | jq -r '.data|keys[]'
 read -rsp "API_KEY=: " v; echo
 kubectl -n $NS create secret generic observability-keys --from-literal=API_KEY="$v" \
   --dry-run=client -o yaml | kubectl apply -f - ; unset v
+# ①b 登录面签名密钥（PR-2c）：**先建 Secret 再走步 ④**。缺它不是"静默退化"而是 Pod 直接
+#     CreateContainerConfigError（有意的 fail-closed）—— 但上面 ① 那行的 keys[] 判据管不到这个对象。
+#     生成 / 写入 / 轮转的完整口径在 `deploy/k8s/README.md` §6.3，这里只读"装配是否到位"。
+kubectl -n $NS get secret agent-platform-jwt -o jsonpath='{.data}'
+#   期望：两个键都在 —— TENANT_JWT_PRIVATE_KEY 与 TENANT_JWT_PUBLIC_KEYS；少一个就是 §3.2 C10 会红
 # ② apply 配置（00-config.yaml 只含 Namespace + ConfigMap ⇒ 不可能顺带覆盖集群凭据；
 #    demo Secret 在 05-secrets.yaml，真实环境**不要 apply 那一个文件**）
 kubectl -n $NS apply -f deploy/k8s/00-config.yaml
@@ -178,6 +183,103 @@ done   # 期望：apply=线上现状(10) / create=清单真值(21)
 - `dependencies: []` 全平台**没有任何服务填过它**（`grep DependencyHealth/dependencies=` 只命中定义处与 nl2sql 的一句显式空列表）。
   读成"所有依赖都健康"是错的；它当前就是一条无数据承载的字段。**待拍板**：填上真值还是从共享契约里摘掉。
 
+### 3.2 登录面现网三格（C10 → C8 → C9，顺序不能反）
+
+> **编号为什么不从 C8 开始**：`deploy/k8s/00-config.yaml` 的注释已把语义绑死 —— C8 = 签得出且验得过、
+> C9 = 注册落点的租户、C10 = 挂载与权限在位。执行序按"先读得到文件、再谈签名"排 ⇒ **C10 最先跑**。
+> C10 红的时候 C8 只会读到一枚 503，那条读数答不了"为什么"，两格分开才有分诊价值。
+>
+> **三格都在 Pod 内跑**：运行镜像是 `python:3.11-slim`，**里面没有 curl**，而 Pod 内必然有 `python3`
+> ⇒ 一律 `kubectl exec -i … -- python3 -B - <<'PY'`（C1–C7 那七格的读数也是这么取的）。端口是容器自己的
+> **8000**。18000 不是 Service 上的口：它是宿主上 `kubectl port-forward` 自己监的本地口（2026-11-06 订正 ——
+> 旧版这里写的「Service 上的 18000 是 nodePort」与 LIVE 不符，当时 `svc/agent-platform` 是
+> `type=ClusterIP`、nodePort 为 `<none>`）。本批 Service 已改 `NodePort: 30080`，那是另一个口，不在这条链上。口令只从环境变量进脚本：不落文件、不打印。
+>
+> ⚠️ **这三格刻意写在手册里、不放进探针文件**：C1–C7 的载体 `k38-daytime-verify.py` 住在 gitignored 目录、
+> 未入库，等于"只有我本机跑得动"（已登记的洞）。新格子不再添第四个这种只在本机存在的载体。
+
+**C10 挂载与权限在位**（纯只读，一个字节都不写）：
+
+```bash
+kubectl -n $NS exec -i deploy/agent-platform -- python3 -B - <<'PY'
+import os
+for p in ("/run/app-secrets/jwt/jwt.key", "/run/app-secrets/jwt/jwt-pubs.json"):
+    st = os.stat(p)
+    print(p, "mode=%o" % (st.st_mode & 0o777), "readable=%s" % os.access(p, os.R_OK), "uid=%d" % st.st_uid)
+PY
+```
+
+| 读数 | 判定 |
+|---|---|
+| 两行都 `mode=440 readable=True uid=0` | 到位。owner 仍是 root、进程靠 `fsGroup=10001` 以属组读 —— 这正是 0440 的意图，别看到 `uid=0` 就当成挂错 |
+| `readable=False` | `defaultMode` 或 `fsGroup` 没到位 ⇒ 登录面 503，**与密钥内容无关**，不要去查 PEM |
+| `FileNotFoundError` | 卷名 / `items[].path` / `mountPath` 三者之一漂了 ⇒ 回 `deploy/k8s/README.md` §6.3 步 ④ 核对。**此格红就不许接着跑 C8** |
+
+**C8 签得出且验得过 + C9 租户三值一致**（同一次登录里读完，C9 是这段读数的尾格）：
+
+```bash
+read -rsp "AP_PASSWORD=: " AP_PASSWORD; echo            # 口令长度带 8–128，本轮只有长度一条规则
+AP_LOGIN=ops-demo \
+kubectl -n $NS exec -i deploy/agent-platform -- \
+  env AP_LOGIN=$AP_LOGIN AP_PASSWORD="$AP_PASSWORD" python3 -B - <<'PY'
+import json, os, urllib.request as u
+
+BASE = "http://127.0.0.1:8000"
+BODY = {"login": os.environ["AP_LOGIN"], "password": os.environ["AP_PASSWORD"], "display_name": "ops"}
+
+
+def call(method, path, payload=None, token=None):
+    data = json.dumps(payload).encode() if payload is not None else None
+    req = u.Request(BASE + path, data=data, method=method)
+    if data is not None:
+        req.add_header("Content-Type", "application/json")
+    if token:
+        req.add_header("Authorization", "Bearer " + token)
+    try:
+        with u.urlopen(req, timeout=20) as r:
+            return r.status, json.loads(r.read())
+    except u.HTTPError as e:
+        return e.code, json.loads(e.read() or b"{}")
+
+
+# 首跑建号 = 一次往返即已登录；已有该账号时这里读到 409，那也是正读数（不静默产出第二个管理员）
+c_reg, reg = call("POST", "/auth/register", BODY)
+print("C8-register", c_reg, reg.get("code"), "is_admin=%s" % reg.get("is_admin"))
+
+c_login, tok = call("POST", "/auth/login", BODY)
+print("C8-login", c_login, tok.get("code"), "expires_in=%s" % tok.get("expires_in"))
+assert c_login == 200, "登录面没通：上一行的 code 就是成因键"
+
+c_me, me = call("GET", "/auth/me", token=tok["access_token"])
+print("C8-me", c_me, me.get("code"), "tenant_id=%s" % me.get("tenant_id"), "user_id=%s" % me.get("user_id"))
+assert c_me == 200 and me.get("user_id"), "令牌签得出来却验不回来（/auth/me 读不到断言身份）"
+
+c9 = (os.environ.get("SINGLE_TENANT"), tok["tenant_id"], me["tenant_id"])
+print("C9 SINGLE_TENANT=%s login.tenant_id=%s me.tenant_id=%s" % c9)
+assert len(set(c9)) == 1, "三值不齐 ⇒ 租户来源分叉，见 §5 基线 2 那条「入库了却检索不到」"
+print("C8-C9-OK")
+PY
+unset AP_PASSWORD
+```
+
+逐格期望（**只有最后一行 `C8-C9-OK` 出现才算两格都过**；上面任何 assert 挂了都要按这张表分诊，不许读成"大概通了"）：
+
+| 读数 | 判定 |
+|---|---|
+| 首跑 `C8-register 201 None is_admin=True` | 表内零用户时首个注册者即管理员（D-g，`create_user` 在一个事务 + advisory lock 里判"零用户"） |
+| 复跑 `C8-register 409 AUTH_LOGIN_TAKEN` | **正读数**：重复/并发注册不会静默产出第二个管理员。别把它当故障修 |
+| `C8-register 403 SIGNUP_DISABLED` | CM 的 `SIGNUP_ENABLED` 被置 false ⇒ 关的是注册面，已有账号的登录照通（D-f）；这一档必须存在，不是静默退化 |
+| `C8-login 200 … expires_in=3600` | 签得出。`expires_in` 必须等于 CM 的 `AUTH_TOKEN_TTL`；出现 28800 之类 ⇒ 只抬了 TTL 一边而 `TENANT_JWT_MAX_TTL_S` 没跟（§0 那条成对约束） |
+| `C8-login 503 AUTH_SIGNER_UNAVAILABLE` | 四种成因，**靠服务端日志那行分开**：私钥文件未挂载 / kid 与公钥 JSON 顶层键逐字不同 / 镜像缺 `PyJWT[crypto]` / 签出的令牌自验不过。前一种 C10 已经能挡住 |
+| `C8-login 503 AUTH_STORE_UNAVAILABLE` | 用户目录不可用：迁移 016 未应用，或 `DATABASE_URL` 没注 ⇒ 查 §3① 与 §7.3，**不是密钥问题** |
+| `C8-login 401 AUTH_CREDENTIALS_INVALID` | 账号或口令不对。它与"登录面坏了"是两件事 —— 不区分成因是 A3 的判据，别为了好排查去拆开这句 |
+| `C8-me 200` 且 `user_id` 非空 | RS256 验签真跑过：`verify_token` 按 header 里的 kid 选公钥（不逐把试），身份由中间件绑定而非请求体传入 |
+| `C8-me 401 AUTH_NOT_ASSERTED` | `user_id` 没绑上。`SINGLE_TENANT` 在位时中间件会绑到租户但绑不到"人"⇒ 静态 key 或租户级令牌打不进这一格，必须用 C8 自己签出来的那枚 |
+| `C9` 三值逐字相同（当前清单下都是 `default`） | 租户来源单轨。不齐就是 §5 基线 2 那个坑的可测形状：`SINGLE_TENANT` 改成非 default 而 `DEFAULT_TENANT_ID` 没跟 ⇒ `/import` 写新桶、`/query` 读 default，**资料入库了却永远检索不到且不报错** |
+
+**这一节证不到的事（别顺手夸大）**：C8 只证"这一对密钥在当前 Pod 里配得起来"，不证轮转可用（README §6.3 步 ⑥ 明写未现网实跑）；
+也不证口令重置/忘记密码（不在方案范围），更不证令牌撤销 —— `POST /auth/logout` 服务端**无事可做**，已签发的令牌在 exp 前照样可用。
+
 ## 4. 八条真实性底线 · 逐条打勾
 
 | # | 底线 | 当场怎么验（命令） | 期望 |
@@ -233,7 +335,7 @@ done   # 期望：apply=线上现状(10) / create=清单真值(21)
 > 另一个会当场踩的坑：把 `SINGLE_TENANT` 改成非 `default`（按"部署单元注入真实租户"的口径）后，
 > `/import` 写新桶、`/query` 读 `default` ⇒ **资料入库了却永远检索不到且不报错**；
 > 清单里钉 `SINGLE_TENANT: "default"` 只是掩盖，不是解决。
-| 3 | 只到内网 | `kubectl -n $NS get svc agent-platform -o jsonpath='{.spec.type} {.spec.ports[*].nodePort} {.spec.externalIPs} {.spec.loadBalancerIP}'`；再从内网另一台机器 curl | ✅ 10:0x 实测 `type=ClusterIP`，nodePort/externalIP/loadBalancerIP **全空**；从 <internal-host> curl `<internal-ip>:18000/health` **200**，集群内 ClusterIP 直连 **200**。⚠️ **公网侧不通这一半没证**：本机就在内网里，测不出"从公网打得到的可能性"，别把它写成"已验证不可从公网访问" |
+| 3 | 只到内网 | `kubectl -n $NS get svc agent-platform -o jsonpath='{.spec.type} {.spec.ports[*].nodePort} {.spec.externalIPs} {.spec.loadBalancerIP}'`；再从内网另一台机器 curl；再跑 `kubectl get svc -A -o jsonpath='{range .items[*]}{.spec.ports[*].nodePort}{"\n"}{end}' \| sort -u` 比 nodePort 有无撞口 | ✅ 10:0x 实测 `type=ClusterIP`，nodePort/externalIP/loadBalancerIP **全空**；从 <internal-host> curl `<internal-ip>:18000/health` **200**，集群内 ClusterIP 直连 **200**。⚠️ **公网侧不通这一半没证**：本机就在内网里，测不出"从公网打得到的可能性"，别把它写成"已验证不可从公网访问"。**2026-11-06 换形**：Service 已改 `type=NodePort` + 钉 `30080`（依据逐字在 `deploy/k8s/20-agent-platform.yaml` 的 Service 段注释）⇒ 本行那一格的期望值从「nodePort 全空」翻成「nodePort=30080、externalIPs/loadBalancerIP 仍全空」；口径也变了：以前是「只有 ops 通道到得了」，现在是「任一节点内网 IP:30080 到得了」，仍然限于内网路由域，但**面从 1 台宿主扩大到 3 台节点** —— 这一条被追问时要如实说，别拿旧读数念 |
 | 4 | 出错不泄内部细节 | **用隔离探针 Pod 验，别动线上**：同镜像起一个 Pod，把 `LLM_BASE_URL` 指向 RFC6761 保留域（`.invalid`，保证不可解析、不会真打到任何服务），对它单独 port-forward 提问 | ✅ 10:30 实测：流正常开到 `route`→`memory`→`evidence`→**`error`**，对外文案 `服务器内部错误，请稍后重试`，**12.8s 完成**；响应体对 9 类泄漏计数**全 0**（含把三个密钥的**实际值**做子串比对，只打印计数不打印内容）；同一时刻服务端日志留完整 traceback（`openai.APIConnectionError` → `fallback.py:154`）⇒ "对外脱敏 + 后台留详情"两边都有读数。**边界**：这只证了"模型连接失败"这一种形态，未证"未捕获异常导致真 5xx"（如 DB 中途不可用）⇒ 别把它念成"所有出错形态都不泄" |
 | 5 | 每次调用可按编号追到 | `API_KEY=... bash deploy/k8s/scripts/e2e_traceparent.sh` | Jaeger 按该 trace_id 查到 `POST /query` SERVER span；BatchSpanProcessor ~5s flush ⇒ 等 ≥8s 再查 |
 | 6 | 页面只读 | 页面源码 grep `fetch(`；无密钥打 `/import`、`/sql/train`、`/session/revert` | ✅ 集群侧 10:0x 实测三个写接口**无密钥一律 401**（`/import` `/sql/train` `/session/revert`）；"页面只调 `query/history/health`、无写入口"由 `test_console_router.py` 钉住（浏览器端今天未复跑，理由见 `docs/operations/evidence/2026-10-12-release/readings.md` §7 第 8 条） |
@@ -280,7 +382,7 @@ done   # 期望：apply=线上现状(10) / create=清单真值(21)
 3. **优雅关闭的判据要在删除 Pod 之前抓**：本轮 137 未复型只有"Warning 级 Killing 事件 0 条"这一旁证，
    旧 Pod 的 `lastState`/`--previous` 随对象删除即不可读。下次重启前先在两侧各抓一份，否则"宽限期够不够"
    这个问题永远只能靠事件面猜。
-4. 门禁候选（**待拍板，未实现**）：`scripts/audit_schema_drift.py`（清单/baseline SQL 与真实库列的漂移扫描）。
+4. 门禁候选（**待拍板，未实现**）：scripts/audit_schema_drift.py（清单/baseline SQL 与真实库列的漂移扫描）。
 5. 门禁候选（**待拍板，未实现**）：一条"消费的 API 是否真的存在于被注入的对象上"的检查——本轮两个缺陷
    （`embed_texts(dim=)`、`alist_messages`）都是同一形状：代码照不存在的契约写，宽 except + mock 把读数盖成正常。
 6. 退出路径的 tracing flush 无上界（`shutdown_tracing()` 用 SDK 默认 30s），会吃光宽限期 ⇒
@@ -380,6 +482,7 @@ ssh root@<internal-ip> 'cd /opt/agent-platform && git fetch /tmp/ap-rollback.bun
 | 现象 | 先看什么 | 别急着做什么 |
 |---|---|---|
 | Pod `CreateContainerConfigError` | `kubectl -n $NS describe pod` 里缺的是哪个 secret key | 别当成镜像坏了重构建 —— 是 §3① 的键没补 |
+| 同上，但 describe 里点名 `agent-platform-jwt` | 该对象是否已按 §3①b 建出来（`kubectl -n $NS get secret agent-platform-jwt`） | 别去改 20 的挂载形状 —— 这是有意的 fail-closed：先建 Secret，再 apply 20（README §6.3 步 ③） |
 | Pod Pending + `hostPath type Directory` 事件 | Pod 落在哪个节点、该节点有没有 `/opt/ap-models` | 别删 `type:` 让它"起来再说" —— 那会把失败挪到首次推理 |
 | 页面出现"（无 LLM 模式）" | 模型服务可用性（账号状态/额度），再看 `/health` 的 `llm` 位 | 别把 `llm=true` 当"模型可用"，它只表示配置项非空；也别拿预录内容顶上（底线 3/8） |
 | `/health` 连错三次被杀 | 探测路径里是否混进了重活（设计上只读 `app.state` 预热值） | 别调大 failureThreshold 掩盖 —— 重活必须在 lifespan，不在探针 |
@@ -448,7 +551,7 @@ ssh root@<internal-ip> 'cd /opt/agent-platform && git fetch /tmp/ap-rollback.bun
 | ⑯ | **D1 交付物"5 条演示问题"至今无产物**（2026-10-13 外部审核指出，核实为真） | 我从现库 7 份业务语料里选并附真跑读数，人工判定列由需求方填 / 需求方直接给题 | **产物已出**（2026-10-13 当天补：`demo-questions.md`，5 题 + 唯一承载块 + 单遍实跑读数 + 三条必须如实说出去的缺陷）。**只剩判定列**："敢不敢当着领导念"由需求方填，我不代判；在那之前不得声称"三道检查全过" |
 | ⑰ | **Langfuse 面要不要接**（方案 D5.5 的第二半，审核核实为未接线） | 接（重建镜像带 `--extra langfuse` + 注入 `LANGFUSE_*` 三个键）/ 不接（明确退回两层证据） | ✅ **已拍板"接"，且已在线上生效**（rev `6ac466af`，2026-10-13）。extra 进默认镜像（**镜像内** A1 复验 `langfuse 4.17.0`）、Secret+CM 三键注入、`/health` 两盏灯 `langfuse_enabled/ready=true`、**A3 现网通过**：一次 rag 问答落 2 条 GENERATION，答案那条 `in=1403/out=1547` 且 input 摊平后含 `[来源: …]` 检索原文，trace id 与注入的 W3C id 相等。过程：在 126 中止过一次构建（`avg10=67.47%`、同机 etcd 5 分钟 41 条 `slow fdatasync`、milvus 累计重启 30→31），改到 241 构建 + PSI 闸门脚本跑通，并**补做了一次 241 的 containerd-k8s 本地导入**——新 Pod 真落在 241，可变 tag + `IfNotPresent` 下漏导入就是"静默跑旧 rev"。**并暴露缺陷 D-LF-1**：接上 Langfuse 把 Jaeger 面顶掉而 `otel_status` 仍报 ACTIVE ⇒ 修法=装配顺序上移 + 复用分支补挂出口 + 三条钉用例，且今后**两个判据必须在同一个 Pod 上同时跑**。留证 `evidence/2026-10-13-langfuse-stack/readings.md`，修法 `docs/plans/plan-langfuse-wiring-2026-10-13.md` §7 |
 | ⑱ | **D7 录播保险 + D8 整场彩排未做**（审核核实为真；我此前把这两张任务卡标成 completed，是改名冒充完成） | 需求方在浏览器前坐一次（持键者输 `API_KEY`）我同步留证 / 我命令行侧先出一版"完整录制"当保险 | 至少要做第 2 项：断网是方案 R0 列的故障面，而现在**没有任何录播文件**。任务卡 #7/#9/#10 已改回未完成状态 |
-| ⑲ | **R19：同一请求两路埋点**（**并非新问题**——`deploy/k8s/VERIFICATION.md` §C 已于 2026-09-30 定性到源头并转独立 issue **[#23]**，默认方案也定了；进这张表只因为它是**演示当天会被观众看到**的那一屏，而 §C 在附录里没人翻） | 执行 #23 的默认方案（工厂内 `telemetry={"tracing": False}`，1 行 + 走一次发布通道）／演示当场解释"同一请求两套埋点、语义不同"（零改动）／保留双层但排除 health 降噪 | **待拍板执行时点**（2026-10-13 重测，两点是今天新增的读数）：① **形状取决于客户端带不带 `traceparent`**——带 ⇒ 两条 `POST /query` 落进同一 trace 互为兄弟（§C 当时记录的形状）；**不带（浏览器真实点击）⇒ 两路各自起根，变成两棵互不串联的 trace**，成对出现（今天 09:48 / 09:50 你那两次提问就是 1 span + 5\|6 span 成对，`otel.scope.name` 分别是 `fastapi` 与 `agent-platform`）。这直接决定现场怎么解释：屏幕上会是**两条独立 trace**而不是一棵双 span 树。② **拓扑与 §C 记录不同了**：`fastapi` 那条仍无业务属性（新 semconv `http.request.method`/`url.path`），但 `agent-platform` 那条现在**带着全部子 span**（2× `ChatOpenAI` + `fastapi.dependencies/endpoint`）⇒ 关原生不丢我们关心的东西，代价是丢掉 `fastapi.*` 三个框架内部细节 span。另：§C 第 4 条"探针淹没，必须按 operation 精查"我今天就重犯了一次（`limit=40` 被 health 刷满 ⇒ 误报"0 条 `/query`"）。
+| ⑲ | **R19：同一请求两路埋点**（**并非新问题**——`deploy/k8s/VERIFICATION.md` §C 已于 2026-09-30 定性到源头并转独立 issue **[#23]**，默认方案也定了；进这张表只因为它是**演示当天会被观众看到**的那一屏，而 §C 在附录里没人翻） | 执行 #23 的默认方案（工厂内 `telemetry={"tracing": False}`，1 行 + 走一次发布通道）／演示当场解释"同一请求两套埋点、语义不同"（零改动）／保留双层但排除 health 降噪 | **待拍板执行时点**（2026-10-13 重测，两点是今天新增的读数）：① **形状取决于客户端带不带 `traceparent`**——带 ⇒ 两条 `POST /query` 落进同一 trace 互为兄弟（§C 当时记录的形状）；**不带（浏览器真实点击）⇒ 两路各自起根，变成两棵互不串联的 trace**，成对出现（今天 09:48 / 09:50 你那两次提问就是 1 span + 5\|6 span 成对，`otel.scope.name` 分别是 `fastapi` 与 `agent-platform`）。这直接决定现场怎么解释：屏幕上会是**两条独立 trace**而不是一棵双 span 树。② **拓扑与 §C 记录不同了**：`fastapi` 那条仍无业务属性（新 semconv `http.request.method`/`url.path`），但 `agent-platform` 那条现在**带着全部子 span**（2× `ChatOpenAI` + `fastapi.dependencies/endpoint`）⇒ 关原生不丢我们关心的东西，代价是丢掉 `fastapi.*` 三个框架内部细节 span。另：§C 第 4 条"探针淹没，必须按 operation 精查"我今天就重犯了一次（`limit=40` 被 health 刷满 ⇒ 误报"0 条 `/query`"）。 |
 | ⑳ | **checkpoints 里那 8 条取证残留句要不要清**（代价 = 控制台会话记录面板清空） | 整桶清空（备份后删）／保留不动 | ✅ **已拍板"整桶清空"并执行完毕**（2026-10-13 **10:27 UTC**，需求方选定"备份后删，不可选择性恢复"）。删前只读预检 = 清单真值（`checkpoints` 1 行 / `checkpoint_blobs` 16 行 / `checkpoint_writes` 0 行，`thread_id` 只有 `tenant-default`）；备份 `126:/tmp/ckpt-backup-host/*.csv`（0600，472/289052/79 B，md5 见坑档 §8，**宿主 /tmp 重启即失，且回灌恢复路径我没实跑验证过**）；删后三表该桶与全表均 **0**，`/history` → **HTTP 200 `count=0`**，`/health` 仍 200。**"只删那 8 句"这个选项不存在**：checkpointer 只留最新一条 checkpoint 行，消息序列化在 `checkpoint_blobs` 的 channel value 里，没有按句的删除锚点（详见坑档 §8）。⇒ **演示口径**：面板空是预期状态，第一轮真实问答就是第一条记录；但**删后没有复验写入路径**（复验=再发一次真问答就等于重新污染），所以底线 7 只能说"曾经证过 + 删后只验了空态"，写路径的当场证据由演示第一轮提供 |
 | ㉑ | **演示的浏览器入口不能压在 126 上** | ①在 241 起转发把两个口挪到已证可达的主机 ②演示只开 Langfuse + 平台事件面 ③先定成因再决定要不要动部署 | ✅ **已闭合（2026-10-14 开盘复测，读数见 `evidence/2026-10-14-morning-state/readings.md`）**：三口全部 200，**且"IP 绑定"这一猜测被容器实况排除**——`docker ps` 显示 `0.0.0.0:16686->16686/tcp`。昨天的失败是**两件不同的事叠在一起**：(i) `126:18000` 是 `port-forward` 进程，机器/会话一停就没（`12ms 被拒`=无人监听，与 `5.0s 无应答` 两种形状）；(ii) 需求方这台机器的流量被 TUN 模式代理客户端接管，connect 层对编造端口都报"通"。**⇒ 演示前必做两条**：① `bash deploy/k8s/scripts/portforward.sh start` 并把 `ss -tlnp \| grep :18000` 当检查项；② 开盘先用**时延形状**判可达性（毫秒级带字节数才算数，整齐 5.0s 无字节 = 本机路径问题，不要去查平台）。②"屏幕不压 126"作为备选口径保留。**10-14 晚间三机侧再复算**：`241→126:16686=200`、`125→126:16686=200`、`241→126:18000=200`、`241:3000=200`、Pod 内连 `126:4318` YES，且 `:18000` 由 `kubectl` pid 3496802 持有、绑 `0.0.0.0` ⇒ **服务侧从头到尾都是活的**。读数表与复算命令见 `env-126-inventory.md` §9.1/§9.5 |
 | ㉒ | **`/health` 卡住会被 liveness 当场杀 Pod**（2026-10-14 开盘发现：`RESTARTS=1`，`exitCode=137`、`finishedAt=2026-10-13T10:37:56Z`，事件面先有 `Liveness probe failed: Get /health: context deadline exceeded` 再有 `Killing`） | ①演示前只加检查项（`kubectl get events --sort-by=.lastTimestamp \| grep -i unhealth`，有超时就不上台）②查 `/health` 的卡点（它在健康检查里同步探依赖，依赖一慢整条就慢）③放宽探针（`timeoutSeconds`/`failureThreshold`）或把 `/health` 改成不依赖外部探测的浅检查 | **建议①为演示口径 + ②另行方案**：这不是"重启过所以没事"——**演示当天一次 `/health` 卡住 = 屏幕上那台服务当场重启**，六环节全断。③属改清单/改代码，按"先方案后编码"走，不许临场改。**注意定性**：此处 137 是 liveness 杀的，`reason` 不是 `OOMKilled`，别当成内存超限（limits 仍是 2Gi） |

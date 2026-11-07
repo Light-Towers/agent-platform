@@ -396,6 +396,294 @@ def test_login_signing_params_from_manifest_are_self_consistent(container, confi
 
 
 # ---------------------------------------------------------------------------
+# ③c 操作面书面两件（README §6.3 / runbook §3.2）与清单、与已入库客户端同源
+# ---------------------------------------------------------------------------
+
+#: 两份“照着敲”的文档，各自从哪个小节标题起算正文。锚点写死成小节号而不是标题全文：
+#: 小节被改名/删掉时本格会当场红（那是好事）而不是退化成空跑。
+_FACE_DOCS = {
+    "deploy/k8s/README.md": "### 6.3 ",
+    "docs/operations/minimal-release-runbook.md": "### 3.2 ",
+}
+_MOUNT_NS = "/run/app-secrets/"
+_LOGIN_FACE_FILE_ENVS = ("TENANT_JWT_PRIVATE_KEY_FILE", "TENANT_JWT_PUBLIC_KEYS_FILE")
+#: 探针必须读的四个响应字段。“200 但字段不对”在本仓一律不算成功（与 auth.ts 的
+#: `sessionFrom` 同口径），所以这四个名字同时得在已入库客户端里出现。
+_ASSERTION_FIELDS = ("access_token", "tenant_id", "user_id", "is_admin")
+
+
+def _face_sections() -> dict[str, str]:
+    """取两份文档各自锚点小节的正文（到下一个标题为止）。
+
+    两个细节都是为了让本格**不假绿**：
+    - 切到文件末尾会放行假绿：README 后半部分的任意一处 `\"platform\"` 都能替 §6.3 顶数；
+    - 判标题时必须跳代码围栏：围栏里的 `# 注释` 不是标题，否则小节正文会被自己断短。
+    """
+    out: dict[str, str] = {}
+    for rel, anchor in _FACE_DOCS.items():
+        lines = (_ROOT / rel).read_text(encoding="utf-8").splitlines(keepends=True)
+        start = next((i for i, ln in enumerate(lines) if ln.startswith(anchor)), None)
+        assert start is not None, f"{rel} 里找不到小节锚点 {anchor!r} ⇒ 书面件被搬走，本格空跑"
+        in_fence = False
+        end = len(lines)
+        for j in range(start + 1, len(lines)):
+            if lines[j].lstrip().startswith("```"):
+                in_fence = not in_fence
+                continue
+            if not in_fence and re.match(r"#{2,4} ", lines[j]):
+                end = j
+                break
+        out[rel] = "".join(lines[start:end])
+    return out
+
+
+def _mounted_path_literals(text: str) -> set[str]:
+    """文档里“看起来是挂载命名空间下的一个文件”的字面（反引号内外都算：命令块里那些同样会被照敲）。
+    两条排除都是必要的：`/run/app-secrets`（裸目录，讲层级关系时用）与 `/run/secrets`（kubelet SA
+    token 那个坑，文中是**反例**）都不该被当成“照敲的人要用的路径”。"""
+    return {
+        m
+        for m in re.findall(_MOUNT_NS + r"[A-Za-z0-9._/\-]+", text)
+        if "." in m.rsplit("/", 1)[-1]
+    }
+
+
+def _client_auth_src() -> str:
+    return (_ROOT / "web" / "src" / "api" / "auth.ts").read_text(encoding="utf-8")
+
+
+def _client_auth_paths(src: str) -> set[str]:
+    """已入库的凭据面客户端声明的 `/auth/*` 路径（`const X_PATH = '/auth/...'`）。
+    **不取 auth_router**：那个文件此刻还在并行线手里、不在本刀可提交树内 ⇒ 若从它 import，
+    候选树的未解析 import 那格会把我自己判红。客户端这一侧在 HEAD 里，够用。"""
+    return set(re.findall(r"const [A-Z_]+_PATH\s*=\s*'(/auth/[^']*)'", src))
+
+
+def _jwt_secret_face(pod_spec: dict) -> tuple[str, set[str]]:
+    """(承载登录面的 Secret 对象名, 它的 items[].key 全集) —— 两个值都从清单派生，不在本文件手抄。"""
+    for vol in pod_spec.get("volumes", []):
+        sec = vol.get("secret") or {}
+        keys = {i["key"] for i in sec.get("items", [])}
+        if "TENANT_JWT_PRIVATE_KEY" in keys:
+            return str(sec["secretName"]), keys
+    raise AssertionError("清单里没有承载 TENANT_JWT_PRIVATE_KEY 的 secret 卷（③b 那格会先红）")
+
+
+def _check_doc_against_manifest(rel: str, sec: str, env: dict[str, str], mounted: set[str]) -> None:
+    invented = _mounted_path_literals(sec) - mounted
+    assert not invented, (
+        f"{rel} 写了清单算不出来的容器内路径 {sorted(invented)}"
+        "（照敲的人当场 FileNotFoundError，而本机门禁不会替他发现）"
+    )
+    for name in _LOGIN_FACE_FILE_ENVS:
+        assert env[name] in sec, (
+            f"{rel} 里没出现清单生效值 {name}={env[name]!r} ⇒ 改了挂载而文档没跟，是静默漂移"
+        )
+
+
+def _check_readme_face(readme: str, obj: str, keys: set[str], kid: str) -> None:
+    assert obj in readme, f"README §6.3 没点到清单里的 Secret 对象名 {obj!r}"
+    for k in sorted(keys):
+        # \b 不是多余的谨慎：TENANT_JWT_PRIVATE_KEY 是 ..._KEY_FILE 的子串，
+        # 不加词边界就变成“文档提过那个 env”也算过，这一格当场被自己糊掉。
+        assert re.search(rf"\b{re.escape(k)}\b", readme), (
+            f"README §6.3 没点到 items 的键名 {k}（对象/键改名而文档没跟）"
+        )
+    assert "TENANT_JWT_KID" in readme, "README §6.3 没点到 CM 的 kid 键名"
+    # 带引号的字面，不是裸子串：现值叫 platform 时，裸词形会被对象名 agent-platform-jwt
+    # 直接喂饱（连字符不是词字符 ⇒ \\bplatform\\b 命中中间那段），那一格就是永久空跑。
+    assert f'"{kid}"' in readme, (
+        f"README §6.3 没把 CM 的 kid 现值以带引号的字面写出来（期望 '{kid!r}'）"
+        " ⇒ “两边逐字相同”这条只能读文档的人自己核，本格就是替他核"
+    )
+
+
+def _check_probe_cells(text: str, client_paths: set[str], client_src: str) -> None:
+    used = set(re.findall(r'call\("[A-Z]+",\s*"(/auth/[^"]*)"', text))
+    assert used, "runbook §3.2 里没有一条 call(...) ⇒ 探针格子被换成了散文，本格空跑"
+    unknown = used - client_paths
+    assert not unknown, f"探针打了客户端没有的路径 {sorted(unknown)}（端点名靠猜那一型）"
+    assert used >= {"/auth/register", "/auth/login", "/auth/me"}, f"探针缺端点：{sorted(used)}"
+    for field in _ASSERTION_FIELDS:
+        assert field in text, f"探针不再读 {field} ⇒ 该字段的判据没人在现网核了"
+        assert field in client_src, f"{field} 在已入库客户端里消失了（文档在读一个没人产出的键）"
+
+
+def test_login_face_docs_are_same_source_with_manifest_and_client(container, pod_spec, configmap):
+    """书面两件的六向同源：容器内路径 / 两个 `*_FILE` 生效值 / Secret 对象名 /
+    items 键名 / CM 的 kid 现值 / 探针端点与响应字段。
+
+    为什么值当单独一格：①b 与 §3.2 是“现网能不能签得出来”的唯一可照敲路径，
+    而它们写的都是字面（路径、键名、端点）。字面漂了不会让 apply 报错、不会让 gate 红，
+    只会让下一个拿手册的人对着一个不存的路径查半天（③ 那格防的就是同一型，只是当时只有清单一侧）。
+    """
+    env = {e["name"]: e.get("value") for e in container["env"]}
+    mounted = _secret_file_paths(pod_spec)
+    sections = _face_sections()
+    for rel, sec in sections.items():
+        _check_doc_against_manifest(rel, sec, env, mounted)
+    client_src = _client_auth_src()
+    obj, keys = _jwt_secret_face(pod_spec)
+    _check_readme_face(
+        sections["deploy/k8s/README.md"],
+        obj,
+        keys,
+        str((configmap.get("data") or {})["TENANT_JWT_KID"]),
+    )
+    _check_probe_cells(
+        sections["docs/operations/minimal-release-runbook.md"],
+        _client_auth_paths(client_src),
+        client_src,
+    )
+
+
+def test_face_gate_bites_on_the_doc_drift_shapes(container, pod_spec, configmap):
+    """③c 的非空洞性：五种漂移形状逐条注回去（与 ⑦ 同口径，合成注入不碰盘上文件）。"""
+    env = {e["name"]: e.get("value") for e in container["env"]}
+    mounted = _secret_file_paths(pod_spec)
+    sections = _face_sections()
+    rel = "docs/operations/minimal-release-runbook.md"
+    run = sections[rel]
+    readme = sections["deploy/k8s/README.md"]
+    obj, keys = _jwt_secret_face(pod_spec)
+    kid = str((configmap.get("data") or {})["TENANT_JWT_KID"])
+    client_src = _client_auth_src()
+
+    # (a) 文档里的挂载路径少写一层子目录 ⇒ 清单算不出，必须点名
+    bad = run.replace(env["TENANT_JWT_PRIVATE_KEY_FILE"], "/run/app-secrets/jwt.key")
+    with pytest.raises(AssertionError, match="清单算不出来的容器内路径"):
+        _check_doc_against_manifest(rel, bad, env, mounted)
+
+    # (b) 清单换了挂载位置而文档没跟（把文档里的路径整片抹掉就是这一形的读数）
+    stripped = re.sub(_MOUNT_NS + r"[A-Za-z0-9._/\-]+", "/mnt/x", run)
+    with pytest.raises(AssertionError, match="改了挂载而文档没跟"):
+        _check_doc_against_manifest(rel, stripped, env, mounted)
+
+    # (c) items 键名改名而 README 没跟
+    with pytest.raises(AssertionError, match="items 的键名"):
+        _check_readme_face(re.sub(r"TENANT_JWT_PUBLIC_KEYS", "PUBKEYS", readme), obj, keys, kid)
+
+    # (d) CM 里的 kid 改了名而 README 还写着旧值（带引号那一层就是这一格的可测形）
+    with pytest.raises(AssertionError, match="kid 现值"):
+        _check_readme_face(readme.replace(f'"{kid}"', '"old-kid"'), obj, keys, kid)
+
+    # (e) 探针端点名靠猜（/auth/me 写成 /auth/whoami）
+    with pytest.raises(AssertionError, match="客户端没有的路径"):
+        _check_probe_cells(run.replace('"/auth/me"', '"/auth/whoami"'), _client_auth_paths(client_src), client_src)
+
+    # (f) 探针退化成散文（一条 call 都没有）
+    with pytest.raises(AssertionError, match="没有一条 call"):
+        _check_probe_cells("", _client_auth_paths(client_src), client_src)
+
+
+# ---------------------------------------------------------------------------
+# ③d deploy/ 里的小节引用必须自带可解析全路径：裸 `README §N.M` 一律红
+# ---------------------------------------------------------------------------
+
+#: 射程 = deploy/ 下会被 kubectl / psql 读的那几类文件。注释里的小节引用不是装饰，
+#: 是「照着敲的人」的路线图，所以它和 ③c 那六向字面同一条链上。
+_CITE_SUFFIXES = (".md", ".yaml", ".yml", ".sql")
+#: 裸形 = `README` 不跟 `.md` 就直接接 `§`。它的问题不是「写得简」，是**可被静默改判**：
+#: 本批实测的成因就是它 —— nl2sql 侧三处注释引的 §6.3 在当时的 README 里根本不存在
+#: （悬空引用），本刀新建「登录面签名密钥」占了同号之后，它们当场从「查无此节」变成
+#: 「解析成功但主题全错」，比悬空更坏：照图翻过去会读到一把完全不相干的密钥。
+_BARE_README_CITE = re.compile(r"(?<![\w./-])README\s+§")
+_FULL_CITE = re.compile(r"([A-Za-z0-9._/\-]+\.md)\s+§(\d+(?:\.\d+)*)")
+_HEADING_NUM = re.compile(r"^#{1,4}[ \t]+(\d+(?:\.\d+)*)[ \t.]")
+
+
+def _deploy_cite_face() -> list[str]:
+    out = []
+    for path in sorted((_ROOT / "deploy").rglob("*")):
+        if path.is_file() and path.suffix in _CITE_SUFFIXES:
+            out.append(path.relative_to(_ROOT).as_posix())
+    assert out, "deploy/ 下扫不到任何可引小节的文件 ⇒ 本格空跑，不是干净通过"
+    return out
+
+
+def _heading_numbers(text: str) -> set[str]:
+    """fence-aware 的小节号集合。跳围栏是这一格能不能咬人的关键：README 的 shell 块里有
+    `# 1.1 关 swap` 那种注释行，拿它当标题就会让 `§1.1` 这种引用被静默放行。"""
+    nums: set[str] = set()
+    in_fence = False
+    for ln in text.splitlines():
+        if ln.lstrip().startswith("```"):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
+        m = _HEADING_NUM.match(ln)
+        if m:
+            nums.add(m.group(1))
+    return nums
+
+
+def _check_citations(items: dict[str, str]) -> None:
+    """两半：裸形必须消失（R-a），全形必须解析到真实存在的节号（R-b）。
+
+    存在性按文件系统判，与 `scripts/check_doc_sync.py` 的版本控制清单基准不同一条链：
+    那一把管的是文档正文里的**路径**引用，这一把只管 deploy/ 注释里的**节号**能不能落到
+    一个真存在的标题上。被引文件只在本机存在而没入库，不在本格的射程内（如实写明，不假称覆盖）。
+    """
+    bare: list[str] = []
+    unresolved: list[str] = []
+    cache: dict[str, set[str]] = {}
+    for rel, text in items.items():
+        for i, ln in enumerate(text.splitlines(), 1):
+            if _BARE_README_CITE.search(ln):
+                bare.append(f"{rel}:{i}")
+            for target, num in _FULL_CITE.findall(ln):
+                if target not in cache:
+                    f = _ROOT / target
+                    cache[target] = _heading_numbers(f.read_text(encoding="utf-8")) if f.is_file() else set()
+                if num not in cache[target]:
+                    # 两种情形成因不同、处置也不同，所以分两条报：换文件名去重找，还是
+                    # 那个节号本来就没写成 —— 把后者当成前者就是“把没写的东西当旧版本”。
+                    if not (_ROOT / target).is_file():
+                        unresolved.append(f"{rel}:{i} 引 {target}（该文件不在仓库里）")
+                    else:
+                        unresolved.append(f"{rel}:{i} 引 {target} §{num}（那一节不存在）")
+    # 两半合并成一个判决，而不是连着两条 assert：本批真面反证实踩过——只种 P1 时第一条
+    # assert 就当场退出，P2（节号不存在）根本没被判过，“1 failed”看起来满绿牙齿、
+    # 其实是半口。一条消息里同时点名两类，才担得起“每条都判了”这句陈述。
+    verdicts: list[str] = []
+    if bare:
+        verdicts.append(
+            f"裸形小节引用 {bare}：只写 `README §` 而不带路径 ⇒ 下一个新建同节号的人会替它改判主题，"
+            "而且改完不会有任何一格报红"
+        )
+    if unresolved:
+        verdicts.append(f"小节引用解析不到真实标题：{unresolved}")
+    assert not verdicts, "；".join(verdicts)
+
+
+def test_deploy_section_citations_resolve_to_real_headings():
+    """③d 正跑：deploy/ 注释里的每一条 `§` 引用都必须带着能解析的全路径。"""
+    items = {rel: (_ROOT / rel).read_text(encoding="utf-8") for rel in _deploy_cite_face()}
+    _check_citations(items)
+
+
+def test_citation_gate_bites_on_the_four_shapes():
+    """③d 的非空洞性：四种形状逐条注回去（与 ③c 同口径，合成注入不碰盘上文件）。"""
+    # 正形：带全路径且节号真实存在
+    _check_citations({"deploy/k8s/x.yaml": "# 见 deploy/k8s/README.md §6.3。\n"})
+    # (a) 裸形 —— 正是本批被自己的新节喂成假解析的那一形
+    with pytest.raises(AssertionError, match="裸形小节引用"):
+        _check_citations({"deploy/k8s/x.yaml": "# 见 README §6.3。\n"})
+    # (b) 全形但节号不存在
+    with pytest.raises(AssertionError, match="那一节不存在"):
+        _check_citations({"deploy/k8s/x.yaml": "# 见 deploy/k8s/README.md §9.9。\n"})
+    # (c) 全形但文件不存在
+    with pytest.raises(AssertionError, match="该文件不在仓库里"):
+        _check_citations({"deploy/k8s/x.yaml": "# 见 docs/operations/no-such-file.md §1。\n"})
+    # (d) 围栏里的假标题不能被当成“存在”：README 的 shell 块里就有 `# 1.1 关 swap`，
+    #     不跳围栏时这一形会让 §1.1 被静默放行，(b) 也会跟着退化。
+    with pytest.raises(AssertionError, match="那一节不存在"):
+        _check_citations({"deploy/k8s/x.yaml": "# 见 deploy/k8s/README.md §1.1。\n"})
+
+
+
+# ---------------------------------------------------------------------------
 # ④ 缩进错位 = 字段被 k8s 静默丢弃
 # ---------------------------------------------------------------------------
 
@@ -498,6 +786,99 @@ def test_platform_does_not_inject_sql_dsn(container):
         "平台清单注入了 SQL_DSN：平台侧已无任何代码读它（字段随批次 5 退役），"
         "业务库连接串属于 nl2sql-service 的 DW_DB_DSN"
     )
+
+
+# ---------------------------------------------------------------------------
+# ⑥c 入口可达面：Service 类型与钉住的 nodePort（2026-11-06 拍板 ClusterIP→NodePort）
+# ---------------------------------------------------------------------------
+
+#: k8s 默认 NodePort 分配域。域外的值不会被 API server 接受，而“域内撞了别人已占的口”
+#: 本格管不着 —— 那只能对现网取，判据在 runbook §5 基线 3。
+_NODEPORT_RANGE = (30000, 32767)
+
+
+def _platform_service() -> dict:
+    return next(d for d in _load(_DEPLOY) if d["kind"] == "Service")
+
+
+def _check_entry_service(svc: dict) -> None:
+    """入口 Service 的三条不变量。判据只写一遍：真格与非空洞性格共用它。
+
+    钉的都是会让「入口一直在线」重新退化成口头承诺的漂移：
+    - 换回 ClusterIP ⇒ 唯一进入路径又只剩 port-forward，而它在取证面里已经死过两次；
+    - 不钉 nodePort ⇒ 每次 apply 由集群随机分配，写进手册的地址当场作废；
+    - 钉了但 `port`/`targetPort` 与容器自己的 8000 分叉 ⇒ 地址对、打过去是空的。
+    """
+    svc_type = svc["spec"].get("type")
+    assert svc_type == "NodePort", (
+        f"入口 Service type={svc_type!r}：ClusterIP 下唯一进入路径是 port-forward，"
+        "那是一条会断的流（依据逐字在清单 Service 段注释里）"
+    )
+    ports = svc["spec"]["ports"]
+    assert len(ports) == 1, f"入口 Service 期望单端口：{ports}"
+    p = ports[0]
+    assert p.get("nodePort"), (
+        "type=NodePort 却没写 nodePort ⇒ 每次 apply 随机分配，手册里那个入口地址当场作废"
+    )
+    lo, hi = _NODEPORT_RANGE
+    assert lo <= int(p["nodePort"]) <= hi, f"nodePort={p['nodePort']} 不在默认分配域 {lo}..{hi}"
+    assert p["port"] == p["targetPort"] == 8000, (
+        f"入口 Service port/targetPort={p['port']}/{p['targetPort']}，而容器自己听的是 8000"
+    )
+
+
+def test_entry_service_is_pinned_nodeport():
+    """入口必须一直在线，且它的地址必须能从清单算出来 —— 不靠“某台宿主上有个前台进程”。
+
+    2026-11-06 拍板：Service 从 ClusterIP 换成 NodePort（D2 可达面变更；为什么改、
+    露出了什么、当时的鉴权实测读数都在清单 Service 段注释里）。本格不复述那段理由，
+    只钉住三件会漂移回来的形状。
+
+    边界（本格**不**判）：该口在三台宿主上是否已被其他进程占用、集群里是否已有同名
+    nodePort —— 那两条是现网读数，只能 apply 前现场核对（runbook §5 基线 3），
+    把它们写成清单断言就等于把未验的假设钉成门禁。
+    """
+    _check_entry_service(_platform_service())
+
+
+def test_runbook_entry_port_matches_the_service_object():
+    """手册里那个“给人点的口”必须等于清单算出来的 nodePort，不是第 N 份手抄字面值。
+
+    与 ⑥b 同一条纪律，只是消费方从代码换成了文档：runbook 基线 3 写死了那个号，
+    清单改了端口而手册没跟，用户拿到的就是「地址在、打不通」。
+    """
+    expected = str(_platform_service()["spec"]["ports"][0]["nodePort"])
+    text = (_ROOT / "docs/operations/minimal-release-runbook.md").read_text(encoding="utf-8")
+    assert expected in text, (
+        f"清单算出 nodePort={expected}，而 runbook 里没有这个口 ⇒ 手册给的入口地址已失效"
+    )
+
+
+def test_entry_gate_bites_on_the_four_drift_shapes():
+    """⑥c 的四枚非空转反证：把四种真发生过的漂移形状注回去，逐条确认会咬。"""
+    import copy
+
+    base = _platform_service()
+
+    bad_a = copy.deepcopy(base)
+    bad_a["spec"]["type"] = "ClusterIP"
+    with pytest.raises(AssertionError, match="ClusterIP"):
+        _check_entry_service(bad_a)
+
+    bad_b = copy.deepcopy(base)
+    del bad_b["spec"]["ports"][0]["nodePort"]
+    with pytest.raises(AssertionError, match="nodePort"):
+        _check_entry_service(bad_b)
+
+    bad_c = copy.deepcopy(base)
+    bad_c["spec"]["ports"][0]["nodePort"] = 80
+    with pytest.raises(AssertionError, match="默认分配域"):
+        _check_entry_service(bad_c)
+
+    bad_d = copy.deepcopy(base)
+    bad_d["spec"]["ports"][0]["targetPort"] = 8080
+    with pytest.raises(AssertionError, match="targetPort"):
+        _check_entry_service(bad_d)
 
 
 # ---------------------------------------------------------------------------

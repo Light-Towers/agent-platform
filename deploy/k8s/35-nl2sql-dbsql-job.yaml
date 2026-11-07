@@ -15,7 +15,9 @@
 #      否则 Pod 里挂的还是旧的 sql——ConfigMap 更新不会自动进已挂载的文件内容以外的缓存路径，
 #      而 Job 是一次性 Pod，重跑就是新内容。
 #
-# 顺序（写进 README §6.3，两文件分开是因为依赖的客户端不同：本 Job 要 psql，
+# 顺序（本文件下方即列出，逐步判据见 docs/operations/nl2sql-release-checklist.md §3；
+# 旧写法指向过一个从未写成的节号（那个号现在已被登录面签名密钥占用），别再照它找。
+# 两文件分开是因为依赖的客户端不同：本 Job 要 psql，
 # 36-nl2sql-meta-init-job.yaml 要 nl2sql 镜像里的 python 包，都不为了"一个 Job 搞定"
 # 往对方镜像里塞工具）：
 #   35（本文件，建库+建表+只读授权） → 36（元库 schema + 元知识） → 30（服务）
