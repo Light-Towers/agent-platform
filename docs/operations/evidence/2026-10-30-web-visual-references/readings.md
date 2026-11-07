@@ -5055,3 +5055,160 @@ ts-provability 自测 n=10 passed=10、门件自测 n=26 passed=26、GATE_RC=GRE
 ③ 门件调用点换形住在未入库的 e26-gate-fill.ps1 里 ⇒ **在新克隆上这一型仍会复发**。
 差别只在于：复发时第 12 条会把它接住（一句话判据 + 复审触发条件），不再需要重新发现一遍。
 把 ③ 变成入库件属 PS 量具债重构（q-5 已拍 A 档 = 本轮不重构），不在本批射程。
+
+## §53 第四十七批（2026-11-07 收口刀）：「申报」换成「入库」的实物面，以及通道不可达下的未完清单
+
+**〇、本批的范围（先写边界，免得下面的绿被读成交付推进）。** 用户前提：目标服务器连不上 ⇒ 凡依赖现网／
+构建通道的步骤一律不再尝试、不排期、不绕行；本轮停止一切新增（不开新刀、不新建也不改写任何 PowerShell／
+量具／门禁脚本、不加判据、不扩范围）。所以本批只有三种动作：**把已经做完的内容真正入库**、**把读数写进账面**、
+**复跑已存在的校验件**。凡需要通道才能取的读数一律写成「未验证（原因：通道不可达）」，不拿本地绿冒充现网通。
+
+**一、真根因（本会话最硬的一条，且它不是产品缺陷，是我自己的判据缺陷）：intent-to-add 把「申报」当成了「入库」。**
+`git add -N <path>` 只在索引里登记一条**空 blob**（OID 以 e69de29b 开头），路径从此出现在版本控制清单里，
+但内容只住在工作区。后果按判据种类分裂：
+- 按**清单**判存在性的门 ⇒ 全绿：check_doc_sync 的路径引用校验、typo-scan 的 T2、门件 B2b 那行 tracked=1/1；
+- 按**内容**取物的判据与载体 ⇒ 拿到零字节：C5 端点成对性齿读索引树、任何新克隆、`git checkout`、
+  `git bundle`、公开镜像的树。
+
+现取实物（本批开工时）：全仓索引里的空 blob 条目 **46** 条 = **36** 条合法空文件（HEAD 里确实是空的那个形状，
+如若干 `__init__.py`）+ **10** 条「申报未入库」。那 10 条的归属全部是 own（own=1 / held=0 / ext=0），
+也就是说**没有一条是别人推迟的，全是我自己漏的**。入库后同一命令现取：空 blob 条目 **36**，
+且提交件里那行 `DECLARED-NOT-IN-HEAD total=0`（逐字见下第三条）＝ 申报未入库归零。
+
+这 10 条入库后的 HEAD 字节数（现取 `git cat-file -s`，不是工作区数，差值来自换行规范化）：
+
+| 路径 | HEAD 字节 |
+|---|---|
+| `applications/agent_server/api/auth_router.py` | 15253 |
+| `applications/agent_server/tests/test_auth_router.py` | 19529 |
+| `docs/plans/plan-error-contract-alignment-2026-11-04.md` | 18638 |
+| `docs/plans/plan-error-contract-staged-split-2026-11-06.md` | 16554 |
+| `scripts/evidence/face_basis.py` | 19077 |
+| `scripts/evidence/k46-keypair-lib.ps1` | 4835 |
+| `scripts/evidence/k71-basis.ps1` | 7768 |
+| `scripts/evidence/ts-provability.ps1` | 44144 |
+| `tests/governance/test_face_basis_gate.py` | 9282 |
+| `tests/governance/test_login_no_secret_leakage.py` | 8684 |
+
+合计 **163,764 B**。它与 AGENTS.md 那条「接线 ≠ 启用」同族，而且比 §52.8 那条「入库 ≠ 被读」更深一层：
+那一条说的是**工具读错了实物**，这一条说的是**实物本身在清单里是个壳**。
+
+**二、处置：`git reset --mixed` + 逐枚精确 add，不用 `git commit --only <目录>`。**
+为什么后者被否：`--only` 的语义是取**工作区**内容，会把同一目录里那条并行线尚未入库的文件（ext 8 件）
+一起卷进提交 —— 那是本会话最不该犯的一类错（并行线占面期间不代登、不 stash、不放宽 A 格基准都在册）。
+分枚件内四道自证闸门：切片覆盖率必须等于 own 总数、切片里不许出现 ext 路径、staged 数必须等于路径数、
+staged 里不许残留空 blob；任一条不满足就 throw，不带 continue 分支。实物末两行逐字：
+
+```text
+FINAL sha=007d1dc2 staged-left=0 unstaged=8 untracked-or-other=8
+DECLARED-NOT-IN-HEAD total=0
+```
+
+四枚提交（件 k78-slice-out.txt 逐字，短号＋行数全绑这一件）：
+
+```text
+COMMIT#1 msg=k78-msg-1.txt files=11 sha=c5bcdb90 11 files changed, 1955 insertions(+), 7 deletions(-)
+COMMIT#2 msg=k78-msg-2.txt files=3 sha=a45ffcc5 3 files changed, 588 insertions(+), 23 deletions(-)
+COMMIT#3 msg=k78-msg-3.txt files=8 sha=3127d494 8 files changed, 1226 insertions(+), 7 deletions(-)
+COMMIT#4 msg=k78-msg-4.txt files=10 sha=007d1dc2 10 files changed, 607 insertions(+), 15 deletions(-)
+```
+
+分枚依据是**依赖闭包**而不是目录：第一枚非运行态半侧（方案件＋量具＋门禁）／第二枚错误契约底座
+（`packages/agent-core/agent_core/guardrails/errors.py` 的 AppError 首次在 HEAD 可解析）／第三枚登录面后端半侧／
+第四枚部署与运维面（清单与它的不变量测试同枚，避免「测试引用了尚未入库的键」）。
+
+**三、同一把判据在处置前后的读数分裂（这就是「齿一直是好的，坏的是输入」的实证）。**
+处置前（件 k78-check-events.txt，node rc=1）末两格逐字：
+
+```text
+  端点成对性（基准=索引树）：消费 5 条 [/auth/login, /auth/logout, /auth/me, /auth/register, /query] · 提供 18 条 · 缺 4 条 ❌
+
+❌ 事件契约门禁失败（4 条）：
+  · 端点不成对（齿 C5）：web 引用的 /auth/login ← web/src/api/auth.ts:35 在 agent_server 的**索引树**装配路由表里查无 ⇒ 两种成因：后端路由文件未 git add（本批就该红），或端点真没实现（现网必 404）
+```
+
+处置后（件 k78-check-events-final.txt，rc=0）同一格逐字：
+
+```text
+  端点成对性（基准=索引树）：消费 5 条 [/auth/login, /auth/logout, /auth/me, /auth/register, /query] · 提供 22 条 · 缺 0 条 ✅
+```
+
+⚠ 这一格同时暴露**齿自己的登记不全**：它正文写「两种成因」，而真实命中的是它没列的**第三种**
+（文件已 add -N、索引里是空 blob ⇒ 路由表从索引树取就读到零条）。本批按范围纪律**不改它**（改写量具
+＝本轮禁止的新增），只把这一格作为「候选齿 C5-第三成因」登记在此，复审触发条件 = 同型再命中一次。
+
+**四、本批复跑的已有校验件（逐值绑件；不复跑的也照登）。**
+- 后端四 session（件 k78-sessions.txt）：`tests/governance` **521 passed, 1 skipped** RC=0、
+  `applications/agent_server/tests` **183 passed** RC=0、`packages/agent-core/tests` **370 passed, 8 skipped** RC=0、
+  `tests/deploy` **79 passed** RC=0。
+- ruff（15 枚 own 的 .py，件 k78-ruff-own.txt）：`All checks passed!` rc=0。
+- `scripts/lint_architecture.py`（件 k78-lint-arch.txt）：rc=0，末段含 P13 身份装配覆盖 **6/6**、L-4 依赖契约、
+  P14 语义缓存单轨通过行。
+- `scripts/check_doc_sync.py`（件 k78-docsync.txt）：`✅ 文档同步校验通过（0 警告）` rc=0。
+- typo-scan 默认面 17 件（件 k78-typo-default.txt）：T1 hits=13（在册恒值未涨）、**T2=0 / T3=0 / T4=0 / T5=0**、
+  forbidden=0、脚本标签数=16。
+- **未复跑**（如实登记，不补读数）：门件 e26-gate-fill（它评的是候选树，本批入库后候选树已变，旧件绿不覆盖新面）、
+  ts-provability、变异反证、前端 ci-web 六步、`make test` 全量十 session。原因＝本轮只做收口，不重开评估面。
+
+**五、未验证清单（六条，全部同一成因：通道不可达 ⇒ 不尝试、不排期、不绕行）。**
+① 当天最终 rev 的 L3 深度安全审查 —— 未验证（原因：通道不可达，且它是推送前置）；
+② push company 与换具独立复取 ahead=0 —— 未验证（原因：通道不可达）；
+③ bundle + scp + 241 fetch/checkout —— 未验证（原因：通道不可达）；
+④ 241 上 build_with_io_guard 与三台 distribute —— 未验证（原因：通道不可达）；
+⑤ rollout restart + rollout status + verify.sh 的 Pod 内 GIT_REV —— 未验证（原因：通道不可达）；
+⑥ Pod 内探针（/ui/ 200 + no-store + sha 对拍、对照 404、真流帧、多轮，以及 §3.2 的 C10 → C8 → C9 三格）
+与浏览器登录屏实拍 —— 未验证（原因：通道不可达）。
+⚠ 这六条里任何一条都不许被本批第四节的本地绿替代：本地 session 全绿只证明**内容与测试一致**，
+不证明**跑着的实例里有这些内容**（现网 rev 仍是 `d4d3d329`，它在 web/ 面与本线零差、在登录面后端半侧**零**）。
+
+**六、服务器恢复后的收口顺序与逐项完成判据（判据全部引自在册件，不新造）。**
+1. 先按**当天最终 rev** 现取 HEAD 跑 L3 ⇒ 判据 findings = 0；非 0 就停，不带伤推送。
+2. 推送 company（工作日窗口 [9,19) 内、非 force、`main` 逐字不动）⇒ 判据 push rc=0 且换具复取 ahead=0。
+   本批实物 = HEAD `007d1dc2` 相对本地 remote-tracking `company/feat/web-visual-poc`（`d4d3d329`）**13** 枚提交。
+3. 造 bundle（`docs/operations/minimal-release-runbook.md` 第 0 步：base 与 `<REV>` 只能当轮现取，件名运行时派生）
+   ⇒ 判据 `git bundle verify` 为 okay 且两侧字节同串。
+4. 241 上构建（`build.sh` 的 rev 门禁 + `IO_LIMIT=80 IO_STRIKES=6`，守卫不得关）⇒ 判据 build rc=0、
+   三台回读同一镜像 ID、构建后逐项比对该批观测容器 RestartCount / Health / StartedAt 与在册基线一致。
+5. 分发**显式列全三台** ⇒ 判据每台 import 成功；漏一台则 Pod 调度过去即 ErrImagePull。
+6. rollout restart + rollout status（D2 已批）⇒ 判据 status 完成且无新增重启次数漂移。
+7. `verify.sh <rev>` ⇒ 判据**以 Pod 内 GIT_REV 为准**，不拿 docker run 那份读库冒充（§43 已照出它读错库）。
+8. 登录面三格按 §3.2 的**固定顺序** C10 → C8 → C9 ⇒ C10 判据两行都 `mode=440 readable=True uid=0`；
+   C10 红就不许跑 C8。另补 C5 那条判据的现网版：`/auth/*` 四端点在新 rev 上**不再 503**。
+9. 交付面探针（/ui/ 200 + no-store + sha12 对拍、对照 404、真流帧、多轮）⇒ 判据 fails = []。
+10. ext 那 8 件（并行线归属）**不由我提交**；错误契约那一簇的拍板痕迹仍未收，它入不入下一步决策不在本线射程。
+
+**七、四层账（用户要的分层，层与层之间的差别说实话）。**
+① 代码已写完 ✅（本批涉及的产品面与量具面都在工作区验过）；
+② 内容已真正入库 ✅（HEAD `007d1dc2`，四枚提交逐枚绑件，`DECLARED-NOT-IN-HEAD total=0`）；
+③ 已推送到远端 ❌（本地 remote-tracking 仍停在 `d4d3d329`，ahead=13；未验证：通道不可达）；
+④ 已在现网生效 ❌（跑着的实例 rev = `d4d3d329`，其产物里没有后端登录面 ⇒ 屏上登不进去的原因是**内容没到现网**，
+不是前端形态问题；未验证：通道不可达）。
+工作区剩余恰为 ext 那 8 件（`git status --porcelain` 现取 8 行全部 ' M'，staged=0）⇒ 它们保持原样、标注未完，
+不强推、不硬合、不为干净而放宽任何断言或删用例。
+
+**八、本小节（账面）落盘后对文档面重跑的两把已有校验件（件名固定，逐字可回grep）。**
+判文档面的两件必须在账面写完之后再跑一次，因为本批新增的表格行与围栏内引用正是它们的射程。
+typo-scan 默认面（件 k79-typo-final.txt）末段逐字：
+
+```text
+T1 probes: 词串=24 码点 forbidden=0 review=22
+T1 hits=13
+T2 hits=0
+T3 hits=0
+T4 hits=0
+  脚本标签数=16
+T5 hits=0（0 = 无；>0 只说明该标签未被文档引用，不等于错字）
+TYPO_RC=0
+```
+
+`scripts/check_doc_sync.py`（件 k79-docsync-final.txt）逐字：
+
+```text
+✅ 文档同步校验通过（0 警告）
+DOCSYNC_RC=0
+```
+
+⇒ T1 那枚棘轮仍是 13（本批没抬高它），T2..T5 与 forbidden 保持 0。这两把 rc=0 **不**推定门件绿：
+门件本批未复跑（理由见第四节末条），它的旧件绿不覆盖本文档面入库后的新面。
+
+
