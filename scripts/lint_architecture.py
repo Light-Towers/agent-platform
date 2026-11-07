@@ -479,11 +479,18 @@ def check_api_layer_path_io() -> list[str]:
 #   2. 服务端日志行（``logger.*``——异常全貌的合规去向）；
 #   3. 仅异常类名 ``type(x).__name__``（不含消息，不属堆栈回显）；
 #   4. 4xx 客户端错误回显（D-2=A：不动各 app 现有 4xx ``{detail}`` 信封，
-#      输入校验失败详情面向调用方自身输入）。
+#      输入校验失败详情面向调用方自身输入）。依据：``normalize_http_errors`` 两处默认
+#      均为 **False**（kernel + 工厂，由 ``test_factory_and_kernel_defaults_agree`` 钉同值），
+#      G2 未逐 app 开启 ⇒ 这条放行仍与代码同形。若哪天默认被翻或某 app 显式开启，
+#      本条依据失效，须先改这里再改产品代码（否则“合规回显”与“异常消息外泄”的边界就靠猜）。
+# ``AppError(`` 在标记集里是**射程随新出口换形**，不是放宽：一个只抛 ``AppError``
+# 而不带装饰器 / 不构 JSONResponse 的模块仍是对外出口（如 ``_map_input_error`` 这种
+# 把异常映射为响应体的 helper 住在路由模块里）。它不在标记集时，整个文件会退出 P8
+# 判定面 ⇒ “装了新的对外出口却逐片静默绕过门禁”，那比逐行漏一行严得多。
 # ---------------------------------------------------------------------------
 _HTTP_EXIT_MARKER = re.compile(
     r"@app\.|@router\.|add_api_route|JSONResponse\(|HTTPException\(|StreamingResponse\("
-    r"|TextResponse\(|FileResponse\(|push_to_session\(|sse_pack\(|\b_sse\("
+    r"|TextResponse\(|FileResponse\(|push_to_session\(|sse_pack\(|\b_sse\(|AppError\("
 )
 _EXC_MSG_CALL = re.compile(r"\bstr\(\s*(?:e|exc|err|error|exception)\b", re.IGNORECASE)
 _EXC_F_INTERP = re.compile(r"\{\s*(?:e|exc|err|error|exception)\s*(?::[^{}]*)?\}")

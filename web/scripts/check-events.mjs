@@ -1,12 +1,23 @@
 #!/usr/bin/env node
-/* ============================================================================
- * check-events.mjs — 事件契约门禁（工单件 §9.3 登记件 / §7 PR-1 判据）
- * 零依赖：只用 Node 内置 fs/path。挂 `make ci-web`，**不进 `make ci`**。
+/* ============================================================================ 
+ * check-events.mjs — 前后端契约门禁（工单件 §9.3 登记件 / §7 PR-1 判据）
+ * 零依赖：只用 Node 内置 fs/path + git CLI。挂 `make ci-web`，**不进 `make ci`**。
+ *
+ * 射程（两件同名易混，先说清）：本件管**事件处理链**（后端 Literal → serialize_stream_event
+ * 分支 → TS 联合 → sse.ts handler 分支 → PR-2 消费面：icons.ts 图标表 + events.css 的
+ * accent 规则）与**端点成对性**（齿 C5，基准 = 索引树）。文件名里的 “events” 窄于实际射程，
+ * 这是有意保留：拆件会把「同一个消费面的两套基准」分到两个文件里，反而更容易被读成同一条。
+ *
+ * ⚠ 本件内部有**三套基准**，写反一格就是假绿：
+ *   · 后端源（事件链）按**仓库根文件系统**读 —— 它比的是源码形状，不需要区分入库态；
+ *   · TS 侧按 **`web/` 文件系统**读（与被测文件同基准）；
+ *   · 端点成对性（C5）按**索引树**读（`git show :path`）—— 理由见 C5 那段：拿文件系统
+ *     做基准时，11-06 那轮“前端已入库、后端只在盘上”的现网自相矛盾永远绿。
+ * 混用会让一条路径写错变成 ENOENT 而不是判红，所以三个读取器各指各的根。
  *
  * 与 check-tokens.mjs 断言 6 的分工（不写清就会被读成「同一条查两遍」）：
  *   那件管**图例**（poc.html 的 EVENTS 与 events.ts 的 EVENT_LEGEND 两副本的 key 集与文案同值），
- *   本件管**处理链**（后端 Literal → serialize_stream_event 分支 → TS 联合 → sse.ts handler 分支
- *   → PR-2 的消费面：icons.ts 图标表 + events.css 的 accent 规则）。
+ *   本件管**处理链 + 端点存在性**。
  *   两者在「TS 联合 == 派生全集」这一格重合，重合的代价是一条判据可能在两处同时报红
  *   （读数重复），不是一处漏；删掉任一件都会留下一条无主判据。
  *
@@ -37,6 +48,7 @@
  *   有专门的"一条都没读到"失败口，不会静默降级成"全绿"。
  * ==========================================================================*/
 import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -342,6 +354,164 @@ const loginChain = [
 ];
 for (const [file, re, msg] of loginChain) {
   if (!re.test(rdWeb(file))) fail.push(`登录面消费链断裂（齿 C4）：${msg}`);
+}
+
+/* ---- 齿 C5（治本）：web 引用的端点必须存在于**待提交的那棵树**里 ----
+ * 这一格的由来不是假想，是已发生过的现网形状：前端登录面（LoginView / auth.ts / session.ts）
+ * 已入库，后端 `/auth` 路由仍在未入库那一簇里 ⇒ 按 HEAD 部署上去就是「登录框在、每次登录必
+ * 404」。当时在场的量具全绿，两个成因各一枚：
+ *   · 在册的闭包齿只理解 Python import —— `'/auth/login'` 在 AST 里就是一个字符串常量，
+ *     跨语言、跨载体的调用边对它不可见；
+ *   · 本件 C2/C3/C4 与 verify-sse.mjs 的基准是**本机文件系统**，而盘上 auth_router.py 一直在。
+ * ⇒ 治本不在「补一次提交」，在这格的基准：**索引树**（`git show :path`）。索引 = 即将成为
+ *   HEAD 的那棵树，所以它既能在提交前咬住，也不会因为「本机有」而免检 —— 与
+ *   `scripts/check_doc_sync.py` 在册那条「存在性判定基准 = 版本控制清单，不是本机文件系统」
+ *   同族（那条规定是 10-04 实踩后立的，本齿是它在跨载体调用边上的第一次套用）。
+ *
+ * 判据 = 单向 ⊆（消费 ⊆ 提供）：后端有而前端不用的端点不是错（外部调用方在用）。
+ * 只判**存在性**不判方法（GET/POST）：TS 侧的方法在 `doFetch(path, { method: 'POST' })` 的
+ * init 里而路径是变量，静态追这个形状会把门禁写成「一动就误报」的东西；方法错配的运行期形状
+ * 是 405（有症状）而不是静默，那条判据属现网探针，不属本齿。
+ * 两条已知边界（写进代码而不是隐形假设）：
+ *   · 只扫 `web/src/**`：随产物上线的消费面。`web/vite.config.ts` 的 dev proxy 不在射程（它
+ *     只在 `pnpm dev` 生效、不进产物），拿它判生产红就是把本地现象当部署事实；
+ *   · 消费集从**字面量**抽，但跳过整行注释（行首 `//` / `*` / `/*` / `<!--`）：方案与复审
+ *     触发条件里提一个端点名是很常见的写法，把它算成需求就是把文档当代码判红（首跑实踩：
+ *     LoginView 块注释里的 `/openapi.json` 被抽成了消费）。**残留的洞**：行尾内联注释仍会
+ *     参与抽取（要剔干净得逐字符跟踪字符串状态，那是解析器不是门禁）——报了就看行号，
+ *     假红不假绿。
+ */
+const gitRead = (args) => {
+  try {
+    return execFileSync('git', args, {
+      cwd: ROOT,
+      encoding: 'utf8',
+      maxBuffer: 16 * 1024 * 1024,
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+  } catch {
+    return null;
+  }
+};
+const GIT_ROOT = gitRead(['rev-parse', '--show-toplevel']);
+if (GIT_ROOT === null) {
+  // fail-closed：取不到 git 就报红，**不退回 readFileSync**、无旁路开关（同 check_doc_sync）。
+  // 理由就在本齿的由来里：文件系统基准把「真破了」读成「全绿」，那比不装这格更坑。
+  fail.push('端点成对性（齿 C5）无法判定：`git rev-parse --show-toplevel` 不可用 ⇒ 拿不到索引树。本格不降级为“通过”（在无 git 的环境里跑本件时，要么先初始化 git，要么把这一格的红当已知代价读）');
+}
+
+/* 路径归一：`/session/${id}` 与 `/session/{sid}` 归到同形，不然动态段会永远对不上 */
+const normPath = (p) => p.replace(/\$\{[^}]*\}/g, '*').replace(/\{[^}]*\}/g, '*').replace(/\/+$/, '') || '/';
+
+if (GIT_ROOT !== null) {
+  /* 索引树读取器（带缓存）：必须先于消费集循环声明——`const showCache` 没有函数声明那种提升，
+   * 顺序写反就是 TDZ 报错而不是判红（本轮实踩形状，故就地写明）。 */
+  const showCache = new Map();
+  function gitShowIndex(rel) {
+    if (!showCache.has(rel)) showCache.set(rel, gitRead(['show', `:${rel}`]));
+    return showCache.get(rel);
+  }
+
+  /* -- 消费集：索引树里 `web/src/**` 的全部“看起来是绝对路径”的字符串字面量 -- */
+  const webIndexFiles = (gitRead(['ls-files', '--', 'web/src']) || '').split('\n').filter(Boolean);
+  /* 字符类里那个 `/` 不是装饰：首跑时它漏写了，结果 `/query` 这种单段路径抽得到、
+   * `/auth/login` 这种多段路径全部不可见 —— 一枚专门用来拦「跨载体缺一条边」的齿，
+   * 自己对本仓历史上那条真 bug 的端点形状是眼盲的。“非空转守门”（下面 consumed=0 那一格）
+   * 抬不出它，抬出它的是 §7.5 那条真载体反证。改这行请先跑那件。 */
+  const PATH_LITERAL_RE = /['"`](\/[A-Za-z0-9\-_/{}.$]*[A-Za-z0-9\-_{}.$])['"`]/g;
+  const COMMENT_LINE_RE = /^(?:\/\/|\*|\/\*|<!--)/;
+  const consumed = new Map(); // normPath -> [ 'file:line', ... ]
+  for (const rel of webIndexFiles) {
+    if (!/\.(ts|vue|js)$/.test(rel)) continue;
+    const text = gitShowIndex(rel);
+    if (text === null) continue; // 索引里有但读不出（已 staged 删除）⇒ 不把它当消费面
+    const lines = text.split(/\r?\n/);
+    lines.forEach((line, i) => {
+      if (COMMENT_LINE_RE.test(line.trim())) return;
+      for (const m of line.matchAll(PATH_LITERAL_RE)) {
+        const key = normPath(m[1]);
+        if (!consumed.has(key)) consumed.set(key, []);
+        consumed.get(key).push(`${rel}:${i + 1}`);
+      }
+    });
+  }
+  if (consumed.size === 0) {
+    // 非空转守门：抽到 0 条只能解释为抽取器坏了（或 web/src 被掏空），不能读成“没引用 ⇒ 全绿”。
+    fail.push('端点成对性（齿 C5）无法判定：从索引树的 web/src 里一条路径字面量都没抽到（抽取器坐标漂了，不是“前端不调接口”）');
+  }
+
+  /* -- 提供集：从 main.py 沿装配链走（不是“全仓装饰器”：没 include 的路由表项运行时不存在） -- */
+  const serverFiles = (gitRead(['ls-files', '--', 'applications/agent_server']) || '')
+    .split('\n')
+    .filter((f) => f.endsWith('.py'));
+  const modToRel = new Map(
+    serverFiles.map((f) => [f.replace(/^applications\//, '').replace(/\.py$/, '').split('/').join('.'), f])
+  );
+
+  const PREFIX_RE = /prefix\s*=\s*['"]([^'"]*)['"]/;
+  const ROUTER_DECL_RE = /^(\w+)\s*=\s*APIRouter\(([^)]*)\)/gm;
+  const IMPORT_ROUTER_RE = /^from\s+([\w.]+)\s+import\s+router(?:\s+as\s+(\w+))?/gm;
+  const INCLUDE_RE = /(\w+)\.include_router\(\s*(\w+)([^)]*)\)/g;
+  const ROUTE_RE = /@(\w+)\.(?:get|post|put|delete|patch|options|head|api_route)\(\s*['"]([^'"]+)['"]/g;
+
+  const provided = new Set();
+  const dangling = new Set(); // 装配链指到了索引树里没有的模块
+  const walk = (rel, basePrefix, seen) => {
+    if (seen.has(rel)) return; // 跨模块互指的死循环
+    seen.add(rel);
+    const src = gitShowIndex(rel);
+    if (src === null) {
+      if (rel) dangling.add(rel);
+      return;
+    }
+    // 本文件里的 router 变量：局部构造 + 从兄弟模块 import
+    const routers = new Map(); // varName -> { prefix, rel }  （rel=null 代局部构造）
+    for (const m of src.matchAll(ROUTER_DECL_RE)) {
+      routers.set(m[1], { prefix: m[2].match(PREFIX_RE)?.[1] || '', rel: null });
+    }
+    for (const m of src.matchAll(IMPORT_ROUTER_RE)) {
+      const target = modToRel.get(m[1]);
+      if (target === undefined) continue; // 不是 agent_server 自有模块（如 fastapi）
+      routers.set(m[2] || 'router', { prefix: '', rel: target });
+    }
+    for (const m of src.matchAll(ROUTE_RE)) {
+      const owner = routers.get(m[1]);
+      if (owner === undefined || owner.rel !== null) continue; // 只收本文件自己构造的 router
+      provided.add(normPath(basePrefix + m[2]));
+    }
+    for (const m of src.matchAll(INCLUDE_RE)) {
+      const target = routers.get(m[2]);
+      if (target === undefined) continue;
+      const sub = (m[3].match(PREFIX_RE)?.[1] || '') + (target.prefix || '');
+      if (target.rel === null) {
+        // 局部 router 被 include：它的路由已由上面的 ROUTE_RE 以 basePrefix+sub 重算一次
+        for (const mm of src.matchAll(ROUTE_RE)) {
+          if (mm[1] === m[2]) provided.add(normPath(basePrefix + sub + mm[2]));
+        }
+      } else {
+        walk(target.rel, basePrefix + sub, seen);
+      }
+    }
+  };
+  walk('applications/agent_server/main.py', '', new Set());
+
+  if (provided.size === 0) {
+    fail.push('端点成对性（齿 C5）无法判定：从 main.py 装配链上一条路由都没派生出来（装饰器形状改了或入口文件不在索引，不是“后端没端点”）');
+  }
+  for (const rel of dangling) {
+    fail.push(`装配链引用了索引树里没有的模块：${rel}（未 git add 的文件在待提交树上不存在 ⇒ 含它的那条链不成立）`);
+  }
+
+  const missing = [];
+  for (const [p, sites] of consumed) {
+    if (!provided.has(p) && p !== '/') missing.push(`${p} ← ${sites.join(', ')}`);
+  }
+  for (const line of missing.sort()) {
+    fail.push(`端点不成对（齿 C5）：web 引用的 ${line} 在 agent_server 的**索引树**装配路由表里查无 ⇒ 两种成因：后端路由文件未 git add（本批就该红），或端点真没实现（现网必 404）`);
+  }
+  note.push(
+    `端点成对性（基准=索引树）：消费 ${consumed.size} 条 [${[...consumed.keys()].sort().join(', ')}] · 提供 ${provided.size} 条 · 缺 ${missing.length} 条 ${missing.length === 0 ? '✅' : '❌'}`
+  );
 }
 
 /* ---- 接线断言：本件的调用链在不在 ---- */
