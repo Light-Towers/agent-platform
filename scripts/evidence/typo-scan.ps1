@@ -38,7 +38,11 @@ $files = @(
   # e26-gate-00-20261106-205559-gate-fill.txt）。进面前先单量：T1..T5 全 0、forbidden=0、rc=0
   # （件 k76-adr-facetarget.txt）⇒ 无旧债，不欠「同批清债」那一步。**只进本刀改的这一件**：
   # 把整个 docs/adr/ 一次拉进面会把别人历史文档的债静默计到本刀头上（上面两条注释同一条纪律）。
-  'docs/adr/0010-ui-stack-selection.md'
+  'docs/adr/0010-ui-stack-selection.md',
+  # 刀 48（2026-11-07）进面：本批把审核件 add -N 申报进 own 面（face_basis 的 NEW-NOT-INTENT-ADDED
+  # 齿要求 untracked 先申报），B2b 随即咬 TYPO-FACE-UNCOVERED。进面前单量读数见件
+  # k80-typo-selfscan3.txt（全 0，无旧债）。
+  'docs/plans/review-error-contract-g2-2026-11-07.md'
 )
 # Optional override: lets a POSITIVE CONTROL run the REAL tool against a synthetic sample instead of
 # re-implementing the matcher elsewhere (a copied matcher proves nothing about this file).

@@ -5211,4 +5211,105 @@ DOCSYNC_RC=0
 ⇒ T1 那枚棘轮仍是 13（本批没抬高它），T2..T5 与 forbidden 保持 0。这两把 rc=0 **不**推定门件绿：
 门件本批未复跑（理由见第四节末条），它的旧件绿不覆盖本文档面入库后的新面。
 
+## §54 第四十八批（2026-11-07）：外部裁决回执落账 + ext 8 件「不批」登记 + AGENTS.md 两条入册
+
+**〇、本批范围（先写边界；判据 = 随本批一同入册的 AGENTS.md 第 14 条，提交后生效，入库前不当已成立依据）。** 本批 = 把外部判断方对判断包
+（k82-decision-brief-for-reviewer-2026-11-07.md，scratch 件不入库）的裁决回执落成账面，并按裁决入册两条
+取证硬规矩。§53 〇 是第四十七批的范围声明、不是永久禁令；本批沿用其精神：动作 = 落账（本节 + AGENTS.md
+第 13/14 条）+ 复跑已存在的校验件（k70→k59 全链 + 门件 + typo 默认面 + doc-sync），不新增判据/量具/断言/
+工作面/新刀。提交候明示指示（D-2 裁决：①含提交 ⇒ 明示前只做到落账 + 门件复跑）。
+
+**一、裁决回执要点（判断方对判断包 §1 十二条抽查的关键项全部复现后给判）。** 成立：D-1(c)、D-3 分写、
+D-5 选 A、Q-5 双层、Q-7 三条；改判：D-4（不算 §53 〇 射程——其禁止枚举不含账面文字，允许动作明写
+「把读数写进账面」）、Q-2（正面方案 = 显式中间件装配顺序断言 + 反证用例，不必然落 G2 射程；「继续红」
+收窄为工作区混合态、提交门不红、有意的未装配状态）；Q-1 补有界枚举后定性改变（见第四节）。判断包三处
+订正已回写：§1-2「= 现网 rev」口径滑移（`d4d3d329` 是本地 remote-tracking tip，Pod GIT_REV 待当轮复取）；
+§1-8 own=38 是判决新鲜度过期（第 9 条）不是「数字对绑错」；Q-6 全链漏了两步（见第七节）。
+
+**二、D-1(c)「不批」登记（本节即登记载体）。** 方案件 `docs/plans/plan-error-contract-staged-split-2026-11-06.md`
+§6 未同步——该件不由本线改，复审触发条件以本节为准。ext 8 件原样冻结在工作区：不退回 HEAD、不做反向
+提交、不由本线提交。冻结复审触发条件 = ①现网验证通过（§53.六 收口顺序走完）或 ②G2 任一 app 拍板批准
+——任一出现即主动复审这份冻结。逐路径清单与所属条目：
+
+| 路径 | 归属依据 |
+|---|---|
+| `applications/agent_federation/api/server.py` | G2：联邦网关信封改造 |
+| `applications/agent_server/api/query_router.py` | G2：query 端点信封 |
+| `packages/agent-runtime/agent_runtime/identity_middleware.py` | G2：`_send_json` 信封（k66-ext-collide 登记在案） |
+| `packages/agent-runtime/agent_runtime/schemas.py` | G2：ErrorEnvelope schema |
+| `packages/shared-schemas/shared_schemas/__init__.py` | G2：契约导出 |
+| `packages/shared-schemas/shared_schemas/error.py` | G2：契约本体 |
+| `packages/shared-schemas/tests/test_contracts.py` | G2：契约测试 |
+| `web/src/api/errors.ts` | G2：前端最终态声明重写（见第四节） |
+
+冻结维持 = 纪律：提交前逐路径核对上表与 `git status --porcelain` 的 ' M' 面一致。**Q-4 订正（11-08 现取
+e26-gate-fill.ps1 第 871、895 行）**：门件 E 段有 extra 齿（进了树却没申报）与 BACKEND-DECL-TREE-MISMATCH，
+ext 进提交树而 own 申报未同步 ⇒ 会红；上一版「对账反而会绿、是真空区」的判断被实物推翻，已回改。
+残余真空区只剩「误提交者同时改写 own 申报集」这一种，属推断（未做注入反证），不当读数。
+候选齿登记（本批不装，第 14 条口径）：「任一 ext 路径出现在 staged 或 commit 面」即红；复审触发条件 =
+下一刀开工，或 ext 误提交事件发生。
+
+**三、D-5 六枚提交的 e28 复取欠项处置（选项 A，过程欠项）。** `eb703f26` / `c5bcdb90` / `a45ffcc5` /
+`3127d494` / `007d1dc2` / `4f21f91f` 六枚提交当时无 e28 复取件。处置 = 以本批**末轮 GREEN 门件**为一次
+累计面对账（验「现在的树」；件名与关键读数随提交信息入册，不预告），**不回填历史、不冒充当轮复取、
+不写「已闭合」**——「六枚提交当时判过」是过程欠项，不可回填；上一版拿一轮 RED 的门件当对账不成立。
+把「提交后必须 e28」升级为硬闸门属新增判据，按第 14 条登记为下一刀候选，本批不装。
+
+**四、Q-1 定性（裁决 + 我方枚举合并）：工作区版 errors.ts 是「过度声明替换了准确射程登记」。**
+到达路径枚举（裁决方）：web 只连 agent_server（vite proxy 仅 dev 生效不进产物，`web/src/api/sse.ts` 与
+`web/src/api/auth.ts` 无第二服务引用）；agent_server 转发路径全部 `raise_for_status` 后重新封装
+（`applications/agent_server/capabilities.py` 5 处；`applications/agent_server/subagents/sql_agent.py` L67-70
+把 HTTPStatusError 转证据文本），不透传原始体；`EXHIBITION_SERVICE_URL` / `NL2SQL_SERVICE_URL` 默认空、
+`if url:` 才注册 ⇒ **这两个服务的错误体当前根本流不到 web**。生产者枚举（我方，绑 `4f21f91f`）：
+exhibition dict detail 真生产者仍在（`applications/exhibition-agent/exhibition_agent/server.py` 4+1 处）、
+nl2sql `/ready` dict（`applications/nl2sql-service/nl2sql_service/api/server.py` L83，本轮坐实）仍在；
+工作区版 describeError 对它们落兜底句，HEAD 那句「不会崩、也不会假装读懂了它」今天仍成立（纪律原文在
+`docs/plans/plan-web-frontend-minimal-core-2026-10-29.md` L118）。⇒ 定性：既非「随 G2 作废」也非单纯
+「误删」——是把一句**准确的射程登记**换成一句**不成立的全局声明**（「HTTP 与流内错误帧统一
+{code,msg,…}」在当前射程下不可证伪，第二批连上 nl2sql/exhibition 即成假灯）。该段不该删；若将来批 G2，
+应改写成带边界的登记。此条同时加强 D-1(b) 为 ✗：切半刀还会把准确登记换成错误声明。ext 8 件冻结
+（第二节）使 HEAD 里的原登记保持有效，信息不丢。
+
+**五、Q-2 L199 断言的处置（裁决）。** HEAD / 候选树上 `assert "code" not in body` 本来就绿（HEAD 版
+identity_middleware 仍发 `{"detail": ...}`）；红只出现在工作区混合态，门件评候选树 ⇒ 提交门不红。性质 =
+有意的未装配状态，不是欠债、不阻塞第一/二段；红线不变（不得删、不得放宽）。正面方案 = 显式中间件装配
+顺序断言 + 反证用例（故意换回旧序必须红），不必然落 G2 射程；本批不做（第 14 条 + 不替未批 G2 做设计），
+登记为下一刀可独立提的候选方案。复审触发条件 = G2 任一 app 拍板 ⇒ 同批升级 L199。
+
+**六、Q-3 x-trace-id（裁决：不再挂 day-2，挂久失真）。** 登记为独立 D1 事项（不绑 G2、本批不动）：
+全仓测试面对 x-trace-id 零断言（负例已配正对照），knowledge-service 侧另有一套大小写与注入方式都不同的
+X-Trace-Id。复审触发条件 = ①任一 app 新增响应头装配 ②knowledge-service 提出同形要求 ③day-2 拍板
+——任一出现即复审。
+
+**七、Q-5 / Q-6 / Q-7 的账面口径。** Q-5：凡「现网 rev」表述一律双层——「本地读数（remote-tracking
+tip）+ 现网读数待当轮复取（Pod 内 GIT_REV）」；§53.五/七 里「现网 rev 仍是 `d4d3d329`」按此读作本地
+remote-tracking 读数。Q-6：全链顺序订正为 k70-attribution → k70-ext-derive → k70-candidate-derive →
+k59-partition → 门件 → 精确 add → 提交 → e28（k59-partition.ps1 第 15 行读 k59-mine-candidate.txt，
+跳掉 k70 两步就会拿旧候选集 ⇒ 清单腐坏型红；**11-08 订正**：Get-BasisSelfTest 只在
+`scripts/evidence/k71-basis.ps1` 第 107 行定义、被一次性探针 k71-basis-probe.ps1 第 6 行调用，
+门件 e26-gate-fill.ps1 对该符号**零命中** ⇒ 链上 selftest 格目前无人调用，是欠项，须显式跑该探针取读数，
+不能写成「门件内部调、不需单列」；两份 k71-basis.ps1 实物本轮 cmp 逐字节相同，
+scratch 副本与入库版 `scripts/evidence/k71-basis.ps1` 等价）。
+Q-7：第一段完成判据 = ①「批准依据已入库」与「本批的树被判过（门件 GREEN 且件名绑当轮）」同时成立
+②六枚提交复取欠项有账面处置记录（本节第三节）③ext 8 件「不批」登记带复审触发条件（本节第二节）；
+不含任何现网可见性声明；「可推送性」属第二段前置，不塞进第一段。顺序约束：本节落盘后才复跑 typo
+默认面 + doc-sync（新增表格行与围栏引用正是它们的射程，§53.八 同型）。
+
+**八、AGENTS.md 两条入册（D-4 裁决三约束内：只登记已发生实物 / 同批复跑 doc-sync+typo / 不顺带改别的节）。**
+第 13 条「申报 ≠ 入库」（只登记 §53.一 已实取的 add -N 空 blob 实物与判据）；第 14 条「范围声明必须带
+可机械判定的边界 + 复审触发条件」（新增 = 新文件/新判据/新量具/新工作面/新刀；纯账面文字不在此列）。
+
+**九、本批复跑读数（末轮件名不预告，本节先定稿）。**
+按在册「末轮件名只写进提交信息、不预告」的口径，k70 全链 / 门件 / typo 默认面 / doc-sync 的件名、
+rc 与关键行随本批提交信息入册，**不在本节回填**：本节本身就是门件的判读面，写完再改它就会让刚取到的
+读数过期（第 9 条判决新鲜度）。本节定稿后才跑末轮，跑完到提交之间不再改任何在册文档。
+
+**十、两处已过期的历史读数（只在被引处订正，不回改原文）。** 审核件
+`docs/plans/review-error-contract-g2-2026-11-07.md` 第 231 行写「默认面 17 件、本件不在那一面里」，
+那是 11-07 23:41 之前的读数；11-07 23:48 本件已进默认面（现取 18 件），该句自此刻起不再成立。
+同件第 226 行「未提交、未推送」是那一轮的边界陈述，本批提交后由提交信息覆盖，不回改。
+另：第 13 条刚入册那一型在 11-07 23:44 同批自踩一次 —— 审核件在索引里是空 blob
+（`e69de29b`），`git add -N` 只申报未入库；本批提交前必须精确 `git add` 全内容并当场
+`git cat-file -s` 复取非空，否则第七节那句「批准依据已入库」是假绿。
+
 
