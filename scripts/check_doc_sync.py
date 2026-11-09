@@ -182,10 +182,35 @@ def check_readme_install_cmd() -> None:
                 err(f"README.md:{i}: 安装命令不一致，应统一为 'uv sync --all-packages --extra dev'，实际为 '{line.strip()}'")
 
 
-def check_pyproject_package_names() -> None:
-    for pyproj in REPO_ROOT.rglob("pyproject.toml"):
-        if ".venv" in str(pyproj) or "node_modules" in str(pyproj):
-            continue
+def iter_pyproject_paths(base: Path = REPO_ROOT) -> list[Path] | None:
+    """枚举入库 ∪ 未跟踪未忽略的 pyproject.toml；清单取不到返回 None（调用方 fail-closed）。
+
+    判定基准与存在性面一致（git 清单），不用 `rglob` 走本机 FS：gitignored 的
+    worktree/暂存目录副本（`.codeartsdoer/temp`、`.tmp-scratch` 等）曾贡献假警告。
+    """
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(base), "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+            capture_output=True,
+            check=False,
+        )
+    except OSError:  # git 不在 PATH 等
+        return None
+    if proc.returncode != 0:
+        return None
+    try:
+        rels = [b.decode("utf-8") for b in proc.stdout.split(b"\x00") if b]
+    except UnicodeDecodeError:
+        return None
+    return [base / rel for rel in rels if rel.rsplit("/", 1)[-1] == "pyproject.toml"]
+
+
+def check_pyproject_package_names(base: Path = REPO_ROOT) -> None:
+    paths = iter_pyproject_paths(base)
+    if paths is None:
+        err("仓内文件清单不可用（git ls-files 未取得）⇒ pyproject 包名校验 fail-closed")
+        return
+    for pyproj in paths:
         try:
             data = tomllib.loads(pyproj.read_text(encoding="utf-8"))
         except Exception:
@@ -195,7 +220,7 @@ def check_pyproject_package_names() -> None:
         if not name:
             continue
         parent = pyproj.parent
-        if parent == REPO_ROOT:
+        if parent == base:
             continue
         dir_name = parent.name
         expected_dir = name
@@ -211,7 +236,7 @@ def check_pyproject_package_names() -> None:
             or dir_name == "knowledge-service"
             or dir_name == "exhibition-agent"
         ):
-            warn(f"{pyproj.relative_to(REPO_ROOT)}: 包名 '{name}' 与目录名 '{dir_name}' 不匹配")
+            warn(f"{pyproj.relative_to(base)}: 包名 '{name}' 与目录名 '{dir_name}' 不匹配")
 
 
 def check_architecture_paths(

@@ -8,7 +8,7 @@
 
 > **2026-10-16 索引表机械重算记录（不是目测）**：逐节重取表格 body 行数与「条数」列求和，本节各分级的声明值与实算值**全部一致**——
 > 0.1 = 4 / 0.2 = 4 / 0.3 = **5 组求和 13**（其中「未接线半成品转正」组记 **0**，即 §3 那三条已于 10-15 全部翻勾后归零，不是漏计）/ 0.4 = 6 行在册（4 开项 + 2 条 `~~删除线~~` 已清零：D4、10 个 BOM `.py`）/ 0.5 = 5 行非开项对账。
-> 全文复选框现值 **open 25 / closed 24**（2026-10-19 R 批两批登记 10 条 + R7 闭合 1 条 + 本批清债翻 9 条后；追记是逐条累计的，取最后一条即现值）。
+> 全文复选框现值 **open 25 / closed 24**（2026-10-19 R 批两批登记 10 条 + R7 闭合 1 条 + 本批清债翻 9 条后；追记是逐条累计的，取最后一条即现值 —— **2026-10-30 起本行已不是现值**，现值看本节末条追记与 `recount_todo_index.py` 的 `DECLARED_TOTAL`）。
 > **登记一处口径重叠，未擅自重排**：0.3 标题写「全部『先方案后编码』，**无外部条件依赖**」，但其内嵌的会展 `F2 真实 LLM 连接` 标注了「需产品决策输入」——按 0.1/0.2 的分类那更像一条「需拍板」项。
 > 现在它同时出现在 0.3（作为 D 组功能存量）与台账 §3 第 5 项的语义邻域里。这属分级口径的划法问题（按"卡在哪"分 vs 按"是什么面"分），**改法要动多条行，等用户定，不在本批顺手搬**。
 > 复算脚本（入库可重跑，本文件为唯一数据源）：`uv run python scripts/evidence/recount_todo_index.py`（全部一致 ⇒ 退出码 0；任何分级不符 ⇒ 1）。
@@ -28,6 +28,10 @@
 > **（2026-10-19 追记，R 批登记·零翻转）**：本批**只登记不翻转**——§0.4/§5 新增 R1-R6 六条（nl2sql 合入前评审 #12-#17 的"建议"级，逐条在 feat 线复验有效：黑名单放行 5 类函数为实测、classify_error 字符串优先、`str(raw)`、lru_cache、唯一键缺 table_name、段名静默忽略均实读确认；同批"严重/警告"级 #1-#11 已修复关闭）。diff 内 `- [ ]`→`- [x]` **零处** ⇒ 按相对口径 open 25→31、closed 14 不变、E 组开项 4→10（§0.4 标题同批改为「12 行在册 = 10 条开项 + 2 条已清零」）。可由 `git diff HEAD~1 -- docs/TODO.md` 核：新增 `- [ ]` 恰 **6** 处、状态变更 **0** 处。
 > **（2026-10-05 追记，本批为 PR #55 处置收口）**：本批只做**状态订正**（§0.2 第 1 行 / §0.5 的 open PR、alerts、分支形态 / §8 的 Dependabot 门禁条），**未新增、未关闭任何开项**——diff 内零 `- [ ]` ↔ `- [x]` 状态变更（可用 `git diff docs/TODO.md` 判），故上行的计数口径与数值不变。**不在此处重述计数**：本机实测 `^- \[ \]` 与 `^\s*- \[ \]` 都得 31、`^- \[x\]` 得 8，与上行「顶格正则只取到 15 / closed 7」的既有口径不一致（成因未查，不做推定复现）⇒ 仍以「先定义口径再引用、不从文件外口头汇总」为规矩，本批不引入第二个数。
 
+> **（2026-10-30 追记，`/health` 记忆后端可见性登记·零翻转）**：本批**只登记不翻转** —— §0.2/§6 新增一条「`/health` 上报记忆后端真实装配态」（来源：`docs/plans/plan-mongo-probe-timeout-single-impl-2026-10-30.md` §9 首行的排除项；用户 2026-10-30 定「进 TODO 排期、不入台账 §3 待拍板」）。diff 内 `- [ ]` → `- [x]` **零处** ⇒ 按相对口径 open 25→26、closed 24 不变、§0.2 由 4 行/4 条开项变 **5 行/5 条**（§0.3 前端那组 3 条**未动**：本项是后端契约面，不混进前端的三条勾沉里）。可由**钉了端点的**命令核：`git diff -U0 07a550bf~1..07a550bf -- docs/TODO.md`（**不写 `HEAD~1`**，理由见本条末）：新增 `- [ ]` 恰 **1** 处、状态变更 **0** 处。——为什么不能写 `HEAD~1`：下一批提交后它就不是登记批了，同一个命令会读出 0 而被当成「判据不过」；登记后的 tip `e5ab37db` 上实测：拿 `HEAD~1` 得 **0**、拿 `07a550bf~1..07a550bf` 得 **1/0** ⇒ 命令必须带**固定 rev 端点**（同型坑在本文 §0 历史追记里另有 6 行，属快照、不就地改写，已登台账 §4 **C8**）。——另一条同型坑：**计数命令必须锚定行首**：`git diff -U0 07a550bf~1..07a550bf -- docs/TODO.md | Select-String -Pattern '^\+- \[ \]'` = **1**、`'^\+- \[x\]'` = **0**；不锚的 `'^\+.*- \[ \]'` 会得到 **2/1**，多出的两条就是**本段自己写的 `- [ ]` / `- [x]` 字样**（追记在描述判据时不可避免把 token 写进了 `+` 行）⇒ 又一例「判据的散文与判据的对象共用形状」：计数靠行首锚区分，不靠人目测哪条是散文。`recount_todo_index.py` 的 `DECLARED_TOTAL` 同批更新（脚本口径 5：每批追记后必须同批更新）。绝对值仍受上条登记的口径不一致影响 ⇒ 不重开对账、不倒推历史数。
+
+> **（2026-11-02 追记，PR-0 收尾批·翻 1 处）**：本批翻转 **恰 1 处**复选框——§1 待办拆解第一条（前端技术栈选型）。判据不是「选了」而是「入库且有门」：`web/package.json` + `web/pnpm-lock.yaml` + `web/` 骨架已入库（刀⑰）、`applications/agent_server/main.py` 条件挂载 `/ui`（刀⑱）、`make ci-web` 五步 + workflow 两处 `paths:` 含 `web/**` + 多阶段 Dockerfile（刀⑲）。按**相对口径** open 26→25、closed 24→25、D 组 13→12（§0.3 标题与「前端」行条数同批 3→2）。可由**钉了端点的**命令核：`git diff -U0 1960d7a6..6bf38b61 -- docs/TODO.md` 锚行首后**四个数都记**：`^\+- \[x\]` = **1**、`^\-- \[x\]` = **0**、`^\+- \[ \]` = **2**、`^\-- \[ \]` = **3** ⇒ 净额 open −1 / closed +1。⚠ **本段原判据写错过、已按实取订正**：原先只写了 `^\+- \[ \]` = **0**，而提交后真跑那条命令得 **2** —— 107/108 两条是就地改文字，一进一出各算一行，只看 `+` 侧就读成假不符；**结论（净翻转恰 1 处）未变**，由文件级 open=25 / closed=25 与本行末那个复算脚本的 PASS rc=0 两重独立见证卡住（错型登记在取证件 §23.4 行 11）。另一条同批订正：**命令不写 `HEAD`、写固定 rev 端点**（本段原文就是 `..HEAD`，与上一条追记在册的那条坑同型，自己第二次踩；下一批提交后 `HEAD` 就不是本批了，同一命令会读出另一个区间而被当成「判据不过」）。`recount_todo_index.py` 的 `DECLARED_TOTAL` 同批更新为 25/25，且**更新方向有自证**：改前跑报 MISMATCH rc=1、改后才 PASS rc=0（顺序反了就是「为了让命令变绿而改声明」）。⚠ **同批故意不翻的两条**（§0.3 前端组仍计 2 条开项）：「错误契约对齐审计」——`web/src/api/errors.ts` 只有收敛点本体、第一个消费者属 PR-1；「CI 门禁」——门已接线但 **CI runner 上从未实跑** ⇒ 翻勾就是把「接线」当「启用」。另订正 §1 盘点两处现状文字（原句「本仓库未追踪任何 `package.json` / Vue / React 工程」与 `agent_server` 行那个 ❌ 自刀⑰ 起不再是事实）——**表行不计入开项**，故不影响以上计数。绝对值仍受 §0 上文的口径不一致影响 ⇒ 不重开对账、不倒推历史数。
+
 ### 0.1 B 需外部条件（4 条）
 
 | 事项 | 锚点 | 卡在哪（实测） | 解锁动作（最小可执行） |
@@ -37,7 +41,7 @@
 | 部署侧存量取证 A/B（`checkpoints` 里存量 `user-*` thread_id · `revert_audit.operator` 历史行） | §8 + §5「审计主体」条 | 本机 `Meta Tunnel`（TUN）把整段 `<internal-ip>/24` 接管 ⇒ `TcpTestSucceeded=True` **不携带任何信息**；`docker` / `kubectl` / `psql` 全部 NOT FOUND、根无 `.env` | 二选一：同网段机器或 VPN 上代跑 `docs/operations/audit-operator-principal-runbook.md`；或本人把该段加进代理 bypass，且**先用「随机死端口对照法」复核劫持已解除**再取证 |
 | Copilot「Code scanning AI findings」工作流恒失败 | §8 | 平台侧月度配额（`SessionModelError … monthly quota` / `statusCode 402`），五个独立数据点里含**零代码 PR** ⇒ 与本仓 diff 无关 | 本仓改不了；要消噪只能在 GHAS 设置里关 AI findings。它未挂必需检查，不阻塞合并 |
 
-### 0.2 C 需拍板 / 需先出方案（4 条）
+### 0.2 C 需拍板 / 需先出方案（5 行在册 = **5 条开项**，无销项）
 
 | 事项 | 锚点 | 卡在哪 | 解锁动作 |
 |------|------|--------|----------|
@@ -45,19 +49,20 @@
 | Milvus 与 pgvector 双向量库长期是否统一 | §6 | 两边各自可用，统一属架构取舍（运维一致性 vs 迁移风险） | 先写清收益判据；无判据不动 |
 | U-1：`QueryRequest` 入站字段双写兼容层能否移除 | §6 | 兼容层的真实消费者是否存在**未取证** | 采集真实调用形态 ⇒ 无消费者则删，有则定弃用窗口 |
 | R19（GitHub issue #23）：FastAPI ≥ 0.142 原生 telemetry 与 kernel `TracingMiddleware` 双埋点 | §6 | 需确认框架无其它自配 provider 残留路径；端到端复验要真集群（通道问题归 B 组第 3 条） | 最小改动已定型：`build_api_app` 内关 telemetry + `scripts/lint_architecture.py` 加门禁；集群复验等有通道时再做 |
+| `/health` 上报**记忆后端真实装配态**（降级可见性） | §6 | 要动 `/health` 响应契约，而「三套 `status` 约定是否统一」在 `CHANGELOG.md:28` 仍是待拍板项 ⇒ 形状未定前加字段 = 再添一套字面值 | 先出方案：形状照既有三件套 `cache_backend` / `cache_ready` / `cache_degraded_reason`（`applications/agent_server/api/health_router.py:70-72`），且必须过 `tests/test_health_contract_consistency.py`（该件含「禁第 4 套 `status` 字面值」断言）；无判据不动 |
 
-### 0.3 D 功能面存量（13 条，全部「先方案后编码」，无外部条件依赖）
+### 0.3 D 功能面存量（12 条，全部「先方案后编码」，无外部条件依赖）
 
 | 组 | 条数 | 逐条事项 | 锚点 |
 |----|------|----------|------|
-| 前端 | 3 | 技术栈选型 · 前端↔后端错误契约对齐审计（须先于 P2 的 D-2/D-4 后端收敛决策）· 引入前端工程时同步补 CI 门禁 | §1（6 个应用各自的形态盘点在 §1 表内，**表行不计入开项**） |
+| 前端 | 2 | ~~技术栈选型~~（**2026-11-02 随 PR-0 落地闭合**，判据与取证见 §1 待办拆解第一条）· 前端↔后端错误契约对齐审计（须先于 P2 的 D-2/D-4 后端收敛决策）· 引入前端工程时同步补 CI 门禁（**门已接线、runner 未实跑 ⇒ 保持开项**） | §1（6 个应用各自的形态盘点在 §1 表内，**表行不计入开项**） |
 | V3 执行平台验收 | 1 | 端到端双实例物理故障转移验收（背后是 §2 的缺口 1–10，逐条需独立方案） | §2 |
 | 未接线半成品转正 | 0 | `human_task` / `execution_recovery` / `state_migration` / `payload_externalization`（**2026-10-15 四者全部接线 ⇒ 已闭合**；接线 ≠ 默认启用，详见 §3 第 1 条） · exhibition `skill_router` 接线（**2026-10-15 已闭合**） · `agent_server` `/health` 上报 V3 组件状态（**2026-10-15 已闭合**） | §3（禁止直接删除：未接线 ≠ 死代码） |
 | 会展业务骨架 | 6 | F1-D Vault/KMS · F2 真实 LLM 连接（需产品决策输入）· F01 `enforce_scope_filter` · F02 READY 数据源 · F03 同具体性不同租户样本规则 · nl2sql-service 通用化后填具体端点 | §4 |
 | 检索 / 存储增强 | 3 | LightRAG 式图谱增强检索 · MySQL 业务库支持 · 多租户配额/隔离/计费 | §7 |
 | nl2sql 评审延优 | 0 | ~~L2 guard 多表未限定列 / SELECT * fail-open 策略（R8）· workspace_id 服务端断言路径（R10，随身份门 rollout）~~ **2026-10-19 双双闭合**（R8：多表任一脸命中即拒 + SELECT * 含敏感表即拒；R10：定性声明"enforce 前不作为隔离维"，ADR-0007 §8） | §5 R 批 |
 
-### 0.4 E Low 技术债（14 行在册 = **4 条开项 + 10 条已于 2026-10-16/10-19 清零**；非阻塞，可随日常改动顺带处理）
+### 0.4 E Low 技术债（14 行在册 = **4 条开项 + 10 条已于 2026-10-16/10-19 清零**；2026-10-27 补记：R1~R7/R9 八行此前漏加删除线，本次按 §5 复选框 `- [x]` 状态补齐，行数与开项数不变；非阻塞，可随日常改动顺带处理）
 
 | 事项 | 锚点 | 为什么留着（不是遗漏） |
 |------|------|------------------------|
@@ -66,14 +71,14 @@
 | D5 `agent_core` 历史溯源注释泛化改写 | §5 | 81 处多数有档案价值，需人工逐条判断 |
 | D7 裸 `except Exception:` 存量按 ratchet 逐文件烧除 | §5 | 门禁已常驻防新增，不追求逐点清零 |
 | D8 `zhanggui-zhiku/core/config.py` 评估迁 pydantic-settings | §5 | 课程脚手架，非主线 |
-| R1 危险函数黑名单补条（`pg_advisory_*`/`lo_open`/`pg_ls_*`/`dblink_send_query`/`pg_switch_wal` 实测放行） | §5 | 2026-10-19 nl2sql 合入前评审 #12；绕过路径已全拦，问题只在清单长度；宜并入下一批 guard 改动不单开分支 |
-| R2 `classify_error` 按异常类型/SQLSTATE 分类（现为字符串匹配优先） | §5 | 2026-10-19 评审 #13；feat 现行规则已带 error_class 但匹配仍字符串优先 |
-| R3 `build_tsquery` 非字符串 token 被 stringify 成 `'None'` 词位；截断只保头部 | §5 | 2026-10-19 评审 #14 |
-| R4 `load_prompt` 的 `lru_cache` 取消 prompt 热改能力 | §5 | 2026-10-19 评审 #15；可按 `st_mtime` 做缓存键 |
-| R5 `nl2sql_value_info` 唯一键缺 `table_name`（同名列跨表撞约束）；`search_text` 无分词器版本标记 | §5 | 2026-10-19 评审 #16；改唯一键涉 DDL 迁移，先方案后动 |
-| R6 YAML 段名拼错被静默忽略（键有校验、段无校验） | §5 | 2026-10-19 评审 #17；与 #105 的 env>YAML 修法同属配置面 |
-| R7 `dw execute_readonly` 会话级 `SET default_transaction_read_only` 对当前事务无效 + "两道都在"注释误导 | §5 | 2026-10-19 第一批评审 #3；默认配置非现网 fail-open（连接级已只读），风险在关掉连接级只读时的错觉与池残留 |
-| R9 payload blob GC 不查引用即删 + 启用门槛未文档化 + `gc_min_age_hours` 无 env 透传 | §5 | 2026-10-19 第一批评审 #6；非同事务债已在 §3 第 7 行登记，不重复 |
+| ~~R1 危险函数黑名单补条（`pg_advisory_*`/`lo_open`/`pg_ls_*`/`dblink_send_query`/`pg_switch_wal` 实测放行）~~ **已闭合（2026-10-19）** | §5 | 2026-10-19 nl2sql 合入前评审 #12；绕过路径已全拦，问题只在清单长度；宜并入下一批 guard 改动不单开分支 |
+| ~~R2 `classify_error` 按异常类型/SQLSTATE 分类（现为字符串匹配优先）~~ **已闭合（2026-10-19）** | §5 | 2026-10-19 评审 #13；feat 现行规则已带 error_class 但匹配仍字符串优先 |
+| ~~R3 `build_tsquery` 非字符串 token 被 stringify 成 `'None'` 词位；截断只保头部~~ **已闭合（2026-10-19）** | §5 | 2026-10-19 评审 #14 |
+| ~~R4 `load_prompt` 的 `lru_cache` 取消 prompt 热改能力~~ **已闭合（2026-10-19）** | §5 | 2026-10-19 评审 #15；可按 `st_mtime` 做缓存键 |
+| ~~R5 `nl2sql_value_info` 唯一键缺 `table_name`（同名列跨表撞约束）；`search_text` 无分词器版本标记~~ **已闭合（2026-10-19）** | §5 | 2026-10-19 评审 #16；改唯一键涉 DDL 迁移，先方案后动 |
+| ~~R6 YAML 段名拼错被静默忽略（键有校验、段无校验）~~ **已闭合（2026-10-19）** | §5 | 2026-10-19 评审 #17；与 #105 的 env>YAML 修法同属配置面 |
+| ~~R7 `dw execute_readonly` 会话级 `SET default_transaction_read_only` 对当前事务无效 + "两道都在"注释误导~~ **已闭合（2026-10-19）** | §5 | 2026-10-19 第一批评审 #3；默认配置非现网 fail-open（连接级已只读），风险在关掉连接级只读时的错觉与池残留 |
+| ~~R9 payload blob GC 不查引用即删 + 启用门槛未文档化 + `gc_min_age_hours` 无 env 透传~~ **已闭合（2026-10-19）** | §5 | 2026-10-19 第一批评审 #6；非同事务债已在 §3 第 7 行登记，不重复 |
 | ~~10 个已入库的 UTF-8 BOM `.py`~~ **已清零（2026-10-16）** | §5 | 见 §5 该项闭合记录：**未按原处方摘除 `utf-8-sig`**（那是扫描任意源文件时的正确读取约定，摘掉会让 P12 在未来任一 BOM 文件上退化成假阳性噪音），回归用例因**自带合成 BOM** 故无需调转、清零后仍有效 |
 
 ### 0.5 非开项对账（防止「TODO 里没有 = 不存在」）
@@ -88,11 +93,11 @@
 
 ## 1. 前端界面（缺口最大项）
 
-现状盘点（本仓库未追踪任何 `package.json` / Vue / React 工程，`courses/zhanggui-wenda/data-agent-fronted` 仅为课程脚手架，本地未入库）：
+现状盘点（**2026-11-02 订正**：原句「本仓库**未追踪**任何 `package.json` / Vue / React 工程」自第十六批刀⑰ 起作废 —— `web/package.json` 与 `web/pnpm-lock.yaml` 已入库，Vue 3 + Vite + TS 骨架已在，`agent_server` 侧另有 `/ui` 条件托管；本行原句保留为历史（同批的 `courses/zhanggui-wenda/data-agent-fronted` 仅为课程脚手架、本地未入库，那一半仍成立）：
 
 | 应用 | 当前形态 | 待办 |
 |------|---------|------|
-| `agent_server` | ❌ 无独立前端代码；`config.py` CORS 默认允许 `http://127.0.0.1:5173`（Vite 开发服务器），但仓库内无对应工程 | 需新建 SSE 流式对话控制台，复用 `/query`（SSE）+ `/history` + `/session/revert` 现有接口 |
+| `agent_server` | 🟡 **2026-11-02 起有工程与托管面**：`web/` 骨架已入库，`applications/agent_server/main.py` 条件挂载 `/ui`（无 dist 即不挂）；但**尚无数据面** —— 无 api 客户端、无 SSE 消费、无 `/health` 拉取（`config.py` CORS 仍只放行 `http://127.0.0.1:5173`） | 待 PR-1：新建 SSE 流式对话控制台，复用 `/query`（SSE）+ `/history` + `/session/revert` 现有接口 |
 | `agent_federation` | ❌ 无前端；`docs/plans/skill-consolidation-inventory.md` 标注「保留 HTTP 壳（WS + 文件上传/下载）供前端直连」，但直连方尚无实现 | 需基于已就绪的 `serialize_stream_event` 统一 schema（见 `CHANGELOG.md`「WS 出口统一收尾」）做多 Agent 会话界面 |
 | `exhibition-agent` | 🟡 已有 `static/index.html`（235 行单文件暗色控制台，仅覆盖 skill 调试） | 需产品化；且依赖第 3 节 `skill_router` 接线后才能展示统一门禁/route 拦截反馈 |
 | `kefu-service` | ❌ 无前端 | 需接入联邦 `/invoke`（Agent Protocol）的客服会话窗口 |
@@ -100,9 +105,9 @@
 | `knowledge-service` | 🟡 已有 2 个静态页（`import_process/page/import.html` + `query_process/page/chat.html`），未组件化 | 需补：知识库列表 / 生命周期状态机可视化 / 多租户 ACL 管理页 |
 
 待办拆解（需独立方案）：
-- [ ] 前端技术栈选型（未定，需按 `AGENTS.md`「框架选型规则」评估成熟度，不预先绑定 Vue/React）
-- [ ] 各应用前端 ↔ 后端错误契约对齐审计：`{detail}` 语义码目前是前端要解析的形状，须先于 `docs/plans/plan-p2-unified-exception-handlers-2026-09-24.md` 的 D-2/D-4 后端收敛决策落地，避免后端改契约打破前端
-- [ ] 若引入前端工程，需同步补 CI 门禁（当前 `make lint`/pytest 仅覆盖 Python 侧，前端代码漂移将无人拦截）
+- [x] 前端技术栈选型 ⇒ **2026-11-02 已定并落地：Vue 3 + Vite + TypeScript（pnpm 单包）**。判据不是「选了」而是「入库且有门」：`web/package.json` 的 `packageManager` 钉 pnpm 版本、`web/pnpm-lock.yaml` 必入库、`make ci-web` 作为独立目标存在。⚠ 选型级别属 D1（可逆 + 中影响）且当时已按《框架选型规则》评估；**不预先绑定**那句已兑现为「只绑 Vue 一套而不绑宿主页」的两条通道形状（见 `web/README.md` 第一节）。逐刀 rev 与取证在 `docs/operations/evidence/2026-10-30-web-visual-references/readings.md` §23。（**2026-11-03 刀㉚ 随动，只随两处现值、不翻勾**：① 原句「运行时依赖只有 `vue`」已不是事实 —— PR-1 引入 `eventsource-parser`（精确钉版），现值以 `web/package.json` 的 `dependencies` 为准；② 原句列举的「五步（frozen install → tokens 对账 → eslint → vue-tsc → vite build）」已被 PR-1 扩面，步数与顺序一律以 Makefile 的 `ci-web:` 目标为准 —— 本行保留那份清单只作为刀⑲ 当时的历史形状）
+- [ ] 各应用前端 ↔ 后端错误契约对齐审计：`{detail}` 语义码目前是前端要解析的形状，须先于 `docs/plans/plan-p2-unified-exception-handlers-2026-09-24.md` 的 D-2/D-4 后端收敛决策落地，避免后端改契约打破前端。（**2026-11-02 状态订正、未翻勾**：`web/src/api/errors.ts` 只交了 `describeError` / `describeStreamError` 两个收敛点**本体**，第一个消费者属 PR-1 ⇒ **审计仍未做**，不做「已部分完成」的推定）（**2026-11-03 刀㉚ 随动、仍未翻勾，理由换形**：「第一个消费者属 PR-1」那一半已成事实 —— `web/src/api/sse.ts` 真 import 了这两个收敛点并被行为件驱动；但**该消费只到喂帧层、无页面调用点**，而本条要的是**审计**（各服务 `{detail}` 形状的盘点）不是实现 ⇒ 开项理由从「无消费者」换成「审计未做」，开项状态本身未变）
+- [ ] 若引入前端工程，需同步补 CI 门禁（当前 `make lint`/pytest 仅覆盖 Python 侧，前端代码漂移将无人拦截）。（**2026-11-02 状态订正、故意不翻勾**：门已接线 —— `make ci-web`（刀⑲ 入库时是五步，刀㉚ 扩面后一律以 Makefile 的 `ci-web:` 为准、不再抄数）与 workflow 两处 `paths:` 含 `web/**` 已入库，本机与容器两处反证均有牙；**但 CI runner 上那一步从未实跑** ⇒ 翻勾就是把「接线」当「启用」。runner 上绿一轮后可闭合，未验证项登记同在 §23 那条链末）
 
 ## 2. V3 企业执行平台验收缺口
 
@@ -236,6 +241,7 @@
 - [ ] U-1：`QueryRequest` 入站字段名（`query`/`question`、`session_id`/`thread_id`）双写兼容层能否移除（见 `README.md`「已知待拍板项（技术债）」）
 - [x] CodeQL Batch 6（已执行，方案 `docs/plans/plan-codeql-batch6-kernel-sanitizer-models-2026-10-01.md` §9）：kernel `agent_core/guardrails/fs.py` 的 `safe_join`/`resolve_within`/`safe_filename` 不被 CodeQL 内建模型识别为 sanitizer，主干重扫报出 `#23`/`#40`/`#41`/`#42`。已新增仓内模型包 `.github/codeql/extensions/agent-platform-python/`（`barrierModel` + `barrierGuardModel`）。**两个原预设已被推翻**：（一）无需从 default setup 切 advanced setup——仓级包放 `.github/codeql/extensions/` 即被自动加载，"只接受已发布包"的限制只适用组织级扩展；（二）`#43`/`#44`（`py/clear-text-logging-sensitive-data`）**不在可自定义的 sink kind 清单内**，无 barrier 可写，"保留取证 + dismiss"是技术上唯一选项（非风格偏好）。待验：合入后主干重扫确认 `#23` 闭合。——**已验收（PR #36 合入 `0bc5175`，主干重扫 open 9 → 6）**：`#23`/`#40`/`#41` 均 `state=fixed` 自动闭合（反证模型包真被 default setup 加载）；`#42` 仍 open 且经分析为结构不可消除（`resolve()` 必须在 containment 检查之前，guard 建模无法覆盖），详见方案 §9.1。剩余待做：模型包非空转自证（删 barrier 行→重扫必复报 `#23`）。**（2026-10-03 已取证闭合，无需破坏性自证）**该自证已被历史自然实验完成，三条实取：① `git diff --name-status 0bc5175^1 0bc5175` ⇒ 该 merge **只**引入 `.github/codeql/extensions/agent-platform-python/{codeql-pack.yml,models/agent_core.guardrails.fs.model.yml}` + 4 个文档，**零产品代码**（故告警消失不能归因于代码改动）；② `#40`/`#41`/`#42` 的 sink 就在 `fs.py` 本身、`#23` 在 `applications/agent_federation/api/server.py:264`，两个文件在该 merge 中均未变 ⇒ **字节相同的前后两次扫描，唯一变量就是模型包**；③ 同一次扫描本身健康且仍在报结果（analysis `1872802593` @ `2026-10-01T09:20:29Z` on `0bc5175`，`/language:python` `results_count=6`、`rules_count=43`）⇒ 排除"扫描失败/空结果导致告警消失"。若模型包是空转（未被 default setup 加载），`#23`/`#40`/`#41` 必然仍在。**因此不再去主干上删 barrier 行做破坏性自证**——那会新开支告警号、破坏本段"open=0 / 最大号 48 不增"的记录，且信息量不高于上述三条。
 - [ ] R19（GitHub issue #23）：FastAPI ≥ 0.142 **原生 telemetry 默认开启**，与 kernel `TracingMiddleware` 对同一请求各建一个同名 SERVER span（互为兄弟），且框架自行 `trace.set_tracer_provider()`——属本仓「第二状态机/双实现」反模式在框架层重现。默认取最小改动：`build_api_app` 内 `FastAPI(telemetry={"tracing": False})` + `scripts/lint_architecture.py` 新增门禁（裸 `FastAPI(` 未关 telemetry 即 CI 失败）；动工前需确认框架无其它自配 provider 残留路径，并做真集群端到端复验（见 `docs/plans/plan-observability-global-remediation-2026-09-29.md` §18）
+- [ ] `/health` 上报**记忆后端的真实装配态**（降级可见性）：`MONGO_URL` 配错或 mongo 宕时 `get_checkpointer()` 会静默降级 `InMemorySaver`（`packages/agent-core/agent_core/memory/__init__.py:94-117` 的 `except` + `logger.warning` 链，降级本身是对的），但健康面读不到这一态：本轮实读 `applications/agent_server/api/health_router.py:39-76` 逐字段 + `git grep -nE "mongo|checkpoint|history_backend|memory_backend" -- packages/shared-schemas/shared_schemas/health.py` = **0 命中**（2026-10-30 实取）。注意它**不是** `CHANGELOG.md:28` 那一条「`/health` 上报真实装配态」的重复：那一项已在报的是 V3 四部件（`cost_governance` / `forensic` / `admission` / `revert` 等），记忆后端三态（`pg_pool` / `MongoCheckpointer` / `InMemorySaver`）始终不在字段集里。前端侧的后果：`plan-web-frontend` PR-4 状态灯页的判据是「每盏灯的文本可追溯到字段值」⇒ 它无法把「现在跑的是内存档」告诉使用者。**动工前须先出方案**：要动的是两层契约模型（`HealthResponse` / `DependencyHealth`），而「三套 `status` 约定是否统一」本身仍待拍板（`CHANGELOG.md:28`）⇒ 不得为补这一格发明第 4 套字面值（`tests/test_health_contract_consistency.py` 有禁止断言）。来源：`docs/plans/plan-mongo-probe-timeout-single-impl-2026-10-30.md` §9 首行的排除项，用户 2026-10-30 定「进 TODO 排期、不入台账 §3 待拍板」（它不卡 D27 施工，按台账自己的收录口径属排期而非决策）
 
 ## 7. 检索 / 存储增强
 

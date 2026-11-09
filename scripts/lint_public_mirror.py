@@ -65,7 +65,10 @@ _GITLAB_GROUP = _asm("techng/", "aimode")  # 内网组路径
 _PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("P-1 私有网段-192.168", re.compile(r"(?<![\d.])192\.168\.\d{1,3}\.\d{1,3}(?![\d.])")),
     ("P-1 私有网段-172.16-31", re.compile(r"(?<![\d.])172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}(?![\d.])")),
-    # 10/8 里放过 flannel pod CIDR（README/VERIFICATION 已公开，且无主机名时不定位）
+    # 10/8 里放过 flannel pod CIDR：该段已在 deploy/k8s/VERIFICATION.md 里在册（现值 5 处），
+    # 而那份文件本来就随镜像出站 ⇒ 在别处拦它不减少暴露；且无主机名时不定位。
+    # （注释旧版还并列了 README，2026-10-30 实测为假：`git log -S` 与 `git grep HEAD -- README.md`
+    # 对 10.244 均 0 命中，故来源只留 VERIFICATION.md 一条。行为不变，正则未动。）
     ("P-1 私有网段-10/8", re.compile(r"(?<![\d.])10\.(?!244\.)\d{1,3}\.\d{1,3}\.\d{1,3}(?![\d.])")),
     ("P-2 内网主机名", re.compile(rf"\b{_OPS_HOST_PREFIX}\d+\b", re.I)),
     ("P-2 内网 GitLab 与组路径", re.compile(_asm(_GITLAB_HOST, "|", _GITLAB_GROUP, r"|code\.mingyan", "g"), re.I)),
@@ -91,10 +94,19 @@ _MASK_PLAN = [
 
 #: 内网信息登记台账（registry 模式用）：{仓内路径: 为何它 legitimately 携带}。
 #: 新增命中必须先登记并写清"推公开镜像时怎么脱敏"；条目失效即 P-4 报红。
+#:
+#: 【2026-10-29 收严】原 3 项登记中的 2 项已随文件就地脱敏而移除（仓内只留
+#: `<internal-*>` 占位符，真值住运维机本机的 .intranet/keymap.json，不入库）。
+#: 台账从「3 个文件合法携带真值」收敛为「1 个文件携带一个非基建的合成示例」
+#: ⇒ 本仓内网分支自此进入**全仓零基建真值**口径：任何位置再出现真网段/主机名/域名，
+#: 当场 P-4（命中而未登记）。《分支卫生》#4 的「内网分支允许携带」前提未变（那是权限），
+#: 变的是我们不再行使它。推镜像前该遮的步骤已不再需要（内网版与镜像版逐行一致）。
 _REGISTRY: dict[str, str] = {
-    "docs/operations/env-126-inventory.md": (
-        "126/241/125 内网环境事实基线（真实网段、主机名、运维机出口 IP）——"
-        "内网侧工作产物；**推公开镜像前必须按 --mask-plan 脱敏并在文首留注记**"
+    "docs/adr/0013-semantic-cache-single-track.md": (
+        "仅剩一处 **PII 正则的测试输入示例**（`IP是…` 跟一个 192.168.1.x 合成值，与 agent-core 的"
+        "guardrails 用例同源）——它不是基建坐标，遮成 `<internal-ip>` 会把合成示例谎报成内网地址。"
+        "该 ADR 的真机坐标（测试机名/IP）已于 2026-10-29 脱敏。"
+        "**推镜像时这一处仍需遮**（公开侧零容忍 P-1，不看语义）；或改写示例为 RFC 5737 文档段。"
     ),
 }
 

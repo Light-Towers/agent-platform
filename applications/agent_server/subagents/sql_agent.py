@@ -7,6 +7,7 @@
 
 降级契约（同 `subagents/search.py`）：`NL2SQL_SERVICE_URL` 未配置时返回明确
 提示而非静默空结果——调用方（Planner）要能区分"没配服务"与"查了没有"。
+文案前缀住在 `subagents/degradation.py`（生产者与空证据判据共用一份常量，改文案不会把判据落下）。
 
 身份：tenant 取服务端上下文（同 rag，不收客户端表单值——ADR-0007），作为
 请求体字段透传；nl2sql 侧有自己的服务端断言优先级（断言 > 请求体 > default），
@@ -17,6 +18,7 @@ from agent_core.memory._tenant_gate import _TENANT_UNSET
 from agent_runtime.workspace_registry import server_tenant_id
 
 from agent_server.config import get_settings
+from agent_server.subagents.degradation import NL2SQL_UNCONFIGURED
 
 #: 与 capabilities.py 注册该 skill 时的 timeout_ms 对齐（问数含 LLM 生成 + 执行）
 _TIMEOUT_S = 30.0
@@ -51,7 +53,7 @@ async def sql_query(
     settings = get_settings()
     url = settings.nl2sql_service_url
     if not url:
-        return ["问数服务未配置（NL2SQL_SERVICE_URL 为空）"]
+        return [f"{NL2SQL_UNCONFIGURED}（NL2SQL_SERVICE_URL 为空）"]
 
     if tenant_id is _TENANT_UNSET:
         tenant_id = server_tenant_id(settings.default_tenant_id)

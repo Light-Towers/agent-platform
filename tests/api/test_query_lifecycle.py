@@ -46,8 +46,16 @@ async def _async_embed():
     return [0.1] * 8
 
 
-async def _async_cache_hit():
-    return "cached-text"
+class _FakeCache:
+    enabled = True
+
+    async def get(self, **_kwargs):
+        from agent_core.cache import CacheHit
+
+        return CacheHit(value={"answer": "cached-text"}, layer="l1")
+
+    async def set(self, **_kwargs):
+        return None
 
 
 class _MockAdmission:
@@ -126,13 +134,13 @@ async def test_cache_hit_releases_resources(app_with_mocks, monkeypatch):
     app, coordinator, admission = app_with_mocks
     coordinator._decision_type = "admit"
 
-    # 让缓存查询命中：pool 非 None、embed_query 返回定长向量、cache_lookup 命中
+    # 让缓存查询命中：embed_query 返回定长向量、工厂返回带命中的后端
     fake_pool = object()
     monkeypatch.setattr("agent_server.api.query_router.get_pool", lambda: fake_pool)
     monkeypatch.setattr("agent_server.api.query_router.embed_query", lambda q: _async_embed())
     monkeypatch.setattr(
-        "agent_server.api.query_router.semantic_cache.cache_lookup",
-        lambda pool, emb, thr, tenant_id="": _async_cache_hit(),
+        "agent_server.api.query_router.get_cache",
+        lambda scope: _FakeCache(),
     )
 
     status, body = await _post_query(app, "repeat question")

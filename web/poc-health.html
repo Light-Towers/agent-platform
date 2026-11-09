@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>agent-platform · 健康灯页（POC）</title>
+<!-- 样式唯一入口，顺序 tokens → base → events（视觉件 §1.1）。 -->
+<link rel="stylesheet" href="src/styles/tokens.css">
+<link rel="stylesheet" href="src/styles/base.css">
+<link rel="stylesheet" href="src/styles/events.css">
+</head>
+<body>
+<div class="app">
+
+  <header class="topbar">
+    <h1>平台健康 <span class="hint">/health 逐字段直读</span></h1>
+    <span class="spacer"></span>
+    <nav class="seg" aria-label="页面">
+      <!-- 相对链接，不引路由库：POC 阶段两页足以说明形态，Vue Router 属 PR-0 -->
+      <a class="btn" href="./poc.html">对话控制台</a>
+      <a class="btn" href="./poc-health.html" aria-current="page">健康灯</a>
+    </nav>
+    <div class="seg" role="group" aria-label="主题">
+      <button class="btn" data-theme-set="auto" aria-pressed="true">自动</button>
+      <button class="btn" data-theme-set="light" aria-pressed="false">浅色</button>
+      <button class="btn" data-theme-set="dark" aria-pressed="false">深色</button>
+    </div>
+  </header>
+
+  <p class="hint">
+    ⚠ 所有值都是本页下方的<strong>手写假数据</strong>，未请求 <code>/health</code>。这一页只证两件事：
+    灯阵移出对话页之后「一页内读完全部字段（允许滚动）」是否成立，以及四档形状能不能真的读得出差别（原措辞「一屏读完」由第八批 ② 按拍板改掉，判据见视觉件 §2.1；本页样式值一个未改）。
+  </p>
+
+  <!-- 判读说明常驻本页：形状不是装饰，是「接线 ≠ 启用」的唯一区分通道 -->
+  <section class="panel" aria-labelledby="hShape">
+    <h2 id="hShape">四档形状（先看这个再看灯）</h2>
+    <div class="shapekey">
+      <div class="sk-row"><span class="dot dot--on"></span><code>true</code><span class="hint">实心圆 · 已装配且启用</span></div>
+      <div class="sk-row"><span class="dot dot--off"></span><code>false</code><span class="hint">空心圆 · 已装配未启用</span></div>
+      <div class="sk-row"><span class="dot dot--null"></span><code>null</code><span class="hint">警示圆 · 未装配</span></div>
+      <div class="sk-row"><span class="dot dot--muted"></span><code>字符串 / 对象</code><span class="hint">方块 · 非布尔，值照原文显示</span></div>
+    </div>
+    <p class="hint">
+      <strong>false 与 null 必须是不同形状</strong>：一个说"开关没推上去"，一个说"这块根本没接"。
+      把它们都渲染成灰点，等于在界面上抹平「接线 ≠ 启用」这条在册红线。
+    </p>
+  </section>
+
+  <section class="panel" aria-labelledby="hLamp">
+    <h2 id="hLamp">全部字段（分组与字段名从源派生，本页不写死数量）</h2>
+    <p class="hint">第一段就是可追溯性本身：字段名原文 = 接口值，不做本地推断（工单件 PR-4）。</p>
+    <div id="lamps"></div>
+  </section>
+
+</div>
+
+<script>
+/* ===== 灯阵字典：分组 key 并集必须 == 派生 /health 字段全集（门禁断言 6） ===== */
+const LAMP_GROUPS = {
+  '平台基座':     ['status', 'version', 'storage', 'planner', 'auth_enabled', 'identity_mode'],
+  '检索与缓存':   ['llm', 'search', 'embedding_backend', 'embedding_real', 'cache_backend', 'cache_ready', 'cache_degraded_reason', 'cache_stats'],
+  '执行平台':     ['admission', 'coordination', 'revert', 'scheduler', 'control_plane', 'cost_governance', 'forensic'],
+  '观测':         ['otel', 'otel_status', 'langfuse_enabled', 'langfuse_ready'],
+  '数据面与工具': ['sql_backend', 'nl2sql', 'mcp', 'guard_enabled', 'dependencies'],
+};
+
+/* 一行一键是硬要求：门禁断言 6 靠「行首缩进 + 标识符 + 冒号」取 key，多键共一行会漏收。 */
+const LAMP_WHY = {
+  status: '服务整体健康状态',
+  version: '服务版本',
+  storage: '平台库后端',
+  planner: '当前 Planner 策略',
+  auth_enabled: '是否要求 X-API-Key',
+  identity_mode: '身份断言模式（不读具体值）',
+  llm: 'LLM 可用',
+  search: '联网搜索可用',
+  embedding_backend: '实际 embedder 类型名',
+  embedding_real: '语义检索真值（false = 按字面比对）',
+  cache_backend: '缓存后端',
+  cache_ready: '缓存就绪',
+  cache_degraded_reason: '降级真因',
+  cache_stats: '命中/未命中计数',
+  admission: '准入限流已装配且启用',
+  coordination: '会话并发协调启用',
+  revert: '对话回退启用',
+  scheduler: 'ExecutionScheduler 已装配',
+  control_plane: 'ControlPlane 已装配',
+  cost_governance: '成本治理已装配',
+  forensic: '轨迹/取证存储已装配',
+  otel: 'OTel 追踪开关',
+  otel_status: '观测内核状态机真值',
+  langfuse_enabled: 'Langfuse 已装配',
+  langfuse_ready: 'Langfuse 后端可达',
+  sql_backend: '问数数据面方言（由持业务库的服务上报）',
+  nl2sql: '问数服务已注册',
+  mcp: 'MCP 工具启用',
+  guard_enabled: 'SQL 守卫启用',
+  dependencies: '依赖探活明细',
+};
+
+/* 假接口值：刻意覆盖四档形状 —— true 实心 / false 空心 / null 警示 / 字符串·对象 方块 */
+const FAKE = {
+  status: 'ok', version: 'poc-本地假值', storage: 'postgres', planner: 'graph',
+  auth_enabled: true, identity_mode: 'jwt',
+  llm: true, search: false, embedding_backend: 'LocalEmbedder', embedding_real: true,
+  cache_backend: 'valkey', cache_ready: true, cache_degraded_reason: null, cache_stats: { hit: 41, miss: 7 },
+  admission: true, coordination: false, revert: null,
+  scheduler: true, control_plane: false, cost_governance: false, forensic: null,
+  otel: true, otel_status: 'DEGRADED', langfuse_enabled: true, langfuse_ready: false,
+  sql_backend: 'postgres', nl2sql: true, mcp: false, guard_enabled: true,
+  dependencies: [{ name: 'db', ok: true }, { name: 'cache', ok: true }, { name: 'vector', ok: false }],
+};
+
+const el = (tag, cls, html) => {
+  const n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (html !== undefined) n.innerHTML = html;
+  return n;
+};
+
+function dotClass(v) {
+  if (v === null || v === undefined) return 'dot dot--null';
+  if (v === true) return 'dot dot--on';
+  if (v === false) return 'dot dot--off';
+  return 'dot dot--muted';
+}
+function valClass(v) {
+  if (typeof v !== 'string') return '';
+  if (v === 'ACTIVE' || v === 'ok') return 'v--active';
+  if (v === 'DEGRADED') return 'v--degraded';
+  return '';
+}
+
+function renderLamps() {
+  const host = document.getElementById('lamps');
+  host.innerHTML = '';
+  for (const [group, keys] of Object.entries(LAMP_GROUPS)) {
+    const g = el('div', 'lamp-group');
+    g.appendChild(el('div', 'o-head-sm', group));
+    const wrap = el('div', 'lamps');
+    for (const k of keys) {
+      const v = FAKE[k];
+      const card = el('div', 'lamp');
+      const head = el('div', 'lamp__head');
+      head.appendChild(el('span', dotClass(v)));
+      head.appendChild(el('span', 'lamp__key', k));
+      card.appendChild(head);
+      card.appendChild(el('div', `lamp__val ${valClass(v)}`, JSON.stringify(v ?? null)));
+      card.appendChild(el('div', 'lamp__why', LAMP_WHY[k]));
+      wrap.appendChild(card);
+    }
+    g.appendChild(wrap);
+    host.appendChild(g);
+  }
+}
+
+/* ===== 主题：与对话页共用同一个偏好键 ===== */
+const THEME_KEY = 'ap.ui.theme';
+function applyTheme(pref) {
+  if (pref === 'auto') delete document.documentElement.dataset.theme;
+  else document.documentElement.dataset.theme = pref;
+  document.querySelectorAll('[data-theme-set]').forEach((b) => {
+    b.setAttribute('aria-pressed', String(b.dataset.themeSet === pref));
+  });
+}
+document.querySelectorAll('[data-theme-set]').forEach((b) => {
+  b.addEventListener('click', () => {
+    const pref = b.dataset.themeSet;
+    if (pref === 'auto') localStorage.removeItem(THEME_KEY);
+    else localStorage.setItem(THEME_KEY, pref);
+    applyTheme(pref);
+  });
+});
+
+renderLamps();
+applyTheme(localStorage.getItem(THEME_KEY) || 'auto');
+</script>
+</body>
+</html>

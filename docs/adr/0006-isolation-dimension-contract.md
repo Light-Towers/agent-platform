@@ -29,10 +29,12 @@
 | `chunks`（RAG 文档切片） | **仅 `workspace_id`**（v2 追加，默认 `'default'`） | `001_baseline.up.sql:7-16`；`002_workspace.up.sql:4-5` |
 | `sql_ddl` / `sql_docs` / `sql_examples` | **仅 `workspace_id`**（默认 `''`） | `001_baseline.up.sql:41-68` |
 | `memories` | `tenant_id` + `user_id` | `001_baseline.up.sql:18-20`；`004` / `005` 迁移 |
-| `semantic_cache` | 仅 `tenant_id` | `001_baseline.up.sql:36-39` |
+| `semantic_cache` | 仅 `tenant_id`（表已停用，ADR-0013 C） | `001_baseline.up.sql:36-39` |
 | `execution_queue` / `rate_limit_buckets` / `cost_records` | 仅 `tenant_id` | `001_baseline.up.sql:223-272` |
 | `admission_queue` | 仅 `user_id` | `001_baseline.up.sql:72-83` |
 | `episodic_memories` / `procedural_memories` | **无隔离列** | `001_baseline.up.sql`（见 ADR-0005 / plan G1） |
+
+> **2026-10-25 补记（ADR-0013 C）**：`semantic_cache` 表已停止读写，待生产观察期后删除；缓存隔离改由 Valkey key 与索引 TAG 承担。另明确：缓存实现中的 `scope`（`agent_server` / `federation`）是**流水线分区**，不是隔离维度——隔离维度仍是 `tenant_id`，`scope` 不能替代它，也不构成跨租户访问面。
 
 ### 2.2 两个维度的**可信性不同**（决定性事实）
 
@@ -41,7 +43,7 @@
 | `tenant_id` | **服务端**：请求链路 ContextVar | `agent_federation/agent/memory/main_agent_memory.py:7`「`tenant_id` 取自请求链路 ContextVar」 |
 | `workspace_id` | **客户端**：请求字段，默认 `"default"` | `agent_server/api/import_router.py:20`；`agent_server/agent/state.py:35` |
 
-且优化 G 的决策明确：workspace_id「由**客户端显式传**……**仅 app 内部隔离**，不写 `shared_schemas`（联邦网关无感）」——`architecture-improvement-plan.md:118`。
+且优化 G 的决策明确：workspace_id「由**客户端显式传**……**仅 app 内部隔离**，不写 `shared_schemas`（联邦网关无感）」——`docs/architecture/architecture-improvement-plan.md:118`。
 
 ### 2.3 `workspace_id` 无归属校验
 
@@ -49,7 +51,7 @@
 
 ### 2.4 `user_id` 位已被 `workspace_id` 占用（TD-13）
 
-`tech-debt-hardcoded-logic.md:126-133`：内核 `recall_typed` / `remember_fact` 形参与列名均为 `user_id`，而 federation 调用处传的是 `workspace_id`，「隔离主键正确传递（`workspace_id` 即落于内核 `user_id` 形参位）」。
+`docs/tech-debt/tech-debt-hardcoded-logic.md:126-133`：内核 `recall_typed` / `remember_fact` 形参与列名均为 `user_id`，而 federation 调用处传的是 `workspace_id`，「隔离主键正确传递（`workspace_id` 即落于内核 `user_id` 形参位）」。
 
 **实质后果**：`memories` 表事实上是 **workspace 级**而非用户级——「跨 workspace 的同一用户画像」这一层**不存在**。
 
@@ -58,7 +60,7 @@
 ### 2.5 存在不属于任何 workspace 的数据
 
 - **租户级治理数据**：`execution_queue`、`rate_limit_buckets`（主键含 `tenant_id, dimension`）、`cost_records`。配额 / 限流 / 成本只认租户，workspace 装不下。
-- **平台级资产**：`procedural_memories` 是**持久化的 Skill 定义**（`procedural_memory.py:1-22`：「已经掌握的做事方法」「从 Episodic Memory 挖掘高频成功模式」）。技能天然跨 workspace 复用；按 workspace 隔离 = 每个空间重学一遍，**摧毁程序性记忆的价值**。
+- **平台级资产**：`procedural_memories` 是**持久化的 Skill 定义**（`packages/agent-runtime/agent_runtime/procedural_memory.py:1-22`：「已经掌握的做事方法」「从 Episodic Memory 挖掘高频成功模式」）。技能天然跨 workspace 复用；按 workspace 隔离 = 每个空间重学一遍，**摧毁程序性记忆的价值**。
 - **共享知识库**：`SharedSemanticStore` 按 `knowledge_id / tenant_id` 隔离（`semantic_memory.py` 模块 docstring），不是 workspace。
 
 ---
@@ -101,7 +103,7 @@
 ### D5 处置 TD-13 的语义重载
 
 - **不重命名**内核形参与列（TD-13 已论证：破坏 schema 与多包兼容）；
-- 改为在内核 `typed.py` / `store.py` docstring 明确：**该形参位是「归属键（scope key）」，调用方须自行决定承载 `workspace_id` 还是 `user_id`，且同一部署内必须一致**；
+- 改为在内核 `packages/agent-core/agent_core/memory/typed.py` / `store.py` docstring 明确：**该形参位是「归属键（scope key）」，调用方须自行决定承载 `workspace_id` 还是 `user_id`，且同一部署内必须一致**；
 - 若未来需要真正的「跨 workspace 用户画像」，应**新增显式维度**，而非复用该位。
 
 ---
@@ -112,8 +114,8 @@
 |---|------|------|------|
 | **W1** | **P0（活跃）** | `chunks` / `sql_ddl` / `sql_docs` / `sql_examples` 四表**无 `tenant_id`**，仅靠客户端传入的 `workspace_id` 隔离 → **多租户部署已确认（2026-09-27），跨租户文档与 SQL 语料可见即为现实风险** | `001_baseline.up.sql:7-16,41-68`；`002_workspace.up.sql` |
 | **W2** | **P0（活跃）** | `workspace_id` 无归属校验（无 `workspaces` 表），无法证明其归属 → 跨租户撞名即可越权 | 全仓无归属表 |
-| W3 | **P0（用户拍板必须存在）** | 跨 workspace 用户画像缺失：`memories.user_id` 位被 `workspace_id` 占用（TD-13，且 `agent_server/agent/graph.py:121` 与 federation 两侧均传 workspace_id），用户维度事实上不存在 | `tech-debt-hardcoded-logic.md:126-133` |
-| W4 | P1 | knowledge-service 有 `tenant_id` 字段但**默认空、可选**（`import_router.py:148` 默认 `""`；`mongo_history_utils.py:65` 仅在非空时追加过滤）→ 不传即不过滤，须升级为服务端强制断言 | `knowledge_service/api/import_router.py:148` |
+| W3 | **P0（用户拍板必须存在）** | 跨 workspace 用户画像缺失：`memories.user_id` 位被 `workspace_id` 占用（TD-13，且 `agent_server/agent/graph.py:121` 与 federation 两侧均传 workspace_id），用户维度事实上不存在 | `docs/tech-debt/tech-debt-hardcoded-logic.md:126-133` |
+| W4 | P1 | knowledge-service 有 `tenant_id` 字段但**默认空、可选**（`import_router.py:148` 默认 `""`；`applications/knowledge-service/knowledge_service/clients/mongo_history_utils.py:65` 仅在非空时追加过滤）→ 不传即不过滤，须升级为服务端强制断言 | `knowledge_service/api/import_router.py:148` |
 | W5 | P2 | 隔离维度无统一约定，七类表四种组合，新增表时无章可循 | 本 ADR §2.1 |
 
 > **部署形态已确认（2026-09-27 用户拍板）：本系统为多租户设计。** 原"多租户化阻断项"的边界条件不再适用，W1–W4 全部按活跃问题定级。

@@ -23,6 +23,13 @@ NEW_FIELDS = (
     "guard_enabled", "auth_enabled", "identity_mode",
     # Langfuse 两盏灯（方案 plan-langfuse-wiring §2.2）：enabled=配置意愿，ready=真装配。
     "langfuse_enabled", "langfuse_ready",
+    # 语义缓存（ADR-0013 C）：backend=实际后端，ready=连得上，reason=降级原因（已脱敏）。
+    # stats=命中率与分账计数（Stage 4 判据「命中率可在 health 读到」；契约模型固定形状，
+    # 取数是纯内存读，不在探针路径发命令）。
+    "cache_backend", "cache_ready", "cache_degraded_reason", "cache_stats",
+    # 问数子代理注册位（2026-10-28 批次 5）：它替掉的不是 sql_backend（那位在共享基类上
+    # 归“拥有业务库数据面的服务”所有），而是平台侧“问数到底走不走子代理”这个真问题。
+    "nl2sql",
 )
 
 _SWITCHES = (
@@ -30,21 +37,39 @@ _SWITCHES = (
     "DEPLOY_ENFORCE_IDENTITY", "LLM_PUBLIC_KEY",
     "LLM_API_KEY", "LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY", "LANGFUSE_HOST",
     "COST_GOVERNANCE_ENABLED",
+    # 不列进来会有一个假阴：上一条用例给它 setenv 后泄到下一条，“未配置”用例读到 true。
+    "NL2SQL_SERVICE_URL", "SQL_DSN",
 )
+_CACHE_ENV = ("CACHE_ENABLED", "CACHE_BACKEND", "VALKEY_URL",
+              "CACHE_CONNECT_TIMEOUT_MS", "CACHE_COMMAND_TIMEOUT_MS")
 
 
 @pytest.fixture(autouse=True)
 def _clean_switch_env():
-    """用例前后都清 env + 清 settings 缓存，避免 lru_cache 与 env 跨用例泄漏。"""
+    """用例前后都清 env + 清 settings/缓存配置单例，避免跨用例泄漏。
+
+    缓存默认 ``disabled``：这些用例验的是装配态，不应依赖本机有没有 Valkey。
+    需要真后端行为的用例自行覆盖 ``CACHE_BACKEND``/``VALKEY_URL``。
+    """
     import os
 
-    for key in _SWITCHES:
+    for key in (*_SWITCHES, *_CACHE_ENV):
         os.environ.pop(key, None)
+    os.environ["CACHE_BACKEND"] = "disabled"
     _clear_cache()
+    _reset_cache()
     yield
-    for key in _SWITCHES:
+    for key in (*_SWITCHES, *_CACHE_ENV):
         os.environ.pop(key, None)
     _clear_cache()
+    _reset_cache()
+
+
+def _reset_cache() -> None:
+    from agent_runtime.cache import reset_cache_config, reset_cache_for_tests
+
+    reset_cache_config()
+    reset_cache_for_tests()
 
 
 def _clear_cache() -> None:
@@ -54,12 +79,19 @@ def _clear_cache() -> None:
 
 
 def _health_with(monkeypatch, **env) -> dict:
-    """设 env → 清缓存 → 起一遍 lifespan → 取 /health。"""
+    """设 env → 清缓存 → 起一遍 lifespan → 取 /health。
+
+    本文件的缓存用例默认以 ``CACHE_BACKEND=disabled`` 运行（不依赖本机 Valkey）；
+    要验 valkey 形态就在 ``env`` 里显式传 ``CACHE_BACKEND="valkey"`` 与不可达的
+    ``VALKEY_URL``。
+    """
     for key in _SWITCHES:
         monkeypatch.delenv(key, raising=False)
+    env.setdefault("CACHE_BACKEND", "disabled")
     for key, value in env.items():
         monkeypatch.setenv(key, value)
     _clear_cache()
+    _reset_cache()
     with TestClient(app) as client:
         return client.get("/health").json()
 
@@ -78,6 +110,37 @@ class TestHealthFieldShape:
             data = client.get("/health").json()
         for key in NEW_FIELDS:
             assert key in data, f"/health 缺字段 {key}"
+
+
+class TestCacheHealth:
+    """ADR-0013 C：/health 必须如实报缓存后端与降级原因，且不泄漏凭据。"""
+
+    def test_disabled_backend_is_ready_without_reason(self, monkeypatch):
+        data = _health_with(monkeypatch, CACHE_BACKEND="disabled")
+        assert data["cache_backend"] == "disabled"
+        assert data["cache_ready"] is True
+        assert data["cache_degraded_reason"] is None
+
+    def test_enabled_false_wins_over_valkey(self, monkeypatch):
+        data = _health_with(
+            monkeypatch, CACHE_ENABLED="false", CACHE_BACKEND="valkey"
+        )
+        assert data["cache_backend"] == "disabled"
+        assert data["cache_ready"] is True
+
+    def test_unreachable_valkey_reports_degraded_without_password(self, monkeypatch):
+        password = "probe-cache-password-must-not-appear"
+        data = _health_with(
+            monkeypatch,
+            CACHE_BACKEND="valkey",
+            VALKEY_URL=f"redis://:{password}@127.0.0.1:1/0",
+            CACHE_CONNECT_TIMEOUT_MS="20",
+            CACHE_COMMAND_TIMEOUT_MS="20",
+        )
+        assert data["cache_backend"] == "valkey"
+        assert data["cache_ready"] is False
+        assert data["cache_degraded_reason"], "降级必须有原因"
+        assert password not in data["cache_degraded_reason"]
 
 
 class TestHealthReflectsRuntimeState:
@@ -300,6 +363,36 @@ class TestLangfuseLights:
 
         for value in list(self._CREDS.values()) + ["llm-secret-must-not-appear"]:
             assert value not in resp.text
+
+
+class TestNl2sqlBit:
+    """问数位（2026-10-28 批次 5）：只回答“子代理注册了没”，平台不再代报问数方言。"""
+
+    def test_bit_follows_the_service_url_switch(self, monkeypatch):
+        """拨 NL2SQL_SERVICE_URL 必须跟着变（本文件的总前提：不写死值）。"""
+        assert _health_with(monkeypatch)["nl2sql"] is False
+        data = _health_with(monkeypatch, NL2SQL_SERVICE_URL="http://nl2sql-service:8000")
+        assert data["nl2sql"] is True
+
+    def test_bit_does_not_echo_the_url(self, monkeypatch):
+        """/health 是免鉴权探针路径：只报位、不回显服务地址（与 auth_enabled 同一口径）。"""
+        data = _health_with(monkeypatch, NL2SQL_SERVICE_URL="http://nl2sql-service:8000")
+        assert "nl2sql-service" not in str(data), f"/health 回显了服务地址：{data}"
+
+    def test_platform_does_not_report_sql_backend(self, monkeypatch):
+        """假灯本体回归：平台侧 sql_backend 必须永远为 null，即使有人还把 SQL_DSN 注进来。
+
+        2026-10-28 之前这里是 `detect_dialect(settings.sql_dsn)`：而那份 DSN 指**平台库**，
+        报出来的 postgres 只证明“平台能连自己的库”，与问数能不能答无关（部署清单已在
+        批次 4 摘掉该注入，本轮把读它的字段与灯一并退役）。
+        """
+        data = _health_with(
+            monkeypatch, SQL_DSN="postgresql://u:p@platform-db/app", NL2SQL_SERVICE_URL="http://nl2sql-service:8000"
+        )
+        assert data["sql_backend"] is None, (
+            "平台又开始报 sql_backend：这个位的语义属于持有业务库连接的服务（现 nl2sql-service），"
+            "平台把它报成非 null 就是把平台库的读数当成问数读数"
+        )
 
 
 def _raise_runtime_error(*a, **k):

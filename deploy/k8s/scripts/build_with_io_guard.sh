@@ -13,7 +13,8 @@
 #     第 2 个参数起 = distribute.sh 的目标节点；**换构建机后必须显式列全其余所有节点**，
 #     漏一台则该台没有镜像层，而部署无 nodeSelector ⇒ Pod 调度过去即 ErrImagePull。
 #
-# 可调环境变量：IO_LIMIT(默认 60%) / IO_STRIKES(默认连续 3 次) / IMAGE / SRC_DIR
+# 可调环境变量：IO_LIMIT(默认 60%) / IO_STRIKES(默认连续 3 次) / IMAGES / SRC_DIR
+#   IMAGES 默认两个 tag（agent-platform:dev nl2sql-service:dev），与 build.sh/distribute.sh 一致。
 # 退出码：0 全成 / 1 构建失败 / 2 rev 或路径问题 / 3 IO 熔断中止 / 4 分发失败 / 5 A1 复验失败
 set -uo pipefail
 
@@ -22,7 +23,7 @@ shift
 TARGETS="${*:-<internal-ip> <internal-ip>}"     # 从 126 构建的历史默认值
 SRC_DIR="${SRC_DIR:-/opt/agent-platform}"
 REPO="$SRC_DIR/deploy/k8s/scripts"
-IMAGE="${IMAGE:-agent-platform:dev}"
+IMAGES="${IMAGE:-${IMAGES:-agent-platform:dev nl2sql-service:dev}}"
 IO_LIMIT="${IO_LIMIT:-60}"
 IO_STRIKES="${IO_STRIKES:-3}"
 
@@ -68,21 +69,42 @@ echo "build rc=$BUILD_RC  sampler rc=$SAMPLER_RC"
 [ "$SAMPLER_RC" = "9" ] && { echo "FAIL: 因 IO 熔断中止构建（换个安静时段，或换构建机）"; exit 3; }
 [ "$BUILD_RC" = "0" ] || { echo "FAIL: 构建未通过"; exit 1; }
 
-echo "### 2/3 A1：在**镜像内**验目标 import 真成功（而非「解析器不报错」）"
+echo "### 2/3 A1：在**每个镜像内**验目标 import 真成功（而非「解析器不报错」）"
 # 这条判据的存在理由：langfuse.langchain 的导入前置是**顶层 langchain 包**，
 # 上一版只验依赖解析就上线，结果镜像里 import 失败被软 except 吞成"静默不报"。
-docker run --rm "$IMAGE" sh -c \
-  'cat /srv/agent-platform/GIT_REV; python -c "import langfuse, langfuse.langchain; print(\"A1 OK langfuse\", langfuse.__version__)"' \
-  || { echo "FAIL: A1 不通过，禁止分发"; exit 5; }
+# 同一个形状对 nl2sql 镜像同样成立：extras 挂错包时 pip 只告警不失败（构建绿、镜像里没包），
+# 所以这里按**Dockerfile 声明的每个 extra** 各探一个入口模块，漏一个即 rc=5 禁止分发。
+#   agent-platform  : langfuse 回调（[langfuse] + 顶层 langchain 前置）
+#   nl2sql-service : OTLP exporter([otel]) + HuggingFaceEmbeddings 后端([memory-embed-local]
+#                     与 [huggingface]) + psycopg 池 + PyJWT([identity])
+# 注意：nl2sql 那侧只探**包与依赖**，不探 nl2sql_service.api.server——那是模块级
+#   `app = create_app()`，在构建期无 env 的容器里跑它会把"配置未给"误判成"镜像坏了"。
+#   应用能构造这件事归现网取证（/ready + span），不归 A1。
+a1_probe() {
+  case "${1%%:*}" in
+    agent-platform) echo 'import langfuse, langfuse.langchain; print("A1 OK langfuse", langfuse.__version__)' ;;
+    nl2sql-service) echo 'import opentelemetry.exporter.otlp.proto.http.trace_exporter, sentence_transformers, langchain_huggingface, psycopg_pool, jwt, nl2sql_service; print("A1 OK nl2sql-service")' ;;
+    *) return 1 ;;
+  esac
+}
+for IMAGE in $IMAGES; do
+  PROBE="$(a1_probe "$IMAGE")" || { echo "FAIL: $IMAGE 无 A1 探针（新镜像必须同时给出「哪个 import 能证明 extras 齐了」）"; exit 5; }
+  echo "  A1 -> $IMAGE"
+  docker run --rm "$IMAGE" sh -c \
+    "cat /srv/agent-platform/GIT_REV; python -c '$PROBE'" \
+    || { echo "FAIL: A1 不通过（$IMAGE），禁止分发"; exit 5; }
+done
 
 echo "### 3/3 分发到其余全部节点"
-IMAGE="$IMAGE" timeout 1800 bash "$REPO/distribute.sh" $TARGETS || { echo "FAIL: 分发失败"; exit 4; }
+IMAGES="$IMAGES" timeout 1800 bash "$REPO/distribute.sh" $TARGETS || { echo "FAIL: 分发失败"; exit 4; }
 
-echo "### 回读：每个节点自己的 containerd-k8s 里有没有这个镜像（不信脚本的 OK 行）"
+echo "### 回读：每个节点自己的 containerd-k8s 里有没有**每个**镜像（不信脚本的 OK 行）"
 for h in $(hostname -I | awk '{print $1}') $TARGETS; do
-  line=$(ssh -o BatchMode=yes -o ConnectTimeout=8 root@$h \
-    'sudo crictl --runtime-endpoint unix:///run/containerd-k8s/containerd.sock images 2>/dev/null | grep -E "agent-platform[[:space:]]+dev" | head -1')
-  printf "  %-16s %s\n" "$h" "${line:-（未见到）}"
+  for IMAGE in $IMAGES; do
+    line=$(ssh -o BatchMode=yes -o ConnectTimeout=8 root@$h \
+      "sudo crictl --runtime-endpoint unix:///run/containerd-k8s/containerd.sock images 2>/dev/null | grep -E '${IMAGE%:*}[[:space:]]+${IMAGE##*:}' | head -1")
+    printf "  %-16s %-28s %s\n" "$h" "$IMAGE" "${line:-（未见到）}"
+  done
 done
 echo "### 结束前 PSI: $(awk '/^some/{print $2}' /proc/pressure/io)"
 echo "OK: 构建 + A1 + 分发完成。下一步在 control-plane 上 apply/rollout/verify。"

@@ -18,6 +18,8 @@
 - `QueryRequest` 入站字段名已于 2026-10-19 统一收敛：`query`/`session_id` 纯字段，旧名 `question`/`thread_id` 兼容 alias 全部删除（U-1 销项，方案 `docs/plans/plan-u1-query-request-alias-removal-2026-10-19.md`）。
 - `ThreadState` 两段式：`messages`（LangChain BaseMessage 序列化形态）+ `metadata`（编排状态），双 Planner 各自读写子集互不干扰。契约版本 `THREAD_STATE_VERSION = 1`。
 - `HealthResponse` 含 8 个能力标志位（storage/llm/search/sql_backend/coordination/admission/revert/otel/mcp），各服务按需贡献，默认 False/None 向后兼容。
+  其中 `sql_backend` 的归属是**持有业务库连接的那个服务**（现在由 nl2sql-service 报它的 dw 方言）；
+  agent_server 不报这一位（它没有业务库数据面，2026-10-28 批次 5 退役）。
 
 ## 使用
 

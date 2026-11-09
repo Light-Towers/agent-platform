@@ -14,6 +14,10 @@ class QueryGraphState(TypedDict):
     # 检索过程中的中间数据
     embedding_chunks: list  # 普通向量检索回来的切片
     hyde_embedding_chunks: list  # HyDE 检索回来的切片
+    # HyDE 假设文档本体：node_search_embedding_hyde 的出参契约（其 docstring 明写
+    # "返回…假设文档，更新会话状态"，span 侧按 result.get("hyde_doc") 读它）。
+    # 必须在此声明：未声明的键在图边界被静默丢弃，节点就白写一次。
+    hyde_doc: str
     kg_chunks: list  # 图谱检索回来的切片
     web_search_docs: list  # 网络搜索回来的文档
 

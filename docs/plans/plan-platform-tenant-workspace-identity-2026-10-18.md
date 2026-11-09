@@ -5,7 +5,7 @@
 > 定位：本文件**不重复立案**任何技术方案——ADR-0006/0007 与六份 plan 已把设计写全；本文件做三件事：
 > ① 把散落状态收敛成**一张可审计的全景矩阵**；② 给出**收敛顺序与批次**（既有文档各自为政，顺序隐含）；③ 列出**必须由用户拍板的决策**。
 > 纪律：所有结论带 `文件:行号` 锚点；区分「已实施（代码+测试）/ 待拍板 / 待环境」三种状态，不拿文档状态行当完成。
-> **批次归属（2026-10-18 用户口径）**：本计划整体处于 **nl2sql 本期（M0）之外**——nl2sql 侧范围裁定见 `plan-nl2sql-meta-lifecycle-2026-10-17.md` §4.0；本文件 T1（关缓存默认分支）不依赖 nl2sql，按本文件自身顺序推进即可，但**不并进 nl2sql 本期范围**，避免一期两摊。
+> **批次归属（2026-10-18 用户口径）**：本计划整体处于 **nl2sql 本期（M0）之外**——nl2sql 侧范围裁定见 `docs/plans/plan-nl2sql-meta-lifecycle-2026-10-17.md` §4.0；本文件 T1（关缓存默认分支）不依赖 nl2sql，按本文件自身顺序推进即可，但**不并进 nl2sql 本期范围**，避免一期两摊。
 
 ---
 
@@ -25,14 +25,14 @@
 |---|---|---|
 | 隔离维度契约（tenant=边界 / workspace=归属；D1-D5） | ✅ 已采纳 | `docs/adr/0006-isolation-dimension-contract.md` |
 | 服务端断言租户身份（A=JWT / C=内部签名头；分支 A 拍板=活跃 P0） | ✅ 已采纳 | `docs/adr/0007-server-asserted-tenant-identity.md` |
-| T9-T13 隔离加固（chunks/sql_* 补 tenant、workspaces 归属表、memories 双 scope、episodic tenant） | ✅ 已实施 | `plan-isolation-hardening-2026-09-27.md` §7；迁移 `006`~`010` |
+| T9-T13 隔离加固（chunks/sql_* 补 tenant、workspaces 归属表、memories 双 scope、episodic tenant） | ✅ 已实施 | `docs/plans/plan-isolation-hardening-2026-09-27.md` §7；迁移 `006`~`010` |
 | A1 追溯审计脚本（只读，五排查点） | ✅ 已产出，**待环境执行** | `scripts/audit_tenant_access.py` |
-| A2 LLM 可填租户通道封堵（tool schema 删 tenant_id/user_id + `_sanitize_identity`） | ✅ 已实施 | `plan-tenant-identity-2026-09-27.md` §A2 实施记录 |
-| A3 身份内核（RS256 签验 / HMAC 头 / 启动守卫）+ agent_server、federation 接线 | ✅ 已实施 | `packages/agent-runtime/agent_runtime/identity.py`、`identity_middleware.py` |
+| A2 LLM 可填租户通道封堵（tool schema 删 tenant_id/user_id + `_sanitize_identity`） | ✅ 已实施 | `docs/plans/plan-tenant-identity-2026-09-27.md` §A2 实施记录 |
+| A3 身份内核（RS256 签验 / HMAC 头 / 启动守卫）+ agent_server、federation 接线 | ✅ 已实施 | `packages/agent-runtime/agent_runtime/identity.py`、`packages/agent-runtime/agent_runtime/identity_middleware.py` |
 | A4 内部签名头（软模式，仅 knowledge-service 一路签发） | ✅ 已实施（部分） | `plan-tenant-identity` §A4；`tools/knowledge_tools.py` 附头 |
-| 身份门 6/6 装配 + P13 存在性门禁（4 shared / 2 fork） | ✅ 已实施 | `plan-identity-gate-6of6-2026-10-16.md` §8（commit `a2bac21`） |
-| 记忆/身份/工作空间五阶段方案 | 📋 方案在册，**阶段 1-5 均未动** | `plan-memory-identity-workspace-2026-10-14.md` |
-| `/query` 租户来源收口 + 缓存默认分支 PoC | 📋 **已立案待拍板，未动代码** | `plan-query-tenant-from-client-not-server-asserted-2026-10-10.md` |
+| 身份门 6/6 装配 + P13 存在性门禁（4 shared / 2 fork） | ✅ 已实施 | `docs/plans/plan-identity-gate-6of6-2026-10-16.md` §8（commit `a2bac21`） |
+| 记忆/身份/工作空间五阶段方案 | 📋 方案在册，**阶段 1-5 均未动** | `docs/plans/plan-memory-identity-workspace-2026-10-14.md` |
+| `/query` 租户来源收口 + 缓存默认分支 PoC | 📋 **已立案待拍板，未动代码** | `docs/plans/plan-query-tenant-from-client-not-server-asserted-2026-10-10.md` |
 
 ⇒ 需要新写的只有**顺序与批次**；设计全部指向上面九份文档。
 
@@ -44,15 +44,15 @@
 
 | 维度 | agent_server | agent_federation | knowledge-service | nl2sql-service | kefu-service | exhibition-agent |
 |---|---|---|---|---|---|---|
-| **① 身份门装配** | ✅ shared（`main.py` 挂 `IdentityMiddleware`） | ✅ shared（独立头 `X-Tenant-JWT` 桥接自有 ContextVar，`identity_bridge.py`） | ⚠️ fork：`TenantHeaderMiddleware`，开关 `TENANT_HEADER_ENFORCE` | ✅ shared（observe 档，10-16 接入） | ✅ shared（observe 档，10-16 接入） | ⚠️ fork：`X-Execution-Context`，**逐端点调用**，DEV 档 base64 **不验签** |
-| **② tenant 来源** | ❌ `/query` 10 处 `req.tenant_id`（数据面=客户端）；其余入口 ✅ `server_tenant_id()` | ✅ 服务端断言（`X-Tenant-JWT`） | ✅ 签名断言 > provided(仅审计) > default | ❌ **零消费**：契约有 `tenant_id` 字段，源码从不读 | ❌ 2 处 `req.tenant_id or "default"`（`__main__.py:73`、`:121`） | ✅ `ctx.tenant_id`，body 自报仅交叉校验→403 |
+| **① 身份门装配** | ✅ shared（`main.py` 挂 `IdentityMiddleware`） | ✅ shared（独立头 `X-Tenant-JWT` 桥接自有 ContextVar，`applications/agent_federation/api/identity_bridge.py`） | ⚠️ fork：`TenantHeaderMiddleware`，开关 `TENANT_HEADER_ENFORCE` | ✅ shared（observe 档，10-16 接入） | ✅ shared（observe 档，10-16 接入） | ⚠️ fork：`X-Execution-Context`，**逐端点调用**，DEV 档 base64 **不验签** |
+| **② tenant 来源** | ❌ `/query` 10 处 `req.tenant_id`（数据面=客户端）；其余入口 ✅ `server_tenant_id()` | ✅ 服务端断言（`X-Tenant-JWT`） | ✅ 签名断言 > provided(仅审计) > default | ❌ **零消费**：契约有 `tenant_id` 字段，源码从不读 | ❌ 2 处 `req.tenant_id or "default"`（`applications/kefu-service/kefu_agent/__main__.py:73`、`:121`） | ✅ `ctx.tenant_id`，body 自报仅交叉校验→403 |
 | **③ 契约层** | ⚠️ `QueryRequest.tenant_id` 可选入参（`shared_schemas/query.py:18`），语义未降级 | — | ⚠️ `tenant_id: Form("")` 曾可空，已改服务端注入 | ⚠️ `SqlQueryRequest(QueryRequest)` 继承字段但零读取 | ⚠️ 同 agent_server 契约 | ⚠️ 自有契约 |
 | **④ 存储层 tenant 列** | ✅ chunks/sql_ddl/sql_docs/sql_examples/memories/episodic（迁移 006-010）；❌ checkpoint 三表无 DDL 无 tenant 列 | ❌ Mongo checkpointer 分组带 tenant 但无归属表 | ⚠️ Milvus filter + Mongo 元数据，租户元数据在案 | ❌ **meta 表（列/指标/取值/别名/码表）零租户维度** | ❌ 无自有存储（用 LangGraph thread） | ⚠️ 自有 execution context 存储 |
 | **⑤ 谓词链（tenant 成对）** | ✅ RAG 五处读写全双谓词（`rag/store.py:78-179`）；❌ `semantic_cache` 空租户走全表（`cache.py:51-61`） | — | ✅ 写入恒带租户（T11 后） | —（无租户概念故无论词链） | — | ✅ `enforce_scope_filter` 生产实现在位 |
 | **⑥ workspace 归属校验** | ✅ `workspaces(tenant_id,id)` 复合 PK + `resolve_workspace`（缺表降级放行） | — | ⚠️ knowledge_id 归属沿用元数据，无独立校验 | ❌ 无 workspace 概念 | ❌ 无 | ⚠️ 有 scope 收窄 |
-| **⑦ user 维度** | ⚠️ `MEMORY_DUAL_SCOPE` 默认**关**（`typed.py:149`）；`server_user_id` 管道在、无生产绑定 | 📋 A5 未做 | ❌ 无 user 断言 | ❌ 无 | ❌ 无 | ⚠️ execution context 带 operator |
-| **⑧ 横切归属面** | ⚠️ 主链 `execute_plan` 持久化轨迹 ✅（`execution_graph.py:606/624`）但 **tenant_id 落库 ❌**：`TrajectoryRecord.tenant_id` 模型字段在位（`models.py:57`，由 `plan.tenant_id` 填充，仅喂 memory_sink 内存消费），`trajectories` 表无该列（`001_baseline.up.sql:173-184`）、迁移止于 012、`store_pg.py:47-79` INSERT 不含它 ⇒ 按租户查轨迹不可能；❌ `cost_records` 建表+索引但**代码零读写**（§28）；❌ forensic `external_inputs` 三字段**零写入点**（判定 6 已因此下修） | ⚠️ checkpoint_cleaner 按 tenant 分组；❌ **轨迹零持久化**：联邦 agentic 走 `AgenticPlanner.arun`→`_execute_agent_core`（`main_agent.py:523`），不经 `execute_plan` ⇒ `_persist_trajectory` 从不调用；`trajectory_store` 已装配（`planners/__init__.py:54`）但**永不消费**；post_execution_hooks 亦未注入（源码注释自认待 B-3） | ⚠️ 成本按知识库 | ❌ 无 trace 落库 | ❌ 无 | ⚠️ citations 属 skill 返回体 |
-| **⑨ 网关→子服务签名头** | ✅ 出站已签（knowledge 一路） | ✅ 签发方 | ✅ 收方（软模式） | ❌ **出站未签，tenant 走 body**（`async_subagents.py:118` payload 字段） | ❌ 同 nl2sql | ❌ 不经网关 |
+| **⑦ user 维度** | ⚠️ `MEMORY_DUAL_SCOPE` 默认**关**（`packages/agent-core/agent_core/memory/typed.py:149`）；`server_user_id` 管道在、无生产绑定 | 📋 A5 未做 | ❌ 无 user 断言 | ❌ 无 | ❌ 无 | ⚠️ execution context 带 operator |
+| **⑧ 横切归属面** | ⚠️ 主链 `execute_plan` 持久化轨迹 ✅（`execution_graph.py:606/624`）但 **tenant_id 落库 ❌**：`TrajectoryRecord.tenant_id` 模型字段在位（`models.py:57`，由 `plan.tenant_id` 填充，仅喂 memory_sink 内存消费），`trajectories` 表无该列（`001_baseline.up.sql:173-184`）、迁移止于 012、`packages/agent-runtime/agent_runtime/trajectory/store_pg.py:47-79` INSERT 不含它 ⇒ 按租户查轨迹不可能；❌ `cost_records` 建表+索引但**代码零读写**（§28）；❌ forensic `external_inputs` 三字段**零写入点**（判定 6 已因此下修） | ⚠️ checkpoint_cleaner 按 tenant 分组；❌ **轨迹零持久化**：联邦 agentic 走 `AgenticPlanner.arun`→`_execute_agent_core`（`applications/agent_federation/agent/main_agent.py:523`），不经 `execute_plan` ⇒ `_persist_trajectory` 从不调用；`trajectory_store` 已装配（`planners/__init__.py:54`）但**永不消费**；post_execution_hooks 亦未注入（源码注释自认待 B-3） | ⚠️ 成本按知识库 | ❌ 无 trace 落库 | ❌ 无 | ⚠️ citations 属 skill 返回体 |
+| **⑨ 网关→子服务签名头** | ✅ 出站已签（knowledge 一路） | ✅ 签发方 | ✅ 收方（软模式） | ❌ **出站未签，tenant 走 body**（`applications/agent_federation/agent/async_subagents.py:118` payload 字段） | ❌ 同 nl2sql | ❌ 不经网关 |
 
 ### 2.1 矩阵读法（三条比格子更重要的事实）
 
@@ -70,18 +70,18 @@
 |---|---|---|---|
 | G1 | `semantic_cache` 空租户 ⇒ 无 WHERE 全表匹配 | `cache.py:51-61`；调用方 `query_router.py:162/313` `req.tenant_id or ""` | **默认行为即跨租户读**：控制台不发 tenant_id ⇒ 现网每次问答走全局匹配；10-12 PoC 已证实串读。修法=10-10 方案选项 D（删 else 分支，空租户无缓存），一条用例可钉 |
 | G2 | `/query` 数据面 10 处 `req.tenant_id` | `api/query_router.py`（`grep -c`=10，含工作区解析/调度/预算/缓存/graph state/PlannerContext） | 自选桶 ⇒ 越权读 + 缓存污染 + 配额绕过三合一；10-10 已取证（含 `SINGLE_TENANT` 改非 default 会"入库了却检索不到且不报错"的现场版） |
-| G3 | `/session/revert` 不走 `resolve_thread_id`，operator 从不与 thread 归属比对（`FORBIDDEN` 是死码） | `session_router.py:72`、`revert.py:36` | 多租户一开即"能回退别人会话"；身份链已有现成函数，这是**接线缺失**不是能力缺失 |
+| G3 | `/session/revert` 不走 `resolve_thread_id`，operator 从不与 thread 归属比对（`FORBIDDEN` 是死码） | `applications/agent_server/api/session_router.py:72`、`packages/agent-runtime/agent_runtime/revert.py:36` | 多租户一开即"能回退别人会话"；身份链已有现成函数，这是**接线缺失**不是能力缺失 |
 | G4 | nl2sql 租户语义无定义 | 源码零 `tenant` 命中（server.py:25 注释自认）；meta 表零租户维度 | roadmap §3 第 10 项已挂"待拍板"：不定义隔离什么（元知识/SQL 谓词/结果集）就无法验收；且它即将接 DW/Doris 多源，晚定义成本更高 |
-| G5 | 网关→nl2sql/kefu 无签名头，tenant 走 body | `async_subagents.py:118` + `:113-125` headers 仅 Content-Type+traceparent | 见 §2.1 ②：不补这一环，T5 的 fail-closed 对这两家空转 |
+| G5 | 网关→nl2sql/kefu 无签名头，tenant 走 body | `applications/agent_federation/agent/async_subagents.py:118` + `:113-125` headers 仅 Content-Type+traceparent | 见 §2.1 ②：不补这一环，T5 的 fail-closed 对这两家空转 |
 
 ### P1（多租户正确性，非默认路径但要先于能力层）
 
 | # | 缺口 | 证据锚点 | 说明 |
 |---|---|---|---|
-| G6 | kefu 2 处 `req.tenant_id or "default"` | `__main__.py:73`、`:121` | 同 G2 形状，量小；随 T2 一并收 |
+| G6 | kefu 2 处 `req.tenant_id or "default"` | `applications/kefu-service/kefu_agent/__main__.py:73`、`:121` | 同 G2 形状，量小；随 T2 一并收 |
 | G7 | checkpoint 三表无 tenant 列、无 DDL 入 VCS | `main.py:46-62` → `saver.setup()` 建表，仓库 SQL 无 DDL | `/history` 只按 thread_id ⇒ "看起来隔离"；thread 前缀已是 `tenant-<t>`，要么加列要么把前缀解析升格为显式契约 |
-| G8 | 归属计量三缺口：`cost_records` 零读写；`trajectories` 表无 tenant_id 列（主链落库缺）；forensic `external_inputs` 零写入。**本轮新增取证——两条执行链路的轨迹状态不对称**：主链（agent_server `unified.py:91`/`graph.py:153`→`execute_plan`→`_persist_trajectory`）有持久化但 store 层丢 tenant_id；联邦链（`AgenticPlanner.arun`→`_execute_agent_core`，`main_agent.py:523`）**根本不持久化**（不经 `execute_plan`，`_persist_trajectory` 从不调用，hooks 未注入待 B-3）⇒ "每次回答可追溯身份+成本"（判定 6）对联邦链路整段不成立 | `001_baseline.up.sql:256` 建表零写；`001_baseline.up.sql:173-184` 表无 tenant 列；`models.py:57` 模型字段仅内存消费；`execution_graph.py:69-71` 填充点；`agentic.py:125-165` 无持久化调用；`planners/__init__.py:84` 注释自认 B-3 未修 | 判定 6 下修记录；三缺口同族（载体在位≠字段被填），本轮把"轨迹"从单点扩为双链路 scope |
-| G9 | `MEMORY_DUAL_SCOPE` 默认关 + `memory_extraction_enabled=False` | `typed.py:149`、`config.py:47` | 画像层事实上不存在（无 UPDATE、无结构化抽取）；**必须在 G2 之后开**，否则 user 行落在同一个塌桶上 |
+| G8 | 归属计量三缺口：`cost_records` 零读写；`trajectories` 表无 tenant_id 列（主链落库缺）；forensic `external_inputs` 零写入。**本轮新增取证——两条执行链路的轨迹状态不对称**：主链（agent_server `applications/agent_server/planners/unified.py:91`/`graph.py:153`→`execute_plan`→`_persist_trajectory`）有持久化但 store 层丢 tenant_id；联邦链（`AgenticPlanner.arun`→`_execute_agent_core`，`applications/agent_federation/agent/main_agent.py:523`）**根本不持久化**（不经 `execute_plan`，`_persist_trajectory` 从不调用，hooks 未注入待 B-3）⇒ "每次回答可追溯身份+成本"（判定 6）对联邦链路整段不成立 | `001_baseline.up.sql:256` 建表零写；`001_baseline.up.sql:173-184` 表无 tenant 列；`models.py:57` 模型字段仅内存消费；`packages/agent-runtime/agent_runtime/planner/execution_graph.py:69-71` 填充点；`agentic.py:125-165` 无持久化调用；`planners/__init__.py:84` 注释自认 B-3 未修 | 判定 6 下修记录；三缺口同族（载体在位≠字段被填），本轮把"轨迹"从单点扩为双链路 scope |
+| G9 | `MEMORY_DUAL_SCOPE` 默认关 + `memory_extraction_enabled=False` | `packages/agent-core/agent_core/memory/typed.py:149`、`config.py:47` | 画像层事实上不存在（无 UPDATE、无结构化抽取）；**必须在 G2 之后开**，否则 user 行落在同一个塌桶上 |
 | G10 | `governed_memories` 无读取点；`MemoryRetriever` 疑似未注入 semantic | `query_router.py:255-277` 仅赋值；`main.py:159`（待核） | 记忆治理"有实现、无装配"；属阶段 5，排在身份后 |
 
 ### P2（收敛债/口径债，不阻塞功能但持续产生误判）
@@ -138,7 +138,7 @@ T0 拍板 ──┬─→ T1 默认分支止血 ─→ T2 来源收口(+nl2sql �
 | D3 | `QueryRequest.tenant_id` 契约变更范围（G12） | ~~双读过渡（信断言、body 仅审计比对），一个版本后 403~~ ⇒ **2026-10-23 用户裁定改为"当场 403"**（见 §9.1 D20：不等即拒，**不承认"静默覆盖/忽略"**——那会让调用方以为自己填的值生效）。~~先审仓外调用方~~ 的**审计本身不撤**，但性质变了：过渡期取消 ⇒ 没有观察期兜底，这一项从"过渡期前置"升为**上线前置**（仓内已审：只有控制台页面与测试，页面不发该字段；**仓外未审**）。字段暂留在契约里仅作比对输入，不是备用身份通道 | ~~契约改一半，新旧口径并存期无限拉长~~ ⇒ 代价换成新的两条：① 仓外若有按老写法填字段的调用方，**首次调用即失败**（原先靠一个版本缓冲，现在没有）；② `T2.5` 的写法必须同步改（已同批改，见该条），否则 §4 内部自相矛盾 |
 | D4 | KS/exhibition fork 收敛选项（G11） | KS 先收敛（exhibition 逐端点覆盖另行）；**前置=KS 镜像重建分发** | 「6/6 覆盖」继续是"可审计的一半" |
 | D5 | `SINGLE_TENANT` / `DEFAULT_TENANT_ID` / `KNOWLEDGE_DEFAULT_TENANT_ID` 口径统一 | 钉死为同一默认值并在清单/手册明示；多租户部署必须显式配非 default | 10-10 已证：改非 default 即"入库了却检索不到且不报错" |
-| D6 | **两条执行链路的轨迹归属**（G8 新增 scope）：① 联邦链路是否补轨迹持久化（现为零，B-3 未修）；② `trajectories` 表补 `tenant_id` 列（主链 store 层丢字段）还是维持白名单"轨迹不带租户" | 两条都补：联邦在 agentic 边界补 `_persist_trajectory` 等价物（B-3 修复的范围，hooks 接入一并做）；`trajectories` 加列（迁移顺延 013 之后，与 nl2sql meta DDL 同批审查），store 写+按租户查。理由：判定 6 的"调用"一问对联邦链路整段不成立，而联邦恰是多租户请求的主入口；白名单"轨迹不带租户"与 memory_sink 已按 tenant fail-fast（`episodic_memory.py:316`）自相矛盾 | 联邦执行永久不可追溯；租户审计能查会话查不到执行；memory_sink 的 tenant 断言与轨迹存储的无租户状态长期不一致 |
+| D6 | **两条执行链路的轨迹归属**（G8 新增 scope）：① 联邦链路是否补轨迹持久化（现为零，B-3 未修）；② `trajectories` 表补 `tenant_id` 列（主链 store 层丢字段）还是维持白名单"轨迹不带租户" | 两条都补：联邦在 agentic 边界补 `_persist_trajectory` 等价物（B-3 修复的范围，hooks 接入一并做）；`trajectories` 加列（迁移顺延 013 之后，与 nl2sql meta DDL 同批审查），store 写+按租户查。理由：判定 6 的"调用"一问对联邦链路整段不成立，而联邦恰是多租户请求的主入口；白名单"轨迹不带租户"与 memory_sink 已按 tenant fail-fast（`packages/agent-runtime/agent_runtime/episodic_memory.py:316`）自相矛盾 | 联邦执行永久不可追溯；租户审计能查会话查不到执行；memory_sink 的 tenant 断言与轨迹存储的无租户状态长期不一致 |
 
 ### T1 默认分支止血（1-2 人日；不依赖 T0 除 D2）
 
@@ -249,10 +249,10 @@ T0 拍板 ──┬─→ T1 默认分支止血 ─→ T2 来源收口(+nl2sql �
 | **D11** ⚠ | G7 的二选一（加列 vs 前缀契约化） | **都不选**，走第三条：旁置 `conversations` 归属表 + `thread_id` 转不透明 uuid | 新增选项 C 并选定；原二选一均否决，理由见 9.4 |
 | **D12** | 行级安全（RLS） | **先不上**；走"仓储收口 + lint 拦裸 SQL" | 新增。RLS 结构上只能覆盖 PG 一侧（`checkpoints` 表由 `saver.setup()` 外部建、`main.py:59`；KS 在 Milvus） |
 | **D13** | 砍掉清单 | 归档 / 分享链接 / 草稿持久化 / `client_ref` / `grants` / 元数据 overlay / 空间级 `allowed_tables` / 一人多企业 / RLS —— **对应列一并删，不留空壳** | 补 §6"明确不做"，七项新增 |
-| **D20** ⚠ | 身份**怎么送**（(a) body 必填 vs (b) 凭据携带） | **选 (b)**：租户/用户以凭据（JWT claim / 签名头）携带，服务端断言；body 里的 `tenant_id`/`user_id` **降为可选**，一旦携带就必须与断言值等值，**不等 ⇒ 当场 403**（用户 2026-10-23 裁定，**推翻** §4 第 138 行 D3 的"双读过渡、一个版本后 403"） | 反转 D20 之前的默认（"body 必填即合规"）；并把 `capabilities.py:16-17` `_sanitize_identity` 的"**覆盖**"语义排除在 HTTP 入口之外——覆盖会让客户端误以为自己填的值生效。D3 被推翻后**过渡期不存在** ⇒ D3 里"先审仓外调用方"从"过渡期前置"变成**上线前置**（无观察期兜底，填错的调用方直接吃 403）。后果清单见 9.11-① |
+| **D20** ⚠ | 身份**怎么送**（(a) body 必填 vs (b) 凭据携带） | **选 (b)**：租户/用户以凭据（JWT claim / 签名头）携带，服务端断言；body 里的 `tenant_id`/`user_id` **降为可选**，一旦携带就必须与断言值等值，**不等 ⇒ 当场 403**（用户 2026-10-23 裁定，**推翻** §4 第 138 行 D3 的"双读过渡、一个版本后 403"） | 反转 D20 之前的默认（"body 必填即合规"）；并把 `applications/agent_server/capabilities.py:16-17` `_sanitize_identity` 的"**覆盖**"语义排除在 HTTP 入口之外——覆盖会让客户端误以为自己填的值生效。D3 被推翻后**过渡期不存在** ⇒ D3 里"先审仓外调用方"从"过渡期前置"变成**上线前置**（无观察期兜底，填错的调用方直接吃 403）。后果清单见 9.11-① |
 | **D15** ·AI默认 | A1 越权审计要不要抢在 T1 前跑 | **不抢跑**。D17/A1 的先后只影响**增量证据**，不构成推迟 T1 的理由 | 外部评审 N-3 提出的"矛盾"经复看非矛盾；代价是 T1 前那段窗口的增量串访证据永久不可取（§9.10 的 A1 增量维度因此在 T1 后不可取） |
 | **D16** ·AI默认 | `budget_usage`/`budget_limits`/`cost_records` 的配额维度是否下到自然人 | **维持 org 级聚合，不加 user 列**。判据 = D13 已裁画像/配额的用户级细化，本条不属"先做核心能力" | 与 `001_baseline:239-246` 现 PK `(tenant_id, dimension, bucket_index)` 相容（评审 N-4 把它读成 2 列，实为 3 列）。**注意本条不对称**：将来翻成人级要改 PK，属"成本随时间上升"那类，翻之前须重开 |
-| **D17** ·已由 D20 关闭 | 写侧遇空租户的策略（跳过 vs fail-fast） | **不再是决策**：(b) 之下六个空租户场景全部变上游 401/403，缓存侧只剩理论上不可达的纵深防御；纵深防御形态按 §9.11-②（跳过 + 独立计数 + WARNING，断言在同步入口） | **理由要更正（结论不变）**：本行原写"`except Exception` 会吞 ⇒ 测不到"作为拒绝 fail-fast 的理由，**被自己的落点设计消解了**——§9.11-②(i) 规定断言必须在 `try` 之前/同步入口，那个位置 fail-fast 是可测的。成立的理由是另两条：① 缓存是优化不是正确性依赖（`cache.py` docstring 自认）；② `cache_store` 在 `query_router.py:318` 被调时答案已在流式返回，抛出会把一次已成功的回答打成失败。**对方复评判我"答的是 fail-fast"系记错**——本行一直是跳过 |
+| **D17** ·已由 D20 关闭 | 写侧遇空租户的策略（跳过 vs fail-fast） | **不再是决策**：(b) 之下六个空租户场景全部变上游 401/403，缓存侧只剩理论上不可达的纵深防御；纵深防御形态按 §9.11-②（跳过 + 独立计数 + WARNING，断言在同步入口） | **理由要更正（结论不变）**：本行原写"`except Exception` 会吞 ⇒ 测不到"作为拒绝 fail-fast 的理由，**被自己的落点设计消解了**——§9.11-②(i) 规定断言必须在 `try` 之前/同步入口，那个位置 fail-fast 是可测的。成立的理由是另两条：① 缓存是优化不是正确性依赖（`packages/agent-runtime/agent_runtime/cache.py`（本批 ADR-0013 退役件，工作区已删） docstring 自认）；② `cache_store` 在 `query_router.py:318` 被调时答案已在流式返回，抛出会把一次已成功的回答打成失败。**对方复评判我"答的是 fail-fast"系记错**——本行一直是跳过 |
 | **D18** ·AI默认 | workspace 注册入口：显式端点 vs "首次引用即注册且归属当前断言 user" | **后者**：保留 `resolve_workspace`（`:118-133`）的自动注册，但 owner 绑服务端断言 user；**不做**独立管理页/端点 | 前提是把 `:164-169/:190-191` 的 `42P01` fail-open 翻成 fail-closed（§9.7-②），否则"自动注册"与"静默共用一个桶"在同一段代码里并存 |
 | **D19** ·AI默认 | 不可逆迁移的 down 纪律 | **空 `.down.sql` + 文件头登记不可逆理由**，不强制成对可执行 | 已有先例：`001_baseline` 本就**没有** `.down.sql`（评审"001–012 全部成对"经复看为不确）。措辞要点：登记的是"有意不提供回退"，不是"尚未编写"——后者会被下一个人当 TODO 补掉 |
 | **D21** ·AI默认 | #133 联邦 L2 无租户谓词的出口（A 声明 silo / B 补过滤） | **A**：显式声明"联邦 = 一部署一租户，L2 无租户谓词属设计意图" + docstring + 断言 + 口径行 | B 的前提是**请求级**身份先进联邦（今天只有进程级 `TENANT_ID`，`config.py:35`）⇒ 属 P-2 落地之后的批，不是本批的取舍 |
@@ -279,8 +279,8 @@ T0 拍板 ──┬─→ T1 默认分支止血 ─→ T2 来源收口(+nl2sql �
 - **新增对象**：`organizations`/`users`（runtime 链）、`conversations`（runtime 链）、`workspaces` 加 `owner_user_id`+`visibility` 并改 PK。
 - **改谓词/改来源**：`/query` 9 处入口取值（G2）、`semantic_cache`（G1）、`resolve_workspace`/`assert_workspace_access` 签名、nl2sql 8 处 `UNIQUE`（G4/D8）。
 - **导入写侧的归属（2026-10-23 补，此前 §9.4 漏项）**：`/import`（KS 侧）与 nl2sql 的元知识构建面今天**只断言租户、无人认领到 user/workspace**。D7 之后"新导入的文档算谁的"必须有答案，否则导入就是"客户端自报 workspace_id ⇒ 谁先引用谁认领"的第二现场（与 §9.7-① 的哨兵坑同族）。**已由用户裁定**：先建 租户/企业/用户，**导入的数据归属该创建用户** ⇒ 落点 = 导入写侧要取服务端断言的 `(org,user,workspace)` 三元组而非请求体值；`chunks` 需补 user 维（当前无 user 列）。执行前置与"老数据删了重灌"同批，见 **9.8.1**（013 前三张表还不存在，"先创建"今天是 SQL 手插）。
-- **退役**：`resolve_thread_identity` + `THREAD_ID_PREFIX`（`guardrails/auth.py:43/56-84`）连同 `scripts/migrate_thread_identity.py`、`tests/governance/test_auth.py`、`test_thread_identity_migration.py`。**不留兼容壳**。
-- **选项 C 的否决理由（D11）**：A（加列到 `checkpoints`）不可行——表由 `saver.setup()` 外部建（`main.py:59`）、`INSERT` 由 LangGraph 持有，新列只能靠默认值/触发器，而触发器取"当前身份"的唯一通道是 `set_config` GUC，等于把 D12 刚推掉的连接池改造请回来；且 checkpointer 是三分支可插拔（`memory/__init__.py:70-82`，Mongo 分支标"生产推荐"），绑 PG 表 = 钉死一条刻意解耦的路径。B（前缀契约化）撞 `_PRINCIPAL_RE` ≤64（`guardrails/auth.py:50`）vs workspace id ≤128（`workspace_registry.py:103-104`）⇒ `tenant-<t>-<u>-<ws>` 拼接天然非法。
+- **退役**：`resolve_thread_identity` + `THREAD_ID_PREFIX`（`guardrails/auth.py:43/56-84`）连同 `scripts/migrate_thread_identity.py`、`tests/governance/test_auth.py`、`tests/governance/test_thread_identity_migration.py`。**不留兼容壳**。
+- **选项 C 的否决理由（D11）**：A（加列到 `checkpoints`）不可行——表由 `saver.setup()` 外部建（`main.py:59`）、`INSERT` 由 LangGraph 持有，新列只能靠默认值/触发器，而触发器取"当前身份"的唯一通道是 `set_config` GUC，等于把 D12 刚推掉的连接池改造请回来；且 checkpointer 是三分支可插拔（`memory/__init__.py:70-82`，Mongo 分支标"生产推荐"），绑 PG 表 = 钉死一条刻意解耦的路径。B（前缀契约化）撞 `_PRINCIPAL_RE` ≤64（`guardrails/auth.py:50`）vs workspace id ≤128（`packages/agent-runtime/agent_runtime/workspace_registry.py:103-104`）⇒ `tenant-<t>-<u>-<ws>` 拼接天然非法。
 - **顺带闭合的已登记缺陷**：G3（`/session/revert` 跨用户回退未禁、`FORBIDDEN` 死码，README.md:58）由 `conversations` 归属断言覆盖——T1.2 的修法可升格为"同一张归属表 + 同一处断言"，不必各写一遍。
 
 ### 9.5 迁移策略（要素三）
@@ -309,17 +309,17 @@ T0 拍板 ──┬─→ T1 默认分支止血 ─→ T2 来源收口(+nl2sql �
 
 ### 9.7 四个实现陷阱（评审必须逐条拍住，都是本轮实测出来的）
 
-1. **`'default'` 字面已名花**：既是今天的"全租户共享桶"（PG 侧 `'default'`，`schemas.py:87`/`002:4`/`008:15`），又将用作"每人的默认空间名"；且 nl2sql 侧的"未指定"是**空串**（`tenant_scope.py:46-47`）——两套约定并存。新默认空间 id 必须与两者字面可分；**禁止用哨兵 id 表示公共空间**（`resolve_workspace` 是"谁先引用谁认领"，`:118-133` ⇒ 哨兵会被第一个用户注册成自己的）。
+1. **`'default'` 字面已名花**：既是今天的"全租户共享桶"（PG 侧 `'default'`，`schemas.py:87`/`002:4`/`008:15`），又将用作"每人的默认空间名"；且 nl2sql 侧的"未指定"是**空串**（`applications/nl2sql-service/nl2sql_service/services/tenant_scope.py:46-47`）——两套约定并存。新默认空间 id 必须与两者字面可分；**禁止用哨兵 id 表示公共空间**（`resolve_workspace` 是"谁先引用谁认领"，`:118-133` ⇒ 哨兵会被第一个用户注册成自己的）。
 2. **fail-open 要翻成 fail-closed**：表缺失即放行（`workspace_registry.py:164-169/190-191`）+ 调用点吞异常（`query_router.py:51-55`）。空间归属从"加固层"升为"正确性依赖"后，静默放行 = 全员共用一个桶。
-3. **会话生命周期三语义**（写进实现，别只写进代码）：① 首条有内容的消息即创建（服务端不得提供"先建后写"端点）；② "新建"的唯一信号 = 请求不带 `session_id`，新 id 经现成 SSE `done` 帧回传（`query_router.py:329/336`，**`QueryResponse` 无需加字段**——它今天没有会话位，`shared_schemas/query.py:40-49`）；③ 未发言的界面状态不持久化（草稿明确不做）。天然可行性已验：写线程唯一入口有 `not answer ⇒ return` 前置（`thread_persist.py:78-80`）。
+3. **会话生命周期三语义**（写进实现，别只写进代码）：① 首条有内容的消息即创建（服务端不得提供"先建后写"端点）；② "新建"的唯一信号 = 请求不带 `session_id`，新 id 经现成 SSE `done` 帧回传（`query_router.py:329/336`，**`QueryResponse` 无需加字段**——它今天没有会话位，`shared_schemas/query.py:40-49`）；③ 未发言的界面状态不持久化（草稿明确不做）。天然可行性已验：写线程唯一入口有 `not answer ⇒ return` 前置（`applications/agent_server/memory/thread_persist.py:78-80`）。
 4. **前端不回传就静默退化**：`console.html:201` 现在把 `session_id` 写死成字面量 `"console"`、`:323` 只把 `thread_id` 显示出来 ⇒ 改造后必须改成"存服务端发的 id 并在下一轮带上"，否则表现为"每次都新开会话"。同时 `:317` 的 `history?session_id=console` 要同步。
 
 ### 9.8 对外口径与不可逆点
 
 | 口径 | 内容 |
 |---|---|
-| **分区 ≠ 隔离** | `workspace` 在服务端断言落地前是"值可自报 ⇒ 是分区不是隔离"（`tenant_scope.py:19-24`、ADR-0007:117 同口径）。改造完成前对外表述必须保持这一措辞 |
-| **行级隔离不承诺** | 问数四层中 workspace 只管 L1（知识可见集）与 L2（多轮状态）；**L3 一部署一 DSN 一池**（`dependencies.py:78-92`）、**L4 原样执行、仅 `SET LOCAL` 只读**（`dw_repository.py:22-38`，docstring 自认"第一道防线永远是账号 `GRANT SELECT ONLY`"）⇒ 出口在源库分账号/建租户视图，属跨团队申请 |
+| **分区 ≠ 隔离** | `workspace` 在服务端断言落地前是"值可自报 ⇒ 是分区不是隔离"（`applications/nl2sql-service/nl2sql_service/services/tenant_scope.py:19-24`、ADR-0007:117 同口径）。改造完成前对外表述必须保持这一措辞 |
+| **行级隔离不承诺** | 问数四层中 workspace 只管 L1（知识可见集）与 L2（多轮状态）；**L3 一部署一 DSN 一池**（`applications/nl2sql-service/nl2sql_service/api/dependencies.py:78-92`）、**L4 原样执行、仅 `SET LOCAL` 只读**（`applications/nl2sql-service/nl2sql_service/repositories/postgres/dw/dw_repository.py:22-38`，docstring 自认"第一道防线永远是账号 `GRANT SELECT ONLY`"）⇒ 出口在源库分账号/建租户视图，属跨团队申请 |
 | **中间态要标** | `conversations.user_id` 在 014 前可空 ⇒ 读侧断言只到 org 级，不得写成"会话按人隔离已具备"（"接线 ≠ 启用"） |
 | ~~不可逆 ①~~ **已降级（不再是不可逆点）** | 原判定"旧 `tenant-default` 线程的**归属永久无从重建**（`/import` 只断言租户、`chunks` 无 user 列）⇒ 处置只有不进新列表/不再可写/数据保留不删"。**2026-10-23 用户给出更干脆的出口：老数据删了重灌**（先建 租户/企业/用户，导入的数据算创建者的）⇒ 归属问题从"无从重建"变成"**不必重建**"。但**只对"有源"那一半成立**，处置明细与三条前置见 **9.8.1** |
 | 不可逆 ②（**仍成立**） | `resolve_thread_identity` 删除后旧格式 thread 值不再生成 ⇒ 老数据可寻址性取决于是否留 legacy 读取通道；**建议不留，并明确否决"按 org 全量可读"**（那等于把刚定掉的会话互串写成长期特性）。**① 的"删了重灌"出口不消解本条**——重灌解决的是语料归属，不解决旧会话 checkpoint 的可寻址性；与 `DEPLOY_ENFORCE_IDENTITY` 灰度同批拍，不留兼容壳 |
@@ -332,17 +332,17 @@ T0 拍板 ──┬─→ T1 默认分支止血 ─→ T2 来源收口(+nl2sql �
 |---|---|---|---|
 | **有源** | `chunks`、nl2sql 8 张 meta 表 | ✅ 能 | 源文件仍在，重跑入库即重建 ⇒ 用户的方案对这类完全成立 |
 | **无源** | LangGraph `checkpoints`/`checkpoint_blobs`/`checkpoint_writes`、`memories` | ❌ **不能** | 对话历史是运行时产生的，没有"源"可再导入 ⇒ 对这类，"删了重灌"实际语义是**归零**（控制台历史面板清空） |
-| **可丢** | `semantic_cache` | ✅ 删了无所谓 | 缓存是优化不是正确性依赖（`cache.py` docstring 自认） |
+| **可丢** | `semantic_cache` | ✅ 删了无所谓 | 缓存是优化不是正确性依赖（`packages/agent-runtime/agent_runtime/cache.py`（本批 ADR-0013 退役件，工作区已删） docstring 自认） |
 
 三条前置（缺一即不可执行）：① **建实体的入口先于导入**——013 之前 `organizations`/`users` 三张表**还不存在**，"自己先创建租户/企业/用户"今天只能执行成**用 SQL 手插一行**（够用于内部演示期，别把它读成已有创建入口；是否补管理端点属 D18 同族，本条不擅自扩）；② 现网删除走 `docs/operations/live-db-destructive-write-recipe.md` 的四步配方（备份→删→复验→声明"复验即污染"），`checkpoints` **无法按句删、只能整桶**且备份只能整桶还原；③ 本条**不是待执行项而是待授权项**——内网 126/241 通道今天不可达（本机 TUN 代理接管，读数一律标"未获取"），且属破坏性写，须单独批准。
 
 ### 9.9 文档改动面（本节之外还要动的地方）
 
-**被 D7 推翻、必须改写结论句**：ADR-0006 §D2（`:75-78`，含 `:125` 的否决理由）；ARCHITECTURE.md `:158`、`:69`（"用户级细化仍待 A5"）、§2.3 三层表 `:57-67`；README.md `:50`；`tenant_scope.py:19-24` 与 `workspace_registry.py:4-18`、`typed.py:116-135`、`identity_middleware.py:13-16` 四段 **docstring 承诺**（最易漏，因无人当文档看）。
+**被 D7 推翻、必须改写结论句**：ADR-0006 §D2（`:75-78`，含 `:125` 的否决理由）；ARCHITECTURE.md `:158`、`:69`（"用户级细化仍待 A5"）、§2.3 三层表 `:57-67`；README.md `:50`；`applications/nl2sql-service/nl2sql_service/services/tenant_scope.py:19-24` 与 `packages/agent-runtime/agent_runtime/workspace_registry.py:4-18`、`packages/agent-core/agent_core/memory/typed.py:116-135`、`packages/agent-runtime/agent_runtime/identity_middleware.py:13-16` 四段 **docstring 承诺**（最易漏，因无人当文档看）。
 **待修订而非静默改**：ADR-0006 D2 的 supersede 建议**在 T/批次合入时发生**，当前只在本节留一行触发条件；不新开 ADR（§7 防重复立案）。
-**要改档位**：`capability-map:164/237/408`；`.env.example:7-11`；`k8s manifest:40`（"本版单租户不暴露该问题"前提失效，且它预告的源库只读角色正是 9.8 L4 的跨团队前置）；`minimal-release-runbook.md:219` 的 S1 fail-closed 判据需重验。
-**两处门禁查不到**：① `check_doc_sync.py` 只查路径存在性与命令/session 数一致性（`:7-12`），**语义反转不会报红**；② 能力图 `:237` 写"挂载 `main.py:571`"而实测在 `:707` ⇒ 改文档时"路径"与"锚点"要分两层核。
-**新门禁位（补 §5/§6 的缺口）**：入口路由出现 `req.tenant_id`/`req.user_id` 而该文件未 import 服务端取值点 ⇒ 红（本轮查出的真空：`test_identity_not_in_tool_schema.py:15` 明文把 `QueryRequest.tenant_id` 排除在射程外）；P13 加第二判据"装配点存在 ≠ 断言被消费"；`conversations` 的 SQL 只允许出现在包装器模块内。
+**要改档位**：`capability-map:164/237/408`；`.env.example:7-11`；`k8s manifest:40`（"本版单租户不暴露该问题"前提失效，且它预告的源库只读角色正是 9.8 L4 的跨团队前置）；`docs/operations/minimal-release-runbook.md:219` 的 S1 fail-closed 判据需重验。
+**两处门禁查不到**：① `scripts/check_doc_sync.py` 只查路径存在性与命令/session 数一致性（`:7-12`），**语义反转不会报红**；② 能力图 `:237` 写"挂载 `main.py:571`"而实测在 `:707` ⇒ 改文档时"路径"与"锚点"要分两层核。
+**新门禁位（补 §5/§6 的缺口）**：入口路由出现 `req.tenant_id`/`req.user_id` 而该文件未 import 服务端取值点 ⇒ 红（本轮查出的真空：`tests/governance/test_identity_not_in_tool_schema.py:15` 明文把 `QueryRequest.tenant_id` 排除在射程外）；P13 加第二判据"装配点存在 ≠ 断言被消费"；`conversations` 的 SQL 只允许出现在包装器模块内。
 
 ### 9.10 本节仍未取到的证据（五档口径见 `docs/operations/unconfirmed-items.md:8`）
 
@@ -355,7 +355,7 @@ T0 拍板 ──┬─→ T1 默认分支止血 ─→ T2 来源收口(+nl2sql �
 ④ 9.8 那两句**对外口径**能不能说（担责面）。
 > **本轮已裁、不再占位**：D20 的 403 节奏 = **当场拒绝**（推翻 D3 过渡期 ⇒ "先审仓外调用方"升为上线前置）；~~`§4:138` D3 与 `§4:159` T2.5 要不要就地改~~ **已批准并已就地改**——且改前两行时做了一次 §0–§8 全量扫描，又扫出**第三处同族矛盾 `§3:92` G12**（"A5 双读过渡未做"），若只按批准字面改两行就会留这处 ⇒ 实际改了三行，连 §5 的三处改动合计 **§0–§8 内六处**，全部带删除线与 dated 批注（清单见 §5 批注段）；老数据处置 = **删了重灌**（① 号不可逆点降级，三类分法见 9.8.1）；导入写侧归属 = **归创建该批数据的用户**（§9.4 补项）；D15/D16/D17/D18/D19/D21/D22/D23 属 **D0/D1**，已按判据自定并标 `·AI默认`，**用户可直接推翻任一行**。
 **他人负责**：问数行级隔离的源库账号方案（BI/DBA）。
-**口径未定**：`rag/store.py:158-159`"隔离双维"与 `tenant_scope.py:19-24`"不是隔离维"两处文字仍相反——按 D7 应把前者第二维改写为 owner，不是裸 id。
+**口径未定**：`rag/store.py:158-159`"隔离双维"与 `applications/nl2sql-service/nl2sql_service/services/tenant_scope.py:19-24`"不是隔离维"两处文字仍相反——按 D7 应把前者第二维改写为 owner，不是裸 id。
 
 ### 9.11 第二轮追加（D20 落地 → P-1 收窄 → 顺带查出一处更硬的缓存面）
 
@@ -388,14 +388,16 @@ T0 拍板 ──┬─→ T1 默认分支止血 ─→ T2 来源收口(+nl2sql �
 **④ 两套语义缓存的处置**
 
 两套的消费者**完全不相交**（各 2 站点，`git grep` 复核）：`agent_runtime/cache.py` ← `query_router.py:163/318`（PG+pgvector）；`agent_federation/agent/cache/*` ← `main_agent.py:484/534`（Valkey）。
-来历：`refactor-plan.md:230` 那轮设计新建 L1/L2/L3 + `docker-compose` 加 valkey（`:231` 列新文件）；TB-4/M5 想统一，**收敛只停在 key 与统计接口**——`agent_core/cache/base.py:4-7` 原文"双轨各自实现该协议，但**不跨后端共享缓存数据**（向量空间/存储引擎不一致，现状保留）"。按 AGENTS.md 三层判据：**单一实现做了半层，全局装配 + 强制门禁两层为空** ⇒ "看起来已收敛、其实没有"。
+来历：`applications/agent_federation/docs/refactor-plan.md:230` 那轮设计新建 L1/L2/L3 + `docker-compose` 加 valkey（`:231` 列新文件）；TB-4/M5 想统一，**收敛只停在 key 与统计接口**——`agent_core/cache/base.py:4-7` 原文"双轨各自实现该协议，但**不跨后端共享缓存数据**（向量空间/存储引擎不一致，现状保留）"。按 AGENTS.md 三层判据：**单一实现做了半层，全局装配 + 强制门禁两层为空** ⇒ "看起来已收敛、其实没有"。
 能力差集（不是重复代码）：PG 侧无精确命中（`cache.py:8` docstring 自认"不使用 cache_key 列参与命中"）、无 TTL/失效（`capability-map:190` 已登记 ❌"表只增不减"）、无防穿透空值缓存；Valkey 侧有 L1/`invalidate()`/NullCache，但依赖外部服务且连不上即**静默 no-op**（`layers.py:43-48`）。
-⇒ **本轮不合并（D2，且留任一单轨都有代价：留 PG 永久丢"能失效"、留 Valkey 给 agent_server 加外部依赖并重做现网演示链路——`minimal-release-runbook.md:237` 明写问答走 pgvector、Milvus 不在这条路径上）。先还三笔便宜债**：
+⇒ **本轮不合并（D2，且留任一单轨都有代价：留 PG 永久丢"能失效"、留 Valkey 给 agent_server 加外部依赖并重做现网演示链路——`docs/operations/minimal-release-runbook.md:237` 明写问答走 pgvector、Milvus 不在这条路径上）。先还三笔便宜债**：
 1. 一个 env 名只允许一个默认值：`CACHE_ENABLED` 当前两 app 相反（`agent_server/config.py:44` True vs `cache/config.py:16` False），且检查点也不同层（`query_router.py:161` 在路由 vs `semantic_cache.py:68/113` 在类内）；
 2. `main_agent.py:481/511/531` 三处直接 `os.getenv("CACHE_ENABLED","false")` 绕开 config 对象 ⇒ 改回读 `get_cache_config()`；
 3. PG 侧的 TTL/失效缺口保留登记（`capability-map:190` 那条 ❌ 继续算未达，不因本节而升档）。
 
 ⇒ 三笔债**已立案 #134**（含计数判据与非空转反证要求）。
+
+> **2026-10-25 复审（ADR-0013 C）**：本节"本轮不合并、两套并存"的结论已被推翻——用户拍板 Valkey 单一实现（生产 + 开发/测试），PG 语义缓存退役。三笔债的落点改为：① 配置面收敛到 `agent_runtime.cache.config`（`CACHE_ENABLED` 单默认 true，`CACHE_BACKEND` 只接受 valkey/disabled）；② 三处裸读随旧联邦实现（`applications/agent_federation/agent/cache/layers.py`（本批 ADR-0013 退役件，工作区已删））整体删除；③ PG TTL/失效缺口随 PG 模块删除而关闭（`semantic_cache` 表待观察期后删）。#134 的文档/死锚项并入 ADR-0013 Stage 5。本节的"能力差集"与"留任一单轨都有代价"仅作历史分析保留。
 
 **⑤ 落点与复审触发条件**（本节的债登记在哪、出现什么证据就回来重看）
 
@@ -413,7 +415,7 @@ T0 拍板 ──┬─→ T1 默认分支止血 ─→ T2 来源收口(+nl2sql �
 
 | 编号 | 定性 | 内容 | 收口范围与判据 |
 |---|---|---|---|
-| **G15** | **缺口（P1）** | `req.user_id` 全仓取值面：按"是真实来源还是只往下转发"分开数——**origin 5 处**（HTTP/入口把请求体值读出来用）、**propagation 3 处**（`control_plane`/`execution_recovery`/`execution_scheduler` 收的是 `ExecutionRequest`，属传播非来源）。此前把两类混计成"6+"，并把 runtime 内部请求对象的 `request.user_id`（`memory_types.py:141` 一类）也算进通道 | ⇒ 真正要收口的只有 **5 个 origin**，T4 的"来源收口"按 5 计（不是 8、不是 6+）。范围比原报更小 ⇒ 对施工有利，不是让步 |
+| **G15** | **缺口（P1）** | `req.user_id` 全仓取值面：按"是真实来源还是只往下转发"分开数——**origin 5 处**（HTTP/入口把请求体值读出来用）、**propagation 3 处**（`control_plane`/`execution_recovery`/`execution_scheduler` 收的是 `ExecutionRequest`，属传播非来源）。此前把两类混计成"6+"，并把 runtime 内部请求对象的 `request.user_id`（`packages/agent-runtime/agent_runtime/memory_types.py:141` 一类）也算进通道 | ⇒ 真正要收口的只有 **5 个 origin**，T4 的"来源收口"按 5 计（不是 8、不是 6+）。范围比原报更小 ⇒ 对施工有利，不是让步 |
 | **G16** | **~~缺口~~ 死代码清理项（P2）** | 联邦 `api/monitor.py:44` 的 `build_thread_id(user_id, sid)` 产出 `user-<uid>-session-<sid>` 形态 | **降级理由（已复验）**：`build_thread_id` 全仓命中 = 定义 `monitor.py:44` + docstring `:5` + `__all__` `:65` ⇒ **零调用**；`extract_thread_id_from_scope` 同样零外部调用；联邦真实链路走 `api/server.py:45/204-211` 的 `resolve_thread_id` → 内核 `resolve_thread_identity`（`tenant-` 形态），`:242` 用的就是它；`user-{uid}-session-{sid}` 形态 grep 不落任何存储。**且这事实仓库早就写明**：`scripts/migrate_thread_identity.py:18` 原话"零调用者的兼容符号"、`tests/governance/test_thread_identity_migration.py:213` 同标 ⇒ 我把它升格成"更重的发现"前**没查自己的迁移脚本** |
 | G16 的清理尾巴 | — | 删两个符号**不是一个文件**：按名字引用共 **4 处** = `monitor.py:5`（docstring）+ `:65-66`（`__all__`）+ `scripts/migrate_thread_identity.py:18`（说明行）+ `docs/operations/audit-operator-principal-runbook.md:56`（把该形态归进"人工核实名单、不动"）。~~`CHANGELOG.md:533/537`~~ **该锚点系误记**（2026-10-23 第三轮评审实测：`applications/agent_federation/CHANGELOG.md` 全文 `grep build_thread_id` / `user-…session` **零命中**，533/537 行为空）——本条属"声称查过某文件并给出行号、实际不存在"的同型失误（与 plan-memory D6 的 metadata 表同款），记为纪律：**引用锚点须附可复取命令** | 判据：删后全仓 `git grep build_thread_id` **零命中**（CHANGELOG 本就无引用；runbook `:56` 是描述性提及非代码引用，若同批清理则一并核） |
 
@@ -481,7 +483,7 @@ list_* 7 处 WHERE、find_* 2 处、upsert_table_stats 的 ON CONFLICT、recall 
 |---|---|
 | meta DDL（013 加列） | **作废**（§9.2 G4 更正：001 已存在）+ 被 **006 反向动作**取代（摘键，D8）✅ |
 | 三路召回 + CRUD 谓词 | 006 完成（保留 tenant 两列过滤，摘 workspace）✅ |
-| 契约消费来源 body→断言 | `query_service.py:59-68` 的 `resolve_scope` 三级优先级（**服务端断言 > 请求体 > default**，`tenant_scope.py:10-14` 注释明示）+ T2.4 出站签名头补完链路 ✅；`query_router.py:26` 传 body 值但被 resolve_scope 断言覆盖，属 observe 档知情降级（#102/#103 既定设计），mismatch WARNING 属 T2.5 域统一件非关闭条件 |
+| 契约消费来源 body→断言 | `applications/nl2sql-service/nl2sql_service/services/query_service.py:59-68` 的 `resolve_scope` 三级优先级（**服务端断言 > 请求体 > default**，`applications/nl2sql-service/nl2sql_service/services/tenant_scope.py:10-14` 注释明示）+ T2.4 出站签名头补完链路 ✅；`query_router.py:26` 传 body 值但被 resolve_scope 断言覆盖，属 observe 档知情降级（#102/#103 既定设计），mismatch WARNING 属 T2.5 域统一件非关闭条件 |
 | 验收判据 | tenantA 元知识 tenantB 召回=0：由保留的 tenant 谓词保证（requires_pg 级待环境实测）；漏传 fail-fast：enforce 档已实现（`_TENANT_UNSET` 触发）✅ |
 
 **② T2.5 前半（仓外调用方审计）结论：D20 翻 403 零破坏**。
@@ -495,9 +497,9 @@ agent_server `/query` 的"携带 tenant_id/user_id 且与断言不符 ⇒ 403"�
 
 **③ G16 死代码清理完成**（判据达成：代码引用零命中）：
 - 删 `monitor.py` 的 `build_thread_id` + `extract_thread_id_from_scope`（docstring/`__all__`/`Any` import 同步）；
-- `migrate_thread_identity.py:18` 与 runbook `:56` 的**判定逻辑保留**（数据面该形态仍可能出现，进人工核实名单），仅来源说明改为"该符号已于 2026-10-23 G16 删除"；
+- `scripts/migrate_thread_identity.py:18` 与 runbook `:56` 的**判定逻辑保留**（数据面该形态仍可能出现，进人工核实名单），仅来源说明改为"该符号已于 2026-10-23 G16 删除"；
 - 遗留命中均为历史性说明文本（monitor docstring 清理备注、plan 登记、脚本/Runbook 来源行），符合判据"代码引用零命中"。
-- 验证：联邦全量 179 passed；`test_thread_identity_migration.py` 49 passed；ruff clean。
+- 验证：联邦全量 179 passed；`tests/governance/test_thread_identity_migration.py` 49 passed；ruff clean。
 
 **④ 下一步**：013/014a/015 迁移施工（T3 域，按 §9.14-⑤ 时序：014b 等待 T4 后半 A5 claim 绑定）。
 
@@ -505,9 +507,9 @@ agent_server `/query` 的"携带 tenant_id/user_id 且与断言不符 ⇒ 403"�
 - **013**：organizations/users/conversations 三表（D9 org 直挂+is_admin；D11 旁置表，user_id 先可空）+ organizations 自 workspaces.tenant_id 回填。**同值域决策（D0 可逆）**：org_id=tenant_id 值域，现有 WHERE tenant_id 谓词零改动；将来一 org 多 tenant 另立迁移重映射。
 - **014a**：workspaces 加 org_id（backfill 自 tenant_id + NOT NULL）+ owner_user_id（NULL=存量无主过渡态，D18 的 user 绑定等 T4/A5）+ visibility（默认 private，D7）+ PK 换 (org_id, id)；**兼容性发现**：保留 UNIQUE (tenant_id, id) 使 register_workspace 的 ON CONFLICT 在 007-013 与 014a 后两阶段均合法（否则渐进窗口报 42P10）。
 - **015**：trajectories 补 tenant_id/org_id/user_id 三列——**施工实锤**：`TrajectoryRecord.tenant_id` 字段在 models.py 存在但 store_pg 列清单与 001 DDL 均无它 ⇒ 租户字段从未落库（G8 缺口的物理证据），本批一并补齐。
-- 代码接线：`conversations.py` 包装器（§9.6-5 单语句 upsert 判据：`ON CONFLICT ... WHERE 归属匹配 RETURNING 1`，0 行即拒；user_id NULL 行 org 级放行=中间态）；`workspace_registry.register_workspace` 写 org_id/visibility + **42703 精确降级**（014a 未应用时按 007 旧形态重写，真故障照抛）；`store_pg.save` 三列写入 + 42703 降级。
+- 代码接线：`packages/agent-runtime/agent_runtime/conversations.py` 包装器（§9.6-5 单语句 upsert 判据：`ON CONFLICT ... WHERE 归属匹配 RETURNING 1`，0 行即拒；user_id NULL 行 org 级放行=中间态）；`workspace_registry.register_workspace` 写 org_id/visibility + **42703 精确降级**（014a 未应用时按 007 旧形态重写，真故障照抛）；`store_pg.save` 三列写入 + 42703 降级。
 - 隔离门禁：三表进 `SYSTEM_TABLE_WHITELIST` 登记理由（身份域本体，org_id 归属维在表内）——`test_isolation_dimension_contract` 由红转绿。
-- 测试：`test_conversations_ownership.py` 14 条（首认领/跨 org 拒/跨 user 拒/中间态放行/42703 降级×2/真故障照抛/三列写入）。核验：根 1314 / runtime 707 / agent_server 131 / ruff / lint_architecture / check_doc_sync 全绿。
+- 测试：`packages/agent-runtime/tests/test_conversations_ownership.py` 14 条（首认领/跨 org 拒/跨 user 拒/中间态放行/42703 降级×2/真故障照抛/三列写入）。核验：根 1314 / runtime 707 / agent_server 131 / ruff / lint_architecture / check_doc_sync 全绿。
 - **014b 未做**（按 §9.14-⑤ 时序，等 T4 后半 A5 claim 绑定）；requires_pg 级判据（真库并发双写/迁移回放）待环境。
 
 ### 9.16 分支返工批（2026-10-24）：三个阻塞项修复 + 盲区门禁
@@ -538,9 +540,9 @@ D8 语义反证同批取到：跨空间同问法两次写入 ⇒ 第二次是更
    **值为空**：`_stamp` 非空才写键 + `_upsert` 恒把该列进 INSERT 列表。确实"不传参"的是
    `scripts/discover_relations.py:135`（tenant/datasource/workspace 三个都不传）。
    ⇒ 修法覆盖"值为空"，光补传参救不了 discover_relations 那条链。
-2. "CI 无 PG service"**不准**：`ha.yml` 起的就是 `pgvector/pgvector:pg16`，缺口是**覆盖面**——
+2. "CI 无 PG service"**不准**：`.github/workflows/ha.yml` 起的就是 `pgvector/pgvector:pg16`，缺口是**覆盖面**——
    该 job 只跑 `tests/ha`（agent-runtime），nl2sql 的迁移与写入从未进过任何自动真库门禁
-   （nl2sql 唯一真库用例是手挡 `DW_DB_DSN` 的 `test_golden_seed_real_pg.py`，Makefile 那条 session 不带 `-m requires_pg`）。
+   （nl2sql 唯一真库用例是手挡 `DW_DB_DSN` 的 `applications/nl2sql-service/tests/test_golden_seed_real_pg.py`，Makefile 那条 session 不带 `-m requires_pg`）。
 
 **④ 改动清单**
 - `006_meta_unique_drop_workspace.up.sql`：6 处表名 → `nl2sql_example_info`，并在换键块注释"文件名≠表名"的来历。
@@ -555,20 +557,20 @@ D8 语义反证同批取到：跨空间同问法两次写入 ⇒ 第二次是更
     （PG 语义按 covered-by 允许子集）；动态表名走弱通道（只验"全链存在此键集"），`_upsert`
     的常量键走 spec 通道——B-3 类因此静态可见；
   - **M-3/M-4 登记表双向对称差**：外部关系登记表、抽取盲区登记表，条目未命中即红、
-    新盲区未登记即红（防白名单无声扩大，同 `lint_architecture.py` 的自检口径）；
+    新盲区未登记即红（防白名单无声扩大，同 `scripts/lint_architecture.py` 的自检口径）；
   - **枚举口径 = `git ls-files`**（本机 FS 不作数），取不到清单退出码 2 fail-closed，无旁路开关；
   - **非空转证据**：`--selftest` 用合成违规样本逐条咬（空转即红）；另有临时副本变异反证
     `scripts/evidence/migration_gate_mutation_probe.py`：注入 B-1 错表名 ⇒ M-1 报红；摘掉 006 ⇒ M-2 视角
     目标键消失 ⇒ 报红；原样副本 ⇒ 两项零违规（阴性对照）。HEAD 正式跑读数：
     迁移目录 2 个、M-2 校验 25 处、盲区文件 1（已登记理由）、违规 0。
-- `test_meta_knowledge_build.py`：fake 池 `_upsert` 增加 **NOT NULL 拒收**（除 `embedding` 外任何列为
+- `applications/nl2sql-service/tests/test_meta_knowledge_build.py`：fake 池 `_upsert` 增加 **NOT NULL 拒收**（除 `embedding` 外任何列为
   None 即 AssertionError）——B-2 全绿活过去的直接原因就是替身不校验 DDL 约束；
   并加 `test_default_scope_write_path_stamps_empty_string_not_null` 钉住默认路径与绕过 `_stamp` 的直接仓储写入。
 
 **⑤ 仍悬（本批未做，别当已做）**
 - 评审 H-1…H-7、C-1…C-8 **未动**（口径更正、runbook 前置检查、`organizations` 运行期回填排 016、
   `X-Internal-Tenant` 软模式与出站 payload 等）；
-- nl2sql 真库冒烟进 `ha.yml`（路线 C）未接——本机已能自证，但自动门禁仍不覆盖 nl2sql；
+- nl2sql 真库冒烟进 `.github/workflows/ha.yml`（路线 C）未接——本机已能自证，但自动门禁仍不覆盖 nl2sql；
 - `session_leases` 全仓无 CREATE TABLE 属**既有待拍板项**（`plan-unfinished-completion-schedule` §3 第 22 项），
   本批 M-2 只是把它显式暴露成"未识别表名"，不另立登记。
 
@@ -606,7 +608,7 @@ D8 语义反证同批取到：跨空间同问法两次写入 ⇒ 第二次是更
 
 **⑧ 公开镜像防泄门禁（同日晚，用户批示"装上"）**
 - 新增 `scripts/lint_public_mirror.py`，registry 模式进 `make lint`（⇒ 进 `make ci`），publish 模式推镜像前跑。
-- **为什么必须两模式**：内网分支携带真实网段/主机名是工作产物（`env-126-inventory.md` 就是干这个的），
+- **为什么必须两模式**：内网分支携带真实网段/主机名是工作产物（`docs/operations/env-126-inventory.md` 就是干这个的），
   单模式零容忍会让门禁在内网侧永远红 ⇒ 下一步一定是被人关掉，比没有更糟。故 registry 用登记制 +
   P-4 双向对称差（新命中未登记即红、登记项零命中即红），publish 模式只看 `base..ref` 新增行且
   **登记台账在此不生效**。

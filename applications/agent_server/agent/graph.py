@@ -23,6 +23,7 @@ from agent_server.capabilities import get_registry
 from agent_server.config import get_settings
 from agent_server.context import build_context_assembler, conversation_cap
 from agent_server.memory.longterm import extract_memory_facts, maybe_consolidate, recall, remember
+from agent_server.subagents.degradation import has_real_evidence
 
 logger = logging.getLogger(__name__)
 
@@ -174,12 +175,10 @@ def build_graph(
         memory_notes = state.memory_notes
         iterations = state.iterations
 
-        # 反思：证据为空且未到重试上限，回到路由再来一次
-        has_real_evidence = evidence and not any(
-            e.startswith(("知识库未启用", "知识库中未检索到", "联网搜索未配置", "SQL_DSN 未配置"))
-            for e in evidence
-        )
-        if not has_real_evidence and state.route != "direct" and iterations < get_settings().max_iterations:
+        # 反思：证据为空且未到重试上限，回到路由再来一次。
+        # 判据单一来源：subagents/degradation.has_real_evidence（与 deterministic planner 同一条）。
+        real_evidence = has_real_evidence(evidence)
+        if not real_evidence and state.route != "direct" and iterations < get_settings().max_iterations:
             return {"iterations": iterations + 1, "evidence": []}
 
         answer = await _compose(question, evidence, memory_notes)
