@@ -245,6 +245,16 @@ worktree 里跑 pytest，测的是**主仓代码**，不能当作合并树的证
     rc=1）、**rc 分档判定**（0 = 命中 / 1 = 零命中 / ≥128 = 命令根本没跑成，不许把"非 0"统称
     零命中）。本轮两条被改写的原句最终都按这三条验过：`：§4 那 3954 passed` 与
     `整体重跑（§8 那条限定同样适用` 在 `652378a6` 各 **1 命中**、在 `main` 各 **rc=1**。
+19. **自证件的 stdout 被管道吞掉时，它的总结论照样能报"通过"**（本轮实踩，与 §5-18 同族，但这一型的
+    载体是自己的取证脚本而不是 git）：给 m5 加固件写守卫自证时，第一版把每条用例包进函数、函数末尾
+    `return ($rc -eq $expectRc)` ⇒ 函数体内的 `Write-Output` 全部进了**函数输出流**，调用点
+    `$ok = $ok -and (Run-Case …)` 拿到的是"若干字符串 + 一个布尔"的数组，于是 **6 行 rc 一行没打印**，
+    末行却照样打出 `teeth overall=OK`（`-and` 把非空数组按真处理）。我差点照这个 OK 写账面 ——
+    暴露它的原因是**期望出现的 6 行整体缺席**，不是任何一条报错。
+    ⇒ 处置：① 用例打印放**脚本作用域**，不进函数返回值；② 结论用计数器 `fail-cases=N` 而不是布尔摘要；
+    ③ 自证件的判据写成"**每条用例的 rc 都看得见**"，看不见就当未跑。通用化一句：
+    **探针的 stdout 形状本身就是证据的一部分** —— 只审 rc 不审"该出现的行有没有出现"，就会放过哑探针
+    （§5-18 是"rc 与不存在同形"，本条是"结论与空跑同形"，同一个失效面的两个入口）。
 
 ## 6. 登记为遗留、本次不顺手改
 
@@ -575,17 +585,46 @@ tree `18f2c5da` 只差文档 blob）。取证后已 `git worktree remove` + `pru
 `m16-obs-652378a6.log`（第 10 格，本轮复跑），均不入库。第 10 格本轮**又跑了一次**且读数一致
 （18 passed / 0 failed），本格引的是复跑那次 —— 因为它有对应的 SDK 在位性证据同批取。
 
-**取数件自身的两个坑要标出来**（否则复跑的人会被带偏，这一型比前面所有条都更容易静默做错）：
-① m13 那份日志的首行仍印 `trunk-candidate session rerun`，那是 runner
+**取数件自身的两个坑 —— 本轮已把件改掉**（第一版的描述保留在下面，因为它解释了加固后每条守卫为什么在那儿）：
+① m13 那份日志的首行印 `trunk-candidate session rerun`，那是 runner
 `m5-run-trunk-sessions.ps1` 里的**陈旧硬编码字样**，不代表当时真跑在 `trunk-candidate` 上；
-② 该 runner 的默认 `-Wt` 仍指向上轮那个已删的 cand 载体（`Test-Path` 实取 = `False`），而它的
+② 该 runner 的默认 `-Wt` 曾指向上轮那个已删的 cand 载体（`Test-Path` 实取 = `False`），而它的
 `$ErrorActionPreference` 是 `Continue` ⇒ `Push-Location` 失败只是**非终止错误**，实测
 `cwd-after` 仍是调用方原目录，脚本会**继续在错误的树上跑 pytest 并打出正常格式的读数**。
-⇒ 复跑必须**显式传** `-Wt`，且开跑前后各现取一次 `HEAD`/`tree` 对账（本轮两处都有：
-`m14-probe.ps1` 打印的 `root=` 与 `misresolved=0`、`m6-final-gates.ps1` 首行的
-`HEAD=652378a6 tree=4de874a7…`）。runner 的默认值与守卫本轮**未改**（它不入库，改默认值
-只影响下一次本地复跑，不影响本节的读数归属）；要改就连带把首行那句硬编码字样一起改，
-否则日志名与内容还是两套口径。
+那两轮是靠人工对账兜住的：`m14-probe.ps1` 打印的 `root=` 与 `misresolved=0`、
+`m6-final-gates.ps1` 首行的 `HEAD=652378a6 tree=4de874a7…`。
+
+加固后的件（**仍不入库**，只影响此后的本地复跑，**不改动本节任何读数的归属**）：`-Wt` 无默认值；
+载体不是目录 / 解释器缺失 / `HEAD`-tree 现取失败 / 探针文件缺失 / 包解析不落在 `-Wt` ⇒ 一律**起跑前**退出；
+log 首行由硬编码文案改为现取 `wt= head= tree= at=`；新增一条最硬的守卫 —— 起 pytest 前先用
+`importlib` 查 8 个包的 `__file__` 前缀（**CWD 对不等于读的就是这棵树**：worktree 无 `.venv`，全靠
+`PYTHONPATH` 那九条，拼错一个子目录就静默回落到主仓 editable 安装，正是 ② 那一型的续集）。
+
+守卫自证 `m21-guard-teeth.ps1`（本轮实跑，脚本 rc=0，`fail-cases=0`；每条都要有能触发的 proof）：
+
+| 用例 | 期望 rc | 实取 rc |
+|---|---|---|
+| 不传 `-Wt` | 2 | 2 |
+| `-Wt` = 旧默认值那个已删载体 | 3 | 3 |
+| `-Wt` 存在但不是 git 工作树 | 5 | 5 |
+| `-Py` 指向不存在的解释器 | 4 | 4 |
+| `-Probe` 指向不存在的探针（不许"没探针就当过了"） | 8 | 8 |
+| `-Wt` = 一次性 mini repo（8 个包解析不落在它内） | 8 | 8 |
+
+两条如实的边界：**exit 6/7 未被端到端触发** —— 构造不出"`Push-Location` 成功而当前目录不等于 `-Wt`"
+（试过 `\.` 后缀形式，`Resolve-Path` 与 `Push-Location` 归一化一致），那条比对只按**表达式两向对照**
+验过：同值 → `False`、仅尾分隔符不同 → `False`（`TrimEnd` 生效）、真差异 → `True`，即它既不恒真也
+不恒假。另一条：自证件第一版把用例包进函数并 `return` 布尔，6 行 rc 全被管道吞掉却照样打出
+`overall=OK` ⇒ 见 §5-19，本表的"实取 rc"列就是为这条而存在的。
+
+happy-path 自检（证明守卫不误杀正常载体）：载体 = 新建 detached worktree `ap-m5selftest` @
+`ff2ebaf5`（tree `be69661b`，与本轮 6 格首行那枚 tree 同一对象），加固后的 runner **显式传 `-Wt`**
+跑前 9 格，**9/9 `rc=0`**，逐 session 三列与上表**逐条相等**（root `1564 passed / 10 skipped /
+29 deselected` … nl2sql `235 passed / 8 skipped`），9 格合计 **3936 passed / 28 skipped /
+29 deselected / 0 failed** = 上表十格减去第 10 格那 18 条。日志 `m22-selftest-9sessions.log`，不入库。
+第 10 格不在本件射程（runner 只覆盖 Makefile `test` 的前 9 个 session），它仍是
+`m16-obs-652378a6.log` 那一格。**上表的归属没有因此改变**：它绑 `652378a6`，这次自检绑 `ff2ebaf5`，
+两棵 tree 的差别仍只在本文这一只 blob（`git diff --name-only 652378a6 ff2ebaf5` 只列一个路径）。
 
 **与 §4 的交叉核对才是本格的意义**：合计四个数 **3954 / 28 / 29 / 0** 与 §4 绑 `d86ee4db`
 的读数**逐项相等**，且逐 session 的 passed/skipped/deselected 三列**逐条相等**（10 行全对齐）。
