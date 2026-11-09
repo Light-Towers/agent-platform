@@ -195,6 +195,26 @@ worktree 里跑 pytest，测的是**主仓代码**，不能当作合并树的证
    main 侧整行，截掉了后半句，于是得出“这几条台账文字在 main 里没有对应物”并说了出去；
    扩到整行（宽 333 字）后正好相反 —— main 是超集。⇒ 引“整行”必须同时打**行宽**；
    截断长度小于行宽就是未证完。本轮已口头纠正该句，且它从未入库。
+11. **单值输出被按两列索引**：`git rev-list --count main...<b>` 只打一个数，我却按
+    `--left-right` 的两列形状 `-split "`t"` 再取 `[0]` ⇒ 拿到 null，"独有 commit 数"整列是
+    **空读数**，表格照样打满。于是上一轮说出的"6 条分支独有 commit 都是 0"全部无效。换成
+    `git rev-list --left-right --count` 后结论整个反过来：`feat/web-visual-poc` 独有 0，
+    dependabot 四条各 1–2，`lineage/intranet-v3-until-2026-10-19` 独有 **797**。
+    ⇒ 某一列齐刷刷为空时，先怀疑度量，不要先怀疑仓库。
+12. **把 `git diff main <b>` 的 + 侧当分支独有面**（§10 同一个坑的第二次触发，方向相反）：
+    本轮对 `fix/dependabot-security-int` 这么算出 2016 行"独有"，而它实际只有 2 个 commit、
+    6 个文件。原因是该分支落后 main 441 个 commit，+ 侧把"main 在这 441 个 commit 里删掉/
+    改掉的行"也算成了分支的独有信息。正确口径 = 以 merge-base 为原点取**分支自身贡献**
+    （`git diff $(git merge-base main <b>) <b>`），再把这些行逐条回查 main 当前版本。
+    上次是 - 侧虚高（cand-wt），这次是 + 侧虚高，同一个误读的两个方向。
+13. **`2>&1` 把 stderr 计进行数**：`@(git ls-remote --heads company 2>&1).Count` 报 6，
+    真 head 只有 3 —— OpenSSH 的 post-quantum 警告占了 3 行。远端 heads 要么丢弃 stderr
+    单独取，要么按 `refs/heads/` 前缀过滤后再数；这个数一旦进"恒 2 分支"报警判据就是假报警。
+14. **远端读数不能用本地缓存冒充现读**：`refs/remotes/github-legacy/*` 里 dependabot 是
+    `brotlicffi` / `major-cb6f23add6` / `minor-and-patch-0e126670a4` 三条，现取
+    `ls-remote` 却是 `brotlicffi` / `dnspython-2.9.0` / `minor-and-patch-ef4e6ffbb8` ——
+    GitHub 服务端 dependabot 在这期间自己建过枝。⇒ 分支卫生第 3 条写的就是 `ls-remote`，
+    `for-each-ref refs/remotes` 只能算"上次 fetch 时的状态"，引用时必须标出是哪一种。
 
 ## 6. 登记为遗留、本次不顺手改
 
@@ -354,3 +374,124 @@ G4 的那 1 项警告是台账项零命中的 WARN（`docs/adr/0013-*.md` 已脱
 表格逐行复原；判定只需上面那三条命令（is-ancestor / diff --numstat / hash-object 对 blob），
 不依赖本轮上下文。另需记住两个量法陷阱：存在性只用 `git ls-tree`（`rev-parse` 失败时会回显查询串）、
 引整行必须同行宽一起看。
+
+---
+
+## 11. 本地分支体检：7 条分支的独有面定性与 4 条死枝处置
+
+量具（两枚都在 `.tmp-scratch/ap-visual/` 下，**不入库**）：`m7-branch-health.ps1` 取
+「独有 commit 数 / 落后 main 数 / 是否 main 祖先」三列；`m8-branch-unique.ps1` 取
+「相对 merge-base 的自身贡献 + 逐行回查 main」。判据链三段，各答一件事：
+`git rev-list --left-right --count` 答"有没有独有 commit"，`git cherry -v` 答"这些补丁是否
+已在上游"，m8 的逐行回查答"内容在不在 main"。缺第三段就会把"比 main 旧"读成"有独有信息"
+（§5-12 本轮就是先缺了第三段才虚报 2016 行）。
+
+体检起点 `main = ce8487a0`，7 条非 main 分支实测：
+
+| 分支 | 独有 commit | 落后 main | 是 main 祖先 | `git cherry` | m8 口径的真独有面 | 判定 |
+|---|---|---|---|---|---|---|
+| `feat/web-visual-poc` | 0 | 8 | 是 | 全 `-` | 无（tip 已在 main） | **保留**：主工作区当前检出，且 ext 8 件仍未提交 |
+| `docs/dependabot-round4-2026-10-24` | 1 | 441 | 否 | `-` 已上游 | 14 行 = §13.4 的**实施前草稿**（main 侧同小节已改写成「已实施，2026-10-25」） | 死枝 |
+| `fix/dependabot-pillow-13-2026-10-24` | 1 | 440 | 否 | `-` 已上游 | 方案文档那个 blob 与 main **逐字节同一**；uv.lock 88 行全在 main；只剩 5 行旧注释写法被 main 重写 | 死枝 |
+| `fix/dependabot-security-oct-2026-10-24` | 2 | 442 | 否 | 2 枚 `+` | 依赖批次已在 main（uv.lock 自身贡献 423 行 not-in-main=0）；真独有只剩 AGENTS.md 2 行 | 死枝 |
+| `fix/dependabot-security-int` | 2 | 260 | 否 | 2 枚 `+` | **19 行文档台账**（下节） | 并入 main 后转死枝 |
+| `lineage/intranet-v3-until-2026-10-19` | 797 | 1113 | 否 | — | §8 那格 G5 有牙对照的载体（`12f03c8f`，172 处命中） | 保留，**禁删**（已在册） |
+| `mirror/nl2sql-ttl-and-006-slim` | 4 | 439 | 否 | 4 枚 `+` | 公开镜像载体：按分支卫生第 5 条不住在「恒 2 分支」计数里，且未累积第二条 | 保留 |
+
+**那 2 行 AGENTS.md 为什么算"被取代"而不是"丢了"**：一行是「上 126 前先记住**六**条容易踩死的
+差异」（main 现为七条），另一行是第 7 条里的「docker+git 齐、空闲 39G/13G，**同机只有我们自己的
+东西**」—— main 已用 2026-10-28 实取把这句订正成错的（241 的 moby 上常驻整套观测后端 +
+exhibition-dashboard，全与那块 `ROTA=1` 单盘同盘）。⇒ 分支侧那 2 行是 main **有意改掉**的形状。
+判定用的是"同一位置 main 有更新版"，不是"main 没这句话"。
+
+**可逆性前置读数**（决定要不要备份）：`git for-each-ref --contains` 实取 —— 其余 4 枚独有 commit
+在 `github-legacy` 上都有同名远端分支兜着；只有 `43f86c68` / `372870a4` **只被
+`fix/dependabot-security-int` 这一个 ref 引用**。本批纪律是不推任何远端 ⇒ 那条分支一删，
+那两枚对象只剩 reflog / gc 窗口，没有持久副本。这是下一节必须先做的原因。
+
+---
+
+### 11.1 唯一真独有面（19 行台账）并入 main
+
+用户批「合入 main，并同步改掉那句『只存在于内网分支』」。落地提交 `7d9c7116`
+= `git cherry-pick -x 43f86c68`（干净 auto-merge，19 行落在 §9.16 ⑧ 台账末尾）
+**同提交内**改写 `docs/plans/plan-platform-tenant-workspace-identity-2026-10-18.md`
+原第 657 行那句「台账里这条之后的文字只存在于内网分支：镜像 `08237f8` 不含它」——
+它随本次并入变成假陈述，按"不在账上留已变假的陈述"就地改成带判据的限定，改写后的那句
+自记实测：`mirror/nl2sql-ttl-and-006-slim`（含其远端 tip `a6753c9c`）与
+`lineage/intranet-v3-until-2026-10-19` 上本文件对「第二批追加发布」`git grep -c` **均 rc=1**
+（零命中）⇒ 公开侧不变，本轮只动 main 一侧。
+
+为什么必须同提交：分两个提交，中间那个 tip 就带着一个已假的说法在账上。
+
+**并入后复核**：`m8-branch-unique.ps1 -Base 7d9c7116 -Branches fix/dependabot-security-int` 实取
+⇒ 那 6 个文件自身贡献**全部** `not-in-main=0`（含本文档那 19 行），整条分支转死枝，备份需求随之
+消掉（内容已在 main，不再依赖 reflog 窗口）。注意读数里 `blob-vs-main=differs` 与
+`not-in-main=0` 并存是对的：blob 不同源自行级改写（657 那句），不是内容有缺失。
+
+`7d9c7116` 上 6 格实取（载体 = 仓外 worktree `d:/Study/github/ap-doc-wt`，非 `.tmp-scratch`）：
+G1 ruff `rc=0` / G2 doc_sync `rc=0`（0 警告）/ G3 arch `rc=0`（含 P14）/ G4 registry `rc=0`
+（0 文件 0 命中，台账 1，违规 0 警告 1）/ **G5 publish `88515cab..7d9c7116` 新增命中 0 处 `rc=0`**
+/ G6 governance `521 passed, 1 skipped`。G5 本格有牙，对照见 §8（同一 linter 对 `12f03c8f`
+报 172 处 / rc=1）。⇒ 那 19 行含 `zhanggui-*` 这类内部项目名，但它**不在门禁口径内**且
+main 早已有 40 处同词形、镜像树同样含 ⇒ 不是本批新增暴露面（这条是实测，不是推断）。
+
+---
+
+### 11.2 死枝处置登记（分支卫生第 1 条要求的"确证退役结论"就写在这里）
+
+用户批「登记判定后进取证件，再 `git branch -D`」。执行 4 条：`docs/dependabot-round4-2026-10-24`、
+`fix/dependabot-pillow-13-2026-10-24`、`fix/dependabot-security-oct-2026-10-24`、
+`fix/dependabot-security-int`。`feat/web-visual-poc` 虽独有 commit = 0，但它是主工作区当前检出且
+ext 8 件在动 ⇒ **不删**，等那条线收口后用 `-d` 即可（那时它是 main 祖先）。
+
+为什么必须 `-D` 而非常规 `-d`：这 4 条都**不是** main 的祖先（独有 commit ≠ 0），
+`-d` 的"已合入"检查会拒；而"内容已在 main"是 §11 表格里 m8 的逐行结论 + `git cherry` 的
+补丁级结论，不是 ancestry。⇒ 本条就是那条确证退役结论的登记处。
+
+**复审触发条件**（第 2 条：没有复审条件的登记不许写）：
+① 若在 main 里查不到某条独有行的对应事实（典型来源：`git log -S<短语>` 查不到出处）⇒ 按 §11
+表格逐行复原。复原成本分两档：那 3 条 dependabot 枝在 `github-legacy` 上有同名远端分支，
+`git fetch github-legacy` 即回（现取 sha 逐字相同：`ba01872c` / `1b2119e4` / `f8f6b0cb`）；
+`fix/dependabot-security-int` 无远端副本 ⇒ 窗口内 `git cat-file -p 43f86c68`，窗口过后只能靠
+本文 §11.1 的文字结论 —— 而那 19 行已经并入 main，所以真需要复原的场景只剩"我判定错了"。
+② 只要 `zhanggui-*` 这类内部项目名将来被列进门禁口径 ⇒ §11.1 那句"不是新增暴露面"立刻失效，
+必须复审这 19 行该不该留在 main。
+
+---
+
+### 11.3 远端 heads 超标：登记为已知条件（用户批）
+
+**现取**（`git ls-remote --heads`，不是本地缓存 —— 理由见 §5-14）：
+
+- `github-legacy` **9 条**：`main = 88515cab`（就是本文一路用的公开基线）、
+  `mirror/nl2sql-ttl-and-006-slim = a6753c9c`、`feat/nl2sql-meta-build-recovery`、
+  `docs/dependabot-round4-2026-10-24`、`fix/dependabot-pillow-13-2026-10-24`、
+  `fix/dependabot-security-oct-2026-10-24`、`dependabot/uv/` 3 条
+  （`brotlicffi-1.2.1.0` / `dnspython-2.9.0` / `minor-and-patch-ef4e6ffbb8`）。
+- `company` **3 条**：`main = fe22794c`、`feat/web-visual-poc = d4d3d329`、
+  `lineage/intranet-v3-until-2026-10-19 = 12f03c8f`。
+
+两条都 > 2 ⇒ 触分支卫生第 3 条的报警项。**为什么本批不在远端清**：`github-legacy` 的推送 URL 是
+`DISABLED-no-push`（脱敏闸门），且 `dependabot/uv/*` 由 GitHub 服务端自动建枝、本地删不动
+（现取比本地缓存多出一条新的 `dnspython-2.9.0` 就是证据）；`company` 那侧是"后续单独同步"，
+本批纪律是不推任何远端。⇒ 如实登记，不假装达标。
+
+**复审触发条件**：
+① 恢复 `github-legacy` 推送能力时，第一批要清的就是上面 3 条 dependabot 枝 + 已并入 main 的
+3 条死枝同名远端；动手前先按 publish 模式确认它们没被当作公开基线引用（`main = 88515cab`
+是基线，不能碰）。
+② GitHub 侧 dependabot 关掉自动建枝或收成 security-only 之后 ⇒ 重跑 `ls-remote`，那时
+>2 才算真违规，不再是"第三方在服务端建"这一型。
+③ `company` 同步完成时，`ls-remote --heads company` 期望读数 = 3（`main` + 集成分支 +
+已登记禁删的 `lineage/intranet-v3-until-2026-10-19` 载体），出现第 4 条才当周处理。
+
+---
+
+### 11.4 本节自己的 tip 限定
+
+本取证件所在提交（现取 `git log -1 --format=%H main`）相对 `7d9c7116` 是**文档单提交**：
+只动本文，可执行面零变更 —— 自证 `git diff --name-only 7d9c7116 main` 只列出本文这一个路径。
+10 个 pytest session **仍未**对本节 tip 整体重跑（§8 那条限定同样适用，引用时必须连着读数一起引，
+不许简写成"全绿"）；§11.1 那 6 格绑的是固定 sha `7d9c7116`，本节所在 tip 的 6 格是**另跑的一轮**，
+结果按 §8 口径不写死 sha：跑就绑当时 tip，不跑就别引。
