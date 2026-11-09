@@ -215,6 +215,22 @@ worktree 里跑 pytest，测的是**主仓代码**，不能当作合并树的证
     `ls-remote` 却是 `brotlicffi` / `dnspython-2.9.0` / `minor-and-patch-ef4e6ffbb8` ——
     GitHub 服务端 dependabot 在这期间自己建过枝。⇒ 分支卫生第 3 条写的就是 `ls-remote`，
     `for-each-ref refs/remotes` 只能算"上次 fetch 时的状态"，引用时必须标出是哪一种。
+15. **§5-10 在同一轮里复犯**：定位 §11.4 的锚点候选行时我又用 `Substring(0,60)` 打整行，
+    短于 60 字的行直接抛 `ArgumentOutOfRangeException`，锚点清单只出一半就断了 —— 上次那次的
+    形状是"截断当结论"（没说错但证据不足），这次是"截断自己崩"（连证据都没出）。⇒ 同一条
+    教训的两种失效形状都出现过，说明**读过坑不等于写下一条命令时不踩**；能兜住的只有现取校验
+    （整行 + 行宽一起打），不靠自觉。本轮因此把 m15/m16 全系列锚点脚本统一成
+    `line=<1-based> width=<len> [<整行>]` 三件套。
+16. **PowerShell 里 `git rev-parse HEAD^{tree}` 必须加引号**：`{tree}` 被 PS 当**脚本块**解析，
+    参数被拆开后再喂进去，报的是 `fatal: ambiguous argument 'dAByAGUAZQA='`（那段 base64
+    解码就是 `tree`），看上去像 git 不认 `^{tree}`，其实是载体把参数吃了。写成
+    `git rev-parse "HEAD^{tree}"` 才对。⇒ 凡带 `{}` 的 rev 后缀（`^{tree}` / `^{commit}`）
+    在 PS 下一律加引号；本轮两次触发（第二次才想起来查形状）。
+17. **内联多行 Python 在 PS 5.1 下不可用**：`python -c "…\n…"` 里的 `\n` 不被解释，得到
+    `SyntaxError: unexpected character after line continuation character`，import 解析自证
+    整条没跑起来。修法不是转义，是**改成落盘脚本再跑**（本轮 = `.tmp-scratch/ap-visual/` 下的
+    `m14_import_resolution_probe.py` + `m14-probe.ps1`，不入库）。与 §5 前几条同源：
+    都是载体选择问题，不是被测物问题。
 
 ## 6. 登记为遗留、本次不顺手改
 
@@ -293,13 +309,19 @@ git worktree remove --force ..\ap-trunk-check; git worktree prune
 `<internal-host>`）。⇒ 本格有牙，0 处不是因它根本不扫。
 G4 的那 1 项警告是台账项零命中的 WARN（`docs/adr/0013-*.md` 已脱敏），非硬红。
 
-10 个 pytest session **未**对终 tip 整体重跑。这个限定必须连着读数一起引，不许简写成
-"终 tip 全绿"：§4 那 3954 passed 绑的是 `d86ee4db`，终 tip 只有本节这 6 格。
+本节 6 格**不含** 10 个 pytest session —— 取数当时未对终 tip 整体重跑，§4 那 3954 passed
+绑的是 `d86ee4db`，本节只有这 6 格。**这个限定已由 §12 解除**（10 个 session 于
+`652378a6` 整体重跑、10/10 rc=0、合计与 §4 逐项相等），引用本节时改连 §12 一起引，
+不要再引"未整体重跑"。
 
-为什么可以不重跑：用「**可执行面**零变更」而不是「代码树等价」——后者是错的，两棵 tree
-的对象名不同（多了一个文档 blob），可直接验：`git rev-parse d86ee4db^{tree}` vs
-`git rev-parse <终 tip>^{tree}`。可执行面零变更同样可直接验：
-`git diff --name-only d86ee4db <终 tip>` 只列出一个 `docs/operations/evidence/**.md`。
+当时为什么可以不重跑：用「**可执行面**零变更」而不是「代码树等价」——后者是错的，三棵
+tree 对象名各不相同（`d86ee4db` `59433cd7` / 本节 tip `cb155db3` / `652378a6` `4de874a7`），
+可直接验（**PS 下 `{}` 后缀必须加引号，见 §5-16**）：`git rev-parse "d86ee4db^{tree}"` vs
+`git rev-parse "<tip>^{tree}"`。可执行面零变更同样可直接验，但**这条是参数化的、会随 tip
+前进而变**：`git diff --name-only d86ee4db <tip>` 在本节落地当时只列出本文一个路径，tip
+走到 `652378a6` 时列出**两个**（本文 +
+`docs/plans/plan-platform-tenant-workspace-identity-2026-10-18.md`，即 §11.1 并入的那 19 行
+台账及其改写句），仍然全是文档面 ⇒ "可执行面零变更"这个结论没变，**路径数变了**。
 
 **顺手抽掉一个错说法**：本节初稿写过一句“文档面由 `tests/governance` 守”，实读不成立 ——
 `check_doc_sync.py` 的存在性校验只扫 `AGENTS.md` / `ARCHITECTURE.md` / `README.md` 三份
@@ -490,8 +512,101 @@ ext 8 件在动 ⇒ **不删**，等那条线收口后用 `-d` 即可（那时�
 
 ### 11.4 本节自己的 tip 限定
 
-本取证件所在提交（现取 `git log -1 --format=%H main`）相对 `7d9c7116` 是**文档单提交**：
-只动本文，可执行面零变更 —— 自证 `git diff --name-only 7d9c7116 main` 只列出本文这一个路径。
-10 个 pytest session **仍未**对本节 tip 整体重跑（§8 那条限定同样适用，引用时必须连着读数一起引，
-不许简写成"全绿"）；§11.1 那 6 格绑的是固定 sha `7d9c7116`，本节所在 tip 的 6 格是**另跑的一轮**，
-结果按 §8 口径不写死 sha：跑就绑当时 tip，不跑就别引。
+本取证件所在提交（现取 `git log -1 --format=%H main`）相对 `7d9c7116` 只有文档提交、
+只动本文 —— 自证 `git diff --name-only 7d9c7116 main` 只列出本文这一个路径。枚数改成现取
+`git rev-list --count 7d9c7116..main`：本节初版写的是"单提交"，那时确实是 1；此后每补一格
+就 +1，所以那个数不该写死在文里（§5-10 的同族形状：把取数当时的计数当成永久属性）。
+
+10 个 pytest session 本节初版写着"**仍未**对本节 tip 整体重跑" —— **该限定已由 §12 解除**：
+`652378a6` 就是本节所在 tip，10 格已在它上面整体重跑、全 rc=0。保留的限定只剩下面这两条：
+§11.1 那 6 格绑的是固定 sha `7d9c7116`，本节所在 tip 的 6 格是**另跑的一轮**；结果仍按 §8
+口径不写死 sha —— 跑就绑当时 tip，不跑就别引。
+
+---
+
+## 12. 10 个 pytest session 对 `652378a6` 整体重跑（解除 §8 与 §11.4 各自那条限定）
+
+为什么补这一格：§8 与 §11.4 都写着"未整体重跑"，而 §4 的 3954 绑的是 `d86ee4db`。
+主线收口收尾时不该把这句话留在账上 —— 它当时的性质不是"没必要跑"，是"还没跑"。
+本格只做**复跑已有校验件**，不新开判据。
+
+**载体**：`git worktree add --detach d:/Study/github/ap-trunk-sessions 652378a6`（**仓外**、
+非 `.tmp-scratch`，理由见 §5-8；tree = `4de874a7`，与 §11.1 那 6 格用的 `7d9c7116`
+tree `18f2c5da` 只差文档 blob）。取证后已 `git worktree remove` + `prune`，未入库。
+**解释器**：主工作区 `.venv` 的 python（worktree 无 `.venv`，`uv run` 会在那儿重建整棵依赖树），
+`PYTHONPATH` 覆盖到 worktree。
+
+**覆盖有效性本轮重做，不再只引 §4 那句**：探针 `.tmp-scratch/ap-visual/m14_import_resolution_probe.py`
++ 包装 `m14-probe.ps1`（都不入库；为何落盘而不是 `python -c` 见 §5-17）实跑 →
+8 个包（`agent_core` / `agent_runtime` / `shared_schemas` / `agent_server` / `nl2sql_service` /
+`knowledge_service` / `kefu_agent` / `exhibition_agent`）的 `__file__` 前缀**全部**落在 worktree 内，
+`checked=8 misresolved=0`，**probe rc=0**。不设 `PYTHONPATH` 直接在 worktree 里跑的后果照 §4：
+测的是主仓代码，不能当合并树的证据。
+
+| session（逐行对齐 Makefile `test` 目标） | rc | 读数 |
+|---|---|---|
+| root `pytest -q -m "not requires_pg"` | 0 | 1564 passed / 10 skipped / 29 deselected（153.55s） |
+| shared-schemas | 0 | 28 passed |
+| agent-runtime | 0 | 888 passed / 2 skipped |
+| agent-server | 0 | 183 passed |
+| federation | 0 | 192 passed / 1 skipped |
+| kefu | 0 | 49 passed |
+| exhibition | 0 | 381 passed（11 warnings） |
+| knowledge-service | 0 | 416 passed / 7 skipped |
+| nl2sql-service | 0 | 235 passed / 8 skipped |
+| `tests/observability`（`--extra otel` 同集） | 0 | **18 passed，零 skip**（18.54s） |
+
+合计 **3954 passed / 28 skipped / 29 deselected / 0 failed**，10/10 rc=0。
+取数件：`.tmp-scratch/ap-visual/m13-sessions-652378a6.log`（前 9 格，13:06 那一轮）+
+`m16-obs-652378a6.log`（第 10 格，本轮复跑），均不入库。第 10 格本轮**又跑了一次**且读数一致
+（18 passed / 0 failed），本格引的是复跑那次 —— 因为它有对应的 SDK 在位性证据同批取。
+
+**取数件自身的两个坑要标出来**（否则复跑的人会被带偏，这一型比前面所有条都更容易静默做错）：
+① m13 那份日志的首行仍印 `trunk-candidate session rerun`，那是 runner
+`m5-run-trunk-sessions.ps1` 里的**陈旧硬编码字样**，不代表当时真跑在 `trunk-candidate` 上；
+② 该 runner 的默认 `-Wt` 仍指向上轮那个已删的 cand 载体（`Test-Path` 实取 = `False`），而它的
+`$ErrorActionPreference` 是 `Continue` ⇒ `Push-Location` 失败只是**非终止错误**，实测
+`cwd-after` 仍是调用方原目录，脚本会**继续在错误的树上跑 pytest 并打出正常格式的读数**。
+⇒ 复跑必须**显式传** `-Wt`，且开跑前后各现取一次 `HEAD`/`tree` 对账（本轮两处都有：
+`m14-probe.ps1` 打印的 `root=` 与 `misresolved=0`、`m6-final-gates.ps1` 首行的
+`HEAD=652378a6 tree=4de874a7…`）。runner 的默认值与守卫本轮**未改**（它不入库，改默认值
+只影响下一次本地复跑，不影响本节的读数归属）；要改就连带把首行那句硬编码字样一起改，
+否则日志名与内容还是两套口径。
+
+**与 §4 的交叉核对才是本格的意义**：合计四个数 **3954 / 28 / 29 / 0** 与 §4 绑 `d86ee4db`
+的读数**逐项相等**，且逐 session 的 passed/skipped/deselected 三列**逐条相等**（10 行全对齐）。
+⇒ `d86ee4db → 652378a6` 之间那 3 枚提交（含 §11.1 并入的 19 行台账）对可执行面零影响，
+这条不再只是"`git diff --name-only` 只列文档"的推理，而是被 10 个 session 的直接读数证实。
+反过来说：如果哪天逐条不相等，先查是不是哪枚提交动了代码，不要先怀疑 §4 的旧读数。
+
+**第 10 格为什么不走 `uv run --extra otel`**：`--extra otel` 的动作是往 venv 里装 OTel SDK，
+而 worktree 没有 venv ⇒ 装过去等于改主仓环境。改为**先现取 SDK 在位性再跑**：
+`import opentelemetry.sdk.version` → `otel-sdk=1.45.1`（主 venv 内），同一解释器直接跑
+`tests/observability`。本格**非空转证据 = skip 数为 0**：这不是"缺 OTel SDK 自动 skip"
+那一型（conftest 守卫那一族见 AGENTS.md《验证策略》），18 条全是实跑。
+
+**Makefile 里还有一条不算第 10 格**：`test` 目标另有
+`VALKEY_URL=… CACHE_CONTRACT_REQUIRED=1 … test_cache_contract.py`，Makefile 自带注释声明它
+不计入那 9 个 session，且需要活的 Valkey ⇒ 仍未跑，列在下面，不含糊进"10/10"。
+
+**同一 sha 上的静态 6 格**（`m6-final-gates.ps1 -Wt …\ap-trunk-sessions -Rev 652378a6`，
+取数件 `m16-gates-652378a6.log`）：G1 ruff `rc=0` / G2 doc_sync `rc=0`（0 警告）/
+G3 arch `rc=0`（含 P14 语义缓存单轨）/ G4 registry `rc=0`（携带文件 0 / 命中 0 / 台账 1 /
+违规 0 / 警告 1）/ **G5 publish `88515cab..652378a6` 新增命中 0 处 `rc=0`** /
+G6 governance `521 passed, 1 skipped`。⇒ 本格与 §11.1 那 6 格同形，差别只在绑的 sha：
+§11.1 绑 `7d9c7116`，本节绑 `652378a6`。G5 本格的有牙对照仍照 §8（同一 linter 对 `12f03c8f`
+报 172 处 / rc=1），0 处不是因它根本不扫。
+
+**仍未跑**（本格解除的只有"10 session 未整体重跑"这一条，别的一条都没解除）：
+
+- `-m requires_pg` 的 29 条：需真 PG。
+- Valkey 契约目标（上面那条）：需活 Valkey。
+- E1 黄金集的 LLM 质量分（`--require-llm`）与 `eval/run_planner_eval.py` 双 Planner 基线：
+  需模型配额，属发布决策；§9 的启发式 100% 不能替它发声。
+- 变异两把 `make mutation-cache` / `make mutation`：未跑。
+- 126 现网回读：本批纪律是不推任何远端、不上 126。
+
+**本节的 tip 限定**（不因"多跑了一格"就免）：以上全部读数绑**固定 sha `652378a6`**，它是本取
+证件所在提交的父提交。本取证件所在提交不在本节射程内，自证 =
+`git diff --name-only 652378a6 main` 只列出本文这一个路径 ⇒ 可执行面零变更，本格读数可直引，
+但引用"10/10 全绿"时**必须连带这句**一起引，不许简写成"终 tip 全绿"。
