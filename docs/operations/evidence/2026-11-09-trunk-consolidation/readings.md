@@ -277,6 +277,13 @@ worktree 里跑 pytest，测的是**主仓代码**，不能当作合并树的证
   `88515cab` / `5c8522cd` / `main` 三侧**均已入库**，已用 `git ls-tree -r --name-only` 逐侧验过），
   存在性覆盖由带反引号那条提供 ⇒ 不补。真要统一得先答“公开镜像分支上该文件会不会不在”，
   那是另一个决策（分支卫生第 4 条射程）。
+- **同一型默认值还留在 `m6-final-gates.ps1` 里**（本批只加固了 session runner，没动它）：它的 `-Wt`
+  默认值是 `d:\Study\github\ap-trunk-final`（本轮实取 `Test-Path` = `False`，上轮已 `worktree remove`），
+  且它的 `Push-Location` 也没带 `-ErrorAction Stop` ⇒ 不显式传 `-Wt` 时同样是
+  "在调用方目录继续跑完 6 格并打出正常格式"的形状。本批所有门禁调用**都显式传了 `-Wt`** 且核对过首行
+  `HEAD=`/`tree=` 与目标 sha 一致 ⇒ 账面读数不受影响，但**件本身未改**。为什么不顺手改：它是门禁读数
+  的载体，判据与在册量具不得擅动（AGENTS.md《禁止行为》末条「所有代码优化/重构必须先制定
+  方案」），要改就得先给方案 —— 与 session runner 不同，那边只是本地复跑便利，没有判据。
 
 ## 7. 复跑命令（本仓 Windows 侧，无 make）
 
@@ -675,3 +682,13 @@ G1 ruff / G2 doc_sync / G3 arch（含 P14）/ G4 registry 四格 `rc=0`，
 （`10.` / `172.` / `192.` 三段前缀，0 命中）。
 **本段所在提交自身的 6 格不在本节射程内**（跑了也只能"绑当时 tip"，见 §8 末段那条规矩）；
 需要时现取 `git log -1 --format=%H main` 再跑，别把上面的数当成它的数。
+
+**本批最新一枚文档提交 `3cd8831e`（父提交 `ff2ebaf5`）的 6 格**：载体 = 仓外 worktree `ap-doc-wt`，
+首行现取 `HEAD=3cd8831e tree=b41b14ac…`。G1 ruff / G2 doc_sync / G3 arch（含 L-4、P14）/
+G4 mirror registry / G5 mirror publish `88515cab..3cd8831e` **新增命中 0 处** / G6 governance
+`521 passed, 1 skipped`（71.04s），**六格全 `rc=0`**。这组数绑固定 sha `3cd8831e`，不是"当前 tip"
+的数；`ff2ebaf5` 与 `3cd8831e` 不同 tree，差别仍只在本文这一只 blob（`git diff --name-only ff2ebaf5
+3cd8831e` 写入前实取 = 1 个路径）。日志 `m24-gates-3cd8831e.log`，不入库。
+上面那两段（加固后的取数件 + 本组 6 格）都不改本节主表的归属：主表仍绑 `652378a6`，取数件自检仍绑
+`ff2ebaf5`。**本段所在提交自身的 6 格仍不在本节射程内**（同 §8 末段那条规矩）：本轮在它之后又动了本文，
+所以要引"终 tip 门禁全绿"就必须在终 tip 上现取一次，不许复用上面任何一组数。
