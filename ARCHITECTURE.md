@@ -41,7 +41,7 @@ agent-core  agent-runtime  shared-schemas  agent-server  agent_federation  exhib
 
 > `agent-core` 提供**零件**，`agent-runtime` 把零件**组装成执行引擎**。二者不可反向依赖。
 > `shared-schemas` 与 `agent-core` 并列：前者是「数据/协议基础设施」，后者是「行为/能力基础设施」。
-> **2026-10-27 订正**：本表 `agent-runtime` 行原列的 `ExecutionRuntime` 在全仓生产代码中**零定义**（`git grep` 只命中本文件与 `docs/adr/0005`；该名随 `56a782fc` 引入本表，从未在代码中出现），现按实际实现列 `PlannerRuntime`（执行期依赖句柄）；原列的 `Workflow` / `Sandbox` 亦无同名类，实际为 `WorkflowSpec` / `WorkflowExecutor` 与 `SandboxExecutor`。`docs/adr/0005-execution-memory-kernel-contract.md` F2 引用的是订正前原文，按 ADR 不改写原则保留。
+> **2026-10-27 订正**：本表 `agent-runtime` 行原列的 `ExecutionRuntime` 在全仓生产代码中**零定义**（`git grep` 只命中本文件与 `docs/adr/0005-execution-memory-kernel-contract.md`；该名随 `56a782fc` 引入本表，从未在代码中出现），现按实际实现列 `PlannerRuntime`（执行期依赖句柄）；原列的 `Workflow` / `Sandbox` 亦无同名类，实际为 `WorkflowSpec` / `WorkflowExecutor` 与 `SandboxExecutor`。`docs/adr/0005-execution-memory-kernel-contract.md` F2 引用的是订正前原文，按 ADR 不改写原则保留。
 
 ### 2.2 Applications（应用，独立部署）
 
@@ -148,6 +148,11 @@ L 系列（观测架构与依赖契约）由 `docs/plans/plan-observability-glob
 | `scripts/evidence/nl2sql_real_pg_probe.py` | nl2sql 元知识真库往返（迁移链幂等 + 作用域写入 + 发布顺序 42P10 判据，11 项）；本机 PG 由 `pgserver` wheel 提供（含 pgvector），配方见 testing-playbook §3.4 | 否（本机进程内 PG） |
 | `scripts/evidence/migration_gate_mutation_probe.py` | `scripts/lint_migration_refs.py` 的非空转反证：原样副本零违规 + 注入 B-1 错表名报红 + 摘掉 006 报红（只在 tempfile 副本上动） | 否 |
 | `scripts/evidence/README.md` | 收录判据、可直接复制的运行命令、三条实踩过坑 | — |
+| `scripts/evidence/face_basis.py` | 面基准唯一实现（`face = git diff --name-only HEAD` + derived / ext-fresh / selftest），四把 PS 量具一律经 `k71-basis.ps1` 取面，禁止各造基准 | 否 |
+| `scripts/evidence/typo-scan.ps1` | 文档面 T1..T5 形状扫描；门件 B2b 从本件源码派生扫描面与「本刀改的入库 .md」对账 | 否 |
+| `scripts/evidence/ts-provability.ps1` | 账面新增行 R-1..R-6 内容可证性（时间戳、件名在位、键绑件内容、逐字引用） | 否 |
+| `scripts/evidence/k46-keypair-lib.ps1` | R-6 三元组抽取器唯一实现，被 `ts-provability.ps1` 与透视件 dot-source | 否 |
+| `scripts/evidence/k71-basis.ps1` | 面基准 PS 薄适配层，被 k70 链三件 dot-source；判据本体仍住 `face_basis.py` | 否 |
 | `tests/governance/test_evidence_scripts.py` | 钉住派生式预期集的纯逻辑不变量（含 `jobs:` 位于文件末尾、YAML 1.1 `on:`→布尔 `True` 键、PyYAML 缺席必 exit 2） | 否（autouse 拦断子进程） |
 
 口径三条：① 退出码 `2` = **前置不可用**（依赖缺失 / `gh` 调用失败），从不折算成通过；② 预期 check 名一律派生，硬编码两个方向都会错（该跑的没进集合 ⇒ 红了没人看；不该跑的写进集合 ⇒ 等不到而误判未达成）；③ 本目录受 `scripts/check_doc_sync.py` 的文件引用存在性校验覆盖（本节即登记位），引用失效即 CI 红——该校验的**判定基准是版本控制清单（`git ls-files`）而不是本机文件系统**，取不到清单即 fail-closed（口径：`docs/plans/plan-doc-sync-tracked-scope-2026-10-04.md`）。方案与验收：`docs/plans/plan-evidence-scripts-intake-2026-10-04.md`。

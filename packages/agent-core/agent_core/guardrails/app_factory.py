@@ -6,10 +6,10 @@ kernel 拥有入站装配：**所有生产 FastAPI app 必须经 ``build_api_app
 手写 / 漏接。配合 ``scripts/lint_architecture.py`` 的"裸 ``FastAPI(`` 即 CI 失败"
 门禁（§3.3），形成"工厂 + 门禁"双保险。
 
-工厂只强制两个全局不变量：**错误处理**（统一 500 脱敏 handler）与**原生
-telemetry 默认关闭**（R19：防 FastAPI ≥0.142 框架侧双 SERVER span 与 provider
-覆盖；调用方可显式覆盖）。CORS / SecurityGuards 等差异化中间件仍由调用方拿到
-返回值后自行 ``add_middleware``——不强推鉴权语义，避免改变各 app 现有对外行为。
+工厂只强制两个全局不变量：**错误处理**（未捕获异常 → 脱敏 500 信封 + ``AppError``
+统一出口）与**原生 telemetry 默认关闭**（R19：防 FastAPI ≥0.142 框架侧双 SERVER span
+与 provider 覆盖；调用方可显式覆盖）。CORS / SecurityGuards 等差异化中间件仍由调用方
+拿到返回值后自行 ``add_middleware``——不强推鉴权语义，避免改变各 app 现有对外行为。
 
 需 fastapi（``web`` extra）。
 """
@@ -26,6 +26,7 @@ def build_api_app(
     get_request_id: Optional[Callable[[], str]] = None,
     logger: Optional[Any] = None,
     install_handlers: bool = True,
+    normalize_http_errors: bool = False,
     enable_tracing: bool = False,
     **fastapi_kwargs: Any,
 ) -> Any:
@@ -39,6 +40,12 @@ def build_api_app(
     §3.2，S2）：每个 HTTP 请求创建 server span，覆盖 429/409/cache_hit/断连
     全旁路（R10）；未 init 启用时逐请求门控透传、零开销（opt-in 铁律）。
     默认关闭——对外 span 数量属行为变更，按 app 逐个开启（兼容顺序见方案 §4）。
+
+    ``normalize_http_errors`` 默认 **False**（在册决定 D-2=A：4xx/422 仍走 FastAPI
+    原生 ``{detail}``）—— 把存量对外形状改成统一信封属**跨服务兼容变更**，须逐 app
+    显式开启并先清点消费者，不由工厂默认代发（分阶段口径见方案 §4，钉默认值的用例是
+    ``test_http_exception_4xx_detail_unchanged``）。``AppError`` 通路不受本开关管，
+    经工厂总是装得上（新增出口，存量零调用点）。
     """
     from fastapi import FastAPI
 
@@ -50,7 +57,12 @@ def build_api_app(
     fastapi_kwargs.setdefault("telemetry", {"tracing": False})
     app = FastAPI(**fastapi_kwargs)
     if install_handlers:
-        install_error_handlers(app, get_request_id=get_request_id, logger=logger)
+        install_error_handlers(
+            app,
+            get_request_id=get_request_id,
+            logger=logger,
+            normalize_http_errors=normalize_http_errors,
+        )
     if enable_tracing:
         from agent_core.tracing_middleware import TracingMiddleware
 

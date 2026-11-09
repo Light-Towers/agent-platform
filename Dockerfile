@@ -67,7 +67,11 @@ RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/wh
 # extras 必须挂在**声明它的那个包**上：`[langfuse]` 声明在 packages/agent-runtime
 # （根包没有这个 extra）。写成 `.[langfuse]` 时 pip 只对未知 extra 告警并继续，
 # 构建照样绿、镜像里却没有包——与 memory-embed-local 那颗雷完全同形（2026-10-10 实测）。
-RUN pip install --no-cache-dir "./packages/agent-core[memory-embed-local]" ./packages/shared-schemas "./packages/agent-runtime[langfuse]" ".[otel]"
+# identity/auth 两个 extra 是同一条雷的第二个实例（登录链路：签令牌靠 PyJWT[crypto]、校
+# 口令靠 argon2-cffi）：本地 .venv 里两个包都靠 `uv sync --all-packages` 的**传递依赖**
+# 在位（pyjwt 的 Required-by 是 exhibition-agent/mcp/openai-agents，argon2-cffi 的是 minio），
+# 所以本地跑绿不能证明镜像里有——必须在本行显式带 extra（方案 §9 第二条）。
+RUN pip install --no-cache-dir "./packages/agent-core[memory-embed-local]" ./packages/shared-schemas "./packages/agent-runtime[langfuse,identity,auth]" ".[otel]"
 
 # 前端产物落点 = /srv/agent-platform/web/dist。这条对不是约定，是被机器钉住的契约：
 # applications/agent_server/main.py 的默认探测点是**进程 CWD** 拼 `web/dist`，而本镜像的

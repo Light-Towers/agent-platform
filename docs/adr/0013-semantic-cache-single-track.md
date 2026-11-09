@@ -4,7 +4,7 @@
 - 日期：2026-10-25
 - 来源：issue #134 的追问「这是修改参数默认值吗？为什么不降能力进行统一？是不是系统架构存在问题？」；用户随后先倾向 C2（Valkey 生产 + PG 开发/测试），再明确改为「统一使用 Valkey 做语义缓存，开发测试也用 Valkey，而不是 PG」。前置登记见 `docs/plans/plan-platform-tenant-workspace-identity-2026-10-18.md` §9.11-④（2026-10-23 已判「本轮不合并」，#133/#134 是债务登记而非排期）。**本 ADR 是对该「本轮不合并」的正式复审（同一 D2 面）**，同时重审 §9.11-③ 按 D21 定的 #133-A：C 下 #133 的终态是「租户 TAG 过滤 + 空租户 fail-closed」，不再以进程级 silo 断言收尾。
 - 关联：ADR-0003（双 DB driver / 单一 psycopg 池）、ADR-0006（隔离维度契约）、ADR-0007（服务端断言身份）、ADR-0009（向量存储选型 pgvector）；issue #133（联邦 L2 无租户谓词）、#134（`CACHE_ENABLED` 一名两默认 + 三处绕 config + 死锚）、#146（联邦 PG 池未接线）
-- 脱敏口径（2026-10-29）：本文的真机坐标（测试机名与 IP）已换为 `<internal-node-01>` / `<internal-host-241>` 占位符，真值住运维机本机的 .intranet/keymap.json（不入库）。**占位符保留编号 ⇒“读数在哪台机器上取得”仍可区分，取证可核性未降**；但拿占位符去现网复现前必须先取回真值。例外（**仅本公开镜像**）：§PII 补漏一节里那条“IP 紧跟中文”的测试输入，在公开侧已遮为 `<internal-ip>` —— 依据是 `scripts/lint_public_mirror.py` 的 publish 模式对 P-1 零容忍、不看语义、内网登记台账在此不生效，所以这一处不遮就过不了闸。内网本体保持合成示例原值未改 ⇒ 两版从此差这 2 行，登记见内网仓 `docs/operations/evidence/2026-10-30-web-visual-references/readings.md` §34。⚠ 这里的 `<internal-ip>` 是**遮罩占位符，不是内网地址**：它原本是一条合成测试输入（与 packages/agent-core/tests/test_guardrails.py 同源），不是基建坐标。
+- 脱敏口径（2026-10-29）：本文的真机坐标（测试机名与 IP）已换为 `<internal-node-01>` / `<internal-host-241>` 占位符，真值住运维机本机的 .intranet/keymap.json（不入库）。**占位符保留编号 ⇒“读数在哪台机器上取得”仍可区分，取证可核性未降**；但拿占位符去现网复现前必须先取回真值。例外（**仅本公开镜像的注记**）：§PII 补漏一节里那条“IP 紧跟中文”的测试输入，在内网本体已按在册词形写为 `<internal-ip>`；本镜像该行与内网逐字相同、未再做值遮罩。同一文件旧版注记曾写“不遮、是合成示例值”，那是该行改写之前的历史口径，本行按当轮实物改写，以免公开读者把两处读成互斥。⚠ `<internal-ip>` 是**脱敏占位符，不是内网地址**：它原本是一条合成测试输入（与 packages/agent-core/tests/test_guardrails.py 同源），不是基建坐标。
 
 ## 1. 结论先行
 

@@ -75,6 +75,36 @@ spec:
             # 由 tests/deploy 钉住，能不能真读到由批次 6 的写路径取证钉。
             - name: INTERNAL_HMAC_KEY_FILE
               value: /run/app-secrets/internal_hmac.key
+            # ---- 登录面（PR-2c：签发 + 验签走同一条 identity 通路，方案 §5）----
+            # 两个 *_FILE 给的是**挂载路径**不是密钥值：identity.load_private_key /
+            # load_public_keys 只读 env 指向的文件（os.getenv 那一句就是清单与代码的唯一接口）。
+            # 真实密钥永不在清单里：值住集群自建的 Secret agent-platform-jwt，生成与注入见
+            # deploy/k8s/README.md §6.3。
+            # ⚠ 那个 Secret 对象不存在时，本 Pod 以 CreateContainerConfigError 起不来 —— 这跟
+            # LLM_API_KEY 缺键时是同一条有意的 fail-closed：宁可拒启动，也不要「/health 全绿而
+            # 登录面静默 503」那种假灯。⇒ apply 顺序必须先建 Secret、再 apply 20。
+            # ⚠ 子目录 /run/app-secrets/jwt 不是多余一层：/run/app-secrets 已被 internal-hmac
+            # 卷占住（而那个位置本身不能改回 /run/secrets，理由见上面的 kubelet 坑注）。
+            - name: TENANT_JWT_PRIVATE_KEY_FILE
+              value: /run/app-secrets/jwt/jwt.key
+            - name: TENANT_JWT_PUBLIC_KEYS_FILE
+              value: /run/app-secrets/jwt/jwt-pubs.json
+            # 三个部署级开关从 CM 读（上面的成对理由与 D-f 写在那里，不在这里拄第二份）。
+            - name: AUTH_TOKEN_TTL
+              valueFrom:
+                configMapKeyRef:
+                  name: agent-platform-config
+                  key: AUTH_TOKEN_TTL
+            - name: SIGNUP_ENABLED
+              valueFrom:
+                configMapKeyRef:
+                  name: agent-platform-config
+                  key: SIGNUP_ENABLED
+            - name: TENANT_JWT_KID
+              valueFrom:
+                configMapKeyRef:
+                  name: agent-platform-config
+                  key: TENANT_JWT_KID
             # ---- 语义缓存（ADR-0013 C）：唯一后端 Valkey，禁止 CACHE_BACKEND=pg ----
             # VALKEY_URL 从 Secret 注入（可能含口令）；日志/health 统一脱敏。
             # 连接不可达时 fail-open（请求照常、health 报 degraded），不阻断平台启动。
@@ -229,6 +259,13 @@ spec:
               # runc 建子目录就是 EROFS，容器直接起不来（2026-10-28 在 126 实跑探针重现，理由详见 30 头部）。
               mountPath: /run/app-secrets
               readOnly: true
+            - name: tenant-jwt
+              # 登录面签名密钥：挂在 internal-hmac 那个卷的**子目录**里（kubelet 按路径深度排序，
+              # 嵌套挂载成立）。与上面同一档 readOnly：签发侧只需要读，写不进去 = 少一条能在运行时
+              # 换掉私钥的路径。env 里那两个路径必须与此处 mountPath + items[].path 逐字相同，
+              # 那个同源关系由 tests/deploy/test_k8s_manifest_wiring.py 钉住（不靠人目测）。
+              mountPath: /run/app-secrets/jwt
+              readOnly: true
       volumes:
         # type: Directory = 节点上没这个目录就调度失败（Pod Pending + 明确事件），
         # 而不是静默起来、首次推理时才发现缓存不在本机、回连 huggingface.co 又不通。
@@ -250,6 +287,21 @@ spec:
                 path: internal_hmac.key
             # 0440 + Pod fsGroup 10001：owner root、group 10001、其他进程不可读。
             defaultMode: 0440
+        - name: tenant-jwt
+          secret:
+            # 为什么另建一个对象而不是塞进 observability-keys：轮换面不同轨。换签名密钥不应当
+            # 有任何一次机会顺手覆盖到 LLM_API_KEY / LANGFUSE_*（补键走 kubectl patch 合并写，
+            # apply 是整对象替换）；两个对象分放后，“patch 错对象”的影响面从「观测面与登录面一起挂」
+            # 缩到只挂一边。名字由 tests/deploy 的集群自有清单登记（引用未交代的 Secret 对象即红）。
+            secretName: agent-platform-jwt
+            # 只投这两把：公钥 JSON 是 {kid: PEM} 形状（多枚并存才能轮转），私钥只有签发侧需要。
+            items:
+              - key: TENANT_JWT_PRIVATE_KEY
+                path: jwt.key
+              - key: TENANT_JWT_PUBLIC_KEYS
+                path: jwt-pubs.json
+            # 与 internal-hmac 同一档：0440 + fsGroup 10001（私钥对同 Pod 其他进程也不可读）。
+            defaultMode: 0440
 ---
 apiVersion: v1
 kind: Service
@@ -257,12 +309,31 @@ metadata:
   name: agent-platform
   namespace: agent-platform
 spec:
-  type: ClusterIP   # 访问用 port-forward 或 minikube service，不直接暴露
+  # 2026-11-06 拍板：ClusterIP → NodePort（用户批准 A 档；属 D2 暴露面变更，依据写在下面）。
+  # 为什么要改（两条实测 + 一条边界澄清，不是推定；2026-11-06 本段第 3) 条换形，成因见下面订正留痕）：
+  #   1) ClusterIP 下唯一进入路径是 kubectl port-forward，而它是一条会断的流 —— 取证面两次记到
+  #      它死掉（/tmp/portforward.log 末行 error: lost connection to pod）。于是「入口活不活」
+  #      取决于某台宿主上有没有一个前台进程，而不是取决于服务本身。
+  #   2) 集群底子：kubectl get ingressclass = No resources found、ingress/traefik/nginx controller
+  #      pod = 0、全集群 NodePort svc = 0 ⇒ 要常驻，NodePort 是本集群代价最小的一项，本 Service 是头一个。
+  #   3) 边界澄清（它不是本段改型的依据）：可达性由 Service 类型支配，与 dist 住在哪个容器无关 ⇒ 前端拆不拆
+  #      独立 Pod 都不改变本段结论。那个形态决策的真相源在 docs/adr/0010-ui-stack-selection.md §7.1
+  #      （现态：同镜像同 Pod，由 NoStoreStaticFiles 挂 /ui），清单注释不承载形态决策。
+  #      订正留痕：本条原写「拆独立前端 Pod 改变不了...（同一读数的推导见台账 §43）」—— 那个锚是假的，
+  #      台账 §43 不含任何拆分推导（2026-11-06 对该节全文检索零命中）；维度拆分与错锚定性见 ADR §7.2。
+  # 暴露了什么：同一次 apply 一起可达的还有 /docs、/openapi.json、/health —— 那不是新东西，
+  # 它们在 ClusterIP 期已经经 ops 通道可达；真正变的是「节点 IP 也能到」这一层。
+  # 鉴权实测（改前现取，非引用旧快照）：DEPLOY_ENFORCE_IDENTITY=true、SINGLE_TENANT=default、
+  # API_KEY_len=32；POST /query 无 key → 401、带假 key → 401 ⇒ 开放的是需要凭据的入口，不是匿名读写。
+  # 为什么钉 30080 而不让集群分配：入口地址要能写进手册给人点，随机端口等于没有地址。
+  # 为什么不指某台节点：Pod 会随调度飘（实测落在 <internal-host>），NodePort 三台都通 ⇒ 用任一 <internal-ip>:30080。
+  type: NodePort
   selector:
     app: agent-platform
   ports:
     - port: 8000
       targetPort: 8000
+      nodePort: 30080   # 固定值：apply 前须现取「该口三台宿主均未监听」+「集群内无同名 nodePort 冲突」
 ---
 # （可选加分项）HPA：先 minikube addons enable metrics-server 再启用本块
 # apiVersion: autoscaling/v2

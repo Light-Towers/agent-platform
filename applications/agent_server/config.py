@@ -18,6 +18,22 @@ class Settings(BaseLLMSettings):
     port: int = 8000
     api_key: str = ""  # 非空时启用 X-API-Key 认证，并忽略客户端 thread_id
 
+    # 登录面（方案 docs/plans/plan-web-auth-user-minimal-2026-11-05.md）。
+    # 三个都是**部署级开关**，不接受请求体/查询参数传入（否则等于让客户端自选注册到哪个 org）。
+    # 登录令牌寿命。**默认 3600 而不是方案 D-j 原写的 28800**：`identity.verify_token` 对
+    # `exp - iat` 有一道安全上限（`TENANT_JWT_MAX_TTL_S`，默认 3600），两边不一致时症状不是
+    # 「寿命短」而是「登录 200、下一个请求当场 401」（签出去的令牌自己验不回来）。实取见
+    # 本轮取证件（ttl=28800 → `令牌 TTL 28800s 超上限 3600s`）。要 8h 覆盖一个工作日，两边必须
+    # **同时抬**（本项与 `TENANT_JWT_MAX_TTL_S` 都是清单里的 ConfigMap 键）；只抬一边就是在
+    # 造一个开箱即碎的配置。auth_router 另有一道签发后自验，不让这种形状以「登录成功」出得去。
+    auth_token_ttl: int = 3600
+    signup_enabled: bool = True  # D-f：演示期默认开；内网外暴露时置 false 关死自助注册
+    signup_org_id: str = ""  # D-e：注册落哪个企业；空 = 回落 default_tenant_id（同值域决策）
+    # 签发令牌的 kid。**必须与 TENANT_JWT_PUBLIC_KEYS_FILE 里那把公钥的键名一致**：
+    # verify_token 按 header kid 选公钥，对不上就是「kid 缺失或无匹配公钥」当场拒（不逐把试，
+    # 那是轮转期的错误方向）。名字由部署声明，不进仓（Secret 侧同一枚值）。
+    tenant_jwt_kid: str = "platform"
+
     # 存储
     database_url: str = ""  # 空 = 内存模式（无持久化，仅开发）
     db_pool_max_size: int = 20  # 连接池上限（高并发 admission 全局限流 100/s 时避免池耗尽）
@@ -181,6 +197,16 @@ class Settings(BaseLLMSettings):
     @property
     def db_enabled(self) -> bool:
         return bool(self.database_url)
+
+    @property
+    def signup_effective_org_id(self) -> str:
+        """注册落点 org（D-e）：显式 ``SIGNUP_ORG_ID`` 优先，否则部署级租户。
+
+        两者都空时返回空串，由 :func:`agent_server.api.auth_router` 转成 503——不拿
+        ``"default"`` 字面量兜底：那等于静默造出一个谁都能注册进去的 org，而配错部署
+        与没配 org 在读数上就分不开了（与 ``WEB_UI_DIST`` 那条「关了与坏了分不清」同族）。
+        """
+        return (self.signup_org_id or self.default_tenant_id).strip()
 
     @property
     def langfuse_enabled(self) -> bool:

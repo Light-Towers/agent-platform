@@ -14,7 +14,7 @@
 #      缺键不静默：configMapKeyRef 指到不存在的键 ⇒ Pod 停在 ContainerCreating + 明确事件，
 #      而不是拿着空串去把元库列宽建成另一种口径；
 #   5. Pod 落到的节点上同时有 nl2sql-service:dev 镜像与 /opt/ap-models/hf-cache 权重缓存
-#      （三节点各自独立盘，先按 README §6 的前置检查逐节点跑过）。缺缓存 ⇒ hostPath
+#      （三节点各自独立盘，先按 deploy/k8s/README.md §6.1 的前置检查逐节点跑过）。缺缓存 ⇒ hostPath
 #      type: Directory 让 Pod 直接 Pending（响的失败），缺镜像 ⇒ ErrImagePull，都不是静默错。
 #
 # 幂等：init_meta_schema 的 DDL 全 IF NOT EXISTS + 跨实例 advisory 锁，并对账 information_schema

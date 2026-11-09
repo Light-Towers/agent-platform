@@ -21,6 +21,12 @@ dependencies = [
 [project.optional-dependencies]
 mcp = ["mcp>=2.0.0"]  # Dependabot: MCP SDK 多 high 告警（first_patched 1.28.1）
 identity = ["PyJWT[crypto]>=2.9"]  # ADR-0007 A3：RS256 令牌签/验（不进 agent-core，红线 1）
+# 登录面（口令目录）：argon2-cffi 散列，声明位只在此一处（PyJWT 由上面的 [identity] 带，
+# 不在本行重复声明下界——两处同一个包的两个下界就是 L-4 盯的那类漂移）。
+# 与 [identity] 同装才能跑完整登录链路（签令牌靠 PyJWT[crypto]，校口令靠本 extra），
+# 所以 Dockerfile 的安装行必须同时带两个 extra：本地的 pyjwt/argon2 是靠 uv sync
+# --all-packages 的传递依赖（exhibition-agent/mcp/minio）在位的，本地绿不等于镜像里有。
+auth = ["argon2-cffi>=23.1"]  # 方案 docs/plans/plan-web-auth-user-minimal-2026-11-05.md D-b（OWASP 首选，不用 passlib 包装）
 # OTel 观测软依赖声明位已摘（2026-09-30 门面退役）：otel.py 删除后本包无 opentelemetry
 # 直接导入，观测统一软导入面在 agent-core [tracing]（lint L-4 监控声明位与下界）。
 # Langfuse 回调软依赖（tracing.py get_langfuse_callbacks 懒导入）；下界与 federation

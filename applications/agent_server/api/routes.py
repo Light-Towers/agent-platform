@@ -1,10 +1,11 @@
-"""HTTP 端点聚合：/health、/query(SSE)、/import、/sql/train、/session/revert、/history、/api/executions。
+"""HTTP 端点聚合：/health、/query(SSE)、/import、/sql/train、/session/revert、/history、/api/executions、/auth/*。
 
 D6: 按业务域拆分为子模块，本文件为聚合入口（main.py 仍 `from agent_server.api.routes import router`）。
 """
 
 from fastapi import APIRouter
 
+from agent_server.api.auth_router import router as auth_router
 from agent_server.api.callback import router as callback_router
 from agent_server.api.console_router import router as console_router
 from agent_server.api.control import router as control_router
@@ -17,6 +18,7 @@ from agent_server.api.sql_router import router as sql_router
 
 router = APIRouter()
 router.include_router(health_router)
+router.include_router(auth_router)
 router.include_router(query_router)
 router.include_router(import_router)
 router.include_router(sql_router)

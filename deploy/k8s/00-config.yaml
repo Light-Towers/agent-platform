@@ -42,6 +42,27 @@ data:
   # 真判据是"Langfuse 里查得到这条 trace"（方案 §4 A3）。
   LANGFUSE_HOST: "http://<internal-ip>:3000"
   # ---------------------------------------------------------------------------
+  # 登录面（方案 docs/plans/plan-web-auth-user-minimal-2026-11-05.md 的部署侧，PR-2c）。
+  # 三键只有 20 在读（30 的鉴权走内部 HMAC 头、不签令牌），键名不带前缀就是因为没有
+  # 第二个同名消费者。密钥值不住这里 —— 两把 *_FILE 给的是挂载路径，见 20 与 deploy/k8s/README.md §6.3。
+  # ---------------------------------------------------------------------------
+  # AUTH_TOKEN_TTL 必须 ≤ TENANT_JWT_MAX_TTL_S（identity.verify_token 对 exp-iat 的安全上限，
+  # 默认 3600）。只抬一边得到的不是「寿命更长」，而是签出的令牌自己验不回来；auth_router 的
+  # 签发后自验把这条拦在登录那一跑里（503），所以这里的 3600 是**成对值**、不是口味值：
+  # 要 8h 覆盖一个工作日，就同时补注入 TENANT_JWT_MAX_TTL_S。形状由 tests/deploy 的成对齿钉。
+  AUTH_TOKEN_TTL: "3600"
+  # D-f：演示期开自助注册（表内零用户时首个注册者即管理员，D-g）。内网之外暴露时改 false
+  # 即关死整面 —— 关掉的表现是 403 + 固定 code，不是静默退化成「用静态 key 也能玩」。
+  SIGNUP_ENABLED: "true"
+  # kid 的名字在这里声明，值住在集群 Secret 的公钥 JSON 顶层键 ⇒ 两边必须逐字相同
+  # （verify_token 按 header kid 选公钥、对不上直接拒，「不逐把试」是 identity.py 明写的）。
+  # 改名而公钥 JSON 没跟上的现场表现是登录 503「签名密钥配置不完整」，探针 C8 读得到。
+  TENANT_JWT_KID: "platform"
+  # 注册落点 org 刻意**不注入**：SIGNUP_ORG_ID 留空 = 回落 DEFAULT_TENANT_ID（config.py 默认
+  # "default"），与上面的 SINGLE_TENANT 同值域（D9 单企业语义）。在这里写第二份 "default"
+  # 等于给同一条事实造两个来源，轮换必漏改其一 —— 与 05-secrets.yaml 那条「口令两处各写一份」
+  # 的教训同族。真读数由探针 C9 在现网取：注册响应里的 tenant_id 必须等于服务端断言的租户。
+  # ---------------------------------------------------------------------------
   # nl2sql-service（批次 3）：键名带 NL2SQL_ 前缀，env 名不带（前缀映射在清单里做）。
   # 为什么要前缀：上面那些不带前缀的键是平台在读的同一一份 CM，同名不同值（EMBEDDING_MODEL
   # 在这份 CM 里是 bge-small-zh，只作用于平台的 RemoteEmbedder 分支）会被下一次“顺手改一下

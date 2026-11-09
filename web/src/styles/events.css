@@ -1,7 +1,11 @@
 /* ============================================================================
- * events.css — 12 类事件的 class → token 映射 + 图例 + 灯阵卡
+ * events.css — 12 类事件的 class → token 映射 + 图例 + 灯阵卡 + 两种客户端侧行形状
  * **只引用 var(--*)，一个值都不写**（视觉件 §2.2/§1.1）。
  * 三通道原则：3px 左边框 accent + 类型徽标（mono 原文常显）+ 图标 ⇒ 色彩不是唯一通道。
+ * ⚠ 本文件末尾另有两组**不在图例里**的 class：`.ev--transport`（客户端侧行种类）与
+ *   `.term--*`（终态徽标三值）。它们故意为此不进 `EVENT_LEGEND` —— 图例的 key 集必须
+ *   == 后端派生事件全集（门禁断言 6 双向校），把客户端自己的行种类塞进去就是
+ *   「前端声称后端产出一种后端没有的行」。理由与 `icons.ts` 头注那条同形。
  * ==========================================================================*/
 
 .timeline { display: grid; gap: var(--sp-2); }
@@ -76,6 +80,24 @@
 }
 .ev--unknown .ev__ico { color: var(--cat-failure); }
 .ev--unknown .ev__body { color: var(--text-2); }
+
+/* 传输行（`kind='transport'` 那四条文案共用一枚行形状）：走警示族不走失败族。
+ * 理由不是审美：那四条里**没有一条是服务端给的失败**（请求没发出 / 200 无体流 /
+ * 帧解析失败 / 流断且未收到 done），它们与 `.ev--error`（服务端 error 帧）是两类事实；
+ * 把它们涂成失败色，读图的人就会去查服务端的日志而不是查自己的地址与网络。
+ * 竖条走实线（不走 `.ev--unknown` 那条虚线）：虚线的含义已经给了「名字没认出来」，
+ * 两件事共用一个形状就会共用一个结论。 */
+.ev--transport { border-left-color: var(--cat-watch); }
+.ev--transport .ev__ico { color: var(--cat-watch); }
+
+/* ---- 终态徽标三值（`Answer.vue` 的 `.term` 形状 + 这里的族色通道）----
+ * 三值各自成立的事实：`open` = 没收到 done（**不得读成完成**，A7）⇒ 警示族；
+ * `completed` = 收到 done ⇒ 终止族（与 `.sw--terminal` 同形，走 --bg-raised 而不造第 9 个 tint）；
+ * `failed` = 流内 error 帧 ⇒ 失败族。文本恒走 `--text-1`（形状在 `base.css` 的 `.term`）：
+ * tint 底上的次级文本实测只有 4.14:1（视觉件 §2.2），所以这里只改边框与底色。 */
+.term--open { border-color: var(--cat-watch); background: var(--tint-watch); }
+.term--completed { border-color: var(--cat-terminal); background: var(--bg-raised); }
+.term--failed { border-color: var(--cat-failure); background: var(--tint-failure); }
 
 /* ---- 图例：屏上 12 行，数据源是 events.css + 事件字典，不另写一份文案 ---- */
 .legend { display: grid; gap: var(--sp-1); }

@@ -11,7 +11,8 @@
 --   nl2sql_dw        业务样例数仓，两个角色：
 --                    nl2sql_dw_owner  NOLOGIN 组角色，只决定"建出来的对象归谁"；
 --                                     服务从不以它连接（fixture 由 Job 用 PGOPTIONS 切到它）
---                    nl2sql_dw_reader LOGIN，**只有 GRANT SELECT**——README 三层纵深的 L1
+--                    nl2sql_dw_reader LOGIN，**只有 GRANT SELECT**——三层纵深的 L1
+--                    （见 applications/nl2sql-service/README.md 的「数据权限（三层纵深）」小节）
 --
 -- 口令的唯一来源是 Secret 里那两个 DSN：本脚本从 META_DB_DSN / DW_DB_DSN 解析 user/password，
 -- 角色不存在就建、存在就把口令同步成 DSN 里的值 ⇒ 重跑即收敛，且仓内不存在第二份口令材料。
@@ -26,10 +27,12 @@
 --      角色名与库名同时出现在清单和 Secret 两侧，不对账就会出现"建了个没人用的角色"；
 --   3) 口令含 `%`。本脚本取 DSN 的**字面**口令建角色，而 libpq 会先做 URL 解码，
 --      带百分号的口令会建出一个与服务端期待值不同的角色口令——宁可不干，不干错。
---      这类口令走运维手工建角色（README §6.3），别改这里。
+--      这类口令走运维手工建角色。⚠ 本仓**没有**成文这一条操作（旧写法指向
+--      deploy/k8s/README.md §6.3，那一节现在是登录面签名密钥，与这里无关），别改这里。
 --
 -- 幂等边界：已存在的库/角色只做"同步口令 + 补权限"，不 DROP、不改属主。
--- 判据（跑完后应看到的读数，见 README §6.3）：`\du` 里 nl2sql_dw_reader 是
+-- 判据（跑完后应看到的读数，见 docs/operations/nl2sql-release-checklist.md §3 步 6）：
+-- `\du` 里 nl2sql_dw_reader 是
 -- `Cannot be assigned by SET ROLE`（NOLOGIN 组角色只有 owner）、Attributes 无 superuser。
 
 \set ON_ERROR_STOP on

@@ -32,7 +32,7 @@ from agent_runtime.skills.middleware import (
     ToolObservedMiddleware,
 )
 from agent_runtime.skills.registry import SkillRegistry
-from agent_runtime.workspace_registry import server_tenant_id
+from agent_runtime.workspace_registry import server_tenant_id, server_user_id
 
 from agent_server.agent.state import AgentState
 from agent_server.config import get_settings
@@ -103,15 +103,17 @@ async def _run_general_qa(graph: Any, **kwargs: Any) -> str:
     graph 保留 checkpoint（thread_id 恢复/持久化对话历史）语义；对调用方是黑盒 Skill。
     """
     question = kwargs["question"]
-    # 身份租户由服务端断言源提供，不接受 LLM/kwargs（防幻觉/注入指定任意租户，ADR-0007 §4.3）；
-    # TODO(A3): server_tenant_id 绑定 ContextVar 后自动返回真实断言租户。
+    # 身份由服务端断言源提供，不接受 LLM/kwargs 覆盖（防幻觉/注入指定任意身份，ADR-0007 §4.3）。
+    # A3 身份内核已落地：IdentityMiddleware 绑定的 ContextVar 优先；未绑定（如 observe 模式 /
+    # 进程内直调）才回落到调用方显式传入的值，保持既有请求链路语义。
     tenant_id = server_tenant_id(get_settings().default_tenant_id)
+    user_id = server_user_id(kwargs.get("user_id", "default"))
     answer = ""
     async for update in graph.astream(
         {
             "messages": [("user", question)],
             "question": question,
-            "user_id": kwargs.get("user_id", "default"),
+            "user_id": user_id,
             "workspace_id": kwargs.get("workspace_id", "default"),
             "tenant_id": tenant_id,
             "iterations": 0,

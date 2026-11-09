@@ -15,8 +15,10 @@ const DEV_BACKEND = 'http://127.0.0.1:8000'
  * 而 /query 是 SSE。此处只登记**未验证的风险**：http-proxy 默认不缓冲响应体，但若后端对
  * text/event-stream 启用了 gzip，开发期会看到「事件一次性到达」而现网是逐帧到达。
  * PR-1 接 SSE 时必须实测这条（判据 = 屏上时间线逐条出现），届时再决定要不要加处置；
- * 不在这里预先写上没验证过的解法。 */
-const proxied = ['/query', '/history', '/health', '/session', '/console.html']
+ * 不在这里预先写上没验证过的解法。
+ * `/auth` 是 PR-2b 登录面四个端点的前缀（`/auth/login`|`/auth/register`|`/auth/me`|
+ * `/auth/logout`）；`src/api/auth.ts` 写的是绝对路径 ⇒ 开发期不经代理就是 5173 的 404。 */
+const proxied = ['/query', '/history', '/health', '/session', '/console.html', '/auth']
 
 export default defineConfig({
   base: '/ui/',

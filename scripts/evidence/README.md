@@ -26,6 +26,29 @@
 | `recount_plan_status_lines.py` | 重算 `docs/plans/` 顶层 plan 的**状态行有无**（钉死口径：顶层 `.md`、排除同目录 `README.md`、前 25 行匹配 `状态[^。；]{0,14}[:：]`），并把已知口径漏计显式登记 ⇒ 输出「未命中」与「真待补」两个数。`rc=1` = 例外清单与现实不符；`rc=2` = 找不到 plan 目录（复制到仓库外运行即触发，**防止空目录冒充读数**）| 否 |
 | `nl2sql_real_pg_probe.py` | nl2sql 元知识**真库往返**：走 `init_meta_schema.apply` 生产入口建全链 001-006 + 幂等第二遍 + `workspace_id=''` 写入路径 + 绕过 `_stamp` 的直接仓储写入 + D8 摘键语义反证 + 「库停在 005 时当前代码必须 42P10」发布顺序判据（11 项）。**改到 nl2sql 迁移或 `_upsert`/`_stamp` 后必须重跑**；`rc=2` 是 pgserver 起不来（前置不可用），不是通过 | 否（本机进程内 PG） |
 | `migration_gate_mutation_probe.py` | `scripts/lint_migration_refs.py` 的**非空转反证**：三形——原样副本零违规（阴性对照）/ 注入 B-1 错表名 ⇒ M-1 报红 / 摘掉 006 ⇒ M-2 目标键消失。只在 `tempfile` 副本上动，不碰工作树。改过门禁判据后必须重跑 | 否 |
+| `face_basis.py` | 面基准**唯一实现**：`face = git diff --name-only HEAD`，另提供 derived / ext-fresh / selftest 三模式；退出码 0/1/2 三态 | 否 |
+| `typo-scan.ps1` | 文档面 T1..T5 形状扫描；扫描面 `$files` 表是本件的唯一来源 | 否 |
+| `ts-provability.ps1` | 账面新增行的内容可证性 R-1..R-6（时间戳 / 件名在位 / 键绑件内容 / 逐字引用） | 否 |
+| `k46-keypair-lib.ps1` | R-6 的 `(key,value,form)` 三元组抽取器**唯一实现** | 否 |
+| `k71-basis.ps1` | 面基准的 PS 薄适配层：本机量具经它转调 `face_basis.py`，不在体内另拼基准 | 否 |
+
+## 本机量具链（登记，非重构）
+
+`scripts/evidence/face_basis.py` 是面基准的唯一实现。派生链与门件从**载体现取**三集合，
+不手抄 CSV；调用边如下，两端都能在 tracked 面解析：
+
+| 库内件 | 被谁调用 | 判据住处 |
+|---|---|---|
+| `scripts/evidence/k71-basis.ps1` | k70-attribution / k70-ext-derive / k70-candidate-derive dot-source | 面基准解析只此一处 |
+| `scripts/evidence/typo-scan.ps1` | e26-gate-fill 的 B2b / C 段 | T1..T5 形状判据 |
+| `scripts/evidence/ts-provability.ps1` | e26-gate-fill 的 B3 段（`-FilesCsv`） | R-1..R-6 |
+| `scripts/evidence/k46-keypair-lib.ps1` | `ts-provability.ps1` 与 R-6 透视件 dot-source | 三元组抽取器 |
+
+**本轮只登记不重构**：`e26-gate-fill.ps1`（99 KB / 13 代 fork）与 postcommit（8 代）仍在本机
+一次性目录运行，拆分 / 迁 pytest 另开一刀。库内四件与同名运行时镜像逐字一致（sha256 自证见
+取证件 §50）；一旦两者漂移，门件从本机镜像派生的扫描面就与库内判据不同源 —— 这条作为
+**待拍项**登记，不在本轮偷改门件路径。T5 仍读本机一次性变异脚本 mutate-v1.mjs，新克隆上
+不可直接跑，同属那一刀的射程。
 
 ## 运行
 

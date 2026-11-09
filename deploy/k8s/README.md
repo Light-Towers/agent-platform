@@ -172,6 +172,103 @@ curl -s 127.0.0.1:18000/health   # embedding_backend/embedding_real/auth_enabled
 `hostPath.type: Directory` 是故意写的：缓存不在目标节点时 Pod 直接 Pending 并给出明确事件，
 而不是静默起来、等首次推理回连 huggingface.co 时才炸。守护用例见 `tests/deploy/`。
 
+### 6.2 集群自有 Secret 的补键：只能合并写，不许 apply 整对象
+
+> 三个凭据对象（`agent-platform-secrets`、`observability-keys`、`agent-platform-jwt`）**都不是
+> apply 出来的**：真实值永不入库，仓里的 `deploy/k8s/05-secrets.yaml` 只是 demo 值。补键时动错
+> 对象、或把合并写做成整对象替换，表现都不是报错而是"键少了"——所以这一节按对象分档写清。
+
+| 对象 | 里面住什么 | 补键怎么做 | 做错的当场表现 |
+|---|---|---|---|
+| `agent-platform-secrets` | `DATABASE_URL`、`POSTGRES_PASSWORD`、`VALKEY_URL`、`META_DB_DSN`、`DW_DB_DSN` | `kubectl -n agent-platform patch secret agent-platform-secrets -p '{"stringData":{"DW_DB_DSN":"…"}}'` | apply 那份 demo 清单 ⇒ pg 口令被换成 `*_dev` 值，Pod 起来即连不上库 |
+| `observability-keys` | `LLM_API_KEY`、`API_KEY`、`LANGFUSE_PUBLIC_KEY`、`LANGFUSE_SECRET_KEY`、`INTERNAL_HMAC_KEY` | 同上，对象名换成 `observability-keys`（一次只补一把） | 整对象替换会抹掉其余键 ⇒ 观测面与 `/sql/train` 转发一起挂，而 `/health` 不一定红 |
+| `agent-platform-jwt` | `TENANT_JWT_PRIVATE_KEY`、`TENANT_JWT_PUBLIC_KEYS` | 首建见 §6.3；建完之后同样只用 patch 合并写 | 对象不存在 = `CreateContainerConfigError`；kid 与公钥 JSON 顶层键不一致 = 登录 503 |
+
+```bash
+# 补键前后的判据：键名集合只许增不许减（值一律不打印）
+kubectl -n agent-platform get secret observability-keys -o json | jq -r '.data|keys[]' | sort
+#   ^ 同一条命令在补键前后各跑一次，旧键必须全部还在；少任何一把就是整对象替换 happened
+```
+
+口令的输入下限与 §6.1① 同源：`read -rsp` 取值、`unset v` 收尾，值只存在于终端与集群里，
+不写进任何文件、脚本或可复用的命令行历史。
+
+### 6.3 登录面签名密钥（agent-platform-jwt）：生成、首建、挂载、验收
+
+清单侧的接线早就落好了（`deploy/k8s/00-config.yaml` 三键 + `deploy/k8s/20-agent-platform.yaml`
+的两把 `*_FILE` 与 `tenant-jwt` 卷），**这一节补的是"值怎么进集群"**。没做本节时的表现是确定的：
+apply 之后 Pod 起不来、`describe pod` 报 `CreateContainerConfigError`（引用了不存在的 Secret 对象）
+⇒ 那是有意的 fail-closed，**别当成镜像坏了去重构建**（判据行见
+`docs/operations/minimal-release-runbook.md` §7.4 第一行）。
+
+**① 生成 RS256 密钥对**（在任何一台能跑 openssl 的运维机器上；私钥从生成到进集群都不落任何入库路径）
+
+```bash
+umask 077
+openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out /tmp/jwt.key
+openssl pkey -in /tmp/jwt.key -pubout -out /tmp/jwt.pub
+```
+
+位数口径：`packages/agent-runtime/agent_runtime/identity.py` 只要求"能 load"，2048 是与
+`tests/deploy/test_k8s_manifest_wiring.py` 那枚自签自验用例一致的现值，不是下限。
+
+**② 公钥 JSON 的形状，以及 kid 为什么要逐字相同**（最容易写错的一格）
+
+`TENANT_JWT_PUBLIC_KEYS` 的值是一个 **`{kid: PEM}` 映射**，不是裸公钥文件：
+
+```json
+{"platform": "-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----\n"}
+```
+
+顶层键必须与 ConfigMap 的 `TENANT_JWT_KID: "platform"` 逐字相同：`verify_token` 按令牌 header
+里的 kid 选公钥、对不上**直接拒**（"不逐把试"是 identity 明写的）。写成 map 而不是单个值是为了
+轮转时两枚并存。改名而公钥没跟上的现场表现是登录 503「签名密钥配置不完整」，
+固定 code `AUTH_SIGNER_UNAVAILABLE`。
+
+**③ 首建 Secret 对象，然后才 apply 部署清单**（顺序是硬的）
+
+```bash
+kubectl -n agent-platform create secret generic agent-platform-jwt \
+  --from-file=TENANT_JWT_PRIVATE_KEY=/tmp/jwt.key \
+  --from-file=TENANT_JWT_PUBLIC_KEYS=/tmp/jwt-pubs.json
+shred -u /tmp/jwt.key /tmp/jwt.pub /tmp/jwt-pubs.json   # 明文只该存在于这一步
+```
+
+用 `--from-file` 而不是 `--from-literal`：PEM 是多行，literal 形式会把换行摊平成一行，
+`load_private_key` 拿到的就不是合法 PEM 了。
+
+**④ 挂载之后容器内的形状**（两条路径由清单算出来，不是手抄的两行字）
+
+| env（清单给的是路径，不是值） | 容器内位置 | 这一行的来源 |
+|---|---|---|
+| `TENANT_JWT_PRIVATE_KEY_FILE` | `/run/app-secrets/jwt/jwt.key` | `tenant-jwt` 卷的 mountPath `/run/app-secrets/jwt` + items 的 `jwt.key` |
+| `TENANT_JWT_PUBLIC_KEYS_FILE` | `/run/app-secrets/jwt/jwt-pubs.json` | 同卷 mountPath + items 的 `jwt-pubs.json` |
+
+子目录 `jwt` 不是多余一层：`/run/app-secrets` 已被 `internal-hmac` 卷占住，而那个位置本身不能改回
+`/run/secrets` —— 那里被 kubelet 挂的 SA token 占着，只读 tmpfs 先占住后 runc 建子目录就是 EROFS，
+容器直接起不来（2026-10-28 在 126 实跑复现）。权限档 `defaultMode: 0440` + Pod `fsGroup: 10001`：
+owner root、group 10001、同 Pod 其他进程不可读。
+
+上表两行与清单之间是同一条边：**改了挂载层级而 env 没跟着改，现场是"签不出令牌"的 503 而不是启动失败**，
+所以这个同源关系由 `tests/deploy/test_k8s_manifest_wiring.py` 逐字比清单派生值，不靠人目测。
+
+**⑤ 验收：本机测不到、只能现网读的那两格**
+
+本机 gate 能证的只有"清单声明的那组参数自洽"（那枚用例现造随机 RSA 真签真验），
+**证不了 kid 与公钥 JSON 顶层键真的相同** —— 公钥 JSON 永不入库，gate 里两边都来自同一个 CM 值、
+一起漂不会红。这两格判据只能是现网真读：挂载与权限在位 = 探针 C10，签得出且验得过 = 探针 C8，
+命令在 `docs/operations/minimal-release-runbook.md` §3.2。**拿 gate 绿去声称 C8 过了，是这一节明确禁止的读法。**
+
+**⑥ 轮转：口径，本轮未现网实跑**
+
+已知约束只有三条，其余留到第一次真做时出方案 + 留读数：
+
+- kid 住在 ConfigMap ⇒ 改它必然要滚动一轮；公钥 JSON 是挂载文件 ⇒ 内容更新有 kubelet 同步延迟，
+  "不重启就生效"这句没实测过，别当依据。
+- 公钥 map 里新旧两枚并存是"旧令牌还能验回来"的前提；`AUTH_TOKEN_TTL`（现值 3600）是旧 kid 至少要
+  保留多久的那个数。
+- 私钥只投签发侧那一把（items 里只有 `jwt.key` 与 `jwt-pubs.json`），验签侧读不到私钥是设计而不是遗漏。
+
 ### 7. 分层验收（每层输出记入 VERIFICATION.md）
 
 | 层 | 命令 | 判定 |
@@ -221,8 +318,8 @@ sudo kubeadm reset   # 每台；worker 侧另有 reset 提示按提示执行
 | PowerShell/sandbox 长命令回显风暴且 scp 未落地 | 合并多条 scp+ssh 时终端被 base64 EncodedCommand 回显淹没，后续发现远端文件还是旧版 | sandbox 包装层对长复合命令处理异常 | 拆逐条短命令；每次同步后远端 `grep`/`md5sum` 验证落地；.sh 脚本先 `sed -i 's/\r$//'` 去 CRLF 再 bash 执行 |
 | port-forward 内联后台起不来 | 进程存活但 curl HTTP=000，随后退出 | setsid 内联命令的 `--address 0.0.0.0` 被引号层吞掉；残留旧 pf 占端口 | 固化为脚本（pkill 旧 pf + nohup + disown + ss 验证 + health 探测）一次拉起 |
 | 双 tracing 状态机致 traceparent 透传断裂 | agent_server 设好 OTel 且 span 能出，但联邦→子服务链路 trace 无法串联 | `agent_core.tracing_propagation` 的 extract/inject 以 `agent_core.tracing.is_tracing_enabled()` 为门；agent_server 只调 `agent_runtime.otel.init_otel()`（另一套状态机）→ extract 恒 None，透传静默失效 | **已修已验（2026-09-30 第三次演练 R6 闭环）**：全局方案 S1 收敛单状态机 + S2 统一 middleware 装配；集群实跑父子同 trace（客户端 parent_span 被服务端 span CHILD_OF 引用），证据见 VERIFICATION.md 第三次演练节 |
-| 存量库迁移链缺口：baseline 拒 stamp + v6 崩 UndefinedColumn（2026-09-30 R6 复验拓出） | rollout 后新 pod CrashLoop：先报 baseline 不完整拒 stamp，补建后又报 `v6 failed: column "workspace_id" does not exist` | 历史演练遗留库无 schema_migrations 记录且缺 V3 八表；sql_ddl/sql_docs/sql_examples 旧基线建表无 workspace_id、v2 只给 chunks 补、增量链从未补；新库由现行 baseline 自带该列 → 本地/CI 全新库路径永不暴露 | 八表：只读侦察库形态后从 001 L188-312 精确提取纯新表块补建；v6：产品码修复（三表幂等 `ADD COLUMN IF NOT EXISTS workspace_id`）+ 回归用例钉住（commit 30cbf25）；教训：**存量库升级路径是本地/CI 盲区，端到端真集群复验不可替代** |
-| verify.sh 在 pipefail 下静默中断（脚本实战磨出） | L0 节点节后的 awk 有输出但脚本止于第一行，后续层未执行 | nodes 对象不支持 `--field-selector=status!Ready`（服务端报错被 2>/dev/null 吞），pipefail 下整条管道非零中断 `set -e` 脚本 | 改 `kubectl get nodes --no-headers | awk '$2!="Ready"'` 按 STATUS 列判定；教训：取证脚本自身也要端到端实跑才算拥有，`2>/dev/null` 在 pipefail 下是静默自杀 |
+| 存量库迁移链缺口：baseline 拒 stamp + v6 崩 UndefinedColumn（2026-09-30 R6 复验挖出） | rollout 后新 pod CrashLoop：先报 baseline 不完整拒 stamp，补建后又报 `v6 failed: column "workspace_id" does not exist` | 历史演练遗留库无 schema_migrations 记录且缺 V3 八表；sql_ddl/sql_docs/sql_examples 旧基线建表无 workspace_id、v2 只给 chunks 补、增量链从未补；新库由现行 baseline 自带该列 → 本地/CI 全新库路径永不暴露 | 八表：只读侦察库形态后从 001 L188-312 精确提取纯新表块补建；v6：产品码修复（三表幂等 `ADD COLUMN IF NOT EXISTS workspace_id`）+ 回归用例钉住（commit 30cbf25）；教训：**存量库升级路径是本地/CI 盲区，端到端真集群复验不可替代** |
+| verify.sh 在 pipefail 下静默中断（脚本实战磨出） | L0 节点节后的 awk 有输出但脚本止于第一行，后续层未执行 | nodes 对象不支持 `--field-selector=status!Ready`（服务端报错被 2>/dev/null 吞），pipefail 下整条管道非零中断 `set -e` 脚本 | 改 `kubectl get nodes --no-headers \| awk '$2!="Ready"'` 按 STATUS 列判定；教训：取证脚本自身也要端到端实跑才算拥有，`2>/dev/null` 在 pipefail 下是静默自杀 |
 
 ## 可复跑取证（deploy/k8s/scripts/ 六件套，观测方案 §3.5 固化）
 
