@@ -51,7 +51,7 @@ const canSend = computed(() =>
 const sendHint = computed(() => {
   if (authPending.value) return '正在等待后端回话…'
   if (login.value.trim() === '') return '登录名为空时不能提交'
-  if (password.value === '') return '口令为空时不能提交'
+  if (password.value === '') return '密码为空时不能提交'
   return ''
 })
 
@@ -137,7 +137,7 @@ function retryResume(): void {
           <label
             class="o-head-sm"
             :for="isRegister ? 'authNewPassword' : 'authPassword'"
-          >口令</label>
+          >密码</label>
           <!-- `type="password"`：屏上不回显明文（截图判据 V4 会拍到这一栏，与 ApiKeyBox 同一条纪律）。
                autocomplete 按两态分派：注册档要的是「新口令」（浏览器据此走生成器），
                登录档才是「当前口令」（据此填已存的）。写成常量会让密码管理器在注册时
@@ -217,19 +217,19 @@ function retryResume(): void {
           这一屏承诺什么
         </h2>
         <p class="hint">
-          口令只在服务端做散列比对（argon2），<strong>不存明文、不进日志、不出本请求</strong>；
-          登录那一路不区分「账号不存在」与「口令不对」，两者共用一句提示；但「创建账号」那一发
+          密码只在服务端做散列比对（argon2），<strong>不存明文、不进日志、不出本请求</strong>；
+          登录那一路不区分「账号不存在」与「密码不对」，两者共用一句提示；但「创建账号」那一发
           撞出的 409 确实会告诉你某个名字已被占用 —— 那是开放自助注册的必然代价，不是漏。
         </p>
         <p class="hint">
-          建号成功后即等于已登录（同一次往返拿到令牌）；名字已被占用时，同一次提交<strong>直接改用口令登录</strong>，
-          不必再点一次 —— 只有口令也不对时才落回一句提示。表内零用户时，第一个建号的人就是管理员；
+          建号成功后即等于已登录（同一次往返拿到令牌）；名字已被占用时，同一次提交<strong>直接改用密码登录</strong>，
+          不必再点一次 —— 只有密码也不对时才落回一句提示。表内零用户时，第一个建号的人就是管理员；
           之后建的都是普通账号。
         </p>
         <p class="hint">
           令牌存在本标签页的 <code class="t-name">sessionStorage</code>（键
           <code class="t-name">ap.auth.token</code>）：<strong>关掉标签即失效</strong>，刷新仍在。
-          它不存 <code class="t-name">localStorage</code>，也不带口令。
+          它不存 <code class="t-name">localStorage</code>，也不带密码。
         </p>
         <p class="hint">
           同企业的两个账号<strong>不共用一条会话线</strong>（会话主体按服务端断言的人分桶）。

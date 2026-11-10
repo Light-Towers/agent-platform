@@ -66,7 +66,7 @@ CODE_NOT_ASSERTED = "AUTH_NOT_ASSERTED"
 
 # 口令校验失败的**唯一**文案：账号不存在与口令错共用一句（A3）。
 # 这句一旦分叉就等于告诉未鉴权的一端"这个账号存在吗"，所以比对在目录里做，文案在这里只留一份。
-CREDENTIALS_INVALID_MSG = "登录名或口令不正确"
+CREDENTIALS_INVALID_MSG = "登录名或密码不正确"
 
 
 class LoginRequest(BaseModel):

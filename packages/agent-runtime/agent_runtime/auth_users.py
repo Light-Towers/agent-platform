@@ -65,7 +65,7 @@ PASSWORD_MAX = 128
 # ``msg``，而不写 ``str(exc)`` —— P8 不变量禁止对外响应体回显异常消息（它不区分“我自己写的
 # 文案”与“库抛出的文本”，从语法上封死这一形）。文案里不含任何用户输入，所以可以直接给
 # 用户看，前端也可以按 code 分支后自行覆盖。
-PASSWORD_LENGTH_HINT = f"口令长度需在 {PASSWORD_MIN}–{PASSWORD_MAX} 字符之间"
+PASSWORD_LENGTH_HINT = f"密码长度需在 {PASSWORD_MIN}–{PASSWORD_MAX} 字符之间"
 
 # 与 runner 的 _MIGRATION_LOCK_KEY、scheduler 的 _SLOT_LOCK_KEY 都不冲突的独立 key。
 _SEED_LOCK_KEY = 0xCAFE0016
