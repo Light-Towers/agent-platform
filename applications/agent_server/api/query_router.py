@@ -11,7 +11,7 @@ from agent_runtime.db import get_pool
 from agent_runtime.planner.protocol import PlannerContext
 from agent_runtime.schemas import ADMISSION_ADMITTED, ADMISSION_QUEUED, ADMISSION_REJECTED
 from agent_runtime.workspace_registry import resolve_workspace, server_tenant_id
-from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from fastapi import APIRouter, Depends, Header, Request
 from fastapi.responses import StreamingResponse
 from shared_schemas import sse_pack
 
