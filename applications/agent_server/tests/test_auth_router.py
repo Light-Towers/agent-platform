@@ -22,6 +22,7 @@ import json
 
 import pytest
 from agent_runtime import auth_users as au
+from agent_runtime.authorization import features_for_role
 from agent_runtime.identity import mint_token
 from agent_runtime.identity_middleware import IdentityMiddleware
 from agent_server.api import auth_router
@@ -33,7 +34,7 @@ from fastapi.testclient import TestClient
 
 LOGIN_OK = {"login": "alice", "password": "password123", "display_name": "Alice"}
 ORG = "acme-test"
-RECORD = au.UserRecord(id="alice", org_id=ORG, display_name="Alice", is_admin=True)
+RECORD = au.UserRecord(id="alice", org_id=ORG, display_name="Alice", is_admin=True, role="admin")
 
 _prk = rsa.generate_private_key(public_exponent=65537, key_size=2048)
 PRIV = _prk.private_bytes(
@@ -128,6 +129,7 @@ def test_login_returns_bearer_token(pool_stub, keys):
     assert body["token_type"] == "bearer"
     assert body["tenant_id"] == ORG and body["user_id"] == "alice"
     assert body["is_admin"] is True
+    assert body["role"] == "admin"  # 1a：登录响应带角色码（claims 同源，D2）
     assert body["expires_in"] == 600
     assert body["access_token"].count(".") == 2  # 三段式 JWS 形状
 
@@ -137,12 +139,19 @@ def test_login_token_is_accepted_by_the_real_middleware(pool_stub, keys):
 
     这一格是"装配真的接上了"的唯一证据：路由单测里把中间件 mock 掉就永远测不到
     "验签通路的 env 与签发通路是否同一条"。
+    1a：登录签发的令牌带 role=admin（双写目录），/auth/me 回读该 role 与其能力集快照
+    （§6 契约）；断言从 authorization 真值取，不硬编码矩阵副本。
     """
     with _client() as client:
         token = client.post("/auth/login", json=LOGIN_OK).json()["access_token"]
         me = client.get("/auth/me", headers={"Authorization": f"Bearer {token}"})
     assert me.status_code == 200, me.text
-    assert me.json() == {"tenant_id": ORG, "user_id": "alice"}
+    assert me.json() == {
+        "tenant_id": ORG,
+        "user_id": "alice",
+        "role": "admin",
+        "features": sorted(features_for_role("admin")),
+    }
 
 
 def test_login_response_is_no_store(pool_stub, keys):

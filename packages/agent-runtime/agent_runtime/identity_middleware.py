@@ -41,14 +41,14 @@ from agent_runtime.identity import (
     verify_internal_header,
     verify_token,
 )
-from agent_runtime.workspace_registry import reset_tenant_context, reset_user_context
+from agent_runtime.workspace_registry import reset_role_context, reset_tenant_context, reset_user_context
 
 logger = get_logger(__name__)
 
 __all__ = ["IdentityMiddleware"]
 
 _Verify = Callable[[str], Any]  # token -> TokenClaims
-_Apply = Callable[[str, "str | None"], Any]  # (tenant, user) -> tokens
+_Apply = Callable[..., Any]  # (tenant, user, role) -> tokens（1a：role 随三元组同批绑定）
 _Reset = Callable[[Any], None]
 
 
@@ -125,9 +125,10 @@ class IdentityMiddleware:
 
     @staticmethod
     def _default_reset(tokens) -> None:
-        tenant_token, user_token = tokens
+        tenant_token, user_token, role_token = tokens
         reset_tenant_context(tenant_token)
         reset_user_context(user_token)
+        reset_role_context(role_token)
 
     def _resolve_single(self) -> str | None:
         if callable(self._single_tenant):
@@ -165,7 +166,8 @@ class IdentityMiddleware:
                 logger.exception("[identity] JWT 验签器异常，按 fail-closed 拒绝")
                 await _send_json(send, 401, "身份令牌无法验证（服务端验签不可用）", code="IDENTITY_VERIFIER_UNAVAILABLE")
                 return
-            await self._run(claims.tenant_id, claims.user_id, scope, receive, send)
+            # role 是 1a 新增的可选 claim：getattr 防御测试注入的最小 mock（无 role 属性时按 None）。
+            await self._run(claims.tenant_id, claims.user_id, getattr(claims, "role", None), scope, receive, send)
             return
 
         if self._verify_header is not None:
@@ -182,12 +184,14 @@ class IdentityMiddleware:
                     return
                 if result is not None:
                     tenant, user = result
-                    await self._run(tenant, user, scope, receive, send)
+                    # 内部头路径：r 键属 1c（D11 承载），本刀 role=None（消费侧走 viewer 兜底）。
+                    await self._run(tenant, user, None, scope, receive, send)
                     return
 
         single = self._resolve_single()
         if single:
-            await self._run(single, None, scope, receive, send)
+            # 单租户部署无用户/角色断言 ⇒ None（消费侧 viewer 兜底，D9）。
+            await self._run(single, None, None, scope, receive, send)
             return
 
         if self._enforce_missing:
@@ -196,8 +200,16 @@ class IdentityMiddleware:
         # observe：无凭据交下游（路由 provided>default 既有语义）
         await self.app(scope, receive, send)
 
-    async def _run(self, tenant: str, user: str | None, scope: dict, receive: Callable, send: Callable) -> None:
-        tokens = self._apply(tenant, user)
+    async def _run(
+        self,
+        tenant: str,
+        user: str | None,
+        role: str | None,
+        scope: dict,
+        receive: Callable,
+        send: Callable,
+    ) -> None:
+        tokens = self._apply(tenant, user, role)
         try:
             await self.app(scope, receive, send)
         finally:

@@ -29,6 +29,7 @@ from agent_core.internal_header import verify_internal_header as _core_verify
 
 from agent_runtime.workspace_registry import (
     _TENANT_UNSET,
+    bind_role_context,
     bind_tenant_context,
     bind_user_context,
     server_tenant_id,
@@ -62,6 +63,7 @@ class IdentityError(Exception):
 class TokenClaims:
     tenant_id: str
     user_id: str | None = None
+    role: str | None = None
     jti: str | None = None
     exp: int | None = None
     iat: int | None = None
@@ -163,6 +165,7 @@ def mint_token(
     tenant_id: str,
     *,
     user_id: str | None = None,
+    role: str | None = None,
     private_key_pem: str,
     kid: str,
     issuer: str | None = None,
@@ -170,7 +173,11 @@ def mint_token(
     ttl: int = 900,
     jti: str | None = None,
 ) -> str:
-    """签发 RS256 JWT（网关/issuer 用；持私钥）。claims: tenant_id/user_id/exp/iat/sub(+jti)。"""
+    """签发 RS256 JWT（网关/issuer 用；持私钥）。claims: tenant_id/user_id/role/exp/iat/sub(+jti)。
+
+    ``role`` 只带**角色码**，不带权限集（D2/ADR-0015）；缺省不写 claim——消费侧
+    （``authorization.resolve_features``）对缺 role 走 viewer 兜底并计数（D9）。
+    """
     import jwt  # 惰性：仅签发/验签路径需要 PyJWT[crypto]
 
     now = int(time.time())
@@ -184,6 +191,8 @@ def mint_token(
     }
     if user_id:
         payload["user_id"] = user_id
+    if role:
+        payload["role"] = role
     if jti:
         payload["jti"] = jti
     return jwt.encode(payload, private_key_pem, algorithm="RS256", headers={"kid": kid})
@@ -245,9 +254,13 @@ def verify_token(
     tenant = payload.get("tenant_id")
     if not isinstance(tenant, str) or not tenant.strip():
         raise IdentityError("令牌缺少 tenant_id claim")
+    role_claim = payload.get("role")
     return TokenClaims(
         tenant_id=tenant,
         user_id=payload.get("user_id") or payload.get("sub"),
+        # role 是可选 claim：缺/空 → None（不判词汇表——值域收敛与 D9 兜底计数
+        # 单一在 authorization.effective_role，令牌有效性与角色词汇表是两件事）。
+        role=role_claim if isinstance(role_claim, str) and role_claim.strip() else None,
         jti=payload.get("jti"),
         exp=exp if isinstance(exp, int) else None,
         iat=iat if isinstance(iat, int) else None,
@@ -286,9 +299,9 @@ def verify_internal_header(
         raise IdentityError(str(e)) from e
 
 
-def apply_tenant_context(tenant_id: str, user_id: str | None = None):
-    """绑定已断言的 tenant/user 到请求上下文；返回 (tenant_token, user_token) 供复位。"""
-    return bind_tenant_context(tenant_id), bind_user_context(user_id)
+def apply_tenant_context(tenant_id: str, user_id: str | None = None, role: str | None = None):
+    """绑定已断言的 tenant/user/role 到请求上下文；返回三个 Token 供复位。"""
+    return bind_tenant_context(tenant_id), bind_user_context(user_id), bind_role_context(role)
 
 
 # --- 启动守卫（封死 auth.py "未配 key 即不校验" 多租户裸奔，ADR-0007 §4.1）--
