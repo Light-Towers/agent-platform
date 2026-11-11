@@ -152,6 +152,13 @@ UPDATE users SET role = 'admin' WHERE is_admin AND role = 'viewer';
 
 **每刀的验收陈述**按 `docs/operations/evidence-format.md` §1 五字段写（rev / 命令 / 读数+分母 / 未跑 / 前置）；**本文不预填任何通过数**（该文件 §1 末尾：“方案文档不欠读数”）。
 
+❗ **1a 施工登记（2026-11-11，HEAD=`5b87f463`）**：
+- **改动面**：与 1a 行一致（authorization.py 新建 / identity 五处 / workspace_registry role 上下文 / identity_middleware 三元组 / auth_users 双写 / auth_router 三模型+me / 迁移 017 up+down / 六件测试随动），15 件 +635/−42。
+- **计划外随动（如实登记）**：① `test_auth_router.py` UserRecord 位置构造补 `role` + `/auth/me` 端到端断言按 §6 新契约随动（旧钉子是契约变更的必随面，非收窄）；② `agent_federation/api/identity_bridge.py` `_apply` 签名对齐中间件三元组契约（联邦 role 先接住不承载，1c 再接——否则中间件传 3 参即 TypeError）；③ lint 收尾 `730282a5`（上批 `e782db22` 死 import 清除，当时漏跑全仓 ruff）；④ 迁移 017 加 COMMENT（照 016 惯例，§5 语义不变）。
+- **验证（rev=5b87f463）**：ruff 全仓 rc=0；`pytest packages/agent-runtime/tests -q` 922 passed, 2 skipped；`pytest tests/governance -q` 521 passed, 1 skipped；agent_server 定向 `-k "auth or identity or login"` 48 passed；federation unit 148 passed；kefu/nl2sql identity 装配 12 passed；`check_doc_sync.py` rc=0。
+- **未跑**：agent_server 全套（183 项，仅定向 48）；shared-schemas / nl2sql / knowledge-service / exhibition 套件（本轮无触碰面）；**迁移 017 未在真 PG 上应用**（本机无 DATABASE_URL——SQL 为 §5 原文，runner discover 形状已对齐 016 惯例，126 部署时按 nl2sql-release-checklist 流程验收）。
+- **前置**：无（1b 可开工；其九个端点守卫的消费点清单见 §4）。
+
 **十条反证**（缺任一条，对应那格就是空转齿；均为**合成违规 → 期望非零或行为翻转**）：
 
 | # | 反证 | 封住的事实格 |
