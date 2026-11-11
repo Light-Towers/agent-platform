@@ -28,7 +28,9 @@ from __future__ import annotations
 import json
 from typing import Any, Awaitable, Callable
 
+from agent_core.guardrails.errors import error_body, error_code_for_status
 from agent_core.logging import get_logger
+from agent_core.tracing import generate_request_id, get_request_id, set_request_context
 
 from agent_runtime.identity import (
     IdentityError,
@@ -73,14 +75,24 @@ def _looks_like_jwt(token: str) -> bool:
     return len(parts) == 3 and parts[0].startswith("eyJ")
 
 
-async def _send_json(send: Callable[[dict], Awaitable[None]], status: int, detail: str) -> None:
-    body = json.dumps({"detail": detail}).encode()
+async def _send_json(
+    send: Callable[[dict], Awaitable[None]],
+    status: int,
+    msg: str,
+    *,
+    code: str | None = None,
+    request_id: str | None = None,
+) -> None:
+    rid = request_id or get_request_id() or generate_request_id()
+    set_request_context(request_id=rid)
+    body = json.dumps(error_body(code or error_code_for_status(status), msg, rid)).encode()
     await send({
         "type": "http.response.start",
         "status": status,
         "headers": [
             (b"content-type", b"application/json"),
             (b"content-length", str(len(body)).encode()),
+            (b"x-trace-id", rid.encode()),
         ],
     })
     await send({"type": "http.response.body", "body": body})
@@ -143,7 +155,7 @@ class IdentityMiddleware:
             try:
                 claims = self._verify(bearer)
             except IdentityError as e:
-                await _send_json(send, 401, f"身份令牌无效: {e}")
+                await _send_json(send, 401, f"身份令牌无效: {e}", code="IDENTITY_TOKEN_INVALID")
                 return
             except Exception:
                 # 验签器自身异常 ⇒ fail-closed。典型成因：镜像缺 PyJWT[crypto]，而
@@ -151,7 +163,7 @@ class IdentityMiddleware:
                 # 既不能降级成「没身份」放行（那是把伪造当匿名），也不能让它变成 500
                 # （攻击者可控输入触发未捕获异常）。异常文本不回显，只进服务端日志。
                 logger.exception("[identity] JWT 验签器异常，按 fail-closed 拒绝")
-                await _send_json(send, 401, "身份令牌无法验证（服务端验签不可用）")
+                await _send_json(send, 401, "身份令牌无法验证（服务端验签不可用）", code="IDENTITY_VERIFIER_UNAVAILABLE")
                 return
             await self._run(claims.tenant_id, claims.user_id, scope, receive, send)
             return
@@ -162,11 +174,11 @@ class IdentityMiddleware:
                 try:
                     result = self._verify_header(hdr)
                 except IdentityError as e:
-                    await _send_json(send, 401, f"内部签名头无效: {e}")
+                    await _send_json(send, 401, f"内部签名头无效: {e}", code="IDENTITY_HEADER_INVALID")
                     return
                 except Exception:
                     logger.exception("[identity] 内部签名头验签器异常，按 fail-closed 拒绝")
-                    await _send_json(send, 401, "内部签名头无法验证（服务端验签不可用）")
+                    await _send_json(send, 401, "内部签名头无法验证（服务端验签不可用）", code="IDENTITY_VERIFIER_UNAVAILABLE")
                     return
                 if result is not None:
                     tenant, user = result
@@ -179,7 +191,7 @@ class IdentityMiddleware:
             return
 
         if self._enforce_missing:
-            await _send_json(send, 401, "缺少身份凭据（TENANT_JWT_ENFORCE）")
+            await _send_json(send, 401, "缺少身份凭据（TENANT_JWT_ENFORCE）", code="IDENTITY_REQUIRED")
             return
         # observe：无凭据交下游（路由 provided>default 既有语义）
         await self.app(scope, receive, send)
@@ -190,3 +202,4 @@ class IdentityMiddleware:
             await self.app(scope, receive, send)
         finally:
             self._reset(tokens)
+
