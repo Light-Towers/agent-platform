@@ -19,6 +19,10 @@
  *   ③ **按 HTTP 状态分支、按 `msg` 上屏**：后端的 `AUTH_*` 码表不抄进前端（抄一份 = 造出
  *      第二个事实源，而本仓没有任何跨语言派生校能钉住它）。`code` 只随失败对象带走给人读，
  *      前端不 `=== 'AUTH_LOGIN_TAKEN'` 这种串做分支。
+ *   ④ **角色与能力是服务端断言的渲染输入（G1/D9）**：`role` 缺省兜底 viewer、`features`
+ *      缺省兜底空集，绝不 fail-open 成 admin —— 谁有什么能力只有服务端说了算，本件不维护
+ *      role→features 的映射（那张表住在 agent_runtime/authorization.py，抄一份就是造出
+ *      第二个事实源）。
  *
  * ⚠ 路径基准与 `sse.ts` 同一条坑：页面挂在 `/ui/` 下（`vite.config.ts` 的 `base`），
  *   所以这里全部写**绝对路径** `/auth/*`。写成相对会拼成 `/ui/auth/login`（后端没这条路由）。
@@ -51,12 +55,23 @@ export interface Credentials {
   readonly displayName: string
 }
 
-/** 一次成功登录拿到的全部可断言信息（值来自**服务端响应**，不是客户端自报）。 */
+/**
+ * 一次成功登录拿到的全部可断言信息（值来自**服务端响应**，不是客户端自报）。
+ * G1 扩展：`role` 与 `features` 同样是服务端给的，不是前端算的（纪律④）。
+ */
 export interface AuthSession {
   readonly token: string
   readonly tenantId: string
   readonly userId: string
   readonly isAdmin: boolean
+  /** 服务端断言的角色码（D9 收敛值域；缺失按 viewer 兜底，绝不兜成 admin）。 */
+  readonly role: string
+  /**
+   * 该角色的能力集（界面显隐的唯一判据）。⚠ 登录/注册响应**只带码不带集**
+   * （auth_router.py 的 TokenResponse 自陈），所以首登拿到的是空数组 —— features 由
+   * 会话层在登录成功后补一发 `/auth/me` 回读（session.ts 的 backfillIdentityAfterLogin）。
+   */
+  readonly features: readonly string[]
 }
 
 /** 一次失败的三值：状态码（分支用）、服务端 code（给人读）、可上屏文案。 */
@@ -208,9 +223,23 @@ async function postEnvelope(path: string, body: Record<string, string>, fetchImp
 }
 
 /**
+ * G1 两个缺省读法（本件内唯一实现位）：`role` 缺失/非串 ⇒ viewer、`features` 缺失/非数组
+ * ⇒ 空集。兜底方向只有一条：往**更小**的能力集兜，绝不往 admin 兜（D9 的最小权限原则；
+ * 「看起来有但没断言到」比「看起来没有但其实有」安全得多）。
+ */
+function parseRoleFeatures(json: Record<string, unknown> | null): { role: string; features: string[] } {
+  const role = json !== null && typeof json.role === 'string' && json.role !== '' ? json.role : 'viewer'
+  const features = json !== null && Array.isArray(json.features)
+    ? json.features.filter((f): f is string => typeof f === 'string')
+    : []
+  return { role, features }
+}
+
+/**
  * 从成功响应里取会话。三值缺一律判**失败**：200 而形状不对时给一个「登录成功」的读数，
  * 就是让屏上出现「已登录」而手里没有身份 —— 那正是本仓最反对的「看起来绿」的形状。
  * `is_admin` 缺失按 false（不是 fail-open 的 true）。
+ * `role`/`features` 缺失按 D9 兜底（viewer/空集，见 parseRoleFeatures）：登录响应只带码不带集。
  */
 function sessionFrom(json: Record<string, unknown> | null): AuthSession | null {
   if (json === null) return null
@@ -218,8 +247,9 @@ function sessionFrom(json: Record<string, unknown> | null): AuthSession | null {
   const tenantId = typeof json.tenant_id === 'string' ? json.tenant_id : ''
   const userId = typeof json.user_id === 'string' ? json.user_id : ''
   const isAdmin = json.is_admin === true
+  const { role, features } = parseRoleFeatures(json)
   if (token === '' || tenantId === '' || userId === '') return null
-  return { token, tenantId, userId, isAdmin }
+  return { token, tenantId, userId, isAdmin, role, features }
 }
 
 /** 登录/注册共用的那一趟往返。注册成功 = 已登录（后端 201 直接回令牌，不需要第二次点击）。 */
@@ -264,7 +294,15 @@ export async function registerAndSignIn(input: Credentials, fetchImpl?: typeof f
  * 配置态是 503 + 固定 code，所以前端必须有一条不跳登录的分支接住它。
  */
 export type IdentityProbe =
-  | { readonly kind: 'asserted'; readonly tenantId: string; readonly userId: string }
+  | {
+      readonly kind: 'asserted'
+      readonly tenantId: string
+      readonly userId: string
+      /** 服务端断言的角色码（D9 收敛值域；缺失按 viewer 兜底）。 */
+      readonly role: string
+      /** 该角色能力集（G1 显隐判据；缺失按空集兜底）。 */
+      readonly features: readonly string[]
+    }
   | { readonly kind: 'expired'; readonly status: number; readonly text: string }
   | { readonly kind: 'unreachable'; readonly status: number; readonly text: string }
 
@@ -301,7 +339,8 @@ export async function fetchAuthenticatedIdentity(fetchImpl?: typeof fetch): Prom
   if (tenantId === '' || userId === '') {
     return { kind: 'unreachable', status: env.status, text: '/auth/me 返回 2xx 但没有身份字段 ⇒ 不读成已断言' }
   }
-  return { kind: 'asserted', tenantId, userId }
+  const { role, features } = parseRoleFeatures(env.json)
+  return { kind: 'asserted', tenantId, userId, role, features }
 }
 
 /**

@@ -20,13 +20,14 @@
  *   （键盘不碰鼠标完成一次提问）不受影响。
  * ==========================================================================-->
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 
 import Answer from './components/Answer.vue'
 import ApiKeyBox from './components/ApiKeyBox.vue'
 import EvidenceList from './components/EvidenceList.vue'
 import Legend from './components/Legend.vue'
 import LoginView from './components/LoginView.vue'
+import RoleGate from './components/RoleGate.vue'
 import ThemeToggle from './components/ThemeToggle.vue'
 import Timeline from './components/Timeline.vue'
 import {
@@ -39,6 +40,7 @@ import {
   dropped,
   evidence,
   eventCount,
+  hasFeature,
   identityNote,
   loggedIn,
   question,
@@ -47,6 +49,28 @@ import {
   traceNote,
   waiting,
 } from './stores/session'
+
+/* ---- G1 管理面导航（批 1：对话页 + 角色页；知识库/数据源两页随批 2/批 3 接入）----
+ * 视图键是本组件的局部 ref：只有本件读写它，不进会话层（会话层是跨组件共享态，
+ * 单组件的 UI 态进会话层 = 把局部事物全局化）。 */
+const activeView = ref<'chat' | 'role'>('chat')
+
+/**
+ * 「角色」页入口的显隐判据：手里有任一管理向能力码才显示。viewer 只有 chat.run /
+ * session.history ⇒ 四码全无 ⇒ 只看到对话页（任务书 §四.1「均无则普通用户只看到对话页」）。
+ * 码集对应方案 §4 的管理面格（kb.upload / datasource.manage / execution.control /
+ * human_task.decide）；这是**渲染映射**不是判定 —— 判定（谁有什么码）在服务端 /auth/me。
+ */
+const showRoleGate = computed(() =>
+  hasFeature('kb.upload') || hasFeature('datasource.manage')
+  || hasFeature('execution.control') || hasFeature('human_task.decide'))
+
+/**
+ * 对话页是否在屏上。两支合一：① 人在对话页；② 视图键停在管理面页但该页已无权渲染
+ * （登录态掉了、或换成了一个没有任何管理向能力的角色）⇒ 回对话页兜底，不给
+ * 「无权页面白屏」留缝 —— RoleGate 只在 showRoleGate 为真时才轮得到渲染。
+ */
+const chatShown = computed(() => activeView.value === 'chat' || !showRoleGate.value)
 
 /* 挂载时确认一次登录态（A8「刷新仍在登录」那一格的调用点）。本件不自己决定何时确认：
  * 会话层故意不在模块加载时自发请求，否则行为件在 Node 里 import 会话层就会多一个 fetch。 */
@@ -76,7 +100,7 @@ function onSignOut(): void {
     <header class="topbar">
       <h1>
         Agent Platform 控制台
-        <span class="hint">{{ canChat ? '对话页（PR-2）' : '登录面（PR-2b）' }}</span>
+        <span class="hint">{{ canChat ? (chatShown ? '对话页' : '角色页') : '登录面' }}</span>
       </h1>
       <span class="spacer" />
       <!-- 身份那一行只在页眉出现一次，文案由会话层的 `identityNote` 给（四种读法各自一句，
@@ -95,6 +119,34 @@ function onSignOut(): void {
       </button>
       <ThemeToggle />
     </header>
+
+    <!-- G1 管理面导航：入口项按 authFeatures 显隐（批 1 只有「角色」页一个入口；对话页恒在）。
+         页签选中态走 aria-current 而不是 aria-pressed（base.css .seg 那格注：它是页签不是
+         开关，读屏读法不同）。没拿到任何管理向能力码时整个 nav 不渲染 ⇒ viewer 只看到对话页。 -->
+    <nav
+      v-if="canChat && showRoleGate"
+      class="topnav"
+      aria-label="管理面导航"
+    >
+      <div class="seg">
+        <button
+          type="button"
+          class="btn"
+          :aria-current="activeView === 'chat' ? 'page' : undefined"
+          @click="activeView = 'chat'"
+        >
+          对话
+        </button>
+        <button
+          type="button"
+          class="btn"
+          :aria-current="activeView === 'role' ? 'page' : undefined"
+          @click="activeView = 'role'"
+        >
+          角色
+        </button>
+      </div>
+    </nav>
 
     <!-- error 态：banner 跨轮累积（一次流最多命中一条分支，四条要在同一屏可对比）。 -->
     <section
@@ -125,11 +177,12 @@ function onSignOut(): void {
     </section>
 
     <!-- 视图闸门（PR-2b）：未确认到登录态时屏上只有登录面，没有空对话框。
-         两个 `<main>` 是 v-if / v-else 关系 ⇒ 任一时刻 DOM 里只有一个，语义上仍是一文档一主区。 -->
+         管理面三视图（对话 main / RoleGate）是 v-if / v-else-if 关系 ⇒ 任一时刻 DOM 里
+         只有一个 main，语义上仍是一文档一主区；chatShown 的兜底支见 script 那条注。 -->
     <LoginView v-if="!canChat" />
 
     <main
-      v-else
+      v-else-if="chatShown"
       class="grid"
     >
       <!-- 栏一（1.1fr）：答案 / 依据 / 密钥 -->
@@ -226,8 +279,13 @@ function onSignOut(): void {
       </div>
     </main>
 
+    <!-- 「角色与能力」页（RoleGate，批 1）：G1 的屏面读数（当前角色 / 能力集 / N3 说明），
+         只在手里确有管理向能力码时轮得到渲染（chatShown 为假 ⇒ activeView='role' 且
+         showRoleGate 为真）。 -->
+    <RoleGate v-else />
+
     <!-- 事件图例只在对话页出现：登录页一行事件都没得对，把图例放上去就是拿不相干的
-         读数占位置（与文件头那句「不给指不到东西的引导」同一条纪律）。 -->
-    <Legend v-if="canChat" />
+         读数占位置（与文件头那句「不给指不到东西的引导」同一条纪律）；管理面页同理。 -->
+    <Legend v-if="canChat && chatShown" />
   </div>
 </template>

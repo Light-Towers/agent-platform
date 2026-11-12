@@ -251,6 +251,11 @@ a.btn { text-decoration: none; }
  * 读屏里 aria-pressed 会把导航报成「可按下的按钮」。 */
 .seg .btn[aria-current="page"] { background: var(--tint-decision); font-weight: 500; }
 
+/* ---- 管理面导航（G1 三块管理面批次起）----
+ * 落位只有一条：与 .grid 同拍的上边距。页签本体是上面的 .seg + .btn[aria-current="page"]，
+ * 选中态已在那一格，这里不重写（同形状第二份 = 会漂的双写）。 */
+.topnav { margin-top: var(--sp-4); }
+
 .field {
   width: 100%;
   border: 1px solid var(--border-control);
