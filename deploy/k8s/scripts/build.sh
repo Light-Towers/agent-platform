@@ -50,7 +50,11 @@ cd "$SRC_DIR"
 for IMAGE in $IMAGES; do
   DF="$(dockerfile_for "$IMAGE")" || { echo "FAIL: 镜像名 $IMAGE 无 Dockerfile 映射（新增镜像请同时改本脚本的 dockerfile_for）"; exit 2; }
   echo "### build $IMAGE  <-  $DF"
-  docker build --build-arg GIT_REV="$ACTUAL_REV" -f "$DF" -t "$IMAGE" .
+  BUILD_ARGS=(--build-arg GIT_REV="$ACTUAL_REV")
+  # 内网构建（npmjs 在容器内不可达）必须传 NPM_REGISTRY=npmmirror；Dockerfile 把它写进
+  # /web/.npmrc（pnpm 不读 NPM_CONFIG_REGISTRY 大写环境变量，只能从 .npmrc 取）。
+  [ -n "${NPM_REGISTRY:-}" ] && BUILD_ARGS+=(--build-arg NPM_REGISTRY="$NPM_REGISTRY")
+  docker build "${BUILD_ARGS[@]}" -f "$DF" -t "$IMAGE" .
 
   # 回读验证：镜像内嵌 rev == 构建源 rev（label + 文件双通道），**逐 tag** 做。
   # 两个 tag 同源的这件事必须可核对：只验一个就等于没验另一个。
