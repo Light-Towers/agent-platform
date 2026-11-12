@@ -8,6 +8,7 @@ from agent_core.internal_header import (
     InternalHeaderError,
     sign_internal_header,
     verify_internal_header,
+    verify_internal_header_with_role,
 )
 
 KEY = b"shared-secret-key"
@@ -16,6 +17,36 @@ KEY = b"shared-secret-key"
 def test_sign_verify_roundtrip():
     v = sign_internal_header("tenantA", "userB", key=KEY)
     assert verify_internal_header(v, key=KEY, max_age=300) == ("tenantA", "userB")
+
+
+def test_roundtrip_with_role():
+    """1c/D11：带 r 的头经三元组验签拿到 role。"""
+    v = sign_internal_header("tenantA", "userB", key=KEY, role="admin")
+    assert verify_internal_header_with_role(v, key=KEY) == ("tenantA", "userB", "admin")
+
+
+def test_legacy_header_has_no_role():
+    """旧签发方（无 r 键）⇒ role=None，消费侧按最小权限处置（fail-closed）。"""
+    v = sign_internal_header("tenantA", "userB", key=KEY)
+    assert verify_internal_header_with_role(v, key=KEY) == ("tenantA", "userB", None)
+
+
+def test_legacy_verifier_ignores_role_key():
+    """F17 兼容自证：旧验签方用二元组读带 r 的新头，行为逐字不变。"""
+    v = sign_internal_header("tenantA", "userB", key=KEY, role="admin")
+    assert verify_internal_header(v, key=KEY) == ("tenantA", "userB")
+
+
+def test_tampered_role_is_rejected():
+    """合成违规：换 payload 里的 r 却沿用旧签名 ⇒ 签名不符，不静默提权。"""
+    v = sign_internal_header("tenantA", "userB", key=KEY, role="viewer")
+    forged = sign_internal_header("tenantA", "userB", key=KEY, role="admin")
+    assert forged != v
+    parts, forged_parts = v.split("."), forged.split(".")
+    with pytest.raises(InternalHeaderError):
+        verify_internal_header_with_role(
+            f"{parts[0]}.{forged_parts[1]}.{parts[2]}", key=KEY
+        )
 
 
 def test_verify_missing_returns_none():

@@ -50,10 +50,9 @@ def _settings(default_tenant: str = "") -> MagicMock:
     s.sql_prompt_max_bytes = 10000
     s.allowed_tables = []
     s.sensitive_columns = []
-    s.default_query_role = "analyst"
+    # 1c/D5：default_query_role / admin_roles 已从 Settings 下线，桩里不再设死字段。
     s.result_masking_enabled = False
     s.mask_keep_chars = 1
-    s.admin_roles = []
     s.date_context_note = ""
     return s
 

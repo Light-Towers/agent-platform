@@ -116,10 +116,19 @@ def test_sanitize_identity_strips_llm_supplied_identity():
     from agent_server.capabilities import _sanitize_identity
 
     out = _sanitize_identity(
-        {"query": "x", "tenant_id": "OTHER_TENANT", "user_id": "spoof", "api_key": "leak"}
+        {
+            "query": "x",
+            "tenant_id": "OTHER_TENANT",
+            "user_id": "spoof",
+            "api_key": "leak",
+            "role": "admin",
+            "features": ["sql.train"],
+            "permissions": ["*"],
+        }
     )
-    # 非租户身份键一律不透传下游
-    assert "user_id" not in out and "api_key" not in out
+    # 非租户身份键一律不透传下游（F15 扩为 6 键）
+    for key in ("user_id", "api_key", "role", "features", "permissions"):
+        assert key not in out
     # 租户绝不等于 LLM 传入值，而是服务端断言（A3 前=部署级 default）
     assert out["tenant_id"] != "OTHER_TENANT"
     from agent_runtime.workspace_registry import server_tenant_id

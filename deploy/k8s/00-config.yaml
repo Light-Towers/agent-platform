@@ -95,5 +95,4 @@ data:
   # L3 开关：默认已是 true，显式声明的理由与平台侧 GUARD_BLOCK_INJECTION 同一条——
   # 防被环境漂移改掉（masks 静默关掉的表观是“数据泄露了”，不是“配置丢了”）。
   NL2SQL_RESULT_MASKING_ENABLED: "true"
-  # 角色：服务端断言的最小权限默认（admin_roles 里才看全量）。置 admin 需显式改这里。
-  NL2SQL_DEFAULT_QUERY_ROLE: "analyst"
+  # 1c/D5 下线：角色改由内部签名头的 r 键承载，不再由 ConfigMap 配置。

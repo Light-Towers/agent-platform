@@ -26,6 +26,7 @@ from agent_core.internal_header import InternalHeaderError
 from agent_core.internal_header import load_hmac_key as _core_load_hmac_key
 from agent_core.internal_header import sign_internal_header as _core_sign
 from agent_core.internal_header import verify_internal_header as _core_verify
+from agent_core.internal_header import verify_internal_header_with_role as _core_verify_with_role
 
 from agent_runtime.workspace_registry import (
     _TENANT_UNSET,
@@ -271,12 +272,21 @@ def verify_token(
 # 签名/验签原语单一实现于 agent_core.internal_header（零依赖 stdlib，knowledge-service 亦复用）；
 # 本层仅负责密钥加载 + max_age 环境默认 + 将 InternalHeaderError 归一为 IdentityError。
 
-def sign_internal_header(tenant_id: str, user_id: str | None = None, *, key: bytes | None = None) -> str:
-    """签发 ``v1.<payload>.<sig>`` 内部头。key 缺则从 INTERNAL_HMAC_KEY 加载。"""
+def sign_internal_header(
+    tenant_id: str,
+    user_id: str | None = None,
+    *,
+    key: bytes | None = None,
+    role: str | None = None,
+) -> str:
+    """签发 ``v1.<payload>.<sig>`` 内部头。key 缺则从 INTERNAL_HMAC_KEY 加载。
+
+    ``role``（1c/D11）只在非 None 时写入 payload 的 ``r`` 键；旧验签方忽略新键（F17）。
+    """
     key = key if key is not None else load_hmac_key()
     if not key:
         raise IdentityError("未配置 INTERNAL_HMAC_KEY（内部签名头无法签发）")
-    return _core_sign(tenant_id, user_id, key=key)
+    return _core_sign(tenant_id, user_id, key=key, role=role)
 
 
 def verify_internal_header(
@@ -295,6 +305,26 @@ def verify_internal_header(
         max_age = _int_env("INTERNAL_HEADER_MAX_AGE_S", 300)
     try:
         return _core_verify(value, key=key, max_age=max_age)
+    except InternalHeaderError as e:
+        raise IdentityError(str(e)) from e
+
+
+def verify_internal_header_with_role(
+    value: str | None,
+    *,
+    key: bytes | None = None,
+    max_age: int | None = None,
+) -> tuple[str, str | None, str | None] | None:
+    """1c/D11：委托 agent-core 三元组验签；无 ``r`` 键 ⇒ role=None（消费侧最小权限）。"""
+    if not value:
+        return None
+    key = key if key is not None else load_hmac_key()
+    if not key:
+        raise IdentityError("收到内部头但未配置 INTERNAL_HMAC_KEY，无法校验")
+    if max_age is None:
+        max_age = _int_env("INTERNAL_HEADER_MAX_AGE_S", 300)
+    try:
+        return _core_verify_with_role(value, key=key, max_age=max_age)
     except InternalHeaderError as e:
         raise IdentityError(str(e)) from e
 

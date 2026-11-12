@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends, Header, Request
 from fastapi.responses import StreamingResponse
 from shared_schemas import sse_pack
 
-from agent_server.api.auth import resolve_thread_id, verify_api_key
+from agent_server.api.auth import require_feature, resolve_thread_id, verify_api_key
 from agent_server.config import get_settings
 from agent_server.memory import thread_persist as _thread_persist
 from agent_server.rag.embed import embed_query
@@ -30,6 +30,7 @@ async def query(
     req: QueryRequest,
     request: Request,
     _auth=Depends(verify_api_key),  # 仅作鉴权闸门：B7b-4 后会话身份不再从凭据派生，故本函数不使用其返回值
+    _feature=Depends(require_feature("chat.run")),  # 401 先于 403：_auth 必须在前
     x_priority: str | None = Header(default=None, alias="X-Priority"),
     traceparent: str | None = Header(default=None),
 ):

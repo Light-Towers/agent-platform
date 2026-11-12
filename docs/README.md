@@ -45,6 +45,10 @@
 - `docs/adr/0013-semantic-cache-single-track.md` —— 语义缓存单轨拍板（Accepted C：Valkey 唯一实现，生产与开发测试都用它；PG 缓存退役、无自动回退）。**2026-10-27 补记：该件已入库**（`git ls-files` 命中），按纪律补回反引号并已复跑 `scripts/check_doc_sync.py`；§9 是变异战役读数、§11 是逐条变更台账（本行追加后至第 58 行）。
 - `docs/adr/0014-web-poc-integration-branch-exception.md`（2026-11-02 新增）—— **`feat/web-visual-poc` 转正为唯一集成分支**，并把 `company` 远端 heads 按 3 条登记为知情例外（计数口径改为「不含历史锚 ref 与公开镜像侧载体」）；§5 是五条复审触发条件。`AGENTS.md`《分支卫生》那句「远端恒 2 分支」在本仓的读法以该件为准，`docs/operations/branch-hygiene-monthly-checks.md` 的 2026-11-02 节指向它。
 
+**2026-11-11 追记 · 本表再漏两篇 ADR**（按 `:43-46` 先例补回；`0015` 已在 HEAD；`0016` 于 2026-11-12 精确 `git add` 入索引、blob 非空（`git cat-file -s :<path>` 现取），**尚未 commit** ⇒ 新克隆仍拿不到，按 `:41` 纪律暂不用反引号路径，提交后照 `:45` 先例补回并复跑 `scripts/check_doc_sync.py`；按《观测面硬规矩》#13 不得用 `git add -N` 空 blob）：
+- `docs/adr/0015-server-asserted-role-claim.md`（2026-11-11 新增）—— **角色码进入 RS256 令牌 claims**：role 断言源、`/auth/me` 返回 role+features、D9 viewer 兜底双通道、内部签名头 payload 增 `r` 的承载（第 2.6 条）。关联 `docs/adr/0007-server-asserted-tenant-identity.md`、`docs/adr/0008-auth-mode-selection.md` 与 `docs/plans/plan-roles-kb-datasource-console-2026-11-11.md`。
+- docs/adr/0016-roadmap-18-kb-proxy-boundary-exception.md（2026-11-11 新增，**已入索引待 commit**：按 `:41` 纪律未进版本历史的路径不用反引号；提交后照 `:45` 先例补回反引号并复跑 `scripts/check_doc_sync.py`）—— **roadmap #18「不新增后端专用接口」对刀 2 两个知识库代理端点的边界裁定**：逐行取证 + 豁免/修订/撤回三立场对照 + 消费方审计 + 代价与复审触发。属方案件 §8 P6 拍板的「第三份交付物」，硬前置绑定 2a；**已决（2026-11-12）= 乙的最小形态「射程裁决」**：#18 结案不改写原文、产品化边界按 D7 四条判据、防扩张复用已有护栏不新增齿。⚠ 仍不得引为「2a 已放行」（KS 镜像重建+分发与 Q6 现网取证未做）。
+
 ## 3. `docs/plans/` 71 篇 md 分层（按主题簇）
 
 「自述状态」= 文内状态行摘录；「未标」= 文内没有可辨状态行，**需读正文才能定**。提及数为全仓入库文件中该文件名的出现次数（含 CHANGELOG 历史条目与自身提及），只作相对热度，不作"仍在用"的证据。

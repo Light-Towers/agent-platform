@@ -26,6 +26,10 @@ L-3：观测 init 仅限装配点（三条见 plan-observability-global-remediat
 L-4：OTel/langfuse 可选依赖多处声明下界必须归一（同方案，防组合解析回溯）。
 P14：语义缓存单轨（ADR-0013 C）：valkey 客户端只在适配器内导入、CACHE_* 只在
      config.py 读取、Python 不再读写 PG semantic_cache 表、生产清单禁 pg 且必须显式 valkey。
+P15：出站签名单入口窄门禁（方案 §8 P10=甲 / 1b）：``sign_internal_header(`` /
+     ``build_internal_headers(`` 只准出现在棘轮基线登记位；单入口三层本体属 1c。
+P16：「本轮不接线」机检（方案 §6 R2 / N7）：三处装配面不得出现权限集调用实参
+     （``permissions=`` / ``caller_permissions=``）；F19 在册的同名透传不算接线。
 """
 
 from __future__ import annotations
@@ -1412,6 +1416,163 @@ def check_credential_param_escape() -> list[str]:
     return violations
 
 
+# ---------------------------------------------------------------------------
+# P15 出站签名单入口「窄门禁」（方案 §8 P10=甲 / §7 lint 行 / §3 D11 ③）。
+# 1b 只建这条门禁：单入口三层本体（agent-core ``build_internal_headers`` + 两应用
+# 装配 + F20 九处发送方）属 1c，本批不碰。按 P10=甲，不钉 httpx 语法（语法上
+# 不可区分），只钉签发符号的出现位。
+# ---------------------------------------------------------------------------
+_SIGN_SYMBOLS = frozenset({"sign_internal_header", "build_internal_headers"})
+
+# 1b 棘轮基线 = 现状合法出现位（2 个定义 + 生产签发点）。
+# 「为什么不绑 0」：本齿现在断言的是「不新增基线外的签发面」，**不是**「签发面已
+# 收敛为一个」——后者是完整「出站签名单入口」改造（F20 九处 + 两应用装配点），
+# 届时把本表收紧为「两个装配点 + agent-core 本体」。
+# ❗ 2026-11-12 1c：+1 位 `applications/agent_server/capabilities.py` —— 问数出站
+# 是 D11 的 role 承载主链路，必须签 r；这是**收编前的登记**不是放松：任何第 7 位
+# 仍报红（合成违规反证见 tests/governance/test_role_feature_gates.py），且 1c 完整
+# 单入口收编时本表要收紧而非继续扩。显式清单作**下限**保留（删掉任一必检位仍报红，
+# 与 :960-961 / :1327-1328 的 L-4/P14 派生纪律同族）；无 git / 新克隆的环境靠这张表
+# 也能复跑，不会恒红 ⇒ 门禁不会被下一轮关掉。
+_SIGN_SITE_ALLOWED = frozenset({
+    "packages/agent-core/agent_core/internal_header.py",
+    "packages/agent-runtime/agent_runtime/identity.py",
+    "applications/agent_server/api/sql_router.py",
+    "applications/agent_federation/tools/knowledge_tools.py",
+    "applications/agent_federation/agent/async_subagents.py",
+    "applications/agent_server/capabilities.py",
+})
+
+
+def _sign_symbol_sites(tree: ast.AST) -> list[int]:
+    """签发符号被定义或调用的行号（AST 口径：注释 / docstring 提及不算）。"""
+    lines: list[int] = []
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            if node.name in _SIGN_SYMBOLS:
+                lines.append(node.lineno)
+        elif isinstance(node, ast.Call):
+            func = node.func
+            name = (
+                func.id if isinstance(func, ast.Name)
+                else func.attr if isinstance(func, ast.Attribute)
+                else None
+            )
+            if name in _SIGN_SYMBOLS:
+                lines.append(node.lineno)
+    return sorted(set(lines))
+
+
+def _sign_site_scan() -> tuple[int, int, dict[str, list[int]], list[str]]:
+    """返回 (扫描文件数, 符号命中数, 命中文件→行号, 解析错误)。
+
+    拆出来供反例单测断言「真面参与判决」：只断言 ``check_*() == []`` 会把
+    「扫不到对象所以绿」读成「已验」（AGENTS.md 硬规矩 #8）。
+    """
+    scanned = 0
+    hits = 0
+    found: dict[str, list[int]] = {}
+    errors: list[str] = []
+    for rel, py_file in _iter_scanned_py_files():
+        scanned += 1
+        try:
+            tree = ast.parse(py_file.read_text(encoding="utf-8-sig"), filename=rel)
+        except (OSError, SyntaxError, ValueError) as exc:
+            errors.append(f"{rel}: 无法解析（{exc}）")
+            continue
+        sites = _sign_symbol_sites(tree)
+        if sites:
+            found[rel] = sites
+            hits += len(sites)
+    return scanned, hits, found, errors
+
+
+def check_internal_header_sign_sites() -> list[str]:
+    """P15：签发符号只准出现在基线登记的位；新增位 = 新签发面 = 报红。"""
+    scanned, hits, found, errors = _sign_site_scan()
+    violations = list(errors)
+    for rel, linenos in sorted(found.items()):
+        if rel in _SIGN_SITE_ALLOWED:
+            continue
+        for lineno in linenos:
+            violations.append(
+                f"{rel}:{lineno}: 签发符号出现在 P15 基线外——出站签名单入口收编属 1c/D11，"
+                "不得另起第二个签发面（新增合法位须先改方案 §7 与本表，并写明理由）"
+            )
+    for rel in sorted(_SIGN_SITE_ALLOWED - set(found)):
+        violations.append(f"{rel}: P15 必检签发位缺失（显式清单是下限，删掉必红）")
+    if scanned == 0 or hits == 0:
+        violations.append(
+            "<<< SIGN-SITE-UNPARSED 扫描面为空 / 签发符号零命中：量具瞎不等于账面被抓，"
+            "不得默默报绿（AGENTS.md 硬规矩 #7/#8）"
+        )
+    return violations
+
+
+# ---------------------------------------------------------------------------
+# P16「本轮不接线」机检（方案 §6 R2 改写后的形状 / §7 lint 行 / N7）。
+# skill 级权限过滤的接线点是两个应用装配层，不是 runtime 内部；本齿把「没接线」
+# 写成齿，防「接上权限引擎」被下一轮读成已具备。
+# ---------------------------------------------------------------------------
+_NO_WIRING_SCOPE = (
+    "applications/agent_server/capabilities.py",
+    "applications/agent_federation/planners/agentic_runtime_bridge.py",
+    "packages/agent-runtime/agent_runtime/planner/execution_graph.py",
+)
+_PERMISSION_KWARGS = frozenset({"permissions", "caller_permissions"})
+
+
+def _permission_wiring_lines(tree: ast.AST) -> list[tuple[int, str]]:
+    """调用时真的传入权限集 = 接线；F19 在册的透传形状不算。
+
+    排除两种既有形状：显式 ``None``，以及 ``caller_permissions=caller_permissions``
+    同名形参逐层透传（默认 None，见 ``execution_graph.py:539/:574``）。函数定义里的
+    形参声明也不算——那是「引擎在、声明面空」的本体，不是接线动作。
+    """
+    hits: list[tuple[int, str]] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        for kw in node.keywords:
+            if kw.arg not in _PERMISSION_KWARGS:
+                continue
+            value = kw.value
+            if isinstance(value, ast.Constant) and value.value is None:
+                continue
+            if isinstance(value, ast.Name) and value.id == kw.arg:
+                continue
+            hits.append((node.lineno, kw.arg))
+    return sorted(set(hits))
+
+
+def check_skill_permission_no_wiring() -> list[str]:
+    """P16：三处装配面不得出现权限集调用实参；接线须先改方案与本齿。"""
+    violations: list[str] = []
+    parsed = 0
+    for rel in _NO_WIRING_SCOPE:
+        path = ROOT / rel
+        if not path.is_file():
+            violations.append(f"{rel}: 无法解析（文件缺失）")
+            continue
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8-sig"), filename=rel)
+        except (OSError, SyntaxError, ValueError) as exc:
+            violations.append(f"{rel}: 无法解析（{exc}）")
+            continue
+        parsed += 1
+        for lineno, kwarg in _permission_wiring_lines(tree):
+            violations.append(
+                f"{rel}:{lineno}: 出现 `{kwarg}=` 权限集实参（R2：本轮不接线，N7 触发条件未到；"
+                "接线须先改方案 §6 与本齿扫描面，不得静默启用）"
+            )
+    if parsed != len(_NO_WIRING_SCOPE):
+        violations.append(
+            f"<<< NO-WIRING-UNPARSED 三个装配面只解析到 {parsed}/{len(_NO_WIRING_SCOPE)}："
+            "不投票的读数不是门禁（AGENTS.md 硬规矩 #8）"
+        )
+    return violations
+
+
 def main() -> int:
     rc = 0
     v1 = check()
@@ -1595,6 +1756,26 @@ def main() -> int:
             "P14 语义缓存单轨通过：单一 Valkey 实现 + 配置单点 + PG 旧 SQL 零再现 + "
             "清单显式 valkey + bundle 镜像坐标一致（" + _VALKEY_BUNDLE_PIN + "）"
         )
+
+    v18 = check_internal_header_sign_sites()
+    if v18:
+        print("P15 架构约束违反：出站签发符号只准出现在棘轮基线登记位（窄门禁，P10=甲）")
+        print("修复：单入口三层收编属 1c/D11；新增合法位须先改方案 §7 与 _SIGN_SITE_ALLOWED 并写明理由：")
+        for v in v18:
+            print(f"  {v}")
+        rc = 1
+    else:
+        print("P15 架构约束通过：签发符号零基线外出现位（基线为下限，见 _SIGN_SITE_ALLOWED 注记）")
+
+    v19 = check_skill_permission_no_wiring()
+    if v19:
+        print("P16 架构约束违反：本轮不接线——三处装配面不得出现权限集调用实参（R2/N7）")
+        print("修复：skill 级权限过滤须先改方案 §6 与本齿扫描面，不得静默启用：")
+        for v in v19:
+            print(f"  {v}")
+        rc = 1
+    else:
+        print("P16 架构约束通过：三处装配面零权限集接线（F19 同名透传形状不算接线）")
     return rc
 
 

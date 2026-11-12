@@ -81,15 +81,22 @@ def test_role_codes_are_closed_vocabulary():
 
 
 # ---------------------------------------------------------------------------
-# 格 3：未知角色 / None → 空集 False（fail-closed）
+# 格 3：1c 统一兜底口径 —— 原语仍 fail-closed，判定入口收敛到 viewer + D9 计数
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("bad_role", [None, "", "root", "superadmin", "ADMIN"])
-def test_unknown_role_yields_empty_set(bad_role):
-    """未知码 → 空集（不抛错、不猜）。has_feature 是消费点唯一入口，这里红等于全链路红。"""
+def test_unknown_role_converges_to_viewer_with_d9_count(bad_role, monkeypatch):
+    """未知码 → viewer 能力集（不是空集），且每次兜底都计入 D9 可聚合计数。
+
+    ``features_for_role`` 作为原语仍返回空集（不猜）；**判定入口** ``has_feature``
+    经 ``effective_role`` 收敛，避免「子服务直调拿空集又不计数」的第二套口径。
+    """
+    _reset_counters(monkeypatch)
     assert features_for_role(bad_role) == frozenset()
-    assert has_feature(bad_role, "chat.run") is False
+    assert has_feature(bad_role, "chat.run") is True       # viewer 放行读面
+    assert has_feature(bad_role, "data.unmasked") is False  # 写面仍拒绝
+    assert az.role_fallback_count() == 2
 
 
 def test_unknown_role_not_treated_as_admin():

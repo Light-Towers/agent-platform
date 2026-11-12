@@ -160,11 +160,8 @@ spec:
                 configMapKeyRef:
                   name: agent-platform-config
                   key: NL2SQL_RESULT_MASKING_ENABLED
-            - name: DEFAULT_QUERY_ROLE
-              valueFrom:
-                configMapKeyRef:
-                  name: agent-platform-config
-                  key: NL2SQL_DEFAULT_QUERY_ROLE
+            # 1c/D5 下线：DEFAULT_QUERY_ROLE / NL2SQL_DEFAULT_QUERY_ROLE 不再由 CM 注入，
+            # 角色改由内部签名头的 r 键承载。
             # ---- 身份档（与平台同档，fail-closed）----
             # DEPLOY_ENFORCE_IDENTITY=true：既无验签公钥又无 SINGLE_TENANT 时启动即拒（不是告警）。
             # TENANT_JWT_ENFORCE 显式留 false（observe）：翻 enforce 是另一条决策，不在这里顺带打开。

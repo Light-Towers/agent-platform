@@ -111,7 +111,14 @@ async def test_stream_error_frame_is_sanitized(app_without_graph, recording_logg
 
     error_frames = [f for f in _frames(body) if f["event"] == "error"]
     assert len(error_frames) == 1, f"应有且仅有一个 error 帧：{body}"
-    assert error_frames[0]["data"]["error"] == SANITIZED_5XX_MSG
+    # e782db22「入站错误收敛」后 SSE 错误帧是 {type, code, msg, request_id} 统一形状
+    # （packages/agent-core/agent_core/guardrails/errors.py:145 stream_error_frame）；
+    # 旧断言取 `error` 键是那批未随动的遗留。本行是**判据扩面**：仍钉死固定脱敏
+    # 文案，并加钉 type/code —— 不删用例、不收窄、不放宽。
+    frame = error_frames[0]["data"]
+    assert frame["type"] == "error"
+    assert frame["code"] == "INTERNAL_ERROR"
+    assert frame["msg"] == SANITIZED_5XX_MSG
 
     # 修复前的泄漏面：异常原文（对象类型 / 属性名）不得出现在任何帧里
     assert "NoneType" not in body

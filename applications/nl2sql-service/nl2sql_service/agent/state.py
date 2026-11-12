@@ -87,8 +87,8 @@ class DataAgentState(TypedDict, total=False):
     # 数据权限清单（§5.9 L2 guard；QueryService 从 settings 注入，服务端单源）
     allowed_tables: list[str]
     sensitive_columns: list[str]
-    # L3 结果层脱敏的角色与开关（§5.9；角色来自服务端断言，非客户端请求体）
-    user_role: str
+    # L3 结果层脱敏（§5.9）：role 取服务端断言（内部签名头 r 承载，1c/D11），
+    # 能力判定由 agent_runtime.authorization.has_feature 单一解释；None ⇒ 最小权限。
+    role: str | None
     result_masking_enabled: bool
     mask_keep_chars: int
-    admin_roles: list[str]

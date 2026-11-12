@@ -6,7 +6,7 @@ from agent_core.logging import get_logger
 from agent_runtime.workspace_registry import server_tenant_id
 from fastapi import APIRouter, Depends, HTTPException, Request
 
-from agent_server.api.auth import resolve_thread_id, verify_api_key
+from agent_server.api.auth import require_feature, resolve_thread_id, verify_api_key
 from agent_server.config import get_settings
 from agent_server.memory import recall_exact as _recall_exact
 from agent_server.schemas import HistoryItem, HistoryResponse, RevertRequest, RevertResponse
@@ -23,6 +23,7 @@ async def history(
     limit: int | None = None,
     request: Request = None,
     _auth=Depends(verify_api_key),  # 仅作鉴权闸门（B7b-4：会话身份不再从凭据派生）
+    _feature=Depends(require_feature("session.history")),  # 401 先于 403：_auth 必须在前
 ):
     """精确回忆：按会话 thread_id 取回历史对话原文（优化 I）。
 
@@ -53,6 +54,7 @@ async def session_revert(
     req: RevertRequest,
     request: Request,
     _auth=Depends(verify_api_key),  # 仅作鉴权闸门（审计主体不得取凭据值，lint P12）
+    _feature=Depends(require_feature("session.history")),  # 401 先于 403：_auth 必须在前
 ):
     """会话回退：审计主体取服务端断言租户，**不是**入站 API Key。
 

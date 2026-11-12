@@ -68,7 +68,7 @@ def _header(scope: dict, name: str) -> str | None:
 def _looks_like_jwt(token: str) -> bool:
     """JWT 形态判断：三段 `.` 分隔且 header 段 base64url 以 `eyJ` 开头（`{"` 编码）。
 
-    区分“真正的租户 JWT”与“不透明 Bearer（如某些部署把静态 API_KEY 放 Authorization）”：
+    区分"真正的租户 JWT"与"不透明 Bearer（如某些部署把静态 API_KEY 放 Authorization）"：
     后者不是本中间件的凭据 → 交下游既有认证，避免误拒。
     """
     parts = token.split(".")
@@ -183,9 +183,14 @@ class IdentityMiddleware:
                     await _send_json(send, 401, "内部签名头无法验证（服务端验签不可用）", code="IDENTITY_VERIFIER_UNAVAILABLE")
                     return
                 if result is not None:
-                    tenant, user = result
-                    # 内部头路径：r 键属 1c（D11 承载），本刀 role=None（消费侧走 viewer 兜底）。
-                    await self._run(tenant, user, None, scope, receive, send)
+                    # 1c/D11：验签器返回 (tenant, user, role)；旧验签器与测试注入的最小
+                    # mock 仍是二元组 ⇒ 宽容解包，role 缺省 None（消费侧走 viewer 兜底）。
+                    if len(result) == 3:
+                        tenant, user, role = result
+                    else:
+                        tenant, user = result
+                        role = None
+                    await self._run(tenant, user, role, scope, receive, send)
                     return
 
         single = self._resolve_single()

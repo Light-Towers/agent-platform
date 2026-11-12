@@ -17,12 +17,25 @@ B7b-4（拆 CodeQL ``py/weak-sensitive-data-hashing`` 链①）：会话身份�
 """
 
 import secrets
+from typing import Callable
 
 from agent_core.guardrails.auth import DEV_THREAD_ID, resolve_thread_identity
-from agent_runtime.workspace_registry import asserted_person_id, server_tenant_id
+from agent_core.guardrails.errors import AppError
+from agent_runtime.authorization import effective_role, has_feature
+from agent_runtime.workspace_registry import (
+    asserted_person_id,
+    asserted_role,
+    asserted_tenant_id,
+    asserted_user_id,
+    server_tenant_id,
+)
 from fastapi import Header, HTTPException
 
 from agent_server.config import get_settings
+
+# 对外稳定错误码（前端按 code 分支；与 auth_router 的 CODE_* 同族命名）。
+# 值与方案 §3 D10 / §4:111 对齐；feature 码只进 details，不进 msg（不把能力清单外泄）。
+CODE_FEATURE_FORBIDDEN = "FORBIDDEN_FEATURE"
 
 # D-l 会话主体的用户段分隔。选 ``--user-`` 而不是 ``/`` ``:`` ``#``：它们都不在
 # ``safe_filename`` 白名单内（会被有损改写成 ``_``，制造不同账号落同一目录的碰撞面），
@@ -55,6 +68,45 @@ def verify_api_key(x_api_key: str | None = Header(default=None, alias="X-API-Key
     if not x_api_key or not secrets.compare_digest(x_api_key, settings.api_key):
         raise HTTPException(status_code=401, detail="API Key 无效")
     return x_api_key
+
+
+def require_feature(code: str) -> Callable[[], None]:
+    """feature 守卫（1b，D4/D10；第三轮升级点 2 的单一实现——**不是**逐端点 inline if）。
+
+    端点写 ``_feature=Depends(require_feature("sql.train"))`` 挂上；**漏挂 = 无守卫**
+    （守卫不做存在性扫描，漏接面由 R3/R10 逐端点反证承担）。判定单一在
+    ``agent_runtime.authorization.has_feature``（D3：角色→能力只有一张常量表）：
+
+    - role 取服务端断言的**原始 claim 值**（``asserted_role``，中间件已随令牌绑定）；
+      值域收敛（未知/缺失码 → viewer 兜底 + D9 可聚合计数）单一在 ``effective_role``
+      ——本件不解释角色词汇表，也不写第二份兜底口径。
+    - 未断言调用方（静态 ``X-API-Key`` / observe 档无凭据）⇒ ``asserted_role()`` 为
+      ``None`` ⇒ viewer 兜底（P8 已拍 (a)：与 D9 同一条「无断言→最小权限」规则）。
+      其能力面由 §4 矩阵决定：``chat.run``/``session.history`` 放行，写面 403（R10）。
+    - 与 :func:`verify_api_key` 同族并存：401（凭据无效）先于 403（角色不够）——
+      FastAPI 按参数声明顺序执行依赖，调用方把 ``_auth`` 放在 ``_feature`` 之前。
+
+    msg 是固定文案不含内部细节；feature 码只进 ``details``（D10：不进 ``msg``，
+    不把能力清单回显给未授权调用方），由统一错误信封渲染。
+    """
+    def _guard() -> None:
+        role = effective_role(
+            asserted_role(),
+            tenant=asserted_tenant_id() or "",
+            user=asserted_user_id() or "",
+        )
+        if not has_feature(role, code):
+            raise AppError(
+                403,
+                CODE_FEATURE_FORBIDDEN,
+                "当前角色无权执行该操作",
+                details={"feature": code},
+            )
+
+    # 具名化让 FastAPI 依赖树/调试日志可见（同名 dependency 会缓存——每个 feature 码独立函数名，互不串）。
+    _guard.__name__ = f"require_{code.replace('.', '_')}"
+    _guard.__qualname__ = _guard.__name__
+    return _guard
 
 
 def _compose_principal(tenant: str, person: str) -> str:

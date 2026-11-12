@@ -120,9 +120,17 @@ def features_for_role(role: str | None) -> frozenset[str]:
     return ROLE_FEATURES.get(role or "", _EMPTY)
 
 
-def has_feature(role: str | None, code: str) -> bool:
-    """「这个角色能不能做 X」的**唯一**判定入口（nl2sql 等子服务 import 它，D11/1c）。"""
-    return code in features_for_role(role)
+def has_feature(
+    role: str | None, code: str, *, tenant: str = "", user: str = ""
+) -> bool:
+    """「这个角色能不能做 X」的**唯一**判定入口（nl2sql 等子服务 import 它，D11/1c）。
+
+    1c 统一两套兜底口径：值域收敛与 D9 可见性单一在 :func:`effective_role`，
+    本函数把所有调用方（含子服务直调）收进同一条路径。此前直调会绕过
+    ``effective_role`` 拿到空集、且不触发兜底计数（1a 遗留）；现在未知/缺失码
+    一律按 viewer 收敛并计数，**不把 None 当 admin**。
+    """
+    return code in features_for_role(effective_role(role, tenant=tenant, user=user))
 
 
 def effective_role(role: str | None, *, tenant: str = "", user: str = "") -> str:
