@@ -24,6 +24,7 @@ from __future__ import annotations
 
 from agent_core.logging import get_logger
 from fastapi import APIRouter, HTTPException, Request
+from pydantic import BaseModel, Field
 
 logger = get_logger(__name__)
 
@@ -70,3 +71,75 @@ async def refresh(http_request: Request, refresh_stats: bool = False) -> dict:
             len(report.type_changed),
         )
     return payload
+
+
+# ---------------------------------------------------------------------------
+# 数据源配置 CRUD（G3 刀 3）：部署级 datasources 表的管理面写入口。
+# 鉴权由 agent_server 代理层（require_feature("datasource.manage") + 签名头）统一把守，
+# 本端点只做"表存在性"闸门（meta 池未就绪 ⇒ 503），不重复加身份判断。
+# ---------------------------------------------------------------------------
+
+
+class DataSourceCreate(BaseModel):
+    id: str = Field(..., description="数据源 id（作用域键，唯一）")
+    label: str = ""
+    dialect: str = "postgres"
+    scope_label: str = ""
+    credential_ref: str = Field(..., description="Secret 投影键名（如 DW_DB_DSN），非口令")
+    is_default: bool = False
+    status: str = "active"
+
+
+class DataSourceUpdate(BaseModel):
+    label: str | None = None
+    dialect: str | None = None
+    scope_label: str | None = None
+    credential_ref: str | None = None
+    status: str | None = None
+
+
+def _get_ds_repo(http_request: Request) -> "DataSourceRepository":
+    from nl2sql_service.repositories.postgres.meta.datasource_repository import (
+        DataSourceRepository,
+    )
+
+    pool = http_request.app.state.pools.get("meta")
+    if pool is None:
+        raise HTTPException(status_code=503, detail="meta 库未就绪，无法操作数据源")
+    settings = http_request.app.state.settings
+    return DataSourceRepository(pool=pool, table_prefix=settings.table_prefix)
+
+
+@router.get("/datasources", summary="数据源列表（部署级）")
+async def list_datasources(http_request: Request) -> list[dict]:
+    repo = _get_ds_repo(http_request)
+    return await repo.list_datasources()
+
+
+@router.post("/datasources", summary="新建数据源", status_code=201)
+async def create_datasource(payload: DataSourceCreate, http_request: Request) -> dict:
+    repo = _get_ds_repo(http_request)
+    if await repo.get_datasource(payload.id) is not None:
+        raise HTTPException(status_code=409, detail=f"数据源 {payload.id} 已存在")
+    row = await repo.create_datasource(payload.model_dump())
+    if payload.is_default:
+        await repo.set_default(payload.id)
+    return row
+
+
+@router.patch("/datasources/{ds_id}", summary="更新数据源")
+async def update_datasource(ds_id: str, payload: DataSourceUpdate, http_request: Request) -> dict:
+    repo = _get_ds_repo(http_request)
+    row = await repo.update_datasource(ds_id, payload.model_dump(exclude_unset=True))
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"数据源 {ds_id} 不存在")
+    return row
+
+
+@router.post("/datasources/{ds_id}/default", summary="设默认源")
+async def set_default_datasource(ds_id: str, http_request: Request) -> dict:
+    repo = _get_ds_repo(http_request)
+    if await repo.get_datasource(ds_id) is None:
+        raise HTTPException(status_code=404, detail=f"数据源 {ds_id} 不存在")
+    await repo.set_default(ds_id)
+    return {"id": ds_id, "is_default": True}

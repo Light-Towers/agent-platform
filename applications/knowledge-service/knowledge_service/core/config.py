@@ -145,7 +145,12 @@ class Settings:
     knowledge_rate_limit_window_s: int = _as_int(os.getenv("KNOWLEDGE_RATE_LIMIT_WINDOW_S"), 60)
     # 输入长度护栏：query 长度上限在 Pydantic 层强制（512）；历史轮数 / 请求体大小可配置
     knowledge_max_history_rounds: int = _as_int(os.getenv("KNOWLEDGE_MAX_HISTORY_ROUNDS"), 20)
-    knowledge_max_body_bytes: int = _as_int(os.getenv("KNOWLEDGE_MAX_BODY_BYTES"), 65536)
+    # Content-Length 粗护栏（SecurityGuardsMiddleware）：缺省从 64KB 抬到 128MB（批 2a）。
+    # 为什么必须 ≥ 128MB：/upload 的 multipart 请求体 = 文件（上限 100MB，P11）+ 表单字段
+    # 与分隔符开销 ⇒ 护栏若仍是 64KB，直传真实 PDF 在进处理器之前就被 413（补记 9 发现 2：
+    # P11「全链路零显式上限」的取证前提对本路径不成立）。精确校验在 import_router 的
+    # _copy_with_limit（100MB 具名 413）；这里是粗护（挡 10GB 级 DoS），两层配对不互替。
+    knowledge_max_body_bytes: int = _as_int(os.getenv("KNOWLEDGE_MAX_BODY_BYTES"), 134217728)
     knowledge_max_context_chars: int = _as_int(os.getenv("KNOWLEDGE_MAX_CONTEXT_CHARS"), 12000)
 
     # -------------------------- 隔离域（ADR-0006 T11 / W4） --------------------------

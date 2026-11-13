@@ -149,7 +149,7 @@ export const busy = computed(() => streaming.value)
 export const hasRound = computed(() => ranOnce.value)
 export const banners = computed<readonly string[]>(() => bannerList.value)
 export const dropped = computed(() => foldedCount.value)
-export { question, apiKey, authMode }
+export { question, apiKey, authMode, authToken }
 
 /** 提交按钮的可用性。只看两态：正在流、输入为空。 */
 export const canSubmit = computed(() => !streaming.value && question.value.trim() !== '')

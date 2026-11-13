@@ -1434,6 +1434,10 @@ _SIGN_SYMBOLS = frozenset({"sign_internal_header", "build_internal_headers"})
 # 单入口收编时本表要收紧而非继续扩。显式清单作**下限**保留（删掉任一必检位仍报红，
 # 与 :960-961 / :1327-1328 的 L-4/P14 派生纪律同族）；无 git / 新克隆的环境靠这张表
 # 也能复跑，不会恒红 ⇒ 门禁不会被下一轮关掉。
+# ❗ 2026-11-12 批 2a：+1 位 `applications/agent_server/api/kb_router.py` —— 网关→KS
+# 的新信任边界（D7 代理转发 + 方案补记 9 拍板：PATCH /kb/{id}/status 的 KS 上游为
+# 新建 /reimport 入口）。role 刻意不签（KS fork 二元组验签「带而不用」，签无消费者
+# 的键 = 无主契约面）。同为收编前的登记：任何第 8 位仍报红；1c 完整收编时收紧。
 _SIGN_SITE_ALLOWED = frozenset({
     "packages/agent-core/agent_core/internal_header.py",
     "packages/agent-runtime/agent_runtime/identity.py",
@@ -1441,6 +1445,7 @@ _SIGN_SITE_ALLOWED = frozenset({
     "applications/agent_federation/tools/knowledge_tools.py",
     "applications/agent_federation/agent/async_subagents.py",
     "applications/agent_server/capabilities.py",
+    "applications/agent_server/api/kb_router.py",
 })
 
 

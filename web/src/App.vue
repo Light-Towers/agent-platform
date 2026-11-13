@@ -28,6 +28,8 @@ import EvidenceList from './components/EvidenceList.vue'
 import Legend from './components/Legend.vue'
 import LoginView from './components/LoginView.vue'
 import RoleGate from './components/RoleGate.vue'
+import KbUpload from './components/KbUpload.vue'
+import DatasourceConfig from './components/DatasourceConfig.vue'
 import ThemeToggle from './components/ThemeToggle.vue'
 import Timeline from './components/Timeline.vue'
 import {
@@ -53,7 +55,7 @@ import {
 /* ---- G1 管理面导航（批 1：对话页 + 角色页；知识库/数据源两页随批 2/批 3 接入）----
  * 视图键是本组件的局部 ref：只有本件读写它，不进会话层（会话层是跨组件共享态，
  * 单组件的 UI 态进会话层 = 把局部事物全局化）。 */
-const activeView = ref<'chat' | 'role'>('chat')
+const activeView = ref<'chat' | 'role' | 'kb' | 'datasource'>('chat')
 
 /**
  * 「角色」页入口的显隐判据：手里有任一管理向能力码才显示。viewer 只有 chat.run /
@@ -65,12 +67,25 @@ const showRoleGate = computed(() =>
   hasFeature('kb.upload') || hasFeature('datasource.manage')
   || hasFeature('execution.control') || hasFeature('human_task.decide'))
 
+/** 知识库上传页入口（feature `kb.upload`）。G2 交付。 */
+const showKb = computed(() => hasFeature('kb.upload'))
+/** 问数数据源配置页入口（feature `datasource.manage`）。G3 交付。 */
+const showDatasource = computed(() => hasFeature('datasource.manage'))
+
+/** 页眉视图标签（对话/角色/知识库/数据源），供 h1 旁的 hint 显示当前所在面。 */
+const viewLabel = computed(() => {
+  if (!canChat.value) return '登录面'
+  if (activeView.value === 'chat') return '对话页'
+  if (activeView.value === 'kb') return '知识库页'
+  if (activeView.value === 'datasource') return '数据源页'
+  return '角色页'
+})
+
 /**
- * 对话页是否在屏上。两支合一：① 人在对话页；② 视图键停在管理面页但该页已无权渲染
- * （登录态掉了、或换成了一个没有任何管理向能力的角色）⇒ 回对话页兜底，不给
- * 「无权页面白屏」留缝 —— RoleGate 只在 showRoleGate 为真时才轮得到渲染。
+ * 对话页是否在屏上。视图键停在管理面页但该页已无权渲染（登录态掉了、或换成无管理向
+ * 能力的角色）⇒ 回对话页兜底，不给「无权页面白屏」留缝。
  */
-const chatShown = computed(() => activeView.value === 'chat' || !showRoleGate.value)
+const chatShown = computed(() => activeView.value === 'chat' || (!showRoleGate.value && !showKb.value && !showDatasource.value))
 
 /* 挂载时确认一次登录态（A8「刷新仍在登录」那一格的调用点）。本件不自己决定何时确认：
  * 会话层故意不在模块加载时自发请求，否则行为件在 Node 里 import 会话层就会多一个 fetch。 */
@@ -100,7 +115,7 @@ function onSignOut(): void {
     <header class="topbar">
       <h1>
         Agent Platform 控制台
-        <span class="hint">{{ canChat ? (chatShown ? '对话页' : '角色页') : '登录面' }}</span>
+        <span class="hint">{{ viewLabel }}</span>
       </h1>
       <span class="spacer" />
       <!-- 身份那一行只在页眉出现一次，文案由会话层的 `identityNote` 给（四种读法各自一句，
@@ -144,6 +159,24 @@ function onSignOut(): void {
           @click="activeView = 'role'"
         >
           角色
+        </button>
+        <button
+          v-if="showKb"
+          type="button"
+          class="btn"
+          :aria-current="activeView === 'kb' ? 'page' : undefined"
+          @click="activeView = 'kb'"
+        >
+          知识库
+        </button>
+        <button
+          v-if="showDatasource"
+          type="button"
+          class="btn"
+          :aria-current="activeView === 'datasource' ? 'page' : undefined"
+          @click="activeView = 'datasource'"
+        >
+          数据源
         </button>
       </div>
     </nav>
@@ -282,7 +315,13 @@ function onSignOut(): void {
     <!-- 「角色与能力」页（RoleGate，批 1）：G1 的屏面读数（当前角色 / 能力集 / N3 说明），
          只在手里确有管理向能力码时轮得到渲染（chatShown 为假 ⇒ activeView='role' 且
          showRoleGate 为真）。 -->
-    <RoleGate v-else />
+    <RoleGate v-else-if="activeView === 'role'" />
+
+    <!-- G2 知识库上传配置页（批 2）：在 `kb.upload` 能力码下轮得到渲染。 -->
+    <KbUpload v-else-if="activeView === 'kb'" />
+
+    <!-- G3 问数数据源配置页（批 3）：在 `datasource.manage` 能力码下轮得到渲染。 -->
+    <DatasourceConfig v-else-if="activeView === 'datasource'" />
 
     <!-- 事件图例只在对话页出现：登录页一行事件都没得对，把图例放上去就是拿不相干的
          读数占位置（与文件头那句「不给指不到东西的引导」同一条纪律）；管理面页同理。 -->
