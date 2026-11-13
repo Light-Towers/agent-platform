@@ -23,7 +23,6 @@
 import { computed, onMounted, ref } from 'vue'
 
 import Answer from './components/Answer.vue'
-import ApiKeyBox from './components/ApiKeyBox.vue'
 import EvidenceList from './components/EvidenceList.vue'
 import Legend from './components/Legend.vue'
 import LoginView from './components/LoginView.vue'
@@ -246,10 +245,6 @@ function onSignOut(): void {
             <span class="count-badge">{{ evidence.length }}</span>
           </h2>
           <EvidenceList />
-        </section>
-
-        <section class="panel">
-          <ApiKeyBox />
         </section>
 
         <!-- 768–1279（含 <768 的单栏档）：依据列表并进原生 details（视觉件 §2.1 表第二行），

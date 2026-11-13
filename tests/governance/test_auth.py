@@ -50,38 +50,44 @@ def _set_api_key(monkeypatch, key: str):
 
 
 def test_verify_api_key_disabled_returns_none(monkeypatch):
+    """纯开发模式（``api_key`` 空）仍旁路 —— U1，本件不代答。"""
     _set_api_key(monkeypatch, "")
-    assert verify_api_key(None) is None
-    assert verify_api_key("any") is None
+    assert verify_api_key() is None
 
 
-def test_verify_api_key_enabled_correct(monkeypatch):
-    _set_api_key(monkeypatch, "secret123")
-    assert verify_api_key("secret123") == "secret123"
-
-
-def test_verify_api_key_enabled_wrong_raises_401(monkeypatch):
+def test_verify_api_key_enabled_requires_login(monkeypatch):
+    """鉴权启用且无人断言 ⇒ 401（fail-closed，不得回落成放行）。"""
     _set_api_key(monkeypatch, "secret123")
     with pytest.raises(HTTPException) as exc:
-        verify_api_key("wrong")
+        verify_api_key()
     assert exc.value.status_code == 401
+
+
+def test_static_api_key_header_can_no_longer_authenticate(monkeypatch):
+    """通道退役的回归锁：带上与配置值逐字相同的 X-API-Key 也不得放行。
+
+    ``verify_api_key`` 已不声明 ``X-API-Key`` 头参数 ⇒ 该值根本进不了依赖树，
+    请求带了头与没带头走的是同一条分支。判据是 401 而不是「视作已登录」：
+    这条用例防的是有人日后把静态比对加回来。
+    """
+    _set_api_key(monkeypatch, "secret123")
     with pytest.raises(HTTPException) as exc:
-        verify_api_key(None)
+        verify_api_key()
     assert exc.value.status_code == 401
 
 
 # ---------------------------------------------------------------------------
-# D-i：两条入口凭据并存（令牌优先、静态 key 回落），且回落不得被“只绑租户”旁路
+# 入站只有登录令牌：断言到人即放行，拿不到「人」一律 401
 # ---------------------------------------------------------------------------
 
 
 def test_verify_api_key_accepts_asserted_person_without_key(monkeypatch):
-    """登录态（中间件已断言到人）无需 X-API-Key 即放行 —— D-i 的正面。"""
+    """登录态（中间件已验签并断言到人）放行 —— 唯一生效的入站通道。"""
     _set_api_key(monkeypatch, "secret123")
     t = bind_tenant_context("acme")
     u = bind_user_context("alice")
     try:
-        assert verify_api_key(None) is None
+        assert verify_api_key() is None
     finally:
         reset_user_context(u)
         reset_tenant_context(t)
@@ -92,12 +98,12 @@ def test_verify_api_key_accepts_asserted_person_without_key(monkeypatch):
     [None, "acme", "alice@example.com"],
     ids=["single-tenant", "tenant-level-token", "non-filename-safe-sub"],
 )
-def test_tenant_only_assertion_does_not_bypass_static_key(monkeypatch, user_bound):
-    """D-i 的 fail-open 反证：拿不到“人”时静态 key 照旧必校。
+def test_tenant_only_assertion_does_not_bypass_login_gate(monkeypatch, user_bound):
+    """fail-open 反证：拿不到“人”时闸门照旧必 401。
 
     ``single-tenant`` 那一格就是 ``auth.py`` 里那句“判据不得换成 ``asserted_tenant_id()``”
-    的实体：SINGLE_TENANT 部署下中间件给每个请求都绑租户，拿它当“已鉴权”等于把整条
-    key 通路旁路。后两格钉的是同一个入口的另外两个“非人”形状（租户级令牌的 sub 回落、
+    的实体：SINGLE_TENANT 部署下中间件给每个请求都绑租户，拿它当“已登录”等于把整条
+    闸门旁路。后两格钉的是同一个入口的另外两个“非人”形状（租户级令牌的 sub 回落、
     邮箱形 sub 不清洗）。
     """
     _set_api_key(monkeypatch, "secret123")
@@ -106,7 +112,7 @@ def test_tenant_only_assertion_does_not_bypass_static_key(monkeypatch, user_boun
     u = bind_user_context(user_bound) if user_bound is not None else before
     try:
         with pytest.raises(HTTPException) as exc:
-            verify_api_key(None)
+            verify_api_key()
         assert exc.value.status_code == 401
     finally:
         if u is not before:

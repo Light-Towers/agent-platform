@@ -82,7 +82,7 @@ export async function describeError(resp: Response): Promise<string> {
     if (Array.isArray(o.details)) return describeValidationDetail(o.details)
     if (typeof detail === 'string' && detail !== '') {
       if (resp.status === 401 || resp.status === 403) {
-        return `密钥未填或不正确（服务端：${detail}）`
+        return `登录凭据无效或已过期（服务端：${detail}）`
       }
       return `${detail}（HTTP ${resp.status}）`
     }

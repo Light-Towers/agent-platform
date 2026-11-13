@@ -273,10 +273,11 @@ a.btn { text-decoration: none; }
 
 .hint { font-size: var(--fs-xs); color: var(--text-2); }
 
-/* 密钥框：值只在内存，不落 localStorage（工单件 §2.3；主题键不属凭据，边界见视觉件 §1.6）。
+/* 凭据框（现由 `poc.html` 的无构建静态预览使用）：值只在内存，不落 localStorage
+ * （工单件 §2.3；主题键不属凭据，边界见视觉件 §1.6）。
  * ⚠ 形状从 `1fr auto` 两列改成单列栈：那一列 `auto` 原来是给 `poc.html:68` 的「应用」按钮留的，
- *   而 PR-2 没有那枚按钮（`ApiKeyBox.vue` 头注② 记了理由：一个不改变任何状态的按钮是假控件），
- *   留着 `1fr auto` 就等于让输入框去挤那条 auto 轨道。 */
+ *   而那个按钮始终没有落地（一个不改变任何状态的按钮是假控件），留着 `1fr auto` 就等于让
+ *   输入框去挤那条 auto 轨道。Vue 侧的 ApiKeyBox 已随静态 X-API-Key 通道退役删除。 */
 .keybox {
   display: grid;
   gap: var(--sp-2);

@@ -57,7 +57,9 @@ spec:
                 secretKeyRef:
                   name: observability-keys
                   key: LLM_API_KEY
-            # API_KEY 非空才启用 X-API-Key 校验，且客户端 thread_id 被忽略、会话归到服务端断言的租户桶。
+            # API_KEY 是**鉴权启用开关**（不是要比对的静态密钥）：非空 ⇒ 入站只接受已验签的
+            # 登录令牌（X-API-Key 通道已退役），且客户端 thread_id 被忽略、会话归到服务端断言的租户桶。
+            # 保留该键是为了不删开关与防劫持语义，值本身不参与任何凭据比对。
             # DEPLOY_ENFORCE_IDENTITY=true 时：无验签公钥且无 SINGLE_TENANT → 启动即失败。
             - name: API_KEY
               valueFrom:

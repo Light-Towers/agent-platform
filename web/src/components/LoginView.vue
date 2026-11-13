@@ -30,7 +30,6 @@ import {
   authMode,
   authNotice,
   authPending,
-  enterWithApiKey,
   hasStoredToken,
   resumeSession,
   submitCredentials,
@@ -138,7 +137,7 @@ function retryResume(): void {
             class="o-head-sm"
             :for="isRegister ? 'authNewPassword' : 'authPassword'"
           >密码</label>
-          <!-- `type="password"`：屏上不回显明文（截图判据 V4 会拍到这一栏，与 ApiKeyBox 同一条纪律）。
+          <!-- `type="password"`：屏上不回显明文（截图判据 V4 会拍到这一栏）。
                autocomplete 按两态分派：注册档要的是「新口令」（浏览器据此走生成器），
                登录档才是「当前口令」（据此填已存的）。写成常量会让密码管理器在注册时
                把旧口令填进来，那是当场能看见的错，不是假想。 -->
@@ -236,21 +235,6 @@ function retryResume(): void {
           但「会话历史列表」这一格还没做：它要等 conversations 的写入点（PR-3），
           现在没有可追溯的来源，所以屏上不给它留位置。
         </p>
-        <div class="keybox">
-          <button
-            type="button"
-            class="btn"
-            @click="enterWithApiKey"
-          >
-            不登录，用 API 密钥进入
-          </button>
-          <p class="hint">
-            后端未启用登录面时（没配 <code class="t-name">DATABASE_URL</code> 或没挂签名密钥 ⇒
-            登录接口回 503）这是唯一通路。密钥与令牌<strong>二选一</strong>：带令牌时不再发
-            <code class="t-name">X-API-Key</code>，两条通道的装配规则住在
-            <code class="t-name">src/api/auth.ts</code> 一处。
-          </p>
-        </div>
       </section>
     </div>
   </main>

@@ -10,7 +10,7 @@
  * ⚠ credential_ref 只是 Secret 投影键名，前端绝不为口令开输入框（文档 N1）。
  * ==========================================================================*/
 import { applyCredentialHeaders } from './auth.ts'
-import { apiKey, authToken } from '../stores/session.ts'
+import { authToken } from '../stores/session.ts'
 
 export interface Datasource {
   id: string
@@ -34,7 +34,7 @@ const LIST_PATH = '/datasources'
 
 function authHeaders(): Headers {
   const h = new Headers({ 'Content-Type': 'application/json' })
-  applyCredentialHeaders(h, { apiKey: apiKey.value, token: authToken.value })
+  applyCredentialHeaders(h, { token: authToken.value })
   return h
 }
 

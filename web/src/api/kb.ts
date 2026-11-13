@@ -31,9 +31,9 @@ export interface KbUploadForm {
   datasourceType: string
 }
 
-function authHeaders(token: string, apiKey: string): Headers {
+function authHeaders(token: string): Headers {
   const h = new Headers()
-  applyCredentialHeaders(h, { apiKey, token })
+  applyCredentialHeaders(h, { token })
   return h
 }
 
@@ -42,11 +42,10 @@ export async function uploadKbDocuments(
   files: File[],
   form: KbUploadForm,
   token: string,
-  apiKey: string,
   fetchImpl?: typeof fetch,
 ): Promise<unknown> {
   const doFetch = fetchImpl ?? globalThis.fetch
-  const headers = authHeaders(token, apiKey)
+  const headers = authHeaders(token)
   const body = new FormData()
   for (const f of files) body.append('files', f, f.name)
   body.append('tenant_id', '')
@@ -75,11 +74,10 @@ export async function uploadKbDocuments(
 export async function getKbStatus(
   taskId: string,
   token: string,
-  apiKey: string,
   fetchImpl?: typeof fetch,
 ): Promise<unknown> {
   const doFetch = fetchImpl ?? globalThis.fetch
-  const headers = authHeaders(token, apiKey)
+  const headers = authHeaders(token)
   const resp = await doFetch(KB_STATUS_PATH(taskId), { method: 'GET', headers, cache: 'no-store' })
   if (!resp.ok) {
     const text = await resp.text().catch(() => '')
@@ -91,11 +89,10 @@ export async function getKbStatus(
 /** 登记文档列表（代理 KS /documents）。 */
 export async function listKbDocuments(
   token: string,
-  apiKey: string,
   fetchImpl?: typeof fetch,
 ): Promise<unknown> {
   const doFetch = fetchImpl ?? globalThis.fetch
-  const headers = authHeaders(token, apiKey)
+  const headers = authHeaders(token)
   const resp = await doFetch(KB_DOCUMENTS_PATH, { method: 'GET', headers, cache: 'no-store' })
   if (!resp.ok) {
     const text = await resp.text().catch(() => '')

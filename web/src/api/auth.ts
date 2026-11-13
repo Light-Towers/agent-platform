@@ -7,10 +7,10 @@
  * 因此 sse.ts（/query 的传输层）**从本件取装配**，而不是自己再拼一次头。
  *
  * 三条落死的纪律：
- *   ① **令牌落 sessionStorage、密钥仍只落内存**（D-k）。这两句不冲突，但必须分开读：
- *      工单件 §2.3 那条「密钥只存内存」管的是 `X-API-Key`（人粘贴进来的那把），它一个字节
- *      都没进存储；进存储的是**服务端签发的登录令牌**，档位是「关标签即失效」。
- *      为什么不是 localStorage：那会把凭据活期从一次会话拉长到整台浏览器（含重启后）。
+ *   ① **唯一凭据是登录令牌，落 sessionStorage**（D-k）。静态 X-API-Key 通道已退役
+ *      （本部署只留用户名/密码登录），本件不再有任何密钥入口，也不再写第二档存储。
+ *      档位是「关标签即失效」：为什么不是 localStorage——那会把凭据活期从一次会话拉长到
+ *      整台浏览器（含重启后）。
  *      ⚠ 残余风险照方案如实写：sessionStorage 是 JS 可读的 ⇒ 一次 XSS 即失令牌，本轮没有
  *      CSP 面（方案 §9 在册）。这一句不许被读成「已加固」。
  *   ② **口令只在调用那一刻进请求体**：本件不把它存进任何变量副本、不写进 storage、
@@ -41,8 +41,7 @@ const REGISTER_PATH = '/auth/register'
 const ME_PATH = '/auth/me'
 const LOGOUT_PATH = '/auth/logout'
 
-/** 前置校验（发出之前）失败的两句文案。前缀是 `isCredentialPreflightError` 的判据，别改前四字。 */
-export const API_KEY_PREFLIGHT_MSG = '接口密钥含非 ASCII 字符（HTTP 请求头不允许），请确认粘贴的是密钥本身而不是中文说明'
+/** 前置校验（发出之前）失败的文案。前缀是 `isCredentialPreflightError` 的判据，别改前四字。 */
 export const TOKEN_PREFLIGHT_MSG = '登录令牌含非 ASCII 字符（HTTP 请求头不允许），请退出登录后重新登录'
 
 /** 登录面的两态名字（同一个屏、两个动作），会话层与 LoginView 共用这一个类型。 */
@@ -136,26 +135,20 @@ function requireHeaderSafe(value: string, message: string): void {
  * 后者是后端给的读数，混在一起就会把「你粘了中文说明」显示成「服务返回 HTTP 500」。
  */
 export function isCredentialPreflightError(err: unknown): boolean {
-  return err instanceof Error
-    && (err.message.startsWith('接口密钥含非 ASCII') || err.message.startsWith('登录令牌含非 ASCII'))
+  return err instanceof Error && err.message.startsWith('登录令牌含非 ASCII')
 }
 
 /**
- * 把入口凭据装进请求头：**有令牌 ⇒ 只发 Bearer；无令牌有密钥 ⇒ 只发 X-API-Key**。
- * 为什么不同时发两把（这是 D-i「两条通道并存」最容易读错的一处）：后端 `verify_api_key` 的
- * 分支是「已断言到人 ⇒ 直接放行」，两把都发时**密钥错也不会红** ⇒ 出问题时读数分不清是哪把
- * 起效的。并存指的是「两条路各自能走」，不是「一个请求同时试两条」。
- * 两把都为空时两个头都不发 —— 那是 observe 档/开发模式的现状，不是本件新增的行为。
+ * 把入口凭据装进请求头：**只接受登录令牌，令牌非空 ⇒ 只发 Bearer**。
+ *
+ * 静态 `X-API-Key` 通道已退役（本部署只留用户名/密码登录）：本件不再接收 apiKey，
+ * 也不再 set 该头。令牌为空时不发任何入口凭据头 —— 那是 observe 档/开发模式的现状，
+ * 生产现网后端会以 401 拒绝（判据在 `agent_server/api/auth.py::verify_api_key`）。
  */
-export function applyCredentialHeaders(h: Headers, cred: { apiKey: string; token: string }): void {
+export function applyCredentialHeaders(h: Headers, cred: { token: string }): void {
   if (cred.token !== '') {
     requireHeaderSafe(cred.token, TOKEN_PREFLIGHT_MSG)
     h.set('Authorization', `Bearer ${cred.token}`)
-    return
-  }
-  if (cred.apiKey !== '') {
-    requireHeaderSafe(cred.apiKey, API_KEY_PREFLIGHT_MSG)
-    h.set('X-API-Key', cred.apiKey)
   }
 }
 
@@ -316,7 +309,7 @@ export async function fetchAuthenticatedIdentity(fetchImpl?: typeof fetch): Prom
   if (token === '') return { kind: 'expired', status: 0, text: '本标签页没有登录令牌' }
 
   const h = new Headers()
-  applyCredentialHeaders(h, { apiKey: '', token })
+  applyCredentialHeaders(h, { token })
   const doFetch = fetchImpl ?? globalThis.fetch
   let resp: Response
   try {
@@ -356,7 +349,7 @@ export async function logoutRequest(fetchImpl?: typeof fetch): Promise<number> {
   if (token === '') return 0
 
   const h = new Headers({ 'Content-Type': 'application/json' })
-  applyCredentialHeaders(h, { apiKey: '', token })
+  applyCredentialHeaders(h, { token })
   const doFetch = fetchImpl ?? globalThis.fetch
   try {
     const resp = await doFetch(LOGOUT_PATH, { method: 'POST', headers: h, body: '{}', cache: 'no-store' })

@@ -85,6 +85,7 @@ class TestHistoryEndpointOverHttp:
         from contextlib import ExitStack
 
         import agent_core.intent.classifier as intent_classifier
+        from agent_server.api.auth import verify_api_key
         from agent_server.config import get_settings
         from agent_server.main import app
         from fastapi.testclient import TestClient
@@ -97,6 +98,13 @@ class TestHistoryEndpointOverHttp:
         monkeypatch.setattr(intent_classifier, "_embedder", _no_semantic)
 
         stack = ExitStack()
+
+        # 本组测的是业务语义（会话归属 / 读侧 5xx / 租户断言），不是入站鉴权——后者由
+        # tests/governance/test_auth.py 专测。静态 X-API-Key 通道退役后，这里用
+        # dependency_overrides 放行闸门；API_KEY 仍按需设为非空，以维持
+        # resolve_thread_id 的「服务端派生、忽略客户端 thread_id」语义（防劫持判据）。
+        app.dependency_overrides[verify_api_key] = lambda: None
+        stack.callback(app.dependency_overrides.pop, verify_api_key, None)
 
         def _make(**envs):
             for k, v in envs.items():
@@ -113,13 +121,10 @@ class TestHistoryEndpointOverHttp:
         r = client.post(
             "/query",
             json={"query": "我们上个月的销售额是多少", "session_id": "客户端乱填的会话号"},
-            headers={"X-API-Key": "k-http"},
         )
         assert r.status_code == 200
 
-        h = client.get(
-            "/history", params={"session_id": "随便一个值"}, headers={"X-API-Key": "k-http"}
-        )
+        h = client.get("/history", params={"session_id": "随便一个值"})
         assert h.status_code == 200, h.text
         body = h.json()
         # 服务端断言会话：客户端传入的会话号不参与归属
@@ -140,7 +145,7 @@ class TestHistoryEndpointOverHttp:
 
         app.state.checkpointer = _Broken()
         try:
-            h = client.get("/history", params={"session_id": "x"}, headers={"X-API-Key": "k-503"})
+            h = client.get("/history", params={"session_id": "x"})
             assert h.status_code == 503
             assert h.json()["detail"] == "HISTORY_READ_FAILED"
         finally:
@@ -153,7 +158,7 @@ class TestHistoryEndpointOverHttp:
         good = app.state.checkpointer
         del app.state.checkpointer
         try:
-            h = client.get("/history", params={"session_id": "x"}, headers={"X-API-Key": "k-none"})
+            h = client.get("/history", params={"session_id": "x"})
             assert h.status_code == 503
             assert h.json()["detail"] == "CHECKPOINTER_UNAVAILABLE"
         finally:
@@ -185,7 +190,6 @@ class TestRevertOwnershipG3(TestHistoryEndpointOverHttp):
         r = client.post(
             "/session/revert",
             json={"session_id": "tenant-bob", "checkpoint_id": "cp-x"},
-            headers={"X-API-Key": "k-rev"},
         )
         assert r.status_code == 404
         assert r.json()["detail"] == "CHECKPOINT_NOT_FOUND"
@@ -231,7 +235,6 @@ class TestQueryTenantAssertionT21(TestHistoryEndpointOverHttp):
             r = client.post(
                 "/query",
                 json={"query": "你好", "tenant_id": "spoofed"},
-                headers={"X-API-Key": "k-t21"},
             )
         assert r.status_code == 200, r.text
         warned = [rec for rec in caplog.records if "与服务端断言不一致" in rec.message]
@@ -254,7 +257,6 @@ class TestQueryTenantAssertionT21(TestHistoryEndpointOverHttp):
             r = client.post(
                 "/query",
                 json={"query": "你好"},
-                headers={"X-API-Key": "k-t21b"},
             )
         assert r.status_code == 200, r.text
         assert not any(

@@ -12,7 +12,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 
-import { apiKey, authToken } from '../stores/session'
+import { authToken } from '../stores/session'
 import { uploadKbDocuments, getKbStatus, listKbDocuments, type KbUploadForm } from '../api/kb.ts'
 import { DIALECT_OPTIONS } from '../api/datasources.ts'
 
@@ -53,7 +53,7 @@ async function submit(): Promise<void> {
   }
   busy.value = true
   try {
-    const res = await uploadKbDocuments(files.value, form.value, authToken.value ?? '', apiKey.value ?? '')
+    const res = await uploadKbDocuments(files.value, form.value, authToken.value ?? '')
     const json = res as { task_ids?: string[] }
     lastTaskIds.value = json.task_ids ?? []
     if (lastTaskIds.value.length > 0) {
@@ -72,7 +72,7 @@ async function submit(): Promise<void> {
 
 async function pollStatus(taskId: string): Promise<void> {
   try {
-    const res = await getKbStatus(taskId, authToken.value ?? '', apiKey.value ?? '')
+    const res = await getKbStatus(taskId, authToken.value ?? '')
     statusText.value = JSON.stringify(res)
   } catch (err) {
     statusText.value = err instanceof Error ? err.message : String(err)
@@ -81,7 +81,7 @@ async function pollStatus(taskId: string): Promise<void> {
 
 async function refreshDocuments(): Promise<void> {
   try {
-    documents.value = await listKbDocuments(authToken.value ?? '', apiKey.value ?? '')
+    documents.value = await listKbDocuments(authToken.value ?? '')
   } catch (err) {
     errorText.value = err instanceof Error ? err.message : String(err)
   }

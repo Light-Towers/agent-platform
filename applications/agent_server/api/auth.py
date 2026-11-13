@@ -1,8 +1,8 @@
 """认证与会话策略。
 
-安全设计（沿用 deepagents 已验证的结论）：API_KEY 启用时忽略客户端传入的
+安全设计（沿用 deepagents 已验证的结论）：鉴权启用时忽略客户端传入的
 thread_id，改为按**服务端断言的主体**派生，防止会话劫持；thread_id 仅在开发
-模式（未启用 API_KEY）下信任客户端。
+模式（未启用鉴权）下信任客户端。
 
 B7b-4（拆 CodeQL ``py/weak-sensitive-data-hashing`` 链①）：会话身份不再从调用方
 凭据派生。旧内核函数 ``derive_thread_id``（形参即 ``api_key``）把「谁持有这把密钥」当身份熵源，
@@ -10,13 +10,16 @@ B7b-4（拆 CodeQL ``py/weak-sensitive-data-hashing`` 链①）：会话身份�
 桶数不变（见 ``resolve_thread_id`` docstring 的等价性说明），但凭据彻底退出派生。
 派生实现仍收敛内核（DUP-1）：``agent_core.guardrails.auth.resolve_thread_identity``。
 
-登录面接入后本件是**两条入口凭据的汇合点**（方案 D-i：并存，不替换）：
-``Authorization: Bearer <RS256 JWT>`` 由 ``IdentityMiddleware`` 验签后绑定断言，本件
-只读断言结果；``X-API-Key`` 仍是机器对机器调用的通路（ADR-0008 U2 未答，删它等于替
-它答题）。``settings.api_key`` 未配即不校验的旁路**照旧不动**（那是 U1，本件不代答）。
+入站凭据**只有一条**（本部署拍板「只留用户名/密码登录」）：``Authorization: Bearer
+<RS256 JWT>`` 由 ``IdentityMiddleware`` 验签并断言到人，本件只读断言结果。静态
+``X-API-Key`` 通道已退役——本件不再接收也不比对该头。
+
+⚠ ``settings.api_key`` **保留**，但语义已从「要比对的静态密钥」收窄为「鉴权启用开关」：
+它同时是 ``resolve_thread_id`` 是否信任客户端 thread_id 的判据，删掉该字段会让会话
+退化为客户端可指定（会话劫持面），故不能用「删 env」的方式退役静态通道。
+``settings.api_key`` 未配即不校验的 dev 旁路**照旧不动**（那是 U1，本件不代答）。
 """
 
-import secrets
 from typing import Callable
 
 from agent_core.guardrails.auth import DEV_THREAD_ID, resolve_thread_identity
@@ -29,7 +32,7 @@ from agent_runtime.workspace_registry import (
     asserted_user_id,
     server_tenant_id,
 )
-from fastapi import Header, HTTPException
+from fastapi import HTTPException
 
 from agent_server.config import get_settings
 
@@ -48,26 +51,33 @@ _USER_SEGMENT = "--user-"
 _PRINCIPAL_MAX = 64
 
 
-def verify_api_key(x_api_key: str | None = Header(default=None, alias="X-API-Key")) -> str | None:
-    """入口鉴权闸门：已断言到人 ⇒ 直接放行；否则回落既有静态 key 比对。
+def verify_api_key() -> None:
+    """入口鉴权闸门：**只接受登录令牌已断言到人的请求**，静态 X-API-Key 通道已退役。
 
-    返回 ``None`` 现在有两种成因（开发模式未校 / 已由令牌鉴权），两者共同含义是
-    「已放行且无凭据值可回」；调用方一律写成 ``_auth=Depends(...)`` 不取返回值
-    （P12 不变量盯的就是这个，现在两种 ``None`` 不会给它新缺口）。
+    本件不再声明 ``X-API-Key`` 头参数，故该头既不参与鉴权、也不出现在 OpenAPI 里；
+    带上它也一律按「无凭据」处理。放行只有两种成因：
+
+    - ``asserted_person_id()`` 非 ``None``：``IdentityMiddleware`` 已验签 RS256 登录令牌
+      并断言到人 —— 本部署唯一在用的入站通道；
+    - ``settings.api_key`` 为空：纯开发模式旁路（U1，本件不代答）。生产现网该键非空。
+
+    返回值恒为 ``None``：调用方一律写 ``_auth=Depends(...)`` 不取返回值（P12 不变量
+    盯的就是这个——凭据值根本不再进入依赖树，从源头消掉「原文当审计主体」那条链）。
 
     ⚠ 判据必须是 :func:`asserted_person_id`（或 ``asserted_user_id``），**不得**换成
     ``asserted_tenant_id()``：SINGLE_TENANT 部署下中间件给**每个**请求都绑租户
-    （``identity_middleware.py:190`` 的 ``_run(single, None, ...)`` 实取），那等于把静态 key
-    整条旁路 = fail-open。这一句不是推测，是本轮读代码抬出来的，改动本判据前先复取它。
+    （``identity_middleware.py:190`` 的 ``_run(single, None, ...)`` 实取），拿它当「已登录」
+    等于把整条闸门旁路 = fail-open。这一句不是推测，是本轮读代码抬出来的，改判据前先复取。
+
+    ⚠ ``settings.api_key`` 在这里只当**开关**读（空=dev 旁路），其值绝不参与任何比对：
+    它仍被 ``resolve_thread_id`` 用作「是否忽略客户端 thread_id」的判据，不能删字段。
     """
     if asserted_person_id() is not None:
-        return None  # 已由中间件验签并断言到人（D-i 并存）
+        return None  # JWT 登录令牌已验签并断言到人
     settings = get_settings()
     if not settings.api_key:
-        return None  # 开发模式：不校验
-    if not x_api_key or not secrets.compare_digest(x_api_key, settings.api_key):
-        raise HTTPException(status_code=401, detail="API Key 无效")
-    return x_api_key
+        return None  # 开发模式：未启用鉴权（U1）
+    raise HTTPException(status_code=401, detail="需要登录令牌")
 
 
 def require_feature(code: str) -> Callable[[], None]:
@@ -80,7 +90,7 @@ def require_feature(code: str) -> Callable[[], None]:
     - role 取服务端断言的**原始 claim 值**（``asserted_role``，中间件已随令牌绑定）；
       值域收敛（未知/缺失码 → viewer 兜底 + D9 可聚合计数）单一在 ``effective_role``
       ——本件不解释角色词汇表，也不写第二份兜底口径。
-    - 未断言调用方（静态 ``X-API-Key`` / observe 档无凭据）⇒ ``asserted_role()`` 为
+    - 未断言到人的调用方（observe 档无令牌 / dev 旁路）⇒ ``asserted_role()`` 为
       ``None`` ⇒ viewer 兜底（P8 已拍 (a)：与 D9 同一条「无断言→最小权限」规则）。
       其能力面由 §4 矩阵决定：``chat.run``/``session.history`` 放行，写面 403（R10）。
     - 与 :func:`verify_api_key` 同族并存：401（凭据无效）先于 403（角色不够）——
@@ -140,7 +150,7 @@ def resolve_thread_id(client_thread_id: str | None) -> str:
         tenant = server_tenant_id(settings.default_tenant_id)
         person = asserted_person_id()
         if person is None:
-            # 无“人”可断言（静态 key / 网关租户级令牌 / observe 档无凭据）⇒ 逐字保持旧主体。
+            # 无“人”可断言（网关租户级令牌 / observe 档无凭据）⇒ 逐字保持旧主体。
             # 这一格是 A6 的后半判据：改成任何前缀/后缀都等于把存量会话线弄丢。
             return resolve_thread_identity(tenant)
         return resolve_thread_identity(_compose_principal(tenant, person))

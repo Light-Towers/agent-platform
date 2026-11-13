@@ -2,7 +2,7 @@
  * sse.ts — /query 的 SSE 客户端（工单件 §7 PR-1：fetch + eventsource-parser 解帧）
  *
  * 三条已定死的纪律都在这个文件里落地，落地方式各自可核：
- *   ① §2.1 传输：必须走 `fetch`（要携带 `X-API-Key` 头，`EventSource` 不支持自定义头）；
+ *   ① §2.1 传输：必须走 `fetch`（要携带 `Authorization` 头，`EventSource` 不支持自定义头）；
  *      解帧不自写循环，交给 `eventsource-parser`（§10.3 第 2 条）。重连与鉴权头仍由本仓掌控。
  *   ② §2.2 未识别事件不吞：落到 `kind='unknown'` 那一条时间线项，**只报事件名、不 dump 载荷**。
  *   ③ §3 第 4 条 error→done 抑制：流内一旦出现过 `error` 帧，后续 `done` 的 `answer`
@@ -31,9 +31,9 @@
  * 断言接住（§G 管快照不回改与依据进表条件，F14 管请求号从响应头传到快照）。
  *
  * PR-2b（登录面）给本件加了两条，都在下面各自的声明处注释：
- *   · `StreamQueryOptions.token` —— 入口凭据从「只有 `X-API-Key`」变成两条通道二选一，
+ *   · `StreamQueryOptions.token` —— 唯一入口凭据（静态 X-API-Key 通道已退役），
  *     装配规则**不在本件**（在 `auth.ts` 的 `applyCredentialHeaders`，理由见那里的注释）；
- *   · `StreamSnapshot.httpStatus` —— 会话层需要一个能区分「401 = 凭据不可用」与其它失败的
+ *   · `StreamSnapshot.httpStatus` —— 会话层需要一个能区分「401 = 令牌不可用」与其它失败的
  *     读数，才能把 A8 那条「401 跳回登录页」落到实处而不是靠猜文案。
  * ==========================================================================*/
 import { createParser } from 'eventsource-parser'
@@ -99,16 +99,15 @@ interface Working {
   doneReceived: boolean
 }
 
-/** 传输与鉴权参数。`apiKey` 只活在这次调用的闭包里（工单件 §2.3：不落 storage）。 */
+/** 传输与鉴权参数。唯一凭据是登录令牌（静态 X-API-Key 通道已退役）。 */
 export interface StreamQueryOptions {
   readonly query: string
   readonly sessionId?: string
   readonly tenantId?: string
-  readonly apiKey: string
   /**
-   * 登录令牌（PR-2b，方案 D-a/D-i）。非空 ⇒ 本请求只带 `Authorization: Bearer`；
-   * 空 ⇒ 只带 `X-API-Key`（现状逐字不变，本机未启用登录面时问答仍可用）。
-   * 两条通道**二选一**的规则不在这里写，在 `auth.ts` 的 `applyCredentialHeaders`。
+   * 登录令牌（PR-2b，方案 D-a/D-i）。非空 ⇒ 本请求带 `Authorization: Bearer`；
+   * 空 ⇒ 不发入口凭据头（生产现网后端会回 401）。
+   * 装配规则不在这里写，在 `auth.ts` 的 `applyCredentialHeaders`。
    */
   readonly token?: string
   readonly signal?: AbortSignal
@@ -272,15 +271,12 @@ export function applyFrame(state: StreamSnapshot, name: string, data: string): S
   return snapshot(w)
 }
 
-function buildHeaders(apiKey: string, token: string): Headers {
+function buildHeaders(token: string): Headers {
   const h = new Headers({ 'Content-Type': 'application/json' })
-  // 装配规则住在 `auth.ts`（与 `/auth/*` 四个端点同一个实现位）：这里只交两个值。
-  // 为什么不在这件里重写一份：两条通道的互斥关系是入口凭据面的知识，写两处就会各漂一份；
-  // 而漂的那一型是「两把都发」——后端 `verify_api_key` 先看断言身份，密钥错了也不会红，
-  // 于是读数分不清是哪把起效（看着绿，其实测的是另一条路）。
-  // 非 ASCII 那两条前置校验也一并在那边（抛出的两句文案以「接口密钥/登录令牌含非 ASCII」
-  // 开头，`streamQuery` 靠 `isCredentialPreflightError` 把它们与后端失败分开）。
-  applyCredentialHeaders(h, { apiKey, token })
+  // 装配规则住在 `auth.ts`（与 `/auth/*` 四个端点同一个实现位）：这里只交令牌。
+  // 非 ASCII 前置校验也在那边（抛出的文案以「登录令牌含非 ASCII」开头，
+  // `streamQuery` 靠 `isCredentialPreflightError` 把它与后端失败分开）。
+  applyCredentialHeaders(h, { token })
   return h
 }
 
@@ -306,7 +302,7 @@ export async function streamQuery(opts: StreamQueryOptions): Promise<StreamSnaps
     // `AbortSignal | null`，把 `AbortSignal | undefined` 直接摊进对象字面量会当场红。
     const init: RequestInit = {
       method: 'POST',
-      headers: buildHeaders(opts.apiKey, opts.token ?? ''),
+      headers: buildHeaders(opts.token ?? ''),
       body: JSON.stringify(body),
     }
     if (opts.signal !== undefined) init.signal = opts.signal
