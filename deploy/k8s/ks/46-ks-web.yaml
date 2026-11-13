@@ -25,26 +25,27 @@ spec:
         - key: node-role.kubernetes.io/control-plane
           operator: Exists
           effect: NoSchedule
+      # 注：原 docker-compose 用 minio/mc 镜像建桶，但该镜像在 126 moby 与集群 containerd 均不可用
+      # （无公网拉取）。改为复用 web 镜像自带的 pyminio（requirements 含 minio）建桶，去除外部镜像依赖。
       initContainers:
         - name: minio-init
-          image: minio/mc:RELEASE.2025-04-16T18-13-26Z
+          image: knowledge-service-web:latest
+          imagePullPolicy: IfNotPresent
           env:
-            - name: MINIO_ROOT_USER
+            - name: MINIO_ACCESS_KEY
               valueFrom:
                 secretKeyRef:
                   name: ks-secrets
                   key: MINIO_ACCESS_KEY
-            - name: MINIO_ROOT_PASSWORD
+            - name: MINIO_SECRET_KEY
               valueFrom:
                 secretKeyRef:
                   name: ks-secrets
                   key: MINIO_SECRET_KEY
-            - name: MINIO_BUCKET
-              value: "kb-import-bucket"
           command:
-            - sh
+            - python
             - -c
-            - "until mc alias set local http://minio:9000 $MINIO_ROOT_USER $MINIO_ROOT_PASSWORD 2>/dev/null; do echo waiting; sleep 2; done; mc mb -p local/$MINIO_BUCKET; echo ready"
+            - "import os; from minio import Minio; b='kb-import-bucket'; c=Minio('minio:9000', access_key=os.environ['MINIO_ACCESS_KEY'], secret_key=os.environ['MINIO_SECRET_KEY'], secure=False); c.make_bucket(b) if not c.bucket_exists(b) else None; print('bucket', b, 'ready')"
       containers:
         - name: web
           image: knowledge-service-web:latest
