@@ -20,6 +20,11 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
+# 可选：构建时指定 PyPI 镜像源（如内网/国内源），加速依赖安装；不传则走默认源。
+# 用法：docker build --build-arg PIP_INDEX_URL=https://<mirror>/simple ...
+ARG PIP_INDEX_URL=
+ENV PIP_INDEX_URL=$PIP_INDEX_URL
+
 WORKDIR /app
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -23,6 +23,7 @@ spec:
         - key: node-role.kubernetes.io/control-plane
           operator: Exists
           effect: NoSchedule
+      enableServiceLinks: false
       containers:
         - name: neo4j
           image: neo4j:5
@@ -45,6 +46,9 @@ spec:
             periodSeconds: 10
             timeoutSeconds: 5
           resources:
+            requests:
+              cpu: "250m"
+              memory: 512Mi
             limits:
               cpu: "1.0"
               memory: 1G
