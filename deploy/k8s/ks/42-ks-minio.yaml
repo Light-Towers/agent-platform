@@ -1,0 +1,72 @@
+# KS MinIO（对象存储）—— Deployment + hostPath + Service
+# 凭据来自 Secret ks-secrets（MINIO_ACCESS_KEY / MINIO_SECRET_KEY）。
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ks-minio
+  namespace: agent-platform
+  labels:
+    app: ks-minio
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ks-minio
+  template:
+    metadata:
+      labels:
+        app: ks-minio
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: ambari03
+      tolerations:
+        - key: node-role.kubernetes.io/control-plane
+          operator: Exists
+          effect: NoSchedule
+      containers:
+        - name: minio
+          image: minio/minio:RELEASE.2024-01-16T16-07-38Z
+          command: ["server", "/data", "--console-address", ":9001"]
+          env:
+            - name: MINIO_ROOT_USER
+              valueFrom:
+                secretKeyRef:
+                  name: ks-secrets
+                  key: MINIO_ACCESS_KEY
+            - name: MINIO_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ks-secrets
+                  key: MINIO_SECRET_KEY
+          ports:
+            - containerPort: 9000
+            - containerPort: 9001
+          volumeMounts:
+            - name: minio-data
+              mountPath: /data
+          resources:
+            limits:
+              cpu: "1.0"
+              memory: 1G
+      volumes:
+        - name: minio-data
+          hostPath:
+            path: /data/k8s-demo/knowledge-service/minio
+            type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio
+  namespace: agent-platform
+spec:
+  type: ClusterIP
+  selector:
+    app: ks-minio
+  ports:
+    - name: api
+      port: 9000
+      targetPort: 9000
+    - name: console
+      port: 9001
+      targetPort: 9001

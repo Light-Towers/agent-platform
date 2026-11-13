@@ -1,0 +1,111 @@
+# KS web（统一 FastAPI 服务）—— Deployment + hostPath(模型/输出/日志) + Service
+# 镜像 knowledge-service-web:latest 须已导入 ambari03 的 containerd-k8s（见执行步骤）。
+# minio-init 改为 initContainer（幂等建桶 kb-import-bucket）。
+# hostPort 8000 保留 126:8000 的外部可达性（迁移期旧 docker 容器已停，端口空闲）。
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ks-web
+  namespace: agent-platform
+  labels:
+    app: ks-web
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ks-web
+  template:
+    metadata:
+      labels:
+        app: ks-web
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: ambari03
+      tolerations:
+        - key: node-role.kubernetes.io/control-plane
+          operator: Exists
+          effect: NoSchedule
+      initContainers:
+        - name: minio-init
+          image: minio/mc:RELEASE.2025-04-16T18-13-26Z
+          env:
+            - name: MINIO_ROOT_USER
+              valueFrom:
+                secretKeyRef:
+                  name: ks-secrets
+                  key: MINIO_ACCESS_KEY
+            - name: MINIO_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ks-secrets
+                  key: MINIO_SECRET_KEY
+            - name: MINIO_BUCKET
+              value: "kb-import-bucket"
+          command:
+            - sh
+            - -c
+            - "until mc alias set local http://minio:9000 $MINIO_ROOT_USER $MINIO_ROOT_PASSWORD 2>/dev/null; do echo waiting; sleep 2; done; mc mb -p local/$MINIO_BUCKET; echo ready"
+      containers:
+        - name: web
+          image: knowledge-service-web:latest
+          imagePullPolicy: IfNotPresent
+          command: ["uvicorn", "knowledge_service.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+          envFrom:
+            - configMapRef:
+                name: ks-config
+            - secretRef:
+                name: ks-secrets
+          ports:
+            - containerPort: 8000
+              hostPort: 8000
+          volumeMounts:
+            - name: web-models
+              mountPath: /app/models
+            - name: web-output
+              mountPath: /app/output
+            - name: web-logs
+              mountPath: /app/logs
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+          resources:
+            limits:
+              cpu: "2.0"
+              memory: 2G
+      volumes:
+        - name: web-models
+          hostPath:
+            path: /data/k8s-demo/knowledge-service/web-models
+            type: DirectoryOrCreate
+        - name: web-output
+          hostPath:
+            path: /data/k8s-demo/knowledge-service/web-output
+            type: DirectoryOrCreate
+        - name: web-logs
+          hostPath:
+            path: /data/k8s-demo/knowledge-service/web-logs
+            type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: knowledge-service-web
+  namespace: agent-platform
+spec:
+  type: ClusterIP
+  selector:
+    app: ks-web
+  ports:
+    - port: 8000
+      targetPort: 8000
