@@ -399,3 +399,228 @@ a.btn { text-decoration: none; }
  * 两处挂载的是同一个纯只读组件 —— 谁显示由这里唯一决定，`EvidenceList.vue` 里不判宽度。 */
 .only-wide { display: block; }
 @media (max-width: 1279px) { .only-wide { display: none; } }
+
+/* ============================================================================
+ * RuoYi 后台外壳 + 标准 CRUD 组件（全局类，无 scoped；全部消费 tokens.css 的 --ry-*）
+ * 三段式：.ry-layout（顶栏 + 侧边栏 + 内容区）→ .ry-header / .ry-aside / .ry-main
+ * 标准件：.ry-card / .ry-table / .ry-form / .ry-input / .ry-btn / .ry-pagination / .ry-tag
+ * 每一条引用都对应一个 --ry-* 令牌，消灭孤儿（门禁断言 3）；本段不写任何色值字面量（断言 1）。
+ * ==========================================================================*/
+
+/* ---- 三段式布局：占满视口 ---- */
+.ry-layout {
+  display: grid;
+  grid-template-columns: var(--ry-aside-w) 1fr;
+  grid-template-rows: var(--ry-header-h) 1fr;
+  grid-template-areas:
+    "aside header"
+    "aside main";
+  height: 100vh;
+}
+
+/* ---- 顶栏 ---- */
+.ry-header {
+  grid-area: header;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  padding-inline: var(--sp-4);
+  background: var(--ry-header-bg);
+  border-bottom: 1px solid var(--ry-header-border);
+  color: var(--ry-header-text);
+}
+.ry-header__title {
+  font-size: var(--fs-md);
+  font-weight: 600;
+  letter-spacing: var(--ls-head);
+}
+.ry-header .spacer { flex: 1 1 auto; }
+.ry-header__user { font-size: var(--fs-sm); color: var(--text-2); }
+
+/* ---- 侧边栏 ---- */
+.ry-aside {
+  grid-area: aside;
+  display: flex;
+  flex-direction: column;
+  background: var(--ry-aside-bg);
+  border-right: 1px solid var(--ry-aside-border);
+  color: var(--ry-aside-text);
+  overflow-y: auto;
+}
+.ry-aside__logo {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  height: var(--ry-header-h);
+  padding-inline: var(--sp-4);
+  background: var(--ry-aside-logo-bg);
+  color: var(--ry-on-primary);
+  font-size: var(--fs-md);
+  font-weight: 600;
+  letter-spacing: var(--ls-head);
+}
+.ry-menu { display: flex; flex-direction: column; padding: var(--sp-2) 0; }
+.ry-menu-item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  color: var(--ry-aside-text);
+  cursor: pointer;
+  font-size: var(--fs-body);
+  border-left: 3px solid transparent;
+  transition: background var(--t-fast) var(--ease-out), color var(--t-fast) var(--ease-out);
+}
+.ry-menu-item:hover { background: var(--ry-aside-hover-bg); }
+.ry-menu-item[aria-disabled="true"] { color: var(--ry-aside-text-muted); cursor: not-allowed; }
+.ry-menu-item.is-active {
+  background: var(--ry-aside-active-bg);
+  color: var(--ry-aside-active-text);
+  border-left-color: var(--ry-on-primary);
+  font-weight: 500;
+}
+.ry-menu-item .ico { color: inherit; }
+
+/* ---- 内容区 ---- */
+.ry-main {
+  grid-area: main;
+  background: var(--ry-content-bg);
+  padding: var(--sp-4);
+  overflow-y: auto;
+}
+
+/* ---- 标准卡片 ---- */
+.ry-card {
+  background: var(--ry-card-bg);
+  border: 1px solid var(--ry-card-border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-1);
+  padding: var(--sp-4);
+}
+.ry-card + .ry-card { margin-top: var(--sp-4); }
+.ry-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  padding-bottom: var(--sp-3);
+  margin-bottom: var(--sp-3);
+  border-bottom: 1px solid var(--ry-border-light);
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+.ry-card__body { min-width: 0; }
+
+/* ---- 区域标题（左侧蓝条） ---- */
+.ry-section-title {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-md);
+  font-weight: 600;
+  margin-bottom: var(--sp-3);
+  padding-left: var(--sp-2);
+  border-left: 3px solid var(--ry-primary);
+}
+
+/* ---- 表格 ---- */
+.ry-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-body);
+}
+.ry-table th, .ry-table td {
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--ry-table-border);
+  text-align: left;
+  line-height: var(--lh-body);
+}
+.ry-table th { background: var(--ry-table-head-bg); font-weight: 600; color: var(--text-1); }
+.ry-table tbody tr:hover { background: var(--ry-table-row-hover); }
+
+/* ---- 表单 ---- */
+.ry-form { display: grid; gap: var(--sp-3); }
+.ry-form-item { display: grid; gap: var(--sp-1); }
+.ry-label { font-size: var(--fs-sm); color: var(--text-2); }
+
+/* ---- 输入控件 ---- */
+.ry-input {
+  width: 100%;
+  border: 1px solid var(--ry-input-border);
+  border-radius: var(--radius-sm);
+  background: var(--ry-input-bg);
+  padding: var(--sp-2) var(--sp-3);
+  color: var(--text-1);
+  font: inherit;
+}
+.ry-input::placeholder { color: var(--text-3); }
+.ry-input:focus { outline: none; border-color: var(--ry-input-focus); }
+
+/* ---- 按钮（RuoYi/Element 标准五态） ---- */
+.ry-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-1);
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+  color: var(--text-1);
+  padding: var(--sp-2) var(--sp-3);
+  font-size: var(--fs-body);
+  font-weight: 500;
+  cursor: pointer;
+  transition: background var(--t-fast) var(--ease-out), border-color var(--t-fast) var(--ease-out);
+}
+.ry-btn:hover { background: var(--bg-raised); }
+.ry-btn[disabled], .ry-btn[aria-disabled="true"] {
+  color: var(--text-3);
+  border-color: var(--border-decor);
+  cursor: progress;
+}
+.ry-btn--primary { background: var(--ry-primary); border-color: var(--ry-primary); color: var(--ry-on-primary); }
+.ry-btn--primary:hover { background: var(--ry-primary); opacity: .85; }
+.ry-btn--success { background: var(--ry-success); border-color: var(--ry-success); color: var(--ry-on-primary); }
+.ry-btn--success:hover { background: var(--ry-success); opacity: .85; }
+.ry-btn--warning { background: var(--ry-warning); border-color: var(--ry-warning); color: var(--ry-on-primary); }
+.ry-btn--warning:hover { background: var(--ry-warning); opacity: .85; }
+.ry-btn--danger { background: var(--ry-danger); border-color: var(--ry-danger); color: var(--ry-on-primary); }
+.ry-btn--danger:hover { background: var(--ry-danger); opacity: .85; }
+.ry-btn--info { background: var(--ry-info); border-color: var(--ry-info); color: var(--ry-on-primary); }
+.ry-btn--info:hover { background: var(--ry-info); opacity: .85; }
+.ry-btn--text { background: transparent; border-color: transparent; color: var(--ry-primary); }
+.ry-btn--text:hover { background: var(--bg-raised); }
+
+/* ---- 标签 / 徽标 ---- */
+.ry-tag {
+  display: inline-flex;
+  align-items: center;
+  font-size: var(--fs-xs);
+  border-radius: var(--radius-sm);
+  padding: 0 var(--sp-2);
+  border: 1px solid var(--border-control);
+  background: var(--bg-raised);
+  color: var(--text-1);
+}
+.ry-tag--success { background: var(--ry-tag-success-bg); border-color: var(--ry-tag-success-border); color: var(--ry-success); }
+.ry-tag--warning { background: var(--ry-tag-warning-bg); border-color: var(--ry-tag-warning-border); color: var(--ry-warning); }
+.ry-tag--danger  { background: var(--ry-tag-danger-bg);  border-color: var(--ry-tag-danger-border);  color: var(--ry-danger); }
+.ry-tag--info    { background: var(--ry-tag-info-bg);    border-color: var(--ry-tag-info-border);    color: var(--ry-info); }
+
+/* ---- 分页 ---- */
+.ry-pagination { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
+.ry-pagination .ry-page {
+  min-width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+  color: var(--text-1);
+  padding-inline: var(--sp-2);
+  cursor: pointer;
+}
+.ry-pagination .ry-page.is-active { background: var(--ry-primary); border-color: var(--ry-primary); color: var(--ry-on-primary); }
+.ry-pagination .ry-page:hover:not(.is-active) { background: var(--bg-raised); }

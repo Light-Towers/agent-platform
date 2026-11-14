@@ -1,6 +1,6 @@
 <!-- ============================================================================
- * App.vue — 对话页（工单件 §7 PR-2：两栏视图 = 视觉件 §2.1 视图 A）
- * 骨架是 `minmax(0, 1.1fr) minmax(0, 1.4fr)` 两栏（住在 `base.css` 的 `.grid`），
+ * App.vue — RuoYi 三段式后台框架外壳（顶栏 + 侧边栏 + 内容区），内容区承载对话/角色/知识库/数据源视图。
+ * 外壳用 `base.css` 的 `.ry-layout` / `.ry-header` / `.ry-aside` / `.ry-menu` / `.ry-main`；
  * 本件只排**格位**，不写任何形状：组件无 <style> 块（理由见 ThemeToggle.vue 头注）。
  * 三态的落点（视觉件 §3 那三行在这里各自的实物）：
  *   · loading = 提交钮 aria-disabled + 文案「等待 done…」+ `Timeline.vue` 尾部骨架条；
@@ -110,23 +110,67 @@ function onSignOut(): void {
 </script>
 
 <template>
-  <div class="app">
-    <header class="topbar">
-      <h1>
+  <!-- 未登录：仅登录面（不套后台框架，避免展示空侧栏） -->
+  <LoginView v-if="!canChat" />
+
+  <!-- 已登录：RuoYi 三段式后台（顶栏 + 侧边栏 + 内容区） -->
+  <div
+    v-else
+    class="ry-layout"
+  >
+    <aside class="ry-aside">
+      <div class="ry-aside__logo">
         Agent Platform 控制台
-        <span class="hint">{{ viewLabel }}</span>
-      </h1>
+      </div>
+      <nav
+        class="ry-menu"
+        aria-label="主导航"
+      >
+        <div
+          class="ry-menu-item"
+          :class="{ 'is-active': activeView === 'chat' }"
+          @click="activeView = 'chat'"
+        >
+          对话
+        </div>
+        <div
+          v-if="showRoleGate"
+          class="ry-menu-item"
+          :class="{ 'is-active': activeView === 'role' }"
+          @click="activeView = 'role'"
+        >
+          角色与能力
+        </div>
+        <div
+          v-if="showKb"
+          class="ry-menu-item"
+          :class="{ 'is-active': activeView === 'kb' }"
+          @click="activeView = 'kb'"
+        >
+          知识库
+        </div>
+        <div
+          v-if="showDatasource"
+          class="ry-menu-item"
+          :class="{ 'is-active': activeView === 'datasource' }"
+          @click="activeView = 'datasource'"
+        >
+          数据源
+        </div>
+      </nav>
+    </aside>
+
+    <header class="ry-header">
+      <span class="ry-header__title">{{ viewLabel }}</span>
       <span class="spacer" />
-      <!-- 身份那一行只在页眉出现一次，文案由会话层的 `identityNote` 给（四种读法各自一句，
-           其中两种是「未确认」与「走的是密钥」—— 把它们合并成「未登录」就是把 503 读成凭据问题）。 -->
       <span
-        class="hint"
+        class="ry-header__user"
         role="status"
       >{{ identityNote }}</span>
       <button
         v-if="loggedIn"
         type="button"
-        class="btn"
+        class="ry-btn ry-btn--text"
         @click="onSignOut"
       >
         退出
@@ -134,192 +178,126 @@ function onSignOut(): void {
       <ThemeToggle />
     </header>
 
-    <!-- G1 管理面导航：入口项按 authFeatures 显隐（批 1 只有「角色」页一个入口；对话页恒在）。
-         页签选中态走 aria-current 而不是 aria-pressed（base.css .seg 那格注：它是页签不是
-         开关，读屏读法不同）。没拿到任何管理向能力码时整个 nav 不渲染 ⇒ viewer 只看到对话页。 -->
-    <nav
-      v-if="canChat && showRoleGate"
-      class="topnav"
-      aria-label="管理面导航"
-    >
-      <div class="seg">
+    <main class="ry-main">
+      <!-- 错误态 banner 跨轮累积（四条要在同一屏可对比） -->
+      <section
+        v-if="banners.length > 0"
+        class="stack"
+        aria-label="本轮提示"
+      >
+        <div
+          v-for="(line, i) in banners"
+          :key="i"
+          class="banner"
+        >
+          <strong>{{ line }}</strong>
+        </div>
+        <p
+          v-if="dropped > 0"
+          class="hint"
+        >
+          另有 {{ dropped }} 条更早的提示已折叠（超出上限时丢的是最旧那条，不静默丢）。
+        </p>
         <button
           type="button"
           class="btn"
-          :aria-current="activeView === 'chat' ? 'page' : undefined"
-          @click="activeView = 'chat'"
+          @click="clearBanners"
         >
-          对话
+          清除提示
         </button>
-        <button
-          type="button"
-          class="btn"
-          :aria-current="activeView === 'role' ? 'page' : undefined"
-          @click="activeView = 'role'"
-        >
-          角色
-        </button>
-        <button
-          v-if="showKb"
-          type="button"
-          class="btn"
-          :aria-current="activeView === 'kb' ? 'page' : undefined"
-          @click="activeView = 'kb'"
-        >
-          知识库
-        </button>
-        <button
-          v-if="showDatasource"
-          type="button"
-          class="btn"
-          :aria-current="activeView === 'datasource' ? 'page' : undefined"
-          @click="activeView = 'datasource'"
-        >
-          数据源
-        </button>
-      </div>
-    </nav>
+      </section>
 
-    <!-- error 态：banner 跨轮累积（一次流最多命中一条分支，四条要在同一屏可对比）。 -->
-    <section
-      v-if="banners.length > 0"
-      class="stack"
-      aria-label="本轮提示"
-    >
+      <!-- 对话页（两栏：答案/依据 + 时间线/输入） -->
       <div
-        v-for="(line, i) in banners"
-        :key="i"
-        class="banner"
+        v-if="chatShown"
+        class="grid"
       >
-        <strong>{{ line }}</strong>
-      </div>
-      <p
-        v-if="dropped > 0"
-        class="hint"
-      >
-        另有 {{ dropped }} 条更早的提示已折叠（超出上限时丢的是最旧那条，不静默丢）。
-      </p>
-      <button
-        type="button"
-        class="btn"
-        @click="clearBanners"
-      >
-        清除提示
-      </button>
-    </section>
-
-    <!-- 视图闸门（PR-2b）：未确认到登录态时屏上只有登录面，没有空对话框。
-         管理面三视图（对话 main / RoleGate）是 v-if / v-else-if 关系 ⇒ 任一时刻 DOM 里
-         只有一个 main，语义上仍是一文档一主区；chatShown 的兜底支见 script 那条注。 -->
-    <LoginView v-if="!canChat" />
-
-    <main
-      v-else-if="chatShown"
-      class="grid"
-    >
-      <!-- 栏一（1.1fr）：答案 / 依据 / 密钥 -->
-      <div class="col">
-        <section
-          class="panel"
-          aria-labelledby="hAnswer"
-        >
-          <h2 id="hAnswer">
-            答案
-          </h2>
-          <Answer />
-          <!-- 请求号那一行：没有就明说没有（`session.ts` 的 traceNote 已含这一支）。 -->
-          <p
-            v-if="busy || eventCount > 0"
-            class="hint"
+        <div class="col">
+          <section
+            class="panel"
+            aria-labelledby="hAnswer"
           >
-            {{ traceNote }}
-          </p>
-        </section>
-
-        <section
-          class="panel only-wide"
-          aria-labelledby="hEvidence"
-        >
-          <h2 id="hEvidence">
-            依据列表
-            <span class="count-badge">{{ evidence.length }}</span>
-          </h2>
-          <EvidenceList />
-        </section>
-
-        <!-- 768–1279（含 <768 的单栏档）：依据列表并进原生 details（视觉件 §2.1 表第二行），
-             折叠的是"占多高的片段列表"，计数仍在 summary 上读得到。 -->
-        <details class="panel only-narrow">
-          <summary>
-            <span class="o-head-sm">依据列表（窄栏折叠）</span>
-            <span class="count-badge">{{ evidence.length }}</span>
-          </summary>
-          <EvidenceList />
-        </details>
-      </div>
-
-      <!-- 栏二（1.4fr）：过程时间线 + 输入区 -->
-      <div class="col">
-        <section
-          class="panel"
-          aria-labelledby="hTimeline"
-        >
-          <h2 id="hTimeline">
-            事件时间线
-            <span class="count-badge">{{ eventCount }}</span>
-          </h2>
-
-          <Timeline />
-
-          <form
-            class="composer"
-            @submit.prevent="submit"
-          >
-            <input
-              v-model="question"
-              class="field"
-              type="text"
-              placeholder="输入问题…"
-              autocomplete="off"
-              aria-label="问题"
+            <h2 id="hAnswer">
+              答案
+            </h2>
+            <Answer />
+            <p
+              v-if="busy || eventCount > 0"
+              class="hint"
             >
-            <div class="composer__row">
-              <!-- ⚠ **刻意用 `aria-disabled` 而不是原生 `disabled`**（刀㊲ 实拍量出来的缺陷，
-                   不是预防性的好愿望）：原生 `disabled` 把控件从 tab 序里抽掉，于是键盘用户
-                   按下 Enter 的那一瞬间焦点被浏览器收回 `body`（V6 那一格实测
-                   `activeElement.tagName === 'BODY'`）⇒ 每问一次就要从头 Tab 一遍，
-                   「键盘一遍走通」在实物上不成文。换 `aria-disabled` 后控件仍在序里，
-                   而“不能提交”仍由 `ask()` 自守（空输入与流中两道早退），不靠属性兼容。 -->
-              <button
-                type="submit"
-                class="btn btn-primary"
-                :aria-disabled="!canSubmit"
+              {{ traceNote }}
+            </p>
+          </section>
+
+          <section
+            class="panel only-wide"
+            aria-labelledby="hEvidence"
+          >
+            <h2 id="hEvidence">
+              依据列表
+              <span class="count-badge">{{ evidence.length }}</span>
+            </h2>
+            <EvidenceList />
+          </section>
+
+          <details class="panel only-narrow">
+            <summary>
+              <span class="o-head-sm">依据列表（窄栏折叠）</span>
+              <span class="count-badge">{{ evidence.length }}</span>
+            </summary>
+            <EvidenceList />
+          </details>
+        </div>
+
+        <div class="col">
+          <section
+            class="panel"
+            aria-labelledby="hTimeline"
+          >
+            <h2 id="hTimeline">
+              事件时间线
+              <span class="count-badge">{{ eventCount }}</span>
+            </h2>
+
+            <Timeline />
+
+            <form
+              class="composer"
+              @submit.prevent="submit"
+            >
+              <input
+                v-model="question"
+                class="field"
+                type="text"
+                placeholder="输入问题…"
+                autocomplete="off"
+                aria-label="问题"
               >
-                {{ busy ? '等待 done…' : '提问' }}
-              </button>
-              <span
-                v-if="submitHint !== ''"
-                class="hint"
-              >{{ submitHint }}</span>
-            </div>
-          </form>
-        </section>
+              <div class="composer__row">
+                <button
+                  type="submit"
+                  class="btn btn-primary"
+                  :aria-disabled="!canSubmit"
+                >
+                  {{ busy ? '等待 done…' : '提问' }}
+                </button>
+                <span
+                  v-if="submitHint !== ''"
+                  class="hint"
+                >{{ submitHint }}</span>
+              </div>
+            </form>
+          </section>
+        </div>
       </div>
+
+      <RoleGate v-else-if="activeView === 'role'" />
+
+      <KbUpload v-else-if="activeView === 'kb'" />
+
+      <DatasourceConfig v-else-if="activeView === 'datasource'" />
+
+      <Legend v-if="chatShown" />
     </main>
-
-    <!-- 「角色与能力」页（RoleGate，批 1）：G1 的屏面读数（当前角色 / 能力集 / N3 说明），
-         只在手里确有管理向能力码时轮得到渲染（chatShown 为假 ⇒ activeView='role' 且
-         showRoleGate 为真）。 -->
-    <RoleGate v-else-if="activeView === 'role'" />
-
-    <!-- G2 知识库上传配置页（批 2）：在 `kb.upload` 能力码下轮得到渲染。 -->
-    <KbUpload v-else-if="activeView === 'kb'" />
-
-    <!-- G3 问数数据源配置页（批 3）：在 `datasource.manage` 能力码下轮得到渲染。 -->
-    <DatasourceConfig v-else-if="activeView === 'datasource'" />
-
-    <!-- 事件图例只在对话页出现：登录页一行事件都没得对，把图例放上去就是拿不相干的
-         读数占位置（与文件头那句「不给指不到东西的引导」同一条纪律）；管理面页同理。 -->
-    <Legend v-if="canChat && chatShown" />
   </div>
 </template>

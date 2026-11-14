@@ -89,7 +89,7 @@ async function refreshDocuments(): Promise<void> {
 </script>
 
 <template>
-  <main class="grid">
+  <div class="col">
     <div class="col">
       <section
         class="panel"
@@ -288,5 +288,5 @@ async function refreshDocuments(): Promise<void> {
         </p>
       </section>
     </div>
-  </main>
+  </div>
 </template>

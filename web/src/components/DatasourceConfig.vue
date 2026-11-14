@@ -140,7 +140,7 @@ onMounted(() => { void refresh() })
 </script>
 
 <template>
-  <main class="grid">
+  <div class="col">
     <div class="col">
       <section
         class="panel"
@@ -171,7 +171,7 @@ onMounted(() => { void refresh() })
 
         <table
           v-else
-          class="stack"
+          class="ry-table"
         >
           <thead>
             <tr>
@@ -366,5 +366,5 @@ onMounted(() => { void refresh() })
         </form>
       </section>
     </div>
-  </main>
+  </div>
 </template>

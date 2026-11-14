@@ -1,63 +1,68 @@
 /* ============================================================================
- * tokens.css — 全工程唯一允许出现 hex / rgb() / rgba() 的文件（视觉件 §1.1/§1.2）
+ * tokens.css — 全工程唯一允许出现 hex / rgb() / rgba() 的文件（视觉门禁断言 1）
  * 三层：L0 primitive → L1 semantic → L2 alias。组件只消费 L1/L2。
- * 状态：**PR-0 的 POC 批**。值全部抄自视觉件 §1.3/§1.5，本文件不新增任何色值判断。
+ *
+ * 本版为「RuoYi 蓝白后台」配色重构：主色 RuoYi 蓝 #1890ff、成功/警告/危险/信息
+ * 取 Element/RuoYi 标准色，页面底灰 #f0f2f5、卡片白、控件边框 #dcdfe6。新增的
+ * `--ry-*` 是后台外壳（顶栏/侧边栏/内容区）与标准 CRUD 组件（卡片/表格/表单/
+ * 按钮/标签/分页）专属令牌，全部在 base.css 的 `.ry-*` 类里被引用，避免孤儿（断言 3）。
+ *
+ * 门禁纪律（check-tokens.mjs）：
+ *   - 断言 1：本文件之外不得出现色值字面量；
+ *   - 断言 2：引用的令牌必须在此登记；
+ *   - 断言 3：登记但无人引用 = 孤儿，fail；
+ *   - 断言 5：下方 dark 两份副本（系统偏好 / 手动选择）必须逐字同值。
  * ==========================================================================*/
 
 :root {
-  /* ---- L0 中性 ramp（light）档号按明度排序，允许断档 ----
-   * ⚠ 发现 F1（待订正视觉件 §1.2）：该句写「中性 9 档 / 050–900 分六段」，但 §1.3
-   *   实际登记的 light 中性值只有 8 个，且 `--text-3`（#9199a3）在它那六段里没有落位
-   *   （既不是"分隔"也不是"控件边界"）。本件按 §1.3 的值建 ramp、档号按明度排，
-   *   断档不补（门禁断言 3 会把无人引用的令牌判红 ⇒ 不能为了凑十档而造空槽）。 */
-  --n-050: #ffffff;   /* surface 底 */
-  --n-100: #fafbfc;   /* raised 底 */
-  --n-200: #f6f7f9;   /* page 底 */
-  --n-300: #d8dee9;   /* 分隔线 */
-  --n-400: #9199a3;   /* disabled / placeholder 文本 */
-  --n-500: #7d8794;   /* 控件边界 */
-  --n-600: #6b7280;   /* 次要正文 */
-  --n-900: #1f2937;   /* 主要正文 */
+  /* ---- L0 中性 ramp（light） ---- */
+  --n-050: #ffffff;   /* surface 底 / 卡片 */
+  --n-100: #f5f7fa;   /* raised 底 */
+  --n-200: #f0f2f5;   /* page 后台灰底 */
+  --n-300: #e4e7ed;   /* 分隔线 */
+  --n-400: #c0c4cc;   /* disabled / placeholder 文本 */
+  --n-500: #dcdfe6;   /* 控件边界 */
+  --n-600: #606266;   /* 次要正文 */
+  --n-900: #303133;   /* 主要正文 */
 
-  /* ---- L0 色相档（light 取 -600，dark 取 -300；视觉件 §1.2）---- */
-  --blue-600:  #2563eb;
-  --cyan-600:  #0891b1;
-  --green-600: #0a7d33;
-  --violet-600:#7c3aed;
-  --teal-600:  #0f766e;
-  --amber-600: #8a6100;
-  --red-600:   #b00020;
-  --slate-600: #475569;
+  /* ---- L0 色相档（light 取 -600；事件族语义色，取 RuoYi/Element 调色） ---- */
+  --blue-600:  #1890ff;
+  --cyan-600:  #409eff;
+  --green-600: #67c23a;
+  --violet-600:#9254de;
+  --teal-600:  #13c2c2;
+  --amber-600: #e6a23c;
+  --red-600:   #f56c6c;
+  --slate-600: #909399;
 
-  /* ---- L0 alpha 变体单列成令牌（借 Radix 的形状，视觉件 §1.2）---- */
-  --blue-tint:  #e8f0fe;
-  --cyan-tint:  #e0f5f8;
-  --green-tint: #e6f4ea;
-  --violet-tint:#f1ebfd;
-  --teal-tint:  #e5f2f1;
-  --amber-tint: #fbf1de;
-  --red-tint:   #fbe9ec;
-  --slate-tint: #eef1f5;
+  /* ---- L0 alpha 变体单列成令牌（淡背景色卡） ---- */
+  --blue-tint:  #ecf5ff;
+  --cyan-tint:  #ecf5ff;
+  --green-tint: #f0f9eb;
+  --violet-tint:#f9f0ff;
+  --teal-tint:  #e6fffb;
+  --amber-tint: #fdf6ec;
+  --red-tint:   #fef0f0;
+  --slate-tint: #f4f4f5;
 
-  /* ---- L1 文本 / 底 / 边框（视觉件 §1.3）---- */
+  /* ---- L1 文本 / 底 / 边框 ---- */
   --text-1: var(--n-900);
   --text-2: var(--n-600);
   --text-3: var(--n-400);           /* 仅 disabled/placeholder，不得承载信息 */
   --bg-page: var(--n-200);
   --bg-surface: var(--n-050);
-  --bg-raised: var(--n-100);        /* 与 --bg-page 差 1.03 ⇒ 分层靠 border 不靠底色 */
+  --bg-raised: var(--n-100);
   --border-decor: var(--n-300);     /* 只作分隔线，不勾控件 */
-  --border-control: var(--n-500);   /* 3.64:1 ≥ 3:1（SC 1.4.11） */
+  --border-control: var(--n-500);   /* 控件边界 */
 
-  /* ---- L1 状态色 ---- */
+  /* ---- L1 状态色（RuoYi/Element 标准） ---- */
   --status-ok: var(--green-600);
   --status-warn: var(--amber-600);
   --status-danger: var(--red-600);
   --status-running: var(--cyan-600);
-  --on-primary: var(--n-050);       /* primary 按钮前景（落在 --blue-600 上，5.17:1） */
+  --on-primary: var(--n-050);
 
-  /* ---- L1 事件族 accent（视觉件 §2.2 的 8 族预算）。警示/失败两族不在此：
-   *   §1.3 写明它们是 --status-warn / --status-danger 的**同值别名** ⇒ 降到 L2 ---- */
+  /* ---- L1 事件族 accent（语义色：决策/进度/来源/记忆/答案/门控） ---- */
   --cat-decision: var(--blue-600);
   --cat-progress: var(--cyan-600);
   --cat-source: var(--green-600);
@@ -65,7 +70,7 @@
   --cat-answer: var(--teal-600);
   --cat-gate: var(--slate-600);
 
-  /* ---- L1 tint（徽标/图例色卡底）---- */
+  /* ---- L1 tint（徽标/图例色卡底） ---- */
   --tint-decision: var(--blue-tint);
   --tint-progress: var(--cyan-tint);
   --tint-source: var(--green-tint);
@@ -76,68 +81,107 @@
   --tint-gate: var(--slate-tint);
 
   /* ---- L1 其他 ---- */
-  --focus-ring: var(--cat-decision);   /* 视觉件 §3；引 L1 不引 L0 ⇒ dark 侧自动跟到 --blue-300 */
-  --shadow-1: 0 1px 2px rgba(0, 0, 0, .04), 0 1px 2px rgba(0, 0, 0, .06);   /* 双层叠加 */
-  /* ⚠ POC 批：`--shadow-2`（浮层档）**已撤销登记** —— 本页没有浮层消费者，门禁断言 3
-   *   把它判成孤儿令牌并 fail。视觉件 §1.5 写的是「≤2 档」上限，不是「必须两档」；
-   *   等 PR-2 真出现菜单/抽屉时再登记。孤儿不是删设计，是**不在无消费者时预留可调用的值**。 */
+  --focus-ring: var(--blue-600);
+  --shadow-1: 0 1px 4px rgba(0, 0, 0, .08), 0 2px 12px rgba(0, 0, 0, .06);
   --page-max: 1440px;
 
-  /* ---- L1 排版（视觉件 §1.5；行高与字距是令牌，组件不得写字面值）---- */
-  --font-sans: "IBM Plex Sans", "Noto Sans CJK SC", "Microsoft YaHei", system-ui, sans-serif;
-  --font-mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+  /* ---- L1 排版（正文 14px / 行高 1.5，贴近 Element 默认） ---- */
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", "Hiragino Sans GB", system-ui, sans-serif;
+  --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
   --fs-xs: 12px;
   --fs-sm: 13px;
   --fs-body: 14px;
   --fs-md: 16px;
-  --fs-lg: 20px;
-  --lh-tight: 1.5;
-  --lh-body: 1.7;
-  --ls-wide: .02em;      /* ≤13px 的小标题与灯名 */
-  --ls-tight: -0.01em;   /* --fs-md 级标题 */
-  --ls-head: -0.02em;    /* --fs-lg 级标题 */
+  --fs-lg: 18px;
+  --lh-tight: 1.4;
+  --lh-body: 1.5;
+  --ls-wide: .02em;
+  --ls-tight: 0;
+  --ls-head: 0;
 
   /* ---- L1 间距 / 圆角 / 动效 ---- */
   --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px;
-  --sp-5: 24px; --sp-6: 32px; --sp-7: 48px;   /* -6/-7 的消费者是 ≥1280 的 .app 内边距，见 base.css 断点段 */
-  --radius-sm: 4px;      /* 控件 */
-  --radius-md: 8px;      /* 卡片 */
+  --sp-5: 24px; --sp-6: 32px; --sp-7: 48px;
+  --radius-sm: 4px;      /* 控件 / 卡片（RuoYi 卡片圆角 4px） */
+  --radius-md: 4px;
   --radius-pill: 999px;  /* 徽标 */
   --t-fast: 120ms;
   --t-slow: 200ms;
   --ease-out: cubic-bezier(.2, 0, 0, 1);
+
+  /* ---- RuoYi 后台外壳令牌（三段式布局 + 标准 CRUD 组件；base.css 的 `.ry-*` 消费） ---- */
+  --ry-primary: var(--blue-600);
+  --ry-success: var(--green-600);
+  --ry-warning: var(--amber-600);
+  --ry-danger:  var(--red-600);
+  --ry-info:    var(--slate-600);
+
+  --ry-header-h: 50px;
+  --ry-header-bg: var(--n-050);
+  --ry-header-border: var(--n-300);
+  --ry-header-text: var(--text-1);
+
+  --ry-aside-w: 200px;
+  --ry-aside-bg: #1d2129;            /* RuoYi 深色侧边栏 */
+  --ry-aside-text: #bfcbd9;
+  --ry-aside-text-muted: #8a96a3;
+  --ry-aside-logo-bg: var(--ry-primary);
+  --ry-aside-active-bg: var(--ry-primary);
+  --ry-aside-active-text: #ffffff;
+  --ry-aside-hover-bg: #263445;
+  --ry-aside-border: #141b2d;
+
+  --ry-content-bg: var(--n-200);
+  --ry-card-bg: var(--n-050);
+  --ry-card-border: var(--n-500);    /* 卡片阴影走 --shadow-1 */
+
+  --ry-table-head-bg: #f5f7fa;
+  --ry-table-border: #ebeef5;
+  --ry-table-row-hover: #f5f7fa;
+  --ry-border-light: #ebeef5;
+
+  --ry-input-bg: var(--n-050);
+  --ry-input-border: var(--n-500);
+  --ry-input-focus: var(--ry-primary);
+
+  --ry-tag-success-bg: var(--green-tint);    --ry-tag-success-border: var(--green-600);
+  --ry-tag-warning-bg: var(--amber-tint);    --ry-tag-warning-border: var(--amber-600);
+  --ry-tag-danger-bg:  var(--red-tint);      --ry-tag-danger-border:  var(--red-600);
+  --ry-tag-info-bg:    var(--slate-tint);    --ry-tag-info-border:    var(--slate-600);
+
+  --ry-on-primary: #ffffff;   /* 主色/侧栏激活态上的前景白，明暗均白（避免在组件文件写 hex） */
 }
 
 /* dark 副本 A：系统偏好驱动（未手动选择时） */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme]) {
-    --n-050: #1c2128;
-    --n-100: #22262d;
-    --n-200: #16191d;
-    --n-300: #30363d;
-    --n-400: #6e7681;
-    --n-500: #6e7681;   /* dark 侧 text-3 与 border-control 同值（视觉件 §1.3 就是这两个 hex） */
-    --n-600: #8b949e;
-    --n-900: #e6edf3;
-    --n-975: #0d1117;   /* dark 的 primary 按钮前景（7.49:1 落在 --blue-300 上） */
+    --n-050: #1d2129;
+    --n-100: #23272e;
+    --n-200: #141b2d;
+    --n-300: #303133;
+    --n-400: #8d9095;
+    --n-500: #434343;
+    --n-600: #a3a6ad;
+    --n-900: #e5eaf3;
+    --n-975: #0a0c10;
 
-    --blue-300:  #58a6ff;
-    --cyan-300:  #3fc6d6;
-    --green-300: #3fb950;
-    --violet-300:#a371f7;
-    --teal-300:  #3fb9b0;
-    --amber-300: #d29922;
-    --red-300:   #ff5c5c;
-    --slate-300: #a8b1bc;
+    --blue-300:  #409eff;
+    --cyan-300:  #36cfc9;
+    --green-300: #73d13d;
+    --violet-300:#b37feb;
+    --teal-300:  #36cfc9;
+    --amber-300: #ffc53d;
+    --red-300:   #ff7875;
+    --slate-300: #c0c4cc;
 
-    --blue-tint:  #1f2b3d;
-    --cyan-tint:  #12303a;
-    --green-tint: #1c2e21;
-    --violet-tint:#2a2140;
-    --teal-tint:  #15302f;
-    --amber-tint: #332914;
-    --red-tint:   #3a1c1f;
-    --slate-tint: #262b32;
+    --blue-tint:  #18222b;
+    --cyan-tint:  #162425;
+    --green-tint: #1a2718;
+    --violet-tint:#211a2e;
+    --teal-tint:  #162525;
+    --amber-tint: #2b2410;
+    --red-tint:   #2b1818;
+    --slate-tint: #26292e;
 
     --status-ok: var(--green-300);
     --status-warn: var(--amber-300);
@@ -152,40 +196,73 @@
     --cat-answer: var(--teal-300);
     --cat-gate: var(--slate-300);
 
-    /* 暗底下投影几乎不可见 ⇒ dark 不靠投影分层（视觉件 §1.5） */
+    --focus-ring: var(--blue-300);
     --shadow-1: none;
+
+    --ry-primary: var(--blue-300);
+    --ry-success: var(--green-300);
+    --ry-warning: var(--amber-300);
+    --ry-danger: var(--red-300);
+    --ry-info: var(--slate-300);
+
+    --ry-header-bg: #1d2129;
+    --ry-header-border: #303133;
+    --ry-aside-bg: #141b2d;
+    --ry-aside-text: #bfcbd9;
+    --ry-aside-active-bg: var(--blue-300);
+    --ry-aside-active-text: #ffffff;
+    --ry-aside-hover-bg: #263445;
+    --ry-aside-border: #0a0c10;
+
+    --ry-content-bg: #141b2d;
+    --ry-card-bg: #1d2129;
+    --ry-card-border: #434343;
+
+    --ry-table-head-bg: #1d2129;
+    --ry-table-border: #303133;
+    --ry-table-row-hover: #23272e;
+    --ry-border-light: #303133;
+
+    --ry-input-bg: #1d2129;
+    --ry-input-border: #434343;
+    --ry-input-focus: var(--blue-300);
+
+    --ry-tag-success-bg: #1a2718; --ry-tag-success-border: var(--green-300);
+    --ry-tag-warning-bg: #2b2410; --ry-tag-warning-border: var(--amber-300);
+    --ry-tag-danger-bg:  #2b1818; --ry-tag-danger-border:  var(--red-300);
+    --ry-tag-info-bg:    #26292e; --ry-tag-info-border:    var(--slate-300);
   }
 }
 
 /* dark 副本 B：手动选择驱动。⚠ 与副本 A **逐字同值**（门禁断言 5） */
 :root[data-theme="dark"] {
-  --n-050: #1c2128;
-  --n-100: #22262d;
-  --n-200: #16191d;
-  --n-300: #30363d;
-  --n-400: #6e7681;
-  --n-500: #6e7681;   /* dark 侧 text-3 与 border-control 同值（视觉件 §1.3 就是这两个 hex） */
-  --n-600: #8b949e;
-  --n-900: #e6edf3;
-  --n-975: #0d1117;   /* dark 的 primary 按钮前景（7.49:1 落在 --blue-300 上） */
+  --n-050: #1d2129;
+  --n-100: #23272e;
+  --n-200: #141b2d;
+  --n-300: #303133;
+  --n-400: #8d9095;
+  --n-500: #434343;
+  --n-600: #a3a6ad;
+  --n-900: #e5eaf3;
+  --n-975: #0a0c10;
 
-  --blue-300:  #58a6ff;
-  --cyan-300:  #3fc6d6;
-  --green-300: #3fb950;
-  --violet-300:#a371f7;
-  --teal-300:  #3fb9b0;
-  --amber-300: #d29922;
-  --red-300:   #ff5c5c;
-  --slate-300: #a8b1bc;
+  --blue-300:  #409eff;
+  --cyan-300:  #36cfc9;
+  --green-300: #73d13d;
+  --violet-300:#b37feb;
+  --teal-300:  #36cfc9;
+  --amber-300: #ffc53d;
+  --red-300:   #ff7875;
+  --slate-300: #c0c4cc;
 
-  --blue-tint:  #1f2b3d;
-  --cyan-tint:  #12303a;
-  --green-tint: #1c2e21;
-  --violet-tint:#2a2140;
-  --teal-tint:  #15302f;
-  --amber-tint: #332914;
-  --red-tint:   #3a1c1f;
-  --slate-tint: #262b32;
+  --blue-tint:  #18222b;
+  --cyan-tint:  #162425;
+  --green-tint: #1a2718;
+  --violet-tint:#211a2e;
+  --teal-tint:  #162525;
+  --amber-tint: #2b2410;
+  --red-tint:   #2b1818;
+  --slate-tint: #26292e;
 
   --status-ok: var(--green-300);
   --status-warn: var(--amber-300);
@@ -200,8 +277,41 @@
   --cat-answer: var(--teal-300);
   --cat-gate: var(--slate-300);
 
-  /* 暗底下投影几乎不可见 ⇒ dark 不靠投影分层（视觉件 §1.5） */
+  --focus-ring: var(--blue-300);
   --shadow-1: none;
+
+  --ry-primary: var(--blue-300);
+  --ry-success: var(--green-300);
+  --ry-warning: var(--amber-300);
+  --ry-danger: var(--red-300);
+  --ry-info: var(--slate-300);
+
+  --ry-header-bg: #1d2129;
+  --ry-header-border: #303133;
+  --ry-aside-bg: #141b2d;
+  --ry-aside-text: #bfcbd9;
+  --ry-aside-active-bg: var(--blue-300);
+  --ry-aside-active-text: #ffffff;
+  --ry-aside-hover-bg: #263445;
+  --ry-aside-border: #0a0c10;
+
+  --ry-content-bg: #141b2d;
+  --ry-card-bg: #1d2129;
+  --ry-card-border: #434343;
+
+  --ry-table-head-bg: #1d2129;
+  --ry-table-border: #303133;
+  --ry-table-row-hover: #23272e;
+  --ry-border-light: #303133;
+
+  --ry-input-bg: #1d2129;
+  --ry-input-border: #434343;
+  --ry-input-focus: var(--blue-300);
+
+  --ry-tag-success-bg: #1a2718; --ry-tag-success-border: var(--green-300);
+  --ry-tag-warning-bg: #2b2410; --ry-tag-warning-border: var(--amber-300);
+  --ry-tag-danger-bg:  #2b1818; --ry-tag-danger-border:  var(--red-300);
+  --ry-tag-info-bg:    #26292e; --ry-tag-info-border:    var(--slate-300);
 }
 
 /* 手动切回 light：`:root` 已是 light 全量，本块**故意留空**（写一份副本 = 多一处会漂的双写） */
@@ -209,7 +319,7 @@
 
 /* ---- L2 alias：同值别名必须显式命名，让图例读得出「这一族共用一个值」。
  *   只写一份：alias 指向 L1，L1 已按主题重定义 ⇒ 这里的间接层会动态解析，
- *   不需要在 dark 两个副本里重复（重复 = 多两处会漂的双写）。 ---- */
+ *   不需要在 dark 两个副本里重复。 ---- */
 :root {
   --cat-terminal: var(--status-ok);     /* done：终止定稿 */
   --cat-watch: var(--status-warn);      /* replan / suspended：需关注 */
