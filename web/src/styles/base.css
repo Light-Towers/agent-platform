@@ -548,6 +548,17 @@ a.ry-btn { text-decoration: none; }
 .ry-btn--text { background: transparent; border-color: transparent; color: var(--ry-primary); }
 .ry-btn--text:hover { background: var(--bg-raised); }
 
+/* 分段控件（主题/页签/三态/登录按钮组）：RuoYi 风格按钮组外框。
+ * 语义类（不是标准件），保留为全局类；内部 .ry-btn 去圆角、竖线分隔，选中项用主色高亮。
+ * 选中态同时覆盖 aria-pressed="true"（主题/三态组）与 aria-current="page"（页签组）。 */
+.seg { display: inline-flex; border: 1px solid var(--ry-input-border); border-radius: var(--radius-sm); overflow: hidden; }
+.seg > .ry-btn { border: 0; border-radius: 0; background: transparent; }
+.seg > .ry-btn + .ry-btn { border-left: 1px solid var(--ry-input-border); }
+.seg > .ry-btn[aria-pressed="true"],
+.seg > .ry-btn[aria-current="page"] { background: var(--ry-primary); color: var(--ry-on-primary); font-weight: 500; }
+.seg > .ry-btn[aria-pressed="true"]:hover,
+.seg > .ry-btn[aria-current="page"]:hover { opacity: .9; }
+
 /* ---- 标签 / 徽标 ---- */
 .ry-tag {
   display: inline-flex;
