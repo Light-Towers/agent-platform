@@ -62,7 +62,7 @@
 | `applications/agent_server/tests/` | agent_server 应用层集成测试（GraphPlanner × runtime，2026-09-21 F-S1-01 迁入） | `pytest applications/agent_server/tests -q` |
 | `eval/` | agent_server 评测门禁（15 条 golden；`run_eval.py` 启发式 + `eval/run_planner_eval.py` 双 Planner 基线） | `python eval/run_eval.py` |
 | `docs/` | 设计文档 | — |
-| `web/` | **前端视觉层 POC（未批开工）**：样式三件 + 两个静态宿主页 + Node 门禁；无 Vue / 无构建链 / 无 `package.json`，页上每个数字都是假数据。射程与判据见 `docs/plans/plan-web-frontend-minimal-core-2026-10-29.md` §13 与同目录视觉件；**本行首列在 `check_doc_sync.py` 的 AGENTS 表格首列面上（会被校存在性），而本行其余格里的 `web/` 路径不在其文件引用面内** | `node web/scripts/check-tokens.mjs`（视觉门禁，rc=0 为过） |
+| `web/` | **前端视觉层 POC（未批开工）**：样式三件 + Vue 组件（`src/`）+ vite 构建链 + `package.json` + 两个静态宿主页 + Node 门禁；页上数字仍是假数据（未接后端）。⚠ 射程已超出 plan-web-frontend §13 原「最小 POC」授权（当时为无 Vue/无构建链），后续经样式统一与 RuoYi 框架落地逐步扩展。射程与判据见 `docs/plans/plan-web-frontend-minimal-core-2026-10-29.md` §13 与同目录视觉件；**本行首列在 `check_doc_sync.py` 的 AGENTS 表格首列面上（会被校存在性），而本行其余格里的 `web/` 路径不在其文件引用面内** | `node web/scripts/check-tokens.mjs`（视觉门禁，rc=0 为过） |
 
 ## 运行方式
 
