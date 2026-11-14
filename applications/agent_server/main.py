@@ -802,7 +802,7 @@ def create_app() -> FastAPI:
     app.add_middleware(IdentityMiddleware, skip_paths=_IDENTITY_SKIP_PATHS)
     app.include_router(router)
     # 前端产物只发页面壳与静态资源：鉴权仍由各数据接口的 verify_api_key 依赖把守（与
-    # /console.html 同惯例：壳免鉴权、数据要密钥）——本仓鉴权是每路由依赖而非中间件，
+    # /console.html 同惯例：壳免鉴权、数据要登录令牌）——本仓鉴权是每路由依赖而非中间件，
     # 所以挂一个新 mount 不需要同步改免鉴权路径集（这一点已实取，不是推定）。
     dist = _resolve_web_ui_dist()
     if dist is not None:

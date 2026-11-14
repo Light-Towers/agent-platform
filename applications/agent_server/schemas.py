@@ -193,7 +193,7 @@ class HealthResponse(BaseHealthResponse):
     cache_stats: CacheStatsReport | None = Field(
         None, description="语义缓存命中率与分项计数（total=0 时 hit_rate=0.0，键集合恒定）"
     )
-    auth_enabled: bool = Field(False, description="接口是否要求 X-API-Key（不回显密钥）")
+    auth_enabled: bool = Field(False, description="是否启用入站鉴权（只接受登录令牌，不回显密钥）")
     identity_mode: str | None = Field(
         None, description="租户身份模式：jwt / single / insecure（与启动守卫同一判定）"
     )
