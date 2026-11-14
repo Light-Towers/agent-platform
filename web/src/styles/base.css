@@ -398,24 +398,43 @@ a.ry-btn { text-decoration: none; }
 }
 .ry-menu { display: flex; flex-direction: column; padding: var(--sp-2) 0; }
 .ry-menu-item {
+  position: relative;
   display: flex;
   align-items: center;
   gap: var(--sp-3);
-  padding: var(--sp-3) var(--sp-4);
+  min-height: 44px;            /* RuoYi 一级菜单统一高度 */
+  padding: 0 var(--sp-4);
   color: var(--ry-aside-text);
   cursor: pointer;
   font-size: var(--fs-body);
   border-left: 3px solid transparent;
   transition: background var(--t-fast) var(--ease-out), color var(--t-fast) var(--ease-out);
 }
-.ry-menu-item:hover { background: var(--ry-aside-hover-bg); }
+/* hover 渐变指示线：RuoYi 侧栏标志性的「光标条」 */
+.ry-menu-item::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 20px;
+  border-radius: 2px;
+  background: linear-gradient(180deg, var(--ry-primary), color-mix(in srgb, var(--ry-primary) 55%, var(--bg-surface)));
+  opacity: 0;
+  transition: opacity var(--t-fast) var(--ease-out);
+}
+.ry-menu-item:hover::before { opacity: 1; }
 .ry-menu-item[aria-disabled="true"] { color: var(--ry-aside-text-muted); cursor: not-allowed; }
+.ry-menu-item[aria-disabled="true"]::before { display: none; }
 .ry-menu-item.is-active {
-  background: var(--ry-aside-active-bg);
+  background: linear-gradient(135deg, var(--ry-primary), color-mix(in srgb, var(--ry-primary) 68%, var(--bg-surface)));
   color: var(--ry-aside-active-text);
   border-left-color: var(--ry-on-primary);
   font-weight: 500;
+  box-shadow: 0 2px 6px var(--ry-primary);
 }
+.ry-menu-item.is-active::before { opacity: 0; }  /* active 已有蓝底+白线，不再叠指示线 */
 .ry-menu-item .ico { color: inherit; }
 
 /* ---- 内容区 ---- */
