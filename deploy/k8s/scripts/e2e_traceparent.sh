@@ -9,10 +9,12 @@
 #   - 唯一 query 带时间戳后缀，绕语义缓存命中短路（cache_hit 路径不建业务 span）；
 #   - BatchSpanProcessor ~5s flush → sleep ≥8 再查 Jaeger；
 #   - agent_server 读 pydantic-settings 字段大写（OTEL_ENABLED/OTEL_ENDPOINT...），非 OTel 官方 env 名；
-#   - 注入 API_KEY 后本脚本必须带 X-API-Key，否则 401（密钥只从环境读，绝不写进文件）；
+#   - 鉴权：优先用登录令牌 AUTH_TOKEN（Bearer）；API_KEY 仅兼容退役前镜像
+#     （旧通道 X-API-Key，新镜像已不认、会 401）。密钥/令牌只从环境读，绝不写进文件；
 #     同时 body 里的 session_id/thread_id 会被服务端忽略——会话桶由服务端断言的租户决定。
-# 用法：export API_KEY='<集群里那份>' 后再执行；未导出则退化为无鉴权模式的探测。
-#   API_KEY=xxx bash deploy/k8s/scripts/e2e_traceparent.sh
+# 用法：export AUTH_TOKEN='<登录JWT>' 后再执行；或 export API_KEY（仅旧镜像）；
+#      均未导出则退化为无鉴权模式的探测。
+#   AUTH_TOKEN=xxx bash deploy/k8s/scripts/e2e_traceparent.sh
 # 成功判据：Jaeger /api/traces/<trace_id> 返回该 trace 且 spans 数 ≥1、含 server 端
 #           "POST /query" SERVER span（S2 TracingMiddleware 产物，429/409 旁路亦须在）。
 # 退出码：0 复验通过 / 1 未落 trace 或断链 / 2 请求本身失败。
@@ -21,6 +23,7 @@ set -euo pipefail
 TARGET="${TARGET:-http://127.0.0.1:18000}"
 JAEGER="${JAEGER:-http://127.0.0.1:16686}"
 API_KEY="${API_KEY:-}"
+AUTH_TOKEN="${AUTH_TOKEN:-}"
 PARENT_SPAN="0123456789abcdef"
 TS="$(date +%s)"
 TRACE_ID="$(printf '%032x' $((0x5abcdef * TS)))"           # 每次运行唯一 trace id
@@ -28,7 +31,10 @@ TRACE_ID="$(printf '%032x' $((0x5abcdef * TS)))"           # 每次运行唯一 
 # session_id 而非 thread_id：thread_id 只是共享契约里的兼容别名（AliasChoices），
 # 新脚本用规范名，避免下一个人以为两者语义不同。
 AUTH_ARGS=()
-if [ -n "$API_KEY" ]; then
+if [ -n "$AUTH_TOKEN" ]; then
+  AUTH_ARGS=(-H "Authorization: Bearer $AUTH_TOKEN")
+elif [ -n "$API_KEY" ]; then
+  # 兼容退役前镜像（旧 X-API-Key 通道）：新镜像只认登录令牌，带 X-API-Key 会 401
   AUTH_ARGS=(-H "X-API-Key: $API_KEY")
 fi
 
@@ -38,7 +44,7 @@ CODE=$(curl -s -o /tmp/e2e_body.txt -w '%{http_code}' -X POST "$TARGET/query" \
   "${AUTH_ARGS[@]+"${AUTH_ARGS[@]}"}" \
   -d "{\"query\": \"e2e取证-$TS 展馆开放时间\", \"session_id\": \"e2e-$TS\"}")
 if [ "$CODE" = "401" ]; then
-  echo "FAIL: HTTP=401 —— 服务端已启用 X-API-Key，本脚本未带凭据（export API_KEY=... 后重试）"
+  echo "FAIL: HTTP=401 —— 服务端已启用鉴权，本脚本未带有效令牌（export AUTH_TOKEN=... 后重试；旧镜像才认 API_KEY）"
   echo "      注意：不要把密钥写进本文件或任何落盘脚本"
   exit 2
 fi
