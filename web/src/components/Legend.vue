@@ -15,7 +15,7 @@ const famCount = computed(() => new Set(EVENT_NAMES.map((n) => EVENT_LEGEND[n].s
 
 <template>
   <!-- details/summary 沿用 POC 页形状：图例是参考信息，不占首屏主位（视觉件 §2.1） -->
-  <details class="panel">
+  <details class="ry-card">
     <summary>
       <span class="o-head-sm">图例：{{ EVENT_NAMES.length }} 类事件 → {{ famCount }} 族色相</span>
     </summary>

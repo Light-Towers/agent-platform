@@ -17,19 +17,19 @@
     <span class="spacer"></span>
     <nav class="seg" aria-label="页面">
       <!-- 相对链接，不引路由库：POC 阶段两页足以说明形态，Vue Router 属 PR-0 -->
-      <a class="btn" href="./poc.html" aria-current="page">对话控制台</a>
-      <a class="btn" href="./poc-health.html">健康灯</a>
+      <a class="ry-btn" href="./poc.html" aria-current="page">对话控制台</a>
+      <a class="ry-btn" href="./poc-health.html">健康灯</a>
     </nav>
     <div class="seg" role="group" aria-label="主题">
-      <button class="btn" data-theme-set="auto" aria-pressed="true">自动</button>
-      <button class="btn" data-theme-set="light" aria-pressed="false">浅色</button>
-      <button class="btn" data-theme-set="dark" aria-pressed="false">深色</button>
+      <button class="ry-btn" data-theme-set="auto" aria-pressed="true">自动</button>
+      <button class="ry-btn" data-theme-set="light" aria-pressed="false">浅色</button>
+      <button class="ry-btn" data-theme-set="dark" aria-pressed="false">深色</button>
     </div>
     <div class="seg" role="group" aria-label="三态演示">
-      <button class="btn" data-state-set="normal" aria-pressed="true">正常</button>
-      <button class="btn" data-state-set="loading" aria-pressed="false">加载中</button>
-      <button class="btn" data-state-set="empty" aria-pressed="false">空态</button>
-      <button class="btn" data-state-set="error" aria-pressed="false">错误</button>
+      <button class="ry-btn" data-state-set="normal" aria-pressed="true">正常</button>
+      <button class="ry-btn" data-state-set="loading" aria-pressed="false">加载中</button>
+      <button class="ry-btn" data-state-set="empty" aria-pressed="false">空态</button>
+      <button class="ry-btn" data-state-set="error" aria-pressed="false">错误</button>
     </div>
   </header>
 
@@ -50,34 +50,34 @@
   <main class="grid">
 
     <!-- 栏一：会话 + 密钥 -->
-    <section class="panel" aria-labelledby="hSess">
+    <section class="ry-card" aria-labelledby="hSess">
       <h2 id="hSess">会话</h2>
       <div class="stack">
-        <button class="btn">上季度退票率的口径是什么 <span class="num">今天</span></button>
-        <button class="btn">2026 版服务协议的免责条款 <span class="num">昨天</span></button>
-        <button class="btn">工单 2311 处理到哪一步了 <span class="num">3 天前</span></button>
+        <button class="ry-btn">上季度退票率的口径是什么 <span class="num">今天</span></button>
+        <button class="ry-btn">2026 版服务协议的免责条款 <span class="num">昨天</span></button>
+        <button class="ry-btn">工单 2311 处理到哪一步了 <span class="num">3 天前</span></button>
       </div>
       <details class="only-narrow fold"><summary class="hint">依据列表（窄栏折叠）</summary>
         <p class="hint">768–1279 断点下并到原生 <code>&lt;details&gt;</code>，不另造抽屉。</p>
       </details>
 
-      <div class="panel">
+      <div class="ry-card">
         <div class="o-head-sm">API 密钥</div>
         <div class="keybox">
-          <input class="field" type="password" placeholder="粘贴密钥" aria-label="API 密钥">
-          <button class="btn btn-primary">应用</button>
+          <input class="ry-input" type="password" placeholder="粘贴密钥" aria-label="API 密钥">
+          <button class="ry-btn ry-btn--primary">应用</button>
         </div>
         <p class="hint">密钥<strong>只存内存，不落 localStorage</strong>。主题偏好键 <code>ap.ui.theme</code> 不属凭据，与这条纪律不冲突（视觉件 §1.6）。</p>
       </div>
     </section>
 
     <!-- 栏二：时间线 -->
-    <section class="panel" aria-labelledby="hTl">
+    <section class="ry-card" aria-labelledby="hTl">
       <h2 id="hTl">事件时间线 <span class="count-badge" id="tlCount"></span></h2>
 
       <div class="empty" id="emptyNormal" hidden>
         <p>还没有会话。</p>
-        <p class="hint"><button class="btn">试试：上季度退票率的口径是什么？</button></p>
+        <p class="hint"><button class="ry-btn">试试：上季度退票率的口径是什么？</button></p>
       </div>
       <div class="empty" id="empty503" hidden>
         <p>历史读不到（<code>HISTORY_READ_FAILED</code>）。</p>
@@ -93,8 +93,8 @@
       </div>
 
       <div class="composer">
-        <input class="field" id="q" placeholder="输入问题…" aria-label="问题">
-        <button class="btn btn-primary" id="submit">提问</button>
+        <input class="ry-input" id="q" placeholder="输入问题…" aria-label="问题">
+        <button class="ry-btn ry-btn--primary" id="submit">提问</button>
         <span class="hint" id="submitHint"></span>
       </div>
     </section>
@@ -102,7 +102,7 @@
   </main>
 
   <!-- 图例常驻页面底部折叠区（视觉件 §2.1） -->
-  <details class="panel" id="legendBox">
+  <details class="ry-card" id="legendBox">
     <summary><span class="o-head-sm">图例：12 类事件 → 8 族色相</span></summary>
     <div class="legend" id="legend"></div>
     <p class="hint">图例与 <code>events.css</code> 同源，由门禁断言 6 校验「key 集 == 派生事件全集」，不写死 12。</p>

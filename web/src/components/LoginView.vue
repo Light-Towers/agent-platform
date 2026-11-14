@@ -85,7 +85,7 @@ function retryResume(): void {
   <main class="grid">
     <div class="col">
       <section
-        class="panel"
+        class="ry-card"
         aria-labelledby="hAuth"
       >
         <h2 id="hAuth">
@@ -99,7 +99,7 @@ function retryResume(): void {
         >
           <button
             type="button"
-            class="btn"
+            class="ry-btn"
             :aria-pressed="isRegister"
             @click="pickMode('register')"
           >
@@ -107,7 +107,7 @@ function retryResume(): void {
           </button>
           <button
             type="button"
-            class="btn"
+            class="ry-btn"
             :aria-pressed="!isRegister"
             @click="pickMode('login')"
           >
@@ -126,7 +126,7 @@ function retryResume(): void {
           <input
             id="authLogin"
             v-model="login"
-            class="field"
+            class="ry-input"
             type="text"
             name="username"
             autocomplete="username"
@@ -144,7 +144,7 @@ function retryResume(): void {
           <input
             :id="isRegister ? 'authNewPassword' : 'authPassword'"
             v-model="password"
-            class="field"
+            class="ry-input"
             type="password"
             name="password"
             :autocomplete="isRegister ? 'new-password' : 'current-password'"
@@ -158,7 +158,7 @@ function retryResume(): void {
             <input
               id="authDisplayName"
               v-model="displayName"
-              class="field"
+              class="ry-input"
               type="text"
               autocomplete="nickname"
               placeholder="屏上给人看的那一个名字"
@@ -170,7 +170,7 @@ function retryResume(): void {
                  里抽走，键盘用户会在按下的一瞬间丢焦点，V6 那一格实测过）。真正的早退在 `send()` 里。 -->
             <button
               type="submit"
-              class="btn btn-primary"
+              class="ry-btn ry-btn--primary"
               :aria-disabled="!canSend"
             >
               {{ authPending ? '提交中…' : isRegister ? '创建并进入' : '登录' }}
@@ -197,7 +197,7 @@ function retryResume(): void {
         >
           <button
             type="button"
-            class="btn"
+            class="ry-btn"
             @click="retryResume"
           >
             重试确认登录态
@@ -209,7 +209,7 @@ function retryResume(): void {
     <!-- 栏二：这一屏的承诺。写的全是**已成立**的事实，未来时的句子一句不要。 -->
     <div class="col">
       <section
-        class="panel"
+        class="ry-card"
         aria-labelledby="hAuthNote"
       >
         <h2 id="hAuthNote">

@@ -200,7 +200,7 @@ function onSignOut(): void {
         </p>
         <button
           type="button"
-          class="btn"
+          class="ry-btn"
           @click="clearBanners"
         >
           清除提示
@@ -214,7 +214,7 @@ function onSignOut(): void {
       >
         <div class="col">
           <section
-            class="panel"
+            class="ry-card"
             aria-labelledby="hAnswer"
           >
             <h2 id="hAnswer">
@@ -230,7 +230,7 @@ function onSignOut(): void {
           </section>
 
           <section
-            class="panel only-wide"
+            class="ry-card only-wide"
             aria-labelledby="hEvidence"
           >
             <h2 id="hEvidence">
@@ -240,7 +240,7 @@ function onSignOut(): void {
             <EvidenceList />
           </section>
 
-          <details class="panel only-narrow">
+          <details class="ry-card only-narrow">
             <summary>
               <span class="o-head-sm">依据列表（窄栏折叠）</span>
               <span class="count-badge">{{ evidence.length }}</span>
@@ -251,7 +251,7 @@ function onSignOut(): void {
 
         <div class="col">
           <section
-            class="panel"
+            class="ry-card"
             aria-labelledby="hTimeline"
           >
             <h2 id="hTimeline">
@@ -267,7 +267,7 @@ function onSignOut(): void {
             >
               <input
                 v-model="question"
-                class="field"
+                class="ry-input"
                 type="text"
                 placeholder="输入问题…"
                 autocomplete="off"
@@ -276,7 +276,7 @@ function onSignOut(): void {
               <div class="composer__row">
                 <button
                   type="submit"
-                  class="btn btn-primary"
+                  class="ry-btn ry-btn--primary"
                   :aria-disabled="!canSubmit"
                 >
                   {{ busy ? '等待 done…' : '提问' }}

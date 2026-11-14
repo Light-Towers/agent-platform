@@ -33,7 +33,7 @@ const TERM_LABEL: Record<Terminal, string> = {
       <p class="hint">
         <button
           type="button"
-          class="btn"
+          class="ry-btn"
           @click="useExample"
         >
           试试：这个平台能帮我查什么？

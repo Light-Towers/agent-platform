@@ -17,13 +17,13 @@
     <span class="spacer"></span>
     <nav class="seg" aria-label="页面">
       <!-- 相对链接，不引路由库：POC 阶段两页足以说明形态，Vue Router 属 PR-0 -->
-      <a class="btn" href="./poc.html">对话控制台</a>
-      <a class="btn" href="./poc-health.html" aria-current="page">健康灯</a>
+      <a class="ry-btn" href="./poc.html">对话控制台</a>
+      <a class="ry-btn" href="./poc-health.html" aria-current="page">健康灯</a>
     </nav>
     <div class="seg" role="group" aria-label="主题">
-      <button class="btn" data-theme-set="auto" aria-pressed="true">自动</button>
-      <button class="btn" data-theme-set="light" aria-pressed="false">浅色</button>
-      <button class="btn" data-theme-set="dark" aria-pressed="false">深色</button>
+      <button class="ry-btn" data-theme-set="auto" aria-pressed="true">自动</button>
+      <button class="ry-btn" data-theme-set="light" aria-pressed="false">浅色</button>
+      <button class="ry-btn" data-theme-set="dark" aria-pressed="false">深色</button>
     </div>
   </header>
 
@@ -33,7 +33,7 @@
   </p>
 
   <!-- 判读说明常驻本页：形状不是装饰，是「接线 ≠ 启用」的唯一区分通道 -->
-  <section class="panel" aria-labelledby="hShape">
+  <section class="ry-card" aria-labelledby="hShape">
     <h2 id="hShape">四档形状（先看这个再看灯）</h2>
     <div class="shapekey">
       <div class="sk-row"><span class="dot dot--on"></span><code>true</code><span class="hint">实心圆 · 已装配且启用</span></div>
@@ -47,7 +47,7 @@
     </p>
   </section>
 
-  <section class="panel" aria-labelledby="hLamp">
+  <section class="ry-card" aria-labelledby="hLamp">
     <h2 id="hLamp">全部字段（分组与字段名从源派生，本页不写死数量）</h2>
     <p class="hint">第一段就是可追溯性本身：字段名原文 = 接口值，不做本地推断（工单件 PR-4）。</p>
     <div id="lamps"></div>

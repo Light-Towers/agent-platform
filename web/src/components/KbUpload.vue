@@ -92,7 +92,7 @@ async function refreshDocuments(): Promise<void> {
   <div class="col">
     <div class="col">
       <section
-        class="panel"
+        class="ry-card"
         aria-labelledby="hKb"
       >
         <h2 id="hKb">
@@ -127,7 +127,7 @@ async function refreshDocuments(): Promise<void> {
             scope_type
             <input
               v-model="form.scopeType"
-              class="field"
+              class="ry-input"
               type="text"
             >
           </label>
@@ -135,7 +135,7 @@ async function refreshDocuments(): Promise<void> {
             tenant_type
             <input
               v-model="form.tenantType"
-              class="field"
+              class="ry-input"
               type="text"
             >
           </label>
@@ -143,7 +143,7 @@ async function refreshDocuments(): Promise<void> {
             effective_from
             <input
               v-model="form.effectiveFrom"
-              class="field"
+              class="ry-input"
               type="text"
             >
           </label>
@@ -151,7 +151,7 @@ async function refreshDocuments(): Promise<void> {
             effective_to
             <input
               v-model="form.effectiveTo"
-              class="field"
+              class="ry-input"
               type="text"
             >
           </label>
@@ -159,7 +159,7 @@ async function refreshDocuments(): Promise<void> {
             version
             <input
               v-model="form.version"
-              class="field"
+              class="ry-input"
               type="text"
             >
           </label>
@@ -167,7 +167,7 @@ async function refreshDocuments(): Promise<void> {
             authority
             <input
               v-model="form.authority"
-              class="field"
+              class="ry-input"
               type="text"
             >
           </label>
@@ -175,7 +175,7 @@ async function refreshDocuments(): Promise<void> {
             status
             <input
               v-model="form.status"
-              class="field"
+              class="ry-input"
               type="text"
             >
           </label>
@@ -183,7 +183,7 @@ async function refreshDocuments(): Promise<void> {
             constraint_kind
             <input
               v-model="form.constraintKind"
-              class="field"
+              class="ry-input"
               type="text"
             >
           </label>
@@ -191,7 +191,7 @@ async function refreshDocuments(): Promise<void> {
             knowledge_id
             <input
               v-model="form.knowledgeId"
-              class="field"
+              class="ry-input"
               type="text"
             >
           </label>
@@ -199,7 +199,7 @@ async function refreshDocuments(): Promise<void> {
             exhibition_id
             <input
               v-model="form.exhibitionId"
-              class="field"
+              class="ry-input"
               type="text"
             >
           </label>
@@ -207,7 +207,7 @@ async function refreshDocuments(): Promise<void> {
             venue_id
             <input
               v-model="form.venueId"
-              class="field"
+              class="ry-input"
               type="text"
             >
           </label>
@@ -215,7 +215,7 @@ async function refreshDocuments(): Promise<void> {
             数据源类型
             <select
               v-model="form.datasourceType"
-              class="field"
+              class="ry-input"
               aria-label="数据源类型"
             >
               <option
@@ -237,7 +237,7 @@ async function refreshDocuments(): Promise<void> {
 
           <button
             type="submit"
-            class="btn btn-primary"
+            class="ry-btn ry-btn--primary"
             :aria-disabled="busy"
           >
             {{ busy ? '上传中…' : '上传' }}
@@ -263,7 +263,7 @@ async function refreshDocuments(): Promise<void> {
       </section>
 
       <section
-        class="panel"
+        class="ry-card"
         aria-labelledby="hDocs"
       >
         <h2 id="hDocs">
@@ -271,7 +271,7 @@ async function refreshDocuments(): Promise<void> {
         </h2>
         <button
           type="button"
-          class="btn"
+          class="ry-btn"
           @click="refreshDocuments"
         >
           刷新列表

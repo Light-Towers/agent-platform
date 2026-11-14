@@ -60,7 +60,7 @@
   --status-warn: var(--amber-600);
   --status-danger: var(--red-600);
   --status-running: var(--cyan-600);
-  --on-primary: var(--n-050);
+
 
   /* ---- L1 事件族 accent（语义色：决策/进度/来源/记忆/答案/门控） ---- */
   --cat-decision: var(--blue-600);
@@ -106,7 +106,7 @@
   --radius-md: 4px;
   --radius-pill: 999px;  /* 徽标 */
   --t-fast: 120ms;
-  --t-slow: 200ms;
+
   --ease-out: cubic-bezier(.2, 0, 0, 1);
 
   /* ---- RuoYi 后台外壳令牌（三段式布局 + 标准 CRUD 组件；base.css 的 `.ry-*` 消费） ---- */
@@ -163,7 +163,7 @@
     --n-500: #434343;
     --n-600: #a3a6ad;
     --n-900: #e5eaf3;
-    --n-975: #0a0c10;
+  
 
     --blue-300:  #409eff;
     --cyan-300:  #36cfc9;
@@ -187,7 +187,7 @@
     --status-warn: var(--amber-300);
     --status-danger: var(--red-300);
     --status-running: var(--cyan-300);
-    --on-primary: var(--n-975);
+
 
     --cat-decision: var(--blue-300);
     --cat-progress: var(--cyan-300);
@@ -244,7 +244,7 @@
   --n-500: #434343;
   --n-600: #a3a6ad;
   --n-900: #e5eaf3;
-  --n-975: #0a0c10;
+
 
   --blue-300:  #409eff;
   --cyan-300:  #36cfc9;
@@ -268,7 +268,7 @@
   --status-warn: var(--amber-300);
   --status-danger: var(--red-300);
   --status-running: var(--cyan-300);
-  --on-primary: var(--n-975);
+
 
   --cat-decision: var(--blue-300);
   --cat-progress: var(--cyan-300);

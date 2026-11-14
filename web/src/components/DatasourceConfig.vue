@@ -143,7 +143,7 @@ onMounted(() => { void refresh() })
   <div class="col">
     <div class="col">
       <section
-        class="panel"
+        class="ry-card"
         aria-labelledby="hDs"
       >
         <h2 id="hDs">
@@ -200,7 +200,7 @@ onMounted(() => { void refresh() })
               <td>
                 <button
                   type="button"
-                  class="btn"
+                  class="ry-btn"
                   @click="startEdit(ds)"
                 >
                   编辑
@@ -208,7 +208,7 @@ onMounted(() => { void refresh() })
                 <button
                   v-if="!ds.is_default"
                   type="button"
-                  class="btn btn-primary"
+                  class="ry-btn ry-btn--primary"
                   @click="markDefault(ds)"
                 >
                   设默认
@@ -220,7 +220,7 @@ onMounted(() => { void refresh() })
 
         <button
           type="button"
-          class="btn btn-primary"
+          class="ry-btn ry-btn--primary"
           @click="openCreate"
         >
           新建数据源
@@ -230,7 +230,7 @@ onMounted(() => { void refresh() })
       <!-- 编辑面板 -->
       <section
         v-if="editing"
-        class="panel"
+        class="ry-card"
         aria-labelledby="hEdit"
       >
         <h2 id="hEdit">
@@ -243,14 +243,14 @@ onMounted(() => { void refresh() })
           <label class="o-head-sm">名称</label>
           <input
             v-model="editLabel"
-            class="field"
+            class="ry-input"
             type="text"
             aria-label="名称"
           >
           <label class="o-head-sm">数据源类型</label>
           <select
             v-model="editDialect"
-            class="field"
+            class="ry-input"
             aria-label="数据源类型"
           >
             <option
@@ -264,27 +264,27 @@ onMounted(() => { void refresh() })
           <label class="o-head-sm">口径标签</label>
           <input
             v-model="editScope"
-            class="field"
+            class="ry-input"
             type="text"
             aria-label="口径标签"
           >
           <label class="o-head-sm">credential_ref（Secret 投影键名，非口令）</label>
           <input
             v-model="editCredRef"
-            class="field"
+            class="ry-input"
             type="text"
             aria-label="credential_ref"
           >
           <div class="composer__row">
             <button
               type="submit"
-              class="btn btn-primary"
+              class="ry-btn ry-btn--primary"
             >
               保存
             </button>
             <button
               type="button"
-              class="btn"
+              class="ry-btn"
               @click="cancelEdit"
             >
               取消
@@ -296,7 +296,7 @@ onMounted(() => { void refresh() })
       <!-- 新建面板 -->
       <section
         v-if="showCreate"
-        class="panel"
+        class="ry-card"
         aria-labelledby="hNew"
       >
         <h2 id="hNew">
@@ -309,21 +309,21 @@ onMounted(() => { void refresh() })
           <label class="o-head-sm">id（必填）</label>
           <input
             v-model="newId"
-            class="field"
+            class="ry-input"
             type="text"
             aria-label="id"
           >
           <label class="o-head-sm">名称</label>
           <input
             v-model="newLabel"
-            class="field"
+            class="ry-input"
             type="text"
             aria-label="名称"
           >
           <label class="o-head-sm">数据源类型</label>
           <select
             v-model="newDialect"
-            class="field"
+            class="ry-input"
             aria-label="数据源类型"
           >
             <option
@@ -337,27 +337,27 @@ onMounted(() => { void refresh() })
           <label class="o-head-sm">口径标签</label>
           <input
             v-model="newScope"
-            class="field"
+            class="ry-input"
             type="text"
             aria-label="口径标签"
           >
           <label class="o-head-sm">credential_ref（必填，Secret 投影键名，非口令）</label>
           <input
             v-model="newCredRef"
-            class="field"
+            class="ry-input"
             type="text"
             aria-label="credential_ref"
           >
           <div class="composer__row">
             <button
               type="submit"
-              class="btn btn-primary"
+              class="ry-btn ry-btn--primary"
             >
               创建
             </button>
             <button
               type="button"
-              class="btn"
+              class="ry-btn"
               @click="cancelCreate"
             >
               取消

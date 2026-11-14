@@ -22,7 +22,7 @@ import { authFeatures, authRole } from '../stores/session'
   <main class="grid">
     <div class="col">
       <section
-        class="panel"
+        class="ry-card"
         aria-labelledby="hRole"
       >
         <h2 id="hRole">
