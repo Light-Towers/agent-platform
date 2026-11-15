@@ -157,6 +157,14 @@ def test_local_mode_model_id_is_the_one_kernel_falls_back_to(container):
     assert env.get("INTENT_EMBEDDING_MODEL"), "local 模式必须显式钉住模型 id"
     from agent_server.config import get_settings
 
+    # 维度前提是「清单 local 模式契约」的属性：内核落底 local 模型(bge-small-zh-v1.5)
+    # 512 维 ⇄ pgvector 列宽 512。get_settings().vector_dim 反映的是【运行进程】的
+    # embedding 配置，而非清单文件本身。dev .env 是 remote(bge-m3=1024)、CI 是
+    # auto/mock，它们与清单 local 契约不是同一套部署，拿其 vector_dim 给清单定罪
+    # 即测错对象。仅当运行环境也走 local 内核时，vector_dim 才真反映该契约、维度
+    # 检查才有意义；否则跳过（清单的模型钉扎仍始终校验，且真实 local 部署会跑本条）。
+    if get_settings().embedding_mode != "local":
+        pytest.skip("运行环境非 local 内核模式，vector_dim 不反映清单 local 契约")
     assert get_settings().vector_dim == 512, "维度前提变了要同步改 pgvector 列宽"
 
 
