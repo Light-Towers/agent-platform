@@ -66,7 +66,7 @@ async def _forward(method: str, path: str, body: Any = None) -> Any:
         raise HTTPException(status_code=resp.status_code, detail=f"数据源配置转发失败：{resp.text[:200]}")
     try:
         return resp.json()
-    except Exception:
+    except ValueError:  # 上游返回非 JSON（JSONDecodeError 即 ValueError 子类）
         return {}
 
 

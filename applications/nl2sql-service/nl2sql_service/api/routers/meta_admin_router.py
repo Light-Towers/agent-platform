@@ -22,9 +22,16 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from agent_core.logging import get_logger
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
+
+if TYPE_CHECKING:
+    from nl2sql_service.repositories.postgres.meta.datasource_repository import (
+        DataSourceRepository,
+    )
 
 logger = get_logger(__name__)
 

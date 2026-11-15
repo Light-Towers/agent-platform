@@ -1446,6 +1446,8 @@ _SIGN_SITE_ALLOWED = frozenset({
     "applications/agent_federation/agent/async_subagents.py",
     "applications/agent_server/capabilities.py",
     "applications/agent_server/api/kb_router.py",
+    # G3 刀 3 数据源代理：与 sql_router 同形，X-Internal-Tenant 签名头转发（role 不签）
+    "applications/agent_server/api/datasources_router.py",
 })
 
 
