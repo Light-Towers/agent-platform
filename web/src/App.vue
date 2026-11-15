@@ -7,12 +7,9 @@
  *   · empty  = `Answer.vue` 的引导与示例按钮 + `Timeline.vue` 的「还没有事件」；
  *   · error  = 顶部 banner 区（`session.ts` 累积，四分支文案互异 = A8）。
  * 两条**刻意没做**的，都要读成"没做"而不是"做完了"：
- *   ① 没有会话历史列表。参照物 `poc.html:56-58` 那三条是**假数据**，而它的宿主
- *      页头已明写"每个数字都是假数据"；产品代码里没有可追溯的来源就不许上屏
- *      （历史接口属 PR-3，未开工）。
- *   ② 没有那条跳 PR-4 灯阵页的 `<a href>` 链接。工单件 §7 PR-2 行要求交它，但
- *      PR-4 未开工 ⇒ 目标不存在，现在加就是一条当场 404 的死链 —— 与 ①同一条纪律
- *      （不给指不到东西的引导）。**复审触发条件**：PR-4 交付批同批把链接接进 header。
+ *   ① 没有会话历史列表（历史接口属 PR-3，未开工）—— 产品代码里没有可追溯的来源就不许上屏。
+ *   ② 平台健康灯阵页（PR-4）已接真实 `/health` 端点（HealthView.vue），不再是演示页；
+ *      侧栏「平台健康」入口对所有已登录用户开放（`/health` 是免鉴权探针路径）。
  * ⚠ Tab 顺序与本件 DOM 顺序一致，不靠 `tabindex`/`order` 重排（重排会让"键盘走到的
  *   顺序"与"肉眼看到的顺序"分叉，视觉件 §3 那条线就失去可核对性）。因此实序是
  *   header → 密钥 → 输入 → 提交 →（窄栏才有）展开事件 —— 与 §3 那句「header → 输入
@@ -30,6 +27,7 @@ import RoleGate from './components/RoleGate.vue'
 import KbUpload from './components/KbUpload.vue'
 import DatasourceConfig from './components/DatasourceConfig.vue'
 import ThemeToggle from './components/ThemeToggle.vue'
+import HealthView from './components/HealthView.vue'
 import Timeline from './components/Timeline.vue'
 import {
   ask,
@@ -54,7 +52,7 @@ import {
 /* ---- G1 管理面导航（批 1：对话页 + 角色页；知识库/数据源两页随批 2/批 3 接入）----
  * 视图键是本组件的局部 ref：只有本件读写它，不进会话层（会话层是跨组件共享态，
  * 单组件的 UI 态进会话层 = 把局部事物全局化）。 */
-const activeView = ref<'chat' | 'role' | 'kb' | 'datasource'>('chat')
+const activeView = ref<'chat' | 'role' | 'kb' | 'datasource' | 'health'>('chat')
 
 /**
  * 「角色」页入口的显隐判据：手里有任一管理向能力码才显示。viewer 只有 chat.run /
@@ -71,6 +69,9 @@ const showKb = computed(() => hasFeature('kb.upload'))
 /** 问数数据源配置页入口（feature `datasource.manage`）。G3 交付。 */
 const showDatasource = computed(() => hasFeature('datasource.manage'))
 
+/** 平台健康灯阵页入口（PR-4 真实视图）：`/health` 是免鉴权探针路径，对所有已登录用户开放。 */
+const showHealth = computed(() => true)
+
 /** 页眉视图标签（对话/角色/知识库/数据源），供 h1 旁的 hint 显示当前所在面。 */
 const viewLabel = computed(() => {
   if (!canChat.value) return '登录面'
@@ -84,7 +85,7 @@ const viewLabel = computed(() => {
  * 对话页是否在屏上。视图键停在管理面页但该页已无权渲染（登录态掉了、或换成无管理向
  * 能力的角色）⇒ 回对话页兜底，不给「无权页面白屏」留缝。
  */
-const chatShown = computed(() => activeView.value === 'chat' || (!showRoleGate.value && !showKb.value && !showDatasource.value))
+const chatShown = computed(() => activeView.value === 'chat' || (!showRoleGate.value && !showKb.value && !showDatasource.value && !showHealth.value))
 
 /* 挂载时确认一次登录态（A8「刷新仍在登录」那一格的调用点）。本件不自己决定何时确认：
  * 会话层故意不在模块加载时自发请求，否则行为件在 Node 里 import 会话层就会多一个 fetch。 */
@@ -156,6 +157,14 @@ function onSignOut(): void {
           @click="activeView = 'datasource'"
         >
           数据源
+        </div>
+        <div
+          v-if="showHealth"
+          class="ry-menu-item"
+          :class="{ 'is-active': activeView === 'health' }"
+          @click="activeView = 'health'"
+        >
+          平台健康
         </div>
       </nav>
     </aside>
@@ -296,6 +305,8 @@ function onSignOut(): void {
       <KbUpload v-else-if="activeView === 'kb'" />
 
       <DatasourceConfig v-else-if="activeView === 'datasource'" />
+
+      <HealthView v-else-if="activeView === 'health'" />
 
       <Legend v-if="chatShown" />
     </main>
