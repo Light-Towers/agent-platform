@@ -58,6 +58,30 @@ async def _probe_pool(pool: Any) -> None:
     await asyncio.wait_for(_run(), timeout=_READY_PROBE_TIMEOUT_S)
 
 
+async def handle_ready(http_request: Request) -> dict:
+    """GET /ready：meta/dw 两池探活（Q26① 落地方案）。
+
+    - 健康 200；任一池缺失或 SELECT 1 失败 → 503（k8s readinessProbe 用）。
+    - **不碰 /health**：那是共享 `HealthResponse` 契约，
+      `test_identity_gate_assembly` 把 `dependencies == []` 钉死了；池状态
+      单独开只读端点，契约零影响（同 pools_router 的理由）。
+    - 池缺失（DSN 未配置或 lifespan 未跑）按不可用处理：没有 dw 池的实例
+      本来就答不了查询，放行流量只会得到无解释的失败。
+    """
+    registry: dict = getattr(http_request.app.state, "pools", None) or {}
+    failed: dict[str, str] = {}
+    for name in _READY_POOLS:
+        pool = registry.get(name)
+        if pool is None:
+            failed[name] = "pool not registered"
+            continue
+        try:
+            await _probe_pool(pool)
+        except Exception as exc:  # noqa: BLE001 - 探活必须兜住一切驱动异常
+            failed[name] = type(exc).__name__
+    if failed:
+        raise HTTPException(status_code=503, detail={"status": "unhealthy", "pools": failed})
+    return {"status": "healthy", "pools": {name: "ok" for name in _READY_POOLS}}
 
 
 def create_app() -> FastAPI:
