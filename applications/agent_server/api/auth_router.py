@@ -38,6 +38,7 @@ from agent_runtime.auth_users import (
     touch_last_login,
     verify_credentials,
 )
+from agent_runtime.authorization import effective_role, features_for_role
 from agent_runtime.db import get_pool
 from agent_runtime.identity import (
     IdentityError,
@@ -46,7 +47,7 @@ from agent_runtime.identity import (
     mint_token,
     verify_token,
 )
-from agent_runtime.workspace_registry import asserted_person_id, asserted_tenant_id
+from agent_runtime.workspace_registry import asserted_person_id, asserted_role, asserted_tenant_id
 from fastapi import APIRouter, Response
 from pydantic import BaseModel, Field
 
@@ -66,7 +67,7 @@ CODE_NOT_ASSERTED = "AUTH_NOT_ASSERTED"
 
 # 口令校验失败的**唯一**文案：账号不存在与口令错共用一句（A3）。
 # 这句一旦分叉就等于告诉未鉴权的一端"这个账号存在吗"，所以比对在目录里做，文案在这里只留一份。
-CREDENTIALS_INVALID_MSG = "登录名或口令不正确"
+CREDENTIALS_INVALID_MSG = "登录名或密码不正确"
 
 
 class LoginRequest(BaseModel):
@@ -87,11 +88,17 @@ class TokenResponse(BaseModel):
     tenant_id: str
     user_id: str
     is_admin: bool
+    # 1a：role 是新断言源（§4 矩阵由 /auth/me 的 features 表达，登录响应只带码不带集）。
+    role: str
 
 
 class MeResponse(BaseModel):
     tenant_id: str
     user_id: str
+    # 1a：role + features（§6 契约）——role 为 D9 收敛后的**有效**角色；
+    # features 是该角色能力集的只读快照（界面按它渲染可用功能，不接受任何客户端输入）。
+    role: str
+    features: list[str]
 
 
 def _pool_or_503():
@@ -129,8 +136,11 @@ def _signer_or_503() -> tuple[str, str]:
     return private_key_pem, kid
 
 
-def _issue(user_id: str, tenant_id: str, private_key_pem: str, kid: str) -> str:
+def _issue(user_id: str, tenant_id: str, private_key_pem: str, kid: str, *, role: str | None = None) -> str:
     """签 RS256 登录令牌（复用 ``identity.mint_token``，不另造一套 claim 形状），**签完自验一次**。
+
+    ``role`` 是 1a 新增的断言 claim（D2/ADR-0015）：登录/注册时取自用户目录的 ``users.role``，
+    claims 只带**码**不带权限集（D3）。缺省 None 时不写 claim（消费侧 viewer 兜底，D9）。
 
     为什么要多花一次验签（RSA 公钥验是微秒级）：``mint_token`` 与 ``verify_token`` 是两个人写的
     函数，它们之间的约定全靠参数：寿命上限（``TENANT_JWT_MAX_TTL_S`` 默认 3600，本轮实测
@@ -147,6 +157,7 @@ def _issue(user_id: str, tenant_id: str, private_key_pem: str, kid: str) -> str:
         token = mint_token(
             tenant_id,
             user_id=user_id,
+            role=role,
             private_key_pem=private_key_pem,
             kid=kid,
             ttl=settings.auth_token_ttl,
@@ -221,8 +232,8 @@ async def register(body: LoginRequest, response: Response) -> TokenResponse:
         logger.warning("注册失败：用户目录不可用", exc_info=True)
         raise AppError(503, CODE_STORE_UNAVAILABLE, "登录未启用：用户目录不可用") from e
 
-    token = _issue(user.id, user.org_id, private_key_pem, kid)
-    logger.info("用户注册成功 user=%s org=%s admin=%s", user.id, user.org_id, user.is_admin)
+    token = _issue(user.id, user.org_id, private_key_pem, kid, role=user.role)
+    logger.info("用户注册成功 user=%s org=%s admin=%s role=%s", user.id, user.org_id, user.is_admin, user.role)
     response.headers["Cache-Control"] = "no-store"
     return TokenResponse(
         access_token=token,
@@ -230,6 +241,7 @@ async def register(body: LoginRequest, response: Response) -> TokenResponse:
         tenant_id=user.org_id,
         user_id=user.id,
         is_admin=user.is_admin,
+        role=user.role,
     )
 
 
@@ -252,12 +264,12 @@ async def login(body: LoginRequest, response: Response) -> TokenResponse:
         logger.info("登录失败 login=%r（凭据不匹配，不区分成因）", _redact(body.login))
         raise AppError(401, CODE_CREDENTIALS_INVALID, CREDENTIALS_INVALID_MSG)
 
-    token = _issue(user.id, user.org_id, private_key_pem, kid)
+    token = _issue(user.id, user.org_id, private_key_pem, kid, role=user.role)
     try:
         await touch_last_login(pool, user.id)
     except AuthStoreUnavailable:
         pass  # 展示位失败不影响登录成立（这条不是安全边界，见 auth_users 的函数注释）
-    logger.info("登录成功 user=%s org=%s", user.id, user.org_id)
+    logger.info("登录成功 user=%s org=%s role=%s", user.id, user.org_id, user.role)
     response.headers["Cache-Control"] = "no-store"
     return TokenResponse(
         access_token=token,
@@ -265,6 +277,7 @@ async def login(body: LoginRequest, response: Response) -> TokenResponse:
         tenant_id=user.org_id,
         user_id=user.id,
         is_admin=user.is_admin,
+        role=user.role,
     )
 
 
@@ -284,7 +297,16 @@ async def me() -> MeResponse:
     tenant = asserted_tenant_id()
     if not user or not tenant:
         raise AppError(401, CODE_NOT_ASSERTED, "本次请求未携带可断言的身份")
-    return MeResponse(tenant_id=tenant, user_id=user)
+    # 1a：role 从服务端断言上下文取（中间件已随令牌绑定）；值域收敛（未知/缺失码 → viewer
+    # 兜底 + 计数）单一在 effective_role——本端点不自己解释词汇表。旧令牌（无 role claim）
+    # 路径同样走这里兜底，符合 D9「消费侧」口径。
+    role = effective_role(asserted_role(), tenant=tenant, user=user)
+    return MeResponse(
+        tenant_id=tenant,
+        user_id=user,
+        role=role,
+        features=sorted(features_for_role(role)),
+    )
 
 
 @router.post("/auth/logout")

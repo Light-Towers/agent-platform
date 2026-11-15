@@ -195,9 +195,10 @@ def test_forged_jwt_and_wrong_key_identity_401_wins(issuer_keys):
     resp = _post(_build_app(), _auth_headers(_forged_token(priv), api_key="wrong-key"))
     assert resp.status_code == 401
     body = resp.json()
-    # guards 的错误信封是 {"code": "UNAUTHORIZED", ...}；身份层是 {"detail": "身份令牌无效: ..."}
-    assert "code" not in body, f"401 竟由 guards 出（接线序回退？）：{body}"
-    assert "身份令牌无效" in body["detail"]
+    # guards 的错误信封 code 是 "UNAUTHORIZED"；身份层 401 经错误信封收敛件后 code 为
+    # IDENTITY_* 前缀（identity_middleware._send_json → error_body(code, msg, request_id)）。
+    assert body.get("code", "").startswith("IDENTITY_"), f"401 竟由 guards 出（接线序回退？）：{body}"
+    assert "身份令牌无效" in body["msg"]
 
 
 def test_forged_jwt_with_correct_api_key_still_identity_401(issuer_keys):
@@ -205,7 +206,7 @@ def test_forged_jwt_with_correct_api_key_still_identity_401(issuer_keys):
     priv, _ = issuer_keys
     resp = _post(_build_app(), _auth_headers(_forged_token(priv)))
     assert resp.status_code == 401
-    assert "身份令牌无效" in resp.json()["detail"]
+    assert "身份令牌无效" in resp.json()["msg"]
 
 
 def test_valid_jwt_wrong_api_key_still_guard_401(issuer_keys):

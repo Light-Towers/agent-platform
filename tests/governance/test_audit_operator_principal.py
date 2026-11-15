@@ -115,17 +115,27 @@ def test_revert_operator_prefers_bound_tenant_context(monkeypatch):
 
 
 def test_revert_call_logs_no_credential(monkeypatch, caplog):
-    """整条路由调用（含鉴权依赖本体）产生的日志里，不得出现入站密钥原文。"""
+    """整条路由调用（含鉴权依赖本体）产生的日志里，不得出现入站密钥原文。
+
+    静态 X-API-Key 通道退役后，凭据值**根本不进依赖树**：闸门无参、恒返回 ``None``。
+    P12 那条「原文当审计主体」的链由此从源头消失；本用例把原判据从
+    「原文不得外流」收紧为「链路上压根没有原文」，同时保留日志/operator 两条反证。
+    """
     _set_api_key(monkeypatch, _INBOUND_KEY)
+    from agent_runtime.workspace_registry import bind_user_context, reset_user_context
     from agent_server.api.auth import verify_api_key
 
+    u = bind_user_context("alice")  # 模拟登录态已断言到人（否则闸门按设计 401）
     handler = _RecordingRevert()
     req = RevertRequest(session_id="s-3", checkpoint_id="c-3")
-    with caplog.at_level(logging.DEBUG):
-        authed = verify_api_key(_INBOUND_KEY)
-        asyncio.run(session_revert(req, _fake_request(handler), _auth=authed))
+    try:
+        with caplog.at_level(logging.DEBUG):
+            authed = verify_api_key()
+            asyncio.run(session_revert(req, _fake_request(handler), _auth=authed))
+    finally:
+        reset_user_context(u)
 
-    assert authed == _INBOUND_KEY  # 依赖本体确实返回原文（不是摘要）⇒ 更不能被当主体
+    assert authed is None  # 不再回传任何凭据值
     assert _INBOUND_KEY not in caplog.text
     assert handler.operators and _INBOUND_KEY not in handler.operators[0]
 

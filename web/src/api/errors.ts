@@ -4,16 +4,13 @@
  * 通道三走已开的 SSE 流（状态码早已发 200，兜不住，见 errors.py 自陈的那条限制）。
  * 两条函数各自对应一组分支点，后端若真收敛为信封制，改动面 = 这两个函数（工单件 §3 末句）。
  *
- * 三条不能省的纪律，都来自实跑而不是推断：
- *   ① 422 的 `detail` 是**数组**，业务类 4xx 的是**字符串**（同一键两种形状）。
- *   ② 422 数组每项带 `input` —— 那是服务端 echo回来的用户原文，可能含资料/PII，
- *      **一律不上屏**（本文件里没有任何一处读 `input`，这不是遗漏）。
- *   ③ 流内 error 帧不含诊断信息（mask 函数的入参"只为语义显式，不参与返回值"），
- *      所以文案引导向 request_id / 服务端日志，**不做**一个"错误详情"区去承接它。
+ * 最终态后端契约：HTTP 与流内错误帧统一 `{code, msg, request_id, details?}`。
+ * 本文件以 `msg` 为唯一上屏文案来源；`details` 只在没有 `msg` 时兜底读取校验项，
+ * 且**永远不读 `input`**（服务端 echo 的用户原文，可能含资料/PII）。
+ * 旧 `detail` / `error` 键只作滚动升级期的兼容分支，不是新代码的契约。
  *
- * 未覆盖的形状（exhibition-agent 的 dict detail、nl2sql 的自定义 dict）**不在此加特例**：
- * 工单件 §3 末段定的是"本批不连那两个服务，要连时按先方案后编码另开第 4/5 分支"。
- * 落到这里的行为 = 走到兜底句，不会崩、也不会假装读懂了它。
+ * 流内 error 帧不含诊断信息（mask 函数的入参"只为语义显式，不参与返回值"），
+ * 所以文案引导向 request_id / 服务端日志，**不做**一个"错误详情"区去承接它。
  * ==========================================================================*/
 
 /** 通道二（未捕获异常的统一信封）与通道一（FastAPI 原生 detail）都可能的体形状。 */
@@ -73,18 +70,19 @@ export async function describeError(resp: Response): Promise<string> {
   if (body !== null && typeof body === 'object') {
     const o = body as ErrorBody
 
-    // 通道二：install_error_handlers 的 500 脱敏信封 {code, msg, request_id}
-    if (typeof o.msg === 'string') {
+    // 最终态：所有 4xx/5xx 均为 {code, msg, request_id, details?}
+    if (typeof o.msg === 'string' && o.msg !== '') {
       const rid = typeof o.request_id === 'string' ? o.request_id : ''
       return rid === '' ? o.msg : `${o.msg}（request_id ${rid}，请凭它查服务端日志）`
     }
 
+    // 兼容分支：滚动升级期旧服务仍可能返回 {detail: [...]} 或 {detail: "..."}。
     const detail = o.detail
     if (Array.isArray(detail)) return describeValidationDetail(detail)
+    if (Array.isArray(o.details)) return describeValidationDetail(o.details)
     if (typeof detail === 'string' && detail !== '') {
-      // 鉴权失败走 FastAPI 原生 detail，文案要能把"密钥问题"和"其它 4xx"分开（A4/A8 判据）。
       if (resp.status === 401 || resp.status === 403) {
-        return `密钥未填或不正确（服务端：${detail}）`
+        return `登录凭据无效或已过期（服务端：${detail}）`
       }
       return `${detail}（HTTP ${resp.status}）`
     }
@@ -93,8 +91,8 @@ export async function describeError(resp: Response): Promise<string> {
   return `服务返回 HTTP ${resp.status}，响应体不是可解析的错误信封`
 }
 
-/** 流内 error 帧的载荷键在两路实现里不同名，按优先级兼容取键（工单件 §3 的一致性陷阱那条）。 */
-const STREAM_TEXT_KEYS = ['error', 'msg', 'message'] as const
+/** 最终态流内 error 帧用 `msg`；后两键仅作滚动升级期兼容。 */
+const STREAM_TEXT_KEYS = ['msg', 'error', 'message'] as const
 
 /**
  * SSE 流内 error 帧 → 一句可直接上屏的文案。同步函数：帧已在手里，没有要 await 的东西。

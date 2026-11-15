@@ -5,7 +5,7 @@
 （原 wenda-adapter 已于 2026-08 退役，由 nl2sql-service 直连替代。）
 """
 
-from shared_schemas.error import ErrorResponse
+from shared_schemas.error import ErrorEnvelope, ErrorResponse
 from shared_schemas.health import CacheStatsReport, DependencyHealth, HealthResponse, HealthStatus
 from shared_schemas.intent import IntentCandidate, IntentResult
 from shared_schemas.knowledge_lifecycle import KNOWLEDGE_STATUS, VALID_TRANSITIONS, validate_metadata
@@ -18,6 +18,7 @@ __all__ = [
     "CONTRACT_VERSION",
     "CacheStatsReport",
     "DependencyHealth",
+    "ErrorEnvelope",
     "ErrorResponse",
     "HealthResponse",
     "HealthStatus",

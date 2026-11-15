@@ -18,7 +18,7 @@ const DEV_BACKEND = 'http://127.0.0.1:8000'
  * 不在这里预先写上没验证过的解法。
  * `/auth` 是 PR-2b 登录面四个端点的前缀（`/auth/login`|`/auth/register`|`/auth/me`|
  * `/auth/logout`）；`src/api/auth.ts` 写的是绝对路径 ⇒ 开发期不经代理就是 5173 的 404。 */
-const proxied = ['/query', '/history', '/health', '/session', '/console.html', '/auth']
+const proxied = ['/query', '/history', '/health', '/session', '/console.html', '/auth', '/kb', '/datasources']
 
 export default defineConfig({
   base: '/ui/',

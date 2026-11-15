@@ -191,7 +191,24 @@ async def test_create_user_first_account_becomes_admin():
     pool.queue("INSERT INTO users", ("alice",))
     rec = await au.create_user(pool, "alice", "password123", org_id="acme")
     assert rec.is_admin is True
+    assert rec.role == "admin"  # 1a：首账号语义在 role 上等价成立
     assert rec.id == "alice" and rec.org_id == "acme"
+
+
+async def test_insert_dual_writes_is_admin_and_role():
+    """H5 双写（1a）：is_admin 与 role 同批落库且等价（is_admin == (role=='admin')）。
+
+    刀 4 的 ``PATCH /users/{id}/role`` 也必须双写——只写一列的形状在本条即红。
+    """
+    pool = _FakePool()
+    pool.queue("SELECT 1 FROM users", None)
+    pool.queue("INSERT INTO users", ("alice",))
+    await au.create_user(pool, "alice", "password123", org_id="acme")
+    sql, params = next((s, p) for s, p in pool.history if s.startswith("INSERT INTO users"))
+    _name, _org, _display, is_admin, role, _pw = params
+    assert "is_admin" in sql and " role" in sql, f"INSERT 缺 role 列（单写形状）：{sql}"
+    assert is_admin is True and role == "admin"
+    assert is_admin == (role == "admin"), "H5 双写等价被破坏"
 
 
 async def test_create_user_second_account_is_not_admin():
@@ -200,6 +217,7 @@ async def test_create_user_second_account_is_not_admin():
     pool.queue("INSERT INTO users", ("bob",))
     rec = await au.create_user(pool, "bob", "password123", org_id="acme")
     assert rec.is_admin is False
+    assert rec.role == "viewer"
 
 
 async def test_create_user_explicit_is_admin_wins():
@@ -208,6 +226,7 @@ async def test_create_user_explicit_is_admin_wins():
     pool.queue("INSERT INTO users", ("ops",))
     rec = await au.create_user(pool, "ops", "password123", org_id="acme", is_admin=False)
     assert rec.is_admin is False
+    assert rec.role == "viewer"
     assert not any(s.startswith("SELECT 1 FROM users") for s in pool.sqls())
 
 
@@ -260,7 +279,9 @@ async def test_create_user_pool_none_is_unavailable():
 
 async def test_verify_credentials_ok_returns_record_without_hash():
     pool = _FakePool()
-    pool.queue("SELECT id, org_id", ("alice", "acme", "Alice", False, au.hash_password("password123")))
+    pool.queue(
+        "SELECT id, org_id", ("alice", "acme", "Alice", False, "viewer", au.hash_password("password123"))
+    )
     rec = await au.verify_credentials(pool, "alice", "password123")
     assert rec is not None and rec.id == "alice"
     # A7 的实现面：结构上没有 password_hash 字段，散列不可能顺着返回值外流
@@ -268,10 +289,18 @@ async def test_verify_credentials_ok_returns_record_without_hash():
     assert "password_hash" not in {f.name for f in dataclasses.fields(au.UserRecord)}
 
 
+async def test_verify_credentials_returns_role():
+    """1a 读取面：SELECT 6 列，role 随记录返回（签发与 /auth/me 的断言源）。"""
+    pool = _FakePool()
+    pool.queue("SELECT id, org_id", ("alice", "acme", "Alice", True, "admin", au.hash_password("password123")))
+    rec = await au.verify_credentials(pool, "alice", "password123")
+    assert rec is not None and rec.is_admin is True and rec.role == "admin"
+
+
 async def test_null_password_hash_is_rejected():
     """D-c 本体：``password_hash IS NULL`` 一律拒，绝不与空串比较。"""
     pool = _FakePool()
-    pool.queue("SELECT id, org_id", ("carol", "acme", "Carol", False, None))
+    pool.queue("SELECT id, org_id", ("carol", "acme", "Carol", False, "viewer", None))
     assert await au.verify_credentials(pool, "carol", "") is None
     assert await au.verify_credentials(pool, "carol", "anything") is None
 
@@ -279,7 +308,9 @@ async def test_null_password_hash_is_rejected():
 async def test_wrong_password_and_unknown_user_return_same_none():
     """A3 的实现面：两种失败**同返回形状**（文案与状态码由宿主统一给）。"""
     pool_known = _FakePool()
-    pool_known.queue("SELECT id, org_id", ("alice", "acme", "Alice", False, au.hash_password("password123")))
+    pool_known.queue(
+        "SELECT id, org_id", ("alice", "acme", "Alice", False, "viewer", au.hash_password("password123"))
+    )
     wrong = await au.verify_credentials(pool_known, "alice", "bad-password-xx")
     pool_unknown = _FakePool()
     pool_unknown.queue("SELECT id, org_id", None)
@@ -306,7 +337,7 @@ async def test_known_user_wrong_password_does_not_burn(monkeypatch):
     burns: list[str] = []
     monkeypatch.setattr(au, "_burn", lambda password: burns.append(password))
     pool = _FakePool()
-    pool.queue("SELECT id, org_id", ("alice", "acme", "Alice", False, au.hash_password("password123")))
+    pool.queue("SELECT id, org_id", ("alice", "acme", "Alice", False, "viewer", au.hash_password("password123")))
     assert await au.verify_credentials(pool, "alice", "wrong-but-long-1") is None
     assert burns == []
 

@@ -3,7 +3,8 @@
 `_sanitize_identity` 与 `general_qa` 是「模型可填参数 → 身份边界」的两道口。
 本文件钉住三条不变量：
 
-1. kwargs 里的 ``tenant_id`` / ``user_id`` / ``api_key`` 一律剔除；
+1. kwargs 里的 ``tenant_id`` / ``user_id`` / ``api_key`` / ``role`` / ``features`` /
+   ``permissions`` 一律剔除（F15：角色与能力只由服务端断言源解释）；
 2. 租户取服务端断言 ContextVar，未绑定才回落部署级 default；
 3. ``general_qa`` 的图状态优先使用服务端断言 user，LLM/kwargs 不得覆盖。
 """
@@ -41,12 +42,18 @@ def test_sanitize_identity_strips_llm_identity_and_uses_asserted_tenant(monkeypa
                 "tenant_id": "tenant-from-prompt",
                 "user_id": "user-from-prompt",
                 "api_key": "sk-leak",
+                "role": "admin",
+                "features": ["sql.train", "execution.control"],
+                "permissions": ["*"],
             }
         )
     finally:
         reset_tenant_context(token)
 
+    # 输入面扩到 6 个身份键，期望输出不变 —— 扩期望集，不是收窄断言。
     assert out == {"query": "q", "workspace_id": "w", "tenant_id": "tenant-asserted"}
+    for key in ("user_id", "api_key", "role", "features", "permissions"):
+        assert key not in out
 
 
 def test_sanitize_identity_falls_back_to_deploy_default(monkeypatch):
@@ -60,6 +67,9 @@ def test_general_qa_schema_does_not_expose_identity_fields():
     assert "tenant_id" not in props
     assert "user_id" not in props
     assert "api_key" not in props
+    assert "role" not in props
+    assert "features" not in props
+    assert "permissions" not in props
 
 
 class _CapturingGraph:

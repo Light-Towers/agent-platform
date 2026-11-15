@@ -33,6 +33,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from agent_runtime.authorization import ROLE_ADMIN, ROLE_VIEWER
 from agent_runtime.workspace_registry import _is_undefined_column, _is_undefined_table
 
 __all__ = [
@@ -65,7 +66,7 @@ PASSWORD_MAX = 128
 # ``msg``，而不写 ``str(exc)`` —— P8 不变量禁止对外响应体回显异常消息（它不区分“我自己写的
 # 文案”与“库抛出的文本”，从语法上封死这一形）。文案里不含任何用户输入，所以可以直接给
 # 用户看，前端也可以按 code 分支后自行覆盖。
-PASSWORD_LENGTH_HINT = f"口令长度需在 {PASSWORD_MIN}–{PASSWORD_MAX} 字符之间"
+PASSWORD_LENGTH_HINT = f"密码长度需在 {PASSWORD_MIN}–{PASSWORD_MAX} 字符之间"
 
 # 与 runner 的 _MIGRATION_LOCK_KEY、scheduler 的 _SLOT_LOCK_KEY 都不冲突的独立 key。
 _SEED_LOCK_KEY = 0xCAFE0016
@@ -99,6 +100,9 @@ class UserRecord:
     org_id: str
     display_name: str
     is_admin: bool
+    # 1a（H5 双写）：role 与 is_admin 同批落库（is_admin == (role=='admin')）；
+    # 前端 auth.ts:220 仍读 is_admin，本字段是 §4 矩阵与 /auth/me 的断言源。
+    role: str
 
     # 本类不加 password_hash 字段：散列一旦成为返回值的一部分，就可能顺着日志/响应体外流。
     # 校验在目录内部完成，宿主只拿"这个人是谁"。
@@ -244,11 +248,14 @@ async def create_user(
                 if admin is None:
                     cur = await conn.execute("SELECT 1 FROM users LIMIT 1")
                     admin = await cur.fetchone() is None
+                # H5 双写：is_admin 与 role 保持等价（is_admin == (role=='admin')），散列保持参数末位。
+                # 建号通路只有 admin/viewer 两态（editor 由刀 4 的 PATCH /users/{id}/role 引入）。
+                role = ROLE_ADMIN if admin else ROLE_VIEWER
                 cur = await conn.execute(
-                    "INSERT INTO users (id, org_id, display_name, is_admin, password_hash) "
-                    "VALUES (%s, %s, %s, %s, %s) "
+                    "INSERT INTO users (id, org_id, display_name, is_admin, role, password_hash) "
+                    "VALUES (%s, %s, %s, %s, %s, %s) "
                     "ON CONFLICT (id) DO NOTHING RETURNING id",
-                    (name, org_id, display, bool(admin), pw_hash),
+                    (name, org_id, display, bool(admin), role, pw_hash),
                 )
                 if await cur.fetchone() is None:
                     raise UserExistsError(f"登录名 {name!r} 已存在")
@@ -258,7 +265,7 @@ async def create_user(
         if _is_undefined_table(e) or _is_undefined_column(e):
             raise AuthStoreUnavailable("用户目录表未就绪（migration 013/016 未应用）") from e
         raise
-    return UserRecord(id=name, org_id=org_id, display_name=display, is_admin=bool(admin))
+    return UserRecord(id=name, org_id=org_id, display_name=display, is_admin=bool(admin), role=role)
 
 
 async def verify_credentials(pool, login: str, password: str) -> UserRecord | None:
@@ -275,8 +282,9 @@ async def verify_credentials(pool, login: str, password: str) -> UserRecord | No
         return None
     try:
         async with pool.connection() as conn:
+            # SELECT 6 列（H5 双写读取面）：is_admin 仍取（前端契约），role 是新断言源。
             cur = await conn.execute(
-                "SELECT id, org_id, display_name, is_admin, password_hash FROM users WHERE id = %s",
+                "SELECT id, org_id, display_name, is_admin, role, password_hash FROM users WHERE id = %s",
                 (name,),
             )
             row = await cur.fetchone()
@@ -287,10 +295,12 @@ async def verify_credentials(pool, login: str, password: str) -> UserRecord | No
     if row is None:
         _burn(password)
         return None
-    uid, org, display, admin, pw_hash = row
+    uid, org, display, admin, role, pw_hash = row
     if not verify_password(pw_hash, password):
         return None
-    return UserRecord(id=uid, org_id=org, display_name=display or "", is_admin=bool(admin))
+    return UserRecord(
+        id=uid, org_id=org, display_name=display or "", is_admin=bool(admin), role=role or ROLE_VIEWER
+    )
 
 
 async def touch_last_login(pool, user_id: str) -> None:

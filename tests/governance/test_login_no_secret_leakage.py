@@ -65,15 +65,20 @@ def _attr_names_in(node: ast.AST) -> set[str]:
 
 def test_user_record_has_no_password_field():
     fields = {f.name for f in dataclasses.fields(au.UserRecord)}
-    assert fields == {"id", "org_id", "display_name", "is_admin"}
+    # 1a：role 是断言码（不是秘密）；password_hash 结构上仍不存在。
+    assert fields == {"id", "org_id", "display_name", "is_admin", "role"}
     assert not any("password" in f or "hash" in f for f in fields), fields
 
 
 @pytest.mark.parametrize(
     "model,allowed",
     [
-        (auth_router.TokenResponse, {"token_type", "access_token", "expires_in", "tenant_id", "user_id", "is_admin"}),
-        (auth_router.MeResponse, {"tenant_id", "user_id"}),
+        (
+            auth_router.TokenResponse,
+            {"token_type", "access_token", "expires_in", "tenant_id", "user_id", "is_admin", "role"},
+        ),
+        # 1a：MeResponse 带 role（D9 收敛后的有效角色）+ features（该角色能力集快照）。
+        (auth_router.MeResponse, {"tenant_id", "user_id", "role", "features"}),
     ],
 )
 def test_response_models_are_exact(model, allowed):

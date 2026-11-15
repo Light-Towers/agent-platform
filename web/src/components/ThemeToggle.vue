@@ -38,7 +38,7 @@ const MODES: readonly { readonly mode: ThemeMode; readonly label: string }[] = [
       v-for="item in MODES"
       :key="item.mode"
       type="button"
-      class="btn"
+      class="ry-btn"
       :aria-pressed="themeMode === item.mode"
       @click="setTheme(item.mode)"
     >

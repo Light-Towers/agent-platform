@@ -256,9 +256,9 @@ for (const fn of ['rowClassOf', 'iconPathOf']) {
 
 /* ---- 齿 C：凭据存储面（工单件 §2.3）----
  * 白名单**双向**：列了却不用也算漂移（与公开镜像 lint 的登记制同一条纪律：台账不能只进不出）。
- * 写这一格的时机是 PR-2：`session.ts`/`ApiKeyBox.vue` 开始真的往界面上接密钥，
- * 「只存内存」自此才有可违反面 —— 在那之前它只是一句注释。
- * PR-2b 把 `auth.ts` 加进名单（方案 D-k：登录令牌落 sessionStorage，关标签即失效）。
+ * 写这一格的时机是 PR-2：会话层开始真的往界面上接凭据，「只存内存」自此才有可违反面
+ * —— 在那之前它只是一句注释。PR-2b 把 `auth.ts` 加进名单（方案 D-k：登录令牌落
+ * sessionStorage，关标签即失效）。静态 X-API-Key 通道退役后，唯一凭据写者仍是 auth.ts。
  * ⚠ 这一格从此管的是「谁可以写存储」，不再能管「写进去的是哪一档」—— 后者由下面
  *   齿 C2 校（只准 sessionStorage，且键名与屏上承诺同源）。只加白名单不加那一格，
  *   等于把「不落 localStorage」这句纪律换成一句注释。
@@ -318,12 +318,12 @@ if (!tokenKeyLine) {
 }
 
 /* ---- 齿 C3（PR-2b）：凭据装配只有一个实现位 ----
- * 为什么需要一枚专门的齿（而不是靠 C2 那格顺手做到）：D-i“两条通道并存”最容易被读错的
- * 一处是一个请求同时发两把 —— 后端 `verify_api_key` 的分支是“已断言到人 ⇒ 直接放行”，
- * 两把都发时密钥错也不会红，于是读数分不清是哪把起效的（看着绿，其实测的是另一条路）。
- * 只要装配规则存在第二份，这份“各漂一份”就没有东西挡着。匹的是 **调用形状**
- * （`.set('Authorization'` / `.set('X-API-Key'`），不是词形 —— 屏上文案里本来就要写
- * `X-API-Key` 这个名字（ApiKeyBox / LoginView 那两处），把它们算成越界就是拿误报换自觉。 */
+ * 静态 X-API-Key 通道退役后，入口凭据头**只剩 `Authorization`**：`verify_api_key` 只认
+ * 已断言到人的登录令牌。这枚齿钉的是「装配规则不许出现第二份实现位」——分两处写就会
+ * 各漂一份。匹的是 **调用形状**（`.set('Authorization'`），不是词形：注释/文案里提到
+ * `X-API-Key` 这个名字不算越界，把它们算进去等于拿误报换自觉。
+ * ⚠ 退役回归锁在 `verify-sse.mjs` 的 I5 段（真调装配函数断言不再发 X-API-Key），本齿
+ *   只管「只有一个实现位」，两件互补，别把其中一件读成完备门禁。 */
 const headerSetterRe = /\.(?:set|append)\(\s*['"](?:Authorization|X-API-Key)['"]/;
 const headerSetters = srcFiles
   .filter((p) => headerSetterRe.test(readText(p)))
@@ -349,7 +349,7 @@ const loginChain = [
   [VUE_APP, /<LoginView/, `${VUE_APP} 没有渲染 <LoginView（视图闸门拆掉了：未登录也会看到一个空对话框）`],
   [VUE_APP, /\bcanChat\b/, `${VUE_APP} 不再读 canChat（闸门失去了判据 ⇒ 与登录态机解链）`],
   [TS_LOGIN_VIEW, /\bsubmitCredentials\(/, `${TS_LOGIN_VIEW} 不调 submitCredentials(（登录页接不上会话层，提交钮是个空控件）`],
-  [TS_LOGIN_VIEW, /\benterWithApiKey\b/, `${TS_LOGIN_VIEW} 没有密钥兜底入口（后端未启用登录面时那一档就没路可走了）`],
+  [TS_LOGIN_VIEW, /\bsessionStorage\b/, `${TS_LOGIN_VIEW} 屏上没写出令牌存储档位（关标签即失效那句承诺失去可核对入口）`],
   ['src/stores/session.ts', /from '\.\.\/api\/auth\.ts'/, `会话层未从 ${TS_AUTH} 取凭据面（存取与装配又回到两处写）`],
 ];
 for (const [file, re, msg] of loginChain) {

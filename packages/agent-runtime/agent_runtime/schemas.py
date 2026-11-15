@@ -16,13 +16,25 @@ ADMISSION_ADMITTED = "admitted"
 ADMISSION_QUEUED = "queued"
 ADMISSION_REJECTED = "rejected"
 
+# 准入拒绝 reason 的对外域（会进入 canonical 错误信封的 code，须稳定有界）；
+# AdmissionDecision.reason 以 Literal 收口，新增散点字符串会被 pydantic 在生产端咬住。
+AdmissionReason = Literal[
+    "RATE_LIMITED",
+    "ADMISSION_UNAVAILABLE",
+    "ADMISSION_TIMEOUT",
+    "ADMISSION_REJECTED",
+]
+VALID_ADMISSION_REASONS: frozenset[str] = frozenset(
+    {"RATE_LIMITED", "ADMISSION_UNAVAILABLE", "ADMISSION_TIMEOUT", "ADMISSION_REJECTED"}
+)
+
 
 class AdmissionDecision(BaseModel):
     status: Literal[ADMISSION_ADMITTED, ADMISSION_QUEUED, ADMISSION_REJECTED]
     queue_position: int | None = None
     priority: Priority = "normal"
     estimated_wait_seconds: float | None = None
-    reason: str | None = None
+    reason: AdmissionReason | None = None
 
 
 class CoordinationDecision(BaseModel):

@@ -118,6 +118,22 @@ class SqlTrainResponse(BaseModel):
     report: dict | None = None
 
 
+class KbStatusRequest(BaseModel):
+    """知识条目生命周期状态变更入参（批 2a；PATCH /kb/{knowledge_id}/status）。
+
+    - status 值域收在提审/发布两档：kb.publish 的界面语义（D8「提审→发布」），
+      其它迁移（EXPIRED/REVOKED/SUPERSEDED）不进本轮界面；非法迁移由 KS 侧
+      VALID_TRANSITIONS 校验兜底 400。
+    - 三字段仅在目标 PUBLISHED 时被 KS 前置校验用（缺 authority/effective_from/
+      effective_to 不得发布）；空串 = 沿用上传登记值。
+    """
+
+    status: Literal["REVIEWING", "PUBLISHED"]
+    authority: str = Field(default="", max_length=256)
+    effective_from: str = Field(default="", max_length=32)
+    effective_to: str = Field(default="", max_length=32)
+
+
 class HealthResponse(BaseHealthResponse):
     """联邦统一健康检查响应 + app 能力标志。
 
@@ -177,7 +193,7 @@ class HealthResponse(BaseHealthResponse):
     cache_stats: CacheStatsReport | None = Field(
         None, description="语义缓存命中率与分项计数（total=0 时 hit_rate=0.0，键集合恒定）"
     )
-    auth_enabled: bool = Field(False, description="接口是否要求 X-API-Key（不回显密钥）")
+    auth_enabled: bool = Field(False, description="是否启用入站鉴权（只接受登录令牌，不回显密钥）")
     identity_mode: str | None = Field(
         None, description="租户身份模式：jwt / single / insecure（与启动守卫同一判定）"
     )

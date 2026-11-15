@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
+
+from agent_server.api.auth import require_feature
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/executions", tags=["control-plane"])
@@ -22,7 +24,11 @@ def _get_control_plane(request: Request):
 
 
 @router.get("/{execution_id}")
-async def inspect_execution(execution_id: str, request: Request):
+async def inspect_execution(
+    execution_id: str,
+    request: Request,
+    _feature=Depends(require_feature("execution.control")),
+):
     """查看执行完整快照。"""
     cp = _get_control_plane(request)
     snapshot = await cp.inspect(execution_id)
@@ -32,7 +38,11 @@ async def inspect_execution(execution_id: str, request: Request):
 
 
 @router.post("/{execution_id}/pause")
-async def pause_execution(execution_id: str, request: Request):
+async def pause_execution(
+    execution_id: str,
+    request: Request,
+    _feature=Depends(require_feature("execution.control")),
+):
     """暂停执行（仅 RUNNING 可暂停）。"""
     cp = _get_control_plane(request)
     snapshot = await cp.inspect(execution_id)
@@ -50,7 +60,11 @@ async def pause_execution(execution_id: str, request: Request):
 
 
 @router.post("/{execution_id}/resume")
-async def resume_execution(execution_id: str, request: Request):
+async def resume_execution(
+    execution_id: str,
+    request: Request,
+    _feature=Depends(require_feature("execution.control")),
+):
     """恢复执行（仅 PAUSED 可恢复）。"""
     cp = _get_control_plane(request)
     snapshot = await cp.inspect(execution_id)
@@ -68,7 +82,11 @@ async def resume_execution(execution_id: str, request: Request):
 
 
 @router.post("/{execution_id}/cancel")
-async def cancel_execution(execution_id: str, request: Request):
+async def cancel_execution(
+    execution_id: str,
+    request: Request,
+    _feature=Depends(require_feature("execution.control")),
+):
     """取消执行（QUEUED 直接取消，RUNNING 标记 CANCEL_REQUESTED）。"""
     cp = _get_control_plane(request)
     snapshot = await cp.inspect(execution_id)
@@ -86,7 +104,11 @@ async def cancel_execution(execution_id: str, request: Request):
 
 
 @router.post("/{execution_id}/retry")
-async def retry_execution(execution_id: str, request: Request):
+async def retry_execution(
+    execution_id: str,
+    request: Request,
+    _feature=Depends(require_feature("execution.control")),
+):
     """重试执行（仅 FAILED / SUCCEEDED / CANCELLED 可 retry）。"""
     cp = _get_control_plane(request)
     snapshot = await cp.inspect(execution_id)
@@ -104,7 +126,11 @@ async def retry_execution(execution_id: str, request: Request):
 
 
 @router.post("/{execution_id}/terminate")
-async def terminate_execution(execution_id: str, request: Request):
+async def terminate_execution(
+    execution_id: str,
+    request: Request,
+    _feature=Depends(require_feature("execution.control")),
+):
     """强制终止执行（非终态均可终止）。"""
     cp = _get_control_plane(request)
     snapshot = await cp.inspect(execution_id)
@@ -122,7 +148,11 @@ async def terminate_execution(execution_id: str, request: Request):
 
 
 @router.post("/{execution_id}/requeue")
-async def requeue_execution(execution_id: str, request: Request):
+async def requeue_execution(
+    execution_id: str,
+    request: Request,
+    _feature=Depends(require_feature("execution.control")),
+):
     """重新入队（保留原 execution_id；仅 failed / cancelled / dispatched 可 requeue）。
 
     与 retry 的区别：retry 开一条 ``:retry:N`` 新执行并保留失败历史，requeue 把同一条
@@ -146,7 +176,11 @@ async def requeue_execution(execution_id: str, request: Request):
 
 
 @router.post("/{execution_id}/recover")
-async def recover_execution(execution_id: str, request: Request):
+async def recover_execution(
+    execution_id: str,
+    request: Request,
+    _feature=Depends(require_feature("execution.control")),
+):
     """按 Effect Contract 跑一次恢复决策（retry / query_status / mark_failed / mark_human）。"""
     cp = _get_control_plane(request)
     snapshot = await cp.inspect(execution_id)

@@ -24,7 +24,7 @@ const open = ref(false)
   <div class="tl-wrap">
     <button
       type="button"
-      class="btn tl-toggle"
+      class="ry-btn tl-toggle"
       :aria-expanded="open"
       aria-controls="tlList"
       @click="open = !open"

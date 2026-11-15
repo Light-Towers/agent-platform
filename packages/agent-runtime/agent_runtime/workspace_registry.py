@@ -32,6 +32,9 @@ logger = logging.getLogger(__name__)
 _tenant_id_ctx: ContextVar[object] = ContextVar("server_tenant_id", default=_TENANT_UNSET)
 # 用户身份上下文（ADR-0007：与 tenant 同为服务端断言 claim；当前供审计/画像读取，不单独承担隔离）。
 _user_id_ctx: ContextVar[object] = ContextVar("server_user_id", default=_TENANT_UNSET)
+# 角色上下文（D2：role 与 tenant/user 同为服务端断言 claim；值域由 authorization.py 收敛，
+# 缺/未知码在消费侧走 viewer 兜底——不在绑定层判定词汇表）。
+_role_ctx: ContextVar[object] = ContextVar("server_role", default=_TENANT_UNSET)
 
 __all__ = [
     "WorkspaceTenantMismatch",
@@ -39,8 +42,11 @@ __all__ = [
     "reset_tenant_context",
     "bind_user_context",
     "reset_user_context",
+    "bind_role_context",
+    "reset_role_context",
     "server_user_id",
     "asserted_user_id",
+    "asserted_role",
     "asserted_tenant_id",
     "asserted_person_id",
     "resolve_workspace",
@@ -72,6 +78,27 @@ def bind_user_context(user_id: str | None) -> Token:
 
 def reset_user_context(token: Token) -> None:
     _user_id_ctx.reset(token)
+
+
+def bind_role_context(role: str | None) -> Token:
+    """绑定服务端断言的 role（来自已验签令牌 claim）；缺/空按未绑定（消费侧走 viewer 兜底）。"""
+    return _role_ctx.set(role if role else _TENANT_UNSET)
+
+
+def reset_role_context(token: Token) -> None:
+    _role_ctx.reset(token)
+
+
+def asserted_role() -> str | None:
+    """服务端**已断言**的 role 码；未绑定 → ``None``（不 fail-fast，语义同 :func:`asserted_user_id`）。
+
+    返回的是**原始 claim 值**，不做词汇表校验：值域收敛（含 D9 兜底计数）是
+    ``authorization.effective_role`` 的职责，这里只负责"有没有断言"。
+    """
+    bound = _role_ctx.get()
+    if bound is _TENANT_UNSET:
+        return None
+    return bound or None
 
 
 def server_user_id(default: object = _TENANT_UNSET) -> str:

@@ -3,19 +3,19 @@
 import logging
 import uuid
 
-from agent_core.guardrails.errors import mask_exception_for_client
+from agent_core.guardrails.errors import AppError, mask_exception_for_client, stream_error_frame
 from agent_core.runtime.lease import AsyncLease
-from agent_core.tracing import record_request_attributes, user_query_hash
+from agent_core.tracing import get_request_id, record_request_attributes, user_query_hash
 from agent_runtime.cache import get_cache
 from agent_runtime.db import get_pool
 from agent_runtime.planner.protocol import PlannerContext
 from agent_runtime.schemas import ADMISSION_ADMITTED, ADMISSION_QUEUED, ADMISSION_REJECTED
 from agent_runtime.workspace_registry import resolve_workspace, server_tenant_id
-from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from fastapi import APIRouter, Depends, Header, Request
 from fastapi.responses import StreamingResponse
 from shared_schemas import sse_pack
 
-from agent_server.api.auth import resolve_thread_id, verify_api_key
+from agent_server.api.auth import require_feature, resolve_thread_id, verify_api_key
 from agent_server.config import get_settings
 from agent_server.memory import thread_persist as _thread_persist
 from agent_server.rag.embed import embed_query
@@ -30,6 +30,7 @@ async def query(
     req: QueryRequest,
     request: Request,
     _auth=Depends(verify_api_key),  # 仅作鉴权闸门：B7b-4 后会话身份不再从凭据派生，故本函数不使用其返回值
+    _feature=Depends(require_feature("chat.run")),  # 401 先于 403：_auth 必须在前
     x_priority: str | None = Header(default=None, alias="X-Priority"),
     traceparent: str | None = Header(default=None),
 ):
@@ -120,7 +121,7 @@ async def query(
         try:
             await cost_governance.check(_tenant, BudgetDimension.REQUESTS, estimated_amount=1)
         except BudgetExceeded:
-            raise HTTPException(status_code=429, detail="BUDGET_EXCEEDED")
+            raise AppError(429, "BUDGET_EXCEEDED", "请求额度已耗尽，请稍后重试")
 
     # Phase 2: durable admission 前置
     decision = None
@@ -130,10 +131,10 @@ async def query(
             request_id, thread_id, req.user_id, priority
         )
         if decision.status == ADMISSION_REJECTED:
-            raise HTTPException(
-                status_code=429 if decision.reason == "RATE_LIMITED" else 503,
-                detail=decision.reason or "ADMISSION_REJECTED",
-            )
+            rejected = decision.reason or "ADMISSION_REJECTED"
+            if rejected == "RATE_LIMITED":
+                raise AppError(429, "RATE_LIMITED", "请求过于频繁，请稍后重试")
+            raise AppError(503, rejected, "服务暂不可用，请稍后重试")
 
     # Phase 2: 会话并发协调前置
     coordinator = getattr(request.app.state, "coordinator", None)
@@ -162,7 +163,7 @@ async def query(
             # 释放，否则该 session 的 coordination 容量永久少 1（P0: leak on reject）。
             # admission 已在前面 enqueue 并可能 admitted，同样要 mark_completed。
             await lease.release()
-            raise HTTPException(status_code=409, detail="CONCURRENCY_REJECTED")
+            raise AppError(409, "CONCURRENCY_REJECTED", "当前会话已有请求在执行，请稍后重试")
 
     # 语义缓存：命中直接返回。命中是正常路径，但 coordinator.acquire 已占用槽位、
     # admission 已可能 admitted —— 必须在返回前统一清理，否则同 session 后续请求
@@ -375,7 +376,13 @@ async def query(
             _stream_failed = True
             # 流已开、状态码已发，无法交由 install_error_handlers 兜底，
             # 故在帧层面脱敏：异常全貌已在上一行落服务端日志。
-            yield _sse({"type": "error", "error": mask_exception_for_client(exc)})
+            yield _sse(
+                stream_error_frame(
+                    "INTERNAL_ERROR",
+                    mask_exception_for_client(exc),
+                    get_request_id() or request_id,
+                )
+            )
             yield _sse({"type": "done", "thread_id": thread_id, "answer": ""})
         finally:
             # V3 Phase 2: Scheduler complete + ExecutionStatus → SUCCEEDED/FAILED
@@ -430,9 +437,10 @@ async def query(
                 await scheduler.cancel(request_id)
             except Exception:
                 logger.warning("scheduler cancel on gating reject failed", exc_info=True)
-            raise HTTPException(
-                status_code=503,
-                detail="SCHEDULER_SLOTS_EXHAUSTED",
+            raise AppError(
+                503,
+                "SCHEDULER_SLOTS_EXHAUSTED",
+                "服务繁忙，请稍后重试",
                 headers={"Retry-After": "5"},
             )
 

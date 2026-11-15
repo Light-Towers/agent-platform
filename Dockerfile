@@ -18,7 +18,6 @@ WORKDIR /web
 # 241 实测两条都 200（npmjs 1.84s / npmmirror 0.19s），国际链路慢时换快的那条，
 # 换的是下载路径而不是锁文件内容。
 ARG NPM_REGISTRY=https://registry.npmjs.org/
-ENV NPM_CONFIG_REGISTRY=${NPM_REGISTRY}
 RUN corepack enable
 
 # 清单先 COPY、源码后 COPY：改一行 .vue 不应重装依赖（层缓存的最小前提）。
@@ -26,7 +25,7 @@ RUN corepack enable
 # 而不是"悄悄装成别的版本然后构建绿"——锁文件因此是必入库件（工单件 §9.2）。
 COPY web/package.json web/pnpm-lock.yaml ./
 COPY web/ ./
-RUN pnpm install --frozen-lockfile && pnpm run build
+RUN echo "registry=${NPM_REGISTRY}" > .npmrc && pnpm install --frozen-lockfile && pnpm run build
 
 # ============================================================================
 # 阶段 2/2 运行镜像：python:3.11-slim，**里面没有 node、没有 node_modules**

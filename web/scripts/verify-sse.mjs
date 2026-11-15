@@ -23,7 +23,7 @@
  * PR-2（刀㊲）在本件加了两组：§G 消费面（快照不回改 / 依据进表三组合 / class 与图标
  * 两个纯映射），F14–F16 请求号（响应头 → 快照，且错误通道同样有号可指），以及
  * §H 会话层（`stores/session.ts` 直接在 Node 里驱动：banner 跨轮累积/去重/溢出、
- * 跳轮不混行、非 ASCII 密钥那条必接）。加 §H 的时机：本件头注那句「可测性持平甚至
+ * 跳轮不混行、非 ASCII 令牌那条必接）。加 §H 的时机：本件头注那句「可测性持平甚至
  * 更好：本件的导出可以直接被 `verify-sse.mjs` 在 Node 里驱动」——能驱动却不驱动，那句
  * 就只是一句能力声明而不是读数（本轮实取：`import('vue')` 与 `import('./session.ts')`
  * 皆 OK，exports=20）。
@@ -113,8 +113,8 @@ check('canary 检测器对依据片段含毒必须报泄漏（哨程扩到 evide
 console.log('§A describeError：三条 HTTP 通道 + 两种 4xx 形状')
 {
   const r401 = new Response(JSON.stringify({ detail: 'INVALID_API_KEY' }), { status: 401 })
-  check('A1 401 → 文案把密钥问题与其它 4xx 分开（A4）',
-    (await describeError(r401)).includes('密钥未填或不正确（服务端：INVALID_API_KEY）'))
+  check('A1 401 → 文案把登录凭据问题与其它 4xx 分开（A4）',
+    (await describeError(r401)).includes('登录凭据无效或已过期（服务端：INVALID_API_KEY）'))
 
   const r422 = new Response(JSON.stringify({
     detail: [{ type: 'missing', loc: ['body', 'checkpoint_id'], msg: 'Field required', input: CANARY }],
@@ -205,7 +205,7 @@ console.log('§F streamQuery：A7 未完成判定 / 401 通道 / 网络失败可
 {
   const seen = []
   const noDone = await streamQuery({
-    query: 'q', apiKey: '',
+    query: 'q',
     fetchImpl: async () => sseResponse([frame('route', { type: 'route', capability: 'rag', secret: CANARY }), frame('answer', { type: 'answer', text: '半截' })]),
     onUpdate: (snap) => { seen.push(snap) },
   })
@@ -214,57 +214,58 @@ console.log('§F streamQuery：A7 未完成判定 / 401 通道 / 网络失败可
   check('F3 过程量逐帧回调（页面靠它渲染，不等最终返回）', seen.length === 3, `onUpdate 次数=${seen.length}`)
 
   const brokeAfterError = await streamQuery({
-    query: 'q', apiKey: '',
+    query: 'q',
     fetchImpl: async () => sseResponse([frame('error', { type: 'error', error: '服务器内部错误，请稍后重试' })]),
   })
   check('F4 已 failed 的会话不被「无 done」改回 open（失败不得读成待完成）', brokeAfterError.terminal === 'failed', brokeAfterError.terminal)
 
   const full = await streamQuery({
-    query: 'q', apiKey: 'abc123', sessionId: 's1',
+    query: 'q', token: 'tk-f7', sessionId: 's1',
     fetchImpl: async (url, init) => {
       check(`F5 请求路径按仓库根而不是 base 相对（当前 URL=${url}）`, url === '/query')
       check('F6 会话号与问题都进了 body', JSON.parse(init.body).query === 'q' && JSON.parse(init.body).session_id === 's1')
-      check('F7 鉴权走 X-API-Key 头（EventSource 做不到这件事）', init.headers.get('X-API-Key') === 'abc123')
+      check('F7 入口凭据只走 Bearer、绝不发 X-API-Key（静态通道退役的回归锁）',
+        init.headers.get('Authorization') === 'Bearer tk-f7' && init.headers.get('X-API-Key') === null)
       return sseResponse([frame('route', { type: 'route', capability: 'rag' }), frame('done', { type: 'done', thread_id: 't9', answer: '最终' })])
     },
   })
   check('F8 正常流：收到 done 即 completed 并定稿答案', full.terminal === 'completed' && full.answer === '最终' && full.threadId === 't9')
 
-  const denied = await streamQuery({ query: 'q', apiKey: 'wrong', fetchImpl: async () => new Response(JSON.stringify({ detail: 'INVALID_API_KEY' }), { status: 401 }) })
-  check('F9 401（通道一，流未开）⇒ 明确文案而不是 TypeError（A4）',
-    denied.terminal === 'failed' && denied.timeline[0].text.includes('密钥未填或不正确（服务端：INVALID_API_KEY）'), denied.timeline[0].text)
+  const denied = await streamQuery({ query: 'q', fetchImpl: async () => new Response(JSON.stringify({ detail: 'INVALID_API_KEY' }), { status: 401 }) })
+  check('F9 401（流未开）⇒ 明确文案而不是 TypeError（A4）',
+    denied.terminal === 'failed' && denied.timeline[0].text.includes('登录凭据无效或已过期（服务端：INVALID_API_KEY）'), denied.timeline[0].text)
   check('F10 鉴权失败不受 error→done 抑制规则约束（流根本没开）', denied.doneReceived === false && denied.sawError === false)
 
-  const boom = await streamQuery({ query: 'q', apiKey: '', fetchImpl: async () => { throw new Error('boom-net') } })
+  const boom = await streamQuery({ query: 'q', fetchImpl: async () => { throw new Error('boom-net') } })
   check('F11 请求没发出去也给可读原因', boom.timeline[0].text.includes('请求未能发出') && boom.terminal === 'failed')
 
   let thrown = ''
   try {
-    await streamQuery({ query: 'q', apiKey: '密钥含中文', fetchImpl: async () => sseResponse([]) })
+    await streamQuery({ query: 'q', token: '令牌含中文', fetchImpl: async () => sseResponse([]) })
   } catch (e) {
     thrown = e instanceof Error ? e.message : String(e)
   }
-  check('F12 密钥含非 ASCII 在发出前就给人话提示（而不是运行时的头参数错误）', thrown.startsWith('接口密钥含非 ASCII'), thrown)
+  check('F12 令牌含非 ASCII 在发出前就给人话提示（而不是运行时的头参数错误）', thrown.startsWith('登录令牌含非 ASCII'), thrown)
 
-  const noBody = await streamQuery({ query: 'q', apiKey: '', fetchImpl: async () => new Response(null, { status: 200 }) })
+  const noBody = await streamQuery({ query: 'q', fetchImpl: async () => new Response(null, { status: 200 }) })
   check('F13 200 但没有体流 ⇒ 明说读不到事件，不静默成功', noBody.terminal === 'failed' && noBody.timeline[0].text.includes('没有响应体流'))
 
   /* F14–F16 请求号（PR-2）：错误文案里那句「请凭本页的 request_id」必须有个实物可指。 */
   const traced = await streamQuery({
-    query: 'q', apiKey: '',
+    query: 'q',
     fetchImpl: async () => sseResponse([frame('done', { type: 'done', thread_id: 't11', answer: ' ok' })], { 'x-trace-id': 'req-77' }),
   })
   check('F14 响应头 x-trace-id 传到快照 requestId（不自己造号）', traced.requestId === 'req-77', traced.requestId)
 
   const untraced = await streamQuery({
-    query: 'q', apiKey: '',
+    query: 'q',
     fetchImpl: async () => sseResponse([frame('done', { type: 'done', thread_id: 't12', answer: 'ok' })]),
   })
   check('F15 没这个头 ⇒ requestId 是空串而不是 undefined/占位符（页面据此不显示该行）',
     untraced.requestId === '', JSON.stringify(untraced.requestId))
 
   const denied401 = await streamQuery({
-    query: 'q', apiKey: 'wrong',
+    query: 'q',
     fetchImpl: async () => new Response(JSON.stringify({ detail: 'INVALID_API_KEY' }), { status: 401, headers: { 'x-trace-id': 'req-88' } }),
   })
   check('F16 流未开的错误通道同样拿到请求号（取头发生在 !resp.ok 分支之前）',
@@ -281,7 +282,7 @@ console.log('§G 消费面：快照契约、依据列表、class 与图标映射
   // 那时帧 2 的 push 会直接长到帧 1 手里那个数组上，这里的事后回读当场报红。
   const shots = []
   await streamQuery({
-    query: 'q', apiKey: '',
+    query: 'q',
     onUpdate: (s) => { shots.push({ s, tl: s.timeline.length, ev: s.evidence.length, ans: s.answer }) },
     fetchImpl: async () => sseResponse([
       frame('evidence', { type: 'evidence', node: 'kb', count: 2, preview: '片段一' }),
@@ -347,7 +348,7 @@ console.log('§G 消费面：快照契约、依据列表、class 与图标映射
 }
 
 /* ---- §H 会话层：stores/session.ts 在 Node 里真驱动（不发网络）---- */
-console.log('§H 会话层：banner 累积/去重/溢出、跳轮不混行、非 ASCII 密钥接住')
+console.log('§H 会话层：banner 累积/去重/溢出、跳轮不混行、非 ASCII 令牌接住')
 /* `store` 必须在模块层：§I 还要拿它驱动登录态机（写在 §H 的花括号里 ⇒ §I 读到的是
  * ReferenceError，症状是“门禁挂掉”而不是“判据没跑”）。不写初值：下一行就要给它接上的
  * 模块或 null，一个“没被读过的 null 初值”是 lint 的 useless-assignment。 */
@@ -361,11 +362,11 @@ let store
   }
   if (store !== null) {
     check('H0 会话层可被 Node 驱动（不靠浏览器、不靠 vitest）', typeof store.ask === 'function')
-    const { ask, apiKey, banners, busy, canSubmit, clearBanners, dropped, hasRound, question, timeline, traceNote, useExample, answerText, terminal, requestId } = store
+    const { ask, authToken, banners, busy, canSubmit, clearBanners, dropped, hasRound, question, timeline, traceNote, useExample, answerText, terminal, requestId } = store
     /* ⚠ 本件是 **.mjs**：Node 的原生类型擦除只对 `.ts` 生效，在这里写 `: void` 这类
      * 注解会当场 SyntaxError（本批实踩：首版 §H 就是被这一条拦住的，不是“测试红了”）。
      * 被擦除的类型属于被测的 `.ts` 那一侧；harness 自己保持纯 JS。 */
-    const reset = () => { clearBanners(); question.value = ''; apiKey.value = '' }
+    const reset = () => { clearBanners(); question.value = ''; authToken.value = '' }
     const okStream = (chunks, head = {}) => async () => sseResponse(chunks, head)
 
     check('H1 初始态：不忙 / 不可提交 / 无提示 / 未跑过',
@@ -376,20 +377,19 @@ let store
     await ask(async () => { calls++; return sseResponse([]) })
     check('H2 输入为空 ⇒ 一问没发、也没记成“本轮已发起”', calls === 0 && hasRound.value === false, `calls=${calls}`)
 
-    // H3 非 ASCII 密钥：sse.ts 明写它是唯一仍会抛的一条，到这一层必须接住（A2 不白屏）
+    // H3 非 ASCII 登录令牌：唯一仍会抛的那条前置校验，到这一层必须接住（A2 不白屏）
     reset()
     question.value = 'q'
-    apiKey.value = '密钥含中文'
+    authToken.value = '令牌含中文'
     await ask()
-    check('H3 非 ASCII 密钥被接住成一句屏上可读的提示（不冒未处理 rejection）',
-      banners.value.length === 1 && banners.value[0].includes('接口密钥含非 ASCII'), banners.value.join(' | '))
+    check('H3 非 ASCII 令牌被接住成一句屏上可读的提示（不冒未处理 rejection）',
+      banners.value.length === 1 && banners.value[0].includes('登录令牌含非 ASCII'), banners.value.join(' | '))
     check('H3b 那一轮终态是 failed、提示已接住 ⇒ busy 必须回 false（不得卡在转圈）',
       busy.value === false && terminal.value === 'failed')
 
     // H4 正常流：跳次拿到定稿与会话号，请求号从注入的响应头进快照
     reset()
     question.value = '平台能查什么'
-    apiKey.value = 'ascii-key'
     await ask(okStream([frame('evidence', { type: 'evidence', node: 'kb', count: 2, preview: '片段' }), frame('done', { type: 'done', thread_id: 'h4', answer: '定稿文本' })], { 'x-trace-id': 'req-h4' }))
     check('H4 正常跳：定稿答案 / 会话号 / 终态三件都对',
       answerText.value === '定稿文本' && terminal.value === 'completed' && timeline.value.length === 2)
@@ -487,8 +487,8 @@ console.log('§I 登录面：存储档位/键名、头装配二选一、409 一�
   if (auth !== null && store !== null) {
     const { readStoredToken, storeToken, applyCredentialHeaders, isCredentialPreflightError } = auth
     const {
-      apiKey, ask, authMode, authNotice, banners, canChat, clearBanners,
-      enterWithApiKey, hasStoredToken, loggedIn, question, resumeSession, signOut,
+      ask, authMode, authNotice, banners, canChat, clearBanners,
+      hasStoredToken, loggedIn, question, resumeSession, signOut,
       submitCredentials,
     } = store
     const PW = 'CANARY-口令不得落存储-3d71'
@@ -622,27 +622,27 @@ console.log('§I 登录面：存储档位/键名、头装配二选一、409 一�
     check('I4c 一发登录不得因为“体不对”而自己重试（补发只住 409 那一条支）',
       be4.calls === 1, `calls=${be4.calls}`)
 
-    // I5 头装配二选一（直接调装配函数三组合）+ 前置校验可归类
+    // I5 头装配（直接调装配函数）+ 静态通道退役回归锁 + 前置校验可归类
     const h5 = new Headers()
-    applyCredentialHeaders(h5, { apiKey: 'key-9', token: 'tk-9' })
-    check('I5 两把都有 ⇒ 只发 Bearer、不发 X-API-Key（“并存”不等于“同时发”）',
+    applyCredentialHeaders(h5, { token: 'tk-9' })
+    check('I5 有令牌 ⇒ 只发 Bearer、绝不发 X-API-Key（静态通道已移除）',
       h5.get('Authorization') === 'Bearer tk-9' && h5.get('X-API-Key') === null)
     const h5b = new Headers()
-    applyCredentialHeaders(h5b, { apiKey: 'key-9', token: '' })
-    check('I5b 只有密钥 ⇒ 只发 X-API-Key、不发 Authorization',
-      h5b.get('X-API-Key') === 'key-9' && h5b.get('Authorization') === null)
-    const h5c = new Headers()
-    applyCredentialHeaders(h5c, { apiKey: '', token: '' })
-    check('I5c 两把都空 ⇒ 两个头都不发（observe 档/开发模式现状，不是本件新增行为）',
-      h5c.get('Authorization') === null && h5c.get('X-API-Key') === null)
+    applyCredentialHeaders(h5b, { token: '' })
+    check('I5b 没有令牌 ⇒ 两个入口凭据头都不发（生产现网后端会回 401）',
+      h5b.get('X-API-Key') === null && h5b.get('Authorization') === null)
+    const h5bb = new Headers()
+    applyCredentialHeaders(h5bb, { token: '', apiKey: 'key-9' })
+    check('I5bb 即便调用方误带已退役的 apiKey 字段，也绝不发出 X-API-Key（通道退役回归锁）',
+      h5bb.get('X-API-Key') === null && h5bb.get('Authorization') === null)
     let thrown5 = null
     try {
-      applyCredentialHeaders(new Headers(), { apiKey: '', token: '令牌含中文' })
+      applyCredentialHeaders(new Headers(), { token: '令牌含中文' })
     } catch (e) { thrown5 = e }
     check('I5d 非 ASCII 令牌 ⇒ 发出前就拦下，且能被归成“凭据写错了”这一型（不是服务端回的错）',
       thrown5 instanceof Error && isCredentialPreflightError(thrown5) === true)
-    check('I5e 非 ASCII 密钥那一型同样可归类（sse.ts 靠它决定“原样抛给页面”还是“折成时间线一条”）',
-      isCredentialPreflightError(new Error('接口密钥含非 ASCII 字符')) === true
+    check('I5e 已退役的密钥型错误不再被归成凭据前置校验（sse.ts 靠它决定“原样抛给页面”还是“折成时间线一条”）',
+      isCredentialPreflightError(new Error('接口密钥含非 ASCII 字符')) === false
       && isCredentialPreflightError(new Error('服务端返回 HTTP 500')) === false)
 
     /* I6 已登录时 /query 的头装配从凭据面取（传输层不再自拼）。
@@ -652,13 +652,12 @@ console.log('§I 登录面：存储档位/键名、头装配二选一、409 一�
     authMode.value = 'login'
     await submitCredentials({ login: 'alice', password: PW, displayName: '' }, mkBackend(200, authOk).call)
     question.value = '平台能查什么'
-    apiKey.value = 'key-q'
     let seen6 = null
     await ask(async (_u, init) => {
       seen6 = init.headers instanceof Headers ? init.headers : new Headers(init?.headers ?? {})
       return sseResponse([frame('done', { type: 'done', thread_id: 'i6', answer: 'ok' })])
     })
-    check('I6 已登录时 /query 只带 Bearer（密钥不并发 ⇒ 读数不会混）',
+    check('I6 已登录时 /query 只带 Bearer（不再有第二条入口凭据 ⇒ 读数不会混）',
       seen6 !== null && seen6.get('Authorization') === 'Bearer tk-1' && seen6.get('X-API-Key') === null,
       seen6 === null ? '未拿到请求头' : `auth=${seen6.get('Authorization')} key=${seen6.get('X-API-Key')}`)
 
@@ -694,28 +693,24 @@ console.log('§I 登录面：存储档位/键名、头装配二选一、409 一�
     check('I9 401 ⇒ 令牌两处都清（内存与存储只清一个会出现“刷新又回到 checking”的矛盾）',
       loggedIn.value === false && hasStoredToken.value === false && !mem.session.has('ap.auth.token'))
 
-    // I10 对话中途 401 才掉线；keyMode 下的 401 是密钥错，不能把人踢下页面
+    // I10 对话中途 401 才掉线；未登录档本来就没有登录态可掉
     await authReset()
     authMode.value = 'login'
     await submitCredentials({ login: 'bob', password: PW, displayName: '' }, mkBackend(200, { ...authOk, access_token: 'tk-c', tenant_id: 't-c', user_id: 'u-c' }).call)
     question.value = '第二问'
-    apiKey.value = ''
     await ask(async () => new Response(JSON.stringify({ detail: 'INVALID_API_KEY' }), { status: 401 }))
     check('I10 已登录时流前 401 ⇒ 掉登录态并给出可执行的下一步',
       loggedIn.value === false && authNotice.value.includes('重新登录'), authNotice.value)
-    enterWithApiKey()
     clearBanners()
     question.value = '第三问'
-    apiKey.value = 'key-m'
     await ask(async () => new Response(JSON.stringify({ detail: 'INVALID_API_KEY' }), { status: 401 }))
-    check('I10b keyMode 下的 401 只报提示不掉线（那一档本来就没有登录态可登）',
-      canChat.value === true && loggedIn.value === false)
+    check('I10b 未登录档下的 401 只报提示不掉线（那一档本来就没有登录态可登）',
+      canChat.value === false && loggedIn.value === false && banners.value.length === 1)
     /* I10c 直接打传输层取那个读数：会话层不导出整个快照（导了组件就能写它），
      * 所以这一格只能从 `streamQuery` 的定稿快照里读 `httpStatus`。它是 I10 那条分支的
      * 前置：没有这个字段，会话层只能猜文案（文案改一个字就换一条路径）。 */
     const s10c = await streamQuery({
       query: 'q',
-      apiKey: 'k-e',
       token: '',
       fetchImpl: async () => new Response(JSON.stringify({ detail: 'INVALID_API_KEY' }), { status: 401 }),
     })
@@ -736,7 +731,7 @@ console.log('§I 登录面：存储档位/键名、头装配二选一、409 一�
       banners.value.length === 1 && banners.value[0].includes('不撤销已签发令牌'), banners.value.join(' | '))
 
     // I12 累计面：本轮跑过十二个入口之后，localStorage 仍然一个键都没写过
-    check('I12 全程零写 localStorage（ApiKeyBox 与 LoginView 屏上那句承诺的行为面）',
+    check('I12 全程零写 localStorage（LoginView 屏上那句承诺的行为面）',
       mem.local.size === 0, [...mem.local.keys()].join(','))
     check('I12b 退出的 banner 里也不含口令（上屏文案只来自服务端信封）',
       banners.value.every((b) => !b.includes(PW)), banners.value.join(' | '))

@@ -43,9 +43,9 @@ mcp = ["mcp>=2.2.0"]  # Dependabot: MCP SDK DNS 重绑定/WebSocket/HTTP session
 # 默认 deterministic/graph/auto 模式无需安装。安装：uv sync --extra agentic
 agentic = ["agent-federation-app"]
 dev = [
-    "pytest>=8.0",
-    "pytest-asyncio>=0.23",
-    "ruff>=0.16.9",
+    "pytest>=9.2.0",
+    "pytest-asyncio>=1.4.1.post1",
+    "ruff>=0.17.4",
     # 清单接线用例（tests/deploy）要真解析 YAML 缩进，不能用行扫描替代；
     # 今天它靠 uvicorn[standard] 传递在位，但守护用例不该赌传递依赖。
     "pyyaml>=6.0",

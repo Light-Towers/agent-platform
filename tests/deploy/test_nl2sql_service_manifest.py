@@ -19,6 +19,15 @@ import yaml
 
 _ROOT = Path(__file__).resolve().parents[2]
 _K8S = _ROOT / "deploy" / "k8s"
+_missing_manifests = [n for n in ('30-nl2sql-service.yaml', '36-nl2sql-meta-init-job.yaml') if not (_K8S / n).exists()]
+if _missing_manifests:
+    import pytest as _pytest
+    _pytest.skip(
+        "deploy/k8s 脱敏资产未入库（.gitignore 排除）：缺 "
+        + ", ".join(_missing_manifests)
+        + "，跳过 manifest 门禁；内网有资产时本套件照常全跑",
+        allow_module_level=True,
+    )
 _SERVICE = _K8S / "30-nl2sql-service.yaml"
 _META_JOB = _K8S / "36-nl2sql-meta-init-job.yaml"
 _PLATFORM = _K8S / "20-agent-platform.yaml"
@@ -577,7 +586,12 @@ def test_manifest_env_actually_lands_in_settings(monkeypatch, tmp_path):
         )
         assert s.sensitive_columns == json.loads(cm["NL2SQL_SENSITIVE_COLUMNS"])
         assert s.result_masking_enabled is True
-        assert s.default_query_role == cm["NL2SQL_DEFAULT_QUERY_ROLE"]
+        # 1c/D5：角色不再由配置承载 —— Settings 字段、ConfigMap 键、
+        # Deployment env 三处同批下线，任一残留都会变成「配了没人读」。
+        assert not hasattr(s, "default_query_role"), "角色配置字段已下线，不得复现"
+        assert not hasattr(s, "admin_roles"), "admin 名单已下线，不得复现"
+        assert "NL2SQL_DEFAULT_QUERY_ROLE" not in cm
+        assert "DEFAULT_QUERY_ROLE" not in values
         # LLM 两键引平台 CM：问数侧读到的必须是同一条模型（现网换 rev 只改 00-config 一处）
         assert s.llm_model == cm["LLM_MODEL"]
         assert s.llm_base_url == cm["LLM_BASE_URL"]

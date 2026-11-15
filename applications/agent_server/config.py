@@ -16,7 +16,10 @@ class Settings(BaseLLMSettings):
     # 服务
     host: str = "0.0.0.0"
     port: int = 8000
-    api_key: str = ""  # 非空时启用 X-API-Key 认证，并忽略客户端 thread_id
+    # 鉴权启用开关（**不是要比对的静态密钥**）：非空 ⇒ 入站只接受已验签的登录令牌、
+    # 且 resolve_thread_id 忽略客户端 thread_id；为空 ⇒ 纯开发模式旁路。静态
+    # X-API-Key 通道已退役，本字段保留仅为上述开关与会话防劫持语义，勿删。
+    api_key: str = ""
 
     # 登录面（方案 docs/plans/plan-web-auth-user-minimal-2026-11-05.md）。
     # 三个都是**部署级开关**，不接受请求体/查询参数传入（否则等于让客户端自选注册到哪个 org）。

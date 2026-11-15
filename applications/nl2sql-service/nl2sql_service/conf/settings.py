@@ -139,14 +139,12 @@ class Settings(BaseLLMSettings):
     # 清单（"table.column" 全限定，小写）——同时驱动 L2 guard 黑名单与 L3 结果
     # 层脱敏。L1（账号 GRANT + 脱敏视图）在 DB 侧，应用不建 DDL，见 README。
     sensitive_columns: List[str] = Field(default_factory=list)
-    # L3 结果层脱敏：非 admin 角色对敏感列投影掩码。掩码保留首尾各 keep 个字符，
-    # 其余打 *；keep=0 = 全掩码。admin_roles 里的角色看全量。
+    # L3 结果层脱敏：无 data.unmasked 能力的角色对敏感列投影掩码。掩码保留首尾
+    # 各 keep 个字符，其余打 *；keep=0 = 全掩码。
     result_masking_enabled: bool = True
     mask_keep_chars: int = 1
-    admin_roles: List[str] = Field(default_factory=lambda: ["admin"])
-    # L3 角色来源（服务端断言，非客户端请求体）：未接 ADR-0007 身份门前的
-    # 最小权限默认。接入身份门后改为从断言身份取。置 admin 需显式改配置。
-    default_query_role: str = "analyst"
+    # 1c/D5：admin_roles / default_query_role 已下线——角色不再来自配置，
+    # 改由内部签名头的 r 键承载、authorization.has_feature 单一解释。
 
     @property
     def meta_db_enabled(self) -> bool:
@@ -242,6 +240,36 @@ def _pool_overrides(app_yaml: dict) -> dict:
     return out
 
 
+_DATA_PERMISSION_KEYS = ("sensitive_columns", "result_masking_enabled", "mask_keep_chars")
+
+
+def _data_permission_overrides(app_yaml: dict) -> dict:
+    """从 app_config.yaml 的 `data_permission:` 段提取覆盖项（1c/D5 + R8）。
+
+    角色键（``admin_roles`` / ``default_query_role``）下线后，残留会让运维以为
+    「改了配置就生效」而实际无人消费 ⇒ 未知键一律具名 raise，不静默忽略。
+    这是把 ``pool:`` 段 :219-240 的既有纪律推广过来；抽成独立函数便于反例单测
+    直接构造违规 YAML（AGENTS.md 硬规矩 #8）。
+    """
+    perm_yaml = app_yaml.get("data_permission") or {}
+    if not isinstance(perm_yaml, dict):
+        raise ValueError("app_config.yaml data_permission 段必须是映射")
+    unknown = set(perm_yaml) - set(_DATA_PERMISSION_KEYS)
+    if unknown:
+        raise ValueError(
+            f"app_config.yaml data_permission 段出现未知键: {sorted(unknown)}"
+            "（admin_roles / default_query_role 已于 1c 下线，请从镜像内 YAML 删除）"
+        )
+    out: dict = {}
+    if perm_yaml.get("sensitive_columns") is not None:
+        out["sensitive_columns"] = perm_yaml.get("sensitive_columns") or []
+    if perm_yaml.get("result_masking_enabled") is not None:
+        out["result_masking_enabled"] = perm_yaml.get("result_masking_enabled")
+    if perm_yaml.get("mask_keep_chars") is not None:
+        out["mask_keep_chars"] = perm_yaml.get("mask_keep_chars")
+    return out
+
+
 @lru_cache
 def get_settings() -> Settings:
     conf_dir = Path(__file__).parent
@@ -282,13 +310,7 @@ def get_settings() -> Settings:
     if guard_yaml:
         overrides["allowed_tables"] = guard_yaml.get("allowed_tables", []) or []
         overrides["metric_config_max_items"] = guard_yaml.get("max_items", 200)
-    perm_yaml = app_yaml.get("data_permission") or {}
-    if perm_yaml:
-        overrides["sensitive_columns"] = perm_yaml.get("sensitive_columns", []) or []
-        overrides["result_masking_enabled"] = perm_yaml.get("result_masking_enabled", True)
-        overrides["mask_keep_chars"] = perm_yaml.get("mask_keep_chars", 1)
-        overrides["admin_roles"] = perm_yaml.get("admin_roles", ["admin"]) or ["admin"]
-        overrides["default_query_role"] = perm_yaml.get("default_query_role", "analyst")
+    overrides.update(_data_permission_overrides(app_yaml))
     datasource_yaml = app_yaml.get("datasource") or {}
     if datasource_yaml:
         overrides["datasource_id"] = datasource_yaml.get("id", "dw")

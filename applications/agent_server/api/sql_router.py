@@ -22,7 +22,7 @@ from agent_runtime.identity import IdentityError, sign_internal_header
 from agent_runtime.workspace_registry import resolve_workspace, server_tenant_id
 from fastapi import APIRouter, Depends, HTTPException
 
-from agent_server.api.auth import verify_api_key
+from agent_server.api.auth import require_feature, verify_api_key
 from agent_server.config import get_settings
 from agent_server.schemas import SqlTrainRequest, SqlTrainResponse
 
@@ -38,6 +38,7 @@ _INGEST_TIMEOUT_S = 60.0
 async def sql_train(
     req: SqlTrainRequest,
     _auth=Depends(verify_api_key),  # 仅作鉴权闸门（函数体不取凭据值，lint P12）
+    _feature=Depends(require_feature("sql.train")),  # 401 先于 403：_auth 必须在前
 ):
     settings = get_settings()
     url = settings.nl2sql_service_url

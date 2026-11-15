@@ -13,6 +13,7 @@ from __future__ import annotations
 import time
 
 import pytest
+from agent_server.config import get_settings
 from agent_server.main import app
 from agent_server.schemas import HealthResponse
 from fastapi.testclient import TestClient
@@ -168,8 +169,11 @@ class TestHealthReflectsRuntimeState:
         是 agent_runtime 里逐步取证的数据载体，不是服务）。所以这里直接翻该字段的输入。
 
         刻意不拨 DATABASE_URL：那会让 lifespan 真去连库（本机无 PG），测到的会是连接失败
-        而不是装配态。
+        而不是装配态。故 DATABASE_URL 已配置（PG 模式）时，该"无 DB 默认形态"不再存在，
+        跳过本用例——与"刻意不拨 DATABASE_URL"的意图一致，仅内存模式执行。
         """
+        if get_settings().database_url:
+            pytest.skip("DATABASE_URL 已配置（PG 模式）：本用例仅覆盖无 DB 内存模式")
         for key in _SWITCHES:
             monkeypatch.delenv(key, raising=False)
         _clear_cache()

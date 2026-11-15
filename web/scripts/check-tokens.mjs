@@ -191,17 +191,19 @@ const subF = healthFields(APP_H, 'HealthResponse');
 /* 任一层读不到 ⇒ 整个派生字段集不可信（缺一层就是缺若干字段，逐项比较只会报成"字典多了"） */
 const FIELD_SET = baseF && subF ? [...new Set([...baseF, ...subF])].sort() : null;
 
-/* 屏上字典：`EVENTS` 住在对话页，`LAMP_GROUPS` / `LAMP_WHY` 住在健康灯页
- * （用户 2026-10-30 拍板：灯阵从对话页第三栏移出成独立视图）。
- * 口径：只取**行首缩进后的第一个标识符**当 key —— 嵌套对象里的 `fam` / `sw` 前面是
- * `{ `不是纯空白，所以不会被误收；代价是字典必须**一行一键**（多键共一行会漏）。
- * 这是一条写进代码的耦合，不是隐形假设：两页的字典都按此形状排。 */
-const talk = src[join(WEB, 'poc.html')];
-const lampPage = src[join(WEB, 'poc-health.html')];
+/* 屏上字典（唯一真相源，已从演示页转正为真实工程源）：
+ *   EVENT 侧 → `src/api/events.ts` 的 `EVENT_LEGEND`（见下方 TS 侧断言）
+ *   LAMP 侧 → `src/api/health.ts` 的 `HEALTH_LAMP_GROUPS` / `HEALTH_LAMP_WHY`
+ * 演示静态页（poc.html / poc-health.html）已删除，门禁不再依赖它们。
+ * 口径：只取**行首缩进后的第一个标识符/引号串**当 key —— 嵌套对象里的 `fam` / `sw`
+ * 前面是 `{ ` 不是纯空白，不会误收；代价是字典必须**一行一键**（多键共一行会漏）。
+ * 这是一条写进代码的耦合，不是隐形假设：两个 TS 字典都按此形状排（与旧演示页同形）。 */
+/* 屏上字典源：演示页已删，统一读真实工程源（events.ts 在下方 TS 侧，health.ts 在此）。 */
+const healthTs = readText(join(WEB, 'src/api/health.ts'));
 /* 屏上字典的块体抽取单独成一个函数：key 集与 fam/sw 同值校验要读同一个块体，
  * 写两遍匹配串就是两个会各自漂的坐标（本仓已实踩过一次“同一件事三处陈述”）。 */
 const dictBody = (text, name, where) => {
-  const block = text.match(new RegExp(`const ${name} = \\{([\\s\\S]*?)\\n\\};`));
+  const block = text.match(new RegExp(`const ${name}[^{]*\\{([\\s\\S]*?)\\n\\}`));
   if (!block) {
     fail.push(`断言6 ${where} 里找不到 const ${name}（屏上字典坐标变了，先核对再改门禁；该项双向比较已跳过）`);
     return null;
@@ -212,15 +214,15 @@ const dictKeys = (text, name, where) => {
   const body = dictBody(text, name, where);
   return body === null ? null : [...body.matchAll(/^[ \t]+([a-z_][a-z0-9_]*)[ \t]*:/gm)].map((m) => m[1]).sort();
 };
-const groupsBlock = lampPage.match(/const LAMP_GROUPS = \{([\s\S]*?)\n\};/);
-if (!groupsBlock) fail.push('断言6 poc-health.html 里读不到 const LAMP_GROUPS（灯阵字典坐标变了，先核对再改门禁；分组项双向比较已跳过）');
+const groupsBlock = healthTs.match(/const HEALTH_LAMP_GROUPS[^{]*\{([\s\S]*?)\n\}/);
+if (!groupsBlock) fail.push('断言6 src/api/health.ts 里读不到 const HEALTH_LAMP_GROUPS（灯阵字典坐标变了，先核对再改门禁；分组项双向比较已跳过）');
 const lampKeys = groupsBlock
   ? [...groupsBlock[1].matchAll(/\[([^\]]*)\]/g)].flatMap((m) => [...m[1].matchAll(/'([^']+)'/g)].map((x) => x[1]))
   : null;
 /* 读不到就是 null，不在这里 .sort() / 展开 —— 坐标变了的情形必须能活着走到下面的跳过分支。 */
-const EVENT_KEYS = dictKeys(talk, 'EVENTS', 'poc.html');
+
 const LAMP_KEYS = lampKeys ? [...new Set(lampKeys)].sort() : null;
-const WHY_KEYS = dictKeys(lampPage, 'LAMP_WHY', 'poc-health.html');
+const WHY_KEYS = dictKeys(healthTs, 'HEALTH_LAMP_WHY', 'src/api/health.ts');
 
 /* ---- 断言 6 在 PR-0 新增的两件（TS 侧）----
  * 为什么要新增而不是等 check-events.mjs：那个脚本的输入是 PR-1 才存在的 handler 分支与
@@ -295,24 +297,11 @@ const legendRows = (body, where) => {
   }
   return rows;
 };
-const talkRows = (() => {
-  const body = dictBody(talk, 'EVENTS', 'poc.html');
-  return body === null ? null : legendRows(body, 'poc.html EVENTS');
-})();
+
+/* EVENT 侧只余 events.ts 一份真相源：EVENT_LEGEND 的 key 集已与派生集在下方双向比对，
+ * 此处不再做"两份副本同值"比较（副本已随演示页退役）。legendRows 保留供未来复用。 */
 const tsRows = tsLegendBlock ? legendRows(tsLegendBlock[1], `${TS_EVENTS_REL} EVENT_LEGEND`) : null;
-if (talkRows && tsRows) {
-  const both = [...new Set([...talkRows.keys(), ...tsRows.keys()])].sort();
-  const drift = [];
-  for (const key of both) {
-    const a = talkRows.get(key);
-    const b = tsRows.get(key);
-    if (!a || !b) { drift.push(`${key}：只在${a ? 'poc.html' : 'events.ts'}`); continue; }
-    if (a.fam !== b.fam) drift.push(`${key}.fam：poc.html='${a.fam}' vs events.ts='${b.fam}'`);
-    if (a.sw !== b.sw) drift.push(`${key}.sw：poc.html='${a.sw}' vs events.ts='${b.sw}'`);
-  }
-  if (drift.length) fail.push(`断言6 两副本图例漂了（${drift.length} 处）：\n  ${drift.join('\n  ')}`);
-  else note.push(`断言6 图例两副本 fam/sw：${both.length} 键逐字同值 ✅`);
-}
+if (tsRows) note.push(`断言6 EVENT_LEGEND 图例：${tsRows.size} 键（fam/sw 同值校验在 TS 联合与 key 集比对中覆盖）`);
 
 const diff = (a, b) => a.filter((x) => !b.includes(x));
 const cmp = (label, dict, derived) => {
@@ -327,7 +316,7 @@ const cmp = (label, dict, derived) => {
   if (extra.length) fail.push(`${label} 多项（字典有但源已不产出）：${extra.join(', ')}`);
   note.push(`${label}：字典 ${dict.length} / 派生 ${derived.length} ${miss.length + extra.length === 0 ? '✅' : '❌'}`);
 };
-cmp('断言6 事件图例字典', EVENT_KEYS, EVENT_SET);
+
 cmp('断言6 TS 事件联合', tsUnionNames, EVENT_SET);
 cmp('断言6 TS 图例字典', TS_EVENT_KEYS, EVENT_SET);
 cmp('断言6 /health 分组字典', LAMP_KEYS, FIELD_SET);

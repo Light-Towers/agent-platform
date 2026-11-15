@@ -27,42 +27,42 @@
 > **提交撞 409 就在同一次提交内用同一份凭据补发一发登录（要人再点一次的“只切态”写法已于刀㊺ 改判）**；另有一种可读法（单按钮先试登录、401 即自动建号）**已被人否掉**，理由写在取证件 §44.1（它会在前端重建一个存在性 oracle，而登录名打错一个字母就静默建号）。
 > ⚠ **代码已交 ≠ 环境已达**：本批未提交、未构建、未 rollout ⇒ 跑着的实例上登录面**仍是 503 那一档**（PR-2c 的清单注入点刀㊺ 已落，但集群里的 Secret 对象与操作条目还不存在）。逐格读数在取证件 **§45**。
 
-## 一、本目录有什么（**两个视图，不是一个页面**）
+## 一、本目录有什么（**真实 Vue 工程，两个视图**）
 
-> 拆页结论于 2026-10-30 由用户拍板：**对话页（两栏）与 `/health` 灯阵页（独立视图）是两个页面**，靠 `<a href>` 互链。没有路由表、没有 history API —— 这仍是「最小核心无前端路由」那条在册口径（工程件 §9.1），越过的那一小块与其复审条件登记在视觉件 §9 排除项 1。
+> 对话页（两栏，接 SSE）与 `/health` 灯阵视图都是 `web/src/` 下的真实组件，无独立静态宿主页——演示用 `poc.html` / `poc-health.html` 已删除，双载体收敛为单一真实工程。无前端路由表、无 history API —— 仍属「最小核心无前端路由」口径（工程件 §9.1）。
 
 | 文件 | 职责 | 实测行数 |
 |---|---|---|
 | `web/src/styles/tokens.css` | **唯一允许写色值的文件**。L0 原语 / L1 语义 / L2 别名三层 + dark 双副本 | 217 |
-| `web/src/styles/base.css` | reset、字体（注释保留未启用）、全局排版、**两栏骨架**与断点、链接与 `aria-current` 选中态、焦点环、reduced-motion；窄栏 sticky 提交区**来由刀㊲ 带上令牌底 + 上分隔线**（实拍量出它透明底与内容叠字，修的是叠字不是 sticky 本身的遮挡） | 395 |
+| `web/src/styles/base.css` | reset、字体（注释保留未启用）、全局排版、**两栏骨架**与断点、链接与 `aria-current` 选中态、焦点环、reduced-motion；窄栏 sticky 提交区**来由刀㊲ 带上令牌底 + 上分隔线**（实拍量出它透明底与内容叠字，修的是叠字不是 sticky 本身的遮挡）。**管理面批 1（G1）**：加 `.topnav` 落位类一条（页签本体与选中态仍是 `.seg`/`aria-current` 那两格，没有重写第二份） | 400 |
 | `web/src/styles/events.css` | 12 类事件的 class→token 映射、图例、`/health` 灯阵卡（**只在独立页用**）、四档形状图例；**刀㊲ 新增 `.ev--transport` 与 `.term--*`**（未识别事件与「没收到 done」那两条形状走同一令牌通道） | 214 |
-| `web/poc.html` | **对话页**宿主页：主题三态 + 三态演示 + 12+1 行时间线 + 图例。**已不含灯阵**（JS 与 DOM 已整批搬走） | 267 |
-| `web/poc-health.html` | **灯阵独立页**宿主页：5 组 30 盏灯（`auto-fill` × `minmax(260px, 1fr)`）+ 四档形状图例 | 180 |
+| `web/src/api/health.ts` | `/health` 灯阵字典真相源：`HEALTH_LAMP_GROUPS`（5 组 30 字段）/ `HEALTH_LAMP_WHY`（字段→判读说明）；门禁断言 6 现读此处与后端 `HealthResponse` 双向比对（原 `poc-health.html` 的 `LAMP_GROUPS`/`LAMP_WHY` 已转正为此） | 56 |
 | `web/scripts/check-tokens.mjs` | 视觉门禁六条断言，零依赖（只用 Node 内置模块）；**扫描面 = `web/` 下 `.css`/`.ts`/`.vue`/`.html` 全量递归**（排除 `node_modules`/`dist`/`scripts`，空面即红） | 344 |
 | `web/scripts/check-events.mjs` | 事件契约门禁（工单件 §9.3 登记件）：后端 `StreamEventType` Literal ⊆ `serialize_stream_event` 分支集（§12-#2）+ 派生全集 ↔ TS 联合 ↔ `EVENT_HANDLERS` 键集三段双向；**只锁结构、不锁行为**；期望集只从源派生，件内不出现事件条数。**刀㊲ 扩三枚消费面齿**：图标表键集 == 事件全集、`.ev--` 集 == 事件全集、两栏骨架的必须件在位；**刀㊹ 再加凭据面与装配面两行**（写了存储的文件必须落在白名单里、唯一装凭据头的入口只能有一处、屏上得写出令牌键名） | 389 |
 | `web/scripts/verify-sse.mjs` | SSE 客户端与三条错误通道的**行为**断言（工单件 §10.5 的第 ① 层）：真 import 被测 `.ts` 后喂帧，带 canary 泄漏判 + 正对照 + 断言器自证；**需 Node ≥ 22.18 的原生类型擦除**，加载失败时报 rc=1 而不吞成 skip。**刀㊲ 扩面**：快照不回改一节 + 会话层一节（后者是消费点侧的行为，不再是「只被行为件驱动」）；**刀㊹ 新增 §I**（登录面行为：注册即登录、409 一次提交内补发登录、绝对路径、掉线清会话）；**刀㊺ 换形一处量具形状**：假后端从单值版 mkBackend 换为按调用次序回值的 mkSteps（单值版表达不了“先 409 再 200”，而一键化的判据正是发数与次序）。⚠ 它咬住的 M5/M6 两型是**结构门看不见的**（删一行 409 补发、把路径写成相对都不破结构）⇒ 两把量具互替不了，不是冗余 | 763 |
-| `web/index.html` | Vue 应用的构建入口（Vite 的 root html）。与 `web/poc.html` 是**两条通道**：前者走构建与托管，后者是无构建静态预览，不共用 | 26 |
+| `web/index.html` | Vue 应用的构建入口（Vite 的 root html），经构建产物由 agent_server 托管在 `/ui/`（§9.2）。演示用 `poc.html` 已删除，不再有第二通道 | 26 |
 | `web/package.json` | pnpm 面清单：运行时依赖两件 `vue` + `eventsource-parser`（PR-1 引入、精确钉版），devDependencies 十件（lint / typecheck / build）；`packageManager` 与 `engines.node` 定死 | 37 |
 | `web/vite.config.ts` | `base: '/ui/'`（§9.2 托管前缀）+ plugin-vue + 开发期代理**六个**前缀（刀㊹ 加 `/auth`；其中一条未验证风险写在文件内注释，不预先给解法） | 37 |
 | `web/tsconfig.json` | 应用面 TS 配置（只包 `src/` 与 `vite.config.ts`；门禁脚本 `.mjs` 故意不在内）；`allowImportingTsExtensions` 属 PR-1：行为件要在 Node 里按 `.ts` 说明符直接 import 被测源，不开这个键 Node 解析不到 | 24 |
 | `web/eslint.config.js` | flat config 三面：`src/**` 与 `vite.config.ts` 走**类型感知**、`.vue` 走 vue-eslint-parser、`scripts/**/*.mjs` 走纯语法 | 59 |
 | `web/src/main.ts` | **样式与主题的唯一入口**：三条 CSS 导入 + `initTheme()` 前置于 `createApp`（顺序即正确性，与 agent_server 那条 provider 装配顺序同族） | 22 |
-| `web/src/App.vue` | **对话页主视图**（刀㊲）：两栏骨架 + 提交区 + 三态 + 窄栏 `<details>` 折叠副本。**不放假数据**；提交钮用 `aria-disabled` 而**不用原生 `disabled`**（实拍量出原生属性把控件从 tab 序抽走、键盘提交后焦点收回 `body`，理由与读数写在文件注里，别挪回去）。刀㊹ 加**视图闸门**：未确认登录态时只渲登录面，判据是 `canChat` 一处 | 233 |
+| `web/src/App.vue` | **对话页主视图**（刀㊲）：两栏骨架 + 提交区 + 三态 + 窄栏 `<details>` 折叠副本。**不放假数据**；提交钮用 `aria-disabled` 而**不用原生 `disabled`**（实拍量出原生属性把控件从 tab 序抽走、键盘提交后焦点收回 `body`，理由与读数写在文件注里，别挪回去）。刀㊹ 加**视图闸门**：未确认登录态时只渲登录面，判据是 `canChat` 一处。**管理面批 1（G1）**：加管理面导航（`.topnav` + `.seg` 页签，选中态 `aria-current`）与三视图切换（对话 main / RoleGate）；入口显隐判据 `showRoleGate` = `hasFeature(...)` 四码任一，`chatShown` 兜底支防「换角色后旧视图键挂着无权页白屏」 | 291 |
 | `web/src/theme.ts` | 主题三档单一落点；「跟随系统」= **移除** `data-theme` 而不是写 `'auto'`（写了会让整条媒体查询失配） | 56 |
 | `web/src/env.d.ts` | ambient 类型入口，两条声明各解一个**实跑报出来的**错；第二条带三档变异实测的注记 | 31 |
 | `web/src/api/errors.ts` | `describeError` + `describeStreamError` 两收敛点（工单件 §3 那两条；读不到字段名时写诚实文案，不上屏 `[object Object]`） | 120 |
-| `web/src/api/events.ts` | `StreamEventType` 联合 + `EVENT_LEGEND` 屏上图例字典；与 `web/poc.html` 的 `EVENTS` 是**两副本、只许一个真相**（断言 6 逐字校 fam/sw） | 65 |
+| `web/src/api/events.ts` | `StreamEventType` 联合 + `EVENT_LEGEND` 屏上图例字典（**唯一 EVENT 真相源**，`poc.html` 的 `EVENTS` 副本已随演示页删除退役） | 65 |
 | `web/src/api/sse.ts` | `/query` 的 SSE 客户端：`fetch` + `eventsource-parser` 解帧、`applyFrame` 是纯函数（可被 Node 直接断言）、`done` 定稿与 **`error`→`done` 抑制**、未识别事件只报名不 dump 载荷；evidence 分支写**结构化三字段**（node/count/preview，刀㊲ 随消费端落地）。⚠ 事件名按「`payload.type` 优先、缺则退到帧的 event 名」两路读 —— 这条不是兼容姿态，是按源复取的结果（`sse_pack` 在 `type` 缺席时只发 data 行）。刀㊹ 扩三处：`token` 入参、`httpStatus` 快照（401 与 409 要能分开判）、凭据头装配**改为复用 `applyCredentialHeaders`**（单一实现位，不在这里自拼一遍） | 375 |
-| `web/src/api/auth.ts` | 凭据面客户端（刀㊹）：`/auth/login` 与 `/auth/register` 两条绝对路径、`applyCredentialHeaders` 是**全仓唯一**装 Bearer/`X-API-Key` 的地方（二选一，不并存）；令牌只落 `sessionStorage`（关标签即失效）、API 密钥仍只内存；口令只在调用那一刻进请求体，不留副本也不上屏；回读不到可断言的身份字段时**不得读成登录成功** | 330 |
+| `web/src/api/auth.ts` | 凭据面客户端（刀㊹）：`/auth/login` 与 `/auth/register` 两条绝对路径、`applyCredentialHeaders` 是**全仓唯一**装 `Authorization: Bearer` 的地方（静态 X-API-Key 通道已退役，只留登录）；令牌只落 `sessionStorage`（关标签即失效）；口令只在调用那一刻进请求体，不留副本也不上屏；回读不到可断言的身份字段时**不得读成登录成功**。**管理面批 1（G1）**：`AuthSession`/`IdentityProbe` 扩 `role`+`features`，缺省读法收在 `parseRoleFeatures` 一处（role 兜 viewer、features 兜空集，绝不兜成 admin —— D9）；登录响应**只带码不带集**（TokenResponse 自陈），features 由会话层补一发 `/auth/me` | 369 |
 | `web/src/components/LoginView.vue` | 登录屏（刀㊹，刀㊺ 改判一处形态）：**一屏两态**的 `.seg` 控件（默认「创建账号」），撞 409 时**同一次提交内补发一发登录**（不再要人点第二下）；`autocomplete` 按态分派 `new-password`/`current-password`；屏上**写出**令牌键名（那是门禁的一枚对拍目标，不是装饰）；屏上那一段“承诺什么”如实承认 409 会告诉你名字已被占用（A3 只管 /auth/login，管不到 /auth/register）；口令成功后立即清 | 257 |
-| `web/src/stores/session.ts` | 会话层单点（刀㊲）：全仓**唯一**调 `streamQuery` 的地方。banner 跟轮累积、`thread_id` 只从 `done` 拿、快照不回改（三条各自对应一个已登记的误读风险）。刀㊹ 加**登录态机**：默认落创建账号、409 同一次提交内补发登录（边界四条与为何不反方向住在 `submitCredentials` 头注）、401 掉线即清会话、退出只清本地（服务端撤销属 PR-3）；401 **不**自动切去建号（那是在前端重建存在性 oracle） | 372 |
+| `web/src/stores/session.ts` | 会话层单点（刀㊲）：全仓**唯一**调 `streamQuery` 的地方。banner 跟轮累积、`thread_id` 只从 `done` 拿、快照不回改（三条各自对应一个已登记的误读风险）。刀㊹ 加**登录态机**：默认落创建账号、409 同一次提交内补发登录（边界四条与为何不反方向住在 `submitCredentials` 头注）、401 掉线即清会话、退出只清本地（服务端撤销属 PR-3）；401 **不**自动切去建号（那是在前端重建存在性 oracle）。**管理面批 1（G1）**：加 `authRole`/`authFeatures` 只读视图 + `hasFeature` 单一问法；能力集**不落任何存储**（登出即清，防「改了角色旧能力还在」的幽灵窗口）；首登后 `backfillIdentityAfterLogin()` 异步补一发 `/auth/me`（**不走 fetchImpl 注入位**，理由三条在函数头注 —— 行为件 §I 的发数断言不破） | 436 |
 | `web/src/components/icons.ts` | `rowClassOf` / `iconPathOf` 两个纯函数（事件类型 → class / SVG path），**不持有状态**；键集与事件全集由 `check-events.mjs` 双向校（不写死条数） | 85 |
 | `web/src/components/Timeline.vue` | 过程时间线（刀㊲）：按类型分色、loading 尾部骨架条、空态直写「还没有事件」 | 78 |
 | `web/src/components/Answer.vue` | 答案区（刀㊲）：含 empty 引导；未收到 `done` 时**不得**读成完成 | 80 |
 | `web/src/components/EvidenceList.vue` | 依据列表（刀㊲）：消费 `sse.ts` 那三字段；badge 为 `0` 时有**单独文案**（不拿空列表冒充「没这一节」） | 56 |
-| `web/src/components/ApiKeyBox.vue` | 密钥输入框（刀㊲）：只存会话内存、不落 `localStorage`；刀㊹ 标注它为**降级通道**（有令牌时不显示，两条凭据不并存） | 54 |
+| ~~`web/src/components/ApiKeyBox.vue`~~ | **已删除**（静态 X-API-Key 通道退役，本部署只留用户名/密码登录）。原为密钥输入框（刀㊲）：只存会话内存、不落 `localStorage`；刀㊹ 曾标注它为降级通道。退役后的回归锁住在 `scripts/verify-sse.mjs` 的 F7/I5bb 与 `scripts/check-events.mjs` 的齿 C3 | — |
 | `web/src/components/ThemeToggle.vue` | 三档 `.seg` 控件；`aria-pressed` 绑**布尔**（那句「false 会被 removeAttribute」的错话如何被两道门各自抓回，写在文件头注） | 48 |
 | `web/src/components/Legend.vue` | 图例：事件数与族色相数**现算**，不把 12 / 8 抄进模板 | 44 |
+| `web/src/components/RoleGate.vue` | **「角色与能力」页**（管理面批 1/G1 新建）：摊开服务端断言的 role 与能力码原文，**不发任何请求、不带中文释义**（码→含义表住服务端，抄一份即第二事实源）；屏上写明 N3「角色改动下次登录生效」与控制面占位（不给死链）；入口显隐在 App.vue（viewer 无管理向能力码 ⇒ 页签都不渲染） | 62 |
 
 行数口径：本表是 `Get-Content <file>.Count` 实取值，不是估。**第十六批重取：六件 = 217 / 299 / 192 / 267 / 180 / 344**（本批只动第六件：222 → **344** = 扫描面递归化 + 断言 6 新增三口；前五件逐项未动。第十四批那一串 217 / 299 / 192 / 267 / 180 / 222 与下面那句「首次追到第八批之后」自本行起都是历史读数）（第十四批原句，保留为历史：四件同上一版逐项未动；改动的两件是样式 `web/src/styles/events.css` 191 → **192** 与门禁 `web/scripts/check-tokens.mjs` 197 → **222**，都跟第八批那两刀。上一版这一列整体停在第七批那次重取上 ⇒ 本行是**首次把它追到第八批之后**，不是本批改坏了什么）。改完样式或宿主页后本列随之漂移，下一批要重取；引用本列前先拿它当**待验值**而不是常量。
 
@@ -74,6 +74,8 @@
 
 **第三十八批（刀㊺）重取，只取本批碰过的三件**：`web/src/stores/session.ts` 348 → **372**（409 由「只切态」改为「同一次提交内补发一发登录」+ 边界四条的头注）/ `web/src/components/LoginView.vue` 253 → **257**（屏上承诺段两处订正，其中一处原文与实际相反）/ `web/scripts/verify-sse.mjs` 713 → **763**（假后端换形 `mkSteps` + I2 族换为七枚 + I3d/I4c）。同批 `web/src/api/auth.ts` **330** 与 `web/src/api/sse.ts` **375** 逐项未动（本批只改了「谁在什么条件下调它」，没改这两个文件本身），`web/src/App.vue` 233 / `web/scripts/check-events.mjs` 389 亦未动。⚠ 上一批那串数（348 / 253 / 713）**已被本批推翻**，不得再当现值引。本批未新增任何运行时依赖（`web/package.json` 与 `web/pnpm-lock.yaml` 逐项未动）。
 
+**管理面批 1（G1，2026-11-12）重取，只取本批碰过的四件 + 本批新增的一件**：`web/src/App.vue` 233 → **291**（管理面导航 + 三视图切换）/ `web/src/api/auth.ts` 330 → **369**（role+features 断言扩展）/ `web/src/stores/session.ts` 372 → **436**（角色态 + `hasFeature` + 首登回读）/ `web/src/styles/base.css` 395 → **400**（加 `.topnav` 落位类，选中态仍住 `.seg` 那一格没重写）；新建一件 = `web/src/components/RoleGate.vue` **62**。本批未新增任何运行时依赖（`web/package.json` 与 `web/pnpm-lock.yaml` 逐项未动）。⚠ 上一批那串数（372 / 330 / 395）**已被本批推翻**，不得再当现值引（口径同上段：本列是 `Get-Content <file>.Count` 实取，与 numstat 不是同一把尺）。门禁读数（本机，Node v24.12.0 / pnpm 10.33.0）：`pnpm install --frozen-lockfile` / `check:tokens`（定义 91 / 引用 91）/ `check:events`（消费 5 条 / 提供 22 条 / 缺 0）/ `lint` / `typecheck` / `build` / `verify:sse`（150 条断言，失败 0）全 rc=0。
+
 ⚠ **本目录的路径书写口径（第十四批定，A3 那笔在册欠项的落地）**：**反引号内的路径一律写仓库根相对**（`web/src/styles/tokens.css`），不写目录相对（src/styles/tokens.css 那种形态）。理由不是美观：反引号 + 根相对正好落在取证量具 `typo-scan.ps1` 的 T2 存在性校验面上（它的匹配前缀含 `web/`），于是那一格**从人读约定升成被校到的引用**；而目录相对 + 反引号是**承诺一个解析不了的东西** —— 按仓库根解就报 MISSING（本目录末节那条旧写法就是这么被 T2 抓出来的：它以 scripts/ 开头、又不带 `web/` 前缀，恰好落进校验面却不落进存在的事实；实物与当时「不改」的理由在台账 §15.10 行 19，本批按本口径改写它）。⚠ **两条边界，缺一条就会误用**：① 本口径只管**叙述文字**，HTML 里的 `href="src/styles/tokens.css"` 是浏览器按文档解的**功能路径**，改成根相对会当场断样式（第七批实拍通道会直接拍到裸 HTML）；② `check_doc_sync.py` 的文件引用面 `DOC_FILE_REF_ROOTS` 里**没有 `web/`** ⇒ 顶层三份文档里的 `web/...` 反引号引用**不红但也校不到**，不得读成「已通过顶层门禁校验」（该缺口已就地登记，扩面属改 `scripts/`，本批未动）。
 
 > 本表**第十六批新增 13 行**（Vue 骨架八件 + 四个配置件 + 入口 html），行数均为同批 `Get-Content` 实取。
@@ -84,19 +86,18 @@
 
 - ~~无 Vue / 无构建链 / 无 package.json / 无 TypeScript~~ ⇒ **第十六批刀⑰ 已交**（本目录不再处于“只有两条 `node` 命令”的状态）。
   现在的命令面是**两套独立的工具链**（§9.2 那条定案）：`pnpm` 一面（install / lint / typecheck / build，需 Node ≥ 22.12）、
-  `node` 一面（门禁与两个静态宿主页的无构建预览，仍可用）。两套互不依赖，共用一个仓库但**不共用 lockfile**。
+  `node` 一面（门禁的 Node 视觉门禁，仍可用）。两套互不依赖，共用一个仓库但**不共用 lockfile**。
   ⚠ 本段那句「只在本机实取」自刀⑲ 起不完整：五条门已在 **node:24-alpine 容器里实跑**（G0 基线 + 四枚反证，
   逐格读数在取证件 §23），而**CI runner 那一半仍未实跑** —— 本机 Node 版本、容器 Node 版本、runner Node
   版本是三个事实，前两个已取、第三个未取。check:tokens 那一格是例外：它要读 `web/` 外的四个仓内文件，
   builder 阶段没那些输入 ⇒ 它只能在完整 checkout 上跑（定性与读数同在 §23）。
 - ~~无 api 客户端、无 SSE 消费、无 `/health` 拉取~~ ⇒ **第二十五批（刀㉚）只推翻前半的一条**：`web/src/api/sse.ts` = api 客户端本体
-  + SSE 解帧与消费逻辑，但它**没有任何页面调用点**（对话页属 PR-2）⇒ 「屏上没有 SSE 消费」那一半仍然成立，`/health` 拉取仍无（PR-4）。
-  两个静态宿主页上每一个数字仍都是手写的假数据（包括灯页那 30 行的值），`web/src/App.vue` 在屏上仍直写「PR-1/PR-2 未交」——
+  + SSE 解帧与消费逻辑，但它**没有任何页面调用点**（对话页属 PR-2）⇒ 「屏上没有 SSE 消费」那一半在刀㉚时仍成立；`/health` 拉取后由 PR-4 的 `HealthView.vue` 补齐（见 :100）。
+  （早期未接后端时，屏上帧是实拍件在 CDP `Fetch` 域 fulfill 的 **mock**，本机无可用后端），`web/src/App.vue` 在屏上仍直写「PR-1/PR-2 未交」——
   那句从本批起要读成「**PR-1 的消费方未交**」，不能读成「PR-1 一行未写」。
   ⚠ **上面那三句自第三十二批（刀㊲）起不再是现值**（保留只为不让后人拿它当现值）：`web/src/App.vue` 已换成对话页（两栏、三态、
   真数据驱动），消费点在 `web/src/stores/session.ts` ⇒ 「屏上没有 SSE 消费」与「PR-1 的消费方未交」两句同时解除。
-  但这一推翻**只到屏上层**：那些屏上帧是实拍件在 CDP `Fetch` 域 fulfill 的 **mock**（本机无可用后端），而两个静态宿主页上
-  每一个数字仍都是手写的假数据（包括灯页那 30 行的值）—— 那两句**仍成立**，`/health` 拉取仍无（PR-4）。
+  但这一推翻**只到屏上层**：那些屏上帧是实拍件在 CDP `Fetch` 域 fulfill 的 **mock**（本机无可用后端）。`/health` 的真实消费者现已补齐（PR-4 交付）：`src/components/HealthView.vue` 接真实 `/health` 端点渲染灯阵，灯阵字典 `health.ts` 同时作为门禁断言 6 的真相源；原 `poc-health.html` 演示页已删。
   本条末句（第十六批原句：反证格只能拿**静态形状**做对象，见 §五）的原因随本批消失：当时它没有第一消费者（`client.ts` / `sse.ts`），
   现在 `sse.ts` 到位 ⇒ 反证对象多出一类**喂帧行为**（`web/scripts/verify-sse.mjs` 是常驻件，另有一枚一次性变异件住在 gitignored 目录，
   格数一律以脚本自身为准、本文件不抄）。
@@ -116,7 +117,7 @@
   ⚠ **第七批把这句从断言换成了实证，并顺手证伪了一个看着很硬的读数**。CDP 逐节点取平台字体（两页共扫 479 个节点、其中栅格化出文字的 292 个）：**全部 `isCustomFont=false`**，实际落到的只有 Microsoft YaHei / Cascadia Mono / NSimSun / Noto Sans SC，**声明栈首位的 IBM Plex 一次都没出现**。反面读数：`document.fonts.check('16px "IBM Plex Sans"')` 返回 **true**，而同一个 API 对控制组（一个编的不存在字体名）也返回 **true**、`document.fonts.size = 0` ⇒ **这个 API 在无 @font-face 页面上没有判别力**，拿它当「字体已装」的证据会得出与本句相反的错结论。取法与逐字体读数在取证件 **§14.4**。（⚠ 上一版括号里写的是「Segoe UI + 微软雅黑」：逐节点实取后，两页的栅格字体里**没出现 Segoe UI**，拉丁走 Cascadia Mono（等宽通道）、中文走 Microsoft YaHei / Noto Sans SC / NSimSun ⇒ 本句按实取改，不当它是旧口径笔误——它当时就是推定。）
 - 根 README 的目录表里**现在有** `web/` 这一行（第九批 2026-11-01 补）。这条欠项原先被两个理由挡着，两个现在都已定死：
   ① 「写进去必红」—— 那是本目录**未入库时**的读数；刀① 入库后不再成立（版本控制清单能读到 `web/README.md`）。② 「得先验清门禁认不认目录路径这种形状」—— 第九批用只读探针实取，答案是**分面的**：防漂移门禁的「文件引用」面只认九个顶层前缀，`web/` 不在里面 ⇒ 根 README 里那行**不红但也校不到**（不能读成「已通过校验」）；而 AGENTS.md 表格首列面与 ARCHITECTURE.md 目录面**会**校 `web/`，入库后判存在 ⇒ 加它不红。控制组（把 `web/` 从清单里剔掉）当场报出一条漂移 ⇒ 那条校验不是空转。探针与逐面读数在取证件 **§16**。
-  （⚠ 同一件事推出一条未随动项：AGENTS.md 的目录表里仍没 `web/` 行 —— 那一面恰好是**会校到**的，加它既能过又在门禁面上；第九批未动它，因它超出本轮拍板的 A1 射程。）
+  （⚠ 同一件事推出一条未随动项：AGENTS.md 的目录表**现已含** `web/` 行（第九批后补，那一面恰好是**会校到**的，加它既能过又在门禁面上）。）
 
 ## 三、怎么跑
 
@@ -166,8 +167,7 @@ uvicorn agent_server.main:app --port 8000  # 从仓库根起 ⇒ 读到 web/dist
 ② 两个 hash 资源（`.css`/`.js`）也带 `no-store`；③ `/ui/<不存在的路径>` 必须 **404** —— 这一格是专门用来
 防"SPA fallback 把没构建照成 200"那种假绿的。逐条读数在取证件 **§23**。
 
-预览起来后两个页各一个地址：`http://localhost:8123/poc.html`（对话页）与
-`http://localhost:8123/poc-health.html`（灯阵页）。预览服务器已改过 CSS 的话，浏览器要**硬刷新**（旧标签页会用内存里那份）。
+Vue 工程用 `pnpm dev`（:5173，代理六个后端前缀）或构建后由 agent_server 托管 `/ui/`（见 §三 构建与托管面）。原 `poc.html` / `poc-health.html` 静态预览地址已随演示页删除而失效。
 
 ## 四、门禁的四条定性（读代码前先看这段，否则会误用它的读数）
 

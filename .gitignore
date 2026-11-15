@@ -140,3 +140,6 @@ applications/knowledge-service/eval/adjudication.jsonl
 # 展会/场馆方提供的正式文档，本地 pypdf 抽取 + 联系方式脱敏后的 .md。
 # 脱敏只覆盖手机/邮箱，正文仍含未公开的业务口径 ⇒ 整目录排除，不是只排除 *.pdf 原件。
 data/corpus/
+
+# === 内网部署目录 deploy/k8s（含真实 k8s 节点标签等内网标识），按方案 X 不进公开 GitHub；本机保留物理文件，仅供内网部署 ===
+/deploy/k8s/

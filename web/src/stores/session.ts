@@ -15,25 +15,35 @@
  *   需要跨页/跨组件共享的可变状态（或需要 devtools 时间旅行）时，本件换 Pinia 是正解。
  *
  * 三条纪律的落点：
- *   · 密钥只活在本模块的 ref 里，**不写 localStorage**（工单件 §2.3）。本模块自己一个存储 API
- *     都不调：登录令牌的存取全部代理给 `api/auth.ts`（那里是白名单件）。全仓 `web/src/**`
+ *   · 唯一凭据是登录令牌，**不写 localStorage**（工单件 §2.3）。本模块自己一个存储 API
+ *     都不调：令牌的存取全部代理给 `api/auth.ts`（那里是白名单件）。全仓 `web/src/**`
  *     的存储写者只有两件：`theme.ts`（`ap.ui.theme`，非凭据）与 `auth.ts`（`ap.auth.token`，
  *     sessionStorage）—— 这条由 `check-events.mjs` 的凭据齿双向校，不靠自觉。
+ *     静态 X-API-Key 通道已退役，本模块不再有密钥 ref。
  *   · banner **跨轮累积**：一次 `streamQuery` 只可能命中四条错误分支里的一条（HTTP 早退
  *     或流内，见 sse.ts），所以单轮屏上最多只出现一支 ⇒ A8「四条分支文案互异」要能在
  *     同一屏上对比，只能靠累积。上限 8，超出丢最旧并**如实报折叠条数**（不静默丢）。
- *   · `streamQuery` 仍会抛的那两条（密钥/令牌含非 ASCII）在这里接住 —— A2 的"不白屏"要求
+ *   · `streamQuery` 仍会抛的那一条（令牌含非 ASCII）在这里接住 —— A2 的"不白屏"要求
  *     页面最后一道有 catch，而不是让它冒到渲染之外。
  *
- * PR-2b 在本模块加的是**登录态机**（四值：`anonymous / checking / authenticated / keyMode`）。
+ * PR-2b 在本模块加的是**登录态机**（三值：`anonymous / checking / authenticated`）。
  * 三条不是显然的取舍，各自写在这里以免后人当手滑改掉：
  *   ① `ask()` 不加「已登录」前置判断。闸门在服务端（`verify_api_key` / `IdentityMiddleware`），
  *      前端这一层的可见性是 UX 而不是安全边界；给 `ask()` 加闸门的唯一效果是让行为件
  *      `verify-sse.mjs` §H 先伪造一个登录态，那不减风险只增耦合。
- *   ② 401 才掉登录态，403 不掉。后者是「已识别但无权」，把令牌清了等于因权限问题把人登出；
- *      同理 `keyMode` 下的 401 是密钥错，只报提示不跳登录页。
+ *   ② 401 才掉登录态，403 不掉。后者是「已识别但无权」，把令牌清了等于因权限问题把人登出。
  *   ③ 刷新后的登录态靠 `/auth/me` 回读确认（不是解本地令牌自报身份），且 5xx/网络失败
  *      不等于「未登录」——那一支必须与 401 分开，否则登录面未启用（503）时界面会永久卡在登录页。
+ *
+ * G1（角色显隐）在本模块加的是**服务端断言的角色/能力集**（任务书 §四.2，2026-11-12 批 1）：
+ *   · `authRoleRef`/`authFeaturesRef` 的值**只**来自登录响应（角色码）与 `/auth/me` 回读
+ *     （码+集），本模块不写任何存储 —— 能力集跟着令牌的每一次确认重新断言，登出即清空；
+ *     客户端持久化它会出现「改了角色、旧页面上还有旧能力」的幽灵窗口（N3 那条「下次登录
+ *     生效」的客户端面就落在这里：旧令牌不解绑，新能力不出现）。
+ *   · 组件一律经 `hasFeature(code)` 读显隐，不直接摸 `authFeatures.value`：问法只有一个
+ *     实现位，前端只是把服务端断言过的集合转成布尔读法（渲染映射，不是权限判定）。
+ *   · 首登后的能力集靠 `backfillIdentityAfterLogin()` 异步补齐（登录响应只带码不带集），
+ *     理由三条都写在那个函数头上。
  * ==========================================================================*/
 import { computed, ref } from 'vue'
 
@@ -55,8 +65,8 @@ import { initialState, streamQuery, type StreamQueryOptions, type StreamSnapshot
 export type { Terminal }
 export type { AuthMode, Credentials }
 
-/** 登录面四态（见文件头③）：`keyMode` = 未登录但走了密钥通道（机器调用/后端未启用登录面）。 */
-export type AuthState = 'anonymous' | 'checking' | 'authenticated' | 'keyMode'
+/** 登录面三态（见文件头③）：静态密钥通道已退役，不再有 `keyMode` 这一档。 */
+export type AuthState = 'anonymous' | 'checking' | 'authenticated'
 
 /** banner 上限。8 条 = 四条分支各出现两次仍然全留在屏上，再多才丢最旧。 */
 const MAX_BANNERS = 8
@@ -65,7 +75,6 @@ const MAX_BANNERS = 8
 export const EXAMPLE_QUESTION = '这个平台能帮我查什么？'
 
 const question = ref('')
-const apiKey = ref('')
 const streaming = ref(false)
 /** 本轮已发起过（区分"空态引导"与"跑完了但答案是空的"两种屏上形态）。 */
 const ranOnce = ref(false)
@@ -80,6 +89,9 @@ const authState = ref<AuthState>(readStoredToken() !== '' ? 'checking' : 'anonym
 const authToken = ref(readStoredToken())
 const authTenant = ref('')
 const authUser = ref('')
+/** G1：服务端断言的角色码与能力集（读法与三条纪律见文件头；**不落存储**，登出即清）。 */
+const authRoleRef = ref('')
+const authFeaturesRef = ref<readonly string[]>([])
 const authBusy = ref(false)
 /** 登录面最近一次需要给人读的句（与 `bannerList` 分开：那些是对话本轮的事实，这一格是入口面的状态）。
  *  本件只到 `authNoticeText` 为止，给组件读的是下面那个 computed（与 `bannerList`/`banners` 同一对形状）。 */
@@ -121,7 +133,7 @@ function promote(s: StreamSnapshot): void {
 }
 
 /* ---- 只读视图（组件只读这些，不各自维护流状态） ---- */
-/* 除了 `question` / `apiKey`（两个 v-model 目标必须可写），其余一律走 computed 导出：
+/* 除了 `question`（v-model 目标必须可写），其余一律走 computed 导出：
  * 模块级 composable 没有 store 实例那层封装，直接把 `ref` 递出去 = 外面能写它。
  * `busy` 只能由 `ask()` 的开/关改，`banners` 只能由 `promote()`/`clearBanners()` 改 ——
  * 这条边界靠类型挡住，不靠注释约定。 */
@@ -136,7 +148,7 @@ export const busy = computed(() => streaming.value)
 export const hasRound = computed(() => ranOnce.value)
 export const banners = computed<readonly string[]>(() => bannerList.value)
 export const dropped = computed(() => foldedCount.value)
-export { question, apiKey, authMode }
+export { question, authMode, authToken }
 
 /** 提交按钮的可用性。只看两态：正在流、输入为空。 */
 export const canSubmit = computed(() => !streaming.value && question.value.trim() !== '')
@@ -159,7 +171,7 @@ export const traceNote = computed(() =>
 
 /* ---- 登录面的只读视图 ---- */
 /** 对话界面是否可见。`checking` 也算不可见：那一瞬给屏上的是「正在确认」而不是一个空对话框。 */
-export const canChat = computed(() => authState.value === 'authenticated' || authState.value === 'keyMode')
+export const canChat = computed(() => authState.value === 'authenticated')
 export const loggedIn = computed(() => authState.value === 'authenticated')
 export const authPending = computed(() => authBusy.value || authState.value === 'checking')
 /** 登录面那句给人读的提示（只读：本模块里能写它的是 `dropSession`/`submitCredentials`/`resumeSession`）。 */
@@ -168,22 +180,35 @@ export const authNotice = computed(() => authNoticeText.value)
 export const hasStoredToken = computed(() => authToken.value !== '')
 
 /**
- * 页眉身份那一行。四种读法各自一句，因为「未确认」与「未登录」与「走的是密钥」是三件不同的事
+ * 页眉身份那一行。三种读法各自一句，因为「未确认」与「未登录」是两件不同的事
  * —— 把它们合并成一句「未登录」就是把 503 读成了凭据问题（文件头③）。
  * 已登录那句里写的是**服务端 `/auth/me` 回读到的值**，不是本地令牌解出来的 claim。
  */
 export const identityNote = computed(() => {
   switch (authState.value) {
     case 'authenticated':
-      return `已登录：${authTenant.value} / ${authUser.value}（身份由服务端 /auth/me 断言回读）`
+      return `已登录：${authTenant.value} / ${authUser.value} · 角色 ${authRoleRef.value}（身份由服务端断言回读）`
     case 'checking':
       return '正在向后端确认登录态…'
-    case 'keyMode':
-      return '未登录，走 API 密钥通道（机器调用兜底；本入口不签发令牌）'
     default:
       return '未登录'
   }
 })
+
+/* ---- G1：角色显隐的只读视图（任务书 §四.2）---- */
+/** 服务端断言的角色码（只读；本模块外不得写它，与上面那组只读 computed 同一条边界）。 */
+export const authRole = computed(() => authRoleRef.value)
+/** 服务端断言的能力集（只读）。空集 = 本会话没有任何管理向能力 ⇒ 管理面入口全隐。 */
+export const authFeatures = computed<readonly string[]>(() => authFeaturesRef.value)
+
+/**
+ * 「这条能力码我有没有」的单一问法。组件一律经它做显隐判断，不散写
+ * `authFeatures.value.includes(...)`：问法只有一个实现位，改判据形状时只动这里。
+ * 这只是**渲染映射**不是权限判定 —— 判定（谁有什么码）在服务端 /auth/me。
+ */
+export function hasFeature(code: string): boolean {
+  return authFeaturesRef.value.includes(code)
+}
 
 /* ---- 动作 ---- */
 /**
@@ -203,7 +228,6 @@ export async function ask(fetchImpl?: typeof fetch): Promise<void> {
   // ⇒ 写在这里的不是“两个属性”，是“只在不缺时才给那个属性”这一件事的两种写法之一。
   const opts: StreamQueryOptions = {
     query: q,
-    apiKey: apiKey.value,
     token: authToken.value,
     onUpdate: onTick,
     ...(fetchImpl !== undefined ? { fetchImpl } : {}),
@@ -213,13 +237,13 @@ export async function ask(fetchImpl?: typeof fetch): Promise<void> {
     snap.value = final
     promote(final)
     // A8 的「401 跳回登录页」就落在这四行。两个条件都是必要的：
-    //   · 只看 401 会把 keyMode（密钥错）也登出，而那一档本来就没有登录态可登；
+    //   · 只看 401 会把未登录档也登出，而那一档本来就没有登录态可登；
     //   · 只看「令牌过期」会把 403（已识别但无权）也当过期，结果是权限问题把人踢下页面。
     if (final.httpStatus === 401 && authState.value === 'authenticated') {
       dropSession('登录令牌已被服务端拒绝（过期或换钥），请重新登录')
     }
   } catch (err) {
-    // 只有两条「凭据含非 ASCII」会走到这里（sse.ts 明写它们是发出前的前置校验）。
+    // 只有一条「令牌含非 ASCII」会走到这里（sse.ts 明写它是发出前的前置校验）。
     // 这句必须在屏上，不能只进 console：它就是这一轮的失败原因（A2 不白屏 / A4 可读）。
     const text = err instanceof Error ? err.message : String(err)
     pushBanner(text)
@@ -248,6 +272,31 @@ export function useExample(): void {
 /* ---- 登录面动作 ---- */
 
 /**
+ * 登录/注册成功后的**异步**能力回读（G1 的首登补齐）。登录响应只带角色码不带 features 集
+ * （auth_router.py 的 TokenResponse 自陈），而显隐判据是 features ⇒ 成功后补一发 `/auth/me`。
+ * 三个不显然的写法，各有一条理由：
+ *  ① **fire-and-forget，不 await**：把登录往返再拉长一程，会把「点了提交但屏上不动」拉得更久
+ *     （文件头③那顾虑在这里同源）；能力晚到几百毫秒只影响管理面入口出现的时机，
+ *     聊天主链路一毫秒都不等它。
+ *  ② **不走 fetchImpl 注入位**：行为件 verify-sse.mjs §I 按「一次提交该发几发」钉死了假后端
+ *     的调用计数与路径序列，回读混进注入位会把发数断言变成时序竞态。全局 fetch 在 Node
+ *     （行为件运行处）对相对路径确定性失败 ⇒ 探针返回 unreachable ⇒ 下面那个分支不改任何
+ *     状态 —— 行为件读到的仍是纯登录往返，发数断言不破。
+ *  ③ **只在仍处于 authenticated 态时落值**：回读在途时人可能已登出，过期探针
+ *     的值不得盖在新的会话态上。
+ */
+function backfillIdentityAfterLogin(): void {
+  void (async () => {
+    const probe = await fetchAuthenticatedIdentity()
+    if (probe.kind !== 'asserted' || authState.value !== 'authenticated') return
+    authTenant.value = probe.tenantId
+    authUser.value = probe.userId
+    authRoleRef.value = probe.role
+    authFeaturesRef.value = probe.features
+  })()
+}
+
+/**
  * 丢掉登录态的唯一出口。内存与 storage 同时清（只清一个就会出现「屏上说未登录、
  * 刷新又回到 checking」那一种自相矛盾）。为什么不兼清对话内容：那些是已经发生的读数，
  * 登出不抹除历史；而登录页不渲时间线，它们在下一轮 `ask()` 开头就被 `initialState()` 掉了。
@@ -257,6 +306,8 @@ function dropSession(notice: string): void {
   authToken.value = ''
   authTenant.value = ''
   authUser.value = ''
+  authRoleRef.value = ''
+  authFeaturesRef.value = []
   authState.value = 'anonymous'
   authNoticeText.value = notice
 }
@@ -305,13 +356,17 @@ export async function submitCredentials(input: Credentials, fetchImpl?: typeof f
         return false
       }
     }
-    // 登录/注册成功后的身份直接取响应里那两个服务端给出的字段（不走 /auth/me：那一次往返
-    // 已经在刷新路径上了，首登再花一次只会把「点了提交但屏上不动」拉长）。
+    // 登录/注册成功后的身份直接取响应里那几个服务端给出的字段（不走 /auth/me：那一次往返
+    // 已经在刷新路径上了，首登再花一次只会把「点了提交但屏上不动」拉长）。G1 的 features
+    // 是唯一例外 —— 登录响应**不带集**，所以它由下面的异步回读补齐，不再阻塞提交那一发。
     authToken.value = result.session.token
     authTenant.value = result.session.tenantId
     authUser.value = result.session.userId
+    authRoleRef.value = result.session.role
+    authFeaturesRef.value = result.session.features
     authState.value = 'authenticated'
     authNoticeText.value = ''
+    backfillIdentityAfterLogin()
     return true
   } finally {
     authBusy.value = false
@@ -336,6 +391,8 @@ export async function resumeSession(fetchImpl?: typeof fetch): Promise<void> {
   if (probe.kind === 'asserted') {
     authTenant.value = probe.tenantId
     authUser.value = probe.userId
+    authRoleRef.value = probe.role
+    authFeaturesRef.value = probe.features
     authState.value = 'authenticated'
     authNoticeText.value = ''
     return
@@ -347,14 +404,7 @@ export async function resumeSession(fetchImpl?: typeof fetch): Promise<void> {
   // unreachable：令牌**留着**（它可能还是好的，只是后端这一跑没答上来），但界面不能停在
   // 「checking」上转圈，所以退回 anonymous + 一句写明“这不是未登录”的提示 + 重试按钮。
   authState.value = 'anonymous'
-  authNoticeText.value = `${probe.text} ⇒ 这不等于未登录：令牌仍在 sessionStorage，可点「重试确认登录态」；`
-    + '也可以先走下方「API 密钥兜底」进对话页'
-}
-
-/** 不登录、用静态密钥进对话页（D-i 那条回退面的屏上入口；后端未启用登录面时它是唯一通路）。 */
-export function enterWithApiKey(): void {
-  authState.value = 'keyMode'
-  authNoticeText.value = ''
+  authNoticeText.value = `${probe.text} ⇒ 这不等于未登录：令牌仍在 sessionStorage，可点「重试确认登录态」`
 }
 
 /**

@@ -7,10 +7,10 @@
  * 因此 sse.ts（/query 的传输层）**从本件取装配**，而不是自己再拼一次头。
  *
  * 三条落死的纪律：
- *   ① **令牌落 sessionStorage、密钥仍只落内存**（D-k）。这两句不冲突，但必须分开读：
- *      工单件 §2.3 那条「密钥只存内存」管的是 `X-API-Key`（人粘贴进来的那把），它一个字节
- *      都没进存储；进存储的是**服务端签发的登录令牌**，档位是「关标签即失效」。
- *      为什么不是 localStorage：那会把凭据活期从一次会话拉长到整台浏览器（含重启后）。
+ *   ① **唯一凭据是登录令牌，落 sessionStorage**（D-k）。静态 X-API-Key 通道已退役
+ *      （本部署只留用户名/密码登录），本件不再有任何密钥入口，也不再写第二档存储。
+ *      档位是「关标签即失效」：为什么不是 localStorage——那会把凭据活期从一次会话拉长到
+ *      整台浏览器（含重启后）。
  *      ⚠ 残余风险照方案如实写：sessionStorage 是 JS 可读的 ⇒ 一次 XSS 即失令牌，本轮没有
  *      CSP 面（方案 §9 在册）。这一句不许被读成「已加固」。
  *   ② **口令只在调用那一刻进请求体**：本件不把它存进任何变量副本、不写进 storage、
@@ -19,6 +19,10 @@
  *   ③ **按 HTTP 状态分支、按 `msg` 上屏**：后端的 `AUTH_*` 码表不抄进前端（抄一份 = 造出
  *      第二个事实源，而本仓没有任何跨语言派生校能钉住它）。`code` 只随失败对象带走给人读，
  *      前端不 `=== 'AUTH_LOGIN_TAKEN'` 这种串做分支。
+ *   ④ **角色与能力是服务端断言的渲染输入（G1/D9）**：`role` 缺省兜底 viewer、`features`
+ *      缺省兜底空集，绝不 fail-open 成 admin —— 谁有什么能力只有服务端说了算，本件不维护
+ *      role→features 的映射（那张表住在 agent_runtime/authorization.py，抄一份就是造出
+ *      第二个事实源）。
  *
  * ⚠ 路径基准与 `sse.ts` 同一条坑：页面挂在 `/ui/` 下（`vite.config.ts` 的 `base`），
  *   所以这里全部写**绝对路径** `/auth/*`。写成相对会拼成 `/ui/auth/login`（后端没这条路由）。
@@ -37,8 +41,7 @@ const REGISTER_PATH = '/auth/register'
 const ME_PATH = '/auth/me'
 const LOGOUT_PATH = '/auth/logout'
 
-/** 前置校验（发出之前）失败的两句文案。前缀是 `isCredentialPreflightError` 的判据，别改前四字。 */
-export const API_KEY_PREFLIGHT_MSG = '接口密钥含非 ASCII 字符（HTTP 请求头不允许），请确认粘贴的是密钥本身而不是中文说明'
+/** 前置校验（发出之前）失败的文案。前缀是 `isCredentialPreflightError` 的判据，别改前四字。 */
 export const TOKEN_PREFLIGHT_MSG = '登录令牌含非 ASCII 字符（HTTP 请求头不允许），请退出登录后重新登录'
 
 /** 登录面的两态名字（同一个屏、两个动作），会话层与 LoginView 共用这一个类型。 */
@@ -51,12 +54,23 @@ export interface Credentials {
   readonly displayName: string
 }
 
-/** 一次成功登录拿到的全部可断言信息（值来自**服务端响应**，不是客户端自报）。 */
+/**
+ * 一次成功登录拿到的全部可断言信息（值来自**服务端响应**，不是客户端自报）。
+ * G1 扩展：`role` 与 `features` 同样是服务端给的，不是前端算的（纪律④）。
+ */
 export interface AuthSession {
   readonly token: string
   readonly tenantId: string
   readonly userId: string
   readonly isAdmin: boolean
+  /** 服务端断言的角色码（D9 收敛值域；缺失按 viewer 兜底，绝不兜成 admin）。 */
+  readonly role: string
+  /**
+   * 该角色的能力集（界面显隐的唯一判据）。⚠ 登录/注册响应**只带码不带集**
+   * （auth_router.py 的 TokenResponse 自陈），所以首登拿到的是空数组 —— features 由
+   * 会话层在登录成功后补一发 `/auth/me` 回读（session.ts 的 backfillIdentityAfterLogin）。
+   */
+  readonly features: readonly string[]
 }
 
 /** 一次失败的三值：状态码（分支用）、服务端 code（给人读）、可上屏文案。 */
@@ -121,26 +135,20 @@ function requireHeaderSafe(value: string, message: string): void {
  * 后者是后端给的读数，混在一起就会把「你粘了中文说明」显示成「服务返回 HTTP 500」。
  */
 export function isCredentialPreflightError(err: unknown): boolean {
-  return err instanceof Error
-    && (err.message.startsWith('接口密钥含非 ASCII') || err.message.startsWith('登录令牌含非 ASCII'))
+  return err instanceof Error && err.message.startsWith('登录令牌含非 ASCII')
 }
 
 /**
- * 把入口凭据装进请求头：**有令牌 ⇒ 只发 Bearer；无令牌有密钥 ⇒ 只发 X-API-Key**。
- * 为什么不同时发两把（这是 D-i「两条通道并存」最容易读错的一处）：后端 `verify_api_key` 的
- * 分支是「已断言到人 ⇒ 直接放行」，两把都发时**密钥错也不会红** ⇒ 出问题时读数分不清是哪把
- * 起效的。并存指的是「两条路各自能走」，不是「一个请求同时试两条」。
- * 两把都为空时两个头都不发 —— 那是 observe 档/开发模式的现状，不是本件新增的行为。
+ * 把入口凭据装进请求头：**只接受登录令牌，令牌非空 ⇒ 只发 Bearer**。
+ *
+ * 静态 `X-API-Key` 通道已退役（本部署只留用户名/密码登录）：本件不再接收 apiKey，
+ * 也不再 set 该头。令牌为空时不发任何入口凭据头 —— 那是 observe 档/开发模式的现状，
+ * 生产现网后端会以 401 拒绝（判据在 `agent_server/api/auth.py::verify_api_key`）。
  */
-export function applyCredentialHeaders(h: Headers, cred: { apiKey: string; token: string }): void {
+export function applyCredentialHeaders(h: Headers, cred: { token: string }): void {
   if (cred.token !== '') {
     requireHeaderSafe(cred.token, TOKEN_PREFLIGHT_MSG)
     h.set('Authorization', `Bearer ${cred.token}`)
-    return
-  }
-  if (cred.apiKey !== '') {
-    requireHeaderSafe(cred.apiKey, API_KEY_PREFLIGHT_MSG)
-    h.set('X-API-Key', cred.apiKey)
   }
 }
 
@@ -208,9 +216,23 @@ async function postEnvelope(path: string, body: Record<string, string>, fetchImp
 }
 
 /**
+ * G1 两个缺省读法（本件内唯一实现位）：`role` 缺失/非串 ⇒ viewer、`features` 缺失/非数组
+ * ⇒ 空集。兜底方向只有一条：往**更小**的能力集兜，绝不往 admin 兜（D9 的最小权限原则；
+ * 「看起来有但没断言到」比「看起来没有但其实有」安全得多）。
+ */
+function parseRoleFeatures(json: Record<string, unknown> | null): { role: string; features: string[] } {
+  const role = json !== null && typeof json.role === 'string' && json.role !== '' ? json.role : 'viewer'
+  const features = json !== null && Array.isArray(json.features)
+    ? json.features.filter((f): f is string => typeof f === 'string')
+    : []
+  return { role, features }
+}
+
+/**
  * 从成功响应里取会话。三值缺一律判**失败**：200 而形状不对时给一个「登录成功」的读数，
  * 就是让屏上出现「已登录」而手里没有身份 —— 那正是本仓最反对的「看起来绿」的形状。
  * `is_admin` 缺失按 false（不是 fail-open 的 true）。
+ * `role`/`features` 缺失按 D9 兜底（viewer/空集，见 parseRoleFeatures）：登录响应只带码不带集。
  */
 function sessionFrom(json: Record<string, unknown> | null): AuthSession | null {
   if (json === null) return null
@@ -218,8 +240,9 @@ function sessionFrom(json: Record<string, unknown> | null): AuthSession | null {
   const tenantId = typeof json.tenant_id === 'string' ? json.tenant_id : ''
   const userId = typeof json.user_id === 'string' ? json.user_id : ''
   const isAdmin = json.is_admin === true
+  const { role, features } = parseRoleFeatures(json)
   if (token === '' || tenantId === '' || userId === '') return null
-  return { token, tenantId, userId, isAdmin }
+  return { token, tenantId, userId, isAdmin, role, features }
 }
 
 /** 登录/注册共用的那一趟往返。注册成功 = 已登录（后端 201 直接回令牌，不需要第二次点击）。 */
@@ -264,7 +287,15 @@ export async function registerAndSignIn(input: Credentials, fetchImpl?: typeof f
  * 配置态是 503 + 固定 code，所以前端必须有一条不跳登录的分支接住它。
  */
 export type IdentityProbe =
-  | { readonly kind: 'asserted'; readonly tenantId: string; readonly userId: string }
+  | {
+      readonly kind: 'asserted'
+      readonly tenantId: string
+      readonly userId: string
+      /** 服务端断言的角色码（D9 收敛值域；缺失按 viewer 兜底）。 */
+      readonly role: string
+      /** 该角色能力集（G1 显隐判据；缺失按空集兜底）。 */
+      readonly features: readonly string[]
+    }
   | { readonly kind: 'expired'; readonly status: number; readonly text: string }
   | { readonly kind: 'unreachable'; readonly status: number; readonly text: string }
 
@@ -278,7 +309,7 @@ export async function fetchAuthenticatedIdentity(fetchImpl?: typeof fetch): Prom
   if (token === '') return { kind: 'expired', status: 0, text: '本标签页没有登录令牌' }
 
   const h = new Headers()
-  applyCredentialHeaders(h, { apiKey: '', token })
+  applyCredentialHeaders(h, { token })
   const doFetch = fetchImpl ?? globalThis.fetch
   let resp: Response
   try {
@@ -301,7 +332,8 @@ export async function fetchAuthenticatedIdentity(fetchImpl?: typeof fetch): Prom
   if (tenantId === '' || userId === '') {
     return { kind: 'unreachable', status: env.status, text: '/auth/me 返回 2xx 但没有身份字段 ⇒ 不读成已断言' }
   }
-  return { kind: 'asserted', tenantId, userId }
+  const { role, features } = parseRoleFeatures(env.json)
+  return { kind: 'asserted', tenantId, userId, role, features }
 }
 
 /**
@@ -317,7 +349,7 @@ export async function logoutRequest(fetchImpl?: typeof fetch): Promise<number> {
   if (token === '') return 0
 
   const h = new Headers({ 'Content-Type': 'application/json' })
-  applyCredentialHeaders(h, { apiKey: '', token })
+  applyCredentialHeaders(h, { token })
   const doFetch = fetchImpl ?? globalThis.fetch
   try {
     const resp = await doFetch(LOGOUT_PATH, { method: 'POST', headers: h, body: '{}', cache: 'no-store' })
