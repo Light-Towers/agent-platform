@@ -16,9 +16,10 @@ import logging
 
 from agent_runtime.human_task import HumanTaskDecision
 from agent_runtime.workspace_registry import server_tenant_id
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
+from agent_server.api.auth import require_feature
 from agent_server.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -83,7 +84,12 @@ async def list_pending(execution_id: str, request: Request):
 
 
 @router.post("/{task_id}/approve")
-async def approve(task_id: str, payload: DecisionPayload, request: Request):
+async def approve(
+    task_id: str,
+    payload: DecisionPayload,
+    request: Request,
+    _feature=Depends(require_feature("human_task.decide")),
+):
     """批准：任务 → COMPLETED + resume_payload，且 WAITING_HUMAN → RUNNING。"""
     approver = _approver()
     try:
@@ -102,7 +108,12 @@ async def approve(task_id: str, payload: DecisionPayload, request: Request):
 
 
 @router.post("/{task_id}/reject")
-async def reject(task_id: str, payload: DecisionPayload, request: Request):
+async def reject(
+    task_id: str,
+    payload: DecisionPayload,
+    request: Request,
+    _feature=Depends(require_feature("human_task.decide")),
+):
     """驳回：任务 → FAILED，执行状态转终态 FAILED。"""
     approver = _approver()
     try:

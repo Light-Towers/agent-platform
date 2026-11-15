@@ -20,7 +20,7 @@ from agent_runtime.identity import (
     verify_token,
 )
 from agent_runtime.identity_middleware import IdentityMiddleware
-from agent_runtime.workspace_registry import server_tenant_id
+from agent_runtime.workspace_registry import asserted_role, server_tenant_id
 
 _prk = rsa.generate_private_key(public_exponent=65537, key_size=2048)
 PRIV = _prk.private_bytes(
@@ -69,14 +69,73 @@ def _run(mw_kwargs, headers, path="/x"):
     return seen.get("tenant"), status
 
 
-def _bearer(tenant="tenantA", user="userB"):
-    tok = mint_token(tenant, user_id=user, private_key_pem=PRIV, kid="k1", issuer=ISS, audience=AUD)
+def _bearer(tenant="tenantA", user="userB", *, role=None):
+    tok = mint_token(tenant, user_id=user, role=role, private_key_pem=PRIV, kid="k1", issuer=ISS, audience=AUD)
     return {"Authorization": f"Bearer {tok}"}
 
 
 def test_valid_bearer_binds_tenant():
     tenant, status = _run({"verify": _verify, "verify_header": None}, _bearer())
     assert status == 200 and tenant == "tenantA"
+
+
+def test_valid_bearer_binds_role_context():
+    """1a：JWT role claim → 中间件绑定 role 上下文（下游 asserted_role() 读到断言值）。"""
+    seen: dict = {}
+
+    async def downstream(scope, receive, send):
+        seen["role"] = asserted_role()
+        await send({"type": "http.response.start", "status": 200, "headers": []})
+        await send({"type": "http.response.body", "body": b"ok"})
+
+    mw = IdentityMiddleware(downstream, verify=_verify, verify_header=None)
+    headers = _bearer(role="editor")
+    scope = {
+        "type": "http", "method": "GET", "path": "/x", "query_string": b"", "scheme": "http",
+        "headers": [(k.lower().encode(), v.encode()) for k, v in headers.items()],
+    }
+
+    async def receive():
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    async def send(msg):
+        pass
+
+    asyncio.run(mw(scope, receive, send))
+    assert seen["role"] == "editor"
+
+
+def test_bearer_without_role_claim_leaves_role_unbound():
+    """无 role claim（旧令牌）→ asserted_role() 为 None；消费侧走 viewer 兜底（D9）。"""
+    seen: dict = {}
+
+    async def downstream(scope, receive, send):
+        seen["role"] = asserted_role()
+        await send({"type": "http.response.start", "status": 200, "headers": []})
+        await send({"type": "http.response.body", "body": b"ok"})
+
+    mw = IdentityMiddleware(downstream, verify=_verify, verify_header=None)
+    headers = _bearer()  # 不带 role
+    scope = {
+        "type": "http", "method": "GET", "path": "/x", "query_string": b"", "scheme": "http",
+        "headers": [(k.lower().encode(), v.encode()) for k, v in headers.items()],
+    }
+
+    async def receive():
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    async def send(msg):
+        pass
+
+    asyncio.run(mw(scope, receive, send))
+    assert seen["role"] is None
+
+
+def test_role_context_reset_after_request():
+    """请求结束后 role 上下文复位（与 tenant/user 同批 set/reset，残留即串号）。"""
+    _run({"verify": _verify, "verify_header": None}, _bearer(role="admin"))
+    # 复位断言在 default 上下文里读：未绑定 ⇒ None
+    assert asserted_role() is None
 
 
 def test_forged_bearer_rejected():

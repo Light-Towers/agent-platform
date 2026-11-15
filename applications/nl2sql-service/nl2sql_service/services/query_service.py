@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from agent_core.logging import get_logger
-from agent_runtime.workspace_registry import server_tenant_id
+from agent_runtime.workspace_registry import asserted_role, server_tenant_id
 
 from nl2sql_service.services.load_guard import LoadRejected
 from nl2sql_service.services.metric_config_guard import MetricConfigRejected, check_metric_config
@@ -113,11 +113,11 @@ class QueryService:
             # 数据权限清单（§5.9 L2 guard）：服务端单源注入，客户端不可覆盖
             "allowed_tables": list(settings.allowed_tables or []),
             "sensitive_columns": list(settings.sensitive_columns or []),
-            # L3 结果层脱敏的角色与开关（§5.9）：角色来自服务端断言
-            "user_role": settings.default_query_role,
+            # L3 结果层脱敏（§5.9）：role 取服务端断言（内部签名头 r 承载，1c/D11），
+            # 能力判定由 agent_runtime.authorization.has_feature 单一解释。
+            "role": asserted_role(),
             "result_masking_enabled": settings.result_masking_enabled,
             "mask_keep_chars": settings.mask_keep_chars,
-            "admin_roles": list(settings.admin_roles or []),
         }
         if metric_config is not None:
             recall = (

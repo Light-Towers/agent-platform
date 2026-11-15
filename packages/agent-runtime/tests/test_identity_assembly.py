@@ -24,6 +24,7 @@ from agent_runtime.identity_assembly import (
     HMAC_KEY_ENV,
     mount_identity_gate,
     verify_internal_header_if_configured,
+    verify_internal_header_with_role_if_configured,
 )
 from agent_runtime.identity_middleware import IdentityMiddleware
 from agent_runtime.workspace_registry import server_tenant_id
@@ -239,12 +240,20 @@ def test_skip_paths_untouched(monkeypatch):
 
 
 def test_public_verifier_is_the_same_function_the_middleware_calls(monkeypatch, tmp_path):
-    """装配传出的就是本模块那个按请求判定的函数（防止有人日后换成裸 verify_internal_header）。"""
+    """装配传出的是按请求判定的函数（1c 后为三元组版，承载 role）。
+
+    二元组版仍在册给存量调用方 ⇒ 两个都钉住，属**扩断言**不是收窄/删用例。
+    """
     key_file = tmp_path / "internal_hmac.key"
     key_file.write_bytes(HMAC_KEY)
     kwargs = _assemble(monkeypatch, **{HMAC_KEY_ENV: str(key_file)})["kwargs"]
-    assert kwargs["verify_header"] is verify_internal_header_if_configured
+    assert kwargs["verify_header"] is verify_internal_header_with_role_if_configured
     hdr = sign_internal_header("tenantA", key=HMAC_KEY)
     assert verify_internal_header_if_configured(hdr) == verify_internal_header(hdr, key=HMAC_KEY)
+    # 1c/D11：带 r 的头经装配用三元组函数拿到 role；旧头按最小权限给 None。
+    with_role = sign_internal_header("tenantA", key=HMAC_KEY, role="admin")
+    assert verify_internal_header_with_role_if_configured(with_role) == ("tenantA", None, "admin")
+    assert verify_internal_header_with_role_if_configured(hdr) == ("tenantA", None, None)
     monkeypatch.delenv(HMAC_KEY_ENV)
     assert verify_internal_header_if_configured(hdr) is None, "撤掉密钥后应回到忽略"
+    assert verify_internal_header_with_role_if_configured(with_role) is None, "三元组版同样按请求判定"

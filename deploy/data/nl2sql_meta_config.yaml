@@ -1,0 +1,170 @@
+# nl2sql 问数样例数仓（nl2sql_dw）的元知识配置 —— deploy/data/nl2sql_dw_fixture.sql 的镜像声明。
+#
+# 用途：deploy/k8s/36-nl2sql-meta-init-job.yaml 调
+#   python -m nl2sql_service.scripts.build_meta_knowledge --dsn "$META_DB_DSN" --config 本文件 --prune
+# 契约单源 = applications/nl2sql-service/nl2sql_service/config/metric_config_schema.py 的
+# MetricConfig（pydantic，写错键名在加载期就炸，不在写入期）。
+#
+# 为什么不直接拿包内的 config/metric_config.example.yaml 去灌：它演示的是
+# customers / order_id / customer_id 那套形状，与种子数据（users / orders / user_id / id）
+# 对不上。照抄的结果是元知识里全是本库不存在的表和列 —— 生成期 prompt 与真实 schema 分叉，
+# 模型按假列名写 SQL，而"门禁绿了"。示例文件继续当形状说明书，本文件才是本部署的真值。
+#
+# 四条对齐纪律（改任一侧必须同时改另一侧，否则批次 6 的黄金集与漂移检测会红）：
+#   0) 表/列注释与 fixture 的 COMMENT ON **逐字相同**——不靠人记，
+#      tests/test_meta_deployment_config.py 直接比字符串；1)/2)/3) 三条靠库侧真值判，
+#      tests/test_golden_seed_real_pg.py 在真 PG 上跑（需 DW_DB_DSN，上线前靶面 = 126 的 ap-iso-pg）。
+#   1) table_name / column_name / data_type 必须等于 nl2sql_dw 的 information_schema 读数。
+#      scripts/detect_drift.py 按 **data_type 字符串相等** 判 type_changed，所以类型要写
+#      PG 的原样拼写：character varying / timestamp without time zone / numeric / bigint。
+#      写 text 还有一个副作用：services/value_resolver.py 的 LinkablePolicy 把 text 列入
+#      _DENY_TYPES，取值只读探针会永久降级 unknown（fixture 因此刻意用 varchar）。
+#   2) values 段的 value 必须是库里**真实存在**的字面量：recall_value 把它当候选取值进 prompt，
+#      写一个库里没有的值＝诱导出一次必然被 validate_literals 判 missing 的 SQL。
+#      口语变体写进 value_desc（值行按 `column_name value value_desc` 参与字面召回），
+#      value 本身保持真值。
+#   3) metrics 的 metric_expr 必须能在本库跑通（口径变了要同步改 fixture 的数据口径）。
+#   4) aliases 的列级 target_name 用 `table.column` 全名（meta_repository
+#      .find_columns_by_names 按 (table_name, column_name) 行值比较，裸列名取不到行）；
+#      source 只有 human 参与召回，machine 是"机提未确认"（§5.14-R1），本文件全为人工确认。
+#
+# 作用域（与在线召回同源，不一致就是恒空召回 —— 2026-10-27 查证的关键坑）：
+#   * datasource_id 取 Settings.datasource_id（默认 "dw"，两侧同一个缺省，别在清单里改单边）；
+#   * tenant_id 取 Settings.default_tenant，即 env `DEFAULT_TENANT`。**36 Job 必须显式置
+#     DEFAULT_TENANT=default**：build 侧读的是 default_tenant（'' ），而在线召回侧走
+#     resolve_tenant_context（SINGLE_TENANT=default ⇒ 'default'）——两条路径的缺省不同，
+#     不写这个 env 就会灌出一批 tenant_id='' 的行、在线按 'default' 过滤，元知识全召回不到，
+#     而服务一切正常（没有任何报错会指向这件事）。
+#   * workspace 不参与召回过滤（#122：无服务端断言路径，不是隔离维）。
+
+# 表定义
+tables:
+  - table_name: "orders"
+    table_comment: "订单表：一行一笔订单，金额与状态是问数主口径"
+  - table_name: "users"
+    table_comment: "用户表：一行一个下单用户，收货城市即订单归属城市"
+
+# 列定义
+columns:
+  - table_name: "orders"
+    column_name: "id"
+    column_comment: "订单ID（主键）"
+    data_type: "bigint"
+  - table_name: "orders"
+    column_name: "user_id"
+    column_comment: "下单用户ID（外键 -> users.id）"
+    data_type: "bigint"
+  - table_name: "orders"
+    column_name: "status"
+    column_comment: "订单状态中文枚举：已支付 / 已退款 / 待支付"
+    data_type: "character varying"
+  - table_name: "orders"
+    column_name: "amount"
+    column_comment: "订单金额（元，两位小数）"
+    data_type: "numeric"
+  - table_name: "orders"
+    column_name: "created_at"
+    column_comment: "下单时间（无时区）；真列名是 created_at，不是 create_time"
+    data_type: "timestamp without time zone"
+  - table_name: "users"
+    column_name: "id"
+    column_comment: "用户ID（主键，orders.user_id 指向它）"
+    data_type: "bigint"
+  - table_name: "users"
+    column_name: "name"
+    column_comment: "用户姓名"
+    data_type: "character varying"
+  - table_name: "users"
+    column_name: "phone"
+    column_comment: "手机号（敏感列：L2 投影黑名单 + L3 结果掩码的靶子，值不得出现在响应里）"
+    data_type: "character varying"
+  - table_name: "users"
+    column_name: "city"
+    column_comment: "收货城市，低基数枚举（北京/上海/广州），取值探针的 linkable 列"
+    data_type: "character varying"
+
+# 指标定义（口径写进 desc：golden 的判据是"数值对不对"，口径靠这里传给模型）
+metrics:
+  - metric_name: "订单数"
+    metric_desc: "订单笔数，不做状态过滤；问「已支付订单数」必须另带 status='已支付'"
+    metric_expr: "COUNT(orders.id)"
+  - metric_name: "订单金额合计"
+    metric_desc: "订单金额求和，不做状态过滤（含待支付与已退款）"
+    metric_expr: "SUM(orders.amount)"
+  - metric_name: "已支付金额合计"
+    metric_desc: "只算已支付订单的金额合计（golden g20 的口径，不含待支付与已退款）"
+    metric_expr: "SUM(orders.amount) FILTER (WHERE orders.status = '已支付')"
+  - metric_name: "平均订单金额"
+    metric_desc: "订单金额均值，不做状态过滤"
+    metric_expr: "AVG(orders.amount)"
+
+# 值定义（枚举值，供值召回；value 是真值，口语变体在 value_desc）
+values:
+  - table_name: "orders"
+    column_name: "status"
+    value: "已支付"
+    value_desc: "付款成功、支付成功、已付款、成交"
+  - table_name: "orders"
+    column_name: "status"
+    value: "已退款"
+    value_desc: "退款、已退、退了款"
+  - table_name: "orders"
+    column_name: "status"
+    value: "待支付"
+    value_desc: "未支付、待付款、没付款"
+  - table_name: "users"
+    column_name: "city"
+    value: "北京"
+    value_desc: "北京市、帝都"
+  - table_name: "users"
+    column_name: "city"
+    value: "上海"
+    value_desc: "上海市"
+  - table_name: "users"
+    column_name: "city"
+    value: "广州"
+    value_desc: "广州市"
+
+# 表间关系声明（§5.14-R1，MDL relationships 的最小子集，不造 DSL）：让 LLM 不再猜 JOIN。
+# 本库只有这一条关系，且 fixture 里就有物理 FK —— 写进元知识是为了让生成期 prompt 直接拿到
+# JOIN 方向，而不是靠模型从列名推断。
+relations:
+  - left_table: "orders"
+    left_column: "user_id"
+    right_table: "users"
+    right_column: "id"
+    relation_type: "many_to_one"
+    note: "一笔订单归属一个用户；按用户维度（姓名/城市）统计订单即 orders JOIN users"
+
+# 别名/同义词声明（§5.14-R1）：口语变体 → 规范名的登记表，人工确认（source: human）才参与召回。
+aliases:
+  - target_kind: "metric"
+    target_name: "订单金额合计"
+    alias: "成交额"
+    source: "human"
+  - target_kind: "metric"
+    target_name: "订单金额合计"
+    alias: "GMV"
+    source: "human"
+  - target_kind: "metric"
+    target_name: "订单数"
+    alias: "单量"
+    source: "human"
+  - target_kind: "column"
+    target_name: "orders.amount"
+    alias: "订单金额"
+    source: "human"
+  - target_kind: "column"
+    target_name: "orders.created_at"
+    alias: "下单时间"
+    source: "human"
+  - target_kind: "column"
+    target_name: "users.city"
+    alias: "收货城市"
+    source: "human"
+  # 敏感列的别名刻意保留：golden g60「所有用户的手机号」要能被召回到 users.phone，
+  # 才能演到 L2 拦投影 / L3 掩码这两条真实防线。把它删掉等于用"召回不到"冒充"已防护"。
+  - target_kind: "column"
+    target_name: "users.phone"
+    alias: "手机号"
+    source: "human"

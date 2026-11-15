@@ -88,5 +88,6 @@ data_permission:
   sensitive_columns: []   # 例：["users.phone", "users.id_card"]
   result_masking_enabled: true
   mask_keep_chars: 1      # 掩码保留首尾各 N 字符；0 = 全掩码
-  admin_roles: ["admin"]  # 这些角色看全量，其余脱敏（最小权限默认）
-  default_query_role: "analyst"  # 服务端断言角色（未接身份门前的最小权限默认）
+  # 1c/D5 下线：admin_roles / default_query_role 不再由此配置。
+  # 角色改由服务端内部签名头的 r 键承载、由 authorization.has_feature 单一解释；
+  # 本段出现任何未知键（含这两个旧键）都会在启动期具名 raise（照 pool: 段纪律）。

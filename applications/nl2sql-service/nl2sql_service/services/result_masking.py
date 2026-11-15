@@ -4,23 +4,19 @@ L1（账号 GRANT + 脱敏视图）在 DB 侧、最可靠，但**改不动存量
 可见度只能在这一层**：同一张表，管理员看全量、分析师看掩码。本层在
 `execute_sql` 之后、答案合成与响应返回之前，对结果行里的敏感列做投影。
 
-**角色来源是服务端断言，不是客户端请求体**——`role` 若可从请求体传入，
-攻击者直接传 `admin` 即绕过。本服务当前未接 ADR-0007 身份门，故 role 取
-`settings.default_query_role`（默认 `analyst`，最小权限）；接入身份门后改为
-从断言身份取，本函数的入参形状不变。
+**角色来源是服务端断言，不是客户端请求体**——1c 起 role 由内部签名头的 `r`
+键承载，能力判定在 `execute_sql._apply_masking` 经
+`agent_runtime.authorization.has_feature(role, "data.unmasked")` 单一解释；
+缺 `r` / 未知码一律收敛到 viewer ⇒ 无条件脱敏（fail-closed）。
 
 只脱敏**列名命中敏感清单**的字段；列名大小写不敏感；非字符串值（数字/
 None）按字符串掩码规则处理（手机号等常以字符串存，数字型敏感列少见）。
+本模块只保留无状态的列掩码原语，不再解释角色词汇表。
 """
 
 from __future__ import annotations
 
 from typing import Any
-
-
-def is_masked_role(role: str, admin_roles: list[str]) -> bool:
-    """该角色是否走脱敏（不在 admin 名单即脱敏——最小权限默认）。"""
-    return (role or "").strip().lower() not in {(r or "").strip().lower() for r in (admin_roles or [])}
 
 
 def mask_value(value: Any, keep: int = 1) -> Any:
@@ -66,4 +62,4 @@ def mask_sensitive_columns(
     return masked
 
 
-__all__ = ["is_masked_role", "mask_sensitive_columns", "mask_value"]
+__all__ = ["mask_sensitive_columns", "mask_value"]

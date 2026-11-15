@@ -6,7 +6,7 @@ from agent_core.logging import get_logger
 from agent_runtime.workspace_registry import server_tenant_id
 from fastapi import APIRouter, Depends, HTTPException, Request
 
-from agent_server.api.auth import resolve_thread_id, verify_api_key
+from agent_server.api.auth import require_feature, resolve_thread_id, verify_api_key
 from agent_server.config import get_settings
 from agent_server.memory import recall_exact as _recall_exact
 from agent_server.schemas import HistoryItem, HistoryResponse, RevertRequest, RevertResponse
@@ -23,6 +23,7 @@ async def history(
     limit: int | None = None,
     request: Request = None,
     _auth=Depends(verify_api_key),  # 仅作鉴权闸门（B7b-4：会话身份不再从凭据派生）
+    _feature=Depends(require_feature("session.history")),  # 401 先于 403：_auth 必须在前
 ):
     """精确回忆：按会话 thread_id 取回历史对话原文（优化 I）。
 
@@ -53,12 +54,15 @@ async def session_revert(
     req: RevertRequest,
     request: Request,
     _auth=Depends(verify_api_key),  # 仅作鉴权闸门（审计主体不得取凭据值，lint P12）
+    _feature=Depends(require_feature("session.history")),  # 401 先于 403：_auth 必须在前
 ):
-    """会话回退：审计主体取服务端断言租户，**不是**入站 API Key。
+    """会话回退：审计主体取服务端断言租户，**不是**入站凭据。
 
-    `verify_api_key` 返回入站头原文（不是摘要），若把它当 `operator` 写进
-    `revert_audit` 与日志，等于把部署密钥持久化进审计痕迹。基数不变：同一
-    部署只有一把 `API_KEY`，按密钥区分操作人本就区分不出两个调用方。
+    静态 X-API-Key 通道已退役，`verify_api_key` 只认登录令牌断言到人（或无
+    鉴权旁路），函数体不取、不返回任何入站凭据值——审计主体由服务端断言的
+    租户/人派生，不依赖调用方提供的密钥。这从源头消除「把部署密钥持久化进
+    审计痕迹」那条链（基数为 1：同一部署只有一把 `API_KEY`，按密钥区分操作人
+    本就区分不出两个调用方）。
 
     G3/T1.2：`req.session_id` 必须经 `resolve_thread_id` 归一化——与 `/query`、
     `/history` 同一入口纪律。认证启用时客户端值被忽略（防指定他人线程回退），

@@ -1,0 +1,594 @@
+/* ============================================================================
+ * base.css — reset + 字体 + 全局排版 + 骨架与断点 + 对话页各区的**中性形状** + 焦点环 + reduced-motion
+ * ⚠ 从 PR-2 起本件还持有 `.answer` / `.evidence` / `.tl-wrap` / `.term` 这些组件形状类：
+ *   组件一律不写 <style> 块（理由见 ThemeToggle.vue 头注），所以它们的形状只能落在这里。
+ *   分工是死的：**族色（会随事件种类变的通道）全在 `events.css`**，本件只给中性形状。
+ * 组件不得自行 import 本文件之外的样式片段；唯一入口按 tokens → base → events 顺序引（视觉件 §1.1）。
+ * 本文件**不允许任何色值字面量、裸间距、裸行高/字距**（门禁断言 1/4）。注意：门禁扫的是
+ * 全文含注释，所以这句里不能拿十六进制或函数式色当反例写 —— 写了会被自己的门禁判红
+ * （POC 首跑实踩）。要举反例就引断言编号，不要写出色值形状。
+ * ==========================================================================*/
+
+/* ---- 字体资产 ----
+ * ⚠ POC 批：六件 Latin1 woff2 **不在本机也不在仓库**（视觉件 §1.4 定的入库清单，需人从官方仓库取）。
+ *   下面 @font-face 整块**注释保留**，接入时解注释并按 §1.4 的六个文件名落盘。
+ *   ⇒ POC 屏幕上看到的是**系统回落脚本**（Windows = Segoe UI + 微软雅黑），不是 Plex。
+ *   这不是疏忽：拿假 404 的 @font-face 冒充"字体已接"会让截图判据 V1/V4 失真。
+ *
+ * @font-face {
+ *   font-family: "IBM Plex Sans";
+ *   src: url("../assets/fonts/IBMPlexSans-Regular-Latin1.woff2") format("woff2");
+ *   font-weight: 400; font-style: normal; unicode-range: U+0000-00FF;
+ * }
+ * （Medium 500 / SemiBold 600 同形；IBMPlexMono 三支同形）
+ */
+
+*, *::before, *::after { box-sizing: border-box; }
+
+/* 三态切换靠 hidden 属性（不写内联样式）；`.ev` 这类 display 规则会赢过 UA 样式，故此处必须兜住 */
+[hidden] { display: none !important; }
+
+/* ---- 图标系统（视觉件 §1.4）：描边四属性**只在此写一次**，不逐图标各写 ----
+ * 1.5px 描边在 16px 网格上混用 butt / round 会直接看出长短不齐，而这恰是「微观不一致」最常见的泄露位。 */
+.ico {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+  color: var(--text-1);
+  background: var(--bg-page);
+}
+
+h1, h2, h3, p, ul, ol, figure { margin: 0; }
+
+h1 {
+  font-size: var(--fs-lg);
+  line-height: var(--lh-tight);
+  font-weight: 600;
+  letter-spacing: var(--ls-head);
+}
+
+h2 {
+  font-size: var(--fs-md);
+  line-height: var(--lh-tight);
+  font-weight: 600;
+  letter-spacing: var(--ls-tight);
+}
+
+/* 小字号才给正字距；正文一律不设 letter-spacing（CJK 回落脚本上正值会拉开汉字间距，视觉件 §1.5） */
+.o-head-sm {
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  letter-spacing: var(--ls-wide);
+  line-height: var(--lh-tight);
+}
+
+code, .t-name, .f-name, .num {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+}
+
+/* ---- 焦点环：禁 outline:none 无替代（视觉件 §3） ---- */
+:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+/* ---- 骨架：≥1280 三栏，768–1279 两栏，<768 单栏（视觉件 §2.1） ---- */
+.app {
+  max-width: var(--page-max);
+  margin-inline: auto;
+  padding: var(--sp-4);
+}
+
+.topbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--sp-3);
+  padding-block: var(--sp-3);
+  border-bottom: 1px solid var(--border-decor);
+}
+
+.topbar .spacer { flex: 1 1 auto; }
+
+.grid {
+  display: grid;
+  /* 对话页 = 两栏（会话 1.1 : 时间线 1.4）。原第三栏（灯阵）已于 2026-10-30
+     按用户拍板移出成独立视图 ⇒ 三栏比例 1.1:1.4:1 不再适用于本页。
+     但 `minmax(0, …)` 这一条**原样保留**：裸 `1fr` 的轨道最小值 = auto = min-content，
+     POC 实测第三栏被顶到 822px、第一栏压到 219px（内容宽只剩 194px，会话按钮被迫换行）。
+     那是轨道算法问题，与栏数无关，换回两栏也一样会顶破。 */
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1.4fr);
+  gap: var(--sp-3);
+  align-items: start;
+  margin-top: var(--sp-4);
+}
+
+.ry-card > h2, .ry-card > .o-head-sm { margin-bottom: var(--sp-2); }
+
+/* ---- 栏容器（PR-2 两栏视图里那条 grid item）----
+ * `.grid` 的直接子元素现在是 `.col` 而不是 `.panel`，所以硬规则 1 那条 `min-width: 0`
+ * 必须落到这一层（否则长 token 依旧顶破轨道，只是换了个元素顶）。 */
+.col {
+  display: grid;
+  gap: var(--sp-3);
+  align-content: start;
+  min-width: 0;
+}
+
+/* 容器已有 gap ⇒ 邻卡那份 margin 必须归零，否则栏内间距是 2×sp-3（`.stack` 同形）。
+   选择器写成 `.col > .panel + .panel` 而不是全局，是为了不动 PR-0 那批的 `.stack` 读数。 */
+.col > .ry-card + .ry-card { margin-top: 0; }
+
+.stack { display: grid; gap: var(--sp-2); }
+.stack > .ry-card + .ry-card { margin-top: 0; }
+
+/* ---- 答案区（PR-2）---- */
+.answer { display: grid; gap: var(--sp-2); }
+
+/* 长 token / 长 URL 不许顶破 1.1fr 轨道：375 档 V4 的判据是「无横向滚动」，
+ * 而答案文本是唯一由服务端给长度的一方 —— 客户端猜不到它多宽，只能给 break。 */
+.answer__text { overflow-wrap: anywhere; min-width: 0; }
+
+.answer__foot { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-2); }
+
+/* 终态徽标的**形状**在这一格，三值各自的边框/底色在 `events.css`（族色只走图形通道，
+ * 文本恒 `--text-1`：视觉件 §2.2 那条实算 3.25/4.25 < 4.5 就是针对着色的）。 */
+.term {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--text-1);
+  background: var(--bg-raised);
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-pill);
+  padding: 0 var(--sp-2);
+}
+
+/* ---- 依据列表（PR-2）----
+ * 刻意**不再加一条 3px 左边框**：那条是时间线的行形状（视觉件 §2.2 的三通道），
+ * 依据行复用 `.ev__name` / `.ev__body` 两个既有类就够，另造一套 accent 通道会让
+ * 「同一段文字在两栏里是两种形状」变成需要解释的事。 */
+.evidence { display: grid; gap: var(--sp-2); }
+
+.ev-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp-2); }
+
+.ev-row {
+  display: grid;
+  gap: var(--sp-1);
+  justify-items: start;
+  min-width: 0;
+}
+
+.ev-row .ev__body { overflow-wrap: anywhere; }
+
+/* ---- 时间线外框与窄栏折叠钮（PR-2）----
+ * `.tl-toggle` 默认不存在（宽栏整条时间线常显，没有可折叠的东西），<768 才出现；
+ * 覆盖在 `@media (max-width: 767px)` 那一格（同文件、在后 ⇒ 硬规则 3）。 */
+.tl-wrap { display: grid; gap: var(--sp-2); }
+
+.tl-toggle { display: none; justify-self: start; }
+
+/* ---- 控件 ---- */
+button, input, select {
+  font: inherit;
+  color: inherit;
+}
+
+/* ---- 链接 ---- */
+/* 两条纪律同时落到这里：
+ *   ① 颜色不走文字通道 —— 与视觉件 §2.2 给事件徽标定下的「accent 只上色到边框与图标」
+ *     同源；可点性靠**下划线**这个非色彩通道保证，不靠链接蓝。
+ *   ② `a.btn`（两页互链）去掉下划线，选中态走 aria-current。 */
+a { color: var(--text-1); text-decoration: underline; text-underline-offset: 2px; }
+a:hover { color: var(--text-2); }
+a.ry-btn { text-decoration: none; }
+
+
+
+
+
+
+
+.composer { display: grid; gap: var(--sp-2); margin-top: var(--sp-3); }
+
+/* 提交钮与它那句理由并排，窄栏换行（两条都是文案，不靠 tooltip） */
+.composer__row { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-2); }
+
+.hint { font-size: var(--fs-xs); color: var(--text-2); }
+
+/* 凭据框（现由 `poc.html` 的无构建静态预览使用）：值只在内存，不落 localStorage
+ * （工单件 §2.3；主题键不属凭据，边界见视觉件 §1.6）。
+ * ⚠ 形状从 `1fr auto` 两列改成单列栈：那一列 `auto` 原来是给 `poc.html:68` 的「应用」按钮留的，
+ *   而那个按钮始终没有落地（一个不改变任何状态的按钮是假控件），留着 `1fr auto` 就等于让
+ *   输入框去挤那条 auto 轨道。Vue 侧的 ApiKeyBox 已随静态 X-API-Key 通道退役删除。 */
+.keybox {
+  display: grid;
+  gap: var(--sp-2);
+  justify-items: start;
+}
+
+/* ---- 三态（视觉件 §3） ---- */
+.banner {
+  border: 1px solid var(--border-control);
+  border-left: 3px solid var(--cat-failure);
+  border-radius: var(--radius-sm);
+  background: var(--tint-failure);
+  padding: var(--sp-2) var(--sp-3);
+  margin-bottom: var(--sp-3);
+}
+
+/* 失败 tint 底色上的说明文字回到 --text-1。
+ * POC 实测：走 --text-2 时该处只有 4.14:1，低于正文 AA 的 4.5:1（hex 明细在取证档）；
+ * “彩色底版上沿用中性次级色”不自动安全 —— tint 会把中性色的对比度拉下来。 */
+.banner .ev__meta, .banner .hint { color: var(--text-1); }
+
+.empty {
+  border: 1px dashed var(--border-control);
+  border-radius: var(--radius-md);
+  padding: var(--sp-5) var(--sp-3);
+  text-align: center;
+}
+
+/* loading 骨架条 */
+.skel {
+  height: 12px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-raised);
+}
+
+.spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--border-control);
+  border-top-color: var(--status-running);
+  border-radius: var(--radius-pill);
+  animation: rotate 1s linear infinite;
+}
+
+@keyframes rotate { to { transform: rotate(1turn); } }
+
+.dot-live {
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  background: var(--cat-answer);
+  vertical-align: -0.15em;
+  animation: blink 1s steps(2, start) infinite;
+}
+
+@keyframes blink { 50% { opacity: 0; } }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0ms !important;
+  }
+  .spinner { border-top-color: var(--border-control); }
+}
+
+/* ---- 断点 ---- */
+/* ≥1280 的宽栏留白：这是 --sp-6 / --sp-7 当前唯一的消费者（断言 3 不允许无消费者的令牌） */
+@media (min-width: 1280px) {
+  .app { padding: var(--sp-6) var(--sp-7); }
+}
+
+@media (max-width: 1279px) {
+  /* 不再覆盖 .grid：拆页后默认就是两栏，而视觉件 §2.1 的 768–1279 那一档本就读作
+     「两栏（对话 + 时间线）」⇒ 同值覆盖是同批拆页的遗留，删。 */
+  /* ⚠ 这里不写 .lamps 的断点：events.css 在本件之后加载，同特异度下这里的覆盖
+     永远不会生效（POC 实测确认）。灯阵已改用 auto-fill —— 列数由它自身容器宽度决定，
+     本来就不属于视口断点该管的事。
+     ⚠ 原 `.col-lamps { grid-column: 1 / -1 }` 已删：灯阵不再是对话页的 grid item，
+     留着就是一条无消费者的死规则（断言 3 管令牌、管不到选择器，只能靠人删）。 */
+  details.fold { display: block; }
+}
+
+@media (max-width: 767px) {
+  .app { padding: var(--sp-3); }
+  .grid { grid-template-columns: 1fr; }
+  /* ⚠ sticky 的代价（刀㊲ 实拍量出来的，不是推断）：<768 且内容比视口长时，钉到底的
+   * `.composer` 会**向上压住面板标题**（375×667 实测与 `h2` 重叠 3575 px²），而它原本
+   * 没有底 ⇒ 叠字，肉眼看像破版。补底 + 上分隔线，让它读作一条输入栏。
+   * 底取 `--bg-surface`（与 `.panel` 同值 ⇒ 压住时看不出接缝），分隔线取 `--border-decor`
+   * （tokens.css 明写它“只作分隔线，不勾控件”，这里正是分隔线用法）。 */
+  .composer {
+    position: sticky;
+    bottom: 0;
+    background: var(--bg-surface);
+    border-top: 1px solid var(--border-decor);
+    padding-block: var(--sp-2);
+  }
+  /* tap 目标 ≥44×44 */
+  .ry-btn { padding: var(--sp-2) var(--sp-3); min-height: 44px; }
+  /* 时间线折叠为计数徽标，点开看全量 */
+  .timeline > .ev { display: none; }
+  .timeline.open > .ev { display: grid; }
+  .col-hint { display: none; }
+  .tl-toggle { display: inline-flex; }
+}
+
+@media (max-width: 375px) {
+  .f-name, .num { word-break: break-word; }
+}
+
+/* 只在窄栏出现的折叠提示 */
+.only-narrow { display: none; }
+@media (max-width: 1279px) { .only-narrow { display: block; } }
+
+/* `.only-narrow` 的补集（同名同形一对，所以写在一起、覆盖在后 ⇒ 硬规则 3）：
+ * 依据列表在 ≥1280 常显，768–1279 起换成上面那个原生 <details>（视觉件 §2.1 表第二行），
+ * 两处挂载的是同一个纯只读组件 —— 谁显示由这里唯一决定，`EvidenceList.vue` 里不判宽度。 */
+.only-wide { display: block; }
+@media (max-width: 1279px) { .only-wide { display: none; } }
+
+/* ============================================================================
+ * RuoYi 后台外壳 + 标准 CRUD 组件（全局类，无 scoped；全部消费 tokens.css 的 --ry-*）
+ * 三段式：.ry-layout（顶栏 + 侧边栏 + 内容区）→ .ry-header / .ry-aside / .ry-main
+ * 标准件：.ry-card / .ry-table / .ry-form / .ry-input / .ry-btn / .ry-pagination / .ry-tag
+ * 每一条引用都对应一个 --ry-* 令牌，消灭孤儿（门禁断言 3）；本段不写任何色值字面量（断言 1）。
+ * ==========================================================================*/
+
+/* ---- 三段式布局：占满视口 ---- */
+.ry-layout {
+  display: grid;
+  grid-template-columns: var(--ry-aside-w) 1fr;
+  grid-template-rows: var(--ry-header-h) 1fr;
+  grid-template-areas:
+    "aside header"
+    "aside main";
+  height: 100vh;
+}
+
+/* ---- 顶栏 ---- */
+.ry-header {
+  grid-area: header;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  padding-inline: var(--sp-4);
+  background: var(--ry-header-bg);
+  border-bottom: 1px solid var(--ry-header-border);
+  color: var(--ry-header-text);
+}
+.ry-header__title {
+  font-size: var(--fs-md);
+  font-weight: 600;
+  letter-spacing: var(--ls-head);
+}
+.ry-header .spacer { flex: 1 1 auto; }
+.ry-header__user { font-size: var(--fs-sm); color: var(--text-2); }
+
+/* ---- 侧边栏 ---- */
+.ry-aside {
+  grid-area: aside;
+  display: flex;
+  flex-direction: column;
+  background: var(--ry-aside-bg);
+  border-right: 1px solid var(--ry-aside-border);
+  color: var(--ry-aside-text);
+  overflow-y: auto;
+}
+.ry-aside__logo {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  height: var(--ry-header-h);
+  padding-inline: var(--sp-4);
+  background: var(--ry-aside-logo-bg);
+  color: var(--ry-on-primary);
+  font-size: var(--fs-md);
+  font-weight: 600;
+  letter-spacing: var(--ls-head);
+}
+.ry-menu { display: flex; flex-direction: column; padding: var(--sp-2) 0; }
+.ry-menu-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  min-height: 44px;            /* RuoYi 一级菜单统一高度 */
+  padding: 0 var(--sp-4);
+  color: var(--ry-aside-text);
+  cursor: pointer;
+  font-size: var(--fs-body);
+  border-left: 3px solid transparent;
+  transition: background var(--t-fast) var(--ease-out), color var(--t-fast) var(--ease-out);
+}
+/* hover 渐变指示线：RuoYi 侧栏标志性的「光标条」 */
+.ry-menu-item::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 20px;
+  border-radius: 2px;
+  background: linear-gradient(180deg, var(--ry-primary), color-mix(in srgb, var(--ry-primary) 55%, var(--bg-surface)));
+  opacity: 0;
+  transition: opacity var(--t-fast) var(--ease-out);
+}
+.ry-menu-item:hover::before { opacity: 1; }
+.ry-menu-item[aria-disabled="true"] { color: var(--ry-aside-text-muted); cursor: not-allowed; }
+.ry-menu-item[aria-disabled="true"]::before { display: none; }
+.ry-menu-item.is-active {
+  background: linear-gradient(135deg, var(--ry-primary), color-mix(in srgb, var(--ry-primary) 68%, var(--bg-surface)));
+  color: var(--ry-aside-active-text);
+  border-left-color: var(--ry-on-primary);
+  font-weight: 500;
+  box-shadow: 0 2px 6px var(--ry-primary);
+}
+.ry-menu-item.is-active::before { opacity: 0; }  /* active 已有蓝底+白线，不再叠指示线 */
+.ry-menu-item .ico { color: inherit; }
+
+/* ---- 内容区 ---- */
+.ry-main {
+  grid-area: main;
+  background: var(--ry-content-bg);
+  padding: var(--sp-4);
+  overflow-y: auto;
+}
+
+/* ---- 标准卡片 ---- */
+.ry-card {
+  min-width: 0;   /* 接替旧 .panel 的 grid item 收缩性，防长 token/URL 顶破轨道（V4 无横向滚动判据） */
+  background: var(--ry-card-bg);
+  border: 1px solid var(--ry-card-border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-1);
+  padding: var(--sp-4);
+}
+.ry-card + .ry-card { margin-top: var(--sp-4); }
+.ry-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  padding-bottom: var(--sp-3);
+  margin-bottom: var(--sp-3);
+  border-bottom: 1px solid var(--ry-border-light);
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+.ry-card__body { min-width: 0; }
+
+/* ---- 区域标题（左侧蓝条） ---- */
+.ry-section-title {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-md);
+  font-weight: 600;
+  margin-bottom: var(--sp-3);
+  padding-left: var(--sp-2);
+  border-left: 3px solid var(--ry-primary);
+}
+
+/* ---- 表格 ---- */
+.ry-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-body);
+}
+.ry-table th, .ry-table td {
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--ry-table-border);
+  text-align: left;
+  line-height: var(--lh-body);
+}
+.ry-table th { background: var(--ry-table-head-bg); font-weight: 600; color: var(--text-1); }
+.ry-table tbody tr:hover { background: var(--ry-table-row-hover); }
+
+/* ---- 表单 ---- */
+.ry-form { display: grid; gap: var(--sp-3); }
+.ry-form-item { display: grid; gap: var(--sp-1); }
+.ry-label { font-size: var(--fs-sm); color: var(--text-2); }
+
+/* ---- 输入控件 ---- */
+.ry-input {
+  width: 100%;
+  border: 1px solid var(--ry-input-border);
+  border-radius: var(--radius-sm);
+  background: var(--ry-input-bg);
+  padding: var(--sp-2) var(--sp-3);
+  color: var(--text-1);
+  font: inherit;
+}
+.ry-input::placeholder { color: var(--text-3); }
+.ry-input:focus { outline: none; border-color: var(--ry-input-focus); }
+
+/* ---- 按钮（RuoYi/Element 标准五态） ---- */
+.ry-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-1);
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+  color: var(--text-1);
+  padding: var(--sp-2) var(--sp-3);
+  font-size: var(--fs-body);
+  font-weight: 500;
+  cursor: pointer;
+  transition: background var(--t-fast) var(--ease-out), border-color var(--t-fast) var(--ease-out);
+}
+.ry-btn:hover { background: var(--bg-raised); }
+.ry-btn[disabled], .ry-btn[aria-disabled="true"] {
+  color: var(--text-3);
+  border-color: var(--border-decor);
+  cursor: progress;
+}
+.ry-btn--primary { background: var(--ry-primary); border-color: var(--ry-primary); color: var(--ry-on-primary); }
+.ry-btn--primary:hover { background: var(--ry-primary); opacity: .85; }
+.ry-btn--success { background: var(--ry-success); border-color: var(--ry-success); color: var(--ry-on-primary); }
+.ry-btn--success:hover { background: var(--ry-success); opacity: .85; }
+.ry-btn--warning { background: var(--ry-warning); border-color: var(--ry-warning); color: var(--ry-on-primary); }
+.ry-btn--warning:hover { background: var(--ry-warning); opacity: .85; }
+.ry-btn--danger { background: var(--ry-danger); border-color: var(--ry-danger); color: var(--ry-on-primary); }
+.ry-btn--danger:hover { background: var(--ry-danger); opacity: .85; }
+.ry-btn--info { background: var(--ry-info); border-color: var(--ry-info); color: var(--ry-on-primary); }
+.ry-btn--info:hover { background: var(--ry-info); opacity: .85; }
+.ry-btn--text { background: transparent; border-color: transparent; color: var(--ry-primary); }
+.ry-btn--text:hover { background: var(--bg-raised); }
+
+/* 分段控件（主题/页签/三态/登录按钮组）：RuoYi 风格按钮组外框。
+ * 语义类（不是标准件），保留为全局类；内部 .ry-btn 去圆角、竖线分隔，选中项用主色高亮。
+ * 选中态同时覆盖 aria-pressed="true"（主题/三态组）与 aria-current="page"（页签组）。 */
+.seg { display: inline-flex; border: 1px solid var(--ry-input-border); border-radius: var(--radius-sm); overflow: hidden; }
+.seg > .ry-btn { border: 0; border-radius: 0; background: transparent; }
+.seg > .ry-btn + .ry-btn { border-left: 1px solid var(--ry-input-border); }
+.seg > .ry-btn[aria-pressed="true"],
+.seg > .ry-btn[aria-current="page"] { background: var(--ry-primary); color: var(--ry-on-primary); font-weight: 500; }
+.seg > .ry-btn[aria-pressed="true"]:hover,
+.seg > .ry-btn[aria-current="page"]:hover { opacity: .9; }
+
+/* ---- 标签 / 徽标 ---- */
+.ry-tag {
+  display: inline-flex;
+  align-items: center;
+  font-size: var(--fs-xs);
+  border-radius: var(--radius-sm);
+  padding: 0 var(--sp-2);
+  border: 1px solid var(--border-control);
+  background: var(--bg-raised);
+  color: var(--text-1);
+}
+.ry-tag--success { background: var(--ry-tag-success-bg); border-color: var(--ry-tag-success-border); color: var(--ry-success); }
+.ry-tag--warning { background: var(--ry-tag-warning-bg); border-color: var(--ry-tag-warning-border); color: var(--ry-warning); }
+.ry-tag--danger  { background: var(--ry-tag-danger-bg);  border-color: var(--ry-tag-danger-border);  color: var(--ry-danger); }
+.ry-tag--info    { background: var(--ry-tag-info-bg);    border-color: var(--ry-tag-info-border);    color: var(--ry-info); }
+
+/* ---- 分页 ---- */
+.ry-pagination { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
+.ry-pagination .ry-page {
+  min-width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+  color: var(--text-1);
+  padding-inline: var(--sp-2);
+  cursor: pointer;
+}
+.ry-pagination .ry-page.is-active { background: var(--ry-primary); border-color: var(--ry-primary); color: var(--ry-on-primary); }
+.ry-pagination .ry-page:hover:not(.is-active) { background: var(--bg-raised); }

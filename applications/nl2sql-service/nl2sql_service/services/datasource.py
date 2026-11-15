@@ -18,17 +18,21 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 #: sqlglot / guard / literal_extractor 共用的方言常量
 DIALECT_POSTGRES = "postgres"
 DIALECT_MYSQL = "mysql"
+DIALECT_HIVE = "hive"
 
-#: DSN scheme → 方言。只认这两族；空/未知按 postgres（服务历史默认）。
+#: DSN scheme → 方言。空/未知按 postgres（服务历史默认）。
 _SCHEME_TO_DIALECT = {
     "postgres": DIALECT_POSTGRES,
     "postgresql": DIALECT_POSTGRES,
     "mysql": DIALECT_MYSQL,
     "mariadb": DIALECT_MYSQL,
+    "hive": DIALECT_HIVE,
+    "hiveserver2": DIALECT_HIVE,
 }
 
 
@@ -98,11 +102,38 @@ def build_default_registry(
     return DataSourceRegistry({datasource_id: source}, default_id=datasource_id)
 
 
+def build_registry_from_rows(rows: list[dict[str, Any]]) -> DataSourceRegistry:
+    """从 datasources 表行构建注册表（F10 表驱动；替代单源 settings 工厂）。
+
+    每行至少含 id/dialect/label；`default_id` 取 `is_default` 为真的那一行
+    （部分唯一索引保证至多一个）；无默认标记时取首行兜底（首次 seed 的保底，
+    仍不静默串源——首行即默认源，调用方按 id 显式选定）。
+    """
+    if not rows:
+        raise ValueError("datasources 表为空，无法构建注册表（请先 seed 默认源）")
+    sources: dict[str, DataSource] = {}
+    default_id = ""
+    for r in rows:
+        ds = DataSource(
+            id=r["id"],
+            dialect=r.get("dialect") or DIALECT_POSTGRES,
+            label=r.get("label") or "",
+        )
+        sources[ds.id] = ds
+        if r.get("is_default"):
+            default_id = ds.id
+    if default_id == "":
+        default_id = next(iter(sources))
+    return DataSourceRegistry(sources, default_id=default_id)
+
+
 __all__ = [
+    "DIALECT_HIVE",
     "DIALECT_MYSQL",
     "DIALECT_POSTGRES",
     "DataSource",
     "DataSourceRegistry",
     "build_default_registry",
+    "build_registry_from_rows",
     "detect_dialect",
 ]

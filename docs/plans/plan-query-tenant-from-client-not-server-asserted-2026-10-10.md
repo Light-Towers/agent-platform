@@ -12,7 +12,7 @@
 | 2 | `/query` 里客户端值决定了：**工作区解析**（`:52`）、**调度器租户维度**（`:94`）、**预算门控维度**（`:108`/`:359`）、**语义缓存读/写桶**（`:162`/`:313`）、**graph 兜底 state**（`:237`）、**PlannerContext**（`:264`/`:273`） | `api/query_router.py` |
 | 3 | `PlannerContext.tenant_id` 一路传进能力调用（`deterministic.py:87/112/129/142/173/205` 等），最终成为检索 SQL 的租户谓词 | `planners/deterministic.py` |
 | 4 | `subagents.rag_query()` 明确写着 **"不收客户端表单值（ADR-0006 T9）：显式传入优先，否则回退部署级 DEFAULT_TENANT_ID"** —— 而调用方 `:205` 正是**显式传入 `plan.tenant_id`（= 客户端值）** ⇒ 这道守卫被调用方按参数语义合法绕过 | `subagents/rag.py:10-19` vs `planners/deterministic.py:205` |
-| 5 | 服务端断言值的来源：`server_tenant_id()` = ContextVar（由 JWT 验签或 `SINGLE_TENANT` 绑定）→ 否则 `DEFAULT_TENANT_ID`（默认 `default`） | `workspace_registry.py:81-90`、`identity.py:296-305` |
+| 5 | 服务端断言值的来源：`server_tenant_id()` = ContextVar（由 JWT 验签或 `SINGLE_TENANT` 绑定）→ 否则 `DEFAULT_TENANT_ID`（默认 `default`） | `packages/agent-runtime/agent_runtime/workspace_registry.py:81-90`、`packages/agent-runtime/agent_runtime/identity.py:296-305` |
 | 6 | 控制台页面**不发** `tenant_id`（grep 命中 0）⇒ 本版演示链路两边走的是同一个 `default`，**今天是自洽的** | `static/console.html` |
 
 ## 2. 两种会真的爆出来的读法
@@ -38,7 +38,7 @@
 
 ⚠ 消费者审计（已查，别当成未知）：仓内**向 agent_server `/query` 发请求的只有控制台页面**（不发 `tenant_id`，
 grep 命中 0）与测试。联邦网关那条 `endpoint="/query"` 是 **knowledge-service** 的（`agent_federation/agent/config.py:56-62`），
-它给下游子服务传 `tenant_id` 的位置是 `async_subagents.py:115-125` —— 与 agent_server 的 `/query` 不是同一条边。
+它给下游子服务传 `tenant_id` 的位置是 `applications/agent_federation/agent/async_subagents.py:115-125` —— 与 agent_server 的 `/query` 不是同一条边。
 ⇒ 选项 A 的兼容面比"怕破坏上游"要小得多；真正要确认的只有**仓外**调用方（若有）。
 
 ## 4. 验收（A 的话，须当场可证）
@@ -55,9 +55,11 @@ grep 命中 0）与测试。联邦网关那条 `endpoint="/query"` 是 **knowled
 
 ## 6. 现场证据升级（2026-10-12 12:3x，126 实跑，不是读代码）
 
+> **2026-10-25 状态**：该洞已由 `6381b70f`（空租户 fail-closed）修复，随后 PG 缓存模块按 ADR-0013 C 整体删除；现实现为 Valkey 单轨，空租户直接 miss 且 L2 恒带 tenant filter。本节保留为历史取证记录。
+
 本条从"边界不收敛的口径问题"升级为**已证的跨租户读通道**，就在语义缓存上。
 
-**形状**：`packages/agent-runtime/agent_runtime/cache.py:47-60` 只在 `tenant_id` **非空**时加 `WHERE`，
+**形状**（**历史取证**：`packages/agent-runtime/agent_runtime/cache.py` 已随 ADR-0013 单轨迁移整文件删除，行窗 47-60 不可解析；租户为空的 fail-closed 现状见 `packages/agent-runtime/agent_runtime/cache/valkey_backend.py`）：`packages/agent-runtime/agent_runtime/cache.py`（本批 ADR-0013 退役件，工作区已删） 历史行窗 47–60 只在 `tenant_id` **非空**时加 `WHERE`，
 否则**查全表**；而调用方传的是 `req.tenant_id or ""`（`applications/agent_server/api/query_router.py:162`
 写侧 `:313` 同）。**客户端不填租户 = 空串 = 走 else = 没有任何租户谓词**——
 那行注释写着"防止跨租户命中（P1 安全修复）"，else 分支恰好把它绕过去了。
@@ -76,7 +78,7 @@ grep 命中 0）与测试。联邦网关那条 `endpoint="/query"` 是 **knowled
 而缓存落进了客户端自报的 `tenant-B` ⇒ **会话桶按服务端、缓存桶按客户端**，两个桶在同一个请求里不一致。
 
 **新增最小选项 D（比 A/B/C 都小，且不依赖 JWT）**：把缓存的 else 分支删掉——**空租户也不查全表**，
-即"没有断言就没有缓存"（fail-closed，读侧与写侧同口径）。改动只在 `cache.py`，一条用例可钉死：
+即"没有断言就没有缓存"（fail-closed，读侧与写侧同口径）。改动只在 `packages/agent-runtime/agent_runtime/cache.py`（本批 ADR-0013 退役件，工作区已删），一条用例可钉死：
 `tenant_id=''` 时不得命中任何行。它不解决 `/query` 数据面的 11 处客户端 tenant，但**关掉这条已经能证的通道**。
 
 **拍板时请一并回答**：③ 选项 D 是否可以独立于 A/B/C 先做（我的建议：可以，且应该先做——它是默认分支上的 fail-open）。

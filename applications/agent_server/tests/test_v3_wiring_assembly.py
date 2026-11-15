@@ -24,6 +24,7 @@ from agent_runtime.execution_scheduler import (
 )
 from agent_runtime.payload_externalization import PayloadExternalizer
 from agent_runtime.state_migration import StateSchemaMigrator, get_default_migrator
+from agent_runtime.workspace_registry import bind_role_context, reset_role_context
 from agent_server.api.control import router
 from agent_server.config import Settings
 from agent_server.main import _build_pg_stores
@@ -81,11 +82,34 @@ def test_scheduler_recovery_defaults_to_off():
 # ===== 项 3：requeue / recover 的 HTTP 面 =====
 
 
+class _AdminRoleMiddleware:
+    """1b 随动（方案 §7）：最小 app 无 IdentityMiddleware，补服务端断言 admin。
+
+    control.py 的 8 个端点均挂 ``execution.control``；不绑定 role ⇒ viewer 兜底 ⇒
+    403/500。本文件测的是控制面状态转换与装配产物，不是权限矩阵 ⇒ 补的是生产装配的
+    等价**前置**，不删用例、不收窄断言。纯 ASGI 中间件保证 ContextVar 与端点同 task。
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        token = bind_role_context("admin")
+        try:
+            await self.app(scope, receive, send)
+        finally:
+            reset_role_context(token)
+
+
 def _client(control_plane) -> TestClient:
     # tests/ 被 lint 的「裸 FastAPI(」门禁排除（scripts/lint_architecture.py 的 tests/ 作用域），
     # 这里只需要 router + app.state，不需要 build_api_app 的中间件栈。
     app = FastAPI()
     app.include_router(router)
+    app.add_middleware(_AdminRoleMiddleware)
     app.state.control_plane = control_plane
     return TestClient(app)
 
@@ -142,10 +166,8 @@ def test_recover_endpoint_409_when_recovery_disabled():
 
 
 def test_endpoints_503_when_control_plane_absent():
-    app = FastAPI()
-    app.include_router(router)
-    app.state.control_plane = None
-    client = TestClient(app)
+    # 复用 _client：它已带 admin 断言中间件（1b 随动），断言形状逐字不变。
+    client = _client(None)
     assert client.post("/api/executions/e1/requeue").status_code == 503
     assert client.post("/api/executions/e1/recover").status_code == 503
 

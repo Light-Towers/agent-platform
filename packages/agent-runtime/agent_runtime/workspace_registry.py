@@ -20,6 +20,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from contextvars import ContextVar, Token
 
 from agent_core.memory._tenant_gate import _TENANT_UNSET, resolve_tenant
@@ -31,6 +32,9 @@ logger = logging.getLogger(__name__)
 _tenant_id_ctx: ContextVar[object] = ContextVar("server_tenant_id", default=_TENANT_UNSET)
 # 用户身份上下文（ADR-0007：与 tenant 同为服务端断言 claim；当前供审计/画像读取，不单独承担隔离）。
 _user_id_ctx: ContextVar[object] = ContextVar("server_user_id", default=_TENANT_UNSET)
+# 角色上下文（D2：role 与 tenant/user 同为服务端断言 claim；值域由 authorization.py 收敛，
+# 缺/未知码在消费侧走 viewer 兜底——不在绑定层判定词汇表）。
+_role_ctx: ContextVar[object] = ContextVar("server_role", default=_TENANT_UNSET)
 
 __all__ = [
     "WorkspaceTenantMismatch",
@@ -38,7 +42,13 @@ __all__ = [
     "reset_tenant_context",
     "bind_user_context",
     "reset_user_context",
+    "bind_role_context",
+    "reset_role_context",
     "server_user_id",
+    "asserted_user_id",
+    "asserted_role",
+    "asserted_tenant_id",
+    "asserted_person_id",
     "resolve_workspace",
     "register_workspace",
     "assert_workspace_access",
@@ -70,12 +80,94 @@ def reset_user_context(token: Token) -> None:
     _user_id_ctx.reset(token)
 
 
+def bind_role_context(role: str | None) -> Token:
+    """绑定服务端断言的 role（来自已验签令牌 claim）；缺/空按未绑定（消费侧走 viewer 兜底）。"""
+    return _role_ctx.set(role if role else _TENANT_UNSET)
+
+
+def reset_role_context(token: Token) -> None:
+    _role_ctx.reset(token)
+
+
+def asserted_role() -> str | None:
+    """服务端**已断言**的 role 码；未绑定 → ``None``（不 fail-fast，语义同 :func:`asserted_user_id`）。
+
+    返回的是**原始 claim 值**，不做词汇表校验：值域收敛（含 D9 兜底计数）是
+    ``authorization.effective_role`` 的职责，这里只负责"有没有断言"。
+    """
+    bound = _role_ctx.get()
+    if bound is _TENANT_UNSET:
+        return None
+    return bound or None
+
+
 def server_user_id(default: object = _TENANT_UNSET) -> str:
     """解析服务端 user：ContextVar 优先，其次显式 default；两者都缺 → 抛错（fail-fast）。"""
     bound = _user_id_ctx.get()
     if bound is not _TENANT_UNSET:
         return bound  # type: ignore[no-any-return]
     return resolve_tenant(default)
+
+
+def asserted_user_id() -> str | None:
+    """服务端**已断言**的 user；未绑定或绑成空值 → ``None``（不 fail-fast）。
+
+    与 :func:`server_user_id` 的分工是刻意的，两者不可互换：
+
+    - ``server_user_id(default)`` = "必须有，否则调用方写错了"（审计/属主落库这类
+      不允许漏绑定的路径）；
+    - 本函数 = "有就用、没有就走既有语义"，给**渐进开启面**用（observe 档下大量请求
+      本来就没有 user 断言，那里硬 fail-fast 等于把存量调用全打红）。
+
+    ⚠ 调用方不得拿它当"随便兜个默认值"的入口：返回 ``None`` 的含义是**这一跳没有
+    可断言的人**，正确的处置是保持旧行为（不拼用户段、不降级成共享桶）。
+    """
+    bound = _user_id_ctx.get()
+    if bound is _TENANT_UNSET:
+        return None
+    return bound or None
+
+
+def asserted_tenant_id() -> str | None:
+    """服务端**已断言**的 tenant；未绑定 → ``None``（不 fail-fast，语义同 :func:`asserted_user_id`）。"""
+    bound = _tenant_id_ctx.get()
+    if bound is _TENANT_UNSET:
+        return None
+    return bound or None
+
+
+# 「人身份段」合法字符集：与 ``agent_core.guardrails.auth._PRINCIPAL_RE`` 的**段内**规则同形
+# （首字符也算字母数字，但不校总长 —— 总长要等宿主把两段拼起来才知道，见 ``_compose_principal``）。
+_PERSON_SEGMENT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+
+
+def asserted_person_id() -> str | None:
+    """服务端断言的**人**，仅当它确实是一个独立于人所在租户的身份时返回；否则 ``None``。
+
+    这是「会话按人分桶」与「本次已鉴权到人」两条判据的**唯一取值点**（单一实现，不给宿主
+    各自复制一份 ``user != tenant`` 比较）。两个 ``None`` 分支各有其实取成因，都不是保守偷懒：
+
+    1. ``user == tenant``：``identity.verify_token`` 的 user 取值是
+       ``payload.get("user_id") or payload.get("sub")``，而 ``mint_token`` 写
+       ``sub = user_id or tenant_id``（``identity.py:178``、``:250`` 实取）⇒ **网关签发的
+       租户级令牌**（没有 ``user_id`` claim）在中间件里绑出来的 user 就是租户名。那不是人，
+       拼进主体只会造出 ``tenant-a--user-a`` 这种凭空改名，把存量会话线弄丢。
+    2. user 不在段内字符集：典型是 ``sub`` 用邮箱（含 ``@``）。内核的处置纪律是**不做有损
+       清洗**（清洗 = 造碰撞面，见 ``guardrails/auth.py`` 顶部注释），所以这里不清洗、不截断，
+       直接当「没有可断言的人」处理。
+
+    ⚠ 两个分支的后果都是**退回租户级共享桶** —— 那是改动前的既有形态，不是新造的共享面；
+    真正的修复在签发方（保证 ``user_id`` filename-safe）与中间件拒收非法 ``sub``，属 PR-3。
+    因此本轮「按人隔离」的承诺**只覆盖本方案签发的登录令牌**，不得对外泛化陈述。
+    """
+    user = asserted_user_id()
+    if not user:
+        return None
+    if user == asserted_tenant_id():
+        return None
+    if not _PERSON_SEGMENT_RE.match(user):
+        return None
+    return user
 
 
 def server_tenant_id(default: object = _TENANT_UNSET) -> str:

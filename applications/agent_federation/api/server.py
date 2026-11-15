@@ -19,7 +19,11 @@ load_dotenv(find_dotenv())
 from agent_core.guardrails.app_factory import build_api_app
 from agent_core.guardrails.fs import PathTraversalError, resolve_within, safe_filename, safe_join
 from agent_core.logging import configure_logging, get_logger
-from agent_core.tracing import init_tracing, shutdown_tracing, start_span
+from agent_core.tracing import (
+    init_tracing,
+    shutdown_tracing,
+    start_span,
+)
 
 # 统一日志配置入口：配置 root + agent_core 子树（agent_core 子树 propagate=False，
 # 消除重复日志；使 agent_runtime.* 等未单独配置的子树正常输出）。级别可经 LOG_LEVEL 覆盖。
@@ -83,6 +87,12 @@ async def lifespan(app: FastAPI):
 
     await init_pool()
 
+    # 语义缓存（ADR-0013 C）：与 agent_server 同一 Valkey 实现、同一份配置面。
+    # 配置不一致启动即失败；Valkey 不可达只 degraded + fail-open。
+    from agent_runtime.cache import get_cache
+
+    await get_cache("federation").startup()
+
     logger.info("deepagents 服务启动完成")
 
     # P1.1：lifespan 预初始化 main_agent，消除并发首请求的重复构造竞态。
@@ -124,6 +134,11 @@ async def lifespan(app: FastAPI):
     from agent.db import close_pool
 
     await close_pool()
+
+    # 语义缓存：排空写队列、关闭 Valkey 连接
+    from agent_runtime.cache import close_cache
+
+    await close_cache()
 
 
 app = build_api_app(title="agent_federation API", lifespan=lifespan)
@@ -225,6 +240,28 @@ class TaskAcceptedResponse(BaseModel):
 
     status: str
     thread_id: str
+
+
+@app.get("/health")
+async def health() -> dict:
+    """探针路径：只读已装配状态 + 有界缓存 ping，不加载模型、不回显 DSN。"""
+    from agent_runtime.cache import get_cache
+
+    from agent.db import get_pool
+
+    cache_backend_obj = get_cache("federation")
+    cache_health = await cache_backend_obj.health()
+    from shared_schemas import CacheStatsReport
+
+    return {
+        "status": "ok",
+        "storage": "postgres" if get_pool() is not None else "memory",
+        "cache_backend": cache_health.backend,
+        "cache_ready": cache_health.ready,
+        "cache_degraded_reason": cache_health.degraded_reason,
+        # 与 agent_server 同一个契约模型出数（单一实现），键集合恒定不随后端/冷热变化。
+        "cache_stats": CacheStatsReport.from_counts(cache_backend_obj.get_stats()).model_dump(),
+    }
 
 
 from agent.main_agent import run_deep_agent

@@ -15,7 +15,12 @@ from pathlib import Path
 import pytest
 from agent_core.guardrails.auth import DEV_THREAD_ID, THREAD_ID_PREFIX, resolve_thread_identity
 from agent_runtime import workspace_registry as _wr
-from agent_runtime.workspace_registry import bind_tenant_context, reset_tenant_context
+from agent_runtime.workspace_registry import (
+    bind_tenant_context,
+    bind_user_context,
+    reset_tenant_context,
+    reset_user_context,
+)
 from agent_server.api.auth import resolve_thread_id, verify_api_key
 from agent_server.config import get_settings
 from fastapi import HTTPException
@@ -32,30 +37,88 @@ def _force_unbound_tenant():
     return _wr._tenant_id_ctx.set(_wr._TENANT_UNSET)
 
 
+def _force_unbound_user():
+    """同上，钉用户维：D-l 后 ``resolve_thread_id`` 会读 user 断言，上一个用例泄漏的
+    绑定值会把「无 user 断言 ⇒ 逐字不变」这条判据测成假绿。
+    """
+    return _wr._user_id_ctx.set(_wr._TENANT_UNSET)
+
+
 def _set_api_key(monkeypatch, key: str):
     monkeypatch.setenv("API_KEY", key)
     get_settings.cache_clear()
 
 
 def test_verify_api_key_disabled_returns_none(monkeypatch):
+    """纯开发模式（``api_key`` 空）仍旁路 —— U1，本件不代答。"""
     _set_api_key(monkeypatch, "")
-    assert verify_api_key(None) is None
-    assert verify_api_key("any") is None
+    assert verify_api_key() is None
 
 
-def test_verify_api_key_enabled_correct(monkeypatch):
-    _set_api_key(monkeypatch, "secret123")
-    assert verify_api_key("secret123") == "secret123"
-
-
-def test_verify_api_key_enabled_wrong_raises_401(monkeypatch):
+def test_verify_api_key_enabled_requires_login(monkeypatch):
+    """鉴权启用且无人断言 ⇒ 401（fail-closed，不得回落成放行）。"""
     _set_api_key(monkeypatch, "secret123")
     with pytest.raises(HTTPException) as exc:
-        verify_api_key("wrong")
+        verify_api_key()
     assert exc.value.status_code == 401
+
+
+def test_static_api_key_header_can_no_longer_authenticate(monkeypatch):
+    """通道退役的回归锁：带上与配置值逐字相同的 X-API-Key 也不得放行。
+
+    ``verify_api_key`` 已不声明 ``X-API-Key`` 头参数 ⇒ 该值根本进不了依赖树，
+    请求带了头与没带头走的是同一条分支。判据是 401 而不是「视作已登录」：
+    这条用例防的是有人日后把静态比对加回来。
+    """
+    _set_api_key(monkeypatch, "secret123")
     with pytest.raises(HTTPException) as exc:
-        verify_api_key(None)
+        verify_api_key()
     assert exc.value.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# 入站只有登录令牌：断言到人即放行，拿不到「人」一律 401
+# ---------------------------------------------------------------------------
+
+
+def test_verify_api_key_accepts_asserted_person_without_key(monkeypatch):
+    """登录态（中间件已验签并断言到人）放行 —— 唯一生效的入站通道。"""
+    _set_api_key(monkeypatch, "secret123")
+    t = bind_tenant_context("acme")
+    u = bind_user_context("alice")
+    try:
+        assert verify_api_key() is None
+    finally:
+        reset_user_context(u)
+        reset_tenant_context(t)
+
+
+@pytest.mark.parametrize(
+    "user_bound",
+    [None, "acme", "alice@example.com"],
+    ids=["single-tenant", "tenant-level-token", "non-filename-safe-sub"],
+)
+def test_tenant_only_assertion_does_not_bypass_login_gate(monkeypatch, user_bound):
+    """fail-open 反证：拿不到“人”时闸门照旧必 401。
+
+    ``single-tenant`` 那一格就是 ``auth.py`` 里那句“判据不得换成 ``asserted_tenant_id()``”
+    的实体：SINGLE_TENANT 部署下中间件给每个请求都绑租户，拿它当“已登录”等于把整条
+    闸门旁路。后两格钉的是同一个入口的另外两个“非人”形状（租户级令牌的 sub 回落、
+    邮箱形 sub 不清洗）。
+    """
+    _set_api_key(monkeypatch, "secret123")
+    before = _force_unbound_user()
+    t = bind_tenant_context("acme")
+    u = bind_user_context(user_bound) if user_bound is not None else before
+    try:
+        with pytest.raises(HTTPException) as exc:
+            verify_api_key()
+        assert exc.value.status_code == 401
+    finally:
+        if u is not before:
+            reset_user_context(u)
+        reset_tenant_context(t)
+        reset_user_context(before)
 
 
 def test_resolve_thread_id_disabled_trusts_client(monkeypatch):
@@ -67,6 +130,7 @@ def test_resolve_thread_id_disabled_trusts_client(monkeypatch):
 def test_resolve_thread_id_enabled_uses_asserted_tenant(monkeypatch):
     """鉴权启用：主体取服务端断言租户，客户端伪造 session_id 不生效（防劫持）。"""
     _set_api_key(monkeypatch, "secret123")
+    u_before = _force_unbound_user()  # D-l 后本断言依赖“无 user 断言”，不显置就会跑成顺序敏感
     token = bind_tenant_context("acme")
     try:
         tid = resolve_thread_id("attacker-guess")
@@ -80,6 +144,7 @@ def test_resolve_thread_id_enabled_uses_asserted_tenant(monkeypatch):
         assert resolve_thread_id(None) == tid
     finally:
         reset_tenant_context(token)
+        reset_user_context(u_before)
 
 
 def test_resolve_thread_id_enabled_falls_back_to_deployment_default(monkeypatch):
@@ -110,6 +175,85 @@ def test_resolve_thread_id_enabled_different_tenants_isolate(monkeypatch):
         reset_tenant_context(t_b)
 
     assert tid_a != tid_b
+
+
+# ---------------------------------------------------------------------------
+# A6（方案 D-l）：同租户两个账号必须不同桶，且无 user 断言时**逐字不变**
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_thread_id_same_tenant_two_users_isolate(monkeypatch):
+    """D-l 的正判据：不拼 user = 两个账号互相看得见对方的对话（产品级错误）。"""
+    _set_api_key(monkeypatch, "key-a")
+    t = bind_tenant_context("acme")
+    u1 = bind_user_context("alice")
+    try:
+        tid_alice = resolve_thread_id("x")
+    finally:
+        reset_user_context(u1)
+    u2 = bind_user_context("bob")
+    try:
+        tid_bob = resolve_thread_id("x")
+    finally:
+        reset_user_context(u2)
+        reset_tenant_context(t)
+
+    assert tid_alice == f"{THREAD_ID_PREFIX}acme--user-alice"
+    assert tid_bob == f"{THREAD_ID_PREFIX}acme--user-bob"
+    assert tid_alice != tid_bob
+
+
+@pytest.mark.parametrize(
+    "user_bound,why",
+    [
+        (None, "静态 key / observe 档无凭据（中间件绑 user=None）"),
+        ("acme", "网关租户级令牌：verify_token 把 sub 当 user ⇒ user == tenant"),
+        ("alice@example.com", "sub 用邮箱：不在 safe_filename 字符集，不清洗不截断"),
+    ],
+    ids=["no-user", "user-equals-tenant", "user-not-filename-safe"],
+)
+def test_resolve_thread_id_without_person_is_byte_identical_to_before(monkeypatch, user_bound, why):
+    """A6 的后半：拿不到“人”时，主体必须与 D-l 前**逐字相同**（{why}）。
+
+    这条钉的是“不得把存量会话线弄丢”：任何改名（包括给租户级令牌顺手拼一段）都会
+    让已有 thread 在数据面上找不到。同时它钉住“不清洗”这一条：邮箱形 sub 被清洗成
+    alice_example_com 就能拼了，但那是在造碰撞面。
+    """
+    _set_api_key(monkeypatch, "key-a")
+    before = _force_unbound_user()
+    t = bind_tenant_context("acme")
+    try:
+        baseline = resolve_thread_id("x")
+        assert baseline == resolve_thread_identity("acme")
+        if user_bound is not None:
+            u = bind_user_context(user_bound)
+            try:
+                assert resolve_thread_id("x") == baseline
+            finally:
+                reset_user_context(u)
+    finally:
+        reset_tenant_context(t)
+        reset_user_context(before)
+
+
+def test_resolve_thread_id_overlong_principal_fails_loud_not_shared(monkeypatch):
+    """两段各自合法、拼起来超 64 ⇒ 当场报错，不允许“退化成只按租户分桶”。
+
+    默默降级就是把两个账号塞回同一个会话目录 —— 那是 D-l 要消除的错误，不能当降级方案。
+    """
+    _set_api_key(monkeypatch, "key-a")
+    u_before = _force_unbound_user()
+    long_tenant = "t" * 60  # 合法主体（≤ 64），但 + "--user-" + user 就超
+    t = bind_tenant_context(long_tenant)
+    u = bind_user_context("alice")
+    try:
+        with pytest.raises(ValueError) as exc:
+            resolve_thread_id("x")
+        assert "会话主体超长" in str(exc.value)
+    finally:
+        reset_user_context(u)
+        reset_tenant_context(t)
+        reset_user_context(u_before)
 
 
 @pytest.mark.parametrize(

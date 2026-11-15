@@ -97,9 +97,9 @@ LLM 生成的 SQL 是自由文本，应用层拦截天然是黑名单对抗；�
 |---|---|---|---|
 | **L1 账号 + 视图** | 问数账号 `GRANT SELECT` 只到授权表；敏感表建脱敏视图（如 `'138' ‖ right(phone,4)`） | **DB 侧，运维前置**——本服务**不建任何 DDL**（只读消费方，Q10a）。这是最可靠的一道：LLM 连敏感表都 select 不到时，应用层漏什么都没后果 | 第一道 |
 | **L2 生成期 guard** | SQL 涉及未授权表 / 敏感列即拒（表白名单 + 敏感列黑名单，按方言 AST 解析） | 应用侧，`agent_core.sql.guard` + `ALLOWED_TABLES` / `SENSITIVE_COLUMNS` | 纵深防御，挡模型幻觉 |
-| **L3 结果层投影脱敏** | 非 admin 角色对敏感列投影掩码（保留首尾 `MASK_KEEP_CHARS` 字符） | 应用侧，`execute_sql` 成功后、答案/响应前 | 精细到人的可见度 |
+| **L3 结果层投影脱敏** | 无 `data.unmasked` 能力的角色对敏感列投影掩码（保留首尾 `MASK_KEEP_CHARS` 字符） | 应用侧，`execute_sql` 成功后、答案/响应前 | 精细到人的可见度 |
 
-**一份声明两处消费**：`SENSITIVE_COLUMNS`（`"table.column"` 全限定）同时驱动 L2 黑名单与 L3 脱敏，不搞两套。角色来自**服务端断言** `DEFAULT_QUERY_ROLE`（默认 `analyst` 最小权限；接入 ADR-0007 身份门后改为从断言身份取，**不可从客户端请求体伪造成 admin**）。
+**一份声明两处消费**：`SENSITIVE_COLUMNS`（`"table.column"` 全限定）同时驱动 L2 黑名单与 L3 脱敏，不搞两套。1c 起角色来自**服务端内部签名头** `X-Internal-Tenant` 的 `r` 键（由网关签发、子服务验签后采信），能力判定单一在 `agent_runtime.authorization.has_feature(role, "data.unmasked")`；缺 `r` / 未知码收敛到 viewer ⇒ 无条件脱敏，**不可从客户端请求体伪造成 admin**。`ADMIN_ROLES` / `DEFAULT_QUERY_ROLE` 配置键已下线。
 
 ## 本地自备资产
 
@@ -122,5 +122,6 @@ LLM 生成的 SQL 是自由文本，应用层拦截天然是黑名单对抗；�
 
 以上为主要变量；数据源（`DATASOURCE_*`）、负载隔离（`QUERY_MAX_CONCURRENCY` 等）、
 `metric_config` 守卫（`ALLOWED_TABLES` / `METRIC_CONFIG_MAX_ITEMS`）、数据权限
-（`SENSITIVE_COLUMNS` / `RESULT_MASKING_ENABLED` / `DEFAULT_QUERY_ROLE` 等）见
-`.env.example` 的分组说明（每组带方案锚点）。
+（`SENSITIVE_COLUMNS` / `RESULT_MASKING_ENABLED` / `MASK_KEEP_CHARS` 等）见
+`.env.example` 的分组说明（每组带方案锚点）。**角色不在配置里**：由网关签发的内部签名头承载，
+`ADMIN_ROLES` / `DEFAULT_QUERY_ROLE` 已下线，模板里不得回流。

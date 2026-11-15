@@ -51,7 +51,7 @@ def select_skill(state: ExhibitionAgentState) -> dict[str, Any]:
     if isinstance(explicit, str) and explicit in _SKILLS:
         return {"skill_name": explicit, "latency_start_ms": now_ms()}
     if isinstance(explicit, str) and explicit:
-        logger.warning("未知 skill: %s，回退默认", explicit)
+        logger.warning("未知 skill: %s，标记 skill_error 由 run_skill 拒执行（UNKNOWN_SKILL）", explicit)
         return {
             "skill_name": _DEFAULT_SKILL.name,
             "latency_start_ms": now_ms(),

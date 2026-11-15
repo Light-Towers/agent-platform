@@ -1,6 +1,12 @@
 # 126 环境事实基线（env-126-inventory）
 
-> **公开镜像脱敏注记**：本文件在 GitHub 公开镜像上把内网实 IP、主机名与运维机出口 IP 换成了 `<internal-host-*>` / `<internal-node-*>` / `<operator-lan-ip>` / `<pod-ip>` 占位符；内网仓（`company` remote）保留原文。判据与结论不受影响，但**按占位符复现取证命令在内网执行**。
+> **内网标识脱敏口径（2026-10-29 起）**：本文的真机 IP、主机名、内网域名与运维机出口 IP 已换成
+> `<internal-host-126>` / `<internal-host-241>` / `<internal-node-01..03>` / `<internal-ip>` /
+> `<internal-net-100>` / `<operator-lan-ip>` / `<internal-git-url>` / `<pod-ip>` 占位符；
+> **真值不在仓内**，住在运维机本机的 .intranet/keymap.json（普通文本不加反引号：该路径不入库，
+> 按 AGENTS.md《文档防漂移》口径避开 check_doc_sync 的存在性校验；它被 .gitignore 的 `.*/` 整体忽略，构造上不可提交）。
+> 占位符保留拓扑可区分性（谁是构建机、谁是运维机仍可读），去掉的只是网段与字面名。
+> ⇒ **不得拿占位符去现网复现命令**：执行前先从键表取回真值。推公开镜像时本文无需再遮（已与镜像版对齐）。
 
 > 来源：2026-10-10 对 <internal-host-126>（hostname <internal-node-03>）的**只读**盘点，含代码同步通道专轮、三次读数校准（e12/e13/e14/e16）与 §7 待查项逐条验证（e17–e25）。
 > 目标：把"每次上 126 都要重新发现一遍"的环境事实固化成基线，每个结论都能指到具体读数与可原地复现的命令。
@@ -100,7 +106,7 @@
 
 ### 2.6 为什么只能走 bundle
 
-本机 HEAD 6cebaa5 相对 origin/main 为 **ahead 1**，且 `git branch -r --contains 6cebaa5` 为空 ⇒ 该提交**未推送**到 GitHub，也未推送到 company remote（<internal-git-host> 上的内网 GitLab，仓库组路径与端口不在公开镜像展开；内网解析可达）。而 126 的 remote **只有 origin=GitHub**、无 company。**远端没有这个对象，126 无法 fetch ⇒ bundle 是物理上唯一可行通道**（与"126 有外网、curl github 得 200"并列，说明瓶颈不在网络）。
+本机 HEAD 6cebaa5 相对 origin/main 为 **ahead 1**，且 `git branch -r --contains 6cebaa5` 为空 ⇒ 该提交**未推送**到 GitHub，也未推送到 company remote（<internal-git-url>，内网解析 <internal-ip>、30001 TCP 可达）。而 126 的 remote **只有 origin=GitHub**、无 company。**远端没有这个对象，126 无法 fetch ⇒ bundle 是物理上唯一可行通道**（与"126 有外网、curl github 得 200"并列，说明瓶颈不在网络）。
 
 ### 2.7 构建与分发的防错设计
 
@@ -716,7 +722,7 @@ BLOCK='echo "host=$(hostname) head=$(git -C /opt/agent-platform rev-parse --shor
  echo "psi=[$(tr "\n" " " </proc/pressure/io)] df=$(df -h / | awk "NR==2{print \$4\"/\"\$5}")";
  echo "ctr=$(ctr -a /run/containerd-k8s/containerd.sock -n k8s.io images ls 2>/dev/null | grep -c agent-platform) moby=$(docker images --format "{{.ID}} {{.Repository}}" | grep agent-platform)";
  echo "pods=$(docker ps --format "{{.Names}}" | paste -sd" " -)"'
-for IP in 125 126 241; do printf '%s\n' "$BLOCK" | ssh -o BatchMode=yes root@192.168.100.$IP bash -s; done
+for IP in 125 126 241; do printf '%s\n' "$BLOCK" | ssh -o BatchMode=yes root@<internal-net-100>$IP bash -s; done
 
 kubectl get nodes -o wide                                   # 角色 / IP / container runtime
 kubectl -n agent-platform get pod -o wide                  # 落点 + RESTARTS + AGE

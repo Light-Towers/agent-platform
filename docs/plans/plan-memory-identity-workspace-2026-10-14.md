@@ -3,9 +3,9 @@
 > 性质：**方案文档，不含任何代码改动**。触发原因：需求方确认"一个完整的企业级 agent 平台需要这些能力"，
 > 并要求先核实 RAG 检索是否带 `workspace_id` 谓词（结论见 §1.4，它改写了阶段划分）。
 > 关联：ADR-0004（typed memory kernel）· ADR-0006（T9/W1 隔离双维、T10 工作空间注册）·
-> ADR-0007（身份=服务端断言租户）· **已立案待拍板：`plan-query-tenant-from-client-not-server-asserted-2026-10-10.md`**
+> ADR-0007（身份=服务端断言租户）· **已立案待拍板：`docs/plans/plan-query-tenant-from-client-not-server-asserted-2026-10-10.md`**
 > （数据面读客户端 tenant 的完整取证，本文阶段 1 = 执行它，不重复立案）·
-> `plan-tenant-identity-2026-09-27.md` · `plan-p0-ha-tenant-fixes-2026-09-25.md` ·
+> `docs/plans/plan-tenant-identity-2026-09-27.md` · `docs/plans/plan-p0-ha-tenant-fixes-2026-09-25.md` ·
 > `docs/plans/plan-observability-target-model-2026-10-14.md`（同一套"先方案后编码"纪律）·
 > 台账与基线（均在 `docs/operations/minimal-release-runbook.md`）：§9 台账 ⑮（search 未启用）、
 > ㉓（观测面含原文）、㉔（记忆回放带取证标识）；§5 基线 2 下那段"服务端断言目前只对会话归属成立"的收窄表述。
@@ -28,8 +28,8 @@
 |---|---|---|
 | 载体 | LangGraph `AsyncPostgresSaver`，三张表 `checkpoints/checkpoint_blobs/checkpoint_writes` | `applications/agent_server/main.py:46-62` → `packages/agent-core/agent_core/memory/__init__.py:83-92`；表由 `saver.setup()` 建，**仓库 SQL 迁移里没有它们的 DDL** |
 | thread 身份 | 鉴权开启即**忽略客户端 session_id**，一律 `tenant-<default_tenant_id>`（现网 `tenant-default`） | `api/auth.py:32-44`、`agent_core/guardrails/auth.py:56-84` |
-| 历史进 prompt | reducer `add_messages` → `state.messages` 读并压缩；Planner 路径另有 `thread_persist` 读写 | `agent/state.py:32`、`agent/graph.py:86-104`、`thread_persist.py:23-41,64-118` |
-| 形状后果 | 读只取最新一行 `aget_tuple` 的 `channel_values.messages`，写把整条列表重新序列化 ⇒ **消息不是独立行，删不了单句**（10-13 只能整桶清空的代码级原因） | `memory/recall_exact.py:70-75`、`thread_persist.py:87,106,116` |
+| 历史进 prompt | reducer `add_messages` → `state.messages` 读并压缩；Planner 路径另有 `thread_persist` 读写 | `agent/state.py:32`、`agent/graph.py:86-104`、`applications/agent_server/memory/thread_persist.py:23-41,64-118` |
+| 形状后果 | 读只取最新一行 `aget_tuple` 的 `channel_values.messages`，写把整条列表重新序列化 ⇒ **消息不是独立行，删不了单句**（10-13 只能整桶清空的代码级原因） | `memory/recall_exact.py:70-75`、`applications/agent_server/memory/thread_persist.py:87,106,116` |
 | 清理 | checkpoint 保留器**只在 `agent_federation` 接线**，agent_server 没有 ⇒ 单服务侧只增不减 | `agent_federation/checkpoint_cleaner.py:83-109`、`api/server.py:101-103`（◻ 调用点） |
 
 ### 1.2 跨会话（✅）
@@ -37,7 +37,7 @@
 - **没有** tenant 级 thread 列表、**没有**全局 state、**没有**画像聚合实体。
 - 实际存在的两条跨会话通路都是副作用：
   1. **租户塌桶**：鉴权启用时所有客户端共用一个 thread ⇒ A 的历史自动进 B 的 prompt；
-  2. **记忆按 (tenant, workspace|user) 召回，不按 thread** ⇒ 同租户内跨会话可见（`typed.py:477-506` ◻）。
+  2. **记忆按 (tenant, workspace|user) 召回，不按 thread** ⇒ 同租户内跨会话可见（`packages/agent-core/agent_core/memory/typed.py:477-506` ◻）。
 - ⇒ 屏上"我之前问了哪些问题"能被答出来，是通路 1 + 2，**不是画像能力**。
 
 ### 1.3 用户画像（✅ 开关，◻ 细节）
@@ -47,8 +47,8 @@
 | 有没有画像实体 | **没有** profile 表，**没有任何 `UPDATE memories`** ⇒ `importance` 写死不再演化，严格说只有"逐条事实" | grep 无命中（◻） |
 | 最接近画像的东西 | `memories.scope='user'` 的行，需 `MEMORY_DUAL_SCOPE=True`；**默认 False**，关时 user 行降级写成 workspace 行 | ✅ `packages/agent-core/agent_core/memory/typed.py:149,290,301-310`（注释原文："画像不跨空间"） |
 | 写入 | 每轮自动 `remember`；但 `memory_extraction_enabled=False` ⇒ **不抽结构化事实，整条 `"Q:…\nA:…"` 原文以 semantic/0.5 落库** | ✅ `applications/agent_server/config.py:47`；◻ `memory/longterm.py:142-152` |
-| 召回 | pgvector 余弦 top-k，**无相似度阈值**；评分 `type_weight(1.2/1.1/1.0) × importance × 1/(1+0.01·age_days)` ⇒ ADR-0004 的"加权融合+时间衰减"真实存在 | ◻ `typed.py:71-83,158-173,478-485` |
-| 遗忘 | `consolidate` 删 `importance<0.1 且 >30 天`，每 5 轮触发；单条 `forget_memory` **生产零调用、无端点** | ◻ `typed.py:407-442`、`longterm.py:159-185` |
+| 召回 | pgvector 余弦 top-k，**无相似度阈值**；评分 `type_weight(1.2/1.1/1.0) × importance × 1/(1+0.01·age_days)` ⇒ ADR-0004 的"加权融合+时间衰减"真实存在 | ◻ `packages/agent-core/agent_core/memory/typed.py:71-83,158-173,478-485` |
+| 遗忘 | `consolidate` 删 `importance<0.1 且 >30 天`，每 5 轮触发；单条 `forget_memory` **生产零调用、无端点** | ◻ `packages/agent-core/agent_core/memory/typed.py:407-442`、`applications/agent_server/memory/longterm.py:159-185` |
 | 半成品 | `SemanticMemory`/`UserSemanticStore`/`SharedSemanticStore` 无生产实现；`MemorySeeder` 仅测试引用 | ◻ `semantic_memory.py:54-109`、`ARCHITECTURE.md:148` |
 
 ### 1.4 RAG 检索的 workspace 谓词（✅ 本轮逐条复查——**这是本次最有价值的更正**）
@@ -64,25 +64,26 @@
   `req.tenant_id or "default"`（`api/query_router.py:94,108,237,264,273,359`）、`workspace_id=req.workspace_id`（`:52,271`），
   且 `workspace_id`/`tenant_id` 在契约里是**可选入参**（`packages/shared-schemas/shared_schemas/query.py:18` 默认 `None`）。
   ⇒ 今天的隔离是"**调用方自选桶**"，不是"边界"：传 `tenant_id=victim` 即可读该租户 chunks。
-  **这一条不是新发现**——2026-10-10 已立案并逐条取证：`plan-query-tenant-from-client-not-server-asserted-2026-10-10.md`
+  **这一条不是新发现**——2026-10-10 已立案并逐条取证：`docs/plans/plan-query-tenant-from-client-not-server-asserted-2026-10-10.md`
   （11 处 `req.tenant_id`、`subagents/rag.py:10-19` 的守卫被调用方按参数语义合法绕过、`SINGLE_TENANT` 改非 default 会
   "入库了却永远检索不到且不报错"）。本文只把它**升格为阶段 1 的前置**，不重复立案。
 - ⇒ 与 §1.1 的身份链**方向相反**：会话与审计已改服务端断言（ADR-0007），数据面还在吃客户端值。
   屏上 `租户身份: single` 与"能自选桶"同时成立，就是这个不一致的表现。
 - 🆕 **今天新读出的一条（10-10 那份没记，且比"伪造"更要紧）**：`semantic_cache.cache_lookup` 在 `tenant_id`
-  为**空串**时直接走"不加 WHERE"分支 ⇒ **跨全部租户全局匹配**（`packages/agent-runtime/agent_runtime/cache.py:51-61` ✅）。
+  为**空串**时直接走"不加 WHERE"分支 ⇒ **跨全部租户全局匹配**（`packages/agent-runtime/agent_runtime/cache.py`（本批 ADR-0013 退役件，工作区已删） 历史行窗 51–61 ✅；**该文件已随 ADR-0013 单轨迁移整文件删除**，行窗只作历史取证。现状判据改读 `packages/agent-runtime/agent_runtime/cache/valkey_backend.py` 的 `get`/`set` 首段 `if not tenant_id` ⇒ `skipped_no_tenant` 计数并直接返回，租户为空 fail-closed，不再走「不加 WHERE」分支）。
   而触发它的不是攻击者，是**默认行为**：契约里 `tenant_id` 默认 `None`（`shared_schemas/query.py:18` ✅）→
   调用方 `req.tenant_id or ""`（`query_router.py:162,313` ✅）→ 空串 → 无谓词。控制台页面**不发**这个字段
   （10-10 方案事实 6）⇒ **现网今天每一次问答走的都是这条全局匹配分支**。
   单租户下库里只有一个桶，所以今天没有实际泄漏；但它的形状是"**第二个租户一写进来就立刻串**"，
   且不需要任何人主动伪造。**与 10-10 记的"自选租户"是两支不同的失效**：那支要调用方主动传值，这支是默认值。
+  （2026-10-25 状态：该分支已由 `6381b70f` 修为空租户 fail-closed；PG 缓存模块随后按 ADR-0013 C 删除，现为 Valkey 单轨。）
 
 ### 1.5 工作空间（✅ 半边，◻ 半边）
 
 - 定位是**归属表 + 注册表**，不是容器：`workspaces(tenant_id,id)` 复合主键（`migrations/007_workspaces.up.sql:7-13` ◻）
   + `chunks.workspace_id`（`002_workspace.up.sql:4` ◻）。**无文件、无生命周期、无对外 API**。
 - 现网恒一个空间：`main.py:420` `workspace_id="default"` ✅（PlannerRuntime 身份硬编）。
-- 归属校验是 defense-in-depth：**缺表即降级放行**（`workspace_registry.py:108-113,164-169` ◻）。
+- 归属校验是 defense-in-depth：**缺表即降级放行**（`packages/agent-runtime/agent_runtime/workspace_registry.py:108-113,164-169` ◻）。
 - ⇒ 准确说法："**隔离槽位已预留、谓词链已通**"，不是"多工作空间可用"。
 
 ### 1.6 两处"算了就丢 / 该判没判"（✅）
@@ -90,8 +91,8 @@
 - `ContextGovernor` 治理出的 `governed_memories` 塞进 `PlannerContext` 后**全仓无读取点**
   （只有 `query_router.py:255-277` 赋值 + `planner/protocol.py:162` 定义）⇒ 记忆治理层"有实现、无装配"。
 - `/session/revert` **不走 `resolve_thread_id`**，直接用客户端 `req.session_id` 当 thread_id
-  （`session_router.py:72` + `revert.py:36`），且 `operator` 只写审计、**从不与 thread 归属比对**
-  （`revert.py` 全文无归属判定，`FORBIDDEN` 分支是死码）⇒ 多租户一开就是"能回退别人会话"的口子。
+  （`applications/agent_server/api/session_router.py:72` + `packages/agent-runtime/agent_runtime/revert.py:36`），且 `operator` 只写审计、**从不与 thread 归属比对**
+  （`packages/agent-runtime/agent_runtime/revert.py` 全文无归属判定，`FORBIDDEN` 分支是死码）⇒ 多租户一开就是"能回退别人会话"的口子。
 
 ## 2. 目标态：企业级要的是什么（判据，不是愿望）
 
@@ -109,11 +110,11 @@
 
 - **阶段 1 身份合一（先方案后编码，改动集中在入口层）**
   目标：数据面的 `tenant_id/workspace_id/user_id` 从"客户端可选入参"改为"服务端断言"，与 ADR-0007 对齐。
-  **本阶段 = 执行已立案的 `plan-query-tenant-from-client-not-server-asserted-2026-10-10.md`**（那份已把 11 处
+  **本阶段 = 执行已立案的 `docs/plans/plan-query-tenant-from-client-not-server-asserted-2026-10-10.md`**（那份已把 11 处
   `req.tenant_id`、`subagents/rag.py` 守卫被绕过、`SINGLE_TENANT` 改非 default 即"入库了却检索不到"三件事取证完），
   本文只在其基础上**追加一项它未覆盖的前置**：`user_id` 目前没有任何服务端来源（画像与"按 user 列会话"都卡在这），
   需要与 `tenant_id` 同批改由 ContextVar 注入，否则阶段 3/4 打不开。
-  影响面：`query_router.py`（9 处 `req.tenant_id`）、`import_router.py`、`sql_router.py`、`capabilities.py`（工具入参 schema 里
+  影响面：`query_router.py`（9 处 `req.tenant_id`）、`import_router.py`、`applications/agent_server/api/sql_router.py`、`applications/agent_server/capabilities.py`（工具入参 schema 里
   的 `workspace_id` 要变成"服务端注入"而非"模型/调用方可填"）、`shared-schemas` 的 `QueryRequest`（**契约变更，需先审消费者**：
   联邦网关与 kefu/nl2sql 等子服务都传这两个字段）。
   迁移策略：契约保留字段但**服务端忽略并覆盖**，同时把"被忽略"做成可观测事件（否则调用方静默失效）；
@@ -135,7 +136,7 @@
   验收：§2 表里那两句可测的话。
 - **阶段 5 治理闭环**
   目标：`governed_memories` 有读取点、`MemoryRetriever` 注入 semantic、`ContextGovernor` 结论进 trace 可回读
-  （与观测方案 P2 同一批属性键，见 `plan-observability-target-model-2026-10-14.md` §3）。
+  （与观测方案 P2 同一批属性键，见 `docs/plans/plan-observability-target-model-2026-10-14.md` §3）。
   验收：一次请求的 trace 里能指出"哪些记忆被治理丢弃、为什么"。
 
 ## 4. 口径表：**阶段 N 之前不得声称**（演示与对外话术都按此答）
@@ -156,5 +157,27 @@
 - 非目标：不自研向量库/不换 pgvector；不做"人格化画像"（那是产品层的事，本平台只负责事实存储与归因）；
   不在本轮引入新的身份框架（沿用 ADR-0007 的 ContextVar + JWT 路线）。
 - 待核（本轮未复核，实施前先确认）：`MemoryRetriever` 是否真的没注入 semantic（`main.py:159` ◻）；
-  `workspaces` 缺表降级放行的具体分支（`workspace_registry.py:108-113` ◻）；
-  episodic 生产读是 `ILIKE` 而非向量（`memory_pg.py:65-75` ◻）——若成立，阶段 3 要顺带定性它算不算"半成品"。
+  `workspaces` 缺表降级放行的具体分支（`packages/agent-runtime/agent_runtime/workspace_registry.py:108-113` ◻）；
+  episodic 生产读是 `ILIKE` 而非向量（`packages/agent-runtime/agent_runtime/memory_pg.py:65-75` ◻）——若成立，阶段 3 要顺带定性它算不算"半成品"。
+- **2026-10-25 新增（实读代码确认，非推测）：记忆向量表的形状把 embedding 维度焊死在"名字存在即复用"上**。
+  `packages/agent-core/agent_core/memory/vector_backend.py:270`/`:281` 只在 `CREATE TABLE IF NOT EXISTS` 里写 `VECTOR({self._dim})`，`:287` 的 hnsw 索引同理；
+  而 `self._dim = self._embedder.dim`（`:80`/`:244`）是**运行期取值**——本仓已有硬约束「换模型不得要求重启」
+  （`docs/plans/plan-router-keyword-gate-hides-corpus-2026-10-12.md`）。两者相撞的后果：换一次 embedding 模型（维度变）后，
+  建表语句对已存在的表是静默 no-op，列仍是旧 `VECTOR(n)`，此后**每一次写入与每一次向量检索都报维度不匹配**，
+  而 `_init_schema` 里那条 `except Exception: pass` 只护住了三个 ALTER（`:297-301`），护不住运行期请求。
+  **可观测形状要说准**（两条路径不同，别混成一句）：读侧 `VectorMemoryStore.recall` 对失败是
+  "记一条 warning 后返回空列表"（`store.py:274-278`）⇒ 现网表现不是报错，而是**语义记忆静默停摆**（召回恒空），
+  健康面看不出来——与"记忆已生效"这类对外话术直接冲突（§4 口径表同一行要跟着改判）。
+  写侧 `remember` 是**契约上就该非阻塞**（`packages/agent-core/agent_core/memory/backend.py:32` 同步签名 + `_run_background` 起 daemon 线程跑协程，
+  `packages/agent-core/agent_core/memory/vector_backend.py:32-49`；所以 `store.py:287` 不 await 是对的，不是漏 await），但代价是
+  协程里的异常只在 daemon 线程里打到 stderr：**不计数、不进健康态、调用方早已返回**，且 daemon 线程随进程退出即弃
+  ⇒ 维度不匹配时"写不进去"这件事除了翻日志没有别的出口（与语义缓存本轮补的 `dropped_writes`/`skipped_pii`
+  计数器是同一缺口形状）。
+  Milvus 后端同形（`:133` `FieldSchema(... dim=self._dim)`，集合已存在则不重建）。这与语义缓存那两条是**同一个横切失效**：
+  服务端 schema 用"名字在不在"判定，而名字不携带形状 ⇒ 形状漂移无声通过（缓存侧本轮的修法见
+  `docs/adr/0013-semantic-cache-single-track.md` §9「schema 版本进索引名」）。
+  **不在本轮动代码**（要先定方向，且属横切关注点，须全局解不是逐处补）：三个候选是
+  ①表名/集合名带 `{model}_{dim}` token（与缓存同一手法，代价是要决定历史记忆是否放弃）、
+  ②启动期读 `pg_attribute.atttypmod` 比对实维，不符即 fail-fast（不改数据，把静默变成开机就红）、
+  ③维持现状但把 `_dim` 钉成部署期常量并禁止热切（与「换模型不重启」冲突，需明确推翻哪一条）。
+  倾向 ②+① 的组合：先有门禁不再静默，再谈命名。等用户拍板后另立阶段。
