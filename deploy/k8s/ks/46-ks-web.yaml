@@ -1,5 +1,5 @@
 # KS web（统一 FastAPI 服务）—— Deployment + hostPath(模型/输出/日志) + Service
-# 镜像 knowledge-service-web:latest 须已导入 ambari03 的 containerd-k8s（见执行步骤）。
+# 镜像 knowledge-service-web:latest 须已导入 <internal-node-03> 的 containerd-k8s（见执行步骤）。
 # minio-init 改为 initContainer（幂等建桶 kb-import-bucket）。
 # hostPort 8000 保留 126:8000 的外部可达性（迁移期旧 docker 容器已停，端口空闲）。
 apiVersion: apps/v1

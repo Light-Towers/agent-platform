@@ -41,7 +41,7 @@ docker 卷实质在 `/var/lib/docker/volumes/knowledge-service_<name>/_data`；w
 ## 3. 目标拓扑
 
 - 命名空间：`agent-platform`（沿用现有）。
-- 节点：全部 `nodeSelector: kubernetes.io/hostname: ambari03`（=192.168.100.126）+ 对应 toleration。
+- 节点：全部 `nodeSelector: kubernetes.io/hostname: <internal-node-03>`（=<internal-host-126>）+ 对应 toleration。
 - 服务发现：为每个组件建 `ClusterIP` Service，名称沿用 compose 里的 `milvus`/`mongo`/`minio`/
   `neo4j`/`etcd`，使 web 的 `MILVUS_URL=http://milvus:19530` 等 env 原样可用。
 - 组件编排形态：

@@ -1,5 +1,5 @@
 # KS etcd（milvus 元数据存储）—— Deployment + hostPath + Service
-# 钉 ambari03(126)，hostPath 复用该机磁盘，与 10-postgres.yaml 同范式。
+# 钉 <internal-node-03>(<internal-host-126>)，hostPath 复用该机磁盘，与 10-postgres.yaml 同范式。
 apiVersion: apps/v1
 kind: Deployment
 metadata:

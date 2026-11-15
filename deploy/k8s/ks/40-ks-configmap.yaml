@@ -1,6 +1,6 @@
 # KS（knowledge-service）非敏感配置
 # 与 docker-compose 的 .env 对齐；密字段（token / password / access_key）在 41-ks-secret（集群内创建，不入库）。
-# 注意：本集群无 StorageClass，stateful 组件走 hostPath 钉 ambari03(126)，与 10-postgres.yaml 同范式。
+# 注意：本集群无 StorageClass，stateful 组件走 hostPath 钉 <internal-node-03>(<internal-host-126>)，与 10-postgres.yaml 同范式。
 apiVersion: v1
 kind: ConfigMap
 metadata:
