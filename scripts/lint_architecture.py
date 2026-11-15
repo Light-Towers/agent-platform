@@ -1278,6 +1278,26 @@ def _cache_manifest_violation(rel: str, text: str) -> list[str]:
     return violations
 
 
+def _is_gitignored(rel: str) -> bool:
+    """True 当该相对路径被 .gitignore 排除（故意不入库的脱敏资产）。
+
+    P14 的两个子项依赖生产 Valkey 清单（deploy/k8s/15-valkey.yaml），该清单在公开镜像分支
+    被 .gitignore 排除。若它"因被排除而缺失"就报红，会让公开镜像分支的 make lint 恒红——
+    而它绿着却没真校验恰恰最危险（门禁早晚被人关掉）。故：资产缺失且被 gitignore 排除 ⇒
+    视为预期的 skip 而非回归；资产缺失但**未被**排除（本应入库却丢了）⇒ 仍报红（真回归）。
+    """
+    try:
+        proc = subprocess.run(
+            ["git", "check-ignore", "-q", rel],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+        )
+        return proc.returncode == 0
+    except (OSError, ValueError):
+        return False
+
+
 def check_cache_single_track() -> list[str]:
     """扫全仓 Python + 生产清单，落实 ADR-0013 C 的单轨不变量。"""
     violations: list[str] = []
@@ -1304,7 +1324,13 @@ def check_cache_single_track() -> list[str]:
 
     valkey_manifest = ROOT / "deploy" / "k8s" / "15-valkey.yaml"
     if not valkey_manifest.is_file():
-        violations.append("deploy/k8s/15-valkey.yaml 缺失（生产清单必须包含专用 Valkey）")
+        if not _is_gitignored("deploy/k8s/15-valkey.yaml"):
+            violations.append("deploy/k8s/15-valkey.yaml 缺失（生产清单必须包含专用 Valkey）")
+        else:
+            print(
+                "P14 skip：deploy/k8s/15-valkey.yaml 被 .gitignore 排除（脱敏资产），"
+                "公开镜像分支不校验专用 Valkey 清单"
+            )
     else:
         text = valkey_manifest.read_text(encoding="utf-8-sig")
         if "valkey/valkey-bundle" not in text:
@@ -1371,7 +1397,8 @@ def _cache_bundle_pin_violations(extra_sites: list[str] | None = None) -> list[s
     for rel in scanned:
         path = ROOT / rel
         if not path.is_file():
-            violations.append(f"{rel}: P14 要求的 bundle 引用位缺失")
+            if rel in required and not _is_gitignored(rel):
+                violations.append(f"{rel}: P14 要求的 bundle 引用位缺失")
             continue
         found = _VALKEY_IMAGE_REF.findall(path.read_text(encoding="utf-8-sig"))
         if not found:
