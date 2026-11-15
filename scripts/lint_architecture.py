@@ -1197,7 +1197,6 @@ _VALKEY_PIN_SCAN_SUFFIXES = frozenset({"yml", "yaml", "toml", "ini", "env", "sh"
 _VALKEY_PIN_SITES = (
     ".github/workflows/agent-platform-ci.yml",
     "applications/agent_federation/docker-compose.yml",
-    "deploy/k8s/15-valkey.yaml",
 )
 _CACHE_ADAPTER_PREFIX = "packages/agent-runtime/agent_runtime/cache/"
 _CACHE_ENV_ALLOWED = f"{_CACHE_ADAPTER_PREFIX}config.py"
