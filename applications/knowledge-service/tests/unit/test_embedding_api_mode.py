@@ -13,6 +13,7 @@ test_embedding_api_mode.py —— 验证 embedding_utils 的 api 模式（M8）�
 """
 
 import math
+import os
 
 import pytest
 from agent_core.memory import embedder as core_embedder
@@ -32,7 +33,11 @@ def _enable_api_mode(monkeypatch):
 
 
 def test_default_mode_is_local():
-    # 默认（不改配置）必须是 local，保证向后兼容铁律
+    # 默认（不改配置）必须是 local，保证向后兼容铁律。
+    # 运行环境若通过 .env 等显式设置 EMBEDDING_MODE（如 dev 的 remote），
+    # 单例在 import 时已冻结为该值，"默认 local"前提不成立 → 跳过（CI 无 .env 仍校验）。
+    if os.getenv("EMBEDDING_MODE"):
+        pytest.skip("EMBEDDING_MODE 由运行环境显式配置，默认 local 前提不适用")
     assert embedding_config.embedding_mode == "local"
 
 
