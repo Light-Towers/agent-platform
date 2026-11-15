@@ -7,7 +7,6 @@ from fastapi import APIRouter, Request
 from shared_schemas import CacheStatsReport
 
 from agent_server.config import get_settings
-from agent_server.db_dialect import detect_dialect
 from agent_server.schemas import HealthResponse
 
 router = APIRouter()
