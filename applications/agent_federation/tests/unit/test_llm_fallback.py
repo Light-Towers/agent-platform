@@ -152,9 +152,18 @@ class TestCreateFallbackModel:
         assert isinstance(m, LangChainFallbackModel)
 
     def test_missing_primary_config_raises(self, monkeypatch):
-        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-        monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
-        monkeypatch.delenv("LLM_QWEN_MAX", raising=False)
+        # 必须清空 create_fallback_model 实际读取的全部「主模型」相关 env。
+        # P0-3：LLM_* 是权威名、OPENAI_* 仅兼容别名，_env_first 先取 LLM_*；
+        # 否则本地 dev .env 的 LLM_API_KEY/LLM_BASE_URL 会泄漏进来，使主模型
+        # 看似「已配置」而不抛错，断言永不触发（CI 无 .env 反而绿）。
+        for _v in (
+            "LLM_API_KEY",
+            "LLM_BASE_URL",
+            "LLM_QWEN_MAX",
+            "OPENAI_API_KEY",
+            "OPENAI_BASE_URL",
+        ):
+            monkeypatch.delenv(_v, raising=False)
 
         from agent.llm import create_fallback_model
 
