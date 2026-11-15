@@ -97,6 +97,15 @@ class TestHistoryEndpointOverHttp:
 
         monkeypatch.setattr(intent_classifier, "_embedder", _no_semantic)
 
+        # 本组测历史读侧落库：语义缓存命中会短路 planner、不写 checkpointer，
+        # 令 history count=0。显式禁用缓存并重置其单轨单例，确保 query 真正执行落库。
+        from agent_runtime.cache import reset_cache_config, reset_cache_for_tests
+
+        monkeypatch.setenv("CACHE_ENABLED", "false")
+        monkeypatch.setenv("CACHE_BACKEND", "disabled")
+        reset_cache_config()
+        reset_cache_for_tests()
+
         stack = ExitStack()
 
         # 本组测的是业务语义（会话归属 / 读侧 5xx / 租户断言），不是入站鉴权——后者由
@@ -115,6 +124,8 @@ class TestHistoryEndpointOverHttp:
         yield _make
         stack.close()
         get_settings.cache_clear()
+        reset_cache_config()
+        reset_cache_for_tests()
 
     def test_real_turn_shows_up_in_history(self, make_client):
         client = make_client(API_KEY="k-http", GUARD_ENABLED="true")
