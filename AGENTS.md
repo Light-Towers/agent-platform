@@ -2,7 +2,7 @@
 
 > 统一生产级 Agent 平台，本仓库为 **monorepo**（根 + `packages/` 3 个共享包 + `applications/` 6 个应用工程）。**分层契约、依赖图、各包子模块完整清单见 `ARCHITECTURE.md`（按需读取）**；人类阅读指南见 `README.md`。本文件面向 AI agent，仅列每轮必守的行为约束 + 定向信息。
 > **演进方向（Plan-F）**：双轨收敛为「单 Runtime + 多 Planner」（`agent-runtime/` 承载运行时中间件，Planner 策略可插拔，不统一 Agent 只统一 Runtime）。详见 `docs/plans/plan-f-single-runtime-multi-planner.md`。
-> **V3 企业执行平台**：Phase 2-4 + 3.4 代码已接线（主链路 `Admission → Scheduler submit → Planner → Execute → Forensic/CostGov`，`scheduler_enabled` 默认 False 渐进开启）；**端到端双实例物理故障转移验收未达，不得当作已上线能力声明**。**原「未接线半成品（P1-7 标注）」五项已全部接线（human_task / execution_recovery / state_migration / payload_externalization 见 `agent_server/main.py` 装配点，`skill_router`(exhibition) 见 `graph/nodes.py:run_skill` 执行前门禁）⇒ 该标注已于 2026-10-16 按 roadmap #5 判据「全仓未接线标注归零」撤除；接线 ≠ 默认启用，逐项依据见 `docs/plans/plan-unfinished-completion-schedule-2026-10-16.md` §10**。架构真相源：`plan-enterprise-platform-skeleton-2026-09-23.md` + `plan-v3-execution-platform-final-architecture-2026-09-22.md` + `arch-audit-2026-09-24.md`（均在 `docs/plans/`）。
+> **V3 企业执行平台**：Phase 2-4 + 3.4 代码已接线（主链路 `Admission → Scheduler submit → Planner → Execute → Forensic/CostGov`，`scheduler_enabled` 默认 False 渐进开启）；**端到端双实例物理故障转移验收未达，不得当作已上线能力声明**。**原「未接线半成品（P1-7 标注）」五项已全部接线（human_task / execution_recovery / state_migration / payload_externalization 见 `agent_server/main.py` 装配点，`skill_router`(exhibition) 见 `graph/nodes.py:run_skill` 执行前门禁）⇒ 该标注已于 2026-10-16 按 roadmap #5 判据「全仓未接线标注归零」撤除；接线 ≠ 默认启用，逐项依据见 `docs/plans/plan-unfinished-completion-schedule-2026-10-16.md` §10**。架构真相源：`docs/plans/plan-enterprise-platform-skeleton-2026-09-23.md` + `docs/plans/plan-v3-execution-platform-final-architecture-2026-09-22.md` + `docs/plans/arch-audit-2026-09-24.md`（均在 `docs/plans/`）。
 
 ## AI 开发范式（总纲）
 
@@ -31,7 +31,7 @@
 ### 测试与评测
 
 - 八种测试按"对象 / 风险 / 手段 / 时机"四维定位；**功能测"对不对（对需求）"，逻辑测"全不全（对路径）"**，两者不可互替。
-- 逻辑测试靠**变异杀死率**验证，覆盖率只是下限。
+- 逻辑测试靠**变异杀死率**验证，覆盖率只是下限。两套仪表都在 `Makefile`（两件别混）：`make mutation-cache` = 门禁，手挑一批性质（条数以脚本 `MUTANTS` 为准，别在散文里抄数）+ 声明式存活集合，判据是"集合不许漂移"；`make mutation` = 战役，AST 算子自动展开，**分母来自代码**，存活体是**待定性清单**（等价 / 引擎独占 / 真缺口）不是分数。战役开工前必跑引擎自带的探针自证"能杀"（4/4 全杀才继续）——否则"引擎整条是空的却报出 40% 杀死率"会被读成套件弱。
 - AI 输出评测四级：**E0 单元断言 → E1 黄金集（守回归）→ E2 基准（做选型）→ E3 线上**；**上线门禁用黄金集，不用公开基准**。
 - 门禁：G1(PR) LSP/typecheck + lint/SAST/SCA/secret + 单测/契约 → G2(合并) 集成/功能/变异/租户隔离/黄金集 → G3(发布) E2/红队/canary。详细版见 noctilucent-lamp `ai-dev-paradigm/agent-platform-dev-handbook.md` §3.4。
 
@@ -49,7 +49,7 @@
 
 | 目录 | 定位 | 入口 |
 |------|------|------|
-| `applications/agent_server/` | 单进程 Supervisor 平台（统一 Agent 平台；V3 Phase 2-4 已接入 Scheduler/ControlPlane/CostGov/Forensic，`api/` 含 `callback.py` + `control.py`；2026-08-19 由根 `app/` 改名迁入） | `agent_server.main:app`（uvicorn） |
+| `applications/agent_server/` | 单进程 Supervisor 平台（统一 Agent 平台；V3 Phase 2-4 已接入 Scheduler/ControlPlane/CostGov/Forensic，`api/` 含 `applications/agent_server/api/callback.py` + `applications/agent_server/api/control.py`；2026-08-19 由根 `app/` 改名迁入） | `agent_server.main:app`（uvicorn） |
 | `applications/agent_federation/` | 联邦网关 + 3 子服务编排中枢（与 agent_server 并行，详见其 README；原名 `deepagents/`，为消除与 PyPI 依赖包 `deepagents` 同名冲突而改名） | `python -m api.server` |
 | `packages/agent-core/` | 零依赖运行时内核：tracing / guardrails / sql 守卫 / llm / memory / events / config / intent / resilience（子模块职责清单见 `ARCHITECTURE.md` §2.1） | — |
 | `packages/agent-runtime/` | Plan-F 运行时中间件 + V3 执行平台：admission / scheduler / coordinator / checkpoint / cache / tracing / planner/ / skills/ / memory 体系 / sandbox / forensic / cost_governance / identity（服务端断言租户，ADR-0007；`DEPLOY_ENFORCE_IDENTITY` 默认关）等（各包职责与分层定位见 `ARCHITECTURE.md` §2.1，身份层见 §2.3） | — |
@@ -60,8 +60,9 @@
 | `applications/exhibition-agent/` | 会展行业 AI Agent（skill_loader + warehouse REST 集成） | `uvicorn exhibition_agent.skill_loader.app:app` |
 | `tests/` | agent_server 单元测试（根套件） | `pytest -q` |
 | `applications/agent_server/tests/` | agent_server 应用层集成测试（GraphPlanner × runtime，2026-09-21 F-S1-01 迁入） | `pytest applications/agent_server/tests -q` |
-| `eval/` | agent_server 评测门禁（15 条 golden；`run_eval.py` 启发式 + `run_planner_eval.py` 双 Planner 基线） | `python eval/run_eval.py` |
+| `eval/` | agent_server 评测门禁（15 条 golden；`run_eval.py` 启发式 + `eval/run_planner_eval.py` 双 Planner 基线） | `python eval/run_eval.py` |
 | `docs/` | 设计文档 | — |
+| `web/` | **前端（真实 Vue 工程，RuoYi 后台框架）**：`src/` 下 Vue 组件 + `api/` 封装（接 `/auth/me` `/query` SSE `/kb` `/datasources` `/health`）+ vite 构建链 + `package.json` + Node 视觉门禁；样式三件（tokens/base/events）。事件图例字典源 `src/api/events.ts`、健康灯阵字典源 `src/api/health.ts`，门禁断言 6 现读这两处与后端源双向比对。演示用静态页（poc.html / poc-health.html）已删除，双载体收敛为单一真实工程。 | `node web/scripts/check-tokens.mjs`（视觉门禁，rc=0 为过） |
 
 ## 运行方式
 
@@ -96,23 +97,33 @@ DATABASE_URL= uvicorn agent_server.main:app --port 8000  # 零依赖冒烟
 
 ## 内网测试环境 126（<internal-host>）
 
-> 环境事实基线 + 可复核取证命令见 docs/operations/env-126-inventory.md。上 126 前先记住六条容易踩死的差异：
+> 环境事实基线 + 可复核取证命令见 `docs/operations/env-126-inventory.md`；**问数（Text-to-SQL）上线专用的现网落差清单 + 逐条判据**（含“哪六个键缺、哪两个镜像没构建、每步 apply 后期望读到什么”）见 `docs/operations/nl2sql-release-checklist.md`——两份都是“读数必绑 rev、引用前先复跑”。上 126 前先记住六条容易踩死的差异：
 > 1. **代码进来的通道是 `git bundle` + `scp`，不是 git push**（126 从未被推送过、无 hook、恒为 detached HEAD）。改完代码若未走 `deploy/k8s/scripts/build.sh`（rev 门禁）+ `distribute.sh`，**跑着的仍是旧 rev**——宿主 checkout 的 rev ≠ 镜像内 `/srv/agent-platform/GIT_REV`。
 > 2. **宿主 Python 3.10 + 无 uv** ⇒ 126 上 `uv run ...` 与项目测试**在宿主均不可执行**；宿主只能用 /usr/bin/python3 -B 跑单文件/只读脚本。两份项目 .venv（6.4G）的 bin/python 是指向 /usr/local/bin/python3 的断链——**因为 venv 建在容器内**：依赖树 454 包完整在位，用 ap-test-base / python:3.11-slim 容器 bind 该目录即可直接跑，**不要重装依赖**（补跑路径见 `docs/operations/testing-playbook.md` 第 4 层）。
 > 3. **双运行时两套镜像库**（docker moby 与 k8s 专用 containerd-k8s）互不可见、节点间不共享，导入须显式 `--address`。
 > 4. **存在第二条代码通道**：knowledge-service 侧有 /root/redeploy.sh 一类 `docker cp` + `sed -i` 直接覆盖容器内文件、不经 git ⇒ 线上代码会与仓库漂移。但**“漂移多少项”不是债**：md5 比对只给差异数（KS 侧 236 个 .py 中 74 个与仓库不同），mtime 只能分离“镜像自带 vs 事后热改”（8 个），**两者都答不了“线上这份内容丢了吗”**。答得了的是三步：`docker diff` 取权威热改清单（可写层 vs 镜像层，不靠推断、不漏非 .py 与删除项）→ `git hash-object`（**不带 `-w`**）得容器版 blob OID → `git cat-file -t` 判是否曾入库（命中 = 只是镜像旧，`git log --find-object` 直接告诉你哪个 commit）。2026-10-10 实测结论：8 个热改文件 = 5 个已入库 + 3 个被 HEAD 取代的 eval 草稿，**无一需救回**；真正的债是**线上 `import_router.py` 缺 3 项已入库修复**（`resolve_server_tenant` 租户注入 / `asyncio.to_thread` / MinIO fail-fast）⇒ **KS 镜像重建+分发是当前首要待执行项**，而非逐文件回写。
 > 5. **`LLM_*` 现在走 ConfigMap，别再按"死键"处理**：2026-10-12 用整 Pod 模板原子替换把 `LLM_BASE_URL/LLM_MODEL/LLM_FALLBACK_MODEL` 恢复成清单里的 `configMapKeyRef`（2026-10-13 实测：CM 值 == Pod 内生效值）。历史背景仍要记住——之前它们是 `kubectl set env` 留下的字面值（改写者就是本项目自己，`deploy/k8s/VERIFICATION.md` §C），所以**遇到"线上与 manifest 不一致"先查仓库自己的部署记录，再怀疑外部改动**；判据是 `deployment last-applied-configuration` 注解 vs LIVE，以及 `kubectl create --dry-run=client -o json`（**不要用 `apply --dry-run`** 取期望态，它会与线上合并）。embedding 口径已变：**deployment 显式注入 `EMBEDDING_MODE=local`**，`/health` 报 `embedding_backend=LocalEmbedder` + `embedding_real=true`（镜像已含 CPU torch）；`local` 曾不可用只是旧镜像裁剪，不是平台缺陷。KS 侧模型走 `{MODELS_DIR}` 的 bind mount，与平台侧不同一条链。
 > 6. **milvus 会随宿主磁盘 IO 抖动自行退出**：etcd `slow fdatasync` → lease 保活失败 → milvus 主动 exit（共 15 次）。看到 `ExitCode=0` + `OOMKilled=false` **不要当成人为 `docker stop`**，先取停机前 60s 的 `docker logs --since/--until` 窗口并全栈比 `RestartCount`（只有单容器有 rc ⇒ 非栈级操作）。pod 那次 137 同理：是外部依赖断连（postgres DNS + OTLP no route）导致优雅关闭超时被 SIGKILL，非应用崩溃。根因已查到顶：单盘 `vda` **ROTA=1** + 常态化 IO stall（`slow fdatasync` 自 09-20 起 953 条且**每天都有**）+ Ubuntu 默认 `apt-daily*`/`e2scrub_all` 定时器放大，而 etcd **无任何 blkio 隔离**。判“介质慢 vs 一次性事件”用 `cat /proc/pressure/io`（avg10 即“此刻” stall%）+ 按天计数，比事后日志强。
-> 7. **三台都可用，别把"构建在 126"当约束**（2026-10-13 实测纠正）：`<internal-host>=241 / <internal-host>=125 / <internal-host>=126`。**agent-platform 的 Pod 实际落在 <internal-host>(241)**，126 只是被 `nodeSelector` 钉住了 postgres（它还带 control-plane `toleration`，所以能在 master 上落——10-14 实测两字段）。`docker build` 的 pip 层在同一块 `ROTA=1` 盘上铺上万个文件时，实测 `/proc/pressure/io avg10=67%`，连带把同机 KS 的 etcd 打进 `slow fdatasync`（5 分钟 41 条）、milvus 重启 30→31 ⇒ **构建放 241**（docker+git 齐、空闲 39G/13G，同机只有我们自己的东西；125 满载别人的 maxkb/dataease/apisix，不要去那儿加 IO）。**但"三台都可用"≠"三台都能构建"（10-14 复测）**：`/opt/agent-platform` **只有 126 与 241 有**，125 是 `NO_CHECKOUT`；且只有 241 那份 HEAD == 线上 rev。另外 `psi avg10` 是 10 秒级瞬时量，三读两分钟内 125 从 2.06%→0.00%、241 从 0.33%→1.27%→0.88% 就换序，**不能拿它当"谁最闲"的排期依据**（依据是上面那轮实测 + 构建入口在哪台）。换构建机后两条硬规则：`build.sh` 只认 `SRC_DIR` 那份 checkout 的 rev，与机器无关；**`distribute.sh` 的默认 `WORKERS=125 241` 是从 126 构建的历史形态，从 241 跑必须显式列 `125 126`**——部署无 nodeSelector，漏一台则 Pod 调度过去即 `ErrImagePull`（可变 tag + `IfNotPresent` 无本地层可退）。三机当前部署态全貌见 docs/operations/env-126-inventory.md §9。
+> 7. **三台都可用，别把"构建在 126"当约束**（2026-10-13 实测纠正）：`<internal-host>=241 / <internal-host>=125 / <internal-host>=126`。**agent-platform 的 Pod 实际落在 <internal-host>(241)**，126 只是被 `nodeSelector` 钉住了 postgres（它还带 control-plane `toleration`，所以能在 master 上落——10-14 实测两字段）。`docker build` 的 pip 层在同一块 `ROTA=1` 盘上铺上万个文件时，实测 `/proc/pressure/io avg10=67%`，连带把同机 KS 的 etcd 打进 `slow fdatasync`（5 分钟 41 条）、milvus 重启 30→31 ⇒ **构建放 241**（docker+git 齐；125 满载别人的 maxkb/dataease/apisix，不要去那儿加 IO）。**但“241 同机只有我们自己的东西”是错的（2026-10-28 实取订正）**：241 的 moby 上常驻整套观测后端 `lf-langfuse / lf-langfuse-worker / lf-clickhouse / lf-minio / lf-langfuse-db / lf-valkey` + `exhibition-dashboard`，**全部与那块 `ROTA=1` 单盘同盘** ⇒ 重 IO 构建直接打在观测栈上，**`build_with_io_guard.sh` 的守卫不得关**（关掉等于把本批验收里“Langfuse 按 traceId 查得到本次原文”那条判据的载体自己打死），且每轮构建后逐项比对该批容器的 `RestartCount / Health / StartedAt` 基线（10-28 基线：全 `restarts=0`、`healthy`、`started=2026-10-13T07:14`）。守卫的熔断口径（“连续 3 次越 60%”≈ 30 秒）对 pip 铺大包层这种**天然顶到 70%+ 的正常动作**会误杀（10-28 实测：`avg10=73%` 三次即 `TRIP`，`build rc=143`）：用脚本自带的 `IO_LIMIT/IO_STRIKES` 旋钮放宽判定口径（实测 80/6 ≈ 持续约 60 秒越 80% 才停）而**不是关守卫**；另注两个实测坑：守卫的 `timeout 1800` 在当前 PyPI 国际链路（单流 45–60 kB/s、一层 170+ 项 / 290MB+）下不够，表观是 `FAIL: 构建未通过` 而不是镜像坏了；`distribute.sh` 的 tarball 名由 `${IMAGE%:*}` 派生，对多段镜像名（`valkey/valkey-bundle`）含 `/` ⇒ 写进不存在的目录后 `set -e` 当场断。两条细则与处置见 `docs/operations/nl2sql-release-checklist.md` §3 步 2/3。根盘余量会随构建漂移（10-28 实取 21G），开工前 `df -h /` 现取，别引这里的数。另记：“三台都可用”≠“三台都能构建”（10-14 复测）：`/opt/agent-platform` **只有 126 与 241 有**，125 是 `NO_CHECKOUT`；且只有 241 那份 HEAD == 线上 rev。另外 `psi avg10` 是 10 秒级瞬时量，三读两分钟内 125 从 2.06%→0.00%、241 从 0.33%→1.27%→0.88% 就换序，**不能拿它当"谁最闲"的排期依据**（依据是上面那轮实测 + 构建入口在哪台）。换构建机后两条硬规则：`build.sh` 只认 `SRC_DIR` 那份 checkout 的 rev，与机器无关；**`distribute.sh` 的默认 `WORKERS=125 241` 是从 126 构建的历史形态，从 241 跑必须显式列 `125 126`**——部署无 nodeSelector，漏一台则 Pod 调度过去即 `ErrImagePull`（可变 tag + `IfNotPresent` 无本地层可退）。三机当前部署态全貌见 `docs/operations/env-126-inventory.md` §9。
 
 ## 观测面与现网取证的硬规矩（2026-10-13 起；全部坑档见 `docs/operations/observability-pitfalls.md`）
 
-> 本轮接 Langfuse 时踩出来的五条，最常重复犯：
+> 本节头部五条是本轮接 Langfuse 时踩出来的，后续三条（6–8）是取证量具本身形状带来的同类盲点，最常重复犯；再后四条（9–12）把同一套纪律从观测面泛化到提交门与量具链（判决新鲜度基准 / 基准同源 / 批准依据与量具必入库 / 入库不等于被读）：
 > 1. **状态灯亮 ≠ 数据到**：`/health` 报 `otel_status=ACTIVE` 的同时 Jaeger 面可以整体静默瞎掉。观测类验收判据必须是"**后端里查得到本次原文**"，不是状态字段。
 > 2. **共用进程级全局单例时，装配顺序就是正确性**：Langfuse 客户端构造会抢全局 TracerProvider ⇒ `init_tracing` 必须**早于**模型构造（`applications/agent_server/main.py` 里有"别挪回去"的顺序注释）。OTel provider / 事件循环 / 连接池 同族。
 > 3. **现网读数必须绑定当时的 Pod `GIT_REV`**：换 rev 滚动后要复跑。"Jaeger ✅"写在手册里而现网为假，就是漏了这条（部署快照见 docs/operations/env-126-inventory.md §4.11）。
 > 4. **读镜像内容要从跑着的 Pod 读**（`kubectl exec`），不要 `docker run`——moby 与 containerd-k8s 两套库互不可见，`docker run` 可能读到中止构建的残留；且**构建机自身的 containerd-k8s 要补一次本地导入**，否则可变 tag + `IfNotPresent` 下是"静默跑旧代码"而不是报错。
 > 5. **读"另一个系统"的数据前，先读它的形状**，别照文档猜：SSE 事件帧是**平铺**的（`d["payload"]` 恒空）；Langfuse v4 `events_only` 撤了 `/api/public/traces`，读径是 `v2/observations?fields=io,usage`（猜错的 fields 名**静默返回不含该键的行**）；载荷是**多层 JSON 编码**的 `\uXXXX`（中文 needle 恒 miss 而 ASCII 命中）；异步后端**先命中≠全到**；命中语义缓存时模型根本没调用（取证问题要**语义新颖**）。
+> 6. **凡基准绑 HEAD 的量具，提交前回答不了「遮好了吗」**：`scripts/lint_public_mirror.py` 的 registry 模式枚举口径是 `git ls-tree HEAD` + blob，不是工作区文件系统 ⇒ 工作区遮完再跑仍报旧内容（与《验证策略》里"存在性判定基准 = 版本控制清单"同根）。合法答案只有两个：**(a) 把基准换成索引树**（`git write-tree`，问「这个提交将造成的那棵树」干净吗）、**(b) 提交后复取**（问「已经发生的那件事」）—— 拿 (a) 冒充 (b) 就是假绿。同一个 CRLF 警告也是这一族：**"git 看到的"与"我看到的"不是同一个东西**。
+> 7. **量具 rc≠0 而它自己 stdout 里一条判决都没有 = 量具瞎，不是账面被抓**：两者必须在读数上分开（否则"本格偶尔盲"会被读成"本轮没问题"）。同族两个坑：PowerShell 下 native 命令的 stderr（如 git 的 CRLF advice）在 `$ErrorActionPreference='Stop'` + 重定向会**终止整把工具**（rc 才是判据，stderr 文本不是）；而**判决自己的日志不是证据源**（反证 stdout 落盘后被下一轮当 corpus grep ⇒ 假读数自我坐实），要按内容排除而不是按临时件名排除。
+> 8. **不投票的读数不是门禁**：一条只被 `Write-Output` 打印、既不进取件 rc 也不进 `GATE_RC` 的判据，与"没有这一格"同形——它只会让下一轮的人把它当成已过（本仓实踩：码点错字 forbidden 面被称作「齿」而从未参与判决）。⇒ **新加（或新换）判据必须同批带两件事**：① 当场自证能咬（合成违规 / 真面种植，期望非零），② 真面必须参与判决（否则报 `<<< *-UNPARSED` 一类 fail-closed，而不是默默报绿）；而基线/棘轮型读数还要说清"为什么不绑 0"，不然下一轮没人记得这个不对称。
+
+> 9. **判决新鲜度基准要写进读数本身**：任何「已过 / 已绿 / 已验」的陈述，必须同时带上判决当时的 HEAD sha 与件名（`HEAD` / `ahead` 是门件跑那一刻的数，换 rev、换面、换工具都要复取）。把上一轮读数搬进这一轮账面，与「数绑件名不绑内容」同型 —— 看起来有出处，实际那一版的件根本没说过这句话。
+> 10. **同一件事只准有一把尺（基准同源）**：面基准只准从 `scripts/evidence/face_basis.py` 经 `scripts/evidence/k71-basis.ps1` 取；量具体内不得再拼 `git diff --name-only` / `git status --porcelain` / `git ls-files --others`。四套面基准各读一张面时，**守恒等式仍会成立**（两边同时错），齿一格都不报；这是「各造一份实现」里最难发现的一种，因为它的自证也是绿的。
+> 11. **批准依据与量具必入库**：方案件、判据本体、被调用的量具都要在版本控制清单里可解析，登记进 `scripts/evidence/README.md` 与 `ARCHITECTURE.md`，受 `scripts/check_doc_sync.py` 的文件引用校验保护。只住在本机 gitignored 目录的量具，新克隆上根本不存在 ⇒ 「量具没跑」与「量具瞎」在读数上同形。一次性取证件可留本机，但**不得**作为新增长期判据的唯一依据；新增读数一律绑入库件路径 + commit sha。
+> 12. **入库 ≠ 被读**：上一条只保证仓库里有一把；它不保证门件跑的是那一把。同一把量具可以有**两份同名实物**（入库件 + 本机工作副本），改的是前者、执行与派生读的是后者 ⇒ 齿的判定完全真实，只是判的不是交付的那把。这一型在 2026-11-06 由门件自己抓到（typo 扫描面入库 17 件、门件派生到 16 件）。三条约束：**调用点只准指入库路径**（多消费点共用一个变量，不在各点重写路径）；量具副本不删（历史读数还要能复跑）但它**不再是判据来源**；换基准前先证两份实物差异 = 本刀改的那几行（逐字节 diff + sha），否则“换输入”本身会变成一次静默的行为变更。候选齿（本批**不装**，只登记）：门件里每个 `-File` 路径必须 `git ls-files` 解析得到，否则 `<<< TOOL-BASIS-NOT-TRACKED`。复审触发条件：再出现一次“改了入库件而门件读数不变”，或新建一代门件。
+> 13. **申报 ≠ 入库**：`git add -N`（intent-to-add）只往索引登记一条**空 blob**（OID 以 e69de29b 开头）——路径从此出现在版本控制清单里，内容却只住在工作区；按清单判存在性的门全绿，按内容取物的判据拿到零字节（2026-11-07 实踩：索引 46 条空 blob 里 10 条属「申报未入库」，第四十七批为此整批重做）。判据：入库与否只认 `git ls-files` + `git cat-file -e` 且 blob 非空，不认申报清单；「批准依据已入库」的陈述必须当场用这两条命令复取。
+> 14. **范围声明（「本批停止一切新增」一类）必须带可机械判定的边界 + 复审触发条件**：只写「停止新增」而不枚举边界，会把「把已发生的读数写进账面」也挡在门外（或反过来放行真正的量具新增），迫使逐题请示。判据：**新增 = 产生新文件 / 新判据 / 新量具 / 新工作面 / 新刀；纯账面文字（把已发生的实物读数与口径登记入册）不在此列**。范围声明只约束其所属批次，不是永久禁令；下一批沿用与否由拍板时明示。复审触发条件：再出现一次「某动作是否属新增」需逐题请示或误判的实例。
 
 ## 技术栈
 
@@ -134,7 +145,7 @@ DATABASE_URL= uvicorn agent_server.main:app --port 8000  # 零依赖冒烟
 
 1. **随清**：每个 PR 合入、每次分支比对结束后，当场删该死枝。死枝判据（任一条即中）：① 独有 commit = 0（内容全在集成分支）；② 内容经比对证实被全覆盖且无独有信息。删除用 `git branch -d`（自带"已合入"检查，删不动会拒绝）；仅当已有 ADR/文档登记的确证退役结论时才用 `-D`。
 2. **登记必须带复审触发条件**：任何"禁删 / 建议备份 / 保留待判"的登记，必须同时写清"出现什么证据就主动复审"；没有复审条件的登记不许写。反例：ADR-0012 §42 初版登记 `b4428bf`"禁删"未带条件 ⇒ 保守登记供成死枝两个月，靠手工逐用例比对才解锁（该用例的 7/7 覆盖证据已写回 ADR）。
-3. **月度体检**：每月跑 `git ls-remote --heads origin | wc -l`（远端 >2 报警）与 `git for-each-ref --format='%(refname:short)' refs/heads`（本地逐条查独有 commit 数，死枝 >1 当周处理）。死枝能躺两个月的根因不是策略失败，是没人定期看。
+3. **月度体检**：每月跑 `git remote -v` 先取实际远端名（克隆间可能不同：本仓为 `company` 与禁推的公开镜像 `github-legacy`，**无 `origin`**——照抄 `origin` 只会报 `No such remote`，等于体检没做；公开镜像 `mirror/*` 按第 4/5 条单独算，不混入计数），再跑 `git ls-remote --heads <远端名> | wc -l`（远端 >2 报警）与 `git for-each-ref --format='%(refname:short)' refs/heads`（本地逐条查独有 commit 数，死枝 >1 当周处理）。死枝能躺两个月的根因不是策略失败，是没人定期看。
 4. **公开镜像只走 `publish` 模式，且必须先过门禁**：`github-legacy` 是公开脱敏镜像（见 `README.md` 顶部 `public-mirror-notice`），内网分支携带真实网段/主机名属正常工作产物，公开镜像一条都不许带。两种模式是前提决定的，不是两种口味：`uv run python scripts/lint_public_mirror.py`（registry 模式，进 `make lint`，登记制 + 失效分流，内网分支因此**不会永远红**——否则它会被人关掉）；`uv run python scripts/lint_public_mirror.py --mode publish --base <公开基线 sha> --ref <待推 ref>`（零容忍，只看"这次新公开了什么"，登记台账在此不生效）。推镜像前必须 publish 模式 rc=0；`--mask-plan` 给出占位符替换建议，词形沿用 `<internal-ip>` / `<internal-host>` / `<internal-gitlab>`。镜像与内网仓因此**内容不完全一致**，被遮文件文首要留一条脱敏注记，免得后人拿占位符去现网复现。
 5. **镜像分支必须是"树已遮好"的单提交，不许"先推未遮内容、再补一个脱敏提交"**：公开镜像的历史一旦落上去就改不回来，中间提交本身就是泄漏，跟 HEAD 干不干净无关。正确形状 = 在公开基线上一次成型（`git checkout -B mirror/<名> <公开基线>` → `git checkout <内网 tip> -- .` → 就地遮被检出的文件 → 一次 `git commit`），推之前用 publish 模式对**该分支的树**实测。镜像分支不住在"恒 2 分支"那条计数里（它是公开侧载体，与集成分支不同维度），但不累积 `mirror/*` 第二条：已推过之后新一批优先在既有分支上**追加**树已遮好的提交；若必须原地重建，那是改写公开历史（force-push），属用户拍板项，不许自作主张。
 
@@ -149,7 +160,7 @@ DATABASE_URL= uvicorn agent_server.main:app --port 8000  # 零依赖冒烟
   2. **全局装配**：由构造保证不可漏接（统一 app 工厂 / 统一门面 / 中间件），而非靠每个调用点"记得调一次"——**接线散落 = 反模式**，即便逻辑已共享也不算全局；
   3. **强制门禁**：用不变量 lint（`scripts/lint_architecture.py`：全仓扫描 + 白名单，计入 `make ci`）拦截未来漂移，让违规在 CI 失败而非靠自觉。
 - **先实测再动手**：判断"是否已有全局兜底"靠读代码/跑验证，不凭模式猜（例：FastAPI 未捕获异常已被 Starlette 全局兜底为裸 500，堆栈不外泄，真正缺的只是统一信封）。
-- **范例（P2）**：入站错误脱敏 handler 从"仅 1/6 应用手写"收敛为 `build_api_app`（工厂）+ `agent_core.guardrails.errors`（单一实现）+ `lint_architecture.py` "裸 `FastAPI(` 即失败"（门禁）。方案见 `docs/plans/plan-p2-unified-exception-handlers-2026-09-24.md`。
+- **范例（P2）**：入站错误脱敏 handler 从"仅 1/6 应用手写"收敛为 `build_api_app`（工厂）+ `agent_core.guardrails.errors`（单一实现）+ `scripts/lint_architecture.py` "裸 `FastAPI(` 即失败"（门禁）。方案见 `docs/plans/plan-p2-unified-exception-handlers-2026-09-24.md`。
 - **边界**：全局优先不等于强行统一对外契约——若改写会影响下游消费者（前端/网关解析的错误体形状），须先审计消费者、按"先方案后编码"另行决策，不得为求统一而静默破坏兼容。
 
 ## 框架选型规则

@@ -32,7 +32,11 @@ from agent_runtime.human_task import (
     HumanTaskResolver,
     HumanTaskStore,
 )
-from agent_runtime.workspace_registry import server_tenant_id
+from agent_runtime.workspace_registry import (
+    bind_role_context,
+    reset_role_context,
+    server_tenant_id,
+)
 from agent_server.api.human_task import router as human_task_router
 from agent_server.api.query_router import _suspend_status
 from agent_server.config import get_settings
@@ -47,6 +51,28 @@ def _expected_approver() -> str:
     return server_tenant_id(get_settings().default_tenant_id)
 
 
+class _AdminRoleMiddleware:
+    """1b 随动（方案 §7）：最小 app 无 IdentityMiddleware，补服务端断言 admin。
+
+    端点守卫取 ``asserted_role()``；不绑定 ⇒ viewer 兜底 ⇒ 写面 403。本文件测的是
+    审批链的状态转换与审计主体，不是权限矩阵 ⇒ 补的是生产装配的等价**前置**，
+    不删用例、不收窄断言、不放宽结果。纯 ASGI 中间件保证 ContextVar 与端点同 task。
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        token = bind_role_context("admin")
+        try:
+            await self.app(scope, receive, send)
+        finally:
+            reset_role_context(token)
+
+
 def _make_app(
     *,
     with_store: bool = True,
@@ -59,6 +85,7 @@ def _make_app(
     """
     app = FastAPI()
     app.include_router(human_task_router)
+    app.add_middleware(_AdminRoleMiddleware)
 
     awaitable_store = InMemoryAwaitableTaskStore()
     status_store = status_store or InMemoryExecutionStatusStore()

@@ -1,9 +1,12 @@
-"""L3 结果层脱敏（§5.9）。"""
+"""L3 结果层脱敏（§5.9）。
+
+1c/D5：脱敏判定从「角色名 + admin 名单」改为「服务端断言 role → feature 集」；
+`mask_value` / `mask_sensitive_columns` 两组与角色无关，逐字不动（§7 随动清单）。
+"""
 
 from __future__ import annotations
 
 from nl2sql_service.services.result_masking import (
-    is_masked_role,
     mask_sensitive_columns,
     mask_value,
 )
@@ -47,56 +50,55 @@ class TestMaskSensitiveColumns:
         assert out[0]["Phone"] == "1*********8"
 
 
-class TestIsMaskedRole:
-    def test_admin_not_masked(self):
-        assert is_masked_role("admin", ["admin"]) is False
-        assert is_masked_role("ADMIN", ["admin"]) is False  # 大小写不敏感
-
-    def test_non_admin_masked(self):
-        assert is_masked_role("analyst", ["admin"]) is True
-        assert is_masked_role("", ["admin"]) is True  # 空角色按最小权限脱敏
-
-
 class TestExecuteSqlMasking:
-    async def test_execute_masks_sensitive_for_analyst(self):
+    @staticmethod
+    def _state(role):
         from unittest.mock import AsyncMock, MagicMock
 
-        from nl2sql_service.agent.nodes.execute_sql import execute_sql
-
         dw = MagicMock()
-        dw.execute_readonly = AsyncMock(return_value=[{"phone": "13812345678", "name": "张三"}])
+        dw.execute_readonly = AsyncMock(
+            return_value=[{"phone": "13812345678", "name": "张三"}]
+        )
         ctx = MagicMock()
         ctx.dw_repository = dw
-        out = await execute_sql(
-            {
-                "sql": "SELECT phone, name FROM users",
-                "context": ctx,
-                "sensitive_columns": ["users.phone"],
-                "user_role": "analyst",
-                "admin_roles": ["admin"],
-                "result_masking_enabled": True,
-                "mask_keep_chars": 1,
-            }
-        )
+        return {
+            "sql": "SELECT phone, name FROM users",
+            "context": ctx,
+            "sensitive_columns": ["users.phone"],
+            "role": role,
+            "result_masking_enabled": True,
+            "mask_keep_chars": 1,
+        }
+
+    async def test_execute_masks_sensitive_for_viewer(self):
+        """viewer 无 data.unmasked ⇒ 掩码（与旧 analyst 行为一致）。"""
+        from nl2sql_service.agent.nodes.execute_sql import execute_sql
+
+        out = await execute_sql(self._state("viewer"))
         assert out["result"][0]["phone"] == "1*********8"
         assert out["result"][0]["name"] == "张三"
 
     async def test_execute_no_mask_for_admin(self):
-        from unittest.mock import AsyncMock, MagicMock
-
+        """admin 有 data.unmasked ⇒ 看全量——这就是 1c 要修的核心行为。"""
         from nl2sql_service.agent.nodes.execute_sql import execute_sql
 
-        dw = MagicMock()
-        dw.execute_readonly = AsyncMock(return_value=[{"phone": "13812345678"}])
-        ctx = MagicMock()
-        ctx.dw_repository = dw
-        out = await execute_sql(
-            {
-                "sql": "SELECT phone FROM users",
-                "context": ctx,
-                "sensitive_columns": ["users.phone"],
-                "user_role": "admin",
-                "admin_roles": ["admin"],
-            }
-        )
-        assert out["result"][0]["phone"] == "13812345678"  # admin 看全量
+        out = await execute_sql(self._state("admin"))
+        assert out["result"][0]["phone"] == "13812345678"
+
+    async def test_execute_masks_when_role_missing(self):
+        """D11 fail-closed：旧调用方 / 无 r 承载 ⇒ role=None ⇒ 无条件脱敏。"""
+        from nl2sql_service.agent.nodes.execute_sql import execute_sql
+
+        out = await execute_sql(self._state(None))
+        assert out["result"][0]["phone"] == "1*********8"
+
+    async def test_missing_role_records_d9_fallback(self, monkeypatch):
+        """真面参与判决：缺 role 时兜底计数必须 +1，不能静默拿空集。"""
+        import agent_runtime.authorization as az
+        from nl2sql_service.agent.nodes.execute_sql import execute_sql
+
+        monkeypatch.setattr(az, "_fallback_count", 0)
+        monkeypatch.setattr(az, "_fallback_warned", set())
+        before = az.role_fallback_count()
+        await execute_sql(self._state(None))
+        assert az.role_fallback_count() == before + 1

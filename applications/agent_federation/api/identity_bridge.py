@@ -13,8 +13,9 @@ from agent_runtime.identity_middleware import IdentityMiddleware
 from api.context import reset_tenant_context, set_tenant_context
 
 
-def _apply(tenant: str, user: str | None):
-    # 联邦当前仅断言 tenant 进 api.context（user 断言随 A5 运行时身份接入）。
+def _apply(tenant: str, user: str | None, role: str | None = None):
+    # 联邦当前仅断言 tenant 进 api.context（user/role 断言随 A5 / 1c 运行时身份接入；
+    # 1a 起 IdentityMiddleware 以三元组调用 apply，签名对齐中间件契约，role 先接住不承载）。
     return set_tenant_context(tenant)
 
 

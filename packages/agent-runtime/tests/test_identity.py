@@ -21,7 +21,13 @@ from agent_runtime.identity import (
     verify_internal_header,
     verify_token,
 )
-from agent_runtime.workspace_registry import reset_tenant_context, reset_user_context, server_tenant_id
+from agent_runtime.workspace_registry import (
+    asserted_role,
+    reset_role_context,
+    reset_tenant_context,
+    reset_user_context,
+    server_tenant_id,
+)
 
 ISS = "test-issuer"
 AUD = "test-audience"
@@ -52,6 +58,35 @@ def test_mint_and_verify_roundtrip():
     claims = verify_token(tok, public_keys=KEYS, issuer=ISS, audience=AUD, max_ttl=3600, leeway=0)
     assert claims.tenant_id == "tenantA"
     assert claims.user_id == "userB"
+
+
+def test_mint_verify_role_roundtrip():
+    """1a：role claim 往返（D2——码随令牌走，服务端断言）。"""
+    tok = mint_token(
+        "tenantA", user_id="userB", role="editor", private_key_pem=PRIV, kid="k1", issuer=ISS, audience=AUD, ttl=900
+    )
+    claims = verify_token(tok, public_keys=KEYS, issuer=ISS, audience=AUD, max_ttl=3600, leeway=0)
+    assert claims.role == "editor"
+
+
+def test_verify_missing_or_blank_role_is_none_not_error():
+    """缺/空 role → None（不是身份错误）：令牌有效性与角色词汇表是两件事（1a 拍定）。
+
+    值域收敛（含 D9 兜底计数）单一在 ``authorization.effective_role``，verify_token
+    对未知码**不**拒——拼错码的令牌仍能通过身份门，能力面在消费侧取 viewer。
+    """
+    tok = mint_token("tenantA", user_id="userB", private_key_pem=PRIV, kid="k1", issuer=ISS, audience=AUD, ttl=900)
+    claims = verify_token(tok, public_keys=KEYS, issuer=ISS, audience=AUD, max_ttl=3600, leeway=0)
+    assert claims.role is None
+
+
+def test_verify_unknown_role_code_still_authenticates():
+    """未知码不 401（1a 拍定）：能力面 viewer 兜底在消费侧，身份面原样放行。"""
+    tok = mint_token(
+        "tenantA", user_id="userB", role="root", private_key_pem=PRIV, kid="k1", issuer=ISS, audience=AUD, ttl=900
+    )
+    claims = verify_token(tok, public_keys=KEYS, issuer=ISS, audience=AUD, max_ttl=3600, leeway=0)
+    assert claims.role == "root"  # 原样透传，词汇表判定留给 effective_role
 
 
 def test_verify_rejects_tampered_token():
@@ -136,12 +171,26 @@ def test_internal_header_expired():
 
 
 def test_apply_tenant_context_binds_server_tenant_id():
-    tok, utok = apply_tenant_context("tenantZ", "userY")
+    tok, utok, rtok = apply_tenant_context("tenantZ", "userY", "editor")
     try:
         assert server_tenant_id() == "tenantZ"
+        assert asserted_role() == "editor"
     finally:
         reset_tenant_context(tok)
         reset_user_context(utok)
+        reset_role_context(rtok)
+
+
+def test_apply_tenant_context_role_none_is_unbound():
+    """role=None（内部头/单租户路径）→ asserted_role() 返回 None（不绑定空串）。"""
+    tok, utok, rtok = apply_tenant_context("tenantZ", "userY", None)
+    try:
+        assert server_tenant_id() == "tenantZ"
+        assert asserted_role() is None
+    finally:
+        reset_tenant_context(tok)
+        reset_user_context(utok)
+        reset_role_context(rtok)
 
 
 def test_startup_mode_single_tenant(monkeypatch):

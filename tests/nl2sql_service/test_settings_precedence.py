@@ -38,6 +38,76 @@ def test_yaml_used_when_env_absent(monkeypatch):
     assert get_settings().sql_max_rows == 1000
 
 
+def test_data_permission_unknown_key_raises():
+    """1c/D5 + R8：残留角色键启动期具名报错，不静默忽略（合成违规能咬）。"""
+    from nl2sql_service.conf.settings import _data_permission_overrides
+
+    for legacy in ("admin_roles", "default_query_role", "typo_key"):
+        with pytest.raises(ValueError, match="未知键"):
+            _data_permission_overrides({"data_permission": {legacy: "x"}})
+    with pytest.raises(ValueError, match="必须是映射"):
+        _data_permission_overrides({"data_permission": ["not", "a", "map"]})
+
+
+def test_data_permission_current_tree_is_clean_and_judged():
+    """真面参与判决：仓库现版 YAML 的三键真被判定且零违规（不是扫不到所以绿）。"""
+    from pathlib import Path
+
+    from nl2sql_service.conf.settings import _data_permission_overrides, _load_yaml
+
+    app_yaml = _load_yaml(
+        Path(__file__).resolve().parents[2]
+        / "applications/nl2sql-service/nl2sql_service/conf/app_config.yaml"
+    )
+    out = _data_permission_overrides(app_yaml)
+    assert set(out) == {
+        "sensitive_columns",
+        "result_masking_enabled",
+        "mask_keep_chars",
+    }
+
+
+_RETIRED_ROLE_ENV_KEYS = frozenset({"ADMIN_ROLES", "DEFAULT_QUERY_ROLE"})
+
+
+def _active_env_keys(text: str) -> set[str]:
+    """模板里真正生效的键（排除注释行），供「下线键不得回流」判据使用。"""
+    return {
+        line.split("=", 1)[0].strip()
+        for line in text.splitlines()
+        if "=" in line and line.strip() and not line.strip().startswith("#")
+    }
+
+
+def test_retired_role_keys_absent_from_env_template():
+    """1c/D5：已下线角色键不得留在 .env.example（配了没人读 / 部署漂移）。
+
+    真面参与判决：模板必须被真读到且非空，不能「扫不到对象所以绿」（硬规矩 #8）。
+    """
+    from pathlib import Path
+
+    text = (
+        Path(__file__).resolve().parents[2]
+        / "applications/nl2sql-service/.env.example"
+    ).read_text(encoding="utf-8-sig")
+    keys = _active_env_keys(text)
+    assert "SENSITIVE_COLUMNS" in keys, "现版 .env.example 必须真被判过且非空"
+    assert not keys & _RETIRED_ROLE_ENV_KEYS, (
+        f"已下线角色键回流: {sorted(keys & _RETIRED_ROLE_ENV_KEYS)}"
+    )
+
+
+def test_retired_role_key_gate_can_bite():
+    """合成违规能咬：把旧键塞回模板形状，判据必须命中两个（注释里的旧键不算）。"""
+    injected = (
+        'SENSITIVE_COLUMNS=[]\n# ADMIN_ROLES 在注释里不算\n'
+        'ADMIN_ROLES=["admin"]\nDEFAULT_QUERY_ROLE=analyst\n'
+    )
+    keys = _active_env_keys(injected)
+    assert keys & _RETIRED_ROLE_ENV_KEYS == _RETIRED_ROLE_ENV_KEYS
+    assert "SENSITIVE_COLUMNS" in keys
+
+
 def test_env_provided_fields_includes_environ_and_dotenv():
     """_env_provided_fields 同时覆盖进程 env 与 .env 文件键（大写）。"""
     import os

@@ -46,8 +46,8 @@ python -m api.server  # 启动 FastAPI，默认 :8000
 | `KEFU_SERVICE_URL` / `KEFU_USE_ADAPTER` / `KEFU_ADAPTER_URL` | 可选 | kefu 直连地址 / 是否经 adapter 中转 / adapter 地址 |
 | `TAVILY_API_KEY` | ✅ | Tavily 搜索 API |
 | `MYSQL_*` | ✅ | MySQL 连接信息（生产环境应使用只读用户；池参数 `MYSQL_POOL_SIZE` 等） |
-| `DEEPAGENTS_DATABASE_URL` / `DATABASE_URL` | 可选 | PG 向量库 DSN（配了才启用向量检索持久化） |
-| `VALKEY_URL` | 可选 | 语义缓存 Valkey 地址（默认 redis://localhost:6379） |
+| `AGENT_PLATFORM_DATABASE_URL` / `DEEPAGENTS_DATABASE_URL`（弃用）/ `DATABASE_URL` | 可选 | PG 向量库 DSN（按此优先级解析；配了才启用向量检索持久化，空则内存模式） |
+| `VALKEY_URL` / `CACHE_BACKEND` | 默认开 | 语义缓存 Valkey 地址与后端（`valkey` / `disabled`；ADR-0013 C 单一实现） |
 | `STORE_POSTGRES_DSN` | 可选 | LangGraph checkpointer PG DSN（默认 SQLite） |
 | `MONGO_URL` / `MONGO_DB` / `MONGO_CHECKPOINT_COLLECTION` | 可选 | Mongo checkpointer（配置且可达时优先） |
 | `SEMANTIC_MEMORY_ENABLED` | 可选 | 长期记忆开关（默认 false） |
@@ -57,7 +57,20 @@ python -m api.server  # 启动 FastAPI，默认 :8000
 | `API_KEY` | 可选 | 服务鉴权 Key（空则不鉴权） |
 | `ALLOWED_ORIGINS` | 可选 | CORS 允许源（逗号分隔，默认 localhost:3000） |
 
-> **完整开关清单见 [`.env.example`](.env.example)**（23 项，源码为真相源盘点，2026-08-19 核销 TB-11 第一步）：能力开关（`INTENT_ENABLED` / `PLANNER_ENABLED` / `REFLEXION_ENABLED` / `GUARD_ENABLED` / `CACHE_ENABLED` / `DYNAMIC_AGENT_ENABLED` / `DYNAMIC_AGENT_CACHE_MAX`）、治理参数（熔断 `CB_*`、限流 `RATE_LIMIT_*`、灰度 `GRAY_PCT`、重试 `SUBAGENT_RETRIES` / `SUBAGENT_RETRY_BASE`、断言 `E1_CONTRACT_ASSERT` / `E1_CONTENT_ASSERT`、checkpoint 清理 `CHECKPOINT_*`）、缓存 key 版本（`KB_VERSION_*` / `TENANT_ID`）、Langfuse trace（`LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` / `LANGFUSE_HOST`）等均已登记。
+> **完整开关清单见 [`.env.example`](.env.example)**（源码为真相源盘点，2026-08-19 核销 TB-11 第一步；2026-10-25 增补 `CACHE_BACKEND`）：能力开关（`INTENT_ENABLED` / `PLANNER_ENABLED` / `REFLEXION_ENABLED` / `GUARD_ENABLED` / `CACHE_ENABLED` / `CACHE_BACKEND` / `DYNAMIC_AGENT_ENABLED` / `DYNAMIC_AGENT_CACHE_MAX`）、治理参数（熔断 `CB_*`、限流 `RATE_LIMIT_*`、灰度 `GRAY_PCT`、重试 `SUBAGENT_RETRIES` / `SUBAGENT_RETRY_BASE`、断言 `E1_CONTRACT_ASSERT` / `E1_CONTENT_ASSERT`、checkpoint 清理 `CHECKPOINT_*`）、缓存 key 版本（`KB_VERSION_*` / `TENANT_ID`）、Langfuse trace（`LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` / `LANGFUSE_HOST`）等均已登记。
+
+### 健康检查
+
+`GET /health` 是探针路径，**即使配置了 `API_KEY` 也不鉴权**（与 `/ws/` 同列豁免）。返回：
+
+| 字段 | 含义 |
+|------|------|
+| `status` | 恒 `ok`（进程存活即 200；依赖故障不把探针打红） |
+| `storage` | `postgres` / `memory`（DSN 是否真正建池，不看 env 声明） |
+| `cache_backend` | `valkey` / `disabled` |
+| `cache_ready` / `cache_degraded_reason` | Valkey 可达性；不可达时请求仍照常（fail-open），原因串已脱敏 |
+
+探针只读已装配状态 + 有界缓存 ping，不加载模型、不回显 DSN 或口令。
 
 ## 改造历程
 
@@ -74,7 +87,7 @@ python -m api.server  # 启动 FastAPI，默认 :8000
 - ✅ Phase 2：AsyncSubAgent 联邦网关 + AGENT_MODE 切换 + 健康探活降级
 - ✅ Phase 3：L1 embedding+原型余弦 + L2 LLM 细判 + Query 改写 + 子问题分解
 - ✅ Phase 4：TodoListMiddleware + RubricMiddleware（扩展非重写 deepagents PyPI 包）
-- ✅ Phase 5：Valkey 分层缓存（L1 精确 + L2 语义 HNSW + L3 检索 + NullCache + singleflight）
+- ✅ Phase 5：Valkey 语义缓存（L1 精确 + L2 语义 HNSW + 负缓存 + singleflight；L3 已按 ADR-0013 C 退役，委托 `agent_runtime.cache` 单一实现）
 - ✅ Phase 6：限流/熔断/guardrail/灰度/成本路由/多租户
 - ✅ Phase 7：kefu-service（legacy → deepagents PyPI + LangGraph，9 命令 + 3 Flow + GraphRAG）
 

@@ -16,12 +16,17 @@ from agent_core.logging import get_logger
 
 logger = get_logger(__name__)
 
+# Python 的 `\b` 把 CJK 字符也当词字符 ⇒ 中文紧邻数字时不存在边界
+# （"银行卡6222…"曾整体漏检）。数字串一律用前后 lookaround 定界，不用 `\b`。
+# 顺序参与 redact_pii 的正确性：长的、含数字的类型必须排在 phone 之前。
+# 否则 phone 会先吃掉 18 位身份证中间 11 位，把数字串切断，
+# 后续 id_card/bank_card 再也匹配不上 ⇒ 脱敏后仍残留部分证件号。
 _PII_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
-    ("phone", re.compile(r"1[3-9]\d{9}")),
+    ("id_card", re.compile(r"(?<!\d)(?:\d{15}|\d{17}[\dXx])(?!\d)")),
+    ("bank_card", re.compile(r"(?<!\d)\d{16,19}(?!\d)")),
     ("email", re.compile(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}")),
-    ("id_card", re.compile(r"\b\d{15}(\d{2}[\dXx])?\b")),
-    ("bank_card", re.compile(r"\b\d{16,19}\b")),
-    ("ip_address", re.compile(r"\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b")),
+    ("ip_address", re.compile(r"(?<![\d.])\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(?![\d.])")),
+    ("phone", re.compile(r"(?<!\d)(?:\+?86)?1[3-9]\d{9}(?!\d)")),
 ]
 
 _INJECTION_PATTERNS: list[re.Pattern[str]] = [

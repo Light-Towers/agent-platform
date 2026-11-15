@@ -22,6 +22,7 @@ from functools import partial
 from typing import Any
 
 from agent_runtime.circuit_breaker import CircuitBreaker
+from agent_runtime.identity import IdentityError, sign_internal_header
 from agent_runtime.mcp_client import MCPClientManager
 from agent_runtime.skills.dag import as_dag_skill
 from agent_runtime.skills.function import as_function_skill
@@ -32,7 +33,12 @@ from agent_runtime.skills.middleware import (
     ToolObservedMiddleware,
 )
 from agent_runtime.skills.registry import SkillRegistry
-from agent_runtime.workspace_registry import server_tenant_id
+from agent_runtime.workspace_registry import (
+    asserted_role,
+    asserted_user_id,
+    server_tenant_id,
+    server_user_id,
+)
 
 from agent_server.agent.state import AgentState
 from agent_server.config import get_settings
@@ -86,8 +92,18 @@ def _sanitize_identity(kwargs: dict[str, Any]) -> dict[str, Any]:
     防“模型幻觉/提示注入把 tenant_id 填成任意值 → 跨租户读写”。A3 绑定 ContextVar
     前 server_tenant_id 回落部署级 default_tenant_id（与 T11 注入语义一致）；
     A3 落地后自动返回真实断言租户。
+
+    F15：role / features / permissions 一并剔除——角色与能力只由服务端断言源
+    （``asserted_role`` + ``authorization`` 常量表）解释，LLM 传进来的同名键既不能
+    提权，也不该透传给下游 skill 冒充身份字典。剔除是「不信任入站值」，不是「下游
+    拿不到角色」：需要角色的路径走 ContextVar，与 tenant 同一条纪律。
     """
-    out = {k: v for k, v in kwargs.items() if k not in ("tenant_id", "user_id", "api_key")}
+    out = {
+        k: v
+        for k, v in kwargs.items()
+        if k
+        not in ("tenant_id", "user_id", "api_key", "role", "features", "permissions")
+    }
     out["tenant_id"] = server_tenant_id(get_settings().default_tenant_id)
     return out
 
@@ -103,15 +119,17 @@ async def _run_general_qa(graph: Any, **kwargs: Any) -> str:
     graph 保留 checkpoint（thread_id 恢复/持久化对话历史）语义；对调用方是黑盒 Skill。
     """
     question = kwargs["question"]
-    # 身份租户由服务端断言源提供，不接受 LLM/kwargs（防幻觉/注入指定任意租户，ADR-0007 §4.3）；
-    # TODO(A3): server_tenant_id 绑定 ContextVar 后自动返回真实断言租户。
+    # 身份由服务端断言源提供，不接受 LLM/kwargs 覆盖（防幻觉/注入指定任意身份，ADR-0007 §4.3）。
+    # A3 身份内核已落地：IdentityMiddleware 绑定的 ContextVar 优先；未绑定（如 observe 模式 /
+    # 进程内直调）才回落到调用方显式传入的值，保持既有请求链路语义。
     tenant_id = server_tenant_id(get_settings().default_tenant_id)
+    user_id = server_user_id(kwargs.get("user_id", "default"))
     answer = ""
     async for update in graph.astream(
         {
             "messages": [("user", question)],
             "question": question,
-            "user_id": kwargs.get("user_id", "default"),
+            "user_id": user_id,
             "workspace_id": kwargs.get("workspace_id", "default"),
             "tenant_id": tenant_id,
             "iterations": 0,
@@ -304,11 +322,29 @@ def _register_remote_skills(registry: SkillRegistry) -> None:
 
     nl2sql_url = os.getenv("NL2SQL_SERVICE_URL", "")
     if nl2sql_url:
+        _nl2sql_header_warned = False
 
         async def _nl2sql_query(**kwargs: Any) -> Any:
+            nonlocal _nl2sql_header_warned
             kwargs = _sanitize_identity(kwargs)  # 不信 LLM 身份参数（ADR-0007 §4.3）
+            # 1c/D11：问数主链路把服务端断言 role 随内部签名头带给 nl2sql。
+            # 缺密钥 / 签发失败 ⇒ 不带头：nl2sql 无 r ⇒ 无条件脱敏（fail-closed），
+            # 不因配置缺位把问答主链路打成 503；警告按进程首次去重。
+            headers: dict[str, str] = {}
+            try:
+                headers["X-Internal-Tenant"] = sign_internal_header(
+                    kwargs["tenant_id"], asserted_user_id(), role=asserted_role()
+                )
+            except IdentityError as exc:
+                if not _nl2sql_header_warned:
+                    _nl2sql_header_warned = True
+                    logging.getLogger(__name__).warning(
+                        "问数内部签名头不可用，按最小权限脱敏: %s", exc
+                    )
             client = _get_http_client()
-            resp = await client.post(f"{nl2sql_url}/api/query", json=kwargs)
+            resp = await client.post(
+                f"{nl2sql_url}/api/query", json=kwargs, headers=headers or None
+            )
             resp.raise_for_status()
             return resp.json()
 

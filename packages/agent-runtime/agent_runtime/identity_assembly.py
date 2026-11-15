@@ -29,12 +29,21 @@ from agent_runtime.identity import (
     load_hmac_key,
     require_identity_startup_guard,
     verify_internal_header,
+    verify_internal_header_with_role,
 )
 from agent_runtime.identity_middleware import IdentityMiddleware
 
 logger = get_logger(__name__)
 
-__all__ = ["ENFORCE_ENV", "FAILFAST_ENV", "HMAC_KEY_ENV", "INTERNAL_HEADER", "mount_identity_gate"]
+__all__ = [
+    "ENFORCE_ENV",
+    "FAILFAST_ENV",
+    "HMAC_KEY_ENV",
+    "INTERNAL_HEADER",
+    "mount_identity_gate",
+    "verify_internal_header_if_configured",
+    "verify_internal_header_with_role_if_configured",
+]
 
 # 灰度开关与凭据面的 env 名在此显式命名：留痕、门禁、测试都引用它，避免各服务猜名字。
 ENFORCE_ENV = "TENANT_JWT_ENFORCE"
@@ -43,17 +52,17 @@ HMAC_KEY_ENV = "INTERNAL_HMAC_KEY_FILE"
 INTERNAL_HEADER = "X-Internal-Tenant"
 
 
-def verify_internal_header_if_configured(value: str) -> tuple[str, str | None] | None:
+def _key_is_configured() -> bool:
     """按请求判定：配了密钥才采信 ``X-Internal-Tenant``，未配则**忽略**该头。
 
     为什么不在装配时一次性决定：装配时点读到的 env 会固化整个进程生命周期，
     那样「运维补挂密钥文件」需要重启才生效。而 ``IdentityMiddleware`` 只在请求**真的带该头**
     时才调本函数，所以未配密钥的常规流量不产生任何额外 I/O。
 
-    为什么「忽略」而不是「拒绝」：``verify_internal_header`` 在收到内部头但没配密钥时抛
-    ``IdentityError``，中间件据此回 401。若照那个语义装配，「网关开始签发内部头」与
-    「子服务尚未挂密钥」两件事的任何时间差都会把子服务打成全量 401——
-    这是拿配置的缺位冒充攻击，属于可用性缺陷。忽略＝与接入前逐字一致。
+    为什么「忽略」而不是「拒绝」：验签函数在收到内部头但没配密钥时抛 ``IdentityError``，
+    中间件据此回 401。若照那个语义装配，「网关开始签发内部头」与「子服务尚未挂密钥」
+    两件事的任何时间差都会把子服务打成全量 401——这是拿配置的缺位冒充攻击，
+    属于可用性缺陷。忽略＝与接入前逐字一致。
     """
     if not load_hmac_key():
         logger.warning(
@@ -61,8 +70,28 @@ def verify_internal_header_if_configured(value: str) -> tuple[str, str | None] |
             INTERNAL_HEADER,
             HMAC_KEY_ENV,
         )
+        return False
+    return True
+
+
+def verify_internal_header_if_configured(value: str) -> tuple[str, str | None] | None:
+    """二元组验签（保留给存量调用方 / 不读 role 的服务）。"""
+    if not _key_is_configured():
         return None
     return verify_internal_header(value)
+
+
+def verify_internal_header_with_role_if_configured(
+    value: str,
+) -> tuple[str, str | None, str | None] | None:
+    """1c/D11：门卫装配用的三元组验签，把内部头 payload 的 ``r`` 接进服务端断言。
+
+    无 ``r``（旧签发方 / 未带 role 的调用链）⇒ role=None，消费侧按最小权限处置，
+    **不得**把 None 当 admin。
+    """
+    if not _key_is_configured():
+        return None
+    return verify_internal_header_with_role(value)
 
 
 def mount_identity_gate(app: Any, service_name: str) -> dict[str, Any]:
@@ -76,13 +105,13 @@ def mount_identity_gate(app: Any, service_name: str) -> dict[str, Any]:
         ``{"tier": "observe"|"enforce", "startup_mode": "jwt"|"single"|"insecure",
         "hmac_key_present_at_assembly": bool}``。调用方不需要据此分支；
         ``hmac_key_present_at_assembly`` 只是留痕快照，**采信与否按请求判定**（见
-        :func:`verify_internal_header_if_configured`）。
+        :func:`verify_internal_header_with_role_if_configured`）。
     """
     startup_mode = require_identity_startup_guard(service_name)
     enforce = env_bool(ENFORCE_ENV, False)
     app.add_middleware(
         IdentityMiddleware,
-        verify_header=verify_internal_header_if_configured,
+        verify_header=verify_internal_header_with_role_if_configured,
     )
     logger.info(
         "[identity] %s 门卫已装配: 档=%s 启动模式=%s 内部签名头=按请求判定（配了 %s 才采信）"

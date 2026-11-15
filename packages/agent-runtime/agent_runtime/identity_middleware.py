@@ -28,7 +28,9 @@ from __future__ import annotations
 import json
 from typing import Any, Awaitable, Callable
 
+from agent_core.guardrails.errors import error_body, error_code_for_status
 from agent_core.logging import get_logger
+from agent_core.tracing import generate_request_id, get_request_id, set_request_context
 
 from agent_runtime.identity import (
     IdentityError,
@@ -39,14 +41,16 @@ from agent_runtime.identity import (
     verify_internal_header,
     verify_token,
 )
-from agent_runtime.workspace_registry import reset_tenant_context, reset_user_context
+from agent_runtime.workspace_registry import reset_role_context, reset_tenant_context, reset_user_context
+
+logger = get_logger(__name__)
 
 logger = get_logger(__name__)
 
 __all__ = ["IdentityMiddleware"]
 
 _Verify = Callable[[str], Any]  # token -> TokenClaims
-_Apply = Callable[[str, "str | None"], Any]  # (tenant, user) -> tokens
+_Apply = Callable[..., Any]  # (tenant, user, role) -> tokens（1a：role 随三元组同批绑定）
 _Reset = Callable[[Any], None]
 
 
@@ -66,21 +70,31 @@ def _header(scope: dict, name: str) -> str | None:
 def _looks_like_jwt(token: str) -> bool:
     """JWT 形态判断：三段 `.` 分隔且 header 段 base64url 以 `eyJ` 开头（`{"` 编码）。
 
-    区分“真正的租户 JWT”与“不透明 Bearer（如某些部署把静态 API_KEY 放 Authorization）”：
+    区分"真正的租户 JWT"与"不透明 Bearer（如某些部署把静态 API_KEY 放 Authorization）"：
     后者不是本中间件的凭据 → 交下游既有认证，避免误拒。
     """
     parts = token.split(".")
     return len(parts) == 3 and parts[0].startswith("eyJ")
 
 
-async def _send_json(send: Callable[[dict], Awaitable[None]], status: int, detail: str) -> None:
-    body = json.dumps({"detail": detail}).encode()
+async def _send_json(
+    send: Callable[[dict], Awaitable[None]],
+    status: int,
+    msg: str,
+    *,
+    code: str | None = None,
+    request_id: str | None = None,
+) -> None:
+    rid = request_id or get_request_id() or generate_request_id()
+    set_request_context(request_id=rid)
+    body = json.dumps(error_body(code or error_code_for_status(status), msg, rid)).encode()
     await send({
         "type": "http.response.start",
         "status": status,
         "headers": [
             (b"content-type", b"application/json"),
             (b"content-length", str(len(body)).encode()),
+            (b"x-trace-id", rid.encode()),
         ],
     })
     await send({"type": "http.response.body", "body": body})
@@ -113,9 +127,10 @@ class IdentityMiddleware:
 
     @staticmethod
     def _default_reset(tokens) -> None:
-        tenant_token, user_token = tokens
+        tenant_token, user_token, role_token = tokens
         reset_tenant_context(tenant_token)
         reset_user_context(user_token)
+        reset_role_context(role_token)
 
     def _resolve_single(self) -> str | None:
         if callable(self._single_tenant):
@@ -143,7 +158,7 @@ class IdentityMiddleware:
             try:
                 claims = self._verify(bearer)
             except IdentityError as e:
-                await _send_json(send, 401, f"身份令牌无效: {e}")
+                await _send_json(send, 401, f"身份令牌无效: {e}", code="IDENTITY_TOKEN_INVALID")
                 return
             except Exception:
                 # 验签器自身异常 ⇒ fail-closed。典型成因：镜像缺 PyJWT[crypto]，而
@@ -151,9 +166,10 @@ class IdentityMiddleware:
                 # 既不能降级成「没身份」放行（那是把伪造当匿名），也不能让它变成 500
                 # （攻击者可控输入触发未捕获异常）。异常文本不回显，只进服务端日志。
                 logger.exception("[identity] JWT 验签器异常，按 fail-closed 拒绝")
-                await _send_json(send, 401, "身份令牌无法验证（服务端验签不可用）")
+                await _send_json(send, 401, "身份令牌无法验证（服务端验签不可用）", code="IDENTITY_VERIFIER_UNAVAILABLE")
                 return
-            await self._run(claims.tenant_id, claims.user_id, scope, receive, send)
+            # role 是 1a 新增的可选 claim：getattr 防御测试注入的最小 mock（无 role 属性时按 None）。
+            await self._run(claims.tenant_id, claims.user_id, getattr(claims, "role", None), scope, receive, send)
             return
 
         if self._verify_header is not None:
@@ -162,31 +178,51 @@ class IdentityMiddleware:
                 try:
                     result = self._verify_header(hdr)
                 except IdentityError as e:
-                    await _send_json(send, 401, f"内部签名头无效: {e}")
+                    await _send_json(send, 401, f"内部签名头无效: {e}", code="IDENTITY_HEADER_INVALID")
+                    return
+                except Exception:
+                    logger.exception("[identity] 内部签名头验签器异常，按 fail-closed 拒绝")
+                    await _send_json(send, 401, "内部签名头无法验证（服务端验签不可用）", code="IDENTITY_VERIFIER_UNAVAILABLE")
                     return
                 except Exception:
                     logger.exception("[identity] 内部签名头验签器异常，按 fail-closed 拒绝")
                     await _send_json(send, 401, "内部签名头无法验证（服务端验签不可用）")
                     return
                 if result is not None:
-                    tenant, user = result
-                    await self._run(tenant, user, scope, receive, send)
+                    # 1c/D11：验签器返回 (tenant, user, role)；旧验签器与测试注入的最小
+                    # mock 仍是二元组 ⇒ 宽容解包，role 缺省 None（消费侧走 viewer 兜底）。
+                    if len(result) == 3:
+                        tenant, user, role = result
+                    else:
+                        tenant, user = result
+                        role = None
+                    await self._run(tenant, user, role, scope, receive, send)
                     return
 
         single = self._resolve_single()
         if single:
-            await self._run(single, None, scope, receive, send)
+            # 单租户部署无用户/角色断言 ⇒ None（消费侧 viewer 兜底，D9）。
+            await self._run(single, None, None, scope, receive, send)
             return
 
         if self._enforce_missing:
-            await _send_json(send, 401, "缺少身份凭据（TENANT_JWT_ENFORCE）")
+            await _send_json(send, 401, "缺少身份凭据（TENANT_JWT_ENFORCE）", code="IDENTITY_REQUIRED")
             return
         # observe：无凭据交下游（路由 provided>default 既有语义）
         await self.app(scope, receive, send)
 
-    async def _run(self, tenant: str, user: str | None, scope: dict, receive: Callable, send: Callable) -> None:
-        tokens = self._apply(tenant, user)
+    async def _run(
+        self,
+        tenant: str,
+        user: str | None,
+        role: str | None,
+        scope: dict,
+        receive: Callable,
+        send: Callable,
+    ) -> None:
+        tokens = self._apply(tenant, user, role)
         try:
             await self.app(scope, receive, send)
         finally:
             self._reset(tokens)
+

@@ -26,9 +26,11 @@ from agent_core.internal_header import InternalHeaderError
 from agent_core.internal_header import load_hmac_key as _core_load_hmac_key
 from agent_core.internal_header import sign_internal_header as _core_sign
 from agent_core.internal_header import verify_internal_header as _core_verify
+from agent_core.internal_header import verify_internal_header_with_role as _core_verify_with_role
 
 from agent_runtime.workspace_registry import (
     _TENANT_UNSET,
+    bind_role_context,
     bind_tenant_context,
     bind_user_context,
     server_tenant_id,
@@ -62,6 +64,7 @@ class IdentityError(Exception):
 class TokenClaims:
     tenant_id: str
     user_id: str | None = None
+    role: str | None = None
     jti: str | None = None
     exp: int | None = None
     iat: int | None = None
@@ -163,6 +166,7 @@ def mint_token(
     tenant_id: str,
     *,
     user_id: str | None = None,
+    role: str | None = None,
     private_key_pem: str,
     kid: str,
     issuer: str | None = None,
@@ -170,7 +174,11 @@ def mint_token(
     ttl: int = 900,
     jti: str | None = None,
 ) -> str:
-    """签发 RS256 JWT（网关/issuer 用；持私钥）。claims: tenant_id/user_id/exp/iat/sub(+jti)。"""
+    """签发 RS256 JWT（网关/issuer 用；持私钥）。claims: tenant_id/user_id/role/exp/iat/sub(+jti)。
+
+    ``role`` 只带**角色码**，不带权限集（D2/ADR-0015）；缺省不写 claim——消费侧
+    （``authorization.resolve_features``）对缺 role 走 viewer 兜底并计数（D9）。
+    """
     import jwt  # 惰性：仅签发/验签路径需要 PyJWT[crypto]
 
     now = int(time.time())
@@ -184,6 +192,8 @@ def mint_token(
     }
     if user_id:
         payload["user_id"] = user_id
+    if role:
+        payload["role"] = role
     if jti:
         payload["jti"] = jti
     return jwt.encode(payload, private_key_pem, algorithm="RS256", headers={"kid": kid})
@@ -245,9 +255,13 @@ def verify_token(
     tenant = payload.get("tenant_id")
     if not isinstance(tenant, str) or not tenant.strip():
         raise IdentityError("令牌缺少 tenant_id claim")
+    role_claim = payload.get("role")
     return TokenClaims(
         tenant_id=tenant,
         user_id=payload.get("user_id") or payload.get("sub"),
+        # role 是可选 claim：缺/空 → None（不判词汇表——值域收敛与 D9 兜底计数
+        # 单一在 authorization.effective_role，令牌有效性与角色词汇表是两件事）。
+        role=role_claim if isinstance(role_claim, str) and role_claim.strip() else None,
         jti=payload.get("jti"),
         exp=exp if isinstance(exp, int) else None,
         iat=iat if isinstance(iat, int) else None,
@@ -258,12 +272,21 @@ def verify_token(
 # 签名/验签原语单一实现于 agent_core.internal_header（零依赖 stdlib，knowledge-service 亦复用）；
 # 本层仅负责密钥加载 + max_age 环境默认 + 将 InternalHeaderError 归一为 IdentityError。
 
-def sign_internal_header(tenant_id: str, user_id: str | None = None, *, key: bytes | None = None) -> str:
-    """签发 ``v1.<payload>.<sig>`` 内部头。key 缺则从 INTERNAL_HMAC_KEY 加载。"""
+def sign_internal_header(
+    tenant_id: str,
+    user_id: str | None = None,
+    *,
+    key: bytes | None = None,
+    role: str | None = None,
+) -> str:
+    """签发 ``v1.<payload>.<sig>`` 内部头。key 缺则从 INTERNAL_HMAC_KEY 加载。
+
+    ``role``（1c/D11）只在非 None 时写入 payload 的 ``r`` 键；旧验签方忽略新键（F17）。
+    """
     key = key if key is not None else load_hmac_key()
     if not key:
         raise IdentityError("未配置 INTERNAL_HMAC_KEY（内部签名头无法签发）")
-    return _core_sign(tenant_id, user_id, key=key)
+    return _core_sign(tenant_id, user_id, key=key, role=role)
 
 
 def verify_internal_header(
@@ -286,9 +309,29 @@ def verify_internal_header(
         raise IdentityError(str(e)) from e
 
 
-def apply_tenant_context(tenant_id: str, user_id: str | None = None):
-    """绑定已断言的 tenant/user 到请求上下文；返回 (tenant_token, user_token) 供复位。"""
-    return bind_tenant_context(tenant_id), bind_user_context(user_id)
+def verify_internal_header_with_role(
+    value: str | None,
+    *,
+    key: bytes | None = None,
+    max_age: int | None = None,
+) -> tuple[str, str | None, str | None] | None:
+    """1c/D11：委托 agent-core 三元组验签；无 ``r`` 键 ⇒ role=None（消费侧最小权限）。"""
+    if not value:
+        return None
+    key = key if key is not None else load_hmac_key()
+    if not key:
+        raise IdentityError("收到内部头但未配置 INTERNAL_HMAC_KEY，无法校验")
+    if max_age is None:
+        max_age = _int_env("INTERNAL_HEADER_MAX_AGE_S", 300)
+    try:
+        return _core_verify_with_role(value, key=key, max_age=max_age)
+    except InternalHeaderError as e:
+        raise IdentityError(str(e)) from e
+
+
+def apply_tenant_context(tenant_id: str, user_id: str | None = None, role: str | None = None):
+    """绑定已断言的 tenant/user/role 到请求上下文；返回三个 Token 供复位。"""
+    return bind_tenant_context(tenant_id), bind_user_context(user_id), bind_role_context(role)
 
 
 # --- 启动守卫（封死 auth.py "未配 key 即不校验" 多租户裸奔，ADR-0007 §4.1）--

@@ -1,5 +1,7 @@
 # M5: SemanticCache 统一规划
 
+> **2026-10-25 状态注记**：本文件的"双轨/双后端"方案已由 `docs/adr/0013-semantic-cache-single-track.md` 取代。该 ADR 已定为 **Accepted / C：Valkey 单一实现（生产 + 开发/测试）**（一套契约、一个适配器；开发测试也连真实 Valkey；PG 语义缓存退役；先单节点，容量触发后集群化）。本文件只保留为历史分析，不再作为施工依据；配置面 #134 并入该 ADR 的 Stage 1/5。
+
 ## 现状：两套独立实现
 
 ### 实现一：`app/infra/cache.py`（66 行，PostgreSQL + pgvector）
@@ -204,7 +206,7 @@ class BaseNullCache(ABC):
 - `_build_cache_key` 改为调用 `agent_core.cache.base.build_cache_key`
 - `_stats` 改为 `CacheStats` 实例
 - `L1Cache`/`L2Cache`/`L3Cache`/`NullCache` 保留（Valkey 特有逻辑）
-- `main_agent.py` 调用方改为 `ValkeySemanticCache`
+- `applications/agent_federation/agent/main_agent.py` 调用方改为 `ValkeySemanticCache`
 
 ### Step 5: 配置统一
 

@@ -15,8 +15,7 @@ import os
 from deepagents import create_deep_agent
 
 from agent.async_subagents import get_remote_subagents
-from agent.cache.config import get_cache_config
-from agent.cache.layers import _build_cache_key
+from agent.cache.semantic_cache import SemanticCache
 from agent.cache.singleflight import singleflight
 from agent.config import is_remote_mode
 from agent.llm import model
@@ -475,21 +474,20 @@ async def run_deep_agent(task_query, workspace_id):
             except Exception as e:
                 logger.warning("意图识别/改写失败（非致命），继续走 LLM 路由: %s", e)
 
-        # Phase 5：语义缓存查询
+        # Phase 5：语义缓存查询（开关与后端由 agent_runtime.cache 统一决定）
         _cache_hit = None
         _final_answer = ""
-        if os.getenv("CACHE_ENABLED", "false").lower() == "true":
-            try:
-                from agent.cache.semantic_cache import SemanticCache
-                _cache_hit = await SemanticCache.get(_cached_intent, task_query)
+        try:
+            if SemanticCache.is_enabled():
+                _cache_hit = await SemanticCache.get(_cached_intent or "", task_query)
                 if _cache_hit is not None:
                     logger.info("缓存命中（%s）: %s", _cache_hit.get("_layer", "?"), task_query[:50])
                     monitor.report_task_result(_cache_hit.get("answer", ""))
                     monitor._emit('cache', {"layer": _cache_hit.get("_layer"), "hit": True, **SemanticCache.get_stats()})
                     return
                 monitor._emit('cache', {"layer": "miss", "hit": False})
-            except Exception as e:
-                logger.warning("缓存查询失败（非致命）: %s", e)
+        except Exception as e:
+            logger.warning("缓存查询失败（非致命）: %s", e)
 
         # P5：动态子 Agent（渐进启用）。开启时先用 LLM 规划角色，再取对应 agent；
         # 失败则回退静态单例。缓存击穿防护应在「确定的 agent」之上生效，故先定 agent。
@@ -505,12 +503,8 @@ async def run_deep_agent(task_query, workspace_id):
         # P4：缓存击穿防护。缓存 miss 后，用 singleflight 以 cache key 去重：
         # 同一 query 的并发请求只真正执行一次 Agent（LLM），其余等同一结果，
         # 避免热点 query 把 LLM/子服务打爆。cache key 与语义缓存一致（含 kb 版本/租户/灰度）。
-        cache_key = _build_cache_key(
-            _cached_intent, task_query,
-            *(lambda c: (c.kb_versions, c.tenant_id, c.gray_pct))(get_cache_config())
-            if os.getenv("CACHE_ENABLED", "false").lower() == "true"
-            else ("", "", ""),
-        )
+        # 恒带真实租户/KB/灰度：缓存关闭时也不能让不同租户共享同一个在途结果。
+        cache_key = SemanticCache.build_key(_cached_intent or "", task_query)
         # Plan-F Phase 3：联邦主链路经 Planner 协议 + PlannerRuntime 治理驱动（与 app /query 对称）。
         # 保留 singleflight 缓存击穿防护（去重仍在「确定的 agent」之上生效）；
         # AgenticPlanner.arun 套 skill_guard 组合治理（max_skill_depth/max_steps），
@@ -528,13 +522,13 @@ async def run_deep_agent(task_query, workspace_id):
         if _final_answer:
             monitor.report_task_result(_final_answer)
             await remember_episodic(workspace_id, task_query, _final_answer)
-            if _cache_hit is None and os.getenv("CACHE_ENABLED", "false").lower() == "true":
+            if _cache_hit is None:
                 try:
-                    from agent.cache.semantic_cache import SemanticCache
-                    await SemanticCache.set_async(
-                        _cached_intent, task_query,
-                        {"answer": _final_answer, "trace_id": workspace_id},
-                    )
+                    if SemanticCache.is_enabled():
+                        await SemanticCache.set_async(
+                            _cached_intent or "", task_query,
+                            {"answer": _final_answer, "trace_id": workspace_id},
+                        )
                 except Exception as e:
                     logger.warning("语义缓存写入失败: %s", e)
 

@@ -53,6 +53,8 @@ B-5b: ExecutionScheduler/ControlPlane/WorkingMemory/ExecutionRecovery 豁免—�
 
 > ⚠️ **补充披露（2026-09-24 审计 P1-7 勘误）**：B-5b 原仅隐含 `ExecutionRecovery` 一个未接线模块，实际另外 3 个 V3 模块同为「半成品（有单测、生产零调用）」且未被本条涵盖：`human_task`（`applications/` 零命中）、`state_migration`（仅自身 + 单测，且它只做 checkpoint JSONB 版本迁移、**非** DDL 迁移）、`payload_externalization`（`applications/` 零命中）。它们与「豁免」不同 —— 豁免是主动判定不需装配，而这 3 个是「设计就绪、待集成」但尚未计入文档。需明确归属：要么排期接线，要么标记为待集成，避免被误认为已上线能力。详见 `arch-audit-2026-09-24.md` P1-7。
 
+**更新（2026-10-15 接线转正）**：上述三项（human_task / state_migration / payload_externalization）已于 2026-10-15 实际接线，并非「待集成」。代码证据：`test_v3_wiring_assembly.py` 钉住三者装配面（state_migration / payload_externalization 装配项 + human_task 装配项），`durability_pg.py:99` 实调 `payload_externalization.is_reference`、`durability.py:60` 实调 `state_migration.CURRENT_STATE_SCHEMA_VERSION`、`routes.py:32` 已 `include_router(human_task_router)`，且 `test_human_task_api.py` 12 用例全绿。「豁免」（B-5b，主动判定不需装配）与「待集成」现已区分清楚：后者在 2026-10-15 转为「接线 ≠ 默认启用」。另：`ExecutionRecovery` 亦已于 2026-10-15 接线（见其模块 docstring `STATUS: WIRED`），B-5b 的「未接线」措辞同样失效。
+
 ## 已修复：C 组（一致性缺陷，含 C-1/C-2/C-3）
 
 ### C-1: trace 多处断链（已修）

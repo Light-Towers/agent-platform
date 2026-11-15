@@ -58,6 +58,7 @@ class ImportGraphState(TypedDict):
     constraint_kind: str  # 约束类型（如 free/commercial，预留）
     exhibition_id: str  # 会展 ID（生命周期校验，通用知识库可设 general）
     venue_id: str  # 场馆 ID（生命周期校验，通用知识库可设 general）
+    datasource_type: str  # 数据源类型（mysql/hive，文档归属的数据源类型，由 /upload 透传）
 
 
 # 建议定一个初始化对象，方便后续使用
@@ -96,6 +97,7 @@ graph_default_state: ImportGraphState = {
     "constraint_kind": "",
     "exhibition_id": "",
     "venue_id": "",
+    "datasource_type": "",
 }
 
 

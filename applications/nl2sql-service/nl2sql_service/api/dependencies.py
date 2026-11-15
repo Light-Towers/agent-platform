@@ -116,17 +116,38 @@ async def lifespan(app: FastAPI):
 
     app.state.pools = registry
 
-    # 数据源注册表（P1-3/P1-4/P1-6）：单源部署按 dw DSN 建默认源；方言按
-    # scheme 探测（mysql:// → mysql）。未配 dw 时不建（QueryService 回落默认）。
+    # 数据源注册表（P1-3/P1-4/P1-6）：优先从部署级 datasources 表逐行构建（F10 表驱动）；
+    # 表空（首次部署、尚未 seed）或不可用 ⇒ 回落单源 settings（向后兼容）；dw 未启用则不建。
     if settings.dw_db_enabled:
-        from nl2sql_service.services.datasource import build_default_registry, detect_dialect
-
-        dialect = settings.datasource_dialect or detect_dialect(settings.dw_db_dsn)
-        ctx.datasources = build_default_registry(
-            datasource_id=settings.datasource_id,
-            dialect=dialect,
-            label=settings.datasource_label,
+        from nl2sql_service.services.datasource import (
+            build_default_registry,
+            build_registry_from_rows,
+            detect_dialect,
         )
+
+        table_rows: list[dict] = []
+        if settings.meta_db_enabled:
+            try:
+                from nl2sql_service.repositories.postgres.meta.datasource_repository import (
+                    DataSourceRepository,
+                )
+
+                ds_repo = DataSourceRepository(
+                    pool=registry.get("meta"), table_prefix=settings.table_prefix
+                )
+                table_rows = await ds_repo.list_datasources()
+            except Exception:  # noqa: BLE001 - 表未建/库不可用都不该阻断启动
+                logger.info("datasources 表不可用，回落单源注册表", exc_info=True)
+
+        if table_rows:
+            ctx.datasources = build_registry_from_rows(table_rows)
+        else:
+            dialect = settings.datasource_dialect or detect_dialect(settings.dw_db_dsn)
+            ctx.datasources = build_default_registry(
+                datasource_id=settings.datasource_id,
+                dialect=dialect,
+                label=settings.datasource_label,
+            )
 
     # 表统计（P0-3 副产物 → 生成期聚合引导）：002 未应用时静默跳过——
     # 缺表不是启动故障，只是没有聚合引导（不猜表大小）。

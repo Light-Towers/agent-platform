@@ -10,6 +10,12 @@
 #      本文件所有密钥一律 `${VAR:?}` fail-closed：不注入即拒绝启动，没有兜底弱值。
 #   3) 镜像 pin 与那份保持一致（clickhouse 25.12 / postgres 15-alpine / valkey-bundle 9.1.2 /
 #      minio:latest / langfuse{,-worker}:4）——版本真值在那份，本文件是 126 的运维形态。
+#      valkey-bundle 的 tag 由 scripts/lint_architecture.py P14 ⑤ 强制一致：9.1.2 是真机读数
+#      （241 上跑着的 lf-valkey 就是这个 tag，healthy 12 天，search 模块 MODULE LIST 解出 1.2.1），
+#      不是从 release 记录推的。本文件的 valkey 是 langfuse 的 `depends_on: service_healthy`（见下），
+#      它起不来整条观测链就起不来。
+#      Langfuse 只用普通缓存、不用 Search 模块，理论上裸 core 够；这里仍统一走 bundle
+#      是为了"全仓一个 valkey 坐标"——两处两套升级节奏是更贵的东西。
 #
 # 密钥来源：deploy/observability/langfuse.env.example 列的是**配置项名**，
 # 真实值只在 126 上 `chmod 600` 的 env 文件里，不进仓库、不进 argv、不进聊天。

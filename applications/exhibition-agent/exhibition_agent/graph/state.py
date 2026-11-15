@@ -29,6 +29,10 @@ class ExhibitionAgentState(TypedDict, total=False):
 
     skill_name: str
     skill_result: Any
+    # select_skill 检出"显式传了但不在册的 skill"时写下，run_skill 据此 fail-closed。
+    # 必须在这里声明：LangGraph 只保留 schema 声明过的键，未声明的跨边界写入被静默丢弃
+    # ——此前正是因此丢了，非法 skill 会静默回退成默认 venue skill 并真的执行。
+    skill_error: str
     answer: str
     error: str | None
 

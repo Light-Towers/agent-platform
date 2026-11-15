@@ -23,7 +23,65 @@ _READY_POOLS = ("meta", "dw")
 
 
 async def handle_health(http_request: Request) -> HealthResponse:
-    return HealthResponse(status=HealthStatus.HEALTHY, version="0.1.0", dependencies=[])
+    """共享契约健康位（livenessProbe 打这里：只算字符串，不发网络、不连库）。
+
+    `sql_backend` 自 2026-10-28（批次 5）起由**本服务**上报。此前它住在 agent_server，
+    而那边那份 DSN 指**平台库** ⇒ 报出来的 postgres 只证明“平台能连自己的库”，
+    与问数能不能答无关（假灯，见 ADR-0011 的后续修订）。方言只按 DSN scheme 推断；
+    **没配数据面时报 null**——`detect_dialect("")` 回落 postgres，拿它当读数会把
+    “没有 dw”读成“有个 pg 可问”。运行态真值（池能不能用）在 `/ready`。
+    """
+    from nl2sql_service.conf.settings import get_settings
+    from nl2sql_service.services.datasource import detect_dialect
+
+    settings = get_settings()
+    sql_backend = (
+        settings.datasource_dialect or detect_dialect(settings.dw_db_dsn)
+        if settings.dw_db_enabled and settings.dw_db_dsn
+        else None
+    )
+    return HealthResponse(
+        status=HealthStatus.HEALTHY,
+        version="0.1.0",
+        dependencies=[],
+        sql_backend=sql_backend,
+    )
+
+
+async def _probe_pool(pool: Any) -> None:
+    """SELECT 1 探活；任何失败都抛给调用方转 503。"""
+
+    async def _run() -> None:
+        async with pool.connection(timeout=_READY_PROBE_TIMEOUT_S) as conn:
+            await conn.execute("SELECT 1")
+
+    await asyncio.wait_for(_run(), timeout=_READY_PROBE_TIMEOUT_S)
+
+
+async def handle_ready(http_request: Request) -> dict:
+    """GET /ready：meta/dw 两池探活（Q26① 落地方案）。
+
+    - 健康 200；任一池缺失或 SELECT 1 失败 → 503（k8s readinessProbe 用）。
+    - **不碰 /health**：那是共享 `HealthResponse` 契约，
+      `test_identity_gate_assembly` 把 `dependencies == []` 钉死了；池状态
+      单独开只读端点，契约零影响（同 pools_router 的理由）。
+    - 池缺失（DSN 未配置或 lifespan 未跑）按不可用处理：没有 dw 池的实例
+      本来就答不了查询，放行流量只会得到无解释的失败。
+    """
+    registry: dict = getattr(http_request.app.state, "pools", None) or {}
+    failed: dict[str, str] = {}
+    for name in _READY_POOLS:
+        pool = registry.get(name)
+        if pool is None:
+            failed[name] = "pool not registered"
+            continue
+        try:
+            await _probe_pool(pool)
+        except Exception as exc:  # noqa: BLE001 - 探活必须兜住一切驱动异常
+            failed[name] = type(exc).__name__
+    if failed:
+        raise HTTPException(status_code=503, detail={"status": "unhealthy", "pools": failed})
+    return {"status": "healthy", "pools": {name: "ok" for name in _READY_POOLS}}
 
 
 async def _probe_pool(pool: Any) -> None:

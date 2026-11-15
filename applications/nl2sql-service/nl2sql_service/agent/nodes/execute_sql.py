@@ -19,9 +19,10 @@ SQL 在真实库上错了。现输出 `error_class` 三分类，由图决定是�
 from typing import Any
 
 from agent_core.logging import get_logger
+from agent_runtime.authorization import has_feature
 
 from nl2sql_service.agent.context import DataAgentContext
-from nl2sql_service.services.result_masking import is_masked_role, mask_sensitive_columns
+from nl2sql_service.services.result_masking import mask_sensitive_columns
 
 logger = get_logger(__name__)
 
@@ -132,17 +133,23 @@ def _classify(exc: BaseException) -> tuple[str, str]:
 
 
 def _apply_masking(state: dict[str, Any], result: Any) -> Any:
-    """L3 结果层脱敏（§5.9）：按角色对敏感列投影掩码；无需脱敏时零开销返回原值。
+    """L3 结果层脱敏（§5.9）：按**能力**对敏感列投影掩码；无需脱敏时零开销返回原值。
 
-    关条件（任一即不脱）：脱敏总开关关 / 无敏感列清单 / 角色在 admin 名单。
+    关条件（任一即不脱）：脱敏总开关关 / 无敏感列清单 / 角色有 ``data.unmasked``。
+    1c/D5：判定源从「角色名 + admin 名单」换成服务端唯一能力表（D3）。
     """
     if not state.get("result_masking_enabled", True):
         return result
     sensitive = state.get("sensitive_columns") or []
     if not sensitive:
         return result
-    role = state.get("user_role", "analyst")
-    if not is_masked_role(role, state.get("admin_roles") or ["admin"]):
+    # D11：role 来自内部签名头的 r 承载；缺 r / 未知码经 effective_role 收敛到
+    # viewer ⇒ 无条件脱敏（fail-closed），且每次兜底进入 D9 可聚合计数。
+    if has_feature(
+        state.get("role"),
+        "data.unmasked",
+        tenant=state.get("tenant_id") or "",
+    ):
         return result
     return mask_sensitive_columns(result, set(sensitive), keep=state.get("mask_keep_chars", 1))
 

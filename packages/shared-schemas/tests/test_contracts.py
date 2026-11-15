@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from shared_schemas.error import ErrorEnvelope, ErrorResponse
 from shared_schemas.health import DependencyHealth, HealthResponse, HealthStatus
 from shared_schemas.intent import IntentCandidate, IntentResult
 from shared_schemas.query import QueryData, QueryRequest, QueryResponse
@@ -13,6 +14,34 @@ from shared_schemas.thread import (
     empty_thread_state,
     message_dict,
 )
+
+# ---- ErrorEnvelope ----
+
+
+class TestErrorEnvelope:
+    def test_minimal_shape(self):
+        env = ErrorEnvelope(code="BAD_REQUEST", msg="请求参数有误", request_id="rid")
+        assert env.to_dict() == {
+            "code": "BAD_REQUEST",
+            "msg": "请求参数有误",
+            "request_id": "rid",
+        }
+
+    def test_details_included_only_when_set(self):
+        env = ErrorEnvelope(
+            code="VALIDATION_ERROR",
+            msg="请求参数校验失败",
+            request_id="rid",
+            details=[{"loc": ["body", "query"], "msg": "Field required"}],
+        )
+        assert env.to_dict()["details"][0]["loc"] == ["body", "query"]
+        assert "details" not in ErrorEnvelope(
+            code="X", msg="y", request_id="rid"
+        ).to_dict()
+
+    def test_legacy_error_response_still_serializes_detail(self):
+        assert ErrorResponse(detail="old", code="X").to_dict() == {"detail": "old", "code": "X"}
+
 
 # ---- QueryRequest ----
 
