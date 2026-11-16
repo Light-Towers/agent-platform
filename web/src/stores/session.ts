@@ -366,6 +366,13 @@ export async function submitCredentials(input: Credentials, fetchImpl?: typeof f
     authFeaturesRef.value = result.session.features
     authState.value = 'authenticated'
     authNoticeText.value = ''
+    // 登录成功 = 新会话开始 ⇒ 清掉**上一会话**残留的提示。
+    // banner 累积的设计目的是「一轮提问内的多条错误要在同一屏可对比」（App.vue 那句
+    // 「跨轮累积」说的是轮次之间），跨**登录态**保留就越界了。
+    // 症状（2026-11-16 用户实测）：登出后再登录，顶栏已显示登录身份，页面顶部却还挂着
+    // 「已退出：登出请求 HTTP 200…」——两句话互相矛盾，且只有手点「清除提示」才会消失。
+    // ⚠ 只清 banner，不动时间线（那是已经发生的读数，见 clearBanners 的注释）。
+    clearBanners()
     backfillIdentityAfterLogin()
     return true
   } finally {
@@ -395,6 +402,9 @@ export async function resumeSession(fetchImpl?: typeof fetch): Promise<void> {
     authFeaturesRef.value = probe.features
     authState.value = 'authenticated'
     authNoticeText.value = ''
+    // 与 submitCredentials 那处同因：确认仍在登录 ⇒ 上一会话的提示已无意义。
+    // 这一条还覆盖「点重试确认登录态」那一枚钮（那时页面没刷新，旧 banner 还在屏上）。
+    clearBanners()
     return
   }
   if (probe.kind === 'expired') {
