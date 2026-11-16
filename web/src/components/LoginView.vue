@@ -20,8 +20,28 @@
  * 成功之后**立即清掉**（`onSubmit` 那两行）；它不进会话层、不进存储、不进任何文案。
  * 令牌则相反：它是服务端签发的、要活过一次刷新，所以落 sessionStorage（D-k，理由与残余风险
  * 都写在 `api/auth.ts` 文件头，本件不复述）。
- * ⚠ 本件没有 <style> 块，理由见 ThemeToggle.vue 头注；用到的四个类
- *   （`.panel` `.field` `.btn` `.composer`）全住在 `base.css`，本件没为登录页新立一枚类。
+ * ⚠ 本件没有 <style> 块，理由见 ThemeToggle.vue 头注；用到的类（`.ry-card` `.seg` `.ry-input`
+ *   `.composer` `.hint` `.banner`）全住在 `base.css` / `tokens.css`。
+ *
+ * 三条 2026-11-16 的形态改动（用户在内网部署后的登录页上实测提出，不是设计偏好）：
+ *   ① **登录面不复用对话页的 `.grid`**。那套 `minmax(0,1.1fr) minmax(0,1.4fr)` 是对话页的
+ *      两栏比例（会话 : 时间线）；借用它会把登录卡挤进 1.1fr 窄栏（≈36%），而说明文字占
+ *      1.4fr（≈64%）——**说明文字反过来决定了登录框的尺寸**；且未登录态不套 `.ry-layout`
+ *      （那个才有 `height:100vh`），`.grid` 自己只有 `margin-top` + `align-items:start`
+ *      ⇒ 整块贴视口顶边。两个方向都不居中，就是屏上看到的那个样子。
+ *      ⇒ 改为 `.auth-page`（单栏 + 居中 + 限宽，形状在 `base.css`），登录卡 420px 居中。
+ *   ② **说明段从「平铺一栏」改为「默认收起的 <details>」**。原先它常驻在屏上（占 64% 宽度），
+ *      而登录的人真正会问的问题只有四类（口令怎么存、令牌在哪、什么时候要重登、409 是什么），
+ *      其余内容不必占首屏。
+ *   ③ **正文删掉两句**：其一「会话历史列表这一格还没做，它要等 conversations 的写入点（PR-3）」
+ *      ——那是**工程待办账**，PR-3 至今未落地（conversations 表与写入函数都在，生产代码零调用点），
+ *      但它对登录者是零价值，放登录屏上只会被读成「这系统还没做完」；其二「同企业的两个账号
+ *      不共用一条会话线」——用户不会同时开两个账号，无从感知。
+ *      留下的四段都是**用户会直接遇到的行为**，且**全部仍成立**（argon2 散列 / 登录失败统一
+ *      提示 / 注册撞名 409 / 首号即管理员，逐条对过后端实现，不是照抄旧文案）。
+ *   ⚠ 两处**不得删**：令牌存储档位（`sessionStorage`）与令牌键名（`ap.auth.token`）——
+ *      门禁齿 C2/C4 拿它们做件间对拍（键名与 `api/auth.ts` 的 `TOKEN_KEY` 必须同源），
+ *      人在屏上读到的键名是取证入口（照着它去 devtools 里找）。
  * ==========================================================================-->
 <script setup lang="ts">
 import { computed, ref } from 'vue'
@@ -82,10 +102,10 @@ function retryResume(): void {
 </script>
 
 <template>
-  <main class="grid">
-    <div class="col">
+  <main class="auth-page">
+    <div class="auth-page__inner">
       <section
-        class="ry-card"
+        class="ry-card auth-page__card"
         aria-labelledby="hAuth"
       >
         <h2 id="hAuth">
@@ -204,38 +224,36 @@ function retryResume(): void {
           </button>
         </p>
       </section>
-    </div>
 
-    <!-- 栏二：这一屏的承诺。写的全是**已成立**的事实，未来时的句子一句不要。 -->
-    <div class="col">
-      <section
-        class="ry-card"
-        aria-labelledby="hAuthNote"
-      >
-        <h2 id="hAuthNote">
-          这一屏承诺什么
-        </h2>
+      <!-- 说明段：默认收起（<details> 原生折叠，形状沿用 App.vue 窄栏那份的同一惯例）。
+           标题从「这一屏承诺什么」改成用户语言；正文只留**用户会直接遇到的行为**。
+           ⚠ 两处不得删（门禁齿 C2/C4 的对拍目标）：令牌存储档位与令牌键名 ——
+           人在屏上读到的键名是取证入口（照着它去 devtools 里找），删了门禁即红。
+           ⚠ 删掉的那句「会话历史列表这一格还没做（PR-3）」是**工程待办账**：
+           PR-3 至今未落地（conversations 表与写入函数都在，生产代码零调用点），
+           但它对登录者是零价值，放登录屏上只会被读成「这系统还没做完」。 -->
+      <details class="ry-card auth-page__note">
+        <summary>
+          <span class="o-head-sm">登录说明（口令怎么存 · 令牌在哪 · 什么情况下要重新登录）</span>
+        </summary>
         <p class="hint">
-          密码只在服务端做散列比对（argon2），<strong>不存明文、不进日志、不出本请求</strong>；
-          登录那一路不区分「账号不存在」与「密码不对」，两者共用一句提示；但「创建账号」那一发
-          撞出的 409 确实会告诉你某个名字已被占用 —— 那是开放自助注册的必然代价，不是漏。
+          口令只在服务端做 argon2 散列比对，<strong>不存明文、不进日志</strong>。
+          登录失败不区分「账号不存在」与「密码不对」——两种情况共用同一句提示。
         </p>
         <p class="hint">
-          建号成功后即等于已登录（同一次往返拿到令牌）；名字已被占用时，同一次提交<strong>直接改用密码登录</strong>，
-          不必再点一次 —— 只有密码也不对时才落回一句提示。表内零用户时，第一个建号的人就是管理员；
-          之后建的都是普通账号。
+          创建账号成功<strong>即等于已登录</strong>（同一次往返就拿到令牌）；
+          若这个名字已被占用，同一次提交会<strong>直接改用密码登录</strong>，不必再点一次
+          —— 只有密码也不对时才落回一句提示。
         </p>
         <p class="hint">
-          令牌存在本标签页的 <code class="t-name">sessionStorage</code>（键
+          令牌只存在本标签页的 <code class="t-name">sessionStorage</code>（键
           <code class="t-name">ap.auth.token</code>）：<strong>关掉标签即失效</strong>，刷新仍在。
           它不存 <code class="t-name">localStorage</code>，也不带密码。
         </p>
         <p class="hint">
-          同企业的两个账号<strong>不共用一条会话线</strong>（会话主体按服务端断言的人分桶）。
-          但「会话历史列表」这一格还没做：它要等 conversations 的写入点（PR-3），
-          现在没有可追溯的来源，所以屏上不给它留位置。
+          系统里的<strong>第一个账号自动是管理员</strong>，之后创建的账号都是普通用户。
         </p>
-      </section>
+      </details>
     </div>
   </main>
 </template>

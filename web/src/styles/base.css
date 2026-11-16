@@ -302,6 +302,8 @@ a.ry-btn { text-decoration: none; }
 @media (max-width: 767px) {
   .app { padding: var(--sp-3); }
   .grid { grid-template-columns: 1fr; }
+  /* 登录面同一档：内边距收一档（登录卡本身已限宽 420px，这里只管左右呼吸位）。 */
+  .auth-page { padding: var(--sp-4) var(--sp-3); }
   /* ⚠ sticky 的代价（刀㊲ 实拍量出来的，不是推断）：<768 且内容比视口长时，钉到底的
    * `.composer` 会**向上压住面板标题**（375×667 实测与 `h2` 重叠 3575 px²），而它原本
    * 没有底 ⇒ 叠字，肉眼看像破版。补底 + 上分隔线，让它读作一条输入栏。
@@ -592,3 +594,39 @@ a.ry-btn { text-decoration: none; }
 }
 .ry-pagination .ry-page.is-active { background: var(--ry-primary); border-color: var(--ry-primary); color: var(--ry-on-primary); }
 .ry-pagination .ry-page:hover:not(.is-active) { background: var(--bg-raised); }
+
+/* ============================================================================
+ * 登录面容器（PR-2b 登录/建号一屏）—— 给登录面**自己的**骨架
+ * ============================================================================
+ * ⚠ 为什么登录面不复用 `.grid`：`.grid` 那套 `minmax(0,1.1fr) minmax(0,1.4fr)` 是
+ *   **对话页**的两栏比例（会话 : 时间线）。登录面借用它会出两个可见后果：
+ *   ① 登录卡落进 1.1fr 窄栏（≈36%），而旁边的说明文字占 1.4fr（≈64%）——
+ *      **说明文字反过来决定了登录框的尺寸**，登录本体被挤成一条；
+ *   ② 未登录态不套 `.ry-layout`（那个才有 `height:100vh`），`.grid` 自己只有
+ *      `margin-top` + `align-items:start` ⇒ 整块贴视口顶边，垂直方向也不居中。
+ *   这两条是用户在内网登录页上实测报出来的（2026-11-16 部署后），不是推断。
+ *   ⇒ 本节给登录面单栏 + 居中 + 限宽；说明段改为默认收起的 <details>。
+ * ⚠ 居中用「flex + margin:auto」而不是「grid + align-content:center」：后者在内容
+ *   高过一屏时会把整块推到容器上方（顶部滚不到）；`margin:auto` 在同一情形下退化为
+ *   0，内容从顶部起排，页面正常可滚。
+ * ⚠ 宽度用 px 字面量：断言 4 的裸尺寸禁令只扫 margin/padding/gap 三族，width 不在其内；
+ *   此处**不新立 token**（新立即孤儿，触发断言 3）。
+ */
+.auth-page {
+  display: flex;
+  min-height: 100vh;
+  padding: var(--sp-5) var(--sp-4);
+}
+.auth-page__inner {
+  margin: auto;                    /* 水平+垂直居中；内容超高时退化为 0，不裁顶 */
+  width: min(100%, 660px);         /* 上限由说明段那一档定 */
+  display: grid;
+  gap: var(--sp-4);
+}
+/* 登录卡：限宽并居中，让表单行长稳定（不随视口拉成超长行）。 */
+.auth-page__card {
+  width: min(100%, 420px);
+  justify-self: center;
+}
+/* 说明段：比登录卡宽一档（它装的是长句），但仍限宽，不铺满屏。 */
+.auth-page__note { width: 100%; }
