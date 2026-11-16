@@ -343,7 +343,13 @@ def node_pdf_to_md(state: ImportGraphState) -> ImportGraphState:
 
     except Exception as e:
         # 异常日志分级，精准提示配置问题
-        logger.error(f"【{func_name}】PDF转MD流程执行失败：{str(e)}", exc_info=True)
+        # ⚠ 2026-11-16 修：f-string + exc_info=True 是 loguru 的雷——当 str(e) 含花括号
+        #   （MinerU 的 JSON 错误体常带 {}）时，loguru 对已插值的 f-string 结果**再跑一次**
+        #   `{}` 格式化，把 exc_info 当 kwargs 参数 ⇒ 抛
+        #   "The logging message could not be formatted with the provided arguments"，
+        #   **掩盖真正的 PDF 解析错误**（上传页只看到这条格式化错误，无法排障）。
+        #   ⇒ 改用 loguru 原生 `{}` 占位符 + 位置参数（与 embedding_utils.py:160 同款）。
+        logger.error("【{}】PDF转MD流程执行失败：{}", func_name, str(e), exc_info=True)
         raise  # 抛出异常，终止工作流
     finally:
         # 结束：记录节点运行状态
