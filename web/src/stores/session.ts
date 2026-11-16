@@ -239,9 +239,7 @@ export async function ask(fetchImpl?: typeof fetch): Promise<void> {
     // A8 的「401 跳回登录页」就落在这四行。两个条件都是必要的：
     //   · 只看 401 会把未登录档也登出，而那一档本来就没有登录态可登；
     //   · 只看「令牌过期」会把 403（已识别但无权）也当过期，结果是权限问题把人踢下页面。
-    if (final.httpStatus === 401 && authState.value === 'authenticated') {
-      dropSession('登录令牌已被服务端拒绝（过期或换钥），请重新登录')
-    }
+    if (final.httpStatus === 401) handleSessionExpired()
   } catch (err) {
     // 只有一条「令牌含非 ASCII」会走到这里（sse.ts 明写它是发出前的前置校验）。
     // 这句必须在屏上，不能只进 console：它就是这一轮的失败原因（A2 不白屏 / A4 可读）。
@@ -310,6 +308,21 @@ function dropSession(notice: string): void {
   authFeaturesRef.value = []
   authState.value = 'anonymous'
   authNoticeText.value = notice
+}
+
+/**
+ * 任何 API 的 401 都走这里：**清令牌 + 屏上给可行动提示**（2026-11-16 加）。
+ * 起因：401 掉登录态原来只在 `ask()` 的 SSE 路径里；`/kb/*`、`/datasources` 等
+ * 独立 fetch 拿到 401 时只把服务端报文甩到屏上（`IDENTITY_TOKEN_INVALID` +
+ * `Signature has expired`），用户既不知道会话已失效、也不知道下一步该做什么。
+ *
+ * ⚠ 只在仍处于 authenticated 时才掉态：未登录档本来就没有会话可清，
+ *   而登录页上的 401（口令错）已由 `submitCredentials` 自己处理，不能在这里二次掉。
+ * ⚠ 只处理 401，**不处理 403**：后者是"已识别但无权"，清令牌等于因权限问题把人登出。
+ */
+export function handleSessionExpired(): void {
+  if (authState.value !== 'authenticated') return
+  dropSession('登录令牌已被服务端拒绝（过期或换钥），请重新登录')
 }
 
 /**

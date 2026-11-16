@@ -9,6 +9,24 @@
  * 多文件用 FormData，不手动设 Content-Type（让 fetch 带 boundary）。
  * ==========================================================================*/
 import { applyCredentialHeaders } from './auth.ts'
+import { handleSessionExpired } from '../stores/session.ts'
+
+/**
+ * /kb/* 的 401 统一出口（2026-11-16）。
+ * 原来三个端点各自把服务端报文甩到屏上（`IDENTITY_TOKEN_INVALID` + `Signature has expired`），
+ * 用户既不知道会话已失效也不知道下一步做什么；而 401 掉登录态的逻辑只在 SSE 那条路径里。
+ * ⇒ 这里按状态码分流：401 掉态 + 一句可行动提示；其它状态码保留原报文给管理员排障。
+ * ⚠ 依赖方向：`kb.ts` 是 API 层、import 会话层只取这一个纯函数；会话层不反过来 import kb.ts，
+ *   没有循环依赖（与 `App.vue` 直接读 session 同一条单向数据流）。
+ */
+async function failKb(action: string, resp: Response): Promise<never> {
+  const text = await resp.text().catch(() => '')
+  if (resp.status === 401) {
+    handleSessionExpired()
+    throw new Error(`${action}失败：登录令牌已过期，请重新登录后再试`)
+  }
+  throw new Error(`${action}失败：HTTP ${resp.status} ${text.slice(0, 200)}`)
+}
 
 const KB_UPLOADS_PATH = '/kb/uploads'
 const KB_STATUS_PATH = (taskId: string) => `/kb/status/${encodeURIComponent(taskId)}`
@@ -63,10 +81,7 @@ export async function uploadKbDocuments(
   body.append('venue_id', form.venueId)
   body.append('datasource_type', form.datasourceType)
   const resp = await doFetch(KB_UPLOADS_PATH, { method: 'POST', headers, body, cache: 'no-store' })
-  if (!resp.ok) {
-    const text = await resp.text().catch(() => '')
-    throw new Error(`知识库上传失败：HTTP ${resp.status} ${text.slice(0, 200)}`)
-  }
+  if (!resp.ok) await failKb('知识库上传', resp)
   return await resp.json()
 }
 
@@ -126,10 +141,7 @@ export async function getKbStatus(
   const doFetch = fetchImpl ?? globalThis.fetch
   const headers = authHeaders(token)
   const resp = await doFetch(KB_STATUS_PATH(taskId), { method: 'GET', headers, cache: 'no-store' })
-  if (!resp.ok) {
-    const text = await resp.text().catch(() => '')
-    throw new Error(`知识库状态查询失败：HTTP ${resp.status} ${text.slice(0, 200)}`)
-  }
+  if (!resp.ok) await failKb('知识库状态查询', resp)
   return await resp.json() as KbTaskStatus
 }
 
@@ -141,9 +153,6 @@ export async function listKbDocuments(
   const doFetch = fetchImpl ?? globalThis.fetch
   const headers = authHeaders(token)
   const resp = await doFetch(KB_DOCUMENTS_PATH, { method: 'GET', headers, cache: 'no-store' })
-  if (!resp.ok) {
-    const text = await resp.text().catch(() => '')
-    throw new Error(`知识库列表查询失败：HTTP ${resp.status} ${text.slice(0, 200)}`)
-  }
+  if (!resp.ok) await failKb('知识库列表查询', resp)
   return await resp.json()
 }
