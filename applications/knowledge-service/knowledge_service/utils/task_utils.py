@@ -1,4 +1,4 @@
-from typing import Dict, List
+from typing import Any, Dict, List
 
 from .sse_utils import push_to_session
 
@@ -17,6 +17,13 @@ _tasks_status: Dict[str, str] = {}
 # key: task_id
 # value: 任务结果（例如 query 的 answer）
 _tasks_result: Dict[str, Dict[str, str]] = {}
+
+# key: task_id
+# value: 导入管线的「可核对读数」——文档怎么切 / 语义有没有丢。
+# 为什么放在这里而不是另开存储：它与 done_list/status 同属"任务运行时读数"，
+# 生命周期一致（内存、单进程、重启即失），且 /status 已是前端唯一轮询口 ⇒
+# 零新增接口就能把结果送到屏上（避免再开 chunk 预览路由 + 代理两层接线）。
+_tasks_summary: Dict[str, Dict[str, Any]] = {}
 
 TASK_STATUS_PENDING = "pending"
 TASK_STATUS_PROCESSING = "processing"
@@ -125,6 +132,23 @@ def get_task_result(task_id: str, key: str, default: str = "") -> str:
     return _tasks_result.get(task_id, {}).get(key, default)
 
 
+def set_task_summary(task_id: str, summary: Dict[str, Any]) -> None:
+    """
+    存储任务的可核对读数（如 split / structure_check）。
+    整块覆盖而非逐字段合并：切分节点只在成功后写一次，没有并发写入者。
+    """
+    _ensure_task(task_id)
+    _tasks_summary[task_id] = summary
+
+
+def get_task_summary(task_id: str) -> Dict[str, Any]:
+    """
+    读取任务的可核对读数；没有就给空字典（前端据此决定"结果尚未产生"而非假装有）。
+    """
+    _ensure_task(task_id)
+    return _tasks_summary.get(task_id, {})
+
+
 def get_task_status(task_id: str) -> str:
     """
     获取当前任务状态。
@@ -190,3 +214,4 @@ def clear_task(task_id: str):
     _tasks_done_list.pop(task_id, None)
     _tasks_status.pop(task_id, None)
     _tasks_result.pop(task_id, None)
+    _tasks_summary.pop(task_id, None)

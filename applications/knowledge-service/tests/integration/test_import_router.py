@@ -55,6 +55,24 @@ def test_status_endpoint_shape(monkeypatch):
     assert isinstance(body["done_list"], list) and len(body["done_list"]) == 1
     assert "开始上传文件" in body["done_list"]  # upload_file 节点中文展示名
     assert isinstance(body["running_list"], list) and len(body["running_list"]) == 1
+    # 「结果可核对」两枚附加字段（2026-11-16）：未写入时必须是**空值**而不是假读数。
+    # 这条是反证格：若后端把 summary 硬编码成"切了 N 片"的假数，这里会红。
+    assert body["error"] == ""
+    assert body["summary"] == {}
+
+    # 写入后要能原样读出（含切分统计与语义结构对照），且不影响原有五格形状
+    tid2 = "integration-status-summary"
+    tu.update_task_status(tid2, "completed")
+    tu.set_task_result(tid2, "error", "解析失败：文件损坏")
+    tu.set_task_summary(tid2, {
+        "split": {"chunk_count": 12, "title_count": 6, "first_title": "产品概述"},
+        "structure_check": {"md_headings": 6, "chunk_headings": 6, "char_coverage": 0.96},
+    })
+    body2 = client.get(f"/status/{tid2}").json()
+    assert body2["status"] == "completed"
+    assert body2["error"] == "解析失败：文件损坏"
+    assert body2["summary"]["split"]["chunk_count"] == 12
+    assert body2["summary"]["structure_check"]["char_coverage"] == 0.96
 
 
 @pytest.mark.skipif(not INTEGRATION_ENABLED, reason="requires ZHIKU_INTEGRATION=1 (heavy LangGraph import)")

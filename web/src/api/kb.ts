@@ -70,12 +70,59 @@ export async function uploadKbDocuments(
   return await resp.json()
 }
 
+/* ---- 结果可核对读数（KS /status 的附加字段；后端未给时整块为空对象）----
+ * 为什么定义类型而不是继续 unknown：管理员要看的是「怎么切 / 语义有没有丢」，
+ * 这些数字必须能被 TS 检查到字段名，否则前端一旦写错字段名会静默显示空。 */
+export interface KbSplitPreview {
+  part: number
+  title: string
+  chars: number
+  head: string
+}
+
+export interface KbSplitSummary {
+  md_lines: number
+  chunk_count: number
+  title_count: number
+  first_title: string
+  chunk_chars: number
+  previews: readonly KbSplitPreview[]
+}
+
+export interface KbStructureCheck {
+  md_headings: number
+  chunk_headings: number
+  md_code_blocks: number
+  chunk_code_blocks: number
+  md_table_rows: number
+  chunk_table_rows: number
+  md_chars: number
+  chunk_chars: number
+  char_coverage: number
+}
+
+export interface KbTaskStatus {
+  code: number
+  task_id: string
+  /** pending/processing/completed/failed；刚上传、后台未启动时是空串。 */
+  status: string
+  done_list: readonly string[]
+  running_list: readonly string[]
+  /** 失败原因文本（后端失败时写，成功为空）。 */
+  error: string
+  /** 切分统计 + 语义结构对照；尚未切分或旧后端为空对象。 */
+  summary: {
+    split?: KbSplitSummary
+    structure_check?: KbStructureCheck
+  }
+}
+
 /** 轮询上传任务进度（代理 KS /status/{task_id}）。 */
 export async function getKbStatus(
   taskId: string,
   token: string,
   fetchImpl?: typeof fetch,
-): Promise<unknown> {
+): Promise<KbTaskStatus> {
   const doFetch = fetchImpl ?? globalThis.fetch
   const headers = authHeaders(token)
   const resp = await doFetch(KB_STATUS_PATH(taskId), { method: 'GET', headers, cache: 'no-store' })
@@ -83,7 +130,7 @@ export async function getKbStatus(
     const text = await resp.text().catch(() => '')
     throw new Error(`知识库状态查询失败：HTTP ${resp.status} ${text.slice(0, 200)}`)
   }
-  return await resp.json()
+  return await resp.json() as KbTaskStatus
 }
 
 /** 登记文档列表（代理 KS /documents）。 */

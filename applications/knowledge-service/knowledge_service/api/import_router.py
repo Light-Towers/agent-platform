@@ -34,7 +34,10 @@ from knowledge_service.utils.task_utils import (
     add_running_task,
     get_done_task_list,
     get_running_task_list,
+    get_task_result,
     get_task_status,
+    get_task_summary,
+    set_task_result,
     update_task_status,
 )
 from knowledge_service.utils.tenant_utils import resolve_server_tenant
@@ -135,6 +138,10 @@ def run_graph_task(
     except Exception as e:
         # 5. 捕获全流程异常，更新任务全局状态为：失败，并记录错误日志（含堆栈）
         update_task_status(task_id, "failed")
+        # error 同时写进 task result：原实现只进日志 ⇒ 前端只知道 failed、不知道为什么，
+        # 管理员无从判断是解析失败还是切分/入库失败。set/get_task_result 早就有，
+        # 这里只是把那个在册能力接上（不改状态码、不改异常传播语义）。
+        set_task_result(task_id, "error", str(e))
         logger.error(f"[{task_id}] LangGraph全流程执行失败，异常信息：{str(e)}", exc_info=True)
 
 
@@ -322,6 +329,12 @@ async def get_task_progress(task_id: str):
         "status": get_task_status(task_id),  # 任务全局状态：pending/processing/completed/failed
         "done_list": get_done_task_list(task_id),  # 已完成的节点/阶段列表
         "running_list": get_running_task_list(task_id),  # 正在运行的节点/阶段列表
+        # 以下两枚是「结果可核对」面（2026-11-16 新增）：
+        #   error   —— 失败原因（原实现只进日志 ⇒ 屏上只知 failed 不知为何）
+        #   summary —— 切分统计 + 语义结构对照（原实现只进日志/本地 chunks.json）
+        # 都是附加字段，原有五个键的形状不变（集成测试钉的那五格仍成立）。
+        "error": get_task_result(task_id, "error"),
+        "summary": get_task_summary(task_id),
     }
     # 记录状态查询日志，方便追踪前端轮询情况
     logger.info(

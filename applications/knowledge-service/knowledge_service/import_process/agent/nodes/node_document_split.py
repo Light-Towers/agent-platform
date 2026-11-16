@@ -14,7 +14,7 @@ from knowledge_service.core.tracing import traced_span
 from knowledge_service.import_process.agent.state import ImportGraphState
 
 # 项目内部工具/状态/日志导入（保持原有路径）
-from knowledge_service.utils.task_utils import add_running_task
+from knowledge_service.utils.task_utils import add_running_task, set_task_summary
 
 # --- 配置参数 (Configuration) ---
 # 单个Chunk最大字符长度：超过则触发二次切分（适配大模型上下文窗口）
@@ -294,6 +294,72 @@ def step_4_refine_chunks(sections: List[Dict[str, Any]], max_len: int) -> List[D
     return final_sections
 
 
+def step_5b_collect_summary(
+    md_content: str,
+    lines_count: int,
+    sections: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """
+    【步骤5b】把切分结果整理成**可核对读数**（不改切分算法，只统计）。
+
+    为什么要有这一步：管理员真正关心的是"文档怎么切、语义有没有丢"，而原管线
+    只把这些数打成日志、写进本地 chunks.json，没有任何 HTTP 读数 ⇒ 屏上无从核对。
+    这里把已在手边的 md_content 与 sections 做一次纯计算对照，写进 task summary，
+    让 /status 能直接带出"切了几片 / 标题保住没 / 表格代码块是否完整"。
+
+    ⚠ 三条口径（不得读成"丢失"）：
+      · chunk_overlap=0 且切分器会剥标题前缀，字符覆盖率 <1.0 属正常；
+      · 表格/代码块计数是**结构标记计数**（围栏、表格行），不是语义等价校验；
+      · 图片由 md_img 节点换成 MinIO 链接，本统计只覆盖切分前的 md_content。
+    """
+    chunk_texts = [str(s.get("content") or "") for s in sections]
+    chunk_all = "\n".join(chunk_texts)
+
+    def headings(text: str) -> int:
+        return sum(1 for line in text.splitlines() if re.match(r"^\s*#{1,6}\s+\S", line))
+
+    def fences(text: str) -> int:
+        # 代码围栏成对出现；取偶数半数是"代码块个数"，避免孤行误计
+        return sum(1 for line in text.splitlines() if line.lstrip().startswith("```")) // 2
+
+    def table_rows(text: str) -> int:
+        # Markdown 表格行：以 | 开头且含分隔竖线（不把正文里偶然的 | 算进去）
+        return sum(1 for line in text.splitlines() if line.lstrip().startswith("|") and line.count("|") >= 2)
+
+    md_chars = len(md_content or "")
+    chunk_chars = sum(len(t) for t in chunk_texts)
+    return {
+        "split": {
+            "md_lines": lines_count,
+            "chunk_count": len(sections),
+            "title_count": headings(md_content or ""),
+            "first_title": str(sections[0].get("title") or "无标题") if sections else "无",
+            "chunk_chars": chunk_chars,
+            "previews": [
+                {
+                    "part": int(s.get("part") or i + 1),
+                    "title": str(s.get("title") or "无标题"),
+                    "chars": len(chunk_texts[i]),
+                    "head": chunk_texts[i][:120],
+                }
+                for i, s in enumerate(sections[:8])
+            ],
+        },
+        "structure_check": {
+            "md_headings": headings(md_content or ""),
+            "chunk_headings": headings(chunk_all),
+            "md_code_blocks": fences(md_content or ""),
+            "chunk_code_blocks": fences(chunk_all),
+            "md_table_rows": table_rows(md_content or ""),
+            "chunk_table_rows": table_rows(chunk_all),
+            "md_chars": md_chars,
+            "chunk_chars": chunk_chars,
+            # 覆盖率只作参考，不代表语义等价（见函数头注）
+            "char_coverage": round(chunk_chars / md_chars, 4) if md_chars else 0.0,
+        },
+    }
+
+
 def step_5_print_stats(lines_count: int, sections: List[Dict[str, Any]]) -> None:
     """
     【步骤5】输出文档切分统计信息（日志记录，便于监控/调试）
@@ -401,6 +467,17 @@ def node_document_split(state: ImportGraphState) -> ImportGraphState:
         # 作用：打印核心统计数据，便于监控切分效果、调试问题（原始行数/最终Chunk数/首个Chunk预览）
         # 输出：无返回值，仅通过logger输出标准化统计日志
         step_5_print_stats(lines_count, sections)
+
+        # ===================================== 步骤5b：写可核对读数 =====================================
+        # 与步骤5的日志同源，但写进 task summary ⇒ /status 能带出「怎么切 / 语义结构保住没」。
+        # 失败不阻断主流程（统计是观测面，不是切分正确性的前提）。
+        try:
+            set_task_summary(
+                state["task_id"],
+                step_5b_collect_summary(content, lines_count, sections),
+            )
+        except Exception as exc:  # noqa: BLE001 - 观测面失败不得影响入库
+            logger.warning(f"步骤5b：切分读数写入失败（不影响入库）：{exc}")
 
         # ===================================== 步骤6：Chunk结果本地JSON备份 + 状态更新 =====================================
         # 作用1：将最终Chunk列表备份到local_dir目录的chunks.json，便于后续问题排查、数据复用

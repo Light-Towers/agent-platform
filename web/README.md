@@ -78,6 +78,17 @@
 
 **登录面批（2026-11-16）重取，只取本批碰过的两件**：`web/src/components/LoginView.vue` 241 → **259**（登录卡改居中单卡 + 说明段改默认收起的 `<details>` + 正文删两句：PR-3 那句工程待办账与「同企业两账号不共用会话线」）/ `web/src/styles/base.css` 594 → **632**（新增 `.auth-page` 一族三条）。⚠ base.css 的 594 是本批**实取**值——此前登记的 400 是管理面批 1 的口径，其间 web 转正批动过该文件但未回写本表 ⇒ 本批顺带抹平这处漂移；口径仍是 `Get-Content <file>.Count` 实取，与 `git diff --numstat` 不是同一把尺（两者不混用）。本批未新增任何运行时依赖（`web/package.json` 与 `web/pnpm-lock.yaml` 逐项未动）。门禁读数（本机，Node v24.12.0 / pnpm 10.33.0）：`check:tokens`（定义 123 / 引用 123）/ `check:events`（消费 9 条 / 提供 29 条 / 缺 0）/ `lint` / `typecheck` / `build`（产物 `index-D0MLJZaB.css` + `index-CYnRkDLc.js`）/ `verify:sse`（150 条断言，失败 0）全 rc=0。
 
+**知识库上传产品形态批（2026-11-16）重取，只取本批碰过的五件**：`web/src/components/KbUpload.vue` → **443**（从「12 个裸 metadata 表单」重做为「拖文件即上传 + 7 步结果条 + 切片/语义结构读数 + 高级选项默认收起」）/ `web/src/api/kb.ts` → **149**（`/status` 返回值从 unknown 改成 `KbTaskStatus`，新增 `split`/`structure_check` 类型）/ `web/src/styles/base.css` 632 → **669**（新增 `.kb-drop` / `.kb-advanced` / `.kb-check` / `.kb-steps` / `.kb-step` / `.kb-previews`）/ `applications/knowledge-service/knowledge_service/utils/task_utils.py`（新增 `_tasks_summary` + set/get，与 status/done_list 同生命周期）/ `applications/knowledge-service/knowledge_service/api/import_router.py`（`/status` 附加 `error` + `summary`；失败分支把异常文本写进 task result，原来只进日志）/ `applications/knowledge-service/knowledge_service/import_process/agent/nodes/node_document_split.py`（新增 `step_5b_collect_summary`：纯统计不改切分算法）。
+
+用户那句判据是这次重做的准绳：**「用户界面管理员只关心你文档怎么切，有没有丢失语义。而用户上传更不会关心具体参数。」**
+⇒ 12 个字段一个没删（功能齐全），但收进默认收起的「高级选项」；主界面只留拖放区 + 一个上传按钮。
+⇒ 「有没有丢语义」的读数不是编的：`node_document_split` 同时握有 `md_content` 和 `chunks`，就地做标题/代码围栏/表格行的**原文 vs chunk 计数对照** + 字符覆盖率，写进 task summary ⇒ `/status` 原接口全透传（agent_server 代理零改动、零新增路由）。
+⚠ 三条口径钉在组件注释里：覆盖率 <100% 属正常（`chunk_overlap=0` 且剥标题前缀）、结构计数不等于语义等价、图片统计只覆盖切分前 md_content。**不替人下"丢了/没丢"的结论**。
+
+反证：AST 抠出纯函数单独跑（本机 .venv 无 langchain_text_splitters，直接 import 节点模块会失败——这正是集成测试要 `ZHIKU_INTEGRATION=1` 守卫的原因）；丢掉表格/代码块那两片后 `chunk_code_blocks`/`chunk_table_rows` 计数确实掉到 0，**证明对照不是恒等假数**。
+集成测试 `test_import_router.py::test_status_endpoint_shape` 补两格：未写 summary 时 `error==""` 且 `summary=={}`（抓假读数），写入后能原样读出。
+
+门禁（本机 Node v24.12.0 / pnpm 10.33.0）：`check:tokens`（定义 123 / 引用 123）/ `check:events`（消费 9 / 提供 29 / 缺 0）/ `lint` / `typecheck` / `build`（产物 `index-DaVHfIHp.js` + `index-Da66Usdy.css`）/ `verify:sse`（150 条断言，失败 0）全 rc=0；仓库级 `ruff check .` / `check_doc_sync.py`（0 警告）通过。
 **登录面批（2026-11-16）第二次改动，只取本批碰过的一件**：`web/src/stores/session.ts` 436 → **432**（登录成功与「确认仍在登录」两条路径各补一次 `clearBanners()`）。
 起因是用户在内网登录页实测报出：**登出后再登录，顶栏已显示登录身份，页面顶部却还挂着「已退出：登出请求 HTTP 200…」**——两句互相矛盾，且只有手点「清除提示」才会消失。
 根因不在渲染而在**状态的生命周期**：banner 的累积语义是「一轮提问内的多条错误要在同一屏可对比」（`App.vue` 那句「跨轮累积」说的是轮次之间），跨**登录态**保留就越界了；而登录成功的路径只清了 `authNoticeText`，banner 没动。

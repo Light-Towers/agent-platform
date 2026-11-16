@@ -595,6 +595,43 @@ a.ry-btn { text-decoration: none; }
 .ry-pagination .ry-page.is-active { background: var(--ry-primary); border-color: var(--ry-primary); color: var(--ry-on-primary); }
 .ry-pagination .ry-page:hover:not(.is-active) { background: var(--bg-raised); }
 
+/* ---- 知识库上传页（2026-11-16 产品形态重做）----
+ * 为什么新增：上传者只要「拖文件 → 一个按钮」，管理员要的是「怎么切 / 语义有没有丢」
+ * 的可核对读数。这四枚类只给这一页的形状，不动对话页的 .grid / .ry-card。 */
+.kb-drop {
+  display: grid;
+  gap: var(--sp-2);
+  justify-items: center;
+  padding: var(--sp-6);
+  border: 1px dashed var(--border-control);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.kb-drop.is-over { background: var(--bg-raised); }
+.kb-advanced {
+  display: grid;
+  gap: var(--sp-2);
+  margin-top: var(--sp-3);
+}
+.kb-check { display: flex; align-items: center; gap: var(--sp-2); }
+.kb-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.kb-step {
+  padding: var(--sp-1) var(--sp-2);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-decor);
+  font-size: var(--fs-xs);
+}
+.kb-step.is-done { border-color: var(--ry-tag-success-border); color: var(--ry-success); }
+.kb-step.is-running { border-color: var(--ry-tag-warning-border); color: var(--ry-warning); }
+.kb-step.is-pending { color: var(--text-2); }
+.kb-previews { margin: 0; padding-inline-start: var(--sp-4); }
 /* ============================================================================
  * 登录面容器（PR-2b 登录/建号一屏）—— 给登录面**自己的**骨架
  * ============================================================================
