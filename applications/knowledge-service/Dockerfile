@@ -39,7 +39,12 @@ COPY applications/exhibition-agent ./applications/exhibition-agent
 # 安装第三方依赖（requirements.txt 与 pyproject dependencies 保持一致）与共享包（editable）。
 # otel-* 为可选 tracing 依赖（M4 全链路追踪），随镜像一并安装，确保 OTel 真实导出开箱即用
 # （默认 no-op 降级，配置 AGENT_CORE_TRACE_ENABLED + endpoint 后启用）。
+# 2026-11-16：CPU 版 torch 三件套先装（与根 Dockerfile 同因）。
+# requirements.txt 里裸写 torch/torchvision/torchaudio ⇒ pip 默认拉 CUDA 轮（数 GB），
+# 2026-11-16 实测在 241 构建 KS 镜像时 `pip install -r requirements.txt` 卡 20+ 分钟
+# 无 TCP 连接（只有 57s CPU）。先从 CPU 索引装好满足依赖，后面 requirements 不再拉 CUDA 版。
 RUN pip install --upgrade pip \
+ && pip install --no-cache-dir torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu \
  && pip install -r requirements.txt \
  && pip install -e ./packages/agent-core \
  && pip install -e ./packages/shared-schemas \
