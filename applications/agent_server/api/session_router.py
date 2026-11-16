@@ -3,9 +3,11 @@
 from datetime import UTC
 
 from agent_core.logging import get_logger
-from agent_runtime.workspace_registry import server_tenant_id
+from agent_runtime.db import get_pool
+from agent_runtime.workspace_registry import asserted_user_id, server_tenant_id
 from fastapi import APIRouter, Depends, HTTPException, Request
 
+from agent_server.api import sessions_service as _sessions
 from agent_server.api.auth import require_feature, resolve_thread_id, verify_api_key
 from agent_server.config import get_settings
 from agent_server.memory import recall_exact as _recall_exact
@@ -32,6 +34,16 @@ async def history(
     thread_id 派生，归属取服务端断言主体）。
     """
     thread_id = resolve_thread_id(session_id)
+    # 多会话：session_id 是服务端签发且归属匹配的会话 → 用其专属 thread_id 读历史；
+    # 否则保持断言主体 thread_id（存量兼容）。非法/越权会话读不到他人历史。
+    settings = get_settings()
+    session_thread = await _sessions.resolve_session_thread(
+        get_pool(), session_id,
+        org_id=server_tenant_id(settings.default_tenant_id),
+        user_id=asserted_user_id() or "",
+    )
+    if session_thread is not None:
+        thread_id = session_thread
     checkpointer = getattr(request.app.state, "checkpointer", None)
     if checkpointer is None:
         raise HTTPException(status_code=503, detail="CHECKPOINTER_UNAVAILABLE")

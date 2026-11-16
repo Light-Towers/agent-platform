@@ -226,3 +226,27 @@ class HistoryResponse(BaseModel):
     items: list[HistoryItem]
 
 
+# 多会话目录契约（服务端签发 session_id + 归属断言；见 api/sessions_service.py）
+class SessionCreateRequest(BaseModel):
+    title: str = Field(default="", max_length=200)
+    workspace_id: str = Field(default="default", max_length=200)
+
+
+class SessionInfo(BaseModel):
+    session_id: str
+    title: str
+    workspace_id: str
+    created_at: str | None = None
+    last_active_at: str | None = None
+
+
+class SessionListResponse(BaseModel):
+    sessions: list[SessionInfo]
+    count: int
+
+
+class SessionDeleteResponse(BaseModel):
+    session_id: str
+    deleted: bool = True
+
+

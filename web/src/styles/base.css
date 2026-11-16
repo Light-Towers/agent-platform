@@ -632,6 +632,66 @@ a.ry-btn { text-decoration: none; }
 .kb-step.is-running { border-color: var(--ry-tag-warning-border); color: var(--ry-warning); }
 .kb-step.is-pending { color: var(--text-2); }
 .kb-previews { margin: 0; padding-inline-start: var(--sp-4); }
+/* 上传历史：每次上传一项，选中态高亮，刷新后从 localStorage 恢复 */
+.kb-history {
+  display: grid;
+  gap: var(--sp-2);
+}
+.kb-history__item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  text-align: left;
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--border-decor);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.kb-history__item.is-active {
+  border-color: var(--ry-primary);
+  background: var(--bg-raised);
+}
+.kb-history__item .hint { margin-left: auto; }
+
+/* ---- 多会话窗口 + 历史对话（2026-11-16）----
+ * 会话切换条：每项内有「选中」与「删除」两钮，选中态高亮；历史消息区分我/助手。 */
+.session-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin-top: var(--sp-3);
+}
+.session-tabs__item {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--border-decor);
+  border-radius: var(--radius-sm);
+}
+.session-tabs__item.is-active {
+  border-color: var(--ry-primary);
+  background: var(--bg-raised);
+}
+.session-tabs__pick { max-width: 16rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-tabs__del { padding-inline: var(--sp-2); color: var(--text-2); }
+.chat-history {
+  display: grid;
+  gap: var(--sp-3);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 24rem;
+  overflow-y: auto;
+}
+.chat-history__item {
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-decor);
+}
+.chat-history__item.is-user { background: var(--bg-raised); }
+.chat-history__text { white-space: pre-wrap; word-break: break-word; margin-top: var(--sp-1); }
 /* ============================================================================
  * 登录面容器（PR-2b 登录/建号一屏）—— 给登录面**自己的**骨架
  * ============================================================================

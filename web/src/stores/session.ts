@@ -215,7 +215,7 @@ export function hasFeature(code: string): boolean {
  * 发一问。`fetchImpl` 是测试注入位（`verify-sse.mjs` §G 靠它喂假流，不发网络）。
  * 返回值不外露 Promise 语义：调用方 `void ask()` 即可，状态全在导出视图里。
  */
-export async function ask(fetchImpl?: typeof fetch): Promise<void> {
+export async function ask(fetchImpl?: typeof fetch, sessionId?: string): Promise<void> {
   const q = question.value.trim()
   if (q === '' || streaming.value) return
   streaming.value = true
@@ -231,6 +231,7 @@ export async function ask(fetchImpl?: typeof fetch): Promise<void> {
     token: authToken.value,
     onUpdate: onTick,
     ...(fetchImpl !== undefined ? { fetchImpl } : {}),
+    ...(sessionId !== undefined && sessionId !== '' ? { sessionId } : {}),
   }
   try {
     const final = await streamQuery(opts)

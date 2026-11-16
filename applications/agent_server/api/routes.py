@@ -16,6 +16,7 @@ from agent_server.api.import_router import router as import_router
 from agent_server.api.kb_router import router as kb_router
 from agent_server.api.query_router import router as query_router
 from agent_server.api.session_router import router as session_router
+from agent_server.api.sessions_router import router as sessions_router
 from agent_server.api.sql_router import router as sql_router
 
 router = APIRouter()
@@ -27,6 +28,7 @@ router.include_router(kb_router)
 router.include_router(datasources_router)
 router.include_router(sql_router)
 router.include_router(session_router)
+router.include_router(sessions_router)
 router.include_router(control_router)
 router.include_router(callback_router)
 router.include_router(human_task_router)

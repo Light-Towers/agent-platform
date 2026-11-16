@@ -25,17 +25,24 @@
  *   的 /kb/* 代理（kb_router.py），凭据头经 applyCredentialHeaders 唯一装配点。
  * ==========================================================================-->
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 
 import { authToken } from '../stores/session'
 import {
   uploadKbDocuments,
   getKbStatus,
   listKbDocuments,
+  KbRateLimitedError,
   type KbUploadForm,
   type KbTaskStatus,
 } from '../api/kb.ts'
 import { DIALECT_OPTIONS } from '../api/datasources.ts'
+import {
+  loadUploads,
+  addUpload,
+  updateUploadStatus,
+  type KbUploadRecord,
+} from '../stores/kbHistory.ts'
 
 /** 默认配置即"能跑"：DRAFT + PRIVATE + 勾语义识别；knowledge_id 提示管理员可填以便登记。 */
 const form = ref<KbUploadForm>({
@@ -59,7 +66,12 @@ const busy = ref(false)
 const dragOver = ref(false)
 const errorText = ref('')
 const taskIds = ref<string[]>([])
+/** 当前正在查看的结果；始终等于历史列表里 activeTaskId 那条的 status。 */
 const status = ref<KbTaskStatus | null>(null)
+const activeTaskId = ref('')
+/** 上传历史（localStorage 恢复），刷新后仍在。 */
+const uploads = ref<KbUploadRecord[]>([])
+/** 后端按 knowledge_id 登记的文档列表（只作补充展示）。 */
 const documents = ref<unknown>(null)
 
 /** 7 个逻辑步骤，按 done_list 里出现的**中文名**点亮（节点可跳过，不按数组下标画死）。 */
@@ -111,10 +123,17 @@ async function submit(): Promise<void> {
   }
   busy.value = true
   try {
+    const names = files.value.map((f) => f.name).join('、')
     const res = await uploadKbDocuments(files.value, form.value, authToken.value ?? '')
     taskIds.value = (res as { task_ids?: string[] }).task_ids ?? []
     const firstId = taskIds.value[0]
-    if (firstId !== undefined) await poll(firstId)
+    if (firstId !== undefined) {
+      // 先落一条初始记录，再轮询；这样即使中途刷新，也能在历史里看到并续查。
+      addUpload(firstId, names, { code: 0, task_id: firstId, status: '', done_list: [], running_list: [], error: '', summary: {} })
+      uploads.value = loadUploads()
+      activeTaskId.value = firstId
+      await poll(firstId)
+    }
     await refreshDocuments()
   } catch (err) {
     errorText.value = err instanceof Error ? err.message : String(err)
@@ -123,22 +142,72 @@ async function submit(): Promise<void> {
   }
 }
 
-/** 上传返回后轮询到终态（成功/失败）；最多 60 次 × 2s，避免永久转圈。 */
+/**
+ * 上传返回后轮询到终态（成功/失败）。
+ * KS 侧限流 20 次/60s，2s 轮询 40s 就撞 429 ⇒ 间隔放宽到 4s（15 次/60s 留余量），
+ * 且撞到 429 按 Retry-After 退避而非当成错误，否则大文档还没解析完就被误报失败。
+ * 最多 90 次 × 4s ≈ 6 分钟，覆盖大 PDF 解析时长。
+ */
 async function poll(taskId: string): Promise<void> {
-  for (let i = 0; i < 60; i += 1) {
-    const next = await getKbStatus(taskId, authToken.value ?? '')
+  for (let i = 0; i < 90; i += 1) {
+    let next: KbTaskStatus
+    try {
+      next = await getKbStatus(taskId, authToken.value ?? '')
+    } catch (err) {
+      if (err instanceof KbRateLimitedError) {
+        errorText.value = `任务仍在处理中（服务端限流，等待 ${Math.round(err.retryAfterMs / 1000)}s 后继续查询）…`
+        await new Promise((resolve) => setTimeout(resolve, err.retryAfterMs))
+        i -= 1
+        continue
+      }
+      throw err
+    }
+    errorText.value = ''
     status.value = next
+    updateUploadStatus(taskId, next)
+    uploads.value = loadUploads()
     if (next.status === 'completed' || next.status === 'failed') return
-    await new Promise((resolve) => setTimeout(resolve, 2000))
+    await new Promise((resolve) => setTimeout(resolve, 4000))
   }
   errorText.value = '处理仍在进行中，可稍后刷新本页查看结果'
 }
+
+/** 点击历史项：切换当前查看的切块结果（不依赖 KS 进程是否还活着）。 */
+function selectTask(record: KbUploadRecord): void {
+  activeTaskId.value = record.taskId
+  status.value = record.status
+  taskIds.value = [record.taskId]
+  errorText.value = ''
+}
+
+/** 刷新后恢复历史；对仍未终态的任务续轮询（KS 进程存活时查得到）。 */
+async function restore(): Promise<void> {
+  uploads.value = loadUploads()
+  const unfinished = uploads.value.find((r) => r.status.status !== 'completed' && r.status.status !== 'failed')
+  if (unfinished) {
+    activeTaskId.value = unfinished.taskId
+    status.value = unfinished.status
+    taskIds.value = [unfinished.taskId]
+    try {
+      await poll(unfinished.taskId)
+    } catch {
+      // KS 重启后查不回：保留本地快照，不强报错误
+    }
+  } else {
+    const latest = uploads.value[0]
+    if (latest) selectTask(latest)
+  }
+  await refreshDocuments()
+}
+
+onMounted(restore)
 
 async function refreshDocuments(): Promise<void> {
   try {
     documents.value = await listKbDocuments(authToken.value ?? '')
   } catch (err) {
-    errorText.value = err instanceof Error ? err.message : String(err)
+    // 登记列表是补充项，拉取失败不覆盖上传主流程的错误提示
+    if (!errorText.value) errorText.value = err instanceof Error ? err.message : String(err)
   }
 }
 </script>
@@ -342,7 +411,35 @@ async function refreshDocuments(): Promise<void> {
       </details>
     </section>
 
-    <!-- ② 管理员层：结果可核对（步骤 + 切片 + 语义结构） -->
+    <!-- ② 管理员层：历史任务切换 + 结果可核对（步骤 + 切片 + 语义结构） -->
+    <section
+      v-if="uploads.length"
+      class="ry-card"
+      aria-labelledby="hHistory"
+    >
+      <h2 id="hHistory">
+        上传历史
+        <span class="count-badge">{{ uploads.length }} 条</span>
+      </h2>
+      <p class="hint">
+        每次上传的结果都保存在本机浏览器，刷新或重进页面仍可查看；点击任一条切换下方切片结果。
+      </p>
+      <div class="kb-history">
+        <button
+          v-for="rec in uploads"
+          :key="rec.taskId"
+          type="button"
+          class="kb-history__item"
+          :class="{ 'is-active': rec.taskId === activeTaskId }"
+          @click="selectTask(rec)"
+        >
+          <strong>{{ rec.filename }}</strong>
+          <span class="hint">{{ new Date(rec.uploadedAt).toLocaleString() }}</span>
+          <span class="count-badge">{{ rec.status.status === 'completed' ? '完成' : rec.status.status === 'failed' ? '失败' : '进行中' }}</span>
+        </button>
+      </div>
+    </section>
+
     <section
       v-if="status"
       class="ry-card"
@@ -420,12 +517,15 @@ async function refreshDocuments(): Promise<void> {
       </p>
     </section>
 
-    <!-- ③ 文档登记列表（不是主线，收起） -->
+    <!-- ③ 后端登记的文档列表（knowledge_id 非空才会登记，作补充展示） -->
     <section class="ry-card">
       <details class="fold">
         <summary>
-          <span class="o-head-sm">已登记文档（点开后刷新）</span>
+          <span class="o-head-sm">已登记文档（服务端，按 knowledge_id）</span>
         </summary>
+        <p class="hint">
+          这里只列出上传时填了 knowledge_id 的文档；未填的上传记录在上面「上传历史」里。
+        </p>
         <button
           type="button"
           class="ry-btn"

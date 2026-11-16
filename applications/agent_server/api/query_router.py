@@ -10,11 +10,12 @@ from agent_runtime.cache import get_cache
 from agent_runtime.db import get_pool
 from agent_runtime.planner.protocol import PlannerContext
 from agent_runtime.schemas import ADMISSION_ADMITTED, ADMISSION_QUEUED, ADMISSION_REJECTED
-from agent_runtime.workspace_registry import resolve_workspace, server_tenant_id
+from agent_runtime.workspace_registry import asserted_user_id, resolve_workspace, server_tenant_id
 from fastapi import APIRouter, Depends, Header, Request
 from fastapi.responses import StreamingResponse
 from shared_schemas import sse_pack
 
+from agent_server.api import sessions_service as _sessions
 from agent_server.api.auth import require_feature, resolve_thread_id, verify_api_key
 from agent_server.config import get_settings
 from agent_server.memory import thread_persist as _thread_persist
@@ -51,6 +52,16 @@ async def query(
     planner_runtime = getattr(request.app.state, "planner_runtime", None)
     checkpointer = getattr(request.app.state, "checkpointer", None)
     pool = get_pool()
+    # 多会话：session_id 若是服务端签发且归属匹配的会话 → 切到会话专属 thread_id；
+    # 否则（无 session_id / 旧 id / 归属不符）保持 L39 的断言主体 thread_id 逐字不变（D-l 红线）。
+    session_thread = await _sessions.resolve_session_thread(
+        pool, req.session_id, org_id=tenant, user_id=asserted_user_id() or "",
+    )
+    if session_thread is not None:
+        thread_id = session_thread
+        await _sessions.touch_session(
+            pool, req.session_id, org_id=tenant, user_id=asserted_user_id() or "",
+        )
     scheduler = getattr(request.app.state, "scheduler", None)
     status_store = getattr(request.app.state, "status_store", None)
     cost_governance = getattr(request.app.state, "cost_governance", None)

@@ -54,3 +54,27 @@ export function setTheme(mode: ThemeMode): void {
     // 这里不弹错误也不降级档位 —— 用户要的是这一屏的配色，持久化失败不是配色失败。
   }
 }
+
+/* ---- 非凭据 UI 状态的 localStorage 唯一装配位 ----
+ * 工单件 §2.3 的存储纪律是「凭据只存内存/sessionStorage、不许散落」，由 check-events.mjs
+ * 的存储白名单（auth.ts / theme.ts）把写入收敛到这两件。上传历史（kbHistory.ts）与当前
+ * 会话选中态（conversations.ts）都是**非凭据 UI 偏好**，与主题同类，故把通用的字符串读写
+ * 收敛到这里，消费件只调本函数、不自己碰 localStorage.*——这样存储写者不越白名单，
+ * 门禁语义（谁能写存储）不被削弱，凭据（ap.auth.token 在 auth.ts 的 sessionStorage）不受影响。
+ * ⚠ 只准存非凭据值：调用方传进来的必须能 JSON 序列化，且不得含令牌/口令。 */
+export function readUiState(key: string): string | null {
+  try {
+    return localStorage.getItem(key)
+  } catch {
+    return null
+  }
+}
+
+export function writeUiState(key: string, value: string | null): void {
+  try {
+    if (value === null) localStorage.removeItem(key)
+    else localStorage.setItem(key, value)
+  } catch {
+    // 配额满/隐私模式：UI 偏好存不下不影响主流程
+  }
+}

@@ -17,9 +17,10 @@
  *   （键盘不碰鼠标完成一次提问）不受影响。
  * ==========================================================================-->
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 
 import Answer from './components/Answer.vue'
+import ChatHistory from './components/ChatHistory.vue'
 import EvidenceList from './components/EvidenceList.vue'
 import Legend from './components/Legend.vue'
 import LoginView from './components/LoginView.vue'
@@ -29,6 +30,17 @@ import DatasourceConfig from './components/DatasourceConfig.vue'
 import ThemeToggle from './components/ThemeToggle.vue'
 import HealthView from './components/HealthView.vue'
 import Timeline from './components/Timeline.vue'
+import {
+  activeSessionId,
+  clearConversations,
+  conversationsBusy,
+  conversationsNotice,
+  loadSessions,
+  newSession,
+  removeSession,
+  selectSession,
+  sessionList,
+} from './stores/conversations.ts'
 import {
   ask,
   banners,
@@ -89,7 +101,17 @@ const chatShown = computed(() => activeView.value === 'chat' || (!showRoleGate.v
 
 /* 挂载时确认一次登录态（A8「刷新仍在登录」那一格的调用点）。本件不自己决定何时确认：
  * 会话层故意不在模块加载时自发请求，否则行为件在 Node 里 import 会话层就会多一个 fetch。 */
-onMounted(() => { void resumeSession() })
+onMounted(async () => {
+  await resumeSession()
+  if (canChat.value) await loadSessions()
+})
+
+/* 登录态变化（登录后 / 掉态后）同步会话目录：登录后拉列表，掉态后清空，避免把上一人的
+ * 会话选中态带到下一个人。刷新路径 onMounted 已处理，这里只补「同页登录/登出」的跃迁。 */
+watch(canChat, (ok) => {
+  if (ok) void loadSessions()
+  else clearConversations()
+})
 
 /* 提交那一行的第二通道：不可用态只说明"现在不能按"，说不清**为什么**不能按（A4 的
  * 同一条要求在控件上也成立）。两句互斥，所以只可能同时出现一句。 */
@@ -102,10 +124,12 @@ const submitHint = computed(() =>
  *  显式 `void` 掉 Promise：模板里的处理器不该有未处理的 promise（lint 的
  *  `no-floating-promises` 只看得到这一层，看不到组件里）。 */
 function submit(): void {
-  void ask()
+  // 第二参数是 sessionId（保持 ask(fetchImpl) 兼容 verify-sse.mjs）。当前会话存在才带。
+  void ask(undefined, activeSessionId.value || undefined)
 }
 
 function onSignOut(): void {
+  clearConversations()
   void signOut()
 }
 </script>
@@ -216,12 +240,73 @@ function onSignOut(): void {
         </button>
       </section>
 
+      <!-- 多会话窗口：新建 / 切换 / 删除；选中态刷新后恢复 -->
+      <section
+        v-if="chatShown"
+        class="ry-card"
+        aria-labelledby="hSessions"
+      >
+        <h2 id="hSessions">
+          会话窗口
+          <span class="count-badge">{{ sessionList.length }}</span>
+        </h2>
+        <p
+          v-if="conversationsNotice"
+          class="banner"
+        >
+          <strong>{{ conversationsNotice }}</strong>
+        </p>
+        <div class="composer__row">
+          <button
+            type="button"
+            class="ry-btn ry-btn--primary"
+            :aria-disabled="conversationsBusy"
+            @click="newSession"
+          >
+            {{ conversationsBusy ? '处理中…' : '新建会话' }}
+          </button>
+          <span class="hint">不同会话的历史各自独立、刷新后仍可切换查看</span>
+        </div>
+        <div class="session-tabs">
+          <div
+            v-for="s in sessionList"
+            :key="s.session_id"
+            class="session-tabs__item"
+            :class="{ 'is-active': s.session_id === activeSessionId }"
+          >
+            <button
+              type="button"
+              class="ry-btn ry-btn--text session-tabs__pick"
+              @click="selectSession(s.session_id)"
+            >
+              {{ s.title || s.session_id }}
+            </button>
+            <button
+              type="button"
+              class="ry-btn ry-btn--text session-tabs__del"
+              :aria-label="`删除会话 ${s.title}`"
+              @click="removeSession(s.session_id)"
+            >
+              ×
+            </button>
+          </div>
+          <p
+            v-if="!sessionList.length"
+            class="hint"
+          >
+            还没有会话，点「新建会话」开始，或直接提问（将不归属任何命名会话）。
+          </p>
+        </div>
+      </section>
+
       <!-- 对话页（两栏：答案/依据 + 时间线/输入） -->
       <div
         v-if="chatShown"
         class="grid"
       >
         <div class="col">
+          <ChatHistory />
+
           <section
             class="ry-card"
             aria-labelledby="hAnswer"

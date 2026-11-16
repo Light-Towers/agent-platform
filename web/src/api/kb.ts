@@ -19,11 +19,25 @@ import { handleSessionExpired } from '../stores/session.ts'
  * ⚠ 依赖方向：`kb.ts` 是 API 层、import 会话层只取这一个纯函数；会话层不反过来 import kb.ts，
  *   没有循环依赖（与 `App.vue` 直接读 session 同一条单向数据流）。
  */
+/** 429 是限流不是任务失败：任务仍在后台跑，交给轮询层退避重试，不当错误甩给用户。 */
+export class KbRateLimitedError extends Error {
+  readonly retryAfterMs: number
+  constructor(retryAfterMs: number) {
+    super('请求过于频繁')
+    this.name = 'KbRateLimitedError'
+    this.retryAfterMs = retryAfterMs
+  }
+}
+
 async function failKb(action: string, resp: Response): Promise<never> {
   const text = await resp.text().catch(() => '')
   if (resp.status === 401) {
     handleSessionExpired()
     throw new Error(`${action}失败：登录令牌已过期，请重新登录后再试`)
+  }
+  if (resp.status === 429) {
+    const ra = Number(resp.headers.get('Retry-After'))
+    throw new KbRateLimitedError(Number.isFinite(ra) && ra > 0 ? ra * 1000 : 10_000)
   }
   throw new Error(`${action}失败：HTTP ${resp.status} ${text.slice(0, 200)}`)
 }
