@@ -23,9 +23,17 @@ RUN corepack enable
 # 清单先 COPY、源码后 COPY：改一行 .vue 不应重装依赖（层缓存的最小前提）。
 # --frozen-lockfile 是判据不是优化项：pnpm-lock.yaml 与 package.json 对不上时必须红，
 # 而不是"悄悄装成别的版本然后构建绿"——锁文件因此是必入库件（工单件 §9.2）。
+#
+# ⚠ 2026-11-16 订正一处**注释与实物不同步**：上面那句"改一行 .vue 不应重装依赖"当时
+#   **并没有成立**——`COPY web/ ./` 写在 `pnpm install` 之前，所以任何前端源码改动都会
+#   让安装层失效，重跑一遍 pnpm install（2026-11-16 实测：内网每次 30–45s，且要联网）。
+#   ⇒ 拆成三层：依赖层（只随清单变）/ 源码层（只随源码变）/ 构建层。
+#   依据：COPY 的层缓存键 = 该指令及其之前所有层的输入摘要；把「清单」与「源码」
+#   分成两次 COPY，安装层便不再看见源码。
 COPY web/package.json web/pnpm-lock.yaml ./
+RUN echo "registry=${NPM_REGISTRY}" > .npmrc && pnpm install --frozen-lockfile
 COPY web/ ./
-RUN echo "registry=${NPM_REGISTRY}" > .npmrc && pnpm install --frozen-lockfile && pnpm run build
+RUN pnpm run build
 
 # ============================================================================
 # 阶段 2/2 运行镜像：python:3.11-slim，**里面没有 node、没有 node_modules**
@@ -51,7 +59,6 @@ COPY pyproject.toml README.md ./
 COPY packages/agent-core ./packages/agent-core
 COPY packages/shared-schemas ./packages/shared-schemas
 COPY packages/agent-runtime ./packages/agent-runtime
-COPY applications/agent_server ./applications/agent_server
 
 # agent-core / shared-schemas / agent-runtime 是 [project].dependencies 里的本地 workspace 包，
 # [tool.uv.sources] workspace=true 仅 uv 能解析；普通 pip 会误当 PyPI 包去下载。
@@ -62,7 +69,15 @@ COPY applications/agent_server ./applications/agent_server
 # 1) extra 挂在 agent-core 上，不是根包 —— 写成 ".[otel,memory-embed-local]" 时 pip 只对未知
 #    extra 告警并继续，构建照样绿、镜像里却没有 sentence_transformers，属静默丢失（2026-10-10 实测）。
 # 2) torch 先从 CPU 索引装：否则 sentence-transformers 拉的是 CUDA 轮，白背 ~2G 且 Pod 内无 GPU可用。
+#
+# ⚠ 2026-11-16 调整**本层的位置**：原来这行在 `COPY applications/agent_server` 之后，
+#   于是**每次改业务代码都让这层失效** ⇒ 重下 209MB 的 CPU 版 torch（2026-11-16 实测
+#   约 2 分钟；且 `--no-cache-dir` 让 pip 自己不留缓存，只能靠 Docker 层缓存兜）。
+#   ⇒ 把 torch 提到「业务代码 COPY」之前：它与业务代码无关，单独成层后，
+#   改 applications/ 只失效后面那条 pip（依赖解析快得多），改 packages/ 才失效这一层。
 RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
+
+COPY applications/agent_server ./applications/agent_server
 # extras 必须挂在**声明它的那个包**上：`[langfuse]` 声明在 packages/agent-runtime
 # （根包没有这个 extra）。写成 `.[langfuse]` 时 pip 只对未知 extra 告警并继续，
 # 构建照样绿、镜像里却没有包——与 memory-embed-local 那颗雷完全同形（2026-10-10 实测）。
