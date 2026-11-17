@@ -1,15 +1,15 @@
-"""Workflow Skill（完整架构 Phase C）：静态 DAG → 编译为 Workflow Skill 注册 SkillRegistry。
+"""Workflow Capability（完整架构 Phase C）：静态 DAG → 编译为 Workflow Capability 注册 CapabilityRegistry。
 
 架构契约（docs/complete-agent-runtime-architecture.md §6）：
 - Workflow 定义（节点 / 依赖边 / 输入输出 schema）经 ``compile_workflow`` 编译为
-  一个 ``Skill(kind=WORKFLOW)``，具备统一的 name / input_schema / output_schema / permissions；
+  一个 ``Capability(kind=WORKFLOW)``，具备统一的 name / input_schema / output_schema / permissions；
 - 注册后，Mode Selector / Planner 可像普通能力一样 discover 并调用它；
 - 执行时由 ``WorkflowExecutor`` 把定义还原为 ``ExecutionGraph``，并经统一 Runtime
   （``delegate`` / 组合治理 / 轨迹）执行——拥有 discover / permission / 超时 / 重试 /
   熔断 / tracing / trajectory 等统一运行时能力。
 
 输入映射（节点 ``inputs``）语义与 Dynamic Graph 一致：
-- ``"$input.<key>"``：来自 Workflow Skill 被调用时的入参 kwargs；
+- ``"$input.<key>"``：来自 Workflow Capability 被调用时的入参 kwargs；
 - ``"$node.<node_id>"``：引用上游节点输出（执行期动态解析）；
 - 其他值视为字面量透传。
 
@@ -24,15 +24,15 @@ input_schema:
   required: [question]
 nodes:
   - id: "route"
-    skill: "route"
+    capability: "route"
     inputs:
       question: "$input.question"
   - id: "search"
-    skill: "search"
+    capability: "search"
     inputs:
       query: "$input.question"
   - id: "summarize"
-    skill: "summarize"
+    capability: "summarize"
     inputs:
       text: "$node.search"
 edges:
@@ -53,19 +53,19 @@ from typing import Any
 import yaml
 from pydantic import BaseModel, Field
 
+from agent_runtime.capabilities.registry import Capability, CapabilityKind, ExecutionBoundary
 from agent_runtime.planner.execution_graph import (
     ExecutionGraph,
     _run_graph_in_place,
 )
 from agent_runtime.planner.protocol import PlannerRuntime, get_current_runtime
-from agent_runtime.skills.registry import ExecutionBoundary, Skill, SkillKind
 
 
 class WorkflowNode(BaseModel):
-    """工作流节点：一次 Skill 调用（skill 须已在注册表）。"""
+    """工作流节点：一次 Capability 调用（capability 须已在注册表）。"""
 
     id: str
-    skill: str
+    capability: str
     inputs: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -106,9 +106,9 @@ def _resolve_input(value: Any, call_kwargs: dict[str, Any]) -> tuple[Any, str | 
 
 
 class WorkflowExecutor:
-    """Workflow Skill 执行器：把 ``WorkflowSpec`` 还原为 ExecutionGraph 并经统一 Runtime 执行。
+    """Workflow Capability 执行器：把 ``WorkflowSpec`` 还原为 ExecutionGraph 并经统一 Runtime 执行。
 
-    边界处理（doc §7 Skill→Skill 须经 Runtime）：
+    边界处理（doc §7 Capability→Capability 须经 Runtime）：
     - 若已处于某个 ``execution()`` 边界内（如经 ``execute_plan`` 单 route delegate 调用），
       直接用 ``_run_graph_in_place`` 复用同一执行上下文（预算 / 调用栈 / trace 连续累计）；
     - 否则（独立调用）创建新的 ``PlannerRuntime`` + 边界，保证组合治理与轨迹可用。
@@ -129,7 +129,7 @@ class WorkflowExecutor:
                     input_refs[arg] = f"node:{ref}"
                 else:
                     node_kwargs[arg] = resolved
-            g.add_node(n.id, n.skill, kwargs=node_kwargs, input_refs=input_refs)
+            g.add_node(n.id, n.capability, kwargs=node_kwargs, input_refs=input_refs)
         for e in self._spec.edges:
             g.add_edge(e.dependent, e.dependency)
         return g
@@ -165,20 +165,20 @@ class WorkflowExecutor:
         return results.get(out_node)
 
 
-def compile_workflow(spec: "WorkflowSpec | dict[str, Any]", *, registry: Any | None = None) -> Skill:
-    """把 Workflow 定义编译为 Workflow Skill（kind=WORKFLOW）。
+def compile_workflow(spec: "WorkflowSpec | dict[str, Any]", *, registry: Any | None = None) -> Capability:
+    """把 Workflow 定义编译为 Workflow Capability（kind=WORKFLOW）。
 
     :param spec: ``WorkflowSpec`` 或等价 dict。
     :param registry: 可选注册表，供 Workflow 独立执行（不经过统一 Runtime 边界时）回溯子能力。
-    :return: 可注册到 ``SkillRegistry`` 的 ``Skill``（含 input/output schema 与权限声明）。
+    :return: 可注册到 ``CapabilityRegistry`` 的 ``Capability``（含 input/output schema 与权限声明）。
     """
     if not isinstance(spec, WorkflowSpec):
         spec = WorkflowSpec(**spec)
     executor = WorkflowExecutor(spec, registry=registry)
-    return Skill(
+    return Capability(
         name=spec.name,
         description=spec.description,
-        kind=SkillKind.WORKFLOW,
+        kind=CapabilityKind.WORKFLOW,
         executor=executor.execute,
         execution_boundary=ExecutionBoundary.INPROCESS,
         input_schema=spec.input_schema,
@@ -188,12 +188,12 @@ def compile_workflow(spec: "WorkflowSpec | dict[str, Any]", *, registry: Any | N
     )
 
 
-def load_workflow_yaml(path: str | pathlib.Path, *, registry: Any | None = None) -> Skill:
-    """从 YAML 文件加载并编译为 Workflow Skill。
+def load_workflow_yaml(path: str | pathlib.Path, *, registry: Any | None = None) -> Capability:
+    """从 YAML 文件加载并编译为 Workflow Capability。
 
     :param path: .yaml/.yml 文件路径。
     :param registry: 可选注册表，传给 ``compile_workflow``。
-    :return: 可直接注册到 ``SkillRegistry`` 的 ``Skill``。
+    :return: 可直接注册到 ``CapabilityRegistry`` 的 ``Capability``。
     """
     p = pathlib.Path(path)
     if not p.exists():
@@ -208,24 +208,24 @@ def discover_workflows(
     *,
     registry: Any | None = None,
     pattern: str = "*.y*ml",
-) -> list[Skill]:
+) -> list[Capability]:
     """递归扫描目录，加载所有匹配的 Workflow YAML 文件。
 
     :param directory: 扫描根目录（如 ``workflows/``）。
     :param registry: 可选注册表，传给 ``compile_workflow``。
     :param pattern: glob 模式（默认 ``*.y*ml`` 兼容 .yaml/.yml）。
-    :return: 编译后的 ``Skill`` 列表，按文件名排序以保证确定性。
+    :return: 编译后的 ``Capability`` 列表，按文件名排序以保证确定性。
     """
     root = pathlib.Path(directory)
     if not root.exists() or not root.is_dir():
         return []
-    skills: list[Skill] = []
+    capabilities: list[Capability] = []
     for file in sorted(root.rglob(pattern)):
         try:
-            skills.append(load_workflow_yaml(file, registry=registry))
+            capabilities.append(load_workflow_yaml(file, registry=registry))
         except Exception as e:
             raise RuntimeError(f"Failed to load workflow {file}: {e}") from e
-    return skills
+    return capabilities
 
 
 __all__ = [

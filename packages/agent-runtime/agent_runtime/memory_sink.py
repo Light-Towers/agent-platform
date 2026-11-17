@@ -9,13 +9,13 @@ execute_plan 完成
     ↓ post_execution_hooks
 EpisodicSink → EpisodicMemory.remember(trajectory) → Episode
     ↓ 每 N 次
-ProceduralSink → ProceduralExtractor.extract_patterns() → CandidateSkill
+ProceduralSink → ProceduralExtractor.extract_patterns() → CandidateCapability
     ↓
 ProceduralMemory.save(ProceduralEntry)
     ↓
-下次任务 → ProceduralMemory.recall() → 匹配 Skill → 直接执行
+下次任务 → ProceduralMemory.recall() → 匹配 Capability → 直接执行
     ↓ 执行后
-SkillUsageTracker.record_use() → check_and_adjust() → lifecycle 升降级
+CapabilityUsageTracker.record_use() → check_and_adjust() → lifecycle 升降级
 ```
 """
 
@@ -29,7 +29,7 @@ from agent_core.memory._tenant_gate import _TENANT_UNSET, resolve_tenant
 
 from agent_runtime.episodic_memory import EpisodicMemory
 from agent_runtime.procedural_memory import (
-    CandidateSkill,
+    CandidateCapability,
     ProceduralEntry,
     ProceduralExtractor,
     ProceduralStore,
@@ -61,7 +61,7 @@ class EpisodicSink:
 
 
 class ProceduralSink:
-    """定期从 Episodic Memory 挖掘候选 Skill → 持久化。
+    """定期从 Episodic Memory 挖掘候选 Capability → 持久化。
 
     每 trigger_interval 次执行触发一次 ProceduralExtractor.extract_patterns，
     把高频成功模式沉淀为 ProceduralEntry（lifecycle=draft），供后续验证。
@@ -86,7 +86,7 @@ class ProceduralSink:
             return
         self._count = 0
 
-        # 租户隔离（plan T1）：挖掘与写候选 Skill 均限本租户；无租户上下文 fail-fast。
+        # 租户隔离（plan T1）：挖掘与写候选 Capability 均限本租户；无租户上下文 fail-fast。
         tenant = resolve_tenant(trajectory.tenant_id or _TENANT_UNSET)
         episodes = await self._ep._store.list_all(tenant_id=tenant)
         candidates = self._extractor.extract_patterns(episodes)
@@ -103,12 +103,12 @@ class ProceduralSink:
             )
 
     async def _save_candidate(
-        self, candidate: CandidateSkill, runtime: Any, tenant: str
+        self, candidate: CandidateCapability, runtime: Any, tenant: str
     ) -> None:
-        """把候选 Skill 持久化为本租户 draft ProceduralEntry。
+        """把候选 Capability 持久化为本租户 draft ProceduralEntry。
 
-        验证 pattern_steps 是否对应 registry 中已注册的 skill，
-        未验证的候选跳过（防止"空壳" skill）。
+        验证 pattern_steps 是否对应 registry 中已注册的 capability，
+        未验证的候选跳过（防止"空壳" capability）。
         """
         if runtime is not None and hasattr(runtime, "registry"):
             valid = all(
@@ -144,8 +144,8 @@ class ProceduralSink:
         await self._proc.save(entry, tenant_id=tenant)
 
 
-class SkillUsageTracker:
-    """记录 Skill 被复用后的效果，自动升降级 lifecycle。
+class CapabilityUsageTracker:
+    """记录 Capability 被复用后的效果，自动升降级 lifecycle。
 
     规则（n ≥ min_uses 时才判定）：
     - draft + success_rate ≥ promote_threshold → stable
@@ -154,8 +154,8 @@ class SkillUsageTracker:
 
     用法：
     ```
-    tracker = SkillUsageTracker(procedural_memory)
-    # skill 被复用后记录效果
+    tracker = CapabilityUsageTracker(procedural_memory)
+    # capability 被复用后记录效果
     tracker.record_use("search", "1.0", success=True)
     # 定期检查并调整
     await tracker.check_and_adjust("search", "1.0")
@@ -178,7 +178,7 @@ class SkillUsageTracker:
     def record_use(
         self, name: str, version: str, success: bool, *, tenant_id: str = _TENANT_UNSET
     ) -> None:
-        """记录一次本租户 Skill 使用结果（按租户隔离统计）。"""
+        """记录一次本租户 Capability 使用结果（按租户隔离统计）。"""
         tenant = resolve_tenant(tenant_id)
         key = (tenant, name, version)
         if key not in self._stats:
@@ -190,13 +190,13 @@ class SkillUsageTracker:
     def get_stats(
         self, name: str, version: str, *, tenant_id: str = _TENANT_UNSET
     ) -> dict[str, int] | None:
-        """获取本租户 Skill 使用统计。"""
+        """获取本租户 Capability 使用统计。"""
         return self._stats.get((resolve_tenant(tenant_id), name, version))
 
     async def check_and_adjust(
         self, name: str, version: str, *, tenant_id: str = _TENANT_UNSET
     ) -> str | None:
-        """检查本租户 Skill 使用效果，自动调整 lifecycle，返回新 lifecycle 或 None（不变）。"""
+        """检查本租户 Capability 使用效果，自动调整 lifecycle，返回新 lifecycle 或 None（不变）。"""
         tenant = resolve_tenant(tenant_id)
         key = (tenant, name, version)
         stats = self._stats.get(key)
@@ -233,7 +233,7 @@ class SkillUsageTracker:
         )
         await self._proc.save(updated, tenant_id=tenant)
         logger.info(
-            "skill %s/%s lifecycle %s → %s (rate=%.2f n=%d)",
+            "capability %s/%s lifecycle %s → %s (rate=%.2f n=%d)",
             name,
             version,
             entry.lifecycle,
@@ -247,5 +247,5 @@ class SkillUsageTracker:
 __all__ = [
     "EpisodicSink",
     "ProceduralSink",
-    "SkillUsageTracker",
+    "CapabilityUsageTracker",
 ]

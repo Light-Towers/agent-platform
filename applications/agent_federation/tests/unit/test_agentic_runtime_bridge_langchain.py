@@ -1,7 +1,7 @@
 """AgenticRuntimeBridge → LangChain 工具 集成测试（Phase D 联邦侧，不拉起 deepagents）。
 
 验证：联邦能力经 discover 转为 LangChain 工具后，agent 调用这些工具会经
-``RuntimeToolCaller`` → ``runtime.delegate`` 进入统一 Skill Runtime 治理
+``RuntimeToolCaller`` → ``runtime.delegate`` 进入统一 Capability Runtime 治理
 （架构不变量 #4：Agentic 不绕过统一 Runtime）。
 """
 
@@ -14,20 +14,20 @@ os.environ.setdefault("OPENAI_API_KEY", "test-key")
 os.environ.setdefault("OPENAI_BASE_URL", "http://localhost/v1")
 
 import pytest
-from agent_runtime.skills.registry import Skill, SkillKind, SkillRegistry
+from agent_runtime.capabilities.registry import Capability, CapabilityKind, CapabilityRegistry
 
 
 class _FakeRuntime:
     """记录 delegate 调用的伪 Runtime（不依赖真实治理链）。"""
 
-    def __init__(self, registry: SkillRegistry) -> None:
+    def __init__(self, registry: CapabilityRegistry) -> None:
         self.registry = registry
         self.delegate_calls: list[tuple[str, dict]] = []
 
     async def delegate(self, name: str, **kwargs: object):
         self.delegate_calls.append((name, kwargs))
-        skill = self.registry._capabilities[name]
-        return await skill.executor(**kwargs)
+        capability = self.registry._capabilities[name]
+        return await capability.executor(**kwargs)
 
 
 async def _db_executor(**kwargs):
@@ -39,12 +39,12 @@ async def test_bridged_tools_route_through_runtime_delegate():
         build_bridged_langchain_tools,
     )
 
-    reg = SkillRegistry()
+    reg = CapabilityRegistry()
     reg.register(
-        Skill(
+        Capability(
             "db_query",
             "查询数据库",
-            SkillKind.FUNCTION,
+            CapabilityKind.FUNCTION,
             _db_executor,
             input_schema={
                 "type": "object",
@@ -76,17 +76,17 @@ async def test_bridged_tools_route_to_distinct_capabilities():
         build_bridged_langchain_tools,
     )
 
-    reg = SkillRegistry()
+    reg = CapabilityRegistry()
     schema = {
         "type": "object",
         "properties": {"q": {"type": "string"}},
         "required": ["q"],
     }
     reg.register(
-        Skill("db_query", "查询数据库", SkillKind.FUNCTION, _db_executor, input_schema=schema)
+        Capability("db_query", "查询数据库", CapabilityKind.FUNCTION, _db_executor, input_schema=schema)
     )
     reg.register(
-        Skill("net_search", "网络搜索", SkillKind.FUNCTION, _db_executor, input_schema=schema)
+        Capability("net_search", "网络搜索", CapabilityKind.FUNCTION, _db_executor, input_schema=schema)
     )
     rt = _FakeRuntime(reg)
 
@@ -110,16 +110,16 @@ async def test_bridge_disabled_returns_default_tools():
     assert _maybe_attach_bridged_tools(base, "q") is base
 
 
-async def test_bridge_registry_includes_sandbox_skill():
-    """沙箱 skill 须注册到桥接能力注册表，AgenticPlanner 才能经 Runtime 路由到沙箱。"""
+async def test_bridge_registry_includes_sandbox_capability():
+    """沙箱 capability 须注册到桥接能力注册表，AgenticPlanner 才能经 Runtime 路由到沙箱。"""
     from agent_federation.planners.agentic_runtime_bridge import (
         federation_capability_registry,
     )
 
     reg = federation_capability_registry()
     assert "code_execution" in reg
-    skill = reg._capabilities["code_execution"]
-    assert skill.kind == SkillKind.FUNCTION
+    capability = reg._capabilities["code_execution"]
+    assert capability.kind == CapabilityKind.FUNCTION
 
 
 async def test_bridged_tools_include_sandbox_via_runtime_delegate():

@@ -181,7 +181,7 @@ class DeterministicPlanner(Planner):
         # 能力调用 + 反思重试：证据为空且未到上限时回到 plan 重新决策（与 synthesize_node 同源）
         # 统一执行边界（P0 路径A）：能力调用经 execution() + delegate 受组合治理，
         # 与 graph 控制平面共享同一执行边界契约。记忆召回/合成/沉淀是 Planner 编排，
-        # 非 Skill 组合，不走 delegate；反思重试在边界内顺序调用，步数累计（max_steps=20 充裕）。
+        # 非 Capability 组合，不走 delegate；反思重试在边界内顺序调用，步数累计（max_steps=20 充裕）。
         async with runtime.execution():
             iterations = plan.iterations
             original_snapshot = plan.last_snapshot
@@ -266,8 +266,8 @@ class DeterministicPlanner(Planner):
                         "latency_ms": round(s.latency * 1000, 1),
                         "tokens": s.tokens,
                         "failed": bool(s.error),
-                        "skill_name": forensic.get("skill_name"),
-                        "skill_version": forensic.get("skill_version"),
+                        "capability_name": forensic.get("capability_name"),
+                        "capability_version": forensic.get("capability_version"),
                         "tool_name": forensic.get("tool_name"),
                         "tool_version": forensic.get("tool_version"),
                     }
@@ -280,7 +280,7 @@ class DeterministicPlanner(Planner):
     async def _run_capability(
         self, plan: Plan, runtime: PlannerRuntime, workspace_id: str, question: str
     ) -> list[str]:
-        """按 Plan.route 经 runtime.delegate（skill_guard 组合治理）执行能力，结果归一化为 evidence 列表。"""
+        """按 Plan.route 经 runtime.delegate（capability_guard 组合治理）执行能力，结果归一化为 evidence 列表。"""
         if plan.route == "direct":
             return []
         if plan.route == "code_execution":

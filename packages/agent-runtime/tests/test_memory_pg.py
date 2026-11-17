@@ -30,14 +30,14 @@ class _FakeCursor:
         if "episodic_memories" in sql:
             if "insert" in sql:
                 # (tenant_id, episode_id, execution_id, task_summary, outcome, key_steps,
-                #  lessons, skill_names, total_tokens, total_cost, duration, importance,
+                #  lessons, capability_names, total_tokens, total_cost, duration, importance,
                 #  created_at, metadata)
                 tenant, eid = params[0], params[1]
                 row = {
                     "tenant_id": tenant,
                     "episode_id": eid, "execution_id": params[2], "task_summary": params[3],
                     "outcome": params[4], "key_steps": json.loads(params[5]),
-                    "lessons": json.loads(params[6]), "skill_names": json.loads(params[7]),
+                    "lessons": json.loads(params[6]), "capability_names": json.loads(params[7]),
                     "total_tokens": params[8], "total_cost": params[9], "duration": params[10],
                     "importance": params[11], "created_at": params[12],
                     "metadata": json.loads(params[13]),
@@ -127,7 +127,7 @@ class _FakeCursor:
         return (
             row["episode_id"], row["execution_id"], row["task_summary"], row["outcome"],
             json.dumps(row["key_steps"]), json.dumps(row["lessons"]),
-            json.dumps(row["skill_names"]), row["total_tokens"], row["total_cost"],
+            json.dumps(row["capability_names"]), row["total_tokens"], row["total_cost"],
             row["duration"], row["importance"], row["created_at"],
             json.dumps(row["metadata"]),
         )

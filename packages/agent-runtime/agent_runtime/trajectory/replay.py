@@ -1,16 +1,16 @@
 """Trajectory Replay（P3-2）。
 
-读取一条 ``TrajectoryRecord``（golden 轨迹），用「重放注册表」按录制顺序回放 Skill 调用，
+读取一条 ``TrajectoryRecord``（golden 轨迹），用「重放注册表」按录制顺序回放 Capability 调用，
 并与原始轨迹逐 step 比对，报告 divergence 点：
 
-- ``order``：同序位调用的 Skill 名称变化（route / skill 顺序变化）；
+- ``order``：同序位调用的 Capability 名称变化（route / capability 顺序变化）；
 - ``extra_call``：重放触发的调用超出录制步数（多余调用）；
-- ``missing_call``：录制存在但重放未触发的 Skill；
-- ``result_change``：同 Skill 成功但结果内容变化；
-- ``error_change``：同 Skill 成功/失败状态反转。
+- ``missing_call``：录制存在但重放未触发的 Capability；
+- ``result_change``：同 Capability 成功但结果内容变化；
+- ``error_change``：同 Capability 成功/失败状态反转。
 
 设计：``replay_trajectory`` 复用 ``execute_plan`` 真实执行链（重放注册表作 ``registry``），
-保证「route 变化 / skill 顺序变化 / 多余调用」都能在真实编排路径上被捕获；比对逻辑与
+保证「route 变化 / capability 顺序变化 / 多余调用」都能在真实编排路径上被捕获；比对逻辑与
 执行解耦（读重放注册表记录的 actual_steps），不依赖持久化是否完成。
 """
 
@@ -62,7 +62,7 @@ class ReplayReport:
 class ReplayRegistry:
     """按录制轨迹构造的重放注册表：``execute`` 按录制顺序回放并自检 divergence。
 
-    - 达录制步数前：与期望 Skill 名比对（不同则记 ``order``），返回/抛出录制结果；
+    - 达录制步数前：与期望 Capability 名比对（不同则记 ``order``），返回/抛出录制结果；
     - 超出录制步数：记 ``extra_call`` 并抛 RuntimeError（中止以暴露多余调用）；
     - ``actual_steps`` 记录真实发生的调用（名称/入参/结果/错误），供 replay 比对。
     """

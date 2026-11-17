@@ -122,7 +122,7 @@ def test_nodes_property():
     g.add_node("a", "search", {"query": "test"})
     nodes = g.nodes
     assert "a" in nodes
-    assert nodes["a"].skill_name == "search"
+    assert nodes["a"].capability_name == "search"
 
 
 def test_edges_property():

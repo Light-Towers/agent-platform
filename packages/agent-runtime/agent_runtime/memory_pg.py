@@ -28,7 +28,7 @@ class PgEpisodicStore(EpisodicStore):
             await conn.execute(
                 "INSERT INTO episodic_memories "
                 "(tenant_id, episode_id, execution_id, task_summary, outcome, key_steps, "
-                " lessons, skill_names, total_tokens, total_cost, duration, "
+                " lessons, capability_names, total_tokens, total_cost, duration, "
                 " importance, created_at, metadata) "
                 "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
                 "ON CONFLICT (episode_id) DO UPDATE SET "
@@ -36,7 +36,7 @@ class PgEpisodicStore(EpisodicStore):
                 " outcome = EXCLUDED.outcome, "
                 " key_steps = EXCLUDED.key_steps, "
                 " lessons = EXCLUDED.lessons, "
-                " skill_names = EXCLUDED.skill_names, "
+                " capability_names = EXCLUDED.capability_names, "
                 " importance = EXCLUDED.importance, "
                 " metadata = EXCLUDED.metadata",
                 (
@@ -47,7 +47,7 @@ class PgEpisodicStore(EpisodicStore):
                     episode.outcome.value,
                     json.dumps(episode.key_steps),
                     json.dumps(episode.lessons),
-                    json.dumps(episode.skill_names),
+                    json.dumps(episode.capability_names),
                     episode.total_tokens,
                     episode.total_cost,
                     episode.duration,
@@ -64,7 +64,7 @@ class PgEpisodicStore(EpisodicStore):
         async with self._pool.connection() as conn:
             cur = await conn.execute(
                 "SELECT episode_id, execution_id, task_summary, outcome, key_steps, "
-                "       lessons, skill_names, total_tokens, total_cost, duration, "
+                "       lessons, capability_names, total_tokens, total_cost, duration, "
                 "       importance, created_at, metadata "
                 "FROM episodic_memories "
                 "WHERE tenant_id = %s AND (task_summary ILIKE %s OR key_steps::text ILIKE %s) "
@@ -79,7 +79,7 @@ class PgEpisodicStore(EpisodicStore):
         async with self._pool.connection() as conn:
             cur = await conn.execute(
                 "SELECT episode_id, execution_id, task_summary, outcome, key_steps, "
-                "       lessons, skill_names, total_tokens, total_cost, duration, "
+                "       lessons, capability_names, total_tokens, total_cost, duration, "
                 "       importance, created_at, metadata "
                 "FROM episodic_memories WHERE episode_id = %s AND tenant_id = %s",
                 (episode_id, tenant),
@@ -94,7 +94,7 @@ class PgEpisodicStore(EpisodicStore):
         async with self._pool.connection() as conn:
             cur = await conn.execute(
                 "SELECT episode_id, execution_id, task_summary, outcome, key_steps, "
-                "       lessons, skill_names, total_tokens, total_cost, duration, "
+                "       lessons, capability_names, total_tokens, total_cost, duration, "
                 "       importance, created_at, metadata "
                 "FROM episodic_memories WHERE execution_id = %s AND tenant_id = %s "
                 "ORDER BY created_at DESC",
@@ -110,7 +110,7 @@ class PgEpisodicStore(EpisodicStore):
         async with self._pool.connection() as conn:
             cur = await conn.execute(
                 "SELECT episode_id, execution_id, task_summary, outcome, key_steps, "
-                "       lessons, skill_names, total_tokens, total_cost, duration, "
+                "       lessons, capability_names, total_tokens, total_cost, duration, "
                 "       importance, created_at, metadata "
                 "FROM episodic_memories WHERE tenant_id = %s "
                 "ORDER BY created_at DESC LIMIT %s",
@@ -137,7 +137,7 @@ class PgEpisodicStore(EpisodicStore):
             outcome=EpisodeOutcome(row[3]),
             key_steps=json.loads(row[4]) if row[4] else [],
             lessons=json.loads(row[5]) if row[5] else [],
-            skill_names=json.loads(row[6]) if row[6] else [],
+            capability_names=json.loads(row[6]) if row[6] else [],
             total_tokens=row[7],
             total_cost=row[8],
             duration=row[9],

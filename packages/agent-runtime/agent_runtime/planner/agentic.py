@@ -18,16 +18,16 @@ import logging
 from collections.abc import AsyncIterator, Callable
 from typing import Any
 
+from agent_runtime.capabilities.registry import Capability, CapabilityKind
 from agent_runtime.planner.protocol import (
+    CapabilityCompositionError,
     ExecutionContext,
     Plan,
     Planner,
     PlannerContext,
     PlannerRuntime,
-    SkillCompositionError,
     StreamEvent,
 )
-from agent_runtime.skills.registry import Skill, SkillKind
 
 logger = logging.getLogger(__name__)
 
@@ -146,9 +146,9 @@ class AgenticPlanner(Planner):
         unsub = _subscribe_monitor(_handle)
         try:
             async with runtime.execution():
-                async with runtime.skill_guard("agentic"):
+                async with runtime.capability_guard("agentic"):
                     answer = await executor(question, workspace_id)
-        except SkillCompositionError:
+        except CapabilityCompositionError:
             unsub()
             raise
         except Exception as exc:
@@ -174,19 +174,19 @@ class AgenticPlanner(Planner):
         executor = factory()
 
         async with runtime.execution():
-            async with runtime.skill_guard("agentic"):
+            async with runtime.capability_guard("agentic"):
                 return await executor(question, workspace_id, main_agent)
 
-    def to_skill(
+    def to_capability(
         self,
         *,
         timeout_ms: int | None = None,
         permissions: frozenset[str] | set[str] | None = None,
-    ) -> Skill:
-        """将 AgenticPlanner 包装为 SkillKind.AGENT 型 Skill。
+    ) -> Capability:
+        """将 AgenticPlanner 包装为 CapabilityKind.AGENT 型 Capability。
 
         executor 经 entry_points 发现（或显式注册），接受 ``question`` / ``workspace_id`` kwargs。
-        注册到 SkillRegistry 后可经 ``runtime.delegate("agentic", question=..., workspace_id=...)`` 调用，
+        注册到 CapabilityRegistry 后可经 ``runtime.delegate("agentic", question=..., workspace_id=...)`` 调用，
         也可在 ExecutionGraph 中作为节点引用。
 
         :raises RuntimeError: entry_points 不可用且未显式注册执行器时。
@@ -202,10 +202,10 @@ class AgenticPlanner(Planner):
                 return await executor(question, workspace_id, main_agent)
             return await executor(question, workspace_id)
 
-        return Skill(
+        return Capability(
             name="agentic",
             description="Agentic Planner：LLM agent 自主决策（deep_agent）",
-            kind=SkillKind.AGENT,
+            kind=CapabilityKind.AGENT,
             executor=execute,
             timeout_ms=timeout_ms,
             input_schema={

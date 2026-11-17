@@ -65,7 +65,7 @@ async def test_no_checkpointer_noop():
 @pytest.mark.asyncio
 async def test_snapshot_roundtrip(saver):
     snap = {"task": {"goal": "g", "completed_steps": ["s1"], "pending": [], "constraints": {}},
-            "execution": {"outputs": {"search": "ok"}, "errors": {}, "skill_stack": []}}
+            "execution": {"outputs": {"search": "ok"}, "errors": {}, "capability_stack": []}}
     await thread_persist.append_thread(saver, "t1", "q", "a", snapshot=snap)
     got = await thread_persist.read_thread_snapshot(saver, "t1")
     assert got == snap

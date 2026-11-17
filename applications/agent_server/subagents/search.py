@@ -1,6 +1,6 @@
 """联网搜索子能力：Tavily；未配置密钥时返回明确提示而非静默空结果。
 
-熔断边界已上提至 SkillRegistry 中间件链（CircuitBreakerMiddleware，
+熔断边界已上提至 CapabilityRegistry 中间件链（CircuitBreakerMiddleware，
 见 capabilities.build_registry）——本实现只负责"搜索"，Runtime 边界不再内嵌。
 """
 

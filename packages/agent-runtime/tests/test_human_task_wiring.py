@@ -21,16 +21,16 @@ from agent_runtime.awaitable_task import (
     AwaitableState,
     InMemoryAwaitableTaskStore,
 )
+from agent_runtime.capabilities.registry import Capability, CapabilityKind, CapabilityRegistry
 from agent_runtime.human_task import HumanTask, HumanTaskStore
 from agent_runtime.planner.execution_graph import ExecutionGraph, execute_graph
 from agent_runtime.planner.protocol import PlannerRuntime, StreamEvent
-from agent_runtime.skills.registry import Skill, SkillKind, SkillRegistry
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
 
-async def _human_awaitable_skill(**kwargs: Any) -> dict[str, Any]:
-    """请求人工审批的可等待 Skill（kind="human"）。"""
+async def _human_awaitable_capability(**kwargs: Any) -> dict[str, Any]:
+    """请求人工审批的可等待 Capability（kind="human"）。"""
     return {
         "__awaitable__": True,
         "kind": "human",
@@ -41,20 +41,20 @@ async def _human_awaitable_skill(**kwargs: Any) -> dict[str, Any]:
     }
 
 
-async def _external_awaitable_skill(**kwargs: Any) -> dict[str, Any]:
-    """普通外部异步 Skill（无 kind=human，走既有 EXTERNAL 路径）。"""
+async def _external_awaitable_capability(**kwargs: Any) -> dict[str, Any]:
+    """普通外部异步 Capability（无 kind=human，走既有 EXTERNAL 路径）。"""
     return {"__awaitable__": True, "task_id": "job-1", "provider": "acme"}
 
 
-def _registry(name: str, fn) -> SkillRegistry:
-    reg = SkillRegistry()
-    reg.register(Skill(name, name, SkillKind.FUNCTION, fn))
+def _registry(name: str, fn) -> CapabilityRegistry:
+    reg = CapabilityRegistry()
+    reg.register(Capability(name, name, CapabilityKind.FUNCTION, fn))
     return reg
 
 
-def _single_node_graph(skill_name: str) -> ExecutionGraph:
+def _single_node_graph(capability_name: str) -> ExecutionGraph:
     g = ExecutionGraph()
-    g.add_node("n1", skill_name, kwargs={"q": "x"})
+    g.add_node("n1", capability_name, kwargs={"q": "x"})
     return g
 
 
@@ -76,7 +76,7 @@ async def test_awaitable_human_dispatches_to_human_task_store():
     awaitable_store = InMemoryAwaitableTaskStore()
     human_store = HumanTaskStore(awaitable_store)
     runtime = PlannerRuntime(
-        registry=_registry("ask_approval", _human_awaitable_skill),
+        registry=_registry("ask_approval", _human_awaitable_capability),
         awaitable_task_store=awaitable_store,
         human_task_store=human_store,
     )
@@ -93,10 +93,10 @@ async def test_awaitable_human_dispatches_to_human_task_store():
     assert task.metadata["prompt"] == "请审批此变更"
     assert task.metadata["options"] == ["approve", "reject"]
     assert task.metadata["approver"] == "manager_a"
-    assert task.metadata["context"] == {"skill_name": "ask_approval", "request": {"amount": 50000}}
+    assert task.metadata["context"] == {"capability_name": "ask_approval", "request": {"amount": 50000}}
     # 挂起事件的 task_id 指向同一条任务（callback / 审批面据此收敛）
     assert susp.payload["task_id"] == task.task_id
-    # node_id 承载的是 delegate 的 skill 名（既有语义，EXTERNAL/HUMAN 两路一致），非图节点 id
+    # node_id 承载的是 delegate 的 capability 名（既有语义，EXTERNAL/HUMAN 两路一致），非图节点 id
     assert susp.payload["node_id"] == "ask_approval"
 
 
@@ -108,7 +108,7 @@ async def test_awaitable_external_path_unchanged():
     awaitable_store = InMemoryAwaitableTaskStore()
     human_store = HumanTaskStore(awaitable_store)
     runtime = PlannerRuntime(
-        registry=_registry("ext_job", _external_awaitable_skill),
+        registry=_registry("ext_job", _external_awaitable_capability),
         awaitable_task_store=awaitable_store,
         human_task_store=human_store,
     )
@@ -137,7 +137,7 @@ async def test_awaitable_human_without_store_falls_back_to_external():
     """
     awaitable_store = InMemoryAwaitableTaskStore()
     runtime = PlannerRuntime(
-        registry=_registry("ask_approval", _human_awaitable_skill),
+        registry=_registry("ask_approval", _human_awaitable_capability),
         awaitable_task_store=awaitable_store,
         # human_task_store 刻意不注入
     )

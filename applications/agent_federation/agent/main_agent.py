@@ -190,7 +190,7 @@ def _maybe_attach_bridged_tools(tools: list, query: str) -> list:
 
     ``AGENTIC_RUNTIME_BRIDGE != "true"`` 时直接返回原工具集（默认行为，零影响）。
     开启时：用联邦能力注册表构建 LangChain 工具，agent 调用这些工具经
-    ``runtime.delegate`` 进入统一 Skill Runtime。任一环节失败仅跳过桥接工具。
+    ``runtime.delegate`` 进入统一 Capability Runtime。任一环节失败仅跳过桥接工具。
     """
     from agent_federation.planners.agentic_runtime_bridge import (
         bridge_enabled,
@@ -507,7 +507,7 @@ async def run_deep_agent(task_query, workspace_id):
         cache_key = SemanticCache.build_key(_cached_intent or "", task_query)
         # Plan-F Phase 3：联邦主链路经 Planner 协议 + PlannerRuntime 治理驱动（与 app /query 对称）。
         # 保留 singleflight 缓存击穿防护（去重仍在「确定的 agent」之上生效）；
-        # AgenticPlanner.arun 套 skill_guard 组合治理（max_skill_depth/max_steps），
+        # AgenticPlanner.arun 套 capability_guard 组合治理（max_capability_depth/max_steps），
         # 内部仍走 _execute_agent_core（guard/intent/cache/memory/monitor 副作用链零破坏）。
         from agent_federation.planners import AgenticPlanner, get_planner_runtime
 

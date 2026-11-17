@@ -1,10 +1,10 @@
 """app 侧 Capability Registry 装配（Plan-F Phase 1 + Phase 1.5 + Phase 3）。
 
-注册 search/rag/sql/mcp 四个进程内能力（原子 Skill），以及 graph 包装的
-``general_qa`` Workflow Skill（静态 DAG 执行器，Phase 3：graph.py 不删除、
+注册 search/rag/sql/mcp 四个进程内能力（原子 Capability），以及 graph 包装的
+``general_qa`` Workflow Capability（静态 DAG 执行器，Phase 3：graph.py 不删除、
 降级为一个可注册能力的实现）。Planner / Agent 经注册表统一调用任意能力。
 
-Skill 契约（Phase 1.5）：每个能力带 input/output JSON Schema，Planner / Agent
+Capability 契约（Phase 1.5）：每个能力带 input/output JSON Schema，Planner / Agent
 经 ``to_tool_schema()`` 生成工具描述——能力实现细节（函数 / 静态 DAG / 远程）
 对调用方保持黑盒。
 
@@ -21,18 +21,18 @@ import logging
 from functools import partial
 from typing import Any
 
-from agent_runtime.circuit_breaker import CircuitBreaker
-from agent_runtime.identity import IdentityError, sign_internal_header
-from agent_runtime.mcp_client import MCPClientManager
-from agent_runtime.skills.dag import as_dag_skill
-from agent_runtime.skills.function import as_function_skill
-from agent_runtime.skills.middleware import (
+from agent_runtime.capabilities.dag import as_dag_capability
+from agent_runtime.capabilities.function import as_function_capability
+from agent_runtime.capabilities.middleware import (
     AuditMiddleware,
     CircuitBreakerMiddleware,
     RetryMiddleware,
     ToolObservedMiddleware,
 )
-from agent_runtime.skills.registry import SkillRegistry
+from agent_runtime.capabilities.registry import CapabilityRegistry
+from agent_runtime.circuit_breaker import CircuitBreaker
+from agent_runtime.identity import IdentityError, sign_internal_header
+from agent_runtime.mcp_client import MCPClientManager
 from agent_runtime.workspace_registry import (
     asserted_role,
     asserted_user_id,
@@ -47,10 +47,10 @@ from agent_server.subagents.rag import rag_query
 from agent_server.subagents.search import search_web
 from agent_server.subagents.sql_agent import sql_query
 
-_registry: SkillRegistry | None = None
+_registry: CapabilityRegistry | None = None
 _breaker: CircuitBreaker | None = None
 
-# Skill 契约（Phase 1.5）：JSON Schema——供 Agent 工具描述生成与入参校验
+# Capability 契约（Phase 1.5）：JSON Schema——供 Agent 工具描述生成与入参校验
 _QUERY_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
@@ -95,7 +95,7 @@ def _sanitize_identity(kwargs: dict[str, Any]) -> dict[str, Any]:
 
     F15：role / features / permissions 一并剔除——角色与能力只由服务端断言源
     （``asserted_role`` + ``authorization`` 常量表）解释，LLM 传进来的同名键既不能
-    提权，也不该透传给下游 skill 冒充身份字典。剔除是「不信任入站值」，不是「下游
+    提权，也不该透传给下游 capability 冒充身份字典。剔除是「不信任入站值」，不是「下游
     拿不到角色」：需要角色的路径走 ContextVar，与 tenant 同一条纪律。
     """
     out = {
@@ -114,9 +114,9 @@ async def _mcp_execute(state: AgentState, mcp_manager: MCPClientManager | None) 
 
 
 async def _run_general_qa(graph: Any, **kwargs: Any) -> str:
-    """general_qa Workflow Skill 执行器：跑静态 DAG（graph.astream 全链路），归约为最终 answer。
+    """general_qa Workflow Capability 执行器：跑静态 DAG（graph.astream 全链路），归约为最终 answer。
 
-    graph 保留 checkpoint（thread_id 恢复/持久化对话历史）语义；对调用方是黑盒 Skill。
+    graph 保留 checkpoint（thread_id 恢复/持久化对话历史）语义；对调用方是黑盒 Capability。
     """
     question = kwargs["question"]
     # 身份由服务端断言源提供，不接受 LLM/kwargs 覆盖（防幻觉/注入指定任意身份，ADR-0007 §4.3）。
@@ -155,20 +155,20 @@ def _get_breaker() -> CircuitBreaker:
     return _breaker
 
 
-_audit_logger = logging.getLogger("skill.audit")
+_audit_logger = logging.getLogger("capability.audit")
 
 
 async def _audit_sink(name: str, kwargs: dict, result: Any, error: str | None, latency_s: float) -> None:
-    """审计 sink：记录每次 Skill 调用的审计事件（合规留痕 / 攻击溯源）。"""
+    """审计 sink：记录每次 Capability 调用的审计事件（合规留痕 / 攻击溯源）。"""
     _audit_logger.info(
-        "skill_call name=%s latency=%.3fs error=%s",
+        "capability_call name=%s latency=%.3fs error=%s",
         name,
         latency_s,
         error or "none",
     )
 
 
-# C-3: 进程级共享 httpx.AsyncClient（连接池复用，避免每次 skill 调用新建 client）
+# C-3: 进程级共享 httpx.AsyncClient（连接池复用，避免每次 capability 调用新建 client）
 _http_client: Any = None
 
 
@@ -182,10 +182,10 @@ def _get_http_client() -> Any:
     return _http_client
 
 
-def build_registry(graph: Any | None = None) -> SkillRegistry:
+def build_registry(graph: Any | None = None) -> CapabilityRegistry:
     """构建 app 能力注册表（幂等；重复调用返回新实例，供测试隔离）。
 
-    graph（可选）：LangGraph 静态图实例。注入时额外注册 ``general_qa`` Workflow Skill
+    graph（可选）：LangGraph 静态图实例。注入时额外注册 ``general_qa`` Workflow Capability
     （Phase 3：graph.py 包装而非删除，供 Planner / Agent 组合调用）。
 
     Runtime 边界（架构审核 P1）：熔断经中间件链收敛——``CircuitBreakerMiddleware``
@@ -194,13 +194,13 @@ def build_registry(graph: Any | None = None) -> SkillRegistry:
     middlewares = [
         # 观测挂链首位（最外层）：记录整链最终 outcome（含 retry/熔断降级后）
         ToolObservedMiddleware(),
-        CircuitBreakerMiddleware(_get_breaker(), skill_names=("search",)),
+        CircuitBreakerMiddleware(_get_breaker(), capability_names=("search",)),
         RetryMiddleware(max_retries=2, backoff_s=0.5),
         AuditMiddleware(_audit_sink, redact=True),
     ]
     settings = get_settings()
     if settings.tool_result_compression_enabled:
-        from agent_runtime.skills.middleware import ToolResultCompressionMiddleware
+        from agent_runtime.capabilities.middleware import ToolResultCompressionMiddleware
 
         middlewares.append(
             ToolResultCompressionMiddleware(
@@ -208,9 +208,9 @@ def build_registry(graph: Any | None = None) -> SkillRegistry:
                 store_dir=settings.tool_result_store_dir or None,
             )
         )
-    registry = SkillRegistry(middlewares=middlewares)
+    registry = CapabilityRegistry(middlewares=middlewares)
     registry.register(
-        as_function_skill(
+        as_function_capability(
             "search",
             "联网搜索（Tavily）：返回证据字符串列表",
             search_web,
@@ -218,7 +218,7 @@ def build_registry(graph: Any | None = None) -> SkillRegistry:
         )
     )
     registry.register(
-        as_function_skill(
+        as_function_capability(
             "rag",
             "知识库混合检索：按 workspace 过滤，返回证据字符串列表",
             rag_query,
@@ -226,7 +226,7 @@ def build_registry(graph: Any | None = None) -> SkillRegistry:
         )
     )
     registry.register(
-        as_function_skill(
+        as_function_capability(
             "sql",
             "SQL 查询：text-to-SQL 管线，返回证据字符串列表",
             sql_query,
@@ -234,7 +234,7 @@ def build_registry(graph: Any | None = None) -> SkillRegistry:
         )
     )
     registry.register(
-        as_function_skill(
+        as_function_capability(
             "mcp",
             "MCP 工具调用：调用外部工具并归约为 evidence（依赖 state + manager）",
             _mcp_execute,
@@ -242,9 +242,9 @@ def build_registry(graph: Any | None = None) -> SkillRegistry:
     )
     if graph is not None:
         registry.register(
-            as_dag_skill(
+            as_dag_capability(
                 "general_qa",
-                "通用问答（Workflow Skill）：端到端 QA 流水线——输入护栏 → 路由 → "
+                "通用问答（Workflow Capability）：端到端 QA 流水线——输入护栏 → 路由 → "
                 "检索/搜索/SQL/MCP → 答案合成，返回最终回答字符串",
                 partial(_run_general_qa, graph),
                 input_schema=_GENERAL_QA_INPUT_SCHEMA,
@@ -252,19 +252,19 @@ def build_registry(graph: Any | None = None) -> SkillRegistry:
                 timeout_ms=120_000,
             )
         )
-    _register_remote_skills(registry)
+    _register_remote_capabilities(registry)
     return registry
 
 
-def _register_remote_skills(registry: SkillRegistry) -> None:
-    """P1：注册重服务为 RemoteExecutor skill（HTTP 调用）。
+def _register_remote_capabilities(registry: CapabilityRegistry) -> None:
+    """P1：注册重服务为 RemoteExecutor capability（HTTP 调用）。
 
     URL 未配置时跳过（不崩溃、不警告——开发环境常见只起 agent_server）。
     重依赖（torch/Milvus/Neo4j/pgvector）隔离在远端进程，编排进程不传染。
     """
     import os
 
-    from agent_runtime.skills.remote import as_remote_skill
+    from agent_runtime.capabilities.remote import as_remote_capability
 
     knowledge_url = os.getenv("KNOWLEDGE_SERVICE_URL", "")
     if knowledge_url:
@@ -279,7 +279,7 @@ def _register_remote_skills(registry: SkillRegistry) -> None:
             return resp.json()
 
         registry.register(
-            as_remote_skill(
+            as_remote_capability(
                 "knowledge_query",
                 "知识库问答：RAG 检索 + LLM 生成，返回答案文本",
                 _knowledge_query,
@@ -304,7 +304,7 @@ def _register_remote_skills(registry: SkillRegistry) -> None:
             return resp.json()
 
         registry.register(
-            as_remote_skill(
+            as_remote_capability(
                 "knowledge_retrieve",
                 "知识库纯检索：embedding→RRF→rerank，返回文档列表（无 LLM 生成）",
                 _knowledge_retrieve,
@@ -349,7 +349,7 @@ def _register_remote_skills(registry: SkillRegistry) -> None:
             return resp.json()
 
         registry.register(
-            as_remote_skill(
+            as_remote_capability(
                 "nl2sql_query",
                 "Text-to-SQL：自然语言→SQL→执行→结果，返回 SQL + 查询结果",
                 _nl2sql_query,
@@ -375,7 +375,7 @@ def _register_remote_skills(registry: SkillRegistry) -> None:
             return resp.json()
 
         registry.register(
-            as_remote_skill(
+            as_remote_capability(
                 "kefu_query",
                 "客服问答：意图路由 + Flow + GraphRAG，返回客服回复",
                 _kefu_query,
@@ -402,7 +402,7 @@ def _register_remote_skills(registry: SkillRegistry) -> None:
             return resp.json()
 
         registry.register(
-            as_remote_skill(
+            as_remote_capability(
                 "exhibition_query",
                 "会展查询：Supervisor 图路由 → warehouse REST，返回 answer + readiness + citations",
                 _exhibition_query,
@@ -422,7 +422,7 @@ def _register_remote_skills(registry: SkillRegistry) -> None:
         )
 
 
-def get_registry(graph: Any | None = None) -> SkillRegistry:
+def get_registry(graph: Any | None = None) -> CapabilityRegistry:
     """进程级单例注册表。
 
     graph 仅首次构建时生效（lifespan 装配 general_qa 时注入）；后续调用幂等返回同一实例。

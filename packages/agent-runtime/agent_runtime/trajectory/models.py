@@ -3,7 +3,7 @@
 一条 ``TrajectoryRecord`` 对应一次 Planner 执行（一个 ``execution_id``），承载：
 - 执行上下文关联：``execution_id`` / ``parent_execution_id`` / ``session_id`` / ``planner``；
 - 决策产物 ``plan``（决策期结构化输出）；
-- 逐步明细 ``steps``（skill / args / result / latency / tokens / error）；
+- 逐步明细 ``steps``（capability / args / result / latency / tokens / error）；
 - 累计 ``total_tokens`` / ``total_cost`` 与结构化 ``snapshot``。
 
 模型层零第三方依赖（stdlib + dataclasses），存储后端见 ``store.py``。
@@ -19,7 +19,7 @@ from typing import Any
 
 @dataclass
 class TrajectoryStep:
-    """单次 Skill 调用明细：名称 / 入参 / 结果 / 耗时 / token / 错误。"""
+    """单次 Capability 调用明细：名称 / 入参 / 结果 / 耗时 / token / 错误。"""
 
     name: str
     args: dict[str, Any] = field(default_factory=dict)
@@ -29,7 +29,7 @@ class TrajectoryStep:
     tokens: int = 0
     # 调用序（同 execution 内从 0 递增），便于 replay 还原顺序
     index: int = 0
-    # V3-9: per-step 版本指纹（skill / tool / model 版本 + external receipt）
+    # V3-9: per-step 版本指纹（capability / tool / model 版本 + external receipt）
     forensic: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
@@ -67,7 +67,7 @@ class TrajectoryRecord:
     total_cost: float = 0.0
     snapshot: dict[str, Any] = field(default_factory=dict)
     created_at: float = field(default_factory=time.monotonic)
-    # V3-9: 执行级版本指纹（model / prompt / skill / planner / policy 版本）
+    # V3-9: 执行级版本指纹（model / prompt / capability / planner / policy 版本）
     forensic: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:

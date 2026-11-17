@@ -8,10 +8,10 @@ from __future__ import annotations
 
 import pytest
 from agent_runtime.planner.protocol import (
+    CapabilityCompositionError,
     Plan,
     PlannerContext,
     PlannerRuntime,
-    SkillCompositionError,
     StreamEvent,
 )
 from agent_runtime.planner.registry import PlannerRegistry
@@ -296,14 +296,14 @@ async def test_plan_matches_golden_baseline():
     assert ok / len(golden) >= 0.8
 
 
-# ---------- P0 路径A：deterministic 能力调用经 execution()+delegate 受 skill_guard ----------
+# ---------- P0 路径A：deterministic 能力调用经 execution()+delegate 受 capability_guard ----------
 
 
 @pytest.mark.asyncio
-async def test_execute_capability_goes_through_skill_guard():
-    """deterministic 能力调用经 execution()+delegate 受 skill_guard 组合治理。
+async def test_execute_capability_goes_through_capability_guard():
+    """deterministic 能力调用经 execution()+delegate 受 capability_guard 组合治理。
 
-    max_steps=0 时第一次 delegate 即抛 SkillCompositionError——证明走了 skill_guard
+    max_steps=0 时第一次 delegate 即抛 CapabilityCompositionError——证明走了 capability_guard
     （若绕过 execution 边界裸调 registry.execute 则不护栏、不抛错）。
     """
     planner = DeterministicPlanner()
@@ -315,7 +315,7 @@ async def test_execute_capability_goes_through_skill_guard():
     )
     runtime = PlannerRuntime(registry=FakeRegistry(), llm=None, pool=None, max_steps=0)
 
-    with pytest.raises(SkillCompositionError):
+    with pytest.raises(CapabilityCompositionError):
         [e async for e in planner.execute(plan, runtime)]
 
 
@@ -324,7 +324,7 @@ async def test_execute_capability_step_count_accounted():
     """deterministic 正常执行时能力调用计入 execution 边界步数预算（受组合治理）。
 
     用 RecordingRegistry 观察调用；执行完成后边界退出 context 复位，但过程中
-    delegate 已走 skill_guard（与上一测试互补：上一测试证护栏生效，本测试证正常路径不破）。
+    delegate 已走 capability_guard（与上一测试互补：上一测试证护栏生效，本测试证正常路径不破）。
     """
     planner = DeterministicPlanner()
     plan = Plan(

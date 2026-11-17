@@ -5,7 +5,7 @@
 
 本模块补上多层预算：
 ```
-Request → Execution → Skill → Tenant → Platform
+Request → Execution → Capability → Tenant → Platform
 ```
 
 - ``BudgetDimension``：预算维度（requests / tokens / cost / duration）；
@@ -130,7 +130,7 @@ class InMemoryBudgetStore(BudgetStore):
 
 
 class CostGovernance:
-    """多层预算治理：Request → Execution → Skill → Tenant → Platform。
+    """多层预算治理：Request → Execution → Capability → Tenant → Platform。
 
     用法：
     ```

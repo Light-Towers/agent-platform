@@ -3,29 +3,29 @@
 from __future__ import annotations
 
 import pytest
+from agent_runtime.capabilities.registry import Capability, CapabilityKind, CapabilityRegistry
 from agent_runtime.planner.execution_graph import ExecutionGraph
 from agent_runtime.planner.policy import PlanViolationError, PolicyValidator
-from agent_runtime.skills.registry import Skill, SkillKind, SkillRegistry
 
 
 async def _noop(**kwargs):
     return None
 
 
-def _skill(name: str, permissions: set[str] | None = None) -> Skill:
-    return Skill(
+def _capability(name: str, permissions: set[str] | None = None) -> Capability:
+    return Capability(
         name=name,
         description=name,
-        kind=SkillKind.FUNCTION,
+        kind=CapabilityKind.FUNCTION,
         executor=_noop,
         permissions=frozenset(permissions) if permissions else frozenset(),
     )
 
 
-def _registry() -> SkillRegistry:
-    reg = SkillRegistry()
-    reg.register(_skill("public_skill"))
-    reg.register(_skill("admin_skill", permissions={"admin"}))
+def _registry() -> CapabilityRegistry:
+    reg = CapabilityRegistry()
+    reg.register(_capability("public_capability"))
+    reg.register(_capability("admin_capability", permissions={"admin"}))
     return reg
 
 
@@ -36,8 +36,8 @@ def test_validate_passes():
     reg = _registry()
     validator = PolicyValidator(reg)
     g = ExecutionGraph()
-    g.add_node("a", "public_skill")
-    g.add_node("b", "public_skill")
+    g.add_node("a", "public_capability")
+    g.add_node("b", "public_capability")
     g.add_edge("b", "a")
     result = validator.validate(g, max_depth=4, max_steps=20)
     assert result is g
@@ -57,8 +57,8 @@ def test_validate_cycle_rejected():
     reg = _registry()
     validator = PolicyValidator(reg)
     g = ExecutionGraph()
-    g.add_node("a", "public_skill")
-    g.add_node("b", "public_skill")
+    g.add_node("a", "public_capability")
+    g.add_node("b", "public_capability")
     g.add_edge("b", "a")
     g.add_edge("a", "b")
     with pytest.raises(PlanViolationError, match="循环"):
@@ -72,9 +72,9 @@ def test_validate_depth_exceeded():
     reg = _registry()
     validator = PolicyValidator(reg)
     g = ExecutionGraph()
-    g.add_node("a", "public_skill")
-    g.add_node("b", "public_skill")
-    g.add_node("c", "public_skill")
+    g.add_node("a", "public_capability")
+    g.add_node("b", "public_capability")
+    g.add_node("c", "public_capability")
     g.add_edge("b", "a")
     g.add_edge("c", "b")
     with pytest.raises(PlanViolationError, match="深度"):
@@ -89,7 +89,7 @@ def test_validate_steps_exceeded():
     validator = PolicyValidator(reg)
     g = ExecutionGraph()
     for i in range(5):
-        g.add_node(f"n{i}", "public_skill")
+        g.add_node(f"n{i}", "public_capability")
     with pytest.raises(PlanViolationError, match="步数"):
         validator.validate(g, max_steps=3)
 
@@ -97,11 +97,11 @@ def test_validate_steps_exceeded():
 # ---------- 未注册能力 ----------
 
 
-def test_validate_unregistered_skill():
+def test_validate_unregistered_capability():
     reg = _registry()
     validator = PolicyValidator(reg)
     g = ExecutionGraph()
-    g.add_node("a", "nonexistent_skill")
+    g.add_node("a", "nonexistent_capability")
     with pytest.raises(PlanViolationError, match="未注册"):
         validator.validate(g)
 
@@ -113,7 +113,7 @@ def test_validate_permissions_denied():
     reg = _registry()
     validator = PolicyValidator(reg)
     g = ExecutionGraph()
-    g.add_node("a", "admin_skill")
+    g.add_node("a", "admin_capability")
     with pytest.raises(PlanViolationError, match="权限"):
         validator.validate(g, caller_permissions={"read"})
 
@@ -122,7 +122,7 @@ def test_validate_permissions_allowed():
     reg = _registry()
     validator = PolicyValidator(reg)
     g = ExecutionGraph()
-    g.add_node("a", "admin_skill")
+    g.add_node("a", "admin_capability")
     validator.validate(g, caller_permissions={"admin", "read"})
 
 
@@ -131,7 +131,7 @@ def test_validate_permissions_none_skips_check():
     reg = _registry()
     validator = PolicyValidator(reg)
     g = ExecutionGraph()
-    g.add_node("a", "admin_skill")
+    g.add_node("a", "admin_capability")
     validator.validate(g)
 
 
@@ -142,7 +142,7 @@ def test_validate_multiple_violations():
     reg = _registry()
     validator = PolicyValidator(reg)
     g = ExecutionGraph()
-    g.add_node("a", "admin_skill")
+    g.add_node("a", "admin_capability")
     g.add_node("b", "nonexistent")
     with pytest.raises(PlanViolationError) as exc_info:
         validator.validate(g, max_steps=1, caller_permissions={"read"})
@@ -157,9 +157,9 @@ def test_validate_max_parallel_exceeded():
     reg = _registry()
     validator = PolicyValidator(reg)
     g = ExecutionGraph()
-    g.add_node("a", "public_skill")
-    g.add_node("b", "public_skill")
-    g.add_node("c", "public_skill")
+    g.add_node("a", "public_capability")
+    g.add_node("b", "public_capability")
+    g.add_node("c", "public_capability")
     with pytest.raises(PlanViolationError, match="并行度"):
         validator.validate(g, max_parallel=2)
 
@@ -168,9 +168,9 @@ def test_validate_max_parallel_ok():
     reg = _registry()
     validator = PolicyValidator(reg)
     g = ExecutionGraph()
-    g.add_node("a", "public_skill")
-    g.add_node("b", "public_skill")
-    g.add_node("c", "public_skill")
+    g.add_node("a", "public_capability")
+    g.add_node("b", "public_capability")
+    g.add_node("c", "public_capability")
     g.add_edge("c", "a")
     g.add_edge("c", "b")
     # 第 0 层 2 节点，第 1 层 1 节点，max_parallel=2 通过

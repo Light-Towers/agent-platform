@@ -7,18 +7,18 @@ Runtime 侧的校验闸门——不修改图，只校验，违规抛 ``PlanViola
 1. **无环**：ExecutionGraph.detect_cycle（DAG 才可分层并行）；
 2. **深度上限**：图的最大依赖链层数 ≤ max_depth；
 3. **步数上限**：总节点数 ≤ max_steps；
-4. **能力注册**：节点引用的 skill_name 须在 SkillRegistry 已注册；
-5. **权限**：skill.permissions 非空时须 ⊆ caller_permissions。
+4. **能力注册**：节点引用的 capability_name 须在 CapabilityRegistry 已注册；
+5. **权限**：capability.permissions 非空时须 ⊆ caller_permissions。
 
-不校验执行级边界（超时 / 熔断 / retry）——那些在 SkillRegistry.execute 洋葱链收敛。
+不校验执行级边界（超时 / 熔断 / retry）——那些在 CapabilityRegistry.execute 洋葱链收敛。
 """
 
 from __future__ import annotations
 
 from typing import Any
 
+from agent_runtime.capabilities.registry import CapabilityNotFoundError, CapabilityRegistry
 from agent_runtime.planner.execution_graph import ExecutionGraph
-from agent_runtime.skills.registry import SkillNotFoundError, SkillRegistry
 
 
 class PlanViolationError(ValueError):
@@ -28,11 +28,11 @@ class PlanViolationError(ValueError):
 class PolicyValidator:
     """执行图策略校验器：校验 ExecutionGraph 是否可安全执行。
 
-    构造时注入 ``SkillRegistry``（用于查 Skill.permissions 与注册状态）。
+    构造时注入 ``CapabilityRegistry``（用于查 Capability.permissions 与注册状态）。
     ``validate()`` 返回校验通过的图（原样返回，不修改），违规抛 ``PlanViolationError``。
     """
 
-    def __init__(self, registry: SkillRegistry) -> None:
+    def __init__(self, registry: CapabilityRegistry) -> None:
         self._registry = registry
 
     def validate(
@@ -72,16 +72,16 @@ class PolicyValidator:
         allowed = frozenset(caller_permissions) if caller_permissions is not None else None
         for node in graph.nodes.values():
             try:
-                skill = self._registry.get(node.skill_name)
-            except SkillNotFoundError:
+                capability = self._registry.get(node.capability_name)
+            except CapabilityNotFoundError:
                 violations.append(
-                    f"节点 {node.node_id} 调用未注册能力 {node.skill_name}"
+                    f"节点 {node.node_id} 调用未注册能力 {node.capability_name}"
                 )
                 continue
-            if allowed is not None and skill.permissions and not skill.permissions <= allowed:
+            if allowed is not None and capability.permissions and not capability.permissions <= allowed:
                 violations.append(
-                    f"节点 {node.node_id} 调用 {node.skill_name} 需权限 "
-                    f"{set(skill.permissions)}，调用方仅持 {set(allowed)}"
+                    f"节点 {node.node_id} 调用 {node.capability_name} 需权限 "
+                    f"{set(capability.permissions)}，调用方仅持 {set(allowed)}"
                 )
 
         if violations:

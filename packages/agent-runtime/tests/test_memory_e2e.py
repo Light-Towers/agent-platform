@@ -2,9 +2,9 @@
 
 场景：
 1. 执行 N 次相同任务 → EpisodicSink 自动沉淀 Episode
-2. ProceduralSink 定期挖掘候选 Skill → 持久化为 draft
-3. SkillUsageTracker 记录使用效果 → draft 升级为 stable
-4. 下次相同任务 → ProceduralMemory.recall 召回已学会的 Skill
+2. ProceduralSink 定期挖掘候选 Capability → 持久化为 draft
+3. CapabilityUsageTracker 记录使用效果 → draft 升级为 stable
+4. 下次相同任务 → ProceduralMemory.recall 召回已学会的 Capability
 5. EpisodeDeduplicator 压缩重复 Episode
 """
 
@@ -15,9 +15,9 @@ from agent_runtime.episodic_memory import (
     InMemoryEpisodicStore,
 )
 from agent_runtime.memory_sink import (
+    CapabilityUsageTracker,
     EpisodicSink,
     ProceduralSink,
-    SkillUsageTracker,
 )
 from agent_runtime.procedural_memory import (
     InMemoryProceduralStore,
@@ -43,7 +43,7 @@ def _trajectory(execution_id: str, task: str = "招商分析", tenant_id: str = 
 
 
 async def test_e2e_learning_closed_loop():
-    """端到端：多次执行 → 自动沉淀 → 挖掘 Skill → 升级 → 召回。"""
+    """端到端：多次执行 → 自动沉淀 → 挖掘 Capability → 升级 → 召回。"""
 
     ep_store = InMemoryEpisodicStore()
     ep_mem = EpisodicMemory(ep_store)
@@ -52,7 +52,7 @@ async def test_e2e_learning_closed_loop():
 
     ep_sink = EpisodicSink(ep_mem)
     proc_sink = ProceduralSink(ep_mem, proc_store, trigger_interval=3)
-    tracker = SkillUsageTracker(proc_store, promote_threshold=0.8, min_uses=5)
+    tracker = CapabilityUsageTracker(proc_store, promote_threshold=0.8, min_uses=5)
 
     # Phase 1: 执行 5 次相同任务，全部成功
     for i in range(5):
@@ -64,10 +64,10 @@ async def test_e2e_learning_closed_loop():
     all_eps = await ep_store.list_all(tenant_id=TENANT)
     assert len(all_eps) == 5
 
-    # 验证：候选 Skill 已挖掘（draft）
-    all_skills = await proc_store.list_all(tenant_id=TENANT)
-    assert len(all_skills) >= 1
-    candidate = all_skills[0]
+    # 验证：候选 Capability 已挖掘（draft）
+    all_capabilities = await proc_store.list_all(tenant_id=TENANT)
+    assert len(all_capabilities) >= 1
+    candidate = all_capabilities[0]
     assert candidate.lifecycle == "draft"
 
     # Phase 2: 记录 5 次成功使用
@@ -78,7 +78,7 @@ async def test_e2e_learning_closed_loop():
     new_lc = await tracker.check_and_adjust(candidate.name, candidate.version, tenant_id=TENANT)
     assert new_lc == "stable"
 
-    # Phase 3: 下次相同任务 → 召回已学会的 Skill
+    # Phase 3: 下次相同任务 → 召回已学会的 Capability
     results = await proc_mem.recall("招商分析", tenant_id=TENANT)
     assert len(results) >= 1
     assert results[0].lifecycle == "stable"
@@ -91,8 +91,8 @@ async def test_e2e_learning_closed_loop():
     assert unique[0].metadata.get("dedup_count") == 4
 
 
-async def test_e2e_skill_demotion_on_failures():
-    """端到端：Skill 使用效果差 → 降级为 deprecated。"""
+async def test_e2e_capability_demotion_on_failures():
+    """端到端：Capability 使用效果差 → 降级为 deprecated。"""
 
     ep_store = InMemoryEpisodicStore()
     ep_mem = EpisodicMemory(ep_store)
@@ -106,9 +106,9 @@ async def test_e2e_skill_demotion_on_failures():
         await ep_sink(traj, runtime=None)
         await proc_sink(traj, runtime=None)
 
-    all_skills = await proc_store.list_all(tenant_id=TENANT)
-    assert len(all_skills) >= 1
-    candidate = all_skills[0]
+    all_capabilities = await proc_store.list_all(tenant_id=TENANT)
+    assert len(all_capabilities) >= 1
+    candidate = all_capabilities[0]
 
     # 手动升级为 stable（模拟通过验证）
     import time
@@ -127,7 +127,7 @@ async def test_e2e_skill_demotion_on_failures():
     ), tenant_id=TENANT)
 
     # 记录 5 次失败使用
-    tracker = SkillUsageTracker(proc_store, demote_threshold=0.3, min_uses=5)
+    tracker = CapabilityUsageTracker(proc_store, demote_threshold=0.3, min_uses=5)
     for _ in range(5):
         tracker.record_use(candidate.name, candidate.version, success=False, tenant_id=TENANT)
 

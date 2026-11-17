@@ -4,7 +4,7 @@
 脱敏边界点唯一（kernel ``agent_core.guardrails.errors``）。
 
 **本文件同时是"规则非空转"的证据**：正例用的是修复前的真实原文行
-（``skill_loader/app.py`` 3 处 + ``agent_server`` / ``knowledge-service`` 的 SSE 帧），
+（``capability_loader/app.py`` 3 处 + ``agent_server`` / ``knowledge-service`` 的 SSE 帧），
 若判定面写得过窄，这些用例会先红。
 
 脚本非包内模块，按文件路径加载（与 ``test_path_io_governance.py`` 同法）。

@@ -20,7 +20,7 @@ _SNAPSHOT = {
         "pending": ["summarize"],
         "constraints": {},
     },
-    "execution": {"outputs": {"sql": "ok"}, "errors": {}, "skill_stack": []},
+    "execution": {"outputs": {"sql": "ok"}, "errors": {}, "capability_stack": []},
 }
 
 

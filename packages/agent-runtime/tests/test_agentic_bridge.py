@@ -1,20 +1,20 @@
-"""Agentic Runtime 收口（Phase D）测试：tool discovery→SkillRegistry；tool call→delegate 受治理；
-subagent 作为 Agent Skill 经统一 Runtime 执行（架构验收 #4：不绕过 Skill Runtime）。"""
+"""Agentic Runtime 收口（Phase D）测试：tool discovery→CapabilityRegistry；tool call→delegate 受治理；
+subagent 作为 Agent Capability 经统一 Runtime 执行（架构验收 #4：不绕过 Capability Runtime）。"""
 
 from __future__ import annotations
 
+from agent_runtime.capabilities.registry import (
+    Capability,
+    CapabilityKind,
+    CapabilityNotFoundError,
+    CapabilityRegistry,
+)
 from agent_runtime.planner.agentic_bridge import (
     AgenticRuntimeBridge,
     RuntimeToolCaller,
     discover_agent_tools,
 )
 from agent_runtime.planner.protocol import PlannerRuntime
-from agent_runtime.skills.registry import (
-    Skill,
-    SkillKind,
-    SkillNotFoundError,
-    SkillRegistry,
-)
 
 
 async def _search(**kwargs):
@@ -25,10 +25,10 @@ async def _analyze(**kwargs):
     return {"result": kwargs.get("data")}
 
 
-def _registry() -> SkillRegistry:
-    reg = SkillRegistry()
-    reg.register(Skill("web_search", "联网搜索 web search", SkillKind.FUNCTION, _search))
-    reg.register(Skill("analyze", "分析数据 analyze data", SkillKind.FUNCTION, _analyze))
+def _registry() -> CapabilityRegistry:
+    reg = CapabilityRegistry()
+    reg.register(Capability("web_search", "联网搜索 web search", CapabilityKind.FUNCTION, _search))
+    reg.register(Capability("analyze", "分析数据 analyze data", CapabilityKind.FUNCTION, _analyze))
     return reg
 
 
@@ -51,7 +51,7 @@ async def test_tool_call_routes_through_runtime_delegate():
         try:
             await caller.call("rm_rf", {})
             assert False, "应拒绝未注册能力"
-        except SkillNotFoundError:
+        except CapabilityNotFoundError:
             pass
 
 
@@ -74,13 +74,13 @@ async def test_bridge_simulated_agent_loop():
     assert answer == {"result": {"hits": ["北京"]}}
 
 
-async def test_subagent_as_agent_skill_via_registry():
-    # subagent 作为 Agent Skill 注册，并经统一 Runtime 执行（Phase D #3）
+async def test_subagent_as_agent_capability_via_registry():
+    # subagent 作为 Agent Capability 注册，并经统一 Runtime 执行（Phase D #3）
     async def _subagent_run(**kwargs):
         return {"answer": f"subagent:{kwargs.get('q')}"}
 
-    reg = SkillRegistry()
-    reg.register(Skill("kb_agent", "知识库子代理", SkillKind.AGENT, _subagent_run))
+    reg = CapabilityRegistry()
+    reg.register(Capability("kb_agent", "知识库子代理", CapabilityKind.AGENT, _subagent_run))
     runtime = PlannerRuntime(registry=reg, max_steps=20)
     async with runtime.execution():
         result = await runtime.delegate("kb_agent", q="天气")

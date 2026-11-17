@@ -1,7 +1,7 @@
 """Planner 协议包（Plan-F Phase 2 + 组合治理 + F-S1-02 收口）。
 
 导出：Planner 协议核心（Plan / StreamEvent / PlannerContext / PlannerRuntime / Planner /
-ExecutionContext / SkillCompositionError）+ PlannerRegistry + 动态执行图
+ExecutionContext / CapabilityCompositionError）+ PlannerRegistry + 动态执行图
 （ExecutionGraph / GraphNode / GraphCycleError / execute_graph）+ 策略校验
 （PolicyValidator / PlanViolationError）+ AgenticPlanner（通用 agentic 适配器，
 执行器经 entry_points 发现）。双实现位于各侧：
@@ -26,12 +26,12 @@ from agent_runtime.planner.execution_graph import (
 )
 from agent_runtime.planner.policy import PlanViolationError, PolicyValidator
 from agent_runtime.planner.protocol import (
+    CapabilityCompositionError,
     ExecutionContext,
     Plan,
     Planner,
     PlannerContext,
     PlannerRuntime,
-    SkillCompositionError,
     StreamEvent,
 )
 from agent_runtime.planner.registry import PlannerRegistry
@@ -53,7 +53,7 @@ __all__ = [
     "PlannerRegistry",
     "PlannerRuntime",
     "PolicyValidator",
-    "SkillCompositionError",
+    "CapabilityCompositionError",
     "StreamEvent",
     "TaskState",
     "execute_graph",

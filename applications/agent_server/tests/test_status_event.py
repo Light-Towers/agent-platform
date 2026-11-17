@@ -77,7 +77,7 @@ class TestStatusPayloadContract:
         for step in status["steps"]:
             assert set(step) == {
                 "index", "name", "latency_ms", "tokens", "failed",
-                "skill_name", "skill_version", "tool_name", "tool_version",
+                "capability_name", "capability_version", "tool_name", "tool_version",
             }
             assert isinstance(step["failed"], bool)
 

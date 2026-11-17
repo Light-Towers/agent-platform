@@ -1,12 +1,12 @@
-"""Skill-local context slicing（Plan-F Context Pipeline P2）：修嵌套上下文膨胀。
+"""Capability-local context slicing（Plan-F Context Pipeline P2）：修嵌套上下文膨胀。
 
-Skill 调用时不再全量携带父 context，改为传递 **context 切片**：
+Capability 调用时不再全量携带父 context，改为传递 **context 切片**：
 
 - ``inherited``：父任务 goal + 关键约束（来自 ``TaskState``，非全量消息）；
 - ``task_specific``：本次调用参数；
 - ``memory``：经 ``MemoryGate`` 的相关记忆。
 
-父 agent 只收到子 skill 的**结果摘要**（同样走 tool_result 压缩规则），
+父 agent 只收到子 capability 的**结果摘要**（同样走 tool_result 压缩规则），
 嵌套 token 从乘法变加法。
 """
 
@@ -19,8 +19,8 @@ from agent_runtime.context.tool_result import ToolResultCompressor
 
 
 @dataclass
-class SkillInvocationContext:
-    """Skill 调用局部上下文：父级只传切片，不传全量消息。
+class CapabilityInvocationContext:
+    """Capability 调用局部上下文：父级只传切片，不传全量消息。
 
     ``to_prompt_text()`` 把切片渲染为注入子 agent 的提示文本。
     """
@@ -55,20 +55,20 @@ class SkillInvocationContext:
         return not (self.inherited or self.task_specific or self.memory)
 
 
-def slice_skill_context(
+def slice_capability_context(
     *,
     task_snapshot: dict[str, Any] | None = None,
     params: dict[str, Any] | None = None,
     gated_memory: list[str] | None = None,
     inherit_keys: tuple[str, ...] = ("goal", "constraints"),
-) -> SkillInvocationContext:
-    """从任务快照 + 调用参数 + 门控记忆构造 Skill 局部上下文切片。
+) -> CapabilityInvocationContext:
+    """从任务快照 + 调用参数 + 门控记忆构造 Capability 局部上下文切片。
 
     ``task_snapshot``：``AgentContext.snapshot()["task"]``（goal / completed_steps /
     pending / constraints）。只抽取 ``inherit_keys`` 指定的字段（默认 goal + constraints），
-    避免把全部执行状态塞给子 skill。
+    避免把全部执行状态塞给子 capability。
 
-    ``params``：本次 Skill 调用参数（task_specific）。
+    ``params``：本次 Capability 调用参数（task_specific）。
     ``gated_memory``：经 ``MemoryGate`` 过滤后的相关记忆。
     """
     inherited: dict[str, Any] = {}
@@ -85,7 +85,7 @@ def slice_skill_context(
             elif value not in ("", None):
                 inherited[key] = value
 
-    return SkillInvocationContext(
+    return CapabilityInvocationContext(
         inherited=inherited,
         task_specific=dict(params or {}),
         memory=list(gated_memory or []),
@@ -95,7 +95,7 @@ def slice_skill_context(
 async def summarize_child_result(
     result: Any, *, max_tokens: int = 2048, store_dir=None
 ) -> dict[str, Any]:
-    """子 Skill 结果摘要（走 tool_result 压缩规则）：父 agent 只收摘要 + ref。
+    """子 Capability 结果摘要（走 tool_result 压缩规则）：父 agent 只收摘要 + ref。
 
     返回 ``{"text", "ref", "full_path", "truncated"}``（见 ToolResultCompressor）。
     """

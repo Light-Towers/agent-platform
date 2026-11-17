@@ -33,7 +33,7 @@ async def test_replay_registry_exact_match():
 async def test_replay_registry_order_mismatch():
     record = _make_record([_make_step("search", index=0)])
     reg = build_replay_registry(record)
-    await reg.execute("different_skill")
+    await reg.execute("different_capability")
     assert len(reg.divergences) == 1
     assert reg.divergences[0].kind == "order"
 
@@ -44,7 +44,7 @@ async def test_replay_registry_extra_call():
     reg = build_replay_registry(record)
     await reg.execute("search")
     with pytest.raises(RuntimeError, match="超出录制步数"):
-        await reg.execute("extra_skill")
+        await reg.execute("extra_capability")
     assert any(d.kind == "extra_call" for d in reg.divergences)
 
 

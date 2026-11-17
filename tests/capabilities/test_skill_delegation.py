@@ -1,4 +1,4 @@
-"""Skill Delegation API + ExecutionContext 落地测试（Plan-F 组合治理）。
+"""Capability Delegation API + ExecutionContext 落地测试（Plan-F 组合治理）。
 
 覆盖：delegate 在/不在 execution 边界内的行为、步数累计、循环检测、深度上限、
 ExecutionContext 真正生效（context 属性 / call_stack / step_count）。
@@ -8,9 +8,9 @@ from __future__ import annotations
 
 import pytest
 from agent_runtime.planner.protocol import (
+    CapabilityCompositionError,
     ExecutionContext,
     PlannerRuntime,
-    SkillCompositionError,
 )
 
 
@@ -43,7 +43,7 @@ async def test_delegate_outside_execution_fallback():
 
 @pytest.mark.asyncio
 async def test_delegate_within_execution_uses_guard():
-    """在 execution 边界内时经 skill_guard，计入步数预算。"""
+    """在 execution 边界内时经 capability_guard，计入步数预算。"""
     rt = _runtime()
     async with rt.execution():
         await rt.delegate("search", query="x")
@@ -63,17 +63,17 @@ async def test_delegate_step_count_accumulates():
         await rt.delegate("b")
         await rt.delegate("c")
         assert rt._steps == 3
-        with pytest.raises(SkillCompositionError, match="步数"):
+        with pytest.raises(CapabilityCompositionError, match="步数"):
             await rt.delegate("d")
 
 
 @pytest.mark.asyncio
 async def test_delegate_cycle_detection():
-    """delegate 嵌套调用同名 Skill 触发循环检测。"""
+    """delegate 嵌套调用同名 Capability 触发循环检测。"""
     reg = _RecordingRegistry()
     rt = PlannerRuntime(registry=reg)
 
-    async def skill_a(**kwargs):
+    async def capability_a(**kwargs):
         return await rt.delegate("a")
 
     # 替换 registry.execute 让 a 递归调 delegate("a")
@@ -84,17 +84,17 @@ async def test_delegate_cycle_detection():
 
     reg.execute = recursive_a
     async with rt.execution():
-        with pytest.raises(SkillCompositionError, match="循环"):
+        with pytest.raises(CapabilityCompositionError, match="循环"):
             await rt.delegate("a")
 
 
 @pytest.mark.asyncio
 async def test_delegate_depth_limit():
-    rt = _runtime(max_skill_depth=1)
+    rt = _runtime(max_capability_depth=1)
     async with rt.execution():
-        async with rt.skill_guard("outer"):
-            with pytest.raises(SkillCompositionError, match="深度"):
-                async with rt.skill_guard("inner"):
+        async with rt.capability_guard("outer"):
+            with pytest.raises(CapabilityCompositionError, match="深度"):
+                async with rt.capability_guard("inner"):
                     pass
 
 
@@ -112,40 +112,40 @@ def test_execution_context_defaults():
 
 def test_execution_context_enter_exit():
     ctx = ExecutionContext(max_steps=10, max_depth=3)
-    ctx.enter_skill("a")
+    ctx.enter_capability("a")
     assert ctx.step_count == 1
     assert ctx.call_stack == ["a"]
     assert ctx.call_depth == 1
-    ctx.enter_skill("b")
+    ctx.enter_capability("b")
     assert ctx.step_count == 2
     assert ctx.call_depth == 2
-    ctx.exit_skill()
+    ctx.exit_capability()
     assert ctx.call_depth == 1
     assert ctx.call_stack == ["a"]
-    ctx.exit_skill()
+    ctx.exit_capability()
     assert ctx.call_depth == 0
     assert ctx.call_stack == []
 
 
 def test_execution_context_cycle_detection():
     ctx = ExecutionContext()
-    ctx.enter_skill("a")
-    with pytest.raises(SkillCompositionError, match="循环"):
-        ctx.enter_skill("a")
+    ctx.enter_capability("a")
+    with pytest.raises(CapabilityCompositionError, match="循环"):
+        ctx.enter_capability("a")
 
 
 def test_execution_context_step_limit():
     ctx = ExecutionContext(max_steps=1)
-    ctx.enter_skill("a")
-    with pytest.raises(SkillCompositionError, match="步数"):
-        ctx.enter_skill("b")
+    ctx.enter_capability("a")
+    with pytest.raises(CapabilityCompositionError, match="步数"):
+        ctx.enter_capability("b")
 
 
 def test_execution_context_depth_limit():
     ctx = ExecutionContext(max_depth=1)
-    ctx.enter_skill("a")
-    with pytest.raises(SkillCompositionError, match="深度"):
-        ctx.enter_skill("b")
+    ctx.enter_capability("a")
+    with pytest.raises(CapabilityCompositionError, match="深度"):
+        ctx.enter_capability("b")
 
 
 # ---------- PlannerRuntime.context 属性 ----------
@@ -167,11 +167,11 @@ async def test_context_property_inside_execution():
 
 
 @pytest.mark.asyncio
-async def test_context_reflects_skill_stack():
+async def test_context_reflects_capability_stack():
     rt = _runtime()
     async with rt.execution():
-        async with rt.skill_guard("a"):
+        async with rt.capability_guard("a"):
             assert rt.context.call_stack == ["a"]
-            async with rt.skill_guard("b"):
+            async with rt.capability_guard("b"):
                 assert rt.context.call_stack == ["a", "b"]
         assert rt.context.call_stack == []

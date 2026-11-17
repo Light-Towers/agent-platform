@@ -9,19 +9,19 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-from agent_runtime.circuit_breaker import CircuitBreaker
-from agent_runtime.skills.agent import as_agent_skill
-from agent_runtime.skills.dag import as_dag_skill
-from agent_runtime.skills.function import as_function_skill
-from agent_runtime.skills.middleware import CircuitBreakerMiddleware
-from agent_runtime.skills.registry import (
-    DuplicateSkillError,
-    SkillExecutionError,
-    SkillKind,
-    SkillNotFoundError,
-    SkillRegistry,
+from agent_runtime.capabilities.agent import as_agent_capability
+from agent_runtime.capabilities.dag import as_dag_capability
+from agent_runtime.capabilities.function import as_function_capability
+from agent_runtime.capabilities.middleware import CircuitBreakerMiddleware
+from agent_runtime.capabilities.registry import (
+    CapabilityExecutionError,
+    CapabilityKind,
+    CapabilityNotFoundError,
+    CapabilityRegistry,
+    DuplicateCapabilityError,
 )
-from agent_runtime.skills.remote import as_remote_skill
+from agent_runtime.capabilities.remote import as_remote_capability
+from agent_runtime.circuit_breaker import CircuitBreaker
 
 
 @pytest.mark.asyncio
@@ -29,10 +29,10 @@ async def test_function_capability_execute():
     async def add(a: int, b: int) -> int:
         return a + b
 
-    registry = SkillRegistry()
-    registry.register(as_function_skill("add", "加法", add))
+    registry = CapabilityRegistry()
+    registry.register(as_function_capability("add", "加法", add))
 
-    assert registry.get("add").kind == SkillKind.FUNCTION
+    assert registry.get("add").kind == CapabilityKind.FUNCTION
     assert "add" in registry
     assert await registry.execute("add", a=1, b=2) == 3
 
@@ -41,16 +41,16 @@ def test_duplicate_register_raises():
     async def noop(**kwargs):
         return None
 
-    registry = SkillRegistry()
-    registry.register(as_function_skill("a", "A", noop))
-    with pytest.raises(DuplicateSkillError):
-        registry.register(as_function_skill("a", "A2", noop))
+    registry = CapabilityRegistry()
+    registry.register(as_function_capability("a", "A", noop))
+    with pytest.raises(DuplicateCapabilityError):
+        registry.register(as_function_capability("a", "A2", noop))
 
 
 @pytest.mark.asyncio
 async def test_execute_unknown_raises():
-    registry = SkillRegistry()
-    with pytest.raises(SkillNotFoundError):
+    registry = CapabilityRegistry()
+    with pytest.raises(CapabilityNotFoundError):
         await registry.execute("nope")
 
 
@@ -58,9 +58,9 @@ def test_list_sorted():
     async def noop(**kwargs):
         return None
 
-    registry = SkillRegistry()
+    registry = CapabilityRegistry()
     for name in ("b", "a", "c"):
-        registry.register(as_function_skill(name, name, noop))
+        registry.register(as_function_capability(name, name, noop))
     assert [c.name for c in registry.list()] == ["a", "b", "c"]
 
 
@@ -70,8 +70,8 @@ async def test_timeout_applies():
         await asyncio.sleep(5)
         return "late"
 
-    registry = SkillRegistry()
-    registry.register(as_function_skill("slow", "慢", slow, timeout_ms=50))
+    registry = CapabilityRegistry()
+    registry.register(as_function_capability("slow", "慢", slow, timeout_ms=50))
     with pytest.raises(asyncio.TimeoutError):
         await registry.execute("slow")
 
@@ -84,9 +84,9 @@ def test_agent_capability_shape():
         "system_prompt": "你是数据库专家",
         "tools": [lambda: None],
     }
-    cap = as_agent_skill(subagent)
+    cap = as_agent_capability(subagent)
     assert cap.name == "database_query_agent"
-    assert cap.kind == SkillKind.AGENT
+    assert cap.kind == CapabilityKind.AGENT
     assert cap.description == "数据库查询"
 
 
@@ -95,12 +95,12 @@ async def test_remote_capability_execute():
     async def invoke(**kwargs):
         return f"remote:{kwargs['q']}"
 
-    registry = SkillRegistry()
-    registry.register(as_remote_skill("remote_search", "远程搜索", invoke))
+    registry = CapabilityRegistry()
+    registry.register(as_remote_capability("remote_search", "远程搜索", invoke))
     assert await registry.execute("remote_search", q="x") == "remote:x"
 
 
-# ---------- Phase 1.5：Skill 契约（input/output JSON Schema） ----------
+# ---------- Phase 1.5：Capability 契约（input/output JSON Schema） ----------
 
 
 def test_capability_input_output_schema():
@@ -112,7 +112,7 @@ def test_capability_input_output_schema():
         "properties": {"a": {"type": "integer"}, "b": {"type": "integer"}},
         "required": ["a", "b"],
     }
-    cap = as_function_skill(
+    cap = as_function_capability(
         "add", "加法", add, input_schema=schema, output_schema={"type": "integer"}
     )
     assert cap.input_schema == schema
@@ -124,7 +124,7 @@ def test_to_tool_schema():
         return None
 
     schema = {"type": "object", "properties": {"q": {"type": "string"}}, "required": ["q"]}
-    cap = as_function_skill("search", "搜索", noop, input_schema=schema)
+    cap = as_function_capability("search", "搜索", noop, input_schema=schema)
     tool = cap.to_tool_schema()
     assert tool["type"] == "function"
     assert tool["function"]["name"] == "search"
@@ -136,11 +136,11 @@ def test_to_tool_schema_default_empty_params():
     async def noop(**kwargs):
         return None
 
-    cap = as_function_skill("x", "X", noop)
+    cap = as_function_capability("x", "X", noop)
     assert cap.to_tool_schema()["function"]["parameters"] == {"type": "object", "properties": {}}
 
 
-# ---------- Phase 3：Static DAG Executor（Workflow Skill） ----------
+# ---------- Phase 3：Static DAG Executor（Workflow Capability） ----------
 
 
 @pytest.mark.asyncio
@@ -148,23 +148,23 @@ async def test_dag_capability_execute():
     async def run_dag(**kwargs):
         return f"answer:{kwargs['question']}"
 
-    cap = as_dag_skill(
+    cap = as_dag_capability(
         "general_qa",
         "通用问答",
         run_dag,
         input_schema={"type": "object", "required": ["question"]},
         timeout_ms=5000,
     )
-    assert cap.kind == SkillKind.WORKFLOW
+    assert cap.kind == CapabilityKind.WORKFLOW
     assert cap.timeout_ms == 5000
-    registry = SkillRegistry()
+    registry = CapabilityRegistry()
     registry.register(cap)
     assert await registry.execute("general_qa", question="你好") == "answer:你好"
 
 
 @pytest.mark.asyncio
 async def test_build_registry_with_graph_registers_general_qa():
-    """app 侧装配：注入 graph 后注册 general_qa Workflow Skill（graph 包装而非删除）。"""
+    """app 侧装配：注入 graph 后注册 general_qa Workflow Capability（graph 包装而非删除）。"""
     from agent_server.capabilities import build_registry
 
     class FakeGraph:
@@ -175,7 +175,7 @@ async def test_build_registry_with_graph_registers_general_qa():
     names = [c.name for c in registry.list()]
     assert "general_qa" in names
     cap = registry.get("general_qa")
-    assert cap.kind == SkillKind.WORKFLOW
+    assert cap.kind == CapabilityKind.WORKFLOW
     answer = await registry.execute(
         "general_qa", question="你好", workspace_id="default", user_id="default", thread_id="t"
     )
@@ -189,18 +189,18 @@ def test_build_registry_without_graph_no_general_qa():
     assert [c.name for c in registry.list()] == ["mcp", "rag", "search", "sql"]
 
 
-# ---------- 架构审核 P1：Skill 契约真正执行（入参校验） ----------
+# ---------- 架构审核 P1：Capability 契约真正执行（入参校验） ----------
 
 
 @pytest.mark.asyncio
 async def test_execute_validates_required_input():
-    """缺少 required 参数时抛 SkillExecutionError（而非内部异常）。"""
+    """缺少 required 参数时抛 CapabilityExecutionError（而非内部异常）。"""
     async def run(**kwargs):
         return "ok"
 
-    registry = SkillRegistry()
+    registry = CapabilityRegistry()
     registry.register(
-        as_function_skill(
+        as_function_capability(
             "search",
             "搜索",
             run,
@@ -211,19 +211,19 @@ async def test_execute_validates_required_input():
             },
         )
     )
-    with pytest.raises(SkillExecutionError, match="缺少必填参数"):
+    with pytest.raises(CapabilityExecutionError, match="缺少必填参数"):
         await registry.execute("search")
 
 
 @pytest.mark.asyncio
 async def test_execute_validates_input_type():
-    """参数类型不符时抛 SkillExecutionError（明确契约错误而非内部异常）。"""
+    """参数类型不符时抛 CapabilityExecutionError（明确契约错误而非内部异常）。"""
     async def run(**kwargs):
         return "ok"
 
-    registry = SkillRegistry()
+    registry = CapabilityRegistry()
     registry.register(
-        as_function_skill(
+        as_function_capability(
             "search",
             "搜索",
             run,
@@ -234,7 +234,7 @@ async def test_execute_validates_input_type():
             },
         )
     )
-    with pytest.raises(SkillExecutionError, match="期望 string"):
+    with pytest.raises(CapabilityExecutionError, match="期望 string"):
         await registry.execute("search", q=123)
 
 
@@ -244,12 +244,12 @@ async def test_execute_skips_validation_without_schema():
     async def run(**kwargs):
         return kwargs
 
-    registry = SkillRegistry()
-    registry.register(as_function_skill("x", "X", run))
+    registry = CapabilityRegistry()
+    registry.register(as_function_capability("x", "X", run))
     assert await registry.execute("x", anything=1) == {"anything": 1}
 
 
-# ---------- Phase 架构审核：Skill Execution Middleware 洋葱链 ----------
+# ---------- Phase 架构审核：Capability Execution Middleware 洋葱链 ----------
 
 
 class _RecordingMiddleware:
@@ -286,13 +286,13 @@ async def test_middleware_onion_order():
         events.append("execute")
         return "ok"
 
-    registry = SkillRegistry(
+    registry = CapabilityRegistry(
         middlewares=[
             _RecordingMiddleware("outer", events),
             _RecordingMiddleware("inner", events),
         ]
     )
-    registry.register(as_function_skill("x", "X", run))
+    registry.register(as_function_capability("x", "X", run))
 
     assert await registry.execute("x") == "ok"
     assert events == ["before:outer", "before:inner", "execute", "after:inner", "after:outer"]
@@ -307,8 +307,8 @@ async def test_middleware_short_circuit_skips_executor():
         called.append(1)
         return "ok"
 
-    registry = SkillRegistry(middlewares=[_ShortCircuitMiddleware()])
-    registry.register(as_function_skill("x", "X", run))
+    registry = CapabilityRegistry(middlewares=[_ShortCircuitMiddleware()])
+    registry.register(as_function_capability("x", "X", run))
 
     assert await registry.execute("x") == "short-circuited"
     assert called == []
@@ -326,10 +326,10 @@ async def test_middleware_chain_with_timeout_still_applies():
         await _asyncio.sleep(5)
         return "late"
 
-    registry = SkillRegistry(
+    registry = CapabilityRegistry(
         middlewares=[_RecordingMiddleware("mw", events, delay_enter=True)]
     )
-    registry.register(as_function_skill("slow", "慢", slow, timeout_ms=50))
+    registry.register(as_function_capability("slow", "慢", slow, timeout_ms=50))
 
     with pytest.raises(_asyncio.TimeoutError):
         await registry.execute("slow")
@@ -346,11 +346,11 @@ async def test_circuit_breaker_middleware_degrades():
         raise RuntimeError("上游故障")
 
     breaker = CircuitBreaker(failure_threshold=1, recovery_seconds=60)
-    registry = SkillRegistry(
-        middlewares=[CircuitBreakerMiddleware(breaker, skill_names=("search",))]
+    registry = CapabilityRegistry(
+        middlewares=[CircuitBreakerMiddleware(breaker, capability_names=("search",))]
     )
-    registry.register(as_function_skill("search", "搜索", run))
-    registry.register(as_function_skill("rag", "RAG", run))
+    registry.register(as_function_capability("search", "搜索", run))
+    registry.register(as_function_capability("rag", "RAG", run))
 
     # 首次失败触发熔断（breaker.call fallback=None → 降级消息）
     degraded = await registry.execute("search", q="x")
@@ -367,19 +367,19 @@ async def test_circuit_breaker_middleware_degrades():
 
 @pytest.mark.asyncio
 async def test_circuit_breaker_middleware_scope():
-    """skill_names 限定故障域：search 熔断不影响 rag（同 breaker 但不同技能）。"""
+    """capability_names 限定故障域：search 熔断不影响 rag（同 breaker 但不同技能）。"""
     calls = []
 
     async def run(**kwargs):
-        calls.append(kwargs.get("skill"))
+        calls.append(kwargs.get("capability"))
         raise RuntimeError("boom")
 
     breaker = CircuitBreaker(failure_threshold=1, recovery_seconds=60)
-    registry = SkillRegistry(
-        middlewares=[CircuitBreakerMiddleware(breaker, skill_names=("search",))]
+    registry = CapabilityRegistry(
+        middlewares=[CircuitBreakerMiddleware(breaker, capability_names=("search",))]
     )
-    registry.register(as_function_skill("search", "搜索", run))
-    registry.register(as_function_skill("rag", "RAG", run))
+    registry.register(as_function_capability("search", "搜索", run))
+    registry.register(as_function_capability("rag", "RAG", run))
 
     await registry.execute("search", q="x")
     with pytest.raises(RuntimeError):
@@ -396,13 +396,13 @@ async def test_execute_validates_output_type_string():
     async def run(**kwargs):
         return 123  # 期望 string，返回 int
 
-    registry = SkillRegistry()
+    registry = CapabilityRegistry()
     registry.register(
-        as_function_skill(
+        as_function_capability(
             "search", "搜索", run, output_schema={"type": "string"}
         )
     )
-    with pytest.raises(SkillExecutionError, match="产出校验失败"):
+    with pytest.raises(CapabilityExecutionError, match="产出校验失败"):
         await registry.execute("search")
 
 
@@ -411,16 +411,16 @@ async def test_execute_validates_output_object_required():
     async def run(**kwargs):
         return {"b": 1}  # 缺 required 字段 a
 
-    registry = SkillRegistry()
+    registry = CapabilityRegistry()
     registry.register(
-        as_function_skill(
+        as_function_capability(
             "search",
             "搜索",
             run,
             output_schema={"type": "object", "required": ["a"]},
         )
     )
-    with pytest.raises(SkillExecutionError, match="缺少必填字段"):
+    with pytest.raises(CapabilityExecutionError, match="缺少必填字段"):
         await registry.execute("search")
 
 
@@ -429,9 +429,9 @@ async def test_execute_output_schema_passes():
     async def run(**kwargs):
         return {"answer": "ok"}
 
-    registry = SkillRegistry()
+    registry = CapabilityRegistry()
     registry.register(
-        as_function_skill(
+        as_function_capability(
             "search",
             "搜索",
             run,
@@ -447,6 +447,6 @@ async def test_execute_no_output_schema_skips_validation():
     async def run(**kwargs):
         return 123  # 无 output_schema，不校验
 
-    registry = SkillRegistry()
-    registry.register(as_function_skill("x", "X", run))
+    registry = CapabilityRegistry()
+    registry.register(as_function_capability("x", "X", run))
     assert await registry.execute("x") == 123

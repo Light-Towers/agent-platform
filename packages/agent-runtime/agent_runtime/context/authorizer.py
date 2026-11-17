@@ -1,6 +1,6 @@
 """ContextAuthorizer（Context Governance）：Memory 级权限过滤。
 
-Skill 级已有权限过滤，但 Memory 级没有——跨租户/跨用户的 Memory 可能被错误召回。
+Capability 级已有权限过滤，但 Memory 级没有——跨租户/跨用户的 Memory 可能被错误召回。
 本模块在召回后、组装前做一次权限校验，确保只把当前请求有权访问的 Memory 送进 LLM。
 
 策略：

@@ -29,7 +29,7 @@ class _Cursor:
     async def fetchone(self):
         return (
             "exec-1", None, "sess-1", "deterministic", {},
-            [{"name": "search", "forensic": {"skill_version": "v9"}}],
+            [{"name": "search", "forensic": {"capability_version": "v9"}}],
             3, 0.0, {}, None,
         )
 
@@ -66,7 +66,7 @@ async def _main() -> None:
         planner="deterministic",
         steps=[TrajectoryStep(
             name="search",
-            forensic=StepForensic(skill_name="search", skill_version="v9").to_dict(),
+            forensic=StepForensic(capability_name="search", capability_version="v9").to_dict(),
         )],
         forensic=ForensicContext(model="qwen-max", planner_version="deterministic").to_dict(),
     )

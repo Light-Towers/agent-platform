@@ -1,8 +1,8 @@
-"""Dynamic Graph 组合器（完整架构 Phase B）：候选 Skill → LLM 输出结构化多 Skill DAG IR。
+"""Dynamic Graph 组合器（完整架构 Phase B）：候选 Capability → LLM 输出结构化多 Capability DAG IR。
 
 架构契约（docs/complete-agent-runtime-architecture.md §4.4）：
-- LLM 只允许从候选 Skill（经 ``SkillRegistry.discover`` 缩窄）中选择，输出结构化 Graph IR；
-- 禁止模型生成任意 Python / 任意执行器（仅 ``skill`` 引用 + 输入映射 + 依赖边）；
+- LLM 只允许从候选 Capability（经 ``CapabilityRegistry.discover`` 缩窄）中选择，输出结构化 Graph IR；
+- 禁止模型生成任意 Python / 任意执行器（仅 ``capability`` 引用 + 输入映射 + 依赖边）；
 - 组合产物为平台级 ``ExecutionGraph`` IR，交由 PolicyValidator 校验 + Runtime 执行。
 
 输入映射（``inputs``）语义（LLM 输出约定）：
@@ -48,11 +48,11 @@ def parse_graph_json(
     """把 LLM 产出的 Graph IR dict 解析为 ``ExecutionGraph``。
 
     :param data: ``{"nodes": [...], "edges": [...]}``；节点形如
-        ``{"id": "n1", "skill": "web_search", "inputs": {"query": "$query"}}``；
+        ``{"id": "n1", "capability": "web_search", "inputs": {"query": "$query"}}``；
         边形如 ``{"dependent": "n2", "dependency": "n1"}``。
     :param question: 原始问题，用于 ``$query`` 替换。
     :param candidate_names: 候选能力名集合（LLM 只能从中选择），越界抛 GraphComposeError。
-    :raises GraphComposeError: 节点缺失 / skill 越界 / 引用未知节点 / 结构非法。
+    :raises GraphComposeError: 节点缺失 / capability 越界 / 引用未知节点 / 结构非法。
     """
     if not isinstance(data, dict):
         raise GraphComposeError("Graph IR 必须是对象")
@@ -66,14 +66,14 @@ def parse_graph_json(
         if not isinstance(n, dict):
             raise GraphComposeError(f"节点必须是对象: {n!r}")
         node_id = n.get("id")
-        skill = n.get("skill")
-        if not node_id or not skill:
-            raise GraphComposeError(f"节点缺少 id 或 skill: {n!r}")
+        capability = n.get("capability")
+        if not node_id or not capability:
+            raise GraphComposeError(f"节点缺少 id 或 capability: {n!r}")
         if node_id in seen:
             raise GraphComposeError(f"重复节点 id: {node_id}")
-        if skill not in candidate_names:
+        if capability not in candidate_names:
             raise GraphComposeError(
-                f"节点 {node_id} 引用越界能力 {skill}（不在候选集）"
+                f"节点 {node_id} 引用越界能力 {capability}（不在候选集）"
             )
         seen.add(node_id)
         inputs = n.get("inputs") or {}
@@ -87,7 +87,7 @@ def parse_graph_json(
                 input_refs[arg] = f"node:{ref}"
             else:
                 kwargs[arg] = resolved
-        g.add_node(node_id, skill, kwargs=kwargs, input_refs=input_refs)
+        g.add_node(node_id, capability, kwargs=kwargs, input_refs=input_refs)
 
     edges_raw = data.get("edges") or []
     if not isinstance(edges_raw, list):
@@ -113,12 +113,12 @@ def parse_graph_json(
 _SYSTEM_PROMPT = (
     "你是执行计划编译器。根据用户的请求和下方可用的能力列表，输出一个调用这些能力的"
     "有向无环图（DAG）。规则：\n"
-    "1. 只能使用列表中的能力（skill 字段必须是候选名之一）；\n"
-    "2. 每个节点有唯一 id、skill、inputs（参数映射）；\n"
+    "1. 只能使用列表中的能力（capability 字段必须是候选名之一）；\n"
+    "2. 每个节点有唯一 id、capability、inputs（参数映射）；\n"
     "3. inputs 中可用 '$query' 表示原始问题，'$node.<节点id>' 表示引用上游节点的输出；\n"
     "4. edges 描述依赖：dependent 依赖 dependency（dependency 先执行）；\n"
     "5. 严禁生成任何代码或函数，只组合已有能力；图必须无环。\n"
-    "只输出 JSON：{\"nodes\": [{\"id\": \"n1\", \"skill\": \"<名>\", \"inputs\": {\"query\": \"$query\"}}], "
+    "只输出 JSON：{\"nodes\": [{\"id\": \"n1\", \"capability\": \"<名>\", \"inputs\": {\"query\": \"$query\"}}], "
     "\"edges\": [{\"dependent\": \"n2\", \"dependency\": \"n1\"}]}。"
 )
 
@@ -139,10 +139,10 @@ async def compose_execution_graph(
     llm: Any,
     feedback: str | None = None,
 ) -> ExecutionGraph:
-    """经 LLM 组合多 Skill DAG。
+    """经 LLM 组合多 Capability DAG。
 
     :param question: 原始问题。
-    :param candidates: 候选 Skill（discover 缩窄后的子集），LLM 只能从中选择。
+    :param candidates: 候选 Capability（discover 缩窄后的子集），LLM 只能从中选择。
     :param llm: 决策期 LLM（LangChain 风格；优先 ``with_structured_output``，否则解析 content）。
     :raises GraphComposeError: LLM 未产出可用结构或 IR 校验失败。
     """

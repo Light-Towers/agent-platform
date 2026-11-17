@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+from agent_runtime.capabilities.registry import Capability, CapabilityKind, CapabilityRegistry
 from agent_runtime.planner.durability import (
     Checkpoint,
     InMemoryCheckpointStore,
@@ -16,7 +17,6 @@ from agent_runtime.planner.execution_graph import (
     _run_graph_in_place,
 )
 from agent_runtime.planner.protocol import PlannerRuntime
-from agent_runtime.skills.registry import Skill, SkillKind, SkillRegistry
 
 
 class _Boom(Exception):
@@ -31,10 +31,10 @@ async def _analyze(**kwargs):
     return {"report": f"analyzed:{kwargs.get('data')}"}
 
 
-def _registry() -> SkillRegistry:
-    reg = SkillRegistry()
-    reg.register(Skill("web_search", "联网搜索 web search", SkillKind.FUNCTION, _fetch))
-    reg.register(Skill("analyze", "分析数据 analyze data", SkillKind.FUNCTION, _analyze))
+def _registry() -> CapabilityRegistry:
+    reg = CapabilityRegistry()
+    reg.register(Capability("web_search", "联网搜索 web search", CapabilityKind.FUNCTION, _fetch))
+    reg.register(Capability("analyze", "分析数据 analyze data", CapabilityKind.FUNCTION, _analyze))
     return reg
 
 
@@ -54,9 +54,9 @@ async def test_checkpoint_resume_after_failure():
     async def _boom_analyze(**kwargs):
         raise _Boom("crash")
 
-    reg = SkillRegistry()
-    reg.register(Skill("web_search", "联网搜索 web search", SkillKind.FUNCTION, _fetch))
-    reg.register(Skill("analyze", "分析数据 analyze data", SkillKind.FUNCTION, _boom_analyze))
+    reg = CapabilityRegistry()
+    reg.register(Capability("web_search", "联网搜索 web search", CapabilityKind.FUNCTION, _fetch))
+    reg.register(Capability("analyze", "分析数据 analyze data", CapabilityKind.FUNCTION, _boom_analyze))
     runtime = PlannerRuntime(registry=reg)
 
     # 第一次执行：n2 的 analyze 抛错（节点级隔离 → 仅产出 error 事件，不中断整次执行）；

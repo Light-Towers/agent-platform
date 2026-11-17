@@ -8,15 +8,15 @@
 """
 
 
+from agent_runtime.capabilities.registry import Capability, CapabilityKind, CapabilityRegistry
 from agent_runtime.planner.execution_graph import ExecutionGraph, _run_graph_in_place
 from agent_runtime.planner.protocol import PlannerRuntime
-from agent_runtime.skills.registry import Skill, SkillKind, SkillRegistry
 
 
-def _registry(skills: dict) -> SkillRegistry:
-    reg = SkillRegistry()
-    for name, fn in skills.items():
-        reg.register(Skill(name, name, SkillKind.FUNCTION, fn))
+def _registry(capabilities: dict) -> CapabilityRegistry:
+    reg = CapabilityRegistry()
+    for name, fn in capabilities.items():
+        reg.register(Capability(name, name, CapabilityKind.FUNCTION, fn))
     return reg
 
 

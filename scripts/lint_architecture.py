@@ -2,13 +2,13 @@
 """架构约束 lint：检测违反模块边界的调用模式。
 
 P4-2：收紧 registry.execute 直接可见性。
-架构契约：Skill → Skill 组合唯一合法路径是 runtime.delegate()，
-禁止在 skills/ 和 planner/ 外部直接调 registry.execute()。
+架构契约：Capability → Capability 组合唯一合法路径是 runtime.delegate()，
+禁止在 capabilities/ 和 planner/ 外部直接调 registry.execute()。
 
 白名单（宿主代码，有意保留）：
 - planner/protocol.py（delegate 实现内部）
 - agent_server/agent/graph.py（_invoke 回退，向后兼容）
-- skills/registry.py（SkillRegistry 自身）
+- capabilities/registry.py（CapabilityRegistry 自身）
 - tests/ / eval/（测试与评测）
 
 P6：禁止对密钥类标识手写裸哈希（DUP-1 横向重复门禁，见下文）。B7b-5 反转后无白名单：
@@ -79,7 +79,7 @@ _PATTERN = re.compile(r"(?:get_registry\(\)|registry)\.execute\s*\(")
 # 白名单：允许直接调用 registry.execute 的文件（相对路径前缀匹配）
 _WHITELIST = (
     "packages/agent-runtime/agent_runtime/planner/protocol.py",
-    "packages/agent-runtime/agent_runtime/skills/registry.py",
+    "packages/agent-runtime/agent_runtime/capabilities/registry.py",
     "applications/agent_server/agent/graph.py",
     "tests/",
     "eval/",
@@ -1544,7 +1544,7 @@ def check_internal_header_sign_sites() -> list[str]:
 
 # ---------------------------------------------------------------------------
 # P16「本轮不接线」机检（方案 §6 R2 改写后的形状 / §7 lint 行 / N7）。
-# skill 级权限过滤的接线点是两个应用装配层，不是 runtime 内部；本齿把「没接线」
+# capability 级权限过滤的接线点是两个应用装配层，不是 runtime 内部；本齿把「没接线」
 # 写成齿，防「接上权限引擎」被下一轮读成已具备。
 # ---------------------------------------------------------------------------
 _NO_WIRING_SCOPE = (
@@ -1578,7 +1578,7 @@ def _permission_wiring_lines(tree: ast.AST) -> list[tuple[int, str]]:
     return sorted(set(hits))
 
 
-def check_skill_permission_no_wiring() -> list[str]:
+def check_capability_permission_no_wiring() -> list[str]:
     """P16：三处装配面不得出现权限集调用实参；接线须先改方案与本齿。"""
     violations: list[str] = []
     parsed = 0
@@ -1800,10 +1800,10 @@ def main() -> int:
     else:
         print("P15 架构约束通过：签发符号零基线外出现位（基线为下限，见 _SIGN_SITE_ALLOWED 注记）")
 
-    v19 = check_skill_permission_no_wiring()
+    v19 = check_capability_permission_no_wiring()
     if v19:
         print("P16 架构约束违反：本轮不接线——三处装配面不得出现权限集调用实参（R2/N7）")
-        print("修复：skill 级权限过滤须先改方案 §6 与本齿扫描面，不得静默启用：")
+        print("修复：capability 级权限过滤须先改方案 §6 与本齿扫描面，不得静默启用：")
         for v in v19:
             print(f"  {v}")
         rc = 1

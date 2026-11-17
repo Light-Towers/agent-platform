@@ -1,6 +1,6 @@
-"""to_skill() 真实 entry_points 发现路径集成测试（T1.7）。
+"""to_capability() 真实 entry_points 发现路径集成测试（T1.7）。
 
-区别于 test_agentic_skill.py 的显式 register_agentic_executor_factory 注入：
+区别于 test_agentic_capability.py 的显式 register_agentic_executor_factory 注入：
 本模块用 tmp_path 构造 fake dist-info（含 entry_points.txt）注入 sys.path，
 验证 _discover_executor_factory 的 entry_points 分支真实生效。
 
@@ -59,15 +59,15 @@ def _make_fake_distribution(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_to_skill_discovers_executor_via_entry_points(tmp_path, monkeypatch):
-    """真实发现路径：entry_points 注册的执行器被 to_skill 发现并可调用（T1.7）。"""
+async def test_to_capability_discovers_executor_via_entry_points(tmp_path, monkeypatch):
+    """真实发现路径：entry_points 注册的执行器被 to_capability 发现并可调用（T1.7）。"""
     root = _make_fake_distribution(tmp_path)
     monkeypatch.syspath_prepend(str(root))
     importlib.invalidate_caches()
 
-    skill = AgenticPlanner().to_skill()  # 不显式 register——走 entry_points 发现
-    assert skill.name == "agentic"
-    result = await skill.executor(question="q", workspace_id="ws")
+    capability = AgenticPlanner().to_capability()  # 不显式 register——走 entry_points 发现
+    assert capability.name == "agentic"
+    result = await capability.executor(question="q", workspace_id="ws")
     assert result == "ep:q@ws"
 
 
@@ -82,6 +82,6 @@ async def test_explicit_registration_precedence_over_entry_points(tmp_path, monk
         return "explicit"
 
     register_agentic_executor_factory(lambda: explicit_executor)
-    skill = AgenticPlanner().to_skill()
-    result = await skill.executor(question="q", workspace_id="ws")
+    capability = AgenticPlanner().to_capability()
+    result = await capability.executor(question="q", workspace_id="ws")
     assert result == "explicit"

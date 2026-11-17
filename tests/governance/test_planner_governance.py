@@ -1,4 +1,4 @@
-"""Plan-F Phase 3：PlannerRuntime 组合治理（skill_guard）测试。
+"""Plan-F Phase 3：PlannerRuntime 组合治理（capability_guard）测试。
 
 覆盖四护栏：正常嵌套退出后栈复位 / 循环调用检测（含跨层 A→B→A）/
 嵌套深度上限 / 步数上限。deterministic 静态 DAG 天然无环，不使用该护栏。
@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 import pytest
-from agent_runtime.planner.protocol import PlannerRuntime, SkillCompositionError
+from agent_runtime.planner.protocol import CapabilityCompositionError, PlannerRuntime
 
 
 class _EmptyRegistry:
@@ -23,11 +23,11 @@ def _runtime(**kwargs) -> PlannerRuntime:
 async def test_guard_allows_normal_composition_and_stack_reset():
     rt = _runtime()
     async with rt.execution():
-        async with rt.skill_guard("a"):
-            async with rt.skill_guard("b"):
+        async with rt.capability_guard("a"):
+            async with rt.capability_guard("b"):
                 pass
-        # 退出后栈复位，同名 Skill 可再次进入（步数预算仍累计）
-        async with rt.skill_guard("a"):
+        # 退出后栈复位，同名 Capability 可再次进入（步数预算仍累计）
+        async with rt.capability_guard("a"):
             pass
     assert rt._call_stack == []
     assert rt._steps == 0
@@ -37,9 +37,9 @@ async def test_guard_allows_normal_composition_and_stack_reset():
 async def test_guard_rejects_adjacent_cycle():
     rt = _runtime()
     async with rt.execution():
-        async with rt.skill_guard("a"):
-            with pytest.raises(SkillCompositionError, match="循环调用"):
-                async with rt.skill_guard("a"):
+        async with rt.capability_guard("a"):
+            with pytest.raises(CapabilityCompositionError, match="循环调用"):
+                async with rt.capability_guard("a"):
                     pass
 
 
@@ -48,21 +48,21 @@ async def test_guard_rejects_cross_layer_cycle():
     """A → B → A 的跨层循环同样拦截（非仅相邻重复）。"""
     rt = _runtime()
     async with rt.execution():
-        async with rt.skill_guard("a"):
-            async with rt.skill_guard("b"):
-                with pytest.raises(SkillCompositionError, match="循环调用"):
-                    async with rt.skill_guard("a"):
+        async with rt.capability_guard("a"):
+            async with rt.capability_guard("b"):
+                with pytest.raises(CapabilityCompositionError, match="循环调用"):
+                    async with rt.capability_guard("a"):
                         pass
 
 
 @pytest.mark.asyncio
 async def test_guard_rejects_depth_overflow():
-    rt = _runtime(max_skill_depth=2)
+    rt = _runtime(max_capability_depth=2)
     async with rt.execution():
-        async with rt.skill_guard("a"):
-            async with rt.skill_guard("b"):
-                with pytest.raises(SkillCompositionError, match="深度"):
-                    async with rt.skill_guard("c"):
+        async with rt.capability_guard("a"):
+            async with rt.capability_guard("b"):
+                with pytest.raises(CapabilityCompositionError, match="深度"):
+                    async with rt.capability_guard("c"):
                         pass
 
 
@@ -71,10 +71,10 @@ async def test_guard_rejects_step_overflow():
     """步数上限在单次执行内（同 task 链嵌套）累计并拦截。"""
     rt = _runtime(max_steps=2)
     async with rt.execution():
-        async with rt.skill_guard("a"):
-            async with rt.skill_guard("b"):
-                with pytest.raises(SkillCompositionError, match="步数"):
-                    async with rt.skill_guard("c"):
+        async with rt.capability_guard("a"):
+            async with rt.capability_guard("b"):
+                with pytest.raises(CapabilityCompositionError, match="步数"):
+                    async with rt.capability_guard("c"):
                         pass
 
 
@@ -82,30 +82,30 @@ async def test_guard_rejects_step_overflow():
 async def test_guard_steps_cumulate_across_sequential_calls():
     """顺序调用同样消耗步数预算：A 退出后再进 B/C，累计超限即拦截。
 
-    架构审核 P1：max_steps 是「单次执行累计 Skill 调用数」，而非同时嵌套深度——
+    架构审核 P1：max_steps 是「单次执行累计 Capability 调用数」，而非同时嵌套深度——
     退出不复位，顺序调用 A→B→C→... 必须被预算拦住。
     """
     rt = _runtime(max_steps=4)
     async with rt.execution():
-        async with rt.skill_guard("a"):
+        async with rt.capability_guard("a"):
             pass
-        async with rt.skill_guard("b"):
+        async with rt.capability_guard("b"):
             pass
-        async with rt.skill_guard("c"):
+        async with rt.capability_guard("c"):
             pass
         # 预算边界内（第 4 步）仍可进入
-        async with rt.skill_guard("d"):
+        async with rt.capability_guard("d"):
             pass
         # 第 5 步超限；嵌套同样在累计预算内（d 内再嵌套 e 即第 5 步）
-        with pytest.raises(SkillCompositionError, match="步数"):
-            async with rt.skill_guard("d"):
-                async with rt.skill_guard("e"):
+        with pytest.raises(CapabilityCompositionError, match="步数"):
+            async with rt.capability_guard("d"):
+                async with rt.capability_guard("e"):
                     pass
     # execution 边界退出后预算复位，后续执行可正常进入
     async with rt.execution():
-        async with rt.skill_guard("a"):
+        async with rt.capability_guard("a"):
             pass
-        async with rt.skill_guard("b"):
+        async with rt.capability_guard("b"):
             pass
     assert rt._steps == 0
     assert rt._call_stack == []
@@ -117,13 +117,13 @@ async def test_guard_budget_resets_after_execution():
     rt = _runtime(max_steps=1)
     # 单次执行：第一个 guard 消费预算，同执行内嵌套第二个必超
     async with rt.execution():
-        async with rt.skill_guard("a"):
-            with pytest.raises(SkillCompositionError, match="步数"):
-                async with rt.skill_guard("b"):
+        async with rt.capability_guard("a"):
+            with pytest.raises(CapabilityCompositionError, match="步数"):
+                async with rt.capability_guard("b"):
                     pass
     # 执行结束预算复位：后续新执行可正常进入
     async with rt.execution():
-        async with rt.skill_guard("a"):
+        async with rt.capability_guard("a"):
             pass
     assert rt._steps == 0
     assert rt._call_stack == []
@@ -132,5 +132,5 @@ async def test_guard_budget_resets_after_execution():
 @pytest.mark.asyncio
 async def test_guard_defaults():
     rt = _runtime()
-    assert rt.max_skill_depth == 4
+    assert rt.max_capability_depth == 4
     assert rt.max_steps == 20

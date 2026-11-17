@@ -111,13 +111,13 @@ def test_extractor_failure():
     assert len(ep.lessons) == 1
 
 
-def test_extractor_skill_names():
+def test_extractor_capability_names():
     extractor = EpisodicExtractor()
     traj = _trajectory(
         steps=[_step("search"), _step("analyze"), _step("search")],
     )
     ep = extractor.extract(traj)
-    assert set(ep.skill_names) == {"search", "analyze"}
+    assert set(ep.capability_names) == {"search", "analyze"}
 
 
 # ===== InMemoryEpisodicStore =====

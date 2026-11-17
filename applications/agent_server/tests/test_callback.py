@@ -19,6 +19,7 @@ from agent_runtime.awaitable_task import (
     AwaitableTask,
     InMemoryAwaitableTaskStore,
 )
+from agent_runtime.capabilities.registry import Capability, CapabilityKind, CapabilityRegistry
 from agent_runtime.execution_status import (
     ExecutionStatus,
     ExecutionStatusRecord,
@@ -33,7 +34,6 @@ from agent_runtime.planner.protocol import (
     Plan,
     PlannerRuntime,
 )
-from agent_runtime.skills.registry import Skill, SkillKind, SkillRegistry
 from agent_runtime.trajectory.models import TrajectoryRecord
 from agent_runtime.trajectory.store import InMemoryTrajectoryStore
 from agent_server.api.callback import router as callback_router
@@ -43,20 +43,20 @@ from httpx import ASGITransport, AsyncClient
 # ── helpers ──────────────────────────────────────────────────────────────────
 
 
-async def _sync_skill(**kwargs: Any) -> dict[str, Any]:
-    """同步 Skill：直接返回入参（用于 checkpoint resume 验证）。"""
+async def _sync_capability(**kwargs: Any) -> dict[str, Any]:
+    """同步 Capability：直接返回入参（用于 checkpoint resume 验证）。"""
     return {"echo": kwargs}
 
 
-async def _awaitable_skill(**kwargs: Any) -> dict[str, Any]:
-    """可等待 Skill：返回 __awaitable__ 标记（触发 ExecutionSuspended）。"""
+async def _awaitable_capability(**kwargs: Any) -> dict[str, Any]:
+    """可等待 Capability：返回 __awaitable__ 标记（触发 ExecutionSuspended）。"""
     return {"__awaitable__": True, "task_id": "ext-123", "data": kwargs}
 
 
-def _make_registry() -> SkillRegistry:
-    reg = SkillRegistry()
-    reg.register(Skill("sync_op", "同步操作", SkillKind.FUNCTION, _sync_skill))
-    reg.register(Skill("async_op", "异步操作", SkillKind.FUNCTION, _awaitable_skill))
+def _make_registry() -> CapabilityRegistry:
+    reg = CapabilityRegistry()
+    reg.register(Capability("sync_op", "同步操作", CapabilityKind.FUNCTION, _sync_capability))
+    reg.register(Capability("async_op", "异步操作", CapabilityKind.FUNCTION, _awaitable_capability))
     return reg
 
 

@@ -52,7 +52,7 @@
 | `applications/agent_server/` | 单进程 Supervisor 平台（统一 Agent 平台；V3 Phase 2-4 已接入 Scheduler/ControlPlane/CostGov/Forensic，`api/` 含 `applications/agent_server/api/callback.py` + `applications/agent_server/api/control.py`；2026-08-19 由根 `app/` 改名迁入） | `agent_server.main:app`（uvicorn） |
 | `applications/agent_federation/` | 联邦网关 + 3 子服务编排中枢（与 agent_server 并行，详见其 README；原名 `deepagents/`，为消除与 PyPI 依赖包 `deepagents` 同名冲突而改名） | `python -m api.server` |
 | `packages/agent-core/` | 零依赖运行时内核：tracing / guardrails / sql 守卫 / llm / memory / events / config / intent / resilience（子模块职责清单见 `ARCHITECTURE.md` §2.1） | — |
-| `packages/agent-runtime/` | Plan-F 运行时中间件 + V3 执行平台：admission / scheduler / coordinator / checkpoint / cache / tracing / planner/ / skills/ / memory 体系 / sandbox / forensic / cost_governance / identity（服务端断言租户，ADR-0007；`DEPLOY_ENFORCE_IDENTITY` 默认关）等（各包职责与分层定位见 `ARCHITECTURE.md` §2.1，身份层见 §2.3） | — |
+| `packages/agent-runtime/` | Plan-F 运行时中间件 + V3 执行平台：admission / scheduler / coordinator / checkpoint / cache / tracing / planner/ / capabilities/ / memory 体系 / sandbox / forensic / cost_governance / identity（服务端断言租户，ADR-0007；`DEPLOY_ENFORCE_IDENTITY` 默认关）等（各包职责与分层定位见 `ARCHITECTURE.md` §2.1，身份层见 §2.3） | — |
 | `packages/shared-schemas/` | 联邦 4 服务共享 Pydantic 契约（QueryRequest/Response · ErrorResponse · KNOWLEDGE_STATUS · ThreadState 等） | — |
 | `applications/kefu-service/` | kefu 迁移版（deepagents + LangGraph），已接入联邦网关（Agent Protocol 兼容 `/invoke`，返回 `QueryResponse`；`KEFU_USE_ADAPTER=false` 默认直连） | — |
 | `applications/nl2sql-service/` | Text-to-SQL 数据分析通用服务（元知识参数化，已直连联邦契约） | — |
@@ -129,7 +129,7 @@ DATABASE_URL= uvicorn agent_server.main:app --port 8000  # 零依赖冒烟
 
 - Python 3.11+（所有包的 `requires-python` 均为 `>=3.11`）
 - FastAPI · LangGraph（仅作执行实现）· deepagents · pgvector · sqlglot · pydantic v2
-- 共享内核：`agent-core`（零依赖运行时内核）· `agent-runtime`（运行时中间件 + Planner/Skill 协议）· `shared-schemas`（联邦契约）
+- 共享内核：`agent-core`（零依赖运行时内核）· `agent-runtime`（运行时中间件 + Planner/Capability 协议）· `shared-schemas`（联邦契约）
 
 ## 禁止行为
 
@@ -176,4 +176,4 @@ DATABASE_URL= uvicorn agent_server.main:app --port 8000  # 零依赖冒烟
 
 ## 技术债追踪
 
-> 技术债追踪（D1-D10 + 多 Agent + Skill 收敛）状态详见追踪文档（会变，不在此内联快照）：`docs/plans/plan-tech-debt-followup-2026-09-22.md`（D1-D10，D1/D4/D5/D8 为 Low 跳过项）、`docs/plans/tech-debt-multi-agent-2026-09-23.md`、`docs/plans/skill-consolidation-inventory.md`。后续如再遇裸 except / llm_client 散落，按已建立的 `agent_core.llm` 统一门面与 except 收窄规范处理（非新增任务）。
+> 技术债追踪（D1-D10 + 多 Agent + Capability 收敛）状态详见追踪文档（会变，不在此内联快照）：`docs/plans/plan-tech-debt-followup-2026-09-22.md`（D1-D10，D1/D4/D5/D8 为 Low 跳过项）、`docs/plans/tech-debt-multi-agent-2026-09-23.md`、`docs/plans/skill-consolidation-inventory.md`。后续如再遇裸 except / llm_client 散落，按已建立的 `agent_core.llm` 统一门面与 except 收窄规范处理（非新增任务）。

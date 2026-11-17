@@ -293,7 +293,7 @@ def test_suspend_status_maps_everything_else_to_waiting_external():
 
 
 async def test_view_does_not_leak_full_metadata():
-    """_view 只暴露审批所需字段，不回传 metadata 全量（如内部 context/skill_name）。"""
+    """_view 只暴露审批所需字段，不回传 metadata 全量（如内部 context/capability_name）。"""
     app, _, _ = _make_app()
     task_id = await _seed_human_task(app, "exec-6", waiting_status=False)
 

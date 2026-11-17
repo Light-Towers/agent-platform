@@ -2,15 +2,15 @@
 
 现状（v3 之前）：``TrajectoryRecord`` 记录 execution_id / plan / steps / result /
 error / latency / tokens / cost / snapshot，能检测"Step 3 发生 divergence"，
-但不能回答"是模型变 / prompt 变 / Skill schema 变 / 数据变 / 外部 API 结果变 / Policy 变"。
+但不能回答"是模型变 / prompt 变 / Capability schema 变 / 数据变 / 外部 API 结果变 / Policy 变"。
 
 本模块补上版本指纹：
-- ``ForensicContext``：一次执行的版本指纹（model / prompt / skill / planner / policy 版本）；
-- ``StepForensic``：单步版本指纹（per-step skill / tool / model 版本 + external receipt）；
+- ``ForensicContext``：一次执行的版本指纹（model / prompt / capability / planner / policy 版本）；
+- ``StepForensic``：单步版本指纹（per-step capability / tool / model 版本 + external receipt）；
 - ``divergence_diagnosis``：对比两次执行的 forensic context，定位漂移源。
 
 从"行为漂移检测"升级到"Execution forensic / reproducibility"。
-与 Skill version / lifecycle（V3-10）联动。
+与 Capability version / lifecycle（V3-10）联动。
 """
 
 from __future__ import annotations
@@ -30,7 +30,7 @@ class ForensicContext:
     model_version: str | None = None  # 如 "2024-08-06"
     provider: str | None = None  # 如 "openai"
     prompt_version: str | None = None  # 如 "v2.3"
-    skill_version: str | None = None  # 如 "exhibition-v1.2"
+    capability_version: str | None = None  # 如 "exhibition-v1.2"
     input_schema_version: str | None = None  # 如 "v1"
     tool_schema_version: str | None = None  # 如 "v3"
     planner_version: str | None = None  # 如 "agentic-v2"
@@ -48,7 +48,7 @@ class ForensicContext:
             "model_version": self.model_version,
             "provider": self.provider,
             "prompt_version": self.prompt_version,
-            "skill_version": self.skill_version,
+            "capability_version": self.capability_version,
             "input_schema_version": self.input_schema_version,
             "tool_schema_version": self.tool_schema_version,
             "planner_version": self.planner_version,
@@ -65,7 +65,7 @@ class ForensicContext:
             model_version=d.get("model_version"),
             provider=d.get("provider"),
             prompt_version=d.get("prompt_version"),
-            skill_version=d.get("skill_version"),
+            capability_version=d.get("capability_version"),
             input_schema_version=d.get("input_schema_version"),
             tool_schema_version=d.get("tool_schema_version"),
             planner_version=d.get("planner_version"),
@@ -78,10 +78,10 @@ class ForensicContext:
 
 @dataclass
 class StepForensic:
-    """单步版本指纹（per-step skill / tool / model 版本 + external receipt）。"""
+    """单步版本指纹（per-step capability / tool / model 版本 + external receipt）。"""
 
-    skill_name: str | None = None
-    skill_version: str | None = None
+    capability_name: str | None = None
+    capability_version: str | None = None
     tool_name: str | None = None
     tool_version: str | None = None
     model: str | None = None
@@ -93,8 +93,8 @@ class StepForensic:
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "skill_name": self.skill_name,
-            "skill_version": self.skill_version,
+            "capability_name": self.capability_name,
+            "capability_version": self.capability_version,
             "tool_name": self.tool_name,
             "tool_version": self.tool_version,
             "model": self.model,
@@ -106,8 +106,8 @@ class StepForensic:
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> StepForensic:
         return cls(
-            skill_name=d.get("skill_name"),
-            skill_version=d.get("skill_version"),
+            capability_name=d.get("capability_name"),
+            capability_version=d.get("capability_version"),
             tool_name=d.get("tool_name"),
             tool_version=d.get("tool_version"),
             model=d.get("model"),
@@ -121,7 +121,7 @@ class StepForensic:
 class DivergenceFinding:
     """单维度漂移发现。"""
 
-    dimension: str  # "model" / "prompt_version" / "skill_version" / ...
+    dimension: str  # "model" / "prompt_version" / "capability_version" / ...
     baseline_value: Any
     comparison_value: Any
 
@@ -145,7 +145,7 @@ def divergence_diagnosis(
     findings: list[DivergenceFinding] = []
     scalar_fields = [
         "model", "model_version", "provider", "prompt_version",
-        "skill_version", "input_schema_version", "tool_schema_version",
+        "capability_version", "input_schema_version", "tool_schema_version",
         "planner_version", "policy_version",
     ]
     for field_name in scalar_fields:

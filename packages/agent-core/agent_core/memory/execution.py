@@ -76,33 +76,33 @@ class EpisodicStoreProtocol(Protocol):
 
 @runtime_checkable
 class ProceduralStoreProtocol(Protocol):
-    """Procedural Memory 持久化协议（Skill 定义）。
+    """Procedural Memory 持久化协议（Capability 定义）。
 
     方法集对齐 ``agent_runtime.procedural_memory.ProceduralStore`` 抽象契约。
     """
 
     async def save(self, entry: Any, *, tenant_id: str = _TENANT_UNSET) -> None:
-        """保存 Skill 定义（同租户内 name + version 覆盖）。"""
+        """保存 Capability 定义（同租户内 name + version 覆盖）。"""
         ...
 
     async def load(
         self, name: str, version: str | None = None, *, tenant_id: str = _TENANT_UNSET
     ) -> Any:
-        """加载本租户 Skill 定义；version=None 时返回最新 stable 版本。"""
+        """加载本租户 Capability 定义；version=None 时返回最新 stable 版本。"""
         ...
 
     async def list_all(self, *, tenant_id: str = _TENANT_UNSET) -> list[Any]:
-        """列出本租户所有 Skill 定义。"""
+        """列出本租户所有 Capability 定义。"""
         ...
 
     async def list_by_name(self, name: str, *, tenant_id: str = _TENANT_UNSET) -> list[Any]:
-        """列出本租户某 Skill 的所有版本。"""
+        """列出本租户某 Capability 的所有版本。"""
         ...
 
     async def delete(
         self, name: str, version: str, *, tenant_id: str = _TENANT_UNSET
     ) -> bool:
-        """删除本租户 Skill 定义。"""
+        """删除本租户 Capability 定义。"""
         ...
 
 

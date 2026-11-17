@@ -36,7 +36,7 @@ agent-core  agent-runtime  shared-schemas  agent-server  agent_federation  exhib
 | 目录 | 定位 | 职责 | 稳定性 |
 |------|------|------|--------|
 | `agent-core` | **基础 Agent 能力内核** | logging / tracing / metrics / llm / memory（含 MemoryStore 统一门面） / tools / guardrails / resilience / events（EventBus 多 sink 扇出） / config（KernelConfig + 类型化 env 解析） / intent（L1 分类器） | 稳定、底层、框架无关（不得 import 任何宿主） |
-| `agent-runtime` | **Agent 执行 / 组合运行时** | Planner / Plan（`packages/agent-runtime/agent_runtime/planner/protocol.py:98`） / Skill（Function/Agent/Remote/Workflow 四型 SkillKind，MCP/Sandbox 经特化注册函数挂载） / SkillRegistry / Workflow（`WorkflowSpec` / `WorkflowExecutor`，`packages/agent-runtime/agent_runtime/skills/workflow.py:79,108`） / ExecutionContext（`packages/agent-runtime/agent_runtime/planner/protocol.py:216`） / PlannerRuntime（同文件 :359） / Sandbox（`SandboxExecutor`，`packages/agent-runtime/agent_runtime/sandbox.py:70`） | 重点建设，架构收口完成 |
+| `agent-runtime` | **Agent 执行 / 组合运行时** | Planner / Plan（`packages/agent-runtime/agent_runtime/planner/protocol.py:98`） / Capability（Function/Agent/Remote/Workflow 四型 CapabilityKind，MCP/Sandbox 经特化注册函数挂载） / CapabilityRegistry / Workflow（`WorkflowSpec` / `WorkflowExecutor`，`packages/agent-runtime/agent_runtime/capabilities/workflow.py:79,108`） / ExecutionContext（`packages/agent-runtime/agent_runtime/planner/protocol.py:216`） / PlannerRuntime（同文件 :359） / Sandbox（`SandboxExecutor`，`packages/agent-runtime/agent_runtime/sandbox.py:70`） | 重点建设，架构收口完成 |
 | `shared-schemas` | **跨边界数据 / 协议契约** | Request / Response / Event / Error / Protocol DTO | 稳定，跨进程通信单一事实来源 |
 
 > `agent-core` 提供**零件**，`agent-runtime` 把零件**组装成执行引擎**。二者不可反向依赖。
@@ -96,7 +96,7 @@ agent-core  agent-runtime  shared-schemas  agent-server  agent_federation  exhib
 1. **Package 互不可反向依赖**：`agent-core` 不得 import `agent-runtime` / `agent_server` / 任何 application；`agent-runtime` 不得 import 任何 application。
 2. **Application 不得互相 import 内部模块**：`agent_federation` 不得 `import agent_server.`；各 application 仅通过 HTTP + `shared-schemas` 契约交互。
 3. **`agent-core` 内核零宿主依赖**：不得 import `agent_server.core.config`、LangGraph、FastAPI 等宿主/PaaS 依赖（设计铁律）。
-4. **禁止再造 Runtime**：任何 application（`agent_federation` 等）需要的 Planner / Skill / Workflow，应从 `agent-runtime` 消费，不得另起一套执行引擎。
+4. **禁止再造 Runtime**：任何 application（`agent_federation` 等）需要的 Planner / Capability / Workflow，应从 `agent-runtime` 消费，不得另起一套执行引擎。
 5. **跨进程通信必须走 `shared-schemas`**：Request / Response / Event 不得各自定义导致字段漂移。
 
 ### 4.1 强制门禁登记表（lint 不变量，计入 `make ci`）
@@ -105,7 +105,7 @@ agent-core  agent-runtime  shared-schemas  agent-server  agent_federation  exhib
 
 | 编号 | 不变量（白名单外即失败） | 锁住的告警形状 | 治理用例 |
 |------|------------------------|------------------|----------|
-| P4-2 | `registry.execute()` 只能经 `delegate()` 调用 | Skill 组合绕过运行时契约 | — |
+| P4-2 | `registry.execute()` 只能经 `delegate()` 调用 | Capability 组合绕过运行时契约 | — |
 | P2 | 生产 `FastAPI(` 必须经 `agent_core` 的 `build_api_app` | 异常处理/错误信封装配漏接 | — |
 | P5 | workspace 成员间不得顶层包名重复 | editable `.pth` 解析取决于安装顺序 | — |
 | P6 | 密钥类标识不得裸用 `hashlib`；**已退役的四个「凭据→摘要」入口名不得再现**（B7b-5 后白名单为空：kernel 单一实现已删） | `py/weak-sensitive-data-hashing` 的散点源头 + 改名绕过 / 死代码复生 | `tests/governance/test_thread_identity_migration.py` |
@@ -172,7 +172,7 @@ L 系列（观测架构与依赖契约）由 `docs/plans/plan-observability-glob
 - **dialogue-framework 已移除**（2026-09-23，孤儿框架，能力已被 agent_server 吸收）。
 - **历史命名残留**：`docs/architecture/architecture-boundary-app-vs-agent-federation.md` 中仍出现的 `deepagents/` 旧名，已于 2026-08-19 清理为 `agent_federation/`；本文统一使用新名。
 
-> 2026-08-20 更新：WS-1~WS-8 八工作流全量落地后，内核记忆/可靠性/可观测/配置/意图/Skill 中间件/LLM 缓存八大维度已收敛，详见 CHANGELOG 对应条目。兼容期为一个小版本（弃用路径保留 + DeprecationWarning），下轮清理专项删除。
+> 2026-08-20 更新：WS-1~WS-8 八工作流全量落地后，内核记忆/可靠性/可观测/配置/意图/Capability 中间件/LLM 缓存八大维度已收敛，详见 CHANGELOG 对应条目。兼容期为一个小版本（弃用路径保留 + DeprecationWarning），下轮清理专项删除。
 
 ## 6. 当前实际结构（2026-08-19 已落地）
 

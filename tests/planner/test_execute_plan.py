@@ -5,15 +5,15 @@ from __future__ import annotations
 import asyncio
 
 import pytest
+from agent_runtime.capabilities.function import as_function_capability
+from agent_runtime.capabilities.registry import CapabilityRegistry
 from agent_runtime.planner.execution_graph import ExecutionGraph, execute_plan
 from agent_runtime.planner.policy import PlanViolationError
 from agent_runtime.planner.protocol import Plan, PlannerRuntime
-from agent_runtime.skills.function import as_function_skill
-from agent_runtime.skills.registry import SkillRegistry
 
 
-def _registry() -> SkillRegistry:
-    reg = SkillRegistry()
+def _registry() -> CapabilityRegistry:
+    reg = CapabilityRegistry()
 
     async def search(**kwargs):
         return f"search:{kwargs.get('query', '')}"
@@ -28,10 +28,10 @@ def _registry() -> SkillRegistry:
         await asyncio.sleep(0.1)
         return "slow:done"
 
-    reg.register(as_function_skill("search", "搜索", search))
-    reg.register(as_function_skill("analyze", "分析", analyze))
-    reg.register(as_function_skill("fail", "失败", fail))
-    reg.register(as_function_skill("slow", "慢", slow))
+    reg.register(as_function_capability("search", "搜索", search))
+    reg.register(as_function_capability("analyze", "分析", analyze))
+    reg.register(as_function_capability("fail", "失败", fail))
+    reg.register(as_function_capability("slow", "慢", slow))
     return reg
 
 
@@ -117,11 +117,11 @@ async def test_execute_plan_graph_error_isolation():
     events = [ev async for ev in execute_plan(plan, _runtime())]
     error_events = [e for e in events if e.type == "error"]
     assert len(error_events) == 1
-    assert error_events[0].payload["skill"] == "fail"
+    assert error_events[0].payload["capability"] == "fail"
     assert "boom" in error_events[0].payload["error"]
     # search 仍成功
     evidence_events = [e for e in events if e.type == "evidence"]
-    assert any(e.payload["skill"] == "search" for e in evidence_events)
+    assert any(e.payload["capability"] == "search" for e in evidence_events)
 
 
 # ---------- ContextManager snapshot ----------

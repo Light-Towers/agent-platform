@@ -33,19 +33,19 @@ Plan-F 运行时中间件层。承载横向关注点（重试/超时/熔断/限�
 | `execution_graph.py` / `graph_compose.py` | 执行图组装 |
 | `durability.py` / `durability_pg.py` | 持久化（内存 / PostgreSQL checkpoint） |
 
-### skills/ — Skill 注册与执行
+### capabilities/ — Capability 注册与执行
 
 | 模块 | 职责 |
 |------|------|
-| `registry.py` | SkillRegistry（能力注册/发现） |
+| `registry.py` | CapabilityRegistry（能力注册/发现） |
 | `function.py` | Function 执行器（Python 可调用） |
 | `agent.py` | Agent 执行器（子代理 invoke） |
 | `remote.py` | Remote 执行器（HTTP /invoke 调用） |
 | `workflow.py` | Workflow 执行器（DAG 编排） |
 | `mcp.py` | MCP 特化注册 |
 | `sandbox.py` | Sandbox 特化注册 |
-| `middleware.py` | Skill 中间件（前置/后置钩子） |
-| `composition.py` / `dag.py` | Skill 组合与 DAG |
+| `middleware.py` | Capability 中间件（前置/后置钩子） |
+| `composition.py` / `dag.py` | Capability 组合与 DAG |
 
 ### context/ / trajectory/ — 上下文与轨迹
 
@@ -58,4 +58,4 @@ Plan-F 运行时中间件层。承载横向关注点（重试/超时/熔断/限�
 
 ## 演进
 
-源自 `app/infra/*`（2026-08-19 起逐模块迁入）。Phase 0 已完成 9 个运行时模块迁移，`app/infra` 已退役。Phase 1 新增 `skills/` 注册表（Function/Agent/Remote/Workflow 四执行器）。
+源自 `app/infra/*`（2026-08-19 起逐模块迁入）。Phase 0 已完成 9 个运行时模块迁移，`app/infra` 已退役。Phase 1 新增 `capabilities/` 注册表（Function/Agent/Remote/Workflow 四执行器；2026-11-17 由 `skills/` 改名回归 `capabilities/`，与业界 Skill=SKILL.md 技能包的语义区分开）。

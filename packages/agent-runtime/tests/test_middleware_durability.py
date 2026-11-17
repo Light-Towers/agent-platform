@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import pytest
 
-from agent_runtime.skills.middleware import (
+from agent_runtime.capabilities.middleware import (
     AuditMiddleware,
     RateLimitMiddleware,
     RetryMiddleware,
     SimpleTokenBucket,
 )
-from agent_runtime.skills.registry import SkillExecutionError
+from agent_runtime.capabilities.registry import CapabilityExecutionError
 
 
 async def _ok(name, kwargs):
@@ -67,8 +67,8 @@ async def test_retry_gives_up_on_permanent():
     assert n["c"] == 3
 
 
-async def test_retry_skip_unrelated_skill():
-    mw = RetryMiddleware(max_retries=5, skill_names=("other",))
+async def test_retry_skip_unrelated_capability():
+    mw = RetryMiddleware(max_retries=5, capability_names=("other",))
     n = {"c": 0}
 
     async def cn(name, kwargs):
@@ -82,20 +82,20 @@ async def test_retry_skip_unrelated_skill():
 
 async def test_rate_limit_blocks_after_capacity():
     bucket = SimpleTokenBucket(rate=0.0, capacity=2)
-    mw = RateLimitMiddleware(bucket, skill_names=("s",))
+    mw = RateLimitMiddleware(bucket, capability_names=("s",))
 
     async def call_next(name, kwargs):
         return {"ok": True}
 
     assert await mw.around("s", {}, call_next) == {"ok": True}
     assert await mw.around("s", {}, call_next) == {"ok": True}
-    with pytest.raises(SkillExecutionError):
+    with pytest.raises(CapabilityExecutionError):
         await mw.around("s", {}, call_next)
 
 
-async def test_rate_limit_skip_unrelated_skill():
+async def test_rate_limit_skip_unrelated_capability():
     bucket = SimpleTokenBucket(rate=0.0, capacity=0)
-    mw = RateLimitMiddleware(bucket, skill_names=("other",))
+    mw = RateLimitMiddleware(bucket, capability_names=("other",))
 
     async def call_next(name, kwargs):
         return {"ok": True}
@@ -127,7 +127,7 @@ async def test_audit_records_success_and_failure():
 
 async def test_middleware_applies_via_registry_execute():
     """新中间件经 registry.execute 洋葱链真实生效（非死代码）。"""
-    from agent_runtime.skills.registry import Skill, SkillKind, SkillRegistry
+    from agent_runtime.capabilities.registry import Capability, CapabilityKind, CapabilityRegistry
 
     calls = {"n": 0}
 
@@ -137,8 +137,8 @@ async def test_middleware_applies_via_registry_execute():
             raise _TransientError("boom")
         return {"ok": True}
 
-    reg = SkillRegistry(middlewares=[RetryMiddleware(max_retries=3, backoff_s=0)])
-    reg.register(Skill("s", "flaky", SkillKind.FUNCTION, _flaky))
+    reg = CapabilityRegistry(middlewares=[RetryMiddleware(max_retries=3, backoff_s=0)])
+    reg.register(Capability("s", "flaky", CapabilityKind.FUNCTION, _flaky))
 
     out = await reg.execute("s")
     assert out == {"ok": True}

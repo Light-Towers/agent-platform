@@ -17,7 +17,7 @@ def make_runtime(registry, ownership_store, *, ttl_s: float = 5.0) -> PlannerRun
         ownership_store=ownership_store,
         max_duration_seconds=ttl_s,
         max_steps=100,
-        max_skill_depth=20,
+        max_capability_depth=20,
     )
 
 

@@ -54,7 +54,7 @@ def build_graph(
     """构建并编译 Supervisor 图；llm 可为 None（无 LLM 模式）。
 
     ``delegate_ref``：延迟绑定的 ``DelegateRef``。提供且 ``delegate`` 已设置时，
-    能力节点经 delegate 调用（受 ``skill_guard`` 组合治理，Workflow 嵌套调用计入
+    能力节点经 delegate 调用（受 ``capability_guard`` 组合治理，Workflow 嵌套调用计入
     步数 / 深度预算）；缺省回退 ``get_registry().execute``（向后兼容）。
     """
 

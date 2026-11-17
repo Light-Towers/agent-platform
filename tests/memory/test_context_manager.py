@@ -72,17 +72,17 @@ def test_update_task():
     assert ctx.task.pending == ["step_b"]
 
 
-def test_record_skill_output():
+def test_record_capability_output():
     cm = ContextManager()
     ctx = cm.create_context()
-    cm.record_skill(ctx, "search", result=["e1"])
+    cm.record_capability(ctx, "search", result=["e1"])
     assert ctx.execution.outputs["search"] == ["e1"]
 
 
-def test_record_skill_error():
+def test_record_capability_error():
     cm = ContextManager()
     ctx = cm.create_context()
-    cm.record_skill(ctx, "search", error="timeout")
+    cm.record_capability(ctx, "search", error="timeout")
     assert ctx.execution.errors["search"] == "timeout"
 
 
@@ -93,7 +93,7 @@ def test_snapshot_structure():
     cm = ContextManager()
     ctx = cm.create_context(goal="g", messages=["m1", "m2"])
     cm.update_task(ctx, pending="step_a")
-    cm.record_skill(ctx, "search", result="ok")
+    cm.record_capability(ctx, "search", result="ok")
 
     snap = cm.snapshot(ctx)
     assert snap["conversation"]["message_count"] == 2
@@ -106,10 +106,10 @@ def test_snapshot_structure():
 def test_agent_context_snapshot_direct():
     ctx = AgentContext()
     ctx.task.goal = "test"
-    ctx.execution.skill_stack.append("a")
+    ctx.execution.capability_stack.append("a")
     snap = ctx.snapshot()
     assert snap["task"]["goal"] == "test"
-    assert snap["execution"]["skill_stack"] == ["a"]
+    assert snap["execution"]["capability_stack"] == ["a"]
 
 
 # ---------- render_snapshot_prompt（WS-2 下一轮注入）----------
@@ -123,7 +123,7 @@ def test_render_snapshot_prompt_renders_task_fields():
             "pending": ["analyze"],
             "constraints": {"scope": "core"},
         },
-        "execution": {"outputs": {}, "errors": {}, "skill_stack": []},
+        "execution": {"outputs": {}, "errors": {}, "capability_stack": []},
     }
     text = render_snapshot_prompt(snap)
     assert text.startswith("[上轮任务状态]")

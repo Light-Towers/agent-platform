@@ -1,4 +1,4 @@
-"""沙箱执行器 + 沙箱 Skill 测试。
+"""沙箱执行器 + 沙箱 Capability 测试。
 
 本机无 Docker，测试用 subprocess 后端（开发降级模式）。
 Docker 后端逻辑与 subprocess 同构，生产环境自动选择 Docker。
@@ -8,9 +8,9 @@ from __future__ import annotations
 
 import pytest
 
+from agent_runtime.capabilities.registry import CapabilityKind, CapabilityRegistry
+from agent_runtime.capabilities.sandbox import as_sandbox_capability
 from agent_runtime.sandbox import SandboxExecutor, SandboxResult
-from agent_runtime.skills.registry import SkillKind, SkillRegistry
-from agent_runtime.skills.sandbox import as_sandbox_skill
 
 # ---------- SandboxExecutor ----------
 
@@ -68,46 +68,46 @@ async def test_sandbox_result_fields():
     assert result.backend == "subprocess"
 
 
-# ---------- as_sandbox_skill ----------
+# ---------- as_sandbox_capability ----------
 
 
 @pytest.mark.asyncio
-async def test_sandbox_skill_registered_correctly():
-    skill = as_sandbox_skill(executor=SandboxExecutor(backend="subprocess"))
-    assert skill.name == "code_execution"
-    assert skill.kind == SkillKind.FUNCTION
-    assert skill.input_schema is not None
-    assert "code" in skill.input_schema["required"]
-    assert "code_execution" in skill.permissions
+async def test_sandbox_capability_registered_correctly():
+    capability = as_sandbox_capability(executor=SandboxExecutor(backend="subprocess"))
+    assert capability.name == "code_execution"
+    assert capability.kind == CapabilityKind.FUNCTION
+    assert capability.input_schema is not None
+    assert "code" in capability.input_schema["required"]
+    assert "code_execution" in capability.permissions
 
 
 @pytest.mark.asyncio
-async def test_sandbox_skill_execute_success():
-    skill = as_sandbox_skill(executor=SandboxExecutor(backend="subprocess"))
-    result = await skill.executor(code="print(3 + 4)")
+async def test_sandbox_capability_execute_success():
+    capability = as_sandbox_capability(executor=SandboxExecutor(backend="subprocess"))
+    result = await capability.executor(code="print(3 + 4)")
     assert result["stdout"].strip() == "7"
     assert result["exit_code"] == 0
     assert result["backend"] == "subprocess"
 
 
 @pytest.mark.asyncio
-async def test_sandbox_skill_execute_failure_raises():
-    skill = as_sandbox_skill(executor=SandboxExecutor(backend="subprocess"))
+async def test_sandbox_capability_execute_failure_raises():
+    capability = as_sandbox_capability(executor=SandboxExecutor(backend="subprocess"))
     with pytest.raises(RuntimeError, match="沙箱执行失败"):
-        await skill.executor(code="raise RuntimeError('boom')")
+        await capability.executor(code="raise RuntimeError('boom')")
 
 
 @pytest.mark.asyncio
-async def test_sandbox_skill_via_registry():
-    registry = SkillRegistry()
-    skill = as_sandbox_skill(executor=SandboxExecutor(backend="subprocess"))
-    registry.register(skill)
+async def test_sandbox_capability_via_registry():
+    registry = CapabilityRegistry()
+    capability = as_sandbox_capability(executor=SandboxExecutor(backend="subprocess"))
+    registry.register(capability)
     result = await registry.execute("code_execution", code="print(100)")
     assert "100" in result["stdout"]
 
 
 @pytest.mark.asyncio
-async def test_sandbox_skill_custom_timeout():
-    skill = as_sandbox_skill(executor=SandboxExecutor(backend="subprocess"), timeout=5)
-    result = await skill.executor(code="print('fast')")
+async def test_sandbox_capability_custom_timeout():
+    capability = as_sandbox_capability(executor=SandboxExecutor(backend="subprocess"), timeout=5)
+    result = await capability.executor(code="print('fast')")
     assert result["stdout"].strip() == "fast"

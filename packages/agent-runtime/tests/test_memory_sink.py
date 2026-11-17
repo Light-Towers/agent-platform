@@ -2,20 +2,21 @@
 
 验证：
 - EpisodicSink：执行后自动沉淀 Episode；
-- ProceduralSink：定期挖掘候选 Skill → 持久化；
-- SkillUsageTracker：使用效果 → lifecycle 升降级；
+- ProceduralSink：定期挖掘候选 Capability → 持久化；
+- CapabilityUsageTracker：使用效果 → lifecycle 升降级；
 - 集成：_persist_trajectory 后自动触发 hooks。
 """
 
 
+from agent_runtime.capabilities.registry import CapabilityRegistry
 from agent_runtime.episodic_memory import (
     EpisodicMemory,
     InMemoryEpisodicStore,
 )
 from agent_runtime.memory_sink import (
+    CapabilityUsageTracker,
     EpisodicSink,
     ProceduralSink,
-    SkillUsageTracker,
 )
 from agent_runtime.planner.execution_graph import _persist_trajectory
 from agent_runtime.planner.protocol import Plan, PlannerRuntime
@@ -23,7 +24,6 @@ from agent_runtime.procedural_memory import (
     InMemoryProceduralStore,
     ProceduralEntry,
 )
-from agent_runtime.skills.registry import SkillRegistry
 from agent_runtime.trajectory.models import TrajectoryRecord, TrajectoryStep
 
 # 隔离域（plan T1）：sink/tracker/store 全链路带 tenant_id。
@@ -128,11 +128,11 @@ async def test_procedural_sink_not_triggered_before_interval():
     assert len(entries) == 0
 
 
-# ===== SkillUsageTracker =====
+# ===== CapabilityUsageTracker =====
 
-async def test_skill_usage_tracker_record_and_stats():
+async def test_capability_usage_tracker_record_and_stats():
     proc_store = InMemoryProceduralStore()
-    tracker = SkillUsageTracker(proc_store)
+    tracker = CapabilityUsageTracker(proc_store)
 
     tracker.record_use("search", "1.0", success=True, tenant_id=TENANT)
     tracker.record_use("search", "1.0", success=False, tenant_id=TENANT)
@@ -144,7 +144,7 @@ async def test_skill_usage_tracker_record_and_stats():
     assert stats["total"] == 3
 
 
-async def test_skill_usage_tracker_promote_draft_to_stable():
+async def test_capability_usage_tracker_promote_draft_to_stable():
     proc_store = InMemoryProceduralStore()
 
     await proc_store.save(ProceduralEntry(
@@ -152,7 +152,7 @@ async def test_skill_usage_tracker_promote_draft_to_stable():
         description="", lifecycle="draft",
     ), tenant_id=TENANT)
 
-    tracker = SkillUsageTracker(proc_store, promote_threshold=0.8, min_uses=5)
+    tracker = CapabilityUsageTracker(proc_store, promote_threshold=0.8, min_uses=5)
 
     for _ in range(5):
         tracker.record_use("search", "1.0", success=True, tenant_id=TENANT)
@@ -164,7 +164,7 @@ async def test_skill_usage_tracker_promote_draft_to_stable():
     assert entry.lifecycle == "stable"
 
 
-async def test_skill_usage_tracker_demote_stable_to_deprecated():
+async def test_capability_usage_tracker_demote_stable_to_deprecated():
     proc_store = InMemoryProceduralStore()
 
     await proc_store.save(ProceduralEntry(
@@ -172,7 +172,7 @@ async def test_skill_usage_tracker_demote_stable_to_deprecated():
         description="", lifecycle="stable",
     ), tenant_id=TENANT)
 
-    tracker = SkillUsageTracker(proc_store, demote_threshold=0.3, min_uses=5)
+    tracker = CapabilityUsageTracker(proc_store, demote_threshold=0.3, min_uses=5)
 
     for _ in range(4):
         tracker.record_use("search", "1.0", success=False, tenant_id=TENANT)
@@ -185,7 +185,7 @@ async def test_skill_usage_tracker_demote_stable_to_deprecated():
     assert entry.lifecycle == "deprecated"
 
 
-async def test_skill_usage_tracker_no_adjust_below_min_uses():
+async def test_capability_usage_tracker_no_adjust_below_min_uses():
     proc_store = InMemoryProceduralStore()
 
     await proc_store.save(ProceduralEntry(
@@ -193,7 +193,7 @@ async def test_skill_usage_tracker_no_adjust_below_min_uses():
         description="", lifecycle="draft",
     ), tenant_id=TENANT)
 
-    tracker = SkillUsageTracker(proc_store, min_uses=10)
+    tracker = CapabilityUsageTracker(proc_store, min_uses=10)
 
     for _ in range(5):
         tracker.record_use("search", "1.0", success=True, tenant_id=TENANT)
@@ -202,7 +202,7 @@ async def test_skill_usage_tracker_no_adjust_below_min_uses():
     assert new_lc is None
 
 
-async def test_skill_usage_tracker_no_adjust_when_rate_in_range():
+async def test_capability_usage_tracker_no_adjust_when_rate_in_range():
     proc_store = InMemoryProceduralStore()
 
     await proc_store.save(ProceduralEntry(
@@ -210,7 +210,7 @@ async def test_skill_usage_tracker_no_adjust_when_rate_in_range():
         description="", lifecycle="stable",
     ), tenant_id=TENANT)
 
-    tracker = SkillUsageTracker(proc_store, promote_threshold=0.8, demote_threshold=0.3, min_uses=5)
+    tracker = CapabilityUsageTracker(proc_store, promote_threshold=0.8, demote_threshold=0.3, min_uses=5)
 
     for _ in range(3):
         tracker.record_use("search", "1.0", success=True, tenant_id=TENANT)
@@ -230,7 +230,7 @@ async def test_post_execution_hook_triggered():
         hook_calls.append(trajectory)
 
     runtime = PlannerRuntime(
-        SkillRegistry(),
+        CapabilityRegistry(),
         post_execution_hooks=[mock_hook],
     )
     plan = Plan(route="test", planner_name="test")
@@ -257,7 +257,7 @@ async def test_post_execution_hook_failure_does_not_propagate():
         raise RuntimeError("hook failed")
 
     runtime = PlannerRuntime(
-        SkillRegistry(),
+        CapabilityRegistry(),
         post_execution_hooks=[bad_hook],
     )
     plan = Plan(route="test", planner_name="test")
@@ -284,7 +284,7 @@ async def test_episodic_sink_integration_with_persist_trajectory():
     sink = EpisodicSink(ep_mem)
 
     runtime = PlannerRuntime(
-        SkillRegistry(),
+        CapabilityRegistry(),
         post_execution_hooks=[sink],
     )
     plan = Plan(route="test", planner_name="test", tenant_id=TENANT)

@@ -58,7 +58,7 @@ target-version = "py311"
 select = ["E4", "E7", "E9", "F", "I", "BLE001", "S110"]
 # 存量豁免基线（与根 pyproject.toml 对齐，配置化前靠继承根 ignore 生效，F-S0-10 显式固化）：
 # E402: admission_gateway.py 模块级 import 在 logger 定义后（deliberate 顺序）；
-# E731: skills/registry.py 中间件链 lambda 闭包（风格，非逻辑阻断）。
+# E731: capabilities/registry.py 中间件链 lambda 闭包（风格，非逻辑阻断）。
 ignore = ["E402", "E731"]
 
 # P0-4 盲捕获门禁棘轮基线：逐文件锁定 legacy 存量，新代码不得新增；策略为整包基线豁免（源码不写逐点 noqa）。

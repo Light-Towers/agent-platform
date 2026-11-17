@@ -36,7 +36,7 @@ def test_add_node_and_edge():
 
 def test_add_edge_unknown_node_raises():
     g = ExecutionGraph()
-    g.add_node("a", "skill")
+    g.add_node("a", "capability")
     with pytest.raises(ValueError, match="未知节点"):
         g.add_edge("a", "nonexistent")
     with pytest.raises(ValueError, match="未知节点"):
@@ -45,7 +45,7 @@ def test_add_edge_unknown_node_raises():
 
 def test_self_loop_raises():
     g = ExecutionGraph()
-    g.add_node("a", "skill")
+    g.add_node("a", "capability")
     with pytest.raises(GraphCycleError, match="自环"):
         g.add_edge("a", "a")
 

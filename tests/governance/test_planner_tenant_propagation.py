@@ -97,7 +97,7 @@ async def test_unified_planner_workflow_branch_propagates_tenant():
         ModeDecision(
             mode=ExecutionMode.WORKFLOW,
             reason="test",
-            workflow_skill="general_qa",
+            workflow_capability="general_qa",
         )
     )
     planner = UnifiedPlanner(

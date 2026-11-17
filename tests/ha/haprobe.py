@@ -1,6 +1,6 @@
 """HAProbeAgent：可控故障实验任务载体（§HA 第 4 节）。
 
-每个 skill 对应一个 step，语义：
+每个 capability 对应一个 step，语义：
 1. 执行（写 side_effect，幂等：effect_key 唯一约束冲突则跳过实际效果）
 2. 写 checkpoint（由 _run_graph_in_place 每节点后持久化）
 3. 记录 execution_events（可证明的 trajectory 审计流）

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""args/文本摘要（单一实现）：observe_tool 与 Skill 中间件共用，禁止各自实现。
+"""args/文本摘要（单一实现）：observe_tool 与 Capability 中间件共用，禁止各自实现。
 
 全量 args/result 全文不入事件（在 Trajectory / Langfuse），事件只带摘要。
 """

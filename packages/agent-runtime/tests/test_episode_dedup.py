@@ -11,7 +11,7 @@ def _ep(
     outcome: EpisodeOutcome = EpisodeOutcome.SUCCESS,
     importance: float = 0.7,
     lessons: list[str] | None = None,
-    skill_names: list[str] | None = None,
+    capability_names: list[str] | None = None,
     tokens: int = 100,
     cost: float = 0.01,
     duration: float = 1.0,
@@ -23,7 +23,7 @@ def _ep(
         outcome=outcome,
         importance=importance,
         lessons=lessons or [],
-        skill_names=skill_names or [],
+        capability_names=capability_names or [],
         total_tokens=tokens,
         total_cost=cost,
         duration=duration,
@@ -64,14 +64,14 @@ def test_dedup_merges_lessons_deduplicated():
     assert len(result[0].lessons) == 3
 
 
-def test_dedup_merges_skill_names_deduplicated():
+def test_dedup_merges_capability_names_deduplicated():
     eps = [
-        _ep("e1", skill_names=["search", "analyze"]),
-        _ep("e2", skill_names=["analyze", "render"]),
+        _ep("e1", capability_names=["search", "analyze"]),
+        _ep("e2", capability_names=["analyze", "render"]),
     ]
     dedup = EpisodeDeduplicator()
     result, _ = dedup.deduplicate(eps)
-    assert set(result[0].skill_names) == {"search", "analyze", "render"}
+    assert set(result[0].capability_names) == {"search", "analyze", "render"}
 
 
 def test_dedup_accumulates_costs():

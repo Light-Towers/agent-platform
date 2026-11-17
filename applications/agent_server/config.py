@@ -125,11 +125,11 @@ class Settings(BaseLLMSettings):
     # 其余值为强制 override（调试/灰度）。
     planner: str = "deterministic"
 
-    # Plan-F Phase 3: Skill 组合治理（agentic 组合路径的护栏边界；
+    # Plan-F Phase 3: Capability 组合治理（agentic 组合路径的护栏边界；
     # deterministic 静态 DAG 天然无环，不使用这些限制）
-    max_skill_depth: int = 4
+    max_capability_depth: int = 4
     max_steps: int = 20
-    # P5-1：语义循环指纹（skill + 归一化 args），重复指纹拒绝继续（默认关，避免误伤合法重放/重规划）
+    # P5-1：语义循环指纹（capability + 归一化 args），重复指纹拒绝继续（默认关，避免误伤合法重放/重规划）
     enable_loop_fingerprint: bool = False
 
     # Plan-F Phase 3: 单次 execution 的 wall-clock 上限（秒），None/0 不启用；
@@ -142,7 +142,7 @@ class Settings(BaseLLMSettings):
     tool_result_max_tokens: int = 8192  # 单条工具结果超此阈值则外置 + 截断视图
     tool_result_store_dir: str = ""  # 空则复用 session_dir
     memory_gate_top_k: int = 5  # 记忆召回门控：预算内最多注入的条数
-    tool_result_compression_enabled: bool = False  # opt-in：Skill 出口统一压缩（默认关，避免改变现有返回结构）
+    tool_result_compression_enabled: bool = False  # opt-in：Capability 出口统一压缩（默认关，避免改变现有返回结构）
 
     # CORS：允许的前端来源（逗号分隔），为空时默认回环 127.0.0.1:5173
     cors_allow_origins: str = ""
@@ -152,12 +152,12 @@ class Settings(BaseLLMSettings):
     # ⇒ 启动记 WARNING，不静默跳过 —— 与 Dockerfile 里 langfuse 那段「关了与坏了分不清」同族。
     web_ui_dist: str = ""
 
-    # Remote Skill 端点（P1：重服务 HTTP 调用）
-    knowledge_service_url: str = ""  # 空 = 不注册 knowledge skill
+    # Remote Capability 端点（P1：重服务 HTTP 调用）
+    knowledge_service_url: str = ""  # 空 = 不注册 knowledge capability
     knowledge_service_key: str = ""
-    nl2sql_service_url: str = ""  # 空 = 不注册 nl2sql skill
-    kefu_service_url: str = ""  # 空 = 不注册 kefu skill
-    exhibition_service_url: str = ""  # 空 = 不注册 exhibition skill（G4）
+    nl2sql_service_url: str = ""  # 空 = 不注册 nl2sql capability
+    kefu_service_url: str = ""  # 空 = 不注册 kefu capability
+    exhibition_service_url: str = ""  # 空 = 不注册 exhibition capability（G4）
 
     # §20: 运行时模式（决定持久化后端与 fail-fast 行为）
     # local       -> InMemory 后端，无需 DATABASE_URL（开发/测试默认）

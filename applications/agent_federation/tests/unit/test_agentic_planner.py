@@ -2,8 +2,8 @@
 
 覆盖：plan() 协议占位（route=agentic + sub_query 透传）、
 execute() 包装 _execute_agent_core（route+answer 事件）、执行异常降级（error+空 answer）、
-arun() 经 skill_guard 治理复用 _execute_agent_core（返回答案）、
-arun() 经 skill_guard 在步数超限时抛 SkillCompositionError。
+arun() 经 capability_guard 治理复用 _execute_agent_core（返回答案）、
+arun() 经 capability_guard 在步数超限时抛 CapabilityCompositionError。
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ from agent_federation.planners.agentic import AgenticPlanner
 from agent_runtime.planner.protocol import (
     PlannerContext,
     PlannerRuntime,
-    SkillCompositionError,
+    CapabilityCompositionError,
 )
 
 
@@ -77,7 +77,7 @@ async def test_execute_degrades_on_error(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_arun_wraps_core_with_governance(monkeypatch):
-    """arun 经 skill_guard 治理复用 _execute_agent_core，返回答案字符串。"""
+    """arun 经 capability_guard 治理复用 _execute_agent_core，返回答案字符串。"""
     captured = {}
 
     async def fake_core(task_query: str, workspace_id: str, main_agent=None) -> str:
@@ -105,7 +105,7 @@ async def test_arun_wraps_core_with_governance(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_arun_raises_on_step_limit(monkeypatch):
-    """arun 经 skill_guard 在单次执行步数超限时抛 SkillCompositionError（预算 per-request 隔离）。"""
+    """arun 经 capability_guard 在单次执行步数超限时抛 CapabilityCompositionError（预算 per-request 隔离）。"""
     async def fake_core(task_query: str, workspace_id: str, main_agent=None) -> str:
         return "ok"
 
@@ -118,9 +118,9 @@ async def test_arun_raises_on_step_limit(monkeypatch):
 
     # 单次执行内嵌套第二个 guard 触发步数超限（max_steps=1）
     async with runtime.execution():
-        async with runtime.skill_guard("a"):
-            with pytest.raises(SkillCompositionError):
-                async with runtime.skill_guard("b"):
+        async with runtime.capability_guard("a"):
+            with pytest.raises(CapabilityCompositionError):
+                async with runtime.capability_guard("b"):
                     pass
 
     # 预算 per-request：execution 边界退出复位，后续 arun 可正常执行（不跨请求累计）

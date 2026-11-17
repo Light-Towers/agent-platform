@@ -1,4 +1,4 @@
-"""Skill Discovery + permissions 测试（Plan-F 组合治理）。
+"""Capability Discovery + permissions 测试（Plan-F 组合治理）。
 
 覆盖：discover 的 metadata 过滤 / 权限过滤 / 关键词打分 / top_k 截断，
 permissions 字段默认值，to_tool_schemas 批量生成。
@@ -6,38 +6,38 @@ permissions 字段默认值，to_tool_schemas 批量生成。
 
 from __future__ import annotations
 
-from agent_runtime.skills.function import as_function_skill
-from agent_runtime.skills.registry import Skill, SkillKind, SkillRegistry
+from agent_runtime.capabilities.function import as_function_capability
+from agent_runtime.capabilities.registry import Capability, CapabilityKind, CapabilityRegistry
 
 
 async def _noop(**kwargs):
     return None
 
 
-def _skill(
+def _capability(
     name: str,
     description: str,
     *,
     permissions: set[str] | None = None,
     metadata: dict | None = None,
-) -> Skill:
-    return Skill(
+) -> Capability:
+    return Capability(
         name=name,
         description=description,
-        kind=SkillKind.FUNCTION,
+        kind=CapabilityKind.FUNCTION,
         executor=_noop,
         permissions=frozenset(permissions) if permissions else frozenset(),
         metadata=metadata or {},
     )
 
 
-def _build_registry() -> SkillRegistry:
-    reg = SkillRegistry()
-    reg.register(_skill("web_search", "联网搜索网页信息", metadata={"category": "search"}))
-    reg.register(_skill("rag_retrieve", "知识库检索文档", metadata={"category": "retrieval"}))
-    reg.register(_skill("sql_query", "SQL 数据库查询", metadata={"category": "data"}))
+def _build_registry() -> CapabilityRegistry:
+    reg = CapabilityRegistry()
+    reg.register(_capability("web_search", "联网搜索网页信息", metadata={"category": "search"}))
+    reg.register(_capability("rag_retrieve", "知识库检索文档", metadata={"category": "retrieval"}))
+    reg.register(_capability("sql_query", "SQL 数据库查询", metadata={"category": "data"}))
     reg.register(
-        _skill("admin_op", "管理员操作", permissions={"admin"}, metadata={"category": "admin"})
+        _capability("admin_op", "管理员操作", permissions={"admin"}, metadata={"category": "admin"})
     )
     return reg
 
@@ -45,14 +45,14 @@ def _build_registry() -> SkillRegistry:
 # ---------- permissions 字段 ----------
 
 
-def test_skill_permissions_default_empty():
-    skill = as_function_skill("x", "X", _noop)
-    assert skill.permissions == frozenset()
+def test_capability_permissions_default_empty():
+    capability = as_function_capability("x", "X", _noop)
+    assert capability.permissions == frozenset()
 
 
-def test_skill_permissions_set_via_factory():
-    skill = as_function_skill("x", "X", _noop, permissions={"read", "write"})
-    assert skill.permissions == frozenset({"read", "write"})
+def test_capability_permissions_set_via_factory():
+    capability = as_function_capability("x", "X", _noop, permissions={"read", "write"})
+    assert capability.permissions == frozenset({"read", "write"})
 
 
 # ---------- discover: 无 query ----------
@@ -115,7 +115,7 @@ def test_discover_permissions_restricted_allowed():
 
 
 def test_discover_keyword_scoring():
-    """query 词与 name/description 重合的 Skill 排前。"""
+    """query 词与 name/description 重合的 Capability 排前。"""
     reg = _build_registry()
     result = reg.discover("search web")
     assert result[0].name == "web_search"
@@ -133,8 +133,8 @@ def test_discover_keyword_no_match_returns_all():
 
 def test_to_tool_schemas_batch():
     reg = _build_registry()
-    skills = reg.list()
-    schemas = SkillRegistry.to_tool_schemas(skills)
+    capabilities = reg.list()
+    schemas = CapabilityRegistry.to_tool_schemas(capabilities)
     assert len(schemas) == 4
     assert all(s["type"] == "function" for s in schemas)
 
@@ -144,17 +144,17 @@ def test_to_tool_schemas_batch():
 
 def test_discover_chinese_keyword_scoring():
     """连续中文段按字符拆分，query 中文词能匹配 description 中的中文字符。"""
-    reg = SkillRegistry()
-    reg.register(_skill("web_search", "联网搜索网页信息"))
-    reg.register(_skill("sql_query", "数据库SQL查询"))
+    reg = CapabilityRegistry()
+    reg.register(_capability("web_search", "联网搜索网页信息"))
+    reg.register(_capability("sql_query", "数据库SQL查询"))
     result = reg.discover("搜索")
     assert result[0].name == "web_search"
 
 
 def test_discover_chinese_mixed_keyword():
     """中英混合 query：英文词 + 中文字符共同打分。"""
-    reg = SkillRegistry()
-    reg.register(_skill("web_search", "联网搜索web网页"))
-    reg.register(_skill("rag", "知识库检索"))
+    reg = CapabilityRegistry()
+    reg.register(_capability("web_search", "联网搜索web网页"))
+    reg.register(_capability("rag", "知识库检索"))
     result = reg.discover("search 网页")
     assert result[0].name == "web_search"

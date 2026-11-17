@@ -6,7 +6,7 @@
   函数级懒导入隔离（模式同 :mod:`agent_core.llm.fallback_lc`），其余内核
   模块不得 import :mod:`tool_wrap_lc`。
 
-单一实现原则：federation ``tool_registry`` 与 agent_server ``SkillRegistry``
+单一实现原则：federation ``tool_registry`` 与 agent_server ``CapabilityRegistry``
 均为本模块的**装配点**，不得各自实现包装逻辑（方案 v3 W1）。
 """
 

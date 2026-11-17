@@ -1,7 +1,7 @@
 """Episode 去重/压缩：防止 Episodic Memory 无限膨胀。
 
 按 (task_summary, outcome) 分组，同组保留 importance 最高的为主 Episode，
-合并 lessons / skill_names（去重），累加 token/cost/duration，
+合并 lessons / capability_names（去重），累加 token/cost/duration，
 metadata.dedup_count 记录合并条数。
 
 当前用精确匹配（task_summary 完全相同）。模糊去重（语义相似度）需 embedding，
@@ -66,13 +66,13 @@ class EpisodeDeduplicator:
                         merged_lessons.append(lesson)
                         seen_lessons.add(lesson)
 
-            merged_skills = list(primary.skill_names)
-            seen_skills = set(merged_skills)
+            merged_capabilities = list(primary.capability_names)
+            seen_capabilities = set(merged_capabilities)
             for ep in duplicates:
-                for skill in ep.skill_names:
-                    if skill not in seen_skills:
-                        merged_skills.append(skill)
-                        seen_skills.add(skill)
+                for capability in ep.capability_names:
+                    if capability not in seen_capabilities:
+                        merged_capabilities.append(capability)
+                        seen_capabilities.add(capability)
 
             total_tokens = primary.total_tokens + sum(
                 ep.total_tokens for ep in duplicates
@@ -88,7 +88,7 @@ class EpisodeDeduplicator:
             merged = replace(
                 primary,
                 lessons=merged_lessons,
-                skill_names=merged_skills,
+                capability_names=merged_capabilities,
                 total_tokens=total_tokens,
                 total_cost=total_cost,
                 duration=duration,

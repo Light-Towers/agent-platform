@@ -1,13 +1,13 @@
-"""MCP Skill 注册测试：register_mcp_skills 把 MCP 工具注册为 Skill。"""
+"""MCP Capability 注册测试：register_mcp_capabilities 把 MCP 工具注册为 Capability。"""
 
 from __future__ import annotations
 
 import pytest
 
+from agent_runtime.capabilities.mcp import register_mcp_capabilities
+from agent_runtime.capabilities.registry import CapabilityKind, CapabilityRegistry
 from agent_runtime.mcp_client import MCPClientManager
 from agent_runtime.schemas import McpServerConfig, McpToolResult
-from agent_runtime.skills.mcp import register_mcp_skills
-from agent_runtime.skills.registry import SkillKind, SkillRegistry
 
 
 def _make_manager_with_tools() -> MCPClientManager:
@@ -33,56 +33,56 @@ def _make_manager_with_tools() -> MCPClientManager:
 
 
 @pytest.mark.asyncio
-async def test_register_mcp_skills_registers_all_tools():
+async def test_register_mcp_capabilities_registers_all_tools():
     manager = _make_manager_with_tools()
-    registry = SkillRegistry()
-    count = register_mcp_skills(manager, registry)
+    registry = CapabilityRegistry()
+    count = register_mcp_capabilities(manager, registry)
     assert count == 2
     assert "mcp.test-server.weather" in registry
     assert "mcp.test-server.calc" in registry
 
 
-def test_register_mcp_skills_skill_kind_and_metadata():
+def test_register_mcp_capabilities_capability_kind_and_metadata():
     manager = _make_manager_with_tools()
-    registry = SkillRegistry()
-    register_mcp_skills(manager, registry)
-    skill = registry.get("mcp.test-server.weather")
-    assert skill.kind == SkillKind.REMOTE
-    assert skill.metadata["source"] == "mcp"
-    assert skill.metadata["server_id"] == "test-server"
-    assert skill.metadata["tool_name"] == "weather"
+    registry = CapabilityRegistry()
+    register_mcp_capabilities(manager, registry)
+    capability = registry.get("mcp.test-server.weather")
+    assert capability.kind == CapabilityKind.REMOTE
+    assert capability.metadata["source"] == "mcp"
+    assert capability.metadata["server_id"] == "test-server"
+    assert capability.metadata["tool_name"] == "weather"
 
 
-def test_register_mcp_skills_permissions_from_allowlist():
+def test_register_mcp_capabilities_permissions_from_allowlist():
     manager = _make_manager_with_tools()
-    registry = SkillRegistry()
-    register_mcp_skills(manager, registry)
-    skill = registry.get("mcp.test-server.weather")
-    assert "mcp:test-server" in skill.permissions
+    registry = CapabilityRegistry()
+    register_mcp_capabilities(manager, registry)
+    capability = registry.get("mcp.test-server.weather")
+    assert "mcp:test-server" in capability.permissions
 
 
-def test_register_mcp_skills_skips_existing():
+def test_register_mcp_capabilities_skips_existing():
     manager = _make_manager_with_tools()
-    registry = SkillRegistry()
-    register_mcp_skills(manager, registry)
+    registry = CapabilityRegistry()
+    register_mcp_capabilities(manager, registry)
     # 二次注册应跳过已存在的
-    count = register_mcp_skills(manager, registry)
+    count = register_mcp_capabilities(manager, registry)
     assert count == 0
 
 
-def test_register_mcp_skills_skips_unavailable():
+def test_register_mcp_capabilities_skips_unavailable():
     manager = _make_manager_with_tools()
     manager._connections["test-server"].available = False
-    registry = SkillRegistry()
-    count = register_mcp_skills(manager, registry)
+    registry = CapabilityRegistry()
+    count = register_mcp_capabilities(manager, registry)
     assert count == 0
 
 
 @pytest.mark.asyncio
-async def test_mcp_skill_executor_calls_manager(monkeypatch):
+async def test_mcp_capability_executor_calls_manager(monkeypatch):
     manager = _make_manager_with_tools()
-    registry = SkillRegistry()
-    register_mcp_skills(manager, registry)
+    registry = CapabilityRegistry()
+    register_mcp_capabilities(manager, registry)
 
     # mock call_tool 返回成功
     async def fake_call_tool(server_id, tool_name, params, caller):
@@ -98,10 +98,10 @@ async def test_mcp_skill_executor_calls_manager(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_mcp_skill_executor_raises_on_failure(monkeypatch):
+async def test_mcp_capability_executor_raises_on_failure(monkeypatch):
     manager = _make_manager_with_tools()
-    registry = SkillRegistry()
-    register_mcp_skills(manager, registry)
+    registry = CapabilityRegistry()
+    register_mcp_capabilities(manager, registry)
 
     async def failing_call_tool(server_id, tool_name, params, caller):
         return McpToolResult(success=False, error="CONNECTION_TIMEOUT", duration_ms=5000)
@@ -112,11 +112,11 @@ async def test_mcp_skill_executor_raises_on_failure(monkeypatch):
         await registry.execute("mcp.test-server.weather", city="上海")
 
 
-def test_register_mcp_skills_discoverable():
+def test_register_mcp_capabilities_discoverable():
     """注册后 MCP 工具可经 discover() 发现。"""
     manager = _make_manager_with_tools()
-    registry = SkillRegistry()
-    register_mcp_skills(manager, registry)
+    registry = CapabilityRegistry()
+    register_mcp_capabilities(manager, registry)
     results = registry.discover("weather", top_k=10)
     names = [s.name for s in results]
     assert "mcp.test-server.weather" in names

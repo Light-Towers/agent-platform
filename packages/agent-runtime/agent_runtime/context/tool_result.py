@@ -145,7 +145,7 @@ def read_tool_result(ref: str, store_dir: str | Path) -> str:
 
 
 def compress_result(max_tokens: int = 8192, store_dir: str | Path | None = None):
-    """执行器出口装饰器：自动压缩 Skill/工具返回结果。
+    """执行器出口装饰器：自动压缩 Capability/工具返回结果。
 
     用法::
 

@@ -21,6 +21,7 @@ configure_logging(fmt="%(asctime)s %(levelname)s %(name)s: %(message)s")
 from agent_runtime.admission import AdmissionQueue, RateLimiter
 from agent_runtime.admission_gateway import PgAdmissionController
 from agent_runtime.cache import close_cache, get_cache
+from agent_runtime.capabilities.workflow import discover_workflows
 from agent_runtime.coordinator import SessionCoordinator
 from agent_runtime.db import close_pool, get_pool, init_pool
 from agent_runtime.mcp_client import MCPClientManager
@@ -30,7 +31,6 @@ from agent_runtime.planner.durability_pg import (
     PgIdempotencyStore,
 )
 from agent_runtime.revert import RevertHandler
-from agent_runtime.skills.workflow import discover_workflows
 from agent_runtime.trajectory import PgTrajectoryStore
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -168,7 +168,7 @@ def _build_memory_hooks(pool):
     """构建执行后记忆沉淀 hooks（EpisodicSink + ProceduralSink + MemoryDecayManager）。
 
     pool 非 None 时用 PG 后端，否则 InMemory。使记忆框架"越用越好"——
-    执行完成后自动沉淀 Episode → 定期挖掘候选 Skill → 衰减清理。
+    执行完成后自动沉淀 Episode → 定期挖掘候选 Capability → 衰减清理。
     """
     from agent_runtime.episodic_memory import EpisodicMemory, InMemoryEpisodicStore
     from agent_runtime.memory_decay import MemoryDecayManager
@@ -403,7 +403,7 @@ async def lifespan(app: FastAPI):
             mcp_manager = None
     app.state.mcp_manager = mcp_manager
 
-    # delegate_ref 延迟绑定：graph 节点经 runtime.delegate 调用能力（受 skill_guard 组合治理），
+    # delegate_ref 延迟绑定：graph 节点经 runtime.delegate 调用能力（受 capability_guard 组合治理），
     # 解决循环依赖（graph → registry → runtime → graph）——先传空 holder，runtime 创建后填充。
     delegate_ref = DelegateRef()
     app.state.graph = build_graph(
@@ -411,8 +411,8 @@ async def lifespan(app: FastAPI):
     )
     app.state.checkpointer = checkpointer
     # Plan-F Phase 2: Planner 实现（PLANNER env 选择，Phase 3 统一 SSE 出口后供 api 消费）
-    # Plan-F Phase 3: PlannerRuntime——注册表注入 graph（含 general_qa Workflow Skill），
-    # llm/mcp_manager/pool 一并装配；组合治理（max_skill_depth/max_steps）约束 agentic 路径。
+    # Plan-F Phase 3: PlannerRuntime——注册表注入 graph（含 general_qa Workflow Capability），
+    # llm/mcp_manager/pool 一并装配；组合治理（max_capability_depth/max_steps）约束 agentic 路径。
     from agent_runtime.planner.protocol import PlannerRuntime
 
     from agent_server.capabilities import get_registry
@@ -421,54 +421,54 @@ async def lifespan(app: FastAPI):
     # 装配顺序：registry 先于 planner（GraphPlanner plan() 需 registry 做 discover）
     registry = get_registry(graph=app.state.graph)
 
-    # §20 演进：自动发现并注册 Workflows 目录（声明式 YAML → Skill）
+    # §20 演进：自动发现并注册 Workflows 目录（声明式 YAML → Capability）
     try:
         import agent_runtime
         _wf_dir = str(pathlib.Path(agent_runtime.__file__).parent / "workflows")
-        wf_skills = discover_workflows(
+        wf_capabilities = discover_workflows(
             _wf_dir,
             registry=registry,
         )
-        for sk in wf_skills:
+        for sk in wf_capabilities:
             registry.register(sk)
-        logger.info("auto-registered %d workflow skills from %s", len(wf_skills), _wf_dir)
+        logger.info("auto-registered %d workflow capabilities from %s", len(wf_capabilities), _wf_dir)
     except Exception:
         logger.warning("workflow auto-discovery failed", exc_info=True)
 
-    # MCP 工具自动注册为 Skill（每个工具 → SkillKind.REMOTE Skill）
+    # MCP 工具自动注册为 Capability（每个工具 → CapabilityKind.REMOTE Capability）
     if mcp_manager is not None:
-        from agent_runtime.skills.mcp import register_mcp_skills
+        from agent_runtime.capabilities.mcp import register_mcp_capabilities
 
-        mcp_count = register_mcp_skills(mcp_manager, registry)
-        logger.info("auto-registered %d MCP tool skills", mcp_count)
+        mcp_count = register_mcp_capabilities(mcp_manager, registry)
+        logger.info("auto-registered %d MCP tool capabilities", mcp_count)
 
-    # 沙箱代码执行 Skill（Docker 优先 subprocess 降级）
-    from agent_runtime.skills.sandbox import as_sandbox_skill
+    # 沙箱代码执行 Capability（Docker 优先 subprocess 降级）
+    from agent_runtime.capabilities.sandbox import as_sandbox_capability
 
-    sandbox_skill = as_sandbox_skill(timeout=settings.max_execution_seconds or 30)
-    if sandbox_skill.name not in registry:
-        registry.register(sandbox_skill)
-        logger.info("registered sandbox skill (backend=%s)", sandbox_skill.metadata.get("backend"))
+    sandbox_capability = as_sandbox_capability(timeout=settings.max_execution_seconds or 30)
+    if sandbox_capability.name not in registry:
+        registry.register(sandbox_capability)
+        logger.info("registered sandbox capability (backend=%s)", sandbox_capability.metadata.get("backend"))
 
-    # AgenticPlanner → SkillKind.AGENT 收敛（entry_points 不可用时跳过）
+    # AgenticPlanner → CapabilityKind.AGENT 收敛（entry_points 不可用时跳过）
     try:
         from agent_runtime.planner.agentic import AgenticPlanner
 
-        agentic_skill = AgenticPlanner().to_skill()
-        if agentic_skill.name not in registry:
-            registry.register(agentic_skill)
-            logger.info("registered agentic skill (SkillKind.AGENT)")
+        agentic_capability = AgenticPlanner().to_capability()
+        if agentic_capability.name not in registry:
+            registry.register(agentic_capability)
+            logger.info("registered agentic capability (CapabilityKind.AGENT)")
     except Exception:
         # entry_points 不可用是常见预期（非 agentic 部署）；仅当运行时实际需要
         # agentic/auto planner 时才值得警告，否则 DEBUG 记录（T1.2c / B2 评审结论）
         if settings.planner in ("agentic", "auto"):
             logger.warning(
-                "agentic skill 注册失败（planner=%s 运行时需要该 skill）",
+                "agentic capability 注册失败（planner=%s 运行时需要该 capability）",
                 settings.planner,
                 exc_info=True,
             )
         else:
-            logger.debug("agentic skill registration skipped (entry_points unavailable)", exc_info=True)
+            logger.debug("agentic capability registration skipped (entry_points unavailable)", exc_info=True)
 
     app.state.registry = registry
     app.state.planner = get_planner(settings, registry=registry)
@@ -495,7 +495,7 @@ async def lifespan(app: FastAPI):
         llm=llm,
         mcp_manager=mcp_manager,
         pool=pool,
-        max_skill_depth=settings.max_skill_depth,
+        max_capability_depth=settings.max_capability_depth,
         max_steps=settings.max_steps,
         max_duration_seconds=settings.max_execution_seconds or None,
         checkpoint_store=checkpoint_store,

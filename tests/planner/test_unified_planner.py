@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+from agent_runtime.capabilities.registry import Capability, CapabilityKind, CapabilityRegistry
 from agent_runtime.planner.execution_graph import ExecutionGraph
 from agent_runtime.planner.mode_selector import ExecutionMode, ModeSelector
 from agent_runtime.planner.protocol import PlannerContext
-from agent_runtime.skills.registry import Skill, SkillKind, SkillRegistry
 from agent_server.planners.unified import UnifiedPlanner
 
 
@@ -15,31 +15,31 @@ async def _echo(**kwargs):
     return kwargs
 
 
-def _registry() -> SkillRegistry:
-    reg = SkillRegistry()
+def _registry() -> CapabilityRegistry:
+    reg = CapabilityRegistry()
     reg.register(
-        Skill(
+        Capability(
             name="web_search",
             description="联网搜索网页信息 web search",
-            kind=SkillKind.FUNCTION,
+            kind=CapabilityKind.FUNCTION,
             executor=_echo,
             metadata={"kind": "function"},
         )
     )
     reg.register(
-        Skill(
+        Capability(
             name="analyze",
             description="分析结构化数据 analyze data",
-            kind=SkillKind.FUNCTION,
+            kind=CapabilityKind.FUNCTION,
             executor=_echo,
             metadata={"kind": "function"},
         )
     )
     reg.register(
-        Skill(
+        Capability(
             name="report_workflow",
             description="生成财务周报 report workflow",
-            kind=SkillKind.FUNCTION,
+            kind=CapabilityKind.FUNCTION,
             executor=_echo,
             metadata={"kind": "workflow"},
         )
@@ -69,7 +69,7 @@ async def test_unified_auto_workflow():
     assert plan.execution_mode == ExecutionMode.WORKFLOW.value
 
 
-async def test_unified_auto_graph_multi_skill():
+async def test_unified_auto_graph_multi_capability():
     settings = SimpleNamespace(planner="auto")
     selector = ModeSelector()
     planner = UnifiedPlanner(settings, _registry(), selector=selector)  # type: ignore[arg-type]

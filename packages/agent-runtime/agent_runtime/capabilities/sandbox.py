@@ -1,4 +1,4 @@
-"""沙箱代码执行 Skill：把 SandboxExecutor 包装为可注册的 Skill。
+"""沙箱代码执行 Capability：把 SandboxExecutor 包装为可注册的 Capability。
 
 注册后，Planner / Agent 可经 ``delegate("code_execution", code="...")``
 在隔离沙箱中执行代码——Docker 容器（生产）或 subprocess（开发降级）。
@@ -10,24 +10,24 @@ from __future__ import annotations
 
 from typing import Any
 
+from agent_runtime.capabilities.registry import Capability, CapabilityKind, ExecutionBoundary
 from agent_runtime.sandbox import SandboxExecutor
-from agent_runtime.skills.registry import ExecutionBoundary, Skill, SkillKind
 
 
-def as_sandbox_skill(
+def as_sandbox_capability(
     executor: SandboxExecutor | None = None,
     *,
     name: str = "code_execution",
     timeout: int = 30,
-) -> Skill:
-    """把沙箱执行器包装为 FUNCTION 型 Skill。
+) -> Capability:
+    """把沙箱执行器包装为 FUNCTION 型 Capability。
 
     :param executor: 沙箱执行器（缺省自动创建，Docker 优先 subprocess 降级）。
-    :param name: Skill 名称（默认 "code_execution"）。
+    :param name: Capability 名称（默认 "code_execution"）。
     :param timeout: 默认超时秒数。
-    :return: 可注册到 SkillRegistry 的 Skill。
+    :return: 可注册到 CapabilityRegistry 的 Capability。
 
-    Skill 入参：
+    Capability 入参：
     - ``code`` (str, 必填)：要执行的 Python 代码。
     - ``language`` (str, 默认 "python")：代码语言。
     - ``timeout`` (int, 默认 30)：超时秒数。
@@ -51,10 +51,10 @@ def as_sandbox_skill(
             "backend": result.backend,
         }
 
-    return Skill(
+    return Capability(
         name=name,
         description="在隔离沙箱中执行 Python 代码（Docker 容器或 subprocess 隔离）",
-        kind=SkillKind.FUNCTION,
+        kind=CapabilityKind.FUNCTION,
         executor=execute,
         execution_boundary=ExecutionBoundary.SANDBOX,
         input_schema={
@@ -84,4 +84,4 @@ def as_sandbox_skill(
     )
 
 
-__all__ = ["as_sandbox_skill"]
+__all__ = ["as_sandbox_capability"]

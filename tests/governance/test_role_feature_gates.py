@@ -130,7 +130,7 @@ def test_p16_current_tree_is_clean_and_really_judged():
     """真树零违规，且三个装配面都真实存在（不靠「文件不存在所以绿」）。"""
     for rel in lint._NO_WIRING_SCOPE:
         assert (_ROOT / rel).is_file()
-    assert lint.check_skill_permission_no_wiring() == []
+    assert lint.check_capability_permission_no_wiring() == []
 
 
 def test_p16_flags_real_wiring(tmp_path, monkeypatch):
@@ -138,7 +138,7 @@ def test_p16_flags_real_wiring(tmp_path, monkeypatch):
     _wiring_scope_tree(tmp_path)
     _write(tmp_path, lint._NO_WIRING_SCOPE[0], _WIRING_SRC)
     monkeypatch.setattr(lint, "ROOT", tmp_path)
-    violations = lint.check_skill_permission_no_wiring()
+    violations = lint.check_capability_permission_no_wiring()
     assert len(violations) == 1
     assert "caller_permissions" in violations[0]
 
@@ -155,7 +155,7 @@ def test_p16_missing_scope_reports_unparsed(tmp_path, monkeypatch):
     """装配面缺失 ⇒ fail-closed 标记，不是默默报绿。"""
     _write(tmp_path, lint._NO_WIRING_SCOPE[0], _PASSTHROUGH_SRC)
     monkeypatch.setattr(lint, "ROOT", tmp_path)
-    violations = lint.check_skill_permission_no_wiring()
+    violations = lint.check_capability_permission_no_wiring()
     assert any("<<< NO-WIRING-UNPARSED" in v for v in violations)
 
 
@@ -165,7 +165,7 @@ def test_p16_missing_scope_reports_unparsed(tmp_path, monkeypatch):
     "check_name,marker",
     [
         ("check_internal_header_sign_sites", "P15"),
-        ("check_skill_permission_no_wiring", "P16"),
+        ("check_capability_permission_no_wiring", "P16"),
     ],
 )
 def test_new_gates_participate_in_main_decision(monkeypatch, capsys, check_name, marker):

@@ -4,11 +4,11 @@
 
 - 决策（plan）只回答「本次走哪条能力链路」，不持有执行语义；
 - 执行（execute）按 Plan 编排能力调用，retry/超时/熔断等执行边界由 Runtime
-  （``SkillRegistry.execute`` 的统一边界）承载；
+  （``CapabilityRegistry.execute`` 的统一边界）承载；
 - 事件（StreamEvent）与 SSE 出口事件同构（type + payload），Phase 3 切换出口时可直传。
 
-组合治理（Phase 3）：PlannerRuntime 承载 ``max_skill_depth`` / ``max_steps`` 与
-``skill_guard``（步数上限 / 循环检测 / 深度上限），约束「Agent 动态组合 Skill」的
+组合治理（Phase 3）：PlannerRuntime 承载 ``max_capability_depth`` / ``max_steps`` 与
+``capability_guard``（步数上限 / 循环检测 / 深度上限），约束「Agent 动态组合 Capability」的
 agentic 路径——deterministic 静态 DAG 天然无环，无需也不使用该护栏（不过度设计）。
 
 实现可放在任意侧（app=deterministic / 联邦=agentic），协议保持中立。
@@ -45,10 +45,10 @@ StreamEventType = Literal["route", "evidence", "memory", "answer", "error", "sta
 
 
 class ExecutionSuspended(Exception):
-    """执行挂起信号：Skill 返回 ``__awaitable__`` 标记，执行暂停等待外部回调。
+    """执行挂起信号：Capability 返回 ``__awaitable__`` 标记，执行暂停等待外部回调。
 
     非业务异常——是控制流信号，被 ``_run_graph_in_place`` 捕获后保存 checkpoint
-    并产出 ``suspended`` 事件。同步 Skill 路径不触发。
+    并产出 ``suspended`` 事件。同步 Capability 路径不触发。
     """
 
     def __init__(
@@ -69,8 +69,8 @@ class ExecutionSuspended(Exception):
         )
 
 # 当前执行上下文绑定的 Runtime（在 ``execution()`` 边界内 set，边界外为 None）。
-# 供嵌套 Skill 执行器（如 Workflow Skill 内部执行子 Skill）获取 Runtime 并经
-# ``delegate`` 受组合治理，避免绕过护栏（架构契约：Skill→Skill 须经 Runtime）。
+# 供嵌套 Capability 执行器（如 Workflow Capability 内部执行子 Capability）获取 Runtime 并经
+# ``delegate`` 受组合治理，避免绕过护栏（架构契约：Capability→Capability 须经 Runtime）。
 _runtime_var: contextvars.ContextVar["PlannerRuntime | None"] = contextvars.ContextVar(
     "planner_runtime", default=None
 )
@@ -79,8 +79,8 @@ _runtime_var: contextvars.ContextVar["PlannerRuntime | None"] = contextvars.Cont
 def get_current_runtime() -> "PlannerRuntime | None":
     """获取当前执行边界内的 PlannerRuntime（不在 execution() 边界内返回 None）。
 
-    嵌套 Skill 执行器（Workflow / Agent Skill）经此拿到 Runtime，调用 ``delegate``
-    执行子 Skill，复用同一执行上下文（预算 / 调用栈 / trace）受治理。
+    嵌套 Capability 执行器（Workflow / Agent Capability）经此拿到 Runtime，调用 ``delegate``
+    执行子 Capability，复用同一执行上下文（预算 / 调用栈 / trace）受治理。
     """
     return _runtime_var.get()
 
@@ -101,7 +101,7 @@ class Plan(BaseModel):
     ``mode``（Plan-F 执行链打通）：标识本次执行的路径——
 
     - ``deterministic``：单 route 调用（现有 DeterministicPlanner，route 必填）；
-    - ``graph``：多 Skill 组合计划，``graph`` 携带 ExecutionGraph，经 PolicyValidator +
+    - ``graph``：多 Capability 组合计划，``graph`` 携带 ExecutionGraph，经 PolicyValidator +
       execute_graph 执行（GraphPlanner）；
     - ``agentic``：LLM 自主 function-calling（AgenticPlanner，不经 ExecutionGraph）。
 
@@ -192,17 +192,17 @@ class ExecutionIdentity:
     tenant_id: str = "default"
 
 
-class SkillCompositionError(RuntimeError):
-    """Skill 组合治理违规：步数超限 / 循环调用 / 嵌套过深（agentic 组合路径）。"""
+class CapabilityCompositionError(RuntimeError):
+    """Capability 组合治理违规：步数超限 / 循环调用 / 嵌套过深（agentic 组合路径）。"""
 
 
 class PlanningFeedback(StrEnum):
-    """Planner 重规划反馈原因：与 Skill 执行异常严格分离。
+    """Planner 重规划反馈原因：与 Capability 执行异常严格分离。
 
     语义边界（架构契约）：
-    - Skill 执行异常（timeout / circuit / tool unavailable）→ Skill Runtime 处理（retry / fallback）；
+    - Capability 执行异常（timeout / circuit / tool unavailable）→ Capability Runtime 处理（retry / fallback）；
     - PlanningFeedback（证据不足 / 路由不匹配）→ Planner 处理（re-plan）。
-    不得将 PlanningFeedback 下沉为 SkillRuntime retry，反之亦然。
+    不得将 PlanningFeedback 下沉为 CapabilityRuntime retry，反之亦然。
     """
 
     EVIDENCE_EMPTY = "evidence_empty"
@@ -217,16 +217,16 @@ class ExecutionContext:
     """单次 Planner execution 的执行上下文（预算 + 调用栈 + 元数据）。
 
     架构契约：绑定一次 execution（由 ``PlannerRuntime.execution`` 入口创建），所有嵌套
-    Skill 共享。经 ``PlannerRuntime`` 的 ``contextvars`` 按 asyncio task 隔离——异 session
+    Capability 共享。经 ``PlannerRuntime`` 的 ``contextvars`` 按 asyncio task 隔离——异 session
     并发互不干扰，同 task 链内共享同一预算。
 
-    预算语义（与 ``PlannerRuntime.max_steps`` / ``max_skill_depth`` 对齐）：
-    - ``step_count``：累计 Skill 调用数（只增不减，顺序 + 嵌套共享）；
+    预算语义（与 ``PlannerRuntime.max_steps`` / ``max_capability_depth`` 对齐）：
+    - ``step_count``：累计 Capability 调用数（只增不减，顺序 + 嵌套共享）；
     - ``call_stack``：当前嵌套调用栈（enter append / exit pop），``call_depth = len(call_stack)``。
 
     P2-1 计量聚合（tokens / cost）：
     - ``tokens_used`` / ``cost_used``：单次执行内累计 token 数与费用；
-    - ``max_tokens`` / ``max_cost``：可选上限，超限抛 ``SkillCompositionError``；
+    - ``max_tokens`` / ``max_cost``：可选上限，超限抛 ``CapabilityCompositionError``；
     - 计量源在 ``agent-core`` llm client 层（P2-2），本类只做聚合器 + 闸门。
     """
 
@@ -243,9 +243,9 @@ class ExecutionContext:
     cost_used: float = 0.0
     max_tokens: int | None = None
     max_cost: float | None = None
-    # P3-1：逐步明细（skill / args / result / latency / tokens / error），供 Trajectory 持久化
+    # P3-1：逐步明细（capability / args / result / latency / tokens / error），供 Trajectory 持久化
     steps: list[TrajectoryStep] = field(default_factory=list)
-    # P5-1：语义循环指纹（skill + 归一化 args），重复指纹拒绝继续（需 enable_loop_fingerprint 开启）
+    # P5-1：语义循环指纹（capability + 归一化 args），重复指纹拒绝继续（需 enable_loop_fingerprint 开启）
     fingerprints: set[str] = field(default_factory=set)
     loop_fingerprint: bool = False
     # §HA：执行所有权丢失检测（split-brain 的 A 侧）。心跳协程发现租约被新 owner 接管后
@@ -274,36 +274,36 @@ class ExecutionContext:
         """当前嵌套深度（调用栈长度）。"""
         return len(self.call_stack)
 
-    def enter_skill(self, name: str, kwargs: dict[str, Any] | None = None) -> None:
-        """进入 Skill：步数预算 → 循环检测 → 深度上限 → 语义指纹，超限抛 SkillCompositionError。
+    def enter_capability(self, name: str, kwargs: dict[str, Any] | None = None) -> None:
+        """进入 Capability：步数预算 → 循环检测 → 深度上限 → 语义指纹，超限抛 CapabilityCompositionError。
 
-        P5-1 语义指纹：对 ``(name, 归一化 kwargs)`` 求指纹，重复指纹（同一 Skill 同入参再次
+        P5-1 语义指纹：对 ``(name, 归一化 kwargs)`` 求指纹，重复指纹（同一 Capability 同入参再次
         调用，如 ``A → B → A'`` 同 args）拒绝继续——比 ``name in call_stack`` 仅查即时重入
-        更宽，能拦「绕一圈回来重复调用」的语义循环，又不误伤「不同入参的同名 Skill」。
+        更宽，能拦「绕一圈回来重复调用」的语义循环，又不误伤「不同入参的同名 Capability」。
         """
         if self.step_count >= self.max_steps:
-            raise SkillCompositionError(
-                f"Skill 组合步数超上限（max_steps={self.max_steps}）"
+            raise CapabilityCompositionError(
+                f"Capability 组合步数超上限（max_steps={self.max_steps}）"
             )
         if name in self.call_stack:
-            raise SkillCompositionError(
-                f"Skill 循环调用检测: {' -> '.join([*self.call_stack, name])}"
+            raise CapabilityCompositionError(
+                f"Capability 循环调用检测: {' -> '.join([*self.call_stack, name])}"
             )
         if len(self.call_stack) >= self.max_depth:
-            raise SkillCompositionError(
-                f"Skill 嵌套深度超上限（max_depth={self.max_depth}）"
+            raise CapabilityCompositionError(
+                f"Capability 嵌套深度超上限（max_depth={self.max_depth}）"
             )
         fp = _fingerprint(name, kwargs or {})
         if self.loop_fingerprint and fp in self.fingerprints:
-            raise SkillCompositionError(
+            raise CapabilityCompositionError(
                 f"语义循环检测：重复调用 {name}（同入参已执行过），拒绝继续"
             )
         self.fingerprints.add(fp)
         self.step_count += 1
         self.call_stack.append(name)
 
-    def exit_skill(self) -> None:
-        """退出 Skill：仅弹出调用栈，步数预算不回退（累计计数）。"""
+    def exit_capability(self) -> None:
+        """退出 Capability：仅弹出调用栈，步数预算不回退（累计计数）。"""
         if self.call_stack:
             self.call_stack.pop()
 
@@ -311,7 +311,7 @@ class ExecutionContext:
         """记录本次执行的 token / 费用消耗（P2-1 聚合器）。
 
         累计到 ``tokens_used`` / ``cost_used``；若设置了 ``max_tokens`` / ``max_cost``
-        上限且累计值超限，抛 ``SkillCompositionError``（与步数/深度/循环护栏同级）。
+        上限且累计值超限，抛 ``CapabilityCompositionError``（与步数/深度/循环护栏同级）。
 
         调用方（Planner / agent-core llm client）在每次 LLM 调用后传入本次 usage，
         本方法只做聚合 + 闸门，不关心计量来源。
@@ -319,11 +319,11 @@ class ExecutionContext:
         self.tokens_used += tokens
         self.cost_used += cost
         if self.max_tokens is not None and self.tokens_used > self.max_tokens:
-            raise SkillCompositionError(
+            raise CapabilityCompositionError(
                 f"tokens 用量超上限（used={self.tokens_used}, max={self.max_tokens}）"
             )
         if self.max_cost is not None and self.cost_used > self.max_cost:
-            raise SkillCompositionError(
+            raise CapabilityCompositionError(
                 f"费用超上限（used={self.cost_used:.4f}, max={self.max_cost:.4f}）"
             )
 
@@ -337,7 +337,7 @@ class ExecutionContext:
         tokens: int = 0,
         forensic: dict[str, Any] | None = None,
     ) -> None:
-        """记录一次 Skill 调用明细（P3-1 Trajectory 来源）。
+        """记录一次 Capability 调用明细（P3-1 Trajectory 来源）。
 
         ``index`` 取当前 ``steps`` 长度（同 execution 内从 0 递增），保证 replay 顺序。
         ``forensic`` 为 V3-9 per-step 版本指纹（StepForensic.to_dict()）。
@@ -359,9 +359,9 @@ class ExecutionContext:
 class PlannerRuntime:
     """执行期依赖句柄：能力注册表必填；llm/mcp_manager/pool 按需注入。
 
-    组合治理（Phase 3）：``max_skill_depth`` / ``max_steps`` 限定「Agent 动态组合 Skill」
-    的资源边界；``skill_guard(name)`` 是组合型 Planner（agentic）编排 Skill 时须包裹的
-    护栏——步数超限 / 循环调用（同名 Skill 重复入栈）/ 嵌套过深时抛 ``SkillCompositionError``。
+    组合治理（Phase 3）：``max_capability_depth`` / ``max_steps`` 限定「Agent 动态组合 Capability」
+    的资源边界；``capability_guard(name)`` 是组合型 Planner（agentic）编排 Capability 时须包裹的
+    护栏——步数超限 / 循环调用（同名 Capability 重复入栈）/ 嵌套过深时抛 ``CapabilityCompositionError``。
 
     由调用方（app lifespan / eval）装配，注入一次、贯穿会话（单例可复用）。
 
@@ -370,7 +370,7 @@ class PlannerRuntime:
     （同一 task 链）共享同一护栏预算。单例注入 + 请求隔离，不再出现「一次执行的预算
     被并发请求耗尽」的跨请求污染。
 
-    ``max_skill_depth`` / ``max_steps`` 为不可变配置（注入一次、贯穿会话）。
+    ``max_capability_depth`` / ``max_steps`` 为不可变配置（注入一次、贯穿会话）。
     """
 
     def __init__(
@@ -380,7 +380,7 @@ class PlannerRuntime:
         mcp_manager: Any = None,
         pool: Any = None,
         *,
-        max_skill_depth: int = 4,
+        max_capability_depth: int = 4,
         max_steps: int = 20,
         max_duration_seconds: float | None = None,
         max_tokens: int | None = None,
@@ -401,7 +401,7 @@ class PlannerRuntime:
         self.llm = llm
         self.mcp_manager = mcp_manager
         self.pool = pool
-        self.max_skill_depth = max_skill_depth
+        self.max_capability_depth = max_capability_depth
         self.max_steps = max_steps
         self.max_duration_seconds = max_duration_seconds
         self.max_tokens = max_tokens
@@ -449,16 +449,16 @@ class PlannerRuntime:
         """当前执行上下文（``execution()`` 边界内有效，边界外为 None）。"""
         return self._ctx_var.get()
 
-    def get_effect_contract(self, skill_name: str) -> "EffectContract | None":
-        """V3-2：查询 Skill 声明的 EffectContract（未注册 / 未声明返回 None）。
+    def get_effect_contract(self, capability_name: str) -> "EffectContract | None":
+        """V3-2：查询 Capability 声明的 EffectContract（未注册 / 未声明返回 None）。
 
         执行图节点失败时据此决定 retry / recover 动作（``decide_failure_action``）。
         """
         try:
-            skill = self.registry.get(skill_name)
+            capability = self.registry.get(capability_name)
         except (KeyError, AttributeError):
             return None
-        return getattr(skill, "effect_contract", None)
+        return getattr(capability, "effect_contract", None)
 
     def _on_llm_usage(self, tokens: int, cost: float) -> None:
         """P2-2 计量回调：LLM 客户端每次调用后上报 usage → 当前 ExecutionContext 聚合。
@@ -478,7 +478,7 @@ class PlannerRuntime:
 
     @property
     def _call_stack(self) -> list[str]:
-        """当前执行上下文的 Skill 调用栈（兼容既有测试/调试读取）。"""
+        """当前执行上下文的 Capability 调用栈（兼容既有测试/调试读取）。"""
         ctx = self._ctx_var.get()
         return ctx.call_stack if ctx else []
 
@@ -488,10 +488,10 @@ class PlannerRuntime:
     ) -> AsyncIterator[None]:
         """单次执行边界：创建 ExecutionContext 并绑定，退出时复位。
 
-        语义（架构审核 P1 修正）：``max_steps`` 是「单次执行累计 Skill 调用数」——
-        顺序调用（A 退出后再进 B）与嵌套调用同样消耗预算；``max_skill_depth`` 才
+        语义（架构审核 P1 修正）：``max_steps`` 是「单次执行累计 Capability 调用数」——
+        顺序调用（A 退出后再进 B）与嵌套调用同样消耗预算；``max_capability_depth`` 才
         约束同时嵌套深度。调用方（组合型 Planner 的 execute/arun 入口）须用本 scope
-        包裹整次执行：预算不跨执行累计，同执行内顺序/嵌套 Skill 共享同一预算。
+        包裹整次执行：预算不跨执行累计，同执行内顺序/嵌套 Capability 共享同一预算。
 
         生命周期职责（§7.1 / §11 / §HA）：
         - 进入时若 ``validate_composition`` 且 registry 非空，先跑 ``CompositionValidator``
@@ -512,7 +512,7 @@ class PlannerRuntime:
         eid = execution_id or uuid.uuid4().hex
         ctx = ExecutionContext(
             execution_id=eid,
-            max_steps=self.max_steps, max_depth=self.max_skill_depth, deadline=deadline,
+            max_steps=self.max_steps, max_depth=self.max_capability_depth, deadline=deadline,
             max_tokens=self.max_tokens, max_cost=self.max_cost,
             loop_fingerprint=self.enable_loop_fingerprint,
             identity=ExecutionIdentity(
@@ -522,7 +522,7 @@ class PlannerRuntime:
             ),
         )
         # 组合静态校验（plan 期 fail-fast）：非法组合不进入执行。
-        # 仅真实 SkillRegistry 具备 assert_composition_valid；测试替身（_FakeRegistry 等）
+        # 仅真实 CapabilityRegistry 具备 assert_composition_valid；测试替身（_FakeRegistry 等）
         # 不强制实现组合校验，跳过（生产运行时始终为真实注册表）。
         if validate_composition and self.registry is not None:
             validator = getattr(self.registry, "assert_composition_valid", None)
@@ -590,13 +590,13 @@ class PlannerRuntime:
         )
 
     @asynccontextmanager
-    async def skill_guard(self, name: str, kwargs: dict[str, Any] | None = None) -> AsyncIterator[None]:
-        """Skill 组合护栏：步数上限 → 循环检测 → 深度上限 → 语义指纹，进入 Skill 前包裹。
+    async def capability_guard(self, name: str, kwargs: dict[str, Any] | None = None) -> AsyncIterator[None]:
+        """Capability 组合护栏：步数上限 → 循环检测 → 深度上限 → 语义指纹，进入 Capability 前包裹。
 
-        用法（组合型 Planner 编排 Skill 时）：
+        用法（组合型 Planner 编排 Capability 时）：
             async with runtime.execution():
-                async with runtime.skill_guard(skill_name, kwargs):
-                    result = await runtime.registry.execute(skill_name, **kwargs)
+                async with runtime.capability_guard(capability_name, kwargs):
+                    result = await runtime.registry.execute(capability_name, **kwargs)
 
         或经 ``delegate()`` 一步到位（推荐）。护栏状态委托给 ``ExecutionContext``，
         经 contextvars 按 asyncio task 隔离：同 task 链内共享预算（单次执行内累计），
@@ -604,19 +604,19 @@ class PlannerRuntime:
         """
         ctx = self._ctx_var.get()
         if ctx is None:
-            raise SkillCompositionError("skill_guard 须在 execution() 边界内使用")
-        ctx.enter_skill(name, kwargs)
+            raise CapabilityCompositionError("capability_guard 须在 execution() 边界内使用")
+        ctx.enter_capability(name, kwargs)
         try:
             yield
         finally:
-            ctx.exit_skill()
+            ctx.exit_capability()
 
     async def delegate(self, name: str, **kwargs: Any) -> Any:
-        """Skill 委派 API：经 ``skill_guard`` 包裹 ``registry.execute``，计入组合预算。
+        """Capability 委派 API：经 ``capability_guard`` 包裹 ``registry.execute``，计入组合预算。
 
-        架构契约（Plan-F Skill Delegation）：Skill → Skill 组合须经此方法，而非直接调
-        ``registry.execute``——确保嵌套调用受步数 / 深度 / 循环护栏治理。Workflow Skill
-        内部调其他 Skill 时同样须走 ``delegate``，避免绕过护栏（架构审核 P2：此前
+        架构契约（Plan-F Capability Delegation）：Capability → Capability 组合须经此方法，而非直接调
+        ``registry.execute``——确保嵌套调用受步数 / 深度 / 循环护栏治理。Workflow Capability
+        内部调其他 Capability 时同样须走 ``delegate``，避免绕过护栏（架构审核 P2：此前
         ``general_qa`` 内部直接调 ``registry.execute`` 不计入预算，现已修正）。
 
         边界回退：不在 ``execution()`` 边界内时（如 deterministic 静态 DAG 路径——天然
@@ -624,23 +624,23 @@ class PlannerRuntime:
         """
         if self._ctx_var.get() is None:
             return await self.registry.execute(name, **kwargs)
-        async with self.skill_guard(name, kwargs):
+        async with self.capability_guard(name, kwargs):
             ctx = self._ctx_var.get()
             t0 = time.monotonic()
             tokens_before = ctx.tokens_used if ctx else 0
             # V3-9: 构建 per-step 版本指纹
-            _skill_version = None
+            _capability_version = None
             try:
-                _skill = self.registry.get(name)
-                _skill_version = getattr(_skill, "version", None)
+                _capability = self.registry.get(name)
+                _capability_version = getattr(_capability, "version", None)
             except (KeyError, AttributeError):
                 pass
             _model = getattr(self.llm, "model", None) if self.llm else None
             step_forensic = StepForensic(
-                skill_name=name,
-                skill_version=_skill_version,
+                capability_name=name,
+                capability_version=_capability_version,
                 tool_name=name,
-                tool_version=_skill_version,
+                tool_version=_capability_version,
                 model=_model,
             )
             _forensic_dict = step_forensic.to_dict()
@@ -654,7 +654,7 @@ class PlannerRuntime:
                         forensic=_forensic_dict,
                     )
                 raise
-            # V3-3: 检测异步 Skill 返回（__awaitable__ 标记）→ 创建 AwaitableTask + 挂起执行
+            # V3-3: 检测异步 Capability 返回（__awaitable__ 标记）→ 创建 AwaitableTask + 挂起执行
             if (
                 isinstance(result, dict)
                 and result.get("__awaitable__")
@@ -683,7 +683,7 @@ class PlannerRuntime:
                             options=list(result.get("options") or ["approve", "reject"]),
                             deadline=result.get("deadline"),
                             approver=result.get("approver"),
-                            context={"skill_name": name, "request": result.get("context") or {}},
+                            context={"capability_name": name, "request": result.get("context") or {}},
                         )
                         task = await self.human_task_store.create(
                             human, generation=ctx.lease_generation
@@ -693,7 +693,7 @@ class PlannerRuntime:
                         import logging
 
                         logging.getLogger(__name__).warning(
-                            "skill=%s 请求人工审批但未装配 human_task_store，退回 EXTERNAL 挂起",
+                            "capability=%s 请求人工审批但未装配 human_task_store，退回 EXTERNAL 挂起",
                             name,
                         )
                 if suspend_kind is AwaitableKind.EXTERNAL:
@@ -704,7 +704,7 @@ class PlannerRuntime:
                         provider=str(result.get("provider", "unknown")),
                         provider_task_id=str(result.get("task_id", "")),
                         state=AwaitableState.SUBMITTED,
-                        metadata={"skill_name": name, "submitted_result": result},
+                        metadata={"capability_name": name, "submitted_result": result},
                         # V3 缺口 1：盖上本次执行的 lease generation，使 takeover 后的
                         # zombie writer 写不进回执（见 PgAwaitableTaskStore.save 的 fence）。
                         generation=ctx.lease_generation,
@@ -753,13 +753,13 @@ class Planner(ABC):
         """编排执行：按 Plan 依次调用能力、合成答案，产出统一流式事件。
 
         ``ctx`` 为可选执行上下文（预算 + 调用栈 + 元数据），由调用方在 execution 入口
-        创建并传入，所有嵌套 Skill 共享同一预算。未传入时由 Runtime 内部护栏
-        （``skill_guard``）承载组合治理，向后兼容。
+        创建并传入，所有嵌套 Capability 共享同一预算。未传入时由 Runtime 内部护栏
+        （``capability_guard``）承载组合治理，向后兼容。
         """
 
 
 def _fingerprint(name: str, kwargs: dict[str, Any]) -> str:
-    """P5-1：``(skill, 归一化 args)`` 稳定指纹（sha256 十六进制）。
+    """P5-1：``(capability, 归一化 args)`` 稳定指纹（sha256 十六进制）。
 
     归一化：键排序；对不可 JSON 序列化对象回退 ``repr``；长字符串截断避免超大/不稳定
     哈希（可变对象 / 大 payload 先做规范化，符合 roadmap P5-1 备注）。

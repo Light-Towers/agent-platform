@@ -24,7 +24,7 @@ def test_forensic_context_to_dict():
         model_version="2024-08-06",
         provider="openai",
         prompt_version="v2.3",
-        skill_version="exhibition-v1.2",
+        capability_version="exhibition-v1.2",
         planner_version="agentic-v2",
         policy_version="rate-limit-v1.5",
     )
@@ -57,29 +57,29 @@ def test_forensic_context_empty():
 
 def test_step_forensic_to_dict():
     sf = StepForensic(
-        skill_name="search",
-        skill_version="v1.0",
+        capability_name="search",
+        capability_version="v1.0",
         tool_name="vector_search",
         tool_version="v2",
         external_call_receipt="hash_abc",
     )
     d = sf.to_dict()
-    assert d["skill_name"] == "search"
+    assert d["capability_name"] == "search"
     assert d["external_call_receipt"] == "hash_abc"
 
 
 def test_step_forensic_from_dict_roundtrip():
-    sf = StepForensic(skill_name="search", skill_version="v1.0", model="gpt-4o")
+    sf = StepForensic(capability_name="search", capability_version="v1.0", model="gpt-4o")
     restored = StepForensic.from_dict(sf.to_dict())
-    assert restored.skill_name == "search"
+    assert restored.capability_name == "search"
     assert restored.model == "gpt-4o"
 
 
 # ===== divergence_diagnosis =====
 
 def test_divergence_no_drift():
-    ctx1 = ForensicContext(model="gpt-4o", prompt_version="v1", skill_version="v1")
-    ctx2 = ForensicContext(model="gpt-4o", prompt_version="v1", skill_version="v1")
+    ctx1 = ForensicContext(model="gpt-4o", prompt_version="v1", capability_version="v1")
+    ctx2 = ForensicContext(model="gpt-4o", prompt_version="v1", capability_version="v1")
     assert divergence_diagnosis(ctx1, ctx2) == []
 
 
@@ -145,10 +145,10 @@ def test_trajectory_record_forensic():
 
 
 def test_trajectory_step_forensic():
-    sf = StepForensic(skill_name="search", skill_version="v1.0")
+    sf = StepForensic(capability_name="search", capability_version="v1.0")
     step = TrajectoryStep(name="search", forensic=sf.to_dict())
     d = step.to_dict()
-    assert d["forensic"]["skill_name"] == "search"
+    assert d["forensic"]["capability_name"] == "search"
 
 
 def test_trajectory_record_default_forensic_none():

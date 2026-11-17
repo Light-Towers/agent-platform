@@ -21,7 +21,7 @@ class ExecutionNotOwned(RuntimeError):
     """§HA（C1 fail-closed）：执行所有权获取失败（acquire 返回 False）。
 
     意味着该 execution_id 的 lease 当前被其他副本持有，或未过期。调用方必须
-    立即停止，不得继续执行任何 Skill——否则破坏 single-active-owner 不变量。
+    立即停止，不得继续执行任何 Capability——否则破坏 single-active-owner 不变量。
     """
 
 
@@ -291,18 +291,18 @@ async def reap_stale_executions(
 class SideEffectStore(abc.ABC):
     """副作用审计 / 幂等记录契约（§HA H2：effectively-once 证据）。
 
-    每次 Skill 副作用落库一条 ``(execution_id, step_id, effect_type)`` 记录，
+    每次 Capability 副作用落库一条 ``(execution_id, step_id, effect_type)`` 记录，
     ``effect_key`` 唯一约束使重复 attempt 的重复写被原子丢弃（ON CONFLICT DO NOTHING）。
     配合 checkpoint，B 接管后 resume 时可判断哪些 step 的副作用已真正落地，避免重复执行。
 
     §HA 契约（H3 明确）：**同一个 ``(execution_id, step_id, effect_type)`` 只能有一次
-    副作用**。这意味着若一个 Skill 合法地产生多种业务副作用（如 ``WRITE-A`` 与
+    副作用**。这意味着若一个 Capability 合法地产生多种业务副作用（如 ``WRITE-A`` 与
     ``WRITE-B``），它们必须使用**不同的** ``effect_type``，否则会被错误地当成重复副作用
     而丢弃。换句话说，abstraction 要求「一个 step 内，每一种 effect_type 仅发生一次」。
 
     §HA 边界（H3 重要）：``record()`` 与真实业务副作用**不是原子事务**。若执行顺序为
     「真实副作用 ✔ → 进程 crash → record() ✘」，B resume 时 checkpoint 与 side_effects
-    均无记录，会重跑 Skill，导致真实副作用 ×2。这是 distributed side-effect 的经典
+    均无记录，会重跑 Capability，导致真实副作用 ×2。这是 distributed side-effect 的经典
     atomicity 问题，无法靠一条 SQL 修复——**业务副作用本身必须支持幂等边界**
     （idempotency_key / transactional outbox），Runtime 层只提供幂等证据（idempotency
     marker），而非强制 exactly-once。
@@ -328,7 +328,7 @@ class SideEffectStore(abc.ABC):
         该副作用误判为"已落地"而跳过真实执行）。``None`` = 来源未知，不 fence。
         进程内后端无 lease 概念 ⇒ 不做 fence，只记录，见 ``InMemorySideEffectStore``。
 
-        调用方必须在 Skill 的**真实业务副作用成功之后**调用本方法；且不同业务副作用
+        调用方必须在 Capability 的**真实业务副作用成功之后**调用本方法；且不同业务副作用
         必须使用不同 ``effect_type``（见类文档 H3 契约）。
         """
 

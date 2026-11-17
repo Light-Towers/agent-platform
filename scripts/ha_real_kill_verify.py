@@ -152,7 +152,7 @@ def _make_runtime(pool, registry, replica: str):
         replica_id=replica,
         max_duration_seconds=LEASE_TTL,
         max_steps=100,
-        max_skill_depth=20,
+        max_capability_depth=20,
     )
 
 

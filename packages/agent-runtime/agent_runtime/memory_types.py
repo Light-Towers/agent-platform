@@ -6,7 +6,7 @@
 - ``WORKING``：当前任务正在发生什么（State / Checkpoint）
 - ``EPISODIC``：过去发生过什么（Execution History / Episode）
 - ``SEMANTIC``：已知的事实/知识是什么（RDB / KG / Vector DB / RAG）
-- ``PROCEDURAL``：已经掌握的做事方法是什么（Skill / Workflow / Policy）
+- ``PROCEDURAL``：已经掌握的做事方法是什么（Capability / Workflow / Policy）
 
 ``MemoryRetriever`` 协议统一召回接口，``ContextSelector`` 按任务类型选哪些 Memory 参与。
 """
@@ -27,7 +27,7 @@ class MemoryCategory(str, Enum):
     WORKING = "working"  # 当前任务状态
     EPISODIC = "episodic"  # 过去执行经历
     SEMANTIC = "semantic"  # 业务事实/知识
-    PROCEDURAL = "procedural"  # 做事方法/Skill
+    PROCEDURAL = "procedural"  # 做事方法/Capability
 
 
 @dataclass
@@ -54,7 +54,7 @@ class MemoryRecallResult:
 
     content: str
     category: MemoryCategory
-    source: str = ""  # 子来源（shared/user/trajectory/skill/...）
+    source: str = ""  # 子来源（shared/user/trajectory/capability/...）
     score: float = 0.0
     metadata: dict[str, Any] = field(default_factory=dict)
 
@@ -184,7 +184,7 @@ class MemoryRetriever:
                     MemoryRecallResult(
                         content=f"{e.name}: {e.description}",
                         category=MemoryCategory.PROCEDURAL,
-                        source="skill",
+                        source="capability",
                         score=0.5,
                         metadata={"name": e.name, "version": e.version, "lifecycle": e.lifecycle},
                     )
@@ -208,7 +208,7 @@ class ContextSelector:
 
     不同任务类型需要不同的 Memory 组合：
     - 问答：Semantic（知识）+ Episodic（相似经历）
-    - 执行：Working（当前状态）+ Procedural（相关 Skill）
+    - 执行：Working（当前状态）+ Procedural（相关 Capability）
     - 分析：Semantic + Episodic + Procedural
     - 审批：Working（当前状态）
     """

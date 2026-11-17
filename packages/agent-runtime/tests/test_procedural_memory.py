@@ -3,21 +3,21 @@
 验证：
 - ProceduralEntry：数据结构；
 - InMemoryProceduralStore：save / load / list_all / list_by_name / delete；
-- ProceduralMemory：save_skill_definition / load_skill / recall / delete_skill；
-- ProceduralExtractor：从 Episode 挖掘候选 Skill；
-- CandidateSkill：success_rate / confidence。
+- ProceduralMemory：save_capability_definition / load_capability / recall / delete_capability；
+- ProceduralExtractor：从 Episode 挖掘候选 Capability；
+- CandidateCapability：success_rate / confidence。
 """
 
 
+from agent_runtime.capability_lifecycle import CapabilityLifecycle
 from agent_runtime.episodic_memory import Episode, EpisodeOutcome
 from agent_runtime.procedural_memory import (
-    CandidateSkill,
+    CandidateCapability,
     InMemoryProceduralStore,
     ProceduralEntry,
     ProceduralExtractor,
     ProceduralMemory,
 )
-from agent_runtime.skill_lifecycle import SkillLifecycle
 
 # 隔离域（plan T1）：store/façade 方法必显式传 tenant_id（无 'default' 兜底）。
 TENANT = "t-proc"
@@ -50,15 +50,15 @@ async def test_store_load_latest_stable():
     store = InMemoryProceduralStore()
     await store.save(ProceduralEntry(
         name="search", version="1.0.0", kind="function",
-        description="v1", lifecycle=SkillLifecycle.STABLE.value,
+        description="v1", lifecycle=CapabilityLifecycle.STABLE.value,
     ), tenant_id=TENANT)
     await store.save(ProceduralEntry(
         name="search", version="2.0.0", kind="function",
-        description="v2", lifecycle=SkillLifecycle.STABLE.value,
+        description="v2", lifecycle=CapabilityLifecycle.STABLE.value,
     ), tenant_id=TENANT)
     await store.save(ProceduralEntry(
         name="search", version="1.5.0", kind="function",
-        description="v1.5", lifecycle=SkillLifecycle.DEPRECATED.value,
+        description="v1.5", lifecycle=CapabilityLifecycle.DEPRECATED.value,
     ), tenant_id=TENANT)
 
     loaded = await store.load("search", tenant_id=TENANT)  # version=None → 最新 stable
@@ -103,23 +103,23 @@ async def test_store_cross_tenant_isolated():
 
 async def test_proc_save_and_load():
     proc = ProceduralMemory(InMemoryProceduralStore())
-    await proc.save_skill_definition(
+    await proc.save_capability_definition(
         name="search", version="1.0.0", kind="function",
         description="向量搜索能力",
         input_schema={"type": "object"},
         tenant_id=TENANT,
     )
-    loaded = await proc.load_skill("search", "1.0.0", tenant_id=TENANT)
+    loaded = await proc.load_capability("search", "1.0.0", tenant_id=TENANT)
     assert loaded is not None
     assert loaded.description == "向量搜索能力"
 
 
 async def test_proc_recall():
     proc = ProceduralMemory(InMemoryProceduralStore())
-    await proc.save_skill_definition(
+    await proc.save_capability_definition(
         name="vector_search", version="1.0", kind="function", description="向量搜索", tenant_id=TENANT
     )
-    await proc.save_skill_definition(
+    await proc.save_capability_definition(
         name="sql_query", version="1.0", kind="function", description="SQL查询", tenant_id=TENANT
     )
 
@@ -130,11 +130,11 @@ async def test_proc_recall():
 
 async def test_proc_delete():
     proc = ProceduralMemory(InMemoryProceduralStore())
-    await proc.save_skill_definition(
+    await proc.save_capability_definition(
         name="search", version="1.0", kind="function", description="搜索", tenant_id=TENANT
     )
-    assert await proc.delete_skill("search", "1.0", tenant_id=TENANT) is True
-    assert await proc.load_skill("search", "1.0", tenant_id=TENANT) is None
+    assert await proc.delete_capability("search", "1.0", tenant_id=TENANT) is True
+    assert await proc.load_capability("search", "1.0", tenant_id=TENANT) is None
 
 
 # ===== ProceduralExtractor =====
@@ -143,9 +143,9 @@ def test_extractor_no_pattern_insufficient_success():
     extractor = ProceduralExtractor(min_success=3)
     episodes = [
         Episode(execution_id="e1", task_summary="分析", outcome=EpisodeOutcome.SUCCESS,
-                skill_names=["query", "analyze"]),
+                capability_names=["query", "analyze"]),
         Episode(execution_id="e2", task_summary="分析", outcome=EpisodeOutcome.SUCCESS,
-                skill_names=["query", "analyze"]),
+                capability_names=["query", "analyze"]),
     ]
     assert extractor.extract_patterns(episodes) == []
 
@@ -154,13 +154,13 @@ def test_extractor_finds_pattern():
     extractor = ProceduralExtractor(min_success=3, min_confidence=0.0)
     episodes = [
         Episode(execution_id="e1", task_summary="招商分析", outcome=EpisodeOutcome.SUCCESS,
-                skill_names=["query", "analyze", "report"], total_tokens=300),
+                capability_names=["query", "analyze", "report"], total_tokens=300),
         Episode(execution_id="e2", task_summary="招商分析", outcome=EpisodeOutcome.SUCCESS,
-                skill_names=["query", "analyze", "report"], total_tokens=400),
+                capability_names=["query", "analyze", "report"], total_tokens=400),
         Episode(execution_id="e3", task_summary="招商分析", outcome=EpisodeOutcome.SUCCESS,
-                skill_names=["query", "analyze", "report"], total_tokens=500),
+                capability_names=["query", "analyze", "report"], total_tokens=500),
         Episode(execution_id="e4", task_summary="招商分析", outcome=EpisodeOutcome.FAILURE,
-                skill_names=["query", "analyze"], total_tokens=100),
+                capability_names=["query", "analyze"], total_tokens=100),
     ]
     candidates = extractor.extract_patterns(episodes)
     assert len(candidates) == 1
@@ -174,13 +174,13 @@ def test_extractor_multiple_tasks():
     extractor = ProceduralExtractor(min_success=2, min_confidence=0.0)
     episodes = [
         Episode(execution_id="e1", task_summary="分析A", outcome=EpisodeOutcome.SUCCESS,
-                skill_names=["a1", "a2"]),
+                capability_names=["a1", "a2"]),
         Episode(execution_id="e2", task_summary="分析A", outcome=EpisodeOutcome.SUCCESS,
-                skill_names=["a1", "a2"]),
+                capability_names=["a1", "a2"]),
         Episode(execution_id="e3", task_summary="分析B", outcome=EpisodeOutcome.SUCCESS,
-                skill_names=["b1", "b2"]),
+                capability_names=["b1", "b2"]),
         Episode(execution_id="e4", task_summary="分析B", outcome=EpisodeOutcome.SUCCESS,
-                skill_names=["b1", "b2"]),
+                capability_names=["b1", "b2"]),
     ]
     candidates = extractor.extract_patterns(episodes)
     assert len(candidates) == 2
@@ -191,23 +191,23 @@ def test_extractor_confidence_filter():
     extractor = ProceduralExtractor(min_success=2, min_confidence=1.5)
     episodes = [
         Episode(execution_id="e1", task_summary="分析", outcome=EpisodeOutcome.SUCCESS,
-                skill_names=["s1"]),
+                capability_names=["s1"]),
         Episode(execution_id="e2", task_summary="分析", outcome=EpisodeOutcome.SUCCESS,
-                skill_names=["s1"]),
+                capability_names=["s1"]),
     ]
     candidates = extractor.extract_patterns(episodes)
     assert candidates == []  # confidence 不够
 
 
-# ===== CandidateSkill =====
+# ===== CandidateCapability =====
 
 def test_candidate_success_rate():
-    c = CandidateSkill(name="test", pattern_steps=[], success_count=3, total_count=5)
+    c = CandidateCapability(name="test", pattern_steps=[], success_count=3, total_count=5)
     assert c.success_rate == 0.6
 
 
 def test_candidate_to_dict():
-    c = CandidateSkill(name="test", pattern_steps=["a", "b"], success_count=3, total_count=4)
+    c = CandidateCapability(name="test", pattern_steps=["a", "b"], success_count=3, total_count=4)
     d = c.to_dict()
     assert d["success_rate"] == 0.75
     assert d["pattern_steps"] == ["a", "b"]

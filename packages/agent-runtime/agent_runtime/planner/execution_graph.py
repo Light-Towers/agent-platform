@@ -1,7 +1,7 @@
-"""动态执行图（Plan-F）：Planner 产出的 Skill 组合计划，Runtime 校验后分层并行执行。
+"""动态执行图（Plan-F）：Planner 产出的 Capability 组合计划，Runtime 校验后分层并行执行。
 
 与静态 DAG（``agent_server/agent/graph.py`` 编译期固定拓扑）的区别：ExecutionGraph
-由 Planner 在决策期动态构建——节点是 Skill 调用，边是依赖关系（``dependent → dependency``
+由 Planner 在决策期动态构建——节点是 Capability 调用，边是依赖关系（``dependent → dependency``
 表示 dependency 须先完成）。``PolicyValidator`` 校验无环 / 深度 / 步数 / 权限后，
 ``execute_graph`` 按拓扑分层并行执行（同层 ``asyncio.gather``，层间顺序）。
 
@@ -26,7 +26,7 @@ from agent_runtime.planner.durability import Checkpoint, FencedWriteError
 from agent_runtime.planner.protocol import ExecutionSuspended, Plan, StreamEvent
 from agent_runtime.trajectory.models import TrajectoryRecord
 
-# 执行级业务重试上限（见 M1.1 重试边界：transport 1–2 < skill 级 2 < 本处 2，禁止叠加）
+# 执行级业务重试上限（见 M1.1 重试边界：transport 1–2 < capability 级 2 < 本处 2，禁止叠加）
 _NODE_BUSINESS_RETRY_MAX = 2
 _NODE_BUSINESS_RETRY_BACKOFF = 0.2
 logger = logging.getLogger(__name__)
@@ -90,22 +90,22 @@ async def _persist_trajectory(
 
 @dataclass(frozen=True)
 class GraphNode:
-    """执行图节点：一次 Skill 调用。
+    """执行图节点：一次 Capability 调用。
 
     ``input_refs``：参数级的「上游节点输出引用」，值为 ``"node:<node_id>"``，
-    在节点执行时从已完成节点的结果中解析（支持多 Skill 组合的依赖数据传递）。
+    在节点执行时从已完成节点的结果中解析（支持多 Capability 组合的依赖数据传递）。
     静态参数仍走 ``kwargs``；``"$query"`` 由组合器在构建期替换为原始问题。
     """
 
     node_id: str
-    skill_name: str
+    capability_name: str
     kwargs: dict[str, Any] = field(default_factory=dict)
     input_refs: dict[str, str] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "node_id": self.node_id,
-            "skill_name": self.skill_name,
+            "capability_name": self.capability_name,
             "kwargs": self.kwargs,
             "input_refs": self.input_refs,
         }
@@ -114,7 +114,7 @@ class GraphNode:
     def from_dict(cls, d: dict[str, Any]) -> GraphNode:
         return cls(
             node_id=d["node_id"],
-            skill_name=d["skill_name"],
+            capability_name=d["capability_name"],
             kwargs=d.get("kwargs", {}),
             input_refs=d.get("input_refs", {}),
         )
@@ -125,7 +125,7 @@ class GraphCycleError(ValueError):
 
 
 class ExecutionGraph:
-    """动态执行图：节点（Skill 调用）+ 依赖边（``dependent → dependency``，dependency 先执行）。
+    """动态执行图：节点（Capability 调用）+ 依赖边（``dependent → dependency``，dependency 先执行）。
 
     用法::
 
@@ -146,17 +146,17 @@ class ExecutionGraph:
     def add_node(
         self,
         node_id: str,
-        skill_name: str,
+        capability_name: str,
         kwargs: dict[str, Any] | None = None,
         input_refs: dict[str, str] | None = None,
     ) -> GraphNode:
-        """添加节点：node_id 唯一，skill_name 为注册表中的能力名。
+        """添加节点：node_id 唯一，capability_name 为注册表中的能力名。
 
         ``input_refs``：参数 → ``"node:<node_id>"`` 引用，执行时从上游结果解析。
         """
         if node_id in self._nodes:
             raise ValueError(f"节点已存在: {node_id}")
-        node = GraphNode(node_id, skill_name, kwargs or {}, input_refs or {})
+        node = GraphNode(node_id, capability_name, kwargs or {}, input_refs or {})
         self._nodes[node_id] = node
         self._deps.setdefault(node_id, set())
         return node
@@ -221,7 +221,7 @@ class ExecutionGraph:
         return len(self.topological_layers()) if self._nodes else 0
 
     def step_count(self) -> int:
-        """总节点数（Skill 调用步数）。"""
+        """总节点数（Capability 调用步数）。"""
         return len(self._nodes)
 
     def to_dict(self) -> dict[str, Any]:
@@ -254,8 +254,8 @@ async def _run_graph_in_place(
     """分层并行执行核心循环（假设已在 ``runtime.execution()`` 边界内）。
 
     与 ``execute_graph`` 的区别：不创建新的执行边界、不做 ContextManager 快照与轨迹持久化
-    —— 供嵌套场景（如 Workflow Skill 内部执行子图）复用调用方已有的执行上下文
-    （预算 / 调用栈 / trace 连续累计，符合 doc §7「Skill→Skill 须经 Runtime」）。
+    —— 供嵌套场景（如 Workflow Capability 内部执行子图）复用调用方已有的执行上下文
+    （预算 / 调用栈 / trace 连续累计，符合 doc §7「Capability→Capability 须经 Runtime」）。
 
     Durability（doc §11）：传入 ``checkpoint_store`` + ``execution_id`` 时，按节点落地
     checkpoint——已完成节点结果复用（崩溃后 resume 不重跑），未完成任务继续（尊重依赖边）。
@@ -335,18 +335,18 @@ async def _run_graph_in_place(
                     {"class": "ownership_lost", "error": "执行所有权已丢失，节点中止（不发起副作用）"},
                     True,
                 )
-            # 执行 + 业务级有限重试（V3-2：据 Skill 声明的 EffectContract 决策重试安全性；
+            # 执行 + 业务级有限重试（V3-2：据 Capability 声明的 EffectContract 决策重试安全性；
             # 未声明时保持 v2 语义——仅瞬态可重试；transport 短重试已在底层 SDK 内，不叠加）
-            contract = runtime.get_effect_contract(node.skill_name)
+            contract = runtime.get_effect_contract(node.capability_name)
             attempt = 0
             last_exc: Exception | None = None
             while attempt <= _NODE_BUSINESS_RETRY_MAX:
                 try:
-                    result = await runtime.delegate(node.skill_name, **kwargs)
-                    # §HA（H2）：副作用（Skill 落地效果）一旦成功，立即落审计/幂等记录。
+                    result = await runtime.delegate(node.capability_name, **kwargs)
+                    # §HA（H2）：副作用（Capability 落地效果）一旦成功，立即落审计/幂等记录。
                     # effect_key = execution_id:step_id:effect_type（唯一约束 → 重复 attempt 幂等去重）。
                     # 配合 checkpoint，B 接管 resume 时可据此判断哪些 step 已真正落地，不重跑。
-                    # V3-2：effect_type 优先用 EffectContract.effect_key（语义化），未声明回退 skill:<name>。
+                    # V3-2：effect_type 优先用 EffectContract.effect_key（语义化），未声明回退 capability:<name>。
                     if (
                         runtime.side_effect_store is not None
                         and execution_id is not None
@@ -355,7 +355,7 @@ async def _run_graph_in_place(
                         effect_type = (
                             contract.effect_key
                             if contract is not None
-                            else f"skill:{node.skill_name}"
+                            else f"capability:{node.capability_name}"
                         )
                         await runtime.side_effect_store.record(
                             execution_id=execution_id,
@@ -430,7 +430,7 @@ async def _run_graph_in_place(
             for node_id, result, error_info, fatal in layer_results:
                 payload_extra = {
                     "node": node_id,
-                    "skill": graph.nodes[node_id].skill_name,
+                    "capability": graph.nodes[node_id].capability_name,
                     "layer": i,
                 }
                 if fatal:
@@ -500,7 +500,7 @@ async def _run_graph_in_place(
                     type="evidence",
                     payload={
                         "node": node_id,
-                        "skill": graph.nodes[node_id].skill_name,
+                        "capability": graph.nodes[node_id].capability_name,
                         "layer": i,
                         "result": results[node_id],
                         "resumed": True,
@@ -518,7 +518,7 @@ async def execute_graph(
 ) -> AsyncIterator[StreamEvent]:
     """分层并行执行 ExecutionGraph（顶层入口）：创建 ``execution()`` 边界后执行核心循环。
 
-    每个节点经 ``runtime.delegate()`` 调用 Skill（受 ``skill_guard`` 组合治理，
+    每个节点经 ``runtime.delegate()`` 调用 Capability（受 ``capability_guard`` 组合治理，
     计入步数 / 深度 / 循环预算）。事件透传给调用方（``execute_plan`` 负责 CM 快照与轨迹持久化）。
 
     嵌套场景（Workflow 内部子图）应改用 ``_run_graph_in_place`` 复用调用方已有的执行上下文，
@@ -569,7 +569,7 @@ async def execute_plan(
         validator = PolicyValidator(runtime.registry)
         validator.validate(
             plan.graph,
-            max_depth=runtime.max_skill_depth,
+            max_depth=runtime.max_capability_depth,
             max_steps=runtime.max_steps,
             caller_permissions=caller_permissions,
             max_parallel=max_parallel,
@@ -589,12 +589,12 @@ async def execute_plan(
                 execution_id=exec_ctx.execution_id,
             ):
                 if event.type == "evidence":
-                    cm.record_skill(
-                        ctx, event.payload.get("skill", ""), result=event.payload.get("result")
+                    cm.record_capability(
+                        ctx, event.payload.get("capability", ""), result=event.payload.get("result")
                     )
                 elif event.type == "error":
-                    cm.record_skill(
-                        ctx, event.payload.get("skill", ""), error=event.payload.get("error", "")
+                    cm.record_capability(
+                        ctx, event.payload.get("capability", ""), error=event.payload.get("error", "")
                     )
                 yield event
             exec_ctx = runtime.context
@@ -616,7 +616,7 @@ async def execute_plan(
         async with runtime.execution():
             kwargs = plan.kwargs
             result = await runtime.delegate(plan.route, **kwargs)
-            cm.record_skill(ctx, plan.route, result=result)
+            cm.record_capability(ctx, plan.route, result=result)
             yield StreamEvent(type="evidence", payload={"node": plan.route, "result": result})
             yield StreamEvent(type="answer", payload={"text": str(result)})
             exec_ctx = runtime.context

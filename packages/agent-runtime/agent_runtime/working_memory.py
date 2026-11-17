@@ -7,7 +7,7 @@
 - Working：当前 execution 的实时状态（自动更新，任务结束不一定保留）
 - Episodic：过去执行经历（需判断价值后沉淀）
 - Semantic：业务事实/知识（结构化事实）
-- Procedural：做事方法（Skill / Workflow）
+- Procedural：做事方法（Capability / Workflow）
 
 存储后端：
 - Checkpoint → PG execution_checkpoints（已完成节点结果）

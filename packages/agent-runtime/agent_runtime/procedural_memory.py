@@ -1,7 +1,7 @@
 """Procedural Memory（四类 Memory 阶段 3）：已经掌握的做事方法是什么。
 
-将 SkillRegistry 的进程内注册升级为**持久化存储**——Skill 定义落库，
-重启后自动恢复注册。并从 Episodic Memory 中挖掘高频成功模式 → 候选 Skill。
+将 CapabilityRegistry 的进程内注册升级为**持久化存储**——Capability 定义落库，
+重启后自动恢复注册。并从 Episodic Memory 中挖掘高频成功模式 → 候选 Capability。
 
 与其他三类 Memory 的区别：
 - Working：当前任务状态
@@ -13,11 +13,11 @@
 ```
 Agent 执行 → Episodic Memory（经历）
     ↓ 高频成功模式
-ProceduralExtractor → CandidateSkill
+ProceduralExtractor → CandidateCapability
     ↓
-ProceduralMemory（持久化 Skill 定义）
+ProceduralMemory（持久化 Capability 定义）
     ↓
-下次任务 → 匹配 Skill → 直接执行
+下次任务 → 匹配 Capability → 直接执行
 ```
 """
 
@@ -33,16 +33,16 @@ from typing import Any
 
 from agent_core.memory._tenant_gate import _TENANT_UNSET, resolve_tenant
 
+from agent_runtime.capability_lifecycle import CapabilityLifecycle
 from agent_runtime.episodic_memory import Episode, EpisodeOutcome
 from agent_runtime.memory_recall import text_similarity
-from agent_runtime.skill_lifecycle import SkillLifecycle
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass
 class ProceduralEntry:
-    """Procedural Memory 条目：持久化的 Skill 定义。"""
+    """Procedural Memory 条目：持久化的 Capability 定义。"""
 
     name: str
     version: str
@@ -51,7 +51,7 @@ class ProceduralEntry:
     input_schema: dict[str, Any] | None = None
     output_schema: dict[str, Any] | None = None
     effect_contract: dict[str, Any] | None = None
-    lifecycle: str = "stable"  # SkillLifecycle.value
+    lifecycle: str = "stable"  # CapabilityLifecycle.value
     definition: dict[str, Any] = field(default_factory=dict)  # 完整定义（用于重建）
     created_at: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)
@@ -73,10 +73,10 @@ class ProceduralEntry:
 
 
 @dataclass
-class CandidateSkill:
-    """从 Episodic Memory 挖掘的候选 Skill（高频成功模式）。"""
+class CandidateCapability:
+    """从 Episodic Memory 挖掘的候选 Capability（高频成功模式）。"""
 
-    name: str  # 候选 Skill 名（从 task_summary 提取）
+    name: str  # 候选 Capability 名（从 task_summary 提取）
     pattern_steps: list[str]  # 高频步骤序列
     success_count: int = 0
     total_count: int = 0
@@ -110,29 +110,29 @@ class ProceduralStore(abc.ABC):
 
     @abc.abstractmethod
     async def save(self, entry: ProceduralEntry, *, tenant_id: str = _TENANT_UNSET) -> None:
-        """保存 Skill 定义（同租户内 name + version 覆盖）。"""
+        """保存 Capability 定义（同租户内 name + version 覆盖）。"""
 
     @abc.abstractmethod
     async def load(
         self, name: str, version: str | None = None, *, tenant_id: str = _TENANT_UNSET
     ) -> ProceduralEntry | None:
-        """加载本租户 Skill 定义。version=None 时返回最新 stable 版本。"""
+        """加载本租户 Capability 定义。version=None 时返回最新 stable 版本。"""
 
     @abc.abstractmethod
     async def list_all(self, *, tenant_id: str = _TENANT_UNSET) -> list[ProceduralEntry]:
-        """列出**本租户**所有 Skill 定义。"""
+        """列出**本租户**所有 Capability 定义。"""
 
     @abc.abstractmethod
     async def list_by_name(
         self, name: str, *, tenant_id: str = _TENANT_UNSET
     ) -> list[ProceduralEntry]:
-        """列出本租户某 Skill 的所有版本。"""
+        """列出本租户某 Capability 的所有版本。"""
 
     @abc.abstractmethod
     async def delete(
         self, name: str, version: str, *, tenant_id: str = _TENANT_UNSET
     ) -> bool:
-        """删除本租户 Skill 定义。"""
+        """删除本租户 Capability 定义。"""
 
 
 class InMemoryProceduralStore(ProceduralStore):
@@ -155,7 +155,7 @@ class InMemoryProceduralStore(ProceduralStore):
         versions = [e for (t, n, _v), e in self._store.items() if t == tenant and n == name]
         if not versions:
             return None
-        stable = [e for e in versions if e.lifecycle == SkillLifecycle.STABLE.value]
+        stable = [e for e in versions if e.lifecycle == CapabilityLifecycle.STABLE.value]
         pool = stable if stable else versions
         return max(pool, key=lambda e: e.version)
 
@@ -177,16 +177,16 @@ class InMemoryProceduralStore(ProceduralStore):
 
 
 class ProceduralMemory:
-    """Procedural Memory 门面：Skill 持久化 + 召回。
+    """Procedural Memory 门面：Capability 持久化 + 召回。
 
     用法：
     ```
     proc = ProceduralMemory(store)
-    # 持久化 Skill
-    await proc.save_skill_definition("search", "1.0.0", "function", "搜索能力", ...)
+    # 持久化 Capability
+    await proc.save_capability_definition("search", "1.0.0", "function", "搜索能力", ...)
     # 重启后恢复
     entries = await proc.list_all()
-    # 召回相关 Skill
+    # 召回相关 Capability
     results = await proc.recall("搜索")
     ```
     """
@@ -194,7 +194,7 @@ class ProceduralMemory:
     def __init__(self, store: ProceduralStore) -> None:
         self._store = store
 
-    async def save_skill_definition(
+    async def save_capability_definition(
         self,
         name: str,
         version: str,
@@ -203,12 +203,12 @@ class ProceduralMemory:
         input_schema: dict | None = None,
         output_schema: dict | None = None,
         effect_contract: dict | None = None,
-        lifecycle: str = SkillLifecycle.STABLE.value,
+        lifecycle: str = CapabilityLifecycle.STABLE.value,
         definition: dict | None = None,
         *,
         tenant_id: str = _TENANT_UNSET,
     ) -> ProceduralEntry:
-        """持久化本租户 Skill 定义。"""
+        """持久化本租户 Capability 定义。"""
         tenant = resolve_tenant(tenant_id)
         entry = ProceduralEntry(
             name=name,
@@ -223,24 +223,24 @@ class ProceduralMemory:
         )
         await self._store.save(entry, tenant_id=tenant)
         logger.info(
-            "procedural memory saved tenant=%s skill=%s version=%s", tenant, name, version
+            "procedural memory saved tenant=%s capability=%s version=%s", tenant, name, version
         )
         return entry
 
-    async def load_skill(
+    async def load_capability(
         self, name: str, version: str | None = None, *, tenant_id: str = _TENANT_UNSET
     ) -> ProceduralEntry | None:
-        """加载本租户 Skill 定义。"""
+        """加载本租户 Capability 定义。"""
         return await self._store.load(name, version, tenant_id=tenant_id)
 
     async def list_all(self, *, tenant_id: str = _TENANT_UNSET) -> list[ProceduralEntry]:
-        """列出本租户所有持久化的 Skill。"""
+        """列出本租户所有持久化的 Capability。"""
         return await self._store.list_all(tenant_id=tenant_id)
 
     async def recall(
         self, query: str, top_k: int = 10, *, tenant_id: str = _TENANT_UNSET
     ) -> list[ProceduralEntry]:
-        """召回本租户相关 Skill（按 bigram Jaccard 相似度）。"""
+        """召回本租户相关 Capability（按 bigram Jaccard 相似度）。"""
         all_entries = await self._store.list_all(tenant_id=tenant_id)
         scored: list[tuple[float, ProceduralEntry]] = []
         for e in all_entries:
@@ -253,19 +253,19 @@ class ProceduralMemory:
         scored.sort(key=lambda x: x[0], reverse=True)
         return [e for _, e in scored[:top_k]]
 
-    async def delete_skill(
+    async def delete_capability(
         self, name: str, version: str, *, tenant_id: str = _TENANT_UNSET
     ) -> bool:
-        """删除本租户 Skill 定义。"""
+        """删除本租户 Capability 定义。"""
         return await self._store.delete(name, version, tenant_id=tenant_id)
 
 
 class ProceduralExtractor:
-    """从 Episodic Memory 挖掘高频成功模式 → 候选 Skill。
+    """从 Episodic Memory 挖掘高频成功模式 → 候选 Capability。
 
     策略：
     - 按 task_summary 分组
-    - 同一 task 的成功执行 ≥ min_success 次 → 候选 Skill
+    - 同一 task 的成功执行 ≥ min_success 次 → 候选 Capability
     - 提取高频步骤序列作为 pattern_steps
     - confidence = success_rate × log(total_count)
     """
@@ -274,8 +274,8 @@ class ProceduralExtractor:
         self._min_success = min_success
         self._min_confidence = min_confidence
 
-    def extract_patterns(self, episodes: list[Episode]) -> list[CandidateSkill]:
-        """从 Episode 列表挖掘候选 Skill。"""
+    def extract_patterns(self, episodes: list[Episode]) -> list[CandidateCapability]:
+        """从 Episode 列表挖掘候选 Capability。"""
         import math
 
         by_task: dict[str, list[Episode]] = {}
@@ -283,7 +283,7 @@ class ProceduralExtractor:
             key = ep.task_summary
             by_task.setdefault(key, []).append(ep)
 
-        candidates: list[CandidateSkill] = []
+        candidates: list[CandidateCapability] = []
         for task, task_episodes in by_task.items():
             success_eps = [
                 e for e in task_episodes
@@ -294,7 +294,7 @@ class ProceduralExtractor:
 
             step_counter: Counter[tuple[str, ...]] = Counter()
             for ep in success_eps:
-                steps_tuple = tuple(ep.skill_names)
+                steps_tuple = tuple(ep.capability_names)
                 step_counter[steps_tuple] += 1
 
             if not step_counter:
@@ -313,8 +313,8 @@ class ProceduralExtractor:
             avg_cost = sum(e.total_cost for e in success_eps) / len(success_eps)
 
             candidates.append(
-                CandidateSkill(
-                    name=self._derive_skill_name(task),
+                CandidateCapability(
+                    name=self._derive_capability_name(task),
                     pattern_steps=list(best_pattern),
                     success_count=success_count,
                     total_count=total,
@@ -328,8 +328,8 @@ class ProceduralExtractor:
         return candidates
 
     @staticmethod
-    def _derive_skill_name(task_summary: str) -> str:
-        """从 task_summary 推导 Skill 名。"""
+    def _derive_capability_name(task_summary: str) -> str:
+        """从 task_summary 推导 Capability 名。"""
         import re
         name = re.sub(r"[^\w]", "_", task_summary.lower()).strip("_")
         return f"auto_{name}" if name else "auto_unknown"
@@ -337,7 +337,7 @@ class ProceduralExtractor:
 
 __all__ = [
     "ProceduralEntry",
-    "CandidateSkill",
+    "CandidateCapability",
     "ProceduralStore",
     "InMemoryProceduralStore",
     "ProceduralMemory",

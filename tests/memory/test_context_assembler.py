@@ -1,5 +1,5 @@
 """Context Pipeline 测试（Plan-F）：budget 分层/回流、assembler 组装/裁剪/snapshot 注入、
-tool_result 压缩外置、memory gate、skill slicing。"""
+tool_result 压缩外置、memory gate、capability slicing。"""
 
 from __future__ import annotations
 
@@ -8,9 +8,9 @@ import json
 import pytest
 from agent_runtime.context.assembler import ContextAssembler
 from agent_runtime.context.budget import ContextBudget, Layer
+from agent_runtime.context.capability_context import slice_capability_context, summarize_child_result
 from agent_runtime.context.compact import compact_messages, estimate_tokens, should_compact
 from agent_runtime.context.memory_gate import MemoryGate, MemoryItem
-from agent_runtime.context.skill_context import slice_skill_context, summarize_child_result
 from agent_runtime.context.tool_result import ToolResultCompressor, is_tool_result_ref, read_tool_result
 
 # ---------- budget ----------
@@ -249,12 +249,12 @@ def test_memory_gate_conflict_latest_wins():
     assert out[0].timestamp == 5.0
 
 
-# ---------- skill slicing ----------
+# ---------- capability slicing ----------
 
 
-def test_slice_skill_context_inherits_goal_only():
+def test_slice_capability_context_inherits_goal_only():
     snapshot = {"task": {"goal": "分析项目", "completed_steps": ["a"], "pending": ["b"], "constraints": {"k": "v"}}}
-    ctx = slice_skill_context(task_snapshot=snapshot, params={"query": "x"}, gated_memory=["相关记忆"])
+    ctx = slice_capability_context(task_snapshot=snapshot, params={"query": "x"}, gated_memory=["相关记忆"])
     assert ctx.inherited["goal"] == "分析项目"
     assert ctx.inherited["constraints"] == {"k": "v"}
     assert "completed_steps" not in ctx.inherited  # 未在 inherit_keys 中
@@ -264,8 +264,8 @@ def test_slice_skill_context_inherits_goal_only():
     assert "父任务上下文" in text and "本次任务参数" in text
 
 
-def test_slice_skill_context_empty_ok():
-    ctx = slice_skill_context()
+def test_slice_capability_context_empty_ok():
+    ctx = slice_capability_context()
     assert ctx.empty
 
 
@@ -312,7 +312,7 @@ async def test_compact_messages_failure_degrades():
 @pytest.mark.asyncio
 async def test_tool_result_compression_middleware(tmp_path):
     """P1 接线：ToolResultCompressionMiddleware 挂洋葱链，超预算结果外置 + 截断视图。"""
-    from agent_runtime.skills.middleware import ToolResultCompressionMiddleware
+    from agent_runtime.capabilities.middleware import ToolResultCompressionMiddleware
 
     big = "x" * 50_000
     calls = {"n": 0}
@@ -332,10 +332,10 @@ async def test_tool_result_compression_middleware(tmp_path):
 
 @pytest.mark.asyncio
 async def test_tool_result_compression_middleware_scope():
-    """skill_names 限定：未列出的技能不压缩。"""
-    from agent_runtime.skills.middleware import ToolResultCompressionMiddleware
+    """capability_names 限定：未列出的技能不压缩。"""
+    from agent_runtime.capabilities.middleware import ToolResultCompressionMiddleware
 
-    mw = ToolResultCompressionMiddleware(max_tokens=10, skill_names=("search",))
+    mw = ToolResultCompressionMiddleware(max_tokens=10, capability_names=("search",))
     small = ["ok"]
 
     async def call_next(name, kwargs):

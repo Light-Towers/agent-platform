@@ -13,8 +13,8 @@
    旧行为（只标 FAILED + 释放 slot）。
    边界（2026-10-19 更新，#99）：``contract_resolver`` **已接生产**——
    ``make_trajectory_contract_resolver`` 读轨迹取 ``plan.route`` 经 registry
-   查契约；四类落空（无记录 / route 空 / skill 未注册 / 无 contract）降级 None
-   ⇒ 决策退化为「无契约默认可重试」。graph/agentic 多 skill 模式的逐 skill
+   查契约；四类落空（无记录 / route 空 / capability 未注册 / 无 contract）降级 None
+   ⇒ 决策退化为「无契约默认可重试」。graph/agentic 多 capability 模式的逐 capability
    契约恢复决策**仍缺**（转新缺口，本模块不猜）。
    兄弟模块 ``payload_externalization``（由 ``agent_server`` 的
    ``_build_payload_externalizer`` 构造并注进 checkpoint 链路）与 ``human_task``
@@ -403,15 +403,15 @@ def make_trajectory_contract_resolver(trajectory_store: Any, registry: Any):
 
     数据链（均为既有件，不新造）：``trajectory_store.get(execution_id)`` →
     ``TrajectoryRecord.plan``（序列化 ``Plan``）→ deterministic 模式
-    ``plan["route"]`` = skill 名 → ``registry.get(route).effect_contract``。
+    ``plan["route"]`` = capability 名 → ``registry.get(route).effect_contract``。
 
     **四类落空一律返回 None**——即保持「无契约默认可重试」的现状语义，
     不静默改判：
     1. 轨迹记录不存在（执行未落轨迹 / store 未装配）；
-    2. ``route`` 为空（graph / agentic 多 skill 模式——逐 skill 契约的恢复
+    2. ``route`` 为空（graph / agentic 多 capability 模式——逐 capability 契约的恢复
        决策需独立设计，转新缺口，本工厂不猜）；
-    3. skill 未注册（退役 / 改名）；
-    4. skill 无 contract（未声明）。
+    3. capability 未注册（退役 / 改名）；
+    4. capability 无 contract（未声明）。
 
     store / registry 经**参数**注入（不 import 具体实现）⇒ 可单测、不引新依赖边。
     返回 async 函数（store.get 是 async）；``RecoveryOrchestrator.recover_one``
@@ -425,16 +425,16 @@ def make_trajectory_contract_resolver(trajectory_store: Any, registry: Any):
         route = (getattr(record, "plan", None) or {}).get("route") or ""
         if not route:
             return None
-        from agent_runtime.skills.registry import SkillNotFoundError
+        from agent_runtime.capabilities.registry import CapabilityNotFoundError
 
         try:
-            skill = registry.get(route)
-        except (SkillNotFoundError, KeyError):
-            # SkillNotFoundError：真实 registry 的未注册口径；KeyError：内存 test
+            capability = registry.get(route)
+        except (CapabilityNotFoundError, KeyError):
+            # CapabilityNotFoundError：真实 registry 的未注册口径；KeyError：内存 test
             # double 的口径。二者都归「未注册」——降级 None，不静默改判。
-            logger.warning("contract resolve: skill not registered route=%s", route)
+            logger.warning("contract resolve: capability not registered route=%s", route)
             return None
-        return getattr(skill, "effect_contract", None)
+        return getattr(capability, "effect_contract", None)
 
     return _resolve
 

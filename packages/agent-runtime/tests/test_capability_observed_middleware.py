@@ -10,7 +10,7 @@ from agent_core.events import EventBus
 from agent_core.monitor import ToolMonitor
 from agent_core.observability import ToolOutcome, ToolResult
 
-from agent_runtime.skills.middleware import ToolObservedMiddleware
+from agent_runtime.capabilities.middleware import ToolObservedMiddleware
 
 
 def _make_mw_and_events(display_names=None) -> tuple[ToolObservedMiddleware, list[dict]]:

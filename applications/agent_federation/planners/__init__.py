@@ -5,7 +5,7 @@
 run_deep_agent 的 guard/intent/cache/memory/monitor 副作用链路保持不动，本包只做协议适配 + 治理装配。
 
 ``get_planner_runtime()``：联邦侧 ``PlannerRuntime`` 单例（与 app/main.py 对称），组合治理参数
-max_skill_depth/max_steps 取环境变量（默认 4 / 20，与 PlannerRuntime 默认值一致）。
+max_capability_depth/max_steps 取环境变量（默认 4 / 20，与 PlannerRuntime 默认值一致）。
 B-2 修复：懒构建 PG stores（checkpoint/trajectory/side_effect/ownership）+ llm 注入，
 pool 不可用时退化为 None（不崩溃），与 agent_server 的 _build_pg_stores 对称。
 """
@@ -73,7 +73,7 @@ def get_planner_runtime() -> PlannerRuntime:
     """联邦侧 PlannerRuntime 单例（模块级，联邦无 FastAPI app.state 注入先例）。
 
     组合治理参数取环境变量（与 app/config 对齐）：
-      - FED_MAX_SKILL_DEPTH（默认 4）
+      - FED_MAX_CAPABILITY_DEPTH（默认 4）
       - FED_MAX_STEPS（默认 20）
       - FED_MAX_DURATION_SECONDS（默认 60）
     registry：默认 None（联邦 agentic 执行不经能力注册表查能力，保持与 AgenticPlanner 行为一致）；
@@ -108,7 +108,7 @@ def get_planner_runtime() -> PlannerRuntime:
             registry=registry,
             llm=llm,
             pool=stores.get("pool"),
-            max_skill_depth=env_int("FED_MAX_SKILL_DEPTH", 4),
+            max_capability_depth=env_int("FED_MAX_CAPABILITY_DEPTH", 4),
             max_steps=env_int("FED_MAX_STEPS", 20),
             max_duration_seconds=env_int("FED_MAX_DURATION_SECONDS", 60),
             checkpoint_store=stores.get("checkpoint_store"),

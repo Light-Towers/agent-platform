@@ -4,10 +4,10 @@
 本模块不被任何默认代码路径引用。
 
 开启后（仅实验/灰度）：
-- 联邦侧能力（文件工具 + 3 个子智能体）注册为统一 ``SkillRegistry``；
+- 联邦侧能力（文件工具 + 3 个子智能体）注册为统一 ``CapabilityRegistry``；
 - ``get_main_agent`` 的工具列表追加「经统一 Runtime 治理」的桥接 LangChain 工具；
   agent 调用这些工具时，经 ``RuntimeToolCaller`` → ``runtime.delegate``，受统一
-  预算 / 权限 / 超时 / 熔断 / 追踪 / 轨迹治理（架构不变量 #4：Agentic 不绕过统一 Skill Runtime）。
+  预算 / 权限 / 超时 / 熔断 / 追踪 / 轨迹治理（架构不变量 #4：Agentic 不绕过统一 Capability Runtime）。
 
 所有集成点均 try/except 降级：任一环节失败都回退到当前行为，不影响主链路。
 机械正确性由 ``test_agentic_runtime_bridge_langchain.py`` 验证（fake runtime，不拉起 deepagents）。
@@ -32,16 +32,16 @@ def bridge_enabled() -> bool:
 def federation_capability_registry() -> "Any":
     """best-effort 构建联邦能力注册表（文件工具 + 3 个子智能体）。
 
-    任一能力注册失败仅跳过该能力（不中断），保证降级安全。返回 ``SkillRegistry``。
+    任一能力注册失败仅跳过该能力（不中断），保证降级安全。返回 ``CapabilityRegistry``。
     """
+    from agent_runtime.capabilities.middleware import CircuitBreakerMiddleware, RetryMiddleware
+    from agent_runtime.capabilities.registry import Capability, CapabilityKind, CapabilityRegistry
     from agent_runtime.circuit_breaker import CircuitBreaker
-    from agent_runtime.skills.middleware import CircuitBreakerMiddleware, RetryMiddleware
-    from agent_runtime.skills.registry import Skill, SkillKind, SkillRegistry
 
     _breaker = CircuitBreaker(failure_threshold=5, recovery_seconds=30)
-    reg = SkillRegistry(
+    reg = CapabilityRegistry(
         middlewares=[
-            CircuitBreakerMiddleware(_breaker, skill_names=("search",)),
+            CircuitBreakerMiddleware(_breaker, capability_names=("search",)),
             RetryMiddleware(max_retries=2, backoff_s=0.5),
         ]
     )
@@ -49,7 +49,7 @@ def federation_capability_registry() -> "Any":
     # 文件工具（FUNCTION）
     for name, fn, desc in _file_tool_specs():
         try:
-            reg.register(Skill(name, desc, SkillKind.FUNCTION, fn))
+            reg.register(Capability(name, desc, CapabilityKind.FUNCTION, fn))
         except Exception as exc:
             logger.warning("bridge: 文件工具 %s 注册失败（跳过）: %s", name, exc)
 
@@ -65,24 +65,24 @@ def federation_capability_registry() -> "Any":
                 return await sub.ainvoke(kwargs)
 
             reg.register(
-                Skill(name, ag.get("description", ""), SkillKind.FUNCTION, _invoke)
+                Capability(name, ag.get("description", ""), CapabilityKind.FUNCTION, _invoke)
             )
         except Exception as exc:
             logger.warning("bridge: 子智能体 %s 注册失败（跳过）: %s", ag.get("name"), exc)
 
-    # 沙箱代码执行 Skill（FUNCTION，经统一 Runtime 治理）
+    # 沙箱代码执行 Capability（FUNCTION，经统一 Runtime 治理）
     # 补齐 AgenticPlanner → 沙箱路由缺口：bridge 开启后 agentic 路径经
     # discover_agent_tools 发现 code_execution → runtime.delegate 调用，
     # 受步数/深度/循环/权限/轨迹统一治理。
     try:
-        from agent_runtime.skills.sandbox import as_sandbox_skill
+        from agent_runtime.capabilities.sandbox import as_sandbox_capability
 
-        sandbox_skill = as_sandbox_skill()
-        if sandbox_skill.name not in reg:
-            reg.register(sandbox_skill)
-            logger.info("bridge: 沙箱 skill 注册成功 (name=%s)", sandbox_skill.name)
+        sandbox_capability = as_sandbox_capability()
+        if sandbox_capability.name not in reg:
+            reg.register(sandbox_capability)
+            logger.info("bridge: 沙箱 capability 注册成功 (name=%s)", sandbox_capability.name)
     except Exception as exc:
-        logger.warning("bridge: 沙箱 skill 注册失败（跳过）: %s", exc)
+        logger.warning("bridge: 沙箱 capability 注册失败（跳过）: %s", exc)
 
     return reg
 
@@ -93,7 +93,7 @@ def build_bridged_langchain_tools(
     """把统一 Runtime 的能力发现结果转为 deepagents 可用的 LangChain 工具列表。
 
     每个工具经 ``RuntimeToolCaller`` 路由到 ``runtime.delegate``（统一治理）。
-    架构验收 #4：agent 工具调用不绕过 Skill Runtime。
+    架构验收 #4：agent 工具调用不绕过 Capability Runtime。
     """
     from agent_runtime.planner.agentic_bridge import (
         RuntimeToolCaller,

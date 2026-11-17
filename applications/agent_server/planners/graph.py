@@ -1,8 +1,8 @@
-"""GraphPlanner：组合型 Planner — discover 候选 Skill → LLM 组合 ExecutionGraph → execute_plan。
+"""GraphPlanner：组合型 Planner — discover 候选 Capability → LLM 组合 ExecutionGraph → execute_plan。
 
 Plan-F 执行链打通（Phase B 升级）：
 - 单候选 / 无 LLM：退化为单节点 ExecutionGraph（基础版，兼容旧行为）；
-- 多候选 + LLM：经 ``compose_execution_graph`` 产出多 Skill DAG（含输入映射与依赖边），
+- 多候选 + LLM：经 ``compose_execution_graph`` 产出多 Capability DAG（含输入映射与依赖边），
   组合失败时按 doc §16 Phase B 重新规划（有限次重试 + 错误反馈），而非进入无限 Agent loop；
   仍失败时回退单节点能力，保证可治理、可审计。
 """
@@ -28,7 +28,7 @@ from agent_runtime.planner.protocol import (
 )
 
 if TYPE_CHECKING:
-    from agent_runtime.skills.registry import SkillRegistry
+    from agent_runtime.capabilities.registry import CapabilityRegistry
 
 
 class GraphPlanner(Planner):
@@ -38,7 +38,7 @@ class GraphPlanner(Planner):
 
     def __init__(
         self,
-        registry: "SkillRegistry | None" = None,
+        registry: "CapabilityRegistry | None" = None,
         *,
         max_compose_retries: int = 1,
         max_execution_replans: int = 1,
@@ -47,9 +47,9 @@ class GraphPlanner(Planner):
         self._max_compose_retries = max_compose_retries
         self._max_execution_replans = max_execution_replans
 
-    def _single_node_plan(self, ctx: PlannerContext, skill_name: str, reason: str) -> Plan:
+    def _single_node_plan(self, ctx: PlannerContext, capability_name: str, reason: str) -> Plan:
         g = ExecutionGraph()
-        g.add_node("n0", skill_name, {"query": ctx.question})
+        g.add_node("n0", capability_name, {"query": ctx.question})
         return Plan(
             mode="graph",
             route="graph",
@@ -81,7 +81,7 @@ class GraphPlanner(Planner):
             return Plan(
                 mode="deterministic",
                 route="direct",
-                reason="无候选 Skill，回退 direct",
+                reason="无候选 Capability，回退 direct",
                 question=ctx.question,
                 workspace_id=ctx.workspace_id,
                 user_id=ctx.user_id,
@@ -94,7 +94,7 @@ class GraphPlanner(Planner):
                 ctx, candidates[0].name, f"单候选，选 {candidates[0].name}"
             )
 
-        # 多候选 + LLM：组合多 Skill DAG（带错误反馈重规划）
+        # 多候选 + LLM：组合多 Capability DAG（带错误反馈重规划）
         graph = await self._compose_with_retry(ctx, candidates)
         if graph is None:
             return self._single_node_plan(
@@ -104,7 +104,7 @@ class GraphPlanner(Planner):
             mode="graph",
             route="graph",
             sub_query=ctx.question,
-            reason="LLM 组合多 Skill DAG",
+            reason="LLM 组合多 Capability DAG",
             graph=graph,
             question=ctx.question,
             workspace_id=ctx.workspace_id,

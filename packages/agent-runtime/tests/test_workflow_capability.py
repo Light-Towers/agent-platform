@@ -1,16 +1,16 @@
-"""Workflow Skill（Phase C）测试：compile_workflow 编译 + 经统一 Runtime 执行（含 $input/$node 映射）。"""
+"""Workflow Capability（Phase C）测试：compile_workflow 编译 + 经统一 Runtime 执行（含 $input/$node 映射）。"""
 
 from __future__ import annotations
 
-from agent_runtime.planner.execution_graph import execute_plan
-from agent_runtime.planner.protocol import Plan, PlannerContext, PlannerRuntime
-from agent_runtime.skills.registry import Skill, SkillKind, SkillRegistry
-from agent_runtime.skills.workflow import (
+from agent_runtime.capabilities.registry import Capability, CapabilityKind, CapabilityRegistry
+from agent_runtime.capabilities.workflow import (
     WorkflowEdge,
     WorkflowNode,
     WorkflowSpec,
     compile_workflow,
 )
+from agent_runtime.planner.execution_graph import execute_plan
+from agent_runtime.planner.protocol import Plan, PlannerContext, PlannerRuntime
 
 
 async def _fetch(**kwargs):
@@ -21,10 +21,10 @@ async def _analyze(**kwargs):
     return {"report": f"analyzed:{kwargs.get('data')}"}
 
 
-def _base_registry() -> SkillRegistry:
-    reg = SkillRegistry()
-    reg.register(Skill("web_search", "联网搜索 web search", SkillKind.FUNCTION, _fetch))
-    reg.register(Skill("analyze", "分析数据 analyze data", SkillKind.FUNCTION, _analyze))
+def _base_registry() -> CapabilityRegistry:
+    reg = CapabilityRegistry()
+    reg.register(Capability("web_search", "联网搜索 web search", CapabilityKind.FUNCTION, _fetch))
+    reg.register(Capability("analyze", "分析数据 analyze data", CapabilityKind.FUNCTION, _analyze))
     return reg
 
 
@@ -33,8 +33,8 @@ def _workflow_spec() -> WorkflowSpec:
         name="research_report",
         description="检索并分析生成报告 research report workflow",
         nodes=[
-            WorkflowNode(id="n1", skill="web_search", inputs={"query": "$input.topic"}),
-            WorkflowNode(id="n2", skill="analyze", inputs={"data": "$node.n1"}),
+            WorkflowNode(id="n1", capability="web_search", inputs={"query": "$input.topic"}),
+            WorkflowNode(id="n2", capability="analyze", inputs={"data": "$node.n1"}),
         ],
         edges=[WorkflowEdge(dependent="n2", dependency="n1")],
         input_schema={"type": "object", "properties": {"topic": {"type": "string"}}, "required": ["topic"]},
@@ -46,7 +46,7 @@ def _workflow_spec() -> WorkflowSpec:
 async def test_compile_and_execute_via_runtime():
     reg = _base_registry()
     wf = compile_workflow(_workflow_spec())
-    assert wf.kind == SkillKind.WORKFLOW
+    assert wf.kind == CapabilityKind.WORKFLOW
     assert wf.metadata.get("kind") == "workflow"
     reg.register(wf)
 
@@ -93,4 +93,4 @@ async def test_workflow_discoverable_by_mode_selector():
     ctx = PlannerContext(question="research report workflow", workspace_id="w", user_id="u")
     decision = await sel.select(ctx, reg)
     assert decision.mode.value == "workflow"
-    assert decision.workflow_skill == "research_report"
+    assert decision.workflow_capability == "research_report"

@@ -176,7 +176,7 @@ def decide_failure_action(
     - FATAL 异常 → ``ABORT``（无论 contract 如何，致命错误终止执行）；
     - RECOVERABLE 异常 → ``NO_RETRY``（降级继续，不重试）；
     - RETRYABLE 异常：按 contract.retry_policy 决策；
-      ``contract`` 为 None（Skill 未声明）时保持 v2 语义（按异常分类可重试 → ``RETRY_SAFE``）。
+      ``contract`` 为 None（Capability 未声明）时保持 v2 语义（按异常分类可重试 → ``RETRY_SAFE``）。
     """
     if error_class is ErrorClass.FATAL:
         return FailureAction.ABORT

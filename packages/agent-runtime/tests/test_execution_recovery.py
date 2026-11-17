@@ -285,19 +285,19 @@ class _FakeRecord:
         self.plan = plan
 
 
-class _FakeSkill:
+class _FakeCapability:
     def __init__(self, contract):
         self.effect_contract = contract
 
 
 class _FakeRegistry:
-    def __init__(self, skills: dict):
-        self._skills = skills
+    def __init__(self, capabilities: dict):
+        self._capabilities = capabilities
 
     def get(self, name: str):
-        if name not in self._skills:
+        if name not in self._capabilities:
             raise KeyError(name)
-        return self._skills[name]
+        return self._capabilities[name]
 
 
 _CONTRACT = EffectContract(
@@ -315,17 +315,17 @@ async def test_resolver_happy_path_route_to_contract():
     from agent_runtime.execution_recovery import make_trajectory_contract_resolver
 
     store = _FakeTrajectoryStore({"e1": _FakeRecord({"route": "venue.query"})})
-    registry = _FakeRegistry({"venue.query": _FakeSkill(_CONTRACT)})
+    registry = _FakeRegistry({"venue.query": _FakeCapability(_CONTRACT)})
     resolve = make_trajectory_contract_resolver(store, registry)
     assert await resolve("e1") is _CONTRACT
 
 
 async def test_resolver_route_hit_but_no_contract():
-    """skill 在册但无 contract → None（不猜）。"""
+    """capability 在册但无 contract → None（不猜）。"""
     from agent_runtime.execution_recovery import make_trajectory_contract_resolver
 
     store = _FakeTrajectoryStore({"e1": _FakeRecord({"route": "venue.query"})})
-    registry = _FakeRegistry({"venue.query": _FakeSkill(None)})
+    registry = _FakeRegistry({"venue.query": _FakeCapability(None)})
     resolve = make_trajectory_contract_resolver(store, registry)
     assert await resolve("e1") is None
 
@@ -339,20 +339,20 @@ async def test_resolver_missing_record_degrades_none():
 
 
 async def test_resolver_empty_route_degrades_none():
-    """graph/agentic 模式（route 空）→ None；逐 skill 契约恢复转新缺口，不猜。"""
+    """graph/agentic 模式（route 空）→ None；逐 capability 契约恢复转新缺口，不猜。"""
     from agent_runtime.execution_recovery import make_trajectory_contract_resolver
 
     store = _FakeTrajectoryStore({"e1": _FakeRecord({"mode": "graph", "route": ""})})
-    registry = _FakeRegistry({"venue.query": _FakeSkill(_CONTRACT)})
+    registry = _FakeRegistry({"venue.query": _FakeCapability(_CONTRACT)})
     resolve = make_trajectory_contract_resolver(store, registry)
     assert await resolve("e1") is None
 
 
-async def test_resolver_unregistered_skill_degrades_none():
-    """skill 未注册（退役/改名）→ None 且不抛。"""
+async def test_resolver_unregistered_capability_degrades_none():
+    """capability 未注册（退役/改名）→ None 且不抛。"""
     from agent_runtime.execution_recovery import make_trajectory_contract_resolver
 
-    store = _FakeTrajectoryStore({"e1": _FakeRecord({"route": "retired.skill"})})
+    store = _FakeTrajectoryStore({"e1": _FakeRecord({"route": "retired.capability"})})
     registry = _FakeRegistry({})
     resolve = make_trajectory_contract_resolver(store, registry)
     assert await resolve("e1") is None

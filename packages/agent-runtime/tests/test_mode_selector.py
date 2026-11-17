@@ -2,30 +2,30 @@
 
 from __future__ import annotations
 
+from agent_runtime.capabilities.registry import Capability, CapabilityKind, CapabilityRegistry
 from agent_runtime.planner.mode_selector import (
     ExecutionMode,
     ModeSelector,
 )
 from agent_runtime.planner.protocol import PlannerContext
-from agent_runtime.skills.registry import Skill, SkillKind, SkillRegistry
 
 
 async def _echo(**kwargs):
     return kwargs
 
 
-def _fn(name: str, description: str, kind: str) -> Skill:
-    return Skill(
+def _fn(name: str, description: str, kind: str) -> Capability:
+    return Capability(
         name=name,
         description=description,
-        kind=SkillKind.FUNCTION,
+        kind=CapabilityKind.FUNCTION,
         executor=_echo,
         metadata={"kind": kind},
     )
 
 
-def _registry() -> SkillRegistry:
-    reg = SkillRegistry()
+def _registry() -> CapabilityRegistry:
+    reg = CapabilityRegistry()
     reg.register(_fn("web_search", "联网搜索网页信息 web search", "function"))
     reg.register(_fn("analyze", "分析结构化数据 analyze data", "function"))
     reg.register(_fn("report_workflow", "生成财务周报 report workflow", "workflow"))
@@ -47,7 +47,7 @@ async def test_workflow_reuse_priority():
     sel = ModeSelector()
     dec = await sel.select(_ctx("生成财务周报"), _registry())
     assert dec.mode == ExecutionMode.WORKFLOW
-    assert dec.workflow_skill == "report_workflow"
+    assert dec.workflow_capability == "report_workflow"
 
 
 async def test_heuristic_deterministic_single():

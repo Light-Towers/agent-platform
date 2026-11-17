@@ -5,7 +5,7 @@
 **仅在调用方显式使用 :func:`agent_core.observability.observe_tool` 时经函数级
 import 加载**；agent_core 其余内核模块不得 import 本模块（内核零依赖铁律）。
 
-职责（单一实现，federation tool_registry / agent_server SkillRegistry 均为装配点）：
+职责（单一实现，federation tool_registry / agent_server CapabilityRegistry 均为装配点）：
 - 对 StructuredTool 的 ``func``（sync）与 ``coroutine``（async）**双路分别包装**；
 - 进入时发 ``tool_start``（args 摘要，单值 repr 截断 512 字符）；
 - 结束时发 ``tool_outcome``：ToolResult → 其 outcome；普通返回 → success；

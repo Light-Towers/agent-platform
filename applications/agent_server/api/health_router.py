@@ -44,7 +44,7 @@ async def health(request: Request) -> HealthResponse:
         search=bool(settings.search_api_key),
         # 问数面：本服务已无业务库连接（ADR-0011 选项 A），原来那盏
         # `sql_backend=detect_dialect(settings.sql_dsn)` 拿**平台库**方言充当问数读数（假灯），
-        # 2026-10-28 批次 5 退役。本位只回答“nl2sql skill 是否已注册”（与 search/llm 同类的意愿位，
+        # 2026-10-28 批次 5 退役。本位只回答“nl2sql capability 是否已注册”（与 search/llm 同类的意愿位，
         # 与它们一样**不回显 URL**：/health 是免鉴权探针路径）。问数运行态真值在 nl2sql-service 自己的 /ready。
         nl2sql=bool(settings.nl2sql_service_url),
         coordination=settings.coordination_enabled,

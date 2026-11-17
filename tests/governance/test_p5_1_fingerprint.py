@@ -1,16 +1,16 @@
 """P5-1 TrajectoryFingerprint 验证。
 
-覆盖：语义循环指纹（skill + 归一化 args）重复时拒绝继续（SkillCompositionError），
-能拦「绕一圈回来同入参重复调用」；不同入参同名 Skill 不误伤；kwargs 键序无关。
+覆盖：语义循环指纹（capability + 归一化 args）重复时拒绝继续（CapabilityCompositionError），
+能拦「绕一圈回来同入参重复调用」；不同入参同名 Capability 不误伤；kwargs 键序无关。
 """
 
 from __future__ import annotations
 
 import pytest
 from agent_runtime.planner.protocol import (
+    CapabilityCompositionError,
     ExecutionContext,
     PlannerRuntime,
-    SkillCompositionError,
     _fingerprint,
 )
 
@@ -30,33 +30,33 @@ def test_fingerprint_differs_by_args():
 
 def test_execution_context_blocks_duplicate_fingerprint():
     ctx = ExecutionContext(loop_fingerprint=True)
-    ctx.enter_skill("a", {"q": "x"})
-    ctx.enter_skill("b", {"q": "x"})
+    ctx.enter_capability("a", {"q": "x"})
+    ctx.enter_capability("b", {"q": "x"})
     # A → B → A（同入参）应被语义指纹拦
-    with pytest.raises(SkillCompositionError):
-        ctx.enter_skill("a", {"q": "x"})
+    with pytest.raises(CapabilityCompositionError):
+        ctx.enter_capability("a", {"q": "x"})
 
 
 def test_execution_context_allows_different_args_same_name():
     ctx = ExecutionContext()
-    ctx.enter_skill("a", {"q": "x"})
-    ctx.exit_skill()
-    # 同 Skill 不同入参（顺序调用，栈已退出）：不拦
-    ctx.enter_skill("a", {"q": "y"})
+    ctx.enter_capability("a", {"q": "x"})
+    ctx.exit_capability()
+    # 同 Capability 不同入参（顺序调用，栈已退出）：不拦
+    ctx.enter_capability("a", {"q": "y"})
 
 
 def test_execution_context_allows_immediate_reentry_only_via_stack():
     # 即时重入仍由 call_stack 拦（即便指纹不同也会先被 name in call_stack 拦）
     ctx = ExecutionContext()
-    ctx.enter_skill("a", {"q": "x"})
-    with pytest.raises(SkillCompositionError):
-        ctx.enter_skill("a", {"q": "z"})  # 同名即时重入：call_stack 先拦
+    ctx.enter_capability("a", {"q": "x"})
+    with pytest.raises(CapabilityCompositionError):
+        ctx.enter_capability("a", {"q": "z"})  # 同名即时重入：call_stack 先拦
 
 
 @pytest.mark.asyncio
 async def test_delegate_blocks_semantic_loop():
     runtime = PlannerRuntime(
-        registry=_FakeRegistry(), max_steps=20, max_skill_depth=8,
+        registry=_FakeRegistry(), max_steps=20, max_capability_depth=8,
         enable_loop_fingerprint=True,
     )
 
@@ -67,14 +67,14 @@ async def test_delegate_blocks_semantic_loop():
             # 与第一次同入参的 search：语义循环
             await runtime.delegate("search", q="weather")
 
-    with pytest.raises(SkillCompositionError):
+    with pytest.raises(CapabilityCompositionError):
         await run()
 
 
 @pytest.mark.asyncio
 async def test_delegate_allows_distinct_args():
     runtime = PlannerRuntime(
-        registry=_FakeRegistry(), max_steps=20, max_skill_depth=8,
+        registry=_FakeRegistry(), max_steps=20, max_capability_depth=8,
         enable_loop_fingerprint=True,
     )
     async with runtime.execution():
@@ -86,7 +86,7 @@ async def test_delegate_allows_distinct_args():
 @pytest.mark.asyncio
 async def test_delegate_default_off_allows_repeated_same_args():
     # 默认关闭：合法重放/重规划（同入参重复调用）不误伤
-    runtime = PlannerRuntime(registry=_FakeRegistry(), max_steps=20, max_skill_depth=8)
+    runtime = PlannerRuntime(registry=_FakeRegistry(), max_steps=20, max_capability_depth=8)
     async with runtime.execution():
         await runtime.delegate("search", q="weather")
         await runtime.delegate("search", q="weather")

@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import pytest
 
+from agent_runtime.capabilities.function import as_function_capability
+from agent_runtime.capabilities.registry import CapabilityRegistry
 from agent_runtime.planner.execution_graph import ExecutionGraph
 from agent_runtime.planner.policy import PlanViolationError, PolicyValidator
-from agent_runtime.skills.function import as_function_skill
-from agent_runtime.skills.registry import SkillRegistry
 
 
-def _make_registry() -> SkillRegistry:
-    reg = SkillRegistry()
+def _make_registry() -> CapabilityRegistry:
+    reg = CapabilityRegistry()
 
     async def search(query):
         return f"result for {query}"
@@ -22,9 +22,9 @@ def _make_registry() -> SkillRegistry:
     async def privileged_op(data):
         return "secret"
 
-    reg.register(as_function_skill("search", "搜索", search))
-    reg.register(as_function_skill("analyze", "分析", analyze))
-    reg.register(as_function_skill("privileged", "特权操作", privileged_op, permissions={"admin"}))
+    reg.register(as_function_capability("search", "搜索", search))
+    reg.register(as_function_capability("analyze", "分析", analyze))
+    reg.register(as_function_capability("privileged", "特权操作", privileged_op, permissions={"admin"}))
     return reg
 
 
@@ -88,11 +88,11 @@ def test_validate_parallel_exceeds():
         pv.validate(g, max_parallel=3)
 
 
-def test_validate_unregistered_skill():
+def test_validate_unregistered_capability():
     reg = _make_registry()
     pv = PolicyValidator(reg)
     g = ExecutionGraph()
-    g.add_node("a", "nonexistent_skill")
+    g.add_node("a", "nonexistent_capability")
     with pytest.raises(PlanViolationError, match="未注册能力"):
         pv.validate(g)
 

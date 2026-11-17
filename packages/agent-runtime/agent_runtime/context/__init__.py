@@ -9,7 +9,7 @@ federation 共用。
 - ``compact``：上下文压缩（由 agent_server 下沉，去 langchain 化，dict 消息）；
 - ``tool_result``：Tool Result 压缩 + 外置（head/tail + 关键字段 + ref handle）；
 - ``memory_gate``：记忆召回门控（去重 / 冲突消解 / 预算内取 top）；
-- ``skill_context``：Skill-local context slicing（父 context 只传切片，嵌套 token 加法化）。
+- ``capability_context``：Capability-local context slicing（父 context 只传切片，嵌套 token 加法化）。
 """
 
 from __future__ import annotations
@@ -25,6 +25,7 @@ from agent_runtime.context.authorizer import (
     ContextAuthorizer,
 )
 from agent_runtime.context.budget import ContextBudget, Layer
+from agent_runtime.context.capability_context import CapabilityInvocationContext, slice_capability_context
 from agent_runtime.context.compact import compact_messages, estimate_tokens, should_compact
 from agent_runtime.context.governor import CompiledContext, ContextGovernor
 from agent_runtime.context.memory_gate import MemoryGate
@@ -33,7 +34,6 @@ from agent_runtime.context.quality import (
     QualityReport,
     QualityScore,
 )
-from agent_runtime.context.skill_context import SkillInvocationContext, slice_skill_context
 from agent_runtime.context.tool_result import ToolResultCompressor, compress_result, read_tool_result
 from agent_runtime.context.validator import (
     ContextValidator,
@@ -57,7 +57,7 @@ __all__ = [
     "MemoryGate",
     "QualityReport",
     "QualityScore",
-    "SkillInvocationContext",
+    "CapabilityInvocationContext",
     "ToolResultCompressor",
     "ValidationIssue",
     "ValidationReport",
@@ -66,5 +66,5 @@ __all__ = [
     "estimate_tokens",
     "read_tool_result",
     "should_compact",
-    "slice_skill_context",
+    "slice_capability_context",
 ]

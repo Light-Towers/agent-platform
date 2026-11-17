@@ -16,17 +16,17 @@ from agent_server.config import get_settings
 from agent_server.planners.deterministic import DeterministicPlanner
 
 if TYPE_CHECKING:
+    from agent_runtime.capabilities.registry import CapabilityRegistry
     from agent_runtime.planner.protocol import Planner
-    from agent_runtime.skills.registry import SkillRegistry
 
 
-def get_planner(settings=None, *, registry: "SkillRegistry | None" = None) -> "Planner":
+def get_planner(settings=None, *, registry: "CapabilityRegistry | None" = None) -> "Planner":
     """按 ``settings.planner``（PLANNER env）返回 Planner 实现。
 
     - ``auto``：启用 Phase A Mode Selector（UnifiedPlanner 逐请求自动选择范式）；
     - ``deterministic``（默认）/ ``graph`` / ``agentic``：强制对应实现（override，doc §16）。
 
-    ``registry``：GraphPlanner / Mode Selector 需要（plan() 经 discover 选候选 Skill）。
+    ``registry``：GraphPlanner / Mode Selector 需要（plan() 经 discover 选候选 Capability）。
     """
     settings = settings or get_settings()
     if settings.planner == "auto":

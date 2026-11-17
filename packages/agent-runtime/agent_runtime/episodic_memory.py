@@ -6,7 +6,7 @@
 - Working：当前 execution 的实时状态
 - Episodic：**过去执行经历**——"以前类似任务是怎么完成的"
 - Semantic：业务事实/知识
-- Procedural：做事方法/Skill
+- Procedural：做事方法/Capability
 
 核心问题：不是每个 Tool Call 都应该记。
 ```
@@ -70,7 +70,7 @@ class Episode:
     outcome: EpisodeOutcome = EpisodeOutcome.SUCCESS
     key_steps: list[str] = field(default_factory=list)  # 关键步骤摘要
     lessons: list[str] = field(default_factory=list)  # 经验教训
-    skill_names: list[str] = field(default_factory=list)  # 涉及的 Skill
+    capability_names: list[str] = field(default_factory=list)  # 涉及的 Capability
     total_tokens: int = 0
     total_cost: float = 0.0
     duration: float = 0.0
@@ -86,7 +86,7 @@ class Episode:
             "outcome": self.outcome.value,
             "key_steps": self.key_steps,
             "lessons": self.lessons,
-            "skill_names": self.skill_names,
+            "capability_names": self.capability_names,
             "total_tokens": self.total_tokens,
             "total_cost": self.total_cost,
             "duration": self.duration,
@@ -260,7 +260,7 @@ class EpisodicExtractor:
         for s in error_steps:
             lessons.append(f"{s.name} 失败: {s.error}")
 
-        skill_names = list({s.name for s in steps})
+        capability_names = list({s.name for s in steps})
 
         task_summary = trajectory.plan.get("task", "") or trajectory.planner or "execution"
         if isinstance(task_summary, dict):
@@ -274,7 +274,7 @@ class EpisodicExtractor:
             outcome=outcome,
             key_steps=key_steps,
             lessons=lessons,
-            skill_names=skill_names,
+            capability_names=capability_names,
             total_tokens=trajectory.total_tokens,
             total_cost=trajectory.total_cost,
             duration=duration,

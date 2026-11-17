@@ -4,11 +4,11 @@
 
 - ``ConversationContext``：对话历史（可能被压缩 / 截断，受 context window 影响）；
 - ``TaskState``：当前任务状态（goal / completed_steps / pending / constraints）；
-- ``ExecutionState``：Skill 执行状态（outputs / errors / skill_stack）。
+- ``ExecutionState``：Capability 执行状态（outputs / errors / capability_stack）。
 
 ``ContextManager`` 管理这三类的生命周期，提供结构化快照（``snapshot``，供 LLM prompt
-注入或持久化）与状态更新（供 Planner / 执行器消费事件）。Skill Definition 不会遗忘
-（在 SkillRegistry 静态持有）；可能被压缩的是 ConversationContext；TaskState /
+注入或持久化）与状态更新（供 Planner / 执行器消费事件）。Capability Definition 不会遗忘
+（在 CapabilityRegistry 静态持有）；可能被压缩的是 ConversationContext；TaskState /
 ExecutionState 由 ContextManager 结构化保存，不依赖 prompt 完整性。
 """
 
@@ -52,17 +52,17 @@ class TaskState:
 
 @dataclass
 class ExecutionState:
-    """Skill 执行状态：输出 + 错误 + 调用栈。"""
+    """Capability 执行状态：输出 + 错误 + 调用栈。"""
 
     outputs: dict[str, Any] = field(default_factory=dict)
     errors: dict[str, str] = field(default_factory=dict)
-    skill_stack: list[str] = field(default_factory=list)
+    capability_stack: list[str] = field(default_factory=list)
 
-    def record_output(self, skill: str, result: Any) -> None:
-        self.outputs[skill] = result
+    def record_output(self, capability: str, result: Any) -> None:
+        self.outputs[capability] = result
 
-    def record_error(self, skill: str, error: str) -> None:
-        self.errors[skill] = error
+    def record_error(self, capability: str, error: str) -> None:
+        self.errors[capability] = error
 
 
 @dataclass
@@ -90,7 +90,7 @@ class AgentContext:
             "execution": {
                 "outputs": dict(self.execution.outputs),
                 "errors": dict(self.execution.errors),
-                "skill_stack": list(self.execution.skill_stack),
+                "capability_stack": list(self.execution.capability_stack),
             },
             "metadata": dict(self.metadata),
         }
@@ -133,17 +133,17 @@ class ContextManager:
         if pending:
             ctx.task.add_pending(pending)
 
-    def record_skill(
+    def record_capability(
         self,
         ctx: AgentContext,
-        skill: str,
+        capability: str,
         result: Any = None,
         error: str | None = None,
     ) -> None:
         if error is not None:
-            ctx.execution.record_error(skill, error)
+            ctx.execution.record_error(capability, error)
         elif result is not None:
-            ctx.execution.record_output(skill, result)
+            ctx.execution.record_output(capability, result)
 
     def snapshot(self, ctx: AgentContext) -> dict[str, Any]:
         """结构化快照（代理 ``AgentContext.snapshot``）。"""

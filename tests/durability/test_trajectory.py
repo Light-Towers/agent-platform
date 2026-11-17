@@ -4,7 +4,7 @@
 - ExecutionContext.record_step 逐步记录（顺序 / latency / token delta / error）；
 - PlannerRuntime.delegate 在 execution 边界内自动记录 step；
 - execute_plan 执行后把 TrajectoryRecord 持久化到 InMemoryTrajectoryStore，
-  按 execution_id 可查完整轨迹（skill / args / result / latency / tokens / error）与累计 tokens。
+  按 execution_id 可查完整轨迹（capability / args / result / latency / tokens / error）与累计 tokens。
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ from agent_runtime.trajectory.store import _coerce_record
 class _FakeRegistry:
     async def execute(self, name, **kwargs):
         if name == "boom":
-            raise RuntimeError("skill failed")
+            raise RuntimeError("capability failed")
         return f"result-of-{name}"
 
 
@@ -62,7 +62,7 @@ async def test_delegate_records_step_on_error():
             await runtime.delegate("boom")
         step = runtime.context.steps[0]
         assert step.name == "boom"
-        assert step.error == "skill failed"
+        assert step.error == "capability failed"
 
 
 @pytest.mark.asyncio

@@ -4,22 +4,22 @@ from __future__ import annotations
 
 import pytest
 
+from agent_runtime.capabilities.registry import Capability, CapabilityKind, CapabilityRegistry
 from agent_runtime.planner.execution_graph import ExecutionGraph
 from agent_runtime.planner.graph_compose import (
     GraphComposeError,
     compose_execution_graph,
     parse_graph_json,
 )
-from agent_runtime.skills.registry import Skill, SkillKind, SkillRegistry
 
 
-def _registry() -> SkillRegistry:
-    reg = SkillRegistry()
+def _registry() -> CapabilityRegistry:
+    reg = CapabilityRegistry()
     reg.register(
-        Skill("web_search", "联网搜索 web search", SkillKind.FUNCTION, _echo, metadata={"kind": "function"})
+        Capability("web_search", "联网搜索 web search", CapabilityKind.FUNCTION, _echo, metadata={"kind": "function"})
     )
     reg.register(
-        Skill("analyze", "分析数据 analyze data", SkillKind.FUNCTION, _echo, metadata={"kind": "function"})
+        Capability("analyze", "分析数据 analyze data", CapabilityKind.FUNCTION, _echo, metadata={"kind": "function"})
     )
     return reg
 
@@ -28,13 +28,13 @@ async def _echo(**kwargs):
     return kwargs
 
 
-def _cands(reg: SkillRegistry):
+def _cands(reg: CapabilityRegistry):
     return reg.discover("搜索 分析", top_k=10)
 
 
 def test_parse_single_node():
     g = parse_graph_json(
-        {"nodes": [{"id": "n1", "skill": "web_search", "inputs": {"query": "$query"}}]},
+        {"nodes": [{"id": "n1", "capability": "web_search", "inputs": {"query": "$query"}}]},
         "北京天气",
         {"web_search", "analyze"},
     )
@@ -46,8 +46,8 @@ def test_parse_single_node():
 def test_parse_multi_node_with_edge_and_ref():
     data = {
         "nodes": [
-            {"id": "n1", "skill": "web_search", "inputs": {"query": "$query"}},
-            {"id": "n2", "skill": "analyze", "inputs": {"data": "$node.n1"}},
+            {"id": "n1", "capability": "web_search", "inputs": {"query": "$query"}},
+            {"id": "n2", "capability": "analyze", "inputs": {"data": "$node.n1"}},
         ],
         "edges": [{"dependent": "n2", "dependency": "n1"}],
     }
@@ -56,10 +56,10 @@ def test_parse_multi_node_with_edge_and_ref():
     assert not g.detect_cycle()
 
 
-def test_parse_rejects_out_of_scope_skill():
+def test_parse_rejects_out_of_scope_capability():
     with pytest.raises(GraphComposeError):
         parse_graph_json(
-            {"nodes": [{"id": "n1", "skill": "hacker", "inputs": {}}]},
+            {"nodes": [{"id": "n1", "capability": "hacker", "inputs": {}}]},
             "q",
             {"web_search"},
         )
@@ -68,8 +68,8 @@ def test_parse_rejects_out_of_scope_skill():
 def test_parse_rejects_cycle():
     data = {
         "nodes": [
-            {"id": "n1", "skill": "web_search", "inputs": {}},
-            {"id": "n2", "skill": "analyze", "inputs": {}},
+            {"id": "n1", "capability": "web_search", "inputs": {}},
+            {"id": "n2", "capability": "analyze", "inputs": {}},
         ],
         "edges": [
             {"dependent": "n2", "dependency": "n1"},
@@ -99,8 +99,8 @@ async def test_compose_via_llm():
     reg = _registry()
     payload = {
         "nodes": [
-            {"id": "n1", "skill": "web_search", "inputs": {"query": "$query"}},
-            {"id": "n2", "skill": "analyze", "inputs": {"data": "$node.n1"}},
+            {"id": "n1", "capability": "web_search", "inputs": {"query": "$query"}},
+            {"id": "n2", "capability": "analyze", "inputs": {"data": "$node.n1"}},
         ],
         "edges": [{"dependent": "n2", "dependency": "n1"}],
     }

@@ -1,4 +1,4 @@
-"""GraphPlanner（Phase B）集成测试：LLM 组合多 Skill DAG 并经 execute_plan 执行（含 input_refs 传递）。
+"""GraphPlanner（Phase B）集成测试：LLM 组合多 Capability DAG 并经 execute_plan 执行（含 input_refs 传递）。
 
 归属：applications/agent_server/tests/（应用层集成测试，测 agent_server.planners.graph.GraphPlanner
 × agent_runtime 执行链）。2026-09-21 由 packages/agent-runtime/tests/ 迁入，消除红线 1
@@ -9,13 +9,13 @@ from __future__ import annotations
 
 import json
 
+from agent_runtime.capabilities.registry import Capability, CapabilityKind, CapabilityRegistry
 from agent_runtime.planner.execution_graph import execute_plan
 from agent_runtime.planner.protocol import (
     PlannerContext,
     PlannerRuntime,
     StreamEvent,
 )
-from agent_runtime.skills.registry import Skill, SkillKind, SkillRegistry
 from agent_server.planners.graph import GraphPlanner
 
 
@@ -27,10 +27,10 @@ async def _analyze(**kwargs):
     return {"report": f"analyzed:{kwargs.get('data')}"}
 
 
-def _registry() -> SkillRegistry:
-    reg = SkillRegistry()
-    reg.register(Skill("web_search", "联网搜索 web search", SkillKind.FUNCTION, _fetch))
-    reg.register(Skill("analyze", "分析数据 analyze data", SkillKind.FUNCTION, _analyze))
+def _registry() -> CapabilityRegistry:
+    reg = CapabilityRegistry()
+    reg.register(Capability("web_search", "联网搜索 web search", CapabilityKind.FUNCTION, _fetch))
+    reg.register(Capability("analyze", "分析数据 analyze data", CapabilityKind.FUNCTION, _analyze))
     return reg
 
 
@@ -38,8 +38,8 @@ class _FakeLLM:
     async def ainvoke(self, messages):
         payload = {
             "nodes": [
-                {"id": "n1", "skill": "web_search", "inputs": {"query": "$query"}},
-                {"id": "n2", "skill": "analyze", "inputs": {"data": "$node.n1"}},
+                {"id": "n1", "capability": "web_search", "inputs": {"query": "$query"}},
+                {"id": "n2", "capability": "analyze", "inputs": {"data": "$node.n1"}},
             ],
             "edges": [{"dependent": "n2", "dependency": "n1"}],
         }
@@ -69,16 +69,16 @@ async def test_graph_planner_compose_and_execute():
 
 
 async def test_graph_planner_single_candidate_no_llm():
-    reg = SkillRegistry()
-    reg.register(Skill("only", "唯一能力", SkillKind.FUNCTION, _fetch))
+    reg = CapabilityRegistry()
+    reg.register(Capability("only", "唯一能力", CapabilityKind.FUNCTION, _fetch))
     planner = GraphPlanner(registry=reg)
     # 无 LLM → 单节点
     ctx = PlannerContext(question="hi", workspace_id="w", user_id="u", llm=None)
     plan = await planner.plan(ctx)
     assert plan.graph is not None
     assert len(plan.graph.nodes) == 1
-    # 单候选无 LLM 仍是单节点（非多 Skill 组合）
-    assert list(plan.graph.nodes.values())[0].skill_name == "only"
+    # 单候选无 LLM 仍是单节点（非多 Capability 组合）
+    assert list(plan.graph.nodes.values())[0].capability_name == "only"
 
 
 async def test_graph_planner_compose_failure_falls_back():

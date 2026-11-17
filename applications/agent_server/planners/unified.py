@@ -27,7 +27,7 @@ from agent_runtime.planner.protocol import (
 )
 
 if TYPE_CHECKING:
-    from agent_runtime.skills.registry import SkillRegistry
+    from agent_runtime.capabilities.registry import CapabilityRegistry
 
     from agent_server.config import Settings
 
@@ -40,7 +40,7 @@ class UnifiedPlanner(Planner):
     def __init__(
         self,
         settings: "Settings",
-        registry: "SkillRegistry | None" = None,
+        registry: "CapabilityRegistry | None" = None,
         *,
         selector: "ModeSelector | None" = None,
     ) -> None:
@@ -54,21 +54,21 @@ class UnifiedPlanner(Planner):
         sub = self._sub_planner(decision.mode)
         plan = await sub.plan(ctx)
         plan.execution_mode = decision.mode.value
-        if decision.mode == ExecutionMode.WORKFLOW and decision.workflow_skill:
-            # workflow 模式：复用 Workflow Skill（已注册）作为单 route 能力
+        if decision.mode == ExecutionMode.WORKFLOW and decision.workflow_capability:
+            # workflow 模式：复用 Workflow Capability（已注册）作为单 route 能力
             # 身份字段必须透传（tenant 漏传会静默落共享 default 桶，造成跨租户可见）
             plan = Plan(
                 mode="workflow",
-                route=decision.workflow_skill,
+                route=decision.workflow_capability,
                 sub_query=ctx.question,
-                reason=f"Mode Selector → Workflow Skill {decision.workflow_skill}",
+                reason=f"Mode Selector → Workflow Capability {decision.workflow_capability}",
                 execution_mode=ExecutionMode.WORKFLOW.value,
                 question=ctx.question,
                 workspace_id=ctx.workspace_id,
                 user_id=ctx.user_id,
                 tenant_id=ctx.tenant_id,
                 last_snapshot=ctx.last_snapshot,
-                # 单 route delegate 直接把 kwargs 传给 Workflow Skill：身份字段随附，
+                # 单 route delegate 直接把 kwargs 传给 Workflow Capability：身份字段随附，
                 # 否则 general_qa 内部回退 default 桶，绕过租户隔离
                 kwargs={
                     "question": ctx.question,

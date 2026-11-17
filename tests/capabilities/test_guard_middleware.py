@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-from agent_runtime.skills.middleware import GuardMiddleware
+from agent_runtime.capabilities.middleware import GuardMiddleware
 
 
 async def _call_next_ok(name, kwargs):
@@ -23,7 +23,7 @@ async def _call_next_slow(name, kwargs):
 
 
 async def _call_next_boom(name, kwargs):
-    raise RuntimeError("skill broken")
+    raise RuntimeError("capability broken")
 
 
 @pytest.mark.asyncio
@@ -51,8 +51,8 @@ async def test_guard_exception_never_raises():
 
 
 @pytest.mark.asyncio
-async def test_guard_skill_names_filter():
-    mw = GuardMiddleware(timeout_s=0.01, skill_names=("rag",))
+async def test_guard_capability_names_filter():
+    mw = GuardMiddleware(timeout_s=0.01, capability_names=("rag",))
     # 未命中的技能不受 guard 影响（慢调用也原样返回）
     assert await mw.around("search", {}, _call_next_slow) == {"evidence": ["late"]}
     # 命中的技能受超时约束
@@ -61,14 +61,14 @@ async def test_guard_skill_names_filter():
 
 @pytest.mark.asyncio
 async def test_guard_in_registry_chain():
-    """集成：挂入 SkillRegistry 洋葱链，execute 超时降级不抛错。"""
-    from agent_runtime.skills.function import as_function_skill
-    from agent_runtime.skills.registry import SkillRegistry
+    """集成：挂入 CapabilityRegistry 洋葱链，execute 超时降级不抛错。"""
+    from agent_runtime.capabilities.function import as_function_capability
+    from agent_runtime.capabilities.registry import CapabilityRegistry
 
     async def slow_fn(**kwargs):
         await asyncio.sleep(1.0)
         return {"evidence": ["late"]}
 
-    registry = SkillRegistry(middlewares=[GuardMiddleware(timeout_s=0.01)])
-    registry.register(as_function_skill("slow", "慢技能", slow_fn))
+    registry = CapabilityRegistry(middlewares=[GuardMiddleware(timeout_s=0.01)])
+    registry.register(as_function_capability("slow", "慢技能", slow_fn))
     assert await registry.execute("slow") == {}

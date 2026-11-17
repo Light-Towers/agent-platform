@@ -67,15 +67,15 @@ Agent Platform 是一个基于 **LangGraph Supervisor 模式** 的统一智能�
 - **会话回退**（`packages/agent-runtime/agent_runtime/revert.py`）：Checkpoint 级原子回退，不删除历史 checkpoint（支持 redo），异步审计日志（`operator` 取服务端断言租户，不取入站密钥）。⚠️ **跨用户回退目前并未被禁止**：本模块 docstring 里那句"跨用户禁止"没有实现——`/session/revert` 不走 `resolve_thread_id`，客户端传来的会话号原样进 `revert()`，且从不与归属比对（路由里 `FORBIDDEN`→403 那条分支是死码）。修法见 `docs/plans/plan-memory-identity-workspace-2026-10-14.md` §1.6（2026-10-15 核码订正）
 - **OTel 分布式追踪**（`packages/agent-core/agent_core/tracing.py` 内核状态机 + `packages/agent-core/agent_core/tracing_middleware.py` 统一装配）：三态语义（DISABLED/DEGRADED/ACTIVE），W3C traceparent 透传，**自建链路属性**脱敏（只记问题长度 + 哈希；⚠️ 范围限定——LangChain 自动埋点的模型节点 span 仍带完整提示词与回答，该暴露已拍板接受，见 `docs/operations/minimal-release-runbook.md` 台账 ㉓），与 Langfuse 共存，exporter 可插拔（otlp/console/注入式）；原 `agent_runtime/otel.py` 过渡门面已退役（观测方案 §15，2026-09-30），消费方直调 kernel
 - **MCP Client**（`packages/agent-runtime/agent_runtime/mcp_client.py` + `applications/agent_server/subagents/mcp.py`）：多 MCP server 连接管理（stdio + SSE transport），工具白名单校验，per-server 独立熔断器隔离故障域，调用审计
-- **MCP 工具自动注册**（`packages/agent-runtime/agent_runtime/skills/mcp.py`）：MCP server 工具自动编译为 `SkillKind.REMOTE` Skill 注册到 SkillRegistry，Planner 经统一 `discover()` / `delegate()` 入口调用
-- **沙箱代码执行**（`packages/agent-runtime/agent_runtime/sandbox.py` + `agent_runtime/skills/sandbox.py`）：Docker 容器隔离执行用户代码（`--network=none --read-only --memory=512m --user=nobody`），Docker 不可用时降级 subprocess。注册为 `code_execution` Skill，Planner 启发式路由自动识别代码执行意图
+- **MCP 工具自动注册**（`packages/agent-runtime/agent_runtime/capabilities/mcp.py`）：MCP server 工具自动编译为 `CapabilityKind.REMOTE` Capability 注册到 CapabilityRegistry，Planner 经统一 `discover()` / `delegate()` 入口调用
+- **沙箱代码执行**（`packages/agent-runtime/agent_runtime/sandbox.py` + `agent_runtime/capabilities/sandbox.py`）：Docker 容器隔离执行用户代码（`--network=none --read-only --memory=512m --user=nobody`），Docker 不可用时降级 subprocess。注册为 `code_execution` Capability，Planner 启发式路由自动识别代码执行意图
 
 ### Plan-F — 单 Runtime 多 Planner
 
 - **运行时中间件层**（`packages/agent-runtime/`）：从 `agent_server/infra/` 迁入的 admission / coordinator / cache / circuit_breaker / revert / mcp_client / otel / tracing / db 等中间件，零依赖具体应用（依赖方向单向：`application → agent-runtime → agent-core`）
-- **Planner 协议 + 组合治理**（`agent_runtime/planner/protocol.py`）：`PlannerRuntime.skill_guard` 提供 max_skill_depth / max_steps / 循环检测（P5-1 语义指纹），仅约束 agentic 组合路径
+- **Planner 协议 + 组合治理**（`agent_runtime/planner/protocol.py`）：`PlannerRuntime.capability_guard` 提供 max_capability_depth / max_steps / 循环检测（P5-1 语义指纹），仅约束 agentic 组合路径
 - **可插拔 Planner**：`DeterministicPlanner`（`applications/agent_server/planners/deterministic.py`）与 `AgenticPlanner`（`applications/agent_federation/planners/agentic.py`）共享同一 `StreamEvent` 契约与 `ThreadState` checkpoint 状态格式
-- **Skill 体系**（`agent_runtime/skills/`）：Function/Agent/Remote/Workflow 四型 `SkillKind` + MCP/Sandbox 特化注册，`SkillRegistry` 统一 `discover()` / `delegate()` 入口
+- **Capability 体系**（`agent_runtime/capabilities/`）：Function/Agent/Remote/Workflow 四型 `CapabilityKind` + MCP/Sandbox 特化注册，`CapabilityRegistry` 统一 `discover()` / `delegate()` 入口
 
 ### V3 — 企业执行平台（代码已接线，验收进行中）
 
@@ -458,7 +458,7 @@ curl -X POST http://127.0.0.1:8000/api/callback/{task_id} \
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
-| `MAX_SKILL_DEPTH` | `4` | `PlannerRuntime.skill_guard` 嵌套深度上限 |
+| `MAX_CAPABILITY_DEPTH` | `4` | `PlannerRuntime.capability_guard` 嵌套深度上限 |
 | `MAX_STEPS` | `20` | 单次执行步数上限 |
 | `ENABLE_LOOP_FINGERPRINT` | `false` | P5-1 语义循环指纹（skill + 归一化 args 重复拒绝） |
 | `MAX_EXECUTION_SECONDS` | `60` | 单次 execution wall-clock 上限（0/None 不启用） |
@@ -565,7 +565,7 @@ applications/agent_server/
 ├── planners/
 │   ├── deterministic.py   # DeterministicPlanner（Plan-F Phase 2）
 │   └── __init__.py        # PLANNER env 切换实现
-├── capabilities.py        # SkillRegistry 装配（search/rag/sql/mcp + general_qa Workflow Skill）
+├── capabilities.py        # CapabilityRegistry 装配（search/rag/sql/mcp + general_qa Workflow Capability）
 └── infra/                 # 退役占位（运行时模块已迁入 packages/agent-runtime）
 ```
 
@@ -585,8 +585,8 @@ applications/agent_federation/  # 联邦网关 + 3 子服务编排中枢（详�
 packages/agent-core/         # 零依赖运行时内核：tracing / guardrails / sql 守卫 / llm / memory（MemoryStore 统一门面）
                              #   / events（EventBus 多 sink 扇出） / config（KernelConfig） / intent / resilience
 packages/agent-runtime/      # 运行时中间件（admission/coordinator/cache/circuit_breaker/revert/mcp/otel/tracing/db）
-                             #   + planner/（Planner 协议 + PlannerRuntime.skill_guard 组合治理）
-                             #   + skills/（SkillRegistry + Function/Agent/Remote/Workflow 四执行器）
+                             #   + planner/（Planner 协议 + PlannerRuntime.capability_guard 组合治理）
+                             #   + capabilities/（CapabilityRegistry + Function/Agent/Remote/Workflow 四执行器）
                              #   + V3 执行平台（execution_scheduler / execution_status / awaitable_task /
                              #     control_plane / cost_governance / forensic / human_task / effect_contract /
                              #     execution_recovery / state_migration / payload_externalization，均未完全接线，
@@ -616,7 +616,7 @@ applications/exhibition-agent/ # 会展行业 AI Agent（skill_loader + warehous
 
 ```
 eval/                      # golden set + 评测脚本（针对 agent_server 平台；run_eval.py + run_planner_eval.py 双基线）
-tests/                     # 单元测试（针对 agent_server 平台；含 planner/skill/governance 契约测试）
+tests/                     # 单元测试（针对 agent_server 平台；含 planner/capability/governance 契约测试）
 ```
 
 ---

@@ -11,8 +11,8 @@
 由调用方从注册表条目或参数显式传入（设计 §3 ⑥）。
 
 **维护模式（WS-7）**：本模块与 ``ToolRegistry`` 进入维护模式，不再新增能力。
-新代码的超时/失败降级应经 ``agent_runtime.skills.middleware.GuardMiddleware``
-（async-native，真正取消等待）挂入 SkillRegistry 洋葱链；本模块保留服务存量
+新代码的超时/失败降级应经 ``agent_runtime.capabilities.middleware.GuardMiddleware``
+（async-native，真正取消等待）挂入 CapabilityRegistry 洋葱链；本模块保留服务存量
 调用方（knowledge-service fanout 等同步链路），迁移列入后续专项。
 
 线程语义显式声明：超时经 ``future.result(timeout)`` 实现——超时后**只是放弃

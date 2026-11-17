@@ -5,7 +5,7 @@ import tempfile
 
 import pytest
 import yaml
-from agent_runtime.skills.workflow import (
+from agent_runtime.capabilities.workflow import (
     WorkflowSpec,
     compile_workflow,
     discover_workflows,
@@ -16,7 +16,7 @@ from agent_runtime.skills.workflow import (
 class TestWorkflowYAML:
     @pytest.mark.asyncio
     async def test_load_workflow_yaml(self):
-        """从 YAML 文件加载并编译为 Skill。"""
+        """从 YAML 文件加载并编译为 Capability。"""
         with tempfile.TemporaryDirectory() as tmpdir:
             yaml_path = pathlib.Path(tmpdir) / "test_wf.yaml"
             yaml_path.write_text("""
@@ -30,7 +30,7 @@ input_schema:
   required: [question]
 nodes:
   - id: "step1"
-    skill: "echo"
+    capability: "echo"
     inputs:
       text: "$input.question"
 edges: []
@@ -38,12 +38,12 @@ output_node: "step1"
 permissions: ["test"]
 """, encoding="utf-8")
 
-            skill = load_workflow_yaml(yaml_path)
+            capability = load_workflow_yaml(yaml_path)
 
-            assert skill.name == "test_pipeline"
-            assert skill.kind.value == "workflow"
-            assert skill.input_schema is not None
-            assert "question" in skill.input_schema.get("properties", {})
+            assert capability.name == "test_pipeline"
+            assert capability.kind.value == "workflow"
+            assert capability.input_schema is not None
+            assert "question" in capability.input_schema.get("properties", {})
 
     @pytest.mark.asyncio
     async def test_discover_workflows(self):
@@ -57,7 +57,7 @@ name: "wf1"
 description: "first"
 nodes:
   - id: "a"
-    skill: "echo"
+    capability: "echo"
 edges: []
 """, encoding="utf-8")
 
@@ -66,14 +66,14 @@ name: "wf2"
 description: "second"
 nodes:
   - id: "b"
-    skill: "echo"
+    capability: "echo"
 edges: []
 """, encoding="utf-8")
 
-            skills = discover_workflows(tmpdir)
+            capabilities = discover_workflows(tmpdir)
 
-            assert len(skills) == 2
-            names = {s.name for s in skills}
+            assert len(capabilities) == 2
+            names = {s.name for s in capabilities}
             assert names == {"wf1", "wf2"}
 
     @pytest.mark.asyncio
@@ -83,16 +83,16 @@ edges: []
             "name": "roundtrip",
             "description": "roundtrip test",
             "nodes": [
-                {"id": "n1", "skill": "echo", "inputs": {"msg": "$input.q"}}
+                {"id": "n1", "capability": "echo", "inputs": {"msg": "$input.q"}}
             ],
             "edges": [],
         }
 
-        skill1 = compile_workflow(spec_dict)
-        skill2 = compile_workflow(WorkflowSpec(**spec_dict))
+        capability1 = compile_workflow(spec_dict)
+        capability2 = compile_workflow(WorkflowSpec(**spec_dict))
 
-        assert skill1.name == skill2.name == "roundtrip"
-        assert skill1.kind == skill2.kind
+        assert capability1.name == capability2.name == "roundtrip"
+        assert capability1.kind == capability2.kind
 
     @pytest.mark.asyncio
     async def test_yaml_references(self):
@@ -104,11 +104,11 @@ name: "ref_test"
 description: "reference test"
 nodes:
   - id: "first"
-    skill: "echo"
+    capability: "echo"
     inputs:
       msg: "$input.question"
   - id: "second"
-    skill: "echo"
+    capability: "echo"
     inputs:
       msg: "$node.first"
 edges:
@@ -116,8 +116,8 @@ edges:
     dependency: "first"
 """, encoding="utf-8")
 
-            skill = load_workflow_yaml(yaml_path)
-            assert skill.metadata.get("kind") == "workflow"
+            capability = load_workflow_yaml(yaml_path)
+            assert capability.metadata.get("kind") == "workflow"
 
             # 通过 executor 验证引用解析（mock registry）
             from unittest.mock import Mock
@@ -125,8 +125,8 @@ edges:
             registry = Mock()
             # WorkflowExecutor 通过 compile_workflow 注入 registry
             spec_dict = yaml.safe_load(yaml_path.read_text(encoding="utf-8"))
-            skill2 = compile_workflow(spec_dict, registry=registry)
-            assert skill2.name == "ref_test"
+            capability2 = compile_workflow(spec_dict, registry=registry)
+            assert capability2.name == "ref_test"
 
 
 if __name__ == "__main__":

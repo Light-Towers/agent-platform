@@ -11,6 +11,7 @@
 
 from agent_core.resilience import ErrorClass
 
+from agent_runtime.capabilities.registry import Capability, CapabilityKind, CapabilityRegistry
 from agent_runtime.effect_contract import (
     DeliverySemantics,
     EffectContract,
@@ -24,7 +25,6 @@ from agent_runtime.effect_contract import (
 from agent_runtime.planner.durability import InMemorySideEffectStore
 from agent_runtime.planner.execution_graph import ExecutionGraph, _run_graph_in_place
 from agent_runtime.planner.protocol import PlannerRuntime
-from agent_runtime.skills.registry import Skill, SkillKind, SkillRegistry
 
 # ===== 单元：模型与预设 =====
 
@@ -118,14 +118,14 @@ def test_decide_retryable_by_policy():
 
 # ===== 集成：ExecutionGraph 决策 =====
 
-def _registry(skills: dict, contracts: dict | None = None) -> SkillRegistry:
-    reg = SkillRegistry()
-    for name, fn in skills.items():
+def _registry(capabilities: dict, contracts: dict | None = None) -> CapabilityRegistry:
+    reg = CapabilityRegistry()
+    for name, fn in capabilities.items():
         reg.register(
-            Skill(
+            Capability(
                 name,
                 name,
-                SkillKind.FUNCTION,
+                CapabilityKind.FUNCTION,
                 fn,
                 effect_contract=(contracts or {}).get(name),
             )
@@ -232,4 +232,4 @@ async def test_effect_key_used_for_side_effect_record():
 
     # effect_key = execution_id:step_id:effect_type，effect_type 应为 order_ref
     assert await store.has("exec-1", "n1", "order_ref") is True
-    assert await store.has("exec-1", "n1", "skill:create_order") is False
+    assert await store.has("exec-1", "n1", "capability:create_order") is False

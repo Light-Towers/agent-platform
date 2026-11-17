@@ -5,11 +5,11 @@
 - Mode Selector **只选择** Planner/Execution Mode，不生成完整 DAG；
 - 选择优先级（doc §3.2）：
   1. 明确的静态规则优先（``force_mode`` override，对应 ``PLANNER=`` 配置，用于调试/灰度）；
-  2. 已注册 Workflow Skill 优先复用（稳定业务流程不应重新让 LLM 规划）；
+  2. 已注册 Workflow Capability 优先复用（稳定业务流程不应重新让 LLM 规划）；
   3. 可组合且边界明确的问题进入 Dynamic Graph（多候选能力）；
   4. 高不确定性、开放式探索任务才进入 Agentic（默认不进入，避免一切问题都交 Agent loop）。
 
-``ModeSelector`` 保持中立：只依赖 ``SkillRegistry.discover`` 与可选的 ``classifier``
+``ModeSelector`` 保持中立：只依赖 ``CapabilityRegistry.discover`` 与可选的 ``classifier``
 （LLM 决策函数，由宿主注入）；本身不依赖具体 Planner 实现，也不直接执行能力。
 """
 
@@ -22,10 +22,10 @@ from typing import TYPE_CHECKING, Any, Awaitable, Callable
 from agent_runtime.planner.protocol import PlannerContext
 
 if TYPE_CHECKING:
-    from agent_runtime.skills.registry import SkillRegistry
+    from agent_runtime.capabilities.registry import CapabilityRegistry
 
 # 可选 LLM 分类器签名：给定问题与 registry，异步返回 ExecutionMode 字符串。
-ModeClassifier = Callable[[str, "SkillRegistry"], Awaitable[str]]
+ModeClassifier = Callable[[str, "CapabilityRegistry"], Awaitable[str]]
 
 
 class ExecutionMode(StrEnum):
@@ -41,13 +41,13 @@ class ExecutionMode(StrEnum):
 class ModeDecision:
     """Mode Selector 的输出：选中的执行范式 + 理由 + 可选命中 Workflow。
 
-    ``workflow_skill``：当 ``mode == WORKFLOW`` 时，命中的已注册 Workflow Skill 名；
-    execute 阶段经 ``delegate(workflow_skill)`` 走统一 Runtime。
+    ``workflow_capability``：当 ``mode == WORKFLOW`` 时，命中的已注册 Workflow Capability 名；
+    execute 阶段经 ``delegate(workflow_capability)`` 走统一 Runtime。
     """
 
     mode: ExecutionMode
     reason: str
-    workflow_skill: str | None = None
+    workflow_capability: str | None = None
     confidence: float = 1.0
 
 
@@ -80,12 +80,12 @@ class ModeSelector:
         self._graph_min_relevant = graph_min_relevant
         self._top_k = top_k
 
-    async def select(self, ctx: PlannerContext, registry: "SkillRegistry") -> ModeDecision:
+    async def select(self, ctx: PlannerContext, registry: "CapabilityRegistry") -> ModeDecision:
         """根据问题 + 可用能力选择执行范式。
 
         :param ctx: 决策输入（含 question / workspace / user / messages 等）。
-        :param registry: 能力注册表，用于 discover 候选 Workflow / 普通 Skill。
-        :return: ``ModeDecision``（mode + reason + 可选 workflow_skill）。
+        :param registry: 能力注册表，用于 discover 候选 Workflow / 普通 Capability。
+        :return: ``ModeDecision``（mode + reason + 可选 workflow_capability）。
         """
         query = ctx.question
 
@@ -96,15 +96,15 @@ class ModeSelector:
                 reason="forced by PLANNER override",
             )
 
-        # 2. 已注册 Workflow Skill 优先复用
+        # 2. 已注册 Workflow Capability 优先复用
         wf = registry.discover(
             query, top_k=1, metadata_filter={"kind": self._workflow_kind}
         )
         if wf and self._score(query, wf[0]) >= self._workflow_min_score:
             return ModeDecision(
                 ExecutionMode.WORKFLOW,
-                reason=f"复用已注册 Workflow Skill {wf[0].name}",
-                workflow_skill=wf[0].name,
+                reason=f"复用已注册 Workflow Capability {wf[0].name}",
+                workflow_capability=wf[0].name,
                 confidence=1.0,
             )
 
@@ -141,16 +141,16 @@ class ModeSelector:
         )
 
     @staticmethod
-    def _score(query: str, skill: Any) -> int:
-        """复用 registry 的关键词打分（discover 已按此排序）；这里取单 skill 分。"""
-        from agent_runtime.skills.registry import SkillRegistry as _R
+    def _score(query: str, capability: Any) -> int:
+        """复用 registry 的关键词打分（discover 已按此排序）；这里取单 capability 分。"""
+        from agent_runtime.capabilities.registry import CapabilityRegistry as _R
 
-        return _R._score(query, skill)
+        return _R._score(query, capability)
 
     @classmethod
-    def _relevant(cls, skill: Any, query: str) -> bool:
+    def _relevant(cls, capability: Any, query: str) -> bool:
         """是否命中关键词（score > 0）。"""
-        return cls._score(query, skill) > 0
+        return cls._score(query, capability) > 0
 
 
 __all__ = ["ExecutionMode", "ModeDecision", "ModeSelector"]

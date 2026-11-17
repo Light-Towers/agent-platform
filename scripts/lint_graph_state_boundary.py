@@ -4,7 +4,7 @@
 **要拦的错误形状**：`StateGraph(SomeState)` 只保留 schema 声明过的键——节点返回、
 图入参、路由函数读取里任何**未声明的键会被静默丢弃，不报错、不记日志**。本仓已因此
 出现过五处真实缺陷（nl2sql 的 `examples` / `filter_table_enabled`、exhibition 的
-`skill_error`、knowledge-service 的 `hyde_doc` 与恒空兜底 `file_name`），每次都是
+`capability_error`、knowledge-service 的 `hyde_doc` 与恒空兜底 `file_name`），每次都是
 "功能跑完就蒸发"，且单元测试全绿。
 
 **为什么是一条 lint 而不是各应用各自写测试**（AGENTS.md《架构决策原则》三层齐备）：

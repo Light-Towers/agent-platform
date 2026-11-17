@@ -20,7 +20,7 @@ from agent_runtime.workspace_registry import server_tenant_id
 from agent_server.config import get_settings
 from agent_server.subagents.degradation import NL2SQL_UNCONFIGURED
 
-#: 与 capabilities.py 注册该 skill 时的 timeout_ms 对齐（问数含 LLM 生成 + 执行）
+#: 与 capabilities.py 注册该 capability 时的 timeout_ms 对齐（问数含 LLM 生成 + 执行）
 _TIMEOUT_S = 30.0
 
 
