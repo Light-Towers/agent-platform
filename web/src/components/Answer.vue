@@ -14,6 +14,7 @@
  * ==========================================================================-->
 <script setup lang="ts">
 import { answerText, busy, hasRound, terminal, threadId, useExample, type Terminal } from '../stores/session'
+import MarkdownText from './MarkdownText.vue'
 
 /** 终态三值的人话。判据只看 `done`（A7）：`open` 那句不得写成「完成」。 */
 const TERM_LABEL: Record<Terminal, string> = {
@@ -54,16 +55,16 @@ const TERM_LABEL: Record<Terminal, string> = {
       >
         本次没有可读的答案文本。
       </p>
-      <p
+      <div
         v-else
         class="answer__text"
       >
-        {{ answerText }}<span
+        <MarkdownText :text="answerText" /><span
           v-if="busy"
           class="dot-live"
           aria-hidden="true"
         />
-      </p>
+      </div>
 
       <p class="answer__foot">
         <span

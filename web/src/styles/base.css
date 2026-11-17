@@ -762,6 +762,29 @@ a.ry-btn { text-decoration: none; }
 .msg--user .msg__bubble { background: var(--blue-tint); }
 .msg--assistant .msg__bubble { background: var(--bg-raised); }
 .msg__bubble--live { min-width: 16rem; }
+/* Markdown 气泡：换行交给块结构，不再用 pre-wrap（否则与解析后的 <br>/列表叠加空行） */
+.msg__bubble--md { white-space: normal; }
+
+/* ---- 聊天气泡的极简 Markdown 渲染（MarkdownText.vue，全插值无 v-html）---- */
+.md-text { display: grid; gap: var(--sp-2); min-width: 0; }
+.md-text__p { margin: 0; }
+.md-text__list { margin: 0; padding-inline-start: var(--sp-4); display: grid; gap: var(--sp-1); }
+.md-text__code {
+  font-family: var(--font-mono);
+  background: var(--bg-surface);
+  padding: var(--sp-1) var(--sp-2);
+  border-radius: var(--radius-sm);
+}
+.md-text__pre {
+  margin: 0;
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-decor);
+  border-radius: var(--radius-sm);
+  overflow-x: auto;
+  font-family: var(--font-mono);
+  white-space: pre;
+}
 
 /* 右栏：可核抽屉，两块 details 默认收起，展开看依据/时间线细节。 */
 .chat-shell__inspector {

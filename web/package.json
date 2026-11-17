@@ -16,7 +16,8 @@
     "lint": "eslint .",
     "check:tokens": "node scripts/check-tokens.mjs",
     "check:events": "node scripts/check-events.mjs",
-    "verify:sse": "node scripts/verify-sse.mjs"
+    "verify:sse": "node scripts/verify-sse.mjs",
+    "verify:markdown": "node scripts/verify-markdown.mjs"
   },
   "dependencies": {
     "eventsource-parser": "4.1.3",

@@ -14,6 +14,7 @@
 import { computed, nextTick, ref, watch } from 'vue'
 
 import Answer from './Answer.vue'
+import MarkdownText from './MarkdownText.vue'
 import { chatHistory, conversationsNotice } from '../stores/conversations.ts'
 import { answerText, busy, hasRound, question, useExample } from '../stores/session'
 
@@ -77,8 +78,8 @@ watch([() => turns.value.length, answerText, busy], async () => {
           :class="m.role === 'user' ? 'msg--user' : 'msg--assistant'"
         >
           <span class="msg__label">{{ m.role === 'user' ? '我' : '助手' }}</span>
-          <div class="msg__bubble">
-            {{ m.content }}
+          <div class="msg__bubble msg__bubble--md">
+            <MarkdownText :text="m.content" />
           </div>
         </li>
 
@@ -89,8 +90,8 @@ watch([() => turns.value.length, answerText, busy], async () => {
             class="msg msg--user"
           >
             <span class="msg__label">我</span>
-            <div class="msg__bubble">
-              {{ currentQuestion }}
+            <div class="msg__bubble msg__bubble--md">
+              <MarkdownText :text="currentQuestion" />
             </div>
           </li>
           <li class="msg msg--assistant">
