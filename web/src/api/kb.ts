@@ -45,6 +45,7 @@ async function failKb(action: string, resp: Response): Promise<never> {
 const KB_UPLOADS_PATH = '/kb/uploads'
 const KB_STATUS_PATH = (taskId: string) => `/kb/status/${encodeURIComponent(taskId)}`
 const KB_DOCUMENTS_PATH = '/kb/documents'
+const KB_HISTORY_PATH = '/kb/history'
 
 /** 上传表单的随表单填的 metadata 字段（tenant_id 由服务端断言注入，前端发空串仅作校验占位）。 */
 export interface KbUploadForm {
@@ -146,6 +147,22 @@ export interface KbTaskStatus {
   }
 }
 
+/** 服务端持久化的上传历史一条（KS /history；换设备/清缓存/KS 重启仍在）。 */
+export interface KbHistoryItem {
+  task_id: string
+  tenant_id: string
+  filename: string
+  knowledge_id: string
+  status: string
+  error: string
+  summary: {
+    split?: KbSplitSummary
+    structure_check?: KbStructureCheck
+  }
+  uploaded_at?: string
+  updated_at?: string
+}
+
 /** 轮询上传任务进度（代理 KS /status/{task_id}）。 */
 export async function getKbStatus(
   taskId: string,
@@ -169,4 +186,17 @@ export async function listKbDocuments(
   const resp = await doFetch(KB_DOCUMENTS_PATH, { method: 'GET', headers, cache: 'no-store' })
   if (!resp.ok) await failKb('知识库列表查询', resp)
   return await resp.json()
+}
+
+/** 服务端上传历史（代理 KS /history；含切块读数，服务端权威，不依赖本机存储）。 */
+export async function getKbHistory(
+  token: string,
+  fetchImpl?: typeof fetch,
+): Promise<KbHistoryItem[]> {
+  const doFetch = fetchImpl ?? globalThis.fetch
+  const headers = authHeaders(token)
+  const resp = await doFetch(KB_HISTORY_PATH, { method: 'GET', headers, cache: 'no-store' })
+  if (!resp.ok) await failKb('上传历史查询', resp)
+  const data = await resp.json() as { items?: KbHistoryItem[] }
+  return Array.isArray(data.items) ? data.items : []
 }

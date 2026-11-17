@@ -32,16 +32,17 @@ import {
   uploadKbDocuments,
   getKbStatus,
   listKbDocuments,
+  getKbHistory,
   KbRateLimitedError,
   type KbUploadForm,
   type KbTaskStatus,
+  type KbHistoryItem,
 } from '../api/kb.ts'
 import { DIALECT_OPTIONS } from '../api/datasources.ts'
 import {
-  loadUploads,
-  addUpload,
-  updateUploadStatus,
-  type KbUploadRecord,
+  loadCachedHistory,
+  saveCachedHistory,
+  cachePending,
 } from '../stores/kbHistory.ts'
 
 /** 默认配置即"能跑"：DRAFT + PRIVATE + 勾语义识别；knowledge_id 提示管理员可填以便登记。 */
@@ -69,8 +70,10 @@ const taskIds = ref<string[]>([])
 /** 当前正在查看的结果；始终等于历史列表里 activeTaskId 那条的 status。 */
 const status = ref<KbTaskStatus | null>(null)
 const activeTaskId = ref('')
-/** 上传历史（localStorage 恢复），刷新后仍在。 */
-const uploads = ref<KbUploadRecord[]>([])
+/** 上传历史（服务端 Mongo 权威，localStorage 仅断网兜底），刷新/换设备/重启仍在。 */
+const uploads = ref<KbHistoryItem[]>([])
+/** 历史来源标记：服务端权威 / 本地缓存兜底。 */
+const historySource = ref<'server' | 'cache'>('cache')
 /** 后端按 knowledge_id 登记的文档列表（只作补充展示）。 */
 const documents = ref<unknown>(null)
 
@@ -128,12 +131,14 @@ async function submit(): Promise<void> {
     taskIds.value = (res as { task_ids?: string[] }).task_ids ?? []
     const firstId = taskIds.value[0]
     if (firstId !== undefined) {
-      // 先落一条初始记录，再轮询；这样即使中途刷新，也能在历史里看到并续查。
-      addUpload(firstId, names, { code: 0, task_id: firstId, status: '', done_list: [], running_list: [], error: '', summary: {} })
-      uploads.value = loadUploads()
+      // 即时占位到缓存（后台管线要跑几分钟才落 Mongo）；权威历史在轮询完成后从服务端拉。
+      uploads.value = cachePending(firstId, names)
+      historySource.value = 'cache'
       activeTaskId.value = firstId
+      status.value = { code: 0, task_id: firstId, status: 'processing', done_list: [], running_list: [], error: '', summary: {} }
       await poll(firstId)
     }
+    await loadHistory()
     await refreshDocuments()
   } catch (err) {
     errorText.value = err instanceof Error ? err.message : String(err)
@@ -164,34 +169,54 @@ async function poll(taskId: string): Promise<void> {
     }
     errorText.value = ''
     status.value = next
-    updateUploadStatus(taskId, next)
-    uploads.value = loadUploads()
     if (next.status === 'completed' || next.status === 'failed') return
     await new Promise((resolve) => setTimeout(resolve, 4000))
   }
   errorText.value = '处理仍在进行中，可稍后刷新本页查看结果'
 }
 
-/** 点击历史项：切换当前查看的切块结果（不依赖 KS 进程是否还活着）。 */
-function selectTask(record: KbUploadRecord): void {
-  activeTaskId.value = record.taskId
-  status.value = record.status
-  taskIds.value = [record.taskId]
+/** 历史条目 → 当前查看的切块读数（服务端 item 的 summary 即要展示的读数）。 */
+function itemToStatus(item: KbHistoryItem): KbTaskStatus {
+  return {
+    code: 0, task_id: item.task_id, status: item.status,
+    done_list: [], running_list: [], error: item.error, summary: item.summary,
+  }
+}
+
+/** 点击历史项：切换当前查看的切块结果（读数来自服务端持久化的 summary）。 */
+function selectTask(item: KbHistoryItem): void {
+  activeTaskId.value = item.task_id
+  status.value = itemToStatus(item)
+  taskIds.value = [item.task_id]
   errorText.value = ''
 }
 
-/** 刷新后恢复历史；对仍未终态的任务续轮询（KS 进程存活时查得到）。 */
+/** 从服务端拉权威上传历史（Mongo，换设备/清缓存/重启仍在）；失败降级到本地缓存兜底。 */
+async function loadHistory(): Promise<void> {
+  try {
+    const items = await getKbHistory(authToken.value ?? '')
+    uploads.value = items
+    saveCachedHistory(items)
+    historySource.value = 'server'
+  } catch {
+    if (!uploads.value.length) uploads.value = loadCachedHistory()
+    historySource.value = 'cache'
+  }
+}
+
+/** 挂载恢复：先服务端拉权威历史；仍未终态的任务续轮询；补充拉登记文档列表。 */
 async function restore(): Promise<void> {
-  uploads.value = loadUploads()
-  const unfinished = uploads.value.find((r) => r.status.status !== 'completed' && r.status.status !== 'failed')
+  await loadHistory()
+  const unfinished = uploads.value.find((r) => r.status !== 'completed' && r.status !== 'failed')
   if (unfinished) {
-    activeTaskId.value = unfinished.taskId
-    status.value = unfinished.status
-    taskIds.value = [unfinished.taskId]
+    activeTaskId.value = unfinished.task_id
+    status.value = itemToStatus(unfinished)
+    taskIds.value = [unfinished.task_id]
     try {
-      await poll(unfinished.taskId)
+      await poll(unfinished.task_id)
+      await loadHistory()
     } catch {
-      // KS 重启后查不回：保留本地快照，不强报错误
+      // 续轮询失败：保留服务端快照，不强报错误
     }
   } else {
     const latest = uploads.value[0]
@@ -422,20 +447,22 @@ async function refreshDocuments(): Promise<void> {
         <span class="count-badge">{{ uploads.length }} 条</span>
       </h2>
       <p class="hint">
-        每次上传的结果都保存在本机浏览器，刷新或重进页面仍可查看；点击任一条切换下方切片结果。
+        {{ historySource === 'server'
+          ? '历史保存在服务端，刷新、换设备或重启后仍可查看；点击任一切换下方切片结果。'
+          : '当前显示本机缓存（服务端暂不可达）；网络恢复后会自动切回服务端权威历史。' }}
       </p>
       <div class="kb-history">
         <button
           v-for="rec in uploads"
-          :key="rec.taskId"
+          :key="rec.task_id"
           type="button"
           class="kb-history__item"
-          :class="{ 'is-active': rec.taskId === activeTaskId }"
+          :class="{ 'is-active': rec.task_id === activeTaskId }"
           @click="selectTask(rec)"
         >
           <strong>{{ rec.filename }}</strong>
-          <span class="hint">{{ new Date(rec.uploadedAt).toLocaleString() }}</span>
-          <span class="count-badge">{{ rec.status.status === 'completed' ? '完成' : rec.status.status === 'failed' ? '失败' : '进行中' }}</span>
+          <span class="hint">{{ rec.uploaded_at ? new Date(rec.uploaded_at).toLocaleString() : '' }}</span>
+          <span class="count-badge">{{ rec.status === 'completed' ? '完成' : rec.status === 'failed' ? '失败' : '进行中' }}</span>
         </button>
       </div>
     </section>

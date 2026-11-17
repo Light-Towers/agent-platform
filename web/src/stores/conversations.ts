@@ -5,8 +5,9 @@
  * 依赖方向单向：本件 import session.ts 的 authToken（只读取令牌），session.ts 不 import 本件；
  * ask(sessionId) 由 App.vue 在提交时把 currentSessionId 传进去，避免两 store 互相引用。
  *
- * 存储：只把「当前会话 id」写 localStorage（ap.chat.session，非凭据，刷新恢复选中态）；
- * 会话列表与历史消息每次从服务端重载（服务端是归属权威，不缓存他处）。登出时清空。
+ * 存储：无本地存储（2026-11-17 按「服务端权威」统一去掉）——会话列表、历史消息、
+ * 当前选中态全部以服务端为准：刷新后 loadSessions 默认选 last_active 最近的一条，
+ * 而提问/切换会 touch last_active，所以「最近活跃」就是用户上次用的那个。换设备一致。
  * ==========================================================================*/
 import { computed, ref } from 'vue'
 
@@ -19,23 +20,12 @@ import {
   type SessionInfo,
 } from '../api/sessions.ts'
 import { authToken, resetRound } from './session.ts'
-import { readUiState, writeUiState } from '../theme.ts'
-
-const CURRENT_KEY = 'ap.chat.session'
 
 const sessions = ref<SessionInfo[]>([])
-const currentId = ref<string>(readCurrent())
+const currentId = ref<string>('')
 const history = ref<ChatHistoryItem[]>([])
 const loading = ref(false)
 const notice = ref('')
-
-function readCurrent(): string {
-  return readUiState(CURRENT_KEY) ?? ''
-}
-
-function persistCurrent(): void {
-  writeUiState(CURRENT_KEY, currentId.value || null)
-}
 
 export const sessionList = computed<readonly SessionInfo[]>(() => sessions.value)
 export const activeSessionId = computed(() => currentId.value)
@@ -52,12 +42,10 @@ export async function loadSessions(): Promise<void> {
     if (currentId.value && !sessions.value.some((s) => s.session_id === currentId.value)) {
       currentId.value = ''
       history.value = []
-      persistCurrent()
     }
-    // 从未选过但已有会话 → 默认选最近一条
+    // 默认选最近活跃的一条（服务端按 last_active_at 降序返回第一条）
     if (!currentId.value && sessions.value.length) {
       currentId.value = sessions.value[0]?.session_id ?? ''
-      persistCurrent()
       await loadHistory()
     }
   } catch (err) {
@@ -89,7 +77,6 @@ export async function selectSession(id: string): Promise<void> {
   if (id === currentId.value && history.value.length) return
   resetRound()
   currentId.value = id
-  persistCurrent()
   await loadHistory()
 }
 
@@ -103,7 +90,6 @@ export async function removeSession(id: string): Promise<void> {
     if (id === currentId.value) {
       currentId.value = ''
       history.value = []
-      persistCurrent()
       const next = sessions.value[0]
       if (next) await selectSession(next.session_id)
     }
@@ -135,5 +121,4 @@ export function clearConversations(): void {
   history.value = []
   notice.value = ''
   currentId.value = ''
-  persistCurrent()
 }

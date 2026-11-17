@@ -26,6 +26,7 @@ from knowledge_service.core.config import settings
 from knowledge_service.core.logger import logger  # 项目统一日志工具
 from knowledge_service.import_process.agent.main_graph import kb_import_app  # LangGraph全流程编译实例
 from knowledge_service.import_process.agent.state import get_default_state
+from knowledge_service.utils import kb_upload_history
 from knowledge_service.utils.kb_registry import get_document, list_by_tenant, update_status, upsert_by_upload
 from knowledge_service.utils.lifecycle_reimport import ReimportError, plan_reimport, resolve_original_file
 from knowledge_service.utils.path_util import PROJECT_ROOT
@@ -75,6 +76,37 @@ async def get_import_page():
 # 后台任务：LangGraph全流程执行
 # 独立于主请求线程，由BackgroundTasks触发，避免阻塞接口响应
 # --------------------------
+def _persist_upload_history(
+    task_id: str,
+    metadata: Optional[Dict[str, Any]],
+    status: str,
+    error: str,
+) -> None:
+    """管线结束后把这次上传的元数据 + 切块读数落 Mongo（观测面，失败不拦主流程）。
+
+    落库点选在 run_graph_task 尾部而非 HTTP handler：切块 summary 是管线中途才写入
+    task_utils 进程内存的，handler 里还没有；这里 get_task_summary 才拿得到完整读数。
+    filename 从 metadata 取（截图/多文件场景），没有就从 local_file_path 取——但本函数
+    只拿到 metadata，故 filename 由调用方在 metadata 里透传（见 upload_files 落盘处）。
+    """
+    meta = dict(metadata or {})
+    tenant_id = str(meta.get("tenant_id", "") or "default")
+    filename = str(meta.get("filename", "") or meta.get("original_filename", "") or task_id)
+    try:
+        summary = get_task_summary(task_id)
+    except Exception:  # summary 读取失败按空处理（观测面，不拦落库）
+        summary = {}
+    kb_upload_history.record_upload(
+        task_id=task_id,
+        tenant_id=tenant_id,
+        filename=filename,
+        metadata=meta,
+        status=status,
+        summary=summary,
+        error=error,
+    )
+
+
 def run_graph_task(
     task_id: str,
     local_dir: str,
@@ -134,6 +166,7 @@ def run_graph_task(
         # 4. 全流程执行完成，更新任务全局状态为：已完成
         update_task_status(task_id, "completed")
         logger.info(f"[{task_id}] LangGraph全流程执行完毕，任务完成")
+        _persist_upload_history(task_id, metadata, "completed", "")
 
     except Exception as e:
         # 5. 捕获全流程异常，更新任务全局状态为：失败，并记录错误日志（含堆栈）
@@ -143,6 +176,7 @@ def run_graph_task(
         # 这里只是把那个在册能力接上（不改状态码、不改异常传播语义）。
         set_task_result(task_id, "error", str(e))
         logger.error(f"[{task_id}] LangGraph全流程执行失败，异常信息：{str(e)}", exc_info=True)
+        _persist_upload_history(task_id, metadata, "failed", str(e))
 
 
 # --------------------------
@@ -279,7 +313,11 @@ async def upload_files(
         add_done_task(task_id, "upload_file")
 
         # 8. 将LangGraph全流程处理加入FastAPI后台任务（异步执行，不阻塞当前接口响应）
-        background_tasks.add_task(run_graph_task, task_id, task_local_dir, local_file_abs_path, metadata)
+        #    metadata 按任务复制一份并带 filename：上传历史落库在管线尾部按任务记录文件名，
+        #    共享 dict 会让多文件场景的历史全部记成最后一个文件名。
+        task_metadata = dict(metadata)
+        task_metadata["filename"] = safe_filename
+        background_tasks.add_task(run_graph_task, task_id, task_local_dir, local_file_abs_path, task_metadata)
         logger.info(f"[{task_id}] 已将LangGraph全流程加入后台任务，任务已启动")
 
         # 9. 登记 kb_documents 注册表（批 2a）：kb.publish（/reimport）的持久依据。
@@ -418,3 +456,17 @@ async def list_documents(limit: int = 100):
     tenant_id = resolve_server_tenant("", endpoint="/documents")
     docs = list_by_tenant(tenant_id, limit=capped)
     return {"code": 200, "tenant_id": tenant_id, "total": len(docs), "documents": docs}
+
+
+@router.get("/history", summary="上传历史列表", description="按服务端断言租户列出上传历史（含切块读数，uploaded_at 降序）")
+async def list_upload_history(limit: int = 100):
+    """租户内上传历史（每次上传一行，切块读数持久化在 Mongo；agent_server GET /kb/history 透传）。
+
+    与 /documents 的区别：documents 只登记 knowledge_id 非空的文档（reimport 依据），
+    history 记**每一次上传**（默认 knowledge_id 为空的也算），且带 summary 切块读数——
+    这才是「刷新/重启后还能看到上传过什么、怎么切的」的服务端权威面。
+    """
+    capped = max(1, min(limit, 100))
+    tenant_id = resolve_server_tenant("", endpoint="/history")
+    items = kb_upload_history.list_by_tenant(tenant_id, limit=capped)
+    return {"code": 200, "tenant_id": tenant_id, "total": len(items), "items": items}

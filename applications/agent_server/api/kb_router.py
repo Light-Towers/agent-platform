@@ -222,3 +222,27 @@ async def kb_status_get(
     if resp.status_code >= 400:
         raise HTTPException(status_code=resp.status_code, detail=f"知识库状态查询失败：{resp.text[:200]}")
     return resp.json()
+
+
+@router.get("/kb/history", summary="上传历史列表（代理 KS /history）")
+async def kb_history(
+    limit: int = 100,
+    _auth=Depends(verify_api_key),
+    _feature=Depends(require_feature("kb.upload")),  # 401 先于 403
+):
+    """租户内上传历史（每次上传一行，含切块读数；服务端权威，刷新/重启仍在）。"""
+    url = _ks_base_url()
+    import httpx
+
+    try:
+        async with httpx.AsyncClient(timeout=_KS_TIMEOUT_S) as client:
+            resp = await client.get(
+                f"{url}/history", params={"limit": limit}, headers=_internal_headers()
+            )
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            status_code=502, detail=f"知识库服务不可达（{type(exc).__name__}）：{url}"
+        ) from exc
+    if resp.status_code >= 400:
+        raise HTTPException(status_code=resp.status_code, detail=f"上传历史查询失败：{resp.text[:200]}")
+    return resp.json()

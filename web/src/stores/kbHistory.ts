@@ -1,65 +1,51 @@
 /* ============================================================================
- * kbHistory.ts — 知识库上传历史（浏览器本地持久化）
+ * kbHistory.ts — 知识库上传历史的**本地兜底缓存**（不是权威源）
  *
- * 为什么需要这一层：KS 的 /documents 只登记填了 knowledge_id 的上传，而默认上传
- * 留空 ⇒ 那份文档根本不在后端列表里；且 /status/{task_id} 的结果存在 KS 进程内存，
- * 进程重启即失。用户要的是「刷新后还能看到上传过什么、怎么切的」，这一层用
- * localStorage 存每次上传的 task_id + 文件名 + 完整结果快照，刷新后原样恢复。
+ * 权威源已从 2026-11-17 起改成服务端：KS 把每次上传的元数据 + 切块读数落 Mongo
+ * collection kb_upload_history，前端经 GET /kb/history 拉取。换设备/清缓存/KS 重启都还在。
  *
- * 边界：
- *   · 只存元数据与统计读数，不存文档正文（切片预览已由后端截断，量小）；
- *   · 只保留最近 MAX 条，防止 localStorage 无限增长；
- *   · 存储读写异常一律降级为空/无操作，不让持久化问题影响上传主流程。
+ * 本层只剩一个职责：**服务端暂时不可达时的兜底显示**——把最近一次成功拉到的历史快照
+ * 存在浏览器（经白名单件 theme.ts 的 readUiState/writeUiState，不新增 localStorage 写者）。
+ * 联网正常时服务端数据会覆盖这里，缓存自动失效更新。
+ *
+ * 边界：只存元数据与统计读数，不存文档正文；只留最近 MAX 条；读写异常静默降级。
  * ==========================================================================*/
-import type { KbTaskStatus } from '../api/kb.ts'
+import type { KbHistoryItem } from '../api/kb.ts'
 import { readUiState, writeUiState } from '../theme.ts'
 
 const KEY = 'ap.kb.uploads'
 const MAX = 30
 
-export interface KbUploadRecord {
-  taskId: string
-  filename: string
-  uploadedAt: string
-  status: KbTaskStatus
-}
-
-function isRecord(v: unknown): v is KbUploadRecord {
+function isItem(v: unknown): v is KbHistoryItem {
   if (typeof v !== 'object' || v === null) return false
-  const r = v as Partial<KbUploadRecord>
-  return typeof r.taskId === 'string' && typeof r.filename === 'string' && typeof r.status === 'object'
+  const r = v as Partial<KbHistoryItem>
+  return typeof r.task_id === 'string' && typeof r.filename === 'string' && typeof r.status === 'string'
 }
 
-export function loadUploads(): KbUploadRecord[] {
+/** 读本地缓存（服务端拉不到时的兜底）。 */
+export function loadCachedHistory(): KbHistoryItem[] {
   try {
     const raw = readUiState(KEY)
     if (!raw) return []
     const parsed: unknown = JSON.parse(raw)
-    return Array.isArray(parsed) ? parsed.filter(isRecord) : []
+    return Array.isArray(parsed) ? parsed.filter(isItem) : []
   } catch {
     return []
   }
 }
 
-function saveUploads(records: readonly KbUploadRecord[]): void {
-  writeUiState(KEY, JSON.stringify(records.slice(0, MAX)))
+/** 用服务端权威列表覆盖本地缓存（联网正常时每次拉取后调用）。 */
+export function saveCachedHistory(items: readonly KbHistoryItem[]): void {
+  writeUiState(KEY, JSON.stringify(items.slice(0, MAX)))
 }
 
-/** 记录一次新上传（同名任务先去重，最新的排最前）。 */
-export function addUpload(taskId: string, filename: string, status: KbTaskStatus): void {
-  if (!taskId) return
-  const records = loadUploads().filter((r) => r.taskId !== taskId)
-  records.unshift({ taskId, filename, uploadedAt: new Date().toISOString(), status })
-  saveUploads(records)
-}
-
-/** 轮询中每次拿到新读数就覆盖该任务快照（完成/失败后也保留最终态）。 */
-export function updateUploadStatus(taskId: string, status: KbTaskStatus): void {
-  const records = loadUploads()
-  const idx = records.findIndex((r) => r.taskId === taskId)
-  if (idx < 0) return
-  const current = records[idx]
-  if (!current) return
-  records[idx] = { ...current, status }
-  saveUploads(records)
+/** 服务端还没登记（刚上传、后台管线未落库）时的即时占位，合入缓存。 */
+export function cachePending(taskId: string, filename: string): KbHistoryItem[] {
+  const items = loadCachedHistory().filter((r) => r.task_id !== taskId)
+  items.unshift({
+    task_id: taskId, tenant_id: '', filename, knowledge_id: '',
+    status: 'processing', error: '', summary: {}, uploaded_at: new Date().toISOString(),
+  })
+  saveCachedHistory(items)
+  return items
 }

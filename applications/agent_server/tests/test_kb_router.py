@@ -21,7 +21,7 @@ import httpx
 import pytest
 from agent_core.guardrails.errors import AppError
 from agent_runtime.identity import IdentityError
-from agent_server.api.kb_router import kb_documents, kb_status, kb_upload
+from agent_server.api.kb_router import kb_documents, kb_history, kb_status, kb_upload
 from agent_server.schemas import KbStatusRequest
 
 
@@ -224,3 +224,18 @@ async def test_documents_forwards_get_with_limit():
     assert params == {"limit": 50}
     assert headers == {"X-Internal-Tenant": "v1.test.sig"}
     assert resp == {"code": 200, "tenant_id": "default-tenant", "total": 0, "documents": []}
+
+
+async def test_history_forwards_get_with_limit():
+    payload = {"code": 200, "tenant_id": "default-tenant", "total": 1,
+               "items": [{"task_id": "t1", "filename": "a.pdf", "status": "completed", "summary": {}}]}
+    client = _Client(_Resp(200, payload))
+    with patch("agent_server.api.kb_router.get_settings", return_value=_settings()), \
+         patch("agent_server.api.kb_router.sign_internal_header", return_value="v1.test.sig"), \
+         patch("httpx.AsyncClient", return_value=client):
+        resp = await kb_history(limit=30, _auth=None, _feature=None)
+    url, params, headers = client.gets[0]
+    assert url == "http://ks:8900/history"
+    assert params == {"limit": 30}
+    assert headers == {"X-Internal-Tenant": "v1.test.sig"}
+    assert resp == payload
