@@ -263,6 +263,14 @@ export function clearBanners(): void {
   foldedCount.value = 0
 }
 
+/** 切换会话时清掉本轮快照：那轮对话已从服务端 /history 回填成消息，本轮气泡不能再挂着
+ * 造成重复显示。只重置"本轮"三态（答案/事件/徽标+hasRound），不动登录态、提示、问题输入。 */
+export function resetRound(): void {
+  snap.value = initialState()
+  ranOnce.value = false
+  promoted = 0
+}
+
 /** 空态那个示例按钮：只填输入框，不直接发请求 —— 发不发由人按提交决定。 */
 export function useExample(): void {
   question.value = EXAMPLE_QUESTION

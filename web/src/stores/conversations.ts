@@ -18,7 +18,7 @@ import {
   type ChatHistoryItem,
   type SessionInfo,
 } from '../api/sessions.ts'
-import { authToken } from './session.ts'
+import { authToken, resetRound } from './session.ts'
 import { readUiState, writeUiState } from '../theme.ts'
 
 const CURRENT_KEY = 'ap.chat.session'
@@ -87,6 +87,7 @@ export async function newSession(): Promise<void> {
 /** 切换会话：更新选中态并回填该会话的历史消息。 */
 export async function selectSession(id: string): Promise<void> {
   if (id === currentId.value && history.value.length) return
+  resetRound()
   currentId.value = id
   persistCurrent()
   await loadHistory()

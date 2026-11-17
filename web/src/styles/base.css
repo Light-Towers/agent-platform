@@ -656,42 +656,123 @@ a.ry-btn { text-decoration: none; }
 }
 .kb-history__item .hint { margin-left: auto; }
 
-/* ---- 多会话窗口 + 历史对话（2026-11-16）----
- * 会话切换条：每项内有「选中」与「删除」两钮，选中态高亮；历史消息区分我/助手。 */
-.session-tabs {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--sp-2);
-  margin-top: var(--sp-3);
+/* ---- 主流 chat 三栏外壳（2026-11-16 重构）----
+ * 左 260px 会话侧栏 / 中弹性消息流+输入 / 右 300px 可核抽屉。
+ * 用 minmax(0, …) 与 min-width:0 防止长 token 顶破轨道（沿用 .grid 那条教训）。
+ * 窄屏（<1280）抽屉落到消息流下方成普通 details，侧栏收窄；更窄（<900）侧栏改横排在上。 */
+.chat-shell {
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr) 300px;
+  gap: var(--sp-3);
+  align-items: stretch;
+  margin-top: var(--sp-4);
+  min-height: 0;
 }
-.session-tabs__item {
-  display: inline-flex;
+.chat-shell__sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-width: 0;
+  align-self: start;
+  position: sticky;
+  top: var(--sp-3);
+}
+.chat-shell__side-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+}
+.session-list {
+  display: grid;
+  gap: var(--sp-1);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+.session-list__item {
+  display: flex;
   align-items: center;
   border: 1px solid var(--border-decor);
   border-radius: var(--radius-sm);
 }
-.session-tabs__item.is-active {
+.session-list__item.is-active {
   border-color: var(--ry-primary);
   background: var(--bg-raised);
 }
-.session-tabs__pick { max-width: 16rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.session-tabs__del { padding-inline: var(--sp-2); color: var(--text-2); }
-.chat-history {
+.session-list__pick {
+  flex: 1 1 auto;
+  min-width: 0;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.session-list__del { padding-inline: var(--sp-2); color: var(--text-2); }
+
+/* 中栏：消息流滚动区 + 固定底部输入；整栏给一个视口内高度，消息区独立滚动。 */
+.chat-shell__main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+.chat-shell__trace { padding-inline: var(--sp-3); }
+.chat-shell__composer { margin: 0; padding: var(--sp-3); border-top: 1px solid var(--border-decor); }
+
+.chat-stream { display: flex; flex-direction: column; min-height: 0; }
+.chat-stream__scroll {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  max-height: 62vh;
+  padding: var(--sp-3);
+}
+.chat-stream__empty { padding: var(--sp-4); text-align: center; }
+.chat-stream__list {
   display: grid;
   gap: var(--sp-3);
   list-style: none;
   margin: 0;
   padding: 0;
-  max-height: 24rem;
-  overflow-y: auto;
 }
-.chat-history__item {
+.msg { display: flex; flex-direction: column; gap: var(--sp-1); max-width: 82%; }
+.msg--user { align-self: flex-end; align-items: flex-end; }
+.msg--assistant { align-self: flex-start; align-items: flex-start; }
+.msg__label { font-size: var(--fs-xs); color: var(--text-2); }
+.msg__bubble {
   padding: var(--sp-2) var(--sp-3);
   border-radius: var(--radius-sm);
   border: 1px solid var(--border-decor);
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
-.chat-history__item.is-user { background: var(--bg-raised); }
-.chat-history__text { white-space: pre-wrap; word-break: break-word; margin-top: var(--sp-1); }
+.msg--user .msg__bubble { background: var(--blue-tint); }
+.msg--assistant .msg__bubble { background: var(--bg-raised); }
+.msg__bubble--live { min-width: 16rem; }
+
+/* 右栏：可核抽屉，两块 details 默认收起，展开看依据/时间线细节。 */
+.chat-shell__inspector {
+  display: grid;
+  gap: var(--sp-3);
+  align-content: start;
+  min-width: 0;
+  position: sticky;
+  top: var(--sp-3);
+}
+.chat-shell__inspector > details > summary { cursor: pointer; }
+@media (max-width: 1279px) {
+  .chat-shell { grid-template-columns: 220px minmax(0, 1fr); }
+  .chat-shell__inspector { grid-column: 1 / -1; grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 899px) {
+  .chat-shell { grid-template-columns: 1fr; }
+  .chat-shell__sidebar { position: static; }
+  .session-list { max-height: 12rem; }
+  .chat-shell__inspector { grid-column: auto; grid-template-columns: 1fr; }
+}
 /* ============================================================================
  * 登录面容器（PR-2b 登录/建号一屏）—— 给登录面**自己的**骨架
  * ============================================================================

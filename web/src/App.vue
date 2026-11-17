@@ -19,8 +19,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 
-import Answer from './components/Answer.vue'
-import ChatHistory from './components/ChatHistory.vue'
+import ChatStream from './components/ChatStream.vue'
 import EvidenceList from './components/EvidenceList.vue'
 import Legend from './components/Legend.vue'
 import LoginView from './components/LoginView.vue'
@@ -123,9 +122,15 @@ const submitHint = computed(() =>
 /** 提问。`ask()` 内部全 catch（两条凭据前置校验也在 `session.ts` 接住了），这里仍
  *  显式 `void` 掉 Promise：模板里的处理器不该有未处理的 promise（lint 的
  *  `no-floating-promises` 只看得到这一层，看不到组件里）。 */
-function submit(): void {
-  // 第二参数是 sessionId（保持 ask(fetchImpl) 兼容 verify-sse.mjs）。当前会话存在才带。
-  void ask(undefined, activeSessionId.value || undefined)
+/** 主流 chat 行为：没有当前会话时先自动建一个，确保每轮问答都归属某个会话窗口。
+ * 第二参数是 sessionId（保持 ask(fetchImpl) 兼容 verify-sse.mjs）。 */
+async function submit(): Promise<void> {
+  let sid = activeSessionId.value
+  if (!sid) {
+    await newSession()
+    sid = activeSessionId.value
+  }
+  void ask(undefined, sid || undefined)
 }
 
 function onSignOut(): void {
@@ -240,149 +245,120 @@ function onSignOut(): void {
         </button>
       </section>
 
-      <!-- 多会话窗口：新建 / 切换 / 删除；选中态刷新后恢复 -->
-      <section
+      <!-- 对话页 = 主流 chat 三栏：左会话侧栏 / 中连续消息流+输入 / 右可核抽屉 -->
+      <div
         v-if="chatShown"
-        class="ry-card"
-        aria-labelledby="hSessions"
+        class="chat-shell"
       >
-        <h2 id="hSessions">
-          会话窗口
-          <span class="count-badge">{{ sessionList.length }}</span>
-        </h2>
-        <p
-          v-if="conversationsNotice"
-          class="banner"
-        >
-          <strong>{{ conversationsNotice }}</strong>
-        </p>
-        <div class="composer__row">
-          <button
-            type="button"
-            class="ry-btn ry-btn--primary"
-            :aria-disabled="conversationsBusy"
-            @click="newSession"
-          >
-            {{ conversationsBusy ? '处理中…' : '新建会话' }}
-          </button>
-          <span class="hint">不同会话的历史各自独立、刷新后仍可切换查看</span>
-        </div>
-        <div class="session-tabs">
-          <div
-            v-for="s in sessionList"
-            :key="s.session_id"
-            class="session-tabs__item"
-            :class="{ 'is-active': s.session_id === activeSessionId }"
-          >
+        <!-- 左：会话侧栏（新建 / 切换 / 删除，当前高亮，刷新后恢复） -->
+        <aside class="chat-shell__sidebar ry-card">
+          <div class="chat-shell__side-head">
+            <h2 id="hSessions">
+              会话
+              <span class="count-badge">{{ sessionList.length }}</span>
+            </h2>
             <button
               type="button"
-              class="ry-btn ry-btn--text session-tabs__pick"
-              @click="selectSession(s.session_id)"
+              class="ry-btn ry-btn--primary"
+              :aria-disabled="conversationsBusy"
+              @click="newSession"
             >
-              {{ s.title || s.session_id }}
-            </button>
-            <button
-              type="button"
-              class="ry-btn ry-btn--text session-tabs__del"
-              :aria-label="`删除会话 ${s.title}`"
-              @click="removeSession(s.session_id)"
-            >
-              ×
+              {{ conversationsBusy ? '…' : '+ 新建' }}
             </button>
           </div>
+          <p
+            v-if="conversationsNotice"
+            class="banner"
+          >
+            <strong>{{ conversationsNotice }}</strong>
+          </p>
+          <ul class="session-list">
+            <li
+              v-for="s in sessionList"
+              :key="s.session_id"
+              class="session-list__item"
+              :class="{ 'is-active': s.session_id === activeSessionId }"
+            >
+              <button
+                type="button"
+                class="ry-btn ry-btn--text session-list__pick"
+                :aria-current="s.session_id === activeSessionId ? 'true' : undefined"
+                @click="selectSession(s.session_id)"
+              >
+                {{ s.title || s.session_id }}
+              </button>
+              <button
+                type="button"
+                class="ry-btn ry-btn--text session-list__del"
+                :aria-label="`删除会话 ${s.title}`"
+                @click="removeSession(s.session_id)"
+              >
+                ×
+              </button>
+            </li>
+          </ul>
           <p
             v-if="!sessionList.length"
             class="hint"
           >
-            还没有会话，点「新建会话」开始，或直接提问（将不归属任何命名会话）。
+            还没有会话。直接提问会自动建一个。
           </p>
-        </div>
-      </section>
+        </aside>
 
-      <!-- 对话页（两栏：答案/依据 + 时间线/输入） -->
-      <div
-        v-if="chatShown"
-        class="grid"
-      >
-        <div class="col">
-          <ChatHistory />
-
-          <section
-            class="ry-card"
-            aria-labelledby="hAnswer"
+        <!-- 中：连续消息流（历史 + 本轮同一条流）+ 底部输入 -->
+        <section class="chat-shell__main ry-card">
+          <ChatStream />
+          <p
+            v-if="busy || eventCount > 0"
+            class="hint chat-shell__trace"
           >
-            <h2 id="hAnswer">
-              答案
-            </h2>
-            <Answer />
-            <p
-              v-if="busy || eventCount > 0"
-              class="hint"
+            {{ traceNote }}
+          </p>
+          <form
+            class="composer chat-shell__composer"
+            @submit.prevent="submit"
+          >
+            <input
+              v-model="question"
+              class="ry-input"
+              type="text"
+              placeholder="输入问题，Enter 发送…"
+              autocomplete="off"
+              aria-label="问题"
             >
-              {{ traceNote }}
-            </p>
-          </section>
+            <div class="composer__row">
+              <button
+                type="submit"
+                class="ry-btn ry-btn--primary"
+                :aria-disabled="!canSubmit"
+              >
+                {{ busy ? '等待 done…' : '发送' }}
+              </button>
+              <span
+                v-if="submitHint !== ''"
+                class="hint"
+              >{{ submitHint }}</span>
+            </div>
+          </form>
+        </section>
 
-          <section
-            class="ry-card only-wide"
-            aria-labelledby="hEvidence"
-          >
-            <h2 id="hEvidence">
-              依据列表
-              <span class="count-badge">{{ evidence.length }}</span>
-            </h2>
-            <EvidenceList />
-          </section>
-
-          <details class="ry-card only-narrow">
+        <!-- 右：可核对抽屉（依据 + 时间线，默认收起，展开看细节） -->
+        <aside class="chat-shell__inspector">
+          <details class="ry-card">
             <summary>
-              <span class="o-head-sm">依据列表（窄栏折叠）</span>
+              <span class="o-head-sm">依据列表</span>
               <span class="count-badge">{{ evidence.length }}</span>
             </summary>
             <EvidenceList />
           </details>
-        </div>
-
-        <div class="col">
-          <section
-            class="ry-card"
-            aria-labelledby="hTimeline"
-          >
-            <h2 id="hTimeline">
-              事件时间线
+          <details class="ry-card">
+            <summary>
+              <span class="o-head-sm">事件时间线</span>
               <span class="count-badge">{{ eventCount }}</span>
-            </h2>
-
+            </summary>
             <Timeline />
-
-            <form
-              class="composer"
-              @submit.prevent="submit"
-            >
-              <input
-                v-model="question"
-                class="ry-input"
-                type="text"
-                placeholder="输入问题…"
-                autocomplete="off"
-                aria-label="问题"
-              >
-              <div class="composer__row">
-                <button
-                  type="submit"
-                  class="ry-btn ry-btn--primary"
-                  :aria-disabled="!canSubmit"
-                >
-                  {{ busy ? '等待 done…' : '提问' }}
-                </button>
-                <span
-                  v-if="submitHint !== ''"
-                  class="hint"
-                >{{ submitHint }}</span>
-              </div>
-            </form>
-          </section>
-        </div>
+          </details>
+        </aside>
       </div>
 
       <RoleGate v-else-if="activeView === 'role'" />
