@@ -381,6 +381,16 @@ async def query(
                     final_answer,
                     snapshot=round_snapshot,
                 )
+            # 首轮标题生成：首轮问答落库后按内容生成短标题（best-effort，不阻断 done）。
+            # 仅对服务端签发且归属匹配的会话生效（session_thread 非空）；
+            # 仅当会话 title_source='default' 时写，且写带 CAS，绝不覆盖用户手改。
+            if final_answer and session_thread is not None:
+                await _sessions.maybe_auto_title(
+                    pool, req.session_id,
+                    org_id=tenant, user_id=asserted_user_id() or "",
+                    question=req.query, answer=final_answer,
+                    llm=getattr(planner_runtime, "llm", None) if planner_runtime is not None else None,
+                )
             yield _sse({"type": "done", "thread_id": thread_id, "answer": final_answer})
         except Exception as exc:
             logger.exception("query stream failed: thread_id=%s", thread_id)

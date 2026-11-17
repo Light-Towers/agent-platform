@@ -17,6 +17,7 @@ from agent_server.schemas import (
     SessionDeleteResponse,
     SessionInfo,
     SessionListResponse,
+    SessionUpdateTitleRequest,
 )
 
 router = APIRouter()
@@ -37,6 +38,7 @@ async def list_sessions(_auth=Depends(verify_api_key), _feature=Depends(require_
     return SessionListResponse(
         sessions=[SessionInfo(
             session_id=r["session_id"], title=r["title"], workspace_id=r["workspace_id"],
+            title_source=r.get("title_source", _svc.TITLE_SOURCE_DEFAULT),
             created_at=r.get("created_at"), last_active_at=r.get("last_active_at"),
         ) for r in rows],
         count=len(rows),
@@ -57,6 +59,33 @@ async def create_session(
     )
     return SessionInfo(
         session_id=row["session_id"], title=row["title"], workspace_id=row["workspace_id"],
+        title_source=row.get("title_source", _svc.TITLE_SOURCE_DEFAULT),
+        created_at=row.get("created_at"), last_active_at=row.get("last_active_at"),
+    )
+
+
+@router.patch("/sessions/{session_id}", response_model=SessionInfo)
+async def update_session_title(
+    session_id: str,
+    req: SessionUpdateTitleRequest,
+    _auth=Depends(verify_api_key),
+    _feature=Depends(require_feature("chat.run")),
+):
+    """手动改标题：无条件写 title_source=manual，之后自动生成器永不覆盖。"""
+    org_id, user_id = _scope()
+    title = req.title.strip()
+    if not title:
+        raise HTTPException(status_code=422, detail="TITLE_EMPTY")
+    updated = await _svc.set_session_title(
+        get_pool(), session_id, title, org_id=org_id, user_id=user_id,
+        source=_svc.TITLE_SOURCE_MANUAL,
+    )
+    if not updated:
+        raise HTTPException(status_code=404, detail="SESSION_NOT_FOUND")
+    row = await _svc.get_session(get_pool(), session_id, org_id=org_id, user_id=user_id)
+    return SessionInfo(
+        session_id=row["session_id"], title=row["title"], workspace_id=row["workspace_id"],
+        title_source=row.get("title_source", _svc.TITLE_SOURCE_MANUAL),
         created_at=row.get("created_at"), last_active_at=row.get("last_active_at"),
     )
 

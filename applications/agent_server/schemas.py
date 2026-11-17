@@ -169,7 +169,7 @@ class HealthResponse(BaseHealthResponse):
     embedding_real: bool = Field(False, description="RAG/记忆检索是否真在算语义（False=MockEmbedder 字面比对）")
     planner: str | None = Field(None, description="当前执行路径（默认 deterministic）")
     guard_enabled: bool = Field(False, description="输入护栏（PII/injection）是否打开")
-    # 问数面（ADR-0011 选项 A）：本服务不连业务库，这一位只说 nl2sql skill 是否因
+    # 问数面（ADR-0011 选项 A）：本服务不连业务库，这一位只说 nl2sql capability 是否因
     # NL2SQL_SERVICE_URL 非空而注册（意愿位，不是探活）。“问数能不能答”看 nl2sql-service 的 /ready。
     nl2sql: bool = Field(False, description="问数子代理是否已注册（NL2SQL_SERVICE_URL 非空；不证明服务可用）")
     # Langfuse 观测面（方案 plan-langfuse-wiring §2.2）：两盏灯必须分开报，合成一盏就退回
@@ -235,9 +235,14 @@ class SessionCreateRequest(BaseModel):
 class SessionInfo(BaseModel):
     session_id: str
     title: str
+    title_source: str = "default"
     workspace_id: str
     created_at: str | None = None
     last_active_at: str | None = None
+
+
+class SessionUpdateTitleRequest(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
 
 
 class SessionListResponse(BaseModel):

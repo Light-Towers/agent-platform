@@ -29,8 +29,15 @@ SESSION_THREAD_SEP = "--session-"
 不会被 safe_filename 有损改写，故不会与另一主体/会话碰撞。"""
 
 _SESSION_COLS = (
-    "session_id, org_id, user_id, thread_id, title, workspace_id, created_at, last_active_at"
+    "session_id, org_id, user_id, thread_id, title, title_source, workspace_id, created_at, last_active_at"
 )
+
+TITLE_SOURCE_DEFAULT = "default"
+"""创建占位（如「新会话 …」）——只有这一态允许自动生成覆盖。"""
+TITLE_SOURCE_AUTO = "auto"
+"""首轮问答后按内容生成（或失败回退的截断问题）。"""
+TITLE_SOURCE_MANUAL = "manual"
+"""用户手动改名，锁定；自动生成永不覆盖。"""
 
 
 class SessionNotFound(Exception):
@@ -61,10 +68,11 @@ def session_thread_id(base_thread_id: str, session_id: str) -> str:
 
 def _row_to_dict(row: Any) -> dict[str, Any]:
     keys = (
-        "session_id", "org_id", "user_id", "thread_id", "title",
+        "session_id", "org_id", "user_id", "thread_id", "title", "title_source",
         "workspace_id", "created_at", "last_active_at",
     )
     d = dict(zip(keys, row))
+    d.setdefault("title_source", TITLE_SOURCE_DEFAULT)
     for k in ("created_at", "last_active_at"):
         if d.get(k) is not None and not isinstance(d[k], str):
             d[k] = d[k].isoformat()
@@ -163,3 +171,78 @@ async def delete_session(pool: Any, session_id: str, *, org_id: str, user_id: st
     async with pool.connection() as conn:
         cur = await conn.execute(sql, (session_id, org_id, user_id))
     return (cur.rowcount or 0) > 0
+
+
+async def set_session_title(
+    pool: Any,
+    session_id: str,
+    title: str,
+    *,
+    org_id: str,
+    user_id: str,
+    source: str,
+    expected_source: str | None = None,
+) -> bool:
+    """标题的**单一写入点**：校验归属 + 可选 CAS，写入 title 与来源标记。
+
+    :param source: 写入后的来源（TITLE_SOURCE_AUTO / TITLE_SOURCE_MANUAL）。
+    :param expected_source: 非空时附加 ``AND title_source=%s`` 的 CAS 条件——只有当前来源
+        等于它才写。自动生成为此项传 TITLE_SOURCE_DEFAULT：即便"读状态"与"写"之间
+        用户手改了标题（来源变 manual），这一 UPDATE 也落空，绝不覆盖人手结果。
+    :return: 是否命中一行。
+    """
+    if pool is None:
+        return False
+    if expected_source is None:
+        sql = (
+            "UPDATE agent_sessions SET title=%s, title_source=%s "
+            "WHERE session_id=%s AND org_id=%s AND user_id=%s"
+        )
+        params: tuple = (title, source, session_id, org_id, user_id)
+    else:
+        sql = (
+            "UPDATE agent_sessions SET title=%s, title_source=%s "
+            "WHERE session_id=%s AND org_id=%s AND user_id=%s AND title_source=%s"
+        )
+        params = (title, source, session_id, org_id, user_id, expected_source)
+    async with pool.connection() as conn:
+        cur = await conn.execute(sql, params)
+    return (cur.rowcount or 0) > 0
+
+
+async def maybe_auto_title(
+    pool: Any,
+    session_id: str,
+    *,
+    org_id: str,
+    user_id: str,
+    question: str,
+    answer: str,
+    llm: object | None,
+) -> str | None:
+    """首轮问答后按内容自动生成标题；整条路径 best-effort，绝不抛异常。
+
+    仅当会话当前处于 TITLE_SOURCE_DEFAULT 时才生成（auto/manual 一律跳过）→
+    调用 session_title.generate_title（内部已兜住 LLM 失败）→ 以 CAS 落库。
+    返回最终写入的标题；跳过或无池时返回 None。
+    """
+    if pool is None or not session_id:
+        return None
+    try:
+        row = await get_session(pool, session_id, org_id=org_id, user_id=user_id)
+        if row is None or row.get("title_source", TITLE_SOURCE_DEFAULT) != TITLE_SOURCE_DEFAULT:
+            return None
+        from agent_server.api.session_title import generate_title
+
+        title = await generate_title(llm, question, answer)
+        written = await set_session_title(
+            pool, session_id, title, org_id=org_id, user_id=user_id,
+            source=TITLE_SOURCE_AUTO, expected_source=TITLE_SOURCE_DEFAULT,
+        )
+        if written:
+            logger.info("会话标题已自动生成 session=%s title=%r", session_id, title)
+            return title
+        return None
+    except Exception as exc:  # noqa: BLE001 —— 自动标题是旁路，失败不影响对话主链路
+        logger.warning("maybe_auto_title 失败 session=%s: %s", session_id, exc)
+        return None

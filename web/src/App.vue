@@ -37,6 +37,7 @@ import {
   loadSessions,
   newSession,
   removeSession,
+  renameSession,
   selectSession,
   sessionList,
 } from './stores/conversations.ts'
@@ -130,7 +131,35 @@ async function submit(): Promise<void> {
     await newSession()
     sid = activeSessionId.value
   }
-  void ask(undefined, sid || undefined)
+  await ask(undefined, sid || undefined)
+  // 首轮问答后服务端按内容生成了标题，刷新列表让它上屏（后续轮次幂等无副作用）。
+  await loadSessions()
+}
+
+/* ---- 会话标题内联编辑 ----
+ * 编辑态是纯本组件 UI 态（不进 store）：editingId 标记正在改哪一项，draft 存草稿。
+ * 保存走 store 的 renameSession（PATCH + 回填 title_source=manual），失败提示留在 store。 */
+const editingId = ref<string>('')
+const draftTitle = ref('')
+
+function startRename(s: { session_id: string; title: string }): void {
+  editingId.value = s.session_id
+  draftTitle.value = s.title
+}
+
+function cancelRename(): void {
+  editingId.value = ''
+  draftTitle.value = ''
+}
+
+async function commitRename(id: string): Promise<void> {
+  const title = draftTitle.value.trim()
+  if (!title) {
+    cancelRename()
+    return
+  }
+  await renameSession(id, title)
+  cancelRename()
 }
 
 function onSignOut(): void {
@@ -279,22 +308,59 @@ function onSignOut(): void {
               class="session-list__item"
               :class="{ 'is-active': s.session_id === activeSessionId }"
             >
-              <button
-                type="button"
-                class="ry-btn ry-btn--text session-list__pick"
-                :aria-current="s.session_id === activeSessionId ? 'true' : undefined"
-                @click="selectSession(s.session_id)"
-              >
-                {{ s.title || s.session_id }}
-              </button>
-              <button
-                type="button"
-                class="ry-btn ry-btn--text session-list__del"
-                :aria-label="`删除会话 ${s.title}`"
-                @click="removeSession(s.session_id)"
-              >
-                ×
-              </button>
+              <template v-if="editingId === s.session_id">
+                <input
+                  v-model="draftTitle"
+                  class="ry-input session-list__edit"
+                  type="text"
+                  maxlength="200"
+                  :aria-label="`修改会话标题 ${s.title}`"
+                  @keydown.enter="commitRename(s.session_id)"
+                  @keydown.esc="cancelRename"
+                >
+                <button
+                  type="button"
+                  class="ry-btn ry-btn--text session-list__edit-ok"
+                  :aria-label="`保存标题 ${s.title}`"
+                  @click="commitRename(s.session_id)"
+                >
+                  ✓
+                </button>
+                <button
+                  type="button"
+                  class="ry-btn ry-btn--text session-list__edit-cancel"
+                  :aria-label="'取消修改标题'"
+                  @click="cancelRename"
+                >
+                  ✕
+                </button>
+              </template>
+              <template v-else>
+                <button
+                  type="button"
+                  class="ry-btn ry-btn--text session-list__pick"
+                  :aria-current="s.session_id === activeSessionId ? 'true' : undefined"
+                  @click="selectSession(s.session_id)"
+                >
+                  {{ s.title || s.session_id }}
+                </button>
+                <button
+                  type="button"
+                  class="ry-btn ry-btn--text session-list__rename"
+                  :aria-label="`修改标题 ${s.title}`"
+                  @click="startRename(s)"
+                >
+                  ✎
+                </button>
+                <button
+                  type="button"
+                  class="ry-btn ry-btn--text session-list__del"
+                  :aria-label="`删除会话 ${s.title}`"
+                  @click="removeSession(s.session_id)"
+                >
+                  ×
+                </button>
+              </template>
             </li>
           </ul>
           <p

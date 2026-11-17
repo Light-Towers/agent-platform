@@ -53,7 +53,7 @@ class _Pool:
 
 
 _SESSION_ROW = (
-    "s1", "acme", "alice", "tenant-acme--user-alice--session-s1", "会话1", "default",
+    "s1", "acme", "alice", "tenant-acme--user-alice--session-s1", "会话1", "default", "default",
     "2026-01-01T00:00:00+00:00", "2026-01-01T00:00:00+00:00",
 )
 
@@ -111,3 +111,70 @@ def test_delete_session_requires_ownership():
     sql, params = pool.history[-1]
     assert sql.startswith("DELETE FROM agent_sessions")
     assert params == ("s1", "acme", "intruder")
+
+
+def _session_row(title_source="default"):
+    return (
+        "s1", "acme", "alice", "tenant-acme--user-alice--session-s1", "旧标题",
+        title_source, "default", "2026-01-01T00:00:00+00:00", "2026-01-01T00:00:00+00:00",
+    )
+
+
+def test_set_title_manual_has_no_cas_and_marks_source():
+    pool = _Pool(cursor=_Cursor(rowcount=1))
+    ok = asyncio.run(svc.set_session_title(
+        pool, "s1", "我改的名字", org_id="acme", user_id="alice",
+        source=svc.TITLE_SOURCE_MANUAL,
+    ))
+    assert ok is True
+    sql, params = pool.history[-1]
+    assert "title_source=%s" in sql and "title_source" not in sql.split("WHERE")[1].split("SET")[0]
+    assert "AND title_source" not in sql  # 手动改不带 CAS
+    assert params == ("我改的名字", svc.TITLE_SOURCE_MANUAL, "s1", "acme", "alice")
+
+
+def test_set_title_auto_uses_cas_on_default():
+    pool = _Pool(cursor=_Cursor(rowcount=1))
+    ok = asyncio.run(svc.set_session_title(
+        pool, "s1", "自动标题", org_id="acme", user_id="alice",
+        source=svc.TITLE_SOURCE_AUTO, expected_source=svc.TITLE_SOURCE_DEFAULT,
+    ))
+    assert ok is True
+    sql, params = pool.history[-1]
+    assert "AND title_source=%s" in sql
+    assert params == ("自动标题", svc.TITLE_SOURCE_AUTO, "s1", "acme", "alice", svc.TITLE_SOURCE_DEFAULT)
+
+
+def test_maybe_auto_title_skips_non_default_source():
+    for src in (svc.TITLE_SOURCE_AUTO, svc.TITLE_SOURCE_MANUAL):
+        pool = _Pool(cursor=_Cursor(row=_session_row(src)))
+        result = asyncio.run(svc.maybe_auto_title(
+            pool, "s1", org_id="acme", user_id="alice",
+            question="查数据", answer="答案", llm=None,
+        ))
+        assert result is None
+        assert all(not sql.startswith(("UPDATE", "INSERT")) for sql, _ in pool.history)  # 只读判定，无写操作
+
+
+def test_maybe_auto_title_generates_and_cas_writes():
+    pool = _Pool(cursor=_Cursor(row=_session_row(svc.TITLE_SOURCE_DEFAULT), rowcount=1))
+    result = asyncio.run(svc.maybe_auto_title(
+        pool, "s1", org_id="acme", user_id="alice",
+        question="如何查询展会收藏量", answer="按 tenant_id 过滤统计", llm=None,
+    ))
+    assert result == "如何查询展会收藏量"  # LLM None → 回退截断问题
+    sql, params = pool.history[-1]
+    assert sql.startswith("UPDATE agent_sessions SET title=%s")
+    assert "AND title_source=%s" in sql
+    assert params[1] == svc.TITLE_SOURCE_AUTO
+    assert params[-1] == svc.TITLE_SOURCE_DEFAULT
+
+
+def test_maybe_auto_title_no_pool_or_missing_session():
+    assert asyncio.run(svc.maybe_auto_title(
+        None, "s1", org_id="acme", user_id="alice", question="q", answer="a", llm=None,
+    )) is None
+    pool = _Pool(cursor=_Cursor(row=None))
+    assert asyncio.run(svc.maybe_auto_title(
+        pool, "s1", org_id="acme", user_id="alice", question="q", answer="a", llm=None,
+    )) is None

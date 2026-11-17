@@ -4,6 +4,7 @@
  * session_id 由服务端签发（uuid4 hex），前端只持有；本件四个端点：
  *   · GET    /sessions              列当前归属人的会话
  *   · POST   /sessions              签一个新会话（title/workspace_id）
+ *   · PATCH  /sessions/{id}         手动改标题（写 title_source=manual，自动生成器不再覆盖）
  *   · DELETE /sessions/{id}         删一个会话（归属校验，非本人 404）
  *   · GET    /history?session_id=…  取某会话的历史对话原文（回填已存在的 thread）
  * 凭据头复用 auth.ts 的 applyCredentialHeaders（全仓唯一装配点），401 走统一掉态出口。
@@ -15,6 +16,7 @@ import { handleSessionExpired } from '../stores/session.ts'
 export interface SessionInfo {
   session_id: string
   title: string
+  title_source?: 'default' | 'auto' | 'manual'
   workspace_id: string
   created_at?: string | null
   last_active_at?: string | null
@@ -67,6 +69,20 @@ export async function createSession(
   })
   const data = await readResp(resp, '新建会话')
   if (typeof data.session_id !== 'string') throw new Error('新建会话失败：服务端未返回 session_id')
+  return data as unknown as SessionInfo
+}
+
+export async function updateSessionTitle(
+  token: string, sessionId: string, title: string, fetchImpl?: typeof fetch,
+): Promise<SessionInfo> {
+  const doFetch = fetchImpl ?? globalThis.fetch
+  const resp = await doFetch(`/sessions/${encodeURIComponent(sessionId)}`, {
+    method: 'PATCH',
+    headers: (() => { const h = headers(token); h.set('Content-Type', 'application/json'); return h })(),
+    body: JSON.stringify({ title }),
+    cache: 'no-store',
+  })
+  const data = await readResp(resp, '修改会话标题')
   return data as unknown as SessionInfo
 }
 

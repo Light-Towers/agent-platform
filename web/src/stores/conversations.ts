@@ -16,6 +16,7 @@ import {
   deleteSession,
   getHistory,
   listSessions,
+  updateSessionTitle,
   type ChatHistoryItem,
   type SessionInfo,
 } from '../api/sessions.ts'
@@ -78,6 +79,20 @@ export async function selectSession(id: string): Promise<void> {
   resetRound()
   currentId.value = id
   await loadHistory()
+}
+
+/** 手动改会话标题；成功用服务端返回值回填（拿到 title_source=manual），失败给出提示。 */
+export async function renameSession(id: string, title: string): Promise<void> {
+  const trimmed = title.trim()
+  if (!trimmed) return
+  if (!sessions.value.some((s) => s.session_id === id)) return
+  notice.value = ''
+  try {
+    const updated = await updateSessionTitle(authToken.value, id, trimmed)
+    sessions.value = sessions.value.map((s) => s.session_id === id ? updated : s)
+  } catch (err) {
+    notice.value = err instanceof Error ? err.message : String(err)
+  }
 }
 
 /** 删除会话；删的是当前会话则清空选中与历史并重选最近一条。 */

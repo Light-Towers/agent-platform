@@ -711,6 +711,16 @@ a.ry-btn { text-decoration: none; }
   white-space: nowrap;
 }
 .session-list__del { padding-inline: var(--sp-2); color: var(--text-2); }
+.session-list__rename { padding-inline: var(--sp-2); color: var(--text-2); }
+.session-list__edit {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  padding-inline: var(--sp-2);
+}
+.session-list__edit-ok { padding-inline: var(--sp-2); color: var(--ry-primary); }
+.session-list__edit-cancel { padding-inline: var(--sp-2); color: var(--text-2); }
 
 /* 中栏：消息流滚动区 + 固定底部输入；整栏给一个视口内高度，消息区独立滚动。 */
 .chat-shell__main {
