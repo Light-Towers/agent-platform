@@ -64,6 +64,10 @@ _RAG_SCHEMA: dict[str, Any] = {
     "properties": {
         "query": {"type": "string", "description": "检索的查询文本"},
         "workspace_id": {"type": "string", "description": "知识库空间 ID，缺省 default"},
+        "knowledge_id": {
+            "type": "string",
+            "description": "知识库 ID 过滤（多库收窄）；空 = 全部知识库",
+        },
     },
     "required": ["query"],
 }
@@ -131,6 +135,7 @@ async def _run_general_qa(graph: Any, **kwargs: Any) -> str:
             "question": question,
             "user_id": user_id,
             "workspace_id": kwargs.get("workspace_id", "default"),
+            "knowledge_id": kwargs.get("knowledge_id", ""),
             "tenant_id": tenant_id,
             "iterations": 0,
         },
@@ -220,7 +225,7 @@ def build_registry(graph: Any | None = None) -> CapabilityRegistry:
     registry.register(
         as_function_capability(
             "rag",
-            "知识库混合检索：按 workspace 过滤，返回证据字符串列表",
+            "知识库混合检索：按 workspace/knowledge_id 过滤，返回证据字符串列表",
             rag_query,
             input_schema=_RAG_SCHEMA,
         )

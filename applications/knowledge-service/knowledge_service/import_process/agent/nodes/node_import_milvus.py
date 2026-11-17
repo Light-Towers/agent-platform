@@ -161,6 +161,11 @@ def create_collection(client, collection_name: str, vector_dimension: int):
     # 08+16 通用化：多租户隔离字段（ACL 前置，INV-8）
     schema.add_field(field_name="tenant_id", datatype=DataType.VARCHAR, max_length=256)  # 租户 ID
     schema.add_field(field_name="scope_type", datatype=DataType.VARCHAR, max_length=32)  # PUBLIC | PRIVATE
+    # v2 多知识库（plan-knowledge-base-model-2026-11-17）：知识库 ID 过滤键（空 = 未分库）。
+    # 与平台侧 agent_runtime/document_store.py 的集合 schema 逐字段镜像——任何一侧改字段，
+    # 另一侧必须同步（先建集合的一方决定另一方的写入/检索行为）。
+    schema.add_field(field_name="knowledge_id", datatype=DataType.VARCHAR, max_length=256)  # 知识库 ID
+    schema.add_field(field_name="workspace_id", datatype=DataType.VARCHAR, max_length=128)  # 工作空间归属维
     # M2 索引生命周期（方案 §5.3）：chunk 元数据字段，保证"评测结果能归因到具体索引版本"
     schema.add_field(
         field_name="embedding_model", datatype=DataType.VARCHAR, max_length=256
@@ -338,6 +343,8 @@ def _enrich_chunk_metadata(item: Dict[str, Any], state: Dict[str, Any] = None) -
         - created_at：入库时间戳（epoch 秒）
         - source_doc：源文档名（优先 file_title，其次 parent_title）
     08+16 通用化：补充 tenant_id / scope_type（多租户隔离，从 state 透传）。
+    v2 多知识库：补充 knowledge_id（state 透传，空 = 未分库）/ workspace_id（缺省
+    "default"，与平台侧检索的归属维谓词同语义）。
     """
     item_copy = item.copy()
     item_copy.setdefault("item_name", "")
@@ -353,6 +360,10 @@ def _enrich_chunk_metadata(item: Dict[str, Any], state: Dict[str, Any] = None) -
         tenant_id, scope_type = extract_tenant_scope_for_chunk(state)
         item_copy.setdefault("tenant_id", tenant_id)
         item_copy.setdefault("scope_type", scope_type)
+        # v2 多知识库字段：knowledge_id 从 state 透传（/upload 表单必填项）；
+        # workspace_id 上游（平台代理/KS 表单）未带时缺省 default。
+        item_copy.setdefault("knowledge_id", str(state.get("knowledge_id", "") or ""))
+        item_copy.setdefault("workspace_id", str(state.get("workspace_id", "") or "default"))
     return item_copy
 
 

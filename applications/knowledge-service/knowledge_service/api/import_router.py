@@ -174,9 +174,13 @@ def run_graph_task(
         # error 同时写进 task result：原实现只进日志 ⇒ 前端只知道 failed、不知道为什么，
         # 管理员无从判断是解析失败还是切分/入库失败。set/get_task_result 早就有，
         # 这里只是把那个在册能力接上（不改状态码、不改异常传播语义）。
-        set_task_result(task_id, "error", str(e))
+        # P8（lint_architecture 门禁）：task result / 上传历史经 /status、/history 回前端，
+        # 属 API 可见面 ⇒ 不回显异常原文（可能含内部路径）。具体原因只在下方日志（exc_info），
+        # 对外给异常类名 + 可行动指引。
+        error_kind = type(e).__name__
+        set_task_result(task_id, "error", f"处理失败（{error_kind}）；详情见服务端日志")
         logger.error(f"[{task_id}] LangGraph全流程执行失败，异常信息：{str(e)}", exc_info=True)
-        _persist_upload_history(task_id, metadata, "failed", str(e))
+        _persist_upload_history(task_id, metadata, "failed", error_kind)
 
 
 # --------------------------
@@ -199,7 +203,7 @@ async def upload_files(
     status: str = Form("DRAFT", description="生命周期状态 DRAFT/REVIEWING/PUBLISHED/..."),
     constraint_kind: str = Form("", description="约束类型，预留"),
     enable_item_name_recognition: bool = Form(True, description="是否启用商品名 NER 节点"),
-    knowledge_id: str = Form("", description="知识条目唯一标识"),
+    knowledge_id: str = Form("", description="知识条目唯一标识（必填：登记/发布/检索的唯一锚点，空值文档无法被检索）"),
     exhibition_id: str = Form("", description="会展 ID（生命周期校验用）"),
     venue_id: str = Form("", description="场馆 ID（生命周期校验用）"),
     datasource_type: str = Form("", description="数据源类型（mysql/hive），文档归属的数据源类型"),
@@ -216,6 +220,13 @@ async def upload_files(
     :param files: 前端上传的文件列表（form-data格式）
     :return: 包含上传结果和所有任务ID的JSON响应
     """
+    # knowledge_id 必填（治本）：它是登记(kb_registry)/发布(reimport)/检索的唯一锚点。
+    # 空 ID 的文档会进入「解析完成但无法登记、无法发布、查不出来」的死胡同——
+    # 正是"知识图谱文档查不到"的根因。在入口拦下，不带病产生后续任务。
+    if not knowledge_id or not knowledge_id.strip():
+        raise HTTPException(status_code=422, detail="KNOWLEDGE_ID_REQUIRED：知识库 ID 为必填项，用于文档登记与发布管理")
+    knowledge_id = knowledge_id.strip()
+
     # 08+16 通用化：聚合 metadata 入参，透传到后台任务
     # 隔离域（ADR-0006 T11）：tenant 为空时服务端注入默认租户（审计），不再静默全量。
     tenant_id = resolve_server_tenant(tenant_id, endpoint="/upload")

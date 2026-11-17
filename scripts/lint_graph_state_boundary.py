@@ -86,6 +86,11 @@ UNDECLARED_READS: dict[str, str] = {
     "applications/nl2sql-service/nl2sql_service/agent/nodes/finalize.py::finalize::path": (
         "trace 的 path 语义未定（graph/其他），待拍板后再决定声明还是删除"
     ),
+    "applications/knowledge-service/knowledge_service/import_process/agent/nodes/node_import_milvus.py::node_import_milvus::workspace_id": (
+        "文档 chunk 的 workspace_id 归属维由上传表单/平台代理透传（plan-knowledge-base-model v2），"
+        "非 LangGraph 节点写入；该节点只从 state 读取并缺省 'default'，与平台检索谓词同语义。"
+        "复审触发条件：KS state schema 增加该键并把写入方纳入同一张图时，改为声明式写入并移除本条"
+    ),
 }
 
 # 解析缓存：键必须带文件指纹。只按路径缓存会在"同一路径换了内容"时读到上一份 AST

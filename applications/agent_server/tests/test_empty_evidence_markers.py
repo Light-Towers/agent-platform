@@ -18,9 +18,10 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from agent_runtime.document_store import DocumentStoreUnavailable
 from agent_server.subagents import degradation
 from agent_server.subagents.degradation import EMPTY_EVIDENCE_MARKERS, has_real_evidence
 
@@ -31,16 +32,27 @@ _LEGACY_MARKERS = ("知识库未启用", "知识库中未检索到", "联网搜�
 
 
 async def _unconfigured_messages() -> list[str]:
-    """四个子能力在「未装配」状态下各自返回的那一条证据文本。"""
+    """各子能力在「未装配/零结果」状态下各自返回的那一批证据文本。"""
     out: list[str] = []
 
-    with patch("agent_server.subagents.rag.get_pool", return_value=None):
+    # 文档检索「未装配」两个入口都取：工厂 None（后端未配置）与 pool None（运行时不可用）
+    with patch("agent_server.subagents.rag.get_document_store", return_value=None):
         from agent_server.subagents.rag import rag_query
 
         out.extend(await rag_query("q"))
 
+    fake_store = MagicMock()
+    fake_store.retrieve = AsyncMock(side_effect=DocumentStoreUnavailable("DATABASE_URL 未配置"))
+    with patch("agent_server.subagents.rag.get_pool", return_value=None), \
+         patch("agent_server.subagents.rag.get_document_store", return_value=fake_store):
+        out.extend(await rag_query("q"))
+
+    no_hit_store = MagicMock()
+    no_hit_store.retrieve = AsyncMock(return_value=[])
     with patch("agent_server.subagents.rag.get_pool", return_value=object()), \
-         patch("agent_server.subagents.rag.retrieve_chunks", AsyncMock(return_value=[])):
+         patch("agent_server.subagents.rag.get_document_store", return_value=no_hit_store), \
+         patch("agent_server.subagents.rag.get_settings") as s:
+        s.return_value.rag_top_k = 5
         out.extend(await rag_query("q"))
 
     from agent_server.subagents.search import search_web
@@ -54,7 +66,7 @@ async def _unconfigured_messages() -> list[str]:
         s.return_value.nl2sql_service_url = ""
         out.extend(await sql_query("q"))
 
-    assert len(out) == 4, f"未配置分支取全了才有意义：{out}"
+    assert len(out) == 5, f"未配置/零结果分支取全了才有意义：{out}"
     return out
 
 

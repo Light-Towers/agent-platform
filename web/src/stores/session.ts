@@ -78,6 +78,11 @@ const question = ref('')
 const streaming = ref(false)
 /** 本轮已发起过（区分"空态引导"与"跑完了但答案是空的"两种屏上形态）。 */
 const ranOnce = ref(false)
+/** 知识范围（plan-knowledge-base-model 步骤 4）：''=全部知识库；非空=只在
+ *  该 knowledge_id 内收窄 rag 召回。与 `question` 同级的**一次性输入**：不落存储、
+ *  登出不清（它不是凭据，只是检索偏好）。可写导出的理由同 `question`：
+ *  选择器的 v-model 目标必须可写。 */
+const knowledgeScope = ref('')
 const snap = ref<StreamSnapshot>(initialState())
 const bannerList = ref<string[]>([])
 const foldedCount = ref(0)
@@ -148,7 +153,7 @@ export const busy = computed(() => streaming.value)
 export const hasRound = computed(() => ranOnce.value)
 export const banners = computed<readonly string[]>(() => bannerList.value)
 export const dropped = computed(() => foldedCount.value)
-export { question, authMode, authToken }
+export { question, authMode, authToken, knowledgeScope }
 
 /** 提交按钮的可用性。只看两态：正在流、输入为空。 */
 export const canSubmit = computed(() => !streaming.value && question.value.trim() !== '')
@@ -232,6 +237,7 @@ export async function ask(fetchImpl?: typeof fetch, sessionId?: string): Promise
     onUpdate: onTick,
     ...(fetchImpl !== undefined ? { fetchImpl } : {}),
     ...(sessionId !== undefined && sessionId !== '' ? { sessionId } : {}),
+    ...(knowledgeScope.value !== '' ? { knowledgeId: knowledgeScope.value } : {}),
   }
   try {
     const final = await streamQuery(opts)

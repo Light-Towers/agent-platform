@@ -80,6 +80,21 @@ class Settings(BaseLLMSettings):
     rerank_base_url: str = "https://api.siliconflow.cn/v1"
     rerank_model: str = "BAAI/bge-reranker-v2-m3"
 
+    # 文档检索后端开关（方案 docs/plans/plan-knowledge-base-model-2026-11-17.md）：
+    # milvus（对齐 KS 上传链路，混合检索）| pgvector（自启降级备选）。
+    # 上传（/kb/uploads）与检索（rag_query）都经 get_document_store() 读同一份配置，
+    # 保证「写哪个后端就查哪个后端」——修复上传写 KS Milvus、检索读 pgvector 的断链。
+    doc_backend: str = "milvus"  # 默认 milvus（与 KS 上传管线同集合，上传即检索）；pgvector 为本地降级备选
+    doc_milvus_uri: str = ""  # 空 = milvus 后端不可用（get_document_store 返回 None → 可读降级）
+    doc_milvus_token: str = ""
+    doc_milvus_collection: str = "platform_doc_v2_bge_m3"  # 独立集合，不复用 KS product_manual_v1_bge_m3
+    # 文档集合专用 embedding 配置：必须与写该集合的模型一致（bge-m3 = 1024 维）。
+    # 未配 api_key 时回退 app 主 embedder，部署侧须自行保证 EMBEDDING_* 与集合对齐。
+    doc_embed_api_key: str = ""
+    doc_embed_base_url: str = "https://api.siliconflow.cn/v1"
+    doc_embed_model: str = "BAAI/bge-m3"
+    doc_embed_dim: int = 1024
+
     # 图控制
     max_iterations: int = 2
 

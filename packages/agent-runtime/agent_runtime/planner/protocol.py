@@ -123,6 +123,7 @@ class Plan(BaseModel):
     reason: str = ""
     question: str = ""
     workspace_id: str = "default"
+    knowledge_id: str = ""  # 知识范围（rag capability 过滤键；空 = 全部知识库）
     user_id: str = "default"
     tenant_id: str = "default"
     session_id: str = ""
@@ -151,6 +152,7 @@ class PlannerContext(BaseModel):
 
     question: str
     workspace_id: str = "default"
+    knowledge_id: str = ""  # 知识范围（rag capability 过滤键；空 = 全部知识库）
     user_id: str = "default"
     tenant_id: str = "default"
     messages: list[Any] = Field(default_factory=list)

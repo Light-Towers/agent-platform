@@ -614,6 +614,8 @@ a.ry-btn { text-decoration: none; }
   margin-top: var(--sp-3);
 }
 .kb-check { display: flex; align-items: center; gap: var(--sp-2); }
+.kb-required { display: grid; gap: var(--sp-2); margin-top: var(--sp-3); }
+.kb-required__star { color: var(--danger, var(--text-1)); }
 .kb-steps {
   display: flex;
   flex-wrap: wrap;

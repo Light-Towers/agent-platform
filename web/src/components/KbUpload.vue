@@ -33,10 +33,12 @@ import {
   getKbStatus,
   listKbDocuments,
   getKbHistory,
+  listKnowledgeBases,
   KbRateLimitedError,
   type KbUploadForm,
   type KbTaskStatus,
   type KbHistoryItem,
+  type KbKnowledgeBase,
 } from '../api/kb.ts'
 import { DIALECT_OPTIONS } from '../api/datasources.ts'
 import {
@@ -45,7 +47,7 @@ import {
   cachePending,
 } from '../stores/kbHistory.ts'
 
-/** 默认配置即"能跑"：DRAFT + PRIVATE + 勾语义识别；knowledge_id 提示管理员可填以便登记。 */
+/** 默认配置即"能跑"：DRAFT + PRIVATE + 勾语义识别；knowledge_id 由上传者在主界面必填。 */
 const form = ref<KbUploadForm>({
   scopeType: 'PRIVATE',
   tenantType: '',
@@ -76,6 +78,19 @@ const uploads = ref<KbHistoryItem[]>([])
 const historySource = ref<'server' | 'cache'>('cache')
 /** 后端按 knowledge_id 登记的文档列表（只作补充展示）。 */
 const documents = ref<unknown>(null)
+/** 知识库清单（datalist 候选；数据源同对话区的 /kb/knowledge-bases，feature 门 chat.run）。 */
+const knowledgeBases = ref<readonly KbKnowledgeBase[]>([])
+/** DOC_BACKEND=pgvector 时的成功读数：本地直写文档向量库，无 KS 后台任务可轮询。 */
+const localIngestNote = ref('')
+
+/** 知识库清单是输入便利（候选 + 校验 ID 拼写），拉取失败不报错——可手填，不拦上传主流程。 */
+async function refreshKnowledgeBases(): Promise<void> {
+  try {
+    knowledgeBases.value = await listKnowledgeBases(authToken.value ?? '')
+  } catch {
+    knowledgeBases.value = []
+  }
+}
 
 /** 7 个逻辑步骤，按 done_list 里出现的**中文名**点亮（节点可跳过，不按数组下标画死）。 */
 const STEP_DEFS = [
@@ -120,8 +135,14 @@ function removeFile(index: number): void {
 async function submit(): Promise<void> {
   errorText.value = ''
   status.value = null
+  localIngestNote.value = ''
   if (files.value.length === 0) {
     errorText.value = '请先选择或拖入至少一个文档文件'
+    return
+  }
+  // 知识库 ID 是登记/发布/检索的唯一锚点，缺了文档就"传了也查不到"——必填前置校验。
+  if (form.value.knowledgeId.trim() === '') {
+    errorText.value = '请填写知识库 ID（文档登记与后续检索必需）'
     return
   }
   busy.value = true
@@ -129,17 +150,26 @@ async function submit(): Promise<void> {
     const names = files.value.map((f) => f.name).join('、')
     const res = await uploadKbDocuments(files.value, form.value, authToken.value ?? '')
     taskIds.value = (res as { task_ids?: string[] }).task_ids ?? []
-    const firstId = taskIds.value[0]
-    if (firstId !== undefined) {
-      // 即时占位到缓存（后台管线要跑几分钟才落 Mongo）；权威历史在轮询完成后从服务端拉。
-      uploads.value = cachePending(firstId, names)
-      historySource.value = 'cache'
-      activeTaskId.value = firstId
-      status.value = { code: 0, task_id: firstId, status: 'processing', done_list: [], running_list: [], error: '', summary: {} }
-      await poll(firstId)
+    if (taskIds.value.length === 0) {
+      // DOC_BACKEND=pgvector：agent_server 本地直写文档向量库（同步完成），没有 KS 后台
+      // 任务可轮询（/kb/status 对这批文档无意义），也不落 KS 的上传历史 —— 给一句如实的
+      // 成功读数并跳过轮询，而不是让屏上停在「没有任务 ID」的空白里。
+      localIngestNote.value = '文档已写入本地文档向量库（pgvector 后端，无需后台处理）；'
+        + '登记列表见页面底部，可直接在对话页向该知识库提问。'
+    } else {
+      const firstId = taskIds.value[0]
+      if (firstId !== undefined) {
+        // 即时占位到缓存（后台管线要跑几分钟才落 Mongo）；权威历史在轮询完成后从服务端拉。
+        uploads.value = cachePending(firstId, names)
+        historySource.value = 'cache'
+        activeTaskId.value = firstId
+        status.value = { code: 0, task_id: firstId, status: 'processing', done_list: [], running_list: [], error: '', summary: {} }
+        await poll(firstId)
+      }
+      await loadHistory()
     }
-    await loadHistory()
     await refreshDocuments()
+    await refreshKnowledgeBases()
   } catch (err) {
     errorText.value = err instanceof Error ? err.message : String(err)
   } finally {
@@ -223,6 +253,7 @@ async function restore(): Promise<void> {
     if (latest) selectTask(latest)
   }
   await refreshDocuments()
+  await refreshKnowledgeBases()
 }
 
 onMounted(restore)
@@ -284,16 +315,48 @@ async function refreshDocuments(): Promise<void> {
         </button>
       </p>
 
+      <label class="kb-required">
+        <span class="o-head-sm">知识库 ID <span class="kb-required__star">*</span></span>
+        <!-- datalist = 可搜索下拉：候选来自服务端登记的知识库（输入即过滤，也可手填新 ID）。 -->
+        <input
+          v-model="form.knowledgeId"
+          class="ry-input"
+          type="text"
+          required
+          list="kb-id-options"
+          aria-label="知识库 ID（必填）"
+          placeholder="如 exhibition-kb，用于文档登记与发布管理"
+        >
+        <datalist id="kb-id-options">
+          <option
+            v-for="kb in knowledgeBases"
+            :key="kb.knowledge_id"
+            :value="kb.knowledge_id"
+          >
+            {{ kb.doc_count }} 篇 · {{ kb.status }}
+          </option>
+        </datalist>
+        <span class="hint">必填：用于文档登记与发布管理，也是对话区「知识范围」收窄的锚点；留空会导致文档无法登记、无法发布，也无法在对话里检索到。</span>
+      </label>
+
       <div class="composer__row">
         <button
           type="button"
           class="ry-btn ry-btn--primary"
-          :aria-disabled="busy || files.length === 0"
+          :aria-disabled="busy || files.length === 0 || form.knowledgeId.trim() === ''"
           @click="submit"
         >
           {{ busy ? '上传中…' : '上传' }}
         </button>
       </div>
+
+      <p
+        v-if="localIngestNote"
+        class="banner"
+        role="status"
+      >
+        <strong>{{ localIngestNote }}</strong>
+      </p>
 
       <p
         v-if="errorText"
@@ -382,15 +445,6 @@ async function refreshDocuments(): Promise<void> {
               v-model="form.constraintKind"
               class="ry-input"
               type="text"
-            >
-          </label>
-          <label class="o-head-sm">
-            knowledge_id
-            <input
-              v-model="form.knowledgeId"
-              class="ry-input"
-              type="text"
-              placeholder="留空则不登记到文档列表"
             >
           </label>
           <label class="o-head-sm">
@@ -493,6 +547,12 @@ async function refreshDocuments(): Promise<void> {
         class="hint"
       >
         任务 ID：{{ taskIds.join('、') }}
+      </p>
+      <p
+        v-if="form.knowledgeId.trim()"
+        class="hint"
+      >
+        知识库 ID：<code class="t-name">{{ form.knowledgeId.trim() }}</code>
       </p>
 
       <template v-if="split">

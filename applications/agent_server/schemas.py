@@ -87,6 +87,9 @@ class QueryRequest(BaseQueryRequest):
     # 工作空间隔离键（优化 G）：跨会话记忆与 RAG 文档按 workspace 隔离；
     # 未传时记为 default（全局共享空间）。user_id 仅作辅助归属维度，不参与隔离。
     workspace_id: str = Field(default="default")
+    # 知识库归属键（plan-knowledge-base-model）：文档检索按 knowledge_id 收窄范围；
+    # 空 = 全部知识库（对话区"知识范围"选择器的默认态）。
+    knowledge_id: str = Field(default="", max_length=256)
     # app 业务默认值：未传 user_id 时记为 default（基类为 None）
     user_id: str = Field(default="default")
     priority: Priority = Field(default="normal")

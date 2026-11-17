@@ -15,14 +15,15 @@ from __future__ import annotations
 
 import io
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
 from agent_core.guardrails.errors import AppError
 from agent_runtime.identity import IdentityError
-from agent_server.api.kb_router import kb_documents, kb_history, kb_status, kb_upload
+from agent_server.api.kb_router import kb_documents, kb_history, kb_knowledge_bases, kb_status, kb_upload
 from agent_server.schemas import KbStatusRequest
+from fastapi import HTTPException
 
 
 class _Resp:
@@ -64,19 +65,23 @@ class _Client:
 
 
 class _Up:
-    """UploadFile 鸭子替身（直调端点不走 FastAPI 验证，只需 filename/file/content_type）。"""
+    """UploadFile 鸭子替身（直调端点不走 FastAPI 验证，只需 filename/file/content_type/read）。"""
 
     def __init__(self, filename: str = "a.pdf", content: bytes = b"pdf-bytes") -> None:
         self.filename = filename
         self.file = io.BytesIO(content)
         self.content_type = "application/pdf"
 
+    async def read(self, n: int = -1) -> bytes:
+        return self.file.read(n)
 
-def _settings(url: str = "http://ks:8900", key: str = "") -> MagicMock:
+
+def _settings(url: str = "http://ks:8900", key: str = "", doc_backend: str = "milvus") -> MagicMock:
     s = MagicMock()
     s.knowledge_service_url = url
     s.knowledge_service_key = key
     s.default_tenant_id = "default-tenant"
+    s.doc_backend = doc_backend
     return s
 
 
@@ -95,6 +100,19 @@ _UPLOAD_FORM = dict(
     exhibition_id="",
     venue_id="",
 )
+
+
+@pytest.mark.parametrize("bad_id", ["", "   "])
+async def test_upload_requires_knowledge_id_422(bad_id):
+    """空/纯空格 knowledge_id → 422，且零转发（治本：无 ID 文档无法登记/检索）。"""
+    with patch("agent_server.api.kb_router.get_settings", return_value=_settings()):
+        with pytest.raises(HTTPException) as exc:
+            await kb_upload(
+                files=[_Up()], **{**_UPLOAD_FORM, "knowledge_id": bad_id},
+                _auth=None, _feature=None,
+            )
+    assert exc.value.status_code == 422
+    assert "KNOWLEDGE_ID_REQUIRED" in str(exc.value.detail)
 
 
 async def test_upload_unconfigured_url_503():
@@ -185,6 +203,58 @@ async def test_upload_upstream_error_status_propagates():
             await kb_upload(files=[_Up()], **_UPLOAD_FORM, _auth=None, _feature=None)
     assert exc_info.value.status_code == 413
     assert "100 MB" in str(exc_info.value.detail)
+
+
+async def test_upload_pgvector_branch_writes_local_store_not_ks():
+    """DOC_BACKEND=pgvector → 本地 DocumentStore 直写（断链修复点：不再转发 KS）。"""
+    fake_store = MagicMock()
+    fake_store.add_document = AsyncMock(return_value="docid1")
+    client = _Client(_Resp(200, {"code": 200, "task_ids": ["t1"]}))
+    with patch("agent_server.api.kb_router.get_settings", return_value=_settings(doc_backend="pgvector")), \
+         patch("agent_server.api.kb_router.get_document_store", return_value=fake_store), \
+         patch("agent_server.api.kb_router.get_pool", return_value=object()), \
+         patch("agent_server.api.kb_router.resolve_workspace", new_callable=AsyncMock), \
+         patch("agent_server.api.kb_router.extract_text", return_value="# 标题\n正文"), \
+         patch("agent_server.api.kb_router.split_markdown", return_value=[MagicMock(text="正文")]), \
+         patch("httpx.AsyncClient", return_value=client):
+        resp = await kb_upload(files=[_Up()], **_UPLOAD_FORM, _auth=None, _feature=None)
+    assert resp["backend"] == "pgvector"
+    assert resp["doc_ids"] == ["docid1"]
+    assert resp["task_ids"] == [], "本地直写同步完成：无后台任务可轮询（前端据此跳过轮询）"
+    assert client.posts == [], "pgvector 模式不得转发 KS（写检索不同源正是本次修复的断链）"
+    args, kwargs = fake_store.add_document.call_args
+    assert kwargs["tenant_id"] == "default-tenant"
+    assert kwargs["knowledge_id"] == "k-1"
+
+
+async def test_upload_unknown_backend_500():
+    """DOC_BACKEND 拼写错误 → 500 当场暴露（配置错误不静默回落，与工厂同口径）。"""
+    with patch("agent_server.api.kb_router.get_settings", return_value=_settings(doc_backend="redis")):
+        with pytest.raises(HTTPException) as exc_info:
+            await kb_upload(files=[_Up()], **_UPLOAD_FORM, _auth=None, _feature=None)
+    assert exc_info.value.status_code == 500
+    assert "DOC_BACKEND" in str(exc_info.value.detail)
+
+
+async def test_knowledge_bases_aggregates_documents_by_knowledge_id():
+    """GET /kb/knowledge-bases：代理 KS /documents 聚合 {knowledge_id, doc_count, status}。"""
+    # KS /documents 按 updated_at 降序 ⇒ 同库多条里首见即最新状态
+    payload = {"code": 200, "tenant_id": "default-tenant", "total": 3, "documents": [
+        {"knowledge_id": "kb-a", "status": "DRAFT", "updated_at": "2026-11-17T08:00:00"},
+        {"knowledge_id": "kb-b", "status": "PUBLISHED", "updated_at": "2026-11-16T10:00:00"},
+        {"knowledge_id": "kb-a", "status": "PUBLISHED", "updated_at": "2026-11-15T09:00:00"},
+        {"knowledge_id": "", "status": "DRAFT", "updated_at": "2026-11-14T09:00:00"},
+    ]}
+    client = _Client(_Resp(200, payload))
+    with patch("agent_server.api.kb_router.get_settings", return_value=_settings()), \
+         patch("agent_server.api.kb_router.sign_internal_header", return_value="v1.test.sig"), \
+         patch("httpx.AsyncClient", return_value=client):
+        resp = await kb_knowledge_bases(_auth=None, _feature=None)
+    assert resp["total"] == 2  # 空 knowledge_id 不进清单
+    assert [k["knowledge_id"] for k in resp["knowledge_bases"]] == ["kb-a", "kb-b"]
+    kb_a = resp["knowledge_bases"][0]
+    assert kb_a["doc_count"] == 2
+    assert kb_a["status"] == "DRAFT", "首见即最新（KS 列表 updated_at 降序）"
 
 
 async def test_status_forwards_to_reimport_with_form_shape():

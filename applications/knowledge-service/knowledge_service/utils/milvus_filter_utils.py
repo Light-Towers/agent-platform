@@ -43,13 +43,26 @@ def build_tenant_filter(tenant_id: Optional[str], scope_type: Optional[str] = No
     return " and ".join(parts)
 
 
+def build_knowledge_filter(knowledge_id: Optional[str]) -> Optional[str]:
+    """
+    构造 knowledge_id 知识库过滤表达式（v2 多知识库，plan-knowledge-base-model）。
+    :param knowledge_id: 知识库 ID（空/None = 不做分库过滤，即全部知识库；
+        老数据 knowledge_id 为空串，选库模式天然不召回它们——归属宁可不可见）
+    :return: Milvus filter 表达式片段或 None
+    """
+    if not knowledge_id:
+        return None
+    return f'knowledge_id == "{escape_milvus_string(knowledge_id)}"'
+
+
 def build_retrieval_filter(
     item_names: Optional[Iterable[str]] = None,
     tenant_id: Optional[str] = None,
     scope_type: Optional[str] = None,
+    knowledge_id: Optional[str] = None,
 ) -> Optional[str]:
     """
-    构造完整检索过滤表达式：item_name + tenant_id + scope_type 复合过滤。
+    构造完整检索过滤表达式：item_name + tenant_id + scope_type + knowledge_id 复合过滤。
     各子句用 and 连接；全为空时返回 None（不做过滤，全库检索）。
     """
     clauses = []
@@ -59,6 +72,9 @@ def build_retrieval_filter(
     tenant_expr = build_tenant_filter(tenant_id, scope_type)
     if tenant_expr:
         clauses.append(tenant_expr)
+    knowledge_expr = build_knowledge_filter(knowledge_id)
+    if knowledge_expr:
+        clauses.append(knowledge_expr)
     if not clauses:
         return None
     return " and ".join(clauses)

@@ -33,6 +33,7 @@ class AgentState(BaseModel):
     question: str = ""
     user_id: str = "default"
     workspace_id: str = "default"
+    knowledge_id: str = ""  # 知识范围（多库过滤键；空 = 全部知识库）
     tenant_id: str = "default"
     route: Route = "direct"
     sub_query: str = ""

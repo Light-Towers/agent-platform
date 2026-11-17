@@ -105,6 +105,11 @@ export interface StreamQueryOptions {
   readonly sessionId?: string
   readonly tenantId?: string
   /**
+   * 知识范围（plan-knowledge-base-model 步骤 4）：知识库 ID 过滤，空/缺省 = 全部知识库。
+   * 服务端字段 `knowledge_id`（QueryRequest），随 rag capability 检索收窄召回范围。
+   */
+  readonly knowledgeId?: string
+  /**
    * 登录令牌（PR-2b，方案 D-a/D-i）。非空 ⇒ 本请求带 `Authorization: Bearer`；
    * 空 ⇒ 不发入口凭据头（生产现网后端会回 401）。
    * 装配规则不在这里写，在 `auth.ts` 的 `applyCredentialHeaders`。
@@ -297,6 +302,7 @@ export async function streamQuery(opts: StreamQueryOptions): Promise<StreamSnaps
     const body: Payload = { query: opts.query }
     if (opts.sessionId !== undefined) body.session_id = opts.sessionId
     if (opts.tenantId !== undefined) body.tenant_id = opts.tenantId
+    if (opts.knowledgeId !== undefined && opts.knowledgeId !== '') body.knowledge_id = opts.knowledgeId
     const doFetch = opts.fetchImpl ?? globalThis.fetch
     // `signal` 单独条件赋值：`RequestInit.signal` 在 exactOptionalPropertyTypes 下接
     // `AbortSignal | null`，把 `AbortSignal | undefined` 直接摊进对象字面量会当场红。

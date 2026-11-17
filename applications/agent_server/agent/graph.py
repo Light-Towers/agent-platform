@@ -134,10 +134,12 @@ def build_graph(
         return {"evidence": await _invoke("search", query=state.sub_query)}
 
     async def rag_node(state: AgentState) -> dict:
-        # 隔离双维透传（ADR-0006 T9）：tenant 安全边界 + workspace 归属维，缺一即 fail-fast
+        # 隔离双维透传（ADR-0006 T9）：tenant 安全边界 + workspace 归属维，缺一即 fail-fast；
+        # knowledge_id 归属维（plan-knowledge-base-model）：对话区"知识范围"选择器透传（空 = 全部库）
         return {
             "evidence": await _invoke(
-                "rag", query=state.sub_query, workspace_id=state.workspace_id, tenant_id=state.tenant_id
+                "rag", query=state.sub_query, workspace_id=state.workspace_id,
+                knowledge_id=state.knowledge_id, tenant_id=state.tenant_id,
             )
         }
 

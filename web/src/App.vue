@@ -34,6 +34,7 @@ import {
   clearConversations,
   conversationsBusy,
   conversationsNotice,
+  loadHistory,
   loadSessions,
   newSession,
   removeSession,
@@ -43,6 +44,7 @@ import {
 } from './stores/conversations.ts'
 import {
   ask,
+  authToken,
   banners,
   busy,
   canChat,
@@ -53,13 +55,16 @@ import {
   eventCount,
   hasFeature,
   identityNote,
+  knowledgeScope,
   loggedIn,
   question,
+  resetRound,
   resumeSession,
   signOut,
   traceNote,
   waiting,
 } from './stores/session'
+import { listKnowledgeBases, type KbKnowledgeBase } from './api/kb.ts'
 
 /* ---- G1 管理面导航（批 1：对话页 + 角色页；知识库/数据源两页随批 2/批 3 接入）----
  * 视图键是本组件的局部 ref：只有本件读写它，不进会话层（会话层是跨组件共享态，
@@ -103,15 +108,40 @@ const chatShown = computed(() => activeView.value === 'chat' || (!showRoleGate.v
  * 会话层故意不在模块加载时自发请求，否则行为件在 Node 里 import 会话层就会多一个 fetch。 */
 onMounted(async () => {
   await resumeSession()
-  if (canChat.value) await loadSessions()
+  if (canChat.value) {
+    await loadSessions()
+    void refreshKnowledgeBases()
+  }
 })
 
 /* 登录态变化（登录后 / 掉态后）同步会话目录：登录后拉列表，掉态后清空，避免把上一人的
  * 会话选中态带到下一个人。刷新路径 onMounted 已处理，这里只补「同页登录/登出」的跃迁。 */
 watch(canChat, (ok) => {
-  if (ok) void loadSessions()
-  else clearConversations()
+  if (ok) {
+    void loadSessions()
+    void refreshKnowledgeBases()
+  } else {
+    clearConversations()
+  }
 })
+
+/* ---- 知识范围选择器（plan-knowledge-base-model 步骤 4）----
+ * 选中值 `knowledgeScope` 住在会话层（ask() 发请求时透传 knowledge_id）；**清单**是
+ * 对话页的展示态，留在本组件（局部 UI 态不进会话层，同 activeView 那条理由）。
+ * 数据源 GET /kb/knowledge-bases（feature 门 chat.run，与会话层同权可见）。
+ * 拉取失败**不拦提问**：选择器退化为只剩「全部知识库」一项，失败原因给一句 hint，
+ * 与「登记列表是补充项」同一条纪律 —— 检索主链路不为辅助清单买单。 */
+const knowledgeBases = ref<readonly KbKnowledgeBase[]>([])
+const knowledgeBasesNotice = ref('')
+
+async function refreshKnowledgeBases(): Promise<void> {
+  try {
+    knowledgeBases.value = await listKnowledgeBases(authToken.value)
+    knowledgeBasesNotice.value = ''
+  } catch (err) {
+    knowledgeBasesNotice.value = err instanceof Error ? err.message : String(err)
+  }
+}
 
 /* 提交那一行的第二通道：不可用态只说明"现在不能按"，说不清**为什么**不能按（A4 的
  * 同一条要求在控件上也成立）。两句互斥，所以只可能同时出现一句。 */
@@ -132,6 +162,10 @@ async function submit(): Promise<void> {
     sid = activeSessionId.value
   }
   await ask(undefined, sid || undefined)
+  // 本轮已落库：用服务端权威历史回填消息区，再清掉本轮流式快照（否则同一轮显示两遍）。
+  // 治本点：历史以 chatHistory 为唯一显示源；ask 后不回填就会出现「问第二句第一句没了」。
+  await loadHistory()
+  resetRound()
   // 首轮问答后服务端按内容生成了标题，刷新列表让它上屏（后续轮次幂等无副作用）。
   await loadSessions()
 }
@@ -393,6 +427,25 @@ function onSignOut(): void {
               aria-label="问题"
             >
             <div class="composer__row">
+              <label class="o-head-sm">
+                知识范围
+                <select
+                  v-model="knowledgeScope"
+                  class="ry-input"
+                  aria-label="知识范围（检索收窄到所选知识库）"
+                >
+                  <option value="">
+                    全部知识库
+                  </option>
+                  <option
+                    v-for="kb in knowledgeBases"
+                    :key="kb.knowledge_id"
+                    :value="kb.knowledge_id"
+                  >
+                    {{ kb.knowledge_id }}（{{ kb.doc_count }} 篇）
+                  </option>
+                </select>
+              </label>
               <button
                 type="submit"
                 class="ry-btn ry-btn--primary"
@@ -405,6 +458,14 @@ function onSignOut(): void {
                 class="hint"
               >{{ submitHint }}</span>
             </div>
+            <p
+              v-if="knowledgeBasesNotice !== '' || knowledgeBases.length === 0"
+              class="hint"
+            >
+              {{ knowledgeBasesNotice !== ''
+                ? `知识库清单未取到：${knowledgeBasesNotice}（不影响提问，检索仍覆盖全部知识库）`
+                : '服务端暂无已登记知识库；在知识库页上传并填写知识库 ID 后，这里会出现候选项。' }}
+            </p>
           </form>
         </section>
 

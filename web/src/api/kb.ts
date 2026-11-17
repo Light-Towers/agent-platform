@@ -200,3 +200,31 @@ export async function getKbHistory(
   const data = await resp.json() as { items?: KbHistoryItem[] }
   return Array.isArray(data.items) ? data.items : []
 }
+
+const KB_KNOWLEDGE_BASES_PATH = '/kb/knowledge-bases'
+
+/** 知识库清单一条（代理聚合 KS /documents：按 knowledge_id 去重计数）。 */
+export interface KbKnowledgeBase {
+  readonly knowledge_id: string
+  readonly doc_count: number
+  /** 该库最新一条登记的生命周期状态（DRAFT/REVIEWING/PUBLISHED/…）。 */
+  readonly status: string
+  readonly latest_updated_at: string
+}
+
+/**
+ * 知识库列表（plan-knowledge-base-model 步骤 4）：
+ * 上传页的知识库 ID 下拉与对话区「知识范围」选择器的共同数据源。
+ * feature 门是 chat.run（对话区也消费），不再叠 kb.upload。
+ */
+export async function listKnowledgeBases(
+  token: string,
+  fetchImpl?: typeof fetch,
+): Promise<KbKnowledgeBase[]> {
+  const doFetch = fetchImpl ?? globalThis.fetch
+  const headers = authHeaders(token)
+  const resp = await doFetch(KB_KNOWLEDGE_BASES_PATH, { method: 'GET', headers, cache: 'no-store' })
+  if (!resp.ok) await failKb('知识库列表查询', resp)
+  const data = await resp.json() as { knowledge_bases?: KbKnowledgeBase[] }
+  return Array.isArray(data.knowledge_bases) ? data.knowledge_bases : []
+}

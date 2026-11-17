@@ -51,6 +51,7 @@ SYSTEM_TABLE_WHITELIST: dict[str, str] = {
     "organizations": "企业实体，id=租户断言值（013 同值域）；身份域本体非租户业务数据",
     "users": "用户实体，org_id 直挂企业（D9）；身份域本体，含 org_id 归属维",
     "conversations": "会话归属表（D11 旁置表），含 org_id 列；user_id 014b 后 NOT NULL",
+    "agent_sessions": "多会话目录表（018 旁置表），org_id=租户断言值 + user_id 归属，与 conversations 同型；身份域本体非租户业务数据",
     "episodic_memories": "执行记忆，隔离列由 plan-memory-hardening T1 处置（本计划不重复）",
     "procedural_memories": "技能记忆，租户内共享由 plan-memory-hardening T1 处置（本计划不重复）",
 }

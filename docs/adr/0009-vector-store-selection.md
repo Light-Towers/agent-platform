@@ -39,3 +39,13 @@ KS 要稀疏向量（引擎侧），agent_server 要"向量列与业务表同库
 ## 5. 待用户回答
 - A / B / C（选 C 的话，我把"哪类数据落哪套"的边界写进 `ARCHITECTURE.md`，并加 lint 禁第三套；
   选 A 或 B 都属跨服务迁移，需单独立项出实施方案，我不会直接动手）。
+
+---
+
+## 6. 后记（2026-11-17：**接口**统一已落地，物理存储仍两套）
+
+本文状态仍为「未决」——**物理存储合并**（A/B）的两条重启条件一个都没触发，本后记不改写 §1–§5 的任何判断，只登记之后发生的一件事。
+
+**变化在接口层**：`plan-knowledge-base-model-2026-11-17` 实施时抽出「文档向量检索」契约 `DocumentStore`（add_documents / retrieve / delete_document 三件套，协议件在 `packages/agent-runtime/agent_runtime/document_store.py`），Milvus（默认）与宿主侧 pgvector（降级/自举备选）各出一个实现，经 agent_server 的 `DOC_BACKEND` 开关由工厂（`applications/agent_server/rag/backend.py`）装配；上传（`/kb/uploads`）与检索（`rag_query`）经同一工厂读同一份配置 ⇒ 「写哪个后端就查哪个后端」，修复了「UI 上传写 KS 的 Milvus、对话检索读 agent_server 自己的 pgvector」的断链（该断链事实与本方案的实取证据见 `docs/plans/plan-knowledge-base-model-2026-11-17.md` §0 F2）。
+
+与 §2 三个选项的关系：这不是 A/B（零数据迁移、零存储合并），也不止是 C（不止把边界写成文档，还把**文档检索这一个消费面**收敛到了单一契约）。定性：C 的自然延伸——两套物理存储各自的功能理由不变（KS 要引擎侧稀疏路，平台要向量列与业务表同库同事务），但新增消费方不得再「各挑一套存储、各写一套客户端」，文档检索一律走 `DocumentStore` 协议。**禁止第三套**不变量仍由 C 承担（见 §2 选项 C 与重启条件 3）。

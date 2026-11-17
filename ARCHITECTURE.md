@@ -36,7 +36,7 @@ agent-core  agent-runtime  shared-schemas  agent-server  agent_federation  exhib
 | 目录 | 定位 | 职责 | 稳定性 |
 |------|------|------|--------|
 | `agent-core` | **基础 Agent 能力内核** | logging / tracing / metrics / llm / memory（含 MemoryStore 统一门面） / tools / guardrails / resilience / events（EventBus 多 sink 扇出） / config（KernelConfig + 类型化 env 解析） / intent（L1 分类器） | 稳定、底层、框架无关（不得 import 任何宿主） |
-| `agent-runtime` | **Agent 执行 / 组合运行时** | Planner / Plan（`packages/agent-runtime/agent_runtime/planner/protocol.py:98`） / Capability（Function/Agent/Remote/Workflow 四型 CapabilityKind，MCP/Sandbox 经特化注册函数挂载） / CapabilityRegistry / Workflow（`WorkflowSpec` / `WorkflowExecutor`，`packages/agent-runtime/agent_runtime/capabilities/workflow.py:79,108`） / ExecutionContext（`packages/agent-runtime/agent_runtime/planner/protocol.py:216`） / PlannerRuntime（同文件 :359） / Sandbox（`SandboxExecutor`，`packages/agent-runtime/agent_runtime/sandbox.py:70`） | 重点建设，架构收口完成 |
+| `agent-runtime` | **Agent 执行 / 组合运行时** | Planner / Plan（`packages/agent-runtime/agent_runtime/planner/protocol.py:98`） / Capability（Function/Agent/Remote/Workflow 四型 CapabilityKind，MCP/Sandbox 经特化注册函数挂载） / CapabilityRegistry / Workflow（`WorkflowSpec` / `WorkflowExecutor`，`packages/agent-runtime/agent_runtime/capabilities/workflow.py:79,108`） / ExecutionContext（`packages/agent-runtime/agent_runtime/planner/protocol.py:216`） / PlannerRuntime（同文件 :359） / Sandbox（`SandboxExecutor`，`packages/agent-runtime/agent_runtime/sandbox.py:70`） / DocumentStore（文档向量检索协议：Milvus 默认 / pgvector 降级，`DOC_BACKEND` 开关统一「上传与检索落同一后端」；后记见 ADR-0009 §6） | 重点建设，架构收口完成 |
 | `shared-schemas` | **跨边界数据 / 协议契约** | Request / Response / Event / Error / Protocol DTO | 稳定，跨进程通信单一事实来源 |
 
 > `agent-core` 提供**零件**，`agent-runtime` 把零件**组装成执行引擎**。二者不可反向依赖。

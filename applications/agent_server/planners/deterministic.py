@@ -82,6 +82,7 @@ class DeterministicPlanner(Planner):
                     reason="被输入护栏拦截（injection）",
                     question=question,
                     workspace_id=ctx.workspace_id,
+                    knowledge_id=ctx.knowledge_id,
                     user_id=ctx.user_id,
                     tenant_id=ctx.tenant_id,
                     last_snapshot=ctx.last_snapshot,
@@ -107,6 +108,7 @@ class DeterministicPlanner(Planner):
                     reason="上下文已压缩，重新路由",
                     question=question,
                     workspace_id=ctx.workspace_id,
+                    knowledge_id=ctx.knowledge_id,
                     user_id=ctx.user_id,
                     tenant_id=ctx.tenant_id,
                     messages=compacted,
@@ -124,6 +126,7 @@ class DeterministicPlanner(Planner):
                 reason="L1 chitchat short-circuit",
                 question=question,
                 workspace_id=ctx.workspace_id,
+                knowledge_id=ctx.knowledge_id,
                 user_id=ctx.user_id,
                 tenant_id=ctx.tenant_id,
                 last_snapshot=ctx.last_snapshot,
@@ -137,6 +140,7 @@ class DeterministicPlanner(Planner):
             reason=decision.reason,
             question=question,
             workspace_id=ctx.workspace_id,
+            knowledge_id=ctx.knowledge_id,
             user_id=ctx.user_id,
             tenant_id=ctx.tenant_id,
             mcp_server=ctx.mcp_server,
@@ -313,6 +317,8 @@ class DeterministicPlanner(Planner):
             kwargs: dict[str, Any] = {"query": plan.sub_query or question}
             if plan.route == "rag":
                 kwargs["workspace_id"] = workspace_id
+                # 知识范围（plan-knowledge-base-model）：Plan 携带的 knowledge_id 透传到协议
+                kwargs["knowledge_id"] = plan.knowledge_id
             elif plan.route == "sql":
                 kwargs["llm"] = runtime.llm
             result = await runtime.delegate(plan.route, **kwargs)

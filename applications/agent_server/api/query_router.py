@@ -278,6 +278,7 @@ async def query(
                 async for update in graph.astream(
                     {"messages": [("user", req.query)], "question": req.query,
                      "user_id": req.user_id, "workspace_id": req.workspace_id,
+                     "knowledge_id": req.knowledge_id,
                      "tenant_id": tenant,
                      "iterations": 0},
                     config=config,
@@ -313,6 +314,7 @@ async def query(
                 ctx = PlannerContext(
                     question=req.query,
                     workspace_id=req.workspace_id,
+                    knowledge_id=req.knowledge_id,
                     user_id=req.user_id,
                     tenant_id=tenant,
                     messages=await _thread_persist.read_thread_messages(checkpointer, thread_id),

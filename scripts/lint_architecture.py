@@ -1464,6 +1464,10 @@ _SIGN_SYMBOLS = frozenset({"sign_internal_header", "build_internal_headers"})
 # 的新信任边界（D7 代理转发 + 方案补记 9 拍板：PATCH /kb/{id}/status 的 KS 上游为
 # 新建 /reimport 入口）。role 刻意不签（KS fork 二元组验签「带而不用」，签无消费者
 # 的键 = 无主契约面）。同为收编前的登记：任何第 8 位仍报红；1c 完整收编时收紧。
+# ❗ 2026-11-17 多知识库：+1 位 `scripts/reimport_kb_to_milvus.py` —— 存量 PUBLISHED
+# 文档重灌运维脚本，要向 KS /documents 与 /reimport 发内部请求，必须签 X-Internal-Tenant
+# （KS 侧只认签名头断言、不收表单租户），与 kb_router.py 的代理出站同形。role 仍不签，
+# 理由同上。本位是收编前登记：1c 完整单入口收编时本表收紧，不继续无条件扩。
 _SIGN_SITE_ALLOWED = frozenset({
     "packages/agent-core/agent_core/internal_header.py",
     "packages/agent-runtime/agent_runtime/identity.py",
@@ -1474,6 +1478,7 @@ _SIGN_SITE_ALLOWED = frozenset({
     "applications/agent_server/api/kb_router.py",
     # G3 刀 3 数据源代理：与 sql_router 同形，X-Internal-Tenant 签名头转发（role 不签）
     "applications/agent_server/api/datasources_router.py",
+    "scripts/reimport_kb_to_milvus.py",
 })
 
 

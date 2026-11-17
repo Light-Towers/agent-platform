@@ -58,9 +58,14 @@ async def test_search_web_with_results(monkeypatch):
     get_settings.cache_clear()
 
 
-async def test_rag_query_no_pool():
-    """pool 为 None 时返回知识库未启用提示。"""
-    with patch("agent_runtime.db.get_pool", return_value=None):
+async def test_rag_query_backend_unavailable():
+    """后端运行时不可用（pgvector 且 pool None）时返回知识库未启用提示。"""
+    from agent_runtime.document_store import DocumentStoreUnavailable
+
+    fake_store = MagicMock()
+    fake_store.retrieve = AsyncMock(side_effect=DocumentStoreUnavailable("DATABASE_URL 未配置"))
+    with patch("agent_server.subagents.rag.get_pool", return_value=None), \
+         patch("agent_server.subagents.rag.get_document_store", return_value=fake_store):
         from agent_server.subagents.rag import rag_query
 
         result = await rag_query("test query")
@@ -68,16 +73,27 @@ async def test_rag_query_no_pool():
     assert "未启用" in result[0]
 
 
-async def test_rag_query_with_chunks(monkeypatch):
-    """有 pool 且检索到 chunks 时返回格式化证据。"""
-    mock_pool = MagicMock()
+async def test_rag_query_backend_not_configured():
+    """DOC_BACKEND 未配置完整（工厂返回 None）时降级为可读提示，不 500。"""
+    with patch("agent_server.subagents.rag.get_document_store", return_value=None):
+        from agent_server.subagents.rag import rag_query
+
+        result = await rag_query("test query")
+    assert len(result) == 1
+    assert "未启用" in result[0]
+
+
+async def test_rag_query_with_chunks():
+    """有后端且检索到 chunks 时返回格式化证据（经协议，不碰具体后端）。"""
+    mock_store = MagicMock()
     mock_chunks = [
         {"source": "doc1", "heading": "标题1", "content": "内容1"},
         {"source": "doc2", "heading": None, "content": "内容2"},
     ]
+    mock_store.retrieve = AsyncMock(return_value=mock_chunks)
 
-    with patch("agent_server.subagents.rag.get_pool", return_value=mock_pool), \
-         patch("agent_server.subagents.rag.retrieve_chunks", new_callable=AsyncMock, return_value=mock_chunks), \
+    with patch("agent_server.subagents.rag.get_pool", return_value=MagicMock()), \
+         patch("agent_server.subagents.rag.get_document_store", return_value=mock_store), \
          patch("agent_server.subagents.rag.get_settings") as mock_settings:
         mock_settings.return_value.rag_top_k = 5
         from agent_server.subagents.rag import rag_query
@@ -89,11 +105,13 @@ async def test_rag_query_with_chunks(monkeypatch):
     assert "无标题" in result[1]
 
 
-async def test_rag_query_no_chunks(monkeypatch):
-    """有 pool 但检索无结果时返回未检索到提示。"""
-    mock_pool = MagicMock()
-    with patch("agent_server.subagents.rag.get_pool", return_value=mock_pool), \
-         patch("agent_server.subagents.rag.retrieve_chunks", new_callable=AsyncMock, return_value=[]), \
+async def test_rag_query_no_chunks():
+    """有后端但检索无结果时返回未检索到提示。"""
+    mock_store = MagicMock()
+    mock_store.retrieve = AsyncMock(return_value=[])
+
+    with patch("agent_server.subagents.rag.get_pool", return_value=MagicMock()), \
+         patch("agent_server.subagents.rag.get_document_store", return_value=mock_store), \
          patch("agent_server.subagents.rag.get_settings") as mock_settings:
         mock_settings.return_value.rag_top_k = 5
         from agent_server.subagents.rag import rag_query
@@ -101,6 +119,45 @@ async def test_rag_query_no_chunks(monkeypatch):
         result = await rag_query("test query")
     assert len(result) == 1
     assert "未检索到" in result[0]
+
+
+async def test_rag_query_passes_knowledge_id_scope():
+    """knowledge_id（对话区"知识范围"选择器）必须透传到后端协议。"""
+    mock_store = MagicMock()
+    mock_store.retrieve = AsyncMock(return_value=[])
+
+    with patch("agent_server.subagents.rag.get_pool", return_value=MagicMock()), \
+         patch("agent_server.subagents.rag.get_document_store", return_value=mock_store), \
+         patch("agent_server.subagents.rag.get_settings") as mock_settings:
+        mock_settings.return_value.rag_top_k = 5
+        from agent_server.subagents.rag import rag_query
+
+        await rag_query("test query", "ws1", "kb-123", tenant_id="tenantA")
+        await rag_query("test query", tenant_id="tenantA")  # 缺省 = 全部知识库
+
+    scoped = mock_store.retrieve.call_args_list[0]
+    assert scoped.kwargs["knowledge_id"] == "kb-123"
+    assert scoped.args[3] == "ws1"
+    all_libs = mock_store.retrieve.call_args_list[1]
+    assert all_libs.kwargs["knowledge_id"] == ""
+
+
+def test_rag_depends_on_protocol_not_backends():
+    """门禁：rag_query 只依赖 DocumentStore 协议与工厂，不 import 具体后端。
+
+    后端可切换的前提是消费方依赖指向接口——谁在 subagents 里 import
+    pg_backend / MilvusDocumentStore / store 模块，谁就把切换性打断。
+    """
+    import inspect
+
+    import agent_server.subagents.rag as rag_mod
+
+    src = inspect.getsource(rag_mod)
+    for forbidden in ("pg_backend", "PgVectorDocumentStore", "MilvusDocumentStore", "rag.store"):
+        assert forbidden not in src, (
+            f"subagents/rag.py 不许 import 具体后端（{forbidden}）："
+            "文档检索经 agent_server.rag.backend.get_document_store 工厂取协议"
+        )
 
 
 async def test_mcp_query_none_manager():
