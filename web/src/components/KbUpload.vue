@@ -34,6 +34,8 @@ import {
   listKbDocuments,
   getKbHistory,
   listKnowledgeBases,
+  deleteKbDocument,
+  deleteKbKnowledgeBase,
   KbRateLimitedError,
   type KbUploadForm,
   type KbTaskStatus,
@@ -89,6 +91,50 @@ async function refreshKnowledgeBases(): Promise<void> {
     knowledgeBases.value = await listKnowledgeBases(authToken.value ?? '')
   } catch {
     knowledgeBases.value = []
+  }
+}
+
+/* ---- 知识/知识库删除（软删除→REVOKED，删后不再被 RAG 召回）---- */
+/** 正在删除的 knowledge_id（防重复点），与上传的 busy 分开。 */
+const deleteBusy = ref('')
+/** 删除操作的成功/失败提示（与上传的 errorText 分开，避免互相覆盖）。 */
+const deleteNotice = ref('')
+
+/** 下线单个文档：软删除，删后对话检索不再召回该文档。 */
+async function onDeleteDocument(kid: string): Promise<void> {
+  if (deleteBusy.value) return
+  if (!window.confirm(`确定下线文档「${kid}」？该文档将从对话检索中移除（软删除，数据保留，可重新发布恢复）。`)) return
+  deleteBusy.value = kid
+  deleteNotice.value = ''
+  try {
+    await deleteKbDocument(kid, authToken.value ?? '')
+    deleteNotice.value = `文档「${kid}」已下线：不再被 RAG 召回（数据保留，可恢复）。`
+    await Promise.all([refreshKnowledgeBases(), refreshDocuments(), loadHistory()])
+  } catch (err) {
+    deleteNotice.value = `文档下线失败：${err instanceof Error ? err.message : String(err)}`
+  } finally {
+    deleteBusy.value = ''
+  }
+}
+
+/** 删除整个知识库：前置校验库下无有效文档（有则后端 409），通过则标 deleted。 */
+async function onDeleteBase(kid: string, docCount: number): Promise<void> {
+  if (deleteBusy.value) return
+  if (docCount > 0) {
+    deleteNotice.value = `知识库「${kid}」下还有 ${docCount} 个文档，请先将文档全部下线后再删库。`
+    return
+  }
+  if (!window.confirm(`确定删除知识库「${kid}」？该库将标记为已删除（数据保留）。`)) return
+  deleteBusy.value = kid
+  deleteNotice.value = ''
+  try {
+    await deleteKbKnowledgeBase(kid, authToken.value ?? '')
+    deleteNotice.value = `知识库「${kid}」已删除。`
+    await refreshKnowledgeBases()
+  } catch (err) {
+    deleteNotice.value = `知识库删除失败：${err instanceof Error ? err.message : String(err)}`
+  } finally {
+    deleteBusy.value = ''
   }
 }
 
@@ -365,6 +411,13 @@ async function refreshDocuments(): Promise<void> {
         <strong>{{ errorText }}</strong>
       </p>
       <p
+        v-if="deleteNotice"
+        class="banner"
+        role="status"
+      >
+        <strong>{{ deleteNotice }}</strong>
+      </p>
+      <p
         v-if="failed && status?.error"
         class="banner"
       >
@@ -506,18 +559,32 @@ async function refreshDocuments(): Promise<void> {
           : '当前显示本机缓存（服务端暂不可达）；网络恢复后会自动切回服务端权威历史。' }}
       </p>
       <div class="kb-history">
-        <button
+        <div
           v-for="rec in uploads"
           :key="rec.task_id"
-          type="button"
           class="kb-history__item"
           :class="{ 'is-active': rec.task_id === activeTaskId }"
-          @click="selectTask(rec)"
         >
-          <strong>{{ rec.filename }}</strong>
-          <span class="hint">{{ rec.uploaded_at ? new Date(rec.uploaded_at).toLocaleString() : '' }}</span>
-          <span class="count-badge">{{ rec.status === 'completed' ? '完成' : rec.status === 'failed' ? '失败' : '进行中' }}</span>
-        </button>
+          <button
+            type="button"
+            class="ry-btn ry-btn--text"
+            @click="selectTask(rec)"
+          >
+            <strong>{{ rec.filename }}</strong>
+            <span class="hint">{{ rec.uploaded_at ? new Date(rec.uploaded_at).toLocaleString() : '' }}</span>
+            <span class="count-badge">{{ rec.status === 'completed' ? '完成' : rec.status === 'failed' ? '失败' : '进行中' }}</span>
+          </button>
+          <button
+            v-if="rec.knowledge_id"
+            type="button"
+            class="ry-btn"
+            :aria-disabled="deleteBusy === rec.knowledge_id"
+            title="下线该知识库文档（软删除，删后不再被 RAG 召回）"
+            @click="onDeleteDocument(rec.knowledge_id)"
+          >
+            {{ deleteBusy === rec.knowledge_id ? '下线中…' : '删除文档' }}
+          </button>
+        </div>
       </div>
     </section>
 
@@ -625,6 +692,44 @@ async function refreshDocuments(): Promise<void> {
           class="hint"
         >{{ JSON.stringify(documents, null, 2) }}</pre>
       </details>
+    </section>
+
+    <!-- ④ 知识库管理：列库 → 下线文档（不再被 RAG 召回）/ 删库（库下有文档则禁删） -->
+    <section
+      class="ry-card"
+      aria-labelledby="hKbManage"
+    >
+      <h2 id="hKbManage">
+        我的知识库
+        <span class="count-badge">{{ knowledgeBases.length }} 个</span>
+      </h2>
+      <p class="hint">
+        这里管理已建的知识库。下线文档后它将不再被对话检索（RAG）召回，数据仍保留、可重新上传恢复；
+        删除知识库前需先把库下文档全部下线。
+      </p>
+      <p
+        v-if="!knowledgeBases.length"
+        class="hint"
+      >
+        还没有知识库。在上方上传文档并填写知识库 ID 即自动建库。
+      </p>
+      <div
+        v-for="kb in knowledgeBases"
+        :key="kb.knowledge_id"
+        class="composer__row"
+      >
+        <span class="o-head-sm">{{ kb.name || kb.knowledge_id }}</span>
+        <span class="hint">{{ kb.doc_count }} 个文档 · {{ kb.status }}</span>
+        <button
+          type="button"
+          class="ry-btn"
+          :aria-disabled="deleteBusy === kb.knowledge_id || kb.doc_count > 0"
+          :title="kb.doc_count > 0 ? '库下还有文档，请先下线文档' : '删除该知识库'"
+          @click="onDeleteBase(kb.knowledge_id, kb.doc_count)"
+        >
+          {{ deleteBusy === kb.knowledge_id ? '删除中…' : '删除知识库' }}
+        </button>
+      </div>
     </section>
   </div>
 </template>

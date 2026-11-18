@@ -79,6 +79,7 @@ kb_documents 一库一行（upsert 覆盖），"库下文档"实际是 kb_upload
 | 整库删 | `kb_delete.delete_collection_guard`：前置校验 + kb_collections.mark_deleted | 有有效文档 409、库不存在 404 |
 | status 值域 | 正常文档=生命周期状态（PUBLISHED/REVIEWING…），软删除=REVOKED（见 P2 §8） | 过滤 `status != REVOKED` 天然排除软删项 |
 | 前后端端点 | KS `DELETE /documents/{id}` + `DELETE /collections/{id}`；平台代理同名 + 管理页 KnowledgeBaseAdmin.vue | 平台纯代理，签名头透传；前端删单文档/删库二段确认 |
+| **UI 整合（2026-11-18 用户反馈后修正）** | **删掉独立「知识库管理」菜单**，把删除能力合并进唯一「知识库」页（KbUpload.vue）：上传历史每项「删除文档」+ 底部「我的知识库」区（列库/删库） | 用户反馈"两个菜单是坏设计"——一个概念应在一个页面。单文档删除后不再被 RAG 召回是硬验收判据 |
 
 ### P2 详细设计（实现口径，2026-11-18 钉死）
 
