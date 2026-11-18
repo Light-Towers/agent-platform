@@ -87,7 +87,7 @@ class Settings(BaseLLMSettings):
     doc_backend: str = "milvus"  # 默认 milvus（与 KS 上传管线同集合，上传即检索）；pgvector 为本地降级备选
     doc_milvus_uri: str = ""  # 空 = milvus 后端不可用（get_document_store 返回 None → 可读降级）
     doc_milvus_token: str = ""
-    doc_milvus_collection: str = "platform_doc_v2_bge_m3"  # 独立集合，不复用 KS product_manual_v1_bge_m3
+    doc_milvus_collection: str = "platform_doc_v3_bge_m3"  # v3 含 status 软删除字段；不复用旧集合 product_manual_v1_bge_m3
     # 文档集合专用 embedding 配置：必须与写该集合的模型一致（bge-m3 = 1024 维）。
     # 未配 api_key 时回退 app 主 embedder，部署侧须自行保证 EMBEDDING_* 与集合对齐。
     doc_embed_api_key: str = ""
