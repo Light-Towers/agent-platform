@@ -25,7 +25,7 @@
  *   的 /kb/* 代理（kb_router.py），凭据头经 applyCredentialHeaders 唯一装配点。
  * ==========================================================================-->
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 
 import { authToken } from '../stores/session'
 import {
@@ -33,14 +33,11 @@ import {
   getKbStatus,
   listKbDocuments,
   getKbHistory,
-  listKnowledgeBases,
   deleteKbDocument,
-  deleteKbKnowledgeBase,
   KbRateLimitedError,
   type KbUploadForm,
   type KbTaskStatus,
   type KbHistoryItem,
-  type KbKnowledgeBase,
 } from '../api/kb.ts'
 import { DIALECT_OPTIONS } from '../api/datasources.ts'
 import {
@@ -49,7 +46,13 @@ import {
   cachePending,
 } from '../stores/kbHistory.ts'
 
-/** 默认配置即"能跑"：DRAFT + PRIVATE + 勾语义识别；knowledge_id 由上传者在主界面必填。 */
+/** 右栏 detail：由父组件（知识库页）传入当前选中的知识库。 */
+const props = defineProps<{
+  selectedKnowledgeId: string
+  selectedName: string
+}>()
+
+/** 默认配置即"能跑"：DRAFT + PRIVATE + 勾语义识别；knowledge_id 由左栏选中的库提供。 */
 const form = ref<KbUploadForm>({
   scopeType: 'PRIVATE',
   tenantType: '',
@@ -80,21 +83,32 @@ const uploads = ref<KbHistoryItem[]>([])
 const historySource = ref<'server' | 'cache'>('cache')
 /** 后端按 knowledge_id 登记的文档列表（只作补充展示）。 */
 const documents = ref<unknown>(null)
-/** 知识库清单（datalist 候选；数据源同对话区的 /kb/knowledge-bases，feature 门 chat.run）。 */
-const knowledgeBases = ref<readonly KbKnowledgeBase[]>([])
+/** 当前选中库的上传历史 / 登记文档（选中库时只显示该库，避免多库混在一起）。 */
+const scopedUploads = computed(() =>
+  props.selectedKnowledgeId
+    ? uploads.value.filter((u) => u.knowledge_id === props.selectedKnowledgeId)
+    : uploads.value,
+)
+const scopedDocuments = computed(() => {
+  if (!props.selectedKnowledgeId || !Array.isArray(documents.value)) return documents.value
+  return (documents.value as Array<{ knowledge_id?: string }>).filter(
+    (d) => d.knowledge_id === props.selectedKnowledgeId,
+  )
+})
 /** DOC_BACKEND=pgvector 时的成功读数：本地直写文档向量库，无 KS 后台任务可轮询。 */
 const localIngestNote = ref('')
 
-/** 知识库清单是输入便利（候选 + 校验 ID 拼写），拉取失败不报错——可手填，不拦上传主流程。 */
-async function refreshKnowledgeBases(): Promise<void> {
-  try {
-    knowledgeBases.value = await listKnowledgeBases(authToken.value ?? '')
-  } catch {
-    knowledgeBases.value = []
-  }
-}
+/** 左栏选中库变化时：同步上传表单的 knowledge_id，并刷新该库历史/文档。 */
+watch(
+  () => props.selectedKnowledgeId,
+  (kid) => {
+    form.value.knowledgeId = kid || ''
+    if (kid) void loadHistory()
+  },
+  { immediate: true },
+)
 
-/* ---- 知识/知识库删除（软删除→REVOKED，删后不再被 RAG 召回）---- */
+/* ---- 文档下线（软删除→REVOKED，删后不再被 RAG 召回）---- */
 /** 正在删除的 knowledge_id（防重复点），与上传的 busy 分开。 */
 const deleteBusy = ref('')
 /** 删除操作的成功/失败提示（与上传的 errorText 分开，避免互相覆盖）。 */
@@ -109,30 +123,9 @@ async function onDeleteDocument(kid: string): Promise<void> {
   try {
     await deleteKbDocument(kid, authToken.value ?? '')
     deleteNotice.value = `文档「${kid}」已下线：不再被 RAG 召回（数据保留，可恢复）。`
-    await Promise.all([refreshKnowledgeBases(), refreshDocuments(), loadHistory()])
+    await Promise.all([refreshDocuments(), loadHistory()])
   } catch (err) {
     deleteNotice.value = `文档下线失败：${err instanceof Error ? err.message : String(err)}`
-  } finally {
-    deleteBusy.value = ''
-  }
-}
-
-/** 删除整个知识库：前置校验库下无有效文档（有则后端 409），通过则标 deleted。 */
-async function onDeleteBase(kid: string, docCount: number): Promise<void> {
-  if (deleteBusy.value) return
-  if (docCount > 0) {
-    deleteNotice.value = `知识库「${kid}」下还有 ${docCount} 个文档，请先将文档全部下线后再删库。`
-    return
-  }
-  if (!window.confirm(`确定删除知识库「${kid}」？该库将标记为已删除（数据保留）。`)) return
-  deleteBusy.value = kid
-  deleteNotice.value = ''
-  try {
-    await deleteKbKnowledgeBase(kid, authToken.value ?? '')
-    deleteNotice.value = `知识库「${kid}」已删除。`
-    await refreshKnowledgeBases()
-  } catch (err) {
-    deleteNotice.value = `知识库删除失败：${err instanceof Error ? err.message : String(err)}`
   } finally {
     deleteBusy.value = ''
   }
@@ -215,7 +208,6 @@ async function submit(): Promise<void> {
       await loadHistory()
     }
     await refreshDocuments()
-    await refreshKnowledgeBases()
   } catch (err) {
     errorText.value = err instanceof Error ? err.message : String(err)
   } finally {
@@ -299,7 +291,6 @@ async function restore(): Promise<void> {
     if (latest) selectTask(latest)
   }
   await refreshDocuments()
-  await refreshKnowledgeBases()
 }
 
 onMounted(restore)
@@ -322,11 +313,11 @@ async function refreshDocuments(): Promise<void> {
       aria-labelledby="hKb"
     >
       <h2 id="hKb">
-        上传文档
+        上传文档<span v-if="selectedName"> · {{ selectedName }}</span>
       </h2>
       <p class="hint">
-        拖入文件即可上传（PDF / Markdown / Word / PPT / Excel，单个不超过 100MB）。
-        处理进度与切片结果会在下方直接给出。
+        拖入文件即可上传到当前选中的知识库（PDF / Markdown / Word / PPT / Excel，单个不超过 100MB）。
+        处理进度与切片结果会在下方给出；下线文档后它将不再被对话检索召回。
       </p>
 
       <label
@@ -361,38 +352,31 @@ async function refreshDocuments(): Promise<void> {
         </button>
       </p>
 
-      <label class="kb-required">
-        <span class="o-head-sm">知识库 ID <span class="kb-required__star">*</span></span>
-        <!-- datalist = 可搜索下拉：候选来自服务端登记的知识库（输入即过滤，也可手填新 ID）。 -->
-        <input
-          v-model="form.knowledgeId"
-          class="ry-input"
-          type="text"
-          required
-          list="kb-id-options"
-          aria-label="知识库 ID（必填）"
-          placeholder="如 exhibition-kb，用于文档登记与发布管理"
+      <div class="kb-required">
+        <span class="o-head-sm">上传到知识库</span>
+        <p
+          v-if="selectedKnowledgeId"
+          class="hint"
         >
-        <datalist id="kb-id-options">
-          <option
-            v-for="kb in knowledgeBases"
-            :key="kb.knowledge_id"
-            :value="kb.knowledge_id"
-          >
-            {{ kb.doc_count }} 篇 · {{ kb.status }}
-          </option>
-        </datalist>
-        <span class="hint">必填：用于文档登记与发布管理，也是对话区「知识范围」收窄的锚点；留空会导致文档无法登记、无法发布，也无法在对话里检索到。</span>
-      </label>
+          当前库：<strong>{{ selectedName }}</strong>
+          <code class="t-name">{{ selectedKnowledgeId }}</code>
+        </p>
+        <p
+          v-else
+          class="banner"
+        >
+          <strong>请先在左侧选择或新建一个知识库，再上传文档。</strong>
+        </p>
+      </div>
 
       <div class="composer__row">
         <button
           type="button"
           class="ry-btn ry-btn--primary"
-          :aria-disabled="busy || files.length === 0 || form.knowledgeId.trim() === ''"
+          :aria-disabled="busy || files.length === 0 || selectedKnowledgeId === ''"
           @click="submit"
         >
-          {{ busy ? '上传中…' : '上传' }}
+          {{ busy ? '上传中…' : '上传到当前知识库' }}
         </button>
       </div>
 
@@ -545,22 +529,22 @@ async function refreshDocuments(): Promise<void> {
 
     <!-- ② 管理员层：历史任务切换 + 结果可核对（步骤 + 切片 + 语义结构） -->
     <section
-      v-if="uploads.length"
+      v-if="scopedUploads.length"
       class="ry-card"
       aria-labelledby="hHistory"
     >
       <h2 id="hHistory">
         上传历史
-        <span class="count-badge">{{ uploads.length }} 条</span>
+        <span class="count-badge">{{ scopedUploads.length }} 条</span>
       </h2>
       <p class="hint">
         {{ historySource === 'server'
-          ? '历史保存在服务端，刷新、换设备或重启后仍可查看；点击任一切换下方切片结果。'
+          ? '历史保存在服务端，点击任一记录查看其切片结果；下线文档后不再被对话检索召回。'
           : '当前显示本机缓存（服务端暂不可达）；网络恢复后会自动切回服务端权威历史。' }}
       </p>
       <div class="kb-history">
         <div
-          v-for="rec in uploads"
+          v-for="rec in scopedUploads"
           :key="rec.task_id"
           class="kb-history__item"
           :class="{ 'is-active': rec.task_id === activeTaskId }"
@@ -675,10 +659,10 @@ async function refreshDocuments(): Promise<void> {
     <section class="ry-card">
       <details class="fold">
         <summary>
-          <span class="o-head-sm">已登记文档（服务端，按 knowledge_id）</span>
+          <span class="o-head-sm">当前库登记文档（服务端原始数据）</span>
         </summary>
         <p class="hint">
-          这里只列出上传时填了 knowledge_id 的文档；未填的上传记录在上面「上传历史」里。
+          当前选中库的登记文档原始数据，供核对；下线文档后状态会变 REVOKED。
         </p>
         <button
           type="button"
@@ -688,48 +672,10 @@ async function refreshDocuments(): Promise<void> {
           刷新列表
         </button>
         <pre
-          v-if="documents"
+          v-if="scopedDocuments"
           class="hint"
-        >{{ JSON.stringify(documents, null, 2) }}</pre>
+        >{{ JSON.stringify(scopedDocuments, null, 2) }}</pre>
       </details>
-    </section>
-
-    <!-- ④ 知识库管理：列库 → 下线文档（不再被 RAG 召回）/ 删库（库下有文档则禁删） -->
-    <section
-      class="ry-card"
-      aria-labelledby="hKbManage"
-    >
-      <h2 id="hKbManage">
-        我的知识库
-        <span class="count-badge">{{ knowledgeBases.length }} 个</span>
-      </h2>
-      <p class="hint">
-        这里管理已建的知识库。下线文档后它将不再被对话检索（RAG）召回，数据仍保留、可重新上传恢复；
-        删除知识库前需先把库下文档全部下线。
-      </p>
-      <p
-        v-if="!knowledgeBases.length"
-        class="hint"
-      >
-        还没有知识库。在上方上传文档并填写知识库 ID 即自动建库。
-      </p>
-      <div
-        v-for="kb in knowledgeBases"
-        :key="kb.knowledge_id"
-        class="composer__row"
-      >
-        <span class="o-head-sm">{{ kb.name || kb.knowledge_id }}</span>
-        <span class="hint">{{ kb.doc_count }} 个文档 · {{ kb.status }}</span>
-        <button
-          type="button"
-          class="ry-btn"
-          :aria-disabled="deleteBusy === kb.knowledge_id || kb.doc_count > 0"
-          :title="kb.doc_count > 0 ? '库下还有文档，请先下线文档' : '删除该知识库'"
-          @click="onDeleteBase(kb.knowledge_id, kb.doc_count)"
-        >
-          {{ deleteBusy === kb.knowledge_id ? '删除中…' : '删除知识库' }}
-        </button>
-      </div>
     </section>
   </div>
 </template>

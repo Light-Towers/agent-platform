@@ -256,3 +256,40 @@ export async function deleteKbKnowledgeBase(
   if (!resp.ok) await failKb('知识库删除', resp)
   return await resp.json()
 }
+
+/** 新建知识库：POST /kb/knowledge-bases。系统生成全局唯一 knowledge_id。 */
+export async function createKbKnowledgeBase(
+  name: string,
+  token: string,
+  fetchImpl?: typeof fetch,
+): Promise<{ knowledge_id: string; name: string }> {
+  const doFetch = fetchImpl ?? globalThis.fetch
+  const headers = authHeaders(token)
+  headers.set('Content-Type', 'application/json')
+  const resp = await doFetch('/kb/knowledge-bases', {
+    method: 'POST', headers,
+    body: JSON.stringify({ name }),
+    cache: 'no-store',
+  })
+  if (!resp.ok) await failKb('知识库创建', resp)
+  return await resp.json() as { knowledge_id: string; name: string }
+}
+
+/** 重命名知识库：PATCH /kb/knowledge-bases/{knowledge_id}。 */
+export async function renameKbKnowledgeBase(
+  knowledgeId: string,
+  name: string,
+  token: string,
+  fetchImpl?: typeof fetch,
+): Promise<unknown> {
+  const doFetch = fetchImpl ?? globalThis.fetch
+  const headers = authHeaders(token)
+  headers.set('Content-Type', 'application/json')
+  const resp = await doFetch(`/kb/knowledge-bases/${encodeURIComponent(knowledgeId)}`, {
+    method: 'PATCH', headers,
+    body: JSON.stringify({ name }),
+    cache: 'no-store',
+  })
+  if (!resp.ok) await failKb('知识库改名', resp)
+  return await resp.json()
+}

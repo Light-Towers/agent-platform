@@ -506,6 +506,36 @@ async def list_collections(limit: int = 100):
     return {"code": 200, "tenant_id": tenant_id, "total": len(items), "knowledge_bases": items}
 
 
+@router.post("/collections", summary="新建知识库", status_code=201)
+async def create_collection(req: dict):
+    """新建空知识库：用户输入 name，系统生成全局唯一 knowledge_id（kb_<uuid>）。
+
+    请求体 {"name": "产品手册"}。name 非空；同名允许（ID 唯一）。
+    """
+    tenant_id = resolve_server_tenant("", endpoint="POST /collections")
+    name = str((req or {}).get("name") or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="知识库名称不能为空")
+    doc = kb_collections.create_collection(tenant_id=tenant_id, name=name)
+    if doc is None:
+        raise HTTPException(status_code=503, detail="知识库创建失败（存储不可用）")
+    logger.info(f"[collections] {tenant_id} 新建知识库 {doc['knowledge_id']} name={name}")
+    return {"code": 201, **doc}
+
+
+@router.patch("/collections/{knowledge_id}", summary="重命名知识库")
+async def rename_collection(knowledge_id: str, req: dict):
+    """改知识库显示名（不改 knowledge_id）。请求体 {"name": "新名字"}。"""
+    tenant_id = resolve_server_tenant("", endpoint="PATCH /collections/{id}")
+    name = str((req or {}).get("name") or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="知识库名称不能为空")
+    ok = kb_collections.rename_collection(tenant_id, knowledge_id, name)
+    if not ok:
+        raise HTTPException(status_code=404, detail=f"知识库不存在或已被删除: {knowledge_id}")
+    return {"code": 200, "knowledge_id": knowledge_id, "name": name}
+
+
 @router.delete("/documents/{knowledge_id}", summary="删除单文档（软删除，标记 REVOKED）")
 async def delete_document(knowledge_id: str):
     """下线单个 knowledge_id：其 Milvus 切片 status→REVOKED，检索不再召回；登记状态→REVOKED。

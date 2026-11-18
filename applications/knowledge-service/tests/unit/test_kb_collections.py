@@ -26,6 +26,12 @@ class _FakeCollection:
         self.fail = fail
         self.updates: list = []
 
+    def insert_one(self, doc):
+        if self.fail:
+            raise ConnectionFailure("mongo down")
+        self.rows.append(dict(doc))
+        return type("_R", (), {"inserted_id": "x"})()
+
     def update_one(self, query, update, upsert=False):
         if self.fail:
             raise ConnectionFailure("mongo down")
@@ -131,3 +137,32 @@ def test_mark_deleted_only_active():
     assert kb_collections.mark_deleted("t", "a", collection=col) is True
     assert kb_collections.get("t", "a", collection=col)["status"] == "deleted"
     assert kb_collections.mark_deleted("t", "a", collection=col) is False  # 已 deleted，不再命中
+
+
+def test_create_collection_generates_unique_kb_id():
+    col = _FakeCollection()
+    a = kb_collections.create_collection(tenant_id="t", name="产品手册", collection=col)
+    b = kb_collections.create_collection(tenant_id="t", name="产品手册", collection=col)  # 同名
+    assert a and b
+    assert a["knowledge_id"].startswith("kb_")
+    assert a["knowledge_id"] != b["knowledge_id"]  # 同名也生成不同 ID（全局唯一）
+    assert a["name"] == "产品手册"
+    assert a["status"] == "active"
+    assert len(col.rows) == 2
+
+
+def test_create_collection_rejects_empty():
+    col = _FakeCollection()
+    assert kb_collections.create_collection(tenant_id="t", name="  ", collection=col) is None
+    assert kb_collections.create_collection(tenant_id="", name="x", collection=col) is None
+    assert col.rows == []
+
+
+def test_rename_collection_only_active():
+    col = _FakeCollection([
+        {"tenant_id": "t", "knowledge_id": "kb-1", "name": "old", "status": "active", "updated_at": "x"},
+    ])
+    assert kb_collections.rename_collection("t", "kb-1", "new", collection=col) is True
+    assert kb_collections.get("t", "kb-1", collection=col)["name"] == "new"
+    assert kb_collections.rename_collection("t", "kb-1", "", collection=col) is False  # 空名拒绝
+    assert kb_collections.rename_collection("other", "kb-1", "x", collection=col) is False  # 跨租户不改

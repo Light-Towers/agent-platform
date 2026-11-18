@@ -658,6 +658,44 @@ a.ry-btn { text-decoration: none; }
 }
 .kb-history__item .hint { margin-left: auto; }
 
+/* ---- 知识库页 master-detail（2026-11-18 重构）----
+ * 左 240px 库列表 / 右弹性文档区。窄屏（<900）改上下堆叠。 */
+.kb-workspace {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  gap: var(--sp-3);
+  align-items: start;
+}
+.kb-workspace__sidebar { position: sticky; top: var(--sp-3); }
+.kb-workspace__main { min-width: 0; }
+.kb-sidebar__list {
+  list-style: none;
+  margin: var(--sp-2) 0 0;
+  padding: 0;
+  display: grid;
+  gap: var(--sp-1);
+}
+.kb-sidebar__item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: var(--sp-1);
+  border: 1px solid var(--border-decor);
+  border-radius: var(--radius-sm);
+}
+.kb-sidebar__pick {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  text-align: left;
+}
+@media (max-width: 900px) {
+  .kb-workspace { grid-template-columns: 1fr; }
+  .kb-workspace__sidebar { position: static; }
+}
+
 /* ---- 主流 chat 三栏外壳（2026-11-16 重构）----
  * 左 260px 会话侧栏 / 中弹性消息流+输入 / 右 300px 可核抽屉。
  * 用 minmax(0, …) 与 min-width:0 防止长 token 顶破轨道（沿用 .grid 那条教训）。

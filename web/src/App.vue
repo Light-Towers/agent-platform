@@ -24,7 +24,7 @@ import EvidenceList from './components/EvidenceList.vue'
 import Legend from './components/Legend.vue'
 import LoginView from './components/LoginView.vue'
 import RoleGate from './components/RoleGate.vue'
-import KbUpload from './components/KbUpload.vue'
+import KnowledgeWorkspace from './components/KnowledgeWorkspace.vue'
 import DatasourceConfig from './components/DatasourceConfig.vue'
 import ThemeToggle from './components/ThemeToggle.vue'
 import HealthView from './components/HealthView.vue'
@@ -490,7 +490,7 @@ function onSignOut(): void {
 
       <RoleGate v-else-if="activeView === 'role'" />
 
-      <KbUpload v-else-if="activeView === 'kb'" />
+      <KnowledgeWorkspace v-else-if="activeView === 'kb'" />
 
       <DatasourceConfig v-else-if="activeView === 'datasource'" />
 

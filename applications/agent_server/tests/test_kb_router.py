@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""/kb/* 代理（批 2a）用例：钉八件事。
+"""/kb/* 代理用例。
 
 1. 未配置 KNOWLEDGE_SERVICE_URL → 503（不静默）；
 2. R5：Form tenant_id 非空且 ≠ 服务端断言租户 → AppError 403 TENANT_MISMATCH；
@@ -9,7 +9,9 @@
 6. 上游不可达 → 502；上游 ≥400 → 状态码 + 文案透传；
 7. PATCH /kb/{id}/status → KS POST /reimport（form 形状钉死）；
 8. GET /kb/documents → KS GET /documents?limit=（透传 JSON）；
-9. GET /kb/knowledge-bases → KS GET /collections?limit=（P1 改查库实体注册表，透传 JSON）。
+9. GET /kb/knowledge-bases → KS GET /collections?limit=（P1 改查库实体注册表）；
+10. DELETE /kb/documents/{id} + DELETE /kb/knowledge-bases/{id} → KS（软删除/删库，含 409 透传）；
+11. POST /kb/knowledge-bases + PATCH /kb/knowledge-bases/{id} → KS（新建/改名，body 透传）。
 """
 
 from __future__ import annotations
@@ -23,11 +25,13 @@ import pytest
 from agent_core.guardrails.errors import AppError
 from agent_runtime.identity import IdentityError
 from agent_server.api.kb_router import (
+    kb_create_collection,
     kb_delete_collection,
     kb_delete_document,
     kb_documents,
     kb_history,
     kb_knowledge_bases,
+    kb_rename_collection,
     kb_status,
     kb_upload,
 )
@@ -54,6 +58,7 @@ class _Client:
         self.posts: list[tuple[str, dict, Any, dict | None]] = []
         self.gets: list[tuple[str, dict | None, dict | None]] = []
         self.deletes: list[tuple[str, dict | None]] = []
+        self.patches: list[tuple[str, dict | None, dict | None]] = []
 
     async def __aenter__(self) -> "_Client":
         return self
@@ -63,6 +68,13 @@ class _Client:
 
     async def post(self, url: str, data: Any = None, **kwargs: Any) -> _Resp:
         self.posts.append((url, data or {}, kwargs.get("files"), kwargs.get("headers")))
+        self.last_json = kwargs.get("json")
+        if self._exc is not None:
+            raise self._exc
+        return self._resp
+
+    async def patch(self, url: str, data: Any = None, **kwargs: Any) -> _Resp:
+        self.patches.append((url, kwargs.get("json"), kwargs.get("headers")))
         if self._exc is not None:
             raise self._exc
         return self._resp
@@ -364,3 +376,31 @@ async def test_history_forwards_get_with_limit():
     assert params == {"limit": 30}
     assert headers == {"X-Internal-Tenant": "v1.test.sig"}
     assert resp == payload
+
+
+async def test_create_collection_proxies_post():
+    """POST /kb/knowledge-bases → KS POST /collections（body + 签名头透传）。"""
+    payload = {"code": 201, "knowledge_id": "kb_abc", "name": "产品手册"}
+    client = _Client(_Resp(201, payload))
+    with patch("agent_server.api.kb_router.get_settings", return_value=_settings()), \
+         patch("agent_server.api.kb_router.sign_internal_header", return_value="v1.test.sig"), \
+         patch("httpx.AsyncClient", return_value=client):
+        resp = await kb_create_collection({"name": "产品手册"}, _auth=None, _feature=None)
+    url, _data, _files, headers = client.posts[0]
+    assert url == "http://ks:8900/collections"
+    assert client.last_json == {"name": "产品手册"}
+    assert headers == {"X-Internal-Tenant": "v1.test.sig"}
+    assert resp["knowledge_id"] == "kb_abc"
+
+
+async def test_rename_collection_proxies_patch():
+    """PATCH /kb/knowledge-bases/{id} → KS PATCH /collections/{id}。"""
+    client = _Client(_Resp(200, {"code": 200, "knowledge_id": "kb-1", "name": "新名"}))
+    with patch("agent_server.api.kb_router.get_settings", return_value=_settings()), \
+         patch("agent_server.api.kb_router.sign_internal_header", return_value="v1.test.sig"), \
+         patch("httpx.AsyncClient", return_value=client):
+        resp = await kb_rename_collection("kb-1", {"name": "新名"}, _auth=None, _feature=None)
+    url, body, headers = client.patches[0]
+    assert url == "http://ks:8900/collections/kb-1"
+    assert body == {"name": "新名"}
+    assert resp["name"] == "新名"

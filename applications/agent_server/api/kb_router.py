@@ -377,6 +377,49 @@ async def _proxy_delete(path: str, knowledge_id: str) -> dict:
     return resp.json()
 
 
+async def _proxy_write(method: str, path: str, data: dict | None = None) -> dict:
+    """知识库写操作代理：签名头透传，KS 响应/状态码原样回。供 POST/PATCH 复用。"""
+    url = _ks_base_url()
+    import httpx
+
+    try:
+        async with httpx.AsyncClient(timeout=_KS_TIMEOUT_S) as client:
+            if method == "POST":
+                resp = await client.post(f"{url}{path}", json=data, headers=_internal_headers())
+            elif method == "PATCH":
+                resp = await client.patch(f"{url}{path}", json=data, headers=_internal_headers())
+            else:
+                raise ValueError(f"不支持的代理方法: {method}")
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            status_code=502, detail=f"知识库服务不可达（{type(exc).__name__}）：{url}"
+        ) from exc
+    if resp.status_code >= 400:
+        raise HTTPException(status_code=resp.status_code, detail=f"操作失败：{resp.text[:200]}")
+    return resp.json()
+
+
+@router.post("/kb/knowledge-bases", summary="新建知识库（代理 KS）", status_code=201)
+async def kb_create_collection(
+    req: dict,
+    _auth=Depends(verify_api_key),
+    _feature=Depends(require_feature("kb.publish")),
+):
+    """新建知识库（kb.publish）：代理 KS POST /collections，系统生成唯一 knowledge_id。"""
+    return await _proxy_write("POST", "/collections", req)
+
+
+@router.patch("/kb/knowledge-bases/{knowledge_id}", summary="重命名知识库（代理 KS）")
+async def kb_rename_collection(
+    knowledge_id: str,
+    req: dict,
+    _auth=Depends(verify_api_key),
+    _feature=Depends(require_feature("kb.publish")),
+):
+    """重命名知识库（kb.publish）：代理 KS PATCH /collections/{id}。"""
+    return await _proxy_write("PATCH", f"/collections/{knowledge_id}", req)
+
+
 @router.delete("/kb/documents/{knowledge_id}", summary="删除单文档（软删除，代理 KS）")
 async def kb_delete_document(
     knowledge_id: str,

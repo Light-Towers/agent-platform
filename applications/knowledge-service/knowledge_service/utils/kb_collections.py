@@ -94,6 +94,59 @@ def ensure_collection(
         return False
 
 
+def create_collection(
+    *,
+    tenant_id: str,
+    name: str,
+    owner: str = "",
+    collection: Any = None,
+) -> Dict[str, Any] | None:
+    """新建知识库：系统生成全局唯一 knowledge_id（kb_<uuid4hex12>），存用户给的显示名。
+
+    :return: {"knowledge_id","name",...} 成功；None = 写入失败。名字不查重（同名允许，
+        ID 才唯一——成熟知识库平台也允许同名，靠 ID 区分）。
+    """
+    tid = str(tenant_id or "").strip()
+    nm = str(name or "").strip()
+    if not tid or not nm:
+        return None
+    import uuid
+
+    kid = f"kb_{uuid.uuid4().hex[:12]}"
+    now = _now_iso()
+    doc = {
+        "tenant_id": tid, "knowledge_id": kid, "name": nm, "owner": str(owner or ""),
+        "status": _ST_ACTIVE, "doc_count": 0, "created_at": now, "updated_at": now,
+    }
+    try:
+        col = collection if collection is not None else _get_collection()
+        col.insert_one(dict(doc))
+        doc.pop("_id", None)
+        return doc
+    except PyMongoError as e:
+        logger.warning(f"[kb_collections] 新建知识库失败: {e}")
+        return None
+
+
+def rename_collection(
+    tenant_id: str, knowledge_id: str, name: str, collection: Any = None
+) -> bool:
+    """改知识库显示名（不改 knowledge_id 主键）。返回是否命中一行。"""
+    nm = str(name or "").strip()
+    if not nm:
+        return False
+    try:
+        col = collection if collection is not None else _get_collection()
+        res = col.update_one(
+            {"tenant_id": tenant_id, "knowledge_id": knowledge_id, "status": _ST_ACTIVE},
+            {"$set": {"name": nm, "updated_at": _now_iso()}},
+        )
+        return bool(getattr(res, "matched_count", 0))
+    except PyMongoError as e:
+        logger.warning(f"[kb_collections] 改名失败: {e}")
+        return False
+
+
 def get(tenant_id: str, knowledge_id: str, collection: Any = None) -> Optional[Dict[str, Any]]:
     """按 (tenant, knowledge_id) 取库记录；无则 None。"""
     col = collection if collection is not None else _get_collection()
@@ -128,7 +181,7 @@ def mark_deleted(
         return False
 
 
-__all__ = ["ensure_collection", "get", "list_by_tenant", "mark_deleted", "STATUS_ACTIVE", "STATUS_DELETED"]
+__all__ = ["ensure_collection", "create_collection", "rename_collection", "get", "list_by_tenant", "mark_deleted", "STATUS_ACTIVE", "STATUS_DELETED"]
 
 # 状态常量以公开名导出（P3 删除端点/判据用）
 STATUS_ACTIVE = _ST_ACTIVE
