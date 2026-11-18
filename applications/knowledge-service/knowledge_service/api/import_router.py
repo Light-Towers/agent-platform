@@ -481,13 +481,71 @@ async def list_documents(limit: int = 100):
     return {"code": 200, "tenant_id": tenant_id, "total": len(docs), "documents": docs}
 
 
+@router.get("/documents/tree", summary="知识库文档树（库→文档→切片）")
+async def documents_tree():
+    """按断言租户从 Milvus v3 集合聚合知识库文档树（真实入库数据）。
+
+    返回 {knowledge_bases:[{knowledge_id, documents:[{source_doc, chunk_count, chunks:[...]}]}]}。
+    doc_count = 该库 distinct source_doc 数（前端左栏用），不再读 kb_collections 的恒 0 冗余字段。
+    """
+    from collections import defaultdict
+
+    tenant_id = resolve_server_tenant("", endpoint="/documents/tree")
+    client = get_milvus_client()
+    if client is None:
+        raise HTTPException(status_code=503, detail="Milvus 不可达，无法读取文档树")
+    try:
+        rows = client.query(
+            collection_name=milvus_config.chunks_collection,
+            filter=f'tenant_id == "{tenant_id}"',
+            output_fields=["knowledge_id", "source_doc", "part", "title", "parent_title", "content", "status"],
+            limit=16384,
+        ) or []
+    except Exception as e:  # noqa: BLE001 — 具名 502，不吞堆栈
+        logger.error("[documents/tree] Milvus 查询失败", exc_info=True)
+        raise HTTPException(status_code=502, detail=f"文档树查询失败：{type(e).__name__}") from e
+
+    tree: dict[str, dict[str, list]] = defaultdict(lambda: defaultdict(list))
+    for r in rows:
+        kid = str(r.get("knowledge_id") or "").strip()
+        if not kid:
+            continue
+        source_doc = str(r.get("source_doc") or "").strip() or "未命名文档"
+        tree[kid][source_doc].append({
+            "part": r.get("part"),
+            "title": str(r.get("title") or ""),
+            "parent_title": str(r.get("parent_title") or ""),
+            "content": str(r.get("content") or ""),
+            "status": str(r.get("status") or ""),
+        })
+    result = []
+    for kid, docs in tree.items():
+        doc_list = []
+        for source_doc, chunks in docs.items():
+            chunks.sort(key=lambda c: (c["part"] if isinstance(c["part"], int) else 0))
+            doc_list.append({
+                "source_doc": source_doc,
+                "chunk_count": len(chunks),
+                "chunks": chunks,
+            })
+        result.append({
+            "knowledge_id": kid,
+            "doc_count": len(doc_list),
+            "documents": doc_list,
+        })
+    result.sort(key=lambda x: x["knowledge_id"])
+    return {"code": 200, "tenant_id": tenant_id, "total": len(result), "knowledge_bases": result}
+
+
 @router.get("/collections", summary="知识库列表", description="按服务端断言租户列出 kb_collections 注册的知识库（updated_at 降序）")
 async def list_collections(limit: int = 100):
     """租户内知识库清单（agent_server GET /kb/knowledge-bases 代理到这里）。
 
     P1 形状对齐原 /documents 聚合结果：knowledge_id / doc_count / status /
-    latest_updated_at，另加 name/owner/created_at 供管理页用。doc_count 是注册表冗余
-    字段（P1 恒 0，由后续阶段维护），不在此处现算——避免每次列表都扫 kb_documents。
+    latest_updated_at，另加 name/owner/created_at 供管理页用。
+    ⚠ doc_count 是注册表冗余字段（一直恒 0、无人维护），前端**不读**它——
+    真实「该库有几份文档」由 GET /documents/tree 从 Milvus 聚合给出（kb_documents 一库一行，
+    无法表达一库多文档）。此处保留该字段只为旧客户端兼容。
     """
     capped = max(1, min(limit, 100))
     tenant_id = resolve_server_tenant("", endpoint="/collections")
@@ -536,13 +594,16 @@ async def rename_collection(knowledge_id: str, req: dict):
     return {"code": 200, "knowledge_id": knowledge_id, "name": name}
 
 
-@router.delete("/documents/{knowledge_id}", summary="删除单文档（软删除，标记 REVOKED）")
-async def delete_document(knowledge_id: str):
-    """下线单个 knowledge_id：其 Milvus 切片 status→REVOKED，检索不再召回；登记状态→REVOKED。
+@router.delete("/documents/{knowledge_id}", summary="删除文档（软删除，标记 REVOKED）")
+async def delete_document(knowledge_id: str, source_doc: str | None = None):
+    """下线文档：其 Milvus 切片 status→REVOKED，检索不再召回。
 
+    source_doc 给定时只下线该文档（三级结构里点单文档删除）；不给则下线整库（旧行为兼容）。
+    仅当库下再无非 REVOKED 切片时才把 kb_documents 登记表标 REVOKED。
     租户取服务端断言（X-Internal-Tenant），跨租户删不到；文档不存在时 404。
     可逆：重新走 DRAFT→PUBLISHED 可恢复（新切片 status=PUBLISHED）。
     """
+    source_doc = (source_doc or "").strip() or None
     tenant_id = resolve_server_tenant("", endpoint="DELETE /documents/{id}")
     record = get_document(tenant_id, knowledge_id)
     if record is None:
@@ -557,7 +618,7 @@ async def delete_document(knowledge_id: str):
     try:
         result = kb_delete.revoke_document(
             client, milvus_config.chunks_collection, tenant_id, knowledge_id,
-            update_registry=_update_registry,
+            source_doc=source_doc, update_registry=_update_registry,
         )
     except Exception as e:  # noqa: BLE001 — 具名 502，不吞堆栈
         logger.error(f"[delete] {tenant_id}/{knowledge_id} 下线失败", exc_info=True)

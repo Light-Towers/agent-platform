@@ -30,33 +30,55 @@ _READ_FIELDS = (
 )
 
 
-def read_chunks(client: Any, collection: str, tenant_id: str, knowledge_id: str) -> List[Dict[str, Any]]:
-    """读该 (tenant, knowledge_id) 的全部切片（含向量）。client/集合名注入。"""
-    expr = (
-        f'tenant_id == "{tenant_id}" and knowledge_id == "{knowledge_id}"'
-    )
+def read_chunks(
+    client: Any, collection: str, tenant_id: str, knowledge_id: str,
+    *, source_doc: str | None = None,
+) -> List[Dict[str, Any]]:
+    """读该 (tenant, knowledge_id) 的切片（含向量）。source_doc 给定时只读该文档。"""
+    expr = f'tenant_id == "{tenant_id}" and knowledge_id == "{knowledge_id}"'
+    if source_doc is not None:
+        expr += f' and source_doc == "{source_doc}"'
     return list(client.query(
         collection_name=collection, filter=expr,
         output_fields=list(_READ_FIELDS), limit=16384,
     ) or [])
 
 
+def has_other_active_docs(
+    client: Any, collection: str, tenant_id: str, knowledge_id: str, source_doc: str,
+) -> bool:
+    """该库是否还有「除 source_doc 外」的非 REVOKED 切片——决定是否回写登记表。"""
+    rows = client.query(
+        collection_name=collection,
+        filter=(
+            f'tenant_id == "{tenant_id}" and knowledge_id == "{knowledge_id}" '
+            f'and status != "{REVOKED}" and source_doc != "{source_doc}"'
+        ),
+        output_fields=["chunk_id"], limit=1,
+    ) or []
+    return len(rows) > 0
+
+
 def revoke_document(
     client: Any, collection: str, tenant_id: str, knowledge_id: str,
-    *, update_registry: Callable[[str, str, str], bool] | None = None,
+    *, source_doc: str | None = None,
+    update_registry: Callable[[str, str, str], bool] | None = None,
 ) -> Dict[str, Any]:
-    """删单文档（软删除）：切片 status→REVOKED，回写登记表。返回操作读数。
+    """软删除：切片 status→REVOKED。source_doc 给定时只下线该文档，否则下线整库。
 
+    :param source_doc: 文档名（Milvus source_doc）。None=整库所有切片（旧行为兼容）。
     :param update_registry: (tenant_id, knowledge_id, status) -> bool，注入的登记表回写；
-        为 None 时跳过登记回写（调用方负责）。
+        整库删始终回写；单文档删仅当无其它有效文档时才回写（不能把多文档库标 REVOKED）。
     """
-    rows = read_chunks(client, collection, tenant_id, knowledge_id)
+    rows = read_chunks(client, collection, tenant_id, knowledge_id, source_doc=source_doc)
     if not rows:
         return {"deleted_chunks": 0, "revoked_chunks": 0, "registry_updated": False, "found": False}
 
-    # 删旧切片（按 tenant + knowledge_id 严格定位，不碰其它库）
-    client.delete(collection_name=collection,
-                  filter=f'tenant_id == "{tenant_id}" and knowledge_id == "{knowledge_id}"')
+    # 删旧切片（按 tenant + knowledge_id [+ source_doc] 严格定位，不碰其它库/文档）
+    delete_expr = f'tenant_id == "{tenant_id}" and knowledge_id == "{knowledge_id}"'
+    if source_doc is not None:
+        delete_expr += f' and source_doc == "{source_doc}"'
+    client.delete(collection_name=collection, filter=delete_expr)
     # 用 REVOKED 状态重插（向量原样复用，去掉主键让 auto_id 重新生成）
     to_insert = []
     for r in rows:
@@ -66,13 +88,20 @@ def revoke_document(
         to_insert.append(item)
     client.insert(collection_name=collection, data=to_insert)
 
+    # 登记表回写：整库删必写；单文档删仅当其它文档均已 REVOKED 才写。
     registry_updated = False
     if update_registry is not None:
-        registry_updated = bool(update_registry(tenant_id, knowledge_id, REVOKED))
+        still_has_docs = (
+            has_other_active_docs(client, collection, tenant_id, knowledge_id, source_doc)
+            if source_doc is not None else False
+        )
+        if not still_has_docs:
+            registry_updated = bool(update_registry(tenant_id, knowledge_id, REVOKED))
 
     return {
         "deleted_chunks": len(rows), "revoked_chunks": len(to_insert),
         "registry_updated": registry_updated, "found": True,
+        "source_doc": source_doc or "",
     }
 
 
@@ -109,4 +138,4 @@ def delete_collection_guard(
     return (True, "知识库已标记删除")
 
 
-__all__ = ["REVOKED", "read_chunks", "revoke_document", "has_active_documents", "delete_collection_guard"]
+__all__ = ["REVOKED", "read_chunks", "has_other_active_docs", "revoke_document", "has_active_documents", "delete_collection_guard"]

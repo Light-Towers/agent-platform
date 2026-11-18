@@ -229,18 +229,48 @@ export async function listKnowledgeBases(
   return Array.isArray(data.knowledge_bases) ? data.knowledge_bases : []
 }
 
-/** 下线单文档（软删除→REVOKED）：DELETE /kb/documents/{knowledge_id}。 */
+/** 下线文档（软删除→REVOKED）：DELETE /kb/documents/{knowledge_id}?source_doc=...。
+ *  传 source_doc 只下线该文档；不传则下线整库（旧行为兼容）。 */
 export async function deleteKbDocument(
   knowledgeId: string,
   token: string,
+  sourceDoc?: string,
   fetchImpl?: typeof fetch,
 ): Promise<unknown> {
   const doFetch = fetchImpl ?? globalThis.fetch
   const headers = authHeaders(token)
-  const resp = await doFetch(`/kb/documents/${encodeURIComponent(knowledgeId)}`,
+  const q = sourceDoc ? `?source_doc=${encodeURIComponent(sourceDoc)}` : ''
+  const resp = await doFetch(`/kb/documents/${encodeURIComponent(knowledgeId)}${q}`,
     { method: 'DELETE', headers, cache: 'no-store' })
   if (!resp.ok) await failKb('文档下线', resp)
   return await resp.json()
+}
+
+/** 知识库文档树（库→文档→切片）：数据源是 Milvus 实际切片，不是上传历史。 */
+export interface KbTreeChunk {
+  readonly part: number | null
+  readonly title: string
+  readonly parent_title: string
+  readonly content: string
+  readonly status: string
+}
+export interface KbTreeDoc {
+  readonly source_doc: string
+  readonly chunk_count: number
+  readonly chunks: readonly KbTreeChunk[]
+}
+export interface KbTreeBase {
+  readonly knowledge_id: string
+  readonly doc_count: number
+  readonly documents: readonly KbTreeDoc[]
+}
+export async function listDocumentTree(token: string, fetchImpl?: typeof fetch): Promise<KbTreeBase[]> {
+  const doFetch = fetchImpl ?? globalThis.fetch
+  const headers = authHeaders(token)
+  const resp = await doFetch('/kb/documents/tree', { method: 'GET', headers, cache: 'no-store' })
+  if (!resp.ok) await failKb('文档树查询', resp)
+  const data = await resp.json() as { knowledge_bases?: KbTreeBase[] }
+  return Array.isArray(data.knowledge_bases) ? data.knowledge_bases : []
 }
 
 /** 删除整个知识库（前置：库下无有效文档）：DELETE /kb/knowledge-bases/{knowledge_id}。 */

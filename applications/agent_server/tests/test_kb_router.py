@@ -12,6 +12,7 @@
 9. GET /kb/knowledge-bases → KS GET /collections?limit=（P1 改查库实体注册表）；
 10. DELETE /kb/documents/{id} + DELETE /kb/knowledge-bases/{id} → KS（软删除/删库，含 409 透传）；
 11. POST /kb/knowledge-bases + PATCH /kb/knowledge-bases/{id} → KS（新建/改名，body 透传）。
+12. GET /kb/documents/tree → KS GET /documents/tree（库→文档→切片，数据源是 Milvus 实际切片）。
 """
 
 from __future__ import annotations
@@ -29,6 +30,7 @@ from agent_server.api.kb_router import (
     kb_delete_collection,
     kb_delete_document,
     kb_documents,
+    kb_documents_tree,
     kb_history,
     kb_knowledge_bases,
     kb_rename_collection,
@@ -58,6 +60,7 @@ class _Client:
         self.posts: list[tuple[str, dict, Any, dict | None]] = []
         self.gets: list[tuple[str, dict | None, dict | None]] = []
         self.deletes: list[tuple[str, dict | None]] = []
+        self.delete_params: list[dict | None] = []
         self.patches: list[tuple[str, dict | None, dict | None]] = []
 
     async def __aenter__(self) -> "_Client":
@@ -87,6 +90,7 @@ class _Client:
 
     async def delete(self, url: str, **kwargs: Any) -> _Resp:
         self.deletes.append((url, kwargs.get("headers")))
+        self.delete_params.append(kwargs.get("params"))
         if self._exc is not None:
             raise self._exc
         return self._resp
@@ -336,7 +340,18 @@ async def test_delete_document_proxies_to_ks():
     url, headers = client.deletes[0]
     assert url == "http://ks:8900/documents/kb-x"
     assert headers == {"X-Internal-Tenant": "v1.test.sig"}
+    assert client.delete_params[0] is None  # 不传 source_doc → 整库下线
     assert resp["status"] == "REVOKED"
+
+
+async def test_delete_document_forwards_source_doc():
+    """source_doc 给定时透传 KS query，实现「点单文档只下线该文档」。"""
+    client = _Client(_Resp(200, {"code": 200, "status": "REVOKED"}))
+    with patch("agent_server.api.kb_router.get_settings", return_value=_settings()), \
+         patch("agent_server.api.kb_router.sign_internal_header", return_value="v1.test.sig"), \
+         patch("httpx.AsyncClient", return_value=client):
+        await kb_delete_document("kb-x", source_doc="GBT45704.md", _auth=None, _feature=None)
+    assert client.delete_params[0] == {"source_doc": "GBT45704.md"}
 
 
 async def test_delete_collection_proxies_to_ks():
@@ -404,3 +419,21 @@ async def test_rename_collection_proxies_patch():
     assert url == "http://ks:8900/collections/kb-1"
     assert body == {"name": "新名"}
     assert resp["name"] == "新名"
+
+
+async def test_documents_tree_proxies_get():
+    """GET /kb/documents/tree → KS GET /documents/tree（库→文档→切片只读视图）。"""
+    payload = {"code": 200, "tenant_id": "default-tenant", "total": 1, "knowledge_bases": [
+        {"knowledge_id": "kb1", "doc_count": 1, "documents": [
+            {"source_doc": "a.pdf", "chunk_count": 2, "chunks": [{"part": 0, "title": "h", "parent_title": "", "content": "c", "status": "PUBLISHED"}]}
+        ]}
+    ]}
+    client = _Client(_Resp(200, payload))
+    with patch("agent_server.api.kb_router.get_settings", return_value=_settings()), \
+         patch("agent_server.api.kb_router.sign_internal_header", return_value="v1.test.sig"), \
+         patch("httpx.AsyncClient", return_value=client):
+        resp = await kb_documents_tree(_auth=None, _feature=None)
+    url, params, headers = client.gets[0]
+    assert url == "http://ks:8900/documents/tree"
+    assert headers == {"X-Internal-Tenant": "v1.test.sig"}
+    assert resp["knowledge_bases"][0]["doc_count"] == 1

@@ -278,6 +278,27 @@ async def kb_documents(
     return resp.json()
 
 
+@router.get("/kb/documents/tree", summary="知识库文档树（代理 KS /documents/tree）")
+async def kb_documents_tree(
+    _auth=Depends(verify_api_key),
+    _feature=Depends(require_feature("kb.upload")),
+):
+    """库→文档→切片三级只读视图（数据源是 Milvus 实际切片，不是上传历史）。"""
+    url = _ks_base_url()
+    import httpx
+
+    try:
+        async with httpx.AsyncClient(timeout=_KS_TIMEOUT_S) as client:
+            resp = await client.get(f"{url}/documents/tree", headers=_internal_headers())
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            status_code=502, detail=f"知识库服务不可达（{type(exc).__name__}）：{url}"
+        ) from exc
+    if resp.status_code >= 400:
+        raise HTTPException(status_code=resp.status_code, detail=f"文档树查询失败：{resp.text[:200]}")
+    return resp.json()
+
+
 @router.get("/kb/status/{task_id}", summary="上传任务进度（代理 KS /status/{task_id}）")
 async def kb_status_get(
     task_id: str,
@@ -360,14 +381,14 @@ async def kb_knowledge_bases(
     }
 
 
-async def _proxy_delete(path: str, knowledge_id: str) -> dict:
-    """DELETE 代理公共逻辑：签名头透传，KS 响应/状态码原样回。"""
+async def _proxy_delete(path: str, knowledge_id: str, params: dict | None = None) -> dict:
+    """DELETE 代理公共逻辑：签名头透传，KS 响应/状态码原样回。params 为可选 query。"""
     url = _ks_base_url()
     import httpx
 
     try:
         async with httpx.AsyncClient(timeout=_KS_TIMEOUT_S) as client:
-            resp = await client.delete(f"{url}{path}", headers=_internal_headers())
+            resp = await client.delete(f"{url}{path}", params=params, headers=_internal_headers())
     except httpx.HTTPError as exc:
         raise HTTPException(
             status_code=502, detail=f"知识库服务不可达（{type(exc).__name__}）：{url}"
@@ -420,14 +441,16 @@ async def kb_rename_collection(
     return await _proxy_write("PATCH", f"/collections/{knowledge_id}", req)
 
 
-@router.delete("/kb/documents/{knowledge_id}", summary="删除单文档（软删除，代理 KS）")
+@router.delete("/kb/documents/{knowledge_id}", summary="删除文档（软删除，代理 KS）")
 async def kb_delete_document(
     knowledge_id: str,
+    source_doc: str | None = None,
     _auth=Depends(verify_api_key),
     _feature=Depends(require_feature("kb.publish")),  # 401 先于 403
 ):
-    """下线单个文档（kb.publish）：代理 KS DELETE /documents/{id}，切片标 REVOKED。"""
-    return await _proxy_delete(f"/documents/{knowledge_id}", knowledge_id)
+    """下线文档（kb.publish）：代理 KS DELETE /documents/{id}。source_doc 给定时只下线该文档。"""
+    params = {"source_doc": source_doc} if source_doc else None
+    return await _proxy_delete(f"/documents/{knowledge_id}", knowledge_id, params=params)
 
 
 @router.delete("/kb/knowledge-bases/{knowledge_id}", summary="删除知识库（前置校验，代理 KS）")

@@ -15,6 +15,11 @@ import {
   type KbKnowledgeBase,
 } from '../api/kb.ts'
 
+const props = defineProps<{
+  /** knowledge_id → 真实文档数（来自 Milvus 文档树）；用它替代 /collections 的恒 0 冗余字段。 */
+  docCounts: Map<string, number>
+}>()
+
 const emit = defineEmits<{
   select: [knowledgeId: string, name: string]
   changed: []   // 库列表变化（新建/改名/删除）后通知父组件刷新
@@ -38,6 +43,10 @@ async function refresh(): Promise<void> {
   } finally {
     loading.value = false
   }
+}
+
+function docCount(kb: KbKnowledgeBase): number {
+  return props.docCounts.get(kb.knowledge_id) ?? kb.doc_count ?? 0
 }
 
 function choose(kb: KbKnowledgeBase): void {
@@ -87,8 +96,8 @@ async function onRename(kb: KbKnowledgeBase): Promise<void> {
 
 async function onDelete(kb: KbKnowledgeBase): Promise<void> {
   if (busy.value) return
-  if (kb.doc_count > 0) {
-    notice.value = `「${kb.name}」下还有 ${kb.doc_count} 个文档，请先下线文档再删库。`
+  if (docCount(kb) > 0) {
+    notice.value = `「${kb.name}」下还有 ${docCount(kb)} 个文档，请先下线文档再删库。`
     return
   }
   if (!window.confirm(`确定删除知识库「${kb.name}」？`)) return
@@ -188,7 +197,7 @@ onMounted(refresh)
             @click="choose(kb)"
           >
             <span class="kb-sidebar__name">{{ kb.name || kb.knowledge_id }}</span>
-            <span class="hint">{{ kb.doc_count }} 文档</span>
+            <span class="hint">{{ docCount(kb) }} 文档</span>
           </button>
           <button
             type="button"
@@ -201,8 +210,8 @@ onMounted(refresh)
           <button
             type="button"
             class="ry-btn ry-btn--text"
-            :title="kb.doc_count > 0 ? '库下有文档，先下线文档' : '删除知识库'"
-            :aria-disabled="busy === kb.knowledge_id || kb.doc_count > 0"
+            :title="docCount(kb) > 0 ? '库下有文档，先下线文档' : '删除知识库'"
+            :aria-disabled="busy === kb.knowledge_id || docCount(kb) > 0"
             @click="onDelete(kb)"
           >
             ×
