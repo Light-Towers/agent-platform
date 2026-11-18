@@ -95,6 +95,18 @@ IMAGES="agent-platform:dev knowledge-service-web:latest" \
 
 **SSE 读数**：事件帧是平铺的（payload 恒空），evidence/citation 从 `data:` 的 JSON 里取；判据要看原始 evidence 片段，不能只看"看到了"。观测类判据必须是"后端里查得到本次原文"（状态灯亮≠数据到）。
 
+**下游服务 502（如"数据源查询失败：问数服务不可达 ConnectError"）**：先分清三层再动手——
+1. `kubectl get pod -l app=<svc>` 看 Pod 是否 Ready + `kubectl get endpoints <svc>` 是否为空（endpoints 空 ⇒ 平台 ConnectError 502）；
+2. 进 Pod `curl /health`（liveness，常 200）vs `curl /ready`（readiness，连库探活）——**/health 200 但 /ready 503 是典型信号**：进程活着但依赖池不可用，k8s 不切流量；
+3. `/ready` 返回体带池名和错误类型（如 `{"meta":"TooManyRequests","dw":"TooManyRequests"}`）。再查 `/api/pools` 的 `pool_size/pool_available/requests_waiting`，并用 psycopg **直连 DSN 绕池 SELECT 1**：
+   - 直连 OK + `pool_size=0 / waiting>0` ⇒ **进程内连接池卡死**（池无法自愈），重启 Pod 重建池即可：
+     ```
+     kubectl -n <ns> delete pod <bad-pod-1> <bad-pod-2>   # ReplicaSet 重建
+     ```
+     验 `/ready=200` + endpoints 非空 + 原失败 URL 200。
+   - 直连也失败 ⇒ 是 DB/网络问题，去查 DSN 主机可达性，别重启 Pod（徒劳）。
+   - 这类卡死可能与本次部署无关（看 Pod age / 503 持续时间，这次已持续 15h），定性后再报，别顺手改产品代码。重启 Pod 属 D3，须人授权。
+
 ## 6. 治本：把"复审触发"变成机械门禁
 
 > 基础服务不常变，但**判据绑 rev/配置**，换任一形状就需重跑。此前"复审触发条件"只是散文，靠人记必然漂移（把上一轮读数搬进本轮账面）。
