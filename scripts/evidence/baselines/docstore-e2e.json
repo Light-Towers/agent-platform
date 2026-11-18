@@ -1,81 +1,123 @@
 {
   "$schema": "判据新鲜度台账条目：绑 rev 的端到端判据依赖哪些可实读形状 + 基线值",
   "criterion_id": "docstore-e2e-ABCD",
-  "description": "DocumentStore 协议统一（Milvus/pgvector 可切换）真环境端到端判据 A/B/C/D，取证于 plan-knowledge-base-model-2026-11-17.md §8",
+  "description": "DocumentStore 协议统一 + P2 软删除 status 字段；A/B/C/D 真环境判据，取证于 plan-knowledge-base-model-2026-11-17.md §8 + plan-kb-delete-and-management-2026-11-18.md",
   "evidence_doc": "docs/plans/plan-knowledge-base-model-2026-11-17.md",
-  "baseline_rev": "aee36f9a6bef38900b86c6b2f408c30a623293bf",
-  "captured_at": "2026-11-18T11:14:00+08:00",
+  "baseline_rev": "b82425de81755e61955898544373e12689be0ac7",
+  "captured_at": "2026-11-18T16:19:00+08:00",
   "rerun_command": "见 evidence_doc §8；漂移后须在新 rev 上重跑 A/B/C/D 全部四项",
   "probes": [
     {
       "id": "platform_pod_git_rev",
       "kind": "kubectl_exec",
       "target": "deploy/agent-platform:/srv/agent-platform/GIT_REV",
-      "expect": "aee36f9a6bef38900b86c6b2f408c30a623293bf",
-      "affects": ["A", "B", "C", "D"]
+      "expect": "b82425de81755e61955898544373e12689be0ac7",
+      "affects": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
     },
     {
       "id": "platform_doc_backend",
       "kind": "kubectl_exec_env",
       "target": "deploy/agent-platform:DOC_BACKEND",
       "expect": "milvus",
-      "affects": ["A", "C", "D"]
+      "affects": [
+        "A",
+        "C",
+        "D"
+      ]
     },
     {
       "id": "platform_doc_milvus_uri",
       "kind": "kubectl_exec_env",
       "target": "deploy/agent-platform:DOC_MILVUS_URI",
       "expect": "http://milvus:19530",
-      "affects": ["A", "C", "D"]
+      "affects": [
+        "A",
+        "C",
+        "D"
+      ]
     },
     {
       "id": "platform_doc_embed_dim",
       "kind": "kubectl_exec_env",
       "target": "deploy/agent-platform:DOC_EMBED_DIM",
       "expect": "1024",
-      "affects": ["A", "C", "D"]
+      "affects": [
+        "A",
+        "C",
+        "D"
+      ]
     },
     {
       "id": "platform_doc_embed_model",
       "kind": "kubectl_exec_env",
       "target": "deploy/agent-platform:DOC_EMBED_MODEL",
       "expect": "BAAI/bge-m3",
-      "affects": ["A", "C", "D"]
+      "affects": [
+        "A",
+        "C",
+        "D"
+      ]
     },
     {
       "id": "ks_default_tenant",
       "kind": "kubectl_exec_env",
       "target": "deploy/ks-web:KNOWLEDGE_DEFAULT_TENANT_ID",
       "expect": "default",
-      "affects": ["A", "C", "D"]
+      "affects": [
+        "A",
+        "C",
+        "D"
+      ]
     },
     {
       "id": "ks_chunks_collection",
       "kind": "kubectl_exec_env",
       "target": "deploy/ks-web:CHUNKS_COLLECTION",
-      "expect": "platform_doc_v2_bge_m3",
-      "affects": ["A", "C", "D"]
+      "expect": "platform_doc_v3_bge_m3",
+      "affects": [
+        "A",
+        "C",
+        "D"
+      ]
     },
     {
       "id": "milvus_collection_dense_dim",
       "kind": "pymilvus_describe",
-      "target": "platform_doc_v2_bge_m3:dense_vector.dim",
+      "target": "platform_doc_v3_bge_m3:dense_vector.dim",
       "expect": "1024",
-      "affects": ["A", "C", "D"]
+      "affects": [
+        "A",
+        "C",
+        "D"
+      ]
     },
     {
       "id": "milvus_image_digest",
       "kind": "crictl_image_digest",
       "target": "agent-platform:dev@docker.io/library",
-      "expect_contains": "2f35514de9d21a49e277491361d4d1ed3bb3e0ec1145d0603f254b7bdcbbc750",
-      "affects": ["A", "B", "C", "D"]
+      "expect_contains": "0449d9c1d5c7295faf99f77eda53f84ccedcfed11afe60e269ddd1c236438758",
+      "affects": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
     },
     {
       "id": "ks_image_digest",
       "kind": "crictl_image_digest",
       "target": "knowledge-service-web:latest@docker.io/library",
-      "expect_contains": "1e8d3dc5f69622a04fdc5a2bfda81f6b386174626fde485e61419010949ac4ae",
-      "affects": ["A", "C", "D"]
+      "expect_contains": "d3871b50c5ac16540cadb790d00a32399fc161fa30f74b17fef4ffef4151ed94",
+      "affects": [
+        "A",
+        "C",
+        "D"
+      ]
     }
   ]
 }

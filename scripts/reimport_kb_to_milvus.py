@@ -59,15 +59,18 @@ def count_by_knowledge(uri: str, collection: str, knowledge_id: str) -> int:
 
 
 def published_knowledge_ids(uri: str, collection: str) -> list[str]:
-    """从旧集合里取所有 PUBLISHED / 非空 knowledge_id 的去重列表。"""
+    """从旧集合里取所有非空 knowledge_id 的去重列表（待搬清单）。
+
+    注意：源集合（v2）没有 status 字段，不能读它——v2 时代切片都是有效的，
+    全部纳入搬迁；status 在写入目标集合（v3）时统一置为 PUBLISHED。
+    """
     c = _client(uri)
     if not c.has_collection(collection):
         return []
     rows = c.query(collection_name=collection, filter='knowledge_id != ""',
-                   output_fields=["knowledge_id", "status"], limit=16384)
+                   output_fields=["knowledge_id"], limit=16384)
     return sorted({str(r["knowledge_id"]) for r in (rows or [])
-                   if str(r.get("knowledge_id") or "").strip()
-                   and str(r.get("status") or "PUBLISHED").upper() != "REVOKED"})
+                   if str(r.get("knowledge_id") or "").strip()})
 
 
 def reimport_one(uri: str, kid: str, src: str, dst: str) -> tuple[int, int]:

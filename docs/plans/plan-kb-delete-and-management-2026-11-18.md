@@ -83,6 +83,20 @@ kb_documents 一库一行（upsert 覆盖），"库下文档"实际是 kb_upload
 - **P2-code**：schema 字段 + 集合名 + 两侧 filter + 写入侧 status + 单测。**不动真环境**——新集合在首次上传时由 KS 管线自动创建。
 - **P2-data**：存量 PUBLISHED 文档重灌进 v3 集合（D3 运维动作，须单独授权 + 窗口）。重灌完成前 v3 集合为空、对话检索会退化——故 P2-code 与 P2-data 之间要尽量短，或先重灌再切配置。
 
+### P2 真环境取证读数（2026-11-18，绑 rev=b82425de）
+
+- 部署：平台镜像 `0449d9c1` / KS 镜像 `d3871b50` 三节点一致；GIT_REV=b82425de；health 200。
+- 配置：平台 settings=`milvus platform_doc_v3_bge_m3 1024`；KS CHUNKS_COLLECTION=v3；PG chunks.status 列存在（migration 021）。
+- 正向：新传 verify-p2-v3 → v3 集合自动创建 + 切片 status 字段在位 → 对话命中 3319。
+- 重灌：4 条存量（verify-kb-A-7Q3 / C-libraryA / C-libraryB / final）从 v2 搬到 v3，各 1 切片，0 失败；v3 集合共 5 库；对话命中存量 TQ-7749，断链窗口关闭。
+- 漂移门禁：台账基线更新后 verify_basis_drift rc=0。
+
+**P2 暴露的两个 bug（已修，记此备查）**：
+1. **config.py 集合名漏改**：P2-code 改了 `document_store.DEFAULT_DOC_COLLECTION=v3`，但工厂实际读 `get_settings().doc_milvus_collection`（config.py Field 默认仍 v2）⇒ 平台上线后仍连 v2。修复需再改 config.py + .env.example 并重Build镜像（commit b82425de）。**教训：改"默认值"要改真正被消费的那一处，不能只改协议层常量。**
+2. **重灌脚本 PUBLISHED→PUBLISHED 被拒**：原脚本逐个 POST /reimport（走合法迁移表），PUBLISHED→PUBLISHED 报 400。改为 pymilvus 直搬（v2 读切片→补 status→写 v3，幂等），commit fe97eb19。**教训：重灌 ≠ 改生命周期状态，PUBLISHED 文档重灌要走切片搬迁而非 /reimport。**
+
+**status 值域真相**：写入的 status 是**生命周期状态**（PUBLISHED/REVIEWING…），不是 spec 早期写的 active/REVOKED。检索过滤 `status != REVOKED` 仍能正确排除软删除项（PUBLISHED != REVOKED 为真）。P3 删除端点写 `status=REVOKED` 即可，正常文档保持 PUBLISHED。
+
 ## 5. 影响面与落地顺序（T3，按依赖分阶段）
 
 **总定性**：D1(chunk status) + D4(注册表) 两个最规范选择叠加 = T3 级（1.5–3w 量级），不是一两个小时。必须分阶段，每阶段可独立验证。
@@ -91,7 +105,7 @@ kb_documents 一库一行（upsert 覆盖），"库下文档"实际是 kb_upload
 |---|---|---|---|
 | P1 数据模型底座 | 新增 kb_collections 注册表 + 上传写入路径改造（上传前确保库存在）+ `/kb/knowledge-bases` 改查注册表 | 上传自动建库；列表返回库元数据；租户隔离 | 低 |
 | P2-code schema v3 + 过滤（**已完成 2026-11-18**）| 两侧 create_collection 加 status 字段（镜像同步测试）；新集合名 platform_doc_v3_bge_m3；两侧检索谓词加 `status != REVOKED`；pgvector migration 021 + store.py 谓词 | **1234 passed / 9 skipped**；ruff/doc-sync/migration lint 绿 | 低（纯代码，未动真环境）|
-| P2-data 切集合名 + 重灌 | KS CHUNKS_COLLECTION 切 v3；存量 PUBLISHED 全量重灌进 v3；真环境 PG 跑 migration 021 | 重灌后检索正常；status 过滤生效 | **高（真环境运维重灌）** |
+| P2-data 切集合名 + 重灌（**已完成 2026-11-18**）| KS CHUNKS_COLLECTION 切 v3；存量 PUBLISHED 全量重灌进 v3；真环境 PG 跑 migration 021 | **重灌 4 条成功 0 失败**；v3 集合 5 库齐全；对话检索命中存量 TQ-7749；漂移门禁 rc=0 | 高（已完成）|
 | P3 删除端点 + 管理页 | DELETE 单文档（→REVOKED）+ DELETE 整库（前置校验无有效文档）；新建 KnowledgeBaseAdmin.vue | §4 全部验收判据 | 中 |
 
 **顺序理由**：P1 先让"库"成为一等实体（D4 判据才有根）；P2 是最高风险的重灌，单独一个阶段可回滚验证；P3 依赖 P1 的库实体和 P2 的 status 过滤才成立。**不要跳过 P2 直接做 P3**——没有 status 字段，REVOKED 无法在检索层生效。
