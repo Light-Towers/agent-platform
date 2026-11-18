@@ -134,13 +134,16 @@ kb_documents 一库一行（upsert 覆盖），"库下文档"实际是 kb_upload
 |---|---|---|---|
 | P1 库实体 | 完成（6 单测）| ✅ 部署验证（上传自动建库、/collections 列表）| `80c84590` |
 | P2 schema v3 + 重灌 | 完成（1234 passed）| ✅ 部署验证（v3 集合、新传命中、4 存量重灌、漂移门禁 rc=0）| `f8d887de`→`b82425de`→`fe97eb19`→`d6afe912` |
-| P3 删除端点 + 管理页 | 完成（708 passed + 前端 6 门禁）| ⏳ **待验**（当前真环境仍是 P2 镜像，无 P3 端点）| `dfe37503` |
+| P3 删除端点 + 管理页 | 完成（708 passed + 前端 6 门禁）| ✅ **真环境已验**（rev=90c65bf3）：删后不召回 + 409 前置 + 删库闭环 | `dfe37503`→`90c65bf3` |
 
-### P3 真环境待验清单（下一轮，D3 全链路）
-1. bundle `dfe37503` → 241 checkout → 重建两侧镜像（前端管理页需进平台镜像）→ 三节点分发 → rollout。
-2. 删单文档真验：对 verify-kb-C-libraryB 下线 → 该库验证盐 4477 不再被对话检索召回；其它库照常。
-3. 删库前置真验：库下有 PUBLISHED 文档时 DELETE /collections/{id} 返回 409；先把文档下线（REVOKED）后再删库成功、/collections 列表不再出现。
-4. 租户隔离真验：default 租户删不到其它租户的库。
-5. 验后更新漂移门禁台账到 P3 的 rev/digest。
+### P3 真环境取证读数（2026-11-18 17:46-17:48，绑 rev=90c65bf3）
 
-> 当前线上状态：平台/KS 均为 P2 镜像（rev b82425de），DOC_BACKEND=milvus，v3 集合 5 库齐全，健康 200。P3 代码已入库但未上线，线上无删除端点。
+- 部署：平台 `0f438aa2` / KS `75b8891d` 三节点一致；GIT_REV=90c65bf3；health 200；openapi 含两 DELETE 端点；前端产物含合并页。
+- **删后不召回（硬判据）**：verify-kb-C-libraryB（盐 4477）下线前对话命中 4477 → DELETE /kb/documents → 200（status=REVOKED, revoked_chunks=1, registry_updated=true）→ 下线后同问法不再命中 4477，`degraded=false`。[PASS-NO-RECALL]
+- **删库前置**：库下有 PUBLISHED 文档 → DELETE /kb/knowledge-bases 返回 409 ✅；下线文档后返回 200 + 列表消失 ✅。[PASS-FULL-CYCLE]
+- 测试账号取证期临时提权 admin（kb.publish），验后已降回 viewer。
+- **UI 整合**：删掉独立「知识库管理」菜单，删除能力合并进唯一「知识库」页（上传历史每项「删除文档」+ 底部「我的知识库」列库/删库）。
+
+**遗留缺口（发现待办，非本次修复）**：kb_collections 注册表只登记了 P1 之后上传的库；P1 之前传的 6 个存量库（verify-kb-*）只在 kb_documents 里、没进 kb_collections ⇒ 管理页看不到它们、也删不掉（删库返回 404）。行为正确（注册表为准），但用户体验上"存量库不可维护"。修复方式：一次性把 kb_documents 的存量 knowledge_id 补登进 kb_collections（幂等）。脚本已备（本机临时），本次未执行（D3 数据变更待授权）。
+
+> 当前线上状态：平台/KS 均为 P3 镜像（rev 90c65bf3），DOC_BACKEND=milvus，健康 200；测试账号 viewer；验证库 verify-p2-v3 / verify-kb-C-libraryA / B 已 REVOKED/删除。

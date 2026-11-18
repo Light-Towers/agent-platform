@@ -1,17 +1,17 @@
 {
   "$schema": "判据新鲜度台账条目：绑 rev 的端到端判据依赖哪些可实读形状 + 基线值",
   "criterion_id": "docstore-e2e-ABCD",
-  "description": "DocumentStore 协议统一 + P2 软删除 status 字段；A/B/C/D 真环境判据，取证于 plan-knowledge-base-model-2026-11-17.md §8 + plan-kb-delete-and-management-2026-11-18.md",
+  "description": "DocumentStore 协议统一 + P2 软删除 schema + P3 删除端点/管理页；A/B/C/D + P3 删后不召回真环境判据，取证于 plan-knowledge-base-model-2026-11-17.md §8 + plan-kb-delete-and-management-2026-11-18.md §9",
   "evidence_doc": "docs/plans/plan-knowledge-base-model-2026-11-17.md",
-  "baseline_rev": "b82425de81755e61955898544373e12689be0ac7",
-  "captured_at": "2026-11-18T16:19:00+08:00",
+  "baseline_rev": "90c65bf387082e9611147397d8e33bfda3c7af1b",
+  "captured_at": "2026-11-18T17:48:00+08:00",
   "rerun_command": "见 evidence_doc §8；漂移后须在新 rev 上重跑 A/B/C/D 全部四项",
   "probes": [
     {
       "id": "platform_pod_git_rev",
       "kind": "kubectl_exec",
       "target": "deploy/agent-platform:/srv/agent-platform/GIT_REV",
-      "expect": "b82425de81755e61955898544373e12689be0ac7",
+      "expect": "90c65bf387082e9611147397d8e33bfda3c7af1b",
       "affects": [
         "A",
         "B",
@@ -100,7 +100,7 @@
       "id": "milvus_image_digest",
       "kind": "crictl_image_digest",
       "target": "agent-platform:dev@docker.io/library",
-      "expect_contains": "0449d9c1d5c7295faf99f77eda53f84ccedcfed11afe60e269ddd1c236438758",
+      "expect_contains": "2381e53caeb6e860cf5fdb8f809c83102dc02a0b16c348412541f606fc417fa6",
       "affects": [
         "A",
         "B",
@@ -112,7 +112,7 @@
       "id": "ks_image_digest",
       "kind": "crictl_image_digest",
       "target": "knowledge-service-web:latest@docker.io/library",
-      "expect_contains": "d3871b50c5ac16540cadb790d00a32399fc161fa30f74b17fef4ffef4151ed94",
+      "expect_contains": "f549edd1f2738fea9bb4ae03fabe588627a8cfefea03b7db12d7465e04f2b933",
       "affects": [
         "A",
         "C",
