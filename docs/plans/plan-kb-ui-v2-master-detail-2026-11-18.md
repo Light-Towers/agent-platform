@@ -10,6 +10,16 @@
 - 测试账号取证期临时提权 admin（kb.publish），验后已降回 viewer。
 - 漂移门禁台账更新到 v2 rev/digest，verify_basis_drift rc=0。
 
+### 视觉/功能真实浏览器检查（2026-11-18 晚，用户要求"自己测一遍"）
+
+用 Chrome headless + CDP（Remote Debugging）真实渲染页面并截图，发现门禁（typecheck/lint）查不出的样式问题并修复：
+- **class 核对脚本**（node 提取模板 class vs base.css 定义）抓到 `.kb-sidebar` 用了但未定义 → 补定义。
+- **CDP 截图**（port-forward 18080 + 登录注入 sessionStorage + 点侧栏菜单）确认：主从布局 grid 生效、4 库显示、空态引导；但发现库名显示成文件名（补登 name=filename）、右栏空态只占顶部一小条、长名折行 ✎× 溢出 → 修：补登 name 改 knowledge_id、空态 min-height 320、库名单行省略（commit f260c9d0）。
+- **CDP CSS 探针**（本地 vite dev 注入长名假 DOM 测量）确认 × 按钮不再溢出（delRight≤itemRight）、ellipsis/nowrap 生效、grid 布局、空态撑满（commit 185c4e01，含 width:100% 的长名兜底）。
+- **教训**：视觉问题只有真浏览器渲染能发现；typecheck/lint/class 门禁只查结构不查渲染。本次把"CDP 截图 + DOM 探针"作为前端改动的补充验证手段。
+
+> 注：最后的 width:100% 长名兜底（185c4e01）本地探针验证通过但未随新镜像部署——线上真实库名均为短 ID（verify-kb-*），既有截图确认无溢出；该微调留待下次镜像重建一并上线。
+
 ## 目标
 
 一个「知识库」页，master-detail 布局：
