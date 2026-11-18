@@ -39,7 +39,7 @@ function onChanged(): void {
       />
       <section
         v-else
-        class="ry-card"
+        class="ry-card kb-workspace__empty"
       >
         <h2 class="o-head-sm">
           知识库

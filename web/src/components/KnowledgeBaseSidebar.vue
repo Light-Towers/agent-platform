@@ -184,9 +184,10 @@ onMounted(refresh)
           <button
             type="button"
             class="ry-btn ry-btn--text kb-sidebar__pick"
+            :title="`${kb.name || kb.knowledge_id} · ${kb.knowledge_id}`"
             @click="choose(kb)"
           >
-            {{ kb.name || kb.knowledge_id }}
+            <span class="kb-sidebar__name">{{ kb.name || kb.knowledge_id }}</span>
             <span class="hint">{{ kb.doc_count }} 文档</span>
           </button>
           <button

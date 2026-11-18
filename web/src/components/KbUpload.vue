@@ -179,9 +179,9 @@ async function submit(): Promise<void> {
     errorText.value = '请先选择或拖入至少一个文档文件'
     return
   }
-  // 知识库 ID 是登记/发布/检索的唯一锚点，缺了文档就"传了也查不到"——必填前置校验。
+  // 知识库 ID 是登记/发布/检索的唯一锚点，由左栏选中的库自动带入；缺了就"传了也查不到"。
   if (form.value.knowledgeId.trim() === '') {
-    errorText.value = '请填写知识库 ID（文档登记与后续检索必需）'
+    errorText.value = '请先在左侧选择或新建一个知识库，再上传文档'
     return
   }
   busy.value = true
@@ -193,8 +193,8 @@ async function submit(): Promise<void> {
       // DOC_BACKEND=pgvector：agent_server 本地直写文档向量库（同步完成），没有 KS 后台
       // 任务可轮询（/kb/status 对这批文档无意义），也不落 KS 的上传历史 —— 给一句如实的
       // 成功读数并跳过轮询，而不是让屏上停在「没有任务 ID」的空白里。
-      localIngestNote.value = '文档已写入本地文档向量库（pgvector 后端，无需后台处理）；'
-        + '登记列表见页面底部，可直接在对话页向该知识库提问。'
+      localIngestNote.value = '文档已写入本地文档向量库（pgvector 后端，无需后台处理），'
+        + '已在当前知识库中登记；可直接在对话页向该知识库提问。'
     } else {
       const firstId = taskIds.value[0]
       if (firstId !== undefined) {
