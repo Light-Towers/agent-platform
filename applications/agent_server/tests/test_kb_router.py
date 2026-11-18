@@ -8,7 +8,8 @@
 5. 签名头形状：X-Internal-Tenant；配了 KNOWLEDGE_SERVICE_KEY 才有 X-API-Key；
 6. 上游不可达 → 502；上游 ≥400 → 状态码 + 文案透传；
 7. PATCH /kb/{id}/status → KS POST /reimport（form 形状钉死）；
-8. GET /kb/documents → KS GET /documents?limit=（透传 JSON）。
+8. GET /kb/documents → KS GET /documents?limit=（透传 JSON）；
+9. GET /kb/knowledge-bases → KS GET /collections?limit=（P1 改查库实体注册表，透传 JSON）。
 """
 
 from __future__ import annotations
@@ -236,25 +237,28 @@ async def test_upload_unknown_backend_500():
     assert "DOC_BACKEND" in str(exc_info.value.detail)
 
 
-async def test_knowledge_bases_aggregates_documents_by_knowledge_id():
-    """GET /kb/knowledge-bases：代理 KS /documents 聚合 {knowledge_id, doc_count, status}。"""
-    # KS /documents 按 updated_at 降序 ⇒ 同库多条里首见即最新状态
-    payload = {"code": 200, "tenant_id": "default-tenant", "total": 3, "documents": [
-        {"knowledge_id": "kb-a", "status": "DRAFT", "updated_at": "2026-11-17T08:00:00"},
-        {"knowledge_id": "kb-b", "status": "PUBLISHED", "updated_at": "2026-11-16T10:00:00"},
-        {"knowledge_id": "kb-a", "status": "PUBLISHED", "updated_at": "2026-11-15T09:00:00"},
-        {"knowledge_id": "", "status": "DRAFT", "updated_at": "2026-11-14T09:00:00"},
+async def test_knowledge_bases_forwards_to_collections():
+    """GET /kb/knowledge-bases：P1 改为代理 KS GET /collections（库实体注册表）。
+
+    形状由 KS 侧保证（{knowledge_id, doc_count, status, ...}），平台只透传不聚合——
+    聚合逻辑随 P1 移入 KS kb_collections，避免平台再扫 /documents。
+    """
+    payload = {"code": 200, "tenant_id": "default-tenant", "total": 2, "knowledge_bases": [
+        {"knowledge_id": "kb-a", "name": "kb-a", "doc_count": 1, "status": "active", "latest_updated_at": "2026-11-18T08:00:00"},
+        {"knowledge_id": "kb-b", "name": "kb-b", "doc_count": 0, "status": "active", "latest_updated_at": "2026-11-18T07:00:00"},
     ]}
     client = _Client(_Resp(200, payload))
     with patch("agent_server.api.kb_router.get_settings", return_value=_settings()), \
          patch("agent_server.api.kb_router.sign_internal_header", return_value="v1.test.sig"), \
          patch("httpx.AsyncClient", return_value=client):
         resp = await kb_knowledge_bases(_auth=None, _feature=None)
-    assert resp["total"] == 2  # 空 knowledge_id 不进清单
+    url, params, headers = client.gets[0]
+    assert url == "http://ks:8900/collections"
+    assert params == {"limit": 100}
+    assert headers == {"X-Internal-Tenant": "v1.test.sig"}
+    assert resp["total"] == 2
     assert [k["knowledge_id"] for k in resp["knowledge_bases"]] == ["kb-a", "kb-b"]
-    kb_a = resp["knowledge_bases"][0]
-    assert kb_a["doc_count"] == 2
-    assert kb_a["status"] == "DRAFT", "首见即最新（KS 列表 updated_at 降序）"
+    assert resp["knowledge_bases"][0]["status"] == "active"
 
 
 async def test_status_forwards_to_reimport_with_form_shape():

@@ -326,15 +326,15 @@ async def kb_history(
     return resp.json()
 
 
-@router.get("/kb/knowledge-bases", summary="知识库列表（代理聚合 KS /documents，按 knowledge_id 去重）")
+@router.get("/kb/knowledge-bases", summary="知识库列表（代理 KS /collections）")
 async def kb_knowledge_bases(
     _auth=Depends(verify_api_key),
     _feature=Depends(require_feature("chat.run")),  # 消费方是对话区"知识范围"选择器，不是 kb 管理页
 ):
-    """租户内知识库清单（plan-knowledge-base-model 步骤 4）：多库检索/选库的前端数据源。
+    """租户内知识库清单（P1 改查 kb_collections 注册表，经 KS /collections 代理）。
 
-    聚合规则：KS /documents 的登记文档按 ``knowledge_id`` 去重计数；``status`` 取该库
-    最新一条登记的状态（KS /documents 按 updated_at 降序 ⇒ 首见即最新）。
+    返回形状保持与旧 /documents 聚合版一致（knowledge_id/doc_count/status/latest_updated_at），
+    另带 name/owner/created_at 供管理页用；对话区选择器与上传页下拉均不受影响。
     """
     url = _ks_base_url()
 
@@ -343,7 +343,7 @@ async def kb_knowledge_bases(
     try:
         async with httpx.AsyncClient(timeout=_KS_TIMEOUT_S) as client:
             resp = await client.get(
-                f"{url}/documents", params={"limit": 100}, headers=_internal_headers()
+                f"{url}/collections", params={"limit": 100}, headers=_internal_headers()
             )
     except httpx.HTTPError as exc:
         raise HTTPException(
@@ -352,21 +352,9 @@ async def kb_knowledge_bases(
     if resp.status_code >= 400:
         raise HTTPException(status_code=resp.status_code, detail=f"知识库列表查询失败：{resp.text[:200]}")
 
-    docs = (resp.json() or {}).get("documents") or []
-    agg: Dict[str, Dict[str, Any]] = {}
-    for d in docs:
-        kid = str(d.get("knowledge_id") or "").strip()
-        if not kid:
-            continue  # 空 ID 未登记（历史遗留形状），不进知识库清单
-        entry = agg.setdefault(
-            kid,
-            {
-                "knowledge_id": kid,
-                "doc_count": 0,
-                "status": str(d.get("status") or ""),
-                "latest_updated_at": str(d.get("updated_at") or ""),
-            },
-        )
-        entry["doc_count"] += 1
-    kbs = sorted(agg.values(), key=lambda e: e["knowledge_id"])
-    return {"code": 200, "total": len(kbs), "knowledge_bases": kbs}
+    body = resp.json() or {}
+    return {
+        "code": 200,
+        "total": int(body.get("total") or 0),
+        "knowledge_bases": body.get("knowledge_bases") or [],
+    }

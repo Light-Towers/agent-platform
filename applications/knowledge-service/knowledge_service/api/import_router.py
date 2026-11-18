@@ -26,7 +26,7 @@ from knowledge_service.core.config import settings
 from knowledge_service.core.logger import logger  # 项目统一日志工具
 from knowledge_service.import_process.agent.main_graph import kb_import_app  # LangGraph全流程编译实例
 from knowledge_service.import_process.agent.state import get_default_state
-from knowledge_service.utils import kb_upload_history
+from knowledge_service.utils import kb_collections, kb_upload_history
 from knowledge_service.utils.kb_registry import get_document, list_by_tenant, update_status, upsert_by_upload
 from knowledge_service.utils.lifecycle_reimport import ReimportError, plan_reimport, resolve_original_file
 from knowledge_service.utils.path_util import PROJECT_ROOT
@@ -331,6 +331,15 @@ async def upload_files(
         background_tasks.add_task(run_graph_task, task_id, task_local_dir, local_file_abs_path, task_metadata)
         logger.info(f"[{task_id}] 已将LangGraph全流程加入后台任务，任务已启动")
 
+        # 8.5 P1：确保知识库一等实体存在（kb_collections）。
+        #    knowledge_id 为空不建库（与 kb_documents 既有行为一致）；
+        #    写失败只落 WARNING 不拦上传（注册表是管理面，不是 upload 闸门）。
+        if knowledge_id.strip():
+            from knowledge_service.utils import kb_collections
+            kb_collections.ensure_collection(
+                tenant_id=tenant_id, knowledge_id=knowledge_id, name=knowledge_id.strip()
+            )
+
         # 9. 登记 kb_documents 注册表（批 2a）：kb.publish（/reimport）的持久依据。
         #    knowledge_id 为空不登记（保持既有行为；该条不可重提、不出现在 /documents）；
         #    存储失败只落 WARNING 不拦上传（kb_registry 模块头注的三条边界）。
@@ -467,6 +476,31 @@ async def list_documents(limit: int = 100):
     tenant_id = resolve_server_tenant("", endpoint="/documents")
     docs = list_by_tenant(tenant_id, limit=capped)
     return {"code": 200, "tenant_id": tenant_id, "total": len(docs), "documents": docs}
+
+
+@router.get("/collections", summary="知识库列表", description="按服务端断言租户列出 kb_collections 注册的知识库（updated_at 降序）")
+async def list_collections(limit: int = 100):
+    """租户内知识库清单（agent_server GET /kb/knowledge-bases 代理到这里）。
+
+    P1 形状对齐原 /documents 聚合结果：knowledge_id / doc_count / status /
+    latest_updated_at，另加 name/owner/created_at 供管理页用。doc_count 是注册表冗余
+    字段（P1 恒 0，由后续阶段维护），不在此处现算——避免每次列表都扫 kb_documents。
+    """
+    capped = max(1, min(limit, 100))
+    tenant_id = resolve_server_tenant("", endpoint="/collections")
+    rows = kb_collections.list_by_tenant(tenant_id, limit=capped)
+    items = [
+        {
+            "knowledge_id": str(r.get("knowledge_id") or ""),
+            "name": str(r.get("name") or r.get("knowledge_id") or ""),
+            "owner": str(r.get("owner") or ""),
+            "status": str(r.get("status") or ""),
+            "doc_count": int(r.get("doc_count") or 0),
+            "latest_updated_at": str(r.get("updated_at") or ""),
+        }
+        for r in rows
+    ]
+    return {"code": 200, "tenant_id": tenant_id, "total": len(items), "knowledge_bases": items}
 
 
 @router.get("/history", summary="上传历史列表", description="按服务端断言租户列出上传历史（含切块读数，uploaded_at 降序）")

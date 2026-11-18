@@ -170,6 +170,40 @@ def test_documents_endpoint_contract(monkeypatch):
 
 
 @pytest.mark.skipif(not INTEGRATION_ENABLED, reason="requires ZHIKU_INTEGRATION=1 (heavy LangGraph import)")
+def test_collections_endpoint_contract(monkeypatch):
+    """GET /collections → kb_collections.list_by_tenant 的形状与租户断言（P1）。"""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    import knowledge_service.api.import_router as ir
+
+    monkeypatch.setattr(ir, "resolve_server_tenant", lambda *a, **k: "tenant-test")
+    monkeypatch.setattr(
+        ir,
+        "kb_collections",
+        type("M", (), {
+            "list_by_tenant": staticmethod(lambda *a, **k: [
+                {"knowledge_id": "kb-x", "name": "kb-x", "doc_count": 2,
+                 "status": "active", "updated_at": "2026-11-18T08:00:00"}
+            ])
+        })(),
+    )
+
+    app = FastAPI()
+    app.include_router(ir.router)
+    client = TestClient(app)
+    resp = client.get("/collections")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["tenant_id"] == "tenant-test"
+    assert body["total"] == 1
+    item = body["knowledge_bases"][0]
+    assert item["knowledge_id"] == "kb-x"
+    assert item["doc_count"] == 2
+    assert item["status"] == "active"
+
+
+@pytest.mark.skipif(not INTEGRATION_ENABLED, reason="requires ZHIKU_INTEGRATION=1 (heavy LangGraph import)")
 def test_reimport_endpoint_contract(monkeypatch, tmp_path):
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
