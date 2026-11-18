@@ -71,15 +71,16 @@ async def add_document(
     vectors = await embed_texts([c.text for c in chunks])
     params = [
         # 末位固定 workspace_id：governance/test_workspace_isolation.py 钉住「首位 tenant_id
-        # + 末位 workspace_id」的元组形状 ⇒ knowledge_id 必须排在它前面。
-        (tenant_id, doc_id, source, c.heading, c.text, vec, knowledge_id, workspace_id)
+        # + 末位 workspace_id」的元组形状 ⇒ knowledge_id/status 必须排在它前面。
+        # v3 软删除：新写入 status='active'。
+        (tenant_id, doc_id, source, c.heading, c.text, vec, knowledge_id, "active", workspace_id)
         for c, vec in zip(chunks, vectors)
     ]
     async with pool.connection() as conn:
         cur = conn.cursor()
         await cur.executemany(
-            "INSERT INTO chunks (tenant_id, doc_id, source, heading, content, embedding, knowledge_id, workspace_id) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+            "INSERT INTO chunks (tenant_id, doc_id, source, heading, content, embedding, knowledge_id, status, workspace_id) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
             params,
         )
     _invalidate_bm25_cache()
@@ -107,7 +108,7 @@ def _scope_predicate(workspace_id: str, knowledge_id: str) -> tuple[str, tuple]:
 
     归属维不掺安全边界：tenant_id 谓词由各调用点单独成对携带（ADR-0006 T9）。
     """
-    where = "workspace_id = %s"
+    where = "workspace_id = %s AND status != 'REVOKED'"
     params: list = [workspace_id]
     if knowledge_id:
         where += " AND knowledge_id = %s"

@@ -44,10 +44,10 @@ from agent_core.memory._tenant_gate import resolve_tenant
 
 logger = get_logger(__name__)
 
-#: 平台文档集合默认名。**不得**复用 KS 旧集合 product_manual_v1_bge_m3（缺
-#: knowledge_id/workspace_id 字段，且老数据未分库）；部署侧 KS 与平台必须指向
-#: 同一集合名（KS 经 CHUNKS_COLLECTION env 覆盖，平台经 DOC_MILVUS_COLLECTION）。
-DEFAULT_DOC_COLLECTION = "platform_doc_v2_bge_m3"
+#: 平台文档集合默认名（v3：新增 status 软删除字段，Milvus 不能给已有集合加字段 ⇒ 换名）。
+#: **不得**复用 KS 旧集合 product_manual_v1_bge_m3（缺 v2/v3 字段）或 v2 集合（缺 status）。
+#: 同一集合名部署侧 KS 与平台必须指向一致（KS 经 CHUNKS_COLLECTION env，平台经 DOC_MILVUS_COLLECTION）。
+DEFAULT_DOC_COLLECTION = "platform_doc_v3_bge_m3"
 
 #: 单条检索默认条数（调用方一般显式传 settings.rag_top_k，这里只是兜底）。
 DEFAULT_TOP_K = 5
@@ -207,6 +207,8 @@ class MilvusDocumentStore:
         schema.add_field(field_name="knowledge_id", datatype=DataType.VARCHAR, max_length=256)
         # v2 新增：归属维（与 pgvector 侧 ADR-0006 T9 成对谓词同语义；KS 管线缺省 default）
         schema.add_field(field_name="workspace_id", datatype=DataType.VARCHAR, max_length=128)
+        # v3 软删除（与 KS node_import_milvus.create_collection 镜像）
+        schema.add_field(field_name="status", datatype=DataType.VARCHAR, max_length=16)
         schema.add_field(field_name="embedding_model", datatype=DataType.VARCHAR, max_length=256)
         schema.add_field(field_name="chunk_version", datatype=DataType.VARCHAR, max_length=64)
         schema.add_field(field_name="created_at", datatype=DataType.INT64)
@@ -238,8 +240,10 @@ class MilvusDocumentStore:
         """标量过滤：tenant_id 严格谓词（安全边界）+ workspace/knowledge 可选。
 
         knowledge_id 为空 ⇒ 不加该子句（全库模式；老数据未分库也可召回）。
+        v3 起所有检索都带 status != REVOKED（软删除；老数据 status 空仍可召回）。
         """
-        expr = f'tenant_id == "{_escape_milvus_string(tenant_id)}"'
+        expr = 'status != "REVOKED"'
+        expr += f' and tenant_id == "{_escape_milvus_string(tenant_id)}"'
         if workspace_id:
             expr += f' and workspace_id == "{_escape_milvus_string(workspace_id)}"'
         if knowledge_id:
@@ -295,6 +299,7 @@ class MilvusDocumentStore:
                 "scope_type": "PRIVATE",
                 "knowledge_id": knowledge_id or "",
                 "workspace_id": workspace_id or "default",
+                "status": "active",  # v3 软删除：新写入即有效；REVOKED 由 P3 删除端点产出
                 "embedding_model": getattr(embedder, "model_name", "") or "",
                 "chunk_version": "v1-title-aware",
                 "created_at": now,

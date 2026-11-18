@@ -166,6 +166,9 @@ def create_collection(client, collection_name: str, vector_dimension: int):
     # 另一侧必须同步（先建集合的一方决定另一方的写入/检索行为）。
     schema.add_field(field_name="knowledge_id", datatype=DataType.VARCHAR, max_length=256)  # 知识库 ID
     schema.add_field(field_name="workspace_id", datatype=DataType.VARCHAR, max_length=128)  # 工作空间归属维
+    # v3 软删除（plan-kb-delete-and-management-2026-11-18 P2）：status=REVOKED 的切片不再召回。
+    # 与平台侧 document_store._create_collection 逐字段镜像；缺省 active（见 _enrich_chunk_metadata）。
+    schema.add_field(field_name="status", datatype=DataType.VARCHAR, max_length=16)  # active | REVOKED
     # M2 索引生命周期（方案 §5.3）：chunk 元数据字段，保证"评测结果能归因到具体索引版本"
     schema.add_field(
         field_name="embedding_model", datatype=DataType.VARCHAR, max_length=256
@@ -364,6 +367,8 @@ def _enrich_chunk_metadata(item: Dict[str, Any], state: Dict[str, Any] = None) -
         # workspace_id 上游（平台代理/KS 表单）未带时缺省 default。
         item_copy.setdefault("knowledge_id", str(state.get("knowledge_id", "") or ""))
         item_copy.setdefault("workspace_id", str(state.get("workspace_id", "") or "default"))
+        # v3 软删除：缺省 active；REVOKED 由 P3 删除端点经重灌/更新写入。
+        item_copy.setdefault("status", str(state.get("status", "") or "active"))
     return item_copy
 
 

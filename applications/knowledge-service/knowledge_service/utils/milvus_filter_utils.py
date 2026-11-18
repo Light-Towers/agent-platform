@@ -55,6 +55,15 @@ def build_knowledge_filter(knowledge_id: Optional[str]) -> Optional[str]:
     return f'knowledge_id == "{escape_milvus_string(knowledge_id)}"'
 
 
+def build_status_filter() -> str:
+    """v3 软删除过滤：排除 status=REVOKED 的切片（plan-kb-delete-and-management P2）。
+
+    用 != 而非 == active：老数据 status 为空/未设时仍可召回（重灌前兼容），只有显式
+    REVOKED 被排除。两侧（KS 检索 / 平台 DocumentStore）口径必须一致。
+    """
+    return 'status != "REVOKED"'
+
+
 def build_retrieval_filter(
     item_names: Optional[Iterable[str]] = None,
     tenant_id: Optional[str] = None,
@@ -63,9 +72,9 @@ def build_retrieval_filter(
 ) -> Optional[str]:
     """
     构造完整检索过滤表达式：item_name + tenant_id + scope_type + knowledge_id 复合过滤。
-    各子句用 and 连接；全为空时返回 None（不做过滤，全库检索）。
+    各子句用 and 连接。v3 起至少含 status 软删除过滤，故永不返回 None。
     """
-    clauses = []
+    clauses = [build_status_filter()]  # v3 软删除：所有检索都排除 REVOKED
     item_expr = build_item_name_filter(item_names)
     if item_expr:
         clauses.append(item_expr)
@@ -75,6 +84,4 @@ def build_retrieval_filter(
     knowledge_expr = build_knowledge_filter(knowledge_id)
     if knowledge_expr:
         clauses.append(knowledge_expr)
-    if not clauses:
-        return None
     return " and ".join(clauses)

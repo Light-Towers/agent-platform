@@ -68,6 +68,21 @@ kb_documents 一库一行（upsert 覆盖），"库下文档"实际是 kb_upload
 - 租户隔离：跨租户删不到对方的库（签名断言）。
 - 单测：delete 模块的租户过滤 + 状态迁移合法性（REVOKED 只能从 PUBLISHED 等合法态迁入）；检索屏蔽名单的可证性。
 
+### P2 详细设计（实现口径，2026-11-18 钉死）
+
+| 决策 | 取值 | 理由 |
+|---|---|---|
+| status 字段 | `VARCHAR(16)`，值域 `active` / `REVOKED`（对齐 KNOWLEDGE_STATUS.REVOKED） | 用生命周期已有枚举值，不另造 |
+| 过滤语义 | 检索谓词加 `status != "REVOKED"` | **兼容存量**：老数据 status 为空/未设仍可召回；只有显式 REVOKED 被排除。重灌前不会误伤 |
+| 集合名 | `platform_doc_v3_bge_m3` | Milvus 不支持给已有集合加字段 ⇒ 必须新集合；v2 集合保留可回滚 |
+| 写入侧 status | KS `_enrich_chunk_metadata` 补 `status`（默认 active）；平台 `add_documents` 同样带 | 两侧镜像；缺省 active 保证新写入即有效 |
+| 两侧过滤 | KS `milvus_filter_utils.build_retrieval_filter` + 平台 `document_store._build_filter` 都加 | 检索经两条路径（KS /api/v1/retrieve + 平台 DocumentStore），都要屏蔽 |
+| schema 镜像测试 | `test_milvus_create_collection_mirrors_ks_schema` 加 status 断言 | 钉死两侧同步 |
+
+**P2 拆两步落地**（代码与运维分离，各自可独立验证/回滚）：
+- **P2-code**：schema 字段 + 集合名 + 两侧 filter + 写入侧 status + 单测。**不动真环境**——新集合在首次上传时由 KS 管线自动创建。
+- **P2-data**：存量 PUBLISHED 文档重灌进 v3 集合（D3 运维动作，须单独授权 + 窗口）。重灌完成前 v3 集合为空、对话检索会退化——故 P2-code 与 P2-data 之间要尽量短，或先重灌再切配置。
+
 ## 5. 影响面与落地顺序（T3，按依赖分阶段）
 
 **总定性**：D1(chunk status) + D4(注册表) 两个最规范选择叠加 = T3 级（1.5–3w 量级），不是一两个小时。必须分阶段，每阶段可独立验证。
@@ -75,7 +90,8 @@ kb_documents 一库一行（upsert 覆盖），"库下文档"实际是 kb_upload
 | 阶段 | 内容 | 可独立验证的判据 | 风险 |
 |---|---|---|---|
 | P1 数据模型底座 | 新增 kb_collections 注册表 + 上传写入路径改造（上传前确保库存在）+ `/kb/knowledge-bases` 改查注册表 | 上传自动建库；列表返回库元数据；租户隔离 | 低 |
-| P2 schema v3 + 重灌 | 两侧 create_collection 加 status 字段（镜像同步测试）；新集合名；存量 PUBLISHED 全量重灌；两侧检索谓词加 `status != REVOKED` | schema 镜像测试绿；重灌后检索正常；status 过滤生效 | **高（真环境运维重灌）** |
+| P2-code schema v3 + 过滤（**已完成 2026-11-18**）| 两侧 create_collection 加 status 字段（镜像同步测试）；新集合名 platform_doc_v3_bge_m3；两侧检索谓词加 `status != REVOKED`；pgvector migration 021 + store.py 谓词 | **1234 passed / 9 skipped**；ruff/doc-sync/migration lint 绿 | 低（纯代码，未动真环境）|
+| P2-data 切集合名 + 重灌 | KS CHUNKS_COLLECTION 切 v3；存量 PUBLISHED 全量重灌进 v3；真环境 PG 跑 migration 021 | 重灌后检索正常；status 过滤生效 | **高（真环境运维重灌）** |
 | P3 删除端点 + 管理页 | DELETE 单文档（→REVOKED）+ DELETE 整库（前置校验无有效文档）；新建 KnowledgeBaseAdmin.vue | §4 全部验收判据 | 中 |
 
 **顺序理由**：P1 先让"库"成为一等实体（D4 判据才有根）；P2 是最高风险的重灌，单独一个阶段可回滚验证；P3 依赖 P1 的库实体和 P2 的 status 过滤才成立。**不要跳过 P2 直接做 P3**——没有 status 字段，REVOKED 无法在检索层生效。

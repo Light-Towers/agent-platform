@@ -89,12 +89,12 @@ class _FakeConnWriter:
         p = params or ()
         self._log.append((sql, p))
         if sql.startswith("INSERT INTO chunks"):
-            # 列序 (tenant_id, doc_id, source, heading, content, embedding, workspace_id)
+            # 列序 (tenant_id, doc_id, source, heading, content, embedding, knowledge_id, status, workspace_id)
             self._db["chunks"].append({
                 "id": len(self._db["chunks"]) + 1,
                 "tenant_id": p[0],
                 "doc_id": p[1], "source": p[2], "heading": p[3],
-                "content": p[4], "embedding": p[5], "workspace_id": p[6],
+                "content": p[4], "embedding": p[5], "workspace_id": p[8],
             })
             return _FakeCur(self._db, sql, p, self._log)
         if sql.startswith("INSERT INTO memories"):
@@ -132,7 +132,7 @@ class _FakeConnWriter:
                 "id": len(self._db["chunks"]) + 1,
                 "tenant_id": p[0],
                 "doc_id": p[1], "source": p[2], "heading": p[3],
-                "content": p[4], "embedding": p[5], "workspace_id": p[6],
+                "content": p[4], "embedding": p[5], "workspace_id": p[8],
             })
         return None
 

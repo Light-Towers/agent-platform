@@ -183,7 +183,7 @@ def test_get_document_store_reads_current_config():
 # ---------------------------------------------------------------------------
 def test_milvus_filter_tenant_only_when_no_scope():
     expr = MilvusDocumentStore._build_filter("tenantA", "default", "")
-    assert expr == 'tenant_id == "tenantA" and workspace_id == "default"'
+    assert expr == 'status != "REVOKED" and tenant_id == "tenantA" and workspace_id == "default"'
 
 
 def test_milvus_filter_knowledge_clause_only_when_scoped():
@@ -194,9 +194,30 @@ def test_milvus_filter_knowledge_clause_only_when_scoped():
     assert scoped.endswith('and knowledge_id == "kb-1"')
 
 
+def test_milvus_filter_excludes_revoked_always():
+    """v3 软删除：所有检索都带 status != REVOKED（老数据 status 空仍可召回）。"""
+    for args in (("t", "ws", ""), ("t", "ws", "kb"), ("t", "", "")):
+        expr = MilvusDocumentStore._build_filter(*args)
+        assert expr.startswith('status != "REVOKED"'), expr
+
+
 def test_milvus_filter_escapes_string_literals():
     expr = MilvusDocumentStore._build_filter('ten"ant\\X', "ws", "kb")
     assert '\\"' in expr and "\\\\" in expr  # 引号与反斜杠都转义，不破表达式结构
+
+
+def test_pgvector_scope_predicate_excludes_revoked():
+    """v3 软删除：pgvector 的归属维谓词也排除 REVOKED（两后端语义一致）。"""
+    from agent_server.rag.store import _scope_predicate
+
+    where, params = _scope_predicate("ws", "")
+    assert "status != 'REVOKED'" in where
+    assert params == ("ws",)
+
+    where, params = _scope_predicate("ws", "kb-1")
+    assert "status != 'REVOKED'" in where
+    assert "knowledge_id = %s" in where
+    assert params == ("ws", "kb-1")
 
 
 # ---------------------------------------------------------------------------
@@ -237,6 +258,7 @@ async def test_milvus_create_collection_mirrors_ks_schema(monkeypatch):
     for name in (
         "chunk_id", "content", "title", "parent_title", "part", "file_title",
         "item_name", "tenant_id", "scope_type", "knowledge_id", "workspace_id",
+        "status",  # v3 软删除字段（plan-kb-delete-and-management P2）
         "embedding_model", "chunk_version", "created_at", "source_doc",
         "sparse_vector", "dense_vector",
     ):

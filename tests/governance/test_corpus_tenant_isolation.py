@@ -143,13 +143,14 @@ async def test_chunks_write_pairs_tenant_and_workspace():
     await add_document(rec, "a.md", [Chunk(text="内容", heading="h")], workspace_id="wsA", tenant_id="tenantA")
     inserts = [p for sql, p in rec.calls if "INSERT INTO chunks" in sql]
     assert inserts
-    # 列序 (tenant_id, doc_id, source, heading, content, embedding, knowledge_id, workspace_id)
+    # 列序 (tenant_id, doc_id, source, heading, content, embedding, knowledge_id, status, workspace_id)
     # 末位固定 workspace_id —— 与 test_workspace_isolation.py 同一条契约，不因新增列而挪动；
-    # knowledge_id 排在它前面（倒数第二位），用 -2 断言不绑死绝对下标。
+    # status 在倒数第二（v3 软删除，新写入恒 active），knowledge_id 在倒数第三。
     assert inserts[-1][0] == "tenantA"
     assert inserts[-1][-1] == "wsA"
+    assert inserts[-1][-2] == "active"  # v3 软删除：新写入即有效
     # knowledge_id 未指定 = 空串（不归属知识库；多知识库登记走 pg_backend 的显式传参）
-    assert inserts[-1][-2] == ""
+    assert inserts[-1][-3] == ""
 
 
 async def test_retrieve_chunks_isolates_across_tenants():
