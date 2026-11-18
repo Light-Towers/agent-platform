@@ -203,19 +203,19 @@ export async function getKbHistory(
 
 const KB_KNOWLEDGE_BASES_PATH = '/kb/knowledge-bases'
 
-/** 知识库清单一条（代理聚合 KS /documents：按 knowledge_id 去重计数）。 */
+/** 知识库清单一条（P1 起代理 KS /collections 注册表）。 */
 export interface KbKnowledgeBase {
   readonly knowledge_id: string
+  readonly name?: string
+  readonly owner?: string
   readonly doc_count: number
-  /** 该库最新一条登记的生命周期状态（DRAFT/REVIEWING/PUBLISHED/…）。 */
+  /** 库状态：active | deleted（P1 kb_collections）；兼容旧聚合值的生命周期状态。 */
   readonly status: string
   readonly latest_updated_at: string
 }
 
 /**
- * 知识库列表（plan-knowledge-base-model 步骤 4）：
- * 上传页的知识库 ID 下拉与对话区「知识范围」选择器的共同数据源。
- * feature 门是 chat.run（对话区也消费），不再叠 kb.upload。
+ * 知识库列表：上传页的知识库 ID 下拉、对话区「知识范围」选择器、管理页的共同数据源。
  */
 export async function listKnowledgeBases(
   token: string,
@@ -227,4 +227,32 @@ export async function listKnowledgeBases(
   if (!resp.ok) await failKb('知识库列表查询', resp)
   const data = await resp.json() as { knowledge_bases?: KbKnowledgeBase[] }
   return Array.isArray(data.knowledge_bases) ? data.knowledge_bases : []
+}
+
+/** 下线单文档（软删除→REVOKED）：DELETE /kb/documents/{knowledge_id}。 */
+export async function deleteKbDocument(
+  knowledgeId: string,
+  token: string,
+  fetchImpl?: typeof fetch,
+): Promise<unknown> {
+  const doFetch = fetchImpl ?? globalThis.fetch
+  const headers = authHeaders(token)
+  const resp = await doFetch(`/kb/documents/${encodeURIComponent(knowledgeId)}`,
+    { method: 'DELETE', headers, cache: 'no-store' })
+  if (!resp.ok) await failKb('文档下线', resp)
+  return await resp.json()
+}
+
+/** 删除整个知识库（前置：库下无有效文档）：DELETE /kb/knowledge-bases/{knowledge_id}。 */
+export async function deleteKbKnowledgeBase(
+  knowledgeId: string,
+  token: string,
+  fetchImpl?: typeof fetch,
+): Promise<unknown> {
+  const doFetch = fetchImpl ?? globalThis.fetch
+  const headers = authHeaders(token)
+  const resp = await doFetch(`/kb/knowledge-bases/${encodeURIComponent(knowledgeId)}`,
+    { method: 'DELETE', headers, cache: 'no-store' })
+  if (!resp.ok) await failKb('知识库删除', resp)
+  return await resp.json()
 }

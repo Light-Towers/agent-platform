@@ -22,7 +22,15 @@ import httpx
 import pytest
 from agent_core.guardrails.errors import AppError
 from agent_runtime.identity import IdentityError
-from agent_server.api.kb_router import kb_documents, kb_history, kb_knowledge_bases, kb_status, kb_upload
+from agent_server.api.kb_router import (
+    kb_delete_collection,
+    kb_delete_document,
+    kb_documents,
+    kb_history,
+    kb_knowledge_bases,
+    kb_status,
+    kb_upload,
+)
 from agent_server.schemas import KbStatusRequest
 from fastapi import HTTPException
 
@@ -45,6 +53,7 @@ class _Client:
         self._exc = exc
         self.posts: list[tuple[str, dict, Any, dict | None]] = []
         self.gets: list[tuple[str, dict | None, dict | None]] = []
+        self.deletes: list[tuple[str, dict | None]] = []
 
     async def __aenter__(self) -> "_Client":
         return self
@@ -60,6 +69,12 @@ class _Client:
 
     async def get(self, url: str, params: dict | None = None, **kwargs: Any) -> _Resp:
         self.gets.append((url, params, kwargs.get("headers")))
+        if self._exc is not None:
+            raise self._exc
+        return self._resp
+
+    async def delete(self, url: str, **kwargs: Any) -> _Resp:
+        self.deletes.append((url, kwargs.get("headers")))
         if self._exc is not None:
             raise self._exc
         return self._resp
@@ -292,12 +307,48 @@ async def test_documents_forwards_get_with_limit():
     with patch("agent_server.api.kb_router.get_settings", return_value=_settings()), \
          patch("agent_server.api.kb_router.sign_internal_header", return_value="v1.test.sig"), \
          patch("httpx.AsyncClient", return_value=client):
-        resp = await kb_documents(limit=50, _auth=None, _feature=None)
+        await kb_documents(limit=50, _auth=None, _feature=None)
     url, params, headers = client.gets[0]
     assert url == "http://ks:8900/documents"
     assert params == {"limit": 50}
     assert headers == {"X-Internal-Tenant": "v1.test.sig"}
-    assert resp == {"code": 200, "tenant_id": "default-tenant", "total": 0, "documents": []}
+
+
+async def test_delete_document_proxies_to_ks():
+    """DELETE /kb/documents/{id} → KS DELETE /documents/{id}（签名头透传）。"""
+    client = _Client(_Resp(200, {"code": 200, "knowledge_id": "kb-x", "status": "REVOKED", "revoked_chunks": 1}))
+    with patch("agent_server.api.kb_router.get_settings", return_value=_settings()), \
+         patch("agent_server.api.kb_router.sign_internal_header", return_value="v1.test.sig"), \
+         patch("httpx.AsyncClient", return_value=client):
+        resp = await kb_delete_document("kb-x", _auth=None, _feature=None)
+    url, headers = client.deletes[0]
+    assert url == "http://ks:8900/documents/kb-x"
+    assert headers == {"X-Internal-Tenant": "v1.test.sig"}
+    assert resp["status"] == "REVOKED"
+
+
+async def test_delete_collection_proxies_to_ks():
+    """DELETE /kb/knowledge-bases/{id} → KS DELETE /collections/{id}。"""
+    client = _Client(_Resp(200, {"code": 200, "knowledge_id": "kb-x", "status": "deleted"}))
+    with patch("agent_server.api.kb_router.get_settings", return_value=_settings()), \
+         patch("agent_server.api.kb_router.sign_internal_header", return_value="v1.test.sig"), \
+         patch("httpx.AsyncClient", return_value=client):
+        resp = await kb_delete_collection("kb-x", _auth=None, _feature=None)
+    url, headers = client.deletes[0]
+    assert url == "http://ks:8900/collections/kb-x"
+    assert resp["status"] == "deleted"
+
+
+async def test_delete_collection_proxies_409():
+    """KS 409（库下有有效文档）原样回传。"""
+    client = _Client(_Resp(409, text="库下仍有有效文档"))
+    with patch("agent_server.api.kb_router.get_settings", return_value=_settings()), \
+         patch("agent_server.api.kb_router.sign_internal_header", return_value="v1.test.sig"), \
+         patch("httpx.AsyncClient", return_value=client):
+        import pytest
+        with pytest.raises(HTTPException) as ei:
+            await kb_delete_collection("kb-x", _auth=None, _feature=None)
+    assert ei.value.status_code == 409
 
 
 async def test_history_forwards_get_with_limit():

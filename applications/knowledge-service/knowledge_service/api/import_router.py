@@ -20,13 +20,16 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 
+from knowledge_service.clients.milvus_utils import get_milvus_client
+
 # 项目内部工具/配置/客户端
 from knowledge_service.clients.minio_utils import get_minio_client
+from knowledge_service.conf.milvus_config import milvus_config
 from knowledge_service.core.config import settings
 from knowledge_service.core.logger import logger  # 项目统一日志工具
 from knowledge_service.import_process.agent.main_graph import kb_import_app  # LangGraph全流程编译实例
 from knowledge_service.import_process.agent.state import get_default_state
-from knowledge_service.utils import kb_collections, kb_upload_history
+from knowledge_service.utils import kb_collections, kb_delete, kb_upload_history
 from knowledge_service.utils.kb_registry import get_document, list_by_tenant, update_status, upsert_by_upload
 from knowledge_service.utils.lifecycle_reimport import ReimportError, plan_reimport, resolve_original_file
 from knowledge_service.utils.path_util import PROJECT_ROOT
@@ -501,6 +504,58 @@ async def list_collections(limit: int = 100):
         for r in rows
     ]
     return {"code": 200, "tenant_id": tenant_id, "total": len(items), "knowledge_bases": items}
+
+
+@router.delete("/documents/{knowledge_id}", summary="删除单文档（软删除，标记 REVOKED）")
+async def delete_document(knowledge_id: str):
+    """下线单个 knowledge_id：其 Milvus 切片 status→REVOKED，检索不再召回；登记状态→REVOKED。
+
+    租户取服务端断言（X-Internal-Tenant），跨租户删不到；文档不存在时 404。
+    可逆：重新走 DRAFT→PUBLISHED 可恢复（新切片 status=PUBLISHED）。
+    """
+    tenant_id = resolve_server_tenant("", endpoint="DELETE /documents/{id}")
+    record = get_document(tenant_id, knowledge_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail=f"未知 knowledge_id（或该条未登记）: {knowledge_id}")
+    client = get_milvus_client()
+    if client is None:
+        raise HTTPException(status_code=503, detail="Milvus 不可达，无法下线文档")
+
+    def _update_registry(t: str, k: str, s: str) -> bool:
+        return update_status(tenant_id=t, knowledge_id=k, status=s, task_id="soft-delete")
+
+    try:
+        result = kb_delete.revoke_document(
+            client, milvus_config.chunks_collection, tenant_id, knowledge_id,
+            update_registry=_update_registry,
+        )
+    except Exception as e:  # noqa: BLE001 — 具名 502，不吞堆栈
+        logger.error(f"[delete] {tenant_id}/{knowledge_id} 下线失败", exc_info=True)
+        raise HTTPException(status_code=502, detail=f"文档下线失败：{type(e).__name__}") from e
+    if not result["found"]:
+        raise HTTPException(status_code=404, detail=f"该知识库无 Milvus 切片: {knowledge_id}")
+    logger.info(f"[delete] {tenant_id}/{knowledge_id} 软删除：{result['revoked_chunks']} 切片标记 REVOKED")
+    return {"code": 200, "knowledge_id": knowledge_id, "status": "REVOKED", **result}
+
+
+@router.delete("/collections/{knowledge_id}", summary="删除知识库（前置：库下无有效文档）")
+async def delete_collection(knowledge_id: str):
+    """删除整个知识库：前置校验库下无有效（非 REVOKED）文档，通过后标 kb_collections deleted。
+
+    软删除：不物理删数据；库 deleted 后不在 /collections 列表出现。跨租户删不到。
+    """
+    tenant_id = resolve_server_tenant("", endpoint="DELETE /collections/{id}")
+    ok, msg = kb_delete.delete_collection_guard(
+        tenant_id, knowledge_id,
+        list_by_tenant=list_by_tenant,
+        mark_deleted=kb_collections.mark_deleted,
+    )
+    if not ok:
+        # 区分"有有效文档"（409）与"库不存在"（404）
+        code = 409 if "有效文档" in msg else 404
+        raise HTTPException(status_code=code, detail=msg)
+    logger.info(f"[delete] {tenant_id}/{knowledge_id} 知识库标记删除")
+    return {"code": 200, "knowledge_id": knowledge_id, "status": "deleted", "message": msg}
 
 
 @router.get("/history", summary="上传历史列表", description="按服务端断言租户列出上传历史（含切块读数，uploaded_at 降序）")

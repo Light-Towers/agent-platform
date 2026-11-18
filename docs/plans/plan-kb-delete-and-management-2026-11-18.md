@@ -68,6 +68,18 @@ kb_documents 一库一行（upsert 覆盖），"库下文档"实际是 kb_upload
 - 租户隔离：跨租户删不到对方的库（签名断言）。
 - 单测：delete 模块的租户过滤 + 状态迁移合法性（REVOKED 只能从 PUBLISHED 等合法态迁入）；检索屏蔽名单的可证性。
 
+### P3 详细设计（实现口径，2026-11-18 钉死）
+
+| 决策 | 取值 | 理由 |
+|---|---|---|
+| 软删除落地 | 向量侧重写 status=REVOKED（读切片→改 status→删旧→重插，向量原样复用） | pymilvus 无 update；P2 已把过滤做成向量侧 status 谓词，保持一致 |
+| D2 禁删判据 | kb_documents 该库下有非 REVOKED 登记文档 ⇒ 禁删库（409） | 登记状态为准，简单可靠（用户拍板） |
+| D3 门控 | 复用 kb.publish（有发布权即可下线） | 少加权限码，角色矩阵不动（用户拍板） |
+| 单文档删 | `kb_delete.revoke_document`：读→删→用 REVOKED 重插 + 回写 kb_documents 状态 | 纯逻辑注入缝，5 单测覆盖租户隔离/向量原样/去主键 |
+| 整库删 | `kb_delete.delete_collection_guard`：前置校验 + kb_collections.mark_deleted | 有有效文档 409、库不存在 404 |
+| status 值域 | 正常文档=生命周期状态（PUBLISHED/REVIEWING…），软删除=REVOKED（见 P2 §8） | 过滤 `status != REVOKED` 天然排除软删项 |
+| 前后端端点 | KS `DELETE /documents/{id}` + `DELETE /collections/{id}`；平台代理同名 + 管理页 KnowledgeBaseAdmin.vue | 平台纯代理，签名头透传；前端删单文档/删库二段确认 |
+
 ### P2 详细设计（实现口径，2026-11-18 钉死）
 
 | 决策 | 取值 | 理由 |
@@ -106,7 +118,7 @@ kb_documents 一库一行（upsert 覆盖），"库下文档"实际是 kb_upload
 | P1 数据模型底座 | 新增 kb_collections 注册表 + 上传写入路径改造（上传前确保库存在）+ `/kb/knowledge-bases` 改查注册表 | 上传自动建库；列表返回库元数据；租户隔离 | 低 |
 | P2-code schema v3 + 过滤（**已完成 2026-11-18**）| 两侧 create_collection 加 status 字段（镜像同步测试）；新集合名 platform_doc_v3_bge_m3；两侧检索谓词加 `status != REVOKED`；pgvector migration 021 + store.py 谓词 | **1234 passed / 9 skipped**；ruff/doc-sync/migration lint 绿 | 低（纯代码，未动真环境）|
 | P2-data 切集合名 + 重灌（**已完成 2026-11-18**）| KS CHUNKS_COLLECTION 切 v3；存量 PUBLISHED 全量重灌进 v3；真环境 PG 跑 migration 021 | **重灌 4 条成功 0 失败**；v3 集合 5 库齐全；对话检索命中存量 TQ-7749；漂移门禁 rc=0 | 高（已完成）|
-| P3 删除端点 + 管理页 | DELETE 单文档（→REVOKED）+ DELETE 整库（前置校验无有效文档）；新建 KnowledgeBaseAdmin.vue | §4 全部验收判据 | 中 |
+| P3 删除端点 + 管理页（**代码完成 2026-11-18，真环境待验**）| DELETE 单文档（→REVOKED）+ DELETE 整库（前置校验无有效文档）；新建 KnowledgeBaseAdmin.vue | **708 passed / 20 skipped**；前端 6 门禁全绿；ruff/doc-sync 绿 | 中（真环境验证待做）|
 
 **顺序理由**：P1 先让"库"成为一等实体（D4 判据才有根）；P2 是最高风险的重灌，单独一个阶段可回滚验证；P3 依赖 P1 的库实体和 P2 的 status 过滤才成立。**不要跳过 P2 直接做 P3**——没有 status 字段，REVOKED 无法在检索层生效。
 

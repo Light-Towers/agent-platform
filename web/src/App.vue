@@ -25,6 +25,7 @@ import Legend from './components/Legend.vue'
 import LoginView from './components/LoginView.vue'
 import RoleGate from './components/RoleGate.vue'
 import KbUpload from './components/KbUpload.vue'
+import KnowledgeBaseAdmin from './components/KnowledgeBaseAdmin.vue'
 import DatasourceConfig from './components/DatasourceConfig.vue'
 import ThemeToggle from './components/ThemeToggle.vue'
 import HealthView from './components/HealthView.vue'
@@ -69,7 +70,7 @@ import { listKnowledgeBases, type KbKnowledgeBase } from './api/kb.ts'
 /* ---- G1 管理面导航（批 1：对话页 + 角色页；知识库/数据源两页随批 2/批 3 接入）----
  * 视图键是本组件的局部 ref：只有本件读写它，不进会话层（会话层是跨组件共享态，
  * 单组件的 UI 态进会话层 = 把局部事物全局化）。 */
-const activeView = ref<'chat' | 'role' | 'kb' | 'datasource' | 'health'>('chat')
+const activeView = ref<'chat' | 'role' | 'kb' | 'kb-admin' | 'datasource' | 'health'>('chat')
 
 /**
  * 「角色」页入口的显隐判据：手里有任一管理向能力码才显示。viewer 只有 chat.run /
@@ -83,6 +84,8 @@ const showRoleGate = computed(() =>
 
 /** 知识库上传页入口（feature `kb.upload`）。G2 交付。 */
 const showKb = computed(() => hasFeature('kb.upload'))
+/** 知识库管理页入口（P3）：删除走 kb.publish 门控，有发布权或上传权即显示管理入口。 */
+const showKbAdmin = computed(() => hasFeature('kb.publish') || hasFeature('kb.upload'))
 /** 问数数据源配置页入口（feature `datasource.manage`）。G3 交付。 */
 const showDatasource = computed(() => hasFeature('datasource.manage'))
 
@@ -94,6 +97,7 @@ const viewLabel = computed(() => {
   if (!canChat.value) return '登录面'
   if (activeView.value === 'chat') return '对话页'
   if (activeView.value === 'kb') return '知识库页'
+  if (activeView.value === 'kb-admin') return '知识库管理'
   if (activeView.value === 'datasource') return '数据源页'
   return '角色页'
 })
@@ -241,6 +245,14 @@ function onSignOut(): void {
           @click="activeView = 'kb'"
         >
           知识库
+        </div>
+        <div
+          v-if="showKbAdmin"
+          class="ry-menu-item"
+          :class="{ 'is-active': activeView === 'kb-admin' }"
+          @click="activeView = 'kb-admin'"
+        >
+          知识库管理
         </div>
         <div
           v-if="showDatasource"
@@ -491,6 +503,8 @@ function onSignOut(): void {
       <RoleGate v-else-if="activeView === 'role'" />
 
       <KbUpload v-else-if="activeView === 'kb'" />
+
+      <KnowledgeBaseAdmin v-else-if="activeView === 'kb-admin'" />
 
       <DatasourceConfig v-else-if="activeView === 'datasource'" />
 
