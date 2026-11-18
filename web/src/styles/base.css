@@ -720,6 +720,9 @@ a.ry-btn { text-decoration: none; }
   margin-top: var(--sp-4);
   min-height: 0;
 }
+/* 过程抽屉未展开时第三列不渲染，grid 收成两列，避免右侧空出 300px。 */
+.chat-shell--no-inspector { grid-template-columns: 260px minmax(0, 1fr); }
+.chat-shell__inspect-toggle { padding-inline: var(--sp-3); }
 .chat-shell__sidebar {
   display: flex;
   flex-direction: column;
@@ -850,10 +853,12 @@ a.ry-btn { text-decoration: none; }
 .chat-shell__inspector > details > summary { cursor: pointer; }
 @media (max-width: 1279px) {
   .chat-shell { grid-template-columns: 220px minmax(0, 1fr); }
+  .chat-shell--no-inspector { grid-template-columns: 220px minmax(0, 1fr); }
   .chat-shell__inspector { grid-column: 1 / -1; grid-template-columns: 1fr 1fr; }
 }
 @media (max-width: 899px) {
   .chat-shell { grid-template-columns: 1fr; }
+  .chat-shell--no-inspector { grid-template-columns: 1fr; }
   .chat-shell__sidebar { position: static; }
   .session-list { max-height: 12rem; }
   .chat-shell__inspector { grid-column: auto; grid-template-columns: 1fr; }

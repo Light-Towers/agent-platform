@@ -44,6 +44,7 @@ import {
 } from './stores/conversations.ts'
 import {
   ask,
+  authRole,
   authToken,
   banners,
   busy,
@@ -88,6 +89,15 @@ const showDatasource = computed(() => hasFeature('datasource.manage'))
 
 /** 平台健康灯阵页入口（PR-4 真实视图）：`/health` 是免鉴权探针路径，对所有已登录用户开放。 */
 const showHealth = computed(() => true)
+
+/**
+ * 「查看过程」开关（证据 / 事件时间线 / 图例 / 请求号）—— 仅 admin 可见。
+ * 普通用户（viewer）界面上完全没有过程入口，只看答案；admin 可点按钮展开/收起。
+ * 判据用服务端回读的**角色码**（authRole）而非能力集：这是"谁能看调试面"的展示门控，
+ * 与管理面按 feature 显隐是两件事。只控渲染，不是安全边界（SSE 仍下发全量帧）。
+ */
+const canInspect = computed(() => authRole.value === 'admin')
+const showInspector = ref(false)
 
 /** 页眉视图标签（对话/角色/知识库/数据源），供 h1 旁的 hint 显示当前所在面。 */
 const viewLabel = computed(() => {
@@ -312,6 +322,7 @@ function onSignOut(): void {
       <div
         v-if="chatShown"
         class="chat-shell"
+        :class="{ 'chat-shell--no-inspector': !showInspector }"
       >
         <!-- 左：会话侧栏（新建 / 切换 / 删除，当前高亮，刷新后恢复） -->
         <aside class="chat-shell__sidebar ry-card">
@@ -408,8 +419,22 @@ function onSignOut(): void {
         <!-- 中：连续消息流（历史 + 本轮同一条流）+ 底部输入 -->
         <section class="chat-shell__main ry-card">
           <ChatStream />
+          <!-- 「查看过程」开关：仅 admin 可见。普通用户只看答案，看不到任何过程入口。 -->
+          <div
+            v-if="canInspect"
+            class="chat-shell__inspect-toggle"
+          >
+            <button
+              type="button"
+              class="ry-btn ry-btn--text"
+              :aria-expanded="showInspector"
+              @click="showInspector = !showInspector"
+            >
+              {{ showInspector ? '收起过程（依据/事件/图例）' : '查看过程（依据/事件/图例 · 仅管理员）' }}
+            </button>
+          </div>
           <p
-            v-if="busy || eventCount > 0"
+            v-if="showInspector && (busy || eventCount > 0)"
             class="hint chat-shell__trace"
           >
             {{ traceNote }}
@@ -469,8 +494,11 @@ function onSignOut(): void {
           </form>
         </section>
 
-        <!-- 右：可核对抽屉（依据 + 时间线，默认收起，展开看细节） -->
-        <aside class="chat-shell__inspector">
+        <!-- 右：可核对抽屉（依据 + 时间线）——仅 admin 点开「查看过程」后才渲染 -->
+        <aside
+          v-if="showInspector"
+          class="chat-shell__inspector"
+        >
           <details class="ry-card">
             <summary>
               <span class="o-head-sm">依据列表</span>
@@ -496,7 +524,7 @@ function onSignOut(): void {
 
       <HealthView v-else-if="activeView === 'health'" />
 
-      <Legend v-if="chatShown" />
+      <Legend v-if="chatShown && showInspector" />
     </main>
   </div>
 </template>
