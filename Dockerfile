@@ -39,6 +39,20 @@ RUN pnpm run build
 # 阶段 2/2 运行镜像：python:3.11-slim，**里面没有 node、没有 node_modules**
 FROM python:3.11-slim
 
+# ===== pip 下载加速（2026-11-17，消除构建期反复失败）=====
+# 根因：不配国内源时 wheel 从 files.pythonhosted.org 走国际链路，实测大包 18-80kB/s
+# 且频繁 ReadTimeoutError（numpy 16.9MB 下了 10 分钟），致 3 次构建失败、累计约 1.5h
+# 全耗在下载。默认走清华 PyPI + 读超时重试：
+#   · pip.conf（pip config set）对所有 pip 子进程生效，含 editable 安装的 build isolation；
+#   · 显式 --index-url 的命令（torch 走 download.pytorch.org）不受影响，仍走原路径。
+# 如需换源，改 PIP_INDEX_URL 默认值或 --build-arg 覆盖即可，不要再每次手工配置。
+ARG PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
+ENV PIP_INDEX_URL=${PIP_INDEX_URL} \
+    PIP_TIMEOUT=120 \
+    PIP_RETRIES=15
+RUN pip config set global.index-url "${PIP_INDEX_URL}" \
+ && pip config set global.trusted-host pypi.tuna.tsinghua.edu.cn
+
 WORKDIR /srv/agent-platform
 
 # 观测依赖（opt-in 启用需要装包，否则软降级为 no-op）：
@@ -86,6 +100,11 @@ COPY applications/agent_server ./applications/agent_server
 # 在位（pyjwt 的 Required-by 是 exhibition-agent/mcp/openai-agents，argon2-cffi 的是 minio），
 # 所以本地跑绿不能证明镜像里有——必须在本行显式带 extra（方案 §9 第二条）。
 RUN pip install --no-cache-dir "./packages/agent-core[memory-embed-local]" ./packages/shared-schemas "./packages/agent-runtime[langfuse,identity,auth]" ".[otel]"
+# Milvus 文档检索实现（agent_runtime.document_store.MilvusDocumentStore）运行时需要 pymilvus
+# 的 MilvusClient。2026-11-18 真环境取证发现平台镜像缺此依赖 → 对话降级「知识库检索失败
+# (No module named 'pymilvus')」。版本钉 3.0.3 与 KS 镜像（pymilvus[model]>=3.0.2）对齐；
+# 稀疏向量是平台侧零依赖实现（vector_sparse.py），故只需核心包、不需 [model] extra。
+RUN pip install --no-cache-dir pymilvus==3.0.3
 
 # 前端产物落点 = /srv/agent-platform/web/dist。这条对不是约定，是被机器钉住的契约：
 # applications/agent_server/main.py 的默认探测点是**进程 CWD** 拼 `web/dist`，而本镜像的

@@ -20,10 +20,16 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# 可选：构建时指定 PyPI 镜像源（如内网/国内源），加速依赖安装；不传则走默认源。
-# 用法：docker build --build-arg PIP_INDEX_URL=https://<mirror>/simple ...
-ARG PIP_INDEX_URL=
-ENV PIP_INDEX_URL=$PIP_INDEX_URL
+# PyPI 源（2026-11-17 固化国内源，消除国际链路大包下载反复超时）：
+# 默认清华源 + 读超时重试。docker build 可用 --build-arg PIP_INDEX_URL=... 覆盖。
+# pip.conf 确保 editable 安装的 build isolation 子进程也走国内源。
+ARG PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
+ENV PIP_INDEX_URL=$PIP_INDEX_URL \
+    PIP_TIMEOUT=120 \
+    PIP_RETRIES=15
+
+RUN pip config set global.index-url "${PIP_INDEX_URL}" \
+ && pip config set global.trusted-host pypi.tuna.tsinghua.edu.cn
 
 WORKDIR /app
 

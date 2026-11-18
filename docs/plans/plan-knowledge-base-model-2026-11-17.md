@@ -126,3 +126,39 @@ knowledge_id 当前真实角色 = 登记分组 + 发布锚点 + 审计字段，�
 | 6 | `test_p15_current_tree_is_clean_and_really_judged`（role_feature_gates） | **本批引入**：重灌脚本 `scripts/reimport_kb_to_milvus.py` 新增签发位未登记 | 在 `lint_architecture.py` 的 `_SIGN_SITE_ALLOWED` 登记 + 理由（与 kb_router 出站同形、role 不签）；`lint.main()` 直接调用 RC=0、P15/P16 通过 |
 
 > 收口复跑：根套件全量 **1130 passed, 35 skipped, 0 failed**（427s，原 1124 passed + 6 failed ⇒ 6 项全转绿）；相关 governance 子集 + agent_server 全套 = **318 passed, 1 skipped**；KS 单测全套 = **438 passed, 7 skipped**；web 6 门禁全 rc=0；ruff 全仓通过；doc-sync 通过（0 警告）。
+
+## 8. 真环境端到端取证（2026-11-18，内网 126/241；判决绑 rev）
+
+> 部署 rev = `aee36f9a`（2026-11-17 commit）。两镜像构建：`agent-platform:dev`=`23ed9b01`（含 pymilvus 3.0.3）、`knowledge-service-web:latest`=`e9fe23cc`，经 registry 通道（`192.168.100.241:5000`）分发到 125/126/241 三节点并校验 digest 一致。上线后 Pod GIT_REV 回读 = `aee36f9a`，/health 200。
+
+### 8.1 A 项（milvus 模式断链修复）—— ✅ 通过
+
+- 上传：KS `/upload` 传含验证盐 `ZephyrVault Capacitor Calibration 7Q3X torsional damper serial TQ-7749` 的 Markdown，knowledge_id=`verify-kb-final`，经 DRAFT→REVIEWING→PUBLISHED 合法迁移写进 `platform_doc_v2_bge_m3`。
+- 集合实证：pymilvus 查询 `knowledge_id=='verify-kb-final'` → 1 实体，`tenant_id=default, workspace_id=default`，字段含 dense_vector(1024 维)/sparse_vector。
+- 对话取证（2026-11-18T10:54:57+08:00，平台 Pod `agent-platform-67f77c9bf8-7g96w`，rev=aee36f9a）：中文问「减振器的零件编号是多少？请引用校准证明原文。」→ 答案逐字引用 `ZephyrVault Capacitor Calibration 7Q3X torsional damper serial TQ-7749`，来源「证据 1（Zephyr Calibration Record）」。`hit=true, degraded=false`。
+- 反证：这正是旧代码（上传写 KS Milvus、对话读 agent_server pgvector）必然失败的场景；命中即证明断链修复。
+
+### 8.2 部署期发现并修复的配置缺口（非产品 bug，逐项拍板后处置）
+
+| # | 现象 | 根因 | 处置 |
+|---|---|---|---|
+| 1 | milvus 集合无健康端点、KS readiness 503 | ks-milvus 旧 Pod 重启 33 次崩 + 新副本 ImagePullBackOff（三节点 containerd 无 milvus 镜像） | 从 126 moby 的 `milvusdb/milvus:v2.5.10` import 进 containerd-k8s；新副本 Ready、endpoints 恢复 |
+| 2 | 对话「知识库未启用（DOC_BACKEND 未配置）」 | 平台 ConfigMap/deploy env 未注入 `DOC_MILVUS_URI`，工厂返回 None | patch ConfigMap `DOC_MILVUS_URI=http://milvus:19530` + deploy env valueFrom；rollout |
+| 3 | 对话「知识库检索失败（No module named 'pymilvus'）」 | **产品构建缺口**：平台 Dockerfile 只装 `agent-core[memory-embed-local]`，Milvus 实现需要 pymilvus | **产品代码修复**：根 Dockerfile 加 `RUN pip install pymilvus==3.0.3`（与 KS 对齐）；增量重建平台镜像 23ed9b01、重分发 |
+| 4 | 对话「向量维度不匹配」 | 平台 DOC_EMBED_API_KEY 未配 → 回退主 embedder bge-small-zh 512 维，集合 dense_vector=1024 维 | 从 ks-secrets 复制 SILICONFLOW_API_KEY → 平台 secret `DOC_EMBED_API_KEY`；env 注入 `DOC_EMBED_*`（base=api.siliconflow.cn/v1, model=BAAI/bge-m3, dim=1024）；Pod 实读 doc embedder dim=1024 |
+| 5 | 检索 0 命中（所有降级串消失） | 租户域不一致：平台 SINGLE_TENANT=default，KS KNOWLEDGE_DEFAULT_TENANT_ID=exhibition，文档登记为 exhibition 被租户隔离拦截 | patch KS ConfigMap `KNOWLEDGE_DEFAULT_TENANT_ID=default` + 重启 KS；重传文档 tenant=default；A 项通过 |
+
+> 复审触发条件：换 rev / 换集合名 / 换租户域 / 换 embedder 后，8.1 的对话取证必须重跑；`DOC_MILVUS_URI`/`DOC_EMBED_*`/`KNOWLEDGE_DEFAULT_TENANT_ID` 三处部署配置任一漂移都会让断链复活，需绑 rev 复取。
+
+### 8.3 B/C/D 项取证（2026-11-18，均绑 rev=aee36f9a）
+
+- **B 项 pgvector 降级自洽** ✅：切 `DOC_BACKEND=pgvector` 后工厂返回 `PgVectorDocumentStore`（协议可切换性实证）；**上传侧**：直接调 `_local_ingest` 返回 `{"backend":"pgvector","task_ids":[],"chunks":1,"message":"已写入本地文档向量库（无需轮询进度）"}`，PG chunks 表 `count=1` 且含验证盐 5566；**检索侧**：对话问「福尔康继电器本地入库验证编号」→ 命中 5566，来源 falcon_relay.md，无降级串。验证后切回 milvus。
+- **C 项选库隔离** ✅：同租户建 `verify-kb-C-libraryA`（盐 8812）/ `libraryB`（盐 4477），全库提问两盐都召回（证据1=B、证据2=A）；选库A只召回 8812（B 的 4477 未泄漏）、选库B只召回 4477（A 未泄漏）；`GET /kb/knowledge-bases` 返回 4 库含 A/B 的 doc_count/status。
+- **D 项跨租户隔离** ✅：集合里两份同内容文档（TQ-7749），`verify-kb-final`=tenant default、`verify-kb-A-7Q3`=tenant exhibition；default 用户提问命中 TQ-7749 但来源只显示 default 那份，exhibition 文档零泄漏（`tenant_id` 谓词生效，签名头链路零改动）。
+
+### 8.4 收尾状态
+
+- 线上后端已恢复默认 `DOC_BACKEND=milvus`。
+- 重灌脚本 `--yes`：dry-run 实测 PUBLISHED 存量 = 0 条（本次验证文档走新管线直写，无需重灌）；未真跑 `--yes`。
+- commit：`aee36f9a`（业务改动）已部署并验证；真环境发现的**平台镜像缺 pymilvus** 构建缺口已修到根 Dockerfile（`pymilvus==3.0.3`）+ pip 国内源固化（清华源 + 超时重试），并在后续 commit `8835c88f` 入库（仅构建配置 + 文档，不改运行时代码，线上无需因它重部署）。
+- 复审触发条件：换 rev / 集合名 / 租户域 / embedder / DOC_BACKEND 后，A/B/C/D 取证必须按绑 rev 复取。
