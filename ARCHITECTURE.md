@@ -153,6 +153,8 @@ L 系列（观测架构与依赖契约）由 `docs/plans/plan-observability-glob
 | `scripts/evidence/ts-provability.ps1` | 账面新增行 R-1..R-6 内容可证性（时间戳、件名在位、键绑件内容、逐字引用） | 否 |
 | `scripts/evidence/k46-keypair-lib.ps1` | R-6 三元组抽取器唯一实现，被 `ts-provability.ps1` 与透视件 dot-source | 否 |
 | `scripts/evidence/k71-basis.ps1` | 面基准 PS 薄适配层，被 k70 链三件 dot-source；判据本体仍住 `face_basis.py` | 否 |
+| `scripts/evidence/verify_basis_drift.py` | 判据新鲜度漂移门禁：LIVE 实读（`baselines/*.json` 登记的形状）vs 基线对码；漂移 rc=1 报需重跑判据，前置不可用 rc=2；把「复审触发条件」从散文变可执行门禁 | 是（ssh 到控制面） |
+| `scripts/evidence/baselines/docstore-e2e.json` | 首个判据新鲜度台账：docstore A/B/C/D 依赖的 LIVE 形状（rev/env/集合/镜像 digest）+ 基线 + affects | — |
 | `tests/governance/test_evidence_scripts.py` | 钉住派生式预期集的纯逻辑不变量（含 `jobs:` 位于文件末尾、YAML 1.1 `on:`→布尔 `True` 键、PyYAML 缺席必 exit 2） | 否（autouse 拦断子进程） |
 
 口径三条：① 退出码 `2` = **前置不可用**（依赖缺失 / `gh` 调用失败），从不折算成通过；② 预期 check 名一律派生，硬编码两个方向都会错（该跑的没进集合 ⇒ 红了没人看；不该跑的写进集合 ⇒ 等不到而误判未达成）；③ 本目录受 `scripts/check_doc_sync.py` 的文件引用存在性校验覆盖（本节即登记位），引用失效即 CI 红——该校验的**判定基准是版本控制清单（`git ls-files`）而不是本机文件系统**，取不到清单即 fail-closed（口径：`docs/plans/plan-doc-sync-tracked-scope-2026-10-04.md`）。方案与验收：`docs/plans/plan-evidence-scripts-intake-2026-10-04.md`。

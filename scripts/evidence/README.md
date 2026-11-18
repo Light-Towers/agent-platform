@@ -27,6 +27,7 @@
 | `nl2sql_real_pg_probe.py` | nl2sql 元知识**真库往返**：走 `init_meta_schema.apply` 生产入口建全链 001-006 + 幂等第二遍 + `workspace_id=''` 写入路径 + 绕过 `_stamp` 的直接仓储写入 + D8 摘键语义反证 + 「库停在 005 时当前代码必须 42P10」发布顺序判据（11 项）。**改到 nl2sql 迁移或 `_upsert`/`_stamp` 后必须重跑**；`rc=2` 是 pgserver 起不来（前置不可用），不是通过 | 否（本机进程内 PG） |
 | `migration_gate_mutation_probe.py` | `scripts/lint_migration_refs.py` 的**非空转反证**：三形——原样副本零违规（阴性对照）/ 注入 B-1 错表名 ⇒ M-1 报红 / 摘掉 006 ⇒ M-2 目标键消失。只在 `tempfile` 副本上动，不碰工作树。改过门禁判据后必须重跑 | 否 |
 | `face_basis.py` | 面基准**唯一实现**：`face = git diff --name-only HEAD`，另提供 derived / ext-fresh / selftest 三模式；退出码 0/1/2 三态 | 否 |
+| `verify_basis_drift.py` | **判据新鲜度漂移门禁**：从 LIVE 经 ssh 实读台账（`baselines/*.json`）登记的形状（Pod rev / env / 集合 schema / 镜像 digest），与基线对码；漂移 rc=1 并报「哪些判据需重跑」，前置不可用 rc=2。`--list` 列台账。把「复审触发条件」从散文变成可执行门禁 | 是（ssh 到控制面） |
 | `typo-scan.ps1` | 文档面 T1..T5 形状扫描；扫描面 `$files` 表是本件的唯一来源 | 否 |
 | `ts-provability.ps1` | 账面新增行的内容可证性 R-1..R-6（时间戳 / 件名在位 / 键绑件内容 / 逐字引用） | 否 |
 | `k46-keypair-lib.ps1` | R-6 的 `(key,value,form)` 三元组抽取器**唯一实现** | 否 |
@@ -67,6 +68,10 @@ uv run --no-sync --with pgserver python scripts/evidence/nl2sql_real_pg_probe.py
 
 # 迁移静态门禁的非空转反证
 uv run --no-sync python scripts/evidence/migration_gate_mutation_probe.py
+
+# 判据新鲜度漂移门禁（内网地址经 env 注入，不硬编码）
+EVIDENCE_SSH_HOST=<控制面IP> uv run --no-sync python scripts/evidence/verify_basis_drift.py
+uv run --no-sync python scripts/evidence/verify_basis_drift.py --list   # 只列台账，不连 LIVE
 ```
 
 `mergedAt` 取自：`gh pr view <n> --json mergedAt,mergeCommit`。

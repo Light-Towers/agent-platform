@@ -152,13 +152,23 @@ knowledge_id 当前真实角色 = 登记分组 + 发布锚点 + 审计字段，�
 
 ### 8.3 B/C/D 项取证（2026-11-18，均绑 rev=aee36f9a）
 
-- **B 项 pgvector 降级自洽** ✅：切 `DOC_BACKEND=pgvector` 后工厂返回 `PgVectorDocumentStore`（协议可切换性实证）；**上传侧**：直接调 `_local_ingest` 返回 `{"backend":"pgvector","task_ids":[],"chunks":1,"message":"已写入本地文档向量库（无需轮询进度）"}`，PG chunks 表 `count=1` 且含验证盐 5566；**检索侧**：对话问「福尔康继电器本地入库验证编号」→ 命中 5566，来源 falcon_relay.md，无降级串。验证后切回 milvus。
+- **B 项 pgvector 降级自洽** ✅（三重闭环）：切 `DOC_BACKEND=pgvector` 后工厂返回 `PgVectorDocumentStore`（协议可切换性实证）；**HTTP 端点**：admin 令牌（取证期临时提权、验证后降回 viewer）走真实 `POST /kb/uploads` → `{"backend":"pgvector","task_ids":[],"chunks":1,"message":"已写入本地文档向量库（无需轮询进度）"}`；**直写**：`_local_ingest` 写 PG chunks 表实存验证盐 5566；**检索侧**：对话命中 5566，来源 falcon_relay.md，无降级串。验证后切回 milvus。
 - **C 项选库隔离** ✅：同租户建 `verify-kb-C-libraryA`（盐 8812）/ `libraryB`（盐 4477），全库提问两盐都召回（证据1=B、证据2=A）；选库A只召回 8812（B 的 4477 未泄漏）、选库B只召回 4477（A 未泄漏）；`GET /kb/knowledge-bases` 返回 4 库含 A/B 的 doc_count/status。
 - **D 项跨租户隔离** ✅：集合里两份同内容文档（TQ-7749），`verify-kb-final`=tenant default、`verify-kb-A-7Q3`=tenant exhibition；default 用户提问命中 TQ-7749 但来源只显示 default 那份，exhibition 文档零泄漏（`tenant_id` 谓词生效，签名头链路零改动）。
 
 ### 8.4 收尾状态
 
 - 线上后端已恢复默认 `DOC_BACKEND=milvus`。
-- 重灌脚本 `--yes`：dry-run 实测 PUBLISHED 存量 = 0 条（本次验证文档走新管线直写，无需重灌）；未真跑 `--yes`。
+- 重灌脚本 `--yes`：dry-run 实测 PUBLISHED 存量 = 0 条（本次验证文档走新管线直写，无需重灌）；未真跑 `--yes`（无存量可灌）。
+- B 项上传侧已补走真实 HTTP `/kb/uploads`（取证期临时提权 admin，验证后降回 viewer），feature gate/鉴权/multipart 全链路验证，无遗留边界。
 - commit：`aee36f9a`（业务改动）已部署并验证；真环境发现的**平台镜像缺 pymilvus** 构建缺口已修到根 Dockerfile（`pymilvus==3.0.3`）+ pip 国内源固化（清华源 + 超时重试），并在后续 commit `8835c88f` 入库（仅构建配置 + 文档，不改运行时代码，线上无需因它重部署）。
-- 复审触发条件：换 rev / 集合名 / 租户域 / embedder / DOC_BACKEND 后，A/B/C/D 取证必须按绑 rev 复取。
+### 8.5 复审触发的机械化（治本，非人肉记账）
+
+> 「复审触发条件」此前只是散文 ⇒ 换 rev/配置后靠人记着重跑，必然漂移（把上一轮读数搬进本轮账面）。本批把它变成可执行门禁：
+
+- **台账** `scripts/evidence/baselines/docstore-e2e.json`：登记每条判据（A/B/C/D）依赖的可实读形状（Pod GIT_REV / DOC_* env / KS 租户 / 集合 dense_vector 维度 / 两侧镜像 digest）+ 基线值 + `affects` 判据集。
+- **量具** `scripts/evidence/verify_basis_drift.py`：从 LIVE 经 ssh 实读探针，与台账对码；漂移 ⇒ `rc=1` 并打印「哪些判据需重跑」；前置不可用（ssh/kubectl 不通）⇒ `rc=2`（从不折算通过）。`--list` 列全部台账判据。内网地址经 `--ssh-host`/env 注入，不硬编码（脱敏纪律）。
+- **非空转反证**：投毒（把 `ks_default_tenant` 基线改错）⇒ rc=1 且精确报出 A/C/D 需重跑；还原 ⇒ rc=0。门禁真能咬，不是永绿。
+- **运行**：`uv run --no-sync python scripts/evidence/verify_basis_drift.py --ssh-host <控制面IP>`。
+
+> 复审触发条件：上述量具 rc=1 的任何判据，须按其 `rerun_command` 在 LIVE 新 rev 上重跑后才可再声称「已验证」。
