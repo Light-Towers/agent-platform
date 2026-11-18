@@ -686,13 +686,17 @@ a.ry-btn { text-decoration: none; }
   border-radius: var(--radius-sm);
 }
 .kb-sidebar__pick {
-  flex: 1;
+  flex: 1 1 0;
+  width: 100%;
   min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
   text-align: left;
 }
+.kb-sidebar__item > button:not(.kb-sidebar__pick) { flex: 0 0 auto; }
 .kb-sidebar__name {
   max-width: 100%;
   overflow: hidden;
