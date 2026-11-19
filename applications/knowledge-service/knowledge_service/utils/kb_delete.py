@@ -124,18 +124,46 @@ def has_active_documents(
     return False
 
 
+def has_active_chunks(
+    client: Any, collection: str, tenant_id: str, knowledge_id: str,
+) -> bool:
+    """整库删前置判据（2026-11-19 改）：该库 Milvus 里是否还有非 REVOKED 切片。
+
+    与页面文档树同源。旧判据读 kb_documents 登记表 status，会与实际切片漂移——
+    上传失败卡在 DRAFT/REVIEWING 的空壳库在页面看是无文档的，却被 409 拒绝删库。
+    """
+    rows = client.query(
+        collection_name=collection,
+        filter=(
+            f'tenant_id == "{tenant_id}" and knowledge_id == "{knowledge_id}" '
+            f'and status != "{REVOKED}"'
+        ),
+        output_fields=["chunk_id"], limit=1,
+    ) or []
+    return len(rows) > 0
+
+
 def delete_collection_guard(
     tenant_id: str, knowledge_id: str,
-    *, list_by_tenant: Callable[..., List[Dict[str, Any]]],
+    *, client: Any, collection: str,
     mark_deleted: Callable[[str, str], bool],
 ) -> Tuple[bool, str]:
-    """整库删：前置校验 + 标记 deleted。返回 (是否成功, 原因/说明)。"""
-    if has_active_documents(tenant_id, knowledge_id, list_by_tenant=list_by_tenant):
-        return (False, "知识库下仍有有效文档（非 REVOKED），请先将文档全部下线后再删库")
+    """整库删：前置校验 + 标记 deleted。返回 (是否成功, 原因/说明)。
+
+    判据以 Milvus 实际有效切片为准（与页面文档树同源），不再读 kb_documents 登记表——
+    避免"页面看着没文档却删不掉"的漂移。
+    """
+    if client is None:
+        return (False, "Milvus 不可达，无法校验库下是否有有效文档")
+    try:
+        if has_active_chunks(client, collection, tenant_id, knowledge_id):
+            return (False, "知识库下仍有有效文档（非 REVOKED），请先将文档全部下线后再删库")
+    except Exception:  # noqa: BLE001 — fail-closed：校验不了就不让删，不误放行
+        return (False, "有效文档校验失败，为安全起见暂不允许删库")
     ok = bool(mark_deleted(tenant_id, knowledge_id))
     if not ok:
         return (False, "知识库不存在或已被删除")
     return (True, "知识库已标记删除")
 
 
-__all__ = ["REVOKED", "read_chunks", "has_other_active_docs", "revoke_document", "has_active_documents", "delete_collection_guard"]
+__all__ = ["REVOKED", "read_chunks", "has_other_active_docs", "revoke_document", "has_active_documents", "has_active_chunks", "delete_collection_guard"]

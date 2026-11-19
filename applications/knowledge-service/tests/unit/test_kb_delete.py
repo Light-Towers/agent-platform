@@ -136,20 +136,44 @@ def test_has_active_documents():
     assert kb_delete.has_active_documents("t", "kb1", list_by_tenant=lambda *a, **k: other) is False
 
 
+class _ChunkClient:
+    def __init__(self, rows):
+        self.rows = rows
+
+    def query(self, **kw):
+        # 简单模拟 status != REVOKED 过滤
+        return [r for r in self.rows if str(r.get("status") or "").upper() != "REVOKED"]
+
+
 def test_delete_collection_guard():
+    # Milvus 有有效切片 → 拒绝
     marked = []
     ok, msg = kb_delete.delete_collection_guard(
-        "t", "kb1",
-        list_by_tenant=lambda *a, **k: [{"knowledge_id": "kb1", "status": "PUBLISHED"}],
-        mark_deleted=lambda t, k: marked.append((t, k)) or True,
+        "t", "kb1", client=_ChunkClient([{"chunk_id": 1, "status": "PUBLISHED"}]),
+        collection="col", mark_deleted=lambda t, k: marked.append((t, k)) or True,
     )
     assert ok is False and "有效文档" in msg
     assert marked == []
 
+    # Milvus 全部 REVOKED（页面无文档）→ 允许，即使登记表卡在 DRAFT/REVIEWING（已不读登记表）
     ok, msg = kb_delete.delete_collection_guard(
-        "t", "kb1",
-        list_by_tenant=lambda *a, **k: [{"knowledge_id": "kb1", "status": "REVOKED"}],
-        mark_deleted=lambda t, k: marked.append((t, k)) or True,
+        "t", "kb1", client=_ChunkClient([{"chunk_id": 1, "status": "REVOKED"}]),
+        collection="col", mark_deleted=lambda t, k: marked.append((t, k)) or True,
     )
     assert ok is True
     assert marked == [("t", "kb1")]
+
+    # Milvus 无任何切片（空壳库）→ 允许
+    ok, msg = kb_delete.delete_collection_guard(
+        "t", "kb1", client=_ChunkClient([]), collection="col",
+        mark_deleted=lambda t, k: True,
+    )
+    assert ok is True
+
+
+def test_delete_collection_guard_milvus_unreachable():
+    """Milvus 不可达 → fail-closed 拒绝删库，不误放行。"""
+    ok, msg = kb_delete.delete_collection_guard(
+        "t", "kb1", client=None, collection="col", mark_deleted=lambda t, k: True,
+    )
+    assert ok is False and "不可达" in msg

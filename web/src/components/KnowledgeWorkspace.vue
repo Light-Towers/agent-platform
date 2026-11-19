@@ -57,6 +57,7 @@ onMounted(refreshTree)
       </p>
       <KnowledgeBaseSidebar
         :doc-counts="docCounts"
+        :selected-id="selectedId"
         @select="onSelect"
         @changed="refreshTree"
       />

@@ -685,18 +685,27 @@ a.ry-btn { text-decoration: none; }
   border: 1px solid var(--border-decor);
   border-radius: var(--radius-sm);
 }
+/* 选中态与对话页会话列表同一套：蓝边 + 浮起底色，操作统一、少记忆负担。 */
+.kb-sidebar__item.is-active {
+  border-color: var(--ry-primary);
+  background: var(--bg-raised);
+}
+/* flex:1 1 auto（不是 width:100%）——留出右侧按钮的空间，避免 ✎× 被挤出卡片。 */
 .kb-sidebar__pick {
-  flex: 1 1 0;
-  width: 100%;
+  flex: 1 1 auto;
   min-width: 0;
-  max-width: 100%;
   overflow: hidden;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
   text-align: left;
 }
-.kb-sidebar__item > button:not(.kb-sidebar__pick) { flex: 0 0 auto; }
+/* 行内操作按钮沿用会话列表的次要色 + 小 padding，风格统一。 */
+.kb-sidebar__item > button:not(.kb-sidebar__pick) {
+  flex: 0 0 auto;
+  padding-inline: var(--sp-2);
+  color: var(--text-2);
+}
 .kb-sidebar__name {
   max-width: 100%;
   overflow: hidden;

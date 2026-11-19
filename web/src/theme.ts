@@ -78,3 +78,25 @@ export function writeUiState(key: string, value: string | null): void {
     // 配额满/隐私模式：UI 偏好存不下不影响主流程
   }
 }
+
+/**
+ * sessionStorage 档的非凭据 UI 偏好（关标签即失效，不留长期痕迹）。
+ * 与 readUiState/writeUiState 同属 theme.ts 白名单写者，C2 齿只校 auth.ts 档位，
+ * 故此处用 sessionStorage 不触发凭据纪律；只准存非凭据值（如当前页签视图键）。
+ */
+export function readSessionState(key: string): string | null {
+  try {
+    return sessionStorage.getItem(key)
+  } catch {
+    return null
+  }
+}
+
+export function writeSessionState(key: string, value: string | null): void {
+  try {
+    if (value === null) sessionStorage.removeItem(key)
+    else sessionStorage.setItem(key, value)
+  } catch {
+    // 存不下不影响主流程
+  }
+}

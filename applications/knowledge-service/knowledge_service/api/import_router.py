@@ -29,7 +29,7 @@ from knowledge_service.core.config import settings
 from knowledge_service.core.logger import logger  # 项目统一日志工具
 from knowledge_service.import_process.agent.main_graph import kb_import_app  # LangGraph全流程编译实例
 from knowledge_service.import_process.agent.state import get_default_state
-from knowledge_service.utils import kb_collections, kb_delete, kb_upload_history
+from knowledge_service.utils import kb_collections, kb_delete, kb_doc_count, kb_upload_history
 from knowledge_service.utils.kb_registry import get_document, list_by_tenant, update_status, upsert_by_upload
 from knowledge_service.utils.lifecycle_reimport import ReimportError, plan_reimport, resolve_original_file
 from knowledge_service.utils.path_util import PROJECT_ROOT
@@ -543,20 +543,34 @@ async def list_collections(limit: int = 100):
 
     P1 形状对齐原 /documents 聚合结果：knowledge_id / doc_count / status /
     latest_updated_at，另加 name/owner/created_at 供管理页用。
-    ⚠ doc_count 是注册表冗余字段（一直恒 0、无人维护），前端**不读**它——
-    真实「该库有几份文档」由 GET /documents/tree 从 Milvus 聚合给出（kb_documents 一库一行，
-    无法表达一库多文档）。此处保留该字段只为旧客户端兼容。
+    doc_count 为该库真实文档数（Milvus distinct source_doc 实时聚合），与
+    GET /documents/tree 的 doc_count 同口径——对话页下拉与知识库页左栏读同一字段即一致。
+    kb_collections 的冗余 doc_count 恒 0（无人维护），不读它。Milvus 不可达降级为 0。
     """
     capped = max(1, min(limit, 100))
     tenant_id = resolve_server_tenant("", endpoint="/collections")
     rows = kb_collections.list_by_tenant(tenant_id, limit=capped)
+
+    # 实时聚合真实文档数：kb_collections 的冗余 doc_count 恒 0，不能给前端用。
+    # 与 /documents/tree 的 doc_count 同口径（distinct source_doc），两页读同一端点即一致。
+    # Milvus 不可达时降级为全 0（列表本身不拦，检索主链路不为辅助计数买单）。
+    doc_counts: dict[str, int] = {}
+    client = get_milvus_client()
+    if client is not None:
+        try:
+            doc_counts = kb_doc_count.count_docs_by_kb(
+                client, milvus_config.chunks_collection, tenant_id,
+            )
+        except Exception:  # noqa: BLE001 — 计数是辅助项，失败降级全 0，不吞主流程
+            logger.warning("[collections] 文档数聚合失败，降级为 0", exc_info=True)
+
     items = [
         {
             "knowledge_id": str(r.get("knowledge_id") or ""),
             "name": str(r.get("name") or r.get("knowledge_id") or ""),
             "owner": str(r.get("owner") or ""),
             "status": str(r.get("status") or ""),
-            "doc_count": int(r.get("doc_count") or 0),
+            "doc_count": doc_counts.get(str(r.get("knowledge_id") or ""), 0),
             "latest_updated_at": str(r.get("updated_at") or ""),
         }
         for r in rows
@@ -631,19 +645,21 @@ async def delete_document(knowledge_id: str, source_doc: str | None = None):
 
 @router.delete("/collections/{knowledge_id}", summary="删除知识库（前置：库下无有效文档）")
 async def delete_collection(knowledge_id: str):
-    """删除整个知识库：前置校验库下无有效（非 REVOKED）文档，通过后标 kb_collections deleted。
+    """删除整个知识库：前置校验库下 Milvus 无有效（非 REVOKED）切片，通过后标 deleted。
 
+    判据以 Milvus 实际切片为准（与页面文档树同源），不再读会漂移的 kb_documents 登记表：
+    上传失败卡在 DRAFT/REVIEWING 的空壳库（页面看是无文档的）可直接删。
     软删除：不物理删数据；库 deleted 后不在 /collections 列表出现。跨租户删不到。
     """
     tenant_id = resolve_server_tenant("", endpoint="DELETE /collections/{id}")
     ok, msg = kb_delete.delete_collection_guard(
         tenant_id, knowledge_id,
-        list_by_tenant=list_by_tenant,
+        client=get_milvus_client(), collection=milvus_config.chunks_collection,
         mark_deleted=kb_collections.mark_deleted,
     )
     if not ok:
-        # 区分"有有效文档"（409）与"库不存在"（404）
-        code = 409 if "有效文档" in msg else 404
+        # 区分"有有效文档"（409）与"库不存在 / 校验失败"（404）
+        code = 409 if "仍有有效文档" in msg else 404
         raise HTTPException(status_code=code, detail=msg)
     logger.info(f"[delete] {tenant_id}/{knowledge_id} 知识库标记删除")
     return {"code": 200, "knowledge_id": knowledge_id, "status": "deleted", "message": msg}

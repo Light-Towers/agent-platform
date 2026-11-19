@@ -18,6 +18,8 @@ import {
 const props = defineProps<{
   /** knowledge_id → 真实文档数（来自 Milvus 文档树）；用它替代 /collections 的恒 0 冗余字段。 */
   docCounts: Map<string, number>
+  /** 当前选中的 knowledge_id，用于选中态高亮（与对话页会话列表同一套 is-active 样式）。 */
+  selectedId: string
 }>()
 
 const emit = defineEmits<{
@@ -170,6 +172,7 @@ onMounted(refresh)
         v-for="kb in bases"
         :key="kb.knowledge_id"
         class="kb-sidebar__item"
+        :class="{ 'is-active': selectedId === kb.knowledge_id }"
       >
         <template v-if="editingId === kb.knowledge_id">
           <input

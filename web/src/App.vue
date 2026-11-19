@@ -66,11 +66,23 @@ import {
   waiting,
 } from './stores/session'
 import { listKnowledgeBases, type KbKnowledgeBase } from './api/kb.ts'
+import { readSessionState, writeSessionState } from './theme.ts'
 
 /* ---- G1 管理面导航（批 1：对话页 + 角色页；知识库/数据源两页随批 2/批 3 接入）----
  * 视图键是本组件的局部 ref：只有本件读写它，不进会话层（会话层是跨组件共享态，
  * 单组件的 UI 态进会话层 = 把局部事物全局化）。 */
-const activeView = ref<'chat' | 'role' | 'kb' | 'datasource' | 'health'>('chat')
+/* 2026-11-19：切页签后刷新保持当前页。存 sessionStorage（关标签即失效）。
+ * 存的是用户意图，渲染真相是 effectiveView（过权限兜底）——刷新时 features 未回读完成
+ * 不会把管理页误判为无权而弹回对话页（computed 随 features 到位自动重算）。 */
+type ViewKey = 'chat' | 'role' | 'kb' | 'datasource' | 'health'
+const VIEW_KEY = 'ap.ui.view'
+const VALID_VIEWS: readonly ViewKey[] = ['chat', 'role', 'kb', 'datasource', 'health']
+function readStoredView(): ViewKey {
+  const raw = readSessionState(VIEW_KEY)
+  return VALID_VIEWS.includes(raw as ViewKey) ? raw as ViewKey : 'chat'
+}
+const activeView = ref<ViewKey>(readStoredView())
+watch(activeView, (v) => writeSessionState(VIEW_KEY, v))
 
 /**
  * 「角色」页入口的显隐判据：手里有任一管理向能力码才显示。viewer 只有 chat.run /
@@ -91,6 +103,20 @@ const showDatasource = computed(() => hasFeature('datasource.manage'))
 const showHealth = computed(() => true)
 
 /**
+ * 渲染真相：activeView 是用户意图（存 sessionStorage），但刷新后若该页无权限，
+ * 必须回退对话页——不能让 viewer 刷出一个无权的管理页。
+ * 依赖 features（showKb 等），所以恢复时 features 未到位会短暂回 chat，到位后自动切回，
+ * 不会因时序误判。chat / health 对所有已登录用户开放，直接放行。
+ */
+const effectiveView = computed<ViewKey>(() => {
+  const v = activeView.value
+  if (v === 'role' && !showRoleGate.value) return 'chat'
+  if (v === 'kb' && !showKb.value) return 'chat'
+  if (v === 'datasource' && !showDatasource.value) return 'chat'
+  return v
+})
+
+/**
  * 「查看过程」开关（证据 / 事件时间线 / 图例 / 请求号）—— 仅 admin 可见。
  * 普通用户（viewer）界面上完全没有过程入口，只看答案；admin 可点按钮展开/收起。
  * 判据用服务端回读的**角色码**（authRole）而非能力集：这是"谁能看调试面"的展示门控，
@@ -102,9 +128,9 @@ const showInspector = ref(false)
 /** 页眉视图标签（对话/角色/知识库/数据源），供 h1 旁的 hint 显示当前所在面。 */
 const viewLabel = computed(() => {
   if (!canChat.value) return '登录面'
-  if (activeView.value === 'chat') return '对话页'
-  if (activeView.value === 'kb') return '知识库页'
-  if (activeView.value === 'datasource') return '数据源页'
+  if (effectiveView.value === 'chat') return '对话页'
+  if (effectiveView.value === 'kb') return '知识库页'
+  if (effectiveView.value === 'datasource') return '数据源页'
   return '角色页'
 })
 
@@ -112,7 +138,7 @@ const viewLabel = computed(() => {
  * 对话页是否在屏上。视图键停在管理面页但该页已无权渲染（登录态掉了、或换成无管理向
  * 能力的角色）⇒ 回对话页兜底，不给「无权页面白屏」留缝。
  */
-const chatShown = computed(() => activeView.value === 'chat' || (!showRoleGate.value && !showKb.value && !showDatasource.value && !showHealth.value))
+const chatShown = computed(() => effectiveView.value === 'chat')
 
 /* 挂载时确认一次登录态（A8「刷新仍在登录」那一格的调用点）。本件不自己决定何时确认：
  * 会话层故意不在模块加载时自发请求，否则行为件在 Node 里 import 会话层就会多一个 fetch。 */
@@ -133,6 +159,13 @@ watch(canChat, (ok) => {
   } else {
     clearConversations()
   }
+})
+
+/* 切回对话页时重拉知识库清单：在知识库页新建/改名/删库后，对话页的「知识范围」下拉
+ * 不能还显示旧列表（用户 2026-11-19 报的一致性问题的刷新时机那一半）。
+ * 只在已登录且真正渲染 chat 时拉，避免切到管理页时发无用请求。 */
+watch(effectiveView, (v) => {
+  if (v === 'chat' && canChat.value) void refreshKnowledgeBases()
 })
 
 /* ---- 知识范围选择器（plan-knowledge-base-model 步骤 4）----
@@ -231,7 +264,7 @@ function onSignOut(): void {
       >
         <div
           class="ry-menu-item"
-          :class="{ 'is-active': activeView === 'chat' }"
+          :class="{ 'is-active': effectiveView === 'chat' }"
           @click="activeView = 'chat'"
         >
           对话
@@ -239,7 +272,7 @@ function onSignOut(): void {
         <div
           v-if="showRoleGate"
           class="ry-menu-item"
-          :class="{ 'is-active': activeView === 'role' }"
+          :class="{ 'is-active': effectiveView === 'role' }"
           @click="activeView = 'role'"
         >
           角色与能力
@@ -247,7 +280,7 @@ function onSignOut(): void {
         <div
           v-if="showKb"
           class="ry-menu-item"
-          :class="{ 'is-active': activeView === 'kb' }"
+          :class="{ 'is-active': effectiveView === 'kb' }"
           @click="activeView = 'kb'"
         >
           知识库
@@ -255,7 +288,7 @@ function onSignOut(): void {
         <div
           v-if="showDatasource"
           class="ry-menu-item"
-          :class="{ 'is-active': activeView === 'datasource' }"
+          :class="{ 'is-active': effectiveView === 'datasource' }"
           @click="activeView = 'datasource'"
         >
           数据源
@@ -263,7 +296,7 @@ function onSignOut(): void {
         <div
           v-if="showHealth"
           class="ry-menu-item"
-          :class="{ 'is-active': activeView === 'health' }"
+          :class="{ 'is-active': effectiveView === 'health' }"
           @click="activeView = 'health'"
         >
           平台健康
@@ -467,7 +500,7 @@ function onSignOut(): void {
                     :key="kb.knowledge_id"
                     :value="kb.knowledge_id"
                   >
-                    {{ kb.knowledge_id }}（{{ kb.doc_count }} 篇）
+                    {{ kb.name || kb.knowledge_id }}（{{ kb.doc_count }} 篇）
                   </option>
                 </select>
               </label>
@@ -516,13 +549,13 @@ function onSignOut(): void {
         </aside>
       </div>
 
-      <RoleGate v-else-if="activeView === 'role'" />
+      <RoleGate v-else-if="effectiveView === 'role'" />
 
-      <KnowledgeWorkspace v-else-if="activeView === 'kb'" />
+      <KnowledgeWorkspace v-else-if="effectiveView === 'kb'" />
 
-      <DatasourceConfig v-else-if="activeView === 'datasource'" />
+      <DatasourceConfig v-else-if="effectiveView === 'datasource'" />
 
-      <HealthView v-else-if="activeView === 'health'" />
+      <HealthView v-else-if="effectiveView === 'health'" />
 
       <Legend v-if="chatShown && showInspector" />
     </main>
