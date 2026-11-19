@@ -32,6 +32,9 @@
 - 改一次 agent-core（或一个频繁变的文件）重构建，观察是否还重下 torch：BuildKit cache mount 命中应秒级、B 方案 pip 从缓存命中应分钟级而非十几分钟。
 - 不砍任何依赖，镜像功能不变（health/openapi 同前）。
 
-## 待确认（服务器断连）
-- 241 是否支持 BuildKit（buildx/containerd）⇒ 决定走 A 还是 B。
+## 待确认（服务器断连，用户约明早 9:00 验证）
+- **A 方案验证脚本已备好**：`C:\...\Temp\opencode\verify_buildkit.sh`（scp 到 241 执行）。
+  内容：① buildx version ② docker info 的 BuildKit 特性 ③ 最小 Dockerfile 用 `RUN --mount=type=cache` 构建自证能咬。
+  rc=0 ⇒ A 可行（切 BuildKit + cache mount）；rc≠0 ⇒ 回退 B（纯层顺序 + 去 --no-cache-dir）。
 - 真环境 embedding 模式 ⇒ 决定将来能否激进砍 torch（本次不做）。
+- ⚠ 本 agent 无定时唤醒能力，不能明早 9:00 自跑——需用户届时发一句"开始验证"才执行。
