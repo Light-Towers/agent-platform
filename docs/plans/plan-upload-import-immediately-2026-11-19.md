@@ -1,6 +1,6 @@
 # 修复：上传解析成功但刷新后文档没了（上传即入库）
 
-> 状态：代码完成，待部署。触发（用户 2026-11-19）：选测试库上传文档，解析成功，刷新后文档没了。绑诊断时的 rev=26d0b21e。
+> 状态：✅ 已部署 + 真环境端到端验证通过（2026-11-19 12:20，绑 rev=1e6ad03d）。触发（用户 2026-11-19）：选测试库上传文档，解析成功，刷新后文档没了。诊断时 rev=26d0b21e。
 
 ## 根因（实取坐实，非猜测）
 1. 测试库 `kb_d73b8969113d` 上传历史有 2 条 `知识图谱 概念与技术3.pdf`，均 completed、33 切片。
@@ -25,6 +25,9 @@
 - `TestMultiTenantIsolation` 4 条：旧断言精确相等不含 status 谓词，软删除（前批）加了 `status != REVOKED` 后漂移——改为"含目标子串 + 含 REVOKED 谓词"。属历史测试漂移修复。
 - 全组 36 passed，ruff 绿。
 
-## 待部署验证
-- 重建 + 分发 KS 镜像（平台无改动）后 rollout。
-- 真环境：传一份文档到测试库 → 上传 completed → 文档树出现该文档 + 对话能检索 → 刷新后仍在。
+## 部署 + 验证（2026-11-19 12:20，绑 rev=1e6ad03d）
+- ✅ 部署：KS 镜像 `d912b533853e` 三节点一致（平台 `5ef9ca73d7d3` 未变）；rollout 时 KS 被 nodeSelector 钉 ambari03 + hostPort 冲突，删旧 Pod 两次让新 RS Pod 起来；容器内验证 `should_skip_import(DRAFT)=False / (REVOKED)=True`。
+- ✅ 构建慢的定位（用户问"不是加了加速吗"）：清华源其实生效，但 `node_import_milvus` Dockerfile 里 torch 的 `--index-url https://download.pytorch.org/whl/cpu` 显式覆盖全局源，torch 209.5MB + onnxruntime 27.8MB 走国际站（50–600 kB/s）。本次 pip 缓存层因 rev 变化失效全量重下。记为技术债（torch 源换国内镜像 / 固化缓存层），未阻塞本次。
+- ✅ 端到端（API，测试库 `kb_d73b8969113d`）：上传前 doc_count=0 → 上传 DRAFT completed（done_list 含「导入向量库」）→ 文档树 doc_count=1 / `GBT45704-e2e` 7 片 → 对话检索 `招展招商` 命中并引用上传文档第 8 页。[PASS]
+- ✅ 漂移门禁 rc=0（台账更新到 1e6ad03d + KS 新 digest）。测试账号验后降回 viewer。
+- 测试更新：新增 test_upload_import_immediately.py；exhibition-agent 旧「DRAFT 跳过」测试改钉新契约；4 条 TestMultiTenantIsolation 的 status 谓词断言更新（历史漂移）。全组 36 passed。
