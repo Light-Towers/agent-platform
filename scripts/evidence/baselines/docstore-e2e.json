@@ -3,15 +3,15 @@
   "criterion_id": "docstore-e2e-ABCD",
   "description": "DocumentStore 协议统一 + P2 软删除 schema + P3 删除端点 + v2 主从知识库页（创建/改名/删库）；A/B/C/D + v2 全链路真环境判据。取证见 plan-kb-delete-and-management §8/§9 + plan-kb-ui-v2 §",
   "evidence_doc": "docs/plans/plan-knowledge-base-model-2026-11-17.md",
-  "baseline_rev": "6961dd5cf14dcd702041e8d5c571fb8aaff926ae",
-  "captured_at": "2026-11-18T19:07:00+08:00",
+  "baseline_rev": "07583c9da29e71bb6fd1a1ec19f057ee5c1f03d1",
+  "captured_at": "2026-11-19T09:35:00+08:00",
   "rerun_command": "见 evidence_doc §8；漂移后须在新 rev 上重跑 A/B/C/D 全部四项",
   "probes": [
     {
       "id": "platform_pod_git_rev",
       "kind": "kubectl_exec",
       "target": "deploy/agent-platform:/srv/agent-platform/GIT_REV",
-      "expect": "6961dd5cf14dcd702041e8d5c571fb8aaff926ae",
+      "expect": "07583c9da29e71bb6fd1a1ec19f057ee5c1f03d1",
       "affects": [
         "A",
         "B",
@@ -100,7 +100,7 @@
       "id": "milvus_image_digest",
       "kind": "crictl_image_digest",
       "target": "agent-platform:dev@docker.io/library",
-      "expect_contains": "4d96efa1591deb3bc17f2f34648b07a978b2167d829b7144f2d682d490dcac44",
+      "expect_contains": "4560627b48432327a6cb1c0c791ebf4dee9cba39dc86412dbc81bdd30f401f71",
       "affects": [
         "A",
         "B",
@@ -112,7 +112,7 @@
       "id": "ks_image_digest",
       "kind": "crictl_image_digest",
       "target": "knowledge-service-web:latest@docker.io/library",
-      "expect_contains": "bb76c5d5441ed8498f0f1afad6d7dfcccf9a10d1405c7151453ccad1a3f49f5d",
+      "expect_contains": "539e29d070bd49edea589e3713fd5f59056a3c4bbf51528c2dc98816e1db0fbb",
       "affects": [
         "A",
         "C",

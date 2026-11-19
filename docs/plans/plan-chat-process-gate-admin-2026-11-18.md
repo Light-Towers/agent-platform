@@ -1,6 +1,6 @@
 # 对话页：过程信息收进 admin 专属开关
 
-> 状态：代码完成 + 静态门禁全绿，真浏览器验证因夜间服务器不可达改期（2026-11-19 早补验 + 部署）。触发：用户指出对话返回/展示了一大堆内部过程事件，普通用户只该看到答案；证据/时间线/图例收进一个按钮（悬浮/点击展开），且**仅 admin 角色**可见。
+> 状态：✅ 已部署 + 真浏览器验证通过（2026-11-19 09:35，绑 rev=07583c9d）。触发：用户指出对话返回/展示了一大堆内部过程事件，普通用户只该看到答案；证据/时间线/图例收进一个按钮（悬浮/点击展开），且**仅 admin 角色**可见。
 
 ## 根因 / 现状（实取确认）
 一次真实对话（"你好"）SSE 返回 6 帧：`route`（路由决策）、`memory`（历史记忆）、`evidence`（命中依据）、`status`（token 用量/步骤）、`answer`（正文答案）、`done`（终止帧）。复杂问题还会有 `replan`/`suspended`/`error`/`admission`/`coordination`/`cache_hit`。
@@ -22,8 +22,11 @@
 ## 安全边界（如实记录）
 前端隐藏是**展示层**，不是安全边界：`/query` 的 SSE 仍把 route/evidence 等帧下发给所有角色。要真正做到"普通用户 API 层拿不到证据"，须后端按角色过滤事件帧（本次不做，另议）。
 
-## 验证
-- ✅ 静态全绿（2026-11-18 晚）：typecheck / lint / 6 视觉门禁（check-tokens，定义 123/引用 123、事件双向比较过）/ ruff / doc-sync。
-- ⏳ 真浏览器验证改期 2026-11-19 早：夜间服务器 SSH 超时、`/auth/login` HTTP=000（5173 代理到后端不通），CDP 无法登录取 DOM。脚本已备好 `C:\...\Temp\opencode\cdp_role_gate.mjs`（注入 fetch patch 改 auth 响应 role，独立端口 9337，不碰用户 9222 agent、不碰数据库），明早服务器可达后跑：viewer 只看答案/无过程入口，admin 有开关、点击展开/收起。
-- 部署也改期明早：本改动纯前端展示层，需重建+分发平台镜像（KS 无改动）后 rollout；临时提权 e2e_probe_7q3 验后降回。
-- 注：本次 server 不可达同时挡住了上一批「知识库三级结构」的部署（commit df00e090），两批可一起明早部署。
+## 验证（2026-11-19 09:35 绑 rev=07583c9d）
+- ✅ 静态全绿：typecheck / lint / 6 视觉门禁（check-tokens，定义 123/引用 123、事件双向比较过）/ ruff / doc-sync。
+- ✅ 部署：平台镜像 `f77a577378973` + KS 镜像 `6d6322a16779d` 三节点 digest 一致；平台 GIT_REV=07583c9d；openapi 含 `/kb/documents/tree` + `/kb/documents/{id}` 的 source_doc 参数；KS hostPort 冲突靠删旧 Pod 解决。
+- ✅ 真浏览器（独立 Chrome CDP，不碰用户 9222 agent、不碰数据库）：
+  - **viewer**（真实 viewer 账号登录）：`hasInspectToggle=false` / `hasInspector=false` / `hasLegend=false` / `noInspectorGrid=true`；截图确认对话页只有会话列表+答案区+输入框，无过程入口。[PASS-VIEWER]
+  - **admin**：未展开时 toggle 出现、inspector/legend 不渲染、grid 两列；点击后 toggle 变「收起」、依据列表/事件时间线/图例全出现、grid 三列。[PASS-ADMIN]
+- ✅ 漂移门禁 `verify_basis_drift.py --ssh-host 192.168.100.126` rc=0（台账更新到 07583c9d + 新 digest）。
+- 测试账号取证期 admin、验后已降回 viewer。
