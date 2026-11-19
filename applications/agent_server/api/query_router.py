@@ -193,11 +193,15 @@ async def query(
         except Exception:
             logger.warning("query embedding failed; semantic cache degrades to L1-only", exc_info=True)
         try:
+            # knowledge_id 纳入缓存键：选不同知识库问同一问题不能串缓存。
+            # 传 None（=全部知识库）时用 None，传具体 ID 时形成独立签名。
+            kb_scope = {"kb": req.knowledge_id} if req.knowledge_id else None
             cache_hit = await cache_backend.get(
                 tenant_id=tenant,
                 intent="",
                 rewritten_query=req.query,
                 embedding=q_embedding,
+                kb_versions=kb_scope,
             )
             # null 是负缓存标记：agent_server 不写负缓存，看到它按未命中继续执行。
             if cache_hit is not None and cache_hit.layer != "null":
@@ -272,6 +276,12 @@ async def query(
         try:
             final_answer = ""
             round_snapshot: dict | None = None
+            # 是否至少有一轮检索命中证据——用于「不缓存空证据答案」（2026-11-19）。
+            # 否定答案（"证据为无/无法回答"）一旦入缓存，会在知识库更新后继续挡住真检索。
+            had_evidence = False
+            # 是否走了 RAG 路由——只有「RAG 但零证据」才是被污染风险的否定答案；
+            # direct/闲聊无 evidence 属正常，应照常缓存（不被这条规则误伤）。
+            is_rag_route = False
             _stream_failed = False
             if planner is None or planner_runtime is None:
                 # 兜底：Planner 未装配（理论不发生，lifespan 保证），走 graph 静态 DAG。
@@ -287,6 +297,10 @@ async def query(
                     for node, payload in update.items():
                         event = _node_event(node, payload)
                         if event:
+                            if event.type == "route" and event.payload.get("capability") == "rag":
+                                is_rag_route = True
+                            if event.type == "evidence" and int(event.payload.get("count") or 0) > 0:
+                                had_evidence = True
                             yield _sse(event)
                         if node == "synthesize" and payload.get("answer"):
                             final_answer = payload["answer"]
@@ -338,6 +352,10 @@ async def query(
                         logger.warning("status save RUNNING failed", exc_info=True)
                 async for event in planner.execute(plan, planner_runtime):
                     sse = _stream_event(event)
+                    if event.type == "route" and event.payload.get("capability") == "rag":
+                        is_rag_route = True
+                    if event.type == "evidence" and int(event.payload.get("count") or 0) > 0:
+                        had_evidence = True
                     if sse:
                         yield _sse(sse)
                     if event.type == "answer":
@@ -362,7 +380,14 @@ async def query(
             # 写侧同样不许把"嵌入器可用"当写入前提：q_embedding=None 时后端会自行派生，
             # 派生不成也只是退成"写 L1、不写 L2"。留在条件里会让嵌入器故障期间
             # 一个键都不写，恢复后缓存永远是冷的。
-            if final_answer and cache_backend.enabled:
+            # 不缓存空证据答案（2026-11-19）：否定答案（"证据为无/无法回答"）一旦入缓存，
+            # 知识库后来补了文档也永远命中旧否定答案——正是用户"上传了却问不到"的成因之一。
+            # 判据用结构信号 had_evidence（evidence 事件 count>0），不靠 LLM 文本措辞。
+            kb_scope = {"kb": req.knowledge_id} if req.knowledge_id else None
+            should_cache = should_cache_answer(
+                final_answer, cache_backend.enabled, is_rag_route, had_evidence,
+            )
+            if should_cache:
                 try:
                     await cache_backend.set(
                         tenant_id=tenant,
@@ -370,6 +395,7 @@ async def query(
                         rewritten_query=req.query,
                         value={"answer": final_answer},
                         embedding=q_embedding,
+                        kb_versions=kb_scope,
                     )
                 except Exception:
                     logger.warning("semantic cache write failed; continue", exc_info=True)
@@ -468,6 +494,20 @@ async def query(
             )
 
     return StreamingResponse(_stream(), media_type="text/event-stream")
+
+
+def should_cache_answer(
+    final_answer: str, cache_enabled: bool, is_rag_route: bool, had_evidence: bool,
+) -> bool:
+    """语义缓存准入（2026-11-19）：非空答案 + 缓存可用 + 非「RAG 但零证据」。
+
+    「RAG 但零证据」的否定答案（"证据为无/无法回答"）一旦入缓存，知识库后来补了文档
+    也永远命中旧否定答案——正是用户"上传了却问不到"的成因。direct/闲聊无 evidence
+    属正常，照常缓存。判据用结构信号（route/evidence），不靠 LLM 文本措辞。
+    """
+    if not final_answer or not cache_enabled:
+        return False
+    return not (is_rag_route and not had_evidence)
 
 
 def _sse(payload: dict) -> str:

@@ -115,6 +115,20 @@ def test_happy_path_keeps_single_embedder_call_shared_by_read_and_write(cache, m
     assert fake.get_calls[0]["embedding"] == fake.set_calls[0]["embedding"] == [0.25] * 8
 
 
+def test_knowledge_scope_is_part_of_cache_key(cache, monkeypatch):
+    """选了知识库时，knowledge_id 必须进缓存键（get+set 都传 kb_versions）——
+    否则选不同库问同一问题会串缓存（2026-11-19 bug）。"""
+    fake = cache["install"]()
+    _patch_embed(monkeypatch, _ok_embed)
+
+    with TestClient(app) as client:
+        client.post("/query", json={"query": "介绍一下这个项目", "knowledge_id": "kb_aaa"})
+
+    assert fake.get_calls and fake.get_calls[0]["kb_versions"] == {"kb": "kb_aaa"}
+    if fake.set_calls:  # 若该路由产出了可缓存答案
+        assert fake.set_calls[0]["kb_versions"] == {"kb": "kb_aaa"}
+
+
 def test_cache_hit_short_circuit_survives_the_read_path_restructure(cache, monkeypatch):
     """读路径拆成两个 try 后，命中旁路必须仍然是"直接返回、不执行、不写回"。"""
     from agent_core.cache import CacheHit
