@@ -63,6 +63,18 @@ def _message_content(msg: Any) -> str:
     return str(msg)
 
 
+def apply_kb_scope(route: str, reason: str, knowledge_id: str) -> tuple[str, str]:
+    """选了知识库（knowledge_id 非空）时，只把 direct 改判 rag（2026-11-19 ADR 00XX）。
+
+    用户拍板：选库只压 direct，不压 sql/search/code_execution/mcp——那些是明确能力，
+    即使选了库也不该去查向量（如"统计订单销售额"仍走 sql）。blocked 不进本函数
+    （安全护栏在更早的 guard 分支返回）。
+    """
+    if knowledge_id and route == "direct":
+        return "rag", f"{reason}；已选知识库，direct 改判 rag"
+    return route, reason
+
+
 class DeterministicPlanner(Planner):
     """确定性 Planner：复刻 graph.py ``route -> (search|rag|sql|direct|mcp) -> synthesize`` 决策与编排。"""
 
@@ -102,10 +114,11 @@ class DeterministicPlanner(Planner):
                 conversation_cap=conversation_cap(settings),
             )
             if compacted is not None:
+                route, reason = apply_kb_scope("direct", "上下文已压缩，重新路由", ctx.knowledge_id)
                 return Plan(
-                    route="direct",
+                    route=route,
                     sub_query=question,
-                    reason="上下文已压缩，重新路由",
+                    reason=reason,
                     question=question,
                     workspace_id=ctx.workspace_id,
                     knowledge_id=ctx.knowledge_id,
@@ -120,10 +133,12 @@ class DeterministicPlanner(Planner):
         # WS-6：async 入口，嵌入计算不阻塞事件循环
         l1_hint = await l1_route_hint_async(question)
         if l1_hint is not None:
+            # 选库只压 direct（sql/search 等明确能力保留）
+            route, reason = apply_kb_scope(l1_hint, "L1 chitchat short-circuit", ctx.knowledge_id)
             return Plan(
-                route=l1_hint,
+                route=route,
                 sub_query=question,
-                reason="L1 chitchat short-circuit",
+                reason=reason,
                 question=question,
                 workspace_id=ctx.workspace_id,
                 knowledge_id=ctx.knowledge_id,
@@ -134,10 +149,12 @@ class DeterministicPlanner(Planner):
 
         # LLM 主路由：失败自动回退确定性启发式（decide_route 内部处理）
         decision = await decide_route(ctx.llm, question)
+        # 选库只压 direct（sql/search/code/mcp 等明确能力保留）
+        route, reason = apply_kb_scope(decision.capability, decision.reason, ctx.knowledge_id)
         return Plan(
-            route=decision.capability,
+            route=route,
             sub_query=decision.sub_query,
-            reason=decision.reason,
+            reason=reason,
             question=question,
             workspace_id=ctx.workspace_id,
             knowledge_id=ctx.knowledge_id,

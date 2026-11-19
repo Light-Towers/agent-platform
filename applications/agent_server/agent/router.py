@@ -17,10 +17,23 @@ from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
+from agent_core.hot_text import load_hot_text
+
 from agent_server.config import get_settings
 from agent_server.schemas import Capability
 
 _DATA_PATH = Path(__file__).resolve().parent / "data" / "route_hints.json"
+# 路由 system prompt 外置（ADR 00XX）：生产由 ConfigMap volume 挂到 /run/app-prompts，
+# 改 CM 即生效不重启；本地 dev/测试用仓库内文件。import 时选一次路径即可
+# （挂载路径在容器生命周期内不变），热加载靠 load_hot_text 的 mtime 指纹。
+_MOUNTED_PROMPT = Path("/run/app-prompts/router_system.prompt")
+_LOCAL_PROMPT = Path(__file__).resolve().parent / "data" / "router_system.prompt"
+_PROMPT_PATH = _MOUNTED_PROMPT if _MOUNTED_PROMPT.exists() else _LOCAL_PROMPT
+# 文件缺失兜底（同 route_hints 的 _FALLBACK_HINTS 纪律：不因文件缺失启动失败）。
+_FALLBACK_ROUTER_PROMPT = (
+    "你是路由器。判断用户问题应走哪条能力链路：{capabilities}\n"
+    "涉及业务/领域/文档内容的问题优先选 rag 检索本地知识库；纯闲聊才判 direct。"
+)
 
 # 代码兜底（数据文件缺失时使用，避免启动失败）
 _FALLBACK_HINTS = {
@@ -80,10 +93,14 @@ async def decide_route(llm, question: str) -> RouteDecision:
     """LLM 结构化路由；任何异常回退启发式（绝不让路由失败阻塞主链路）。"""
     if llm is None:
         return heuristic_route(question)
+    # system prompt 从外置文件读（热加载，改文件不重启）；缺失时用兜底。
+    # 不用 str.format（prompt 里可能有字面花括号），用 replace 白名单槽位。
+    prompt_template = load_hot_text(_PROMPT_PATH, _FALLBACK_ROUTER_PROMPT)
     try:
         capabilities = "search=联网搜索, rag=本地知识库, sql=数据库查询, direct=直接回答, code_execution=沙箱代码执行"
         if get_settings().mcp_enabled:
             capabilities += ", mcp=调用外部工具"
+        system_prompt = prompt_template.replace("{capabilities}", capabilities)
         # method 必须显式指定：langchain-openai 默认走 json_schema，而提供方是否支持该
         # response_format 类型按模型不同（126 现网 DeepSeek 稳定 400、同端点 Qwen 却可用），
         # 失败会被下面的宽 except 吞成"静默回退启发式"。tools 是实测唯一跨模型都合规的形态，
@@ -91,7 +108,7 @@ async def decide_route(llm, question: str) -> RouteDecision:
         structured = llm.with_structured_output(RouteDecision, method="function_calling")
         decision = await structured.ainvoke(
             [
-                {"role": "system", "content": f"你是路由器。判断用户问题应走哪条能力链路：{capabilities}。"},
+                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": question},
             ]
         )

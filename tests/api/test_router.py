@@ -1,3 +1,5 @@
+from agent_core.hot_text import clear_hot_text_cache
+from agent_server.agent import router as router_mod
 from agent_server.agent.router import RouteDecision, decide_route, heuristic_route
 
 
@@ -74,3 +76,22 @@ async def test_provider_rejection_still_falls_back_to_heuristic():
     decision = await decide_route(double, "什么是向量检索，解释一下")
     assert decision.capability == "rag"
     assert decision.reason == "命中知识库特征词"  # 回退仍走词表，且 reason 可据此判别走了哪条
+
+
+async def test_router_prompt_externalized_and_hot_reload(monkeypatch, tmp_path):
+    """路由 system prompt 从外置文件读；改文件内容下次调用即生效，不重启（ADR 00XX）。"""
+    clear_hot_text_cache()
+    p = tmp_path / "router.prompt"
+    p.write_text("版本一 {capabilities}", encoding="utf-8")
+    monkeypatch.setattr(router_mod, "_PROMPT_PATH", p)
+
+    double = _StructuredDouble(RouteDecision(capability="rag", sub_query="q", reason="r"))
+    await decide_route(double, "关系抽取是什么？")
+    assert double.seen_messages[0]["content"].startswith("版本一 ")
+
+    # 模拟 kubectl patch cm → kubelet 同步文件 → mtime 变
+    p.write_text("版本二 {capabilities}", encoding="utf-8")
+    double2 = _StructuredDouble(RouteDecision(capability="rag", sub_query="q", reason="r"))
+    await decide_route(double2, "关系抽取是什么？")
+    assert double2.seen_messages[0]["content"].startswith("版本二 ")
+
