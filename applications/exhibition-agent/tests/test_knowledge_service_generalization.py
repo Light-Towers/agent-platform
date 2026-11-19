@@ -318,19 +318,26 @@ class TestMultiTenantIsolation:
         assert "scope_type" not in expr
 
     def test_tenant_only_filter(self):
-        """仅 tenant_id → tenant_id == "..." 过滤。"""
+        """仅 tenant_id → 含 tenant_id 过滤 + 软删除谓词。"""
         expr = build_retrieval_filter(tenant_id="tenant_A")
-        assert expr == 'tenant_id == "tenant_A"'
+        assert expr is not None
+        assert 'tenant_id == "tenant_A"' in expr
+        assert 'status != "REVOKED"' in expr  # P3 软删除：检索永远排除 REVOKED
 
     def test_scope_only_filter(self):
-        """仅 scope_type → scope_type == "..." 过滤。"""
+        """仅 scope_type → 含 scope_type 过滤 + 软删除谓词。"""
         expr = build_retrieval_filter(scope_type="PUBLIC")
-        assert expr == 'scope_type == "PUBLIC"'
+        assert expr is not None
+        assert 'scope_type == "PUBLIC"' in expr
+        assert 'status != "REVOKED"' in expr
 
     def test_tenant_and_scope_filter(self):
-        """tenant_id + scope_type → and 复合过滤。"""
+        """tenant_id + scope_type → 复合过滤 + 软删除谓词。"""
         expr = build_retrieval_filter(tenant_id="tenant_A", scope_type="PRIVATE")
-        assert expr == 'tenant_id == "tenant_A" and scope_type == "PRIVATE"'
+        assert expr is not None
+        assert 'tenant_id == "tenant_A"' in expr
+        assert 'scope_type == "PRIVATE"' in expr
+        assert 'status != "REVOKED"' in expr
 
     def test_full_composite_filter(self):
         """item_names + tenant_id + scope_type → 完整复合过滤。"""
@@ -347,10 +354,10 @@ class TestMultiTenantIsolation:
         # 顺序：item_name 先，tenant+scope 后
         assert expr.index("item_name") < expr.index("tenant_id")
 
-    def test_empty_filter_returns_none(self):
-        """全空 → None（不做过滤，全库检索）。"""
-        assert build_retrieval_filter() is None
-        assert build_retrieval_filter(item_names=[], tenant_id="", scope_type="") is None
+    def test_empty_filter_still_excludes_revoked(self):
+        """全空 → 仍带软删除谓词（排除 REVOKED），不是 None。"""
+        assert build_retrieval_filter() == 'status != "REVOKED"'
+        assert build_retrieval_filter(item_names=[], tenant_id="", scope_type="") == 'status != "REVOKED"'
 
     def test_tenant_isolation_prevents_cross_tenant_leak(self):
         """跨租户隔离：tenant_A 的查询不会命中 tenant_B 的数据（filter 表达式互斥）。"""
@@ -384,22 +391,18 @@ class TestMultiTenantIsolation:
 
 
 class TestImportMilvusLifecycleGate:
-    """node_import_milvus 入口的生命周期门控（不连 Milvus，仅测跳过逻辑）。"""
+    """node_import_milvus 入口的入库门控（不连 Milvus，仅测 should_skip_import 纯函数）。"""
 
-    def test_draft_state_skips_milvus_insert(self):
-        """status=DRAFT 时 node_import_milvus 直接返回，不触发 Milvus 写入。"""
-        from knowledge_service.import_process.agent.nodes.node_import_milvus import node_import_milvus
+    def test_draft_state_proceeds_to_milvus(self):
+        """上传即入库（2026-11-19 新契约）：DRAFT 不再跳过，只有 REVOKED 跳过。"""
+        from knowledge_service.import_process.agent.nodes.node_import_milvus import should_skip_import
 
-        state = create_default_state(
-            task_id="t1",
-            status="DRAFT",
-            chunks=[{"content": "x", "dense_vector": [0.1]}],
-        )
-        # DRAFT → should_publish=False → 节点早返回，不连 Milvus
-        result = node_import_milvus(state)
-        assert result["status"] == "DRAFT"
-        # chunks 未被修改（未进入插入流程）
-        assert result["chunks"] == state["chunks"]
+        # 旧契约「DRAFT 跳过」已废：用户传完文档期望立即可见可检索。
+        assert should_skip_import({"status": "DRAFT"}) is False
+        assert should_skip_import({"status": "REVIEWING"}) is False
+        assert should_skip_import({"status": "PUBLISHED"}) is False
+        # 删除态才跳过
+        assert should_skip_import({"status": "REVOKED"}) is True
 
     def test_published_state_proceeds_to_milvus(self):
         """status=PUBLISHED + 完整 metadata → 进入 Milvus 流程（连接失败时抛 ValueError）。"""

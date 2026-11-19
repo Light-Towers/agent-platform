@@ -11,7 +11,6 @@ from knowledge_service.clients.milvus_utils import get_milvus_client
 from knowledge_service.conf.milvus_config import milvus_config
 from knowledge_service.core.knowledge_lifecycle_integration import (
     extract_tenant_scope_for_chunk,
-    should_publish_to_production,
 )
 from knowledge_service.core.logger import logger
 from knowledge_service.core.tracing import traced_span
@@ -22,6 +21,14 @@ from knowledge_service.utils.task_utils import add_running_task
 # 从配置文件读取切片集合名称（M2：版本化命名 {prefix}_{schema_version}_{embedding_model}，
 # 与检索侧 node_search_embedding / node_search_embedding_hyde 统一读取同一配置，杜绝两侧写死不一致）
 CHUNKS_COLLECTION_NAME = milvus_config.chunks_collection
+
+
+def should_skip_import(state: Dict[str, Any]) -> bool:
+    """上传即入库：只有删除态（REVOKED）才跳过，其余状态（含 DRAFT）都写入生产库。
+
+    抽成纯函数便于零 Milvus 单测；节点里的日志在此函数外打印。
+    """
+    return str(state.get("status", "") or "").strip().upper() == "REVOKED"
 
 
 # ==========================================
@@ -67,12 +74,16 @@ def node_import_milvus(state: Dict[str, Any]) -> Dict[str, Any]:
     add_running_task(state["task_id"], current_node)
     logger.info("--- Milvus切片数据入库流程启动 ---")
 
-    # 08+16 通用化：生命周期状态机集成——非 PUBLISHED 跳过生产入库（仅审计留痕）
-    should_publish, reason = should_publish_to_production(state)
-    if not should_publish:
-        logger.info(f"[{state.get('task_id', '')}] 跳过生产入库：{reason}")
+    # 上传即入库（2026-11-19 用户拍板，去掉隐藏门禁）：
+    # 旧逻辑用 should_publish_to_production 把非 PUBLISHED（含前端默认 DRAFT）挡在生产库外，
+    # 导致"上传解析成功但刷新后文档没了"——解析/切分/向量都做了，切片却不写 Milvus。
+    # 检索侧谓词是 status != REVOKED，DRAFT/REVIEWING 切片本就可被召回，故上传直接入库。
+    # 只挡 REVOKED（删除态不重新入库）。正式发布的 metadata 校验仍由生命周期端点负责，
+    # 不作为"上传入库"的拦路虎（否则前端得编造 authority/exhibition_id 等业务字段）。
+    if should_skip_import(state):
+        logger.info(f"[{state.get('task_id', '')}] status=REVOKED（删除态），跳过入库")
         return state
-    logger.info(f"[{state.get('task_id', '')}] 生命周期校验通过，进入生产入库流程")
+    logger.info(f"[{state.get('task_id', '')}] 上传即入库：status={str(state.get('status', '') or 'DRAFT')}，进入生产入库流程")
 
     try:
         # 步骤1：输入数据有效性校验
