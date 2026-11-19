@@ -1,6 +1,6 @@
 # ADR：路由提示词热加载（改提示词不重启服务）
 
-> 状态：✅ 已拍板（2026-11-19），实现中。触发（用户 2026-11-19）：路由 prompt 把"关系抽取/知识图谱是什么"判 direct 跳过检索；用户要求 ① 全局治本、改提示词不能重启服务 ② 选库只压 direct 不压 sql/search ③ 检索无证据时如实说"库里没找到"，不退回通用知识硬答。
+> 状态：✅ 已部署 + 真环境验证通过（2026-11-19 18:45，绑 rev=fe4e4aab，平台镜像 e8a59304979e / digest e3fdee92）。触发（用户 2026-11-19）：路由 prompt 把"关系抽取/知识图谱是什么"判 direct 跳过检索；用户要求 ① 全局治本、改提示词不能重启服务 ② 选库只压 direct 不压 sql/search ③ 检索无证据时如实说"库里没找到"，不退回通用知识硬答。
 
 ## Context（实取事实）
 
@@ -49,6 +49,13 @@ kubectl -n agent-platform patch cm agent-platform-prompts \
   --type=merge -p='{"data":{"router_system.prompt":"<新提示词全文>"}}'
 # kubelet 同步卷文件（通常≤1min）→ 下次请求 load_hot_text 感知 mtime 变化自动重读
 ```
+
+## 真环境验证（2026-11-19 18:45，绑 rev=fe4e4aab）
+- ✅ 静态：hot_text 3 passed(1 skip/Win)、test_router 9 passed、scope_forces_rag 3 passed、ruff/doc-sync 绿。
+- ✅ 部署：平台 `e8a59304979e` 三节点一致；CM `agent-platform-prompts` 创建 + deployment volume 挂载 patch 成功（一次性 rollout）；Pod 内 `/run/app-prompts/router_system.prompt` 可见。
+- ✅ 路由（真环境 API）：选库问"知识图谱是什么？"→ `route=rag`、evidence(count=4,node=rag)，如实答"证据中只有关系抽取内容"（不硬编）；选库问"统计订单销售额"→ `route=sql`（没被压 rag）；不选库问概念→ `route=rag`（新 prompt 生效）。
+- ✅ **热加载**：`kubectl patch cm` 加 marker → **90s** 后 Pod 内挂载文件出现 marker → 恢复；全程未 rollout、未重建镜像。改提示词从此秒级生效不重启。
+- 注：126 SSH 夜间超时，最后"marker 已恢复"的二次确认没做成（恢复命令本身执行成功，kubelet 同步机制同 90s）。明日可复核。
 
 ## Consequences
 - 改提示词从"重建镜像+rollout（~30min）"降为"`kubectl patch cm`（秒级、不重启）"。
