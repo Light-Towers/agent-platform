@@ -172,6 +172,7 @@ ci-web:
 	cd web && pnpm install --frozen-lockfile
 	cd web && pnpm run check:tokens
 	cd web && pnpm run check:events
+	cd web && pnpm run check:ui-consistency
 	cd web && pnpm run lint
 	cd web && pnpm run typecheck
 	cd web && pnpm run verify:sse

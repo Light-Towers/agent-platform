@@ -652,10 +652,7 @@ a.ry-btn { text-decoration: none; }
   color: inherit;
   cursor: pointer;
 }
-.kb-history__item.is-active {
-  border-color: var(--ry-primary);
-  background: var(--bg-raised);
-}
+/* 选中态走全局 .is-active（单一实现，见 plan-ui-consistency-2026-11-19） */
 .kb-history__item .hint { margin-left: auto; }
 
 /* ---- 知识库页 master-detail（2026-11-18 重构）----
@@ -684,11 +681,6 @@ a.ry-btn { text-decoration: none; }
   padding: var(--sp-1);
   border: 1px solid var(--border-decor);
   border-radius: var(--radius-sm);
-}
-/* 选中态与对话页会话列表同一套：蓝边 + 浮起底色，操作统一、少记忆负担。 */
-.kb-sidebar__item.is-active {
-  border-color: var(--ry-primary);
-  background: var(--bg-raised);
 }
 /* flex:1 1 auto（不是 width:100%）——留出右侧按钮的空间，避免 ✎× 被挤出卡片。 */
 .kb-sidebar__pick {
@@ -761,10 +753,6 @@ a.ry-btn { text-decoration: none; }
   align-items: center;
   border: 1px solid var(--border-decor);
   border-radius: var(--radius-sm);
-}
-.session-list__item.is-active {
-  border-color: var(--ry-primary);
-  background: var(--bg-raised);
 }
 .session-list__pick {
   flex: 1 1 auto;
@@ -907,3 +895,13 @@ a.ry-btn { text-decoration: none; }
 }
 /* 说明段：比登录卡宽一档（它装的是长句），但仍限宽，不铺满屏。 */
 .auth-page__note { width: 100%; }
+
+/* 通用选中态（单一实现，plan-ui-consistency-2026-11-19）：
+ * 列表行项选中 = 蓝边 + 浮起底色。会话/知识库侧栏/文档列表三处共用，不再各自复制。
+ * ⚠ 必须放在所有组件布局类之后：.session-list__item 等的 `border` 简写与 .is-active 同为
+ *   (0,1,0)，若本块在前会被简写覆盖（真浏览器 computed style 实测抓到过）。
+ *   菜单实心蓝是另一语义族（.ry-menu-item.is-active），不在此列。 */
+.is-active {
+  border-color: var(--ry-primary);
+  background: var(--bg-raised);
+}
