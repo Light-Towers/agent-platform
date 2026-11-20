@@ -15,7 +15,7 @@
  *   全在 base.css。浏览器不直连 KS：所有请求只打 agent_server 的 /kb/* 代理。
  * ==========================================================================-->
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onUnmounted, ref, watch } from 'vue'
 
 import { authToken } from '../stores/session'
 import {
@@ -40,6 +40,19 @@ const props = defineProps<{
 const emit = defineEmits<{
   changed: []   // 上传/下线后通知父组件刷新文档树
 }>()
+
+/** 乐观状态覆盖：Milvus 写入有可见性延迟，操作成功后立刻改本地状态让按钮即时切换，
+ *  后端刷新回来后以真实数据为准（覆盖随文档从树里消失/重插自动失效）。 */
+const statusOverride = ref<Record<string, string>>({})
+function optimisticStatus(sourceDoc: string, status: string): void {
+  statusOverride.value = { ...statusOverride.value, [sourceDoc]: status }
+}
+/** 展示用文档：用乐观状态覆盖 chunks[].status，驱动 isRevoked 的按钮显隐。 */
+const displayDocs = computed(() => props.documents.map((doc) => {
+  const ov = statusOverride.value[doc.source_doc]
+  if (!ov) return doc
+  return { ...doc, chunks: doc.chunks.map((c) => ({ ...c, status: ov })) }
+}))
 
 /** 默认配置即"能跑"：DRAFT + PRIVATE；knowledge_id 由左栏选中的库提供。 */
 const form = ref<KbUploadForm>({
@@ -71,7 +84,21 @@ const localIngestNote = ref('')
 const expandedDoc = ref('')
 /** 正在下线的文档名（防重复点）。 */
 const deleteBusy = ref('')
-const deleteNotice = ref('')
+/** 操作反馈：ok=true 成功（绿）/false 失败（红）——用户视角：成功别用失败色。 */
+const deleteNotice = ref<{ text: string; ok: boolean }>({ text: '', ok: true })
+
+function notice(text: string, ok: boolean): void {
+  deleteNotice.value = { text, ok }
+}
+
+/** Milvus 写入可见性有延迟：操作后立即刷新会读到旧 status ⇒ 延迟再刷一次。 */
+const pendingTimers: number[] = []
+function refreshAfterWrite(): void {
+  emit('changed')                    // 先即时刷新（乐观）
+  // #12：记录定时器 id，组件销毁（切库）时清理，避免旧组件触发全局刷新
+  pendingTimers.push(window.setTimeout(() => emit('changed'), 3000))
+}
+onUnmounted(() => { for (const t of pendingTimers) window.clearTimeout(t) })
 
 const totalChunks = computed(() =>
   props.documents.reduce((sum, d) => sum + d.chunk_count, 0),
@@ -84,7 +111,8 @@ watch(
     form.value.knowledgeId = kid || ''
     expandedDoc.value = ''
     errorText.value = ''
-    deleteNotice.value = ''
+    notice('', true)
+    statusOverride.value = {}  // 切换库时清掉乐观状态
   },
   { immediate: true },
 )
@@ -100,14 +128,16 @@ async function onDeleteDocument(sourceDoc: string): Promise<void> {
   if (deleteBusy.value) return
   if (!window.confirm(`确定下线文档「${sourceDoc}」？该文档将从对话检索中移除（软删除，数据保留，可重新发布恢复）。`)) return
   deleteBusy.value = sourceDoc
-  deleteNotice.value = ''
+  notice('', true)
   try {
     await deleteKbDocument(props.selectedKnowledgeId, authToken.value ?? '', sourceDoc)
-    deleteNotice.value = `文档「${sourceDoc}」已下线：不再被 RAG 召回（数据保留，可恢复）。`
+    notice(`文档「${sourceDoc}」已下线：不再被 RAG 召回（数据保留，可恢复）。`, true)
     if (expandedDoc.value === sourceDoc) expandedDoc.value = ''
-    emit('changed')
+    // 乐观更新：立刻把该文档标记为已下线，删除按钮马上出现，不等后端刷新
+    optimisticStatus(sourceDoc, 'REVOKED')
+    refreshAfterWrite()
   } catch (err) {
-    deleteNotice.value = `文档下线失败：${err instanceof Error ? err.message : String(err)}`
+    notice(`文档下线失败：${err instanceof Error ? err.message : String(err)}`, false)
   } finally {
     deleteBusy.value = ''
   }
@@ -117,13 +147,15 @@ async function onDeleteDocument(sourceDoc: string): Promise<void> {
 async function onRestoreDocument(sourceDoc: string): Promise<void> {
   if (deleteBusy.value) return
   deleteBusy.value = sourceDoc
-  deleteNotice.value = ''
+  notice('', true)
   try {
     await restoreKbDocument(props.selectedKnowledgeId, sourceDoc, authToken.value ?? '')
-    deleteNotice.value = `文档「${sourceDoc}」已重新上线：可再次被对话检索召回。`
-    emit('changed')
+    notice(`文档「${sourceDoc}」已重新上线：可再次被对话检索召回。`, true)
+    // 乐观更新：立刻标记为 PUBLISHED，「上线/删除」按钮即时消失
+    optimisticStatus(sourceDoc, 'PUBLISHED')
+    refreshAfterWrite()
   } catch (err) {
-    deleteNotice.value = `文档上线失败：${err instanceof Error ? err.message : String(err)}`
+    notice(`文档上线失败：${err instanceof Error ? err.message : String(err)}`, false)
   } finally {
     deleteBusy.value = ''
   }
@@ -134,14 +166,15 @@ async function onPurgeDocument(sourceDoc: string): Promise<void> {
   if (deleteBusy.value) return
   if (!window.confirm(`确定永久删除文档「${sourceDoc}」？此操作不可逆，文档将从知识库彻底移除。`)) return
   deleteBusy.value = sourceDoc
-  deleteNotice.value = ''
+  notice('', true)
   try {
     await purgeKbDocument(props.selectedKnowledgeId, sourceDoc, authToken.value ?? '')
-    deleteNotice.value = `文档「${sourceDoc}」已永久删除。`
+    notice(`文档「${sourceDoc}」已永久删除。`, true)
     if (expandedDoc.value === sourceDoc) expandedDoc.value = ''
-    emit('changed')
+    emit('changed')  // 删除后文档从树消失，无需乐观状态
+    pendingTimers.push(window.setTimeout(() => emit('changed'), 3000))
   } catch (err) {
-    deleteNotice.value = `文档删除失败：${err instanceof Error ? err.message : String(err)}`
+    notice(`文档删除失败：${err instanceof Error ? err.message : String(err)}`, false)
   } finally {
     deleteBusy.value = ''
   }
@@ -192,7 +225,9 @@ async function submit(): Promise<void> {
         await poll(firstId)
       }
     }
-    emit('changed')   // 刷新文档树（上传完成 → 新文档/新切片出现在列表）
+    // #7：清掉乐观覆盖——同名文档重新上传后应按后端真实状态显示，不被旧 override 误标下线
+    statusOverride.value = {}
+    refreshAfterWrite()  // #5：上传也走即时+3s二次刷新（Milvus 写入可见性延迟）
   } catch (err) {
     errorText.value = err instanceof Error ? err.message : String(err)
   } finally {
@@ -252,20 +287,31 @@ const failed = computed(() => status.value?.status === 'failed')
       class="ry-card"
       aria-labelledby="hDocs"
     >
-      <h2 id="hDocs">
-        {{ selectedName }} 的文档
-        <span class="count-badge">{{ documents.length }} 份 · {{ totalChunks }} 片</span>
-      </h2>
+      <div class="composer__row">
+        <h2 id="hDocs">
+          {{ selectedName }} 的文档
+          <span class="count-badge">{{ documents.length }} 份 · {{ totalChunks }} 片</span>
+        </h2>
+        <button
+          type="button"
+          class="ry-btn ry-btn--text"
+          :aria-disabled="busy"
+          @click="emit('changed')"
+        >
+          刷新
+        </button>
+      </div>
       <p class="hint">
         这是当前知识库下实际存在的文档。点开一份可查看它的切片；下线文档后它将不再被对话检索（RAG）召回。
       </p>
 
       <p
-        v-if="deleteNotice"
-        class="banner"
+        v-if="deleteNotice.text"
+        class="notice"
+        :class="deleteNotice.ok ? 'notice--ok' : 'banner'"
         role="status"
       >
-        <strong>{{ deleteNotice }}</strong>
+        <strong>{{ deleteNotice.text }}</strong>
       </p>
 
       <div
@@ -273,7 +319,7 @@ const failed = computed(() => status.value?.status === 'failed')
         class="kb-history"
       >
         <div
-          v-for="doc in documents"
+          v-for="doc in displayDocs"
           :key="doc.source_doc"
           class="kb-history__item"
           :class="{
@@ -434,7 +480,7 @@ const failed = computed(() => status.value?.status === 'failed')
 
       <p
         v-if="localIngestNote"
-        class="banner"
+        class="notice notice--ok"
         role="status"
       >
         <strong>{{ localIngestNote }}</strong>

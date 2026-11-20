@@ -12,15 +12,29 @@ import { listDocumentTree, type KbTreeBase, type KbTreeDoc } from '../api/kb.ts'
 import KnowledgeBaseSidebar from './KnowledgeBaseSidebar.vue'
 import KbUpload from './KbUpload.vue'
 
+const emit = defineEmits<{
+  /** 库被删除——父组件（App）可据此清理对话页知识范围下拉里已失效的选中值（#8）。 */
+  'kb-deleted': [knowledgeId: string]
+}>()
+
 const selectedId = ref('')
 const selectedName = ref('')
 const treeBases = ref<readonly KbTreeBase[]>([])
 const treeError = ref('')
+const sidebarRef = ref<InstanceType<typeof KnowledgeBaseSidebar> | null>(null)
 
-/** 每个库的真实文档数（来自 Milvus source_doc 去重），左栏显示用。 */
+/** 有效文档数（status != REVOKED 的 distinct source_doc）——与后端删库守卫同源。
+ *  #1：全下线后 doc_count=0 ⇒ 删库按钮可用（之前数全部含 REVOKED，永远删不掉库）。 */
+function activeDocCount(base: KbTreeBase): number {
+  const docs = new Set<string>()
+  for (const doc of base.documents) {
+    if (doc.chunks.some((c) => c.status !== 'REVOKED')) docs.add(doc.source_doc)
+  }
+  return docs.size
+}
 const docCounts = computed(() => {
   const m = new Map<string, number>()
-  for (const b of treeBases.value) m.set(b.knowledge_id, b.doc_count)
+  for (const b of treeBases.value) m.set(b.knowledge_id, activeDocCount(b))
   return m
 })
 /** 当前选中库的文档列表（点开看切片）。 */
@@ -34,12 +48,34 @@ async function refreshTree(): Promise<void> {
     treeError.value = ''
   } catch (err) {
     treeError.value = `文档树加载失败：${err instanceof Error ? err.message : String(err)}`
+    treeBases.value = []  // #11：失败时清掉旧数据，不把过期读数当当前
   }
+}
+
+/** 统一刷新（P1 修类）：任何变更同时刷新 tree + Sidebar 的库列表快照。 */
+async function refreshAll(): Promise<void> {
+  await Promise.all([refreshTree(), sidebarRef.value?.refresh()])
 }
 
 function onSelect(kid: string, name: string): void {
   selectedId.value = kid
   selectedName.value = name
+}
+
+/** #3：改名当前库 → 同步右栏标题。 */
+function onRenamed(kid: string, name: string): void {
+  if (kid === selectedId.value) selectedName.value = name
+  void refreshAll()
+}
+
+/** #2：删库 → 若删的是当前选中库，清空选中态，右栏回空态。 */
+function onDeleted(kid: string): void {
+  if (kid === selectedId.value) {
+    selectedId.value = ''
+    selectedName.value = ''
+  }
+  emit('kb-deleted', kid)
+  void refreshAll()
 }
 
 onMounted(refreshTree)
@@ -56,10 +92,13 @@ onMounted(refreshTree)
         <strong>{{ treeError }}</strong>
       </p>
       <KnowledgeBaseSidebar
+        ref="sidebarRef"
         :doc-counts="docCounts"
         :selected-id="selectedId"
         @select="onSelect"
-        @changed="refreshTree"
+        @changed="refreshAll"
+        @renamed="onRenamed"
+        @deleted="onDeleted"
       />
     </aside>
     <main class="kb-workspace__main">
@@ -69,7 +108,7 @@ onMounted(refreshTree)
         :selected-knowledge-id="selectedId"
         :selected-name="selectedName"
         :documents="currentDocs"
-        @changed="refreshTree"
+        @changed="refreshAll"
       />
       <section
         v-else

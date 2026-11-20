@@ -125,12 +125,19 @@ const effectiveView = computed<ViewKey>(() => {
 const canInspect = computed(() => authRole.value === 'admin')
 const showInspector = ref(false)
 
+/** #8：删库后，若对话页「知识范围」正选中该库，清空选中值——否则下拉显示空白却仍带已删 id，
+ *  提问静默查不到内容。 */
+function onKbDeleted(kid: string): void {
+  if (knowledgeScope.value === kid) knowledgeScope.value = ''
+}
+
 /** 页眉视图标签（对话/角色/知识库/数据源），供 h1 旁的 hint 显示当前所在面。 */
 const viewLabel = computed(() => {
   if (!canChat.value) return '登录面'
   if (effectiveView.value === 'chat') return '对话页'
   if (effectiveView.value === 'kb') return '知识库页'
   if (effectiveView.value === 'datasource') return '数据源页'
+  if (effectiveView.value === 'health') return '平台健康'
   return '角色页'
 })
 
@@ -551,7 +558,10 @@ function onSignOut(): void {
 
       <RoleGate v-else-if="effectiveView === 'role'" />
 
-      <KnowledgeWorkspace v-else-if="effectiveView === 'kb'" />
+      <KnowledgeWorkspace
+        v-else-if="effectiveView === 'kb'"
+        @kb-deleted="onKbDeleted"
+      />
 
       <DatasourceConfig v-else-if="effectiveView === 'datasource'" />
 

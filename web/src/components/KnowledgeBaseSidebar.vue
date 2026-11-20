@@ -25,11 +25,17 @@ const props = defineProps<{
 const emit = defineEmits<{
   select: [knowledgeId: string, name: string]
   changed: []   // 库列表变化（新建/改名/删除）后通知父组件刷新
+  renamed: [knowledgeId: string, name: string]  // #3：改名当前库 → 父组件同步右栏标题
+  deleted: [knowledgeId: string]                // #2：删库 → 父组件清选中态
 }>()
 
 const bases = ref<KbKnowledgeBase[]>([])
 const loading = ref(false)
-const notice = ref('')
+/** #9：成功/失败提示二分（成功绿、失败红）。 */
+const notice = ref<{ text: string; ok: boolean }>({ text: '', ok: true })
+function setNotice(text: string, ok: boolean): void {
+  notice.value = { text, ok }
+}
 const creating = ref(false)
 const newName = ref('')
 const editingId = ref('')
@@ -41,7 +47,7 @@ async function refresh(): Promise<void> {
   try {
     bases.value = await listKnowledgeBases(authToken.value ?? '')
   } catch (err) {
-    notice.value = `加载失败：${err instanceof Error ? err.message : String(err)}`
+    setNotice(`加载失败：${err instanceof Error ? err.message : String(err)}`, false)
   } finally {
     loading.value = false
   }
@@ -59,17 +65,17 @@ async function onCreate(): Promise<void> {
   const name = newName.value.trim()
   if (!name || busy.value) return
   busy.value = 'create'
-  notice.value = ''
+  setNotice('', true)
   try {
     const created = await createKbKnowledgeBase(name, authToken.value ?? '')
-    notice.value = `已创建「${created.name}」`
+    setNotice(`已创建「${created.name}」`, true)
     newName.value = ''
     creating.value = false
     await refresh()
     emit('changed')
     emit('select', created.knowledge_id, created.name)
   } catch (err) {
-    notice.value = `创建失败：${err instanceof Error ? err.message : String(err)}`
+    setNotice(`创建失败：${err instanceof Error ? err.message : String(err)}`, false)
   } finally {
     busy.value = ''
   }
@@ -87,10 +93,12 @@ async function onRename(kb: KbKnowledgeBase): Promise<void> {
   try {
     await renameKbKnowledgeBase(kb.knowledge_id, name, authToken.value ?? '')
     editingId.value = ''
+    setNotice(`已改名为「${name}」`, true)
     await refresh()
+    emit('renamed', kb.knowledge_id, name)
     emit('changed')
   } catch (err) {
-    notice.value = `改名失败：${err instanceof Error ? err.message : String(err)}`
+    setNotice(`改名失败：${err instanceof Error ? err.message : String(err)}`, false)
   } finally {
     busy.value = ''
   }
@@ -99,19 +107,20 @@ async function onRename(kb: KbKnowledgeBase): Promise<void> {
 async function onDelete(kb: KbKnowledgeBase): Promise<void> {
   if (busy.value) return
   if (docCount(kb) > 0) {
-    notice.value = `「${kb.name}」下还有 ${docCount(kb)} 个文档，请先下线文档再删库。`
+    setNotice(`「${kb.name}」下还有 ${docCount(kb)} 个有效文档，请先下线文档再删库。`, false)
     return
   }
   if (!window.confirm(`确定删除知识库「${kb.name}」？`)) return
   busy.value = kb.knowledge_id
-  notice.value = ''
+  setNotice('', true)
   try {
     await deleteKbKnowledgeBase(kb.knowledge_id, authToken.value ?? '')
-    notice.value = `已删除「${kb.name}」`
+    setNotice(`已删除「${kb.name}」`, true)
     await refresh()
+    emit('deleted', kb.knowledge_id)  // #2：父组件清选中态
     emit('changed')
   } catch (err) {
-    notice.value = `删除失败：${err instanceof Error ? err.message : String(err)}`
+    setNotice(`删除失败：${err instanceof Error ? err.message : String(err)}`, false)
   } finally {
     busy.value = ''
   }
@@ -160,11 +169,12 @@ onMounted(refresh)
     </div>
 
     <p
-      v-if="notice"
-      class="hint"
+      v-if="notice.text"
+      class="notice"
+      :class="notice.ok ? 'notice--ok' : 'banner'"
       role="status"
     >
-      {{ notice }}
+      <strong>{{ notice.text }}</strong>
     </p>
 
     <ul class="kb-sidebar__list">

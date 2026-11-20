@@ -236,6 +236,18 @@ a.ry-btn { text-decoration: none; }
  * “彩色底版上沿用中性次级色”不自动安全 —— tint 会把中性色的对比度拉下来。 */
 .banner .ev__meta, .banner .hint { color: var(--text-1); }
 
+/* 成功提示（用户视角：上线/下线/删除成功用成功色，别用失败的红色）。
+ * 与 .banner 同形状，只换语义色：左边框/底色走 success tint。 */
+.notice--ok {
+  border: 1px solid var(--border-control);
+  border-left: 3px solid var(--ry-success);
+  border-radius: var(--radius-sm);
+  background: var(--tint-source);
+  padding: var(--sp-2) var(--sp-3);
+  margin-bottom: var(--sp-3);
+  color: var(--text-1);
+}
+
 .empty {
   border: 1px dashed var(--border-control);
   border-radius: var(--radius-md);
