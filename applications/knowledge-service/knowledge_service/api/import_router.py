@@ -695,7 +695,16 @@ async def purge_document_endpoint(knowledge_id: str, source_doc: str):
             delete_registry=lambda t, k: delete_document(tenant_id=t, knowledge_id=k),
         )
     except Exception as e:  # noqa: BLE001
-        logger.error(f"[purge] {tenant_id}/{knowledge_id}/{source_doc} 删除失败", exc_info=True)
+        # 用户视角（2026-11-20）：purge 的副作用是「删 Milvus 切片」，它发生在 registry 回调之前。
+        # 若异常发生在切片已删之后（如登记清理/日志），文档其实已经删掉了——此时报 502
+        # 会让用户以为失败（而文档已消失），比"多报一次成功"更糟。复查切片确认再定。
+        logger.exception(f"[purge] {tenant_id}/{knowledge_id}/{source_doc} 删除过程异常")
+        remaining = kb_delete.read_chunks(
+            client, milvus_config.chunks_collection, tenant_id, knowledge_id, source_doc=source_doc,
+        )
+        if not remaining:  # 切片已删干净 ⇒ 删除目标已达成
+            return {"code": 200, "knowledge_id": knowledge_id, "status": "PURGED",
+                    "deleted_chunks": -1, "note": f"删除已完成，后续步骤异常：{type(e).__name__}"}
         raise HTTPException(status_code=502, detail=f"文档删除失败：{type(e).__name__}") from e
     if not result["found"]:
         raise HTTPException(status_code=404, detail=f"文档无切片可删: {source_doc}")
