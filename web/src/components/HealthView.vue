@@ -9,11 +9,17 @@
  * ==========================================================================-->
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
-import { HEALTH_LAMP_GROUPS, HEALTH_LAMP_WHY, getHealth } from '../api/health.ts'
+import {
+  HEALTH_LAMP_GROUPS, HEALTH_LAMP_WHY, getHealth,
+  getNl2sqlHealth, type Nl2sqlHealth,
+} from '../api/health.ts'
 
 type Shape = 'on' | 'off' | 'null' | 'muted'
 
-function shapeOf(v: unknown): Shape {
+function shapeOf(key: string, v: unknown): Shape {
+  // sql_backend 在平台侧是退役假灯（ADR-0011，恒 null）——不渲染成警示圆，
+  // 改中性方块，真值由下方「问数数据面」面板给出。
+  if (key === 'sql_backend') return 'muted'
   if (v === true) return 'on'
   if (v === false) return 'off'
   if (v === null) return 'null'
@@ -28,6 +34,7 @@ function displayVal(v: unknown): string {
 }
 
 const data = ref<Record<string, unknown> | null>(null)
+const nl2sql = ref<Nl2sqlHealth | null>(null)
 const errorText = ref('')
 const busy = ref(false)
 const fetchedAt = ref('')
@@ -36,8 +43,13 @@ async function refresh(): Promise<void> {
   errorText.value = ''
   busy.value = true
   try {
-    const res = await getHealth()
+    // 两路独立拉取：/health 探针 + /health/nl2sql 真值代理（后者失败不影响前者展示）
+    const [res, n] = await Promise.all([
+      getHealth(),
+      getNl2sqlHealth().catch(() => null),
+    ])
     data.value = res
+    nl2sql.value = n
     fetchedAt.value = new Date().toLocaleTimeString()
   } catch (err) {
     errorText.value = err instanceof Error ? err.message : String(err)
@@ -123,7 +135,7 @@ const groups = Object.entries(HEALTH_LAMP_GROUPS)
             class="lamp"
           >
             <div class="lamp__head">
-              <span :class="['dot', `dot--${shapeOf(data[key])}`]" />
+              <span :class="['dot', `dot--${shapeOf(key, data[key])}`]" />
               <span class="lamp__key">{{ key }}</span>
             </div>
             <div class="lamp__val">
@@ -136,6 +148,37 @@ const groups = Object.entries(HEALTH_LAMP_GROUPS)
         </div>
       </section>
     </template>
+
+    <!-- 问数数据面真值：替代平台 /health 已退役的 sql_backend 假灯（ADR-0011）。
+         真值来自 nl2sql-service 的 /health + /ready，经平台 /health/nl2sql 代理。 -->
+    <section
+      v-if="nl2sql"
+      class="ry-card"
+      aria-labelledby="hNl2sql"
+    >
+      <h3
+        id="hNl2sql"
+        class="o-head-sm"
+      >
+        问数数据面
+        <span
+          class="ry-tag"
+          :class="nl2sql.ok ? 'ry-tag--success' : 'ry-tag--danger'"
+        >
+          {{ nl2sql.ok ? '就绪' : '不可用' }}
+        </span>
+      </h3>
+      <p class="hint">
+        真值来自 nl2sql-service（非平台探针路径）：方言 {{ nl2sql.sql_backend ?? '未知' }} ·
+        连接池 {{ Object.entries(nl2sql.pools).map(([k, v]) => `${k}=${v}`).join(' / ') || '无' }}。
+      </p>
+      <p
+        v-if="nl2sql.error"
+        class="banner"
+      >
+        <strong>{{ nl2sql.error }}</strong>
+      </p>
+    </section>
 
     <p
       v-else-if="!errorText"

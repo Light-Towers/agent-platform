@@ -18,6 +18,8 @@ export const HEALTH_LAMP_GROUPS: Record<string, string[]> = {
   '检索与缓存':   ['llm', 'search', 'embedding_backend', 'embedding_real', 'cache_backend', 'cache_ready', 'cache_degraded_reason', 'cache_stats'],
   '执行平台':     ['admission', 'coordination', 'revert', 'scheduler', 'control_plane', 'cost_governance', 'forensic'],
   '观测':         ['otel', 'otel_status', 'langfuse_enabled', 'langfuse_ready'],
+  // sql_backend 保留登记只为满足门禁双向比对（后端 schema 仍用它给 nl2sql-service 上报）。
+  // 平台侧它恒 null=退役假灯（ADR-0011），HealthView 对它渲染成中性点、并另展示真值面板。
   '数据面与工具': ['sql_backend', 'nl2sql', 'mcp', 'guard_enabled', 'dependencies'],
 }
 
@@ -35,7 +37,7 @@ export const HEALTH_LAMP_WHY: Record<string, string> = {
   embedding_real: '语义检索真值（false = 按字面比对）',
   cache_backend: '缓存后端',
   cache_ready: '缓存就绪',
-  cache_degraded_reason: '降级真因',
+  cache_degraded_reason: '降级真因（null=未降级）',
   cache_stats: '命中/未命中计数',
   admission: '准入限流已装配且启用',
   coordination: '会话并发协调启用',
@@ -48,11 +50,11 @@ export const HEALTH_LAMP_WHY: Record<string, string> = {
   otel_status: '观测内核状态机真值',
   langfuse_enabled: 'Langfuse 已装配',
   langfuse_ready: 'Langfuse 后端可达',
-  sql_backend: '问数数据面方言（由持业务库的服务上报）',
+  sql_backend: '问数方言（平台侧已退役，真值见下方「问数数据面」）',
   nl2sql: '问数服务已注册',
   mcp: 'MCP 工具启用',
   guard_enabled: 'SQL 守卫启用',
-  dependencies: '依赖探活明细',
+  dependencies: '依赖探活明细（空=无外部依赖探活）',
 }
 
 /** 拉取 /health 真实状态（免鉴权探针路径，经 vite 代理 /health）。返回扁平字段字典，
@@ -61,4 +63,18 @@ export async function getHealth(): Promise<Record<string, unknown>> {
   const res = await fetch('/health')
   if (!res.ok) throw new Error(`/health ${res.status}`)
   return (await res.json()) as Record<string, unknown>
+}
+
+/** 问数数据面真值（nl2sql-service 的 /health + /ready，经平台 /health/nl2sql 代理）。
+ *  独立于免鉴权探针 /health——不在探针路径，故可同步拉外部服务。 */
+export interface Nl2sqlHealth {
+  readonly ok: boolean
+  readonly sql_backend: string | null
+  readonly pools: Record<string, string>
+  readonly error?: string
+}
+export async function getNl2sqlHealth(): Promise<Nl2sqlHealth> {
+  const res = await fetch('/health/nl2sql')
+  if (!res.ok) throw new Error(`/health/nl2sql ${res.status}`)
+  return (await res.json()) as Nl2sqlHealth
 }

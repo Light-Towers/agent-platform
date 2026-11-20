@@ -77,3 +77,39 @@ async def health(request: Request) -> HealthResponse:
         # 与 lifespan 的 require_identity_startup_guard 同一个函数，不另建一套判定。
         identity_mode=resolve_startup_tenant_mode()[0],
     )
+
+
+@router.get("/health/nl2sql", summary="问数数据面真值（代理 nl2sql-service）")
+async def health_nl2sql() -> dict:
+    """问数真值：从 nl2sql-service 的 /health + /ready 聚合（2026-11-20）。
+
+    平台 /health 是免鉴权探针（timeoutSeconds=1），不能在里面同步拉外部服务
+    （连错 3 次 → SIGKILL，见 health() 内注释）⇒ 独立端点供健康页主动读取。
+    取代已退役的 sql_backend 假灯（ADR-0011）——它恒 null，不代表问数故障。
+    失败降级为 ok=false + error，不静默 null。
+    """
+    import httpx
+
+    settings = get_settings()
+    base = (settings.nl2sql_service_url or "").rstrip("/")
+    if not base:
+        return {"ok": False, "error": "NL2SQL_SERVICE_URL 未配置", "sql_backend": None, "pools": {}}
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            h = (await client.get(f"{base}/health")).json()
+            r = (await client.get(f"{base}/ready")).json()
+        pools = r.get("pools") or {}
+        ok = (
+            h.get("status") == "healthy"
+            and r.get("status") == "healthy"
+            and bool(pools)
+            and all(str(v) == "ok" for v in pools.values())
+        )
+        return {"ok": ok, "sql_backend": h.get("sql_backend"), "pools": pools}
+    except Exception as exc:  # noqa: BLE001 — 探针路径降级，不吞主流程
+        return {
+            "ok": False,
+            "error": f"{type(exc).__name__}: {str(exc)[:120]}",
+            "sql_backend": None,
+            "pools": {},
+        }
