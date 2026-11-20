@@ -155,9 +155,14 @@ def purge_document(
     与 revoke_document 的区别：只删不重插 ⇒ 数据彻底消失，文档树不再显示。
     """
     deleted = _delete_chunks(client, collection, tenant_id, knowledge_id, source_doc)
+    # registry 清理是「附带」操作：切片已物理删除即达成用户目标。登记清理失败不该让
+    # 整个删除报失败（用户视角：文档已删掉，不该看到"删除失败"）——失败只标记不抛。
     registry_deleted = False
     if delete_registry is not None:
-        registry_deleted = bool(delete_registry(tenant_id, knowledge_id))
+        try:
+            registry_deleted = bool(delete_registry(tenant_id, knowledge_id))
+        except Exception:  # noqa: BLE001 — 附带清理失败不影响删除结果
+            registry_deleted = False
     return {"found": deleted > 0, "deleted_chunks": deleted,
             "registry_deleted": registry_deleted, "source_doc": source_doc}
 

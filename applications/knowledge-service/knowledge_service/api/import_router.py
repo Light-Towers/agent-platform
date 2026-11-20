@@ -31,7 +31,9 @@ from knowledge_service.import_process.agent.main_graph import kb_import_app  # L
 from knowledge_service.import_process.agent.state import get_default_state
 from knowledge_service.utils import kb_collections, kb_delete, kb_doc_count, kb_upload_history
 from knowledge_service.utils.kb_registry import (
-    delete_document,
+    delete_document as delete_document_registry,
+)
+from knowledge_service.utils.kb_registry import (
     get_document,
     list_by_tenant,
     update_status,
@@ -692,7 +694,7 @@ async def purge_document_endpoint(knowledge_id: str, source_doc: str):
         result = kb_delete.purge_document(
             client, milvus_config.chunks_collection, tenant_id, knowledge_id,
             source_doc=source_doc,
-            delete_registry=lambda t, k: delete_document(tenant_id=t, knowledge_id=k),
+            delete_registry=lambda t, k: delete_document_registry(tenant_id=t, knowledge_id=k),
         )
     except Exception as e:  # noqa: BLE001
         # 用户视角（2026-11-20）：purge 的副作用是「删 Milvus 切片」，它发生在 registry 回调之前。
