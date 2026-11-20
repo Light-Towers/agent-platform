@@ -143,3 +143,6 @@ data/corpus/
 
 # === 内网部署目录 deploy/k8s（含真实 k8s 节点标签等内网标识），按方案 X 不进公开 GitHub；本机保留物理文件，仅供内网部署 ===
 /deploy/k8s/
+
+# === skill_live_check 本地测试套件（含内网 harness 配置，未准备入库；本机保留物理文件）===
+tests/skill_live_check/
