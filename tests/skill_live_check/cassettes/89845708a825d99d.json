@@ -1,0 +1,20 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/company-builder/api/builder/home/statistic/boothStatistic",
+    "params": null
+  },
+  "status": 200,
+  "json": {
+    "code": 200,
+    "data": {
+      "totalArea": 0,
+      "useTotalArea": 0,
+      "unusedTotalArea": 0,
+      "specialTotalArea": 0,
+      "useSpecialTotalArea": 0,
+      "unusedSpecialTotalArea": 0
+    },
+    "message": "操作成功！"
+  }
+}

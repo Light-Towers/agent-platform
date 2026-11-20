@@ -1,0 +1,21 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/company-builder/api/builder/home/carCert/page",
+    "params": {
+      "exhibitionId": "1775075366701867009",
+      "page": 1,
+      "pageSize": 10
+    }
+  },
+  "status": 200,
+  "json": {
+    "code": 200,
+    "data": [],
+    "message": "操作成功！",
+    "index": 1,
+    "size": 10,
+    "maxPage": 0,
+    "maxSize": 0
+  }
+}

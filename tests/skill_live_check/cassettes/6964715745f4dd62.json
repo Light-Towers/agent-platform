@@ -1,0 +1,77 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/company-sys/api/sys/workbench/account/page",
+    "params": {
+      "page": 1,
+      "pageSize": 10
+    }
+  },
+  "status": 200,
+  "json": {
+    "code": 200,
+    "data": {
+      "total": 3,
+      "list": [
+        {
+          "id": "2056267282140020738",
+          "account": "张天",
+          "name": "张天",
+          "phone": "15669004545",
+          "department": "财务部门",
+          "departmentId": "2056266029817315330",
+          "role": "财务人员",
+          "roleId": "2056266343232487426",
+          "createTime": "2026-05-18 14:54:58",
+          "status": 1,
+          "remarks": ""
+        },
+        {
+          "id": "2056267110714621955",
+          "account": "李恩仪",
+          "name": "李恩仪",
+          "phone": "15669007878",
+          "department": "销售部门",
+          "departmentId": "2056266051308929026",
+          "role": "销售人员",
+          "roleId": "2056266229025783810",
+          "createTime": "2026-05-18 14:54:17",
+          "status": 1,
+          "remarks": ""
+        },
+        {
+          "id": "2056266712662589442",
+          "account": "徐丽",
+          "name": "徐丽",
+          "phone": "15669006369",
+          "department": "运营部门",
+          "departmentId": "2056266073157058561",
+          "role": "运营人员",
+          "roleId": "2056266445204406275",
+          "createTime": "2026-05-18 14:52:43",
+          "status": 1,
+          "remarks": ""
+        }
+      ],
+      "pageNum": 1,
+      "pageSize": 10,
+      "size": 3,
+      "startRow": 1,
+      "endRow": 3,
+      "pages": 1,
+      "prePage": 0,
+      "nextPage": 0,
+      "isFirstPage": true,
+      "isLastPage": true,
+      "hasPreviousPage": false,
+      "hasNextPage": false,
+      "navigatePages": 8,
+      "navigatepageNums": [
+        1
+      ],
+      "navigateFirstPage": 1,
+      "navigateLastPage": 1
+    },
+    "message": "操作成功！"
+  }
+}

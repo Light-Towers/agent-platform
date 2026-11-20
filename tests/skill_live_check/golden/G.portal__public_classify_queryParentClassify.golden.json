@@ -1,0 +1,11 @@
+{
+  "_meta": {
+    "path": "/company-public/api/public/site/classify/queryParentClassify",
+    "params": {}
+  },
+  "fingerprint": {
+    "code": "<int>",
+    "data": [],
+    "message": "<str>"
+  }
+}

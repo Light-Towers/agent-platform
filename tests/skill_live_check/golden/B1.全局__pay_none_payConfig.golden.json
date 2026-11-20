@@ -1,0 +1,17 @@
+{
+  "_meta": {
+    "path": "/company-builder/api/builder/build/pay/none/payConfig",
+    "params": null
+  },
+  "fingerprint": {
+    "code": "<int>",
+    "data": {
+      "onlinePayEnabled": "<bool>",
+      "payTypes": [
+        "<str>"
+      ],
+      "totalAmount": null
+    },
+    "message": "<str>"
+  }
+}

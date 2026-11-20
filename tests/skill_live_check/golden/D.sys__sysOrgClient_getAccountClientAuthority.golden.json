@@ -1,0 +1,18 @@
+{
+  "_meta": {
+    "path": "/company-sys/api/sys/sysOrgClient/getAccountClientAuthority",
+    "params": null
+  },
+  "fingerprint": {
+    "code": "<int>",
+    "data": [
+      {
+        "clientCode": "<str>",
+        "clientId": "<str>",
+        "clientName": "<str>",
+        "isHave": "<bool>"
+      }
+    ],
+    "message": "<str>"
+  }
+}

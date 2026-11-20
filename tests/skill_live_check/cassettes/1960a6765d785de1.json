@@ -1,0 +1,13 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/company-public/api/public/site/classify/queryParentClassify",
+    "params": {}
+  },
+  "status": 200,
+  "json": {
+    "code": 200,
+    "data": [],
+    "message": "操作成功！"
+  }
+}

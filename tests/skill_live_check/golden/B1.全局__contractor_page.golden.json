@@ -1,0 +1,41 @@
+{
+  "_meta": {
+    "path": "/company-builder/api/builder/home/contractor/page",
+    "params": null
+  },
+  "fingerprint": {
+    "code": "<int>",
+    "data": [
+      {
+        "applyTime": "<TS>",
+        "areaName": "<str>",
+        "auditStatus": "<int>",
+        "boothArea": "<num>",
+        "boothId": "<ID>",
+        "boothNo": "<str>",
+        "boothSpec": "<str>",
+        "boothType": "<int>",
+        "builderStatus": null,
+        "companyName": "<str>",
+        "costStatus": "<int>",
+        "createTime": null,
+        "dataStatus": "<int>",
+        "exhibitId": "<ID>",
+        "exhibitName": "<str>",
+        "exhibitionName": "<str>",
+        "hallName": "<str>",
+        "id": "<ID>",
+        "imageStatus": null,
+        "isPayment": "<bool>",
+        "price": null,
+        "updateTime": "<TS>",
+        "zipUrl": "<str>"
+      }
+    ],
+    "index": "<int>",
+    "maxPage": "<int>",
+    "maxSize": "<int>",
+    "message": "<str>",
+    "size": "<int>"
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/company-builder/api/builder/home/statistic/builderStatistic",
+    "params": null
+  },
+  "status": 200,
+  "json": {
+    "code": 200,
+    "data": {
+      "builderCount": 0,
+      "builderAssignCount": 0,
+      "contractorCount": 0,
+      "paymentOfFeeCount": 0,
+      "goodsCount": 0
+    },
+    "message": "操作成功！"
+  }
+}

@@ -1,0 +1,66 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/company-company/api/company/site/exhibitor/page",
+    "params": {
+      "page": 1,
+      "pageSize": 10
+    }
+  },
+  "status": 200,
+  "json": {
+    "code": 200,
+    "data": [
+      {
+        "auditId": "2088105808700116993",
+        "checkbox_1779455795000_38922EnName": "",
+        "": "",
+        "positionType": 1,
+        "cityCode": "150700",
+        "companyName": "测试单位",
+        "templateId": "2086664933083754499",
+        "checkbox_1782198861000_51834Name": "展览展示,专业照明",
+        "contactsName": "234234",
+        "positionSize": 11,
+        "intentionRoom": "",
+        "reviewerName": "博博会",
+        "attachment": "http://<internal-ip>:9000/<internal-prod>/zhzz/file/20260814/2088105731789164546/2 DOCX测试文档.docx",
+        "textarea_1782201015000_63695": "111",
+        "id": "2088105768468353025",
+        "radio_1779455590000_46022": "",
+        "exhibitionName": "第十一届中国博物馆及相关产品与技术博览会",
+        "checkbox_1779455795000_38922Name": "",
+        "email": "21@13.com",
+        "templateNameEn": "Enterprise",
+        "positionAreaEnName": "",
+        "checkbox_1779455795000_38922": "",
+        "auditOpinion": "1",
+        "address": "435345",
+        "provinceCode": "150000",
+        "positionAreaName": "",
+        "checkbox_1782201371000_9929": "",
+        "positionArea": "",
+        "input_1781079578000_15135": "1",
+        "intentionRoomEnName": "",
+        "areaCode": "150724",
+        "contactsPhone": "15669006369",
+        "textarea_1782201125000_11095": "",
+        "intentionRoomName": "",
+        "auditTime": "2026-08-14 11:29:54",
+        "createTime": "2026-08-14 11:29:45",
+        "templateName": "企业（已确认）",
+        "checkbox_1782201371000_9929Name": "",
+        "checkbox_1782201371000_9929EnName": "",
+        "enterpriseCaseUrl": "http://<internal-ip>:9000/<internal-prod>/zhzz/file/20260814/2088105699367194626/1 DOC测试文档.doc",
+        "duty": "21",
+        "checkbox_1782198861000_51834": "743,2615",
+        "input_1781242323000_28227": "",
+        "checkbox_1782198861000_51834EnName": "Exhibition Display,Professional Lighting",
+        "region": "内蒙古自治区呼伦贝尔市鄂温克族自治旗",
+        "input_1779450696000_77991": "http://<internal-ip>/167/site/exhibitorEnroll?crumbsType=data.homePage&type=exhibitor",
+        "status": 1
+      }
+    ],
+    "message": "操作成功！"
+  }
+}

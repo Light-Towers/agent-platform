@@ -1,0 +1,12 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/company-sys/api/sys/org/page",
+    "params": null
+  },
+  "status": 401,
+  "json": {
+    "code": 204,
+    "message": "您无权进行此操作"
+  }
+}

@@ -1,0 +1,69 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/company-company/api/company/site/exhibitor/task-steps",
+    "params": null
+  },
+  "status": 200,
+  "json": {
+    "code": 200,
+    "data": {
+      "exhibitionId": "2049696300255744001",
+      "companyId": "2085660222380904450",
+      "currentIndex": 0,
+      "currentCode": "AUTH",
+      "currentName": "认证",
+      "nodes": [
+        {
+          "code": "AUTH",
+          "name": "认证",
+          "done": false,
+          "hasApplied": null
+        },
+        {
+          "code": "ENROLL",
+          "name": "报名",
+          "done": true,
+          "hasApplied": true
+        },
+        {
+          "code": "BOOTH",
+          "name": "分配展位",
+          "done": true,
+          "hasApplied": null
+        },
+        {
+          "code": "CONTRACT",
+          "name": "签订合同",
+          "done": false,
+          "hasApplied": null
+        },
+        {
+          "code": "PAY",
+          "name": "支付",
+          "done": true,
+          "hasApplied": null
+        },
+        {
+          "code": "CERTIFICATE",
+          "name": "证件管理",
+          "done": false,
+          "hasApplied": null
+        },
+        {
+          "code": "PROCEEDINGS",
+          "name": "会刊",
+          "done": true,
+          "hasApplied": null
+        },
+        {
+          "code": "CONFIRM_LETTER",
+          "name": "参展确认函",
+          "done": false,
+          "hasApplied": null
+        }
+      ]
+    },
+    "message": "操作成功！"
+  }
+}

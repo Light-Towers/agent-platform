@@ -1,0 +1,25 @@
+{
+  "_meta": {
+    "path": "/company-company/api/company/site/exhibitor/task-steps",
+    "params": null
+  },
+  "fingerprint": {
+    "code": "<int>",
+    "data": {
+      "companyId": "<ID>",
+      "currentCode": "<str>",
+      "currentIndex": "<int>",
+      "currentName": "<str>",
+      "exhibitionId": "<ID>",
+      "nodes": [
+        {
+          "code": "<str>",
+          "done": "<bool>",
+          "hasApplied": null,
+          "name": "<str>"
+        }
+      ]
+    },
+    "message": "<str>"
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/company-builder/api/builder/home/page/booth",
+    "params": null
+  },
+  "status": 200,
+  "json": {
+    "code": 200,
+    "data": {
+      "allBoothCount": 0,
+      "allBoothUseCount": 0
+    },
+    "message": "操作成功！"
+  }
+}

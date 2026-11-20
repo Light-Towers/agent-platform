@@ -1,0 +1,64 @@
+{
+  "_meta": {
+    "path": "/company-company/api/company/site/exhibitor/page",
+    "params": {
+      "page": 1,
+      "pageSize": 10
+    }
+  },
+  "fingerprint": {
+    "code": "<int>",
+    "data": [
+      {
+        "": "<str>",
+        "address": "<str>",
+        "areaCode": "<str>",
+        "attachment": "<str>",
+        "auditId": "<ID>",
+        "auditOpinion": "<str>",
+        "auditTime": "<TS>",
+        "checkbox_1779455795000_38922": "<str>",
+        "checkbox_1779455795000_38922EnName": "<str>",
+        "checkbox_1779455795000_38922Name": "<str>",
+        "checkbox_1782198861000_51834": "<str>",
+        "checkbox_1782198861000_51834EnName": "<str>",
+        "checkbox_1782198861000_51834Name": "<str>",
+        "checkbox_1782201371000_9929": "<str>",
+        "checkbox_1782201371000_9929EnName": "<str>",
+        "checkbox_1782201371000_9929Name": "<str>",
+        "cityCode": "<str>",
+        "companyName": "<str>",
+        "contactsName": "<str>",
+        "contactsPhone": "<ID>",
+        "createTime": "<TS>",
+        "duty": "<str>",
+        "email": "<str>",
+        "enterpriseCaseUrl": "<str>",
+        "exhibitionName": "<str>",
+        "id": "<ID>",
+        "input_1779450696000_77991": "<str>",
+        "input_1781079578000_15135": "<str>",
+        "input_1781242323000_28227": "<str>",
+        "intentionRoom": "<str>",
+        "intentionRoomEnName": "<str>",
+        "intentionRoomName": "<str>",
+        "positionArea": "<str>",
+        "positionAreaEnName": "<str>",
+        "positionAreaName": "<str>",
+        "positionSize": "<int>",
+        "positionType": "<int>",
+        "provinceCode": "<str>",
+        "radio_1779455590000_46022": "<str>",
+        "region": "<str>",
+        "reviewerName": "<str>",
+        "status": "<int>",
+        "templateId": "<ID>",
+        "templateName": "<str>",
+        "templateNameEn": "<str>",
+        "textarea_1782201015000_63695": "<str>",
+        "textarea_1782201125000_11095": "<str>"
+      }
+    ],
+    "message": "<str>"
+  }
+}

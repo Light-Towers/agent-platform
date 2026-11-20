@@ -1,0 +1,27 @@
+{
+  "_meta": {
+    "path": "/company-builder/api/builder/home/page/backlog",
+    "params": null
+  },
+  "fingerprint": {
+    "code": "<int>",
+    "data": {
+      "contractorAuditCount": "<int>",
+      "contractorAuditPercent": "<num>",
+      "contractorAuditToBeCount": "<int>",
+      "contractorCostAuditCount": "<int>",
+      "contractorCostAuditPercent": "<num>",
+      "contractorCostAuditToBeCount": "<int>",
+      "invoiceAuditCount": "<int>",
+      "invoiceAuditPercent": "<num>",
+      "invoiceAuditToBeCount": "<int>",
+      "leasedGoodsAuditCount": "<int>",
+      "leasedGoodsAuditPercent": "<num>",
+      "leasedGoodsAuditToBeCount": "<int>",
+      "refundAuditCount": "<int>",
+      "refundAuditPercent": "<num>",
+      "refundAuditToBeCount": "<int>"
+    },
+    "message": "<str>"
+  }
+}

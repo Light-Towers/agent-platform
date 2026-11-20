@@ -1,0 +1,26 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/company-builder/api/builder/home/booth/map/boothStatistics",
+    "params": {
+      "exhibitionId": "1963526156780019713",
+      "page": 1,
+      "pageSize": 10
+    }
+  },
+  "status": 200,
+  "json": {
+    "code": 200,
+    "data": {
+      "totalBoothCount": 0,
+      "reportedBoothCount": 0,
+      "notReportedBoothCount": 0,
+      "reportingBoothCount": 0,
+      "notConstructionCount": 0,
+      "inConstructionCount": 0,
+      "completedCount": 0,
+      "exhibitionId": "1963526156780019713"
+    },
+    "message": "操作成功！"
+  }
+}

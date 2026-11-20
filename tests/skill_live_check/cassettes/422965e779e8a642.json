@@ -1,0 +1,26 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/company-company/api/company/site/userApplyMessage/getMyStatistics",
+    "params": {}
+  },
+  "status": 200,
+  "json": {
+    "code": 200,
+    "data": {
+      "companyId": "2085660222380904450",
+      "companyName": "测试单位",
+      "logoUrl": "",
+      "authStatus": 2,
+      "companyType": 1,
+      "companyCount": 0,
+      "productCount": 0,
+      "intentionCount": 0,
+      "bookingCount": 0,
+      "companyAllBrowseCount": 0,
+      "productAllBrowseCount": 0,
+      "allBrowseCount": 0
+    },
+    "message": "操作成功！"
+  }
+}

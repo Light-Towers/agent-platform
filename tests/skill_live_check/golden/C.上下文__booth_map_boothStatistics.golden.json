@@ -1,0 +1,24 @@
+{
+  "_meta": {
+    "path": "/company-builder/api/builder/home/booth/map/boothStatistics",
+    "params": {
+      "exhibitionId": "1963526156780019713",
+      "page": 1,
+      "pageSize": 10
+    }
+  },
+  "fingerprint": {
+    "code": "<int>",
+    "data": {
+      "completedCount": "<int>",
+      "exhibitionId": "<ID>",
+      "inConstructionCount": "<int>",
+      "notConstructionCount": "<int>",
+      "notReportedBoothCount": "<int>",
+      "reportedBoothCount": "<int>",
+      "reportingBoothCount": "<int>",
+      "totalBoothCount": "<int>"
+    },
+    "message": "<str>"
+  }
+}

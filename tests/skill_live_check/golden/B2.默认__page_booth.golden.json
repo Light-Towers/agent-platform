@@ -1,0 +1,14 @@
+{
+  "_meta": {
+    "path": "/company-builder/api/builder/home/page/booth",
+    "params": null
+  },
+  "fingerprint": {
+    "code": "<int>",
+    "data": {
+      "allBoothCount": "<int>",
+      "allBoothUseCount": "<int>"
+    },
+    "message": "<str>"
+  }
+}

@@ -1,0 +1,42 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/company-operation/api/operation/site/invitation/queryEffectiveInvitation",
+    "params": null
+  },
+  "status": 200,
+  "json": {
+    "code": 200,
+    "data": [
+      {
+        "id": "2094707519816470530",
+        "name": "沃达丰",
+        "homePageUrl": "http://<internal-ip>:9000/<internal-prod>/sponsor/file/20260901/2094707154484203522/展会会刊(19).png",
+        "homePageLayout": "{\"fontColor\":\"#FFFFFF\"}",
+        "exhibitionIntroduceUrl": "http://<internal-ip>:9000/<internal-prod>/sponsor/file/20260901/2094707199006740481/展会会刊(19).png",
+        "exhibitionIntroduceLayout": "{\"fontColor\":\"#FFFFFF\"}",
+        "exhibitionIntroduce": "456的推广费用回复",
+        "committeeIntroduceUrl": "http://<internal-ip>:9000/<internal-prod>/sponsor/file/20260901/2094707229847457793/展会会刊(18).png",
+        "committeeIntroduceLayout": "{\"fontColor\":\"#FFFFFF\"}",
+        "committeeIntroduce": "453456",
+        "exhibitorInformationUrl": "http://<internal-ip>:9000/<internal-prod>/sponsor/file/20260901/2094707259941588994/展会会刊(15).png",
+        "exhibitorBackgroundBoxUrl": "",
+        "exhibitorInfoLayout": "{\"fontColor\":\"#FFFFFF\",\"layout\":[{\"label\":\"展商名称\",\"dataKey\":\"companyName\",\"x\":100,\"y\":100,\"width\":150,\"height\":50},{\"label\":\"展馆\",\"dataKey\":\"hallNames\",\"x\":100,\"y\":180,\"width\":150,\"height\":50},{\"label\":\"展区\",\"dataKey\":\"areaNames\",\"x\":100,\"y\":260,\"width\":150,\"height\":50},{\"label\":\"展位号\",\"dataKey\":\"boothNos\",\"x\":100,\"y\":340,\"width\":150,\"height\":50}]}",
+        "companyIntroduceUrl": "http://<internal-ip>:9000/<internal-prod>/sponsor/file/20260901/2094707314505289730/展会会刊(13).png",
+        "companyIntroduceLayout": "{\"fontColor\":\"#FFFFFF\"}",
+        "productIntroduceUrl": "http://<internal-ip>:9000/<internal-prod>/sponsor/file/20260901/2094707341680185346/展会会刊(12).png",
+        "productIntroduceLayout": "{\"fontColor\":\"#FFFFFF\"}",
+        "qrCodeBackgroundUrl": "http://<internal-ip>:9000/<internal-prod>/sponsor/file/20260901/2094707373502369793/展会会刊(14).png",
+        "qrCodeUrl": "http://<internal-ip>:9000/<internal-prod>/sponsor/file/20260901/2094707449570267138/展会会刊(16).png",
+        "qrCodeLayout": "{\"fontColor\":\"#FFFFFF\",\"layout\":[{\"label\":\"二维码\",\"dataKey\":\"qrCode\",\"x\":100,\"y\":100,\"width\":150,\"height\":150,\"square\":true},{\"label\":\"立即预约\",\"dataKey\":\"reservation\",\"x\":100,\"y\":300,\"width\":150,\"height\":50}]}",
+        "companyName": "测试单位",
+        "companyIntroduce": "534534",
+        "productIntroduce": null,
+        "hallNames": "8号馆",
+        "areaNames": "8号馆博物馆M区",
+        "boothNos": "8M01"
+      }
+    ],
+    "message": "操作成功！"
+  }
+}

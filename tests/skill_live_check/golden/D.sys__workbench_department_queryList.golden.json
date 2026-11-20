@@ -1,0 +1,22 @@
+{
+  "_meta": {
+    "path": "/company-sys/api/sys/workbench/department/queryList",
+    "params": {}
+  },
+  "fingerprint": {
+    "code": "<int>",
+    "data": [
+      {
+        "code": "<str>",
+        "createTime": "<TS>",
+        "id": "<ID>",
+        "intro": "<str>",
+        "name": "<str>",
+        "sort": null,
+        "status": "<int>",
+        "type": null
+      }
+    ],
+    "message": "<str>"
+  }
+}

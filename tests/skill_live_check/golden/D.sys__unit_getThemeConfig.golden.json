@@ -1,0 +1,14 @@
+{
+  "_meta": {
+    "path": "/company-sys/api/sys/workbench/unit/getThemeConfig",
+    "params": null
+  },
+  "fingerprint": {
+    "code": "<int>",
+    "data": {
+      "bg": "<str>",
+      "logo": "<str>"
+    },
+    "message": "<str>"
+  }
+}

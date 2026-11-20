@@ -1,0 +1,18 @@
+{
+  "_meta": {
+    "path": "/company-operation/api/operation/site/information/page",
+    "params": {
+      "page": 1,
+      "pageSize": 10
+    }
+  },
+  "fingerprint": {
+    "code": "<int>",
+    "data": [],
+    "index": "<int>",
+    "maxPage": "<int>",
+    "maxSize": "<int>",
+    "message": "<str>",
+    "size": "<int>"
+  }
+}

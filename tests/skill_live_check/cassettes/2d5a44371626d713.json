@@ -1,0 +1,52 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/company-company/api/company/site/company/datail",
+    "params": null
+  },
+  "status": 200,
+  "json": {
+    "code": 200,
+    "data": {
+      "id": "2085660222380904450",
+      "orgId": "2049694703694561281",
+      "name": "测试单位",
+      "logoUrl": "http://<internal-ip>:9000/<internal-prod>/site/file/20260813/2087836007167692802/23图片.jpg",
+      "countryCode": null,
+      "countryName": null,
+      "provinceCode": "820000",
+      "provinceName": "澳门特别行政区",
+      "cityCode": "820100",
+      "cityName": "澳门半岛",
+      "areaCode": "820102",
+      "areaName": "圣安多尼堂区",
+      "address": "435345",
+      "classifyId": "001002",
+      "classifyName": "藏品保护与文物运输",
+      "mainProduct": null,
+      "creditCode": "345345345345345",
+      "lintel": null,
+      "details": "534534",
+      "osUrl": null,
+      "emailCompany": null,
+      "corporate": null,
+      "corporatePhone": null,
+      "businessPic": "http://<internal-ip>:9000/<internal-prod>/site/file/20260813/2087836035084980225/23图片.jpg",
+      "trademarkRegistPic": null,
+      "foodLicencePic": null,
+      "contacts": "234234",
+      "contactsPhone": "15669006369",
+      "duty": null,
+      "email": null,
+      "authStatus": 2,
+      "nameLocked": true,
+      "auditOpinion": null,
+      "unitType": 0,
+      "caseInfo": "",
+      "museumJoinType": 0,
+      "museumGroupId": "",
+      "promotionMaterial": null
+    },
+    "message": "操作成功！"
+  }
+}

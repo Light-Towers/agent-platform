@@ -1,0 +1,48 @@
+{
+  "_meta": {
+    "path": "/company-company/api/company/site/proceedings/query",
+    "params": {
+      "page": 1,
+      "pageSize": 10
+    }
+  },
+  "fingerprint": {
+    "code": "<int>",
+    "data": {
+      "address": "<str>",
+      "areaCode": "<str>",
+      "areaName": "<str>",
+      "boothArea": "<num>",
+      "boothNo": "<str>",
+      "cityCode": "<str>",
+      "cityName": "<str>",
+      "companyDetailCn": "<str>",
+      "companyDetailEn": null,
+      "companyId": null,
+      "companyNameCn": "<str>",
+      "companyNameEn": null,
+      "contacts": "<str>",
+      "contactsPhone": "<ID>",
+      "countryId": null,
+      "countryName": null,
+      "email": null,
+      "exhibitionAreaName": "<str>",
+      "exhibitionHallName": "<str>",
+      "exhibitionId": null,
+      "exhibitorCategory": null,
+      "fax": null,
+      "id": "<ID>",
+      "logoUrl": "<str>",
+      "osUrl": null,
+      "productDetailCn": null,
+      "productDetailEn": null,
+      "productPic": "<str>",
+      "provinceCode": "<str>",
+      "provinceName": "<str>",
+      "publicityPic": null,
+      "tel": null,
+      "zipCode": null
+    },
+    "message": "<str>"
+  }
+}

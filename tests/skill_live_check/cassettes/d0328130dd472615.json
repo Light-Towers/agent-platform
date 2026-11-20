@@ -1,0 +1,17 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/company-builder/api/builder/home/h5/work-drawing/getBoothCompleted",
+    "params": null
+  },
+  "status": 200,
+  "json": {
+    "code": 200,
+    "data": {
+      "allBoothCount": 0,
+      "completedBoothCount": 0,
+      "unFinishedBoothCount": 0
+    },
+    "message": "操作成功！"
+  }
+}

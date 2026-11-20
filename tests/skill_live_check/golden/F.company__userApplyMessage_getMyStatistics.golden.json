@@ -1,0 +1,24 @@
+{
+  "_meta": {
+    "path": "/company-company/api/company/site/userApplyMessage/getMyStatistics",
+    "params": {}
+  },
+  "fingerprint": {
+    "code": "<int>",
+    "data": {
+      "allBrowseCount": "<int>",
+      "authStatus": "<int>",
+      "bookingCount": "<int>",
+      "companyAllBrowseCount": "<int>",
+      "companyCount": "<int>",
+      "companyId": "<ID>",
+      "companyName": "<str>",
+      "companyType": "<int>",
+      "intentionCount": "<int>",
+      "logoUrl": "<str>",
+      "productAllBrowseCount": "<int>",
+      "productCount": "<int>"
+    },
+    "message": "<str>"
+  }
+}

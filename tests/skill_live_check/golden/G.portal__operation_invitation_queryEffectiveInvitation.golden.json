@@ -1,0 +1,40 @@
+{
+  "_meta": {
+    "path": "/company-operation/api/operation/site/invitation/queryEffectiveInvitation",
+    "params": null
+  },
+  "fingerprint": {
+    "code": "<int>",
+    "data": [
+      {
+        "areaNames": "<str>",
+        "boothNos": "<str>",
+        "committeeIntroduce": "<str>",
+        "committeeIntroduceLayout": "<str>",
+        "committeeIntroduceUrl": "<str>",
+        "companyIntroduce": "<str>",
+        "companyIntroduceLayout": "<str>",
+        "companyIntroduceUrl": "<str>",
+        "companyName": "<str>",
+        "exhibitionIntroduce": "<str>",
+        "exhibitionIntroduceLayout": "<str>",
+        "exhibitionIntroduceUrl": "<str>",
+        "exhibitorBackgroundBoxUrl": "<str>",
+        "exhibitorInfoLayout": "<str>",
+        "exhibitorInformationUrl": "<str>",
+        "hallNames": "<str>",
+        "homePageLayout": "<str>",
+        "homePageUrl": "<str>",
+        "id": "<ID>",
+        "name": "<str>",
+        "productIntroduce": null,
+        "productIntroduceLayout": "<str>",
+        "productIntroduceUrl": "<str>",
+        "qrCodeBackgroundUrl": "<str>",
+        "qrCodeLayout": "<str>",
+        "qrCodeUrl": "<str>"
+      }
+    ],
+    "message": "<str>"
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "_meta": {
+    "path": "/company-sys/api/sys/workbench/role/page",
+    "params": {
+      "page": 1,
+      "pageSize": 10
+    }
+  },
+  "fingerprint": {
+    "code": "<int>",
+    "data": [
+      {
+        "commonMenuVoList": null,
+        "createTime": "<TS>",
+        "id": "<ID>",
+        "intro": "<str>",
+        "isDelete": "<bool>",
+        "name": "<str>",
+        "permissionIds": null
+      }
+    ],
+    "index": "<int>",
+    "maxPage": "<int>",
+    "maxSize": "<int>",
+    "message": "<str>",
+    "size": "<int>"
+  }
+}

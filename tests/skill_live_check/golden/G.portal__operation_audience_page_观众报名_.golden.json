@@ -1,0 +1,14 @@
+{
+  "_meta": {
+    "path": "/company-operation/api/operation/site/audience/page",
+    "params": {
+      "page": 1,
+      "pageSize": 10
+    }
+  },
+  "fingerprint": {
+    "code": "<int>",
+    "data": [],
+    "message": "<str>"
+  }
+}

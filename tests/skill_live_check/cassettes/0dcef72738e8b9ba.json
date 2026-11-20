@@ -1,0 +1,98 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/company-builder/api/builder//home/private/workbench/buildCompany/page",
+    "params": null
+  },
+  "status": 200,
+  "json": {
+    "code": 200,
+    "data": [
+      {
+        "id": "2100063780204576770",
+        "name": "徐志远测试专用企业名称",
+        "contacts": "",
+        "contactsPhone": "",
+        "socialCreditCode": null,
+        "createTime": "2026-09-16 11:26:37"
+      },
+      {
+        "id": "2100060577996079106",
+        "name": "",
+        "contacts": "",
+        "contactsPhone": "",
+        "socialCreditCode": null,
+        "createTime": "2026-09-16 11:13:54"
+      },
+      {
+        "id": "2036324514111029249",
+        "name": "露露乐檬文化服饰有限公司",
+        "contacts": "温灿",
+        "contactsPhone": "19211636960",
+        "socialCreditCode": "345356356756756734",
+        "createTime": "2026-03-24 14:09:32"
+      },
+      {
+        "id": "2017071724977324034",
+        "name": "中国人形机器人生态大会",
+        "contacts": "斜撑",
+        "contactsPhone": "",
+        "socialCreditCode": null,
+        "createTime": "2026-01-30 11:05:49"
+      },
+      {
+        "id": "2004439223171551235",
+        "name": "山东卓创资讯股份有限公司",
+        "contacts": "",
+        "contactsPhone": "",
+        "socialCreditCode": null,
+        "createTime": "2025-12-26 14:28:46"
+      },
+      {
+        "id": "1982979658198552577",
+        "name": "廊坊临空自贸区中泽会展服务有限公司",
+        "contacts": "王建",
+        "contactsPhone": "18031689560",
+        "socialCreditCode": null,
+        "createTime": "2025-10-28 09:16:07"
+      },
+      {
+        "id": "1980100141989761027",
+        "name": "杭州硅行智能科技有限公司",
+        "contacts": "宋鑫炜",
+        "contactsPhone": "15167167338",
+        "socialCreditCode": "91330110MAEG44NX65",
+        "createTime": "2025-10-20 10:33:57"
+      },
+      {
+        "id": "1978751638575255555",
+        "name": "诺兰德展览(杭州)有限公司",
+        "contacts": "刘振",
+        "contactsPhone": "18655739757",
+        "socialCreditCode": null,
+        "createTime": "2025-10-16 17:15:29"
+      },
+      {
+        "id": "1978750001366437889",
+        "name": "中国科学院自动化研究所",
+        "contacts": "陈老师",
+        "contactsPhone": "15810169736",
+        "socialCreditCode": "12100000400010945B",
+        "createTime": "2025-10-16 17:08:58"
+      },
+      {
+        "id": "1978666355204820994",
+        "name": "常州微亿智造科技股份有限公司",
+        "contacts": "黄妍",
+        "contactsPhone": "13856389933",
+        "socialCreditCode": "91320400MA1X29B12Y",
+        "createTime": "2025-10-16 11:36:36"
+      }
+    ],
+    "message": "操作成功！",
+    "index": 1,
+    "size": 10,
+    "maxPage": 39,
+    "maxSize": 385
+  }
+}

@@ -1,0 +1,73 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/company-sys/api/sys/home/orgProject/page",
+    "params": {
+      "page": 1,
+      "pageSize": 10
+    }
+  },
+  "status": 200,
+  "json": {
+    "code": 200,
+    "data": {
+      "pageInfo": {
+        "total": 2,
+        "list": [
+          {
+            "id": "2052287052480167938",
+            "itemName": "测试（博博会测试）",
+            "unitId": "1",
+            "unitName": "中国博物馆协会",
+            "tradeType": "1838855699912671235",
+            "tradeTypeVal": "会展",
+            "image": "https://file.expo-museums.com/sponsor/file/20260507/2052300575432290306/236.jpg",
+            "intro": "测试（博博会测试）",
+            "exhibitorNumber": null,
+            "audienceNumber": null,
+            "exhibitionCount": 0,
+            "clientName": null,
+            "createTime": "2026-05-07 15:18:58",
+            "boothCount": 0
+          },
+          {
+            "id": "2049694703694561281",
+            "itemName": "第十一届中国博物馆及相关产品与技术博览会 ",
+            "unitId": "1",
+            "unitName": "中国博物馆协会",
+            "tradeType": "1838855699912671235",
+            "tradeTypeVal": "会展",
+            "image": "https://file.expo-museums.com/sponsor/file/20260507/2052191255583567874/logo.png",
+            "intro": "中国博物馆及相关产品与技术博览会（简称 “博博会”，MPT-EXPO） 是由中国博物馆协会主办的国家级、国际性、专业性双年展，创办于 2004 年，每两年举办一届，是亚洲规模最大、全球三大博物馆行业展会之一，也是中国唯一大型专业国际博物馆及相关行业展会。",
+            "exhibitorNumber": null,
+            "audienceNumber": null,
+            "exhibitionCount": 0,
+            "clientName": null,
+            "createTime": "2026-04-30 11:37:54",
+            "boothCount": 0
+          }
+        ],
+        "pageNum": 1,
+        "pageSize": 10,
+        "size": 2,
+        "startRow": 1,
+        "endRow": 2,
+        "pages": 1,
+        "prePage": 0,
+        "nextPage": 0,
+        "isFirstPage": true,
+        "isLastPage": true,
+        "hasPreviousPage": false,
+        "hasNextPage": false,
+        "navigatePages": 8,
+        "navigatepageNums": [
+          1
+        ],
+        "navigateFirstPage": 1,
+        "navigateLastPage": 1
+      },
+      "orgNumber": 2
+    },
+    "message": "操作成功！"
+  }
+}
