@@ -53,7 +53,7 @@ dev = [
 # 成"配了但不报"。与 agent-runtime/exhibition 的 [langfuse] 同下界，由 lint L-4 守。
 observability = ["langfuse>=5.0.4", "langchain>=1.4.6,<2"]  # 2026-10-19：#98 处置——L-4 要求三处同下界（agent-runtime/exhibition 经 dependabot 已至 >=1.4.6，本处原 >=1 是离群值）；归一到当前解析版本
 # Markdown→PDF 文档生成（word_converter 软降级）
-docs = ["markdown>=3.10.2", "weasyprint>=70.0", "pypdf>=6.21.2"]
+docs = ["markdown>=3.10.2", "weasyprint>=70.0", "pypdf>=7.1.0"]
 # Excel/Word 文件读取（upload_file_read_tool 软降级）
 excel = ["pandas>=3.0.1", "openpyxl>=3.1.5", "python-docx>=1.2.0"]
 # 记忆架构（MongoCheckpointer + Milvus 语义记忆；代码内 try/except ImportError 软降级）
