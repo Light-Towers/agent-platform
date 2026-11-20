@@ -1,6 +1,6 @@
 # UI 一致性收敛（消除样式散点，P3 债务）
 
-> 状态：实现中。触发：用户 2026-11-19 要求处理 P3「全局统一靠机制」欠账。审计结论：`docs/.../plan-ui-consistency` 对应 subagent 报告（本文件附录摘要）。
+> 状态：✅ 已部署 + 真浏览器验证通过（2026-11-20 09:35，绑 rev=bdcab7c3，平台镜像 7a5f92c21776 / digest 2d76d683）。触发：用户 2026-11-19 要求处理 P3「全局统一靠机制」欠账。审计结论：`docs/.../plan-ui-consistency` 对应 subagent 报告（本文件附录摘要）。
 > 原则：P1 修类不修点（收敛同一根因的所有散点）、P3 单一实现+门禁强制、P4 边界先行（只动证据确凿的最小集，不碰死类删除）。
 
 ## 审计证据（实取）
@@ -38,3 +38,10 @@
 - ✅ 新门禁能咬：正常 rc=0；注入第二块 `.rogue-item.is-active` → rc=1 列出两处；恢复 rc=0。
 - ✅ **真浏览器 computed style 抓到一个 CSS 坑并修复**：初版把全局 `.is-active` 放在 base.css 前部（211 行），被后定义的 `.session-list__item { border: 1px solid ... }` **简写覆盖**（同为 0,1,0，后者胜出）——三处选中态实测是灰边非蓝边。修复：把 `.is-active` 移到 base.css 末尾（所有布局类之后）。再测三处均 `border=rgb(64,158,255)` / `bg=rgb(35,39,46)` 完全一致。这正是 P5（真浏览器验证）的价值——门禁全绿但视觉是错的。
 - 未做（边界外，另议）：行内图标按钮 .ry-btn--icon、空态容器三合一、.ry-list-pick 合并、死类删除。
+
+## 部署（2026-11-20 09:35，绑 rev=bdcab7c3）
+- ✅ 平台镜像 `7a5f92c21776` 三节点一致；GIT_REV=bdcab7c3；KS 未变。
+- 构建插曲：首次因 `registry.npmjs.org` DNS 不通失败（pnpm install getaddrinfo）→ buf.sh 加 `--build-arg NPM_REGISTRY=https://registry.npmmirror.com/` 后成功；本次只改前端 CSS、pip 层缓存命中，构建约 3 分钟（对比昨晚改 agent-core 触发 pip 全量重下 13 分钟）。
+- ✅ 真浏览器线上验证（admin CDP）：会话列表选中态 + 知识库侧栏选中态 computed style 均 `border=rgb(64,158,255)` / `bg=rgb(35,39,46)`，完全一致；截图确认视觉正常。
+- ✅ 漂移门禁 rc=0（台账更新到 bdcab7c3 + 平台新 digest）。测试账号验后降回 viewer。
+- 注：9:00 闹钟自动跑了 A 方案(BuildKit)验证——结论 **不可行**（241 无 buildx 组件，`DOCKER_BUILDKIT=1` 报 "buildx component missing"）；构建提速走 B 方案（plan-build-speed-optimization），另案。
