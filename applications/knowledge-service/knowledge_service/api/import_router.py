@@ -30,7 +30,13 @@ from knowledge_service.core.logger import logger  # 项目统一日志工具
 from knowledge_service.import_process.agent.main_graph import kb_import_app  # LangGraph全流程编译实例
 from knowledge_service.import_process.agent.state import get_default_state
 from knowledge_service.utils import kb_collections, kb_delete, kb_doc_count, kb_upload_history
-from knowledge_service.utils.kb_registry import get_document, list_by_tenant, update_status, upsert_by_upload
+from knowledge_service.utils.kb_registry import (
+    delete_document,
+    get_document,
+    list_by_tenant,
+    update_status,
+    upsert_by_upload,
+)
 from knowledge_service.utils.lifecycle_reimport import ReimportError, plan_reimport, resolve_original_file
 from knowledge_service.utils.path_util import PROJECT_ROOT
 from knowledge_service.utils.task_utils import (
@@ -641,6 +647,59 @@ async def delete_document(knowledge_id: str, source_doc: str | None = None):
         raise HTTPException(status_code=404, detail=f"该知识库无 Milvus 切片: {knowledge_id}")
     logger.info(f"[delete] {tenant_id}/{knowledge_id} 软删除：{result['revoked_chunks']} 切片标记 REVOKED")
     return {"code": 200, "knowledge_id": knowledge_id, "status": "REVOKED", **result}
+
+
+@router.post("/documents/{knowledge_id}/restore", summary="重新上线文档（REVOKED→PUBLISHED，恢复 RAG 召回）")
+async def restore_document_endpoint(knowledge_id: str, source_doc: str):
+    """把已下线文档的切片改回 PUBLISHED，恢复可被检索召回。source_doc 必填。"""
+    source_doc = (source_doc or "").strip()
+    if not source_doc:
+        raise HTTPException(status_code=400, detail="source_doc 必填")
+    tenant_id = resolve_server_tenant("", endpoint="POST /documents/{id}/restore")
+    client = get_milvus_client()
+    if client is None:
+        raise HTTPException(status_code=503, detail="Milvus 不可达，无法上线文档")
+    try:
+        result = kb_delete.restore_document(
+            client, milvus_config.chunks_collection, tenant_id, knowledge_id,
+            source_doc=source_doc,
+            update_registry=lambda t, k, s: update_status(
+                tenant_id=t, knowledge_id=k, status=s, task_id="restore",
+            ),
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.error(f"[restore] {tenant_id}/{knowledge_id}/{source_doc} 上线失败", exc_info=True)
+        raise HTTPException(status_code=502, detail=f"文档上线失败：{type(e).__name__}") from e
+    if not result["found"]:
+        raise HTTPException(status_code=404, detail=f"没有已下线的文档切片: {source_doc}")
+    return {"code": 200, "knowledge_id": knowledge_id, "status": "PUBLISHED", **result}
+
+
+@router.delete("/documents/{knowledge_id}/purge", summary="真删除文档（物理删切片+登记，不可逆）")
+async def purge_document_endpoint(knowledge_id: str, source_doc: str):
+    """真删除：物理删该文档全部切片（含 REVOKED）+ 清 kb_documents 登记，不可逆。
+
+    只应对已下线（REVOKED）文档调用——UI 层保证删除按钮只在已下线时出现。
+    """
+    source_doc = (source_doc or "").strip()
+    if not source_doc:
+        raise HTTPException(status_code=400, detail="source_doc 必填")
+    tenant_id = resolve_server_tenant("", endpoint="DELETE /documents/{id}/purge")
+    client = get_milvus_client()
+    if client is None:
+        raise HTTPException(status_code=503, detail="Milvus 不可达，无法删除文档")
+    try:
+        result = kb_delete.purge_document(
+            client, milvus_config.chunks_collection, tenant_id, knowledge_id,
+            source_doc=source_doc,
+            delete_registry=lambda t, k: delete_document(tenant_id=t, knowledge_id=k),
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.error(f"[purge] {tenant_id}/{knowledge_id}/{source_doc} 删除失败", exc_info=True)
+        raise HTTPException(status_code=502, detail=f"文档删除失败：{type(e).__name__}") from e
+    if not result["found"]:
+        raise HTTPException(status_code=404, detail=f"文档无切片可删: {source_doc}")
+    return {"code": 200, "knowledge_id": knowledge_id, "status": "PURGED", **result}
 
 
 @router.delete("/collections/{knowledge_id}", summary="删除知识库（前置：库下无有效文档）")

@@ -654,6 +654,9 @@ a.ry-btn { text-decoration: none; }
 }
 /* 选中态走全局 .is-active（单一实现，见 plan-ui-consistency-2026-11-19） */
 .kb-history__item .hint { margin-left: auto; }
+/* 已下线文档：标灰 + 主操作名淡化，一眼区分有效/下线（用户拍板两阶段操作） */
+.kb-history__item--revoked .kb-sidebar__name,
+.kb-history__item--revoked strong { color: var(--text-2); opacity: 0.75; }
 
 /* ---- 知识库页 master-detail（2026-11-18 重构）----
  * 左 240px 库列表 / 右弹性文档区。窄屏（<900）改上下堆叠。 */

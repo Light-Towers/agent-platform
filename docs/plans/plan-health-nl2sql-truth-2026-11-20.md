@@ -1,6 +1,6 @@
 # 健康页：把退役的 sql_backend 假灯换成问数真值
 
-> 状态：代码完成 + 静态全绿，待部署。触发（用户 2026-11-20）：平台 /health 的 `sql_backend=None` 是退役假灯（ADR-0011，恒 null），健康页却把它渲染成"未装配"警示圆，误导用户以为问数坏了。用户拍板：换成真值——展示 nl2sql-service 的 /ready。
+> 状态：✅ 已部署 + 本地 mock + 线上真浏览器双重验证通过（2026-11-20 11:20，绑 rev=8bb4d2b0，平台镜像 d702a7c0871b / digest 69ff4b21）。触发（用户 2026-11-20）：平台 /health 的 `sql_backend=None` 是退役假灯（ADR-0011，恒 null），健康页却把它渲染成"未装配"警示圆，误导用户以为问数坏了。用户拍板：换成真值——展示 nl2sql-service 的 /ready。
 
 ## 实取事实
 - 平台 `/health`：`nl2sql=True`（注册意愿位）、`sql_backend=None`（退役假灯，恒 null）。

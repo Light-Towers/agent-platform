@@ -22,6 +22,8 @@ import {
   uploadKbDocuments,
   getKbStatus,
   deleteKbDocument,
+  restoreKbDocument,
+  purgeKbDocument,
   KbRateLimitedError,
   type KbUploadForm,
   type KbTaskStatus,
@@ -87,6 +89,12 @@ watch(
   { immediate: true },
 )
 
+/** 文档是否已全部下线（所有切片 status=REVOKED）——据此决定显示「上线/删除」还是「下线」。
+ *  产品规则（用户拍板）：删除按钮只在已下线文档上出现，有效文档不能一步删除。 */
+function isRevoked(doc: KbTreeDoc): boolean {
+  return doc.chunks.length > 0 && doc.chunks.every((c) => c.status === 'REVOKED')
+}
+
 /* ---- 文档下线（按 source_doc 粒度软删除 → REVOKED，删后不再被 RAG 召回）---- */
 async function onDeleteDocument(sourceDoc: string): Promise<void> {
   if (deleteBusy.value) return
@@ -100,6 +108,40 @@ async function onDeleteDocument(sourceDoc: string): Promise<void> {
     emit('changed')
   } catch (err) {
     deleteNotice.value = `文档下线失败：${err instanceof Error ? err.message : String(err)}`
+  } finally {
+    deleteBusy.value = ''
+  }
+}
+
+/** 重新上线：REVOKED → PUBLISHED，恢复被 RAG 召回。 */
+async function onRestoreDocument(sourceDoc: string): Promise<void> {
+  if (deleteBusy.value) return
+  deleteBusy.value = sourceDoc
+  deleteNotice.value = ''
+  try {
+    await restoreKbDocument(props.selectedKnowledgeId, sourceDoc, authToken.value ?? '')
+    deleteNotice.value = `文档「${sourceDoc}」已重新上线：可再次被对话检索召回。`
+    emit('changed')
+  } catch (err) {
+    deleteNotice.value = `文档上线失败：${err instanceof Error ? err.message : String(err)}`
+  } finally {
+    deleteBusy.value = ''
+  }
+}
+
+/** 真删除（不可逆）：物理删切片+登记，文档从列表消失。只对已下线文档可见。 */
+async function onPurgeDocument(sourceDoc: string): Promise<void> {
+  if (deleteBusy.value) return
+  if (!window.confirm(`确定永久删除文档「${sourceDoc}」？此操作不可逆，文档将从知识库彻底移除。`)) return
+  deleteBusy.value = sourceDoc
+  deleteNotice.value = ''
+  try {
+    await purgeKbDocument(props.selectedKnowledgeId, sourceDoc, authToken.value ?? '')
+    deleteNotice.value = `文档「${sourceDoc}」已永久删除。`
+    if (expandedDoc.value === sourceDoc) expandedDoc.value = ''
+    emit('changed')
+  } catch (err) {
+    deleteNotice.value = `文档删除失败：${err instanceof Error ? err.message : String(err)}`
   } finally {
     deleteBusy.value = ''
   }
@@ -234,7 +276,10 @@ const failed = computed(() => status.value?.status === 'failed')
           v-for="doc in documents"
           :key="doc.source_doc"
           class="kb-history__item"
-          :class="{ 'is-active': expandedDoc === doc.source_doc }"
+          :class="{
+            'is-active': expandedDoc === doc.source_doc,
+            'kb-history__item--revoked': isRevoked(doc),
+          }"
         >
           <button
             type="button"
@@ -245,11 +290,37 @@ const failed = computed(() => status.value?.status === 'failed')
             <strong>{{ doc.source_doc }}</strong>
             <span class="hint">{{ doc.chunk_count }} 片 · {{ expandedDoc === doc.source_doc ? '收起切片' : '点击查看切片' }}</span>
           </button>
+          <span
+            v-if="isRevoked(doc)"
+            class="ry-tag ry-tag--warning"
+          >已下线</span>
+          <!-- 有效文档：只有「下线」；已下线文档：显示「上线」+「删除」（删除只对已下线开放） -->
+          <template v-if="isRevoked(doc)">
+            <button
+              type="button"
+              class="ry-btn"
+              :aria-disabled="deleteBusy === doc.source_doc"
+              title="重新上线（恢复被 RAG 召回）"
+              @click="onRestoreDocument(doc.source_doc)"
+            >
+              {{ deleteBusy === doc.source_doc ? '上线中…' : '上线' }}
+            </button>
+            <button
+              type="button"
+              class="ry-btn ry-btn--danger"
+              :aria-disabled="deleteBusy === doc.source_doc"
+              title="永久删除（不可逆）"
+              @click="onPurgeDocument(doc.source_doc)"
+            >
+              {{ deleteBusy === doc.source_doc ? '删除中…' : '删除' }}
+            </button>
+          </template>
           <button
+            v-else
             type="button"
             class="ry-btn"
             :aria-disabled="deleteBusy === doc.source_doc"
-            title="下线该文档（软删除，删后不再被 RAG 召回）"
+            title="下线该文档（软删除，可恢复）"
             @click="onDeleteDocument(doc.source_doc)"
           >
             {{ deleteBusy === doc.source_doc ? '下线中…' : '下线' }}

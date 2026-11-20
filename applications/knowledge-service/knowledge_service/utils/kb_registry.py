@@ -143,4 +143,17 @@ def update_status(
         return False
 
 
-__all__ = ["upsert_by_upload", "get_document", "list_by_tenant", "update_status"]
+def delete_document(
+    tenant_id: str, knowledge_id: str, collection: Any = None,
+) -> bool:
+    """真删除登记行（purge 用）。失败只落日志，返回是否成功。"""
+    try:
+        col = collection if collection is not None else _get_collection()
+        result = col.delete_one({"tenant_id": tenant_id, "knowledge_id": knowledge_id})
+        return (result.deleted_count or 0) > 0
+    except PyMongoError as e:
+        logger.warning(f"[kb_registry] 登记删除失败: {e}")
+        return False
+
+
+__all__ = ["upsert_by_upload", "get_document", "list_by_tenant", "update_status", "delete_document"]

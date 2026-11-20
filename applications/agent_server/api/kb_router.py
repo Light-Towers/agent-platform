@@ -398,7 +398,9 @@ async def _proxy_delete(path: str, knowledge_id: str, params: dict | None = None
     return resp.json()
 
 
-async def _proxy_write(method: str, path: str, data: dict | None = None) -> dict:
+async def _proxy_write(
+    method: str, path: str, data: dict | None = None, params: dict | None = None,
+) -> dict:
     """知识库写操作代理：签名头透传，KS 响应/状态码原样回。供 POST/PATCH 复用。"""
     url = _ks_base_url()
     import httpx
@@ -406,7 +408,9 @@ async def _proxy_write(method: str, path: str, data: dict | None = None) -> dict
     try:
         async with httpx.AsyncClient(timeout=_KS_TIMEOUT_S) as client:
             if method == "POST":
-                resp = await client.post(f"{url}{path}", json=data, headers=_internal_headers())
+                resp = await client.post(
+                    f"{url}{path}", json=data, params=params, headers=_internal_headers(),
+                )
             elif method == "PATCH":
                 resp = await client.patch(f"{url}{path}", json=data, headers=_internal_headers())
             else:
@@ -451,6 +455,32 @@ async def kb_delete_document(
     """下线文档（kb.publish）：代理 KS DELETE /documents/{id}。source_doc 给定时只下线该文档。"""
     params = {"source_doc": source_doc} if source_doc else None
     return await _proxy_delete(f"/documents/{knowledge_id}", knowledge_id, params=params)
+
+
+@router.post("/kb/documents/{knowledge_id}/restore", summary="重新上线文档（代理 KS）")
+async def kb_restore_document(
+    knowledge_id: str,
+    source_doc: str,
+    _auth=Depends(verify_api_key),
+    _feature=Depends(require_feature("kb.publish")),
+):
+    """上线已下线文档（kb.publish）：代理 KS POST /documents/{id}/restore。"""
+    return await _proxy_write(
+        "POST", f"/documents/{knowledge_id}/restore", params={"source_doc": source_doc},
+    )
+
+
+@router.delete("/kb/documents/{knowledge_id}/purge", summary="真删除文档（代理 KS，不可逆）")
+async def kb_purge_document(
+    knowledge_id: str,
+    source_doc: str,
+    _auth=Depends(verify_api_key),
+    _feature=Depends(require_feature("kb.publish")),
+):
+    """真删除文档（kb.publish）：代理 KS DELETE /documents/{id}/purge。不可逆。"""
+    return await _proxy_delete(
+        f"/documents/{knowledge_id}/purge", knowledge_id, params={"source_doc": source_doc},
+    )
 
 
 @router.delete("/kb/knowledge-bases/{knowledge_id}", summary="删除知识库（前置校验，代理 KS）")

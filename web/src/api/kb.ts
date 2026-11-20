@@ -246,6 +246,30 @@ export async function deleteKbDocument(
   return await resp.json()
 }
 
+/** 重新上线文档（REVOKED→PUBLISHED，恢复 RAG 召回）：POST /kb/documents/{id}/restore。 */
+export async function restoreKbDocument(
+  knowledgeId: string, sourceDoc: string, token: string, fetchImpl?: typeof fetch,
+): Promise<unknown> {
+  const doFetch = fetchImpl ?? globalThis.fetch
+  const q = `?source_doc=${encodeURIComponent(sourceDoc)}`
+  const resp = await doFetch(`/kb/documents/${encodeURIComponent(knowledgeId)}/restore${q}`,
+    { method: 'POST', headers: authHeaders(token), cache: 'no-store' })
+  if (!resp.ok) await failKb('文档上线', resp)
+  return await resp.json()
+}
+
+/** 真删除文档（物理删切片+登记，不可逆）：DELETE /kb/documents/{id}/purge。只应对已下线文档调用。 */
+export async function purgeKbDocument(
+  knowledgeId: string, sourceDoc: string, token: string, fetchImpl?: typeof fetch,
+): Promise<unknown> {
+  const doFetch = fetchImpl ?? globalThis.fetch
+  const q = `?source_doc=${encodeURIComponent(sourceDoc)}`
+  const resp = await doFetch(`/kb/documents/${encodeURIComponent(knowledgeId)}/purge${q}`,
+    { method: 'DELETE', headers: authHeaders(token), cache: 'no-store' })
+  if (!resp.ok) await failKb('文档删除', resp)
+  return await resp.json()
+}
+
 /** 知识库文档树（库→文档→切片）：数据源是 Milvus 实际切片，不是上传历史。 */
 export interface KbTreeChunk {
   readonly part: number | null
