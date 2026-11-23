@@ -85,16 +85,18 @@
 
 **依赖**：T0-1（D-1）、R3（守卫读 Pinia 状态）。**门禁**：`pnpm typecheck && pnpm lint && pnpm check:ui-consistency`。
 
-- [ ] R4-1 `pnpm add vue-router --save-exact`；lockfile 入库。
-- [ ] R4-2 新建 `web/src/router/index.ts`：`createWebHashHistory('/ui/')`（D-1 推荐）。路由：`/ → /chat`、`/chat/:sessionId?`、`/role`(feature)、`/kb`(kb.upload)、`/datasource`(datasource.manage)、`/health`。
-- [ ] R4-3 `router.beforeEach` 复用 `hasFeature`（唯一问法），不新写第二份判定；能力码未回读时不得永久重定向；`/health` 对所有已登录用户开放。
-- [ ] R4-4 从 `web/src/App.vue` 拆出 `ChatView.vue`（三栏 + 提交区 + 过程抽屉），App.vue 退为框架 + `<RouterView>`；删除 `ap.ui.view` 读写与 `activeView/effectiveView`。
-- [ ] R4-5 URL 与会话联动：`:sessionId` 变化驱动 conversations store 选中；未知 id 回落默认选择且不白屏；菜单选中态继续用 `.is-active`（单一实现）。
-- [ ] R4-6 保留 `/ui/*` 未知路径 404 判据；**不改后端托管语义**，除非 D-1 另选 history 并单独写 ADR。
-- [ ] R4-7 跑三门；手动验证：前进/后退、深链刷新、无权限回落、未知会话 id 回落。
+- [x] R4-1 `pnpm add vue-router --save-exact`；lockfile 入库。
+- [x] R4-2 新建 `web/src/router/index.ts`：`createWebHashHistory('/ui/')`（D-1 推荐）。路由：`/ → /chat`、`/chat/:sessionId?`、`/role`(feature)、`/kb`(kb.upload)、`/datasource`(datasource.manage)、`/health`。
+- [x] R4-3 `router.beforeEach` 复用 `hasFeature`（唯一问法），不新写第二份判定；能力码未回读时不得永久重定向；`/health` 对所有已登录用户开放。
+- [x] R4-4 从 `web/src/App.vue` 拆出 `ChatView.vue`（三栏 + 提交区 + 过程抽屉），App.vue 退为框架 + `<RouterView>`；删除 `ap.ui.view` 读写与 `activeView/effectiveView`。
+- [x] R4-5 URL 与会话联动：`:sessionId` 变化驱动 conversations store 选中；未知 id 回落默认选择且不白屏；菜单选中态继续用 `.is-active`（单一实现）。
+- [x] R4-6 保留 `/ui/*` 未知路径 404 判据；**不改后端托管语义**，除非 D-1 另选 history 并单独写 ADR。
+- [x] R4-7 跑三门；手动验证：前进/后退、深链刷新、无权限回落、未知会话 id 回落。
 
 **验收**：5 视图 URL 可达；刷新直达；前进/后退还原；404 判据仍成立；`check:ui-consistency` 仍咬。
 **回滚**：R4 整批 revert（含 lockfile 与 App.vue 拆分）；恢复 `ap.ui.view` 前先确认 R3 的 store 仍自洽。
+
+**R4 完成记录（2026-11-23，HEAD 见提交）**：`pnpm add vue-router --save-exact` 装 vue-router 5.5.1。`router/index.ts` 用 `createWebHashHistory('/ui/')`（D-1），五路由 + RBAC 守卫复用 `hasFeature`；`/role` 用 any-of 四码（与旧 showRoleGate 同口径）。App.vue 退为框架 + `<RouterView />`，对话三栏拆到新 `ChatView.vue`；`ap.ui.view` 读写删除，会话深链与侧栏选中双向同步。补了"能力码晚到"回落 watch（对齐旧 effectiveView 的响应式语义）。D-6 跨标签：`api/tabSync.ts` BroadcastChannel 协商，令牌仍只在 sessionStorage 的唯一装配位，新增 `adoptSharedToken()` 经 `/auth/me` 回读后才落盘；产品限制写入 `web/README.md`。门禁 `typecheck` / `lint` / `check:ui-consistency` / `check:events`（C2/I1c/I12 全过）/`verify:sse`（153 断言失败 0）/`build` 全 rc=0。**未达**：前进/后退、深链刷新、无权限回落的浏览器人工验证未跑（本机无 CDP harness），不写成已过。
 
 ---
 
@@ -144,8 +146,8 @@
 
 **R4 扩展（依赖 D-6）**
 
-- [ ] X-1 评估并实现跨标签令牌协商：维持 sessionStorage 档位，用 BroadcastChannel 在仍打开的老标签与新标签间传递令牌；无老标签时回落登录面。**不改 `ap.auth.token` 的档位与写入点**，不触碰 `check-events.mjs` C2 与 `verify-sse.mjs` I1c/I12。
-- [ ] X-2 把"所有标签关闭后首次直达仍需登录"作为产品限制写入 `web/README.md` 与帮助文案，不靠放宽门禁掩盖。
+- [x] X-1 评估并实现跨标签令牌协商：维持 sessionStorage 档位，用 BroadcastChannel 在仍打开的老标签与新标签间传递令牌；无老标签时回落登录面。**不改 `ap.auth.token` 的档位与写入点**，不触碰 `check-events.mjs` C2 与 `verify-sse.mjs` I1c/I12。
+- [x] X-2 把"所有标签关闭后首次直达仍需登录"作为产品限制写入 `web/README.md` 与帮助文案，不靠放宽门禁掩盖。
 
 **R5a 引用联动（依赖 D-7 / D-8）**
 

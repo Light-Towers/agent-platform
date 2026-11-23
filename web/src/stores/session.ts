@@ -55,9 +55,11 @@ import {
   logoutRequest,
   readStoredToken,
   registerAndSignIn,
+  storeToken,
   type AuthMode,
   type Credentials,
 } from '../api/auth.ts'
+import { announceToken, onSharedToken, requestToken } from '../api/tabSync.ts'
 import { streamQuery, type StreamQueryOptions } from '../api/sse.ts'
 import { initialState, pushBanner, type StreamSnapshot, type Terminal, type TimelineEntry } from './sseReducer.ts'
 
@@ -384,6 +386,7 @@ async function submitCredentials(input: Credentials, fetchImpl?: typeof fetch): 
     // 已经在刷新路径上了，首登再花一次只会把「点了提交但屏上不动」拉长）。G1 的 features
     // 是唯一例外 —— 登录响应**不带集**，所以它由下面的异步回读补齐，不再阻塞提交那一发。
     authToken.value = result.session.token
+    announceToken(result.session.token) // D-6：登录成功后同步给其它标签
     authTenant.value = result.session.tenantId
     authUser.value = result.session.userId
     authRoleRef.value = result.session.role
@@ -405,6 +408,33 @@ async function submitCredentials(input: Credentials, fetchImpl?: typeof fetch): 
 }
 
 /**
+ * D-6：收到老标签共享的令牌后，走与刷新路径同一条 /auth/me 回读链确认，
+ * 成功才落本标签的 sessionStorage（档位不变）；失败清掉，不把“共享来的”读成已登录。
+ */
+async function adoptSharedToken(token: string): Promise<void> {
+  if (readStoredToken() !== '' || authState.value === 'authenticated') return
+  authToken.value = token
+  authState.value = 'checking'
+  const probe = await fetchAuthenticatedIdentity()
+  if (probe.kind === 'asserted') {
+    storeToken(token)
+    authTenant.value = probe.tenantId
+    authUser.value = probe.userId
+    authRoleRef.value = probe.role
+    authFeaturesRef.value = probe.features
+    authState.value = 'authenticated'
+    authNoticeText.value = ''
+    clearBanners()
+    return
+  }
+  dropSession(probe.kind === 'expired'
+    ? probe.text
+    : '跨标签共享的令牌未通过服务端确认，请在本标签重新登录')
+}
+
+onSharedToken((token) => { void adoptSharedToken(token) })
+
+/**
  * 刷新后确认可用的登录态（A8「刷新仍在登录」那一格的实物）。
  * 本件**不在模块加载时自发请求**：那样的话 `verify-sse.mjs` 在 Node 里 import 会话层就会
  * 当场发一个 fetch（能力声明变成隐形副作用）。调用人是 `App.vue` 的挂载点。
@@ -413,6 +443,8 @@ async function submitCredentials(input: Credentials, fetchImpl?: typeof fetch): 
 async function resumeSession(fetchImpl?: typeof fetch): Promise<void> {
   const token = readStoredToken()
   if (token === '') {
+    // D-6：新标签没令牌时问仍开着的老标签要一份；在收到 share 前仍按未登录渲染。
+    requestToken()
     authState.value = 'anonymous'
     return
   }

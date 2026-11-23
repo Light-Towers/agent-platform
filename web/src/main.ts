@@ -18,8 +18,9 @@ import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import App from './App.vue'
 import { initTheme } from './theme'
+import { router } from './router/index.ts'
 
 initTheme()
 
-// Pinia 必须在挂载前装好：各组件在 setup 里同步调用 useSessionStore()/useConversationsStore()。
-createApp(App).use(createPinia()).mount('#app')
+// Pinia 必须在路由与挂载前装好：守卫与各组件在 setup/导航时同步取 store 实例。
+createApp(App).use(createPinia()).use(router).mount('#app')

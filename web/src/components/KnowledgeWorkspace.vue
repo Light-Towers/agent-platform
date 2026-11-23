@@ -10,7 +10,7 @@ import { computed, onMounted, ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useSessionStore } from '../stores/session'
 const sessionStore = useSessionStore()
-const { authToken } = storeToRefs(sessionStore)
+const { authToken, knowledgeScope } = storeToRefs(sessionStore)
 
 import { listDocumentTree, type KbTreeBase, type KbTreeDoc, type KbChunkConfig } from '../api/kb.ts'
 import KnowledgeBaseSidebar from './KnowledgeBaseSidebar.vue'
@@ -86,6 +86,8 @@ function onDeleted(kid: string): void {
     selectedId.value = ''
     selectedName.value = ''
   }
+  // R4：对话页不再由 App 常驻，删库后直接清掉会话层的知识范围选中值（原先靠 @kb-deleted 上抛）。
+  if (knowledgeScope.value === kid) knowledgeScope.value = ''
   emit('kb-deleted', kid)
   void refreshAll()
 }

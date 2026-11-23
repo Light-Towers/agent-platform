@@ -31,7 +31,9 @@
 
 > **R2 生产前置条件（2026-11-23）**：开发代理的 `/query` 已拆出独立配置，请求侧 `Accept-Encoding: identity`、响应侧对 `text/event-stream` 透传 `cache-control: no-cache` 与 `x-accel-buffering: no`（形状由 `check-events.mjs` 齿 C6 锁住）。**当前部署链没有 HTTP 反向代理**（NodePort 直通、全仓零 Ingress、`deploy/k8s` 不入库），因此没有可改的生产网关配置文件；日后若引入 nginx/ingress/apisix，`/query` 必须 `proxy_buffering off` 且 gzip 关闭，并把这一条列为开工前置而不是事后排查。`verify:sse` 只锁客户端行为，不证明代理逐帧到达——后者必须本地联调人工确认。
 
-## 一、本目录有什么（**真实 Vue 工程，两个视图**）
+> **R4 路由与跨标签（2026-11-23，D-1 / D-6）**：`web/src/router/index.ts` 采用 `createWebHashHistory('/ui/')`，深链形如 `/ui/#/chat/<sessionId>`；后端 `/ui/<未知路径>` 返回 404 的反假绿判据**不变**。`ap.ui.view` 已删除，视图状态由 URL 表达。菜单选中态复用全局 `.is-active` 单一实现。跨标签登录走 `web/src/api/tabSync.ts` 的 BroadcastChannel 协商：新标签请求、已登录老标签回传令牌，新标签经 `/auth/me` 回读确认后才落自己的 sessionStorage；**令牌档位与唯一写入点不变**（C2 / I1c / I12 全过）。**产品限制**：若所有标签都已关闭，首次打开深链仍需登录——这是不降低令牌安全档位的代价，不靠放宽门禁掩盖。
+
+## 一、本目录有什么（**真实 Vue 工程，五个路由视图**）
 
 > 对话页（两栏，接 SSE）与 `/health` 灯阵视图都是 `web/src/` 下的真实组件，无独立静态宿主页——演示用 `poc.html` / `poc-health.html` 已删除，双载体收敛为单一真实工程。无前端路由表、无 history API —— 仍属「最小核心无前端路由」口径（工程件 §9.1）。
 
