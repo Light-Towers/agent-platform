@@ -547,6 +547,62 @@ for (const key of ['check:events', 'verify:sse']) {
   }
 }
 
+/* ---- 齿 C6（R2）：开发代理对 /query 的 SSE 防缓冲形状 ----
+ * 背景：http-proxy 默认不缓冲响应体，但上游若对 text/event-stream 启用 gzip，开发期会
+ * 看到「事件一次性到达」；症状像前端卡顿，实为代理层缓冲。本齿只锁**配置形状**：
+ * /query 必须拆出通用 proxied 数组并独占一条带 configure 的代理项，请求侧关压缩、
+ * 响应侧对 event-stream 透传 no-cache + x-accel-buffering: no。
+ * 与 verify:sse 的分工：那件锁客户端喂帧行为、不碰代理；逐帧到达的本地联调属人工验收。
+ * 遵循 AGENTS 观测面规矩第 8 条：真面参与判决 + 固定合成违规/正对照自证能咬。 */
+const VITE_CONFIG = 'vite.config.ts';
+const SSE_HEAD_CHECKS = [
+  ['configure 钩子', /configure\s*:/],
+  ['Accept-Encoding: identity', /setHeader\(\s*['"]Accept-Encoding['"]\s*,\s*['"]identity['"]\s*\)/],
+  ['content-type 守卫', /text\/event-stream/],
+  ['cache-control: no-cache', /\[['"]cache-control['"]\]\s*=\s*['"]no-cache['"]/],
+  ['x-accel-buffering: no', /\[['"]x-accel-buffering['"]\]\s*=\s*['"]no['"]/],
+];
+const missingSseHeads = (body) => SSE_HEAD_CHECKS.filter(([, re]) => !re.test(body)).map(([name]) => name);
+const queryProxyBody = (src) => {
+  const at = src.search(/['"]\/query['"]\s*:\s*\{/);
+  if (at < 0) return null;
+  const open = src.indexOf('{', at);
+  let depth = 0;
+  for (let i = open; i < src.length; i += 1) {
+    if (src[i] === '{') depth += 1;
+    else if (src[i] === '}' && --depth === 0) return src.slice(open + 1, i);
+  }
+  return null;
+};
+
+const viteText = rdWeb(VITE_CONFIG);
+const qBody = queryProxyBody(viteText);
+if (qBody === null) {
+  fail.push('代理齿 C6：vite.config.ts 里找不到 /query 的独立代理项（仍混在通用 proxied 数组里？）');
+} else {
+  const miss = missingSseHeads(qBody);
+  if (miss.length) fail.push(`代理齿 C6：/query 代理项缺 ${miss.join('、')}`);
+}
+const proxiedArr = viteText.match(/const proxied = \[([\s\S]*?)\]/);
+if (!proxiedArr) fail.push('代理齿 C6：读不到 const proxied = [...]（坐标变了，先核对再改门禁）');
+else if (/['"]\/query['"]/.test(proxiedArr[1])) fail.push('代理齿 C6：/query 仍在通用 proxied 数组里（防缓冲配置与通用项重叠，形状不唯一）');
+
+/* 自证：固定样本喂同一判定，坏样本必须被咬、好样本必须不被误判 */
+const SYN_BAD = `configure: (proxy) => { proxy.on('proxyReq', (r) => {}); }`;
+const SYN_GOOD = `configure: (p) => {
+  p.on('proxyReq', (proxyReq) => { proxyReq.setHeader('Accept-Encoding', 'identity'); });
+  p.on('proxyRes', (proxyRes) => {
+    if (String(proxyRes.headers['content-type']).includes('text/event-stream')) {
+      proxyRes.headers['cache-control'] = 'no-cache';
+      proxyRes.headers['x-accel-buffering'] = 'no';
+    }
+  });
+}`;
+if (missingSseHeads(SYN_BAD).length === 0) fail.push('SELF_TEST_FAIL: 合成违规（缺全部防缓冲头）未被代理齿判红——门禁瞎了');
+if (missingSseHeads(SYN_GOOD).length !== 0) fail.push('SELF_TEST_FAIL: 正对照样本被代理齿误判红');
+const c6ok = qBody !== null && missingSseHeads(qBody).length === 0 && proxiedArr !== null && !/['"]\/query['"]/.test(proxiedArr[1]);
+note.push(`SSE 开发代理（齿 C6）：/query 独立配置 + identity + 防缓冲头 ${c6ok ? '✅' : '❌'}`);
+
 /* ---- 输出 ---- */
 console.log(`派生集（不写死条数）：Literal ${LITERAL ? LITERAL.length : '不可读'} + 实现下发 ${emitted.size} ⇒ 全集 ${EVENT_SET ? EVENT_SET.length : '不可读'} 类`);
 console.log(`  全集成员：${EVENT_SET ? EVENT_SET.join(', ') : '（读不到）'}`);

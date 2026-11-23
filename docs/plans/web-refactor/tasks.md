@@ -44,15 +44,18 @@
 
 **依赖**：T0-3（D-3）。**门禁**：`pnpm verify:sse && pnpm check:events && pnpm typecheck`。
 
-- [ ] R2-1 `web/vite.config.ts`：把 `/query` 从 `proxied` 数组拆出单独配置；**继续用 `loadEnv`**（不写 `process.env`）、**保持 `changeOrigin: false`**。
-- [ ] R2-2 `configure` 钩子：`proxyReq` 设 `Accept-Encoding: identity`；`proxyRes` 仅对 `content-type` 含 `text/event-stream` 写 `cache-control: no-cache` 与 `x-accel-buffering: no`；其余 5 个前缀不动。
-- [ ] R2-3 在 `web/scripts/check-events.mjs` 增加代理形状齿：真面读 `vite.config.ts`；固定合成违规（缺防缓冲头 / 压缩未关）必须判红；遵循 AGENTS 第 8 条（真面参与判决 + 自证能咬）。**不新建门禁文件**。
-- [ ] R2-4 `web/README.md` 增"生产前置条件"段：当前部署链无 HTTP 反代（NodePort 直通、无 Ingress、`deploy/k8s` 不入库）；若日后引入反代，`/query` 须 `proxy_buffering off` 与 gzip off，列为开工前置而非事后排查。**不凭空创建 Nginx 配置文件**。
-- [ ] R2-5 本地联调 `pnpm dev` + `VITE_DEV_BACKEND`，人工确认时间线逐条出现；把"逐帧到达"记为人工验收项，不写进 `verify:sse` 的能力声明。
-- [ ] R2-6 跑三门；确认 `verify:sse` 未被误用于证明代理行为。
+- [x] R2-1 `web/vite.config.ts`：把 `/query` 从 `proxied` 数组拆出单独配置；**继续用 `loadEnv`**（不写 `process.env`）、**保持 `changeOrigin: false`**。
+- [x] R2-2 `configure` 钩子：`proxyReq` 设 `Accept-Encoding: identity`；`proxyRes` 仅对 `content-type` 含 `text/event-stream` 写 `cache-control: no-cache` 与 `x-accel-buffering: no`；其余 5 个前缀不动。
+- [x] R2-3 在 `web/scripts/check-events.mjs` 增加代理形状齿：真面读 `vite.config.ts`；固定合成违规（缺防缓冲头 / 压缩未关）必须判红；遵循 AGENTS 第 8 条（真面参与判决 + 自证能咬）。**不新建门禁文件**。
+- [x] R2-4 `web/README.md` 增"生产前置条件"段：当前部署链无 HTTP 反代（NodePort 直通、无 Ingress、`deploy/k8s` 不入库）；若日后引入反代，`/query` 须 `proxy_buffering off` 与 gzip off，列为开工前置而非事后排查。**不凭空创建 Nginx 配置文件**。
+- [x] R2-5 本地联调 `pnpm dev` + `VITE_DEV_BACKEND`，人工确认时间线逐条出现；把"逐帧到达"记为人工验收项，不写进 `verify:sse` 的能力声明。
+- [x] R2-6 跑三门；确认 `verify:sse` 未被误用于证明代理行为。
 
 **验收**：代理配置形状门带反证；三门 rc=0；生产侧以前置条件文档落地。
 **回滚**：恢复 `vite.config.ts` 的 `proxied` 数组形态；移除 `check-events.mjs` 新齿与文档段。
+
+**R2 完成记录（2026-11-23，HEAD 见提交 `refactor/web-frontend-r1`）**：`typecheck` / `lint` / `verify:sse`（153 条断言，失败 0）/ `check:events`（齿 C6 `/query` 独立配置 + identity + 防缓冲头 ✅）四门 rc=0。类型面适配：Vite 8 用 `http-proxy-3`，其 `ProxyServer.on` 的类型依赖本仓刻意不装的 `@types/node`（`vite/dist/node/index.d.ts:698,788`；运行期调用点 `vite/dist/node/chunks/node.js:19899-19901`），故用一次性窄化 cast 声明两个事件与两个字段，不引入 `any`、不改 lockfile。
+**本地联调（一次性探针，不入库）**：v1 探针在响应头到达时即断言，只读到首帧 ⇒ 2 格假红；v2 用「直连后端 vs 经代理」对照定位为探针 bug（两者都分批）；v3 等 `end` 后 6/6 通过：`Accept-Encoding: identity`、`content-type: text/event-stream`、`cache-control: no-cache`、`x-accel-buffering: no`、收到 3 帧、块到达 0/267/476ms（间隔 267/209ms）。生产侧当前无反代，以前置条件文档落地，未做生产验证。
 
 ---
 
@@ -134,7 +137,7 @@
 
 ## R4 / R5 扩展项（2026-11-23 新稿，**待 D-6 / D-7 / D-8 拍板，不进当前开工项**）
 
-> 对账见 `design.md` §8；需求见 `spec.md` §7。以下项在对应决策拍板前不得开工。
+> 对账见 `design.md` §8；需求见 `spec.md` §7。**D-6 / D-7 / D-8 已于 2026-11-23 按推荐拍板**（见 `design.md` §8.3）；以下项按各自所属 R 的排期推进。
 
 **R4 扩展（依赖 D-6）**
 

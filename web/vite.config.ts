@@ -16,14 +16,25 @@
 import { defineConfig, loadEnv } from 'vite'
 import vue from '@vitejs/plugin-vue'
 
+/* Vite 8 的 configure 回调参数来自 http-proxy-3 的 ProxyServer，它 extends 一个依赖
+ * @types/node 的 EventEmitter；本仓刻意不装 @types/node ⇒ 类型面看不到 .on。
+ * 运行期对象确实有 .on（http-proxy-3），这里只声明本配置用到的两个事件与两个字段，
+ * 用一次窄化 cast 避开缺失的 node 类型，不引入 any、不改 lockfile。 */
+type SseProxyReq = { setHeader(name: string, value: string): void }
+type SseProxyRes = { headers: Record<string, string | string[] | undefined> }
+type SseProxyHooks = {
+  on(event: 'proxyReq', listener: (proxyReq: SseProxyReq) => void): void
+  on(event: 'proxyRes', listener: (proxyRes: SseProxyRes) => void): void
+}
+
 /* 代理这些前缀的理由：CORS 只放行了 5173（agent_server/config.py 的 cors_allow_origins），
- * 而 /query 是 SSE。此处只登记**未验证的风险**：http-proxy 默认不缓冲响应体，但若后端对
- * text/event-stream 启用了 gzip，开发期会看到「事件一次性到达」而现网是逐帧到达。
- * PR-1 接 SSE 时必须实测这条（判据 = 屏上时间线逐条出现），届时再决定要不要加处置；
- * 不在这里预先写上没验证过的解法。
- * `/auth` 是 PR-2b 登录面四个端点的前缀（`/auth/login`|`/auth/register`|`/auth/me`|
+ * 而 /query 是 SSE。/query 已从通用数组拆出、单独配防缓冲（见下方 configure）；
+ * http-proxy 默认不缓冲响应体，但上游若对 text/event-stream 启用 gzip，开发期会看到
+ * 「事件一次性到达」——这里显式要求 identity 并透传防缓冲头。形状由 check-events.mjs
+ * 的齿 C6 锁住，逐帧到达仍需本地联调人工确认（verify:sse 不测代理）。
+ * `/auth` 是登录面四个端点的前缀（`/auth/login`|`/auth/register`|`/auth/me`|
  * `/auth/logout`）；`src/api/auth.ts` 写的是绝对路径 ⇒ 开发期不经代理就是 5173 的 404。 */
-const proxied = ['/query', '/history', '/health', '/session', '/console.html', '/auth', '/kb', '/datasources']
+const proxied = ['/history', '/health', '/session', '/console.html', '/auth', '/kb', '/datasources']
 
 export default defineConfig(({ mode }) => {
   // envDir 传 '.'（相对 vite 启动目录 web/），不写 process.cwd() —— 后者要 @types/node。
@@ -38,9 +49,29 @@ export default defineConfig(({ mode }) => {
     },
     server: {
       port: 5173,
-      proxy: Object.fromEntries(
-        proxied.map((p) => [p, { target: DEV_BACKEND, changeOrigin: false }]),
-      ),
+      proxy: {
+        ...Object.fromEntries(
+          proxied.map((p) => [p, { target: DEV_BACKEND, changeOrigin: false }]),
+        ),
+        // SSE 专用。changeOrigin 保持 false：原配置的 Host/来源语义不动，只加防缓冲。
+        '/query': {
+          target: DEV_BACKEND,
+          changeOrigin: false,
+          configure: (proxy) => {
+            const hooks = proxy as unknown as SseProxyHooks
+            hooks.on('proxyReq', (proxyReq) => {
+              proxyReq.setHeader('Accept-Encoding', 'identity')
+            })
+            hooks.on('proxyRes', (proxyRes) => {
+              const contentType = proxyRes.headers['content-type']
+              if (typeof contentType === 'string' && contentType.includes('text/event-stream')) {
+                proxyRes.headers['cache-control'] = 'no-cache'
+                proxyRes.headers['x-accel-buffering'] = 'no'
+              }
+            })
+          },
+        },
+      },
     },
   }
 })

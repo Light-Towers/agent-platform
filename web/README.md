@@ -29,6 +29,8 @@
 
 > **R1 / D-2 随动（2026-11-23）**：`web/index.html` 现已在 `<head>` 顶部加同步内联脚本，在首帧前按 `ap.ui.theme` 写 `data-theme`（只写手动档 `light` / `dark`；`system` 与无值不写，交给 `@media (prefers-color-scheme: dark)`）。这**翻转了视觉件 §1.5 原定的「壳内不放内联脚本、接受首帧闪一次」取舍**，由用户 2026-11-23「按推荐全部拍板」批准；`web/src/main.ts` 的 `initTheme()` 保留为应用侧复核。样式三件现按 `@layer tokens, base, events` 分层，跨层覆盖不再靠 import 顺序，但 `base.css` 内部 `.is-active` 的顺序纪律仍在（见该文件尾注）。
 
+> **R2 生产前置条件（2026-11-23）**：开发代理的 `/query` 已拆出独立配置，请求侧 `Accept-Encoding: identity`、响应侧对 `text/event-stream` 透传 `cache-control: no-cache` 与 `x-accel-buffering: no`（形状由 `check-events.mjs` 齿 C6 锁住）。**当前部署链没有 HTTP 反向代理**（NodePort 直通、全仓零 Ingress、`deploy/k8s` 不入库），因此没有可改的生产网关配置文件；日后若引入 nginx/ingress/apisix，`/query` 必须 `proxy_buffering off` 且 gzip 关闭，并把这一条列为开工前置而不是事后排查。`verify:sse` 只锁客户端行为，不证明代理逐帧到达——后者必须本地联调人工确认。
+
 ## 一、本目录有什么（**真实 Vue 工程，两个视图**）
 
 > 对话页（两栏，接 SSE）与 `/health` 灯阵视图都是 `web/src/` 下的真实组件，无独立静态宿主页——演示用 `poc.html` / `poc-health.html` 已删除，双载体收敛为单一真实工程。无前端路由表、无 history API —— 仍属「最小核心无前端路由」口径（工程件 §9.1）。
