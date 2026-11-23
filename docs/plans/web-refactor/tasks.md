@@ -151,9 +151,10 @@
 
 **R5a 引用联动（依赖 D-7 / D-8）**
 
-- [ ] X-3 `InlineTokens.vue` 解析 `[1]` 为按钮（hover 预览、click 锚定）；`Answer.vue` 持 `activeEvidenceIndex` / `isEvidenceExpanded` 局部态。
-- [ ] X-4 `EvidenceList.vue` 自动展开并平滑滚动 + 1.8s 高亮脉冲；`Timeline.vue` 支持从证据卡片反向高亮 stepId；高亮色只引 `tokens.css` 语义令牌。
-- [ ] X-5 `streamQuery` 增 `AbortController` signal 支持"停止生成"；错误改为单轮内联重试，全局 banner 语义变更时同批迁移 `verify:sse` 断言并加反证（改形状≠放宽）。
+- [x] X-3 `InlineTokens.vue` 解析 `[1]` 为按钮（hover 预览、click 锚定）；`Answer.vue` 持 `activeEvidenceIndex` / `isEvidenceExpanded` 局部态。
+- [x] X-4 `EvidenceList.vue` 自动展开并平滑滚动 + 1.8s 高亮脉冲；`Timeline.vue` 支持从证据卡片反向高亮 stepId；高亮色只引 `tokens.css` 语义令牌。
+- [x] X-5 `streamQuery` 增 `AbortController` signal 支持"停止生成"；错误改为单轮内联重试，全局 banner 语义变更时同批迁移 `verify:sse` 断言并加反证（改形状≠放宽）。
+  - **完成记录（HEAD 见提交）**：`markdown.ts` 增 `ref` token + `verify:markdown` §D/§E（角标、非数字方括号、表格/多级列表不丢字、代码块、XSS）；`answerLink.ts` 承载单轮三向联动（不进 Pinia），`Answer/InlineTokens/MarkdownText/EvidenceList/Timeline` 接角标→证据→轨迹；Timeline 完成 300ms 折叠、失败保持展开、手动优先；`session.abortCurrent()` 加 AbortController，ChatView 接停止与重试。A8 的跨轮 banner 累积**保留**（不删 `verify:sse` H6/H8），内联错误+重试作为补充而非替代——删除 banner 会破坏 A8 判据，属门禁护城河。门禁 `typecheck` / `lint` / `check:tokens` / `verify:sse`（153 断言失败 0）/ `verify:markdown` / `build` 全 rc=0。
 
 **R5b 阅读密度与配置闭环（依赖 D-7）**
 

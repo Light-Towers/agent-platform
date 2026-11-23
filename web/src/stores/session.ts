@@ -73,6 +73,9 @@ export type AuthState = 'anonymous' | 'checking' | 'authenticated'
 
 export const useSessionStore = defineStore('session', () => {
 
+/** R5a：「停止生成」只中止本标签的在途 fetch，不碰服务端状态与已落快照。 */
+let activeController: AbortController | null = null
+
 /** 空态里那个示例问题按钮填进去的句子。刻意不是问数专属文案（与 poc.html 同一条理由）。 */
 const EXAMPLE_QUESTION = '这个平台能帮我查什么？'
 
@@ -229,9 +232,11 @@ async function ask(fetchImpl?: typeof fetch, sessionId?: string): Promise<void> 
   //   ① `exactOptionalPropertyTypes` 下 `T | undefined` 摊进可选属性会当场红（可选≠可写 undefined）；
   //   ② `StreamQueryOptions` 的字段是 `readonly`，也不能先建对象再赋值。
   // ⇒ 写在这里的不是“两个属性”，是“只在不缺时才给那个属性”这一件事的两种写法之一。
+  activeController = new AbortController()
   const opts: StreamQueryOptions = {
     query: q,
     token: authToken.value,
+    signal: activeController.signal,
     onUpdate: onTick,
     ...(fetchImpl !== undefined ? { fetchImpl } : {}),
     ...(sessionId !== undefined && sessionId !== '' ? { sessionId } : {}),
@@ -252,8 +257,15 @@ async function ask(fetchImpl?: typeof fetch, sessionId?: string): Promise<void> 
     pushBannerLocal(text)
     snap.value = { ...snap.value, terminal: 'failed' }
   } finally {
+    activeController = null
     streaming.value = false
   }
+}
+
+/** R5a：中止在途问答；终态由 streamQuery 的 catch 折成一条 transport 行（failed）。 */
+function abortCurrent(): void {
+  activeController?.abort()
+  activeController = null
 }
 
 function onTick(s: StreamSnapshot): void {
@@ -518,6 +530,7 @@ async function signOut(fetchImpl?: typeof fetch): Promise<void> {
     authFeatures,
     hasFeature,
     ask,
+    abortCurrent,
     clearBanners,
     resetRound,
     useExample,

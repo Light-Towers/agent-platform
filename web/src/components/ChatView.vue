@@ -28,9 +28,9 @@ const {
   loadHistory, loadSessions, newSession, removeSession, renameSession, selectSession, askCurrent,
 } = conversationsStore
 const {
-  authRole, authToken, busy, canSubmit, evidence, eventCount, knowledgeScope, question, traceNote, waiting,
+  authRole, authToken, busy, canSubmit, evidence, eventCount, knowledgeScope, question, terminal, traceNote, waiting,
 } = storeToRefs(sessionStore)
-const { resetRound } = sessionStore
+const { resetRound, abortCurrent } = sessionStore
 
 /** 「查看过程」开关：仅 admin 可见，判据用服务端回读的角色码。 */
 const canInspect = computed(() => authRole.value === 'admin')
@@ -263,6 +263,14 @@ async function commitRename(id: string): Promise<void> {
             v-if="submitHint !== ''"
             class="hint"
           >{{ submitHint }}</span>
+          <button
+            v-if="terminal === 'failed' && !busy"
+            type="button"
+            class="ry-btn ry-btn--text"
+            @click="submit"
+          >
+            重试本轮
+          </button>
         </div>
         <p
           v-if="knowledgeBasesNotice !== '' || knowledgeBases.length === 0"
@@ -292,7 +300,7 @@ async function commitRename(id: string): Promise<void> {
           <span class="o-head-sm">事件时间线</span>
           <span class="count-badge">{{ eventCount }}</span>
         </summary>
-        <Timeline />
+        <Timeline @stop="abortCurrent" />
       </details>
     </aside>
   </div>

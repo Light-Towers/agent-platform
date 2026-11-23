@@ -11,7 +11,8 @@ import { computed } from 'vue'
 import { parseMarkdown } from '../utils/markdown.ts'
 import InlineTokens from './InlineTokens.vue'
 
-const props = defineProps<{ text: string }>()
+const props = defineProps<{ text: string; activeRef?: number | null }>()
+const emit = defineEmits<{ refClick: [index: number] }>()
 const blocks = computed(() => parseMarkdown(props.text))
 </script>
 
@@ -30,7 +31,11 @@ const blocks = computed(() => parseMarkdown(props.text))
           :key="li"
         >
           <br v-if="li > 0">
-          <InlineTokens :tokens="line" />
+          <InlineTokens
+            :tokens="line"
+            :active-ref="activeRef"
+            @ref-click="emit('refClick', $event)"
+          />
         </template>
       </p>
 
@@ -42,7 +47,11 @@ const blocks = computed(() => parseMarkdown(props.text))
           v-for="(item, ii) in block.items"
           :key="ii"
         >
-          <InlineTokens :tokens="item" />
+          <InlineTokens
+            :tokens="item"
+            :active-ref="activeRef"
+            @ref-click="emit('refClick', $event)"
+          />
         </li>
       </ol>
       <ul
@@ -53,7 +62,11 @@ const blocks = computed(() => parseMarkdown(props.text))
           v-for="(item, ii) in block.items"
           :key="ii"
         >
-          <InlineTokens :tokens="item" />
+          <InlineTokens
+            :tokens="item"
+            :active-ref="activeRef"
+            @ref-click="emit('refClick', $event)"
+          />
         </li>
       </ul>
 

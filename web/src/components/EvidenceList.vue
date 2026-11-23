@@ -17,11 +17,22 @@
  *   `base.css`。
  * ==========================================================================-->
 <script setup lang="ts">
+import { nextTick, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useSessionStore } from '../stores/session'
 const sessionStore = useSessionStore()
 const { evidence, hasRound } = storeToRefs(sessionStore)
 
+/* R5a：联动态住在单轮作用域模块（不进全局 Pinia），由 Answer 的角标与这里共用。 */
+import { activeEvidenceIndex, isEvidenceExpanded, locateStep } from './answerLink.ts'
+const listRef = ref<HTMLElement | null>(null)
+
+watch(activeEvidenceIndex, async (idx) => {
+  if (idx === null) return
+  await nextTick()
+  const row = listRef.value?.querySelectorAll('.ev-row')[idx]
+  row?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+})
 </script>
 
 <template>
@@ -40,20 +51,36 @@ const { evidence, hasRound } = storeToRefs(sessionStore)
       这一轮服务端没有给出可展示的依据片段。
     </p>
 
+    <p
+      v-else-if="!isEvidenceExpanded"
+      class="hint ev-collapsed"
+    >
+      已收集 {{ evidence.length }} 条证据（点开查看片段）。
+    </p>
+
     <ul
       v-else
+      ref="listRef"
       class="ev-list"
     >
       <li
         v-for="(row, i) in evidence"
         :key="i"
         class="ev-row"
+        :class="{ 'ev-row--pulse': activeEvidenceIndex === i }"
       >
         <span class="ev__name">{{ row.node }}</span>
         <span class="num">{{ row.count }}</span>
         <p class="ev__body">
           {{ row.preview }}
         </p>
+        <button
+          type="button"
+          class="ry-btn ry-btn--text ev__locate"
+          @click="locateStep(i)"
+        >
+          来源步骤
+        </button>
       </li>
     </ul>
   </div>

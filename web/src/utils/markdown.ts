@@ -19,13 +19,14 @@ export type InlineToken =
   | { kind: 'text'; text: string }
   | { kind: 'strong'; text: string }
   | { kind: 'code'; text: string }
+  | { kind: 'ref'; text: string }
 
 export type MdBlock =
   | { kind: 'paragraph'; lines: readonly InlineToken[][] }
   | { kind: 'list'; ordered: boolean; items: readonly InlineToken[][] }
   | { kind: 'code'; lines: readonly string[] }
 
-/** 解析一行里的 **加粗** 与 `行内码`；未闭合的标记按普通文本保留，不吞字。 */
+/** 解析一行里的 **加粗**、`行内码` 与 `[n]` 引用角标；未闭合的标记按普通文本保留，不吞字。 */
 export function parseInline(line: string): InlineToken[] {
   const out: InlineToken[] = []
   let buf = ''
@@ -49,6 +50,16 @@ export function parseInline(line: string): InlineToken[] {
         flush()
         out.push({ kind: 'code', text: line.slice(i + 1, end) })
         i = end + 1
+        continue
+      }
+    }
+    // [n] 引用角标：只认 1–3 位数字，渲染层据此锚定证据卡片；其它方括号按文本保留。
+    if (line[i] === '[') {
+      const ref = line.slice(i + 1).match(/^(\d{1,3})\]/)
+      if (ref) {
+        flush()
+        out.push({ kind: 'ref', text: ref[1] ?? '' })
+        i += 1 + (ref[0]?.length ?? 0)
         continue
       }
     }

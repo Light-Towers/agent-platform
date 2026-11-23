@@ -13,8 +13,10 @@
  * ⚠ 本件没有 <style> 块，理由见 ThemeToggle.vue 头注。
  * ==========================================================================-->
 <script setup lang="ts">
+import { watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useSessionStore } from '../stores/session'
+import { activeEvidenceIndex, resetLink, selectEvidence } from './answerLink.ts'
 import type { Terminal } from '../stores/session'
 const sessionStore = useSessionStore()
 const { answerText, busy, hasRound, richAnswer, terminal, threadId } = storeToRefs(sessionStore)
@@ -23,6 +25,9 @@ const { useExample } = sessionStore
 import MarkdownText from './MarkdownText.vue'
 import ImageStrip from './ImageStrip.vue'
 import CitationList from './CitationList.vue'
+
+/* 新一轮开始即清空上一轮的角标/高亮；失败态保留，便于对照证据与轨迹。 */
+watch(busy, (streaming) => { if (streaming) resetLink() })
 
 /** 终态三值的人话。判据只看 `done`（A7）：`open` 那句不得写成「完成」。 */
 const TERM_LABEL: Record<Terminal, string> = {
@@ -67,7 +72,11 @@ const TERM_LABEL: Record<Terminal, string> = {
         v-else
         class="answer__text"
       >
-        <MarkdownText :text="answerText" /><span
+        <MarkdownText
+          :text="answerText"
+          :active-ref="activeEvidenceIndex"
+          @ref-click="selectEvidence"
+        /><span
           v-if="busy"
           class="dot-live"
           aria-hidden="true"
@@ -78,6 +87,13 @@ const TERM_LABEL: Record<Terminal, string> = {
         <ImageStrip :images="richAnswer.images" />
         <CitationList :citations="richAnswer.citations" />
       </template>
+
+      <p
+        v-if="terminal === 'failed'"
+        class="hint answer__error"
+      >
+        本轮以失败收尾；已检索到的证据与过程保留，可在提交区重试（不会清掉已发生的读数）。
+      </p>
 
       <p class="answer__foot">
         <span

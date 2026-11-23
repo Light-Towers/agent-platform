@@ -52,5 +52,26 @@ ok(parseInline('a `b` c').some((t) => t.kind === 'code' && t.text === 'b'), 'C2 
 const xss = parseInline('<img src=x onerror=alert(1)> **粗**')
 ok(xss.some((t) => t.kind === 'text' && t.text.includes('<img')), 'C3 HTML 串当文本（无 v-html，天然安全）')
 
+console.log('§D 引用角标（R5a）')
+ok(parseInline('见 [1] 与 [12]').filter((t) => t.kind === 'ref').map((t) => t.text).join(',') === '1,12',
+   'D1 数字角标解析为 ref token（供证据锚定）')
+ok(parseInline('[abc] 与 [12x] 按文本').every((t) => t.kind !== 'ref'),
+   'D2 非数字方括号不误判为角标，按文本保留')
+
+console.log('§E 不支持语法的边界（R5c：不丢字、不进 HTML）')
+const table = '| 列1 | 列2 |\n| --- | --- |\n| a | b |'
+const tb = parseMarkdown(table)
+ok(tb.length > 0 && tb.every((b) => b.kind === 'paragraph' || b.kind === 'list'),
+   'E1 表格按普通段落逐行显示（不丢字、不假装有表格块）')
+ok(tb.map((b) => b.kind === 'paragraph' ? b.lines.map((line) => line.map((t) => t.text).join('')).join('') : '').join('').includes('列1'),
+   'E2 表格原文未被吞掉')
+const nested = '1. 第一层\n   - 第二层\n2. 另一项'
+const nb = parseMarkdown(nested)
+ok(JSON.stringify(nb).includes('第二层'), 'E3 多级缩进列表的内层文字仍上屏')
+ok(parseMarkdown('前文\n```js\nconst x = 1\n```\n后文').filter((b) => b.kind === 'code').length === 1,
+   'E4 代码块边界仍成立')
+const xss2 = parseInline('<img src=x onerror=alert(1)> [1]')
+ok(xss2.some((t) => t.kind === 'text' && t.text.includes('<img')), 'E5 XSS 串仍按文本')
+
 console.log(`\n合计：${failures === 0 ? '全部通过' : failures + ' 条失败'}`)
 process.exit(failures === 0 ? 0 : 1)

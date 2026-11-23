@@ -8,7 +8,8 @@
 <script setup lang="ts">
 import type { InlineToken } from '../utils/markdown.ts'
 
-defineProps<{ tokens: readonly InlineToken[] }>()
+defineProps<{ tokens: readonly InlineToken[]; activeRef?: number | null | undefined }>()
+const emit = defineEmits<{ refClick: [index: number] }>()
 </script>
 
 <template>
@@ -23,6 +24,16 @@ defineProps<{ tokens: readonly InlineToken[] }>()
       v-else-if="tok.kind === 'code'"
       class="md-text__code"
     >{{ tok.text }}</code>
+    <button
+      v-else-if="tok.kind === 'ref'"
+      type="button"
+      class="md-ref"
+      :class="{ 'md-ref--active': activeRef === Number(tok.text) - 1 }"
+      :aria-label="`查看依据 ${tok.text}`"
+      @click="emit('refClick', Number(tok.text) - 1)"
+    >
+      {{ tok.text }}
+    </button>
     <template v-else>
       {{ tok.text }}
     </template>

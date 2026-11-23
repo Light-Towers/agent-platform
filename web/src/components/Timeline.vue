@@ -12,16 +12,43 @@
  *   所以整条时间线常显而按钮不存在（`display:none` 的按钮同时退出 Tab 顺序）。
  * ==========================================================================-->
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 
 import { storeToRefs } from 'pinia'
 import { useSessionStore } from '../stores/session'
 const sessionStore = useSessionStore()
-const { busy, eventCount, hasRound, timeline } = storeToRefs(sessionStore)
+const { busy, eventCount, hasRound, terminal, timeline } = storeToRefs(sessionStore)
 
 import { iconPathOf, rowClassOf } from './icons'
 
-const open = ref(false)
+/* R5a 渐进折叠：流式期展开；正常完成后延迟 300ms 收敛为摘要；手动操作优先；失败保持展开。 */
+import { activeEvidenceIndex, forceTimelineOpen } from './answerLink.ts'
+const emit = defineEmits<{ stop: [] }>()
+const manualOpen = ref(false)
+const collapsed = ref(false)
+
+watch([busy, hasRound], ([streaming, ran]) => {
+  if (streaming) { collapsed.value = false; return }
+  if (ran && !manualOpen.value) {
+    setTimeout(() => { if (!busy.value) collapsed.value = true }, 300)
+  }
+})
+
+const expanded = computed(() =>
+  !collapsed.value || forceTimelineOpen.value || busy.value || terminal.value === 'failed')
+
+/** 证据卡片反向溯源：第 n 条依据对应时间线里第 n 个 evidence 行。 */
+const highlightedRow = computed(() => {
+  if (activeEvidenceIndex.value === null) return -1
+  let seen = 0
+  for (let i = 0; i < timeline.value.length; i += 1) {
+    if (timeline.value[i]?.event === 'evidence') {
+      if (seen === activeEvidenceIndex.value) return i
+      seen += 1
+    }
+  }
+  return -1
+})
 </script>
 
 <template>
@@ -29,17 +56,32 @@ const open = ref(false)
     <button
       type="button"
       class="ry-btn tl-toggle"
-      :aria-expanded="open"
+      :aria-expanded="expanded"
       aria-controls="tlList"
-      @click="open = !open"
+      @click="manualOpen = !expanded; collapsed = expanded"
     >
-      {{ open ? '收起事件' : '展开事件' }}
+      {{ expanded ? '收起事件' : '展开事件' }}
     </button>
+    <button
+      v-if="busy"
+      type="button"
+      class="ry-btn ry-btn--text tl-stop"
+      @click="emit('stop')"
+    >
+      停止生成
+    </button>
+    <p
+      v-if="collapsed && !expanded"
+      class="hint tl-summary"
+    >
+      本轮 {{ eventCount }} 个过程事件（已收敛；展开可看明细）
+    </p>
 
     <div
+      v-show="expanded"
       id="tlList"
       class="timeline"
-      :class="{ open }"
+      :class="{ open: expanded }"
     >
       <p
         v-if="!hasRound && eventCount === 0"
@@ -52,7 +94,7 @@ const open = ref(false)
         v-for="(row, i) in timeline"
         :key="i"
         class="ev"
-        :class="rowClassOf(row)"
+        :class="[rowClassOf(row), { 'ev--pulse': i === highlightedRow }]"
       >
         <svg
           class="ico ev__ico"

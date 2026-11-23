@@ -970,5 +970,35 @@ a.ry-btn { text-decoration: none; }
   background: var(--bg-raised);
 }
 
+/* ---- R5a 引用联动 / 渐进折叠（只引语义令牌，色值禁令仍由断言 1 守） ---- */
+.md-ref {
+  display: inline-block;
+  min-width: var(--sp-4);
+  padding: 0 var(--sp-1);
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-sm);
+  background: var(--bg-raised);
+  color: var(--text-1);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  cursor: pointer;
+}
+.md-ref--active {
+  border-color: var(--ry-primary);
+  background: var(--tint-gate);
+}
+.ev-row--pulse,
+.ev--pulse {
+  animation: ap-pulse 1.8s var(--ease-out);
+}
+@keyframes ap-pulse {
+  0%, 100% { border-color: var(--border-control); }
+  25%, 75% { border-color: var(--ry-primary); }
+}
+.ev-collapsed,
+.tl-summary,
+.answer__error { color: var(--text-1); }
+.tl-stop { margin-inline-start: var(--sp-2); }
+
 /* @layer base 收尾 */
 }
