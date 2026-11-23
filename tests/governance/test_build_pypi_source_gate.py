@@ -68,5 +68,19 @@ def test_p18_true_face_passes(rel):
     assert lint._dockerfile_source_violation(rel, text) is None
 
 
+def test_p18_recipe_layer_true_face_passes():
+    # 入库配方层（下一个 agent 的真相源）必须过
+    text = (_ROOT / "scripts/deploy-recipe/build-env.sh").read_text(encoding="utf-8")
+    assert lint._dockerfile_source_violation("scripts/deploy-recipe/build-env.sh", text) is None
+
+
+def test_p18_recipe_layer_flags_slow_source():
+    # 配方层若把默认改回慢源，纯判定要能咬
+    assert lint._dockerfile_source_violation(
+        "scripts/deploy-recipe/build-env.sh",
+        'PIP_INDEX_URL="https://pypi.tuna.tsinghua.edu.cn/simple"',
+    ) is not None
+
+
 def test_p18_full_scan_green():
     assert lint.check_build_pypi_source() == []

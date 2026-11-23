@@ -25,7 +25,7 @@
 
 ### 2.1 单一真相源：3 个 Dockerfile 的默认值（它们在版本控制里）
 
-⚠ 实取订正：`deploy/k8s/` 整个被 `.gitignore:145` 排除，**不在版本控制里**——所以曾试图新增的 `build-env.sh` 放那里是错的（gitignored 的本机副本不是真相源，新克隆不存在）。真相源必须是入库文件：**3 个 Dockerfile 的 `ARG PIP_INDEX_URL` 默认值**（它们被 CI 和 doc-sync 保护）。
+⚠ 实取订正：`deploy/k8s/` 整个被 `.gitignore:145` 排除，**不在版本控制里**——曾试图把 `build-env.sh` 放那里是错的（gitignored 的本机副本不是真相源，新克隆不存在）。且 `.gitignore:13` 的 `build/` 规则会连 `scripts/build/` 一起误伤（实踩）。最终真相源放在**入库的 `scripts/deploy-recipe/build-env.sh`**（公网源、零内网真值），3 个 Dockerfile 默认值与它对齐，两者都受 P18 门禁 + doc-sync 保护。构建机上 gitignored 的 `build.sh` 改为 source 这个入库配方（241 本机已改并备份 `.bak-20261123`），消除硬编码覆盖点。流程与踩坑清单见 `scripts/deploy-recipe/README.md`（下一个 agent 的入口）。
 
 - 3 个 Dockerfile 的默认 `ARG PIP_INDEX_URL` 统一改成阿里云；`PIP_TRUSTED_HOST` 用 ARG 参数化（不再硬编码）。
 - nl2sql Dockerfile 原本**完全没配 pip 源**（裸 pip 走官方 PyPI，也是慢点），补上统一配置。
@@ -58,7 +58,7 @@
 
 ## 5. 待拍板
 
-- **方案范围**：(a) 全量治本（改 3 Dockerfile + build.sh + build-env.sh + 门禁，本方案推荐）——一劳永逸；(b) 只改这次构建的 `--build-arg` 用阿里云（最小改动，但下次还会踩）。
+- **方案范围**：已按 (a) 全量治本交付——3 Dockerfile + 入库配方层 `scripts/deploy-recipe/` + P18 门禁扩面 + 241 build.sh 改 source 配方。**可复用性**：下一个 agent 从 `scripts/deploy-recipe/README.md` 入口读取流程，P18 门禁自动拦截慢源回退；gitignored 的 deploy 脚本只按配方取值、不含可读但失效的常量。
 - **torch 缓存策略**：(a) 去 --no-cache-dir 复用 pip 缓存（改动小）；(b) 宿主持久缓存挂卷（改动大但最彻底）。
 
 ## 6. D24 收口

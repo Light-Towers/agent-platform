@@ -1704,21 +1704,33 @@ def _dockerfile_source_violation(rel: str, text: str) -> str | None:
 
 
 def check_build_pypi_source() -> list[str]:
-    """P18 扫描：所有 Dockerfile 的生产指令不得含慢源。"""
+    """P18 扫描：Dockerfile + 入库构建配方层(scripts/deploy-recipe/) 不得含慢源；配方层必须在位。"""
     violations: list[str] = []
-    for py_file in ROOT.rglob("*"):
-        if py_file.name != "Dockerfile" and not py_file.name.startswith("Dockerfile."):
+    build_env = ROOT / "scripts/deploy-recipe/build-env.sh"
+    if not build_env.is_file():
+        violations.append("<<< BUILD-ENV-MISSING 缺 scripts/deploy-recipe/build-env.sh：构建源无入库真相源，下个 agent 会再踩慢源")
+    for path in ROOT.rglob("*"):
+        is_dockerfile = path.name == "Dockerfile" or path.name.startswith("Dockerfile.")
+        is_build_recipe = "scripts/deploy-recipe/" in path.as_posix().replace("\\", "/") and path.suffix == ".sh"
+        if not (is_dockerfile or is_build_recipe):
             continue
-        rel = py_file.relative_to(ROOT).as_posix()
+        rel = path.relative_to(ROOT).as_posix()
         if _skipped_rel(rel):
             continue
         try:
-            text = py_file.read_text(encoding="utf-8")
+            text = path.read_text(encoding="utf-8")
         except (UnicodeDecodeError, OSError):
             continue
         violation = _dockerfile_source_violation(rel, text)
         if violation:
             violations.append(violation)
+    # 配方层必须指向快源（防止有人把 build-env.sh 默认改回慢源）
+    if build_env.is_file():
+        env_text = build_env.read_text(encoding="utf-8", errors="replace")
+        if _SLOW_PIPY_HOST in "\n".join(
+            line for line in env_text.splitlines() if _is_code_line(line)
+        ):
+            violations.append("scripts/deploy-recipe/build-env.sh: 默认 PyPI 源不得为慢源")
     return violations
 
 
@@ -1937,12 +1949,12 @@ def main() -> int:
 
     v21 = check_build_pypi_source()
     if v21:
-        print("P18 架构约束违反：Dockerfile 构建默认 PyPI 源不得回退到慢源（plan-build-pypi-acceleration）")
+        print("P18 架构约束违反：Dockerfile + scripts/deploy-recipe/ 配方层不得回退慢源，且配方层须在位（plan-build-pypi-acceleration）")
         for v in v21:
             print(f"  {v}")
         rc = 1
     else:
-        print("P18 架构约束通过：所有 Dockerfile 的默认 PyPI 源均非慢源")
+        print("P18 架构约束通过：Dockerfile + scripts/deploy-recipe/ 配方层均非慢源，且配方层在位")
     return rc
 
 
