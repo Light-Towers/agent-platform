@@ -164,6 +164,7 @@ class DeterministicPlanner(Planner):
             mcp_tool=ctx.mcp_tool,
             mcp_params=ctx.mcp_params,
             last_snapshot=ctx.last_snapshot,
+            images=ctx.images,
         )
 
     async def execute(
@@ -175,6 +176,7 @@ class DeterministicPlanner(Planner):
         settings = get_settings()
         question = plan.question or plan.sub_query or ""
         workspace_id = plan.workspace_id
+        images = list(plan.images)  # 会话传图：重规划时回填，避免丢失（plan-image-qa-fullstack）
 
         yield StreamEvent(type="route", payload={"capability": plan.route, "reason": plan.reason})
         if plan.route == "blocked":
@@ -225,6 +227,7 @@ class DeterministicPlanner(Planner):
                             tenant_id=plan.tenant_id,
                             messages=[],
                             llm=runtime.llm,
+                            images=images,
                         )
                     )
                     # re-plan 新建的 Plan 不携带原快照，回填避免丢失（WS-2）
@@ -245,6 +248,12 @@ class DeterministicPlanner(Planner):
             # 合成 + 记忆沉淀（与 synthesize_node 同源）
             # compaction 路径：plan() 把摘要写入 messages，这里消费它作为合成上下文
             context_messages = plan.messages
+            # 多模态：带图请求用 VL 模型合成（plan-image-qa-fullstack）。
+            vl_llm = None
+            if images:
+                from agent_server.agent.llm import build_vl_model
+
+                vl_llm = build_vl_model()
             answer = await self._compose(
                 question,
                 evidence,
@@ -252,6 +261,8 @@ class DeterministicPlanner(Planner):
                 runtime.llm,
                 context_messages,
                 snapshot=plan.last_snapshot,
+                images=images,
+                vl_llm=vl_llm,
             )
             if settings.memory_enabled and runtime.pool is not None:
                 facts = None
@@ -351,6 +362,8 @@ class DeterministicPlanner(Planner):
         llm,
         context_messages: list[Any] | None = None,
         snapshot: dict[str, Any] | None = None,
+        images: list[str] | None = None,
+        vl_llm=None,
     ) -> str:
         """答案合成：无 LLM 走模板拼装，有 LLM 走证据约束提示（与 graph._compose 同源）。
 
@@ -384,10 +397,27 @@ class DeterministicPlanner(Planner):
         if snapshot_text:
             blocks.append("## 任务状态\n" + snapshot_text)
         blocks.append(f"## 问题\n{question}")
-        raw = await llm.ainvoke(
-            [
-                {"role": "system", "content": _SYNTHESIZE_PROMPT},
-                {"role": "user", "content": "\n\n".join(blocks)},
-            ]
-        )
+        blocks_text = "\n\n".join(blocks)
+        # 会话传图（plan-image-qa-fullstack）：有图 + VL 客户端 ⇒ 用多模态 message；
+        # 否则逐字保持原纯文本调用（零回归面）。
+        if images and vl_llm is not None:
+            user_content: list[dict[str, Any]] = [{"type": "text", "text": blocks_text}]
+            for img in images:
+                user_content.append({
+                    "type": "image_url",
+                    "image_url": {"url": img},  # img 已是 data URI（_resolve_images 转换）
+                })
+            raw = await vl_llm.ainvoke(
+                [
+                    {"role": "system", "content": _SYNTHESIZE_PROMPT},
+                    {"role": "user", "content": user_content},
+                ]
+            )
+        else:
+            raw = await llm.ainvoke(
+                [
+                    {"role": "system", "content": _SYNTHESIZE_PROMPT},
+                    {"role": "user", "content": blocks_text},
+                ]
+            )
         return raw.content if hasattr(raw, "content") else str(raw)

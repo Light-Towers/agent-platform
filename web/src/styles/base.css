@@ -247,6 +247,14 @@ a.ry-btn { text-decoration: none; }
 /* 提交钮与它那句理由并排，窄栏换行（两条都是文案，不靠 tooltip） */
 .composer__row { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-2); }
 
+/* 会话传图：待发送缩略图 + 文件选择（plan-image-qa-fullstack） */
+.composer__images { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
+.composer__thumb {
+  width: 56px; height: 56px; object-fit: cover; display: block;
+  border: 1px solid var(--border-decor); border-radius: var(--radius-sm);
+}
+.composer__file { max-width: 180px; font-size: var(--fs-xs); }
+
 .hint { font-size: var(--fs-xs); color: var(--text-2); }
 
 /* 凭据框（现由 `poc.html` 的无构建静态预览使用）：值只在内存，不落 localStorage

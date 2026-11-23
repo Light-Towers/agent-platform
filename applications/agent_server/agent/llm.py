@@ -37,3 +37,33 @@ def build_chat_model() -> FallbackChatModel | None:
     primary = ChatOpenAI(model=settings.llm_model, **common)
     fallback = ChatOpenAI(model=settings.llm_fallback_model, **common)
     return FallbackChatModel(primary, fallback)
+
+
+def build_vl_model():
+    """多模态 LLM 客户端（会话传图提问，plan-image-qa-fullstack §刀1）。
+
+    与 build_chat_model 同一端点/密钥/观测回调，仅模型换成 vl_model（视觉语言模型）。
+    vl_model 为空或 image_qa_enabled=false 时返回 None —— 调用方据此走文本降级。
+    只在带图请求时使用；路由/压缩/记忆抽取仍走 build_chat_model 的文本 client。
+    """
+    settings = get_settings()
+    if not settings.image_qa_enabled or not settings.vl_model or not settings.llm_enabled:
+        return None
+    from agent_runtime.tracing import get_langfuse_callbacks
+    from langchain_openai import ChatOpenAI
+
+    common: dict = {
+        "api_key": settings.llm_api_key,
+        "base_url": settings.llm_base_url,
+        "model": settings.vl_model,
+        "temperature": 0,
+        "timeout": settings.llm_timeout,
+    }
+    callbacks = get_langfuse_callbacks(
+        public_key=settings.langfuse_public_key,
+        secret_key=settings.langfuse_secret_key,
+        host=settings.langfuse_host,
+    )
+    if callbacks:
+        common["callbacks"] = callbacks
+    return ChatOpenAI(**common)

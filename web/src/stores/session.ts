@@ -88,6 +88,8 @@ const ranOnce = ref(false)
  *  登出不清（它不是凭据，只是检索偏好）。可写导出的理由同 `question`：
  *  选择器的 v-model 目标必须可写。 */
 const knowledgeScope = ref('')
+/** 会话传图（plan-image-qa-fullstack）：本轮待发送的图片 ref，ask() 后清空。 */
+const pendingImages = ref<string[]>([])
 const snap = ref<StreamSnapshot>(initialState())
 const bannerList = ref<string[]>([])
 const foldedCount = ref(0)
@@ -241,6 +243,7 @@ async function ask(fetchImpl?: typeof fetch, sessionId?: string): Promise<void> 
     ...(fetchImpl !== undefined ? { fetchImpl } : {}),
     ...(sessionId !== undefined && sessionId !== '' ? { sessionId } : {}),
     ...(knowledgeScope.value !== '' ? { knowledgeId: knowledgeScope.value } : {}),
+    ...(pendingImages.value.length > 0 ? { images: [...pendingImages.value] } : {}),
   }
   try {
     const final = await streamQuery(opts)
@@ -259,6 +262,7 @@ async function ask(fetchImpl?: typeof fetch, sessionId?: string): Promise<void> 
   } finally {
     activeController = null
     streaming.value = false
+    pendingImages.value = []  // 图片是一次性的，发完即清（避免下一轮误带）
   }
 }
 
@@ -517,6 +521,7 @@ async function signOut(fetchImpl?: typeof fetch): Promise<void> {
     authMode,
     authToken,
     knowledgeScope,
+    pendingImages,
     canSubmit,
     waiting,
     traceNote,

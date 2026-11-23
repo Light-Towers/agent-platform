@@ -7,7 +7,7 @@
  * ==========================================================================-->
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
-import { isSafeImageUrl, type RichImage } from '../stores/sseReducer.ts'
+import { isSafeImageUrl, toProxyImageUrl, type RichImage } from '../stores/sseReducer.ts'
 
 const props = defineProps<{ images: readonly RichImage[] }>()
 
@@ -67,7 +67,7 @@ function onKeydown(event: KeyboardEvent): void {
         @click="open(img, $event)"
       >
         <img
-          :src="img.url"
+          :src="toProxyImageUrl(img.url)"
           :alt="img.caption || '回答引用的图片'"
           loading="lazy"
           referrerpolicy="no-referrer"
@@ -90,7 +90,7 @@ function onKeydown(event: KeyboardEvent): void {
         @click.stop
       >
         <img
-          :src="preview.url"
+          :src="toProxyImageUrl(preview.url)"
           :alt="preview.caption || '图片预览'"
           referrerpolicy="no-referrer"
         >

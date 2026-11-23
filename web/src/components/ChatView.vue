@@ -28,9 +28,50 @@ const {
   loadHistory, loadSessions, newSession, removeSession, renameSession, selectSession, askCurrent,
 } = conversationsStore
 const {
-  authRole, authToken, busy, canSubmit, evidence, eventCount, knowledgeScope, question, terminal, traceNote, waiting,
+  authRole, authToken, busy, canSubmit, evidence, eventCount, knowledgeScope, pendingImages, question, terminal, traceNote, waiting,
 } = storeToRefs(sessionStore)
 const { resetRound, abortCurrent } = sessionStore
+import { applyCredentialHeaders } from '../api/auth.ts'
+
+/* 会话传图（plan-image-qa-fullstack）：本地预览 + 上传后的不透明 ref。
+ * 图片先 POST /chat/upload-image 存 PG，返回 ref 进 pendingImages，随 /query 发送。 */
+const imagePreview = ref<string[]>([])
+const imageUploadError = ref('')
+async function onPickImage(event: Event): Promise<void> {
+  const input = event.target as HTMLInputElement
+  const files = Array.from(input.files ?? [])
+  input.value = ''  // 允许重复选同一张
+  imageUploadError.value = ''
+  for (const file of files) {
+    if (!file.type.startsWith('image/')) {
+      imageUploadError.value = '仅支持图片文件'
+      continue
+    }
+    if (pendingImages.value.length >= 4) {
+      imageUploadError.value = '最多 4 张图片'
+      break
+    }
+    const form = new FormData()
+    form.append('file', file)
+    form.append('session_id', activeSessionId.value || '')
+    const headers = new Headers()
+    applyCredentialHeaders(headers, { token: authToken.value })
+    try {
+      const resp = await fetch('/chat/upload-image', { method: 'POST', headers, body: form })
+      if (!resp.ok) {
+        imageUploadError.value = `上传失败（HTTP ${resp.status}）`
+        continue
+      }
+      const data = await resp.json() as { image_ref?: string }
+      if (data.image_ref) {
+        pendingImages.value = [...pendingImages.value, data.image_ref]
+        imagePreview.value = [...imagePreview.value, URL.createObjectURL(file)]
+      }
+    } catch {
+      imageUploadError.value = '图片上传失败（服务端不可达）'
+    }
+  }
+}
 
 /** 「查看过程」开关：仅 admin 可见，判据用服务端回读的角色码。 */
 const canInspect = computed(() => authRole.value === 'admin')
@@ -75,6 +116,9 @@ const submitHint = computed(() =>
 
 async function submit(): Promise<void> {
   await askCurrent()
+  for (const url of imagePreview.value) URL.revokeObjectURL(url)
+  imagePreview.value = []
+  imageUploadError.value = ''
   await loadHistory()
   resetRound()
   await loadSessions()
@@ -232,7 +276,35 @@ async function commitRename(id: string): Promise<void> {
           autocomplete="off"
           aria-label="问题"
         >
+        <div
+          v-if="imagePreview.length > 0"
+          class="composer__images"
+        >
+          <img
+            v-for="(src, i) in imagePreview"
+            :key="src"
+            :src="src"
+            class="composer__thumb"
+            :alt="`待发送图片 ${i + 1}`"
+          >
+          <span class="hint">本轮附带 {{ imagePreview.length }} 张图片</span>
+        </div>
         <div class="composer__row">
+          <label class="o-head-sm">
+            <input
+              type="file"
+              accept="image/png,image/jpeg,image/webp,image/gif"
+              multiple
+              class="composer__file"
+              aria-label="上传图片提问"
+              @change="onPickImage"
+            >
+            图片
+          </label>
+          <span
+            v-if="imageUploadError !== ''"
+            class="hint"
+          >{{ imageUploadError }}</span>
           <label class="o-head-sm">
             知识范围
             <select

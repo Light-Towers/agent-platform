@@ -22,7 +22,7 @@ import { useSessionStore } from '../stores/session'
 const sessionStore = useSessionStore()
 const { authToken } = storeToRefs(sessionStore)
 
-import { isSafeImageUrl } from '../stores/sseReducer.ts'
+import { isSafeImageUrl, toProxyImageUrl } from '../stores/sseReducer.ts'
 import {
   uploadKbDocuments,
   getKbStatus,
@@ -290,13 +290,38 @@ const split = computed(() => status.value?.summary?.split)
 /** 从切片预览 head 中提取图片链接（导入时写回的 MinIO 链接），渲染成缩略图。
  *  前端二次校验 scheme；服务端 head 截断导致链接不完整时自然提不到，不报错。 */
 const PREVIEW_IMG_RE = /!\[[^\]]*\]\(([^)\s]+)\)/g
+/** 从任意 markdown 文本提取安全图片 URL（去重）；切片明细与预览面板共用。 */
+function extractImageUrls(text: string): string[] {
+  const out: string[] = []
+  const seen = new Set<string>()
+  for (const match of text.matchAll(PREVIEW_IMG_RE)) {
+    const url = match[1]
+    if (!url || seen.has(url) || !isSafeImageUrl(url)) continue
+    seen.add(url)
+    out.push(url)
+  }
+  return out
+}
+/** 按当前展开文档取切片里的图片（切片明细缩略图用）。 */
+const expandedDocImages = computed(() => {
+  const doc = props.documents.find((d) => d.source_doc === expandedDoc.value)
+  const out: string[] = []
+  const seen = new Set<string>()
+  for (const chunk of doc?.chunks ?? []) {
+    for (const url of extractImageUrls(chunk.content)) {
+      if (seen.has(url)) continue
+      seen.add(url)
+      out.push(url)
+    }
+  }
+  return out
+})
 const previewImages = computed(() => {
   const out: { url: string; caption: string }[] = []
   const seen = new Set<string>()
   for (const preview of split.value?.previews ?? []) {
-    for (const match of preview.head.matchAll(PREVIEW_IMG_RE)) {
-      const url = match[1]
-      if (!url || seen.has(url) || !isSafeImageUrl(url)) continue
+    for (const url of extractImageUrls(preview.head)) {
+      if (seen.has(url)) continue
       seen.add(url)
       out.push({ url, caption: preview.title || `第 ${preview.part} 片` })
     }
@@ -424,6 +449,25 @@ const failed = computed(() => status.value?.status === 'failed')
                 <code class="t-name">{{ chunk.content.slice(0, 160) }}{{ chunk.content.length > 160 ? '…' : '' }}</code>
               </li>
             </ol>
+            <div
+              v-if="expandedDocImages.length > 0"
+              class="rich-images"
+            >
+              <div class="rich-images__label">
+                本文档切片中的图片（{{ expandedDocImages.length }}）
+              </div>
+              <div class="rich-images__strip">
+                <img
+                  v-for="img in expandedDocImages"
+                  :key="img"
+                  class="kb-preview-img"
+                  :src="toProxyImageUrl(img)"
+                  :alt="img"
+                  loading="lazy"
+                  referrerpolicy="no-referrer"
+                >
+              </div>
+            </div>
           </details>
         </div>
       </div>
@@ -603,7 +647,7 @@ const failed = computed(() => status.value?.status === 'failed')
               v-for="img in previewImages"
               :key="img.url"
               class="kb-preview-img"
-              :src="img.url"
+              :src="toProxyImageUrl(img.url)"
               :alt="img.caption"
               loading="lazy"
               referrerpolicy="no-referrer"

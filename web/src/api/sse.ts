@@ -56,6 +56,11 @@ export interface StreamQueryOptions {
    */
   readonly knowledgeId?: string
   /**
+   * 会话上传图片的不透明引用（plan-image-qa-fullstack）。服务端按 ref 取字节转 data URI
+   * 喂 VL 模型。空/缺省 = 纯文本请求。
+   */
+  readonly images?: readonly string[]
+  /**
    * 登录令牌（PR-2b，方案 D-a/D-i）。非空 ⇒ 本请求带 `Authorization: Bearer`；
    * 空 ⇒ 不发入口凭据头（生产现网后端会回 401）。
    * 装配规则不在这里写，在 `auth.ts` 的 `applyCredentialHeaders`。
@@ -94,6 +99,9 @@ export async function streamQuery(opts: StreamQueryOptions): Promise<StreamSnaps
     if (opts.sessionId !== undefined) body.session_id = opts.sessionId
     if (opts.tenantId !== undefined) body.tenant_id = opts.tenantId
     if (opts.knowledgeId !== undefined && opts.knowledgeId !== '') body.knowledge_id = opts.knowledgeId
+    if (opts.images !== undefined && opts.images.length > 0) {
+      body.context = { images: [...opts.images] }
+    }
     const doFetch = opts.fetchImpl ?? globalThis.fetch
     // `signal` 单独条件赋值：`RequestInit.signal` 在 exactOptionalPropertyTypes 下接
     // `AbortSignal | null`，把 `AbortSignal | undefined` 直接摊进对象字面量会当场红。

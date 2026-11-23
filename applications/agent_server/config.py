@@ -49,6 +49,15 @@ class Settings(BaseLLMSettings):
     # LLM 补充字段
     llm_fallback_model: str = "gpt-4o-mini"
 
+    # 多模态（会话传图提问，plan-image-qa-fullstack-2026-11-23）：
+    # 复用 KS 已配的 VL 模型；与 llm_* 同一端点/密钥。空 = 不启用多模态（降级文本占位）。
+    vl_model: str = "Qwen/Qwen3-VL-8B-Instruct"
+    image_qa_enabled: bool = True  # 关掉时带图请求降级为文本占位，不崩
+    image_qa_force_deterministic: bool = True  # 带图请求强制走 deterministic（graph 路径不支持图）
+    # 会话上传图片存 PG bytea（chat_images 表）；单张上限字节数 + 保留天数（TTL 清理）
+    chat_image_max_bytes: int = 5 * 1024 * 1024
+    chat_image_ttl_days: int = 7
+
     # Embedding 补充字段
     embedding_mode: str = "auto"  # auto | mock | remote
 
@@ -101,6 +110,14 @@ class Settings(BaseLLMSettings):
     # 主机名（不含端口/协议，如 minio,kb.internal）。空 = 拒绝一切图片回显（fail-closed），
     # 部署侧必须显式配置；adapter 构造 ImageRef 前 + 前端渲染时各校验一次（双保险）。
     rich_image_allowed_hosts: str = ""
+
+    # 图片代理（plan-image-qa-fullstack D1=B）：agent_server 用这些凭证从私有 MinIO 桶取
+    # 图片字节，流式回给浏览器（浏览器无法直连集群内 minio:9000）。连接信息集群内有效。
+    minio_endpoint: str = "minio:9000"
+    minio_access_key: str = ""
+    minio_secret_key: str = ""
+    minio_secure: bool = False
+    minio_bucket: str = "kb-import-bucket"
 
     # 图控制
     max_iterations: int = 2

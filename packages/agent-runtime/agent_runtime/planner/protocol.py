@@ -139,6 +139,9 @@ class Plan(BaseModel):
     mcp_params: dict[str, Any] = Field(default_factory=dict)
     execution_mode: str = ""
     graph: Any = None
+    # 会话上传图片（data URI 列表，plan-image-qa-fullstack-2026-11-23）；空 = 纯文本请求。
+    # 带默认值，旧调用方零影响；deterministic 的 _compose 据此切换多模态合成。
+    images: list[str] = Field(default_factory=list)
 
 
 class PlannerContext(BaseModel):
@@ -174,6 +177,9 @@ class PlannerContext(BaseModel):
     # 由 app 层在构建 PlannerContext 前调 governor.govern_memories() 填充；
     # Planner 在 prompt 组装时注入这些已治理的记忆（空列表 = 无可用记忆或 Governor 未接入）。
     governed_memories: list[str] = Field(default_factory=list)
+
+    # 会话上传图片（data URI 列表，plan-image-qa-fullstack-2026-11-23）。
+    images: list[str] = Field(default_factory=list)
 
 
 @dataclass(frozen=True)

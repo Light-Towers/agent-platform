@@ -7,11 +7,13 @@ from fastapi import APIRouter
 
 from agent_server.api.auth_router import router as auth_router
 from agent_server.api.callback import router as callback_router
+from agent_server.api.chat_router import router as chat_router
 from agent_server.api.console_router import router as console_router
 from agent_server.api.control import router as control_router
 from agent_server.api.datasources_router import router as datasources_router
 from agent_server.api.health_router import router as health_router
 from agent_server.api.human_task import router as human_task_router
+from agent_server.api.image_router import router as image_router
 from agent_server.api.import_router import router as import_router
 from agent_server.api.kb_router import router as kb_router
 from agent_server.api.query_router import router as query_router
@@ -22,6 +24,7 @@ from agent_server.api.sql_router import router as sql_router
 router = APIRouter()
 router.include_router(health_router)
 router.include_router(auth_router)
+router.include_router(chat_router)
 router.include_router(query_router)
 router.include_router(import_router)
 router.include_router(kb_router)
@@ -32,4 +35,5 @@ router.include_router(sessions_router)
 router.include_router(control_router)
 router.include_router(callback_router)
 router.include_router(human_task_router)
+router.include_router(image_router)
 router.include_router(console_router)

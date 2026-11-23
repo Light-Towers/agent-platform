@@ -70,6 +70,26 @@ export function isSafeImageUrl(value: unknown): value is string {
   }
 }
 
+/**
+ * 把集群内 MinIO 图片 URL 改写为同源代理路径（plan-image-qa-fullstack D1=B）。
+ * 浏览器无法直连 `minio:9000`（私有桶 + 集群内 DNS），agent_server 的 /img/{bucket}/{path}
+ * 端点用凭证取字节流式回。只对已知内部 host 改写；其他 URL 原样返回（白名单由 isSafeImageUrl 把关）。
+ * - `http://minio:9000/kb-import-bucket/images/a.png` → `/img/kb-import-bucket/images/a.png`
+ * - 已是 `/img/...` 的不再重复改写。
+ */
+const INTERNAL_IMAGE_HOSTS = new Set(['minio'])
+
+export function toProxyImageUrl(url: string): string {
+  if (url.startsWith('/img/')) return url
+  try {
+    const u = new URL(url)
+    if (!INTERNAL_IMAGE_HOSTS.has(u.hostname)) return url
+    return `/img${u.pathname}`
+  } catch {
+    return url
+  }
+}
+
 function _isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v)
 }

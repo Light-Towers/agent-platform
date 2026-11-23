@@ -37,7 +37,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from agent_server.agent.graph import DelegateRef, build_graph
-from agent_server.agent.llm import build_chat_model
+from agent_server.agent.llm import build_chat_model, build_vl_model
 from agent_server.api.routes import router
 from agent_server.config import get_settings
 from agent_server.schemas import McpServerConfig
@@ -332,6 +332,9 @@ async def lifespan(app: FastAPI):
             )
 
     llm = build_chat_model()
+    # 多模态 LLM（会话传图提问；与 llm 同一端点，模型换成 vl_model）。
+    # 同样必须在 init_tracing 之后构造（构造期挂 Langfuse callbacks 的硬约束，见上方）。
+    app.state.vl_llm = build_vl_model()
 
     # Langfuse 观测面两盏灯（方案 docs/plans/plan-langfuse-wiring-2026-10-13.md §2.2）。
     # langfuse_enabled 只是"三个配置项非空"= 意愿；langfuse_ready 读**已装配的运行态**——

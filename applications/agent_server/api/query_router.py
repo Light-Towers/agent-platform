@@ -1,5 +1,7 @@
 """查询路由（SSE 流式）：/query。"""
 
+import base64
+import hashlib
 import logging
 import uuid
 
@@ -15,6 +17,7 @@ from fastapi import APIRouter, Depends, Header, Request
 from fastapi.responses import StreamingResponse
 from shared_schemas import sse_pack
 
+from agent_server import chat_images as _chat_images
 from agent_server.api import sessions_service as _sessions
 from agent_server.api.auth import require_feature, resolve_thread_id, verify_api_key
 from agent_server.config import get_settings
@@ -49,6 +52,10 @@ async def query(
             req.tenant_id,
             tenant,
         )
+    # 会话传图（plan-image-qa-fullstack）：在 query() 作用域解析，供缓存键（本函数）与
+    # _stream() 的 PlannerContext 共用。有图时缓存键加图片签名、强制 deterministic。
+    images = await _resolve_images(req.context, tenant) if settings.image_qa_enabled else []
+    img_sig = _image_signature(images)
     graph = request.app.state.graph
     planner = getattr(request.app.state, "planner", None)
     planner_runtime = getattr(request.app.state, "planner_runtime", None)
@@ -198,6 +205,8 @@ async def query(
             # knowledge_id 纳入缓存键：选不同知识库问同一问题不能串缓存。
             # 传 None（=全部知识库）时用 None，传具体 ID 时形成独立签名。
             kb_scope = {"kb": req.knowledge_id} if req.knowledge_id else None
+            if img_sig:  # 有图：图片签名纳入缓存键，同文不同图不串味（plan-image-qa-fullstack）
+                kb_scope = {**(kb_scope or {}), "imgs": img_sig}
             cache_hit = await cache_backend.get(
                 tenant_id=tenant,
                 intent="",
@@ -235,6 +244,7 @@ async def query(
         # 赋值即被视为局部变量，导致 queued 分支未触发时读取未初始化局部变量
         # → UnboundLocalError F823）。
         nonlocal decision
+        # images / img_sig 在 query() 作用域已解析（闭包可读），供 PlannerContext 与缓存键共用。
         # Phase 2: admission 排队阻塞等待（路径一：queued 时真正等待补位唤醒）
         if (
             admission_controller is not None
@@ -341,8 +351,16 @@ async def query(
                     llm=planner_runtime.llm,
                     last_snapshot=last_snapshot,
                     governed_memories=governed_memories,
+                    images=images,
                 )
-                plan = await planner.plan(ctx)
+                # 会话传图（plan-image-qa-fullstack）：带图请求强制走 deterministic
+                #（graph 两路径不支持多模态合成），无图保持原 planner 选择（零回归）。
+                active_planner = planner
+                if images and settings.image_qa_force_deterministic:
+                    from agent_server.planners.deterministic import DeterministicPlanner
+
+                    active_planner = DeterministicPlanner()
+                plan = await active_planner.plan(ctx)
                 # P0-1（方案 B）：Scheduler 认领已在进入流式前由 try_start 完成（见 handler 末尾），
                 # 认领即置 RUNNING；不再调 dispatch_next()（旧写法无参会错标队首他人任务）。
                 # V3 Phase 2: ExecutionStatus → RUNNING
@@ -356,7 +374,7 @@ async def query(
                         ))
                     except Exception:
                         logger.warning("status save RUNNING failed", exc_info=True)
-                async for event in planner.execute(plan, planner_runtime):
+                async for event in active_planner.execute(plan, planner_runtime):
                     sse = _stream_event(event)
                     if event.type == "route" and event.payload.get("capability") == "rag":
                         is_rag_route = True
@@ -396,6 +414,8 @@ async def query(
             # 知识库后来补了文档也永远命中旧否定答案——正是用户"上传了却问不到"的成因之一。
             # 判据用结构信号 had_evidence（evidence 事件 count>0），不靠 LLM 文本措辞。
             kb_scope = {"kb": req.knowledge_id} if req.knowledge_id else None
+            if img_sig:
+                kb_scope = {**(kb_scope or {}), "imgs": img_sig}
             should_cache = should_cache_answer(
                 final_answer, cache_backend.enabled, is_rag_route, had_evidence,
             )
@@ -507,6 +527,51 @@ async def query(
             )
 
     return StreamingResponse(_stream(), media_type="text/event-stream")
+
+
+async def _resolve_images(context: dict, tenant: str) -> list[str]:
+    """从 QueryRequest.context.images 取图片 ref，按租户取字节转 data URI（plan-image-qa-fullstack）。
+
+    - 最多 4 张，防 prompt 膨胀；
+    - 每条 ref 由 chat_images.get_image 做租户校验（不匹配返回 None）；
+    - 外部 http(s) URL 也接受（已是 data URI 或可访问 URL 直接透传，前端二次校验过）；
+    - 任一失败静默跳过该张（不拖垮问答），全部失败返回空 = 纯文本路径。
+    """
+    raw = context.get("images") if isinstance(context, dict) else None
+    if not isinstance(raw, list):
+        return []
+    out: list[str] = []
+    for item in raw[:4]:
+        if not isinstance(item, str) or not item:
+            continue
+        if item.startswith("data:image/"):
+            out.append(item)
+            continue
+        if item.startswith("http://") or item.startswith("https://"):
+            # 外部可访问 URL 直接透传（VL 服务可拉取时）；集群内 ref 走下面 PG 读取。
+            if item.startswith("http://minio:") or item.startswith("http://minio/"):
+                continue  # 集群内地址 VL 服务访问不到，拒
+            out.append(item)
+            continue
+        try:
+            fetched = await _chat_images.get_image(item, tenant)
+        except Exception:
+            logger.warning("chat image resolve failed: ref=%s", item, exc_info=True)
+            continue
+        if fetched is None:
+            continue
+        content, content_type = fetched
+        b64 = base64.b64encode(content).decode("ascii")
+        out.append(f"data:{content_type};base64,{b64}")
+    return out
+
+
+def _image_signature(images: list[str]) -> str:
+    """图片集合签名，纳入缓存键（同文不同图不串味）。"""
+    if not images:
+        return ""
+    joined = "|".join(sorted(images))
+    return hashlib.sha256(joined.encode("utf-8")).hexdigest()[:16]
 
 
 def should_cache_answer(
