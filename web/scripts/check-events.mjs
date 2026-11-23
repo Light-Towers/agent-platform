@@ -425,7 +425,7 @@ if (GIT_ROOT !== null) {
   const COMMENT_LINE_RE = /^(?:\/\/|\*|\/\*|<!--)/;
   /* 客户端路由路径不是后端端点：从 router 文件派生集合并从消费集扣除。
    * 读不到 router 文件时不扣除（fail-closed），避免把端点漏检读成全绿。 */
-  let clientRoutes = new Set();
+  const clientRoutes = new Set();
   try {
     const routerText = rdWeb('src/router/index.ts');
     for (const m of routerText.matchAll(/path\s*:\s*['"]([^'"]+)['"]/g)) {
