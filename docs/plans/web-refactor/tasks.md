@@ -129,3 +129,29 @@
 3. 门禁红时改产品代码到契约要求；**禁止删用例 / 收窄断言 / 放宽前置条件凑绿**。
 4. 新增或迁移的判据必须同批带自证能咬；否则按"门禁瞎"处理。
 5. 完成陈述带 HEAD sha + 件名 + 逐条 rc；不把历史读数搬进当前账面。
+
+---
+
+## R4 / R5 扩展项（2026-11-23 新稿，**待 D-6 / D-7 / D-8 拍板，不进当前开工项**）
+
+> 对账见 `design.md` §8；需求见 `spec.md` §7。以下项在对应决策拍板前不得开工。
+
+**R4 扩展（依赖 D-6）**
+
+- [ ] X-1 评估并实现跨标签令牌协商：维持 sessionStorage 档位，用 BroadcastChannel 在仍打开的老标签与新标签间传递令牌；无老标签时回落登录面。**不改 `ap.auth.token` 的档位与写入点**，不触碰 `check-events.mjs` C2 与 `verify-sse.mjs` I1c/I12。
+- [ ] X-2 把"所有标签关闭后首次直达仍需登录"作为产品限制写入 `web/README.md` 与帮助文案，不靠放宽门禁掩盖。
+
+**R5a 引用联动（依赖 D-7 / D-8）**
+
+- [ ] X-3 `InlineTokens.vue` 解析 `[1]` 为按钮（hover 预览、click 锚定）；`Answer.vue` 持 `activeEvidenceIndex` / `isEvidenceExpanded` 局部态。
+- [ ] X-4 `EvidenceList.vue` 自动展开并平滑滚动 + 1.8s 高亮脉冲；`Timeline.vue` 支持从证据卡片反向高亮 stepId；高亮色只引 `tokens.css` 语义令牌。
+- [ ] X-5 `streamQuery` 增 `AbortController` signal 支持"停止生成"；错误改为单轮内联重试，全局 banner 语义变更时同批迁移 `verify:sse` 断言并加反证（改形状≠放宽）。
+
+**R5b 阅读密度与配置闭环（依赖 D-7）**
+
+- [ ] X-6 对话视图去外层描边、正文宽 760–840px、中等断点折叠侧栏；过 `check:tokens` 与 V4 实拍。
+- [ ] X-7 `KbUpload.vue` 索引完成时提供"在对话中使用此知识库"跳转，并把选中知识库带入对话页。
+
+**R5c a11y 与文档（原 R5 内容，依赖 D-7 决定编号）**
+
+- [ ] X-8 保留原 R5-1…R5-7 全部项（Markdown 边界、ImageStrip lightbox 无障碍、根 README 与 App.vue 过时注释清理、全量门禁）。
