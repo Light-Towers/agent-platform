@@ -40,6 +40,7 @@
 /* ---- 12 类事件（视觉件 §2.2 表逐行对应；族数 = 8，两类复用一族） ---- */
 .ev--route       { border-left-color: var(--cat-decision); }
 .ev--evidence    { border-left-color: var(--cat-source); }
+.ev--rich        { border-left-color: var(--cat-source); }
 .ev--memory      { border-left-color: var(--cat-memory); }
 .ev--status      { border-left-color: var(--cat-progress); }
 .ev--replan      { border-left-color: var(--cat-watch); }
@@ -59,6 +60,7 @@
  * 族色由竖条与图标表达 —— 三通道原则本来就不需要第三条通道也上色。 */
 .ev--route .ev__ico        { color: var(--cat-decision); }
 .ev--evidence .ev__ico     { color: var(--cat-source); }
+.ev--rich .ev__ico         { color: var(--cat-source); }
 .ev--memory .ev__ico       { color: var(--cat-memory); }
 .ev--status .ev__ico       { color: var(--cat-progress); }
 .ev--replan .ev__ico       { color: var(--cat-watch); }

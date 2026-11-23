@@ -18,8 +18,10 @@ from shared_schemas import sse_pack
 from agent_server.api import sessions_service as _sessions
 from agent_server.api.auth import require_feature, resolve_thread_id, verify_api_key
 from agent_server.config import get_settings
+from agent_server.evidence_sink import bind_sink, reset_sink
 from agent_server.memory import thread_persist as _thread_persist
 from agent_server.rag.embed import embed_query
+from agent_server.rich_answer_adapter import to_rich_answer
 from agent_server.schemas import Priority, QueryRequest
 
 logger = logging.getLogger(__name__)
@@ -273,6 +275,10 @@ async def query(
         # 创建/结束（含入站 traceparent 父链 R6），业务属性已在 handler 早段
         # 经 record_request_attributes 写入，覆盖全部旁路路径。
 
+        # 富回答结构化证据池（plan-image-citation-e2e §2.2）：在父 task 绑定，
+        # rag/exhibition capability 在子 task 内只 append 同一对象（跨 task 可见）；
+        # finally 必复位，避免同 worker 后续请求读到上一轮的池。
+        sink, sink_token = bind_sink()
         try:
             final_answer = ""
             round_snapshot: dict | None = None
@@ -377,6 +383,12 @@ async def query(
                             ))
                         except Exception:
                             logger.warning("status save %s failed", suspend_status.value, exc_info=True)
+            # 富回答（plan-image-citation-e2e §2.3）：从请求证据池构造 RichAnswer，
+            # 转换只在 adapter 一处；有富信息才发一个 "rich" 事件（router 直发，
+            # 与 cache_hit/done 同族，不进 StreamEventType，避免大 payload 走 SSE 契约）。
+            rich = to_rich_answer(final_answer, sink)
+            if rich is not None:
+                yield _sse({"type": "rich", "rich": rich.model_dump(mode="json")})
             # 写侧同样不许把"嵌入器可用"当写入前提：q_embedding=None 时后端会自行派生，
             # 派生不成也只是退成"写 L1、不写 L2"。留在条件里会让嵌入器故障期间
             # 一个键都不写，恢复后缓存永远是冷的。
@@ -434,6 +446,7 @@ async def query(
             )
             yield _sse({"type": "done", "thread_id": thread_id, "answer": ""})
         finally:
+            reset_sink(sink_token)
             # V3 Phase 2: Scheduler complete + ExecutionStatus → SUCCEEDED/FAILED
             # P0-1（方案 B）：complete 现带终态 status（COMPLETED/FAILED），槽位真实释放。
             if scheduler is not None and scheduler_enqueued:

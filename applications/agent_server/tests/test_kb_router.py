@@ -131,6 +131,10 @@ _UPLOAD_FORM = dict(
     knowledge_id="k-1",
     exhibition_id="",
     venue_id="",
+    # 刀 2：切分参数（直接调用时显式传空值模拟 HTTP 未传）
+    split_strategy="",
+    max_content_length=0,
+    chunk_overlap_ratio="",
 )
 
 
@@ -181,6 +185,23 @@ async def test_upload_forwards_files_and_strips_tenant_id():
     assert files is not None and files[0][0] == "files", "多文件经 files= 转发（浏览器禁直连 KS，唯一入口在本代理）"
     assert headers == {"X-Internal-Tenant": "v1.test.sig"}, "未配 KNOWLEDGE_SERVICE_KEY ⇒ 只发签名头"
     assert resp == {"code": 200, "message": "ok", "task_ids": ["t1"]}, "KS 响应透传（契约形状不重造）"
+
+
+async def test_upload_forwards_chunk_config_params():
+    """刀 2：切分参数同名透传给 KS（校验/兜底在 KS 侧做）。"""
+    client = _Client(_Resp(200, {"code": 200, "task_ids": ["t1"]}))
+    with patch("agent_server.api.kb_router.get_settings", return_value=_settings()), \
+         patch("agent_server.api.kb_router.sign_internal_header", return_value="v1.test.sig"), \
+         patch("httpx.AsyncClient", return_value=client):
+        await kb_upload(
+            files=[_Up()],
+            **{**_UPLOAD_FORM, "split_strategy": "char", "max_content_length": 1500, "chunk_overlap_ratio": "0.2"},
+            _auth=None, _feature=None,
+        )
+    _url, data, _files, _headers = client.posts[0]
+    assert data["split_strategy"] == "char"
+    assert data["max_content_length"] == "1500"
+    assert data["chunk_overlap_ratio"] == "0.2"
 
 
 async def test_upload_no_hmac_key_503_refuses_unsigned_forward():

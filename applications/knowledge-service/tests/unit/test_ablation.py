@@ -335,6 +335,18 @@ def test_fallback_config_hash_deterministic_and_env_driven(monkeypatch):
     assert fallback_config_hash() != h1  # env 变化则哈希变化
 
 
+def test_fallback_config_hash_accepts_chunk_config(monkeypatch):
+    """刀 4：降级实现须与 compute_config_hash 同签名，接受可选 chunk_config（旧镜像不崩）。"""
+    monkeypatch.setenv("CHUNKS_COLLECTION", "eval_rag_routes")
+    monkeypatch.setenv("EMBEDDING_MODE", "local")
+    base = fallback_config_hash()
+    c1 = {"split_strategy": "title", "max_content_length": 2000, "chunk_overlap": 200}
+    c2 = {"split_strategy": "char", "max_content_length": 1000, "chunk_overlap": 100}
+    assert fallback_config_hash(chunk_config=c1) != base  # 纳入切分参数后改变
+    assert fallback_config_hash(chunk_config=c1) != fallback_config_hash(chunk_config=c2)
+    assert fallback_config_hash(chunk_config=c1) == fallback_config_hash(chunk_config=c1)
+
+
 # ---------------------------------------------------------------------------
 # KG 别名归一（--with-kg）：锁死「seed 合成的 kg:: 键 == query_kg 线上产出键」这一可比性命门。
 # 顶层不 import run_route_ablation（沿用本文件「只依赖纯 stdlib」约定），故在用例内局部导入；

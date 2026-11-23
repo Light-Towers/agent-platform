@@ -1611,6 +1611,71 @@ def check_capability_permission_no_wiring() -> list[str]:
     return violations
 
 
+# ---------------------------------------------------------------------------
+# P17：富回答转换单一实现（plan-image-citation-e2e-2026-11-23 §2.3/§2.5）
+#
+# 病根：图片/引用曾各端自己拼，散点转换导致富信息在 SSE 出口被丢。治本是「单一真相源
+# （shared-schemas RichAnswer）+ 单一转换点（adapter）+ 白名单强制」。本门禁钉住后两条：
+#   ① 生产代码里 ImageRef/Citation 的构造只允许在 adapter 一处；
+#   ② adapter 构造 ImageRef 必须同时调用 is_allowed_image_url（白名单不可绕过）。
+# 两个纯判定函数（_is_image_ref_construction / _rich_conversion_violation）是治理测试的
+# 反证面：种植违规必须报红，真面必须过（见 tests/governance/test_rich_answer_gate.py）。
+# ---------------------------------------------------------------------------
+
+_RICH_ADAPTER_REL = "applications/agent_server/rich_answer_adapter.py"
+_RICH_ROUTER_REL = "applications/agent_server/api/query_router.py"
+
+
+def _is_image_ref_construction(line: str) -> bool:
+    """识别 ``ImageRef(...)`` 构造调用；排除 class 定义本身。"""
+    stripped = line.strip()
+    if stripped.startswith("class ImageRef"):
+        return False
+    return bool(re.search(r"\bImageRef\s*\(", stripped))
+
+
+def _rich_conversion_violation(rel: str, text: str) -> str | None:
+    """P17 单行判定：返回违规说明或 None（测试文件跳过）。"""
+    if "/tests/" in rel or rel.startswith("tests/") or rel.endswith("_test.py"):
+        return None
+    # 复用既有纪律（P6/P7）：注释行与 rst 内联 ``...`` 里的写法不算真实构造调用，
+    # 否则本门禁自己的 docstring（`ImageRef(...)`）会被判成违规。
+    has_ctor = any(
+        _is_image_ref_construction(line) and _is_code_line(line)
+        for line in text.splitlines()
+    )
+    if rel == _RICH_ADAPTER_REL:
+        if has_ctor and "is_allowed_image_url" not in text:
+            return f"{rel}: 构造 ImageRef 却未调用 is_allowed_image_url（白名单被绕过）"
+        return None
+    if rel == _RICH_ROUTER_REL:
+        if has_ctor or re.search(r"\bCitation\s*\(", text):
+            return f"{rel}: router 不得自行构造 ImageRef/Citation（单一转换点在 adapter）"
+        return None
+    if has_ctor:
+        return f"{rel}: ImageRef 构造必须收敛到 {_RICH_ADAPTER_REL}"
+    return None
+
+
+def check_rich_answer_single_conversion() -> list[str]:
+    """P17 扫描：富回答构造只在一处 + 白名单强制；adapter 缺失也算违规（fail-closed）。"""
+    violations: list[str] = []
+    adapter_seen = False
+    for rel, py_file in _iter_prod_py():
+        if rel == _RICH_ADAPTER_REL:
+            adapter_seen = True
+        try:
+            text = py_file.read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            continue
+        violation = _rich_conversion_violation(rel, text)
+        if violation:
+            violations.append(violation)
+    if not adapter_seen:
+        violations.append(f"<<< RICH-ADAPTER-MISSING 缺 {_RICH_ADAPTER_REL}：不投票的读数不是门禁")
+    return violations
+
+
 def main() -> int:
     rc = 0
     v1 = check()
@@ -1814,6 +1879,15 @@ def main() -> int:
         rc = 1
     else:
         print("P16 架构约束通过：三处装配面零权限集接线（F19 同名透传形状不算接线）")
+
+    v20 = check_rich_answer_single_conversion()
+    if v20:
+        print("P17 架构约束违反：富回答构造必须单一实现（adapter）+ ImageRef 必经 URL 白名单（plan-image-citation-e2e）")
+        for v in v20:
+            print(f"  {v}")
+        rc = 1
+    else:
+        print("P17 架构约束通过：富回答构造只在 adapter 一处，且 ImageRef 构造必经 is_allowed_image_url")
     return rc
 
 

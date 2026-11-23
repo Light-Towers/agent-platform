@@ -4,7 +4,7 @@ import re
 import sys
 
 # 统一类型注解，避免混用any/Any
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 # LangChain文本分割器（标注核心用途，便于理解）
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -14,6 +14,7 @@ from knowledge_service.core.tracing import traced_span
 from knowledge_service.import_process.agent.state import ImportGraphState
 
 # 项目内部工具/状态/日志导入（保持原有路径）
+from knowledge_service.utils.chunk_config_utils import DEFAULT_CHUNK_CONFIG, overlap_chars
 from knowledge_service.utils.task_utils import add_running_task, set_task_summary
 
 # --- 配置参数 (Configuration) ---
@@ -21,6 +22,11 @@ from knowledge_service.utils.task_utils import add_running_task, set_task_summar
 DEFAULT_MAX_CONTENT_LENGTH = 2000
 # 短Chunk合并阈值：同父标题的短Chunk会被合并，减少碎片化
 MIN_CONTENT_LENGTH = 500
+# M-3：表格原子块硬上限——超限则放弃"整块保真"、按字符切分，避免撑爆 Milvus VARCHAR(65535)
+# 产生检索"黑洞块"。60000 对齐的是存储层上限，不是 embedding 输入上限：BGE-M3 约 8192 token，
+# 60000 中文字符约 36000–60000 token，**超过 embedding 输入**（超长表格仍可能被 embedding 截断）。
+# 该"截断风险"属已知限制、另行评估（本值优先保表格整块语义，降上限会破坏保真），勿把 60000 读成"embedding 安全线"。
+MAX_TABLE_BLOCK_CHARS = 60000
 
 
 def step_1_get_inputs(state: ImportGraphState) -> Tuple[Any, str, int]:
@@ -43,11 +49,34 @@ def step_1_get_inputs(state: ImportGraphState) -> Tuple[Any, str, int]:
     content = content.replace("\r\n", "\n").replace("\r", "\n")
     # 提取文件标题：有则用，无则默认"Unknown File"
     file_title = state.get("file_title", "Unknown File")
-    # 提取最大Chunk长度：有则用状态中的配置，无则用全局默认值
-    max_len = DEFAULT_MAX_CONTENT_LENGTH
+    # 提取最大Chunk长度：刀 2 起从 state 读（刀 1 resolver 已注入）；无则用全局默认值。
+    # 用 `or` 兜住 None/0（state 默认值缺失的旧调用方），保持向后兼容。
+    max_len = state.get("max_content_length") or DEFAULT_MAX_CONTENT_LENGTH
 
     logger.info(f"步骤1：输入数据加载完成，文件标题：{file_title}，最大Chunk长度：{max_len}")
     return content, file_title, max_len
+
+
+def resolve_split_config(state: ImportGraphState) -> Dict[str, Any]:
+    """从 state 读切分策略与重叠字符数（刀 1 注入、刀 2 消费）。缺省回落全局默认。
+
+    默认单一真相源：DEFAULT_CHUNK_CONFIG（M-2），与 state.py graph_default_state 同源。
+    """
+    strategy = state.get("split_strategy") or DEFAULT_CHUNK_CONFIG["split_strategy"]
+    if strategy not in ("title", "char", "line"):
+        logger.warning(f"未知切分策略 {strategy!r}，回落到 {DEFAULT_CHUNK_CONFIG['split_strategy']}")
+        strategy = DEFAULT_CHUNK_CONFIG["split_strategy"]
+    default_overlap = overlap_chars(
+        DEFAULT_CHUNK_CONFIG["max_content_length"], DEFAULT_CHUNK_CONFIG["chunk_overlap_ratio"]
+    )
+    overlap = state.get("chunk_overlap")
+    if overlap is None:
+        overlap = default_overlap
+    try:
+        overlap = max(0, int(overlap))
+    except (TypeError, ValueError):
+        overlap = default_overlap
+    return {"split_strategy": strategy, "chunk_overlap": overlap}
 
 
 def step_2_split_by_titles(content: str, file_title: str) -> Tuple[List[Dict[str, Any]], int, int]:
@@ -135,13 +164,87 @@ def step_3_handle_no_title(
     return sections
 
 
-def _split_long_section(section: Dict[str, Any], max_length: int = DEFAULT_MAX_CONTENT_LENGTH) -> List[Dict[str, Any]]:
+def step_2_split_by_chars(content: str, file_title: str) -> Tuple[List[Dict[str, Any]], int, int]:
+    """char 策略：忽略标题结构，把全文作为单个章节，交给 step_4 的递归字符切分器切块。
+
+    实际切分在 step_4_refine_chunks（_split_long_section）按 max/overlap 完成；
+    这里产出一个覆盖全文的"章节"，title_count=0，lines_count 照实统计。
+    """
+    lines_count = len(content.split("\n"))
+    section = {"title": "", "content": content, "file_title": file_title}
+    return [section], 0, lines_count
+
+
+def step_2_split_by_lines(
+    content: str, file_title: str, warnings: Optional[List[str]] = None
+) -> Tuple[List[Dict[str, Any]], int, int]:
+    """line 策略：表格整块保真 + 其余交 step_4 递归字符切分。
+
+    表格块判定：连续以 `|` 开头的行（含表头与分隔行）作为一个原子 section（no_split）。
+    非表格行**不在此按行分段**——整段交给 step_4 的递归字符切分器按 max/overlap 切块。
+    因此 line 与 char 的实际差异仅在"表格是否保整"；docstring 如实描述，避免误读为"按行组切"。
+    """
+    lines = content.split("\n")
+    sections: List[Dict[str, Any]] = []
+    buffer: List[str] = []
+    i = 0
+
+    def _flush_buffer():
+        if buffer and any(line.strip() for line in buffer):
+            sections.append({
+                "title": "",
+                "content": "\n".join(buffer),
+                "file_title": file_title,
+            })
+            buffer.clear()
+
+    while i < len(lines):
+        line = lines[i]
+        if line.strip().startswith("|"):
+            # 收集连续表格行为一个原子块
+            _flush_buffer()
+            table_lines = []
+            while i < len(lines) and lines[i].strip().startswith("|"):
+                table_lines.append(lines[i])
+                i += 1
+            table_text = "\n".join(table_lines)
+            # M-3：超长表格不保整——落到常规字符切分，避免 embedding/向量库超限产生黑洞块
+            if len(table_text) > MAX_TABLE_BLOCK_CHARS:
+                warn_msg = (
+                    f"表格块 {len(table_text)} 字符超过上限 {MAX_TABLE_BLOCK_CHARS}，"
+                    f"放弃整块保真、按字符切分（表头可能不再随每块）"
+                )
+                logger.warning(warn_msg)
+                if warnings is not None:
+                    warnings.append(warn_msg)
+                sections.append({"title": "", "content": table_text, "file_title": file_title})
+            else:
+                sections.append({
+                    "title": "",
+                    "content": table_text,
+                    "file_title": file_title,
+                    "no_split": True,  # 表格整块保真：表头随块、不按行劈开
+                })
+            continue
+        buffer.append(line)
+        i += 1
+    _flush_buffer()
+    logger.info(f"步骤2(line)：按行/表格切分完成，共 {len(sections)} 个区块，原始 {len(lines)} 行")
+    return sections, 0, len(lines)
+
+
+def _split_long_section(
+    section: Dict[str, Any],
+    max_length: int = DEFAULT_MAX_CONTENT_LENGTH,
+    chunk_overlap: int = 0,
+) -> List[Dict[str, Any]]:
     """
     【辅助函数】超长章节二次切分（核心适配LangChain分割器）
     功能：单个章节内容超限时，按「段落→句子→空格」从粗到细切分，保留语义
     切分规则：1.先按空行(段落) 2.再按换行 3.最后按中英文标点/空格
     :param section: 原始章节字典，必须包含content键，可选title/file_title等
     :param max_length: 单个Chunk最大字符长度，默认使用全局配置
+    :param chunk_overlap: 相邻子Chunk的重叠字符数（刀 2：由配置传入，默认 0 保持旧行为）
     :return: 切分后的子章节列表，每个子章节带父标题/序号等元信息
     """
     # 内容空值兜底：无内容直接返回原章节
@@ -168,11 +271,15 @@ def _split_long_section(section: Dict[str, Any], max_length: int = DEFAULT_MAX_C
     if title and body.lstrip().startswith(title):
         body = body[body.find(title) + len(title) :].lstrip()
 
+    # 重叠字符数必须 < chunk_size（否则 LangChain base.py:79-84 抛 ValueError）。
+    # available_len 已扣除标题前缀，可能小于配置的重叠值，故这里按实际可用长度收敛。
+    safe_overlap = max(0, min(chunk_overlap, available_len - 1))
+
     # 初始化LangChain递归分割器（核心工具：按优先级分隔符切分，保留语义）
     # separators：分割符优先级（从粗到细），优先按大语义单元切分，最后才硬拆
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=available_len,  # 正文部分最大长度（已扣除标题）
-        chunk_overlap=0,  # 无重叠：按标题切分后语义完整，无需重叠
+        chunk_overlap=safe_overlap,  # 刀 2：由配置传入（默认 0 保持旧行为）
         # 分割符优先级：空行(段落)→换行→中文标点→英文标点→空格，最后硬拆
         separators=["\n\n", "\n", "。", "！", "？", "；", ".", "!", "?", ";", " "],
     )
@@ -201,12 +308,29 @@ def _split_long_section(section: Dict[str, Any], max_length: int = DEFAULT_MAX_C
     return sub_sections
 
 
-def _merge_short_sections(sections: List[Dict[str, Any]], min_length: int = MIN_CONTENT_LENGTH) -> List[Dict[str, Any]]:
+def _strip_parent_prefix(sec: Dict[str, Any]) -> str:
+    """去掉切片正文开头重复的父标题，返回清洗后的正文（L-1：合并判断与实际拼接共用）。"""
+    content = sec.get("content", "") or ""
+    parent_title = sec.get("parent_title", "")
+    if parent_title and content.startswith(parent_title):
+        content = content[len(parent_title):].lstrip()
+    return content
+
+
+def _merge_short_sections(
+    sections: List[Dict[str, Any]],
+    min_length: int = MIN_CONTENT_LENGTH,
+    max_length: int = 0,
+    overlap: int = 0,
+) -> List[Dict[str, Any]]:
     """
     【辅助函数】过短章节合并（减少碎片化，提升检索效果）
     核心规则：仅合并「同父标题」且「当前块长度不足阈值」的相邻Chunk，避免跨章节合并
     :param sections: 待合并的Chunk列表（通常是_split_long_section切分后的结果）
     :param min_length: 最小长度阈值，低于此值的Chunk会被合并
+    :param max_length: 合并产物上限（刀 2 F-2 根治）：>0 时合并前校验不超此值，否则不合并；
+                       0 = 不启用上限校验（保持旧行为）
+    :param overlap: 重叠字符数（带重叠子块合并时会计入上限判断）
     :return: 合并后的Chunk列表，长度适中，保留元信息
     """
     # 边界处理：空列表直接返回，避免后续索引报错
@@ -223,17 +347,26 @@ def _merge_short_sections(sections: List[Dict[str, Any]], min_length: int = MIN_
             current_chunk = sec
             continue
 
-        # 合并条件：1.当前块长度不足阈值 2.与下一块同父标题（同属一个原章节）
-        is_current_short = len(current_chunk["content"]) < min_length
+        # 合并条件：1.当前块长度不足阈值 2.与下一块同父标题 3.非表格原子块
+        is_current_short = (
+            len(current_chunk["content"]) < min_length
+            and not current_chunk.get("no_split")
+            and not sec.get("no_split")
+        )
         is_same_parent = current_chunk.get("parent_title") == sec.get("parent_title")
 
+        # F-2 根治：合并前校验产物不超 max_length（含重叠字符）。
+        # 两个各 <min 的块合并后可达 ~2×min-1 仍超 max——"max>min"挡不住，必须在此截断。
+        next_content = _strip_parent_prefix(sec)  # L-1：判断与拼接共用同一清洗结果
+
+        if max_length > 0 and is_current_short and is_same_parent:
+            merged_len = len(current_chunk["content"]) + len("\n\n") + len(next_content) + overlap
+            if merged_len > max_length:
+                # 合并会超限 ⇒ 各自成块（走下方 else 的切换逻辑）
+                is_current_short = False
+
         if is_current_short and is_same_parent:
-            # 合并前清理：去掉下一块开头重复的父标题，避免内容冗余
-            parent_title = sec.get("parent_title", "")
-            next_content = sec["content"]
-            if parent_title and next_content.startswith(parent_title):
-                next_content = next_content[len(parent_title) :].lstrip()
-            # 合并内容：空行分隔，保证格式整洁
+            # 合并内容：空行分隔，保证格式整洁（next_content 已剥重复父标题）
             current_chunk["content"] += "\n\n" + next_content
             # 更新子Chunk序号：保留最新序号，便于溯源
             if "part" in sec:
@@ -252,12 +385,19 @@ def _merge_short_sections(sections: List[Dict[str, Any]], min_length: int = MIN_
     return merged_sections
 
 
-def step_4_refine_chunks(sections: List[Dict[str, Any]], max_len: int) -> List[Dict[str, Any]]:
+def step_4_refine_chunks(
+    sections: List[Dict[str, Any]],
+    max_len: int,
+    chunk_overlap: int = 0,
+    merge_short: bool = True,
+) -> List[Dict[str, Any]]:
     """
     【步骤4】Chunk精细化处理（核心：长切短合，适配大模型/检索）
     执行流程：1.切分超长章节 2.合并过短章节 3.父标题兜底（适配Milvus向量库schema）
     :param sections: 步骤3处理后的章节列表
     :param max_len: 单个Chunk最大字符长度
+    :param chunk_overlap: 二次切分的重叠字符数（刀 2，默认 0 保持旧行为）
+    :param merge_short: 是否做短块合并（char 策略不做，见主方案 §3.2.1）
     :return: 长度适中、低碎片化的最终Chunk列表
     """
     # 边界处理：最大长度无效（空/≤0），直接返回原章节，避免切分异常
@@ -268,13 +408,20 @@ def step_4_refine_chunks(sections: List[Dict[str, Any]], max_len: int) -> List[D
     # 阶段1：切分超长章节 → 所有章节长度控制在max_len内
     refined_split = []
     for sec in sections:
-        # 对每个章节执行超长切分，结果平铺加入列表（避免嵌套）
-        # extend 的作用就是： 把另一个列表（或可迭代对象）里的“元素”，一个个拆出来，直接追加到当前列表的尾部
-        refined_split.extend(_split_long_section(sec, max_len))
+        # 表格原子块（line 策略）不二次切分，保表头随块；其余章节执行超长切分
+        if sec.get("no_split"):
+            refined_split.append(sec)
+            continue
+        # extend 的作用就是： 把另一个列表（或可迭代对象）里的"元素"，一个个拆出来，直接追加到当前列表的尾部
+        refined_split.extend(_split_long_section(sec, max_len, chunk_overlap))
     logger.info(f"步骤4-1：超长章节切分完成，共生成{len(refined_split)}个初始子Chunk")
 
     # 阶段2：合并过短章节 → 减少碎片化，提升后续检索/大模型调用效果
-    final_sections = _merge_short_sections(refined_split)
+    # 刀 2 F-2 根治：传 max_len 作为合并上限（含 overlap），防止合并产物超上限
+    if merge_short:
+        final_sections = _merge_short_sections(refined_split, max_length=max_len, overlap=chunk_overlap)
+    else:
+        final_sections = refined_split
     logger.info(f"步骤4-2：过短章节合并完成，最终得到{len(final_sections)}个Chunk")
 
     # 阶段3：父标题兜底 → 适配Milvus向量库schema（parent_title为必填字段）
@@ -298,6 +445,8 @@ def step_5b_collect_summary(
     md_content: str,
     lines_count: int,
     sections: List[Dict[str, Any]],
+    effective_config: Dict[str, Any],
+    warnings: List[str],
 ) -> Dict[str, Any]:
     """
     【步骤5b】把切分结果整理成**可核对读数**（不改切分算法，只统计）。
@@ -328,7 +477,19 @@ def step_5b_collect_summary(
 
     md_chars = len(md_content or "")
     chunk_chars = sum(len(t) for t in chunk_texts)
+    # 本次实际生效的切分配置（观测面：让用户核对"我设的规则是否真的用上了"）
+    cfg = effective_config  # 必填参数：漏传由调用方/测试直接暴露，不静默给空
+    strategy_label = {
+        "title": "按标题切分", "char": "按字符数切分", "line": "按行/表格切分",
+    }.get(str(cfg.get("split_strategy", "")), str(cfg.get("split_strategy", "")) or "未知")
     return {
+        "effective_config": {
+            "split_strategy": cfg.get("split_strategy", ""),
+            "strategy_label": strategy_label,
+            "max_content_length": cfg.get("max_content_length", 0),
+            "chunk_overlap": cfg.get("chunk_overlap", 0),
+        },
+        "warnings": list(warnings),  # 如超长表格已按字符切——所见即所发生
         "split": {
             "md_lines": lines_count,
             "chunk_count": len(sections),
@@ -447,21 +608,33 @@ def node_document_split(state: ImportGraphState) -> ImportGraphState:
             logger.info(f">>> 节点执行终止：{node_name}（无有效MD内容）")
             return state
 
-        # ===================================== 步骤2：按MD标题进行初次切分 =====================================
-        # 作用：基于Markdown标题（#/##/###）切分文档为独立章节，自动跳过代码块内的伪标题，保证章节语义完整
-        # 输出：初切后的章节列表、识别到的有效标题数量、MD原始文本总行数（为后续统计/日志使用）
-        sections, title_count, lines_count = step_2_split_by_titles(content, file_title)
+        # 切分策略与重叠（刀 2：由 state 注入，缺省回落 DEFAULT_CHUNK_CONFIG 换算值 title / 200）
+        split_cfg = resolve_split_config(state)
+        strategy = split_cfg["split_strategy"]
+        chunk_overlap = split_cfg["chunk_overlap"]
+        split_warnings: List[str] = []  # 观测面：切分过程中的告警（如超长表格降级）
+
+        # ===================================== 步骤2：按策略初次切分 =====================================
+        # title：按 Markdown 标题切章节；char：全文一个章节交 step_4 字符切；line：按行/表格块切
+        if strategy == "char":
+            sections, title_count, lines_count = step_2_split_by_chars(content, file_title)
+        elif strategy == "line":
+            sections, title_count, lines_count = step_2_split_by_lines(content, file_title, split_warnings)
+        else:
+            sections, title_count, lines_count = step_2_split_by_titles(content, file_title)
 
         # ===================================== 步骤3：无标题场景兜底处理 =====================================
-        # 作用：解决MD文档无任何标题的边界情况，避免后续切分逻辑异常
-        # 输出：有标题则返回步骤2的章节列表；无标题则将全文封装为单个「无标题」章节，保证数据格式统一
-        sections = step_3_handle_no_title(content, sections, title_count, file_title)
+        # char/line 本就 title_count=0，step_3 会把全文/各区块封装为"无标题"章节——
+        # 但 line 已切成多个区块，step_3 的兜底会把它们合并成单个"无标题"章节，破坏表格保整。
+        # ⇒ line/char 跳过 step_3（它们的初切结果已是有效章节列表）。
+        if strategy == "title":
+            sections = step_3_handle_no_title(content, sections, title_count, file_title)
 
         # ===================================== 步骤4：Chunk精细化处理（长切短合） =====================================
-        # 作用：核心切分逻辑，先将超长章节按「段落→句子」二次切分，再合并同父标题的过短章节，减少碎片化
-        # 额外处理：对所有Chunk做parent_title兜底，适配Milvus向量库必填字段要求
-        # 输出：长度适中、语义完整、低碎片化的最终Chunk列表（可直接用于向量入库/大模型调用）
-        sections = step_4_refine_chunks(sections, max_len)
+        # char 策略不做短块合并（与父标题无关）；title/line 做。
+        sections = step_4_refine_chunks(
+            sections, max_len, chunk_overlap=chunk_overlap, merge_short=(strategy != "char")
+        )
 
         # ===================================== 步骤5：输出文档切分统计信息 =====================================
         # 作用：打印核心统计数据，便于监控切分效果、调试问题（原始行数/最终Chunk数/首个Chunk预览）
@@ -474,7 +647,15 @@ def node_document_split(state: ImportGraphState) -> ImportGraphState:
         try:
             set_task_summary(
                 state["task_id"],
-                step_5b_collect_summary(content, lines_count, sections),
+                step_5b_collect_summary(
+                    content, lines_count, sections,
+                    effective_config={
+                        "split_strategy": strategy,
+                        "max_content_length": max_len,
+                        "chunk_overlap": chunk_overlap,
+                    },
+                    warnings=split_warnings,
+                ),
             )
         except Exception as exc:  # noqa: BLE001 - 观测面失败不得影响入库
             logger.warning(f"步骤5b：切分读数写入失败（不影响入库）：{exc}")

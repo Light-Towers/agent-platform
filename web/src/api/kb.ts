@@ -47,21 +47,24 @@ const KB_STATUS_PATH = (taskId: string) => `/kb/status/${encodeURIComponent(task
 const KB_DOCUMENTS_PATH = '/kb/documents'
 const KB_HISTORY_PATH = '/kb/history'
 
-/** 上传表单的随表单填的 metadata 字段（tenant_id 由服务端断言注入，前端发空串仅作校验占位）。 */
+/** 切分配置（库级，存 kb_collections.chunk_config；前端读出来做只读展示/编辑）。 */
+export interface KbChunkConfig {
+  readonly split_strategy: 'title' | 'char' | 'line'
+  readonly max_content_length: number
+  readonly chunk_overlap_ratio: number
+}
+
+/** 切分配置默认值（与后端 chunk_config_utils.DEFAULT_CHUNK_CONFIG 对齐）。 */
+export const DEFAULT_KB_CHUNK_CONFIG: KbChunkConfig = {
+  split_strategy: 'title',
+  max_content_length: 2000,
+  chunk_overlap_ratio: 0.10,
+}
+
+/** 上传表单（刀 3 精简）：只保留知识库锚点。
+ *  其余 metadata 由后端 Form 默认值登记；切分配置由 KS resolver 读库配置兜底，无需前端带。 */
 export interface KbUploadForm {
-  scopeType: string
-  tenantType: string
-  effectiveFrom: string
-  effectiveTo: string
-  version: string
-  authority: string
-  status: string
-  constraintKind: string
-  enableItemNameRecognition: boolean
   knowledgeId: string
-  exhibitionId: string
-  venueId: string
-  datasourceType: string
 }
 
 function authHeaders(token: string): Headers {
@@ -81,20 +84,10 @@ export async function uploadKbDocuments(
   const headers = authHeaders(token)
   const body = new FormData()
   for (const f of files) body.append('files', f, f.name)
-  body.append('tenant_id', '')
-  body.append('scope_type', form.scopeType)
-  body.append('tenant_type', form.tenantType)
-  body.append('effective_from', form.effectiveFrom)
-  body.append('effective_to', form.effectiveTo)
-  body.append('version', form.version)
-  body.append('authority', form.authority)
-  body.append('status', form.status)
-  body.append('constraint_kind', form.constraintKind)
-  body.append('enable_item_name_recognition', form.enableItemNameRecognition ? 'true' : 'false')
+  body.append('tenant_id', '')  // 服务端断言注入，前端发空串仅作校验占位
   body.append('knowledge_id', form.knowledgeId)
-  body.append('exhibition_id', form.exhibitionId)
-  body.append('venue_id', form.venueId)
-  body.append('datasource_type', form.datasourceType)
+  // 切分参数不随上传提交：KS resolver 读 kb_collections.chunk_config 兜底（F-7），
+  // 前端在库设置页改配置即可，上传页只读展示——避免"靠前端记得带"。
   const resp = await doFetch(KB_UPLOADS_PATH, { method: 'POST', headers, body, cache: 'no-store' })
   if (!resp.ok) await failKb('知识库上传', resp)
   return await resp.json()
@@ -142,6 +135,15 @@ export interface KbTaskStatus {
   error: string
   /** 切分统计 + 语义结构对照；尚未切分或旧后端为空对象。 */
   summary: {
+    /** 本次实际生效的切分配置（旧后端可能没有）。 */
+    effective_config?: {
+      split_strategy: string
+      strategy_label: string
+      max_content_length: number
+      chunk_overlap: number
+    }
+    /** 切分过程告警（如超长表格已按字符切）；旧后端可能没有。 */
+    warnings?: readonly string[]
     split?: KbSplitSummary
     structure_check?: KbStructureCheck
   }
@@ -212,6 +214,8 @@ export interface KbKnowledgeBase {
   /** 库状态：active | deleted（P1 kb_collections）；兼容旧聚合值的生命周期状态。 */
   readonly status: string
   readonly latest_updated_at: string
+  /** 库级切分配置（刀 2 GET /collections 带出）；未配置时后端给 null。 */
+  readonly chunk_config?: KbChunkConfig | null
 }
 
 /**
@@ -345,5 +349,24 @@ export async function renameKbKnowledgeBase(
     cache: 'no-store',
   })
   if (!resp.ok) await failKb('知识库改名', resp)
+  return await resp.json()
+}
+
+/** 更新库级切分配置：PATCH /kb/knowledge-bases/{id}（body 仅 chunk_config，后端校验范围）。 */
+export async function updateKbChunkConfig(
+  knowledgeId: string,
+  config: KbChunkConfig,
+  token: string,
+  fetchImpl?: typeof fetch,
+): Promise<unknown> {
+  const doFetch = fetchImpl ?? globalThis.fetch
+  const headers = authHeaders(token)
+  headers.set('Content-Type', 'application/json')
+  const resp = await doFetch(`/kb/knowledge-bases/${encodeURIComponent(knowledgeId)}`, {
+    method: 'PATCH', headers,
+    body: JSON.stringify({ chunk_config: config }),
+    cache: 'no-store',
+  })
+  if (!resp.ok) await failKb('切分配置保存', resp)
   return await resp.json()
 }

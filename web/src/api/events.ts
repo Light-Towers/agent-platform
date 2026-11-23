@@ -21,6 +21,7 @@ export type StreamEventType =
   | 'evidence'
   | 'memory'
   | 'replan'
+  | 'rich'
   | 'route'
   | 'status'
   | 'suspended'
@@ -49,6 +50,7 @@ export interface LegendRow {
 export const EVENT_LEGEND: Record<StreamEventType, LegendRow> = {
   route:        { fam: '决策 · 判给哪个能力', sw: 'decision' },
   evidence:     { fam: '来源 · 命中依据', sw: 'source' },
+  rich:         { fam: '来源 · 图片与引用', sw: 'source' },
   memory:       { fam: '记忆读写', sw: 'memory' },
   status:       { fam: '进度', sw: 'progress' },
   replan:       { fam: '需关注 · 推翻前判', sw: 'watch' },

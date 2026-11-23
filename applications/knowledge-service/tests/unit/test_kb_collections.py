@@ -158,6 +158,35 @@ def test_create_collection_rejects_empty():
     assert col.rows == []
 
 
+# --- 切分配置 chunk_config 读写（刀 1）---
+
+def test_get_chunk_config_none_when_unset():
+    col = _FakeCollection([
+        {"tenant_id": "t", "knowledge_id": "kb1", "status": "active"},
+    ])
+    assert kb_collections.get_chunk_config("t", "kb1", collection=col) is None
+    assert kb_collections.get_chunk_config("t", "missing", collection=col) is None
+
+
+def test_get_chunk_config_only_active():
+    col = _FakeCollection([
+        {"tenant_id": "t", "knowledge_id": "kb1", "status": "deleted",
+         "chunk_config": {"split_strategy": "char"}},
+    ])
+    assert kb_collections.get_chunk_config("t", "kb1", collection=col) is None
+
+
+def test_update_chunk_config_writes_and_matches_active():
+    col = _FakeCollection([
+        {"tenant_id": "t", "knowledge_id": "kb1", "status": "active"},
+    ])
+    cfg = {"split_strategy": "char", "max_content_length": 1000, "chunk_overlap_ratio": 0.1}
+    assert kb_collections.update_chunk_config("t", "kb1", cfg, collection=col) is True
+    assert kb_collections.get_chunk_config("t", "kb1", collection=col) == cfg
+    assert kb_collections.update_chunk_config("t", "missing", cfg, collection=col) is False
+
+
+
 def test_rename_collection_only_active():
     col = _FakeCollection([
         {"tenant_id": "t", "knowledge_id": "kb-1", "name": "old", "status": "active", "updated_at": "x"},

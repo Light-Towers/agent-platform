@@ -74,7 +74,9 @@ class Settings(BaseLLMSettings):
     # RAG
     rag_top_k: int = 4  # 区别于 knowledge(5)/nl2sql(10)：本服务为 supervisor 级多工具编排，每个子查询只注入少量高相关文档
     # Rerank：RRF 融合后是否用硅基流动 bge-reranker-v2-m3 重排 top-K
-    rerank_enabled: bool = False
+    # 用户拍板 2026-11-22 翻默认 True；注意 rerank_effective_enabled 仍须 rerank_api_key 非空才真生效，
+    # 未配 key 时 get_reranker() 返回 None、检索保持原序（不报错、不空转）
+    rerank_enabled: bool = True
     rerank_top_n: int = 8  # 融合后送入 rerank 的候选数（>= rag_top_k）
     rerank_api_key: str = ""
     rerank_base_url: str = "https://api.siliconflow.cn/v1"
@@ -94,6 +96,11 @@ class Settings(BaseLLMSettings):
     doc_embed_base_url: str = "https://api.siliconflow.cn/v1"
     doc_embed_model: str = "BAAI/bge-m3"
     doc_embed_dim: int = 1024
+
+    # 富回答图片白名单（plan-image-citation-e2e-2026-11-23 §2.5）：逗号分隔的可信图片
+    # 主机名（不含端口/协议，如 minio,kb.internal）。空 = 拒绝一切图片回显（fail-closed），
+    # 部署侧必须显式配置；adapter 构造 ImageRef 前 + 前端渲染时各校验一次（双保险）。
+    rich_image_allowed_hosts: str = ""
 
     # 图控制
     max_iterations: int = 2
@@ -121,19 +128,23 @@ class Settings(BaseLLMSettings):
     # Phase 2: 会话回退 revert
     revert_enabled: bool = True
 
-    # Phase 2: OTel 接线（opt-in，默认 false）
-    otel_enabled: bool = False
+    # Phase 2: OTel 接线（用户拍板 2026-11-22 翻默认 True）
+    # 注意真正导出仍需 otel_exporter != "none" 且 otel_endpoint 非空；endpoint 为空时按现有实现不导出
+    otel_enabled: bool = True
     otel_exporter: str = "otlp"  # otlp | jaeger | console | none
     otel_endpoint: str = ""
     otel_sampling_rate: float = 1.0
     otel_service_name: str = "agent-platform"
 
-    # Phase 2: MCP client（opt-in，默认 false）
-    mcp_enabled: bool = False
+    # Phase 2: MCP client（用户拍板 2026-11-22 翻默认 True）
+    # 真正挂载工具仍需 mcp_servers 非空（JSON 配置列表）；为空时不挂任何工具、不报错
+    mcp_enabled: bool = True
     mcp_servers: str = ""  # JSON 编码的 server 配置列表
 
-    # 输入护栏（opt-in，默认 false）：PII 脱敏 + prompt injection 检测
-    guard_enabled: bool = False
+    # 输入护栏（用户拍板 2026-11-22 翻默认 True）：PII 脱敏 + prompt injection 检测
+    # ⚠ 真拦截：命中 injection 短路返回"输入包含不安全内容"；PII（手机/邮箱/身份证/银行卡/IP）被替换为占位符。
+    # 会展问数场景若用手机号/身份证当查询条件，脱敏后会影响 SQL 生成；可用 GUARD_BLOCK_INJECTION=false 只告警不拦。
+    guard_enabled: bool = True
 
     # Plan-F Phase 2: Planner 实现选择（deterministic | graph | agentic | auto），PLANNER env 覆盖。
     # ``auto`` 启用 Phase A Mode Selector：按问题/能力自动选 deterministic/workflow/graph/agentic；

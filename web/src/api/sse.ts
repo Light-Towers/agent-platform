@@ -65,10 +65,108 @@ export interface EvidenceEntry {
   readonly preview: string
 }
 
+/* ---- 富回答（plan-image-citation-e2e-2026-11-23）：前端只认这一套形状 ----
+ * 逐字段对应后端 shared_schemas.RichAnswer（Source/Citation/ImageRef）。
+ * 图片渲染前必须过 isSafeImageUrl —— 服务端已过域名白名单，这里是防伪协议的第二道闸。
+ */
+export interface RichSource {
+  readonly type: 'knowledge' | 'table' | 'api' | 'web'
+  readonly name: string
+  readonly source_doc?: string | null
+  readonly as_of?: string | null
+}
+export interface RichCitation {
+  readonly source: RichSource
+  readonly chunk_id?: string | null
+  readonly heading?: string | null
+  readonly snippet?: string | null
+}
+export interface RichImage {
+  readonly url: string
+  readonly source_doc?: string | null
+  readonly caption?: string | null
+}
+export interface RichAnswer {
+  readonly answer: string
+  readonly sources: readonly RichSource[]
+  readonly citations: readonly RichCitation[]
+  readonly images: readonly RichImage[]
+}
+
+/** 前端二次校验：只接受绝对 http(s) URL（相对协议 / data: / javascript: 一律拒）。 */
+export function isSafeImageUrl(value: unknown): value is string {
+  if (typeof value !== 'string' || value === '') return false
+  try {
+    const u = new URL(value)
+    return u.protocol === 'http:' || u.protocol === 'https:'
+  } catch {
+    return false
+  }
+}
+
+function _isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v)
+}
+
+/** 防御性解析后端 rich 载荷：字段缺失/类型不对不炸界面，图片过二次校验。 */
+export function parseRichAnswer(payload: unknown): RichAnswer | null {
+  if (!_isRecord(payload)) return null
+  const sources: RichSource[] = []
+  if (Array.isArray(payload.sources)) {
+    for (const item of payload.sources) {
+      if (!_isRecord(item) || typeof item.name !== 'string') continue
+      const type = item.type
+      sources.push({
+        type: type === 'knowledge' || type === 'table' || type === 'web' ? type : 'api',
+        name: item.name,
+        source_doc: typeof item.source_doc === 'string' ? item.source_doc : null,
+        as_of: typeof item.as_of === 'string' ? item.as_of : null,
+      })
+    }
+  }
+  const citations: RichCitation[] = []
+  if (Array.isArray(payload.citations)) {
+    for (const item of payload.citations) {
+      if (!_isRecord(item) || !_isRecord(item.source)) continue
+      const src = item.source
+      const name = src.name
+      if (typeof name !== 'string') continue
+      const type = src.type
+      citations.push({
+        source: {
+          type: type === 'knowledge' || type === 'table' || type === 'web' ? type : 'api',
+          name,
+          source_doc: typeof src.source_doc === 'string' ? src.source_doc : null,
+        },
+        chunk_id: typeof item.chunk_id === 'string' ? item.chunk_id : null,
+        heading: typeof item.heading === 'string' ? item.heading : null,
+        snippet: typeof item.snippet === 'string' ? item.snippet : null,
+      })
+    }
+  }
+  const images: RichImage[] = []
+  if (Array.isArray(payload.images)) {
+    for (const item of payload.images) {
+      if (!_isRecord(item) || !isSafeImageUrl(item.url)) continue
+      images.push({
+        url: item.url,
+        source_doc: typeof item.source_doc === 'string' ? item.source_doc : null,
+        caption: typeof item.caption === 'string' ? item.caption : null,
+      })
+    }
+  }
+  return {
+    answer: typeof payload.answer === 'string' ? payload.answer : '',
+    sources, citations, images,
+  }
+}
+
 /** 每次事件到达都会回调这个快照；页面不需要自己维护流状态。 */
 export interface StreamSnapshot {
   readonly timeline: readonly TimelineEntry[]
   readonly evidence: readonly EvidenceEntry[]
+  /** 富回答（图片/引用/来源）；无富信息时为 null。 */
+  readonly rich: RichAnswer | null
   readonly answer: string
   readonly terminal: Terminal
   readonly threadId: string
@@ -90,6 +188,7 @@ export interface StreamSnapshot {
 interface Working {
   timeline: TimelineEntry[]
   evidence: EvidenceEntry[]
+  rich: RichAnswer | null
   answer: string
   terminal: Terminal
   threadId: string
@@ -136,7 +235,7 @@ function snapshot(w: Working): StreamSnapshot {
 /** 独立跑一帧的起点（测试与页面首轮渲染用）。 */
 export function initialState(): StreamSnapshot {
   return snapshot({
-    timeline: [], evidence: [], answer: '', terminal: 'open',
+    timeline: [], evidence: [], rich: null, answer: '', terminal: 'open',
     threadId: '', requestId: '', httpStatus: 0, sawError: false, doneReceived: false,
   })
 }
@@ -180,6 +279,15 @@ const EVENT_HANDLERS = {
       event: 'evidence',
       kind: 'event',
       text: `命中 ${cnt} 条依据（${orNone(p, 'node')}）${preview === '' ? '，无片段可展示' : '，片段见依据列表'}`,
+    })
+  },
+  rich: (s, p) => {
+    const parsed = parseRichAnswer(p.rich)
+    if (parsed !== null) s.rich = parsed
+    s.timeline.push({
+      event: 'rich',
+      kind: 'event',
+      text: `富回答：${parsed?.images.length ?? 0} 张图片、${parsed?.citations.length ?? 0} 条引用`,
     })
   },
   memory: (s, p) => {

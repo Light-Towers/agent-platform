@@ -97,6 +97,10 @@ async def kb_upload(
     exhibition_id: str = Form(""),
     venue_id: str = Form(""),
     datasource_type: str = Form(""),
+    # 切分参数（刀 2）：与 KS /upload 同名透传；空默认 = 让 KS resolver 读库配置兜底
+    split_strategy: str = Form(""),
+    max_content_length: int = Form(0),
+    chunk_overlap_ratio: str = Form(""),
     _auth=Depends(verify_api_key),  # 仅作鉴权闸门（函数体不取凭据值，lint P12）
     _feature=Depends(require_feature("kb.upload")),  # 401 先于 403：_auth 必须在前
 ):
@@ -145,6 +149,10 @@ async def kb_upload(
         "exhibition_id": exhibition_id,
         "venue_id": venue_id,
         "datasource_type": datasource_type,
+        # 切分参数同名透传（KS resolver 负责校验/兜底）
+        "split_strategy": split_strategy,
+        "max_content_length": str(max_content_length) if max_content_length else "",
+        "chunk_overlap_ratio": chunk_overlap_ratio,
     }
 
     import httpx

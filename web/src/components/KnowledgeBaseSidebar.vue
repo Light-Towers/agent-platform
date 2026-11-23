@@ -12,7 +12,10 @@ import {
   createKbKnowledgeBase,
   renameKbKnowledgeBase,
   deleteKbKnowledgeBase,
+  updateKbChunkConfig,
+  DEFAULT_KB_CHUNK_CONFIG,
   type KbKnowledgeBase,
+  type KbChunkConfig,
 } from '../api/kb.ts'
 
 const props = defineProps<{
@@ -27,6 +30,8 @@ const emit = defineEmits<{
   changed: []   // 库列表变化（新建/改名/删除）后通知父组件刷新
   renamed: [knowledgeId: string, name: string]  // #3：改名当前库 → 父组件同步右栏标题
   deleted: [knowledgeId: string]                // #2：删库 → 父组件清选中态
+  /** 库配置索引（L-B：单一数据源，避免父组件重复请求 listKnowledgeBases）。 */
+  configs: [map: Map<string, KbChunkConfig>]
 }>()
 
 const bases = ref<KbKnowledgeBase[]>([])
@@ -42,10 +47,59 @@ const editingId = ref('')
 const editName = ref('')
 const busy = ref('')
 
+/** 切分设置编辑态（刀 3）：正在编辑配置的库 id + 草稿（可变副本，KbChunkConfig 只读）。 */
+type ChunkConfigDraft = { split_strategy: KbChunkConfig['split_strategy']; max_content_length: number; chunk_overlap_ratio: number }
+const configEditingId = ref('')
+const configDraft = ref<ChunkConfigDraft>({ ...DEFAULT_KB_CHUNK_CONFIG })
+const STRATEGY_OPTIONS: { value: KbChunkConfig['split_strategy']; label: string }[] = [
+  { value: 'title', label: '按标题切分' },
+  { value: 'char', label: '按字符数切分' },
+  { value: 'line', label: '按行/表格切分' },
+]
+
+function startConfigEdit(kb: KbKnowledgeBase): void {
+  configDraft.value = kb.chunk_config
+    ? { ...kb.chunk_config }
+    : { ...DEFAULT_KB_CHUNK_CONFIG }
+  configEditingId.value = configEditingId.value === kb.knowledge_id ? '' : kb.knowledge_id
+}
+
+async function onSaveConfig(kb: KbKnowledgeBase): Promise<void> {
+  const d = configDraft.value
+  // 前端做基本范围提示（后端为准做权威校验）
+  // L-C：下列 500/2000/0.5 与后端 chunk_config_utils 的 MAX_MIN/MAX_MAX/OVERLAP_RATIO_MAX 三处重复；
+  // 后端 P-2 取证若收紧，以服务端 400 为准（此处提示可能滞后），届时同步这三个数。
+  if (!Number.isInteger(d.max_content_length) || d.max_content_length < 500 || d.max_content_length > 2000) {
+    setNotice('块大小须为 500–2000 之间的整数', false)
+    return
+  }
+  if (d.chunk_overlap_ratio < 0 || d.chunk_overlap_ratio > 0.5) {
+    setNotice('重叠比例须在 0–50% 之间', false)
+    return
+  }
+  busy.value = `cfg-${kb.knowledge_id}`
+  setNotice('', true)
+  try {
+    await updateKbChunkConfig(kb.knowledge_id, d, authToken.value ?? '')
+    setNotice(`已保存「${kb.name || kb.knowledge_id}」的切分配置`, true)
+    configEditingId.value = ''
+    await refresh()
+    emit('changed')  // 通知父组件刷新 chunkConfigById → 上传页只读展示同步
+  } catch (err) {
+    setNotice(`切分配置保存失败：${err instanceof Error ? err.message : String(err)}`, false)
+  } finally {
+    busy.value = ''
+  }
+}
+
 async function refresh(): Promise<void> {
   loading.value = true
   try {
     bases.value = await listKnowledgeBases(authToken.value ?? '')
+    // L-B：单一数据源——把配置索引 emit 给父组件，父不再另发一次 listKnowledgeBases
+    const configMap = new Map<string, KbChunkConfig>()
+    for (const b of bases.value) if (b.chunk_config) configMap.set(b.knowledge_id, b.chunk_config)
+    emit('configs', configMap)
   } catch (err) {
     setNotice(`加载失败：${err instanceof Error ? err.message : String(err)}`, false)
   } finally {
@@ -215,6 +269,14 @@ onMounted(refresh)
           <button
             type="button"
             class="ry-btn ry-btn--text"
+            title="切分设置"
+            @click="startConfigEdit(kb)"
+          >
+            设置
+          </button>
+          <button
+            type="button"
+            class="ry-btn ry-btn--text"
             title="重命名"
             @click="startEdit(kb)"
           >
@@ -230,6 +292,70 @@ onMounted(refresh)
             ×
           </button>
         </template>
+
+        <!-- 切分设置内联编辑器（仅改库级配置；上传页只读展示） -->
+        <div
+          v-if="configEditingId === kb.knowledge_id"
+          class="kb-config-editor"
+        >
+          <label class="o-head-sm">
+            切分规则
+            <select
+              v-model="configDraft.split_strategy"
+              class="ry-input"
+              aria-label="切分规则"
+            >
+              <option
+                v-for="opt in STRATEGY_OPTIONS"
+                :key="opt.value"
+                :value="opt.value"
+              >{{ opt.label }}</option>
+            </select>
+          </label>
+          <label class="o-head-sm">
+            每片字数（500–2000）
+            <input
+              v-model.number="configDraft.max_content_length"
+              class="ry-input"
+              type="number"
+              min="500"
+              max="2000"
+              aria-label="切块大小"
+            >
+          </label>
+          <label class="o-head-sm">
+            重叠比例（0–50%）
+            <input
+              :value="Math.round(configDraft.chunk_overlap_ratio * 100)"
+              class="ry-input"
+              type="number"
+              min="0"
+              max="50"
+              aria-label="重叠比例"
+              @input="configDraft.chunk_overlap_ratio = Number(($event.target as HTMLInputElement).value) / 100"
+            >
+          </label>
+          <p class="hint">
+            规则按字符切；改完重新上传同名文档即按新配置覆盖。
+          </p>
+          <div class="composer__row">
+            <button
+              type="button"
+              class="ry-btn ry-btn--primary"
+              :aria-disabled="busy === `cfg-${kb.knowledge_id}`"
+              @click="onSaveConfig(kb)"
+            >
+              {{ busy === `cfg-${kb.knowledge_id}` ? '保存中…' : '保存配置' }}
+            </button>
+            <button
+              type="button"
+              class="ry-btn"
+              @click="configEditingId = ''"
+            >
+              取消
+            </button>
+          </div>
+        </div>
       </li>
     </ul>
 

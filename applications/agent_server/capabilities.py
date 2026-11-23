@@ -42,6 +42,7 @@ from agent_runtime.workspace_registry import (
 
 from agent_server.agent.state import AgentState
 from agent_server.config import get_settings
+from agent_server.evidence_sink import current_sink
 from agent_server.subagents.mcp import mcp_query
 from agent_server.subagents.rag import rag_query
 from agent_server.subagents.search import search_web
@@ -404,7 +405,18 @@ def _register_remote_capabilities(registry: CapabilityRegistry) -> None:
             client = _get_http_client()
             resp = await client.post(f"{exhibition_url}/api/query", json=kwargs)
             resp.raise_for_status()
-            return resp.json()
+            payload = resp.json()
+            # 富回答旁路：会展的结构化 citations/sources 在确定性 planner 的
+            # _run_capability 里会被丢弃（只取 result["evidence"]），故在此提前入池。
+            sink = current_sink()
+            if sink is not None:
+                citations = payload.get("citations") or []
+                sources = payload.get("sources") or []
+                if citations:
+                    sink.exhibition_citations.extend(citations)
+                if sources:
+                    sink.exhibition_sources.extend(sources)
+            return payload
 
         registry.register(
             as_remote_capability(

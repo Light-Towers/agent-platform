@@ -13,6 +13,7 @@
 """
 
 import hashlib
+import json
 import math
 import os
 from typing import Any, Dict, List, Optional, Sequence, Tuple
@@ -61,12 +62,15 @@ HYBRID_DEFAULT_LABEL = "dense+sparse"
 EVAL_COLLECTION_NAME = "eval_rag_routes"
 
 
-def fallback_config_hash() -> str:
+def fallback_config_hash(chunk_config=None) -> str:
     """
     部署镜像落后于工作树、缺 ``knowledge_service.conf.config_hash`` 时的降级实现（纯 stdlib）。
 
     仅用于**实验归因标签 / run_id 目录名**，不参与任何检索数值计算（recall/mrr/ndcg 不受影响）。
     基于影响实验可复现性的关键环境变量做 sha256 短哈希，输出形状与 compute_config_hash 一致。
+
+    :param chunk_config: 与 compute_config_hash 同签名（刀 4）——旧镜像降级时可选并入哈希，
+        使不同切分参数的 run 仍可区分；不传保持旧降级哈希不变。
     """
     raw = "|".join(
         [
@@ -74,6 +78,8 @@ def fallback_config_hash() -> str:
             os.environ.get("EMBEDDING_MODE", ""),
         ]
     )
+    if chunk_config is not None:
+        raw += "|" + json.dumps(chunk_config, sort_keys=True, ensure_ascii=False)
     return "fb" + hashlib.sha256(raw.encode("utf-8")).hexdigest()[:8]
 
 

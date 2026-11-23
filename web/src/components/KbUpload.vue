@@ -18,6 +18,7 @@
 import { computed, onUnmounted, ref, watch } from 'vue'
 
 import { authToken } from '../stores/session'
+import { isSafeImageUrl } from '../api/sse.ts'
 import {
   uploadKbDocuments,
   getKbStatus,
@@ -29,13 +30,15 @@ import {
   type KbTaskStatus,
   type KbTreeDoc,
 } from '../api/kb.ts'
-import { DIALECT_OPTIONS } from '../api/datasources.ts'
+import { DEFAULT_KB_CHUNK_CONFIG, type KbChunkConfig } from '../api/kb.ts'
 
 const props = defineProps<{
   selectedKnowledgeId: string
   selectedName: string
   /** 当前选中库的文档列表（来自文档树；数据源是 Milvus 实际切片）。 */
   documents: readonly KbTreeDoc[]
+  /** 当前库的切分配置（库设置页编辑；上传页只读展示）。 */
+  chunkConfig?: KbChunkConfig | null
 }>()
 const emit = defineEmits<{
   changed: []   // 上传/下线后通知父组件刷新文档树
@@ -54,21 +57,25 @@ const displayDocs = computed(() => props.documents.map((doc) => {
   return { ...doc, chunks: doc.chunks.map((c) => ({ ...c, status: ov })) }
 }))
 
-/** 默认配置即"能跑"：DRAFT + PRIVATE；knowledge_id 由左栏选中的库提供。 */
-const form = ref<KbUploadForm>({
-  scopeType: 'PRIVATE',
-  tenantType: '',
-  effectiveFrom: '',
-  effectiveTo: '',
-  version: '',
-  authority: '',
-  status: 'DRAFT',
-  constraintKind: '',
-  enableItemNameRecognition: true,
-  knowledgeId: '',
-  exhibitionId: '',
-  venueId: '',
-  datasourceType: 'mysql',
+/** 上传表单（刀 3 精简）：只带 knowledge_id；切分配置由后端读库配置兜底。 */
+const form = ref<KbUploadForm>({ knowledgeId: '' })
+
+/** 展示用切分配置：后端未配置时用默认值标注（与后端 DEFAULT_CHUNK_CONFIG 对齐）。 */
+const shownChunkConfig = computed<KbChunkConfig>(() =>
+  props.chunkConfig ?? DEFAULT_KB_CHUNK_CONFIG
+)
+const STRATEGY_LABEL: Record<KbChunkConfig['split_strategy'], string> = {
+  title: '按标题切分',
+  char: '按字符数切分',
+  line: '按行/表格切分',
+}
+
+/** 同名覆盖提示（F-5）：文件名去后缀 = source_doc，命中现有文档即提示将被覆盖。 */
+const overwriteNames = computed<string[]>(() => {
+  const existing = new Set(displayDocs.value.map((d) => d.source_doc))
+  return files.value
+    .map((f) => f.name.replace(/\.[^.]+$/, ''))  // 去后缀，与后端 file_title 同口径
+    .filter((name) => existing.has(name))
 })
 
 const files = ref<File[]>([])
@@ -276,7 +283,25 @@ function stepState(names: readonly string[]): 'done' | 'running' | 'pending' {
   return 'pending'
 }
 const split = computed(() => status.value?.summary?.split)
+/** 从切片预览 head 中提取图片链接（导入时写回的 MinIO 链接），渲染成缩略图。
+ *  前端二次校验 scheme；服务端 head 截断导致链接不完整时自然提不到，不报错。 */
+const PREVIEW_IMG_RE = /!\[[^\]]*\]\(([^)\s]+)\)/g
+const previewImages = computed(() => {
+  const out: { url: string; caption: string }[] = []
+  const seen = new Set<string>()
+  for (const preview of split.value?.previews ?? []) {
+    for (const match of preview.head.matchAll(PREVIEW_IMG_RE)) {
+      const url = match[1]
+      if (!url || seen.has(url) || !isSafeImageUrl(url)) continue
+      seen.add(url)
+      out.push({ url, caption: preview.title || `第 ${preview.part} 片` })
+    }
+  }
+  return out
+})
 const check = computed(() => status.value?.summary?.structure_check)
+const effectiveConfig = computed(() => status.value?.summary?.effective_config)
+const splitWarnings = computed(() => status.value?.summary?.warnings ?? [])
 const failed = computed(() => status.value?.status === 'failed')
 </script>
 
@@ -450,6 +475,14 @@ const failed = computed(() => status.value?.status === 'failed')
         </button>
       </p>
 
+      <p
+        v-if="overwriteNames.length"
+        class="notice notice--ok"
+        role="status"
+      >
+        <strong>将覆盖同名文档：{{ overwriteNames.join('、') }}</strong>（同名即视为同一文档，旧切片会被新内容替换）
+      </p>
+
       <div class="kb-required">
         <span class="o-head-sm">上传到知识库</span>
         <p
@@ -498,123 +531,17 @@ const failed = computed(() => status.value?.status === 'failed')
         <strong>处理失败：{{ status.error }}</strong>
       </p>
 
-      <!-- 高级选项：默认收起，不占用上传者注意力 -->
-      <details class="fold">
-        <summary>
-          <span class="o-head-sm">高级选项（文档归属与处理开关，一般不用改）</span>
-        </summary>
+      <!-- 切分设置：只读展示当前库配置（编辑在左侧栏库设置里） -->
+      <div class="kb-required">
+        <span class="o-head-sm">当前库切分规则</span>
         <p class="hint">
-          配置随每次上传提交；留空即按默认值处理。请求只发往
-          <code class="t-name">/kb/uploads</code> 代理，浏览器不直连知识库服务。
+          {{ STRATEGY_LABEL[shownChunkConfig.split_strategy] }} · 每片 {{ shownChunkConfig.max_content_length }} 字 ·
+          重叠 {{ Math.round(shownChunkConfig.chunk_overlap_ratio * 100) }}%
         </p>
-        <div class="kb-advanced">
-          <label class="o-head-sm">
-            scope_type
-            <input
-              v-model="form.scopeType"
-              class="ry-input"
-              type="text"
-            >
-          </label>
-          <label class="o-head-sm">
-            tenant_type
-            <input
-              v-model="form.tenantType"
-              class="ry-input"
-              type="text"
-            >
-          </label>
-          <label class="o-head-sm">
-            effective_from
-            <input
-              v-model="form.effectiveFrom"
-              class="ry-input"
-              type="text"
-              placeholder="yyyy-MM-dd"
-            >
-          </label>
-          <label class="o-head-sm">
-            effective_to
-            <input
-              v-model="form.effectiveTo"
-              class="ry-input"
-              type="text"
-              placeholder="yyyy-MM-dd"
-            >
-          </label>
-          <label class="o-head-sm">
-            version
-            <input
-              v-model="form.version"
-              class="ry-input"
-              type="text"
-            >
-          </label>
-          <label class="o-head-sm">
-            authority
-            <input
-              v-model="form.authority"
-              class="ry-input"
-              type="text"
-            >
-          </label>
-          <label class="o-head-sm">
-            status
-            <input
-              v-model="form.status"
-              class="ry-input"
-              type="text"
-            >
-          </label>
-          <label class="o-head-sm">
-            constraint_kind
-            <input
-              v-model="form.constraintKind"
-              class="ry-input"
-              type="text"
-            >
-          </label>
-          <label class="o-head-sm">
-            exhibition_id
-            <input
-              v-model="form.exhibitionId"
-              class="ry-input"
-              type="text"
-            >
-          </label>
-          <label class="o-head-sm">
-            venue_id
-            <input
-              v-model="form.venueId"
-              class="ry-input"
-              type="text"
-            >
-          </label>
-          <label class="o-head-sm">
-            数据源类型
-            <select
-              v-model="form.datasourceType"
-              class="ry-input"
-              aria-label="数据源类型"
-            >
-              <option
-                v-for="d in DIALECT_OPTIONS"
-                :key="d.value"
-                :value="d.value"
-              >
-                {{ d.label }}
-              </option>
-            </select>
-          </label>
-          <label class="o-head-sm kb-check">
-            <input
-              v-model="form.enableItemNameRecognition"
-              type="checkbox"
-            >
-            启用主体名称识别
-          </label>
-        </div>
-      </details>
+        <p class="hint">
+          要修改切法/大小/重叠，请在左侧选中库后点「设置」。改完重新上传同名文档即可按新规则覆盖旧切片。
+        </p>
+      </div>
     </section>
 
     <!-- ③ 最近一次上传处理读数（仅上传后展示，可核对切分/语义结构是否完整） -->
@@ -637,6 +564,20 @@ const failed = computed(() => status.value?.status === 'failed')
           {{ step.label }}
         </li>
       </ol>
+      <p
+        v-if="effectiveConfig"
+        class="hint"
+      >
+        本次按 <strong>{{ effectiveConfig.strategy_label }}</strong> · 每片 {{ effectiveConfig.max_content_length }} 字 ·
+        重叠 {{ effectiveConfig.chunk_overlap }} 字执行
+      </p>
+      <p
+        v-for="(w, i) in splitWarnings"
+        :key="i"
+        class="hint"
+      >
+        ⚠ {{ w }}
+      </p>
       <template v-if="split">
         <h3 class="o-head-sm">
           文档怎么切
@@ -646,6 +587,25 @@ const failed = computed(() => status.value?.status === 'failed')
           原稿 {{ split.md_lines }} 行 · 识别到 {{ split.title_count }} 个标题 ·
           首片「{{ split.first_title }}」· 切片正文共 {{ split.chunk_chars }} 字
         </p>
+        <div
+          v-if="previewImages.length > 0"
+          class="rich-images"
+        >
+          <div class="rich-images__label">
+            切片中出现的图片（{{ previewImages.length }}）
+          </div>
+          <div class="rich-images__strip">
+            <img
+              v-for="img in previewImages"
+              :key="img.url"
+              class="kb-preview-img"
+              :src="img.url"
+              :alt="img.caption"
+              loading="lazy"
+              referrerpolicy="no-referrer"
+            >
+          </div>
+        </div>
       </template>
       <template v-if="check">
         <p class="hint">

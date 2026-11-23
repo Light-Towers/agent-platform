@@ -8,7 +8,7 @@
 import { computed, onMounted, ref } from 'vue'
 
 import { authToken } from '../stores/session'
-import { listDocumentTree, type KbTreeBase, type KbTreeDoc } from '../api/kb.ts'
+import { listDocumentTree, type KbTreeBase, type KbTreeDoc, type KbChunkConfig } from '../api/kb.ts'
 import KnowledgeBaseSidebar from './KnowledgeBaseSidebar.vue'
 import KbUpload from './KbUpload.vue'
 
@@ -21,6 +21,8 @@ const selectedId = ref('')
 const selectedName = ref('')
 const treeBases = ref<readonly KbTreeBase[]>([])
 const treeError = ref('')
+/** 库级切分配置索引（库设置页保存后随刷新更新），传给右栏只读展示。 */
+const chunkConfigById = ref<Map<string, KbChunkConfig>>(new Map())
 const sidebarRef = ref<InstanceType<typeof KnowledgeBaseSidebar> | null>(null)
 
 /** 有效文档数（status != REVOKED 的 distinct source_doc）——与后端删库守卫同源。
@@ -50,6 +52,12 @@ async function refreshTree(): Promise<void> {
     treeError.value = `文档树加载失败：${err instanceof Error ? err.message : String(err)}`
     treeBases.value = []  // #11：失败时清掉旧数据，不把过期读数当当前
   }
+  // L-B：切分配置索引由 Sidebar.refresh() 经 @configs emit 上来（单一数据源，不重复请求）
+}
+
+/** Sidebar 经 @configs 抛上来的库配置索引（L-B：一次请求，配置与库列表同源） */
+function onConfigs(map: Map<string, KbChunkConfig>): void {
+  chunkConfigById.value = map
 }
 
 /** 统一刷新（P1 修类）：任何变更同时刷新 tree + Sidebar 的库列表快照。 */
@@ -99,6 +107,7 @@ onMounted(refreshTree)
         @changed="refreshAll"
         @renamed="onRenamed"
         @deleted="onDeleted"
+        @configs="onConfigs"
       />
     </aside>
     <main class="kb-workspace__main">
@@ -108,6 +117,7 @@ onMounted(refreshTree)
         :selected-knowledge-id="selectedId"
         :selected-name="selectedName"
         :documents="currentDocs"
+        :chunk-config="chunkConfigById.get(selectedId) ?? null"
         @changed="refreshAll"
       />
       <section

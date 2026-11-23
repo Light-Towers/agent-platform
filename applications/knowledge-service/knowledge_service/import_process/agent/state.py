@@ -2,6 +2,7 @@ import copy
 from typing import TypedDict
 
 from knowledge_service.core.logger import logger
+from knowledge_service.utils.chunk_config_utils import DEFAULT_CHUNK_CONFIG, overlap_chars
 
 
 class ImportGraphState(TypedDict):
@@ -18,9 +19,13 @@ class ImportGraphState(TypedDict):
     is_pdf_read_enabled: bool  # 是否启用 PDF 读取路径
 
     # --- 切块相关 ---
-    is_normal_split_enabled: bool
+    # 切分参数（config 经 /upload resolver 规范化后注入；刀 1 加字段，刀 2 消费分派）
+    # 注意：StateGraph 只保留 schema 声明过的键——这三个键必须声明，否则图边界静默丢弃
+    split_strategy: str  # title | char | line
+    max_content_length: int  # 块大小（字符），500–2000，默认 2000
+    chunk_overlap: int  # 重叠字符数（由 ratio × max 换算），默认 200
+    chunk_overlap_ratio: float  # 重叠比例（刀 2 LLD 快照 4 键之一，供事后归因还原比例）
     is_silicon_flow_api_enabled: bool
-    is_advanced_split_enabled: bool
     is_vllm_enabled: bool
 
     # --- 路径相关 ---
@@ -67,9 +72,14 @@ graph_default_state: ImportGraphState = {
     "task_id": "",
     "is_pdf_read_enabled": False,
     "is_md_read_enabled": False,
-    "is_normal_split_enabled": True,
+    # 切分参数默认（单一真相源：从 chunk_config_utils 推导，不再手工写 200）
+    "split_strategy": DEFAULT_CHUNK_CONFIG["split_strategy"],
+    "max_content_length": DEFAULT_CHUNK_CONFIG["max_content_length"],
+    "chunk_overlap": overlap_chars(
+        DEFAULT_CHUNK_CONFIG["max_content_length"], DEFAULT_CHUNK_CONFIG["chunk_overlap_ratio"]
+    ),
+    "chunk_overlap_ratio": DEFAULT_CHUNK_CONFIG["chunk_overlap_ratio"],
     "is_silicon_flow_api_enabled": True,
-    "is_advanced_split_enabled": False,
     "is_vllm_enabled": False,
     "local_dir": "",
     "local_file_path": "",

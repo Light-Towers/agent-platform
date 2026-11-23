@@ -16,6 +16,7 @@ from knowledge_service.core.logger import logger
 from knowledge_service.core.tracing import traced_span
 from knowledge_service.utils.escape_milvus_string_utils import escape_milvus_string
 from knowledge_service.utils.index_registry import register_index
+from knowledge_service.utils.kb_delete import clear_chunks_for_reupload
 from knowledge_service.utils.task_utils import add_running_task
 
 # 从配置文件读取切片集合名称（M2：版本化命名 {prefix}_{schema_version}_{embedding_model}，
@@ -90,12 +91,22 @@ def node_import_milvus(state: Dict[str, Any]) -> Dict[str, Any]:
         chunks_json_data, vector_dimension = step_1_check_input(state)
         # 步骤2：Milvus客户端连接+集合准备（自动建表）
         client = step_2_prepare_collection(vector_dimension)
-        # 步骤3：幂等性处理 - 清理同item_name旧数据
-        step_3_clean_old_data(client, chunks_json_data)
+        # 步骤3：幂等性处理 - 重新上传按 (tenant, knowledge_id, source_doc) 删旧切片（刀 1 幂等改造）
+        # source_doc 来自 node_entry 的 file_title（文件名去后缀）；空值时函数内 fail-safe 跳过。
+        # 旧的 item_name 清理（step_3_clean_old_data）不再调用——它 NER 关闭时失效且跨租户误删。
+        reupload_source_doc = str(state.get("file_title", "") or "")
+        tenant_for_clean = str(state.get("tenant_id", "") or "")
+        kid_for_clean = str(state.get("knowledge_id", "") or "")
+        cleared = clear_chunks_for_reupload(
+            client, CHUNKS_COLLECTION_NAME, tenant_for_clean, kid_for_clean, reupload_source_doc
+        )
+        logger.info(
+            f"[{state.get('task_id', '')}] 重新上传幂等清理：source_doc={reupload_source_doc!r} 删除旧切片 {cleared} 条"
+        )
         # 步骤4：批量插入数据+主键chunk_id回填
         updated_chunks = step_4_insert_data(client, chunks_json_data, state=state)
-        # 步骤4.5：索引 registry 登记（M2：集合 ↔ 构建配置，评测指标留待实测回填）
-        step_5_register_index(chunks_json_data)
+        # 步骤4.5：索引 registry 登记（M2：集合 ↔ 构建配置；刀 2 写入切分参数快照）
+        step_5_register_index(chunks_json_data, state=state)
         # 步骤5：更新全局状态，将回填后的切片回传下游
         state["chunks"] = updated_chunks
 
@@ -425,7 +436,9 @@ def step_4_insert_data(client, chunks_json_data: List[Dict[str, Any]], state: Di
     return chunks_json_data
 
 
-def step_5_register_index(chunks_json_data: List[Dict[str, Any]]) -> None:
+def step_5_register_index(
+    chunks_json_data: List[Dict[str, Any]], state: Dict[str, Any] = None
+) -> None:
     """
     步骤4.5：Milvus 入库成功后向索引 registry 登记一条构建记录（M2，方案 §5.4）。
 
@@ -439,12 +452,20 @@ def step_5_register_index(chunks_json_data: List[Dict[str, Any]]) -> None:
     item_names = {
         str(c.get("item_name", "")).strip() for c in chunks_json_data or [] if str(c.get("item_name", "")).strip()
     }
+    # 刀 2 F-12：把本次生效的切分参数写进 chunk_params 快照（按集合登记=导入批次级归因）。
+    st = state or {}
+    chunk_params_snapshot = {
+        "split_strategy": st.get("split_strategy", ""),
+        "max_content_length": st.get("max_content_length", 0),
+        "chunk_overlap": st.get("chunk_overlap", 0),
+        "chunk_overlap_ratio": st.get("chunk_overlap_ratio", 0.0),  # 刀 2 LLD 4 键：还原用户设的比例语义
+    }
     try:
         register_index(
             collection_name=CHUNKS_COLLECTION_NAME,
             embedding_model=milvus_config.embedding_model,
             chunk_version=milvus_config.chunk_version,
-            chunk_params={"max_len": None, "merge_short": True},
+            chunk_params=chunk_params_snapshot,
             doc_count=len(item_names),
             chunk_count=len(chunks_json_data or []),
         )

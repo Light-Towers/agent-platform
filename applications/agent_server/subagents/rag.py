@@ -12,6 +12,7 @@ from agent_runtime.document_store import DocumentStoreUnavailable
 from agent_runtime.workspace_registry import server_tenant_id
 
 from agent_server.config import get_settings
+from agent_server.evidence_sink import current_sink
 from agent_server.rag.backend import get_document_store
 from agent_server.subagents.degradation import (
     KNOWLEDGE_DISABLED,
@@ -62,6 +63,12 @@ async def rag_query(
         return [f"{KNOWLEDGE_UNAVAILABLE}：{e}"]
     if not chunks:
         return [f"{KNOWLEDGE_NO_HIT}相关内容"]
+    # 富回答旁路：在拍平成 list[str] 之前把结构化 chunks 存入请求级 sink，
+    # 供 SSE 出口的 rich adapter 构造 citations/images（plan-image-citation-e2e §2.2）。
+    # 降级路径（上方 return）不写池——避免把"无命中"提示当证据。
+    sink = current_sink()
+    if sink is not None:
+        sink.rag_chunks.extend(chunks)
     return [
         f"[来源: {c['source']} / {c['heading'] or '无标题'}] {c['content']}" for c in chunks
     ]

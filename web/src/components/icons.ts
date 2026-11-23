@@ -34,6 +34,7 @@ export type IconKey =
 export const ICON_PATHS: Record<IconKey, string> = {
   route: 'M5 3l6 5-6 5z',
   evidence: 'M2 4h12M2 8h12M2 12h12',
+  rich: 'M2 4h12v9H2zM4 12l3-4 2 3 2-2 3 3',
   memory: 'M8 2l6 6-6 6-6-6z',
   status: 'M13 8a5 5 0 11-10 0 5 5 0 0110 0',
   replan: 'M13 8a5 5 0 11-1.5-3.6M13 2.5V5h-2.5',

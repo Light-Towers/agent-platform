@@ -6,6 +6,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from shared_schemas.rich_answer import RichAnswer
+
 Priority = Literal["high", "normal", "low"]
 
 CONTRACT_VERSION = "1.0"
@@ -47,3 +49,5 @@ class QueryResponse(BaseModel):
     intent: str | None = Field(None, description="命中的意图标签（可选）")
     fallback: bool = Field(False, description="是否走了降级路径")
     version: str = Field(CONTRACT_VERSION, description="契约版本号（缺省 1.0，向后兼容）")
+    # 富回答（图片/引用/来源）：可选扩展，旧消费者 extra=ignore 不读即为 None，向后兼容。
+    rich: RichAnswer | None = Field(None, description="富回答扩展（图片/引用/来源；旧消费者忽略）")

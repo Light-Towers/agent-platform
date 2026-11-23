@@ -217,7 +217,9 @@ class TestHealthReflectsRuntimeState:
         assert on["identity_mode"] != off["identity_mode"]
 
     def test_guard_enabled_tracks_switch(self, monkeypatch):
-        off = _health_with(monkeypatch)
+        # 2026-11-22：guard_enabled 默认翻 True；显式拨 env 两侧值，保持"跟随开关"本意，
+        # 不依赖默认值（本文件头注：刻意不断言写死值）。
+        off = _health_with(monkeypatch, GUARD_ENABLED="false")
         on = _health_with(monkeypatch, GUARD_ENABLED="true")
         assert (off["guard_enabled"], on["guard_enabled"]) == (False, True)
 

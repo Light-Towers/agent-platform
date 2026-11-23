@@ -144,6 +144,7 @@ function promote(s: StreamSnapshot): void {
  * 这条边界靠类型挡住，不靠注释约定。 */
 export const timeline = computed<readonly TimelineEntry[]>(() => snap.value.timeline)
 export const evidence = computed(() => snap.value.evidence)
+export const richAnswer = computed(() => snap.value.rich)
 export const answerText = computed(() => snap.value.answer)
 export const terminal = computed(() => snap.value.terminal)
 export const threadId = computed(() => snap.value.threadId)

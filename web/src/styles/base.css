@@ -146,6 +146,43 @@ code, .t-name, .f-name, .num {
 
 .answer__foot { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-2); }
 
+/* ---- 富回答：图片回显条 + 引用卡片（plan-image-citation-e2e-2026-11-23）----
+ * 只用现有 token（视觉门禁禁止新色/裸 hex）。图片为白名单 URL，点击就地展开预览。 */
+.rich-images { display: grid; gap: var(--sp-1); }
+.rich-images__label { font-size: var(--fs-xs); color: var(--text-2); }
+.rich-images__strip { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.rich-images__thumb {
+  width: 88px; height: 88px; padding: 0; cursor: pointer; overflow: hidden;
+  border: 1px solid var(--border-decor); border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+}
+.rich-images__thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.kb-preview-img {
+  width: 88px; height: 88px; object-fit: cover; display: block;
+  border: 1px solid var(--border-decor); border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+}
+.rich-images__lightbox {
+  margin-top: var(--sp-2); padding: var(--sp-2); cursor: pointer;
+  border: 1px solid var(--border-decor); border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+}
+.rich-images__lightbox-body { display: grid; gap: var(--sp-1); }
+.rich-images__lightbox-body img { max-width: 100%; max-height: 60vh; object-fit: contain; display: block; }
+
+.rich-citations { display: grid; gap: var(--sp-1); }
+.rich-citations__label { font-size: var(--fs-xs); color: var(--text-2); }
+.rich-citations__list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp-1); }
+.rich-citations__item {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-1);
+  padding: var(--sp-1) var(--sp-2); background: var(--bg-surface);
+  border: 1px solid var(--border-decor); border-radius: var(--radius-sm);
+}
+.rich-citations__index { font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--text-2); }
+.rich-citations__name { font-size: var(--fs-xs); color: var(--text-1); }
+.rich-citations__heading { font-size: var(--fs-xs); color: var(--text-2); }
+.rich-citations__snippet { font-size: var(--fs-xs); color: var(--text-2); overflow-wrap: anywhere; }
+
 /* 终态徽标的**形状**在这一格，三值各自的边框/底色在 `events.css`（族色只走图形通道，
  * 文本恒 `--text-1`：视觉件 §2.2 那条实算 3.25/4.25 < 4.5 就是针对着色的）。 */
 .term {
@@ -691,11 +728,21 @@ a.ry-btn { text-decoration: none; }
 }
 .kb-sidebar__item {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--sp-1);
   padding: var(--sp-1);
   border: 1px solid var(--border-decor);
   border-radius: var(--radius-sm);
+}
+/* 切分设置内联编辑器（刀 3）：占满整行，与行内操作按钮换行显示。 */
+.kb-config-editor {
+  flex: 1 1 100%;
+  display: grid;
+  gap: var(--sp-2);
+  padding: var(--sp-2);
+  margin-top: var(--sp-1);
+  border-top: 1px solid var(--border-decor);
 }
 /* flex:1 1 auto（不是 width:100%）——留出右侧按钮的空间，避免 ✎× 被挤出卡片。 */
 .kb-sidebar__pick {

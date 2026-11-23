@@ -317,6 +317,33 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def _read_chunk_config_snapshot(collection: str) -> Optional[Dict[str, Any]]:
+    """读集合的切分参数快照（刀 4 F-15 地基）。
+
+    来源：index_registry[collection]["chunk_params"]——导入时由 step_5_register_index 写入的真实
+    生效参数。取刀 2 LLD 约定的四个键（含 ratio，供事后归因还原比例语义）；registry 缺失/损坏/
+    字段不全时返回 None（graceful 降级，保持旧哈希与旧行为）。本函数纯文件读、零 Milvus 依赖，可单测。
+    """
+    try:
+        from knowledge_service.utils.index_registry import read_registry
+
+        registry = read_registry()
+        entry = registry.get(collection) or {}
+        params = entry.get("chunk_params") or {}
+        snapshot = {
+            "split_strategy": params.get("split_strategy", ""),
+            "max_content_length": params.get("max_content_length", 0),
+            "chunk_overlap": params.get("chunk_overlap", 0),
+            "chunk_overlap_ratio": params.get("chunk_overlap_ratio", 0.0),
+        }
+        # 空快照（旧 registry 的占位值 max_len/merge_short）视为无有效切分参数
+        if not snapshot["split_strategy"] and not snapshot["max_content_length"]:
+            return None
+        return snapshot
+    except Exception:  # noqa: BLE001 — registry 是辅助治理，读失败不影响评测主流程
+        return None
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     args = parse_args(argv)
     golden_path = Path(args.golden)
@@ -326,9 +353,14 @@ def main(argv: Optional[List[str]] = None) -> int:
     collection_name = milvus_config.chunks_collection
     print(f"[eval] 目标集合：{collection_name}")
 
+    # ---------- 切分参数快照（刀 4 F-15）----------
+    # 从 index_registry 读本次集合的 chunk_params（导入时由 step_5_register_index 写入）。
+    # registry 缺失/损坏时 graceful 降级为 None——hash 不变、快照标注 null，不影响检索数值。
+    effective_chunk_config = _read_chunk_config_snapshot(collection_name)
+
     # ---------- OTel 初始化（M4，方案 §8） ----------
     # 幂等；未配置 endpoint / 未启用时自动 no-op（评测默认不导出，需显式设置环境变量）。
-    config_hash = compute_config_hash()
+    config_hash = compute_config_hash(chunk_config=effective_chunk_config)
     init_tracing(config_hash=config_hash, collection=collection_name)
 
     client = get_milvus_client()
@@ -420,6 +452,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         "timestamp": timestamp,
         "config_hash": config_hash,
         "collection": collection_name,
+        # 刀 4 F-15：把本次生效的切分参数写进 results，使每次 run 可区分（与 config_hash 同源）
+        "chunk_config": effective_chunk_config,
         "golden": str(golden_path),
         "sample_size": len(records),
         "overall": overall,

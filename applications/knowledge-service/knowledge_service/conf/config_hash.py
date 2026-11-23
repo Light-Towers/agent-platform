@@ -19,7 +19,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from knowledge_service.conf.milvus_config import milvus_config
 from knowledge_service.conf.rerank_config import rerank_cfg  # TD-9：统一引用 yaml 配置
@@ -53,12 +53,16 @@ def _sha256_hex(content: str) -> str:
     return hashlib.sha256(content.encode("utf-8")).hexdigest()[:8]
 
 
-def compute_config_hash() -> str:
+def compute_config_hash(chunk_config: Optional[Dict[str, Any]] = None) -> str:
     """
     计算当前检索配置哈希（实验/trace 归因用）。
 
     优先：knowledge_service/conf/retrieval.yaml + rerank.yaml（M3 起存在）内容 + 集合名。
     兜底：M2 硬编码基线快照 + 集合名（yaml 尚不存在时退化）。
+
+    :param chunk_config: 刀 4 新增——本次评测/导入生效的切分参数快照。传入时并入哈希输入，
+        使同 yaml + 同集合下、不同切分参数的两次 run 得到不同 hash（F-15 地基）。
+        不传时保持旧哈希不变，兼容现有调用方（生产 init_tracing / 旧评测脚本）。
     """
     conf_dir = Path(__file__).resolve().parent
     parts: List[str] = [milvus_config.chunks_collection]
@@ -70,4 +74,6 @@ def compute_config_hash() -> str:
             parts.append(yf.read_text(encoding="utf-8"))
     if not any_yaml:
         parts.append(json.dumps(_RUNTIME_BASELINE, sort_keys=True, ensure_ascii=False))
+    if chunk_config is not None:
+        parts.append("chunk_config=" + json.dumps(chunk_config, sort_keys=True, ensure_ascii=False))
     return _sha256_hex("\n".join(parts))

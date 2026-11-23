@@ -13,8 +13,10 @@
  * ⚠ 本件没有 <style> 块，理由见 ThemeToggle.vue 头注。
  * ==========================================================================-->
 <script setup lang="ts">
-import { answerText, busy, hasRound, terminal, threadId, useExample, type Terminal } from '../stores/session'
+import { answerText, busy, hasRound, richAnswer, terminal, threadId, useExample, type Terminal } from '../stores/session'
 import MarkdownText from './MarkdownText.vue'
+import ImageStrip from './ImageStrip.vue'
+import CitationList from './CitationList.vue'
 
 /** 终态三值的人话。判据只看 `done`（A7）：`open` 那句不得写成「完成」。 */
 const TERM_LABEL: Record<Terminal, string> = {
@@ -65,6 +67,11 @@ const TERM_LABEL: Record<Terminal, string> = {
           aria-hidden="true"
         />
       </div>
+
+      <template v-if="richAnswer">
+        <ImageStrip :images="richAnswer.images" />
+        <CitationList :citations="richAnswer.citations" />
+      </template>
 
       <p class="answer__foot">
         <span

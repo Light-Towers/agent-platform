@@ -13,11 +13,14 @@
 - **tenant 安全边界**：所有操作按 (tenant_id, knowledge_id) 定位，跨租户删不到。
 - **可逆**：REVOKED 可通过重新发布（DRAFT→...→PUBLISHED）恢复；库 deleted 可重新建。
 
-模块无 KS 硬依赖（client / registry / collections 全注入缝），零 Milvus/Mongo 可单测。
+Milvus/Mongo client 全注入缝，零外部服务可单测（仅依赖轻量 logger / 纯转义工具）。
 """
 from __future__ import annotations
 
 from typing import Any, Callable, Dict, List, Tuple
+
+from knowledge_service.core.logger import logger
+from knowledge_service.utils.escape_milvus_string_utils import escape_milvus_string
 
 # 状态值（与 shared_schemas.knowledge_lifecycle.KNOWLEDGE_STATUS 对齐；本模块零 KS 依赖故用字面量）
 REVOKED = "REVOKED"
@@ -58,6 +61,63 @@ def has_other_active_docs(
         output_fields=["chunk_id"], limit=1,
     ) or []
     return len(rows) > 0
+
+
+def clear_chunks_for_reupload(
+    client: Any, collection: str, tenant_id: str, knowledge_id: str, source_doc: str,
+) -> int:
+    """重新上传的幂等清理：按 (tenant, kid, source_doc) 删该文档的旧切片。
+
+    与 read_chunks/_delete_chunks 的区别（刀 1 幂等改造，主方案 §3.4）：
+    - **转义**（F-1）：所有 filter 值过 escape_milvus_string——文件名可含引号/反斜杠，
+      直接 f-string 拼接会 Milvus filter 语法错误；
+    - **轻量只读**（F-9）：只读 chunk_id，不读 dense/sparse 向量（软删除重插才需要向量）；
+    - **空值 fail-safe**（F-11）：source_doc 为空/纯空白时**不删**、告警、返回 0——
+      `source_doc == ""` 会误删该库所有空 source_doc 切片；
+    - **租户谓词**（F-13）：filter 恒含 tenant_id + knowledge_id，杜绝跨租户误删；
+    - **删全部历史版本**（H-1 修法 b）：重传 = 用新内容整体替换该文档，**连 REVOKED 旧版一起删**。
+      reason：若保留 REVOKED 旧版，用户后续点"恢复"（restore_document 会把该 source_doc 全部
+      REVOKED 切片无脑复活）将导致旧版内容复活、与新版并存污染检索；且"下线→重传→再下线→恢复"
+      路径下旧版全为 REVOKED，前置校验"有无活跃同名"挡不住。重传是明确的替换信号，旧下线版本
+      无保留价值——这与"主动下线未替换"的 REVOKED 保留语义不冲突。
+
+    :return: 删前读到的切片数（0 = 无旧切片或空值跳过）。
+    """
+    safe_doc = (source_doc or "").strip()
+    if not safe_doc:
+        # 无法定位到具体文档，绝不执行删除（否则误删全库空 source_doc 切片）
+        logger.warning(
+            f"[reupload] source_doc 为空，跳过幂等清理（tenant={tenant_id} kid={knowledge_id}）"
+        )
+        return 0
+    if not collection:
+        return 0
+
+    e_tenant = escape_milvus_string(tenant_id)
+    e_kid = escape_milvus_string(knowledge_id)
+    e_doc = escape_milvus_string(safe_doc)
+    filter_expr = (
+        f'tenant_id == "{e_tenant}" and knowledge_id == "{e_kid}" '
+        f'and source_doc == "{e_doc}"'
+    )
+    try:
+        if not client.has_collection(collection_name=collection):
+            return 0
+        rows = client.query(
+            collection_name=collection, filter=filter_expr,
+            output_fields=["chunk_id"], limit=16384,
+        ) or []
+        if not rows:
+            return 0
+        client.delete(collection_name=collection, filter=filter_expr)
+        if hasattr(client, "flush"):
+            try:
+                client.flush(collection_name=collection)
+            except Exception as e:  # noqa: BLE001 — flush 失败不影响删除结果
+                logger.warning(f"[reupload] flush 失败（不影响删除结果）: {e}")
+        return len(rows)
+    except Exception as e:  # noqa: BLE001 — 删除失败如实上抛，不静默吞（幂等失败=重传堆积）
+        raise ValueError(f"重新上传幂等清理失败（source_doc={safe_doc}）: {e}") from e
 
 
 def _delete_chunks(

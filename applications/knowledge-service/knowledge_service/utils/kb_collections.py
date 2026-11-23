@@ -39,7 +39,9 @@ def _get_collection() -> Any:
     if _store is None:
         from pymongo import MongoClient
 
-        client = MongoClient(settings.mongo_url)
+        # Mongo 不可达时快速失败（默认 serverSelectionTimeoutMS=30s 会拖慢上传热路径的
+        # get_chunk_config）；读配置失败本就要回落到全局默认，快失败符合意图。
+        client = MongoClient(settings.mongo_url, serverSelectionTimeoutMS=3000)
         db = client[settings.mongo_db_name]
         col = db[_COLLECTION]
         col.create_index([("tenant_id", 1), ("knowledge_id", 1)], unique=True)
@@ -147,6 +149,44 @@ def rename_collection(
         return False
 
 
+def get_chunk_config(
+    tenant_id: str, knowledge_id: str, collection: Any = None
+) -> Optional[Dict[str, Any]]:
+    """读库的切分配置（chunk_config 子文档）；库不存在或未配置返回 None。
+
+    Mongo 不可达只 WARNING 不抛（与模块"写失败不拦上传"同纪律）——兜底逻辑见调用方。
+    """
+    try:
+        col = collection if collection is not None else _get_collection()
+        doc = col.find_one(
+            {"tenant_id": tenant_id, "knowledge_id": knowledge_id, "status": _ST_ACTIVE},
+            {"chunk_config": 1, "_id": 0},
+        )
+        return (doc or {}).get("chunk_config")
+    except PyMongoError as e:
+        logger.warning(f"[kb_collections] 读 chunk_config 失败（回落到默认）: {e}")
+        return None
+
+
+def update_chunk_config(
+    tenant_id: str, knowledge_id: str, chunk_config: Dict[str, Any], collection: Any = None
+) -> bool:
+    """写库的切分配置（chunk_config 子文档 + updated_at）。返回是否命中 active 行。
+
+    Mongo 不可达只 WARNING 不抛——配置写失败由上层接口决定如何回告。
+    """
+    try:
+        col = collection if collection is not None else _get_collection()
+        res = col.update_one(
+            {"tenant_id": tenant_id, "knowledge_id": knowledge_id, "status": _ST_ACTIVE},
+            {"$set": {"chunk_config": dict(chunk_config), "updated_at": _now_iso()}},
+        )
+        return bool(getattr(res, "matched_count", 0))
+    except PyMongoError as e:
+        logger.warning(f"[kb_collections] 写 chunk_config 失败: {e}")
+        return False
+
+
 def get(tenant_id: str, knowledge_id: str, collection: Any = None) -> Optional[Dict[str, Any]]:
     """按 (tenant, knowledge_id) 取库记录；无则 None。"""
     col = collection if collection is not None else _get_collection()
@@ -181,7 +221,7 @@ def mark_deleted(
         return False
 
 
-__all__ = ["ensure_collection", "create_collection", "rename_collection", "get", "list_by_tenant", "mark_deleted", "STATUS_ACTIVE", "STATUS_DELETED"]
+__all__ = ["ensure_collection", "create_collection", "rename_collection", "get_chunk_config", "update_chunk_config", "get", "list_by_tenant", "mark_deleted", "STATUS_ACTIVE", "STATUS_DELETED"]
 
 # 状态常量以公开名导出（P3 删除端点/判据用）
 STATUS_ACTIVE = _ST_ACTIVE

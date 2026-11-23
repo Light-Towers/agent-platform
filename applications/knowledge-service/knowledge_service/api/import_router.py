@@ -30,6 +30,10 @@ from knowledge_service.core.logger import logger  # 项目统一日志工具
 from knowledge_service.import_process.agent.main_graph import kb_import_app  # LangGraph全流程编译实例
 from knowledge_service.import_process.agent.state import get_default_state
 from knowledge_service.utils import kb_collections, kb_delete, kb_doc_count, kb_upload_history
+from knowledge_service.utils.chunk_config_utils import (
+    normalize_chunk_config,
+    overlap_chars,
+)
 from knowledge_service.utils.kb_registry import (
     delete_document as delete_document_registry,
 )
@@ -162,6 +166,10 @@ def run_graph_task(
                 "exhibition_id",
                 "venue_id",
                 "datasource_type",
+                "split_strategy",
+                "max_content_length",
+                "chunk_overlap",
+                "chunk_overlap_ratio",
             ):
                 if key in metadata and metadata[key] is not None:
                     init_state[key] = metadata[key]
@@ -218,6 +226,10 @@ async def upload_files(
     exhibition_id: str = Form("", description="会展 ID（生命周期校验用）"),
     venue_id: str = Form("", description="场馆 ID（生命周期校验用）"),
     datasource_type: str = Form("", description="数据源类型（mysql/hive），文档归属的数据源类型"),
+    # 切分参数（刀 1）：空默认 = 未显式传，触发服务端读库配置/全局默认兜底
+    split_strategy: str = Form("", description="切分策略 title/char/line，空=沿用库配置"),
+    max_content_length: int = Form(0, description="块大小字符数 500-2000，0=沿用库配置"),
+    chunk_overlap_ratio: str = Form("", description="重叠比例 0-0.5，空=沿用库配置"),
 ):
     """
     文件上传核心接口
@@ -241,6 +253,27 @@ async def upload_files(
     # 08+16 通用化：聚合 metadata 入参，透传到后台任务
     # 隔离域（ADR-0006 T11）：tenant 为空时服务端注入默认租户（审计），不再静默全量。
     tenant_id = resolve_server_tenant(tenant_id, endpoint="/upload")
+
+    # 切分参数 resolver（F-7）：显式传参优先；未传的字段读库配置兜底；仍无则全局默认。
+    # 把"靠前端记得带"变成机制保证——脚本/curl/旧前端不带参数也能用上库配置。
+    raw_chunk_cfg: Dict[str, Any] = {}
+    if split_strategy:
+        raw_chunk_cfg["split_strategy"] = split_strategy
+    if max_content_length:
+        raw_chunk_cfg["max_content_length"] = max_content_length
+    if chunk_overlap_ratio:
+        try:
+            raw_chunk_cfg["chunk_overlap_ratio"] = float(chunk_overlap_ratio)
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"chunk_overlap_ratio 非法: {chunk_overlap_ratio!r}")
+    stored_cfg = kb_collections.get_chunk_config(tenant_id, knowledge_id) or {}
+    # 部分传参时，未传字段用库配置补全（库配置本身缺字段再由 normalize 取全局默认）
+    merged_cfg = {**stored_cfg, **raw_chunk_cfg}
+    try:
+        chunk_cfg = normalize_chunk_config(merged_cfg)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
     metadata = {
         "scope_type": scope_type,
         "tenant_id": tenant_id,
@@ -256,6 +289,11 @@ async def upload_files(
         "exhibition_id": exhibition_id,
         "venue_id": venue_id,
         "datasource_type": datasource_type,
+        # 规范化后的切分参数（字符数 overlap 由 ratio×max 算出，state 直接消费）
+        "split_strategy": chunk_cfg["split_strategy"],
+        "max_content_length": chunk_cfg["max_content_length"],
+        "chunk_overlap": overlap_chars(chunk_cfg["max_content_length"], chunk_cfg["chunk_overlap_ratio"]),
+        "chunk_overlap_ratio": chunk_cfg["chunk_overlap_ratio"],  # 刀 2 LLD 快照 4 键之一，供事后归因还原比例
     }
     # 1. 构建本地存储根目录：项目根目录/output/YYYYMMDD（按日期分层，方便管理）
     date_based_root_dir = os.path.join(PROJECT_ROOT / "output", datetime.now().strftime("%Y%m%d"))
@@ -346,7 +384,6 @@ async def upload_files(
         #    knowledge_id 为空不建库（与 kb_documents 既有行为一致）；
         #    写失败只落 WARNING 不拦上传（注册表是管理面，不是 upload 闸门）。
         if knowledge_id.strip():
-            from knowledge_service.utils import kb_collections
             kb_collections.ensure_collection(
                 tenant_id=tenant_id, knowledge_id=knowledge_id, name=knowledge_id.strip()
             )
@@ -580,6 +617,8 @@ async def list_collections(limit: int = 100):
             "status": str(r.get("status") or ""),
             "doc_count": doc_counts.get(str(r.get("knowledge_id") or ""), 0),
             "latest_updated_at": str(r.get("updated_at") or ""),
+            # 刀 2 F-8：库级切分配置随列表带出（P-1 前端读取路径依赖此字段）
+            "chunk_config": r.get("chunk_config"),
         }
         for r in rows
     ]
@@ -596,24 +635,69 @@ async def create_collection(req: dict):
     name = str((req or {}).get("name") or "").strip()
     if not name:
         raise HTTPException(status_code=400, detail="知识库名称不能为空")
+    # 刀 2 F-8：可选初始切分配置，校验后随建库写入
+    chunk_cfg = None
+    if (req or {}).get("chunk_config"):
+        try:
+            chunk_cfg = normalize_chunk_config((req or {})["chunk_config"])
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
     doc = kb_collections.create_collection(tenant_id=tenant_id, name=name)
     if doc is None:
         raise HTTPException(status_code=503, detail="知识库创建失败（存储不可用）")
+    # M-1：初始配置写失败不能假成功回显——如实标注，避免用户以为已生效
+    chunk_config_applied = True
+    if chunk_cfg is not None:
+        chunk_config_applied = kb_collections.update_chunk_config(
+            tenant_id, doc["knowledge_id"], chunk_cfg
+        )
     logger.info(f"[collections] {tenant_id} 新建知识库 {doc['knowledge_id']} name={name}")
-    return {"code": 201, **doc}
+    resp = {"code": 201, **doc}
+    if chunk_cfg is not None:
+        # 只在写成功时回显配置；失败时用 applied=false 明示（前端可据此提示重试）
+        if chunk_config_applied:
+            resp["chunk_config"] = chunk_cfg
+        resp["chunk_config_applied"] = chunk_config_applied
+    return resp
 
 
-@router.patch("/collections/{knowledge_id}", summary="重命名知识库")
-async def rename_collection(knowledge_id: str, req: dict):
-    """改知识库显示名（不改 knowledge_id）。请求体 {"name": "新名字"}。"""
+@router.patch("/collections/{knowledge_id}", summary="更新知识库（重命名 / 切分配置）")
+async def update_collection(knowledge_id: str, req: dict):
+    """改知识库显示名和/或切分配置（不改 knowledge_id）。
+
+    请求体 {"name": "新名字"} 和/或 {"chunk_config": {...}}。至少给一项。
+    """
     tenant_id = resolve_server_tenant("", endpoint="PATCH /collections/{id}")
-    name = str((req or {}).get("name") or "").strip()
-    if not name:
-        raise HTTPException(status_code=400, detail="知识库名称不能为空")
-    ok = kb_collections.rename_collection(tenant_id, knowledge_id, name)
-    if not ok:
+    body = req or {}
+    name = str(body.get("name") or "").strip()
+    has_cfg = "chunk_config" in body
+
+    if not name and not has_cfg:
+        raise HTTPException(status_code=400, detail="至少提供 name 或 chunk_config")
+
+    chunk_cfg = None
+    if has_cfg and body["chunk_config"] is not None:
+        try:
+            chunk_cfg = normalize_chunk_config(body["chunk_config"])
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
+    # M-1：先判库存在（404 只用于"库不存在/已删除"），后续写失败用 503——避免存储失败被误报成 404，
+    # 也避免回显未真正写入的字段。
+    existing = kb_collections.get(tenant_id, knowledge_id)
+    if existing is None or str(existing.get("status") or "") != kb_collections.STATUS_ACTIVE:
         raise HTTPException(status_code=404, detail=f"知识库不存在或已被删除: {knowledge_id}")
-    return {"code": 200, "knowledge_id": knowledge_id, "name": name}
+
+    resp: dict = {"code": 200, "knowledge_id": knowledge_id}
+    if name:
+        if not kb_collections.rename_collection(tenant_id, knowledge_id, name):
+            raise HTTPException(status_code=503, detail="知识库改名失败（存储不可用），请重试")
+        resp["name"] = name  # 只回显写成功的字段
+    if chunk_cfg is not None:
+        if not kb_collections.update_chunk_config(tenant_id, knowledge_id, chunk_cfg):
+            raise HTTPException(status_code=503, detail="切分配置写入失败（存储不可用），请重试")
+        resp["chunk_config"] = chunk_cfg
+    return resp
 
 
 @router.delete("/documents/{knowledge_id}", summary="删除文档（软删除，标记 REVOKED）")
