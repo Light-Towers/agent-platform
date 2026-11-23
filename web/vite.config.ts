@@ -49,6 +49,9 @@ export default defineConfig(({ mode }) => {
     },
     server: {
       port: 5173,
+      // 默认只绑 ::1（localhost 解析到 IPv6），直接敲 127.0.0.1 会 Failed to fetch。
+      // host: true 同时监听 IPv4/IPv6，localhost 与 127.0.0.1 均可访问（开发 convenience）。
+      host: true,
       proxy: {
         ...Object.fromEntries(
           proxied.map((p) => [p, { target: DEV_BACKEND, changeOrigin: false }]),
