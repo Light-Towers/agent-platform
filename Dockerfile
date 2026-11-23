@@ -40,18 +40,19 @@ RUN pnpm run build
 FROM python:3.11-slim
 
 # ===== pip 下载加速（2026-11-17，消除构建期反复失败）=====
-# 根因：不配国内源时 wheel 从 files.pythonhosted.org 走国际链路，实测大包 18-80kB/s
-# 且频繁 ReadTimeoutError（numpy 16.9MB 下了 10 分钟），致 3 次构建失败、累计约 1.5h
-# 全耗在下载。默认走清华 PyPI + 读超时重试：
+# 根因：wheel 从国际链路下载慢 + ReadTimeoutError（详见 plan-build-pypi-acceleration-2026-11-23）。
+# 2026-11-23 实取：容器内拉阿里云 19MB/s、清华源回源仅 50-160kB/s ⇒ 默认走阿里云 + 读超时重试：
 #   · pip.conf（pip config set）对所有 pip 子进程生效，含 editable 安装的 build isolation；
-#   · 显式 --index-url 的命令（torch 走 download.pytorch.org）不受影响，仍走原路径。
-# 如需换源，改 PIP_INDEX_URL 默认值或 --build-arg 覆盖即可，不要再每次手工配置。
-ARG PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
+#   · 显式 --index-url 的命令（torch 走 download.pytorch.org）不受影响，仍走原路径（CPU wheel 走 CDN 不慢）。
+# 默认值只在 build-env.sh 与各 Dockerfile 对齐；构建入口 build.sh source build-env.sh 后经
+# --build-arg 覆盖，不再靠人每次手工传参。
+ARG PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
+ARG PIP_TRUSTED_HOST=mirrors.aliyun.com
 ENV PIP_INDEX_URL=${PIP_INDEX_URL} \
     PIP_TIMEOUT=120 \
     PIP_RETRIES=15
 RUN pip config set global.index-url "${PIP_INDEX_URL}" \
- && pip config set global.trusted-host pypi.tuna.tsinghua.edu.cn
+ && pip config set global.trusted-host "${PIP_TRUSTED_HOST}"
 
 WORKDIR /srv/agent-platform
 

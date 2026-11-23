@@ -20,16 +20,17 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# PyPI 源（2026-11-17 固化国内源，消除国际链路大包下载反复超时）：
-# 默认清华源 + 读超时重试。docker build 可用 --build-arg PIP_INDEX_URL=... 覆盖。
-# pip.conf 确保 editable 安装的 build isolation 子进程也走国内源。
-ARG PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
+# PyPI 源（2026-11-23 治本，plan-build-pypi-acceleration）：容器实测阿里云 19MB/s、
+# 清华源回源仅 50-160kB/s ⇒ 默认阿里云 + 读超时重试。docker build 可用 --build-arg 覆盖。
+# pip.conf 确保 editable 安装的 build isolation 子进程也走快源。
+ARG PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
+ARG PIP_TRUSTED_HOST=mirrors.aliyun.com
 ENV PIP_INDEX_URL=$PIP_INDEX_URL \
     PIP_TIMEOUT=120 \
     PIP_RETRIES=15
 
 RUN pip config set global.index-url "${PIP_INDEX_URL}" \
- && pip config set global.trusted-host pypi.tuna.tsinghua.edu.cn
+ && pip config set global.trusted-host "${PIP_TRUSTED_HOST}"
 
 WORKDIR /app
 

@@ -1676,6 +1676,48 @@ def check_rich_answer_single_conversion() -> list[str]:
     return violations
 
 
+# ---------------------------------------------------------------------------
+# P18：构建期 PyPI 源不得回退到慢源（plan-build-pypi-acceleration-2026-11-23）
+#
+# 反复踩坑：3 个 Dockerfile 曾各自硬编码清华源（容器实测 50–160kB/s，阿里云 19MB/s），
+# 靠每次 --build-arg 覆盖 ⇒ 既慢又靠人记得（P2/P3 违规）。本门禁钉住：Dockerfile 的
+# 默认 PIP 源只能是快源，禁止再出现 tuna.tsinghua。torch 的 download.pytorch.org 是
+# 允许的例外（CPU wheel 有 Docker 层缓存，且阿里云无 +cpu 版）。
+# 纯判定函数 _dockerfile_source_violation 是治理测试的反证面（种植能咬、真面过）。
+# ---------------------------------------------------------------------------
+
+_SLOW_PIPY_HOST = "pypi.tuna.tsinghua.edu.cn"
+
+
+def _dockerfile_source_violation(rel: str, text: str) -> str | None:
+    """P18 纯判定：Dockerfile 出现慢源即违规（注释行不算，避免文档描述被误判）。"""
+    for line in text.splitlines():
+        if not _is_code_line(line):
+            continue
+        if _SLOW_PIPY_HOST in line:
+            return f"{rel}: 构建默认 PyPI 源不得为慢源 {_SLOW_PIPY_HOST}（改用阿里云，见 plan-build-pypi-acceleration）"
+    return None
+
+
+def check_build_pypi_source() -> list[str]:
+    """P18 扫描：所有 Dockerfile 的生产指令不得含慢源。"""
+    violations: list[str] = []
+    for py_file in ROOT.rglob("*"):
+        if py_file.name != "Dockerfile" and not py_file.name.startswith("Dockerfile."):
+            continue
+        rel = py_file.relative_to(ROOT).as_posix()
+        if _skipped_rel(rel):
+            continue
+        try:
+            text = py_file.read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            continue
+        violation = _dockerfile_source_violation(rel, text)
+        if violation:
+            violations.append(violation)
+    return violations
+
+
 def main() -> int:
     rc = 0
     v1 = check()
@@ -1888,6 +1930,15 @@ def main() -> int:
         rc = 1
     else:
         print("P17 架构约束通过：富回答构造只在 adapter 一处，且 ImageRef 构造必经 is_allowed_image_url")
+
+    v21 = check_build_pypi_source()
+    if v21:
+        print("P18 架构约束违反：Dockerfile 构建默认 PyPI 源不得回退到慢源（plan-build-pypi-acceleration）")
+        for v in v21:
+            print(f"  {v}")
+        rc = 1
+    else:
+        print("P18 架构约束通过：所有 Dockerfile 的默认 PyPI 源均非慢源")
     return rc
 
 

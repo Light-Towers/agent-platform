@@ -7,6 +7,14 @@ FROM python:3.11-slim
 # 于是 `kubectl exec <pod> -- cat /srv/agent-platform/GIT_REV` 在两侧形状一致。
 WORKDIR /srv/agent-platform
 
+# PyPI 源（2026-11-23 治本，plan-build-pypi-acceleration）：本镜像原先未配源、裸 pip 走
+# 官方 PyPI 国际链路（慢源点之一）。统一改为阿里云（容器实测 19MB/s），与根/KS 镜像对齐。
+# torch 的 --index-url 显式覆盖此配置（CPU wheel 走 CDN，不慢），不受影响。
+ARG PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
+ARG PIP_TRUSTED_HOST=mirrors.aliyun.com
+RUN pip config set global.index-url "${PIP_INDEX_URL}" \
+ && pip config set global.trusted-host "${PIP_TRUSTED_HOST}"
+
 # 依赖装配面（每条都是踩过的坑，改前先读）：
 # - agent-core / shared-schemas / agent-runtime 是 nl2sql-service 的 workspace 本地依赖
 #   （[tool.uv.sources] workspace=true 只有 uv 认；普通 pip 会当 PyPI 包去下载）。故必须
