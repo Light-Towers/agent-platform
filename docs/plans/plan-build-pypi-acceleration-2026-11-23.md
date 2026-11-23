@@ -31,9 +31,11 @@
 - nl2sql Dockerfile 原本**完全没配 pip 源**（裸 pip 走官方 PyPI，也是慢点），补上统一配置。
 - 构建机上的 `build.sh:83` 硬编码改成 `"${PIP_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple/}"`（运行时读 env，构建机副本不在本方案交付范围，仅记录改法）。
 
-### 2.2 torch 不动（已有层缓存，不是瓶颈）
+### 2.2 torch 尾部慢源（二次订正，已治）
 
-实取订正：torch 的 `download.pytorch.org` 虽首页 734 kB/s，但 209MB CPU wheel 走 CDN 30 秒下完（构建日志实测 7 MB/s）；且 Dockerfile:88-92 已刻意把 torch 放在业务代码 COPY 之前、`--no-cache-dir` 配合 Docker 层缓存——改它会破坏这套成熟设计。阿里云又无 `+cpu` 版（只有 800MB+ CUDA 版）。⇒ **torch 保持原样**，不在本次治本射程内。慢的只是清华源的其余包。
+首版判断"torch 不动"是错的：209MB CPU wheel 本体确实走 CDN 不慢，但 `pip install torch --index-url download.pytorch.org` 会让 **torch 的全部传递依赖**（networkx/sympy/jinja2/fsspec/pillow…）也从 pytorch.org 拉——部署期 KS 构建实测 30 kB/s + `Network is unreachable` 重试，是最后一段慢源。
+
+**治法**：先从快源（pip.conf 的阿里云）预装这些传递依赖，再让 torch/torchvision/torchaudio 本体 `--no-deps` 从 CPU 索引拉（只拉 wheel，走 CDN）。3 个 Dockerfile 都改。阿里云无 `+cpu` 版，故本体仍必须走 pytorch.org——但只有 209MB 一个 wheel，且依赖已满足后 pip 不再回 pytorch.org。层缓存设计（torch 在业务代码 COPY 之前）保持不变。
 
 ### 2.3 门禁（防复发）
 
@@ -44,7 +46,7 @@
 
 | 文件 | 改动 |
 |---|---|
-| `Dockerfile` / `Dockerfile.nl2sql-service` / `applications/knowledge-service/Dockerfile` | 默认源改阿里云；PIP_TRUSTED_HOST 参数化；nl2sql 补源配置；torch 不动 |
+| `Dockerfile` / `Dockerfile.nl2sql-service` / `applications/knowledge-service/Dockerfile` | 默认源改阿里云；PIP_TRUSTED_HOST 参数化；nl2sql 补源配置；torch 传递依赖预装+本体 `--no-deps` |
 | `scripts/lint_architecture.py` + 治理用例 | 防复发门禁（Dockerfile 不得再出现 tuna.tsinghua 源） |
 | （构建机副本 `build.sh`，gitignored 不在交付） | 记录改法：`PIP_INDEX_URL` 从 env 读 |
 

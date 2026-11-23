@@ -90,7 +90,14 @@ COPY packages/agent-runtime ./packages/agent-runtime
 #   约 2 分钟；且 `--no-cache-dir` 让 pip 自己不留缓存，只能靠 Docker 层缓存兜）。
 #   ⇒ 把 torch 提到「业务代码 COPY」之前：它与业务代码无关，单独成层后，
 #   改 applications/ 只失效后面那条 pip（依赖解析快得多），改 packages/ 才失效这一层。
-RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
+#
+# ⚠ 2026-11-23 再调整（plan-build-pypi-acceleration）：torch 的**传递依赖**
+#   （networkx/sympy/jinja2/fsspec/pillow…）此前跟着 --index-url 一起从 download.pytorch.org
+#   拉，实测 30kB/s + 偶发 Network unreachable，是最后一段慢源。改为先从快源（pip.conf 的
+#   阿里云）预装这些依赖，再让 torch 本体 --no-deps 从 CPU 索引拉——209MB wheel 走 CDN
+#   不慢，且依赖已满足后 pip 不再回 pytorch.org 取。
+RUN pip install --no-cache-dir filelock typing-extensions sympy networkx jinja2 fsspec markupsafe \
+ && pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu --no-deps
 
 COPY applications/agent_server ./applications/agent_server
 # extras 必须挂在**声明它的那个包**上：`[langfuse]` 声明在 packages/agent-runtime

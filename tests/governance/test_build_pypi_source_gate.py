@@ -43,6 +43,20 @@ def test_p18_fast_source_ok():
     ) is None
 
 
+def test_p18_flags_torch_without_no_deps():
+    # torch 本体走 pytorch.org 但没 --no-deps ⇒ 传递依赖也会从慢源拉
+    assert lint._dockerfile_source_violation(
+        "Dockerfile", "RUN pip install torch --index-url https://download.pytorch.org/whl/cpu"
+    ) is not None
+
+
+def test_p18_torch_with_no_deps_ok():
+    assert lint._dockerfile_source_violation(
+        "Dockerfile",
+        "RUN pip install torch --index-url https://download.pytorch.org/whl/cpu --no-deps",
+    ) is None
+
+
 # ② 真面参与判决：3 个真实 Dockerfile 必须过
 @pytest.mark.parametrize("rel", [
     "Dockerfile",

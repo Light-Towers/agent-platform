@@ -40,7 +40,10 @@ COPY packages/shared-schemas ./packages/shared-schemas
 COPY packages/agent-runtime ./packages/agent-runtime
 COPY applications/nl2sql-service ./applications/nl2sql-service
 
-RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
+# 2026-11-23（plan-build-pypi-acceleration）：先快源预装 torch 传递依赖，再 --no-deps 拉本体，
+# 避免 pip 把 networkx/sympy/jinja2 等也从 pytorch.org（30kB/s）拉。
+RUN pip install --no-cache-dir filelock typing-extensions sympy networkx jinja2 fsspec markupsafe \
+ && pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu --no-deps
 RUN pip install --no-cache-dir \
     "./packages/agent-core[memory-embed-local,tracing]" \
     ./packages/shared-schemas \

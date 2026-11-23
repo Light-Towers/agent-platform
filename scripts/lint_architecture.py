@@ -1681,8 +1681,8 @@ def check_rich_answer_single_conversion() -> list[str]:
 #
 # 反复踩坑：3 个 Dockerfile 曾各自硬编码清华源（容器实测 50–160kB/s，阿里云 19MB/s），
 # 靠每次 --build-arg 覆盖 ⇒ 既慢又靠人记得（P2/P3 违规）。本门禁钉住：Dockerfile 的
-# 默认 PIP 源只能是快源，禁止再出现 tuna.tsinghua。torch 的 download.pytorch.org 是
-# 允许的例外（CPU wheel 有 Docker 层缓存，且阿里云无 +cpu 版）。
+# 默认 PIP 源只能是快源，禁止再出现 tuna.tsinghua。torch 本体可走 download.pytorch.org
+# （阿里云无 +cpu 版），但必须 --no-deps + 传递依赖预装，否则依赖也从慢源拉。
 # 纯判定函数 _dockerfile_source_violation 是治理测试的反证面（种植能咬、真面过）。
 # ---------------------------------------------------------------------------
 
@@ -1690,12 +1690,16 @@ _SLOW_PIPY_HOST = "pypi.tuna.tsinghua.edu.cn"
 
 
 def _dockerfile_source_violation(rel: str, text: str) -> str | None:
-    """P18 纯判定：Dockerfile 出现慢源即违规（注释行不算，避免文档描述被误判）。"""
+    """P18 纯判定：慢源 / torch 行无 --no-deps 即违规（注释行不算）。"""
     for line in text.splitlines():
         if not _is_code_line(line):
             continue
         if _SLOW_PIPY_HOST in line:
             return f"{rel}: 构建默认 PyPI 源不得为慢源 {_SLOW_PIPY_HOST}（改用阿里云，见 plan-build-pypi-acceleration）"
+        # torch 可从 pytorch.org 拉本体，但必须 --no-deps（传递依赖已从快源预装），
+        # 否则 pip 会把 networkx/sympy/... 也从慢源拉（部署期实测 30kB/s + 断连）。
+        if "download.pytorch.org" in line and "--index-url" in line and "--no-deps" not in line:
+            return f"{rel}: torch --index-url pytorch.org 必须带 --no-deps（传递依赖先从快源预装）"
     return None
 
 

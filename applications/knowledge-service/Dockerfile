@@ -50,8 +50,12 @@ COPY applications/exhibition-agent ./applications/exhibition-agent
 # requirements.txt 里裸写 torch/torchvision/torchaudio ⇒ pip 默认拉 CUDA 轮（数 GB），
 # 2026-11-16 实测在 241 构建 KS 镜像时 `pip install -r requirements.txt` 卡 20+ 分钟
 # 无 TCP 连接（只有 57s CPU）。先从 CPU 索引装好满足依赖，后面 requirements 不再拉 CUDA 版。
+# 2026-11-23（plan-build-pypi-acceleration）：torch 三件套的传递依赖此前跟着 --index-url
+# 从 download.pytorch.org 拉（实测 30kB/s + Network unreachable），先从快源预装，再让
+# 三件套本体 --no-deps 从 CPU 索引拉（wheel 走 CDN 不慢）。
 RUN pip install --upgrade pip \
- && pip install --no-cache-dir torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu \
+ && pip install --no-cache-dir filelock typing-extensions sympy networkx jinja2 fsspec markupsafe pillow \
+ && pip install --no-cache-dir torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu --no-deps \
  && pip install -r requirements.txt \
  && pip install -e ./packages/agent-core \
  && pip install -e ./packages/shared-schemas \
