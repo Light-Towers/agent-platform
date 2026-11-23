@@ -113,7 +113,7 @@ web/scripts/check-tokens.mjs # §6 的视觉门禁（与 check-events.mjs 同族
 ```
 
 - 默认**跟随系统**（`prefers-color-scheme`），手动切换写 `<html data-theme>` + `localStorage['ap.ui.theme']`。主题偏好**不是凭据** ⇒ 与工单件 §2.3 那条「密钥只存内存、不落 localStorage」不冲突；这条边界写在这里，免得后人拿密钥纪律误伤主题键。
-- 无 SSR ⇒ 首帧由 CSS 媒体查询保证（不闪烁）；手动偏好由 `main.ts` 读取，代价是**切换时可能有一帧闪烁**，属已知取舍（要消除它就得往 `index.html` 塞内联脚本，本件**不做**：`index.html` 是被 no-store 锁着的壳，塞脚本等于给自己加一条 CSP/审计面）。
+- 无 SSR ⇒ 首帧由 CSS 媒体查询保证（不闪烁）；手动偏好由 `main.ts` 读取，代价是**切换时可能有一帧闪烁**，属已知取舍（要消除它就得往 `index.html` 塞内联脚本，本件**不做**：`index.html` 是被 no-store 锁着的壳，塞脚本等于给自己加一条 CSP/审计面）。⚠ **2026-11-23 D-2 已拍板翻转本条**：用户批准在 `web/index.html` 头部加同步内联脚本以消除首帧闪白（只写手动档 `light`/`dark`，`system` 不写属性、交媒体查询），`web/src/main.ts` 的 `initTheme()` 保留为应用侧复核。本句作为历史取舍保留，不得当现值读；随动方案件 `docs/plans/web-refactor/design.md` §2.3 D-2。
 - 两处 dark 声明「逐字同值」不是散文约定，是门禁断言 5（§6）——这是这类双写最常见的腐坏方式。
 
 ## 2. 格二：关键页面形态

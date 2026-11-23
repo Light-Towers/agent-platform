@@ -9,6 +9,8 @@
  * （POC 首跑实踩）。要举反例就引断言编号，不要写出色值形状。
  * ==========================================================================*/
 
+@layer base {
+
 /* ---- 字体资产 ----
  * ⚠ POC 批：六件 Latin1 woff2 **不在本机也不在仓库**（视觉件 §1.4 定的入库清单，需人从官方仓库取）。
  *   下面 @font-face 整块**注释保留**，接入时解注释并按 §1.4 的六个文件名落盘。
@@ -966,4 +968,7 @@ a.ry-btn { text-decoration: none; }
 .is-active {
   border-color: var(--ry-primary);
   background: var(--bg-raised);
+}
+
+/* @layer base 收尾 */
 }

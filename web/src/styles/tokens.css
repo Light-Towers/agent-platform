@@ -14,6 +14,13 @@
  *   - 断言 5：下方 dark 两份副本（系统偏好 / 手动选择）必须逐字同值。
  * ==========================================================================*/
 
+/* 层叠顺序声明（R1 / docs/plans/web-refactor）：跨层覆盖由层序决定，不再靠 import 顺序。
+ * 三件样式各自包裹进对应层；内部缩进刻意不重排 —— check-tokens 断言 5 的 dark 副本锚点
+ * 按原缩进匹配，重排会让门禁在"内容没变"的情况下报红。 */
+@layer tokens, base, events;
+
+@layer tokens {
+
 :root {
   /* ---- L0 中性 ramp（light） ---- */
   --n-050: #ffffff;   /* surface 底 / 卡片 */
@@ -321,4 +328,7 @@
   --cat-terminal: var(--status-ok);     /* done：终止定稿 */
   --cat-watch: var(--status-warn);      /* replan / suspended：需关注 */
   --cat-failure: var(--status-danger);  /* error：失败 */
+}
+
+/* @layer tokens 收尾 */
 }

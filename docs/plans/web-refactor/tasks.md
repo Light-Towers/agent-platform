@@ -22,19 +22,21 @@
 
 **依赖**：T0-2（D-2）。**门禁**：`pnpm typecheck && pnpm lint && pnpm check:tokens && pnpm check:ui-consistency`。
 
-- [ ] R1-1 在 `web/index.html` `<head>` 顶部插入同步 IIFE：
+- [x] R1-1 在 `web/index.html` `<head>` 顶部插入同步 IIFE：
   - 读取 `ap.ui.theme`（**不是** `ap.theme`）；
   - `dark` → 写 `data-theme="dark"`；`light` → 写 `data-theme="light"`；`system`/无值 → 不写；
   - try/catch 包住存储读取，失败按 system；不得写 `data-theme="auto"`。
   - 同步把翻转理由写入 `web/README.md` 与视觉件对应条目（D-2 的登记义务）。
-- [ ] R1-2 更新 `web/src/main.ts` 头注：从"已知闪帧"改为"首帧已同步定档，应用侧复核"；保留 `initTheme()` 在 `createApp()` 之前的顺序。
-- [ ] R1-3 在 `web/src/styles/tokens.css` 顶部声明 `@layer tokens, base, events;`，三件样式分别包裹到对应层；**不重排内部缩进**（保护 `check-tokens` 断言 5 锚点）。
-- [ ] R1-4 保留 `base.css` 中 `.is-active` 的顺序纪律与门禁：`@layer` 只解决跨层覆盖，不宣称解除 base 内部同权重依赖。
-- [ ] R1-5 跑门禁；若断言 5 锚点漂移，**改锚点不改判据强度**，并加一枚合成违规样本自证能咬（注一条色值字面量必须判红）。
-- [ ] R1-6 复取 V4 视觉读数（双主题 × 三断点），确认无新增横向滚动/叠字；读数绑本次 HEAD。
+- [x] R1-2 更新 `web/src/main.ts` 头注：从"已知闪帧"改为"首帧已同步定档，应用侧复核"；保留 `initTheme()` 在 `createApp()` 之前的顺序。
+- [x] R1-3 在 `web/src/styles/tokens.css` 顶部声明 `@layer tokens, base, events;`，三件样式分别包裹到对应层；**不重排内部缩进**（保护 `check-tokens` 断言 5 锚点）。
+- [x] R1-4 保留 `base.css` 中 `.is-active` 的顺序纪律与门禁：`@layer` 只解决跨层覆盖，不宣称解除 base 内部同权重依赖。
+- [x] R1-5 跑门禁；若断言 5 锚点漂移，**改锚点不改判据强度**，并加一枚合成违规样本自证能咬（注一条色值字面量必须判红）。
+- [x] R1-6 复取 V4 视觉读数（双主题 × 三断点），确认无新增横向滚动/叠字；读数绑本次 HEAD。
 
 **验收**：深色系统首帧为深色；深色系统 + 手动浅色首帧为浅色；四门全 rc=0；锚点迁移带反证。
 **回滚**：按 R1 单批 revert；恢复 `index.html` 头注与三件样式原状。
+
+**R1 完成记录（2026-11-23，HEAD `dd8b2dd41b33d99fffed79113a2582691025eed0`）**：`typecheck` / `lint` / `check:tokens`（定义 123 / 引用 123）/ `check:ui-consistency`（`.is-active` 单一实现、合成反证已咬）四门 rc=0；额外 `pnpm build` 通过（CSS 30.66 kB / JS 151.48 kB）。首档同步脚本一次性行为探针 4/4 通过（dark/亮系统→dark；light/深系统→light；无偏好与 system→不写属性）。**未达**：V4 双主题 × 三断点实拍 harness 在本机不存在（`.tmp-scratch/ap-visual/` 未随仓库带来），故视觉判据未复取，不写成"已过"。
 
 ---
 

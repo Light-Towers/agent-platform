@@ -8,6 +8,8 @@
  *   「前端声称后端产出一种后端没有的行」。理由与 `icons.ts` 头注那条同形。
  * ==========================================================================*/
 
+@layer events {
+
 .timeline { display: grid; gap: var(--sp-2); }
 
 .ev {
@@ -213,4 +215,7 @@
   border: 1px solid var(--border-control);
   border-radius: var(--radius-pill);
   padding: 0 var(--sp-2);
+}
+
+/* @layer events 收尾 */
 }
