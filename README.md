@@ -505,7 +505,7 @@ CI（`.github/workflows/agent-platform-ci.yml`）在每次推送时执行 pytest
 > 另有 `applications/agent_federation/` 联邦网关编排系统（与 agent_server 并行，二者不构成上下级关系），
 > 以及若干 sibling 业务包与共享内核包。各包均为独立 `pyproject.toml` 工程，
 > 通过 `packages/agent-core` / `packages/shared-schemas` 共享内核与契约，以 `uv` workspace 互联。
-> 另有 `web/`：视觉层 POC 的两个静态宿主页与样式门禁（零构建、不进运行链路、非 uv workspace 成员），逐条说明见 `web/README.md`。
+> 另有 `web/`：Vue 3 + Vite + TypeScript 单页应用（pnpm 工程，非 uv workspace 成员），构建产物由 agent_server 挂在 `/ui/`；含 Pinia 状态层、hash 路由与 Node 门禁（`check:*` / `verify:*`），逐条说明见 `web/README.md`。
 
 ### uv workspace 环境约定（重要）
 

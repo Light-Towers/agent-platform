@@ -423,6 +423,22 @@ if (GIT_ROOT !== null) {
    * 抬不出它，抬出它的是 §7.5 那条真载体反证。改这行请先跑那件。 */
   const PATH_LITERAL_RE = /['"`](\/[A-Za-z0-9\-_/{}.$]*[A-Za-z0-9\-_{}.$])['"`]/g;
   const COMMENT_LINE_RE = /^(?:\/\/|\*|\/\*|<!--)/;
+  /* 客户端路由路径不是后端端点：从 router 文件派生集合并从消费集扣除。
+   * 读不到 router 文件时不扣除（fail-closed），避免把端点漏检读成全绿。 */
+  let clientRoutes = new Set();
+  try {
+    const routerText = rdWeb('src/router/index.ts');
+    for (const m of routerText.matchAll(/path\s*:\s*['"]([^'"]+)['"]/g)) {
+      // '/chat/:sessionId?' 与 RouterLink 的 '/chat' 是同一客户端路由
+      clientRoutes.add(normPath(m[1]).replace(/\/:.*$/, '') || '/');
+    }
+    if (clientRoutes.size === 0) {
+      fail.push('端点成对性（齿 C5）：router 文件里一条客户端 path 都没读到（抽取器坐标漂了，不是“没有路由”）');
+    }
+  } catch {
+    fail.push('端点成对性（齿 C5）：读不到 src/router/index.ts，无法区分客户端路由与后端端点；本格不降级为“通过”');
+  }
+
   const consumed = new Map(); // normPath -> [ 'file:line', ... ]
   for (const rel of webIndexFiles) {
     if (!/\.(ts|vue|js)$/.test(rel)) continue;
@@ -433,6 +449,7 @@ if (GIT_ROOT !== null) {
       if (COMMENT_LINE_RE.test(line.trim())) return;
       for (const m of line.matchAll(PATH_LITERAL_RE)) {
         const key = normPath(m[1]);
+        if (clientRoutes.has(key)) continue; // 客户端 hash 路由，不是 /api 端点
         if (!consumed.has(key)) consumed.set(key, []);
         consumed.get(key).push(`${rel}:${i + 1}`);
       }

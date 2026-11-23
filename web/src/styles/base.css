@@ -1000,5 +1000,25 @@ a.ry-btn { text-decoration: none; }
 .answer__error { color: var(--text-1); }
 .tl-stop { margin-inline-start: var(--sp-2); }
 
+/* ---- R5b 阅读密度：正文限宽 + 去外层描边 + 中等断点折叠侧栏 ---- */
+.chat-shell__main.ry-card {
+  border: 0;
+  box-shadow: none;
+}
+.answer__text {
+  max-width: 820px;
+  margin-inline: auto;
+}
+.kb-workspace__jump {
+  display: flex;
+  justify-content: flex-end;
+  margin-block-end: var(--sp-3);
+}
+@media (min-width: 768px) and (max-width: 1100px) {
+  .chat-shell,
+  .chat-shell--no-inspector { grid-template-columns: minmax(0, 1fr); }
+  .chat-shell__sidebar { display: none; }
+}
+
 /* @layer base 收尾 */
 }

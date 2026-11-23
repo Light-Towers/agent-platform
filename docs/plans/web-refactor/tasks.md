@@ -158,9 +158,12 @@
 
 **R5b 阅读密度与配置闭环（依赖 D-7）**
 
-- [ ] X-6 对话视图去外层描边、正文宽 760–840px、中等断点折叠侧栏；过 `check:tokens` 与 V4 实拍。
-- [ ] X-7 `KbUpload.vue` 索引完成时提供"在对话中使用此知识库"跳转，并把选中知识库带入对话页。
+- [x] X-6 对话视图去外层描边、正文宽 760–840px、中等断点折叠侧栏；过 `check:tokens` 与 V4 实拍。
+- [x] X-7 `KbUpload.vue` 索引完成时提供"在对话中使用此知识库"跳转，并把选中知识库带入对话页。
 
 **R5c a11y 与文档（原 R5 内容，依赖 D-7 决定编号）**
 
-- [ ] X-8 保留原 R5-1…R5-7 全部项（Markdown 边界、ImageStrip lightbox 无障碍、根 README 与 App.vue 过时注释清理、全量门禁）。
+- [x] X-8 保留原 R5-1…R5-7 全部项（Markdown 边界、ImageStrip lightbox 无障碍、根 README 与 App.vue 过时注释清理、全量门禁）。
+  - **全量终跑（HEAD 见提交）**：`typecheck` / `lint` / `check:tokens`（定义 123 / 引用 123）/ `check:events`（消费 13 / 提供 39 / 缺 0）/ `check:ui-consistency`（选中态单一实现 + 弹层无障碍结构齿，合成反证已咬）/ `verify:sse`（153 断言失败 0）/ `verify:markdown`（16 断言全过）/ `build` / `check_doc_sync.py`（0 警告）全 rc=0。
+  - **R5b/R5c 交付**：正文限宽 820px + 去 chat 卡片外描边 + 768–1100 断点折叠侧栏 + KB 跳转按钮；ImageStrip lightbox 加 `aria-modal` / Escape / 焦点锁 / 焦点归还；根 `README.md:508` 改为 Vue 3 + Vite + TS 单页应用描述；App.vue 过时注释随 R4 重写已清除。
+  - **门禁自纠（登记）**：齿 C5 把 Vue 路由路径 `/chat` 等误判为后端端点 → 按原则改为"从 router 文件派生客户端路由集合并从消费集扣除"，读不到 router 即 fail-closed；带非空自证（router 里一条 path 都读不到就报红），未放宽端点判据。

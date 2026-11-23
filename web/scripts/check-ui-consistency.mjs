@@ -59,6 +59,24 @@ if (syntheticBlocks.length !== 2) {
   fail.push(`SELF_TEST_FAIL: 合成违规应判出 2 处，实际 ${syntheticBlocks.length}——门禁瞎了`);
 }
 
+/* ---- R5c：图片预览弹层的无障碍结构齿 ----
+ * 行为（Escape 真关闭 / 焦点真锁）属 CDP harness，本机不常驻；这里只锁结构不变量：
+ * role=dialog + aria-modal + Escape 处理 + 关闭后焦点归还。合成违规必须被咬。 */
+const dialogPath = join(WEB, 'src/components/ImageStrip.vue');
+const dialogText = readText(dialogPath);
+const A11Y_CHECKS = [
+  ['role="dialog"', /role="dialog"/],
+  ['aria-modal="true"', /aria-modal="true"/],
+  ['Escape 关闭', /event\.key === 'Escape'/],
+  ['焦点锁（Tab 处理）', /event\.key !== 'Tab'/],
+  ['关闭后焦点归还触发按钮', /lastTrigger\?\.focus\(\)/],
+];
+const a11yMissing = (src) => A11Y_CHECKS.filter(([, re]) => !re.test(src)).map(([name]) => name);
+const a11yMiss = a11yMissing(dialogText);
+if (a11yMiss.length) fail.push(`弹层无障碍结构缺项（ImageStrip.vue）：${a11yMiss.join('、')}`);
+const SYN_BAD_DIALOG = '<div role="dialog" aria-label="预览"><img /></div>';
+if (a11yMissing(SYN_BAD_DIALOG).length === 0) fail.push('SELF_TEST_FAIL: 合成违规弹层（缺 aria-modal/Escape/焦点锁）未被判红——无障碍齿瞎了');
+
 if (fail.length) {
   console.error('❌ UI 结构复用门禁失败：');
   for (const f of fail) console.error('  ' + f);

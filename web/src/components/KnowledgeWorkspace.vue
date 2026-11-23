@@ -6,11 +6,20 @@
  * ==========================================================================-->
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 
 import { storeToRefs } from 'pinia'
 import { useSessionStore } from '../stores/session'
 const sessionStore = useSessionStore()
 const { authToken, knowledgeScope } = storeToRefs(sessionStore)
+const router = useRouter()
+
+/** R5b：配置→问答闭环。把当前库设为对话的知识范围后直接跳到 /chat。 */
+function useInChat(): void {
+  if (!selectedId.value) return
+  knowledgeScope.value = selectedId.value
+  void router.push({ name: 'chat' })
+}
 
 import { listDocumentTree, type KbTreeBase, type KbTreeDoc, type KbChunkConfig } from '../api/kb.ts'
 import KnowledgeBaseSidebar from './KnowledgeBaseSidebar.vue'
@@ -117,6 +126,18 @@ onMounted(refreshTree)
       />
     </aside>
     <main class="kb-workspace__main">
+      <div
+        v-if="selectedId"
+        class="kb-workspace__jump"
+      >
+        <button
+          type="button"
+          class="ry-btn ry-btn--primary"
+          @click="useInChat"
+        >
+          在对话中使用此知识库
+        </button>
+      </div>
       <KbUpload
         v-if="selectedId"
         :key="selectedId"
