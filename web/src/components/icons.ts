@@ -22,7 +22,7 @@
  * ==========================================================================*/
 import type { StreamEventType } from '../api/events.ts'
 import { EVENT_NAMES } from '../api/events.ts'
-import type { TimelineEntry } from '../api/sse.ts'
+import type { TimelineEntry } from '../stores/sseReducer.ts'
 
 /** 一行时间线能拿到的图标种类 = 后端派生事件全集 + 两种客户端侧行。 */
 export type IconKey =

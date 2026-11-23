@@ -6,7 +6,7 @@
  * ==========================================================================-->
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { isSafeImageUrl, type RichImage } from '../api/sse.ts'
+import { isSafeImageUrl, type RichImage } from '../stores/sseReducer.ts'
 
 const props = defineProps<{ images: readonly RichImage[] }>()
 

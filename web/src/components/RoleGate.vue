@@ -15,7 +15,11 @@
  * ⚠ 本件没有 <style> 块（理由见 ThemeToggle.vue 头注）；用到的类全在 base.css。
  * ==========================================================================-->
 <script setup lang="ts">
-import { authFeatures, authRole } from '../stores/session'
+import { storeToRefs } from 'pinia'
+import { useSessionStore } from '../stores/session'
+const sessionStore = useSessionStore()
+const { authFeatures, authRole } = storeToRefs(sessionStore)
+
 </script>
 
 <template>

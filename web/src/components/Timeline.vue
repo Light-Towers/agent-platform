@@ -14,7 +14,11 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 
-import { busy, eventCount, hasRound, timeline } from '../stores/session'
+import { storeToRefs } from 'pinia'
+import { useSessionStore } from '../stores/session'
+const sessionStore = useSessionStore()
+const { busy, eventCount, hasRound, timeline } = storeToRefs(sessionStore)
+
 import { iconPathOf, rowClassOf } from './icons'
 
 const open = ref(false)

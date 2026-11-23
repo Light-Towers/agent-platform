@@ -17,7 +17,11 @@
  *   `base.css`。
  * ==========================================================================-->
 <script setup lang="ts">
-import { evidence, hasRound } from '../stores/session'
+import { storeToRefs } from 'pinia'
+import { useSessionStore } from '../stores/session'
+const sessionStore = useSessionStore()
+const { evidence, hasRound } = storeToRefs(sessionStore)
+
 </script>
 
 <template>

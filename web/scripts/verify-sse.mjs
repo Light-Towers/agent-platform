@@ -79,11 +79,15 @@ const sseResponse = (chunks, head = {}) => {
 
 /* ---- 载入被测模块 ---- */
 let sse
+let reducer
+let pinia
 let errors
 let events
 let icons
 try {
+  pinia = await import('pinia')
   sse = await import('../src/api/sse.ts')
+  reducer = await import('../src/stores/sseReducer.ts')
   errors = await import('../src/api/errors.ts')
   events = await import('../src/api/events.ts')
   icons = await import('../src/components/icons.ts')
@@ -92,7 +96,9 @@ try {
   process.exit(1)
 }
 
-const { applyFrame, initialState, streamQuery } = sse
+// R3：纯归约内核迁到 sseReducer.ts；streamQuery 仍住传输层 sse.ts。
+const { applyFrame, initialState } = reducer
+const { streamQuery } = sse
 const { describeError, describeStreamError } = errors
 const { ICON_PATHS, iconKeyOf, iconPathOf, rowClassOf } = icons
 const NAMES = events.EVENT_NAMES
@@ -355,7 +361,12 @@ console.log('§H 会话层：banner 累积/去重/溢出、跳轮不混行、非
 let store
 {
   try {
-    store = await import('../src/stores/session.ts')
+    // R3：会话层已是 Pinia store。Node 下须先 setActivePinia，再取实例；
+    // storeToRefs 的 refs 覆盖 store 上被解包的同名值，保持 §H/§I 原有的 .value 读法不变。
+    pinia.setActivePinia(pinia.createPinia())
+    const sessionModule = await import('../src/stores/session.ts')
+    const instance = sessionModule.useSessionStore()
+    store = { ...instance, ...pinia.storeToRefs(instance) }
   } catch (e) {
     check('H0 会话层可被 Node 驱动（头注那句能力声明的实物）', false, String(e && e.message))
     store = null

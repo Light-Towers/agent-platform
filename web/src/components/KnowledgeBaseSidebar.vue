@@ -6,7 +6,11 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 
-import { authToken } from '../stores/session'
+import { storeToRefs } from 'pinia'
+import { useSessionStore } from '../stores/session'
+const sessionStore = useSessionStore()
+const { authToken } = storeToRefs(sessionStore)
+
 import {
   listKnowledgeBases,
   createKbKnowledgeBase,

@@ -46,15 +46,13 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 
-import {
-  authMode,
-  authNotice,
-  authPending,
-  hasStoredToken,
-  resumeSession,
-  submitCredentials,
-  type AuthMode,
-} from '../stores/session'
+import { storeToRefs } from 'pinia'
+import { useSessionStore } from '../stores/session'
+import type { AuthMode } from '../stores/session'
+const sessionStore = useSessionStore()
+const { authMode, authNotice, authPending, hasStoredToken } = storeToRefs(sessionStore)
+const { resumeSession, submitCredentials } = sessionStore
+
 
 const login = ref('')
 const password = ref('')

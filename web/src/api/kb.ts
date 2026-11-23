@@ -9,7 +9,7 @@
  * 多文件用 FormData，不手动设 Content-Type（让 fetch 带 boundary）。
  * ==========================================================================*/
 import { applyCredentialHeaders } from './auth.ts'
-import { handleSessionExpired } from '../stores/session.ts'
+import { useSessionStore } from '../stores/session.ts'
 
 /**
  * /kb/* 的 401 统一出口（2026-11-16）。
@@ -32,7 +32,7 @@ export class KbRateLimitedError extends Error {
 async function failKb(action: string, resp: Response): Promise<never> {
   const text = await resp.text().catch(() => '')
   if (resp.status === 401) {
-    handleSessionExpired()
+    useSessionStore().handleSessionExpired()
     throw new Error(`${action}失败：登录令牌已过期，请重新登录后再试`)
   }
   if (resp.status === 429) {

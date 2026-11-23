@@ -63,18 +63,21 @@
 
 **依赖**：T0-4（D-4）。**门禁**：`pnpm typecheck && pnpm lint && pnpm verify:sse && pnpm verify:markdown`。
 
-- [ ] R3-1 `pnpm add pinia --save-exact`；`pnpm-lock.yaml` 由命令生成并入库；`web/src/main.ts` 在挂载前注册 `createPinia()`。
-- [ ] R3-2 新建 `web/src/stores/sseReducer.ts`：迁入 `EVENT_HANDLERS`、`applyFrame`、`initialState`、纯类型，以及 `pushBanner`（8 条上限、去重、溢出计数）。契约保持纯函数、不碰网络/DOM/全局状态。
-- [ ] R3-3 `web/src/api/sse.ts` 改为 import reducer；**不留 re-export 兼容 shim**（D-4）；网络层职责不变。
-- [ ] R3-4 `web/src/stores/session.ts` 改写为 Pinia store：保留登录态机、`hasFeature` 单一问法、8 条 banner、登录态切换清 banner 不清时间线、`ap.auth.token` 唯一装配位不变、features 不落存储。
-- [ ] R3-5 `web/src/stores/conversations.ts` 改写为 Pinia store，直接 `useSessionStore()` 取当前会话 id 与 `resetRound`；删除 `web/src/App.vue` 中 `ask(undefined, sid)` 的中转胶水。
-- [ ] R3-6 `web/src/stores/kbHistory.ts` 保持纯函数缓存层（现状无响应式状态），不强行包 store；在消费点接 store。
-- [ ] R3-7 `web/scripts/verify-sse.mjs`：import 路径改到 reducer；驱动会话层前 `setActivePinia(createPinia())`；§H 的 banner/登录态用例复跑通过。
-- [ ] R3-8 `web/scripts/check-events.mjs`：`TS_SSE` 坐标与 `EVENT_HANDLERS` 正则来源改到 reducer；双向比较与存储白名单强度不变；加合成违规（删一个 key）自证能红。
-- [ ] R3-9 跑四门；确认 `verify:markdown` 未受影响。
+- [x] R3-1 `pnpm add pinia --save-exact`；`pnpm-lock.yaml` 由命令生成并入库；`web/src/main.ts` 在挂载前注册 `createPinia()`。
+- [x] R3-2 新建 `web/src/stores/sseReducer.ts`：迁入 `EVENT_HANDLERS`、`applyFrame`、`initialState`、纯类型，以及 `pushBanner`（8 条上限、去重、溢出计数）。契约保持纯函数、不碰网络/DOM/全局状态。
+- [x] R3-3 `web/src/api/sse.ts` 改为 import reducer；**不留 re-export 兼容 shim**（D-4）；网络层职责不变。
+- [x] R3-4 `web/src/stores/session.ts` 改写为 Pinia store：保留登录态机、`hasFeature` 单一问法、8 条 banner、登录态切换清 banner 不清时间线、`ap.auth.token` 唯一装配位不变、features 不落存储。
+- [x] R3-5 `web/src/stores/conversations.ts` 改写为 Pinia store，直接 `useSessionStore()` 取当前会话 id 与 `resetRound`；删除 `web/src/App.vue` 中 `ask(undefined, sid)` 的中转胶水。
+- [x] R3-6 `web/src/stores/kbHistory.ts` 保持纯函数缓存层（现状无响应式状态），不强行包 store；在消费点接 store。
+- [x] R3-7 `web/scripts/verify-sse.mjs`：import 路径改到 reducer；驱动会话层前 `setActivePinia(createPinia())`；§H 的 banner/登录态用例复跑通过。
+- [x] R3-8 `web/scripts/check-events.mjs`：`TS_SSE` 坐标与 `EVENT_HANDLERS` 正则来源改到 reducer；双向比较与存储白名单强度不变；加合成违规（删一个 key）自证能红。
+- [x] R3-9 跑四门；确认 `verify:markdown` 未受影响。
 
 **验收**：三个 store 无旧单例兼容层；"谁写谁读谁清空"可在 `design.md` §4.2 表中逐行对上；两个门禁同批迁移且反证有效。
 **回滚**：R3 整批 revert（含 lockfile）；不可只回退 store 而留半迁移的门禁坐标。
+
+**R3 完成记录（2026-11-23，HEAD 见提交）**：`pnpm add pinia --save-exact` 装 pinia 4.1.0（lockfile 随命令生成）。纯内核 `stores/sseReducer.ts`（349 行）从 `api/sse.ts`（375→169 行）原子迁入事件分支表/逐帧归约/快照类型/富回答解析 + 纯 `pushBanner`（8 上限、去重、溢出计数）；无 re-export shim。三个 store 中 session/conversations 改为 `defineStore`，`kbHistory.ts` 保持纯函数缓存层。10 个消费点改用 `storeToRefs` + store 实例；App.vue 的 `ask(undefined, sid)` 胶水删除，会话归属收口到 `askCurrent()`。门禁同批迁移：`verify-sse.mjs` 改 import 到 reducer 并 `setActivePinia(createPinia())`（§H/§I 用 storeToRefs 保持 .value 读法）；`check-events.mjs` 增 `TS_REDUCER` 并把 EVENT_HANDLERS/kind 联合坐标迁走，`TS_SSE` 仍锁凭据装配。四门 `typecheck` / `lint` / `verify:sse`（153 断言失败 0）/ `verify:markdown` 全 rc=0；额外 `build`、`check:tokens`、`check:ui-consistency` 亦全绿。
+**中途自纠（登记）**：批量替换脚本首版正则跨过了 `}` 吞掉组件原有 vue import，typecheck 抓出后从 HEAD 恢复 10 个文件并用 `[^}]*` 收紧重做；`pushBanner` 全局替换误改自身定义内一行，已改回调用 reducer 纯函数。两处均由 typecheck 当场咬住，未进入提交。
 
 ---
 

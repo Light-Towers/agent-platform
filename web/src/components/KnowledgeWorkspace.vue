@@ -7,7 +7,11 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 
-import { authToken } from '../stores/session'
+import { storeToRefs } from 'pinia'
+import { useSessionStore } from '../stores/session'
+const sessionStore = useSessionStore()
+const { authToken } = storeToRefs(sessionStore)
+
 import { listDocumentTree, type KbTreeBase, type KbTreeDoc, type KbChunkConfig } from '../api/kb.ts'
 import KnowledgeBaseSidebar from './KnowledgeBaseSidebar.vue'
 import KbUpload from './KbUpload.vue'

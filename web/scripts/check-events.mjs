@@ -69,6 +69,9 @@ const PROTO = 'packages/agent-runtime/agent_runtime/planner/protocol.py';
 const ROUTER = 'applications/agent_server/api/query_router.py';
 const TS_EVENTS = 'src/api/events.ts';
 const TS_SSE = 'src/api/sse.ts';
+/* R3：纯归约内核（事件分支表、快照类型）原子迁到 stores/sseReducer.ts。
+ * TS_SSE 仍锁传输层的凭据装配；两者分工不能合并，否则一条迁走就同时误报另一条。 */
+const TS_REDUCER = 'src/stores/sseReducer.ts';
 const TS_ICONS = 'src/components/icons.ts';
 const CSS_EVENTS = 'src/styles/events.css';
 const TS_AUTH = 'src/api/auth.ts';
@@ -151,16 +154,16 @@ const tsUnion = (() => {
 
 /* ---- 被校物 2：sse.ts 的 handler 分支表键集 ---- */
 const handlerKeys = (() => {
-  const block = rdWeb(TS_SSE).match(/const EVENT_HANDLERS[^{]*\{([\s\S]*?)\n\}[ \t]*satisfies/);
+  const block = rdWeb(TS_REDUCER).match(/const EVENT_HANDLERS[^{]*\{([\s\S]*?)\n\}[ \t]*satisfies/);
   if (!block) {
-    fail.push(`读不到 const EVENT_HANDLERS … } satisfies（${TS_SSE} 的表体坐标或 satisfies 尾形变了，先核对再改门禁；handler 侧比较已跳过）`);
+    fail.push(`读不到 const EVENT_HANDLERS … } satisfies（${TS_REDUCER} 的表体坐标或 satisfies 尾形变了，先核对再改门禁；handler 侧比较已跳过）`);
     return null;
   }
   const out = [...block[1].matchAll(/^ {2}([a-z_][a-z0-9_]*)[ \t]*:[ \t]*\(s/gm)].map((m) => m[1]).sort();
   if (out.length === 0) {
     // 一条都没读到 ≠ 表是空的：更可能是形状换了。这里必须单独报，不能让它走到下面
     // 变成"12 条全缺项"——那会把一次坐标漂移伪装成一次内容缺失。
-    fail.push(`${TS_SSE} 的 EVENT_HANDLERS 里一条 key 都没读到（表体形状与文件头声明的「一行一键 + 值以 (s 开头」不符，不是分支被删）`);
+    fail.push(`${TS_REDUCER} 的 EVENT_HANDLERS 里一条 key 都没读到（表体形状与文件头声明的「一行一键 + 值以 (s 开头」不符，不是分支被删）`);
     return null;
   }
   return out;
@@ -200,14 +203,14 @@ cmp('handler 分支 ↔ TS 事件联合', handlerKeys, tsUnion);
  * `TimelineEntry.kind` 的三个值里，`'event'` 是**后端事件行**（它的 class 由事件名决定，
  * 不是一种额外种类），剩下两个才是客户端自造的 row kind ⇒ 去掉 'event' 后剩下的就是期望集补。
  * 读不到这一行 ⇒ fail + 跳过两处比较（口径同上：不把坐标问题报成内容缺失）。 */
-const kindLine = rdWeb(TS_SSE).match(/readonly kind:\s*((?:'[a-z_]+'\s*\|?\s*)+)/);
+const kindLine = rdWeb(TS_REDUCER).match(/readonly kind:\s*((?:'[a-z_]+'\s*\|?\s*)+)/);
 const KIND_VALUES = kindLine ? [...kindLine[1].matchAll(/'([a-z_]+)'/g)].map((m) => m[1]) : null;
 if (KIND_VALUES === null) {
-  fail.push(`读不到 TimelineEntry 的 readonly kind 联合（${TS_SSE} 的形状变了，先核对再改门禁；消费面两处比较已跳过）`);
+  fail.push(`读不到 TimelineEntry 的 readonly kind 联合（${TS_REDUCER} 的形状变了，先核对再改门禁；消费面两处比较已跳过）`);
 }
 const CLIENT_ROW_KINDS = KIND_VALUES ? KIND_VALUES.filter((k) => k !== 'event').sort() : null;
 if (CLIENT_ROW_KINDS !== null && CLIENT_ROW_KINDS.length === 0) {
-  fail.push(`${TS_SSE} 的 kind 联合里除了 'event' 一个客户端侧行种类都没有（期望集补为空，消费面两处比较已跳过）`);
+  fail.push(`${TS_REDUCER} 的 kind 联合里除了 'event' 一个客户端侧行种类都没有（期望集补为空，消费面两处比较已跳过）`);
 }
 
 /* 期望集 = 派生全集 ∪ 客户端侧行种类（两者都来自源，本件不写死任何一类名字）。 */

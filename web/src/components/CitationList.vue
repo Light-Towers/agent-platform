@@ -5,7 +5,7 @@
  * 本件无 <style> 块；形状类落 base.css。
  * ==========================================================================-->
 <script setup lang="ts">
-import type { RichCitation } from '../api/sse.ts'
+import type { RichCitation } from '../stores/sseReducer.ts'
 
 defineProps<{ citations: readonly RichCitation[] }>()
 </script>

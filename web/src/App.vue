@@ -18,6 +18,7 @@
  * ==========================================================================-->
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
+import { storeToRefs } from 'pinia'
 
 import ChatStream from './components/ChatStream.vue'
 import EvidenceList from './components/EvidenceList.vue'
@@ -29,44 +30,24 @@ import DatasourceConfig from './components/DatasourceConfig.vue'
 import ThemeToggle from './components/ThemeToggle.vue'
 import HealthView from './components/HealthView.vue'
 import Timeline from './components/Timeline.vue'
-import {
-  activeSessionId,
-  clearConversations,
-  conversationsBusy,
-  conversationsNotice,
-  loadHistory,
-  loadSessions,
-  newSession,
-  removeSession,
-  renameSession,
-  selectSession,
-  sessionList,
-} from './stores/conversations.ts'
-import {
-  ask,
-  authRole,
-  authToken,
-  banners,
-  busy,
-  canChat,
-  canSubmit,
-  clearBanners,
-  dropped,
-  evidence,
-  eventCount,
-  hasFeature,
-  identityNote,
-  knowledgeScope,
-  loggedIn,
-  question,
-  resetRound,
-  resumeSession,
-  signOut,
-  traceNote,
-  waiting,
-} from './stores/session'
+import { useConversationsStore } from './stores/conversations.ts'
+import { useSessionStore } from './stores/session.ts'
 import { listKnowledgeBases, type KbKnowledgeBase } from './api/kb.ts'
 import { readSessionState, writeSessionState } from './theme.ts'
+
+const conversationsStore = useConversationsStore()
+const sessionStore = useSessionStore()
+const {
+  activeSessionId, conversationsBusy, conversationsNotice, sessionList,
+} = storeToRefs(conversationsStore)
+const {
+  clearConversations, loadHistory, loadSessions, newSession, removeSession, renameSession, selectSession, askCurrent,
+} = conversationsStore
+const {
+  authRole, authToken, banners, busy, canChat, canSubmit, dropped, evidence, eventCount,
+  identityNote, knowledgeScope, loggedIn, question, traceNote, waiting,
+} = storeToRefs(sessionStore)
+const { clearBanners, hasFeature, resetRound, resumeSession, signOut } = sessionStore
 
 /* ---- G1 管理面导航（批 1：对话页 + 角色页；知识库/数据源两页随批 2/批 3 接入）----
  * 视图键是本组件的局部 ref：只有本件读写它，不进会话层（会话层是跨组件共享态，
@@ -206,14 +187,9 @@ const submitHint = computed(() =>
 /** 主流 chat 行为：没有当前会话时先自动建一个，确保每轮问答都归属某个会话窗口。
  * 第二参数是 sessionId（保持 ask(fetchImpl) 兼容 verify-sse.mjs）。 */
 async function submit(): Promise<void> {
-  let sid = activeSessionId.value
-  if (!sid) {
-    await newSession()
-    sid = activeSessionId.value
-  }
-  await ask(undefined, sid || undefined)
+  // 会话归属由 conversations store 自己决定（R3：App.vue 不再中转 currentSessionId）。
+  await askCurrent()
   // 本轮已落库：用服务端权威历史回填消息区，再清掉本轮流式快照（否则同一轮显示两遍）。
-  // 治本点：历史以 chatHistory 为唯一显示源；ask 后不回填就会出现「问第二句第一句没了」。
   await loadHistory()
   resetRound()
   // 首轮问答后服务端按内容生成了标题，刷新列表让它上屏（后续轮次幂等无副作用）。

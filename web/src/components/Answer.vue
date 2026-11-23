@@ -13,7 +13,13 @@
  * ⚠ 本件没有 <style> 块，理由见 ThemeToggle.vue 头注。
  * ==========================================================================-->
 <script setup lang="ts">
-import { answerText, busy, hasRound, richAnswer, terminal, threadId, useExample, type Terminal } from '../stores/session'
+import { storeToRefs } from 'pinia'
+import { useSessionStore } from '../stores/session'
+import type { Terminal } from '../stores/session'
+const sessionStore = useSessionStore()
+const { answerText, busy, hasRound, richAnswer, terminal, threadId } = storeToRefs(sessionStore)
+const { useExample } = sessionStore
+
 import MarkdownText from './MarkdownText.vue'
 import ImageStrip from './ImageStrip.vue'
 import CitationList from './CitationList.vue'

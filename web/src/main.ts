@@ -15,9 +15,11 @@ import './styles/base.css'
 import './styles/events.css'
 
 import { createApp } from 'vue'
+import { createPinia } from 'pinia'
 import App from './App.vue'
 import { initTheme } from './theme'
 
 initTheme()
 
-createApp(App).mount('#app')
+// Pinia 必须在挂载前装好：各组件在 setup 里同步调用 useSessionStore()/useConversationsStore()。
+createApp(App).use(createPinia()).mount('#app')

@@ -45,6 +45,7 @@
  *   · 首登后的能力集靠 `backfillIdentityAfterLogin()` 异步补齐（登录响应只带码不带集），
  *     理由三条都写在那个函数头上。
  * ==========================================================================*/
+import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 
 import {
@@ -57,22 +58,21 @@ import {
   type AuthMode,
   type Credentials,
 } from '../api/auth.ts'
-import { initialState, streamQuery, type StreamQueryOptions, type StreamSnapshot, type Terminal, type TimelineEntry } from '../api/sse.ts'
+import { streamQuery, type StreamQueryOptions } from '../api/sse.ts'
+import { initialState, pushBanner, type StreamSnapshot, type Terminal, type TimelineEntry } from './sseReducer.ts'
 
 /** 终态三值的类型从本件再转一次：组件读的是本件的 `terminal`，不该为了拿一个类型
  *  而去 import 传输层（那条边会把 PR-2 的组件绑回 sse.ts 的形状上）。同一条理由也适用于
  *  登录面两态的名：LoginView 只从会话层取类型，将来凭据面换形状时只改本件一处。 */
+
 export type { Terminal }
 export type { AuthMode, Credentials }
-
-/** 登录面三态（见文件头③）：静态密钥通道已退役，不再有 `keyMode` 这一档。 */
 export type AuthState = 'anonymous' | 'checking' | 'authenticated'
 
-/** banner 上限。8 条 = 四条分支各出现两次仍然全留在屏上，再多才丢最旧。 */
-const MAX_BANNERS = 8
+export const useSessionStore = defineStore('session', () => {
 
 /** 空态里那个示例问题按钮填进去的句子。刻意不是问数专属文案（与 poc.html 同一条理由）。 */
-export const EXAMPLE_QUESTION = '这个平台能帮我查什么？'
+const EXAMPLE_QUESTION = '这个平台能帮我查什么？'
 
 const question = ref('')
 const streaming = ref(false)
@@ -114,14 +114,10 @@ function isDiagnostic(row: TimelineEntry): boolean {
   return row.kind === 'transport' || row.event === 'error'
 }
 
-function pushBanner(text: string): void {
-  if (text === '' || bannerList.value.includes(text)) return
-  bannerList.value.push(text)
-  // 溢出时丢的是**最旧**那条，并把它计数出来：静默丢弃会让人以为屏上就是全部提示。
-  if (bannerList.value.length > MAX_BANNERS) {
-    bannerList.value.shift()
-    foldedCount.value += 1
-  }
+function pushBannerLocal(text: string): void {
+  const next = pushBanner({ banners: bannerList.value, folded: foldedCount.value }, text)
+  bannerList.value = [...next.banners]
+  foldedCount.value = next.folded
 }
 
 /**
@@ -132,7 +128,7 @@ function pushBanner(text: string): void {
 function promote(s: StreamSnapshot): void {
   for (let i = promoted; i < s.timeline.length; i++) {
     const row = s.timeline[i]
-    if (row !== undefined && isDiagnostic(row)) pushBanner(row.text)
+    if (row !== undefined && isDiagnostic(row)) pushBannerLocal(row.text)
   }
   promoted = s.timeline.length
 }
@@ -142,55 +138,54 @@ function promote(s: StreamSnapshot): void {
  * 模块级 composable 没有 store 实例那层封装，直接把 `ref` 递出去 = 外面能写它。
  * `busy` 只能由 `ask()` 的开/关改，`banners` 只能由 `promote()`/`clearBanners()` 改 ——
  * 这条边界靠类型挡住，不靠注释约定。 */
-export const timeline = computed<readonly TimelineEntry[]>(() => snap.value.timeline)
-export const evidence = computed(() => snap.value.evidence)
-export const richAnswer = computed(() => snap.value.rich)
-export const answerText = computed(() => snap.value.answer)
-export const terminal = computed(() => snap.value.terminal)
-export const threadId = computed(() => snap.value.threadId)
-export const requestId = computed(() => snap.value.requestId)
-export const eventCount = computed(() => snap.value.timeline.length)
-export const busy = computed(() => streaming.value)
-export const hasRound = computed(() => ranOnce.value)
-export const banners = computed<readonly string[]>(() => bannerList.value)
-export const dropped = computed(() => foldedCount.value)
-export { question, authMode, authToken, knowledgeScope }
+const timeline = computed<readonly TimelineEntry[]>(() => snap.value.timeline)
+const evidence = computed(() => snap.value.evidence)
+const richAnswer = computed(() => snap.value.rich)
+const answerText = computed(() => snap.value.answer)
+const terminal = computed(() => snap.value.terminal)
+const threadId = computed(() => snap.value.threadId)
+const requestId = computed(() => snap.value.requestId)
+const eventCount = computed(() => snap.value.timeline.length)
+const busy = computed(() => streaming.value)
+const hasRound = computed(() => ranOnce.value)
+const banners = computed<readonly string[]>(() => bannerList.value)
+const dropped = computed(() => foldedCount.value)
 
 /** 提交按钮的可用性。只看两态：正在流、输入为空。 */
-export const canSubmit = computed(() => !streaming.value && question.value.trim() !== '')
+const canSubmit = computed(() => !streaming.value && question.value.trim() !== '')
 
 /**
  * 「等待 done…」那句（视觉件 §3 loading 形态）。判据只看 `done`（A7），
  * spinner 不是完成信号 —— 所以这里不能用 `terminal === 'completed'` 之外的任何猜测。
  */
-export const waiting = computed(() => streaming.value)
+const waiting = computed(() => streaming.value)
 
 /**
  * 请求号那一行。有就报原文，**没有就明说没有**：`describeStreamError` 的文案引导向
  * 「本页的 request_id」，而流内错误帧所在的响应头里本来就没有 `X-Trace-Id`（200 已发），
  * 这时给一个空占位比给一句指不到东西的引导诚实。
  */
-export const traceNote = computed(() =>
+const traceNote = computed(() =>
   snap.value.requestId === ''
     ? '本次响应未带请求号（流内 error 帧不含诊断细节）⇒ 需服务端按时间窗查日志'
     : `本次请求号 ${snap.value.requestId}`)
 
 /* ---- 登录面的只读视图 ---- */
 /** 对话界面是否可见。`checking` 也算不可见：那一瞬给屏上的是「正在确认」而不是一个空对话框。 */
-export const canChat = computed(() => authState.value === 'authenticated')
-export const loggedIn = computed(() => authState.value === 'authenticated')
-export const authPending = computed(() => authBusy.value || authState.value === 'checking')
+const canChat = computed(() => authState.value === 'authenticated')
+const loggedIn = computed(() => authState.value === 'authenticated')
+const authPending = computed(() => authBusy.value || authState.value === 'checking')
 /** 登录面那句给人读的提示（只读：本模块里能写它的是 `dropSession`/`submitCredentials`/`resumeSession`）。 */
-export const authNotice = computed(() => authNoticeText.value)
+const authNotice = computed(() => authNoticeText.value)
 /** 手里还有没有令牌（登录页拿它决定要不要给「重试确认登录态」那一枚按钮）。 */
-export const hasStoredToken = computed(() => authToken.value !== '')
+const hasStoredToken = computed(() => authToken.value !== '')
 
 /**
  * 页眉身份那一行。三种读法各自一句，因为「未确认」与「未登录」是两件不同的事
  * —— 把它们合并成一句「未登录」就是把 503 读成了凭据问题（文件头③）。
  * 已登录那句里写的是**服务端 `/auth/me` 回读到的值**，不是本地令牌解出来的 claim。
  */
-export const identityNote = computed(() => {
+const identityNote = computed(() => {
   switch (authState.value) {
     case 'authenticated':
       return `已登录：${authTenant.value} / ${authUser.value} · 角色 ${authRoleRef.value}（身份由服务端断言回读）`
@@ -203,16 +198,16 @@ export const identityNote = computed(() => {
 
 /* ---- G1：角色显隐的只读视图（任务书 §四.2）---- */
 /** 服务端断言的角色码（只读；本模块外不得写它，与上面那组只读 computed 同一条边界）。 */
-export const authRole = computed(() => authRoleRef.value)
+const authRole = computed(() => authRoleRef.value)
 /** 服务端断言的能力集（只读）。空集 = 本会话没有任何管理向能力 ⇒ 管理面入口全隐。 */
-export const authFeatures = computed<readonly string[]>(() => authFeaturesRef.value)
+const authFeatures = computed<readonly string[]>(() => authFeaturesRef.value)
 
 /**
  * 「这条能力码我有没有」的单一问法。组件一律经它做显隐判断，不散写
  * `authFeatures.value.includes(...)`：问法只有一个实现位，改判据形状时只动这里。
  * 这只是**渲染映射**不是权限判定 —— 判定（谁有什么码）在服务端 /auth/me。
  */
-export function hasFeature(code: string): boolean {
+function hasFeature(code: string): boolean {
   return authFeaturesRef.value.includes(code)
 }
 
@@ -221,7 +216,7 @@ export function hasFeature(code: string): boolean {
  * 发一问。`fetchImpl` 是测试注入位（`verify-sse.mjs` §G 靠它喂假流，不发网络）。
  * 返回值不外露 Promise 语义：调用方 `void ask()` 即可，状态全在导出视图里。
  */
-export async function ask(fetchImpl?: typeof fetch, sessionId?: string): Promise<void> {
+async function ask(fetchImpl?: typeof fetch, sessionId?: string): Promise<void> {
   const q = question.value.trim()
   if (q === '' || streaming.value) return
   streaming.value = true
@@ -252,7 +247,7 @@ export async function ask(fetchImpl?: typeof fetch, sessionId?: string): Promise
     // 只有一条「令牌含非 ASCII」会走到这里（sse.ts 明写它是发出前的前置校验）。
     // 这句必须在屏上，不能只进 console：它就是这一轮的失败原因（A2 不白屏 / A4 可读）。
     const text = err instanceof Error ? err.message : String(err)
-    pushBanner(text)
+    pushBannerLocal(text)
     snap.value = { ...snap.value, terminal: 'failed' }
   } finally {
     streaming.value = false
@@ -265,21 +260,21 @@ function onTick(s: StreamSnapshot): void {
 }
 
 /** 顶部提示区只清提示，**不动时间线**：事件行是本轮事实的记录，提示是给人的提醒。 */
-export function clearBanners(): void {
+function clearBanners(): void {
   bannerList.value = []
   foldedCount.value = 0
 }
 
 /** 切换会话时清掉本轮快照：那轮对话已从服务端 /history 回填成消息，本轮气泡不能再挂着
  * 造成重复显示。只重置"本轮"三态（答案/事件/徽标+hasRound），不动登录态、提示、问题输入。 */
-export function resetRound(): void {
+function resetRound(): void {
   snap.value = initialState()
   ranOnce.value = false
   promoted = 0
 }
 
 /** 空态那个示例按钮：只填输入框，不直接发请求 —— 发不发由人按提交决定。 */
-export function useExample(): void {
+function useExample(): void {
   question.value = EXAMPLE_QUESTION
 }
 
@@ -336,7 +331,7 @@ function dropSession(notice: string): void {
  *   而登录页上的 401（口令错）已由 `submitCredentials` 自己处理，不能在这里二次掉。
  * ⚠ 只处理 401，**不处理 403**：后者是"已识别但无权"，清令牌等于因权限问题把人登出。
  */
-export function handleSessionExpired(): void {
+function handleSessionExpired(): void {
   if (authState.value !== 'authenticated') return
   dropSession('登录令牌已被服务端拒绝（过期或换钥），请重新登录')
 }
@@ -359,7 +354,7 @@ export function handleSessionExpired(): void {
  *   ③ 补发失败时屏上落的是**第二发**的服务端文案（那句「登录名或口令不对」比「已被占用」
  *      更可行动），不拼第三份文案 —— 纪律②（`api/auth.ts` 文件头）：上屏的话只来自服务端信封。
  */
-export async function submitCredentials(input: Credentials, fetchImpl?: typeof fetch): Promise<boolean> {
+async function submitCredentials(input: Credentials, fetchImpl?: typeof fetch): Promise<boolean> {
   if (authBusy.value) return false
   authBusy.value = true
   authNoticeText.value = ''
@@ -415,7 +410,7 @@ export async function submitCredentials(input: Credentials, fetchImpl?: typeof f
  * 当场发一个 fetch（能力声明变成隐形副作用）。调用人是 `App.vue` 的挂载点。
  * 无令牌时早退，不花一次往返去问「我登录了谁」。
  */
-export async function resumeSession(fetchImpl?: typeof fetch): Promise<void> {
+async function resumeSession(fetchImpl?: typeof fetch): Promise<void> {
   const token = readStoredToken()
   if (token === '') {
     authState.value = 'anonymous'
@@ -451,11 +446,52 @@ export async function resumeSession(fetchImpl?: typeof fetch): Promise<void> {
  * 无状态的，已签发令牌在 exp 前仍可用，真正的撤销属 PR-3。登出能做到的只有「本地不再持有」。
  * 登出请求本身失败也不回滚本地态（否则一个挂掉的后端会让人无法退出当前标签页）。
  */
-export async function signOut(fetchImpl?: typeof fetch): Promise<void> {
+async function signOut(fetchImpl?: typeof fetch): Promise<void> {
   const status = await logoutRequest(fetchImpl)
   authToken.value = ''
   dropSession('本标签页已清除登录令牌')
   const sent = status === 0 ? '登出请求未能发出' : `登出请求 HTTP ${status}`
-  pushBanner(`已退出：${sent}。服务端不撤销已签发令牌（无状态 RS256，撤销属 PR-3），`
+  pushBannerLocal(`已退出：${sent}。服务端不撤销已签发令牌（无状态 RS256，撤销属 PR-3），`
     + '所以令牌在过期前仍可能被接受；本标签页已不再持有它')
 }
+
+  return {
+    EXAMPLE_QUESTION,
+    timeline,
+    evidence,
+    richAnswer,
+    answerText,
+    terminal,
+    threadId,
+    requestId,
+    eventCount,
+    busy,
+    hasRound,
+    banners,
+    dropped,
+    question,
+    authMode,
+    authToken,
+    knowledgeScope,
+    canSubmit,
+    waiting,
+    traceNote,
+    canChat,
+    loggedIn,
+    authPending,
+    authNotice,
+    hasStoredToken,
+    identityNote,
+    authRole,
+    authFeatures,
+    hasFeature,
+    ask,
+    clearBanners,
+    resetRound,
+    useExample,
+    handleSessionExpired,
+    submitCredentials,
+    resumeSession,
+    signOut,
+  }
+})

@@ -17,8 +17,12 @@
 <script setup lang="ts">
 import { computed, onUnmounted, ref, watch } from 'vue'
 
-import { authToken } from '../stores/session'
-import { isSafeImageUrl } from '../api/sse.ts'
+import { storeToRefs } from 'pinia'
+import { useSessionStore } from '../stores/session'
+const sessionStore = useSessionStore()
+const { authToken } = storeToRefs(sessionStore)
+
+import { isSafeImageUrl } from '../stores/sseReducer.ts'
 import {
   uploadKbDocuments,
   getKbStatus,

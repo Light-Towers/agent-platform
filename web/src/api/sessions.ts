@@ -11,7 +11,7 @@
  * 路径写绝对路径（页面挂 /ui/，相对会被拼成 /ui/sessions，后端无此路由）。
  * ==========================================================================*/
 import { applyCredentialHeaders } from './auth.ts'
-import { handleSessionExpired } from '../stores/session.ts'
+import { useSessionStore } from '../stores/session.ts'
 
 export interface SessionInfo {
   session_id: string
@@ -38,7 +38,7 @@ function headers(token: string): Headers {
 
 async function readResp(resp: Response, action: string): Promise<Record<string, unknown>> {
   if (resp.status === 401) {
-    handleSessionExpired()
+    useSessionStore().handleSessionExpired()
     throw new Error(`${action}失败：登录令牌已过期，请重新登录后再试`)
   }
   const text = await resp.text().catch(() => '')

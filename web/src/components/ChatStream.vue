@@ -15,8 +15,16 @@ import { computed, nextTick, ref, watch } from 'vue'
 
 import Answer from './Answer.vue'
 import MarkdownText from './MarkdownText.vue'
-import { chatHistory, conversationsNotice } from '../stores/conversations.ts'
-import { answerText, busy, hasRound, question, useExample } from '../stores/session'
+import { storeToRefs } from 'pinia'
+import { useConversationsStore } from '../stores/conversations.ts'
+const conversationsStore = useConversationsStore()
+const { chatHistory, conversationsNotice } = storeToRefs(conversationsStore)
+
+import { useSessionStore } from '../stores/session'
+const sessionStore = useSessionStore()
+const { answerText, busy, hasRound, question } = storeToRefs(sessionStore)
+const { useExample } = sessionStore
+
 
 /** 只展示 user/assistant 的对话轮次；tool/system 原文不铺给用户。 */
 const turns = computed(() =>
