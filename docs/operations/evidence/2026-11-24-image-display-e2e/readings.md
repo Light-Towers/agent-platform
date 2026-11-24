@@ -32,7 +32,20 @@
 - `check-events.mjs` C5 扩展"消费是提供的路径前缀"匹配（前端运行时拼路径的盲点），内置自证 `/img*` 放行、`/bogus*` 报红。
 - 前端 typecheck/lint/check-events/verify-sse 全绿。
 
-## 4. 边界
+## 4. 上传→切分预览（临时提权后补测，已还原）
 
-- viewer 账号 403 于 `/kb/uploads`、`/kb/documents`（需 admin 提权，D3，本次未做）⇒ "上传带图文档→切分预览"这一步没在真机跑；用现成知识库的命中图片验证了"回答回显图片"这条主链路。
+用户授权后临时提权测试账号（双写 is_admin=true + role=admin），验后 trap 还原并独立确认 `false/viewer`：
+
+| 步骤 | 读数 |
+|---|---|
+| 上传带图 Markdown（2 张真实 MinIO 图） | HTTP 200，task_ids=[f042fb90...] |
+| 轮询切分状态 | completed，chunk_count=1 |
+| 该文档问答命中图片 | rich.images 含**刚上传的 2 张**（URL 带正确斜杠）+ 历史 7 张（缺斜杠，前端兼容补回）✓ |
+| 账号还原 | false/viewer ✓ |
+
+**已知小局限**：上传后读数面板的 `previewImages` 从 `split.previews[].head`（前 120 字）提取图片——图片若在文档后段会被 head 截断、该面板提不到；但**切片明细**（`expandedDocImages` 从 chunk 完整 content 提取）和**回答回显**都能显示。不影响核心诉求，登记不扩大改动。
+
+## 5. 边界
+
 - 本次只改前端 + KS 代码，线上 agent-platform 无需重建；KS 镜像重建（导入 bug）待定，不阻断历史图片显示。
+- 生产 MinIO 私有桶保持私有（未开匿名），图片经 agent_server `/img` 鉴权代理取字节。
