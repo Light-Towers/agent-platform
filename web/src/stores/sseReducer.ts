@@ -95,6 +95,33 @@ export function toProxyImageUrl(url: string): string {
 }
 
 /**
+ * 把 markdown 正文按 `![alt](url)` 切成"文本段 + 图片段"序列，供正文内嵌渲染
+ * （图片出现在正文哪个位置就显示在哪，而不是抽出来堆在底部）。
+ * 图片段保留原始 url（由 AuthImage 做 scheme 校验 + 代理改写 + 带令牌取图）。
+ */
+export type ContentToken =
+  | { readonly kind: 'text'; readonly text: string }
+  | { readonly kind: 'image'; readonly url: string; readonly alt: string }
+
+const MD_IMAGE_RE = /!\[([^\]]*)\]\(([^)\s]+)\)/g
+
+export function parseContentTokens(text: string): readonly ContentToken[] {
+  const out: ContentToken[] = []
+  let last = 0
+  for (const m of text.matchAll(MD_IMAGE_RE)) {
+    const start = m.index ?? 0
+    if (start > last) out.push({ kind: 'text', text: text.slice(last, start) })
+    const url = m[2]
+    const alt = m[1]
+    if (url === undefined) continue
+    out.push({ kind: 'image', url, alt: alt ?? '' })
+    last = start + m[0].length
+  }
+  if (last < text.length) out.push({ kind: 'text', text: text.slice(last) })
+  return out
+}
+
+/**
  * 带令牌取图片字节（AuthImage 的唯一实现，便于行为测试）。
  * <img src> 不会带 Authorization 头 ⇒ /img 鉴权端点返回 401 碎图（2026-11-24 实踩）。
  * 用 fetch 带 Bearer 取 blob，组件再 createObjectURL 给 <img>。令牌不进 URL。

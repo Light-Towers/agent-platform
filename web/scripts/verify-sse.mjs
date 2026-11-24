@@ -383,6 +383,17 @@ console.log('§G 消费面：快照契约、依据列表、class 与图标映射
   check('G9c Bearer 头真的带上了（<img src> 做不到这点）', seenAuth === 'Bearer tk-img', seenAuth)
   const noToken = await fetchImageBlob(imgUrl, '', mockFetch)
   check('G9d 无令牌也能取（公开图兜底，头缺省）', noToken.ok === true && seenAuth === '')
+
+  // G10 正文内嵌图片解析：图片出现在正文哪个位置就显示在哪（不抽出来堆底部）
+  const parseTokens = reducer.parseContentTokens
+  const toks = parseTokens('甲文![图A](http://minio:9000/a.png)乙文![图B](http://minio:9000/b.png)丙文')
+  check('G10a 正文按图片切成文本/图片交替序列',
+    toks.length === 5 && toks[0].kind === 'text' && toks[0].text === '甲文'
+    && toks[1].kind === 'image' && toks[1].url === 'http://minio:9000/a.png'
+    && toks[2].text === '乙文' && toks[3].kind === 'image' && toks[4].text === '丙文',
+    JSON.stringify(toks))
+  check('G10b 无图片的正文只有一段文本',
+    JSON.stringify(parseTokens('纯文本正文')) === JSON.stringify([{ kind: 'text', text: '纯文本正文' }]))
 }
 
 /* ---- §H 会话层：stores/session.ts 在 Node 里真驱动（不发网络）---- */
