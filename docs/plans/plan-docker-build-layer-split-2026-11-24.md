@@ -83,3 +83,13 @@ RUN pip install --no-cache-dir --no-deps --force-reinstall .
 
 - `plan-build-pypi-acceleration` 治"下载慢"（阿里云源 + torch 依赖预装），本方案治"重复安装"——两者叠加后：下载快 + 不重复装。
 - `scripts/evidence/chat_images_real_pg_probe.py`（今天新增的真 PG 探针）保证本次 Dockerfile 改动不涉及业务逻辑回归；镜像内 import 探针（A1）保证依赖齐全。
+
+## 6. 实施结果（2026-11-24 实取，诚实读数）
+
+**核心目的达成**：改一行业务代码（`config.py` 加注释）后重建，`Step 19（torch）` 与 `Step 21（依赖层 9.5min）` 均 `Using cache`，只有 `Step 22（COPY 业务代码）` + `Step 23（pip --no-deps --force-reinstall）` 重跑。依赖层不再因业务代码改动而重装——B 的目标证实。
+
+**但总耗时未降到 <3min（实测 692s ≈ 11.5min）**：因为**前端 pnpm 层（Step 6 `pnpm install` / Step 8 `pnpm build`）没命中缓存、每次重跑**。这是 Dockerfile :28-35 早已记录的**另一个**分层坑（`COPY web/` 在 `pnpm install` 之前，任何前端源码变化都让安装层失效）——与本次依赖层拆分无关，但让"整体构建快"的目标只实现了一半。
+
+⇒ 待办（独立）：按 :28-32 的既有思路拆前端层（清单先 COPY → pnpm install → 源码 COPY → pnpm build），才能把总构建时长真正降到分钟级。
+
+线上：rev `05d9910b` 三台分发 + rollout 成功，A1 全依赖 import（langfuse/pymilvus/minio/sentence_transformers/jwt/argon2/opentelemetry/fastapi）全过——分层没漏包。
