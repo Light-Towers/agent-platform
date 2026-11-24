@@ -148,6 +148,7 @@ L 系列（观测架构与依赖契约）由 `docs/plans/plan-observability-glob
 | `scripts/evidence/verify_main_tip.py` | 判据 6 七项 `[A]`–`[G]` 全 fail-closed 复验；门禁预期集按 `on.push.paths` × changed paths **派生**（不硬编码） | 是（`gh api`） |
 | `scripts/evidence/normalize_dump.py` | PowerShell 重定向产物默认 UTF-16 LE ⇒ 按 BOM 嗅探转 UTF-8，防「肉眼正常而计数全 0」 | 否 |
 | `scripts/evidence/nl2sql_real_pg_probe.py` | nl2sql 元知识真库往返（迁移链幂等 + 作用域写入 + 发布顺序 42P10 判据，11 项）；本机 PG 由 `pgserver` wheel 提供（含 pgvector），配方见 testing-playbook §3.4 | 否（本机进程内 PG） |
+| `scripts/evidence/chat_images_real_pg_probe.py` | 会话传图真库往返（migration 022 + 生产 chat_images.py save/get/租户/TTL + `_resolve_images`→data URI→多模态合成，11 项）。**改到会话传图 DB/合成链后必须重跑**；钉住 query_router 与探针共用同一 `agent_server.chat_images` 模块 | 否（本机进程内 PG） |
 | `scripts/evidence/migration_gate_mutation_probe.py` | `scripts/lint_migration_refs.py` 的非空转反证：原样副本零违规 + 注入 B-1 错表名报红 + 摘掉 006 报红（只在 tempfile 副本上动） | 否 |
 | `scripts/evidence/README.md` | 收录判据、可直接复制的运行命令、三条实踩过坑 | — |
 | `scripts/evidence/face_basis.py` | 面基准唯一实现（`face = git diff --name-only HEAD` + derived / ext-fresh / selftest），四把 PS 量具一律经 `k71-basis.ps1` 取面，禁止各造基准 | 否 |
