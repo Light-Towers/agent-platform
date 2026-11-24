@@ -42,19 +42,24 @@ def build_chat_model() -> FallbackChatModel | None:
 def build_vl_model():
     """多模态 LLM 客户端（会话传图提问，plan-image-qa-fullstack §刀1）。
 
-    与 build_chat_model 同一端点/密钥/观测回调，仅模型换成 vl_model（视觉语言模型）。
-    vl_model 为空或 image_qa_enabled=false 时返回 None —— 调用方据此走文本降级。
+    **独立端点 VL_BASE_URL/VL_API_KEY**：硅基流动提供 Qwen3-VL-8B，agent_server 的
+    LLM_BASE_URL(modelscope) 不提供该模型（实测 400 has no provider supported）。
+    vl_model/vl_api_key 为空或 image_qa_enabled=false 时返回 None —— 调用方走文本降级。
     只在带图请求时使用；路由/压缩/记忆抽取仍走 build_chat_model 的文本 client。
     """
     settings = get_settings()
-    if not settings.image_qa_enabled or not settings.vl_model or not settings.llm_enabled:
+    if (
+        not settings.image_qa_enabled
+        or not settings.vl_model
+        or not settings.vl_api_key
+    ):
         return None
     from agent_runtime.tracing import get_langfuse_callbacks
     from langchain_openai import ChatOpenAI
 
     common: dict = {
-        "api_key": settings.llm_api_key,
-        "base_url": settings.llm_base_url,
+        "api_key": settings.vl_api_key,
+        "base_url": settings.vl_base_url,
         "model": settings.vl_model,
         "temperature": 0,
         "timeout": settings.llm_timeout,

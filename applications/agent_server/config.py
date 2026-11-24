@@ -52,6 +52,10 @@ class Settings(BaseLLMSettings):
     # 多模态（会话传图提问，plan-image-qa-fullstack-2026-11-23）：
     # 复用 KS 已配的 VL 模型；与 llm_* 同一端点/密钥。空 = 不启用多模态（降级文本占位）。
     vl_model: str = "Qwen/Qwen3-VL-8B-Instruct"
+    # VL 端点独立于 LLM_*：硅基流动提供该模型，agent_server 的 LLM_BASE_URL(modelscope) 不提供。
+    # API key 默认空（部署从 KS SILICONFLOW_API_KEY 复制进 Secret），空则 VL 不可用、降级文本。
+    vl_base_url: str = "https://api.siliconflow.cn/v1"
+    vl_api_key: str = ""
     image_qa_enabled: bool = True  # 关掉时带图请求降级为文本占位，不崩
     image_qa_force_deterministic: bool = True  # 带图请求强制走 deterministic（graph 路径不支持图）
     # 会话上传图片存 PG bytea（chat_images 表）；单张上限字节数 + 保留天数（TTL 清理）
