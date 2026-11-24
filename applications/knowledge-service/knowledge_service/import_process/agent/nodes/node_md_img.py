@@ -3,12 +3,14 @@ import os
 import re
 import sys
 from collections import deque
+from functools import lru_cache
 from pathlib import Path
 from typing import Dict, List, Tuple
 
 # LangChain多模态依赖（消息构造+异常捕获）
 from langchain.messages import HumanMessage
 from langchain_core.exceptions import LangChainException
+from langchain_openai import ChatOpenAI
 
 # MinIO相关依赖
 from minio import Minio
@@ -29,9 +31,9 @@ from knowledge_service.core.load_prompt import load_prompt
 from knowledge_service.core.logger import logger
 from knowledge_service.import_process.agent.state import ImportGraphState
 
-# LLM客户端工具类（核心复用，替换原生OpenAI调用）
-from knowledge_service.lm.lm_utils import get_llm_client
-
+# 视觉模型客户端：不走 lm_utils.get_llm_client shim —— 它硬注入 enable_thinking=False，
+# 硅基流动 Qwen3-VL-8B 不支持该参数（实测 400 "current model does not support parameter
+# enable_thinking" ⇒ 摘要全部兜底成"图片描述"）。同 agent_server.build_vl_model 口径直接构造。
 # api访问限速工具
 from knowledge_service.utils.rate_limit_utils import apply_api_rate_limit
 from knowledge_service.utils.task_utils import add_running_task
@@ -144,6 +146,18 @@ def encode_image_to_base64(image_path: str) -> str:
     return base64_str
 
 
+@lru_cache(maxsize=1)
+def _get_vl_client() -> ChatOpenAI:
+    """视觉模型客户端（进程级单例）。不带 enable_thinking —— VL 模型不支持该参数。"""
+    return ChatOpenAI(
+        model=lm_config.lv_model,
+        api_key=lm_config.api_key,
+        base_url=lm_config.base_url,
+        temperature=0,
+        timeout=60,
+    )
+
+
 def summarize_image(image_path: str, root_folder: str, image_content: Tuple[str, str]) -> str:
     """
     调用多模态大模型生成图片内容摘要（适配LangChain工具类，复用项目统一LLM客户端）
@@ -156,8 +170,8 @@ def summarize_image(image_path: str, root_folder: str, image_content: Tuple[str,
     # 将图片编码为Base64，适配多模态大模型输入要求
     base64_image = encode_image_to_base64(image_path)
     try:
-        # 1. 获取项目统一LLM客户端（自动缓存，传入多模态模型名）
-        lvm_client = get_llm_client(model=lm_config.lv_model)
+        # 1. 获取视觉模型客户端（独立构造，不带 enable_thinking）
+        lvm_client = _get_vl_client()
 
         # 加载并渲染提示词（核心：传入所有占位符对应的变量）
         prompt_text = load_prompt(
