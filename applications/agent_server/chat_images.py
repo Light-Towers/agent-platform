@@ -31,10 +31,11 @@ async def save_image(ref: str, tenant_id: str, session_id: str, content: bytes, 
     if pool is None:
         raise RuntimeError("chat_images: 数据库未配置")
     async with pool.connection() as conn:
+        # psycopg3：%s 占位符 + 参数作为单个元组（不是 asyncpg 的 $1 散参数）
         await conn.execute(
             "INSERT INTO chat_images (ref, tenant_id, session_id, content, content_type, byte_size) "
-            "VALUES ($1, $2, $3, $4, $5, $6)",
-            ref, tenant_id, session_id, content, content_type, len(content),
+            "VALUES (%s, %s, %s, %s, %s, %s)",
+            (ref, tenant_id, session_id, content, content_type, len(content)),
         )
 
 
@@ -46,13 +47,15 @@ async def get_image(ref: str, tenant_id: str) -> tuple[bytes, str] | None:
     if pool is None:
         return None
     async with pool.connection() as conn:
-        row = await conn.fetchrow(
-            "SELECT content, content_type FROM chat_images WHERE ref=$1 AND tenant_id=$2",
-            ref, tenant_id,
+        # psycopg3：execute 返回 cursor，再 fetchone（无 asyncpg 的 fetchrow）
+        cur = await conn.execute(
+            "SELECT content, content_type FROM chat_images WHERE ref=%s AND tenant_id=%s",
+            (ref, tenant_id),
         )
+        row = await cur.fetchone()
     if row is None:
         return None
-    return bytes(row["content"]), row["content_type"]
+    return bytes(row[0]), row[1]
 
 
 async def delete_expired() -> int:
@@ -62,4 +65,5 @@ async def delete_expired() -> int:
         return 0
     cutoff = datetime.now(UTC) - timedelta(days=get_settings().chat_image_ttl_days)
     async with pool.connection() as conn:
-        return await conn.fetchval("DELETE FROM chat_images WHERE created_at < $1", cutoff)
+        cur = await conn.execute("DELETE FROM chat_images WHERE created_at < %s", (cutoff,))
+        return cur.rowcount  # psycopg3：删除条数在 cursor.rowcount（无 asyncpg 的 fetchval）

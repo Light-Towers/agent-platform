@@ -1,18 +1,23 @@
 # -*- coding: utf-8 -*-
 """会话图片存储/上传测试：ref 形状、租户隔离、格式白名单（plan-image-qa-fullstack §刀3）。"""
 
-from agent_server.chat_images import ext_for_content_type, make_ref, save_image, get_image, delete_expired
+from agent_server.chat_images import delete_expired, ext_for_content_type, get_image, make_ref, save_image
+
+
+class _FakeCursor:
+    rowcount = 0
+
+    async def fetchone(self):
+        return None
 
 
 class _FakeConn:
-    async def execute(self, *a, **kw):
-        return None
+    """psycopg3 签名：execute(sql, (params,)) → cursor；无 fetchrow/fetchval。"""
 
-    async def fetchrow(self, *a, **kw):
-        return None
-
-    async def fetchval(self, *a, **kw):
-        return 0
+    async def execute(self, sql, params=None):
+        assert "%s" in sql and "$1" not in sql
+        assert isinstance(params, tuple)
+        return _FakeCursor()
 
 
 class _FakePool:

@@ -19,21 +19,33 @@ _TINY_PNG = base64.b64decode(
 
 
 class _Conn:
+    """模拟 psycopg3：execute(sql, (params,)) → cursor.fetchone/rowcount；无 fetchrow/fetchval。"""
+
     def __init__(self, mem: dict):
         self.mem = mem
 
-    async def execute(self, sql, *args):
+    # 刻意不提供 fetchrow/fetchval —— 若代码回退到 asyncpg 风格会当场 AttributeError。
+    async def execute(self, sql, params=None):
+        assert "%s" in sql and "$1" not in sql
         if sql.strip().startswith("INSERT"):
-            ref, tenant, session, content, ctype, size = args
+            assert isinstance(params, tuple) and len(params) == 6
+            ref, tenant, session, content, ctype, size = params
             self.mem[ref] = (bytes(content), ctype)
+            return _Cursor()
+        if sql.strip().startswith("SELECT"):
+            assert isinstance(params, tuple) and len(params) == 2
+            ref, tenant = params
+            return _Cursor(row=self.mem.get(ref))
+        return _Cursor()
 
-    async def fetchrow(self, sql, *args):
-        ref, tenant = args
-        value = self.mem.get(ref)
-        return {"content": value[0], "content_type": value[1]} if value else None
 
-    async def fetchval(self, *args):
-        return 0
+class _Cursor:
+    def __init__(self, row=None, rowcount=0):
+        self._row = row
+        self.rowcount = rowcount
+
+    async def fetchone(self):
+        return self._row
 
 
 class _CM:

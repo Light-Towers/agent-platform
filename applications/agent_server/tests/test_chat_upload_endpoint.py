@@ -3,12 +3,11 @@
 
 from __future__ import annotations
 
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
-
 from agent_core.guardrails.errors import install_error_handlers
 from agent_server.api.auth import require_feature, verify_api_key
 from agent_server.api.chat_router import router
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
 
 def _client() -> TestClient:
