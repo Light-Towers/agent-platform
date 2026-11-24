@@ -1,7 +1,47 @@
 # -*- coding: utf-8 -*-
 """会话图片存储/上传测试：ref 形状、租户隔离、格式白名单（plan-image-qa-fullstack §刀3）。"""
 
-from agent_server.chat_images import ext_for_content_type, make_ref
+from agent_server.chat_images import ext_for_content_type, make_ref, save_image, get_image, delete_expired
+
+
+class _FakeConn:
+    async def execute(self, *a, **kw):
+        return None
+
+    async def fetchrow(self, *a, **kw):
+        return None
+
+    async def fetchval(self, *a, **kw):
+        return 0
+
+
+class _FakePool:
+    """只实现 psycopg3 AsyncConnectionPool 的 connection()；若代码用 acquire() 会当场 AttributeError。"""
+
+    def connection(self):
+        return _AsyncCM()
+
+
+class _AsyncCM:
+    async def __aenter__(self):
+        return _FakeConn()
+
+    async def __aexit__(self, *a):
+        return False
+
+
+class TestPoolApi:
+    async def test_save_uses_connection(self, monkeypatch):
+        monkeypatch.setattr("agent_server.chat_images.get_pool", lambda: _FakePool())
+        await save_image("ref", "t", "s", b"x", "image/png")  # 不抛即证明用了 connection()
+
+    async def test_get_uses_connection(self, monkeypatch):
+        monkeypatch.setattr("agent_server.chat_images.get_pool", lambda: _FakePool())
+        assert await get_image("chat-images/t/s/x.png", "t") is None
+
+    async def test_delete_expired_uses_connection(self, monkeypatch):
+        monkeypatch.setattr("agent_server.chat_images.get_pool", lambda: _FakePool())
+        assert await delete_expired() == 0
 
 
 class TestRef:

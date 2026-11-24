@@ -30,7 +30,7 @@ async def save_image(ref: str, tenant_id: str, session_id: str, content: bytes, 
     pool = get_pool()
     if pool is None:
         raise RuntimeError("chat_images: 数据库未配置")
-    async with pool.acquire() as conn:
+    async with pool.connection() as conn:
         await conn.execute(
             "INSERT INTO chat_images (ref, tenant_id, session_id, content, content_type, byte_size) "
             "VALUES ($1, $2, $3, $4, $5, $6)",
@@ -45,7 +45,7 @@ async def get_image(ref: str, tenant_id: str) -> tuple[bytes, str] | None:
     pool = get_pool()
     if pool is None:
         return None
-    async with pool.acquire() as conn:
+    async with pool.connection() as conn:
         row = await conn.fetchrow(
             "SELECT content, content_type FROM chat_images WHERE ref=$1 AND tenant_id=$2",
             ref, tenant_id,
@@ -61,5 +61,5 @@ async def delete_expired() -> int:
     if pool is None:
         return 0
     cutoff = datetime.now(UTC) - timedelta(days=get_settings().chat_image_ttl_days)
-    async with pool.acquire() as conn:
+    async with pool.connection() as conn:
         return await conn.fetchval("DELETE FROM chat_images WHERE created_at < $1", cutoff)
