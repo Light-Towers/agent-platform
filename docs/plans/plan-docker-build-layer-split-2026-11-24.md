@@ -90,6 +90,6 @@ RUN pip install --no-cache-dir --no-deps --force-reinstall .
 
 **但总耗时未降到 <3min（实测 692s ≈ 11.5min）**：因为**前端 pnpm 层（Step 6 `pnpm install` / Step 8 `pnpm build`）没命中缓存、每次重跑**。这是 Dockerfile :28-35 早已记录的**另一个**分层坑（`COPY web/` 在 `pnpm install` 之前，任何前端源码变化都让安装层失效）——与本次依赖层拆分无关，但让"整体构建快"的目标只实现了一半。
 
-⇒ 待办（独立）：按 :28-32 的既有思路拆前端层（清单先 COPY → pnpm install → 源码 COPY → pnpm build），才能把总构建时长真正降到分钟级。
+⇒ **不拆前端层（已判定为伪需求，2026-11-24 用户澄清）**：前端有完整本地验证链（typecheck/lint/check-events/check-tokens/verify-sse/ui-consistency/markdown），本地全绿即可证明前端改动正确，**不需要靠重建镜像来验证前端**。只有后端代码改动才需要重建镜像，而那正是本方案已解决的问题（Step 19/21 命中缓存）。所以"前端 pnpm 层每次重跑"只在确实需要重建镜像时偶发，不构成持续痛点，不值得为此重构。下一个 agent 勿再拆前端层。
 
 线上：rev `05d9910b` 三台分发 + rollout 成功，A1 全依赖 import（langfuse/pymilvus/minio/sentence_transformers/jwt/argon2/opentelemetry/fastapi）全过——分层没漏包。

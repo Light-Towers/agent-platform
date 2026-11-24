@@ -65,7 +65,7 @@
 
 - ~~写"依赖层拆分"方案~~ → 已实施（见下 §8）。
 - 修 `_resolve_images` 的 http URL 透传（SSRF + 无效）。
-- 拆前端 pnpm 层（`COPY web/` 在 `pnpm install` 之前，每次重跑）——让总构建时长真正降到分钟级（见 §8）。
+- ~~拆前端 pnpm 层~~ → 不拆（用户 2026-11-24 澄清：前端有本地验证链 typecheck/lint/check-events/verify-sse 等，本地绿即可，不需重建镜像验证；只有后端改动才重建镜像，而依赖层拆分已解决该痛点）。见 `plan-docker-build-layer-split-2026-11-24.md` §6。
 
 ## 8. 上午复盘的两个机制修复（同日补做）
 
