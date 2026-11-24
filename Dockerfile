@@ -99,20 +99,28 @@ COPY packages/agent-runtime ./packages/agent-runtime
 RUN pip install --no-cache-dir filelock typing-extensions sympy networkx jinja2 fsspec markupsafe \
  && pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu --no-deps
 
-COPY applications/agent_server ./applications/agent_server
+# ── 依赖层拆分（plan-docker-build-layer-split-2026-11-24）────────────────────
+# 原写法：COPY 整个 agent_server → pip install 全部依赖 → 改一行 .py 就让 pip 层失效、
+# 重跑 100+ 包安装（实测每次 ~10min）。拆成"骨架装依赖 + 真代码秒级重装"两层：
+#   · 骨架只需 __init__.py（纯声明、hatchling 能据此构建 wheel，本机 uv build 实测过），
+#     这层的缓存键只绑 pyproject/packages/骨架/命令——改业务 .py 不失效。
+#   · 真代码随后 COPY 覆盖，--no-deps 重装包本体（依赖已满足，秒级）。
+COPY applications/agent_server/__init__.py ./applications/agent_server/__init__.py
 # extras 必须挂在**声明它的那个包**上：`[langfuse]` 声明在 packages/agent-runtime
 # （根包没有这个 extra）。写成 `.[langfuse]` 时 pip 只对未知 extra 告警并继续，
 # 构建照样绿、镜像里却没有包——与 memory-embed-local 那颗雷完全同形（2026-10-10 实测）。
 # identity/auth 两个 extra 是同一条雷的第二个实例（登录链路：签令牌靠 PyJWT[crypto]、校
 # 口令靠 argon2-cffi）：本地 .venv 里两个包都靠 `uv sync --all-packages` 的**传递依赖**
-# 在位（pyjwt 的 Required-by 是 exhibition-agent/mcp/openai-agents，argon2-cffi 的是 minio），
-# 所以本地跑绿不能证明镜像里有——必须在本行显式带 extra（方案 §9 第二条）。
-RUN pip install --no-cache-dir "./packages/agent-core[memory-embed-local]" ./packages/shared-schemas "./packages/agent-runtime[langfuse,identity,auth]" ".[otel]"
-# Milvus 文档检索实现（agent_runtime.document_store.MilvusDocumentStore）运行时需要 pymilvus
-# 的 MilvusClient。2026-11-18 真环境取证发现平台镜像缺此依赖 → 对话降级「知识库检索失败
-# (No module named 'pymilvus')」。版本钉 3.0.3 与 KS 镜像（pymilvus[model]>=3.0.2）对齐；
-# 稀疏向量是平台侧零依赖实现（vector_sparse.py），故只需核心包、不需 [model] extra。
-RUN pip install --no-cache-dir pymilvus==3.0.3
+# 在位，所以本地跑绿不能证明镜像里有——必须在本行显式带 extra（方案 §9 第二条）。
+# pymilvus：Milvus 检索实现运行时需要 MilvusClient（2026-11-18 缺包事故），版本钉 3.0.3
+# 与 KS 对齐；稀疏向量是零依赖实现，只需核心包、不需 [model] extra。
+RUN pip install --no-cache-dir \
+      "./packages/agent-core[memory-embed-local]" ./packages/shared-schemas \
+      "./packages/agent-runtime[langfuse,identity,auth]" ".[otel]" pymilvus==3.0.3
+
+# 业务代码层：覆盖骨架，仅重装根包本体（--no-deps 不重新解析依赖，秒级）。
+COPY applications/agent_server ./applications/agent_server
+RUN pip install --no-cache-dir --no-deps --force-reinstall .
 
 # 前端产物落点 = /srv/agent-platform/web/dist。这条对不是约定，是被机器钉住的契约：
 # applications/agent_server/main.py 的默认探测点是**进程 CWD** 拼 `web/dist`，而本镜像的
