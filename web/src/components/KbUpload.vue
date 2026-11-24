@@ -23,6 +23,7 @@ const sessionStore = useSessionStore()
 const { authToken } = storeToRefs(sessionStore)
 
 import { parseContentTokens } from '../stores/sseReducer.ts'
+import { confirmDestructive } from '../utils/confirm.ts'
 import AuthImage from './AuthImage.vue'
 import {
   uploadKbDocuments,
@@ -138,7 +139,11 @@ function isRevoked(doc: KbTreeDoc): boolean {
 /* ---- 文档下线（按 source_doc 粒度软删除 → REVOKED，删后不再被 RAG 召回）---- */
 async function onDeleteDocument(sourceDoc: string): Promise<void> {
   if (deleteBusy.value) return
-  if (!window.confirm(`确定下线文档「${sourceDoc}」？该文档将从对话检索中移除（软删除，数据保留，可重新发布恢复）。`)) return
+  if (!confirmDestructive({
+    action: '下线文档', target: sourceDoc,
+    consequence: '该文档将从对话检索（RAG）中移除，数据保留。',
+    reversible: true,
+  })) return
   deleteBusy.value = sourceDoc
   notice('', true)
   try {
@@ -176,7 +181,11 @@ async function onRestoreDocument(sourceDoc: string): Promise<void> {
 /** 真删除（不可逆）：物理删切片+登记，文档从列表消失。只对已下线文档可见。 */
 async function onPurgeDocument(sourceDoc: string): Promise<void> {
   if (deleteBusy.value) return
-  if (!window.confirm(`确定永久删除文档「${sourceDoc}」？此操作不可逆，文档将从知识库彻底移除。`)) return
+  if (!confirmDestructive({
+    action: '永久删除文档', target: sourceDoc,
+    consequence: '该文档的切片与登记将被物理删除，从知识库彻底移除。',
+    reversible: false,
+  })) return
   deleteBusy.value = sourceDoc
   notice('', true)
   try {

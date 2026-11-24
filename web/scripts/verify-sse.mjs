@@ -394,6 +394,28 @@ console.log('§G 消费面：快照契约、依据列表、class 与图标映射
     JSON.stringify(toks))
   check('G10b 无图片的正文只有一段文本',
     JSON.stringify(parseTokens('纯文本正文')) === JSON.stringify([{ kind: 'text', text: '纯文本正文' }]))
+
+  // G11 删除确认（plan-image-vl-summary-and-delete-confirm §2）：不可逆操作必须醒目告知、取消不执行
+  const { confirmDestructive } = await import('../src/utils/confirm.ts')
+  let seenConfirmMsg = ''
+  const yes = confirmDestructive(
+    { action: '删除会话', target: '某会话', consequence: '全部历史将移除。', reversible: false },
+    (m) => { seenConfirmMsg = m; return true },
+  )
+  check('G11a 确认返回 true 才继续', yes === true)
+  check('G11b 不可逆文案带醒目标识', seenConfirmMsg.includes('不可恢复'), seenConfirmMsg)
+  check('G11c 对象名进文案（用户看到的与删的一致）', seenConfirmMsg.includes('某会话'))
+  const no = confirmDestructive(
+    { action: '下线文档', target: 'd', consequence: 'x', reversible: true },
+    () => false,
+  )
+  check('G11d 取消返回 false（不执行删除）', no === false)
+  const revMsg = []
+  confirmDestructive(
+    { action: '下线文档', target: 'd', consequence: 'x', reversible: true },
+    (m) => { revMsg.push(m); return true },
+  )
+  check('G11e 可恢复操作文案明确写可恢复', revMsg[0].includes('可恢复') && !revMsg[0].includes('不可恢复'))
 }
 
 /* ---- §H 会话层：stores/session.ts 在 Node 里真驱动（不发网络）---- */

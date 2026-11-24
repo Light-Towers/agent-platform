@@ -8,6 +8,7 @@ import { onMounted, ref } from 'vue'
 
 import { storeToRefs } from 'pinia'
 import { useSessionStore } from '../stores/session'
+import { confirmDestructive } from '../utils/confirm.ts'
 const sessionStore = useSessionStore()
 const { authToken } = storeToRefs(sessionStore)
 
@@ -168,7 +169,11 @@ async function onDelete(kb: KbKnowledgeBase): Promise<void> {
     setNotice(`「${kb.name}」下还有 ${docCount(kb)} 个有效文档，请先下线文档再删库。`, false)
     return
   }
-  if (!window.confirm(`确定删除知识库「${kb.name}」？`)) return
+  if (!confirmDestructive({
+    action: '删除知识库', target: kb.name ?? kb.knowledge_id,
+    consequence: '该知识库的登记信息将被移除（库下须无有效文档）。',
+    reversible: false,
+  })) return
   busy.value = kb.knowledge_id
   setNotice('', true)
   try {

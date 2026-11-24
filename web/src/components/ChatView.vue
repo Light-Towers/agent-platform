@@ -16,6 +16,18 @@ import Timeline from './Timeline.vue'
 import { useConversationsStore } from '../stores/conversations.ts'
 import { useSessionStore } from '../stores/session.ts'
 import { listKnowledgeBases, type KbKnowledgeBase } from '../api/kb.ts'
+import { confirmDestructive } from '../utils/confirm.ts'
+
+/** 会话删除二次确认（不可逆）：取消不删，确认才调 removeSession。 */
+function onRemoveSession(id: string, title: string): void {
+  if (!confirmDestructive({
+    action: '删除会话',
+    target: title,
+    consequence: '该会话及全部对话历史将被永久移除。',
+    reversible: false,
+  })) return
+  void removeSession(id)
+}
 
 const route = useRoute()
 const router = useRouter()
@@ -227,7 +239,7 @@ async function commitRename(id: string): Promise<void> {
               type="button"
               class="ry-btn ry-btn--text session-list__del"
               :aria-label="`删除会话 ${s.title}`"
-              @click="removeSession(s.session_id)"
+              @click="onRemoveSession(s.session_id, s.title)"
             >
               ×
             </button>
