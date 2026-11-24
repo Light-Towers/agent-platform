@@ -365,6 +365,24 @@ console.log('§G 消费面：快照契约、依据列表、class 与图标映射
     toProxy('https://example.com/a.png') === 'https://example.com/a.png')
   check('G8d 已是 /img 的不重复改写',
     toProxy('/img/kb-import-bucket/a.png') === '/img/kb-import-bucket/a.png')
+
+  // G9 带令牌取图（2026-11-24 实踩：<img src> 不带 Bearer ⇒ /img 401 碎图）。
+  // 必须验证 fetch 真的带了 Authorization 头、且改写后的 /img 路径被请求。
+  const fetchImageBlob = reducer.fetchImageBlob
+  let seenUrl = ''
+  let seenAuth = ''
+  const mockFetch = async (u, init) => {
+    seenUrl = u
+    seenAuth = init?.headers?.Authorization || ''
+    return new Response(new Blob(['img'], { type: 'image/jpeg' }), { status: 200 })
+  }
+  const imgUrl = 'http://minio:9000/kb-import-bucket/images/a.png'
+  const got = await fetchImageBlob(imgUrl, 'tk-img', mockFetch)
+  check('G9a 带令牌取图成功返回 blob', got.ok === true && got.blob !== undefined)
+  check('G9b 请求的是改写后的 /img 代理路径', seenUrl === '/img/kb-import-bucket/images/a.png', seenUrl)
+  check('G9c Bearer 头真的带上了（<img src> 做不到这点）', seenAuth === 'Bearer tk-img', seenAuth)
+  const noToken = await fetchImageBlob(imgUrl, '', mockFetch)
+  check('G9d 无令牌也能取（公开图兜底，头缺省）', noToken.ok === true && seenAuth === '')
 }
 
 /* ---- §H 会话层：stores/session.ts 在 Node 里真驱动（不发网络）---- */

@@ -22,7 +22,8 @@ import { useSessionStore } from '../stores/session'
 const sessionStore = useSessionStore()
 const { authToken } = storeToRefs(sessionStore)
 
-import { isSafeImageUrl, toProxyImageUrl } from '../stores/sseReducer.ts'
+import { isSafeImageUrl } from '../stores/sseReducer.ts'
+import AuthImage from './AuthImage.vue'
 import {
   uploadKbDocuments,
   getKbStatus,
@@ -457,15 +458,13 @@ const failed = computed(() => status.value?.status === 'failed')
                 本文档切片中的图片（{{ expandedDocImages.length }}）
               </div>
               <div class="rich-images__strip">
-                <img
+                <AuthImage
                   v-for="img in expandedDocImages"
                   :key="img"
-                  class="kb-preview-img"
-                  :src="toProxyImageUrl(img)"
+                  :url="img"
                   :alt="img"
-                  loading="lazy"
-                  referrerpolicy="no-referrer"
-                >
+                  img-class="kb-preview-img"
+                />
               </div>
             </div>
           </details>
@@ -643,15 +642,13 @@ const failed = computed(() => status.value?.status === 'failed')
             切片中出现的图片（{{ previewImages.length }}）
           </div>
           <div class="rich-images__strip">
-            <img
+            <AuthImage
               v-for="img in previewImages"
               :key="img.url"
-              class="kb-preview-img"
-              :src="toProxyImageUrl(img.url)"
+              :url="img.url"
               :alt="img.caption"
-              loading="lazy"
-              referrerpolicy="no-referrer"
-            >
+              img-class="kb-preview-img"
+            />
           </div>
         </div>
       </template>

@@ -255,6 +255,12 @@ a.ry-btn { text-decoration: none; }
 }
 .composer__file { max-width: 180px; font-size: var(--fs-xs); }
 
+/* 鉴权图片加载占位（AuthImage）：失败/加载中保持可见文字，不空着 */
+.rich-img-failed, .rich-img-loading {
+  font-size: var(--fs-xs); color: var(--text-2);
+  padding: var(--sp-1); display: inline-block; max-width: 120px; overflow-wrap: anywhere;
+}
+
 .hint { font-size: var(--fs-xs); color: var(--text-2); }
 
 /* 凭据框（现由 `poc.html` 的无构建静态预览使用）：值只在内存，不落 localStorage

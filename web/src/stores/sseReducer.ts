@@ -94,6 +94,31 @@ export function toProxyImageUrl(url: string): string {
   }
 }
 
+/**
+ * 带令牌取图片字节（AuthImage 的唯一实现，便于行为测试）。
+ * <img src> 不会带 Authorization 头 ⇒ /img 鉴权端点返回 401 碎图（2026-11-24 实踩）。
+ * 用 fetch 带 Bearer 取 blob，组件再 createObjectURL 给 <img>。令牌不进 URL。
+ */
+export async function fetchImageBlob(
+  url: string,
+  token: string,
+  fetchImpl: typeof fetch = globalThis.fetch,
+): Promise<{ ok: true; blob: Blob } | { ok: false }> {
+  if (!isSafeImageUrl(url)) return { ok: false }
+  const proxyUrl = toProxyImageUrl(url)
+  const init: RequestInit = {}
+  if (token !== '') {
+    init.headers = { Authorization: `Bearer ${token}` }
+  }
+  try {
+    const resp = await fetchImpl(proxyUrl, init)
+    if (!resp.ok) return { ok: false }
+    return { ok: true, blob: await resp.blob() }
+  } catch {
+    return { ok: false }
+  }
+}
+
 function _isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v)
 }

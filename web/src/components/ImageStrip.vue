@@ -7,7 +7,8 @@
  * ==========================================================================-->
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
-import { isSafeImageUrl, toProxyImageUrl, type RichImage } from '../stores/sseReducer.ts'
+import { isSafeImageUrl, type RichImage } from '../stores/sseReducer.ts'
+import AuthImage from './AuthImage.vue'
 
 const props = defineProps<{ images: readonly RichImage[] }>()
 
@@ -66,12 +67,11 @@ function onKeydown(event: KeyboardEvent): void {
         :title="img.caption || img.source_doc || '查看图片'"
         @click="open(img, $event)"
       >
-        <img
-          :src="toProxyImageUrl(img.url)"
+        <AuthImage
+          :url="img.url"
           :alt="img.caption || '回答引用的图片'"
-          loading="lazy"
-          referrerpolicy="no-referrer"
-        >
+          img-class="rich-images__thumb-img"
+        />
       </button>
     </div>
     <div
@@ -89,21 +89,22 @@ function onKeydown(event: KeyboardEvent): void {
         class="rich-images__lightbox-body"
         @click.stop
       >
-        <img
-          :src="toProxyImageUrl(preview.url)"
+        <AuthImage
+          :url="preview.url"
           :alt="preview.caption || '图片预览'"
-          referrerpolicy="no-referrer"
+          img-class="rich-images__lightbox-img"
         >
-        <p class="hint">
-          {{ preview.caption || preview.source_doc || '回答引用的图片' }}
-        </p>
-        <button
-          type="button"
-          class="ry-btn"
-          @click="close"
-        >
-          关闭
-        </button>
+          <p class="hint">
+            {{ preview.caption || preview.source_doc || '回答引用的图片' }}
+          </p>
+          <button
+            type="button"
+            class="ry-btn"
+            @click="close"
+          >
+            关闭
+          </button>
+        </authimage>
       </div>
     </div>
   </div>
