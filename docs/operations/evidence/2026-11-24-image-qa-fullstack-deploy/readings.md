@@ -63,5 +63,11 @@
 
 ## 7. 后续待办
 
-- 写"依赖层拆分"方案：Dockerfile Step 21 pip 层在业务代码 COPY 之后，改一行代码就重跑全量 pip 安装（~10min）。拆成"依赖层（只看 lock）+ 代码层（pip -e --no-deps）"后构建可降到 1-2min。用户已关注此问题。
+- ~~写"依赖层拆分"方案~~ → 已实施（见下 §8）。
 - 修 `_resolve_images` 的 http URL 透传（SSRF + 无效）。
+- 拆前端 pnpm 层（`COPY web/` 在 `pnpm install` 之前，每次重跑）——让总构建时长真正降到分钟级（见 §8）。
+
+## 8. 上午复盘的两个机制修复（同日补做）
+
+1. **消除测试假绿**：新增 `scripts/evidence/chat_images_real_pg_probe.py`（pgserver 本机真 PG 16.2，11 项 rc=0）。5 个 bug（Form/pool API/psycopg3 占位符/cursor API/VL 端点）曾在 fake 单测全绿下存活、部署后才暴露；现在用生产 chat_images.py 在真库往返，改动 DB/合成链后本地先跑探针。登记在 `scripts/evidence/README.md` + `ARCHITECTURE.md`。
+2. **依赖层拆分**（`plan-docker-build-layer-split-2026-11-24.md`）：Dockerfile 把"装依赖"与"装业务代码"拆两层。实测改一行业务代码后 `Step 19(torch)` + `Step 21(依赖层)` 均 `Using cache`，依赖层不再重跑；线上 rev `05d9910b` 三台 rollout 成功、A1 全依赖 import OK。**但总耗时仍 692s（11.5min）**——前端 pnpm 层（Step 6/8）仍每次重跑（Dockerfile :28-35 的既有坑，独立待办）。⇒ 依赖层目标达成，整体构建快的目标只完成一半。
