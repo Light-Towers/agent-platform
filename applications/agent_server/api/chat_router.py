@@ -10,7 +10,7 @@ from __future__ import annotations
 from agent_core.guardrails.errors import AppError
 from agent_core.logging import get_logger
 from agent_runtime.workspace_registry import server_tenant_id
-from fastapi import APIRouter, Depends, File, UploadFile
+from fastapi import APIRouter, Depends, File, Form, UploadFile
 
 from agent_server import chat_images as _store
 from agent_server.api.auth import require_feature, verify_api_key
@@ -23,7 +23,7 @@ logger = get_logger(__name__)
 @router.post("/chat/upload-image")
 async def upload_chat_image(
     file: UploadFile = File(...),
-    session_id: str = "",
+    session_id: str = Form(""),  # multipart 字段；前端 FormData.append('session_id', ...)
     _auth=Depends(verify_api_key),
     _feature=Depends(require_feature("chat.run")),
 ):
