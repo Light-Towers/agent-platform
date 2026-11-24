@@ -351,6 +351,20 @@ console.log('§G 消费面：快照契约、依据列表、class 与图标映射
     check(`G7 ${name} ⇒ ev--${name} 且图标 path 非空`,
       rowClassOf(row) === `ev--${name}` && iconKeyOf(row) === name && ICON_PATHS[name] !== undefined && ICON_PATHS[name] !== '')
   }
+
+  // G8 图片代理 URL 改写（plan-image-qa-fullstack）：含历史缺斜杠 URL 的兼容。
+  // 历史 node_md_img.py 拼出 /kb-import-bucketimages/...（bucket 与目录粘连），
+  // 代理按 bucket 校验会 403 ⇒ 前端必须补回斜杠，否则图片显示不出来（2026-11-24 实踩）。
+  const toProxy = reducer.toProxyImageUrl
+  check('G8a 正常 MinIO URL 改写为 /img 同源路径',
+    toProxy('http://minio:9000/kb-import-bucket/images/a.png') === '/img/kb-import-bucket/images/a.png')
+  check('G8b 历史缺斜杠 URL 补回 bucket/images 斜杠',
+    decodeURIComponent(toProxy('http://minio:9000/kb-import-bucketimages/知识图谱/a.png'))
+      === '/img/kb-import-bucket/images/知识图谱/a.png')
+  check('G8c 外域 URL 原样返回（不改写成代理）',
+    toProxy('https://example.com/a.png') === 'https://example.com/a.png')
+  check('G8d 已是 /img 的不重复改写',
+    toProxy('/img/kb-import-bucket/a.png') === '/img/kb-import-bucket/a.png')
 }
 
 /* ---- §H 会话层：stores/session.ts 在 Node 里真驱动（不发网络）---- */

@@ -522,10 +522,24 @@ if (GIT_ROOT !== null) {
     fail.push(`装配链引用了索引树里没有的模块：${rel}（未 git add 的文件在待提交树上不存在 ⇒ 含它的那条链不成立）`);
   }
 
+  /* 前端运行时拼路径（如 /img 加 u.pathname）会被抽成 /img* 这种前缀形态，
+   * 而后端声明带路径参数、归一后是 /img 加两段星号，精确比对对不上。
+   * 判据：去掉消费 key 的尾部星号得到基段，若它是某个 provided 的路径前缀（按 / 分段），
+   * 视为该端点存在——前提是 provided 在该基段之后确实还有动态段（否则就是真缺端点）。
+   * 这只放宽前缀形态匹配，真缺失（如 /bogus 星号）仍报红；下方内联自测钉住这一点。 */
+  const _baseOf = (p) => p.replace(/\/\*+$/, '').replace(/\*+$/, '') || '/';
+  const _prefixProvided = (p) => {
+    const base = _baseOf(p);
+    if (base === '/' || provided.has(p)) return base === '/' || provided.has(p);
+    return [...provided].some((q) => q.startsWith(base + '/*'));
+  };
   const missing = [];
   for (const [p, sites] of consumed) {
-    if (!provided.has(p) && p !== '/') missing.push(`${p} ← ${sites.join(', ')}`);
+    if (!provided.has(p) && p !== '/' && !_prefixProvided(p)) missing.push(`${p} ← ${sites.join(', ')}`);
   }
+  // 内联自证：前缀匹配必须对真存在的 /img* 放行、对编造的 /bogus* 报红（防放宽到假绿）
+  if (!_prefixProvided('/img*')) fail.push('SELF_TEST_FAIL: 前缀匹配未认出真端点 /img* → 门禁过严');
+  if (_prefixProvided('/bogus*')) fail.push('SELF_TEST_FAIL: 前缀匹配放行了编造端点 /bogus* → 门禁瞎了');
   for (const line of missing.sort()) {
     fail.push(`端点不成对（齿 C5）：web 引用的 ${line} 在 agent_server 的**索引树**装配路由表里查无 ⇒ 两种成因：后端路由文件未 git add（本批就该红），或端点真没实现（现网必 404）`);
   }

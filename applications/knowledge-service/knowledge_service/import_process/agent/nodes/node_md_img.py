@@ -271,6 +271,16 @@ def upload_images_batch(
     return urls
 
 
+def build_image_url(endpoint: str, bucket: str, object_name: str, secure: bool) -> str:
+    """拼接 MinIO 图片访问 URL（纯函数，便于单测）。
+
+    base_url 末尾无斜杠、object_name 开头也无斜杠 ⇒ 必须显式加 "/"，
+    否则得到 kb-import-bucketimages/...（bucket 与目录粘连，2026-11-24 实踩）。
+    """
+    protocol = "https" if secure else "http"
+    return f"{protocol}://{endpoint}/{bucket}/{object_name}"
+
+
 def upload_to_minio(minio_client: Minio, local_path: str, object_name: str) -> str | None:
     """
     将单张本地图片上传至MinIO对象存储，并返回公网可访问URL
@@ -302,12 +312,10 @@ def upload_to_minio(minio_client: Minio, local_path: str, object_name: str) -> s
         # MinIO 接收到 %5C 后，会自动解析回 \，保证对象名的正确性；
         # 后续通过 URL 访问时，%5C 会被正确解码，不会出现路径错误。
         object_name = object_name.replace("\\", "%5C")
-        # 根据配置选择HTTP/HTTPS协议
-        protocol = "https" if minio_config.minio_secure else "http"
-        # 构造MinIO基础访问URL
-        base_url = f"{protocol}://{minio_config.endpoint}/{minio_config.bucket_name}"
-        # 拼接完整图片访问URL base_url 后面带 / 中间直接两个字符串拼接即可
-        img_url = f"{base_url}{object_name}"
+        # 构造图片访问 URL（纯函数，便于单测钉住斜杠纪律）
+        img_url = build_image_url(
+            minio_config.endpoint, minio_config.bucket_name, object_name, minio_config.minio_secure,
+        )
         logger.info(f"图片上传成功，访问URL：{img_url}")
         return img_url
     except Exception as e:

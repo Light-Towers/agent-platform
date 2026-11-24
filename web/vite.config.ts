@@ -34,7 +34,9 @@ type SseProxyHooks = {
  * 的齿 C6 锁住，逐帧到达仍需本地联调人工确认（verify:sse 不测代理）。
  * `/auth` 是登录面四个端点的前缀（`/auth/login`|`/auth/register`|`/auth/me`|
  * `/auth/logout`）；`src/api/auth.ts` 写的是绝对路径 ⇒ 开发期不经代理就是 5173 的 404。 */
-const proxied = ['/history', '/health', '/session', '/console.html', '/auth', '/kb', '/datasources']
+// /img（图片代理）与 /chat（会话传图上传）是图片全链路新端点（plan-image-qa-fullstack），
+// 本地 vite 必须一并代理，否则 <img src="/img/..."> 与上传请求会落到 5173 的 SPA fallback。
+const proxied = ['/history', '/health', '/session', '/console.html', '/auth', '/kb', '/datasources', '/img', '/chat']
 
 export default defineConfig(({ mode }) => {
   // envDir 传 '.'（相对 vite 启动目录 web/），不写 process.cwd() —— 后者要 @types/node。

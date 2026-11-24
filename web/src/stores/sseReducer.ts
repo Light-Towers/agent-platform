@@ -84,7 +84,11 @@ export function toProxyImageUrl(url: string): string {
   try {
     const u = new URL(url)
     if (!INTERNAL_IMAGE_HOSTS.has(u.hostname)) return url
-    return `/img${u.pathname}`
+    // 历史数据兼容：旧版 node_md_img.py 拼 URL 时漏了 bucket 与 images 之间的斜杠，
+    // 写成 /kb-import-bucketimages/...，代理按 bucket 校验会 403。这里补回斜杠。
+    const pathname = u.pathname.replace(/^\/kb-import-bucketimages\//, '/kb-import-bucket/images/')
+    // 已改写过的历史 /img 路径同样兼容（防御）
+    return `/img${pathname}`
   } catch {
     return url
   }
