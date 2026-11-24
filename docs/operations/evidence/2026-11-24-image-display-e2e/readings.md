@@ -45,7 +45,22 @@
 
 **已知小局限**：上传后读数面板的 `previewImages` 从 `split.previews[].head`（前 120 字）提取图片——图片若在文档后段会被 head 截断、该面板提不到；但**切片明细**（`expandedDocImages` 从 chunk 完整 content 提取）和**回答回显**都能显示。不影响核心诉求，登记不扩大改动。
 
-## 5. 边界
+## 5. 界面截图实踩：碎图的真正根因（E2E 假绿反思）
+
+上面 §1 的 E2E 用 curl **手动加了 Bearer 头**打 `/img` 得到 200 —— 这是**假阳性**，没模拟真实浏览器。用户在界面截图看到的是**碎图图标 + URL 文字**。
+
+实测对照：
+- 浏览器式 `<img src>` 请求（无 Authorization 头）→ `/img` **401**（桶私有、端点鉴权）
+- 带 Bearer 的同一请求 → HTTP 200 image/jpeg
+
+⇒ `<img src>` 天生不带 Authorization 头，`/img` 鉴权端点对它恒 401。**这才是碎图根因**（不是缺斜杠那条——那条也已修，但即使 URL 正确仍会 401）。
+
+修复：`AuthImage.vue`（单一实现）内部用 `fetch()` 带 Bearer 取 blob → `createObjectURL` 给 `<img>`；令牌不进 URL。ImageStrip + KbUpload 共用。`sseReducer.fetchImageBlob()` 纯函数 + verify-sse §G9（161 断言，验证 Bearer 头真的带上）。
+
+**教训**：E2E 必须用被测客户端的真实行为发请求（浏览器 `<img>` = 无自定义头），手动加头 curl 出来的 200 不算数——与上午"测试假绿"是同一类错误，这次自己也犯了并已修正。
+
+## 6. 边界
 
 - 本次只改前端 + KS 代码，线上 agent-platform 无需重建；KS 镜像重建（导入 bug）待定，不阻断历史图片显示。
-- 生产 MinIO 私有桶保持私有（未开匿名），图片经 agent_server `/img` 鉴权代理取字节。
+- 生产 MinIO 私有桶保持私有（未开匿名），图片经 agent_server `/img` 鉴权代理取字节（AuthImage 带令牌 fetch）。
+- 本机无浏览器自动化工具，无法真正截图确认 `<img>` 渲染；判据 = G9 行为断言（Bearer 头带上）+ 带令牌 `/img` 200 实测的组合，不假称"浏览器里看到了"。
