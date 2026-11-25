@@ -156,6 +156,9 @@ L 系列（观测架构与依赖契约）由 `docs/plans/plan-observability-glob
 | `scripts/evidence/ts-provability.ps1` | 账面新增行 R-1..R-6 内容可证性（时间戳、件名在位、键绑件内容、逐字引用） | 否 |
 | `scripts/evidence/k46-keypair-lib.ps1` | R-6 三元组抽取器唯一实现，被 `ts-provability.ps1` 与透视件 dot-source | 否 |
 | `scripts/evidence/k71-basis.ps1` | 面基准 PS 薄适配层，被 k70 链三件 dot-source；判据本体仍住 `face_basis.py` | 否 |
+| `scripts/check_tokenizer_equivalence.py` | ADR-0017/T14 行为等价门禁：混排样本词项集合比对；`--self-test` 注入错误期望证明能咬；引擎侧待 T2 POC | 否 |
+| `scripts/evidence/tokenizer_samples.json` | 上述门禁的混排样本与期望词项，唯一输入源 | 否 |
+| `scripts/lint_no_local_tokenizer.py` | ADR-0017/T14 架构不变量：禁止服务内本地分词实现；白名单逐项带理由，`--self-test` 注入违规证明能咬 | 否 |
 | `scripts/evidence/verify_basis_drift.py` | 判据新鲜度漂移门禁：LIVE 实读（`baselines/*.json` 登记的形状）vs 基线对码；漂移 rc=1 报需重跑判据，前置不可用 rc=2；把「复审触发条件」从散文变可执行门禁 | 是（ssh 到控制面） |
 | `scripts/evidence/baselines/docstore-e2e.json` | 首个判据新鲜度台账：docstore A/B/C/D 依赖的 LIVE 形状（rev/env/集合/镜像 digest）+ 基线 + affects | — |
 | `tests/governance/test_evidence_scripts.py` | 钉住派生式预期集的纯逻辑不变量（含 `jobs:` 位于文件末尾、YAML 1.1 `on:`→布尔 `True` 键、PyYAML 缺席必 exit 2） | 否（autouse 拦断子进程） |

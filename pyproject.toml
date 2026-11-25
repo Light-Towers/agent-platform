@@ -24,7 +24,8 @@ dependencies = [
     "pgvector>=0.3",
     "asyncpg>=0.29",
     "rank-bm25>=0.2.2",
-    "sqlglot>=30.24.0",
+    "jieba>=0.42",  # ADR-0017/T14 检索分词单一实现：agent_server 运行期必需，与 agent-runtime/nl2sql 同下界
+    "sqlglot>=30.24.0", 
     "anyio>=4.15.1",  # Dependabot: AnyIO TLSStream IDNA 2003 / process-pool 阻塞（critical+medium，first_patched 4.14.2；现下界已高于修复版）
     "minio>=7.2.20",  # 图片代理端点（plan-image-qa-fullstack）：私有桶取字节流式回前端
 ]

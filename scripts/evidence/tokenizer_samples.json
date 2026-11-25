@@ -1,0 +1,22 @@
+[
+  {
+    "id": "mixed_model",
+    "text": "HAK-180 烫金机怎么用",
+    "expected_tokens": ["hak-180", "烫金机", "怎么", "用"]
+  },
+  {
+    "id": "mixed_english_domain",
+    "text": "BGE-M3 sparse 原理",
+    "expected_tokens": ["bge-m3", "sparse", "原理"]
+  },
+  {
+    "id": "cjk_domain_term",
+    "text": "向量数据库召回",
+    "expected_tokens": ["向量数据库", "召回"]
+  },
+  {
+    "id": "empty_input",
+    "text": "",
+    "expected_tokens": []
+  }
+]

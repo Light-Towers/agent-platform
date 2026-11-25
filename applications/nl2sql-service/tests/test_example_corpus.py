@@ -215,7 +215,7 @@ class _FakePool:
 
 def _service(pool: _FakePool, embedder: Any = None) -> MetaKnowledgeService:
     return MetaKnowledgeService(
-        meta_repo=MetaRepository(pool=pool), embedder=embedder, tokenizer="bigram", vector_dim=8
+        meta_repo=MetaRepository(pool=pool), embedder=embedder, tokenizer="jieba", vector_dim=8
     )
 
 

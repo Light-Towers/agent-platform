@@ -71,3 +71,8 @@
 
 - **T1 已完成（2026-11-25，分支 `docs/cn-en-tokenizer-2026-11-25`）**：新增 `docs/adr/0017-zh-en-tokenizer-bm25.md`（含 6 条复审触发条件）；四件方案件在 HEAD `bedf2ce1` 已逐件 `git cat-file -e` + 非空校验通过；`uv run python scripts/check_doc_sync.py` rc=0。
 - **T2 受阻（2026-11-25，本机实测）**：`docker` 命令不存在；`127.0.0.1:19530` `connect_ex=10035`（拒连）；本地 `import jieba` 不可用（`pymilvus` 可用）。POC 所需引擎环境缺失，**不得用文档推断代替实测**，需用户提供可用 Milvus v2.5.10 环境（本地 Docker 或内网测试机）后再继续。
+- **用户决策（2026-11-25）**：先做代码开发，环境验证顺延次日；据此放宽 T14 对 T2 的本地依赖，引擎侧行为等价留到 T2。
+- **T14 本地部分完成**：`agent_runtime/retrieval_tokenizer.py` + 同源配置 JSON + 唯一 `get_tokenizer()`；两把入库门禁 `scripts/check_tokenizer_equivalence.py`（4 条样本 PASS，`--self-test` 注入错误期望 rc≠0）与 `scripts/lint_no_local_tokenizer.py`（真实代码 rc=0，注入违规 rc≠0）；已登记 Makefile / ARCHITECTURE.md / evidence README。`agent-runtime` 单测 5 passed。**引擎侧三路词项集合比对待 T2**。
+- **T7 完成**：`agent_server/rag/store.py` 删除本地 `tokenize()`，改调 `get_tokenizer()`；`tests/memory/test_retrieval.py` 改断言为词典分词（不再断言字符 bigram，未删用例），`pytest tests/memory/test_retrieval.py -q` 4 passed。
+- **T8 完成**：`Settings.tokenizer` / `app_config.yaml` 默认 `jieba`；nl2sql 生产调用点改 `get_tokenizer()`，`nl2sql_service/tokenizer.py` 退为测试兼容读件；`extract_keywords` 记录分词字典版本到可检索日志；`pytest tests/nl2sql_service -q` 219 passed/1 skipped，`pytest applications/nl2sql-service/tests -q` 235 passed/8 skipped。
+- **本批门禁读数**：`ruff check .` rc=0；`lint_architecture.py` 中 P8/P15 与 `lint_public_mirror.py` P-4 共 8 项为本批之前的存量失败（未在本次改动面），新加两把门禁与 `lint_migration_refs.py` / `lint_graph_state_boundary.py` 均通过。

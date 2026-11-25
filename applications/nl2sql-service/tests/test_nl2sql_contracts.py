@@ -168,7 +168,7 @@ def test_settings_defaults():
     assert s.retrieval_top_k == 10
     assert s.rrf_k == 60
     assert s.sql_read_only_guard is True
-    assert s.tokenizer == "bigram"
+    assert s.tokenizer == "jieba"  # ADR-0017/T8
 
 
 def test_settings_db_enabled_flags():

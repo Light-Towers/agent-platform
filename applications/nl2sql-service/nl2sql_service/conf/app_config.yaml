@@ -51,7 +51,7 @@ pool:
     statement_timeout_ms: 30000
 
 tokenizer:
-  type: "bigram"
+  type: "jieba"   # ADR-0017/T8；实现单源在 agent_runtime.retrieval_tokenizer
 
 # 数据源（P1-3/P1-4/P1-6）：问数只读消费方，源由用户在会话里显式选定。
 # 单源部署（一个 dw DSN）时描述默认源；dialect 留空按 dw DSN scheme 自动探测。
