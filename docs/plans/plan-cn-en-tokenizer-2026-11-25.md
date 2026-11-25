@@ -66,3 +66,8 @@
 2. **不升级 Milvus 服务端**：本批只在现有 v2.5.10 上建新集合并验证。现网（K8s）引擎升级、存量 v3 集合在新引擎上的兼容验证、服务端级回退预案，另立工单 / ADR 后单独批准。
 3. **不引入 ES / 不改 dense 模型 / 不做英文词干化**。
 4. 方案件落位在版本控制内的 `docs/specs/cn_en_tok/`（`.*/` 规则会忽略 `.opencode/`，不得迁回）；批准前需完成 `git add` 并提交，使 `git ls-files` + `git cat-file -e HEAD:<path>` 可解析且 blob 非空。
+
+## 8. 执行记录（按 `tasks.md` 工单）
+
+- **T1 已完成（2026-11-25，分支 `docs/cn-en-tokenizer-2026-11-25`）**：新增 `docs/adr/0017-zh-en-tokenizer-bm25.md`（含 6 条复审触发条件）；四件方案件在 HEAD `bedf2ce1` 已逐件 `git cat-file -e` + 非空校验通过；`uv run python scripts/check_doc_sync.py` rc=0。
+- **T2 受阻（2026-11-25，本机实测）**：`docker` 命令不存在；`127.0.0.1:19530` `connect_ex=10035`（拒连）；本地 `import jieba` 不可用（`pymilvus` 可用）。POC 所需引擎环境缺失，**不得用文档推断代替实测**，需用户提供可用 Milvus v2.5.10 环境（本地 Docker 或内网测试机）后再继续。
