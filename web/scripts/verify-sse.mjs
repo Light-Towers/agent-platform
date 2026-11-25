@@ -416,6 +416,17 @@ console.log('§G 消费面：快照契约、依据列表、class 与图标映射
     (m) => { revMsg.push(m); return true },
   )
   check('G11e 可恢复操作文案明确写可恢复', revMsg[0].includes('可恢复') && !revMsg[0].includes('不可恢复'))
+
+  // G12 粘贴图片提问：只挑 image/* 项，纯文本粘贴不干预（clipboard.ts）
+  const { extractImageFiles } = await import('../src/utils/clipboard.ts')
+  const fakeItem = (type, file) => ({ type, getAsFile: () => file })
+  const pngFile = { name: 'p.png' }
+  const mixed = [fakeItem('text/plain', null), fakeItem('image/png', pngFile), fakeItem('text/html', null)]
+  check('G12a 粘贴只提取 image/* 项', extractImageFiles(mixed).length === 1)
+  check('G12b 无图片（纯文本粘贴）返回空数组', extractImageFiles([fakeItem('text/plain', null)]).length === 0)
+  check('G12c clipboardData 缺失返回空数组', extractImageFiles(undefined).length === 0)
+  const noFile = [fakeItem('image/png', null)]
+  check('G12d getAsFile 为 null 的项被跳过', extractImageFiles(noFile).length === 0)
 }
 
 /* ---- §H 会话层：stores/session.ts 在 Node 里真驱动（不发网络）---- */

@@ -44,45 +44,59 @@ const {
 } = storeToRefs(sessionStore)
 const { resetRound, abortCurrent } = sessionStore
 import { applyCredentialHeaders } from '../api/auth.ts'
+import { extractImageFiles } from '../utils/clipboard.ts'
 
 /* 会话传图（plan-image-qa-fullstack）：本地预览 + 上传后的不透明 ref。
  * 图片先 POST /chat/upload-image 存 PG，返回 ref 进 pendingImages，随 /query 发送。 */
 const imagePreview = ref<string[]>([])
 const imageUploadError = ref('')
+/** 单张图片上传（P3 单一实现）：选文件与粘贴两条入口共用同一套校验/上传/预览。 */
+async function uploadImageFile(file: File): Promise<void> {
+  if (!file.type.startsWith('image/')) {
+    imageUploadError.value = '仅支持图片文件'
+    return
+  }
+  if (pendingImages.value.length >= 4) {
+    imageUploadError.value = '最多 4 张图片'
+    return
+  }
+  const form = new FormData()
+  form.append('file', file)
+  form.append('session_id', activeSessionId.value || '')
+  const headers = new Headers()
+  applyCredentialHeaders(headers, { token: authToken.value })
+  try {
+    const resp = await fetch('/chat/upload-image', { method: 'POST', headers, body: form })
+    if (!resp.ok) {
+      imageUploadError.value = `上传失败（HTTP ${resp.status}）`
+      return
+    }
+    const data = await resp.json() as { image_ref?: string }
+    if (data.image_ref) {
+      pendingImages.value = [...pendingImages.value, data.image_ref]
+      imagePreview.value = [...imagePreview.value, URL.createObjectURL(file)]
+    }
+  } catch {
+    imageUploadError.value = '图片上传失败（服务端不可达）'
+  }
+}
+
 async function onPickImage(event: Event): Promise<void> {
   const input = event.target as HTMLInputElement
   const files = Array.from(input.files ?? [])
   input.value = ''  // 允许重复选同一张
   imageUploadError.value = ''
-  for (const file of files) {
-    if (!file.type.startsWith('image/')) {
-      imageUploadError.value = '仅支持图片文件'
-      continue
-    }
-    if (pendingImages.value.length >= 4) {
-      imageUploadError.value = '最多 4 张图片'
-      break
-    }
-    const form = new FormData()
-    form.append('file', file)
-    form.append('session_id', activeSessionId.value || '')
-    const headers = new Headers()
-    applyCredentialHeaders(headers, { token: authToken.value })
-    try {
-      const resp = await fetch('/chat/upload-image', { method: 'POST', headers, body: form })
-      if (!resp.ok) {
-        imageUploadError.value = `上传失败（HTTP ${resp.status}）`
-        continue
-      }
-      const data = await resp.json() as { image_ref?: string }
-      if (data.image_ref) {
-        pendingImages.value = [...pendingImages.value, data.image_ref]
-        imagePreview.value = [...imagePreview.value, URL.createObjectURL(file)]
-      }
-    } catch {
-      imageUploadError.value = '图片上传失败（服务端不可达）'
-    }
-  }
+  for (const file of files) await uploadImageFile(file)
+}
+
+/** 粘贴图片提问：剪贴板里的图片 File 直接走与选文件相同的上传链路。
+ *  图片是"附带"不是文字，阻止默认行为避免被塞进 question 输入框。 */
+async function onPasteImage(event: ClipboardEvent): Promise<void> {
+  const files = extractImageFiles(event.clipboardData?.items)
+  if (files.length === 0) return  // 纯文本粘贴照常，不干预
+  event.preventDefault()
+  imageUploadError.value = ''
+  for (const file of files) await uploadImageFile(file)
 }
 
 /** 「查看过程」开关：仅 admin 可见，判据用服务端回读的角色码。 */
@@ -284,9 +298,10 @@ async function commitRename(id: string): Promise<void> {
           v-model="question"
           class="ry-input"
           type="text"
-          placeholder="输入问题，Enter 发送…"
+          placeholder="输入问题，Enter 发送…（可直接粘贴图片）"
           autocomplete="off"
           aria-label="问题"
+          @paste="onPasteImage"
         >
         <div
           v-if="imagePreview.length > 0"
