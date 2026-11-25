@@ -59,4 +59,10 @@
 ### 验证读数
 - `pnpm run typecheck` / `lint` / `verify:markdown` / `check:events` / `check:tokens` / `verify:sse` 全绿
 - 生产那批语料（102 标题 / 10 表 / 5 sub-sup / Wingdings / `$$`）已固化为 F1–F12 黄金集
-- **未覆盖**：本机无浏览器自动化，需部署后人工目视复核前端 rev（绑 rev 取证，避免"代码绿界面旧"）
+- **本地真渲染验证（无需部署）**：新 `scripts/verify-kb-render.mjs`（`pnpm run verify:kb-render`），
+  用 Vite SSR + `@vue/server-renderer` 把 `KbContentText.vue` 真渲染成 HTML，喂生产真实切片语料，
+  A1–A9 + B1 全过：`##` 不出现、`<h1>/<h2>/<table>/<sup>` 真渲染、表格在图片前、关系元组保留。
+  这补上"解析器单测"与"部署目视"之间的缺口——**不需要部署、不需要浏览器自动化**。
+- **SSR 边界（诚实标注）**：SSR 不执行客户端 `fetchImageBlob`，图片此时是 `<span 加载中…>` 占位，
+  最终 `<img src=blob>` 需浏览器端加载后才出现 ⇒ 本验证证明"图片 token 在正文正确位置渲染"，
+  不声称验证了图片字节。真浏览器像素级目视仍推荐（非阻塞）。

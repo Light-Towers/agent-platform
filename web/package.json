@@ -18,7 +18,8 @@
     "check:events": "node scripts/check-events.mjs",
     "check:ui-consistency": "node scripts/check-ui-consistency.mjs",
     "verify:sse": "node scripts/verify-sse.mjs",
-    "verify:markdown": "node scripts/verify-markdown.mjs"
+    "verify:markdown": "node scripts/verify-markdown.mjs",
+    "verify:kb-render": "node scripts/verify-kb-render.mjs"
   },
   "dependencies": {
     "eventsource-parser": "4.1.3",
