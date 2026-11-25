@@ -8,7 +8,13 @@
  * 与 check-events.mjs 的分工：那件锁源码结构，这件锁解析行为（喂文本才测得出）。
  * 加载失败必须 rc=1（不把跑不动吞成跳过）。
  * ==========================================================================*/
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { parseInline, parseMarkdown } from '../src/utils/markdown.ts'
+import { stripHeadingMarks } from '../src/utils/kbText.ts'
+
+const webRoot = fileURLToPath(new URL('../', import.meta.url))
+const src = (rel) => readFileSync(webRoot + rel, 'utf8')
 
 let failures = 0
 const ok = (cond, name) => {
@@ -100,6 +106,29 @@ const latex = parseMarkdown('前文\n$$\n\\{< - 0. 75 >\n$$\n后文', true)
 ok(latex.filter((b) => b.kind === 'code').length === 1, 'F11 $$…$$ 解析成代码块')
 const xss3 = parseInline('<img src=x onerror=alert(1)> **粗**', true)
 ok(xss3.some((t) => t.kind === 'text' && t.text.includes('<img')), 'F12 extended 下 XSS 串仍按文本（无 v-html）')
+
+console.log('§G 标题显示单一归一化（kbText.ts，治本）')
+ok(stripHeadingMarks('## 本章大纲') === '本章大纲', 'G1 剥 ## 标题标记')
+ok(stripHeadingMarks('# 第 3 讲') === '第 3 讲', 'G2 剥 # 标题标记')
+ok(stripHeadingMarks('正文 # 话题') === '正文 # 话题', 'G3 非行首 # 原样保留')
+ok(stripHeadingMarks(null) === '' && stripHeadingMarks('') === '', 'G4 空值兜底')
+
+console.log('§H 单一渲染入口门禁（结构断言 + 自证）')
+// 判定函数本体（自证与真面共用同一把尺，避免"自证能咬、真面用另一套"）
+const isScatterViolation = (text) => /chunkTokens\s*\(/.test(text) || /#\{1,6\}\\s/.test(text)
+const kbContentSrc = src('src/components/KbContentText.vue')
+const kbUploadSrc = src('src/components/KbUpload.vue')
+const kbApiSrc = src('src/api/kb.ts')
+ok(kbContentSrc.includes('parseContentTokens') && kbContentSrc.includes('extended'),
+   'H1 单一入口组件内封 parseContentTokens + extended（调用方无开关）')
+ok(!isScatterViolation(kbUploadSrc) && kbUploadSrc.includes('KbContentText'),
+   'H2 KbUpload 正文已改用单一入口，不再自带 token 切分 / # 正则')
+ok(kbApiSrc.includes('stripHeadingMarks') && kbApiSrc.includes('titleDisplay'),
+   'H4 API 边界一次性归一化 display 字段')
+// 自证：同一把尺必须能咬住违规样本（否则门禁瞎）。注入后立即撤销，不留在真面里。
+const badSrc = 'function chunkTokens(c){ return parseContentTokens(c) } // #{1,6}\\s+'
+const biteOk = isScatterViolation(badSrc)
+ok(biteOk, 'H2s 自证：注入违规样本被同一判据命中（用后即弃，不进真面）')
 
 console.log(`\n合计：${failures === 0 ? '全部通过' : failures + ' 条失败'}`)
 process.exit(failures === 0 ? 0 : 1)

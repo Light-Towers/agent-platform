@@ -6,6 +6,7 @@
  * ==========================================================================-->
 <script setup lang="ts">
 import type { RichCitation } from '../stores/sseReducer.ts'
+import { stripHeadingMarks } from '../utils/kbText.ts'
 
 defineProps<{ citations: readonly RichCitation[] }>()
 </script>
@@ -30,7 +31,7 @@ defineProps<{ citations: readonly RichCitation[] }>()
         <span
           v-if="cite.heading"
           class="rich-citations__heading"
-        >· {{ cite.heading }}</span>
+        >· {{ stripHeadingMarks(cite.heading) }}</span>
         <span
           v-if="cite.snippet"
           class="rich-citations__snippet"

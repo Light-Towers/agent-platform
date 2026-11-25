@@ -10,6 +10,7 @@
  * ==========================================================================*/
 import { applyCredentialHeaders } from './auth.ts'
 import { useSessionStore } from '../stores/session.ts'
+import { stripHeadingMarks } from '../utils/kbText.ts'
 
 /**
  * /kb/* 的 401 统一出口（2026-11-16）。
@@ -279,6 +280,9 @@ export interface KbTreeChunk {
   readonly part: number | null
   readonly title: string
   readonly parent_title: string
+  /** 展示用标题：API 边界已剥掉行首 '#{1,6} '（KS 原文 title 字面带 '#'）。 */
+  readonly titleDisplay: string
+  readonly parentTitleDisplay: string
   readonly content: string
   readonly status: string
 }
@@ -298,7 +302,20 @@ export async function listDocumentTree(token: string, fetchImpl?: typeof fetch):
   const resp = await doFetch('/kb/documents/tree', { method: 'GET', headers, cache: 'no-store' })
   if (!resp.ok) await failKb('文档树查询', resp)
   const data = await resp.json() as { knowledge_bases?: KbTreeBase[] }
-  return Array.isArray(data.knowledge_bases) ? data.knowledge_bases : []
+  if (!Array.isArray(data.knowledge_bases)) return []
+  // 单一归一化点（P3）：原始 title/content 保真留给检索，display 字段专供 UI，
+  // 这样下游每个组件不必各自剥 '#'（历史上漏一处补一处）。
+  return data.knowledge_bases.map((base) => ({
+    ...base,
+    documents: base.documents.map((doc) => ({
+      ...doc,
+      chunks: doc.chunks.map((chunk) => ({
+        ...chunk,
+        titleDisplay: stripHeadingMarks(chunk.title),
+        parentTitleDisplay: stripHeadingMarks(chunk.parent_title),
+      })),
+    })),
+  }))
 }
 
 /** 删除整个知识库（前置：库下无有效文档）：DELETE /kb/knowledge-bases/{knowledge_id}。 */

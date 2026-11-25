@@ -22,10 +22,9 @@ import { useSessionStore } from '../stores/session'
 const sessionStore = useSessionStore()
 const { authToken } = storeToRefs(sessionStore)
 
-import { parseContentTokens } from '../stores/sseReducer.ts'
 import { confirmDestructive } from '../utils/confirm.ts'
-import AuthImage from './AuthImage.vue'
-import MarkdownText from './MarkdownText.vue'
+import { firstHeadingOf, stripHeadingMarks } from '../utils/kbText.ts'
+import KbContentText from './KbContentText.vue'
 import {
   uploadKbDocuments,
   getKbStatus,
@@ -298,16 +297,16 @@ function stepState(names: readonly string[]): 'done' | 'running' | 'pending' {
   return 'pending'
 }
 const split = computed(() => status.value?.summary?.split)
-/** 切片正文内嵌渲染：图片出现在正文哪个位置就显示在哪（不抽出来堆在底部）。 */
-function chunkTokens(content: string) {
-  return parseContentTokens(content)
-}
-/** 标题缺省时从正文首个 Markdown 标题推导，避免「（无标题）」而正文明明有标题。 */
-function chunkTitle(chunk: { title?: string; parent_title?: string; content?: string }): string {
-  const explicit = chunk.title || chunk.parent_title
+/** 标题缺省时从正文首个 Markdown 标题推导，避免「（无标题）」而正文明明有标题。
+ *  优先用 API 边界已归一化的 display 字段（剥掉 '#'），不再由本组件自行处理标记。 */
+function chunkTitle(chunk: {
+  titleDisplay?: string
+  parentTitleDisplay?: string
+  content?: string
+}): string {
+  const explicit = chunk.titleDisplay || chunk.parentTitleDisplay
   if (explicit?.trim()) return explicit
-  const first = (chunk.content ?? '').match(/^#{1,6}\s+(.+)$/m)
-  return first?.[1]?.trim() || '（无标题）'
+  return firstHeadingOf(chunk.content) || '（无标题）'
 }
 const check = computed(() => status.value?.summary?.structure_check)
 const effectiveConfig = computed(() => status.value?.summary?.effective_config)
@@ -422,30 +421,12 @@ const failed = computed(() => status.value?.status === 'failed')
                 :key="`${chunk.part}-${chunk.title}`"
                 class="hint"
               >
-                <strong>#{{ chunk.part }} {{ chunkTitle(chunk) }}</strong>
+                <strong>第 {{ chunk.part }} 片 · {{ chunkTitle(chunk) }}</strong>
                 <span
                   v-if="chunk.status"
                   class="count-badge"
                 >{{ chunk.status }}</span>
-                <div class="kb-chunk-content">
-                  <template
-                    v-for="(token, ti) in chunkTokens(chunk.content)"
-                    :key="ti"
-                  >
-                    <MarkdownText
-                      v-if="token.kind === 'text'"
-                      :text="token.text"
-                      extended
-                      class="kb-chunk-md"
-                    />
-                    <AuthImage
-                      v-else
-                      :url="token.url"
-                      :alt="token.alt || '切片图片'"
-                      img-class="kb-inline-img"
-                    />
-                  </template>
-                </div>
+                <KbContentText :content="chunk.content" />
               </li>
             </ol>
           </details>
@@ -613,7 +594,7 @@ const failed = computed(() => status.value?.status === 'failed')
         </h3>
         <p class="hint">
           原稿 {{ split.md_lines }} 行 · 识别到 {{ split.title_count }} 个标题 ·
-          首片「{{ split.first_title }}」· 切片正文共 {{ split.chunk_chars }} 字
+          首片「{{ stripHeadingMarks(split.first_title) }}」· 切片正文共 {{ split.chunk_chars }} 字
         </p>
       </template>
       <template v-if="check">
