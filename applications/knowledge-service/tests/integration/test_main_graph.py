@@ -85,7 +85,8 @@ def test_kg_import_full_workflow():
     chunks = final_state.get("chunks", [])
     chunk_count = len(chunks)
     md_content = final_state.get("md_content", "")[:150]  # MD 内容前 150 字符
-    has_embedding = all("dense_vector" in c and "sparse_vector" in c for c in chunks) if chunks else False
+    # ADR-0017/T5：bm25_engine 下稀疏向量由引擎生成，切片只需带 dense_vector。
+    has_embedding = all("dense_vector" in c for c in chunks) if chunks else False
     has_chunk_id = all("chunk_id" in c for c in chunks) if chunks else False
     kg_id = final_state.get("kg_id", "未生成")  # KG 导入生成的 ID（按实际业务字段调整）
 
@@ -101,5 +102,5 @@ def test_kg_import_full_workflow():
 
     # 7. 核心断言：切分产出非空，且每个切片都完成了向量化与入库标识
     assert chunk_count > 0, "文档切分结果为空"
-    assert has_embedding, "存在未完成向量化（缺 dense_vector / sparse_vector）的切片"
+    assert has_embedding, "存在未完成向量化（缺 dense_vector）的切片；词法稀疏向量由引擎生成"
     assert has_chunk_id, "存在未完成 Milvus 入库（缺 chunk_id）的切片"

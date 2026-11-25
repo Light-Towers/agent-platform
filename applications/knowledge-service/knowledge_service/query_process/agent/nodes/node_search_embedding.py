@@ -57,14 +57,22 @@ def node_search_embedding(state):
     embeddings = generate_embeddings([query])
 
     dense_vec = embeddings.get("dense")[0]
-    sparse_vec = embeddings.get("sparse")[0]
-    # 打印稠密/稀疏向量日志，便于调试向量生成结果
-    logger.debug(f"向量生成成功: dense_dim={len(dense_vec)}, sparse_len={len(sparse_vec)}")
+    sparse_vec = embeddings.get("sparse", [None])[0]
+    lexical_mode = retrieval_cfg.lexical.mode
+    # 打印稠密向量日志；bm25_engine 下稀疏向量由引擎生成，不再记录本地 sparse 长度
+    logger.debug(
+        "向量生成成功: dense_dim=%s, lexical_mode=%s, sparse_len=%s",
+        len(dense_vec),
+        lexical_mode,
+        len(sparse_vec) if sparse_vec is not None else 0,
+    )
 
     # 3. 准备Milvus向量数据库连接相关配置，指定检索的集合
     # 与导入侧（node_import_milvus）统一从 milvus_config.chunks_collection 读取，
     # 均为版本化命名 {prefix}_{schema_version}_{embedding_model}，杜绝两侧写死不一致。
-    collection_name = milvus_config.chunks_collection
+    collection_name = (
+        milvus_config.bm25_chunks_collection if lexical_mode == "bm25_engine" else milvus_config.chunks_collection
+    )
     logger.info(f"正在连接到 Milvus 并准备集合 '{collection_name}'...")
 
     # 4. 构造Milvus混合搜索请求对象（核心步骤）
@@ -82,10 +90,12 @@ def node_search_embedding(state):
 
     # 构造稠密+稀疏混合搜索请求，整合向量、过滤条件、搜索参数
     reqs = create_hybrid_search_requests(
-        dense_vector=dense_vec,  # 取用户问题的稠密向量（单条，故取索引0）
-        sparse_vector=sparse_vec,  # 取用户问题的稀疏向量（单条，故取索引0）
-        expr=expr,  # 商品名过滤表达式，缩小检索范围（仅检索指定商品名的向量）
-        limit=retrieval_cfg.channels.embedding.candidate_limit,  # 底层检索返回数量（后续会再过滤为 top_k，预留更多结果做重排序）
+        dense_vector=dense_vec,
+        expr=expr,
+        limit=retrieval_cfg.channels.embedding.candidate_limit,
+        sparse_vector=sparse_vec if lexical_mode == "learned_sparse" else None,
+        query_text=query if lexical_mode == "bm25_engine" else None,
+        lexical_mode=lexical_mode,
     )
 
     # 5. 执行Milvus稠密+稀疏混合向量检索（核心调用）

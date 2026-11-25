@@ -4,11 +4,13 @@ import time
 from typing import Any, Dict, List
 
 # 导入Milvus相关依赖
-from pymilvus import DataType
+from agent_runtime.retrieval_tokenizer import milvus_analyzer_params
+from pymilvus import DataType, Function, FunctionType
 
 # 导入自定义模块
 from knowledge_service.clients.milvus_utils import get_milvus_client
 from knowledge_service.conf.milvus_config import milvus_config
+from knowledge_service.conf.retrieval_config import retrieval_cfg
 from knowledge_service.core.knowledge_lifecycle_integration import (
     extract_tenant_scope_for_chunk,
 )
@@ -22,6 +24,13 @@ from knowledge_service.utils.task_utils import add_running_task
 # 从配置文件读取切片集合名称（M2：版本化命名 {prefix}_{schema_version}_{embedding_model}，
 # 与检索侧 node_search_embedding / node_search_embedding_hyde 统一读取同一配置，杜绝两侧写死不一致）
 CHUNKS_COLLECTION_NAME = milvus_config.chunks_collection
+
+
+def get_chunks_collection_name() -> str:
+    """按词法路实现选择集合：bm25_engine 用新集合，learned_sparse 用旧集合（ADR-0017/T4）。"""
+    if retrieval_cfg.lexical.mode == "bm25_engine":
+        return milvus_config.bm25_chunks_collection
+    return milvus_config.chunks_collection
 
 
 def should_skip_import(state: Dict[str, Any]) -> bool:
@@ -174,7 +183,18 @@ def create_collection(client, collection_name: str, vector_dimension: int):
 
     # 2. 新增字段：业务字段+主键+双向量字段，字段类型/长度适配业务场景
     schema.add_field(field_name="chunk_id", datatype=DataType.INT64, is_primary=True, auto_id=True)
-    schema.add_field(field_name="content", datatype=DataType.VARCHAR, max_length=65535)  # 切片内容
+    bm25_mode = retrieval_cfg.lexical.mode == "bm25_engine"
+    if bm25_mode:
+        # 引擎 BM25 Function 从原文生成稀疏向量：原文字段必须开启 analyzer。
+        schema.add_field(
+            field_name="content",
+            datatype=DataType.VARCHAR,
+            max_length=65535,
+            enable_analyzer=True,
+            analyzer_params=milvus_analyzer_params(),
+        )
+    else:
+        schema.add_field(field_name="content", datatype=DataType.VARCHAR, max_length=65535)  # 切片内容
     schema.add_field(field_name="title", datatype=DataType.VARCHAR, max_length=65535)  # 切片标题
     schema.add_field(field_name="parent_title", datatype=DataType.VARCHAR, max_length=65535)  # 父标题
     schema.add_field(field_name="part", datatype=DataType.INT8)  # 分片编号
@@ -200,7 +220,11 @@ def create_collection(client, collection_name: str, vector_dimension: int):
     )  # 切分策略版本（切分逻辑变更即升版）
     schema.add_field(field_name="created_at", datatype=DataType.INT64)  # 入库时间戳（epoch 秒，索引时效排查）
     schema.add_field(field_name="source_doc", datatype=DataType.VARCHAR, max_length=65535)  # 源文档名（badcase 溯源）
-    schema.add_field(field_name="sparse_vector", datatype=DataType.SPARSE_FLOAT_VECTOR)  # 稀疏向量
+    if bm25_mode:
+        # 稀疏向量由引擎 Function 生成，应用侧不写入。
+        schema.add_field(field_name=retrieval_cfg.lexical.bm25_field, datatype=DataType.SPARSE_FLOAT_VECTOR)
+    else:
+        schema.add_field(field_name="sparse_vector", datatype=DataType.SPARSE_FLOAT_VECTOR)  # 稀疏向量
     schema.add_field(field_name="dense_vector", datatype=DataType.FLOAT_VECTOR, dim=vector_dimension)  # 稠密向量
     # 对于 BGE-M3 模型 ：
     # 它的输出维度是固定的 1024 。
@@ -224,17 +248,32 @@ def create_collection(client, collection_name: str, vector_dimension: int):
         params={"M": 16, "efConstruction": 200},
     )
 
-    # 稀疏向量索引：专用SPARSE_INVERTED_INDEX+IP，关闭量化保证精度
-    index_params.add_index(
-        field_name="sparse_vector",
-        index_name="sparse_vector_index",
-        # 稀疏倒排索引 专门为稀疏向量（比如文本的 TF-IDF 向量、关键词权重向量，特点是大部分元素为 0，只有少数维度有值）设计的倒排索引，是稀疏向量检索的标配索引类型。
-        index_type="SPARSE_INVERTED_INDEX",
-        # IP（内积，Inner Product）如果向量是 “文本语义向量 + 关键词权重”，长度代表文本与主题的关联强度，此时用 IP 能同时体现 “语义匹配度” 和 “关联强度”。
-        metric_type="IP",
-        # DAAT_MAXSCORE 是稀疏检索的高效算法，quantization="none" 保证稀疏向量权重无损失；normalize=是否归一化。
-        params={"inverted_index_algo": "DAAT_MAXSCORE", "normalize": True, "quantization": "none"},
-    )
+    if bm25_mode:
+        # 引擎 BM25：专用稀疏倒排索引，metric_type=BM25（不是 IP）。
+        index_params.add_index(
+            field_name=retrieval_cfg.lexical.bm25_field,
+            index_name="bm25_sparse_index",
+            index_type="SPARSE_INVERTED_INDEX",
+            metric_type="BM25",
+            params={"inverted_index_algo": "DAAT_MAXSCORE"},
+        )
+        schema.add_function(
+            Function(
+                name="content_bm25_emb",
+                function_type=FunctionType.BM25,
+                input_field_names=["content"],
+                output_field_names=[retrieval_cfg.lexical.bm25_field],
+            )
+        )
+    else:
+        # 旧 learned sparse：SPARSE_INVERTED_INDEX + IP，关闭量化保证精度。
+        index_params.add_index(
+            field_name="sparse_vector",
+            index_name="sparse_vector_index",
+            index_type="SPARSE_INVERTED_INDEX",
+            metric_type="IP",
+            params={"inverted_index_algo": "DAAT_MAXSCORE", "normalize": True, "quantization": "none"},
+        )
 
     # 4. 创建集合：Schema+索引参数结合，一次性完成初始化
     client.create_collection(collection_name=collection_name, schema=schema, index_params=index_params)
@@ -254,21 +293,22 @@ def step_2_prepare_collection(vector_dimension: int):
     异常：
         客户端获取失败/集合名称未配置，抛出ValueError终止流程
     """
-    logger.info(f"开始准备Milvus环境，目标集合：{CHUNKS_COLLECTION_NAME}")
+    collection_name = get_chunks_collection_name()
+    logger.info(f"开始准备Milvus环境，目标集合：{collection_name}")
     # 1. 获取Milvus单例客户端，验证连接
     client = get_milvus_client()
     if client is None:
         logger.error("Milvus客户端获取失败：get_milvus_client()返回空，连接可能异常")
         raise ValueError("Milvus 连接失败：get_milvus_client() 返回空")
     # 2. 验证集合名称配置
-    if not CHUNKS_COLLECTION_NAME:
-        logger.error("Milvus集合名称未配置：CHUNKS_COLLECTION_NAME为空")
-        raise ValueError("未配置CHUNKS_COLLECTION集合名称")
+    if not collection_name:
+        logger.error("Milvus集合名称未配置")
+        raise ValueError("未配置 chunks 集合名称")
 
     # 3. 集合不存在则自动创建
-    if not client.has_collection(collection_name=CHUNKS_COLLECTION_NAME):
-        logger.info(f"Milvus集合{CHUNKS_COLLECTION_NAME}不存在，开始自动创建Schema和索引")
-        create_collection(client, CHUNKS_COLLECTION_NAME, vector_dimension)
+    if not client.has_collection(collection_name=collection_name):
+        logger.info(f"Milvus集合{collection_name}不存在，开始自动创建Schema和索引")
+        create_collection(client, collection_name, vector_dimension)
     else:
         logger.info(f"Milvus集合{CHUNKS_COLLECTION_NAME}已存在，直接复用")
 
@@ -415,11 +455,14 @@ def step_4_insert_data(client, chunks_json_data: List[Dict[str, Any]], state: Di
         item_copy = _enrich_chunk_metadata(item, state=state)
         if isinstance(item_copy, dict) and "chunk_id" in item_copy:
             item_copy.pop("chunk_id", None)
+        if retrieval_cfg.lexical.mode == "bm25_engine":
+            # 新集合没有 sparse_vector 字段：稀疏向量由引擎 Function 从 content 生成。
+            item_copy.pop("sparse_vector", None)
         data_to_insert.append(item_copy)
 
     logger.info(f"Milvus数据插入：准备{len(data_to_insert)}条切片数据，开始批量插入")
     # 2. 执行批量插入
-    insert_result = client.insert(collection_name=CHUNKS_COLLECTION_NAME, data=data_to_insert)
+    insert_result = client.insert(collection_name=get_chunks_collection_name(), data=data_to_insert)
     insert_count = insert_result.get("insert_count", 0)
     logger.info(f"Milvus数据插入完成：成功插入{insert_count}条数据，插入结果：{insert_result}")
 

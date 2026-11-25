@@ -1,6 +1,7 @@
 from pymilvus import AnnSearchRequest, MilvusClient, WeightedRanker
 
 from knowledge_service.conf.milvus_config import milvus_config
+from knowledge_service.conf.retrieval_config import retrieval_cfg
 from knowledge_service.core.logger import logger
 
 # 全局Milvus客户端实例，实现单例复用
@@ -136,36 +137,50 @@ def fetch_chunks_by_chunk_ids(
 
 
 def create_hybrid_search_requests(
-    dense_vector, sparse_vector, dense_params=None, sparse_params=None, expr=None, limit=5
+    dense_vector,
+    sparse_vector=None,
+    dense_params=None,
+    sparse_params=None,
+    expr=None,
+    limit=5,
+    query_text=None,
+    lexical_mode=None,
 ):
+    """构建稠密 + 词法两路 ANN 请求（ADR-0017/T5）。
+
+    - ``lexical_mode='bm25_engine'``（默认，读 retrieval.yaml）：词法腿传**原文**，
+      anns_field 指向引擎 BM25 Function 生成的稀疏字段，metric_type=BM25。
+    - ``lexical_mode='learned_sparse'``：旧路径，仍传应用侧预计算的稀疏向量（IP），
+      仅用于旧集合回退；新代码不得再走这条。
     """
-    构建Milvus混合搜索请求对象
-    分别创建稠密/稀疏向量的搜索请求，用于后续混合搜索融合
-    :param dense_vector: 文本生成的稠密向量
-    :param sparse_vector: 文本生成的稀疏向量
-    :param dense_params: 稠密向量搜索参数，默认使用余弦相似度
-    :param sparse_params: 稀疏向量搜索参数，默认使用内积相似度
-    :param expr: 搜索过滤表达式，用于精准筛选数据
-    :param limit: 单向量搜索返回结果数量，默认5
-    :return: 搜索请求列表，包含[dense_req, sparse_req]
-    """
-    # 稠密向量默认搜索参数：余弦相似度（COSINE），适配BGE-M3稠密向量并与建库参数保持一致
+    mode = lexical_mode or retrieval_cfg.lexical.mode
     if dense_params is None:
         dense_params = {"metric_type": "COSINE"}
-    # 稀疏向量默认搜索参数：内积（IP），适配BGE-M3稀疏向量
-    if sparse_params is None:
-        sparse_params = {"metric_type": "IP"}
 
-    # 构建稠密向量搜索请求，关联Milvus的dense_vector字段 近似最近邻（ANN）检索请求的核心类
     dense_req = AnnSearchRequest(
-        data=[dense_vector], anns_field="dense_vector", param=dense_params, expr=expr, limit=limit
+        data=[dense_vector], anns_field=retrieval_cfg.lexical.dense_field, param=dense_params, expr=expr, limit=limit
     )
 
-    # 构建稀疏向量搜索请求，关联Milvus的sparse_vector字段
-    sparse_req = AnnSearchRequest(
-        data=[sparse_vector], anns_field="sparse_vector", param=sparse_params, expr=expr, limit=limit
-    )
-
+    if mode == "bm25_engine":
+        if not query_text:
+            raise ValueError("bm25_engine 模式必须提供 query_text（由引擎生成 BM25 稀疏向量）")
+        sparse_req = AnnSearchRequest(
+            data=[query_text],
+            anns_field=retrieval_cfg.lexical.bm25_field,
+            param={"metric_type": "BM25"},
+            expr=expr,
+            limit=limit,
+        )
+    elif mode == "learned_sparse":
+        if sparse_vector is None:
+            raise ValueError("learned_sparse 模式必须提供 sparse_vector（旧集合回退路径）")
+        if sparse_params is None:
+            sparse_params = {"metric_type": "IP"}
+        sparse_req = AnnSearchRequest(
+            data=[sparse_vector], anns_field="sparse_vector", param=sparse_params, expr=expr, limit=limit
+        )
+    else:
+        raise ValueError(f"未知 lexical.mode: {mode!r}")
     return [dense_req, sparse_req]
 
 

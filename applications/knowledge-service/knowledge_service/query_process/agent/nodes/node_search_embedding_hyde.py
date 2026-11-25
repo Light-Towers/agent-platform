@@ -105,13 +105,15 @@ def step_2_search_embedding_hyde(
     combined_text = rewritten_query + " " + hyde_doc
     logger.info(f"Step 2: 拼接 Query + HyDE Doc, 总长度: {len(combined_text)}")
 
-    # 2. 生成向量 (Dense + Sparse)
-    logger.info("Step 2: 正在生成混合向量 (Embedding)...")
+    # 2. 生成向量；bm25_engine 下只用 dense，词法路传原文由引擎生成
+    logger.info("Step 2: 正在生成向量 (Embedding)...")
     embeddings = generate_embeddings([combined_text])
+    lexical_mode = retrieval_cfg.lexical.mode
 
-    # 3. 准备 Milvus 检索
-    # 与导入侧统一从 milvus_config.chunks_collection 读取版本化集合名，杜绝两侧写死不一致
-    collection_name = milvus_config.chunks_collection
+    # 3. 准备 Milvus 检索：按词法路实现选择对应集合，杜绝新旧分词版本混读
+    collection_name = (
+        milvus_config.bm25_chunks_collection if lexical_mode == "bm25_engine" else milvus_config.chunks_collection
+    )
     if not collection_name:
         logger.error("Step 2 Error: chunks_collection 未配置")
         return []
@@ -133,9 +135,11 @@ def step_2_search_embedding_hyde(
         # 构造搜索请求
         reqs = create_hybrid_search_requests(
             dense_vector=embeddings.get("dense")[0],
-            sparse_vector=embeddings.get("sparse")[0],
             expr=expr,
             limit=req_limit,
+            sparse_vector=embeddings.get("sparse", [None])[0] if lexical_mode == "learned_sparse" else None,
+            query_text=combined_text if lexical_mode == "bm25_engine" else None,
+            lexical_mode=lexical_mode,
         )
 
         client = get_milvus_client()

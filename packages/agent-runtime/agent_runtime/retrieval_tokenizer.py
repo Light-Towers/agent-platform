@@ -13,10 +13,13 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from dataclasses import dataclass
 from importlib.resources import files
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 _CONFIG: dict[str, Any] = json.loads(
     files("agent_runtime").joinpath("retrieval_tokenizer_config.json").read_text(encoding="utf-8")
@@ -24,6 +27,14 @@ _CONFIG: dict[str, Any] = json.loads(
 
 DICT_VERSION: str = str(_CONFIG["version"])
 DOMAIN_TERMS: tuple[str, ...] = tuple(str(term) for term in _CONFIG["domain_terms"])
+
+# T3：词典规模在真实注册路径上生效，不是只在配置文本里校验。
+_DICT_WARN_AT = 8000
+_DICT_REJECT_AT = 10000
+if len(DOMAIN_TERMS) >= _DICT_REJECT_AT:
+    raise RuntimeError(f"领域词典 {len(DOMAIN_TERMS)} 条超过上限 {_DICT_REJECT_AT}，拒绝启动")
+if len(DOMAIN_TERMS) >= _DICT_WARN_AT:
+    logger.warning("领域词典已达 %d 条（告警线 %d），请复核注册耗时", len(DOMAIN_TERMS), _DICT_WARN_AT)
 
 _ASCII_WORD_RE = re.compile(r"[A-Za-z0-9]+(?:[-_][A-Za-z0-9]+)*")
 _CJK_RUN_RE = re.compile(r"[\u4e00-\u9fff]+")

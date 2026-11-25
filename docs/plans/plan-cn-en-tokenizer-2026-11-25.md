@@ -76,3 +76,15 @@
 - **T7 完成**：`agent_server/rag/store.py` 删除本地 `tokenize()`，改调 `get_tokenizer()`；`tests/memory/test_retrieval.py` 改断言为词典分词（不再断言字符 bigram，未删用例），`pytest tests/memory/test_retrieval.py -q` 4 passed。
 - **T8 完成**：`Settings.tokenizer` / `app_config.yaml` 默认 `jieba`；nl2sql 生产调用点改 `get_tokenizer()`，`nl2sql_service/tokenizer.py` 退为测试兼容读件；`extract_keywords` 记录分词字典版本到可检索日志；`pytest tests/nl2sql_service -q` 219 passed/1 skipped，`pytest applications/nl2sql-service/tests -q` 235 passed/8 skipped。
 - **本批门禁读数**：`ruff check .` rc=0；`lint_architecture.py` 中 P8/P15 与 `lint_public_mirror.py` P-4 共 8 项为本批之前的存量失败（未在本次改动面），新加两把门禁与 `lint_migration_refs.py` / `lint_graph_state_boundary.py` 均通过。
+
+## 9. 第二批本地开发（引擎/DB 真机验证顺延）
+
+- **T3**：词典版本与词条收敛到 `retrieval_tokenizer_config.json`；8,000 词告警 / 10,000 词拒绝在模块加载路径生效（当前词条数远低于阈值，仅代码就绪）。
+- **T4**：`applications/knowledge-service/scripts/create_bm25_collection.py` 建新集合（BM25 Function + 同源 analyzer + `SPARSE_INVERTED_INDEX/BM25`），不改旧集合；**未执行**，等 T2 真机。
+- **T5**：`retrieval.yaml` 新增 `lexical.mode=bm25_engine`；`milvus_utils.create_hybrid_search_requests` 按模式构造 BM25 原文腿；embedding / hyde 节点按模式选集合并传原文；商品名集合显式保留旧模式；导入侧新集合不写 `sparse_vector`。`test_bm25_search_requests.py` 3 passed；KS `tests/unit` 545 passed。
+- **T6（阶段一/二）**：主链路读点不再消费本地 sparse；旧 canary 保留为历史读件，不进主门禁。**阶段三（删除旧文件）待真机观测周期后**。
+- **T9**：迁移 `008_tokenizer_shadow.up.sql` / `.down.sql` + `rebuild_tokenizer_shadow.py`（默认 dry-run，`--apply` 事务内影子→正式原子切换）。**未在真库执行**。
+- **T10**：`eval/golden_queries.zh_en_tokenizer.jsonl` 8 条领域样本（四类覆盖），`relevant_chunk_ids` 留空，明确标注空标注跑出 recall=0 是前置未就绪而非效果结论。
+- **T11/T12/T13 的 A/B、灰度、回退与观测**：全部依赖 T2 真机环境，顺延；本批不伪造任何引擎或真库读数。
+- **回归读数（2026-11-25）**：KS `tests/unit` 545 passed；`packages/agent-runtime/tests` 927 passed / 2 skipped；`tests/nl2sql_service` 219 passed / 1 skipped；`applications/nl2sql-service/tests` 235 passed / 8 skipped；`tests/governance/test_app_env_templates.py` 2 passed（新增 `MILVUS_BM25_SCHEMA_VERSION` / `BM25_CHUNKS_COLLECTION` 已补入 KS `.env.example` 后复跑）。
+- **根套件存量失败（与本批改动面无关）**：`test_exception_echo_governance::test_p8_current_tree_has_zero_violations`（`health_router.py:112`）、`test_role_feature_gates::test_p15_current_tree_is_clean_and_really_judged`（`scripts/reimport_kb_to_milvus.py`）；另有 5 条 `tests/skill_live_check/*` 因 `192.168.100.9:80` ConnectTimeout 失败（环境依赖）。这些文件均不在本批改动面，不删用例、不放宽断言。
