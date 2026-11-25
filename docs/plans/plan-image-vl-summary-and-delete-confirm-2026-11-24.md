@@ -95,6 +95,17 @@
 
 ⇒ C 路径（问答时现场调 VL）不在本次射程，登记为未来可选项。
 
+## 4.5 执行记录（2026-11-25，已交付）
+
+- **D2 已交付**：commit `8d737252`（会话删除补确认 + `utils/confirm.ts` 统一 4 处），前端全套门禁绿、verify-sse 168 断言（含 G11a-e）。
+- **D1 执行中发现真 bug 并修复**：commit `3ba346d3`。生产开关虽为 `true`，但 `lm_utils.get_llm_client` 硬注入 `enable_thinking=False`，
+  硅基流动 Qwen3-VL-8B 返回 400 ⇒ 摘要全部兜底成"图片描述"（修复前重传负控：7/7 占位）。
+  新增 `_get_vl_client()` 直构造 `ChatOpenAI`（不带该参数），需重建 KS 镜像生效。
+- **KS 镜像重建 + 分发 + rollout**：镜像 `52acc3a5164d`（241 构建、三台回读一致）、Pod `ks-web-7b947cf4c6-9qk58`（新镜像，解开 hostPort 死锁）。
+- **重传结果**：仅 2 份文档在检索链路（另 4 份图片只在 MinIO、切片已清，按拍板不动）。
+  `后端技术中阶`（7 图 / DRAFT）+ `知识图谱 概念与技术3`（24 图 / PUBLISHED）共 **31/31 张语义摘要、0 占位**，
+  原 status / knowledge_id 保持，无重复切片。取证见 `docs/operations/evidence/2026-11-25-image-vl-summary-reupload/readings.md`。
+
 ## 5. 与既有工作的关系
 
 - 图片显示链路（AuthImage / 历史 URL 兼容 / C5 门禁）已交付，本方案在其上补"语义"
