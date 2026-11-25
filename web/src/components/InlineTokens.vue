@@ -24,6 +24,14 @@ const emit = defineEmits<{ refClick: [index: number] }>()
       v-else-if="tok.kind === 'code'"
       class="md-text__code"
     >{{ tok.text }}</code>
+    <sub
+      v-else-if="tok.kind === 'sub'"
+      class="md-text__sub"
+    >{{ tok.text }}</sub>
+    <sup
+      v-else-if="tok.kind === 'sup'"
+      class="md-text__sup"
+    >{{ tok.text }}</sup>
     <button
       v-else-if="tok.kind === 'ref'"
       type="button"

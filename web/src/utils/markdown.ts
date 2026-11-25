@@ -12,7 +12,12 @@
  *   · "1. xxx" / "- xxx" / "* xxx" → 有序/无序列表项（连续行合并成一个 list 块）
  *   · ``` 起止   → 代码块（内部原样，不做行内解析）
  *   · 其它      → 段落（连续行合并，空行分段）
- * 不支持的写法（标题 #、链接 []() 等）按段落原样显示——不丢字，只是不美化。
+ *
+ * extended=true（知识库切片预览专用，聊天气泡默认 false 不受影响）额外支持 PDF→MD 的产物：
+ *   · "# / ## / ###" 标题 → heading 块（隐藏 # 号，按层级渲染）
+ *   · <table><tr><td> HTML 表格 → table 块（渲染成真表格）
+ *   · <sub>/<sup> → 行内上下标；$$…$$ → 代码块；Wingdings \uf0e0 → •
+ * 关键边界：<headquarters 0.7> 一类关系抽取元组**不是 HTML**，绝不按标签剥掉。
  * ==========================================================================*/
 
 export type InlineToken =
@@ -20,14 +25,18 @@ export type InlineToken =
   | { kind: 'strong'; text: string }
   | { kind: 'code'; text: string }
   | { kind: 'ref'; text: string }
+  | { kind: 'sub'; text: string }
+  | { kind: 'sup'; text: string }
 
 export type MdBlock =
   | { kind: 'paragraph'; lines: readonly InlineToken[][] }
   | { kind: 'list'; ordered: boolean; items: readonly InlineToken[][] }
   | { kind: 'code'; lines: readonly string[] }
+  | { kind: 'heading'; level: number; tokens: readonly InlineToken[] }
+  | { kind: 'table'; rows: readonly (readonly InlineToken[][])[] }
 
 /** 解析一行里的 **加粗**、`行内码` 与 `[n]` 引用角标；未闭合的标记按普通文本保留，不吞字。 */
-export function parseInline(line: string): InlineToken[] {
+export function parseInline(line: string, extended = false): InlineToken[] {
   const out: InlineToken[] = []
   let buf = ''
   let i = 0
@@ -51,6 +60,20 @@ export function parseInline(line: string): InlineToken[] {
         out.push({ kind: 'code', text: line.slice(i + 1, end) })
         i = end + 1
         continue
+      }
+    }
+    // <sub>/<sup> 只认**精确标签**：<headquarters 0.7> 一类关系元组不会被误剥（P4 边界先行）
+    if (extended) {
+      const sub = line.startsWith('<sub>', i) ? 'sub' : line.startsWith('<sup>', i) ? 'sup' : null
+      if (sub) {
+        const close = `</${sub}>`
+        const end = line.indexOf(close, i + sub.length + 2)
+        if (end > i + sub.length + 2) {
+          flush()
+          out.push({ kind: sub, text: line.slice(i + sub.length + 2, end) })
+          i = end + close.length
+          continue
+        }
       }
     }
     // [n] 引用角标：只认 1–3 位数字，渲染层据此锚定证据卡片；其它方括号按文本保留。
@@ -79,9 +102,10 @@ function listLine(line: string): { ordered: boolean; body: string } | null {
   return null
 }
 
-/** 把整段文本解析成块数组。 */
-export function parseMarkdown(text: string): MdBlock[] {
-  const lines = text.replace(/\r\n?/g, '\n').split('\n')
+/** 把整段文本解析成块数组。extended=false 保持聊天气泡既有行为。 */
+export function parseMarkdown(text: string, extended = false): MdBlock[] {
+  const src = extended ? text.replace(/\uf0e0/g, '•') : text // PDF Wingdings 项目符号归一
+  const lines = src.replace(/\r\n?/g, '\n').split('\n')
   const blocks: MdBlock[] = []
   let i = 0
   while (i < lines.length) {
@@ -100,6 +124,54 @@ export function parseMarkdown(text: string): MdBlock[] {
       continue
     }
 
+    // LaTeX $$…$$（PDF 切片里的公式块）→ 代码块，extended-only
+    if (extended && line.trimStart().startsWith('$$')) {
+      const code: string[] = []
+      i += 1
+      while (i < lines.length && !(lines[i] ?? '').trimStart().startsWith('$$')) {
+        code.push(lines[i] ?? '')
+        i += 1
+      }
+      if (i < lines.length) i += 1
+      blocks.push({ kind: 'code', lines: code })
+      continue
+    }
+
+    // HTML 表格（PDF 转换产物）：<table><tr><td>…</td></tr></table>，可能跨多行，extended-only
+    if (extended && /^<table\b/i.test(line.trimStart())) {
+      const buf: string[] = []
+      while (i < lines.length) {
+        buf.push(lines[i] ?? '')
+        const closed = (lines[i] ?? '').includes('</table>')
+        i += 1
+        if (closed) break
+      }
+      const html = buf.join('\n')
+      const rows: InlineToken[][][] = []
+      const trRe = /<tr\b[^>]*>([\s\S]*?)<\/tr>/gi
+      let tr: RegExpExecArray | null
+      while ((tr = trRe.exec(html))) {
+        const cells: InlineToken[][] = []
+        const tdRe = /<t[dh]\b[^>]*>([\s\S]*?)<\/t[dh]>/gi
+        let td: RegExpExecArray | null
+        while ((td = tdRe.exec(tr[1] ?? ''))) cells.push(parseInline((td[1] ?? '').trim(), extended))
+        if (cells.length) rows.push(cells)
+      }
+      if (rows.length) blocks.push({ kind: 'table', rows })
+      else blocks.push({ kind: 'paragraph', lines: buf.map((l) => parseInline(l, extended)) })
+      continue
+    }
+
+    // Markdown 标题 #/##/### → heading 块（隐藏 #），extended-only
+    if (extended) {
+      const h = line.match(/^(#{1,6})\s+(.+)$/)
+      if (h) {
+        blocks.push({ kind: 'heading', level: (h[1] ?? '').length, tokens: parseInline(h[2] ?? '', extended) })
+        i += 1
+        continue
+      }
+    }
+
     // 空行：结束当前段落
     if (line.trim() === '') { i += 1; continue }
 
@@ -110,7 +182,7 @@ export function parseMarkdown(text: string): MdBlock[] {
       while (i < lines.length) {
         const item = listLine(lines[i] ?? '')
         if (!item || item.ordered !== first.ordered) break
-        items.push(parseInline(item.body))
+        items.push(parseInline(item.body, extended))
         i += 1
       }
       blocks.push({ kind: 'list', ordered: first.ordered, items })
@@ -121,8 +193,11 @@ export function parseMarkdown(text: string): MdBlock[] {
     const para: InlineToken[][] = []
     while (i < lines.length) {
       const l = lines[i] ?? ''
-      if (l.trim() === '' || l.trimStart().startsWith('```') || listLine(l)) break
-      para.push(parseInline(l))
+      const isNewBlock = extended && (
+        /^#{1,6}\s+/.test(l) || /^<table\b/i.test(l.trimStart()) || l.trimStart().startsWith('$$')
+      )
+      if (l.trim() === '' || l.trimStart().startsWith('```') || listLine(l) || isNewBlock) break
+      para.push(parseInline(l, extended))
       i += 1
     }
     if (para.length) blocks.push({ kind: 'paragraph', lines: para })

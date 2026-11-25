@@ -11,9 +11,9 @@ import { computed } from 'vue'
 import { parseMarkdown } from '../utils/markdown.ts'
 import InlineTokens from './InlineTokens.vue'
 
-const props = defineProps<{ text: string; activeRef?: number | null }>()
+const props = defineProps<{ text: string; activeRef?: number | null; extended?: boolean }>()
 const emit = defineEmits<{ refClick: [index: number] }>()
-const blocks = computed(() => parseMarkdown(props.text))
+const blocks = computed(() => parseMarkdown(props.text, props.extended))
 </script>
 
 <template>
@@ -38,6 +38,42 @@ const blocks = computed(() => parseMarkdown(props.text))
           />
         </template>
       </p>
+
+      <component
+        :is="`h${block.level}`"
+        v-else-if="block.kind === 'heading'"
+        class="md-text__h"
+        :class="`md-text__h--${block.level}`"
+      >
+        <InlineTokens
+          :tokens="block.tokens"
+          :active-ref="activeRef"
+          @ref-click="emit('refClick', $event)"
+        />
+      </component>
+
+      <table
+        v-else-if="block.kind === 'table'"
+        class="md-text__table"
+      >
+        <tbody>
+          <tr
+            v-for="(row, ri) in block.rows"
+            :key="ri"
+          >
+            <td
+              v-for="(cell, ci) in row"
+              :key="ci"
+            >
+              <InlineTokens
+                :tokens="cell"
+                :active-ref="activeRef"
+                @ref-click="emit('refClick', $event)"
+              />
+            </td>
+          </tr>
+        </tbody>
+      </table>
 
       <ol
         v-else-if="block.kind === 'list' && block.ordered"

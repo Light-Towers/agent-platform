@@ -73,5 +73,33 @@ ok(parseMarkdown('前文\n```js\nconst x = 1\n```\n后文').filter((b) => b.kind
 const xss2 = parseInline('<img src=x onerror=alert(1)> [1]')
 ok(xss2.some((t) => t.kind === 'text' && t.text.includes('<img')), 'E5 XSS 串仍按文本')
 
+console.log('§F extended（知识库切片预览，PDF→MD 产物）')
+const headingSrc = '# 第 3 讲\n\n## 本章大纲\n\n正文'
+const hb = parseMarkdown(headingSrc, true)
+const heads = hb.filter((b) => b.kind === 'heading')
+ok(heads.length === 2 && heads[0].level === 1 && heads[1].level === 2, 'F1 标题解析成 heading 块且层级正确')
+ok(heads[0].tokens.every((t) => !t.text.includes('#')), 'F2 # 号不进渲染文本')
+ok(parseMarkdown(headingSrc).every((b) => b.kind !== 'heading'), 'F3 默认模式不变（聊天气泡仍不美化标题）')
+
+const tableSrc = '<table><tr><td>Pattern</td><td>Example</td></tr><tr><td>PERSON</td><td>George</td></tr></table>'
+const tbl = parseMarkdown(tableSrc, true).find((b) => b.kind === 'table')
+ok(!!tbl && tbl.rows.length === 2 && tbl.rows[0].length === 2, 'F4 HTML 表格解析成 2x2 table 块')
+ok(tbl.rows[1][0][0].text === 'PERSON', 'F5 表格单元格文本正确')
+ok(parseMarkdown(tableSrc).every((b) => b.kind !== 'table'), 'F6 默认模式表格仍按段落')
+
+// 关键边界：关系抽取元组 <headquarters 0.7> 不是 HTML，绝不能被剥掉
+const tuple = 'ORGANIZATION {<headquarters 0.7> <in 0.7>}'
+const tupleTokens = parseInline(tuple, true)
+ok(tupleTokens.some((t) => t.text.includes('<headquarters 0.7>')), 'F7 关系元组原样保留（不误判 HTML）')
+
+ok(parseInline('特朗普<sup>“</sup>新政', true).some((t) => t.kind === 'sup' && t.text === '“'), 'F8 sup 解析为行内上标')
+ok(parseInline('bootstra<sub>pp</sub>in', true).some((t) => t.kind === 'sub' && t.text === 'pp'), 'F9 sub 解析为行内下标')
+const wing = parseMarkdown('• 项\n\n\uf0e0 bootstra', true)
+ok(JSON.stringify(wing).includes('• bootstra'), 'F10 Wingdings \uf0e0 归一成 •')
+const latex = parseMarkdown('前文\n$$\n\\{< - 0. 75 >\n$$\n后文', true)
+ok(latex.filter((b) => b.kind === 'code').length === 1, 'F11 $$…$$ 解析成代码块')
+const xss3 = parseInline('<img src=x onerror=alert(1)> **粗**', true)
+ok(xss3.some((t) => t.kind === 'text' && t.text.includes('<img')), 'F12 extended 下 XSS 串仍按文本（无 v-html）')
+
 console.log(`\n合计：${failures === 0 ? '全部通过' : failures + ' 条失败'}`)
 process.exit(failures === 0 ? 0 : 1)

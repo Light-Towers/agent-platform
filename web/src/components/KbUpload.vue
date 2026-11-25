@@ -25,6 +25,7 @@ const { authToken } = storeToRefs(sessionStore)
 import { parseContentTokens } from '../stores/sseReducer.ts'
 import { confirmDestructive } from '../utils/confirm.ts'
 import AuthImage from './AuthImage.vue'
+import MarkdownText from './MarkdownText.vue'
 import {
   uploadKbDocuments,
   getKbStatus,
@@ -301,6 +302,13 @@ const split = computed(() => status.value?.summary?.split)
 function chunkTokens(content: string) {
   return parseContentTokens(content)
 }
+/** 标题缺省时从正文首个 Markdown 标题推导，避免「（无标题）」而正文明明有标题。 */
+function chunkTitle(chunk: { title?: string; parent_title?: string; content?: string }): string {
+  const explicit = chunk.title || chunk.parent_title
+  if (explicit?.trim()) return explicit
+  const first = (chunk.content ?? '').match(/^#{1,6}\s+(.+)$/m)
+  return first?.[1]?.trim() || '（无标题）'
+}
 const check = computed(() => status.value?.summary?.structure_check)
 const effectiveConfig = computed(() => status.value?.summary?.effective_config)
 const splitWarnings = computed(() => status.value?.summary?.warnings ?? [])
@@ -414,7 +422,7 @@ const failed = computed(() => status.value?.status === 'failed')
                 :key="`${chunk.part}-${chunk.title}`"
                 class="hint"
               >
-                <strong>#{{ chunk.part }} {{ chunk.title || chunk.parent_title || '（无标题）' }}</strong>
+                <strong>#{{ chunk.part }} {{ chunkTitle(chunk) }}</strong>
                 <span
                   v-if="chunk.status"
                   class="count-badge"
@@ -424,10 +432,12 @@ const failed = computed(() => status.value?.status === 'failed')
                     v-for="(token, ti) in chunkTokens(chunk.content)"
                     :key="ti"
                   >
-                    <span
+                    <MarkdownText
                       v-if="token.kind === 'text'"
-                      class="kb-chunk-text"
-                    >{{ token.text }}</span>
+                      :text="token.text"
+                      extended
+                      class="kb-chunk-md"
+                    />
                     <AuthImage
                       v-else
                       :url="token.url"

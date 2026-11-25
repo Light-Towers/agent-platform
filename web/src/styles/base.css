@@ -162,6 +162,8 @@ code, .t-name, .f-name, .num {
 /* 切片正文内嵌渲染：图片出现在正文哪个位置就显示在哪（不另起统计条） */
 .kb-chunk-content { display: flex; flex-wrap: wrap; align-items: flex-start; gap: var(--sp-1); }
 .kb-chunk-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+/* 切片正文的 Markdown 段：extended 解析后独占整行，图片仍按原顺序夹在段间 */
+.kb-chunk-md { flex: 1 1 100%; min-width: 0; }
 .kb-inline-img {
   max-width: 100%; max-height: 160px; object-fit: contain; display: block;
   border: 1px solid var(--border-decor); border-radius: var(--radius-sm);
@@ -900,6 +902,14 @@ a.ry-btn { text-decoration: none; }
 /* ---- 聊天气泡的极简 Markdown 渲染（MarkdownText.vue，全插值无 v-html）---- */
 .md-text { display: grid; gap: var(--sp-2); min-width: 0; }
 .md-text__p { margin: 0; }
+/* extended（知识库切片）专用：标题按层级降号，颜色仍走 --text-1，视觉门禁不新增色 */
+.md-text__h { margin: 0; font-weight: 600; color: var(--text-1); }
+.md-text__h--1 { font-size: var(--fs-md); }
+.md-text__h--2 { font-size: var(--fs-body); }
+.md-text__h--3 { font-size: var(--fs-sm); }
+.md-text__sub, .md-text__sup { font-size: var(--fs-xs); }
+.md-text__table { border-collapse: collapse; width: 100%; font-size: var(--fs-xs); }
+.md-text__table td { border: 1px solid var(--border-decor); padding: var(--sp-1); vertical-align: top; }
 .md-text__list { margin: 0; padding-inline-start: var(--sp-4); display: grid; gap: var(--sp-1); }
 .md-text__code {
   font-family: var(--font-mono);
