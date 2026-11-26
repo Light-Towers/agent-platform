@@ -48,6 +48,7 @@ def main() -> int:
     parser.add_argument("--collection", default="product_manual_v4_bge_m3")
     parser.add_argument("--limit", type=int, default=20)
     parser.add_argument("--out", required=True)
+    parser.add_argument("--worksheet", help="可选：同时输出 Markdown 人工复核工作表")
     args = parser.parse_args()
 
     from pymilvus import MilvusClient
@@ -89,6 +90,31 @@ def main() -> int:
         encoding="utf-8",
     )
     print(f"CANDIDATES {len(candidates)} -> {out}")
+
+    if args.worksheet:
+        lines = [
+            "# 人工标注工作表（自动生成，待复核）",
+            "",
+            "> 规范见 `docs/operations/rag-golden-annotation-guide.md`。",
+            "> `relevant` 只是来源文档假设；请改写 query 为自然问句并复核相关文档。",
+            "",
+            "| qid | query（待改写） | 来源文档 | 原文证据 | relevant（假设） | 复核结论 |",
+            "|---|---|---|---|---|---|",
+        ]
+        for x in candidates:
+            lines.append(
+                "| {qid} | {query} | {src} | {ev} | {rel} | 待填 |".format(
+                    qid=x["qid"],
+                    query=x["query"].replace("|", "\\|"),
+                    src=x["source_doc"].replace("|", "\\|"),
+                    ev=x["evidence_excerpt"].replace("|", "\\|"),
+                    rel=", ".join(x["relevant_chunk_ids"]),
+                )
+            )
+        ws = Path(args.worksheet)
+        ws.parent.mkdir(parents=True, exist_ok=True)
+        ws.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        print(f"WORKSHEET {len(candidates)} -> {ws}")
     return 0
 
 

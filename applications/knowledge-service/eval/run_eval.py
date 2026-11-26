@@ -43,6 +43,7 @@ if str(_PROJECT_ROOT) not in sys.path:
 
 from eval.ablation import fallback_config_hash  # noqa: E402 —— 纯 stdlib，供落后镜像降级用
 from eval.metrics import compute_retrieval_metrics  # noqa: E402
+from eval.validate_golden import validate as validate_golden  # noqa: E402
 from knowledge_service.clients.milvus_utils import (  # noqa: E402
     create_hybrid_search_requests,
     get_milvus_client,
@@ -308,6 +309,7 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     parser.add_argument("--out", default=str(DEFAULT_OUT), help="评测输出根目录")
     parser.add_argument("--limit", type=int, default=None, help="只评测前 N 条 query（调试用）")
     parser.add_argument("--golden", default=str(DEFAULT_GOLDEN), help="golden 数据集路径")
+    parser.add_argument("--require-approved", action="store_true", help="要求全部行已人工 approved（正式判决用）")
     parser.add_argument("--enable-hyde", action="store_true", help="启用 HyDE 召回路（需 LLM）")
     parser.add_argument("--skip-rerank", action="store_true", help="跳过 BGE 重排，直接使用 RRF 顺序")
     parser.add_argument(
@@ -348,6 +350,13 @@ def main(argv: Optional[List[str]] = None) -> int:
     args = parse_args(argv)
     golden_path = Path(args.golden)
     out_root = Path(args.out)
+
+    # ---------- golden 门禁：pending 候选不得被用于跑分（no fake green） ----------
+    errors = validate_golden(golden_path, require_approved=args.require_approved)
+    if errors:
+        for e in errors:
+            print(f"[eval] golden 门禁失败：{e}", file=sys.stderr)
+        return 2
 
     # ---------- 环境守卫（Milvus 依赖，失败清晰报错并以非 0 退出，不吞异常） ----------
     collection_name = milvus_config.chunks_collection

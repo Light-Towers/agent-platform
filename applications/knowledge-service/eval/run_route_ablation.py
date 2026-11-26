@@ -76,6 +76,7 @@ from eval.source_adapter import (  # noqa: E402 —— 纯 stdlib，插拔契约
     parse_id_map_arg,
     rrf_channels,
 )
+from eval.validate_golden import validate as validate_golden  # noqa: E402 —— pure stdlib gate
 
 # 集合隔离必须在任何 knowledge_service.* 导入前生效（须与 seed 同一集合）。
 os.environ.setdefault("CHUNKS_COLLECTION", EVAL_COLLECTION_NAME)
@@ -115,6 +116,7 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument("--golden", default=str(DEFAULT_GOLDEN), help="重标注 golden 数据集路径（真实 chunk_id）")
+    parser.add_argument("--require-approved", action="store_true", help="要求全部行已人工 approved（正式判决用）")
     parser.add_argument("--out", default=str(DEFAULT_OUT), help="评测输出根目录")
     parser.add_argument("--limit", type=int, default=None, help="只跑前 N 条 query（调试用）")
     parser.add_argument("--max-results", type=int, default=10, help="RRF 融合 / 检索结果截断上限")
@@ -863,6 +865,13 @@ def main(argv: Optional[List[str]] = None) -> int:
     deps = _load_deps()
     golden_path = Path(args.golden)
     out_root = Path(args.out)
+
+    # ---------- golden 门禁：pending 候选不得被用于跑分 ----------
+    errors = validate_golden(golden_path, require_approved=args.require_approved)
+    if errors:
+        for e in errors:
+            print(f"[route-ablation] golden 门禁失败：{e}", file=sys.stderr)
+        return 2
 
     collection_name = deps["milvus_config"].chunks_collection
     print(f"[route-ablation] 目标集合：{collection_name}")

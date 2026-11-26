@@ -17,7 +17,11 @@ python eval/build_golden_candidates.py \
 
 输出每条强制带 `review_status=pending_human_review`，`relevant_chunk_ids` 只是"来源文档"假设，**不是标注结论**。人工复核前不得喂给 `run_eval.py` / `run_route_ablation.py` 做判决。
 
-已生成交接件：`applications/knowledge-service/eval/golden_queries.real_candidates.jsonl`（20 条候选，来自 v4 集合；仍有截断句，标注人须改写为自然问句后再 `approved`）。
+已生成交接件：
+- `applications/knowledge-service/eval/golden_queries.real_candidates.jsonl`（20 条候选，来自 v4 集合；仍有截断句，标注人须改写为自然问句后再 `approved`）。
+- `applications/knowledge-service/eval/golden_queries.real_candidates.review.md`（同批候选的人工复核工作表）。
+
+**自动门禁**：`eval/validate_golden.py` 会拦截任何 `review_status != approved` 的行；`run_eval.py` / `run_route_ablation.py` 已在加载 golden 前调用它（候选集直接跑会 rc=2，已自证）。正式判决加 `--require-approved`，要求全部行带 `reviewer` / `reviewed_at`。
 
 ## 2. 抽样规则
 
