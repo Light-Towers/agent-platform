@@ -163,6 +163,7 @@ L 系列（观测架构与依赖契约）由 `docs/plans/plan-observability-glob
 | `applications/knowledge-service/eval/golden_queries.zh_en_tokenizer.jsonl` | ADR-0017/T10：中英混排领域 golden case（4 类 8 条）；标注留空，重灌后回填，空标注不算通过 | 否 |
 | `applications/nl2sql-service/nl2sql_service/scripts/rebuild_tokenizer_shadow.py` | ADR-0017/T9：取值行影子重建 + 事务内原子切换；默认 dry-run，`--apply` 才写库 | 是（连接元知识库） |
 | `applications/knowledge-service/eval/run_tokenizer_ab_poc.py` | ADR-0017/T10-T11：词法路 A/B 机制验证（bge-small + md5/TF 代理，非 BGE-M3 质量结论）；输出按路 recall/MRR | 是（连接 Milvus） |
+| `applications/knowledge-service/eval/run_real_corpus_ab.py` | ADR-0017/T11：真实 83 行语料 self-retrieval canary，对比 dense / 旧 md5/TF hybrid / 新引擎 BM25 hybrid；输出 recall/MRR | 是（连接 Milvus） |
 | `scripts/evidence/verify_basis_drift.py` | 判据新鲜度漂移门禁：LIVE 实读（`baselines/*.json` 登记的形状）vs 基线对码；漂移 rc=1 报需重跑判据，前置不可用 rc=2；把「复审触发条件」从散文变可执行门禁 | 是（ssh 到控制面） |
 | `scripts/evidence/baselines/docstore-e2e.json` | 首个判据新鲜度台账：docstore A/B/C/D 依赖的 LIVE 形状（rev/env/集合/镜像 digest）+ 基线 + affects | — |
 | `tests/governance/test_evidence_scripts.py` | 钉住派生式预期集的纯逻辑不变量（含 `jobs:` 位于文件末尾、YAML 1.1 `on:`→布尔 `True` 键、PyYAML 缺席必 exit 2） | 否（autouse 拦断子进程） |

@@ -37,6 +37,7 @@
 | `tokenizer_samples.json` | 上述门禁的混排样本与期望词项（唯一输入源） | 否 |
 | `../lint_no_local_tokenizer.py` | ADR-0017/T14 架构不变量：禁止服务内本地分词实现；白名单逐项带理由，`--self-test` 注入违规自证能咬 | 否 |
 | `../applications/knowledge-service/eval/run_tokenizer_ab_poc.py` | ADR-0017/T10-T11 A/B 机制验证：12 条样本按路 recall/MRR；用 bge-small + md5/TF 代理，**不是** BGE-M3 质量结论 | 是（连接 Milvus） |
+| `../applications/knowledge-service/eval/run_real_corpus_ab.py` | ADR-0017/T11 真实语料 self-retrieval canary：83 行现网文档，对比 dense / 旧 md5/TF hybrid / 新引擎 BM25 hybrid | 是（连接 Milvus） |
 
 ## 本机量具链（登记，非重构）
 
