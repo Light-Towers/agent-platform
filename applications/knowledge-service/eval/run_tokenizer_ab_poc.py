@@ -126,7 +126,14 @@ def _seed(client: MilvusClient, docs: list[tuple[int, str]], dim: int) -> None:
     time.sleep(3)  # 等索引就绪；刚插入即查会出现 0 命中（T2 实测）
 
 
-def _search(client: MilvusClient, collection: str, query: str, dense_vec: list[float], mode: str) -> list[int]:
+def _search(
+    client: MilvusClient,
+    collection: str,
+    query: str,
+    dense_vec: list[float],
+    mode: str,
+    weights: tuple[float, float] = (0.8, 0.2),
+) -> list[int]:
     dense_req = AnnSearchRequest(data=[dense_vec], anns_field="dense", param={"metric_type": "COSINE"}, limit=10)
     if mode == "dense_only":
         res = client.search(collection_name=collection, data=[dense_vec], anns_field="dense",
@@ -148,7 +155,7 @@ def _search(client: MilvusClient, collection: str, query: str, dense_vec: list[f
         lex_req = AnnSearchRequest(data=[query], anns_field="bm25_sparse", param={"metric_type": "BM25"}, limit=10)
     res = client.hybrid_search(
         collection_name=collection, reqs=[dense_req, lex_req],
-        ranker=WeightedRanker(0.8, 0.2, norm_score=True), limit=10, output_fields=["id"],
+        ranker=WeightedRanker(weights[0], weights[1], norm_score=True), limit=10, output_fields=["id"],
     )
     return [int(h["id"]) for h in res[0]]
 
@@ -214,6 +221,18 @@ def main(argv: list[str] | None = None) -> int:
         report[f"{mode}_recall@10"] = sum(c[mode]["recall@10"] for c in report["cases"]) / len(CASES)
         report[f"{mode}_mrr"] = sum(c[mode]["mrr"] for c in report["cases"]) / len(CASES)
 
+    # 融合权重扫描：回答"口语改写被 BM25 压低是否可只靠调权重解决"。
+    report["weight_sweep"] = {}
+    for dense_w in (0.5, 0.8, 0.9, 0.95, 1.0):
+        mrr_sum = 0.0
+        for i, (_qid, query, _text) in enumerate(CASES):
+            ranked = _search(
+                client, "tok_ab_new", query, q_vectors[i], "new_hybrid", weights=(dense_w, 1.0 - dense_w)
+            )
+            rank = ranked.index(i) + 1 if i in ranked else 0
+            mrr_sum += 1.0 / rank if rank else 0.0
+        report["weight_sweep"][f"{dense_w:.2f}/{(1 - dense_w):.2f}"] = round(mrr_sum / len(CASES), 3)
+
     out = Path(__file__).parent / "runs" / "tokenizer_ab_poc.json"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -222,6 +241,7 @@ def main(argv: list[str] | None = None) -> int:
             f"{mode}: recall@5={report[f'{mode}_recall@5']:.3f} "
             f"recall@10={report[f'{mode}_recall@10']:.3f} mrr={report[f'{mode}_mrr']:.3f}"
         )
+    print("weight_sweep(new_hybrid):", report["weight_sweep"])
     print(f"REPORT {out}")
     return 0
 
