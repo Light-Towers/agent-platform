@@ -119,7 +119,7 @@
 ## 12. A/B 机制验证结果（2026-11-26，未通过切换判据）
 
 - 量具：`applications/knowledge-service/eval/run_tokenizer_ab_poc.py`，报告 `eval/runs/tokenizer_ab_poc.json`，12 条样本（8 条领域词 + 4 条口语改写难样本）。
-- **诚实边界**：用本机缓存 `BAAI/bge-small-zh-v1.5`（512 维）代替 BGE-M3（1024 维），旧路用已退役的 md5/TF 稀疏近似；**只验证机制，不是线上语义质量结论，不得作为 BGE-M3 质量对比**。
+- **诚实边界（2026-11-26 二次重跑已更新）**：先用 bge-small（512 维）跑机制验证；拿到硅基流动 key 后，以 `EMBEDDING_MODE=api` + `BAAI/bge-m3`（**1024 维**）重跑，报告 `dim=1024`、disclaimer 记录真实模型。旧路 sparse 仍是 md5/TF 代理（非 BGE-M3 原生 sparse），语料仍是合成样本 ⇒ 这是**真实稠密模型下的机制/相对排序观察**，不是真实业务语料的线上质量结论。key 已写入根与 KS 的 gitignored `.env`，不入库。
 - 读数（12 条）：
 
 | 路 | recall@5 | recall@10 | MRR |
@@ -128,7 +128,8 @@
 | old sparse only（代理） | 0.750 | 0.750 | 0.694 |
 | new BM25 only | 0.750 | 0.750 | 0.646 |
 | old hybrid（代理） | 1.000 | 1.000 | 0.944 |
-| **new hybrid** | 1.000 | 1.000 | **0.882** |
+| **new hybrid（bge-small 机制轮）** | 1.000 | 1.000 | 0.882 |
+| **new hybrid（BGE-M3 1024d 轮）** | 1.000 | 1.000 | **0.889** |
 
-- 结论：**新 hybrid 的 MRR 低于旧 hybrid 与 dense-only**，主因是口语改写样本 `API 怎么对接`（旧 hybrid rank=1，新 hybrid rank=4，两路词法均未命中）被 BM25 负分干扰。样本量小、向量模型也非线上模型，**不能据此判新方案更差，更不能据此切换**；同样也不能声称更优。
-- 处置：**不执行灰度切换**；T11 判据未通过。后续需 BGE-M3 权重 / API key 就绪后用 `run_route_ablation.py` 在真实标注上重跑，并针对口语改写样本调融合权重或加查询改写，再决定是否切换。
+- 结论：换成真实 BGE-M3 后差距基本不变——**new hybrid MRR 0.889 < old hybrid 0.944 < dense-only 0.944**。口语改写样本 `API 怎么对接` 仍是主因（两路词法都未命中，BM25 把相关文档从第 1 压到第 4）。样本量仅 12 条且为合成语料，**不能据此断言新方案更差，也绝不能据此切换**；同样不能声称更优。
+- 处置：**不执行灰度切换**；T11 判据未通过。key 已就绪，后续应用真实业务语料 + 人工标注跑 `run_route_ablation.py` 的 E2，并针对口语改写样本调融合权重 / 加查询改写后再判决。

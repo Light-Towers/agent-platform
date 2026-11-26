@@ -1,12 +1,11 @@
 """ADR-0017 / T10-T11：检索词法路 A/B 机制验证（POC，可复跑）。
 
-【诚实声明】本脚本**不是**线上语义质量评测：
-- 稠密向量用本机缓存的 `BAAI/bge-small-zh-v1.5`（512 维）代替 BGE-M3（1024 维），
-  因为本机既无 BGE-M3 权重也无 SiliconFlow key；
-- 旧路用 `agent_runtime.vector_sparse`（已登记待退役的 md5/TF 近似）模拟 learned sparse，
-  不是 BGE-M3 原生 learned sparse；
-- 因此结论只回答"两路机制是否按预期工作、领域词是否可被词法路召回"，
-  **不回答"新方案检索质量优于旧方案"**。真实 E2 需模型/API 就绪后用 run_route_ablation.py 重跑。
+【诚实声明】
+- `EMBEDDING_MODE=api` 时，稠密向量走硅基流动 `BAAI/bge-m3`（1024 维），是真实线上模型；
+  未设置时回退本机缓存 `BAAI/bge-small-zh-v1.5`（512 维），仅作机制验证。
+- 旧路 sparse 仍用 `agent_runtime.vector_sparse`（已退役的 md5/TF 近似）代理 learned sparse，
+  不是 BGE-M3 原生 sparse；新路词法由 Milvus 引擎 BM25 生成。
+- 样本是合成语料，不是真实业务文档；结论用于机制与相对排序观察，正式上线仍需真实语料 E2。
 
 集合：在给定 Milvus 上创建 `tok_ab_old` / `tok_ab_new` 两个独立集合（存在则复用，不删数据）。
 """
@@ -15,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import time
 from pathlib import Path
 from typing import Any
@@ -59,6 +59,14 @@ def _load_golden_ids() -> set[str]:
 
 
 def _embed(texts: list[str]) -> list[list[float]]:
+    import os
+
+    if os.getenv("EMBEDDING_MODE") == "api":
+        # 真实线上稠密模型：硅基流动 BAAI/bge-m3（1024 维）。
+        from knowledge_service.lm.embedding_utils import generate_embeddings
+
+        return generate_embeddings(texts)["dense"]
+
     from sentence_transformers import SentenceTransformer
 
     model = SentenceTransformer("BAAI/bge-small-zh-v1.5", local_files_only=True)
@@ -171,7 +179,11 @@ def main(argv: list[str] | None = None) -> int:
     queries = [q for _id, q, _text in CASES]
     q_vectors = _embed(queries)
     report: dict[str, Any] = {
-        "disclaimer": "mechanics-only: bge-small-zh-v1.5 + md5/TF proxy; not BGE-M3 quality result",
+        "disclaimer": (
+            "BGE-M3 via SiliconFlow (1024d); old sparse is md5/TF proxy, not BGE-M3 native sparse; synthetic corpus"
+            if os.getenv("EMBEDDING_MODE") == "api"
+            else "mechanics-only: bge-small-zh-v1.5 (512d) + md5/TF proxy; not a BGE-M3 quality result"
+        ),
         "dim": dim,
         "cases": [],
     }
