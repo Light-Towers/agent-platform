@@ -45,6 +45,9 @@ dependencies = [
     # 并在 requirements 去掉此行（hatchling 不解析 path 表）。
     "agent-core",
     "shared-schemas",
+    # ADR-0017 治本形态：共享 tokenizer 与 Milvus analyzer 配置单源在 agent-runtime。
+    "agent-runtime",
+    "jieba>=0.42",
 ]
 
 [project.scripts]

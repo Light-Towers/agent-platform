@@ -41,6 +41,7 @@ WORKDIR /app
 COPY applications/knowledge-service/pyproject.toml applications/knowledge-service/requirements.txt ./
 COPY packages/agent-core ./packages/agent-core
 COPY packages/shared-schemas ./packages/shared-schemas
+COPY packages/agent-runtime ./packages/agent-runtime
 COPY applications/exhibition-agent ./applications/exhibition-agent
 
 # 安装第三方依赖（requirements.txt 与 pyproject dependencies 保持一致）与共享包（editable）。
@@ -59,6 +60,7 @@ RUN pip install --upgrade pip \
  && pip install -r requirements.txt \
  && pip install -e ./packages/agent-core \
  && pip install -e ./packages/shared-schemas \
+ && pip install -e './packages/agent-runtime[tokenizer]' \
  && pip install -e ./applications/exhibition-agent \
  && pip install opentelemetry-sdk opentelemetry-api opentelemetry-exporter-otlp-proto-http
 
