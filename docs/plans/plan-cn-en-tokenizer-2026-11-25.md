@@ -88,3 +88,14 @@
 - **T11/T12/T13 的 A/B、灰度、回退与观测**：全部依赖 T2 真机环境，顺延；本批不伪造任何引擎或真库读数。
 - **回归读数（2026-11-25）**：KS `tests/unit` 545 passed；`packages/agent-runtime/tests` 927 passed / 2 skipped；`tests/nl2sql_service` 219 passed / 1 skipped；`applications/nl2sql-service/tests` 235 passed / 8 skipped；`tests/governance/test_app_env_templates.py` 2 passed（新增 `MILVUS_BM25_SCHEMA_VERSION` / `BM25_CHUNKS_COLLECTION` 已补入 KS `.env.example` 后复跑）。
 - **根套件存量失败（与本批改动面无关）**：`test_exception_echo_governance::test_p8_current_tree_has_zero_violations`（`health_router.py:112`）、`test_role_feature_gates::test_p15_current_tree_is_clean_and_really_judged`（`scripts/reimport_kb_to_milvus.py`）；另有 5 条 `tests/skill_live_check/*` 因 `192.168.100.9:80` ConnectTimeout 失败（环境依赖）。这些文件均不在本批改动面，不删用例、不放宽断言。
+
+## 10. T2 POC 环境（2026-11-26 实取）
+
+- 本机无 Docker、无 `127.0.0.1:19530`；`ssh BatchMode root@126`/`@241` 均 rc=0（126=ambari03，241=ambari01），`192.168.100.132:30001` 与 `192.168.100.9:80` TCP OPEN。
+- K8s 存量 `milvus` 为 ClusterIP `10.111.204.66:19530`，Pod 有 66 次重启，不适合作 POC 靶机；其镜像为 `milvusdb/milvus:v2.5.10`。
+- 按用户授权，在 126 上用本地已有镜像启动**隔离 POC 栈**（不碰 K8s 实例）：
+  - 网络 `milvus-poc-net`；MinIO 容器 `milvus-poc-minio`（镜像从 241 以 `docker save`/`scp`/`docker load` 内网导入，外部 registry 不可达）；
+  - Milvus 容器 `milvus-poc-zh-en`，`milvusdb/milvus:v2.5.10`，内嵌 etcd 配置 `etcd.use.embed=true` / `dir=/var/lib/etcd`；
+  - 端口只绑 126 回环：`127.0.0.1:19531 -> 19530`、`127.0.0.1:9092 -> 9091`，不暴露内网；
+  - 就绪证据：`curl -sf http://127.0.0.1:9092/healthz` 通过，日志 `Proxy successfully initialized and ready to serve!`。
+- 本机连该端口需按需 `ssh -L 19530:127.0.0.1:19531`；本批尚未开该转发，也未在 POC 集合上执行任何建集合 / 写入 / 评测。
