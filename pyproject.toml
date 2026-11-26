@@ -10,22 +10,22 @@ dependencies = [
     "agent-core",
     "shared-schemas",
     "agent-runtime",
-    "fastapi>=0.159.1",
+    "fastapi>=0.165.0",
     "uvicorn[standard]>=0.54.0",
-    "python-multipart>=0.0.9",
-    "pydantic>=2.13.5",
-    "pydantic-settings>=2.16.1",
+    "python-multipart>=0.0.34",
+    "pydantic>=2.14.4",
+    "pydantic-settings>=2.16.3",
     "httpx>=0.27",
-    "langgraph>=1.2.16,<2",
-    "langchain-core>=1.6.13",
-    "langchain-openai>=1.6.6",
-    "langgraph-checkpoint-postgres>=2.0",
+    "langgraph>=1.2.24,<2",
+    "langchain-core>=1.8.4",
+    "langchain-openai>=1.8.5",
+    "langgraph-checkpoint-postgres>=3.2.1",
     "psycopg[binary,pool]>=3.3.6",
     "pgvector>=0.3",
     "asyncpg>=0.29",
     "rank-bm25>=0.2.2",
     "jieba>=0.42",  # ADR-0017/T14 检索分词单一实现：agent_server 运行期必需，与 agent-runtime/nl2sql 同下界
-    "sqlglot>=30.24.0", 
+    "sqlglot>=30.33.0", 
     "anyio>=4.15.1",  # Dependabot: AnyIO TLSStream IDNA 2003 / process-pool 阻塞（critical+medium，first_patched 4.14.2；现下界已高于修复版）
     "minio>=7.2.20",  # 图片代理端点（plan-image-qa-fullstack）：私有桶取字节流式回前端
 ]
@@ -46,11 +46,11 @@ mcp = ["mcp>=2.2.0"]  # Dependabot: MCP SDK DNS 重绑定/WebSocket/HTTP session
 agentic = ["agent-federation-app"]
 dev = [
     "pytest>=9.2.0",
-    "pytest-asyncio>=1.4.1.post1",
-    "ruff>=0.17.4",
+    "pytest-asyncio>=1.5.0",
+    "ruff>=0.17.6",
     # 清单接线用例（tests/deploy）要真解析 YAML 缩进，不能用行扫描替代；
     # 今天它靠 uvicorn[standard] 传递在位，但守护用例不该赌传递依赖。
-    "pyyaml>=6.0",
+    "pyyaml>=6.0.4",
 ]
 
 # 检索回归评测专用（FlashRAG 依赖较重：faiss/transformers/spacy 等），
@@ -58,7 +58,7 @@ dev = [
 eval = [
     "flashrag-dev",
     "faiss-cpu",
-    "transformers>=5.20.2",  # Dependabot: transformers 多条 RCE/路径遍历（high×3+medium×1，first_patched 5.10.0；现下界已高于修复版），强制下界覆盖 flashrag-dev 传递边
+    "transformers>=5.24.0",  # Dependabot: transformers 多条 RCE/路径遍历（high×3+medium×1，first_patched 5.10.0；现下界已高于修复版），强制下界覆盖 flashrag-dev 传递边
 ]
 
 [build-system]
