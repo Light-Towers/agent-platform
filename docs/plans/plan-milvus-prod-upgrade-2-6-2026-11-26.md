@@ -74,3 +74,32 @@
 ## 8. 范围外
 
 不改 dense 模型 / 不改融合权重 / 不引入 ES / 不启用引擎自定义词典（待本升级完成后的独立变更）/ 不动公网镜像分支。
+
+## 9. 执行记录（2026-11-26，已获明确批准"执行升级"）
+
+### 9.1 apply 前发生过一次可逆故障（已恢复）
+
+- 准备阶段把 v2.6.3 导入 CRI 后，由于 CRI 只保留 `milvusdb/milvus` 的单个 tag，v2.5.10 被挤出；kubelet 转去外网拉 v2.5.10 失败，出现 `ErrImagePull` 与 4 个 Pod 0/1（其中 3 个 `ContainerStatusUnknown`）。
+- 处置：从 `/root/backup/milvus-upgrade/milvus-v2.5.10.tar` 重新导入旧镜像；删除 POC 容器与 moby 里重复的 v2.6.3 镜像释放 ephemeral-storage（root 从 15G 可用回到 18G）；新 Pod `vfpvg` 恢复 1/1，ClusterIP `:9091/healthz` = 200。
+- **apply 前服务已回到健康基线**，不是带故障升级。
+
+### 9.2 升级读数
+
+| 项 | 读数 |
+|---|---|
+| 执行 | `kubectl apply -f /root/backup/milvus-upgrade/ks-milvus-upgrade.yaml`；`kubectl rollout status ... --timeout=15m` 成功 |
+| Deployment | revision 5；container + initContainer 均 `milvusdb/milvus:v2.6.3`；`MQ_TYPE=rocksmq`；`imagePullPolicy=IfNotPresent` 与其余字段不变 |
+| Pod | `ks-milvus-7d94d8944b-r4qks` 1/1 Running，**RESTARTS=0** |
+| MQ 日志 | `["try to init mq"] [standalone=true] [mqType=rocksmq]` |
+| healthz | ClusterIP `10.111.204.66:9091/healthz` = **200** |
+| 旧集合 | `list_collections()` = `['product_manual_v1_bge_m3', 'eval_rag_routes', 'platform_doc_v2_bge_m3', 'platform_doc_v3_bge_m3']` |
+| 真实数据 | `platform_doc_v3_bge_m3` row_count=83，抽样查询返回真实 chunk；`product_manual_v1_bge_m3` row_count=87，抽样查询返回真实 chunk |
+| 近期错误 | `kubectl logs --since=5m | grep -iE 'panic|ERROR'` 无输出 |
+| 回退准备 | 两个版本 tar 仍在 `/root/backup/milvus-upgrade/`；CRI 当前只有 v2.6.3，回退需先 import v2.5.10 tar |
+| 检索配置 | `RETRIEVAL_ANALYZER_PROFILE` 未切，仍默认 `simple_2_5`；本次只升引擎，不改检索行为 |
+
+### 9.3 待完成
+
+- **30 分钟观察窗口尚未走满**：需在窗口结束时复取 `RestartCount / Health / StartedAt` 与升级前基线比对；目前 18 分钟内 0 重启。
+- etcd / MinIO bucket 备份仍按运维流程补齐（未由本变更执行）。
+- 引擎升级完成后，另立变更切 `domain_dict_2_6` + 挂载领域词典 + 建 v4 集合；不在本变更内做。

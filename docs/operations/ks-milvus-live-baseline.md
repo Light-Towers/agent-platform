@@ -42,4 +42,5 @@
 - 镜像备份：`/root/backup/milvus-upgrade/milvus-v2.5.10.tar`（1.7G）、`milvus-v2.6.3.tar`（2.6G）。CRI 实测一次只保留一个 milvus tag，故两个 tar 都必须保留。
 - CRI 正确 endpoint：`/run/containerd-k8s/containerd.sock`（`/etc/crictl.yaml`）；曾误导入 `/run/containerd/containerd.sock`（moby 运行时），已纠正，该错误读入未影响 Pod。
 - hostPath 冷备：`/root/backup/milvus-upgrade/hostpath-20261126.tar.gz`，46M，sha256 `cd26264696808d2e602cb47039b8d315fca613f1f3fbe4931bef75617c47284d`。
-- **尚未执行** `kubectl apply`，Pod 与 Service 未动。
+- **执行更新（2026-11-26）**：已获明确批准并 apply，rollout 成功；Deployment revision 5，镜像 v2.6.3，`MQ_TYPE=rocksmq`，新 Pod 0 重启，healthz 200，旧 v3 集合 83 行可查询。详见 `docs/plans/plan-milvus-prod-upgrade-2-6-2026-11-26.md` §9。
+- apply 前曾因 CRI 单 tag 行为导致 `ErrImagePull`，已从 v2.5.10 tar 恢复服务并重新取证，见 §9.1。
