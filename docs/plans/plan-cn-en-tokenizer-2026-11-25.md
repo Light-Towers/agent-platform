@@ -166,4 +166,8 @@
 - **已完成（2026-11-26）**：
   - `RETRIEVAL_ANALYZER_PROFILE=domain_dict_2_6` 已通过 `kubectl set env deploy/ks-web` 注入；该值由 `agent_runtime.retrieval_tokenizer.milvus_analyzer_params()` 读取，线上默认仍 `simple_2_5`，只有显式注入后才切治本形态。
   - 新集合 `product_manual_v4_bge_m3` 已用治本 analyzer（jieba exact + local 领域词典）创建，并从 `platform_doc_v3_bge_m3` 回填 **83 行**（row_count=83）；引擎侧 BM25 检索可用。
-- **仍未完成**：ks-web Pod 因 prepare 阶段 CRI GC 反复 `ImagePullBackOff`，尚未真正加载新 profile；真实业务语料上的 A/B 判决未跑；`向量数据库` 未整词的问题待词典格式核实；30 分钟观察与旧集合保留期满后的清理未做。
+- **仍未完成 / 新发现（2026-11-26）**：
+  - ks-web 已恢复为 1/1 Running，且新 RS Pod 已带 `RETRIEVAL_ANALYZER_PROFILE=domain_dict_2_6`；它就是 `knowledge_service` 宿主（`/app/knowledge_service/__init__.py`）。
+  - **硬阻塞**：该镜像里**没有 `agent_runtime`**（只有 `agent-core`），也没有 `jieba`；`agent-server` 镜像同样没有 `jieba`。我们新代码 `node_import_milvus.py` 依赖 `agent_runtime.retrieval_tokenizer`、`get_tokenizer()` 也依赖 jieba，直接上生产会 `ModuleNotFoundError` / `RuntimeError`。
+  - 因此治本形态目前只在 v4 集合与引擎侧生效；**Python 侧必须随镜像重建补齐 `agent-runtime` + `jieba`**，否则不能宣称端到端切换完成。镜像重建/分发属 D2，另行批准。
+  - 真实业务语料 A/B、`向量数据库` 词典格式核实、30 分钟观察与旧集合保留期满清理仍未做。
