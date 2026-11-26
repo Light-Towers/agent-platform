@@ -163,4 +163,7 @@
 - 滚动策略改为 `maxSurge=0, maxUnavailable=1`：第一次 apply 因旧/新 Pod 同时挂同一 hostPath，RocksMQ 的 `/var/lib/milvus/rdb_data_meta_kv/LOCK` 冲突而 CrashLoopBackOff；改策略后 rollout 成功，新 Pod Running、healthz 200。
 - 现网 `run_analyzer` 实测：`search` 模式输出 `['HAK-180',' ','烫金','烫金机','怎么','用']`，`exact` 模式输出 `['HAK-180',' ','烫金机','怎么','用']`。**`exact` 保住领域词整词且不产生多余子词**，已将共享配置 `analyzer.mode` 从 `search` 改为 `exact`，单测同步。
 - 注意：`向量数据库` 在两种模式下都未作为整词出现（输出 `向量`+`数据库` 或 `向量`/`数据`/`据库`/`数据库`），词典文件的一行一词格式对该词未生效，需后续单独核实 jieba-rs 自定义词典权重格式；本批不据此宣称所有领域词都整词。
-- **尚未完成**：`RETRIEVAL_ANALYZER_PROFILE=domain_dict_2_6` 的配置注入（需确认承载 `knowledge_service` 的 Deployment）、v4 集合创建与双写/重灌、A/B 复跑。
+- **已完成（2026-11-26）**：
+  - `RETRIEVAL_ANALYZER_PROFILE=domain_dict_2_6` 已通过 `kubectl set env deploy/ks-web` 注入；该值由 `agent_runtime.retrieval_tokenizer.milvus_analyzer_params()` 读取，线上默认仍 `simple_2_5`，只有显式注入后才切治本形态。
+  - 新集合 `product_manual_v4_bge_m3` 已用治本 analyzer（jieba exact + local 领域词典）创建，并从 `platform_doc_v3_bge_m3` 回填 **83 行**（row_count=83）；引擎侧 BM25 检索可用。
+- **仍未完成**：ks-web Pod 因 prepare 阶段 CRI GC 反复 `ImagePullBackOff`，尚未真正加载新 profile；真实业务语料上的 A/B 判决未跑；`向量数据库` 未整词的问题待词典格式核实；30 分钟观察与旧集合保留期满后的清理未做。
