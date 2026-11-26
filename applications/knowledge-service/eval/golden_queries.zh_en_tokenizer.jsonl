@@ -1,4 +1,4 @@
-# ADR-0017/T10：中英混排分词领域 golden case（8 条，四类覆盖）
+# ADR-0017/T10：中英混排分词领域 golden case（12 条；8 条覆盖四类 + 4 条口语改写难样本）
 # 【诚实声明】本文件的 relevant_chunk_ids / grade 留空：需 T4 新集合重灌后，
 # 用 eval/gen_golden.py 或人工标注回填真实 chunk_id。空标注跑出的 recall 恒 0，
 # 是"前置未就绪"，不是效果结论，禁止据此宣称通过或回退。
@@ -10,3 +10,7 @@
 {"qid":"tok_006","query":"How to configure BGE-M3 dense retrieval","item_name":"","relevant_chunk_ids":[],"grade":{},"tags":["纯英文"]}
 {"qid":"tok_007","query":"SKU-9527 的保修期是多久","item_name":"SKU-9527","relevant_chunk_ids":[],"grade":{},"tags":["型号"]}
 {"qid":"tok_008","query":"sparse vector 和 BM25 有什么关系","item_name":"","relevant_chunk_ids":[],"grade":{},"tags":["缩写","中英混排"]}
+{"qid":"tok_009","query":"烫金机的功率是多少","item_name":"","relevant_chunk_ids":[],"grade":{},"tags":["口语改写","难样本"]}
+{"qid":"tok_010","query":"这台机器最多能耐多热","item_name":"","relevant_chunk_ids":[],"grade":{},"tags":["口语改写","难样本"]}
+{"qid":"tok_011","query":"API 怎么对接","item_name":"","relevant_chunk_ids":[],"grade":{},"tags":["缩写","难样本"]}
+{"qid":"tok_012","query":"质保多长时间","item_name":"","relevant_chunk_ids":[],"grade":{},"tags":["口语改写","难样本"]}
