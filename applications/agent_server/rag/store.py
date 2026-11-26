@@ -9,11 +9,11 @@ MVP 阶段 BM25 语料在查询时加载（万级分块内可接受）；
 ``_tenant_gate.resolve_tenant`` fail-fast，绝不静默落共享 default 桶。
 """
 
-import re
 import uuid
 
 from agent_core.memory._tenant_gate import _TENANT_UNSET, resolve_tenant
 from agent_runtime.db import vector_search
+from agent_runtime.retrieval_tokenizer import get_tokenizer
 from rank_bm25 import BM25Okapi
 
 from agent_server.config import get_settings
@@ -32,18 +32,6 @@ _BM25_CACHE: dict = {}
 def _invalidate_bm25_cache() -> None:
     """语料变更后清空 BM25 缓存。"""
     _BM25_CACHE.clear()
-
-
-def tokenize(text: str) -> list[str]:
-    """英文按词、中文按二元切分（免分词器依赖，MVP 够用）。"""
-    text = text.lower()
-    tokens = re.findall(r"[a-z0-9_]+", text)
-    for seg in re.findall(r"[\u4e00-\u9fff]+", text):
-        if len(seg) == 1:
-            tokens.append(seg)
-        else:
-            tokens.extend(seg[i : i + 2] for i in range(len(seg) - 1))
-    return tokens
 
 
 def rrf_merge(ranked_id_lists: list[list], k: int = _RRF_K) -> list:
@@ -157,14 +145,14 @@ async def _bm25_ids(
         if not rows:
             _BM25_CACHE[signature] = (None, [])
             return []
-        corpus = [tokenize(r[1]) for r in rows]
+        corpus = [get_tokenizer().tokenize(r[1]) for r in rows]
         bm25 = BM25Okapi(corpus)
         ids = [r[0] for r in rows]
         _BM25_CACHE[signature] = (bm25, ids)
 
     if bm25 is None:
         return []
-    scores = bm25.get_scores(tokenize(query))
+    scores = bm25.get_scores(get_tokenizer().tokenize(query))
     order = sorted(range(len(ids)), key=lambda i: scores[i], reverse=True)
     return [ids[i] for i in order[:k] if scores[i] > 0]
 

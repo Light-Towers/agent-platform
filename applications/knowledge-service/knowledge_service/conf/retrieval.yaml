@@ -8,6 +8,13 @@ hybrid:
   dense_weight: 0.8          # 稠密向量评分权重（原 node_search_embedding.py 硬编码 (0.8, 0.2)）
   sparse_weight: 0.2         # 稀疏向量评分权重
 
+# ADR-0017/T5：词法路实现切换。bm25_engine = Milvus 内置 BM25 + 引擎侧 jieba；
+# learned_sparse = 旧 BGE-M3 sparse（仅旧集合回退用）。
+lexical:
+  mode: "bm25_engine"
+  bm25_field: "bm25_sparse"
+  dense_field: "dense_vector"
+
 rrf:
   k: 60                      # RRF 常数（原 node_rrf.py:172 硬编码 k=60）
   max_results: 10            # RRF 输出上限（原 node_rrf.py:172 硬编码 max_results=10）

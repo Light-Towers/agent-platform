@@ -191,7 +191,7 @@ class _StubEmbedder:
         return [0.1] * self.dim
 
 
-def _service(pool: _FakePool, embedder: Any = None, vector_dim: int = 8, tokenizer: str = "bigram") -> MetaKnowledgeService:
+def _service(pool: _FakePool, embedder: Any = None, vector_dim: int = 8, tokenizer: str = "jieba") -> MetaKnowledgeService:
     return MetaKnowledgeService(
         meta_repo=MetaRepository(pool=pool),
         embedder=embedder,
@@ -312,11 +312,11 @@ async def test_value_rows_stamp_tokenizer_version():
     """#117 后半：tokenizer 列记录 search_text 的分词器——换分词器后旧行可识别
     （旧 search_text/tsvector 静默失效的标记位）。"""
     pool = _FakePool()
-    service = _service(pool, tokenizer="bigram")
+    service = _service(pool, tokenizer="jieba")
     await service.build_from_values([{"table_name": "orders", "column_name": "status", "value": "已支付"}])
 
     row = pool.rows("nl2sql_value_info")[0]
-    assert row["tokenizer"] == "bigram"
+    assert row["tokenizer"] == "jieba"
     assert row["table_name"] == "orders"
 
 
@@ -383,7 +383,7 @@ async def test_values_write_search_text_with_shared_tokenizer():
 
     rows = {(r["column_name"], r["value"]): r for r in pool.rows("nl2sql_value_info")}
     for key, row in rows.items():
-        expected = " ".join(tokenize(f"{key[0]} {key[1]} {row['value_desc']}", "bigram"))
+        expected = " ".join(tokenize(f"{key[0]} {key[1]} {row['value_desc']}"))
         assert row["search_text"] == expected, f"{key} 的 search_text 与同一套分词不符"
         assert row["search_text"].strip(), f"{key} 的 search_text 为空 ⇒ 全文路召不到（契约断裂）"
 

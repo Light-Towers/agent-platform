@@ -95,8 +95,9 @@ class Settings(BaseLLMSettings):
     # "优先聚合"引导。估值来自漂移检测的表统计（P0-3），无估值则不引导。
     aggregation_row_threshold: int = 1_000_000
 
-    # 分词器：jieba | bigram（jieba 需装可选 extra `[tokenizer]`，缺包时告警降级 bigram）
-    tokenizer: str = "bigram"
+    # 分词器：jieba（ADR-0017/T8 默认值）；实现单源在 agent_runtime.retrieval_tokenizer，
+    # 缺包时 get_tokenizer() fail-fast，不再静默降级 bigram。
+    tokenizer: str = "jieba"
 
     # 取值只读探针（P0-9/P0-7）：取值匹配的唯一源侧入口。默认全关的
     # linkable 白名单 + 短超时 + 信号量 + 版本缓存；分区列配了就必须带
@@ -300,7 +301,7 @@ def get_settings() -> Settings:
         overrides["sql_prompt_max_bytes"] = app_yaml["sql"].get("prompt_max_bytes", 51200)
         overrides["aggregation_row_threshold"] = app_yaml["sql"].get("aggregation_row_threshold", 1_000_000)
     if "tokenizer" in app_yaml:
-        overrides["tokenizer"] = app_yaml["tokenizer"].get("type", "bigram")
+        overrides["tokenizer"] = app_yaml["tokenizer"].get("type", "jieba")
     load_yaml = app_yaml.get("load_guard") or {}
     if load_yaml:
         overrides["query_max_concurrency"] = load_yaml.get("max_concurrency", 0)

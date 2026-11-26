@@ -19,6 +19,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+tokenizer = ["jieba>=0.42"]  # ADR-0017/T14：检索分词单一实现；下界与根 / nl2sql 一致
 mcp = ["mcp>=2.0.0"]  # Dependabot: MCP SDK 多 high 告警（first_patched 1.28.1）
 identity = ["PyJWT[crypto]>=2.9"]  # ADR-0007 A3：RS256 令牌签/验（不进 agent-core，红线 1）
 # 登录面（口令目录）：argon2-cffi 散列，声明位只在此一处（PyJWT 由上面的 [identity] 带，

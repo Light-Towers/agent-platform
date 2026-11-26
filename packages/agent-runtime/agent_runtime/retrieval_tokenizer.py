@@ -1,0 +1,123 @@
+"""中英混排检索分词：两个 Python 服务共用的唯一实现（ADR-0017 / T14）。
+
+设计约束（不是普通工具函数）：
+1. 单一实现：agent_server 与 nl2sql-service 只从 :func:`get_tokenizer` 取分词能力，
+   禁止各自写正则切词或词典读取逻辑。
+2. 单一事实源：词典版本、领域词、analyzer 配置均来自同包的
+   ``retrieval_tokenizer_config.json``；Milvus analyzer 配置由 :func:`milvus_analyzer_params`
+   从同一份源派生，避免"版本号一致但行为不等价"。
+3. 缺依赖即失败：jieba 是 optional extra（``agent-runtime[tokenizer]``）；未安装时
+   :func:`get_tokenizer` 抛 RuntimeError，不允许静默降级到字符二元组。
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import os
+import re
+from dataclasses import dataclass
+from importlib.resources import files
+from typing import Any
+
+logger = logging.getLogger(__name__)
+
+_CONFIG: dict[str, Any] = json.loads(
+    files("agent_runtime").joinpath("retrieval_tokenizer_config.json").read_text(encoding="utf-8")
+)
+
+DICT_VERSION: str = str(_CONFIG["version"])
+DOMAIN_TERMS: tuple[str, ...] = tuple(str(term) for term in _CONFIG["domain_terms"])
+
+# T3：词典规模在真实注册路径上生效，不是只在配置文本里校验。
+_DICT_WARN_AT = 8000
+_DICT_REJECT_AT = 10000
+if len(DOMAIN_TERMS) >= _DICT_REJECT_AT:
+    raise RuntimeError(f"领域词典 {len(DOMAIN_TERMS)} 条超过上限 {_DICT_REJECT_AT}，拒绝启动")
+if len(DOMAIN_TERMS) >= _DICT_WARN_AT:
+    logger.warning("领域词典已达 %d 条（告警线 %d），请复核注册耗时", len(DOMAIN_TERMS), _DICT_WARN_AT)
+
+_ASCII_WORD_RE = re.compile(r"[A-Za-z0-9]+(?:[-_][A-Za-z0-9]+)*")
+_CJK_RUN_RE = re.compile(r"[\u4e00-\u9fff]+")
+_SEGMENT_RE = re.compile(r"[A-Za-z0-9]+(?:[-_][A-Za-z0-9]+)*|[\u4e00-\u9fff]+")
+
+_jieba_module: Any | None = None
+
+
+def _load_jieba() -> Any:
+    """惰性加载 jieba 并注入领域词；同进程只初始化一次。"""
+    global _jieba_module
+    if _jieba_module is None:
+        try:
+            import jieba  # noqa: PLC0415 —— optional extra，惰性导入是有意为之
+        except ImportError as exc:
+            raise RuntimeError(
+                "检索分词需要 jieba：请安装 agent-runtime[tokenizer]（或部署镜像带 jieba>=0.42）；"
+                "禁止静默降级到字符二元组"
+            ) from exc
+        for term in DOMAIN_TERMS:
+            jieba.add_word(term)
+        _jieba_module = jieba
+    return _jieba_module
+
+
+@dataclass(frozen=True)
+class RetrievalTokenizer:
+    """检索词项化器。无状态、线程安全（jieba 词典在初始化时一次性注入）。"""
+
+    dict_version: str = DICT_VERSION
+
+    def tokenize(self, text: str | None) -> list[str]:
+        """中英混排文本 → 词项列表；英文整词保形并小写，中文走 jieba 词典切分。"""
+        if not text:
+            return []
+        jieba = _load_jieba()
+        tokens: list[str] = []
+        for segment in _SEGMENT_RE.findall(text):
+            if _ASCII_WORD_RE.fullmatch(segment):
+                tokens.append(segment.lower())
+                continue
+            if _CJK_RUN_RE.fullmatch(segment):
+                tokens.extend(token for token in jieba.cut(segment) if token and _CJK_RUN_RE.fullmatch(token))
+        return tokens
+
+
+_TOKENIZER = RetrievalTokenizer()
+
+
+def get_tokenizer() -> RetrievalTokenizer:
+    """唯一装配入口：三个服务只允许通过本函数获取检索分词能力。"""
+    return _TOKENIZER
+
+
+def milvus_analyzer_params() -> dict[str, Any]:
+    """从同一份配置派生 Milvus analyzer 参数（治本形态：引擎侧领域词典）。
+
+    v2.5.10 只接受简单 `{"tokenizer":"jieba"}`，自定义词典无法注册（已实测）。
+    治本方案要求引擎侧也认识领域词：Milvus 2.6 支持 `extra_dict_file` 的
+    local 文件资源——把领域词表挂载到每个组件的同一绝对路径即可（自建部署适用）。
+    路径与词条均来自 `retrieval_tokenizer_config.json`，不在 Python 里另写一份。
+    """
+    analyzer_cfg = _CONFIG["analyzer"]
+    profile = os.getenv("RETRIEVAL_ANALYZER_PROFILE", str(analyzer_cfg["profile"]))
+    if profile == "simple_2_5":
+        # 线上当前仍是 v2.5.10：只能用简单形式，否则建集合直接失败。
+        return {"tokenizer": "jieba"}
+    if profile == "domain_dict_2_6":
+        # 治本形态：v2.6+ 用 local 文件资源挂载领域词典（POC / 升级后启用）。
+        return {
+            "tokenizer": {
+                "type": "jieba",
+                "dict": list(analyzer_cfg["dict"]),
+                "mode": str(analyzer_cfg["mode"]),
+                "hmm": bool(analyzer_cfg["hmm"]),
+                "extra_dict_file": {
+                    "type": "local",
+                    "path": str(analyzer_cfg["extra_dict_file_path"]),
+                },
+            }
+        }
+    raise ValueError(f"未知 RETRIEVAL_ANALYZER_PROFILE: {profile!r}")
+
+
+__all__ = ["DICT_VERSION", "DOMAIN_TERMS", "RetrievalTokenizer", "get_tokenizer", "milvus_analyzer_params"]

@@ -156,6 +156,14 @@ L 系列（观测架构与依赖契约）由 `docs/plans/plan-observability-glob
 | `scripts/evidence/ts-provability.ps1` | 账面新增行 R-1..R-6 内容可证性（时间戳、件名在位、键绑件内容、逐字引用） | 否 |
 | `scripts/evidence/k46-keypair-lib.ps1` | R-6 三元组抽取器唯一实现，被 `ts-provability.ps1` 与透视件 dot-source | 否 |
 | `scripts/evidence/k71-basis.ps1` | 面基准 PS 薄适配层，被 k70 链三件 dot-source；判据本体仍住 `face_basis.py` | 否 |
+| `scripts/check_tokenizer_equivalence.py` | ADR-0017/T14 行为等价门禁：混排样本词项集合比对；`--self-test` 注入错误期望证明能咬；引擎侧待 T2 POC | 否 |
+| `scripts/evidence/tokenizer_samples.json` | 上述门禁的混排样本与期望词项，唯一输入源 | 否 |
+| `scripts/lint_no_local_tokenizer.py` | ADR-0017/T14 架构不变量：禁止服务内本地分词实现；白名单逐项带理由，`--self-test` 注入违规证明能咬 | 否 |
+| `applications/knowledge-service/scripts/create_bm25_collection.py` | ADR-0017/T4：BM25+jieba 新集合建表脚本；analyzer 参数来自共享单源，需真机 T2 验证 | 否（仅建集合） |
+| `applications/knowledge-service/eval/golden_queries.zh_en_tokenizer.jsonl` | ADR-0017/T10：中英混排领域 golden case（4 类 8 条）；标注留空，重灌后回填，空标注不算通过 | 否 |
+| `applications/nl2sql-service/nl2sql_service/scripts/rebuild_tokenizer_shadow.py` | ADR-0017/T9：取值行影子重建 + 事务内原子切换；默认 dry-run，`--apply` 才写库 | 是（连接元知识库） |
+| `applications/knowledge-service/eval/run_tokenizer_ab_poc.py` | ADR-0017/T10-T11：词法路 A/B 机制验证（bge-small + md5/TF 代理，非 BGE-M3 质量结论）；输出按路 recall/MRR | 是（连接 Milvus） |
+| `applications/knowledge-service/eval/run_real_corpus_ab.py` | ADR-0017/T11：真实 83 行语料 self-retrieval canary，对比 dense / 旧 md5/TF hybrid / 新引擎 BM25 hybrid；输出 recall/MRR | 是（连接 Milvus） |
 | `scripts/evidence/verify_basis_drift.py` | 判据新鲜度漂移门禁：LIVE 实读（`baselines/*.json` 登记的形状）vs 基线对码；漂移 rc=1 报需重跑判据，前置不可用 rc=2；把「复审触发条件」从散文变可执行门禁 | 是（ssh 到控制面） |
 | `scripts/evidence/baselines/docstore-e2e.json` | 首个判据新鲜度台账：docstore A/B/C/D 依赖的 LIVE 形状（rev/env/集合/镜像 digest）+ 基线 + affects | — |
 | `tests/governance/test_evidence_scripts.py` | 钉住派生式预期集的纯逻辑不变量（含 `jobs:` 位于文件末尾、YAML 1.1 `on:`→布尔 `True` 键、PyYAML 缺席必 exit 2） | 否（autouse 拦断子进程） |

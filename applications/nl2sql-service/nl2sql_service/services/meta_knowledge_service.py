@@ -9,17 +9,18 @@ embedding，metric/value 的 embedding 无任何写入方 ⇒ `MetricRepository.
 
 search_text 契约（001 DDL）：`value_tsvector` 是只从 `search_text` 生成的
 列，漏写 = 该行全文路召不到——不是 bug，是契约。分词与召回查询侧同一套
-（`Settings.tokenizer`），经 `nl2sql_service.tokenizer` 单源。
+（ADR-0017/T8：唯一实现在 `agent_runtime.retrieval_tokenizer`，`Settings.tokenizer`
+只作可追溯标记）。
 """
 
 from typing import Any
 
 from agent_core.logging import get_logger
+from agent_runtime.retrieval_tokenizer import get_tokenizer
 
 from nl2sql_service.clients.embedding_client_manager import BaseEmbedder
 from nl2sql_service.conf.settings import get_settings
 from nl2sql_service.repositories.postgres.meta.meta_repository import MetaRepository
-from nl2sql_service.tokenizer import tokenize
 
 logger = get_logger(__name__)
 
@@ -166,7 +167,7 @@ class MetaKnowledgeService:
                 "value_desc": value_desc,
                 "tokenizer": self._tokenizer,
                 "search_text": " ".join(
-                    tokenize(f"{column_name} {value} {value_desc}", self._tokenizer)
+                    get_tokenizer().tokenize(f"{column_name} {value} {value_desc}")
                 ),
             }
             if self._embedder is not None:

@@ -125,7 +125,14 @@ def step_4_vectorize_and_query(
                 sparse_vector = embeddings.get("sparse")[i]
 
                 # 构造混合搜索请求（带 tenant 过滤）
-                reqs = create_hybrid_search_requests(dense_vector=dense_vector, sparse_vector=sparse_vector, limit=retrieval_cfg.item_confirm.candidate_limit, expr=tenant_expr)
+                # 商品名集合仍是旧 schema，显式走 learned_sparse；新 chunks 集合才切 BM25。
+                reqs = create_hybrid_search_requests(
+                    dense_vector=dense_vector,
+                    sparse_vector=sparse_vector,
+                    limit=retrieval_cfg.item_confirm.candidate_limit,
+                    expr=tenant_expr,
+                    lexical_mode="learned_sparse",
+                )
 
                 # 执行混合搜索
                 # M3：稠密/稀疏权重从 knowledge_service/conf/retrieval.yaml 读取（与 node_search_embedding 同一配置源）

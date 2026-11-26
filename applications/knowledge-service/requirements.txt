@@ -18,6 +18,8 @@ pandas
 pymilvus[model]
 pymilvus-model
 pymongo
+# ADR-0017 治本形态：共享 tokenizer 依赖
+jieba>=0.42
 python-dotenv
 python-multipart
 regex

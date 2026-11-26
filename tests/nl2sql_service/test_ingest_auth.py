@@ -39,7 +39,7 @@ def _settings() -> MagicMock:
     s.embedding_model = "m"
     s.embedding_base_url = ""
     s.vector_dim = 1024
-    s.tokenizer = "bigram"
+    s.tokenizer = "jieba"
     return s
 
 

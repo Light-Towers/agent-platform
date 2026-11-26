@@ -1,0 +1,19 @@
+{
+  "version": "1.0.0",
+  "analyzer": {
+    "profile": "simple_2_5",
+    "mode": "exact",
+    "hmm": true,
+    "dict": ["_default_"],
+    "extra_dict_file_path": "/var/lib/milvus/dicts/zh_terms.txt"
+  },
+  "domain_terms": [
+    "烫金机",
+    "向量数据库",
+    "稀疏向量",
+    "稠密向量",
+    "BGE-M3",
+    "HAK-180"
+  ],
+  "_note": "T3 将扩充领域词条；version 变更即升版。三侧（Milvus analyzer / agent_server / nl2sql）由此单一源派生。"
+}

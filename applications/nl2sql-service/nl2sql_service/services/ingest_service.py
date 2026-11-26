@@ -141,7 +141,7 @@ async def write_scope(
     workspace_id: str,
     datasource_id: str,
     vector_dim: int,
-    tokenizer: str = "bigram",
+    tokenizer: str = "jieba",
 ) -> dict[str, int]:
     """单个作用域的写入 core：批量重嵌 → upsert（迁移 CLI 与 ingest 端点共用）。
 

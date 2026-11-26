@@ -48,6 +48,7 @@ def build_chunks_collection_name(prefix: str, schema_version: str, embedding_mod
 class MilvusConfig:
     milvus_url: str  # Milvus服务端连接地址
     chunks_collection: str  # 存储切片的集合名称（版本化命名，见 build_chunks_collection_name）
+    bm25_chunks_collection: str  # ADR-0017/T4：BM25+jieba 新集合，与旧集合并存供灰度切换
     entity_name_collection: str  # 预留-实体名称集合
     item_name_collection: str  # 存储文档对应实体类的集合名称
     collection_prefix: str  # 集合名前缀（如 product_manual）
@@ -66,9 +67,16 @@ _default_chunks_collection = build_chunks_collection_name(
 # 实例化Milvus配置对象（和其他配置对象命名风格统一）
 # 兼容性：若用户显式设置 CHUNKS_COLLECTION 环境变量（既有部署/既有数据），则优先沿用，
 # 未显式设置时默认落到版本化集合名。
+_default_bm25_chunks_collection = build_chunks_collection_name(
+    prefix=settings.milvus_collection_prefix,
+    schema_version=os.getenv("MILVUS_BM25_SCHEMA_VERSION", "v4"),
+    embedding_model=embedding_config.bge_m3,
+)
+
 milvus_config = MilvusConfig(
     milvus_url=settings.milvus_url,
     chunks_collection=os.getenv("CHUNKS_COLLECTION") or _default_chunks_collection,
+    bm25_chunks_collection=os.getenv("BM25_CHUNKS_COLLECTION") or _default_bm25_chunks_collection,
     entity_name_collection=settings.entity_name_collection,
     item_name_collection=settings.item_name_collection,
     collection_prefix=settings.milvus_collection_prefix,

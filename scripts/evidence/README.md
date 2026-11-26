@@ -33,6 +33,11 @@
 | `ts-provability.ps1` | 账面新增行的内容可证性 R-1..R-6（时间戳 / 件名在位 / 键绑件内容 / 逐字引用） | 否 |
 | `k46-keypair-lib.ps1` | R-6 的 `(key,value,form)` 三元组抽取器**唯一实现** | 否 |
 | `k71-basis.ps1` | 面基准的 PS 薄适配层：本机量具经它转调 `face_basis.py`，不在体内另拼基准 | 否 |
+| `../check_tokenizer_equivalence.py` | ADR-0017/T14 行为等价门禁：混排样本词项集合比对；`--self-test` 注入错误期望自证能咬；引擎侧待 T2 POC | 否 |
+| `tokenizer_samples.json` | 上述门禁的混排样本与期望词项（唯一输入源） | 否 |
+| `../lint_no_local_tokenizer.py` | ADR-0017/T14 架构不变量：禁止服务内本地分词实现；白名单逐项带理由，`--self-test` 注入违规自证能咬 | 否 |
+| `../applications/knowledge-service/eval/run_tokenizer_ab_poc.py` | ADR-0017/T10-T11 A/B 机制验证：12 条样本按路 recall/MRR；用 bge-small + md5/TF 代理，**不是** BGE-M3 质量结论 | 是（连接 Milvus） |
+| `../applications/knowledge-service/eval/run_real_corpus_ab.py` | ADR-0017/T11 真实语料 self-retrieval canary：83 行现网文档，对比 dense / 旧 md5/TF hybrid / 新引擎 BM25 hybrid | 是（连接 Milvus） |
 
 ## 本机量具链（登记，非重构）
 
