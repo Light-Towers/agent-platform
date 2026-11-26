@@ -60,7 +60,10 @@ def main(argv: list[str] | None = None) -> int:
         for line in failures:
             print(f"FAIL {line}", file=sys.stderr)
         return 1
-    print(f"PASS: {len(samples)} 条混排样本词项集合与期望一致（Python 侧；引擎侧待 T2）")
+    print(
+        f"PASS: {len(samples)} 条混排样本词项集合与期望一致"
+        "（Python 侧；v2.5.10 引擎侧用样本检索代理验证，run_analyzer 不可用）"
+    )
     return 0
 
 
