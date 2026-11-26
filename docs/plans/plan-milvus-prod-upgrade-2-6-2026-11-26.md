@@ -32,10 +32,10 @@
 ## 3. 前置条件（缺一不可）
 
 1. **清单入库**：从 `kubectl get deploy -n agent-platform ks-milvus -o yaml` 导出并脱敏后落到 `deploy/k8s/`，使 `scripts/check_doc_sync.py` 可校验；否则升级后 live 与源不可对账（AGENTS.md「基准同源 / 批准依据必入库」）。
-2. **镜像进 CRI**：在 126 上把已拉取的 moby 镜像 `milvusdb/milvus:v2.6.3` 用 `ctr --address /run/containerd/containerd.sock -n k8s.io images import` 导入 CRI（`docker save -o` 中转），并用 `crictl images | grep 2.6.3` 验证。**不能只靠 `IfNotPresent` + 可变 tag**，否则节点上仍是旧层。
-3. **备份**：hostPath 目录 246M 做冷备；etcd 与 MinIO bucket 按现有运维流程备份；记录升级前 `crictl images` 与 `kubectl get deploy -o yaml` 的 sha256。
+2. **镜像进 CRI**：crictl 的 runtime/image endpoint 是 **`/run/containerd-k8s/containerd.sock`**（见 `/etc/crictl.yaml`），不是 moby 的 `/run/containerd/containerd.sock`。必须用 `ctr --address /run/containerd-k8s/containerd.sock -n k8s.io images import` 导入（`docker save -o` 中转）。2026-11-26 已实测：CRI 一次只保留 `milvusdb/milvus` 的**一个 tag**（导 v2.6.3 后 v2.5.10 消失，反之亦然），因此**两个版本都要留持久 tar**：`/root/backup/milvus-upgrade/milvus-v2.5.10.tar`（1.7G）与 `milvus-v2.6.3.tar`（2.6G），回退时按 tar 重新 import，不依赖外网 registry。
+3. **备份**：hostPath 已冷备为 `/root/backup/milvus-upgrade/hostpath-20261126.tar.gz`（46M，sha256 `cd26264696808d2e602cb47039b8d315fca613f1f3fbe4931bef75617c47284d`）；升级前 live deploy yaml sha256 `ccd405357c832289aaeb6b77e18d287cf6145a92ae2a8cd89f2c281c69ccadbe`（见 `docs/operations/ks-milvus-live-baseline.md`）。etcd 与 MinIO bucket 备份仍由运维流程补齐后打勾。
 4. **同形态演练**：在 126 上用 2.6.3 起一个**生产同形态** rehearsal（外部 etcd/minio + `MQ_TYPE=rocksmq` + 同 env + 同 hostPath 副本），验：启动无 panic、`/healthz` 200、列出并查询旧 v3 集合、`run_analyzer` 可用。POC 当前只验过内嵌 etcd 形态，不足以替代。
-5. **回退前提**：确认 CRI 中仍保留 v2.5.10 镜像，且升级后**未写入 v4 新集合**前才允许镜像级回退；一旦 2.6 写入新数据，回退必须走"备份恢复"而不是改 tag。
+5. **回退前提**：确认 `milvus-v2.5.10.tar` 仍在备份目录，且升级后**未写入 v4 新集合**前才允许镜像级回退；一旦 2.6 写入新数据，回退必须走"备份恢复"而不是改 tag。
 
 ## 4. 执行步骤（批准后）
 
@@ -52,7 +52,7 @@
 
 **回退步骤**：
 
-1. `kubectl apply -f` 恢复升级前入库清单（image v2.5.10、`MQ_TYPE=default`），确认 CRI 仍有旧镜像。
+1. 先 `ctr --address /run/containerd-k8s/containerd.sock -n k8s.io images import /root/backup/milvus-upgrade/milvus-v2.5.10.tar` 补回旧镜像（CRI 不保证同时保留两个 tag），再 `kubectl apply -f` 恢复升级前清单（image v2.5.10、`MQ_TYPE=default`）。
 2. 若升级后已有 2.6 写入的新数据：先停写入，用升级前备份恢复 hostPath / etcd / MinIO，再回退镜像；**禁止只改 tag 试图向下兼容**。
 3. 回退后复跑 §4 验收项，并记录耗时与读数（按 `docs/operations/evidence-format.md` 五字段）。
 
