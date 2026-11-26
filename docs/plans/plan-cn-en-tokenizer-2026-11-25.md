@@ -178,4 +178,5 @@
     - Milvus 1/1、ks-web 1/1、healthz 200；v4 集合 `product_manual_v4_bge_m3` 83 行可查。
     - ks-web 滚动策略保持 `maxSurge=0/maxUnavailable=1`（避 hostPort 死锁）。
   - 注意：镜像重建期间 CRI 多次 GC 把 milvus / ks-web 镜像挤出，已从 tar 恢复并重建 Pod；这类副作用已记录，后续分发应逐节点回读关键镜像。
+  - **已知限制**：`向量数据库` 在 jieba `exact` 模式下仍切成 `向量`+`数据库`。2026-11-26 实测把词典改成带词频格式（`向量数据库 1000`）后输出不变，说明内置词典优先级压过自定义条目；该词不影响当前 12 条 golden 与 83 行 canary 的判决，留作后续词典方案专项，不在本批宣称已解决。
   - **真实语料 A/B（2026-11-26）**：量具 `applications/knowledge-service/eval/run_real_corpus_ab.py`，83 行现网文档 self-retrieval canary（从每篇文档自身抽 query，标注该文档 relevant）。读数：dense 1.000/1.000/1.000；旧 md5/TF hybrid recall@5=0.964、recall@10=1.000、MRR=0.839；**新引擎 BM25 hybrid recall@5=0.988、recall@10=1.000、MRR=0.889**。新路在这组 canary 上优于旧路；但 dense 是自身向量所以恒为 1，且这不是人工语义 golden，不能当作线上质量最终判决。报告在 `eval/runs/real_corpus_ab.json`。
