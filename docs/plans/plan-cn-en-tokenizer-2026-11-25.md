@@ -171,4 +171,10 @@
   - **硬阻塞**：该镜像里**没有 `agent_runtime`**（只有 `agent-core`），也没有 `jieba`；`agent-server` 镜像同样没有 `jieba`。我们新代码 `node_import_milvus.py` 依赖 `agent_runtime.retrieval_tokenizer`、`get_tokenizer()` 也依赖 jieba，直接上生产会 `ModuleNotFoundError` / `RuntimeError`。
   - 因此治本形态目前只在 v4 集合与引擎侧生效；**Python 侧必须随镜像重建补齐 `agent-runtime` + `jieba`**，否则不能宣称端到端切换完成。镜像重建/分发属 D2，另行批准。
   - 真实业务语料 A/B、`向量数据库` 词典格式核实、30 分钟观察与旧集合保留期满清理仍未做。
-  - **镜像重建（2026-11-26，D2 已批准）**：已在 241 上从 rev `d9cd7daa` 建立独立 worktree `/opt/agent-platform-cn-tokenizer`；`applications/knowledge-service/pyproject.toml` / `requirements.txt` / `Dockerfile` 已补 `agent-runtime[tokenizer]` 与 `jieba`，根 `Dockerfile` 经根 pyproject 的 jieba 依赖带入。`agent-platform:dev` 构建已用 `build_with_io_guard.sh`（IO_LIMIT=80/IO_STRIKES=6，目标 125/126）启动；KS 镜像需在同一 rev 上手工 build 并按 `--address /run/containerd-k8s/containerd.sock` 分发。构建/分发完成前不切换 Python 侧代码。
+  - **镜像重建（2026-11-26，D2 已批准）**：已在 241 上从 rev `d9cd7daa` 建立独立 worktree；KS 镜像补 `agent-runtime[tokenizer]` + `jieba`，根镜像经根 pyproject 带入 jieba。两个镜像均构建、A1 通过、按 `--address /run/containerd-k8s/containerd.sock` 分发到 125/126，`crictl images` 回读一致。
+  - **生产验收（2026-11-26）**：
+    - `agent-platform` Pod imageID `sha256:143e88117651…`、容器 `GIT_REV=d9cd7daa…`、`jieba 0.42.1` 可用，共享 tokenizer 产出 `['hak-180','烫金机','怎么','用']`。
+    - `ks-web` Pod imageID `sha256:3274470d8afe…`，env `RETRIEVAL_ANALYZER_PROFILE=domain_dict_2_6`；Pod 内探针读到 `PROFILE_PARAMS={'tokenizer':{'type':'jieba','dict':['_default_'],'mode':'exact','hmm':True,'extra_dict_file':{'type':'local','path':'/var/lib/milvus/dicts/zh_terms.txt'}}}`，领域词同样整词。
+    - Milvus 1/1、ks-web 1/1、healthz 200；v4 集合 `product_manual_v4_bge_m3` 83 行可查。
+    - ks-web 滚动策略保持 `maxSurge=0/maxUnavailable=1`（避 hostPort 死锁）。
+  - 注意：镜像重建期间 CRI 多次 GC 把 milvus / ks-web 镜像挤出，已从 tar 恢复并重建 Pod；这类副作用已记录，后续分发应逐节点回读关键镜像。
