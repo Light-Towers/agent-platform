@@ -19,6 +19,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from agent_runtime.retrieval_tokenizer import milvus_analyzer_params
 from agent_runtime.vector_sparse import build_sparse_vectors  # 已退役实现，仅作旧路基线代理
 from pymilvus import AnnSearchRequest, DataType, Function, FunctionType, MilvusClient, WeightedRanker
 
@@ -93,7 +94,7 @@ def _create_collections(client: MilvusClient, dim: int) -> tuple[Any, Any]:
     new = client.create_schema(auto_id=False, enable_dynamic_fields=True)
     new.add_field(field_name="id", datatype=DataType.INT64, is_primary=True)
     new.add_field(field_name="text", datatype=DataType.VARCHAR, max_length=4096, enable_analyzer=True,
-                  analyzer_params={"tokenizer": "jieba"})
+                  analyzer_params=milvus_analyzer_params())
     new.add_field(field_name="dense", datatype=DataType.FLOAT_VECTOR, dim=dim)
     new.add_field(field_name="bm25_sparse", datatype=DataType.SPARSE_FLOAT_VECTOR)
     new.add_function(Function(name="bm25", function_type=FunctionType.BM25,

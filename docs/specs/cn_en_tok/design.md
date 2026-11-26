@@ -75,9 +75,12 @@ E --> NL : A/B 分路指标
 
 ### **1.2.4 实现设计文档**
 
-#### **A. 集合版本（服务端保持 v2.5.10）**
+#### **A. 集合版本（线上保持 v2.5.10；POC 已升 2.6.3）**
 
-- **本批不升级 Milvus 服务端**。T2 POC 已实测：pymilvus 3.0.3 + v2.5.10 组合可用，BM25 Function、简单 jieba、hybrid 原文腿均工作。**但 v2.5.10 不支持自定义词典 / `run_analyzer`**：引擎侧只能用内置 jieba 词典；领域词完整由 Python 共享 tokenizer 的 `add_word` 保障，引擎侧自定义词典需升级后另案。现网 K8s 引擎升级、存量 `platform_doc_v3_bge_m3` 兼容与服务端回退另立工单 / ADR（见 plan §7）。
+- **线上服务端本批不升级**：pymilvus 3.0.3 + v2.5.10 组合已实测可用（BM25 Function / 简单 jieba / hybrid 原文腿）。**但 v2.5.10 不支持引擎侧自定义词典 / `run_analyzer`**，因此代码提供 `RETRIEVAL_ANALYZER_PROFILE`：
+  - 默认 `simple_2_5` → `{"tokenizer":"jieba"}`，保住当前线上；
+  - `domain_dict_2_6` → jieba + `extra_dict_file(local)`，仅升级后的引擎可用。
+- 按用户"按治本方案处理"的要求，**POC 容器已改为 `milvusdb/milvus:v2.6.3`**（单容器 standalone，需 `DEPLOY_MODE=STANDALONE` + `ETCD_USE_EMBED=true`），领域词典以 local 文件资源挂载；`run_analyzer` 实测 `HAK-180` / `烫金机` 为整词。现网 K8s `ks-milvus` 仍是 v2.5.10，切换 profile 前必须先升级现网引擎（另立工单 / ADR，见 plan §7、§13）。
 - 新建集合版本（建议 `platform_doc_v4_bm25_jieba`，沿用现有 `{prefix}_{schema_version}_{embedding_model}` 命名思路），schema 含：
   - 主键；
   - 原始文本 `VARCHAR`，`enable_analyzer=True`，挂 jieba analyzer 配置；
@@ -85,9 +88,9 @@ E --> NL : A/B 分路指标
   - 词法稀疏向量 `SPARSE_FLOAT_VECTOR`，由 `Function(function_type=BM25, input=[原文], output=[稀疏字段])` 自动生成，**应用侧不再写入该字段**；
   - 既有租户 / 工作空间 / 知识库 / 状态字段保持不动。
 - 索引：dense 沿用 `AUTOINDEX+COSINE/IP`；稀疏字段用 `SPARSE_INVERTED_INDEX + metric_type=BM25`（可调 `bm25_k1` / `bm25_b`、`inverted_index_algo`）。
-- **引擎侧**：v2.5.10 实测只接受 `{"tokenizer":"jieba"}`（内置默认词典 / search / hmm）。自定义词典参数会建集合失败，故本批不在引擎侧注册领域词典；`milvus_analyzer_params()` 已按 POC 修正。
+- **引擎侧**：profile `simple_2_5`（默认，线上）用简单 jieba；profile `domain_dict_2_6`（POC / 升级后）用 jieba + `extra_dict_file` local 词典，路径与词条来自 `retrieval_tokenizer_config.json` 单一源。
 - **Python 侧**：领域词由共享 tokenizer 的 `jieba.add_word` 注入，8,000 词告警 / 10,000 词拒绝在模块加载路径生效（T3）。
-- **词典规模实测结论**：v2.5.10 无引擎侧自定义词典入口，≥10k 引擎注册项**不适用**（非"已验证"）；Python 侧可承载，但引擎/查询两侧词项等价只能用样本检索代理验证（`run_analyzer` UNIMPLEMENTED），不冒充逐词等价。
+- **词典规模实测结论**：v2.5.10 无引擎侧词典入口，≥10k 引擎注册项不适用；v2.6.3 已验证 local 文件注册路径可用（6 条领域词），大规模词条仍需在真实语料 E2 时测加载耗时。v2.5.10 下词项等价用样本检索代理验证；v2.6 下可用 `run_analyzer` 直接验证。
 - 变更 analyzer 必须产生新集合；旧集合至少保留 **14 个自然日且跨一次完整部署窗口**用于回退。
 
 #### **B. knowledge-service 主链路改造**

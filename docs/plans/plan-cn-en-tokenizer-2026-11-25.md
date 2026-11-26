@@ -146,3 +146,13 @@
 
 - 结论：口语改写样本的排序回退**可以通过降低词法路权重缓解**；0.95/0.05 在这 12 条上与 dense-only / old hybrid 持平（0.944）。
 - 但 0.95/0.05 意味着词法路贡献很小，"BM25 混合检索"的实际增益尚未被证明；**不据此改默认配置**。候选方案登记为：真实语料 E2 时把 0.8/0.2 与 0.95/0.05 一起扫，并要求领域型号/术语样本不被回退，才允许调权。
+
+## 13. 治本形态 POC（2026-11-26，按用户要求改容器）
+
+- 在 126 上把 POC 容器从 `v2.5.10` 换成 **`milvusdb/milvus:v2.6.3`**（镜像经已配置的华为云加速拉取），单容器 standalone。
+- 启动必要参数：`DEPLOY_MODE=STANDALONE` + `ETCD_USE_EMBED=true`（2.6 内嵌 etcd 必须显式声明，否则 panic `embedded etcd can not be used under distributed mode`）；2.6 默认 MQ 为 Woodpecker，不再传 `MQ_TYPE=default`。
+- 领域词典：把与 Python 共享配置同批词条写入 `/root/milvus-poc-zh-en/dicts/zh_terms.txt`，挂载到容器 `/var/lib/milvus/dicts/zh_terms.txt`，经 jieba 的 `extra_dict_file={"type":"local","path":...}` 引用。
+- 引擎侧实测（`run_analyzer` 在 2.6 可用）：`"HAK-180 烫金机怎么用" -> ['HAK-180', ' ', '烫金', '烫金机', '怎么', '用']`，领域词作为整词出现，治本形态成立。
+- **安全档位**：新增 `RETRIEVAL_ANALYZER_PROFILE`，默认 `simple_2_5`（线上 2.5.10 仍只能用简单形式），POC/升级后设 `domain_dict_2_6` 才启用引擎自定义词典；默认配置不破坏当前线上。
+- 以 `domain_dict_2_6` + BGE-M3 重跑 A/B：MRR 与 §12 基本一致（new hybrid 0.889；权重 0.90/0.10 起可达 0.944）。领域词典在 12 条合成样本上未改变排序，但引擎侧词项完整性已由 `run_analyzer` 独立验证。
+- **边界**：仅 POC 容器升到 2.6.3；现网 K8s `ks-milvus` 仍是 v2.5.10。切换治本形态前须先完成现网引擎升级与回退预案（另立工单 / ADR）。

@@ -62,7 +62,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     print(
         f"PASS: {len(samples)} 条混排样本词项集合与期望一致"
-        "（Python 侧；v2.5.10 引擎侧用样本检索代理验证，run_analyzer 不可用）"
+        "（Python 侧；引擎侧按版本验证：v2.5.10 用样本检索代理，v2.6+ 可用 run_analyzer）"
     )
     return 0
 

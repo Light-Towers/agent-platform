@@ -37,6 +37,17 @@ def test_empty_input_returns_empty_list() -> None:
     assert get_tokenizer().tokenize("") == []
 
 
-def test_milvus_analyzer_params_matches_poc_version() -> None:
-    # T2 真机实测：v2.5.10 只接受简单 jieba 配置，自定义 dict/mode/hmm 会建集合失败。
+def test_milvus_analyzer_params_default_is_safe_for_online_2_5() -> None:
+    # 线上仍是 v2.5.10，默认必须保持简单形式，否则建集合失败。
     assert milvus_analyzer_params() == {"tokenizer": "jieba"}
+
+
+def test_milvus_analyzer_params_domain_dict_profile(monkeypatch: pytest.MonkeyPatch) -> None:
+    # 治本形态（Milvus 2.6 POC/升级后）：引擎侧 jieba 挂载领域词典文件。
+    monkeypatch.setenv("RETRIEVAL_ANALYZER_PROFILE", "domain_dict_2_6")
+    tok = milvus_analyzer_params()["tokenizer"]
+    assert tok["type"] == "jieba"
+    assert tok["dict"] == ["_default_"]
+    assert tok["mode"] == "search" and tok["hmm"] is True
+    assert tok["extra_dict_file"]["type"] == "local"
+    assert tok["extra_dict_file"]["path"].endswith("zh_terms.txt")

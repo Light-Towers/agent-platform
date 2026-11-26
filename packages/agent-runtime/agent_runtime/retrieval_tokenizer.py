@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 from dataclasses import dataclass
 from importlib.resources import files
@@ -90,16 +91,33 @@ def get_tokenizer() -> RetrievalTokenizer:
 
 
 def milvus_analyzer_params() -> dict[str, Any]:
-    """从同一份配置派生 Milvus analyzer 参数（T2 真机实测后修正）。
+    """从同一份配置派生 Milvus analyzer 参数（治本形态：引擎侧领域词典）。
 
-    2026-11-26 在 `milvusdb/milvus:v2.5.10` POC 上实测：该版本只接受
-    ``{"tokenizer": "jieba"}`` 这种简单形式；传自定义 ``dict`` / ``mode`` /
-    ``hmm`` 的嵌套配置会在建集合时报 ``tokenizer name should be string param``。
-    因此当前线上版本使用引擎内置 jieba 词典（默认 dict / search 模式 / hmm 开）。
-    领域词保障由 Python 侧共享 tokenizer 的 ``add_word`` 承担；引擎侧自定义词典
-    需升级到 2.5.11+ / 2.6 后重新评估，不在此版本假装支持。
+    v2.5.10 只接受简单 `{"tokenizer":"jieba"}`，自定义词典无法注册（已实测）。
+    治本方案要求引擎侧也认识领域词：Milvus 2.6 支持 `extra_dict_file` 的
+    local 文件资源——把领域词表挂载到每个组件的同一绝对路径即可（自建部署适用）。
+    路径与词条均来自 `retrieval_tokenizer_config.json`，不在 Python 里另写一份。
     """
-    return {"tokenizer": "jieba"}
+    analyzer_cfg = _CONFIG["analyzer"]
+    profile = os.getenv("RETRIEVAL_ANALYZER_PROFILE", str(analyzer_cfg["profile"]))
+    if profile == "simple_2_5":
+        # 线上当前仍是 v2.5.10：只能用简单形式，否则建集合直接失败。
+        return {"tokenizer": "jieba"}
+    if profile == "domain_dict_2_6":
+        # 治本形态：v2.6+ 用 local 文件资源挂载领域词典（POC / 升级后启用）。
+        return {
+            "tokenizer": {
+                "type": "jieba",
+                "dict": list(analyzer_cfg["dict"]),
+                "mode": str(analyzer_cfg["mode"]),
+                "hmm": bool(analyzer_cfg["hmm"]),
+                "extra_dict_file": {
+                    "type": "local",
+                    "path": str(analyzer_cfg["extra_dict_file_path"]),
+                },
+            }
+        }
+    raise ValueError(f"未知 RETRIEVAL_ANALYZER_PROFILE: {profile!r}")
 
 
 __all__ = ["DICT_VERSION", "DOMAIN_TERMS", "RetrievalTokenizer", "get_tokenizer", "milvus_analyzer_params"]
