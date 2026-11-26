@@ -48,6 +48,6 @@ def test_milvus_analyzer_params_domain_dict_profile(monkeypatch: pytest.MonkeyPa
     tok = milvus_analyzer_params()["tokenizer"]
     assert tok["type"] == "jieba"
     assert tok["dict"] == ["_default_"]
-    assert tok["mode"] == "search" and tok["hmm"] is True
+    assert tok["mode"] == "exact" and tok["hmm"] is True  # exact 保住领域词整词（POC 实测 search 会拆）
     assert tok["extra_dict_file"]["type"] == "local"
     assert tok["extra_dict_file"]["path"].endswith("zh_terms.txt")

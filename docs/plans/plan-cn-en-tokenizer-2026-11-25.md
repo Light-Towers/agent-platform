@@ -155,4 +155,12 @@
 - 引擎侧实测（`run_analyzer` 在 2.6 可用）：`"HAK-180 烫金机怎么用" -> ['HAK-180', ' ', '烫金', '烫金机', '怎么', '用']`，领域词作为整词出现，治本形态成立。
 - **安全档位**：新增 `RETRIEVAL_ANALYZER_PROFILE`，默认 `simple_2_5`（线上 2.5.10 仍只能用简单形式），POC/升级后设 `domain_dict_2_6` 才启用引擎自定义词典；默认配置不破坏当前线上。
 - 以 `domain_dict_2_6` + BGE-M3 重跑 A/B：MRR 与 §12 基本一致（new hybrid 0.889；权重 0.90/0.10 起可达 0.944）。领域词典在 12 条合成样本上未改变排序，但引擎侧词项完整性已由 `run_analyzer` 独立验证。
-- **边界**：仅 POC 容器升到 2.6.3；现网 K8s `ks-milvus` 仍是 v2.5.10。切换治本形态前须先完成现网引擎升级与回退预案（另立工单 / ADR）。
+- **边界更新**：POC 与现网 K8s `ks-milvus` 均已升到 v2.6.3（见 `docs/plans/plan-milvus-prod-upgrade-2-6-2026-11-26.md` §9）；下面 §13.1 开始切治本形态。
+
+### 13.1 现网切治本形态（2026-11-26，进行中）
+
+- 领域词典已落 126 hostPath：`/data/k8s-demo/knowledge-service/dicts/zh_terms.txt`（6 条，与 Python 共享配置同批），以只读方式挂到 `ks-milvus` 的 `/var/lib/milvus/dicts`。
+- 滚动策略改为 `maxSurge=0, maxUnavailable=1`：第一次 apply 因旧/新 Pod 同时挂同一 hostPath，RocksMQ 的 `/var/lib/milvus/rdb_data_meta_kv/LOCK` 冲突而 CrashLoopBackOff；改策略后 rollout 成功，新 Pod Running、healthz 200。
+- 现网 `run_analyzer` 实测：`search` 模式输出 `['HAK-180',' ','烫金','烫金机','怎么','用']`，`exact` 模式输出 `['HAK-180',' ','烫金机','怎么','用']`。**`exact` 保住领域词整词且不产生多余子词**，已将共享配置 `analyzer.mode` 从 `search` 改为 `exact`，单测同步。
+- 注意：`向量数据库` 在两种模式下都未作为整词出现（输出 `向量`+`数据库` 或 `向量`/`数据`/`据库`/`数据库`），词典文件的一行一词格式对该词未生效，需后续单独核实 jieba-rs 自定义词典权重格式；本批不据此宣称所有领域词都整词。
+- **尚未完成**：`RETRIEVAL_ANALYZER_PROFILE=domain_dict_2_6` 的配置注入（需确认承载 `knowledge_service` 的 Deployment）、v4 集合创建与双写/重灌、A/B 复跑。

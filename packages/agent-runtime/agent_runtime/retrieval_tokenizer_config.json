@@ -2,7 +2,7 @@
   "version": "1.0.0",
   "analyzer": {
     "profile": "simple_2_5",
-    "mode": "search",
+    "mode": "exact",
     "hmm": true,
     "dict": ["_default_"],
     "extra_dict_file_path": "/var/lib/milvus/dicts/zh_terms.txt"
