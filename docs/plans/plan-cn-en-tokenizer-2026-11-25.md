@@ -99,3 +99,19 @@
   - 端口只绑 126 回环：`127.0.0.1:19531 -> 19530`、`127.0.0.1:9092 -> 9091`，不暴露内网；
   - 就绪证据：`curl -sf http://127.0.0.1:9092/healthz` 通过，日志 `Proxy successfully initialized and ready to serve!`。
 - 本机连该端口需按需 `ssh -L 19530:127.0.0.1:19531`；本批尚未开该转发，也未在 POC 集合上执行任何建集合 / 写入 / 评测。
+
+## 11. T2 POC 实测结论（2026-11-26）
+
+按用户指示不开 SSH 隧道，把 POC 端口改绑到 126 内网 IP：`192.168.100.126:19531` / `:9092`，本机直连成功（`pymilvus 3.0.3` `list_collections()` rc=0）。
+
+| 验证项 | 结果 | 证据 |
+|---|---|---|
+| pymilvus 3.0.3 + v2.5.10 兼容 | ✅ | `MilvusClient.list_collections()` rc=0 |
+| 内置 BM25 Function + 简单 jieba 建集合 | ✅ | `poc_simple_jieba`、`poc_v4_bge_m3` 创建成功 |
+| 自定义 analyzer 配置（`dict`/`mode`/`hmm`） | ❌ **不支持** | 报 `tokenizer name should be string param`；v2.5.10 只接受 `{"tokenizer":"jieba"}` |
+| `run_analyzer` | ❌ **UNIMPLEMENTED** | RPC `unknown method RunAnalyzer`；改为样本检索代理验证 |
+| 领域词 BM25 命中 | ✅ | `HAK-180 烫金机` / `烫金机` / `向量数据库` 均命中对应文档 |
+| 我们自己的 hybrid 原文腿 | ✅ | `create_hybrid_search_requests(lexical_mode='bm25_engine')` + `hybrid_search(0.8/0.2)` 返回正确排序 |
+| 索引预热瞬态 | 注意 | 刚插入后首次 hybrid 查询 0 命中，索引就绪后同样查询恢复正常；评测须等索引 ready |
+
+**据此修正代码**：`milvus_analyzer_params()` 改为 `{"tokenizer":"jieba"}`，单测同步更新（5 passed）。领域词完整由 Python 共享 tokenizer 的 `add_word` 保障；引擎侧自定义词典需升级到 2.5.11+/2.6 后另案，本批不假装支持。≥10k 引擎侧注册项在该版本不适用。

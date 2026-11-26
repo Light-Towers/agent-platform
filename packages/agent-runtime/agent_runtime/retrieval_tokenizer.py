@@ -90,21 +90,16 @@ def get_tokenizer() -> RetrievalTokenizer:
 
 
 def milvus_analyzer_params() -> dict[str, Any]:
-    """从同一份配置派生 Milvus jieba analyzer 参数。
+    """从同一份配置派生 Milvus analyzer 参数（T2 真机实测后修正）。
 
-    ``dict`` 里的自定义词典名由 T2 的 POC 确认注册方式后落定；此处按版本派生，
-    避免配置文本与 Python 实现各写一份。
+    2026-11-26 在 `milvusdb/milvus:v2.5.10` POC 上实测：该版本只接受
+    ``{"tokenizer": "jieba"}`` 这种简单形式；传自定义 ``dict`` / ``mode`` /
+    ``hmm`` 的嵌套配置会在建集合时报 ``tokenizer name should be string param``。
+    因此当前线上版本使用引擎内置 jieba 词典（默认 dict / search 模式 / hmm 开）。
+    领域词保障由 Python 侧共享 tokenizer 的 ``add_word`` 承担；引擎侧自定义词典
+    需升级到 2.5.11+ / 2.6 后重新评估，不在此版本假装支持。
     """
-    analyzer_cfg = _CONFIG["analyzer"]
-    return {
-        "tokenizer": {
-            "type": "jieba",
-            "dict": ["_default_", f"cn_en_tok_{DICT_VERSION}"],
-            "mode": str(analyzer_cfg["mode"]),
-            "hmm": bool(analyzer_cfg["hmm"]),
-        },
-        "filter": ["lowercase"],
-    }
+    return {"tokenizer": "jieba"}
 
 
 __all__ = ["DICT_VERSION", "DOMAIN_TERMS", "RetrievalTokenizer", "get_tokenizer", "milvus_analyzer_params"]

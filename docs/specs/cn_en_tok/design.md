@@ -63,7 +63,7 @@ E --> NL : A/B 分路指标
 | 手写分词（降级路） | 英文按词 + 中文 bigram | `applications/agent_server/rag/store.py:37-46` |
 | nl2sql 默认分词 | `bigram`，jieba 为可选 extra | `applications/nl2sql-service/nl2sql_service/conf/settings.py:98-99`；`applications/nl2sql-service/pyproject.toml:49-52`；`applications/nl2sql-service/nl2sql_service/tokenizer.py:23-49` |
 | nl2sql 重建标记 | `value_info.tokenizer` 列已存在 | `applications/nl2sql-service/nl2sql_service/migrations/005_value_info_table_name.up.sql:8-18` |
-| Milvus 官方能力（本批所需） | v2.5.x 已具备 jieba tokenizer（支持 `_default_` + 自定义词典）与内置 BM25 Function；`multi_analyzer_params` / `run_analyzer` 是 2.5.11+ 的便利能力，本方案采用单一 analyzer，不依赖它们 | `https://milvus.io/docs/v2.5.x/jieba-tokenizer.md`；`https://milvus.io/docs/v2.5.x/full-text-search.md` |
+| Milvus 官方能力 / **v2.5.10 实测修正** | 内置 BM25 Function 可用；jieba **只接受简单形式 `{"tokenizer":"jieba"}`**。T2 POC 实测：传 `dict` / `mode` / `hmm` 嵌套配置会报 `tokenizer name should be string param` 而建集合失败；`run_analyzer` 在该版本 RPC UNIMPLEMENTED（2.5.11+ 才有）。文档里"自定义词典"示例属于更新版本，不可套到 v2.5.10 | POC 2026-11-26：`poc_simple_jieba` / `poc_v4_bge_m3` 建集合与检索实测；`https://milvus.io/docs/v2.5.10/jieba-tokenizer.md` |
 | Milvus 官方能力 | 内置 BM25 Function + `SPARSE_INVERTED_INDEX`/`metric_type=BM25`；hybrid search 中词法腿由引擎从原文生成 | `https://milvus.io/docs/v2.6.x/full-text-search.md`；`https://milvus.io/docs/v2.6.x/multi-vector-search.md`（2.6 文档用于确认机制，POC 在 v2.5.10 实测） |
 | Milvus 3.0 风险 | 3.0.3 起有破坏性变更（V1 REST 路由移除、导入权限 `ImportBinlog`、Pulsar producer 默认 exclusive）；Storage V3 属 3.0 架构变更、非 3.0.3 特有 | `https://milvus.io/docs/release_notes.md`（v3.0.3 / v3.0.5） |
 
@@ -77,7 +77,7 @@ E --> NL : A/B 分路指标
 
 #### **A. 集合版本（服务端保持 v2.5.10）**
 
-- **本批不升级 Milvus 服务端**。所需能力（BM25 Function、jieba tokenizer、自定义词典）在 v2.5.10 已具备；`multi_analyzer_params` / `run_analyzer` 属 2.5.11+，本方案不依赖。现网 K8s 的引擎大版本升级、存量 `platform_doc_v3_bge_m3` 在新引擎上的兼容验证与服务端级回退，另立工单 / ADR，不纳入本批（见 plan §7）。pymilvus 3.0.3 与 v2.5.10 的组合兼容性必须在 POC 实测，不靠文档推断。
+- **本批不升级 Milvus 服务端**。T2 POC 已实测：pymilvus 3.0.3 + v2.5.10 组合可用，BM25 Function、简单 jieba、hybrid 原文腿均工作。**但 v2.5.10 不支持自定义词典 / `run_analyzer`**：引擎侧只能用内置 jieba 词典；领域词完整由 Python 共享 tokenizer 的 `add_word` 保障，引擎侧自定义词典需升级后另案。现网 K8s 引擎升级、存量 `platform_doc_v3_bge_m3` 兼容与服务端回退另立工单 / ADR（见 plan §7）。
 - 新建集合版本（建议 `platform_doc_v4_bm25_jieba`，沿用现有 `{prefix}_{schema_version}_{embedding_model}` 命名思路），schema 含：
   - 主键；
   - 原始文本 `VARCHAR`，`enable_analyzer=True`，挂 jieba analyzer 配置；
@@ -85,8 +85,9 @@ E --> NL : A/B 分路指标
   - 词法稀疏向量 `SPARSE_FLOAT_VECTOR`，由 `Function(function_type=BM25, input=[原文], output=[稀疏字段])` 自动生成，**应用侧不再写入该字段**；
   - 既有租户 / 工作空间 / 知识库 / 状态字段保持不动。
 - 索引：dense 沿用 `AUTOINDEX+COSINE/IP`；稀疏字段用 `SPARSE_INVERTED_INDEX + metric_type=BM25`（可调 `bm25_k1` / `bm25_b`、`inverted_index_algo`）。
-- 领域词典按 Milvus jieba tokenizer 的 `dict` 约定注册（`dict: ["_default_", "<custom>"]`，`mode=search`，`hmm=true`）。**注册方式必须在 POC 中验证**：文档给出的是词典名列表，具体挂载路径 / 加载方式需实测确认，不得凭猜测写进实施方案。
-- **词典规模必须实测**：POC 以 ≥10,000 词条实测注册耗时、检索加载耗时与 `run_analyzer` 替代品（临时集合检索）延迟；配置侧在 8,000 词开始告警、10,000 词拒绝新增，告警与拒绝必须在真实注册路径上生效，而不是只校验配置文本。
+- **引擎侧**：v2.5.10 实测只接受 `{"tokenizer":"jieba"}`（内置默认词典 / search / hmm）。自定义词典参数会建集合失败，故本批不在引擎侧注册领域词典；`milvus_analyzer_params()` 已按 POC 修正。
+- **Python 侧**：领域词由共享 tokenizer 的 `jieba.add_word` 注入，8,000 词告警 / 10,000 词拒绝在模块加载路径生效（T3）。
+- **词典规模实测结论**：v2.5.10 无引擎侧自定义词典入口，≥10k 引擎注册项**不适用**（非"已验证"）；Python 侧可承载，但引擎/查询两侧词项等价只能用样本检索代理验证（`run_analyzer` UNIMPLEMENTED），不冒充逐词等价。
 - 变更 analyzer 必须产生新集合；旧集合至少保留 **14 个自然日且跨一次完整部署窗口**用于回退。
 
 #### **B. knowledge-service 主链路改造**

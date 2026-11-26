@@ -7,7 +7,6 @@ import pytest
 pytest.importorskip("jieba", reason="agent-runtime[tokenizer] extra 未安装")
 
 from agent_runtime.retrieval_tokenizer import (  # noqa: E402
-    DICT_VERSION,
     DOMAIN_TERMS,
     get_tokenizer,
     milvus_analyzer_params,
@@ -38,9 +37,6 @@ def test_empty_input_returns_empty_list() -> None:
     assert get_tokenizer().tokenize("") == []
 
 
-def test_milvus_analyzer_params_derived_from_same_source() -> None:
-    params = milvus_analyzer_params()
-    assert params["tokenizer"]["type"] == "jieba"
-    assert params["tokenizer"]["dict"][1] == f"cn_en_tok_{DICT_VERSION}"
-    assert params["tokenizer"]["mode"] in {"search", "exact"}
-    assert "filter" in params
+def test_milvus_analyzer_params_matches_poc_version() -> None:
+    # T2 真机实测：v2.5.10 只接受简单 jieba 配置，自定义 dict/mode/hmm 会建集合失败。
+    assert milvus_analyzer_params() == {"tokenizer": "jieba"}
